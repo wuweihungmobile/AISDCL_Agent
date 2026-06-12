@@ -7,7 +7,6 @@
 from __future__ import annotations
 
 import logging
-from typing import Optional
 
 from ..models.playbook import Playbook, PlaybookTask
 from ..models.step_mutation import StepMutationType
@@ -30,10 +29,10 @@ class PlaybookKernel:
         self,
         executor: IExecutor,
         evaluator: IEvaluator,
-        bus: Optional[EventBus] = None,
-        brain: Optional[IBrain] = None,
-        mutation_service: Optional[MutationApplyService] = None,
-        observability: Optional[IObservabilityPort] = None,
+        bus: EventBus | None = None,
+        brain: IBrain | None = None,
+        mutation_service: MutationApplyService | None = None,
+        observability: IObservabilityPort | None = None,
     ):
         self._exec = executor
         self._eval = evaluator
@@ -62,7 +61,7 @@ class PlaybookKernel:
         """M1 shim 用：供 PlaybookRunner._evaluate 委派。"""
         return self._eval
 
-    def execute_once(self, prompt: str) -> "object":
+    def execute_once(self, prompt: str) -> object:
         """供 AutoResumeService 執行單次 prompt（context_negotiation 等）。"""
         return self._exec.execute(prompt, maintain_context=False, timeout=60, label="cn")
 
@@ -90,6 +89,10 @@ class PlaybookKernel:
 
         # start_idx 邊界保護：負數截至 0，超過總步數截至 len（直接 POST_RUN）
         step_idx = max(0, min(start_idx, len(playbook.tasks)))
+        # F-C2 resume 口徑（Phase 1 複驗 P1-1）：start_idx 語意 = 前面步驟皆已完成
+        # （checkpoint resume），POST_RUN 進度摘要須含這些步驟，否則 resume run
+        # 的 progress_pct 系統性低估（10 步於 idx 5 resume 完成 → 誤記 50%）
+        resume_prior_ids = [t.step_id for t in playbook.tasks[:step_idx]]
         step_log: list[str] = []
         completed_ids: list[str] = []
         contributors: list[str] = []
@@ -117,7 +120,16 @@ class PlaybookKernel:
                     completed_step_ids=completed_ids,
                 )
 
-        post = self._bus.emit(HookContext(phase=KernelPhase.POST_RUN, playbook=playbook))
+        # F-C2：POST_RUN 附帶 run 結果摘要（GoalProgressPlugin 記錄 L4 進度 ledger）；
+        # completed_step_ids = resume 前已完成（start_idx 語意）+ 本次完成，
+        # KernelResult 維持「本次 run」口徑不變（兩者語意刻意不同）
+        post = self._bus.emit(HookContext(
+            phase=KernelPhase.POST_RUN, playbook=playbook,
+            payload={
+                "completed_step_ids": resume_prior_ids + list(completed_ids),
+                "total_steps": len(playbook.tasks),
+            },
+        ))
         contributors.extend(post.contributors)
 
         return KernelResult.success_(
@@ -184,9 +196,22 @@ class PlaybookKernel:
             })
 
             if self._brain is not None and attempt < max_retries:
+                # F-C1：PRE_CORRECTION dispatch（hookspec 既有定義，本處首次發布）。
+                # PreferenceMemoryPlugin 回傳 PromptInjectionResult（## 使用者偏好），
+                # 僅於非空時以 preferences_section 傳遞（fake brain 向下相容）。
+                pre_correction = self._bus.emit(HookContext(
+                    phase=KernelPhase.PRE_CORRECTION, playbook=playbook, task=task,
+                    step_idx=step_idx, attempt=attempt,
+                    payload={"failure_reason": failure_reason},
+                ))
+                _prefs_kwargs = (
+                    {"preferences_section": pre_correction.accumulated_prefix}
+                    if pre_correction.accumulated_prefix else {}
+                )
                 c = self._brain.decide_correction(
                     task=task, failure_reason=failure_reason, eval_output=_eval_out,
                     attempt=attempt, global_goal=playbook.global_goal,
+                    **_prefs_kwargs,
                 )
                 if c is None:
                     return StepOutcome(action=StepAction.ESCALATE,
@@ -226,7 +251,7 @@ class PlaybookKernel:
                            failure_reason=f"max_retries_exhausted: {last_failure_reason}",
                            attempts_used=attempt)
 
-    def _apply_mutation(self, playbook, task, step_idx, mut, attempt) -> Optional[StepOutcome]:
+    def _apply_mutation(self, playbook, task, step_idx, mut, attempt) -> StepOutcome | None:
         """Brain correction step_mutation 處理；回傳 StepOutcome 表示需跳轉，None 表示繼續。"""
         mt = mut.mutation_type
         if mt == StepMutationType.GOTO_STEP and mut.goto_step_id:

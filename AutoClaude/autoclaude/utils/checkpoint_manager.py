@@ -12,11 +12,11 @@ Playbook 執行檢查點管理器。
   - 支援「排程繼續時間」：儲存 scheduled_resume_at，讓 PlaybookRunner 知道何時喚醒
 """
 from __future__ import annotations
+
 import logging
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from pathlib import Path
-from typing import Optional
 
 logger = logging.getLogger("autoclaude.utils.checkpoint")
 
@@ -35,7 +35,7 @@ class PlaybookCheckpoint:
     saved_at: str = field(
         default_factory=lambda: datetime.now().isoformat(timespec="seconds")
     )
-    scheduled_resume_at: Optional[str] = None  # ISO 8601，None = 立即可繼續
+    scheduled_resume_at: str | None = None  # ISO 8601，None = 立即可繼續
     # Gap-007-A：跨 TOKEN_HALT / ESC+F12 的 FailureTracker 持久化
     failure_history: list[dict] = field(default_factory=list)  # 序列化的 AttemptRecord 列表
     active_step_attempt: int = 0                               # 中斷時的 attempt 編號
@@ -51,9 +51,9 @@ class PlaybookCheckpoint:
     # SD_06 W5-T5-7：三層任務模型對應的 run_id（可由 PgStateRepository 寫回）
     #   - yaml_only / both 模式：可為 None（不依賴 PG）
     #   - db_only 模式：對應 playbook_runs.run_id（PgStateRepository._ensure_run_id 維護）
-    run_id: Optional[str] = None
+    run_id: str | None = None
     # SD_06 W5-T5-7：所屬 goal_task_id（三層任務模型；可為 None 表示舊 playbook）
-    goal_task_id: Optional[str] = None
+    goal_task_id: str | None = None
     # AutoSDD_improving_01 §1.2（W5）：SDD 治理狀態（additive，比照 Gap-007-A 模式）。
     # dict 內 schema 由 SddGovernancePlugin 維護：
     #   { "scg_gate": "SCG-3", "fsm_state": "IMPLEMENTATION",
@@ -91,7 +91,8 @@ class CheckpointManager:
                          與舊行為相容；可注入 canonical_playbook_id 以在
                          不同 storage.mode 下取得對應 ID
         """
-        import os, warnings  # noqa: E401
+        import os  # noqa: E401
+        import warnings
         if os.environ.get("AUTOCLAUDE_DEPRECATION_WARN") == "1":
             warnings.warn(
                 "CheckpointManager is deprecated; use FileStateRepository directly.",
@@ -103,7 +104,9 @@ class CheckpointManager:
             self._repo = repository
         else:
             # 延遲 import 避免頂層循環依賴（file_state_repository → PlaybookCheckpoint）
-            from ..infra.repositories.file_state_repository import FileStateRepository  # noqa: PLC0415
+            from ..infra.repositories.file_state_repository import (
+                FileStateRepository,  # noqa: PLC0415
+            )
             self._repo = FileStateRepository(checkpoint_dir)
         # T8 / Dev-6：可注入 ID 策略；未指定時委派至 canonical_playbook_id("yaml_only")
         # 作為單一真相來源（SSOT）。yaml_only 模式回傳 Path.stem，行為與舊版一致。
@@ -127,7 +130,7 @@ class CheckpointManager:
         """符合 StateRepositoryPort 契約：回傳 None。"""
         self._repo.save_checkpoint(self._to_id(playbook_path), checkpoint)
 
-    def load(self, playbook_path: str) -> Optional[PlaybookCheckpoint]:
+    def load(self, playbook_path: str) -> PlaybookCheckpoint | None:
         return self._repo.load_checkpoint(self._to_id(playbook_path))
 
     def clear(self, playbook_path: str) -> None:

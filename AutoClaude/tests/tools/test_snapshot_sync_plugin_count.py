@@ -25,8 +25,8 @@ sys.path.insert(0, str(PROJECT_ROOT / "tools"))
 import snapshot_sync  # noqa: E402
 
 # 單一 pin 點：新增/移除 plugin 時只改這兩個常數（與 wiring._REGISTER_ORDER 同步）
-_STATIC_COUNT = 15   # len(_REGISTER_ORDER)，含條件式 hotkey
-_ACTIVE_COUNT = 14   # 排除 _CONDITIONAL_PLUGINS（hotkey）
+_STATIC_COUNT = 17   # len(_REGISTER_ORDER)，含條件式 hotkey（Improving_012 Phase 1 +2）
+_ACTIVE_COUNT = 16   # 排除 _CONDITIONAL_PLUGINS（hotkey）
 
 
 class TestCountActivePluginsDeterminism:

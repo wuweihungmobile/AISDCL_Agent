@@ -16,7 +16,6 @@ from __future__ import annotations
 import hashlib
 import re
 from pathlib import Path
-from typing import Optional
 
 import yaml
 
@@ -78,9 +77,9 @@ class SddToPlaybookAdapter:
 
     def __init__(
         self,
-        observability: Optional[IObservabilityPort] = None,
+        observability: IObservabilityPort | None = None,
         *,
-        fsm_state_path: Optional[str] = None,
+        fsm_state_path: str | None = None,
         test_path: str = "tests",
     ):
         """
@@ -111,7 +110,7 @@ class SddToPlaybookAdapter:
     def compile_tasks(self, spec: SddSpec) -> list[PlaybookTask]:
         """SddSpec → PlaybookTask 序列。純函數、無 IO。"""
         tasks: list[PlaybookTask] = []
-        prev_ac: Optional[str] = None
+        prev_ac: str | None = None
         digest8 = spec.digest.split(":")[-1][:8]
         for c in spec.contracts:
             tasks.append(PlaybookTask(
@@ -150,7 +149,7 @@ class SddToPlaybookAdapter:
                 f"未達 SPEC_FROZEN 之後狀態"
             )
 
-    def _find_fsm_state(self, spec_dir: str) -> Optional[Path]:
+    def _find_fsm_state(self, spec_dir: str) -> Path | None:
         if self._fsm_state_path:
             p = Path(self._fsm_state_path)
             return p if p.is_file() else None

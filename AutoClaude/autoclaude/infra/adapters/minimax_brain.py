@@ -7,8 +7,6 @@
 """
 from __future__ import annotations
 
-from typing import Optional
-
 from ...core.ports.brain import (
     BrainCapabilities,
     CorrectionResult,
@@ -48,7 +46,7 @@ class MinimaxBrainAdapter:
         failure_history: list[dict],
         convergence_trend: str,
         last_correction_prompt: str = "",
-        global_goal: Optional[str] = None,
+        global_goal: str | None = None,
     ) -> EscalationDecision:
         """ESCALATION 前的最終判斷（Phase 1 預設：human_handoff）。
 
@@ -80,12 +78,13 @@ class MinimaxBrainAdapter:
         convergence_reasoning: str = "",
         strategy_hint: str = "",
         error_class: str = "unknown",
-        task_goal_summary: Optional[str] = None,
-        global_goal: Optional[str] = None,
+        task_goal_summary: str | None = None,
+        global_goal: str | None = None,
         allow_step_mutation: bool = False,
-        mutation_history: Optional[list[str]] = None,
+        mutation_history: list[str] | None = None,
         mutation_pressure: int = 0,
-    ) -> Optional[CorrectionResult]:
+        preferences_section: str = "",
+    ) -> CorrectionResult | None:
         try:
             decision = self._client.decide_correction(
                 step_id=task.step_id,
@@ -106,6 +105,7 @@ class MinimaxBrainAdapter:
                 allow_step_mutation=allow_step_mutation,
                 mutation_history=mutation_history or [],
                 mutation_pressure=mutation_pressure,
+                preferences_section=preferences_section,  # F-C1
             )
         except MinimaxError:
             return None

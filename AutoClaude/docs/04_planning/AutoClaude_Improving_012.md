@@ -140,10 +140,10 @@
    - [x] 本計畫通過 Architect / SA·SD / QA zero-trust 審查（標準：P0 發現=0、P1 發現全數修復或文件化豁免）+ 🔴 人工確認 — ✅ 2026-06-12/13 三方並行 audit：初始 P0=0 / P1=6（含跨角色重複 1）/ P2=8；P1 全數修復＋複審期抓出修復自身引入之 P0=1（CLAUDE.md:4 行長 842cp 破 contract test）即修＋P2 全數修復（無文件化豁免）；2 輪 QA 複審 PASS。取證：nightly run_id=233820 六 stage 全綠（TD-N01/N02/N03 錨點 log:227/125/243）、full pytest 2,853 passed / 122 skipped、mirror tests/tools/ 421 passed、importlinter 7 kept、LOC violations=0、snapshot OK。🔴 人工確認：koalawu（2026-06-13）— **本文件即日凍結（SCG-0）**
 
 2. **Phase 1 — 記憶基座（C 能力，最低風險先行）**
-   - [ ] F-C3 KB metrics 持久化（含 alembic migration + File 對等）
-   - [ ] F-C1 PreferenceStore（Port + adapter + plugin + Brain 注入點）
-   - [ ] F-C2 GoalProgressLedger
-   - 驗收：重啟後 metrics 不清零；偏好可寫可讀並出現在 correction prompt；跨 ≥ 2 個 playbook run 的進度可彙總查詢
+   - [x] F-C3 KB metrics 持久化（含 alembic migration + File 對等）— ✅ 2026-06-13：採 ADR-SD09-006 canonical（IKbMetricStore port + Local/Pg adapter + alembic 0016 + importlinter Rule 8，7→8 kept）
+   - [x] F-C1 PreferenceStore（Port + adapter + plugin + Brain 注入點）— ✅ 2026-06-13：IPreferenceStore + File/Pg adapter + PreferenceMemoryPlugin + Kernel 補發 PRE_CORRECTION + `preferences_section` 注入鏈（SRD §2.3 實作修正註記）
+   - [x] F-C2 GoalProgressLedger — ✅ 2026-06-13：GoalProgressLedger（File/Pg）+ GoalProgressPlugin（POST_RUN 補 payload）+ project fallback 鍵
+   - 驗收：重啟後 metrics 不清零 ✅（test_knowledge_base_metric_store）；偏好可寫可讀並出現在 correction prompt ✅（test_kernel_pre_correction 端到端）；跨 ≥ 2 個 playbook run 的進度可彙總查詢 ✅（test_goal_progress_ledger）。閘門：SCG-1（SRD_AGT_Phase1_Memory.md）+ SCG-2（ADR-AGT-003）🔴 koalawu 2026-06-13；full pytest 2,931/122、importlinter 8 kept、LOC=0
 
 3. **Phase 2 — 閉環強化（B 能力）**
    - [ ] F-B1 AlertLadder（feature flag 預設 off → nightly 觀察 7 天 → 預設 on）

@@ -13,7 +13,7 @@
 """
 from __future__ import annotations
 
-from typing import Any, Optional
+from typing import Any
 
 from ..plugins import (
     CheckpointPlugin,
@@ -22,12 +22,14 @@ from ..plugins import (
     EvolutionPlugin,
     FastPathPlugin,
     GlobalGoalAnchorPlugin,
+    GoalProgressPlugin,
     GoalSynthesisPlugin,
     GotoCounterPlugin,
     HotkeyPlugin,
     KnowledgeBasePlugin,
     NotificationPlugin,
     PlaybookPersistencePlugin,
+    PreferenceMemoryPlugin,
     PreRunValidatorPlugin,
     SddGovernancePlugin,
     TokenGuardPlugin,
@@ -43,7 +45,6 @@ from .ports.evaluator import IEvaluator
 from .ports.executor import IExecutor
 from .ports.observability import IObservabilityPort
 from .services.mutation.service import MutationApplyService
-
 
 # Plugin 註冊順序（SSOT — 兩條組裝路徑共用，避免 M-3 漂移）
 #
@@ -72,7 +73,11 @@ _REGISTER_ORDER: tuple[str, ...] = (
     "fast_path",
     "notification",
     "knowledge_base",
+    # Improving_012 Phase 1（F-C1/F-C2，priority=50 tie-breaker 群尾端；
+    # 不影響 fast_path 先位語意）
+    "preference_memory",
     "goal_synthesis",
+    "goal_progress",
     "convergence",
     "evolution",
     "goto_counter",
@@ -83,11 +88,11 @@ _REGISTER_ORDER: tuple[str, ...] = (
 def _build_plugin_set(
     cfg: AppConfig,
     *,
-    minimax_client: Optional[Any] = None,
-    hotkey: Optional[Any] = None,
-    state_repository: Optional[Any] = None,
-    observability: Optional[IObservabilityPort] = None,
-    brain: Optional[IBrain] = None,
+    minimax_client: Any | None = None,
+    hotkey: Any | None = None,
+    state_repository: Any | None = None,
+    observability: IObservabilityPort | None = None,
+    brain: IBrain | None = None,
 ) -> dict[str, Any]:
     """組裝完整的 Plugin 集合（含 MutationApplyService），回傳以 name 為 key 的 dict。
 
@@ -97,15 +102,39 @@ def _build_plugin_set(
     回傳 key（與 _REGISTER_ORDER 對應 + 兩個非註冊項）：
       註冊：pre_run_validator, hotkey?, cross_step_validator, token_guard,
             global_goal_anchor, playbook_persistence, sdd_governance, fast_path,
-            notification, knowledge_base, goal_synthesis,
-            convergence, evolution, goto_counter, checkpoint
+            notification, knowledge_base, preference_memory, goal_synthesis,
+            goal_progress, convergence, evolution, goto_counter, checkpoint
       非註冊：mutation_service（注入 PlaybookKernel）
     """
     # SD_04 W2 三方審查 Dev-W2-Crit-1 / Arch-W2-Maj-1：id_resolver SSOT
     # （確保 db_only / both 模式下 CheckpointPlugin 與 AutoResumeService 使用一致 ID）
-    from ..infra.repositories.factory import canonical_playbook_id  # noqa: PLC0415
+    from ..infra.repositories.factory import (  # noqa: PLC0415
+        build_goal_progress_ledger,
+        build_kb_metric_store,
+        build_preference_store,
+        canonical_playbook_id,
+    )
 
     kb_path = f"{cfg.checkpoint_dir}/failure_knowledge_base.jsonl"
+    # F-C3 / ADR-SD09-006：IKbMetricStore 依 storage.mode 路由（wiring 為
+    # core-purity 唯一豁免點，import infra 合法）；建構失敗不阻斷主流程
+    # （KB metrics 為輔助功能，與 observability 可選注入同哲學）
+    try:
+        kb_metric_store = build_kb_metric_store(cfg.checkpoint_dir, cfg.storage)
+    except Exception:
+        kb_metric_store = None
+    # F-C1：IPreferenceStore 依 storage.mode 路由 + config.preferences seed（冪等 last-wins）
+    try:
+        preference_store = build_preference_store(cfg.checkpoint_dir, cfg.storage)
+        for _k, _v in (cfg.preferences or {}).items():
+            preference_store.set(_k, str(_v), scope="global")
+    except Exception:
+        preference_store = None
+    # F-C2：GoalProgressLedger 依 storage.mode 路由
+    try:
+        goal_progress_ledger = build_goal_progress_ledger(cfg.checkpoint_dir, cfg.storage)
+    except Exception:
+        goal_progress_ledger = None
     checkpoint_mgr = CheckpointManager(
         cfg.checkpoint_dir,
         repository=state_repository,
@@ -129,12 +158,18 @@ def _build_plugin_set(
         "knowledge_base": KnowledgeBasePlugin(
             # SD_08 W4 / ADR-SD08-004 §2.4：注入 IObservabilityPort 啟用 4 metric emit
             # （未注入 observability 時為 None，metrics 純記憶體累計仍生效）
-            knowledge_base=FailureKnowledgeBase(kb_path, observability=observability)
+            # F-C3：注入 IKbMetricStore 啟用跨 session 持久化（POST_RUN flush）
+            knowledge_base=FailureKnowledgeBase(
+                kb_path, observability=observability, metric_store=kb_metric_store,
+            )
         ),
         "goal_synthesis": GoalSynthesisPlugin(
             minimax_client=minimax_client,
             enabled=cfg.playbook.goal_synthesis_enabled,
         ),
+        # Improving_012 Phase 1：F-C1 偏好注入（PRE_CORRECTION）/ F-C2 進度 ledger（POST_RUN）
+        "preference_memory": PreferenceMemoryPlugin(preference_store=preference_store),
+        "goal_progress": GoalProgressPlugin(ledger=goal_progress_ledger),
         # AutoSDD_improving_01 W7：SddGovernancePlugin（PRIORITY=45）。
         # ISpecSource 於 wiring 組裝注入——wiring 是 core-purity contract（#2）
         # 唯一豁免點，import infra adapter 合法。plugin 於 PRE_RUN 依
@@ -155,7 +190,7 @@ def _build_plugin_set(
 
 
 def _build_sdd_governance(
-    brain: Optional[IBrain], observability: Optional[IObservabilityPort],
+    brain: IBrain | None, observability: IObservabilityPort | None,
 ) -> SddGovernancePlugin:
     """組裝 SddGovernancePlugin + SddToPlaybookAdapter（ISpecSource 實作）。
 
@@ -191,11 +226,11 @@ def wire_plugins_with_registry(
     bus: EventBus,
     *,
     config: AppConfig,
-    minimax_client: Optional[Any] = None,
-    hotkey: Optional[Any] = None,
-    state_repository: Optional[Any] = None,
-    observability: Optional[IObservabilityPort] = None,
-    brain: Optional[IBrain] = None,
+    minimax_client: Any | None = None,
+    hotkey: Any | None = None,
+    state_repository: Any | None = None,
+    observability: IObservabilityPort | None = None,
+    brain: IBrain | None = None,
 ) -> dict[str, Any]:
     """組裝 Plugin 並回傳 dict（供測試斷言 plugin state）。
 
@@ -226,11 +261,11 @@ def build_kernel(
     *,
     executor: IExecutor,
     evaluator: IEvaluator,
-    brain: Optional[IBrain] = None,
-    hotkey: Optional[Any] = None,
-    minimax_client: Optional[Any] = None,
-    state_repository: Optional[Any] = None,
-    observability: Optional[IObservabilityPort] = None,
+    brain: IBrain | None = None,
+    hotkey: Any | None = None,
+    minimax_client: Any | None = None,
+    state_repository: Any | None = None,
+    observability: IObservabilityPort | None = None,
 ) -> PlaybookKernel:
     """組裝完整的 PlaybookKernel。
 
@@ -288,7 +323,7 @@ def build_coordinator(
     bus: EventBus,
     brain: IBrain,
     executor: IExecutor,
-    max_active_runs_per_goal: Optional[int] = None,
+    max_active_runs_per_goal: int | None = None,
 ) -> OrchestrationCoordinator:
     """組裝 OrchestrationCoordinator（SD_Improving_06 W1 T1-5）。
 

@@ -10,15 +10,13 @@ merged.counter_diff['sdd_governance']（GotoCounter 先例之消費端，
 """
 from __future__ import annotations
 
-from typing import Optional
-
 from ...core.hookspec import HookContext, KernelPhase
 from ...utils.checkpoint_manager import PlaybookCheckpoint
 
 
 def build_checkpoint_from_ctx(
     plugin, ctx: HookContext, payload: dict,
-) -> Optional[PlaybookCheckpoint]:
+) -> PlaybookCheckpoint | None:
     """從 ctx + payload 組裝 PlaybookCheckpoint（plugin 注入避免循環依賴）。
 
     SD_05 W1 Step-2：優先從 MergedResult.counter_diff（CounterSnapshotResult

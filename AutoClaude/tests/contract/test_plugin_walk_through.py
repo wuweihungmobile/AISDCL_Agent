@@ -27,24 +27,44 @@ PLUGINS_DIR = PROJECT_ROOT / "autoclaude" / "plugins"
 
 
 # ── 公開 entry 對照表 ────────────────────────────────────────────────
-# 15 個 Plugin（SD_06 W6 12 + SD_05 W4 補 2 + AutoSDD_improving_01 W6 補 1）
+# 17 個 Plugin（SD_06 W6 12 + SD_05 W4 補 2 + AutoSDD_improving_01 W6 補 1
+#   + Improving_012 Phase 1 補 2：PreferenceMemory / GoalProgress）
 # — 對應 autoclaude/plugins/__init__.py
 PLUGIN_REGISTRY: dict[str, dict] = {
-    "PreRunValidatorPlugin":     {"module": "autoclaude.plugins.pre_run_validator_plugin",     "priority": 5},
-    "HotkeyPlugin":              {"module": "autoclaude.plugins.hotkey_plugin",                 "priority": 10},
-    "CrossStepValidatorPlugin":  {"module": "autoclaude.plugins.cross_step_validator_plugin",   "priority": 15},
-    "TokenGuardPlugin":          {"module": "autoclaude.plugins.token_guard_plugin",            "priority": 30},
-    "GlobalGoalAnchorPlugin":    {"module": "autoclaude.plugins.global_goal_anchor_plugin",     "priority": 35},
-    "PlaybookPersistencePlugin": {"module": "autoclaude.plugins.playbook_persistence_plugin",   "priority": 40},
-    "SddGovernancePlugin":       {"module": "autoclaude.plugins.sdd_governance_plugin",         "priority": 45},
-    "FastPathPlugin":            {"module": "autoclaude.plugins.fast_path_plugin",              "priority": 50},
-    "NotificationPlugin":        {"module": "autoclaude.plugins.notification_plugin",           "priority": 50},
-    "KnowledgeBasePlugin":       {"module": "autoclaude.plugins.knowledge_base_plugin",         "priority": 50},
-    "GoalSynthesisPlugin":       {"module": "autoclaude.plugins.goal_synthesis_plugin",         "priority": 50},
-    "ConvergencePlugin":         {"module": "autoclaude.plugins.convergence_plugin",            "priority": 65},
-    "EvolutionPlugin":           {"module": "autoclaude.plugins.evolution_plugin",              "priority": 70},
-    "GotoCounterPlugin":         {"module": "autoclaude.plugins.goto_counter_plugin",           "priority": 85},
-    "CheckpointPlugin":          {"module": "autoclaude.plugins.checkpoint_plugin",             "priority": 90},
+    "PreRunValidatorPlugin": {
+        "module": "autoclaude.plugins.pre_run_validator_plugin", "priority": 5},
+    "HotkeyPlugin": {
+        "module": "autoclaude.plugins.hotkey_plugin", "priority": 10},
+    "CrossStepValidatorPlugin": {
+        "module": "autoclaude.plugins.cross_step_validator_plugin", "priority": 15},
+    "TokenGuardPlugin": {
+        "module": "autoclaude.plugins.token_guard_plugin", "priority": 30},
+    "GlobalGoalAnchorPlugin": {
+        "module": "autoclaude.plugins.global_goal_anchor_plugin", "priority": 35},
+    "PlaybookPersistencePlugin": {
+        "module": "autoclaude.plugins.playbook_persistence_plugin", "priority": 40},
+    "SddGovernancePlugin": {
+        "module": "autoclaude.plugins.sdd_governance_plugin", "priority": 45},
+    "FastPathPlugin": {
+        "module": "autoclaude.plugins.fast_path_plugin", "priority": 50},
+    "NotificationPlugin": {
+        "module": "autoclaude.plugins.notification_plugin", "priority": 50},
+    "KnowledgeBasePlugin": {
+        "module": "autoclaude.plugins.knowledge_base_plugin", "priority": 50},
+    "PreferenceMemoryPlugin": {
+        "module": "autoclaude.plugins.preference_memory_plugin", "priority": 50},
+    "GoalSynthesisPlugin": {
+        "module": "autoclaude.plugins.goal_synthesis_plugin", "priority": 50},
+    "GoalProgressPlugin": {
+        "module": "autoclaude.plugins.goal_progress_plugin", "priority": 50},
+    "ConvergencePlugin": {
+        "module": "autoclaude.plugins.convergence_plugin", "priority": 65},
+    "EvolutionPlugin": {
+        "module": "autoclaude.plugins.evolution_plugin", "priority": 70},
+    "GotoCounterPlugin": {
+        "module": "autoclaude.plugins.goto_counter_plugin", "priority": 85},
+    "CheckpointPlugin": {
+        "module": "autoclaude.plugins.checkpoint_plugin", "priority": 90},
 }
 
 
@@ -171,16 +191,17 @@ def test_plugin_priority_constant_matches_audit_report(plugin_name: str, info: d
 
 
 def test_wiring_register_order_covers_all_non_optional_plugins():
-    """`wiring._REGISTER_ORDER` 必須涵蓋 15 個 plugin（hotkey optional 含在內）。"""
+    """`wiring._REGISTER_ORDER` 必須涵蓋 17 個 plugin（hotkey optional 含在內）。"""
     wiring = importlib.import_module("autoclaude.core.wiring")
     order = wiring._REGISTER_ORDER
-    assert len(order) >= 15, f"_REGISTER_ORDER 應涵蓋全部 15 plugin，實際 {len(order)}"
+    assert len(order) >= 17, f"_REGISTER_ORDER 應涵蓋全部 17 plugin，實際 {len(order)}"
     # hotkey 為 optional（hotkey_handler=None 時跳過）— 但仍應在 order 中
     expected = {
         "pre_run_validator", "hotkey", "cross_step_validator", "token_guard",
         "global_goal_anchor", "playbook_persistence", "sdd_governance",
         "fast_path", "notification",
-        "knowledge_base", "goal_synthesis", "convergence", "evolution",
+        "knowledge_base", "preference_memory", "goal_synthesis", "goal_progress",
+        "convergence", "evolution",
         "goto_counter", "checkpoint",
     }
     assert set(order) == expected, (
@@ -231,5 +252,6 @@ def test_runner_does_not_import_checkpoint_internals():
         violations = imports & forbidden_internals
         assert not violations, (
             f"{src.relative_to(PROJECT_ROOT)} 不可直接 import checkpoint 內部模組；"
-            f"違規: {violations}（請改用 `from autoclaude.plugins.checkpoint import CheckpointPlugin`）"
+            f"違規: {violations}"
+            "（請改用 `from autoclaude.plugins.checkpoint import CheckpointPlugin`）"
         )

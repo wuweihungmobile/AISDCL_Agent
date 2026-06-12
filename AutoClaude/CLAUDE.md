@@ -1,7 +1,7 @@
 # CLAUDE.md
 # Claude Code Project Guidance
 
-**Last Updated**: 2026-06-12 | **AISDLC Version**: v0.09 | **Status**: SD_09 **W0 收尾期 + R61 nightly 機制三十八度閉環（R24~R61 連 38 輪）+ 四方 zero-trust audit 重驗收斂 OVERALL PASS（0 P0/0 P1/0 P2，無新缺陷）+ 紀律#17 雙向兩條獨立驗證數字互證**。本輪手動親跑 nightly + 派 subagent 四方挑戰式 audit + 加速 SD10：nightly 6 stage 全綠 run_id=114056 kill_rate 76.51%（真 Docker，Killed 114/Survived 35）perf green=3 + 主 agent 權威 full pytest 基線 **2,853 passed / 122 skipped**（2026-06-12 Improving_012 後實測；R61 原 2,732/122，明細沉 §1.7.3）+ mirror tests/tools/ 421 passed（R61 原 404）+ importlinter 7 kept + LOC=0 + snapshot OK + 源碼零 diff（mutmut 還原乾淨）。挑戰式攻擊 5 點（藏刪測/exit=2假綠/streak灌水/源碼殘留/鏡子未驗）全敗證非橡皮圖章；delta=0 為本機與 R60 同 UTC 日 M-05 去重正確（非缺陷）。詳見 [§1.7.3 R61](docs/05_development/sprint_history.md) + [Round61_NextAction](docs/05_development/SD09_W3_Round61_NextAction.md)。
+**Last Updated**: 2026-06-13 | **AISDLC Version**: v0.09 | **Status**: **Improving_012 Phase 1 記憶基座完成（F-C3/F-C1/F-C2）**+ SD_09 W0 收尾期。Phase 1 經 SCG-1（SRD_AGT_Phase1_Memory）+ SCG-2（ADR-AGT-003）🔴 人工確認後交付：IKbMetricStore + IPreferenceStore 二新 port（10→12）、preference_memory + goal_progress 二新 plugin（14→16 active）、alembic 0016 三新表、importlinter Rule 8（7→8 kept）、Kernel 補發 PRE_CORRECTION。三方 zero-trust audit 2 輪複審 PASS（QA P1×7/P2×6 + 複驗 P1-1 resume 口徑全修；紀律 #18 mutation 隔離樹；nightly run_id=040216 六 stage 全綠 kill_rate 76.51% 持平）。full pytest 基線 **2,972 passed / 122 skipped**（2026-06-13 audit 修復後實測；前基線 2,853/122）+ LOC=0 + snapshot OK。詳見 [AutoClaude_Improving_012.md](docs/04_planning/AutoClaude_Improving_012.md) §5 Phase 1 + [SRD_AGT_Phase1_Memory](docs/02_architecture/SRD_AGT_Phase1_Memory.md)。
 
 > **🔴 Important Notice 🔴** This file provides critical guidance for Claude Code (claude.ai/code). All instructions here OVERRIDE default behavior and must be followed exactly.
 
@@ -280,6 +280,7 @@ tasks:
 15. **呼叫端工具路徑分隔符相容性（Bash 反斜線吞噬根治）** — Bash 工具呼叫 `tools\run_local_nightly.ps1` 時反斜線被 escape 吞噬 → `toolsrun_local_nightly.ps1` 找不到檔案 → exit 127。CLAUDE.md / SOP 範例**一律用正斜線** `tools/run_local_nightly.ps1`；schtasks 用絕對 Windows 路徑；以 PowerShell 工具呼叫亦可（R40 P2-R40-2 修復）
 16. **pytest 數字 SSOT 必須註記隨機性與 fixture 前提** — 引用 pytest 數字（如 2,716 passed）時加註「pytest-randomly 未啟用，順序由 collection 確定」；pyproject.toml 不安裝 pytest-randomly；引入前需先補測試隔離（R40 P1-R40-1 偽陽性預防）
 17. **zero-trust 須雙向：agent audit 結論本身亦須複核** — subagent 聲稱「某檔案不存在」須以 `find`/`rg -l`/`ls` 獨立複核（嚴禁單憑 `fd`，未安裝時靜默回空 → 誤判不存在）；可機械驗證之 finding（檔案存在 / 數字驗算 / 行號）落入 backlog 前主 agent 須親跑複核，誤報與真缺陷同樣留證（R57 SD agent `fd` 誤報 `test_pg_memory_store_security.py:14` 不存在實則存在）
+18. **mutation 必須在隔離樹執行，禁止就地突變活體工作樹** — mutmut 就地改寫 volume-mount 源碼會與並行 pytest/audit 互踩產生假紅、kill 時殘留變異；載具須 tar 複製至 container 內 `/tmp/mutwork` 隔離樹（editable install 指向隔離樹），輸出物寫回 `/workspace` 維持取證鏈（Improving_012 Phase 1 QA P1-7）
 
 > **採樣統計**：baseline lock 必須 `samples ≥ 20`；< 20 印 warning「statistical noise high; not blocking」；`perf_regression_check.py` baseline samples<20 自動 BLOCK→WARN；rc 三態 0/2/1 = 綠/warn/block；`Invoke-Stage` rc=2 視為 WARN（ADR-SD08-003 §2.6 v1.1）。
 
@@ -323,9 +324,9 @@ tasks:
 
 ---
 
-**文檔元數據**：v7.4 | 建立 2025-01-11 | 最後更新 2026-06-12 | 適用 AISDLC v0.09+
+**文檔元數據**：v7.5 | 建立 2025-01-11 | 最後更新 2026-06-13 | 適用 AISDLC v0.09+
 
-**v7.4 重點**：SD_09 W3 **R61 nightly 三十八度閉環（R24~R61 連 38 輪）+ 四方 zero-trust audit 重驗收斂 OVERALL PASS（0 P0/P1/P2，無新缺陷）+ 紀律#17 雙向兩條獨立驗證數字互證**。用戶要求手動親跑 nightly + 派 subagent 四方挑戰式 audit + 加速 SD10 + 打 tag + merge main：nightly run_id=114056 6 stage 全綠（各 stage exit=0）、kill_rate 76.51%（真 Docker，Killed 114/Survived 35）、perf green=3、ac4 11/14（trailing-14-day 窗，~06-16 達標）、主 agent 權威 full pytest **2,732/122**（88.69s 持平 R60 零回歸）、subagent collect-only **2854**（=2732+122 互證）、mirror tests/tools/ 404 passed、importlinter 7 kept、LOC=0、snapshot OK、源碼零 diff（mutmut 還原乾淨）。subagent 挑戰式攻擊 5 點全敗證非橡皮圖章；delta=0 為本機與 R60 同 UTC 日 M-05 去重正確（非缺陷）。詳見 [Round61_NextAction](docs/05_development/SD09_W3_Round61_NextAction.md)。
+**v7.5 重點**：**Improving_012 Phase 1 記憶基座（F-C3/F-C1/F-C2）完成**（SCG-1/SCG-2 🔴 確認後交付）。F-C3 KB metrics 持久化採 ACCEPTED ADR-SD09-006 canonical（IKbMetricStore + Local/Pg adapter + alembic 0016 + Rule 8，重啟不清零）；F-C1 IPreferenceStore + PreferenceMemoryPlugin + Kernel 補發 PRE_CORRECTION → `preferences_section` 注入 correction prompt；F-C2 GoalProgressLedger + GoalProgressPlugin（POST_RUN payload）。Ports 10→12、plugins 14→16 active、alembic 0016 三新表。三方 zero-trust audit 2 輪複審 PASS（含 PG now() bug、resume 進度口徑、mutation 隔離樹紀律 #18）。full pytest **2,972/122**（+119 零回歸）、importlinter 8 kept、LOC=0、snapshot OK。完整明細見 [sprint_history.md §1.7.3](docs/05_development/sprint_history.md) Improving_012 Phase 1 段 + [SRD_AGT_Phase1_Memory](docs/02_architecture/SRD_AGT_Phase1_Memory.md)。
 
 <!-- ARCH_SNAPSHOT_BEGIN -->
 ## [Architecture Snapshot] — 由 tools/snapshot_sync.py 自動生成（請勿手動編輯本區段；以 `python tools/snapshot_sync.py` 重新生成）
@@ -342,7 +343,7 @@ tasks:
 | absolute_limit | ≤ 750 | 全域絕對紅線（任何層級不得超）|
 | special: CLAUDE.md | ≤ 400 | ADR-SD08-001 文件治理 |
 
-### importlinter Rules（目前 7 kept）
+### importlinter Rules（目前 8 kept）
 1. Plugins must not import other plugins (use EventBus instead)
 2. autoclaude.core (excl. wiring) must not depend on execution or infra layers
 3. _runner_internals must not be imported by core or plugins
@@ -350,8 +351,9 @@ tasks:
 5. Executor modules must not import Brain modules (use EventBus)
 6. playbook_runner / strategy modules must not import checkpoint internal modules (use CheckpointPlugin public API)
 7. Plugins must not directly import utils.observability helpers (use IObservabilityPort)
+8. Plugin must not directly import IKbMetricStore (use FailureKnowledgeBase routing)
 
-### Plugin 列表（14 個 active / 15 個靜態，按 wiring._REGISTER_ORDER）
+### Plugin 列表（16 個 active / 17 個靜態，按 wiring._REGISTER_ORDER）
 1. pre_run_validator
 2. hotkey
 3. cross_step_validator
@@ -362,20 +364,24 @@ tasks:
 8. fast_path
 9. notification
 10. knowledge_base
-11. goal_synthesis
-12. convergence
-13. evolution
-14. goto_counter
-15. checkpoint
+11. preference_memory
+12. goal_synthesis
+13. goal_progress
+14. convergence
+15. evolution
+16. goto_counter
+17. checkpoint
 
-### Port 列表（10 個，autoclaude/core/ports/）
+### Port 列表（12 個，autoclaude/core/ports/）
 - brain
 - embedder
 - evaluator
 - executor
+- kb_metric_store
 - memory_store
 - observability
 - playbook_repository
+- preference_store
 - spec_source
 - state_repository
 - vector_search

@@ -9,17 +9,19 @@
   - 純 Protocol，零依賴，零實作
   - 任一 Adapter 實作必須通過契約測（Phase 5 才落地，Phase 1 預留）
 """
-from .executor import IExecutor, ExecutionOutput
+from .brain import CorrectionResult, IBrain
 from .evaluator import IEvaluator
-from .brain import IBrain, CorrectionResult
+from .executor import ExecutionOutput, IExecutor
+from .kb_metric_store import IKbMetricStore, MetricValue
+from .memory_store import IMemoryStore
+from .observability import IObservabilityPort, ISpan, NullObservability
+from .playbook_repository import IPlaybookRepository
+from .preference_store import IPreferenceStore
 from .state_repository import (
-    IStateRepository,
     IQueryableStateRepository,
+    IStateRepository,
     StateRepositoryError,
 )
-from .memory_store import IMemoryStore
-from .playbook_repository import IPlaybookRepository
-from .observability import IObservabilityPort, ISpan, NullObservability
 
 __all__ = [
     "IExecutor", "ExecutionOutput",
@@ -31,4 +33,7 @@ __all__ = [
     "IPlaybookRepository",
     # SD_Improving_08 W4 / ADR-SD08-004
     "IObservabilityPort", "ISpan", "NullObservability",
+    # Improving_012 Phase 1（F-C3 / F-C1；ADR-SD09-006 / ADR-AGT-003）
+    "IKbMetricStore", "MetricValue",
+    "IPreferenceStore",
 ]

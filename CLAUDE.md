@@ -12,7 +12,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 | 子目錄 | 性質 | 權威指引 |
 |--------|------|---------|
-| [AutoClaude/](AutoClaude/) | Python 3.11+ 應用程式 — Claude Code 多步驟 Playbook 自動執行引擎（微核心 + 14 Plugin + DAL 三後端） | [AutoClaude/CLAUDE.md](AutoClaude/CLAUDE.md) |
+| [AutoClaude/](AutoClaude/) | Python 3.11+ 應用程式 — Claude Code 多步驟 Playbook 自動執行引擎（微核心 + 16 Plugin + DAL 三後端） | [AutoClaude/CLAUDE.md](AutoClaude/CLAUDE.md) |
 | [AISDLC_SDD/](AISDLC_SDD/) | 規格先行（Spec-First）SDLC 框架 — 以 Markdown 模板／Agent／Workflow 為主 + FSM runtime（Python）+ TLA+ 形式化驗證 | [AISDLC_SDD/CLAUDE.md](AISDLC_SDD/CLAUDE.md) |
 
 ### 🔴 進入任一子專案前的第一動作
@@ -55,11 +55,11 @@ autoclaude <playbook.yaml> --config config.local.yaml   # 安裝後 entrypoint
 
 ### 測試 / Lint
 ```bash
-python -m pytest tests/ -q                       # 全套（基線 2,853 passed / 122 skipped，2026-06-12 Improving_012 Phase 0 + audit 修復後實測）
+python -m pytest tests/ -q                       # 全套（基線 2,972 passed / 122 skipped，2026-06-13 Improving_012 Phase 1 + audit 修復後實測）
 python -m pytest tests/test_playbook_runner.py -v # 單檔
 python -m pytest tests/ -k <substring> -v         # 單一測試
 python -m pytest tests/ -m pg_real                # 需 SD07_REAL_PG_E2E_ENABLED=true + PG DSN
-PYTHONUTF8=1 lint-imports                          # import-linter（7 kept / 0 broken）
+PYTHONUTF8=1 lint-imports                          # import-linter（8 kept / 0 broken）
 ruff check .                                       # lint（line-length=100, py311；含 E,F,I,UP）
 ```
 - pytest markers：`pg_real`（真 PG e2e）、`perf`、`benchmark`。
@@ -77,11 +77,11 @@ docker compose -f docker-compose.ci.yml up -d                          # CI 對�
 - DB migrations：`alembic upgrade head`（同步 DSN／psycopg2；PostgreSQL 17 + pgvector）。
 
 ### 架構大圖
-**Hexagonal / 微核心**：`core/`（Kernel + EventBus + HookSpec + 10 個 `ports/` 抽象介面，含 AutoSDD W1 新增之 `spec_source`）只依賴 ports；`infra/adapters/` 提供具體實作（MinimaxBrain / PtyExecutor / ShellEvaluator / LocalLogger）；`infra/repositories/` 是 DAL 三後端（File / InMemory / Pg + Dual）；`plugins/`（14 active，含 AutoSDD W6 新增之 `sdd_governance`）為橫切關注點，彼此**不可互 import**，協作一律走 EventBus。`execution/playbook_runner.py` 是無業務邏輯的 thin facade。
+**Hexagonal / 微核心**：`core/`（Kernel + EventBus + HookSpec + 12 個 `ports/` 抽象介面，含 Improving_012 Phase 1 新增之 `kb_metric_store`/`preference_store`）只依賴 ports；`infra/adapters/` 提供具體實作（MinimaxBrain / PtyExecutor / ShellEvaluator / LocalLogger）；`infra/repositories/` 是 DAL 三後端（File / InMemory / Pg + Dual）；`plugins/`（16 active，含 Phase 1 新增之 `preference_memory`/`goal_progress`）為橫切關注點，彼此**不可互 import**，協作一律走 EventBus。`execution/playbook_runner.py` 是無業務邏輯的 thin facade。
 
 **狀態機閉環**：INIT → PRE_RUN_VALIDATE → EXECUTE(step) →（Token Guard：≥80% `/compact`、≥90% checkpoint）→ EVALUATE →（失敗則 Minimax CORRECTION / 超限則 ESCALATION → MinimaxEvolver→PlaybookEvolver 自演化）→ DONE → GOAL_SYNTHESIS。
 
-**架構約束以 `.importlinter` 7 條 contract 機械強制 + LOC 分級政策**（data ≤150 / plugin_entry ≤250 / strategy ≤300 / adapter ≤400 / contract ≤400 / service ≤500 / 絕對紅線 ≤750；`tools/check_loc_budget.py` 強制）。`CLAUDE.md` 內含自動生成的 `[Architecture Snapshot]` 區段（由 `tools/snapshot_sync.py` 產生，**勿手動編輯**）。
+**架構約束以 `.importlinter` 8 條 contract 機械強制 + LOC 分級政策**（data ≤150 / plugin_entry ≤250 / strategy ≤300 / adapter ≤400 / contract ≤400 / service ≤500 / 絕對紅線 ≤750；`tools/check_loc_budget.py` 強制）。`CLAUDE.md` 內含自動生成的 `[Architecture Snapshot]` 區段（由 `tools/snapshot_sync.py` 產生，**勿手動編輯**）。
 
 ### 新增 Plugin 的 SOP
 1. 建 `autoclaude/plugins/<feature>_plugin.py`（繼承 HookSpec，PascalCase 類別）；2. 實作對應 hook；3. 加入 `wiring._REGISTER_ORDER`，相依走 constructor 注入 ports（**禁止直接 import infra**）；4. 寫 `tests/plugins/test_<feature>.py`（coverage ≥ 90%）；5. 遵守 LOC 分級；6. Plugin 間禁止互相 import（走 EventBus）。

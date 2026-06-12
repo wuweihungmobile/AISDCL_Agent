@@ -12,7 +12,6 @@ import yaml
 from autoclaude.execution.pre_run_validator import PreRunValidator
 from autoclaude.models.playbook import Playbook
 from autoclaude.tools.sdd_compile import compile_spec, main
-
 from tests.infra.test_sdd_to_playbook_adapter import _write_fsm_state, _write_spec
 
 

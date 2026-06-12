@@ -9,20 +9,20 @@ DSN 解析優先級：環境變數 AUTOCLAUDE_DB_DSN > config.storage.db_dsn
 
 Phase 6 stakeholder review 採納項：
   - DSN 環境變數統一為 AUTOCLAUDE_DB_DSN（舊 AUTOCLAUDE_PG_DSN 短期相容）
-  - 強制 TLS（Security）：ssl/sslmode 缺失時 reject 啟動，AUTOCLAUDE_ALLOW_INSECURE_DB=1 可暫時 override
+  - 強制 TLS（Security）：ssl/sslmode 缺失時 reject 啟動，
+    AUTOCLAUDE_ALLOW_INSECURE_DB=1 可暫時 override
   - Engine pool 配置（DBA / Infra / SRE）：pool_pre_ping / pool_recycle / pool_size
 """
 from __future__ import annotations
 
 import logging
 import os
+import re as _re
 from typing import Any
 
 from ...utils.config import StorageConfig
-from .file_state_repository import FileStateRepository
 from .dual_state_repository import DualStateRepository
-
-import re as _re
+from .file_state_repository import FileStateRepository
 
 logger = logging.getLogger("autoclaude.infra.repositories.factory")
 
@@ -53,8 +53,8 @@ def canonical_playbook_id(playbook_path: str, mode: str) -> str:
       - both：    Path.stem（dual-write 兩端必須使用同一 ID）
       - db_only： sha256(abs_path)[:16]（純 PG 後端，確保唯一）
     """
-    from pathlib import Path
     import hashlib
+    from pathlib import Path
     if mode == "db_only":
         abs_path = str(Path(playbook_path).resolve())
         return hashlib.sha256(abs_path.encode("utf-8")).hexdigest()[:16]
@@ -131,7 +131,7 @@ def _normalize_asyncpg_dsn(dsn: str) -> tuple[str, dict]:
     return cleaned, {"ssl": ssl_val}
 
 
-def _strip_param(m: "re.Match") -> str:  # type: ignore[type-arg]
+def _strip_param(m: _re.Match) -> str:  # type: ignore[type-arg]
     """移除 ?key=val 或 &key=val，保持剩餘 query string 完整。"""
     sep, trailing = m.group(1), m.group(2)
     # 若 sep=? 且有 trailing &，補回 ? 作為下一個參數的起頭
@@ -167,7 +167,9 @@ def _smoke_test_pg(engine) -> None:
                 else:
                     logger.info("PG smoke: alembic_version=%s", ver)
             except Exception:
-                logger.warning("PG smoke: 無法讀取 alembic_version（schema 未執行 alembic upgrade head？）")
+                logger.warning(
+                    "PG smoke: 無法讀取 alembic_version（schema 未執行 alembic upgrade head？）"
+                )
 
     try:
         _run_async(_check(engine))
@@ -177,6 +179,93 @@ def _smoke_test_pg(engine) -> None:
             f"PG startup smoke test 失敗：{_redact(str(exc))}。"
             "請確認 PostgreSQL 服務運行中且已執行 alembic upgrade head。"
         ) from exc
+
+
+def build_kb_metric_store(checkpoint_dir: str, storage: StorageConfig) -> Any:
+    """F-C3 / ADR-SD09-006 §2.2：依 storage.mode 回傳 IKbMetricStore 後端。
+
+    - yaml_only        → LocalKbMetricStore（`.kb_metrics_local.jsonl`）
+    - both / db_only   → PgKbMetricStore（kb_metrics 表，alembic 0016）
+
+    PG 路徑各自建 NullPool engine（與 state repository 相同理由：CLI 工具
+    跨 asyncio.run() 呼叫，連線不可 bound 至特定 event loop；NullPool 開銷可接受）。
+    """
+    if storage.mode == "yaml_only":
+        from ..adapters.local_kb_metric_store import LocalKbMetricStore  # noqa: PLC0415
+        return LocalKbMetricStore(f"{checkpoint_dir}/.kb_metrics_local.jsonl")
+
+    dsn = _resolve_dsn(storage)
+    _enforce_tls(dsn)
+    try:
+        from sqlalchemy.ext.asyncio import create_async_engine  # noqa: PLC0415
+        from sqlalchemy.pool import NullPool  # noqa: PLC0415
+
+        from ..adapters.pg_kb_metric_store import PgKbMetricStore  # noqa: PLC0415
+    except ImportError as exc:
+        raise ImportError(
+            "PostgreSQL backend 需安裝：pip install autoclaude[postgres]"
+        ) from exc
+    dsn, ssl_connect_args = _normalize_asyncpg_dsn(dsn)
+    engine = create_async_engine(
+        dsn, echo=False, poolclass=NullPool, connect_args=ssl_connect_args,
+    )
+    return PgKbMetricStore(engine)
+
+
+def build_preference_store(checkpoint_dir: str, storage: StorageConfig) -> Any:
+    """F-C1 / ADR-AGT-003 L3：依 storage.mode 回傳 IPreferenceStore 後端。
+
+    - yaml_only      → FilePreferenceStore（`preferences.jsonl`）
+    - both / db_only → PgPreferenceStore（user_preferences 表，alembic 0016）
+    """
+    if storage.mode == "yaml_only":
+        from ..adapters.file_preference_store import FilePreferenceStore  # noqa: PLC0415
+        return FilePreferenceStore(f"{checkpoint_dir}/preferences.jsonl")
+
+    dsn = _resolve_dsn(storage)
+    _enforce_tls(dsn)
+    try:
+        from sqlalchemy.ext.asyncio import create_async_engine  # noqa: PLC0415
+        from sqlalchemy.pool import NullPool  # noqa: PLC0415
+
+        from ..adapters.pg_preference_store import PgPreferenceStore  # noqa: PLC0415
+    except ImportError as exc:
+        raise ImportError(
+            "PostgreSQL backend 需安裝：pip install autoclaude[postgres]"
+        ) from exc
+    dsn, ssl_connect_args = _normalize_asyncpg_dsn(dsn)
+    engine = create_async_engine(
+        dsn, echo=False, poolclass=NullPool, connect_args=ssl_connect_args,
+    )
+    return PgPreferenceStore(engine)
+
+
+def build_goal_progress_ledger(checkpoint_dir: str, storage: StorageConfig) -> Any:
+    """F-C2 / ADR-AGT-003 L4：依 storage.mode 回傳 GoalProgressLedger 後端。
+
+    - yaml_only      → utils.goal_progress.GoalProgressLedger（`goal_progress.jsonl`）
+    - both / db_only → PgGoalProgressLedger（goal_progress 表，alembic 0016）
+    """
+    if storage.mode == "yaml_only":
+        from ...utils.goal_progress import GoalProgressLedger  # noqa: PLC0415
+        return GoalProgressLedger(f"{checkpoint_dir}/goal_progress.jsonl")
+
+    dsn = _resolve_dsn(storage)
+    _enforce_tls(dsn)
+    try:
+        from sqlalchemy.ext.asyncio import create_async_engine  # noqa: PLC0415
+        from sqlalchemy.pool import NullPool  # noqa: PLC0415
+
+        from ..adapters.pg_goal_progress_ledger import PgGoalProgressLedger  # noqa: PLC0415
+    except ImportError as exc:
+        raise ImportError(
+            "PostgreSQL backend 需安裝：pip install autoclaude[postgres]"
+        ) from exc
+    dsn, ssl_connect_args = _normalize_asyncpg_dsn(dsn)
+    engine = create_async_engine(
+        dsn, echo=False, poolclass=NullPool, connect_args=ssl_connect_args,
+    )
+    return PgGoalProgressLedger(engine)
 
 
 def build_state_repository(checkpoint_dir: str, storage: StorageConfig) -> Any:
@@ -191,6 +280,7 @@ def build_state_repository(checkpoint_dir: str, storage: StorageConfig) -> Any:
     try:
         from sqlalchemy.ext.asyncio import create_async_engine
         from sqlalchemy.pool import NullPool
+
         from .pg_state_repository import PgStateRepository
     except ImportError as exc:
         raise ImportError(

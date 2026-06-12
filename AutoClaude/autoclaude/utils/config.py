@@ -1,8 +1,10 @@
 from __future__ import annotations
+
 import os
 import re
 from pathlib import Path
-from typing import Literal, Optional
+from typing import Literal
+
 import yaml
 from pydantic import BaseModel, Field, field_validator, model_validator
 
@@ -92,7 +94,7 @@ class TokenGuardConfig(BaseModel):
     )
 
     @model_validator(mode="after")
-    def halt_greater_than_compact(self) -> "TokenGuardConfig":
+    def halt_greater_than_compact(self) -> TokenGuardConfig:
         """M-3/X-3 防呆：halt 門檻必須高於 compact 門檻。"""
         if self.halt_threshold_pct <= self.compact_threshold_pct:
             raise ValueError(
@@ -119,7 +121,7 @@ class TokenGuardConfig(BaseModel):
 
 class NotificationConfig(BaseModel):
     enabled: bool = True
-    webhook_url: Optional[str] = None
+    webhook_url: str | None = None
 
 
 class StorageConfig(BaseModel):
@@ -135,14 +137,14 @@ class StorageConfig(BaseModel):
     """
     mode: Literal["yaml_only", "both", "db_only"] = "yaml_only"
     # PostgreSQL DSN（asyncpg 格式）；db_only / both 模式必填，可被 AUTOCLAUDE_DB_DSN 覆寫
-    db_dsn: Optional[str] = None
+    db_dsn: str | None = None
     # both 模式下，dual-write 失敗時是否阻斷主寫（False = 僅紀錄 warning，不影響使用者）
     dual_write_strict: bool = False
     # both 模式下，dual-read 不一致時的解決策略（"yaml_wins" / "db_wins" / "fail_loud"）
     dual_read_resolution: Literal["yaml_wins", "db_wins", "fail_loud"] = "yaml_wins"
 
     @model_validator(mode="after")
-    def db_dsn_required_for_pg(self) -> "StorageConfig":
+    def db_dsn_required_for_pg(self) -> StorageConfig:
         """X-3 防呆：db_only / both 模式必須提供 db_dsn 或環境變數。"""
         if self.mode in ("both", "db_only"):
             has_dsn = bool(self.db_dsn)
@@ -172,6 +174,9 @@ class AppConfig(BaseModel):
     # 工作流程自動偵測的搜尋路徑清單（依序嘗試，找到即回傳）
     # 空列表 → 僅以 CWD 作為最後備援
     workflow_search_paths: list[str] = Field(default_factory=list)
+    # F-C1 / ADR-AGT-003 L3：啟動時 seed 至 IPreferenceStore（global scope）
+    # 寫入為冪等 last-wins；config 為使用者期望值的 SSOT 來源之一
+    preferences: dict[str, str] = Field(default_factory=dict)
 
 
 def load_config(path: str = "config.yaml") -> AppConfig:

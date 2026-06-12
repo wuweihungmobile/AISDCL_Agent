@@ -9,7 +9,7 @@ SD_Improving_06 W1 T1-1（capabilities + decide_escalation 擴張）。
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Optional, Protocol
+from typing import Protocol
 
 from ...models.step_mutation import StepMutation
 
@@ -19,8 +19,8 @@ class CorrectionResult:
     """IBrain.decide_correction 的回傳值。對齊 PlaybookRunner._get_correction 四元組。"""
     correction_prompt: str
     reasoning: str
-    task_goal_summary: Optional[str] = None
-    step_mutation: Optional[StepMutation] = None
+    task_goal_summary: str | None = None
+    step_mutation: StepMutation | None = None
 
 
 # ──────────────────────────────────────────────────────────────
@@ -64,8 +64,8 @@ class EscalationDecision:
     """
     human_handoff: bool
     reasoning: str
-    retry_hint: Optional[str] = None
-    proposed_mutation: Optional[StepMutation] = None
+    retry_hint: str | None = None
+    proposed_mutation: StepMutation | None = None
     extra: dict = field(default_factory=dict)
 
 
@@ -96,13 +96,17 @@ class IBrain(Protocol):
         convergence_reasoning: str = "",
         strategy_hint: str = "",
         error_class: str = "unknown",
-        task_goal_summary: Optional[str] = None,
-        global_goal: Optional[str] = None,
+        task_goal_summary: str | None = None,
+        global_goal: str | None = None,
         allow_step_mutation: bool = False,
-        mutation_history: Optional[list[str]] = None,
+        mutation_history: list[str] | None = None,
         mutation_pressure: int = 0,
-    ) -> Optional[CorrectionResult]:
+        preferences_section: str = "",
+    ) -> CorrectionResult | None:
         """諮詢 LLM 取得修正策略。
+
+        F-C1：preferences_section 為 PreferenceMemoryPlugin 於 PRE_CORRECTION
+        產出的 `## 使用者偏好` 區段（Kernel 僅於非空時傳遞，向下相容）。
 
         Returns:
             CorrectionResult（成功）或 None（API 故障）
@@ -116,7 +120,7 @@ class IBrain(Protocol):
         failure_history: list[dict],
         convergence_trend: str,
         last_correction_prompt: str = "",
-        global_goal: Optional[str] = None,
+        global_goal: str | None = None,
     ) -> EscalationDecision:
         """ESCALATION 觸發前的最終判斷。
 

@@ -147,6 +147,19 @@ env override（如 `AUTOCLAUDE_TEST_P95_THRESHOLD_MS`）若同時影響「採集
 
 對應實作：R57 NextAction §3 誤報-1 + 本紀律；後續 zero-trust audit SOP 沿用。
 
+### 紀律 #18 — mutation 必須在隔離樹執行，禁止就地突變活體工作樹
+
+**背景（Improving_012 Phase 1 QA audit P1-7，2026-06-13）**：mutmut 2.4.3 以「就地改寫源碼 → 跑測試 → 還原」方式工作；nightly mutation stage 將 repo volume-mount 進 container（`-v repo:/workspace`）就地突變，導致：(a) 與主機並行 pytest / audit 互踩 —— QA audit 親跑 full pytest 時 2 個 token_guard 測試假紅（斷言出現 `XX/compact\nXX` 突變特徵字串，單跑 PASSED），所有「親跑取證」帶噪；(b) mutmut 中途被 kill 時變異源碼可能殘留磁碟。
+
+**強制條款**：
+
+1. **隔離樹執行**：mutation 載具（`tools/run_mutmut_in_docker.sh`）必須先將源碼複製至 container 內 ephemeral 隔離樹（`/tmp/mutwork`，tar 排除 `.git`/`logs`/`backups`/cache），editable install 與 mutmut 全程在隔離樹執行；**主機工作樹全程零寫入**。
+2. **import 路徑一致性**：editable install 必須指向隔離樹（裝 `/workspace` 版會使 pytest import 未突變源碼 → 全 survived 假象）。
+3. **取證輸出回寫**：log / backlog / `.mutmut-cache` 仍寫回 `/workspace`，維持 validate_mutmut_log / baseline_lock / mutation_history 取證鏈完全相容。
+4. **驗證要求**：本紀律落地後首次 nightly mutation stage 必須確認 kill_rate 與隔離前基線同量級（76% 上下），證隔離未破壞突變-測試耦合。
+
+對應實作：QA audit P1-R62-7 修復（2026-06-13）；`run_mutmut_in_docker.sh` 隔離樹段落。
+
 ---
 
 ## 3. 採樣統計紀律
@@ -168,4 +181,4 @@ CLAUDE.md §「Nightly / CI 取證紀律」維持 16 條編號標題清單（一
 
 ---
 
-**文檔元數據**：v1.3（AutoClaude_Improving_012 Phase 0 — 紀律 #4 補 TD-N02/TD-N03 驗證點、#7 補 TD-N01 perf 產出強制驗證、#11 補 TD-N04 latest pointer 時序語意、#12 補 TD-N06 source_sha256 向下相容語意；無新增編號紀律，CLAUDE.md 摘要免同步）| 建立 2026-05-26 | 最後更新 2026-06-12 | 維護者：Tech Lead
+**文檔元數據**：v1.4（Improving_012 Phase 1 — 新增紀律 #18 mutation 隔離樹，CLAUDE.md 摘要已同步）| 建立 2026-05-26 | 最後更新 2026-06-13 | 維護者：Tech Lead

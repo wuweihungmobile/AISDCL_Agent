@@ -18,11 +18,12 @@ import json
 import logging
 import time
 from pathlib import Path
-from typing import TYPE_CHECKING, Optional
+from typing import TYPE_CHECKING
 
 from .knowledge_base_metrics import KnowledgeBaseMetrics
 
 if TYPE_CHECKING:
+    from ..core.ports.kb_metric_store import IKbMetricStore
     from ..core.ports.observability import IObservabilityPort
 
 logger = logging.getLogger("autoclaude.utils.knowledge_base")
@@ -49,13 +50,17 @@ class FailureKnowledgeBase:
     def __init__(
         self,
         kb_path: str,
-        observability: Optional["IObservabilityPort"] = None,
+        observability: IObservabilityPort | None = None,
+        metric_store: IKbMetricStore | None = None,
     ):
         self._path = Path(kb_path)
         self._cache: dict[str, dict] = {}
         # SD_08 W4：4 metric 純記憶體累計（永遠存在；observability 為可選 emit）
         self._metrics = KnowledgeBaseMetrics()
         self._observability = observability
+        # F-C3 / ADR-SD09-006：可選注入 IKbMetricStore → 跨 session 持久化（重啟不清零）
+        self._metric_store = metric_store
+        self._restore_metrics_from_store()
         self._load()
 
     @property
@@ -66,6 +71,51 @@ class FailureKnowledgeBase:
     def metrics_snapshot(self) -> dict:
         """SD_08 W4：與 AutoResumeMetrics 一致的 snapshot 模式。"""
         return self._metrics.snapshot()
+
+    def persist_metrics(self) -> None:
+        """F-C3：將 metrics 累計值 flush 至 IKbMetricStore 後端（POST_RUN 觸發）。
+
+        未注入 metric_store 時 no-op（向下相容：原純記憶體行為不變）。
+        """
+        if self._metric_store is None:
+            return
+        try:
+            self._metric_store.flush()
+        except Exception as exc:
+            logger.warning("KB metrics persist 失敗（warning，繼續主流程）: %s", exc)
+
+    # F-C3：KnowledgeBaseMetrics 欄位 ↔ IKbMetricStore counter 名稱映射
+    _METRIC_NAME_MAP = {
+        "total_queries": "kb_queries_total",
+        "total_hits": "kb_hits_total",
+        "strategy_rotation_count": "kb_strategy_rotation_total",
+        "cache_eviction_count": "kb_cache_eviction_total",
+    }
+
+    def _restore_metrics_from_store(self) -> None:
+        """F-C3：自 metric_store 末筆快照恢復 4 counters（重啟不清零）。
+
+        latency 滑動窗口為短期統計不恢復（SRD_AGT_Phase1_Memory §1.3）。
+        """
+        if self._metric_store is None:
+            return
+        try:
+            snap = self._metric_store.snapshot()
+        except Exception as exc:
+            logger.warning("KB metrics 恢復失敗（以零起算）: %s", exc)
+            return
+        for attr, name in self._METRIC_NAME_MAP.items():
+            if name in snap:
+                setattr(self._metrics, attr, int(snap[name].value))
+
+    def _record_store_counter(self, attr: str, *, delta: int = 1) -> None:
+        """F-C3：counter 變動同步轉送 metric_store（記憶體 buffer，flush 才落地）。"""
+        if self._metric_store is None:
+            return
+        try:
+            self._metric_store.record_counter(self._METRIC_NAME_MAP[attr], delta)
+        except Exception as exc:
+            logger.warning("KB metric_store 轉送失敗: %s", exc)
 
     def _load(self) -> None:
         if not self._path.exists():
@@ -82,7 +132,7 @@ class FailureKnowledgeBase:
         except Exception as exc:
             logger.warning("知識庫載入失敗（將以空庫啟動）: %s", exc)
 
-    def query(self, error_signature: str) -> Optional[dict]:
+    def query(self, error_signature: str) -> dict | None:
         """查詢已知的錯誤模式。回傳 entry dict 或 None。
 
         SD_08 W4：每次 query 累計 metrics（hit/miss + latency）+ emit observability。
@@ -93,6 +143,15 @@ class FailureKnowledgeBase:
         latency_ms = (time.monotonic_ns() - start_ns) / 1_000_000.0
         hit = result is not None
         self._metrics.record_query(hit=hit, latency_ms=latency_ms)
+        # F-C3：同步累計至 metric_store buffer（POST_RUN persist_metrics 落地）
+        self._record_store_counter("total_queries")
+        if hit:
+            self._record_store_counter("total_hits")
+        if self._metric_store is not None:
+            try:
+                self._metric_store.record_histogram("kb_query_latency_ms", latency_ms)
+            except Exception as exc:
+                logger.warning("KB metric_store histogram 轉送失敗: %s", exc)
         if self._observability is not None:
             try:
                 self._observability.emit_counter(
@@ -115,6 +174,7 @@ class FailureKnowledgeBase:
         from ..execution.failure_tracker import STRATEGY_TYPES
         # SD_08 W4：strategy rotation 累計（next_strategy/get_strategy_priority 觸發）
         self._metrics.record_strategy_rotation()
+        self._record_store_counter("strategy_rotation_count")
         if self._observability is not None:
             try:
                 self._observability.emit_counter(
@@ -182,6 +242,7 @@ class FailureKnowledgeBase:
                 del self._cache[oldest_key]
                 # SD_08 W4：LRU 淘汰累計 metrics
                 self._metrics.record_cache_eviction()
+                self._record_store_counter("cache_eviction_count")
                 if self._observability is not None:
                     try:
                         self._observability.emit_counter("kb_cache_eviction_count")

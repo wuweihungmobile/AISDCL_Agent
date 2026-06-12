@@ -3,13 +3,12 @@
 僅服務 Playbook 模式：步驟失敗時諮詢 Minimax，由其產出修正 prompt。
 """
 from __future__ import annotations
+
 import os
 import re
 import subprocess
-from typing import Optional
 
 from ..utils.trace_context import propagate_to_subprocess_env
-
 
 CORRECTION_SYSTEM_PROMPT = """\
 你是 AutoClaude 的 Playbook 修正大腦。
@@ -170,7 +169,7 @@ def build_correction_message(
     step_id: str,
     task_name: str,
     task_prompt: str,
-    expected_regex: Optional[str],
+    expected_regex: str | None,
     failure_reason: str,
     eval_output: str,
     retry_count: int,
@@ -179,10 +178,11 @@ def build_correction_message(
     convergence_reasoning: str = "",
     strategy_hint: str = "",
     error_class: str = "unknown",
-    task_goal_summary: Optional[str] = None,  # Gap-010-B: 高重試時取代完整 task_prompt
-    global_goal: Optional[str] = None,         # Gap-011-A: 自治系統總目標
-    mutation_history: Optional[list[str]] = None,  # Gap-013-D: 本步驟已執行的突變歷史
+    task_goal_summary: str | None = None,  # Gap-010-B: 高重試時取代完整 task_prompt
+    global_goal: str | None = None,         # Gap-011-A: 自治系統總目標
+    mutation_history: list[str] | None = None,  # Gap-013-D: 本步驟已執行的突變歷史
     mutation_pressure: int = 0,                # Gap-032: 突變壓力等級 0-3（無效 correction 累計次數）
+    preferences_section: str = "",             # F-C1: 使用者偏好區段（PreferenceMemoryPlugin 產出）
 ) -> str:
     mutation_history = mutation_history or []
     key_lines = _extract_key_error_lines(eval_output, max_lines=20)
@@ -230,6 +230,8 @@ def build_correction_message(
 
     return (
         f"{goal_section}"
+        # F-C1：使用者偏好插於總目標後、失敗細節前（ADR-AGT-003 L3 唯讀注入）
+        f"{preferences_section}"
         f"## 失敗步驟\n{step_id}: {task_name}\n\n"
         f"{task_context}"
         f"{file_snapshot}"
@@ -406,7 +408,7 @@ def build_evolution_message(
     step_prompt: str,
     failure_summary: str,
     escalation_reasoning: str,
-    global_goal: Optional[str] = None,  # Gap-022-A：注入總目標，防止演化步驟語意漂移
+    global_goal: str | None = None,  # Gap-022-A：注入總目標，防止演化步驟語意漂移
 ) -> str:
     """Gap-016 / Gap-022-A：組裝 AI 驅動演化提議的 user message（含 global_goal 約束）。"""
     goal_section = f"## 系統總目標（演化提議必須對齊此目標）\n{global_goal}\n\n" if global_goal else ""

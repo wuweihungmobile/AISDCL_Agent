@@ -1,7 +1,7 @@
 # AutoClaude 完整使用與架構手冊
 
-> **手冊版本**：1.0.0　｜　**最後更新**：2026-06-12　｜　**對應里程碑**：SD_Improving_09 W3（R61）
-> **套件版本**（`pyproject.toml`）：0.1.0　｜　**測試基線**：2,732 passed / 122 skipped（R61，pytest-randomly 未啟用，順序由 collection 確定）
+> **手冊版本**：1.1.0　｜　**最後更新**：2026-06-13　｜　**對應里程碑**：AutoClaude_Improving_012 Phase 1（記憶基座）
+> **套件版本**（`pyproject.toml`）：0.1.0　｜　**測試基線**：2,931 passed / 122 skipped（2026-06-13 實測，pytest-randomly 未啟用，順序由 collection 確定）
 > **平台**：Windows 11（主要）/ macOS 13+ / Linux（次要）；PostgreSQL DB 主機支援 Windows 11 與 Linux
 
 > **適用範圍**：本手冊涵蓋 AutoClaude 唯一現役引擎 — **微核心化 PlaybookKernel（多步驟 DAG 狀態機）**。
@@ -68,6 +68,7 @@ INIT → CONTEXT_NEGOTIATION → EXECUTE(step N) → EVALUATE
 | SD_07 | ADR-SD07-001 LOC 分級政策；肥胖檔案二度拆解；6 大議題 e2e；PlaybookResult → KernelResult 物理拔除 |
 | SD_08 | 文件治理（CLAUDE.md ≤ 400）+ 可觀測性（IObservabilityPort）+ mutation/perf baseline + 5 條 ADR |
 | SD_09 | PG production SOP 落地評估 + 三個觀察期本地 nightly 採集 + W3 zero-trust audit 連 38 輪（R24~R61）|
+| Improving_012 | Agentic 三大能力 gap 分析（SCG-0 凍結）+ Phase 1 記憶基座（F-C3/F-C1/F-C2，2026-06-13）|
 
 > 完整 Sprint 脈絡見 [sprint_history.md](../05_development/sprint_history.md)；架構決策見 [ADR/](ADR/)（SD06~SD09 共 17 條）。
 
@@ -75,7 +76,7 @@ INIT → CONTEXT_NEGOTIATION → EXECUTE(step N) → EVALUATE
 
 ## 2. 微核心架構
 
-AutoClaude 採 **Hexagonal Architecture（六角架構）**：核心領域（Kernel）不依賴具體基礎設施，所有外部互動透過 **9 個 Port（介面）** 與 **EventBus** 解耦；具體實作為 **infra adapters**，可變行為由 **plugins** 透過 hook 注入。
+AutoClaude 採 **Hexagonal Architecture（六角架構）**：核心領域（Kernel）不依賴具體基礎設施，所有外部互動透過 **12 個 Port（介面）** 與 **EventBus** 解耦；具體實作為 **infra adapters**，可變行為由 **plugins** 透過 hook 注入。
 
 ```
 autoclaude/
@@ -85,12 +86,12 @@ autoclaude/
 │   ├── kernel_state.py             # KernelResult（SSOT，取代 PlaybookResult）
 │   ├── event_bus.py / hookspec.py / wiring.py
 │   ├── orchestration/              # OrchestrationCoordinator（SD_06 W1）
-│   ├── ports/                      # 9 ports（見下表）
+│   ├── ports/                      # 12 ports（見下表）
 │   └── services/                   # mutation/ + auto_resume.py + _auto_resume_metrics.py
 ├── infra/                           # 基礎設施層
 │   ├── adapters/                   # MinimaxBrain / PtyExecutor / ShellEvaluator / observability/
 │   └── repositories/               # factory.py + 3 後端（File / InMemory / PG）+ Dual
-├── plugins/                         # 13 active / 14 靜態（hotkey 條件式註冊）
+├── plugins/                         # 16 active / 17 靜態（hotkey 條件式註冊）
 ├── models/                          # Playbook / Decision / Escalation / StepMutation
 ├── perception/                      # PTY wrapper / StreamReader / hotkey
 ├── decision/                        # MinimaxClient / PromptBuilder
@@ -102,7 +103,7 @@ autoclaude/
                                      # token_tracker / knowledge_base / trace_context
 ```
 
-### 2.1 9 個 Port（`autoclaude/core/ports/`）
+### 2.1 12 個 Port（`autoclaude/core/ports/`）
 
 | Port | 職責 | 預設 adapter |
 |------|------|--------------|
@@ -115,12 +116,15 @@ autoclaude/
 | `embedder` | 文字向量化（pgvector 選配）| — |
 | `vector_search` | 語意檢索（HNSW）| `PgMemoryStore` |
 | `observability` | 結構化 metric / log（SD_08 W4）| `LocalLogger` / `NullObservability` |
+| `spec_source` | SDD 規格來源 → Playbook（AutoSDD W1）| `SddToPlaybookAdapter` |
+| `kb_metric_store` | KB metrics 跨 session 持久化（F-C3，ADR-SD09-006）| `LocalKbMetricStore`（jsonl）/ `PgKbMetricStore` |
+| `preference_store` | 使用者偏好記憶（F-C1，ADR-AGT-003）| `FilePreferenceStore` / `PgPreferenceStore` |
 
-### 2.2 13 個 Plugin（按 `wiring._REGISTER_ORDER`）
+### 2.2 16 個 Plugin（按 `wiring._REGISTER_ORDER`）
 
-`pre_run_validator` → `hotkey` → `cross_step_validator` → `token_guard` → `global_goal_anchor` → `playbook_persistence` → `fast_path` → `notification` → `knowledge_base` → `goal_synthesis` → `convergence` → `evolution` → `goto_counter` → `checkpoint`（14 靜態含條件式註冊的 hotkey）。
+`pre_run_validator` → `hotkey` → `cross_step_validator` → `token_guard` → `global_goal_anchor` → `playbook_persistence` → `sdd_governance` → `fast_path` → `notification` → `knowledge_base` → `preference_memory` → `goal_synthesis` → `goal_progress` → `convergence` → `evolution` → `goto_counter` → `checkpoint`（17 靜態含條件式註冊的 hotkey）。
 
-**Plugin 鐵律**（由 `.importlinter` 強制）：Plugin 之間**不可互相 import**，協作一律走 EventBus；Plugin 不得直接 import infra 或 `utils.observability` helpers（須走 `IObservabilityPort`）。
+**Plugin 鐵律**（由 `.importlinter` 強制）：Plugin 之間**不可互相 import**，協作一律走 EventBus；Plugin 不得直接 import infra 或 `utils.observability` helpers（須走 `IObservabilityPort`）；Plugin 不得直接 import `IKbMetricStore`（須走 FailureKnowledgeBase routing，Rule 8）。
 
 ### 2.3 新增 Plugin 的 SOP
 
@@ -502,6 +506,16 @@ Level 5 自治的核心：失敗不只重試，還能**改寫步驟序列**與**
 - **CrossStepValidator**：步驟切換前以 `git status` 偵測污染（> 5 個修改未確認時警告）。
 - **Meta-learning（FailureKnowledgeBase）**：跨 session 記錄成功策略（透過 `memory_store` port）。
 
+### 11.4 記憶基座（Improving_012 Phase 1）
+
+2026-06-13 落地的三項跨 session 記憶能力（經 SCG-1/SCG-2 人工確認）：
+
+- **F-C3 KB metrics 跨 session 持久化**（`kb_metric_store` port，ADR-SD09-006）：KB metric 重啟不清零；`yaml_only` 模式寫 `.kb_metrics_local.jsonl`，`both` / `db_only` 模式寫 `kb_metrics` 表；於 POST_RUN flush。
+- **F-C1 使用者偏好**（`preference_memory` plugin + `preference_store` port，ADR-AGT-003）：偏好存於 `preferences.jsonl` / `user_preferences` 表；`config.yaml` 可選 `preferences:` 區段做 seed；PRE_CORRECTION 時將偏好注入 correction prompt 的 `## 使用者偏好` 區段（上限 10 鍵）。
+- **F-C2 GoalProgressLedger**（`goal_progress` plugin）：進度存於 `goal_progress.jsonl` / `goal_progress` 表；POST_RUN 記錄當次結果，`goal_task_id` 缺漏時以 `project:{name}` fallback；`summarize()` 提供跨 run 彙總。
+
+> 規格與決策詳見 [SRD_AGT_Phase1_Memory.md](../02_architecture/SRD_AGT_Phase1_Memory.md)、[ADR-AGT-003-memory-layering.md](ADR/ADR-AGT-003-memory-layering.md)、[AutoClaude_Improving_012.md](AutoClaude_Improving_012.md)。
+
 ---
 
 ## 12. 可觀測性
@@ -510,7 +524,7 @@ SD_08 W4 落地 **IObservabilityPort**（ADR-SD08-004），核心領域不依賴
 
 - **adapter**：`LocalLogger`（結構化 JSON log）/ `NullObservability`（未注入時 fallback，避免 None check 散落）。
 - **trace_id**：`utils/trace_context.py` 以 `ContextVar` 傳遞 trace_id，跨步驟串接（ADR-SD09-004 支援多進程）。
-- **KB metric 4 項**：knowledge_base 命中/未命中/預播種/回退兜底等指標。
+- **KB metric 4 項**：knowledge_base 命中/未命中/預播種/回退兜底等指標（Improving_012 Phase 1 起跨 session 持久化，見 §11.4 F-C3）。
 - **Plugin 約束**（importlinter Rule 7）：Plugin 不得直接 import `utils.observability` helpers，須走 `IObservabilityPort`。
 
 Kernel 透過 `kernel.observability` property 對外暴露，供 Coordinator / AutoResume 讀取。
@@ -635,7 +649,7 @@ $env:AUTOCLAUDE_ALLOW_INSECURE_DB = "1"      # PowerShell
 export AUTOCLAUDE_MIGRATE_DSN="postgresql://koala:koala5@192.168.1.133/aisdlc"
 export AUTOCLAUDE_ALLOW_INSECURE_DB=1
 alembic upgrade head
-alembic current   # 應顯示 0004_pgvector
+alembic current   # 應顯示 0016_agt_phase1_memory（Improving_012 Phase 1：kb_metrics / user_preferences / goal_progress 三新表）
 ```
 
 ### 15.6 pgvector 語意查詢（選配）
@@ -666,7 +680,7 @@ result = store.query("ModuleNotFoundError: No module named 'foo'")   # 精確文
 
 工具：`tools/check_loc_budget.py`（baseline 永久鎖定）；Hook `loc_budget_check.py`（PostToolUse warn / CLAUDE.md > 400 行 exit 2 阻斷）。當前 LOC violations = **0**。
 
-### 16.2 importlinter（7 kept / 0 broken）
+### 16.2 importlinter（8 kept / 0 broken）
 
 1. Plugins 不得 import 其他 plugins（改用 EventBus）
 2. `autoclaude.core`（除 wiring）不得依賴 execution / infra
@@ -675,6 +689,7 @@ result = store.query("ModuleNotFoundError: No module named 'foo'")   # 精確文
 5. Executor 模組不得 import Brain 模組（改用 EventBus）
 6. playbook_runner / strategy 模組不得 import checkpoint internal（改用 CheckpointPlugin public API）
 7. Plugins 不得直接 import `utils.observability` helpers（改用 IObservabilityPort）
+8. Plugins 不得直接 import `IKbMetricStore`（改用 FailureKnowledgeBase routing，Improving_012 Phase 1）
 
 ### 16.3 mutation / perf nightly（本地採集）
 
@@ -750,7 +765,7 @@ python tests/fixtures/dummy_cli.py    # 搭配 tests/fixtures/mock_playbook.yaml
 ### 18.3 測試指令
 
 ```bash
-python -m pytest tests/ -q                      # 全部（基線 2,732 passed / 122 skipped）
+python -m pytest tests/ -q                      # 全部（基線 2,931 passed / 122 skipped）
 python -m pytest tests/test_playbook_runner.py -v
 python -m pytest tests/test_decision.py -v      # MinimaxClient + StepMutation
 python -m pytest tests/test_gap009.py -v        # Gap-009 ~ Gap-011 整合驗證
@@ -764,6 +779,14 @@ python -m pytest tests/plugins/ tests/core/ tests/infra/ -q
 ---
 
 ## 19. 變更紀錄
+
+### v1.1.0（2026-06-13，Improving_012 Phase 1 記憶基座）
+
+- 新增 §11.4 記憶基座：F-C3 KB metrics 跨 session 持久化 / F-C1 使用者偏好 / F-C2 GoalProgressLedger。
+- Ports 9 → 12（新增 `kb_metric_store` / `preference_store` / `spec_source`）；Plugins 13 → 16 active / 17 靜態（新增 `sdd_governance` / `preference_memory` / `goal_progress`）。
+- importlinter 7 → 8 條 contract（Rule 8：Plugin 不得直接 import `IKbMetricStore`）。
+- alembic 最新 revision：`0016_agt_phase1_memory`（kb_metrics / user_preferences / goal_progress 三新表）。
+- 測試基線更新：2,931 passed / 122 skipped（2026-06-13 實測）。
 
 ### v1.0.0（2026-06-12，本手冊重寫）
 
@@ -788,5 +811,5 @@ python -m pytest tests/plugins/ tests/core/ tests/infra/ -q
 
 ---
 
-> **文檔元數據**：v1.0.0 ｜ 重建於 2026-06-12 ｜ 對應 SD_Improving_09 W3（R61）｜ 適用 AutoClaude（套件 0.1.0，微核心架構）
+> **文檔元數據**：v1.1.0 ｜ 最後更新 2026-06-13 ｜ 對應 AutoClaude_Improving_012 Phase 1（記憶基座）｜ 適用 AutoClaude（套件 0.1.0，微核心架構）
 > **SSOT 提醒**：架構細節（Plugin / Port / LOC tiers / importlinter rules）以 [CLAUDE.md](../../CLAUDE.md) 的 `[Architecture Snapshot]`（`tools/snapshot_sync.py` 自動生成）為單一真相；本手冊如與其牴觸，以 Snapshot 為準。

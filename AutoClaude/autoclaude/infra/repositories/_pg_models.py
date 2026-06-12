@@ -10,7 +10,13 @@ from __future__ import annotations
 
 try:
     from sqlalchemy import (
-        Column, ForeignKey, Index, Integer, String, Text, Float, CheckConstraint,
+        CheckConstraint,
+        Column,
+        Float,
+        ForeignKey,
+        Index,
+        Integer,
+        Text,
     )
     from sqlalchemy.dialects.postgresql import ARRAY, JSONB, TIMESTAMP, UUID
     from sqlalchemy.orm import DeclarativeBase
@@ -74,7 +80,9 @@ class CheckpointRow(Base):
         升級為 ``TIMESTAMPTZ``，並補 ``DEFAULT now()``）。
     """
     __tablename__ = "checkpoints"
-    checkpoint_id = Column(UUID(as_uuid=True), primary_key=True, server_default=func.gen_random_uuid())
+    checkpoint_id = Column(
+        UUID(as_uuid=True), primary_key=True, server_default=func.gen_random_uuid(),
+    )
     run_id = Column(UUID(as_uuid=True), ForeignKey("playbook_runs.run_id"), nullable=False)
     playbook_id = Column(Text, nullable=False)
     step_idx = Column(Integer, nullable=False)
@@ -107,7 +115,9 @@ class KnowledgeEntry(Base):
     outcome = Column(Text, nullable=False)
     recorded_at = Column(TIMESTAMP(timezone=True), nullable=False, server_default=func.now())
     # pgvector 選配欄位（nullable，向下相容；需安裝 pgvector extension + Python pgvector 套件）
-    embedding = Column(Vector(1536), nullable=True) if _PGVECTOR_AVAILABLE else None  # type: ignore[assignment]
+    embedding = (  # type: ignore[assignment]
+        Column(Vector(1536), nullable=True) if _PGVECTOR_AVAILABLE else None
+    )
     __table_args__ = (
         CheckConstraint("outcome IN ('success', 'escalation')", name="ck_kb_outcome"),
         Index("idx_kb_signature", "error_class", "error_signature"),
@@ -182,4 +192,55 @@ class ConfigAuditLogRow(Base):
             name="ck_config_audit_action",
         ),
         Index("idx_config_audit_field", "field_path", "changed_at"),
+    )
+
+
+class KbMetricRow(Base):
+    """F-C3 / ADR-SD09-006 §2.3：KB metrics 跨 session 快照 ORM。
+
+    對應 alembic 0016_agt_phase1_memory（append-only；[start, end) 半開區間）。
+    """
+    __tablename__ = "kb_metrics"
+    metric_id = Column(UUID(as_uuid=True), primary_key=True, server_default=func.gen_random_uuid())
+    metric_name = Column(Text, nullable=False)
+    value = Column(Float, nullable=False)
+    window_start_at = Column(TIMESTAMP(timezone=True), nullable=False)
+    window_end_at = Column(TIMESTAMP(timezone=True), nullable=False)
+    run_id = Column(UUID(as_uuid=True), nullable=True)
+    tags = Column(JSONB, nullable=True, server_default="{}")
+    recorded_at = Column(TIMESTAMP(timezone=True), nullable=False, server_default=func.now())
+    __table_args__ = (
+        Index("idx_kb_metrics_name_window", "metric_name", "window_end_at"),
+    )
+
+
+class UserPreferenceRow(Base):
+    """F-C1 / ADR-AGT-003 L3：使用者偏好 ORM（UPSERT by (scope, key)）。
+
+    對應 alembic 0016_agt_phase1_memory。
+    """
+    __tablename__ = "user_preferences"
+    scope = Column(Text, primary_key=True)
+    key = Column(Text, primary_key=True)
+    value = Column(Text, nullable=False)
+    updated_at = Column(TIMESTAMP(timezone=True), nullable=False, server_default=func.now())
+
+
+class GoalProgressRow(Base):
+    """F-C2 / ADR-AGT-003 L4：目標進度 ledger ORM（append-only）。
+
+    對應 alembic 0016_agt_phase1_memory。
+    """
+    __tablename__ = "goal_progress"
+    progress_id = Column(
+        UUID(as_uuid=True), primary_key=True, server_default=func.gen_random_uuid(),
+    )
+    goal_task_id = Column(Text, nullable=False)
+    playbook_id = Column(Text, nullable=True)
+    run_id = Column(UUID(as_uuid=True), nullable=True)
+    completed_features = Column(JSONB, nullable=False, server_default="[]")
+    progress_pct = Column(Float, nullable=True)
+    recorded_at = Column(TIMESTAMP(timezone=True), nullable=False, server_default=func.now())
+    __table_args__ = (
+        Index("idx_goal_progress_goal", "goal_task_id", "recorded_at"),
     )

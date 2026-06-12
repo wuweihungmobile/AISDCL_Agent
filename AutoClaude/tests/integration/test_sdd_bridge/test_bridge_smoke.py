@@ -9,7 +9,7 @@ wire_plugins_with_registry 真組裝。
 """
 from __future__ import annotations
 
-from typing import Optional
+import re
 
 import yaml
 
@@ -22,9 +22,7 @@ from autoclaude.models.playbook import Playbook
 from autoclaude.plugins.sdd_governance_plugin import SddGovernancePlugin
 from autoclaude.tools.sdd_compile import main as sdd_compile_main
 from autoclaude.utils.config import AppConfig
-
 from tests.infra.test_sdd_to_playbook_adapter import _write_fsm_state, _write_spec
-import re
 
 
 class _RegexExecutor:
@@ -43,7 +41,7 @@ class _RegexExecutor:
 class _RegexOnlyEvaluator:
     """只跑 regex 雙重驗證第一層（evaluator_command 留給真實環境）。"""
 
-    def evaluate(self, task, output) -> tuple[Optional[str], str, int]:
+    def evaluate(self, task, output) -> tuple[str | None, str, int]:
         if task.expected_output_regex and not re.search(
                 task.expected_output_regex, output):
             return f"regex 不符: {task.expected_output_regex}", output[-200:], 1

@@ -7,22 +7,22 @@ Minimax API 客戶端。
 - Gap-008-D：Hallucination Guard，驗證 correction_prompt 品質。
 """
 from __future__ import annotations
+
 import json
 import logging
 import re
 import time
-from typing import Optional
 
 import httpx
 
-from ..models.decision import CorrectionDecision, GoalAchievementDecision, EvolutionDecision
+from ..models.decision import CorrectionDecision, EvolutionDecision, GoalAchievementDecision
 from .prompt_builder import (
-    build_correction_system_prompt,
-    build_correction_message,
-    GOAL_VALIDATION_SYSTEM_PROMPT,
     EVOLUTION_SYSTEM_PROMPT,
-    build_goal_validation_message,
+    GOAL_VALIDATION_SYSTEM_PROMPT,
+    build_correction_message,
+    build_correction_system_prompt,
     build_evolution_message,
+    build_goal_validation_message,
 )
 
 logger = logging.getLogger("autoclaude.decision")
@@ -109,7 +109,7 @@ class MinimaxClient:
         step_id: str,
         task_name: str,
         task_prompt: str,
-        expected_regex: Optional[str],
+        expected_regex: str | None,
         failure_reason: str,
         eval_output: str,
         retry_count: int,
@@ -118,12 +118,14 @@ class MinimaxClient:
         convergence_reasoning: str = "",
         strategy_hint: str = "",
         error_class: str = "unknown",
-        last_correction_prompt: str = "",  # Gap-008-D：前次修正 prompt，供 Hallucination Guard 去重比對
-        task_goal_summary: Optional[str] = None,  # Gap-010-B：任務目標摘要（高重試時取代完整 prompt）
-        global_goal: Optional[str] = None,         # Gap-011-A：自治系統總目標
+        # Gap-008-D：前次修正 prompt，供 Hallucination Guard 去重比對
+        last_correction_prompt: str = "",
+        task_goal_summary: str | None = None,  # Gap-010-B：任務目標摘要（高重試時取代完整 prompt）
+        global_goal: str | None = None,         # Gap-011-A：自治系統總目標
         allow_step_mutation: bool = False,          # Gap-011-B：是否允許 Minimax 提議步驟變異
-        mutation_history: Optional[list[str]] = None,  # Gap-013-D：本步驟已執行的突變歷史
+        mutation_history: list[str] | None = None,  # Gap-013-D：本步驟已執行的突變歷史
         mutation_pressure: int = 0,                 # Gap-032：突變壓力等級 0-3
+        preferences_section: str = "",              # F-C1：使用者偏好區段
     ) -> CorrectionDecision:
         mutation_history = mutation_history or []
         system_prompt = build_correction_system_prompt(allow_step_mutation)  # Gap-011-B
@@ -144,6 +146,7 @@ class MinimaxClient:
             global_goal=global_goal,               # Gap-011-A
             mutation_history=mutation_history,     # Gap-013-D
             mutation_pressure=mutation_pressure,   # Gap-032
+            preferences_section=preferences_section,  # F-C1
         )
         raw = self._call_with_retry(system_prompt, user_msg)
         try:
@@ -162,7 +165,8 @@ class MinimaxClient:
                 task_goal_summary=decision.task_goal_summary,
                 step_mutation=decision.step_mutation,  # Gap-011-B：截斷時保留 step_mutation
             )
-        # Gap-008-D：Hallucination Guard — 驗證品質，不通過時記錄警告（不阻斷，由 ConvergenceMonitor 處理）
+        # Gap-008-D：Hallucination Guard — 驗證品質，不通過時記錄警告
+        # （不阻斷，由 ConvergenceMonitor 處理）
         previous_prompts = [last_correction_prompt] if last_correction_prompt else []
         is_valid, quality_reason = _validate_correction_quality(
             decision.correction_prompt, previous_prompts
@@ -263,7 +267,7 @@ class MinimaxClient:
         step_prompt: str,
         failure_summary: str,
         escalation_reasoning: str,
-        global_goal: Optional[str] = None,  # Gap-022-B：總目標約束，防演化步驟語意漂移
+        global_goal: str | None = None,  # Gap-022-B：總目標約束，防演化步驟語意漂移
     ) -> EvolutionDecision:
         """
         Gap-016-B / Gap-022-B：諮詢 Minimax 提議 Playbook 演化策略（含 global_goal 約束）。

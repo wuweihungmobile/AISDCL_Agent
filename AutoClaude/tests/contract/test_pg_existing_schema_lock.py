@@ -22,7 +22,6 @@ import os
 
 import pytest
 
-
 # ─────────────────────────────────────────────────────────────
 # Baseline DDL snapshot（2026-05-16 鎖定 → 2026-05-18 SD_06 W5 擴張）
 # ─────────────────────────────────────────────────────────────
@@ -30,7 +29,9 @@ import pytest
 BASELINE_TABLES = {"playbook_runs", "checkpoints", "knowledge_entries", "playbook_versions"}
 # SD_06 W5 新增 2 表（drift_log + config_audit_log；對應 alembic 0013 + 0014）
 SD06_W5_TABLES = {"drift_log", "config_audit_log"}
-EXPECTED_TABLES = BASELINE_TABLES | SD06_W5_TABLES
+# Improving_012 Phase 1 新增 3 表（F-C3/F-C1/F-C2；對應 alembic 0016；SCG-1 凍結）
+AGT_PHASE1_TABLES = {"kb_metrics", "user_preferences", "goal_progress"}
+EXPECTED_TABLES = BASELINE_TABLES | SD06_W5_TABLES | AGT_PHASE1_TABLES
 
 EXPECTED_COLUMNS: dict[str, set[str]] = {
     "playbook_runs": {
@@ -62,6 +63,16 @@ EXPECTED_COLUMNS: dict[str, set[str]] = {
         "audit_id", "changed_at", "user_id", "layer", "field_path",
         "old_value", "new_value", "action", "reason",
     },
+    # Improving_012 Phase 1（alembic 0016）
+    "kb_metrics": {
+        "metric_id", "metric_name", "value", "window_start_at",
+        "window_end_at", "run_id", "tags", "recorded_at",
+    },
+    "user_preferences": {"scope", "key", "value", "updated_at"},
+    "goal_progress": {
+        "progress_id", "goal_task_id", "playbook_id", "run_id",
+        "completed_features", "progress_pct", "recorded_at",
+    },
 }
 
 EXPECTED_PRIMARY_KEYS: dict[str, set[str]] = {
@@ -72,6 +83,10 @@ EXPECTED_PRIMARY_KEYS: dict[str, set[str]] = {
     # drift_log 為 partitioned table，PK = (drift_id, detected_at)
     "drift_log": {"drift_id", "detected_at"},
     "config_audit_log": {"audit_id"},
+    # Improving_012 Phase 1：user_preferences 採複合 PK（UPSERT by (scope, key)）
+    "kb_metrics": {"metric_id"},
+    "user_preferences": {"scope", "key"},
+    "goal_progress": {"progress_id"},
 }
 
 EXPECTED_NOT_NULL: dict[str, set[str]] = {
@@ -99,6 +114,15 @@ EXPECTED_NOT_NULL: dict[str, set[str]] = {
     "config_audit_log": {
         "audit_id", "changed_at", "layer", "field_path", "action",
     },
+    # Improving_012 Phase 1
+    "kb_metrics": {
+        "metric_id", "metric_name", "value", "window_start_at",
+        "window_end_at", "recorded_at",
+    },
+    "user_preferences": {"scope", "key", "value", "updated_at"},
+    "goal_progress": {
+        "progress_id", "goal_task_id", "completed_features", "recorded_at",
+    },
 }
 
 EXPECTED_FOREIGN_KEYS: dict[str, set[tuple[str, str, str]]] = {
@@ -110,6 +134,10 @@ EXPECTED_FOREIGN_KEYS: dict[str, set[tuple[str, str, str]]] = {
     # drift_log.run_id 為 nullable，不建 FK（避免 partition + FK 衝突）
     "drift_log": set(),
     "config_audit_log": set(),
+    # Improving_012 Phase 1：run_id 皆 nullable 留痕欄位，不建 FK（與 drift_log 同理）
+    "kb_metrics": set(),
+    "user_preferences": set(),
+    "goal_progress": set(),
 }
 
 EXPECTED_INDEX_NAMES: dict[str, set[str]] = {
@@ -119,6 +147,10 @@ EXPECTED_INDEX_NAMES: dict[str, set[str]] = {
     "playbook_versions": {"idx_pv_playbook"},
     "drift_log": {"idx_drift_log_playbook"},
     "config_audit_log": {"idx_config_audit_field"},
+    # Improving_012 Phase 1
+    "kb_metrics": {"idx_kb_metrics_name_window"},
+    "user_preferences": set(),
+    "goal_progress": {"idx_goal_progress_goal"},
 }
 
 EXPECTED_CHECK_CONSTRAINT_NAMES: dict[str, set[str]] = {
@@ -128,6 +160,10 @@ EXPECTED_CHECK_CONSTRAINT_NAMES: dict[str, set[str]] = {
     "playbook_versions": set(),
     "drift_log": {"ck_drift_severity"},
     "config_audit_log": {"ck_config_audit_layer", "ck_config_audit_action"},
+    # Improving_012 Phase 1：無 CHECK constraint
+    "kb_metrics": set(),
+    "user_preferences": set(),
+    "goal_progress": set(),
 }
 
 
@@ -305,6 +341,7 @@ class TestCRUDBehaviorSnapshot:
     def test_playbook_runs_status_check_constraint(self):
         """status 必須在 {running, success, escalated, halted, interrupted} 集合內。"""
         import asyncio
+
         from sqlalchemy import text
 
         async def _run():
@@ -321,6 +358,7 @@ class TestCRUDBehaviorSnapshot:
     def test_kb_outcome_check_constraint(self):
         """outcome 必須在 {success, escalation} 集合內。"""
         import asyncio
+
         from sqlalchemy import text
 
         async def _run():
@@ -338,6 +376,7 @@ class TestCRUDBehaviorSnapshot:
     def test_checkpoint_run_id_uniqueness_enforced(self):
         """idx_ck_run_id UNIQUE 強制：同一 run_id 不可有兩筆 checkpoint。"""
         import asyncio
+
         from sqlalchemy import text
 
         async def _run():
@@ -377,6 +416,7 @@ class TestCRUDBehaviorSnapshot:
     def test_playbook_versions_self_fk_chain(self):
         """playbook_versions.parent_version_id 可形成版本鏈（自參考 FK）。"""
         import asyncio
+
         from sqlalchemy import text
 
         async def _run():

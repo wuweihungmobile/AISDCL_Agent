@@ -15,6 +15,13 @@ LOG_FILE="${LOG_FILE:-mutation_token_guard.log}"
 MODULE_PATH="${MODULE_PATH:-autoclaude/plugins/token_guard}"
 TESTS_DIR="${TESTS_DIR:-tests/plugins/token_guard}"
 
+# P1-R62-7 修復（2026-06-13，紀律 #18）：LOG_FILE 正規化為絕對路徑（落 /workspace），
+# 因後續 mutmut 改在隔離樹 /tmp/mutwork 執行（cd 後相對路徑會寫錯位置）。
+case "${LOG_FILE}" in
+  /*) : ;;
+  *) LOG_FILE="/workspace/${LOG_FILE}" ;;
+esac
+
 # SD_09 W2 zero-trust audit P0-AUDIT-01 修復：log 一律 append，不再以末段 `>` 一次覆寫；
 # 先用 truncate 清空 LOG_FILE，確保開頭乾淨 + 後續 pip/mutmut 錯誤訊息能保留。
 : > "${LOG_FILE}"
@@ -28,6 +35,30 @@ echo "[run_mutmut_in_docker] $(date -u +%FT%TZ) module=${MODULE_PATH} tests=${TE
 #    導致 ERROR collecting → mutmut baseline 直接 abort，無法產出真實 mutant 統計。
 #    故需安裝所有 import 相依的 extras：dev / postgres / pgvector / lint。
 #    notifications extras 含 win10toast（Windows only），且 nightly Docker 為 Linux 不需要，故省略。
+# P1-R62-7 修復（2026-06-13，紀律 #18 — mutation 隔離樹）：
+# mutmut 2.4.3 會「就地改寫」--paths-to-mutate 的真實源碼檔（變異→測→還原）。
+# volume-mount 下這會突變主機工作樹：與主機並行 pytest / audit 互踩產生假紅，
+# mutmut 中途被 kill 時變異源碼更可能殘留磁碟。
+# 修法：把源碼 tar 複製到 container 內 ephemeral 隔離樹 /tmp/mutwork，
+# editable install + mutmut 全程在隔離樹執行；輸出物（log / backlog / cache）
+# 仍寫回 /workspace 維持 nightly 取證鏈相容。主機樹全程零寫入。
+MUTWORK=/tmp/mutwork
+rm -rf "${MUTWORK}"
+mkdir -p "${MUTWORK}"
+tar -C /workspace \
+  --exclude=.git --exclude=logs --exclude=backups --exclude=checkpoints \
+  --exclude=.pytest_cache --exclude=.mutmut-cache --exclude='__pycache__' \
+  -cf - . | tar -C "${MUTWORK}" -xf -
+TAR_RC=$?
+if [ "${TAR_RC}" -ne 0 ]; then
+  echo "[run_mutmut_in_docker] 隔離樹複製失敗 exit=${TAR_RC}" | tee -a "${LOG_FILE}"
+  exit "${TAR_RC}"
+fi
+cd "${MUTWORK}" || exit 5
+echo "[run_mutmut_in_docker] isolated worktree ready: ${MUTWORK}（主機樹零就地突變，紀律 #18）" | tee -a "${LOG_FILE}"
+
+# editable install 必須指向隔離樹（否則 mutmut 突變 /tmp/mutwork 而 pytest
+# import /workspace 版 → 全 survived 假象）
 pip install --quiet -e ".[dev,postgres,pgvector,lint]" "mutmut==2.4.3"
 PIP_EXIT=$?
 if [ "${PIP_EXIT}" -ne 0 ]; then
@@ -68,7 +99,9 @@ echo "[run_mutmut_in_docker] mutmut version OK: 2.4.3" | tee -a "${LOG_FILE}"
 # 移除舊 .mutmut-cache / .pytest_cache 避免：
 #   (a) baseline crash → results 從過期 cache 撈舊資料 → 假 pass
 #   (b) pytest fixture cache 殘留前次假象
-rm -rf /workspace/.mutmut-cache /workspace/.pytest_cache
+# 隔離樹（cwd=/tmp/mutwork）為全新複本本就無 cache；/workspace 殘留 cache 一併清，
+# 確保後續 cp 回寫的 cache 是本次 fresh run 的單一真相
+rm -rf "${MUTWORK}/.mutmut-cache" "${MUTWORK}/.pytest_cache" /workspace/.mutmut-cache /workspace/.pytest_cache
 echo "[run_mutmut_in_docker] cache cleared (.mutmut-cache + .pytest_cache) — forcing fresh baseline" | tee -a "${LOG_FILE}"
 
 RUNNER_CMD="python -m pytest -x --rootdir=${TESTS_DIR} -c /dev/null ${TESTS_DIR}"
@@ -103,7 +136,7 @@ fi
 echo "[run_mutmut_in_docker] querying mutmut cache for full counts..."
 python3 - >"${LOG_FILE}.header" 2>"${LOG_FILE}.headerr" <<'PYEOF'
 import sqlite3, os, sys
-path = "/workspace/.mutmut-cache"
+path = "/tmp/mutwork/.mutmut-cache"  # P1-R62-7：cache 在隔離樹（紀律 #18）
 if not os.path.exists(path) or not os.path.isfile(path):
     sys.stderr.write(f"cache file not found: {path}\n")
     sys.exit(1)
@@ -159,11 +192,19 @@ echo "[run_mutmut_in_docker] log written exit=${RESULTS_RC} log_bytes=$(wc -c < 
 #      → classify_diff 全進 "other" → backlog 全 38 個 mutation 都被分類 "other"。
 #      改：在 container 內（mutmut 可用）跑 mutation_analysis.py，產出真實分類 backlog。
 echo "[run_mutmut_in_docker] running mutation_analysis.py inside container (P0-2 fix)..."
+# cwd=/tmp/mutwork（mutmut show 需要 cwd 有 .mutmut-cache）；LOG_FILE 已為絕對路徑
 python3 /workspace/tools/mutation_analysis.py token_guard \
-  --log "/workspace/${LOG_FILE}" \
+  --log "${LOG_FILE}" \
   --output /workspace/mutation_backlog_token_guard.md
 ANALYSIS_RC=$?
 echo "[run_mutmut_in_docker] mutation_analysis exit=${ANALYSIS_RC}" | tee -a "${LOG_FILE}"
+
+# 4.6) P1-R62-7：把隔離樹 cache 複製回 /workspace（保留既有「cache 可回查」行為；
+#      主機樹源碼全程未被觸碰，僅新增此 artifact）
+if [ -f "${MUTWORK}/.mutmut-cache" ]; then
+  cp "${MUTWORK}/.mutmut-cache" /workspace/.mutmut-cache
+  echo "[run_mutmut_in_docker] .mutmut-cache copied back to /workspace（取證可回查）" | tee -a "${LOG_FILE}"
+fi
 
 # 5) stage exit code 決策
 if [ ! -s "${LOG_FILE}" ]; then

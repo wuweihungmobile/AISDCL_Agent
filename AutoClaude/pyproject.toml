@@ -73,6 +73,11 @@ target-version = "py311"
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP"]
 
+[tool.ruff.lint.per-file-ignores]
+# prompt 模板長行為「資料內容」：三引號模板內斷行會改變送往 LLM 的 prompt 語意，
+# E501 對其無意義（Improving_012 Phase 1 ruff 觸碰檔清理決議）
+"autoclaude/decision/prompt_builder.py" = ["E501"]
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 # legacy / xunit1 允許 record_property 寫入 <property> 元素（xunit2 不支援）

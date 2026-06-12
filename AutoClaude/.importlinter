@@ -16,18 +16,26 @@ root_packages =
 [importlinter:contract:plugin-isolation]
 name = Plugins must not import other plugins (use EventBus instead)
 type = independence
+; Improving_012 Phase 1 複驗 P2-2：補齊清單與 wiring._REGISTER_ORDER 對齊
+; （新增 preference_memory/goal_progress + 前置債 fast_path/playbook_persistence/
+;   sdd_governance；AST 級隔離另有 test_plugin_walk_through.py 雙閘門）
 modules =
     autoclaude.plugins.checkpoint_plugin
     autoclaude.plugins.convergence_plugin
     autoclaude.plugins.cross_step_validator_plugin
     autoclaude.plugins.evolution_plugin
+    autoclaude.plugins.fast_path_plugin
     autoclaude.plugins.global_goal_anchor_plugin
+    autoclaude.plugins.goal_progress_plugin
     autoclaude.plugins.goal_synthesis_plugin
     autoclaude.plugins.goto_counter_plugin
     autoclaude.plugins.hotkey_plugin
     autoclaude.plugins.knowledge_base_plugin
     autoclaude.plugins.notification_plugin
+    autoclaude.plugins.playbook_persistence_plugin
     autoclaude.plugins.pre_run_validator_plugin
+    autoclaude.plugins.preference_memory_plugin
+    autoclaude.plugins.sdd_governance_plugin
     autoclaude.plugins.token_guard_plugin
 
 ; Rule 2: pure core modules must not depend on execution or infra layers.
@@ -210,3 +218,27 @@ ignore_imports =
     autoclaude.decision.prompt_builder -> autoclaude.utils.trace_context
     autoclaude.core.services.mutation._conditional_evaluator -> autoclaude.utils.trace_context
     autoclaude.perception.pty_wrapper -> autoclaude.utils.trace_context
+
+; ─────────────────────────────────────────────────────────────
+; Rule 8（F-C3 / ADR-SD09-006 §2.4）：Plugin 不可直接 import IKbMetricStore
+; 與其 adapter；必須經 FailureKnowledgeBase（wiring 注入）路由，
+; 確保 metrics 持久化路徑單一（plugin → KB 物件 → metric_store）。
+[importlinter:contract:no-direct-kb-metric-store-import]
+name = Plugin must not directly import IKbMetricStore (use FailureKnowledgeBase routing)
+type = forbidden
+source_modules =
+    autoclaude.plugins
+forbidden_modules =
+    autoclaude.core.ports.kb_metric_store
+    autoclaude.infra.adapters.pg_kb_metric_store
+    autoclaude.infra.adapters.local_kb_metric_store
+; 合法 transitive 路徑放行（與 Rule 7 ignore_imports 同模式）：
+;   1. utils.knowledge_base 為 aggregator（wiring 注入 metric_store，TYPE_CHECKING
+;      型別宣告 + 物件方法呼叫），plugin 經 KB 物件路由非直接 import
+;   2. repositories.factory 為 storage.mode 路由組裝點（build_kb_metric_store），
+;      checkpoint_manager → factory 為既有 canonical_playbook_id 依賴所拖入
+ignore_imports =
+    autoclaude.utils.knowledge_base -> autoclaude.core.ports.kb_metric_store
+    autoclaude.infra.repositories.factory -> autoclaude.infra.adapters.local_kb_metric_store
+    autoclaude.infra.repositories.factory -> autoclaude.infra.adapters.pg_kb_metric_store
+    autoclaude.infra.adapters.local_kb_metric_store -> autoclaude.core.ports.kb_metric_store

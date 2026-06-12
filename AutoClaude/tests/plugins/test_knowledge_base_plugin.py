@@ -136,3 +136,44 @@ class TestKnowledgeBasePluginErrorSafety:
         # 不應拋例外（純觀察者，異常需吞掉）
         result = plugin.on_event(ctx)
         assert result is None
+
+
+class TestKnowledgeBasePluginPostRunPersist:
+    """F-C3：POST_RUN 必須觸發 KB metrics 持久化（重啟不清零的落地時機）。"""
+
+    def test_post_run_calls_persist_metrics(self):
+        # autospec（QA P2-3）：若 persist_metrics 被改名/移除，本測試於
+        # create_autospec 即紅；plugin 內 try/except 吞 AttributeError，
+        # 普通 MagicMock 抓不到此類漂移
+        from unittest.mock import create_autospec
+
+        from autoclaude.utils.knowledge_base import FailureKnowledgeBase
+
+        kb = create_autospec(FailureKnowledgeBase, instance=True)
+        plugin = KnowledgeBasePlugin(knowledge_base=kb)
+        ctx = HookContext(phase=KernelPhase.POST_RUN, playbook=_pb())
+        plugin.on_event(ctx)
+        kb.persist_metrics.assert_called_once()
+
+    def test_post_run_persist_with_real_kb_writes_backend(self, tmp_path):
+        """真 KB + LocalKbMetricStore 的 plugin 級整合（非 mock 路徑）。"""
+        from autoclaude.infra.adapters.local_kb_metric_store import LocalKbMetricStore
+        from autoclaude.utils.knowledge_base import FailureKnowledgeBase
+
+        store_path = tmp_path / ".kb_metrics_local.jsonl"
+        kb = FailureKnowledgeBase(
+            str(tmp_path / "kb.jsonl"),
+            metric_store=LocalKbMetricStore(str(store_path)),
+        )
+        kb.query("sig")
+        plugin = KnowledgeBasePlugin(knowledge_base=kb)
+        plugin.on_event(HookContext(phase=KernelPhase.POST_RUN, playbook=_pb()))
+        assert store_path.exists()
+
+    def test_post_run_subscribed(self):
+        assert KernelPhase.POST_RUN in KnowledgeBasePlugin().subscribed_phases()
+
+    def test_post_run_without_kb_is_noop(self):
+        plugin = KnowledgeBasePlugin(knowledge_base=None)
+        ctx = HookContext(phase=KernelPhase.POST_RUN, playbook=_pb())
+        assert plugin.on_event(ctx) is None

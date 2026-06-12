@@ -20,7 +20,7 @@ import hashlib
 import logging
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any
 
 from ..core.hookspec import (
     CounterSnapshotResult,
@@ -44,9 +44,9 @@ class SddGovernancePlugin:
 
     def __init__(
         self,
-        brain: Optional[Any] = None,
-        observability: Optional[IObservabilityPort] = None,
-        spec_source: Optional[ISpecSource] = None,
+        brain: Any | None = None,
+        observability: IObservabilityPort | None = None,
+        spec_source: ISpecSource | None = None,
         *,
         escalation_threshold: int = 3,  # 鏡像 SCG-4「同模式 3 次 → SPEC_AUDIT」
     ):
@@ -55,7 +55,7 @@ class SddGovernancePlugin:
         self._spec_source = spec_source
         self._threshold = escalation_threshold
         self._active = False
-        self._spec: Optional[SddSpec] = None
+        self._spec: SddSpec | None = None
         self._gate_of_step: dict[str, str] = {}
         self._at_of_step: dict[str, str] = {}
         self._state: dict = {"scg_gate": None, "fsm_state": None,
@@ -80,7 +80,7 @@ class SddGovernancePlugin:
             KernelPhase.ON_CHECKPOINT_RESTORE,
         ]
 
-    def on_event(self, ctx: HookContext) -> Optional[Any]:
+    def on_event(self, ctx: HookContext) -> Any | None:
         phase = ctx.phase
         if phase == KernelPhase.PRE_RUN:
             return self._on_pre_run(ctx)
@@ -130,7 +130,7 @@ class SddGovernancePlugin:
             self._state["spec_digest"] = restored
 
     # ── phase handlers ─────────────────────────────────────────
-    def _on_pre_run(self, ctx: HookContext) -> Optional[VetoResult]:
+    def _on_pre_run(self, ctx: HookContext) -> VetoResult | None:
         self._active = ctx.playbook.workflow_type in _SDD_WORKFLOWS
         if not self._active or self._spec_source is None:
             return None
@@ -154,7 +154,7 @@ class SddGovernancePlugin:
         self._obs.emit_counter("sdd.scg_gate_pass", tags={"gate": "SPEC_FROZEN"})
         return None
 
-    def _on_pre_attempt(self, ctx: HookContext) -> Optional[VetoResult]:
+    def _on_pre_attempt(self, ctx: HookContext) -> VetoResult | None:
         if ctx.task is None:
             return None
         gate = self._gate_of_step.get(ctx.task.step_id)

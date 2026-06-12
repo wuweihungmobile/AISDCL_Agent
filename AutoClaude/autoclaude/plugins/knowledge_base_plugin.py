@@ -14,7 +14,7 @@
 from __future__ import annotations
 
 import logging
-from typing import Any, Optional
+from typing import Any
 
 from ..core.hookspec import HookContext, KernelPhase
 from ..utils.knowledge_base import FailureKnowledgeBase
@@ -27,7 +27,7 @@ class KnowledgeBasePlugin:
 
     PRIORITY = 50
 
-    def __init__(self, knowledge_base: Optional[FailureKnowledgeBase] = None):
+    def __init__(self, knowledge_base: FailureKnowledgeBase | None = None):
         self._kb = knowledge_base
 
     def name(self) -> str:
@@ -41,9 +41,11 @@ class KnowledgeBasePlugin:
             KernelPhase.ON_SUCCESS,
             KernelPhase.ON_FAILURE,
             KernelPhase.ON_ESCALATION,
+            # F-C3：POST_RUN 觸發 metrics 持久化（IKbMetricStore flush）
+            KernelPhase.POST_RUN,
         ]
 
-    def on_event(self, ctx: HookContext) -> Optional[Any]:
+    def on_event(self, ctx: HookContext) -> Any | None:
         if self._kb is None:
             return None
 
@@ -51,6 +53,13 @@ class KnowledgeBasePlugin:
             self._on_success(ctx)
         elif ctx.phase == KernelPhase.ON_ESCALATION:
             self._on_escalation(ctx)
+        elif ctx.phase == KernelPhase.POST_RUN:
+            # F-C3：run 結束將 metrics 累計 flush 至後端（重啟不清零）。
+            # 經 KB 物件路由，plugin 不直接 import kb_metric_store（Rule 8）。
+            try:
+                self._kb.persist_metrics()
+            except (TypeError, AttributeError) as exc:
+                logger.warning("KnowledgeBasePlugin persist_metrics failed: %s", exc)
         # ON_FAILURE：重試中，不記錄（避免污染統計）
         return None
 

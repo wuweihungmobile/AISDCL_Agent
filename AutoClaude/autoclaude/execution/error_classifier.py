@@ -7,11 +7,13 @@ ErrorClassifier — 對 eval_output 進行語義分類。
   > ASSERTION > TIMEOUT > UNKNOWN
 """
 from __future__ import annotations
-from enum import Enum
+
 import re
+from enum import Enum
 
 
-class ErrorClass(str, Enum):
+# noqa 註記：刻意 str+Enum（KB JSONL / checkpoint 序列化相容；改 StrEnum 破壞既有持久化口徑）
+class ErrorClass(str, Enum):  # noqa: UP042
     SYNTAX      = "syntax"        # SyntaxError / IndentationError
     IMPORT      = "import"        # ImportError / ModuleNotFoundError
     ASSERTION   = "assertion"     # AssertionError / pytest FAILED
