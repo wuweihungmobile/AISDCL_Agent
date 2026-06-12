@@ -1,0 +1,90 @@
+# AutoClaude 設定檔完整範例（W4-T15 m-8 擴充）
+#
+# 用法：
+#   cp config.yaml.example config.local.yaml
+#   python -m autoclaude playbook.yaml --config config.local.yaml
+#
+# 所有區段皆為選填；未列出的欄位將使用 autoclaude/utils/config.py 中的預設值。
+# 各欄位的 Pydantic validator 會在啟動時驗證合法性。
+
+# ── Claude Code CLI 設定 ─────────────────────────────────────────
+claude:
+  command: "claude"
+  extra_args: ["--yes"]
+  continue_flag: "--continue"   # 維持對話脈絡
+  encoding: "utf-8"
+
+# ── Minimax LLM API 設定（修正決策用） ────────────────────────────
+minimax:
+  api_key: ""                                                              # 必填（建議改用環境變數 MINIMAX_API_KEY）
+  base_url: "https://api.minimax.chat/v1/text/chatcompletion_v2"
+  model: "MiniMax-Text-01"
+  timeout_seconds: 30
+
+# ── 主迴圈設定 ───────────────────────────────────────────────────
+loop:
+  max_iterations: 20
+  completion_pattern: "執行完畢[,，]\\s*報告如下"
+  auth_patterns:
+    - "Do you want to proceed\\?"
+    - "\\(y/n\\)"
+    - "Press Enter to continue"
+    - "Allow this action\\?"
+  auth_response: "y\n"
+  poll_interval_seconds: 0.2
+
+# ── Playbook 執行設定 ─────────────────────────────────────────────
+playbook:
+  step_timeout_seconds: 600
+  evaluator_timeout_seconds: 120
+  global_goal_anchor_chars: 400      # 100~1000
+  max_evolutions: 3                  # 1~10（Gap-020）
+  goal_synthesis_enabled: true       # Gap-014
+  global_goal_brief_chars: 150       # 50~500（Gap-015）
+  conditional_evaluator_timeout_seconds: 5
+  max_goto_per_step: 3               # Gap-049：每步驟最大 GOTO_STEP 次數
+  # SD_Improving_05 W6：use_kernel_path 欄位已移除（Kernel 路徑為唯一正式路徑）
+
+# ── Token / Context 用量保護 ─────────────────────────────────────
+token_guard:
+  enabled: true
+  compact_threshold_pct: 80.0        # 觸發 /compact
+  halt_threshold_pct: 90.0           # 必須 > compact_threshold_pct（validator 強制）
+  resume_delay_minutes: 30           # 0 = 立即繼續
+  auto_resume: true
+  max_auto_resumes: 10
+  # context 偵測 regex（任一命中即視為偵測成功，validator 會檢查 regex 合法性）
+  context_patterns:
+    - "(\\d+(?:\\.\\d+)?)\\s*%\\s*(?:context|token)"
+    - "(?:context|token)\\w*[\\s:]+(\\d+(?:\\.\\d+)?)\\s*%"
+    - "(\\d+)\\s*/\\s*(\\d+)\\s*tokens?"
+    - "\\[CONTEXT_USAGE:\\s*(\\d+(?:\\.\\d+)?)%\\]"
+    - "Context window:\\s*(\\d+)\\s*/\\s*(\\d+)\\s*tokens"
+    - "\\[STATS:\\s*usage\\s*(\\d+(?:\\.\\d+)?)\\s*%\\]"
+    - "Token usage:\\s*(\\d+)\\s*tokens\\s*/\\s*max\\s*(\\d+)"
+
+# ── 桌面通知 ─────────────────────────────────────────────────────
+notification:
+  enabled: true
+  webhook_url: null                  # 選填：Slack/Teams webhook
+
+# ── 儲存後端（Phase 6 三段開關） ──────────────────────────────────
+# yaml_only：純 File backend（預設，零部署成本）
+# both：     File 主寫 + PG 影子寫（PG 上線首兩週灰度驗證）
+# db_only：  純 PG backend（Production 穩定後）
+#
+# db_dsn 解析優先序：環境變數 AUTOCLAUDE_DB_DSN > AUTOCLAUDE_PG_DSN > storage.db_dsn
+storage:
+  mode: "yaml_only"
+  db_dsn: null                       # both / db_only 模式必填（或設環境變數）
+  dual_write_strict: false           # both 模式：影子寫失敗是否阻斷主寫
+  dual_read_resolution: "yaml_wins"  # both 模式：yaml_wins / db_wins / fail_loud
+
+# ── 路徑設定 ─────────────────────────────────────────────────────
+log_dir: "logs"
+backup_dir: "backups"
+scripts_dir: "scripts"
+checkpoint_dir: "checkpoints"
+
+# Workflow 偵測搜尋路徑（依序嘗試；空列表 = 僅以 CWD 為備援）
+workflow_search_paths: []

@@ -1,0 +1,23 @@
+version: "1.0"
+project: "Equivalence_13_max_goto_per_step_override"
+
+# 場景設計（SD_Improving_02.md v1.1 §0.1）：
+#   驗證 Gap-049：playbook.max_goto_per_step 配置可覆寫預設值（3）
+#   - config 設定 max_goto_per_step: 5
+#   - 第 6 次回跳被 GotoCounterPlugin 阻擋
+# dry_run 下：直接執行成功，max_goto_per_step 從 PlaybookConfig 取得，不影響 baseline
+
+global_invariants:
+  max_retries_per_step: 3
+  auto_compact_interval: 0
+
+tasks:
+  - step_id: "T01"
+    name: "可被多次 GOTO 的步驟"
+    prompt: "可被多次 GOTO 並輸出 [MULTIGOTO_STEP1]"
+    expected_output_regex: "\\[MULTIGOTO_STEP1\\]"
+
+  - step_id: "T02"
+    name: "最終步驟"
+    prompt: "最終並輸出 [MULTIGOTO_DONE]"
+    expected_output_regex: "\\[MULTIGOTO_DONE\\]"

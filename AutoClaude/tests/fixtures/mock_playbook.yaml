@@ -1,0 +1,40 @@
+# tests/fixtures/mock_playbook.yaml — Mock CLI 整合測試劇本
+# 配套工具：tests/fixtures/dummy_cli.py
+#
+# 此劇本專供本地整合測試使用，非生產 Playbook。
+# 使用 PlaybookRunner(dry_run=True) 執行時不需要真實 Claude Code。
+#
+# 欄位說明：
+#   prompt   — PlaybookRunner 送給 Claude Code 的 prompt（必填）
+#   command  — Mock CLI 模式下送給 dummy_cli 的指令（選填）
+#   expected_output_regex — 評估成功的 regex（評估前自動 strip ANSI）
+
+version: "1.0"
+project: "AutoClaude_MockTest"
+
+global_invariants:
+  max_retries_per_step: 3
+  auto_compact_interval: 0  # Mock 環境不需 /compact
+
+context_negotiation:
+  prompt: "DummyCLI ready, starting mock test session."
+  expected_keyword: "DummyCLI v1.0 ready"
+
+tasks:
+  - step_id: "T01"
+    name: "初始化確認 (INIT_DONE)"
+    prompt: "請執行初始化步驟並確認完成，完成後輸出 [INIT_DONE]"
+    command: "step1"
+    expected_output_regex: "\\[INIT_DONE\\]"
+
+  - step_id: "T02"
+    name: "測試建立確認 (TEST_CREATED)"
+    prompt: "請建立測試案例並確認完成，完成後輸出 [TEST_CREATED]"
+    command: "step2"
+    expected_output_regex: "\\[TEST_CREATED\\]"
+
+  - step_id: "T03"
+    name: "Ping 測試 (PONG)"
+    prompt: "請執行 ping 測試，完成後輸出 [PONG]"
+    command: "ping"
+    expected_output_regex: "\\[PONG\\]"

@@ -1,0 +1,25 @@
+version: "1.0"
+project: "Equivalence_06_goal_synthesis"
+
+global_goal: |
+  驗證 GOAL_SYNTHESIS 機制：當所有步驟完成但未達總目標時，可觸發整合步驟。
+
+global_invariants:
+  max_retries_per_step: 2
+  auto_compact_interval: 0
+
+tasks:
+  - step_id: "T01"
+    name: "子任務 1"
+    prompt: "完成子任務 1 並輸出 [SUB1_DONE]"
+    expected_output_regex: "\\[SUB1_DONE\\]"
+
+  - step_id: "T02"
+    name: "子任務 2"
+    prompt: "完成子任務 2 並輸出 [SUB2_DONE]"
+    expected_output_regex: "\\[SUB2_DONE\\]"
+
+  - step_id: "T03"
+    name: "目標整合"
+    prompt: "整合所有子任務並輸出 [GOAL_ACHIEVED]"
+    expected_output_regex: "\\[GOAL_ACHIEVED\\]"

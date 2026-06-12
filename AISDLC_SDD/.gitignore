@@ -1,0 +1,76 @@
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+
+# Thumbnails
+._*
+
+# Files that might appear in the root of a volume
+.DocumentRevisions-V100
+.fseventsd
+.Spotlight-V100
+.TemporaryItems
+.Trashes
+.VolumeIcon.icns
+.com.apple.timemachine.donotpresent
+
+# Directories potentially created on remote AFP share
+.AppleDB
+.AppleDesktop
+Network Trash Folder
+Temporary Items
+.apdisk
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Logs
+
+# Temporary files
+*.tmp
+*.temp
+tmp/
+temp/
+
+# Environment variables
+.env
+.env.local
+.env.*.local
+
+# OS generated files
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+
+# Python build artifacts
+__pycache__/
+*.pyc
+*.pyo
+
+# SDD FSM Runtime artifacts (per-project runtime state, regenerated)
+AISDLC_SDD_v0.01/build/reports/fsm/FSM-STATE-*.yaml
+!AISDLC_SDD_v0.01/build/reports/fsm/FSM-STATE-TEMPLATE.yaml
+AISDLC_SDD_v0.01/build/reports/fsm/FSM-STATE-*.yaml.bak
+AISDLC_SDD_v0.01/build/reports/fsm/CONTEXT-LEDGER-*.yaml
+AISDLC_SDD_v0.01/build/reports/fsm/CONTEXT-LEDGER-*.yaml.bak
+AISDLC_SDD_v0.01/build/reports/fsm/CI-EVENT-*.yaml
+AISDLC_SDD_v0.01/build/reports/abort/CONTEXT-SNAPSHOT-*-auto.md
+
+# SDD test/chaos/TLC run byproducts (simulated-fault reports, regenerated on demand)
+AISDLC_SDD_v0.01/build/reports/abort/CONTEXT-SNAPSHOT-*-auto-*.md
+AISDLC_SDD_v0.01/build/reports/abort/ABORT-*.md
+AISDLC_SDD_v0.01/build/reports/abort/ABORT-RAW-*.yaml
+AISDLC_SDD_v0.01/build/reports/fsm/MONITOR-VIOLATION-*.yaml
+AISDLC_SDD_v0.01/build/reports/test-analysis/DISPATCH-LOG-*.yaml
+
+# arch_fitness 暫時性 SENSE 輸出（TREND.yaml 為累積趨勢、追蹤；findings 每次重生、忽略）
+AISDLC_SDD_v0.01/build/reports/fse/findings*.json
+AISDLC_SDD_v0.01/arch-fitness.json
+
+# 本機 CI 閘門 / chaos 暫時產物（ci-gate.sh / chaos sweep 重生，不追蹤）
+AISDLC_SDD_v0.01/chaos-report.json

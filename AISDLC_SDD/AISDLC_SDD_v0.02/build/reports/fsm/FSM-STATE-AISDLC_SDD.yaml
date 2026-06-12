@@ -1,0 +1,58 @@
+fsm_state:
+  project: AISDLC_SDD
+  session_id: a1abe345-e9db-4f55-a5a7-10cbaca78404
+  created_at: '2026-04-19T12:50:10+00:00'
+  updated_at: '2026-04-20T11:26:04+00:00'
+  current_state: ESCALATION
+  current_sprint: 1
+  retry_history:
+    SCG_VALIDATION:
+      current_count: 0
+      max_limit: 3
+      history: []
+    PR_REVIEW:
+      current_count: 0
+      max_limit: 5
+      spec_audit_count: 0
+      max_spec_audit: 2
+      same_pattern_count: 0
+      same_pattern_threshold: 3
+      last_failure_pattern: null
+      history: []
+    RTM_VERIFY:
+      current_count: 0
+      max_limit: 2
+      history: []
+  implementation_budget:
+    current_iteration: 0
+    max_iterations: 20
+    consecutive_compile_fail: 0
+    max_consecutive_compile_fail: 3
+    test_fail_without_spec_change: 0
+    max_test_fail_without_spec_change: 5
+  cumulative_history:
+    total_scg_retries_all_time: 0
+    total_spec_frozen_count: 0
+    total_pr_review_retries: 0
+    escalation_count: 1
+    spec_audit_total_count: 0
+    superficial_fix_count: 0
+    audit_warning_threshold: 10
+    superficial_fix_escalation_threshold: 2
+  spec_regression_check:
+    last_run_at: null
+    last_outcome: null
+    recent_failures_rescanned: []
+  ci_events_pending: []
+  frozen_stages: []
+  escalation_history:
+  - triggered_at: '2026-04-20T11:26:04+00:00'
+    trigger_reason: 'TOKEN_BUDGET_CRITICAL: cumulative=960 ratio=0.96 (zero-delta
+      tool)'
+    resolved_at: null
+    resolution: null
+  ci_event_seen_hashes: []
+  production_signal_tracking:
+    last_scan_at: '2026-04-24T09:12:46+00:00'
+    events_ingested_count: 1
+    events_quarantined_count: 0

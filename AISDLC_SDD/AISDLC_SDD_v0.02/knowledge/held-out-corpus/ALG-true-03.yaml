@@ -1,0 +1,23 @@
+case_id: ALG-true-03
+expect: true_alphabet
+note: concentration/sumsq-sensitive invented primitive rescues a low-magnitude good
+  candidate (high existing_cost) that baseline alphabet OPS miss
+candidates:
+- real_quality: 0.5
+  existing_cost: 2.0
+  features:
+    rollback_steps: 7.0
+    blast_radius: 7.0
+    canary_gap: 8.0
+- real_quality: 0.85
+  existing_cost: 6.0
+  features:
+    rollback_steps: 1.0
+    blast_radius: 2.0
+    canary_gap: 1.0
+- real_quality: 0.6
+  existing_cost: 4.0
+  features:
+    rollback_steps: 5.0
+    blast_radius: 5.0
+    canary_gap: 4.0

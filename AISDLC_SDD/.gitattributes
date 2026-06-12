@@ -1,0 +1,17 @@
+# AISDLC-SDD — 行尾政策（保障 Win/Linux 平價，呼應 ADR-001）。
+# shell 腳本 / git hook / Dockerfile 在 Linux（CI / Docker / act）必須 LF，否則
+# CRLF 會造成 `bash: $'\r': command not found` 與 Dockerfile 解析錯誤——正是本次
+# 要根除的「本機 Windows vs 正式 Linux」差異來源。
+
+# 預設讓 git 自行判斷文字/二進位
+* text=auto
+
+# 強制 LF（Linux 執行；勿被 autocrlf 改成 CRLF）
+*.sh        text eol=lf
+.githooks/* text eol=lf
+Dockerfile* text eol=lf
+*.yml       text eol=lf
+*.yaml      text eol=lf
+
+# PowerShell 腳本維持 CRLF（Windows 原生）
+*.ps1       text eol=crlf

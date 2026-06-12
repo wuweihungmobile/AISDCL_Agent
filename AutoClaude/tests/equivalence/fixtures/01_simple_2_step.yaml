@@ -1,0 +1,17 @@
+version: "1.0"
+project: "Equivalence_01_simple_2_step"
+
+global_invariants:
+  max_retries_per_step: 2
+  auto_compact_interval: 0
+
+tasks:
+  - step_id: "T01"
+    name: "Step 1 INIT_DONE"
+    prompt: "請執行步驟 1 並輸出 [INIT_DONE]"
+    expected_output_regex: "\\[INIT_DONE\\]"
+
+  - step_id: "T02"
+    name: "Step 2 ALL_DONE"
+    prompt: "請執行步驟 2 並輸出 [ALL_DONE]"
+    expected_output_regex: "\\[ALL_DONE\\]"

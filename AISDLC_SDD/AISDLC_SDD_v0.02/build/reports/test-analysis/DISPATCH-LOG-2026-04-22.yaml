@@ -1,0 +1,16 @@
+dispatches:
+- agent: dev-senior
+  fsm_state: ESCALATION
+  stage: initial
+  entered_at: '2026-04-22T15:44:19+00:00'
+  mode: soft
+  registered: true
+  phase: enter
+- agent: dev-senior
+  fsm_state: ESCALATION
+  stage: initial
+  entered_at: '2026-04-22T15:52:04+00:00'
+  mode: soft
+  registered: true
+  phase: enter
+date: '2026-04-22'

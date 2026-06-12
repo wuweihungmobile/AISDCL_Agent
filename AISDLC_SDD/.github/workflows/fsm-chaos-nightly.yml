@@ -1,0 +1,252 @@
+# AISDLC-SDD — FSM Runtime Chaos Nightly (ACT-029 P1-04, Rule 9.9.4)
+#
+# Dual purpose:
+#   1. **Framework repo dogfood** — actively scheduled here at repo root so
+#      AISDLC-SDD self-enforces Rule 9.9.4 (nightly Chaos verification of its
+#      own runtime). Required, not optional.
+#   2. **Downstream reference** — the same yaml is what downstream repos
+#      adopting AISDLC-SDD should copy to their own `.github/workflows/`.
+#      No path adjustment needed; only `working-directory` may differ if the
+#      downstream repo doesn't keep framework code under `AISDLC_SDD_v0.01/`.
+#
+# Schedule rationale:
+#   - Daily at 02:00 UTC keeps chaos runs off the critical PR path while
+#     exercising the full §ACT-029 suite (13 chaos tests + 100-round sweep)
+#     on a predictable cadence.
+#   - `workflow_dispatch` allows manual re-runs during incident triage.
+#
+# Runner lock-in:
+#   - `ubuntu-latest` only. POSIX-only substitutions (seed via Python) plus
+#     the `pytest` marker scheme assume Unix semantics. See
+#     cicd/SDD_CICD_BASE_LAYER.md §fsm_chaos_check for portability notes.
+
+name: fsm-chaos-nightly
+
+# 僅與「本 workflow 自身」序列化（防同一 nightly 重疊跑），不與其他 workflow 共用
+# group——chaos 不 push，無推送競爭，故不需加入 main-push-serialize。永不取消進行中
+# 的 chaos sweep（cancel-in-progress: false）。
+concurrency:
+  group: fsm-chaos-nightly
+  cancel-in-progress: false
+
+on:
+  schedule:
+    # 02:00 UTC daily — out of the PR hotpath, before APAC working hours so
+    # failures surface early for the engineering lead.
+    - cron: "0 2 * * *"
+  workflow_dispatch:
+    inputs:
+      rounds:
+        description: "Chaos rounds to run (default 100)"
+        required: false
+        default: "100"
+
+jobs:
+  chaos:
+    name: fsm-runtime chaos suite
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        working-directory: AISDLC_SDD_v0.01
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements-ci.txt
+
+      - name: Compute reproducible seed from date
+        id: seed
+        run: |
+          # Cross-runner safe: avoid `date +%Y%m%d` (GNU/BSD drift, no-op on
+          # Windows). Python's stdlib is always present and deterministic.
+          SEED=$(python -c "import datetime; print(datetime.date.today().strftime('%Y%m%d'))")
+          echo "seed=${SEED}" >> "$GITHUB_OUTPUT"
+          echo "Using seed=${SEED}"
+
+      - name: Run chaos-marked pytest suite
+        working-directory: AISDLC_SDD_v0.01
+        run: |
+          python -m pytest tools/fsm_runtime/tests/ -m chaos -v
+
+      - name: Run 100-round chaos sweep
+        working-directory: AISDLC_SDD_v0.01
+        env:
+          CHAOS_ROUNDS: ${{ github.event.inputs.rounds || '100' }}
+        run: |
+          python -m tools.fsm_runtime.chaos_runner \
+            --rounds "${CHAOS_ROUNDS}" \
+            --seed "${{ steps.seed.outputs.seed }}" \
+            --json > chaos-report.json
+          cat chaos-report.json | python -c "import json,sys; d=json.load(sys.stdin); print(f\"bounded={d['bounded_rounds']}/{d['total_rounds']} avg_tokens={d['avg_tokens']} max_steps={d['max_steps']}\")"
+
+      # Artifact upload is observability-only; it MUST NOT fail the gate. The
+      # actual chaos verdict is the pytest + sweep steps above. GitHub artifact
+      # storage quota exhaustion previously turned green chaos runs red here —
+      # `continue-on-error` makes upload best-effort, low retention curbs quota.
+      - name: Upload chaos report
+        if: always()
+        continue-on-error: true
+        uses: actions/upload-artifact@v5
+        with:
+          name: fsm-chaos-report-${{ steps.seed.outputs.seed }}
+          path: AISDLC_SDD_v0.01/chaos-report.json
+          retention-days: 7
+
+  # QA Round-3 P1-02 — enforce Rule 9.9.4「連 3 日 nightly 失敗鎖定 main」.
+  # Runs only when the chaos job failed. Queries the most recent completed
+  # nightly runs; if ≥3 consecutive failures are confirmed, opens a P0 issue
+  # and attempts to tighten branch protection on `main`. Both side-effects
+  # are best-effort (`continue-on-error: true`) — the workflow never masks a
+  # chaos failure because the post-fail automation threw.
+  track-streak-and-lock:
+    name: enforce 3-day streak lockdown
+    runs-on: ubuntu-latest
+    needs: chaos
+    if: failure()
+    permissions:
+      actions: read
+      contents: read
+      issues: write
+      # NOTE: branch-protection API requires `repo` / `administration:write`
+      # scope on the token, which CANNOT be granted via this `permissions:`
+      # block (only `actions`, `contents`, `issues`, etc. are valid here per
+      # GitHub's schema; using an invalid key like `administration` causes
+      # the entire workflow to fail validation).
+      # The "Tighten branch protection on main" step below thus runs with
+      # GITHUB_TOKEN lacking admin scope; it will hit 403 and gracefully
+      # log `::warning::` per its `continue-on-error: true`. To enable real
+      # auto-tightening, store a PAT (or fine-grained token) with admin
+      # scope as repo secret `BRANCH_PROTECTION_PAT` and switch the step's
+      # `GH_TOKEN` env to `${{ secrets.BRANCH_PROTECTION_PAT }}`.
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Query recent nightly run conclusions
+        id: streak
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          WORKFLOW_FILE: fsm-chaos-nightly.yml
+        run: |
+          # Fetch the last 5 completed runs of THIS workflow, ordered newest first.
+          # We treat the failing run that triggered this job as the newest entry.
+          set -eu
+          runs_json=$(gh api \
+            "/repos/${REPO}/actions/workflows/${WORKFLOW_FILE}/runs?status=completed&per_page=5" \
+            --jq '[.workflow_runs[] | {id: .id, conclusion: .conclusion, created_at: .created_at}]')
+          echo "Recent runs: ${runs_json}"
+          # Export JSON to env so the python subprocess below can read it.
+          export RUNS_JSON="${runs_json}"
+          # Count consecutive failures from newest end. `failure` and `timed_out`
+          # count toward the streak; `success`/`cancelled`/`neutral` break it.
+          streak=$(python3 - <<'PY'
+          import json, os
+          data = json.loads(os.environ.get("RUNS_JSON") or "[]")
+          count = 0
+          for r in data:
+              if r.get("conclusion") in ("failure", "timed_out"):
+                  count += 1
+              else:
+                  break
+          print(count)
+          PY
+          )
+          # The current run is in-progress (conclusion=null) and not yet in
+          # the list — add 1 to include the failure we're responding to.
+          actual=$((streak + 1))
+          echo "streak=${actual}" >> "$GITHUB_OUTPUT"
+          echo "Consecutive failures including current: ${actual}"
+
+      - name: Open P0 issue when streak >= 3
+        if: steps.streak.outputs.streak >= '3'
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          STREAK: ${{ steps.streak.outputs.streak }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          gh issue create \
+            --repo "${REPO}" \
+            --title "[P0] FSM Chaos Nightly 連續 ${STREAK} 日失敗 — Rule 9.9.4 觸發" \
+            --label "p0,chaos,fsm-runtime" \
+            --body "$(cat <<EOF
+          ## 事件
+
+          \`fsm-chaos-nightly\` 已連續 ${STREAK} 次失敗，依 CLAUDE.md Rule 9.9.4 必須鎖定 main。
+
+          ## 觸發來源
+
+          - 最新失敗執行：${RUN_URL}
+          - 連續失敗次數：${STREAK}（含本次）
+
+          ## 需要的處置（24h 內）
+
+          1. CODEOWNERS 必須阻止所有非 hotfix PR 合入 main，直到 chaos 綠燈。
+          2. 指派 fsm-runtime owner 排查根因；首要嫌疑：ACT-029 保護鏈退化、FSM 轉換表與 \`_HAPPY_PATH\` 失同步。
+          3. 修復後手動觸發 \`workflow_dispatch\` 於 workflows 頁驗證。
+          4. 連續綠燈 1 次後可以關閉本 issue 並解除 branch-protection override。
+
+          ## 自動化
+
+          - 本 workflow 的 \`track-streak-and-lock\` job 已嘗試呼叫 branch-protection API；若 token 權限不足，請 repo admin 手動啟用 \`require_linear_history\` + restrict pushes。
+          EOF
+          )"
+
+      - name: Tighten branch protection on main (best-effort)
+        if: steps.streak.outputs.streak >= '3'
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+        run: |
+          # Best-effort: tighten `main` branch protection. On insufficient
+          # permissions we log a warning rather than failing the workflow.
+          # Reference: https://docs.github.com/en/rest/branches/branch-protection
+          if ! gh api -X PUT "/repos/${REPO}/branches/main/protection" \
+               --input - <<'JSON'
+          {
+            "required_status_checks": {
+              "strict": true,
+              "contexts": ["fsm-runtime chaos suite"]
+            },
+            "enforce_admins": false,
+            "required_pull_request_reviews": {
+              "dismiss_stale_reviews": true,
+              "require_code_owner_reviews": true,
+              "required_approving_review_count": 2
+            },
+            "restrictions": null,
+            "required_linear_history": true,
+            "allow_force_pushes": false,
+            "allow_deletions": false
+          }
+          JSON
+          then
+            echo "::warning::branch-protection tighten failed — GITHUB_TOKEN cannot grant admin scope (per GitHub schema). 請 repo admin 手動啟用 require_linear_history + restrict pushes，或於 repo secrets 加入 BRANCH_PROTECTION_PAT 並改用該 secret 作為 GH_TOKEN。"
+          fi
+
+      - name: Record streak signal as workflow summary
+        if: always()
+        env:
+          STREAK: ${{ steps.streak.outputs.streak }}
+        run: |
+          {
+            echo "### FSM Chaos Nightly — Streak Tracker"
+            echo ""
+            echo "- Consecutive failures (including this run): **${STREAK}**"
+            echo "- Rule 9.9.4 threshold: 3 consecutive failures → lock main"
+            if [ "${STREAK}" -ge 3 ]; then
+              echo "- ✗ 已觸發：已嘗試開 P0 issue + 收緊 branch protection（best-effort）"
+            else
+              echo "- ✓ 未達鎖定門檻（仍在觀察中）"
+            fi
+          } >> "${GITHUB_STEP_SUMMARY}"

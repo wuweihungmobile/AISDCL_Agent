@@ -1,0 +1,43 @@
+# AISDLC-SDD — 迷你正式環境（approach 一）+ 地端 LLM（approach 四）。
+#
+# 用法：
+#   docker compose run --rm ci-runner                 # 跑離線 CI 閘門（= ci.yml）
+#   docker compose run --rm ci-runner bash scripts/ci-gate.sh --full-tlc
+#   docker compose run --rm ci-runner python -m pytest tools/fsm_runtime/tests -q
+#   docker compose --profile llm up -d local-llm      # 選用：啟動地端 LLM（Ollama）
+#
+# 設計原則：ci-runner 與 GitHub ubuntu-latest 同為 Linux+Python3.11，跑同一份
+# scripts/ci-gate.sh，達成「地端通過 ⇒ 雲端通過」的高擬真平價。
+
+services:
+  # ── 迷你正式環境：CI runner（鏡像 ubuntu-latest）──────────────────────
+  ci-runner:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.ci
+    image: aisdlc-sdd-ci:local
+    working_dir: /workspace/AISDLC_SDD_v0.01
+    volumes:
+      - ./:/workspace:rw          # 掛載整個 repo，跑的是當前工作樹
+    environment:
+      # 預設多模態走 session 後端（零外連，CI 路徑 hermetic）。
+      SDD_MULTIMODAL_BACKEND: ${SDD_MULTIMODAL_BACKEND:-session}
+      # approach 四：若改用地端 LLM，指向 local-llm 服務的 OpenAI 相容端點。
+      SDD_LLM_BASE_URL: ${SDD_LLM_BASE_URL:-http://local-llm:11434/v1}
+      SDD_LLM_MODEL: ${SDD_LLM_MODEL:-qwen2.5:7b-instruct}
+    command: ["bash", "/workspace/scripts/ci-gate.sh"]
+
+  # ── approach 四：地端輕量 LLM（Ollama，原生 GGUF + OpenAI 相容 /v1）──────
+  # 預設不啟動（profile=llm），避免一般 CI 跑測試時被牽連，維持 hermetic。
+  # 高階工作站（128GB RAM）可拉較大模型；vLLM 為替代方案（見 docs/ADR）。
+  local-llm:
+    image: ollama/ollama:latest
+    profiles: ["llm"]
+    ports:
+      - "11434:11434"
+    volumes:
+      - ollama-models:/root/.ollama
+    # 注意：GPU 加速需 host 安裝 NVIDIA Container Toolkit；CPU 亦可跑小模型。
+
+volumes:
+  ollama-models:

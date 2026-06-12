@@ -1,0 +1,18 @@
+{
+  "completed_step_ids": [
+    "T01",
+    "T02",
+    "T03"
+  ],
+  "completed_steps": 3,
+  "escalated": false,
+  "halted": false,
+  "step_log": [
+    "[T01] Token Halt 前置步驟 ✓ (attempt 1)",
+    "[T02] 可能觸發 Token Halt 的長步驟 ✓ (attempt 1)",
+    "[T03] Resume 後完成步驟 ✓ (attempt 1)"
+  ],
+  "step_log_count": 3,
+  "success": true,
+  "total_steps": 3
+}

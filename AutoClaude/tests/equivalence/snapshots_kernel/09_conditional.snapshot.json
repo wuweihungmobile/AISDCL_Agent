@@ -1,0 +1,18 @@
+{
+  "completed_step_ids": [
+    "T01",
+    "T02",
+    "T03"
+  ],
+  "completed_steps": 3,
+  "escalated": false,
+  "halted": false,
+  "step_log": [
+    "[T01] 條件評估前置步驟 ✓ (attempt 1)",
+    "[T02] 條件式步驟 ✓ (attempt 1)",
+    "[T03] 後續步驟 ✓ (attempt 1)"
+  ],
+  "step_log_count": 3,
+  "success": true,
+  "total_steps": 3
+}

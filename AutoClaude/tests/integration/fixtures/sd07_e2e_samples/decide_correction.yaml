@@ -1,0 +1,76 @@
+# SD_07 W2 fixture：Brain decide_correction → ExecutorPort.execute(on_event)
+# 對應 AC0-2（test_brain_executor_e2e.py::test_decide_correction_on_event）
+
+scenario: decide_correction
+description: |
+  步驟首次執行失敗（regex 不匹配）→ Coordinator 進入 DECIDE phase →
+  Brain.decide_correction() 回傳修正 prompt + step_mutation=REVISE_CURRENT →
+  Coordinator 進入 BEFORE_EXEC → ExecutorPort.execute(on_event) 接收事件 →
+  第二次 attempt 成功。
+
+playbook:
+  version: "1.0"
+  project: "SD07_DecideCorrection_E2E"
+  global_goal: "驗證 Brain decide_correction 完整往返"
+  global_invariants:
+    max_retries_per_step: 3
+    auto_compact_interval: 0
+  tasks:
+    - step_id: "T01"
+      name: "首次失敗、修正後成功"
+      prompt: "請輸出 [SUCCESS]，若失敗則修正"
+      expected_output_regex: "\\[SUCCESS\\]"
+
+brain_decisions:
+  capabilities:
+    supports_correction: true
+    supports_escalation: true
+    supports_interrupt: true
+    max_concurrent_attempts: 1
+    model_id: "MiniMax-Text-01"
+  decisions:
+    - attempt: 1
+      decision_type: correction
+      step_mutation: REVISE_CURRENT
+      revised_prompt: "請改用 echo '[SUCCESS]' 確保輸出格式"
+      reason: "原 prompt 未指定輸出方式"
+
+executor_events:
+  - attempt: 1
+    phase: EXEC
+    event_type: output
+    payload: { line: "trying without echo" }
+  - attempt: 1
+    phase: AFTER_EXEC
+    event_type: failure
+    payload: { reason: "regex_no_match" }
+  - attempt: 2
+    phase: EXEC
+    event_type: output
+    payload: { line: "[SUCCESS]" }
+  - attempt: 2
+    phase: AFTER_EXEC
+    event_type: success
+    payload: {}
+
+expected_phases:
+  - BEFORE_DECIDE
+  - DECIDE
+  - BEFORE_EXEC
+  - EXEC
+  - ON_EVENT
+  - AFTER_EXEC
+  - DECIDE   # 第二次決策 (correction)
+  - BEFORE_EXEC
+  - EXEC
+  - AFTER_EXEC
+
+expected_brain_call_count:
+  capabilities: 1   # 單次 cache
+  decide_correction: 1
+  decide_escalation: 0
+
+expected_kernel_result:
+  success: true
+  completed_steps: 1
+  total_steps: 1

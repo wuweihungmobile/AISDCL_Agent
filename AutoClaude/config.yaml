@@ -1,0 +1,63 @@
+claude:
+  command: claude
+  extra_args:
+    - "--yes"
+  continue_flag: "--continue"       # 傳遞給 claude 以維持多步驟對話脈絡
+  encoding: utf-8
+
+minimax:
+  api_key: ""                       # 建議改用環境變數 MINIMAX_API_KEY
+  base_url: "https://api.minimax.io/anthropic"
+  model: "MiniMax-M2.7"
+  timeout_seconds: 30
+
+loop:
+  max_iterations: 20
+  completion_pattern: "執行完畢[,，]\\s*報告如下"
+  auth_patterns:
+    - "Do you want to proceed\\?"
+    - "\\(y/n\\)"
+    - "Press Enter to continue"
+    - "Allow this action\\?"
+  auth_response: "y"
+  poll_interval_seconds: 0.2
+
+playbook:
+  step_timeout_seconds: 600         # 每個步驟最多等待 10 分鐘
+  evaluator_timeout_seconds: 120    # evaluator_command 最多執行 2 分鐘
+
+token_guard:
+  enabled: true
+  # Context >= 80% → 自動送出 /compact，壓縮對話脈絡後繼續執行
+  compact_threshold_pct: 80.0
+  # Context >= 90% → 儲存檢查點並暫停，等待排程時間後繼續
+  halt_threshold_pct: 90.0
+  # 儲存檢查點後等待幾分鐘再自動繼續（0 = 立即繼續）
+  resume_delay_minutes: 30
+  # true = 等待後自動繼續；false = 退出並讓使用者手動重啟
+  auto_resume: true
+  # 單次 Playbook 執行最多允許幾次自動恢復（防止無限迴圈）
+  max_auto_resumes: 10
+  # 從 Claude Code 輸出中偵測 context 使用率的 regex patterns（可自訂）
+  context_patterns:
+    - "(\\d+(?:\\.\\d+)?)\\s*%\\s*(?:context|token)"
+    - "(?:context|token)\\w*[\\s:]+(\\d+(?:\\.\\d+)?)\\s*%"
+    - "(\\d+)\\s*/\\s*(\\d+)\\s*tokens?"
+    - "\\[CONTEXT_USAGE:\\s*(\\d+(?:\\.\\d+)?)%\\]"
+
+notification:
+  enabled: true                     # 完成或需要人工介入時彈出桌面通知
+
+log_dir: logs
+backup_dir: backups
+scripts_dir: scripts
+checkpoint_dir: checkpoints
+
+# 工作流程自動偵測搜尋路徑（workflow_type: auto 且 playbook 未指定 workflow_path 時使用）
+# 依序嘗試，找到符合的工作流程標記即回傳；皆無則以 CWD 兜底。
+# 此處留空，個人環境請於 config.local.yaml 中覆寫此欄位（gitignore）。
+# 範例：
+#   workflow_search_paths:
+#     - "/path/to/AISDLC_SDD"
+#     - "/path/to/AISDLC"
+workflow_search_paths: []

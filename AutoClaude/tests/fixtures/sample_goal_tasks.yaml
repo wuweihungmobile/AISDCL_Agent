@@ -1,0 +1,210 @@
+# SD_Improving_06 W0-T0-4：三層任務樣本 fixture
+# ----------------------------------------------------------------------------
+# 對應規格：
+#   - SD_Improving_06.md §6.5 AC3-1 三表 FK / AC3-4 多 run 並存
+#   - PM 拍板 #1：sub-task 深度 ≤ 3（執行指南 §3 W0 範圍）
+#
+# 用途：
+#   - W3 alembic 0009_three_tier_schema 三表 schema 結構驗證
+#   - W3 tests/contract/test_three_tier_schema.py 載入測試資料
+#   - W4 tools/migrate_yaml_to_db.py 60+ YAML 匯入回歸測試 baseline
+#
+# 三層結構：
+#   project (頂層) → goal_task (中層，可巢狀 sub-task) → execution_item (底層原子單元)
+#
+# 深度規範（PM #1）：
+#   depth=1：goal_task 無 sub-task
+#   depth=2：goal_task 含 sub-tasks（單層）
+#   depth=3：goal_task 含 sub-tasks，sub-task 再含 sub-tasks（**最深允許**）
+#   depth>3：W4 import 工具必須 reject
+# ----------------------------------------------------------------------------
+
+version: "1.0"
+fixture_purpose: "SD_06 W3+ three-tier schema contract baseline"
+
+# 10 個樣本（depth 分布：4 個 depth=1, 4 個 depth=2, 2 個 depth=3）
+projects:
+  # ============================================================
+  # depth=1 樣本 ×4（goal_task 無 sub-task）
+  # ============================================================
+  - project_id: "PRJ-001"
+    name: "auth-service-bugfix"
+    description: "修正 OAuth refresh token 漏失"
+    goal_tasks:
+      - goal_task_id: "GT-001-A"
+        depth: 1
+        title: "重現 refresh token 漏失"
+        priority: 5
+        execution_items:
+          - exec_id: "EI-001-A-1"
+            action: "撰寫 pytest 重現案例"
+          - exec_id: "EI-001-A-2"
+            action: "確認 oauth_lib 版本"
+
+  - project_id: "PRJ-002"
+    name: "telemetry-dashboard-v2"
+    description: "Grafana dashboard 重構"
+    goal_tasks:
+      - goal_task_id: "GT-002-A"
+        depth: 1
+        title: "匯出既有 dashboard JSON"
+        priority: 3
+        execution_items:
+          - exec_id: "EI-002-A-1"
+            action: "grafana-cli admin export"
+
+  - project_id: "PRJ-003"
+    name: "ci-cd-migration"
+    description: "GitLab CI → GitHub Actions"
+    goal_tasks:
+      - goal_task_id: "GT-003-A"
+        depth: 1
+        title: "整理 .gitlab-ci.yml 對照表"
+        priority: 4
+        execution_items:
+          - exec_id: "EI-003-A-1"
+            action: "解析 stages 與 jobs 結構"
+
+  - project_id: "PRJ-004"
+    name: "load-test-suite"
+    description: "p99 latency baseline"
+    goal_tasks:
+      - goal_task_id: "GT-004-A"
+        depth: 1
+        title: "建立 k6 baseline script"
+        priority: 3
+        execution_items:
+          - exec_id: "EI-004-A-1"
+            action: "撰寫 ramp-up scenario"
+
+  # ============================================================
+  # depth=2 樣本 ×4（goal_task 含 sub-tasks，單層巢狀）
+  # ============================================================
+  - project_id: "PRJ-005"
+    name: "search-pipeline-redesign"
+    description: "ElasticSearch → pgvector 遷移"
+    goal_tasks:
+      - goal_task_id: "GT-005-A"
+        depth: 2
+        title: "資料層遷移"
+        priority: 5
+        sub_tasks:
+          - goal_task_id: "GT-005-A-1"
+            depth: 2
+            title: "Schema 遷移 (sub depth=2)"
+            execution_items:
+              - exec_id: "EI-005-A-1-a"
+                action: "alembic upgrade head"
+          - goal_task_id: "GT-005-A-2"
+            depth: 2
+            title: "Embedding 回填 (sub depth=2)"
+            execution_items:
+              - exec_id: "EI-005-A-2-a"
+                action: "background batch re-embed"
+        execution_items: []  # 巢狀層自己無原子單元
+
+  - project_id: "PRJ-006"
+    name: "feature-flag-rollout"
+    description: "GrowthBook 接入"
+    goal_tasks:
+      - goal_task_id: "GT-006-A"
+        depth: 2
+        title: "FE 接入"
+        sub_tasks:
+          - goal_task_id: "GT-006-A-1"
+            depth: 2
+            title: "useFeature hook 包裝"
+            execution_items:
+              - exec_id: "EI-006-A-1-a"
+                action: "撰寫 useFeature(flag)"
+          - goal_task_id: "GT-006-A-2"
+            depth: 2
+            title: "灰度條件評估"
+            execution_items:
+              - exec_id: "EI-006-A-2-a"
+                action: "userId/orgId targeting rules"
+
+  - project_id: "PRJ-007"
+    name: "k8s-operator-poc"
+    description: "Custom Operator 設計"
+    goal_tasks:
+      - goal_task_id: "GT-007-A"
+        depth: 2
+        title: "CRD 定義"
+        sub_tasks:
+          - goal_task_id: "GT-007-A-1"
+            depth: 2
+            title: "spec.schema 設計"
+            execution_items:
+              - exec_id: "EI-007-A-1-a"
+                action: "openAPIV3Schema 草稿"
+
+  - project_id: "PRJ-008"
+    name: "billing-refund-flow"
+    description: "Stripe refund webhook 處理"
+    goal_tasks:
+      - goal_task_id: "GT-008-A"
+        depth: 2
+        title: "Webhook 訂閱"
+        sub_tasks:
+          - goal_task_id: "GT-008-A-1"
+            depth: 2
+            title: "charge.refunded 處理"
+            execution_items:
+              - exec_id: "EI-008-A-1-a"
+                action: "驗證 stripe signature"
+
+  # ============================================================
+  # depth=3 樣本 ×2（goal_task → sub-task → sub-sub-task；最深允許）
+  # ============================================================
+  - project_id: "PRJ-009"
+    name: "ml-training-pipeline"
+    description: "離線特徵 + 模型訓練自動化"
+    goal_tasks:
+      - goal_task_id: "GT-009-A"
+        depth: 3
+        title: "特徵工程"
+        sub_tasks:
+          - goal_task_id: "GT-009-A-1"
+            depth: 3
+            title: "特徵抽取（中層）"
+            sub_tasks:
+              - goal_task_id: "GT-009-A-1-i"
+                depth: 3
+                title: "Session aggregator (最深 depth=3)"
+                execution_items:
+                  - exec_id: "EI-009-A-1-i-α"
+                    action: "撰寫 SQL CTE 聚合"
+              - goal_task_id: "GT-009-A-1-ii"
+                depth: 3
+                title: "User profile join (最深 depth=3)"
+                execution_items:
+                  - exec_id: "EI-009-A-1-ii-α"
+                    action: "left join + null handling"
+
+  - project_id: "PRJ-010"
+    name: "incident-response-playbook"
+    description: "On-call SOP 自動化"
+    goal_tasks:
+      - goal_task_id: "GT-010-A"
+        depth: 3
+        title: "告警分流"
+        sub_tasks:
+          - goal_task_id: "GT-010-A-1"
+            depth: 3
+            title: "嚴重度判定（中層）"
+            sub_tasks:
+              - goal_task_id: "GT-010-A-1-i"
+                depth: 3
+                title: "P0 規則集 (最深 depth=3)"
+                execution_items:
+                  - exec_id: "EI-010-A-1-i-α"
+                    action: "5xx > 50/min OR p99 > 5s"
+
+# ============================================================
+# Invariant assertions (W3 contract test 入口)
+# ============================================================
+#   projects 數量 = 10
+#   depth 分布：1×4, 2×4, 3×2（總和 10）
+#   無任何節點 depth > 3
+# ============================================================

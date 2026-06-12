@@ -1,0 +1,26 @@
+# AISDLC-SDD — 迷你正式環境 / CI runner（鏡像 GitHub ubuntu-latest 的 Linux + Python 3.11）。
+#
+# 目的（approach 一）：消除「本機 Windows vs 正式 Linux」差異——路徑分隔、
+# 換行、檔名大小寫、bash 與 java 的 TLC 呼叫——讓地端跑出與雲端一致的結果。
+#
+# 基底用 python:3.11-slim（Debian/Linux，鎖死 Python 3.11，與 setup-python 同版）。
+# 安裝 default-jre-headless 以支援 TLA+/TLC（tla2tools.jar 已隨 repo 提供）。
+FROM python:3.11-slim-bookworm
+
+# Java（TLC）+ git + bash + ca-certificates；裝完即清 apt 快取縮小鏡像。
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        default-jre-headless \
+        git \
+        bash \
+        ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
+
+# 先 COPY 釘版相依做 layer 快取（原始碼於 runtime 由 compose 掛載覆蓋）。
+COPY AISDLC_SDD_v0.01/requirements-ci.txt /tmp/requirements-ci.txt
+RUN python -m pip install --upgrade pip \
+    && pip install -r /tmp/requirements-ci.txt
+
+WORKDIR /workspace/AISDLC_SDD_v0.01
+
+# 預設：跑離線 CI 閘門（與 ci.yml / pre-push 同一腳本）。
+CMD ["bash", "/workspace/scripts/ci-gate.sh"]

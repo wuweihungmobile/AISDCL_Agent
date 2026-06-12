@@ -1,0 +1,20 @@
+version: "1.0"
+project: "Equivalence_05_evolution_inject"
+
+global_goal: |
+  驗證演化引擎在 ESCALATION 時可注入新步驟（INJECT_STEP）的能力。
+
+global_invariants:
+  max_retries_per_step: 2
+  auto_compact_interval: 0
+
+tasks:
+  - step_id: "T01"
+    name: "可能 ESCALATE 的步驟"
+    prompt: "執行高風險步驟並輸出 [RISKY_DONE]"
+    expected_output_regex: "\\[RISKY_DONE\\]"
+
+  - step_id: "T02"
+    name: "後續步驟"
+    prompt: "完成並輸出 [FINAL_DONE]"
+    expected_output_regex: "\\[FINAL_DONE\\]"

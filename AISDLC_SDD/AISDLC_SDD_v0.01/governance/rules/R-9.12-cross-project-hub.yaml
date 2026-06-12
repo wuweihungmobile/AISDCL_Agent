@@ -1,0 +1,17 @@
+id: R-9.12
+title: Phase F M2 Cross-Project Learning Hub
+trigger_states:
+  - HUB_SYNC
+severity: high
+maturity: active
+spec: >
+  跨實例 FPL/SLV 知識共享。治理八條（G-30.1~8）：pre-push PII 雙掃 + 商業機密 deny-list
+  + opt-in 確認 + pull 預設 trust_level=external（advisory）+ 升級需 reviewer signoff +
+  endpoint allow-list（deny_unlisted=true）+ quarantine 不可自動清。所有 push 經
+  pii_scanner + anonymizer；HUB_SYNC 非阻塞觀測態（success→resume、partial→HUMAN_PENDING、
+  failed→resume，不升 ESCALATION）。對應 hub_sync.py / hub_merge.py。
+test_ref: tools/fsm_runtime/tests/test_hub_sync.py
+scaffold_roi:
+  fire_count: 0
+  catch_count: 0
+  false_positive_count: 0

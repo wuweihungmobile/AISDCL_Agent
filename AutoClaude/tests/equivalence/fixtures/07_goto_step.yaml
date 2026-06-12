@@ -1,0 +1,22 @@
+version: "1.0"
+project: "Equivalence_07_goto_step"
+
+global_invariants:
+  max_retries_per_step: 2
+  auto_compact_interval: 0
+
+tasks:
+  - step_id: "T01"
+    name: "起始步驟"
+    prompt: "起始並輸出 [START]"
+    expected_output_regex: "\\[START\\]"
+
+  - step_id: "T02"
+    name: "可能觸發 GOTO 的步驟"
+    prompt: "驗證並輸出 [VERIFY_DONE]"
+    expected_output_regex: "\\[VERIFY_DONE\\]"
+
+  - step_id: "T03"
+    name: "結束步驟"
+    prompt: "結束並輸出 [END]"
+    expected_output_regex: "\\[END\\]"

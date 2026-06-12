@@ -1,0 +1,63 @@
+- timestamp: '2026-06-02T01:06:12'
+  score: 3
+  n_fail: 0
+  n_warn: 3
+  fingerprints:
+  - ff6-workflow-linkrot
+  - ff7-count-skills
+  - ff7-count-specialized-agents
+- timestamp: '2026-06-02T01:32:35'
+  score: 1
+  n_fail: 0
+  n_warn: 1
+  fingerprints:
+  - ff6-workflow-linkrot
+- timestamp: '2026-06-02T01:41:16'
+  score: 0
+  n_fail: 0
+  n_warn: 0
+  fingerprints: []
+- timestamp: '2026-06-02T01:51:02'
+  score: 0
+  n_fail: 0
+  n_warn: 0
+  fingerprints: []
+- timestamp: '2026-06-02T07:08:54'
+  score: 1
+  n_fail: 0
+  n_warn: 1
+  fingerprints:
+  - ff13-yaml-invalid
+- timestamp: '2026-06-03T07:22:54'
+  score: 0
+  n_fail: 0
+  n_warn: 0
+  fingerprints: []
+- timestamp: '2026-06-04T07:05:59'
+  score: 1
+  n_fail: 0
+  n_warn: 1
+  fingerprints:
+  - ff5-oversize
+- timestamp: '2026-06-05T06:49:24'
+  score: 1
+  n_fail: 0
+  n_warn: 1
+  fingerprints:
+  - ff5-oversize
+- timestamp: '2026-06-08T07:13:27'
+  score: 3
+  n_fail: 0
+  n_warn: 3
+  fingerprints:
+  - ff16-gc-never-fired
+  - ff16-meta-loop-ungrounded
+  - ff5-oversize
+- timestamp: '2026-06-11T07:14:47'
+  score: 3
+  n_fail: 0
+  n_warn: 3
+  fingerprints:
+  - ff16-gc-never-fired
+  - ff16-meta-loop-ungrounded
+  - ff5-oversize

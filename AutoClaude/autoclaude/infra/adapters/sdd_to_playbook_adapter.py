@@ -1,0 +1,272 @@
+"""SddToPlaybookAdapter — SDD 規格 → PlaybookTask 轉譯器（adapter tier ≤400 LOC）。
+
+對應 AutoSDD_improving_01.md §3（W3）。實作 core/ports/spec_source.ISpecSource。
+
+安全設計（§1.3 三點截斷鏈式攻擊）：
+  1. 模板白名單：evaluator_command 僅得由 _EVALUATOR_TEMPLATES 內插生成
+  2. 參數消毒：黑名單字元集（⊇ CONDITIONAL 黑名單）+ 白名單 regex
+  3. 末端複驗：生成 playbook 執行時仍經 pre_run_validator 整體驗證
+
+凍結偵測（§2.2 / §3.2）：讀 state_loader 管理的 FSM 狀態檔
+build/reports/fsm/FSM-STATE-*.yaml，frozen_stages 非空或 current_state
+已達 SPEC_FROZEN 之後狀態，否則 raise SpecNotFrozenError（fail-closed）。
+"""
+from __future__ import annotations
+
+import hashlib
+import re
+from pathlib import Path
+from typing import Optional
+
+import yaml
+
+from ...core.ports.observability import IObservabilityPort, NullObservability
+from ...core.ports.spec_source import (
+    SddSpec,
+    SpecContract,
+    SpecNotFrozenError,
+    SpecTaintedError,
+)
+from ...models.playbook import PlaybookTask
+
+# §1.3 截斷點 2：黑名單字元集 ⊇ CONDITIONAL 黑名單 {!,`,>,<,~,$}，再加 &;
+_DENY = set("!`><~$&;")
+# 白名單 regex：路徑片段僅允許 word / . / / / -（消毒第二層）
+_SAFE_FRAGMENT = re.compile(r"^[\w./\\-]+$")
+
+# §1.3 截斷點 1：唯二合法 evaluator 模板（任何自由字串一律拒絕）
+_EVALUATOR_TEMPLATES = (
+    'python -m pytest {path} -k "{at}" -q',
+    "python -m tools.{module} {args}",
+)
+
+# happy path 上 SPEC_FROZEN 及其後繼狀態（transition_rules._HAPPY_PATH 實況）
+_POST_FROZEN_STATES = frozenset({
+    "SPEC_FROZEN", "TEST_CONTRACT_NEGOTIATED", "IMPLEMENTATION",
+    "SANDBOX_HARDENING_GATE", "EXECUTION_EVALUATION", "ADVERSARIAL_EVALUATION",
+    "PR_REVIEW", "SPEC_AUDIT", "RTM_VERIFY", "RELEASE_READY", "RELEASE",
+})
+
+# AISDLC-SDD 10 場景（scenarios/ 實況）
+_SCENARIOS = (
+    "greenfield", "brownfield", "refactoring", "documentation", "devops",
+    "integration", "migration", "performance", "security", "testing",
+)
+
+# Section 1 AC→AT 映射表列：| AC ID | AC 描述 | AT ID | AT 描述 | 自動化 | 測試類型 | 狀態 |
+_AT_ROW = re.compile(
+    r"^\|\s*(AC-[\d\-]+)\s*\|[^|]*\|\s*(AT-[\d\-]+)\s*\|([^|]*)\|[^|]*\|([^|]*)\|",
+    re.M,
+)
+# Section 2 Gherkin 區塊（```gherkin fence，內含 # AT-XXX-Y-Z 標頭）
+_GHERKIN_BLOCK = re.compile(r"```gherkin\s*\n(.*?)```", re.S)
+_GHERKIN_AT_ID = re.compile(r"#\s*(AT-[\d\-]+)")
+
+# Gherkin Then 斷言轉譯規則（§3.1 實例表）
+_QUOTED_LITERAL = re.compile(r"[「\"']([^」\"']+)[」\"']")
+_STATUS_CODE = re.compile(r"\b([1-5]\d{2})\b(?:\s+([A-Za-z][A-Za-z ]*[A-Za-z]|[A-Za-z]+))?")
+_QUANTITATIVE = re.compile(r"[<>≤≥]|\bms\b|\b秒\b|%")
+_FALLBACK_REGEX = r"\bPASS(ED)?\b"
+
+# E2E 屬 RTM 層（SCG-5，retry=2）；Unit/Integration/Contract 屬 PR 層（SCG-4，retry=5）
+# 對齊 transition_rules RETRY_LIMITS：PR_REVIEW=5 / RTM_VERIFY=2
+_RETRY_BY_GATE = {"SCG-4": 5, "SCG-5": 2}
+
+
+class SddToPlaybookAdapter:
+    """ISpecSource 實作：解析凍結後的 TEST-CONTRACT-SPEC，編譯為 PlaybookTask。"""
+
+    def __init__(
+        self,
+        observability: Optional[IObservabilityPort] = None,
+        *,
+        fsm_state_path: Optional[str] = None,
+        test_path: str = "tests",
+    ):
+        """
+        Args:
+            observability: weak_regex audit 事件出口（contract #7；未注入 → no-op）
+            fsm_state_path: 顯式 FSM 狀態檔路徑；None 時自 spec_dir 向上搜尋
+                            build/reports/fsm/FSM-STATE-*.yaml
+            test_path: evaluator 模板的 pytest 目標路徑（白名單模板參數）
+        """
+        self._obs = observability or NullObservability()
+        self._fsm_state_path = fsm_state_path
+        self._test_path = self._sanitize(test_path)
+
+    # ──────────────────────────────────────────────
+    # ISpecSource 契約
+    # ──────────────────────────────────────────────
+    def load_spec(self, spec_dir: str) -> SddSpec:
+        text, spec_file = self._read_contract_spec(spec_dir)
+        self._assert_frozen(spec_dir)  # 凍結硬閘（Spec-First Gate）
+        digest = "sha256:" + hashlib.sha256(text.encode("utf-8")).hexdigest()
+        return SddSpec(
+            spec_path=str(spec_file),
+            digest=digest,
+            scenario=self._scenario_of(text),
+            contracts=tuple(self._parse_contracts(text)),
+        )
+
+    def compile_tasks(self, spec: SddSpec) -> list[PlaybookTask]:
+        """SddSpec → PlaybookTask 序列。純函數、無 IO。"""
+        tasks: list[PlaybookTask] = []
+        prev_ac: Optional[str] = None
+        digest8 = spec.digest.split(":")[-1][:8]
+        for c in spec.contracts:
+            tasks.append(PlaybookTask(
+                step_id=f"sdd-{spec.scenario}-{c.at_id.lower()}",
+                name=c.at_id,
+                prompt=(
+                    f"依下列契約實作並使測試通過：\n{c.gherkin}\n"
+                    f"規格出處：{spec.spec_path}（digest {digest8}）"
+                ),
+                expected_output_regex=c.expected_regex,
+                evaluator_command=c.evaluator_cmd,
+                max_retries=_RETRY_BY_GATE.get(c.scg_gate),
+                # 同一 AC 內連續 AT 維持脈絡；跨 AC 隔離污染（§3.1）
+                maintain_context=(c.ac_id == prev_ac),
+            ))
+            prev_ac = c.ac_id
+        return tasks
+
+    # ──────────────────────────────────────────────
+    # 凍結偵測（§2.2 docstring 機制）
+    # ──────────────────────────────────────────────
+    def _assert_frozen(self, spec_dir: str) -> None:
+        state_file = self._find_fsm_state(spec_dir)
+        if state_file is None:
+            raise SpecNotFrozenError(
+                f"{spec_dir}: 找不到 FSM 狀態檔（build/reports/fsm/FSM-STATE-*.yaml）"
+                "——規格未經 FSMRuntime 凍結，依 Spec-First Gate fail-closed 拒絕"
+            )
+        doc = yaml.safe_load(state_file.read_text(encoding="utf-8")) or {}
+        root = doc.get("fsm_state", {}) or {}
+        frozen_stages = root.get("frozen_stages") or []
+        current = root.get("current_state")
+        if not frozen_stages and current not in _POST_FROZEN_STATES:
+            raise SpecNotFrozenError(
+                f"{state_file}: frozen_stages 為空且 current_state={current!r} "
+                f"未達 SPEC_FROZEN 之後狀態"
+            )
+
+    def _find_fsm_state(self, spec_dir: str) -> Optional[Path]:
+        if self._fsm_state_path:
+            p = Path(self._fsm_state_path)
+            return p if p.is_file() else None
+        node = Path(spec_dir).resolve()
+        for candidate in (node, *node.parents):
+            fsm_dir = candidate / "build" / "reports" / "fsm"
+            if fsm_dir.is_dir():
+                matches = sorted(fsm_dir.glob("FSM-STATE-*.yaml"))
+                if matches:
+                    return matches[0]
+        return None
+
+    # ──────────────────────────────────────────────
+    # 解析（TEST-CONTRACT-SPEC 結構，F11）
+    # ──────────────────────────────────────────────
+    def _read_contract_spec(self, spec_dir: str) -> tuple[str, Path]:
+        root = Path(spec_dir)
+        candidates = sorted(
+            p for p in root.rglob("*.md")
+            if ("CONTRACT" in p.name.upper() and "SPEC" in p.name.upper())
+            or p.name.upper().startswith("TCS-")
+        )
+        if not candidates:
+            raise FileNotFoundError(
+                f"{spec_dir}: 找不到 TEST-CONTRACT-SPEC（*CONTRACT*SPEC*.md / TCS-*.md）"
+            )
+        spec_file = candidates[0]
+        return spec_file.read_text(encoding="utf-8"), spec_file
+
+    def _scenario_of(self, text: str) -> str:
+        lowered = text.lower()
+        for s in _SCENARIOS:
+            if s in lowered:
+                return s
+        return "greenfield"
+
+    def _parse_contracts(self, text: str) -> list[SpecContract]:
+        gherkin_by_at: dict[str, str] = {}
+        for block in _GHERKIN_BLOCK.findall(text):
+            m = _GHERKIN_AT_ID.search(block)
+            if m:
+                gherkin_by_at[m.group(1)] = block.strip()
+
+        contracts: list[SpecContract] = []
+        seen: set[str] = set()
+        for ac_id, at_id, at_desc, test_type in _AT_ROW.findall(text):
+            if "{" in at_id or at_id in seen:  # 模板佔位列 / 重複列
+                continue
+            seen.add(at_id)
+            gherkin = gherkin_by_at.get(at_id, at_desc.strip())
+            regex, weak = self._gherkin_to_regex(gherkin)
+            if weak:
+                # §3.1：weak_regex 必經 IObservabilityPort 留審計痕，禁 silent fallback
+                self._obs.record_event(
+                    "sdd.weak_regex", {"at_id": at_id, "gherkin": gherkin}
+                )
+            scg_gate = "SCG-5" if "E2E" in test_type.upper() else "SCG-4"
+            contracts.append(SpecContract(
+                ac_id=ac_id,
+                at_id=at_id,
+                gherkin=gherkin,
+                expected_regex=regex,
+                evaluator_cmd=self._build_evaluator_cmd(at_id),
+                scg_gate=scg_gate,
+                weak_regex=weak,
+            ))
+        return contracts
+
+    # ──────────────────────────────────────────────
+    # Gherkin Then → expected_output_regex（§3.1 轉譯實例表）
+    # ──────────────────────────────────────────────
+    def _gherkin_to_regex(self, gherkin: str) -> tuple[str, bool]:
+        then_lines = self._then_assertions(gherkin)
+        for line in then_lines:
+            quoted = _QUOTED_LITERAL.search(line)
+            if quoted:
+                return re.escape(quoted.group(1)), False
+        for line in then_lines:
+            if _QUANTITATIVE.search(line):
+                continue  # 量化 NFR 斷言不可由文字推導
+            status = _STATUS_CODE.search(line)
+            if status:
+                parts = [status.group(1)]
+                if status.group(2):
+                    parts.append(re.escape(status.group(2).strip().lower()))
+                return "(?i)(" + "|".join(parts) + ")", False
+        return _FALLBACK_REGEX, True
+
+    @staticmethod
+    def _then_assertions(gherkin: str) -> list[str]:
+        """抽出 Then 與其後續 And 行（And 僅在 Then 之後才算斷言）。"""
+        out: list[str] = []
+        in_then = False
+        for raw in gherkin.splitlines():
+            line = raw.strip()
+            if line.startswith("Then"):
+                in_then = True
+                out.append(line)
+            elif line.startswith("And") and in_then:
+                out.append(line)
+            elif line and not line.startswith(("#", "And")):
+                in_then = False
+        return out
+
+    # ──────────────────────────────────────────────
+    # 消毒 + 白名單模板（§1.3 截斷點 1+2）
+    # ──────────────────────────────────────────────
+    def _sanitize(self, fragment: str) -> str:
+        tainted = [ch for ch in fragment if ch in _DENY]
+        if tainted or not _SAFE_FRAGMENT.match(fragment):
+            raise SpecTaintedError(
+                f"規格片段含非法字元 {tainted or fragment!r}（疑似注入向量）"
+            )
+        return fragment
+
+    def _build_evaluator_cmd(self, at_id: str) -> str:
+        # pytest -k 表達式不接受連字號 → at_id 消毒為底線形式
+        at_sanitized = self._sanitize(at_id).replace("-", "_")
+        return _EVALUATOR_TEMPLATES[0].format(path=self._test_path, at=at_sanitized)

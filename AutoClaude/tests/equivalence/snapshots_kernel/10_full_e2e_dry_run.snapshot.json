@@ -1,0 +1,20 @@
+{
+  "completed_step_ids": [
+    "T01",
+    "T02",
+    "T03",
+    "T04"
+  ],
+  "completed_steps": 4,
+  "escalated": false,
+  "halted": false,
+  "step_log": [
+    "[T01] E2E 步驟 1 ✓ (attempt 1)",
+    "[T02] E2E 步驟 2 ✓ (attempt 1)",
+    "[T03] E2E 步驟 3 (含 evaluator) ✓ (attempt 1)",
+    "[T04] E2E 結束步驟 ✓ (attempt 1)"
+  ],
+  "step_log_count": 4,
+  "success": true,
+  "total_steps": 4
+}

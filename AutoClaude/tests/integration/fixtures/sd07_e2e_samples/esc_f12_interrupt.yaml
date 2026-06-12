@@ -1,0 +1,67 @@
+# SD_07 W2 fixture：ESC+F12 中斷 → CheckpointPlugin → restart
+# 對應 AC0-3（test_brain_executor_e2e.py::test_send_interrupt_ack_and_restart）
+
+scenario: esc_f12_interrupt
+description: |
+  使用者按 ESC+F12 → HotkeyPlugin 廣播 ON_INTERRUPT_REQUEST →
+  Coordinator.send_interrupt(seq=N) → ExecutorPort ACK → CheckpointPlugin
+  儲存 interrupt checkpoint。restart 後從正確 step 繼續。
+
+playbook:
+  version: "1.0"
+  project: "SD07_EscF12_E2E"
+  global_goal: "驗證 ESC+F12 中斷可恢復"
+  global_invariants:
+    max_retries_per_step: 1
+    auto_compact_interval: 0
+  tasks:
+    - step_id: "T01"
+      name: "長時運行步驟"
+      prompt: "請執行 30s 模擬"
+      expected_output_regex: "\\[DONE\\]"
+    - step_id: "T02"
+      name: "後續步驟（應 restart 時跳過 T01）"
+      prompt: "請執行 T02"
+      expected_output_regex: "\\[T02_DONE\\]"
+
+brain_decisions:
+  capabilities:
+    supports_correction: true
+    supports_escalation: true
+    supports_interrupt: true
+    max_concurrent_attempts: 1
+    model_id: "MiniMax-Text-01"
+  decisions: []
+
+executor_events:
+  - phase: EXEC
+    event_type: progress
+    payload: { line: "Running 10s mark" }
+  - phase: ON_INTERRUPT_REQUEST
+    event_type: interrupt
+    payload: { seq: 1, source: "hotkey:esc+f12" }
+
+expected_phases:
+  - BEFORE_DECIDE
+  - DECIDE
+  - BEFORE_EXEC
+  - EXEC
+  - ON_INTERRUPT_REQUEST
+  - ON_CHECKPOINT_SAVE_REQUEST
+  - AFTER_EXEC
+
+expected_interrupt_ack:
+  seq: 1
+  ack_received: true
+  monotonic_seq: true  # 多次中斷 seq 必嚴格遞增
+
+expected_kernel_result:
+  success: false
+  halted: false
+  completed_steps: 0
+  total_steps: 2
+  interrupted: true
+
+restart_behavior:
+  next_step_idx: 0      # 中斷在 T01 → restart 從 T01 繼續
+  completed_step_ids: []

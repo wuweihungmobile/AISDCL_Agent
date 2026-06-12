@@ -1,0 +1,88 @@
+fsm_state:
+  project: workspace
+  session_id: 08d9b019-efa5-4bf5-a66e-d04bdc5c32e0
+  created_at: '2026-06-11T15:06:34+00:00'
+  updated_at: '2026-06-11T15:06:34+00:00'
+  current_state: INIT
+  current_sprint: 1
+  retry_history:
+    SCG_VALIDATION:
+      current_count: 0
+      max_limit: 3
+      history: []
+    PR_REVIEW:
+      current_count: 0
+      max_limit: 5
+      spec_audit_count: 0
+      max_spec_audit: 2
+      same_pattern_count: 0
+      same_pattern_threshold: 3
+      last_failure_pattern: null
+      history: []
+      patterns: []
+    RTM_VERIFY:
+      current_count: 0
+      max_limit: 2
+      history: []
+  implementation_budget:
+    current_iteration: 0
+    max_iterations: 20
+    consecutive_compile_fail: 0
+    max_consecutive_compile_fail: 3
+    test_fail_without_spec_change: 0
+    max_test_fail_without_spec_change: 5
+  cumulative_history:
+    total_scg_retries_all_time: 0
+    total_spec_frozen_count: 0
+    total_pr_review_retries: 0
+    escalation_count: 0
+    spec_audit_total_count: 0
+    superficial_fix_count: 0
+    audit_warning_threshold: 10
+    superficial_fix_escalation_threshold: 2
+  spec_regression_check:
+    last_run_at: null
+    last_outcome: null
+    recent_failures_rescanned: []
+  human_pending_tracking:
+    entered_at: null
+    reminder_sent_at: null
+    reminder_hours: 72
+    escalation_hours: 168
+  auto_compact_state:
+    triggered_at: null
+    completed_at: null
+    resume_state: null
+    trigger_ratio: null
+    trigger_cumulative_tokens: 0
+    trigger_count: 0
+    completed_count: 0
+    snapshot_path: null
+    count_per_stage: 0
+    stage_key: null
+    max_per_stage: 3
+  decision_trace: []
+  decision_trace_flushed: []
+  production_signal_tracking:
+    inbox_dir: data/slo_events
+    quarantine_dir: data/slo_events/quarantine
+    processed_dir: data/slo_events/processed
+    drift_log: build/reports/fsm/PBS-DRIFT-{date}.yaml
+    last_scan_at: null
+    events_ingested_count: 0
+    events_quarantined_count: 0
+    drift_reports_written: []
+    persistent_threshold: 3
+    window_hours: 24
+  learning_commit_tracking:
+    entered_at: null
+    entered_from: null
+    fpl_id: null
+    proposed_slv_id: null
+    proposed_rule_path: null
+    review_status: null
+    reviewed_at: null
+    proposals_history: []
+  ci_events_pending: []
+  frozen_stages: []
+  escalation_history: []

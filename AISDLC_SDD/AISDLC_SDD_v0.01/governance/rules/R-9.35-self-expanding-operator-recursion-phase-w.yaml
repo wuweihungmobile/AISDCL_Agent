@@ -1,0 +1,97 @@
+id: R-9.35
+title: Phase W 算子間互遞迴文法的自我擴充（meta⁸）（非遞迴外有界互遞迴生成文法 + 良基停機證書有界停機，因互遞迴=停機可判定性臨界線）
+trigger_states:
+  - LEARNING_COMMIT
+  - MEMORY_CONSOLIDATION
+severity: high
+maturity: active
+spec: >
+  L10 完整之「離線活體 meta⁸ 迴圈 · 算子間互遞迴文法自我擴充 + 良基停機證書」切片：把 Phase T/U/V 只能自我
+  發明「結構性非遞迴」的算子（T）/ 字母（U）/ 組合深度（V）（三者共同地基：被發明的算子代數零遞迴、零迴圈、
+  零自呼叫，運算式是有限樹，故總步數=樹節點數這個結構性有限量，「有界步數」device 足以保證停機）的能力，推進到
+  系統能自我發明一個會呼叫其他算子（甚至自呼叫）的互遞迴複合算子（= 擴充算子生成文法的『算子是否可互相引用 /
+  自引用』這個結構參數本身，互遞迴外生成，meta⁸）。並納管「互遞迴外生成」憑空長出、Phase T/U/V（非遞迴）時不
+  存在而 Phase W 才出現的新危害：(i) 互遞迴良基停機危害（RecursionClosure，本 Phase 靈魂，且是迄今唯一一個讓
+  「有界步數」device 結構性失效、必須換全新停機判定機制的紅線）——Phase T 的「cost<=3」、U 的「擴充字母表後
+  整代數 cost<=3」、V 的「cost==depth<=STEP_MAX」之所以成立，其共同地基是『算子代數零遞迴、運算式是有限樹』；
+  一旦讓系統自我發明『算子可互相呼叫 / 自呼叫』，運算式「樹」變成運算式「圖」（可含環），一個含環呼叫圖可以
+  是停機的（每次繞環嚴格逼近一個下界=有良基遞減測度）也可以是不停機的（無窮迴圈），而判定一個任意互遞迴算子
+  是否停機字面上就是停機問題本身（不可判定），故「有界步數」device 結構性失效（不能枚舉含環圖數步數，那等於
+  解停機問題）；停機性必須由『有界步數靜態量』升級為『良基停機證書（Well-Founded Termination Certificate）』：
+  呼叫圖為 DAG（無環，結構良基），或每條回邊（自呼叫 / 環）皆嚴格遞減一個下有界（>=0）的良基測度（rank），且
+  硬燃料 fuel<=STEP_MAX——這是「圖靈完備 vs 保證停機」第一次正面逼到不可判定的臨界線本身（meta⁸），meta⁸ 不讓
+  算子代數真正跨入圖靈完備（那會使停機不可判定），而是安裝一道把互遞迴侷限在「可證良基終止之全函式片段
+  （total / structurally-recursive fragment，即 Agda/Coq/Idris 全函式語言的可判定停機邊界）」的證書，凡無法出示
+  良基測度者結構性拒絕、導人類舵手；(ii) 互遞迴無界生成爆炸（呼叫圖節點/邊無上界）；(iii) 互遞迴自我發明 Goodhart
+  （發明一個 node/call/probe 計算自己核可訊號的自指自利互遞迴算子）。9.35.1 互遞迴生成文法自我擴充骨架
+  （RecursionGenesis / BoundedRecursionGrammar，meta⁸）：非遞迴外互遞迴自我發明經 operator_recursion_genesis 在
+  bounded 互遞迴生成文法（有限節點集〔每節點 = operator_genesis 深度-2 base〕× 有限帶 rank 呼叫邊集，呼叫圖只
+  生成 DAG ∨ 每邊嚴格遞減下有界 rank）可枚舉、節點 ≤ SDD_DIM_RECUR_BUDGET（clamp[8,128] 預設 32）、呼叫圖節點 ≤
+  SDD_DIM_RECUR_NODES（clamp[2,8] 預設 4）、fuel ≤ SDD_DIM_OP_STEP_MAX——「非遞迴外」≠「無界」；只提案、絕不自動
+  納入、絕不自寫常數；結構性不 import oracle / 不讀必要性語料（對抗分離，編譯期隔離斷言）。9.35.2 互遞迴自我發明
+  反自利（RecursionGenesisAntiSelfInterest）：互遞迴自我發明的 capability-delta tier 唯一合法來源為
+  operator_recursion_genesis 不可見、content-hashed 凍結的 feature-grounded 互遞迴必要性 held-out（增量覆蓋 ∧
+  非冗餘）勝率；genesis 自評結構性禁止充當；genesis 自評必要但 oracle 判不必要/冗餘一律以 oracle 為準；互遞迴自指
+  守門結構性拒絕（node base/probe 引用保留自指/proposer/oracle 內部信號 self_score/proposer_*/necessity/oracle_* …
+  → recursion_self_reference_guard 在送 oracle 前攔，零漏放）；互遞迴外噪音算子（增量覆蓋 < SDD_DIM_COVERAGE_MARGIN）
+  + 冗餘互遞迴算子（與既有 existing_cost 排序一致率 ≥ SDD_DIM_REDUNDANCY_MAX）兩道正交門檻並列攔截零漏放（新增
+  feature-grounded evaluate_genesis_recursion 不靠算子名）。9.35.3 互遞迴良基停機證書有界停機（RecursionClosureBounded，
+  本 Phase 靈魂、迄今唯一質變停機紅線，因互遞迴=停機可判定性臨界線）：每個自我發明互遞迴算子結構性附帶良基停機
+  證書 + 整代數全函式 + 求值器零真遞迴零 while + fuel 硬上界——(a) 互遞迴算子 = 帶 rank 呼叫圖；生成文法只生成
+  **帶良基 ranking function（每條呼叫邊嚴格遞減下有界 >=0 rank）的呼叫圖**——含線性鏈與**分支/共享/重匯聚呼叫圖**
+  （一個算子呼叫多個其他算子，Phase V 線性深度鏈表達不出，見 RecursiveOperator.fan）；在有限整數 rank 上「含環 ∧
+  每邊嚴格遞減 rank」為空集，故 ranking function ⟹ 無環（DAG）⟹ 可證終止，本 Phase **不 admit 真正含環算子**，fuel
+  為硬後盾；(b) 採納前 guard_recursion_closure 枚舉呼叫圖斷言**帶良基 ranking function（well_founded：每條呼叫邊嚴格
+  遞減下有界 rank）∧ acyclic（Kahn's 交叉驗證）** ∧ fuel ≤ SDD_DIM_OP_STEP_MAX（clamp[1,64] 預設 8）∧ 整代數 fuzz-total
+  （零例外、無 NaN/inf）；(c) 求值器以 rank 升序對整張呼叫圖做良基 fold（折疊每節點所有 callee 已算值，步數 = 節點數
+  <= fuel），零 while/零自呼叫函式（ast 斷言 apply/cost）；觸發 RecursionClosureViolation → MFSM_ESCALATION。良基停機證書定理（良基歸納）：ranking function ⟹ 良基無環，DAG 沿
+  拓樸序至多訪 |N| 次必終止（rank 即嚴格遞減的良基測度，下有界於 0 → 無無窮遞減鏈 → 必終止）；device 之新在於用
+  「呼叫圖上的 ranking function」承載 Phase V 線性深度鏈表達不出的分支/共享/重匯聚呼叫圖、取代「有界運算式樹深度」，
+  而仍可判定終止。把「圖靈完備 vs 保證停機」正面釘在可判定 vs 不可判定的臨界線本身——判定任意
+  含環圖停機 = 停機問題（不可判定），故監督者不去判定它，而是用全新 device「良基測度終止」取代失效的「有界步數」，
+  要求生成端只生成出示良基測度證書的圖，把互遞迴侷限在可證良基終止之全函式片段，而整個閉環仍靠 LLM+紙帶維持
+  圖靈完備。9.35.4 互遞迴基數 + 反 big-bang 互遞迴發明（RecursionGenesisBounded + NoUnboundedRecursionGenesis）：
+  (i) 現存活躍 recursion-genesis 算子數 ≤ SDD_DIM_RECUR_MAX（clamp[1,64] 預設 16）→ 觸頂 RecursionCardinalityExceeded
+  → MFSM_ESCALATION（meta_halt_monitor.guard_recursion_genesis）；(ii) 每週期至多 K_recur（SDD_DIM_EXPAND_K 預設 1，
+  沿用 Phase Q~V）個互遞迴自我發明可進 proposed-pending-signoff，每個必經人工 signoff（守 Rule 8 / 9.27~9.34）；
+  genesis/steersman 絕不自動 commit、絕不自動納入、絕不一次劫持整個互遞迴本體論；退役互遞迴算子再採納須挾 necessity
+  capability-delta（沿用 GraduationRatchet）；誠實標註：互遞迴算子 stock（每互遞迴算子首採、per-fingerprint churn=0、
+  維度/詞彙/算子/字母/深度 stock 天花板皆盲）與良基停機證書（呼叫圖 acyclic ∨ rank 遞減 + fuel<=step_max + 整代數
+  fuzz-total + ast 零真遞迴零 while）是更緊的 runtime/結構精煉，由 guard_recursion_genesis / guard_recursion_closure +
+  RECURSION_GENESIS_GOODHART_FLAP / RECURSION_CLOSURE_FLAP chaos enforce/驗收；META_FSM.tla 的 RecursionGenesisBounded +
+  RecursionClosureBounded 為 single-counter 抽象之歸約引用（互遞迴自我擴充的 add↔retire 迴圈與單指紋 churn 迴圈
+  同構，不無限抖動；被自我擴充的互遞迴圖結構由良基測度證書侷限在可證良基終止之全函式片段）；重用既有 META_FSM、
+  僅補 RecursionGenesisBounded + RecursionClosureBounded INVARIANT、不增狀態 / 變數、不增第六軌；五軌 TLC（SDD 42 /
+  META 13 / FLEET 7 / COMPOSITION 21 / OPTIMIZATION 12）全不回歸、互遞迴發明不污染單軌 SDD_FSM.tla。9.35.5 互遞迴自我
+  發明誠實 + 活體/meta-oracle/真圖靈完備 horizon：feature-grounded 互遞迴必要性勝率 tier 為 capability_level 唯一
+  合法來源，不得謊報、不得用自評充當；真·圖靈完備算子代數（meta⁹+：無良基測度約束、帶無界記憶，使停機不可判定、
+  無靜態 device 可保證停機，只能靠執行期硬 fuel 截斷喪失「可證」，須權衡是否值得放棄「可證停機」）+ 自我發明評估器
+  （meta-oracle 自演化，最高 horizon——它自指地破壞所有 Phase 賴以成立的對抗分離地基〔generator 與 evaluator
+  收斂同基質會掏空全部反 Goodhart 保證〕，未獲 evaluator-of-evaluators 的更高階 held-out meta-corpus + 其反自利
+  證明等對抗分離不可繞過性證明前不得採納）+ 活體 meta⁸ 發明版受 OPEN-10.6 約束續列 horizon（OPEN-W.x 承
+  OPEN-V.x/U.x/T.x/S.x/R.x/Q.x/O.7/M.7/P.7 暫不放寬沙箱）。對應 operator_recursion_genesis（enumerate_genesis_recursion /
+  recursion_self_reference_guard / recursion_genesis / recursion_genesis_round / adopt_genesis_recursion /
+  expanded_recursion_ops / verify_recursion_closure / RecursiveOperator / RecursionNode / TerminationCertificate /
+  RecursionClosureReport / recur_budget / recur_nodes）/ dimension_necessity_oracle（evaluate_genesis_recursion /
+  necessity_score_recursion / load_recursion_corpus / recursion_corpus_fingerprint / RecursionCase /
+  RecursionCandidate）/ meta_halt/meta_ledger（is_recursion_genesis_fingerprint / active_recursion_genesis_features）/
+  meta_halt/meta_halt_monitor（guard_recursion_genesis / RecursionCardinalityExceeded / guard_recursion_closure /
+  RecursionClosureViolation / dim_recur_max）/ steersman_renderer（render_recursion_genesis_proposal）。禁止：
+  operator_recursion_genesis 自動納入互遞迴自我發明 / 自寫常數繞過人工 signoff + guard_recursion_genesis /
+  guard_recursion_closure、用 genesis 自評充當互遞迴自我發明必要性 capability-delta tier（互遞迴自我發明 Goodhart
+  自評放水）、互遞迴自我發明 node/call/probe 自指（引用保留自指 / proposer / oracle 內部信號繞過
+  recursion_self_reference_guard）、operator_recursion_genesis 讀寫 / 影響 / import RCR-* 互遞迴必要性語料或
+  dimension_necessity_oracle、互遞迴自我發明搜尋超 SDD_DIM_RECUR_BUDGET 仍指數展開 / 呼叫圖節點超 SDD_DIM_RECUR_NODES /
+  fuel 超 SDD_DIM_OP_STEP_MAX（破有界互遞迴文法）、自我發明互遞迴算子呼叫圖含無證書環（環中無回邊嚴格遞減下有界
+  rank）/ fuel 超 STEP_MAX / 求值器含真遞迴 while 自呼叫函式 / 整代數出現非全函式算子（破良基停機證書——被自我
+  擴充的互遞迴圖結構不可證良基終止；判定任意圖停機不可判定，「有界步數」device 失效，必須出示良基測度證書）、
+  現存活躍 recursion-genesis 算子超 SDD_DIM_RECUR_MAX 仍無界擴充、一週期同時互遞迴自我發明 > K_recur 個、把
+  recursion-genesis 元迴圈併入單軌 SDD_FSM.tla 或新增第六軌污染五軌 reachable、讓算子代數真正跨入圖靈完備（移除
+  良基測度約束 / 帶無界記憶使停機不可判定）而謊稱「可證停機」、未獲對抗分離不可繞過性證明即採納自我發明評估器
+  （meta-oracle 自演化，掏空全部反 Goodhart 對抗分離地基）、未經 OPEN-W.x 私自開 HTTP 外聯做活體 meta⁸ 發明
+  （破 OPEN-10.6）。
+test_ref: tools/fsm_runtime/tests/test_phase_w.py
+scaffold_roi:
+  fire_count: 0
+  catch_count: 0
+  false_positive_count: 0

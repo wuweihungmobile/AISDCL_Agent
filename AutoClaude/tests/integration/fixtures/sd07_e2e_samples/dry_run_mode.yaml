@@ -1,0 +1,62 @@
+# SD_07 W2 fixture：dry_run 模式完整 phase 序驗證
+# 對應 AC0-1~AC0-3（test_brain_executor_e2e.py::test_dry_run_full_phase_sequence）
+
+scenario: dry_run_mode
+description: |
+  PlaybookRunner(dry_run=True) → Brain/Executor 走 fake 雙端 →
+  驗證 BrainCapabilities 單次呼叫 + cache；
+  驗證 ExecutorPort 不呼叫真實 Claude Code（無 subprocess）；
+  驗證所有 phase 順序符合 PHASE_RESULT_CONTRACT。
+
+playbook:
+  version: "1.0"
+  project: "SD07_DryRun_E2E"
+  global_goal: "驗證 dry_run 完整 phase 序"
+  global_invariants:
+    max_retries_per_step: 1
+    auto_compact_interval: 0
+  tasks:
+    - step_id: "T01"
+      name: "Step 1 (dry_run synthetic success)"
+      prompt: "請輸出 [DRY_RUN_OK]"
+      expected_output_regex: "\\[DRY_RUN_OK\\]"
+    - step_id: "T02"
+      name: "Step 2"
+      prompt: "請輸出 [DRY_RUN_OK]"
+      expected_output_regex: "\\[DRY_RUN_OK\\]"
+
+brain_decisions:
+  capabilities:
+    supports_correction: false
+    supports_escalation: false
+    supports_interrupt: false
+    max_concurrent_attempts: 1
+    model_id: "dry-run-fake"
+  decisions: []
+
+executor_events: []   # dry_run 直接以 regex keyword 合成輸出
+
+expected_phases:
+  - BEFORE_DECIDE
+  - DECIDE
+  - BEFORE_EXEC
+  - EXEC
+  - AFTER_EXEC
+  - BEFORE_DECIDE
+  - DECIDE
+  - BEFORE_EXEC
+  - EXEC
+  - AFTER_EXEC
+
+expected_brain_call_count:
+  capabilities: 1   # 單次 cache（dry_run 也須驗證 cache 機制）
+  decide_correction: 0
+  decide_escalation: 0
+
+expected_subprocess_count: 0   # 紅線：dry_run 不得呼叫真實 Claude Code
+
+expected_kernel_result:
+  success: true
+  halted: false
+  completed_steps: 2
+  total_steps: 2

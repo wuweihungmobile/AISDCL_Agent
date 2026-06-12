@@ -1,0 +1,29 @@
+version: "1.0"
+project: "Equivalence_11_goto_counter_token_halt"
+
+# 場景設計（SD_Improving_02.md v1.1 §0.1）：
+#   驗證 Gap-042：goto_counter / inject_before_counter / skip_to_counter 跨 TOKEN_HALT 持久化
+#   - 3 步 playbook，第 2 步可能觸發 GOTO_STEP 回跳第 1 步
+#   - 連續 2 次後觸發 TOKEN_HALT
+#   - resume 後計數器不歸零
+# dry_run 下：直接執行成功，計數器保持為空 dict（{}）作為 baseline
+
+global_invariants:
+  max_retries_per_step: 3
+  auto_compact_interval: 0
+
+tasks:
+  - step_id: "T01"
+    name: "起點步驟（GOTO 目標）"
+    prompt: "起始並輸出 [GOTO_START]"
+    expected_output_regex: "\\[GOTO_START\\]"
+
+  - step_id: "T02"
+    name: "可能觸發 GOTO 的步驟"
+    prompt: "驗證並輸出 [GOTO_VERIFY]"
+    expected_output_regex: "\\[GOTO_VERIFY\\]"
+
+  - step_id: "T03"
+    name: "結束步驟"
+    prompt: "結束並輸出 [GOTO_END]"
+    expected_output_regex: "\\[GOTO_END\\]"

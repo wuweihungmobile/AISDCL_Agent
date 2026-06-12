@@ -1,0 +1,32 @@
+# AISDLC-SDD — pre-commit（approach 三：自動攔截點 / 系統強制把關）。
+#
+# 安裝（一次）：
+#   pip install pre-commit
+#   pre-commit install                       # 每次 commit 跑 hygiene
+#   pre-commit install --hook-type pre-push  # push 前跑完整離線閘門
+#
+# 分工：commit 階段只跑快速 hygiene；push 階段跑 scripts/ci-gate.sh 完整離線
+# 閘門（pytest not chaos + arch_fitness）。與原生 .githooks/pre-push 為雙保險
+# ——前者需 pre-commit 框架，後者零相依，擇一即可達成「本機過才 push」。
+minimum_pre_commit_version: "3.5.0"
+repos:
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v5.0.0
+    hooks:
+      - id: check-yaml
+        args: [--allow-multiple-documents]
+      - id: end-of-file-fixer
+      - id: trailing-whitespace
+      - id: check-merge-conflict
+      - id: check-added-large-files
+        args: [--maxkb=2048]
+
+  - repo: local
+    hooks:
+      - id: ci-gate-offline
+        name: local CI gate (offline pytest + arch_fitness)
+        entry: bash scripts/ci-gate.sh
+        language: system
+        pass_filenames: false
+        always_run: true
+        stages: [pre-push]

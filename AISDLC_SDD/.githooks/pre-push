@@ -1,0 +1,10 @@
+#!/usr/bin/env bash
+# AISDLC-SDD — git pre-push hook（approach 三，零相依強制把關）。
+# 每次 `git push` 前自動跑本機 CI 閘門；任一硬閘門失敗即中止 push。
+# 啟用：bash scripts/install-hooks.sh  （或 git config core.hooksPath .githooks）
+# 繞過（僅緊急）：git push --no-verify
+set -euo pipefail
+REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+echo "🔒 [pre-push] 執行本機 CI 閘門 scripts/ci-gate.sh（push 前最後防線）…"
+bash "${REPO_ROOT}/scripts/ci-gate.sh"
+echo "✅ [pre-push] 閘門通過，允許 push。"

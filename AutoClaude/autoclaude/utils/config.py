@@ -1,0 +1,183 @@
+from __future__ import annotations
+import os
+import re
+from pathlib import Path
+from typing import Literal, Optional
+import yaml
+from pydantic import BaseModel, Field, field_validator, model_validator
+
+
+class MinimaxConfig(BaseModel):
+    api_key: str = ""
+    base_url: str = "https://api.minimax.chat/v1/text/chatcompletion_v2"
+    model: str = "MiniMax-Text-01"
+    timeout_seconds: int = 30
+
+
+class ClaudeConfig(BaseModel):
+    command: str = "claude"
+    extra_args: list[str] = Field(default_factory=lambda: ["--yes"])
+    continue_flag: str = "--continue"   # 傳遞給 claude 以維持對話脈絡
+    encoding: str = "utf-8"
+
+
+class LoopConfig(BaseModel):
+    max_iterations: int = 20
+    completion_pattern: str = r"執行完畢[,，]\s*報告如下"
+    auth_patterns: list[str] = Field(
+        default_factory=lambda: [
+            r"Do you want to proceed\?",
+            r"\(y/n\)",
+            r"Press Enter to continue",
+            r"Allow this action\?",
+        ]
+    )
+    auth_response: str = "y\n"
+    poll_interval_seconds: float = 0.2
+
+
+class PlaybookConfig(BaseModel):
+    step_timeout_seconds: int = 600        # 每個步驟的最大等待時間
+    evaluator_timeout_seconds: int = 120   # evaluator_command 的最大執行時間
+    global_goal_anchor_chars: int = Field(default=400, ge=100, le=1000)
+    # Gap-013-H：/compact MEMORY ANCHOR 中 [GLOBAL_GOAL] 最大字元數（100~1000，預設 400）
+    max_evolutions: int = Field(default=3, ge=1, le=10)
+    # Gap-020：自動演化最大次數（1~10，預設 3）
+    goal_synthesis_enabled: bool = True
+    # Gap-014：是否啟用 DONE 前的全局目標驗證（預設啟用）
+    global_goal_brief_chars: int = Field(default=150, ge=50, le=500)
+    # Gap-015：非首個步驟的精簡 global_goal 字元數（50~500，預設 150）
+    conditional_evaluator_timeout_seconds: int = 5
+    # Gap-038：CONDITIONAL 突變的 condition_evaluator 執行超時秒數（預設 5 秒）
+    max_goto_per_step: int = 3
+    # Gap-049：GOTO_STEP 每個目標步驟的最大跳轉次數（預設 3，可配置以支援複雜 TDD 場景）
+
+
+class TokenGuardConfig(BaseModel):
+    """Token / Context 用量保護設定。
+
+    SD_06 W5-T5-12 加強 invariants：
+      - halt_threshold_pct 必須 > compact_threshold_pct（既有 M-3/X-3）
+      - resume_delay_minutes ≥ 0（避免負延遲）
+      - max_auto_resumes ≥ 1（避免 0 次自動恢復產生 dead config）
+    """
+    enabled: bool = True
+    # 觸發 /compact 的 context 使用百分比門檻（應低於 halt_threshold_pct）
+    compact_threshold_pct: float = Field(default=80.0, ge=0.0, le=100.0)
+    # 觸發儲存檢查點並暫停的 context 使用百分比門檻
+    halt_threshold_pct: float = Field(default=90.0, ge=0.0, le=100.0)
+    # 儲存檢查點後等待多少分鐘再自動繼續（0 = 立即繼續）
+    resume_delay_minutes: int = Field(default=30, ge=0, le=1440)
+    # True = 等待後自動繼續；False = 儲存檢查點後退出，讓人類決定何時重啟
+    auto_resume: bool = True
+    # 單次 playbook 執行中最多允許多少次自動恢復（防止無限迴圈）
+    max_auto_resumes: int = Field(default=10, ge=1, le=100)
+    # 從 Claude Code 輸出中偵測 context 使用率的 regex patterns
+    # T7（SD_04 §3 / M-4）：補強 Claude Code 實際輸出格式涵蓋率
+    #   - 原 4 個：%context、context%、N/M tokens、[CONTEXT_USAGE: N%]
+    #   - 新 3 個：Context window N / M tokens、[STATS: usage N%]、Token usage: N tokens / max M
+    context_patterns: list[str] = Field(
+        default_factory=lambda: [
+            r"(\d+(?:\.\d+)?)\s*%\s*(?:context|token)",
+            r"(?:context|token)\w*[\s:]+(\d+(?:\.\d+)?)\s*%",
+            r"(\d+)\s*/\s*(\d+)\s*tokens?",
+            r"\[CONTEXT_USAGE:\s*(\d+(?:\.\d+)?)%\]",
+            # 新增：Claude Code "Context window: N / M tokens" 格式
+            r"Context window:\s*(\d+)\s*/\s*(\d+)\s*tokens",
+            # 新增：[STATS: usage N%] 簡短標記
+            r"\[STATS:\s*usage\s*(\d+(?:\.\d+)?)\s*%\]",
+            # 新增：Token usage: N tokens / max M
+            r"Token usage:\s*(\d+)\s*tokens\s*/\s*max\s*(\d+)",
+        ]
+    )
+
+    @model_validator(mode="after")
+    def halt_greater_than_compact(self) -> "TokenGuardConfig":
+        """M-3/X-3 防呆：halt 門檻必須高於 compact 門檻。"""
+        if self.halt_threshold_pct <= self.compact_threshold_pct:
+            raise ValueError(
+                f"halt_threshold_pct({self.halt_threshold_pct}%) 必須 > "
+                f"compact_threshold_pct({self.compact_threshold_pct}%)"
+            )
+        return self
+
+    @field_validator("context_patterns")
+    @classmethod
+    def validate_regex(cls, v: list[str]) -> list[str]:
+        """M-3 防呆：驗證每個 context_patterns 項目都是合法 regex。
+
+        SA-4 修正：加上 re.IGNORECASE 旗標以與 token_tracker.build_patterns()
+        的執行時編譯語意一致（避免「validator 通過但執行時行為不同」陷阱）。
+        """
+        for pattern in v:
+            try:
+                re.compile(pattern, re.IGNORECASE)
+            except re.error as exc:
+                raise ValueError(f"無效 regex pattern '{pattern}': {exc}") from exc
+        return v
+
+
+class NotificationConfig(BaseModel):
+    enabled: bool = True
+    webhook_url: Optional[str] = None
+
+
+class StorageConfig(BaseModel):
+    """Phase 6：State / Playbook backend 三段開關（SD_Improving_02.md v1.1 §2.8）。
+
+    模式語義：
+      - yaml_only（預設）：所有 Playbook 從 .yaml 載入；checkpoints 寫入 file backend。
+                          無 PostgreSQL 依賴，零部署成本，與 v1.x 相容。
+      - both：              Playbook 雙源讀（yaml 優先，DB 兜底）；checkpoints 雙寫（File + PG），
+                          讀取以 File 為主、PG 為災難回復來源。適合 PG 上線首兩週的灰度驗證。
+      - db_only：          Playbook 與 checkpoints 完全使用 PG backend；yaml 僅供匯入。
+                          需 PostgreSQL 運行 + AUTOCLAUDE_DB_DSN 環境變數。
+    """
+    mode: Literal["yaml_only", "both", "db_only"] = "yaml_only"
+    # PostgreSQL DSN（asyncpg 格式）；db_only / both 模式必填，可被 AUTOCLAUDE_DB_DSN 覆寫
+    db_dsn: Optional[str] = None
+    # both 模式下，dual-write 失敗時是否阻斷主寫（False = 僅紀錄 warning，不影響使用者）
+    dual_write_strict: bool = False
+    # both 模式下，dual-read 不一致時的解決策略（"yaml_wins" / "db_wins" / "fail_loud"）
+    dual_read_resolution: Literal["yaml_wins", "db_wins", "fail_loud"] = "yaml_wins"
+
+    @model_validator(mode="after")
+    def db_dsn_required_for_pg(self) -> "StorageConfig":
+        """X-3 防呆：db_only / both 模式必須提供 db_dsn 或環境變數。"""
+        if self.mode in ("both", "db_only"):
+            has_dsn = bool(self.db_dsn)
+            has_env = bool(
+                os.environ.get("AUTOCLAUDE_DB_DSN") or os.environ.get("AUTOCLAUDE_PG_DSN")
+            )
+            if not has_dsn and not has_env:
+                raise ValueError(
+                    f"storage.mode='{self.mode}' 需要 db_dsn 或環境變數 "
+                    "AUTOCLAUDE_DB_DSN / AUTOCLAUDE_PG_DSN"
+                )
+        return self
+
+
+class AppConfig(BaseModel):
+    claude: ClaudeConfig = Field(default_factory=ClaudeConfig)
+    minimax: MinimaxConfig = Field(default_factory=MinimaxConfig)
+    loop: LoopConfig = Field(default_factory=LoopConfig)
+    playbook: PlaybookConfig = Field(default_factory=PlaybookConfig)
+    token_guard: TokenGuardConfig = Field(default_factory=TokenGuardConfig)
+    notification: NotificationConfig = Field(default_factory=NotificationConfig)
+    storage: StorageConfig = Field(default_factory=StorageConfig)
+    log_dir: str = "logs"
+    backup_dir: str = "backups"
+    scripts_dir: str = "scripts"
+    checkpoint_dir: str = "checkpoints"
+    # 工作流程自動偵測的搜尋路徑清單（依序嘗試，找到即回傳）
+    # 空列表 → 僅以 CWD 作為最後備援
+    workflow_search_paths: list[str] = Field(default_factory=list)
+
+
+def load_config(path: str = "config.yaml") -> AppConfig:
+    p = Path(path)
+    if not p.exists():
+        return AppConfig()
+    with p.open(encoding="utf-8") as f:
+        raw = yaml.safe_load(f) or {}
+    return AppConfig.model_validate(raw)

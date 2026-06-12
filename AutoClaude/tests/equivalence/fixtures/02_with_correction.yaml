@@ -1,0 +1,18 @@
+version: "1.0"
+project: "Equivalence_02_with_correction"
+
+global_invariants:
+  max_retries_per_step: 3
+  auto_compact_interval: 0
+
+tasks:
+  - step_id: "T01"
+    name: "需要修正的步驟"
+    prompt: "執行測試並輸出 [TEST_PASSED]"
+    expected_output_regex: "\\[TEST_PASSED\\]"
+    max_retries: 2
+
+  - step_id: "T02"
+    name: "結束步驟"
+    prompt: "完成全部流程並輸出 [DONE]"
+    expected_output_regex: "\\[DONE\\]"

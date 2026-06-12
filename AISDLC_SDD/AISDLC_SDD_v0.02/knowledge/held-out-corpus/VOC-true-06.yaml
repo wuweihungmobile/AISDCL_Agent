@@ -1,0 +1,18 @@
+case_id: VOC-true-06
+expect: true_invention
+genesis:
+  source: cache
+  transform: count
+candidates:
+- real_quality: 0.9
+  existing_cost: 5.0
+  features:
+    cache.count: 0.0
+- real_quality: 0.3
+  existing_cost: 2.0
+  features:
+    cache.count: 9.0
+- real_quality: 0.6
+  existing_cost: 4.0
+  features:
+    cache.count: 4.0

@@ -1,0 +1,61 @@
+#!/usr/bin/env bash
+# AutoClaude git pre-commit hook — 快速本地把關（目標 < 15s，僅針對已暫存檔）
+# 安裝：powershell -ExecutionPolicy Bypass -File tools/install_git_hooks.ps1（設 core.hooksPath=tools/git-hooks）
+# 緊急跳過：AUTOCLAUDE_SKIP_HOOKS=1 git commit ...  或  git commit --no-verify
+# ---------------------------------------------------------------------------
+set -uo pipefail
+
+if [ "${AUTOCLAUDE_SKIP_HOOKS:-0}" = "1" ]; then
+  echo "[pre-commit] AUTOCLAUDE_SKIP_HOOKS=1 → 跳過所有檢查"
+  exit 0
+fi
+
+ROOT="$(git rev-parse --show-toplevel)"
+cd "$ROOT" || exit 1
+export PYTHONUTF8=1
+fail=0
+
+# 1. ruff lint（僅已暫存的 .py）
+staged_py="$(git diff --cached --name-only --diff-filter=ACM -- '*.py')"
+if [ -n "$staged_py" ]; then
+  echo "[pre-commit] 1/4 ruff lint（已暫存 .py）"
+  if command -v ruff >/dev/null 2>&1; then
+    # shellcheck disable=SC2086
+    ruff check $staged_py || fail=1
+  else
+    # shellcheck disable=SC2086
+    python -m ruff check $staged_py || fail=1
+  fi
+fi
+
+# 2. LOC 預算（靜態掃描，快）— 對齊 CI test/claude-md-budget job
+echo "[pre-commit] 2/4 LOC 預算（tools/check_loc_budget.py）"
+python tools/check_loc_budget.py || fail=1
+
+# 3. CLAUDE.md <= 400 行（ADR-SD08-001 / CI hard gate）
+echo "[pre-commit] 3/4 CLAUDE.md <= 400 行"
+if [ -f CLAUDE.md ]; then
+  lines="$(wc -l < CLAUDE.md | tr -d ' ')"
+  if [ "$lines" -gt 400 ]; then
+    echo "::error:: CLAUDE.md=$lines 行 > 400（ADR-SD08-001）"
+    fail=1
+  fi
+fi
+
+# 4. .sh/.bash 必須 LF 行尾（取證紀律 #8；CRLF 會讓 Docker/Linux bash 噴 $'\r'）
+echo "[pre-commit] 4/4 .sh/.bash LF 行尾檢查"
+staged_sh="$(git diff --cached --name-only --diff-filter=ACM | grep -E '\.(sh|bash)$' || true)"
+for f in $staged_sh; do
+  if [ -f "$f" ] && grep -q $'\r' "$f"; then
+    echo "::error:: $f 含 CR/CRLF — .sh 必須 LF（取證紀律 #8）"
+    fail=1
+  fi
+done
+
+if [ "$fail" -ne 0 ]; then
+  echo "[pre-commit] ❌ 失敗 — 請於本機修復後再 commit"
+  echo "           （緊急跳過：AUTOCLAUDE_SKIP_HOOKS=1 或 git commit --no-verify）"
+  exit 1
+fi
+echo "[pre-commit] ✅ 全部通過"
+exit 0

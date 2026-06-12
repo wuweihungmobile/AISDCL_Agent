@@ -1,0 +1,313 @@
+"""build_kernel — Kernel + 15 Plugin + MutationApplyService 組裝工廠（Phase 4）。
+
+對應：
+  - SD_Improving_01.md v1.1 §3.6 Layer 4 CLI 圖
+  - SD_Improving_02.md v1.1 §1.4「main.py 的 DI 組裝為唯一決定後端的位置」
+  - SD_Improving_05 W0 T0-2：抽 `_build_plugin_set()` + `_register_in_order()`
+    解決 wire_plugins_with_registry / build_kernel 兩條路徑的 SSOT 漂移（M-3）
+
+職責：
+  - 接受 AppConfig + 必要相依，組裝完整可運行的 PlaybookKernel
+  - 註冊全部 15 個 Plugin（按 priority 自動排序）
+  - 整合 GotoCounterPlugin + CheckpointPlugin（Gap-042/048/049 計數器持久化）
+"""
+from __future__ import annotations
+
+from typing import Any, Optional
+
+from ..plugins import (
+    CheckpointPlugin,
+    ConvergencePlugin,
+    CrossStepValidatorPlugin,
+    EvolutionPlugin,
+    FastPathPlugin,
+    GlobalGoalAnchorPlugin,
+    GoalSynthesisPlugin,
+    GotoCounterPlugin,
+    HotkeyPlugin,
+    KnowledgeBasePlugin,
+    NotificationPlugin,
+    PlaybookPersistencePlugin,
+    PreRunValidatorPlugin,
+    SddGovernancePlugin,
+    TokenGuardPlugin,
+)
+from ..utils.checkpoint_manager import CheckpointManager
+from ..utils.config import AppConfig
+from ..utils.knowledge_base import FailureKnowledgeBase
+from .event_bus import EventBus
+from .kernel import PlaybookKernel
+from .orchestration import OrchestrationCoordinator
+from .ports.brain import IBrain
+from .ports.evaluator import IEvaluator
+from .ports.executor import IExecutor
+from .ports.observability import IObservabilityPort
+from .services.mutation.service import MutationApplyService
+
+
+# Plugin 註冊順序（SSOT — 兩條組裝路徑共用，避免 M-3 漂移）
+#
+# EventBus 排序規則：
+#   主鍵：plugin.priority()（數值越小越先觸發）
+#   tie-breaker（同 priority 才採用）：本元組的列順序
+#
+# SD_Improving_05 W4-5：新增 2 plugin
+#   - playbook_persistence (priority=40) → priority 高低天然排序（35 < 40 < 50）
+#   - fast_path (priority=50) → **tie-breaker**，需在 notification/knowledge_base/
+#     goal_synthesis（皆 50）之前，確保 PRE_ATTEMPT phase 早於同優先級 plugin 觸發
+#
+# ⚠️ 重要：fast_path / notification / knowledge_base / goal_synthesis 4 個 plugin
+# 共用 priority=50；register 順序就是 tie-breaker，重排會破壞 PRE_ATTEMPT 早觸發語意
+_REGISTER_ORDER: tuple[str, ...] = (
+    "pre_run_validator",
+    "hotkey",
+    "cross_step_validator",
+    "token_guard",
+    "global_goal_anchor",
+    "playbook_persistence",
+    # AutoSDD_improving_01 W7：sdd_governance (priority=45) 插於
+    # playbook_persistence(40) 與 fast_path 等 tie-breaker 群(50) 之間
+    # → SCG 閘門先於快速路徑，且不與 tie-breaker 群同優先級（迴避順序耦合）
+    "sdd_governance",
+    "fast_path",
+    "notification",
+    "knowledge_base",
+    "goal_synthesis",
+    "convergence",
+    "evolution",
+    "goto_counter",
+    "checkpoint",
+)
+
+
+def _build_plugin_set(
+    cfg: AppConfig,
+    *,
+    minimax_client: Optional[Any] = None,
+    hotkey: Optional[Any] = None,
+    state_repository: Optional[Any] = None,
+    observability: Optional[IObservabilityPort] = None,
+    brain: Optional[IBrain] = None,
+) -> dict[str, Any]:
+    """組裝完整的 Plugin 集合（含 MutationApplyService），回傳以 name 為 key 的 dict。
+
+    SD_Improving_05 W0 T0-2：SSOT 抽出，wire_plugins_with_registry 與 build_kernel
+    皆改呼叫此函式，避免兩條路徑漂移（M-3）。
+
+    回傳 key（與 _REGISTER_ORDER 對應 + 兩個非註冊項）：
+      註冊：pre_run_validator, hotkey?, cross_step_validator, token_guard,
+            global_goal_anchor, playbook_persistence, sdd_governance, fast_path,
+            notification, knowledge_base, goal_synthesis,
+            convergence, evolution, goto_counter, checkpoint
+      非註冊：mutation_service（注入 PlaybookKernel）
+    """
+    # SD_04 W2 三方審查 Dev-W2-Crit-1 / Arch-W2-Maj-1：id_resolver SSOT
+    # （確保 db_only / both 模式下 CheckpointPlugin 與 AutoResumeService 使用一致 ID）
+    from ..infra.repositories.factory import canonical_playbook_id  # noqa: PLC0415
+
+    kb_path = f"{cfg.checkpoint_dir}/failure_knowledge_base.jsonl"
+    checkpoint_mgr = CheckpointManager(
+        cfg.checkpoint_dir,
+        repository=state_repository,
+        id_resolver=lambda p: canonical_playbook_id(p, cfg.storage.mode),
+    )
+
+    plugins: dict[str, Any] = {
+        "pre_run_validator": PreRunValidatorPlugin(),
+        "cross_step_validator": CrossStepValidatorPlugin(),
+        "token_guard": TokenGuardPlugin(token_guard_cfg=cfg.token_guard),
+        "global_goal_anchor": GlobalGoalAnchorPlugin(playbook_cfg=cfg.playbook),
+        # SD_Improving_05 W4-3：PlaybookPersistencePlugin（ON_EVOLUTION_APPLY phase）
+        "playbook_persistence": PlaybookPersistencePlugin(
+            checkpoint_dir=cfg.checkpoint_dir,
+        ),
+        # SD_Improving_05 W4-2：FastPathPlugin（PRE_ATTEMPT phase）
+        "fast_path": FastPathPlugin(),
+        "notification": NotificationPlugin(
+            enabled=cfg.notification.enabled, app_config=cfg
+        ),
+        "knowledge_base": KnowledgeBasePlugin(
+            # SD_08 W4 / ADR-SD08-004 §2.4：注入 IObservabilityPort 啟用 4 metric emit
+            # （未注入 observability 時為 None，metrics 純記憶體累計仍生效）
+            knowledge_base=FailureKnowledgeBase(kb_path, observability=observability)
+        ),
+        "goal_synthesis": GoalSynthesisPlugin(
+            minimax_client=minimax_client,
+            enabled=cfg.playbook.goal_synthesis_enabled,
+        ),
+        # AutoSDD_improving_01 W7：SddGovernancePlugin（PRIORITY=45）。
+        # ISpecSource 於 wiring 組裝注入——wiring 是 core-purity contract（#2）
+        # 唯一豁免點，import infra adapter 合法。plugin 於 PRE_RUN 依
+        # workflow_type ∈ {aisdlc, aisdlc_sdd} 自行啟用，非 SDD playbook 全程 no-op。
+        "sdd_governance": _build_sdd_governance(brain, observability),
+        "convergence": ConvergencePlugin(),
+        "evolution": EvolutionPlugin(minimax_client=minimax_client),
+        "goto_counter": GotoCounterPlugin(playbook_cfg=cfg.playbook),
+        # W4-T17 / M-11：CheckpointPlugin 解耦；attach_bus 由 _register_in_order 處理
+        "checkpoint": CheckpointPlugin(checkpoint_manager=checkpoint_mgr),
+        # mutation_service 非 Plugin，不會被 register；供 PlaybookKernel 注入
+        "mutation_service": MutationApplyService(),
+    }
+    if hotkey is not None:
+        plugins["hotkey"] = HotkeyPlugin(hotkey_handler=hotkey)
+
+    return plugins
+
+
+def _build_sdd_governance(
+    brain: Optional[IBrain], observability: Optional[IObservabilityPort],
+) -> SddGovernancePlugin:
+    """組裝 SddGovernancePlugin + SddToPlaybookAdapter（ISpecSource 實作）。
+
+    延遲 import infra adapter（wiring 為 core-purity 唯一豁免點，與
+    build_kernel 內 LocalLogger 既有先例同模式）。
+    """
+    from ..infra.adapters.sdd_to_playbook_adapter import SddToPlaybookAdapter  # noqa: PLC0415
+    return SddGovernancePlugin(
+        brain=brain,
+        observability=observability,
+        spec_source=SddToPlaybookAdapter(observability=observability),
+    )
+
+
+def _register_in_order(bus: EventBus, plugins: dict[str, Any]) -> None:
+    """按 _REGISTER_ORDER 註冊 Plugin 並對 CheckpointPlugin attach_bus。
+
+    SD_Improving_05 W0 T0-2：SSOT 抽出，兩條組裝路徑共用此註冊邏輯。
+
+    W4 三方審查 Arch-W4-Maj-2：CheckpointPlugin 的 attach_bus 緊跟 register 後立即
+    執行，避免未來新增 PRE_RUN dispatch hook 時的順序依賴。
+    """
+    for name in _REGISTER_ORDER:
+        plugin = plugins.get(name)
+        if plugin is None:
+            continue
+        bus.register(plugin)
+        if isinstance(plugin, CheckpointPlugin) and hasattr(plugin, "attach_bus"):
+            plugin.attach_bus(bus)
+
+
+def wire_plugins_with_registry(
+    bus: EventBus,
+    *,
+    config: AppConfig,
+    minimax_client: Optional[Any] = None,
+    hotkey: Optional[Any] = None,
+    state_repository: Optional[Any] = None,
+    observability: Optional[IObservabilityPort] = None,
+    brain: Optional[IBrain] = None,
+) -> dict[str, Any]:
+    """組裝 Plugin 並回傳 dict（供測試斷言 plugin state）。
+
+    SD_Improving_05 W0 T0-2：改呼叫 _build_plugin_set + _register_in_order，
+    與 build_kernel 共用唯一 SSOT 來源。
+
+    SD_Improving_05 W0 三方審查 Arch-M3 / SD-M7：補 state_repository 參數，
+    與 build_kernel 對稱，消除「test 路徑 CheckpointManager 永遠 repository=None」
+    的隱性不等價問題。
+
+    SD_09 Pre-W0 audit P0-03：補 observability 參數與 build_kernel 對稱；
+    未注入時 KnowledgeBasePlugin 仍 fallback 記憶體累計（不破壞測試）。
+    """
+    plugins = _build_plugin_set(
+        config,
+        minimax_client=minimax_client,
+        hotkey=hotkey,
+        state_repository=state_repository,
+        observability=observability,
+        brain=brain,
+    )
+    _register_in_order(bus, plugins)
+    return plugins
+
+
+def build_kernel(
+    cfg: AppConfig,
+    *,
+    executor: IExecutor,
+    evaluator: IEvaluator,
+    brain: Optional[IBrain] = None,
+    hotkey: Optional[Any] = None,
+    minimax_client: Optional[Any] = None,
+    state_repository: Optional[Any] = None,
+    observability: Optional[IObservabilityPort] = None,
+) -> PlaybookKernel:
+    """組裝完整的 PlaybookKernel。
+
+    註冊所有 15 個 Plugin 並注入相應依賴。Plugin 的 priority 由各 Plugin 類別
+    本身的 ``PRIORITY`` 常數決定（W4-T15 m-6），EventBus 在 register 時透過
+    ``hook.priority()`` 自動排序，此處不再硬編碼數值。
+
+    SD_Improving_05 W0 T0-2：改呼叫 _build_plugin_set + _register_in_order，
+    與 wire_plugins_with_registry 共用唯一 SSOT 來源，杜絕 M-3 漂移。
+
+    PRIORITY 對照表（來源：各 plugins/*.py 內 `PRIORITY` 常數，僅供讀者參考）：
+      5  PreRunValidatorPlugin
+      10 HotkeyPlugin
+      15 CrossStepValidatorPlugin
+      30 TokenGuardPlugin
+      35 GlobalGoalAnchorPlugin
+      40 PlaybookPersistencePlugin（SD_05 W4-3）
+      45 SddGovernancePlugin（AutoSDD W6）
+      50 FastPathPlugin / NotificationPlugin / KnowledgeBasePlugin / GoalSynthesisPlugin
+         （SD_05 W4-2：FastPathPlugin tie-breaker register 在 notification 前）
+      65 ConvergencePlugin
+      70 EvolutionPlugin
+      85 GotoCounterPlugin
+      90 CheckpointPlugin
+    """
+    # SD_08 W4 / ADR-SD08-004 §2.1：build_kernel 預設注入 LocalLogger
+    # （唯一 W4 Adapter；caller 可顯式傳 observability 覆寫，例如 NullObservability for tests）
+    if observability is None:
+        from ..infra.adapters.observability import LocalLogger  # noqa: PLC0415
+        observability = LocalLogger()
+
+    bus = EventBus()
+    plugins = _build_plugin_set(
+        cfg,
+        minimax_client=minimax_client,
+        hotkey=hotkey,
+        state_repository=state_repository,
+        observability=observability,
+        brain=brain,
+    )
+    _register_in_order(bus, plugins)
+
+    return PlaybookKernel(
+        executor=executor,
+        evaluator=evaluator,
+        bus=bus,
+        brain=brain,
+        mutation_service=plugins["mutation_service"],
+        observability=observability,
+    )
+
+
+def build_coordinator(
+    *,
+    bus: EventBus,
+    brain: IBrain,
+    executor: IExecutor,
+    max_active_runs_per_goal: Optional[int] = None,
+) -> OrchestrationCoordinator:
+    """組裝 OrchestrationCoordinator（SD_Improving_06 W1 T1-5）。
+
+    對應 ADR-SD06-001 §2 雙層架構：Layer 1.5（Coordinator）介於 Kernel
+    與 Layer 2 AutoResumeService 之間。
+
+    呼叫鏈：
+      AutoResumeService.run()         ← Layer 2（外層 retry / auto_resume / evolution）
+        → Kernel.run()                ← dispatch HookSpec phases + 15 Plugin
+          → Coordinator.run_step()    ← Layer 1.5（per step Brain/Executor 協調）
+
+    Args:
+        bus: 與 PlaybookKernel 共用同一 EventBus 實例
+        brain / executor: 與 PlaybookKernel 共用相同 adapter
+        max_active_runs_per_goal: PM #8 guard 上限（None=讀環境變數 / 預設 5）
+    """
+    return OrchestrationCoordinator(
+        bus=bus,
+        brain=brain,
+        executor=executor,
+        max_active_runs_per_goal=max_active_runs_per_goal,
+    )

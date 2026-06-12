@@ -1,0 +1,160 @@
+# AISDLC-SDD — Architecture Fitness（演化式架構守門 / Framework Self-Evolution SENSE）
+#
+# 對應：
+#   - workflow/sdd-self-evolution/SDD_SELF_EVOLUTION.md（FSE_SENSE / FSE_VERIFY 量測）
+#   - tools/arch_fitness/arch_fitness.py（FF-1~FF-14 全數實作：三源/governance/孤兒/觀測態/§9/
+#     連結/引用/規則強制可追溯/Scaffold-ROI/死規則/Skill frontmatter/critical 錯置/Agent YAML/
+#     CI workflow 工具模組引用）
+#   - nightly 以 --trend 把每日 score 累積回寫 build/reports/fse/TREND.yaml（R4 趨勢可觀測）
+#
+# 雙軌（呼應框架 advisory vs blocking 哲學，Rule 9.11.3）：
+#   1. pr-advisory   — 每個 PR 跑非 strict，把 fitness 報告貼進 Step Summary；
+#                      永遠 exit 0、絕不阻擋（governance 遷移等屬漸進式 advisory）。
+#   2. nightly-strict— 每日 02:30 UTC 跑 --strict；structural fail（FF-1 不一致 /
+#                      FF-3 孤兒 / FF-4 ∩Terminals / FF-8 規則無有效強制測試 /
+#                      FF-9 scaffold_roi 基座缺漏 / FF-10 死規則 / FF-11 skill frontmatter 不全 /
+#                      FF-12 critical 規則錯置 / FF-14 workflow 引用不存在的工具模組）即紅，
+#                      作為架構回歸硬守門。
+#
+# Runner：ubuntu-latest。downstream 採用者複製本檔到自家 repo root；
+#         若框架碼不在 AISDLC_SDD_v0.01/ 下，僅需改 working-directory。
+
+name: arch-fitness
+
+on:
+  pull_request:
+  schedule:
+    - cron: "30 2 * * *"   # 02:30 UTC，排在 fsm-chaos-nightly(02:00) 之後
+  workflow_dispatch:
+
+# PR-advisory 併發以分支序列化（同分支新 push 取消舊跑，省 runner）；
+# nightly-strict 推送 main 的序列化改用 job-level `main-push-serialize`
+# 群組（與 drift-daily 共用），見下方 job。
+concurrency:
+  group: arch-fitness-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  pr-advisory:
+    name: architecture fitness (advisory)
+    if: github.event_name == 'pull_request' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.11"
+      - name: Install deps
+        working-directory: AISDLC_SDD_v0.01
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements-ci.txt
+      - name: Run fitness (advisory, never blocks)
+        working-directory: AISDLC_SDD_v0.01
+        run: |
+          # 一次跑：印報告到 stdout 並寫 JSON artifact；|| true 確保永不阻擋 PR
+          report="$(python -m tools.arch_fitness.arch_fitness --json arch-fitness.json || true)"
+          {
+            echo "### 架構適應度報告（advisory）"
+            echo ""
+            echo '```'
+            echo "${report}"
+            echo '```'
+          } >> "${GITHUB_STEP_SUMMARY}"
+      - name: Upload findings
+        if: always()
+        continue-on-error: true   # observability-only；artifact 配額耗盡不得判紅
+        uses: actions/upload-artifact@v5
+        with:
+          name: arch-fitness-findings
+          path: AISDLC_SDD_v0.01/arch-fitness.json
+          retention-days: 7
+
+  nightly-strict:
+    name: architecture fitness (strict gate)
+    if: github.event_name == 'schedule'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    # 與 drift-daily 共用同一 cron(02:30) 且都 push main；用全域 job-level
+    # concurrency 群組序列化兩者的推送，避免 non-fast-forward 競爭。
+    concurrency:
+      group: main-push-serialize
+      cancel-in-progress: false
+    permissions:
+      contents: write   # 回寫 build/reports/fse/TREND.yaml（趨勢累積）— 鏡像 drift-daily.yml
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0   # rebase-retry 需完整歷史，與 drift-daily 對齊（避免 shallow rebase 失敗）
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.11"
+      - name: Install deps
+        working-directory: AISDLC_SDD_v0.01
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements-ci.txt
+      - name: Run fitness (strict + trend)
+        id: fitness
+        working-directory: AISDLC_SDD_v0.01
+        run: |
+          # --strict：structural fail → exit 2；advisory warn → exit 1。
+          # --trend：把本次 score 追加進 TREND.yaml（單次執行，避免重複追加）。
+          set +e
+          report="$(python -m tools.arch_fitness.arch_fitness --strict \
+                      --json arch-fitness.json --trend build/reports/fse/TREND.yaml)"
+          code=$?
+          echo "arch_fitness exit=${code}"
+          echo "code=${code}" >> "${GITHUB_OUTPUT}"
+          {
+            echo "### 架構適應度（nightly strict）— exit=${code}"
+            echo ""
+            echo '```'
+            echo "${report}"
+            echo '```'
+          } >> "${GITHUB_STEP_SUMMARY}"
+          exit 0
+      - name: Persist score trend (commit back)
+        if: always()
+        working-directory: AISDLC_SDD_v0.01
+        run: |
+          set -eu
+          git config user.name  "sdd-arch-fitness-bot"
+          git config user.email "sdd-arch-fitness-bot@users.noreply.github.com"
+          git add build/reports/fse/TREND.yaml
+          if git diff --cached --quiet; then
+            echo "No TREND change to commit."
+          else
+            git commit -m "chore(arch-fitness): score trend $(date -u +%Y-%m-%dT%H:%MZ) [skip ci]"
+            # rebase-retry：另一支 nightly 可能已先 push，避免 non-fast-forward 失敗。
+            n=0
+            until git push; do
+              n=$((n+1))
+              if [ "$n" -ge 5 ]; then
+                echo "::error::push TREND failed after 5 retries"; exit 1
+              fi
+              echo "push rejected (attempt $n) — rebasing onto origin/main…"
+              git rebase --abort 2>/dev/null || true   # 清除前次殘留 rebase 狀態
+              git pull --rebase --autostash origin main || true
+              sleep 3
+            done
+          fi
+      - name: Upload findings + trend
+        if: always()
+        continue-on-error: true   # observability-only；artifact 配額耗盡不得判紅
+        uses: actions/upload-artifact@v5
+        with:
+          name: arch-fitness-findings-nightly
+          path: |
+            AISDLC_SDD_v0.01/arch-fitness.json
+            AISDLC_SDD_v0.01/build/reports/fse/TREND.yaml
+          retention-days: 7
+      - name: Enforce strict gate
+        if: always()
+        run: |
+          # structural fail（exit 2）才把 nightly 判紅；advisory warn（exit 1）放行。
+          if [ "${{ steps.fitness.outputs.code }}" -ge 2 ]; then
+            echo "::error::arch_fitness 偵測到 structural fail（FF-1/3/4 等）"
+            exit 1
+          fi

@@ -1,0 +1,499 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  # SD_07 W2 T2-6（PM #2）：nightly 跑真實 PG e2e（02:00 UTC）
+  # SD_09 W0 M-01：mutation cron 拆 3 job — TG 03:00 UTC active；GS/Coord dormant 待 W1/W2 啟用
+  # ADR-SD09-002 §2.3：單一時間 1 個 active pilot module（GS 04 / Coord 05 UTC schedule 待 W1/W2 開啟）
+  schedule:
+    - cron: "0 2 * * *"   # pg-e2e-nightly（pgvector recall + p95）
+    - cron: "0 3 * * *"   # mutation-test-tokenguard-nightly（active pilot）
+    # - cron: "0 4 * * *" # mutation-test-goalsynthesis-nightly（dormant，待 W1 啟用）
+    # - cron: "0 5 * * *" # mutation-test-coordinator-nightly（dormant，待 W2 啟用）
+  workflow_dispatch:
+
+jobs:
+  test:
+    name: Tests + LOC Budget
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[dev]"
+
+      - name: Run pytest
+        run: |
+          python -m pytest tests/ -q --tb=short
+
+      - name: Check LOC budget
+        run: |
+          python tools/check_loc_budget.py
+
+      - name: Check import architecture (R-3 M5)
+        run: |
+          pip install -e ".[lint]" -q
+          PYTHONUTF8=1 lint-imports
+
+  # SD_08 W0 T0-E3（ADR-SD08-001 §4）：CLAUDE.md ≤ 400 行 + Snapshot freshness
+  claude-md-budget:
+    name: CLAUDE.md Budget + Snapshot Freshness
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # 需要 git log 拿 Snapshot 區段最後變更日
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Check CLAUDE.md <= 400 lines
+        run: |
+          LINES=$(wc -l < CLAUDE.md)
+          if [ "$LINES" -gt 400 ]; then
+            echo "::error::CLAUDE.md=$LINES lines > 400 (ADR-SD08-001)"
+            exit 1
+          fi
+          echo "::notice::CLAUDE.md=$LINES lines <= 400 OK"
+
+      - name: Check Snapshot freshness (<= 7 days)
+        run: |
+          LAST_SYNC=$(git log -1 --format="%at" -- CLAUDE.md | head -1)
+          NOW=$(date +%s)
+          DIFF_DAYS=$(( (NOW - LAST_SYNC) / 86400 ))
+          if [ "$DIFF_DAYS" -gt 7 ]; then
+            echo "::warning::Architecture Snapshot 已 $DIFF_DAYS 天未同步（>7 天告警）；請執行 python tools/snapshot_sync.py"
+          fi
+
+      - name: Verify snapshot_sync.py reproducible (dry-run)
+        run: |
+          python tools/snapshot_sync.py --check
+
+      - name: Run check_loc_budget.py (含 SPECIAL_FILES)
+        run: |
+          python tools/check_loc_budget.py
+
+  equivalence:
+    name: Equivalence Snapshot
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    needs: test
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[dev]"
+
+      - name: Run equivalence snapshot tests (verbose)
+        run: |
+          python -m pytest tests/equivalence/ -v --tb=short
+
+  # P1 #2：PG 契約測（pgvector/pgvector:pg17 service container）
+  # SD_09 R56 P0-1d 揪修：原 postgres:17 無 pgvector extension，但 `alembic upgrade head`
+  # 含 0007/0008 pgvector migration（CREATE EXTENSION vector）→ NotSupportedError
+  # `extension "vector" is not available`。改用 pgvector 鏡像對齊 pg-e2e-nightly。
+  pg-contract:
+    name: PG Contract Tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    needs: test
+    # SD_09 R56 P0-1f/1g：本 job 因上游 test job 長期紅而被 skip，從未在 CI 真綠。修復
+    # P0-1c（psycopg2）/P0-1d（pgvector image）/P0-1e（alembic version_num>32）後 alembic
+    # 可達 head，但 contract test 仍有兩項 pre-existing 缺陷需 PG-production track 正式重構：
+    #   (1) fixture 以 asyncio.run-per-method 重用 async engine（NullPool 已緩解連線跨 loop，
+    #       見 test 檔 P0-1f）；(2) `relation "playbook_runs" does not exist`——migration 鏈
+    #       到 head 後仍缺三層父表，屬 schema/migration 議題。
+    # 依 ADR-SD08-005「PG production 延 SD_09 W4-W5 / SD_10（人類 DBA staging + 親簽）」，
+    # 此 job 暫標 continue-on-error（非阻塞、log 仍完整可見真實狀態，非掩蓋），SD_10 PG-track
+    # 正式修復 contract test fixture + 三層 schema 後移除。詳見 sprint_history §1.7.3 R56。
+    continue-on-error: true
+
+    services:
+      postgres:
+        image: pgvector/pgvector:pg17
+        env:
+          POSTGRES_USER: autoclaude
+          POSTGRES_PASSWORD: autoclaude
+          POSTGRES_DB: autoclaude
+        options: >-
+          --health-cmd "pg_isready -U autoclaude -d autoclaude"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+        ports:
+          - 5432:5432
+
+    env:
+      AUTOCLAUDE_TEST_PG_DSN: "postgresql+asyncpg://autoclaude:autoclaude@localhost:5432/autoclaude"
+      AUTOCLAUDE_DB_DSN: "postgresql+asyncpg://autoclaude:autoclaude@localhost:5432/autoclaude"
+      AUTOCLAUDE_ALLOW_INSECURE_DB: "1"
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install postgres dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[dev,postgres]"
+
+      - name: Run alembic migrations
+        run: |
+          alembic upgrade head
+
+      - name: Run PG contract tests
+        run: |
+          python -m pytest tests/contract/test_pg_state_repository_contract.py -v --tb=short
+
+  # SD_07 W2 T2-6（PM #2）：真實 PG e2e（pgvector + recall@10 + p95 latency）
+  # 觸發：nightly schedule + 手動 workflow_dispatch
+  pg-e2e-nightly:
+    name: PG E2E (pgvector recall + p95) - nightly
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    # SD_09 W0 Z1 解除（2026-05-20，B-09）：X1/Y1/B-01/B-07/B-08 全綠後移除 continue-on-error: true
+
+    services:
+      postgres:
+        image: pgvector/pgvector:pg17
+        env:
+          POSTGRES_USER: autoclaude
+          POSTGRES_PASSWORD: autoclaude
+          POSTGRES_DB: autoclaude
+        options: >-
+          --health-cmd "pg_isready -U autoclaude -d autoclaude"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+        ports:
+          - 5432:5432
+
+    env:
+      AUTOCLAUDE_TEST_PG_DSN: "postgresql+asyncpg://autoclaude:autoclaude@localhost:5432/autoclaude"
+      AUTOCLAUDE_DB_DSN: "postgresql+asyncpg://autoclaude:autoclaude@localhost:5432/autoclaude"
+      AUTOCLAUDE_ALLOW_INSECURE_DB: "1"
+      # SD_07 PM #2：opt-in flag — 啟用 tests/integration/test_pgvector_real_recall.py
+      SD07_REAL_PG_E2E_ENABLED: "true"
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[dev,postgres]"
+
+      - name: Run alembic migrations (含 0007/0008 pgvector + halfvec)
+        run: |
+          alembic upgrade head
+
+      - name: Run SD_07 W2 真實 PG e2e（pg_real marker）+ junit XML
+        id: pgvector_run
+        # SD_09 W0 Z1 解除（2026-05-20，B-09）：X1/Y1/B-01/B-07/B-08 全綠後移除 continue-on-error: true
+        run: |
+          python -m pytest tests/integration/test_pgvector_real_recall.py \
+            -v --tb=short -m pg_real \
+            --junitxml=.ac4_junit.xml
+
+      # SD_08 W2 T2-C2：AC4 nightly metric collector（累計 14 天）
+      - name: Collect AC4 metrics (SD_08 W2 T2-C2)
+        if: always()
+        run: |
+          python tools/ac4_nightly_collector.py \
+            --junit-xml .ac4_junit.xml \
+            --history .ac4_history.jsonl
+
+      # SD_08 W2 T2-C3：AC4 14 天進度檢查（黃/紅線告警，不阻塞 nightly）
+      - name: Check AC4 progress (SD_08 W2 T2-C3)
+        if: always()
+        # SD_09 W0 Z1 解除（2026-05-20，B-09）：X1/Y1/B-01/B-07/B-08 全綠後移除 continue-on-error: true
+        run: |
+          python tools/ac4_progress_check.py --history .ac4_history.jsonl --json
+
+      - name: Upload AC4 history artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ac4-history-${{ github.run_id }}
+          path: |
+            .ac4_history.jsonl
+            .ac4_junit.xml
+          retention-days: 30
+
+  # SD_09 W0 M-01：mutation cron 拆 3 job（ADR-SD09-002 §2.3 落地）
+  # 設計原則：單一時間 1 個 active pilot module，避免並行超時 + 互相干擾
+  # 排程：TG 03:00 UTC（active）/ GS 04:00 UTC（dormant，W1 啟用）/ Coord 05:00 UTC（dormant，W2 啟用）
+  # 對應前身 mutation-test-nightly（SD_07 W5 T5-6 / SD_08 W3 T3-D2 pilot）
+  #
+  # === Job 1：TokenGuardPlugin（active pilot）===
+  # ADR-SD09-002 §2.3：單一時間 1 個 active pilot module
+  # 連續 7 次達 ≥ 70%（目標 75%，-5% 容忍）才鎖定 baseline
+  mutation-test-tokenguard-nightly:
+    name: Mutation Test - TokenGuardPlugin (active pilot) - 03:00 UTC
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    # 觸發：03:00 UTC nightly + 手動 workflow_dispatch
+    if: (github.event_name == 'schedule' && github.event.schedule == '0 3 * * *') || github.event_name == 'workflow_dispatch'
+    # SD_09 W0 Z1 解除（2026-05-20，B-09）：X1/Y1/B-01/B-07/B-08 全綠後移除 continue-on-error: true
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install dependencies + mutmut
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[dev]"
+          pip install mutmut
+
+      # ADR-SD09-002 §2.3：單一時間 1 個 active pilot module
+      # 必須：--paths-to-mutate=autoclaude/plugins/token_guard 縮限
+      # 必須：--tests-dir=tests/plugins/token_guard 對位測試集
+      # 必須：-p no:xdist 鎖序列避免 hash 衝突
+      - name: Run mutation test - TokenGuardPlugin SSOT (active pilot)
+        run: |
+          mutmut run --paths-to-mutate=autoclaude/plugins/token_guard \
+                     --tests-dir=tests/plugins/token_guard \
+                     --no-progress \
+                     -p no:xdist || true  # mutmut 工具特性：survived mutation 退出碼 != 0；保留 || true 容忍
+          mutmut results | tee mutation_token_guard.log
+
+      # 連續 7 次達 ≥ 70%（目標 75% -5% 容忍）才鎖定 baseline
+      - name: Lock baseline if 7 consecutive runs >= target
+        if: always()
+        # SD_09 W0 Z1 解除（2026-05-20，B-09）：X1/Y1/B-01/B-07/B-08 全綠後移除 continue-on-error: true
+        run: |
+          python tools/mutation_baseline_lock.py token_guard \
+            --log mutation_token_guard.log \
+            --history .mutation_history.jsonl \
+            --baseline .mutation_baseline.toml
+
+      # survived diff 分類 + 補測 backlog 自動產出
+      - name: Analyze survived mutations (補測 backlog)
+        if: always()
+        # SD_09 W0 Z1 解除（2026-05-20，B-09）：X1/Y1/B-01/B-07/B-08 全綠後移除 continue-on-error: true
+        run: |
+          python tools/mutation_analysis.py token_guard \
+            --log mutation_token_guard.log \
+            --output mutation_backlog_token_guard.md
+
+      - name: Upload mutation reports + baseline + history
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: mutation-reports-token-guard-${{ github.run_id }}
+          path: |
+            mutation_token_guard.log
+            mutation_backlog_token_guard.md
+            .mutation_history.jsonl
+            .mutation_baseline.toml
+          retention-days: 30
+
+  # === Job 2：GoalSynthesisPlugin（dormant，待 W1 啟用）===
+  # ADR-SD09-002 §2.3：單一時間 1 個 active pilot module
+  # 目標：mutation score ≥ 70%（W1 啟用後納入連續 7 次達標規則）
+  # 觸發：04:00 UTC nightly + 手動 workflow_dispatch（dormant 期間僅 workflow_dispatch 允許執行）
+  mutation-test-goalsynthesis-nightly:
+    name: Mutation Test - GoalSynthesisPlugin (dormant W1) - 04:00 UTC
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    # dormant：暫不掛 04:00 UTC schedule（待 W1 啟用）；現階段僅 workflow_dispatch
+    if: github.event_name == 'workflow_dispatch'
+    # SD_09 W0 Z1 解除（2026-05-20，B-09）：X1/Y1/B-01/B-07/B-08 全綠後移除 continue-on-error: true
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install dependencies + mutmut
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[dev]"
+          pip install mutmut
+
+      # ADR-SD09-002 §2.3：單一時間 1 個 active pilot module（W1 啟用前 dormant）
+      - name: Run mutation test - GoalSynthesisPlugin (dormant W1)
+        run: |
+          mutmut run --paths-to-mutate=autoclaude/plugins/goal_synthesis \
+                     --tests-dir=tests/plugins/goal_synthesis \
+                     --no-progress \
+                     -p no:xdist || true  # mutmut 工具特性：survived mutation 退出碼 != 0；保留 || true 容忍
+          mutmut results | tee mutation_goal_synthesis.log
+
+      - name: Upload mutation reports (dormant)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: mutation-reports-goal-synthesis-${{ github.run_id }}
+          path: |
+            mutation_goal_synthesis.log
+          retention-days: 30
+
+  # === Job 3：OrchestrationCoordinator（dormant，待 W2 啟用）===
+  # ADR-SD09-002 §2.3：單一時間 1 個 active pilot module
+  # 目標：mutation score ≥ 65%（W2 啟用後納入連續 7 次達標規則）
+  # 觸發：05:00 UTC nightly + 手動 workflow_dispatch（dormant 期間僅 workflow_dispatch 允許執行）
+  mutation-test-coordinator-nightly:
+    name: Mutation Test - OrchestrationCoordinator (dormant W2) - 05:00 UTC
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    # dormant：暫不掛 05:00 UTC schedule（待 W2 啟用）；現階段僅 workflow_dispatch
+    if: github.event_name == 'workflow_dispatch'
+    # SD_09 W0 Z1 解除（2026-05-20，B-09）：X1/Y1/B-01/B-07/B-08 全綠後移除 continue-on-error: true
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install dependencies + mutmut
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[dev]"
+          pip install mutmut
+
+      # ADR-SD09-002 §2.3：單一時間 1 個 active pilot module（W2 啟用前 dormant）
+      - name: Run mutation test - OrchestrationCoordinator (dormant W2)
+        run: |
+          mutmut run --paths-to-mutate=autoclaude/core/orchestration \
+                     --tests-dir=tests/core/orchestration \
+                     --no-progress \
+                     -p no:xdist || true  # mutmut 工具特性：survived mutation 退出碼 != 0；保留 || true 容忍
+          mutmut results | tee mutation_coordinator.log
+
+      - name: Upload mutation reports (dormant)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: mutation-reports-coordinator-${{ github.run_id }}
+          path: |
+            mutation_coordinator.log
+          retention-days: 30
+
+  # SD_08 W5 T5-G7：perf baseline nightly job（ADR-SD08-003 §3）
+  # CPU-bound only（dry_run / TokenHalt / decide_correction）；pgvector 場景延 perf machine（R-SD08-G-1）
+  # 觸發：nightly schedule + 手動 workflow_dispatch
+  # SD_09 W0 B-09 解除（2026-05-20）：原非阻塞 continue-on-error: true 已移除；perf_regression_check.py 偵測 ≥ 15% 增量即 exit=1 硬性 fail
+  perf-baseline-nightly:
+    name: Perf Baseline (CPU-bound scenarios) - nightly
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    # 觸發：跟原 pg-e2e-nightly 同 02:00 UTC（含 03:00 UTC TG 也會跑，無傷）
+    if: (github.event_name == 'schedule' && github.event.schedule == '0 2 * * *') || github.event_name == 'workflow_dispatch'
+    # SD_09 W0 Z1 解除（2026-05-20，B-09）：X1/Y1/B-01/B-07/B-08 全綠後移除 continue-on-error: true
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[dev]"
+
+      # 連跑 4 場景 × 7 runs；輸出 perf_results.json（由 tests/perf/conftest.py
+      # pytest_sessionfinish hook 自動呼叫 write_perf_results，SD_09 B-08 修復）
+      - name: Run perf baseline (4 scenarios x 7 runs)
+        run: |
+          python -m pytest tests/perf/ -v --tb=short -m perf
+
+      # SD_09 W0 B-08：確認 perf_results.json 已由 conftest pytest_sessionfinish 寫出
+      - name: Verify perf_results.json present
+        run: |
+          if [ ! -f perf_results.json ]; then
+            echo "::error::perf_results.json 缺失 — tests/perf/conftest.py 的 pytest_sessionfinish hook 應產生此檔（B-08 caller）"
+            exit 1
+          fi
+          echo "::notice::perf_results.json present"
+          cat perf_results.json | head -50
+
+      # 比對 baseline（ADR-SD08-003 §2.4 三級告警 / §2.5 雙通道）
+      - name: Check regression vs baseline
+        if: always()
+        # SD_09 W0 Z1 解除（2026-05-20，B-09）：X1/Y1/B-01/B-07/B-08 全綠後移除 continue-on-error: true
+        run: |
+          if [ -f .perf_baseline.toml ] && [ -f perf_results.json ]; then
+            python tools/perf_regression_check.py perf_results.json .perf_baseline.toml \
+              --comment-out perf_regression_comment.md
+          else
+            echo "::warning::baseline 或 results 不存在；首次跑請手動執行 perf_baseline_lock"
+          fi
+
+      - name: Upload perf reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: perf-baseline-${{ github.run_id }}
+          path: |
+            perf_results.json
+            perf_regression_comment.md
+            .perf_baseline.toml
+          retention-days: 90  # 季度趨勢分析

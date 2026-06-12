@@ -1,0 +1,10 @@
+190000 / 200000 tokens
+50000/100000 tokens
+175000 /  200000 tokens used by current session
+12345 / 67890 token consumed
+99 / 100 tokens (alert)
+8000 / 16000 tokens
+1 / 2 tokens
+123456/200000 tokens left
+180000  /  200000 tokens approaching limit
+9999 / 10000 tokens

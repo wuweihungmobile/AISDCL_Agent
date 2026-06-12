@@ -1,0 +1,18 @@
+{
+  "completed_step_ids": [
+    "T01",
+    "T02",
+    "T03"
+  ],
+  "completed_steps": 3,
+  "escalated": false,
+  "halted": false,
+  "step_log": [
+    "[T01] 子任務 1 ✓ (attempt 1)",
+    "[T02] 子任務 2 ✓ (attempt 1)",
+    "[T03] 目標整合 ✓ (attempt 1)"
+  ],
+  "step_log_count": 3,
+  "success": true,
+  "total_steps": 3
+}

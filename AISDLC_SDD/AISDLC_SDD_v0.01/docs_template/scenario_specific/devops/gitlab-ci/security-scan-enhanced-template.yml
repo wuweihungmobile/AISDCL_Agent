@@ -1,0 +1,248 @@
+# ============================================================
+# AISDLC v0.09 - Enhanced Security Scans (P1)
+# GitLab CI Template
+# ============================================================
+#
+# 使用方式:
+#   1. 在專案 .gitlab-ci.yml 中引入此模板:
+#      include:
+#        - local: 'ci-templates/security-scan-enhanced.yml'
+#   2. 設定 CI/CD Variables:
+#      - SECURITY_LEVEL: standard / advanced / enhanced
+#      - DAST_TARGET_URL: Staging URL (Enhanced 等級需要)
+#   3. 確保 Layer 0 (security-baseline-template.yml) 已引入
+#
+# 安全等級（參考 Security_Scan_Integration_Template.md）:
+#   Basic    = L0 only                     → documentation
+#   Standard = L0 + SAST                   → greenfield, brownfield, refactoring, testing
+#   Advanced = L0 + SAST + Container       → migration, integration, performance, devops
+#   Enhanced = L0 + SAST + Container + DAST → security
+#
+# 參考文檔: Security_Scan_Integration_Template.md
+# ============================================================
+
+# ─── Stage 定義（與 L0 合併使用）───
+stages:
+  - security-baseline    # Layer 0
+  - security-enhanced    # 本範本: SAST + Container + DAST
+  - build
+  - test
+  - quality
+  - deploy
+
+# ─── 全域變數 ───
+variables:
+  # 安全等級: standard / advanced / enhanced
+  SECURITY_LEVEL: "standard"
+  # DAST 目標 URL（Enhanced 需要）
+  DAST_TARGET_URL: ""
+  # SAST 超時
+  SAST_TIMEOUT: "10 minutes"
+  # Container Scan 超時
+  CONTAINER_SCAN_TIMEOUT: "10 minutes"
+
+# ═══════════════════════════════════════════
+# Job 1: SAST - 靜態應用安全測試 (Semgrep)
+# 適用: Standard / Advanced / Enhanced
+# ═══════════════════════════════════════════
+sast-semgrep:
+  stage: security-enhanced
+  image: semgrep/semgrep:latest
+  timeout: 10 minutes
+  allow_failure: false        # Critical/High 阻塞
+  script:
+    - |
+      echo "=== SAST Scan (Semgrep) ==="
+      echo "Security Level: $SECURITY_LEVEL"
+      semgrep scan \
+        --config "p/owasp-top-ten" \
+        --config "p/security-audit" \
+        --severity ERROR \
+        --error \
+        --json --output semgrep-results.json \
+        . || SCAN_EXIT=$?
+
+      # ERROR (Critical/High) 阻塞, WARNING 僅記錄
+      if [ "${SCAN_EXIT:-0}" -ne 0 ]; then
+        echo "🔴 SAST: Critical/High vulnerabilities found"
+        cat semgrep-results.json | python3 -m json.tool || true
+        exit 1
+      fi
+      echo "✅ SAST: No Critical/High vulnerabilities"
+  artifacts:
+    when: always
+    paths:
+      - semgrep-results.json
+    expire_in: 30 days
+  rules:
+    # Standard 以上等級
+    - if: '$SECURITY_LEVEL == "standard" || $SECURITY_LEVEL == "advanced" || $SECURITY_LEVEL == "enhanced"'
+      when: on_success
+    # 排程時始終執行
+    - if: '$CI_PIPELINE_SOURCE == "schedule"'
+      when: always
+    # 預設不執行（Basic 等級）
+    - when: never
+
+# 備選: CodeQL（需 GitHub Advanced Security）
+# sast-codeql:
+#   stage: security-enhanced
+#   image: ...
+#   script:
+#     - codeql database create --language=javascript
+#     - codeql database analyze --format=sarif-latest
+
+# ─── 語言專屬 SAST 規則擴充 ───
+# 取消註解以啟用語言專屬規則
+
+# sast-semgrep-js:
+#   extends: sast-semgrep
+#   script:
+#     - semgrep scan --config "p/javascript" --config "p/typescript" --severity ERROR --error .
+
+# sast-semgrep-python:
+#   extends: sast-semgrep
+#   script:
+#     - semgrep scan --config "p/python" --severity ERROR --error .
+
+# sast-semgrep-java:
+#   extends: sast-semgrep
+#   script:
+#     - semgrep scan --config "p/java" --severity ERROR --error .
+
+# sast-semgrep-go:
+#   extends: sast-semgrep
+#   script:
+#     - semgrep scan --config "p/golang" --severity ERROR --error .
+
+# ═══════════════════════════════════════════
+# Job 2: Container Scan - 容器映像掃描 (Trivy)
+# 適用: Advanced / Enhanced
+# ═══════════════════════════════════════════
+container-scan:
+  stage: security-enhanced
+  image:
+    name: aquasec/trivy:latest
+    entrypoint: [""]
+  timeout: 10 minutes
+  allow_failure: false
+  services:
+    - docker:dind
+  variables:
+    DOCKER_HOST: tcp://docker:2376
+    DOCKER_TLS_CERTDIR: "/certs"
+  before_script:
+    - |
+      echo "=== Container Scan (Trivy) ==="
+      echo "Security Level: $SECURITY_LEVEL"
+  script:
+    - |
+      # 建置映像
+      docker build -t scan-target:${CI_COMMIT_SHORT_SHA} .
+
+      # Trivy 掃描
+      trivy image \
+        --severity CRITICAL,HIGH \
+        --exit-code 1 \
+        --ignore-unfixed \
+        --format json \
+        --output trivy-container-results.json \
+        scan-target:${CI_COMMIT_SHORT_SHA} || SCAN_EXIT=$?
+
+      if [ "${SCAN_EXIT:-0}" -ne 0 ]; then
+        echo "🔴 Container Scan: Critical/High vulnerabilities found"
+        trivy image --severity CRITICAL,HIGH scan-target:${CI_COMMIT_SHORT_SHA}
+        exit 1
+      fi
+      echo "✅ Container Scan: No Critical/High vulnerabilities"
+  artifacts:
+    when: always
+    paths:
+      - trivy-container-results.json
+    expire_in: 30 days
+  rules:
+    # Advanced 以上 + Dockerfile 存在
+    - if: '$SECURITY_LEVEL == "advanced" || $SECURITY_LEVEL == "enhanced"'
+      exists:
+        - Dockerfile
+      when: on_success
+    # 排程時（有 Dockerfile）
+    - if: '$CI_PIPELINE_SOURCE == "schedule"'
+      exists:
+        - Dockerfile
+      when: always
+    - when: never
+
+# 備選: Grype
+# container-scan-grype:
+#   stage: security-enhanced
+#   image: anchore/grype:latest
+#   script:
+#     - grype scan-target:${CI_COMMIT_SHORT_SHA} --fail-on high
+
+# ═══════════════════════════════════════════
+# Job 3: DAST - 動態應用安全測試 (OWASP ZAP)
+# 適用: Enhanced only (或 Nightly 排程)
+# ═══════════════════════════════════════════
+dast-zap-baseline:
+  stage: security-enhanced
+  image: ghcr.io/zaproxy/zaproxy:stable
+  timeout: 30 minutes
+  allow_failure: true         # DAST 僅警告（誤報率高）
+  script:
+    - |
+      echo "=== DAST Baseline Scan (OWASP ZAP) ==="
+      echo "Target: $DAST_TARGET_URL"
+
+      if [ -z "$DAST_TARGET_URL" ]; then
+        echo "⏭️ DAST skipped: DAST_TARGET_URL not set"
+        exit 0
+      fi
+
+      zap-baseline.py \
+        -t "$DAST_TARGET_URL" \
+        -g gen.conf \
+        -r zap-report.html \
+        -J zap-report.json \
+        -l WARN \
+        || SCAN_EXIT=$?
+
+      if [ "${SCAN_EXIT:-0}" -gt 1 ]; then
+        echo "⚠️ DAST: Potential vulnerabilities found (review recommended)"
+      else
+        echo "✅ DAST: No high-severity issues"
+      fi
+  artifacts:
+    when: always
+    paths:
+      - zap-report.html
+      - zap-report.json
+    expire_in: 30 days
+  rules:
+    # Enhanced 等級
+    - if: '$SECURITY_LEVEL == "enhanced" && $DAST_TARGET_URL != ""'
+      when: on_success
+    # Nightly 排程
+    - if: '$CI_PIPELINE_SOURCE == "schedule" && $DAST_TARGET_URL != ""'
+      when: always
+    - when: never
+
+# DAST Full Scan（僅 Nightly）
+# dast-zap-full:
+#   extends: dast-zap-baseline
+#   timeout: 60 minutes
+#   script:
+#     - zap-full-scan.py -t "$DAST_TARGET_URL" -g gen.conf -r zap-full-report.html -J zap-full-report.json
+#   rules:
+#     - if: '$CI_PIPELINE_SOURCE == "schedule" && $DAST_TARGET_URL != ""'
+#       when: always
+#     - when: never
+
+# ═══════════════════════════════════════════
+# Hotfix 旁路規則
+# ═══════════════════════════════════════════
+# hotfix/* 分支: SAST 降級為警告，Container/DAST 跳過
+# 注意: Layer 0 (Secret Detection) 永遠不可跳過
+#
+# 使用方式: 在 hotfix 分支上設定 SECURITY_LEVEL=basic
+# 並在 merge 後由 security-engineer 執行 post-merge audit

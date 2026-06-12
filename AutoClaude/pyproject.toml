@@ -1,0 +1,96 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "autoclaude"
+version = "0.1.0"
+description = "Claude Code 閉環自動化代理"
+requires-python = ">=3.11"
+dependencies = [
+    "pydantic>=2.0",
+    "pyyaml>=6.0",
+    "httpx>=0.27",
+    "wexpect>=4.0; sys_platform == 'win32'",
+    "keyboard>=0.13",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0",
+    "pytest-mock>=3.14",
+    "ruff>=0.4",
+    "cachetools>=5.3",
+    "hypothesis>=6.0",
+]
+# Mutation testing（SD_08 W3 / ADR-SD08-002 — TokenGuardPlugin pilot）
+# 鎖 2.4.3：mutmut 3.x CLI 重寫不支援 --paths-to-mutate / --tests-dir，
+# 與 .github/workflows/ci.yml mutation-test-nightly + tools/run_mutmut_in_docker.sh 一致。
+# 安裝：pip install autoclaude[mutation]（僅在 Linux container 內安裝）
+mutation = [
+    "mutmut==2.4.3",
+]
+# 架構約束檢查（Plugin 互引用 / Layered architecture，搭配 .importlinter）：
+#   pip install autoclaude[lint]
+#   lint-imports
+lint = [
+    "import-linter>=2.0",
+]
+# 桌面通知後端（任選其一即可）：
+#   pip install autoclaude[notifications]
+notifications = [
+    "plyer>=2.1",
+    "win10toast>=0.9; sys_platform == 'win32'",
+]
+# PostgreSQL 後端（Phase 6 選配，需 docker-compose 起 postgres:17）：
+#   pip install autoclaude[postgres]
+# 注意：runtime PgStateRepository 走 async asyncpg；但 alembic 只支援同步連線，
+# alembic/env.py:42 會 strip `+asyncpg` 改用 psycopg2 → 故 migration 工具需 psycopg2。
+# 缺 psycopg2 時 `alembic upgrade head` 報 ModuleNotFoundError（SD_09 R56 揪修：CI
+# pg-contract / pg-e2e-nightly job 的 alembic 步驟因此失敗）。psycopg2-binary 為預編譯 wheel，
+# 免 CI 安裝 build 依賴。
+postgres = [
+    "sqlalchemy>=2.0",
+    "asyncpg>=0.29",
+    "psycopg2-binary>=2.9",
+    "alembic>=1.13",
+    "tenacity>=8.2",
+    "cachetools>=5.3",
+]
+# pgvector 向量查詢（需 DB 安裝 pgvector extension）：
+#   pip install autoclaude[postgres,pgvector]
+pgvector = [
+    "pgvector>=0.3",
+]
+
+[project.scripts]
+autoclaude = "autoclaude.main:main"
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+# legacy / xunit1 允許 record_property 寫入 <property> 元素（xunit2 不支援）
+# ac4_nightly_collector.py 依賴 <property name="recall_at_10"> / <property name="p95_ms">
+junit_family = "legacy"
+# SD_Improving_04 W3 三方審查（Arch-W3-Min-3 / Dev-W3-Maj-2）：
+# 抑制 _runner_compat 內部模組層 DeprecationWarning，避免 playbook_runner /
+# _runner_internals 頂層 import 引發的噪音；針對性測試（test_runner_compat_deprecated）
+# 仍可透過 monkeypatch.delitem + importlib.reload + warnings.catch_warnings 捕獲。
+filterwarnings = [
+    "ignore::DeprecationWarning:autoclaude.execution._runner_compat",
+    "ignore:_runner_compat.*W5.*過渡模組.*:DeprecationWarning",
+]
+# SD_Improving_07 W2 T2-3：opt-in marker — 真實 PG e2e（PM #2）
+# 啟用條件：SD07_REAL_PG_E2E_ENABLED=true + AUTOCLAUDE_TEST_PG_DSN
+# 本地預設 skip；CI nightly 啟用。
+markers = [
+    "pg_real: 需要真實 PG + pgvector 的 e2e 測試（SD_07 T2-3 / PM #2）",
+    "perf: 性能 baseline 測試（SD_08 W5 / ADR-SD08-003）；perf-baseline-nightly job 啟用",
+    "benchmark: pytest-benchmark 入口（SD_08 W5 / ADR-SD08-003 §3）",
+]

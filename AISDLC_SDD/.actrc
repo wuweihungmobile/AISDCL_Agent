@@ -1,0 +1,19 @@
+# AISDLC-SDD — act 預設組態（approach 二：地端用 Docker 跑 .github/workflows/*）。
+#
+# 以 catthehacker 中型 Ubuntu 鏡像貼近 GitHub ubuntu-latest（內含 python/node/
+# git 等常用工具）。act 讀 .github/workflows/ 的 YAML，用本機 Docker 起虛擬環境
+# 模擬雲端 CI，Push 前即可驗證 workflow 是否寫對。
+#
+# 注意（誠實警語）：act 不連 GitHub artifact 儲存，故 upload-artifact 步驟在
+# act 中為 no-op；本次紅燈的真因（artifact 配額）act 模擬不到 → 真正可靠的
+# 地端閘門是 docker compose ci-runner / scripts/ci-gate.sh（跑實際檢查命令）。
+# act 的價值在於：抓 YAML 語法錯、步驟順序、缺套件、shell 相容性等結構問題。
+
+-P ubuntu-latest=catthehacker/ubuntu:act-latest
+-P ubuntu-24.04=catthehacker/ubuntu:act-latest
+-P ubuntu-22.04=catthehacker/ubuntu:act-22.04
+--container-architecture linux/amd64
+# 用本地已拉的鏡像，避免 act 的 forcePull 帶 Docker 認證導致
+# 「authentication required」失敗（公開鏡像但 act 送出 ~/.docker 認證）。
+# 首次請先：docker pull catthehacker/ubuntu:act-latest（act-ci.sh 會自動預拉）。
+--pull=false

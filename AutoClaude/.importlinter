@@ -1,0 +1,212 @@
+; import-linter config (R-3 / M5 — SD_Improving_02.md v1.1 §3.1)
+;
+; Rules:
+;   1. plugin-isolation: no plugin may import another plugin (use EventBus)
+;   2. core-purity: core modules (excl. wiring) must not depend on execution or infra layers
+;
+; Usage:
+;   pip install autoclaude[lint]
+;   PYTHONUTF8=1 lint-imports
+
+[importlinter]
+root_packages =
+    autoclaude
+
+; Rule 1: plugin-to-plugin imports are forbidden (use EventBus instead)
+[importlinter:contract:plugin-isolation]
+name = Plugins must not import other plugins (use EventBus instead)
+type = independence
+modules =
+    autoclaude.plugins.checkpoint_plugin
+    autoclaude.plugins.convergence_plugin
+    autoclaude.plugins.cross_step_validator_plugin
+    autoclaude.plugins.evolution_plugin
+    autoclaude.plugins.global_goal_anchor_plugin
+    autoclaude.plugins.goal_synthesis_plugin
+    autoclaude.plugins.goto_counter_plugin
+    autoclaude.plugins.hotkey_plugin
+    autoclaude.plugins.knowledge_base_plugin
+    autoclaude.plugins.notification_plugin
+    autoclaude.plugins.pre_run_validator_plugin
+    autoclaude.plugins.token_guard_plugin
+
+; Rule 2: pure core modules must not depend on execution or infra layers.
+; autoclaude.core.wiring is intentionally excluded — it is the assembly layer
+; whose job is to wire all layers together and is expected to reference plugins,
+; execution, and infra transitively.
+; ignore_imports: autoclaude.utils.checkpoint_manager lazily imports
+; FileStateRepository inside __init__ to break a circular import; this is a
+; deliberate bridge and does not represent a true core→infra violation.
+; Likewise, autoclaude.core.services.auto_resume lazily imports
+; canonical_playbook_id (pure function, no infra runtime deps) at use-site
+; to compute storage-mode-aware playbook IDs without breaking layering.
+[importlinter:contract:core-purity]
+name = autoclaude.core (excl. wiring) must not depend on execution or infra layers
+type = forbidden
+source_modules =
+    autoclaude.core.kernel
+    autoclaude.core.kernel_state
+    autoclaude.core.event_bus
+    autoclaude.core.hookspec
+    autoclaude.core.ports
+    autoclaude.core.services
+forbidden_modules =
+    autoclaude.execution
+    autoclaude.infra
+ignore_imports =
+    autoclaude.utils.checkpoint_manager -> autoclaude.infra.repositories.file_state_repository
+    autoclaude.utils.checkpoint_manager -> autoclaude.infra.repositories.factory
+    autoclaude.core.services.auto_resume -> autoclaude.infra.repositories.factory
+
+; Rule 3 (W4-T15 m-5) — Anti-resurrection guard (SD_Improving_06 W6 G6 維持):
+; `autoclaude.execution._runner_internals` 模組已於 SD_06 W6 G6 物理刪除
+; （2026-05-18），但本 contract 保留作為**防復活柵欄**：禁止未來任何人在
+; `autoclaude.execution` 內重新建立同名模組並被 core / plugins 直接 import。
+; 詳見 docs/08_deployment/SD06_Migration_Guide.md §7.2。
+[importlinter:contract:runner-internals-isolation]
+name = _runner_internals must not be imported by core or plugins
+type = forbidden
+source_modules =
+    autoclaude.core
+    autoclaude.plugins
+forbidden_modules =
+    autoclaude.execution._runner_internals
+
+; Rule 4 (SD_Improving_06 W2 T2-14 NOTE): runner-no-checkpoint-logic
+; mixin 不可實作 checkpoint 持久化 logic（❌13 雙寫法）。
+; importlinter 僅能管 module-level import；無法 grep 函式名稱，因此本 contract
+; 改由 tests/contract/test_runner_no_checkpoint_logic.py 以 grep-based 形式 enforce
+; （階段 1/2/3 由環境變數 SD06_W2_PHASE 控制；G2 gate 設 SD06_W2_PHASE=3）。
+; 對應規格：SD_Improving_06.md v1.2 §6.5 AC2-1。
+;
+; Rule 4 (SD_Improving_06 W1 T1-6): Brain ↛ Executor isolation
+; 對應 ADR-SD06-001 R3：Brain 與 Executor 互通必須走 EventBus，
+; 不可直接 callback / 互相 import；否則隱性建立反向依賴並違反 Layer 1.5 邊界。
+; 拆兩條 forbidden 方向以保留 adapter 與對應 port 之間的合法 import。
+[importlinter:contract:brain-executor-isolation]
+name = Brain modules must not import Executor modules (use EventBus)
+type = forbidden
+source_modules =
+    autoclaude.core.ports.brain
+    autoclaude.infra.adapters.minimax_brain
+forbidden_modules =
+    autoclaude.core.ports.executor
+    autoclaude.infra.adapters.pty_executor
+    autoclaude.infra.adapters.dry_run_executor
+
+[importlinter:contract:executor-brain-isolation]
+name = Executor modules must not import Brain modules (use EventBus)
+type = forbidden
+source_modules =
+    autoclaude.core.ports.executor
+    autoclaude.infra.adapters.pty_executor
+    autoclaude.infra.adapters.dry_run_executor
+forbidden_modules =
+    autoclaude.core.ports.brain
+    autoclaude.infra.adapters.minimax_brain
+
+; Rule 6 (SD_Improving_07 W5 T5-2): runner-no-checkpoint-logic — importlinter 原生升級
+;
+; 設計動機：
+;   SD_06 W2-T2-14 原以 tests/contract/test_runner_no_checkpoint_logic.py（grep-based）
+;   掃描 _runner_internals.py 內 `_save_.*_checkpoint` 字串。SD_06 W6 G6
+;   `_runner_internals.py` 已物理刪除（2026-05-18），grep contract 失去 enforce
+;   目標。本 contract 改以 importlinter 原生 forbidden 規則替代——
+;   禁止 `playbook_runner` 與所有 strategy / facade 模組直接 import
+;   checkpoint package 內部實作（_phase_handlers / _token_halt / _builder /
+;   _escalation / _interrupt / _evolution）。
+;
+; 唯一允許路徑：`from autoclaude.plugins.checkpoint import CheckpointPlugin`
+; （公開 entry API；SD_05 W3 拆 package 後唯一可調用面）。
+;
+; 違反此 contract 即代表 runner 重新引入 checkpoint logic 雙寫法（❌13），
+; 與 SSOT 原則衝突。詳見 docs/06_quality/SD07_Plugin_Audit_Report.md §7。
+[importlinter:contract:runner-no-checkpoint-logic]
+name = playbook_runner / strategy modules must not import checkpoint internal modules (use CheckpointPlugin public API)
+type = forbidden
+source_modules =
+    autoclaude.execution.playbook_runner
+    autoclaude.execution.steps_orchestrator
+    autoclaude.execution.boot_helper
+    autoclaude.execution.prompt_dispatcher
+    autoclaude.execution.escalation_dumper
+forbidden_modules =
+    autoclaude.plugins.checkpoint._phase_handlers
+    autoclaude.plugins.checkpoint._token_halt
+    autoclaude.plugins.checkpoint._builder
+    autoclaude.plugins.checkpoint._escalation
+    autoclaude.plugins.checkpoint._interrupt
+    autoclaude.plugins.checkpoint._evolution
+; ignore_imports：豁免 CheckpointPlugin 自己對自身子模組的合法 import，
+; 以及 package `__init__` 對 plugin entry 的 re-export。這些是 SD_05 W3
+; 拆 package 後的內部組成，不屬於 runner 違規路徑；此 contract 僅針對
+; 「source_modules 直接 import 內部實作模組」一情境。
+;
+; ─────────────────────────────────────────────────────────────────────
+; 【內部子模組白名單（CheckpointPlugin 內部 transitive 路徑）】
+; 以下為 CheckpointPlugin 內部子模組互相 import 的合法 transitive 路徑，
+; 由 Plugin 公開 API（autoclaude.plugins.checkpoint.plugin.CheckpointPlugin）
+; 統一對外。新增子模組時請同步更新此白名單（contract 升級時不可誤刪）。
+;
+; 維護規則：
+;   1. 新增 checkpoint/_<sub>.py 子模組時，若被 plugin.py 或其他子模組 import，
+;      必須在此區段補對應 ignore_imports 條目；
+;   2. 不可移除既有條目（會導致 lint-imports broken）；
+;   3. CheckpointPlugin 公開 API 由 plugin.py 統一 expose，shim
+;      `checkpoint_plugin.py` re-export 後 source_modules 不可直接 import 內部模組。
+; ─────────────────────────────────────────────────────────────────────
+ignore_imports =
+    autoclaude.plugins.checkpoint -> autoclaude.plugins.checkpoint.plugin
+    autoclaude.plugins.checkpoint.plugin -> autoclaude.plugins.checkpoint._phase_handlers
+    autoclaude.plugins.checkpoint.plugin -> autoclaude.plugins.checkpoint._token_halt
+    autoclaude.plugins.checkpoint.plugin -> autoclaude.plugins.checkpoint._builder
+    autoclaude.plugins.checkpoint.plugin -> autoclaude.plugins.checkpoint._escalation
+    autoclaude.plugins.checkpoint.plugin -> autoclaude.plugins.checkpoint._interrupt
+    autoclaude.plugins.checkpoint.plugin -> autoclaude.plugins.checkpoint._evolution
+    autoclaude.plugins.checkpoint._phase_handlers -> autoclaude.plugins.checkpoint._builder
+
+; Rule 7 (SD_Improving_08 W4 / ADR-SD08-004 §3): plugin-no-utils-observability-direct-import
+;
+; 設計動機（ADR-SD08-004 §2.1 / 紅線 ❌18）：
+;   可觀測性必須走 Port 注入而非 plugin 直接 import utils 模組。
+;   - utils.knowledge_base_metrics：純 data tier，封裝 4 metric 累計（不可被 plugin 直接 import）
+;   - utils.trace_context        ：純 contract，trace_id ContextVar（不可被 plugin 直接 import）
+;
+; 唯一允許路徑：
+;   - 透過 IObservabilityPort（autoclaude.core.ports.observability）建構式注入
+;   - knowledge_base 模組本身可 import knowledge_base_metrics（aggregator pattern）
+;
+; 違反此 contract 即代表 plugin 退化為散裝技術債（6 個月後分散式部署時各 worker
+; 各自實作 metric 統計），SD_10 OTel 遷移將遭遇大面積修改。
+[importlinter:contract:plugin-no-utils-observability-direct-import]
+name = Plugins must not directly import utils.observability helpers (use IObservabilityPort)
+type = forbidden
+source_modules =
+    autoclaude.plugins
+forbidden_modules =
+    autoclaude.utils.knowledge_base_metrics
+    autoclaude.utils.trace_context
+; 合法 transitive 路徑白名單（非 plugin 直接 import）：
+;   1. knowledge_base_plugin 注入 FailureKnowledgeBase（utils.knowledge_base），
+;      後者於 SD_08 W4 起內嵌 KnowledgeBaseMetrics（aggregator pattern）。
+;      Plugin 仍不可直接 import knowledge_base_metrics；本豁免僅針對
+;      knowledge_base → knowledge_base_metrics 的內聚轉接。
+;   2. checkpoint.plugin → core.event_bus（既有 SD_05 依賴）。EventBus 於 SD_08 W4
+;      lazy import utils.trace_context 以自動注入 trace_id；屬框架層內部行為，
+;      非 plugin 業務邏輯。
+;   3. SD_09 W0 M-04 subprocess trace_id propagation（非 plugin 業務邏輯）：
+;      下列 execution / decision / mutation_applier / perception 模組於
+;      `subprocess.run` / `subprocess.Popen` 呼叫端注入
+;      `env=propagate_to_subprocess_env(...)`，以維持跨進程 trace_id 不斷鏈。
+;      這些模組屬「subprocess caller」基礎設施層，非 plugin 業務邏輯；
+;      plugin 仍透過 IObservabilityPort 注入 observability 能力。
+ignore_imports =
+    autoclaude.utils.knowledge_base -> autoclaude.utils.knowledge_base_metrics
+    autoclaude.core.event_bus -> autoclaude.utils.trace_context
+    autoclaude.execution.cross_step_validator -> autoclaude.utils.trace_context
+    autoclaude.execution.pre_run_validator -> autoclaude.utils.trace_context
+    autoclaude.execution.evaluator -> autoclaude.utils.trace_context
+    autoclaude.execution.mutation_applier._conditional -> autoclaude.utils.trace_context
+    autoclaude.decision.prompt_builder -> autoclaude.utils.trace_context
+    autoclaude.core.services.mutation._conditional_evaluator -> autoclaude.utils.trace_context
+    autoclaude.perception.pty_wrapper -> autoclaude.utils.trace_context

@@ -1,0 +1,40 @@
+# SD_09 W0 P0-AUDIT-31/32 修復：防止 Windows git autocrlf 將 Linux/Docker 內執行的 .sh
+# 轉成 CRLF 而導致 `$'\r': command not found` + syntax error
+# 對齊 CLAUDE.md §Nightly / CI 取證紀律 #1（區分真實失敗 vs 工具標準回報）—
+# 載具腳本（.sh）必須 LF 行尾，違反即視為 P0
+
+* text=auto eol=lf
+
+# Unix/Linux 腳本與配置（強制 LF，跨 Docker container 執行）
+*.sh        text eol=lf
+*.bash      text eol=lf
+# git hooks（無副檔名，於 git-bash/Docker 以 bash 執行，CRLF 會噴 $'\r'）+ act 設定
+tools/git-hooks/* text eol=lf
+.actrc      text eol=lf
+*.py        text eol=lf
+*.yaml      text eol=lf
+*.yml       text eol=lf
+*.toml      text eol=lf
+*.json      text eol=lf
+*.md        text eol=lf
+*.txt       text eol=lf
+*.cfg       text eol=lf
+*.ini       text eol=lf
+Dockerfile  text eol=lf
+Makefile    text eol=lf
+
+# Windows-only 腳本（保留 CRLF）
+*.ps1       text eol=crlf
+*.cmd       text eol=crlf
+*.bat       text eol=crlf
+
+# 二進位（不轉換）
+*.png       binary
+*.jpg       binary
+*.gif       binary
+*.ico       binary
+*.gz        binary
+*.zip       binary
+*.tar       binary
+*.pdf       binary
+*.gpg       binary

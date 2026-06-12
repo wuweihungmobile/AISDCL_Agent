@@ -1,0 +1,99 @@
+# AutoClaude 部署堆疊（SD_Improving_05/06）
+# ---------------------------------------------------------------------------
+# 服務清單：
+#   postgres  PostgreSQL + pgvector 0.7+（Project/GoalTask/ExecutionItem 三層 + KB 向量）
+#   embedder  HuggingFace TEI（BGE-M3 本地 embedding，需 NVIDIA GPU）
+#
+# 使用方式：
+#   cp .env.example .env       # 填入 MINIMAX_API_KEY 等真實憑證
+#   docker compose up -d        # 啟動全部服務
+#   alembic upgrade head        # 套用 schema migration
+#
+# 服務檢查：
+#   curl http://localhost:8080/health        # TEI 健康狀態
+#   docker compose exec postgres psql -U $POSTGRES_USER -d $POSTGRES_DB -c "\dx"
+#       → 確認 vector extension 已安裝
+#
+# ⚠️ Production 注意：
+#   - 移除 AUTOCLAUDE_ALLOW_INSECURE_DB，將 sslmode 改為 require
+#   - postgres 不要 expose 5432 至 host（移除 ports 區段，僅內網存取）
+#   - embedder 設 resource limits（防 OOM）
+#   - 定期 pg_dump 備份至 host 路徑（見 deployment/README.md）
+# ---------------------------------------------------------------------------
+
+services:
+  postgres:
+    # pgvector 官方 image（postgres 18 + pgvector 0.8.2）
+    # SD_05 三方審查 Critical-6 / SD C-1 要求：vector extension 必須內建
+    # 升級紀錄：2026-05-17 PG16 → PG18（async I/O / UUIDv7 / B-tree skip scan）
+    # 詳見 docs/08_deployment/PG_Version_Upgrade_Guide.md
+    image: pgvector/pgvector:pg18
+    container_name: autoclaude_pg
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-autoclaude}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-autoclaude}
+      POSTGRES_DB: ${POSTGRES_DB:-autoclaude}
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    volumes:
+      # PG18+ image breaking change：mount 改至 /var/lib/postgresql（非 /data 子目錄）
+      # PG18 在內部建立 18/data sub-dir，便於未來 pg_upgrade --link 跨版本升級
+      # 詳見 docs/08_deployment/PG_Version_Upgrade_Guide.md §4.5
+      - pg_data:/var/lib/postgresql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-autoclaude} -d ${POSTGRES_DB:-autoclaude}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+    networks:
+      - autoclaude_net
+
+  embedder:
+    # HuggingFace Text Embeddings Inference（BGE-M3 本地推論）
+    # SD_06 W3 IEmbedder port 的 BGEM3LocalAdapter 後端
+    # 需 NVIDIA GPU + nvidia-container-toolkit
+    # RTX 4060 Ti = Ada Lovelace SM 8.9 → 89-1.x tag
+    image: ghcr.io/huggingface/text-embeddings-inference:89-1.5
+    container_name: autoclaude_embedder
+    restart: unless-stopped
+    command:
+      - --model-id=${TEI_MODEL_ID:-BAAI/bge-m3}
+      - --port=80
+      - --max-client-batch-size=32
+    ports:
+      - "8080:80"
+    volumes:
+      # bind mount 本地預下載的 BGE-M3 cache，繞過 container 內 hf-hub 下載問題
+      # 重新下載：python tools/download_bge_m3.py
+      - ./.model_cache:/data
+    environment:
+      # 限制 tokenizer thread，避免吃滿 CPU
+      RUST_LOG: text_embeddings_inference=info
+      # 明確設定 HuggingFace endpoint，避免 hf-hub 0.3.x URL 建構失敗
+      HF_ENDPOINT: https://huggingface.co
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://localhost:80/health || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 60s   # 首次啟動需下載 model
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+    networks:
+      - autoclaude_net
+
+volumes:
+  pg_data:
+    driver: local
+  # tei_cache 改用 bind mount（.model_cache），此 named volume 已廢棄
+
+networks:
+  autoclaude_net:
+    driver: bridge

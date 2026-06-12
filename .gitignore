@@ -1,0 +1,31 @@
+# AISDCL_Agent monorepo 根層 .gitignore（快照式單一 repo；子專案各自的 .gitignore 仍生效）
+
+# 巢狀 git repo 備份目錄（push 期間暫時改名的本地 .git，絕不入庫）
+.git-nested-backup/
+**/.git-nested-backup/
+
+# Python 通用快取
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# 虛擬環境
+.venv/
+venv/
+
+# 環境設定（API Key 絕不 commit）
+.env
+.env.*
+!.env.example
+
+# IDE
+.idea/
+.vscode/
+*.swp
+.DS_Store
+
+# 大型模型快取（GB 級，GitHub 限制）
+.model_cache/

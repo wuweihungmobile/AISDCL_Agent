@@ -1,0 +1,20 @@
+version: "1.0"
+project: "Equivalence_03_with_mutation"
+
+global_goal: |
+  驗證步驟突變（Step Mutation）流程：當 Minimax 提議 REVISE_CURRENT 時可正常套用。
+
+global_invariants:
+  max_retries_per_step: 3
+  auto_compact_interval: 0
+
+tasks:
+  - step_id: "T01"
+    name: "可被突變的步驟"
+    prompt: "執行步驟 1 並輸出 [STEP1_DONE]"
+    expected_output_regex: "\\[STEP1_DONE\\]"
+
+  - step_id: "T02"
+    name: "結束步驟"
+    prompt: "完成並輸出 [ALL_DONE]"
+    expected_output_regex: "\\[ALL_DONE\\]"

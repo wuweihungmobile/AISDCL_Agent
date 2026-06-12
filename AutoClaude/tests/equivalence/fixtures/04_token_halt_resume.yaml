@@ -1,0 +1,22 @@
+version: "1.0"
+project: "Equivalence_04_token_halt_resume"
+
+global_invariants:
+  max_retries_per_step: 2
+  auto_compact_interval: 0
+
+tasks:
+  - step_id: "T01"
+    name: "Token Halt 前置步驟"
+    prompt: "執行前置任務並輸出 [PREP_DONE]"
+    expected_output_regex: "\\[PREP_DONE\\]"
+
+  - step_id: "T02"
+    name: "可能觸發 Token Halt 的長步驟"
+    prompt: "執行可能觸發 token halt 的步驟並輸出 [LONG_DONE]"
+    expected_output_regex: "\\[LONG_DONE\\]"
+
+  - step_id: "T03"
+    name: "Resume 後完成步驟"
+    prompt: "完成最後步驟並輸出 [RESUMED_DONE]"
+    expected_output_regex: "\\[RESUMED_DONE\\]"

@@ -1,0 +1,69 @@
+# AutoClaude — 本地 Mock / LLM 堆疊（對應「四、高擬真 API 與 AI 模型模擬」）
+# ===========================================================================
+# 兩個 profile，依需求啟動其一：
+#
+#   profile=mock（推薦、零下載、可驗證）：確定性 Brain 測試替身
+#     docker compose -f docker-compose.llm.yml --profile mock up -d
+#     → http://localhost:9100/v1/chat/completions（OpenAI 相容；過 Hallucination Guard）
+#
+#   profile=llm（真模型、需 GPU + 下載權重）：vLLM 部署輕量 Qwen
+#     docker compose -f docker-compose.llm.yml --profile llm up -d
+#     → http://localhost:8000/v1/chat/completions（OpenAI 相容）
+#
+# 接線：把 config.yaml minimax.base_url（或 env MINIMAX_BASE_URL）指向上述 endpoint，
+#       api_key 任填（mock 不驗證；vLLM 預設不驗證）。回應契約見 minimax_client.py。
+#
+# 為何能直接相容：minimax_client._parse_response 解 choices[0].message.content（OpenAI
+# chat completions 格式），vLLM/llama.cpp/Ollama 的 /v1 端點皆回此格式。
+# ---------------------------------------------------------------------------
+
+services:
+  # ---- 確定性 Mock（無需任何模型，CI/離線首選）----
+  mock-brain:
+    image: python:3.11-slim
+    container_name: autoclaude_mock_brain
+    profiles: ["mock"]
+    working_dir: /workspace
+    volumes:
+      - ./tools:/workspace/tools:ro
+    command: ["python", "tools/mock_brain_server.py", "--host", "0.0.0.0", "--port", "9100"]
+    ports:
+      - "9100:9100"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://localhost:9100/health').status==200 else 1)"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 5s
+
+  # ---- 真模型：vLLM OpenAI server（輕量 Qwen；需 NVIDIA GPU）----
+  # GGUF 量化模型請改用 llama.cpp（見 Local_CI_Parity_Guide.md §4）；vLLM 走 HF 權重最穩。
+  # 預設 Qwen2.5-1.5B-Instruct（小參數，8GB VRAM 可跑）；可改 --model 換更大模型。
+  vllm:
+    image: vllm/vllm-openai:latest
+    container_name: autoclaude_vllm
+    profiles: ["llm"]
+    command:
+      - --model=Qwen/Qwen2.5-1.5B-Instruct
+      - --port=8000
+      - --max-model-len=8192
+      - --gpu-memory-utilization=0.85
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./.model_cache:/root/.cache/huggingface
+    environment:
+      HF_ENDPOINT: https://huggingface.co
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://localhost:8000/health || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+      start_period: 120s   # 首次需下載模型權重

@@ -1,0 +1,92 @@
+# AISDLC-SDD — Artifact 配額長期治本（ADR-001 Next Action #1）。
+#
+# 動機：CI 反覆紅燈的主因是 GitHub Actions artifact 儲存配額耗盡。各 workflow 已
+# 把 upload 改 continue-on-error + 降 retention 止血；本 workflow 主動刪除過期/逾齡
+# artifact，讓配額不再累積撞頂（治本）。
+#
+# 觸發：每日 03:00 UTC（排在 chaos 02:00 / drift·arch-fitness 02:30 之後，清的是
+# 舊產物，不動當天剛產生的）；workflow_dispatch 可手動立即清理並自訂天數。
+#
+# Runner：ubuntu-latest；用內建 gh CLI + GITHUB_TOKEN（actions:write），不引第三方
+# action（避免供應鏈風險）。個別刪除失敗以 || true 容錯，整體永不判紅。
+
+name: artifact-cleanup
+
+on:
+  schedule:
+    - cron: "0 3 * * *"
+  workflow_dispatch:
+    inputs:
+      max_age_days:
+        description: "刪除超過幾天的 artifact（預設 7，對齊各 workflow 的 retention-days）"
+        required: false
+        default: "7"
+
+concurrency:
+  group: artifact-cleanup
+  cancel-in-progress: false
+
+permissions:
+  actions: write    # 刪除 artifact 需要
+  contents: read
+
+jobs:
+  cleanup:
+    name: prune aged artifacts
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Delete expired / aged artifacts
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          MAX_AGE_DAYS: ${{ github.event.inputs.max_age_days || '7' }}
+        run: |
+          set -euo pipefail
+          echo "盤點 artifact，刪除 expired 或 created_at 超過 ${MAX_AGE_DAYS} 天者…"
+
+          # 取全部 artifact（id / created_at / expired），--paginate 自動翻頁。
+          gh api --paginate \
+            "/repos/${REPO}/actions/artifacts?per_page=100" \
+            --jq '.artifacts[] | [.id, .created_at, .expired] | @tsv' > all_artifacts.tsv || true
+
+          total=$(wc -l < all_artifacts.tsv | tr -d ' ')
+          echo "目前 artifact 總數：${total}"
+
+          # 用 Python 精確比較 ISO8601 時間（避免字串比較的格式陷阱），輸出待刪 id。
+          python3 - "${MAX_AGE_DAYS}" <<'PY' > to_delete.txt
+          import sys, datetime
+          max_age = int(sys.argv[1])
+          cutoff = datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(days=max_age)
+          try:
+              lines = open("all_artifacts.tsv", encoding="utf-8").read().splitlines()
+          except FileNotFoundError:
+              lines = []
+          for line in lines:
+              parts = line.split("\t")
+              if len(parts) < 3:
+                  continue
+              aid, created, expired = parts[0], parts[1], parts[2]
+              try:
+                  dt = datetime.datetime.fromisoformat(created.replace("Z", "+00:00"))
+              except ValueError:
+                  continue
+              if expired == "true" or dt < cutoff:
+                  print(aid)
+          PY
+
+          n=$(wc -l < to_delete.txt | tr -d ' ')
+          echo "待刪除：${n} 個"
+          while read -r id; do
+            [ -z "${id}" ] && continue
+            echo "  DELETE artifact #${id}"
+            gh api -X DELETE "/repos/${REPO}/actions/artifacts/${id}" || true
+          done < to_delete.txt
+
+          {
+            echo "### Artifact Cleanup"
+            echo ""
+            echo "- 總數（清理前）：${total}"
+            echo "- 刪除門檻：> ${MAX_AGE_DAYS} 天 或 expired"
+            echo "- 已刪除：${n}"
+          } >> "${GITHUB_STEP_SUMMARY}"

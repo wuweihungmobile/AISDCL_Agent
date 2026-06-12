@@ -1,0 +1,105 @@
+name: PG E2E (Labeled PR)
+
+# SD_Improving_08 W2 T2-C5：漸進式升級為 labeled PR 觸發
+# 對應 [SD_Improving_08.md §3 W2 + PM #2 拍板](../docs/04_planning/SD_Improving_08.md)
+#
+# 觸發條件：PR 加上 `needs-pg-e2e` label 後執行（避免每 PR +8-12 min CI 額度爆預算）
+# 啟用條件：14 天 nightly 全綠 + recall σ ≤ 0.02 + CircuitBreaker open=0 後手動啟用
+#
+# 目前狀態：W2 已就位，14 天觀察期通過後由 PM 確認啟用（manual gate）
+
+on:
+  pull_request:
+    types: [labeled]
+
+jobs:
+  pg-e2e-on-label:
+    name: PG E2E (pgvector recall + p95) - labeled PR
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    if: github.event.label.name == 'needs-pg-e2e'
+    continue-on-error: true  # 同 nightly：警示不阻塞 PR merge
+
+    services:
+      postgres:
+        image: pgvector/pgvector:pg17
+        env:
+          POSTGRES_USER: autoclaude
+          POSTGRES_PASSWORD: autoclaude
+          POSTGRES_DB: autoclaude
+        options: >-
+          --health-cmd "pg_isready -U autoclaude -d autoclaude"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+        ports:
+          - 5432:5432
+
+    env:
+      AUTOCLAUDE_TEST_PG_DSN: "postgresql+asyncpg://autoclaude:autoclaude@localhost:5432/autoclaude"
+      AUTOCLAUDE_DB_DSN: "postgresql+asyncpg://autoclaude:autoclaude@localhost:5432/autoclaude"
+      AUTOCLAUDE_ALLOW_INSECURE_DB: "1"
+      SD07_REAL_PG_E2E_ENABLED: "true"
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[dev,postgres]"
+
+      - name: Run alembic migrations (含 0007/0008 pgvector + halfvec)
+        run: |
+          alembic upgrade head
+
+      - name: Run labeled PR 真實 PG e2e（pg_real marker）+ junit XML
+        continue-on-error: true
+        run: |
+          python -m pytest tests/integration/test_pgvector_real_recall.py \
+            -v --tb=short -m pg_real \
+            --junitxml=.ac4_junit.xml
+
+      - name: Collect AC4 metrics (labeled PR 模式)
+        if: always()
+        run: |
+          python tools/ac4_nightly_collector.py \
+            --junit-xml .ac4_junit.xml \
+            --history .ac4_history.jsonl
+
+      - name: Comment AC4 progress on PR
+        if: always()
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const { execSync } = require('child_process');
+            let output = '';
+            try {
+              output = execSync('python tools/ac4_progress_check.py --history .ac4_history.jsonl --json').toString();
+            } catch (e) {
+              output = e.stdout ? e.stdout.toString() : 'AC4 progress check failed.';
+            }
+            const body = `## AC4 PG E2E result\n\n\`\`\`json\n${output}\n\`\`\``;
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+              body
+            });
+
+      - name: Upload AC4 artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ac4-labeled-pr-${{ github.run_id }}
+          path: |
+            .ac4_history.jsonl
+            .ac4_junit.xml
+          retention-days: 30

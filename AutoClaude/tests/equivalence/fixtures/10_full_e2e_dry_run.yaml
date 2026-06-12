@@ -1,0 +1,32 @@
+version: "1.0"
+project: "Equivalence_10_full_e2e_dry_run"
+
+global_goal: |
+  E2E dry-run：覆蓋多步驟、context_negotiation、global_goal 與 evaluator_command 的綜合場景。
+
+global_invariants:
+  max_retries_per_step: 3
+  auto_compact_interval: 0
+
+tasks:
+  - step_id: "T01"
+    name: "E2E 步驟 1"
+    prompt: "E2E 步驟 1 並輸出 [E2E_STEP1]"
+    expected_output_regex: "\\[E2E_STEP1\\]"
+
+  - step_id: "T02"
+    name: "E2E 步驟 2"
+    prompt: "E2E 步驟 2 並輸出 [E2E_STEP2]"
+    expected_output_regex: "\\[E2E_STEP2\\]"
+
+  - step_id: "T03"
+    name: "E2E 步驟 3 (含 evaluator)"
+    prompt: "E2E 步驟 3 並輸出 [E2E_STEP3]"
+    expected_output_regex: "\\[E2E_STEP3\\]"
+    evaluator_command: "python -c \"print('E2E_STEP3')\""
+    evaluator_timeout_seconds: 5
+
+  - step_id: "T04"
+    name: "E2E 結束步驟"
+    prompt: "E2E 結束並輸出 [E2E_DONE]"
+    expected_output_regex: "\\[E2E_DONE\\]"

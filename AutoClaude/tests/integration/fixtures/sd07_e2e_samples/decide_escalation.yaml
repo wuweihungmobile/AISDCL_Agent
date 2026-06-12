@@ -1,0 +1,95 @@
+# SD_07 W2 fixture：Brain decide_escalation → EvolutionPlugin → ON_ESCALATION_DUMP_REQUEST
+# 對應 AC0-2（test_brain_executor_e2e.py::test_decide_escalation_dump）
+
+scenario: decide_escalation
+description: |
+  重試耗盡（max_retries=2，全 fail）→ Coordinator 進入 ON_ESCALATION →
+  Brain.decide_escalation() 回傳 dump_required=true → EvolutionPlugin 嘗試
+  evolve playbook（INJECT_STEP）→ CheckpointPlugin 寫 escalation_dump。
+
+playbook:
+  version: "1.0"
+  project: "SD07_DecideEscalation_E2E"
+  global_goal: "驗證 escalation 完整 dump + evolve 路徑"
+  global_invariants:
+    max_retries_per_step: 2
+    auto_compact_interval: 0
+  tasks:
+    - step_id: "T01"
+      name: "持續失敗觸發 escalation"
+      prompt: "請輸出 [IMPOSSIBLE]"
+      expected_output_regex: "\\[IMPOSSIBLE\\]"
+
+brain_decisions:
+  capabilities:
+    supports_correction: true
+    supports_escalation: true
+    supports_interrupt: true
+    max_concurrent_attempts: 1
+    model_id: "MiniMax-Text-01"
+  decisions:
+    - attempt: 1
+      decision_type: correction
+      step_mutation: REVISE_CURRENT
+      revised_prompt: "再試一次"
+      reason: "首次失敗"
+    - attempt: 2
+      decision_type: correction
+      step_mutation: REVISE_CURRENT
+      revised_prompt: "最後一次"
+      reason: "第二次失敗"
+    - attempt: 3
+      decision_type: escalation
+      dump_required: true
+      evolution_proposal:
+        type: INJECT_STEP
+        new_step:
+          step_id: "T01_PRE"
+          name: "前置環境設定"
+          prompt: "請先設定環境"
+      reason: "重試耗盡，需 evolve"
+
+executor_events:
+  - attempt: 1
+    phase: AFTER_EXEC
+    event_type: failure
+    payload: { reason: "regex_no_match" }
+  - attempt: 2
+    phase: AFTER_EXEC
+    event_type: failure
+    payload: { reason: "regex_no_match" }
+  - attempt: 3
+    phase: AFTER_EXEC
+    event_type: failure
+    payload: { reason: "regex_no_match" }
+
+expected_phases:
+  - BEFORE_DECIDE
+  - DECIDE
+  - BEFORE_EXEC
+  - EXEC
+  - AFTER_EXEC
+  - DECIDE
+  - BEFORE_EXEC
+  - EXEC
+  - AFTER_EXEC
+  - DECIDE
+  - BEFORE_EXEC
+  - EXEC
+  - AFTER_EXEC
+  - ON_ESCALATION
+  - ON_EVOLUTION_PROPOSE
+  - ON_EVOLUTION_APPLY
+  - ON_ESCALATION_DUMP_REQUEST
+
+expected_brain_call_count:
+  capabilities: 1
+  decide_correction: 2
+  decide_escalation: 1
+
+expected_kernel_result:
+  success: false
+  evolved_playbook_path_not_null: true
+  evolution_fresh_required: true
+  completed_steps: 0
+  total_steps: 1

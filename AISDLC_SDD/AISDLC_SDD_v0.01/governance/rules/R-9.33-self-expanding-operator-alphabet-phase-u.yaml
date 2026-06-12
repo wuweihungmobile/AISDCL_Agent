@@ -1,0 +1,84 @@
+id: R-9.33
+title: Phase U 組合算子文法的自我擴充（meta⁶）（PRIMITIVES/COMBINATORS 外有界字母表生成文法 + 可計算性閉包有界停機）
+trigger_states:
+  - LEARNING_COMMIT
+  - MEMORY_CONSOLIDATION
+severity: high
+maturity: active
+spec: >
+  L10 完整之「離線活體 meta⁶ 迴圈 · 組合算子文法自我擴充」切片：把 Phase T 只能在固定算子字母表
+  PRIMITIVES（operator_genesis.PRIMITIVES 8 條硬編：mean/max/min/sum/range/median/mad/last）+ COMBINATORS
+  （9 條硬編：identity/abs/neg/clip01/sq + diff/ratio_safe/max2/min2）之上自我發明 TRANSFORMS/OPS 外算子的
+  能力，推進到系統能自我發明一個 PRIMITIVES/COMBINATORS 字母表裡根本沒有的全新原始算子/組合算子（= 擴充
+  算子生成文法的字母表本身，字母表外生成，meta⁶）。並納管「字母表外生成」憑空長出、Phase T（固定字母表）
+  時不存在而 Phase U 才出現的新危害：(i) 可計算性閉包危害（ComputabilityClosure，本 Phase 靈魂）——Phase T
+  的「每個被發明算子全函式 + 有界步數」之所以成立，其地基是『字母表本身被人類凍結、逐條手證過全 total +
+  O(n) + cost-1』；一旦讓系統自我發明字母表元素（= 會被文法用來生成每一個算子的生成規則零件），可計算性
+  須由『單一算子可證停機』升級為『擴充字母表後，文法 G(A') 生成的整個（仍有限的）算子代數中每一個算子皆
+  全函式 + 有界步數』的閉包性質——這是「圖靈完備 vs 保證停機」第一次反噬到框架自我擴充的生成規則本身
+  （meta⁶）而非僅其產物；(ii) 字母表無界生成爆炸（PRIMITIVES/COMBINATORS 外不再有 8+9 條硬編上界）；
+  (iii) 字母表自我發明 Goodhart（發明一個 base_reducer/post_map/binary_atom/probe 計算自己核可訊號的自指
+  自利字母）。9.33.1 字母表生成文法自我擴充骨架（AlphabetGenesis / BoundedAlphabetGrammar，meta⁶）：
+  PRIMITIVES/COMBINATORS 外字母自我發明經 operator_alphabet_genesis 在 bounded 字母表生成文法（有限
+  ATOM_REDUCERS × POST_MAPS 生成 InventedPrimitive + 有限 BINARY_ATOMS + 一元 POST_MAPS 生成
+  InventedCombinator）可枚舉、節點 ≤ SDD_DIM_ALPHABET_BUDGET（clamp[8,128] 預設 32）——「PRIMITIVES/
+  COMBINATORS 外」≠「無界」；只提案、絕不自動納入、絕不自寫常數；結構性不 import oracle / 不讀必要性語料
+  （對抗分離，編譯期隔離斷言）。9.33.2 字母表自我發明反自利（AlphabetGenesisAntiSelfInterest）：字母自我
+  發明的 capability-delta tier 唯一合法來源為 operator_alphabet_genesis 不可見、content-hashed 凍結的
+  feature-grounded 字母必要性 held-out（增量覆蓋 ∧ 非冗餘）勝率；genesis 自評結構性禁止充當；genesis 自評
+  必要但 oracle 判不必要/冗餘一律以 oracle 為準；字母自指守門結構性拒絕（base_reducer/post_map/atom/probe
+  引用保留自指/proposer/oracle 內部信號 self_score/proposer_*/necessity/oracle_* … → alphabet_self_reference_guard
+  在送 oracle 前攔，零漏放）；字母表外噪音字母（增量覆蓋 < SDD_DIM_COVERAGE_MARGIN）+ 冗餘字母（與既有
+  existing_cost 排序一致率 ≥ SDD_DIM_REDUNDANCY_MAX）兩道正交門檻並列攔截零漏放（新增 feature-grounded
+  evaluate_genesis_alphabet 不靠字母名）。9.33.3 可計算性閉包有界停機（ComputabilityClosureBounded，本 Phase
+  最深停機紅線）：每個自我發明字母結構性保證擴充後整個算子代數全函式 + 有界步數 + 零遞迴零迴圈——(a) 字母
+  由 total ATOM_REDUCERS（acc_sum/acc_count/acc_sumabs/acc_sumsq/acc_max/acc_min/acc_first，O(n) 單遍累積）×
+  total POST_MAPS（identity/sqrt_safe/recip_safe/log1p_safe/clip01/negate）+ total BINARY_ATOMS（wmean/hypot/
+  geo_safe/harmonic_safe/absdiff，非法域回退）組成 → 字母自身 total + cost-1；(b) 採納前 guard_computability_closure
+  枚舉擴充字母表後 G(A') 整個算子代數，斷言每算子 fuzz-total（零例外、無 NaN/inf）∧ cost() ≤
+  SDD_DIM_OP_STEP_MAX（clamp[1,64] 預設 8，有界深度文法結構性保證 ≤3）；(c) 字母求值路徑零 while/零遞迴/零
+  自呼叫（ast 斷言 _reduce/_post/_binary_atom/reduce/combine/apply/cost）；觸發 ComputabilityClosureViolation →
+  MFSM_ESCALATION。閉包定理（結構歸納）：total 的合成仍 total、cost=prim_evals+1 ≤3，故 I(A') 成立——可計算性
+  在字母表擴充下封閉。把「圖靈完備 vs 保證停機」正面釘進框架自我擴充的生成規則本身——被發明字母（生成算子
+  的規則零件）生成的整個算子代數可證停機，而整個閉環仍靠 LLM+紙帶維持圖靈完備。9.33.4 字母基數 + 反 big-bang
+  字母發明（AlphabetGenesisBounded + NoUnboundedAlphabetGenesis）：(i) 現存活躍 alphabet-genesis 字母數 ≤
+  SDD_DIM_ALPHABET_MAX（clamp[1,64] 預設 16）→ 觸頂 AlphabetCardinalityExceeded → MFSM_ESCALATION
+  （meta_halt_monitor.guard_alphabet_genesis）；(ii) 每週期至多 K_alpha（SDD_DIM_EXPAND_K 預設 1，沿用 Phase
+  Q/R/S/T）個字母自我發明可進 proposed-pending-signoff，每個必經人工 signoff（守 Rule 8 / 9.27.3 / 9.28.4 /
+  9.29.4 / 9.30.4 / 9.31.4 / 9.32.4）；genesis/steersman 絕不自動 commit、絕不自動納入、絕不一次劫持整個字母
+  本體論；退役字母再採納須挾 necessity capability-delta（沿用 GraduationRatchet）；誠實標註：字母 stock（每
+  字母首採、per-fingerprint churn=0、維度/詞彙/算子 stock 天花板皆盲）與可計算性閉包（G(A') 整代數 fuzz-total +
+  cost ≤ step_max + ast 零遞迴零迴圈）是更緊的 runtime/結構精煉，由 guard_alphabet_genesis /
+  guard_computability_closure + ALPHABET_GENESIS_GOODHART_FLAP / COMPUTABILITY_CLOSURE_FLAP chaos enforce；
+  META_FSM.tla 的 AlphabetGenesisBounded + ComputabilityClosureBounded 為 single-counter 抽象之歸約引用（字母
+  自我擴充的 add↔retire 迴圈與單指紋 churn 迴圈同構，不無限抖動；被發明字母使生成的整個代數有界停機）；重用
+  既有 META_FSM、僅補 AlphabetGenesisBounded + ComputabilityClosureBounded INVARIANT、不增狀態 / 變數、不增第
+  六軌；五軌 TLC（SDD 42 / META 13 / FLEET 7 / COMPOSITION 21 / OPTIMIZATION 12）全不回歸、字母發明不污染單軌
+  SDD_FSM.tla。9.33.5 字母表自我發明誠實 + 活體/meta-oracle horizon：feature-grounded 字母必要性勝率 tier 為
+  capability_level 唯一合法來源，不得謊報、不得用自評充當；算子組合深度自我擴充（meta⁷：自我擴充運算式樹深度
+  上界）+ 自我發明評估器（meta-oracle 自演化，最高 horizon——它自指地破壞所有 Phase 賴以成立的對抗分離地基
+  〔generator 與 evaluator 收斂同基質會掏空全部反 Goodhart 保證〕，未獲 evaluator-of-evaluators 的更高階
+  held-out meta-corpus + 其反自利證明等對抗分離不可繞過性證明前不得採納）+ 活體 meta⁶ 發明版受 OPEN-10.6
+  約束續列 horizon（OPEN-U.x 承 OPEN-T.x/S.x/R.x/Q.x/O.7/M.7/P.7 暫不放寬沙箱）。對應 operator_alphabet_genesis
+  （enumerate_genesis_alphabet / alphabet_self_reference_guard / alphabet_genesis / alphabet_genesis_round /
+  adopt_genesis_alphabet / expanded_alphabet / verify_computability_closure / InventedPrimitive / InventedCombinator /
+  ClosureReport）/ dimension_necessity_oracle（evaluate_genesis_alphabet / necessity_score_alphabet /
+  load_alphabet_corpus / AlphabetCase / AlphabetCandidate）/ meta_halt/meta_ledger（is_alphabet_genesis_fingerprint /
+  active_alphabet_genesis_features）/ meta_halt/meta_halt_monitor（guard_alphabet_genesis /
+  AlphabetCardinalityExceeded / guard_computability_closure / ComputabilityClosureViolation / dim_alphabet_max）/
+  steersman_renderer（render_alphabet_genesis_proposal）。禁止：operator_alphabet_genesis 自動納入字母自我發明 /
+  自寫常數繞過人工 signoff + guard_alphabet_genesis / guard_computability_closure、用 genesis 自評充當字母自我
+  發明必要性 capability-delta tier（字母自我發明 Goodhart 自評放水）、字母自我發明 base_reducer/post_map/atom/
+  probe 自指（引用保留自指 / proposer / oracle 內部信號繞過 alphabet_self_reference_guard）、
+  operator_alphabet_genesis 讀寫 / 影響 / import ALG-* 字母必要性語料或 dimension_necessity_oracle、字母自我發明
+  搜尋超 SDD_DIM_ALPHABET_BUDGET 仍指數展開（破有界字母表文法）、自我發明字母使擴充後 G(A') 整個算子代數出現
+  非全函式 / cost 超 SDD_DIM_OP_STEP_MAX / 求值路徑含遞迴 while 自呼叫的算子（破可計算性閉包——被發明的生成
+  規則本身不可證停機）、現存活躍 alphabet-genesis 字母超 SDD_DIM_ALPHABET_MAX 仍無界擴充字母、一週期同時字母
+  自我發明 > K_alpha 個、把 alphabet-genesis 元迴圈併入單軌 SDD_FSM.tla 或新增第六軌污染五軌 reachable、未獲
+  對抗分離不可繞過性證明即採納自我發明評估器（meta-oracle 自演化，掏空全部反 Goodhart 對抗分離地基）、未經
+  OPEN-U.x 私自開 HTTP 外聯做活體 meta⁶ 發明（破 OPEN-10.6）。
+test_ref: tools/fsm_runtime/tests/test_phase_u.py
+scaffold_roi:
+  fire_count: 0
+  catch_count: 0
+  false_positive_count: 0

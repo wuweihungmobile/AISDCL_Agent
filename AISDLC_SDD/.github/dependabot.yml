@@ -1,0 +1,27 @@
+# AISDLC-SDD — Dependabot（自動更新相依，免未來再撞 Node/action 退役或套件漏洞）。
+#
+# 對應 ADR-001：本次 Node20→Node24 是人工救火；Dependabot 讓 action 版本與
+# pip 釘版日後自動進 PR，經 ci.yml offline-gate 驗證後再合入，避免重蹈覆轍。
+version: 2
+updates:
+  # GitHub Actions：每週掃 .github/workflows/，action 有新版即開 PR。
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+    open-pull-requests-limit: 5
+    labels: ["ci", "dependencies"]
+    commit-message:
+      prefix: "chore(ci)"
+
+  # pip：框架 CI 釘版相依（requirements-ci.txt）有新版即開 PR。
+  - package-ecosystem: "pip"
+    directory: "/AISDLC_SDD_v0.01"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+    open-pull-requests-limit: 5
+    labels: ["dependencies"]
+    commit-message:
+      prefix: "chore(deps)"

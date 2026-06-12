@@ -1,0 +1,99 @@
+# AISDLC-SDD — Drift Daily Report (Phase G M4 / ACT-040, Rule 9.17.4)
+#
+# Placement: **active workflow at repo root** (framework dogfood Rule 9.17.4).
+# Sibling actively-scheduled workflow: fsm-chaos-nightly.yml (Rule 9.9.4).
+# Contrast with `AISDLC_SDD_v0.01/.github/workflows/hub-push.yml` which stays
+# nested as reference-only (intended for downstream Hub Registry repo).
+#
+# Generates one DAILY-{YYYY-MM-DD}.md per day from accumulated COMMIT-*.yaml
+# drift records. Advisory only — never fails main; never blocks PRs.
+#
+# Schedule rationale:
+#   - 02:30 UTC offset from chaos (02:00) to avoid runner contention.
+#   - `workflow_dispatch` for ad-hoc backfill / verification.
+#
+# Output: AISDLC_SDD_v0.01/build/reports/drift/DAILY-YYYY-MM-DD.md
+# Spec:   cicd/SDD_CICD_BASE_LAYER.md §Drift Daily Report
+
+name: drift-daily
+
+on:
+  schedule:
+    - cron: "30 2 * * *"
+  workflow_dispatch:
+    inputs:
+      date:
+        description: "Override report date (YYYY-MM-DD). Empty = today UTC."
+        required: false
+        default: ""
+
+jobs:
+  daily:
+    name: emit DAILY drift report
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    # 與 arch-fitness nightly-strict 共用同一 cron 視窗且都 push main；
+    # 共用 job-level concurrency 群組序列化推送，避免 non-fast-forward 競爭。
+    concurrency:
+      group: main-push-serialize
+      cancel-in-progress: false
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        working-directory: AISDLC_SDD_v0.01
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements-ci.txt
+
+      - name: Generate DAILY report
+        id: gen
+        working-directory: AISDLC_SDD_v0.01
+        env:
+          OVERRIDE_DATE: ${{ github.event.inputs.date }}
+        run: |
+          python - <<'PY'
+          import os, sys
+          from tools.fsm_runtime.drift_monitor import write_daily_report
+          override = os.environ.get("OVERRIDE_DATE", "").strip()
+          path = write_daily_report(date=override or None)
+          print(f"GENERATED::{path}")
+          # Surface to step summary
+          with open(os.environ["GITHUB_STEP_SUMMARY"], "a", encoding="utf-8") as f:
+              f.write(f"## Drift Daily Report\n\nGenerated: `{path}`\n")
+          PY
+
+      - name: Commit and push report
+        working-directory: AISDLC_SDD_v0.01
+        run: |
+          set -eu
+          git config user.name  "sdd-drift-bot"
+          git config user.email "sdd-drift-bot@users.noreply.github.com"
+          git add build/reports/drift/DAILY-*.md
+          if git diff --cached --quiet; then
+            echo "No DAILY report changes to commit."
+          else
+            git commit -m "chore(drift): DAILY report $(date -u +%Y-%m-%d) [skip ci]"
+            # rebase-retry：arch-fitness nightly 可能已先 push，避免 non-fast-forward。
+            n=0
+            until git push; do
+              n=$((n+1))
+              if [ "$n" -ge 5 ]; then
+                echo "::error::push DAILY report failed after 5 retries"; exit 1
+              fi
+              echo "push rejected (attempt $n) — rebasing onto origin/main…"
+              git rebase --abort 2>/dev/null || true   # 清除前次殘留 rebase 狀態
+              git pull --rebase --autostash origin main || true
+              sleep 3
+            done
+          fi

@@ -1,0 +1,10 @@
+Token usage: 100000 tokens / max 200000
+Token usage: 50000 tokens / max 100000
+Token usage:  175000 tokens / max 200000
+Token usage: 1 tokens / max 200000
+Token usage: 9999 tokens / max 10000
+Token usage: 80000 tokens / max 200000 active session
+Token usage: 199999 tokens / max 200000
+Token usage: 25 tokens / max 100
+Token usage:12345 tokens/max 50000
+Token usage: 67890 tokens / max 100000

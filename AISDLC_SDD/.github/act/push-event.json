@@ -1,0 +1,9 @@
+{
+  "ref": "refs/heads/main",
+  "repository": {
+    "name": "AISDLC_SDD",
+    "full_name": "wuweihungmobile/AISDLC_SDD",
+    "default_branch": "main"
+  },
+  "pusher": { "name": "local-act" }
+}

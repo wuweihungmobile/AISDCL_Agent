@@ -1,0 +1,62 @@
+#!/usr/bin/env bash
+# AutoClaude git pre-push hook — push 前完整 CI 閘門鏡像（在本機把所有問題解決完才上版）
+# 鏡像 .github/workflows/ci.yml 的 push gating jobs：
+#   test（pytest + LOC + import-linter）/ claude-md-budget（CLAUDE.md + snapshot）/ equivalence
+# 安裝：powershell -ExecutionPolicy Bypass -File tools/install_git_hooks.ps1
+# 緊急跳過：AUTOCLAUDE_SKIP_HOOKS=1 git push ...  或  git push --no-verify
+# 注意：本 hook 在 Windows 跑本機 Python；如需 100% Linux 對等，請另跑 tools/run_act.ps1。
+# ---------------------------------------------------------------------------
+set -uo pipefail
+
+if [ "${AUTOCLAUDE_SKIP_HOOKS:-0}" = "1" ]; then
+  echo "[pre-push] AUTOCLAUDE_SKIP_HOOKS=1 → 跳過所有檢查"
+  exit 0
+fi
+
+ROOT="$(git rev-parse --show-toplevel)"
+cd "$ROOT" || exit 1
+export PYTHONUTF8=1
+fail=0
+
+echo "[pre-push] === 本機 CI 閘門（鏡像 ci.yml push jobs）==="
+
+# 1. LOC 預算（CI: test / claude-md-budget）
+echo "[pre-push] 1/5 LOC 預算"
+python tools/check_loc_budget.py || fail=1
+
+# 2. CLAUDE.md <= 400 行（CI: claude-md-budget hard gate）
+echo "[pre-push] 2/5 CLAUDE.md <= 400 行"
+if [ -f CLAUDE.md ]; then
+  lines="$(wc -l < CLAUDE.md | tr -d ' ')"
+  if [ "$lines" -gt 400 ]; then
+    echo "::error:: CLAUDE.md=$lines 行 > 400"
+    fail=1
+  fi
+fi
+
+# 3. Architecture Snapshot 可重現（CI: claude-md-budget 的 snapshot_sync --check）
+echo "[pre-push] 3/5 snapshot_sync.py --check"
+python tools/snapshot_sync.py --check || fail=1
+
+# 4. import-linter 架構約束（CI: test 的 lint-imports）
+echo "[pre-push] 4/5 import-linter（架構約束）"
+if command -v lint-imports >/dev/null 2>&1; then
+  lint-imports || fail=1
+else
+  echo "[pre-push]   lint-imports 未安裝（pip install -e .[lint]）— 略過，CI 仍會檢查" >&2
+fi
+
+# 5. pytest 全測（CI: test + equivalence）。可用 AUTOCLAUDE_PUSH_PYTEST_ARGS 縮限。
+echo "[pre-push] 5/5 pytest（CI test+equivalence 鏡像）"
+PYTEST_ARGS="${AUTOCLAUDE_PUSH_PYTEST_ARGS:-tests/ -q --tb=short}"
+# shellcheck disable=SC2086
+python -m pytest $PYTEST_ARGS || fail=1
+
+if [ "$fail" -ne 0 ]; then
+  echo "[pre-push] ❌ 本機 CI 閘門失敗 — 請修復後再 push（這正是要在本機攔下的 CI 紅燈）"
+  echo "           100% Linux 對等驗證：powershell -ExecutionPolicy Bypass -File tools/run_act.ps1 -Job test"
+  echo "           緊急跳過：AUTOCLAUDE_SKIP_HOOKS=1 或 git push --no-verify"
+  exit 1
+fi
+echo "[pre-push] ✅ 本機 CI 閘門全綠 — 可安全 push"
+exit 0

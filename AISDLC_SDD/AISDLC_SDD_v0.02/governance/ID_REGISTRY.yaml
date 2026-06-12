@@ -1,0 +1,138 @@
+# AISDLC-SDD ID 分配登記簿（單一真實來源 / Single Source of Truth）
+#
+# 目的：徹底解決「ACT / Rule(R-9.x) 編號徵用衝突」。以往編號靠人工散記於藍圖標頭與
+#       memory，沒有權威「下一個可用號」，每隔幾個 Phase 就重演撞號（如 Phase K vs
+#       backup 分支 M3 Hook Health 都想要 ACT-081+）。本檔為唯一分配權威，配 pytest
+#       守門（tools/fsm_runtime/tests/test_id_registry.py），CI 每跑必檢，重疊即 fail。
+#
+# 查號（分配前必跑）：
+#   python -m tools.fsm_runtime.id_registry next-act     # 印下一個可用 ACT
+#   python -m tools.fsm_runtime.id_registry next-rule    # 印下一個可用 Rule
+#   python -m tools.fsm_runtime.id_registry validate     # 驗證一致性（CI/pytest 等同）
+
+allocation_policy:
+  principle: "monotonic-from-next-free"
+  rules:
+    - "新 ACT/Rule 一律取 next_free，分配後立即在此登記並推進 next_free。"
+    - "禁止『向前預留』未落地的號；停滯/備援分支不持有任何號（act_range/rule 必為 null）。"
+    - "停滯分支復活時，從當下 next_free 重新取號，不得回頭認領舊號。"
+    - "concrete range 不得重疊、不得跳號（contiguous from 1）。"
+    - "status=active 的 Rule 必有對應 governance/rules/R-*.yaml；reserved 則尚無檔。"
+
+# === 分配前緣（唯一權威）===
+next_free:
+  act: 172
+  rule: "9.39"
+
+# === ACT 編號分配（範圍式；ACT 無磁碟檔，本登記簿為唯一真實來源）===
+act_allocations:
+  - phase: "Phase A~D — SDD 核心轉型 + Runtime Hook 基礎"
+    range: [1, 19]
+    status: active
+    ref: "build/planning/archive/SDD_improving_Automation_01~05.md"
+  - phase: "Phase E — 精準停機 + 閉環品質 + 生產回饋 + 學習層"
+    range: [20, 29]
+    status: active
+    ref: "build/planning/archive/SDD_improving_Automation_06.md"
+  - phase: "Phase F — 跨專案 Hub + 多模態驗證"
+    range: [30, 31]
+    status: active
+    ref: "build/planning/archive/SDD_improving_Automation_07.md"
+  - phase: "Phase G — 自癒 + 預測停機 + 模糊量化 + 漂移 + 形式化 + 成本"
+    range: [32, 44]
+    status: active
+    ref: "build/planning/archive/SDD_improving_Automation_08.md"
+  - phase: "Phase H — 執行接地 + 鷹架代謝 + 舵手交棒"
+    range: [45, 58]
+    status: active
+    ref: "build/planning/archive/SDD_improving_Automation_09.md"
+  - phase: "Phase I — 可信賴的規模化現實自治"
+    range: [59, 72]
+    status: active
+    ref: "build/planning/archive/SDD_improving_Automation_09.md"
+  - phase: "Phase J — 對抗式自我改進現實自治"
+    range: [73, 80]
+    status: active
+    ref: "build/planning/archive/SDD_improving_Automation_10.md"
+  - phase: "Phase K — 意圖規劃 + 辯證消歧 + 因果接地"
+    range: [81, 88]
+    status: active            # 2026-06-02 Phase K 執行完成（ACT-081~088 全綠）
+    ref: "build/planning/archive/SDD_improving_Automation_11.md"
+  - phase: "Phase L — 元迴圈形式化停機 + 離線反事實實驗 + 主動規格脆弱性預測"
+    range: [89, 96]
+    status: active            # 2026-06-03 Phase L 執行（ACT-089~096：META_FSM/EXPERIMENT_REPLAY/fragility）
+    ref: "build/planning/archive/SDD_improving_Automation_12.md"
+  - phase: "Phase M — 組合級意圖自治形式化 + 自我演化進步性監測 + 組合級脆弱性"
+    range: [97, 104]
+    status: active            # 2026-06-03 Phase M 執行（ACT-097~104：COMPOSITION_FSM/trajectory/ceiling/blast）
+    ref: "build/planning/archive/SDD_improving_Automation_13.md"
+  - phase: "Phase N — 全域組合最佳化 + NP-hard 搜尋形式化停機"
+    range: [105, 110]
+    status: active            # 2026-06-03 Phase N 執行（ACT-105~110：OPTIMIZATION_FSM/optimizer/objective）
+    ref: "build/planning/archive/SDD_improving_Automation_14.md"
+  - phase: "Phase O — 自我調參的對抗式有界元最佳化"
+    range: [111, 116]
+    status: active            # 2026-06-03 Phase O 執行（ACT-111~116：objective_tuner/replay_oracle/obj-profile 納入 META_FSM）
+    ref: "build/planning/archive/SDD_improving_Automation_15.md"
+  - phase: "Phase P — 全評分器一體化自校準 + 跨評分器聯合反 Goodhart + 耦合感知聚合停機"
+    range: [117, 122]
+    status: active            # 2026-06-04 Phase P 執行（ACT-117~122：scorer_calibration_registry/joint_calibration_oracle/CrossScorerChurnBounded/unified steersman）
+    ref: "build/planning/archive/SDD_improving_Automation_16.md"
+  - phase: "Phase Q — 價值維度的自我擴充（meta-meta 層有界本體論演化）"
+    range: [123, 128]
+    status: active            # 2026-06-04 Phase Q 執行（ACT-123~128：value_dimension_registry/dimension_necessity_oracle/DimensionCardinalityBounded/ontology steersman）
+    ref: "build/planning/archive/SDD_improving_Automation_17.md"
+  - phase: "Phase R — 價值維度語意的自我發明 + 退役聯動（meta-meta-meta 層候選池外有界生成與定基數本體論演化）"
+    range: [129, 134]
+    status: active            # 2026-06-04 Phase R 執行（ACT-129~134：dimension_semantics_synthesizer 有界生成文法+自指守門/feature-keyed evaluate_invented_dimension/SwapCadenceBounded 退役聯動/swap steersman）
+    ref: "build/planning/archive/SDD_improving_Automation_18.md"
+  - phase: "Phase S — 生成文法詞彙的自我擴充（meta⁴）+ 多維度批次退役聯動（VOCAB 外有界詞彙生成與批次本體論重構有界停機）"
+    range: [135, 140]
+    status: active            # 2026-06-04 Phase S 執行（ACT-135~140：vocabulary_genesis VOCAB 外有界詞彙生成文法+詞彙自指守門/feature-grounded evaluate_genesis_feature/VocabGenesisBounded 詞彙基數停機/batch_swap_dimensions+BatchSwapCadenceBounded 批次三鎖/vocab+batch steersman）
+    ref: "build/planning/archive/SDD_improving_Automation_19.md"
+  - phase: "Phase T — 轉換算子文法的自我擴充（meta⁵）（TRANSFORMS/OPS 外有界算子生成文法 + 算子可計算性有界停機）"
+    range: [141, 146]
+    status: active            # 2026-06-04 Phase T 執行（ACT-141~146：operator_genesis TRANSFORMS/OPS 外有界算子生成文法〔PRIMITIVES×COMBINATORS〕+算子自指守門+可計算性〔全函式+有界步數+零遞迴零迴圈〕/feature-grounded evaluate_genesis_operator/OperatorGenesisBounded 算子基數停機+OperatorComputabilityBounded/render_operator_genesis_proposal steersman）
+    ref: "build/planning/archive/SDD_improving_Automation_20.md"
+  - phase: "Phase U — 組合算子文法的自我擴充（meta⁶）（PRIMITIVES/COMBINATORS 外有界字母表生成文法 + 可計算性閉包有界停機）"
+    range: [147, 149]
+    status: active            # 2026-06-04 Phase U 執行（ACT-147~149：operator_alphabet_genesis PRIMITIVES/COMBINATORS 外有界字母表生成文法〔ATOM_REDUCERS×POST_MAPS+BINARY_ATOMS〕+字母自指守門+可計算性閉包〔擴充字母表後 G(A') 整代數全函式+有界步數+零遞迴零迴圈〕/feature-grounded evaluate_genesis_alphabet/AlphabetGenesisBounded 字母基數停機+ComputabilityClosureBounded/render_alphabet_genesis_proposal steersman）
+    ref: "build/planning/archive/SDD_improving_Automation_21.md"
+  - phase: "Phase V — 算子組合深度文法的自我擴充（meta⁷）（深度 <=2 外有界深度生成文法 + 深度可計算性閉包有界停機，因 cost==depth）"
+    range: [150, 152]
+    status: active            # 2026-06-05 Phase V 執行（ACT-150~152：operator_depth_genesis 深度 <=2 外有界深度生成文法〔有限深度-2 基底 × 一元鏈，鏈長 <= depth_limit-2〕+深度自指守門+深度可計算性閉包〔擴充深度後 G(A,depth) 整代數全函式+cost==depth<=step_max+零遞迴零迴圈，因 cost==depth 把停機問題釘進文法結構性深度=步數參數本身〕/feature-grounded evaluate_genesis_depth/DepthGenesisBounded 深度算子基數停機+DepthClosureBounded/render_depth_genesis_proposal steersman）
+    ref: "build/planning/archive/SDD_improving_Automation_22.md"
+  - phase: "Phase W — 算子間互遞迴文法的自我擴充（meta⁸）（非遞迴外有界互遞迴生成文法 + 良基停機證書有界停機，因互遞迴=停機可判定性臨界線）"
+    range: [153, 155]
+    status: active            # 2026-06-05 Phase W 執行（ACT-153~155：operator_recursion_genesis 非遞迴外有界互遞迴生成文法〔有限節點集 × 有限帶 rank 呼叫邊集，只生成 DAG ∨ 每邊嚴格遞減下有界 rank〕+互遞迴自指守門+良基停機證書〔呼叫圖 acyclic ∨ 每環嚴格遞減下有界 rank + fuel<=step_max + 整代數全函式 + 求值器零真遞迴零 while，把停機問題釘在可判定 vs 不可判定臨界線本身，用全新 device「良基測度終止」取代失效的「有界步數」〕/feature-grounded evaluate_genesis_recursion/RecursionGenesisBounded 互遞迴算子基數停機+RecursionClosureBounded/render_recursion_genesis_proposal steersman）
+    ref: "build/planning/archive/SDD_improving_Automation_23.md"
+  - phase: "Phase X — 具身接地接入 META_FSM（元迴圈自我演化判定接地具身評估器 + EmbodiedGroundingBounded 有界停機）"
+    range: [156, 158]
+    status: active            # 2026-06-05 Phase X 執行（ACT-156~158：EMBODIED_GROUNDING_GATE 把元迴圈自我演化判定從合成語料勝率接地到具身評估器〔sdd-evaluator 沙箱實跑 + observability_query 客觀錯誤 + output_quality_scorer OQS〕+ embodied_grounding_oracle 具身增益判據〔OQS 不退步 ∧ 無新增 runtime_fail，generator 不可見對抗分離〕+ guard_embodied_grounding fail-closed〔與 TLA+ EmbodiedGroundingBounded 100% 同構：缺客觀 ExecutionObservation→MFSM_ESCALATION；沙箱硬 timeout→grounded_fail FSM 不 wall-clock wait；guard 獨立重新計分不盲信 oracle 標籤〕+ EmbodiedGroundingBounded 不增軸不增狀態變數+ meta_ledger embodied-grounding 命名空間 + render_embodied_grounding_proposal steersman + EMBODIED_GROUNDING_FLAP chaos；前置 Phase X 切片 FF-16 量測 surface GAP-X1，本份升級為形式化有界閉環；橫向接地不碰 meta⁹）
+    ref: "build/planning/archive/SDD_improving_Automation_25.md"
+  - phase: "Phase Y — meta⁸ 互遞迴呼叫圖人類視覺化儀表板（可解釋性轉向：可證良基終止 + 互遞迴呼叫圖有界可稽核投影成人類可審批拓樸 + VisualizationBounded 有界停機）"
+    range: [159, 161]
+    status: active            # 2026-06-06 Phase Y 執行（ACT-159~161：recursion_topology_view AST 同構投影〔extract_topology/3 視圖/render_json〕+ verify_topology_consistency 拓樸防偽〔反解析重算圖同構，攔畫的圖比跑的簡單/偽 rank/刪邊〕+ guard_visualization_bounded fail-closed〔與 TLA+ VisualizationBounded 100% 同構：render budget 逃逸 token 爆炸→raise；拓樸視覺欺騙→raise；接地零觀測 false-green→raise〕+ VisualizationBounded 不增軸不增狀態變數〔read-only 純觀察者，churn 永不變動〕+ render_recursion_topology_dashboard steersman + VISUALIZATION_FLAP〔10⁶ 節點有界截斷〕+ VISUALIZATION_TOPOLOGY_DRIFT_FLAP chaos；橫向可解釋性加固不碰 meta⁹/meta-oracle）
+    ref: "build/planning/active/SDD_improving_Automation_26.md"
+  - phase: "Phase Z — AutoClaude 執行引擎橋接（SDD→Playbook 編譯 + 治理回路 + AUTOCLAUDE_DELEGATED 提案）"
+    range: [162, 171]
+    status: active            # 2026-06-12 Phase Z 執行（ACT-162~171：SDD_AUTOCLAUDE_BRIDGE workflow + sdd-playbook-compiler agent + R-9.38 翻譯保真 + 10 場景 §AutoClaude 自動化執行小節；AUTOCLAUDE_DELEGATED 維持提案、_HAPPY_PATH 零修改 → TLC N/A）
+    ref: "../../docs/04_planning/AutoSDD_improving_01.md"
+
+# === Rule(R-9.x) 分配前緣（active 集合以 governance/rules/R-*.yaml 磁碟為準，
+#     由 test_rules_index_sync 守 ↔ RULES_INDEX；本處只登記「保留」與前緣）===
+rule_allocations:
+  active_authority: "governance/rules/R-*.yaml（磁碟即真實，目前 R-9.1~9.38 + R-SELF-STRIDE）"
+  reserved: []   # R-9.26 已於 2026-06-03 落地為 active（Phase N / ACT-109）
+
+# === 停滯 / 備援分支（不持有任何號；復活時取 next_free）===
+parked:
+  - name: "M3 Hook Health（backup 分支，已停滯歸檔）"
+    status: parked
+    act_range: null
+    rule: null
+    note: >
+      原 Phase H fork 曾擬「改配 ACT-081+ / Rule 9.23+」；該號段已由 Phase K 主線正式徵用
+      （依 memory project-phase-j-blueprint「續推 L7 從 ACT-081+/Rule 9.23+」）。若 M3 日後復活，
+      一律從當下 next_free 重新取號（現為 ACT-172+ / Rule 9.39+），不得回頭認領 081~149。
+    ref: "memory project-phase-h-fork-decision"

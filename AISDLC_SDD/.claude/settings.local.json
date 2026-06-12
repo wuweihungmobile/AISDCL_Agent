@@ -1,0 +1,20 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(rsync -av --exclude='*/archive/' AISDLC_v0.08/agent/ AISDLC_v0.09/agent/)",
+      "Bash(ls AISDLC_v0.09/agent/core/*-zh.yaml)",
+      "Bash(ls AISDLC_v0.09/agent/specialized/*.yaml)",
+      "Bash(git add:*)",
+      "Bash(cat)",
+      "Read(//tmp/**)",
+      "Bash(gh repo:*)",
+      "Bash(gh api:*)",
+      "Bash(grep -E \"yaml$\")",
+      "Bash(grep \"version: \\\\\"v0.09\\\\\"\" \"d:/CursorProject/AISDLC_SDD/AISDLC_SDD_v0.01/agent/specialized/\"*.yaml)",
+      "Bash(tar -czf AISDLC_SDD_v0.01/releases/v0.01/AISDLC-SDD_v0.01_release_2026-04-16.tar.gz --exclude=AISDLC_SDD_v0.01/releases/v0.01/AISDLC-SDD_v0.01_release_2026-04-16.tar.gz --exclude=AISDLC_v0.09 --exclude=docs AISDLC_SDD_v0.01/)",
+      "Bash(git commit -m ' *)",
+      "Bash(git push *)",
+      "Bash(git mv *)"
+    ]
+  }
+}

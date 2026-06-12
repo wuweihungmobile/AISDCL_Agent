@@ -1,0 +1,55 @@
+# AISDLC-SDD — CI 離線閘門（push/PR）。
+#
+# 補齊先前缺口：原本沒有任何 workflow 在 push/PR 跑那整套離線測試
+# （只有 nightly chaos + PR arch-fitness advisory）。本 workflow 與地端
+# scripts/ci-gate.sh / docker compose ci-runner / pre-push hook / act 跑
+# 同一份 ci-gate.sh，達成「地端通過 ⇒ 雲端通過」的高擬真平價。
+#
+# 設計：
+#   - push 只在 main（驗證主線）；PR 涵蓋所有分支，避免 push+PR 雙跑。
+#   - 不推送、不寫回 repo（純驗證），故不需 contents:write，也無推送競爭。
+#   - artifact 上傳 continue-on-error（observability-only，配額耗盡不判紅）。
+#   - chaos / 五軌完整 TLC 仍留 nightly（重；不上 PR 熱路徑）。
+
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+# 純驗證、不寫回 repo → 最小權限唯讀（佐證無推送競爭）。
+permissions:
+  contents: read
+
+jobs:
+  offline-gate:
+    name: offline gate (pytest + arch-fitness)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.11"
+      - name: Install pinned deps
+        working-directory: AISDLC_SDD_v0.01
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements-ci.txt
+      - name: Run local CI gate (offline)
+        run: bash scripts/ci-gate.sh
+      - name: Upload arch-fitness findings
+        if: always()
+        continue-on-error: true   # observability-only；artifact 配額耗盡不得判紅
+        uses: actions/upload-artifact@v5
+        with:
+          name: ci-arch-fitness-${{ github.run_id }}
+          path: AISDLC_SDD_v0.01/arch-fitness.json
+          retention-days: 7
+          if-no-files-found: ignore

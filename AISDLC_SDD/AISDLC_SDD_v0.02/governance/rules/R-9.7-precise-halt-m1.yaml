@@ -1,0 +1,18 @@
+id: R-9.7
+title: Phase E M1 精準停機強化
+trigger_states:
+  - "*"
+  - HUMAN_PENDING
+  - AUTO_COMPACT_PENDING
+severity: critical
+maturity: active
+spec: >
+  9.7.1 FSM 雙源一致性：每次 PR/CI 跑 test_md_python_sync，MD 轉換表與 _HAPPY_PATH
+  不一致即 fail；9.7.2 HUMAN_PENDING 逾時守門：≥72h REMINDER、≥168h 自動 ESCALATION；
+  9.7.3 AUTO_COMPACT 單 stage 限流：同一 stage 超過 MAX_AUTO_COMPACT_PER_STAGE=3 即
+  ESCALATION。對應 timeout_checker.py / fsm_runtime.trigger_auto_compact。
+test_ref: tools/fsm_runtime/tests/test_timeout_checker.py
+scaffold_roi:
+  fire_count: 0
+  catch_count: 0
+  false_positive_count: 0

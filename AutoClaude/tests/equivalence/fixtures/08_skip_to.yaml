@@ -1,0 +1,22 @@
+version: "1.0"
+project: "Equivalence_08_skip_to"
+
+global_invariants:
+  max_retries_per_step: 2
+  auto_compact_interval: 0
+
+tasks:
+  - step_id: "T01"
+    name: "前置步驟"
+    prompt: "前置並輸出 [PRE_DONE]"
+    expected_output_regex: "\\[PRE_DONE\\]"
+
+  - step_id: "T02"
+    name: "可被 SKIP 的步驟"
+    prompt: "可選步驟，輸出 [OPTIONAL_DONE]"
+    expected_output_regex: "\\[OPTIONAL_DONE\\]"
+
+  - step_id: "T03"
+    name: "目標步驟"
+    prompt: "目標並輸出 [TARGET_DONE]"
+    expected_output_regex: "\\[TARGET_DONE\\]"

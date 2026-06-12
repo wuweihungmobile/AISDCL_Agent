@@ -1,0 +1,17 @@
+# config.local.yaml — 個人環境覆寫範本
+#
+# 用法：
+#   1. cp config.local.yaml.example config.local.yaml
+#   2. 編輯 config.local.yaml，填入你機器上的絕對路徑
+#   3. 執行：python -m autoclaude scripts/foo.yaml --config config.local.yaml
+#
+# 此檔已加入 .gitignore，個人路徑不會 commit 進倉儲。
+# 留空欄位會 fallback 到 config.yaml 的預設值。
+
+# === 工作流程自動偵測搜尋路徑 ===
+# 當 playbook 內 workflow_type: auto 且未指定 workflow_path 時，依序嘗試這些路徑
+workflow_search_paths:
+  - "D:/CursorProject/AISDLC_SDD/AISDLC_SDD_v0.01"
+  - "D:/CursorProject/AISDLC/AISDLC_v0.09"
+
+# 其他欄位若需要覆寫，可一併寫入此檔，格式同 config.yaml

@@ -1,0 +1,16 @@
+Running pytest in /workspace
+[INFO] Starting Claude Code session
+Step 3 completed successfully
+def hello():
+    return 42
+Build succeeded with 0 warnings
+ANSWER: 42
+GET /api/v1/users 200 OK in 12ms
+Reading file /tmp/foo.txt
+[INFO] saved checkpoint to disk
+This sentence mentions nothing related
+50% off sale discount applied
+Step 5/10 done (50%) - some random sentence
+Compiled 95 files / 100 files done
+Processing 80% complete final report
+Loaded 100 modules successfully

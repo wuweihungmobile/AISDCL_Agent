@@ -1,0 +1,24 @@
+version: "1.0"
+project: "Equivalence_09_conditional"
+
+global_invariants:
+  max_retries_per_step: 2
+  auto_compact_interval: 0
+
+tasks:
+  - step_id: "T01"
+    name: "條件評估前置步驟"
+    prompt: "前置並輸出 [PRE_COND_DONE]"
+    expected_output_regex: "\\[PRE_COND_DONE\\]"
+
+  - step_id: "T02"
+    name: "條件式步驟"
+    prompt: "條件式步驟並輸出 [COND_DONE]"
+    expected_output_regex: "\\[COND_DONE\\]"
+    evaluator_command: "python -c \"print('COND_DONE')\""
+    evaluator_timeout_seconds: 5
+
+  - step_id: "T03"
+    name: "後續步驟"
+    prompt: "後續並輸出 [POST_DONE]"
+    expected_output_regex: "\\[POST_DONE\\]"

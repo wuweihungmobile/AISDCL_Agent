@@ -1,0 +1,10 @@
+95% context used
+92.5% token full
+75% context remaining (alert)
+80% token consumed for this session
+99.9% context at threshold
+50.0% Token used, switching strategy
+33% context window left
+0% token usage at start
+100% context reached
+77.7% TOKEN saturation reported

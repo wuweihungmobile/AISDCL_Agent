@@ -1,0 +1,10 @@
+context: 95%
+tokens: 92%
+context_window: 87.5%
+token_consumption 70%
+context_used: 60%
+token_remaining 25%
+context: 99%
+contextLength: 88.8%
+token_pct 55%
+contextSize  77 %

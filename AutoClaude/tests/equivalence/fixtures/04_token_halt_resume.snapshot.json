@@ -1,0 +1,17 @@
+{
+  "completed_step_ids": [],
+  "completed_steps": 3,
+  "evolved_playbook_path": null,
+  "failure_history": [],
+  "goto_counter": {},
+  "halt_for_token": false,
+  "inject_before_counter": {},
+  "mutation_log": [],
+  "skip_to_counter": {},
+  "step_evolution_counter": {},
+  "step_log": [
+    "[T01] Token Halt 前置步驟 ✓ (attempt 1)",
+    "[T02] 可能觸發 Token Halt 的長步驟 ✓ (attempt 1)",
+    "[T03] Resume 後完成步驟 ✓ (attempt 1)"
+  ]
+}

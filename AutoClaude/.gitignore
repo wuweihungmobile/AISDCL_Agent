@@ -1,0 +1,79 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.Python
+*.egg-info/
+dist/
+build/
+
+# 虛擬環境
+.venv/
+venv/
+env/
+
+# 敏感設定（API Key 絕對不能 commit）
+.env
+.env.*
+!.env.example
+
+# 個人環境覆寫設定（含絕對路徑等不可移植資訊）
+config.local.yaml
+!config.local.yaml.example
+
+# AutoClaude 執行期產生的檔案
+logs/
+backups/
+checkpoints/
+*.log
+
+# 測試覆蓋率快取（pytest-cov 每次測試重新產生）
+.coverage
+.coverage.*
+htmlcov/
+
+# 備份檔（git history 為 SSOT）
+*.bk
+*.bak
+
+# c6 staging validator 中間執行紀錄（G5 證據已在 gate_audit / SD_04）
+tools/c6_report_*.json
+
+# IDE
+.idea/
+.vscode/
+*.swp
+.DS_Store
+
+# Claude Code 本機 state（不可 commit）
+.claude/scheduled_tasks.lock
+.claude/projects/
+
+# HuggingFace 模型權重快取（數 GB，絕對不可 commit）
+.model_cache/
+
+# SD_Improving_08 W2 T2-C2/C3：AC4 nightly metric 累計檔（CI artifact 為 SSOT）
+.ac4_history.jsonl
+.ac4_junit.xml
+
+# SD_Improving_08 W3 T3-D6：mutation pilot nightly 累計檔（CI artifact 為 SSOT）
+.mutation_history.jsonl
+mutation_*.log
+mutation_*.log.header*
+mutation_backlog_*.md
+
+# mutmut 本機 cache（SD_09 W0：含 file 形式的 .mutmut-cache sqlite）
+.mutmut-cache
+.mutmut-cache/
+
+# SD_Improving_08 W5 perf baseline runtime artifact（tests/perf/conftest.py 寫入；CI artifact 為 SSOT）
+perf_results.json
+
+# SD_Improving_09 W0 nightly 採集 artifact（每日 1 筆累計，本機 SSOT；不入 git history）
+.perf_history.jsonl
+.observability_history.jsonl
+.mutmut-cache-journal
+
+# perf_regression_check.py PR comment 輸出（CI workflow 產生，本機殘留 artifact）
+perf_regression_comment.md

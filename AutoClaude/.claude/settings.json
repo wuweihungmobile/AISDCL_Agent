@@ -1,0 +1,46 @@
+{
+  "$schema": "https://json.schemastore.org/claude-code-settings.json",
+  "_comment": "SD_09 W0 三次 zero-trust audit 後建立的 Hook 治理；哲學：Hook 僅補強 LLM 行為，不替代 CLAUDE.md prompt 規範。",
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Write",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python tools/hooks/enforce_docs_path.py"
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "Edit|Write",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python tools/hooks/loc_budget_check.py"
+          },
+          {
+            "type": "command",
+            "command": "python tools/hooks/check_sh_eol.py"
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python tools/hooks/check_lang.py"
+          },
+          {
+            "type": "command",
+            "command": "python tools/hooks/claude_md_freshness.py"
+          }
+        ]
+      }
+    ]
+  }
+}

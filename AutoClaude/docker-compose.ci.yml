@@ -1,0 +1,50 @@
+# AutoClaude — CI 對等「迷你正式環境」（Local CI Parity）
+# ===========================================================================
+# 目的：消除「本機（Windows）vs CI（Linux）」環境差異造成的 push 後 CI/CD 紅燈。
+#
+# 本檔 **精準對齊** .github/workflows/ci.yml 的 services.postgres：
+#   - image:  pgvector/pgvector:pg17   ← 必須與 CI 同版（主 docker-compose.yml 為 pg18 dev/prod 棧）
+#   - env:    autoclaude / autoclaude / autoclaude
+#   - port:   5432
+#   - health: pg_isready
+# 任何 CI 的 PG 版本變更都必須同步本檔，否則本地驗證失真（環境漂移根因）。
+#
+# 使用方式（push 前在本機重現 CI 的 PG 依賴 job）：
+#   docker compose -f docker-compose.ci.yml up -d
+#   $env:AUTOCLAUDE_DB_DSN="postgresql+asyncpg://autoclaude:autoclaude@localhost:5432/autoclaude"
+#   $env:AUTOCLAUDE_ALLOW_INSECURE_DB="1"
+#   alembic upgrade head
+#   python -m pytest tests/contract/test_pg_state_repository_contract.py -v
+#   docker compose -f docker-compose.ci.yml down -v
+#
+# 更推薦：直接用 act 在 Linux 容器內跑整份 workflow（tools/run_act.ps1），
+#   連 OS/pip/apt 差異都一併對齊；本檔供「不想起整個 act 但需要 PG」的快速路徑。
+# ---------------------------------------------------------------------------
+
+services:
+  postgres-ci:
+    # 與 ci.yml / pg-e2e-on-label.yml 完全相同的鏡像（CI 真相）
+    image: pgvector/pgvector:pg17
+    container_name: autoclaude_ci_pg
+    environment:
+      POSTGRES_USER: autoclaude
+      POSTGRES_PASSWORD: autoclaude
+      POSTGRES_DB: autoclaude
+    ports:
+      - "5432:5432"
+    healthcheck:
+      # 對齊 CI options 的 health-cmd
+      test: ["CMD-SHELL", "pg_isready -U autoclaude -d autoclaude"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+    # CI 用完即丟，不需 named volume（避免本機殘留舊 schema 污染下次驗證 — 取證紀律 #7 fresh）
+    tmpfs:
+      - /var/lib/postgresql/data
+    networks:
+      - autoclaude_ci_net
+
+networks:
+  autoclaude_ci_net:
+    driver: bridge

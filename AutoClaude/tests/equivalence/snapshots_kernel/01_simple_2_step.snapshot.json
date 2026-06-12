@@ -1,0 +1,16 @@
+{
+  "completed_step_ids": [
+    "T01",
+    "T02"
+  ],
+  "completed_steps": 2,
+  "escalated": false,
+  "halted": false,
+  "step_log": [
+    "[T01] Step 1 INIT_DONE ✓ (attempt 1)",
+    "[T02] Step 2 ALL_DONE ✓ (attempt 1)"
+  ],
+  "step_log_count": 2,
+  "success": true,
+  "total_steps": 2
+}

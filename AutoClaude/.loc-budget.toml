@@ -1,0 +1,13 @@
+# LOC budget overrides — ADR-SD07-001 §5.2 / §6.2
+# 每筆 override 必須附書面理由（PR description）+ Architect / SD 雙簽
+# 每季 review 一次避免長期積累
+
+[overrides]
+# 純函式庫例外（多個獨立純函數可共處；拆散反致呼叫端散亂）
+# tier 提升 strategy (300) → service (500)
+"autoclaude/decision/prompt_builder.py" = { tier = "service", reason = "純函式集中可讀性高於分散；ADR §4.4 已豁免（SD_07 W1/W5 評估）" }
+
+# steps_orchestrator/_impl.py：W4 G4 末物理 wc-l 530 行，邏輯行 ≤ 500（含 docstring + 註解 + 空白）
+# tier 維持 service (≤ 500)，明示書面理由避免後續 reviewer 誤判
+# 對應 ADR-SD07-001 §6.2 雙簽機制 + §4.2 歸類優先順序（目錄 steps_orchestrator/ 屬 service tier）
+"autoclaude/execution/steps_orchestrator/_impl.py" = { tier = "service", reason = "物理 wc-l 530 含 docstring/註解/空白，邏輯行 ≤ 500 service tier 達標；ADR §6.2 雙簽明示" }

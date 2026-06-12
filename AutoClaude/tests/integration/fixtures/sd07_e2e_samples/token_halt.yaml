@@ -1,0 +1,60 @@
+# SD_07 W2 fixture：Token Halt → /compact → checkpoint 往返
+# 對應 AC0-1（test_brain_executor_e2e.py::test_token_halt_round_trip）
+
+scenario: token_halt
+description: |
+  Claude Code 輸出 context 使用率達 90%，TokenGuardPlugin 觸發 checkpoint
+  並 schedule resume。OrchestrationCoordinator 接收 halt 後不再呼叫 Brain。
+
+playbook:
+  version: "1.0"
+  project: "SD07_TokenHalt_E2E"
+  global_goal: "驗證 Token Halt 完整往返"
+  global_invariants:
+    max_retries_per_step: 1
+    auto_compact_interval: 5
+  tasks:
+    - step_id: "T01"
+      name: "觸發 90% context"
+      prompt: "請輸出大量內容直至 context 90%"
+      expected_output_regex: "\\[DONE\\]"
+
+brain_decisions:
+  capabilities:
+    supports_correction: true
+    supports_escalation: true
+    supports_interrupt: true
+    max_concurrent_attempts: 1
+    model_id: "MiniMax-Text-01"
+  # halt 後 Brain 不應再被呼叫
+  decisions: []
+
+executor_events:
+  - phase: EXEC
+    event_type: progress
+    payload: { context_pct: 0.85, line: "Context: 85% used" }
+  - phase: EXEC
+    event_type: progress
+    payload: { context_pct: 0.92, line: "Context: 92% used" }
+  - phase: ON_TOKEN_HALT
+    event_type: halt
+    payload: { peak_pct: 0.92 }
+
+expected_phases:
+  - BEFORE_DECIDE
+  - DECIDE
+  - BEFORE_EXEC
+  - EXEC
+  - ON_TOKEN_HALT
+  - ON_CHECKPOINT_SAVE_REQUEST
+  - AFTER_EXEC
+
+expected_kernel_result:
+  success: false
+  halted: true
+  scheduled_resume_at_not_null: true
+  completed_steps: 0
+  total_steps: 1
+
+expected_auto_resume_metrics:
+  wake_kinds_includes: ["token_halt"]

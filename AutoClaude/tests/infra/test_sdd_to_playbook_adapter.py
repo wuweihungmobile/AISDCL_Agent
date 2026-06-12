@@ -1,0 +1,216 @@
+"""W3（AutoSDD_improving_01 §3）：SddToPlaybookAdapter 單測 + 消毒攻防測試。
+
+覆蓋：
+  1. 凍結硬閘（frozen_stages / current_state / 無狀態檔 fail-closed）
+  2. TEST-CONTRACT-SPEC 解析（AC→AT 表 + Gherkin 區塊 + 場景偵測）
+  3. compile_tasks 轉譯規則（step_id / max_retries / maintain_context / prompt digest）
+  4. 注入攻防（黑名單字元 → SpecTaintedError；evaluator 僅白名單模板）
+"""
+from __future__ import annotations
+
+import re
+
+import pytest
+import yaml
+
+from autoclaude.core.ports.spec_source import (
+    ISpecSource,
+    SpecNotFrozenError,
+    SpecTaintedError,
+)
+from autoclaude.infra.adapters.sdd_to_playbook_adapter import SddToPlaybookAdapter
+
+_SPEC_MD = """# Test Contract Specification — Demo
+
+場景：brownfield 既有系統改進
+
+## 1. AC → AT 映射表
+
+| AC ID | AC 描述 | AT ID | AT 描述 | 自動化 | 測試類型 | 狀態 |
+|-------|---------|-------|---------|-------|---------|------|
+| AC-001-1 | 登入成功 | AT-001-1-1 | 正常登入 | ✅ | Unit | □ |
+| AC-001-1 | 登入成功 | AT-001-1-2 | 錯誤密碼 | ✅ | Integration | □ |
+| AC-002-1 | 餘額警示 | AT-002-1-1 | 餘額不足提示 | ✅ | E2E | □ |
+
+## 2. AT 格式
+
+```gherkin
+# AT-001-1-1
+Scenario: 正常登入
+  Given 使用者在登入頁面
+  When 輸入正確帳密
+  Then 回傳 201 Created
+```
+
+```gherkin
+# AT-001-1-2
+Scenario: 錯誤密碼
+  Given 使用者在登入頁面
+  When 輸入錯誤密碼
+  Then 顯示錯誤訊息「餘額不足」
+```
+
+```gherkin
+# AT-002-1-1
+Scenario: 回應時間
+  Given 系統在尖峰負載
+  When 查詢餘額
+  Then 回應時間 < 200ms
+```
+"""
+
+
+def _write_fsm_state(root, current_state="IMPLEMENTATION", frozen_stages=None):
+    fsm_dir = root / "build" / "reports" / "fsm"
+    fsm_dir.mkdir(parents=True, exist_ok=True)
+    doc = {"fsm_state": {"current_state": current_state,
+                         "frozen_stages": frozen_stages or []}}
+    (fsm_dir / "FSM-STATE-demo.yaml").write_text(
+        yaml.safe_dump(doc, allow_unicode=True), encoding="utf-8")
+
+
+def _write_spec(root, text=_SPEC_MD, name="TEST-CONTRACT-SPEC-Demo.md"):
+    docs = root / "docs" / "03_testing" / "contracts"
+    docs.mkdir(parents=True, exist_ok=True)
+    (docs / name).write_text(text, encoding="utf-8")
+    return root / "docs"
+
+
+class TestFrozenGate:
+    def test_no_fsm_state_file_fail_closed(self, tmp_path):
+        spec_dir = _write_spec(tmp_path)
+        with pytest.raises(SpecNotFrozenError, match="FSM"):
+            SddToPlaybookAdapter().load_spec(str(spec_dir))
+
+    def test_not_frozen_state_rejected(self, tmp_path):
+        spec_dir = _write_spec(tmp_path)
+        _write_fsm_state(tmp_path, current_state="SPEC_DRAFTING")
+        with pytest.raises(SpecNotFrozenError, match="SPEC_DRAFTING"):
+            SddToPlaybookAdapter().load_spec(str(spec_dir))
+
+    def test_frozen_stages_accepted_even_if_state_regressed(self, tmp_path):
+        spec_dir = _write_spec(tmp_path)
+        _write_fsm_state(tmp_path, current_state="SPEC_DRAFTING",
+                         frozen_stages=[{"stage": "SCG-0", "frozen_at": "t"}])
+        spec = SddToPlaybookAdapter().load_spec(str(spec_dir))
+        assert spec.digest.startswith("sha256:")
+
+    @pytest.mark.parametrize("state", ["SPEC_FROZEN", "TEST_CONTRACT_NEGOTIATED",
+                                       "IMPLEMENTATION", "RTM_VERIFY"])
+    def test_post_frozen_states_accepted(self, tmp_path, state):
+        spec_dir = _write_spec(tmp_path)
+        _write_fsm_state(tmp_path, current_state=state)
+        assert SddToPlaybookAdapter().load_spec(str(spec_dir)).contracts
+
+    def test_explicit_fsm_state_path(self, tmp_path):
+        spec_dir = _write_spec(tmp_path)
+        _write_fsm_state(tmp_path)
+        explicit = tmp_path / "build" / "reports" / "fsm" / "FSM-STATE-demo.yaml"
+        adapter = SddToPlaybookAdapter(fsm_state_path=str(explicit))
+        assert adapter.load_spec(str(spec_dir)).scenario == "brownfield"
+
+    def test_missing_spec_file_raises(self, tmp_path):
+        (tmp_path / "docs").mkdir()
+        with pytest.raises(FileNotFoundError):
+            SddToPlaybookAdapter().load_spec(str(tmp_path / "docs"))
+
+
+class TestParsing:
+    @pytest.fixture()
+    def spec(self, tmp_path):
+        spec_dir = _write_spec(tmp_path)
+        _write_fsm_state(tmp_path)
+        return SddToPlaybookAdapter().load_spec(str(spec_dir))
+
+    def test_three_contracts_parsed(self, spec):
+        assert [c.at_id for c in spec.contracts] == [
+            "AT-001-1-1", "AT-001-1-2", "AT-002-1-1"]
+
+    def test_scenario_detected(self, spec):
+        assert spec.scenario == "brownfield"
+
+    def test_scg_gate_by_test_type(self, spec):
+        gates = {c.at_id: c.scg_gate for c in spec.contracts}
+        assert gates["AT-001-1-1"] == "SCG-4"   # Unit
+        assert gates["AT-002-1-1"] == "SCG-5"   # E2E
+
+    def test_evaluator_cmd_whitelist_template_only(self, spec):
+        for c in spec.contracts:
+            assert re.fullmatch(
+                r'python -m pytest [\w./\\-]+ -k "[A-Za-z0-9_]+" -q',
+                c.evaluator_cmd,
+            ), c.evaluator_cmd
+
+    def test_satisfies_ispec_source_protocol(self):
+        adapter: ISpecSource = SddToPlaybookAdapter()
+        assert hasattr(adapter, "load_spec") and hasattr(adapter, "compile_tasks")
+
+
+class TestCompileTasks:
+    @pytest.fixture()
+    def tasks(self, tmp_path):
+        spec_dir = _write_spec(tmp_path)
+        _write_fsm_state(tmp_path)
+        adapter = SddToPlaybookAdapter()
+        spec = adapter.load_spec(str(spec_dir))
+        return spec, adapter.compile_tasks(spec)
+
+    def test_step_id_format_unique(self, tasks):
+        _, ts = tasks
+        ids = [t.step_id for t in ts]
+        assert ids[0] == "sdd-brownfield-at-001-1-1"
+        assert len(set(ids)) == len(ids)
+
+    def test_max_retries_by_gate(self, tasks):
+        _, ts = tasks
+        by_id = {t.step_id: t for t in ts}
+        assert by_id["sdd-brownfield-at-001-1-1"].max_retries == 5   # SCG-4
+        assert by_id["sdd-brownfield-at-002-1-1"].max_retries == 2   # SCG-5
+
+    def test_maintain_context_within_same_ac_only(self, tasks):
+        _, ts = tasks
+        assert ts[0].maintain_context is False   # 首步
+        assert ts[1].maintain_context is True    # 同 AC-001-1
+        assert ts[2].maintain_context is False   # 跨入 AC-002-1
+
+    def test_prompt_contains_gherkin_and_digest(self, tasks):
+        spec, ts = tasks
+        digest8 = spec.digest.split(":")[-1][:8]
+        assert "依下列契約實作並使測試通過" in ts[0].prompt
+        assert digest8 in ts[0].prompt
+        assert "Given 使用者在登入頁面" in ts[0].prompt
+
+
+class TestInjectionDefense:
+    """§1.3 消毒攻防：黑名單字元 / 非白名單片段一律 SpecTaintedError。"""
+
+    @pytest.mark.parametrize("payload", [
+        "tests; rm -rf /",
+        "tests`whoami`",
+        "tests$(id)",
+        "tests>out",
+        "tests<in",
+        "tests!bang",
+        "tests~home",
+        "tests&bg",
+        "tests with space",
+    ])
+    def test_tainted_test_path_rejected(self, payload):
+        with pytest.raises(SpecTaintedError):
+            SddToPlaybookAdapter(test_path=payload)
+
+    def test_tainted_at_id_in_spec_rejected(self, tmp_path):
+        evil = _SPEC_MD.replace("AT-002-1-1", "AT-002-1-1;rm")
+        spec_dir = _write_spec(tmp_path, text=evil)
+        _write_fsm_state(tmp_path)
+        # 注入的分號不符 AT row regex → 該列被拒於解析之外（白名單 regex 第一層）
+        spec = SddToPlaybookAdapter().load_spec(str(spec_dir))
+        assert all(";" not in c.evaluator_cmd for c in spec.contracts)
+
+    def test_evaluator_cmd_never_contains_deny_chars(self, tmp_path):
+        spec_dir = _write_spec(tmp_path)
+        _write_fsm_state(tmp_path)
+        spec = SddToPlaybookAdapter().load_spec(str(spec_dir))
+        deny = set("!`><~$&;")
+        for c in spec.contracts:
+            assert not (set(c.evaluator_cmd) & deny), c.evaluator_cmd

@@ -1,0 +1,141 @@
+"""PtyExecutor — IExecutor 的真實 PTY 實作（Phase 1）。
+
+職責：
+  - 建構 PtyWrapper 執行 Claude Code CLI
+  - 收集輸出文字並回傳 ExecutionOutput
+  - 不含 token guard（由 Phase 3 TokenGuardPlugin 透過 ON_TOKEN_USAGE 處理）
+  - 不含 hotkey 檢查（由 Phase 3 HotkeyPlugin 透過 PRE_ATTEMPT 處理）
+
+注意：
+  - 此 Adapter 在 Phase 1 / Phase 2 期間「並存」於 PlaybookRunner._execute_prompt 之側
+  - 真正取代 _execute_prompt 是 Phase 4 Facade 切換時
+"""
+from __future__ import annotations
+
+import time
+from pathlib import Path
+from typing import Optional
+
+from ...core.ports.executor import (
+    ExecutionEvent,
+    ExecutionEventCallback,
+    ExecutionEventKind,
+    ExecutionOutput,
+)
+from ...perception.pty_wrapper import PtyWrapper
+from ...utils.config import ClaudeConfig, LoopConfig
+
+
+class PtyExecutor:
+    """以 PtyWrapper 包裝 Claude Code CLI 執行。"""
+
+    def __init__(
+        self,
+        claude_cfg: ClaudeConfig,
+        loop_cfg: LoopConfig,
+        log_dir: str = "logs",
+        hotkey: Optional[object] = None,
+    ):
+        self._claude = claude_cfg
+        self._loop = loop_cfg
+        self._log_dir = log_dir
+        self._hotkey = hotkey   # 可選，提供時於 readline 期間檢查中斷
+        # SD_Improving_06 W1 T1-2：interrupt 旗標（send_interrupt 觸發；execute 迴圈檢查）
+        self._interrupt_requested: bool = False
+        self._interrupt_reason: str = ""
+
+    def send_interrupt(self, reason: str = "") -> bool:
+        """請求中斷下一個 readline 輪詢（ADR-SD06-001 §6.4）。
+
+        Phase 1：標記旗標；execute 主迴圈下一輪 poll 時偵測並結束。
+        Phase 2+：將改由 Coordinator 訂閱 ON_INTERRUPT_REQUEST event 後呼叫。
+        """
+        self._interrupt_requested = True
+        self._interrupt_reason = reason
+        return True
+
+    def execute(
+        self,
+        prompt: str,
+        *,
+        maintain_context: bool = True,
+        timeout: int = 600,
+        label: str = "",
+        on_event: Optional[ExecutionEventCallback] = None,
+    ) -> ExecutionOutput:
+        args = list(self._claude.extra_args)
+        if maintain_context and self._claude.continue_flag:
+            args.append(self._claude.continue_flag)
+        args += ["-p", prompt]
+
+        log_path = Path(self._log_dir) / f"playbook_{label or 'untitled'}.log"
+        pty = PtyWrapper(
+            command=self._claude.command,
+            args=args,
+            auth_patterns=self._loop.auth_patterns,
+            auth_response=self._loop.auth_response,
+            raw_log_path=log_path,
+            encoding=self._claude.encoding,
+        )
+
+        output_lines: list[str] = []
+        deadline = time.monotonic() + timeout
+        completed = True
+        # SD_Improving_06 W1 T1-2：重置 interrupt 旗標 + event sequence
+        self._interrupt_requested = False
+        self._interrupt_reason = ""
+        event_seq = 0
+        pty.start()
+        try:
+            while time.monotonic() < deadline:
+                if self._interrupt_requested:
+                    completed = False
+                    break
+                if self._hotkey is not None and getattr(self._hotkey, "triggered", False):
+                    completed = False
+                    break
+                if not pty.is_alive:
+                    break
+                line = pty.readline(timeout=self._loop.poll_interval_seconds)
+                if line is None:
+                    break
+                if not line:
+                    continue
+                output_lines.append(line)
+                if on_event is not None:
+                    event_seq += 1
+                    try:
+                        on_event(ExecutionEvent(
+                            kind=ExecutionEventKind.PARTIAL_OUTPUT,
+                            payload={"text": line},
+                            sequence=event_seq,
+                        ))
+                    except Exception:
+                        # adapter 不可因 callback 失敗影響執行（callback 邊界錯誤吞掉）
+                        pass
+        finally:
+            pty.close()
+
+        if time.monotonic() >= deadline:
+            completed = False
+
+        if on_event is not None:
+            event_seq += 1
+            try:
+                on_event(ExecutionEvent(
+                    kind=ExecutionEventKind.COMPLETION,
+                    payload={
+                        "exit_code": 0 if completed else 1,
+                        "completed": completed,
+                        "text_len": sum(len(s) for s in output_lines),
+                    },
+                    sequence=event_seq,
+                ))
+            except Exception:
+                pass
+
+        return ExecutionOutput(
+            text="".join(output_lines),
+            exit_code=0 if completed else 1,
+            completed=completed,
+        )
