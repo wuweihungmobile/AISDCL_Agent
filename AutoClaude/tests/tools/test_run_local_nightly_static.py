@@ -3,7 +3,8 @@
 SD_09 W3 Round 19 audit P0-AUDIT-R18-2 修復（紀律 #4「驗證鏡子自身要被驗證」）：
 
 背景：2026-05-26 02:00 schtasks 第 14 跑（首次自動跑）pg-e2e stage 36ms 內 EXCEPTION crash
-      「在此物件上找不到屬性 'Source'」— 根因 `(Get-Command alembic.exe -EA SilentlyContinue).Source`
+      「在此物件上找不到屬性 'Source'」— 根因
+      `(Get-Command alembic.exe -EA SilentlyContinue).Source`
       在 StrictMode 3.0 下，當 Get-Command 回 $null 時 `.Source` 拋 PropertyNotFoundException。
       schtasks 自動跑 PATH 不含 pyenv shims 觸發；互動模式因 pyenv hook 動態注入路徑而躲過。
 
@@ -234,4 +235,157 @@ def test_observability_stage_independent_of_docker(ps1_content: str) -> None:
     assert not docker_in_obs, (
         "observability stage 不應 Invoke docker（其應為 Docker-independent；"
         "若需 docker 應走獨立 stage）"
+    )
+
+
+# --- AutoClaude_Improving_012 Phase 0 修復鏡子（紀律 #4：TD-N01 / TD-N03 自身要被驗證） ---
+# QA 終審指出：ps1 新增的 (a) perf_results.json 缺檔守門、(b) observability 末筆 UTC 日期
+# 整合驗證，兩段「驗證鏡子」自身無測試 → 違反紀律 #4。下列 case 以靜態錨點斷言補齊：
+# 若有人刪掉 ps1 對應驗證段（或改掉 fail-loud 分支），這些 case 必須 fail。
+
+_OBS_SNAPSHOT_PY = _REPO_ROOT / "tools" / "observability_snapshot.py"
+
+
+def _extract_stage_block(ps1_content: str, stage_marker: str, end_marker: str | None = None) -> str:
+    """擷取指定 stage scriptblock 原文（靜態錨點檢查用；找不到標記即 fail）。"""
+    idx = ps1_content.find(stage_marker)
+    assert idx > 0, f"ps1 必須含 stage 標記：{stage_marker}"
+    if end_marker is not None:
+        end = ps1_content.find(end_marker, idx)
+        assert end > idx, f"ps1 stage 區塊找不到結尾標記：{end_marker}"
+        return ps1_content[idx:end]
+    return ps1_content[idx : idx + 3000]
+
+
+def test_perf_stage_missing_results_fails_loud(ps1_content: str) -> None:
+    """case 11（TD-N01）：perf stage 內 perf_results.json 缺檔 → rc=1 + ERROR log。
+
+    意圖：pytest 跑完後若 tests/perf/conftest.py pytest_sessionfinish hook 未產出
+    perf_results.json，本次採集無效（紀律 #1 真實失敗）；不可讓後續 regression check
+    的「baseline 或 results 不存在」WARN 分支把 stage 染綠。
+    """
+    block = _extract_stage_block(ps1_content, "Invoke-Stage 'perf-baseline'")
+    guard_idx = block.find("if (-not (Test-Path 'perf_results.json'))")
+    assert guard_idx > 0, "perf stage 必須含 perf_results.json 缺檔守門 if（TD-N01）"
+    branch = block[guard_idx : guard_idx + 400]
+    assert "'ERROR'" in branch, "TD-N01 缺檔分支必須以 ERROR 等級 Log（取證可見）"
+    assert "$global:LASTEXITCODE = 1" in branch, (
+        "TD-N01 缺檔分支必須標記 stage rc=1（fail-loud；禁止染綠）"
+    )
+    assert "TD-N01" in branch, "缺檔分支 Log 必須含 TD-N01 取證錨點"
+
+
+def test_observability_validation_missing_history_branch(ps1_content: str) -> None:
+    """case 12（TD-N03 分支 1）：.observability_history.jsonl 缺檔 → rc=1 + ERROR。
+
+    意圖：snapshot 宣稱成功（rc=0）但 jsonl 根本不存在 = 「印 OK 但未落盤」假綠，
+    必須 fail-loud。
+    """
+    block = _extract_stage_block(
+        ps1_content, "Invoke-Stage 'observability-snapshot'", "Stage 'Cleanup'"
+    )
+    assert "'.observability_history.jsonl'" in block, (
+        "obs 驗證段必須以 .observability_history.jsonl 為驗證標的"
+    )
+    guard_idx = block.find("if (-not (Test-Path $histPath))")
+    assert guard_idx > 0, "obs 驗證段必須含 jsonl 缺檔守門 if（TD-N03）"
+    branch = block[guard_idx : guard_idx + 400]
+    assert "'ERROR'" in branch, "TD-N03 缺檔分支必須以 ERROR 等級 Log"
+    assert "$global:LASTEXITCODE = 1" in branch, "TD-N03 缺檔分支必須標記 stage rc=1"
+
+
+def test_observability_validation_parse_failure_try_catch(ps1_content: str) -> None:
+    """case 13（TD-N03 分支 2）：jsonl 末筆解析失敗（try/catch）→ rc=1 + ERROR。
+
+    意圖：StrictMode 3.0 下 PSCustomObject 缺 ts 屬性 / 非法 JSON / 非法日期都拋例外，
+    必須由 catch 接住並 fail-loud，不可讓例外把 stage rc 留在 snapshot 的 0。
+    """
+    block = _extract_stage_block(
+        ps1_content, "Invoke-Stage 'observability-snapshot'", "Stage 'Cleanup'"
+    )
+    try_idx = block.find("try {")
+    assert try_idx > 0, "obs 驗證段必須以 try/catch 包住 jsonl 末筆解析（TD-N03）"
+    assert "ConvertFrom-Json" in block, "obs 驗證段必須解析 jsonl 末筆（ConvertFrom-Json）"
+    catch_idx = block.find("} catch {", try_idx)
+    assert catch_idx > try_idx, "obs 驗證段 try 之後必須有 catch 分支"
+    catch_block = block[catch_idx : catch_idx + 400]
+    assert "'ERROR'" in catch_block, "TD-N03 解析失敗分支必須以 ERROR 等級 Log"
+    assert "$global:LASTEXITCODE = 1" in catch_block, "TD-N03 解析失敗分支必須標記 stage rc=1"
+
+
+def test_observability_validation_date_match_branches(ps1_content: str) -> None:
+    """case 14（TD-N03 分支 3+4）：末筆 UTC 日期 = 今日 → rc=0；不符 → rc=1 + ERROR。
+
+    意圖：today 與末筆 ts 都必須以 UTC 語意比較（ToUniversalTime + yyyy-MM-dd）；
+    日期不符 = snapshot 假綠 → fail-loud；通過分支明確清 rc=0（取證可見）。
+    """
+    block = _extract_stage_block(
+        ps1_content, "Invoke-Stage 'observability-snapshot'", "Stage 'Cleanup'"
+    )
+    assert re.search(
+        r"\(Get-Date\)\.ToUniversalTime\(\)\.ToString\('yyyy-MM-dd'\)", block
+    ), "todayUtc 必須以 UTC 日期計算（ToUniversalTime + yyyy-MM-dd）"
+    pass_idx = block.find("if ($lastDate -eq $todayUtc)")
+    assert pass_idx > 0, "obs 驗證段必須含「末筆 UTC 日期 = 今日」判斷分支（TD-N03）"
+    else_idx = block.find("} else {", pass_idx)
+    assert else_idx > pass_idx, "日期判斷必須有 else（不符）分支"
+    pass_branch = block[pass_idx:else_idx]
+    assert "$global:LASTEXITCODE = 0" in pass_branch, "通過分支必須明確標記 rc=0"
+    else_branch = block[else_idx : else_idx + 400]
+    assert "'ERROR'" in else_branch, "日期不符分支必須以 ERROR 等級 Log"
+    assert "$global:LASTEXITCODE = 1" in else_branch, "日期不符分支必須標記 stage rc=1"
+
+
+def test_mutation_stage_validate_call_requires_version_marker(ps1_content: str) -> None:
+    """case 16（TD-N02）：mutation stage 呼叫 validate_mutmut_log.py 必須帶
+    --require-version-marker flag。
+
+    意圖：--require-version-marker 預設關閉（零破壞其他呼叫端），nightly ps1 的
+    mutation stage 呼叫處是 TD-N02 防護的唯一生效點（防 mutmut 換版後輸出格式
+    漂移仍被統計 regex 誤判通過）。若有人移除該 flag，validate_mutmut_log.py
+    自身的單元測試仍全綠 → silent regression 回舊行為，本 case 必須 fail。
+    """
+    block = _extract_stage_block(
+        ps1_content, "Invoke-Stage 'mutation-test", "Invoke-Stage 'pg-e2e"
+    )
+    call_lines = [
+        line
+        for line in block.splitlines()
+        if "validate_mutmut_log.py" in line and not line.strip().startswith("#")
+    ]
+    assert call_lines, (
+        "mutation stage 必須呼叫 tools/validate_mutmut_log.py（log 真實性驗證）"
+    )
+    for line in call_lines:
+        assert "--require-version-marker" in line, (
+            "mutation stage 的 validate_mutmut_log.py 呼叫必須帶 "
+            "--require-version-marker（TD-N02 防護唯一生效點；缺 flag = "
+            f"silent regression）。違規行：{line.strip()}"
+        )
+
+
+def test_observability_ts_field_isomorphic_with_snapshot_tool(ps1_content: str) -> None:
+    """case 15（防漂移）：ps1 驗證段 ↔ tools/observability_snapshot.py 的 ts/UTC 語意同構。
+
+    比照 F2 分支 ↔ ac4_nightly_alert_parser.py 的 SSOT 同構樣板（紀律 #4 延伸）：
+    ps1 端讀 `$lastRecord.ts` 並轉 UTC 日期；py 端必須同時存在
+    `.observability_history.jsonl` 檔名、"ts" 欄位字串與 UTC 語意（timezone.utc）。
+    任一端改檔名 / 欄位名 / 時區語意而未同步另一端 = silent drift → 本 case fail。
+    """
+    assert _OBS_SNAPSHOT_PY.exists(), f"snapshot 工具缺失：{_OBS_SNAPSHOT_PY}"
+    py_src = _OBS_SNAPSHOT_PY.read_text(encoding="utf-8")
+    block = _extract_stage_block(
+        ps1_content, "Invoke-Stage 'observability-snapshot'", "Stage 'Cleanup'"
+    )
+    # ps1 端錨點：讀 ts 欄位 + UTC 轉換 + jsonl 檔名
+    assert re.search(r"\$lastRecord\s*\.\s*ts\b", block), "ps1 端必須讀取 jsonl 記錄之 ts 欄位"
+    assert ".ToUniversalTime()" in block, "ps1 端 ts 比較必須走 UTC 語意"
+    assert "'.observability_history.jsonl'" in block, "ps1 端必須引用 jsonl 檔名"
+    # py 端同構錨點：同檔名 + 同欄位名 + 同 UTC 語意
+    assert ".observability_history.jsonl" in py_src, (
+        "observability_snapshot.py 必須含 .observability_history.jsonl（檔名同構）"
+    )
+    assert '"ts"' in py_src, 'observability_snapshot.py 必須含 "ts" 欄位字串（欄位名同構）'
+    assert "timezone.utc" in py_src, (
+        "observability_snapshot.py 必須以 timezone.utc 寫入 ts（UTC 語意同構）"
     )

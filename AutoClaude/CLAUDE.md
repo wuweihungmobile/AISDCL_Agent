@@ -1,7 +1,7 @@
 # CLAUDE.md
 # Claude Code Project Guidance
 
-**Last Updated**: 2026-06-12 | **AISDLC Version**: v0.09 | **Status**: SD_09 **W0 收尾期 + R61 nightly 機制三十八度閉環（R24~R61 連 38 輪）+ 四方 zero-trust audit 重驗收斂 OVERALL PASS（0 P0/0 P1/0 P2，無新缺陷）+ 紀律#17 雙向兩條獨立驗證數字互證**。本輪手動親跑 nightly + 派 subagent 四方挑戰式 audit + 加速 SD10：nightly 6 stage 全綠 run_id=114056 kill_rate 76.51%（真 Docker，Killed 114/Survived 35）perf green=3 + 主 agent 權威 full pytest **2,732 passed / 122 skip**（88.69s 持平 R60，零回歸）+ subagent collect-only 2854（=2732+122 互證）+ mirror tests/tools/ 404 passed + importlinter 7 kept + LOC=0 + snapshot OK + 源碼零 diff（mutmut 還原乾淨）。挑戰式攻擊 5 點（藏刪測/exit=2假綠/streak灌水/源碼殘留/鏡子未驗）全敗證非橡皮圖章；delta=0 為本機與 R60 同 UTC 日 M-05 去重正確（非缺陷）。詳見 [§1.7.3 R61](docs/05_development/sprint_history.md) + [Round61_NextAction](docs/05_development/SD09_W3_Round61_NextAction.md)。
+**Last Updated**: 2026-06-12 | **AISDLC Version**: v0.09 | **Status**: SD_09 **W0 收尾期 + R61 nightly 機制三十八度閉環（R24~R61 連 38 輪）+ 四方 zero-trust audit 重驗收斂 OVERALL PASS（0 P0/0 P1/0 P2，無新缺陷）+ 紀律#17 雙向兩條獨立驗證數字互證**。本輪手動親跑 nightly + 派 subagent 四方挑戰式 audit + 加速 SD10：nightly 6 stage 全綠 run_id=114056 kill_rate 76.51%（真 Docker，Killed 114/Survived 35）perf green=3 + 主 agent 權威 full pytest 基線 **2,853 passed / 122 skipped**（2026-06-12 Improving_012 後實測；R61 原 2,732/122，明細沉 §1.7.3）+ mirror tests/tools/ 421 passed（R61 原 404）+ importlinter 7 kept + LOC=0 + snapshot OK + 源碼零 diff（mutmut 還原乾淨）。挑戰式攻擊 5 點（藏刪測/exit=2假綠/streak灌水/源碼殘留/鏡子未驗）全敗證非橡皮圖章；delta=0 為本機與 R60 同 UTC 日 M-05 去重正確（非缺陷）。詳見 [§1.7.3 R61](docs/05_development/sprint_history.md) + [Round61_NextAction](docs/05_development/SD09_W3_Round61_NextAction.md)。
 
 > **🔴 Important Notice 🔴** This file provides critical guidance for Claude Code (claude.ai/code). All instructions here OVERRIDE default behavior and must be followed exactly.
 
@@ -103,9 +103,10 @@ autoclaude/
 ├── core/                            # 微核心層
 │   ├── kernel.py / kernel_state.py / event_bus.py / hookspec.py / wiring.py
 │   ├── orchestration/              # OrchestrationCoordinator（SD_06 W1）
-│   ├── ports/                      # 9 ports：brain / executor / evaluator /
+│   ├── ports/                      # 10 ports：brain / executor / evaluator /
 │   │                               # memory_store / playbook_repository / state_repository /
-│   │                               # embedder / vector_search / observability（SD_08 W4 新增）
+│   │                               # embedder / vector_search / observability（SD_08 W4）/
+│   │                               # spec_source（AutoSDD W1）— 以下方 [Architecture Snapshot] Port 列表為準
 │   └── services/                   # mutation/ + auto_resume.py + _auto_resume_metrics.py
 ├── infra/                           # 基礎設施層
 │   ├── adapters/                   # MinimaxBrain / PtyExecutor / ShellEvaluator /

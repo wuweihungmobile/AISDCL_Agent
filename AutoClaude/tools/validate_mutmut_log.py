@@ -15,11 +15,19 @@ SD_Improving_09 觀察期 #2 殘留缺陷修復：
     0  log 含真實統計（至少一條 `Killed/Survived/Timeout/Suspicious (\\d+)` 行
        或 `\\d+ out of \\d+` 形式），且至少一個非零或 denom 可計算 = 真實 run
     2  log 不含真實統計（空檔 / help fallback / 缺檔 / 僅 legend 描述）
+    3  （僅 --require-version-marker 開啟時）統計真實但缺版本標記行 —
+       表示 log 非來自 run_mutmut_in_docker.sh 版本守門通過的 run（TD-N02）
 
 用法：
     python tools/validate_mutmut_log.py mutation_token_guard.log
+    python tools/validate_mutmut_log.py mutation_token_guard.log --require-version-marker
 
-對應 ps1 stage：tools/run_local_nightly.ps1 line ~172-186。
+--require-version-marker（TD-N02，2026-06-12，預設關閉以不破壞既有呼叫端）：
+    驗證 log 含 `[run_mutmut_in_docker] mutmut version OK: <x.y.z>` 標記行
+    （由 tools/run_mutmut_in_docker.sh 在 mutmut 版本檢查通過後寫入）。
+    防衛 mutmut 換版後輸出格式漂移仍被統計 regex 誤判通過。
+
+對應 ps1 stage：tools/run_local_nightly.ps1 mutation-test stage。
 """
 from __future__ import annotations
 
@@ -37,6 +45,12 @@ _SUMMARY_PATTERN = re.compile(
 
 # 備援格式：`5 out of 12 mutants killed` 之類 mutmut 變體輸出。
 _OUT_OF_PATTERN = re.compile(r"(?i)\b\d+\s+out\s+of\s+\d+\b")
+
+# TD-N02：run_mutmut_in_docker.sh 版本守門通過後寫入的明確標記行。
+# 例：`[run_mutmut_in_docker] mutmut version OK: 2.4.3`
+_VERSION_MARKER_PATTERN = re.compile(
+    r"(?m)^\[run_mutmut_in_docker\] mutmut version OK: \d+(?:\.\d+)+\s*$"
+)
 
 
 def is_real_mutmut_run(log_path: Path) -> bool:
@@ -67,24 +81,49 @@ def is_real_mutmut_run(log_path: Path) -> bool:
     return False
 
 
+def has_version_marker(log_path: Path) -> bool:
+    """判定 log 是否含版本守門標記行（TD-N02）。
+
+    True 條件：log 存在且含 `[run_mutmut_in_docker] mutmut version OK: <x.y.z>` 行
+    （由 run_mutmut_in_docker.sh 在 mutmut 版本檢查通過後寫入）。
+    """
+    if not log_path.exists():
+        return False
+    try:
+        text = log_path.read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        return False
+    return bool(_VERSION_MARKER_PATTERN.search(text))
+
+
 def main(argv: list[str] | None = None) -> int:
     args = sys.argv[1:] if argv is None else argv
+    require_version_marker = "--require-version-marker" in args
+    args = [a for a in args if a != "--require-version-marker"]
     if not args:
         sys.stderr.write(
-            "usage: python tools/validate_mutmut_log.py <log_path>\n"
+            "usage: python tools/validate_mutmut_log.py <log_path> "
+            "[--require-version-marker]\n"
         )
         return 2
     log_path = Path(args[0])
-    if is_real_mutmut_run(log_path):
-        sys.stdout.write(
-            f"[validate_mutmut_log] OK: real mutmut run detected ({log_path})\n"
+    if not is_real_mutmut_run(log_path):
+        sys.stderr.write(
+            f"[validate_mutmut_log] FAIL: no real mutmut summary in {log_path} "
+            "(empty / help fallback / missing) — refusing to treat as pass\n"
         )
-        return 0
-    sys.stderr.write(
-        f"[validate_mutmut_log] FAIL: no real mutmut summary in {log_path} "
-        "(empty / help fallback / missing) — refusing to treat as pass\n"
+        return 2
+    if require_version_marker and not has_version_marker(log_path):
+        sys.stderr.write(
+            f"[validate_mutmut_log] FAIL: version marker missing in {log_path} "
+            "(expected '[run_mutmut_in_docker] mutmut version OK: <x.y.z>' — "
+            "log 非來自版本守門通過的 run；TD-N02) — refusing to treat as pass\n"
+        )
+        return 3
+    sys.stdout.write(
+        f"[validate_mutmut_log] OK: real mutmut run detected ({log_path})\n"
     )
-    return 2
+    return 0
 
 
 if __name__ == "__main__":

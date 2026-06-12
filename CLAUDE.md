@@ -55,7 +55,7 @@ autoclaude <playbook.yaml> --config config.local.yaml   # 安裝後 entrypoint
 
 ### 測試 / Lint
 ```bash
-python -m pytest tests/ -q                       # 全套（基線 2,838 passed / 122 skipped，2026-06-12 AutoSDD W1~W8 後實測）
+python -m pytest tests/ -q                       # 全套（基線 2,853 passed / 122 skipped，2026-06-12 Improving_012 Phase 0 + audit 修復後實測）
 python -m pytest tests/test_playbook_runner.py -v # 單檔
 python -m pytest tests/ -k <substring> -v         # 單一測試
 python -m pytest tests/ -m pg_real                # 需 SD07_REAL_PG_E2E_ENABLED=true + PG DSN
@@ -77,7 +77,7 @@ docker compose -f docker-compose.ci.yml up -d                          # CI 對�
 - DB migrations：`alembic upgrade head`（同步 DSN／psycopg2；PostgreSQL 17 + pgvector）。
 
 ### 架構大圖
-**Hexagonal / 微核心**：`core/`（Kernel + EventBus + HookSpec + 9 個 `ports/` 抽象介面）只依賴 ports；`infra/adapters/` 提供具體實作（MinimaxBrain / PtyExecutor / ShellEvaluator / LocalLogger）；`infra/repositories/` 是 DAL 三後端（File / InMemory / Pg + Dual）；`plugins/`（14 active，含 AutoSDD W6 新增之 `sdd_governance`）為橫切關注點，彼此**不可互 import**，協作一律走 EventBus。`execution/playbook_runner.py` 是無業務邏輯的 thin facade。
+**Hexagonal / 微核心**：`core/`（Kernel + EventBus + HookSpec + 10 個 `ports/` 抽象介面，含 AutoSDD W1 新增之 `spec_source`）只依賴 ports；`infra/adapters/` 提供具體實作（MinimaxBrain / PtyExecutor / ShellEvaluator / LocalLogger）；`infra/repositories/` 是 DAL 三後端（File / InMemory / Pg + Dual）；`plugins/`（14 active，含 AutoSDD W6 新增之 `sdd_governance`）為橫切關注點，彼此**不可互 import**，協作一律走 EventBus。`execution/playbook_runner.py` 是無業務邏輯的 thin facade。
 
 **狀態機閉環**：INIT → PRE_RUN_VALIDATE → EXECUTE(step) →（Token Guard：≥80% `/compact`、≥90% checkpoint）→ EVALUATE →（失敗則 Minimax CORRECTION / 超限則 ESCALATION → MinimaxEvolver→PlaybookEvolver 自演化）→ DONE → GOAL_SYNTHESIS。
 
@@ -130,3 +130,68 @@ bash tools/fsm_runtime/formal/run_tlc.sh                      # TLA+/TLC（自�
 | AutoClaude Sprint 脈絡 / ADR / Nightly 取證紀律 | `AutoClaude/docs/05_development/sprint_history.md`、`AutoClaude/docs/04_planning/ADR/`、`AutoClaude/docs/06_quality/Nightly_Forensic_Discipline.md` |
 | AISDLC_SDD 框架入口 / 目錄規則 | [AISDLC_SDD/AISDLC_SDD_v0.01/AISDLC_SDD_INIT.md](AISDLC_SDD/AISDLC_SDD_v0.01/AISDLC_SDD_INIT.md)、`AISDLC_SDD/AISDLC_SDD_v0.01/FILE_DIRECTORY_RULES.md` |
 | AISDLC_SDD 治理規則總覽（34+ 條） | `AISDLC_SDD/AISDLC_SDD_v0.01/governance/RULES_INDEX.md` |
+
+---
+
+## 12-Rule Template（全域工作規則）
+
+These rules apply to every task in this project unless explicitly overridden.
+
+Bias: caution over speed on non-trivial work. Use judgment on trivial tasks.
+
+### Rule 1 — Think Before Coding
+- State assumptions explicitly. If uncertain, proceed with the most reasonable assumption and surface it — never guess silently.
+- Present multiple interpretations when ambiguity exists, then pick one and say why.
+- Push back when a simpler approach exists.
+
+### Rule 2 — Simplicity First
+- Minimum code that solves the problem. Nothing speculative.
+- No features beyond what was asked. No abstractions for single-use code.
+- Test: would a senior engineer say this is overcomplicated? If yes, simplify.
+
+### Rule 3 — Surgical Changes
+- Touch only what you must. Clean up only your own mess.
+- Don't "improve" adjacent code, comments, or formatting.
+- Don't refactor what isn't broken. Match existing style.
+
+### Rule 4 — Goal-Driven Execution
+- Define success criteria. Loop until verified.
+- Don't follow steps. Define success and iterate.
+- Strong success criteria let you loop independently.
+
+### Rule 5 — Use the model only for judgment calls
+- Use me for: classification, drafting, summarization, extraction.
+- Do NOT use me for: routing, retries, deterministic transforms.
+- If code can answer, code answers.
+
+### Rule 6 — Token budgets are not advisory
+- Per-task: 4,000 tokens. Per-session: 30,000 tokens.
+- If approaching budget, summarize and start fresh.
+- Surface the breach. Do not silently overrun.
+
+### Rule 7 — Surface conflicts, don't average them
+- If two patterns contradict, pick one (more recent / more tested).
+- Explain why. Flag the other for cleanup.
+- Don't blend conflicting patterns.
+
+### Rule 8 — Read before you write
+- Before adding code, read exports, immediate callers, shared utilities.
+- "Looks orthogonal" is dangerous. If unsure why code is structured a way, ask.
+
+### Rule 9 — Tests verify intent, not just behavior
+- Tests must encode WHY behavior matters, not just WHAT it does.
+- A test that can't fail when business logic changes is wrong.
+
+### Rule 10 — Checkpoint after every significant step
+- Summarize what was done, what's verified, what's left.
+- Don't continue from a state you can't describe back.
+- If you lose track, stop and restate.
+
+### Rule 11 — Match the codebase's conventions, even if you disagree
+- Conformance > taste inside the codebase.
+- If you genuinely think a convention is harmful, surface it. Don't fork silently.
+
+### Rule 12 — Fail loud
+- "Completed" is wrong if anything was skipped silently.
+- "Tests pass" is wrong if any were skipped.
+- Default to surfacing uncertainty, not hiding it.

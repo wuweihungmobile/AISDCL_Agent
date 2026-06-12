@@ -51,6 +51,10 @@ if ! echo "${INSTALLED_VER}" | grep -q '2\.4\.3'; then
   echo "[run_mutmut_in_docker] expected mutmut 2.4.3 but got: ${INSTALLED_VER}" | tee -a "${LOG_FILE}"
   exit 4
 fi
+# TD-N02 修復（2026-06-12）：版本檢查通過後寫入明確版本標記行（進 LOG_FILE）。
+# validate_mutmut_log.py --require-version-marker 據此驗證「log 來自版本守門通過的 run」，
+# 防止格式漂移（mutmut 換版）下統計 regex 誤判仍假 pass。
+echo "[run_mutmut_in_docker] mutmut version OK: 2.4.3" | tee -a "${LOG_FILE}"
 
 # 3) 跑 mutmut（mutant 全 survived / 部分 failed 都允許繼續，後續 baseline_lock 會判斷）
 #    -p no:xdist 已知為 pytest 選項；mutmut 2.x 不支援 → 不傳；若需傳給 runner 走 --runner。

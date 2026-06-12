@@ -37,7 +37,11 @@
 
 ### 紀律 #4 — 驗證鏡子自身要被驗證
 
-任何 `validate_*` / 真實性判定工具必須有單元測試（如 `tests/tools/test_validate_mutmut_log.py` 15 case），測試「假 PASS 場景能被拒絕」而非只測通過路徑。延伸：ps1 複雜分支邏輯也要被驗證（如 ps1:492-521 `F2 OK`/`F2 ALERT` AC4 解析分支 ↔ [tools/ac4_nightly_alert_parser.py](../../tools/ac4_nightly_alert_parser.py) SSOT 同構樣板）。
+任何 `validate_*` / 真實性判定工具必須有單元測試（如 `tests/tools/test_validate_mutmut_log.py` 21 case，含 TD-N02 version-marker 4 case），測試「假 PASS 場景能被拒絕」而非只測通過路徑。延伸：ps1 複雜分支邏輯也要被驗證（如 ps1:492-521 `F2 OK`/`F2 ALERT` AC4 解析分支 ↔ [tools/ac4_nightly_alert_parser.py](../../tools/ac4_nightly_alert_parser.py) SSOT 同構樣板）。
+
+**2026-06-12 強化（AutoClaude_Improving_012 Phase 0 TD-N02 / TD-N03）**：
+- **TD-N02 mutmut 版本標記**：[run_mutmut_in_docker.sh](../../tools/run_mutmut_in_docker.sh) 於版本檢查通過後寫入 `[run_mutmut_in_docker] mutmut version OK: 2.4.3` 標記行；nightly 呼叫 [validate_mutmut_log.py](../../tools/validate_mutmut_log.py) 加 `--require-version-marker`（缺標記 exit=3，與「非真實 run」exit=2 可區分）— 防 mutmut 換版後輸出格式漂移仍被統計 regex 誤判通過。flag 預設關閉，其他呼叫端零破壞。
+- **TD-N03 observability 整合驗證**：observability stage 於 snapshot 成功後驗證 `.observability_history.jsonl` 末筆 ts 之 UTC 日期 = 今日（snapshot 工具以 UTC ISO timestamp 寫入、同日去重後 append 至末行），否則 stage rc=1 — 防「snapshot 印 OK 但實際未落盤」假綠。對應 ps1 observability-snapshot stage（錨點關鍵字 `TD-N03`）。
 
 ### 紀律 #5 — 跨工具數字對齊 assertion
 
@@ -50,6 +54,8 @@ env override（如 `AUTOCLAUDE_TEST_P95_THRESHOLD_MS`）若同時影響「採集
 ### 紀律 #7 — cache 路徑必須強制 fresh baseline
 
 任何依賴 `.mutmut-cache` / `.pytest_cache` / `.ac4_junit.xml` / `perf_results.json` 等本地 cache 的 nightly stage，每次跑前 `rm -rf` 強制 fresh；避免「舊資料 + 當次 crash → 老 summary 騙過驗證」。對應 ps1:462（`.ac4_junit.xml`）、ps1:534（`perf_results.json`）、run_mutmut_in_docker.sh:67（`.mutmut-cache`）。
+
+**2026-06-12 強化（AutoClaude_Improving_012 Phase 0 TD-N01）**：perf stage 除跑前 fresh 外，pytest 跑完後必須**強制驗證 `perf_results.json` 確實產出**（由 `tests/perf/conftest.py` pytest_sessionfinish hook 寫出；對齊 `ci.yml`「Verify perf_results.json present」step），缺檔 stage rc=1 並記 ERROR — 防「fresh 清掉舊檔 + hook 未寫出 → regression check 走『baseline 或 results 不存在』WARN 分支假綠」。對應 [run_local_nightly.ps1](../../tools/run_local_nightly.ps1) perf-baseline stage（錨點關鍵字 `TD-N01`）。
 
 ### 紀律 #8 — 載具腳本（.sh）必須 LF 行尾
 
@@ -67,11 +73,15 @@ env override（如 `AUTOCLAUDE_TEST_P95_THRESHOLD_MS`）若同時影響「採集
 
 `logs/nightly_latest.log` 必須由 nightly script 末段 `Copy-Item` 自完整當次 run 寫入；不可在 stage 中段更新或從 partial buffer 取。partial / stale latest 會讓「綠燈聲稱」對應到的 log 行號失效（紀律 #3 RunId log:L 取證失敗）。同時 Windows file lock 場景下 log 寫入須用 `FileShare.ReadWrite` + retry（見紀律 #8 延伸），避免 tail -F 干擾寫入。SD_09 W3 Round 2 audit P0-2 修復項。對應實作：[run_local_nightly.ps1](../../tools/run_local_nightly.ps1) `Add-LogLineSafe` + 末段 `Copy-Item`。
 
+**TD-N04 補充（2026-06-12，AutoClaude_Improving_012 Phase 0 — pointer 時序語意明文化）**：`logs/nightly_latest.log` 為**每次 run 結束後 `Copy-Item` 覆寫**的 pointer（非歷史累積檔）— 任何後續 run 完成即覆寫前次內容。因此「latest = 最後完成的 run」而非「最後啟動的 run」；多 run 並行或補跑歷史場景下 latest 可能與時間直覺不符。**取證一律以 RunId log（`logs/nightly_YYYY-MM-DD_HHMMSS.log`）為準**（紀律 #3），latest pointer 僅供人工快速 retrieve。
+
 ### 紀律 #12 — mutation history 必須有 source_sha256 區分
 
 `.mutation_history.jsonl` 每筆 record 必須含 `source_sha256` 欄位（plugin 目錄 .py 檔合併 sha256 截 16 chars）。`should_lock` 必須驗證 tail 7 筆 `unique source_sha256 ≥ 7`，否則 = 同 commit 重跑 7 次騙過 lock（即使 kill_rate 達標也應拒絕）。舊紀錄缺欄位寬鬆通過（向下相容），但新紀錄必填。SD_09 W3 Round 2 audit P0-5 修復項。對應實作：[tools/mutation_baseline_lock.py](../../tools/mutation_baseline_lock.py) `should_lock` line 226-307 雙分支邏輯。
 
 **SD_09 W3 Round 31 強化（P1-R31-2 修復）**：同 sha multi-run kill_rate variance > 3pp 時必須印 WARN（mutmut suspicious 半確定性風險）。對應 [tools/mutation_baseline_lock.py compute_consistency_warning](../../tools/mutation_baseline_lock.py)。避免單次 outlier（如 R30 85.57% vs 同 sha 復跑 74.83%）被當作真實 baseline 而誤鎖定。
+
+**TD-N06 補充（2026-06-12，AutoClaude_Improving_012 Phase 0 — 向下相容語意明文化）**：`source_sha256` 欄位於 SD_09 W3 Round 2 audit P0-5 修復時引入；引入前 `.mutation_history.jsonl` 已存在 2 筆 legacy 紀錄（2026-05-20 / 2026-05-21）缺此欄位。向下相容語意：`should_lock` 在 tail 7 筆中允許**至多 `MAX_BACKWARD_COMPAT_MISSING=2` 筆**缺欄位（常數定義於 [tools/mutation_baseline_lock.py](../../tools/mutation_baseline_lock.py)，SD_09 W3 Round 21 Architect P1 #2 自 ceil(N/2)=4 收緊為 N-2=5 unique 下限），上限 2 恰等於 legacy 筆數 — 即只豁免歷史既存缺欄位紀錄，P0-5 修復後寫入的新紀錄一律必填；缺欄位筆數 > 2 即拒絕鎖定。
 
 ### 紀律 #13 — 觀察期 jsonl 累計進度必須可見
 
@@ -158,4 +168,4 @@ CLAUDE.md §「Nightly / CI 取證紀律」維持 16 條編號標題清單（一
 
 ---
 
-**文檔元數據**：v1.2（SD_09 W3 R40 — 新增紀律 #15 呼叫端反斜線吞噬根治 + #16 pytest SSOT 隨機性前提註記）| 建立 2026-05-26 | 最後更新 2026-05-28 | 維護者：Tech Lead
+**文檔元數據**：v1.3（AutoClaude_Improving_012 Phase 0 — 紀律 #4 補 TD-N02/TD-N03 驗證點、#7 補 TD-N01 perf 產出強制驗證、#11 補 TD-N04 latest pointer 時序語意、#12 補 TD-N06 source_sha256 向下相容語意；無新增編號紀律，CLAUDE.md 摘要免同步）| 建立 2026-05-26 | 最後更新 2026-06-12 | 維護者：Tech Lead

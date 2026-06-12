@@ -340,7 +340,10 @@ if ($script:DockerOK) {
     # 只有 log 全空 / 不存在 / 僅 help fallback / 0 mutant 時才算未跑（exit=2）。
     # 修補 SD_09 觀察期 #2 殘留缺陷：先前 regex 含 'mutmut' / 'to apply a mutant'
     # 過寬，會把 mutmut help fallback（90 bytes）誤判通過 → 假 pass。
-    Invoke-Native { python tools/validate_mutmut_log.py $MutLog }
+    # TD-N02 修復（2026-06-12）：--require-version-marker — log 必須含
+    # run_mutmut_in_docker.sh 版本守門通過標記（mutmut version OK: 2.4.3），
+    # 防衛 mutmut 換版後輸出格式漂移仍假 pass（exit=3 取證可區分）。
+    Invoke-Native { python tools/validate_mutmut_log.py $MutLog --require-version-marker }
     $validateRc = $LASTEXITCODE
     if ($validateRc -ne 0) {
       Log "mutation_token_guard.log 未含真實 mutmut 統計（validate_rc=$validateRc）— 標記 stage 失敗（避免假 pass）" 'ERROR'
@@ -537,6 +540,17 @@ if (Test-Path 'perf_results.json') {
 }
 $rc3 = Invoke-Stage 'perf-baseline' {
   Invoke-Native { python -m pytest tests/perf/ -v --tb=short -m perf }
+  # TD-N01 修復（2026-06-12，AutoClaude_Improving_012 Phase 0）：
+  # 對齊 ci.yml「Verify perf_results.json present」step — pytest 跑完後強制驗證
+  # perf_results.json 確實由 tests/perf/conftest.py pytest_sessionfinish hook 產出。
+  # 缺檔 = 本次採集無效（紀律 #1 真實失敗，不可讓後續 regression check 的
+  # 「baseline 或 results 不存在」WARN 分支把 stage 染綠）→ stage rc=1。
+  if (-not (Test-Path 'perf_results.json')) {
+    Log 'perf_results.json 缺失 — tests/perf/conftest.py pytest_sessionfinish hook 應產生此檔（對齊 ci.yml Verify perf_results.json present；TD-N01）— 標記 stage fail' 'ERROR'
+    $global:LASTEXITCODE = 1
+    return
+  }
+  Log 'perf_results.json present（TD-N01 強制驗證通過）'
   # SD_09 W2 D-10 修復：使用 [ref] 變數 capture regression rc，避免 baseline_lock 跑完後 LASTEXITCODE 被覆蓋
   $regressionRcRef = [ref] 0
   $baselineLockRcRef = [ref] 0
@@ -639,6 +653,42 @@ if ($script:DockerOK) {
 # 每日寫 1 筆至 .observability_history.jsonl；同日去重；30 天起算 2026-05-22
 $rc5 = Invoke-Stage 'observability-snapshot' {
   Invoke-Native { python tools/observability_snapshot.py }
+  $snapRc = $LASTEXITCODE
+  if ($snapRc -ne 0) { return }   # 保留 snapshot 真實 rc（紀律 #1）
+  # TD-N03 修復（2026-06-12，AutoClaude_Improving_012 Phase 0）：整合驗證 —
+  # observability_snapshot.py 以 UTC ISO timestamp 寫入並同 UTC 日去重後 append 至末行，
+  # 故 stage 成功後 .observability_history.jsonl 最後一筆 ts 的 UTC 日期必須等於今日；
+  # 否則 snapshot「印 OK 但實際未落盤」假綠（紀律 #4 鏡子被驗證）→ stage rc=1。
+  $histPath = Join-Path $RepoRoot '.observability_history.jsonl'
+  if (-not (Test-Path $histPath)) {
+    Log ".observability_history.jsonl 不存在 — snapshot 宣稱成功但未落盤 — 標記 stage fail（TD-N03）" 'ERROR'
+    $global:LASTEXITCODE = 1
+    return
+  }
+  # 已知接受風險：跨 UTC 午夜秒級窗口可能 false fail（fail-loud 方向，重跑即解）。
+  $todayUtc = (Get-Date).ToUniversalTime().ToString('yyyy-MM-dd')
+  $lastDate = ''
+  $lastTs = ''
+  try {
+    $obsLines = @(Get-Content -Path $histPath -ErrorAction Stop | Where-Object { $_.Trim() -ne '' })
+    if ($obsLines.Count -gt 0) {
+      $lastRecord = $obsLines[$obsLines.Count - 1] | ConvertFrom-Json
+      # StrictMode 3.0：PSCustomObject 缺 ts 屬性會拋 PropertyNotFoundException → 由 catch 接住
+      $lastTs = [string]$lastRecord.ts
+      $lastDate = [datetime]::Parse($lastTs).ToUniversalTime().ToString('yyyy-MM-dd')
+    }
+  } catch {
+    Log "observability 整合驗證：jsonl 末筆解析失敗：$_ — 標記 stage fail（TD-N03）" 'ERROR'
+    $global:LASTEXITCODE = 1
+    return
+  }
+  if ($lastDate -eq $todayUtc) {
+    Log "observability 整合驗證通過：末筆 ts=$lastTs（UTC date=$lastDate = today）（TD-N03）"
+    $global:LASTEXITCODE = 0
+  } else {
+    Log "observability 整合驗證失敗：末筆 UTC date='$lastDate' != today '$todayUtc'（ts='$lastTs'）— 標記 stage fail（TD-N03）" 'ERROR'
+    $global:LASTEXITCODE = 1
+  }
 }
 
 # ----- Cleanup（僅清掉本次新建的臨時 container；既有的不動）-----

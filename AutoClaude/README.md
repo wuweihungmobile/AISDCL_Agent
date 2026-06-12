@@ -164,7 +164,7 @@ autoclaude/
 │   ├── hookspec.py              # HookSpec：Plugin 介面合約
 │   ├── wiring.py                # build_kernel：Plugin 註冊（_REGISTER_ORDER SSOT）與相依注入
 │   ├── orchestration/           # OrchestrationCoordinator（SD_06 W1）
-│   ├── ports/                   # 9 個抽象介面（Hexagonal Architecture）
+│   ├── ports/                   # 10 個抽象介面（Hexagonal Architecture；含 spec_source〔AutoSDD W1〕，以 CLAUDE.md [Architecture Snapshot] 為準）
 │   │   ├── brain.py             # BrainPort（Minimax / LLM）
 │   │   ├── executor.py          # ExecutorPort（Claude Code / 子程序）
 │   │   ├── evaluator.py         # EvaluatorPort
@@ -229,7 +229,7 @@ tests/                          # 2,732 passed / 122 skipped（SD_09 W3 R61 基�
 ├── core/ plugins/ infra/       # Kernel / 13 Plugin / adapters + repositories
 ├── contract/                   # DAL 契約測試（File vs PG 行為等價）+ runner 防護
 ├── equivalence/ cli/ integration/ perf/   # 等價 / CLI / 整合 / 性能 baseline
-└── tools/                      # hooks / nightly 驗證鏡子自身測試（404 passed）
+└── tools/                      # hooks / nightly 驗證鏡子自身測試（421 passed，2026-06-12 實測；R61 原 404）
 ```
 
 ### Plugin 註冊順序（`wiring._REGISTER_ORDER` — SSOT）

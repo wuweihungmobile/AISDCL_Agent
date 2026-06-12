@@ -78,15 +78,11 @@
 除非必要讓我參考的報告，否則不必產出報告(若有後續Next Action, 需要產出報告)。若有修改，更新相關必要文件即可。請將輸出部分簡潔清楚就好，節省Token！
 
 問題： 
-1.確認 AutoSDD_improving_01.md 凍結
-2.請詳細規劃執行 AutoSDD_improving_01.md and 以及AutoSDD_improving_01相關資訊與文件
+1.確認 AutoClaude_Improving_012.md 凍結
+2.建立一個 dynamic workflow 繼續詳細執行 AutoClaude_Improving_012.md and 以及AutoClaude_Improving_012相關資訊與文件
 3.若有需要確認, 請評估選項, 以互動方式我會進行回覆!
 
-
-
-
-
-為確保執行品質與AutoSDD_improving_01.md執行項目都有執行, 請確實派出Architect / SA SD / QA 專家整體考量審查, 與目前系統現況進行比對, 採完全不信任 zero-trust audit 全面驗證和"修復方向是否正確", 看看nightly程式是否正確 and 執行過程與結果是否正確!
+為確保執行品質與AutoClaude_Improving_012.md執行項目都有執行, 請確實派出Architect / SA SD / QA 專家整體考量審查, 與目前系統現況進行比對, 採完全不信任 zero-trust audit 全面驗證和"修復方向是否正確", 看看nightly程式是否正確 and 執行過程與結果是否正確!
 有問題馬上請派另一個Agent(Architect/SA SD/QA 全能)專家進行修復相關程式與文件「所有問題"文件問題"和"技術問題"必須徹底全部修復才能算完成」! 
 再經QA專家審議修完是否有符合"原設計功能"或若有破壞收斂即不通過須馬上進行修改再進行QA!
 全部符合上述PASS才核准通過!

@@ -23,8 +23,7 @@ _TOOLS_DIR = Path(__file__).resolve().parent.parent.parent / "tools"
 if str(_TOOLS_DIR) not in sys.path:
     sys.path.insert(0, str(_TOOLS_DIR))
 
-from validate_mutmut_log import is_real_mutmut_run, main  # noqa: E402
-
+from validate_mutmut_log import has_version_marker, is_real_mutmut_run, main  # noqa: E402
 
 # --- is_real_mutmut_run() unit tests ---
 
@@ -212,6 +211,59 @@ def test_real_existing_repo_log_is_real_run() -> None:
     )
 
 
+# --- --require-version-marker（TD-N02，2026-06-12）---------------------------
+# 意圖：版本守門標記行由 run_mutmut_in_docker.sh 在 mutmut 版本檢查通過後寫入；
+# 開啟 flag 時「統計真實但缺標記」必須 fail（exit=3），防 mutmut 換版格式漂移假 pass。
+# 預設關閉（向下相容）：無 flag 時行為與舊版完全一致。
+
+def test_version_marker_present_with_flag_passes(tmp_path: Path) -> None:
+    """(h) 統計真實 + 含版本標記行 + flag 開啟 → exit 0。"""
+    log = tmp_path / "with_marker.log"
+    log.write_text(
+        "[run_mutmut_in_docker] mutmut version check: mutmut version 2.4.3\n"
+        "[run_mutmut_in_docker] mutmut version OK: 2.4.3\n"
+        "Killed (5)\nSurvived (2)\n",
+        encoding="utf-8",
+    )
+    assert has_version_marker(log) is True
+    assert main([str(log), "--require-version-marker"]) == 0
+
+
+def test_version_marker_missing_with_flag_fails_exit_3(tmp_path: Path) -> None:
+    """(i) 統計真實但缺版本標記 + flag 開啟 → exit 3（與「非真實 run」exit 2 可區分）。
+
+    注意：`version check:` 行（檢查前回報）不可被當成標記 — 標記必須是檢查
+    **通過後**寫入的 `mutmut version OK:` 行，否則版本不符（exit 4 提前終止）
+    的 log 也會帶 `version check:` 行而誤判通過。
+    """
+    log = tmp_path / "no_marker.log"
+    log.write_text(
+        "[run_mutmut_in_docker] mutmut version check: mutmut version 9.9.9\n"
+        "Killed (5)\nSurvived (2)\n",
+        encoding="utf-8",
+    )
+    assert has_version_marker(log) is False
+    assert main([str(log), "--require-version-marker"]) == 3
+
+
+def test_version_marker_flag_off_backward_compatible(tmp_path: Path) -> None:
+    """(j) flag 關閉（預設）時缺標記不影響判定 → exit 0（既有呼叫端零破壞）。"""
+    log = tmp_path / "legacy.log"
+    log.write_text("Killed (5)\nSurvived (2)\n", encoding="utf-8")
+    assert main([str(log)]) == 0
+
+
+def test_version_marker_flag_on_not_real_run_still_exit_2(tmp_path: Path) -> None:
+    """(k) flag 開啟但 log 非真實 run → 仍回 exit 2（真實性檢查優先於版本標記）。"""
+    log = tmp_path / "help.log"
+    log.write_text(
+        "[run_mutmut_in_docker] mutmut version OK: 2.4.3\n"
+        "To apply a mutant on disk:\n    mutmut apply <id>\n",
+        encoding="utf-8",
+    )
+    assert main([str(log), "--require-version-marker"]) == 2
+
+
 def test_partial_state_skip_when_wrapper_preamble_only(tmp_path: Path) -> None:
     """P1-R10-1 修復配套單元測試：partial state 應 skip 而非 assert fail。
 
@@ -221,9 +273,11 @@ def test_partial_state_skip_when_wrapper_preamble_only(tmp_path: Path) -> None:
     """
     log = tmp_path / "mutation_token_guard.log"
     log.write_text(
-        "[run_mutmut_in_docker] 2026-05-25T06:06:46Z module=autoclaude/plugins/token_guard tests=tests/plugins/token_guard\n"
+        "[run_mutmut_in_docker] 2026-05-25T06:06:46Z module=autoclaude/plugins/token_guard"
+        " tests=tests/plugins/token_guard\n"
         "[run_mutmut_in_docker] mutmut version check: mutmut version 2.4.3\n"
-        "[run_mutmut_in_docker] cache cleared (.mutmut-cache + .pytest_cache) — forcing fresh baseline\n",
+        "[run_mutmut_in_docker] cache cleared (.mutmut-cache + .pytest_cache)"
+        " — forcing fresh baseline\n",
         encoding="utf-8",
     )
     text = log.read_text(encoding="utf-8")
