@@ -36,6 +36,8 @@ class LoopState:
     completed_step_ids: set = field(default_factory=set)
     skip_completed_ids: set = field(default_factory=set)
     goal_synthesis_injected: bool = False
+    # F-B1/F-B2（ADR-AGT-004）：AlertLadder 階梯計數 + streak 恢復快照
+    alert_ladder_state: dict = field(default_factory=dict)
 
 
 def initialize_loop_state(
@@ -72,6 +74,8 @@ def initialize_loop_state(
         logger.info("Gap-024-C | 恢復演化版 mutation_log: %d 筆", len(state.mutation_log))
 
     if resume_checkpoint:
+        # F-B1：舊 checkpoint 無 alert_ladder 屬性 → getattr 補空 dict（additive 相容）
+        state.alert_ladder_state = dict(getattr(resume_checkpoint, "alert_ladder", {}) or {})
         state.skip_completed_ids = set(resume_checkpoint.completed_step_ids)
         if state.skip_completed_ids:
             logger.info(

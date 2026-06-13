@@ -235,6 +235,37 @@ class FailureKnowledgeBase:
         self._append(entry)
         logger.debug("知識庫記錄 ESCALATION: sig=%s failed=%s", key[:40], all_failed)
 
+    def record_strategy_failure(
+        self, error_signature: str, failed_strategy: str, step_id: str
+    ) -> None:
+        """F-B2（ADR-AGT-004）：單次修正無改善時的策略失效標記。
+
+        - failed_strategy 併入 skip_strategies（merge 模式比照 record_escalation）；
+        - 既有 entry 之 successful_strategy 與失效策略相同 → 清為 None
+          （歷史成功策略此次無效，後續 query 命中不再直接採用）；
+        - outcome="strategy_failure"（additive，舊版讀取相容）。
+        """
+        key = error_signature[:80]
+        existing = self._cache.get(key, {})
+        skip = list(set(existing.get("skip_strategies", []) + [failed_strategy]))
+        successful = existing.get("successful_strategy")
+        if successful == failed_strategy:
+            successful = None
+        entry = {
+            "error_sig": key,
+            "successful_strategy": successful,
+            "error_class": existing.get("error_class", "unknown"),
+            "step_id": step_id,
+            "skip_strategies": skip,
+            "timestamp": time.time(),
+            "outcome": "strategy_failure",
+        }
+        self._cache[key] = entry
+        self._append(entry)
+        logger.debug(
+            "知識庫記錄策略失效: sig=%s strategy=%s", key[:40], failed_strategy
+        )
+
     def _append(self, entry: dict) -> None:
         try:
             if len(self._cache) > _MAX_ENTRIES:

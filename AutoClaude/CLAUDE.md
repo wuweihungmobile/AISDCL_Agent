@@ -1,7 +1,7 @@
 # CLAUDE.md
 # Claude Code Project Guidance
 
-**Last Updated**: 2026-06-13 | **AISDLC Version**: v0.09 | **Status**: **Improving_012 Phase 1 記憶基座完成（F-C3/F-C1/F-C2）**+ SD_09 W0 收尾期。Phase 1 經 SCG-1（SRD_AGT_Phase1_Memory）+ SCG-2（ADR-AGT-003）🔴 人工確認後交付：IKbMetricStore + IPreferenceStore 二新 port（10→12）、preference_memory + goal_progress 二新 plugin（14→16 active）、alembic 0016 三新表、importlinter Rule 8（7→8 kept）、Kernel 補發 PRE_CORRECTION。三方 zero-trust audit 2 輪複審 PASS（QA P1×7/P2×6 + 複驗 P1-1 resume 口徑全修；紀律 #18 mutation 隔離樹；nightly run_id=040216 六 stage 全綠 kill_rate 76.51% 持平）。full pytest 基線 **2,972 passed / 122 skipped**（2026-06-13 audit 修復後實測；前基線 2,853/122）+ LOC=0 + snapshot OK。詳見 [AutoClaude_Improving_012.md](docs/04_planning/AutoClaude_Improving_012.md) §5 Phase 1 + [SRD_AGT_Phase1_Memory](docs/02_architecture/SRD_AGT_Phase1_Memory.md)。
+**Last Updated**: 2026-06-13 | **AISDLC Version**: v0.09 | **Status**: **Improving_012 Phase 2 閉環強化完成（F-B1 AlertLadder + F-B2 Correction 效果驗證）**。經 SCG-1（SRD_AGT_Phase2_Closedloop）+ SCG-2（ADR-AGT-004）🔴 確認交付：AlertLadder 三階梯（WARNING→HINT→ESCALATE，flag 預設 off）+ CorrectionVerifier（signature/fail_count/exit_code 本地比對）+ KB 策略失效回寫；checkpoint additive `alert_ladder` 欄（File + PG counters JSONB 子鍵，零 alembic、無新 port/plugin）。三方 zero-trust audit（P0=0 / P1×3 / P2×4 全修）+ QA 變異實證複審 PASS。full pytest **3,020 passed / 122 skipped**（前基線 2,972，+48 零回歸）、新模組 coverage 100%、importlinter 8 kept、LOC=0。詳見 [AutoClaude_Improving_012.md](docs/04_planning/AutoClaude_Improving_012.md) §5 Phase 2。
 
 > **🔴 Important Notice 🔴** This file provides critical guidance for Claude Code (claude.ai/code). All instructions here OVERRIDE default behavior and must be followed exactly.
 
@@ -324,9 +324,9 @@ tasks:
 
 ---
 
-**文檔元數據**：v7.5 | 建立 2025-01-11 | 最後更新 2026-06-13 | 適用 AISDLC v0.09+
+**文檔元數據**：v7.6 | 建立 2025-01-11 | 最後更新 2026-06-13 | 適用 AISDLC v0.09+
 
-**v7.5 重點**：**Improving_012 Phase 1 記憶基座（F-C3/F-C1/F-C2）完成**（SCG-1/SCG-2 🔴 確認後交付）。F-C3 KB metrics 持久化採 ACCEPTED ADR-SD09-006 canonical（IKbMetricStore + Local/Pg adapter + alembic 0016 + Rule 8，重啟不清零）；F-C1 IPreferenceStore + PreferenceMemoryPlugin + Kernel 補發 PRE_CORRECTION → `preferences_section` 注入 correction prompt；F-C2 GoalProgressLedger + GoalProgressPlugin（POST_RUN payload）。Ports 10→12、plugins 14→16 active、alembic 0016 三新表。三方 zero-trust audit 2 輪複審 PASS（含 PG now() bug、resume 進度口徑、mutation 隔離樹紀律 #18）。full pytest **2,972/122**（+119 零回歸）、importlinter 8 kept、LOC=0、snapshot OK。完整明細見 [sprint_history.md §1.7.3](docs/05_development/sprint_history.md) Improving_012 Phase 1 段 + [SRD_AGT_Phase1_Memory](docs/02_architecture/SRD_AGT_Phase1_Memory.md)。
+**v7.6 重點**：**Improving_012 Phase 2 閉環強化（F-B1/F-B2）完成**（SCG-1/SCG-2 🔴 確認交付）。F-B1 AlertLadder 三階梯（WARNING→HINT→ESCALATE，flag `alert_ladder.enabled` 預設 off，SCG-6 觀察 7 天轉正）攔截收斂升級唯一 call site；F-B2 CorrectionVerifier（signature/fail_count/exit_code 三分量本地比對）+ streak 提前升級 + KB 策略失效回寫。**無新 port/plugin、零 alembic**：計數落 `PlaybookCheckpoint.alert_ladder` additive 欄 + PG `counters` JSONB 子鍵。三方 zero-trust audit（P0=0 / P1×3 / P2×4 全修）+ QA 變異實證複審 PASS。full pytest **3,020/122**（前基線 2,972，+48）、coverage 100%、importlinter 8 kept、LOC=0。明細見 [sprint_history.md §1.7.3](docs/05_development/sprint_history.md) Phase 2 段。
 
 <!-- ARCH_SNAPSHOT_BEGIN -->
 ## [Architecture Snapshot] — 由 tools/snapshot_sync.py 自動生成（請勿手動編輯本區段；以 `python tools/snapshot_sync.py` 重新生成）

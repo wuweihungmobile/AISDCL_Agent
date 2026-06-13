@@ -34,6 +34,7 @@ def handle_token_halt_impl(
     skip_to_counter: Optional[dict] = None,
     completed_step_ids: Optional[set] = None,
     step_evolution_counter: Optional[dict] = None,
+    alert_ladder: Optional[dict] = None,
     notify_callback: Optional[Callable[[str, str], None]] = None,
     token_logger_callback: Optional[Callable[[str, str, float, str, str], None]] = None,
 ) -> PlaybookCheckpoint:
@@ -64,6 +65,7 @@ def handle_token_halt_impl(
         skip_to_counter=dict(skip_to_counter) if skip_to_counter else {},
         completed_step_ids=list(completed_step_ids) if completed_step_ids else [],
         step_evolution_counter=dict(step_evolution_counter) if step_evolution_counter else {},
+        alert_ladder=dict(alert_ladder) if alert_ladder else {},
     )
     if resume_delay_minutes > 0:
         plugin._mgr.schedule_resume(cp, resume_delay_minutes)

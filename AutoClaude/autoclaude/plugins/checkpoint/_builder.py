@@ -67,4 +67,6 @@ def build_checkpoint_from_ctx(
         skip_to_counter=skip_c,
         step_evolution_counter=evo_c,
         sdd_governance=sdd_gov,
+        # F-B1（ADR-AGT-004）：Kernel 路徑經 payload 鍵 additive 傳遞
+        alert_ladder=dict(payload.get("alert_ladder", {})),
     )

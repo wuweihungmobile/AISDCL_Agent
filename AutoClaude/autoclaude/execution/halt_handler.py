@@ -38,6 +38,7 @@ def handle_token_halt_impl(
     skip_to_counter: Optional[dict] = None,
     completed_step_ids: Optional[set] = None,
     step_evolution_counter: Optional[dict] = None,
+    alert_ladder: Optional[dict] = None,
 ) -> PlaybookResult:
     """SD_06 W2-T2-8：_handle_token_halt 全文下沉。
 
@@ -62,6 +63,7 @@ def handle_token_halt_impl(
         skip_to_counter=skip_to_counter,
         completed_step_ids=completed_step_ids,
         step_evolution_counter=step_evolution_counter,
+        alert_ladder=alert_ladder,
         notify_callback=runner._notify,
         token_logger_callback=runner._token_logger.record,
     )

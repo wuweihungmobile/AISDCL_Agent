@@ -39,6 +39,7 @@ def handle_convergence_escalation(
     mutation_log: list[str],
     completed_step_ids: set[str],
     step_evolution_counter: dict[str, int],
+    alert_ladder: dict | None = None,
 ) -> PlaybookResult:
     """收斂評估 ESCALATION（原 _impl.py L276-379）"""
     logger.error(
@@ -66,6 +67,7 @@ def handle_convergence_escalation(
             step_evolution_counter=step_evolution_counter,
             convergence_label="收斂",
             max_retries=None,
+            alert_ladder=alert_ladder,
         )
         if gs_result is not None:
             return gs_result
@@ -103,6 +105,7 @@ def handle_convergence_escalation(
             _esc_save_ok = runner._checkpoint_plugin.save_evolution_resume_checkpoint(
                 _evolved_path_esc, playbook, step_log, completed_step_ids,
                 step_evolution_counter=step_evolution_counter,
+                alert_ladder=alert_ladder,
             )
         runner._notify(
             "AutoClaude — Playbook 自動演化（Level 5）",
@@ -140,6 +143,7 @@ def handle_max_retries_escalation(
     mutation_log: list[str],
     completed_step_ids: set[str],
     step_evolution_counter: dict[str, int],
+    alert_ladder: dict | None = None,
 ) -> PlaybookResult:
     """重試耗盡 ESCALATION（原 _impl.py L420-522）"""
     logger.error(
@@ -167,6 +171,7 @@ def handle_max_retries_escalation(
             step_evolution_counter=step_evolution_counter,
             convergence_label="重試耗盡",
             max_retries=max_retries,
+            alert_ladder=alert_ladder,
         )
         if gs_result is not None:
             return gs_result
@@ -204,6 +209,7 @@ def handle_max_retries_escalation(
             _max_save_ok = runner._checkpoint_plugin.save_evolution_resume_checkpoint(
                 _evolved_path_max, playbook, step_log, completed_step_ids,
                 step_evolution_counter=step_evolution_counter,
+                alert_ladder=alert_ladder,
             )
         runner._notify(
             "AutoClaude — Playbook 自動演化（Level 5）",
@@ -239,6 +245,7 @@ def _handle_goal_synthesis_recovery(
     step_evolution_counter: dict[str, int],
     convergence_label: str,
     max_retries: Optional[int],
+    alert_ladder: dict | None = None,
 ) -> Optional[PlaybookResult]:
     """Gap-044 GOAL_SYNTHESIS 復原（共用於收斂 + 重試耗盡兩路徑）"""
     logger.warning(
@@ -268,6 +275,7 @@ def _handle_goal_synthesis_recovery(
             _gs_save_ok = runner._checkpoint_plugin.save_evolution_resume_checkpoint(
                 _gs_evolved, playbook, step_log, completed_step_ids,
                 step_evolution_counter=step_evolution_counter,
+                alert_ladder=alert_ladder,
             )
             return PlaybookResult(
                 False, len(step_log), total, return_msg,

@@ -22,6 +22,7 @@ def save_evolution_resume_checkpoint_impl(
     step_log: list,
     completed_step_ids,
     step_evolution_counter: Optional[dict] = None,
+    alert_ladder: Optional[dict] = None,
 ) -> bool:
     """W3-1a：Gap-041 演化後儲存 checkpoint；回傳是否成功。"""
     try:
@@ -37,6 +38,7 @@ def save_evolution_resume_checkpoint_impl(
             step_evolution_counter=(
                 dict(step_evolution_counter) if step_evolution_counter else {}
             ),
+            alert_ladder=dict(alert_ladder) if alert_ladder else {},
         )
         plugin._mgr.save(_cp, evolved_path)
         logger.info(

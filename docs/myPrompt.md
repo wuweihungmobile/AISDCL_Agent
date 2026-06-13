@@ -79,8 +79,16 @@
 
 問題： 
 1.確認 AutoClaude_Improving_012.md 凍結
-2.建立一個 dynamic workflow 繼續詳細執行 AutoClaude_Improving_012.md and 以及AutoClaude_Improving_012相關資訊與文件
+2.繼續詳細執行 AutoClaude_Improving_012.md and 以及Improving012_Phase0_NextAction.md, AutoClaude_Improving_012相關資訊與文件, 並確認那些項目沒有完成, 繼續執行!
 3.若有需要確認, 請評估選項, 以互動方式我會進行回覆!
+
+參考資訊:
+收尾
+ 巢狀 AutoClaude repo commit 至 sprint/sd_09_phase9（cbd15cd，依您決策）
+ monorepo push：ca85936 + tag v2026.06.13-01 → wuweihungmobile/AISDCL_Agent main ✅
+ AISDLC_SDD 流程問題 4 項已記錄於 Improving012_Phase1_NextAction.md：SCG-1 缺擴充點實證檢查、ADR 落地承諾無追蹤、破壞性取證載具互踩、🔴 閘門回填時序
+Next Action：Phase 2 閉環強化（F-B1 AlertLadder + F-B2 Correction 效果驗證，須先過 SCG-1/2 🔴）→ Phase 3；backlog 含 ruff 全量清理、PG pg_real e2e、perf 載具根治（詳見 NextAction 報告）。
+
 
 為確保執行品質與AutoClaude_Improving_012.md執行項目都有執行, 請確實派出Architect / SA SD / QA 專家整體考量審查, 與目前系統現況進行比對, 採完全不信任 zero-trust audit 全面驗證和"修復方向是否正確", 看看nightly程式是否正確 and 執行過程與結果是否正確!
 有問題馬上請派另一個Agent(Architect/SA SD/QA 全能)專家進行修復相關程式與文件「所有問題"文件問題"和"技術問題"必須徹底全部修復才能算完成」! 

@@ -68,6 +68,13 @@ def run_steps_impl(
     _skip_completed_ids: set[str] = _state.skip_completed_ids
     _goal_synthesis_injected = _state.goal_synthesis_injected
 
+    # F-B1/F-B2（ADR-AGT-004）：AlertLadder 三階梯 + CorrectionVerifier。
+    # flag off（預設）時 intercept 不被呼叫，escalation 控制流與既有行為一致；
+    # F-B2 KB 失效回寫常開（additive，不影響控制流）。
+    from ..alert_ladder import build_from_config
+    _alert_ladder, _ladder_enabled = build_from_config(
+        runner._cfg, _state.alert_ladder_state)
+
     step_idx = start_idx
     _prev_step_idx = -1
     while step_idx < len(playbook.tasks):
@@ -90,6 +97,7 @@ def run_steps_impl(
             tracker, attempt_offset,
             _goto_counter, _inject_before_counter, _skip_to_counter,
             _completed_step_ids, _step_evolution_counter, workflow,
+            alert_ladder=_alert_ladder.snapshot(),
         )
         if _hotkey_return is not None:
             return _hotkey_return
@@ -134,6 +142,7 @@ def run_steps_impl(
                     skip_to_counter=_skip_to_counter,
                     completed_step_ids=list(_completed_step_ids),
                     step_evolution_counter=_step_evolution_counter,
+                    alert_ladder=_alert_ladder.snapshot(),
                 )
                 return PlaybookResult(
                     False, len(step_log), total, "使用者 ESC+F12 中斷（已儲存中斷點）",
@@ -211,6 +220,7 @@ def run_steps_impl(
                         skip_to_counter=_skip_to_counter,
                         completed_step_ids=_completed_step_ids,
                         step_evolution_counter=_step_evolution_counter,
+                        alert_ladder=_alert_ladder.snapshot(),
                     )
                 if runner._should_compact_now(
                     step_out,
@@ -274,27 +284,45 @@ def run_steps_impl(
             tracker.record(attempt, failure_reason, eval_output, exit_code, minimax_reasoning,
                            error_class=error_cls.value)
 
+            # F-B2（ADR-AGT-004）：修正效果事後驗證（純本地）+ KB 失效回寫（常開）
+            from ..correction_verifier import verify_and_update
+            _no_improve_streak = verify_and_update(
+                tracker=tracker, ladder=_alert_ladder,
+                knowledge_base=runner._knowledge_base, step_id=task.step_id,
+                error_class=error_cls.value, last_strategy=last_strategy_used,
+            )
+
+            _ladder_hint = ""
             report = monitor.evaluate(tracker)
             if report.recommendation == "escalate":
-                from ._escalation_handler import handle_convergence_escalation
-                return handle_convergence_escalation(
-                    runner=runner,
-                    playbook=playbook,
-                    playbook_path=playbook_path,
-                    task=task,
-                    step_idx=step_idx,
-                    tracker=tracker,
-                    convergence_trend=report.trend,
-                    convergence_reasoning=report.reasoning,
-                    eval_output=eval_output,
-                    error_cls=error_cls,
-                    step_log=step_log,
-                    workflow=workflow,
-                    total=total,
-                    mutation_log=_mutation_log,
-                    completed_step_ids=_completed_step_ids,
-                    step_evolution_counter=_step_evolution_counter,
-                )
+                # F-B1（ADR-AGT-004）：flag on 時三階梯攔截；off 時行為與既有一致
+                _ladder_decision = (_alert_ladder.intercept(
+                    task.step_id, report, _no_improve_streak) if _ladder_enabled else None)
+                if _ladder_decision is None or _ladder_decision.action == "escalate":
+                    from ._escalation_handler import handle_convergence_escalation
+                    return handle_convergence_escalation(
+                        runner=runner,
+                        playbook=playbook,
+                        playbook_path=playbook_path,
+                        task=task,
+                        step_idx=step_idx,
+                        tracker=tracker,
+                        convergence_trend=report.trend,
+                        convergence_reasoning=(
+                            _ladder_decision.reasoning if _ladder_decision
+                            else report.reasoning
+                        ),
+                        eval_output=eval_output,
+                        error_cls=error_cls,
+                        step_log=step_log,
+                        workflow=workflow,
+                        total=total,
+                        mutation_log=_mutation_log,
+                        completed_step_ids=_completed_step_ids,
+                        step_evolution_counter=_step_evolution_counter,
+                        alert_ladder=_alert_ladder.snapshot(),)
+                # WARNING：僅記錄；HINT：本地提示經 strategy_hint 通道注入
+                _ladder_hint = _ladder_decision.hint_text
 
             _budget_check = ErrorBudget()
             _eff_limit = _budget_check.effective_max_retries(max_retries, error_cls.value, attempt)
@@ -324,7 +352,9 @@ def run_steps_impl(
                 )
 
             strategy_hint = ""
-            if report.recommendation == "change_strategy":
+            if _ladder_hint:
+                strategy_hint = _ladder_hint
+            elif report.recommendation == "change_strategy":
                 next_strat = tracker.next_strategy(
                     kb=runner._knowledge_base, current_error_class=error_cls.value
                 )
@@ -354,6 +384,7 @@ def run_steps_impl(
                     mutation_log=_mutation_log,
                     completed_step_ids=_completed_step_ids,
                     step_evolution_counter=_step_evolution_counter,
+                    alert_ladder=_alert_ladder.snapshot(),
                 )
 
             if not strategy_hint and tracker.history:

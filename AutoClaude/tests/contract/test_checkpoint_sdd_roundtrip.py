@@ -30,6 +30,9 @@ _SDD_GOV = {
     "spec_digest": "sha256:abcdef0123456789",
 }
 
+# F-B1（ADR-AGT-004）：alert_ladder 計數，與 sdd_governance 同走整體序列化路徑
+_ALERT_LADDER = {"T01": {"warning": 1, "hint": 1, "no_improve_streak": 2}}
+
 
 def _cp(**overrides) -> PlaybookCheckpoint:
     defaults = dict(
@@ -39,6 +42,7 @@ def _cp(**overrides) -> PlaybookCheckpoint:
         total_steps=3,
         project="sdd-roundtrip",
         sdd_governance=dict(_SDD_GOV),
+        alert_ladder=dict(_ALERT_LADDER),
     )
     defaults.update(overrides)
     return PlaybookCheckpoint(**defaults)
@@ -94,10 +98,75 @@ class TestSerializationSymmetry:
         cp = _cp()
         restored = PlaybookCheckpoint(**json.loads(json.dumps(asdict(cp))))
         assert restored.sdd_governance == cp.sdd_governance
+        # F-B1：alert_ladder 同走整體序列化（PG JSONB 路徑等價錨點）
+        assert restored.alert_ladder == cp.alert_ladder
         assert asdict(restored) == asdict(cp)
 
+    def test_alert_ladder_pg_counters_subkey_roundtrip(self):
+        """PG mock 往返（SRD §4「File+PG mock」）：alert_ladder 經 PG checkpoints.counters
+        JSONB 子鍵 save→load 還原，零 schema migration（SRD §0 實證）。
+
+        以 fake row 直驗 PgStateRepository._row_to_checkpoint（staticmethod，免真實連線）：
+        模擬 PG 已寫入之 row.counters 含 alert_ladder 子鍵 → 還原至
+        PlaybookCheckpoint.alert_ladder。對齊 pg_state_repository.py:283 save /
+        :482 load。若 load 端漏接 counters["alert_ladder"]（回歸）→ 還原為 {} → 失敗。
+        """
+        from autoclaude.infra.repositories.pg_state_repository import (
+            PgStateRepository,
+        )
+
+        class _FakeRow:
+            playbook_id = "pb_pg"
+            step_idx = 1
+            step_id = "T02"
+            total_steps = 3
+            saved_at = None
+            scheduled_resume_at = None
+            peak_token_pct = 0.0
+            # save 端（:276-284）把 cp.alert_ladder 落於 counters["alert_ladder"]
+            counters = {
+                "goto": {}, "inject_before": {}, "skip_to": {},
+                "step_evolution": {}, "alert_ladder": dict(_ALERT_LADDER),
+            }
+            completed_step_ids: list = []
+            completed_step_log: list = []
+            failure_history: list = []
+            active_step_attempt = 0
+            last_correction_prompt = None
+            run_id = None
+
+        restored = PgStateRepository._row_to_checkpoint(_FakeRow())
+        assert restored.alert_ladder == _ALERT_LADDER
+
+    def test_alert_ladder_absent_counters_subkey_defaults_empty(self):
+        """舊列 counters 無 alert_ladder 子鍵（PG 上線前寫入）→ 還原補空 dict。"""
+        from autoclaude.infra.repositories.pg_state_repository import (
+            PgStateRepository,
+        )
+
+        class _LegacyRow:
+            playbook_id = "pb_pg_legacy"
+            step_idx = 0
+            step_id = "T01"
+            total_steps = 1
+            saved_at = None
+            scheduled_resume_at = None
+            peak_token_pct = 0.0
+            counters = {"goto": {}}  # 無 alert_ladder 子鍵
+            completed_step_ids: list = []
+            completed_step_log: list = []
+            failure_history: list = []
+            active_step_attempt = 0
+            last_correction_prompt = None
+            run_id = None
+
+        restored = PgStateRepository._row_to_checkpoint(_LegacyRow())
+        assert restored.alert_ladder == {}
+
     def test_field_is_additive_last_position(self):
-        """additive 紀律：新欄位不改變既有欄位序（舊位置參數呼叫不受影響）。"""
+        """additive 紀律：新欄位只能 append 末位，不改變既有欄位序
+        （舊位置參數呼叫不受影響）。F-B1（ADR-AGT-004）alert_ladder 為現行末位。"""
         fields = list(PlaybookCheckpoint.__dataclass_fields__)
-        assert fields[-1] == "sdd_governance"
-        assert fields.index("goal_task_id") == len(fields) - 2
+        assert fields[-1] == "alert_ladder"
+        assert fields[-2] == "sdd_governance"
+        assert fields.index("goal_task_id") == len(fields) - 3

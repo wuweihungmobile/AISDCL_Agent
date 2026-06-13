@@ -61,6 +61,10 @@ class PlaybookCheckpoint:
     #     "spec_digest": "sha256:..." }   # 規格凍結指紋，防 drift
     # 舊 checkpoint 反序列化 → default_factory 補空 dict，零遷移破壞。
     sdd_governance: dict = field(default_factory=dict)
+    # F-B1/F-B2（ADR-AGT-004）：AlertLadder 階梯計數 + CorrectionVerifier streak。
+    # 結構 {step_id: {"warning": int, "hint": int, "no_improve_streak": int}}。
+    # additive：舊 checkpoint 反序列化 → default_factory 補空 dict，零遷移破壞。
+    alert_ladder: dict = field(default_factory=dict)
 
 
 class CheckpointManager:

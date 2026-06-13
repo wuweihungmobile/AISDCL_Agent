@@ -119,6 +119,17 @@ class TokenGuardConfig(BaseModel):
         return v
 
 
+class AlertLadderConfig(BaseModel):
+    """F-B1 / ADR-AGT-004：漸進式告警階梯（WARNING→HINT→ESCALATE）。
+
+    enabled 預設 off（凍結計畫 §4 風險緩解；SCG-6 nightly 觀察 7 天綠後轉正）。
+    off 時收斂升級控制流與既有行為 byte-level 一致。
+    """
+    enabled: bool = False
+    # F-B2：同 error signature 無改善連續 N 次即提前升級（穿透剩餘階梯）
+    no_improve_escalate_threshold: int = Field(default=2, ge=1, le=5)
+
+
 class NotificationConfig(BaseModel):
     enabled: bool = True
     webhook_url: str | None = None
@@ -165,6 +176,7 @@ class AppConfig(BaseModel):
     loop: LoopConfig = Field(default_factory=LoopConfig)
     playbook: PlaybookConfig = Field(default_factory=PlaybookConfig)
     token_guard: TokenGuardConfig = Field(default_factory=TokenGuardConfig)
+    alert_ladder: AlertLadderConfig = Field(default_factory=AlertLadderConfig)
     notification: NotificationConfig = Field(default_factory=NotificationConfig)
     storage: StorageConfig = Field(default_factory=StorageConfig)
     log_dir: str = "logs"

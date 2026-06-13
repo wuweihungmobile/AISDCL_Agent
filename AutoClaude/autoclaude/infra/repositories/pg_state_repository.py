@@ -278,6 +278,9 @@ class PgStateRepository:
                     "inject_before": cp.inject_before_counter,
                     "skip_to": cp.skip_to_counter,
                     "step_evolution": cp.step_evolution_counter,
+                    # F-B1（ADR-AGT-004）：alert_ladder 走既有 counters JSONB
+                    # 子鍵，零 schema migration（SRD_AGT_Phase2 §0 實證）
+                    "alert_ladder": getattr(cp, "alert_ladder", {}) or {},
                 }
                 stmt = pg_insert(CheckpointRow).values(
                     run_id=run_id,
@@ -476,6 +479,7 @@ class PgStateRepository:
             inject_before_counter=dict(c.get("inject_before", {})),
             skip_to_counter=dict(c.get("skip_to", {})),
             step_evolution_counter=dict(c.get("step_evolution", {})),
+            alert_ladder=dict(c.get("alert_ladder", {})),
             completed_step_ids=list(r.completed_step_ids or []),
             completed_step_log=list(r.completed_step_log or []),
             failure_history=list(r.failure_history or []),

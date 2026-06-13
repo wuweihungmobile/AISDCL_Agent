@@ -31,6 +31,7 @@ def save_interrupt_checkpoint_impl(
     skip_to_counter: Optional[dict] = None,
     completed_step_ids: Optional[list] = None,
     step_evolution_counter: Optional[dict] = None,
+    alert_ladder: Optional[dict] = None,
 ) -> None:
     """W3-1c：ESC+F12 中斷時持久化 checkpoint（含 5 個 counter snapshot）。"""
     cp = PlaybookCheckpoint(
@@ -51,6 +52,7 @@ def save_interrupt_checkpoint_impl(
         skip_to_counter=dict(skip_to_counter) if skip_to_counter else {},
         completed_step_ids=list(completed_step_ids) if completed_step_ids else [],
         step_evolution_counter=dict(step_evolution_counter) if step_evolution_counter else {},
+        alert_ladder=dict(alert_ladder) if alert_ladder else {},
     )
     plugin._mgr.save(cp, playbook_path)
     logger.info(

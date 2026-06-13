@@ -118,6 +118,7 @@ def check_hotkey_and_save(
     completed_step_ids: set,
     step_evolution_counter: dict,
     workflow: "WorkflowType",
+    alert_ladder: Optional[dict] = None,
 ) -> Optional[PlaybookResult]:
     """ESC+F12 中斷檢查（line 132-145 抽出）。觸發則 save_interrupt + 回 PlaybookResult。"""
     if not runner._hotkey.triggered:
@@ -130,6 +131,7 @@ def check_hotkey_and_save(
         skip_to_counter=skip_to_counter,
         completed_step_ids=list(completed_step_ids),
         step_evolution_counter=step_evolution_counter,
+        alert_ladder=alert_ladder,
     )
     return PlaybookResult(
         False, len(step_log), total, "使用者 ESC+F12 中斷（已儲存中斷點）",

@@ -158,10 +158,11 @@ class CheckpointPlugin:
         step_log: list,
         completed_step_ids,
         step_evolution_counter: Optional[dict] = None,
+        alert_ladder: Optional[dict] = None,
     ) -> bool:
         return save_evolution_resume_checkpoint_impl(
             self, evolved_path, playbook, step_log,
-            completed_step_ids, step_evolution_counter,
+            completed_step_ids, step_evolution_counter, alert_ladder,
         )
 
     # W3-1b：TOKEN_HALT checkpoint（純 plugin，PlaybookResult 由呼叫端組裝）
@@ -183,6 +184,7 @@ class CheckpointPlugin:
         skip_to_counter: Optional[dict] = None,
         completed_step_ids: Optional[set] = None,
         step_evolution_counter: Optional[dict] = None,
+        alert_ladder: Optional[dict] = None,
         notify_callback: Optional[Callable[[str, str], None]] = None,
         token_logger_callback: Optional[Callable[..., None]] = None,
     ) -> PlaybookCheckpoint:
@@ -191,7 +193,7 @@ class CheckpointPlugin:
             step_log, total, halt_threshold_pct, resume_delay_minutes,
             tracker, attempt, goto_counter, inject_before_counter,
             skip_to_counter, completed_step_ids, step_evolution_counter,
-            notify_callback, token_logger_callback,
+            alert_ladder, notify_callback, token_logger_callback,
         )
 
     # W3-1c：ESC+F12 中斷 checkpoint
@@ -210,11 +212,13 @@ class CheckpointPlugin:
         skip_to_counter: Optional[dict] = None,
         completed_step_ids: Optional[list] = None,
         step_evolution_counter: Optional[dict] = None,
+        alert_ladder: Optional[dict] = None,
     ) -> None:
         return save_interrupt_checkpoint_impl(
             self, playbook, playbook_path, task, step_idx, step_log, total,
             tracker, attempt, goto_counter, inject_before_counter,
             skip_to_counter, completed_step_ids, step_evolution_counter,
+            alert_ladder,
         )
 
     # W3-1d：ESCALATION dump 持久化

@@ -146,9 +146,9 @@
    - 驗收：重啟後 metrics 不清零 ✅（test_knowledge_base_metric_store）；偏好可寫可讀並出現在 correction prompt ✅（test_kernel_pre_correction 端到端）；跨 ≥ 2 個 playbook run 的進度可彙總查詢 ✅（test_goal_progress_ledger）。閘門：SCG-1（SRD_AGT_Phase1_Memory.md）+ SCG-2（ADR-AGT-003）🔴 koalawu 2026-06-13；full pytest 2,931/122、importlinter 8 kept、LOC=0
 
 3. **Phase 2 — 閉環強化（B 能力）**
-   - [ ] F-B1 AlertLadder（feature flag 預設 off → nightly 觀察 7 天 → 預設 on）
-   - [ ] F-B2 Correction 效果事後驗證 + KB 失效回寫
-   - 驗收：階梯轉換有測試；同 error signature 無改善 N=2 次提前升級；既有 escalation 測試零回歸
+   - [x] F-B1 AlertLadder（feature flag 預設 off → nightly 觀察 7 天 → 預設 on）— ✅ 2026-06-13：AlertLadder（WARNING→HINT→ESCALATE 三階梯，strategy tier）+ AlertLadderConfig（enabled 預設 off）+ checkpoint additive `alert_ladder` 欄（File + PG counters JSONB 子鍵，零 alembic）+ 五條存檔路徑接線（interrupt/token-halt/evolution×3/payload）
+   - [x] F-B2 Correction 效果事後驗證 + KB 失效回寫 — ✅ 2026-06-13：CorrectionVerifier（signature/fail_count/exit_code 三分量純本地比對，不呼叫 Brain）+ no_improve_streak 提前升級（門檻可配置 1~5）+ `record_strategy_failure`（skip_strategies merge + 失效清 successful_strategy，常開 additive）
+   - 驗收：階梯轉換有測試；同 error signature 無改善 N=2 次提前升級；既有 escalation 測試零回歸 — ✅ 全達成。閘門：SCG-1（SRD_AGT_Phase2_Closedloop）+ SCG-2（ADR-AGT-004 ACCEPTED）🔴 koalawu 2026-06-13。三方 zero-trust audit（P0=0 / P1×3 / P2×4 全修，含 evolution-resume 接線經 koalawu 🔴 拍板）+ QA 最終複審變異實證 4/4 PASS。full pytest **3,020 passed / 122 skipped**（前基線 2,972，+48 零回歸）、新模組 coverage 100%、importlinter 8 kept、LOC=0、snapshot OK
 
 4. **Phase 3 — 自主拆解與工具（A 能力，風險最高最後）**
    - [ ] F-A2 ToolInvocationPort + allowlist 閘（先行，因 F-A1 拆解出的步驟需要工具可用）
