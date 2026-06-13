@@ -16,6 +16,7 @@
 - **A 軌（整合）**：推進 AISDLC-SDD 框架與 AutoClaude 多步驟 Playbook 引擎的深度整合。
   基線：AutoClaude 全套 pytest 以「本輪實測」為準（上輪為 2,732 passed / 122 skipped；
   新測試只增不減、0 failed）。禁止引用文件宣稱數字，必須重新實測。
+  > 入口分界（勿混用，Improving_012 後新增）：A 軌 `SddToPlaybookAdapter`＝**有 SDD 規格**時規格驅動轉譯（規格即 SSOT、無 AI 自由拆解）；`autoclaude/execution/goal_decomposer.py` GoalDecomposer＝**無規格的高階 goal** 才用，Brain 自主產 DAG + 三道有界閘（≤24／Kahn 無環／非空）+ 🔴 人工 signoff。有規格走 adapter、無規格走 decomposer。
 - **B 軌（自我迭代 / Dogfooding）**：本輪開發**本身**立即套用
   `AISDLC_SDD/AISDLC_SDD_v0.0X/`（取最新版）流程執行：本輪計畫書 = SCG-0/1 載體；
   介面設計 = SCG-2；轉譯契約 = SCG-3；實作 PR 過 SCG-4；驗證矩陣 = SCG-5 RTM。
@@ -100,6 +101,10 @@
 - Plugin 互不 import，協作走 EventBus；相依以 constructor 注入 ports。
 - CONDITIONAL 三層防禦（白名單 regex + 黑名單字元 + shell=False/shlex）不可弱化；
   任何「從文件生成指令」的路徑必須套用等強度消毒。
+- **對外 I/O 安全（Improving_012 F-A2 新攻擊類別，CONDITIONAL 消毒涵蓋不到）**：對外工具呼叫
+  （Web/HTTP/訊息，`ToolInvocationPort` 路徑）一律**預設 deny + allowlist domain/子域比對 +
+  全程審計 log**；新增任何外呼能力須附 SSRF／畸形 URL／allowlist 繞過攻防測試（對齊
+  ADR-AGT-001 工具安全閘）。此為網路 I/O 威脅模型，與 CONDITIONAL 的 shell 注入防護是**不同類別**。
 - 開發-編譯-測試循環：每完成一支立即編譯+單測，絕不累積；失敗立即停修，禁 skip/註解。
 - B 軌紅線：v0.0X 凍結本體禁改（修改走 Copy-on-Evolve）；🔴 人工確認閘門
   （HUMAN_PENDING 狀態）不可自動跳過；規則回流必經人工 review
@@ -121,13 +126,15 @@ B 軌：依 Brownfield SOP 走 SCG-0~3（產出落 monorepo `docs/` 對應編號
 觸發 `SDD_CONTRACT_VIOLATION` 路徑必有攻防測試（注入向量 + 越閘存取）。
 **全程執行缺陷記錄紀律（見 🐶）——框架摩擦發現即記入帳本。**
 ### 階段四：CI 平價收斂
-跑零退化驗證矩陣**全項**（內嵌自 `docs/04_planning/AutoSDD_improving_01.md` §5.3，
-兩處必須保持同步）：
+跑零退化驗證矩陣**全項**（矩陣**結構**內嵌自 `docs/04_planning/AutoSDD_improving_01.md` §5.3，
+兩處結構須保持同步；但「通過條件」欄的基線數字**每輪以實測為準、禁寫死**——floor 取上輪
+`AutoSDD_improving_{{N-1}}.md` 階段一實測值，improving_01 §5.3 的 `≥2732`/`7+ kept` 為 01 輪
+當時 floor 之凍結史料，**勿沿用為後續輪門檻**）：
 
 | 檢查 | 命令 | 通過條件 |
 |------|------|---------|
-| AutoClaude 全套 | `python -m pytest tests/ -q` | ≥2732 passed / 0 failed（新測試只增不減） |
-| 架構契約 | `PYTHONUTF8=1 lint-imports` | 7+ kept / 0 broken |
+| AutoClaude 全套 | `python -m pytest tests/ -q` | ≥ 上輪實測 passed / 0 failed（新測試只增不減；floor = `AutoSDD_improving_{{N-1}}.md` 實測值，禁寫死） |
+| 架構契約 | `PYTHONUTF8=1 lint-imports` | 全部 kept / 0 broken（以實際執行為準，不寫死條數） |
 | LOC 分級 | `python tools/check_loc_budget.py` | 全部過（port≤400 / adapter≤400 / plugin≤250） |
 | Snapshot | `python tools/snapshot_sync.py --check` | 新鮮 |
 | AISDLC_SDD 閘門 | `bash scripts/ci-gate.sh` | pytest not-chaos 全綠 + arch_fitness exit<2 |
@@ -142,11 +149,15 @@ SDD_CONTRACT_VIOLATION 次數、token 峰值）。
 1. 架構純潔性：是否創造 God-object？Thin Facade 是否維持？
 2. 持久化相容：新狀態是否 additive 寫入 PlaybookCheckpoint？DAL 三後端零停機是否維持？
 3. 安全防護網：CONDITIONAL 白名單能否攔截本輪新增路徑的鏈式攻擊向量？
+4. 對外 I/O 安全：本輪是否新增 `ToolInvocationPort` 外呼路徑？若有，allowlist 預設 deny 是否生效？是否有 SSRF／任意 URL 攻防測試？
 
 ## 🔍 多專家 Zero-Trust 審查閉環（強制，全 PASS 才准結案）
 1. 產出後派 **Architect / SA-SD / QA** 專家 agent 對「文件 vs 系統現況」全面比對審查：
    修復方向是否正確、nightly/CI 腳本是否正確、執行過程與結果是否真實、
    **缺陷帳本是否完整誠實（有無漏記/虛報）**。
+   > **並行派發隔離（流程問題 #11）**：若同時運行 mutation/突變或並行多 agent 就地寫檔，
+   > audit agent 須以 `isolation: worktree` 派發，避免讀到突變態源碼產生假紅（見 AutoClaude
+   > CLAUDE.md Nightly 紀律 #18「mutation 須隔離樹」）。
 2. 任何發現（文件問題 + 技術問題）→ 派全能修復 agent **徹底修完**，不留 partial。
 3. QA 專家複審：是否符合原設計功能？是否破壞收斂（基線退化/契約 broken/TLC violation）？
    不通過 → 回步驟 2 再修，循環直到 PASS。
