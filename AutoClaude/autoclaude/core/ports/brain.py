@@ -11,6 +11,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Protocol
 
+from ...models.decision import DecompositionDecision
 from ...models.step_mutation import StepMutation
 
 
@@ -45,12 +46,15 @@ class BrainCapabilities:
       retry_policy       : Brain 自定義的 retry 行為，Coordinator 不可覆寫，只能整合
       model_id           : SA 補欄；對齊 §3.1 model registry / PG-backed 配置
       dimension          : SD 補欄；對齊 SD_06 W3 embedding 欄寬（1024 / 1536 dual-read 期間）
+      supports_decomposition : F-A1 / ADR-AGT-002；是否支援 decide_decomposition。
+                               預設 False（舊 adapter 不支援即被 GoalDecomposer 拒絕，不靜默降級）
     """
     max_context_tokens: int
     supports_streaming: bool
     retry_policy: RetryPolicy
     model_id: str
     dimension: int
+    supports_decomposition: bool = False
 
 
 @dataclass(frozen=True)
@@ -126,5 +130,22 @@ class IBrain(Protocol):
 
         Coordinator 在 EscalationDumper 之前先諮詢 Brain；Brain 可建議
         是否真要 escalate 或改 retry / mutation 路徑。
+        """
+        ...
+
+    def decide_decomposition(
+        self,
+        *,
+        goal: str,
+        context: str = "",
+    ) -> DecompositionDecision | None:
+        """F-A1 / ADR-AGT-002：將高階 goal 一次性拆解為候選步驟 DAG。
+
+        受 capabilities().supports_decomposition 守門；不支援之 adapter 由
+        GoalDecomposer 在呼叫前拒絕（不靜默降級）。每 run 僅呼叫 1 次（不遞迴）。
+        有界性（≤24 步 / 無環 / 非空 prompt）由 GoalDecomposer 本地驗證，非本方法職責。
+
+        Returns:
+            DecompositionDecision（成功）或 None（API 故障）
         """
         ...

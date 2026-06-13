@@ -152,8 +152,8 @@
 
 4. **Phase 3 — 自主拆解與工具（A 能力，風險最高最後）**
    - [x] F-A2 ToolInvocationPort + allowlist 閘（先行，因 F-A1 拆解出的步驟需要工具可用）— ✅ 2026-06-13：SCG-1（SRD_AGT_Phase3）+ SCG-2（ADR-AGT-001）🔴 koalawu；IToolInvocation port（ports 12→13）+ ToolInvocationAdapter（預設 deny + allowlist domain/子域比對 + 全程審計 + send_message 委派 notifier）+ ToolInvocationConfig（flag off）；tag v2026.06.13-05。full pytest 3,035/122（+15 零回歸）、新模組 coverage 100%、importlinter 8 kept、LOC=0
-   - [ ] F-A1 GoalDecomposer（產出 Playbook 草稿 + 🔴 人工 signoff 流程）
-   - 驗收：allowlist 外呼叫被拒並留審計 log ✅（test_tool_invocation）；拆解超限／含環被拒（待 F-A1）；signoff 前不執行任何步驟（待 F-A1）
+   - [x] F-A1 GoalDecomposer（產出 Playbook 草稿 + 🔴 人工 signoff 流程）— ✅ 2026-06-13：`IBrain.decide_decomposition` + `BrainCapabilities.supports_decomposition`（additive 預設 False，capability 守門不靜默降級）+ MinimaxBrain/MinimaxClient/prompt_builder 拆解鏈 + `execution/goal_decomposer.py`（GoalDecomposer：三道機械有界閘 ≤24 硬上限 `min()` 鉗制／DAG 無環 Kahn 拓撲排序／非空 prompt，超限拒絕不截斷不重試，每 run 僅 1 次 Brain 呼叫非遞迴）+ `DecompositionDraft` frozen + 🔴 signoff 硬閘（`release_for_execution` 未簽署拒絕釋出 + 審計人/日期/goal hash）+ `wiring.build_goal_decomposer` 注入 F-A2 `ToolInvocationAdapter`（消費 allowlist 安全閘，不再 dead code）。沿用既有 Playbook schema 產 YAML 草稿（往返載入驗證）。
+   - 驗收：allowlist 外呼叫被拒並留審計 log ✅（test_tool_invocation）；拆解超限／含環被拒 ✅（test_too_many_steps_rejected_no_retry/test_cycle_rejected）；signoff 前不執行任何步驟 ✅（test_release_before_signoff_denied）；不支援 decomposition 的 brain 被拒 ✅（test_unsupported_brain_rejected，brain.calls==0）；Playbook 草稿可被既有 validator 載入 ✅（test_draft_roundtrip_loadable）。閘門：full pytest **3,056/122**（前基線 3,035，+21 零回歸）、新模組 coverage 100%、importlinter 8 kept、LOC=0（goal_decomposer 機械錨定 strategy ≤300）、新檔 ruff 零違規。三方 zero-trust audit（Architect·SD / QA·RTM）OVERALL PASS（P0=0 / P1=0），2 項 P2（LOC tier 錨定 + evaluator_command 往返）已修；QA 突變實證（signoff 閘與步驟數閘改 `if False:` → 對應測試 FAILED，證非套套邏輯）+ 收斂閉環未污染 + ADR-AGT-002 原設計無弱化。**Phase 3 完成，Improving_012 三能力（A/B/C）全數交付。**
 
 ### SCG 閘門對應（每 Phase 皆須過）
 

@@ -1,7 +1,7 @@
 # CLAUDE.md
 # Claude Code Project Guidance
 
-**Last Updated**: 2026-06-13 | **AISDLC Version**: v0.09 | **Status**: **Improving_012 Phase 2 閉環強化完成（F-B1 AlertLadder + F-B2 Correction 效果驗證）**。經 SCG-1（SRD_AGT_Phase2_Closedloop）+ SCG-2（ADR-AGT-004）🔴 確認交付：AlertLadder 三階梯（WARNING→HINT→ESCALATE，flag 預設 off）+ CorrectionVerifier（signature/fail_count/exit_code 本地比對）+ KB 策略失效回寫；checkpoint additive `alert_ladder` 欄（File + PG counters JSONB 子鍵，零 alembic、無新 port/plugin）。三方 zero-trust audit（P0=0 / P1×3 / P2×4 全修）+ QA 變異實證複審 PASS。full pytest **3,020 passed / 122 skipped**（前基線 2,972，+48 零回歸）、新模組 coverage 100%、importlinter 8 kept、LOC=0。詳見 [AutoClaude_Improving_012.md](docs/04_planning/AutoClaude_Improving_012.md) §5 Phase 2。
+**Last Updated**: 2026-06-13 | **AISDLC Version**: v0.09 | **Status**: **Improving_012 完成（三能力 A/B/C 全交付）— Phase 3 F-A1 GoalDecomposer 收尾**。SCG-1/SCG-2 🔴 確認後交付：`IBrain.decide_decomposition` + `supports_decomposition`（additive，capability 守門不靜默降級）+ `execution/goal_decomposer.py`（三道有界閘 ≤24`min()`鉗制／Kahn 無環／非空 prompt，超限拒絕不截斷不重試、1 次 Brain 呼叫非遞迴）+ 🔴 signoff 硬閘（未簽拒絕釋出 + 審計人/日期/goal hash）+ `wiring.build_goal_decomposer` 注入 F-A2 ToolInvocationAdapter（消費 allowlist，不再 dead code）；沿用既有 Playbook schema。三方 zero-trust audit（Architect·SD / QA·RTM）OVERALL PASS（P0=0/P1=0，2 P2 已修）+ QA 突變實證複審 PASS。full pytest **3,056 passed / 122 skipped**（前基線 3,035，+21 零回歸）、新模組 coverage 100%、importlinter 8 kept、LOC=0（goal_decomposer 機械錨定 strategy ≤300）。詳見 [AutoClaude_Improving_012.md](docs/04_planning/AutoClaude_Improving_012.md) §5 Phase 3。
 
 > **🔴 Important Notice 🔴** This file provides critical guidance for Claude Code (claude.ai/code). All instructions here OVERRIDE default behavior and must be followed exactly.
 

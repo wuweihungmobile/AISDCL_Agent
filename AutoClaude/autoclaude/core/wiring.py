@@ -318,6 +318,32 @@ def build_kernel(
     )
 
 
+def build_goal_decomposer(
+    cfg: AppConfig,
+    *,
+    brain: IBrain,
+    observability: IObservabilityPort | None = None,
+) -> Any:
+    """組裝 GoalDecomposer（F-A1 / ADR-AGT-002）並注入 F-A2 ToolInvocationAdapter。
+
+    Improving_012 Phase 3：F-A2 adapter 先前無消費者（避免 dead code），於此處
+    經 wiring 注入 GoalDecomposer——拆解出之步驟若需工具，經 allowlist 安全閘查可用性。
+    wiring 為 core-purity contract（#2）唯一豁免點，import infra adapter / execution 合法。
+
+    安全閘以 config.tool_invocation 驅動（預設 enabled=False 全 deny，flag-off 零行為變更）。
+    """
+    from ..execution.goal_decomposer import GoalDecomposer  # noqa: PLC0415
+    from ..infra.adapters.tool_invocation_adapter import (  # noqa: PLC0415
+        ToolInvocationAdapter,
+    )
+    tool = ToolInvocationAdapter(
+        enabled=cfg.tool_invocation.enabled,
+        allowlist=list(cfg.tool_invocation.allowlist),
+        observability=observability,
+    )
+    return GoalDecomposer(brain, observability=observability, tool_invocation=tool)
+
+
 def build_coordinator(
     *,
     bus: EventBus,

@@ -14,6 +14,7 @@ from ...core.ports.brain import (
     RetryPolicy,
 )
 from ...decision.minimax_client import MinimaxClient, MinimaxError
+from ...models.decision import DecompositionDecision
 from ...models.playbook import PlaybookTask
 
 
@@ -37,7 +38,20 @@ class MinimaxBrainAdapter:
             retry_policy=RetryPolicy(max_attempts=3, backoff_seconds=2.0, jitter=True),
             model_id=getattr(self._client, "_model", "minimax-unknown"),
             dimension=self._DEFAULT_DIMENSION,
+            supports_decomposition=True,  # F-A1 / ADR-AGT-002：本 adapter 支援拆解
         )
+
+    def decide_decomposition(
+        self,
+        *,
+        goal: str,
+        context: str = "",
+    ) -> DecompositionDecision | None:
+        """F-A1：委派 MinimaxClient 拆解高階 goal（API 故障回 None，由 GoalDecomposer 處理）。"""
+        try:
+            return self._client.decide_decomposition(goal, context)
+        except MinimaxError:
+            return None
 
     def decide_escalation(
         self,

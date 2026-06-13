@@ -385,6 +385,48 @@ JSON Schema：
 """
 
 
+# ──────────────────────────────────────────────
+# F-A1 / ADR-AGT-002：自主任務拆解 System Prompt + Message
+# ──────────────────────────────────────────────
+
+DECOMPOSITION_SYSTEM_PROMPT = """\
+你是 AutoClaude 的任務拆解大腦（F-A1）。
+給定一個高階目標（goal），你負責將其拆解為一組有界、可執行、相依關係明確的步驟（DAG）。
+
+## 輸出規則（強制）
+只輸出一個 JSON 物件，不得加前綴、說明或 Markdown 代碼區塊。
+JSON Schema：
+{
+  "steps": [
+    {
+      "step_id": "<唯一步驟代號，如 T01>",
+      "name": "<步驟名稱>",
+      "prompt": "<傳給 Claude Code 的完整可執行指令，不得為空>",
+      "depends_on": ["<前序步驟 step_id，無相依則為空陣列>"],
+      "evaluator_command": "<驗證本步驟成功的 shell 指令，選填可為 null>"
+    }
+  ],
+  "reasoning": "<拆解依據，不超過 100 字>"
+}
+
+## 拆解原則（有界性硬限制）
+1. 步驟總數**不得超過 24**（超限將被拒絕，不會截斷重試）。
+2. depends_on 必須形成**無環有向圖（DAG）**，不得有循環相依。
+3. 每個步驟的 prompt 必須非空且可獨立執行。
+4. 步驟粒度適中：寧可少而完整，不要拆出無法獨立驗證的瑣碎步驟。
+"""
+
+
+def build_decomposition_message(goal: str, context: str = "") -> str:
+    """F-A1：組裝任務拆解的 user message。"""
+    context_section = f"## 補充脈絡\n{context}\n\n" if context else ""
+    return (
+        f"## 高階目標\n{goal}\n\n"
+        f"{context_section}"
+        "請將以上目標拆解為有界（≤24 步）、無環、每步可執行的步驟 DAG，輸出拆解 JSON。"
+    )
+
+
 def build_goal_validation_message(
     global_goal: str,
     step_summary: str,

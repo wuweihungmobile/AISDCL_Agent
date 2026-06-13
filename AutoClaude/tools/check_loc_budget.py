@@ -58,6 +58,9 @@ LOC_TIERS: dict[str, dict] = {
         "patterns": [
             "autoclaude/core/services/mutation/",
             "autoclaude/decision/prompt_builder.py",
+            # F-A1 / ADR-AGT-002 §2 + SRD_AGT_Phase3 §2.3：GoalDecomposer 設計屬
+            # strategy tier ≤300，機械錨定使設計宣稱可被 CI 強制（流程改善 #8）
+            "autoclaude/execution/goal_decomposer.py",
         ],
     },
     "adapter": {

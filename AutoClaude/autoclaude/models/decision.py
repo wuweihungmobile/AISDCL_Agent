@@ -30,3 +30,22 @@ class EvolutionDecision(BaseModel):
     new_step_prompt: Optional[str] = None   # INJECT_STEP 使用
     split_context_bridge: str = ""           # SPLIT_STEP 使用：Part B 的 context 前置摘要
     revised_evaluator: Optional[str] = None  # REVISE_EVALUATOR 使用
+
+
+class DecompositionStep(BaseModel):
+    """F-A1 / ADR-AGT-002：Brain 拆解出的單一步驟節點（DAG node）。"""
+    step_id: str
+    name: str
+    prompt: str
+    depends_on: list[str] = []               # DAG edges：本步驟相依之前序 step_id
+    evaluator_command: Optional[str] = None  # 選填，對齊 PlaybookTask.evaluator_command
+
+
+class DecompositionDecision(BaseModel):
+    """F-A1 / ADR-AGT-002：Brain 對高階 goal 的一次性拆解候選 DAG。
+
+    本地有界性驗證（≤24 步 / 無環 / 非空 prompt）由 GoalDecomposer 負責，
+    本模型僅承載 Brain 候選輸出，不做業務判定。
+    """
+    steps: list[DecompositionStep] = []
+    reasoning: str = ""

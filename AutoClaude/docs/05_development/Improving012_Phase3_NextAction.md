@@ -28,11 +28,18 @@
 - **F-A2 ✅ 已交付**（tag v2026.06.13-05，commit cbb846d）：`IToolInvocation` port（ports 12→13）+ `ToolInvocationAdapter`（預設 deny + allowlist domain/子域比對 + 全程審計 log via IObservabilityPort + send_message 委派 `utils.notifier.notify`）+ `ToolInvocationConfig`（flag off）。閘門：full pytest **3,035/122**（+15 零回歸）、新模組 coverage **100%**、importlinter 8 kept、LOC=0、新檔 ruff 零違規。
 - **實作精化留證**（SRD §0）：send_message 改委派 notifier（非裸 EventBus，因 EventBus 為 phase-based 非通用匯流排）；F-A2 adapter 尚未 wiring 接線（無消費者，避免 dead code），待 F-A1 GoalDecomposer 注入消費。
 
+## F-A1 交付（2026-06-13，Phase 3 收尾）✅
+
+- **交付**：`IBrain.decide_decomposition` + `BrainCapabilities.supports_decomposition`（additive 預設 False，capability 守門不靜默降級）+ MinimaxBrain/MinimaxClient/prompt_builder 拆解鏈 + `execution/goal_decomposer.py`（三道機械有界閘 ≤24`min()`鉗制／Kahn 無環／非空 prompt，超限拒絕不截斷不重試，1 次 Brain 呼叫非遞迴）+ `DecompositionDraft` frozen + 🔴 signoff 硬閘（`release_for_execution` 未簽拒絕 + 審計人/日期/goal hash）+ `wiring.build_goal_decomposer` 注入 F-A2 `ToolInvocationAdapter`（消費 allowlist，不再 dead code）。沿用既有 Playbook schema 產 YAML 草稿。
+- **閘門**：full pytest **3,056/122**（前基線 3,035，+21 零回歸）、新模組 coverage 100%、importlinter 8 kept、LOC=0（goal_decomposer 機械錨定 strategy ≤300）、新檔 ruff 零違規。
+- **三方 zero-trust audit**（Architect·SD / QA·RTM 並行）：OVERALL **PASS**，P0=0 / P1=0；2 項 P2 已修（① LOC tier 錨定 `check_loc_budget.py` strategy patterns 補 goal_decomposer.py；② evaluator_command 往返斷言補測）。QA 突變實證：signoff 閘與步驟數閘改 `if False:` → 對應測試 FAILED（證非套套邏輯）；收斂閉環未污染（playbook_runner/kernel 對 GoalDecomposer 零匹配）；ADR-AGT-002 有界性 + 人工棘輪原設計完整無弱化。
+- **未採納 P2**（QA P2-1）：port `decide_decomposition` kw-only vs client positional — 與既有 `decide_correction`（port kw-only / client positional / adapter 橋接）同一模式，符合 codebase 慣例（Rule 11），非缺陷。
+
 ## Next Action（依凍結計畫順序）
 
-1. **F-A1 GoalDecomposer**（Phase 3 收尾）：`IBrain.decide_decomposition`（+ capability flag 守門）→ `execution/goal_decomposer.py`（≤24 步硬上限 + DAG 無環 + 非空 prompt）→ 產 Playbook 草稿 → **🔴 人工 signoff** 後才交 PlaybookRunner；同時把 F-A2 adapter 經 wiring 注入。驗收：拆解超限/含環被拒、signoff 前零執行、不支援 decomposition 的 brain 被拒。
-2. **SCG-4/5（F-A1 PR）**：pytest 全綠 + lint-imports + LOC + coverage ≥90% + RTM US-AGT-001~002 → TC。
-3. **SCG-6（Phase 2 殘留）**：F-B1 `alert_ladder.enabled` nightly **連 7 天綠**後轉預設 on（觀察期；本輪未到期）。
+1. ~~F-A1 GoalDecomposer~~ ✅ 已交付（見上）。**Improving_012 三能力 A/B/C 全數完成。**
+2. **SCG-6（Phase 2 殘留）**：F-B1 `alert_ladder.enabled` nightly **連 7 天綠**後轉預設 on（觀察期；本輪未到期）。
+3. **backlog**（沿用，非阻斷）：ruff 鎖版全量清理、新模組 mutation 強度擴範圍、PG pg_real e2e、perf 載具偽陽性、舊 editable install 殘留（見流程問題 #9）。
 
 ## Audit / 觀察 backlog（沿用、未阻斷）
 | 項目 | 說明 |
@@ -47,6 +54,7 @@
 | # | 問題 | 證據（本輪實證） | 建議改善 |
 |---|------|----------------|---------|
 | 8 | **SRD/ADR 引用之源碼 `檔案:行號` 於 LANDED 後隨源碼演進漂移，無機械校驗** | 本輪三方 audit 揪出 6 處行號漂移（`_impl.py:278` 實為 :297 等）；功能/測試全正確，純文件行號失準，違背 SRD §0「附 檔案:行號 且已驗證觸發」承諾與 nightly 紀律 #15 | 二擇一機械化：(a) SCG-4 交付時對文件內所有 `xxx.py:NN` 引用做靜態校驗（grep 該行內容是否仍含宣稱符號，漂移即 fail）；(b) **SRD/ADR 一律引用穩定的函式/類別名錨點，避免裸行號**（本輪 Phase 3 草案已採此法，延伸流程改善 #6/#7 的機械校驗精神） |
+| 9 | **舊 editable install 殘留指向遷移前路徑，工作樹驗證易誤命中舊源碼** | F-A1 開發中發現 `pip show autoclaude` 之 Editable project location = 遷移前舊路徑 `D:\CursorProject\AutoClaude`（5/7 舊副本）；從 cwd 跑 `python -m pytest`/`python -c` 時 cwd 會 shadow 故正確，但 `python /tmp/xxx.py`（sys.path 不含 cwd）會誤命中舊副本 → 一度 ImportError 誤判新符號不存在。屬環境殘留非源碼缺陷，但違 nightly 紀律 #17「zero-trust 須雙向、可機械驗證者親跑複核」之載具一致性精神 | (a) `pip install -e .` 重指向本 repo 覆蓋舊 .pth，或移除舊 `D:\CursorProject\AutoClaude` 副本；(b) 驗證 SOP 明示「一律從專案 cwd 跑 pytest/`python -c`，禁 `python <repo 外路徑>.py`」；(c) CI/local_ci_gate 可加 `assert 'AISDCL_Agent' in autoclaude.__file__` 哨兵 |
 
 ---
 **產出**: 主 agent（Claude Code）依 AISDLC_SDD SCG 流程執行；audit 取證見三方 agent 報告（行號/數字均經主 agent 親跑複核）。

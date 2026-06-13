@@ -15,12 +15,19 @@ import time
 
 import httpx
 
-from ..models.decision import CorrectionDecision, EvolutionDecision, GoalAchievementDecision
+from ..models.decision import (
+    CorrectionDecision,
+    DecompositionDecision,
+    EvolutionDecision,
+    GoalAchievementDecision,
+)
 from .prompt_builder import (
+    DECOMPOSITION_SYSTEM_PROMPT,
     EVOLUTION_SYSTEM_PROMPT,
     GOAL_VALIDATION_SYSTEM_PROMPT,
     build_correction_message,
     build_correction_system_prompt,
+    build_decomposition_message,
     build_evolution_message,
     build_goal_validation_message,
 )
@@ -286,6 +293,26 @@ class MinimaxClient:
             return EvolutionDecision.model_validate(raw)
         except Exception as exc:
             raise MinimaxError(f"EvolutionDecision 解析失敗: {exc}") from exc
+
+    # ──────────────────────────────────────────────
+    # F-A1 / ADR-AGT-002：自主任務拆解（一次性，不遞迴）
+    # ──────────────────────────────────────────────
+    def decide_decomposition(
+        self,
+        goal: str,
+        context: str = "",
+    ) -> DecompositionDecision:
+        """F-A1：諮詢 Minimax 將高階 goal 拆解為候選步驟 DAG。
+
+        每 run 僅呼叫 1 次（不遞迴）。有界性驗證（≤24 步/無環/非空）由
+        GoalDecomposer 本地負責，本方法僅回傳 Brain 候選輸出。
+        """
+        user_msg = build_decomposition_message(goal, context)
+        raw = self._call_with_retry(DECOMPOSITION_SYSTEM_PROMPT, user_msg)
+        try:
+            return DecompositionDecision.model_validate(raw)
+        except Exception as exc:
+            raise MinimaxError(f"DecompositionDecision 解析失敗: {exc}") from exc
 
     def _parse_response(self, data: dict) -> dict:
         try:

@@ -26,15 +26,28 @@ from autoclaude.core.ports.brain import (
 # ──────────────────────────────────────────────────────────────
 class TestBrainCapabilities:
     def test_has_five_required_fields(self):
-        """ADR §6.2 五欄全到位。"""
-        names = {f.name for f in fields(BrainCapabilities)}
-        assert names == {
+        """ADR §6.2 五欄全到位 + F-A1 additive capability flag（ADR-AGT-002）。
+
+        五個核心必填欄（無預設）不變；Improving_012 Phase 3 F-A1 additively
+        新增 supports_decomposition（有預設 False＝向下相容，非必填），
+        舊 adapter 不設此欄即被 GoalDecomposer 拒絕拆解（不靜默降級）。
+        """
+        flds = {f.name: f for f in fields(BrainCapabilities)}
+        # 五個核心必填欄（MISSING 預設，定位順序在前）
+        required = {
+            name for name, f in flds.items()
+            if f.default is f.default_factory  # dataclasses.MISSING 哨兵相等
+        }
+        assert required == {
             "max_context_tokens",
             "supports_streaming",
             "retry_policy",
             "model_id",
             "dimension",
         }
+        # F-A1 additive 旗標：有預設值、預設 False
+        assert "supports_decomposition" in flds
+        assert flds["supports_decomposition"].default is False
 
     def test_is_frozen(self):
         """BrainCapabilities frozen，instance 不可變。"""
