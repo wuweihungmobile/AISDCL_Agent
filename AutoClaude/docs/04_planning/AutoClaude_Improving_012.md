@@ -151,9 +151,9 @@
    - 驗收：階梯轉換有測試；同 error signature 無改善 N=2 次提前升級；既有 escalation 測試零回歸 — ✅ 全達成。閘門：SCG-1（SRD_AGT_Phase2_Closedloop）+ SCG-2（ADR-AGT-004 ACCEPTED）🔴 koalawu 2026-06-13。三方 zero-trust audit（P0=0 / P1×3 / P2×4 全修，含 evolution-resume 接線經 koalawu 🔴 拍板）+ QA 最終複審變異實證 4/4 PASS。full pytest **3,020 passed / 122 skipped**（前基線 2,972，+48 零回歸）、新模組 coverage 100%、importlinter 8 kept、LOC=0、snapshot OK
 
 4. **Phase 3 — 自主拆解與工具（A 能力，風險最高最後）**
-   - [ ] F-A2 ToolInvocationPort + allowlist 閘（先行，因 F-A1 拆解出的步驟需要工具可用）
+   - [x] F-A2 ToolInvocationPort + allowlist 閘（先行，因 F-A1 拆解出的步驟需要工具可用）— ✅ 2026-06-13：SCG-1（SRD_AGT_Phase3）+ SCG-2（ADR-AGT-001）🔴 koalawu；IToolInvocation port（ports 12→13）+ ToolInvocationAdapter（預設 deny + allowlist domain/子域比對 + 全程審計 + send_message 委派 notifier）+ ToolInvocationConfig（flag off）；tag v2026.06.13-05。full pytest 3,035/122（+15 零回歸）、新模組 coverage 100%、importlinter 8 kept、LOC=0
    - [ ] F-A1 GoalDecomposer（產出 Playbook 草稿 + 🔴 人工 signoff 流程）
-   - 驗收：allowlist 外呼叫被拒並留審計 log；拆解超限／含環被拒；signoff 前不執行任何步驟
+   - 驗收：allowlist 外呼叫被拒並留審計 log ✅（test_tool_invocation）；拆解超限／含環被拒（待 F-A1）；signoff 前不執行任何步驟（待 F-A1）
 
 ### SCG 閘門對應（每 Phase 皆須過）
 

@@ -22,12 +22,17 @@
 - SCG-2：[ADR-AGT-001](../04_planning/ADR/ADR-AGT-001-tool-invocation-security-gate.md)（工具安全閘）/ [ADR-AGT-002](../04_planning/ADR/ADR-AGT-002-decomposition-boundedness.md)（拆解有界性）
 - 重要精化：Port 12→**13**（僅新增 `IToolInvocation`；`PreferenceStorePort` 已於 Phase 1 交付，凍結計畫 §2「10→12」描述須以實況校正）；`IBrain` 新增 `decide_decomposition`（capability 守門）；send_message 經 EventBus 委派既有 notification plugin。
 
+## 進度更新（2026-06-13 開發輪）
+
+- **🔴 SCG-1 + SCG-2 已簽署**（koalawu 2026-06-13，AskUserQuestion 互動核准後回填文件）：SRD_AGT_Phase3 v1.0 凍結、ADR-AGT-001/002 轉 ACCEPTED。
+- **F-A2 ✅ 已交付**（tag v2026.06.13-05，commit cbb846d）：`IToolInvocation` port（ports 12→13）+ `ToolInvocationAdapter`（預設 deny + allowlist domain/子域比對 + 全程審計 log via IObservabilityPort + send_message 委派 `utils.notifier.notify`）+ `ToolInvocationConfig`（flag off）。閘門：full pytest **3,035/122**（+15 零回歸）、新模組 coverage **100%**、importlinter 8 kept、LOC=0、新檔 ruff 零違規。
+- **實作精化留證**（SRD §0）：send_message 改委派 notifier（非裸 EventBus，因 EventBus 為 phase-based 非通用匯流排）；F-A2 adapter 尚未 wiring 接線（無消費者，避免 dead code），待 F-A1 GoalDecomposer 注入消費。
+
 ## Next Action（依凍結計畫順序）
 
-1. **🔴 SCG-1 確認**：審閱 SRD_AGT_Phase3 §0 精化 + 介面規格 + 有界性/安全閘設計 → 互動核准後回填 SRD「SCG-1 🔴 確認」欄（流程改善 #4）。
-2. **🔴 SCG-2 確認**：審閱 ADR-AGT-001/002 → 核准後狀態轉 ACCEPTED、回填確認欄。
-3. **SCG-3 → 實作**：介面契約凍結後依序實作 **F-A2（先行）→ F-A1**；每 PR 過 SCG-4（pytest 全綠 + lint-imports + LOC + coverage ≥90%）。
-4. **SCG-6（Phase 2 殘留）**：F-B1 `alert_ladder.enabled` nightly **連 7 天綠**後轉預設 on（觀察期；本輪未到期）。
+1. **F-A1 GoalDecomposer**（Phase 3 收尾）：`IBrain.decide_decomposition`（+ capability flag 守門）→ `execution/goal_decomposer.py`（≤24 步硬上限 + DAG 無環 + 非空 prompt）→ 產 Playbook 草稿 → **🔴 人工 signoff** 後才交 PlaybookRunner；同時把 F-A2 adapter 經 wiring 注入。驗收：拆解超限/含環被拒、signoff 前零執行、不支援 decomposition 的 brain 被拒。
+2. **SCG-4/5（F-A1 PR）**：pytest 全綠 + lint-imports + LOC + coverage ≥90% + RTM US-AGT-001~002 → TC。
+3. **SCG-6（Phase 2 殘留）**：F-B1 `alert_ladder.enabled` nightly **連 7 天綠**後轉預設 on（觀察期；本輪未到期）。
 
 ## Audit / 觀察 backlog（沿用、未阻斷）
 | 項目 | 說明 |
