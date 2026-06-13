@@ -135,6 +135,17 @@ class NotificationConfig(BaseModel):
     webhook_url: str | None = None
 
 
+class ToolInvocationConfig(BaseModel):
+    """F-A2 / ADR-AGT-001：工具自主使用安全閘。
+
+    預設 deny（凍結計畫 §4 風險緩解）：enabled=False 全拒；即使 True，allowlist
+    為空仍全拒。allowlist 為 domain（web_search/http_request 比對 target 之 host）
+    或通道名（send_message）。flag-off 時不發出任何外部 I/O，零行為變更。
+    """
+    enabled: bool = False
+    allowlist: list[str] = Field(default_factory=list)
+
+
 class StorageConfig(BaseModel):
     """Phase 6：State / Playbook backend 三段開關（SD_Improving_02.md v1.1 §2.8）。
 
@@ -178,6 +189,7 @@ class AppConfig(BaseModel):
     token_guard: TokenGuardConfig = Field(default_factory=TokenGuardConfig)
     alert_ladder: AlertLadderConfig = Field(default_factory=AlertLadderConfig)
     notification: NotificationConfig = Field(default_factory=NotificationConfig)
+    tool_invocation: ToolInvocationConfig = Field(default_factory=ToolInvocationConfig)
     storage: StorageConfig = Field(default_factory=StorageConfig)
     log_dir: str = "logs"
     backup_dir: str = "backups"

@@ -14,7 +14,7 @@
 | 項目 | 凍結計畫原文 | 本 SRD 精化（附**穩定錨點**：函式/類別名，非行號） |
 |------|-------------|--------------------------------|
 | Port 數量 | §2「10 ports → 12 ports」（含 ToolInvocationPort / PreferenceStorePort） | 修正：Phase 1 已落 `IPreferenceStore` + `IKbMetricStore`（10→**12**，現況實證 `core/ports/` 12 檔）；本 Phase 僅新增 `IToolInvocation`（**12→13**）。`PreferenceStorePort` 已於 Phase 1 交付，不重複 |
-| 訊息發送 | §1 F-A2「訊息發送（延伸現有 notification）」 | AutoClaude 現況：notification 為 **plugin**（`notification_plugin.py`），無正式 `NotifierPort`。F-A2 的 `send_message` 能力**經 EventBus 委派既有 notification plugin**，不直接 import；不新建 notification port |
+| 訊息發送 | §1 F-A2「訊息發送（延伸現有 notification）」 | AutoClaude 現況：notification 為 **plugin**（`notification_plugin.py`），無正式 `NotifierPort`。**實作精化（已落地 2026-06-13）**：EventBus 為 phase-based（KernelPhase 訂閱 + `PHASE_RESULT_CONTRACT`），非通用訊息匯流排，不適合委派任意 send_message；改委派 `utils.notifier.notify`（`notification_plugin.py:18` 即 import 此函式＝**同一 notification 通道**），達成「延伸既有 notification、不耦合 plugin、不開放任意端點」之原意。不直接 import notification plugin、不新建 notification port |
 | Brain 拆解能力 | §1 F-A1「輸入高階 goal → Brain 產出步驟 DAG」 | `IBrain`（`core/ports/brain.py`）現有 `decide_correction` / `decide_escalation` / `capabilities`。F-A1 **新增 `IBrain.decide_decomposition`**（capability flag 守門，舊 adapter 不支援即 raise NotImplemented → GoalDecomposer 拒絕拆解，不靜默退化） |
 | 工具能力來源 | §「能力總判定 A」：PtyExecutor 委派之 Claude Code CLI 內建 WebSearch/WebFetch | F-A2 係在 **AutoClaude 層**新增統一抽象 + allowlist 治理（與 CLI 內建工具正交）；adapter 可選擇實作為「呼叫外部 HTTP」或「no-op stub（預設）」，allowlist 為唯一放行依據 |
 
@@ -24,10 +24,10 @@
 
 | 擴充點 | 規劃落點（穩定錨點） | 觸發驗證（實作期回填） |
 |--------|---------------------|----------------------|
-| `IToolInvocation` port | `core/ports/tool_invocation.py`（Protocol，零 infra 依賴） | 介面契約測試 |
-| Tool adapter | `infra/adapters/tool_invocation_adapter.py`（allowlist 閘 + 審計 log；adapter ≤400） | allowlist 放行/拒絕往返測試 |
-| allowlist 設定 | `config.py` 新增 `tool_invocation` 區段（預設 `enabled=False`、`allowlist=[]` = 全 deny） | 預設 deny 測試 |
-| send_message 委派 | EventBus event（不直接 import notification plugin，遵守 importlinter Rule 1） | EventBus 委派測試 |
+| `IToolInvocation` port ✅ | `core/ports/tool_invocation.py`（Protocol，零 infra 依賴） | `test_tool_invocation.py::test_adapter_satisfies_protocol`（100% cov） |
+| Tool adapter ✅ | `infra/adapters/tool_invocation_adapter.py`（allowlist 閘 + 審計 log；adapter ≤400） | `test_in_allowlist_allowed_with_audit` / `test_not_in_allowlist_denied_with_audit`（往返 + 審計關聯） |
+| allowlist 設定 ✅ | `config.py` `ToolInvocationConfig`（預設 `enabled=False`、`allowlist=[]` = 全 deny） | `test_config_default_deny` |
+| send_message 委派 ✅ | `utils.notifier.notify`（同 notification 通道；非裸 EventBus，見 §0 訊息發送精化），不 import plugin | `test_send_message_delegates_to_notifier` / `test_send_message_denied_not_in_allowlist` |
 | `IBrain.decide_decomposition` | `core/ports/brain.py`（+ `BrainCapabilities` flag） | capability 守門測試（不支援即拒絕） |
 | GoalDecomposer | `execution/goal_decomposer.py`（strategy tier ≤300；DAG 驗證 + ≤24 步硬上限 + 無環檢查） | 超限/含環/signoff 前不執行 三測試 |
 | Playbook 草稿產出 | 既有 `models/playbook.py` 序列化（不改 schema，產 YAML 草稿檔） | 草稿可被既有 validator 載入測試 |
@@ -62,7 +62,7 @@ class IToolInvocation(Protocol):
 1. **預設 deny**：`config.tool_invocation.enabled` 預設 `False`；即使 `True`，`allowlist` 為空 = 全部拒絕。
 2. **allowlist 比對**：`web_search`/`http_request` 比對 `target` 之 domain；不在 allowlist → `ToolResult(allowed=False, ok=False)` + **審計 log（WARN）**，不發出任何外部 I/O。
 3. **審計 log**：所有 invoke（放行與拒絕皆然）寫一筆審計記錄（經 `IObservabilityPort`），含 `kind/target/allowed/audit_id`。
-4. **send_message**：僅延伸既有 notification 通道，經 EventBus 委派 `notification_plugin`，不開放任意外部端點。
+4. **send_message**：僅延伸既有 notification 通道，委派 `utils.notifier.notify`（notification_plugin 同源；§0 精化說明為何非裸 EventBus），不 import plugin、不開放任意外部端點。
 5. **無 Brain 呼叫**：安全閘為純本地判定（domain 比對），不呼叫 Brain。
 
 ### 1.3 邊界與約束
@@ -123,7 +123,7 @@ class IToolInvocation(Protocol):
 |--------|-----------------------------------|
 | allowlist 外呼叫被拒並留審計 log | `tests/test_tool_invocation.py`：預設 deny、空 allowlist 全拒、不在 allowlist 拒絕 + 審計 log 落筆 |
 | allowlist 內呼叫放行 + 審計 | `tests/test_tool_invocation.py`：放行路徑 + audit_id 關聯 |
-| send_message 經 EventBus 委派 notification | `tests/test_tool_invocation.py`：不直接 import、EventBus 委派 |
+| send_message 委派既有 notification 通道 | `tests/test_tool_invocation.py`：`test_send_message_delegates_to_notifier`（委派 notifier、不 import plugin） |
 | flag-off 零行為變更 | `tests/test_tool_invocation.py`：`enabled=False` 既有流程 byte-level 控制流一致 |
 | 拆解超限被拒 | `tests/test_goal_decomposer.py`：> 24 步拒絕、不重試 |
 | 拆解含環被拒 | `tests/test_goal_decomposer.py`：環偵測拒絕 |
