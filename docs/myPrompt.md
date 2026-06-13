@@ -83,14 +83,10 @@
 3.若有需要確認, 請評估選項, 以互動方式我會進行回覆!
 
 參考資訊:
-2. AISDLC_SDD 流程問題記錄 ✅（Improving012_Phase2_NextAction.md）
 
-#5 SCG-1 擴充點實證表未涵蓋持久化 save 路徑（致 evolution-resume 漏接線）
-#6 SRD §4 列之 TC 未被 SCG-4 機械核對存在（PG mock 測試缺漏）
-#7 SRD 文件內測試路徑未 glob 校驗
-後續 Next Action：SCG-6（nightly 連 7 天綠後 alert_ladder.enabled 轉 on）→ Phase 3（F-A2 ToolInvocationPort → F-A1 GoalDecomposer，須先過 SCG-1/2 🔴）。
-
-註：commit 經您授權 AUTOCLAUDE_SKIP_HOOKS=1 — 僅跳過 hook 中 CI 未強制的 ruff 步驟（5 舊 execution 檔 pre-existing 風格債屬 backlog）；其真實 CI-mirror 閘門（LOC=0 / CLAUDE.md 396 行 / .sh LF）均已獨立驗證通過。
+1.AISDLC_SDD 流程問題記錄 ✅ 新增 #9：舊 editable install 殘留（pip show autoclaude 指向遷移前 D:\CursorProject\AutoClaude，python <repo外路徑>.py 會誤命中舊副本）→ 已記入 Improving012_Phase3_NextAction.md 與 memory，附三項改善建議（重指 editable／移除舊副本／CI 加哨兵）。
+2.Improving_012 三能力 A/B/C 全數完成。 唯一剩餘為非阻斷的 SCG-6 觀察期（F-B1 alert_ladder.enabled nightly 連 7 天綠後轉 on，本輪未到期）。
+3.是否還有沒有完成的項目? 請馬上執行!
 
 
 為確保執行品質與AutoClaude_Improving_012.md執行項目都有執行, 請確實派出Architect / SA SD / QA 專家整體考量審查, 與目前系統現況進行比對, 採完全不信任 zero-trust audit 全面驗證和"修復方向是否正確", 看看nightly程式是否正確 and 執行過程與結果是否正確!
@@ -99,7 +95,7 @@
 全部符合上述PASS才核准通過!
 
 以上執行完後, 
-1.以日期Timestamp為標籤(例:v2026.05.01-0x), 幫我Push到github wuweihungmobile/AISDCL_Agent, 並且進行Merge main!
+1.以日期Timestamp為標籤(例:v2026.05.01-0x), 幫我commit+Push到github wuweihungmobile/AISDCL_Agent
 2.開發改進中, 是否有發現AISDLC_SDD_v0.01開發流程有問題, 請立即記錄準備於下一輪進行改善
 
 

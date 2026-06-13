@@ -8,7 +8,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## 這是一個「雙專案 monorepo」
 
-工作目錄根 `d:\CursorProject\AISDCL_Agent\` 底下是**兩個獨立專案**，各自有一份 override 級的 `CLAUDE.md`。它們互為姊妹：`AISDLC_SDD` 是**方法論框架**，`AutoClaude` 是能驅動該方法論的**執行引擎**（AutoClaude 的 Playbook `workflow_type` 支援 `aisdlc` / `aisdlc_sdd`）。
+工作目錄根 `d:\CursorProject\AISDCL_Agent\` 底下是**兩個獨立子專案** + **一層 monorepo 根整合層**（根 `docs/`）。兩子專案各自有一份 override 級的 `CLAUDE.md`，互為姊妹：`AISDLC_SDD` 是**方法論框架**，`AutoClaude` 是能驅動該方法論的**執行引擎**（AutoClaude 的 Playbook `workflow_type` 支援 `aisdlc` / `aisdlc_sdd`）。**根整合層**（根 `docs/`）不屬於任一子專案，承載「兩者深度整合」的迭代計畫——見下方〈🔴 三條改進軌道〉，**勿與子專案內部的改進系列混淆**。
 
 | 子目錄 | 性質 | 權威指引 |
 |--------|------|---------|
@@ -25,6 +25,24 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - 它們文件內的相對路徑（如 `docs/05_development/...`、`autoclaude/core/...`）是**相對於該子專案目錄**，不是相對於本 monorepo 根。
 - AISDLC_SDD 的 CLAUDE.md 把根稱為 `d:/CursorProject/AISDLC_SDD/`，實際對應到本 repo 的 `AISDLC_SDD/` 子目錄。
 - 跑指令前先 `cd` 到正確的子專案目錄。
+
+---
+
+## 🔴 三條改進軌道（迭代方向總圖 — 勿搞錯方向）
+
+> **為何特立此節**：本 repo 同時存在三條**平行且彼此獨立**的改進/迭代軌道，檔名相似極易混淆（曾有 session 把「整合迭代」誤指向子專案內部的 `SDD_improving_Automation_NN`，方向全錯）。**動工前先用本表對齊「現在在哪條軌、下一份檔名是什麼」。**
+
+| 軌道 | 計畫文件（驅動器） | 性質 / scope | 下一份 |
+|------|------------------|-------------|--------|
+| **① 整合迭代**（AISDLC-SDD × AutoClaude 深度整合） | 根層 [docs/04_planning/AutoSDD_improving_NN.md](docs/04_planning/) | 雙軌：**A 軌**＝SDD→Playbook 橋接整合 W 項；**B 軌**＝以 v0.0X 自身流程 dogfooding 並回流框架缺陷。由 [docs/04_planning/AutoSDD_Iteration_Prompt_Template.md](docs/04_planning/AutoSDD_Iteration_Prompt_Template.md) 驅動，每輪四件套（improving_NN + ZeroTrust_Audit_NN + Defect_Log 累積 + 框架改進落 `v0.0(X+1)/`） | `AutoSDD_improving_02.md`（01 已凍結 2026-06-12） |
+| **② 框架內部 RFC**（AISDLC_SDD 自身演進） | `AISDLC_SDD/AISDLC_SDD_v0.01/build/planning/active/SDD_improving_Automation_NN.md` | **①B 軌 dogfooding 的缺陷回流路徑之一**（框架程式/模板/hook 缺陷提案）；是迭代的**下游產物，不是驅動器**。active 為 26 號 | 隨缺陷回流產生（非定期遞增） |
+| **③ AutoClaude 內部能力** | `AutoClaude/docs/04_planning/AutoClaude_Improving_0NN.md` | AutoClaude 自身能力升級（如 Improving_012＝Agentic 三能力 A/B/C），與整合無關 | Improving_012 已結案（tag v2026.06.13-09） |
+
+**鐵律**：
+- 要「推進整合 / 開新一輪迭代」→ **走軌道 ①**，複製 `AutoSDD_Iteration_Prompt_Template.md`、續 `AutoSDD_improving_NN`。**絕不**把 `SDD_improving_Automation_NN`（軌道 ②）當迭代計畫。
+- 軌道 ② 只在軌道 ①B 軌發現框架缺陷時，作為回流 RFC 帳本使用；缺陷先入根層累積帳本 [docs/06_quality/AutoSDD_Defect_Log.md](docs/06_quality/)。
+- 軌道 ③ 是 AutoClaude 私有改進，不併入 `AutoSDD_improving` 鏈。
+- 三軌的 `docs/` 都各自獨立編號（01~08）：軌道 ① 用**根層** `docs/`、軌道 ②/③ 用各**子專案**的 `docs/`（見〈路徑陷阱〉）。
 
 ---
 
