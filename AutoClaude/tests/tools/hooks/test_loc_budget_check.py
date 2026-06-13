@@ -89,6 +89,44 @@ def test_special_file_at_warn_threshold_warns(tmp_path, monkeypatch):
     assert rc == 1
 
 
+def test_claude_md_long_line_blocks(tmp_path, monkeypatch):
+    """CLAUDE.md 含 801 codepoint 單行 → check_claude_md_line_length 回 2（流程改善 #10a）。
+
+    對齊 contract test_claude_md_no_long_lines：edit 當下即攔「累積敘事繞過 ≤400 行紅線」反模式。
+    """
+    mod = _load_hook_module()
+    fake_claude = tmp_path / "CLAUDE.md"
+    fake_claude.write_text("short\n" + "a" * 801 + "\nok\n", encoding="utf-8")
+    monkeypatch.setattr(mod, "PROJECT_ROOT", tmp_path, raising=True)
+    rc = mod.check_claude_md_line_length(Path("CLAUDE.md"))
+    assert rc == 2
+
+
+def test_claude_md_line_at_800_passes(tmp_path, monkeypatch):
+    """CLAUDE.md 邊界 800 codepoint 單行 → 回 0（與 contract test 800 邊界一致）。"""
+    mod = _load_hook_module()
+    fake_claude = tmp_path / "CLAUDE.md"
+    fake_claude.write_text("a" * 800 + "\n", encoding="utf-8")
+    monkeypatch.setattr(mod, "PROJECT_ROOT", tmp_path, raising=True)
+    assert mod.check_claude_md_line_length(Path("CLAUDE.md")) == 0
+
+
+def test_claude_md_cjk_800_codepoint_passes(tmp_path, monkeypatch):
+    """800 個 CJK 字（2400 bytes / 800 codepoint）→ 回 0（codepoint 計非 byte）。"""
+    mod = _load_hook_module()
+    fake_claude = tmp_path / "CLAUDE.md"
+    fake_claude.write_text("中" * 800 + "\n", encoding="utf-8")
+    monkeypatch.setattr(mod, "PROJECT_ROOT", tmp_path, raising=True)
+    assert mod.check_claude_md_line_length(Path("CLAUDE.md")) == 0
+
+
+def test_non_claude_md_skips_line_length_check(tmp_path, monkeypatch):
+    """非 root CLAUDE.md（如 sprint_history.md）不受單行限制 → 回 0。"""
+    mod = _load_hook_module()
+    monkeypatch.setattr(mod, "PROJECT_ROOT", tmp_path, raising=True)
+    assert mod.check_claude_md_line_length(Path("docs/05_development/sprint_history.md")) == 0
+
+
 def test_unrelated_file_outside_project_fail_open(tmp_path):
     """tmp_path 外部檔案 → normalize 失敗 → fail-open exit 0。"""
     target = tmp_path / "stray.py"

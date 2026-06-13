@@ -4,8 +4,10 @@
 
 .DESCRIPTION
 依序鏡像 .github/workflows/ci.yml 的 push gating jobs，全綠才建議 push：
+  0. editable 哨兵       （流程改善 #9c：autoclaude 指向本 monorepo）
   1. LOC 預算            （CI: test / claude-md-budget）
   2. CLAUDE.md <= 400 行 （CI: claude-md-budget）
+  2b. CLAUDE.md 單行<=800 （流程改善 #10b：對齊 contract test_claude_md_no_long_lines）
   3. snapshot 可重現     （CI: claude-md-budget）
   4. import-linter       （CI: test）
   5. pytest              （CI: test + equivalence）
@@ -43,6 +45,12 @@ function Invoke-Gate {
   $results.Add([pscustomobject]@{ Name = $Name; Status = $status; Rc = $rc })
 }
 
+# 0. editable install 哨兵（流程改善 #9c）：autoclaude 必須指向本 monorepo，
+#    避免舊 editable .pth 殘留 shadow 至遷移前副本，導致工作樹驗證誤命中舊源碼。
+Invoke-Gate 'editable sentinel' {
+  python -c "import autoclaude,sys; ok='AISDCL_Agent' in autoclaude.__file__; print('autoclaude:', autoclaude.__file__); sys.exit(0 if ok else 1)"
+}
+
 # 1. LOC 預算
 Invoke-Gate 'LOC budget' { python tools/check_loc_budget.py }
 
@@ -51,6 +59,12 @@ Invoke-Gate 'CLAUDE.md <=400' {
   $lines = (Get-Content CLAUDE.md | Measure-Object -Line).Lines
   if ($lines -gt 400) { Write-Host "CLAUDE.md=$lines > 400"; $global:LASTEXITCODE = 1 }
   else { Write-Host "CLAUDE.md=$lines lines OK"; $global:LASTEXITCODE = 0 }
+}
+
+# 2b. CLAUDE.md 單行 <= 800 codepoint（流程改善 #10b；顯式早攔，對齊 contract test
+#     與 loc_budget_check.py hook #10a，避免「累積敘事單行繞過 ≤400 行紅線」復發）
+Invoke-Gate 'CLAUDE.md line<=800' {
+  python -m pytest tests/contract/test_claude_md_no_long_lines.py -q --tb=short
 }
 
 # 3. snapshot 可重現

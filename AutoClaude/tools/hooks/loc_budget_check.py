@@ -8,6 +8,7 @@
   - .py 檔超 tier budget → stderr warn（exit 1，不阻斷）
   - .py 檔超絕對紅線 750 → stderr warn（exit 1）
   - CLAUDE.md > 400 行 → stderr error（exit 2，阻斷）
+  - CLAUDE.md 單行 > 800 codepoint → stderr error（exit 2，阻斷；流程改善 #10a）
 
 複用 tools/check_loc_budget.py 的 LOC_TIERS / classify_file / count_loc / count_raw_lines。
 """
@@ -29,6 +30,9 @@ def _init_utf8_streams() -> None:
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(PROJECT_ROOT / "tools"))
+
+# 對齊 tests/contract/test_claude_md_no_long_lines.py（MAX_LINE_CHARS=800，codepoint 計）
+MAX_CLAUDE_MD_LINE_CHARS = 800
 
 try:
     from check_loc_budget import (  # type: ignore[import-not-found]
@@ -122,6 +126,38 @@ def check_special_file(rel: Path) -> int:
     return 0
 
 
+def check_claude_md_line_length(rel: Path) -> int:
+    """CLAUDE.md 單行 codepoint 上限檢查（流程改善 #10a；阻斷級 exit 2）。
+
+    對齊 tests/contract/test_claude_md_no_long_lines.py（MAX_LINE_CHARS=800，`len(str)`
+    codepoint 計，非 byte）。讓「累積敘事單行繞過 ≤ 400 行紅線」反模式在 edit 當下即被攔，
+    而非僅在 pytest/CI 才失敗（根因：SD_09 R11-18 怪物段 / Improving_012 Phase 0 + F-A1
+    Status 行 815cp 復發 — 編輯可過 hook 卻破 contract）。僅檢 root CLAUDE.md（與 contract
+    test 同口徑；sprint_history.md 等累積敘事檔不受此單行限制）。
+    """
+    if rel.as_posix() != "CLAUDE.md":
+        return 0
+    abs_path = PROJECT_ROOT / rel
+    if not abs_path.exists():
+        return 0
+    violations = [
+        (i, len(line))
+        for i, line in enumerate(abs_path.read_text(encoding="utf-8").splitlines(), start=1)
+        if len(line) > MAX_CLAUDE_MD_LINE_CHARS
+    ]
+    if violations:
+        detail = "; ".join(f"line {ln}={n}cp" for ln, n in violations[:5])
+        print(
+            f"[loc_budget_check] BLOCK: 'CLAUDE.md' 有 {len(violations)} 行 > "
+            f"{MAX_CLAUDE_MD_LINE_CHARS} codepoint（{detail}）。累積敘事請下沉至 "
+            f"docs/05_development/sprint_history.md §1.x（對齊 contract "
+            f"test_claude_md_no_long_lines；流程改善 #10a）。",
+            file=sys.stderr,
+        )
+        return 2
+    return 0
+
+
 def main() -> int:
     payload = read_hook_payload()
     tool_input = payload.get("tool_input") or {}
@@ -136,6 +172,9 @@ def main() -> int:
     # 1) Special files（CLAUDE.md 等）優先於 .py 檢查；rc=2 阻斷 / rc=1 預警不阻斷
     rc = check_special_file(rel)
     if rc == 2:
+        return 2
+    # 1b) CLAUDE.md 單行 codepoint 上限（流程改善 #10a；與行數紅線同為阻斷級）
+    if check_claude_md_line_length(rel) == 2:
         return 2
     if rc == 1:
         # 預警；繼續走 .py 檢查（理論上 .md 不會走到，但保險起見）

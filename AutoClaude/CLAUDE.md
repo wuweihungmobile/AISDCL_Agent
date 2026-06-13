@@ -281,6 +281,7 @@ tasks:
 16. **pytest 數字 SSOT 必須註記隨機性與 fixture 前提** — 引用 pytest 數字（如 2,716 passed）時加註「pytest-randomly 未啟用，順序由 collection 確定」；pyproject.toml 不安裝 pytest-randomly；引入前需先補測試隔離（R40 P1-R40-1 偽陽性預防）
 17. **zero-trust 須雙向：agent audit 結論本身亦須複核** — subagent 聲稱「某檔案不存在」須以 `find`/`rg -l`/`ls` 獨立複核（嚴禁單憑 `fd`，未安裝時靜默回空 → 誤判不存在）；可機械驗證之 finding（檔案存在 / 數字驗算 / 行號）落入 backlog 前主 agent 須親跑複核，誤報與真缺陷同樣留證（R57 SD agent `fd` 誤報 `test_pg_memory_store_security.py:14` 不存在實則存在）
 18. **mutation 必須在隔離樹執行，禁止就地突變活體工作樹** — mutmut 就地改寫 volume-mount 源碼會與並行 pytest/audit 互踩產生假紅、kill 時殘留變異；載具須 tar 複製至 container 內 `/tmp/mutwork` 隔離樹（editable install 指向隔離樹），輸出物寫回 `/workspace` 維持取證鏈（Improving_012 Phase 1 QA P1-7）
+19. **驗證載具 import 路徑一致性** — 一律從專案 cwd 跑 `python -m pytest`/`python -c`，禁 `python <repo 外路徑>.py`（sys.path 不含 cwd → shadow 至舊 editable 副本）；`local_ci_gate.ps1` gate 0 哨兵斷言 `'AISDCL_Agent' in autoclaude.__file__`（流程問題 #9b/#9c，Improving_012 Phase 3）
 
 > **採樣統計**：baseline lock 必須 `samples ≥ 20`；< 20 印 warning「statistical noise high; not blocking」；`perf_regression_check.py` baseline samples<20 自動 BLOCK→WARN；rc 三態 0/2/1 = 綠/warn/block；`Invoke-Stage` rc=2 視為 WARN（ADR-SD08-003 §2.6 v1.1）。
 
@@ -312,7 +313,7 @@ tasks:
 |------|------|--------|------|
 | 語言檢查 | Stop | [check_lang.py](tools/hooks/check_lang.py) | 偵測 assistant 訊息含韓/日/簡體 → stderr warn（exit 1，不阻斷） |
 | 文件路徑強制 | PreToolUse(Write) | [enforce_docs_path.py](tools/hooks/enforce_docs_path.py) | `.md` 必須在 `docs/0[1-8]_*/` 或根層白名單；違規 exit 2 阻斷 |
-| LOC 預算檢查 | PostToolUse(Edit\|Write) | [loc_budget_check.py](tools/hooks/loc_budget_check.py) | `.py` 超 tier budget → warn；CLAUDE.md > 400 行 → exit 2 阻斷 |
+| LOC 預算檢查 | PostToolUse(Edit\|Write) | [loc_budget_check.py](tools/hooks/loc_budget_check.py) | `.py` 超 tier budget → warn；CLAUDE.md > 400 行或單行 > 800 codepoint → exit 2 阻斷（#10a） |
 | Snapshot 新鮮度 | Stop | [claude_md_freshness.py](tools/hooks/claude_md_freshness.py) | `snapshot_sync.py --check` drift → warn；CLAUDE.md > 400 行 → exit 2 |
 | .sh LF 行尾 | PostToolUse(Edit\|Write) | [check_sh_eol.py](tools/hooks/check_sh_eol.py) | `.sh`/`.bash` 含 CR/CRLF → exit 2 阻斷（紀律 #8 / SD_09 W2 nightly audit） |
 

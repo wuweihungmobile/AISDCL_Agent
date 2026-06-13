@@ -160,6 +160,18 @@ env override（如 `AUTOCLAUDE_TEST_P95_THRESHOLD_MS`）若同時影響「採集
 
 對應實作：QA audit P1-R62-7 修復（2026-06-13）；`run_mutmut_in_docker.sh` 隔離樹段落。
 
+### 紀律 #19 — 驗證載具 import 路徑一致性：一律從專案 cwd 跑，禁 repo 外路徑 python
+
+**背景（Improving_012 Phase 3 F-A1 開發，流程問題 #9）**：`pip show autoclaude` 之 Editable project location 一度指向遷移前舊路徑 `D:\CursorProject\AutoClaude`（舊副本）。從專案 cwd 跑 `python -m pytest` / `python -c` 時 cwd 會 shadow 至正確源碼故無礙；但 `python <repo 外路徑>.py`（sys.path 不含 cwd）會誤命中舊副本 → 一度 ImportError 誤判新符號不存在。屬環境殘留非源碼缺陷，但違紀律 #17 載具一致性精神。
+
+**強制條款**：
+
+1. **cwd 一致**：所有工作樹驗證一律從專案 cwd（`AutoClaude/`）跑 `python -m pytest` / `python -c`；**禁 `python <repo 外絕對路徑>.py`**（sys.path 不含 cwd，易 shadow 至舊 editable 副本）。
+2. **editable 哨兵**：`local_ci_gate.ps1` gate 0 + 可選 CI 步驟斷言 `'AISDCL_Agent' in autoclaude.__file__`，殘留舊副本即 fail（流程改善 #9c，2026-06-13 落地）。
+3. **殘留清除**：發現舊 `.pth` 指向遷移前路徑時，`pip install -e .` 重指向本 repo 覆蓋，或移除舊副本。
+
+對應實作：NextAction 流程問題 #9（(a) editable 重指向已於 2026-06-13 執行；(b) 本紀律 SOP +(c) `local_ci_gate.ps1` gate 0 哨兵於本輪落地）。
+
 ---
 
 ## 3. 採樣統計紀律
@@ -177,8 +189,8 @@ baseline lock 必須 `samples ≥ 20`；< 20 印 warning「statistical noise hig
 
 ## 4. CLAUDE.md ↔ 本檔 cross-reference
 
-CLAUDE.md §「Nightly / CI 取證紀律」維持 16 條編號標題清單（一行一條）+ 連結至本檔 §2。**任何紀律新增 / 修訂必須先改本檔，再同步 CLAUDE.md 摘要**。
+CLAUDE.md §「Nightly / CI 取證紀律」維持 19 條編號標題清單（一行一條）+ 連結至本檔 §2。**任何紀律新增 / 修訂必須先改本檔，再同步 CLAUDE.md 摘要**。
 
 ---
 
-**文檔元數據**：v1.4（Improving_012 Phase 1 — 新增紀律 #18 mutation 隔離樹，CLAUDE.md 摘要已同步）| 建立 2026-05-26 | 最後更新 2026-06-13 | 維護者：Tech Lead
+**文檔元數據**：v1.5（Improving_012 Phase 3 收尾 — 新增紀律 #19 驗證載具 import 路徑一致性／流程問題 #9b+#9c，CLAUDE.md 摘要已同步）| 建立 2026-05-26 | 最後更新 2026-06-13 | 維護者：Tech Lead
