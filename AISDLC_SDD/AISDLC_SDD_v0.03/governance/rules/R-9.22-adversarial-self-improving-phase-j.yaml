@@ -1,0 +1,21 @@
+id: R-9.22
+title: Phase J 對抗式自我改進現實自治
+trigger_states:
+  - ADVERSARIAL_EVALUATION
+  - CAPABILITY_BENCHMARK
+  - SPEC_PATCH_PROPOSAL
+severity: high
+maturity: active
+spec: >
+  L7 入口（判官主動對抗 + 能力感知鷹架代謝 + 規格自癒 + 艦隊人機收斂）。對抗有界
+  SDD_ADVERSARIAL_ROUNDS clamp[1,16] 預設 8、4 類攻擊、FLAKY 隔離；對抗強度凍結於
+  ADVERSARIAL_PROFILE_VERSION（變更須 bump）；能力代謝（連 ≥3 滿分為建議退役訊號，
+  退役 active 規則必經 set_maturity(reviewed_by=)）；OOD advisory-only 不自動阻塞 SCG；
+  spec_patch_proposer 重複 ≥2 次 spec_defect 產 SPEC-PATCH 草案（proposed，絕不自動套用，
+  經 HUMAN_PENDING）；艦隊聚合不折疊 P0/structural。對應 adversarial_synthesizer /
+  capability_benchmark / competence_envelope / spec_patch_proposer。
+test_ref: tools/fsm_runtime/tests/test_phase_j.py
+scaffold_roi:
+  fire_count: 0
+  catch_count: 0
+  false_positive_count: 0

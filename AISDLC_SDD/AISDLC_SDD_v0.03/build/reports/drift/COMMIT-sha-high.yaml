@@ -1,0 +1,12 @@
+commit_sha: sha-high
+api_drift: 0.8
+type_drift: 0.0
+total_score: 0.5
+spec_endpoints: 0
+code_endpoints: 0
+missing_in_code: []
+missing_in_spec: []
+spec_types: 0
+type_field_misses: 0
+elapsed_ms: 0
+timestamp: ''

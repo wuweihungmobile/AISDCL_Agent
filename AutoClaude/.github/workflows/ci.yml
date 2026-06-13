@@ -186,7 +186,9 @@ jobs:
     name: PG E2E (pgvector recall + p95) - nightly
     runs-on: ubuntu-latest
     timeout-minutes: 30
-    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    # DEF-01-004（improving_02 W2）：綁定 pg-e2e 自身 02:00 UTC cron，避免 03:00
+    # mutation cron 也觸發致每晚雙跑（對齊 mutation `0 3` / perf-baseline `0 2` 既有過濾）。
+    if: (github.event_name == 'schedule' && github.event.schedule == '0 2 * * *') || github.event_name == 'workflow_dispatch'
     # SD_09 W0 Z1 解除（2026-05-20，B-09）：X1/Y1/B-01/B-07/B-08 全綠後移除 continue-on-error: true
 
     services:

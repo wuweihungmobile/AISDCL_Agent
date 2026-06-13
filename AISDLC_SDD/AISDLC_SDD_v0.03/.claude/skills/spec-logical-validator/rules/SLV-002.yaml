@@ -1,0 +1,28 @@
+id: SLV-002
+name: "AC 可測試性"
+source: "builtin (AISDLC-SDD v0.01 Phase A)"
+trust_level: verified
+reviewed_by: "sa-analyst@aisdlc-sdd"
+reviewed_at: "2026-04-14"
+scope: ac
+purpose: "確保每個 AC 都能翻譯為明確的自動化測試"
+
+scan_targets:
+  - "docs/01_requirements/FRD-*.md"
+  - "docs/03_testing/contracts/TCS-*.md"
+
+required_qualifiers:
+  - "AC 必須包含明確的量化條件（數值、比率、時間）或可觀察的狀態變化"
+  - "AC 不得使用模糊詞彙作為唯一判定標準：『很快』『適當』『合理』『盡快』『順暢』"
+  - "AC 必須有明確的前置條件（Given）和期望結果（Then）"
+
+failure_examples:
+  - "系統應該很快地回應使用者"
+  - "登入應該順暢"
+
+pass_examples:
+  - "API 回應時間 P95 < 200ms"
+  - "登入成功後，JWT token 出現於 Response Header"
+
+severity: CRITICAL
+blocks_scg: true

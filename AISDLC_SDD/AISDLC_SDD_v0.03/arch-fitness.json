@@ -1,0 +1,162 @@
+{
+  "score": 3,
+  "n_fail": 0,
+  "n_warn": 3,
+  "findings": [
+    {
+      "ff": "FF-1",
+      "severity": "info",
+      "fingerprint": "ff1-ok",
+      "title": "FSM 三源狀態宇宙一致（43 態：Python ⇄ TLA ⇄ MD）",
+      "detail": "transition_rules ∪ == SDD_FSM.tla States；且全部狀態均見於 SDD_FSM_ENGINE.md、轉換表來源欄無 stale token。守 Rule 9.18.1 三源一致性。",
+      "evidence": []
+    },
+    {
+      "ff": "FF-2",
+      "severity": "info",
+      "fingerprint": "ff2-coverage",
+      "title": "CLAUDE.md §9 已裁剪；registry 權威持有 39 條規則",
+      "detail": "Phase 2 2c 完成：CLAUDE.md §9 不再 eager-load 編號子規則，細節以 governance/rules/R-*.yaml 為權威來源、由 rule_loader 逐態注入。§9 頁數與引用完整性改由 FF-5 守門。",
+      "evidence": [
+        "已抽出 R-*.yaml：39 檔"
+      ]
+    },
+    {
+      "ff": "FF-3",
+      "severity": "info",
+      "fingerprint": "ff3-ok",
+      "title": "無孤兒 / 損毀 FSM 持久化檔",
+      "detail": "build/reports/fsm/ 乾淨；save_state reap 契約完整。",
+      "evidence": []
+    },
+    {
+      "ff": "FF-4",
+      "severity": "info",
+      "fingerprint": "ff4-ok",
+      "title": "觀測態分類同位通過（15 態 + 1 已知分歧）",
+      "detail": "Terminal/Emergency 互斥成立；已知分歧：['AUTO_RECOVERY_ATTEMPT']。",
+      "evidence": []
+    },
+    {
+      "ff": "FF-5",
+      "severity": "warn",
+      "fingerprint": "ff5-oversize",
+      "title": "CLAUDE.md §9 約 5.6 頁 > 1.2 頁目標",
+      "detail": "Phase 2 2c 待裁剪：Rule 9 區塊仍為 eager-load 全文。細節已在 governance/rules/R-*.yaml，建議裁剪為 ≤1 頁憲法摘要 + registry 指標（見 build/planning/active/PHASE2-CLAUDEMD-TRIM-PLAN.md）。",
+      "evidence": [
+        "區塊約 16854 字元 ≈ 5.6 頁"
+      ]
+    },
+    {
+      "ff": "FF-6",
+      "severity": "info",
+      "fingerprint": "ff6-ok",
+      "title": "文件相對連結完整",
+      "detail": "INIT.md 樞紐 + workflow/ 內容文件無死連結。",
+      "evidence": []
+    },
+    {
+      "ff": "FF-7",
+      "severity": "info",
+      "fingerprint": "ff7-ok",
+      "title": "Agent↔Workflow↔Skill 引用健康",
+      "detail": "數量宣稱與 auto_load_config 引用均與磁碟一致。",
+      "evidence": []
+    },
+    {
+      "ff": "FF-8",
+      "severity": "info",
+      "fingerprint": "ff8-ok",
+      "title": "全部 39 條 active 治理規則皆接上有效且雙向可追溯的強制測試",
+      "detail": "每條 active 規則 test_ref 存在、含 def test_、且測試反向引用規則 id；guard ↔ halting test 連結完整可稽核。",
+      "evidence": []
+    },
+    {
+      "ff": "FF-9",
+      "severity": "info",
+      "fingerprint": "ff9-ok",
+      "title": "全部 39 條 active 規則 scaffold_roi 基座完整",
+      "detail": "三整數計數齊備；aggregate fire=0 < 門檻 20，0-fire 偵測待 runtime 資料（gate 關閉）。",
+      "evidence": []
+    },
+    {
+      "ff": "FF-10",
+      "severity": "info",
+      "fingerprint": "ff10-ok",
+      "title": "全部 39 條 active 規則 trigger_states 皆可達（無死規則）",
+      "detail": "每條規則 trigger ⊆ FSM 43 態 canonical 宇宙（或 * 萬用）；守規則→狀態引用完整性，與 FF-1 三源宇宙一致互補。",
+      "evidence": []
+    },
+    {
+      "ff": "FF-11",
+      "severity": "info",
+      "fingerprint": "ff11-ok",
+      "title": "全部 42 個 skill frontmatter 結構完整",
+      "detail": "每個 SKILL.md 皆有合法 YAML frontmatter 含 name + description。",
+      "evidence": []
+    },
+    {
+      "ff": "FF-12",
+      "severity": "info",
+      "fingerprint": "ff12-ok",
+      "title": "全部 8 條 critical 規則 trigger 落點正確（無治理錯置）",
+      "detail": "每條 critical 規則至少有一個能真正停機的 trigger（* 或非觀測態）；severity 與觸發落點一致。",
+      "evidence": []
+    },
+    {
+      "ff": "FF-13",
+      "severity": "info",
+      "fingerprint": "ff13-ok",
+      "title": "全部 26 個 agent YAML 嚴格合法且具 agent 定義鍵",
+      "detail": "每個 agent/**/*.yaml 皆通過 safe_load_all 且含頂層 agent 鍵。",
+      "evidence": []
+    },
+    {
+      "ff": "FF-14",
+      "severity": "info",
+      "fingerprint": "ff14-ok",
+      "title": "全部 2 個 CI workflow 工具模組引用皆可解析",
+      "detail": "每個 python -m tools.* 引用均對應磁碟上存在的模組／套件。",
+      "evidence": []
+    },
+    {
+      "ff": "FF-15",
+      "severity": "info",
+      "fingerprint": "ff15-ok",
+      "title": "SDD 模板索引與磁碟一致（59 個模板全索引、全可解析）",
+      "detail": "索引引用全部解析至磁碟，且宣稱數與涵蓋面與 docs_template/sdd/ 一致；完成 Skill（FF-11）/ Agent（FF-13）/ Template（FF-15）三支柱 artifact 結構守門。",
+      "evidence": []
+    },
+    {
+      "ff": "FF-16",
+      "severity": "warn",
+      "fingerprint": "ff16-meta-loop-ungrounded",
+      "title": "元迴圈 3 個生成器模組零引用具身評估器工具鏈（GAP-X1 未接地）",
+      "detail": "META_FSM 自我演化判定只引用合成語料 oracle，從不啟動沙箱 / 查真實日誌 / 跑真 App；生成-評估分離在元迴圈層未接地（advisory，鏡像 FF-2/13 漸進哲學，不阻擋收斂）。",
+      "evidence": [
+        "tools/fsm_runtime/operator_genesis.py",
+        "tools/fsm_runtime/operator_recursion_genesis.py",
+        "tools/fsm_runtime/dimension_necessity_oracle.py",
+        "具身工具鏈=['sandbox_runner', 'observability_query', 'output_quality_scorer']"
+      ]
+    },
+    {
+      "ff": "FF-16",
+      "severity": "warn",
+      "fingerprint": "ff16-gc-never-fired",
+      "title": "鷹架代謝 GC 從未產出退役 ROI 提案（GAP-X2 代謝肌肉從未收縮）",
+      "detail": "sdd-gc / scaffold_gc 制度齊備但 build/reports/gc/ 無 SCAFFOLD-ROI 提案；「大膽移除冗餘鷹架」（Anthropic）寫在憲法（Rule 9.20）卻從未行使（advisory，不阻擋）。",
+      "evidence": [
+        "D:\\CursorProject\\AISDCL_Agent\\AISDLC_SDD\\AISDLC_SDD_v0.03\\build\\reports\\gc"
+      ]
+    },
+    {
+      "ff": "FF-16",
+      "severity": "info",
+      "fingerprint": "ff16-ok",
+      "title": "具身評估器 & 鷹架代謝工具鏈引用接地完整（2 組）",
+      "detail": "系統級 agent 宣告的 runtime 模組 + FSM 狀態皆解析；鎖住具身/代謝鷹架不被 bit-rot/誤刪（structural pass，nightly-strict ENFORCING）。advisory(B) 另記元迴圈接地 backlog。",
+      "evidence": []
+    }
+  ]
+}

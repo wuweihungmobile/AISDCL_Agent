@@ -1,0 +1,6 @@
+detected_at: '2026-06-13T16:23:58+00:00'
+state: IMPLEMENTATION
+violations:
+- 'RetryBounded: gate PR_REVIEW retry_count=99 > MAX_RETRY=5'
+synthesized_from: tools/fsm_runtime/formal/SDD_FSM.tla (TypeOK/RetryBounded/RecoveryBounded/NotInBothSets)
+required_action: MONITOR_VIOLATION → ESCALATION（runtime monitor 補位，不可恢復）

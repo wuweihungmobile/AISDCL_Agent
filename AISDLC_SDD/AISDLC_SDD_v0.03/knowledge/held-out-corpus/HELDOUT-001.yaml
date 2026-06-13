@@ -1,0 +1,20 @@
+# Phase O / ACT-112 — held-out 現實代理語料（凍結 + content-hashed；只有 objective_replay_oracle 讀）
+#
+# 反 Goodhart 試金石：每個 case 提供「一個排程問題 + 多個候選排程及其『已知真實品質』」。
+# real_quality 代表框架歷史上該排程實測的綜合品質（OQS / 低 escalation / 低返工），
+# objective_tuner **看不到此檔**（它只收到注入的 evaluate 回呼）。
+#
+# 本 case 是「批次數 ↔ 延遲」真實權衡：高價值意圖 A 排晚（S_a）真實返工高（0.3），
+# 把 A 排早即使多一批（S_b）真實品質高（0.9）。incumbent 權重 latency_w=0.1 偏低 →
+# 誤挑 S_a（次優）；調高 latency_w 才挑到真實最優 S_b——這正是 tuner 該學到的校準。
+case_id: HELDOUT-001
+values:
+  A: 10.0
+  B: 1.0
+  C: 1.0
+  D: 1.0
+candidates:
+  - schedule: [["B", "C"], ["A", "D"]]    # A(高價值) 排在第 1 批（晚）→ latency=11
+    real_quality: 0.3
+  - schedule: [["A", "B"], ["C"], ["D"]]  # A 排在第 0 批（早），多一批 → latency=3
+    real_quality: 0.9
