@@ -3,14 +3,14 @@
 | 項目 | 內容 |
 |------|------|
 | 編號 | ADR-AGT-001 |
-| 狀態 | **DRAFT / PROPOSED（待 SCG-2 🔴 確認）** |
-| 落地狀態 | **PLANNED**（Phase 3 F-A2；尚未實作） |
+| 狀態 | **ACCEPTED — koalawu 2026-06-13（SCG-2 🔴 AskUserQuestion 互動核准）** |
+| 落地狀態 | **PLANNED → 實作啟動**（Phase 3 F-A2，先行；SCG-3 介面凍結後開工） |
 | 提出者 | sd-architect（Improving_012 Phase 3） |
 | 提出日期 | 2026-06-13 |
 | 對應計畫 | [AutoClaude_Improving_012.md](../AutoClaude_Improving_012.md) §1 F-A2 / §4 風險（SCG-0 已凍結） |
 | 相依 ADR | ADR-SD08-004（IObservabilityPort，審計 log 通道）/ ADR-SD07-001（LOC 分級） |
 
-> ⚠️ **草案**：本輪僅供審查，未凍結、未實作。
+> ✅ **SCG-2 已確認**（koalawu 2026-06-13）：決策凍結；SCG-3 介面凍結後實作 F-A2（先行）。
 
 ## 1. 背景
 
@@ -38,10 +38,10 @@ A 能力「工具自主使用」缺口：AutoClaude 本體無統一工具抽象�
 | 每種工具一個 port | 過度抽象（Rule 2）；單一 `invoke` + kind 已足夠 |
 | 預設 allow + 黑名單 | 違反最小權限；新端點預設可達，風險高 |
 
-## 5. SCG-2 🔴 確認（pending）
+## 5. SCG-2 🔴 確認（✅ 已確認 koalawu 2026-06-13）
 
-- [ ] 安全閘設計（預設 deny + allowlist + 審計）接受
-- [ ] send_message 委派模式接受
-- [ ] port/adapter/flag 落點接受
+- [x] 安全閘設計（預設 deny + allowlist + 審計）接受
+- [x] send_message 委派模式接受
+- [x] port/adapter/flag 落點接受
 
-**確認人**: ____（待 koalawu 🔴）　**日期**: ____　**方式**: ____
+**確認人**: koalawu　**日期**: 2026-06-13　**方式**: 親簽（AskUserQuestion 互動核准後回填，流程改善 #4）

@@ -1,11 +1,11 @@
 # SRD 增補 — Improving_012 Phase 3 自主拆解與工具（A 能力）
 
-**版本**: v0.1 **DRAFT（待 SCG-1 🔴 凍結）** | **建立日期**: 2026-06-13 | **建立者**: sd-architect
+**版本**: v1.0 — **SCG-1 ✅ 凍結（koalawu 2026-06-13）** | **建立日期**: 2026-06-13 | **建立者**: sd-architect
 **對應計畫**: [AutoClaude_Improving_012.md](../04_planning/AutoClaude_Improving_012.md)（SCG-0 已凍結）
-**閘門**: SCG-1（SRD 增補 + Port 介面規格）🔴 人工確認後凍結；其後 SCG-2（ADR-AGT-001/002）🔴
+**閘門**: SCG-1（SRD 增補 + Port 介面規格）✅ 已凍結（§SCG-1 確認欄）；其後 **SCG-2（ADR-AGT-001/002）🔴 待確認** → SCG-3 凍結介面後才實作
 **涵蓋**: F-A2（ToolInvocationPort + allowlist 安全閘，**先行**）/ F-A1（GoalDecomposer：goal→步驟 DAG→🔴 signoff）
 
-> ⚠️ **本文件為草案**：依使用者 2026-06-13 指示，本輪僅產出 Phase 3 規格供審查，**凍結（SCG-1 🔴）與任何程式碼實作均尚未進行**。範圍以凍結計畫 §1（F-A2/F-A1）/ §2（架構差距）/ §4（風險）為準，本 SRD 不得擴張其範圍。
+> ✅ **SCG-1 已凍結**（koalawu 2026-06-13 親簽）：本 SRD 範圍與介面規格凍結。**下一道閘門 SCG-2（ADR-AGT-001/002）仍待 🔴 確認**，且任何程式碼實作須待 SCG-2 + SCG-3 介面契約凍結後才啟動。範圍以凍結計畫 §1（F-A2/F-A1）/ §2 / §4 為準，凍結後變更須重開變更單。
 
 ---
 
@@ -133,15 +133,15 @@ class IToolInvocation(Protocol):
 
 ---
 
-## SCG-1 🔴 人工確認（pending）
+## SCG-1 🔴 人工確認（✅ 已確認 koalawu 2026-06-13）
 
-- [ ] F-A2/F-A1 範圍與凍結計畫 §1 一致（無範圍擴張）
-- [ ] §0 精化逐條覆核（Port 13、Brain 新方法、send_message 委派模式）
-- [ ] 介面規格（`IToolInvocation` / `IBrain.decide_decomposition`）凍結
-- [ ] 有界性設計（≤24 步 + 無環 + 🔴 signoff + 不遞迴）接受
-- [ ] 安全閘設計（預設 deny + allowlist + 審計）接受
+- [x] F-A2/F-A1 範圍與凍結計畫 §1 一致（無範圍擴張）
+- [x] §0 精化逐條覆核（Port 13、Brain 新方法、send_message 委派模式）
+- [x] 介面規格（`IToolInvocation` / `IBrain.decide_decomposition`）凍結
+- [x] 有界性設計（≤24 步 + 無環 + 🔴 signoff + 不遞迴）接受
+- [x] 安全閘設計（預設 deny + allowlist + 審計）接受
 
-**確認人**: ____（待 koalawu 🔴）　**確認日期**: ____　**方式**: ____（流程改善 #4：互動核准後回填本欄為唯一追溯源）
+**確認人**: koalawu　**確認日期**: 2026-06-13　**方式**: 親簽（互動核准後回填，流程改善 #4：文件為唯一追溯源）
 
 ---
 

@@ -3,14 +3,14 @@
 | 項目 | 內容 |
 |------|------|
 | 編號 | ADR-AGT-002 |
-| 狀態 | **DRAFT / PROPOSED（待 SCG-2 🔴 確認）** |
-| 落地狀態 | **PLANNED**（Phase 3 F-A1；尚未實作，依序於 F-A2 之後） |
+| 狀態 | **ACCEPTED — koalawu 2026-06-13（SCG-2 🔴 AskUserQuestion 互動核准）** |
+| 落地狀態 | **PLANNED**（Phase 3 F-A1；依序於 F-A2 之後實作） |
 | 提出者 | sd-architect（Improving_012 Phase 3） |
 | 提出日期 | 2026-06-13 |
 | 對應計畫 | [AutoClaude_Improving_012.md](../AutoClaude_Improving_012.md) §1 F-A1 / §4 風險（SCG-0 已凍結） |
 | 相依 ADR | ADR-AGT-001（工具可用性，拆解步驟需工具）/ 姊妹框架 R-9.23（意圖分解有界拆解） |
 
-> ⚠️ **草案**：本輪僅供審查，未凍結、未實作。
+> ✅ **SCG-2 已確認**（koalawu 2026-06-13）：決策凍結；F-A1 依序於 F-A2 之後實作。
 
 ## 1. 背景
 
@@ -43,11 +43,11 @@ A 能力「任務拆解」缺口：無「高階 goal → 完整步驟 DAG」之�
 | 遞迴拆解子步驟 | 自我放大風險；違反有界性 |
 | 拆解結果直接執行不產草稿 | 無法人工審閱 DAG，signoff 無對象 |
 
-## 5. SCG-2 🔴 確認（pending）
+## 5. SCG-2 🔴 確認（✅ 已確認 koalawu 2026-06-13）
 
-- [ ] 三道機械有界閘（≤24 + 無環 + 非空 prompt）接受
-- [ ] 🔴 signoff 硬閘 + 不遞迴 接受
-- [ ] capability 守門（不支援即拒絕）接受
-- [ ] F-A2 先於 F-A1 之順序接受
+- [x] 三道機械有界閘（≤24 + 無環 + 非空 prompt）接受
+- [x] 🔴 signoff 硬閘 + 不遞迴 接受
+- [x] capability 守門（不支援即拒絕）接受
+- [x] F-A2 先於 F-A1 之順序接受
 
-**確認人**: ____（待 koalawu 🔴）　**日期**: ____　**方式**: ____
+**確認人**: koalawu　**日期**: 2026-06-13　**方式**: 親簽（AskUserQuestion 互動核准後回填，流程改善 #4）
