@@ -61,3 +61,19 @@
   - ff16-gc-never-fired
   - ff16-meta-loop-ungrounded
   - ff5-oversize
+- timestamp: '2026-06-12T07:05:09'
+  score: 3
+  n_fail: 0
+  n_warn: 3
+  fingerprints:
+  - ff16-gc-never-fired
+  - ff16-meta-loop-ungrounded
+  - ff5-oversize
+- timestamp: '2026-06-13T06:37:52'
+  score: 3
+  n_fail: 0
+  n_warn: 3
+  fingerprints:
+  - ff16-gc-never-fired
+  - ff16-meta-loop-ungrounded
+  - ff5-oversize
