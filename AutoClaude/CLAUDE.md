@@ -1,7 +1,7 @@
 # CLAUDE.md
 # Claude Code Project Guidance
 
-**Last Updated**: 2026-06-13 | **AISDLC Version**: v0.09 | **Status**: **Improving_012 完成（三能力 A/B/C 全交付）— Phase 3 F-A1 GoalDecomposer 收尾**。SCG-1/SCG-2 🔴 確認後交付：`IBrain.decide_decomposition` + `supports_decomposition`（additive，capability 守門不靜默降級）+ `execution/goal_decomposer.py`（三道有界閘 ≤24`min()`鉗制／Kahn 無環／非空 prompt，超限拒絕不截斷不重試、1 次 Brain 呼叫非遞迴）+ 🔴 signoff 硬閘（未簽拒絕釋出 + 審計人/日期/goal hash）+ `wiring.build_goal_decomposer` 注入 F-A2 ToolInvocationAdapter（消費 allowlist，不再 dead code）；沿用既有 Playbook schema。三方 zero-trust audit（Architect·SD / QA·RTM）OVERALL PASS（P0=0/P1=0，2 P2 已修）+ QA 突變實證複審 PASS。full pytest **3,056 passed / 122 skipped**（前基線 3,035，+21 零回歸）、新模組 coverage 100%、importlinter 8 kept、LOC=0（goal_decomposer 機械錨定 strategy ≤300）。詳見 [AutoClaude_Improving_012.md](docs/04_planning/AutoClaude_Improving_012.md) §5 Phase 3。
+**Last Updated**: 2026-06-13 | **AISDLC Version**: v0.09 | **Status**: **Improving_012 完成（三能力 A/B/C 全交付）**。Phase 3 F-A1 GoalDecomposer 收尾：`IBrain.decide_decomposition` + `supports_decomposition`（additive，capability 守門不靜默降級）+ `execution/goal_decomposer.py`（三道有界閘 ≤24 硬上限／Kahn 無環／非空 prompt，超限拒絕不重試、1 次 Brain 呼叫非遞迴）+ 🔴 signoff 硬閘 + `wiring.build_goal_decomposer` 注入 F-A2 ToolInvocationAdapter（消費 allowlist）。三方 zero-trust audit OVERALL PASS（P0=0/P1=0）。full pytest **3,056 passed / 122 skipped**、coverage 100%、importlinter 8 kept、LOC=0。詳見 [AutoClaude_Improving_012.md](docs/04_planning/AutoClaude_Improving_012.md) §5 Phase 3。
 
 > **🔴 Important Notice 🔴** This file provides critical guidance for Claude Code (claude.ai/code). All instructions here OVERRIDE default behavior and must be followed exactly.
 
@@ -326,7 +326,7 @@ tasks:
 
 **文檔元數據**：v7.6 | 建立 2025-01-11 | 最後更新 2026-06-13 | 適用 AISDLC v0.09+
 
-**v7.6 重點**：**Improving_012 Phase 2 閉環強化（F-B1/F-B2）完成**（SCG-1/SCG-2 🔴 確認交付）。F-B1 AlertLadder 三階梯（WARNING→HINT→ESCALATE，flag `alert_ladder.enabled` 預設 off，SCG-6 觀察 7 天轉正）攔截收斂升級唯一 call site；F-B2 CorrectionVerifier（signature/fail_count/exit_code 三分量本地比對）+ streak 提前升級 + KB 策略失效回寫。**無新 port/plugin、零 alembic**：計數落 `PlaybookCheckpoint.alert_ladder` additive 欄 + PG `counters` JSONB 子鍵。三方 zero-trust audit（P0=0 / P1×3 / P2×4 全修）+ QA 變異實證複審 PASS。full pytest **3,020/122**（前基線 2,972，+48）、coverage 100%、importlinter 8 kept、LOC=0。明細見 [sprint_history.md §1.7.3](docs/05_development/sprint_history.md) Phase 2 段。
+**v7.6 重點**：**Improving_012 Phase 2 閉環強化（F-B1/F-B2）完成**（SCG-1/SCG-2 🔴 確認交付）。F-B1 AlertLadder 三階梯（WARNING→HINT→ESCALATE，flag `alert_ladder.enabled` 預設 on，2026-06-13 SCG-6 人工 waiver 提前轉正）攔截收斂升級唯一 call site；F-B2 CorrectionVerifier（signature/fail_count/exit_code 三分量本地比對）+ streak 提前升級 + KB 策略失效回寫。**無新 port/plugin、零 alembic**：計數落 `PlaybookCheckpoint.alert_ladder` additive 欄 + PG `counters` JSONB 子鍵。三方 zero-trust audit（P0=0 / P1×3 / P2×4 全修）+ QA 變異實證複審 PASS。full pytest **3,020/122**（前基線 2,972，+48）、coverage 100%、importlinter 8 kept、LOC=0。明細見 [sprint_history.md §1.7.3](docs/05_development/sprint_history.md) Phase 2 段。
 
 <!-- ARCH_SNAPSHOT_BEGIN -->
 ## [Architecture Snapshot] — 由 tools/snapshot_sync.py 自動生成（請勿手動編輯本區段；以 `python tools/snapshot_sync.py` 重新生成）

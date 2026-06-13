@@ -38,7 +38,7 @@
 ## Next Action（依凍結計畫順序）
 
 1. ~~F-A1 GoalDecomposer~~ ✅ 已交付（見上）。**Improving_012 三能力 A/B/C 全數完成。**
-2. **SCG-6（Phase 2 殘留）**：F-B1 `alert_ladder.enabled` nightly **連 7 天綠**後轉預設 on（觀察期；本輪未到期）。
+2. ~~SCG-6（Phase 2 殘留）：alert_ladder.enabled nightly 連 7 天綠後轉 on~~ ✅ **2026-06-13 人工 waiver 結案**（koalawu 拍板提前轉正，預設改 on，免 7 天 soak）。已知行為影響：diverging 升級時序 2→3 次 evaluate（仍有界）；同步更新 `test_alert_ladder.py` + `test_escalation_on_diverging`、config.py docstring、計畫 §SCG-6 waiver、ADR-AGT-004 addendum、SRD_Phase2。設 `enabled=False` 可還原。**Improving_012 全數結案（含 SCG-6）。**
 3. **backlog**（沿用，非阻斷）：ruff 鎖版全量清理、新模組 mutation 強度擴範圍、PG pg_real e2e、perf 載具偽陽性、舊 editable install 殘留（見流程問題 #9）。
 
 ## Audit / 觀察 backlog（沿用、未阻斷）
@@ -54,7 +54,8 @@
 | # | 問題 | 證據（本輪實證） | 建議改善 |
 |---|------|----------------|---------|
 | 8 | **SRD/ADR 引用之源碼 `檔案:行號` 於 LANDED 後隨源碼演進漂移，無機械校驗** | 本輪三方 audit 揪出 6 處行號漂移（`_impl.py:278` 實為 :297 等）；功能/測試全正確，純文件行號失準，違背 SRD §0「附 檔案:行號 且已驗證觸發」承諾與 nightly 紀律 #15 | 二擇一機械化：(a) SCG-4 交付時對文件內所有 `xxx.py:NN` 引用做靜態校驗（grep 該行內容是否仍含宣稱符號，漂移即 fail）；(b) **SRD/ADR 一律引用穩定的函式/類別名錨點，避免裸行號**（本輪 Phase 3 草案已採此法，延伸流程改善 #6/#7 的機械校驗精神） |
-| 9 | **舊 editable install 殘留指向遷移前路徑，工作樹驗證易誤命中舊源碼** | F-A1 開發中發現 `pip show autoclaude` 之 Editable project location = 遷移前舊路徑 `D:\CursorProject\AutoClaude`（5/7 舊副本）；從 cwd 跑 `python -m pytest`/`python -c` 時 cwd 會 shadow 故正確，但 `python /tmp/xxx.py`（sys.path 不含 cwd）會誤命中舊副本 → 一度 ImportError 誤判新符號不存在。屬環境殘留非源碼缺陷，但違 nightly 紀律 #17「zero-trust 須雙向、可機械驗證者親跑複核」之載具一致性精神 | (a) `pip install -e .` 重指向本 repo 覆蓋舊 .pth，或移除舊 `D:\CursorProject\AutoClaude` 副本；(b) 驗證 SOP 明示「一律從專案 cwd 跑 pytest/`python -c`，禁 `python <repo 外路徑>.py`」；(c) CI/local_ci_gate 可加 `assert 'AISDCL_Agent' in autoclaude.__file__` 哨兵 |
+| 9 | **舊 editable install 殘留指向遷移前路徑，工作樹驗證易誤命中舊源碼** | F-A1 開發中發現 `pip show autoclaude` 之 Editable project location = 遷移前舊路徑 `D:\CursorProject\AutoClaude`（5/7 舊副本）；從 cwd 跑 `python -m pytest`/`python -c` 時 cwd 會 shadow 故正確，但 `python /tmp/xxx.py`（sys.path 不含 cwd）會誤命中舊副本 → 一度 ImportError 誤判新符號不存在。屬環境殘留非源碼缺陷，但違 nightly 紀律 #17「zero-trust 須雙向、可機械驗證者親跑複核」之載具一致性精神 | (a) `pip install -e .` 重指向本 repo 覆蓋舊 .pth，或移除舊 `D:\CursorProject\AutoClaude` 副本；(b) 驗證 SOP 明示「一律從專案 cwd 跑 pytest/`python -c`，禁 `python <repo 外路徑>.py`」；(c) CI/local_ci_gate 可加 `assert 'AISDCL_Agent' in autoclaude.__file__` 哨兵 — **2026-06-13 本輪已執行 (a)：editable 重指向 monorepo（哨兵 PASS）；(b)(c) 仍待。** |
+| 10 | **CLAUDE.md 累積敘事行反覆破 `test_claude_md_no_long_lines`（≤800 codepoint）contract，且 commit 前閘門未攔 → 交付聲稱與 committed 實況不一致** | 本輪零信任親跑揪出：committed F-A1（commit `c435425`）之 CLAUDE.md line 4（Status 行）=**815 字元 > 800**，contract test **實際 FAILED**，但 F-A1 交付文件聲稱「full pytest 3,056 passed」。屬 Phase 0 同型 P0（「CLAUDE.md:4 行長 842cp 破 contract」）**復發**。根因：Claude Code PostToolUse hook `loc_budget_check.py` 只查 CLAUDE.md **行數 ≤400**，**未查單行字元 ≤800**；後者僅在 pytest/CI 才失敗 → 編輯可過 hook 卻破 contract，且本機 commit 未跑全套即 push | (a) `loc_budget_check.py` hook 增「CLAUDE.md 單行 >800 codepoint → exit 2 阻斷」（與 contract test 同口徑，編輯當下即攔）；(b) `local_ci_gate.ps1` / git pre-push hook 納入 `test_claude_md_no_long_lines`；(c) Status/v-note 行採「短摘要 + 連結下沉 sprint_history」慣例，避免單行累積敘事 |
 
 ---
 **產出**: 主 agent（Claude Code）依 AISDLC_SDD SCG 流程執行；audit 取證見三方 agent 報告（行號/數字均經主 agent 親跑複核）。

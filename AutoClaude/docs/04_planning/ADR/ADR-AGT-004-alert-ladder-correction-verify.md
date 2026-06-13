@@ -37,6 +37,7 @@ B 能力（觀察→調整）判定 🟢 大致滿足，但收斂信號一觸發
 - 負面：execution 層 +2 模組；checkpoint dict 增 1 鍵；escalation 路徑分支複雜度 +1（以 flag off 直通與獨立模組測試緩解）。
 - **LOC baseline 重鎖**：Phase 2 增量（~300 LOC，凍結計畫內範圍）使總量觸 SD_07 鎖定之 cap（17,032 > 14,058×1.2=16,869）；經 koalawu 2026-06-13 🔴 互動確認重鎖 `.loc_baseline=17,032`（新 cap=20,438，`check_loc_budget.py --update` 既定程序），棘輪繼續防爆漲。
 - 風險：階梯緩階期間多消耗 1~2 次 Brain correction 呼叫 → 緩解：僅 flag on 生效，SCG-6 nightly 觀察 7 天後才轉正。
+  - **[2026-06-13 addendum]** SCG-6 經 koalawu 🔴 人工 waiver 提前轉正：`alert_ladder.enabled` 預設改 on（免 7 天 soak）。上述 §2.1「預設 off」為當時決策；現預設 on，本風險（多 1~2 次 correction 呼叫）轉為常態行為。deviation 全文見 AutoClaude_Improving_012.md §SCG-6 waiver。
 
 ## 5. 參考
 

@@ -68,7 +68,7 @@ class AlertLadderConfig(BaseModel):
     no_improve_escalate_threshold: int = Field(default=2, ge=1, le=5)  # F-B2 N
 ```
 
-flag off = escalation 控制流 byte-level 不變（零回歸保證）。轉正路徑依 SCG-6：nightly 觀察 7 天綠 → 預設 on。
+flag off = escalation 控制流 byte-level 不變（零回歸保證）。**2026-06-13 起預設 on**（SCG-6 經 koalawu 🔴 人工 waiver 提前轉正，免 7 天 soak；deviation 見 AutoClaude_Improving_012.md §SCG-6 waiver）；設 `enabled=False` 仍可還原 byte-level 一致舊控制流。
 
 ### 1.4 持久化（凍結計畫「各階計數持久化於 checkpoint」）
 

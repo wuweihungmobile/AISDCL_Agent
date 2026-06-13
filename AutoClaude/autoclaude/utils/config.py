@@ -122,10 +122,11 @@ class TokenGuardConfig(BaseModel):
 class AlertLadderConfig(BaseModel):
     """F-B1 / ADR-AGT-004：漸進式告警階梯（WARNING→HINT→ESCALATE）。
 
-    enabled 預設 off（凍結計畫 §4 風險緩解；SCG-6 nightly 觀察 7 天綠後轉正）。
-    off 時收斂升級控制流與既有行為 byte-level 一致。
+    enabled 預設 on（2026-06-13 SCG-6 人工 waiver：koalawu 拍板提前轉正，免 7 天
+    soak；deviation 紀錄見 AutoClaude_Improving_012.md §5 Phase 2 與 Phase3 NextAction）。
+    可於 config 設 enabled=False 還原為與既有行為 byte-level 一致之控制流。
     """
-    enabled: bool = False
+    enabled: bool = True
     # F-B2：同 error signature 無改善連續 N 次即提前升級（穿透剩餘階梯）
     no_improve_escalate_threshold: int = Field(default=2, ge=1, le=5)
 

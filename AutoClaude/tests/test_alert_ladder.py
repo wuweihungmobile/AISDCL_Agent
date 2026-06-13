@@ -151,13 +151,17 @@ class TestCheckpointFieldRoundtrip:
 
 
 class TestConfig:
-    def test_alert_ladder_config_defaults_off(self):
-        """feature flag 預設 off（凍結計畫 §4 風險緩解；零回歸保證的根）。"""
+    def test_alert_ladder_config_defaults_on(self):
+        """feature flag 預設 on（2026-06-13 SCG-6 人工 waiver：koalawu 拍板提前轉正）。
+
+        原預設 off（凍結計畫 §4 soak）已由人工 waiver 轉正；設 enabled=False 仍可
+        還原與既有行為 byte-level 一致之控制流（見 TestBuildFromConfig.test_restore_state_applied）。
+        """
         from autoclaude.utils.config import AlertLadderConfig, AppConfig
         cfg = AlertLadderConfig()
-        assert cfg.enabled is False
+        assert cfg.enabled is True
         assert cfg.no_improve_escalate_threshold == 2
-        assert AppConfig().alert_ladder.enabled is False
+        assert AppConfig().alert_ladder.enabled is True
 
     def test_threshold_bounds(self):
         import pydantic

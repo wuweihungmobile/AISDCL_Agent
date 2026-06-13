@@ -146,7 +146,7 @@
    - 驗收：重啟後 metrics 不清零 ✅（test_knowledge_base_metric_store）；偏好可寫可讀並出現在 correction prompt ✅（test_kernel_pre_correction 端到端）；跨 ≥ 2 個 playbook run 的進度可彙總查詢 ✅（test_goal_progress_ledger）。閘門：SCG-1（SRD_AGT_Phase1_Memory.md）+ SCG-2（ADR-AGT-003）🔴 koalawu 2026-06-13；full pytest 2,931/122、importlinter 8 kept、LOC=0
 
 3. **Phase 2 — 閉環強化（B 能力）**
-   - [x] F-B1 AlertLadder（feature flag 預設 off → nightly 觀察 7 天 → 預設 on）— ✅ 2026-06-13：AlertLadder（WARNING→HINT→ESCALATE 三階梯，strategy tier）+ AlertLadderConfig（enabled 預設 off）+ checkpoint additive `alert_ladder` 欄（File + PG counters JSONB 子鍵，零 alembic）+ 五條存檔路徑接線（interrupt/token-halt/evolution×3/payload）
+   - [x] F-B1 AlertLadder（feature flag 預設 off → nightly 觀察 7 天 → 預設 on）— ✅ 2026-06-13：AlertLadder（WARNING→HINT→ESCALATE 三階梯，strategy tier）+ AlertLadderConfig（enabled 預設 off）+ checkpoint additive `alert_ladder` 欄（File + PG counters JSONB 子鍵，零 alembic）+ 五條存檔路徑接線（interrupt/token-halt/evolution×3/payload）。**2026-06-13 SCG-6 人工 waiver（koalawu）：`enabled` 提前轉正為預設 on**（免 7 天 soak）；同步更新 `test_alert_ladder.py` 預設斷言 + `test_escalation_on_diverging`（diverging 改走 WARNING→F-B2 streak，升級時序 call_count 2→3，仍有界提前升級）。設 `enabled=False` 可還原 byte-level 一致控制流
    - [x] F-B2 Correction 效果事後驗證 + KB 失效回寫 — ✅ 2026-06-13：CorrectionVerifier（signature/fail_count/exit_code 三分量純本地比對，不呼叫 Brain）+ no_improve_streak 提前升級（門檻可配置 1~5）+ `record_strategy_failure`（skip_strategies merge + 失效清 successful_strategy，常開 additive）
    - 驗收：階梯轉換有測試；同 error signature 無改善 N=2 次提前升級；既有 escalation 測試零回歸 — ✅ 全達成。閘門：SCG-1（SRD_AGT_Phase2_Closedloop）+ SCG-2（ADR-AGT-004 ACCEPTED）🔴 koalawu 2026-06-13。三方 zero-trust audit（P0=0 / P1×3 / P2×4 全修，含 evolution-resume 接線經 koalawu 🔴 拍板）+ QA 最終複審變異實證 4/4 PASS。full pytest **3,020 passed / 122 skipped**（前基線 2,972，+48 零回歸）、新模組 coverage 100%、importlinter 8 kept、LOC=0、snapshot OK
 
@@ -165,7 +165,7 @@
 | SCG-3 | Port 契約（介面簽名）凍結後才實作 adapter | 🔴 |
 | SCG-4 | 每 PR：pytest 全綠 + lint-imports + LOC budget + coverage ≥ 90% | 🔴 |
 | SCG-5 | RTM：US-AGT-001~004 → TC 100% 覆蓋 | 🔴 |
-| SCG-6 | nightly 連續 7 天綠 + feature flag 轉正 | 🔴 |
+| SCG-6 | nightly 連續 7 天綠 + feature flag 轉正 | 🔴 ✅ **2026-06-13 人工 waiver（koalawu）**：F-B1 `alert_ladder.enabled` 提前轉正為預設 on，免 7 天 soak（deviation 紀錄見下方 §SCG-6 waiver）。F-C3/F-C1/F-C2 無 flag，本閘對 Phase 1 不適用 |
 
 ### 預估 Story Points
 
@@ -176,6 +176,17 @@
 | 技術債還債（TD-N01~N06） | 3 |
 | 回歸測試 + RTM | 5 |
 | **總計** | **47** |
+
+---
+
+## 🔴 SCG-6 waiver 紀錄（2026-06-13）
+
+> **Deviation 性質**：凍結（SCG-0）計畫原訂 SCG-6 為「nightly 連續 7 天綠 → feature flag 轉正」之 🔴 人工閘。本紀錄為**人工 waiver**，非範圍變更（不觸及需求/設計範圍，僅提前既定終局之 flag 轉正動作），故不重走 SCG-0。
+
+- **決策者**：koalawu（2026-06-13，AskUserQuestion 互動拍板「立即手動轉 on」）
+- **內容**：F-B1 `AlertLadderConfig.enabled` 由預設 `False` → `True`（提前轉正，免 7 天 soak 觀察）
+- **已知行為影響（透明揭露）**：alert_ladder 三階梯即時介入收斂→升級活路徑；`environment_error` 與 F-B2 提前升級仍直接 bypass、`max_retries`/ErrorBudget 保底不動 → 仍有界。預設路徑 diverging 升級時序由 2 次 evaluate 延後為 3 次（WARNING 階消耗一手後由 F-B2 streak 升級）。
+- **取證**：full pytest 全綠（見 §5 Phase 2 閘門）；同步更新 `test_alert_ladder.py` 預設斷言（off→on）+ `test_playbook_runner.py::test_escalation_on_diverging`（call_count 2→3，附 WHY 註解）。設 `enabled=False` 即還原 byte-level 一致舊控制流（還原路徑由 `test_restore_state_applied` 守護）。
 
 ---
 

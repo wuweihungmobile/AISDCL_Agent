@@ -246,8 +246,11 @@ def test_escalation_on_diverging(mock_pty_cls, tmp_path):
 
     assert result.success is False
     assert "T01" in result.reason
-    # 只有 2 次 evaluate（exit=1, exit=2），即提前 ESCALATION，未消耗完 max_retries=3
-    assert call_count[0] == 2
+    # alert_ladder 預設 on（2026-06-13 SCG-6 人工 waiver）後，diverging 收斂信號改走階梯：
+    #   attempt2 出 WARNING(1/3) → attempt3 由 F-B2 no_improve_streak=2 提前升級（bypass 剩餘階梯）。
+    # 仍為有界提前 ESCALATION（未耗完 max_retries=3 的全部 4 次嘗試），僅被 WARNING 階延後一手。
+    # （設 alert_ladder.enabled=False 可還原為 call_count==2 的直接升級時序。）
+    assert call_count[0] == 3
 
 
 # ──────────────────────────────────────────────
