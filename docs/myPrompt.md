@@ -83,11 +83,14 @@
 3.若有需要確認, 請評估選項, 以互動方式我會進行回覆!
 
 參考資訊:
-收尾
- 巢狀 AutoClaude repo commit 至 sprint/sd_09_phase9（cbd15cd，依您決策）
- monorepo push：ca85936 + tag v2026.06.13-01 → wuweihungmobile/AISDCL_Agent main ✅
- AISDLC_SDD 流程問題 4 項已記錄於 Improving012_Phase1_NextAction.md：SCG-1 缺擴充點實證檢查、ADR 落地承諾無追蹤、破壞性取證載具互踩、🔴 閘門回填時序
-Next Action：Phase 2 閉環強化（F-B1 AlertLadder + F-B2 Correction 效果驗證，須先過 SCG-1/2 🔴）→ Phase 3；backlog 含 ruff 全量清理、PG pg_real e2e、perf 載具根治（詳見 NextAction 報告）。
+2. AISDLC_SDD 流程問題記錄 ✅（Improving012_Phase2_NextAction.md）
+
+#5 SCG-1 擴充點實證表未涵蓋持久化 save 路徑（致 evolution-resume 漏接線）
+#6 SRD §4 列之 TC 未被 SCG-4 機械核對存在（PG mock 測試缺漏）
+#7 SRD 文件內測試路徑未 glob 校驗
+後續 Next Action：SCG-6（nightly 連 7 天綠後 alert_ladder.enabled 轉 on）→ Phase 3（F-A2 ToolInvocationPort → F-A1 GoalDecomposer，須先過 SCG-1/2 🔴）。
+
+註：commit 經您授權 AUTOCLAUDE_SKIP_HOOKS=1 — 僅跳過 hook 中 CI 未強制的 ruff 步驟（5 舊 execution 檔 pre-existing 風格債屬 backlog）；其真實 CI-mirror 閘門（LOC=0 / CLAUDE.md 396 行 / .sh LF）均已獨立驗證通過。
 
 
 為確保執行品質與AutoClaude_Improving_012.md執行項目都有執行, 請確實派出Architect / SA SD / QA 專家整體考量審查, 與目前系統現況進行比對, 採完全不信任 zero-trust audit 全面驗證和"修復方向是否正確", 看看nightly程式是否正確 and 執行過程與結果是否正確!
