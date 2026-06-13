@@ -54,6 +54,13 @@
   - P2-2：`ToolInvocationAdapter` host allowlist 比對目前對 stub no-op handler；未來注入真實 I/O handler 時補「畸形 URL / userinfo@host / IDN punycode」對抗測試防繞過。
   - P2-3（流程）：見流程問題 #11——並行 audit 含就地突變者改 `isolation: worktree` 起代理。
 
+## 2026-06-13 驗證收尾輪（主 agent 獨立親跑複核，tag v2026.06.13-09）✅
+
+- **觸發**：使用者要求再次確認凍結 + zero-trust 全面驗證「修復方向／nightly／執行結果是否正確」+ 是否仍有未完成項目。
+- **主 agent 獨立親跑複核（非橡皮圖章，紀律 #17）**：full pytest **3,060 passed / 122 skipped**（99.56s，與 v2026.06.13-08 聲稱逐字一致）；importlinter **8 kept / 0 broken**；LOC violations=**0**（total=17508 baseline=17032）；snapshot OK；CLAUDE.md 398 行。git：HEAD=origin/main=`68cf6cb`、tag `v2026.06.13-08` 均已推遠端。
+- **實碼抽查**：`goal_decomposer.py` 三道有界閘實際存在且有效 — `min()` 鉗制 L78、capability 守門 L99、Kahn 無環 L186-216、signoff/approver raise L128/142、非空 prompt L184。
+- **結論**：凍結計畫範圍內項目（A/B/C + F-A1/A2/B1/B2/C1/C2/C3 + SCG-6 waiver + 護欄 #9/#10）**全數交付、已 commit、已 push，無未完成項目**。經使用者拍板（AskUserQuestion）：接受已推送之雙方 audit + 本輪獨立複核，於同 commit 打驗證 tag **v2026.06.13-09** 收尾，不重派冗餘第 5 輪稽核。殘留僅前瞻性 P2 backlog（P2-1/P2-2/流程 #11，皆需未來新增 CLI entry／真實 handler／worktree 隔離才有意義，非當前缺陷）。
+
 ## Audit / 觀察 backlog（沿用、未阻斷）
 | 項目 | 說明 |
 |------|------|
