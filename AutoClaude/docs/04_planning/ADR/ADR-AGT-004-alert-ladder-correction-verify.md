@@ -16,7 +16,7 @@ B 能力（觀察→調整）判定 🟢 大致滿足，但收斂信號一觸發
 
 ## 2. 決策
 
-1. **AlertLadder 三階梯**（WARNING→HINT→ESCALATE）攔截收斂升級唯一 call site（`_impl.py:278`），feature flag `alert_ladder.enabled` **預設 off**；階梯消耗既有 attempt 預算（不增加重試）、`max_retries`/ErrorBudget 保底不動 → 有界（對齊 R-9.23 / Rule 8 精神）。`environment_error` 與 F-B2 提前升級直接 bypass。
+1. **AlertLadder 三階梯**（WARNING→HINT→ESCALATE）攔截收斂升級唯一 call site（`_impl.py:297`），feature flag `alert_ladder.enabled` **預設 off**；階梯消耗既有 attempt 預算（不增加重試）、`max_retries`/ErrorBudget 保底不動 → 有界（對齊 R-9.23 / Rule 8 精神）。`environment_error` 與 F-B2 提前升級直接 bypass。
 2. **HINT 為本地文字生成**，經既有 `strategy_hint` 通道注入，**不呼叫 Brain**（「code 能答就 code 答」；亦避免 Brain/Executor 邊界違規）。
 3. **CorrectionVerifier 純本地效果比對**（signature / fail_count / exit_code 三分量），同 signature 無改善連續 N=2（可配置 1~5）→ 穿透階梯提前升級；每次無改善即回寫 KB `record_strategy_failure`（skip_strategies merge + 失效時清除 successful_strategy），回寫常開、控制流變更僅在 flag on 時生效。
 4. **持久化零 migration**：階梯/streak 計數落 `PlaybookCheckpoint.alert_ladder` additive 欄位（File）+ PG `checkpoints.counters` JSONB 子鍵（既有欄，`_pg_models.py:95`）——**推翻原規劃之 alembic 0017**（實證見 SRD §0）。

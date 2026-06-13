@@ -11,7 +11,7 @@
 
 | 項目 | 凍結計畫原文 | 本 SRD 精化（附源碼實證） |
 |------|-------------|--------------------------|
-| checkpoint 持久化 | §2「`checkpoints` 新增欄位 alert_ladder（JSON 欄）」；Phase1 NextAction 寫「alembic 0017」 | **不需 alembic 0017**。PG `checkpoints` 表既有 `counters` JSONB 欄（`_pg_models.py:95`，server_default `'{}'`），Gap-042 四計數器即落此欄（`pg_state_repository.py:276-281` save / `:463` load）；alert_ladder 以 `counters["alert_ladder"]` 子鍵落地 = 零 schema migration、舊列向下相容。File backend 以 `PlaybookCheckpoint` additive 欄位（`sdd_governance` 前例：`checkpoint_manager.py:57-63`） |
+| checkpoint 持久化 | §2「`checkpoints` 新增欄位 alert_ladder（JSON 欄）」；Phase1 NextAction 寫「alembic 0017」 | **不需 alembic 0017**。PG `checkpoints` 表既有 `counters` JSONB 欄（`_pg_models.py:95`，server_default `'{}'`），Gap-042 四計數器即落此欄（`pg_state_repository.py:276-281` save / `:482` load）；alert_ladder 以 `counters["alert_ladder"]` 子鍵落地 = 零 schema migration、舊列向下相容。File backend 以 `PlaybookCheckpoint` additive 欄位（`sdd_governance` 前例：`checkpoint_manager.py:57-63`） |
 | 新 port / plugin | §2 受影響模組表未列 ports/plugins 變更（F-B 系列） | 確認**無新 port、無新 plugin**：F-B 全在 execution 層（2 新 strategy 模組），wiring / `_REGISTER_ORDER` / importlinter 8 contracts 不動 |
 
 > 以上為實作層精化，非範圍變更（F-B1/F-B2 功能語意與凍結計畫 §1 完全一致）。
@@ -20,9 +20,9 @@
 
 | 擴充點 | 實證 | 觸發驗證 |
 |--------|------|---------|
-| 收斂升級唯一攔截點 | `_impl.py:278` `if report.recommendation == "escalate"` → `handle_convergence_escalation`（grep 全 codebase 唯一 call site） | 既有 escalation 測試覆蓋此路徑 |
+| 收斂升級唯一攔截點 | `_impl.py:297` `if report.recommendation == "escalate"` → `handle_convergence_escalation`（grep 全 codebase 唯一 call site） | 既有 escalation 測試覆蓋此路徑 |
 | HINT 注入通道 | `_impl.py:326-331` `strategy_hint` 變數 → `_impl.py:416` `runner._get_correction(strategy_hint=...)` 既有參數 | change_strategy 路徑既有行為 |
-| 重試耗盡保底 | `_impl.py:338` `if attempt >= max_retries` → `handle_max_retries_escalation`（不受 flag 影響，階梯有界性保證） | 既有測試 |
+| 重試耗盡保底 | `_impl.py:368` `if attempt >= max_retries` → `handle_max_retries_escalation`（不受 flag 影響，階梯有界性保證） | 既有測試 |
 | checkpoint 計數恢復點 | `_loop_state.py:53-61` `initialize_loop_state` counters restore | Gap-042 既有測試 |
 | KB skip_strategies merge 前例 | `knowledge_base.py:219-236` `record_escalation` | 既有測試 |
 | AttemptRecord 效果比對欄位 | `failure_tracker.py:61-65`（`error_signature` / `exit_code` / `correction_prompt_sent` / `mutation_applied`）+ `_extract_fail_count_from_output:263` | Gap-007/008 既有測試 |
@@ -48,7 +48,7 @@ class AlertLadder:
     def restore(self, state: dict) -> None: ...
 ```
 
-### 1.2 行為（flag on 時，攔截 `_impl.py:278`）
+### 1.2 行為（flag on 時，攔截 `_impl.py:297`）
 
 該步驟第 1 次 escalate 信號 → **WARNING**（log + 計數，修正迴圈繼續）；第 2 次 → **HINT**（本地生成提示文字——含 trend/reasoning 與「已連續無法收斂，請徹底改變修法」——經既有 `strategy_hint` 參數注入 correction prompt；**不呼叫 Brain**，遵守「code 能答就 code 答」與 `.importlinter` Rule 4/5）；第 3 次 → **ESCALATE**（走既有 `handle_convergence_escalation`，行為與 flag off 完全相同）。
 
@@ -56,7 +56,7 @@ class AlertLadder:
 1. `report.trend == "environment_error"`（AutoClaude 無法修復，緩階無意義；`convergence_monitor.py:52-57`）；
 2. F-B2 `no_improve_streak >= threshold`（見 §2.3，穿透剩餘階梯提前升級）。
 
-**有界性**：階梯不增加 attempt 預算——WARNING/HINT 後 continue 既有 `for attempt` 迴圈，`max_retries` 上限與 `handle_max_retries_escalation`（`_impl.py:338`）、ErrorBudget 語意預算（`_impl.py:299-324`）均不受 flag 影響；每步驟最多 2 次緩階。
+**有界性**：階梯不增加 attempt 預算——WARNING/HINT 後 continue 既有 `for attempt` 迴圈，`max_retries` 上限與 `handle_max_retries_escalation`（`_impl.py:368`）、ErrorBudget 語意預算（`_impl.py:327-329`）均不受 flag 影響；每步驟最多 2 次緩階。
 
 ### 1.3 Feature flag
 
@@ -75,7 +75,7 @@ flag off = escalation 控制流 byte-level 不變（零回歸保證）。轉正�
 - `PlaybookCheckpoint` 新增 `alert_ladder: dict = field(default_factory=dict)`（additive，舊 checkpoint 反序列化補空 dict，比照 `sdd_governance` 前例）。
 - PG：`pg_state_repository._save` 之 `counters` dict 增 `"alert_ladder"` 鍵；`_load` 對應恢復。零 migration。
 - 存檔路徑（三條，均 additive 預設空 dict）：interrupt 顯式 kwarg（`_step_init.check_hotkey_and_save` → `save_interrupt_checkpoint`）/ evolution kwarg（`save_evolution_resume_checkpoint`）/ token-halt payload 鍵（`checkpoint/_builder.py:53-70` 組裝處）。
-- resume：`initialize_loop_state`（`_loop_state.py:53-61`）自 `resume_checkpoint.alert_ladder` 恢復至 runner 持有之 `AlertLadder` 實例。
+- resume：`initialize_loop_state`（`_loop_state.py:77-78`）自 `resume_checkpoint.alert_ladder` 恢復至 runner 持有之 `AlertLadder` 實例。
 
 ## 2. F-B2 — Correction 效果事後驗證 + KB 失效回寫
 
