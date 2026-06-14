@@ -79,17 +79,23 @@
 
 問題： 
 
-## 已經執行完 AutoSDD_improving_03.md 和 AutoSDD_ZeroTrust_Audit_03.md 等相關項目
+## 已經執行完 AutoSDD_improving_05.md 和 AutoSDD_ZeroTrust_Audit_05.md 等相關項目
 
 參考資訊:
-四件套輸出
-AutoSDD_improving_03.md
-AutoSDD_ZeroTrust_Audit_03.md
-AutoSDD_Defect_Log.md（DEF-01-008→fixed@improving_03、DEF-02-002→fixed@v0.04、新增 DEF-03-001）
-框架改進落 AISDLC_SDD_v0.04/ + EVOLUTION_LOG + CHANGELOG
-記憶（整合迭代進度、MEMORY 索引）已更新：下一份 improving_04、floor=3069。
+誠實標示
+殘留 T2：顯式 pytest vX/ vY/ 雙路徑因 version pytest.ini 捕獲 confcutdir、根 conftest 不載入而攔不到 → 列文件化已知限制（原生錯誤已具名兩版可診斷）。
+DEF-05-001（行進中即記）：pytest hook chicken-and-egg——pytest_load_initial_conftests 真 repo 不 fire，改 pytest_configure 才正確；已入帳並修復。
+零觸碰 任一 v0.0X 凍結本體與 AutoClaude（git diff 佐證）；ci-gate 運行副作用產物已還原，diff surgical。
+四件套
+AutoSDD_improving_05.md（計畫/設計/RTM）
+AutoSDD_ZeroTrust_Audit_05.md（審計+複審）
+AutoSDD_Defect_Log.md（DEF-02-001 fixed + DEF-05-001 新增）
+框架本體演化：N/A（無 v0.05，純共享 infra）
+本輪變更檔（乾淨 diff）：3 個新 guard 檔 + 2 份 docs 新增 + Defect_Log 修改。
 
-為確保執行品質與AutoSDD_improving_02.md執行項目都有執行, 請確實派出Architect / SA SD / QA 專家整體考量審查, 與目前系統現況進行比對, 採完全不信任 zero-trust audit 全面驗證和"修復方向是否正確", 看看nightly程式是否正確 and 執行過程與結果是否正確!
+Source Control 處置：依你的慣例，這些皆為原始碼/文件（應 commit + push 直推 main）。但推送至 main 屬對外動作，是否現在要我 commit 並 push？（歷輪皆「尚未 commit/tag」，由你決定時機；若要，建議 commit 訊息標 improving_05 結案 + tag v2026.06.14-05。）
+
+為確保執行品質與AutoSDD_improving_05.md執行項目都有執行, 請確實派出Architect / SA SD / QA 專家整體考量審查, 與目前系統現況進行比對, 採完全不信任 zero-trust audit 全面驗證和"修復方向是否正確", 看看nightly程式是否正確 and 執行過程與結果是否正確!
 有問題馬上請派另一個Agent(Architect/SA SD/QA 全能)專家進行修復相關程式與文件「所有問題"文件問題"和"技術問題"必須徹底全部修復才能算完成」! 
 再經QA專家審議修完是否有符合"原設計功能"或若有破壞收斂即不通過須馬上進行修改再進行QA!
 全部符合上述PASS才核准通過!
