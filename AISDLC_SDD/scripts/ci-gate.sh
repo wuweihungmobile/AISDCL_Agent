@@ -49,6 +49,10 @@ if [[ "${1:-}" == "--full-tlc" || "${SDD_RUN_TLC:-0}" == "1" ]]; then
   FULL_TLC=1
 fi
 
+# ── 逐軌計數累積（DEF-06-001 取證友善性）──────────────────────────────────
+# 收斂時彙整成單行 `vX:N passed`，使單次輸出即自證逐軌結果，免審計捲動截斷輸出。
+GATE_SUMMARY=()
+
 # ── 單一版本閘門（雙軌共用）───────────────────────────────────────────────
 run_gate_for_version() {
   local VER="$1"
@@ -61,7 +65,17 @@ run_gate_for_version() {
   cd "${FW_DIR}"
 
   echo "==> [1/3] 離線測試套件 pytest -m 'not chaos'（全套，含 offline reachability BFS）"
-  python -m pytest tools/fsm_runtime/tests/ -m "not chaos" -q
+  # tee 保留串流到 console；set -o pipefail 確保 pytest 失敗（非零）時此處即中止，
+  # 收斂彙總絕不會在任一軌紅燈時印出（硬閘語意不變）。
+  local PYTEST_LOG
+  PYTEST_LOG="$(mktemp)"
+  python -m pytest tools/fsm_runtime/tests/ -m "not chaos" -q 2>&1 | tee "${PYTEST_LOG}"
+  # DEF-06-001：擷取逐軌 `N passed` 收斂計數（取證友善性，純函式 helper 單獨可測）
+  local PASSED
+  PASSED="$(bash "${REPO_ROOT}/scripts/pytest_passed_count.sh" < "${PYTEST_LOG}")"
+  rm -f "${PYTEST_LOG}"
+  echo "==> [1/3] ${VER}: ${PASSED} passed（not chaos）"
+  GATE_SUMMARY+=("${VER}:${PASSED}")
 
   echo "==> [2/3] 架構適應度 arch_fitness（structural fail 阻擋；advisory warn 放行）"
   # 必帶 --strict：唯有 --strict 時 structural fail 才回傳 exit 2（見 arch_fitness.py
@@ -93,3 +107,5 @@ for VER in "${FW_VERSIONS[@]}"; do
 done
 
 echo "✅ 本機 CI 閘門全數通過（版本：${FW_VERSIONS[*]}）"
+# DEF-06-001：單行自證逐軌 passed 計數，免零信任取證捲動截斷輸出
+echo "   逐軌計數：${GATE_SUMMARY[*]}"
