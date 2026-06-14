@@ -74,3 +74,12 @@ AISDLC_SDD_v0.01/arch-fitness.json
 
 # 本機 CI 閘門 / chaos 暫時產物（ci-gate.sh / chaos sweep 重生，不追蹤）
 AISDLC_SDD_v0.01/chaos-report.json
+
+# ── v0.05 runtime 取證產物排除（DEF-11-001 修正版：Copy-on-Evolve 只入真框架源碼）──
+# build/reports/ 全為運行時取證輸出（abort/drift/fsm/test-analysis/formal/…），
+# 由 ci-gate.sh / chaos / arch_fitness / FSM runtime 每次跑都重生（輸出非輸入），
+# 不屬框架源碼故整樹排除。build/planning/（SDD_improving_Automation_NN 規劃）、
+# build/logs/README.md 為真源碼，不在此列。
+AISDLC_SDD_v0.05/build/reports/
+AISDLC_SDD_v0.05/arch-fitness.json
+AISDLC_SDD_v0.05/chaos-report.json

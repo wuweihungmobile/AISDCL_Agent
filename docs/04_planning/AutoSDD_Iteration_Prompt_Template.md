@@ -114,7 +114,10 @@
 ### 階段一：現況重偵察（Zero-Trust Re-Audit）
 派出 Explore agent 重新實測：(a) AutoClaude 全套 pytest 數字；(b) lint-imports；
 (c) `bash scripts/ci-gate.sh`（AISDLC_SDD）；(d) 上輪聲稱完成的構件是否真的存在且被測試
-覆蓋；(e) 缺陷帳本 open 項是否仍重現（已自癒者改 fixed 並附證據）。
+覆蓋；(e) 缺陷帳本 open 項是否仍重現（已自癒者改 fixed 並附證據）；(f) 本輪若涉**外部工具
+依賴**（A/B 後端切換、外部 CLI／服務、訊息平台），須先確認其 **invocation 形態（GUI app／
+PATH CLI／API）**，勿假設可 headless 自動化（DEF-10-002a 紀律：cc-switch 主流版 farion1231 為
+Tauri GUI 不上 PATH，因規劃期假設其為 PATH CLI，致 DEF-01-007 跨 9 輪才釐清）。
 所有後續設計只准錨定本階段實測事實。
 **硬閘：若 (a) 基線出現任何 failed 或低於上輪 passed 數 → 立即停機回報，禁止進入階段二。**
 ### 階段二：本輪增量設計

@@ -79,18 +79,29 @@
 
 問題： 
 
-## 已經執行完 AutoSDD_improving_10.md 和 AutoSDD_ZeroTrust_Audit_10.md 等相關項目
+## 已經執行完 AutoSDD_improving_11.md 和 AutoSDD_ZeroTrust_Audit_11.md 等相關項目
 
 參考資訊:
+階段四（CI 平價，全項綠）
+
+AutoClaude 改動後複測 3075 / 0 failed（零改動持平）
+雙軌 ci-gate exit 0：v0.01:1478 / v0.05:1499，FF-17 報告 ff17-ok 自證最新版 v0.05 自動入閘
+v0.05 not-chaos 1499 passed、arch_fitness 87 passed、-k ff17 5 passed
+五軌 TLC N/A（零 _HAPPY_PATH/*.tla 變更，Rule 9.18.1 不啟動）
+多專家 Zero-Trust 三鏡審查 — 初審技術 PASS → 複審 FAIL（文件誠實性 + Copy-on-Evolve 潔淨度）→ 即修後複驗 PASS
+獨立 agent 親跑重驗，親手反向實驗證實 FF-17 真鑑別力（monkeypatch 指向寫死單版 → 確實 structural fail）；確認 v0.01~v0.04 源碼零改動。**複審揭露缺口**：鏡三 QA 潔淨度查證僅涵蓋 .pyc，未涵蓋 build/reports（173 runtime 取證檔）+ arch-fitness.json，而此二類將隨 v0.05 commit 入庫。即修＝AISDLC_SDD/.gitignore 新增 v0.05 區塊排除（would-add 1013→839），ci-gate 雙軌 1478/1499 不變複驗。
+
 缺陷帳本
-DEF-10-001 → fixed@improving_10（即記即修）。
-DEF-01-007 → 縮窄、維持 open：倉內阻塞全清，殘留純為環境/API 動作（裝 CLI 變體 + 配 2 profile + 授權 token 後一鍵跑 live A/B）。未虛報為 fixed。
-四件套（改動面乾淨）
-AutoSDD_improving_10.md（新）/ AutoSDD_ZeroTrust_Audit_10.md（新）/ AutoSDD_Defect_Log.md（DEF-10-001+DEF-01-007）/ 載具+gate 落地。下一份 improving_11（按需），floor=3075。
+DEF-10-002 → fixed@improving_11（兩子項齊備）
+新記 DEF-11-001（P3）→ fixed@improving_11（即清理子項）/ routed v0.0Y（通用 helper+SOP 子項）：Copy-on-Evolve cp -r 缺排除 runtime 產物之 helper；複審發現 v0.05 build/reports + arch-fitness.json 未被 .gitignore 涵蓋將入 commit，本輪即以 .gitignore 排除（1013→839），通用 copy_on_evolve.sh helper 留 v0.0Y
+四件套產出
+AutoSDD_improving_11.md
+AutoSDD_ZeroTrust_Audit_11.md
+AutoSDD_Defect_Log.md（DEF-10-002→fixed、新增 DEF-11-001）
+AISDLC_SDD_v0.05/（FF-17 + 測試 + EVOLUTION_LOG + CHANGELOG）+ 範本 (f)
 
 
-
-為確保執行品質與AutoSDD_improving_10.md執行項目都有執行, 請確實派出Architect / SA SD / QA 專家整體考量審查, 與目前系統現況進行比對, 採完全不信任 zero-trust audit 全面驗證和"修復方向是否正確", 看看nightly程式是否正確 and 執行過程與結果是否正確!
+為確保執行品質與AutoSDD_improving_11.md執行項目都有執行, 請確實派出Architect / SA SD / QA 專家整體考量審查, 與目前系統現況進行比對, 採完全不信任 zero-trust audit 全面驗證和"修復方向是否正確", 看看nightly程式是否正確 and 執行過程與結果是否正確!
 有問題馬上請派另一個Agent(Architect/SA SD/QA 全能)專家進行修復相關程式與文件「所有問題"文件問題"和"技術問題"必須徹底全部修復才能算完成」! 
 再經QA專家審議修完是否有符合"原設計功能"或若有破壞收斂即不通過須馬上進行修改再進行QA!
 全部符合上述PASS才核准通過!
