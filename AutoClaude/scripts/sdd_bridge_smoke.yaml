@@ -1,0 +1,51 @@
+# sdd_bridge_smoke.yaml — SDD→Playbook 橋接「多模型後端 A/B」煙霧載具
+#
+# 用途：DEF-01-007（AutoSDD_improving_01 §5.2）多模型後端 A/B 驗收載具。
+#       對同一 playbook 以 cc-switch 切換不同 profile 各跑一次，對比四指標：
+#         一次通過率 / CORRECTION 次數 / SDD_CONTRACT_VIOLATION 次數 / token 峰值。
+#
+# 設計（Rule 2 最小但可用）：
+#   - 自包含：不依賴外部 spec 文件 / FSM 狀態檔，任一後端皆可在臨時工作目錄實跑。
+#   - workflow_type=aisdlc_sdd：標記為 SDD 橋接載具（SddGovernancePlugin 路徑）；
+#     未提供凍結規格時 plugin 優雅 no-op（見 tests/.../test_bridge_smoke.py
+#     test_non_sdd_playbook_unaffected_by_plugin），不影響 A/B 後端對比本身。
+#   - 規格先行（Spec-First）TDD：先寫測試、後實作，最終 pytest 全綠。
+#
+# 執行（於 AutoClaude/ 目錄）：
+#   cc-switch use <profile-A> && autoclaude scripts/sdd_bridge_smoke.yaml --fresh
+#   cc-switch use <profile-B> && autoclaude scripts/sdd_bridge_smoke.yaml --fresh
+#   （cc-switch 須為 CLI 變體；GUI app 不上 PATH，見 DEF-10-001 / integration_gate.ps1 [5/5]）
+version: "1.0"
+project: "SDD_Bridge_Smoke"
+workflow_type: "aisdlc_sdd"
+
+global_goal: |
+  以規格先行（Spec-First）方式完成一個最小純函式 add(a, b)：先寫測試、再實作，
+  最終 pytest 全綠。此為多模型後端 A/B 對比之輕量載具，步驟刻意簡短以利重複跑。
+
+global_invariants:
+  max_retries_per_step: 3
+  auto_compact_interval: 5
+
+tasks:
+  - step_id: "S01"
+    name: "TDD First — 撰寫規格測試（先測後實作）"
+    prompt: |
+      請在當前工作目錄建立 `smoke_add_test.py`，內含 pytest 測試：
+        - test_add_basic：from smoke_add import add; assert add(2, 3) == 5
+        - test_add_negative：assert add(-1, 1) == 0
+      此步驟**先不要**建立 smoke_add.py（規格先行：測試先於實作）。
+      完成後請嚴格輸出 Keyword：[TEST_READY]
+    expected_output_regex: "\\[TEST_READY\\]"
+    maintain_context: false
+
+  - step_id: "S02"
+    name: "實作至綠 — Evaluator 雙重驗證"
+    prompt: |
+      請建立 `smoke_add.py`，實作 `def add(a, b): return a + b`，
+      使 `smoke_add_test.py` 全數通過。完成後請輸出 Keyword：[ADD_DONE]
+    expected_output_regex: "\\[ADD_DONE\\]"
+    # 雙重驗證：AI 自稱完成不算，Evaluator 親跑 pytest 才算數
+    evaluator_command: "pytest smoke_add_test.py -q"
+    evaluator_timeout_seconds: 60
+    maintain_context: true

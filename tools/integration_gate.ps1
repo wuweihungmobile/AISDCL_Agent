@@ -63,16 +63,32 @@ Invoke-Section "[4/5] 回退驗證（v0.01/v0.02 真品 FSM 狀態）" {
 }
 
 Write-Host "`n==> [5/5] cc-switch 多模型 A/B 驗收" -ForegroundColor Cyan
-$ccSwitch = Get-Command cc-switch -ErrorAction SilentlyContinue
-if ($null -eq $ccSwitch) {
+# DEF-10-001(b)（improving_10 階段一重偵察）：主流 cc-switch（farion1231）為 Tauri GUI
+# 桌面 app，安裝後**不會**在 PATH 放 cc-switch 指令 → 原 Get-Command 永遠偵測不到。
+# headless 自動 A/B 需 CLI 變體（SaladDay/cc-switch-cli 等）。逐一偵測已知 CLI 名。
+$ccCli = $null
+foreach ($name in @("cc-switch", "cc-switch-cli", "ccs")) {
+    $cmd = Get-Command $name -ErrorAction SilentlyContinue
+    if ($null -ne $cmd) { $ccCli = $cmd; break }
+}
+# DEF-10-001(a)：A/B 載具 playbook 須存在，否則文件化指令會 file-not-found。
+$smokePb = Join-Path $Root "AutoClaude\scripts\sdd_bridge_smoke.yaml"
+$pbRel = if (Test-Path $smokePb) { "scripts/sdd_bridge_smoke.yaml" } `
+         else { "⚠️載具缺失:scripts/sdd_bridge_smoke.yaml(DEF-10-001a)" }
+if ($null -eq $ccCli) {
     $skipCount++
-    Write-Host ("⚠️  SKIP：cc-switch 未安裝（DEF-01-007，AutoSDD_Defect_Log.md）。" +
-        "安裝後執行：cc-switch use <profile> && autoclaude sdd_bridge_smoke.yaml --fresh，" +
+    Write-Host ("⚠️  SKIP：未偵測到 cc-switch CLI（DEF-01-007，AutoSDD_Defect_Log.md）。" +
+        "注意：farion1231/cc-switch 為 GUI app 不上 PATH；headless A/B 需 CLI 變體" +
+        "（SaladDay/cc-switch-cli）。裝好 CLI 後於 AutoClaude/ 執行：" +
+        "cc-switch use <profile-A> && autoclaude $pbRel --fresh（換 profile-B 再跑一次），" +
         "對比指標：一次通過率 / CORRECTION 次數 / SDD_CONTRACT_VIOLATION 次數 / token 峰值") `
         -ForegroundColor Yellow
 } else {
     $passCount++
-    Write-Host "cc-switch 已安裝：請依 AutoSDD_improving_01.md §5.2 手動執行 A/B 對比" -ForegroundColor Green
+    Write-Host ("cc-switch CLI 已偵測（$($ccCli.Source)）：於 AutoClaude/ 對 $pbRel 切換 " +
+        "profile 各跑一次 --fresh，依 $pbRel 檔頭程序收集 A/B 四指標" +
+        "（一次通過率 / CORRECTION 次數 / SDD_CONTRACT_VIOLATION 次數 / token 峰值）") `
+        -ForegroundColor Green
 }
 
 if ($failures.Count -gt 0) {

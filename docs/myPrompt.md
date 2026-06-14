@@ -79,23 +79,18 @@
 
 問題： 
 
-## 已經執行完 AutoSDD_improving_06.md 和 AutoSDD_ZeroTrust_Audit_06.md 等相關項目
+## 已經執行完 AutoSDD_improving_10.md 和 AutoSDD_ZeroTrust_Audit_10.md 等相關項目
 
 參考資訊:
-誠實標示
-殘留 T2：顯式 pytest vX/ vY/ 雙路徑因 version pytest.ini 捕獲 confcutdir、根 conftest 不載入而攔不到 → 列文件化已知限制（原生錯誤已具名兩版可診斷）。
-DEF-05-001（行進中即記）：pytest hook chicken-and-egg——pytest_load_initial_conftests 真 repo 不 fire，改 pytest_configure 才正確；已入帳並修復。
-零觸碰 任一 v0.0X 凍結本體與 AutoClaude（git diff 佐證）；ci-gate 運行副作用產物已還原，diff surgical。
-四件套
-AutoSDD_improving_05.md（計畫/設計/RTM）
-AutoSDD_ZeroTrust_Audit_05.md（審計+複審）
-AutoSDD_Defect_Log.md（DEF-02-001 fixed + DEF-05-001 新增）
-框架本體演化：N/A（無 v0.05，純共享 infra）
-本輪變更檔（乾淨 diff）：3 個新 guard 檔 + 2 份 docs 新增 + Defect_Log 修改。
+缺陷帳本
+DEF-10-001 → fixed@improving_10（即記即修）。
+DEF-01-007 → 縮窄、維持 open：倉內阻塞全清，殘留純為環境/API 動作（裝 CLI 變體 + 配 2 profile + 授權 token 後一鍵跑 live A/B）。未虛報為 fixed。
+四件套（改動面乾淨）
+AutoSDD_improving_10.md（新）/ AutoSDD_ZeroTrust_Audit_10.md（新）/ AutoSDD_Defect_Log.md（DEF-10-001+DEF-01-007）/ 載具+gate 落地。下一份 improving_11（按需），floor=3075。
 
-Source Control 處置：依你的慣例，這些皆為原始碼/文件（應 commit + push 直推 main）。但推送至 main 屬對外動作，是否現在要我 commit 並 push？（歷輪皆「尚未 commit/tag」，由你決定時機；若要，建議 commit 訊息標 improving_05 結案 + tag v2026.06.14-05。）
 
-為確保執行品質與AutoSDD_improving_06.md執行項目都有執行, 請確實派出Architect / SA SD / QA 專家整體考量審查, 與目前系統現況進行比對, 採完全不信任 zero-trust audit 全面驗證和"修復方向是否正確", 看看nightly程式是否正確 and 執行過程與結果是否正確!
+
+為確保執行品質與AutoSDD_improving_10.md執行項目都有執行, 請確實派出Architect / SA SD / QA 專家整體考量審查, 與目前系統現況進行比對, 採完全不信任 zero-trust audit 全面驗證和"修復方向是否正確", 看看nightly程式是否正確 and 執行過程與結果是否正確!
 有問題馬上請派另一個Agent(Architect/SA SD/QA 全能)專家進行修復相關程式與文件「所有問題"文件問題"和"技術問題"必須徹底全部修復才能算完成」! 
 再經QA專家審議修完是否有符合"原設計功能"或若有破壞收斂即不通過須馬上進行修改再進行QA!
 全部符合上述PASS才核准通過!
@@ -117,26 +112,8 @@ Source Control 處置：依你的慣例，這些皆為原始碼/文件（應 com
 
 
 ===========================================================
-✅ 結案報告 — 第二輪全部 PASS，核准通過
-您兩個問題的答案
-1. 可否依 v0.01 進行自我迭代開發、行進中記錄缺點 Bug 改進？——可以，且框架已內建官方機制，無需另造。 逐層開檔驗證（證據在 AutoSDD_ZeroTrust_Audit_01.md §6.2）：
-
-自舉：SessionStart hook 自動呼叫 FSMRuntime.bootstrap()（session_start.py:74），project 由 SDD_PROJECT 環境變數指定，FSM 狀態檔落 build/reports/fsm/，decision_trace 自動留痕全部狀態轉換。
-場景：對框架自身迭代走 Brownfield（既有系統改進），轉場依 SCENARIO_TRANSITION_GUIDE.md。
-缺陷記錄與回流：v0.01 已有五層回流鏈（production inbox / decision_trace / drift / FPL→SLV / meta_halt）+ Phase J SPEC-PATCH + RFC 慣例（build/planning/active/）+ 官方 DEFECT-CLASSIFICATION P0~P3 分級。
-邊界釐清：build/、data/ 是可寫運行工作區（官方機制本就寫此處）；框架本體（agent/governance/workflow/tools/.claude）凍結，修改走 Copy-on-Evolve 落 v0.02。
-2. 立即用 v0.01 流程開發 + 演化 v0.02/v0.03…？——已寫入範本：B 軌 SCG-05 載體映射 + Copy-on-Evolve 條款（v0.0(X+1) + EVOLUTION_LOG + 五軌 TLC 義務）+ improving_01 §6 的 v0.02 Phase Z（ACT-162171）規劃。
-
-範本改版內容（已通過審查閉環）
-AutoSDD_Iteration_Prompt_Template.md 升級為雙軌迭代：A 軌（整合 W 項）+ B 軌（🐶 自我迭代模式），新增可寫/凍結邊界表、啟動三步驟（附程式碼錨點）、缺陷記錄紀律（DEF-{{N}}-{seq} 格式、發現即記）、四路分流表（SPEC-PATCH / FPL→SLV / RFC / A 軌 W 項）、B 軌結案條件、階段一硬停機閘、內嵌零退化矩陣。
-
-並當場實踐 dogfooding：新建缺陷帳本 AutoSDD_Defect_Log.md，把已發現的 5 筆缺陷 seed 入帳（RULES_INDEX 表頭過期、run_tlc.sh 僅 2 軌、tools/ 缺 __init__.py、ci.yml pg-e2e 每晚雙跑、原始 Prompt 假設偏差——最後一筆已標 fixed）。
-
-審查閉環紀錄
-關卡	結果
-Architect 審查	CONDITIONAL PASS：2 WARN（hooks 描述精度、矩陣未內嵌）
-SA-SD 審查	範本 12/12 機制宣稱逐項開檔屬實；4 缺口（帳本不存在為首）
-QA 審查	agent 因 API 內容過濾中斷，檢核項併入最終複審補齊（已誠實記載於審計 §6.3）
-全能修復	FIX-1~8 全數落地，每項先複驗再修文；含檔名對齊（Audit_001→Audit_01，消除與 {{N}} 編號制的首輪斷鏈）
-QA 最終複審	PASS：A 區 8/8（所有錨點開檔比對無一失準、5 筆 seed 證據屬實）、B 區 5/5（一致性/路徑/繁中/nightly/目標覆蓋）、C 區零退化實測重跑 2732 passed / 122 skipped / 0 failed
-Nightly 再抽查仍屬實（fsm-chaos cron 0 2 + -m chaos；AutoClaude 2 條 active cron），本輪零程式碼修改、零基線退化。下一輪可直接以範本 {{N}}=02 啟動：A 軌做 W1（spec_source.py），B 軌同步開 FSM 實例並處置帳本中 4 筆 routed 缺陷。
+請幫我寫完整的安裝部屬手冊, 放入docs\AISDLC_Agent_UserGuide.md
+1.如何安裝部屬AISDLC_Agent
+2.如何啟動AISDLC_Agent
+3.如何使用AISDLC_Agent
+4.如何AISDLC_Agent關閉
