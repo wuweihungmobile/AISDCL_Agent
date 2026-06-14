@@ -1,0 +1,99 @@
+{
+  "score": 3,
+  "n_fail": 0,
+  "n_warn": 3,
+  "findings": [
+    {
+      "ff": "FF-1",
+      "severity": "info",
+      "fingerprint": "ff1-ok",
+      "title": "FSM 三源狀態宇宙一致（39 態）",
+      "detail": "transition_rules ∪ == SDD_FSM.tla States。雙源一致性守門通過。",
+      "evidence": []
+    },
+    {
+      "ff": "FF-2",
+      "severity": "info",
+      "fingerprint": "ff2-coverage",
+      "title": "CLAUDE.md §9 已裁剪；registry 權威持有 23 條規則",
+      "detail": "Phase 2 2c 完成：CLAUDE.md §9 不再 eager-load 編號子規則，細節以 governance/rules/R-*.yaml 為權威來源、由 rule_loader 逐態注入。§9 頁數與引用完整性改由 FF-5 守門。",
+      "evidence": [
+        "已抽出 R-*.yaml：23 檔"
+      ]
+    },
+    {
+      "ff": "FF-3",
+      "severity": "info",
+      "fingerprint": "ff3-ok",
+      "title": "無孤兒 / 損毀 FSM 持久化檔",
+      "detail": "build/reports/fsm/ 乾淨；save_state reap 契約完整。",
+      "evidence": []
+    },
+    {
+      "ff": "FF-4",
+      "severity": "info",
+      "fingerprint": "ff4-ok",
+      "title": "觀測態分類同位通過（12 態 + 1 已知分歧）",
+      "detail": "Terminal/Emergency 互斥成立；已知分歧：['AUTO_RECOVERY_ATTEMPT']。",
+      "evidence": []
+    },
+    {
+      "ff": "FF-5",
+      "severity": "info",
+      "fingerprint": "ff5-ok",
+      "title": "CLAUDE.md §9 已精簡（≈0.6 頁 ≤ 1.2）",
+      "detail": "憲法摘要引用 13 條 R-9.x，全部存在。",
+      "evidence": []
+    },
+    {
+      "ff": "FF-6",
+      "severity": "warn",
+      "fingerprint": "ff6-workflow-linkrot",
+      "title": "workflow 文件連結衛生：37 條未解析相對連結",
+      "detail": "多為 v0.09 繼承文件註腳引用（相對深度寫錯或檔名更名）；聚合為單一 advisory，建議批次清理（非樞紐、不阻擋收斂）。",
+      "evidence": [
+        "workflow/adr-generation/ADR_GENERATION.md → ../../docs/02_architecture/adr/ADR-TEMPLATE.md",
+        "workflow/adr-generation/ADR_GENERATION.md → ../../docs/02_architecture/SDD_Core_Principles.md",
+        "workflow/core/api-specification.md → ../../docs_template/srd/API_Specification_Template.md",
+        "workflow/core/api-specification.md → ../../docs_template/srd/API_Index_Template.md",
+        "workflow/core/api-specification.md → ../../AISDLC_INIT.md",
+        "workflow/core/api-specification.md → agent/core/05.sd-architect-zh.yaml",
+        "workflow/core/api-specification.md → agent/core/04.sa-analyst-zh.yaml",
+        "workflow/core/api-specification.md → agent/core/07.qa-tester-zh.yaml",
+        "…另有 29 條"
+      ]
+    },
+    {
+      "ff": "FF-6",
+      "severity": "info",
+      "fingerprint": "ff6-hub-ok",
+      "title": "INIT.md 導覽樞紐連結完整（0 死連結）",
+      "detail": "樞紐全綠；workflow 內容文件連結衛生見上方聚合 advisory。",
+      "evidence": []
+    },
+    {
+      "ff": "FF-7",
+      "severity": "warn",
+      "fingerprint": "ff7-count-specialized-agents",
+      "title": "Specialized Agents 數量漂移：INIT 宣稱 14，磁碟 18",
+      "detail": "INIT.md 摘要與磁碟實況不符（measurement blindness；advisory）。",
+      "evidence": [
+        "宣稱=14",
+        "磁碟=18",
+        "差=+4"
+      ]
+    },
+    {
+      "ff": "FF-7",
+      "severity": "warn",
+      "fingerprint": "ff7-count-skills",
+      "title": "Skills 數量漂移：INIT 宣稱 39，磁碟 42",
+      "detail": "INIT.md 摘要與磁碟實況不符（measurement blindness；advisory）。",
+      "evidence": [
+        "宣稱=39",
+        "磁碟=42",
+        "差=+3"
+      ]
+    }
+  ]
+}

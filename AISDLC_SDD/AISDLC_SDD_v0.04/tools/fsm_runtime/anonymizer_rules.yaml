@@ -1,0 +1,246 @@
+# Anonymizer Rules — Cross-Project Learning Hub
+#
+# ACT: ACT-030 (Phase F M1 D-30.2)
+# Version: v1
+# Status: APPROVED 2026-04-25 (Human Checkpoint passed; OPEN-G.1 deny_list defaults empty)
+# Spec: docs/06_quality/HUB-GOVERNANCE-SPEC.md §肆
+#
+# Schema:
+#   schema_version: 規格版本（loader 寬鬆解析）
+#   rules:
+#     - id: 唯一識別（{LEVEL}.{category} 格式）
+#       level: L0 | L1 | L2
+#       category: 分類名（人類可讀）
+#       pattern: Python re.compile() 相容 regex
+#       placeholder: L1 用替換字串；L2 留空（quarantine 不替換）
+#       case_insensitive: bool（預設 false）
+#       description: 何時命中
+#   allow_list: 不替換的公開技術名詞 / 開源專案名
+#
+# 註解：
+#   - L2 命中 → quarantine + 中止 push（HUB-GOVERNANCE-SPEC G-30.1/G-30.2）
+#   - L1 命中 → 自動替換（HUB-GOVERNANCE-SPEC §4.2）
+#   - placeholder 中的 {N}（如 PROJECT_{N}）由 anonymizer 動態流水號（出現序：A,B,C）
+
+schema_version: "phase-f-v1"
+last_updated: "2026-04-25"
+rule_count_target: 20  # M2 D-30.6 測試 fixture 至少覆蓋 20 條
+
+# ─────────────────────────────────────────────
+# L2 — 機密：命中即 quarantine
+# ─────────────────────────────────────────────
+rules:
+  - id: L2.email_named
+    level: L2
+    category: email
+    pattern: '\b[a-zA-Z0-9._%+-]+@(?!example\.(com|org|net)\b)[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}\b'
+    placeholder: ""
+    case_insensitive: true
+    description: "具名 Email（排除 example.com 等保留域名）"
+
+  - id: L2.ipv4
+    level: L2
+    category: ip_address
+    pattern: '\b(?:(?:25[0-5]|2[0-4]\d|[01]?\d\d?)\.){3}(?:25[0-5]|2[0-4]\d|[01]?\d\d?)\b'
+    placeholder: ""
+    description: "IPv4 位址"
+
+  - id: L2.ipv6
+    level: L2
+    category: ip_address
+    pattern: '\b(?:[A-Fa-f0-9]{1,4}:){2,7}[A-Fa-f0-9]{1,4}\b'
+    placeholder: ""
+    description: "IPv6 位址（簡化匹配，可能誤判，由 PII Scanner 二次確認）"
+
+  - id: L2.api_token_openai
+    level: L2
+    category: api_token
+    pattern: '\bsk-[a-zA-Z0-9]{20,}\b'
+    placeholder: ""
+    description: "OpenAI / Anthropic 風格 API Key"
+
+  - id: L2.api_token_github
+    level: L2
+    category: api_token
+    pattern: '\bgh[pousr]_[A-Za-z0-9]{20,}\b'
+    placeholder: ""
+    description: "GitHub Personal Access Token"
+
+  - id: L2.api_token_aws_access_key
+    level: L2
+    category: api_token
+    pattern: '\bAKIA[0-9A-Z]{16}\b'
+    placeholder: ""
+    description: "AWS Access Key ID"
+
+  - id: L2.api_token_bearer
+    level: L2
+    category: api_token
+    pattern: '\bBearer\s+[A-Za-z0-9._\-]{20,}\b'
+    placeholder: ""
+    case_insensitive: true
+    description: "Authorization: Bearer ... header 樣式"
+
+  - id: L2.credit_card
+    level: L2
+    category: financial
+    pattern: '\b(?:\d[ -]?){13,16}\b'
+    placeholder: ""
+    description: "13~16 位連號（含 - 與空白），可能為信用卡號（PII Scanner 二次以 Luhn 演算法確認）"
+
+  - id: L2.tw_id_number
+    level: L2
+    category: pii
+    pattern: '\b[A-Z][12]\d{8}\b'
+    placeholder: ""
+    description: "台灣身分證字號格式"
+
+  - id: L2.internal_domain
+    level: L2
+    category: internal_domain
+    pattern: '\b[a-zA-Z0-9-]+\.(corp|internal|intranet|local)\.[a-zA-Z]{2,}\b'
+    placeholder: ""
+    case_insensitive: true
+    description: "內部網域（*.corp.* / *.internal.* 等）"
+
+  # 客戶名 / 商業機密由 deny_list 機制處理（per-project 維護），
+  # 預設清單為空，使用者依 OPEN-G.1 決議補充
+  - id: L2.customer_name_denylist
+    level: L2
+    category: customer_name
+    pattern: ""  # 動態組合自 deny_list（見下方）
+    placeholder: ""
+    description: "客戶名 deny-list 命中（per-project 配置）；空 pattern 表示由 deny_list 動態建立"
+    dynamic_source: deny_list_customers
+
+  # Phase F.1 advisory 補件：保守 corporate suffix 兜底，即使 per-project deny_list
+  # 為空仍能攔截多數具名法人。命中即 quarantine（L2），由人工於 PR 確認是否
+  # 真為公開技術名詞（加入 allow_list）或商業機密（補入 deny_list）。
+  - id: L2.corporate_suffix_starter
+    level: L2
+    category: customer_name
+    # 中文: XX公司/股份有限公司/銀行/集團/控股；英文: Inc / Corp / Ltd / LLC / GmbH / SA / SAS / Pty
+    # 前綴需 1~12 字（中文）或 PascalCase（英文）以避免誤觸通用詞
+    pattern: '(?:[一-鿿]{2,12}(?:股份有限公司|有限公司|公司|銀行|集團|控股|工業))|(?:\b[A-Z][a-zA-Z0-9&-]{1,30}\s+(?:Inc|Corp|Corporation|Ltd|Limited|LLC|GmbH|S\.?A\.?|SAS|Pty)\b\.?)'
+    placeholder: "<CUSTOMER_{N}>"
+    description: "保守 corporate suffix 兜底（中英文常見法人後綴）；防 deny_list 未配置時漏掃"
+
+# ─────────────────────────────────────────────
+# L1 — 內部：自動替換為 placeholder
+# ─────────────────────────────────────────────
+  - id: L1.project_codename
+    level: L1
+    category: project_codename
+    pattern: '\b(?:proj|project|sys)-([a-z][a-z0-9_-]{2,})\b'
+    placeholder: "<PROJECT_{N}>"
+    case_insensitive: true
+    description: "專案代號（proj-foo、sys-order 等）；{N} 動態流水"
+
+  - id: L1.module_name_named
+    level: L1
+    category: module_name
+    # 一個或多個 PascalCase 段 + Module 後綴；Order/Payment/User... + Module 皆匹配
+    pattern: '\b(?:[A-Z][a-z]+)+Module\b'
+    placeholder: "<MODULE_{N}>"
+    description: "FRD/SRD 內 PascalCase + Module 後綴的具名模組（如 OrderModule、PaymentModule）"
+
+  - id: L1.issue_number
+    level: L1
+    category: issue_pr
+    pattern: '#(\d{2,6})'
+    placeholder: "<ISSUE_{N}>"
+    description: "GitHub Issue / PR 編號"
+
+  - id: L1.pr_explicit
+    level: L1
+    category: issue_pr
+    pattern: '\b(?:PR|pull|pull-request)[-/\s]?(\d{2,6})\b'
+    placeholder: "<PR_{N}>"
+    case_insensitive: true
+    description: "PR 顯式編號"
+
+  - id: L1.absolute_date
+    level: L1
+    category: date
+    pattern: '\b20\d{2}-(?:0[1-9]|1[0-2])-(?:0[1-9]|[12]\d|3[01])\b'
+    placeholder: "<DATE>"
+    description: "ISO 絕對日期（保留 quarter / 相對描述如「7 天前」不替換）"
+
+  - id: L1.user_mention
+    level: L1
+    category: user_handle
+    # Negative lookbehind 排除 email context（e.g. john.doe@acme.com）；
+    # 只匹配前綴非 word/dot 的 @username。L2.email_named 仍會先 quarantine email。
+    pattern: '(?<![\w.])@([a-zA-Z][a-zA-Z0-9_-]{2,})\b'
+    placeholder: "<USER_{N}>"
+    description: "@username 提及（GitHub / Slack 風格）；不含 email 內 @"
+
+  - id: L1.repo_path_specific
+    level: L1
+    category: file_path
+    # match src/<具名專案>/... 但保留通用 lib/、tests/、common/
+    pattern: '\b(?:src|app|services|modules)/(?!common|shared|lib|test)([a-z][a-z0-9_-]+)(?:/[\w./-]+)?\b'
+    placeholder: "<PATH_{N}>"
+    description: "含具名專案層的相對檔案路徑"
+
+# ─────────────────────────────────────────────
+# Allow-list — 公開技術名詞，永不替換
+# ─────────────────────────────────────────────
+allow_list:
+  technology:
+    - OAuth
+    - JWT
+    - PostgreSQL
+    - MySQL
+    - Redis
+    - Kafka
+    - Docker
+    - Kubernetes
+    - GraphQL
+    - REST
+    - gRPC
+    - WebSocket
+    - SQLite
+  open_source:
+    - linux
+    - react
+    - vue
+    - angular
+    - django
+    - flask
+    - fastapi
+    - spring
+    - nodejs
+    - typescript
+    - python
+    - golang
+    - rust
+  framework_internal:
+    - AISDLC
+    - SDD
+    - Phase E
+    - Phase F
+    - SCG
+    - FSM
+    - FPL
+    - SLV
+    - RTM
+    - PBS
+    - ADR
+    - C4
+
+# ─────────────────────────────────────────────
+# Deny-list — per-project 客戶名 / 商業機密
+# 由使用者依 OPEN-G.1 決議維護；預設空
+# ─────────────────────────────────────────────
+deny_list_customers: []   # e.g., ["ACME 公司", "XX 銀行"]
+deny_list_products: []    # e.g., ["Project Phoenix", "OperationFox"]
+
+# ─────────────────────────────────────────────
+# Anonymizer 行為設定
+# ─────────────────────────────────────────────
+behavior:
+  preserve_semantic_skeleton: true   # 保留 regex / qualifier / scope 欄位
+  numbering_scheme: alphabetical_seq # PROJECT_A, PROJECT_B, ...（同類型共用流水）
+  cross_session_persist: false       # 流水號不跨 session 持久化（每次 push 重新編號）
+  hit_log_redact: true               # quarantine log 不寫原文（HUB-GOVERNANCE-SPEC §5.1）

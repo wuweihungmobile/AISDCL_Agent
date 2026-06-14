@@ -27,6 +27,7 @@ from .perception.hotkey_handler import HotkeyHandler
 from .decision.minimax_client import MinimaxClient, MinimaxError
 from .core.wiring import build_kernel
 from .core.services.auto_resume import AutoResumeService
+from .infra.adapters.minimax_brain import MinimaxBrainAdapter
 from .infra.adapters.pty_executor import PtyExecutor
 from .infra.adapters.shell_evaluator import ShellEvaluator
 from .infra.repositories import build_state_repository
@@ -94,8 +95,12 @@ def main() -> int:
     executor = PtyExecutor(cfg)
     evaluator = ShellEvaluator(cfg.playbook)
     state_repo = build_state_repository(cfg.checkpoint_dir, cfg.storage)
+    # DEF-01-008：flag-gated brain 注入。預設 enable_kernel_brain=False → brain=None，
+    # 維持既有 production 行為（無 Minimax 逐步 correction、SddGovernance escalation 諮詢
+    # 不啟用），零退化。顯式啟用後死碼轉為可達能力（行為差異見 improving_03 §2.1）。
+    brain = MinimaxBrainAdapter(minimax) if cfg.minimax.enable_kernel_brain else None
     kernel = build_kernel(cfg, executor=executor, evaluator=evaluator,
-                          hotkey=hotkey, minimax_client=minimax,
+                          hotkey=hotkey, minimax_client=minimax, brain=brain,
                           state_repository=state_repo)
     service = AutoResumeService(kernel, cfg, state_repository=state_repo)
     result = service.run(args.playbook, fresh=args.fresh)

@@ -1,0 +1,79 @@
+id: R-9.32
+title: Phase T 轉換算子文法的自我擴充（meta⁵）（TRANSFORMS/OPS 外有界算子生成文法 + 算子可計算性有界停機）
+trigger_states:
+  - LEARNING_COMMIT
+  - MEMORY_CONSOLIDATION
+severity: high
+maturity: active
+spec: >
+  L10 完整之「離線活體 meta⁵ 迴圈 · 轉換算子文法自我擴充」切片：把 Phase S 只能在固定轉換算子
+  TRANSFORMS（vocabulary_genesis.TRANSFORMS 6 條硬編）+ 固定聚合算子 OPS
+  （dimension_semantics_synthesizer.OPS 4 條硬編）上自我發明 VOCAB 外特徵詞彙的能力，推進到系統能
+  自我發明一個 TRANSFORMS/OPS 外的全新轉換/聚合算子語意（算子外生成，meta⁵）。並納管「算子外生成」
+  憑空長出、Phase S（固定算子）時不存在而 Phase T 才出現的新危害：(i) 算子可計算性危害——被發明物第一
+  次是『可執行計算』而非『資料』（Phase Q/R/S 的被發明物皆為標籤/描述子，執行它們的是人類寫死全函式），
+  自我發明的算子若無界可非全函式（某輸入無定義/拋例外）、無界計算步數（隱含遞迴/迴圈）、甚至不停機——
+  這是「圖靈完備 vs 保證停機」第一次反噬到框架自我擴充的產物本身；(ii) 算子無界生成爆炸（TRANSFORMS/OPS
+  外不再有 6+4 條硬編上界）；(iii) 算子自我發明 Goodhart（發明一個 primary/combinator/probe 計算自己核可
+  訊號的自指自利算子）。9.32.1 算子生成文法自我擴充骨架（OperatorGenesis / BoundedGrammar，meta⁵）：
+  TRANSFORMS/OPS 外算子自我發明經 operator_genesis 在 bounded 算子生成文法（有限原始算子 PRIMITIVES ×
+  有限組合算子 COMBINATORS）可枚舉、節點 ≤ SDD_DIM_OP_BUDGET（clamp[8,128] 預設 32）——「TRANSFORMS/OPS
+  外」≠「無界」（更深的無界生成需另證有界的形式化兌現）；只提案、絕不自動納入、絕不自寫常數；結構性不
+  import oracle / 不讀必要性語料（對抗分離，編譯期隔離斷言）。9.32.2 算子自我發明反自利
+  （OperatorGenesisAntiSelfInterest）：算子自我發明的 capability-delta tier 唯一合法來源為 operator_genesis
+  不可見、content-hashed 凍結的 feature-grounded 算子必要性 held-out（增量覆蓋 ∧ 非冗餘）勝率；genesis 自評
+  結構性禁止充當；genesis 自評必要但 oracle 判不必要/冗餘一律以 oracle 為準；算子自指守門結構性拒絕
+  （primary/combinator/secondary/probe 引用保留自指/proposer/oracle 內部信號 self_score/proposer_*/necessity/
+  oracle_* … → operator_self_reference_guard 在送 oracle 前攔，零漏放）；OPS 外噪音算子（增量覆蓋 <
+  SDD_DIM_COVERAGE_MARGIN）+ 冗餘算子（與既有 existing_cost 排序一致率 ≥ SDD_DIM_REDUNDANCY_MAX）兩道正交
+  門檻並列攔截零漏放（新增 feature-grounded evaluate_genesis_operator 不靠算子名）。9.32.3 算子可計算性
+  有界停機（OperatorComputabilityBounded，本 Phase 最深停機紅線）：每個自我發明算子結構性保證全函式 +
+  有界計算步數 + 零遞迴零迴圈——(a) 算子由 total PRIMITIVES（mean/max/min/sum/range/median/mad/last，O(n)
+  list-reduction）× total COMBINATORS（identity/abs/neg/clip01/sq 一元 + diff/ratio_safe/max2/min2 二元，
+  ratio_safe 對 0 分母回退）在有界深度（≤2）運算式樹組成 → apply() 對任何輸入（含空/極端值）有定義、永不拋
+  例外、無 NaN/inf（fuzz-total）；(b) cost() ≤ SDD_DIM_OP_STEP_MAX（clamp[1,64] 預設 8，有界深度文法結構性
+  保證 ≤3）；(c) 算子求值路徑零 while/零遞迴/零自呼叫（ast 斷言 _prim/_comb/apply/cost）；採納前
+  guard_operator_computability 驗，觸頂 OperatorComputabilityExceeded → MFSM_ESCALATION。把「圖靈完備 vs
+  保證停機」正面釘進框架自我擴充的產物本身——被發明物（算子=可執行計算）本身可證停機，而整個閉環仍靠
+  LLM+紙帶維持圖靈完備（把可執行計算刻意設計成 sub-Turing 的有限代數）。9.32.4 算子基數 + 反 big-bang
+  算子發明（OperatorGenesisBounded + NoUnboundedOperatorGenesis）：(i) 現存活躍 operator-genesis 算子數 ≤
+  SDD_DIM_OP_MAX（clamp[1,64] 預設 16）→ 觸頂 OperatorCardinalityExceeded → MFSM_ESCALATION
+  （meta_halt_monitor.guard_operator_genesis）；(ii) 每週期至多 K_op（SDD_DIM_EXPAND_K 預設 1，沿用 Phase
+  Q/R/S）個算子自我發明可進 proposed-pending-signoff，每個必經人工 signoff（守 Rule 8 / 9.27.3 / 9.28.4 /
+  9.29.4 / 9.30.4 / 9.31.4）；genesis/steersman 絕不自動 commit、絕不自動納入、絕不一次劫持整個算子本體論；
+  退役算子再採納須挾 necessity capability-delta（沿用 GraduationRatchet）；誠實標註：算子 stock（每算子
+  首採、per-fingerprint churn=0、維度/詞彙 stock 天花板皆盲）與算子可計算性（cost ≤ step_max + fuzz-total +
+  ast 零遞迴零迴圈）是更緊的 runtime/結構精煉，由 guard_operator_genesis / guard_operator_computability +
+  OPERATOR_GENESIS_GOODHART_FLAP / OPERATOR_COMPUTABILITY_FLAP chaos enforce；META_FSM.tla 的
+  OperatorGenesisBounded + OperatorComputabilityBounded 為 single-counter 抽象之歸約引用（算子自我擴充的
+  add↔retire 迴圈與單指紋 churn 迴圈同構，不無限抖動；被發明算子自身行為有界停機）；重用既有 META_FSM、僅補
+  OperatorGenesisBounded + OperatorComputabilityBounded INVARIANT、不增狀態 / 變數、不增第六軌；五軌 TLC
+  （SDD 42 / META 13 / FLEET 7 / COMPOSITION 21 / OPTIMIZATION 12）全不回歸、算子發明不污染單軌 SDD_FSM.tla。
+  9.32.5 算子自我發明誠實 + 活體/meta-oracle horizon：feature-grounded 算子必要性勝率 tier 為 capability_level
+  唯一合法來源，不得謊報、不得用自評充當；組合算子文法（meta⁶：自我擴充 PRIMITIVES/COMBINATORS 集合）+
+  自我發明評估器（meta-oracle 自演化，最高 horizon——它自指地破壞所有 Phase 賴以成立的對抗分離地基
+  〔generator 與 evaluator 收斂同基質會掏空全部反 Goodhart 保證〕，未獲 evaluator-of-evaluators 的更高階
+  held-out meta-corpus + 其反自利證明等對抗分離不可繞過性證明前不得採納）+ 活體 meta⁵ 發明版受 OPEN-10.6
+  約束續列 horizon（OPEN-T.x 承 OPEN-S.x/R.x/Q.x/O.7/M.7/P.7 暫不放寬沙箱）。對應 operator_genesis
+  （enumerate_genesis_operators / operator_self_reference_guard / operator_genesis / operator_genesis_round /
+  adopt_genesis_operator / expanded_ops / GenesisOperator.cost / GenesisOperator.is_total）/
+  dimension_necessity_oracle（evaluate_genesis_operator / necessity_score_operator / load_operator_corpus /
+  OperatorCase / OperatorCandidate）/ meta_halt/meta_ledger（is_operator_genesis_fingerprint /
+  active_operator_genesis_features）/ meta_halt/meta_halt_monitor（guard_operator_genesis /
+  OperatorCardinalityExceeded / guard_operator_computability / OperatorComputabilityExceeded / dim_op_max /
+  dim_op_step_max）/ steersman_renderer（render_operator_genesis_proposal）。禁止：operator_genesis 自動納入
+  算子自我發明 / 自寫常數繞過人工 signoff + guard_operator_genesis / guard_operator_computability、用 genesis
+  自評充當算子自我發明必要性 capability-delta tier（算子自我發明 Goodhart 自評放水）、算子自我發明
+  primary/combinator/secondary/probe 自指（引用保留自指 / proposer / oracle 內部信號繞過
+  operator_self_reference_guard）、operator_genesis 讀寫 / 影響 / import OPR-* 算子必要性語料或
+  dimension_necessity_oracle、算子自我發明搜尋超 SDD_DIM_OP_BUDGET 仍指數展開（破有界算子文法）、自我發明
+  算子非全函式 / cost 超 SDD_DIM_OP_STEP_MAX / 算子求值路徑含遞迴 while 自呼叫（破算子可計算性——被發明物
+  本身不可證停機）、現存活躍 operator-genesis 算子超 SDD_DIM_OP_MAX 仍無界擴充算子、一週期同時算子自我
+  發明 > K_op 個、把 operator-genesis 元迴圈併入單軌 SDD_FSM.tla 或新增第六軌污染五軌 reachable、未獲對抗
+  分離不可繞過性證明即採納自我發明評估器（meta-oracle 自演化，掏空全部反 Goodhart 對抗分離地基）、未經
+  OPEN-S.x 私自開 HTTP 外聯做活體 meta⁵ 發明（破 OPEN-10.6）。
+test_ref: tools/fsm_runtime/tests/test_phase_t.py
+scaffold_roi:
+  fire_count: 0
+  catch_count: 0
+  false_positive_count: 0

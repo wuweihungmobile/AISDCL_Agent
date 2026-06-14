@@ -1,0 +1,1039 @@
+events:
+- ts: '2026-06-05T03:48:14.593449+00:00'
+  category: auto-compact-rate-limit
+  reason: auto_compact exceeded 3 per stage 'initial' — 可能引用文件過大或 stage 需拆分；拒絕再次 compact
+  state: ESCALATION
+  extra_context_keys:
+  - count_per_stage
+  - cumulative_tokens
+  - max_per_stage
+  - ratio
+  - stage_key
+  - suggestions
+- ts: '2026-06-05T03:48:14.904222+00:00'
+  category: auto-compact-rate-limit
+  reason: auto_compact exceeded 3 per stage 'initial' — 可能引用文件過大或 stage 需拆分；拒絕再次 compact
+  state: ESCALATION
+  extra_context_keys:
+  - count_per_stage
+  - cumulative_tokens
+  - max_per_stage
+  - ratio
+  - stage_key
+  - suggestions
+- ts: '2026-06-05T03:48:15.267026+00:00'
+  category: auto-recovery-refused
+  reason: 'auto_recovery refused: Rule 9.14.2: same reason already attempted (1 ≥
+    1)'
+  state: ESCALATION_FINAL
+  extra_context_keys:
+  - refusal_reason
+- ts: '2026-06-05T03:48:15.430817+00:00'
+  category: auto-recovery-refused
+  reason: 'auto_recovery refused: Rule 9.14.1: session_attempt_count (3) ≥ 3'
+  state: ESCALATION_FINAL
+  extra_context_keys:
+  - refusal_reason
+- ts: '2026-06-05T03:48:15.465866+00:00'
+  category: auto-recovery-refused
+  reason: 'auto_recovery refused: Rule 9.14.3: diagnostic category=structural (sub_type=spec_conflict)
+    is not auto-recoverable'
+  state: ESCALATION_FINAL
+  extra_context_keys:
+  - refusal_reason
+- ts: '2026-06-05T03:48:15.643046+00:00'
+  category: auto-compact-rate-limit
+  reason: auto_compact exceeded 3 per stage 'initial' — 可能引用文件過大或 stage 需拆分；拒絕再次 compact
+  state: ESCALATION
+  extra_context_keys:
+  - count_per_stage
+  - cumulative_tokens
+  - max_per_stage
+  - ratio
+  - stage_key
+  - suggestions
+- ts: '2026-06-05T03:48:53.692325+00:00'
+  category: auto-compact-rate-limit
+  reason: auto_compact exceeded 3 per stage 'initial' — 可能引用文件過大或 stage 需拆分；拒絕再次 compact
+  state: ESCALATION
+  extra_context_keys:
+  - count_per_stage
+  - cumulative_tokens
+  - max_per_stage
+  - ratio
+  - stage_key
+  - suggestions
+- ts: '2026-06-05T03:48:56.160605+00:00'
+  category: auto-compact-rate-limit
+  reason: auto_compact exceeded 3 per stage 'initial' — 可能引用文件過大或 stage 需拆分；拒絕再次 compact
+  state: ESCALATION
+  extra_context_keys:
+  - count_per_stage
+  - cumulative_tokens
+  - max_per_stage
+  - ratio
+  - stage_key
+  - suggestions
+- ts: '2026-06-05T03:49:21.499444+00:00'
+  category: auto-recovery-refused
+  reason: 'auto_recovery refused: Rule 9.14.3: diagnostic category=structural (sub_type=spec_conflict)
+    is not auto-recoverable'
+  state: ESCALATION_FINAL
+  extra_context_keys:
+  - refusal_reason
+- ts: '2026-06-05T03:51:01.159195+00:00'
+  category: auto-compact-rate-limit
+  reason: auto_compact exceeded 3 per stage 'initial' — 可能引用文件過大或 stage 需拆分；拒絕再次 compact
+  state: ESCALATION
+  extra_context_keys:
+  - count_per_stage
+  - cumulative_tokens
+  - max_per_stage
+  - ratio
+  - stage_key
+  - suggestions
+- ts: '2026-06-05T03:51:03.716821+00:00'
+  category: auto-compact-rate-limit
+  reason: auto_compact exceeded 3 per stage 'initial' — 可能引用文件過大或 stage 需拆分；拒絕再次 compact
+  state: ESCALATION
+  extra_context_keys:
+  - count_per_stage
+  - cumulative_tokens
+  - max_per_stage
+  - ratio
+  - stage_key
+  - suggestions
+- ts: '2026-06-05T03:53:47.604724+00:00'
+  category: auto-compact-rate-limit
+  reason: auto_compact exceeded 3 per stage 'initial' — 可能引用文件過大或 stage 需拆分；拒絕再次 compact
+  state: ESCALATION
+  extra_context_keys:
+  - count_per_stage
+  - cumulative_tokens
+  - max_per_stage
+  - ratio
+  - stage_key
+  - suggestions
+- ts: '2026-06-05T03:53:48.024929+00:00'
+  category: auto-compact-rate-limit
+  reason: auto_compact exceeded 3 per stage 'initial' — 可能引用文件過大或 stage 需拆分；拒絕再次 compact
+  state: ESCALATION
+  extra_context_keys:
+  - count_per_stage
+  - cumulative_tokens
+  - max_per_stage
+  - ratio
+  - stage_key
+  - suggestions
+- ts: '2026-06-05T03:53:48.529706+00:00'
+  category: auto-recovery-refused
+  reason: 'auto_recovery refused: Rule 9.14.2: same reason already attempted (1 ≥
+    1)'
+  state: ESCALATION_FINAL
+  extra_context_keys:
+  - refusal_reason
+- ts: '2026-06-05T03:53:49.010726+00:00'
+  category: auto-recovery-refused
+  reason: 'auto_recovery refused: Rule 9.14.1: session_attempt_count (3) ≥ 3'
+  state: ESCALATION_FINAL
+  extra_context_keys:
+  - refusal_reason
+- ts: '2026-06-05T03:53:49.163462+00:00'
+  category: auto-recovery-refused
+  reason: 'auto_recovery refused: Rule 9.14.3: diagnostic category=structural (sub_type=spec_conflict)
+    is not auto-recoverable'
+  state: ESCALATION_FINAL
+  extra_context_keys:
+  - refusal_reason
+- ts: '2026-06-05T03:53:49.761057+00:00'
+  category: auto-compact-rate-limit
+  reason: auto_compact exceeded 3 per stage 'initial' — 可能引用文件過大或 stage 需拆分；拒絕再次 compact
+  state: ESCALATION
+  extra_context_keys:
+  - count_per_stage
+  - cumulative_tokens
+  - max_per_stage
+  - ratio
+  - stage_key
+  - suggestions
+- ts: '2026-06-05T03:55:32.894573+00:00'
+  category: auto-compact-rate-limit
+  reason: auto_compact exceeded 3 per stage 'initial' — 可能引用文件過大或 stage 需拆分；拒絕再次 compact
+  state: ESCALATION
+  extra_context_keys:
+  - count_per_stage
+  - cumulative_tokens
+  - max_per_stage
+  - ratio
+  - stage_key
+  - suggestions
+- ts: '2026-06-05T03:55:36.070300+00:00'
+  category: auto-compact-rate-limit
+  reason: auto_compact exceeded 3 per stage 'initial' — 可能引用文件過大或 stage 需拆分；拒絕再次 compact
+  state: ESCALATION
+  extra_context_keys:
+  - count_per_stage
+  - cumulative_tokens
+  - max_per_stage
+  - ratio
+  - stage_key
+  - suggestions
+- ts: '2026-06-05T03:56:02.049550+00:00'
+  category: auto-recovery-refused
+  reason: 'auto_recovery refused: Rule 9.14.3: diagnostic category=structural (sub_type=spec_conflict)
+    is not auto-recoverable'
+  state: ESCALATION_FINAL
+  extra_context_keys:
+  - refusal_reason
+- ts: '2026-06-05T03:56:56.950167+00:00'
+  category: auto-compact-rate-limit
+  reason: auto_compact exceeded 3 per stage 'initial' — 可能引用文件過大或 stage 需拆分；拒絕再次 compact
+  state: ESCALATION
+  extra_context_keys:
+  - count_per_stage
+  - cumulative_tokens
+  - max_per_stage
+  - ratio
+  - stage_key
+  - suggestions
+- ts: '2026-06-05T03:56:59.507888+00:00'
+  category: auto-compact-rate-limit
+  reason: auto_compact exceeded 3 per stage 'initial' — 可能引用文件過大或 stage 需拆分；拒絕再次 compact
+  state: ESCALATION
+  extra_context_keys:
+  - count_per_stage
+  - cumulative_tokens
+  - max_per_stage
+  - ratio
+  - stage_key
+  - suggestions
+- ts: '2026-06-05T04:10:52.699702+00:00'
+  category: auto-compact-rate-limit
+  reason: auto_compact exceeded 3 per stage 'initial' — 可能引用文件過大或 stage 需拆分；拒絕再次 compact
+  state: ESCALATION
+  extra_context_keys:
+  - count_per_stage
+  - cumulative_tokens
+  - max_per_stage
+  - ratio
+  - stage_key
+  - suggestions
+- ts: '2026-06-05T04:10:53.046922+00:00'
+  category: auto-compact-rate-limit
+  reason: auto_compact exceeded 3 per stage 'initial' — 可能引用文件過大或 stage 需拆分；拒絕再次 compact
+  state: ESCALATION
+  extra_context_keys:
+  - count_per_stage
+  - cumulative_tokens
+  - max_per_stage
+  - ratio
+  - stage_key
+  - suggestions
+- ts: '2026-06-05T04:10:53.426107+00:00'
+  category: auto-recovery-refused
+  reason: 'auto_recovery refused: Rule 9.14.2: same reason already attempted (1 ≥
+    1)'
+  state: ESCALATION_FINAL
+  extra_context_keys:
+  - refusal_reason
+- ts: '2026-06-05T04:10:53.583027+00:00'
+  category: auto-recovery-refused
+  reason: 'auto_recovery refused: Rule 9.14.1: session_attempt_count (3) ≥ 3'
+  state: ESCALATION_FINAL
+  extra_context_keys:
+  - refusal_reason
+- ts: '2026-06-05T04:10:53.629059+00:00'
+  category: auto-recovery-refused
+  reason: 'auto_recovery refused: Rule 9.14.3: diagnostic category=structural (sub_type=spec_conflict)
+    is not auto-recoverable'
+  state: ESCALATION_FINAL
+  extra_context_keys:
+  - refusal_reason
+- ts: '2026-06-05T04:10:53.782358+00:00'
+  category: auto-compact-rate-limit
+  reason: auto_compact exceeded 3 per stage 'initial' — 可能引用文件過大或 stage 需拆分；拒絕再次 compact
+  state: ESCALATION
+  extra_context_keys:
+  - count_per_stage
+  - cumulative_tokens
+  - max_per_stage
+  - ratio
+  - stage_key
+  - suggestions
+- ts: '2026-06-05T04:11:33.281048+00:00'
+  category: auto-compact-rate-limit
+  reason: auto_compact exceeded 3 per stage 'initial' — 可能引用文件過大或 stage 需拆分；拒絕再次 compact
+  state: ESCALATION
+  extra_context_keys:
+  - count_per_stage
+  - cumulative_tokens
+  - max_per_stage
+  - ratio
+  - stage_key
+  - suggestions
+- ts: '2026-06-05T04:11:35.920880+00:00'
+  category: auto-compact-rate-limit
+  reason: auto_compact exceeded 3 per stage 'initial' — 可能引用文件過大或 stage 需拆分；拒絕再次 compact
+  state: ESCALATION
+  extra_context_keys:
+  - count_per_stage
+  - cumulative_tokens
+  - max_per_stage
+  - ratio
+  - stage_key
+  - suggestions
+- ts: '2026-06-05T04:12:01.373384+00:00'
+  category: auto-recovery-refused
+  reason: 'auto_recovery refused: Rule 9.14.3: diagnostic category=structural (sub_type=spec_conflict)
+    is not auto-recoverable'
+  state: ESCALATION_FINAL
+  extra_context_keys:
+  - refusal_reason
+- ts: '2026-06-05T09:33:01.602436+00:00'
+  category: auto-compact-rate-limit
+  reason: auto_compact exceeded 3 per stage 'initial' — 可能引用文件過大或 stage 需拆分；拒絕再次 compact
+  state: ESCALATION
+  extra_context_keys:
+  - count_per_stage
+  - cumulative_tokens
+  - max_per_stage
+  - ratio
+  - stage_key
+  - suggestions
+- ts: '2026-06-05T09:33:02.016612+00:00'
+  category: auto-compact-rate-limit
+  reason: auto_compact exceeded 3 per stage 'initial' — 可能引用文件過大或 stage 需拆分；拒絕再次 compact
+  state: ESCALATION
+  extra_context_keys:
+  - count_per_stage
+  - cumulative_tokens
+  - max_per_stage
+  - ratio
+  - stage_key
+  - suggestions
+- ts: '2026-06-05T09:33:02.602144+00:00'
+  category: auto-recovery-refused
+  reason: 'auto_recovery refused: Rule 9.14.2: same reason already attempted (1 ≥
+    1)'
+  state: ESCALATION_FINAL
+  extra_context_keys:
+  - refusal_reason
+- ts: '2026-06-05T09:33:02.843246+00:00'
+  category: auto-recovery-refused
+  reason: 'auto_recovery refused: Rule 9.14.1: session_attempt_count (3) ≥ 3'
+  state: ESCALATION_FINAL
+  extra_context_keys:
+  - refusal_reason
+- ts: '2026-06-05T09:33:02.915369+00:00'
+  category: auto-recovery-refused
+  reason: 'auto_recovery refused: Rule 9.14.3: diagnostic category=structural (sub_type=spec_conflict)
+    is not auto-recoverable'
+  state: ESCALATION_FINAL
+  extra_context_keys:
+  - refusal_reason
+- ts: '2026-06-05T09:33:23.285093+00:00'
+  category: auto-recovery-refused
+  reason: 'auto_recovery refused: Rule 9.14.3: diagnostic category=structural (sub_type=spec_conflict)
+    is not auto-recoverable'
+  state: ESCALATION_FINAL
+  extra_context_keys:
+  - refusal_reason
+- ts: '2026-06-05T10:15:18.158200+00:00'
+  category: auto-compact-rate-limit
+  reason: auto_compact exceeded 3 per stage 'initial' — 可能引用文件過大或 stage 需拆分；拒絕再次 compact
+  state: ESCALATION
+  extra_context_keys:
+  - count_per_stage
+  - cumulative_tokens
+  - max_per_stage
+  - ratio
+  - stage_key
+  - suggestions
+- ts: '2026-06-05T10:15:18.500129+00:00'
+  category: auto-compact-rate-limit
+  reason: auto_compact exceeded 3 per stage 'initial' — 可能引用文件過大或 stage 需拆分；拒絕再次 compact
+  state: ESCALATION
+  extra_context_keys:
+  - count_per_stage
+  - cumulative_tokens
+  - max_per_stage
+  - ratio
+  - stage_key
+  - suggestions
+- ts: '2026-06-05T10:15:18.889615+00:00'
+  category: auto-recovery-refused
+  reason: 'auto_recovery refused: Rule 9.14.2: same reason already attempted (1 ≥
+    1)'
+  state: ESCALATION_FINAL
+  extra_context_keys:
+  - refusal_reason
+- ts: '2026-06-05T10:15:19.066506+00:00'
+  category: auto-recovery-refused
+  reason: 'auto_recovery refused: Rule 9.14.1: session_attempt_count (3) ≥ 3'
+  state: ESCALATION_FINAL
+  extra_context_keys:
+  - refusal_reason
+- ts: '2026-06-05T10:15:19.119693+00:00'
+  category: auto-recovery-refused
+  reason: 'auto_recovery refused: Rule 9.14.3: diagnostic category=structural (sub_type=spec_conflict)
+    is not auto-recoverable'
+  state: ESCALATION_FINAL
+  extra_context_keys:
+  - refusal_reason
+- ts: '2026-06-05T10:15:37.464000+00:00'
+  category: auto-recovery-refused
+  reason: 'auto_recovery refused: Rule 9.14.3: diagnostic category=structural (sub_type=spec_conflict)
+    is not auto-recoverable'
+  state: ESCALATION_FINAL
+  extra_context_keys:
+  - refusal_reason
+- ts: '2026-06-05T10:16:04.995101+00:00'
+  category: auto-compact-rate-limit
+  reason: auto_compact exceeded 3 per stage 'initial' — 可能引用文件過大或 stage 需拆分；拒絕再次 compact
+  state: ESCALATION
+  extra_context_keys:
+  - count_per_stage
+  - cumulative_tokens
+  - max_per_stage
+  - ratio
+  - stage_key
+  - suggestions
+- ts: '2026-06-05T10:16:44.253214+00:00'
+  category: auto-compact-rate-limit
+  reason: auto_compact exceeded 3 per stage 'initial' — 可能引用文件過大或 stage 需拆分；拒絕再次 compact
+  state: ESCALATION
+  extra_context_keys:
+  - count_per_stage
+  - cumulative_tokens
+  - max_per_stage
+  - ratio
+  - stage_key
+  - suggestions
+- ts: '2026-06-05T10:17:55.403846+00:00'
+  category: auto-compact-rate-limit
+  reason: auto_compact exceeded 3 per stage 'initial' — 可能引用文件過大或 stage 需拆分；拒絕再次 compact
+  state: ESCALATION
+  extra_context_keys:
+  - count_per_stage
+  - cumulative_tokens
+  - max_per_stage
+  - ratio
+  - stage_key
+  - suggestions
+- ts: '2026-06-05T10:17:55.744065+00:00'
+  category: auto-compact-rate-limit
+  reason: auto_compact exceeded 3 per stage 'initial' — 可能引用文件過大或 stage 需拆分；拒絕再次 compact
+  state: ESCALATION
+  extra_context_keys:
+  - count_per_stage
+  - cumulative_tokens
+  - max_per_stage
+  - ratio
+  - stage_key
+  - suggestions
+- ts: '2026-06-05T10:17:56.148288+00:00'
+  category: auto-recovery-refused
+  reason: 'auto_recovery refused: Rule 9.14.2: same reason already attempted (1 ≥
+    1)'
+  state: ESCALATION_FINAL
+  extra_context_keys:
+  - refusal_reason
+- ts: '2026-06-05T10:17:56.317831+00:00'
+  category: auto-recovery-refused
+  reason: 'auto_recovery refused: Rule 9.14.1: session_attempt_count (3) ≥ 3'
+  state: ESCALATION_FINAL
+  extra_context_keys:
+  - refusal_reason
+- ts: '2026-06-05T10:17:56.365908+00:00'
+  category: auto-recovery-refused
+  reason: 'auto_recovery refused: Rule 9.14.3: diagnostic category=structural (sub_type=spec_conflict)
+    is not auto-recoverable'
+  state: ESCALATION_FINAL
+  extra_context_keys:
+  - refusal_reason
+- ts: '2026-06-05T10:18:15.496717+00:00'
+  category: auto-recovery-refused
+  reason: 'auto_recovery refused: Rule 9.14.3: diagnostic category=structural (sub_type=spec_conflict)
+    is not auto-recoverable'
+  state: ESCALATION_FINAL
+  extra_context_keys:
+  - refusal_reason
+- ts: '2026-06-05T10:20:35.764962+00:00'
+  category: auto-compact-rate-limit
+  reason: auto_compact exceeded 3 per stage 'initial' — 可能引用文件過大或 stage 需拆分；拒絕再次 compact
+  state: ESCALATION
+  extra_context_keys:
+  - count_per_stage
+  - cumulative_tokens
+  - max_per_stage
+  - ratio
+  - stage_key
+  - suggestions
+- ts: '2026-06-05T10:21:15.027437+00:00'
+  category: auto-compact-rate-limit
+  reason: auto_compact exceeded 3 per stage 'initial' — 可能引用文件過大或 stage 需拆分；拒絕再次 compact
+  state: ESCALATION
+  extra_context_keys:
+  - count_per_stage
+  - cumulative_tokens
+  - max_per_stage
+  - ratio
+  - stage_key
+  - suggestions
+- ts: '2026-06-05T10:21:53.171543+00:00'
+  category: auto-compact-rate-limit
+  reason: auto_compact exceeded 3 per stage 'initial' — 可能引用文件過大或 stage 需拆分；拒絕再次 compact
+  state: ESCALATION
+  extra_context_keys:
+  - count_per_stage
+  - cumulative_tokens
+  - max_per_stage
+  - ratio
+  - stage_key
+  - suggestions
+- ts: '2026-06-05T10:36:43.328780+00:00'
+  category: auto-compact-rate-limit
+  reason: auto_compact exceeded 3 per stage 'initial' — 可能引用文件過大或 stage 需拆分；拒絕再次 compact
+  state: ESCALATION
+  extra_context_keys:
+  - count_per_stage
+  - cumulative_tokens
+  - max_per_stage
+  - ratio
+  - stage_key
+  - suggestions
+- ts: '2026-06-05T10:36:43.679062+00:00'
+  category: auto-compact-rate-limit
+  reason: auto_compact exceeded 3 per stage 'initial' — 可能引用文件過大或 stage 需拆分；拒絕再次 compact
+  state: ESCALATION
+  extra_context_keys:
+  - count_per_stage
+  - cumulative_tokens
+  - max_per_stage
+  - ratio
+  - stage_key
+  - suggestions
+- ts: '2026-06-05T10:36:44.064708+00:00'
+  category: auto-recovery-refused
+  reason: 'auto_recovery refused: Rule 9.14.2: same reason already attempted (1 ≥
+    1)'
+  state: ESCALATION_FINAL
+  extra_context_keys:
+  - refusal_reason
+- ts: '2026-06-05T10:36:44.241152+00:00'
+  category: auto-recovery-refused
+  reason: 'auto_recovery refused: Rule 9.14.1: session_attempt_count (3) ≥ 3'
+  state: ESCALATION_FINAL
+  extra_context_keys:
+  - refusal_reason
+- ts: '2026-06-05T10:36:44.292428+00:00'
+  category: auto-recovery-refused
+  reason: 'auto_recovery refused: Rule 9.14.3: diagnostic category=structural (sub_type=spec_conflict)
+    is not auto-recoverable'
+  state: ESCALATION_FINAL
+  extra_context_keys:
+  - refusal_reason
+- ts: '2026-06-05T10:37:03.495496+00:00'
+  category: auto-recovery-refused
+  reason: 'auto_recovery refused: Rule 9.14.3: diagnostic category=structural (sub_type=spec_conflict)
+    is not auto-recoverable'
+  state: ESCALATION_FINAL
+  extra_context_keys:
+  - refusal_reason
+- ts: '2026-06-05T10:37:40.834245+00:00'
+  category: auto-compact-rate-limit
+  reason: auto_compact exceeded 3 per stage 'initial' — 可能引用文件過大或 stage 需拆分；拒絕再次 compact
+  state: ESCALATION
+  extra_context_keys:
+  - count_per_stage
+  - cumulative_tokens
+  - max_per_stage
+  - ratio
+  - stage_key
+  - suggestions
+- ts: '2026-06-05T10:37:59.237055+00:00'
+  category: auto-compact-rate-limit
+  reason: auto_compact exceeded 3 per stage 'initial' — 可能引用文件過大或 stage 需拆分；拒絕再次 compact
+  state: ESCALATION
+  extra_context_keys:
+  - count_per_stage
+  - cumulative_tokens
+  - max_per_stage
+  - ratio
+  - stage_key
+  - suggestions
+- ts: '2026-06-05T10:38:27.327028+00:00'
+  category: auto-compact-rate-limit
+  reason: auto_compact exceeded 3 per stage 'initial' — 可能引用文件過大或 stage 需拆分；拒絕再次 compact
+  state: ESCALATION
+  extra_context_keys:
+  - count_per_stage
+  - cumulative_tokens
+  - max_per_stage
+  - ratio
+  - stage_key
+  - suggestions
+- ts: '2026-06-05T10:39:40.253834+00:00'
+  category: auto-compact-rate-limit
+  reason: auto_compact exceeded 3 per stage 'initial' — 可能引用文件過大或 stage 需拆分；拒絕再次 compact
+  state: ESCALATION
+  extra_context_keys:
+  - count_per_stage
+  - cumulative_tokens
+  - max_per_stage
+  - ratio
+  - stage_key
+  - suggestions
+- ts: '2026-06-05T10:39:40.635348+00:00'
+  category: auto-compact-rate-limit
+  reason: auto_compact exceeded 3 per stage 'initial' — 可能引用文件過大或 stage 需拆分；拒絕再次 compact
+  state: ESCALATION
+  extra_context_keys:
+  - count_per_stage
+  - cumulative_tokens
+  - max_per_stage
+  - ratio
+  - stage_key
+  - suggestions
+- ts: '2026-06-05T10:39:41.013107+00:00'
+  category: auto-recovery-refused
+  reason: 'auto_recovery refused: Rule 9.14.2: same reason already attempted (1 ≥
+    1)'
+  state: ESCALATION_FINAL
+  extra_context_keys:
+  - refusal_reason
+- ts: '2026-06-05T10:39:41.188990+00:00'
+  category: auto-recovery-refused
+  reason: 'auto_recovery refused: Rule 9.14.1: session_attempt_count (3) ≥ 3'
+  state: ESCALATION_FINAL
+  extra_context_keys:
+  - refusal_reason
+- ts: '2026-06-05T10:39:41.245887+00:00'
+  category: auto-recovery-refused
+  reason: 'auto_recovery refused: Rule 9.14.3: diagnostic category=structural (sub_type=spec_conflict)
+    is not auto-recoverable'
+  state: ESCALATION_FINAL
+  extra_context_keys:
+  - refusal_reason
+- ts: '2026-06-05T10:40:01.248469+00:00'
+  category: auto-recovery-refused
+  reason: 'auto_recovery refused: Rule 9.14.3: diagnostic category=structural (sub_type=spec_conflict)
+    is not auto-recoverable'
+  state: ESCALATION_FINAL
+  extra_context_keys:
+  - refusal_reason
+- ts: '2026-06-05T13:49:30.990474+00:00'
+  category: auto-compact-rate-limit
+  reason: auto_compact exceeded 3 per stage 'initial' — 可能引用文件過大或 stage 需拆分；拒絕再次 compact
+  state: ESCALATION
+  extra_context_keys:
+  - count_per_stage
+  - cumulative_tokens
+  - max_per_stage
+  - ratio
+  - stage_key
+  - suggestions
+- ts: '2026-06-05T13:49:31.362035+00:00'
+  category: auto-compact-rate-limit
+  reason: auto_compact exceeded 3 per stage 'initial' — 可能引用文件過大或 stage 需拆分；拒絕再次 compact
+  state: ESCALATION
+  extra_context_keys:
+  - count_per_stage
+  - cumulative_tokens
+  - max_per_stage
+  - ratio
+  - stage_key
+  - suggestions
+- ts: '2026-06-05T13:49:31.801518+00:00'
+  category: auto-recovery-refused
+  reason: 'auto_recovery refused: Rule 9.14.2: same reason already attempted (1 ≥
+    1)'
+  state: ESCALATION_FINAL
+  extra_context_keys:
+  - refusal_reason
+- ts: '2026-06-05T13:49:31.985725+00:00'
+  category: auto-recovery-refused
+  reason: 'auto_recovery refused: Rule 9.14.1: session_attempt_count (3) ≥ 3'
+  state: ESCALATION_FINAL
+  extra_context_keys:
+  - refusal_reason
+- ts: '2026-06-05T13:49:32.050113+00:00'
+  category: auto-recovery-refused
+  reason: 'auto_recovery refused: Rule 9.14.3: diagnostic category=structural (sub_type=spec_conflict)
+    is not auto-recoverable'
+  state: ESCALATION_FINAL
+  extra_context_keys:
+  - refusal_reason
+- ts: '2026-06-05T13:49:52.664404+00:00'
+  category: auto-recovery-refused
+  reason: 'auto_recovery refused: Rule 9.14.3: diagnostic category=structural (sub_type=spec_conflict)
+    is not auto-recoverable'
+  state: ESCALATION_FINAL
+  extra_context_keys:
+  - refusal_reason
+- ts: '2026-06-05T13:53:47.701692+00:00'
+  category: auto-compact-rate-limit
+  reason: auto_compact exceeded 3 per stage 'initial' — 可能引用文件過大或 stage 需拆分；拒絕再次 compact
+  state: ESCALATION
+  extra_context_keys:
+  - count_per_stage
+  - cumulative_tokens
+  - max_per_stage
+  - ratio
+  - stage_key
+  - suggestions
+- ts: '2026-06-05T13:53:48.086553+00:00'
+  category: auto-compact-rate-limit
+  reason: auto_compact exceeded 3 per stage 'initial' — 可能引用文件過大或 stage 需拆分；拒絕再次 compact
+  state: ESCALATION
+  extra_context_keys:
+  - count_per_stage
+  - cumulative_tokens
+  - max_per_stage
+  - ratio
+  - stage_key
+  - suggestions
+- ts: '2026-06-05T13:53:48.510269+00:00'
+  category: auto-recovery-refused
+  reason: 'auto_recovery refused: Rule 9.14.2: same reason already attempted (1 ≥
+    1)'
+  state: ESCALATION_FINAL
+  extra_context_keys:
+  - refusal_reason
+- ts: '2026-06-05T13:53:48.703640+00:00'
+  category: auto-recovery-refused
+  reason: 'auto_recovery refused: Rule 9.14.1: session_attempt_count (3) ≥ 3'
+  state: ESCALATION_FINAL
+  extra_context_keys:
+  - refusal_reason
+- ts: '2026-06-05T13:53:48.767709+00:00'
+  category: auto-recovery-refused
+  reason: 'auto_recovery refused: Rule 9.14.3: diagnostic category=structural (sub_type=spec_conflict)
+    is not auto-recoverable'
+  state: ESCALATION_FINAL
+  extra_context_keys:
+  - refusal_reason
+- ts: '2026-06-05T13:54:07.803759+00:00'
+  category: auto-recovery-refused
+  reason: 'auto_recovery refused: Rule 9.14.3: diagnostic category=structural (sub_type=spec_conflict)
+    is not auto-recoverable'
+  state: ESCALATION_FINAL
+  extra_context_keys:
+  - refusal_reason
+- ts: '2026-06-05T14:00:44.477130+00:00'
+  category: auto-compact-rate-limit
+  reason: auto_compact exceeded 3 per stage 'initial' — 可能引用文件過大或 stage 需拆分；拒絕再次 compact
+  state: ESCALATION
+  extra_context_keys:
+  - count_per_stage
+  - cumulative_tokens
+  - max_per_stage
+  - ratio
+  - stage_key
+  - suggestions
+- ts: '2026-06-05T14:00:44.856223+00:00'
+  category: auto-compact-rate-limit
+  reason: auto_compact exceeded 3 per stage 'initial' — 可能引用文件過大或 stage 需拆分；拒絕再次 compact
+  state: ESCALATION
+  extra_context_keys:
+  - count_per_stage
+  - cumulative_tokens
+  - max_per_stage
+  - ratio
+  - stage_key
+  - suggestions
+- ts: '2026-06-05T14:00:45.291172+00:00'
+  category: auto-recovery-refused
+  reason: 'auto_recovery refused: Rule 9.14.2: same reason already attempted (1 ≥
+    1)'
+  state: ESCALATION_FINAL
+  extra_context_keys:
+  - refusal_reason
+- ts: '2026-06-05T14:00:45.499017+00:00'
+  category: auto-recovery-refused
+  reason: 'auto_recovery refused: Rule 9.14.1: session_attempt_count (3) ≥ 3'
+  state: ESCALATION_FINAL
+  extra_context_keys:
+  - refusal_reason
+- ts: '2026-06-05T14:00:45.567005+00:00'
+  category: auto-recovery-refused
+  reason: 'auto_recovery refused: Rule 9.14.3: diagnostic category=structural (sub_type=spec_conflict)
+    is not auto-recoverable'
+  state: ESCALATION_FINAL
+  extra_context_keys:
+  - refusal_reason
+- ts: '2026-06-05T14:01:04.668093+00:00'
+  category: auto-recovery-refused
+  reason: 'auto_recovery refused: Rule 9.14.3: diagnostic category=structural (sub_type=spec_conflict)
+    is not auto-recoverable'
+  state: ESCALATION_FINAL
+  extra_context_keys:
+  - refusal_reason
+- ts: '2026-06-05T14:04:19.776778+00:00'
+  category: auto-compact-rate-limit
+  reason: auto_compact exceeded 3 per stage 'initial' — 可能引用文件過大或 stage 需拆分；拒絕再次 compact
+  state: ESCALATION
+  extra_context_keys:
+  - count_per_stage
+  - cumulative_tokens
+  - max_per_stage
+  - ratio
+  - stage_key
+  - suggestions
+- ts: '2026-06-05T14:04:20.329454+00:00'
+  category: auto-compact-rate-limit
+  reason: auto_compact exceeded 3 per stage 'initial' — 可能引用文件過大或 stage 需拆分；拒絕再次 compact
+  state: ESCALATION
+  extra_context_keys:
+  - count_per_stage
+  - cumulative_tokens
+  - max_per_stage
+  - ratio
+  - stage_key
+  - suggestions
+- ts: '2026-06-05T14:04:20.996970+00:00'
+  category: auto-recovery-refused
+  reason: 'auto_recovery refused: Rule 9.14.2: same reason already attempted (1 ≥
+    1)'
+  state: ESCALATION_FINAL
+  extra_context_keys:
+  - refusal_reason
+- ts: '2026-06-05T14:04:21.286307+00:00'
+  category: auto-recovery-refused
+  reason: 'auto_recovery refused: Rule 9.14.1: session_attempt_count (3) ≥ 3'
+  state: ESCALATION_FINAL
+  extra_context_keys:
+  - refusal_reason
+- ts: '2026-06-05T14:04:21.403208+00:00'
+  category: auto-recovery-refused
+  reason: 'auto_recovery refused: Rule 9.14.3: diagnostic category=structural (sub_type=spec_conflict)
+    is not auto-recoverable'
+  state: ESCALATION_FINAL
+  extra_context_keys:
+  - refusal_reason
+- ts: '2026-06-05T14:04:45.468422+00:00'
+  category: auto-recovery-refused
+  reason: 'auto_recovery refused: Rule 9.14.3: diagnostic category=structural (sub_type=spec_conflict)
+    is not auto-recoverable'
+  state: ESCALATION_FINAL
+  extra_context_keys:
+  - refusal_reason
+- ts: '2026-06-05T14:35:05.791758+00:00'
+  category: auto-compact-rate-limit
+  reason: auto_compact exceeded 3 per stage 'initial' — 可能引用文件過大或 stage 需拆分；拒絕再次 compact
+  state: ESCALATION
+  extra_context_keys:
+  - count_per_stage
+  - cumulative_tokens
+  - max_per_stage
+  - ratio
+  - stage_key
+  - suggestions
+- ts: '2026-06-05T14:35:06.158958+00:00'
+  category: auto-compact-rate-limit
+  reason: auto_compact exceeded 3 per stage 'initial' — 可能引用文件過大或 stage 需拆分；拒絕再次 compact
+  state: ESCALATION
+  extra_context_keys:
+  - count_per_stage
+  - cumulative_tokens
+  - max_per_stage
+  - ratio
+  - stage_key
+  - suggestions
+- ts: '2026-06-05T14:35:06.592386+00:00'
+  category: auto-recovery-refused
+  reason: 'auto_recovery refused: Rule 9.14.2: same reason already attempted (1 ≥
+    1)'
+  state: ESCALATION_FINAL
+  extra_context_keys:
+  - refusal_reason
+- ts: '2026-06-05T14:35:06.791141+00:00'
+  category: auto-recovery-refused
+  reason: 'auto_recovery refused: Rule 9.14.1: session_attempt_count (3) ≥ 3'
+  state: ESCALATION_FINAL
+  extra_context_keys:
+  - refusal_reason
+- ts: '2026-06-05T14:35:06.864390+00:00'
+  category: auto-recovery-refused
+  reason: 'auto_recovery refused: Rule 9.14.3: diagnostic category=structural (sub_type=spec_conflict)
+    is not auto-recoverable'
+  state: ESCALATION_FINAL
+  extra_context_keys:
+  - refusal_reason
+- ts: '2026-06-05T14:35:26.122307+00:00'
+  category: auto-recovery-refused
+  reason: 'auto_recovery refused: Rule 9.14.3: diagnostic category=structural (sub_type=spec_conflict)
+    is not auto-recoverable'
+  state: ESCALATION_FINAL
+  extra_context_keys:
+  - refusal_reason
+- ts: '2026-06-05T14:56:54.778685+00:00'
+  category: auto-compact-rate-limit
+  reason: auto_compact exceeded 3 per stage 'initial' — 可能引用文件過大或 stage 需拆分；拒絕再次 compact
+  state: ESCALATION
+  extra_context_keys:
+  - count_per_stage
+  - cumulative_tokens
+  - max_per_stage
+  - ratio
+  - stage_key
+  - suggestions
+- ts: '2026-06-05T14:56:55.171278+00:00'
+  category: auto-compact-rate-limit
+  reason: auto_compact exceeded 3 per stage 'initial' — 可能引用文件過大或 stage 需拆分；拒絕再次 compact
+  state: ESCALATION
+  extra_context_keys:
+  - count_per_stage
+  - cumulative_tokens
+  - max_per_stage
+  - ratio
+  - stage_key
+  - suggestions
+- ts: '2026-06-05T14:56:55.598725+00:00'
+  category: auto-recovery-refused
+  reason: 'auto_recovery refused: Rule 9.14.2: same reason already attempted (1 ≥
+    1)'
+  state: ESCALATION_FINAL
+  extra_context_keys:
+  - refusal_reason
+- ts: '2026-06-05T14:56:55.814102+00:00'
+  category: auto-recovery-refused
+  reason: 'auto_recovery refused: Rule 9.14.1: session_attempt_count (3) ≥ 3'
+  state: ESCALATION_FINAL
+  extra_context_keys:
+  - refusal_reason
+- ts: '2026-06-05T14:56:55.891152+00:00'
+  category: auto-recovery-refused
+  reason: 'auto_recovery refused: Rule 9.14.3: diagnostic category=structural (sub_type=spec_conflict)
+    is not auto-recoverable'
+  state: ESCALATION_FINAL
+  extra_context_keys:
+  - refusal_reason
+- ts: '2026-06-05T14:57:15.163070+00:00'
+  category: auto-recovery-refused
+  reason: 'auto_recovery refused: Rule 9.14.3: diagnostic category=structural (sub_type=spec_conflict)
+    is not auto-recoverable'
+  state: ESCALATION_FINAL
+  extra_context_keys:
+  - refusal_reason
+- ts: '2026-06-05T14:57:43.205450+00:00'
+  category: auto-compact-rate-limit
+  reason: auto_compact exceeded 3 per stage 'initial' — 可能引用文件過大或 stage 需拆分；拒絕再次 compact
+  state: ESCALATION
+  extra_context_keys:
+  - count_per_stage
+  - cumulative_tokens
+  - max_per_stage
+  - ratio
+  - stage_key
+  - suggestions
+- ts: '2026-06-05T14:58:24.779254+00:00'
+  category: auto-compact-rate-limit
+  reason: auto_compact exceeded 3 per stage 'initial' — 可能引用文件過大或 stage 需拆分；拒絕再次 compact
+  state: ESCALATION
+  extra_context_keys:
+  - count_per_stage
+  - cumulative_tokens
+  - max_per_stage
+  - ratio
+  - stage_key
+  - suggestions
+- ts: '2026-06-05T15:00:14.901884+00:00'
+  category: auto-compact-rate-limit
+  reason: auto_compact exceeded 3 per stage 'initial' — 可能引用文件過大或 stage 需拆分；拒絕再次 compact
+  state: ESCALATION
+  extra_context_keys:
+  - count_per_stage
+  - cumulative_tokens
+  - max_per_stage
+  - ratio
+  - stage_key
+  - suggestions
+- ts: '2026-06-05T15:00:15.314512+00:00'
+  category: auto-compact-rate-limit
+  reason: auto_compact exceeded 3 per stage 'initial' — 可能引用文件過大或 stage 需拆分；拒絕再次 compact
+  state: ESCALATION
+  extra_context_keys:
+  - count_per_stage
+  - cumulative_tokens
+  - max_per_stage
+  - ratio
+  - stage_key
+  - suggestions
+- ts: '2026-06-05T15:00:15.765094+00:00'
+  category: auto-recovery-refused
+  reason: 'auto_recovery refused: Rule 9.14.2: same reason already attempted (1 ≥
+    1)'
+  state: ESCALATION_FINAL
+  extra_context_keys:
+  - refusal_reason
+- ts: '2026-06-05T15:00:15.988269+00:00'
+  category: auto-recovery-refused
+  reason: 'auto_recovery refused: Rule 9.14.1: session_attempt_count (3) ≥ 3'
+  state: ESCALATION_FINAL
+  extra_context_keys:
+  - refusal_reason
+- ts: '2026-06-05T15:00:16.066580+00:00'
+  category: auto-recovery-refused
+  reason: 'auto_recovery refused: Rule 9.14.3: diagnostic category=structural (sub_type=spec_conflict)
+    is not auto-recoverable'
+  state: ESCALATION_FINAL
+  extra_context_keys:
+  - refusal_reason
+- ts: '2026-06-05T15:00:39.601225+00:00'
+  category: auto-recovery-refused
+  reason: 'auto_recovery refused: Rule 9.14.3: diagnostic category=structural (sub_type=spec_conflict)
+    is not auto-recoverable'
+  state: ESCALATION_FINAL
+  extra_context_keys:
+  - refusal_reason
+- ts: '2026-06-05T15:12:02.280752+00:00'
+  category: auto-compact-rate-limit
+  reason: auto_compact exceeded 3 per stage 'initial' — 可能引用文件過大或 stage 需拆分；拒絕再次 compact
+  state: ESCALATION
+  extra_context_keys:
+  - count_per_stage
+  - cumulative_tokens
+  - max_per_stage
+  - ratio
+  - stage_key
+  - suggestions
+- ts: '2026-06-05T15:12:02.668614+00:00'
+  category: auto-compact-rate-limit
+  reason: auto_compact exceeded 3 per stage 'initial' — 可能引用文件過大或 stage 需拆分；拒絕再次 compact
+  state: ESCALATION
+  extra_context_keys:
+  - count_per_stage
+  - cumulative_tokens
+  - max_per_stage
+  - ratio
+  - stage_key
+  - suggestions
+- ts: '2026-06-05T15:12:03.092152+00:00'
+  category: auto-recovery-refused
+  reason: 'auto_recovery refused: Rule 9.14.2: same reason already attempted (1 ≥
+    1)'
+  state: ESCALATION_FINAL
+  extra_context_keys:
+  - refusal_reason
+- ts: '2026-06-05T15:12:03.316302+00:00'
+  category: auto-recovery-refused
+  reason: 'auto_recovery refused: Rule 9.14.1: session_attempt_count (3) ≥ 3'
+  state: ESCALATION_FINAL
+  extra_context_keys:
+  - refusal_reason
+- ts: '2026-06-05T15:12:03.392950+00:00'
+  category: auto-recovery-refused
+  reason: 'auto_recovery refused: Rule 9.14.3: diagnostic category=structural (sub_type=spec_conflict)
+    is not auto-recoverable'
+  state: ESCALATION_FINAL
+  extra_context_keys:
+  - refusal_reason
+- ts: '2026-06-05T15:12:17.714570+00:00'
+  category: auto-recovery-refused
+  reason: 'auto_recovery refused: Rule 9.14.3: diagnostic category=structural (sub_type=spec_conflict)
+    is not auto-recoverable'
+  state: ESCALATION_FINAL
+  extra_context_keys:
+  - refusal_reason
+date: '2026-06-05'

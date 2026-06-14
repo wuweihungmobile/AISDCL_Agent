@@ -14,6 +14,12 @@ class MinimaxConfig(BaseModel):
     base_url: str = "https://api.minimax.chat/v1/text/chatcompletion_v2"
     model: str = "MiniMax-Text-01"
     timeout_seconds: int = 30
+    enable_kernel_brain: bool = False
+    # DEF-01-008：是否把 MinimaxBrainAdapter 注入 PlaybookKernel + SddGovernancePlugin。
+    # 預設 False＝production 維持 brain=None（無 Minimax 逐步 correction、無 escalation 諮詢，
+    # 零退化）。設 True 啟用後：kernel.decide_correction 生效（改寫 prompt + step mutation）
+    # 且 Minimax API 故障將觸發 ESCALATION（見 docs/04_planning/AutoSDD_improving_03.md §2.1）
+    # —— operator 須知悉行為差異。
 
 
 class ClaudeConfig(BaseModel):

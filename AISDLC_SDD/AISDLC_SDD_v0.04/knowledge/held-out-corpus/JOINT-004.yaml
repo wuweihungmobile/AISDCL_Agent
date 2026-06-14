@@ -1,0 +1,16 @@
+# Phase P / ACT-118 — pipeline 級聯合 held-out 現實代理語料（凍結 + content-hashed）
+#
+# 真優（tuned scorer = fragility）：候選（已調權重）在 pipeline 級聯合重放整體真實勝率 ≫ incumbent + margin。
+# 某評分器 profile 對候選的成本 = Σ weight(name) × feature(name)；聯合選中 = 各評分器成本之和最低。
+# 只有 joint_calibration_oracle 讀本檔；scorer_calibration_registry（生成器）看不到。
+case_id: JOINT-004
+expect: true_optimum
+tuned_scorer: fragility
+candidate_profile: {namespace: "fragility-profile:", weights: {threshold_w: 2.0, history_w: 0.3}}
+candidates:
+  - real_quality: 0.35          # 次優候選（incumbent 偏好但真實差）
+    features:
+      fragility: {threshold_w: 1.0, history_w: 0.0}
+  - real_quality: 0.92          # 真實最優候選
+    features:
+      fragility: {threshold_w: 0.0, history_w: 4.0}
