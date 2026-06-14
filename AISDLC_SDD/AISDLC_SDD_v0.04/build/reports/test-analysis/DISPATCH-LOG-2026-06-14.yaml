@@ -27,4 +27,25 @@ dispatches:
   mode: soft
   registered: true
   phase: enter
+- agent: dev-senior
+  fsm_state: ESCALATION
+  stage: initial
+  entered_at: '2026-06-14T08:50:48+00:00'
+  mode: soft
+  registered: true
+  phase: enter
+- agent: dev-senior
+  fsm_state: ESCALATION
+  stage: initial
+  entered_at: '2026-06-14T09:12:58+00:00'
+  mode: soft
+  registered: true
+  phase: enter
+- agent: dev-senior
+  fsm_state: ESCALATION
+  stage: initial
+  entered_at: '2026-06-14T09:15:48+00:00'
+  mode: soft
+  registered: true
+  phase: enter
 date: '2026-06-14'

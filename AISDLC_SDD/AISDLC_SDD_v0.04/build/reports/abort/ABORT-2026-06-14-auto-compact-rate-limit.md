@@ -1,6 +1,6 @@
 # SDD Abort Report — auto-compact-rate-limit
 
-**建立時間**: 2026-06-14T02:57:02+00:00
+**建立時間**: 2026-06-14T09:15:47+00:00
 **觸發原因**: auto_compact exceeded 3 per stage 'initial' — 可能引用文件過大或 stage 需拆分；拒絕再次 compact
 **current_state**: `ESCALATION`
 **project**: rate-limit-proj

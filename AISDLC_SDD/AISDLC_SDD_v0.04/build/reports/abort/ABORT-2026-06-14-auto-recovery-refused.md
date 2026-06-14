@@ -1,6 +1,6 @@
 # SDD Abort Report — auto-recovery-refused
 
-**建立時間**: 2026-06-14T02:57:20+00:00
+**建立時間**: 2026-06-14T09:16:01+00:00
 **觸發原因**: auto_recovery refused: Rule 9.14.3: diagnostic category=structural (sub_type=spec_conflict) is not auto-recoverable
 **current_state**: `ESCALATION_FINAL`
 **project**: g8-wire

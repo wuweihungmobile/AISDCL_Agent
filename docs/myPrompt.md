@@ -79,7 +79,7 @@
 
 問題： 
 
-## 已經執行完 AutoSDD_improving_05.md 和 AutoSDD_ZeroTrust_Audit_05.md 等相關項目
+## 已經執行完 AutoSDD_improving_06.md 和 AutoSDD_ZeroTrust_Audit_06.md 等相關項目
 
 參考資訊:
 誠實標示
@@ -95,7 +95,7 @@ AutoSDD_Defect_Log.md（DEF-02-001 fixed + DEF-05-001 新增）
 
 Source Control 處置：依你的慣例，這些皆為原始碼/文件（應 commit + push 直推 main）。但推送至 main 屬對外動作，是否現在要我 commit 並 push？（歷輪皆「尚未 commit/tag」，由你決定時機；若要，建議 commit 訊息標 improving_05 結案 + tag v2026.06.14-05。）
 
-為確保執行品質與AutoSDD_improving_05.md執行項目都有執行, 請確實派出Architect / SA SD / QA 專家整體考量審查, 與目前系統現況進行比對, 採完全不信任 zero-trust audit 全面驗證和"修復方向是否正確", 看看nightly程式是否正確 and 執行過程與結果是否正確!
+為確保執行品質與AutoSDD_improving_06.md執行項目都有執行, 請確實派出Architect / SA SD / QA 專家整體考量審查, 與目前系統現況進行比對, 採完全不信任 zero-trust audit 全面驗證和"修復方向是否正確", 看看nightly程式是否正確 and 執行過程與結果是否正確!
 有問題馬上請派另一個Agent(Architect/SA SD/QA 全能)專家進行修復相關程式與文件「所有問題"文件問題"和"技術問題"必須徹底全部修復才能算完成」! 
 再經QA專家審議修完是否有符合"原設計功能"或若有破壞收斂即不通過須馬上進行修改再進行QA!
 全部符合上述PASS才核准通過!
