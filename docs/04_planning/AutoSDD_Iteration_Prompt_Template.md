@@ -24,8 +24,12 @@
 3. **完美協調溝通機制**：AutoClaude 利用 `AISDLC_SDD_v0.0X` 進行軟體開發，建立兩者間雙向橋接，
    成為端到端**自動化開發 Agent**（A 軌整合即直接服務此目標）。
 
-> **成熟度分級判準出處**：上述 L5↔L10、`meta⁸`/meta 階數等成熟度術語的分級定義，一律以**當輪
-> active planning 文件 `_NN.md` 的 maturity ladder／成熟度定義為準**，禁各輪自行詮釋。
+> **成熟度分級判準出處（SSOT）**：上述 L5↔L10 的分級定義，一律以
+> [`docs/04_planning/AutoSDD_Maturity_Rubric.md`](AutoSDD_Maturity_Rubric.md) 為準（bespoke、非業界標準，
+> 錨定 SAE J3016／CMMI／AGI 級），禁各輪自行詮釋。**該量表＝同一把 L0–10 尺、量三軸**：
+> **C 引擎自治（AutoClaude＝C 軌）＋ B 流程自治（SDD＝B 軌）＋ A 協作自治（橋接＝A 軌）**，
+> 上捲規則 `L_合體 = min(A,B,C)`（不變式 `A ≤ min(B,C)`）——故**三軸必須一起升**才推得動北極星。
+> 每輪須**階段一實測**分評三軸現級並引證據，禁文件宣稱當事實（zero-trust）。
 
 ## 🎯 核心任務（第 {{N}} 輪迭代）
 在「零退化 (Zero-Regression)」絕對前提下，推進**三軌迭代**（對齊北極星三點：指揮官 AutoClaude × 手腳 AISLDC_SDD × 雙向協作；每輪須明確標示本輪在哪一柱（A/B/C）推進、下一份檔名，防跨軌誤指）：
@@ -257,4 +261,5 @@ SDD_CONTRACT_VIOLATION 次數、token 峰值）。
 | 缺陷帳本放 monorepo `docs/06_quality/` 且跨輪累積 | 帳本記錄的是「對框架的觀察」，不屬框架本體（凍結區）；跨輪累積才能追蹤 open→routed→fixed 生命週期，並供審查驗證「有無漏記」 |
 | 北極星目標置入範本頂部 | 三點終極目標（AutoClaude 驅動 SDD／AI SDD 圖靈完備閉環→L10／兩者完美協調成自動化開發 Agent）每輪不變，置頂使每輪局部優化都向同一 L10 終局對齊，避免迭代發散；原陳述的 9 Ports/13 Plugin 與 L5↔L10 張力一律交由階段一實測收斂 |
 | XAI 可解釋性轉向設為「條件式疊加」而非常駐段落 | 僅高階 meta／形式化終止／互遞迴圖／具身接地的輪次才需首席架構師視角；條件式疊加避免低階輪被無關紀律拖累，又確保高階輪不漏「人類可審批＝架構不失控」紅線（driver instance 以 `{{本輪 driver instance}}` 佔位，當前範例＝ACT-159/R-9.37） |
+| 成熟度判準落地為正式 L0–10 rubric SSOT（`AutoSDD_Maturity_Rubric.md`） | 2026-06-15：原 DOC-01 只說「以 active planning maturity ladder 為準」，但該 ladder **實際未被定義**（潛在缺口）。業界無 L0–10 自治標準（公認皆 0~5：SAE/CMMI/AGI），故起草 **bespoke 但錨定** 的量表：**同一把 L0–10 尺量三軸**（C 引擎/B 流程/A 協作），上捲 `L_合體=min(A,B,C)`——數學上保證「三軸一起升」才達北極星。誠實標 non-industry-standard + zero-trust 須實測，並揭露目前實測位粗估 L3–L4 而非宣稱 L5 |
 | 核心任務由「雙軌」升為「三軌」（新增 C 軌＝指揮官 AutoClaude） | 2026-06-15 釐清範本定位＝精進 **AutoClaude（指揮官）＋ AISLDC_SDD（手腳）＋ 兩方協作**，三者一一對應北極星三點。原雙軌只驅動「協作（A）＋手腳 dogfooding（B）」，把 AutoClaude 自身開發（SD_09 W1~W6／Improving_NN）排除在外，與定位牴觸；故新增 **C 軌全收 AutoClaude 開發（含 ops/infra）**，並同步鬆綁根 `CLAUDE.md` 軌道③「與整合無關」。防混淆機制不變：每輪標示在哪一柱（A/B/C）、下一份檔名 |
