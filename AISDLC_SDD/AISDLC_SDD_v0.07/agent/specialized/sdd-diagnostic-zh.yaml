@@ -1,0 +1,83 @@
+# AISDLC-SDD Diagnostic Agent 配置 (v0.01, Phase G M1 / ACT-032)
+# ESCALATION 因子分類器 — 決定 1-shot bounded auto-recovery 是否允許
+
+agent:
+  name: "SDD-Diagnostic"
+  id: "sdd-diagnostic"
+  title: "SDD ESCALATION Diagnostic Agent"
+  icon: "🩺"
+  version: "v0.01"
+  whenToUse: |
+    用於 Phase G M1「Self-Healing Layer」。當 FSM 進入 ESCALATION 狀態，
+    本 Agent 解析 escalation_reason，分類為 6 種 sub_type 並判斷
+    auto_recoverable，作為 FSMRuntime.enter_auto_recovery() 的決策依據。
+    Rule-based v1（無 LLM 呼叫，零成本）。
+  customization: null
+
+  responsibilities:
+    core:
+      - "解析 FSMState.escalation_history 最新一筆的 trigger_reason"
+      - "對 6 種規則模式比對：data_corruption / spec_conflict / retry_exhausted（structural）+ ci_timeout / network_flap / rate_limit（transient）"
+      - "回傳 DiagnosticResult{category, sub_type, auto_recoverable, confidence, recovery_action, wait_sec, rationale}"
+      - "保守原則：無匹配 → structural/unknown（confidence 0.5，禁止 auto-recovery）"
+      - "Structural 優先：當 transient + structural 同時匹配，structural 勝出（confidence -0.15）"
+    boundaries:
+      - "禁止呼叫 LLM 後端（rule-based 限制）"
+      - "禁止修改 FSM-STATE.yaml（僅讀取 escalation_history）"
+      - "禁止實際執行 recovery action（wait/rerun 由 caller 負責）"
+      - "category=structural 必返回 auto_recoverable=False（Rule 9.14.3 強制）"
+
+  inputs:
+    required:
+      - escalation_reason: "FSMState.escalation_history[-1].trigger_reason 字串"
+    optional:
+      - spec_refs: "list[str] — 相關 SLV/AC/INV 識別碼，用於審計鏈"
+
+  workflow:
+    step_1_parse_reason:
+      action: "讀取 escalation_reason；若為空 → 回 unknown/structural"
+    step_2_match_rules:
+      action: "依 _RULES 順序逐一 regex 比對；structural 規則先檢查"
+    step_3_resolve_priority:
+      action: "若同時匹配多 category，structural 勝出（避免誤自動修 spec/data）；confidence 扣 0.15"
+    step_4_return_result:
+      action: "建構 DiagnosticResult dataclass，附 recovery_playbook（僅 transient）"
+    step_5_audit:
+      action: "caller 將 result.to_dict() 寫入 decision_trace.spec_refs"
+
+  outputs:
+    diagnostic_result:
+      schema: "tools/fsm_runtime/diagnostic.py::DiagnosticResult"
+      fields:
+        - "category: 'transient' | 'structural'"
+        - "sub_type: 6 enum + 'unknown'"
+        - "auto_recoverable: bool（衍生）"
+        - "confidence: 0.0~1.0"
+        - "recovery_action: str | None（僅 transient）"
+        - "recovery_max_wait_sec: int | None"
+        - "rationale: str（人類可讀）"
+        - "spec_refs: list[str]"
+        - "escalation_reason: str（passthrough）"
+
+  dependencies:
+    runtime:
+      - "tools/fsm_runtime/diagnostic.py"
+    documents:
+      - "workflow/sdd-fsm-engine/SDD_FSM_ENGINE.md §Phase G M1"
+      - "CLAUDE.md §9.14"
+
+  collaboration_patterns:
+    primary_patterns:
+      - pattern: "Advisor"
+        role: "Advisor"
+        description: "向 FSMRuntime.enter_auto_recovery 提供 binary 決策（allow/refuse）"
+      - pattern: "Lead-Support"
+        role: "Support"
+        description: "下游由 FSMRuntime + auto_recovery.py 執行 Rule 9.14 邊界檢查與 state transition"
+
+  rules_compliance:
+    enforces:
+      - "Rule 9.14.3：structural 一律 auto_recoverable=False"
+    consumed_by:
+      - "FSMRuntime.enter_auto_recovery（Rule 9.14.1/9.14.2 邊界）"
+      - "auto_recovery.propose_recovery（confidence ≥ 0.7 門檻）"

@@ -99,3 +99,12 @@ AISDLC_SDD_v0.06/build/reports/fsm/*
 !AISDLC_SDD_v0.06/build/reports/fsm/FSM-STATE-TEMPLATE.yaml
 AISDLC_SDD_v0.06/arch-fitness.json
 AISDLC_SDD_v0.06/chaos-report.json
+
+# ── v0.07 runtime 取證產物排除（improving_16 B 軌 L4→L5 SLV 自動提議，同 DEF-11-001/15-001 紀律）──
+# 同 v0.06：build/reports/ 運行時取證輸出整批排除，惟 negate 保留 FSM 種子模板。
+AISDLC_SDD_v0.07/build/reports/*
+!AISDLC_SDD_v0.07/build/reports/fsm/
+AISDLC_SDD_v0.07/build/reports/fsm/*
+!AISDLC_SDD_v0.07/build/reports/fsm/FSM-STATE-TEMPLATE.yaml
+AISDLC_SDD_v0.07/arch-fitness.json
+AISDLC_SDD_v0.07/chaos-report.json
