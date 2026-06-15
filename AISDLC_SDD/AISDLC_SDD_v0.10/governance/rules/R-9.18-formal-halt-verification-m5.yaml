@@ -1,0 +1,17 @@
+id: R-9.18
+title: Phase G M5 Formal Halt Verification
+trigger_states:
+  - "*"
+severity: critical
+maturity: active
+spec: >
+  把 Chaos 經驗性有界停機升級為 TLA+/TLC 窮舉證明。9.18.1 雙源一致性：改 _HAPPY_PATH
+  必須同步 formal/SDD_FSM.tla 並重跑 run_tlc；9.18.2 invariant/liveness violation 即 fail
+  PR；9.18.3 reachable coverage ≥95%（Phase I 後 36/36=100%）；9.18.4 觀測狀態須位於
+  ObservationStates 且 ObservationStates ∩ Terminals = ∅（NotInBothSets）。禁止移除
+  INVARIANT 或把 run_tlc 改成永遠 exit 0。對應 formal/SDD_FSM.{tla,cfg}。
+test_ref: tools/fsm_runtime/tests/test_tla_python_sync.py
+scaffold_roi:
+  fire_count: 0
+  catch_count: 0
+  false_positive_count: 0

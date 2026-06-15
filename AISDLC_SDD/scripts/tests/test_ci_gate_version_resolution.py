@@ -56,8 +56,12 @@ def _dry_run(overrides: dict[str, str] | None = None) -> list[str]:
 
 
 def _disk_versions() -> list[str]:
-    """磁碟上的版本目錄，依語意版本由低到高排序。"""
-    dirs = [p.name for p in REPO_ROOT.glob("AISDLC_SDD_v0.0*") if p.is_dir()]
+    """磁碟上的版本目錄，依語意版本由低到高排序。
+
+    DEF-19-002：glob 由 `v0.0*` 放寬為 `v0.*`，與修復後的 ci-gate.sh 雙 glob 同涵蓋面
+    （含 v0.10+）。否則 helper 漏 v0.10 → 誤算「磁碟最高版=v0.09」，與腳本實測 v0.10 不符。
+    """
+    dirs = [p.name for p in REPO_ROOT.glob("AISDLC_SDD_v0.*") if p.is_dir()]
     # 與腳本 `sort -V` 等價：以版本數值排序
     return sorted(dirs, key=lambda n: [int(x) for x in re.findall(r"\d+", n)])
 

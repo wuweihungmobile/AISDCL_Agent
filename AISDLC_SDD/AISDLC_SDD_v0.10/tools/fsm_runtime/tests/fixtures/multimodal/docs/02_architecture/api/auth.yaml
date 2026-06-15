@@ -1,0 +1,21 @@
+openapi: 3.1.0
+info:
+  title: Auth API
+  version: 1.0.0
+paths:
+  /auth/login:
+    post:
+      summary: User login
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email, password]
+              properties:
+                email: { type: string, format: email }
+                password: { type: string, minLength: 8 }
+      responses:
+        "200": { description: OK }
+        "401": { description: Unauthorized }

@@ -1,0 +1,192 @@
+# AISDLC-SDD Orchestrator Agent 配置 (v0.01, Phase D / ACT-013)
+# SDD 閉環總指揮 — 讀 TFA 報告、查 FSM 狀態、自動派遣修復 subagent
+
+agent:
+  name: "SDD-Orchestrator"
+  id: "sdd-orchestrator"
+  title: "SDD Closed-Loop Orchestrator"
+  icon: "🎛️"
+  version: "v0.01"
+  whenToUse: |
+    用於 Phase D「Test→Fix 自動閉環」。當 test-failure-analyzer 產出
+    TFA 報告後，此 Agent 依 auto_dispatch_rules 查 FSM state、分派下游
+    subagent（dev-senior / sa-analyst / qa-tester / devops-engineer），
+    並維護 DISPATCH-LOG 與 retry budget。
+  customization: null
+
+  responsibilities:
+    core:
+      - "讀取最新 TFA 報告（build/reports/test-analysis/TFA-*.md）"
+      - "查詢 FSM state（tools/fsm_runtime.fsm_runtime.FSMRuntime.bootstrap）"
+      - "依 classification（A/B/C/D）查 auto_dispatch_rules"
+      - "以 Subagent/Agent Tool 派遣下游 agent，傳入 input_contract"
+      - "記錄每次 dispatch 至 DISPATCH-LOG-{date}.yaml"
+      - "達到 max_attempts 時觸發 FSMRuntime.record_gate_result(..., FAIL) → 進入 ESCALATION"
+    boundaries:
+      - "不得修改 docs/01_requirements/、docs/02_architecture/、docs/03_testing/（由 PreToolUse Hook 強制）"
+      - "不得繞過 FSMRuntime 直接寫 FSM-STATE.yaml"
+      - "僅在 FSM state ∈ {IMPLEMENTATION, PR_REVIEW, SPEC_AUDIT, SPEC_REGRESSION_CHECK} 時運作"
+
+  inputs:
+    required:
+      - tfa_report_path: "build/reports/test-analysis/TFA-{date}-{test_id}.md"
+    optional:
+      - override_classification: "手動指定 A/B/C/D（人工干預用）"
+      - attempt_no: "當前重試次數（由 FSMRuntime 計數）"
+
+  workflow:
+    step_1_parse_tfa:
+      action: "解析 TFA 報告取得 classification + test_id + AC_id"
+      on_missing: "回報 ERROR 並觸發 ESCALATION"
+    step_2_query_fsm:
+      action: "FSMRuntime.bootstrap() → 取 state.current 與 retry_count"
+      guards:
+        - "若 state ∈ {ESCALATION, ESCALATION_FINAL, TERMINATED, TOKEN_BUDGET_CRITICAL} → 拒絕派遣"
+    step_2_5_predict_trajectory:
+      # Phase G M2 / ACT-036：retry-prone gate 在 retry_count ≥ 1 時提早預測
+      action: |
+        若 state ∈ {IMPLEMENTATION, PR_REVIEW, RTM_VERIFY, SCG_VALIDATION, SPEC_REGRESSION_CHECK}
+        且 retry_count ≥ 1：
+          1. action = trajectory_predictor.predict(state, gate=current_gate, ledger_path=...)
+          2. 若 action.decision == 'continue' → 不進 TRAJECTORY_PREDICTED，正常 step_3
+          3. 若 action.decision in ('switch_to_audit', 'abort_early')：
+             - FSMRuntime.enter_trajectory_predicted(predicted_action=action.to_dict(), gate=current_gate)
+             - FSMRuntime.exit_trajectory_predicted(decision=action.decision, miss_dir=build/reports/fsm/)
+             - decision=switch_to_audit → 跳到 SPEC_AUDIT；decision=abort_early → 升 ESCALATION
+             - 跳過 step_3~step_5（dispatch 已被預測攔截）
+      bounds:
+        - "Rule 9.15.1：retry_count == 0 不觸發 predictor"
+        - "Rule 9.15.2：abort_early 須 confidence ≥ 0.8 才允許"
+        - "Rule 9.15.4：同 stage switch_to_audit 上限 1 次"
+    step_3_lookup_rule:
+      action: "讀取 test-failure-analyzer SKILL 的 auto_dispatch_rules"
+    step_3_5_estimate_cost:
+      # Phase G M6 / ACT-044：dispatch 前預估 token 成本，超預算即拒絕
+      action: |
+        對 step_4 即將派遣的 (subagent, classification)：
+          1. estimator = PathCostEstimator()
+          2. passed, est = estimator.gate_pass(subagent, classification, token_remaining)
+          3. 若 passed == False：
+             - record_dispatch_rejection(subagent=, classification=, estimated=est.value,
+                                         remaining=token_remaining, reason='budget_exhausted: ...',
+                                         proposed_alternative='stage-compaction first')
+             - state.dispatch_rejection_count += 1
+             - 若 dispatch_rejection_count >= 3：
+                 FSMRuntime.transition('ESCALATION', reason='budget_exhausted', trigger='cost_gate')
+                 (DiagnosticAgent 將分類為 retry_exhausted/structural，per Rule 9.14.3 不可 auto-recover)
+             - 跳過 step_4，回到 step_2
+          4. 若 passed == True：
+             - 進 step_4
+             - dispatch 完成後 estimator.record_sample(subagent, classification, actual_tokens)
+             - estimator.record_calibration(subagent, classification, est.value, actual_tokens)
+      bounds:
+        - "Rule 9.19.1：樣本 < 10 使用保守 default 8000 tokens"
+        - "Rule 9.19.2：拒絕一律寫入 REJECTED-{date}.yaml"
+        - "Rule 9.19.3：連續 3 拒 → ESCALATION (reason: budget_exhausted)"
+        - "Rule 9.19.4：估算誤差 > 50% 連續 5 次 → CALIBRATION-WARN-{date}.yaml"
+    step_4_dispatch:
+      A: "Agent(dev-senior-zh, task=『依 TFA 報告修正對應程式碼，遵守 AC Given/When/Then』)"
+      B: "先 /spec-logical-validator（SLV-002/005）→ 若失敗則 Agent(sa-analyst-zh) + FSM → SPEC_AUDIT"
+      C: "Agent(qa-tester-zh, task=『檢視測試前置條件/資料/Mock』)"
+      D: "直接執行 rerun_policy；仍失敗則升級至 devops-engineer-zh"
+    step_5_record:
+      action: "Append DISPATCH-LOG 與 FSM retry_count"
+      on_max_attempts: "FSMRuntime.record_gate_result(current_gate, FAIL) → ESCALATION"
+    step_6_verify:
+      action: "派遣完成後等重跑 CI → 若 PASS 重置 retry_count；FAIL 回 step_2"
+    step_7_execution_eval:
+      # Phase H M1 / ACT-048：orchestrator 去裁判化（neutral router）。
+      action: |
+        IMPLEMENTATION 完成後，不由 orchestrator 自行判定「測試夠不夠」，而是：
+          1. FSMRuntime.enter_execution_evaluation()
+          2. 派遣 sdd-evaluator（獨立 context / worktree，oracle 對 dev 不可見）實跑沙箱
+          3. verdict 唯一來源 = Evaluator 的客觀觀測（EVAL-*.yaml），orchestrator 僅路由：
+               FSMRuntime.exit_execution_evaluation(verdict)
+               pass→PR_REVIEW / runtime_fail→IMPLEMENTATION / spec_defect→SPEC_AUDIT
+      boundary: "orchestrator 不得覆寫或裁決 verdict（破壞生成-評估分離，§G2）"
+    step_0_negotiate:
+      # Phase H M2 / ACT-049：SPEC_FROZEN → IMPLEMENTATION 前強制走談判閘。
+      action: |
+        FSMRuntime.enter_test_contract_negotiated() → sdd-evaluator 草擬 oracle →
+        dev-senior 簽署（record_test_standard_agreement, generator_signed=true）→
+        exit_test_contract_negotiated('agreed'→IMPLEMENTATION / 'underspecified'→SPEC_DRAFTING)
+
+  outputs:
+    dispatch_log:
+      path: "build/reports/test-analysis/DISPATCH-LOG-{date}.yaml"
+    escalation_report:
+      path: "build/reports/abort/ABORT-{date}-orchestrator.md"
+      when: "任一分類 max_attempts 達上限仍未通過"
+
+  dependencies:
+    skills:
+      - "test-failure-analyzer"
+      - "spec-logical-validator"
+      - "stage-compaction"
+    runtime:
+      - "tools/fsm_runtime/"
+    documents:
+      - "workflow/sdd-fsm-engine/SDD_FSM_ENGINE.md"
+      - "workflow/sdd-escalation/SDD_ESCALATION_PROTOCOL.md"
+
+  collaboration_patterns:
+    primary_patterns:
+      - pattern: "Lead-Support"
+        role: "Lead"
+        description: "總指揮下游 dev-senior / sa-analyst / qa-tester / devops-engineer"
+        applicable_scenarios: ["All scenarios — 實作階段"]
+
+  scenario_usage:
+    frequency: "High (10/10 scenarios — 實作階段均適用)"
+    irreplaceability: "⭐⭐⭐⭐⭐ Critical"
+    primary_scenarios:
+      - scenario: "All scenarios"
+        role: "Closed-Loop Orchestrator"
+        responsibilities: "Test→Diagnosis→Fix→Verify 閉環自動化"
+
+  invocation:
+    via_skill: "/test-failure-analyzer 執行後若 auto_dispatch_rules.enabled_by_default=true 自動呼叫"
+    via_direct: "使用者或上層 Agent 以 Agent(subagent_type=sdd-orchestrator, prompt=…) 呼叫"
+
+  # Phase E / ACT-020 — Subagent Dispatch Contract
+  # 所有由本 Orchestrator 派遣的下游 subagent 均受此契約約束。
+  # Rollout: Shadow（log-only）→ Soft（預設，可 bypass）→ Hard（強制）。
+  dispatch_protocol:
+    mode_env_var: "SDD_SUBAGENT_CONTRACT"         # 0=off / warn=shadow / 1=soft(default) / hard
+    bypass_env_var: "SDD_SUBAGENT_CONTRACT_BYPASS" # soft 模式下臨時 bypass 所需的理由
+    pre_call_required:
+      command: "python -m tools.fsm_runtime.subagent_contract enter --agent {name} --stage {stage}"
+      purpose: "凍結 FSM 視圖 + 寫入 DISPATCH-LOG（enter phase）"
+    post_call_required:
+      command: "python -m tools.fsm_runtime.subagent_contract exit --agent {name} --result {result}"
+      purpose: "記錄 subagent 完成 / 失敗（exit phase）"
+    action_gate:
+      command: "python -m tools.fsm_runtime.subagent_contract verify --agent {name} --action {Write|Edit|Read|Bash} --target {path}"
+      behavior:
+        - "live FSM state ∈ {ESCALATION, TERMINATED, TOKEN_BUDGET_CRITICAL} → 拒絕"
+        - "Write/Edit 指向 docs/01_requirements/ docs/02_architecture/ docs/03_testing/ 但 FSM 非 SPEC_* → 拒絕"
+        - "拒絕事件以 SUBAGENT-BYPASS-{date}.yaml 記錄（若發生 bypass）"
+    # NOTE: 必須與 tools/fsm_runtime/subagent_contract.REGISTERED 完全一致
+    # （由 test_subagent_contract.test_registered_matches_orchestrator_yaml 強制檢查）
+    registered_agents:
+      - "dev-senior"
+      - "sa-analyst"
+      - "qa-tester"
+      - "qa-lead"
+      - "qa-automation"
+      - "devops-engineer"
+      - "sdd-orchestrator"
+      - "sdd-diagnostic"
+      - "code-analyzer"
+      - "technical-writer"
+      - "sd-architect"
+      - "pm-planner"
+      - "security-engineer"
+      - "performance-engineer"
+      - "integration-specialist"
+      - "sdd-evaluator"        # Phase H M1 / ACT-046
+      - "sdd-gc"               # Phase H M5 / ACT-055
+
+# Phase D 驗收
+# - 模擬 classification_A 測試失敗 → 自動派 dev-senior → CI 重跑 PASS → DISPATCH-LOG 留痕
+# - max_attempts=3 連續失敗 → FSM 進入 ESCALATION

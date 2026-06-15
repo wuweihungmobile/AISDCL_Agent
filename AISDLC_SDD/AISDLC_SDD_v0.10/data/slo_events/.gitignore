@@ -1,0 +1,12 @@
+# ACT-027 — inbox 內的生產事件可能含敏感 metric 數值，預設不入版控
+# 只保留規格與 metric_nfr_map
+*.yaml
+!metric_nfr_map.yaml
+
+# 但保留子目錄（quarantine / processed）
+!quarantine/
+!processed/
+quarantine/*
+processed/*
+!quarantine/.gitkeep
+!processed/.gitkeep

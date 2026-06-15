@@ -1,0 +1,133 @@
+openapi: "3.1.0"
+
+info:
+  title: "{Module Name} API Contract"
+  description: |
+    Contract-First API 規格文件
+    本文件為 API 契約，必須先於實作完成
+  version: "{v1.0.0}"
+  contact:
+    name: "{Team}"
+  x-aisdlc:
+    module: "{MODULE_NAME}"
+    contract_date: "YYYY-MM-DD"
+    status: "Draft | Approved | Deprecated"
+    related_srd: "docs/02_architecture/{SRD_FILE}.md"
+    related_adr: "docs/02_architecture/adr/ADR-{NNN}-{title}.md"
+    spec_gate: "SCG-3 API Contract Gate"
+
+servers:
+  - url: "https://api.example.com/{version}"
+    description: "Production"
+    variables:
+      version:
+        default: "v1"
+  - url: "https://staging-api.example.com/{version}"
+    description: "Staging"
+    variables:
+      version:
+        default: "v1"
+
+# ─────────────────────────────────────────────────────────
+# 安全機制定義
+# ─────────────────────────────────────────────────────────
+components:
+  securitySchemes:
+    BearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: "JWT Bearer Token 認證"
+
+  schemas:
+    ErrorResponse:
+      type: object
+      required: [code, message]
+      properties:
+        code:
+          type: string
+          description: "錯誤代碼"
+        message:
+          type: string
+          description: "錯誤訊息"
+        details:
+          type: object
+          description: "額外錯誤資訊"
+
+    # ── 在此新增業務實體 Schema ──
+    # ExampleEntity:
+    #   type: object
+    #   required: [id, name]
+    #   properties:
+    #     id:
+    #       type: string
+    #       format: uuid
+    #     name:
+    #       type: string
+
+  responses:
+    UnauthorizedError:
+      description: "未授權"
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+    NotFoundError:
+      description: "資源不存在"
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+    ValidationError:
+      description: "請求參數驗證失敗"
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+
+# ─────────────────────────────────────────────────────────
+# 全域安全設定
+# ─────────────────────────────────────────────────────────
+security:
+  - BearerAuth: []
+
+# ─────────────────────────────────────────────────────────
+# 路徑定義（Contract-First，先定義後實作）
+# ─────────────────────────────────────────────────────────
+paths:
+  /example:
+    get:
+      summary: "取得範例資源列表"
+      operationId: "listExamples"
+      tags:
+        - "{Module}"
+      x-aisdlc:
+        related_us: "US-XXX"
+        related_ac: "AC-XXX-1"
+        spec_gate: "SCG-3"
+      parameters:
+        - name: page
+          in: query
+          schema:
+            type: integer
+            default: 1
+        - name: size
+          in: query
+          schema:
+            type: integer
+            default: 20
+      responses:
+        "200":
+          description: "成功"
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items: {}
+                  total:
+                    type: integer
+        "401":
+          $ref: "#/components/responses/UnauthorizedError"
