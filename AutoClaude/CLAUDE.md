@@ -373,7 +373,7 @@ tasks:
 16. goto_counter
 17. checkpoint
 
-### Port 列表（13 個，autoclaude/core/ports/）
+### Port 列表（14 個，autoclaude/core/ports/）
 - brain
 - embedder
 - evaluator
@@ -386,6 +386,7 @@ tasks:
 - spec_source
 - state_repository
 - tool_invocation
+- topology_dashboard
 - vector_search
 
 ### DAL 三後端 storage.mode 矩陣（autoclaude/infra/repositories/factory.py）

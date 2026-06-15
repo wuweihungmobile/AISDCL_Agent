@@ -30,6 +30,8 @@ from ..core.hookspec import (
 )
 from ..core.ports.observability import IObservabilityPort, NullObservability
 from ..core.ports.spec_source import ISpecSource, SddSpec, SpecNotFrozenError
+from ..core.ports.topology_dashboard import ITopologyDashboardSource
+from . import _sdd_topology_signoff as _sig
 
 logger = logging.getLogger("autoclaude.plugins.sdd_governance")
 
@@ -49,17 +51,23 @@ class SddGovernancePlugin:
         spec_source: ISpecSource | None = None,
         *,
         escalation_threshold: int = 3,  # 鏡像 SCG-4「同模式 3 次 → SPEC_AUDIT」
+        topology_dashboard_source: ITopologyDashboardSource | None = None,
+        dashboard_artifact: str = "build/reports/recursion_topology_dashboard.md",
     ):
         self._brain = brain
         self._obs = observability or NullObservability()
         self._spec_source = spec_source
         self._threshold = escalation_threshold
+        # AutoSDD_improving_14 A 軌（W-14-2）：meta⁸ 拓樸審批儀表板橋接（read-only 消費）。
+        self._dashboard_source = topology_dashboard_source
+        self._dashboard_artifact = dashboard_artifact
         self._active = False
         self._spec: SddSpec | None = None
         self._gate_of_step: dict[str, str] = {}
         self._at_of_step: dict[str, str] = {}
         self._state: dict = {"scg_gate": None, "fsm_state": None,
-                             "contract_violations": [], "spec_digest": None}
+                             "contract_violations": [], "spec_digest": None,
+                             "topology_dashboard": None}
 
     def name(self) -> str:
         return "sdd_governance"
@@ -110,7 +118,22 @@ class SddGovernancePlugin:
             "fsm_state": self._state["fsm_state"],
             "contract_violations": [dict(v) for v in self._state["contract_violations"]],
             "spec_digest": self._state["spec_digest"],
+            "topology_dashboard": self._state["topology_dashboard"],
         }
+
+    def pending_topology_dashboard(self) -> str:
+        """W-14-2：回傳已載入的 meta⁸ 拓樸審批儀表板 Markdown（供 escalation dump 嵌入）；無則 ""。"""
+        return self._state.get("topology_dashboard") or ""
+
+    def load_signoff_dashboard(self, artifact_path: str) -> str:
+        """W-14-2：經 port 載入儀表板 Markdown（fail-closed advisory；邏輯抽於 _sdd_topology_signoff）。"""
+        return _sig.load_dashboard_markdown(self._dashboard_source, self._obs, artifact_path)
+
+    def _maybe_load_dashboard(self, ctx: HookContext) -> None:
+        path = _sig.resolve_artifact(
+            self._dashboard_source, self._dashboard_artifact, ctx.playbook.workflow_path)
+        if path:
+            self._state["topology_dashboard"] = self.load_signoff_dashboard(path)
 
     def restore(self, data: dict) -> None:
         if not isinstance(data, dict):
@@ -119,6 +142,8 @@ class SddGovernancePlugin:
         self._state["fsm_state"] = data.get("fsm_state")
         self._state["contract_violations"] = [
             dict(v) for v in data.get("contract_violations", [])]
+        if data.get("topology_dashboard") is not None:
+            self._state["topology_dashboard"] = data.get("topology_dashboard")
         restored = data.get("spec_digest")
         if (restored and self._state["spec_digest"]
                 and restored != self._state["spec_digest"]):
@@ -132,6 +157,8 @@ class SddGovernancePlugin:
     # ── phase handlers ─────────────────────────────────────────
     def _on_pre_run(self, ctx: HookContext) -> VetoResult | None:
         self._active = ctx.playbook.workflow_type in _SDD_WORKFLOWS
+        if self._active:
+            self._maybe_load_dashboard(ctx)  # W-14-2：meta⁸ 拓樸儀表板（與 SCG 治理獨立）
         if not self._active or self._spec_source is None:
             return None
         spec_dir = ctx.playbook.workflow_path

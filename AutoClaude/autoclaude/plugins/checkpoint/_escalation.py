@@ -31,6 +31,7 @@ def save_escalation_dump_impl(
     log_dir: str,
     human_hint: str = "",
     notify_callback: Optional[Callable[..., None]] = None,
+    topology_dashboard: str = "",
 ) -> EscalationDump:
     """W3-1d：組裝 EscalationDump + 持久化 + 觸發 notify。
 
@@ -62,6 +63,7 @@ def save_escalation_dump_impl(
         human_hint=human_hint,
         last_log_path=last_log_path,
         checkpoint_resume_hint=checkpoint_resume_hint,
+        topology_dashboard=topology_dashboard,
     )
     saved_path: str = ""
     try:

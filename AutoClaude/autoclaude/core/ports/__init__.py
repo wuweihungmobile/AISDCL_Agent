@@ -22,6 +22,11 @@ from .state_repository import (
     IStateRepository,
     StateRepositoryError,
 )
+from .topology_dashboard import (
+    DashboardNotVerifiedError,
+    ITopologyDashboardSource,
+    TopologyDashboard,
+)
 
 __all__ = [
     "IExecutor", "ExecutionOutput",
@@ -36,4 +41,6 @@ __all__ = [
     # Improving_012 Phase 1（F-C3 / F-C1；ADR-SD09-006 / ADR-AGT-003）
     "IKbMetricStore", "MetricValue",
     "IPreferenceStore",
+    # AutoSDD_improving_14 A 軌（W-14-1）：meta⁸ 拓樸審批儀表板橋接
+    "ITopologyDashboardSource", "TopologyDashboard", "DashboardNotVerifiedError",
 ]

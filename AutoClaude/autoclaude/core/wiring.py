@@ -198,10 +198,15 @@ def _build_sdd_governance(
     build_kernel 內 LocalLogger 既有先例同模式）。
     """
     from ..infra.adapters.sdd_to_playbook_adapter import SddToPlaybookAdapter  # noqa: PLC0415
+    from ..infra.adapters.sdd_topology_dashboard_adapter import (  # noqa: PLC0415
+        SddTopologyDashboardAdapter,
+    )
     return SddGovernancePlugin(
         brain=brain,
         observability=observability,
         spec_source=SddToPlaybookAdapter(observability=observability),
+        # AutoSDD_improving_14 A 軌（W-14-2）：注入拓樸儀表板來源（read-only 消費 SDD 渲染產物）。
+        topology_dashboard_source=SddTopologyDashboardAdapter(observability=observability),
     )
 
 

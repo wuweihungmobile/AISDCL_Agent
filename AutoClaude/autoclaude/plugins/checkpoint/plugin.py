@@ -232,8 +232,10 @@ class CheckpointPlugin:
         log_dir: str,
         human_hint: str = "",
         notify_callback: Optional[Callable[..., None]] = None,
+        topology_dashboard: str = "",
     ):
         return save_escalation_dump_impl(
             self, tracker, task, playbook_path, final_eval_output,
             checkpoint_dir, log_dir, human_hint, notify_callback,
+            topology_dashboard=topology_dashboard,
         )

@@ -27,6 +27,10 @@ class EscalationDump:
     human_hint: str = ""
     last_log_path: str = ""
     checkpoint_resume_hint: str = ""
+    # AutoSDD_improving_14 A 軌（W-14-2）：meta⁸ 互遞迴拓樸審批儀表板（已過 SDD 端 PY-2
+    # 拓樸防偽 + AutoClaude 端 fail-closed 稽核的 Markdown）。空字串＝非 SDD recursion
+    # signoff / 無儀表板（預設，零退化）；有值時 to_markdown() 嵌入供舵手於指揮官端審批。
+    topology_dashboard: str = ""
 
     def generate_handover_checklist(self) -> list[str]:
         """
@@ -133,6 +137,10 @@ class EscalationDump:
             "## 建議行動",
             self.human_hint or "請檢查上方失敗鏈，優先確認測試檔是否有獨立錯誤。",
         ]
+        if self.topology_dashboard:
+            lines += ["", "## 🧭 meta⁸ 互遞迴拓樸審批儀表板（指揮官端可審批）",
+                      "> SDD 渲染、已過 PY-2 拓樸防偽 + 本端 fail-closed 稽核；🔴=最耗 fuel 算子、⛔=計數器強制打斷。",
+                      "", self.topology_dashboard]
         if self.last_log_path:
             lines += ["", "## 最後執行 Log", f"`{self.last_log_path}`"]
         if self.checkpoint_resume_hint:

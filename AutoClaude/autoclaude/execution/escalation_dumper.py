@@ -21,6 +21,21 @@ if TYPE_CHECKING:
     from .playbook_runner import PlaybookRunner
 
 
+def _resolve_topology_dashboard(runner: "PlaybookRunner") -> str:
+    """AutoSDD_improving_14 A 軌（W-14-2）：從 runner 上可選的 SddGovernancePlugin 取已載入的
+    meta⁸ 拓樸審批儀表板（kernel 路徑 PRE_RUN fail-closed 載入後寫入 plugin 狀態）。
+
+    防禦性：facade 路徑無 sdd_governance / 非 SDD recursion signoff → 回 ""（零退化）。
+    """
+    gov = getattr(runner, "_sdd_governance_plugin", None)
+    if gov is None:
+        return ""
+    try:
+        return gov.pending_topology_dashboard() or ""
+    except Exception:  # noqa: BLE001 — 儀表板為 advisory，絕不拖垮既有 escalation 鏈
+        return ""
+
+
 def dump_escalation_impl(
     runner: "PlaybookRunner",
     tracker: "FailureTracker",
@@ -28,15 +43,21 @@ def dump_escalation_impl(
     playbook_path: str,
     final_eval_output: str,
     human_hint: str = "",
+    topology_dashboard: str = "",
 ) -> "EscalationDump":
     """SD_06 W2-T2-12：_save_escalation_dump 全文下沉。
 
     含 cfg snapshot + _notify_cb closure；委派至 CheckpointPlugin.save_escalation_dump。
     SD_05 W3 Arch-M1：closure 只捕獲 notification 必要欄位 snapshot，避免 cfg 熱重載污染。
+
+    AutoSDD_improving_14（W-14-2）：topology_dashboard 未顯式傳入時，自 runner 上 SDD 治理
+    plugin 解析（fail-closed 已在 plugin/adapter 端完成；此處只取結果）。
     """
     from .playbook_runner import _pr
 
     cfg = runner._cfg
+    if not topology_dashboard:
+        topology_dashboard = _resolve_topology_dashboard(runner)
     cfg_snapshot = SimpleNamespace(
         checkpoint_dir=cfg.checkpoint_dir,
         notification=SimpleNamespace(
@@ -61,4 +82,5 @@ def dump_escalation_impl(
         log_dir=cfg.log_dir,
         human_hint=human_hint,
         notify_callback=_notify_cb,
+        topology_dashboard=topology_dashboard,
     )
