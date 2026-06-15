@@ -102,6 +102,7 @@ class PlaybookRunner:
         checkpoint_mgr: "Optional[CheckpointManager]" = None,
         knowledge_base: "Optional[FailureKnowledgeBase]" = None,
         kernel: "Optional[AutoResumeService]" = None,
+        evolution_approver: "Optional[object]" = None,
     ):
         self._cfg = config
         self._minimax = minimax_client
@@ -113,6 +114,9 @@ class PlaybookRunner:
         self._port_executor = executor
         self._port_evaluator = evaluator
         self._port_brain = brain
+        # DEF-13-004（L5 signoff 守界）：演化重載核可者 callable(count, evolved_path)->bool。
+        # 僅在 cfg.playbook.require_evolution_signoff=True 時生效；None＝未注入。
+        self._evolution_approver = evolution_approver
 
         self._detector = WorkflowDetector()
         self._checkpoint_mgr = checkpoint_mgr or CheckpointManager(config.checkpoint_dir)
@@ -287,6 +291,31 @@ class PlaybookRunner:
         from .boot_helper import validate_evaluator_commands_impl
         return validate_evaluator_commands_impl(playbook)
 
+    def _evolution_signoff_granted(self, count: int, evolved_path: str) -> bool:
+        """DEF-13-004（L5 signoff 守界）：演化版重載前的人工核可閘。
+
+        require_evolution_signoff=False（預設）→ 永遠放行，維持 Gap-012-D
+        自動重載（零退化）。為 True 時 fail-closed：須有 evolution_approver
+        且回傳 True 才放行；approver 缺失或拋例外一律 deny（停機不重載）。
+        """
+        if not self._cfg.playbook.require_evolution_signoff:
+            return True
+        approver = self._evolution_approver
+        if approver is None:
+            logger.warning(
+                "DEF-13-004 | require_evolution_signoff=True 但未注入 "
+                "evolution_approver → fail-closed 拒絕重載 #%d: %s",
+                count, evolved_path,
+            )
+            return False
+        try:
+            return bool(approver(count, evolved_path))
+        except Exception as exc:  # noqa: BLE001 fail-closed：核可者異常一律 deny
+            logger.warning(
+                "DEF-13-004 | evolution_approver 例外，fail-closed 拒絕重載: %s", exc
+            )
+            return False
+
     # ──────────────────────────────────────────────────────────────────────
     # 公開進入點（外層自動恢復迴圈）
     # ──────────────────────────────────────────────────────────────────────
@@ -349,6 +378,20 @@ class PlaybookRunner:
                 self._hotkey.unregister()
 
             if result.evolved_playbook_path and _evolution_count < _max_evolutions:
+                # DEF-13-004（L5 signoff 守界）：重載前須過人工核可閘；未獲准則
+                # 停機不重載，落入下方終止回報（escalation 已在 result 內）。
+                if not self._evolution_signoff_granted(
+                    _evolution_count + 1, result.evolved_playbook_path
+                ):
+                    logger.warning(
+                        "=== DEF-13-004 | 演化版重載未獲 signoff，停機不重載: %s ===",
+                        result.evolved_playbook_path,
+                    )
+                    self._notify(
+                        "AutoClaude — 演化版重載未獲 signoff（停機）",
+                        f"演化版: {result.evolved_playbook_path}",
+                    )
+                    return result
                 _evolution_count += 1
                 logger.info(
                     "=== Gap-012-D | Level 5 自動重載演化版 Playbook #%d: %s ===",

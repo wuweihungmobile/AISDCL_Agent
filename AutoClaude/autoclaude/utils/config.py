@@ -51,6 +51,12 @@ class PlaybookConfig(BaseModel):
     # Gap-013-H：/compact MEMORY ANCHOR 中 [GLOBAL_GOAL] 最大字元數（100~1000，預設 400）
     max_evolutions: int = Field(default=3, ge=1, le=10)
     # Gap-020：自動演化最大次數（1~10，預設 3）
+    require_evolution_signoff: bool = False
+    # DEF-13-004（L5 signoff 守界）：是否在自動重載演化版 Playbook 前要求人工 signoff。
+    # 預設 False＝維持 Gap-012-D Level 5 自動重載（零退化）。設 True 後，每次演化重載前
+    # 須經注入的 evolution_approver 核可（回傳 True）才放行；approver 缺失或拒絕 → fail-closed
+    # 停機不重載並留審計痕（對齊 goal_decomposer signoff 硬閘 + MinimaxConfig.enable_kernel_brain
+    # flag-gate 雙前例）。
     goal_synthesis_enabled: bool = True
     # Gap-014：是否啟用 DONE 前的全局目標驗證（預設啟用）
     global_goal_brief_chars: int = Field(default=150, ge=50, le=500)
