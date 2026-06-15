@@ -161,6 +161,14 @@ SDD_CONTRACT_VIOLATION 次數、token 峰值）。
    > **並行派發隔離（流程問題 #11）**：若同時運行 mutation/突變或並行多 agent 就地寫檔，
    > audit agent 須以 `isolation: worktree` 派發，避免讀到突變態源碼產生假紅（見 AutoClaude
    > CLAUDE.md Nightly 紀律 #18「mutation 須隔離樹」）。
+   > **Copy-on-Evolve / 大批新檔入庫潔淨度（DEF-11-002 紀律）**：審查涉及新凍結版本
+   > （`AISDLC_SDD_v0.0(X+1)/`）或大批 untracked 檔將入庫時，**必跑 `git add -A -n <path>`
+   > 全量 dry-run 審 would-add 清單**有無 runtime/stale 產物（`build/reports/`、
+   > `arch-fitness.json`、`chaos-report.json`、逐字 stale 複製檔…），**不可僅憑
+   > `git check-ignore *.pyc` 數 .pyc 就宣稱潔淨**（Audit_11 初審即因把潔淨度查證窄化到
+   > .pyc、未跑 dry-run，漏審 227 個 build/reports + arch-fitness.json → 誤判 OVERALL PASS，
+   > 複審以 `git add -A -n` 1013 檔當場揭露）。與階段一 (f)、DEF-05-002/DEF-07-001
+   > 「實作後回掃」同屬潔淨度/誠實性紀律家族。
 2. 任何發現（文件問題 + 技術問題）→ 派全能修復 agent **徹底修完**，不留 partial。
 3. QA 專家複審：是否符合原設計功能？是否破壞收斂（基線退化/契約 broken/TLC violation）？
    不通過 → 回步驟 2 再修，循環直到 PASS。

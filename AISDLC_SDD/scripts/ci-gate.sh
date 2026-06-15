@@ -106,6 +106,21 @@ for VER in "${FW_VERSIONS[@]}"; do
   run_gate_for_version "${VER}"
 done
 
+# ── 共享 CI infra 自身回歸鎖（DEF-12-001 修復）────────────────────────────
+# scripts/tests/（versioned 目錄外＝共享 CI infra：ci-gate 版本解析 / pytest 計數
+# helper / 跨版 guard / Copy-on-Evolve helper 的意圖鎖）過去未被 ci-gate.sh 或
+# ci.yml 任何閘門執行 → 這些「退化即紅」保護從未被實際強制。此處於版本迴圈後跑
+# 一次（版本無關，故不掛特定 vX，但仍以 GATE_SUMMARY 自證 passed 數）。
+# set -o pipefail + set -e：scripts/tests 任一紅燈 → 管線非零 → 此處即中止，硬閘語意一致。
+echo "############## CI 閘門：共享 infra scripts/tests/ ##############"
+cd "${REPO_ROOT}"
+INFRA_LOG="$(mktemp)"
+python -m pytest scripts/tests/ -q 2>&1 | tee "${INFRA_LOG}"
+INFRA_PASSED="$(bash "${REPO_ROOT}/scripts/pytest_passed_count.sh" < "${INFRA_LOG}")"
+rm -f "${INFRA_LOG}"
+echo "==> 共享 infra scripts/tests/: ${INFRA_PASSED} passed"
+GATE_SUMMARY+=("scripts/tests:${INFRA_PASSED}")
+
 echo "✅ 本機 CI 閘門全數通過（版本：${FW_VERSIONS[*]}）"
 # DEF-06-001：單行自證逐軌 passed 計數，免零信任取證捲動截斷輸出
 echo "   逐軌計數：${GATE_SUMMARY[*]}"

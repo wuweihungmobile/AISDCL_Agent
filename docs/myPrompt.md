@@ -68,7 +68,7 @@
 再經QA專家審議修完是否有符合"原設計功能"或若有破壞收斂即不通過須馬上進行修改再進行QA!
 全部符合上述PASS才核准通過!
 
-2.AutoClaude的驗證測試Nightly是否有繼續?
+1.AutoClaude的驗證測試Nightly是否有繼續?
 
 下一步：依計畫 🔴 人工確認點，待您確認 AutoSDD_improving_01.md 凍結後即可啟動 W1（spec_source.py）實作；屆時直接用迭代範本以 {{N}}=02 開啟第二輪即可。
 
@@ -82,23 +82,28 @@
 ## 已經執行完 AutoSDD_improving_11.md 和 AutoSDD_ZeroTrust_Audit_11.md 等相關項目
 
 參考資訊:
-階段四（CI 平價，全項綠）
+落地的 W 項
+W-12-1（DEF-11-002）：迭代範本「多專家 Zero-Trust 審查閉環」step 1 補檢核項——涉新凍結版本/大批 untracked 入庫時必跑 git add -A -n 全量 dry-run，不可僅憑 .pyc 宣稱潔淨（含 Audit_11 漏審 227 個 build/reports 實例）。
+W-12-2（DEF-11-001 v0.0Y helper 子項）：新增 copy_on_evolve.sh + test_copy_on_evolve.py（5 case）。tar --exclude 串流複製排除 runtime 產物（rsync 在 Win Git Bash 不可用故採 GNU tar）。
+Rule 7 誠實設計修正
+W-12-2 落點共享 infra（AISDLC_SDD/scripts/）、免 Copy-on-Evolve、不新增 v0.06——修正上輪「routed v0.0Y / v0.05→v0.06」粗略標記。理由：家族前例（ci-gate/conftest/pytest_passed_count/cross_version_guard）全落共享 infra；為改 2 行 SOP 整碗複製 v0.06 反而再觸 DEF-11-001;routing 用「或」字、單 helper 即足。
 
-AutoClaude 改動後複測 3075 / 0 failed（零改動持平）
-雙軌 ci-gate exit 0：v0.01:1478 / v0.05:1499，FF-17 報告 ff17-ok 自證最新版 v0.05 自動入閘
-v0.05 not-chaos 1499 passed、arch_fitness 87 passed、-k ff17 5 passed
-五軌 TLC N/A（零 _HAPPY_PATH/*.tla 變更，Rule 9.18.1 不啟動）
-多專家 Zero-Trust 三鏡審查 — 初審技術 PASS → 複審 FAIL（文件誠實性 + Copy-on-Evolve 潔淨度）→ 即修後複驗 PASS
-獨立 agent 親跑重驗，親手反向實驗證實 FF-17 真鑑別力（monkeypatch 指向寫死單版 → 確實 structural fail）；確認 v0.01~v0.04 源碼零改動。**複審揭露缺口**：鏡三 QA 潔淨度查證僅涵蓋 .pyc，未涵蓋 build/reports（173 runtime 取證檔）+ arch-fitness.json，而此二類將隨 v0.05 commit 入庫。即修＝AISDLC_SDD/.gitignore 新增 v0.05 區塊排除（would-add 1013→839），ci-gate 雙軌 1478/1499 不變複驗。
+實作期 dogfooding 新發現
+DEF-12-001（即修）：ci.yml/ci-gate.sh 從不執行 scripts/tests/ → 4 個共享 infra 測試（含我新增的 helper test）的「退化即紅」從未被任何閘門強制。若不修，W-12-2 的測試形同 Rule 9 無效測試。已在 ci-gate.sh 版本迴圈後補「共享 infra scripts/tests/」軌（硬閘語意一致）。判為完成 W-12-2 必要部分、非新 scope。
+DEF-12-002（即記 routed）：cross_version_guard 對 檔案.py::nodeid（從 root 跑單一測試）誤攔。小修剝 :: 後綴，守 scope 本輪不修。
+零退化矩陣（全綠，主 agent + 獨立複審 agent 雙親跑）
+項目	結果
+AutoClaude pytest	3075 passed / 122 skipped / 0 failed
+lint-imports	8 kept / 0 broken
+LOC / snapshot	violations=0（17511）/ OK
+ci-gate（雙軌+新軌）	exit 0｜v0.01:1478 v0.05:1499 scripts/tests:24
+FF-17	structural-pass（改後四錨點未動）
+scripts/tests	24 passed（含突變移除 build/reports 排除→test_excludes 轉紅，證非假測試）
+五軌 TLC	N/A（零 FSM/.tla/_HAPPY_PATH）
+潔淨度親實踐 DEF-11-002 紀律：git add -A -n would-add 僅 7 個源碼/文件檔，runtime/stale 命中 = 0。AISDLC_SDD v0.01~v0.05 凍結本體零誤改、AutoClaude 微核心零改動。
 
-缺陷帳本
-DEF-10-002 → fixed@improving_11（兩子項齊備）
-新記 DEF-11-001（P3）→ fixed@improving_11（即清理子項）/ routed v0.0Y（通用 helper+SOP 子項）：Copy-on-Evolve cp -r 缺排除 runtime 產物之 helper；複審發現 v0.05 build/reports + arch-fitness.json 未被 .gitignore 涵蓋將入 commit，本輪即以 .gitignore 排除（1013→839），通用 copy_on_evolve.sh helper 留 v0.0Y
 四件套產出
-AutoSDD_improving_11.md
-AutoSDD_ZeroTrust_Audit_11.md
-AutoSDD_Defect_Log.md（DEF-10-002→fixed、新增 DEF-11-001）
-AISDLC_SDD_v0.05/（FF-17 + 測試 + EVOLUTION_LOG + CHANGELOG）+ 範本 (f)
+AutoSDD_improving_12.md、AutoSDD_ZeroTrust_Audit_12.md、AutoSDD_Defect_Log.md 更新、範本+helper+test+ci-gate.sh。進度記憶已更新。
 
 
 為確保執行品質與AutoSDD_improving_11.md執行項目都有執行, 請確實派出Architect / SA SD / QA 專家整體考量審查, 與目前系統現況進行比對, 採完全不信任 zero-trust audit 全面驗證和"修復方向是否正確", 看看nightly程式是否正確 and 執行過程與結果是否正確!
