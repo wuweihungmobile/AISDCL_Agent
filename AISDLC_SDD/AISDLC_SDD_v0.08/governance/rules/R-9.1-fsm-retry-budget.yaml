@@ -1,0 +1,17 @@
+id: R-9.1
+title: FSM Retry Budget
+trigger_states:
+  - SCG_VALIDATION
+  - PR_REVIEW
+  - RTM_VERIFY
+  - SPEC_REGRESSION_CHECK
+severity: critical
+maturity: active
+spec: >
+  SCG_VALIDATION 失敗 3 次 / PR_REVIEW 5 次 / RTM_VERIFY 2 次即進入 ESCALATION；
+  PR_REVIEW 同 pattern 3 次轉 SPEC_AUDIT。對應 transition_rules.RETRY_LIMITS。
+test_ref: tools/fsm_runtime/tests/test_transitions.py
+scaffold_roi:
+  fire_count: 0
+  catch_count: 0
+  false_positive_count: 0

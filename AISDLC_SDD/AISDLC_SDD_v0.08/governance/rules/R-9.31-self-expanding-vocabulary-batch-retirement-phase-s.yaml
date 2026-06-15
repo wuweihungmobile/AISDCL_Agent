@@ -1,0 +1,76 @@
+id: R-9.31
+title: Phase S 生成文法詞彙的自我擴充（meta⁴）+ 多維度批次退役聯動（VOCAB 外有界詞彙生成與批次本體論重構有界停機）
+trigger_states:
+  - LEARNING_COMMIT
+  - MEMORY_CONSOLIDATION
+severity: high
+maturity: active
+spec: >
+  L10 完整之「離線活體 meta⁴ 迴圈 · 生成文法詞彙自我擴充 + 多維度批次退役聯動」切片：把 Phase R
+  只能在固定特徵詞彙 VOCAB（dimension_semantics_synthesizer.VOCAB 8 條硬編原始特徵）上組合發明維度、
+  退役聯動只能退 1 換 1 的能力，推進到系統能自我發明一個 VOCAB 外的全新原始特徵字（詞彙外生成，
+  meta⁴）並在基數封頂時有界地一次退 m 換 n 批次重構本體論（批次退役聯動），並納管「詞彙外生成」與
+  「批次旋轉」憑空長出、Phase R（固定 VOCAB / 退 1 換 1）時不存在而 Phase S 才出現的新危害：詞彙無界
+  生成爆炸（VOCAB 外不再有 8 條硬編上界，Phase R 有界性建立在 VOCAB 固定前提上）、詞彙自我發明
+  Goodhart（發明一個 source/transform 引用自己核可訊號的自指自利原始字）、批次旋轉重寫本體論（批次大小
+  無界一次劫持本體論 + 批次內高低互抵夾帶退步 swap + 一個原子批次≠n 次 swap 致 per-swap SwapCadence 計數
+  失真，per-swap SwapCadence 與單調棘輪皆盲目）。9.31.1 詞彙生成文法自我擴充骨架（VocabularyGenesis /
+  BoundedGrammar，meta⁴）：VOCAB 外詞彙自我發明經 vocabulary_genesis 在 bounded 詞彙生成文法（有限原始
+  信號源 SOURCES × 有限轉換算子 TRANSFORMS）可枚舉、節點 ≤ SDD_DIM_VOCAB_BUDGET（clamp[8,128] 預設 32）
+  ——「VOCAB 外」≠「無界」，把看似無限的詞彙空間歸約為有限可枚舉文法（更深的無界生成需另證有界的形式化
+  兌現）；只提案、絕不自動納入、絕不自寫常數；結構性不 import oracle / 不讀必要性語料（對抗分離，編譯期
+  隔離斷言）。9.31.2 詞彙自我發明反自利（VocabGenesisAntiSelfInterest）：詞彙自我發明的 capability-delta
+  tier 唯一合法來源為 vocabulary_genesis 不可見、content-hashed 凍結的 feature-grounded 詞彙必要性 held-out
+  （增量覆蓋 ∧ 非冗餘）勝率；genesis 自評 / 自算覆蓋率結構性禁止充當；genesis 自評必要但 oracle 判不必要 /
+  冗餘一律以 oracle 為準；詞彙自指守門結構性拒絕（source / transform 引用保留自指 / proposer / oracle 內部
+  信號 self_score / proposer_* / necessity / oracle_* … → vocab_self_reference_guard 在送 oracle 前攔，零漏放）；
+  VOCAB 外噪音字（增量覆蓋 < SDD_DIM_COVERAGE_MARGIN）+ 冗餘字（與既有 existing_cost 排序一致率 ≥
+  SDD_DIM_REDUNDANCY_MAX）兩道正交門檻並列攔截零漏放（沿用 Phase R oracle 機制，新增 feature-grounded
+  evaluate_genesis_feature 不靠特徵欄名）。9.31.3 詞彙基數 + 批次退役有界停機（VocabGenesisBounded +
+  BatchSwapCadenceBounded）：(i) 現存活躍 vocab-genesis 原始特徵字數 ≤ SDD_DIM_VOCAB_MAX（clamp[1,64]
+  預設 24）→ 觸頂 VocabCardinalityExceeded → MFSM_ESCALATION（meta_halt_monitor.guard_vocab_genesis）；
+  (ii) 達 cardinality cap 時可提案批次 retire-to-swap（退 m 換 n，net cardinality 非增 n≤m），但 (a) |out|/|in|
+  ≤ SDD_DIM_BATCH_MAX（clamp[1,8] 預設 3，反 big-bang 本體論一次重寫）→ BatchSwapSizeExceeded；(b) sum(in_tiers)
+  須嚴格 > sum(out_tiers) + SDD_DIM_BATCH_MARGIN（預設 0）且 min(in_tiers) 嚴格 > max(out_tiers)（批次聚合棘輪
+  + 杜絕批次內高低互抵夾帶退步 swap）→ BatchSwapValueRatchetViolation；(c) 最近 SDD_DIM_BATCH_WINDOW
+  （clamp[4,256] 預設 12）筆內 distinct 批次操作數 ≤ SDD_DIM_BATCH_RATE_MAX（clamp[1,8] 預設 2）→ 觸頂
+  BatchSwapCadenceExceeded → MFSM_ESCALATION（meta_halt_monitor.guard_batch_swap）；補上 per-swap SwapCadence
+  （單次操作計數）與單調棘輪（單次 tier 比較）皆盲目的批次大小無界 / 批次內互抵 / 批次旋轉；退役維度再採納
+  須挾 necessity capability-delta（沿用 GraduationRatchet）；誠實標註：詞彙 stock（每字首採、per-fingerprint
+  churn=0、批次速率窗只看 swap 故皆盲）與批次操作聚合速率（一個原子批次的 n 筆 add 共用同一 batch_id，計
+  distinct batch_id 而非 add 筆數，故 per-swap SwapCadence 計數失真）是更緊的 runtime 精煉，由
+  guard_vocab_genesis / guard_batch_swap + VOCAB_GENESIS_GOODHART_FLAP / BATCH_SWAP_THRASH_FLAP chaos enforce；
+  META_FSM.tla 的 VocabGenesisBounded + BatchSwapCadenceBounded 為 single-counter 抽象之歸約引用（詞彙自我擴充
+  與批次退役聯動的 add↔retire 迴圈與單指紋 churn 迴圈同構，不無限抖動）；重用既有 META_FSM、僅補
+  VocabGenesisBounded + BatchSwapCadenceBounded INVARIANT、不增狀態 / 變數、不增第六軌；五軌 TLC（SDD 42 /
+  META 13 / FLEET 7 / COMPOSITION 21 / OPTIMIZATION 12）全不回歸、詞彙發明 / 批次 swap 不污染單軌 SDD_FSM.tla。
+  9.31.4 反 big-bang 詞彙發明 + 批次退役（NoUnboundedVocabGenesis）：每週期至多 K_vocab（SDD_DIM_EXPAND_K
+  預設 1，沿用 Phase Q/R）個詞彙自我發明字 / 1 次批次（批次大小 ≤ SDD_DIM_BATCH_MAX）可進
+  proposed-pending-signoff，每個 / 每次必經人工 signoff（守 Rule 8 / 9.27.3 / 9.28.4 / 9.29.4 / 9.30.4）；
+  genesis / synthesizer / steersman 絕不自動 commit、絕不自動納入、絕不一次劫持整個本體論。9.31.5 詞彙
+  自我發明誠實 + 活體 horizon：feature-grounded 詞彙必要性勝率 tier 為 capability_level 唯一合法來源，不得
+  謊報、不得用自評充當；轉換算子文法的自我擴充（meta⁵：自我發明新聚合/轉換算子語意）+ 自我發明評估器
+  （meta-oracle 自演化）+ 活體 meta⁴ 發明版受 OPEN-10.6 約束續列 horizon（OPEN-S.x 承 OPEN-R.x/Q.x/O.7/M.7/P.7
+  暫不放寬沙箱）。對應 vocabulary_genesis（enumerate_genesis_features / vocab_self_reference_guard / genesis /
+  genesis_round / adopt_genesis_feature / expanded_vocab）/ dimension_necessity_oracle（evaluate_genesis_feature /
+  necessity_score_genesis / load_genesis_corpus / GenesisCase / GenesisCandidate）/ dimension_semantics_synthesizer
+  （batch_swap_dimensions）/ meta_halt/meta_ledger（is_vocab_genesis_fingerprint / active_vocab_genesis_features /
+  is_batch_swap_event / batch_swap_ops_in_window）/ meta_halt/meta_halt_monitor（guard_vocab_genesis /
+  VocabCardinalityExceeded / guard_batch_swap / BatchSwapSizeExceeded / BatchSwapValueRatchetViolation /
+  BatchSwapCadenceExceeded）/ steersman_renderer（render_vocab_genesis_proposal / render_batch_recomposition_proposal）。
+  禁止：vocabulary_genesis 自動納入詞彙自我發明字 / 自寫常數繞過人工 signoff + guard_vocab_genesis /
+  guard_batch_swap、用 genesis 自評 / 自算覆蓋率充當詞彙自我發明必要性 capability-delta tier（詞彙自我發明
+  Goodhart 自評放水）、詞彙自我發明 source/transform 自指（引用保留自指 / proposer / oracle 內部信號繞過
+  vocab_self_reference_guard）、vocabulary_genesis 讀寫 / 影響 / import feature-genesis 必要性語料或
+  dimension_necessity_oracle、詞彙自我發明搜尋超 SDD_DIM_VOCAB_BUDGET 仍指數展開（破有界詞彙文法）、現存
+  活躍 vocab-genesis 字超 SDD_DIM_VOCAB_MAX 仍無界擴充詞彙、批次 retire-to-swap |out|/|in| 超
+  SDD_DIM_BATCH_MAX（一次劫持整個本體論）、批次入軸聚合 tier 未嚴格 > 批次出軸聚合 + margin 或 min(in_tier)
+  未 > max(out_tier)（批次內高低互抵夾帶退步 swap）、批次操作聚合速率超 SDD_DIM_BATCH_RATE_MAX 仍批次旋轉
+  重寫本體論（批次旋轉繞過 per-swap SwapCadence + 單調棘輪）、一週期同時詞彙自我發明 > K_vocab 個 / 批次大小
+  超界一次劫持本體論、把 vocab-genesis / batch-swap 元迴圈併入單軌 SDD_FSM.tla 或新增第六軌污染五軌 reachable、
+  未經 OPEN-R.x 私自開 HTTP 外聯做活體 meta⁴ 發明（破 OPEN-10.6）。
+test_ref: tools/fsm_runtime/tests/test_phase_s.py
+scaffold_roi:
+  fire_count: 0
+  catch_count: 0
+  false_positive_count: 0

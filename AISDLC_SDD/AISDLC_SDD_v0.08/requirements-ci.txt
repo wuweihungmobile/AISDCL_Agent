@@ -1,0 +1,14 @@
+# AISDLC-SDD — CI / local-parity pinned dependencies
+#
+# 目的：消除「本機 vs 正式環境」版本漂移（迷你正式環境的根基）。所有 CI
+# workflow、Docker ci-runner、pre-commit、act 一律 `pip install -r` 此檔，
+# 確保地端與 ubuntu-latest 跑的是同一組相依版本。
+#
+# 範圍：FSM runtime 測試套件僅依賴 stdlib + 下列兩者；「14 subtests」來自
+# stdlib unittest 的 self.subTest()（非 pytest-subtests 套件）。TLA+/TLC 走
+# 系統 Java + tools/fsm_runtime/formal/lib/tla2tools.jar（非 pip 相依）。
+#
+# 升版規則：本機先 `pip install -U` 跑全綠後，再回寫釘選版本並 commit。
+
+pyyaml==6.0.3
+pytest==9.0.3
