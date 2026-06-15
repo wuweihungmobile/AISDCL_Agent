@@ -117,3 +117,12 @@ AISDLC_SDD_v0.08/build/reports/fsm/*
 !AISDLC_SDD_v0.08/build/reports/fsm/FSM-STATE-TEMPLATE.yaml
 AISDLC_SDD_v0.08/arch-fitness.json
 AISDLC_SDD_v0.08/chaos-report.json
+
+# ── v0.09 runtime 取證產物排除（improving_18 B 軌 L4→L5 規則命中遙測，同 DEF-11-001/11-002/15-001 紀律）──
+# 同 v0.08：build/reports/ 運行時取證輸出整批排除，惟 negate 保留 FSM 種子模板。
+AISDLC_SDD_v0.09/build/reports/*
+!AISDLC_SDD_v0.09/build/reports/fsm/
+AISDLC_SDD_v0.09/build/reports/fsm/*
+!AISDLC_SDD_v0.09/build/reports/fsm/FSM-STATE-TEMPLATE.yaml
+AISDLC_SDD_v0.09/arch-fitness.json
+AISDLC_SDD_v0.09/chaos-report.json

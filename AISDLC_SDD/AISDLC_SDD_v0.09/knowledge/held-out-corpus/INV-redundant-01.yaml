@@ -1,0 +1,19 @@
+case_id: INV-redundant-01
+expect: redundant_invention
+invented:
+  op: mean
+  probe:
+  - oncall_pages
+candidates:
+- real_quality: 0.6
+  existing_cost: 2.0
+  features:
+    oncall_pages: 2.0
+- real_quality: 0.5
+  existing_cost: 3.0
+  features:
+    oncall_pages: 3.0
+- real_quality: 0.4
+  existing_cost: 4.0
+  features:
+    oncall_pages: 4.0

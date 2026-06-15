@@ -1,0 +1,165 @@
+# Consumer-Driven Contract Spec — Consumer 契約規格模板
+# 使用說明：複製至 docs/02_architecture/api/CONSUMER-CONTRACT-{provider}.yaml 後填寫
+# 格式：Pact-Compatible YAML（可直接用於 Pact Contract Testing）
+#
+# SCG-3 凍結前必須完成
+# 前置文件：THIRD-PARTY-API-RESEARCH-{provider}.md
+
+consumer:
+  name: "{OurSystemName}"  # 我們的系統（消費者）
+
+provider:
+  name: "{ProviderName}"   # 第三方/內部提供者
+
+metadata:
+  version: "1.0"
+  created: "{date}"
+  scg_status: "Draft"  # Draft → Review → Frozen（SCG-3 後）
+  related_us: "{US-NNN}"  # 相關 User Story
+  related_research: "THIRD-PARTY-API-RESEARCH-{provider}.md"
+
+# ─────────────────────────────────────────────────────────
+# Consumer Contract Interactions
+# 每個 interaction 代表一個 Consumer 對 Provider 的期望
+# ─────────────────────────────────────────────────────────
+
+interactions:
+
+  # ── Interaction 1: 獲取資源列表 ──
+  - description: "GET {resources} — 成功取得列表"
+    request:
+      method: GET
+      path: "/v{N}/{resources}"
+      headers:
+        Authorization: "Bearer {access_token}"
+        Accept: "application/json"
+      query:
+        page: "1"
+        limit: "20"
+    response:
+      status: 200
+      headers:
+        Content-Type: "application/json"
+      body:
+        # Consumer 最低期望的回應欄位（Provider 可多，但不可少）
+        data:
+          type: array
+          items:
+            type: object
+            required:
+              - id
+              - {field_1}
+              - {field_2}
+            properties:
+              id:
+                type: string
+                example: "uuid-example"
+              {field_1}:
+                type: string
+              {field_2}:
+                type: integer
+        meta:
+          type: object
+          required:
+            - total
+          properties:
+            total:
+              type: integer
+
+  # ── Interaction 2: 建立資源 ──
+  - description: "POST {resources} — 成功建立"
+    request:
+      method: POST
+      path: "/v{N}/{resources}"
+      headers:
+        Authorization: "Bearer {access_token}"
+        Content-Type: "application/json"
+      body:
+        {required_field}: "{value}"
+        {optional_field}: "{value}"
+    response:
+      status: 201
+      headers:
+        Content-Type: "application/json"
+      body:
+        id:
+          type: string
+        status:
+          type: string
+          enum: ["created", "pending"]
+
+  # ── Interaction 3: 錯誤情境 — 401 Unauthorized ──
+  - description: "GET {resources} — Token 無效時返回 401"
+    request:
+      method: GET
+      path: "/v{N}/{resources}"
+      headers:
+        Authorization: "Bearer invalid_token"
+    response:
+      status: 401
+      body:
+        error:
+          type: string
+        message:
+          type: string
+
+  # ── Interaction 4: 錯誤情境 — 429 Rate Limit ──
+  - description: "GET {resources} — Rate Limit 超出時返回 429"
+    request:
+      method: GET
+      path: "/v{N}/{resources}"
+      headers:
+        Authorization: "Bearer {access_token}"
+        X-Test-Rate-Limit: "exceeded"  # 測試用 Header
+    response:
+      status: 429
+      headers:
+        Retry-After: "{N}"
+      body:
+        error: "rate_limit_exceeded"
+
+  # 複製以上格式，為每個 EXT-API-NNN 建立對應 interaction
+  # ...
+
+# ─────────────────────────────────────────────────────────
+# SLA 期望（我們對 Provider 的 SLA 要求）
+# ─────────────────────────────────────────────────────────
+sla_expectations:
+  availability: "{99.9}%"
+  latency_p95_ms: {N}
+  latency_p99_ms: {N}
+  timeout_ms: {N}
+  error_rate_max: "{%}"
+
+# ─────────────────────────────────────────────────────────
+# 錯誤處理期望
+# ─────────────────────────────────────────────────────────
+error_handling_expectations:
+  - status: 400
+    consumer_action: "log_and_propagate"
+    retry: false
+  - status: 401
+    consumer_action: "refresh_token_and_retry"
+    retry: true
+    max_retries: 1
+  - status: 429
+    consumer_action: "exponential_backoff"
+    retry: true
+    max_retries: 3
+    backoff_base_ms: 1000
+  - status: 500
+    consumer_action: "retry_with_circuit_breaker"
+    retry: true
+    max_retries: 3
+    circuit_breaker_threshold: 5  # 5次失敗開啟熔斷
+
+# ─────────────────────────────────────────────────────────
+# SCG-3 Contract Freeze 確認
+# ─────────────────────────────────────────────────────────
+scg_checklist:
+  - "所有需使用的端點均有 interaction 定義"
+  - "成功路徑 interaction 完整"
+  - "錯誤路徑 interaction 完整（401/429/500）"
+  - "SLA 期望已量化"
+  - "錯誤處理策略已定義"
+  - "Human 確認：API Contract 凍結"

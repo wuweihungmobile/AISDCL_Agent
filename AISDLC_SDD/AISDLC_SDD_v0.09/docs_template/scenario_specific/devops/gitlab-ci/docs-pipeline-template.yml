@@ -1,0 +1,195 @@
+# ============================================================
+# AISDLC v0.09 - Documentation Pipeline (P2)
+# GitLab CI Template
+# ============================================================
+#
+# 使用方式:
+#   1. 在 .gitlab-ci.yml 中引入此範本:
+#      include:
+#        - local: 'ci/templates/docs-pipeline-template.yml'
+#   2. 依文檔工具調整 build 命令
+#   3. 確保 Layer 0 已配置
+#
+# 參考文檔: Documentation_Pipeline_Template.md
+# ============================================================
+
+# ─── 階段定義 ───
+stages:
+  - doc-lint
+  - doc-link-check
+  - doc-build
+  - doc-deploy
+
+# ============================================================
+# Job 1: Doc Lint（MR 階段）
+# ============================================================
+doc-lint:
+  stage: doc-lint
+  image: node:20-slim
+  timeout: 3 minutes
+
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+      changes:
+        - "**/*.md"
+        - "docs/**"
+        - "mkdocs.yml"
+        - ".markdownlint.yml"
+      when: always
+    - if: '$CI_COMMIT_BRANCH == "main"'
+      changes:
+        - "**/*.md"
+        - "docs/**"
+      when: always
+    - when: never
+
+  before_script:
+    - npm install -g markdownlint-cli2 cspell
+
+  script:
+    # Markdown Lint
+    - echo "📋 Markdown Lint..."
+    - markdownlint-cli2 "**/*.md" "#node_modules" 2>&1 | tee mdlint-output.txt
+
+    # 拼字檢查（警告，不阻塞）
+    - echo "📝 Spell Check..."
+    - cspell "**/*.md" --no-progress 2>&1 | tee spell-output.txt || true
+
+    - echo "✅ Doc Lint 通過"
+
+  artifacts:
+    paths:
+      - mdlint-output.txt
+      - spell-output.txt
+    expire_in: 7 days
+    when: always
+
+# ============================================================
+# Job 2: Link Check（MR + Nightly）
+# ============================================================
+link-check-internal:
+  stage: doc-link-check
+  image: alpine:latest
+  timeout: 5 minutes
+
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+      changes:
+        - "**/*.md"
+        - "docs/**"
+      when: always
+    - when: never
+
+  before_script:
+    - apk add --no-cache curl tar
+    - curl -sL https://github.com/lycheeverse/lychee/releases/latest/download/lychee-x86_64-unknown-linux-musl.tar.gz | tar xz
+    - mv lychee /usr/local/bin/
+
+  script:
+    - echo "🔗 Internal Link Check..."
+    - lychee --offline --no-progress --format markdown --output internal-links-report.md '**/*.md'
+
+  artifacts:
+    paths:
+      - internal-links-report.md
+    expire_in: 30 days
+    when: always
+
+link-check-full:
+  stage: doc-link-check
+  image: alpine:latest
+  timeout: 35 minutes
+
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "schedule"'
+      when: always
+    - if: '$CI_PIPELINE_SOURCE == "web"'
+      when: manual
+    - when: never
+
+  before_script:
+    - apk add --no-cache curl tar
+    - curl -sL https://github.com/lycheeverse/lychee/releases/latest/download/lychee-x86_64-unknown-linux-musl.tar.gz | tar xz
+    - mv lychee /usr/local/bin/
+
+  script:
+    - echo "🔗 Full Link Check (Internal + External)..."
+    - |
+      lychee \
+        --no-progress \
+        --format markdown \
+        --output full-links-report.md \
+        --timeout 30 \
+        --max-concurrency 5 \
+        --accept 200,204,301,302 \
+        '**/*.md' || true
+
+  # Nightly 僅警告
+  allow_failure: true
+
+  artifacts:
+    paths:
+      - full-links-report.md
+    expire_in: 90 days
+    when: always
+
+# ============================================================
+# Job 3: Doc Build（Main 推送）
+# ============================================================
+doc-build:
+  stage: doc-build
+  image: python:3.12-slim
+  timeout: 10 minutes
+
+  rules:
+    - if: '$CI_COMMIT_BRANCH == "main"'
+      changes:
+        - "**/*.md"
+        - "docs/**"
+        - "mkdocs.yml"
+      when: always
+    - when: never
+
+  before_script:
+    - pip install mkdocs-material mkdocs-minify-plugin
+
+  script:
+    - echo "📦 Building documentation..."
+    - mkdocs build --strict
+    - echo "✅ Doc Build 完成"
+
+  artifacts:
+    paths:
+      - site/
+    expire_in: 7 days
+
+# ============================================================
+# Job 4: Deploy Docs（GitLab Pages）
+# ============================================================
+pages:
+  stage: doc-deploy
+  dependencies:
+    - doc-build
+  timeout: 5 minutes
+
+  rules:
+    - if: '$CI_COMMIT_BRANCH == "main"'
+      changes:
+        - "**/*.md"
+        - "docs/**"
+        - "mkdocs.yml"
+      when: always
+    - when: never
+
+  script:
+    - echo "🚀 Deploying to GitLab Pages..."
+    - mv site/ public/
+
+  artifacts:
+    paths:
+      - public/
+    expire_in: 30 days
+
+  environment:
+    name: documentation
+    url: https://$CI_PROJECT_NAMESPACE.gitlab.io/$CI_PROJECT_NAME
