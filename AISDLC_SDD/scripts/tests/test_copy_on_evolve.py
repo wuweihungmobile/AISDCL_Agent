@@ -83,6 +83,10 @@ def _make_source(root: Path) -> Path:
     # ── runtime 產物（必排除）──
     (src / "build" / "reports" / "fsm").mkdir(parents=True)
     (src / "build" / "reports" / "fsm" / "FSM-STATE-x.yaml").write_text("s: 1\n", encoding="utf-8")
+    # DEF-15-001：FSM 種子模板＝真輸入（state_loader._load_template 必需），須**保留**
+    (src / "build" / "reports" / "fsm" / "FSM-STATE-TEMPLATE.yaml").write_text(
+        "current_state: INIT\n", encoding="utf-8"
+    )
     (src / "build" / "reports" / "abort").mkdir(parents=True)
     (src / "build" / "reports" / "abort" / "ABORT-1.md").write_text("abort\n", encoding="utf-8")
     (src / "arch-fitness.json").write_text("{}\n", encoding="utf-8")
@@ -111,8 +115,10 @@ def test_excludes_runtime_keeps_source(work: Path):
     assert (dst / "build" / "planning" / "active" / "rfc.md").is_file()
     assert (dst / "build" / "logs" / "README.md").is_file()
 
-    # runtime 產物必排除
-    assert not (dst / "build" / "reports").exists(), "build/reports/ 未被排除"
+    # runtime 產物必排除（DEF-15-001：但 FSM-STATE-TEMPLATE.yaml 種子模板須保留，見專屬 case）
+    assert not (dst / "build" / "reports" / "fsm" / "FSM-STATE-x.yaml").exists(), \
+        "build/reports/ runtime FSM-STATE 檔未被排除"
+    assert not (dst / "build" / "reports" / "abort").exists(), "build/reports/abort/ 未被排除"
     assert not (dst / "arch-fitness.json").exists(), "arch-fitness.json 未被排除"
     assert not (dst / "chaos-report.json").exists(), "chaos-report.json 未被排除"
     assert not (dst / "tools" / "__pycache__").exists(), "__pycache__/ 未被排除"
@@ -121,6 +127,24 @@ def test_excludes_runtime_keeps_source(work: Path):
     # 但 build/planning 與 build/logs（同在 build/ 下）不可被連坐排除
     assert (dst / "build" / "planning").is_dir()
     assert (dst / "build" / "logs").is_dir()
+
+
+def test_preserves_fsm_state_template(work: Path):
+    """DEF-15-001：排除 build/reports/ 時，FSM 種子模板 FSM-STATE-TEMPLATE.yaml 必須保留。
+
+    WHY：該模板是 state_loader._load_template() 必需的真輸入（非運行時輸出）；早期
+    `cp -r`/robocopy 因不排除 build/reports 而碰巧帶上，改用 copy_on_evolve.sh 的
+    `tar --exclude build/reports` 後被誤殺 → 演化版整個 FSM runtime 無法 bootstrap
+    （46+ 測試全紅，improving_15 首次真實 v0.06 演化當場揭露）。helper 須在排除後補回。
+    退化（拿掉 helper 的補回步驟）→ 本 assert 即紅。
+    """
+    src = _make_source(work)
+    dst = work / "AISDLC_SDD_vNEW"
+    proc = _run(src, dst)
+    assert proc.returncode == 0, f"helper 非零退出：{proc.returncode}\n{proc.stderr}"
+    tmpl = dst / "build" / "reports" / "fsm" / "FSM-STATE-TEMPLATE.yaml"
+    assert tmpl.is_file(), "FSM-STATE-TEMPLATE.yaml 種子模板被誤排除（DEF-15-001 回歸）"
+    assert tmpl.read_text(encoding="utf-8") == "current_state: INIT\n", "模板內容應原樣保留"
 
 
 def test_refuses_existing_target(work: Path):

@@ -52,4 +52,18 @@ tar -C "$FROM" \
   --exclude='./chaos-report.json' \
   -cf - . | tar -C "$TO" -xf -
 
-echo "✅ Copy-on-Evolve 完成: $FROM → $TO（已排除 __pycache__/*.pyc/*.pyo + build/reports/ + arch-fitness.json + chaos-report.json）"
+# DEF-15-001（improving_15 B 軌 dogfooding）：build/reports/ 整樹排除會誤刪
+# build/reports/fsm/FSM-STATE-TEMPLATE.yaml —— 它是 state_loader._load_template()
+# 必需的 FSM 種子模板（真輸入、非運行時輸出；.gitignore 對 v0.01 以 `!` 負向保留同此意）。
+# 若漏帶，演化版整個 FSM runtime 無法 bootstrap（_load_template 觸 FileNotFoundError，
+# 46+ FSM 測試全紅）。故排除後補回該模板（來源存在時）。
+_TMPL_REL="build/reports/fsm/FSM-STATE-TEMPLATE.yaml"
+if [ -f "$FROM/$_TMPL_REL" ]; then
+  mkdir -p "$TO/$(dirname "$_TMPL_REL")"
+  cp "$FROM/$_TMPL_REL" "$TO/$_TMPL_REL"
+  _TMPL_NOTE="；已保留 FSM 種子模板 $_TMPL_REL（DEF-15-001）"
+else
+  _TMPL_NOTE=""
+fi
+
+echo "✅ Copy-on-Evolve 完成: $FROM → $TO（已排除 __pycache__/*.pyc/*.pyo + build/reports/ + arch-fitness.json + chaos-report.json${_TMPL_NOTE}）"

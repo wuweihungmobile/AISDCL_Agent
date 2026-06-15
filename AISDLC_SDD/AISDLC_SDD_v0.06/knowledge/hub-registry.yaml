@@ -1,0 +1,58 @@
+# Hub Registry — Cross-Project Learning Hub endpoint allow-list
+#
+# ACT: ACT-030 (Phase F M2 D-30.4)
+# Spec: docs/06_quality/HUB-GOVERNANCE-SPEC.md G-30.6
+# Trust: knowledge/hub/trust-ladder.md
+#
+# Schema:
+#   registry_version    — schema version (loader 寬鬆解析)
+#   sync_policy         — pull/push 行為設定
+#   allowed_endpoints[] — Hub URL allow-list（非清單 URL 一律拒連）
+#   pull_cache          — pull cache 配置
+#   push_audit_log      — push 審計檔位置
+#
+# 修改本檔需經 PR review；session_start 載入時以 RFC-3986 嚴格比對 endpoint URL。
+
+registry_version: "1.0"
+last_updated: "2026-04-25"
+
+sync_policy:
+  pull:
+    enabled: true
+    cache_ttl_hours: 24                # session_start 24h 內走 cache
+    auto_pull_on_session_start: true   # bootstrap 自動 pull（失敗不阻塞）
+    failure_mode: non_blocking         # Hub 失效不升 ESCALATION（HUB-GOVERNANCE §捌）
+    timeout_seconds: 30                # 單次 pull 上限
+  push:
+    enabled: false                     # 預設關（須使用者 explicit confirm）
+    require_env_confirm: true          # G-30.3：須 SDD_HUB_PUSH_CONFIRMED=<reason>
+    require_pii_double_scan: true      # G-30.7：本地 + Hub 端各掃一次
+    require_anonymize: true            # 強制經 anonymizer
+    timeout_seconds: 60
+
+allowed_endpoints: []
+# 範例（使用者填入）：
+#   - id: aisdlc-sdd-hub
+#     url: https://github.com/aisdlc-sdd-org/learning-hub
+#     protocol: git+https
+#     branch: main
+#     gpg_fingerprint: "<GPG-KEY-ID>"     # G-30.7 GPG 簽章驗證（commit signed）
+#     last_pulled_at: null
+#     last_push_at: null
+#     description: "AISDLC-SDD official learning hub (private repo)"
+#
+# 行為：
+#   - 列表為空 → 所有 pull/push 一律拒連（hub_sync.py raise ConfigError）
+#   - deny_unlisted: true（hard-coded，不可由 yaml 改寫）
+#   - SDD_HUB_ALLOWLIST_OVERRIDE=<audit_reason> 可一次性繞過（寫 audit log）
+
+deny_unlisted: true   # 硬性宣告，hub_sync.py 同步硬編碼檢查
+
+pull_cache:
+  path: "build/reports/hub/pull-cache"   # 24h cache 落地
+  metadata: "build/reports/hub/pull-cache/META.yaml"
+
+push_audit_log: "build/reports/hub/PUSH-AUDIT.yaml"
+quarantine_dir: "build/reports/hub"
+conflicts_dir: "knowledge/hub/CONFLICTS"
+rejected_log: "knowledge/hub/REJECTED-LOG.yaml"

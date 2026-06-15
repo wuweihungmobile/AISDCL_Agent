@@ -1,0 +1,23 @@
+case_id: INV-redundant-03
+expect: redundant_invention
+invented:
+  op: sum
+  probe:
+  - blast_radius
+  - rollback_steps
+candidates:
+- real_quality: 0.61
+  existing_cost: 2.0
+  features:
+    blast_radius: 1.0
+    rollback_steps: 1.0
+- real_quality: 0.51
+  existing_cost: 4.0
+  features:
+    blast_radius: 2.0
+    rollback_steps: 2.0
+- real_quality: 0.4
+  existing_cost: 6.0
+  features:
+    blast_radius: 3.0
+    rollback_steps: 3.0

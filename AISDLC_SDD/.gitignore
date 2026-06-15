@@ -80,6 +80,22 @@ AISDLC_SDD_v0.01/chaos-report.json
 # 由 ci-gate.sh / chaos / arch_fitness / FSM runtime 每次跑都重生（輸出非輸入），
 # 不屬框架源碼故整樹排除。build/planning/（SDD_improving_Automation_NN 規劃）、
 # build/logs/README.md 為真源碼，不在此列。
-AISDLC_SDD_v0.05/build/reports/
+# 🔴 DEF-15-001：FSM-STATE-TEMPLATE.yaml 是 state_loader._load_template() 必需的種子模板
+# （真輸入、非運行時輸出），須**保留追蹤**否則 fresh checkout / GitHub CI 跑此版 FSM 無法
+# bootstrap（improving_11 引入整樹排除時漏 negate，致 v0.05 模板自此 untracked＝潛在缺陷，
+# improving_15 修）。逐層 re-include（git 無法在父目錄已排除時直接 negate 子檔）。
+AISDLC_SDD_v0.05/build/reports/*
+!AISDLC_SDD_v0.05/build/reports/fsm/
+AISDLC_SDD_v0.05/build/reports/fsm/*
+!AISDLC_SDD_v0.05/build/reports/fsm/FSM-STATE-TEMPLATE.yaml
 AISDLC_SDD_v0.05/arch-fitness.json
 AISDLC_SDD_v0.05/chaos-report.json
+
+# ── v0.06 runtime 取證產物排除（improving_15 首次真實 v0.06 演化，同 DEF-11-001/11-002/15-001 紀律）──
+# 同 v0.05：build/reports/ 內運行時取證輸出（每跑重生）整批排除，惟 negate 保留 FSM 種子模板。
+AISDLC_SDD_v0.06/build/reports/*
+!AISDLC_SDD_v0.06/build/reports/fsm/
+AISDLC_SDD_v0.06/build/reports/fsm/*
+!AISDLC_SDD_v0.06/build/reports/fsm/FSM-STATE-TEMPLATE.yaml
+AISDLC_SDD_v0.06/arch-fitness.json
+AISDLC_SDD_v0.06/chaos-report.json

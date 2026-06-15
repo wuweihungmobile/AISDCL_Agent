@@ -1,0 +1,183 @@
+# ============================================================
+# AISDLC v0.09 - Layer 0 Security Baseline
+# GitHub Actions Workflow Template
+# ============================================================
+#
+# 使用方式:
+#   1. 複製此檔案至 .github/workflows/security-baseline.yml
+#   2. 依專案需求調整 dependency-scan job 的語言設定
+#   3. 設定 Repository Secrets（如使用 Snyk: SNYK_TOKEN）
+#
+# 參考文檔: Layer0_Security_Baseline_Template.md
+# ============================================================
+
+name: "🔒 Layer 0: Security Baseline"
+
+on:
+  pull_request:
+    branches: [main, develop, release/*]
+  push:
+    branches: [main, develop]
+
+# 取消同一 PR 的重複執行
+concurrency:
+  group: security-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  security-events: write    # For SARIF upload
+  pull-requests: write      # For PR comments
+
+jobs:
+  # ═══════════════════════════════════════════
+  # Job 1: Secret Detection
+  # ═══════════════════════════════════════════
+  secret-scan:
+    name: "🔑 Secret Detection"
+    runs-on: ubuntu-latest
+    timeout-minutes: 5       # 超時熔斷: 5 分鐘
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0     # Full history for thorough scan
+
+      - name: TruffleHog Secret Scan
+        uses: trufflesecurity/trufflehog@main
+        with:
+          extra_args: --only-verified
+
+      # 備選: GitHub 原生 Secret Scanning（需在 Repo Settings 啟用）
+      # GitHub 的 Secret Scanning 自動運行，無需額外配置
+
+  # ═══════════════════════════════════════════
+  # Job 2: Dependency Scan (SCA)
+  # ═══════════════════════════════════════════
+  dependency-scan:
+    name: "📦 Dependency Scan (SCA)"
+    runs-on: ubuntu-latest
+    timeout-minutes: 10      # 超時熔斷: 10 分鐘
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # ─── Node.js 專案 ───
+      # TODO: 取消註解對應語言的掃描步驟
+      - name: "[Node.js] npm audit"
+        if: hashFiles('package-lock.json') != ''
+        run: |
+          npm audit --audit-level=high
+        continue-on-error: false  # HIGH+ 漏洞阻塞
+
+      # ─── Python 專案 ───
+      # - name: "[Python] pip-audit"
+      #   if: hashFiles('requirements.txt') != ''
+      #   run: |
+      #     pip install pip-audit
+      #     pip-audit -r requirements.txt --desc --fix --dry-run
+
+      # ─── Java 專案 ───
+      # - name: "[Java] OWASP Dependency-Check"
+      #   if: hashFiles('pom.xml') != '' || hashFiles('build.gradle') != ''
+      #   uses: dependency-check/Dependency-Check_Action@main
+      #   with:
+      #     project: '${{ github.repository }}'
+      #     path: '.'
+      #     format: 'HTML'
+      #     args: '--failOnCVSS 7'
+
+      # ─── Snyk（多語言通用，推薦） ───
+      # - name: "[Universal] Snyk Vulnerability Scan"
+      #   uses: snyk/actions/node@master  # 或 snyk/actions/python, /maven, /gradle
+      #   env:
+      #     SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
+      #   with:
+      #     args: --severity-threshold=high
+
+      # ─── Trivy（容器 + 依賴多合一） ───
+      - name: "[Universal] Trivy Filesystem Scan"
+        uses: aquasecurity/trivy-action@master
+        with:
+          scan-type: 'fs'
+          scan-ref: '.'
+          severity: 'CRITICAL,HIGH'
+          exit-code: '1'           # HIGH+ 漏洞阻塞 Pipeline
+          format: 'sarif'
+          output: 'trivy-results.sarif'
+
+      - name: Upload Trivy SARIF
+        uses: github/codeql-action/upload-sarif@v3
+        if: always()
+        with:
+          sarif_file: 'trivy-results.sarif'
+
+  # ═══════════════════════════════════════════
+  # Job 3: License Compliance
+  # ═══════════════════════════════════════════
+  license-check:
+    name: "📜 License Compliance"
+    runs-on: ubuntu-latest
+    timeout-minutes: 5       # 超時熔斷: 5 分鐘
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # ─── Node.js 專案 ───
+      - name: "[Node.js] License Check"
+        if: hashFiles('package.json') != ''
+        run: |
+          npm install -g license-checker
+          license-checker --failOn "GPL-3.0;AGPL-3.0" --summary
+
+      # ─── Python 專案 ───
+      # - name: "[Python] License Check"
+      #   if: hashFiles('requirements.txt') != ''
+      #   run: |
+      #     pip install pip-licenses
+      #     pip-licenses --fail-on="GPL-3.0;AGPL-3.0"
+
+      # ─── Trivy License（多語言通用） ───
+      # - name: "[Universal] Trivy License Scan"
+      #   uses: aquasecurity/trivy-action@master
+      #   with:
+      #     scan-type: 'fs'
+      #     scanners: 'license'
+      #     severity: 'CRITICAL,HIGH'
+      #     exit-code: '1'
+
+  # ═══════════════════════════════════════════
+  # Gate: All Layer 0 checks must pass
+  # ═══════════════════════════════════════════
+  security-gate:
+    name: "🚦 Layer 0 Security Gate"
+    needs: [secret-scan, dependency-scan, license-check]
+    runs-on: ubuntu-latest
+    if: always()
+    steps:
+      - name: Evaluate Results
+        run: |
+          echo "=== Layer 0 Security Baseline Results ==="
+          echo "Secret Scan:     ${{ needs.secret-scan.result }}"
+          echo "Dependency Scan: ${{ needs.dependency-scan.result }}"
+          echo "License Check:   ${{ needs.license-check.result }}"
+          echo "=========================================="
+
+          # Secret scan 必須通過（永遠不可跳過）
+          if [ "${{ needs.secret-scan.result }}" != "success" ]; then
+            echo "::error::🔴 Secret Detection FAILED - PR blocked"
+            exit 1
+          fi
+
+          # Dependency scan 必須通過
+          if [ "${{ needs.dependency-scan.result }}" != "success" ]; then
+            echo "::error::🔴 Dependency Scan FAILED - PR blocked"
+            exit 1
+          fi
+
+          # License check: 失敗時警告但不阻塞（可調整為阻塞）
+          if [ "${{ needs.license-check.result }}" != "success" ]; then
+            echo "::warning::⚠️ License Check FAILED - Review required"
+          fi
+
+          echo "✅ Layer 0 Security Baseline PASSED"
