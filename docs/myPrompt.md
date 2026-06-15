@@ -59,6 +59,15 @@
 
 問題:
 ===========================================================
+目標:
+1.AutoClaude 是多步驟 Playbook 自動執行引擎，以狀態機管理執行流程、重試、Token 限制與錯誤升級, 更重要的是可以控制「AISDLC_SDD_v0.0X」進行相關的軟體開發。 Level 5 自治系統：具備動態突變、自演化、目標對齊、跨 Session 持久化、元學習等高階閉環能力。 微核心化架構：Hexagonal Architecture（9 Ports）+ Kernel/EventBus + 13 Plugin + DAL 三後端（File / InMemory / PostgreSQL）。
+2.我正在構建一套能讓軟體架構隨 AI 演進的自動化機制「AI 規格驅動開發 (AI SDD)」系統。請深度剖析我目前的系統設計，驗證其是否具備「圖靈完備的自動化閉環」能力。你的終極目標是協助我將此系統進化為 Level 10 自治開發流程。利用 Claude Code 建立一個具備自我修正能力的動態工作流程 (Dynamic Workflow)，用於深度重構與優化「AISDLC_SDD_v0.0X」。
+3.AutoClaude可以利用「AISDLC_SDD_v0.0X」進行相關的軟體開發, 建立兩者間完美的協調溝通機制, 成為自動化開發Agent!
+
+目前需確認或解決問題
+1.AutoClaude的驗證測試Nightly是否有繼續?
+2.AutoClaude中SD_Improving_09.md 是否已經執行完畢?
+
 請驗證AutoSDD_Iteration_Prompt_Template.md與執行以下AISDLC_SDD_v0.01專案進行自我迭代開發為目標, 來修改驗證AutoSDD_Iteration_Prompt_Template.md
 1.可否依照目前的D:\CursorProject\AISDCL_Agent\AISDLC_SDD\AISDLC_SDD_v0.01專案 進行自我迭代開發, 行進中並記錄缺點Bug進行改進
 2.此專案開發的過程中, 馬上利用D:\CursorProject\AISDCL_Agent\AISDLC_SDD\AISDLC_SDD_v0.01專案中的流程開發, 並且設計演化AISDLC_SDD_v0.02,AISDLC_SDD_v0.03..等以此類推
@@ -68,11 +77,8 @@
 再經QA專家審議修完是否有符合"原設計功能"或若有破壞收斂即不通過須馬上進行修改再進行QA!
 全部符合上述PASS才核准通過!
 
-1.AutoClaude的驗證測試Nightly是否有繼續?
 
-下一步：依計畫 🔴 人工確認點，待您確認 AutoSDD_improving_01.md 凍結後即可啟動 W1（spec_source.py）實作；屆時直接用迭代範本以 {{N}}=02 開啟第二輪即可。
 
-2.建立一個 dynamic workflow 來請詳細執行 AutoSDD_improving_01.md and 以及AutoSDD_improving_01相關資訊與文件
 ===========================================================
 請協助解決以下問題，詳細規劃需要的執行項目，注意每個項目都不可以遺漏，完成後逐項打勾確認！
 除非必要讓我參考的報告，否則不必產出報告(若有後續Next Action, 需要產出報告)。若有修改，更新相關必要文件即可。請將輸出部分簡潔清楚就好，節省Token！
@@ -133,3 +139,31 @@ AutoSDD_improving_12.md、AutoSDD_ZeroTrust_Audit_12.md、AutoSDD_Defect_Log.md 
 2.如何啟動AISDLC_Agent
 3.如何使用AISDLC_Agent
 4.如何AISDLC_Agent關閉
+
+
+
+已經執行以下項目:
+
+三項編輯皆已寫入。整合完成，逐項確認：
+
+執行項目確認
+
+✅ 1. 北極星目標：在模板區塊頂部（專家身分後、核心任務前）新增「🌟 系統終極目標」，完整納入你的 3 點終極目標（AutoClaude 驅動 SDD／AI SDD 圖靈完備閉環→L10／兩者完美協調成自動化開發 Agent）
+✅ 2. XAI 可解釋性轉向：在核心任務後、自我迭代模式前新增「🔭 高階方向：可解釋性轉向 (XAI Turn)」，完整收錄首席架構師視角全部紀律——觸發條件、ACT-159/R-9.37 driver instance、絕對紀律（五軌 TLC／Token 上限／meta-oracle）、四項前沿思維、兩類漏洞挖掘、15 算子極端圖自我驗證、GitHub Issue 規格輸出
+✅ 3. 底部設計說明表：補 2 列，說明北極星置頂與 XAI 條件式疊加的理由
+✅ 4. 衝突收斂（未靜默取平均）：
+數字衝突（9 Ports/13 Plugin vs 現況 12 Ports/16 Plugin）→ 明確標註「以階段一實測為準、禁寫死」
+成熟度衝突（L5 現況 vs L10/meta⁸ 宣稱）→ 以範本既有 zero-trust「maturity 校準」紀律收斂，須階段一實測證實才採信
+整合設計取捨說明（為何如此做）：
+
+任務動詞是「整合進範本」，故只做文件編輯，未實際執行該架構師 prompt（產出 ACT-159 issue）——維持任務邊界。
+Part B 採蒸餾為範本緊湊風格而非逐字貼入：原文是 Karpathy 風格長 prompt，逐字貼會與範本密集條列慣例衝突且膨脹（Rule 11 對齊慣例），故壓縮但保留全部實質紀律。
+XAI 設為條件式疊加而非常駐：範本是通用每輪 prompt，低階輪不需高階形式化視角，避免無關紀律拖累。
+無 Next Action，故未產出額外報告。檔案 docs/04_planning/AutoSDD_Iteration_Prompt_Template.md 為唯一變更。
+
+為確保
+
+為確保執行品質與docs/04_planning/AutoSDD_Iteration_Prompt_Template.md文件內容符合設計架構與目的, 可以朝系統終極目標進行精進（北極星，每輪不變——所有迭代向此對齊）, 請確實派出Architect / SA / SD / QA 專家整體考量審查, 與目前系統現況進行比對, 採完全不信任 zero-trust audit 全面驗證和"修復方向是否正確", 看看nightly程式是否正確 and 執行過程與結果是否正確!
+有問題馬上請派另一個Agent(Architect/SA/SD/QA 全能)專家進行修復相關程式與文件「所有問題"文件問題"和"技術問題"必須徹底全部修復才能算完成」! 
+再經QA專家審議修完是否有符合"原設計功能"或若有破壞收斂即不通過須馬上進行修改再進行QA!
+全部符合上述PASS才核准通過!
