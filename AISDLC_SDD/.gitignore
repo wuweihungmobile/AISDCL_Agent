@@ -153,3 +153,12 @@ AISDLC_SDD_v0.12/build/reports/fsm/*
 !AISDLC_SDD_v0.12/build/reports/fsm/FSM-STATE-TEMPLATE.yaml
 AISDLC_SDD_v0.12/arch-fitness.json
 AISDLC_SDD_v0.12/chaos-report.json
+
+# ── v0.13 runtime 取證產物排除（improving_22 DEF-15-001 深層重構 + DEF-12-002/22-001）──
+# 🔴 DEF-15-001 深層：自 v0.13 起 FSM 種子模板已移至 tracked 源碼位
+# tools/fsm_runtime/templates/FSM-STATE-TEMPLATE.yaml（輸入/輸出分離），故 build/reports/
+# 可**整樹排除、不再需 negate idiom**（v0.05~v0.12 因模板寄居 build/reports/fsm/ 才須逐層
+# re-include）。runtime 狀態檔輸出（FSM-STATE-{project}.yaml）仍寫 build/reports/fsm/ 並排除。
+AISDLC_SDD_v0.13/build/reports/
+AISDLC_SDD_v0.13/arch-fitness.json
+AISDLC_SDD_v0.13/chaos-report.json

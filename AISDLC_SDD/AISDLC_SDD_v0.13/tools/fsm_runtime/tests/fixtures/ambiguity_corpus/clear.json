@@ -1,0 +1,30 @@
+{
+  "description": "25 clear AC samples — score should be < 0.4 (SCG-0 passes)",
+  "samples": [
+    {"id": "CLEAR-01", "text": "若使用者連續輸入錯誤密碼 3 次，則鎖定帳號 15 分鐘", "expected_max": 0.39, "reason": "negative + numbers"},
+    {"id": "CLEAR-02", "text": "當訂單金額超過 10000 元，系統自動觸發人工審核流程", "expected_max": 0.39, "reason": "negative + numbers"},
+    {"id": "CLEAR-03", "text": "API 回應時間在 95 百分位下需 < 200 ms", "expected_max": 0.39, "reason": "NFR with numbers"},
+    {"id": "CLEAR-04", "text": "如果使用者未登入，畫面導向 /login 頁面 <!-- anchor:ui:login -->", "expected_max": 0.39, "reason": "negative + anchor"},
+    {"id": "CLEAR-05", "text": "資料庫查詢必須在 50 ms 內完成，否則回傳 503", "expected_max": 0.39, "reason": "NFR num + negative"},
+    {"id": "CLEAR-06", "text": "POST /orders 端點必須驗證 JWT，未通過則回傳 401 <!-- anchor:api:create-order -->", "expected_max": 0.39, "reason": "negative + anchor"},
+    {"id": "CLEAR-07", "text": "When user uploads a file > 10 MB, return HTTP 413", "expected_max": 0.39, "reason": "negative + numbers"},
+    {"id": "CLEAR-08", "text": "若購物車為空，提交按鈕變為 disabled <!-- anchor:ui:cart -->", "expected_max": 0.39, "reason": "negative + anchor"},
+    {"id": "CLEAR-09", "text": "系統可用性必須維持 99.9% 月度 SLA", "expected_max": 0.39, "reason": "NFR with numbers"},
+    {"id": "CLEAR-10", "text": "每秒處理請求量 ≥ 1000 qps", "expected_max": 0.39, "reason": "NFR with numbers"},
+    {"id": "CLEAR-11", "text": "If session expires after 30 min idle, redirect to /login", "expected_max": 0.39, "reason": "negative + numbers"},
+    {"id": "CLEAR-12", "text": "當使用者於 5 秒內重複點擊提交按鈕，系統忽略後續請求", "expected_max": 0.39, "reason": "negative + numbers"},
+    {"id": "CLEAR-13", "text": "若 RPO 超過 60 秒，告警通知 oncall", "expected_max": 0.39, "reason": "NFR num + negative"},
+    {"id": "CLEAR-14", "text": "系統每日 02:00 UTC 執行備份，保留 30 天", "expected_max": 0.39, "reason": "exact times + numbers"},
+    {"id": "CLEAR-15", "text": "若密碼長度 < 8 字元，註冊 API 回傳 400 BadRequest", "expected_max": 0.39, "reason": "negative + numbers"},
+    {"id": "CLEAR-16", "text": "在訂單取消後 24 小時內可申請退款，否則進入售後流程", "expected_max": 0.39, "reason": "negative + numbers"},
+    {"id": "CLEAR-17", "text": "When DB connection fails 3 times consecutively, switch to read replica", "expected_max": 0.39, "reason": "negative + numbers"},
+    {"id": "CLEAR-18", "text": "RTO 必須 ≤ 4 小時、RPO 必須 ≤ 15 分鐘", "expected_max": 0.39, "reason": "NFR with numbers"},
+    {"id": "CLEAR-19", "text": "若 CPU 使用率超過 80% 持續 5 分鐘，自動擴容 +1 instance", "expected_max": 0.39, "reason": "negative + numbers"},
+    {"id": "CLEAR-20", "text": "If payment webhook returns non-200 status, retry up to 5 times with exponential backoff", "expected_max": 0.39, "reason": "negative + numbers"},
+    {"id": "CLEAR-21", "text": "當庫存 = 0，商品頁面顯示「售完」徽章 <!-- anchor:ui:product-detail -->", "expected_max": 0.39, "reason": "negative + anchor"},
+    {"id": "CLEAR-22", "text": "若客戶連續 7 天未登入，發送召回 email", "expected_max": 0.39, "reason": "negative + numbers"},
+    {"id": "CLEAR-23", "text": "POST /payment 必須冪等，相同 idempotency_key 24 小時內回傳同樣結果", "expected_max": 0.39, "reason": "exact constraint + numbers"},
+    {"id": "CLEAR-24", "text": "若使用者地區為 EU，啟用 GDPR cookie banner", "expected_max": 0.39, "reason": "negative path"},
+    {"id": "CLEAR-25", "text": "API rate limit 為 100 req/min/user，超出回傳 429", "expected_max": 0.39, "reason": "NFR with numbers"}
+  ]
+}

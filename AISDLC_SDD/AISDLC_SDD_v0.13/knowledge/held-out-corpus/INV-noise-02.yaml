@@ -1,0 +1,23 @@
+case_id: INV-noise-02
+expect: noise_invention
+invented:
+  op: max
+  probe:
+  - oncall_pages
+  - schema_lock_time
+candidates:
+- real_quality: 0.55
+  existing_cost: 2.0
+  features:
+    oncall_pages: 6.0
+    schema_lock_time: 4.0
+- real_quality: 0.55
+  existing_cost: 3.0
+  features:
+    oncall_pages: 0.0
+    schema_lock_time: 1.0
+- real_quality: 0.45
+  existing_cost: 4.0
+  features:
+    oncall_pages: 9.0
+    schema_lock_time: 2.0

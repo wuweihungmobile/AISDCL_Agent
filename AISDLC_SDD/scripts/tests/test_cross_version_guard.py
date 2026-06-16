@@ -41,6 +41,32 @@ def test_non_version_path_detects_none():
     assert vs == set()
 
 
+def test_nodeid_with_colons_not_false_positive(tmp_path):
+    """pytest 單一測試 nodeid（``path::test``）含 :: → 剝除後判路徑，不誤觸跨版 guard。
+
+    WHY（DEF-12-002）：從 REPO_ROOT 跑 ``pytest 檔案.py::test_y`` 取突變證據時，token 含
+    ``::`` 使 ``os.path.exists`` 為 False → 舊碼誤判「無路徑 arg」→ 走 bare 分支展開
+    cwd 下全部版本 → 誤報跨版 UsageError。修後須回傳空集（不 fire）。退化即紅。
+    """
+    (tmp_path / "AISDLC_SDD_v0.12").mkdir()
+    (tmp_path / "AISDLC_SDD_v0.13").mkdir()
+    (tmp_path / "smoke.py").write_text("def test_x(): pass\n", encoding="utf-8")
+    vs = versions_touched(["smoke.py::test_x"], str(tmp_path))
+    assert vs == set(), f"單一非版本 nodeid 不該展開版本目錄，實得 {vs}（DEF-12-002 回歸）"
+
+
+def test_versioned_nodeid_still_detects_version(tmp_path):
+    """版本路徑帶 nodeid（``v0.12/x.py::test``）→ 仍正確偵測該版（剝 :: 不傷版本偵測）。
+
+    WHY：DEF-12-002 修法只剝 :: 判存在，版本片段由 VERSION_RE 涵蓋，不可因修法漏掉真跨版。
+    """
+    vs = versions_touched(
+        ["AISDLC_SDD_v0.12/tools/fsm_runtime/tests/test_x.py::test_y"],
+        str(tmp_path),
+    )
+    assert vs == {"AISDLC_SDD_v0.12"}
+
+
 def test_flags_and_option_values_ignored():
     """旗標與選項值（-m 'not chaos'）不得被當路徑，只認真正的版本路徑。
 

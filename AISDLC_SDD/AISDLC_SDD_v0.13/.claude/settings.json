@@ -1,0 +1,46 @@
+{
+  "$schema": "https://json.schemastore.org/claude-code-settings.json",
+  "description": "AISDLC-SDD v0.01 — Phase D 閉環自動化 Hooks（ACT-011/012） + Phase E M2 契約環境變數（ACT-020/021）",
+  "env": {
+    "SDD_SUBAGENT_CONTRACT": "soft",
+    "SDD_PATTERN_MATCH_THRESHOLD": "0.75",
+    "SDD_MULTIMODAL_BACKEND": "session"
+  },
+  "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python .claude/hooks/session_start.py",
+            "timeout": 30
+          }
+        ]
+      }
+    ],
+    "PreToolUse": [
+      {
+        "matcher": "Write|Edit|Read|Bash|NotebookEdit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python .claude/hooks/context_ledger_pre.py",
+            "timeout": 10
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "Write|Edit|Read|Bash|NotebookEdit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python .claude/hooks/context_ledger_post.py",
+            "timeout": 10
+          }
+        ]
+      }
+    ]
+  }
+}

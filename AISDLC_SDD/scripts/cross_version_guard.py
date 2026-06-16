@@ -15,7 +15,10 @@ from __future__ import annotations
 import os
 import re
 
-VERSION_RE = re.compile(r"AISDLC_SDD_v0\.0\d+")
+# DEF-22-001：原 ``v0\.0\d+`` 僅匹配 v0.00–v0.09，對 v0.10+ 失效（DEF-19-002 同根的
+# 十位數跨越 regex 失效，當時只修 ci-gate.sh/arch_fitness/test_ci_gate_version_resolution
+# 三處 glob，漏此處）→ guard 對現役 v0.10~v0.13 版本偵測失能。放寬為 ``v0\.\d+`` 通則化。
+VERSION_RE = re.compile(r"AISDLC_SDD_v0\.\d+")
 
 
 def _versions_in_path(abspath: str) -> set[str]:
@@ -41,9 +44,13 @@ def _is_path_arg(token: str, cwd: str) -> bool:
     """
     if VERSION_RE.search(token):
         return True
-    if os.path.exists(token):
+    # pytest nodeid 形如 ``path::test_x`` —— 剝除 :: 後綴再判路徑存在，否則
+    # ``os.path.exists("檔案.py::test_y")``=False 致誤判「無路徑 arg」走 bare 展開全版
+    # 誤報跨版（DEF-12-002）。版本片段偵測在上方 search 已涵蓋故不受影響。
+    path_part = token.split("::", 1)[0]
+    if os.path.exists(path_part):
         return True
-    return os.path.exists(os.path.join(cwd, token))
+    return os.path.exists(os.path.join(cwd, path_part))
 
 
 def versions_touched(args: list[str], cwd: str) -> set[str]:

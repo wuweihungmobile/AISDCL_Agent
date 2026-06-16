@@ -1,0 +1,20 @@
+id: R-SELF-STRIDE
+title: 自治執行迴圈自身安全（Loop Self-STRIDE）
+trigger_states:
+  - SANDBOX_HARDENING_GATE
+  - EXECUTION_EVALUATION
+severity: critical
+maturity: active
+spec: >
+  Phase I M1 / ACT-061（Rule 9.21.3）：對「會自動執行自己生成的不可信碼」的執行器
+  自身施加 6 類 self-STRIDE 控制 — Spoofing（spec 簽章）/ Tampering（lockfile 雜湊）
+  / Repudiation（執行落帳）/ Info-disclosure（--network none）/ DoS（--memory/--pids-limit）
+  / Elevation（--cap-drop ALL + 非 root + no-new-privileges + image allow-list）。
+  任一違反 → SANDBOX_HARDENING_GATE policy_violation → ESCALATION（structural，
+  DiagnosticAgent sub_type=sandbox_policy_violation，不可 auto-recover）。對應
+  loop_threat_model.py / sandbox_runner.SecurityProfile。
+test_ref: tools/fsm_runtime/tests/test_phase_i.py
+scaffold_roi:
+  fire_count: 0
+  catch_count: 0
+  false_positive_count: 0
