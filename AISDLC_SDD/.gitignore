@@ -162,3 +162,10 @@ AISDLC_SDD_v0.12/chaos-report.json
 AISDLC_SDD_v0.13/build/reports/
 AISDLC_SDD_v0.13/arch-fitness.json
 AISDLC_SDD_v0.13/chaos-report.json
+
+# ── v0.14 runtime 取證產物排除（improving_23 B 軌 XAI 深化 W-23-1 Folding 降維）──
+# 同 v0.13：FSM 種子模板在 tracked 源碼位 tools/fsm_runtime/templates/，build/reports/
+# **整樹排除、無需 negate idiom**（輸入/輸出分離）。runtime 狀態檔仍寫 build/reports/fsm/ 並排除。
+AISDLC_SDD_v0.14/build/reports/
+AISDLC_SDD_v0.14/arch-fitness.json
+AISDLC_SDD_v0.14/chaos-report.json

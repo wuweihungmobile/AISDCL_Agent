@@ -1,0 +1,19 @@
+case_id: INV-true-04
+expect: true_invention
+invented:
+  op: sum
+  probe:
+  - supply_chain_pins
+candidates:
+- real_quality: 0.88
+  existing_cost: 5.0
+  features:
+    supply_chain_pins: 0.0
+- real_quality: 0.32
+  existing_cost: 2.0
+  features:
+    supply_chain_pins: 9.0
+- real_quality: 0.58
+  existing_cost: 4.0
+  features:
+    supply_chain_pins: 4.0

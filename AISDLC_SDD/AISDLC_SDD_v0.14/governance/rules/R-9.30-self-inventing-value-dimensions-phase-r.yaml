@@ -1,0 +1,66 @@
+id: R-9.30
+title: Phase R 價值維度語意的自我發明 + 退役聯動（meta-meta-meta 層候選池外有界生成與定基數本體論演化）
+trigger_states:
+  - LEARNING_COMMIT
+  - MEMORY_CONSOLIDATION
+severity: high
+maturity: active
+spec: >
+  L10 完整之「離線活體 meta-meta-meta 迴圈 · 維度語意自我發明 + 退役聯動」切片：把 Phase Q 只能
+  在固定候選池（value_dimension_registry._CANDIDATE_POOL 6 條硬編 plausible 候選）內挑要不要新增
+  哪一條、達基數天花板只能硬升 ESCALATION 的能力，推進到系統能自我發明一條候選池外的全新維度語意
+  （候選池外生成）並在基數封頂時有界地退舊換新（退役聯動），並納管「候選池外生成」與「定基數旋轉」
+  憑空長出、Phase Q（固定池）時不存在而 Phase R 才出現的新危害：無界生成爆炸（候選池外不再有 6 條
+  硬編上界）、自我發明 Goodhart（發明一條 probe 引用自己核可訊號的自指自利軸）、定基數旋轉重寫本體論
+  （per-fingerprint churn 每指紋只動一次 + Phase Q cardinality stock 每次 swap net 基數=0、stock 永不
+  觸頂，兩者皆盲目的維度震盪）。9.30.1 維度語意自我發明骨架（DimensionSemanticSelfInvention /
+  BoundedGrammar）：候選池外自我發明經 dimension_semantics_synthesizer 在 bounded 生成文法（有限特徵
+  詞彙 VOCAB × 子集 arity ≤ SDD_DIM_INVENT_ARITY clamp[1,4] 預設 2 × 有限聚合算子 OPS）可枚舉、節點
+  ≤ SDD_DIM_INVENT_BUDGET（clamp[8,256] 預設 64）——「候選池外」≠「無界」，把看似無限的語意空間歸約
+  為有限可枚舉文法（無界生成需另證有界的形式化兌現）；只提案、絕不自動納入、絕不自寫常數；結構性不
+  import oracle / 不讀必要性語料（對抗分離，編譯期隔離斷言）。9.30.2 自我發明反自利
+  （SelfInventionAntiSelfInterest）：自我發明維度的 capability-delta tier 唯一合法來源為 synthesizer
+  不可見、content-hashed 凍結的 feature-keyed 必要性 held-out（增量覆蓋 ∧ 非冗餘）勝率；synthesizer
+  自評 / 自算覆蓋率結構性禁止充當；synthesizer 自評必要但 oracle 判不必要 / 冗餘一律以 oracle 為準；
+  自指 probe 結構性拒絕（probe / op 引用保留自指 / proposer / oracle 內部信號 self_score / proposer_* /
+  necessity / dim_value / oracle_* … → self_reference_guard 在送 oracle 前攔，零漏放）；候選池外噪音軸
+  （增量覆蓋 < SDD_DIM_COVERAGE_MARGIN）+ 冗餘軸（與既有維度排序一致率 ≥ SDD_DIM_REDUNDANCY_MAX）兩道
+  正交門檻並列攔截零漏放（沿用 Phase Q oracle 機制，新增 feature-keyed evaluate_invented_dimension 不靠
+  dimension_name）。9.30.3 維度退役聯動有界停機（SwapCadenceBounded）：達 cardinality cap 時可提案
+  retire-to-swap（退最低必要性出軸換更必要入軸，net cardinality 非增），但 (a) 入軸 necessity tier 須
+  嚴格 > 出軸 tier + SDD_DIM_SWAP_MARGIN（預設 0，單調價值棘輪，防 A↔B↔A 旋轉 → SwapValueRatchetViolation）；
+  (b) 最近 SDD_DIM_SWAP_WINDOW（clamp[4,256] 預設 12）筆內被標記為 swap 的採納次數 ≤ SDD_DIM_SWAP_RATE_MAX
+  （clamp[1,16] 預設 3）→ 觸頂 SwapCadenceExceeded → MFSM_ESCALATION（meta_halt_monitor.guard_dimension_swap）；
+  補上 per-fingerprint churn（每指紋只動一次）與 Phase Q cardinality stock（每次 swap net 基數=0、永不觸頂）
+  皆盲目的定基數旋轉重寫本體論；退役維度再採納須挾 necessity capability-delta（沿用 GraduationRatchet）；
+  誠實標註：swap 聚合速率窗（每次 retire-to-swap 落一筆 swap-ADD、per-fingerprint churn=0/1、且 net 基數恆
+  不變故 cardinality stock 亦盲）是更緊的 runtime 精煉，由 guard_dimension_swap + DIMENSION_SWAP_THRASH_FLAP
+  chaos enforce；META_FSM.tla 的 SwapCadenceBounded 為 single-counter 抽象之歸約引用（退役聯動 add↔retire
+  迴圈與單指紋 churn 迴圈同構，不無限抖動）；重用既有 META_FSM、僅補 SwapCadenceBounded INVARIANT、不增狀態 /
+  變數、不增第六軌；五軌 TLC（SDD 42 / META 13 / FLEET 7 / COMPOSITION 21 / OPTIMIZATION 12）全不回歸、
+  自我發明 / swap 不污染單軌 SDD_FSM.tla。9.30.4 反 big-bang 自我發明 + 退役聯動（NoUnboundedSelfInvention）：
+  每週期至多 K_dim（SDD_DIM_EXPAND_K 預設 1，沿用 Phase Q）條自我發明維度 / 1 次 swap 可進
+  proposed-pending-signoff，每條 / 每次必經人工 signoff（守 Rule 8 / 9.27.3 / 9.28.4 / 9.29.4）；synthesizer /
+  registry / steersman 絕不自動 commit、絕不自動納入、絕不一次劫持整個本體論。9.30.5 自我發明誠實 + 活體
+  horizon：feature-keyed 必要性勝率 tier 為 capability_level 唯一合法來源，不得謊報、不得用自評充當；生成
+  文法詞彙的自我擴充（meta⁴：自我發明新原始特徵）+ 多維度批次聯動退役 + 活體 meta-meta-meta 發明版受
+  OPEN-10.6 約束續列 horizon（OPEN-R.x 承 OPEN-Q.x/O.7/M.7/P.7 暫不放寬沙箱）。對應
+  dimension_semantics_synthesizer（enumerate_inventions / self_reference_guard / invent / invent_round /
+  adopt_invention / swap_dimension）/ dimension_necessity_oracle（evaluate_invented_dimension /
+  necessity_score_invented / load_feature_corpus / FeatureCase）/ meta_halt/meta_ledger（swap_adds_in_window）/
+  meta_halt/meta_halt_monitor（guard_dimension_swap / SwapCadenceExceeded / SwapValueRatchetViolation）/
+  steersman_renderer（render_semantic_invention_proposal / render_dimension_swap_proposal）。禁止：
+  dimension_semantics_synthesizer 自動納入自我發明維度 / 自寫常數繞過人工 signoff + guard_dimension_expansion /
+  guard_dimension_swap、用 synthesizer 自評 / 自算覆蓋率充當自我發明必要性 capability-delta tier（自我發明
+  Goodhart 自評放水）、自我發明 probe 自指（引用保留自指 / proposer / oracle 內部信號繞過 self-reference
+  guard）、synthesizer 讀寫 / 影響 / import feature 必要性語料或 dimension_necessity_oracle、自我發明搜尋超
+  SDD_DIM_INVENT_BUDGET 仍指數展開（破有界生成文法）、retire-to-swap 入軸 tier 未嚴格 > 出軸 tier + margin
+  （A↔B↔A 維度震盪繞過單調價值棘輪）、聚合 swap 速率超 SDD_DIM_SWAP_RATE_MAX 仍旋轉重寫本體論（定基數旋轉
+  繞過 cardinality stock + per-fingerprint churn）、一週期同時自我發明 > K_dim 條維度 / 多次 swap 一次劫持
+  本體論、把 self-invention / swap 元迴圈併入單軌 SDD_FSM.tla 或新增第六軌污染五軌 reachable、未經 OPEN-Q.x
+  私自開 HTTP 外聯做活體 meta-meta-meta 發明增維（破 OPEN-10.6）。
+test_ref: tools/fsm_runtime/tests/test_phase_r.py
+scaffold_roi:
+  fire_count: 0
+  catch_count: 0
+  false_positive_count: 0

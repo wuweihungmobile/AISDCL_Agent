@@ -1,0 +1,228 @@
+# Provider API Spec — 我們提供給外部的 API 規格模板
+# 使用說明：複製至 docs/02_architecture/api/PROVIDER-API-SPEC-{module}.yaml 後填寫
+# 格式：OpenAPI 3.1
+
+openapi: "3.1.0"
+
+info:
+  title: "{ModuleName} Provider API"
+  description: |
+    # {ModuleName} 提供給外部消費者的 API 規格
+
+    此規格定義我們作為 Provider 所承諾的 API 行為。
+    任何對此規格的破壞性變更，必須通過所有 Consumer Contract Tests 後才可發布。
+
+    **SCG 狀態**: Draft → SCG-3 凍結後才可開始實作
+    **相關 ADR**: `ADR-INTEGRATION-{NNN}.md`
+  version: "1.0.0"
+  contact:
+    name: "{Team Name}"
+
+  x-aisdlc:
+    scg_status: "Draft"  # Draft → Frozen
+    frozen_date: "{date}"
+    related_us: "{US-NNN}"
+    contract_type: "Provider API（我們提供）"
+
+servers:
+  - url: "https://{dev-host}/api"
+    description: "Development"
+  - url: "https://{staging-host}/api"
+    description: "Staging"
+  - url: "https://{prod-host}/api"
+    description: "Production"
+
+# ─────────────────────────────────────────────────────────
+# Security Schemes
+# ─────────────────────────────────────────────────────────
+components:
+  securitySchemes:
+    BearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+    ApiKeyAuth:
+      type: apiKey
+      in: header
+      name: X-API-Key
+
+  # 共用 Schema 定義
+  schemas:
+    ErrorResponse:
+      type: object
+      required: [error, message]
+      properties:
+        error:
+          type: string
+          example: "validation_error"
+        message:
+          type: string
+          example: "Request validation failed"
+        details:
+          type: array
+          items:
+            type: string
+
+    PaginationMeta:
+      type: object
+      properties:
+        total:
+          type: integer
+        page:
+          type: integer
+        limit:
+          type: integer
+        has_next:
+          type: boolean
+
+    # 業務資源 Schema
+    {ResourceName}:
+      type: object
+      required:
+        - id
+        - {required_field_1}
+      properties:
+        id:
+          type: string
+          format: uuid
+          description: "資源唯一識別碼"
+          x-aisdlc:
+            related_inv: "INV-{NNN}"  # 關聯 Business Invariant
+        {required_field_1}:
+          type: string
+          description: "{欄位說明}"
+        {optional_field}:
+          type: string
+          nullable: true
+          description: "{欄位說明}"
+
+# ─────────────────────────────────────────────────────────
+# API Endpoints
+# ─────────────────────────────────────────────────────────
+paths:
+
+  # ── GET /v1/{resources} — 列表查詢 ──
+  /v1/{resources}:
+    get:
+      summary: "取得 {resource} 列表"
+      operationId: "list{Resources}"
+      tags: ["{ModuleName}"]
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: page
+          in: query
+          schema:
+            type: integer
+            default: 1
+            minimum: 1
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 20
+            maximum: 100
+        - name: {filter_param}
+          in: query
+          description: "{過濾條件說明}"
+          schema:
+            type: string
+      responses:
+        "200":
+          description: "成功取得列表"
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/{ResourceName}"
+                  meta:
+                    $ref: "#/components/schemas/PaginationMeta"
+              example:
+                data:
+                  - id: "uuid-example"
+                    {field_1}: "value"
+                meta:
+                  total: 100
+                  page: 1
+                  limit: 20
+                  has_next: true
+        "401":
+          description: "未授權"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "429":
+          description: "請求頻率超限"
+          headers:
+            Retry-After:
+              schema:
+                type: integer
+              description: "秒數後可重試"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+      x-aisdlc:
+        related_us: "{US-NNN}"
+        rate_limit: "{N}/min per API key"
+        sla_p95_ms: {N}
+
+    # ── POST /v1/{resources} — 建立資源 ──
+    post:
+      summary: "建立 {resource}"
+      operationId: "create{Resource}"
+      tags: ["{ModuleName}"]
+      security:
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - {required_field}
+              properties:
+                {required_field}:
+                  type: string
+                  description: "{說明}"
+                {optional_field}:
+                  type: string
+      responses:
+        "201":
+          description: "建立成功"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/{ResourceName}"
+        "400":
+          description: "請求格式錯誤"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          description: "未授權"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+      x-aisdlc:
+        related_us: "{US-NNN}"
+        idempotency: "支援 Idempotency-Key header"
+
+# ─────────────────────────────────────────────────────────
+# Backward Compatibility Policy
+# ─────────────────────────────────────────────────────────
+x-backward-compatibility:
+  policy: "Semantic Versioning — 破壞性變更必須升主版本號"
+  deprecation_notice_period: "{N weeks}"
+  breaking_changes_require:
+    - "所有 Consumer Contract Tests 通過"
+    - "ADR 記錄變更原因"
+    - "Human 確認：API Contract 變更授權"

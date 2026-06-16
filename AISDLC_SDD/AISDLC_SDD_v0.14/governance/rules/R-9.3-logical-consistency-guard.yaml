@@ -1,0 +1,18 @@
+id: R-9.3
+title: 邏輯一致性防護（SLV 前置）
+trigger_states:
+  - SCG_VALIDATION
+  - SPEC_DRAFTING
+  - SPEC_AUDIT
+  - PR_REVIEW
+severity: high
+maturity: active
+spec: >
+  SCG-0 前須跑 spec-logical-validator（SLV-001~003）、SCG-3 前 SLV-004~006；
+  PR_REVIEW 相同模式 ×3 自動觸發 SPEC_AUDIT 比對 AC vs Test Contract；確認矛盾
+  即進 ESCALATION 產出 Abort Report、禁止繼續開發。對應 spec-logical-validator skill。
+test_ref: tools/fsm_runtime/tests/test_slv_generator.py
+scaffold_roi:
+  fire_count: 0
+  catch_count: 0
+  false_positive_count: 0

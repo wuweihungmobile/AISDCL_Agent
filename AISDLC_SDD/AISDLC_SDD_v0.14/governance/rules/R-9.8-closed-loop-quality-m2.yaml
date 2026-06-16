@@ -1,0 +1,19 @@
+id: R-9.8
+title: Phase E M2 閉環品質鏈
+trigger_states:
+  - "*"
+  - PR_REVIEW
+  - IMPLEMENTATION
+severity: high
+maturity: active
+spec: >
+  9.8.1 Decision Trace：每次 transition 必帶 reason/spec_refs/trigger（bounded 50）；
+  9.8.2 Ledger 精準度：estimate_tool_tokens 為唯一 token 入口、file_lock 互斥讀寫；
+  9.8.3 語意同模式判定：pattern_matcher.is_same_pattern（max(SequenceMatcher, Jaccard)，
+  門檻 0.75）；9.8.4 Subagent Dispatch Contract：off/shadow/soft/hard 四 rollout。
+  對應 state_loader / conversation_ledger / pattern_matcher / subagent_contract。
+test_ref: tools/fsm_runtime/tests/test_decision_trace.py
+scaffold_roi:
+  fire_count: 0
+  catch_count: 0
+  false_positive_count: 0

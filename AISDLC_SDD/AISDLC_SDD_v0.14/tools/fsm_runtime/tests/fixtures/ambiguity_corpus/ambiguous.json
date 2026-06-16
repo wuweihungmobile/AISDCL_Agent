@@ -1,0 +1,30 @@
+{
+  "description": "25 ambiguous AC samples — each carries >= 2 ambiguity signals so score >= 0.4 (SCG-0 blocking)",
+  "samples": [
+    {"id": "AMBIG-01", "text": "效能應快速且適度，類似既有產品", "expected_min": 0.4, "reason": "D1 multi + D3 + D6"},
+    {"id": "AMBIG-02", "text": "登入流程應被適當且快速地處理", "expected_min": 0.4, "reason": "D1 multi + D2"},
+    {"id": "AMBIG-03", "text": "系統可用性須維持適度水準", "expected_min": 0.4, "reason": "D1 + D3 NFR no number + D4"},
+    {"id": "AMBIG-04", "text": "應盡可能減少延遲時間，類似業界標準", "expected_min": 0.4, "reason": "D1 + D3 + D6"},
+    {"id": "AMBIG-05", "text": "資料應被處理為相應的格式，類似舊系統", "expected_min": 0.4, "reason": "D2 + D6 multi + D4"},
+    {"id": "AMBIG-06", "text": "API request 應被適當地驗證並回應", "expected_min": 0.4, "reason": "D1 + D2 + D5 no anchor"},
+    {"id": "AMBIG-07", "text": "回應時間應夠快，類似既有產品", "expected_min": 0.4, "reason": "D1 + D6 + D4"},
+    {"id": "AMBIG-08", "text": "Performance should be adequate and fast for many users", "expected_min": 0.4, "reason": "D1 multi + D3 NFR no number"},
+    {"id": "AMBIG-09", "text": "The endpoint shall be processed appropriately and quickly", "expected_min": 0.4, "reason": "D1 multi + D2 + D5"},
+    {"id": "AMBIG-10", "text": "Some requests are handled in a similar manner", "expected_min": 0.4, "reason": "D1 + D2 + D6"},
+    {"id": "AMBIG-11", "text": "系統可用性需足夠且適度以滿足業務", "expected_min": 0.4, "reason": "D1 multi + D3 NFR no number"},
+    {"id": "AMBIG-12", "text": "畫面應顯示適度相關訊息，類似既有設計", "expected_min": 0.4, "reason": "D1 + D5 + D6 multi"},
+    {"id": "AMBIG-13", "text": "使用者可被適當授權存取若干相關資源", "expected_min": 0.4, "reason": "D1 multi + D2 + D6"},
+    {"id": "AMBIG-14", "text": "效能應盡量優化，類似業界標準", "expected_min": 0.4, "reason": "D1 + D3 NFR no number + D6"},
+    {"id": "AMBIG-15", "text": "API 應該被適當地保護並回應", "expected_min": 0.4, "reason": "D1 + D2 + D5"},
+    {"id": "AMBIG-16", "text": "Response time shall be reasonable and fast for most users", "expected_min": 0.4, "reason": "D1 multi + D3 NFR no number"},
+    {"id": "AMBIG-17", "text": "資料延遲不可大量累積，類似批次處理", "expected_min": 0.4, "reason": "D1 multi + D3 + D6"},
+    {"id": "AMBIG-18", "text": "頁面顯示應適度對應使用者偏好，類似舊版", "expected_min": 0.4, "reason": "D1 + D5 + D6 multi"},
+    {"id": "AMBIG-19", "text": "Throughput should be sufficient and many requests served", "expected_min": 0.4, "reason": "D1 multi + D3 NFR no number"},
+    {"id": "AMBIG-20", "text": "form 提交應被適當地處理", "expected_min": 0.4, "reason": "D1 + D2 + D5"},
+    {"id": "AMBIG-21", "text": "若干筆資料應被適當地批次處理，類似舊流程", "expected_min": 0.4, "reason": "D1 multi + D2 + D6"},
+    {"id": "AMBIG-22", "text": "系統容量需大量擴充，類似 peak", "expected_min": 0.4, "reason": "D1 + D3 NFR no number + D6"},
+    {"id": "AMBIG-23", "text": "對話框應適度顯示類似的相關錯誤訊息", "expected_min": 0.4, "reason": "D1 + D5 + D6 multi"},
+    {"id": "AMBIG-24", "text": "Latency must remain low for many users, similar to baseline", "expected_min": 0.4, "reason": "D1 + D3 NFR no number + D6"},
+    {"id": "AMBIG-25", "text": "效能與可用性應相應提升，類似舊架構", "expected_min": 0.4, "reason": "D3 NFR no number + D6 multi"}
+  ]
+}
