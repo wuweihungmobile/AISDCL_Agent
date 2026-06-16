@@ -1,0 +1,18 @@
+id: R-9.11
+title: Phase E M4 Learning Layer MVP
+trigger_states:
+  - LEARNING_COMMIT
+  - SCG_VALIDATION
+severity: high
+maturity: active
+spec: >
+  slv_generator 從 FPL pattern-extraction 推導 SLV 草案；trust_level ∈
+  {verified, proposed, external}，write_rule_candidate 對 verified 規則一律
+  RuleOverwriteProtected；proposed/external 規則 CRITICAL FAIL 不阻塞 SCG（僅 advisory），
+  人工填 reviewed_by/reviewed_at 升 verified 後才阻塞；每條自動規則帶 source_fpl 審計鏈。
+  LEARNING_COMMIT 為非阻塞觀測態。對應 slv_generator.py。
+test_ref: tools/fsm_runtime/tests/test_slv_generator.py
+scaffold_roi:
+  fire_count: 0
+  catch_count: 0
+  false_positive_count: 0

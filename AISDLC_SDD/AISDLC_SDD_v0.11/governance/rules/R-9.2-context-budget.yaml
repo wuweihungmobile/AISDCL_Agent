@@ -1,0 +1,21 @@
+id: R-9.2
+title: Context Budget（Token 預算）
+trigger_states:
+  - "*"
+severity: high
+maturity: active
+spec: >
+  Token 使用 ≥70% 開始壓縮輔助文件、改用 ID 清單；≥85% 建議執行 /stage-compaction；
+  ≥90% Hook 自動轉 AUTO_COMPACT_PENDING、PreToolUse 僅允許 stage-compaction；
+  ≥95% 立即停止、產出 Context Snapshot 進 ESCALATION。對應 context_ledger_pre/post
+  hook 與 conversation_ledger.py（唯一 token 估算入口）。
+test_ref: tools/fsm_runtime/tests/test_context_ledger_pre_hook.py
+failure_mode: >
+  per-stage auto_compact 超限（同一 stage 內 auto_compact 次數 > max_per_stage）→ 拒絕再次
+  compact、record_escalation 進 ESCALATION。此即 R-9.2 守望的失敗模式——context/token 預算
+  治理已無法再壓縮上下文時真實發生；catch 側結構化歸因到 R-9.2（W-19 catch 契約三要件之一；
+  對應 FSMRuntime.trigger_auto_compact 的 per-stage cap escalate 分支，無歧義映射非時序猜測）。
+scaffold_roi:
+  fire_count: 0
+  catch_count: 0
+  false_positive_count: 0

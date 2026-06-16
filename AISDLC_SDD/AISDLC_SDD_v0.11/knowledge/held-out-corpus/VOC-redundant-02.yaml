@@ -1,0 +1,18 @@
+case_id: VOC-redundant-02
+expect: redundant_invention
+genesis:
+  source: tenant
+  transform: delta
+candidates:
+- real_quality: 0.6
+  existing_cost: 2.0
+  features:
+    tenant.delta: 2.0
+- real_quality: 0.5
+  existing_cost: 3.0
+  features:
+    tenant.delta: 3.0
+- real_quality: 0.4
+  existing_cost: 4.0
+  features:
+    tenant.delta: 4.0
