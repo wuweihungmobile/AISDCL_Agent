@@ -157,6 +157,24 @@ TopoNode    += folded: bool = False                 # 是否為折疊超節點
 
 ## §9 結案契約（closure-evidence，收官回填）
 
-```text
-（收官時回填：base_sha / claimed_commits / claimed_tag，由 closure_evidence --rederive 就 HEAD 重推導）
+> 兩段式 closure（同 improving_22）：commit A（主體 `cd3d4c45`）+ tag `v2026.06.17-20`，本契約於 commit B 回填。
+> 廉價層（git 事實）：`claimed_commits`/`claimed_tag` 可由 post-commit hook 就 repo 真實狀態重推導 → VERIFIED。
+> 昂貴層（pytest/ci-gate floors）：`base_sha != HEAD`（回填後 HEAD=commit B）→ 設計上 fail-closed 標 INCONCLUSIVE（誠實，不假綠）。
+
+```yaml
+closure-evidence:
+  round: 23
+  track: B
+  base_sha: cd3d4c450ed2c20fe3128d2eba211a98d38fbeac
+  claimed_commits:
+    - cd3d4c450ed2c20fe3128d2eba211a98d38fbeac   # commit A（W-23-1 主體 + 四件套）
+  claimed_tag: v2026.06.17-20
+  observed:
+    autoclaude_pytest: "3112 passed / 122 skipped / 0 failed"
+    aisldc_ci_gate: "v0.01:1478 / v0.14:1593 / scripts:27 (arch_fitness fail=0)"
+    aisldc_chaos: "34 passed (bounded_ratio==1.0, incl VISUALIZATION_FOLD_DRIFT_FLAP)"
+    lint_imports: "8 kept / 0 broken"
+    five_track_tlc: "N/A (formal *.tla/*.cfg v0.13↔v0.14 逐位元零差異 → 免觸發)"
+    cleanliness: "git add -A -n v0.14 = 853 would-add, 零 runtime 漏網"
+  audit: docs/06_quality/AutoSDD_ZeroTrust_Audit_23.md   # 三鏡全 OVERALL PASS + 突變回歸鎖驗證
 ```
