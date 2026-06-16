@@ -1,0 +1,22 @@
+id: R-9.20
+title: Phase H 生成-對抗-執行閘（Generative-Adversarial Execution）
+trigger_states:
+  - SPEC_FROZEN
+  - TEST_CONTRACT_NEGOTIATED
+  - IMPLEMENTATION
+  - EXECUTION_EVALUATION
+  - SCAFFOLD_GC
+severity: high
+maturity: active
+spec: >
+  9.20.1 IMPLEMENTATION 後須過 EXECUTION_EVALUATION（沙箱實跑客觀 verdict）才放行 PR_REVIEW；
+  9.20.2 SPEC_FROZEN 後須過 TEST_CONTRACT_NEGOTIATED（Dev/QA 簽署 oracle）才進 IMPLEMENTATION；
+  9.20.3 Generator 與 Evaluator 須獨立 context，oracle 對 Generator 不可見（防過擬合）；
+  9.20.4 orchestrator 降為中立路由，verdict 唯一來源為 Evaluator 客觀觀測；
+  9.20.5 SCAFFOLD_GC 週期性算 Scaffold ROI 並提議退役（人工 review 生效）；
+  9.20.6 ESCALATION 後 abort 報告須含 Steersman 交接（sub_type→能力缺口→環境請求）。
+test_ref: tools/fsm_runtime/tests/test_phase_h.py
+scaffold_roi:
+  fire_count: 0
+  catch_count: 0
+  false_positive_count: 0

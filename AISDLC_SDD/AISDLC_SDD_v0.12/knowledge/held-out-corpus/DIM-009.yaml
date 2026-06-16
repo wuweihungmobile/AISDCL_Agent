@@ -1,0 +1,16 @@
+# Phase Q / ACT-124 — 維度必要性 held-out 現實代理語料（凍結 + content-hashed）
+#
+# 一個 pipeline 問題 + 多個候選結果及其『已知整體真實品質』。baseline 向量（僅既有固定維度）
+# 以 existing_cost argmin 選候選；augmented 向量（既有 + 候選新維度）以 existing_cost +
+# w×dim_value argmin 選候選。增量覆蓋 = augmented 真實品質 − baseline 真實品質；非冗餘度 =
+# dim_value 排序與 existing_cost 排序的最大 pairwise 一致率。只有 dimension_necessity_oracle
+# 讀本檔；value_dimension_registry（生成器）看不到（Rule 9.29.2 對抗分離）。
+# expect: true_necessity（真必要新軸）/ noise_axis（自利噪音軸：自評高真實零增量）/
+#         redundant_axis（既有軸再投影：冗餘，過擬合/自我背書）。
+case_id: DIM-009
+dimension_name: noise_dim_1
+expect: noise_axis
+candidates:
+  - {real_quality: 0.6, existing_cost: 2.0, dim_value: 5.0}
+  - {real_quality: 0.6, existing_cost: 3.0, dim_value: 0.0}
+  - {real_quality: 0.4, existing_cost: 4.0, dim_value: 8.0}

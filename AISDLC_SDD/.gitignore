@@ -144,3 +144,12 @@ AISDLC_SDD_v0.11/build/reports/fsm/*
 !AISDLC_SDD_v0.11/build/reports/fsm/FSM-STATE-TEMPLATE.yaml
 AISDLC_SDD_v0.11/arch-fitness.json
 AISDLC_SDD_v0.11/chaos-report.json
+
+# ── v0.12 runtime 取證產物排除（improving_21 B 軌 DEF-20-001 結案證據強制重推導 hook，同 DEF-11-001/11-002/15-001 紀律）──
+# 同 v0.11：build/reports/ 運行時取證輸出整批排除，惟 negate 保留 FSM 種子模板。
+AISDLC_SDD_v0.12/build/reports/*
+!AISDLC_SDD_v0.12/build/reports/fsm/
+AISDLC_SDD_v0.12/build/reports/fsm/*
+!AISDLC_SDD_v0.12/build/reports/fsm/FSM-STATE-TEMPLATE.yaml
+AISDLC_SDD_v0.12/arch-fitness.json
+AISDLC_SDD_v0.12/chaos-report.json
