@@ -19,8 +19,10 @@
 """
 from __future__ import annotations
 
+import json
 import re
 import subprocess
+import sys
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
@@ -304,3 +306,40 @@ def write_rederive_cert(repo_root: Path, observed: dict) -> Path:
     p.parent.mkdir(parents=True, exist_ok=True)
     p.write_text(yaml.safe_dump(cert, allow_unicode=True, sort_keys=False), encoding="utf-8")
     return p
+
+
+# ─────────────────────────────────────────────────────────────
+# CLI 入口（顯式由人/CI 跑，非 hook budget 內；hook INCONCLUSIVE 訊息引導至此）
+# ─────────────────────────────────────────────────────────────
+
+
+def _main(argv: List[str], repo_root: Optional[Path] = None) -> int:
+    """`--rederive --observed '<json>'` 由獨立驗證者就 repo 真實狀態跑出數字後 stamp 當前
+    HEAD 落盤證書；無參數＝evaluate 最新 improving_NN.md 契約並印 verdict。
+    repo_root 預設以 git toplevel 定位（測試可注入）。
+    """
+    if repo_root is None:
+        repo_root = repo_root_from()
+    if "--rederive" in argv:
+        observed: dict = {}
+        if "--observed" in argv:
+            raw = argv[argv.index("--observed") + 1]
+            try:
+                observed = json.loads(raw)
+            except (json.JSONDecodeError, IndexError):
+                print("[closure] --observed 需合法 JSON，例：'{\"autoclaude_pytest_passed\":3112}'")
+                return 2
+        p = write_rederive_cert(repo_root, observed)
+        print(f"[closure] rederive 證書已落盤（stamp 當前 HEAD）：{p}")
+        return 0
+    verdict = evaluate_closure(repo_root)
+    print(f"[closure] verdict={verdict.verdict} head={verdict.head_sha[:12]}")
+    for f in verdict.facts:
+        print(f"  fact  {f.kind}:{f.target[:12]} {f.status} — {f.detail}")
+    for c in verdict.claims:
+        print(f"  claim {c.key} {c.status} — {c.detail}")
+    return 0
+
+
+if __name__ == "__main__":  # pragma: no cover
+    sys.exit(_main(sys.argv[1:]))

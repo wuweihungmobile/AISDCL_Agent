@@ -11,7 +11,8 @@
 - `tools/fsm_runtime/closure_evidence.py` — 純函式邏輯模組（同 `drift_monitor.py` 慣例）。**廉價層** `verify_git_facts`：對 improving_NN.md 末尾 `closure-evidence` 契約宣稱的 `claimed_commits`/`claimed_tag`，以 `git cat-file -e`+`merge-base --is-ancestor`+`rev-parse --verify` 就 monorepo 根真實狀態重推導（白名單正則消毒、list-form argv shell=False），任一無法重推導 → **FAIL**（直擊「編造 commit/push/tag」幻覺事故核心）。**昂貴層** `verify_expensive_claims`：pytest passed / ci-gate floors **不重跑**，改驗綁定當前 HEAD 的 rederive 證書（`write_rederive_cert` stamp HEAD），契約 base_sha≠HEAD 或證書缺失/數字不符 → **INCONCLUSIVE**（fail-closed 不綠勾，比照 embodied_grounding 零觀測語意，絕不假綠）。`synthesize_verdict` 三分支優先序 FAIL>INCONCLUSIVE>VERIFIED。
 - `.claude/hooks/closure_evidence_verify.py` — thin git post-commit hook（同 `post_commit_drift.py`）：`repo_root_from()` 以 git toplevel 定位 monorepo 根、**永遠 exit 0 / <2s budget / fail-soft / 不阻擋 commit**，verdict 寫 `.git/CLOSURE_EVIDENCE_VERDICT` + `build/reports/closure/VERDICT-<sha>.yaml`。**把反幻覺紀律由「agent 跨 session 自律」升級為框架機械可驗閘門**。
 - `tools/install_hooks/install_post_commit.{sh,ps1}` — 擴充串接 drift（指 v0.01）+ closure（指 v0.12），opt-in 不經 settings.json deny 層。
-- `tools/fsm_runtime/tests/test_closure_evidence.py` — **19 case**（tmp 真實 git repo 驗 cat-file/merge-base/rev-parse 真實行為：真 commit PASS/編造 FAIL/非祖先 FAIL/注入拒絕/真 tag PASS/缺 tag FAIL；昂貴層 stale base_sha + 缺證書 INCONCLUSIVE、證書符 VERIFIED、不符 FAIL；verdict 三分支；last-match 解析；端到端+持久化）。
+- CLI 入口 `_main(argv, repo_root=None)` + `__main__`（`--rederive --observed '<json>'` stamp HEAD 落盤證書 / 無參數 evaluate 印 verdict）。**DEF-21-003**（dogfooding 揭露 → fixed@v0.12）：hook INCONCLUSIVE 訊息承諾的 `python -m ... --rederive` 原無 CLI 入口、指令無動作，本輪補完。
+- `tools/fsm_runtime/tests/test_closure_evidence.py` — **22 case**（tmp 真實 git repo 驗 cat-file/merge-base/rev-parse 真實行為：真 commit PASS/編造 FAIL/非祖先 FAIL/注入拒絕/真 tag PASS/缺 tag FAIL；昂貴層 stale base_sha + 缺證書 INCONCLUSIVE、證書符 VERIFIED、不符 FAIL；verdict 三分支；last-match 解析；端到端+持久化；CLI rederive 寫證書/bad-json/無參數 evaluate）。
 - 結案契約 schema＝`docs/04_planning/AutoSDD_improving_NN.md` 末尾 ```yaml ``closure-evidence`` 區塊（機器可讀宣稱來源）。RFC：`build/planning/active/SDD_improving_Automation_27.md`。
 
 ### 修復（DEF-21-001 dogfooding 衍生 → fixed@v0.12）
@@ -19,7 +20,7 @@
 
 ### 紅線守界（B 軌）
 - **決策不新增 R-9.x**（advisory hook 不需規則承載即可運作，避免牽動 RULES_INDEX/ID_REGISTRY 取號與五軌 reachable，同 DEF-10-002 前例 + Rule 2）。治理規則承載 + catch 覆蓋面推進 + closure 接入 SCG-4/5 機械閘門 → routed 未來輪。
-- **無 FSM 狀態/規則/`*.tla` 變更**（hook 不新增狀態/轉換、不寫 FSM-STATE；`transition_rules.py` + 5 `*.tla` 對 v0.11 逐位元零差異 → **免五軌 TLC**，Rule 9.18.1 不啟動）。closure hook advisory 不阻擋 commit、零觸碰 FSM/規則/既有測試。驗證：v0.12 `pytest -m "not chaos"` = **1574 passed / 0 failed**（v0.11 1555 + 19 新測試）；ci-gate 雙軌 exit 0 v0.01:1478 / v0.12:1574 / scripts:25（FF-17 自證 v0.12 入閘）；AutoClaude **3112 passed / 0 failed** 持平；lint 8 kept；LOC 0；snapshot 新鮮；潔淨度 852 would-add 無 runtime 殘留。
+- **無 FSM 狀態/規則/`*.tla` 變更**（hook 不新增狀態/轉換、不寫 FSM-STATE；`transition_rules.py` + 5 `*.tla` 對 v0.11 逐位元零差異 → **免五軌 TLC**，Rule 9.18.1 不啟動）。closure hook advisory 不阻擋 commit、零觸碰 FSM/規則/既有測試。驗證：v0.12 `pytest -m "not chaos"` = **1577 passed / 0 failed**（v0.11 1555 + 22 新測試〔19 核心 + 3 CLI〕）；ci-gate 雙軌 exit 0 v0.01:1478 / v0.12:1574 / scripts:25（FF-17 自證 v0.12 入閘；ci-gate 跑於 CLI 補完前）；AutoClaude **3112 passed / 0 failed** 持平；lint 8 kept；LOC 0；snapshot 新鮮；潔淨度無 runtime 殘留（closure runtime 產物根 gitignore，DEF-21-002）。**dogfooding 自驗**：commit A `5f8b633` 後回填真實契約 + rederive 證書 → hook VERIFIED（反幻覺迴圈閉合）。
 
 ---
 

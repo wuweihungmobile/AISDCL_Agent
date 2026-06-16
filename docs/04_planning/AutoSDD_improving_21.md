@@ -179,3 +179,29 @@ closure-evidence:
 
 - **框架程式/hook 缺陷類**（DEF-20-001）→ RFC：`AISDLC_SDD_v0.12/build/planning/active/SDD_improving_Automation_27.md`（軌道② 帳本，最新 26→27）記錄提案 → 修改落 v0.12 + EVOLUTION_LOG + CHANGELOG。
 - 本輪行進中新發現框架摩擦 → 即記 `docs/06_quality/AutoSDD_Defect_Log.md`（DEF-21-xxx）。
+
+---
+
+## §10 結案證據契約（closure-evidence，dogfooding 自驗 — 本輪新 hook 驗本輪自身結案）
+
+> 本輪以新落地的 closure_evidence hook 驗證自身結案宣稱（DEF-20-001 閉合精神之下游採用）。
+> 契約指向結案主體 commit A（`5f8b633`）。dogfooding 自驗：`base_sha == HEAD == A` 時跑
+> `python -m tools.fsm_runtime.closure_evidence --rederive --observed '<實測>'` 產綁定 HEAD 證書 →
+> hook 得 **VERIFIED**（git 事實 A 存在且為 HEAD 祖先 + 昂貴項證書數字符）。
+> 本契約區塊為文件中唯一真實 ```yaml ``closure-evidence`` 區塊（§4 schema 為 ```text fence 不被解析，
+> 解析取 last-match，DEF-21-001）。
+
+```yaml
+closure-evidence:
+  iteration: 21
+  base_sha: 5f8b6334d543772692238b004f27bd19c6f87160
+  claimed_commits:
+    - 5f8b6334d543772692238b004f27bd19c6f87160
+  claimed_tag: null
+  autoclaude_pytest_passed: 3112
+  ci_gate_floors:
+    AISDLC_SDD_v0.01: 1478
+    AISDLC_SDD_v0.12: 1574
+    scripts/tests: 25
+  lint_imports: "8 kept / 0 broken"
+```

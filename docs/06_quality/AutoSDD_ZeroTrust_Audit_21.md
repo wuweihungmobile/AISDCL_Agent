@@ -59,9 +59,14 @@ v0.12 全套 = **1574 passed / 0 failed**（v0.11 1555 + 19 新測試，只增�
 - **SA-SD 鏡首次跑 `test_fabricated_commit_fails` 曾紅一次**（`deadbeef1234` 一度判 PASS），但其後單獨×3 + 全檔×2 + 根目錄×1 共 6 次重跑皆穩定 19/0failed，且在乾淨 `/tmp` repo 與 monorepo 親驗 `git cat-file -e deadbeef1234^{commit}` rc=128 確被拒；QA 鏡獨立跑該測試亦在 19 passed 內穩定 + 突變驗證有效。根因疑首次 Bash 呼叫 cwd 殘留/git 冷啟動瞬時，核心反幻覺保證（編造 hash→FAIL）可重現為正確。判定為環境瞬時，非測試缺陷。
 - **本輪 hook 對 improving_21 自身結案尚屬 advisory 觀察**（improving_21.md 末尾尚未填真實 closure-evidence 契約 + 跑 rederive 證書）——機制就緒，「下游自我採用」於結案 commit 階段執行（見 §6）。
 
-## §6 結案後 dogfooding 自我驗證（下游採用，commit 階段）
+## §6 結案後 dogfooding 自我驗證（已執行 — VERIFIED）
 
-DEF-20-001 閉合精神＝「結案 commit 時就 repo 真實狀態重推導本輪宣稱」。本輪 commit 後執行：① 回填 improving_21.md 末尾真實 closure-evidence 契約（claimed_commits=結案 commit、base_sha=HEAD、autoclaude_pytest_passed=3112、ci_gate_floors{v0.01:1478,v0.12:1574,scripts:25}）；② 跑 `python -m tools.fsm_runtime.closure_evidence --rederive` 產綁定 HEAD 證書；③ 重跑 hook 應得 VERIFIED——以本輪新機制驗證本輪自身結案，閉合反幻覺迴圈。
+DEF-20-001 閉合精神＝「結案 commit 時就 repo 真實狀態重推導本輪宣稱」。本輪 commit A（`5f8b633`，結案主體）push 後執行並**成功**：
+1. 回填 improving_21.md §10 真實 closure-evidence 契約（base_sha=`5f8b633`、claimed_commits=[`5f8b633`]、autoclaude_pytest_passed=3112、ci_gate_floors{v0.01:1478, v0.12:1574, scripts/tests:25}、lint_imports="8 kept / 0 broken"）。
+2. 跑 `python -m tools.fsm_runtime.closure_evidence --rederive --observed '{…實測…}'` → 產綁定 HEAD 的 `build/reports/closure/REDERIVE-5f8b6334d543.yaml` 證書。
+3. 重跑 hook → **VERIFIED**（`.git/CLOSURE_EVIDENCE_VERDICT`：✅ 結案宣稱經 repo 真實狀態重推導通過）。CLI verdict 明細：`fact commit:5f8b6334d543 PASS（存在且為 HEAD 祖先）` + `claim autoclaude_pytest_passed / ci_gate_floors / lint_imports 三項皆 VERIFIED`。
+
+**dogfooding 閉環達成**：本輪新落地的反幻覺 hook 對本輪自身結案宣稱判 VERIFIED——若任一數字被編造（如 passed 寫成 9999），昂貴層比對 rederive 證書即判 FAIL；若 commit hash 編造，廉價層 `git cat-file` 即判 FAIL。**dogfooding 衍生 DEF-21-003**（P3, fixed@v0.12）：rederive 機制原缺 CLI `__main__` 入口（hook 訊息承諾的 `--rederive` 指令無法運作），本輪補 `_main` + `__main__`（+3 測試，共 22 case）。
 
 ## §7 缺陷處置
 

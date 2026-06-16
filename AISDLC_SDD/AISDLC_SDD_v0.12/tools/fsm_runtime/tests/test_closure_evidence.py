@@ -198,3 +198,26 @@ def test_write_verdict_report_persists(git_repo: Path):
     assert p.exists()
     data = yaml.safe_load(p.read_text(encoding="utf-8"))
     assert data["verdict"] == "VERIFIED" and data["iteration"] == 21
+
+
+# ─────────────────────────────────────────────────────────────
+# CLI 入口（DEF-21-003：hook INCONCLUSIVE 訊息承諾的 --rederive 須真實可用）
+# ─────────────────────────────────────────────────────────────
+
+
+def test_cli_rederive_writes_cert(git_repo: Path):
+    rc = ce._main(["--rederive", "--observed", '{"autoclaude_pytest_passed": 3112}'], repo_root=git_repo)
+    assert rc == 0
+    cert = ce._rederive_cert_path(git_repo, _head(git_repo))
+    assert cert.exists()
+    data = yaml.safe_load(cert.read_text(encoding="utf-8"))
+    assert data["base_sha"] == _head(git_repo) and data["observed"]["autoclaude_pytest_passed"] == 3112
+
+
+def test_cli_rederive_bad_json_returns_2(git_repo: Path):
+    assert ce._main(["--rederive", "--observed", "not-json"], repo_root=git_repo) == 2
+
+
+def test_cli_default_evaluates(git_repo: Path):
+    # 無契約 → evaluate 回 INCONCLUSIVE，exit 0
+    assert ce._main([], repo_root=git_repo) == 0
