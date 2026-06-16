@@ -136,13 +136,11 @@ TEMPLATE_PATH = Path(__file__).resolve().parent / "templates" / "FSM-STATE-TEMPL
 
 ```yaml
 closure-evidence:
-  round: 22
-  framework_version: v0.13
-  claimed_commits: []   # 結案 commit 後填
-  claimed_tag: ""        # 結案 tag 後填
-  floors:
-    autoclaude_pytest: 3112
-    ci_gate_v_latest: 1577
-    scripts_tests: 25
-    lint_imports_kept: 8
+  iteration: 22
+  base_sha: 1e283bb40fbaff99c527bf243e97bb9b5eeae71b
+  claimed_commits: [1e283bb40fbaff99c527bf243e97bb9b5eeae71b]
+  claimed_tag: v2026.06.17-19
+  autoclaude_pytest_passed: 3112
+  ci_gate_floors: { AISDLC_SDD_v0.01: 1478, AISDLC_SDD_v0.13: 1580, scripts/tests: 27 }
+  lint_imports: "8 kept / 0 broken"
 ```
