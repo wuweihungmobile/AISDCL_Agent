@@ -81,6 +81,7 @@
 ### 5.1 資料模型 delta（additive）
 ```
 RenderBudget += fold_enabled: bool = False          # 讀 SDD_VIZ_FOLD（"1"/"true" 開；預設關）
+            += fold_min:     int  = 3               # 鏈塌縮最小長度門檻（讀 SDD_VIZ_FOLD_MIN，clamp）
 TopoNode    += folded: bool = False                 # 是否為折疊超節點
             += folds:  Tuple[int, ...] = ()          # 被收縮的成員 id（鏈序；空=非超節點）
 ```
