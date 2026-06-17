@@ -124,6 +124,13 @@ rm -f "${INFRA_LOG}"
 echo "==> 共享 infra scripts/tests/: ${INFRA_PASSED} passed"
 GATE_SUMMARY+=("scripts/tests:${INFRA_PASSED}")
 
+# ── RFC 生命週期 lint（DEF-23-005 機械強制）─────────────────────────────────
+# 框架明定「active=待決 / archive=已決」RFC 生命週期但過去無機械強制 → 已決 RFC 曾滯留
+# active/（v0.12/v0.13 至今凍結著 _26/_27）。此 lint（版本無關 shared infra，read-only 純
+# 觀察者）掃最新演化版 build/planning/active/，偵測已決 RFC 滯留即非零 → 硬閘擋下。
+echo "############## CI 閘門：RFC 生命週期 lint（DEF-23-005）##############"
+python scripts/rfc_lifecycle_lint.py "${REPO_ROOT}"
+
 echo "✅ 本機 CI 閘門全數通過（版本：${FW_VERSIONS[*]}）"
 # DEF-06-001：單行自證逐軌 passed 計數，免零信任取證捲動截斷輸出
 echo "   逐軌計數：${GATE_SUMMARY[*]}"
