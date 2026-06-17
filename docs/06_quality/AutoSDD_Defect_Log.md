@@ -190,3 +190,19 @@
 
 **本輪新增防退化資產（非缺陷）**：`scripts/rfc_lifecycle_lint.py` 由 `test_rfc_lifecycle_lint.py` 11 case 鎖定（雙信號 fire / 待決不誤報 / meta 防誤報 / 只掃最新版 / 語意版本 / CLI exit / 真實 v0.14 active 乾淨）；ci-gate scripts/tests 27→38。
 
+## improving_31 複驗註記（2026-06-18，A 軌正向轉譯保真度 / 負向斷言 negation-aware）
+
+**本輪 = A 軌**，閉合正向橋接「負向斷言語意顛倒（mis-specify）」缺口——`Then 回應不應包含「X」` 原被譯為**要求** X 出現（語意顛倒）。零框架 v0.0X 變更（純 AutoClaude `_gherkin_to_regex` surgical 重構 + 1 module 常數，無新檔/port/plugin/flag）、零 Copy-on-Evolve、五軌 TLC 不觸發。三鏡 Zero-Trust 審查全 OVERALL PASS（**主樹派發，遵 DEF-24-001**——本輪僅改 2 個 tracked 檔且未 commit，worktree 由 HEAD 建樹看不到未 staged 修改會產生假陰性）；零退化 **3203/0**（floor 3196 +7）、lint 8/0、LOC violations=0（adapter 284→304<400）、snapshot FRESH、ci-gate exit 0（scripts:38）。三組突變實證（翻轉 `(?!`→`(?=` / 整行切片 / 停用 `neg_frags` 分流）各致負向測試轉紅、還原 diff clean，證非假測試。
+
+- **新增 DEF-31-001（P3, routed）**：`_NEGATION_MARKER` 孤立 `\bnot\b`/`\bnever\b` 誤判風險（見下表）。
+- **DEF-30-001**（RFC 已決標記標準化，P3）：維持 **open（routed 未來輪）**，屬 B 軌框架治理，非本輪 A 軌 scope，未推進。
+- **DEF-19-001**（catch 漸進覆蓋，P3）/ **DEF-17-001**（遙測，routed）：維持 **routed**（框架側 B 軌），本輪未推進。
+- **DEF-01-007**（cc-switch GUI/CLI，P3）：維持 **open**，本輪純文字轉譯不涉多後端 A/B，`command -v cc-switch`=NOT FOUND 仍重現（環境工具缺裝非倉內可修）。
+- **DEF-01-009**（`sdd_governance_plugin.py` LOC watch，P3）：維持 **open watch**，本輪改 `sdd_to_playbook_adapter.py`，**未動 sdd_governance_plugin**、`check_loc_budget` violations=0，watch 不觸發。
+
+**本輪新增防退化資產（非缺陷）**：`_gherkin_to_regex` 負向斷言分流由 `test_sdd_to_playbook_adapter.py::TestNegativeAssertionFidelity` 7 case 鎖定（單負向 `\A(?!.*X)` 不出現語意 / 正負混合 / 多負向 / 英文標記 / 否定字眼在引號內仍正向 / 純正向 ≥2 引號防退化哨兵〔斷言 `\A`/`(?!` 不得出現，保護 improving_29 格式〕/ 端到端 security 規格）；improving_29 `TestMultiAssertionCombination` 7 case 仍全綠證零退化。
+
+| ID | 發現日期 | 發現情境 | 現象與證據 | 嚴重度 | 分流去向 | 狀態 |
+|----|----------|----------|------------|--------|----------|------|
+| DEF-31-001 | 2026-06-18 | improving_31 階段五 SA-SD 鏡 zero-trust 審查（否定標記涵蓋面查核） | 否定標記潛在誤判（影響面極小）：`sdd_to_playbook_adapter.py:_NEGATION_MARKER` 含孤立 `\bnot\b`/`\bnever\b`，對 `not only … but`、`is not empty` 等「含 not 但語意非否定」的句式，若**同句又含引號字面值**，會把該引號片段誤分流為負向（`(?!.*X)`）。實際影響面極小：(1) 須 Then 斷言行同時含此類片語 + 引號；(2) SA-SD 親測孤立 `\bno\b` **不在** pattern（只有 `\bno\s+longer\b`，刻意避高誤判）、`\bnot\b`/`\bnever\b` 以 `\b` 已避開 notification/note/nevertheless 子串誤判。非阻擋、非本輪功能缺陷（本輪三鏡全 OVERALL PASS P0=0/P1=0） | P3（轉譯保真度邊角，誤判面極小、無功能阻擋） | 整合層（AutoClaude 側）→ 未來輪按需收斂：若實測 SDD 規格出現此類「含 not 非否定語意 + 引號」句式，再以「否定標記須緊鄰引號／排除 `not only`/`is not empty` 慣用語」精化 `_NEGATION_MARKER`；現階段不投機修（Rule 2，無實證案例） | open（routed 未來輪；SA-SD 鏡觀察，影響面極小） |
+

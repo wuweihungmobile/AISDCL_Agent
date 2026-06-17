@@ -277,6 +277,95 @@ class TestMultiAssertionCombination:
         assert not re.search(c.expected_regex, "輸出 建立成功 但缺後半")
 
 
+_NEG_SPEC = """# Test Contract Specification — Negative
+
+場景：security 安全強化
+
+## 1. AC → AT 映射表
+
+| AC ID | AC 描述 | AT ID | AT 描述 | 自動化 | 測試類型 | 狀態 |
+|-------|---------|-------|---------|-------|---------|------|
+| AC-031-1 | 不洩漏敏感資訊 | AT-031-1-1 | 回應不含密碼 | ✅ | Integration | □ |
+
+## 2. AT 格式
+
+```gherkin
+# AT-031-1-1
+Scenario: 隱私防護
+  Given 使用者已登入
+  When 查詢個人資料
+  Then 顯示訊息「查詢成功」
+  And 回應不應包含「password」
+```
+"""
+
+
+class TestNegativeAssertionFidelity:
+    """W-31-1：負向斷言保真度（AC-31-1）。修正「不應包含「X」」被譯為要求 X 出現的
+    語意顛倒缺口；負向用 \\A 錨定 (?!.*X) 確保 re.search 下「不出現」語意正確。"""
+
+    def test_single_negative_requires_absence(self):
+        regex, weak = _gtr(_block("Then 回應不應包含「password」"))
+        assert weak is False
+        assert regex == r"(?s)\A(?!.*password)"
+        # 不含 → 通過；含 → 不過（語意未顛倒）
+        assert re.search(regex, "回應為 token=abc 一切正常")
+        assert not re.search(regex, "回應洩漏 password=secret")
+
+    def test_mixed_positive_and_negative(self):
+        regex, weak = _gtr(_block(
+            "Then 顯示訊息「查詢成功」", "And 回應不得包含「password」"))
+        assert weak is False
+        # 正向 lookahead + 負向 lookahead，皆 \A 錨定
+        assert regex == r"(?s)\A(?=.*查詢成功)(?!.*password)"
+        assert re.search(regex, "查詢成功 且 token=abc")          # 正存負缺 → 過
+        assert not re.search(regex, "查詢成功 但 password=x 外洩")  # 含禁詞 → 不過
+        assert not re.search(regex, "沒有成功字樣 也無禁詞")        # 缺正向 → 不過
+
+    def test_multiple_negatives_all_absent(self):
+        regex, weak = _gtr(_block(
+            "Then 不應顯示「internal error」", "And 不得回傳「stacktrace」"))
+        assert weak is False
+        assert regex.count("(?!") == 2
+        assert regex.startswith(r"(?s)\A")
+        assert re.search(regex, "輸出乾淨無內部訊息")
+        assert not re.search(regex, "internal error 出現了")
+        assert not re.search(regex, "夾帶 stacktrace 細節")
+
+    def test_english_negation_marker(self):
+        regex, weak = _gtr(_block('Then the response should not contain "secret"'))
+        assert weak is False
+        assert regex == r"(?s)\A(?!.*secret)"
+        assert not re.search(regex, "leaked secret value")
+        assert re.search(regex, "all clean output")
+
+    def test_negation_inside_quote_is_positive(self):
+        # 否定字眼在引號「之內」屬訊息文字，非斷言否定 → 仍為正向（向後相容）
+        regex, weak = _gtr(_block("Then 顯示警告「不可撤銷」"))
+        assert weak is False
+        assert regex == re.escape("不可撤銷")
+        assert "(?!" not in regex and "\\A" not in regex
+
+    def test_end_to_end_negative_regex(self, tmp_path):
+        spec_dir = _write_spec(tmp_path, text=_NEG_SPEC,
+                               name="TEST-CONTRACT-SPEC-Neg.md")
+        _write_fsm_state(tmp_path)
+        spec = SddToPlaybookAdapter().load_spec(str(spec_dir))
+        c = next(c for c in spec.contracts if c.at_id == "AT-031-1-1")
+        assert c.weak_regex is False
+        # 正向「查詢成功」須出現、負向「password」須不出現
+        assert "(?=.*查詢成功)" in c.expected_regex
+        assert "(?!.*password)" in c.expected_regex
+        assert re.search(c.expected_regex, "輸出 查詢成功 token=abc")
+        assert not re.search(c.expected_regex, "輸出 查詢成功 但 password 外洩")
+
+    def test_positive_only_unchanged_no_anchor(self):
+        # 防退化哨兵：純正向 ≥2 引號維持 improving_29 格式（不含 \A、不含 (?!）
+        regex, _ = _gtr(_block("Then 顯示「甲」", "And 顯示「乙」"))
+        assert regex == "(?s)(?=.*甲)(?=.*乙)"
+        assert "\\A" not in regex and "(?!" not in regex
+
+
 class TestInjectionDefense:
     """§1.3 消毒攻防：黑名單字元 / 非白名單片段一律 SpecTaintedError。"""
 

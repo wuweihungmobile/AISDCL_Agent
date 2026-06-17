@@ -66,6 +66,15 @@ _QUOTED_LITERAL = re.compile(r"[「\"']([^」\"']+)[」\"']")
 _STATUS_CODE = re.compile(r"\b([1-5]\d{2})\b(?:\s+([A-Za-z][A-Za-z ]*[A-Za-z]|[A-Za-z]+))?")
 _QUANTITATIVE = re.compile(r"[<>≤≥]|\bms\b|\b秒\b|%")
 _FALLBACK_REGEX = r"\bPASS(ED)?\b"
+# improving_31 W-31-1：否定標記（須出現在引號「之外、之前」才視為負向斷言）。
+# 修正「不應包含「X」」被當成「要求 X 出現」的語意顛倒（mis-specify）缺口。
+_NEGATION_MARKER = re.compile(
+    r"不應|不得|不可|不能|不會|不要|不准|不再|禁止|沒有|無法"
+    r"|不存在|不包含|不顯示|不出現|不回傳|不允許|不洩漏|不暴露"
+    r"|\bshould\s+not\b|\bmust\s+not\b|\bshall\s+not\b|\bcannot\b"
+    r"|\bnot\b|\bnever\b|\bno\s+longer\b",
+    re.I,
+)
 
 # E2E 屬 RTM 層（SCG-5，retry=2）；Unit/Integration/Contract 屬 PR 層（SCG-4，retry=5）
 # 對齊 transition_rules RETRY_LIMITS：PR_REVIEW=5 / RTM_VERIFY=2
@@ -227,18 +236,30 @@ class SddToPlaybookAdapter:
         # 使 evaluator 驗證全部引號斷言（修正「多引號只取首條」under-specify 缺口）。
         # 僅限同類多引號：刻意保留「quoted wins over status code」既有設計決策
         # （混合 quoted/status 時 status 不納入，見 test_quoted_wins_over_status_code）。
-        quoted_frags = [
-            re.escape(m.group(1))
-            for line in then_lines
-            if (m := _QUOTED_LITERAL.search(line))
-        ]
-        if len(quoted_frags) >= 2:
-            return "(?s)" + "".join(f"(?=.*{q})" for q in quoted_frags), False
-        # 單引號 / 無引號：維持既有逐行推導（向後相容、零行為變化）
+        # W-31-1：依「引號之前是否有否定標記」分流正向/負向斷言，修正負向語意顛倒。
+        pos_frags: list[str] = []
+        neg_frags: list[str] = []
         for line in then_lines:
-            quoted = _QUOTED_LITERAL.search(line)
-            if quoted:
-                return re.escape(quoted.group(1)), False
+            m = _QUOTED_LITERAL.search(line)
+            if not m:
+                continue
+            frag = re.escape(m.group(1))
+            if _NEGATION_MARKER.search(line[: m.start()]):
+                neg_frags.append(frag)
+            else:
+                pos_frags.append(frag)
+        if neg_frags:
+            # 含負向斷言：正向 (?=.*P) 要求出現 + 負向 (?!.*N) 要求不出現。
+            # 負向 lookahead 在 re.search 下需 \A 錨定才語意正確（否則於 N 之後位置
+            # 恆真）；正向片段一併納入同一 \A 錨定式（順序無關 AND）。
+            parts = [f"(?=.*{q})" for q in pos_frags] + [f"(?!.*{q})" for q in neg_frags]
+            return "(?s)\\A" + "".join(parts), False
+        if len(pos_frags) >= 2:
+            # 純正向 ≥2 引號：維持 improving_29 既有格式（不加 \A，零行為變化）。
+            return "(?s)" + "".join(f"(?=.*{q})" for q in pos_frags), False
+        # 單一正向引號：維持既有逐行推導（向後相容、零行為變化）
+        if pos_frags:
+            return pos_frags[0], False
         for line in then_lines:
             if _QUANTITATIVE.search(line):
                 continue  # 量化 NFR 斷言不可由文字推導
