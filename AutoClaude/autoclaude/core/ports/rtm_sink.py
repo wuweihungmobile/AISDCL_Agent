@@ -88,11 +88,22 @@ class IRtmSink(Protocol):
         """
         ...
 
+    def append_report_line(self, report_name: str, line: str) -> str:
+        """append 單行至 {report_name}.jsonl（improving_27 W3 跨輪趨勢持久化）。
+
+        覆寫語意（write_report）保留「最新快照」；append 語意累積「跨輪趨勢」，
+        供 IRtmFeedbackSource.read_history 讀回。回傳檔案絕對路徑（no-op 回空字串）。
+        """
+        ...
+
 
 class NullRtmSink:
     """No-op IRtmSink 實作；未注入 sink 時 fallback（符合 Protocol，duck typing）。"""
 
     def write_report(self, report_name: str, content: str, *, fmt: str = "yaml") -> str:
+        return ""
+
+    def append_report_line(self, report_name: str, line: str) -> str:
         return ""
 
 

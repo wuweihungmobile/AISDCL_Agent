@@ -183,7 +183,14 @@ def _build_plugin_set(
         # 於 wiring 注入（core-purity 唯一豁免點 import infra 合法）。
         "rtm_writeback": _build_rtm_writeback(cfg, observability),
         "convergence": ConvergencePlugin(),
-        "evolution": EvolutionPlugin(minimax_client=minimax_client),
+        # AutoSDD_improving_27 W1：A 軌 RTM 反饋讀回（flag-gated）。feedback source
+        # 與 _build_rtm_writeback 的 FileRtmSink 同 base_dir 對稱；flag 預設 OFF 時
+        # plugin 內 _rtm_gap_annotation 立即短路（零退化），source 不被觸碰。
+        "evolution": EvolutionPlugin(
+            minimax_client=minimax_client,
+            rtm_feedback=_build_rtm_feedback_source(cfg),
+            enable_rtm_feedback=cfg.playbook.enable_rtm_feedback,
+        ),
         "goto_counter": GotoCounterPlugin(playbook_cfg=cfg.playbook),
         # W4-T17 / M-11：CheckpointPlugin 解耦；attach_bus 由 _register_in_order 處理
         "checkpoint": CheckpointPlugin(checkpoint_manager=checkpoint_mgr),
@@ -233,6 +240,20 @@ def _build_rtm_writeback(
         adapter=PlaybookToRtmAdapter(observability=observability),
         sink=FileRtmSink(f"{cfg.checkpoint_dir}/rtm", observability=observability),
     )
+
+
+def _build_rtm_feedback_source(cfg: AppConfig):
+    """組裝 FileRtmFeedbackSource（AutoSDD_improving_27 W1）。
+
+    base_dir 與 _build_rtm_writeback 的 FileRtmSink 對稱（checkpoint_dir/rtm），
+    讀回 sink 寫出的 RTM-COVERAGE-*.yaml / HISTORY.jsonl。延遲 import infra
+    （wiring core-purity 唯一豁免點）。建構零副作用（僅持 base_dir，不建目錄），
+    故 flag OFF 時建了也不觸碰檔案系統。
+    """
+    from ..infra.adapters.rtm_file_feedback_source import (  # noqa: PLC0415
+        FileRtmFeedbackSource,
+    )
+    return FileRtmFeedbackSource(f"{cfg.checkpoint_dir}/rtm")
 
 
 def _register_in_order(bus: EventBus, plugins: dict[str, Any]) -> None:

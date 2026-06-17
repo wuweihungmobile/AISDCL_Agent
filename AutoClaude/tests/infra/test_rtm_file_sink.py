@@ -63,3 +63,50 @@ class TestFileRtmSink:
         sink = FileRtmSink(str(tmp_path), observability=_Obs())
         sink.write_report("R", "content", fmt="yaml")
         assert any(n == "rtm_report_written" for n, _ in events)
+
+
+class TestFileRtmSinkAppendHistory:
+    """improving_27 W3a：append_report_line 跨輪趨勢持久化。
+
+    RTM AT 對應：
+      - AT-27-3-1：append 兩行 → .jsonl 檔含 2 行、各為原內容、LF 收尾
+      - AT-27-3-2：基名消毒（同 write_report 路徑）
+      - AT-27-3-3：append 發 rtm_history_appended 事件
+    """
+
+    def test_append_accumulates_lines(self, tmp_path):
+        """AT-27-3-1：兩次 append → 兩行，順序保留，強制 LF 收尾（不重複換行）。"""
+        base = tmp_path / "reports" / "rtm"
+        sink = FileRtmSink(str(base))
+        path = sink.append_report_line("RTM-COVERAGE-HISTORY-Demo", '{"a":1}')
+        sink.append_report_line("RTM-COVERAGE-HISTORY-Demo", '{"a":2}\n')  # 已帶換行
+        p = Path(path)
+        assert p.name == "RTM-COVERAGE-HISTORY-Demo.jsonl"
+        lines = p.read_text(encoding="utf-8").splitlines()
+        assert lines == ['{"a":1}', '{"a":2}']
+        # 末尾恰一個 LF（rstrip 後補一個），無雙換行
+        assert p.read_text(encoding="utf-8") == '{"a":1}\n{"a":2}\n'
+
+    def test_append_sanitizes_name(self, tmp_path):
+        """AT-27-3-2：惡意基名消毒，落點仍在 base_dir 內。"""
+        sink = FileRtmSink(str(tmp_path))
+        path = sink.append_report_line("../../evil", '{"x":1}')
+        p = Path(path)
+        assert str(p).startswith(str(tmp_path.resolve()))
+        assert ".." not in p.name
+
+    def test_append_emits_observability(self, tmp_path):
+        """AT-27-3-3：append 發 rtm_history_appended 事件。"""
+        events = []
+
+        class _Obs:
+            def emit_counter(self, *a, **k): pass
+            def emit_histogram(self, *a, **k): pass
+            def start_span(self, *a, **k):
+                raise AssertionError("unused")
+            def record_event(self, name, attributes=None):
+                events.append(name)
+
+        sink = FileRtmSink(str(tmp_path), observability=_Obs())
+        sink.append_report_line("H", '{"x":1}')
+        assert "rtm_history_appended" in events

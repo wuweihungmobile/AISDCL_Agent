@@ -127,3 +127,22 @@
 |----|----------|----------|------------|--------|----------|------|
 | DEF-26-001 | 2026-06-17 | improving_26 階段一 C 軌偵察（zero-trust 親查程式碼比對藍圖宣稱時揭露） | 方法論缺陷（DEF-01-005 陷阱**復發**）：C 軌偵察 agent **兩度**把已完工的引擎能力誤報為「待建」（首推 Gap-011-A `global_goal`、次推 Gap-011-B/Gap-010 系列），根因＝AutoClaude planning 藍圖 `AutoClaude_Improving_010.md`（文末「文件狀態: Active／下一個行動項目: 按 P0 優先級實作…」）、`_011.md`（行 8「文件狀態: Active」雖文末 checklist 全 `[x]`）、`AutoClaude_L5_Evo_001.md`（行 7「下一步: 實作 Gap-012-A~F」）之 **status 仍標 Active/待實作**，閱讀者（含 agent）信 status 不查碼 → 誤判。實證全已落地：見 `AutoSDD_improving_26.md` §3.2 file:line 證據表（13 項能力逐一對照碼存在） | P3（方法論/文檔治理，無功能影響；但每輪 C 軌偵察都可能因 stale status 重蹈 DEF-01-005，浪費定範回合並可能臆造重複能力） | C 軌 docs governance 即修：和解三藍圖 status 為 `CLOSED@implemented`（附 file:line 對照碼 + 指向 §3.2）；偵察紀律補強：階段一「待建 vs 已存在」必親 grep 碼，禁信文件 status（對齊範本階段一 (d) + 紀律 #17 zero-trust 雙向） | **fixed@improving_26**（證據：`AutoClaude_Improving_010.md`/`_011.md`/`AutoClaude_L5_Evo_001.md` status 行已改 CLOSED@implemented + 對照碼註記；本輪 improving_26.md §3.2 13 項 file:line 實證表） |
 
+## improving_27 複驗註記（2026-06-17，A 軌 RTM 反饋迴圈 + 跨輪覆蓋趨勢持久化）
+
+**本輪零新框架程式缺陷、零框架 v0.0X 變更**（純 AutoClaude 整合層擴充：新增 1 port + 1 adapter，surgical 改 6 既有檔 + 2 測試檔）。三鏡 Zero-Trust 審查全 OVERALL PASS（主樹派發，遵 DEF-24-001）；零退化 3175/0、lint 8/0、LOC 0、snapshot FRESH、ci-gate exit 0。
+
+**本輪 zero-trust 三次設計修正紀實（誠實揭露，→ DEF-27-001）**：測繪 agent 初版 W1+W2+W3 建議，經主 agent 對系統實況複核發現三處設計缺陷並修正——①W1 同次 run evolution 消費（時序矛盾，POST_RUN vs ON_ESCALATION）→ 改讀回上次報告；②W2 統一路由層（過度抽象，workflow_type 已 SSOT、`GoalDecomposer.decompose()` 無生產呼叫端）→ 撤除改選 W3；③W3 checkpoint snapshot（時序矛盾，`playbook_runner.py:428-429` 成功 run 立即 clear checkpoint）→ 改 append-only history 檔。
+
+**上輪 open/routed 項複驗**：
+- **DEF-23-005**（RFC 生命週期自動化，P3）：維持 **open（routed 下一輪）**，屬 B 軌框架治理，非本輪 A 軌 scope，未推進。
+- **DEF-01-007**（cc-switch GUI/CLI，P3）：維持 **open**，本輪 A 軌反饋讀回不涉多後端 A/B，未觸發；環境工具缺裝非倉內可修。
+- **DEF-01-009**（`sdd_governance_plugin.py` LOC watch，P3）：維持 **open watch**，本輪以全新檔（rtm_feedback port / feedback_source adapter）+ surgical 改 evolution_plugin（249≤300）/rtm_writeback，**未動 sdd_governance_plugin**，watch 不觸發。
+- **DEF-19-001**（catch 漸進覆蓋，P3）/ **DEF-17-001**（代謝 fire 側遙測，routed）：維持 **routed**（框架側 B 軌），本輪未推進。
+- **DEF-26-001**（stale 藍圖 status，fixed@improving_26）/ **DEF-25-001**（R-9.37.4 邊界，wontfix）：維持，本輪無關。
+
+**本輪新增防退化資產（非缺陷，記錄供後續輪參考）**：A 軌反饋讀回 `FileRtmFeedbackSource` 與寫出 `FileRtmSink` 構成對稱往返契約，序列化單一真相 `coverage_report_to_doc`/`from_doc` 與既有 `PlaybookToRtmAdapter.render_yaml` 由 `test_rtm_feedback.py::test_from_doc_parses_render_yaml_output` 鎖定格式一致；若任一側 doc 結構漂移該測試立即轉紅（防序列化靜默 drift，DEF-05-002/07-001 家族防護）。
+
+| ID | 發現日期 | 發現情境 | 現象與證據 | 嚴重度 | 分流去向 | 狀態 |
+|----|----------|----------|------------|--------|----------|------|
+| DEF-27-001 | 2026-06-17 | improving_27 階段二 A 軌增量設計（zero-trust 對測繪 agent 建議複核時揭露） | 方法論缺陷（與 DEF-26-001 同屬「agent 二手結論須複核」家族、紀律 #17）：A 軌測繪/設計 agent 的增量建議**未經系統實況（時序、抽象必要性）驗證**即提出，本輪三度被主 agent zero-trust 複核抓出——①W1 建議「同次 run 的 RTM 報告餵 evolution」撞時序矛盾（報告於 POST_RUN run 完整走完才產出，evolution 於 ON_ESCALATION run 中途觸發，`kernel.py:127` vs `evolution_plugin` ON_ESCALATION）；②W2 建議「統一路由層」屬過度抽象（`workflow_type` 已 SSOT 判別欄 `sdd_governance_plugin.py:159`、`boot_helper.py:92` 已有解析點、`GoalDecomposer.decompose()` 全倉無生產呼叫端、SDD 守門與 goal 拆解本在不同生命週期）；③W3 建議「POST_RUN 注入 checkpoint snapshot」撞時序矛盾（`playbook_runner.py:428-429` 成功 run 立即 clear checkpoint，中斷 run 不走 POST_RUN 無報告 → 無有效保存路徑）。若直接採信任一建議，將分別產生時序無效碼／single-use 過度抽象／無效持久化路徑 | P3（方法論/流程觀察，無功能影響；防後續輪盲信 agent 設計建議直接落地） | 流程觀察入帳本（本筆即記）：設計階段對測繪/設計 agent 的增量建議，須由主 agent zero-trust 對「系統實況時序 + 抽象必要性（Rule 2/3）」複核後才採納，不可直接採信——對齊範本紀律 #17（agent 結論本身須複核）+ Rule 1（push back when simpler exists）。本輪三次修正均經 🔴 掌舵者知情後定案（W2→W3 改選） | **fixed@improving_27**（證據：三次修正均落地——W1 改讀回上次報告〔`rtm_file_feedback_source.py`〕、W2 撤除改選 W3、W3 改 history 檔〔`rtm_writeback_plugin.py` POST_RUN append〕；計畫書 §2.1 三次修正表 + Audit_27 §2 紀實；三鏡 SA-SD 鏡複核三點論述與系統實況相符） |
+

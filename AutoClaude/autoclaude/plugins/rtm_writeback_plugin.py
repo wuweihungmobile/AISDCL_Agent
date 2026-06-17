@@ -15,11 +15,13 @@
 """
 from __future__ import annotations
 
+import json
 import logging
 import re
 from typing import Any
 
 from ..core.hookspec import HookContext, KernelPhase
+from ..core.ports.rtm_feedback import coverage_report_to_doc
 
 logger = logging.getLogger("autoclaude.plugins.rtm_writeback")
 
@@ -69,6 +71,13 @@ class RtmWritebackPlugin:
                 f"RTM-GAP-{project}",
                 self._adapter.render_gap_markdown(report),
                 fmt="md",
+            )
+            # AutoSDD_improving_27 W3：append 本次覆蓋快照至跨輪趨勢 history（jsonl），
+            # 供 IRtmFeedbackSource.read_history 讀回「上次 X% → 本次 Y%」。覆寫語意
+            # （write_report）保留最新快照，append 累積趨勢；行序即時序。
+            self._sink.append_report_line(
+                f"RTM-COVERAGE-HISTORY-{project}",
+                json.dumps(coverage_report_to_doc(report), ensure_ascii=False),
             )
         except Exception as exc:  # 回寫為輔助功能，絕不阻斷主流程
             logger.warning("RtmWritebackPlugin writeback failed: %s", exc)

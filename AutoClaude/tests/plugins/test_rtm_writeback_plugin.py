@@ -11,6 +11,8 @@ RTM AT 對應：
 """
 from __future__ import annotations
 
+import json
+
 import yaml
 
 from autoclaude.core.event_bus import EventBus
@@ -40,10 +42,15 @@ def _sdd_pb() -> Playbook:
 class _RecordingSink:
     def __init__(self):
         self.calls = []
+        self.history = []  # improving_27 W3：append_report_line 記錄
 
     def write_report(self, report_name, content, *, fmt="yaml"):
         self.calls.append((report_name, content, fmt))
         return f"/fake/{report_name}.{fmt}"
+
+    def append_report_line(self, report_name, line):
+        self.history.append((report_name, line))
+        return f"/fake/{report_name}.jsonl"
 
 
 def _post_run_ctx(pb: Playbook, completed: list[str]) -> HookContext:
@@ -73,6 +80,30 @@ class TestRtmWritebackPlugin:
         assert cov_doc["spec_digest"] == "abcdef12"
         assert cov_doc["summary"]["passed_at"] == 1
         assert cov_doc["summary"]["total_at"] == 2
+
+    def test_appends_history_snapshot_for_sdd_playbook(self):
+        """AT-27-3-4（W3b）：SDD playbook POST_RUN 額外 append 一筆 history 快照。"""
+        sink = _RecordingSink()
+        plugin = RtmWritebackPlugin(adapter=PlaybookToRtmAdapter(), sink=sink)
+        ctx = _post_run_ctx(_sdd_pb(), ["sdd-greenfield-at-001-1-1"])
+        plugin.on_event(ctx)
+        assert len(sink.history) == 1
+        name, line = sink.history[0]
+        assert name == "RTM-COVERAGE-HISTORY-Demo"
+        # line 為單行 JSON，可還原為 coverage doc（與 read_history 對稱）
+        doc = json.loads(line)
+        assert doc["kind"] == "rtm-coverage"
+        assert doc["summary"]["passed_at"] == 1
+        assert doc["summary"]["total_at"] == 2
+
+    def test_no_history_for_non_sdd_playbook(self):
+        """W3b 零退化：非 SDD playbook → 不寫報告也不 append history。"""
+        sink = _RecordingSink()
+        plugin = RtmWritebackPlugin(adapter=PlaybookToRtmAdapter(), sink=sink)
+        ctx = _post_run_ctx(_pb([PlaybookTask(step_id="T01", name="x", prompt="x")]), ["T01"])
+        plugin.on_event(ctx)
+        assert sink.calls == []
+        assert sink.history == []
 
     def test_noop_for_non_sdd_playbook(self):
         """AT-24-2-2：非 SDD playbook → 不觸碰 sink（零退化）。"""
@@ -133,7 +164,12 @@ class TestEventBusIntegration:
         bus.register(RtmWritebackPlugin(adapter=PlaybookToRtmAdapter(), sink=sink))
         bus.emit(_post_run_ctx(_sdd_pb(), ["sdd-greenfield-at-001-1-1"]))
         files = sorted(p.name for p in (tmp_path / "rtm").iterdir())
-        assert files == ["RTM-COVERAGE-Demo.yaml", "RTM-GAP-Demo.md"]
+        # improving_27 W3b：除既有 coverage/gap 兩檔，另 append 跨輪趨勢 history jsonl
+        assert files == [
+            "RTM-COVERAGE-Demo.yaml",
+            "RTM-COVERAGE-HISTORY-Demo.jsonl",
+            "RTM-GAP-Demo.md",
+        ]
 
 
 class TestClosureRoundTrip:

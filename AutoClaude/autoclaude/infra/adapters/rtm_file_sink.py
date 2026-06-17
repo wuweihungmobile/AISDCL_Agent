@@ -39,6 +39,23 @@ class FileRtmSink:
         )
         return path
 
+    def append_report_line(self, report_name: str, line: str) -> str:
+        """append 單行至 {report_name}.jsonl（improving_27 W3 跨輪趨勢）。
+
+        以單行 JSON（呼叫端序列化）累積，每行恰一筆覆蓋快照；強制 LF 收尾，
+        既有檔不存在時自動建立。回傳檔案絕對路徑。
+        """
+        safe_name = _sanitize_name(report_name)
+        self._base.mkdir(parents=True, exist_ok=True)
+        target = self._base / f"{safe_name}.jsonl"
+        with target.open("a", encoding="utf-8") as f:
+            f.write(line.rstrip("\n") + "\n")
+        path = str(target.resolve())
+        self._obs.record_event(
+            "rtm_history_appended", {"path": path, "bytes": len(line)}
+        )
+        return path
+
 
 def _sanitize_name(name: str) -> str:
     """報告基名消毒：僅保留檔名安全字元，杜絕路徑穿越（../、絕對路徑）。"""

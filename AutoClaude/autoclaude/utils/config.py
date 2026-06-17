@@ -57,6 +57,13 @@ class PlaybookConfig(BaseModel):
     # 須經注入的 evolution_approver 核可（回傳 True）才放行；approver 缺失或拒絕 → fail-closed
     # 停機不重載並留審計痕（對齊 goal_decomposer signoff 硬閘 + MinimaxConfig.enable_kernel_brain
     # flag-gate 雙前例）。
+    enable_rtm_feedback: bool = False
+    # AutoSDD_improving_27 W1（A 軌 RTM 反饋迴圈）：是否在 ON_ESCALATION 演化提議時，
+    # 讀回上次 RTM coverage 報告把 gap 摘要附 proposal.rationale 作**諮詢**輸入。
+    # 預設 False＝EvolutionPlugin 行為與現況完全相同（零退化）。設 True 後僅增補
+    # rationale 文字（不改 mutation 決策、不自動套用 RTM/SPEC）；演化仍走
+    # require_evolution_signoff + max_evolutions 硬閘（對齊「RTM/SPEC-PATCH 絕不
+    # 自動套用」紅線 + enable_kernel_brain flag-gate 前例）。
     goal_synthesis_enabled: bool = True
     # Gap-014：是否啟用 DONE 前的全局目標驗證（預設啟用）
     global_goal_brief_chars: int = Field(default=150, ge=50, le=500)

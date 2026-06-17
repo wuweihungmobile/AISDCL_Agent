@@ -102,10 +102,7 @@ autoclaude/
 ├── core/                            # 微核心層
 │   ├── kernel.py / kernel_state.py / event_bus.py / hookspec.py / wiring.py
 │   ├── orchestration/              # OrchestrationCoordinator（SD_06 W1）
-│   ├── ports/                      # 10 ports：brain / executor / evaluator /
-│   │                               # memory_store / playbook_repository / state_repository /
-│   │                               # embedder / vector_search / observability（SD_08 W4）/
-│   │                               # spec_source（AutoSDD W1）— 以下方 [Architecture Snapshot] Port 列表為準
+│   ├── ports/                      # Ports 抽象介面 — 數量/清單以下方 [Architecture Snapshot] Port 列表為準
 │   └── services/                   # mutation/ + auto_resume.py + _auto_resume_metrics.py
 ├── infra/                           # 基礎設施層
 │   ├── adapters/                   # MinimaxBrain / PtyExecutor / ShellEvaluator /
@@ -373,7 +370,7 @@ tasks:
 17. goto_counter
 18. checkpoint
 
-### Port 列表（15 個，autoclaude/core/ports/）
+### Port 列表（16 個，autoclaude/core/ports/）
 - brain
 - embedder
 - evaluator
@@ -383,6 +380,7 @@ tasks:
 - observability
 - playbook_repository
 - preference_store
+- rtm_feedback
 - rtm_sink
 - spec_source
 - state_repository

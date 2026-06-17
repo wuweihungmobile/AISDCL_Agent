@@ -54,11 +54,20 @@ class EvolutionPlugin:
         rule_evolver: Optional[PlaybookEvolver] = None,
         ai_evolver: Optional[MinimaxEvolver] = None,
         minimax_client: Optional[Any] = None,
+        *,
+        rtm_feedback: Optional[Any] = None,
+        enable_rtm_feedback: bool = False,
     ):
         self._rule_evolver = rule_evolver or PlaybookEvolver()
         self._ai_evolver = ai_evolver or MinimaxEvolver()
         self._minimax_client = minimax_client
         self._latest_proposal: Optional[PlaybookEvolutionProposal] = None
+        # AutoSDD_improving_27 W1：A 軌 RTM 反饋讀回（flag-gated，預設 OFF）。
+        # 啟用後 ON_ESCALATION 時讀回上次 RTM coverage，把 gap 摘要附 proposal.rationale
+        # 作為**諮詢**輸入（不改 mutation 決策、不自動套用 RTM/SPEC）。對齊紅線：
+        # 演化仍走 require_evolution_signoff + max_evolutions 硬閘。
+        self._rtm_feedback = rtm_feedback  # IRtmFeedbackSource（Any 型別，不 import infra）
+        self._enable_rtm_feedback = enable_rtm_feedback
 
     def name(self) -> str:
         return "evolution"
@@ -114,8 +123,36 @@ class EvolutionPlugin:
         return MutationProposal(
             contributor=self.name(),
             mutation=mutation,
-            rationale=proposal.reasoning,
+            rationale=proposal.reasoning + self._rtm_gap_annotation(ctx),
         )
+
+    def _rtm_gap_annotation(self, ctx: HookContext) -> str:
+        """W1：讀回上次 RTM coverage gap，回傳附加到 rationale 的**諮詢**註記。
+
+        僅在 flag ON ∧ 有注入 source ∧ 失敗步驟為 SDD 編譯步驟（step_id 前綴 sdd-）
+        ∧ 上次報告存在且未完全覆蓋時回非空字串；其餘一律回 ""（零退化）。
+        fail-soft：讀回任何例外吞掉回 ""（諮詢功能不得阻斷演化）。
+        """
+        if not self._enable_rtm_feedback or self._rtm_feedback is None:
+            return ""
+        try:
+            task = ctx.task
+            step_id = (getattr(task, "step_id", "") or "") if task else ""
+            if not step_id.startswith("sdd-"):
+                return ""
+            report = self._rtm_feedback.read_report(ctx.playbook.project)
+            if report is None or report.is_fully_covered:
+                return ""
+            failed = ", ".join(report.failed_at_ids) or "(無)"
+            return (
+                "\n\n[RTM 反饋｜上次覆蓋諮詢（不自動套用，僅供 signoff 判讀）]\n"
+                f"- AC 覆蓋：{report.ac_covered}/{report.ac_total}"
+                f"（{report.ac_coverage_pct}%）\n"
+                f"- 未通過 AT：{failed}"
+            )
+        except Exception as exc:  # noqa: BLE001 — fail-soft（諮詢不得阻斷主流程）
+            logger.warning("RTM 反饋讀回 fail-soft: %s", exc)
+            return ""
 
     # ──────────────────────────────────────────────
     # 公開 API
