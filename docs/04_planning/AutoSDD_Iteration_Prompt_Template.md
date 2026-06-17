@@ -221,9 +221,17 @@ SDD_CONTRACT_VIOLATION 次數、token 峰值）。
 1. 產出後派 **Architect / SA-SD / QA** 專家 agent 對「文件 vs 系統現況」全面比對審查：
    修復方向是否正確、nightly/CI 腳本是否正確、執行過程與結果是否真實、
    **缺陷帳本是否完整誠實（有無漏記/虛報）**。
-   > **並行派發隔離（流程問題 #11）**：若同時運行 mutation/突變或並行多 agent 就地寫檔，
-   > audit agent 須以 `isolation: worktree` 派發，避免讀到突變態源碼產生假紅（見 AutoClaude
-   > CLAUDE.md Nightly 紀律 #18「mutation 須隔離樹」）。
+   > **並行派發隔離（流程問題 #11，DEF-24-001 情境細化）**：worktree 隔離**僅適用**「**並行就地
+   > 突變 tracked 檔**」——若同時運行 mutation/突變或並行多 agent 就地寫**已追蹤**檔，audit agent 須以
+   > `isolation: worktree` 派發，避免讀到突變態源碼產生假紅（見 AutoClaude CLAUDE.md Nightly 紀律 #18
+   > 「mutation 須隔離樹」）。
+   > **🔴 反向陷阱（DEF-24-001，違反即假陰性）**：審查**本輪尚未 commit 的 untracked 新增檔**（新源碼／
+   > 新測試）時**嚴禁** `isolation: worktree`——`git worktree add` 由指定 commit（HEAD）建樹，**不攜帶
+   > 主樹 untracked／未 staged 檔**，worktree 內 audit agent 會看不到本輪新檔、實際在跑舊碼，回報「檔案
+   > 不存在＋≈HEAD 基線 passed 數＋OVERALL FAIL」之**假陰性**（improving_24 QA 鏡實證：worktree 看不到
+   > 4 源＋3 測試、回報 3111 vs 主樹真值 3146）。**正解**：審查 untracked 新檔的 audit agent 一律**在
+   > 主樹派發**；若確需隔離又要含新檔，先 `git add -A` 暫存使 untracked 入樹後再建 worktree。
+   > **判準（一句記住）**：**突變 tracked 檔 → worktree；審查 untracked 新檔 → 主樹。**
    > **Copy-on-Evolve / 大批新檔入庫潔淨度（DEF-11-002 紀律）**：審查涉及新凍結版本
    > （`AISDLC_SDD_v0.0(X+1)/`）或大批 untracked 檔將入庫時，**必跑 `git add -A -n <path>`
    > 全量 dry-run 審 would-add 清單**有無 runtime/stale 產物（`build/reports/`、

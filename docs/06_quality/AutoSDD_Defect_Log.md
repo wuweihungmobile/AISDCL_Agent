@@ -81,5 +81,27 @@
 
 | ID | 發現日期 | 發現情境 | 現象與證據 | 嚴重度 | 分流去向 | 狀態 |
 |----|----------|----------|------------|--------|----------|------|
-| DEF-24-001 | 2026-06-17 | improving_24 三鏡 Zero-Trust 審查（QA 鏡以 `isolation: worktree` 派發） | 流程缺陷：審查**未 commit 的新增檔案**時，迭代範本 §🔍 規定的「並行派發隔離（流程問題 #11）→ audit agent 以 `isolation: worktree` 派發」**與 git worktree 語意衝突**——`git worktree add` 由指定 commit（HEAD）建樹，**不攜帶主樹的 untracked / 未 staged 檔案**，故 QA agent 在 worktree 看不到本輪 4 支新源碼 + 3 支新測試（全 untracked），實際在跑 improving_23 舊碼，回報「檔案不存在 + 3111 passed（≈HEAD 基線）+ OVERALL FAIL」之**假陰性**。與 Architect/SA-SD 主樹實測（檔案全在、3146 passed、OVERALL PASS）矛盾，經紀律 #17「zero-trust 須雙向：agent 結論本身須複核」識破。根因：流程 #11 worktree 隔離原為「**並行就地突變 tracked 檔**」設計（紀律 #18），審查 untracked 新檔不適用 | P2（流程/工具，無功能影響；但會在每輪「審查未 commit 新檔」時製造假陰性 FAIL，浪費修復回合並可能誤導回滾） | 流程缺陷 → 下一輪修迭代範本 §🔍：worktree 隔離僅在「並行就地突變 tracked 檔」時用；審查**未 commit 新增檔**的 audit agent 須在主樹派發（或先 `git add -A` 暫存後再建 worktree，使 untracked 入樹）。本輪即時補償：QA 鏡改於主樹重派完成對抗複審 | open（routed 下一輪範本修訂；本輪以「主樹重派 QA」即時補償，見 ZeroTrust_Audit_24） |
+| DEF-24-001 | 2026-06-17 | improving_24 三鏡 Zero-Trust 審查（QA 鏡以 `isolation: worktree` 派發） | 流程缺陷：審查**未 commit 的新增檔案**時，迭代範本 §🔍 規定的「並行派發隔離（流程問題 #11）→ audit agent 以 `isolation: worktree` 派發」**與 git worktree 語意衝突**——`git worktree add` 由指定 commit（HEAD）建樹，**不攜帶主樹的 untracked / 未 staged 檔案**，故 QA agent 在 worktree 看不到本輪 4 支新源碼 + 3 支新測試（全 untracked），實際在跑 improving_23 舊碼，回報「檔案不存在 + 3111 passed（≈HEAD 基線）+ OVERALL FAIL」之**假陰性**。與 Architect/SA-SD 主樹實測（檔案全在、3146 passed、OVERALL PASS）矛盾，經紀律 #17「zero-trust 須雙向：agent 結論本身須複核」識破。根因：流程 #11 worktree 隔離原為「**並行就地突變 tracked 檔**」設計（紀律 #18），審查 untracked 新檔不適用 | P2（流程/工具，無功能影響；但會在每輪「審查未 commit 新檔」時製造假陰性 FAIL，浪費修復回合並可能誤導回滾） | 流程缺陷 → 下一輪修迭代範本 §🔍：worktree 隔離僅在「並行就地突變 tracked 檔」時用；審查**未 commit 新增檔**的 audit agent 須在主樹派發（或先 `git add -A` 暫存後再建 worktree，使 untracked 入樹）。本輪即時補償：QA 鏡改於主樹重派完成對抗複審 | open（routed 下一輪範本修訂；本輪以「主樹重派 QA」即時補償） → **fixed@improving_25**（證據：`docs/04_planning/AutoSDD_Iteration_Prompt_Template.md` §🔍 行 224-235 由單一無條件「audit agent 須以 `isolation: worktree` 派發」note，改為**兩情境判準**——新增「🔴 反向陷阱（DEF-24-001）」段：突變 tracked → worktree；審查 untracked 新檔 → 主樹（或先 `git add -A` 使 untracked 入樹再建 worktree）。一句判準入範本。本輪三鏡 QA 鏡即依新判準在主樹派發，零假陰性復發） |
+
+## improving_25 複驗註記（2026-06-17，A 協作軌範本修訂 + B 軌 meta⁸ 視覺化飽和認定）
+
+**本輪零新框架程式缺陷、零框架 v0.0X 變更**（純文檔/範本層：修整合迭代範本 §🔍 + 缺陷帳本紅線澄清）。
+
+**本輪定範三度 zero-trust 翻轉紀實（誠實揭露，供後續輪參考）**：
+1. 🔴 人工初選 driver instance＝「B 軌 meta⁸ 終止證書視覺化儀表板」。
+2. **第一層翻轉**：階段一 B 軌標的偵察實證，該 driver instance 在 **v0.14 已 100% 落地並測試覆蓋**——`recursion_topology_view.py`（880 行：`render_mermaid`/`render_termination_ladder`/`render_grounding_panel`/`render_json`/`render_dashboard_markdown`/`verify_topology_consistency` PY-2 拓樸防偽/`RenderBudget` 有界截斷/folding 降維）+ `steersman_renderer.py:890 render_recursion_topology_dashboard`（ACT-161 舵手端點，**親讀證實存在**，非如某偵察 agent 二手誤報「待實現」）+ `META_FSM.tla VisualizationBounded` + `test_phase_y.py` PY-1/2/3 + chaos `VISUALIZATION_FLAP`。即上輪 improving_23（B 軌 XAI Folding 降維 v0.13→v0.14）做掉的方向；範本「🔭 XAI Turn」driver instance（ACT-159/R-9.37）為**已完成歷史 placeholder**。
+3. **第二層收斂**：重定本輪剩餘真實 delta＝「四源一致斷點（視覺化稽核反射進 FSM-STATE.yaml）」。
+4. **第三層翻轉（致命）**：對照剛載入之 `AISDLC_SDD/CLAUDE.md` **Rule 9 第 27 條 / R-9.37.4**，該 delta **撞停機級紅線**——見 DEF-25-001。
+5. **最終收斂**：本輪＝(1) 修 DEF-24-001 範本 §🔍；(2) 記 DEF-25-001 紅線澄清；(3) 正式認定 B 軌 meta⁸ 視覺化**飽和閉環**（無不撞紅線之實質 delta；其餘候選 OPEN-Y.1 活體 Playwright HTTP／OPEN-Y.3 互動式 Web UI 皆 horizon 被範本明禁）。
+
+**上輪 open/routed 項複驗**：
+- **DEF-24-001**（worktree 隔離假陰性，P2）：本輪 **fixed@improving_25**（範本 §🔍 兩情境判準，見上）。
+- **DEF-23-005**（RFC 生命週期自動化，P3）：維持 **open（routed 下一輪）**，屬 B 軌框架治理（需動 `.claude/hooks/`/ci-gate），非本輪範本層 scope，未推進。
+- **DEF-01-007**（cc-switch GUI，P3）：維持 **open**，本輪不涉多後端 A/B，未觸發；環境工具缺裝非倉內可修。
+- **DEF-01-009**（`sdd_governance_plugin.py` LOC watch，P3）：維持 **open watch**，本輪零 Python 變更，watch 不觸發。
+- **DEF-19-001**（catch 漸進覆蓋，P3）/ **DEF-17-001**（代謝 fire 側遙測，routed）：維持 **routed**（框架側 B 軌），本輪未推進。
+
+| ID | 發現日期 | 發現情境 | 現象與證據 | 嚴重度 | 分流去向 | 狀態 |
+|----|----------|----------|------------|--------|----------|------|
+| DEF-25-001 | 2026-06-17 | improving_25 階段二 B 軌設計（對照 `AISDLC_SDD/CLAUDE.md` Rule 9 第 27 條 / R-9.37.4 時揭露） | 認知/設計反模式澄清（非框架程式缺陷，記錄防未來輪誤判）：本輪一度把「視覺化稽核摘要（`audit_digest`/`well_founded`/`truncated`）未反射進 `FSM-STATE.yaml`」判為「四源一致斷點」缺口，並有偵察 agent 提出 ~60 LOC 方案（在 `steersman_renderer`/guard 後呼叫 `record_visualization_audit` 寫 FSM-STATE）。**但該方案直接違反 R-9.37.4 停機級禁令**：「`recursion_topology_view`／`guard_visualization_bounded` 視覺化模組**寫 FSM-STATE／影響 churn／影響 meta-loop 狀態** → 破 read-only 純觀察者；`VisualizationBounded == churn<=MAX_CHURN` 恆真之根基正是 read-only ⇒ churn 永不變動」（`AISDLC_SDD/CLAUDE.md` Rule 9 §27 + `governance/rules/R-9.37-*.yaml`）。**正解認知**：範本「四源絕對一致」是**驗證戒律**（四真相源不得矛盾），落實方向為**讀取式核對**，v0.14 已由 `verify_topology_consistency`（PY-2，比對 Python執行 vs 渲染）+ `META_FSM.tla VisualizationBounded` 同構（TLA+）**閉環**；`FSM-STATE.yaml` 記錄 SDD 主 FSM 運行態（SCG retry/token budget/decision_trace），meta⁸ 算子拓樸屬 meta-loop 範疇——FSM-STATE「沒有」視覺化稽核欄位**是刻意維持的架構邊界，非缺口**。偵察 agent 未讀 governance 規則致誤判（zero-trust 教訓：agent 設計建議須對照治理紅線複核） | P3（認知/流程澄清，無功能影響；防後續輪重蹈「把 R-9.37.4 邊界誤判為缺口」） | 認知澄清入帳本（本筆即記）+ 整合範本「四源一致」語意已於 improving_25.md §設計釐清為讀取式核對、非寫入；後續輪若再遇「FSM-STATE 缺視覺化欄位」訴求，直接引本筆判為 R-9.37.4 邊界、wontfix | **wontfix+理由（R-9.37.4 架構邊界，非缺口）**（記錄完成；B 軌 meta⁸ 視覺化飽和閉環之佐證） |
 
