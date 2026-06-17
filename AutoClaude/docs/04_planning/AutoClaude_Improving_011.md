@@ -5,7 +5,7 @@
 **建立日期**: 2026-05-03  
 **作者角色**: 首席 AI 自動化架構師  
 **分析基準**: AutoClaude Gap-001 ~ Gap-010 全量實作  
-**文件狀態**: Active  
+**文件狀態**: CLOSED@implemented（improving_26 狀態和解，2026-06-17）— Gap-011-A/B 全數已落地（文末執行 Checklist 全 `[x]` 為內證；對照碼：`plugins/global_goal_anchor_plugin.py`、`core/services/mutation/revise_current.py`、`models/step_mutation.py`）。詳見根層 `docs/04_planning/AutoSDD_improving_26.md` §3.2。  
 
 ---
 

@@ -4,7 +4,8 @@
 **建立日期**: 2026-05-04  
 **作者**: 首席 AI 自動化架構師分析（Chief AI Automation Architect Review）  
 **前置分析對象**: Gap-009 ~ Gap-011 完成後的現有系統  
-**下一步**: 實作 Gap-012-A ~ Gap-012-F
+**文件狀態**: CLOSED@implemented（improving_26 狀態和解，2026-06-17）— 圖靈完備核心缺口（Gap-012-A INJECT_BEFORE / Gap-012-B GOTO_STEP / Gap-012-C DELETE_STEP）**已落地**：`core/services/mutation/inject_before.py`、`goto_step.py`、`delete_step.py` + `plugins/goto_counter_plugin.py`（loop guard）+ checkpoint 4 counter。詳見根層 `docs/04_planning/AutoSDD_improving_26.md` §3.2。
+**原下一步（已完成，存史）**: 實作 Gap-012-A ~ Gap-012-F
 
 ---
 

@@ -1084,5 +1084,5 @@ _TEST_FILE_PATTERN = re.compile(
 
 ---
 
-**文件狀態**: Active  
-**下一個行動項目**: 按 P0 優先級實作 Gap-010-A（ErrorBudget）、Gap-010-D（EscalationDump 行動清單）、測試檔非標準命名修復
+**文件狀態**: CLOSED@implemented（improving_26 狀態和解，2026-06-17）— Gap-010-A~F 與測試檔非標準命名修復**全數已落地**。對照碼：`execution/error_budget.py`（A）、`prompt_builder.py:226`（B）、`execution/cross_step_validator.py`（C）、EscalationDump shell 行動清單（D）、`evolution/playbook_evolver.py:248-265`（E）、`utils/knowledge_base.py:167` get_strategy_priority（F）、`failure_tracker.py:26` `(?:test_\w+|\w+_test)\.py`（命名修復）。詳見根層 `docs/04_planning/AutoSDD_improving_26.md` §3.2。  
+**原下一個行動項目（已完成，存史）**: 按 P0 優先級實作 Gap-010-A（ErrorBudget）、Gap-010-D（EscalationDump 行動清單）、測試檔非標準命名修復

@@ -105,3 +105,25 @@
 |----|----------|----------|------------|--------|----------|------|
 | DEF-25-001 | 2026-06-17 | improving_25 階段二 B 軌設計（對照 `AISDLC_SDD/CLAUDE.md` Rule 9 第 27 條 / R-9.37.4 時揭露） | 認知/設計反模式澄清（非框架程式缺陷，記錄防未來輪誤判）：本輪一度把「視覺化稽核摘要（`audit_digest`/`well_founded`/`truncated`）未反射進 `FSM-STATE.yaml`」判為「四源一致斷點」缺口，並有偵察 agent 提出 ~60 LOC 方案（在 `steersman_renderer`/guard 後呼叫 `record_visualization_audit` 寫 FSM-STATE）。**但該方案直接違反 R-9.37.4 停機級禁令**：「`recursion_topology_view`／`guard_visualization_bounded` 視覺化模組**寫 FSM-STATE／影響 churn／影響 meta-loop 狀態** → 破 read-only 純觀察者；`VisualizationBounded == churn<=MAX_CHURN` 恆真之根基正是 read-only ⇒ churn 永不變動」（`AISDLC_SDD/CLAUDE.md` Rule 9 §27 + `governance/rules/R-9.37-*.yaml`）。**正解認知**：範本「四源絕對一致」是**驗證戒律**（四真相源不得矛盾），落實方向為**讀取式核對**，v0.14 已由 `verify_topology_consistency`（PY-2，比對 Python執行 vs 渲染）+ `META_FSM.tla VisualizationBounded` 同構（TLA+）**閉環**；`FSM-STATE.yaml` 記錄 SDD 主 FSM 運行態（SCG retry/token budget/decision_trace），meta⁸ 算子拓樸屬 meta-loop 範疇——FSM-STATE「沒有」視覺化稽核欄位**是刻意維持的架構邊界，非缺口**。偵察 agent 未讀 governance 規則致誤判（zero-trust 教訓：agent 設計建議須對照治理紅線複核） | P3（認知/流程澄清，無功能影響；防後續輪重蹈「把 R-9.37.4 邊界誤判為缺口」） | 認知澄清入帳本（本筆即記）+ 整合範本「四源一致」語意已於 improving_25.md §設計釐清為讀取式核對、非寫入；後續輪若再遇「FSM-STATE 缺視覺化欄位」訴求，直接引本筆判為 R-9.37.4 邊界、wontfix | **wontfix+理由（R-9.37.4 架構邊界，非缺口）**（記錄完成；B 軌 meta⁸ 視覺化飽和閉環之佐證） |
 
+## improving_26 複驗註記（2026-06-17，C 軌引擎成熟度實測認證 + C 軌藍圖狀態和解）
+
+**本輪零新框架程式缺陷、零框架 v0.0X 變更、零 AutoClaude 程式碼變更**（純文檔/狀態和解：認證引擎現級 + 和解 stale 藍圖 status）。
+
+**本輪定範三度 zero-trust 翻轉紀實（誠實揭露，供後續輪參考）**：
+1. 🔴 人工初選主柱＝**C 軌（AutoClaude 引擎能力）**。
+2. **第一層翻轉**：C 軌偵察 agent 推薦 Gap-011-A（Playbook `global_goal`）為「待建」首選 → 親查證實**已實作**（`plugins/global_goal_anchor_plugin.py` + `models/playbook.py` global_goal 欄位 + Improving_011 文末執行 Checklist 全 `[x]`）。
+3. **第二層翻轉**：偵察 agent 次推 Gap-011-B / Gap-010 系列為「待建」→ 親查證實**全已實作**（`core/services/mutation/revise_current.py`、`execution/error_budget.py`、`prompt_builder.py:226`、`execution/cross_step_validator.py`、`evolution/playbook_evolver.py:248-265`、`utils/knowledge_base.py:167`、`failure_tracker.py:26` `\w+_test\.py`）。
+4. **第三層翻轉**：L5_Evo_001「圖靈完備致命缺口」INJECT_BEFORE/GOTO/DELETE → 親查證實**核心已實作**（`core/services/mutation/inject_before.py`/`goto_step.py`/`delete_step.py` + `goto_counter_plugin.py` + checkpoint 4 counter）。
+5. **最終收斂**：C 軌引擎能力藍圖（Improving_010/011/012 + L5_Evo_001 核心）**全飽和**；唯一未建 SD_09 W0~W6 為日曆鎖（觀察期末日 2026-06-17、W0 須 2026-06-18 起），今日無法行動。本輪＝(1) W-26-1 以 Maturity Rubric 實測認證引擎現級（C=L5 實測背書、A/B=L3–L4、`L_合體≈L3–L4`，**禁宣稱 L 級提升**）；(2) W-26-2 和解三藍圖 stale 狀態；(3) W-26-3 記 DEF-26-001。
+
+**上輪 open/routed 項複驗**：
+- **DEF-23-005**（RFC 生命週期自動化，P3）：維持 **open（routed 下一輪）**，屬 B 軌框架治理，非本輪 C 軌 scope，未推進。
+- **DEF-01-007**（cc-switch GUI/CLI，P3）：維持 **open**，本輪純文檔不涉多後端 A/B，未觸發；環境工具缺裝非倉內可修。
+- **DEF-01-009**（`sdd_governance_plugin.py` LOC watch，P3）：複驗 raw 277 行（自 improving_14 commit `63f69ea` 未變）、`check_loc_budget` 受控計數（非空非註解）**不在 violations 清單**＝受控指標 ≤250、紅線未破；維持 **open watch**（前幾輪「raw 仍 250」註記與實際 raw 277 有小幅 stale，受控指標才是閘門，不影響判定）。本輪零 Python 變更，watch 不觸發。
+- **DEF-19-001**（catch 漸進覆蓋，P3）/ **DEF-17-001**（代謝 fire 側遙測，routed）：維持 **routed**（框架側 B 軌），本輪未推進。
+- **DEF-25-001**（FSM-STATE 視覺化反射＝R-9.37.4 邊界）：維持 **wontfix**。
+
+| ID | 發現日期 | 發現情境 | 現象與證據 | 嚴重度 | 分流去向 | 狀態 |
+|----|----------|----------|------------|--------|----------|------|
+| DEF-26-001 | 2026-06-17 | improving_26 階段一 C 軌偵察（zero-trust 親查程式碼比對藍圖宣稱時揭露） | 方法論缺陷（DEF-01-005 陷阱**復發**）：C 軌偵察 agent **兩度**把已完工的引擎能力誤報為「待建」（首推 Gap-011-A `global_goal`、次推 Gap-011-B/Gap-010 系列），根因＝AutoClaude planning 藍圖 `AutoClaude_Improving_010.md`（文末「文件狀態: Active／下一個行動項目: 按 P0 優先級實作…」）、`_011.md`（行 8「文件狀態: Active」雖文末 checklist 全 `[x]`）、`AutoClaude_L5_Evo_001.md`（行 7「下一步: 實作 Gap-012-A~F」）之 **status 仍標 Active/待實作**，閱讀者（含 agent）信 status 不查碼 → 誤判。實證全已落地：見 `AutoSDD_improving_26.md` §3.2 file:line 證據表（13 項能力逐一對照碼存在） | P3（方法論/文檔治理，無功能影響；但每輪 C 軌偵察都可能因 stale status 重蹈 DEF-01-005，浪費定範回合並可能臆造重複能力） | C 軌 docs governance 即修：和解三藍圖 status 為 `CLOSED@implemented`（附 file:line 對照碼 + 指向 §3.2）；偵察紀律補強：階段一「待建 vs 已存在」必親 grep 碼，禁信文件 status（對齊範本階段一 (d) + 紀律 #17 zero-trust 雙向） | **fixed@improving_26**（證據：`AutoClaude_Improving_010.md`/`_011.md`/`AutoClaude_L5_Evo_001.md` status 行已改 CLOSED@implemented + 對照碼註記；本輪 improving_26.md §3.2 13 項 file:line 實證表） |
+
