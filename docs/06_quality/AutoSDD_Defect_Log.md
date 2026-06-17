@@ -145,6 +145,21 @@
 | ID | 發現日期 | 發現情境 | 現象與證據 | 嚴重度 | 分流去向 | 狀態 |
 |----|----------|----------|------------|--------|----------|------|
 | DEF-27-001 | 2026-06-17 | improving_27 階段二 A 軌增量設計（zero-trust 對測繪 agent 建議複核時揭露） | 方法論缺陷（與 DEF-26-001 同屬「agent 二手結論須複核」家族、紀律 #17）：A 軌測繪/設計 agent 的增量建議**未經系統實況（時序、抽象必要性）驗證**即提出，本輪三度被主 agent zero-trust 複核抓出——①W1 建議「同次 run 的 RTM 報告餵 evolution」撞時序矛盾（報告於 POST_RUN run 完整走完才產出，evolution 於 ON_ESCALATION run 中途觸發，`kernel.py:127` vs `evolution_plugin` ON_ESCALATION）；②W2 建議「統一路由層」屬過度抽象（`workflow_type` 已 SSOT 判別欄 `sdd_governance_plugin.py:159`、`boot_helper.py:92` 已有解析點、`GoalDecomposer.decompose()` 全倉無生產呼叫端、SDD 守門與 goal 拆解本在不同生命週期）；③W3 建議「POST_RUN 注入 checkpoint snapshot」撞時序矛盾（`playbook_runner.py:428-429` 成功 run 立即 clear checkpoint，中斷 run 不走 POST_RUN 無報告 → 無有效保存路徑）。若直接採信任一建議，將分別產生時序無效碼／single-use 過度抽象／無效持久化路徑 | P3（方法論/流程觀察，無功能影響；防後續輪盲信 agent 設計建議直接落地） | 流程觀察入帳本（本筆即記）：設計階段對測繪/設計 agent 的增量建議，須由主 agent zero-trust 對「系統實況時序 + 抽象必要性（Rule 2/3）」複核後才採納，不可直接採信——對齊範本紀律 #17（agent 結論本身須複核）+ Rule 1（push back when simpler exists）。本輪三次修正均經 🔴 掌舵者知情後定案（W2→W3 改選） | **fixed@improving_27**（證據：三次修正均落地——W1 改讀回上次報告〔`rtm_file_feedback_source.py`〕、W2 撤除改選 W3、W3 改 history 檔〔`rtm_writeback_plugin.py` POST_RUN append〕；計畫書 §2.1 三次修正表 + Audit_27 §2 紀實；三鏡 SA-SD 鏡複核三點論述與系統實況相符） |
+| DEF-29-001 | 2026-06-18 | improving_29 收尾 zero-trust 三鏡審查（Architect 鏡） | 流程摩擦（DEF-05-002/DEF-07-001「實作期調整後計畫文件未同步」家族復發）：實作期把多斷言組合邏輯由初版「抽出 `_assertion_fragments` 純函式」收斂為「inline 進 `_gherkin_to_regex`」（Rule 2 簡化），但**計畫書 `AutoSDD_improving_29.md` §2.4/§2.5/§6 三處殘留 `_assertion_fragments` 函式名**未同步，與最終實作（無此函式）不符。落地碼正確、測試全綠，僅計畫文件措辭出入，收尾審查才抓到 | P3（流程/文件，非阻擋、非框架程式缺陷） | 同輪即修（計畫書整合層文件，免 Copy-on-Evolve）；教訓已於 DEF-05-002/07-001 institutionalize 為範本「實作後回掃文件引用」紀律，本筆為該紀律於「設計收斂後文件回掃」之復發實例（提示：實作期抽出/內聯函式後須 grep 計畫書同步函式名） | **fixed@improving_29**（證據：`grep _assertion_fragments docs/04_planning/AutoSDD_improving_29.md` 三處全改為「`_gherkin_to_regex` 多引號組合分支」；§2.4(1) adapter 行數同步訂正 272→283；純文件修正不涉碼，三鏡碼層證據不受影響） |
+
+## improving_29 複驗註記（2026-06-18，A 軌正向轉譯保真度 / 多引號斷言組合）
+
+**本輪零新框架程式缺陷、零框架 v0.0X 變更**（純 AutoClaude 正向轉譯保真度增強：surgical 改 `_gherkin_to_regex` 多引號組合分支 +~12 行、無新檔、無新 port/plugin/flag）。新增 1 筆**整合層流程摩擦 DEF-29-001**（P3，計畫書文件未同步，同輪 audit 攔截即修）。三鏡 Zero-Trust 審查全 OVERALL PASS（**主樹派發，遵 DEF-24-001**——本輪變更未 commit，worktree 由 HEAD 建樹會看不到產生假陰性）；零退化 **3196/0**（floor 3189 +7）、lint 8/0、LOC violations=0、snapshot FRESH、ci-gate exit 0（階段一）。QA 鏡變異測試證非假測試（突變 `>=2`→`>=99` 使組合永不觸發，3 關鍵測試轉紅，還原回綠 46 passed、git diff 無殘留）。
+
+**本輪設計衝突和解（誠實揭露，Rule 7/Rule 8）**：初版設計把「任意 ≥2 可推導斷言（含 status+quoted 混合）」皆組合，跑全套時撞既有測試 `test_gherkin_to_regex.py::test_quoted_wins_over_status_code`——該測試以具名方式編碼 improving_01 §3.1 刻意決策「quoted wins over status code」（非缺陷）。依 Rule 7（衝突取更成熟/更受測者）收斂 scope 為「僅組合多個引號字面值」，完整保留 quoted-wins 決策。教訓：階段一測繪漏讀 `test_gherkin_to_regex.py`（Rule 8），由開發-編譯-測試循環當場攔截、未流出。
+
+**上輪 open/routed 項複驗**：
+- **DEF-23-005**（RFC 生命週期自動化，P3）：維持 **open（routed 下一輪）**，屬 B 軌框架治理，非本輪 A 軌 scope，未推進。
+- **DEF-01-007**（cc-switch GUI/CLI，P3）：維持 **open**，本輪 A 軌純文字轉譯不涉多後端 A/B，未觸發。
+- **DEF-01-009**（`sdd_governance_plugin.py` LOC watch，P3）：維持 **open watch**，本輪改 `sdd_to_playbook_adapter.py`（adapter 283≤400），**未動 sdd_governance_plugin**，watch 不觸發。
+- **DEF-19-001**（catch 漸進覆蓋，P3）/ **DEF-17-001**（遙測，routed）：維持 **routed**（框架側 B 軌），本輪未推進。
+
+**本輪新增防退化資產（非缺陷）**：`_gherkin_to_regex` 多引號組合由 `test_sdd_to_playbook_adapter.py::TestMultiAssertionCombination` 7 case 鎖定（雙/三引號 AND 順序無關組合、混合 quoted-wins 保留、量化排除、單引號/單 status 向後相容、端到端 `load_spec→expected_regex`）；既有 `test_gherkin_to_regex.py` 全綠證 quoted-wins 等既有決策零退化。
 
 ## improving_28 複驗註記（2026-06-17，A 軌 RTM 跨輪覆蓋趨勢讀回 / 閉合 W3 冷資料斷鏈）
 

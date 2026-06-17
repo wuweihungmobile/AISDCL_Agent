@@ -181,6 +181,102 @@ class TestCompileTasks:
         assert "Given 使用者在登入頁面" in ts[0].prompt
 
 
+_MULTI_SPEC = """# Test Contract Specification — Multi
+
+場景：greenfield 新建
+
+## 1. AC → AT 映射表
+
+| AC ID | AC 描述 | AT ID | AT 描述 | 自動化 | 測試類型 | 狀態 |
+|-------|---------|-------|---------|-------|---------|------|
+| AC-029-1 | 建立成功 | AT-029-1-1 | 雙斷言 | ✅ | Integration | □ |
+
+## 2. AT 格式
+
+```gherkin
+# AT-029-1-1
+Scenario: 建立資源
+  Given 前置條件就緒
+  When 送出建立請求
+  Then 顯示訊息「建立成功」
+  And 回傳通知「已寄送」
+```
+"""
+
+
+def _gtr(gherkin):
+    """白盒呼叫純函式 _gherkin_to_regex（回傳 (regex, weak)）。"""
+    return SddToPlaybookAdapter()._gherkin_to_regex(gherkin)
+
+
+def _block(*then_and_lines):
+    body = "\n".join(f"  {ln}" for ln in then_and_lines)
+    return f"# AT-029-1-1\nScenario: s\n  Given g\n  When w\n{body}\n"
+
+
+class TestMultiAssertionCombination:
+    """W-29-1：多重 Then/And 斷言組合保真度（AC-29-1）+ 向後相容（AC-29-2）。"""
+
+    # AC-29-1：複雜斷言組合（多引號字面值）
+    def test_two_quoted_assertions_combined(self):
+        regex, weak = _gtr(_block("Then 顯示訊息「建立成功」", "And 顯示「已寄出」"))
+        assert weak is False
+        # 順序無關 AND：兩斷言皆須出現
+        assert re.search(regex, "log: 建立成功 然後 已寄出")
+        assert re.search(regex, "已寄出 在前 建立成功 在後")  # 順序無關
+        assert not re.search(regex, "只有 建立成功 沒有另一個")  # 缺一即不過
+        assert regex.count("(?=") == 2
+
+    def test_three_quoted_assertions_all_combined(self):
+        regex, weak = _gtr(_block(
+            "Then 顯示「甲」", "And 顯示「乙」", "And 顯示「丙」"))
+        assert weak is False
+        assert regex.count("(?=") == 3
+        assert re.search(regex, "丙 乙 甲")          # 三者俱全（順序無關）
+        assert not re.search(regex, "甲 乙 沒有第三個")  # 缺一即不過
+
+    def test_quoted_wins_when_mixed_with_status(self):
+        # 刻意保留設計決策「quoted wins over status code」：混合時只取引號、
+        # 不與 status 組合（單引號 → 不觸發多引號組合路徑）。對齊
+        # test_gherkin_to_regex.py::test_quoted_wins_over_status_code。
+        regex, weak = _gtr(_block("Then 回傳 201 Created", "And 顯示訊息「建立成功」"))
+        assert weak is False
+        assert regex == re.escape("建立成功")
+        assert "(?=" not in regex  # 未組合
+
+    def test_quantitative_excluded_keeps_single_quoted(self):
+        # 引號 + 量化 NFR：量化非引號、僅 1 引號 → 走單斷言路徑（非組合）
+        regex, weak = _gtr(_block("Then 顯示訊息「建立成功」", "And 回應時間 < 200ms"))
+        assert weak is False
+        assert regex == re.escape("建立成功")
+        assert "(?=" not in regex
+
+    # AC-29-2：向後相容（零行為變化）
+    def test_single_quoted_unchanged(self):
+        regex, weak = _gtr(_block("Then 顯示錯誤訊息「餘額不足」"))
+        assert weak is False
+        assert regex == re.escape("餘額不足")
+        assert "(?=" not in regex
+
+    def test_single_status_unchanged(self):
+        # 單一 status 維持既有 alternation 格式 (?i)(code|phrase)，非新片段格式
+        regex, weak = _gtr(_block("Then 回傳 201 Created"))
+        assert weak is False
+        assert regex == "(?i)(201|created)"
+
+    def test_end_to_end_multi_assertion_regex(self, tmp_path):
+        spec_dir = _write_spec(tmp_path, text=_MULTI_SPEC,
+                               name="TEST-CONTRACT-SPEC-Multi.md")
+        _write_fsm_state(tmp_path)
+        spec = SddToPlaybookAdapter().load_spec(str(spec_dir))
+        c = next(c for c in spec.contracts if c.at_id == "AT-029-1-1")
+        assert c.weak_regex is False
+        assert c.expected_regex.count("(?=") == 2
+        # evaluator 端 re.search 同時驗證兩引號斷言
+        assert re.search(c.expected_regex, "輸出 建立成功 並 已寄送 通知")
+        assert not re.search(c.expected_regex, "輸出 建立成功 但缺後半")
+
+
 class TestInjectionDefense:
     """§1.3 消毒攻防：黑名單字元 / 非白名單片段一律 SpecTaintedError。"""
 

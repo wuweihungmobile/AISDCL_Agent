@@ -223,6 +223,18 @@ class SddToPlaybookAdapter:
     # ──────────────────────────────────────────────
     def _gherkin_to_regex(self, gherkin: str) -> tuple[str, bool]:
         then_lines = self._then_assertions(gherkin)
+        # §3.1 複雜斷言組合：≥2 個引號字面值 → 順序無關 AND（lookahead），
+        # 使 evaluator 驗證全部引號斷言（修正「多引號只取首條」under-specify 缺口）。
+        # 僅限同類多引號：刻意保留「quoted wins over status code」既有設計決策
+        # （混合 quoted/status 時 status 不納入，見 test_quoted_wins_over_status_code）。
+        quoted_frags = [
+            re.escape(m.group(1))
+            for line in then_lines
+            if (m := _QUOTED_LITERAL.search(line))
+        ]
+        if len(quoted_frags) >= 2:
+            return "(?s)" + "".join(f"(?=.*{q})" for q in quoted_frags), False
+        # 單引號 / 無引號：維持既有逐行推導（向後相容、零行為變化）
         for line in then_lines:
             quoted = _QUOTED_LITERAL.search(line)
             if quoted:
