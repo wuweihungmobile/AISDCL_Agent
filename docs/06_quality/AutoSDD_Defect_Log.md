@@ -146,3 +146,18 @@
 |----|----------|----------|------------|--------|----------|------|
 | DEF-27-001 | 2026-06-17 | improving_27 階段二 A 軌增量設計（zero-trust 對測繪 agent 建議複核時揭露） | 方法論缺陷（與 DEF-26-001 同屬「agent 二手結論須複核」家族、紀律 #17）：A 軌測繪/設計 agent 的增量建議**未經系統實況（時序、抽象必要性）驗證**即提出，本輪三度被主 agent zero-trust 複核抓出——①W1 建議「同次 run 的 RTM 報告餵 evolution」撞時序矛盾（報告於 POST_RUN run 完整走完才產出，evolution 於 ON_ESCALATION run 中途觸發，`kernel.py:127` vs `evolution_plugin` ON_ESCALATION）；②W2 建議「統一路由層」屬過度抽象（`workflow_type` 已 SSOT 判別欄 `sdd_governance_plugin.py:159`、`boot_helper.py:92` 已有解析點、`GoalDecomposer.decompose()` 全倉無生產呼叫端、SDD 守門與 goal 拆解本在不同生命週期）；③W3 建議「POST_RUN 注入 checkpoint snapshot」撞時序矛盾（`playbook_runner.py:428-429` 成功 run 立即 clear checkpoint，中斷 run 不走 POST_RUN 無報告 → 無有效保存路徑）。若直接採信任一建議，將分別產生時序無效碼／single-use 過度抽象／無效持久化路徑 | P3（方法論/流程觀察，無功能影響；防後續輪盲信 agent 設計建議直接落地） | 流程觀察入帳本（本筆即記）：設計階段對測繪/設計 agent 的增量建議，須由主 agent zero-trust 對「系統實況時序 + 抽象必要性（Rule 2/3）」複核後才採納，不可直接採信——對齊範本紀律 #17（agent 結論本身須複核）+ Rule 1（push back when simpler exists）。本輪三次修正均經 🔴 掌舵者知情後定案（W2→W3 改選） | **fixed@improving_27**（證據：三次修正均落地——W1 改讀回上次報告〔`rtm_file_feedback_source.py`〕、W2 撤除改選 W3、W3 改 history 檔〔`rtm_writeback_plugin.py` POST_RUN append〕；計畫書 §2.1 三次修正表 + Audit_27 §2 紀實；三鏡 SA-SD 鏡複核三點論述與系統實況相符） |
 
+## improving_28 複驗註記（2026-06-17，A 軌 RTM 跨輪覆蓋趨勢讀回 / 閉合 W3 冷資料斷鏈）
+
+**本輪零新框架程式缺陷、零新整合層缺陷、零框架 v0.0X 變更**（純 AutoClaude 諮詢讀回擴充：additive 至既有 1 port + surgical 改 evolution_plugin，無新檔）。三鏡 Zero-Trust 審查全 OVERALL PASS（**主樹派發，遵 DEF-24-001**——本輪變更為未 commit 的 tracked 檔修改，worktree 由 HEAD 建樹會看到舊碼產生假陰性）；零退化 **3189/0**（floor 3175 +14）、lint 8/0、LOC violations=0、snapshot FRESH（無新 port/plugin）、ci-gate exit 0。QA 鏡變異測試證非假測試（突變 `coverage_trend` 連續下降判斷 / direction 對調皆致測試轉紅，還原回綠、git diff 0 deletions）。
+
+**本輪 DEF-27-001 教訓主動應用（誠實揭露）**：階段一測繪 agent 把「history 讀回」候選寫成「驅動保守/激進演化策略選擇」——該版本撞 `max_evolutions` 時序紅線（`config.py:52`）+ 違反「RTM/SPEC 不自動套用」停機級紅線。主 agent 依 DEF-27-001 紀律 zero-trust 複核後**未採信**，改採諮詢版本（趨勢只增補 rationale、不改 mutation 決策、不碰 max_evolutions、flag 預設 OFF）。
+
+**上輪 open/routed 項複驗**：
+- **DEF-23-005**（RFC 生命週期自動化，P3）：維持 **open（routed 下一輪）**，屬 B 軌框架治理（需動 `.claude/hooks/`/ci-gate），非本輪 A 軌 scope，未推進。
+- **DEF-01-007**（cc-switch GUI/CLI，P3）：維持 **open**，本輪 A 軌趨勢讀回不涉多後端 A/B，未觸發；環境工具缺裝非倉內可修。
+- **DEF-01-009**（`sdd_governance_plugin.py` LOC watch，P3）：維持 **open watch**，本輪以 additive 改 rtm_feedback port（純函式）+ surgical 改 evolution_plugin（strategy ≤300 未超），**未動 sdd_governance_plugin**，watch 不觸發。
+- **DEF-19-001**（catch 漸進覆蓋，P3）/ **DEF-17-001**（代謝 fire 側遙測，routed）：維持 **routed**（框架側 B 軌），本輪未推進。
+- **DEF-26-001**（stale 藍圖 status，fixed@improving_26）/ **DEF-25-001**（R-9.37.4 邊界，wontfix）：維持，本輪無關。
+
+**本輪新增防退化資產（非缺陷，記錄供後續輪參考）**：跨輪趨勢純函式 `coverage_trend`（`core/ports/rtm_feedback.py`）由 `test_rtm_feedback.py::TestCoverageTrend` 7 case 鎖定方向/連續下降判定；plugin 諮詢註記 `_rtm_trend_annotation` 由 `test_evolution_rtm_feedback.py::TestTrendAnnotation` 7 case 鎖定 flag-gate + fail-soft + 紅線（端到端斷言 `result.mutation is not None`＝決策本身未被趨勢更動）。`read_history` 由此取得**首個生產消費端**（`evolution_plugin.py:178`），improving_27 W3 趨勢冷資料斷鏈閉合（呼應 improving_27 自身發現的「報告產出後無人讀」模式，於趨勢層收斂）。
+

@@ -22,6 +22,7 @@ core 純度：本檔僅 import stdlib + 同層 rtm_sink 的 dataclass，不觸 e
 """
 from __future__ import annotations
 
+from dataclasses import dataclass
 from typing import Any, Optional, Protocol
 
 from .rtm_sink import RtmCoverageReport
@@ -80,6 +81,54 @@ def coverage_report_from_doc(doc: dict[str, Any]) -> RtmCoverageReport:
     )
 
 
+@dataclass(frozen=True)
+class CoverageTrend:
+    """跨輪 AC 覆蓋率趨勢摘要（AutoSDD_improving_28 W-28-1，純資料）。
+
+    由 coverage_trend() 從 read_history 的快照序列計算；供 EvolutionPlugin
+    格式化為 rationale **諮詢**註記（不改 mutation 決策）。
+    """
+
+    rounds: int  # 納入趨勢的輪數（history 長度）
+    latest_pct: float  # 最新一輪 AC 覆蓋率
+    previous_pct: Optional[float]  # 上一輪 AC 覆蓋率（rounds<2 時 None）
+    delta_pct: float  # latest - previous（rounds<2 時 0.0）
+    consecutive_declines: int  # 從最新往回連續嚴格下降的輪數
+    direction: str  # "improving" | "declining" | "flat" | "single"
+
+
+def coverage_trend(
+    history: tuple[RtmCoverageReport, ...]
+) -> Optional[CoverageTrend]:
+    """從跨輪覆蓋快照（最舊→最新）計算 AC 覆蓋率趨勢摘要（純函式、無副作用）。
+
+    以 ac_coverage_pct 為趨勢指標（對齊 SCG-5 100% AC 判準）。history 空回 None；
+    僅 1 輪時 direction="single"、previous_pct=None（呼叫端據此判定「無足夠輪數」）。
+    """
+    if not history:
+        return None
+    pcts = [r.ac_coverage_pct for r in history]
+    latest = pcts[-1]
+    if len(pcts) < 2:
+        return CoverageTrend(
+            rounds=len(pcts), latest_pct=latest, previous_pct=None,
+            delta_pct=0.0, consecutive_declines=0, direction="single",
+        )
+    previous = pcts[-2]
+    delta = round(latest - previous, 2)
+    declines = 0
+    for i in range(len(pcts) - 1, 0, -1):
+        if pcts[i] < pcts[i - 1]:
+            declines += 1
+        else:
+            break
+    direction = "improving" if delta > 0 else "declining" if delta < 0 else "flat"
+    return CoverageTrend(
+        rounds=len(pcts), latest_pct=latest, previous_pct=previous,
+        delta_pct=delta, consecutive_declines=declines, direction=direction,
+    )
+
+
 class IRtmFeedbackSource(Protocol):
     """RTM coverage 報告讀回契約（IRtmSink 的逆向）。
 
@@ -117,8 +166,10 @@ class NullRtmFeedbackSource:
 
 
 __all__ = [
+    "CoverageTrend",
     "IRtmFeedbackSource",
     "NullRtmFeedbackSource",
     "coverage_report_to_doc",
     "coverage_report_from_doc",
+    "coverage_trend",
 ]

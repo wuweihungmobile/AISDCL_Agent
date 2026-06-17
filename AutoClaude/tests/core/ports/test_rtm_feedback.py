@@ -14,6 +14,7 @@ from autoclaude.core.ports.rtm_feedback import (
     NullRtmFeedbackSource,
     coverage_report_from_doc,
     coverage_report_to_doc,
+    coverage_trend,
 )
 from autoclaude.core.ports.rtm_sink import RtmCoverageReport
 from autoclaude.infra.adapters.playbook_to_rtm_adapter import PlaybookToRtmAdapter
@@ -71,6 +72,78 @@ class TestDocRoundTrip:
         yaml_text = PlaybookToRtmAdapter().render_yaml(report)
         restored = coverage_report_from_doc(yaml.safe_load(yaml_text))
         assert restored == report  # frozen dataclass 全欄位等值
+
+
+def _ac_report(covered: int, total: int) -> RtmCoverageReport:
+    """建一份 ac_coverage_pct = covered/total×100 的快照（其餘欄位不影響趨勢）。"""
+    ac = tuple((f"AC-{i}", 1, 1) for i in range(covered)) + tuple(
+        (f"AC-{covered + i}", 0, 1) for i in range(total - covered)
+    )
+    return RtmCoverageReport(
+        scenario="brownfield", spec_digest="x",
+        total_at=total, passed_at=covered, ac_coverage=ac,
+    )
+
+
+class TestCoverageTrend:
+    """W-28-1：跨輪覆蓋趨勢純函式（read_history 的生產消費判定邏輯）。"""
+
+    def test_empty_history_returns_none(self):
+        """AT-28-1-1：空 history → None。"""
+        assert coverage_trend(()) is None
+
+    def test_single_round_is_single_direction(self):
+        """AT-28-1-2：僅 1 輪 → direction=single、previous_pct=None（呼叫端判「無趨勢」）。"""
+        t = coverage_trend((_ac_report(4, 5),))
+        assert t is not None
+        assert t.rounds == 1
+        assert t.direction == "single"
+        assert t.previous_pct is None
+        assert t.latest_pct == 80.0
+        assert t.consecutive_declines == 0
+
+    def test_two_rounds_improving(self):
+        """AT-28-1-3：40%→80% → improving、delta=+40、declines=0。"""
+        t = coverage_trend((_ac_report(2, 5), _ac_report(4, 5)))
+        assert t.direction == "improving"
+        assert t.previous_pct == 40.0
+        assert t.latest_pct == 80.0
+        assert t.delta_pct == 40.0
+        assert t.consecutive_declines == 0
+
+    def test_two_rounds_declining(self):
+        """AT-28-1-4：80%→40% → declining、delta=-40、declines=1。"""
+        t = coverage_trend((_ac_report(4, 5), _ac_report(2, 5)))
+        assert t.direction == "declining"
+        assert t.delta_pct == -40.0
+        assert t.consecutive_declines == 1
+
+    def test_consecutive_declines_counts_trailing_drops(self):
+        """AT-28-1-5：100%→80%→40% → 連續下降 2 輪。"""
+        t = coverage_trend(
+            (_ac_report(5, 5), _ac_report(4, 5), _ac_report(2, 5))
+        )
+        assert t.direction == "declining"
+        assert t.consecutive_declines == 2
+        assert t.previous_pct == 80.0
+        assert t.latest_pct == 40.0
+
+    def test_flat_trend(self):
+        """AT-28-1-6：50%→50% → flat、delta=0、declines=0。"""
+        t = coverage_trend((_ac_report(1, 2), _ac_report(1, 2)))
+        assert t.direction == "flat"
+        assert t.delta_pct == 0.0
+        assert t.consecutive_declines == 0
+
+    def test_recover_then_dip_only_counts_last_decline(self):
+        """AT-28-1-7：40%→80%→60%（先升後降）→ declining 但連續下降僅 1 輪。"""
+        t = coverage_trend(
+            (_ac_report(2, 5), _ac_report(4, 5), _ac_report(3, 5))
+        )
+        assert t.direction == "declining"
+        assert t.consecutive_declines == 1
+        assert t.previous_pct == 80.0
+        assert t.latest_pct == 60.0
 
 
 class TestFailSoft:

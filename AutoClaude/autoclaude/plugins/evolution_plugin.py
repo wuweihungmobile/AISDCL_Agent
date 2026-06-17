@@ -37,6 +37,7 @@ import logging
 from typing import Any, Optional
 
 from ..core.hookspec import HookContext, KernelPhase, MutationProposal
+from ..core.ports.rtm_feedback import coverage_trend
 from ..evolution.minimax_evolver import MinimaxEvolver
 from ..evolution.playbook_evolver import PlaybookEvolutionProposal, PlaybookEvolver
 from ..models.step_mutation import StepMutation, StepMutationType
@@ -123,7 +124,11 @@ class EvolutionPlugin:
         return MutationProposal(
             contributor=self.name(),
             mutation=mutation,
-            rationale=proposal.reasoning + self._rtm_gap_annotation(ctx),
+            rationale=(
+                proposal.reasoning
+                + self._rtm_gap_annotation(ctx)
+                + self._rtm_trend_annotation(ctx)
+            ),
         )
 
     def _rtm_gap_annotation(self, ctx: HookContext) -> str:
@@ -152,6 +157,42 @@ class EvolutionPlugin:
             )
         except Exception as exc:  # noqa: BLE001 — fail-soft（諮詢不得阻斷主流程）
             logger.warning("RTM 反饋讀回 fail-soft: %s", exc)
+            return ""
+
+    def _rtm_trend_annotation(self, ctx: HookContext) -> str:
+        """W-28-1：讀回跨輪覆蓋趨勢，回傳附加到 rationale 的**諮詢**註記。
+
+        與 _rtm_gap_annotation 同守門（flag ON ∧ 有注入 source ∧ SDD 編譯步驟），
+        但消費 read_history（跨輪）而非 read_report（最新單筆），閉合 improving_27
+        W3 留下的「趨勢 history 寫出後無人讀」冷資料斷鏈。需 ≥2 輪才有趨勢，否則回 ""。
+        紅線：僅增補 rationale 供 signoff 判讀，不改 mutation 決策、不碰 max_evolutions。
+        fail-soft：讀回任何例外吞掉回 ""（諮詢不得阻斷演化）。
+        """
+        if not self._enable_rtm_feedback or self._rtm_feedback is None:
+            return ""
+        try:
+            task = ctx.task
+            step_id = (getattr(task, "step_id", "") or "") if task else ""
+            if not step_id.startswith("sdd-"):
+                return ""
+            trend = coverage_trend(self._rtm_feedback.read_history(ctx.playbook.project))
+            if trend is None or trend.previous_pct is None:
+                return ""  # 無足夠輪數（<2）→ 尚無趨勢
+            arrow = {"improving": "↑ 改善", "declining": "↓ 下降", "flat": "→ 持平"}.get(
+                trend.direction, trend.direction
+            )
+            streak = (
+                f"，連續 {trend.consecutive_declines} 輪下降"
+                if trend.consecutive_declines >= 2
+                else ""
+            )
+            return (
+                "\n\n[RTM 反饋｜跨輪覆蓋趨勢諮詢（不自動套用，僅供 signoff 判讀）]\n"
+                f"- 近 {trend.rounds} 輪 AC 覆蓋：上輪 {trend.previous_pct}%"
+                f" → 本輪 {trend.latest_pct}%（{arrow} {trend.delta_pct:+}%{streak}）"
+            )
+        except Exception as exc:  # noqa: BLE001 — fail-soft（諮詢不得阻斷主流程）
+            logger.warning("RTM 趨勢讀回 fail-soft: %s", exc)
             return ""
 
     # ──────────────────────────────────────────────

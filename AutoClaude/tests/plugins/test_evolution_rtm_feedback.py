@@ -34,10 +34,23 @@ def _full_report() -> RtmCoverageReport:
     )
 
 
+def _ac_report(covered: int, total: int) -> RtmCoverageReport:
+    """ac_coverage_pct = covered/total×100 的快照（供趨勢測試）。"""
+    ac = tuple((f"AC-{i}", 1, 1) for i in range(covered)) + tuple(
+        (f"AC-{covered + i}", 0, 1) for i in range(total - covered)
+    )
+    return RtmCoverageReport(
+        scenario="brownfield", spec_digest="x",
+        total_at=total, passed_at=covered, ac_coverage=ac,
+    )
+
+
 class _FakeFeedback:
-    def __init__(self, report=None, *, raises=False):
+    def __init__(self, report=None, *, raises=False, history=(), raises_history=False):
         self._r = report
         self._raises = raises
+        self._history = history
+        self._raises_history = raises_history
 
     def read_report(self, project):
         if self._raises:
@@ -45,7 +58,9 @@ class _FakeFeedback:
         return self._r
 
     def read_history(self, project, *, limit=0):
-        return ()
+        if self._raises_history:
+            raise RuntimeError("boom-history")
+        return self._history
 
 
 class _StubEvolver:
@@ -111,6 +126,55 @@ class TestAnnotationBranches:
         """AT-27-4-4：read_report 拋例外 → fail-soft 回空、不 raise。"""
         p = _plugin(feedback=_FakeFeedback(raises=True), enabled=True)
         assert p._rtm_gap_annotation(_ctx()) == ""
+
+
+class TestTrendAnnotation:
+    """W-28-1：跨輪覆蓋趨勢諮詢註記（消費 read_history，閉合 W3 冷資料斷鏈）。"""
+
+    _DECLINING = (_ac_report(5, 5), _ac_report(4, 5), _ac_report(2, 5))  # 100→80→40
+
+    def test_flag_off_no_trend(self):
+        """flag OFF → 空趨勢註記（零退化）。"""
+        p = _plugin(feedback=_FakeFeedback(history=self._DECLINING), enabled=False)
+        assert p._rtm_trend_annotation(_ctx()) == ""
+
+    def test_no_source_no_trend(self):
+        """flag ON 但無注入 source → 空。"""
+        assert _plugin(feedback=None, enabled=True)._rtm_trend_annotation(_ctx()) == ""
+
+    def test_non_sdd_step_no_trend(self):
+        """非 SDD step（無 sdd- 前綴）→ 空。"""
+        p = _plugin(feedback=_FakeFeedback(history=self._DECLINING), enabled=True)
+        assert p._rtm_trend_annotation(_ctx(task_step_id="T01")) == ""
+
+    def test_single_round_no_trend(self):
+        """history <2 輪（無上輪可比）→ 空。"""
+        p = _plugin(feedback=_FakeFeedback(history=(_ac_report(2, 5),)), enabled=True)
+        assert p._rtm_trend_annotation(_ctx()) == ""
+
+    def test_declining_trend_produces_annotation(self):
+        """flag ON ∧ SDD step ∧ ≥2 輪下降 → 諮詢註記含趨勢、連續下降、紅線標記。"""
+        p = _plugin(feedback=_FakeFeedback(history=self._DECLINING), enabled=True)
+        ann = p._rtm_trend_annotation(_ctx())
+        assert "跨輪覆蓋趨勢" in ann
+        assert "上輪 80.0%" in ann and "本輪 40.0%" in ann
+        assert "下降" in ann
+        assert "連續 2 輪下降" in ann
+        assert "不自動套用" in ann  # 紅線標記
+
+    def test_read_history_error_fail_soft(self):
+        """read_history 拋例外 → fail-soft 回空、不 raise。"""
+        p = _plugin(feedback=_FakeFeedback(raises_history=True), enabled=True)
+        assert p._rtm_trend_annotation(_ctx()) == ""
+
+    def test_trend_in_end_to_end_rationale(self):
+        """端到端：flag ON ∧ 下降趨勢 → on_event 回的 rationale 含趨勢諮詢（不改 mutation）。"""
+        p = _plugin(feedback=_FakeFeedback(history=self._DECLINING), enabled=True)
+        result = p.on_event(_ctx())
+        assert result is not None
+        assert "base reason" in result.rationale
+        assert "跨輪覆蓋趨勢" in result.rationale
+        assert result.mutation is not None  # 紅線：決策本身未被趨勢更動
 
 
 class TestEndToEndRationale:
