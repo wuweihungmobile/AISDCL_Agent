@@ -26,6 +26,7 @@ from .notification_plugin import NotificationPlugin
 from .playbook_persistence_plugin import PlaybookPersistencePlugin
 from .pre_run_validator_plugin import PreRunValidatorPlugin
 from .preference_memory_plugin import PreferenceMemoryPlugin
+from .rtm_writeback_plugin import RtmWritebackPlugin
 from .sdd_governance_plugin import SddGovernancePlugin
 from .token_guard_plugin import TokenGuardPlugin
 
@@ -58,4 +59,6 @@ __all__ = [
     # Improving_012 Phase 1（F-C1 / F-C2，皆 PRIORITY=50 tie-breaker 群尾端）
     "PreferenceMemoryPlugin",
     "GoalProgressPlugin",
+    # AutoSDD_improving_24 A 軌（W-24-2，PRIORITY=52 逆向回寫閉環）
+    "RtmWritebackPlugin",
 ]

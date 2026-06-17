@@ -67,3 +67,19 @@
 | DEF-23-005 | 2026-06-17 | improving_23 結案後 zero-trust 複審（中斷重啟後三鏡整體複驗，DEF-23-002 系統性根因抽離） | 框架流程自動化缺口（DEF-23-002 之系統性根因）：框架明定「active=待決 / archive=已決」RFC 生命週期，但**無任何 hook/lint/CI 自動強制**——已完成的 `_26/_27` 滯留 active/ 直到人工 zero-trust 盤點才揪出（DEF-23-002 已手動 `git mv` 修症狀，但「下次再漏」的結構性風險未除）。同類「逐版本手寫 gitignore block」（DEF-23-003）亦屬「框架治理靠人工紀律、缺機械強制」家族。本輪複審：三鏡全 OVERALL PASS、零新功能缺陷，此為唯一可行動之**流程改善候選** | P3（流程衛生自動化，無功能影響；每輪 Copy-on-Evolve/RFC 收官皆潛在復發） | 框架程式/hook 缺陷 → 下一輪 RFC + v0.0(X+1)：評估 `.claude/hooks/` 或 ci-gate 增「RFC 生命週期 lint」（active/ 內含已標收官/已決 RFC 即 warn/fail）+「Copy-on-Evolve 新版 gitignore block 缺漏偵測」 | open（routed 下一輪；DEF-23-002/23-003 症狀本輪已 fixed，本條僅追蹤系統性自動化改善） |
 | DEF-23-002 | 2026-06-17 | improving_23 階段一 zero-trust 偵察（active planning 盤點） | 流程漂移：`AISDLC_SDD_v0.13/build/planning/active/SDD_improving_Automation_26.md`（Phase Y，§D 已載「✅ 已執行收官 2026-06-06」）與 `_27.md`（closure_evidence，§6 標「決策後 archive」、已落 v0.12）**兩份已完成 RFC 仍滯留 `build/planning/active/`**，違反框架自身「active=待決 / archive=已決」生命週期（archive/ 已有 _01~_23+，獨缺已完成的 _26/_27）| P3（流程衛生，無功能影響；但使 active 列表失真，誤導後續輪判斷待辦） | 框架程式/流程缺陷 → v0.14 `git mv` _26/_27 入 `build/planning/archive/`（隨 W-23-1 落版） | fixed@improving_23（證據：v0.14 archive/ 含 _26/_27、active/ 清空已完成項；**SA-SD 鏡複審連帶修**：`ID_REGISTRY.yaml:116` Phase Y `ref` 由 `active/SDD_improving_Automation_26.md` 同步改 `archive/...`，消除歸檔後 stale ref） |
 
+## improving_24 複驗註記（2026-06-17，A 軌雙向橋接 / SDD→Playbook 逆向回寫閉環）
+
+**本輪零新框架缺陷**（純 AutoClaude 整合層擴充，零框架 v0.0X 變更）。上輪 open/routed 項複驗：
+
+- **DEF-23-005**（RFC 生命週期自動化，P3）：維持 **open（routed 下一輪）**。屬 B 軌框架治理改善，**非本輪 A 軌 scope**，未推進。
+- **DEF-01-007**（cc-switch GUI，P3）：維持 **open**。本輪 A 軌逆向回寫不涉多後端 A/B 對比，未觸發；環境工具缺裝非倉內程式可修。
+- **DEF-01-009**（`sdd_governance_plugin.py` LOC watch，P3）：維持 **open watch**。本輪逆向回寫以**全新檔** `rtm_writeback_plugin.py`（48 stmts，遠低於 250）實作，**未動** `sdd_governance_plugin.py`，watch 不觸發。
+- **DEF-19-001**（catch 漸進覆蓋，P3）：維持 **routed**，本輪未推進（屬框架側）。
+- **DEF-17-001**（代謝 fire 側遙測，routed）：維持 **routed**（框架側 B 軌），本輪未推進。
+
+**本輪新增防退化資產（非缺陷，記錄供後續輪參考）**：A 軌逆向橋接 `PlaybookToRtmAdapter` 與正向 `SddToPlaybookAdapter` 之 step_id 編碼（`sdd-{scenario}-{at_id.lower()}`）構成**對稱往返契約**，已由 `test_rtm_writeback_plugin.py::TestClosureRoundTrip` 鎖定；若未來任一側改 step_id 格式，該測試立即轉紅（防雙向橋接靜默漂移）。
+
+| ID | 發現日期 | 發現情境 | 現象與證據 | 嚴重度 | 分流去向 | 狀態 |
+|----|----------|----------|------------|--------|----------|------|
+| DEF-24-001 | 2026-06-17 | improving_24 三鏡 Zero-Trust 審查（QA 鏡以 `isolation: worktree` 派發） | 流程缺陷：審查**未 commit 的新增檔案**時，迭代範本 §🔍 規定的「並行派發隔離（流程問題 #11）→ audit agent 以 `isolation: worktree` 派發」**與 git worktree 語意衝突**——`git worktree add` 由指定 commit（HEAD）建樹，**不攜帶主樹的 untracked / 未 staged 檔案**，故 QA agent 在 worktree 看不到本輪 4 支新源碼 + 3 支新測試（全 untracked），實際在跑 improving_23 舊碼，回報「檔案不存在 + 3111 passed（≈HEAD 基線）+ OVERALL FAIL」之**假陰性**。與 Architect/SA-SD 主樹實測（檔案全在、3146 passed、OVERALL PASS）矛盾，經紀律 #17「zero-trust 須雙向：agent 結論本身須複核」識破。根因：流程 #11 worktree 隔離原為「**並行就地突變 tracked 檔**」設計（紀律 #18），審查 untracked 新檔不適用 | P2（流程/工具，無功能影響；但會在每輪「審查未 commit 新檔」時製造假陰性 FAIL，浪費修復回合並可能誤導回滾） | 流程缺陷 → 下一輪修迭代範本 §🔍：worktree 隔離僅在「並行就地突變 tracked 檔」時用；審查**未 commit 新增檔**的 audit agent 須在主樹派發（或先 `git add -A` 暫存後再建 worktree，使 untracked 入樹）。本輪即時補償：QA 鏡改於主樹重派完成對抗複審 | open（routed 下一輪範本修訂；本輪以「主樹重派 QA」即時補償，見 ZeroTrust_Audit_24） |
+

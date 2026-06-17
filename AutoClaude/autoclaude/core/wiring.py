@@ -31,6 +31,7 @@ from ..plugins import (
     PlaybookPersistencePlugin,
     PreferenceMemoryPlugin,
     PreRunValidatorPlugin,
+    RtmWritebackPlugin,
     SddGovernancePlugin,
     TokenGuardPlugin,
 )
@@ -78,6 +79,9 @@ _REGISTER_ORDER: tuple[str, ...] = (
     "preference_memory",
     "goal_synthesis",
     "goal_progress",
+    # AutoSDD_improving_24 W-24-2：rtm_writeback (priority=52) 逆向回寫閉環，
+    # 置於 goal_progress(50) 之後、convergence(65) 之前；非 SDD playbook 全程 no-op
+    "rtm_writeback",
     "convergence",
     "evolution",
     "goto_counter",
@@ -175,6 +179,9 @@ def _build_plugin_set(
         # 唯一豁免點，import infra adapter 合法。plugin 於 PRE_RUN 依
         # workflow_type ∈ {aisdlc, aisdlc_sdd} 自行啟用，非 SDD playbook 全程 no-op。
         "sdd_governance": _build_sdd_governance(brain, observability),
+        # AutoSDD_improving_24 W-24-2：A 軌逆向回寫閉環。adapter（純函式）+ sink
+        # 於 wiring 注入（core-purity 唯一豁免點 import infra 合法）。
+        "rtm_writeback": _build_rtm_writeback(cfg, observability),
         "convergence": ConvergencePlugin(),
         "evolution": EvolutionPlugin(minimax_client=minimax_client),
         "goto_counter": GotoCounterPlugin(playbook_cfg=cfg.playbook),
@@ -207,6 +214,24 @@ def _build_sdd_governance(
         spec_source=SddToPlaybookAdapter(observability=observability),
         # AutoSDD_improving_14 A 軌（W-14-2）：注入拓樸儀表板來源（read-only 消費 SDD 渲染產物）。
         topology_dashboard_source=SddTopologyDashboardAdapter(observability=observability),
+    )
+
+
+def _build_rtm_writeback(
+    cfg: AppConfig, observability: IObservabilityPort | None,
+) -> RtmWritebackPlugin:
+    """組裝 RtmWritebackPlugin + PlaybookToRtmAdapter + FileRtmSink（AutoSDD_improving_24 W-24-2）。
+
+    延遲 import infra adapter（wiring 為 core-purity 唯一豁免點）。報告寫到
+    run 工作區 build/reports/rtm/（base_dir=checkpoint_dir/rtm）；非 SDD playbook
+    時 plugin 於 POST_RUN 自行 no-op，sink 不會被觸碰。
+    """
+    from ..infra.adapters.playbook_to_rtm_adapter import PlaybookToRtmAdapter  # noqa: PLC0415
+    from ..infra.adapters.rtm_file_sink import FileRtmSink  # noqa: PLC0415
+
+    return RtmWritebackPlugin(
+        adapter=PlaybookToRtmAdapter(observability=observability),
+        sink=FileRtmSink(f"{cfg.checkpoint_dir}/rtm", observability=observability),
     )
 
 

@@ -1,5 +1,4 @@
-# CLAUDE.md
-# Claude Code Project Guidance
+# CLAUDE.md — Claude Code Project Guidance
 
 **Last Updated**: 2026-06-13 | **AISDLC Version**: v0.09 | **Status**: **Improving_012 完成（三能力 A/B/C 全交付）**。Phase 3 F-A1 GoalDecomposer 收尾：`IBrain.decide_decomposition` + `supports_decomposition`（additive，capability 守門不靜默降級）+ `execution/goal_decomposer.py`（三道有界閘 ≤24 硬上限／Kahn 無環／非空 prompt，超限拒絕不重試、1 次 Brain 呼叫非遞迴）+ 🔴 signoff 硬閘 + `wiring.build_goal_decomposer` 注入 F-A2 ToolInvocationAdapter（消費 allowlist）。三方 zero-trust audit OVERALL PASS（P0=0/P1=0）。full pytest **3,056 passed / 122 skipped**、coverage 100%、importlinter 8 kept、LOC=0。詳見 [AutoClaude_Improving_012.md](docs/04_planning/AutoClaude_Improving_012.md) §5 Phase 3。
 
@@ -354,7 +353,7 @@ tasks:
 7. Plugins must not directly import utils.observability helpers (use IObservabilityPort)
 8. Plugin must not directly import IKbMetricStore (use FailureKnowledgeBase routing)
 
-### Plugin 列表（16 個 active / 17 個靜態，按 wiring._REGISTER_ORDER）
+### Plugin 列表（17 個 active / 18 個靜態，按 wiring._REGISTER_ORDER）
 1. pre_run_validator
 2. hotkey
 3. cross_step_validator
@@ -368,12 +367,13 @@ tasks:
 11. preference_memory
 12. goal_synthesis
 13. goal_progress
-14. convergence
-15. evolution
-16. goto_counter
-17. checkpoint
+14. rtm_writeback
+15. convergence
+16. evolution
+17. goto_counter
+18. checkpoint
 
-### Port 列表（14 個，autoclaude/core/ports/）
+### Port 列表（15 個，autoclaude/core/ports/）
 - brain
 - embedder
 - evaluator
@@ -383,6 +383,7 @@ tasks:
 - observability
 - playbook_repository
 - preference_store
+- rtm_sink
 - spec_source
 - state_repository
 - tool_invocation

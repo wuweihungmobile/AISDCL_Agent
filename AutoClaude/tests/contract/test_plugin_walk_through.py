@@ -27,8 +27,9 @@ PLUGINS_DIR = PROJECT_ROOT / "autoclaude" / "plugins"
 
 
 # ── 公開 entry 對照表 ────────────────────────────────────────────────
-# 17 個 Plugin（SD_06 W6 12 + SD_05 W4 補 2 + AutoSDD_improving_01 W6 補 1
-#   + Improving_012 Phase 1 補 2：PreferenceMemory / GoalProgress）
+# 18 個 Plugin（SD_06 W6 12 + SD_05 W4 補 2 + AutoSDD_improving_01 W6 補 1
+#   + Improving_012 Phase 1 補 2：PreferenceMemory / GoalProgress
+#   + AutoSDD_improving_24 A 軌補 1：RtmWriteback PRIORITY=52）
 # — 對應 autoclaude/plugins/__init__.py
 PLUGIN_REGISTRY: dict[str, dict] = {
     "PreRunValidatorPlugin": {
@@ -57,6 +58,8 @@ PLUGIN_REGISTRY: dict[str, dict] = {
         "module": "autoclaude.plugins.goal_synthesis_plugin", "priority": 50},
     "GoalProgressPlugin": {
         "module": "autoclaude.plugins.goal_progress_plugin", "priority": 50},
+    "RtmWritebackPlugin": {
+        "module": "autoclaude.plugins.rtm_writeback_plugin", "priority": 52},
     "ConvergencePlugin": {
         "module": "autoclaude.plugins.convergence_plugin", "priority": 65},
     "EvolutionPlugin": {
@@ -191,16 +194,17 @@ def test_plugin_priority_constant_matches_audit_report(plugin_name: str, info: d
 
 
 def test_wiring_register_order_covers_all_non_optional_plugins():
-    """`wiring._REGISTER_ORDER` 必須涵蓋 17 個 plugin（hotkey optional 含在內）。"""
+    """`wiring._REGISTER_ORDER` 必須涵蓋 18 個 plugin（hotkey optional 含在內）。"""
     wiring = importlib.import_module("autoclaude.core.wiring")
     order = wiring._REGISTER_ORDER
-    assert len(order) >= 17, f"_REGISTER_ORDER 應涵蓋全部 17 plugin，實際 {len(order)}"
+    assert len(order) >= 18, f"_REGISTER_ORDER 應涵蓋全部 18 plugin，實際 {len(order)}"
     # hotkey 為 optional（hotkey_handler=None 時跳過）— 但仍應在 order 中
     expected = {
         "pre_run_validator", "hotkey", "cross_step_validator", "token_guard",
         "global_goal_anchor", "playbook_persistence", "sdd_governance",
         "fast_path", "notification",
         "knowledge_base", "preference_memory", "goal_synthesis", "goal_progress",
+        "rtm_writeback",
         "convergence", "evolution",
         "goto_counter", "checkpoint",
     }
