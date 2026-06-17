@@ -55,6 +55,56 @@
 全部符合上述PASS才核准通過!
 
 
+規劃AISDLC自動開發Agent Console UI PRD
+=====================================
+AISDLC自動開發Agent Console UI
+=====================================
+要設計一個AI Agent自主開發系統, 目前已經有以下三個模組, AutoClaude模組,AISDLC_SDD模組,AISDLC Agent模組:
+1.AutoClaude模組:Claude Code 多步驟 Playbook 自動執行引擎，以狀態機管理執行流程、重試、Token 限制與錯誤升級。 Level 5 自治系統：具備動態突變、自演化、目標對齊、跨 Session 持久化、元學習等高階閉環能力。 微核心化架構：Hexagonal Architecture（9 Ports）+ Kernel/EventBus + 13 Plugin + DAL 三後端（File / InMemory / PostgreSQL）。
+2.AISDLC_SDD模組:建立一套「AI 規格驅動開發 (AI SDD)」軟體架構隨 AI 演進的自動化機制系統。請深度剖析我目前的系統設計，驗證其是否具備「圖靈完備的自動化閉環」能力。你的終極目標是協助我將此系統進化為 Level 10 自治開發流程。
+3.AISDLC Agent模組: 整合兩者的**自動化開發 Agent**
+
+## 🌟 系統終極目標（北極星，每輪不變——所有迭代向此對齊）
+1. **AutoClaude＝多步驟 Playbook 自動執行引擎**：以狀態機管理執行流程／重試／Token 限制／錯誤升級，
+   更關鍵的是能**驅動 `AISDLC_SDD_v0.0X` 進行相關軟體開發**。定位 **Level 5 自治系統**（動態突變／
+   自演化／目標對齊／跨 Session 持久化／元學習等高階閉環）；**微核心化架構**：Hexagonal（Ports）+
+   Kernel/EventBus + Plugins + DAL 三後端（File / InMemory / PostgreSQL）。
+   〔Port／Plugin／後端具體數量一律以階段一實測為準，勿引用宣稱值——原始陳述 9 Ports/13 Plugin
+   與現況不符，禁寫死〕
+2. **AI 規格驅動開發 (AI SDD)**：構建讓軟體架構隨 AI 演進的自動化機制。每輪須**深度剖析並驗證系統
+   是否具「圖靈完備的自動化閉環」**能力，終極目標＝進化為 **Level 10 自治開發流程**——利用 Claude Code
+   建立具**自我修正能力的動態工作流 (Dynamic Workflow)**，用於深度重構與優化 `AISDLC_SDD_v0.0X`。
+3. **完美協調溝通機制**：AutoClaude 利用 `AISDLC_SDD_v0.0X` 進行軟體開發，建立兩者間雙向橋接，
+   成為端到端**自動化開發 Agent**（A 軌整合即直接服務此目標）。
+
+以下是要新增加的模組, 請撰寫以下Agent Console UI PRD
+====================================================
+1.專案控管:三層管理架構
+a.專案管理(CRUD):專案名稱, 專案執行路徑, 專案通過標準
+一個專案可以有多項目標, 專案說明描述(支援.md格式), 可以列出底下多少目標(只顯示標題), 目標底下多少任務(只顯示標題)
+b.目標管理(CRUD):CURD, 一個目標可以多項任務, 說明描述(支援.md格式), 目標通過標準
+c.任務管理(CRUD):CURD, 一個任務與任務說明描述(支援.md格式), 任務通過標準
+2.BRD, PRD ==> 產生專案,目標,任務
+3.專案執行:(不知如何設計)
+4.專案監控:(不知如何設計)
+5.系統參數設定: 系統所有參數, 例如:模型URL,Token
+
+Agent Console UI 技術棧如下
+==========================
+| 層級 | 技術 | 備註 |
+|------|------|------|
+| 前端 | Next.js 16 (App Router) + TypeScript + Tailwind CSS + shadcn/ui 搭配 Tremor (處理數據圖表) | 
+| 後端 | Spring Boot 3.2 (Java 21) + Clean Architecture + DDD | 
+| 資料庫 | PostgreSQL 18 | 
+
+詳細規劃整體可以部屬到Docker可以運作, 並且規劃如何將Docker的PostgreSQL 18進行高使用性備份
+
+PS: 以上PRD, 請輸出docs\01_requirements\Agent_ConsoleUI_PRD.md輸出
+
+為確保Agent_ConsoleUI_PRD.md內容品質, 請確實派出Architect / SA / SD / QA 專家整體考量審查, 與目前系統現況進行比對, 採完全不信任 zero-trust audit 全面驗證和"修復方向是否正確", 看看nightly程式是否正確 and 執行過程與結果是否正確!
+有問題馬上請派另一個Agent(Architect/SA/SD/QA 全能)專家進行修復相關程式與文件「所有問題"文件問題"和"技術問題"必須徹底全部修復才能算完成」! 
+再經QA專家審議修完是否有符合"原設計功能"或若有破壞收斂即不通過須馬上進行修改再進行QA!
+全部符合上述PASS才核准通過!
 
 
 問題:
@@ -73,8 +123,8 @@
 1.可否依照目前的D:\CursorProject\AISDCL_Agent\AISDLC_SDD\AISDLC_SDD_v0.01專案 進行自我迭代開發, 行進中並記錄缺點Bug進行改進
 2.此專案開發的過程中, 馬上利用D:\CursorProject\AISDCL_Agent\AISDLC_SDD\AISDLC_SDD_v0.01專案中的流程開發, 並且設計演化AISDLC_SDD_v0.02,AISDLC_SDD_v0.03..等以此類推
 
-為確保執行品質與AutoSDD_improving_0X.md內容, 請確實派出Architect / SA SD / QA 專家整體考量審查, 與目前系統現況進行比對, 採完全不信任 zero-trust audit 全面驗證和"修復方向是否正確", 看看nightly程式是否正確 and 執行過程與結果是否正確!
-有問題馬上請派另一個Agent(Architect/SA SD/QA 全能)專家進行修復相關程式與文件「所有問題"文件問題"和"技術問題"必須徹底全部修復才能算完成」! 
+為確保執行品質與AutoSDD_improving_0X.md內容, 請確實派出Architect / SA / SD / QA 專家整體考量審查, 與目前系統現況進行比對, 採完全不信任 zero-trust audit 全面驗證和"修復方向是否正確", 看看nightly程式是否正確 and 執行過程與結果是否正確!
+有問題馬上請派另一個Agent(Architect/SA/SD/QA 全能)專家進行修復相關程式與文件「所有問題"文件問題"和"技術問題"必須徹底全部修復才能算完成」! 
 再經QA專家審議修完是否有符合"原設計功能"或若有破壞收斂即不通過須馬上進行修改再進行QA!
 全部符合上述PASS才核准通過!
 
@@ -117,7 +167,7 @@ QA（對抗）：20 個攻擊向量全數守住、無繞過破口（含藏 criti
 DEF-23-001（CHANGELOG 口徑）、DEF-23-002（_26/_27 歸檔+ref）、DEF-23-003（.gitignore v0.14 block）、DEF-23-004（RTM 命名對齊）。
 
 因為這輪中斷兩三次
-為確保執行品質與AutoSDD_improving_23.md執行項目都有執行, 請確實派出Architect / SA SD / QA 專家整體考量審查, 與目前系統現況進行比對, 採完全不信任 zero-trust audit 全面驗證和"修復方向是否正確", 看看nightly程式是否正確 and 執行過程與結果是否正確!
+為確保執行品質與AutoSDD_improving_23.md執行項目都有執行, 請確實派出Architect / SA / SD / QA 專家整體考量審查, 與目前系統現況進行比對, 採完全不信任 zero-trust audit 全面驗證和"修復方向是否正確", 看看nightly程式是否正確 and 執行過程與結果是否正確!
 有問題馬上請派另一個Agent(Architect/SA SD/QA 全能)專家進行修復相關程式與文件「所有問題"文件問題"和"技術問題"必須徹底全部修復才能算完成」! 
 再經QA專家審議修完是否有符合"原設計功能"或若有破壞收斂即不通過須馬上進行修改再進行QA!
 全部符合上述PASS才核准通過!
