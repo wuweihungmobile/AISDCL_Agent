@@ -148,9 +148,9 @@
 
 ```yaml
 closure-evidence:
-  base_sha: PENDING_FILL_AFTER_COMMIT
+  base_sha: 376a5119deee3aa88bba7dc07cd19f024b0ccb4e
   claimed_commits:
-    - PENDING
+    - 376a5119deee3aa88bba7dc07cd19f024b0ccb4e
   claimed_tag: v2026.06.18-36
   pytest:
     autoclaude: "3221 passed / 122 skipped / 0 failed"
