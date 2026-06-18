@@ -1,0 +1,17 @@
+id: R-9.10
+title: Phase E M3 Production Feedback Layer
+trigger_states:
+  - PRODUCTION_SIGNAL
+  - RELEASE
+severity: high
+maturity: active
+spec: >
+  File-based Pull（禁 HTTP webhook，OPEN-10.6）：SLO event 走 data/slo_events/ +
+  session_start scan_inbox 消化；每事件 HMAC-SHA256 簽章 + 常數時間比對、未來時戳 ≤5min
+  / 過期 ≤72h 防重放，驗證失敗一律 quarantine；PRODUCTION_SIGNAL 為非阻塞觀測態；
+  同一 NFR 24h 內 ≥3 次違反 → 產出 PBS-DRIFT 報告供人工 review。對應 production_monitor.py。
+test_ref: tools/fsm_runtime/tests/test_production_monitor.py
+scaffold_roi:
+  fire_count: 0
+  catch_count: 0
+  false_positive_count: 0

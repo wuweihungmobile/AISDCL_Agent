@@ -1,0 +1,29 @@
+id: R-SELF-STRIDE
+title: 自治執行迴圈自身安全（Loop Self-STRIDE）
+trigger_states:
+  - SANDBOX_HARDENING_GATE
+  - EXECUTION_EVALUATION
+severity: critical
+maturity: active
+spec: >
+  Phase I M1 / ACT-061（Rule 9.21.3）：對「會自動執行自己生成的不可信碼」的執行器
+  自身施加 6 類 self-STRIDE 控制 — Spoofing（spec 簽章）/ Tampering（lockfile 雜湊）
+  / Repudiation（執行落帳）/ Info-disclosure（--network none）/ DoS（--memory/--pids-limit）
+  / Elevation（--cap-drop ALL + 非 root + no-new-privileges + image allow-list）。
+  任一違反 → SANDBOX_HARDENING_GATE policy_violation → ESCALATION（structural，
+  DiagnosticAgent sub_type=sandbox_policy_violation，不可 auto-recover）。對應
+  loop_threat_model.py / sandbox_runner.SecurityProfile。
+test_ref: tools/fsm_runtime/tests/test_phase_i.py
+failure_mode: >
+  SANDBOX_HARDENING_GATE 出 policy_violation（image/簽章/lockfile/6 類 self-STRIDE 任一違反）
+  → exit_sandbox_hardening_gate 判 verdict=policy_violation → record_escalation 進 ESCALATION
+  （structural，DiagnosticAgent sub_type=sandbox_policy_violation，不可 auto-recover）。此即
+  R-SELF-STRIDE 守望的失敗模式——自治執行迴圈對其自身生成的不可信碼之安全硬化閘失守時真實發生；
+  catch 側結構化歸因到 R-SELF-STRIDE（對應 FSMRuntime.exit_sandbox_hardening_gate 的
+  record_escalation 落點，無歧義映射非時序猜測，W-38-1）。此為**唯一生產 escalation 落點**
+  （verdict=pass 路徑轉 EXECUTION_EVALUATION 不 escalate、不歸因），與已接線 R-9.1/R-9.2/R-9.7/
+  R-9.21/R-9.22 五條零交集（無人觸碰 SANDBOX_HARDENING_GATE），杜絕雙重歸因（DEF-18-001 寧缺勿濫）。
+scaffold_roi:
+  fire_count: 0
+  catch_count: 0
+  false_positive_count: 0

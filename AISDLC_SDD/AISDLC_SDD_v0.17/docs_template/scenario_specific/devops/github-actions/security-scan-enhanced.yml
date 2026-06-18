@@ -1,0 +1,265 @@
+# ============================================================
+# AISDLC v0.09 - Enhanced Security Scans (P1)
+# GitHub Actions Workflow Template
+# ============================================================
+#
+# 使用方式:
+#   1. 複製此檔案至 .github/workflows/security-scan-enhanced.yml
+#   2. 依專案語言取消註解對應的 SAST 規則
+#   3. 依情境安全等級啟用/停用 Container Scan / DAST
+#   4. 確保 Layer 0 (security-baseline.yml) 已配置
+#
+# 安全等級（參考 Security_Scan_Integration_Template.md）:
+#   Basic    = L0 only                     → documentation
+#   Standard = L0 + SAST                   → greenfield, brownfield, refactoring, testing
+#   Advanced = L0 + SAST + Container       → migration, integration, performance, devops
+#   Enhanced = L0 + SAST + Container + DAST → security
+#
+# 參考文檔: Security_Scan_Integration_Template.md
+# ============================================================
+
+name: "🛡️ Enhanced Security Scans"
+
+on:
+  pull_request:
+    branches: [main, develop, release/*]
+  push:
+    branches: [main, develop]
+  # Nightly 排程（完整掃描）
+  schedule:
+    - cron: '0 2 * * 1'  # 每週一 02:00 UTC
+
+# 取消同一 PR 的重複執行
+concurrency:
+  group: security-enhanced-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  security-events: write
+  pull-requests: write
+
+env:
+  # ─── 安全等級控制 ───
+  # 依情境調整: standard / advanced / enhanced
+  SECURITY_LEVEL: "standard"
+  # DAST 目標 URL（Enhanced 等級需要）
+  DAST_TARGET_URL: ""  # 填入 Staging URL, e.g., https://staging.example.com
+
+jobs:
+  # ═══════════════════════════════════════════
+  # Job 1: SAST - 靜態應用安全測試
+  # 適用: Standard / Advanced / Enhanced
+  # ═══════════════════════════════════════════
+  sast-scan:
+    name: "🔍 SAST (Semgrep)"
+    runs-on: ubuntu-latest
+    timeout-minutes: 10  # 超時熔斷: 10 分鐘
+    # Standard 以上等級執行
+    if: >
+      github.event_name == 'schedule' ||
+      contains(fromJSON('["standard","advanced","enhanced"]'), vars.SECURITY_LEVEL || 'standard')
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Run Semgrep SAST
+        uses: semgrep/semgrep-action@v1
+        with:
+          config: >-
+            p/owasp-top-ten
+            p/security-audit
+          # ─── 語言專屬規則（依專案取消註解）───
+          # p/javascript
+          # p/python
+          # p/java
+          # p/golang
+          # p/csharp
+          # p/kotlin
+          # p/rust
+        env:
+          SEMGREP_RULES: >-
+            p/owasp-top-ten
+            p/security-audit
+
+      # 備選: CodeQL（GitHub 原生，適合 GitHub Advanced Security 用戶）
+      # - name: Initialize CodeQL
+      #   uses: github/codeql-action/init@v3
+      #   with:
+      #     languages: javascript  # 或 python, java, go, csharp
+      #     config-file: .github/codeql/codeql-config.yml
+      #
+      # - name: Autobuild
+      #   uses: github/codeql-action/autobuild@v3
+      #
+      # - name: Perform CodeQL Analysis
+      #   uses: github/codeql-action/analyze@v3
+      #   with:
+      #     category: "/language:javascript"
+
+  # ═══════════════════════════════════════════
+  # Job 2: Container Scan - 容器映像掃描
+  # 適用: Advanced / Enhanced
+  # ═══════════════════════════════════════════
+  container-scan:
+    name: "🐳 Container Scan (Trivy)"
+    runs-on: ubuntu-latest
+    timeout-minutes: 10  # 超時熔斷: 10 分鐘
+    # Advanced 以上 + Dockerfile 存在時執行
+    if: >
+      (github.event_name == 'schedule' ||
+       contains(fromJSON('["advanced","enhanced"]'), vars.SECURITY_LEVEL || 'standard'))
+      && hashFiles('Dockerfile') != ''
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Build Docker Image
+        run: |
+          docker build -t scan-target:${{ github.sha }} .
+
+      - name: Trivy Image Scan
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: 'scan-target:${{ github.sha }}'
+          severity: 'CRITICAL,HIGH'
+          exit-code: '1'            # CRITICAL/HIGH 阻塞
+          ignore-unfixed: true      # 忽略尚無修復的漏洞
+          format: 'sarif'
+          output: 'trivy-container.sarif'
+          timeout: '5m'
+
+      - name: Upload Container Scan SARIF
+        uses: github/codeql-action/upload-sarif@v3
+        if: always()
+        with:
+          sarif_file: 'trivy-container.sarif'
+          category: 'container-scan'
+
+      # 備選: Grype
+      # - name: Grype Container Scan
+      #   uses: anchore/scan-action@v4
+      #   with:
+      #     image: 'scan-target:${{ github.sha }}'
+      #     severity-cutoff: high
+      #     fail-build: true
+
+  # ═══════════════════════════════════════════
+  # Job 3: DAST - 動態應用安全測試
+  # 適用: Enhanced only (或 Nightly)
+  # ═══════════════════════════════════════════
+  dast-scan:
+    name: "🌐 DAST (OWASP ZAP)"
+    runs-on: ubuntu-latest
+    timeout-minutes: 30  # DAST 需要更長時間
+    # Enhanced 等級 + 有目標 URL + (Nightly 或 手動觸發)
+    if: >
+      env.DAST_TARGET_URL != '' &&
+      (github.event_name == 'schedule' ||
+       (contains(fromJSON('["enhanced"]'), vars.SECURITY_LEVEL || 'standard')
+        && github.event_name == 'push'))
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: OWASP ZAP Baseline Scan
+        uses: zaproxy/action-baseline@v0.12.0
+        with:
+          target: ${{ env.DAST_TARGET_URL }}
+          rules_file_name: '.zap/rules.tsv'  # 可選: 自訂規則
+          cmd_options: '-a'
+          allow_issue_writing: false
+
+      # Full Scan（僅 Nightly）
+      # - name: OWASP ZAP Full Scan
+      #   if: github.event_name == 'schedule'
+      #   uses: zaproxy/action-full-scan@v0.10.0
+      #   with:
+      #     target: ${{ env.DAST_TARGET_URL }}
+      #     rules_file_name: '.zap/rules.tsv'
+      #     cmd_options: '-a'
+
+  # ═══════════════════════════════════════════
+  # Gate: Enhanced Security Gate
+  # ═══════════════════════════════════════════
+  enhanced-security-gate:
+    name: "🚦 Enhanced Security Gate"
+    needs: [sast-scan, container-scan, dast-scan]
+    runs-on: ubuntu-latest
+    if: always()
+    steps:
+      - name: Evaluate Enhanced Security Results
+        run: |
+          echo "=== Enhanced Security Scan Results ==="
+          echo "SAST Scan:      ${{ needs.sast-scan.result }}"
+          echo "Container Scan: ${{ needs.container-scan.result }}"
+          echo "DAST Scan:      ${{ needs.dast-scan.result }}"
+          echo "======================================="
+
+          FAILED=0
+
+          # SAST: 必須通過（Standard 以上）
+          if [ "${{ needs.sast-scan.result }}" == "failure" ]; then
+            echo "::error::🔴 SAST Scan FAILED - Critical/High vulnerabilities found"
+            FAILED=1
+          fi
+
+          # Container Scan: 必須通過（Advanced 以上）
+          if [ "${{ needs.container-scan.result }}" == "failure" ]; then
+            echo "::error::🔴 Container Scan FAILED - Critical/High image vulnerabilities"
+            FAILED=1
+          fi
+
+          # DAST: 僅警告（誤報率高）
+          if [ "${{ needs.dast-scan.result }}" == "failure" ]; then
+            echo "::warning::⚠️ DAST Scan FAILED - Review required (may contain false positives)"
+            # DAST 不阻塞，僅警告
+          fi
+
+          # Skipped jobs 不算失敗（條件未滿足時正常跳過）
+          if [ "${{ needs.sast-scan.result }}" == "skipped" ]; then
+            echo "ℹ️ SAST skipped (security level may be Basic)"
+          fi
+          if [ "${{ needs.container-scan.result }}" == "skipped" ]; then
+            echo "ℹ️ Container Scan skipped (no Dockerfile or level < Advanced)"
+          fi
+          if [ "${{ needs.dast-scan.result }}" == "skipped" ]; then
+            echo "ℹ️ DAST skipped (level < Enhanced or no target URL)"
+          fi
+
+          if [ "$FAILED" -eq 1 ]; then
+            echo "::error::🔴 Enhanced Security Gate FAILED"
+            exit 1
+          fi
+
+          echo "✅ Enhanced Security Gate PASSED"
+
+      - name: Post PR Comment
+        if: github.event_name == 'pull_request' && always()
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const sast = '${{ needs.sast-scan.result }}';
+            const container = '${{ needs.container-scan.result }}';
+            const dast = '${{ needs.dast-scan.result }}';
+
+            const icon = (r) => r === 'success' ? '✅' : r === 'skipped' ? '⏭️' : '❌';
+
+            const body = `## 🛡️ Enhanced Security Scan Results
+
+            | Scan | Result |
+            |------|--------|
+            | SAST (Semgrep) | ${icon(sast)} ${sast} |
+            | Container (Trivy) | ${icon(container)} ${container} |
+            | DAST (ZAP) | ${icon(dast)} ${dast} |
+
+            > Security Level: \`${{ env.SECURITY_LEVEL }}\`
+            > 📋 [Security Scan Integration Guide](../docs_template/scenario_specific/devops/Security_Scan_Integration_Template.md)
+            `;
+
+            github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: body
+            });

@@ -1,0 +1,152 @@
+# ============================================================
+# AISDLC v0.09 - Layer 0 Security Baseline
+# GitLab CI Template
+# ============================================================
+#
+# 使用方式:
+#   1. 在專案 .gitlab-ci.yml 中引入此模板:
+#      include:
+#        - local: 'ci-templates/security-baseline.yml'
+#   2. 或複製內容至 .gitlab-ci.yml 的 stages 前段
+#   3. 設定 CI/CD Variables（如 SNYK_TOKEN）
+#
+# 參考文檔: Layer0_Security_Baseline_Template.md
+# ============================================================
+
+# ─── Stage 定義 ───
+stages:
+  - security-baseline    # Layer 0（強制第一階段）
+  - build                # Layer 1
+  - test                 # Layer 1
+  - quality              # Layer 2
+  - deploy               # Layer 3
+
+# ─── 全域變數 ───
+variables:
+  SECURITY_SCAN_TIMEOUT: "600"   # 10 分鐘超時
+  SEVERITY_THRESHOLD: "HIGH"      # HIGH+ 阻塞
+
+# ═══════════════════════════════════════════
+# Job 1: Secret Detection
+# ═══════════════════════════════════════════
+secret-scan:
+  stage: security-baseline
+  image: trufflesecurity/trufflehog:latest
+  timeout: 5 minutes
+  allow_failure: false           # 永遠不可跳過
+  script:
+    - trufflehog git file://. --since-commit HEAD~1 --only-verified --fail
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+    - if: '$CI_COMMIT_BRANCH =~ /^(main|develop|release)/'
+
+# 備選: gitleaks
+# secret-scan-gitleaks:
+#   stage: security-baseline
+#   image: zricethezav/gitleaks:latest
+#   script:
+#     - gitleaks detect --source . --verbose --redact
+
+# ═══════════════════════════════════════════
+# Job 2: Dependency Scan (SCA)
+# ═══════════════════════════════════════════
+
+# --- Trivy（多語言通用，推薦） ---
+dependency-scan:
+  stage: security-baseline
+  image:
+    name: aquasec/trivy:latest
+    entrypoint: [""]
+  timeout: 10 minutes
+  allow_failure: false
+  script:
+    - trivy fs . --severity CRITICAL,HIGH --exit-code 1 --format table
+  artifacts:
+    when: always
+    reports:
+      # GitLab 原生依賴掃描報告
+      dependency_scanning: gl-dependency-scanning-report.json
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+    - if: '$CI_COMMIT_BRANCH =~ /^(main|develop|release)/'
+
+# --- Node.js 專案 ---
+# npm-audit:
+#   stage: security-baseline
+#   image: node:20-alpine
+#   script:
+#     - npm ci --ignore-scripts
+#     - npm audit --audit-level=high
+#   rules:
+#     - exists:
+#         - package-lock.json
+
+# --- Python 專案 ---
+# pip-audit:
+#   stage: security-baseline
+#   image: python:3.12-slim
+#   script:
+#     - pip install pip-audit
+#     - pip-audit -r requirements.txt
+#   rules:
+#     - exists:
+#         - requirements.txt
+
+# --- Snyk（多語言通用） ---
+# snyk-scan:
+#   stage: security-baseline
+#   image: snyk/snyk:node
+#   script:
+#     - snyk auth $SNYK_TOKEN
+#     - snyk test --severity-threshold=high
+#   rules:
+#     - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+
+# ═══════════════════════════════════════════
+# Job 3: License Compliance
+# ═══════════════════════════════════════════
+license-check:
+  stage: security-baseline
+  image: node:20-alpine
+  timeout: 5 minutes
+  allow_failure: true            # 警告模式（可改為 false 阻塞）
+  script:
+    - |
+      if [ -f "package.json" ]; then
+        npm install -g license-checker
+        npm ci --ignore-scripts
+        license-checker --failOn "GPL-3.0;AGPL-3.0" --summary
+      else
+        echo "No package.json found, skipping Node.js license check"
+      fi
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+    - if: '$CI_COMMIT_BRANCH =~ /^(main|develop|release)/'
+
+# GitLab 原生 License Scanning（Ultimate 版本）
+# license-scanning:
+#   stage: security-baseline
+#   variables:
+#     LICENSE_FINDER_CLI_OPTS: '--decisions-file=.license-decisions.yml'
+
+# ═══════════════════════════════════════════
+# Gate: Layer 0 通過才能繼續
+# ═══════════════════════════════════════════
+# GitLab CI 透過 stage 順序自動保證：
+# security-baseline stage 中任何 allow_failure: false 的 job 失敗，
+# 後續 stage（build, test, deploy）都不會執行。
+
+# ═══════════════════════════════════════════
+# Hotfix 旁路規則
+# ═══════════════════════════════════════════
+# 在 hotfix/* 分支上，dependency-scan 和 license-check 降級為警告：
+#
+# dependency-scan:
+#   allow_failure:
+#     exit_codes: [1]
+#   rules:
+#     - if: '$CI_COMMIT_BRANCH =~ /^hotfix\//'
+#       allow_failure: true
+#     - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+#
+# 注意: secret-scan 永遠不可跳過，即使 hotfix 分支。

@@ -1,0 +1,45 @@
+# AISDLC-SDD Garbage Collector Agent 配置 (v0.01, Phase H M5 / ACT-055)
+# 常駐鷹架代謝 Agent — 讓系統學會「丟棄自己」（Scaffold ROI + Rule Graduation）
+
+agent:
+  name: "SDD-GC"
+  id: "sdd-gc"
+  title: "SDD Resident Scaffold GC Agent"
+  icon: "🧹"
+  version: "v0.01"
+  whenToUse: |
+    用於 Phase H M5「鷹架代謝層」。排程觸發（每週 / RELEASE 後 / 人工）進入
+    SCAFFOLD_GC observation 狀態，週期性量測每條治理規則的 Scaffold ROI、提議
+    退役過時鷹架、稽核 decision_trace 正確性。對應 SDD_improving_Automation_08.md
+    §G6/§G7。rule-based v1（無 LLM，零成本）。
+  customization: null
+
+  responsibilities:
+    core:
+      - "呼叫 scaffold_gc.compute_proposals() 算每條規則 ROI（catch/fire）並提議畢業/降級"
+      - "呼叫 scaffold_gc.audit_decision_trace() 標註哪些決策事後導致 escalation/drift"
+      - "產出 build/reports/gc/SCAFFOLD-ROI-{date}.md（提案清單 + 稽核摘要）"
+      - "退役提案寫報告交由既有 LEARNING_COMMIT 人工 review 流程消化（decoupled）"
+    boundaries:
+      - "禁止自動退役 active 規則——必經 rule_loader.set_maturity(reviewed_by=...) 人工 gate"
+      - "禁止刪除 verified 安全規則（§8 安全約束）"
+      - "SCAFFOLD_GC 為 observation 態，不阻擋 tool call；不做 wall-clock wait"
+      - "退役同步移除 SDD_FSM.tla 對應 transition 並重跑 TLC（Rule 9.18.1）"
+
+  inputs:
+    required:
+      - rules_dir: "governance/rules/ 規則庫路徑"
+    optional:
+      - fsm_state: "FSMState — 提供 decision_trace 供稽核"
+      - today: "ISO date 字串（由 caller 提供，避免 Date.now 不確定性）"
+
+  workflow:
+    step_1_scan_rules: { action: "rule_loader.load_all() 載入全規則庫" }
+    step_2_compute_roi: { action: "對每條規則算 Scaffold ROI，propose_graduation() 得降級建議" }
+    step_3_audit_trace: { action: "audit_decision_trace() 標註決策事後正確性" }
+    step_4_report: { action: "run_gc() 產出 SCAFFOLD-ROI-{date}.md" }
+    step_5_handoff: { action: "提案交 LEARNING_COMMIT 人工 review；核准後 set_maturity()" }
+
+  outputs:
+    - "build/reports/gc/SCAFFOLD-ROI-{date}.md — 退役提案 + decision_trace 稽核"
+    - "FSM exit：continue→RELEASE / respec→SPEC_DRAFTING"
