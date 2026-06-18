@@ -241,3 +241,17 @@
 - **零信任雙向複核糾正（紀律#17）**：階段一 Explore agent 誤報 **DEF-24-001/DEF-20-001/DEF-18-001 為 open/routed**，主 agent 親 grep 狀態欄複核證實**皆已 fixed**（DEF-24-001 fixed@improving_25 / DEF-20-001 fixed@improving_21 v0.12 / DEF-18-001 fixed@v0.10，殘留面轉 DEF-19-001 routed）；係對長狀態欄歷史敘事 "open"/"routed" 子字串解析誤判，已更正（見 `AutoSDD_ZeroTrust_Audit_34.md` §2）。
 - **未推進（維持原狀態，誠實標示非本輪 C 軌 scope）**：DEF-32-002（open/routed 未來輪，A 軌刻意 scope）、DEF-19-001（routed，catch 漸進 4/39）、DEF-01-007（open，cc-switch 環境缺裝，本輪不涉多後端）、DEF-01-009（open watch，本輪零源碼變更不觸發、violations=0）、DEF-17-001（routed，遙測）。
 
+## improving_35 收尾註記（2026-06-18，C 軌 SD_09 W1 GoalSynthesis mutation pilot 準備 / 多模組鎖定契約前置）
+
+**本輪 = C 軌（指揮官 AutoClaude）**，🔴 掌舵者定調 W1 mutation pilot **準備**（軸 D 安全區）。**誠實 scoping**：W1「執行」被 06-26 G0 閘門 blocked（#2 AC4 12/14~06-20、#3 obs/drift 22/30~06-26，且 #1 unique sha 須 W1 合法改 token_guard 源碼自然解、紀律 #12 禁人工 churn、主 agent 禁偽造 nightly）；mutation 多模組鎖定核心邏輯已存在（`TARGETS`/`_MODULE_PATHS`/`should_lock` 含 goal_synthesis），**唯一真實缺口＝多模組並存契約測試不存在**。故本輪非大型 Wave，交付 **W-35-1＝補 `tests/contract/test_mutation_multi_module_lock.py`（4 case）**：(1) 兩模組經 `run()` 端到端各自鎖定、baseline 兩行並存不互踩；(2) 共用 history 檔 `load_module_history` 篩選隔離；(3) 一模組抖動不波及另一；(4) per-module 目標差異（0.65 落 GS eff 0.63 與 TG eff 0.68 之間 → GS 鎖/TG 拒鎖）。
+
+零退化 **3218/122/0**（floor 3214 +4，只增不減）、lint 8/0、LOC violations=0、snapshot OK/對齊、AISDLC_SDD ci-gate **本輪零碰**（純新增 1 個 AutoClaude 測試檔，引階段一 v0.01:1478 / v0.14:1593 全綠）、五軌 TLC 不觸發、零 Copy-on-Evolve。M1（門檻寫死 0.75）/M2（write_baseline 非 upsert）突變實證各致對應 case 轉紅、還原後 4 passed（in-memory 還原禁 git checkout，DEF-32-001；CRLF→LF 行尾以 git checkout 補正——該檔本輪無有意改動）。主樹單一 zero-trust agent **OVERALL PASS 5/5**（遵 DEF-24-001：untracked 新檔→主樹派發）。
+
+- **新增 DEF-35-001（P2, routed W1）**：`autoclaude/plugins/goal_synthesis` 目錄不存在（實體單檔），但 `_MODULE_PATHS["goal_synthesis"]` 與 W1 T1-B3 `--paths-to-mutate` 當目錄 → W1 啟動後 `compute_source_sha256` 永遠回 'unknown'、mutmut 找不到目標（見下表）。
+- **誠實 scope 邊界**：T1-B8 字面「模組間 LRU 順序」屬 ci.yml 三 cron 排程層（W1 執行期），baseline_lock 純函數層無 LRU，本輪以 case 4「per-module 目標差異隔離」覆蓋等價語意，LRU 留 W1，不偽造覆蓋。
+- **未推進（維持原狀態）**：DEF-32-002（routed 未來輪，A 軌刻意 scope）、DEF-19-001（routed，catch 4/39）、DEF-01-007（open，cc-switch 環境缺裝，本輪不涉多後端）、DEF-01-009（open watch，本輪零生產源碼變更不觸發、violations=0）、DEF-17-001（routed，遙測）、DEF-31-001/DEF-30-001（fixed@improving_33）。
+
+| ID | 發現日期 | 發現情境 | 現象與證據 | 嚴重度 | 分流去向 | 狀態 |
+|----|----------|----------|------------|--------|----------|------|
+| DEF-35-001 | 2026-06-18 | improving_35 W-35-1 設計期親驗（mutation 多模組鎖定路徑查證） | mutation 模組路徑配置缺陷：`autoclaude/plugins/goal_synthesis` **目錄不存在**（`test -d`=MISSING；實體為單檔 `autoclaude/plugins/goal_synthesis_plugin.py` 7782 bytes），但 `tools/mutation_baseline_lock.py:58` `_MODULE_PATHS["goal_synthesis"]` = `…/plugins/goal_synthesis`（當目錄）、W1 T1-B3 `--paths-to-mutate=autoclaude/plugins/goal_synthesis` 亦當目錄。對比 token_guard（SD_07 拆 5 子模組為目錄）、coordinator（core/orchestration 目錄）路徑正確，唯 goal_synthesis 單檔被當目錄。**後果**：W1 啟動後 `compute_source_sha256("goal_synthesis")` 對不存在目錄 `rglob("*.py")` 回空 → 永遠 `"unknown"` → GS 無法滿足 unique sha 鎖定（紀律 #12）；mutmut `--paths-to-mutate` 亦找不到 mutate 目標。本輪 idle 未觸發（GS pilot 尚未啟動）。主樹 zero-trust audit 親驗屬實（§3 複核項 3） | P2（W1 啟動阻塞級，但目前未觸發；W1 前必修否則 GS mutation 無法鎖定/無法 mutate） | 整合層（AutoClaude 側）→ routed SD_09 W1 執行期：將 `_MODULE_PATHS["goal_synthesis"]` 指向單檔 + `compute_source_sha256` 支援單檔輸入（`module_path.is_file()` 分支），或比照 token_guard 把 goal_synthesis 拆 `goal_synthesis/` package 並同步 T1-B3 `--paths-to-mutate`；屬 production 配置/行為變更，超出本輪安全區（🔴 確認前不動實作）。W-35-1 測試以 `source_path` 注入 mock 目錄迴避此缺陷、不依賴真實佈局 | routed（SD_09 W1；本輪以契約測試前置揭露，W1 啟動前必修） |
+
