@@ -139,3 +139,50 @@ def test_real_repo_v014_active_clean():
     """真實 repo 鎖：v0.14（最新）active/ 現況乾淨（improving_23 已清）→ lint pass。"""
     repo_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
     assert lint.lint(repo_root) == []
+
+
+# ── W-33-2（DEF-30-001）：狀態欄標準化 + 缺欄 advisory warn ────────────────────
+
+def test_closed_status_decided_token_fires(tmp_path):
+    """標準英文 token『狀態：decided』→ 識別為已決（DEF-30-001 標準化）。
+
+    為何重要：DEF-30-001 標準化狀態詞彙為 proposed/decided；新標準 decided token 須與
+    既有『已決』同等被 decided 偵測攔下，否則用標準寫法的已決 RFC 滯留 active/ 漏網。
+    """
+    repo = _mk_repo(tmp_path, ["AISDLC_SDD_v0.14"])
+    _write(os.path.join(repo, "AISDLC_SDD_v0.14", "build", "planning", "active", "RFC_D.md"),
+           "# RFC D\n**狀態**：decided\n決策：採納。\n")
+    v = lint.lint(repo)
+    assert len(v) == 1 and "結案狀態" in v[0][1]
+
+
+def test_active_rfc_missing_status_warns_not_fails(tmp_path):
+    """active/ RFC 缺標準『**狀態**：』欄 → advisory（缺欄清單），但非硬違規（不阻擋）。
+
+    為何重要：DEF-30-001 的『缺 狀態 欄即 warn』強制慣例——缺欄是慣例提醒（exit 0），
+    與『已決滯留 active/』（exit 1）嚴格分級，避免合法 proposed RFC 因缺欄被當硬違規擋下。
+    """
+    repo = _mk_repo(tmp_path, ["AISDLC_SDD_v0.14"])
+    _write(os.path.join(repo, "AISDLC_SDD_v0.14", "build", "planning", "active", "RFC_N.md"),
+           "# RFC N\n**前置基線**：v0.14 凍結\n（無狀態欄）\n")
+    assert lint.missing_status(repo) == ["RFC_N.md"]   # advisory 命中
+    assert lint.lint(repo) == []                       # 非硬違規
+
+
+def test_proposed_status_clean_no_warn_no_fire(tmp_path):
+    """標準『狀態：proposed』→ 既非已決（不 fire）亦非缺欄（不 warn）→ 全乾淨。"""
+    repo = _mk_repo(tmp_path, ["AISDLC_SDD_v0.14"])
+    _write(os.path.join(repo, "AISDLC_SDD_v0.14", "build", "planning", "active", "RFC_P2.md"),
+           "# RFC P2\n**狀態**：proposed\n**前置基線**：v0.14\n")
+    assert lint.lint(repo) == []
+    assert lint.missing_status(repo) == []
+
+
+def test_main_missing_status_warns_but_exits_zero(tmp_path, capsys):
+    """CLI：僅缺欄（無已決滯留）→ 印 ::warning:: 但 exit 0（advisory 不阻擋硬閘）。"""
+    repo = _mk_repo(tmp_path, ["AISDLC_SDD_v0.14"])
+    _write(os.path.join(repo, "AISDLC_SDD_v0.14", "build", "planning", "active", "RFC_W.md"),
+           "# RFC W\n（無狀態欄）\n")
+    assert lint.main([repo]) == 0
+    out = capsys.readouterr().out
+    assert "::warning::" in out and "DEF-30-001" in out and "RFC_W.md" in out

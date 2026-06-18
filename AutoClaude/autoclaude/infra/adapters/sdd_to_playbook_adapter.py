@@ -68,11 +68,15 @@ _QUANTITATIVE = re.compile(r"[<>≤≥]|\bms\b|\b秒\b|%")
 _FALLBACK_REGEX = r"\bPASS(ED)?\b"
 # improving_31 W-31-1：否定標記（須出現在引號「之外、之前」才視為負向斷言）。
 # 修正「不應包含「X」」被當成「要求 X 出現」的語意顛倒（mis-specify）缺口。
+# improving_33 W-33-1（DEF-31-001）：裸 \bnot\b 排除「not only…（but）」「is not empty」
+# 兩慣用語——此處 not 非否定其後引號（"not only X but"＝連接詞、"not empty"＝存在斷言）。
+# 強標記（should not / 不應…）與真否定（not contain / not visible）不受影響；.search 左掃
+# 特性確保「is not empty but does not contain 'X'」仍因第二個 not 命中 → 'X' 正確負向。
 _NEGATION_MARKER = re.compile(
     r"不應|不得|不可|不能|不會|不要|不准|不再|禁止|沒有|無法"
     r"|不存在|不包含|不顯示|不出現|不回傳|不允許|不洩漏|不暴露"
     r"|\bshould\s+not\b|\bmust\s+not\b|\bshall\s+not\b|\bcannot\b"
-    r"|\bnot\b|\bnever\b|\bno\s+longer\b",
+    r"|\bnot\b(?!\s+(?:only|empty)\b)|\bnever\b|\bno\s+longer\b",
     re.I,
 )
 

@@ -12,8 +12,15 @@ hook/lint/CI 自動強制**——已決 RFC（_26/_27）曾滯留 active/ 直到
 的 ``build/planning/active/`` —— 舊凍結版的 active/ 是 Copy-on-Evolve 歷史快照，不可掃（會誤報）。
 對每個 RFC 以「最低誤報」雙信號判已決：
   (a) 宣告 ``落地版本：AISDLC_SDD_vX`` 且該版**目錄已存在於磁碟**（已落地＝已決、已凍結）；
-  (b) 顯式結案狀態行 ``狀態：已決/結案/archived/closed``。
+  (b) 顯式結案狀態行 ``狀態：已決/decided/結案/archived/closed``。
 genuinely-proposed RFC 兩者皆無（其用 前置基線/目標版本），故近零誤報。
+
+**RFC 狀態欄標準慣例（improving_33 W-33-2 / DEF-30-001，本 lint 即 SSOT）**：
+每個 RFC 應於開頭以行首欄位宣告 ``**狀態**：proposed``（提案中／待決）或
+``**狀態**：decided``（已決／已落地，亦可用 ``已決``）。DEF-30-001 揭露：現有 RFC 狀態標記
+不統一（``已歸檔``／``EXECUTED``／無），致雙信號 lint 無法覆蓋所有已決 RFC。標準化後：
+  - active/ RFC **缺**標準 ``狀態`` 欄 → advisory **warn**（不阻擋；強制慣例被遵循）；
+  - 已決 RFC 滯留 active/ 必帶 ``狀態：decided`` → 被既有 decided 偵測攔下（覆蓋缺口閉合）。
 """
 from __future__ import annotations
 
@@ -26,10 +33,14 @@ VERSION_RE = re.compile(r"AISDLC_SDD_v0\.\d+")
 # 容忍 markdown 粗體（真實格式 ``**落地版本**：``）與縮排，但**不**誤配 inline-code 範例 / 句中
 # 提及（如本 lint 的 RFC 文件本身為說明規則而引用這些 token —— dogfooding 當場揭露之誤報源）。
 _LANDED_LINE_RE = re.compile(r"^\s*\**落地版本\**[:：][^\n]*", re.MULTILINE)
-# 顯式結案狀態行（同錨定行首，避免 meta 文件誤報）
+# 顯式結案狀態行（同錨定行首，避免 meta 文件誤報）。W-33-2：加標準英文 token ``decided``
+# （補 ``已決``），使標準 ``**狀態**：decided`` 被識別為已決（DEF-30-001 標準化）。
 _CLOSED_STATUS_RE = re.compile(
-    r"^\s*\**狀態\**[:：]\s*(已決|結案|archived|closed)", re.MULTILINE | re.IGNORECASE
+    r"^\s*\**狀態\**[:：]\s*(已決|decided|結案|archived|closed)",
+    re.MULTILINE | re.IGNORECASE,
 )
+# W-33-2（DEF-30-001）：任一行首 ``**狀態**：`` 欄位是否存在（標準慣例強制；缺即 advisory warn）。
+_STATUS_FIELD_RE = re.compile(r"^\s*\**狀態\**[:：]", re.MULTILINE)
 
 
 def discover_frozen_versions(repo_root: str) -> set[str]:
@@ -77,14 +88,45 @@ def find_decided_rfcs_in_active(active_dir: str, frozen_versions: set[str]) -> l
     return violations
 
 
-def lint(repo_root: str) -> list[tuple[str, str]]:
-    """解析最新演化版，掃其 ``build/planning/active/``，回傳違規清單。"""
-    frozen = discover_frozen_versions(repo_root)
-    latest = latest_version(frozen)
+def find_active_rfcs_missing_status(active_dir: str) -> list[str]:
+    """掃描 active_dir 下所有 ``*.md``，回傳缺標準行首 ``**狀態**：`` 欄的檔名清單.
+
+    W-33-2（DEF-30-001）：advisory — 缺欄不阻擋（exit 不受影響），僅 warn 促慣例採納。
+    """
+    missing: list[str] = []
+    if not os.path.isdir(active_dir):
+        return missing
+    for name in sorted(os.listdir(active_dir)):
+        if not name.endswith(".md"):  # 略過 .gitkeep 等非 RFC 檔
+            continue
+        with open(os.path.join(active_dir, name), encoding="utf-8") as f:
+            if not _STATUS_FIELD_RE.search(f.read()):
+                missing.append(name)
+    return missing
+
+
+def _latest_active_dir(repo_root: str) -> str | None:
+    """回傳最新演化版的 ``build/planning/active/`` 路徑（無版本則 None）。"""
+    latest = latest_version(discover_frozen_versions(repo_root))
     if latest is None:
+        return None
+    return os.path.join(repo_root, latest, "build", "planning", "active")
+
+
+def lint(repo_root: str) -> list[tuple[str, str]]:
+    """解析最新演化版，掃其 ``build/planning/active/``，回傳違規清單（已決 RFC 滯留）。"""
+    active_dir = _latest_active_dir(repo_root)
+    if active_dir is None:
         return []
-    active_dir = os.path.join(repo_root, latest, "build", "planning", "active")
-    return find_decided_rfcs_in_active(active_dir, frozen)
+    return find_decided_rfcs_in_active(active_dir, discover_frozen_versions(repo_root))
+
+
+def missing_status(repo_root: str) -> list[str]:
+    """解析最新演化版，掃其 active/，回傳缺標準 ``**狀態**：`` 欄的檔名（advisory）。"""
+    active_dir = _latest_active_dir(repo_root)
+    if active_dir is None:
+        return []
+    return find_active_rfcs_missing_status(active_dir)
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -97,6 +139,9 @@ def main(argv: list[str] | None = None) -> int:
     argv = sys.argv[1:] if argv is None else argv
     repo_root = argv[0] if argv else os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     violations = lint(repo_root)
+    # W-33-2（DEF-30-001）：advisory 缺標準狀態欄 warn（不影響 exit code，僅促慣例採納）。
+    for name in missing_status(repo_root):
+        print(f"::warning:: RFC 缺標準 **狀態** 欄（建議 proposed/decided，DEF-30-001）：{name}")
     if not violations:
         print("✅ RFC 生命週期 lint：最新版 active/ 無已決 RFC 滯留")
         return 0

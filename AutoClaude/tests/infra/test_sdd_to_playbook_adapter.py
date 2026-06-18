@@ -443,6 +443,51 @@ class TestNegativeStatusAssertionFidelity:
         assert not re.search(c.expected_regex, "回應 500 洩漏內部錯誤")
 
 
+class TestNegationIdiomFidelity:
+    """W-33-1（DEF-31-001）：裸 not 排除「not only…（but）」「is not empty」慣用語——
+    此處 not 非否定其後引號，須維持正向；同時保證真否定（not contain）與強標記
+    （should not）不受影響。"""
+
+    def test_not_only_idiom_keeps_positive(self):
+        # 「not only X but …」：not 為連接詞片語，引號斷言仍為正向（非否定）
+        regex, weak = _gtr(_block('Then the response is not only valid but returns "token"'))
+        assert weak is False
+        assert regex == re.escape("token")
+        assert "(?!" not in regex and "\\A" not in regex
+        assert re.search(regex, "got token=abc")
+
+    def test_is_not_empty_idiom_keeps_positive(self):
+        # 「is not empty」：not empty 為存在斷言，其後引號為正向
+        regex, weak = _gtr(_block('Then the result list is not empty and contains "user_id"'))
+        assert weak is False
+        assert regex == re.escape("user_id")
+        assert "(?!" not in regex and "\\A" not in regex
+
+    def test_genuine_not_contain_still_negative(self):
+        # 防退化：真否定「does not contain X」（not 後非 only/empty）仍正確判為負向
+        regex, weak = _gtr(_block('Then the response does not contain "password"'))
+        assert weak is False
+        assert regex == r"(?s)\A(?!.*password)"
+        assert not re.search(regex, "leaked password=secret")
+        assert re.search(regex, "all clean output")
+
+    def test_idiom_then_genuine_negation_left_scan(self):
+        # .search 左掃：首個 not 命中慣用語被排除，第二個真否定 not 仍命中 → 引號負向
+        regex, weak = _gtr(_block(
+            'Then the list is not empty but does not contain "spam"'))
+        assert weak is False
+        assert regex == r"(?s)\A(?!.*spam)"
+        assert not re.search(regex, "found spam in body")
+        assert re.search(regex, "clean body")
+
+    def test_strong_marker_negation_unaffected(self):
+        # 防退化哨兵：強標記 should not 不受裸 not 收斂影響，仍正確分流負向
+        regex, weak = _gtr(_block(
+            'Then the page shows "welcome"', 'And it should not contain "error"'))
+        assert weak is False
+        assert regex == r"(?s)\A(?=.*welcome)(?!.*error)"
+
+
 class TestInjectionDefense:
     """§1.3 消毒攻防：黑名單字元 / 非白名單片段一律 SpecTaintedError。"""
 
