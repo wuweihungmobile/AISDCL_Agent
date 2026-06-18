@@ -1,0 +1,18 @@
+case_id: VOC-noise-01
+expect: noise_invention
+genesis:
+  source: secret
+  transform: count
+candidates:
+- real_quality: 0.6
+  existing_cost: 2.0
+  features:
+    secret.count: 5.0
+- real_quality: 0.6
+  existing_cost: 3.0
+  features:
+    secret.count: 0.0
+- real_quality: 0.4
+  existing_cost: 4.0
+  features:
+    secret.count: 8.0

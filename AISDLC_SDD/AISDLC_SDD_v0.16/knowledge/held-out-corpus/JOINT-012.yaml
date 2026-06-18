@@ -1,0 +1,16 @@
+# Phase P / ACT-118 — pipeline 級聯合 held-out 現實代理語料（凍結 + content-hashed）
+#
+# 接縫 Goodhart 假優（tuned scorer = adversarial）：弱化/放寬該評分器在 per-scorer 樸素視角『沒退步』，但整套套進 pipeline 聯合重放整體變差（接縫 Goodhart）。
+# 某評分器 profile 對候選的成本 = Σ weight(name) × feature(name)；聯合選中 = 各評分器成本之和最低。
+# 只有 joint_calibration_oracle 讀本檔；scorer_calibration_registry（生成器）看不到。
+case_id: JOINT-012
+expect: seam_goodhart
+tuned_scorer: adversarial
+candidate_profile: {namespace: "adversarial-profile:", weights: {attack_strength_w: 0.0, breadth_w: 0.5}}
+candidates:
+  - real_quality: 0.15          # 整體很差候選（唯有該評分器被弱化才被選中）
+    features:
+      adversarial: {attack_strength_w: 1.0, breadth_w: 0.0}
+  - real_quality: 0.88          # 整體穩健候選（incumbent 選它）
+    features:
+      adversarial: {attack_strength_w: 0.0, breadth_w: 1.0}

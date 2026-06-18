@@ -176,3 +176,10 @@ AISDLC_SDD_v0.14/chaos-report.json
 AISDLC_SDD_v0.15/build/reports/
 AISDLC_SDD_v0.15/arch-fitness.json
 AISDLC_SDD_v0.15/chaos-report.json
+
+# ── v0.16 runtime 取證產物排除（improving_38 B 軌 DEF-19-001 catch 覆蓋 5/39→7/39 R-9.3+R-SELF-STRIDE）──
+# 同 v0.13~v0.15：FSM 種子模板在 tracked 源碼位 tools/fsm_runtime/templates/，build/reports/
+# **整樹排除、無需 negate idiom**（輸入/輸出分離）。runtime 狀態檔仍寫 build/reports/fsm/ 並排除。
+AISDLC_SDD_v0.16/build/reports/
+AISDLC_SDD_v0.16/arch-fitness.json
+AISDLC_SDD_v0.16/chaos-report.json

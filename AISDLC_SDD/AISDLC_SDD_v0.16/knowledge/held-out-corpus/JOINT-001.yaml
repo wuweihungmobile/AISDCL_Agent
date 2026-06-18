@@ -1,0 +1,22 @@
+# Phase P / ACT-118 — pipeline 級聯合 held-out 現實代理語料（凍結 + content-hashed）
+#
+# 跨評分器接縫 Goodhart 試金石：一個 pipeline 問題、兩個候選結果及其『已知整體真實品質』。
+# 某評分器 profile 對候選的成本 = Σ weight(name) × feature(name)；聯合選中 = 各評分器成本之和最低。
+# 只有 joint_calibration_oracle 讀本檔；scorer_calibration_registry（生成器）看不到。
+#
+# 本 case 演示「弱化 adversarial 一個評分器，會使整體很差的 BAD 候選因不再被攻擊懲罰而被選中」：
+#   - incumbent 向量（adversarial attack_strength_w=1.0）→ BAD 的 adv 成本 5.0 → 選 GOOD（真實 0.9）
+#   - 候選向量（adversarial attack_strength_w=0）→ BAD 的 adv 成本歸零 → 選 BAD（真實 0.2）
+# fragility / ambiguity 各自的 per-scorer oracle 看不到這個接縫效應；唯有 pipeline 級聯合 oracle 攔得住。
+case_id: JOINT-001
+candidates:
+  - real_quality: 0.9          # GOOD：整體真實品質高
+    features:
+      adversarial: {attack_strength_w: 0.5, breadth_w: 0.5}
+      fragility: {threshold_w: 1.0, history_w: 1.0}
+      ambiguity: {block_threshold_w: 1.0, dimension_w: 1.0}
+  - real_quality: 0.2          # BAD：整體真實品質差，僅在 adversarial 被弱化時才會被選中
+    features:
+      adversarial: {attack_strength_w: 5.0, breadth_w: 0.0}
+      fragility: {threshold_w: 0.0, history_w: 0.0}
+      ambiguity: {block_threshold_w: 0.0, dimension_w: 0.0}
