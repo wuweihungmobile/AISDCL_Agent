@@ -64,8 +64,14 @@ def _run(repo: Path, *args: str) -> subprocess.CompletedProcess:
 
 @pytest.fixture
 def repo():
-    """與 REPO_ROOT 同碟的暫存 git repo（init + 一個 baseline commit 使 HEAD 存在）。"""
-    d = Path(tempfile.mkdtemp(prefix=".coe_tmp_", dir=str(REPO_ROOT)))
+    """暫存 git repo（init + 一個 baseline commit 使 HEAD 存在）。
+
+    建於**系統暫存目錄**（非 REPO_ROOT 內）——git-archive 版 helper 全程走相對路徑（helper 複製進
+    repo、以 cwd 相對呼叫），不再需「與 REPO_ROOT 同碟」；且若 Windows 下 git handle 鎖住致
+    teardown 的 rmtree 失敗而洩漏，殘留落在系統暫存（OS 自清），**絕不污染 repo 工作樹**
+    （舊版用 dir=REPO_ROOT 曾洩漏 49 個 .coe_tmp_* 進 AISDLC_SDD/）。
+    """
+    d = Path(tempfile.mkdtemp(prefix="coe_test_"))
     _git(d, "init", "-q")
     (d / ".seed").write_text("seed\n", encoding="utf-8")
     _git(d, "add", ".seed")
