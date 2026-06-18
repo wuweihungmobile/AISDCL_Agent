@@ -265,7 +265,14 @@ class SddToPlaybookAdapter:
                 continue  # 量化 NFR 斷言不可由文字推導
             status = _STATUS_CODE.search(line)
             if status:
-                parts = [status.group(1)]
+                code = status.group(1)
+                # W-32-1：否定狀態碼斷言（「不應回傳 500」/ must not return 403）→ 要求該碼
+                # 不出現。修正與 W-31-1 引號路徑對稱的 mis-specify：原 (?i)(500) 反而「要求」
+                # 500 出現（語意顛倒）。負向 lookahead 在 re.search 下需 \A 錨定（同 W-31-1）。
+                # 僅否定狀態碼數字（canonical 信號、case 無關）；尾隨描述片語刻意不納入。
+                if _NEGATION_MARKER.search(line[: status.start()]):
+                    return rf"(?s)\A(?!.*{code})", False
+                parts = [code]
                 if status.group(2):
                     parts.append(re.escape(status.group(2).strip().lower()))
                 return "(?i)(" + "|".join(parts) + ")", False

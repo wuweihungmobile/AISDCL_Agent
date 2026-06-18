@@ -366,6 +366,83 @@ class TestNegativeAssertionFidelity:
         assert "\\A" not in regex and "(?!" not in regex
 
 
+_NEG_STATUS_SPEC = """# Test Contract Specification — Negative Status
+
+場景：security 安全強化
+
+## 1. AC → AT 映射表
+
+| AC ID | AC 描述 | AT ID | AT 描述 | 自動化 | 測試類型 | 狀態 |
+|-------|---------|-------|---------|-------|---------|------|
+| AC-032-1 | 不洩漏內部錯誤碼 | AT-032-1-1 | 未授權不得回傳 500 | ✅ | Integration | □ |
+
+## 2. AT 格式
+
+```gherkin
+# AT-032-1-1
+Scenario: 不洩漏內部錯誤
+  Given 未授權請求
+  When 存取受保護資源
+  Then 系統不應回傳 500
+```
+"""
+
+
+class TestNegativeStatusAssertionFidelity:
+    """W-32-1：否定狀態碼斷言保真度（AC-32-1）。修正與 W-31-1 引號路徑對稱的
+    mis-specify——「不應回傳 500」原被譯為 (?i)(500)＝要求 500 出現（語意顛倒）；
+    本輪改為 \\A(?!.*500) 要求該狀態碼不出現。"""
+
+    def test_single_negative_status_requires_absence(self):
+        regex, weak = _gtr(_block("Then 系統不應回傳 500"))
+        assert weak is False
+        assert regex == r"(?s)\A(?!.*500)"
+        # 不含 500 → 通過；含 500 → 不過（語意未顛倒）
+        assert re.search(regex, "回應 200 OK 一切正常")
+        assert not re.search(regex, "伺服器回傳 500 Internal Server Error")
+
+    def test_negative_status_english_marker(self):
+        regex, weak = _gtr(_block("Then the API must not return 403"))
+        assert weak is False
+        assert regex == r"(?s)\A(?!.*403)"
+        assert not re.search(regex, "got 403 forbidden")
+        assert re.search(regex, "got 200 ok")
+
+    def test_positive_status_unchanged_sentinel(self):
+        # 防退化哨兵：正向狀態碼維持 improving_01 既有 (?i)(code|phrase) 格式，
+        # 絕不誤套負向 \A/(?! （保護「回傳 201 Created」等正向路徑 bit-for-bit 不變）。
+        regex, weak = _gtr(_block("Then 回傳 201 Created"))
+        assert weak is False
+        assert regex == "(?i)(201|created)"
+        assert "\\A" not in regex and "(?!" not in regex
+
+    def test_negative_status_ignores_trailing_phrase(self):
+        # scope 邊界：僅否定狀態碼數字，尾隨描述片語刻意不納入（不出現 (?i)、不否定 phrase）
+        regex, weak = _gtr(_block("Then 不得回傳 500 Internal Server Error"))
+        assert weak is False
+        assert regex == r"(?s)\A(?!.*500)"
+        assert "internal" not in regex.lower()
+
+    def test_quoted_wins_over_negative_status(self):
+        # quoted-wins 設計保留：同時含引號字面值時走引號路徑，狀態碼（含其否定）不評估。
+        regex, weak = _gtr(_block(
+            "Then 系統不應回傳 500", "And 顯示訊息「查詢成功」"))
+        assert weak is False
+        assert regex == re.escape("查詢成功")
+        assert "500" not in regex
+
+    def test_end_to_end_negative_status_regex(self, tmp_path):
+        spec_dir = _write_spec(tmp_path, text=_NEG_STATUS_SPEC,
+                               name="TEST-CONTRACT-SPEC-NegStatus.md")
+        _write_fsm_state(tmp_path)
+        spec = SddToPlaybookAdapter().load_spec(str(spec_dir))
+        c = next(c for c in spec.contracts if c.at_id == "AT-032-1-1")
+        assert c.weak_regex is False
+        assert c.expected_regex == r"(?s)\A(?!.*500)"
+        assert re.search(c.expected_regex, "回應 200 給未授權者")
+        assert not re.search(c.expected_regex, "回應 500 洩漏內部錯誤")
+
+
 class TestInjectionDefense:
     """§1.3 消毒攻防：黑名單字元 / 非白名單片段一律 SpecTaintedError。"""
 
