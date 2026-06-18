@@ -167,7 +167,7 @@
 closure-evidence:
   base_sha: 0936eaff83741af9e5359327f803d7314019e2bd  # 本輪所建之上的 HEAD（improving_38 收尾後）
   claimed_commits:
-    - TBD  # 結案 commit 後以 backfill commit 回填（同 improving_38 d2e854a 先例）
+    - 41560b5b9c17c8cb8a209698e909b3041d4a65fa
   claimed_tag: v2026.06.18-37
   pytest:
     autoclaude: "3221 passed / 122 skipped / 0 failed（未動）"
