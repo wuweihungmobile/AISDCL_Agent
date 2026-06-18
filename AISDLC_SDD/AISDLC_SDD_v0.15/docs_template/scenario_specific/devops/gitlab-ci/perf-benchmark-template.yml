@@ -1,0 +1,213 @@
+# ============================================================
+# AISDLC v0.09 - Performance Benchmark Gate (P2)
+# GitLab CI Template
+# ============================================================
+#
+# 使用方式:
+#   1. 在 .gitlab-ci.yml 中引入此範本:
+#      include:
+#        - local: 'ci/templates/perf-benchmark-template.yml'
+#   2. 依專案語言調整 benchmark 命令
+#   3. 確保 Layer 0 + Layer 1 已配置
+#
+# 雙層效能測試模型:
+#   PR 階段:     Micro-Benchmark（< 2 分鐘）→ 退化 > 10% 阻塞
+#   Nightly 排程: Full Load Test（30-60 分鐘）→ 結果次日審查
+#
+# 參考文檔: Performance_Benchmark_Gate_Template.md
+# ============================================================
+
+# ─── 變數 ───
+variables:
+  PERF_BASELINE_BRANCH: "main"
+  REGRESSION_THRESHOLD: "10"
+  MICRO_BENCHMARK_TIMEOUT: "120"
+  K6_VERSION: "0.50.0"
+
+# ─── 階段定義 ───
+stages:
+  - perf-micro
+  - perf-load
+
+# ============================================================
+# Job 1: Micro-Benchmark（MR 階段，< 2 分鐘）
+# ============================================================
+micro-benchmark:
+  stage: perf-micro
+  image: node:20-slim    # 依語言替換 image
+  timeout: 5 minutes
+
+  rules:
+    # MR 觸發
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+      when: always
+    # main 分支推送（更新基線）
+    - if: '$CI_COMMIT_BRANCH == $PERF_BASELINE_BRANCH'
+      when: always
+    # 手動觸發
+    - if: '$CI_PIPELINE_SOURCE == "web"'
+      when: manual
+    - when: never
+
+  cache:
+    - key: "perf-baseline-${CI_COMMIT_REF_SLUG}"
+      paths:
+        - .perf-baseline/
+      policy: pull
+    - key:
+        files:
+          - package-lock.json     # 依語言替換
+      paths:
+        - node_modules/           # 依語言替換
+      policy: pull
+
+  before_script:
+    # ─── Node.js ───
+    - npm ci --prefer-offline
+
+    # ─── Python ───
+    # - pip install -r requirements.txt
+
+    # ─── Go ───
+    # (使用 golang image，無需額外安裝)
+
+  script:
+    - echo "⚡ 執行 Micro-Benchmark..."
+
+    # ┌─────────────────────────────────────────┐
+    # │ 依語言替換以下命令                        │
+    # │ Node.js: npm run bench                   │
+    # │ Python:  pytest --benchmark-only          │
+    # │ Go:      go test -bench=. -benchmem ./... │
+    # │ Java:    mvn exec:java -Dexec.mainClass   │
+    # │ Rust:    cargo bench                      │
+    # └─────────────────────────────────────────┘
+    - npm run bench -- --outputFile=benchmark-results.json 2>&1 | tee bench-output.txt
+
+    # 退化偵測
+    - |
+      if [ -f .perf-baseline/baseline.json ] && [ -f benchmark-results.json ]; then
+        echo "📊 比較當前結果與基線..."
+        # 依實際 benchmark 工具實作比較邏輯
+        echo "REGRESSION_DETECTED=false" >> regression.env
+        echo "REGRESSION_PERCENT=0" >> regression.env
+      else
+        echo "⚠️ 無基線可比較，跳過退化偵測"
+        echo "REGRESSION_DETECTED=false" >> regression.env
+        echo "REGRESSION_PERCENT=0" >> regression.env
+      fi
+
+    # 更新基線（僅 main 分支）
+    - |
+      if [ "$CI_COMMIT_BRANCH" = "$PERF_BASELINE_BRANCH" ]; then
+        echo "📦 更新效能基線..."
+        mkdir -p .perf-baseline
+        cp benchmark-results.json .perf-baseline/baseline.json 2>/dev/null || true
+        date -u +%Y-%m-%dT%H:%M:%SZ > .perf-baseline/updated_at.txt
+      fi
+
+    # 退化阻塞
+    - |
+      source regression.env
+      if [ "$REGRESSION_DETECTED" = "true" ]; then
+        echo "🔴 效能退化 ${REGRESSION_PERCENT}% 超過閾值 ${REGRESSION_THRESHOLD}%"
+        exit 1
+      fi
+      echo "✅ Micro-Benchmark 通過"
+
+  # 更新基線快取（僅 main）
+  after_script:
+    - |
+      if [ "$CI_COMMIT_BRANCH" = "$PERF_BASELINE_BRANCH" ]; then
+        echo "快取基線已更新"
+      fi
+
+  cache:
+    - key: "perf-baseline-${PERF_BASELINE_BRANCH}"
+      paths:
+        - .perf-baseline/
+      policy: pull-push
+      when: on_success
+
+  artifacts:
+    paths:
+      - benchmark-results.json
+      - bench-output.txt
+      - regression.env
+    expire_in: 30 days
+    when: always
+
+# ============================================================
+# Job 2: Full Load Test（Nightly 排程，30-60 分鐘）
+# ============================================================
+full-load-test:
+  stage: perf-load
+  image: grafana/k6:latest
+  timeout: 75 minutes
+  tags:
+    - perf-runner    # 專用 Runner，避免佔用通用資源
+
+  rules:
+    # Nightly 排程
+    - if: '$CI_PIPELINE_SOURCE == "schedule"'
+      when: always
+    # 手動觸發
+    - if: '$CI_PIPELINE_SOURCE == "web"'
+      when: manual
+    - when: never
+
+  before_script:
+    # 啟動應用（依專案調整）
+    - echo "⚠️ 請替換為實際應用啟動命令"
+    # - docker-compose up -d
+    # - sleep 10
+
+  script:
+    - echo "🔥 執行 Full Load Test..."
+
+    # Load Test
+    - |
+      echo "── Load Test ──"
+      k6 run tests/performance/load-test.js \
+        --out json=load-test-results.json \
+        --summary-export=load-test-summary.json \
+        2>&1 | tee load-test-output.txt || LOAD_FAILED=true
+
+    # Stress Test
+    - |
+      echo "── Stress Test ──"
+      k6 run tests/performance/stress-test.js \
+        --out json=stress-test-results.json \
+        --summary-export=stress-test-summary.json \
+        2>&1 | tee stress-test-output.txt || STRESS_FAILED=true
+
+    # Soak Test
+    - |
+      echo "── Soak Test ──"
+      k6 run tests/performance/soak-test.js \
+        --out json=soak-test-results.json \
+        --summary-export=soak-test-summary.json \
+        2>&1 | tee soak-test-output.txt || SOAK_FAILED=true
+
+    # 結果彙總
+    - |
+      echo "## 🔥 Full Load Test 結果彙總" > full-load-summary.md
+      echo "" >> full-load-summary.md
+      echo "| 測試 | 狀態 |" >> full-load-summary.md
+      echo "|------|------|" >> full-load-summary.md
+      [ -z "$LOAD_FAILED" ] && echo "| Load Test | ✅ 通過 |" >> full-load-summary.md || echo "| Load Test | ⚠️ 未通過 |" >> full-load-summary.md
+      [ -z "$STRESS_FAILED" ] && echo "| Stress Test | ✅ 通過 |" >> full-load-summary.md || echo "| Stress Test | ⚠️ 未通過 |" >> full-load-summary.md
+      [ -z "$SOAK_FAILED" ] && echo "| Soak Test | ✅ 通過 |" >> full-load-summary.md || echo "| Soak Test | ⚠️ 未通過 |" >> full-load-summary.md
+      cat full-load-summary.md
+
+  # Nightly 測試僅警告，不阻塞
+  allow_failure: true
+
+  artifacts:
+    paths:
+      - "*-results.json"
+      - "*-summary.json"
+      - "*-output.txt"
+      - full-load-summary.md
+    expire_in: 90 days
+    when: always

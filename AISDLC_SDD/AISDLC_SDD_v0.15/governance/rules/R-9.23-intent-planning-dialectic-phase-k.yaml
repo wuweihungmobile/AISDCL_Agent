@@ -1,0 +1,26 @@
+id: R-9.23
+title: Phase K 意圖驅動生成式規劃與辯證接地
+trigger_states:
+  - INTENT_DECOMPOSITION
+  - SPEC_DEBATE
+severity: high
+maturity: active
+spec: >
+  L8 入口（意圖分解 + 辯證消歧 + 因果定位）。9.23.1 分解有界：INTENT_DECOMPOSITION 節點/
+  迭代硬上限 SDD_INTENT_MAX_NODES clamp[4,128] 預設 32、spec-DAG 必 acyclic（偵環即
+  underspecified→HUMAN_PENDING）。9.23.2 規劃不自我裁決：自動產出候選只建議排序，最高 ROI 必經
+  BACKLOG_PRIORITIZED 人工 signoff（Rule 8），planner 永不自選目標執行。9.23.3 辯證有界 +
+  不自我放水：SPEC_DEBATE 輪數 clamp SDD_SPEC_DEBATE_ROUNDS[1,8] 預設 4、強度凍結
+  SPEC_DEBATE_PROFILE_VERSION（變更須 bump，比照 ADVERSARIAL_PROFILE_VERSION/SCORER_VERSION）。
+  9.23.4 辯證 advisory：divergence 不自動阻塞/改寫 AC，僅導 HUMAN_PENDING 澄清。9.23.5 因果定位
+  advisory-only：spec_localizer 只建議 suspect+證據，絕不自動改 spec，餵 SPEC_PATCH_PROPOSAL/
+  PBS-DRIFT/steersman 供人裁決。9.23.6 三源 + TLC 同步：INTENT_DECOMPOSITION(gatekeep)/
+  SPEC_DEBATE(observation) 同步 _HAPPY_PATH ↔ SDD_FSM.tla ↔ SDD_FSM_ENGINE.md，reachable 39→41。
+  對應 intent_decomposer / spec_debate / spec_localizer。禁止：planner 繞過 BACKLOG signoff
+  自選目標、含環或超上限續分解、調辯證強度不 bump、divergence 自動阻塞、localizer 自動改 spec、
+  2 新狀態不同步 .tla。
+test_ref: tools/fsm_runtime/tests/test_phase_k.py
+scaffold_roi:
+  fire_count: 0
+  catch_count: 0
+  false_positive_count: 0

@@ -1,0 +1,26 @@
+case_id: RCR-true-06
+expect: true_recursion
+note: a 2-node inter-recursive operator (mul-fold over a rank-descending call graph
+  of sq(sum), computing sum^4) rescues a low-magnitude high-quality candidate that
+  the non-recursive operator family's existing_cost baseline misses; genuine inter-operator
+  recursive interaction needed (call graph carries a well-founded rank measure, decidably
+  terminating — NOT expressible by a single non-recursive operator)
+candidates:
+- real_quality: 0.44
+  existing_cost: 1.6
+  features:
+    rollback_steps: 8.0
+    blast_radius: 8.0
+    canary_gap: 9.0
+- real_quality: 0.85
+  existing_cost: 4.8
+  features:
+    rollback_steps: 3.0
+    blast_radius: 1.0
+    canary_gap: 1.0
+- real_quality: 0.59
+  existing_cost: 3.0
+  features:
+    rollback_steps: 5.0
+    blast_radius: 4.0
+    canary_gap: 5.0

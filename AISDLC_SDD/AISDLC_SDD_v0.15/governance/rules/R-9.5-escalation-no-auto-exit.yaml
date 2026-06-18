@@ -1,0 +1,18 @@
+id: R-9.5
+title: ESCALATION 不可自動退出
+trigger_states:
+  - ESCALATION
+  - ESCALATION_FINAL
+  - TERMINATED
+severity: critical
+maturity: active
+spec: >
+  進入 ESCALATION 後系統產出 Abort Report（build/reports/abort/）並停止執行、等待人工
+  決策；人工中止 → TERMINATED（產出 Context Snapshot），人工修復後 → 走 Session 恢復
+  流程（RESUME_VERIFICATION）。禁止進入 ESCALATION 後自動嘗試恢復。對應 snapshot.py /
+  steersman_renderer.py。
+test_ref: tools/fsm_runtime/tests/test_auto_recovery.py
+scaffold_roi:
+  fire_count: 0
+  catch_count: 0
+  false_positive_count: 0
