@@ -53,9 +53,12 @@ CONSECUTIVE_RUNS = 7
 MAX_BACKWARD_COMPAT_MISSING = 2
 
 # SD_09 W3 Round 2 audit P0-5：source_sha256 對應 plugin 目錄
+# DEF-35-001 修復（improving_36，方案 A）：goal_synthesis 為單檔（187 行 < plugin_entry 250，
+#   無拆 package 理由），指向單檔本身；compute_source_sha256 以 is_file() 分支支援。
+#   對齊 W1 計畫中 coordinator 採「單檔精準」之先例（SD09_Execution_Guide §T1-C）。
 _MODULE_PATHS: dict[str, Path] = {
     "token_guard": _REPO_ROOT / "autoclaude" / "plugins" / "token_guard",
-    "goal_synthesis": _REPO_ROOT / "autoclaude" / "plugins" / "goal_synthesis",
+    "goal_synthesis": _REPO_ROOT / "autoclaude" / "plugins" / "goal_synthesis_plugin.py",
     "coordinator": _REPO_ROOT / "autoclaude" / "core" / "orchestration",
 }
 
@@ -225,14 +228,27 @@ def load_module_history(history_path: Path, module: str) -> list[dict[str, Any]]
 
 
 def compute_source_sha256(module_path: Path) -> str:
-    """SD_09 W3 Round 2 audit P0-5：計算 plugin 目錄所有 .py SHA-256（截 16 chars）。
+    """SD_09 W3 Round 2 audit P0-5：計算 plugin 模組原始碼 SHA-256（截 16 chars）。
 
     用途：mutation history 區分「同 source 跑 7 次」vs「7 次不同 commit」，避免假鎖定。
     若 module_path 不存在或無 .py 檔 → 回 'unknown'（向下相容測試環境）。
+
+    DEF-35-001 修復（improving_36，方案 A）：支援單檔模組——
+      - module_path 為單檔（is_file）→ 直接 hash 該檔內容；
+      - module_path 為目錄 → hash 目錄下所有 .py（原行為，token_guard/coordinator）。
+    goal_synthesis 為單檔 `goal_synthesis_plugin.py`，原本被當目錄 rglob 致永遠回 'unknown'
+    （GS 無法滿足 unique sha 鎖定、mutmut 找不到目標）。
     """
     if not module_path.exists():
         return "unknown"
     hasher = hashlib.sha256()
+    if module_path.is_file():
+        # 單檔模組（DEF-35-001）：直接 hash 該檔，與目錄分支同樣截 16 chars
+        try:
+            hasher.update(module_path.read_bytes())
+        except (OSError, PermissionError):
+            return "unknown"
+        return hasher.hexdigest()[:16]
     # SD_09 W3 Round 21 audit QA P1-R21-3 修復：顯式 posix path key
     # 避免跨平台（Win NTFS vs Linux ext4 / OS locale）排序差異導致 sha 不一致
     py_files = sorted(module_path.rglob("*.py"), key=lambda p: p.as_posix())

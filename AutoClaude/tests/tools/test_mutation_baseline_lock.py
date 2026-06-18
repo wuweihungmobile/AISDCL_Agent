@@ -520,6 +520,51 @@ def test_compute_source_sha256_missing_dir_returns_unknown(tmp_path: Path) -> No
     assert sha == "unknown"
 
 
+# ----- DEF-35-001（improving_36，方案 A）：單檔模組 source_sha256 支援 -----
+
+
+def test_compute_source_sha256_single_file_resolves_not_unknown(tmp_path: Path) -> None:
+    """單檔模組（is_file）→ 回 16-char sha，非 'unknown'。
+
+    DEF-35-001：goal_synthesis 為單檔，原 rglob 目錄分支永遠回 'unknown'。
+    is_file 分支若被移除（退回純目錄 rglob），單檔將 rglob 自身回空 → 'unknown'，本測試轉紅。
+    """
+    from tools.mutation_baseline_lock import compute_source_sha256
+
+    single = tmp_path / "goal_synthesis_plugin.py"
+    single.write_text("class GoalSynthesisPlugin:\n    pass\n", encoding="utf-8")
+    sha = compute_source_sha256(single)
+    assert sha != "unknown"
+    assert len(sha) == 16
+
+
+def test_compute_source_sha256_single_file_distinguishes_content(tmp_path: Path) -> None:
+    """單檔內容改變 → sha 改變（同 source 同 sha；不同 source 不同 sha）。"""
+    from tools.mutation_baseline_lock import compute_source_sha256
+
+    single = tmp_path / "mod.py"
+    single.write_text("x = 1\n", encoding="utf-8")
+    sha1 = compute_source_sha256(single)
+    assert sha1 == compute_source_sha256(single)
+    single.write_text("x = 999\n", encoding="utf-8")
+    assert compute_source_sha256(single) != sha1
+
+
+def test_module_paths_goal_synthesis_points_to_existing_file() -> None:
+    """DEF-35-001 回歸鎖：_MODULE_PATHS['goal_synthesis'] 須指向實際存在的單檔，
+    且 compute_source_sha256 對其回非 'unknown'。
+
+    意圖：若 _MODULE_PATHS 退回不存在的目錄 `.../plugins/goal_synthesis`，
+    real-path 解析會 missing → 'unknown'，W1 GS mutation 無法鎖定/無法 mutate，本測試轉紅。
+    """
+    from tools.mutation_baseline_lock import _MODULE_PATHS, compute_source_sha256
+
+    gs_path = _MODULE_PATHS["goal_synthesis"]
+    assert gs_path.exists(), f"goal_synthesis source path 不存在: {gs_path}"
+    assert gs_path.is_file(), f"goal_synthesis 應為單檔: {gs_path}"
+    assert compute_source_sha256(gs_path) != "unknown"
+
+
 # ----- P1-2: log mtime guard -----
 
 

@@ -319,7 +319,8 @@ tail -1 logs/nightly_latest.log                                # 期望 END obse
 [  ] T1-B3 (**Architect M2 修復**) .github/workflows/ci.yml `mutation-test-nightly` job 重構：
        - TokenGuardPlugin step 從 nightly 移除，改為週 baseline 抽測（schedule: weekly）
        - 新增 GoalSynthesisPlugin nightly step：
-         * `--paths-to-mutate=autoclaude/plugins/goal_synthesis --tests-dir=tests/plugins/goal_synthesis`
+         * `--paths-to-mutate=autoclaude/plugins/goal_synthesis_plugin.py --tests-dir=tests/plugins/test_goal_synthesis_plugin.py`
+           （**DEF-35-001 修復@improving_36**：goal_synthesis 為單檔非目錄，原 `.../plugins/goal_synthesis` 對不存在目錄；已於 ci.yml dormant job 同步單檔精準）
          * `-p no:xdist` + `--no-progress`
          * `timeout-minutes=45` + `continue-on-error=true`
        - 拆獨立 cron job（與 TG 週 baseline + 未來 Coordinator nightly 三個獨立 schedule，不同小時觸發）
@@ -332,7 +333,7 @@ tail -1 logs/nightly_latest.log                                # 期望 END obse
 
 **G1 驗證**：
 ```bash
-[  ] grep -E "paths-to-mutate=autoclaude/plugins/goal_synthesis" .github/workflows/ci.yml   # 命中
+[  ] grep -E "paths-to-mutate=autoclaude/plugins/goal_synthesis_plugin.py" .github/workflows/ci.yml   # 命中（DEF-35-001：單檔精準）
 [  ] grep -E "schedule:" .github/workflows/ci.yml | wc -l                   # ≥ 3（TG 週 + GS nightly + 未來 Coord）
 [  ] grep -E "token_guard" .mutation_baseline.toml                          # 命中（前置鎖定）
 [  ] ls docs/06_quality/SD09_Mutation_GoalSynthesis_Report.md               # 存在

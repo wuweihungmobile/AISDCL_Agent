@@ -371,8 +371,11 @@ jobs:
       # ADR-SD09-002 §2.3：單一時間 1 個 active pilot module（W1 啟用前 dormant）
       - name: Run mutation test - GoalSynthesisPlugin (dormant W1)
         run: |
-          mutmut run --paths-to-mutate=autoclaude/plugins/goal_synthesis \
-                     --tests-dir=tests/plugins/goal_synthesis \
+          # DEF-35-001 修復（improving_36，方案 A）：goal_synthesis 為單檔非目錄，
+          # 原 --paths-to-mutate=.../plugins/goal_synthesis 對不存在目錄 → mutmut 無目標。
+          # 改單檔精準（source 單檔 ↔ 單測試）；W1 啟用時實跑 mutmut 驗證 kill_rate。
+          mutmut run --paths-to-mutate=autoclaude/plugins/goal_synthesis_plugin.py \
+                     --tests-dir=tests/plugins/test_goal_synthesis_plugin.py \
                      --no-progress \
                      -p no:xdist || true  # mutmut 工具特性：survived mutation 退出碼 != 0；保留 || true 容忍
           mutmut results | tee mutation_goal_synthesis.log
