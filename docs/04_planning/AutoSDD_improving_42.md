@@ -149,7 +149,7 @@
 closure-evidence:
   base_sha: b4d69d9  # 本輪所建之上的 HEAD（improving_41 回填收尾後）
   claimed_commits:
-    - <主 commit sha：回填時填入>
+    - bf3f541fbf39eea278decd3c563c27cc54c6ecf2
   claimed_tag: v2026.06.21-42
   pytest:
     autoclaude: "3235 passed / 122 skipped / 0 failed（floor 3229 +6）"
