@@ -141,7 +141,7 @@
 closure-evidence:
   base_sha: 7461bcb  # 本輪所建之上的 HEAD（improving_40 回填收尾後）
   claimed_commits:
-    - "{{CLAIMED_COMMIT}}"
+    - 5c043216767d2d8a1d0ff7dad31a59027e7bbfe7
   claimed_tag: v2026.06.21-41
   pytest:
     autoclaude: "3229 passed / 122 skipped / 0 failed（floor 3223 +6）"
