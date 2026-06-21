@@ -137,8 +137,9 @@
 ```yaml
 closure-evidence:
   base_sha: cc00788a675dba6e351c3b2ed018f9e85c134429  # 本輪所建之上的 HEAD（improving_39 收尾後）
-  claimed_commits: []        # 待結案 commit 後回填
-  claimed_tag: ""            # 待回填
+  claimed_commits:
+    - c7272273b5d48f7907d9a9af3b9e5b0a847029e0
+  claimed_tag: v2026.06.21-40
   pytest:
     autoclaude: "3223 passed / 122 skipped / 0 failed（floor 3221 +2）"
     adapter_focused: "66 passed（test_sdd_to_playbook_adapter.py + test_gherkin_to_regex.py）"
