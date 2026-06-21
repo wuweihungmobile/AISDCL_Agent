@@ -273,9 +273,16 @@ class SddToPlaybookAdapter:
                 # W-32-1：否定狀態碼斷言（「不應回傳 500」/ must not return 403）→ 要求該碼
                 # 不出現。修正與 W-31-1 引號路徑對稱的 mis-specify：原 (?i)(500) 反而「要求」
                 # 500 出現（語意顛倒）。負向 lookahead 在 re.search 下需 \A 錨定（同 W-31-1）。
-                # 僅否定狀態碼數字（canonical 信號、case 無關）；尾隨描述片語刻意不納入。
+                # W-40-1（DEF-32-002）：與正向路徑對稱，尾隨描述片語一併納入負向 lookahead。
+                # 原僅否定數字，當規格「不應回傳 500」而系統輸出僅含片語（Internal Server
+                # Error）不帶數字時會漏放（誤判通過）。含字母片語 → 加 (?i) 與正向 case 一致；
+                # 片語正規化沿用正向路徑完全相同的 strip().lower()+re.escape（負正對稱可審）。
                 if _NEGATION_MARKER.search(line[: status.start()]):
-                    return rf"(?s)\A(?!.*{code})", False
+                    neg = [code]
+                    if status.group(2):
+                        neg.append(re.escape(status.group(2).strip().lower()))
+                    flags = "(?is)" if status.group(2) else "(?s)"
+                    return flags + "\\A" + "".join(f"(?!.*{p})" for p in neg), False
                 parts = [code]
                 if status.group(2):
                     parts.append(re.escape(status.group(2).strip().lower()))

@@ -416,12 +416,26 @@ class TestNegativeStatusAssertionFidelity:
         assert regex == "(?i)(201|created)"
         assert "\\A" not in regex and "(?!" not in regex
 
-    def test_negative_status_ignores_trailing_phrase(self):
-        # scope 邊界：僅否定狀態碼數字，尾隨描述片語刻意不納入（不出現 (?i)、不否定 phrase）
+    def test_negative_status_includes_trailing_phrase(self):
+        # W-40-1（DEF-32-002）：尾隨描述片語一併納入負向 lookahead（修原刻意排除之漏放）。
+        # 含字母片語 → 全域 (?i)（與正向 case 一致）；片語正規化同正向 strip().lower()+escape。
         regex, weak = _gtr(_block("Then 不得回傳 500 Internal Server Error"))
         assert weak is False
-        assert regex == r"(?s)\A(?!.*500)"
-        assert "internal" not in regex.lower()
+        assert regex == r"(?is)\A(?!.*500)(?!.*internal\ server\ error)"
+
+    def test_negative_status_phrase_only_output_caught(self):
+        # DEF-32-002 核心修復：系統輸出僅含片語不帶數字「500」時，修正前 (?s)\A(?!.*500)
+        # 會漏放（誤判通過）；修正後因片語 lookahead 命中 → 正確擋下。
+        regex, _ = _gtr(_block("Then 不得回傳 500 Internal Server Error"))
+        assert not re.search(regex, "回應 Internal Server Error 給呼叫者")  # 修復前會漏放
+        assert not re.search(regex, "伺服器回傳 500")                      # 數字仍擋
+        assert re.search(regex, "回應 200 OK 一切正常")                    # 正常輸出放行
+
+    def test_negative_status_phrase_case_insensitive(self):
+        # case 一致性：片語在 (?i) 下大小寫無關，任意 case 的洩漏輸出皆攔下。
+        regex, _ = _gtr(_block("Then 不得回傳 500 Internal Server Error"))
+        assert not re.search(regex, "INTERNAL SERVER ERROR leaked")
+        assert not re.search(regex, "internal server error")
 
     def test_quoted_wins_over_negative_status(self):
         # quoted-wins 設計保留：同時含引號字面值時走引號路徑，狀態碼（含其否定）不評估。
