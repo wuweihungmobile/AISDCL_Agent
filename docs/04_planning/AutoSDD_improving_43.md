@@ -112,7 +112,7 @@ Explore agent 實測（2026-06-21，背景審計 a01d6a3a）：
 closure-evidence:
   base_sha: ccfaf5e  # 本輪所建之上的 HEAD（improving_42 回填收尾後）
   claimed_commits:
-    - <主 commit sha：回填時填入>
+    - a353fb194a597473837f12d488b4a3f660a5ab3e
   claimed_tag: v2026.06.22-43
   pytest:
     autoclaude: "3235 passed / 122 skipped / 0 failed（floor 3235，零退化；本輪零觸碰 AutoClaude）"
