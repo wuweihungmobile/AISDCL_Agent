@@ -303,7 +303,12 @@ class SddToPlaybookAdapter:
 
     @staticmethod
     def _then_assertions(gherkin: str) -> list[str]:
-        """抽出 Then 與其後續 And 行（And 僅在 Then 之後才算斷言）。"""
+        """抽出 Then 與其後續 And／But 行（And/But 僅在 Then 之後才算斷言）。
+
+        W-42-1（DEF-42-002）：But 為標準 Gherkin 關鍵字（語意同 And，慣用於負向對比，
+        如「Then 回傳 200 But 不應回傳 500」），原僅認 And → But 行連同其負向斷言被靜默
+        丟棄＝under-specify 漏放；改與 And 同等處理（負向斷言保真度家族 DEF-31/32/41）。
+        """
         out: list[str] = []
         in_then = False
         for raw in gherkin.splitlines():
@@ -311,9 +316,9 @@ class SddToPlaybookAdapter:
             if line.startswith("Then"):
                 in_then = True
                 out.append(line)
-            elif line.startswith("And") and in_then:
+            elif line.startswith(("And", "But")) and in_then:
                 out.append(line)
-            elif line and not line.startswith(("#", "And")):
+            elif line and not line.startswith(("#", "And", "But")):
                 in_then = False
         return out
 

@@ -540,6 +540,83 @@ class TestStatusAssertionAggregation:
         assert not re.search(c.expected_regex, "回應 403 洩漏狀態")  # 第二條負向真攔
 
 
+_BUT_SPEC = """# Test Contract Specification — But Continuation
+
+場景：security 安全強化
+
+## 1. AC → AT 映射表
+
+| AC ID | AC 描述 | AT ID | AT 描述 | 自動化 | 測試類型 | 狀態 |
+|-------|---------|-------|---------|-------|---------|------|
+| AC-042-1 | 成功且不洩漏錯誤碼 | AT-042-1-1 | 回傳 200 但不得回傳 500 | ✅ | Integration | □ |
+
+## 2. AT 格式
+
+```gherkin
+# AT-042-1-1
+Scenario: 成功且不洩漏內部錯誤碼
+  Given 已授權請求
+  When 查詢資源
+  Then 回傳 200
+  But 不應回傳 500
+```
+"""
+
+
+class TestButContinuationFidelity:
+    """W-42-1：But 續行斷言保真度（DEF-42-002）。But 為標準 Gherkin 關鍵字（語意同
+    And，慣用於「Then 正向 But 負向」對比），原 _then_assertions 僅認 And → But 行連同
+    其負向斷言被靜默丟棄＝under-specify 漏放。改與 And 同等處理（負向保真度家族）。"""
+
+    def test_but_negative_status_aggregated(self):
+        # 核心修復：But 行的負向狀態碼納入聚合（先前整行丟棄 → 漏放 500）。
+        regex, weak = _gtr(_block("Then 回傳 200", "But 不應回傳 500"))
+        assert weak is False
+        assert regex == r"(?s)\A(?=.*(?:200))(?!.*500)"
+        assert not re.search(regex, "回傳 200 然後洩漏 500")  # 修正前 But 丟棄 → 漏放
+        assert re.search(regex, "回傳 200 一切正常")           # 含 200 不含 500 → 放行
+
+    def test_but_negative_quoted_aggregated(self):
+        # But 行的負向引號字面值納入聚合（先前整行丟棄 → 漏放「錯誤」）。
+        regex, weak = _gtr(_block("Then 顯示「成功」", "But 不應顯示「錯誤」"))
+        assert weak is False
+        assert regex == r"(?s)\A(?=.*成功)(?!.*錯誤)"
+        assert not re.search(regex, "成功 但出現 錯誤")  # 修正前漏放
+        assert re.search(regex, "成功 完成")             # 含成功不含錯誤 → 放行
+
+    def test_but_english_keyword(self):
+        # 英文 Gherkin：「But must not return 500」同等視為續行負向斷言。
+        regex, weak = _gtr(_block("Then the API returns 200", "But must not return 500"))
+        assert weak is False
+        assert regex == r"(?s)\A(?=.*(?:200))(?!.*500)"
+        assert not re.search(regex, "returns 200 then 500")
+
+    def test_but_before_then_not_assertion_sentinel(self):
+        # 防退化哨兵：But 出現在 Then 之前（Given/When 段）不得當斷言（鏡 And-before-Then）。
+        regex, weak = _gtr(
+            "# AT\nScenario: s\n  Given g\n  But 前置條件\n  When w\n  Then 回傳 201")
+        assert weak is False
+        assert regex == "(?i)(201)"  # 僅取 Then 的 201，But-before-Then 不污染
+
+    def test_and_only_path_unchanged_sentinel(self):
+        # 防退化哨兵：純 And 路徑逐位元維持（But 修復不得改變既有 And 行為）。
+        regex, weak = _gtr(_block("Then 回傳 200", "And 不應回傳 500"))
+        assert weak is False
+        assert regex == r"(?s)\A(?=.*(?:200))(?!.*500)"
+
+    def test_end_to_end_but_regex(self, tmp_path):
+        # 端到端：經 load_spec 完整路徑驗證 But 行負向斷言抵達 expected_regex。
+        spec_dir = _write_spec(tmp_path, text=_BUT_SPEC,
+                               name="TEST-CONTRACT-SPEC-But.md")
+        _write_fsm_state(tmp_path)
+        spec = SddToPlaybookAdapter().load_spec(str(spec_dir))
+        c = next(c for c in spec.contracts if c.at_id == "AT-042-1-1")
+        assert c.weak_regex is False
+        assert c.expected_regex == r"(?s)\A(?=.*(?:200))(?!.*500)"
+        assert re.search(c.expected_regex, "回傳 200 給已授權者")
+        assert not re.search(c.expected_regex, "回傳 200 但洩漏 500")  # But 負向真攔
+
+
 class TestNegationIdiomFidelity:
     """W-33-1（DEF-31-001）：裸 not 排除「not only…（but）」「is not empty」慣用語——
     此處 not 非否定其後引號，須維持正向；同時保證真否定（not contain）與強標記
