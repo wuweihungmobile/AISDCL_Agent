@@ -131,6 +131,14 @@ GATE_SUMMARY+=("scripts/tests:${INFRA_PASSED}")
 echo "############## CI 閘門：RFC 生命週期 lint（DEF-23-005）##############"
 python scripts/rfc_lifecycle_lint.py "${REPO_ROOT}"
 
+# ── Copy-on-Evolve .gitignore 覆蓋 lint（DEF-37-001 advisory）────────────────
+# 每輪 Copy-on-Evolve 建新版後，新版 build/reports/ + arch-fitness.json + chaos-report.json
+# 排除 block 過去全靠人工手補、無自動偵測（improving_37 v0.15 block 漏補實證）。此 lint
+# （版本無關 shared infra，read-only 純觀察者）偵測磁碟最新演化版是否缺對應排除行，缺即
+# advisory warn。**advisory：永遠 exit 0、不阻擋硬閘**（P3，對齊 DEF-37-001 routed「缺即 warn」）。
+echo "############## CI 閘門：.gitignore 覆蓋 lint（DEF-37-001 advisory）##############"
+python scripts/gitignore_coverage_lint.py "${REPO_ROOT}"
+
 echo "✅ 本機 CI 閘門全數通過（版本：${FW_VERSIONS[*]}）"
 # DEF-06-001：單行自證逐軌 passed 計數，免零信任取證捲動截斷輸出
 echo "   逐軌計數：${GATE_SUMMARY[*]}"
