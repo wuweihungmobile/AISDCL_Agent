@@ -1,0 +1,29 @@
+id: SLV-011
+name: C4 component 與 SRD 模組宣告不對齊
+source: ACT-031 manual-authored 2026-04-25
+source_fpl: null   # 非 FPL 衍生（manual-authored per ACT-031）；per Rule 9.11.5 審計鏈顯式宣告
+trust_level: proposed
+scope: SCG-2
+purpose: |
+  SRD 中宣告 `<!-- anchor:c4:<component> -->` 的 component，必須存在於
+  docs/02_architecture/C4-*.md（內嵌 Mermaid）或 *.puml 的 component
+  宣告中，且 SRD 文字必須提及該 component 名稱。常見違反：C4 圖新增
+  component 但 SRD 沒寫到；SRD 提到模組但 C4 圖未繪。
+scan_targets:
+  - docs/02_architecture/SRD-*.md
+required_qualifiers:
+  - 每個 anchor:c4 必能在 C4 diagram source 找到
+  - SRD 內須以 case-insensitive 子字串形式提及 component
+modality:
+  type: c4
+  validator_module: tools.fsm_runtime.modality.c4_adapter
+  validator_function: validate_anchor
+backend_hint: session   # PlantUML / Mermaid 純規則解析
+failure_examples:
+  - "anchor:c4:OrderService；C4 diagram 無 OrderService → orphan_component"
+  - "C4 圖含 PaymentGateway；SRD 全文無 PaymentGateway → srd_missing_module_reference"
+pass_examples:
+  - "C4 Mermaid `Component(OrderService, \"訂單服務\", \"FastAPI\")` + SRD 模組段落『OrderService 處理...』"
+severity: MEDIUM
+blocks_scg: false       # proposed → advisory only
+anchor_type: c4

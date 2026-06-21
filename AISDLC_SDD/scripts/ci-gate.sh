@@ -139,6 +139,13 @@ python scripts/rfc_lifecycle_lint.py "${REPO_ROOT}"
 echo "############## CI 閘門：.gitignore 覆蓋 lint（DEF-37-001 advisory）##############"
 python scripts/gitignore_coverage_lint.py "${REPO_ROOT}"
 
+# ── Agent template 路徑存在性 lint（DEF-AGTREV-002 機械強制）──────────────────
+# v0.18 全面重新接線 broken template_path（方案一）後，加此硬閘掃最新演化版 agent/
+# 所有 template 引用是否解析至磁碟且為「框架根相對」（無 ../），杜絕舊接線再生。
+# 版本無關 shared infra、read-only 純觀察者；broken / 非根相對即非零硬閘擋下。
+echo "############## CI 閘門：Agent template 路徑 lint（DEF-AGTREV-002）##############"
+python scripts/agent_template_lint.py "${REPO_ROOT}"
+
 echo "✅ 本機 CI 閘門全數通過（版本：${FW_VERSIONS[*]}）"
 # DEF-06-001：單行自證逐軌 passed 計數，免零信任取證捲動截斷輸出
 echo "   逐軌計數：${GATE_SUMMARY[*]}"

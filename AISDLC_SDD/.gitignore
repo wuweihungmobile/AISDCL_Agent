@@ -190,3 +190,9 @@ AISDLC_SDD_v0.16/chaos-report.json
 AISDLC_SDD_v0.17/build/reports/
 AISDLC_SDD_v0.17/arch-fitness.json
 AISDLC_SDD_v0.17/chaos-report.json
+
+# ── v0.18 runtime 取證產物排除（agent/* 符規審查 DEF-AGTREV-001~004：broken template 重新接線 + 11 項可自主修復）──
+# 同 v0.13~v0.17：FSM 種子模板在 tracked 源碼位 tools/fsm_runtime/templates/，build/reports/ 整樹排除。
+AISDLC_SDD_v0.18/build/reports/
+AISDLC_SDD_v0.18/arch-fitness.json
+AISDLC_SDD_v0.18/chaos-report.json

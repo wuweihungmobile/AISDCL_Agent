@@ -1,0 +1,24 @@
+id: R-9.7
+title: Phase E M1 精準停機強化
+trigger_states:
+  - "*"
+  - HUMAN_PENDING
+  - AUTO_COMPACT_PENDING
+severity: critical
+maturity: active
+spec: >
+  9.7.1 FSM 雙源一致性：每次 PR/CI 跑 test_md_python_sync，MD 轉換表與 _HAPPY_PATH
+  不一致即 fail；9.7.2 HUMAN_PENDING 逾時守門：≥72h REMINDER、≥168h 自動 ESCALATION；
+  9.7.3 AUTO_COMPACT 單 stage 限流：同一 stage 超過 MAX_AUTO_COMPACT_PER_STAGE=3 即
+  ESCALATION。對應 timeout_checker.py / fsm_runtime.trigger_auto_compact。
+test_ref: tools/fsm_runtime/tests/test_timeout_checker.py
+failure_mode: >
+  HUMAN_PENDING 逾時 ≥168h（wall-clock）未獲人工確認 → timeout_checker 判定 outcome=ESCALATION
+  → 自動進入 ESCALATION（ACT-023）。此即 R-9.7 第 9.7.2 條款守望的失敗模式——人工確認閘逾期
+  失守時真實發生；catch 側結構化歸因到 R-9.7（對應 FSMRuntime.escalate_human_pending_timeout
+  的 record_escalation 落點，無歧義映射非時序猜測，W-37-1）。**僅涵蓋 9.7.2**：9.7.3（AUTO_COMPACT
+  per-stage 超限）的 escalate 落點歸 R-9.2（trigger_auto_compact），不重複歸因（DEF-18-001 寧缺勿濫）。
+scaffold_roi:
+  fire_count: 0
+  catch_count: 0
+  false_positive_count: 0

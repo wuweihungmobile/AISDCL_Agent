@@ -1,0 +1,19 @@
+case_id: INV-redundant-02
+expect: redundant_invention
+invented:
+  op: max
+  probe:
+  - runbook_depth
+candidates:
+- real_quality: 0.62
+  existing_cost: 2.0
+  features:
+    runbook_depth: 2.0
+- real_quality: 0.52
+  existing_cost: 3.5
+  features:
+    runbook_depth: 3.5
+- real_quality: 0.41
+  existing_cost: 5.0
+  features:
+    runbook_depth: 5.0

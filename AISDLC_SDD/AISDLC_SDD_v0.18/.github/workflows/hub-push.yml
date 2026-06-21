@@ -1,0 +1,232 @@
+# AISDLC-SDD — Hub Registry PR Validation (ACT-030 D-30.10 sample)
+#
+# ⚠️ This is a sample workflow for the Hub Registry repo, not for the
+#    AISDLC-SDD framework repo itself.
+#
+# 用途：本檔是 Phase F M2 D-30.10 提供的「Hub Registry 端參考實作」。
+# 下游若要架設自家 Hub Registry repo（per knowledge/hub/REGISTRY-SPEC.md），
+# 將此檔複製到 Hub repo 的 `.github/workflows/hub-push.yml` 即可。
+#
+# 在 framework repo 內保留此檔僅作為治理範例 — 實際觸發於 Hub repo 端。
+#
+# 對應規格：
+#   - knowledge/hub/REGISTRY-SPEC.md §肆 PR-review Gate 流程
+#   - docs/06_quality/HUB-GOVERNANCE-SPEC.md G-30.7（雙層掃描）
+#   - knowledge/hub/trust-ladder.md（external 規則 schema）
+#
+# 前置假設（Hub Registry repo 端）：
+#   1. tools/pii_scanner.py、tools/anonymizer.py、tools/schema_validator.py 與
+#      AISDLC-SDD framework repo 同源（建議以 git submodule 引用 framework
+#      `tools/fsm_runtime/`，或 vendor 後以 CI 檢查版本對齊）。
+#   2. metadata/CONTRIBUTORS.yaml 內登記合法 reviewer 的 GPG fingerprint。
+#   3. requirements-hub.txt 至少含 pyyaml（PII scanner 與 schema validator 依賴）。
+#
+# 安裝 framework tools 的兩個建議路徑（擇一）：
+#   (A) git submodule:
+#         git submodule add https://github.com/aisdlc-sdd/framework framework
+#         然後 step "Install hub tools" 改為 cp framework/AISDLC_SDD_v0.01/tools/fsm_runtime/{pii_scanner,anonymizer}.py tools/
+#   (B) pip install:
+#         pip install aisdlc-sdd-tools==<framework-version>  # 待 framework 套件化後
+#
+# 本 sample 採 (A) submodule 路徑，最易追蹤版本。
+
+name: hub-push
+
+on:
+  pull_request:
+    paths:
+      - "rules/**"
+      - "failure-patterns/**"
+      - "metadata/**"
+
+# 任一 job 失敗即 fail PR，不允許 merge（branch protection 須額外設定 required checks）
+jobs:
+
+  # ──────────────────────────────────────────────────────────────────────
+  # Job 1: pii-rescan
+  # 對 PR 變更檔重跑 framework 同源的 pii_scanner.py，補強 Client 端漏掃。
+  # 對應 G-30.7（雙層掃描）+ REGISTRY-SPEC.md §肆 step 2.1。
+  # ──────────────────────────────────────────────────────────────────────
+  pii-rescan:
+    name: Re-scan PR diff for PII (G-30.7)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout PR with full history
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          submodules: recursive   # framework submodule（路徑 A）
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements-hub.txt
+
+      - name: Compute PR diff file list
+        id: diff
+        run: |
+          git fetch origin "${{ github.base_ref }}"
+          CHANGED=$(git diff --name-only "origin/${{ github.base_ref }}"...HEAD \
+            -- 'rules/**' 'failure-patterns/**' 'metadata/**' || true)
+          echo "files<<EOF" >> "$GITHUB_OUTPUT"
+          echo "$CHANGED"   >> "$GITHUB_OUTPUT"
+          echo "EOF"        >> "$GITHUB_OUTPUT"
+
+      - name: Run PII scanner on diff
+        if: steps.diff.outputs.files != ''
+        run: |
+          python tools/pii_scanner.py \
+            --files "${{ steps.diff.outputs.files }}" \
+            --rules tools/anonymizer_rules.yaml \
+            --report-out build/hub-rescan-report.yaml \
+            --fail-on-hit
+
+      - name: Upload quarantine artifact on hit
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: pii-rescan-quarantine
+          path: build/hub-rescan-report.yaml
+          retention-days: 30
+
+  # ──────────────────────────────────────────────────────────────────────
+  # Job 2: gpg-verify
+  # 驗證 PR 所有 commit 是否經 GPG 簽章，且 fingerprint 在 CONTRIBUTORS allow-list。
+  # 對應 REGISTRY-SPEC.md §參 Merge 策略 + §肆 step 2.2。
+  # ──────────────────────────────────────────────────────────────────────
+  gpg-verify:
+    name: Verify GPG signed commits
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Checkout PR with full history
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Import allow-list GPG keys
+        run: |
+          python <<'PY'
+          import yaml, subprocess, sys
+          with open("metadata/CONTRIBUTORS.yaml") as f:
+              data = yaml.safe_load(f) or {}
+          for c in data.get("contributors", []):
+              key_url = c.get("gpg_key_url")
+              if key_url:
+                  subprocess.run(["curl", "-fsSL", key_url, "-o", "/tmp/key.asc"], check=True)
+                  subprocess.run(["gpg", "--import", "/tmp/key.asc"], check=True)
+          PY
+
+      - name: Verify each commit on PR is signed by allow-list fingerprint
+        run: |
+          BASE="${{ github.event.pull_request.base.sha }}"
+          HEAD="${{ github.event.pull_request.head.sha }}"
+          ALLOW=$(python -c "import yaml; print('\n'.join(c['gpg_fingerprint'] for c in yaml.safe_load(open('metadata/CONTRIBUTORS.yaml'))['contributors']))")
+          FAIL=0
+          for sha in $(git rev-list "$BASE..$HEAD"); do
+            STATUS=$(git verify-commit "$sha" 2>&1 || true)
+            FP=$(echo "$STATUS" | grep -Eo '[A-F0-9]{40}' | head -1 || true)
+            if [ -z "$FP" ]; then
+              echo "::error ::commit $sha not GPG signed"
+              FAIL=1
+            elif ! echo "$ALLOW" | grep -q "$FP"; then
+              echo "::error ::commit $sha signed by $FP not in CONTRIBUTORS allow-list"
+              FAIL=1
+            fi
+          done
+          [ "$FAIL" -eq 0 ]
+
+  # ──────────────────────────────────────────────────────────────────────
+  # Job 3: schema-validate
+  # 驗 SLV YAML schema（沿用 framework slv_generator._validate_rule_doc）+
+  # FPL frontmatter schema（templates/ 對齊）。
+  # 對應 REGISTRY-SPEC.md §玖 Schema Version 承諾。
+  # ──────────────────────────────────────────────────────────────────────
+  schema-validate:
+    name: Validate SLV / FPL schema
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements-hub.txt
+
+      - name: Validate rules/SLV-*.yaml
+        run: |
+          python tools/schema_validator.py \
+            --kind slv \
+            --glob 'rules/SLV-*.yaml' \
+            --strict-trust-level external
+
+      - name: Validate failure-patterns/FPL-*.md frontmatter
+        run: |
+          python tools/schema_validator.py \
+            --kind fpl \
+            --glob 'failure-patterns/FPL-*.md'
+
+      - name: Validate metadata schema
+        run: |
+          python tools/schema_validator.py \
+            --kind metadata \
+            --files metadata/HISTORY.yaml metadata/CONTRIBUTORS.yaml metadata/SCHEMA-VERSION.yaml
+
+  # ──────────────────────────────────────────────────────────────────────
+  # Job 4: anonymize-check
+  # 確認 PR 變更檔內沒有殘留具名專案名 / 客戶名（過 anonymizer 二次掃）。
+  # 對應 G-30.2 + REGISTRY-SPEC.md §肆 step 2.4。
+  # ──────────────────────────────────────────────────────────────────────
+  anonymize-check:
+    name: Check for residual customer / project names
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          submodules: recursive
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements-hub.txt
+
+      - name: Run anonymizer in check-only mode
+        run: |
+          git fetch origin "${{ github.base_ref }}"
+          CHANGED=$(git diff --name-only "origin/${{ github.base_ref }}"...HEAD \
+            -- 'rules/**' 'failure-patterns/**' || true)
+          if [ -z "$CHANGED" ]; then
+            echo "no rule/FPL changes — skip"
+            exit 0
+          fi
+          python tools/anonymizer.py \
+            --check-only \
+            --rules tools/anonymizer_rules.yaml \
+            --files "$CHANGED" \
+            --fail-on-residual
+
+# ──────────────────────────────────────────────────────────────────────
+# Notes for Hub Registry repo maintainers:
+#   - branch protection on `main` 必須 required-status-checks 包含上述 4 個 job
+#   - reviewer signoff 透過 GitHub native review approval 補強（非 workflow 範疇）
+#   - 失敗 PR 禁止 force-delete branch（沿用 G-30.8）— GitHub branch protection 設「Restrict deletions」
+# ──────────────────────────────────────────────────────────────────────

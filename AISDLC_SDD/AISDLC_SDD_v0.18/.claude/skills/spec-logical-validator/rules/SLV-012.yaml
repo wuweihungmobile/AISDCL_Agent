@@ -1,0 +1,28 @@
+id: SLV-012
+name: 自治迴圈安全不變量（執行器自身硬化）
+source: ACT-061 manual-authored 2026-05-31
+source_fpl: null   # 非 FPL 衍生（manual-authored per ACT-061）；per Rule 9.11.5 審計鏈顯式宣告
+trust_level: proposed
+scope: SANDBOX_HARDENING_GATE
+purpose: |
+  進入 EXECUTION_EVALUATION（真實容器執行自己生成的不可信碼）前，執行器自身必須
+  通過 6 類 self-STRIDE 硬化不變量：斷網（--network none）、去權限（--cap-drop ALL）、
+  非 root（--user）、no-new-privileges、資源上限（--memory/--pids-limit）、image
+  allow-list；並（依需求）通過 spec 簽章與相依 lockfile 雜湊。常見違反：以 root +
+  可出網執行未簽署生成碼、相依套件被竄改（supply-chain）、image 不在 allow-list。
+scan_targets:
+  - tools/fsm_runtime/sandbox_runner.py
+  - tools/fsm_runtime/loop_threat_model.py
+required_qualifiers:
+  - DockerBackend 套用 DEFAULT_SECURITY_PROFILE（network=none / cap-drop ALL / 非 root）
+  - image 在 default_image_allowlist() 內
+  - 需網路放寬須走 WAIVER 人工 gate
+failure_examples:
+  - "docker run --rm <image> 無 --network none → info_disclosure（phone-home）"
+  - "image evilcorp/backdoor 不在 allow-list → elevation/tampering"
+  - "spec_signature mismatch 仍進 EXECUTION_EVALUATION → spoofing"
+pass_examples:
+  - "busybox + DEFAULT_SECURITY_PROFILE（斷網/去權限/非 root/資源上限）→ hardening pass"
+severity: HIGH
+blocks_scg: false       # proposed → advisory only（per Rule 9.11.3，人工 review 升 verified 後 enforce）
+anchor_type: null
