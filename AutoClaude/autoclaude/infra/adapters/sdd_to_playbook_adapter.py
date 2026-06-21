@@ -264,29 +264,41 @@ class SddToPlaybookAdapter:
         # 單一正向引號：維持既有逐行推導（向後相容、零行為變化）
         if pos_frags:
             return pos_frags[0], False
+        # W-32-1/W-40-1：否定狀態碼（「不應回傳 500」/ must not return 403）→ 要求該碼（與
+        # 尾隨片語）不出現，修正原 (?i)(500) 語意顛倒；負向 lookahead 在 re.search 下需 \A 錨定。
+        # W-41-1（DEF-41-001）：與引號路徑（244-260）對稱，跨行聚合所有狀態碼斷言——原僅取
+        # 「首條」status 行即 return，致多條負向（不應回傳 500 And 不應回傳 403）只擋首條、或正負
+        # 混合時負向遭丟棄＝under-specify 漏放。改為收集：負向碼/片語各自 (?!.*x)、正向以
+        # (?=.*(?:碼|片語)) 要求出現（片語沿用正向 strip().lower()+re.escape，負正對稱可審）。
+        pos_status: list[str] = []  # 每項 "碼|片語"（alternation：任一出現即表該狀態）
+        neg_status: list[str] = []  # 每項為禁出現片段（碼或片語，各自獨立 lookahead）
+        has_phrase = False
         for line in then_lines:
             if _QUANTITATIVE.search(line):
-                continue  # 量化 NFR 斷言不可由文字推導
+                continue  # 量化 NFR 斷言不可由文字推導（含 500ms 之 500 不誤判為狀態碼）
             status = _STATUS_CODE.search(line)
-            if status:
-                code = status.group(1)
-                # W-32-1：否定狀態碼斷言（「不應回傳 500」/ must not return 403）→ 要求該碼
-                # 不出現。修正與 W-31-1 引號路徑對稱的 mis-specify：原 (?i)(500) 反而「要求」
-                # 500 出現（語意顛倒）。負向 lookahead 在 re.search 下需 \A 錨定（同 W-31-1）。
-                # W-40-1（DEF-32-002）：與正向路徑對稱，尾隨描述片語一併納入負向 lookahead。
-                # 原僅否定數字，當規格「不應回傳 500」而系統輸出僅含片語（Internal Server
-                # Error）不帶數字時會漏放（誤判通過）。含字母片語 → 加 (?i) 與正向 case 一致；
-                # 片語正規化沿用正向路徑完全相同的 strip().lower()+re.escape（負正對稱可審）。
-                if _NEGATION_MARKER.search(line[: status.start()]):
-                    neg = [code]
-                    if status.group(2):
-                        neg.append(re.escape(status.group(2).strip().lower()))
-                    flags = "(?is)" if status.group(2) else "(?s)"
-                    return flags + "\\A" + "".join(f"(?!.*{p})" for p in neg), False
-                parts = [code]
-                if status.group(2):
-                    parts.append(re.escape(status.group(2).strip().lower()))
-                return "(?i)(" + "|".join(parts) + ")", False
+            if not status:
+                continue
+            code = status.group(1)
+            phrase = re.escape(status.group(2).strip().lower()) if status.group(2) else None
+            has_phrase = has_phrase or bool(phrase)
+            if _NEGATION_MARKER.search(line[: status.start()]):
+                neg_status.append(code)
+                if phrase:
+                    neg_status.append(phrase)
+            else:
+                pos_status.append(code + ("|" + phrase if phrase else ""))
+        if neg_status:
+            # 含負向：正向 (?=.*(?:碼|片語)) 要求出現 + 負向 (?!.*片段) 要求不出現（同引號路徑 259）。
+            # 含字母片語 → 全域 (?i) 與正向 case 一致（W-40-1）；單負向無片語逐位元維持
+            # (?s)\A(?!.*碼)、含片語維持 (?is)\A(?!.*碼)(?!.*片語)（哨兵鎖定，零退化）。
+            flags = "(?is)" if has_phrase else "(?s)"
+            parts = [f"(?=.*(?:{p}))" for p in pos_status] + [f"(?!.*{n})" for n in neg_status]
+            return flags + "\\A" + "".join(parts), False
+        if pos_status:
+            # 純正向：維持既有 alternation 格式 (?i)(碼|片語) 取首條（哨兵鎖定，零行為變化）。
+            # 多正向狀態碼語意罕見且歧義，沿用既有「首條 wins」設計，不臆測聚合（對齊 quoted-wins）。
+            return "(?i)(" + pos_status[0] + ")", False
         return _FALLBACK_REGEX, True
 
     @staticmethod

@@ -457,6 +457,89 @@ class TestNegativeStatusAssertionFidelity:
         assert not re.search(c.expected_regex, "回應 500 洩漏內部錯誤")
 
 
+_MULTI_STATUS_SPEC = """# Test Contract Specification — Multi Status
+
+場景：security 安全強化
+
+## 1. AC → AT 映射表
+
+| AC ID | AC 描述 | AT ID | AT 描述 | 自動化 | 測試類型 | 狀態 |
+|-------|---------|-------|---------|-------|---------|------|
+| AC-041-1 | 不洩漏多種錯誤碼 | AT-041-1-1 | 未授權不得回傳 500 或 403 | ✅ | Integration | □ |
+
+## 2. AT 格式
+
+```gherkin
+# AT-041-1-1
+Scenario: 不洩漏多種內部錯誤
+  Given 未授權請求
+  When 存取受保護資源
+  Then 系統不應回傳 500
+  And 系統不應回傳 403
+```
+"""
+
+
+class TestStatusAssertionAggregation:
+    """W-41-1：狀態碼斷言跨行聚合保真度（DEF-41-001）。修正與引號路徑對稱的
+    under-specify——原狀態碼路徑只取「首條」status 行即 return，致多條負向只擋首條、
+    或正負混合時負向遭丟棄（漏放）。改為收集所有 Then/And 狀態碼斷言。"""
+
+    def test_multiple_negative_status_all_aggregated(self):
+        # 核心修復（缺口 A）：兩條負向狀態碼皆須納入 lookahead，非只擋首條。
+        regex, weak = _gtr(_block("Then 系統不應回傳 500", "And 系統不應回傳 403"))
+        assert weak is False
+        assert regex == r"(?s)\A(?!.*500)(?!.*403)"
+        assert not re.search(regex, "回應 403 forbidden")   # 修正前漏放（只擋 500）
+        assert not re.search(regex, "伺服器回傳 500")        # 首條仍擋
+        assert re.search(regex, "回應 200 OK 一切正常")      # 皆不含 → 放行
+
+    def test_positive_and_negative_status_mixed(self):
+        # 核心修復（缺口 B）：正向在前時，原 (?i)(200) 完全丟棄負向 500；改為
+        # (?=.*(?:200)) 要求 200 出現 + (?!.*500) 要求 500 不出現。
+        regex, weak = _gtr(_block("Then 回傳 200", "And 不應回傳 500"))
+        assert weak is False
+        assert regex == r"(?s)\A(?=.*(?:200))(?!.*500)"
+        assert not re.search(regex, "回傳 200 然後洩漏 500")  # 修正前漏放（負向被丟）
+        assert not re.search(regex, "回應 forbidden 缺成功碼")  # 缺正向 200 → 不過
+        assert re.search(regex, "回傳 200 一切正常")           # 含 200 不含 500 → 放行
+
+    def test_multiple_negative_status_with_phrases_case_insensitive(self):
+        # 含片語的多負向：碼與片語各自 (?!)，任一含字母片語 → 全域 (?i)（與 W-40-1 一致）。
+        regex, weak = _gtr(_block(
+            "Then 不得回傳 500 Internal Server Error", "And 不應回傳 403 Forbidden"))
+        assert weak is False
+        assert regex == (
+            r"(?is)\A(?!.*500)(?!.*internal\ server\ error)(?!.*403)(?!.*forbidden)")
+        assert not re.search(regex, "回應 FORBIDDEN 給呼叫者")     # 片語 case 無關仍擋
+        assert not re.search(regex, "internal server error leaked")
+        assert re.search(regex, "回應 200 OK")                     # 皆不含 → 放行
+
+    def test_single_negative_status_unchanged_sentinel(self):
+        # 防退化哨兵：單條負向（無片語）逐位元維持 (?s)\A(?!.*500)，不因聚合路徑改格式。
+        regex, weak = _gtr(_block("Then 系統不應回傳 500"))
+        assert weak is False
+        assert regex == r"(?s)\A(?!.*500)"
+
+    def test_single_positive_status_unchanged_sentinel(self):
+        # 防退化哨兵：單條正向維持 alternation (?i)(碼|片語)，絕不誤套 \A/(?=/(?!。
+        regex, weak = _gtr(_block("Then 回傳 201 Created"))
+        assert weak is False
+        assert regex == "(?i)(201|created)"
+        assert "\\A" not in regex and "(?!" not in regex and "(?=" not in regex
+
+    def test_end_to_end_multi_negative_status_regex(self, tmp_path):
+        spec_dir = _write_spec(tmp_path, text=_MULTI_STATUS_SPEC,
+                               name="TEST-CONTRACT-SPEC-MultiStatus.md")
+        _write_fsm_state(tmp_path)
+        spec = SddToPlaybookAdapter().load_spec(str(spec_dir))
+        c = next(c for c in spec.contracts if c.at_id == "AT-041-1-1")
+        assert c.weak_regex is False
+        assert c.expected_regex == r"(?s)\A(?!.*500)(?!.*403)"
+        assert re.search(c.expected_regex, "回應 200 給未授權者")
+        assert not re.search(c.expected_regex, "回應 403 洩漏狀態")  # 第二條負向真攔
+
+
 class TestNegationIdiomFidelity:
     """W-33-1（DEF-31-001）：裸 not 排除「not only…（but）」「is not empty」慣用語——
     此處 not 非否定其後引號，須維持正向；同時保證真否定（not contain）與強標記
