@@ -34,6 +34,14 @@ import subprocess
 import sys
 from pathlib import Path
 
+# Windows zh-TW 主控台/pipe 預設 cp950：router 自身以 sys.stdout 寫中文（_emit 的休眠/
+# WARN 訊息、轉發 child 輸出）時會被 cp950 編碼，CC 端以 UTF-8 讀回 → 亂碼（DEF-43-001
+# 之 b：連 no-op 休眠訊息都亂碼）。對齊 sibling 腳本（sync_exposed_skills.py /
+# framework_status_snapshot.py）強制自身串流為 UTF-8，確保整條鏈端到端 UTF-8。
+for _stream in (sys.stdout, sys.stderr):
+    if hasattr(_stream, "reconfigure"):
+        _stream.reconfigure(encoding="utf-8", errors="replace")  # type: ignore[attr-defined]
+
 # router 位於 <repo_root>/.claude/hooks/sdd_hook_router.py → parents[2] == repo_root。
 # 優先採 CC 注入的 CLAUDE_PROJECT_DIR（最可靠），否則回退 __file__ 自我定位。
 _ENV_ROOT = os.environ.get("CLAUDE_PROJECT_DIR")
@@ -107,6 +115,12 @@ def main(argv: list[str]) -> int:
 
     # 轉交實體 hook：原樣轉發 stdin → child，child 的 stdout/stderr/exit code 原樣回傳。
     stdin_data = "" if sys.stdin.isatty() else sys.stdin.read()
+    # Windows zh-TW 預設主控台/pipe 編碼為 cp950：SDD 實體 hook 未 reconfigure stdout 時
+    # 會以 cp950 印中文，而本 router 以 encoding="utf-8" 解 child 輸出 → reader thread
+    # 拋 UnicodeDecodeError(0xb7) 崩潰，方案 C 在 Windows 上整個失效（DEF-43-001）。
+    # 修法：①強制 child 以 UTF-8 輸出（PYTHONUTF8/PYTHONIOENCODING），與本端解碼對齊；
+    # ②errors="replace" 作後盾，即使 child 仍吐非 UTF-8 也絕不崩潰（守 router「永不讓 CC 崩潰」）。
+    child_env = {**os.environ, "PYTHONUTF8": "1", "PYTHONIOENCODING": "utf-8"}
     try:
         proc = subprocess.run(
             [sys.executable, str(target)],
@@ -114,6 +128,8 @@ def main(argv: list[str]) -> int:
             capture_output=True,
             text=True,
             encoding="utf-8",
+            errors="replace",
+            env=child_env,
             cwd=str(REPO_ROOT),
         )
     except Exception as exc:  # noqa: BLE001 — 永不讓 CC 崩潰
