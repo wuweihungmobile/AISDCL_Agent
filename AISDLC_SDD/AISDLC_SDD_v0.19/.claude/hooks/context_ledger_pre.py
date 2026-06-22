@@ -28,10 +28,16 @@ _SDD_ROOT = Path(__file__).resolve().parents[2]
 if str(_SDD_ROOT) not in sys.path:
     sys.path.insert(0, str(_SDD_ROOT))
 
-_RAW_MAX_CONTEXT = int(os.environ.get("SDD_MAX_CONTEXT", "200000"))
-# QA Round-5 P0: guard against operator misconfiguration (env=0 / negative).
-# A zero budget would crash every ratio calculation with ZeroDivisionError
-# and deny every subsequent tool call. Floor to 200000 to degrade gracefully.
+# QA Round-5 P0 + DEF-CLDREV-012: guard against operator misconfiguration.
+# A zero/negative budget would crash every ratio calculation with
+# ZeroDivisionError; a non-numeric value (e.g. "abc", "1.5") would raise
+# ValueError at import time and silently disable the whole context-budget gate
+# (cumulative tokens stop being recorded, 85% warn / 95% deny / auto-compact
+# never fire). Both classes degrade gracefully to the 200000 default.
+try:
+    _RAW_MAX_CONTEXT = int(os.environ.get("SDD_MAX_CONTEXT", "200000"))
+except (TypeError, ValueError):
+    _RAW_MAX_CONTEXT = 200000
 MAX_CONTEXT = _RAW_MAX_CONTEXT if _RAW_MAX_CONTEXT > 0 else 200000
 WARN_RATIO = 0.85
 AUTO_COMPACT_RATIO = 0.90

@@ -146,7 +146,7 @@ retry_count ≥ 5 次：
 
 **重要**：不得在 retry_count 耗盡前繞過 /sdd-gate 強行合併 PR。
 
-相關文件：[SDD_FSM_ENGINE.md](../../workflow/sdd-fsm-engine/SDD_FSM_ENGINE.md) | [SDD_ESCALATION_PROTOCOL.md](../../workflow/sdd-escalation/SDD_ESCALATION_PROTOCOL.md)
+相關文件：[SDD_FSM_ENGINE.md](../../../workflow/sdd-fsm-engine/SDD_FSM_ENGINE.md) | [SDD_ESCALATION_PROTOCOL.md](../../../workflow/sdd-escalation/SDD_ESCALATION_PROTOCOL.md)
 
 ---
 

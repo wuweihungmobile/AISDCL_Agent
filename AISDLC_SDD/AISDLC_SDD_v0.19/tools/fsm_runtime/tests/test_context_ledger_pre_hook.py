@@ -254,5 +254,36 @@ class ZeroTokenEscalationTests(unittest.TestCase):
         self.assertNotIn("AUTO-COMPACT", hook_out.get("additionalContext", ""))
 
 
+class MaxContextGuardTests(unittest.TestCase):
+    """DEF-CLDREV-002 (symmetric) + DEF-CLDREV-012: a misconfigured
+    SDD_MAX_CONTEXT (zero / negative / non-numeric) must NOT crash the pre hook
+    at import time. A crash here silently disables the entire context-budget gate
+    (cumulative tokens stop recording, 85% warn / 95% deny / auto-compact never
+    fire) — the opposite of the hook's purpose."""
+
+    def test_zero_floors_to_default(self) -> None:
+        with patch.dict(os.environ, {"SDD_MAX_CONTEXT": "0"}, clear=False):
+            mod = _load_hook_module(Path(tempfile.gettempdir()))
+            self.assertEqual(mod.MAX_CONTEXT, 200000)
+
+    def test_negative_floors_to_default(self) -> None:
+        with patch.dict(os.environ, {"SDD_MAX_CONTEXT": "-5"}, clear=False):
+            mod = _load_hook_module(Path(tempfile.gettempdir()))
+            self.assertEqual(mod.MAX_CONTEXT, 200000)
+
+    def test_non_numeric_falls_back_to_default(self) -> None:
+        """Pre-fix: `int("abc")` raises ValueError at import → hook crashes.
+        Post-fix: falls back to 200000, matching the 0/negative floor."""
+        for bad in ("abc", "1.5", "12k"):
+            with patch.dict(os.environ, {"SDD_MAX_CONTEXT": bad}, clear=False):
+                mod = _load_hook_module(Path(tempfile.gettempdir()))
+                self.assertEqual(mod.MAX_CONTEXT, 200000, msg=f"value={bad!r}")
+
+    def test_valid_value_preserved(self) -> None:
+        with patch.dict(os.environ, {"SDD_MAX_CONTEXT": "50000"}, clear=False):
+            mod = _load_hook_module(Path(tempfile.gettempdir()))
+            self.assertEqual(mod.MAX_CONTEXT, 50000)
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -181,9 +181,9 @@ cd AISDLC_SDD_v0.0X && python -m tools.fsm_runtime.fsm_runtime complete-auto-com
 
 ## 相關文件
 
-- [SDD_CONTEXT_GOVERNOR.md](../../workflow/sdd-context-governor/SDD_CONTEXT_GOVERNOR.md) — 完整預算管理策略
-- [SDD_FSM_ENGINE.md](../../workflow/sdd-fsm-engine/SDD_FSM_ENGINE.md) — SPEC_FROZEN 觸發點
-- [SDD_ESCALATION_PROTOCOL.md](../../workflow/sdd-escalation/SDD_ESCALATION_PROTOCOL.md) — 95% 緊急處理
+- [SDD_CONTEXT_GOVERNOR.md](../../../workflow/sdd-context-governor/SDD_CONTEXT_GOVERNOR.md) — 完整預算管理策略
+- [SDD_FSM_ENGINE.md](../../../workflow/sdd-fsm-engine/SDD_FSM_ENGINE.md) — SPEC_FROZEN 觸發點
+- [SDD_ESCALATION_PROTOCOL.md](../../../workflow/sdd-escalation/SDD_ESCALATION_PROTOCOL.md) — 95% 緊急處理
 
 ---
 

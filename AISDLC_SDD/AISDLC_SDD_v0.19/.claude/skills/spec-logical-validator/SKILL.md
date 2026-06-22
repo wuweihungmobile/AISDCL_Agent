@@ -334,12 +334,12 @@ python -m tools.fsm_runtime.multimodal_validator <spec_paths...> \
 - `/spec-compliance-check` — SLV PASS 後才執行格式驗證
 - `tools/fsm_runtime/slv_generator.py` — Phase E M4 規則生成器（ACT-028）
 - `tools/fsm_runtime/multimodal_validator.py` — Phase F M4 多模態驗證入口（ACT-031）
-- [SDD_FSM_ENGINE.md](../../workflow/sdd-fsm-engine/SDD_FSM_ENGINE.md) — FSM 狀態定義（LEARNING_COMMIT / SPEC_AUDIT 觸發）
-- [SDD_ESCALATION_PROTOCOL.md](../../workflow/sdd-escalation/SDD_ESCALATION_PROTOCOL.md) — 矛盾確認後退場
+- [SDD_FSM_ENGINE.md](../../../workflow/sdd-fsm-engine/SDD_FSM_ENGINE.md) — FSM 狀態定義（LEARNING_COMMIT / SPEC_AUDIT 觸發）
+- [SDD_ESCALATION_PROTOCOL.md](../../../workflow/sdd-escalation/SDD_ESCALATION_PROTOCOL.md) — 矛盾確認後退場
 - [FPL-INDEX.md](../../../knowledge/failure-patterns/FPL-INDEX.md) — Failure Pattern Library
 - [SPEC-ANCHOR-TEMPLATE.md](../../../docs_template/sdd/architecture/SPEC-ANCHOR-TEMPLATE.md) — Phase F 多模態 anchor 規格
 
 ---
 
 **基於**: AISDLC-SDD v0.19（Phase E M4 / ACT-028 規則引擎化 + Phase F M4 / ACT-031 多模態擴充）
-**對應藍圖**: SDD_improving_Automation_04.md §ACT-028 + SDD_improving_Automation_05.md §伍 ACT-031（均已歸檔 ../../build/planning/archive/）
+**對應藍圖**: SDD_improving_Automation_04.md §ACT-028 + SDD_improving_Automation_05.md §伍 ACT-031（均已歸檔 ../../../build/planning/archive/）

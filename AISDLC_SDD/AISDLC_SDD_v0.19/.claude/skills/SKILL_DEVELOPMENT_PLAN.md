@@ -240,7 +240,7 @@ allowed-tools:
 
 ### 🔴 當前優先任務：SDD 原生改寫（2026-04-14 啟動）
 
-> 計畫文件：`build/planning/active/Skill_for_SDD_Planning_Phase_01.md`
+> 計畫文件：`build/planning/archive/Skill_for_SDD_Planning_Phase_01.md`
 
 **問題**：現有 33 個繼承 Skill 採用「AISDLC v0.01 + 附加 SDD 區塊」模式，
 非 SDD 原生設計，SCG 閘門游離、RTM 缺席、前置條件不明。

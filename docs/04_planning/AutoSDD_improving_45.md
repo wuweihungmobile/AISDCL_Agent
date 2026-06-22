@@ -61,7 +61,7 @@
 - `skill_header_sync.py --write` 同步 **44 處**（42 footer + 2 套件版），後綴完整保留；`--check` 回 OK。
 - 8 測試（正例 fire / 後綴保留 / README 同步；負例 provenance / 歷史 / 模板佔位鎖死；凍結基線邊界；token 擷取）→ **8 passed**；3 受控突變實證**非空殼**（M1 放寬前綴鎖→負例紅、M2 反向 stale 判斷→正例紅、M3 去後綴→保留測試紅）。
 - DEF-CLDREV-006：pre.py docstring matcher 補 NotebookEdit。
-- DEF-CLDREV-008：SKILL.md description→SLV-001~014、argument-hint 補 SANDBOX_HARDENING_GATE、新增 proposed 規則清單段；SLV-013/014.yaml 加 `superseded_by: SLV-007` + 改名（`slv_generator.load_rule` 容忍新欄位、39 SLV 測試 passed）。
+- DEF-CLDREV-008：SKILL.md description→SLV-001~014、argument-hint 補 SANDBOX_HARDENING_GATE、新增 proposed 規則清單段；SLV-013/014.yaml 加 `superseded_by: SLV-007` + 改名（`slv_generator.load_rule` 容忍新欄位、test_slv_generator.py 35 passed；原誤植 39，DEF-CLDREV-016 訂正為實測 35，與本檔 §驗證表 line 75 一致）。
 - stage-compaction:158 / PLAN:269 寫死 `AISDLC_SDD_v0.01` → version-agnostic `v0.0X` + 旁註（杜絕再漂）。
 - 父層曝光鏡像 `sync_exposed_skills.py --write` 重生 59 檔。
 

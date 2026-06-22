@@ -97,6 +97,23 @@ class MaxContextFloorTests(unittest.TestCase):
             mod = _load_hook_module(self.root)
             self.assertEqual(mod.MAX_CONTEXT, 50000)  # valid value preserved
 
+    def test_non_numeric_max_context_does_not_crash(self) -> None:
+        """DEF-CLDREV-012: a non-numeric SDD_MAX_CONTEXT (operator typo) must NOT
+        raise ValueError at import time. Pre-fix: `int("abc")` crashes the whole
+        hook → the context-budget gate is silently disabled. Post-fix: falls back
+        to the 200000 default and the hook runs cleanly."""
+        out = self._run_with_env("abc")
+        self.assertEqual(out.get("hookSpecificOutput", {}).get("hookEventName"), "PostToolUse")
+        out = self._run_with_env("1.5")
+        self.assertEqual(out.get("hookSpecificOutput", {}).get("hookEventName"), "PostToolUse")
+
+    def test_non_numeric_falls_back_to_default(self) -> None:
+        """Intent (Rule 9): a non-numeric value must land on the same 200000 floor
+        as 0/negative, so the gate keeps a sane budget rather than vanishing."""
+        with patch.dict(os.environ, {"SDD_MAX_CONTEXT": "abc"}, clear=False):
+            mod = _load_hook_module(self.root)
+            self.assertEqual(mod.MAX_CONTEXT, 200000)
+
 
 if __name__ == "__main__":
     unittest.main()

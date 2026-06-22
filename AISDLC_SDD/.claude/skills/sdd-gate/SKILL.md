@@ -290,8 +290,8 @@ SCG-6 → 所有 SCG-0~5 驗證報告
 
 ## 相關 FSM 文件
 
-- [SDD_FSM_ENGINE.md](../../workflow/sdd-fsm-engine/SDD_FSM_ENGINE.md) — 狀態機定義（retry_count 上界）
-- [SDD_ESCALATION_PROTOCOL.md](../../workflow/sdd-escalation/SDD_ESCALATION_PROTOCOL.md) — retry 耗盡後的退場
+- [SDD_FSM_ENGINE.md](../../../workflow/sdd-fsm-engine/SDD_FSM_ENGINE.md) — 狀態機定義（retry_count 上界）
+- [SDD_ESCALATION_PROTOCOL.md](../../../workflow/sdd-escalation/SDD_ESCALATION_PROTOCOL.md) — retry 耗盡後的退場
 - [spec-logical-validator](../spec-logical-validator/SKILL.md) — SCG-0/3 前置 SLV 驗證
 
 ---
