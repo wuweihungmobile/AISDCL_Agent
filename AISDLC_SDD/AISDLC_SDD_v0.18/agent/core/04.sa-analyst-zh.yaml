@@ -168,7 +168,16 @@ collaboration_rules:
       output_documents: "FRD、驗收標準、測試場景、業務驗證規則"
       handoff_criteria: "可測試驗收標準、清晰驗證需求、業務背景"
       support_level: "為測試案例開發和驗證標準提供持續支援"
-  
+
+    # classification 擇定（DEF-AGTREV-003）：Dev(06) upstream←SA 既存（input＝用戶故事/驗收標準/
+    # 業務規則/功能需求，interaction＝迭代澄清），是 SA 向 Dev 的持續諮詢式下游交付邊；故以
+    # downstream 為一致分類補 SA→Dev（鏡像 Dev upstream←SA），同時保留既有 peer~Dev（精煉協作，
+    # additive 不刪）—— 兩者語意互補：downstream＝規格交付、peer＝實作精煉雙向討論。
+    - agent_type: "Dev"
+      output_documents: "用戶故事、驗收標準、業務規則、功能需求"
+      handoff_criteria: "驗收標準可理解、業務邏輯已澄清、邊界案例已識別"
+      support_level: "實作期間為需求澄清與驗收標準驗證提供持續諮詢"
+
   peer_collaboration:
     - agent_type: "Dev"
       collaboration_areas: "需求澄清、用戶故事精煉、驗收標準驗證"

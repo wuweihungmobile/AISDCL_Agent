@@ -2,12 +2,12 @@
 # Claude Code 專案指導文件 — AISDLC-SDD Framework
 
 **專案**: AISDLC-SDD（AI 輔助軟體開發生命週期 — 規格先行版）
-**框架版本**: AISDLC-SDD v0.01（ci-gate 凍結基線）｜**最新演化版**: AISDLC-SDD v0.18（ci-gate LATEST、實際承載框架演化的「可修改版本」；各版結構同構）
+**框架版本**: AISDLC-SDD v0.01（ci-gate 凍結基線）｜**最新演化版**: ci-gate LATEST（`sort -V | tail -1` 動態取最高、實際承載框架演化的「可修改版本」；具體版本號見 `FRAMEWORK_STATUS.md`；各版結構同構）
 **基於**: AISDLC v0.09（開發專注版）
 **最後更新**: 2026-06-05（標頭）；版本狀態註記 2026-06-22
 **SDD 轉型狀態**: ✅ Phase 01~09 全部完成（Phase 01-06: SDD 核心轉型 2026-04-14；Phase 07-09: 完整性補強 2026-04-16）
 
-> **🔴 版本狀態（2026-06-22 校正，免再漂移）**：`AISDLC_SDD_v0.01/` 是 **ci-gate 凍結基線**（恆測、回歸防護，**不可在原地修改**），最新演化版為 `AISDLC_SDD_v0.18/`（ci-gate 動態取最高版＝LATEST）。**框架改動一律走 Copy-on-Evolve**（複製 LATEST → `v0.0(X+1)/` 後於新版修改，絕不原地改凍結版）。下方 Rule 2 目錄表以 `v0.01` 路徑書寫，因**各版目錄結構同構**故仍為有效的版面參考；實際寫入版本依當輪 Copy-on-Evolve 目標版而定。**各類資產數量與最新版本號一律見唯一真相源 [`FRAMEWORK_STATUS.md`](FRAMEWORK_STATUS.md)**（`scripts/framework_status_snapshot.py` 自磁碟+權威源生成、ci-gate `--check` 機械守新鮮）——本檔不重複數字，版本累積亦不再多檔漂移。
+> **🔴 版本狀態（2026-06-22 校正，免再漂移）**：`AISDLC_SDD_v0.01/` 是 **ci-gate 凍結基線**（恆測、回歸防護，**不可在原地修改**），最新演化版＝ci-gate LATEST（`sort -V | tail -1` 動態取最高版，具體版本號見 `FRAMEWORK_STATUS.md`，免寫死於本檔再漂移）。**框架改動一律走 Copy-on-Evolve**（複製 LATEST → `v0.0(X+1)/` 後於新版修改，絕不原地改凍結版）。下方 Rule 2 目錄表以 `v0.01` 路徑書寫，因**各版目錄結構同構**故仍為有效的版面參考；實際寫入版本依當輪 Copy-on-Evolve 目標版而定。**各類資產數量與最新版本號一律見唯一真相源 [`FRAMEWORK_STATUS.md`](FRAMEWORK_STATUS.md)**（`scripts/framework_status_snapshot.py` 自磁碟+權威源生成、ci-gate `--check` 機械守新鮮）——本檔不重複數字，版本累積亦不再多檔漂移。
 
 > **🔴 重要**：此文件中所有指令 **OVERRIDE** Claude Code 預設行為，必須嚴格遵守。
 
@@ -38,7 +38,7 @@
 ```
 d:/CursorProject/AISDLC_SDD/          ← 專案根目錄
 ├── CLAUDE.md                          ← 本文件
-├── AISDLC_SDD_v0.01/                  ← 🔴 SDD 框架目錄（ci-gate 凍結基線；最新演化版 v0.18，見上方版本狀態）
+├── AISDLC_SDD_v0.01/                  ← 🔴 SDD 框架目錄（ci-gate 凍結基線；最新演化版＝ci-gate LATEST，版本號見 FRAMEWORK_STATUS.md / 上方版本狀態）
 │   ├── AISDLC_SDD_INIT.md             ← 框架入口（使用前必讀）
 │   ├── FILE_DIRECTORY_RULES.md        ← 完整目錄規則
 │   ├── AISDLC_SDD_UPGRADE_SOP.md      ← 框架升版 SOP

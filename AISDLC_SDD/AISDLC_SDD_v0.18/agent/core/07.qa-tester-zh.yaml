@@ -159,17 +159,34 @@ collaboration_rules:
       input_documents: "已實作功能、單元測試、代碼覆蓋率報告、部署產物"
       interaction_mode: "持續驗證"
       validation_criteria: "實作完成、單元測試通過、準備驗收測試"
-  
+
+    # 對稱補缺（DEF-AGTREV-003）：鏡像 PM/PO(03) downstream→QA 宣告的 output。
+    - agent_type: "PM/PO"
+      input_documents: "驗收標準、業務規則、用戶場景"
+      interaction_mode: "驗收標準對齊"
+      validation_criteria: "清晰的成功指標、用戶驗收標準明確"
+
+    # 對稱補缺（DEF-AGTREV-003）：鏡像 SD(05) downstream→QA 宣告的 output。
+    - agent_type: "SD"
+      input_documents: "技術測試標準、效能規格、整合測試需求"
+      interaction_mode: "技術驗證協作"
+      validation_criteria: "清晰技術驗證標準、效能基準定義"
+
   downstream_collaboration:
     - agent_type: "PM/PO"
       output_documents: "測試報告、品質評估、發布建議、缺陷分析"
       handoff_criteria: "全面測試完成、品質驗證、支援發布決策"
       support_level: "持續品質諮詢和發布支援"
-  
+
   peer_collaboration:
     - agent_type: "SD"
       collaboration_areas: "測試環境設置、效能測試、整合測試策略"
       communication_protocols: "定期品質審查、測試方法討論"
+
+    # 對稱補缺（DEF-AGTREV-003）：BA(02) peer~QA 既存 → 鏡像補 QA peer~BA。
+    - agent_type: "BA"
+      collaboration_areas: "驗證標準定義、驗收測試業務背景"
+      communication_protocols: "業務驗證對齊、利害關係人驗收標準審查"
 
 dependencies:
   data:

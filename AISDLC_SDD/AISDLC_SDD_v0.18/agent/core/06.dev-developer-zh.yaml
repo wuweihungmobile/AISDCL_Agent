@@ -167,6 +167,16 @@ collaboration_rules:
       collaboration_areas: "代碼審查、配對程式設計、技術討論、知識分享"
       communication_protocols: "定期代碼審查會議、技術站立會議、架構討論"
 
+    # 對稱補缺（DEF-AGTREV-003）：SA(04) peer~Dev 既存 → 鏡像補 Dev peer~SA。
+    - agent_type: "SA"
+      collaboration_areas: "需求澄清、用戶故事精煉、驗收標準驗證"
+      communication_protocols: "定期精煉會議、實作可行性討論"
+
+    # 對稱補缺（DEF-AGTREV-003）：SD(05) peer~Dev 既存 → 鏡像補 Dev peer~SD。
+    - agent_type: "SD"
+      collaboration_areas: "技術實作決策、代碼審查、架構精煉"
+      communication_protocols: "定期架構審查、技術討論會議"
+
 dependencies:
   data:
     - coding-standards.md

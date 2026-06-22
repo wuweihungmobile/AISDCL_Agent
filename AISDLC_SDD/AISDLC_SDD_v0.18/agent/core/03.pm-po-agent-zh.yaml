@@ -134,7 +134,13 @@ collaboration_rules:
       input_documents: "業務需求、用戶反饋、市場研究"
       interaction_mode: "迭代協作"
       validation_criteria: "業務價值對齊、可行性評估"
-  
+
+    # 對稱補缺（DEF-AGTREV-003）：QA(07) downstream→PM/PO 回饋邊既存 → 鏡像其 output。
+    - agent_type: "QA"
+      input_documents: "測試報告、品質評估、發布建議、缺陷分析"
+      interaction_mode: "品質回饋審查"
+      validation_criteria: "全面測試完成、品質驗證、支援發布決策"
+
   downstream_collaboration:
     - agent_type: "SA"
       output_documents: "PRD、業務需求、用戶人物誌"

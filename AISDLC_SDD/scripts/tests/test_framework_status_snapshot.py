@@ -49,8 +49,13 @@ def _mk_version(
         os.makedirs(os.path.join(base, ".claude", "skills", f"skill{i}"), exist_ok=True)
     for i in range(rules):
         _touch(os.path.join(base, "governance", "rules", f"R-9.{i}-x.yaml"))
-    for i in range(tmpl_md):
+    # 多數模板放一層深（docs_template/sdd/<cat>/）；但 tmpl_md>=1 時把最後 1 個放「兩層深」
+    # （docs_template/sdd/<cat>/<sub>/），確保 count_metrics 的 recursive=True 有鑑別力——
+    # 拿掉 recursive 後此深層模板會漏算 → templates_md 期望值對不上 → 測試轉紅（突變可抓）。
+    for i in range(max(tmpl_md - 1, 0)):
         _touch(os.path.join(base, "docs_template", "sdd", "cat", f"T{i}-TEMPLATE.md"))
+    if tmpl_md >= 1:
+        _touch(os.path.join(base, "docs_template", "sdd", "cat", "sub", "T-DEEP-TEMPLATE.md"))
     for i in range(tmpl_yaml):
         _touch(os.path.join(base, "docs_template", "sdd", "api", f"C{i}-TEMPLATE.yaml"))
     if workflows is not None:

@@ -181,6 +181,16 @@ collaboration_rules:
       collaboration_areas: "技術實作決策、代碼審查、架構精煉"
       communication_protocols: "定期架構審查、技術討論會議"
 
+    # 對稱補缺（DEF-AGTREV-003）：PM/PO(03) peer~SD 既存 → 鏡像補 SD peer~PM/PO。
+    - agent_type: "PM/PO"
+      collaboration_areas: "技術可行性評估、架構與業務目標對齊"
+      communication_protocols: "定期設計審查、技術約束討論"
+
+    # 對稱補缺（DEF-AGTREV-003）：QA(07) peer~SD 既存 → 鏡像補 SD peer~QA。
+    - agent_type: "QA"
+      collaboration_areas: "測試環境設置、效能測試、整合測試策略"
+      communication_protocols: "定期品質審查、測試方法討論"
+
 dependencies:
   data:
     - technical-standards.md

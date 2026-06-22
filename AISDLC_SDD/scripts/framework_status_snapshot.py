@@ -37,10 +37,30 @@ for _stream in (sys.stdout, sys.stderr):
 
 STATUS_FILENAME = "FRAMEWORK_STATUS.md"
 _WORKFLOW_TOTAL_RE = re.compile(r"共\s*(\d+)\s*個工作流")
+# DRY 單一真相源：凍結基線由 scripts/ci-gate.sh 的 `FROZEN_BASELINE="..."` 行宣告，
+# 本腳本 regex 解析該行取得（而非自寫一份「取最低」邏輯），避免 v0.01 退役時兩處分歧。
+_CI_GATE_FROZEN_RE = re.compile(r'^\s*FROZEN_BASELINE\s*=\s*"([^"]+)"', re.MULTILINE)
 
 
-def _baseline_version(versions: set[str]) -> str | None:
-    """凍結基線＝最低語意版本（對齊 ci-gate.sh 的 FROZEN_BASELINE=v0.01，但動態取最低不寫死）。"""
+def _frozen_baseline_from_ci_gate(repo_root: str) -> str | None:
+    """解析 scripts/ci-gate.sh 的 ``FROZEN_BASELINE="..."``（凍結基線的單一真相源）。"""
+    ci_gate = os.path.join(repo_root, "scripts", "ci-gate.sh")
+    if not os.path.isfile(ci_gate):
+        return None
+    with open(ci_gate, encoding="utf-8") as f:
+        m = _CI_GATE_FROZEN_RE.search(f.read())
+    return m.group(1) if m else None
+
+
+def _baseline_version(versions: set[str], repo_root: str | None = None) -> str | None:
+    """凍結基線：優先取 ci-gate.sh ``FROZEN_BASELINE`` 行（DRY 單一真相源）；
+    解析不到（缺檔/格式變）才 fallback「動態取最低語意版本」。
+    """
+    if repo_root is not None:
+        declared = _frozen_baseline_from_ci_gate(repo_root)
+        if declared and declared in versions:
+            return declared
+
     def key(v: str) -> int:
         m = re.search(r"v0\.(\d+)", v)
         return int(m.group(1)) if m else 1 << 30
@@ -88,14 +108,14 @@ def count_metrics(version_path: str) -> dict[str, int | None]:
     }
 
 
-def _row(label: str, b: int | None, l: int | None) -> str:
+def _row(label: str, b: int | None, latest: int | None) -> str:
     fmt = lambda x: "—（無）" if x is None else str(x)  # noqa: E731
-    return f"| {label} | {fmt(b)} | {fmt(l)} |"
+    return f"| {label} | {fmt(b)} | {fmt(latest)} |"
 
 
 def render(repo_root: str) -> str:
     versions = discover_frozen_versions(repo_root)
-    baseline = _baseline_version(versions)
+    baseline = _baseline_version(versions, repo_root)
     latest = latest_version(versions)
     if baseline is None or latest is None:
         return "（找不到任何 AISDLC_SDD_v0.* 版本目錄）\n"

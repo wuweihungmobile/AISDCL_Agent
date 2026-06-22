@@ -146,6 +146,14 @@ python scripts/gitignore_coverage_lint.py "${REPO_ROOT}"
 echo "############## CI 閘門：Agent template 路徑 lint（DEF-AGTREV-002）##############"
 python scripts/agent_template_lint.py "${REPO_ROOT}"
 
+# ── 核心 agent collaboration 對稱性 lint（DEF-AGTREV-004 機械防復發）──────────────
+# collaboration_rules 的 upstream/downstream/peer 本應構成對稱有向圖，但全靠人工同步 →
+# 長期累積單向斷鏈（downstream X→Y 漏對側 upstream←X、peer 單向；DEF-AGTREV-003 只手修一處）。
+# 此 lint（版本無關 shared infra、read-only 純觀察者）掃最新演化版 7 核心 agent，斷言每條
+# 內部 downstream/peer 邊皆有對側宣告，不對稱即非零硬閘擋下 → 杜絕同類斷鏈再生。
+echo "############## CI 閘門：核心 agent collaboration 對稱性 lint（DEF-AGTREV-004）##############"
+python scripts/collaboration_symmetry_lint.py "${REPO_ROOT}"
+
 # ── 框架版本/計數 SSOT 新鮮度 lint（DEF-AGTREV 全面收尾，機械強制）────────────────
 # 版本（Copy-on-Evolve）不斷累積，過去「最新版本號 + 各類資產計數」硬寫散落多份文件
 # （root/子 CLAUDE.md、INIT、RULES_INDEX…），任一處變動其餘 stale → 必然遺漏（實證：
