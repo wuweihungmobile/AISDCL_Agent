@@ -217,3 +217,7 @@ test_failure_analyzer:
 - [spec-logical-validator SKILL](../spec-logical-validator/SKILL.md) — SLV-005 可達性驗證
 - [FSM-STATE-TEMPLATE.yaml](../../../tools/fsm_runtime/templates/FSM-STATE-TEMPLATE.yaml) — 狀態持久化
 - [SDD_improving_Automation_02.md](../../../build/planning/archive/SDD_improving_Automation_02.md) — 設計依據（已歸檔 archive/）
+
+---
+
+**基於**: AISDLC-SDD v0.19

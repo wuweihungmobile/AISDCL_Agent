@@ -218,11 +218,11 @@ def _build_subagent_notice(tool: str, tool_input: dict, runtime=None) -> str | N
     except Exception as exc:  # noqa: BLE001
         return f"[SDD-SUBAGENT-CONTRACT][WARN] {exc!r}"
 
-    agent_name = (
-        tool_input.get("subagent_type")
-        or tool_input.get("agent")
-        or ""
-    ).strip().lower()
+    # DEF-CLDREV-020：subagent_type/agent 若為非字串（list/dict/int 等畸形 payload）
+    # 不可讓 .strip() 拋 AttributeError 致整支 hook crash（與 DEF-CLDREV-012 非數字
+    # SDD_MAX_CONTEXT 同類輸入域防護）。非字串一律退回空字串 → 視為無 agent、graceful。
+    _raw_agent = tool_input.get("subagent_type") or tool_input.get("agent") or ""
+    agent_name = (_raw_agent if isinstance(_raw_agent, str) else "").strip().lower()
     if not agent_name or _sub_mode() == "off":
         return None
     hint = injection_hint_for_task(agent_name)

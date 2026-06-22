@@ -285,5 +285,45 @@ class MaxContextGuardTests(unittest.TestCase):
             self.assertEqual(mod.MAX_CONTEXT, 50000)
 
 
+class NonStringSubagentTypeTests(unittest.TestCase):
+    """DEF-CLDREV-020: a non-string subagent_type/agent (list / dict / int) on a
+    Task payload must NOT crash the pre hook. Pre-fix `_build_subagent_notice`
+    called `.strip()` on the raw value → AttributeError → hook exits non-zero,
+    silently dropping the PreToolUse JSON. This path became reachable only after
+    DEF-CLDREV-017 added `Task` to the PreToolUse matcher, so it is the input-domain
+    sibling of DEF-CLDREV-012 (non-numeric SDD_MAX_CONTEXT)."""
+
+    def setUp(self) -> None:
+        self._tmp = tempfile.TemporaryDirectory()
+        self.root = Path(self._tmp.name)
+        self.mod = _load_hook_module(self.root)
+        self.runner = _MainRunner(self.mod)
+
+    def tearDown(self) -> None:
+        self._tmp.cleanup()
+
+    def test_non_string_subagent_type_does_not_crash(self) -> None:
+        # contract ON (soft) so the code path reaches the agent_name extraction.
+        env = {"SDD_SUBAGENT_CONTRACT": "1"}
+        for bad in ([{"a": 1}], {"x": 1}, 123, ["a", "b"]):
+            payload = {"tool_name": "Task", "tool_input": {"subagent_type": bad}}
+            with patch.dict(os.environ, env, clear=False):
+                # _MainRunner.run asserts rc == 0; pre-fix this raised AttributeError.
+                out = self.runner.run(payload)
+            hook_out = out.get("hookSpecificOutput", {})
+            self.assertEqual(hook_out.get("hookEventName"), "PreToolUse",
+                             msg=f"value={bad!r}")
+            # non-string ⇒ treated as no agent ⇒ no contract injection (graceful).
+            self.assertNotIn("additionalContext", hook_out, msg=f"value={bad!r}")
+
+    def test_non_string_agent_key_does_not_crash(self) -> None:
+        env = {"SDD_SUBAGENT_CONTRACT": "1"}
+        payload = {"tool_name": "Task", "tool_input": {"agent": {"nested": True}}}
+        with patch.dict(os.environ, env, clear=False):
+            out = self.runner.run(payload)
+        self.assertEqual(
+            out.get("hookSpecificOutput", {}).get("hookEventName"), "PreToolUse")
+
+
 if __name__ == "__main__":
     unittest.main()

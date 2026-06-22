@@ -50,6 +50,11 @@ allowed-tools:
 /spec-logical-validator verified         # 僅執行 trust_level=verified 的 enforce 規則
 ```
 
+> **🔴 scope vs anchor_type（DEF-CLDREV-021）**：`ui` / `api` / `db` / `c4` / `multimodal`
+> 子命令是依規則的 **`anchor_type`（媒介類別）** 篩選，**非** yaml `scope` 欄——SLV-008~010 的
+> `scope=SCG-1`、SLV-011 的 `scope=SCG-2`（見各 rules/*.yaml），其 `anchor_type` 才是 ui/api/db/c4。
+> 其餘子命令（nfr/dependency/temporal/contract/test…）才是依 `scope` 篩選。
+
 ---
 
 ## 前置條件
@@ -110,7 +115,7 @@ source_fpl: FPL-001                            # 溯源（若由 slv_generator �
 ```
 階段 1：掃描 rules/*.yaml
 階段 2：載入並驗證每條規則 schema（id/name/trust_level/scope 必填）
-階段 3：依 argument filter（scope / proposed / verified）篩選
+階段 3：依 argument filter（scope / anchor_type〔ui/api/db/c4〕/ trust_level〔proposed/verified〕）篩選
 階段 4：依 scope 讀取對應 scan_targets 檔案
 階段 5：執行驗證（regex + required_qualifier 檢核）
 ```
@@ -147,10 +152,10 @@ source_fpl: FPL-001                            # 溯源（若由 slv_generator �
 
 | ID | Name | Scope | 來源 | 備註 |
 |----|------|-------|------|------|
-| [SLV-008](rules/SLV-008.yaml) | UI mockup ↔ FRD AC 錨點一致 | ui | Phase F 多模態 | 跨媒介 |
-| [SLV-009](rules/SLV-009.yaml) | OpenAPI ↔ UI form 錨點一致 | api | Phase F 多模態 | 跨媒介 |
-| [SLV-010](rules/SLV-010.yaml) | DB schema ↔ FRD 欄位錨點一致 | db | Phase F 多模態 | 跨媒介 |
-| [SLV-011](rules/SLV-011.yaml) | C4 component ↔ SRD 模組錨點一致 | c4 | Phase F 多模態 | 跨媒介 |
+| [SLV-008](rules/SLV-008.yaml) | UI mockup ↔ FRD AC 錨點一致 | SCG-1 | Phase F 多模態 | 跨媒介·anchor_type=ui |
+| [SLV-009](rules/SLV-009.yaml) | OpenAPI ↔ UI form 錨點一致 | SCG-1 | Phase F 多模態 | 跨媒介·anchor_type=api |
+| [SLV-010](rules/SLV-010.yaml) | DB schema ↔ FRD 欄位錨點一致 | SCG-1 | Phase F 多模態 | 跨媒介·anchor_type=db |
+| [SLV-011](rules/SLV-011.yaml) | C4 component ↔ SRD 模組錨點一致 | SCG-2 | Phase F 多模態 | 跨媒介·anchor_type=c4 |
 | [SLV-012](rules/SLV-012.yaml) | 自治迴圈安全不變量（執行器自身硬化） | SANDBOX_HARDENING_GATE | ACT-061 manual-authored | self-STRIDE 6 類硬化 |
 | [SLV-013](rules/SLV-013.yaml) | 時序語義矛盾（proposed 重生） | temporal | FPL-001 auto 2026-06-15 | ⚠️ `superseded_by: SLV-007`（與 verified 全同，不另升級） |
 | [SLV-014](rules/SLV-014.yaml) | 時序語義矛盾（proposed 重生） | temporal | FPL-001 auto 2026-06-15 | ⚠️ `superseded_by: SLV-007`（與 verified 全同，不另升級） |
