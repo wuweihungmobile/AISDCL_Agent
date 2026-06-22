@@ -118,8 +118,9 @@ PS: 以上PRD, 請輸出docs\01_requirements\Agent_ConsoleUI_PRD.md輸出
 ===================
 1.AutoClaude的驗證測試Nightly是否有繼續?
 2.AutoClaude中SD_Improving_09.md 是否已經執行完畢? 是否可以繼續推進?
-3.AISDLC_SDD_v0.xx中的agent\* (根目錄三個檔案, Core and specialized兩目錄)請全面修復所有的Agent是否都合SDD與目前的架構, 請全面請Architect / SA / SD / QA 專家檢視, 若不適當, 請派Architect/SA/SD/QA 全能專家進行修復
-4.AISDLC_SDD_v0.xx中.claude中的hools and skills是否都沒法正常使用到? 請問該如何進行完善的架構調整? 請全面請Architect / SA / SD / QA 專家檢視, 若不適當, 請派Architect/SA/SD/QA 全能專家進行修復
+OK_3.AISDLC_SDD_v0.xx中的agent\* (根目錄三個檔案, Core and specialized兩目錄)請全面修復所有的Agent是否都合SDD與目前的架構, 請全面請Architect / SA / SD / QA 專家檢視, 若不適當, 請派Architect/SA/SD/QA 全能專家進行修復
+OK_4.AISDLC_SDD_v0.xx中.claude中的hools and skills是否都可以完整被所有模組使用到? 請完整徹底驗證, 請問該如何進行完善的架構調整? 請全面請Architect / SA / SD / QA 專家檢視, 若不適當, 請派Architect/SA/SD/QA 全能專家進行修復
+5.AISDLC_SDD_v0.xx中.claude中的hools and skills,  請全面確認所有的hools and skills的內容是否都合SDD與目前整體系統架構? 請完整徹底驗證! 若不符合, 請問該如何進行完善的架構調整? 請全面請Architect / SA / SD / QA 專家檢視, 若不適當, 請派Architect/SA/SD/QA 全能專家進行修復
 
 請驗證AutoSDD_Iteration_Prompt_Template.md與執行以下AISDLC_SDD_v0.01專案進行自我迭代開發為目標, 來修改驗證AutoSDD_Iteration_Prompt_Template.md
 1.可否依照目前的D:\CursorProject\AISDCL_Agent\AISDLC_SDD\AISDLC_SDD_v0.01專案 進行自我迭代開發, 行進中並記錄缺點Bug進行改進

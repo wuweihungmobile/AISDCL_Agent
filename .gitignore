@@ -35,3 +35,6 @@ venv/
 # 在根 build/reports/closure/ 產生 VERDICT-<sha>.yaml / REDERIVE-<sha>.yaml，屬「輸出非輸入」
 # runtime 產物，同 AISDLC_SDD 各版 build/reports 排除精神）
 /build/reports/closure/
+# post_commit_drift.py 同以 git toplevel＝monorepo 根為 repo_root，write 到根
+# build/reports/drift/ 產生 COMMIT-<sha>.yaml（同 closure 之「輸出非輸入」runtime 產物）
+/build/reports/drift/
