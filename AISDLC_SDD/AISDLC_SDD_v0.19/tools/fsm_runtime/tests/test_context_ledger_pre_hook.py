@@ -358,5 +358,73 @@ class MalformedPayloadTests(unittest.TestCase):
         self.assertEqual(out.get("hookSpecificOutput", {}).get("hookEventName"), "PreToolUse")
 
 
+class NonStringToolNameTests(unittest.TestCase):
+    """DEF-CLDREV-029 (SA 鏡 F-03): a non-string tool_name (list / dict / int)
+    must be normalized to "" BEFORE reaching the FSM guardrail. Pre-fix it reached
+    `assert_tool_allowed([...], target)` → TypeError → caught by the broad except →
+    degraded to a "guardrail unavailable" warn-pass, silently bypassing FSM
+    enforcement for that call. Same input-domain class as DEF-CLDREV-020/025."""
+
+    def setUp(self) -> None:
+        self._tmp = tempfile.TemporaryDirectory()
+        self.root = Path(self._tmp.name)
+        self.mod = _load_hook_module(self.root)
+        self.runner = _MainRunner(self.mod)
+
+        from tools.fsm_runtime.fsm_runtime import FSMRuntime
+        from tools.fsm_runtime.state_loader import load_state
+        state = load_state("toolname-proj", path=self.root / "FSM-STATE-toolname.yaml")
+        state.current = "SPEC_DRAFTING"  # benign state
+        self._isolated_rt = FSMRuntime(state)
+
+        # Spy on assert_tool_allowed to capture the exact `tool` argument it receives.
+        self._seen_tools: list = []
+        _orig = self._isolated_rt.assert_tool_allowed
+
+        def _spy(tool, target=None):  # noqa: ANN001
+            self._seen_tools.append(tool)
+            return _orig(tool, target)
+
+        self._isolated_rt.assert_tool_allowed = _spy  # type: ignore[method-assign]
+
+        import tools.fsm_runtime.fsm_runtime as fsm_rt_mod
+        self._boot_patch = patch.object(
+            fsm_rt_mod.FSMRuntime, "bootstrap",
+            classmethod(lambda cls, project=None: self._isolated_rt),
+        )
+        self._boot_patch.start()
+
+    def tearDown(self) -> None:
+        self._boot_patch.stop()
+        self._tmp.cleanup()
+
+    def _run(self, bad_tool_name) -> dict:  # noqa: ANN001
+        payload = {"tool_name": bad_tool_name, "tool_input": {}}
+        with patch.dict(os.environ, {
+            "SDD_HOOKS_DISABLE": "",
+            "SDD_HOOKS_DRY_RUN": "",
+            "SDD_SUBAGENT_CONTRACT": "0",
+        }, clear=False):
+            return self.runner.run(payload)  # type: ignore[arg-type]
+
+    def test_list_tool_name_normalized_before_guardrail(self) -> None:
+        out = self._run(["Bash"])
+        hook_out = out.get("hookSpecificOutput", {})
+        self.assertEqual(hook_out.get("hookEventName"), "PreToolUse")
+        # Non-hollow: the guardrail must have been reached with a *string* tool
+        # (normalized ""), not the raw list — proving no TypeError bypass.
+        self.assertEqual(self._seen_tools, [""],
+                         msg=f"guardrail saw {self._seen_tools!r}, expected normalized ['']")
+        self.assertNotIn("guardrail unavailable", hook_out.get("additionalContext", ""))
+
+    def test_dict_tool_name_normalized(self) -> None:
+        out = self._run({"nested": True})
+        self.assertEqual(self._seen_tools, [""])
+        self.assertNotIn(
+            "guardrail unavailable",
+            out.get("hookSpecificOutput", {}).get("additionalContext", ""),
+        )
+
+
 if __name__ == "__main__":
     unittest.main()

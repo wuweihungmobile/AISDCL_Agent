@@ -30,6 +30,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import subprocess
 import sys
 from pathlib import Path
@@ -151,7 +152,33 @@ def main(argv: list[str]) -> int:
         return _noop(event_name)
 
     version = _normalize_version(raw_ver)
+    # DEF-CLDREV-028（SA 鏡 F-01，P2 路徑注入→RCE）：`SDD_ACTIVE_VERSION` 原樣插值進
+    # 路徑，`_normalize_version` 僅 strip + 去前導 v，**不擋 `../`／絕對路徑／路徑分隔符**。
+    # 親驗：`SDD_ACTIVE_VERSION="0.19/../../../../Windows"` → resolve 成
+    # `D:\Windows\.claude\hooks\session_start.py`，逃逸 AISLDC_SDD 樹；唯一閘門 is_file()
+    # 通過後即 subprocess.run([python, target]) → 凡能控此 env 並於任意可達處植入
+    # `<dir>/.claude/hooks/<script>` 者即達任意碼執行。縱深兩道修復：
+    #   ① 語法白名單——版本須完整匹配 `\d+\.\d+`（對齊 _disk_latest_version 的
+    #      AISLDC_SDD_v(\d+)\.(\d+) pattern），不符即放行不路由（`../`/分隔符天然被擋）。
+    #   ② 邊界斷言——即使白名單未來被放寬，仍斷言 resolved target 落在 AISLDC_SDD 樹內。
+    if not re.fullmatch(r"\d+\.\d+", version):
+        return _warn(
+            event_name,
+            f"[SDD-ROUTER][WARN] SDD_ACTIVE_VERSION={raw_ver!r} 格式非法（須形如 0.19）。"
+            f"本次放行、未套用 SDD 守門。",
+        )
     target = REPO_ROOT / "AISDLC_SDD" / f"AISDLC_SDD_v{version}" / ".claude" / "hooks" / script_name
+    sdd_base = (REPO_ROOT / "AISDLC_SDD").resolve()
+    try:
+        in_tree = target.resolve().is_relative_to(sdd_base)
+    except (OSError, ValueError):  # noqa: BLE001 — fail-safe：解析異常即拒路由、放行
+        in_tree = False
+    if not in_tree:
+        return _warn(
+            event_name,
+            f"[SDD-ROUTER][WARN] SDD_ACTIVE_VERSION={raw_ver!r} 解析逃逸 AISLDC_SDD 樹"
+            f"（{target}）。本次放行、未套用 SDD 守門。",
+        )
     if not target.is_file():
         return _warn(
             event_name,

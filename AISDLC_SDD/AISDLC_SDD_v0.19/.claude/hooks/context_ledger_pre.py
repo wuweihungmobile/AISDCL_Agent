@@ -253,6 +253,13 @@ def main() -> int:
     if not isinstance(inp, dict):
         inp = {}
     tool = inp.get("tool_name", "")
+    # DEF-CLDREV-029（SA 鏡 F-03）：非字串 tool_name（list/dict/int）會在
+    # `assert_tool_allowed(tool, target)` 處拋 TypeError，被下方寬 except 接住 → 降級為
+    # 「guardrail unavailable」warn-pass，使該次工具呼叫**靜默繞過 FSM 守門**。與緊鄰的
+    # tool_input 正規化不對稱（同 DEF-CLDREV-020/025 輸入域家族）。非字串退回空字串：
+    # 走正常空工具放行路徑，守門對其餘有效欄位仍生效、不墜入例外網。
+    if not isinstance(tool, str):
+        tool = ""
     tool_input = inp.get("tool_input", {})
     if not isinstance(tool_input, dict):
         tool_input = {}
