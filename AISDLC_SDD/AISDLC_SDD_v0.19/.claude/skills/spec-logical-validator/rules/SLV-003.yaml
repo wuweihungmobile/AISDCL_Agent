@@ -1,0 +1,27 @@
+id: SLV-003
+name: "Business Invariant 矛盾偵測"
+source: "builtin (AISDLC-SDD v0.01 Phase A)"
+trust_level: verified
+reviewed_by: "sa-analyst@aisdlc-sdd"
+reviewed_at: "2026-04-14"
+scope: invariant
+purpose: "確保 Business Invariants 清單中不存在互相矛盾的約束"
+
+scan_targets:
+  - "docs/01_requirements/INVARIANT-SPEC-*.md"
+  - "docs/03_testing/contracts/INVARIANT-TEST-CONTRACT-*.md"
+
+required_qualifiers:
+  - "對每對 INV（INV-A, INV-B），驗證不存在一個合法狀態同時滿足 A 要求但違反 B"
+  - "特別檢查：互斥條件（X 不得為空 vs X 可以為空）"
+  - "特別檢查：範圍矛盾（X ≥ 10 vs X ≤ 5）"
+  - "特別檢查：時序矛盾（A 必須在 B 之前 vs B 必須在 A 之前）"
+
+failure_examples:
+  - "INV-001 訂單金額 > 0 + INV-007 訂單金額可為 0 → 範圍矛盾"
+
+pass_examples:
+  - "INV-001 訂單金額 ≥ 0，付款金額 > 0 才允許處理"
+
+severity: CRITICAL
+blocks_scg: true

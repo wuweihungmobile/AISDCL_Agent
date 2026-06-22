@@ -1,0 +1,29 @@
+id: R-9.3
+title: 邏輯一致性防護（SLV 前置）
+trigger_states:
+  - SCG_VALIDATION
+  - SPEC_DRAFTING
+  - SPEC_AUDIT
+  - PR_REVIEW
+severity: high
+maturity: active
+spec: >
+  SCG-0 前須跑 spec-logical-validator（SLV-001~003）、SCG-3 前 SLV-004~006；
+  PR_REVIEW 相同模式 ×3 自動觸發 SPEC_AUDIT 比對 AC vs Test Contract；確認矛盾
+  即進 ESCALATION 產出 Abort Report、禁止繼續開發。對應 spec-logical-validator skill。
+test_ref: tools/fsm_runtime/tests/test_slv_generator.py
+failure_mode: >
+  PR_REVIEW 相同模式達 SPEC_AUDIT_MAX_PER_STAGE 次仍無法解消 AC vs Test Contract 矛盾 →
+  record_spec_audit 判 spec_audit_count ≥ SPEC_AUDIT_MAX_PER_STAGE → record_escalation 進
+  ESCALATION（"SPEC_AUDIT executed N times without resolution"，產 Abort Report、禁止繼續開發）。
+  此即 R-9.3 守望的失敗模式——SLV / SPEC_AUDIT 邏輯一致性防護於矛盾無法在上限內解消時真實發生；
+  catch 側結構化歸因到 R-9.3（對應 FSMRuntime.record_spec_audit 的 record_escalation 落點，
+  無歧義映射非時序猜測，W-38-2）。**僅涵蓋 record_spec_audit 的 SPEC_AUDIT 耗盡落點**，明文排除：
+  (a) check_implementation_budget 的 "implementation budget exceeded" 直接 escalate 分支
+  （max_iterations / consecutive_compile_fail 耗盡＝正交失敗模式、目前無規則承載，不搭便車）；
+  (b) 一般 gate retry budget 耗盡（SCG/PR/RTM）歸 R-9.1（record_gate_retry 落點）。
+  皆不重複歸因（DEF-18-001 寧缺勿濫）。
+scaffold_roi:
+  fire_count: 0
+  catch_count: 0
+  false_positive_count: 0

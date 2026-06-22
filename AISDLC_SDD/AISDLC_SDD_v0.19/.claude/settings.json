@@ -1,0 +1,46 @@
+{
+  "$schema": "https://json.schemastore.org/claude-code-settings.json",
+  "description": "AISDLC-SDD SDD 治理 Hooks — SessionStart 注入 FSM bootstrap + 當前狀態規則；PreToolUse/PostToolUse 走 context-ledger 守門（版本中性，各版同構；DEF-43-008 起不再滯留 v0.01 標頭）。",
+  "env": {
+    "SDD_SUBAGENT_CONTRACT": "soft",
+    "SDD_PATTERN_MATCH_THRESHOLD": "0.75",
+    "SDD_MULTIMODAL_BACKEND": "session"
+  },
+  "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python .claude/hooks/session_start.py",
+            "timeout": 30
+          }
+        ]
+      }
+    ],
+    "PreToolUse": [
+      {
+        "matcher": "Write|Edit|Read|Bash|NotebookEdit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python .claude/hooks/context_ledger_pre.py",
+            "timeout": 10
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "Write|Edit|Read|Bash|NotebookEdit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python .claude/hooks/context_ledger_post.py",
+            "timeout": 10
+          }
+        ]
+      }
+    ]
+  }
+}

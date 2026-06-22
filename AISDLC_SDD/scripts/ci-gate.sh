@@ -183,6 +183,15 @@ python scripts/framework_status_snapshot.py --check --repo-root "${REPO_ROOT}"
 echo "############## CI 閘門：對外曝光 skills SSOT 新鮮度 lint（方案 C ②）##############"
 python scripts/sync_exposed_skills.py --check --repo-root "${REPO_ROOT}"
 
+# ── Router hook 覆蓋 lint（DEF-43-008 / DEF-B 機械防破口）──────────────────────
+# Claude Code 不遞迴載入子目錄 hooks → 各版 .claude/hooks 須經根層守衛式 router 橋接，且根
+# settings.json 須 wire 該 router。router _HOOK_MAP 與根 settings 的 CC hook event 集合全靠人工
+# 同步：若某版 settings.json 新增第 4 種 CC event（如 Stop）卻忘改根 router/settings，該版治理
+# hook 在 monorepo 根 session 下靜默失效。此 lint（版本無關 shared infra、read-only 純觀察者）斷言
+# 最新演化版宣告之 CC event ⊆ (router 涵蓋 ∩ 根 settings wire)；不可達即非零硬閘擋下（fail-loud）。
+echo "############## CI 閘門：Router hook 覆蓋 lint（DEF-43-008）##############"
+python scripts/router_hook_coverage_lint.py "${REPO_ROOT}"
+
 echo "✅ 本機 CI 閘門全數通過（版本：${FW_VERSIONS[*]}）"
 # DEF-06-001：單行自證逐軌 passed 計數，免零信任取證捲動截斷輸出
 echo "   逐軌計數：${GATE_SUMMARY[*]}"

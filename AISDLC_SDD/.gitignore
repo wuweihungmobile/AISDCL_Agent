@@ -196,3 +196,9 @@ AISDLC_SDD_v0.17/chaos-report.json
 AISDLC_SDD_v0.18/build/reports/
 AISDLC_SDD_v0.18/arch-fitness.json
 AISDLC_SDD_v0.18/chaos-report.json
+
+# ── v0.19 runtime 取證產物排除（improving_44 整合層 DEF-43-008：SDD .claude hooks 完整可用性修復 — drift hook repo-root 對稱化 + 安裝器動態 LATEST + router 覆蓋 lint）──
+# 同 v0.13~v0.18：FSM 種子模板在 tracked 源碼位 tools/fsm_runtime/templates/，build/reports/ 整樹排除。
+AISDLC_SDD_v0.19/build/reports/
+AISDLC_SDD_v0.19/arch-fitness.json
+AISDLC_SDD_v0.19/chaos-report.json
