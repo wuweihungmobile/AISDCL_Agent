@@ -80,7 +80,7 @@
 | 序號 | Skill 名稱 | 觸發命令 | 檔案路徑 | 狀態 |
 |------|-----------|---------|---------|------|
 | 10 | Security Audit | `/security-audit` | `scenarios/security-audit.md` | ✅ 已建立 |
-| 11 | Documentation API | `/doc-api` | `scenarios/documentation-api.md` | ✅ 已建立 |
+| 11 | Documentation API | `/documentation-api` | `scenarios/documentation-api.md` | ✅ 已建立 |
 | 12 | SD Architect | `/sd-architect` | `agents/sd-architect.md` | ✅ 已建立 |
 | 13 | QA Testing | `/qa-testing` | `agents/qa-testing.md` | ✅ 已建立 |
 

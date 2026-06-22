@@ -87,7 +87,7 @@
 |------|------|------|------|
 | DEF-CLDREV-007 工具面根除 | `scripts/skill_header_sync.py` + ci-gate wire + 44 處同步 | 8 測試 + 突變 + `--check` OK + 四鏡 PASS | ✅ fixed@v0.19 |
 | DEF-CLDREV-006 docstring 對齊 | `context_ledger_pre.py:6` 補 NotebookEdit | diff 確認 + SA 鏡驗一致 | ✅ fixed@v0.19 |
-| DEF-CLDREV-008 SLV 清單/重名 | SKILL.md + SLV-013/014.yaml superseded_by/改名 | 39 SLV 測試 + SD 鏡驗磁碟一致 | ✅ fixed@v0.19 |
+| DEF-CLDREV-008 SLV 清單/重名 | SKILL.md + SLV-013/014.yaml superseded_by/改名 | 35 SLV 測試 + SD 鏡驗磁碟一致 | ✅ fixed@v0.19 |
 | 寫死 v0.01 路徑 | stage-compaction/PLAN → `v0.0X` | grep 殘留 0 + Architect/SA 鏡驗可執行性 | ✅ fixed@v0.19 |
 | DEF-CLDREV-009/010（新，README 殘留） | README.md SLV-001~014 + `/integration-api-client` | grep 殘留 0 | ✅ fixed@v0.19 |
 | DEF-CLDREV-011（掌舵者裁定直接解決，治本） | slv_generator 去重閘：`FplAlreadyVerified` + `find_verified_rule_for_fpl` + `allow_duplicate_fpl` 逃生口 + CLI exit 3 + SKILL.md 註記 | +5 測試 + 突變實證非空殼 + 真實 dir `FPL-001→SLV-007` 命中 | ✅ fixed@v0.19 |
