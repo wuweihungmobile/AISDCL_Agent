@@ -54,6 +54,14 @@ _HOOK_MAP = {
     "context_ledger_post": ("context_ledger_post.py", "PostToolUse"),
 }
 
+# DEF-43-005：對 child 實體 hook 設「略小於外層 settings.json timeout」的硬上限。
+# 外層 settings.json 對 router 設 SessionStart=30s、Pre/Post=10s；那是 CC 對「router」
+# 的逾時，不是 router 對「child」的逾時。若實體 hook 卡住（如 session_start 注入 FSM
+# 時讀大量 R-*.yaml），CC 砍 router 時 child subprocess 可能變孤兒。改由 router 自己
+# 先 timeout 並讓 subprocess.run 回收 child（其 docstring：逾時會 kill 並 wait child），
+# 留約 5s/2s 餘裕讓 router 在被外層砍掉前印出 fail-safe 放行 JSON。
+_CHILD_TIMEOUT = {"SessionStart": 25.0, "PreToolUse": 8.0, "PostToolUse": 8.0}
+
 
 def _emit(payload: dict) -> None:
     sys.stdout.write(json.dumps(payload, ensure_ascii=False))
@@ -173,6 +181,14 @@ def main(argv: list[str]) -> int:
             errors="replace",
             env=child_env,
             cwd=str(REPO_ROOT),
+            timeout=_CHILD_TIMEOUT.get(event_name, 8.0),  # DEF-43-005：child 硬上限，逾時 kill+放行
+        )
+    except subprocess.TimeoutExpired:
+        # 實體 hook 卡住：subprocess.run 已 kill 並 wait child（不留孤兒），router 放行不擋。
+        return _warn(
+            event_name,
+            f"[SDD-ROUTER][WARN] {script_name} 逾 {_CHILD_TIMEOUT.get(event_name, 8.0)}s 未回應，"
+            f"已中止 child 並本次放行（未套用 SDD 守門）。",
         )
     except Exception as exc:  # noqa: BLE001 — 永不讓 CC 崩潰
         return _warn(event_name, f"[SDD-ROUTER][WARN] 轉交 {script_name} 失敗：{exc!r}。本次放行。")

@@ -134,7 +134,12 @@
 ├── rtm-generate/SKILL.md                  # RTM 需求追溯矩陣
 ├── contract-generate/SKILL.md             # API Contract（OpenAPI/CDC）
 ├── sdd-gate/SKILL.md                      # SCG 閘門驗證
-└── sdd-review/SKILL.md                    # SCG-4 PR Review（實作規格一致性）
+├── sdd-review/SKILL.md                    # SCG-4 PR Review（實作規格一致性）
+│
+│── # ★ SDD Runtime 家族 (3個，FSM 閉環 runtime skill)
+├── spec-logical-validator/SKILL.md        # Spec 邏輯一致性驗證（SLV-001~011）
+├── test-failure-analyzer/SKILL.md         # 測試失敗 → Spec 自動映射橋接（TFA）
+└── stage-compaction/SKILL.md              # Stage 凍結後上下文壓縮
 ```
 
 ---
@@ -151,7 +156,8 @@
 | **Workflows** | 2 | Sprint/Release |
 | **Scenario/Dev** | 3 | 棕地分析、資料庫遷移、行動開發 |
 | ★ **SDD 專屬** | 6 | ADR生成、Spec驗證、RTM、Contract、SCG閘門、SCG-4 Review |
-| **總計** | **39** | 33 繼承（SDD 強化）+ 6 SDD 新增 |
+| ★ **SDD Runtime** | 3 | Spec 邏輯驗證、測試失敗映射(TFA)、Stage 壓縮 |
+| **總計** | **42** | 33 繼承（SDD 強化）+ 6 SDD 新增 + 3 SDD Runtime |
 
 ---
 
@@ -228,6 +234,13 @@
 | `/sdd-gate` | SDD Gate | SCG-0~6 | SCG 閘門驗證 |
 | `/sdd-review` | SDD Review | SCG-4 | PR Review 實作規格一致性審查 |
 
+### ★ SDD Runtime 家族
+| 命令 | Skill | 用途 |
+|------|-------|------|
+| `/spec-logical-validator` | Spec Logical Validator | Spec 邏輯一致性驗證（SLV-001~011：邏輯/物理可行性/不可測 AC/跨媒介一致性），於 SCG 格式驗證前執行 |
+| `/test-failure-analyzer` | Test Failure Analyzer | 測試失敗 → AC/US/FRD 自動映射（TFA），分類修程式碼 vs 修 Spec，供閉環消費 |
+| `/stage-compaction` | Stage Compaction | Stage 凍結里程碑後壓縮上下文、產出 Stage Summary，保後續 Token 預算 |
+
 ---
 
 ## SDD 原生設計原則（v0.02 改寫後）
@@ -245,6 +258,22 @@
 ## 安裝與部署
 
 安裝腳本 (`tools/init_project.sh`) 會自動將 `.claude/skills/` 複製到專案根目錄，確保 Claude Code 能自動發現所有 Skills。
+
+---
+
+## Skill 調用命名空間（monorepo 整合層）
+
+> 從 monorepo 根 `d:/CursorProject/AISDCL_Agent/` 啟動 session 時，Claude Code 對 skills 採
+> **按需巢狀探索**：觸及 `AISDLC_SDD/` 子樹檔案後，本套 skills 會以兩種 namespace 同時曝光：
+>
+> | 形式 | 來源 | 用途 |
+> |------|------|------|
+> | `AISDLC_SDD:<skill>` | 父層 SSOT 鏡像（= ci-gate LATEST，由 `scripts/sync_exposed_skills.py` 守新鮮） | **對外預設調用**（版本穩定，免綁版本號） |
+> | `AISDLC_SDD/AISDLC_SDD_v0.0X:<skill>` | 該版本目錄 | 僅限**明確指定版本做 B 軌 dogfooding** 時使用 |
+>
+> **優先序規範**：對外一律用父層 `AISDLC_SDD:` 形式；路徑版僅在需鎖定特定凍結版本時用。
+> ⚠️ 觸及舊版（v0.13↓）目錄會曝光語意落後的同名 skill（如舊 `sdd-gate` 缺 ESCALATION 段），
+> 跨多版工作時務必認明 namespace 前綴，勿誤叫舊版。
 
 ---
 
