@@ -15,12 +15,14 @@ from tools.fsm_runtime import slv_generator  # noqa: E402
 from tools.fsm_runtime.slv_generator import (  # noqa: E402
     FPLEntry,
     FPLNotFound,
+    FplAlreadyVerified,
     ImmutableFieldViolation,
     RuleOverwriteProtected,
     SchemaViolation,
     SLVRuleCandidate,
     VALID_TRUST_LEVELS,
     classify_result,
+    find_verified_rule_for_fpl,
     iter_rule_files,
     load_fpl_entry,
     load_rule,
@@ -134,6 +136,79 @@ class TrustLevelProtectionTests(unittest.TestCase):
         # Now attempting to overwrite must raise.
         with self.assertRaises(RuleOverwriteProtected):
             write_rule_candidate(cand, rules_dir=self.tmp, overwrite_proposed=True)
+
+
+class FplDedupGateTests(unittest.TestCase):
+    """DEF-CLDREV-011 去重閘意圖鎖。
+
+    為何重要：`propose_slv_from_fpl` 每次配新 id，過去無機制阻止「同一 FPL 已升
+    verified 卻再產 proposed 重複」→ FPL-001 已有 verified SLV-007 仍重生 SLV-013/014
+    （純噪音、永不可升第二條 verified）。此 gate 從持久化 choke point 治本。正例（已有
+    verified → fire）與負例（僅 proposed / 不同 FPL / 覆寫逃生口 → 不 fire）對稱覆蓋，
+    避免誤擋合法的「審核前多草案」與「人工指定變體」。
+    """
+
+    def setUp(self) -> None:
+        self.tmp = Path(__file__).resolve().parent / "_tmp_dedup_rules"
+        self.tmp.mkdir(parents=True, exist_ok=True)
+        for p in self.tmp.glob("*.yaml*"):
+            p.unlink()
+
+    def tearDown(self) -> None:
+        for p in self.tmp.glob("*.yaml*"):
+            p.unlink()
+        if self.tmp.exists():
+            self.tmp.rmdir()
+
+    def _cand(self, slv_id: str, fpl_id: str, trust: str = "proposed") -> SLVRuleCandidate:
+        return SLVRuleCandidate(
+            id=slv_id, name=f"rule {slv_id}", source=f"{fpl_id} auto-generated 2026-06-15",
+            trust_level=trust,
+            reviewed_by=("r@x" if trust == "verified" else None),
+            reviewed_at=("2026-06-15" if trust == "verified" else None),
+            scope="temporal", purpose="t",
+            scan_targets=["docs/01_requirements/FRD-*.md"],
+            required_qualifiers=["必須不為空"], failure_examples=[], pass_examples=[],
+            severity="CRITICAL", blocks_scg=True, source_fpl=fpl_id,
+        )
+
+    def test_dedup_gate_fires_when_fpl_already_verified(self) -> None:
+        """已有 verified SLV-A(FPL-001) → 為同 FPL 配新 id SLV-B 落盤須被擋（SLV-013/014 本體）。"""
+        write_rule_candidate(self._cand("SLV-A", "FPL-001", trust="verified"), rules_dir=self.tmp)
+        with self.assertRaises(FplAlreadyVerified):
+            write_rule_candidate(self._cand("SLV-B", "FPL-001"), rules_dir=self.tmp)
+
+    def test_dedup_gate_silent_when_only_proposed_exists(self) -> None:
+        """僅有 proposed（尚未 review）→ 同 FPL 另一草案不擋（審核前多草案合法）。"""
+        write_rule_candidate(self._cand("SLV-A", "FPL-002"), rules_dir=self.tmp)
+        # 不應 raise
+        path = write_rule_candidate(self._cand("SLV-B", "FPL-002"), rules_dir=self.tmp)
+        self.assertTrue(path.exists())
+
+    def test_dedup_gate_silent_for_different_fpl(self) -> None:
+        """verified SLV-A(FPL-001) 不擋 FPL-003 的新草案（去重只針對同一 FPL）。"""
+        write_rule_candidate(self._cand("SLV-A", "FPL-001", trust="verified"), rules_dir=self.tmp)
+        path = write_rule_candidate(self._cand("SLV-B", "FPL-003"), rules_dir=self.tmp)
+        self.assertTrue(path.exists())
+
+    def test_allow_duplicate_fpl_overrides_gate(self) -> None:
+        """allow_duplicate_fpl=True → 明確變體逃生口，即使已有 verified 仍放行。"""
+        write_rule_candidate(self._cand("SLV-A", "FPL-001", trust="verified"), rules_dir=self.tmp)
+        path = write_rule_candidate(
+            self._cand("SLV-B", "FPL-001"), rules_dir=self.tmp, allow_duplicate_fpl=True
+        )
+        self.assertTrue(path.exists())
+
+    def test_find_verified_rule_for_fpl_helper(self) -> None:
+        """helper：verified 命中回 id、exclude_id 排除自身、無命中回 None。"""
+        write_rule_candidate(self._cand("SLV-A", "FPL-001", trust="verified"), rules_dir=self.tmp)
+        write_rule_candidate(self._cand("SLV-C", "FPL-004"), rules_dir=self.tmp)  # proposed
+        self.assertEqual(find_verified_rule_for_fpl("FPL-001", rules_dir=self.tmp), "SLV-A")
+        self.assertIsNone(  # 排除自身（overwrite 同 id 的 verified 不算重複）
+            find_verified_rule_for_fpl("FPL-001", rules_dir=self.tmp, exclude_id="SLV-A"))
+        self.assertIsNone(  # 只有 proposed，無 verified
+            find_verified_rule_for_fpl("FPL-004", rules_dir=self.tmp))
+        self.assertIsNone(find_verified_rule_for_fpl("", rules_dir=self.tmp))
 
 
 class RuleSchemaTests(unittest.TestCase):

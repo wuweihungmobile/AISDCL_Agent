@@ -176,6 +176,16 @@ python scripts/scenario_frequency_lint.py "${REPO_ROOT}"
 echo "############## CI 閘門：框架版本/計數 SSOT 新鮮度 lint（DEF-AGTREV 收尾）##############"
 python scripts/framework_status_snapshot.py --check --repo-root "${REPO_ROOT}"
 
+# ── Skill 版本戳記 SSOT 新鮮度 lint（DEF-CLDREV-007 系統性根除）────────────────────
+# 每版 skill 的框架版本戳（SKILL.md footer `**基於**: AISDLC-SDD vX.YY`、README/PLAN 套件版
+# `**版本**: vX.YY-SDD`）應對齊所在版本目錄，但全靠人工在每輪 Copy-on-Evolve 手改 → 系統性
+# 漏改（DEF-CLDREV-007 實證：v0.19 內 42 footer 仍寫 v0.01、README 停在 v0.02-SDD）。此 lint
+# （版本無關 shared infra、read-only 純觀察者）校最新演化版戳記是否全等其目錄版本；stale 即
+# 非零硬閘擋下。前綴鎖死故不誤觸 provenance / 歷史 / 模板佔位版。先於 skills 鏡像守門（戳記＝
+# 源頭，鏡像在後）。修復：python scripts/skill_header_sync.py --write
+echo "############## CI 閘門：Skill 版本戳記 SSOT 新鮮度 lint（DEF-CLDREV-007）##############"
+python scripts/skill_header_sync.py --check --repo-root "${REPO_ROOT}"
+
 # ── 對外曝光 skills SSOT 新鮮度 lint（AutoSDD_improving 方案 C ②）──────────────────
 # 父層 .claude/skills（版本無關曝光集）曾為早期凍結快照、與 LATEST 漂移且不受治理。
 # 改以「LATEST 版 = SSOT、父層為機械鏡像」+ 此 check 硬閘，stale 即非零擋下。

@@ -139,5 +139,5 @@ Redis 整合在 SDD 中必須設計先行：快取策略需有 ADR（Cache Aside
 
 ---
 
-**基於**: AISDLC-SDD v0.01
+**基於**: AISDLC-SDD v0.19
 **對應情境**: Integration 場景

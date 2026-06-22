@@ -227,6 +227,6 @@ migrations/
 
 ---
 
-**基於**: AISDLC-SDD v0.01
+**基於**: AISDLC-SDD v0.19
 **對應場景**: `scenarios/brownfield/SDD_BROWNFIELD_ENHANCEMENT.md`
 **對應 CI/CD 規格**: `cicd/SDD_MIGRATION_CICD.md`

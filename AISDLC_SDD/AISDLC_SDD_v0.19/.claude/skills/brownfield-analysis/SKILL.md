@@ -228,5 +228,5 @@ Brownfield 是 SDD 中最複雜的場景。本 Skill 是 Brownfield 工作流的
 
 ---
 
-**基於**: AISDLC-SDD v0.01
+**基於**: AISDLC-SDD v0.19
 **對應場景**: `scenarios/brownfield/SDD_BROWNFIELD_ENHANCEMENT.md`

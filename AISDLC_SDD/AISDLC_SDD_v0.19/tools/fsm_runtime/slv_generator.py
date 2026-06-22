@@ -82,6 +82,19 @@ class SchemaViolation(ValueError):
     """
 
 
+class FplAlreadyVerified(RuntimeError):
+    """Raised when proposing a NEW SLV id for an FPL that already has a verified rule.
+
+    DEF-CLDREV-011（去重閘，治本）：`propose_slv_from_fpl` 每次經
+    `next_available_slv_id()` 配新 id，過去無機制阻止「同一 FPL 已有 verified 規則
+    卻再產 proposed 重複」→ 實證 FPL-001 已升 verified SLV-007 後仍二度/三度重生
+    SLV-013/014（同 scope/regex/purpose、純噪音、永不可升第二條 verified）。此 gate
+    在持久化 choke point 斷言：若磁碟已有 trust_level=verified 且 source_fpl 相同
+    但 id 不同的規則，拒絕落盤新 proposed 重複，引導呼叫方改用既有 verified 規則。
+    （明確需要變體規則時以 `allow_duplicate_fpl=True` / `--allow-duplicate-fpl` 覆寫。）
+    """
+
+
 class FPLNotFound(FileNotFoundError):
     """Raised when an FPL id cannot be resolved to a markdown file."""
 
@@ -312,11 +325,44 @@ def propose_slv_from_fpl(
     )
 
 
+def find_verified_rule_for_fpl(
+    fpl_id: str,
+    *,
+    rules_dir: Optional[Path] = None,
+    exclude_id: Optional[str] = None,
+) -> Optional[str]:
+    """回傳磁碟上 source_fpl==fpl_id 且 trust_level==verified 的規則 id（無則 None）。
+
+    DEF-CLDREV-011 去重閘的判斷依據。輕量 `yaml.safe_load`（不走 `load_rule` 的
+    schema 驗證，避免一條無關規則格式問題就讓 propose 整個炸開）。`exclude_id`
+    用來在 overwrite 自身時排除目標自己。
+    """
+    if not fpl_id:
+        return None
+    for path in iter_rule_files(rules_dir):
+        try:
+            doc = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+        except yaml.YAMLError:
+            continue
+        if not isinstance(doc, dict):
+            continue
+        if doc.get("source_fpl") != fpl_id:
+            continue
+        if str(doc.get("trust_level", "")) != "verified":
+            continue
+        rid = str(doc.get("id", "")) or path.stem
+        if exclude_id is not None and rid == exclude_id:
+            continue
+        return rid
+    return None
+
+
 def write_rule_candidate(
     cand: SLVRuleCandidate,
     *,
     rules_dir: Optional[Path] = None,
     overwrite_proposed: bool = True,
+    allow_duplicate_fpl: bool = False,
 ) -> Path:
     """Persist candidate to rules/SLV-00N.yaml.
 
@@ -331,6 +377,9 @@ def write_rule_candidate(
       - M4 QA Round-6 P0-4：`source` / `source_fpl` 為 FPL→SLV 審計鏈錨
         點；overwrite 時若新 candidate 的這兩欄與磁碟現況不同即 raise
         ImmutableFieldViolation，強制改走新 SLV id。
+      - DEF-CLDREV-011 去重閘：若 cand.source_fpl 已有「id 不同的 verified
+        規則」存在，raise FplAlreadyVerified（除非 allow_duplicate_fpl=True）。
+        杜絕為已 verified 的 FPL 配新 id 產 proposed 重複（SLV-013/014 重生根因）。
     """
     from .file_lock import file_lock  # local import：與 hooks 使用同源
 
@@ -340,6 +389,17 @@ def write_rule_candidate(
     lock_path = target.with_suffix(target.suffix + ".lock")
 
     with file_lock(lock_path, timeout=5.0):
+        # DEF-CLDREV-011 去重閘：同一 FPL 已有 id 不同的 verified 規則 → 拒絕重生 proposed 重複。
+        if cand.source_fpl and not allow_duplicate_fpl:
+            existing_verified = find_verified_rule_for_fpl(
+                cand.source_fpl, rules_dir=target_dir, exclude_id=cand.id
+            )
+            if existing_verified is not None:
+                raise FplAlreadyVerified(
+                    f"refuse to propose {cand.id} for {cand.source_fpl}: "
+                    f"verified rule {existing_verified} already covers this FPL "
+                    "— reuse it (or pass allow_duplicate_fpl=True for a deliberate variant)"
+                )
         if target.exists():
             try:
                 existing = yaml.safe_load(target.read_text(encoding="utf-8")) or {}
@@ -488,6 +548,11 @@ def _cli(argv: Optional[List[str]] = None) -> int:
         action="store_true",
         help="fail if a proposed rule already exists at the target id",
     )
+    p_propose.add_argument(
+        "--allow-duplicate-fpl",
+        action="store_true",
+        help="DEF-CLDREV-011：覆寫去重閘，即使該 FPL 已有 verified 規則仍允許產 proposed 變體",
+    )
 
     sub.add_parser("list-fpl", help="list known FPL entries")
     sub.add_parser("list-rules", help="list loaded SLV rule files")
@@ -503,9 +568,20 @@ def _cli(argv: Optional[List[str]] = None) -> int:
         if args.dry_run:
             yaml.safe_dump(doc, sys.stdout, allow_unicode=True, sort_keys=False)
             return 0
-        path = write_rule_candidate(
-            cand, overwrite_proposed=(not args.no_overwrite)
-        )
+        try:
+            path = write_rule_candidate(
+                cand,
+                overwrite_proposed=(not args.no_overwrite),
+                allow_duplicate_fpl=args.allow_duplicate_fpl,
+            )
+        except FplAlreadyVerified as exc:
+            # DEF-CLDREV-011：已有 verified 規則涵蓋此 FPL → 不重生，明確回報供 FSM/人工判斷。
+            existing = find_verified_rule_for_fpl(cand.source_fpl) if cand.source_fpl else None
+            print(json.dumps(
+                {"skipped": True, "reason": str(exc), "source_fpl": cand.source_fpl,
+                 "existing_verified": existing},
+                ensure_ascii=False), file=sys.stderr)
+            return 3
         print(json.dumps({"wrote": str(path), "slv_id": cand.id, "trust_level": cand.trust_level}, ensure_ascii=False))
         return 0
     if args.cmd == "list-fpl":

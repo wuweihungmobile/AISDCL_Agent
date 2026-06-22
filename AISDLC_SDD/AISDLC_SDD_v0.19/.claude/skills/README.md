@@ -1,7 +1,7 @@
 # AISDLC Claude Skills
 # Claude Code 技能套件
 
-**版本**: v0.02-SDD
+**版本**: v0.19-SDD
 **建立日期**: 2025-01-22
 **最後更新**: 2026-04-15
 **格式標準**: Claude Code Agent Skills Standard (`<name>/SKILL.md`)
@@ -26,7 +26,7 @@
 # Integration
 /integration-oauth      # OAuth 認證
 /integration-stripe     # Stripe 支付
-/integration-api        # API 客戶端
+/integration-api-client # API 客戶端
 /integration-aws        # AWS 服務
 /integration-webhook    # Webhook 處理
 /integration-firebase   # Firebase
@@ -139,7 +139,7 @@
 ├── sdd-review/SKILL.md                    # SCG-4 PR Review（實作規格一致性）
 │
 │── # ★ SDD Runtime 家族 (3個，FSM 閉環 runtime skill)
-├── spec-logical-validator/SKILL.md        # Spec 邏輯一致性驗證（SLV-001~011）
+├── spec-logical-validator/SKILL.md        # Spec 邏輯一致性驗證（SLV-001~014）
 ├── test-failure-analyzer/SKILL.md         # 測試失敗 → Spec 自動映射橋接（TFA）
 └── stage-compaction/SKILL.md              # Stage 凍結後上下文壓縮
 ```
@@ -179,7 +179,7 @@
 |------|-------|------|
 | `/integration-oauth` | OAuth | 認證整合 |
 | `/integration-stripe` | Stripe | 支付整合 |
-| `/integration-api` | API Client | 通用 API 客戶端 |
+| `/integration-api-client` | API Client | 通用 API 客戶端 |
 | `/integration-aws` | AWS | S3/SES/SNS/Lambda |
 | `/integration-webhook` | Webhook | 事件處理 |
 | `/integration-firebase` | Firebase | BaaS 整合 |
@@ -239,7 +239,7 @@
 ### ★ SDD Runtime 家族
 | 命令 | Skill | 用途 |
 |------|-------|------|
-| `/spec-logical-validator` | Spec Logical Validator | Spec 邏輯一致性驗證（SLV-001~011：邏輯/物理可行性/不可測 AC/跨媒介一致性），於 SCG 格式驗證前執行 |
+| `/spec-logical-validator` | Spec Logical Validator | Spec 邏輯一致性驗證（SLV-001~014：邏輯/物理可行性/不可測 AC/跨媒介一致性/沙箱硬化），於 SCG 格式驗證前執行 |
 | `/test-failure-analyzer` | Test Failure Analyzer | 測試失敗 → AC/US/FRD 自動映射（TFA），分類修程式碼 vs 修 Spec，供閉環消費 |
 | `/stage-compaction` | Stage Compaction | Stage 凍結里程碑後壓縮上下文、產出 Stage Summary，保後續 Token 預算 |
 

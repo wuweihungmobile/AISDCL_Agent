@@ -211,6 +211,6 @@ export class ApiClientWrapper {
 
 ---
 
-**基於**: AISDLC-SDD v0.01
+**基於**: AISDLC-SDD v0.19
 **對應情境**: Integration 場景
 **CI/CD 規格**: `cicd/SDD_INTEGRATION_CICD.md`

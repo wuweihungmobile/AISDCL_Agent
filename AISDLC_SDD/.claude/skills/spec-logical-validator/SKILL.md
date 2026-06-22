@@ -1,9 +1,9 @@
 ---
 name: spec-logical-validator
-description: 執行 Spec 邏輯一致性驗證（SLV-001~011：含 Phase E 學習層 + Phase F 多模態），在 SCG 格式驗證之前，偵測物理不可行需求、不可測試 AC、業務不變量矛盾、UI/API/DB/C4 跨媒介不一致等邏輯錯誤
+description: 執行 Spec 邏輯一致性驗證（SLV-001~014：含 Phase E 學習層 + Phase F 多模態 + 自治迴圈沙箱硬化），在 SCG 格式驗證之前，偵測物理不可行需求、不可測試 AC、業務不變量矛盾、UI/API/DB/C4 跨媒介不一致等邏輯錯誤
 user-invocable: true
 disable-model-invocation: false
-argument-hint: "<scope: full|nfr|ac|invariant|contract|test|dependency|temporal|cache|proposed|verified|multimodal|ui|api|db|c4>"
+argument-hint: "<scope: full|nfr|ac|invariant|contract|test|dependency|temporal|cache|proposed|verified|multimodal|ui|api|db|c4|SANDBOX_HARDENING_GATE>"
 allowed-tools:
   - Read
   - Grep
@@ -100,6 +100,11 @@ source_fpl: FPL-001                            # 溯源（若由 slv_generator �
 > 1. 人工編輯 YAML，填寫 `reviewed_by` 與 `reviewed_at`，將 `trust_level` 改為 `verified`；或
 > 2. FSM 走 `LEARNING_COMMIT → exit_learning_commit("approved")` 流程（記錄完整審計鏈）。
 
+> **去重閘（DEF-CLDREV-011，治本）**：`/slv-generator propose <FPL>` 落盤時，若該 FPL **已有 id 不同的
+> verified 規則**，`write_rule_candidate` 直接 raise `FplAlreadyVerified`（CLI 回 exit 3 + 跳過訊息），
+> **不再為已 verified 的 FPL 配新 id 產 proposed 重複**（過去 FPL-001 已升 verified SLV-007 仍重生
+> SLV-013/014 之根因）。明確需要變體時以 `--allow-duplicate-fpl` 覆寫。
+
 ### 載入流程
 
 ```
@@ -134,6 +139,25 @@ source_fpl: FPL-001                            # 溯源（若由 slv_generator �
 > → 人工 review → 填寫 reviewed_by/reviewed_at → trust_level=verified → SCG enforce`。
 > 後續透過 FSM `enter_learning_commit → exit_learning_commit("approved")` 落在
 > `learning_commit_tracking.proposals_history` 的事後審計鏈紀錄，可跨 session 回查。
+
+## proposed / advisory 規則清單（trust_level=proposed — 待 review，🟡 不阻塞 SCG）
+
+> 引擎動態掃 `rules/*.yaml`；下表為磁碟實有之 proposed 規則，僅作 advisory 報告，
+> **絕不**自動升級為 verified（升級須走人工 review 填 reviewed_by/reviewed_at）。
+
+| ID | Name | Scope | 來源 | 備註 |
+|----|------|-------|------|------|
+| [SLV-008](rules/SLV-008.yaml) | UI mockup ↔ FRD AC 錨點一致 | ui | Phase F 多模態 | 跨媒介 |
+| [SLV-009](rules/SLV-009.yaml) | OpenAPI ↔ UI form 錨點一致 | api | Phase F 多模態 | 跨媒介 |
+| [SLV-010](rules/SLV-010.yaml) | DB schema ↔ FRD 欄位錨點一致 | db | Phase F 多模態 | 跨媒介 |
+| [SLV-011](rules/SLV-011.yaml) | C4 component ↔ SRD 模組錨點一致 | c4 | Phase F 多模態 | 跨媒介 |
+| [SLV-012](rules/SLV-012.yaml) | 自治迴圈安全不變量（執行器自身硬化） | SANDBOX_HARDENING_GATE | ACT-061 manual-authored | self-STRIDE 6 類硬化 |
+| [SLV-013](rules/SLV-013.yaml) | 時序語義矛盾（proposed 重生） | temporal | FPL-001 auto 2026-06-15 | ⚠️ `superseded_by: SLV-007`（與 verified 全同，不另升級） |
+| [SLV-014](rules/SLV-014.yaml) | 時序語義矛盾（proposed 重生） | temporal | FPL-001 auto 2026-06-15 | ⚠️ `superseded_by: SLV-007`（與 verified 全同，不另升級） |
+
+> **SLV-013/014 重複說明（DEF-CLDREV-008）**：兩者係 `slv_generator` 由 FPL-001 二次自動產出之
+> proposed 草案，邏輯/scope/regex 與 **verified SLV-007 完全相同**。已於 yaml 標 `superseded_by:
+> SLV-007` 並改名破除重複命名；保留為學習層審計痕跡，**不可升級為第二條 verified**。
 
 ---
 
@@ -317,5 +341,5 @@ python -m tools.fsm_runtime.multimodal_validator <spec_paths...> \
 
 ---
 
-**基於**: AISDLC-SDD v0.01（Phase E M4 / ACT-028 規則引擎化 + Phase F M4 / ACT-031 多模態擴充）
+**基於**: AISDLC-SDD v0.19（Phase E M4 / ACT-028 規則引擎化 + Phase F M4 / ACT-031 多模態擴充）
 **對應藍圖**: SDD_improving_Automation_04.md §ACT-028 + SDD_improving_Automation_05.md §伍 ACT-031（均已歸檔 ../../build/planning/archive/）

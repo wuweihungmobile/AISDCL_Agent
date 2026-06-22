@@ -208,6 +208,6 @@ npx @stoplight/spectral-cli lint docs/02_architecture/api/CONTRACT-*.yaml \
 
 ---
 
-**基於**: AISDLC-SDD v0.01
+**基於**: AISDLC-SDD v0.19
 **對應 CI/CD 規格**: `cicd/SDD_SECURITY_CICD.md`
 **SDD Enhancement**: `scenarios/security/SDD_SECURITY_ENHANCEMENT.md`

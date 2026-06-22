@@ -234,6 +234,6 @@ docs/01_requirements/INVARIANT-SPEC-{SystemName}.md（若存在）
 
 ---
 
-**基於**: AISDLC-SDD v0.01
+**基於**: AISDLC-SDD v0.19
 **對應 Agent**: `06.dev-developer-zh.yaml`
 **對應 SDD Enhancement**: `scenarios/greenfield/SDD_GREENFIELD_ENHANCEMENT.md`

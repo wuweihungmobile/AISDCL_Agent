@@ -155,7 +155,10 @@ Stage Summary 已建立，包含所有關鍵決策摘要。
 
 ```bash
 # 1) 將 FSM 從 AUTO_COMPACT_PENDING 轉回原 resume_state，並重置今日 Ledger cumulative_tokens
-cd AISDLC_SDD_v0.01 && python -m tools.fsm_runtime.fsm_runtime complete-auto-compact
+#    cd 至「本 skill 所在的框架版本目錄根」（AISDLC_SDD_v0.0X/，X=當前版本）——tools.fsm_runtime
+#    是以該版本目錄為根的 namespace package，須以其為 cwd 才能解析；勿寫死特定版本號（避免
+#    每輪 Copy-on-Evolve 漂移，DEF-CLDREV-008 紀律）。
+cd AISDLC_SDD_v0.0X && python -m tools.fsm_runtime.fsm_runtime complete-auto-compact
 
 # 預期輸出（範例）：
 # {"resumed_to": "SPEC_DRAFTING", "ledger": {"reset": true, "path": "...", "previous_cumulative": 184000}}
@@ -184,5 +187,5 @@ cd AISDLC_SDD_v0.01 && python -m tools.fsm_runtime.fsm_runtime complete-auto-com
 
 ---
 
-**基於**: AISDLC-SDD v0.01（SDD 原生新增 Skill）
+**基於**: AISDLC-SDD v0.19（SDD 原生新增 Skill）
 **對應藍圖**: SDD_improving_Automation_01.md Phase B — stage-compaction

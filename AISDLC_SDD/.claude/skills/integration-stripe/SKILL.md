@@ -203,6 +203,6 @@ Stripe 整合在 SDD 中屬於「整合設計先行」範疇：支付策略需�
 
 ---
 
-**基於**: AISDLC-SDD v0.01
+**基於**: AISDLC-SDD v0.19
 **對應情境**: Integration 場景
 **CI/CD 規格**: `cicd/SDD_INTEGRATION_CICD.md`

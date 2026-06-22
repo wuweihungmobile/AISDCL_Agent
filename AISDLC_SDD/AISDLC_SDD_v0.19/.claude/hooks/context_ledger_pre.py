@@ -3,7 +3,7 @@
 Wiring (.claude/settings.json):
     "hooks": {
       "PreToolUse": [{
-        "matcher": "Write|Edit|Read|Bash",
+        "matcher": "Write|Edit|Read|Bash|NotebookEdit",
         "hooks": [{ "type": "command",
            "command": "python .claude/hooks/context_ledger_pre.py" }]
       }]

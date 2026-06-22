@@ -1,6 +1,7 @@
 id: SLV-014
-name: 時序語義矛盾（N+1 vs N 無穩態條件）
+name: 時序語義矛盾（N+1 vs N）proposed 重生 — 已由 verified SLV-007 涵蓋，不另行升級
 source: FPL-001 auto-generated 2026-06-15
+superseded_by: SLV-007   # DEF-CLDREV-008：與 verified SLV-007 邏輯/scope/regex 全同之 proposed 重生；保留為學習層審計痕跡，不可升級為第二條 verified
 trust_level: proposed
 reviewed_by: null
 reviewed_at: null

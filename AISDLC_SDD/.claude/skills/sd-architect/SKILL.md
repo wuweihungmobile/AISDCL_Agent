@@ -246,6 +246,6 @@ SRD 完成後執行 RTM 更新，加入 API 追溯：
 
 ---
 
-**基於**: AISDLC-SDD v0.01
+**基於**: AISDLC-SDD v0.19
 **對應 Agent**: `05.sd-architect-zh.yaml`
 **對應 SDD Enhancement**: `scenarios/greenfield/SDD_GREENFIELD_ENHANCEMENT.md`

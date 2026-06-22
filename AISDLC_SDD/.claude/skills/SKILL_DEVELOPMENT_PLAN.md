@@ -1,7 +1,7 @@
 # AISDLC Claude Skill 開發規劃
 # Claude Skill Development Plan
 
-**版本**: v0.02-SDD
+**版本**: v0.19-SDD
 **建立日期**: 2025-01-22
 **最後更新**: 2026-04-14
 **用途**: 規劃 AISDLC 九大情境和 Agent 轉化為 Claude Skill 的完整路線圖
@@ -266,7 +266,7 @@ allowed-tools:
 ## 檔案結構 (Claude Code Agent Skills Standard)
 
 ```
-AISDLC_SDD_v0.01/.claude/skills/
+AISDLC_SDD_v0.0X/.claude/skills/          # X=當前框架版本，勿寫死（DEF-CLDREV-008）
 ├── README.md                              ✅ 總覽文檔
 ├── SKILL_DEVELOPMENT_PLAN.md              ✅ 本文件
 ├── devops-github-actions/SKILL.md         ✅ GitHub Actions

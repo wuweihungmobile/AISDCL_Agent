@@ -141,5 +141,5 @@ AI API 整合在 SDD 中必須設計先行：AI 使用策略需有 ADR（含成�
 
 ---
 
-**基於**: AISDLC-SDD v0.01
+**基於**: AISDLC-SDD v0.19
 **對應情境**: Integration 場景

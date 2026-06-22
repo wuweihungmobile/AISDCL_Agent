@@ -248,6 +248,6 @@ src/models/ / migrations/
 
 ---
 
-**基於**: AISDLC-SDD v0.01（SDD 專屬 Skill）
+**基於**: AISDLC-SDD v0.19（SDD 專屬 Skill）
 **對應 SDD 原則**: Design-as-Doc（設計即文件）
 **對應範本**: `docs_template/sdd/adr/ADR-TEMPLATE.md`

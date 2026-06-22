@@ -143,5 +143,5 @@ Document ID: {uid}（Firebase Auth UID）
 
 ---
 
-**基於**: AISDLC-SDD v0.01
+**基於**: AISDLC-SDD v0.19
 **對應情境**: Integration 場景

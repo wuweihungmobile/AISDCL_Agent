@@ -238,5 +238,5 @@ Pipeline 配置存入：`docs/08_deployment/CI-CD-PIPELINE-{System}.md`（說明
 
 ---
 
-**基於**: AISDLC-SDD v0.01
+**基於**: AISDLC-SDD v0.19
 **對應 CI/CD 規格**: `cicd/SDD_TESTING_CICD.md`

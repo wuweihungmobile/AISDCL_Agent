@@ -145,5 +145,5 @@ allowed-tools:
 
 ---
 
-**基於**: AISDLC-SDD v0.01
+**基於**: AISDLC-SDD v0.19
 **定位**: 通用程式品質審查（不綁 SCG-4；SCG-4 規格一致性主審見 `/sdd-review`）
