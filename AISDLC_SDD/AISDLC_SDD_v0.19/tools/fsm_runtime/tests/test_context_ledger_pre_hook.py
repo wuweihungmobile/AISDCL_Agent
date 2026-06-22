@@ -325,5 +325,38 @@ class NonStringSubagentTypeTests(unittest.TestCase):
             out.get("hookSpecificOutput", {}).get("hookEventName"), "PreToolUse")
 
 
+class MalformedPayloadTests(unittest.TestCase):
+    """DEF-CLDREV-025: a JSON-valid but non-dict top-level payload (`[1,2,3]`)
+    does NOT raise json.JSONDecodeError, so the except branch never fires and the
+    subsequent `inp.get(...)` / `tool_input.get(...)` raised AttributeError →
+    hook exits non-zero and the PreToolUse JSON is dropped. Same input-domain
+    class as DEF-CLDREV-012 (non-numeric SDD_MAX_CONTEXT) / DEF-CLDREV-020
+    (non-string subagent_type). Both `inp` and `tool_input` must normalize to {}."""
+
+    def setUp(self) -> None:
+        self._tmp = tempfile.TemporaryDirectory()
+        self.root = Path(self._tmp.name)
+        self.mod = _load_hook_module(self.root)
+        self.runner = _MainRunner(self.mod)
+
+    def tearDown(self) -> None:
+        self._tmp.cleanup()
+
+    def test_top_level_list_does_not_crash(self) -> None:
+        # _MainRunner.run asserts rc == 0; pre-fix this raised AttributeError at
+        # `inp.get("tool_name")`. _FakeStdin serializes via json.dumps so a list
+        # payload reaches main() exactly as Claude Code would deliver malformed JSON.
+        out = self.runner.run([1, 2, 3])  # type: ignore[arg-type]
+        self.assertEqual(out.get("hookSpecificOutput", {}).get("hookEventName"), "PreToolUse")
+
+    def test_list_tool_input_does_not_crash(self) -> None:
+        out = self.runner.run({"tool_name": "Read", "tool_input": [1, 2, 3]})  # type: ignore[dict-item]
+        self.assertEqual(out.get("hookSpecificOutput", {}).get("hookEventName"), "PreToolUse")
+
+    def test_str_tool_input_does_not_crash(self) -> None:
+        out = self.runner.run({"tool_name": "Read", "tool_input": "abc"})  # type: ignore[dict-item]
+        self.assertEqual(out.get("hookSpecificOutput", {}).get("hookEventName"), "PreToolUse")
+
+
 if __name__ == "__main__":
     unittest.main()

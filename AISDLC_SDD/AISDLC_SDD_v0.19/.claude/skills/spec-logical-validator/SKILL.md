@@ -221,7 +221,7 @@ source_fpl: FPL-001                            # 溯源（若由 slv_generator �
 ### 🟡 ADVISORY（proposed / external, **不阻塞** SCG）
 | 規則 | 位置 | 問題描述 | 建議動作 |
 |------|------|---------|---------|
-| SLV-008 (proposed) | FRD-OrderSystem.md L120 | AC-015-1 缺穩態條件 | 建議補充；等 sa-analyst review SLV-008 後改為強制 |
+| SLV-008 (proposed) | FRD-OrderSystem.md L120 | AC-015-1 對應的 UI mockup 缺 `anchor:ui` 標記（UI mockup ↔ FRD AC 錨點不一致） | 建議補充錨點；等 sa-analyst review SLV-008 後改為強制 |
 
 ### 結論
 🔴 SLV 未通過（1 個 verified CRITICAL 問題）

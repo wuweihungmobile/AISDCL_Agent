@@ -22,7 +22,11 @@ sync_policy:
     cache_ttl_hours: 24                # session_start 24h 內走 cache
     auto_pull_on_session_start: true   # bootstrap 自動 pull（失敗不阻塞）
     failure_mode: non_blocking         # Hub 失效不升 ESCALATION（HUB-GOVERNANCE §捌）
-    timeout_seconds: 30                # 單次 pull 上限
+    timeout_seconds: 20                # 單次 pull 上限。DEF-CLDREV-026：必 < 根 router
+                                       # _CHILD_TIMEOUT["SessionStart"]=25s（嵌套不變量
+                                       # 外層 settings 30 ⊃ router child 25 ⊃ hub pull 20，
+                                       # 留 5s 給 session_start 其餘 bootstrap + router fail-safe）。
+                                       # 原 30 > 25 會致慢 pull 時 router 先砍 child、FSM 注入蒸發。
   push:
     enabled: false                     # 預設關（須使用者 explicit confirm）
     require_env_confirm: true          # G-30.3：須 SDD_HUB_PUSH_CONFIRMED=<reason>

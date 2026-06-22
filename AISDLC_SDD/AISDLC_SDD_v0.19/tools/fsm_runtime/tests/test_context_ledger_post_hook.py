@@ -115,5 +115,31 @@ class MaxContextFloorTests(unittest.TestCase):
             self.assertEqual(mod.MAX_CONTEXT, 200000)
 
 
+class MalformedPayloadTests(unittest.TestCase):
+    """DEF-CLDREV-025: symmetric with the pre hook — a JSON-valid but non-dict
+    top-level payload (`[1,2,3]`) or non-dict tool_input must NOT crash the post
+    hook with AttributeError at `inp.get(...)` / `tool_input.get(...)`. Both must
+    normalize to {}."""
+
+    def setUp(self) -> None:
+        self._tmp = tempfile.TemporaryDirectory()
+        self.root = Path(self._tmp.name)
+        self.mod = _load_hook_module(self.root)
+        self.runner = _MainRunner(self.mod)
+
+    def tearDown(self) -> None:
+        self._tmp.cleanup()
+
+    def test_top_level_list_does_not_crash(self) -> None:
+        out = self.runner.run([1, 2, 3])  # type: ignore[arg-type]
+        self.assertEqual(out.get("hookSpecificOutput", {}).get("hookEventName"), "PostToolUse")
+
+    def test_list_tool_input_does_not_crash(self) -> None:
+        out = self.runner.run(
+            {"tool_name": "Read", "tool_input": [1, 2, 3], "tool_response": "x"}  # type: ignore[dict-item]
+        )
+        self.assertEqual(out.get("hookSpecificOutput", {}).get("hookEventName"), "PostToolUse")
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -3,6 +3,13 @@
 Reads Claude Code hook JSON from stdin. Appends a 'post' entry to the daily
 context ledger with result-size token estimate. Emits an additionalContext
 warning when cumulative ratio crosses 70% (soft), 85% (hard), 95% (critical).
+
+Matcher note (A6-02, by-design — do NOT add `Task` here): the PostToolUse matcher
+is `Write|Edit|Read|Bash|NotebookEdit` WITHOUT `Task`, deliberately asymmetric
+with PreToolUse (which adds `Task` purely for the ACT-020 subagent-contract
+injection hint, not for accounting). A subagent runs in its own context window,
+so its result tokens must NOT be charged to the main session's MAX_CONTEXT —
+adding `Task` here would inflate cumulative and trip the 95% deny prematurely.
 """
 from __future__ import annotations
 
@@ -120,8 +127,14 @@ def main() -> int:
         inp = json.loads(raw or "{}")
     except json.JSONDecodeError:
         inp = {}
+    # DEF-CLDREV-025：與 pre hook 對稱 — 頂層 payload / tool_input 非 dict（如 `[1,2,3]`）
+    # 時 `.get()` 會拋 AttributeError 致 hook 非零退出。非 dict 一律正規化為 {}。
+    if not isinstance(inp, dict):
+        inp = {}
     tool = inp.get("tool_name", "")
-    tool_input = inp.get("tool_input", {}) or {}
+    tool_input = inp.get("tool_input", {})
+    if not isinstance(tool_input, dict):
+        tool_input = {}
     tool_response = inp.get("tool_response")
     target = tool_input.get("file_path") or tool_input.get("path")
 

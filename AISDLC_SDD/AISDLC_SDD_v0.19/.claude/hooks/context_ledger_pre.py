@@ -246,8 +246,16 @@ def main() -> int:
         inp = json.loads(raw or "{}")
     except json.JSONDecodeError:
         inp = {}
+    # DEF-CLDREV-025：頂層 payload 可能是合法 JSON 但非 dict（如 `[1,2,3]` 解析成 list，
+    # 不觸發 JSONDecodeError），tool_input 亦可能為 list/str。`.get()` 對非 dict 會拋
+    # AttributeError 致整支 hook 非零退出、PreToolUse JSON 被丟棄（與 DEF-CLDREV-012/020
+    # 同類型別假設輸入域缺口）。非 dict 一律正規化為 {}，graceful 視為空 payload。
+    if not isinstance(inp, dict):
+        inp = {}
     tool = inp.get("tool_name", "")
-    tool_input = inp.get("tool_input", {}) or {}
+    tool_input = inp.get("tool_input", {})
+    if not isinstance(tool_input, dict):
+        tool_input = {}
     target = (
         tool_input.get("file_path")
         or tool_input.get("path")
