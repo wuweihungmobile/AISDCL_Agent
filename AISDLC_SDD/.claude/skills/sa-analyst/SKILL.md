@@ -91,7 +91,7 @@ SA 是 SDD 工作流的起點。本 Skill 產出 FRD、User Stories 和 RTM 初�
 ### 階段 3：功能需求文件（FRD）產出
 
 **文件路徑**：`docs/01_requirements/FRD-{SystemName}.md`
-**範本來源**：`docs_template/sdd/requirements/FRD-TEMPLATE.md`
+**範本來源**：`docs_template/core/frd/FRD_Universal_Template.md`
 
 **FRD 必要結構**：
 

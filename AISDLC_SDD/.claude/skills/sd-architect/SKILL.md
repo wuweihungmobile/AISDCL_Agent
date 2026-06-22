@@ -129,7 +129,7 @@ ADR 類型清單（需確認全部覆蓋）：
 ### 階段 4：SRD 文件產出（SCG-1 必要條件）
 
 **文件路徑**：`docs/02_architecture/SRD-{SystemName}.md`
-**範本來源**：`docs_template/sdd/architecture/SRD-TEMPLATE.md`
+**範本來源**：`docs_template/core/srd/SRD_Module_Template.md`
 
 ```markdown
 # System Requirements Document — {SystemName}

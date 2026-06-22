@@ -46,7 +46,7 @@ PM 是 SDD 需求階段的業務目標定義者。本 Skill 產出 PRD，與 SA 
 ### 任務 A：PRD 產出（SCG-0 前置）
 
 **文件路徑**：`docs/01_requirements/PRD-{SystemName}.md`
-**範本來源**：`docs_template/sdd/requirements/PRD-TEMPLATE.md`
+**範本來源**：`docs_template/core/prd/PRD_Universal_Template.md`
 
 ```markdown
 # Product Requirements Document — {SystemName}
