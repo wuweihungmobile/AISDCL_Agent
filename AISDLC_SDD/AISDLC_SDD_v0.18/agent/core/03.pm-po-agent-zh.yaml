@@ -27,7 +27,7 @@ agent:
         description: "與SA/BA審查需求文檔"
 
   scenario_usage:
-    frequency: "Medium-High (6/9 scenarios)"
+    frequency: "Medium-High (6/10 scenarios)"
     irreplaceability: "⭐⭐⭐⭐ High Priority"
     primary_scenarios:
       - scenario: "Greenfield"
@@ -234,7 +234,7 @@ sdd_phase02_greenfield:
   nfr_collection:
     description: "Stage 1 PRD 必須包含非功能需求（NFR）初版目標"
     trigger: "Greenfield Stage 1 PRD 撰寫時強制執行"
-    spec_gate: "🔷 SCG-1 Requirement Spec Gate"
+    spec_gate: "🔷 SCG-0 Requirement Spec Gate"
     required_nfr_fields:
       - "可用性目標（Availability）：XX.XX%"
       - "回應時間目標（P95 Latency）：< XXX ms"

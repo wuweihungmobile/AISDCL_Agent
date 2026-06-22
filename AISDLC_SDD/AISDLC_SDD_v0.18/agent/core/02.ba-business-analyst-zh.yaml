@@ -27,7 +27,7 @@ agent:
         description: "從PM/PO接收業務目標，驗證後交給SA"
 
   scenario_usage:
-    frequency: "Medium (3/9 scenarios)"
+    frequency: "Medium (3/10 scenarios)"
     irreplaceability: "⭐⭐⭐⭐⭐ Must Keep"
     primary_scenarios:
       - scenario: "Greenfield"

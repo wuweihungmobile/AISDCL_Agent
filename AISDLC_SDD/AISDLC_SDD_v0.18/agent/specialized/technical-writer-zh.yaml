@@ -27,7 +27,7 @@ agent:
         description: "根據審查意見持續改進文檔"
 
   scenario_usage:
-    frequency: "Low-Specialized (2/9 scenarios)"
+    frequency: "Low-Specialized (2/10 scenarios)"
     irreplaceability: "⭐⭐⭐⭐ High Priority"
     primary_scenarios:
       - scenario: "Documentation"
@@ -569,7 +569,7 @@ sdd_skills:
     description: "活文件維護機制 - 確保文件與代碼同步更新"
     trigger: "任何功能交付或代碼變更時觸發文件同步檢查"
     output: "相關文件更新（FRD/SRD/API Spec）"
-    spec_gate: "SCG-1 Requirement Spec Gate"
+    spec_gate: "SCG-0 Requirement Spec Gate"
     mechanisms:
       - "建立文件-代碼追溯連結"
       - "定義文件更新觸發條件清單"
@@ -644,7 +644,7 @@ sdd_phase02_documentation:
           deadline: "上線當天"
           responsible: "sa-analyst"
       output_template: "docs_template/sdd/development/LIVING-DOC-STRATEGY-TEMPLATE.md"
-      spec_gate: "SCG-1 Requirement Spec Gate"
+      spec_gate: "SCG-0 Requirement Spec Gate"
 
   # 2.6.2 adr_index_maintenance 標準流程
   adr_index_maintenance_flow:

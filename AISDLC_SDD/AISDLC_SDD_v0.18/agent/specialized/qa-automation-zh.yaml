@@ -28,7 +28,7 @@ agent:
         description: "並行開發自動化測試與Dev開發"
 
   scenario_usage:
-    frequency: "Low-Medium (3/9 scenarios)"
+    frequency: "Low-Medium (3/10 scenarios)"
     irreplaceability: "⭐⭐⭐⭐ High Priority"
     primary_scenarios:
       - scenario: "Testing"

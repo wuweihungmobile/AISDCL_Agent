@@ -31,6 +31,25 @@
 - **新測試**：`test_agent_template_lint.py` 9 case（前次零測試）+ `test_collaboration_symmetry_lint.py` +3 case。
 - **驗證**：完整 ci-gate **exit 0**：v0.01:1478 / v0.18:1611（零退化）/ scripts/tests:**81**；窮盡掃描 template broken=0；DEF-AGTREV-001~008 全閉。
 
+### 三度收尾（2026-06-22，使用者第三次請求；四鏡 zero-trust 重審揪出語意層殘留）
+> 派 Architect/SA/SD/QA **四鏡**獨立重審全 26 agent + 3 根文檔。機械閘門（兩 lint + SSOT fresh）皆綠，聚焦 lint 抓不到的語意/架構符規缺口。查證 5 類真實殘留（fixed）+ 5 類親驗判定 by-design（不修、誠實記分歧）。
+
+#### 修正（5 項，純 agent 定義檔/根文檔，無 FSM/`*.tla`/test 變更）
+- **DEF-AGTREV-009（P1）spec_gate 號碼/名稱張冠李戴**：7 處「SCG-1 Requirement Spec Gate」（官方 SCG-0=Requirement、SCG-1=Design）→ 分情境修：SRD 產物（`04.sa-analyst` 2 處）改「SCG-1 **Design** Spec Gate」；FRD/PRD/RTM 產物（`04.sa-analyst` 2 處 + `03.pm-po` + `technical-writer` 2 處）改「SCG-0 Requirement Spec Gate」。
+- **DEF-AGTREV-010（P2）scenario_usage 分母 /9→/10**：場景實為 10（devops/mapping 已 /10）→ 15 live agent + `AGENT_PHASE2_UPDATE_GUIDE` 14 處範例全修，保留分子。
+- **DEF-AGTREV-011（P3）sa-analyst 漏 Migration**：9/9→10/10 + supporting 補 Migration（sd-architect 為主力、sa 需求面支援）。
+- **DEF-AGTREV-012（P3）architect SRD 模板重複行**：`sd-web`/`sd-mobile-architect` 各去重一條（lint 盲區：路徑存在故漏抓）。
+- **DEF-AGTREV-013（P2）core/README SCG-5 owner 誤標 qa-tester**：官方 owner=qa-lead → 改「RTM 覆蓋率支援（SCG-5 閘門 owner：qa-lead）」。
+
+#### 親驗判定 by-design / 不修（與專家分歧之誠實記錄，Rule 7）
+- **A-01 駁回**：4 個 extends-agent（sd-web/mobile、qa-web/mobile）缺 document_responsibilities/supported_workflows 係 `extends` base 繼承，非缺漏（補上反致 base 漂移）。
+- **A-04 駁回**：「21 個 Agents」= 21 persona-schema agent（Phase 2 對象，5 runtime 不在內），歷史正確。
+- **A-05 defer**：.md 標頭 v0.01 漂移屬文檔新鮮度（agent.version 機械 SSOT 已全 v0.18），需逐處人工判歷史 vs 現況，列觀察項。
+- **A-02 / SD-06**：compiler schema 歸類近似、workflow_name 為邏輯標籤（綁定走 workflow 端 agent_binding）—— 皆 by-design。
+
+#### 驗證
+- 完整 `bash scripts/ci-gate.sh` **exit 0**：v0.01:1478 / v0.18:1611（**零退化**，agent YAML/.md 非 pytest 標的）/ scripts/tests:81；arch_fitness fail=0；兩 agent lint + SSOT fresh 皆 ✅；26/26 agent YAML safe_load OK；QA 複審鏡實測 5 修復項全成立、無誤傷合法 SCG 引用、同類 0 殘留。DEF-AGTREV-009~013 全閉。
+
 ---
 
 ## [v0.17] - 2026-06-18（Copy-on-Evolve 自 v0.16；v0.16 凍結唯讀）

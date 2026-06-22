@@ -27,7 +27,7 @@ agent:
         description: "持續分析代碼品質變化"
 
   scenario_usage:
-    frequency: "Low-Specialized (2/9 scenarios)"
+    frequency: "Low-Specialized (2/10 scenarios)"
     irreplaceability: "⭐⭐⭐⭐ High Priority (在特定情境中)"
     primary_scenarios:
       - scenario: "Brownfield"

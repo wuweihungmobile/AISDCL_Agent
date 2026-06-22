@@ -96,7 +96,7 @@ collaboration_patterns:
       applicable_scenarios: ["Greenfield", "Integration"]
 
 scenario_usage:
-  frequency: "Medium (3/9 scenarios)"
+  frequency: "Medium (3/10 scenarios)"
   irreplaceability: "⭐⭐⭐⭐⭐ Must Keep"
   primary_scenarios:
     - scenario: "Greenfield"
@@ -127,7 +127,7 @@ collaboration_patterns:
       applicable_scenarios: ["Greenfield", "All with PRD"]
 
 scenario_usage:
-  frequency: "High (6/9 scenarios)"
+  frequency: "High (6/10 scenarios)"
   irreplaceability: "⭐⭐⭐⭐⭐ Must Keep"
   primary_scenarios:
     - scenario: "Greenfield"
@@ -171,7 +171,7 @@ collaboration_patterns:
       applicable_scenarios: ["All technical scenarios"]
 
 scenario_usage:
-  frequency: "High (8/9 scenarios)"
+  frequency: "High (8/10 scenarios)"
   irreplaceability: "⭐⭐⭐⭐⭐ Must Keep"
   primary_scenarios:
     - scenario: "Greenfield"
@@ -217,7 +217,7 @@ collaboration_patterns:
       applicable_scenarios: ["All scenarios"]
 
 scenario_usage:
-  frequency: "High (6/9 scenarios)"
+  frequency: "High (6/10 scenarios)"
   irreplaceability: "⭐⭐⭐⭐⭐ Must Keep"
   primary_scenarios:
     - scenario: "Greenfield"
@@ -257,7 +257,7 @@ collaboration_patterns:
       applicable_scenarios: ["All scenarios"]
 
 scenario_usage:
-  frequency: "High (7/9 scenarios)"
+  frequency: "High (7/10 scenarios)"
   irreplaceability: "⭐⭐⭐⭐⭐ Must Keep"
   primary_scenarios:
     - scenario: "Greenfield"
@@ -304,7 +304,7 @@ collaboration_patterns:
       applicable_scenarios: ["Brownfield", "Refactoring"]
 
 scenario_usage:
-  frequency: "Medium (2/9 scenarios)"
+  frequency: "Medium (2/10 scenarios)"
   irreplaceability: "⭐⭐⭐⭐ Keep (Brownfield/Refactoring必需)"
   primary_scenarios:
     - scenario: "Brownfield"
@@ -330,7 +330,7 @@ collaboration_patterns:
       applicable_scenarios: ["Performance"]
 
 scenario_usage:
-  frequency: "Low (1/9 scenarios)"
+  frequency: "Low (1/10 scenarios)"
   irreplaceability: "⭐⭐⭐⭐ Keep (Performance必需)"
   primary_scenarios:
     - scenario: "Performance"
@@ -353,7 +353,7 @@ collaboration_patterns:
       applicable_scenarios: ["Integration"]
 
 scenario_usage:
-  frequency: "Low (1/9 scenarios)"
+  frequency: "Low (1/10 scenarios)"
   irreplaceability: "⭐⭐⭐⭐ Keep (Integration必需)"
   primary_scenarios:
     - scenario: "Integration"
@@ -376,7 +376,7 @@ collaboration_patterns:
       applicable_scenarios: ["DevOps"]
 
 scenario_usage:
-  frequency: "Low (1/9 scenarios)"
+  frequency: "Low (1/10 scenarios)"
   irreplaceability: "⭐⭐⭐⭐ Keep (DevOps必需)"
   primary_scenarios:
     - scenario: "DevOps"
@@ -430,7 +430,7 @@ collaboration_patterns:
       applicable_scenarios: ["Testing"]
 
 scenario_usage:
-  frequency: "Medium (3/9 scenarios)"
+  frequency: "Medium (3/10 scenarios)"
   irreplaceability: "⭐⭐⭐ Keep (與qa-tester互補)"
   primary_scenarios:
     - scenario: "Testing"
@@ -461,7 +461,7 @@ collaboration_patterns:
       applicable_scenarios: ["Testing"]
 
 scenario_usage:
-  frequency: "Medium (3/9 scenarios)"
+  frequency: "Medium (3/10 scenarios)"
   irreplaceability: "⭐⭐⭐ Keep (與qa-tester互補)"
   primary_scenarios:
     - scenario: "Testing"
@@ -492,7 +492,7 @@ collaboration_patterns:
       applicable_scenarios: ["Documentation"]
 
 scenario_usage:
-  frequency: "Medium (2/9 scenarios)"
+  frequency: "Medium (2/10 scenarios)"
   irreplaceability: "⭐⭐⭐ Keep (Documentation必需)"
   primary_scenarios:
     - scenario: "Documentation"
@@ -520,7 +520,7 @@ collaboration_patterns:
       applicable_scenarios: ["Brownfield", "Performance"]
 
 scenario_usage:
-  frequency: "Medium (4/9 scenarios)"
+  frequency: "Medium (4/10 scenarios)"
   irreplaceability: "⭐⭐⭐ Keep (Brownfield複雜決策必需)"
   primary_scenarios:
     - scenario: "Brownfield"
@@ -554,7 +554,7 @@ collaboration_patterns:
       applicable_scenarios: ["Security"]
 
 scenario_usage:
-  frequency: "Low (1/9 scenarios)"
+  frequency: "Low (1/10 scenarios)"
   irreplaceability: "⭐⭐⭐⭐ Keep (Security必需)"
   primary_scenarios:
     - scenario: "Security"

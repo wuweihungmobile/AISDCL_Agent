@@ -27,7 +27,7 @@ agent:
         description: "接收設計文檔進行安全審查"
 
   scenario_usage:
-    frequency: "Specialized + Optional (4/9 scenarios)"
+    frequency: "Specialized + Optional (4/10 scenarios)"
     irreplaceability: "⭐⭐⭐⭐⭐ Must Keep (Security專用) + Optional (Greenfield/Brownfield/Performance)"
     primary_scenarios:
       - scenario: "Security"

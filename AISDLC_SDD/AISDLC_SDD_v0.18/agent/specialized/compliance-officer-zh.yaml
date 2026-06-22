@@ -27,7 +27,7 @@ agent:
         description: "在合規專案中主導合規要求定義"
 
   scenario_usage:
-    frequency: "Low-Specialized (1/9 scenarios)"
+    frequency: "Low-Specialized (1/10 scenarios)"
     irreplaceability: "⭐⭐⭐⭐ High Priority (在受監管行業)"
     primary_scenarios:
       - scenario: "Security"

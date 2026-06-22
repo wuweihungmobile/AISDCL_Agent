@@ -29,7 +29,7 @@ agent:
         description: "多測試人員並行測試不同模組"
 
   scenario_usage:
-    frequency: "High (7/9 scenarios)"
+    frequency: "High (7/10 scenarios)"
     irreplaceability: "⭐⭐⭐⭐⭐ Must Keep"
     primary_scenarios:
       - scenario: "Greenfield"

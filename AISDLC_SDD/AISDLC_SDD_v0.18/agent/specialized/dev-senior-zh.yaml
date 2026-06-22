@@ -27,7 +27,7 @@ agent:
         description: "技術指導和實作建議"
 
   scenario_usage:
-    frequency: "Medium (4/9 scenarios)"
+    frequency: "Medium (4/10 scenarios)"
     irreplaceability: "⭐⭐⭐⭐ High Priority"
     primary_scenarios:
       - scenario: "Brownfield"

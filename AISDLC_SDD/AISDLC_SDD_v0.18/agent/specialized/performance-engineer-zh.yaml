@@ -27,7 +27,7 @@ agent:
         description: "與SD/Dev-Senior審查優化方案"
 
   scenario_usage:
-    frequency: "Low-Specialized (1/9 scenarios)"
+    frequency: "Low-Specialized (1/10 scenarios)"
     irreplaceability: "⭐⭐⭐⭐⭐ Must Keep (Performance專用)"
     primary_scenarios:
       - scenario: "Performance"

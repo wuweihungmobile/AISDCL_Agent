@@ -31,7 +31,7 @@ agent:
         description: "多平台架構並行設計（Web/Mobile）"
 
   scenario_usage:
-    frequency: "High (8/9 scenarios)"
+    frequency: "High (8/10 scenarios)"
     irreplaceability: "⭐⭐⭐⭐⭐ Must Keep"
     primary_scenarios:
       - scenario: "Greenfield"

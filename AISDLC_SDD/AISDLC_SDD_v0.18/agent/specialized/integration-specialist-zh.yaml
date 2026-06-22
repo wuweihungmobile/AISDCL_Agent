@@ -27,7 +27,7 @@ agent:
         description: "API測試→調整→重測循環"
 
   scenario_usage:
-    frequency: "Low-Specialized (1/9 scenarios)"
+    frequency: "Low-Specialized (1/10 scenarios)"
     irreplaceability: "⭐⭐⭐⭐⭐ Must Keep (Integration專用)"
     primary_scenarios:
       - scenario: "Integration"

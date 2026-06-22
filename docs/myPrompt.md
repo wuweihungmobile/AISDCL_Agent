@@ -118,7 +118,7 @@ PS: 以上PRD, 請輸出docs\01_requirements\Agent_ConsoleUI_PRD.md輸出
 ===================
 1.AutoClaude的驗證測試Nightly是否有繼續?
 2.AutoClaude中SD_Improving_09.md 是否已經執行完畢? 是否可以繼續推進?
-3.AISDLC_SDD_v0.xx中的agent\* 請全面修復所有的Agent是否都合SDD與目前的架構, 請全面請Architect / SA / SD / QA 專家檢視, 若不適當, 請派Architect/SA/SD/QA 全能專家進行修復
+3.AISDLC_SDD_v0.xx中的agent\* (根目錄三個檔案, Core and specialized兩目錄)請全面修復所有的Agent是否都合SDD與目前的架構, 請全面請Architect / SA / SD / QA 專家檢視, 若不適當, 請派Architect/SA/SD/QA 全能專家進行修復
 4.AISDLC_SDD_v0.xx中.claude中的hools and skills是否都沒法正常使用到? 請問該如何進行完善的架構調整? 請全面請Architect / SA / SD / QA 專家檢視, 若不適當, 請派Architect/SA/SD/QA 全能專家進行修復
 
 請驗證AutoSDD_Iteration_Prompt_Template.md與執行以下AISDLC_SDD_v0.01專案進行自我迭代開發為目標, 來修改驗證AutoSDD_Iteration_Prompt_Template.md

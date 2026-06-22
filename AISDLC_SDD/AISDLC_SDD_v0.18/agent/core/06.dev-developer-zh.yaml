@@ -29,7 +29,7 @@ agent:
         description: "根據測試結果迭代優化代碼"
 
   scenario_usage:
-    frequency: "Medium-High (6/9 scenarios)"
+    frequency: "Medium-High (6/10 scenarios)"
     irreplaceability: "⭐⭐⭐⭐⭐ Must Keep"
     primary_scenarios:
       - scenario: "Greenfield"

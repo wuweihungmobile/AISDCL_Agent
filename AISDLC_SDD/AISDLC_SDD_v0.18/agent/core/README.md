@@ -15,7 +15,7 @@
 | `04.sa-analyst-zh.yaml` | SA 分析師 | 需求提取、**逆向規格工程**、Gap Analysis、Invariants 提取 |
 | `05.sd-architect-zh.yaml` | SD 架構師 | 系統設計、**As-Is/To-Be SRD**、C4 圖、**ADR 生成** |
 | `06.dev-developer-zh.yaml` | 開發工程師 | 代碼實作、Spec-First 遵從、SCG-4 驗證 |
-| `07.qa-tester-zh.yaml` | QA 測試師 | **RTM 生成**、**Invariant Test Contract**、SCG-5 驗證 |
+| `07.qa-tester-zh.yaml` | QA 測試師 | **RTM 生成**、**Invariant Test Contract**、RTM 覆蓋率支援（SCG-5 閘門 owner：qa-lead） |
 
 ---
 
@@ -36,7 +36,7 @@
 ### QA 測試師（07）— SDD 核心
 - **RTM 生成**：需求追蹤矩陣（F-XXX → TC-XXX）
 - **Invariant Test Contract**：Invariant 保護測試合約
-- **SCG-5 驗證**：RTM 100% 覆蓋確認
+- **RTM 100% 覆蓋**：產出 RTM 供 SCG-5 閘門驗證（SCG-5 RTM Completeness Gate 之 owner 為 qa-lead）
 
 ---
 

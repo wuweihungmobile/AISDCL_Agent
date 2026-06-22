@@ -28,7 +28,7 @@ agent:
         description: "與Security-Engineer進行安全測試策略審查"
 
   scenario_usage:
-    frequency: "Low-Medium (3/9 scenarios)"
+    frequency: "Low-Medium (3/10 scenarios)"
     irreplaceability: "⭐⭐⭐⭐ High Priority"
     primary_scenarios:
       - scenario: "Testing"

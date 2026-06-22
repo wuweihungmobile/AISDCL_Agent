@@ -451,7 +451,6 @@ dependencies:
 
   templates:
     - docs_template/core/srd/SRD_Module_Template.md
-    - docs_template/core/srd/SRD_Module_Template.md
     - docs_template/sdd/testing/PERFORMANCE-BASELINE-SPEC-TEMPLATE.md
 
   checklists:

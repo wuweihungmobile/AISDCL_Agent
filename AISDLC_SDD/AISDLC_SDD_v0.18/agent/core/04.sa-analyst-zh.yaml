@@ -31,7 +31,7 @@ agent:
         description: "持續精煉需求文檔"
 
   scenario_usage:
-    frequency: "High (9/9 scenarios)"
+    frequency: "High (10/10 scenarios)"
     irreplaceability: "⭐⭐⭐⭐⭐ Must Keep"
     primary_scenarios:
       - scenario: "Greenfield"
@@ -63,6 +63,9 @@ agent:
       - scenario: "Security"
         role: "Security Requirements"
         contributions: "安全需求定義"
+      - scenario: "Migration"
+        role: "Migration Requirements"
+        contributions: "遷移業務功能清單、遷移需求定義（sd-architect 為遷移主力，本角色提供需求面支援）"
 
 persona:
   role: "資深系統分析師與需求專家"
@@ -241,7 +244,7 @@ sdd_skills:
     description: "逆向規格提取 - 從現有系統提取 As-Is SRD"
     trigger: "Brownfield / Refactoring 情境，分析現有系統時觸發"
     output: "docs/02_architecture/AS-IS-SRD-{system}.md"
-    spec_gate: "SCG-1 Requirement Spec Gate"
+    spec_gate: "SCG-1 Design Spec Gate"
     steps:
       - "分析現有系統代碼與文件"
       - "提取隱性規格並顯性化"
@@ -252,7 +255,7 @@ sdd_skills:
     description: "To-Be SRD 生成 - 基於 FRD 生成目標系統 SRD"
     trigger: "FRD 完成後，進入架構設計前"
     output: "docs/02_architecture/TO-BE-SRD-{system}.md"
-    spec_gate: "SCG-1 Requirement Spec Gate"
+    spec_gate: "SCG-1 Design Spec Gate"
     steps:
       - "讀取 FRD 所有 User Stories 與 AC"
       - "識別系統邊界與模組劃分"
@@ -290,7 +293,7 @@ sdd_phase02_greenfield:
   rtm_mandatory_output:
     description: "Stage 2：FRD 完成後 RTM 初版為必要產出（非選配）"
     trigger: "Greenfield Stage 2 FRD 完成時強制執行"
-    spec_gate: "🔷 SCG-1 Requirement Spec Gate"
+    spec_gate: "🔷 SCG-0 Requirement Spec Gate"
     rtm_stage2_content:
       - "EPIC 層：所有業務史詩已列入"
       - "Feature 層：每個 EPIC 下的功能列表"
@@ -317,7 +320,7 @@ sdd_phase03_brownfield:
       - "step_5: 整理成 As-Is FRD（EPIC→Feature→US→AC 四層）"
       - "step_6: 標記可信度（高/中/低）- 程式碼直接讀取為高，推斷為低"
       - "step_7: Human 確認 As-Is FRD 準確性"
-    quality_gate: "SCG-1：As-Is FRD Human 確認完成"
+    quality_gate: "SCG-0：As-Is FRD Human 確認完成"
     anti_patterns:
       - "❌ 不可跳過此步驟直接開始實作"
       - "❌ 不可假設功能，必須從程式碼驗證"
