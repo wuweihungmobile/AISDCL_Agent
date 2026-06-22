@@ -87,12 +87,12 @@ document_responsibilities:
       workflows: "requirements-analysis, user-story-mapping, stakeholder-validation"
     
     - document_type: "User_Stories"
-      template_path: "user-story-template.md"
+      template_path: "docs_template/core/prd/User_Story_Template.md"
       description: "開發包含清晰驗收標準和業務背景的全面用戶故事"
       workflows: "story-creation, backlog-refinement"
     
     - document_type: "Requirements_Traceability_Matrix"
-      template_path: "traceability-matrix-template.md"
+      template_path: "docs_template/sdd/testing/RTM-TEMPLATE.md"
       description: "維護從業務需求到驗收標準的可追蹤性"
       workflows: "requirements-validation, change-management"
   
@@ -280,7 +280,7 @@ sdd_skills:
     description: "需求追溯矩陣生成"
     trigger: "SCG-0（FRD 後）、SCG-1（SRD 後）、SCG-4（測試計畫後）、需求變更後"
     output: "docs/03_testing/RTM-{project}-{date}.md"
-    template: "docs/03_testing/RTM-TEMPLATE.md"
+    template: "docs_template/sdd/testing/RTM-TEMPLATE.md"
     format: "| EPIC | Feature | User Story | AC | AT | API | NFR | Status |"
 
 # ─────────────────────────────────────────────────────────

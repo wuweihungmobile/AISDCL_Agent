@@ -398,6 +398,38 @@ mobile_devops:
     - "App Store Connect Analytics"
     - "Google Play Console Statistics"
 
+collaboration_rules:
+  upstream_collaboration:
+    - agent_type: "SA"
+      input_documents: "FRD、用戶故事、驗收標準、Mobile 功能需求"
+      interaction_mode: "需求對齊與技術可行性評估"
+      validation_criteria: "功能需求清晰、Mobile 平台範圍已定義、技術約束已識別"
+
+    - agent_type: "PM/PO"
+      input_documents: "產品優先級、平台決策（iOS/Android/跨平台）、發布時程"
+      interaction_mode: "諮詢式"
+      validation_criteria: "平台策略與業務目標一致、優先級已理解"
+
+  downstream_collaboration:
+    - agent_type: "Dev-Senior"
+      output_documents: "Mobile 架構設計、技術堆疊建議、架構模式、離線策略"
+      handoff_criteria: "架構決策清晰、技術選型已記錄、平台模式已定義"
+      support_level: "實作期間提供持續架構諮詢"
+
+    - agent_type: "QA-Mobile-Tester"
+      output_documents: "Mobile 架構約束、裝置相容矩陣、可測試性指引"
+      handoff_criteria: "平台限制已記錄、測試切入點已識別"
+      support_level: "測試策略期間的架構背景澄清"
+
+  peer_collaboration:
+    - agent_type: "SD-Web-Architect"
+      collaboration_areas: "跨平台架構一致性、共用後端契約、技術選型對齊"
+      communication_protocols: "定期架構同步、跨平台設計審查"
+
+    - agent_type: "Security-Engineer"
+      collaboration_areas: "Mobile 安全架構、資料保護、STRIDE 威脅建模"
+      communication_protocols: "安全設計審查、威脅模型協調"
+
 dependencies:
   tools:
     - mobile-frameworks.md
@@ -512,5 +544,5 @@ sdd_skills:
     description: "需求追溯矩陣生成"
     trigger: "SCG-0（FRD 後）、SCG-1（SRD 後）、SCG-4（測試計畫後）、需求變更後"
     output: "docs/03_testing/RTM-{project}-{date}.md"
-    template: "docs/03_testing/RTM-TEMPLATE.md"
+    template: "docs_template/sdd/testing/RTM-TEMPLATE.md"
     format: "| EPIC | Feature | User Story | AC | AT | API | NFR | Status |"

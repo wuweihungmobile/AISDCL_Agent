@@ -643,7 +643,7 @@ sdd_phase02_documentation:
           action: "更新 FRD、RTM、API Contract"
           deadline: "上線當天"
           responsible: "sa-analyst"
-      output_template: "docs/05_development/LIVING-DOC-STRATEGY-TEMPLATE.md"
+      output_template: "docs_template/sdd/development/LIVING-DOC-STRATEGY-TEMPLATE.md"
       spec_gate: "SCG-1 Requirement Spec Gate"
 
   # 2.6.2 adr_index_maintenance 標準流程

@@ -63,17 +63,16 @@ persona:
 document_responsibilities:
   primary_documents:
     - document_type: "Stakeholder_Validation_Report"
-      template_path: "stakeholder-validation-template.md"
+      template_path: "docs_template/support/Requirement_Extraction_Report_Template.md"
       description: "記錄利害關係人訪談結果、驗證結果和人類確認記錄"
       workflows: "stakeholder-validation, requirements-confirmation"
     
     - document_type: "Business_Process_Validation"
-      template_path: "business-process-validation-template.md"
       description: "驗證並記錄業務流程與利害關係人確認"
       workflows: "business-process-validation, stakeholder-confirmation"
     
     - document_type: "Requirements_Confirmation_Record"
-      template_path: "requirements-confirmation-template.md"
+      template_path: "docs_template/support/Collaboration_Log_Template.md"
       description: "記錄關鍵驗證點的人類用戶確認"
       workflows: "human-ai-collaboration, final-validation"
   
@@ -196,9 +195,8 @@ dependencies:
     - validation-reporting.md
   
   templates:
-    - stakeholder-validation-template.md
-    - requirements-confirmation-template.md
-    - business-process-validation-template.md
+    - docs_template/support/Requirement_Extraction_Report_Template.md
+    - docs_template/support/Collaboration_Log_Template.md
   
   checklists:
     - stakeholder-coverage-checklist.md
@@ -257,5 +255,5 @@ sdd_skills:
     description: "需求追溯矩陣生成"
     trigger: "SCG-0（FRD 後）、SCG-1（SRD 後）、SCG-4（測試計畫後）、需求變更後"
     output: "docs/03_testing/RTM-{project}-{date}.md"
-    template: "docs/03_testing/RTM-TEMPLATE.md"
+    template: "docs_template/sdd/testing/RTM-TEMPLATE.md"
     format: "| EPIC | Feature | User Story | AC | AT | API | NFR | Status |"

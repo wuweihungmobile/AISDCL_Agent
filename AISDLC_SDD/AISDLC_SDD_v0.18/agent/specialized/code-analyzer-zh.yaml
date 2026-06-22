@@ -303,7 +303,7 @@ sdd_skills:
     description: "需求追溯矩陣生成"
     trigger: "SCG-0（FRD 後）、SCG-1（SRD 後）、SCG-4（測試計畫後）、需求變更後"
     output: "docs/03_testing/RTM-{project}-{date}.md"
-    template: "docs/03_testing/RTM-TEMPLATE.md"
+    template: "docs_template/sdd/testing/RTM-TEMPLATE.md"
 
 # ─────────────────────────────────────────────────────────
 # SDD Phase 03 Brownfield + Refactoring 強化（2026-04-12）
@@ -340,7 +340,7 @@ sdd_phase03:
         tool: "Istanbul / JaCoCo / Coverage.py"
         threshold: "Line Coverage < 60% → 低覆蓋率"
         output_format: "| 模組 | Line% | Branch% | Function% |"
-    template: "docs/06_quality/TECH-DEBT-SPEC-TEMPLATE.md"
+    template: "docs_template/sdd/quality/TECH-DEBT-SPEC-TEMPLATE.md"
 
   # 3.6.3 量化指標輸出格式（Refactoring）
   refactoring_quality_baseline:
@@ -370,5 +370,5 @@ sdd_phase03:
         format: "整體 TDR% + 分類 TDR（架構/程式碼/安全）"
     snapshot_requirement: "必須在重構前後各建立一份（Before Baseline + After Baseline）"
     comparison_output: "重構前後差異報告（Δ 複雜度 / Δ 耦合 / Δ 覆蓋率）"
-    template: "docs/06_quality/CODE-QUALITY-BASELINE-TEMPLATE.md"
+    template: "docs_template/sdd/quality/CODE-QUALITY-BASELINE-TEMPLATE.md"
     format: "| EPIC | Feature | User Story | AC | AT | API | NFR | Status |"

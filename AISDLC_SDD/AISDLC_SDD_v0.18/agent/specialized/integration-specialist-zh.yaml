@@ -533,7 +533,7 @@ sdd_skills:
     description: "OpenAPI 優先生成 - API 規格先於實作"
     trigger: "任何第三方 API 整合或內部 API 設計時"
     output: "docs/02_architecture/api/CONTRACT-{module}-{version}.yaml"
-    template: "docs/02_architecture/api/CONTRACT-TEMPLATE.yaml"
+    template: "docs_template/sdd/api/CONTRACT-TEMPLATE.yaml"
     spec_gate: "SCG-3 API Contract Gate"
     steps:
       - "分析整合需求與 API 設計"

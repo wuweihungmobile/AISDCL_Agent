@@ -34,7 +34,7 @@
 
 | # | 修復 | 範圍 | 獨立驗證 |
 |---|------|------|---------|
-| 1 | pm-planner→pm-po | orchestrator yaml + subagent_contract.py 雙端對稱 | grep 無殘留；契約測試 24 passed |
+| 1 | pm-planner→pm-po | orchestrator yaml + subagent_contract.py 雙端對稱 | grep 無殘留；契約測試 19 passed（DEF-AGTREV-007 校正：原誤記 24，e796c1f 起逐位元實為 19） |
 | 2 | icon 去碰撞 | BA 🧭 / code-analyzer 🔬 / qa-tester 🔍 | 三者互異 |
 | 3 | agent.version 統一 v0.18 | 26 檔（含模板） | 無 v0.01/02/03 殘留 |
 | 4 | 補 dependencies 區塊 | compliance / security（子鍵留空） | 兩檔皆有、未引新 broken path |
@@ -79,4 +79,23 @@
 
 ---
 
-**修復成果置於 `AISDLC_SDD/AISDLC_SDD_v0.18/`（凍結 v0.17 唯讀保留）。** 尚未 commit/push——依專案紀律待掌舵者指示後直推 main。
+## 8. 獨立重審輪補強（2026-06-22，使用者再次請求；🔴 signoff：就地修 v0.18）
+
+第一輪結案後，使用者再次請求「agent/* 全面 SDD/架構符規審查並修復」。依 zero-trust 紀律視為**獨立重審**：派 Architect/SA-SD/QA 三鏡獨立查證（不採信本文件前 7 節），過濾過度回報後揪出 **4 類前次未竟殘留**（DEF-AGTREV-005~007，詳見 `AutoSDD_Defect_Log.md` 重審輪追記）：
+
+| # | 殘留缺陷 | 嚴重度 | 根因 | 修法 |
+|---|---------|--------|------|------|
+| 005 | 34 條 broken template 假綠（12 core 裸名 `template_path` + 19 `sdd_skills.*.template` 誤指 `docs/` + 3 dependencies 裸名） | P1 | `agent_template_lint` TOK regex 只認 `docs_template/` 前綴 → 裸名/docs 誤指**盲區**，前次「broken=0」僅窄範圍成立 | 12 方案一 rewire（1 刪欄）+ 19 全域重指 `docs_template/sdd/*` + 3 重指；lint 加 `BARE`+`dependencies.templates` YAML 雙檢查封閉盲區 |
+| 006 | 4 specialized persona agent 缺 `collaboration_rules` | P2 | symmetry lint 只掃 7 core | 各補合角色 rules（peer 對互相對稱）；lint 加 `find_missing_collaboration_rules` presence 檢查 |
+| 007 | `test_subagent_contract` 三處「24 passed」實為 19（從未 24）；README 同檔計數矛盾 | P3 | 前次誤記 + README 樹狀圖/Q&A 未同步 | 三處 24→19 校正；README 補列 5 sdd-* runtime、Q&A 校正 |
+| 008 | **QA 閉環複審補抓**：005 的 BARE regex 只匹配 `.md`，漏 2 條 `.yaml` template（`05.sd:256`/`integration-specialist:536` 誤指 `docs/02_architecture/api/CONTRACT-TEMPLATE.yaml`）；真實總 broken=36（34+2） | P1 | 盲區修復的盲區（副檔名限縮 `.md`） | 2 條重指 `docs_template/sdd/api/CONTRACT-TEMPLATE.yaml`；BARE 改 `_TMPL_EXT`（md/yaml/yml/json）+2 測試 |
+
+**新測試（機械防復發）**：`test_agent_template_lint.py` 9 case（前次此 lint 零測試；含 .yaml 誤指 + 合法 .yaml）+ `test_collaboration_symmetry_lint.py` +3 case。
+
+**重審輪驗證（親跑）**：完整 `bash scripts/ci-gate.sh` **exit 0** — v0.01:1478 / v0.18:1611（零退化）/ scripts/tests:**81**（69→81）；`agent_template_lint`（盲區封閉後，副檔名涵蓋 md/yaml/yml/json）/ `collaboration_symmetry_lint`（含 presence 檢查）皆 ✅；arch_fitness fail=0；FRAMEWORK_STATUS fresh；FF-13 26/26 agent 合法；26/26 safe_load OK、template broken=0（窮盡掃描證）。**DEF-AGTREV-001~008 至此全閉。**
+
+> 重審輪僅改 agent YAML 描述性內容（template_path 重指既有有效模板、additive 補 collaboration_rules）+ `AISDLC_SDD/scripts/` 共用 lint（versioned 目錄外 shared infra）+ 文檔；FSM/`*.tla` 逐位元零差異，不觸發五軌 TLC。
+
+---
+
+**修復成果置於 `AISDLC_SDD/AISDLC_SDD_v0.18/`（凍結 v0.17 唯讀保留）+ `AISDLC_SDD/scripts/` 共用 lint。** 待掌舵者指示後直推 main。

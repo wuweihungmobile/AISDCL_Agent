@@ -79,7 +79,7 @@ document_responsibilities:
       workflows: "sprint-planning, stakeholder-communication, product-backlog-management"
     
     - document_type: "Product_Backlog"
-      template_path: "custom-backlog-template.md"
+      template_path: "docs_template/core/prd/User_Story_Template.md"
       description: "維護包含用戶故事和業務理由的優先級產品待辦清單"
       workflows: "backlog-refinement, priority-management"
   
@@ -224,7 +224,7 @@ sdd_skills:
     description: "需求追溯矩陣生成"
     trigger: "SCG-0（FRD 後）、SCG-1（SRD 後）、SCG-4（測試計畫後）、需求變更後"
     output: "docs/03_testing/RTM-{project}-{date}.md"
-    template: "docs/03_testing/RTM-TEMPLATE.md"
+    template: "docs_template/sdd/testing/RTM-TEMPLATE.md"
     format: "| EPIC | Feature | User Story | AC | AT | API | NFR | Status |"
 
 # ─────────────────────────────────────────────────────────

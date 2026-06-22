@@ -89,12 +89,12 @@ document_responsibilities:
       workflows: "test-execution, quality-reporting, release-validation"
     
     - document_type: "Test_Plan"
-      template_path: "test-plan-template.md"
+      template_path: "docs_template/sdd/testing/TEST-STRATEGY-SPEC-TEMPLATE.md"
       description: "創建涵蓋所有測試面向和策略的全面測試計劃"
       workflows: "test-planning, test-strategy-design"
     
     - document_type: "Defect_Report"
-      template_path: "defect-report-template.md"
+      template_path: "docs_template/sdd/testing/DEFECT-CLASSIFICATION-SPEC-TEMPLATE.md"
       description: "記錄和追蹤缺陷，包含詳細重現步驟和影響分析"
       workflows: "defect-management, quality-tracking"
   
@@ -265,7 +265,7 @@ sdd_skills:
     description: "需求追溯矩陣生成"
     trigger: "SCG-0（FRD 後）、SCG-1（SRD 後）、SCG-4（測試計畫後）、需求變更後"
     output: "docs/03_testing/RTM-{project}-{date}.md"
-    template: "docs/03_testing/RTM-TEMPLATE.md"
+    template: "docs_template/sdd/testing/RTM-TEMPLATE.md"
     format: "| EPIC | Feature | User Story | AC | AT | API | NFR | Status |"
 
 # ─────────────────────────────────────────────────────────
@@ -348,7 +348,7 @@ sdd_phase03:
       tool: "Stryker（JS）/ PIT（Java）/ mutmut（Python）"
       scope: "Invariant Test 所覆蓋的業務邏輯函數"
       target_score: "Mutation Score ≥ 80%"
-    template: "docs/03_testing/contracts/INVARIANT-TEST-CONTRACT-TEMPLATE.md"
+    template: "docs_template/sdd/testing/INVARIANT-TEST-CONTRACT-TEMPLATE.md"
 
 # ─────────────────────────────────────────────────────────
 # SDD Phase 04 Skills 升級（2026-04-13）

@@ -24,6 +24,13 @@
 ### 驗證
 - 完整 `bash scripts/ci-gate.sh` 全綠：**v0.01:1478 / v0.18:1611 / scripts/tests:56**；arch_fitness fail=0（exit<2）；RFC/gitignore/agent_template 三 lint 全 ✅；26/26 agent YAML safe_load 通過、template broken=0；獨立 zero-trust 複審 OVERALL PASS。
 
+### 同日收尾補強（2026-06-22，使用者再次請求；獨立 zero-trust 重審揪出首版未竟殘留）
+- **DEF-AGTREV-005/008**：首版「broken=0」僅在 lint 窄範圍成立。實揪 36 條 broken template（12 core 裸名 `template_path` + 19 `sdd_skills.*.template` 誤指 `docs/` 之 `.md` + 3 `dependencies.templates` 裸名 + **QA 閉環複審補抓 2 條 `.yaml` 誤指 `docs/`**）→ 全數 rewire 至既有 `docs_template/` 模板（1 條無對應刪欄）；`agent_template_lint` 加 `BARE`（涵蓋 md/yaml/yml/json）+ `dependencies.templates` YAML 雙檢查封閉盲區。
+- **DEF-AGTREV-006**：4 specialized persona agent（qa-mobile/qa-web-tester、sd-mobile/sd-web-architect）補 `collaboration_rules`；`collaboration_symmetry_lint` 加 persona-schema presence 檢查防復發。
+- **DEF-AGTREV-007**：`test_subagent_contract` 三處「24 passed」校正為實測 19；README 同檔計數矛盾（樹狀圖/Q&A 14 vs 19）校正。
+- **新測試**：`test_agent_template_lint.py` 9 case（前次零測試）+ `test_collaboration_symmetry_lint.py` +3 case。
+- **驗證**：完整 ci-gate **exit 0**：v0.01:1478 / v0.18:1611（零退化）/ scripts/tests:**81**；窮盡掃描 template broken=0；DEF-AGTREV-001~008 全閉。
+
 ---
 
 ## [v0.17] - 2026-06-18（Copy-on-Evolve 自 v0.16；v0.16 凍結唯讀）

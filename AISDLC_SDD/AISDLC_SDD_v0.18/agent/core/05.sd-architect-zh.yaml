@@ -89,12 +89,12 @@ document_responsibilities:
       workflows: "system-design, api-specification, database-design, architecture-review"
     
     - document_type: "Technical_Architecture"
-      template_path: "technical-architecture-template.md"
+      template_path: "docs_template/sdd/architecture/SAD-TEMPLATE.md"
       description: "記錄整體系統架構、技術堆疊和整合模式"
       workflows: "architecture-design, technology-evaluation"
     
     - document_type: "API_Specification"
-      template_path: "api-spec-template.md"
+      template_path: "docs_template/core/api/API_Specification_Template.md"
       description: "定義詳細API合約、資料模型和介面規格"
       workflows: "api-design, integration-specification"
   
@@ -253,7 +253,7 @@ sdd_skills:
     description: "契約文件生成 - Contract-First API 規格文件"
     trigger: "任何 API 或整合介面定義時，先於實作"
     output: "docs/02_architecture/api/CONTRACT-{module}-{version}.yaml"
-    template: "docs/02_architecture/api/CONTRACT-TEMPLATE.yaml"
+    template: "docs_template/sdd/api/CONTRACT-TEMPLATE.yaml"
     spec_gate: "SCG-3 API Contract Gate"
     steps:
       - "識別所有 API 端點與整合介面"

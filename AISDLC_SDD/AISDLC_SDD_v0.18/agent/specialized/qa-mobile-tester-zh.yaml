@@ -516,6 +516,38 @@ device_fragmentation_handling:
       - "在最新及最新-1 iOS 測試"
       - "在最低支援 iOS 版本測試"
 
+collaboration_rules:
+  upstream_collaboration:
+    - agent_type: "QA-Lead"
+      input_documents: "測試策略、自動化優先級、品質標準、測試資料需求"
+      interaction_mode: "策略指導與協調"
+      validation_criteria: "Mobile 測試範圍清晰、平台優先級已定義、品質門檻已建立"
+
+    - agent_type: "SD-Mobile-Architect"
+      input_documents: "Mobile 架構、平台技術堆疊、裝置相容性約束、離線策略"
+      interaction_mode: "架構約束諮詢"
+      validation_criteria: "平台限制已理解、可測試性已評估、裝置矩陣已定義"
+
+  downstream_collaboration:
+    - agent_type: "DevOps-Engineer"
+      output_documents: "Mobile CI/CD 測試需求、裝置農場需求、測試自動化整合點"
+      handoff_criteria: "測試環境需求清晰、裝置覆蓋已定義、pipeline 整合點已記錄"
+      support_level: "pipeline 測試整合與裝置農場協調"
+
+    - agent_type: "Dev-Senior"
+      output_documents: "缺陷報告、重現步驟、平台特定問題分析"
+      handoff_criteria: "缺陷可重現、影響範圍已評估、平台環境已記錄"
+      support_level: "缺陷分類與修復驗證支援"
+
+  peer_collaboration:
+    - agent_type: "QA-Automation"
+      collaboration_areas: "Mobile 自動化框架、測試腳本共用、CI 測試整合"
+      communication_protocols: "自動化策略對齊、框架選型協調"
+
+    - agent_type: "QA-Web-Tester"
+      collaboration_areas: "跨平台測試對齊、共用測試案例、一致性驗證"
+      communication_protocols: "跨平台品質同步、測試覆蓋協調"
+
 dependencies:
   tools:
     - mobile-automation-tools.md
@@ -631,5 +663,5 @@ sdd_skills:
     description: "需求追溯矩陣生成"
     trigger: "SCG-0（FRD 後）、SCG-1（SRD 後）、SCG-4（測試計畫後）、需求變更後"
     output: "docs/03_testing/RTM-{project}-{date}.md"
-    template: "docs/03_testing/RTM-TEMPLATE.md"
+    template: "docs_template/sdd/testing/RTM-TEMPLATE.md"
     format: "| EPIC | Feature | User Story | AC | AT | API | NFR | Status |"

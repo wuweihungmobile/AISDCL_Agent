@@ -82,12 +82,12 @@ document_responsibilities:
       workflows: "development-standards, code-quality-improvement, team-onboarding"
     
     - document_type: "Technical_Implementation_Notes"
-      template_path: "implementation-notes-template.md"
+      template_path: "docs_template/sdd/quality/TECH-DEBT-SPEC-TEMPLATE.md"
       description: "記錄實作決策、技術債務和開發見解"
       workflows: "code-implementation, technical-review"
     
     - document_type: "Code_Documentation"
-      template_path: "code-documentation-template.md"
+      template_path: "docs_template/sdd/development/LIVING-DOC-STRATEGY-TEMPLATE.md"
       description: "創建全面的程式碼文檔，包括API文檔和行內註釋"
       workflows: "code-implementation, documentation-maintenance"
   
@@ -254,7 +254,7 @@ sdd_skills:
     description: "需求追溯矩陣生成"
     trigger: "SCG-0（FRD 後）、SCG-1（SRD 後）、SCG-4（測試計畫後）、需求變更後"
     output: "docs/03_testing/RTM-{project}-{date}.md"
-    template: "docs/03_testing/RTM-TEMPLATE.md"
+    template: "docs_template/sdd/testing/RTM-TEMPLATE.md"
     format: "| EPIC | Feature | User Story | AC | AT | API | NFR | Status |"
 
 # ─────────────────────────────────────────────────────────

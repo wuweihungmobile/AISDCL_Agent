@@ -156,6 +156,32 @@ def find_asymmetries(graph: dict) -> list[str]:
     return problems
 
 
+def find_missing_collaboration_rules(version_path: str) -> list[str]:
+    """DEF-AGTREV-006：persona-schema agent（具 ``persona:`` 區塊）必須有非空
+    ``collaboration_rules:``。runtime agent（``sdd-*``，runtime-schema 無 persona）豁免。
+
+    緣由：4 個 specialized persona agent（qa-mobile/qa-web-tester、sd-mobile/sd-web-architect）
+    長期缺 collaboration_rules，與其餘 10 個 persona 同儕不一致（v0.18 重審揭露）；core
+    symmetry 只掃 core 故漏。此 presence 檢查機械防復發。
+    """
+    problems: list[str] = []
+    files = sorted(glob.glob(os.path.join(version_path, "agent", "core", "*.yaml")) +
+                   glob.glob(os.path.join(version_path, "agent", "specialized", "*.yaml")))
+    for fp in files:
+        base = os.path.basename(fp)
+        if any(base.startswith(p) for p in _TEMPLATE_PREFIXES):
+            continue
+        with open(fp, encoding="utf-8") as f:
+            doc = yaml.safe_load(f)
+        if not isinstance(doc, dict):
+            continue
+        if not doc.get("persona"):  # runtime-schema agent 無 persona → 豁免
+            continue
+        if not doc.get("collaboration_rules"):
+            problems.append(f"{base} 具 persona 區塊但缺 collaboration_rules（persona-schema 必填）")
+    return problems
+
+
 def main(argv: list[str] | None = None) -> int:
     argv = sys.argv[1:] if argv is None else argv
     repo_root = argv[0] if argv else os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -166,16 +192,20 @@ def main(argv: list[str] | None = None) -> int:
     version_path = os.path.join(repo_root, latest)
     graph, roles = build_graph(version_path)
     problems = find_asymmetries(graph)
-    if not problems:
+    missing = find_missing_collaboration_rules(version_path)
+    if not problems and not missing:
         print(
             f"✅ collaboration 對稱性 lint：{latest} 全部 downstream/upstream/peer 對稱"
-            f"（核心角色：{', '.join(sorted(graph.keys()))}）"
+            f"（核心角色：{', '.join(sorted(graph.keys()))}）；persona-schema agent 皆具 collaboration_rules"
         )
         return 0
-    print(f"::error:: collaboration 對稱性 lint 失敗（{latest}），偵測 {len(problems)} 條不對稱：")
+    print(f"::error:: collaboration 對稱性 lint 失敗（{latest}），偵測 "
+          f"{len(problems)} 條不對稱 + {len(missing)} 條缺 collaboration_rules：")
     for p in problems:
         print(f"  ASYMMETRY  {p}")
-    print("  修法：additive 補對側 upstream/peer 宣告（鏡像既有語意，勿刪既有邊）。")
+    for m in missing:
+        print(f"  MISSING-RULES  {m}")
+    print("  修法：additive 補對側 upstream/peer 宣告或 collaboration_rules 區塊（鏡像既有語意，勿刪既有邊）。")
     return 1
 
 
