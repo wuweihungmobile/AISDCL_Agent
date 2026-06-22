@@ -399,7 +399,7 @@ collaboration_patterns:
       applicable_scenarios: ["Security"]
 
 scenario_usage:
-  frequency: "Medium (1/9 primary + cross-cutting)"
+  frequency: "Medium (1/10 primary + cross-cutting)"
   irreplaceability: "⭐⭐⭐⭐⭐ Must Keep (Security必需)"
   primary_scenarios:
     - scenario: "Security"

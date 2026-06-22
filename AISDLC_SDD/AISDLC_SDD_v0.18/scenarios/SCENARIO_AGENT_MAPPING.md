@@ -124,6 +124,7 @@ Supporting Agents:
   - code-analyzer:        重構範圍識別、複雜度分析
   - dev-senior:           重構技術決策、Strangler Fig / Branch by Abstraction
   - qa-tester:            Invariant Test Contract、回歸測試計畫
+  - qa-automation:        Invariant Contract Tests 自動化、重構回歸測試套件
 ```
 
 ### SDD 必要產出

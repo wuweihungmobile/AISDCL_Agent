@@ -28,7 +28,7 @@ agent:
         description: "並行開發自動化測試與Dev開發"
 
   scenario_usage:
-    frequency: "Low-Medium (3/10 scenarios)"
+    frequency: "Medium (4/10 scenarios)"
     irreplaceability: "⭐⭐⭐⭐ High Priority"
     primary_scenarios:
       - scenario: "Testing"
@@ -36,6 +36,9 @@ agent:
         responsibilities: "自動化框架開發、E2E測試、API測試、CI/CD整合"
 
     supporting_scenarios:
+      - scenario: "Refactoring"
+        role: "Invariant Contract Test Automation"
+        contributions: "Invariant Contract Tests 自動化、重構回歸測試套件"
       - scenario: "DevOps"
         role: "CI/CD Test Integration"
         contributions: "測試自動化整合CI/CD、持續測試策略"

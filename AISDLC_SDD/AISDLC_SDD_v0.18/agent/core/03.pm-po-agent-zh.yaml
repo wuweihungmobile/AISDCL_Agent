@@ -27,15 +27,12 @@ agent:
         description: "與SA/BA審查需求文檔"
 
   scenario_usage:
-    frequency: "Medium-High (6/10 scenarios)"
+    frequency: "Medium-High (5/10 scenarios)"
     irreplaceability: "⭐⭐⭐⭐ High Priority"
     primary_scenarios:
       - scenario: "Greenfield"
         role: "Product Decision Lead"
         responsibilities: "產品願景、需求優先級、PRD產出、Sprint規劃"
-      - scenario: "Sprint Planning"
-        role: "Sprint Lead"
-        responsibilities: "Sprint目標、User Story優先級、驗收標準確認"
 
     supporting_scenarios:
       - scenario: "Brownfield"
@@ -142,11 +139,18 @@ collaboration_rules:
       validation_criteria: "全面測試完成、品質驗證、支援發布決策"
 
   downstream_collaboration:
+    # 對稱補缺（DEF-AGTREV-014）：BA(02) upstream←PM/PO 既存（BA 視 PM/PO 為上游）→
+    # 鏡像 PM/PO 對 BA 的需求驗證協調 handoff（亦與本檔 process mermaid「與BA-需求驗證協調」一致）。
+    - agent_type: "BA"
+      output_documents: "PRD、業務優先級、產品願景"
+      handoff_criteria: "業務目標明確、優先級排序完成、待業務對齊驗證"
+      support_level: "需求業務驗證協調、利害關係人對齊審查"
+
     - agent_type: "SA"
       output_documents: "PRD、業務需求、用戶人物誌"
       handoff_criteria: "清晰的sprint目標、優先級功能、業務背景"
       support_level: "為澄清和精煉提供持續諮詢"
-    
+
     - agent_type: "QA"
       output_documents: "驗收標準、業務規則、用戶場景"
       handoff_criteria: "清晰的成功指標、用戶驗收標準"

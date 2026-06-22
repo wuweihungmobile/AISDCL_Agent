@@ -1,7 +1,7 @@
 # Core Agents — 載入說明與 SDD 角色
 
-**框架版本**: AISDLC-SDD v0.01
-**最後更新**: 2026-04-15
+**框架版本**: AISDLC-SDD v0.18
+**最後更新**: v0.18
 
 ---
 
@@ -65,5 +65,5 @@ AISDLC_SDD_INIT.md 的 auto_load_config.primary_agents
 ## 參考
 
 - Specialized Agents：[../specialized/README.md](../specialized/README.md)
-- 完整 Agent 使用指南：`AISDLC_SDD_v0.01/guides/system/agents/`
+- 完整 Agent 使用指南：`AISDLC_SDD_v0.01/guides/system/agent/`
 - 場景 Agent 對應表：`AISDLC_SDD_v0.01/scenarios/SCENARIO_AGENT_MAPPING.md`

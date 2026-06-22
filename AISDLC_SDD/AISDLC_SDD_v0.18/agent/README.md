@@ -241,7 +241,7 @@ A: SDD v0.01 已刻意移除 `backup_en/` 目錄（設計決策：僅維護中�
 
 ### Q: Specialized Agents 都有中文版嗎？
 
-A: 是的！v0.09 起所有 14 個 persona/specialized Agents 均已中文化（`-zh.yaml` 後綴），與核心 Agent 保持一致。另有 5 個系統級 runtime agent（`sdd-*`，採 runtime schema），合計 19 個 Specialized（計數見上方第 71 行與 FRAMEWORK_STATUS.md）。
+A: 是的！v0.09 起所有 14 個 persona/specialized Agents 均已中文化（`-zh.yaml` 後綴），與核心 Agent 保持一致。另有 5 個系統級 runtime agent（`sdd-*`，採 runtime schema），合計 19 個 Specialized（計數見上方第 76 行與 FRAMEWORK_STATUS.md）。
 
 ### Q: 如何貢獻新的 Agent？
 

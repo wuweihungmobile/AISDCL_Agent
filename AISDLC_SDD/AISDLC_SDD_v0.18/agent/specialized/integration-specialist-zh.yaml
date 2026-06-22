@@ -27,7 +27,7 @@ agent:
         description: "API測試→調整→重測循環"
 
   scenario_usage:
-    frequency: "Low-Specialized (1/10 scenarios)"
+    frequency: "Low-Specialized (2/10 scenarios)"
     irreplaceability: "⭐⭐⭐⭐⭐ Must Keep (Integration專用)"
     primary_scenarios:
       - scenario: "Integration"
@@ -35,12 +35,6 @@ agent:
         responsibilities: "API研究、認證設計、資料映射、整合測試計畫"
 
     supporting_scenarios:
-      - scenario: "Greenfield"
-        role: "Integration Advisor"
-        responsibilities: "第三方服務選擇與評估、整合架構設計"
-      - scenario: "Brownfield"
-        role: "Integration Assessor"
-        responsibilities: "現有整合評估與改進、遺留整合遷移"
       - scenario: "Migration"
         role: "Integration Migration Specialist"
         responsibilities: "跨系統 API 遷移、資料同步策略、雙寫模式設計"

@@ -27,7 +27,7 @@ agent:
         description: "持續分析代碼品質變化"
 
   scenario_usage:
-    frequency: "Low-Specialized (2/10 scenarios)"
+    frequency: "Low-Specialized (3/10 scenarios)"
     irreplaceability: "⭐⭐⭐⭐ High Priority (在特定情境中)"
     primary_scenarios:
       - scenario: "Brownfield"
@@ -36,6 +36,11 @@ agent:
       - scenario: "Refactoring"
         role: "技術債務分析師"
         responsibilities: "技術債務識別、重構優先級、影響範圍分析"
+
+    supporting_scenarios:
+      - scenario: "Migration"
+        role: "Migration Impact Analyst"
+        contributions: "舊系統代碼分析、遷移影響評估"
 
     notes: |
       - 專業化Agent，專注於代碼分析和重構情境

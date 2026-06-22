@@ -99,3 +99,40 @@
 ---
 
 **修復成果置於 `AISDLC_SDD/AISDLC_SDD_v0.18/`（凍結 v0.17 唯讀保留）+ `AISDLC_SDD/scripts/` 共用 lint。** 待掌舵者指示後直推 main。
+
+---
+
+## 9. 第四輪獨立重審（2026-06-22，使用者再次請求 agent/* 全面 SDD/架構符規審查並修復）
+
+依 zero-trust 紀律視為**獨立第四輪重審**（不採信前三輪報告）：派 **Architect / SA / SD / QA 四鏡**主樹並行親查證，過濾過度回報後揪出 **3 類前次未竟殘留**（DEF-AGTREV-014~016），掌舵者就兩項真正需 SSOT/scope 裁決者拍板後修復。
+
+### 四鏡分工與結論
+| 鏡 | 視角 | 結論 |
+|----|------|------|
+| **Architect** | 結構/schema（YAML 解析、persona 模板區塊、version、icon、dependencies） | **全查證乾淨，零 P0~P2 殘留** |
+| **SA** | SDD 方法論（SCG 號碼/名稱/owner、scenario_usage、RTM stage） | SCG/RG-*/owner/stage **乾淨**；揪出 scenario_usage 計數 P1×1+P2×2 + frequency off-by-one |
+| **SD** | 跨檔引用 + 架構（template_path、agent id、collaboration 對稱、Rule 9 相容） | template(54 條)/id 互引/skill/Rule 9 **乾淨**；揪出 upstream 反向斷鏈 lint 盲區 |
+| **QA** | 完整性/誠實性（計數、簡體、佔位符、跨檔矛盾） | 計數誠實性/簡體**乾淨**；揪出 4 個 P2 文件引用/標頭殘留 |
+
+### 掌舵者裁決（兩項 SSOT/scope 決策，Rule 7 浮現衝突而非取平均）
+- **Q1 frequency SSOT**：四鏡查出 frequency 在「SCENARIO_AGENT_MAPPING.md 統計段」與「各 agent 自列場景數」系統性不一致。掌舵者裁定 **統計段為唯一 SSOT，全對齊**。
+- **Q2 協作反向邊**：SD 鏡查出 upstream 反向單向邊（現行 lint 刻意只查 down→up + peer~peer）。掌舵者裁定 **補對稱邊 + 擴 lint**。
+
+### 三類殘留修復（DEF-AGTREV-014~016，詳見 Defect_Log）
+| # | 殘留缺陷 | 嚴重度 | 修法 |
+|---|---------|--------|------|
+| 014 | collaboration upstream 反向斷鏈：`ba` upstream←PM/PO 但 pm-po 結構化 collaboration_rules 完全不提 BA（惟 pm-po 自身 mermaid+review_participants 確有與 BA 協作）；symmetry lint 只查 down→up + peer~peer，漏 upstream 反向 | P2 | pm-po 補 `downstream→BA`（鏡像）；`collaboration_symmetry_lint` 加 upstream 反向檢查（接受 down 或 peer 為合法對側，不誤判視角差）+2 test。SD-1（sd↔pm-po 視角差）判 by-design 不動 |
+| 015 | scenario_usage frequency 與 SSOT 系統性漂移（6 agent off-by-one）+ integration「1/10 vs 自列 4」內部矛盾 + pm-po 計入非法場景「Sprint Planning」（非 10 場景之一）+ sd-architect 漏 Migration（其 notes 自稱「唯一不參與純Testing」=9 卻寫 8）；全框架**無** frequency 守門 | P2 | 掌舵者 signoff「統計段為唯一 SSOT」全對齊 8 agent（freq 分子＝統計段＝清單項數三者一致，逐場景對應表交叉核對成員）；新增 `scenario_frequency_lint.py`（SSOT 跨源 + 內部一致雙檢查）+6 test + 接入 ci-gate；mapping doc Refactoring supporting 補 qa-automation 收斂統計段↔逐場景表雙視圖 |
+| 016 | 文件交叉引用/標頭殘留：`README.md:244` 行號 71→76 失準；`core/README.md:68` 複數 `agents/` 斷鏈（實為單數 `agent/`）；`core/README.md` 標頭滯留 v0.01/2026-04-15；`AGENT_PHASE2_UPDATE_GUIDE.md:402` 離群 `/9`（DEF-AGTREV-010 同類修漏網） | P3 | 四處就地校正（行號、單數路徑、標頭 v0.18、/9→/10） |
+
+### 第四輪驗證全綠（親跑 + QA 複審鏡 zero-trust）
+- 26/26 agent YAML `safe_load` OK；8 agent frequency 三者一致（QA 複審鏡親數逐項吻合）；「Sprint Planning」確認非 `scenarios/` 10 場景；pm-po↔BA 對稱閉合。
+- 完整 `bash scripts/ci-gate.sh` **exit 0**：v0.01:1478 / v0.18:1611（零退化，agent YAML/.md 非 pytest 標的）/ scripts/tests **81→89**（+2 collaboration upstream 反向 case + 6 frequency case）；6 lint 全 ✅（含新 `scenario_frequency_lint`）；arch_fitness fail=0（僅 FF-16 GC advisory，與基線同）；FRAMEWORK_STATUS fresh；FF-13 26 agent 全合法。
+- 兩新/擴 lint **非空殼**（含 SSOT 漂移 / 內部矛盾 / upstream 反向斷鏈 / 突變退化負向 case，真能轉紅）。
+- FSM/`transition_rules.py`/五軌 `*.tla` 對 v0.18 前狀態**逐位元零差異** → **不觸發五軌 TLC**（Rule 9.18.1）。
+
+### by-design / 誠實標記（非缺陷）
+- **SD-1（sd-architect upstream←PM/PO vs pm-po peer~SD 視角差）**：pm-po.peer 已含 SD，雙向皆有宣告，屬可接受的協作視角不對稱，**不強制統一階層**以免連鎖改寫；新 lint 刻意接受 down 或 peer 任一為合法對側故不誤判。
+- **frequency off-by-one 的 SSOT 雙視圖**：統計段（SSOT）與逐場景對應表對 qa-automation/qa-tester 等的成員數本有微張力；本輪以統計段為準對齊 agent + 同步逐場景表（補 qa-automation 於 Refactoring），雙視圖現收斂。
+
+**臨時審查塊 DEF-AGTREV-001~016 至此全閉、零 routed 殘留。** 修復成果置於 `AISDLC_SDD/AISDLC_SDD_v0.18/` + `AISDLC_SDD/scripts/` 共用 lint，待掌舵者指示後直推 main。

@@ -181,3 +181,39 @@ def test_runtime_agent_without_persona_exempt(tmp_path):
         "responsibilities": ["orchestrate"],  # runtime-schema，無 persona
     })
     assert csl.main([repo]) == 0
+
+
+# ── (9) DEF-AGTREV-014：upstream 反向斷鏈（對方完全不承認）→ 非零 ──────────────
+
+def test_upstream_without_any_reciprocal_fails(tmp_path):
+    """BA upstream←PM/PO 但 PM/PO 既未 downstream→BA 亦未 peer~BA → 真實斷鏈，必須非零。
+
+    （前 lint 只查 down→up 與 peer~peer，漏此 upstream 反向；DEF-AGTREV-014 補盲區。）
+    """
+    repo = str(tmp_path)
+    ver = "AISDLC_SDD_v0.18"
+    _write_agent(repo, ver, "02.ba-business-analyst-zh.yaml", "ba-business-analyst", {
+        "upstream_collaboration": _down("PM/PO"),  # BA 視 PM/PO 為上游
+    })
+    _write_agent(repo, ver, "03.pm-po-agent-zh.yaml", "pm-po", {
+        "downstream_collaboration": _down("SA"),  # 完全不提 BA
+        "peer_collaboration": _down("SD"),
+    })
+    assert csl.main([repo]) == 1
+
+
+def test_upstream_satisfied_by_peer_perspective_passes(tmp_path):
+    """SD upstream←PM/PO 但 PM/PO 以 peer~SD 承認（視角不對稱非斷鏈）→ 接受，仍 0。
+
+    刻意設計：upstream vs peer 的協作視角差不誤判，避免強制統一階層引發連鎖改寫。
+    """
+    repo = str(tmp_path)
+    ver = "AISDLC_SDD_v0.18"
+    _write_agent(repo, ver, "05.sd-architect-zh.yaml", "sd-architect", {
+        "upstream_collaboration": _down("PM/PO"),  # SD 視 PM/PO 為上游
+        "peer_collaboration": _down("PM/PO"),       # 同時 peer（與 PM/PO 對稱）
+    })
+    _write_agent(repo, ver, "03.pm-po-agent-zh.yaml", "pm-po", {
+        "peer_collaboration": _down("SD"),  # PM/PO 以 peer 承認 SD（非 downstream）
+    })
+    assert csl.main([repo]) == 0

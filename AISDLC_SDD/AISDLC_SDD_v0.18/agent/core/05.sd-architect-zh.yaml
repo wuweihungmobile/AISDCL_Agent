@@ -31,7 +31,7 @@ agent:
         description: "多平台架構並行設計（Web/Mobile）"
 
   scenario_usage:
-    frequency: "High (8/10 scenarios)"
+    frequency: "High (9/10 scenarios)"
     irreplaceability: "⭐⭐⭐⭐⭐ Must Keep"
     primary_scenarios:
       - scenario: "Greenfield"
@@ -43,6 +43,9 @@ agent:
       - scenario: "DevOps"
         role: "Infrastructure Architect"
         responsibilities: "基礎設施架構、雲端架構、容器化策略"
+      - scenario: "Migration"
+        role: "Migration Architecture Lead"
+        responsibilities: "遷移架構設計、跨系統資料遷移策略、雙寫/影子模式架構"
 
     supporting_scenarios:
       - scenario: "Brownfield"

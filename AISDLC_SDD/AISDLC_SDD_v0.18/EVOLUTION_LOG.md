@@ -24,6 +24,17 @@
 | **驗證** | 完整 `bash scripts/ci-gate.sh` **exit 0**：逐軌 **v0.01:1478 / v0.18:1611（零退化，agent YAML 非 pytest 標的）/ scripts/tests:81**（69→81，+9 template lint〔含 .yaml〕 + 3 symmetry presence 測試）。`agent_template_lint` / `collaboration_symmetry_lint`（含新 presence 檢查）/ rfc / gitignore / FRAMEWORK_STATUS fresh 全 ✅；arch_fitness fail=0；FF-13 26/26 agent YAML 合法；26/26 safe_load OK、**功能性 template broken=0**。獨立 QA zero-trust 複審 OVERALL PASS。 |
 | **回退指引** | 純向後相容（agent 定義檔 template_path 重指既有有效模板、additive 補 collaboration_rules、文檔校正、lint 加嚴）。回退即還原各 agent template_path/collaboration_rules、2 支 lint 增量與 2 個測試檔；零觸碰 FSM/`*.tla`/既有測試拓樸。 |
 
+### v0.18 三度+四度收尾補強（2026-06-22，使用者第三/第四次請求 agent/* 全面符規審查並修復；🔴 人工 signoff：就地修 v0.18）
+
+| 欄位 | 內容 |
+|------|------|
+| **性質** | 連續兩輪獨立 zero-trust 重審（四鏡，不採信前輪文件）揪出語意/架構符規殘留並就地清償。純 agent 定義檔/共用 lint/文檔，**無 FSM/規則/`*.tla` 變更**。 |
+| **delta（三度，DEF-AGTREV-009~013）** | ① **spec_gate 號碼/名稱張冠李戴**（7 處「SCG-1 Requirement」→ 分情境修：SRD 產物 SCG-1 Design、FRD/PRD/RTM 產物 SCG-0 Requirement）；② **scenario_usage 分母 /9→/10**（15 agent + GUIDE 14 處）；③ **sa-analyst 漏 Migration**（9/9→10/10）；④ **architect SRD 模板重複行去重**；⑤ **core/README SCG-5 owner 誤標 qa-tester→qa-lead**。另 5 類經親驗判 by-design（extends 繼承缺區塊、21 persona 歷史數、.md 標頭新鮮度、compiler schema 近似、workflow_name 邏輯標籤）誠實記分歧。 |
+| **delta（四度，DEF-AGTREV-014~016，掌舵者 SSOT/scope 裁決）** | ① **collaboration upstream 反向斷鏈**（`ba` upstream←PM/PO 但 pm-po 不提 BA）→ pm-po 補 `downstream→BA` + `collaboration_symmetry_lint` 加 upstream 反向檢查（接受 down/peer 為對側）+2 test；SD-1 視角差判 by-design。② **scenario_usage frequency 與統計段 SSOT 系統性漂移**（integration 1/10 vs 自列 4 內部矛盾 + 6 agent off-by-one + pm-po 計入非法場景 Sprint Planning + sd-architect 漏 Migration）→ 掌舵者裁定「統計段為唯一 SSOT」，**8 agent 全對齊**（freq 分子＝統計段＝清單項數三者一致，逐場景表交叉核對成員）+ 新增 `scripts/scenario_frequency_lint.py`（SSOT 跨源 + 內部一致雙檢查）+6 test + 接入 ci-gate + mapping doc Refactoring 補 qa-automation 收斂雙視圖。③ **文件交叉引用/標頭殘留**（README:244 行號、core/README:68 複數 agents 斷鏈、core/README 標頭 v0.01、PHASE2_GUIDE:402 離群 /9）四處校正。 |
+| **TLC 證據** | **N/A** — `transition_rules.py`（含 `_HAPPY_PATH`）與全部 5 `*.tla`/`.cfg` 對前狀態**逐位元零差異**（未觸碰）。改動限 agent YAML 描述性內容 + `AISDLC_SDD/scripts/` 共用 lint（versioned 目錄外 shared infra）+ 同版 `scenarios/SCENARIO_AGENT_MAPPING.md` 描述性對應表 + 文檔。依 Rule 9.18.1 無重跑義務。 |
+| **驗證** | 完整 `bash scripts/ci-gate.sh` **exit 0**：v0.01:1478 / v0.18:1611（零退化，agent YAML/.md 非 pytest 標的）/ scripts/tests **56→81→89**（四度 +2 collaboration upstream 反向 case + 6 frequency case）；6 lint 全 ✅（含新 `scenario_frequency_lint`）；arch_fitness fail=0（僅 FF-16 GC advisory）；FRAMEWORK_STATUS fresh；FF-13 26 agent 全合法；26/26 safe_load OK；8 agent frequency 三者一致（QA 複審鏡親數吻合）；兩新/擴 lint 經突變實證非空殼。獨立 QA zero-trust 複審 OVERALL PASS。**臨時審查塊 DEF-AGTREV-001~016 全閉、零 routed 殘留。** |
+| **回退指引** | 純向後相容（agent 定義檔描述性內容對齊、additive 補協作邊、新增 1 支 lint + 擴 1 支 lint + 2 測試檔、文檔校正）。回退即還原各 agent scenario_usage/collaboration_rules、`scenario_frequency_lint.py` 與 `collaboration_symmetry_lint` upstream 反向增量、2 測試檔、mapping doc Refactoring 行、文檔；零觸碰 FSM/`*.tla`/既有測試拓樸。 |
+
 ## v0.16 → v0.17
 
 | 欄位 | 內容 |

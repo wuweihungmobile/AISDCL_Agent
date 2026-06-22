@@ -50,6 +50,17 @@
 #### 驗證
 - 完整 `bash scripts/ci-gate.sh` **exit 0**：v0.01:1478 / v0.18:1611（**零退化**，agent YAML/.md 非 pytest 標的）/ scripts/tests:81；arch_fitness fail=0；兩 agent lint + SSOT fresh 皆 ✅；26/26 agent YAML safe_load OK；QA 複審鏡實測 5 修復項全成立、無誤傷合法 SCG 引用、同類 0 殘留。DEF-AGTREV-009~013 全閉。
 
+### 四度收尾（2026-06-22，使用者第四次請求；四鏡 zero-trust 重審 + 掌舵者 SSOT/scope 裁決）
+> 派 Architect/SA/SD/QA **四鏡**主樹並行獨立重審。**Architect 鏡全乾淨**（schema 五類零殘留）；三 lint + SSOT 皆綠。揪出 3 類殘留（DEF-AGTREV-014~016），兩項經掌舵者拍板（Q1 frequency「統計段為唯一 SSOT 全對齊」、Q2 協作「補對稱邊 + 擴 lint」）。
+
+#### 修正（DEF-AGTREV-014~016，純 agent 定義檔/共用 lint/文檔，無 FSM/`*.tla` 變更）
+- **DEF-AGTREV-014（P2）collaboration upstream 反向斷鏈 + lint 盲區**：`02.ba` upstream←PM/PO 但 `03.pm-po` 結構化 collaboration_rules 完全不提 BA（其 mermaid/review_participants 確有協作）；symmetry lint 只查 down→up + peer~peer → pm-po 補 `downstream→BA`，`collaboration_symmetry_lint` 加 upstream 反向檢查（接受 down 或 peer 為合法對側）+2 test。SD-1（sd↔pm-po 視角差）判 by-design。
+- **DEF-AGTREV-015（P2）scenario_usage frequency 與 SSOT 系統性漂移**：integration「1/10 vs 自列 4」內部矛盾 + 6 agent off-by-one + pm-po 計入非法場景「Sprint Planning」+ sd-architect 漏 Migration（notes 自稱 9 卻寫 8）；全框架無 frequency 守門 → 掌舵者裁定統計段為唯一 SSOT，**8 agent 全對齊**（freq 分子＝統計段＝清單項數三者一致，逐場景表交叉核對成員）；新增 `scripts/scenario_frequency_lint.py`（SSOT 跨源 + 內部一致雙檢查）+6 test + 接入 ci-gate；mapping doc Refactoring supporting 補 qa-automation 收斂雙視圖。
+- **DEF-AGTREV-016（P3）文件交叉引用/標頭殘留**：`README.md:244` 行號 71→76；`core/README.md:68` 複數 `agents/`→`agent/`（斷鏈）；`core/README.md` 標頭 v0.01→v0.18；`AGENT_PHASE2_UPDATE_GUIDE.md:402` 離群 `/9`→`/10`。
+
+#### 驗證
+- 完整 `bash scripts/ci-gate.sh` **exit 0**：v0.01:1478 / v0.18:1611（**零退化**）/ scripts/tests **81→89**（+2 collaboration upstream 反向 case + 6 frequency case）；6 lint 全 ✅（含新 `scenario_frequency_lint`）；arch_fitness fail=0；FRAMEWORK_STATUS fresh；26/26 agent YAML safe_load OK；8 agent frequency 三者一致（QA 複審鏡親數吻合）；兩新/擴 lint 經突變實證非空殼。DEF-AGTREV-001~016 全閉、零 routed 殘留。
+
 ---
 
 ## [v0.17] - 2026-06-18（Copy-on-Evolve 自 v0.16；v0.16 凍結唯讀）

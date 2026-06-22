@@ -17,6 +17,9 @@ DEF-AGTREV-003 只修了 BA→SA/SD 一處；本 lint 機械強制全圖對稱�
 【判準（任一不對稱即非零硬閘擋下）】
   1. downstream X→Y 但 Y 無 upstream←X。
   2. peer X~Y 但 Y 無 peer~X（自環 X~X 不要求對側，忽略）。
+  3. upstream X←Y 但 Y 既無 downstream→X 亦無 peer~X（Y 完全不承認 X＝真實斷鏈；
+     DEF-AGTREV-014 補上游反向盲區。接受 down 或 peer 任一為合法對側，故 upstream
+     vs peer 的視角差不誤判）。
 
 【排除】
   * 模板示例檔（``01.agent-template*``）：非真實 agent，僅結構範例。
@@ -152,6 +155,17 @@ def find_asymmetries(graph: dict) -> list[str]:
             if y in internal and x not in graph[y]["peer"]:
                 problems.append(
                     f"peer {x}~{y} 但 {y} 的 peer 未列 {x}（peer 應雙向，漏對側 peer~{x}）"
+                )
+        # upstream X←Y（X 把 Y 列為上游）必有 Y 在某方向承認 X：Y downstream→X（Y 把 X
+        # 列為下游 handoff）或 Y peer~X（平級協作）。二者皆無＝Y 完全不提 X＝真實斷鏈。
+        # （DEF-AGTREV-014：補 upstream 反向盲區。刻意接受 down 或 peer 為合法對側——
+        #  upstream vs peer 的視角差〔如 SD←PM/PO upstream 對 PM/PO~SD peer〕屬可接受的
+        #  協作視角不對稱，非斷鏈，不強制統一階層以免連鎖改寫。）
+        for y in sorted(node["up"]):
+            if y in internal and x not in graph[y]["down"] and x not in graph[y]["peer"]:
+                problems.append(
+                    f"upstream {x}←{y} 但 {y} 既未 downstream→{x} 亦未 peer~{x}"
+                    f"（{y} 完全不承認 {x}，漏對側 downstream→{x} 或 peer~{x}）"
                 )
     return problems
 

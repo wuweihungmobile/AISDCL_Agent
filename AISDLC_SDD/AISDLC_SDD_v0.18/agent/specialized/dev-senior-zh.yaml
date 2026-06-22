@@ -27,7 +27,7 @@ agent:
         description: "技術指導和實作建議"
 
   scenario_usage:
-    frequency: "Medium (4/10 scenarios)"
+    frequency: "Medium (5/10 scenarios)"
     irreplaceability: "⭐⭐⭐⭐ High Priority"
     primary_scenarios:
       - scenario: "Brownfield"
@@ -38,6 +38,9 @@ agent:
       - scenario: "Refactoring"
         role: "Refactoring Decision"
         contributions: "重構技術決策、風險評估、實作指導"
+      - scenario: "Migration"
+        role: "Migration Technical Lead"
+        contributions: "跨平台開發指導、遷移技術決策"
       - scenario: "Performance"
         role: "Code Optimization"
         contributions: "代碼層面優化、演算法改進"

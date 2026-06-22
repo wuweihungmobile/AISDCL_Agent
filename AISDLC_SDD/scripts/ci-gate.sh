@@ -154,6 +154,15 @@ python scripts/agent_template_lint.py "${REPO_ROOT}"
 echo "############## CI 閘門：核心 agent collaboration 對稱性 lint（DEF-AGTREV-004）##############"
 python scripts/collaboration_symmetry_lint.py "${REPO_ROOT}"
 
+# ── Agent scenario_usage frequency SSOT 一致性 lint（DEF-AGTREV-015 機械防復發）──────
+# 各 agent 的 scenario_usage.frequency（N/10）有兩個義務全靠人工同步 → 長期漂移（第四輪
+# 重審揭露 6 agent 與權威統計段系統性 off-by-one + integration「1/10 vs 自列 4」內部矛盾）：
+# (1) 掌舵者裁定 SCENARIO_AGENT_MAPPING.md 頻率統計段為唯一 SSOT，凡列出之 agent 分子須等之；
+# (2) 分子須等於 primary+supporting 場景項數（內部一致）。此 lint（版本無關 shared infra、
+# read-only 純觀察者）掃最新演化版 agent 比對之，任一不一致即非零硬閘擋下 → 杜絕漂移再生。
+echo "############## CI 閘門：Agent scenario frequency SSOT lint（DEF-AGTREV-015）##############"
+python scripts/scenario_frequency_lint.py "${REPO_ROOT}"
+
 # ── 框架版本/計數 SSOT 新鮮度 lint（DEF-AGTREV 全面收尾，機械強制）────────────────
 # 版本（Copy-on-Evolve）不斷累積，過去「最新版本號 + 各類資產計數」硬寫散落多份文件
 # （root/子 CLAUDE.md、INIT、RULES_INDEX…），任一處變動其餘 stale → 必然遺漏（實證：

@@ -29,7 +29,7 @@ agent:
         description: "根據測試結果迭代優化代碼"
 
   scenario_usage:
-    frequency: "Medium-High (6/10 scenarios)"
+    frequency: "Medium (4/10 scenarios)"
     irreplaceability: "⭐⭐⭐⭐⭐ Must Keep"
     primary_scenarios:
       - scenario: "Greenfield"
@@ -40,18 +40,12 @@ agent:
         responsibilities: "功能開發、代碼修改、回歸測試"
 
     supporting_scenarios:
-      - scenario: "Refactoring"
-        role: "Code Refactoring"
-        contributions: "代碼重構實作、技術債務清理"
       - scenario: "Integration"
         role: "Integration Implementation"
         contributions: "API客戶端實作、整合代碼開發"
       - scenario: "Testing"
         role: "Testability Support"
         contributions: "可測試性改進、測試工具支援"
-      - scenario: "Documentation"
-        role: "Code Documentation"
-        contributions: "代碼範例、技術文檔審查"
 
     notes: |
       - Dev在所有需要實作的情境中都參與
