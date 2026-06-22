@@ -1,9 +1,9 @@
 ---
 name: sdd-gate
-description: 執行 SDD Spec-First Gate（SCG）閘門驗證，確認規格文件完整後才允許進入下一階段
+description: 執行 SDD Spec-First Gate（SCG）閘門驗證，確認規格文件完整後才允許進入下一階段。內建 retry_count 追蹤與 pattern_detection，超過重試上限自動觸發 ESCALATION
 user-invocable: true
 disable-model-invocation: false
-argument-hint: "<gate: SCG-0|SCG-1|SCG-2|SCG-3|SCG-4|SCG-5|SCG-6>"
+argument-hint: "<gate: SCG-0|SCG-1|SCG-2|SCG-3|SCG-4|SCG-5|SCG-6> [--retry-reset] [--status]"
 allowed-tools:
   - Read
   - Grep
@@ -19,13 +19,76 @@ SDD 三大支柱之 **Spec-First Gate**：每個關鍵里程碑前的強制閘�
 ## 觸發方式
 
 ```bash
-/sdd-gate SCG-0    # 需求凍結前驗證
-/sdd-gate SCG-1    # 設計凍結前驗證
-/sdd-gate SCG-2    # 架構凍結前驗證
-/sdd-gate SCG-3    # API Contract 凍結前驗證
-/sdd-gate SCG-4    # PR Review（實作與規格一致性）
-/sdd-gate SCG-5    # 交付前（RTM 100%）
-/sdd-gate SCG-6    # 發布前（全閘門通過）
+/sdd-gate SCG-0             # 需求凍結前驗證
+/sdd-gate SCG-1             # 設計凍結前驗證
+/sdd-gate SCG-2             # 架構凍結前驗證
+/sdd-gate SCG-3             # API Contract 凍結前驗證
+/sdd-gate SCG-4             # PR Review（實作與規格一致性）
+/sdd-gate SCG-5             # 交付前（RTM 100%）
+/sdd-gate SCG-6             # 發布前（全閘門通過）
+/sdd-gate SCG-4 --status    # 查看當前 retry_count 與 failure_pattern
+/sdd-gate SCG-0 --retry-reset  # 人工修復後重置 retry_count（須在 ESCALATION 解除後執行）
+```
+
+---
+
+## 🔄 FSM 整合：Retry Budget 管理
+
+本 Skill 整合 SDD_FSM_ENGINE.md 的重試上限規則，**每次 FAIL 自動遞增 retry_count**。
+
+```yaml
+retry_policy:
+  SCG_VALIDATION:  # SCG-0 ~ SCG-3 / SCG-5 / SCG-6
+    max_retry: 3
+    on_exceed: "進入 ESCALATION（見 SDD_ESCALATION_PROTOCOL.md）"
+    
+  PR_REVIEW:  # SCG-4
+    max_retry: 5
+    pattern_detection: true
+    same_pattern_threshold: 3
+    on_same_pattern_exceed: "進入 SPEC_AUDIT（見 SDD_FSM_ENGINE.md）"
+    on_max_exceed: "進入 ESCALATION"
+    
+  RTM_VERIFY:  # SCG-5（特殊）
+    max_retry: 2
+    on_exceed: "進入 ESCALATION"
+```
+
+### Retry_count 追蹤規則
+
+```
+每次執行 /sdd-gate 時，在 context 中記錄：
+
+[SCG Retry State]
+  gate: SCG-{N}
+  attempt: {N}/3（或 N/5 for SCG-4）
+  last_failure_reason: {原因摘要}
+  failure_pattern_hash: {用於比對是否為重複失敗}
+
+失敗時：
+  1. attempt++
+  2. 記錄 failure_reason
+  3. 比對 failure_pattern_hash
+     - 若與上次相同 → pattern_repeat_count++
+  4. 判斷是否觸發特殊路徑
+
+當 attempt > max_retry：
+  → 宣告「⚠️ SCG 重試次數耗盡，進入 ESCALATION」
+  → 執行 SDD_ESCALATION_PROTOCOL.md 的流程
+```
+
+### Pattern Detection（SCG-4 專屬）
+
+```
+PR_REVIEW 連續失敗時，比對每次的 failing_test_ids：
+  - 若相同的 test_id 連續失敗 ≥ 3 次
+  → 宣告「⚠️ 偵測到重複失敗模式，觸發 SPEC_AUDIT」
+  → 停止 PR Review 重試
+  → 執行 SPEC_AUDIT 流程：
+      1. 讀取失敗 test_id 對應的原始 AC
+      2. 比對 Test Contract assertion
+      3. 執行 /spec-logical-validator
+      4. 產出 SPEC_AUDIT 報告
 ```
 
 ---
@@ -51,6 +114,23 @@ SDD 三大支柱之 **Spec-First Gate**：每個關鍵里程碑前的強制閘�
 ---
 
 ## 執行流程
+
+### 階段 0：SLV 前置驗證（SCG-0 / SCG-3 專用）
+
+**在執行 SCG 格式驗證之前**，針對 SCG-0 和 SCG-3 先執行邏輯一致性驗證：
+
+```
+SCG-0 前 → /spec-logical-validator（SLV-001 + SLV-002 + SLV-003）
+SCG-3 前 → /spec-logical-validator（SLV-004 + SLV-005 + SLV-006）
+
+若 SLV 有 CRITICAL FAIL：
+  → SCG 閘門被阻塞
+  → 不進入人工審查
+  → 退回規格修正（retry_count++）
+  
+若 SLV 全部通過：
+  → 繼續執行 SCG 格式/完整性驗證
+```
 
 ### 階段 1：收集驗證素材
 
@@ -146,6 +226,10 @@ SCG-6 → 所有 SCG-0~5 驗證報告
 **日期**: {YYYY-MM-DD}
 **系統**: {SystemName}
 **執行者**: {Agent/人工}
+**嘗試次數**: {N}/{max}（FSM retry_count）
+
+### SLV 邏輯驗證（SCG-0/SCG-3）
+{SLV 結果摘要，或「不適用（非 SCG-0/3）」}
 
 ### 通過項目 ✅
 - [x] 項目 1
@@ -157,8 +241,14 @@ SCG-6 → 所有 SCG-0~5 驗證報告
 ### 結論
 🔴 未通過 / 🟢 通過
 
+### FSM 狀態
+- retry_count: {N}/{max}
+- 剩餘重試次數: {max - N}
+- {若耗盡}: ⚠️ 已達重試上限，請人工介入
+
 ### 下一步
 {修正項目清單 or 可進入下一階段}
+{若耗盡}: → 執行 SDD_ESCALATION_PROTOCOL.md
 ```
 
 🔴 **人工確認點**：閘門通過需等待負責人明確確認，不可自動通過。
@@ -198,6 +288,15 @@ SCG-6 → 所有 SCG-0~5 驗證報告
 
 ---
 
+## 相關 FSM 文件
+
+- [SDD_FSM_ENGINE.md](../../workflow/sdd-fsm-engine/SDD_FSM_ENGINE.md) — 狀態機定義（retry_count 上界）
+- [SDD_ESCALATION_PROTOCOL.md](../../workflow/sdd-escalation/SDD_ESCALATION_PROTOCOL.md) — retry 耗盡後的退場
+- [spec-logical-validator](../spec-logical-validator/SKILL.md) — SCG-0/3 前置 SLV 驗證
+
+---
+
 **基於**: AISDLC-SDD v0.01（SDD 專屬 Skill）
+**強化版本**: v1.1（加入 FSM retry_count + pattern_detection）
 **對應 SDD 原則**: Spec-First Gate（所有 SCG 閘門）
 **對應工作流**: `workflow/sdd-spec-first-gate/SDD_SPEC_FIRST_GATE.md`

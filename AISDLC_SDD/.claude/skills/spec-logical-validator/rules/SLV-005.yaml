@@ -1,0 +1,28 @@
+id: SLV-005
+name: "Test Contract 可達性"
+source: "builtin (AISDLC-SDD v0.01 Phase A)"
+trust_level: verified
+reviewed_by: "sa-analyst@aisdlc-sdd"
+reviewed_at: "2026-04-14"
+scope: test
+purpose: "確保 Test Contract 中的 assertion 在現有架構下物理可達"
+
+scan_targets:
+  - "docs/03_testing/contracts/TCS-*.md"
+  - "docs/02_architecture/SRD-*.md"
+
+required_qualifiers:
+  - "Test assertion 不得依賴系統未聲明具備的能力"
+  - "Mock 範圍必須在 SRD 定義的系統邊界內"
+  - "效能 assertion 必須考量網路延遲、DB 查詢等現實開銷"
+  - "Test 的前置條件（Given）必須可由 Test Setup 建立"
+
+failure_examples:
+  - "TCS-003 expect(loginTime_ms).toBeLessThan(0) → 物理不可達"
+  - "TCS-007 直接讀 DB 但 SRD 定義為 Read-Through Cache → 架構不符"
+
+pass_examples:
+  - "expect(loginTime_ms).toBeLessThan(200) 並於 Setup 建立 test user"
+
+severity: CRITICAL
+blocks_scg: true

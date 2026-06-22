@@ -1,9 +1,32 @@
 # AISDLC Claude Skill 開發規劃
 # Claude Skill Development Plan
 
-**版本**: v0.09
+**版本**: v0.02-SDD
 **建立日期**: 2025-01-22
+**最後更新**: 2026-04-14
 **用途**: 規劃 AISDLC 九大情境和 Agent 轉化為 Claude Skill 的完整路線圖
+
+---
+
+## ✅ SDD 原生改寫完成（2026-04-14）
+
+**改寫範圍**: 38 個 Skills 全部改寫為 SDD 原生設計
+
+| 改寫 Phase | Skill 數量 | 狀態 |
+|-----------|-----------|------|
+| Phase 01：SDD Core Skills | 5 | ✅ 完成 |
+| Phase 02：Agent Skills | 6 | ✅ 完成 |
+| Phase 03：Scenario/Workflow Skills | 5 | ✅ 完成 |
+| Phase 04：DevOps/Security/Doc Skills | 8 | ✅ 完成 |
+| Phase 05：Integration/Quality Skills | 14 | ✅ 完成 |
+| **總計** | **38** | ✅ **全部完成** |
+
+**改寫核心變化**：
+- SCG 閘門前置條件嵌入每個 Skill（非附加）
+- RTM 更新步驟嵌入執行流程
+- ADR 決策步驟嵌入設計先行階段
+- Consumer Contract / Webhook Event Schema 定義嵌入 Integration Skills
+- NFR 量化值作為 Monitoring/Performance Skill 的閾值依據
 
 ---
 
@@ -214,21 +237,36 @@ allowed-tools:
 
 - [x] 建立 Agents 家族 (dev-review, pm-planning)
 - [x] 建立 Workflow Skills (sprint-planning, release-management, code-review)
-- [ ] 建立 Skill 使用文檔
-- [ ] 收集使用回饋
+
+### 🔴 當前優先任務：SDD 原生改寫（2026-04-14 啟動）
+
+> 計畫文件：`build/planning/active/Skill_for_SDD_Planning_Phase_01.md`
+
+**問題**：現有 33 個繼承 Skill 採用「AISDLC v0.01 + 附加 SDD 區塊」模式，
+非 SDD 原生設計，SCG 閘門游離、RTM 缺席、前置條件不明。
+
+**目標**：38 個 Skill 全部改寫為 SDD 原生，嵌入 Spec-First/Design-as-Doc/Contract-Driven 三大支柱
+
+| Phase | 範疇 | Skill 數 | 狀態 |
+|-------|------|---------|------|
+| Phase 01 | SDD 核心 Skill 精化 + 新標準建立 | 5 | ⬜ 待執行 |
+| Phase 02 | Agent Skill 全面改寫 | 6 | ⬜ 待執行 |
+| Phase 03 | Scenario + Workflow Skill 改寫 | 5 | ⬜ 待執行 |
+| Phase 04 | DevOps + Security/Docs Skill 改寫 | 8 | ⬜ 待執行 |
+| Phase 05 | Integration + Code Quality Skill 改寫 | 14 | ⬜ 待執行 |
+| Phase 06 | 整合測試 + 文件更新 | - | ⬜ 待執行 |
 
 ### 長期 (季度)
 
-- [ ] 建立 Skill 組合使用指南
-- [ ] 評估新增 Skill 需求
-- [ ] 根據回饋優化現有 Skills
+- [ ] Skill 組合使用指南
+- [ ] 根據改寫後回饋繼續優化
 
 ---
 
 ## 檔案結構 (Claude Code Agent Skills Standard)
 
 ```
-AISDLC_v0.09/.claude/skills/
+AISDLC_SDD_v0.01/.claude/skills/
 ├── README.md                              ✅ 總覽文檔
 ├── SKILL_DEVELOPMENT_PLAN.md              ✅ 本文件
 ├── devops-github-actions/SKILL.md         ✅ GitHub Actions

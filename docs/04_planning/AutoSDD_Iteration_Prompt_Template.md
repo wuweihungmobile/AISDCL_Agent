@@ -104,11 +104,19 @@ Graph)**」開發**人類視覺化儀表板／拓樸結構輸出工具**：把�
 | monorepo 根 `docs/` | 整合層文件 | ✅ 可（依 01~08 編號制） |
 
 ### 啟動（每輪 B 軌第一動作）
-1. 工作目錄切到 `AISDLC_SDD/AISDLC_SDD_v0.0X/`。hooks 由 Claude Code 依 cwd 及其祖層
-   目錄是否含 `.claude/settings.json` 自動載入生效（v0.01 實際位置：
-   `AISDLC_SDD_v0.01/.claude/settings.json`，其 hook command 為相對路徑
-   `python .claude/hooks/...`）；建議仍以 `v0.0X/` 為工作目錄，確保 hook 相對路徑
-   與 FSM 相對路徑（`build/reports/fsm/`）正確解析。
+1. hooks 啟用（🔴 機制更正）：Claude Code 的 hooks **只從「啟動時的專案根
+   `.claude/settings.json`」+ user/local/enterprise 載入，不會遞迴/沿 cwd 祖層探索
+   子目錄 settings.json**（官方：There is no recursive subdirectory discovery of hook
+   files）。故從 monorepo 根啟動的 session，`AISDLC_SDD_v0.0X/.claude/settings.json`
+   的治理 hooks **不會自動觸發**。兩種正確啟用法（擇一）：
+   - **(a) 根層守衛式 router（建議，可在 monorepo 根 session 直接用）**：本 repo 已於根
+     `.claude/settings.json` wire 守衛式 router（`.claude/hooks/sdd_hook_router.py`）。
+     **設定 `SDD_ACTIVE_VERSION`（如 `0.18`）**即路由到該版實體 hooks；未設則 no-op。
+   - **(b) 從版本目錄啟動**：工作目錄切到 `AISDLC_SDD/AISDLC_SDD_v0.0X/` 再啟動 claude，
+     使該版 `.claude/settings.json` 成為專案根 settings；其 hook command 為相對路徑
+     `python .claude/hooks/...`，需以 `v0.0X/` 為 cwd 才正確解析。
+   （FSM 相對路徑 `build/reports/fsm/` 由各 hook 以 `Path(__file__).parents[2]` 自我定位，
+   不依賴 cwd。）
 2. 設定 `SDD_PROJECT=AutoSDD_iter_{{N}}`。SessionStart hook
    （`.claude/hooks/session_start.py`）自動呼叫 `FSMRuntime.bootstrap()`
    （`session_start.py:74`），project 取自 `SDD_PROJECT` 環境變數

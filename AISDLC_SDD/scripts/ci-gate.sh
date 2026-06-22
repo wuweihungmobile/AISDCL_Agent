@@ -172,6 +172,13 @@ python scripts/scenario_frequency_lint.py "${REPO_ROOT}"
 echo "############## CI 閘門：框架版本/計數 SSOT 新鮮度 lint（DEF-AGTREV 收尾）##############"
 python scripts/framework_status_snapshot.py --check --repo-root "${REPO_ROOT}"
 
+# ── 對外曝光 skills SSOT 新鮮度 lint（AutoSDD_improving 方案 C ②）──────────────────
+# 父層 .claude/skills（版本無關曝光集）曾為早期凍結快照、與 LATEST 漂移且不受治理。
+# 改以「LATEST 版 = SSOT、父層為機械鏡像」+ 此 check 硬閘，stale 即非零擋下。
+# 修復：python scripts/sync_exposed_skills.py --write
+echo "############## CI 閘門：對外曝光 skills SSOT 新鮮度 lint（方案 C ②）##############"
+python scripts/sync_exposed_skills.py --check --repo-root "${REPO_ROOT}"
+
 echo "✅ 本機 CI 閘門全數通過（版本：${FW_VERSIONS[*]}）"
 # DEF-06-001：單行自證逐軌 passed 計數，免零信任取證捲動截斷輸出
 echo "   逐軌計數：${GATE_SUMMARY[*]}"

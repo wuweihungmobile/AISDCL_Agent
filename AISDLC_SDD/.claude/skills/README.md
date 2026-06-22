@@ -1,11 +1,13 @@
 # AISDLC Claude Skills
 # Claude Code 技能套件
 
-**版本**: v0.09
+**版本**: v0.02-SDD
 **建立日期**: 2025-01-22
-**最後更新**: 2026-04-11
+**最後更新**: 2026-04-15
 **格式標準**: Claude Code Agent Skills Standard (`<name>/SKILL.md`)
-**用途**: 將 AISDLC 十大情境和 Agent 能力轉化為可重複使用的 Claude Skills
+**用途**: 將 AISDLC-SDD 十大情境和 Agent 能力轉化為可重複使用的 Claude Skills
+**SDD 轉型 Phase 01**: ✅ 完成（2026-04-14）— 33 個繼承 Skill 加入 SDD 合規區塊；5 個 SDD 專屬新增 Skill
+**SDD 原生改寫**: ✅ 完成（2026-04-14）— 38 個 Skill 全部改寫為 SDD 原生設計（SCG 嵌入 + RTM 嵌入 + Contract-Driven）
 
 ---
 
@@ -58,6 +60,14 @@
 /brownfield             # 棕地系統分析
 /database-migration     # 資料庫遷移
 /mobile-development     # 行動端開發
+
+# ★ SDD 專屬（新增）
+/adr-generate           # ADR 架構決策生成
+/spec-compliance-check  # Spec 符合性驗證
+/rtm-generate           # RTM 需求追溯矩陣
+/contract-generate      # API Contract 生成（OpenAPI/CDC）
+/sdd-gate               # SCG 閘門驗證
+/sdd-review             # SCG-4 PR Review — 實作規格一致性審查
 ```
 
 ---
@@ -116,7 +126,15 @@
 │── # Scenario / Dev 家族 (3個)
 ├── brownfield-analysis/SKILL.md           # 棕地系統分析
 ├── database-migration/SKILL.md            # 資料庫遷移
-└── mobile-development/SKILL.md            # 行動端開發
+├── mobile-development/SKILL.md            # 行動端開發
+│
+│── # ★ SDD 專屬家族 (6個，AISDLC-SDD v0.01 新增)
+├── adr-generate/SKILL.md                  # ADR 架構決策生成
+├── spec-compliance-check/SKILL.md         # Spec 符合性驗證
+├── rtm-generate/SKILL.md                  # RTM 需求追溯矩陣
+├── contract-generate/SKILL.md             # API Contract（OpenAPI/CDC）
+├── sdd-gate/SKILL.md                      # SCG 閘門驗證
+└── sdd-review/SKILL.md                    # SCG-4 PR Review（實作規格一致性）
 ```
 
 ---
@@ -132,7 +150,8 @@
 | **Agents** | 6 | SA/BA/SD/QA/Dev/PM |
 | **Workflows** | 2 | Sprint/Release |
 | **Scenario/Dev** | 3 | 棕地分析、資料庫遷移、行動開發 |
-| **總計** | **33** | - |
+| ★ **SDD 專屬** | 6 | ADR生成、Spec驗證、RTM、Contract、SCG閘門、SCG-4 Review |
+| **總計** | **39** | 33 繼承（SDD 強化）+ 6 SDD 新增 |
 
 ---
 
@@ -199,15 +218,27 @@
 | `/database-migration` | Database Migration | DB 平台遷移 (Oracle/MySQL → PostgreSQL) |
 | `/mobile-development` | Mobile Dev | Android/iOS/跨平台開發規劃 |
 
+### ★ SDD 專屬家族
+| 命令 | Skill | SCG 閘門 | 用途 |
+|------|-------|---------|------|
+| `/adr-generate` | ADR Generate | SCG-2 | 架構決策記錄自動生成 |
+| `/spec-compliance-check` | Spec Compliance | SCG-0~6 | SDD 文件規格合規驗證 |
+| `/rtm-generate` | RTM Generate | SCG-0/5 | 需求追溯矩陣生成與更新 |
+| `/contract-generate` | Contract Generate | SCG-3 | OpenAPI 3.1 Contract 生成 |
+| `/sdd-gate` | SDD Gate | SCG-0~6 | SCG 閘門驗證 |
+| `/sdd-review` | SDD Review | SCG-4 | PR Review 實作規格一致性審查 |
+
 ---
 
-## 設計原則
+## SDD 原生設計原則（v0.02 改寫後）
 
-1. **遵循 Claude Code Agent Skills 標準** - 每個 Skill 為 `<name>/SKILL.md` 目錄格式
-2. **遵循 AISDLC SOP** - 每個 Skill 對應標準作業程序
-3. **人機確認點** - 🔴 標記需人類確認的步驟
-4. **產出物明確** - 每個 Skill 有明確 Deliverables
-5. **可組合使用** - Skills 之間可組合使用
+1. **Spec-First 前置條件** - 每個 Skill 有明確的 SCG 閘門前置條件，未通過不可執行
+2. **SCG 嵌入執行流程** - SCG 驗證步驟嵌入 Skill 執行階段，不附加在末尾
+3. **RTM 嵌入** - 每個 Skill 完成後直接呼叫 `/rtm-generate update`
+4. **Contract-Driven** - Integration Skills 必須有 Consumer Contract / Event Schema Contract
+5. **ADR 強制** - 所有架構決策型 Skill（devops / integration）必須有 ADR
+6. **文件路徑明確** - 每個 Skill 的產出物有明確的 `docs/` 路徑
+7. **SDD 三大支柱貫穿** - Spec-First Gate / Design-as-Doc / Contract-Driven 嵌入每個 Skill 執行流程
 
 ---
 

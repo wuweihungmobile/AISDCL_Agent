@@ -123,14 +123,43 @@ allowed-tools:
 
 ---
 
+## 🔄 FSM 整合：Retry Budget 追蹤
+
+本 Skill 的每次執行與 `/sdd-gate SCG-4` 的 **PR_REVIEW retry_count** 直接連動。
+
+```
+[sdd-review 執行結果] → [影響 sdd-gate SCG-4 retry_count]
+
+失敗時（有任何 Fail 項）：
+  → retry_count++（由 sdd-gate 追蹤）
+  → 修正後重新執行 /sdd-review
+
+連續相同失敗 × 3 次：
+  → sdd-gate 偵測到 failure_pattern_hash 相符
+  → 自動進入 SPEC_AUDIT 狀態
+  → 停止 PR Review 迴圈，深查 AC vs Test Contract 矛盾
+
+retry_count ≥ 5 次：
+  → sdd-gate 宣告 ESCALATION
+  → 停止所有開發，等待人工介入
+```
+
+**重要**：不得在 retry_count 耗盡前繞過 /sdd-gate 強行合併 PR。
+
+相關文件：[SDD_FSM_ENGINE.md](../../workflow/sdd-fsm-engine/SDD_FSM_ENGINE.md) | [SDD_ESCALATION_PROTOCOL.md](../../workflow/sdd-escalation/SDD_ESCALATION_PROTOCOL.md)
+
+---
+
 ## 後置動作
 
 ```bash
 # 若全部 Pass：
-/sdd-gate SCG-4    # 執行 SCG-4 閘門確認
+/sdd-gate SCG-4    # 執行 SCG-4 閘門確認（通過後 retry_count 重置）
 
 # 若有 Fail：
 # 退回開發修正後，重新執行 /sdd-review
+# ⚠️ 每次 Fail 累積至 /sdd-gate SCG-4 的 retry_count（上限 5 次）
+# ⚠️ 相同失敗模式出現 3 次 → 系統自動觸發 SPEC_AUDIT（見 SDD_FSM_ENGINE.md）
 ```
 
 ---

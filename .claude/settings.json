@@ -1,0 +1,41 @@
+{
+  "$schema": "https://json.schemastore.org/claude-code-settings.json",
+  "description": "monorepo 整合層 — 守衛式 SDD hook 橋接（AutoSDD_improving）。以 SDD_ACTIVE_VERSION 為守衛路由到 AISDLC_SDD/AISDLC_SDD_v0.0X 的實體 hooks；未設則 no-op，純 AutoClaude session 零污染。詳見 .claude/hooks/sdd_hook_router.py。",
+  "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python \"${CLAUDE_PROJECT_DIR}/.claude/hooks/sdd_hook_router.py\" session_start",
+            "timeout": 30
+          }
+        ]
+      }
+    ],
+    "PreToolUse": [
+      {
+        "matcher": "Write|Edit|Read|Bash|NotebookEdit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python \"${CLAUDE_PROJECT_DIR}/.claude/hooks/sdd_hook_router.py\" context_ledger_pre",
+            "timeout": 10
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "Write|Edit|Read|Bash|NotebookEdit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python \"${CLAUDE_PROJECT_DIR}/.claude/hooks/sdd_hook_router.py\" context_ledger_post",
+            "timeout": 10
+          }
+        ]
+      }
+    ]
+  }
+}
