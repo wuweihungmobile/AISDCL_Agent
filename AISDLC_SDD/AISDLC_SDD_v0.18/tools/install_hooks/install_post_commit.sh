@@ -7,8 +7,10 @@
 set -e
 REPO_ROOT="$(git rev-parse --show-toplevel)"
 HOOK_TARGET="$REPO_ROOT/.git/hooks/post-commit"
-HOOK_SRC_DRIFT="$REPO_ROOT/AISDLC_SDD_v0.01/.claude/hooks/post_commit_drift.py"
-HOOK_SRC_CLOSURE="$REPO_ROOT/AISDLC_SDD_v0.12/.claude/hooks/closure_evidence_verify.py"
+# DEF-43-002：monorepo 收斂後 git rev-parse --show-toplevel = monorepo 根，
+# 各版位於 AISDLC_SDD/ 子目錄下，故路徑須含 AISDLC_SDD/ 中間層（原缺此層致裝不起來）。
+HOOK_SRC_DRIFT="$REPO_ROOT/AISDLC_SDD/AISDLC_SDD_v0.01/.claude/hooks/post_commit_drift.py"
+HOOK_SRC_CLOSURE="$REPO_ROOT/AISDLC_SDD/AISDLC_SDD_v0.12/.claude/hooks/closure_evidence_verify.py"
 
 if [ ! -f "$HOOK_SRC_DRIFT" ]; then
   echo "ERROR: drift hook source not found at $HOOK_SRC_DRIFT" >&2

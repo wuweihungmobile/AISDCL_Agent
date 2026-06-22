@@ -28,7 +28,9 @@ import os
 import re
 import sys
 
-VERSION_RE = re.compile(r"AISDLC_SDD_v0\.\d+")
+# DEF-43-003：major 不再硬寫死 0（原 ``v0\.`` 致一旦升 v1.00 整個版本解析家族
+# 集體無視新 major 版、LATEST 退回 v0.x）。放寬為 ``v<major>.<minor>`` 雙數值。
+VERSION_RE = re.compile(r"AISDLC_SDD_v\d+\.\d+")
 # 「落地版本」欄：擷取同行所有版本片段。錨定行首 header 欄位式（``^\s*\**落地版本\**[:：]``）：
 # 容忍 markdown 粗體（真實格式 ``**落地版本**：``）與縮排，但**不**誤配 inline-code 範例 / 句中
 # 提及（如本 lint 的 RFC 文件本身為說明規則而引用這些 token —— dogfooding 當場揭露之誤報源）。
@@ -56,8 +58,9 @@ def discover_frozen_versions(repo_root: str) -> set[str]:
 def latest_version(versions: set[str]) -> str | None:
     """以語意版本（major, minor 數值）取最高者，對齊 ci-gate.sh 的 ``sort -V | tail -1``。"""
     def key(v: str) -> tuple[int, int]:
-        m = re.search(r"v0\.(\d+)", v)
-        return (0, int(m.group(1))) if m else (0, -1)
+        # DEF-43-003：擷取真正的 (major, minor)，不再硬寫死 major=0（否則 v1.00 被當 minor=-1）。
+        m = re.search(r"v(\d+)\.(\d+)", v)
+        return (int(m.group(1)), int(m.group(2))) if m else (-1, -1)
 
     return max(versions, key=key) if versions else None
 

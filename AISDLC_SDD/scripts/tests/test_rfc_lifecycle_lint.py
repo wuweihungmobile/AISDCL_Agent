@@ -123,6 +123,25 @@ def test_latest_version_semantic(tmp_path):
     assert lint.latest_version(set()) is None
 
 
+# ── DEF-43-003：major version bump（v1.x）兩端盲區封閉 ─────────────────────────
+
+def test_latest_version_major_bump(tmp_path):
+    """v1.00 > v0.18：major bump 後新版必勝（原硬寫死 major=0 會把 v1.00 當 (0,0) 排輸）。
+
+    為何重要：一旦 Copy-on-Evolve 升 v1.00，若 latest_version 仍硬寫死 major=0，LATEST 會
+    退回 v0.x → 父層 skills 鏡像停在舊版、ci-gate 雙軌不測新版（DEF-43-003 靜默退化）。
+    """
+    assert lint.latest_version({"AISDLC_SDD_v0.18", "AISDLC_SDD_v1.00"}) == "AISDLC_SDD_v1.00"
+    assert lint.latest_version({"AISDLC_SDD_v1.2", "AISDLC_SDD_v1.10"}) == "AISDLC_SDD_v1.10"
+
+
+def test_discover_finds_v1_dirs(tmp_path):
+    """discover_frozen_versions 須認得 v1.x 目錄（原 VERSION_RE `v0\\.` 會整個漏掉）。"""
+    repo = _mk_repo(tmp_path, ["AISDLC_SDD_v0.18", "AISDLC_SDD_v1.00"])
+    found = lint.discover_frozen_versions(repo)
+    assert "AISDLC_SDD_v1.00" in found and "AISDLC_SDD_v0.18" in found
+
+
 def test_main_exit_codes(tmp_path, capsys):
     """CLI：乾淨 exit 0、有違規 exit 1（ci-gate 硬閘語意）。"""
     clean = _mk_repo(tmp_path, ["AISDLC_SDD_v0.14"])

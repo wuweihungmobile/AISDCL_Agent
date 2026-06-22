@@ -93,6 +93,44 @@ def _normalize_version(raw: str) -> str:
     return v
 
 
+def _disk_latest_version() -> str | None:
+    """掃 ``<root>/AISDLC_SDD/`` 取磁碟最高版（(major,minor) 數值，對齊 sort -V）。
+
+    DEF-43-003 後同步支援 v1.x。永不拋例外（fail-safe，回 None 即略過漂移告警）。
+    """
+    import re as _re
+
+    base = REPO_ROOT / "AISDLC_SDD"
+    pat = _re.compile(r"AISDLC_SDD_v(\d+)\.(\d+)$")
+    best: tuple[int, int] | None = None
+    best_name: str | None = None
+    try:
+        for child in base.iterdir():
+            m = pat.match(child.name)
+            if m and child.is_dir():
+                key = (int(m.group(1)), int(m.group(2)))
+                if best is None or key > best:
+                    best, best_name = key, f"{m.group(1)}.{m.group(2)}"
+    except Exception:  # noqa: BLE001 — fail-safe：漂移告警僅為 advisory，絕不影響路由
+        return None
+    return best_name
+
+
+def _drift_advisory(active: str) -> None:
+    """DEF-43-004：SessionStart 時若 SDD_ACTIVE_VERSION ≠ 磁碟最高版，於 stderr 印軟告警。
+
+    走 stderr 而非 stdout：絕不污染實體 hook 的 stdout JSON（剛於 DEF-43-001 修好的
+    編碼敏感轉發路徑），非阻擋；刻意指凍結版做 B 軌 dogfooding 為合法用法故僅提示不擋。
+    """
+    latest = _disk_latest_version()
+    if latest is not None and latest != active:
+        sys.stderr.write(
+            f"[SDD-ROUTER][advisory] SDD_ACTIVE_VERSION=v{active} 非磁碟最高版 v{latest}。"
+            f"若非刻意指定凍結版做 B 軌 dogfooding，請確認是否應改用 LATEST(v{latest})。\n"
+        )
+        sys.stderr.flush()
+
+
 def main(argv: list[str]) -> int:
     if len(argv) < 2 or argv[1] not in _HOOK_MAP:
         # 設定錯誤：未知 hook 名。靜默放行（無法得知 event name 時印通用占位）。
@@ -112,6 +150,10 @@ def main(argv: list[str]) -> int:
             f"[SDD-ROUTER][WARN] SDD_ACTIVE_VERSION={raw_ver!r} 指向的 hook 不存在："
             f"{target}。請確認版本號（例：0.18）。本次放行、未套用 SDD 守門。",
         )
+
+    # DEF-43-004：僅 SessionStart 印一次 LATEST 漂移軟告警（stderr，非阻擋、不污染 stdout JSON）。
+    if event_name == "SessionStart":
+        _drift_advisory(version)
 
     # 轉交實體 hook：原樣轉發 stdin → child，child 的 stdout/stderr/exit code 原樣回傳。
     stdin_data = "" if sys.stdin.isatty() else sys.stdin.read()
