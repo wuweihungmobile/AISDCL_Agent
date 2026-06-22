@@ -162,3 +162,35 @@
 - FSM/`transition_rules.py`/五軌 `*.tla` **逐位元零差異** → **不觸發五軌 TLC**（Rule 9.18.1）。
 
 **臨時審查塊 DEF-AGTREV-001~020 至此全閉、零 routed 殘留；4 類鏡子幻覺經 parent 親驗誠實駁回並記錄。** 修復成果置於 `AISDLC_SDD/AISDLC_SDD_v0.18/` + `AISDLC_SDD/scripts/` 共用 lint，待掌舵者指示後直推 main。
+
+---
+
+## 第六度獨立重審（2026-06-22，使用者第六次請求）— 四鏡 + parent 親驗
+
+派 Architect/SA/SD/QA 四鏡主樹並行重審（工作樹乾淨、無 untracked，主樹派發合 DEF-24-001 判準；不採信前五輪宣稱）。**Architect 鏡 + QA 鏡獨立雙鏡收斂**揪出 **1 條 agent/* 範圍內真缺陷（DEF-AGTREV-021）**；SD 鏡零新缺陷；SA 鏡 agent/* 內 0 P0~P2 + 2 項標的外邊界觀察（OBS-1/OBS-2）。
+
+### 四鏡分工與結論
+| 鏡 | 視角 | 結論 |
+|----|------|------|
+| **Architect** | 結構/schema（YAML 解析、version、icon、persona 區塊、dependencies） | 26 YAML 全解析、version 全 v0.18、id/name/icon 零碰撞、persona 區塊完整、5 runtime + 4 extends 皆 by-design、零簡體日韓 → **唯 1 項 P3：COLLABORATION 標頭滯留 v0.01** |
+| **SA** | SDD 方法論（SCG/RG owner、scenario_usage frequency、RTM stage、ADR 路徑） | RG-* 5 碼權威定義齊全、frequency 三向一致、SCG-5 owner 三源對齊、RTM stage 對齊 SCG → agent/* **0 P0~P2**；2 項標的外觀察（OBS-1 scenarios/ 統計段 vs 場景區塊、OBS-2 guides/ SCG-4 owner 粒度） |
+| **SD** | 跨檔引用 + 架構（template_path、id 互引、collaboration 對稱、Rule 9） | 54 template 引用全命中磁碟、dispatchable 17 id 全存在無幻影、4 extends base 有效、collaboration 雙向皆宣告、Rule 9 人工閘門無越權 → **零新缺陷** |
+| **QA** | 完整性/誠實性（計數、連結、標頭、簡體、佔位符） | 計數全鏈一致（SSOT 26＝7+19、runtime 5）、frequency README 表與 yaml 吻合、9 導覽連結可解析、零簡體/佔位符 → **與 Architect 收斂同 1 項 P3：COLLABORATION 標頭/內文/版本歷史滯留 v0.01** |
+
+### 真缺陷（已修，詳見 Defect_Log DEF-AGTREV-021）
+- **021（P3）現役協作指南版本滯留 v0.01**：`agent/AGENT_COLLABORATION_PATTERNS.md:4/6/7/22/653` 標頭與內文仍標 v0.01（該檔自建版 commit 後 5 輪 AGTREV 均未碰標頭），與同層三份 README（皆 v0.18）漂移。**修**：標頭→v0.18、最後更新→2026-06-22（對齊同層 README 慣例）；內文 `:22`/`:653` 敘述改 version-agnostic 根因消除防再漂移；版本歷史新增 v0.18 條目；`:849` v0.01 史實條目與 `AGENT_PHASE2_UPDATE_GUIDE.md`（升級指南主題本身）保留不動。
+
+### agent/* 標的外邊界觀察（誠實記錄，本輪不擴 scope）
+- **OBS-1（P3，routed）**：`scenarios/SCENARIO_AGENT_MAPPING.md:368` 統計段 qa-tester `8/10` vs 同檔場景區塊實際 6 處出現＝mapping 檔**內部**不一致（parent grep 親驗屬實）。agent yaml 已正確對齊掌舵者裁定之 SSOT（統計段），**agent/* 無缺陷**；矛盾在 scenarios/ 層，`scenario_frequency_lint` 未下探場景區塊。待掌舵者裁決是否另開 scenarios/ 清理輪。
+- **OBS-2（P3，by-design）**：SCG-4 owner `SDD_GUIDE:37`=dev-senior vs `Core_Principles:53`=dev-senior/qa-lead，語意相容（主責 vs PR 雙人複核），非 agent/* 標的，不強制統一。
+
+### 第六輪驗證全綠（親跑 + parent zero-trust 對鏡子再驗）
+- 26/26 agent YAML `safe_load` OK；`AGENT_COLLABORATION_PATTERNS.md` 除 `:853-854` 歷史條目外零 v0.01 殘留；同層四份文件版本標頭全 v0.18 收斂。
+- 完整 `bash scripts/ci-gate.sh` **exit 0**（基線實測 v0.01:1478 / v0.18:1611、6 lint 全 ✅、arch_fitness fail=0、FRAMEWORK_STATUS fresh、FF-13 26 agent 全合法）；本輪僅改 1 個 .md 描述性標頭/敘述（**非 pytest/lint 標的**故 ci-gate 數字與基線逐位元一致＝零退化）。
+- FSM/`transition_rules.py`/五軌 `*.tla` **逐位元零差異** → **不觸發五軌 TLC**（Rule 9.18.1）。
+
+### parent 對鏡子之過度回報控管（誠實記錄）
+- 本輪四鏡**未**出現前輪那類「把存在的東西報成不存在」之假陰性（QA 鏡已知前輪教訓、本輪明確查證 FRAMEWORK_STATUS/lint 在父層）；雙鏡（Architect+QA）對 DEF-021 獨立收斂提高可信度，parent 親讀四處 + 同層 README 對照後採信。
+- SA 鏡之 OBS-1/OBS-2 正確標示為「根因在 agent/* 標的外」，parent 親驗後同意不擴 scope（Rule 3 surgical + 使用者標的為 agent/*）。
+
+**臨時審查塊 DEF-AGTREV-001~021 至此全閉；OBS-1 routed、OBS-2 by-design 誠實記錄。** 修復成果置於 `AISDLC_SDD/AISDLC_SDD_v0.18/`，待掌舵者指示後直推 main。
