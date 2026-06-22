@@ -112,8 +112,10 @@ docker compose -f docker-compose.ci.yml up -d                          # CI 對�
 
 這是一個 **~85% Markdown（模板／Agent／Workflow／治理規則）+ ~15% Python runtime** 的框架。
 
-### 結構（`AISDLC_SDD/AISDLC_SDD_v0.01/`＝ci-gate 凍結基線；最新演化版＝`AISDLC_SDD_v0.18/`，各版結構同構，ci-gate 同時測「凍結基線 v0.01 + LATEST」）
-`agent/`（v0.01：25 Agents＝7 core + 18 specialized，含 4 runtime；最新 v0.18：26＝7 core + 19 specialized，含 5 runtime，多 `sdd-playbook-compiler`）、`scenarios/`（10 場景）、`workflow/`（23 工作流＝1 SDD Gate + 8 core + 13 scenario + 1 ADR，另加 FSM/Escalation/Context runtime）、`docs_template/`（59 SDD 模板＝56 md + 3 yaml）、`governance/`（`RULES_INDEX.md` + 38 條 `R-*.yaml`＝v0.01 基線；v0.18 為 39，多 R-9.38 playbook-translation-fidelity）、`tools/fsm_runtime/`（FSM 引擎，~140 py 檔）、`cicd/`、`guides/`、`prompts/`、`.claude/`（hooks + 42 skills）。
+### 結構（各版目錄結構同構；`AISDLC_SDD_v0.01/`＝ci-gate 凍結基線，最新演化版＝ci-gate LATEST，ci-gate 同時測「凍結基線 + LATEST」）
+> 🔴 **具體版本號與各類資產計數一律見唯一真相源 [AISDLC_SDD/FRAMEWORK_STATUS.md](AISDLC_SDD/FRAMEWORK_STATUS.md)**（由 `scripts/framework_status_snapshot.py` 自磁碟+權威源生成，ci-gate `--check` 機械守新鮮）。本檔與子 CLAUDE.md **不重複數字**——版本累積亦不再多檔漂移、不靠人工記得改多處。
+
+`agent/`（core + specialized，含數個 `sdd-*` runtime agent）、`scenarios/`、`workflow/`（1 SDD Gate + core + scenario + ADR，另加 FSM/Escalation/Context runtime）、`docs_template/`（SDD 模板＝md + yaml）、`governance/`（`RULES_INDEX.md` + `R-*.yaml`，依 FSM 狀態 lazy-load）、`tools/fsm_runtime/`（FSM 引擎，~140 py 檔）、`cicd/`、`guides/`、`prompts/`、`.claude/`（hooks + skills）。
 
 ### 測試 / 形式化驗證 / 本機 CI 閘門
 ```bash
@@ -147,7 +149,7 @@ bash tools/fsm_runtime/formal/run_tlc.sh                      # TLA+/TLC（自�
 | AutoClaude 開發規範 / 模型欄位 / Architecture Snapshot | [AutoClaude/CLAUDE.md](AutoClaude/CLAUDE.md) |
 | AutoClaude Sprint 脈絡 / ADR / Nightly 取證紀律 | `AutoClaude/docs/05_development/sprint_history.md`、`AutoClaude/docs/04_planning/ADR/`、`AutoClaude/docs/06_quality/Nightly_Forensic_Discipline.md` |
 | AISDLC_SDD 框架入口 / 目錄規則 | [AISDLC_SDD/AISDLC_SDD_v0.01/AISDLC_SDD_INIT.md](AISDLC_SDD/AISDLC_SDD_v0.01/AISDLC_SDD_INIT.md)、`AISDLC_SDD/AISDLC_SDD_v0.01/FILE_DIRECTORY_RULES.md` |
-| AISDLC_SDD 治理規則總覽（38 條 R-*.yaml；v0.18 為 39） | `AISDLC_SDD/AISDLC_SDD_v0.01/governance/RULES_INDEX.md` |
+| AISDLC_SDD 治理規則總覽（條數見 FRAMEWORK_STATUS.md） | `AISDLC_SDD/AISDLC_SDD_v0.01/governance/RULES_INDEX.md` |
 
 ---
 

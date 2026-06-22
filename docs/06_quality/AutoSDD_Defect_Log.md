@@ -380,4 +380,6 @@
 > 1. **DEF-AGTREV-003 fixed@v0.18**：`04.sa`/`05.sd` upstream 補 BA 項，斷鏈轉雙向（見上表列）。
 > 2. **CLAUDE.md 計數校正（實測對帳）**：governance R-*.yaml 由失真「35/34 條」改為 **38（v0.01）/39（v0.18）**（權威源 RULES_INDEX.md:9「R-9.1~9.38 共 38 條 + R-SELF-STRIDE」；「34」原為 2026-06-05 遷移批次數非檔數）。**經查正確無須改者**：workflow 23（README.md:11 = 8+13+1+1）、docs_template 59（INIT.md:200 = 56 md + 3 yaml）、skills 42、scenarios 10、agents 25/26 — 一律實測吻合。
 > 3. **版本標籤漂移校正（非翻改、零風險）**：根/子 `CLAUDE.md` 加注 `v0.01=ci-gate 凍結基線`、`v0.18=LATEST 可修改演化版`、各版結構同構、框架改動走 Copy-on-Evolve；**不做 30 列路徑硬翻改**（各版同構故 v0.01 路徑仍為有效版面參考，硬翻改反成下版即漂移之新債）。
+>
+> **根因永久解（掌舵者拍板「機械快照閘門」）——版本累積不再多檔漂移/遺漏**：漂移根因＝同一版本事實（最新版本號 + 各類計數）被複製散落多份文件。新增 shared-infra `scripts/framework_status_snapshot.py`（複用 `rfc_lifecycle_lint` 版本探測 DRY）自磁碟+權威源（workflow/README 宣稱數）生成**唯一真相源 `FRAMEWORK_STATUS.md`**（凍結基線 vs LATEST 雙欄：agents core/spec/runtime、scenarios、workflows、templates md+yaml、skills、governance）；`ci-gate.sh` 新增 `--check` **硬閘**（stale 即非零）；根/子 `CLAUDE.md` 全面 version-agnostic（指「最新演化版＝ci-gate LATEST」不寫死版本號）並指向 SSOT、**不再重複數字**。`test_framework_status_snapshot.py` 6 case（計數正確/版本端點/v0.09→v0.10 十位數邊界 DEF-19-002/閘門 fresh-stale-missing/新增更高版自動 stale/雙欄渲染）＋ M1（agents_total 漏算 spec）實證轉紅還原全綠；scripts/tests 56→62。**自此新版誕生或資產增減 → LATEST 自動跟上 → 未重生即 CI 紅，「人去記得改多處」從流程消失**。
 

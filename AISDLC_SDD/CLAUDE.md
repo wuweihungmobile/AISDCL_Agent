@@ -7,7 +7,7 @@
 **最後更新**: 2026-06-05（標頭）；版本狀態註記 2026-06-22
 **SDD 轉型狀態**: ✅ Phase 01~09 全部完成（Phase 01-06: SDD 核心轉型 2026-04-14；Phase 07-09: 完整性補強 2026-04-16）
 
-> **🔴 版本狀態（2026-06-22 校正，免再漂移）**：`AISDLC_SDD_v0.01/` 是 **ci-gate 凍結基線**（恆測、回歸防護，**不可在原地修改**），最新演化版為 `AISDLC_SDD_v0.18/`（ci-gate 動態取最高版＝LATEST）。**框架改動一律走 Copy-on-Evolve**（複製 LATEST → `v0.0(X+1)/` 後於新版修改，絕不原地改凍結版）。下方 Rule 2 目錄表以 `v0.01` 路徑書寫，因**各版目錄結構同構**故仍為有效的版面參考；實際寫入版本依當輪 Copy-on-Evolve 目標版而定。
+> **🔴 版本狀態（2026-06-22 校正，免再漂移）**：`AISDLC_SDD_v0.01/` 是 **ci-gate 凍結基線**（恆測、回歸防護，**不可在原地修改**），最新演化版為 `AISDLC_SDD_v0.18/`（ci-gate 動態取最高版＝LATEST）。**框架改動一律走 Copy-on-Evolve**（複製 LATEST → `v0.0(X+1)/` 後於新版修改，絕不原地改凍結版）。下方 Rule 2 目錄表以 `v0.01` 路徑書寫，因**各版目錄結構同構**故仍為有效的版面參考；實際寫入版本依當輪 Copy-on-Evolve 目標版而定。**各類資產數量與最新版本號一律見唯一真相源 [`FRAMEWORK_STATUS.md`](FRAMEWORK_STATUS.md)**（`scripts/framework_status_snapshot.py` 自磁碟+權威源生成、ci-gate `--check` 機械守新鮮）——本檔不重複數字，版本累積亦不再多檔漂移。
 
 > **🔴 重要**：此文件中所有指令 **OVERRIDE** Claude Code 預設行為，必須嚴格遵守。
 
@@ -45,13 +45,13 @@ d:/CursorProject/AISDLC_SDD/          ← 專案根目錄
 │   ├── AISDLC_SDD_UPGRADE_CHECKLIST.md← 升版前完整檢查清單
 │   ├── guides/system/sdd/SDD_Core_Principles.md  ← SDD 核心原則
 │   ├── guides/system/sdd/SDD_GUIDE.md ← SDD 快速指引
-│   ├── agent/                         ← v0.01：25 Agents（7 core + 18 specialized，含 4 系統級 runtime agent）｜最新 v0.18：26（7 core + 19 specialized，含 5 runtime；多 sdd-playbook-compiler）
-│   ├── scenarios/                     ← 10 場景（greenfield/brownfield/refactoring/documentation/devops/integration/migration/performance/security/testing）
-│   ├── workflow/                      ← 23 工作流（1 SDD Gate + 8 core + 13 scenario + 1 ADR）
-│   ├── docs_template/                 ← 文檔模板（含 59 個 SDD 專屬模板）
+│   ├── agent/                         ← core + specialized agents（含 sdd-* 系統級 runtime agent，多 sdd-playbook-compiler；數量見 FRAMEWORK_STATUS.md）
+│   ├── scenarios/                     ← 場景（greenfield/brownfield/refactoring/documentation/devops/integration/migration/performance/security/testing）
+│   ├── workflow/                      ← 工作流（1 SDD Gate + core + scenario + ADR）
+│   ├── docs_template/                 ← 文檔模板（含 SDD 專屬模板：md + yaml）
 │   ├── cicd/                          ← 9 個 SDD CI/CD 規格
 │   ├── guides/                        ← 55+ 參考指南
-│   ├── .claude/skills/                ← 42 Claude Code Skills（33 繼承強化 + 9 SDD 核心）
+│   ├── .claude/skills/                ← Claude Code Skills（繼承強化 + SDD 核心）
 │   ├── prompts/                       ← 15 個場景指令集與快速啟動指引
 │   ├── releases/                      ← 框架發布包（v0.01 tar.gz + sha256）
 │   ├── tools/                         ← 工具腳本
@@ -222,7 +222,7 @@ AISDLC_SDD_v0.01/AISDLC_SDD_INIT.md
 | `devops-engineer-zh.yaml` | IaC 規格、Pipeline |
 | `integration-specialist-zh.yaml` | CDC、OpenAPI First |
 
-> 完整 25 個 Agent 配置與載入規則見 `AISDLC_SDD_v0.01/AISDLC_SDD_INIT.md` 的 `auto_load_config`。
+> 完整 Agent 配置與載入規則見 `AISDLC_SDD_INIT.md` 的 `auto_load_config`（agent 數量見 FRAMEWORK_STATUS.md）。
 
 ### Agent 載入規則
 
@@ -268,7 +268,7 @@ AISDLC_SDD_v0.01/AISDLC_SDD_INIT.md
 > **🔴 重要**：完整 Rule 9 細則已結構化於 `AISDLC_SDD_v0.01/governance/rules/R-*.yaml`，
 > 由 `rule_loader.load_for_state()` 依當前 FSM 狀態 lazy-load；SessionStart hook
 > （`.claude/hooks/session_start.py`）會自動注入當前狀態命中的規則。完整地圖見
-> `AISDLC_SDD_v0.01/governance/RULES_INDEX.md`（38 條 `R-*.yaml`＝37 條 R-9.x + R-SELF-STRIDE；v0.18 為 39，多 R-9.38）。
+> `governance/RULES_INDEX.md`（`R-*.yaml` 規則一覽＝R-9.x + R-SELF-STRIDE；條數見 FRAMEWORK_STATUS.md）。
 >
 > 本節僅保留**永遠生效、違反即停機的絕對禁令**（憲法層）。各 Phase 子規則、ACT 對照、
 > 相關文件與驗收憑證一律見對應 `R-*.yaml`。

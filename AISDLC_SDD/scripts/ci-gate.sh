@@ -146,6 +146,15 @@ python scripts/gitignore_coverage_lint.py "${REPO_ROOT}"
 echo "############## CI 閘門：Agent template 路徑 lint（DEF-AGTREV-002）##############"
 python scripts/agent_template_lint.py "${REPO_ROOT}"
 
+# ── 框架版本/計數 SSOT 新鮮度 lint（DEF-AGTREV 全面收尾，機械強制）────────────────
+# 版本（Copy-on-Evolve）不斷累積，過去「最新版本號 + 各類資產計數」硬寫散落多份文件
+# （root/子 CLAUDE.md、INIT、RULES_INDEX…），任一處變動其餘 stale → 必然遺漏（實證：
+# governance 規則由 34/35 漂到 38/39 無人察覺）。改以唯一真相源 FRAMEWORK_STATUS.md
+# （磁碟+權威源實算）+ CLAUDE.md version-agnostic 指向之。此 lint（版本無關 shared infra，
+# read-only 純觀察者）重生並比對，stale 即非零硬閘擋下 → 「人去記得改多處」從流程消失。
+echo "############## CI 閘門：框架版本/計數 SSOT 新鮮度 lint（DEF-AGTREV 收尾）##############"
+python scripts/framework_status_snapshot.py --check --repo-root "${REPO_ROOT}"
+
 echo "✅ 本機 CI 閘門全數通過（版本：${FW_VERSIONS[*]}）"
 # DEF-06-001：單行自證逐軌 passed 計數，免零信任取證捲動截斷輸出
 echo "   逐軌計數：${GATE_SUMMARY[*]}"
