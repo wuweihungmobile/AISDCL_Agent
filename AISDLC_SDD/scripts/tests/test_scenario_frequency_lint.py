@@ -115,3 +115,36 @@ def test_consistent_then_break_detects_regression(tmp_path):
     # 突變：分子改 5（既不符 SSOT 2、也不符清單 2）
     _write_agent(repo, "sd-architect-zh.yaml", 5, ["Greenfield"], ["Migration"])
     assert sfl.main([repo]) == 1
+
+
+# ── (7) DEF-AGTREV-017：README 摘要表分子須等於 yaml 分子（第三來源盲區）─────────
+
+def _write_readme(repo: str, rows: list[tuple[str, int]], ver: str = _VER) -> None:
+    """寫最小 agent/README.md 核心表；rows=[(檔名, 表列分子)]。"""
+    base = os.path.join(repo, ver, "agent")
+    os.makedirs(base, exist_ok=True)
+    lines = ["# agent", "", "| # | 檔案 | 名 | 角色 | 頻率 | 不可替代性 |",
+             "|---|------|----|------|------|-----------|"]
+    for i, (fname, num) in enumerate(rows, 1):
+        lines.append(f"| {i} | {fname} | N | R | High ({num}/10) | ⭐ |")
+    with open(os.path.join(base, "README.md"), "w", encoding="utf-8") as f:
+        f.write("\n".join(lines))
+
+
+def test_readme_table_matches_yaml_passes(tmp_path):
+    """README 表列分子 == yaml 分子 → 0（重現修復後狀態）。"""
+    repo = str(tmp_path)
+    _write_mapping(repo, {"sd-architect": 2})
+    _write_agent(repo, "05.sd-architect-zh.yaml", 2, ["Greenfield"], ["Migration"])
+    _write_readme(repo, [("05.sd-architect-zh.yaml", 2)])
+    assert sfl.main([repo]) == 0
+
+
+def test_readme_table_drift_fails(tmp_path):
+    """yaml 已對齊 SSOT（2）但 README 表列滯留舊值（7）→ 必須非零
+    （重現 DEF-AGTREV-017：dev README 7 vs yaml 4 的第三來源漂移）。"""
+    repo = str(tmp_path)
+    _write_mapping(repo, {"sd-architect": 2})
+    _write_agent(repo, "05.sd-architect-zh.yaml", 2, ["Greenfield"], ["Migration"])
+    _write_readme(repo, [("05.sd-architect-zh.yaml", 7)])
+    assert sfl.main([repo]) == 1

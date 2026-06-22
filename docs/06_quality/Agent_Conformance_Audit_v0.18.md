@@ -136,3 +136,29 @@
 - **frequency off-by-one 的 SSOT 雙視圖**：統計段（SSOT）與逐場景對應表對 qa-automation/qa-tester 等的成員數本有微張力；本輪以統計段為準對齊 agent + 同步逐場景表（補 qa-automation 於 Refactoring），雙視圖現收斂。
 
 **臨時審查塊 DEF-AGTREV-001~016 至此全閉、零 routed 殘留。** 修復成果置於 `AISDLC_SDD/AISDLC_SDD_v0.18/` + `AISDLC_SDD/scripts/` 共用 lint，待掌舵者指示後直推 main。
+
+---
+
+## 第五度獨立重審（2026-06-22，使用者第五次請求）— 四鏡 + parent 對鏡子再 zero-trust
+
+派 Architect/SA/SD/QA 四鏡主樹並行重審（不採信前四輪宣稱）。四鏡共報 ~16 條，**parent 逐條親驗**：確認 **4 條真缺陷（DEF-AGTREV-017~020，全 fixed@v0.18）**、**駁回 4 類鏡子幻覺**。真缺陷共同根因＝機械 lint 涵蓋不到的「第三來源 / guides 層 / 碼定義」語意盲區。
+
+### 真缺陷（已修，詳見 Defect_Log DEF-AGTREV-017~020）
+- **017（P2）README 摘要表 frequency 第三來源盲區**：`agent/README.md` 核心表 ba/dev/qa 分子滯留 DEF-015 對齊前舊值（4/7/7 vs yaml SSOT 3/4/8）。`scenario_frequency_lint` 只查 yaml↔統計段↔清單、不查 README 表。**修**：對齊 3 分子 + pm-po 標籤；lint 加 `check_readme_table`（yaml 為基準）+2 test。
+- **018（P3）SCG-5 owner 同族漏網**：`SDD_GUIDE.md:38` `qa-tester`→`qa-lead`（DEF-013 漏修同表；兩權威源皆 qa-lead）。
+- **019（P3）導覽連結滯留 v0.01 絕對路徑**：`core/README:68-69`、`specialized/README:103`→相對路徑。`AGENT_PHASE2_UPDATE_GUIDE:578` 屬歷史敘述段**不改**（駁回 QA 鏡 stale-path 誤判）。
+- **020（P3）角色 sub-gate 缺權威碼定義**：RG-TEST/SEC/PERF（v0.18 本輪所創別名）agent 21 處引用但 `SDD_GUIDE` 補充閘門表僅以名稱定義 → 補「代碼」欄 + 註腳。
+
+### parent 駁回鏡子幻覺（zero-trust 對鏡子本身，誠實記錄）
+1. **QA 鏡「FRAMEWORK_STATUS.md / scenario_frequency_lint.py / collaboration_symmetry_lint.py 不存在」＝假陰性**：三者皆存在、本輪 parent 親跑全綠；QA 鏡在 `v0.18/` 內找，實在父層 `AISDLC_SDD/`（FRAMEWORK_STATUS）與 `AISDLC_SDD/scripts/`（lint，versioned 目錄外共享 infra）。
+2. **SD 鏡「BA↔SD/PM-PO/Dev 協作非對稱」＝假發現**：親讀 `02.ba` 實為 up←PM/PO、down→SA+SD、peer~QA 對稱完整（`collaboration_symmetry_lint` 通過為機械證）。
+3. **Architect/SD 鏡「5 sdd-* runtime agent 缺 collaboration_rules / scenario_usage」＝by-design**：`README.md:107` 明文「runtime schema 刻意不遵 persona 模板」+ 兩 lint 明確豁免無 `persona:`/無 `scenario_usage` 者；部分 runtime agent 額外帶 collaboration_patterns 屬 additive 無害。
+4. **QA 鏡「sdd-playbook-compiler 分類歧義」＝by-design**：FRAMEWORK_STATUS SSOT 計「runtime（sdd-*）＝5」README 與之一致；INIT「4 runtime+1 bridge」為更細子分仍 net 5/19，無數字錯誤。
+
+### 第五輪驗證全綠（親跑 + parent zero-trust 對鏡子再驗）
+- 26/26 agent YAML `safe_load` OK；README 表 7 列分子與 yaml 逐列吻合；SDD_GUIDE SCG-5 owner 三源一致；3 導覽連結相對路徑目標 `test -d/-f` 親驗存在；RG-* 21 引用全可追溯。
+- 完整 `bash scripts/ci-gate.sh` **exit 0**：v0.01:1478 / v0.18:1611（零退化，agent .md/.yaml 非 pytest 標的）/ scripts/tests **89→91**（+2 README 表 case）；6 lint 全 ✅；arch_fitness fail=0（僅 FF-16 GAP-X1/X2 既存 advisory）；FRAMEWORK_STATUS fresh；FF-13 26 agent 全合法。
+- 擴充 `check_readme_table` **非空殼**（README 7 vs yaml 4 漂移轉紅，突變實證）。
+- FSM/`transition_rules.py`/五軌 `*.tla` **逐位元零差異** → **不觸發五軌 TLC**（Rule 9.18.1）。
+
+**臨時審查塊 DEF-AGTREV-001~020 至此全閉、零 routed 殘留；4 類鏡子幻覺經 parent 親驗誠實駁回並記錄。** 修復成果置於 `AISDLC_SDD/AISDLC_SDD_v0.18/` + `AISDLC_SDD/scripts/` 共用 lint，待掌舵者指示後直推 main。

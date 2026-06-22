@@ -100,4 +100,4 @@
 ## 參考
 
 - Core Agents：[../core/README.md](../core/README.md)
-- 場景 Agent 對應表：`AISDLC_SDD_v0.01/scenarios/SCENARIO_AGENT_MAPPING.md`
+- 場景 Agent 對應表：[../../scenarios/SCENARIO_AGENT_MAPPING.md](../../scenarios/SCENARIO_AGENT_MAPPING.md)

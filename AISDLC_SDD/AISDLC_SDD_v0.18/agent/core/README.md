@@ -65,5 +65,5 @@ AISDLC_SDD_INIT.md 的 auto_load_config.primary_agents
 ## 參考
 
 - Specialized Agents：[../specialized/README.md](../specialized/README.md)
-- 完整 Agent 使用指南：`AISDLC_SDD_v0.01/guides/system/agent/`
-- 場景 Agent 對應表：`AISDLC_SDD_v0.01/scenarios/SCENARIO_AGENT_MAPPING.md`
+- 完整 Agent 使用指南：[../../guides/system/agent/](../../guides/system/agent/)
+- 場景 Agent 對應表：[../../scenarios/SCENARIO_AGENT_MAPPING.md](../../scenarios/SCENARIO_AGENT_MAPPING.md)

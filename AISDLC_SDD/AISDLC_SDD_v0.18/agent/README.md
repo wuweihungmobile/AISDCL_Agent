@@ -63,12 +63,12 @@ agent/
 | # | 檔案 | 名稱 | 角色 | 情境使用頻率 | 不可替代性 |
 |---|------|------|------|------------|-----------|
 | 1 | 01.agent-template-zh.yaml | Template | Agent 模板 | - | - |
-| 2 | 02.ba-business-analyst-zh.yaml | Beatrice | 業務分析師 | Medium (4/10) | ⭐⭐⭐⭐⭐ |
-| 3 | 03.pm-po-agent-zh.yaml | Victoria | 產品經理/產品負責人 | Medium (5/10) | ⭐⭐⭐⭐ |
+| 2 | 02.ba-business-analyst-zh.yaml | Beatrice | 業務分析師 | Medium (3/10) | ⭐⭐⭐⭐⭐ |
+| 3 | 03.pm-po-agent-zh.yaml | Victoria | 產品經理/產品負責人 | Medium-High (5/10) | ⭐⭐⭐⭐ |
 | 4 | 04.sa-analyst-zh.yaml | Amanda | 系統分析師 | High (10/10) | ⭐⭐⭐⭐⭐ |
 | 5 | 05.sd-architect-zh.yaml | Marcus | 系統設計師/架構師 | High (9/10) | ⭐⭐⭐⭐⭐ |
-| 6 | 06.dev-developer-zh.yaml | David | 軟體開發者 | Medium-High (7/10) | ⭐⭐⭐⭐⭐ |
-| 7 | 07.qa-tester-zh.yaml | Quincy | 品質保證工程師 | High (7/10) | ⭐⭐⭐⭐⭐ |
+| 6 | 06.dev-developer-zh.yaml | David | 軟體開發者 | Medium (4/10) | ⭐⭐⭐⭐⭐ |
+| 7 | 07.qa-tester-zh.yaml | Quincy | 品質保證工程師 | High (8/10) | ⭐⭐⭐⭐⭐ |
 
 ## 🔧 專業化 Agent (Specialized Agents)
 

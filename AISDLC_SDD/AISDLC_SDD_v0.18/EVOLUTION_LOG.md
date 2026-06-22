@@ -35,6 +35,17 @@
 | **驗證** | 完整 `bash scripts/ci-gate.sh` **exit 0**：v0.01:1478 / v0.18:1611（零退化，agent YAML/.md 非 pytest 標的）/ scripts/tests **56→81→89**（四度 +2 collaboration upstream 反向 case + 6 frequency case）；6 lint 全 ✅（含新 `scenario_frequency_lint`）；arch_fitness fail=0（僅 FF-16 GC advisory）；FRAMEWORK_STATUS fresh；FF-13 26 agent 全合法；26/26 safe_load OK；8 agent frequency 三者一致（QA 複審鏡親數吻合）；兩新/擴 lint 經突變實證非空殼。獨立 QA zero-trust 複審 OVERALL PASS。**臨時審查塊 DEF-AGTREV-001~016 全閉、零 routed 殘留。** |
 | **回退指引** | 純向後相容（agent 定義檔描述性內容對齊、additive 補協作邊、新增 1 支 lint + 擴 1 支 lint + 2 測試檔、文檔校正）。回退即還原各 agent scenario_usage/collaboration_rules、`scenario_frequency_lint.py` 與 `collaboration_symmetry_lint` upstream 反向增量、2 測試檔、mapping doc Refactoring 行、文檔；零觸碰 FSM/`*.tla`/既有測試拓樸。 |
 
+### v0.18 五度收尾補強（2026-06-22，使用者第五次請求 agent/* 全面符規審查並修復；🔴 人工 signoff：就地修 v0.18）
+
+| 欄位 | 內容 |
+|------|------|
+| **性質** | 第五度獨立 zero-trust 重審（Architect/SA/SD/QA 四鏡，不採信前四輪「全閉零殘留」宣稱）+ **parent 對鏡子發現再施 zero-trust**（駁回 4 類鏡子幻覺）。純文檔/共用 lint，**無 FSM/規則/`*.tla` 變更**。 |
+| **delta（DEF-AGTREV-017~020）** | ① **README 摘要表 frequency 第三來源盲區**：`scenario_frequency_lint` 只查 yaml↔統計段↔清單，不查 `agent/README.md` 表 → DEF-015 對齊 yaml 後 README 表滯留舊值（ba 4≠3、dev 7≠4、qa 7≠8）→ 對齊 3 分子 + pm-po 標籤；lint 加 `check_readme_table`（以 yaml 為基準比對 README 表列）+2 test（突變實證）。② **SCG-5 owner 同族漏網**：`SDD_GUIDE.md:38` `qa-tester`→`qa-lead`（DEF-013 當輪只修 core/README，漏 SDD_GUIDE 同表；兩權威源皆 qa-lead）。③ **v0.18 導覽連結滯留 v0.01 絕對路徑**：`core/README:68-69`、`specialized/README:103` → 相對路徑（同段兄弟連結已相對；`AGENT_PHASE2_UPDATE_GUIDE:578` 屬歷史敘述段不動）。④ **角色 sub-gate 缺權威碼定義**：RG-TEST/SEC/PERF（v0.18 line 12 ⑤ 創的別名）agent 引用 21 處但 `SDD_GUIDE` 補充閘門表僅以名稱定義 → 補「代碼」欄（RG-TEST/SEC/PERF/DOC/PIPE 全 5 碼）+ 註腳定義，使引用可追溯。 |
+| **parent 駁回鏡子幻覺（誠實記錄）** | (1) QA 鏡「FRAMEWORK_STATUS / 2 lint 不存在」＝假陰性（在 v0.18/ 內找，實在父層 `AISDLC_SDD/` 與 `scripts/`，本輪親跑全綠）；(2) SD 鏡「BA 協作非對稱」＝假發現（BA 實 up←PM/PO·down→SA+SD·peer~QA 對稱，symmetry lint 通過為機械證）；(3) Architect/SD 鏡「5 sdd-* runtime 缺 collaboration_rules/scenario_usage」＝by-design（README:107 明文 + 兩 lint 明確豁免無 persona/無 scenario_usage 者）；(4) QA 鏡「playbook-compiler 分類歧義」＝by-design（SSOT 計 5 runtime，INIT 4+1 細分仍 net 5/19）。 |
+| **TLC 證據** | **N/A** — `transition_rules.py`（含 `_HAPPY_PATH`）與全部 5 `*.tla`/`.cfg` **逐位元零差異**（未觸碰）。改動限 `agent/README.md`、`guides/system/sdd/SDD_GUIDE.md`、`agent/core/README.md`、`agent/specialized/README.md` 描述性內容 + `AISDLC_SDD/scripts/` 共用 lint（versioned 目錄外 shared infra）+ 文檔。依 Rule 9.18.1 無重跑義務。 |
+| **驗證** | 完整 `bash scripts/ci-gate.sh` **exit 0**：v0.01:1478 / v0.18:1611（零退化，agent .md/.yaml 非 pytest 標的）/ scripts/tests **89→91**（+2 README 表 case）；6 lint 全 ✅；arch_fitness fail=0（僅 FF-16 GAP-X1/X2 既存 advisory）；FRAMEWORK_STATUS fresh；FF-13 26 agent 全合法；26/26 safe_load OK；擴充 `check_readme_table` 經突變實證非空殼（README 7 vs yaml 4 轉紅）。**臨時審查塊 DEF-AGTREV-001~020 全閉、零 routed 殘留；4 類鏡子幻覺 parent 親驗誠實駁回。** |
+| **回退指引** | 純向後相容（README 表分子對齊、SDD_GUIDE owner/碼校正、導覽相對路徑、lint 加 README 第三來源檢查 +2 測試）。回退即還原 4 文檔與 `scenario_frequency_lint.check_readme_table`/2 測試；零觸碰 FSM/`*.tla`/既有測試拓樸。 |
+
 ## v0.16 → v0.17
 
 | 欄位 | 內容 |

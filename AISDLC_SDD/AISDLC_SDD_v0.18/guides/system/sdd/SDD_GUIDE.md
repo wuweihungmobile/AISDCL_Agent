@@ -35,18 +35,21 @@ SDD（Spec-First Design-Driven Development）是 AISDLC 框架的品質強化層
 | SCG-2 | Architecture Review Gate | 架構凍結前 | sd-architect | C4 圖 + ADR |
 | SCG-3 | Contract Freeze Gate | 開發啟動前 | sd-architect | OpenAPI 3.1 凍結 |
 | SCG-4 | Implementation Compliance Gate | PR Review | dev-senior | 實作與規格一致性 |
-| SCG-5 | RTM Completeness Gate | 交付前 | qa-tester | RTM 100% 覆蓋 |
+| SCG-5 | RTM Completeness Gate | 交付前 | qa-lead | RTM 100% 覆蓋 |
 | SCG-6 | Release Readiness Gate | 發布前 | technical-writer | 所有閘門通過 |
 
 > **場景專屬補充閘門**（不取代標準 SCG）：
 >
-> | 補充閘門 | 適用場景 | 觸發時機 | 強制文件 |
-> |---------|---------|---------|---------|
-> | Test Strategy Gate | Testing 場景 | SCG-3 後，測試開始前 | Test Strategy Spec |
-> | Security Spec Gate | Security 場景 | SCG-2 後，安全設計凍結前 | SAD + STRIDE |
-> | Performance Baseline Gate | Performance 場景 | SCG-3 後，效能測試前 | PBS |
-> | Documentation Audit Gate | Documentation 場景 | 文件交付前 | Living Doc Strategy |
-> | Pipeline Spec Gate | DevOps 場景 | CI/CD 設計前 | Pipeline Spec Doc |
+> | 代碼 | 補充閘門 | 適用場景 | 觸發時機 | 強制文件 |
+> |------|---------|---------|---------|---------|
+> | RG-TEST | Test Strategy Gate | Testing 場景 | SCG-3 後，測試開始前 | Test Strategy Spec |
+> | RG-SEC | Security Spec Gate | Security 場景 | SCG-2 後，安全設計凍結前 | SAD + STRIDE |
+> | RG-PERF | Performance Baseline Gate | Performance 場景 | SCG-3 後，效能測試前 | PBS |
+> | RG-DOC | Documentation Audit Gate | Documentation 場景 | 文件交付前 | Living Doc Strategy |
+> | RG-PIPE | Pipeline Spec Gate | DevOps 場景 | CI/CD 設計前 | Pipeline Spec Doc |
+>
+> 註：`RG-*`（Role/Scenario sub-Gate）為角色／場景補充閘門代碼，供 agent 配置引用；
+> 不取代主流程 SCG-0~6，亦不納入 FSM retry 上限治理。
 
 ---
 

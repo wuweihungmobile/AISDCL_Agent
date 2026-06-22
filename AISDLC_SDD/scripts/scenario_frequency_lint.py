@@ -53,6 +53,10 @@ _TEMPLATE_PREFIXES = ("01.agent-template",)
 _FREQ_NUM_RE = re.compile(r"(\d+)\s*/\s*10")
 # 統計段行：行首（容許前導空白）<key>: ... N/10 ...
 _STATS_LINE_RE = re.compile(r"^\s*([a-z][a-z0-9-]+):\s*(\d+)\s*/\s*10")
+# agent/README.md 核心表列：| # | <NN.role-zh.yaml> | 名 | 角色 | <Label> (N/10) | ... |
+# 擷取檔名與 N/10 分子（DEF-AGTREV-017：README 摘要表為 lint 未覆蓋之第三來源，曾與
+# 對齊後的 yaml SSOT 漂移〔ba/dev/qa 三處〕）。
+_README_ROW_RE = re.compile(r"^\|\s*\d+\s*\|\s*([\w.\-]+\.ya?ml)\s*\|.*?\((\d+)\s*/\s*10\)")
 
 
 def _file_key(path: str) -> str:
@@ -102,6 +106,34 @@ def _listed_count(scenario_usage: dict) -> int:
     return total
 
 
+def check_readme_table(version_path: str, yaml_nums: dict[str, int]) -> list[str]:
+    """DEF-AGTREV-017：agent/README.md 核心表的頻率分子須等於對應 yaml 分子。
+
+    README 摘要表是 yaml/統計段之外的**第三來源**，原 lint 未覆蓋 → 曾在 yaml 對齊
+    SSOT 後仍滯留舊值（ba 4≠3、dev 7≠4、qa 7≠8）。此檢查以 yaml 分子為基準
+    （yaml 已受上方 SSOT + 內部一致雙約束），擋下 README 與 yaml 漂移。
+    README 不存在或某列無對應 yaml 時靜默略過（不誤擋測試 fixture / 模板列）。
+    """
+    out: list[str] = []
+    readme_fp = os.path.join(version_path, "agent", "README.md")
+    if not os.path.isfile(readme_fp):
+        return out
+    with open(readme_fp, encoding="utf-8") as f:
+        for line in f:
+            m = _README_ROW_RE.match(line)
+            if not m:
+                continue
+            base, rnum = m.group(1), int(m.group(2))
+            if base not in yaml_nums:
+                continue
+            if rnum != yaml_nums[base]:
+                out.append(
+                    f"agent/README.md：{base} 表列分子 {rnum} ≠ yaml frequency 分子 "
+                    f"{yaml_nums[base]}（README 摘要表與 yaml SSOT 漂移）"
+                )
+    return out
+
+
 def check(version_path: str) -> list[str]:
     problems: list[str] = []
     mapping_fp = os.path.join(version_path, "scenarios", "SCENARIO_AGENT_MAPPING.md")
@@ -114,6 +146,7 @@ def check(version_path: str) -> list[str]:
 
     files = sorted(glob.glob(os.path.join(version_path, "agent", "core", "*.yaml")) +
                    glob.glob(os.path.join(version_path, "agent", "specialized", "*.yaml")))
+    yaml_nums: dict[str, int] = {}
     for fp in files:
         base = os.path.basename(fp)
         if any(base.startswith(p) for p in _TEMPLATE_PREFIXES):
@@ -129,6 +162,7 @@ def check(version_path: str) -> list[str]:
         if num is None:
             problems.append(f"{base}：scenario_usage.frequency 無法解析 N/10 分子")
             continue
+        yaml_nums[base] = num
         # 內部一致：分子 == 場景清單項數
         listed = _listed_count(su)
         if num != listed:
@@ -143,6 +177,8 @@ def check(version_path: str) -> list[str]:
                 f"{base}：frequency 分子 {num} ≠ SCENARIO_AGENT_MAPPING 統計段 SSOT "
                 f"{stats[key]}（key={key}）"
             )
+    # README 摘要表（第三來源）對齊 yaml SSOT
+    problems.extend(check_readme_table(version_path, yaml_nums))
     return problems
 
 
