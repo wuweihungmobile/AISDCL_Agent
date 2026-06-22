@@ -47,9 +47,13 @@ def test_event_missing_in_both():
 
 # ── IO 解析 ─────────────────────────────────────────────────────────────────
 
-def _write_settings(path: str, events: list[str]) -> None:
+# 根側 settings 的 hook command 須含 router basename 才被 router_wired_events 認可（DEF-43-012）。
+_ROUTER_CMD = 'python "${CLAUDE_PROJECT_DIR}/.claude/hooks/sdd_hook_router.py" h'
+
+
+def _write_settings(path: str, events: list[str], command: str = "x") -> None:
     os.makedirs(os.path.dirname(path), exist_ok=True)
-    hooks = {e: [{"hooks": [{"type": "command", "command": "x"}]}] for e in events}
+    hooks = {e: [{"hooks": [{"type": "command", "command": command}]}] for e in events}
     with open(path, "w", encoding="utf-8") as f:
         json.dump({"hooks": hooks}, f)
 
@@ -79,6 +83,53 @@ def test_router_mapped_events_parse(tmp_path):
     assert lint.router_mapped_events(p) == {"SessionStart", "PreToolUse", "PostToolUse"}
 
 
+# ── router_wired_events：DEF-43-012 假綠縫意圖鎖 ─────────────────────────────
+
+def test_router_wired_events_accepts_router_command(tmp_path):
+    """command 含 sdd_hook_router.py → 該 event 算 router-wired（可達）。"""
+    p = str(tmp_path / ".claude" / "settings.json")
+    _write_settings(p, ["SessionStart", "PreToolUse"], command=_ROUTER_CMD)
+    assert lint.router_wired_events(p) == {"SessionStart", "PreToolUse"}
+
+
+def test_router_wired_events_rejects_non_router_command(tmp_path):
+    """為何重要（DEF-43-012）：event 宣告卻 wire 到別的腳本 → 不算 router-wired，杜絕假綠。
+
+    舊 settings_hook_events 僅取 keys 會誤判此 event 可達；router_wired_events 須回空集。
+    移除 command 指向檢查（退回只取 keys）即此 case 紅。
+    """
+    p = str(tmp_path / ".claude" / "settings.json")
+    _write_settings(p, ["SessionStart"], command="python some_other_hook.py")
+    assert lint.router_wired_events(p) == set()
+    # 對照：舊 keys-only 解析仍會把它當宣告了 SessionStart（證明兩函式語意確有別）
+    assert lint.settings_hook_events(p) == {"SessionStart"}
+
+
+def test_router_wired_events_missing_file(tmp_path):
+    assert lint.router_wired_events(str(tmp_path / "nope.json")) == set()
+
+
+def test_analyze_false_green_seam_caught(tmp_path):
+    """整合鎖（DEF-43-012）：版本宣告 SessionStart、router 有映射，但根 settings 把該 event
+    wire 到非 router 腳本 → analyze 須判不可達（治理 hook 實際不會經 router 觸發）。"""
+    three = ["SessionStart", "PreToolUse", "PostToolUse"]
+    repo = str(tmp_path)
+    _write_router(
+        os.path.join(repo, ".claude", "hooks", "sdd_hook_router.py"), three
+    )
+    # 根 settings 宣告了 SessionStart 卻 wire 到別的腳本（假綠來源）
+    _write_settings(
+        os.path.join(repo, ".claude", "settings.json"),
+        ["SessionStart"],
+        command="python not_the_router.py",
+    )
+    _write_settings(
+        os.path.join(repo, "AISDLC_SDD_v0.20", ".claude", "settings.json"), ["SessionStart"]
+    )
+    res = lint.analyze(repo)
+    assert res["unreachable"] == ["SessionStart"]
+
+
 # ── analyze 整合（合成 monorepo 佈局）─────────────────────────────────────────
 
 def _mk_monorepo(tmp_path, version: str, ver_events, router_events, root_events) -> str:
@@ -88,7 +139,10 @@ def _mk_monorepo(tmp_path, version: str, ver_events, router_events, root_events)
     """
     repo = str(tmp_path)
     _write_router(os.path.join(repo, ".claude", "hooks", "sdd_hook_router.py"), list(router_events))
-    _write_settings(os.path.join(repo, ".claude", "settings.json"), list(root_events))
+    # 根 settings 須 wire 到 router（DEF-43-012）才算可達；版本 settings 只看宣告 keys。
+    _write_settings(
+        os.path.join(repo, ".claude", "settings.json"), list(root_events), command=_ROUTER_CMD
+    )
     _write_settings(
         os.path.join(repo, version, ".claude", "settings.json"), list(ver_events)
     )

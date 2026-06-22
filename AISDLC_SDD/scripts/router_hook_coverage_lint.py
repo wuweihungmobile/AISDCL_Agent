@@ -31,6 +31,10 @@ import sys
 
 from rfc_lifecycle_lint import discover_frozen_versions, latest_version
 
+# DEF-43-012：根 settings 某 event 須真 wire 到此 router basename 才算「經 router 可達」，
+# 防「event 宣告卻 wire 到別的腳本」之假綠（僅取 hooks keys 不驗 command 指向的韌性縫）。
+_ROUTER_BASENAME = "sdd_hook_router.py"
+
 
 # ── 純邏輯（可測，不碰 IO）─────────────────────────────────────────────────
 def unreachable_events(
@@ -46,12 +50,41 @@ def unreachable_events(
 
 # ── IO 解析 ─────────────────────────────────────────────────────────────
 def settings_hook_events(settings_path: str) -> set[str]:
-    """讀 ``.claude/settings.json``，回 ``hooks`` 下宣告的 event 名集合（無檔/無 hooks → 空集）。"""
+    """讀 ``.claude/settings.json``，回 ``hooks`` 下宣告的 event 名集合（無檔/無 hooks → 空集）。
+
+    用於**版本側**（該版宣告「需被治理」的 event）——只看宣告，不問 command 指向誰。
+    """
     if not os.path.isfile(settings_path):
         return set()
     with open(settings_path, encoding="utf-8") as f:
         data = json.load(f)
     return set((data.get("hooks") or {}).keys())
+
+
+def router_wired_events(settings_path: str) -> set[str]:
+    """讀 ``.claude/settings.json``，回「至少一個 hook command 真指向 router」的 event 名集合。
+
+    用於**根側**：比 ``settings_hook_events`` 嚴——event 僅宣告 key 不夠，其下至少一個 hook 的
+    ``command`` 須含 ``sdd_hook_router.py`` 才算「經 router 可達」（DEF-43-012）。防假綠：根 settings
+    宣告了某 event 卻把它 wire 到別的腳本（非 router）時，舊版 ``settings_hook_events`` 仍會誤判可達。
+    結構：``hooks[event] = [ {"hooks": [ {"command": ...}, ... ]}, ... ]``；全程防呆，無檔/畸形 → 空集。
+    """
+    if not os.path.isfile(settings_path):
+        return set()
+    with open(settings_path, encoding="utf-8") as f:
+        data = json.load(f)
+    out: set[str] = set()
+    for event, groups in (data.get("hooks") or {}).items():
+        for group in groups or []:
+            if not isinstance(group, dict):
+                continue
+            if any(
+                isinstance(h, dict) and _ROUTER_BASENAME in (h.get("command") or "")
+                for h in (group.get("hooks") or [])
+            ):
+                out.add(event)
+                break
+    return out
 
 
 def router_mapped_events(router_path: str) -> set[str]:
@@ -97,7 +130,8 @@ def analyze(repo_root: str) -> dict:
     version_settings = os.path.join(repo_root, latest, ".claude", "settings.json")
     ver_events = settings_hook_events(version_settings)
     rtr_events = router_mapped_events(router)
-    root_events = settings_hook_events(root_settings)
+    # DEF-43-012：根側用 router_wired_events（驗 command 真指向 router），非僅取 keys。
+    root_events = router_wired_events(root_settings)
     return {
         "latest": latest,
         "version_events": ver_events,
