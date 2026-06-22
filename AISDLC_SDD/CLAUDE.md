@@ -43,7 +43,7 @@ d:/CursorProject/AISDLC_SDD/          ← 專案根目錄
 │   ├── AISDLC_SDD_UPGRADE_CHECKLIST.md← 升版前完整檢查清單
 │   ├── guides/system/sdd/SDD_Core_Principles.md  ← SDD 核心原則
 │   ├── guides/system/sdd/SDD_GUIDE.md ← SDD 快速指引
-│   ├── agent/                         ← 25 Agents（7 core + 18 specialized，含 4 系統級 runtime agent）
+│   ├── agent/                         ← v0.01：25 Agents（7 core + 18 specialized，含 4 系統級 runtime agent）｜最新 v0.18：26（7 core + 19 specialized，含 5 runtime；多 sdd-playbook-compiler）
 │   ├── scenarios/                     ← 10 場景（greenfield/brownfield/refactoring/documentation/devops/integration/migration/performance/security/testing）
 │   ├── workflow/                      ← 23 工作流（1 SDD Gate + 8 core + 13 scenario + 1 ADR）
 │   ├── docs_template/                 ← 文檔模板（含 59 個 SDD 專屬模板）

@@ -113,7 +113,7 @@ docker compose -f docker-compose.ci.yml up -d                          # CI 對�
 這是一個 **~85% Markdown（模板／Agent／Workflow／治理規則）+ ~15% Python runtime** 的框架。
 
 ### 結構（`AISDLC_SDD/AISDLC_SDD_v0.01/`）
-`agent/`（25 Agents）、`scenarios/`（10 場景）、`workflow/`（23 工作流 + FSM/Escalation/Context runtime）、`docs_template/`（59 SDD 模板）、`governance/`（`RULES_INDEX.md` + 35 條 `R-*.yaml`）、`tools/fsm_runtime/`（FSM 引擎，~140 py 檔）、`cicd/`、`guides/`、`prompts/`、`.claude/`（hooks + 42 skills）。
+`agent/`（v0.01：25 Agents＝7 core + 18 specialized，含 4 runtime；最新 v0.18：26＝7 core + 19 specialized，含 5 runtime，多 `sdd-playbook-compiler`）、`scenarios/`（10 場景）、`workflow/`（23 工作流 + FSM/Escalation/Context runtime）、`docs_template/`（59 SDD 模板）、`governance/`（`RULES_INDEX.md` + 35 條 `R-*.yaml`）、`tools/fsm_runtime/`（FSM 引擎，~140 py 檔）、`cicd/`、`guides/`、`prompts/`、`.claude/`（hooks + 42 skills）。
 
 ### 測試 / 形式化驗證 / 本機 CI 閘門
 ```bash
