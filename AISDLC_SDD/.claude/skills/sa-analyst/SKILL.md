@@ -1,5 +1,5 @@
 ---
-name: sa-analyze
+name: sa-analyst
 description: 以 System Analyst 角色分析需求，產出 FRD、User Stories 和 RTM 初版，準備 SCG-0 需求凍結閘門
 user-invocable: true
 disable-model-invocation: false
@@ -20,11 +20,11 @@ SA 是 SDD 工作流的起點。本 Skill 產出 FRD、User Stories 和 RTM 初�
 ## 觸發方式
 
 ```bash
-/sa-analyze                        # Greenfield：從 PRD 或會議記錄開始
-/sa-analyze screenshot             # 從截圖分析需求
-/sa-analyze prd                    # 從現有 PRD 產出 FRD
-/sa-analyze brownfield             # Brownfield：讀取 As-Is SRD 後分析 Gap
-/sa-analyze refactoring            # Refactoring：讀取 Business Invariants 後分析
+/sa-analyst                        # Greenfield：從 PRD 或會議記錄開始
+/sa-analyst screenshot             # 從截圖分析需求
+/sa-analyst prd                    # 從現有 PRD 產出 FRD
+/sa-analyst brownfield             # Brownfield：讀取 As-Is SRD 後分析 Gap
+/sa-analyst refactoring            # Refactoring：讀取 Business Invariants 後分析
 ```
 
 ---
@@ -200,7 +200,7 @@ RTM 初版只填入 EPIC/Feature/US/AC 欄位，API 和 TC 欄位留空（稍後
 ## 後置動作
 
 ```
-/ba-validate prd       # BA 驗證需求業務對齊
+/ba-analyst prd       # BA 驗證需求業務對齊
 /rtm-generate verify   # 確認 RTM 初版完整
 /sdd-gate SCG-0        # 需求凍結閘門
 ```
@@ -211,10 +211,10 @@ RTM 初版只填入 EPIC/Feature/US/AC 欄位，API 和 TC 欄位留空（稍後
 
 ## 相關 Skill
 
-- `/ba-validate` — 業務驗證（SCG-0 協同）
+- `/ba-analyst` — 業務驗證（SCG-0 協同）
 - `/brownfield-analysis` — Brownfield 前置（as-is 規格化）
 - `/rtm-generate` — 追溯矩陣（FRD 完成後立即執行）
-- `/sd-design` — 架構設計（SCG-0 通過後接棒）
+- `/sd-architect` — 架構設計（SCG-0 通過後接棒）
 - `/sdd-gate SCG-0` — 需求凍結閘門
 
 ---

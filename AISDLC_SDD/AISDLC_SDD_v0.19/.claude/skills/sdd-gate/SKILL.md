@@ -103,9 +103,9 @@ PR_REVIEW 連續失敗時，比對每次的 failing_test_ids：
 
 | Gate | 名稱 | 進入條件 | 必要文件 | **需要以下 Skill 產出** | 主責 Agent |
 |------|------|---------|---------|----------------------|-----------|
-| 🔷 SCG-0 | Requirement Spec Gate | 需求凍結前 | PRD + FRD ≥ 95% | `/sa-analyze` + `/ba-validate` | sa-analyst |
-| 🔷 SCG-1 | Architecture Spec Gate | 設計凍結前 | SRD + API Spec 草稿 | `/sd-design` | sd-architect |
-| 🔷 SCG-2 | Architecture Freeze Gate | 架構凍結前 | C4 圖 + ADR | `/sd-design` + `/adr-generate` | sd-architect |
+| 🔷 SCG-0 | Requirement Spec Gate | 需求凍結前 | PRD + FRD ≥ 95% | `/sa-analyst` + `/ba-analyst` | sa-analyst |
+| 🔷 SCG-1 | Architecture Spec Gate | 設計凍結前 | SRD + API Spec 草稿 | `/sd-architect` | sd-architect |
+| 🔷 SCG-2 | Architecture Freeze Gate | 架構凍結前 | C4 圖 + ADR | `/sd-architect` + `/adr-generate` | sd-architect |
 | 🔷 SCG-3 | API Contract Freeze | 開發啟動前 | OpenAPI 3.1 + Consumer Contract | `/contract-generate` | sd-architect |
 | 🔷 SCG-4 | Implementation Review | PR Review | 實作與規格一致性 + 測試通過 | `/dev-review` + `/qa-testing` | qa-tester |
 | 🔷 SCG-5 | Delivery Gate | 交付前 | RTM 100% 覆蓋 + 所有測試通過 | `/rtm-generate verify` + `/qa-testing` | qa-tester |
@@ -267,7 +267,7 @@ SCG-6 → 所有 SCG-0~5 驗證報告
 
 | Gate | 通過後執行 |
 |------|-----------|
-| SCG-0 通過 | `/sd-design` 開始架構設計 |
+| SCG-0 通過 | `/sd-architect` 開始架構設計 |
 | SCG-1 通過 | `/adr-generate` + `/contract-generate` |
 | SCG-2 通過 | `/contract-generate openapi` → SCG-3 |
 | SCG-3 通過 | 開發啟動（`/devops-github-actions` 或 `/integration-*`） |

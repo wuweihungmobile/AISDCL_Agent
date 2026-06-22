@@ -13,6 +13,7 @@ Install: tools/install_hooks/install_post_commit.sh / .ps1（opt-in，與 post_c
 """
 from __future__ import annotations
 
+import concurrent.futures
 import signal
 import sys
 from pathlib import Path
@@ -45,21 +46,42 @@ def _write_flag(repo_root: Path, msg: str) -> None:
 
 def main() -> int:
     repo_root = repo_root_from()
+    # SIGALRM only on POSIX; Windows has no SIGALRM, so the < 2s budget there is
+    # enforced via a ThreadPoolExecutor + future.result(timeout=...) guard
+    # (DEF-CLDREV-001). Both paths converge on the same fail-soft contract:
+    # advisory only, write a flag and never block the commit (Rule 9.17.1 精神)。
     has_alarm = hasattr(signal, "SIGALRM")
     if has_alarm:
         signal.signal(signal.SIGALRM, _timeout_handler)
         signal.alarm(BUDGET_SEC)
-    try:
-        verdict = evaluate_closure(repo_root)
-    except _Timeout:
-        _write_flag(repo_root, f"closure hook timeout > {BUDGET_SEC}s — skipped (advisory)")
-        return 0
-    except Exception as exc:  # fail-soft，絕不阻擋 commit
-        _write_flag(repo_root, f"closure hook error: {exc} — advisory")
-        return 0
-    finally:
-        if has_alarm:
+        try:
+            verdict = evaluate_closure(repo_root)
+        except _Timeout:
+            _write_flag(repo_root, f"closure hook timeout > {BUDGET_SEC}s — skipped (advisory)")
+            return 0
+        except Exception as exc:  # fail-soft，絕不阻擋 commit
+            _write_flag(repo_root, f"closure hook error: {exc} — advisory")
+            return 0
+        finally:
             signal.alarm(0)
+    else:
+        # Windows thread-guard path: bound the wait to BUDGET_SEC. On timeout we
+        # cannot truly kill the worker thread, but the hook returns immediately
+        # (advisory, never-block); avoid the `with` block's implicit
+        # shutdown(wait=True) so a slow evaluate can never overrun the budget.
+        pool = concurrent.futures.ThreadPoolExecutor(max_workers=1)
+        future = pool.submit(evaluate_closure, repo_root)
+        try:
+            verdict = future.result(timeout=BUDGET_SEC)
+        except concurrent.futures.TimeoutError:
+            _write_flag(repo_root, f"closure hook timeout > {BUDGET_SEC}s — skipped (advisory)")
+            pool.shutdown(wait=False, cancel_futures=True)
+            return 0
+        except Exception as exc:  # fail-soft，絕不阻擋 commit
+            _write_flag(repo_root, f"closure hook error: {exc} — advisory")
+            pool.shutdown(wait=False, cancel_futures=True)
+            return 0
+        pool.shutdown(wait=False)
 
     try:
         write_verdict_report(verdict, repo_root)

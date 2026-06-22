@@ -34,7 +34,7 @@ SDD 三大支柱之 **Spec-First Gate**：建立從業務需求到測試案例�
 
 | 執行時機 | 前置條件 | 說明 |
 |---------|---------|------|
-| 初版建立（full） | FRD 已完成 | `/sa-analyze` 產出後 |
+| 初版建立（full） | FRD 已完成 | `/sa-analyst` 產出後 |
 | 加入 API 追溯（update） | SCG-3 通過（Contract 凍結） | `/contract-generate` 產出後 |
 | 加入 TC 追溯（update） | 測試計畫完成 | `/qa-testing` 產出後 |
 | 覆蓋率驗證（verify） | 所有上述追溯已完成 | SCG-5 前執行 |
@@ -159,7 +159,7 @@ EPIC-XXX（業務目標）
 ```
 
 **各階段後置動作**：
-- `full` 完成後 → 通知 `/sa-analyze` RTM 初版已建立
+- `full` 完成後 → 通知 `/sa-analyst` RTM 初版已建立
 - `update`（API）後 → 通知 `/qa-testing` 可開始補 TC
 - `verify` 通過（100%）→ `/sdd-gate SCG-5`
 
@@ -171,8 +171,8 @@ EPIC-XXX（業務目標）
 
 | Skill | 呼叫時機 | 說明 |
 |-------|---------|------|
-| `/sa-analyze` | FRD 完成後 | 建立 RTM 初版 |
-| `/sd-design` | SRD 完成後 | 更新 API 追溯 |
+| `/sa-analyst` | FRD 完成後 | 建立 RTM 初版 |
+| `/sd-architect` | SRD 完成後 | 更新 API 追溯 |
 | `/contract-generate` | Contract 凍結後 | 確認 API-XXX 對應 |
 | `/qa-testing` | 測試計畫完成後 | 填入 TC-XXX-Y-Z |
 | `/dev-review` | PR 通過後 | 更新 Status 為 ✅ |
@@ -181,7 +181,7 @@ EPIC-XXX（業務目標）
 
 ## 相關 Skill
 
-- `/sa-analyze` — 需求分析（RTM 來源文件）
+- `/sa-analyst` — 需求分析（RTM 來源文件）
 - `/qa-testing` — 測試案例（RTM 目標文件）
 - `/spec-compliance-check` — 驗證 RTM 格式與覆蓋率
 - `/sdd-gate SCG-5` — 使用 RTM 100% 作為交付閘門條件

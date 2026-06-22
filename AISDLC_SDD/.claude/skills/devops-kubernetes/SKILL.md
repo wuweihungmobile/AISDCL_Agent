@@ -1,5 +1,5 @@
 ---
-name: devops-k8s
+name: devops-kubernetes
 description: Kubernetes 部署配置，規格對應 SRD 部署架構，資源限制對應 NFR 量化，SCG-2 後執行
 user-invocable: true
 disable-model-invocation: false
@@ -20,9 +20,9 @@ K8s 部署配置是 SDD 部署架構規格的實作。本 Skill 在 SCG-2 架構
 ## 觸發方式
 
 ```bash
-/devops-k8s api production
-/devops-k8s web staging
-/devops-k8s worker production
+/devops-kubernetes api production
+/devops-kubernetes web staging
+/devops-kubernetes worker production
 ```
 
 ---
@@ -218,7 +218,7 @@ spec:
 
 ## 相關 Skill
 
-- `/sd-design` — SRD 部署架構（K8s 設計的規格依據）
+- `/sd-architect` — SRD 部署架構（K8s 設計的規格依據）
 - `/devops-docker` — Docker Image（K8s 部署前置）
 - `/devops-monitoring` — K8s 指標監控（NFR 驗證）
 - `/adr-generate` — K8s 部署策略 ADR

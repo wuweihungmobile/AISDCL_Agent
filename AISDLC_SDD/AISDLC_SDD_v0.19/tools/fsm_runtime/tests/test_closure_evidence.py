@@ -221,3 +221,66 @@ def test_cli_rederive_bad_json_returns_2(git_repo: Path):
 def test_cli_default_evaluates(git_repo: Path):
     # 無契約 → evaluate 回 INCONCLUSIVE，exit 0
     assert ce._main([], repo_root=git_repo) == 0
+
+
+# ─────────────────────────────────────────────────────────────
+# DEF-CLDREV-001：Windows thread-guard budget（closure_evidence_verify.py hook）
+# ─────────────────────────────────────────────────────────────
+
+
+class _NoAlarmSignal:
+    """signal 模組的替身，無 SIGALRM → 走 Windows thread-guard 路徑（任何主機可測）。"""
+
+
+@pytest.fixture
+def closure_hook():
+    import importlib.util
+
+    hook_path = (
+        Path(__file__).resolve().parents[3] / ".claude" / "hooks" / "closure_evidence_verify.py"
+    )
+    spec = importlib.util.spec_from_file_location("closure_evidence_verify", hook_path)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def test_closure_hook_windows_thread_guard_timeout_fail_soft(closure_hook, git_repo: Path):
+    """DEF-CLDREV-001：no-SIGALRM 路徑下 evaluate_closure 過慢必須被 thread guard
+    有界。Hook 在 budget 內返回、寫 timeout flag、exit 0（advisory never-block）。
+    修復前 Windows 分支完全不設 timeout → 會 hang 滿 2s sleep、elapsed 斷言轉紅。"""
+    import time
+    from unittest.mock import patch
+
+    def _slow(*_a, **_k):
+        time.sleep(2.0)
+
+    with patch.object(closure_hook, "signal", _NoAlarmSignal), \
+         patch.object(closure_hook, "BUDGET_SEC", 0.3), \
+         patch.object(closure_hook, "repo_root_from", return_value=git_repo), \
+         patch.object(closure_hook, "evaluate_closure", side_effect=_slow):
+        start = time.monotonic()
+        rc = closure_hook.main()
+        elapsed = time.monotonic() - start
+
+    assert rc == 0  # 絕不 raise、絕不阻擋 commit
+    assert elapsed < 1.5, f"thread guard 未限制等待：{elapsed:.3f}s"
+    flag = git_repo / ".git" / "CLOSURE_EVIDENCE_VERDICT"
+    assert flag.exists()
+    assert "timeout" in flag.read_text(encoding="utf-8").lower()
+
+
+def test_closure_hook_windows_thread_guard_normal_completion(closure_hook, git_repo: Path):
+    """DEF-CLDREV-001 companion：no-SIGALRM 路徑下快速 evaluate 仍正常完成、
+    寫 VERIFIED flag（guard 不吞掉真實結果）。"""
+    from unittest.mock import patch
+
+    verdict = ce.ClosureVerdict(iteration=21, verdict="VERIFIED", head_sha=_head(git_repo))
+    with patch.object(closure_hook, "signal", _NoAlarmSignal), \
+         patch.object(closure_hook, "repo_root_from", return_value=git_repo), \
+         patch.object(closure_hook, "evaluate_closure", return_value=verdict):
+        rc = closure_hook.main()
+    assert rc == 0
+    flag = git_repo / ".git" / "CLOSURE_EVIDENCE_VERDICT"
+    assert flag.exists()
+    assert "VERIFIED" in flag.read_text(encoding="utf-8")

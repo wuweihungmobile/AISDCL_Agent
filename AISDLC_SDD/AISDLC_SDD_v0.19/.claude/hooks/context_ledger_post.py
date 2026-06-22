@@ -16,7 +16,12 @@ _SDD_ROOT = Path(__file__).resolve().parents[2]
 if str(_SDD_ROOT) not in sys.path:
     sys.path.insert(0, str(_SDD_ROOT))
 
-MAX_CONTEXT = int(os.environ.get("SDD_MAX_CONTEXT", "200000"))
+_RAW_MAX_CONTEXT = int(os.environ.get("SDD_MAX_CONTEXT", "200000"))
+# DEF-CLDREV-002: symmetric with context_ledger_pre.py — guard against operator
+# misconfiguration (env=0 / negative). A zero budget would crash the :140 ratio
+# calculation (cumulative / MAX_CONTEXT) with ZeroDivisionError. Floor to 200000
+# to degrade gracefully.
+MAX_CONTEXT = _RAW_MAX_CONTEXT if _RAW_MAX_CONTEXT > 0 else 200000
 SOFT_RATIO = 0.70
 WARN_RATIO = 0.85
 AUTO_COMPACT_RATIO = 0.90

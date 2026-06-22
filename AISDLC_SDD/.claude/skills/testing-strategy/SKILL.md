@@ -1,5 +1,5 @@
 ---
-name: testing
+name: testing-strategy
 description: 測試策略設計，Contract Testing 為新 L3，RTM 100% AC 覆蓋，測試金字塔對應 SCG-5
 user-invocable: true
 disable-model-invocation: false

@@ -1,5 +1,5 @@
 ---
-name: security
+name: security-audit
 description: 安全審查，STRIDE 威脅建模為第一步驟，安全設計先於實作，對應 SDD_SECURITY_CICD 規格
 user-invocable: true
 disable-model-invocation: false
@@ -201,7 +201,7 @@ npx @stoplight/spectral-cli lint docs/02_architecture/api/CONTRACT-*.yaml \
 
 ## 相關 Skill
 
-- `/sd-design` — C4 架構圖（STRIDE 威脅建模的輸入）
+- `/sd-architect` — C4 架構圖（STRIDE 威脅建模的輸入）
 - `/adr-generate` — 安全控制措施 ADR
 - `/compliance-audit` — 法規合規（GDPR/PCI-DSS）
 - `/rtm-generate` — 安全 TC 追蹤

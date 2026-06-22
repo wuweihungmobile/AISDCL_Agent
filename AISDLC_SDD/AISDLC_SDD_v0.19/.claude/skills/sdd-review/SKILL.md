@@ -1,6 +1,6 @@
 ---
 name: sdd-review
-description: SCG-4 PR Review 輔助 — 驗證實作與規格一致性，產出 PR Review 報告
+description: SDD 規格視角 SCG-4 主審 — 正式裁決實作與規格一致性（Code vs Contract vs FRD vs Invariant），SCG-4（Implementation Review Gate）正式閘門主責。【何時用哪個】PR 後正式 SCG-4 規格一致性裁決用本 skill；提交 commit/PR 前的開發者輕量自審用 /dev-review；通用程式品質（可讀性/重複/效能/壞味道，不綁 SCG-4）用 /code-review。
 user-invocable: true
 disable-model-invocation: false
 argument-hint: "[review_type: full|spec|contract|invariant] [pr_path: <PR描述或diff路徑>]"
@@ -11,9 +11,9 @@ allowed-tools:
   - Glob
 ---
 
-# SDD 規格一致性審查 Skill（SCG-4）
+# SDD 規格一致性審查 Skill（SCG-4 主審）
 
-本 Skill 在 PR Review 時執行，從 SDD 視角驗證**實作是否符合規格**。核心任務：確認代碼變更與凍結的 FRD、OpenAPI Contract、Business Invariants 一致，協助通過 SCG-4（Implementation Review Gate）。
+本 Skill 是 **SCG-4（Implementation Review Gate）的正式主審**，在 PR Review 時執行，從 SDD 規格視角**正式裁決實作是否符合規格**。核心任務：確認代碼變更與凍結的 FRD、OpenAPI Contract、Business Invariants 一致，是 SCG-4 閘門通過與否的權威依據。**與另兩支 review skill 分工互斥**：提交前的開發者輕量自審見 `/dev-review`（事前準備、不裁決）；通用程式品質（可讀性/重複/效能/壞味道，不綁 SCG-4）見 `/code-review`。
 
 ---
 
@@ -164,8 +164,10 @@ retry_count ≥ 5 次：
 
 ---
 
-## 相關 Skill
+## 相關 Skill（何時用哪個）
 
+- `/dev-review` — **提交 commit/PR 前的開發者輕量自審**（事前準備，不做 SCG-4 裁決）
+- `/code-review` — **通用程式品質審查**（可讀性/重複/效能/壞味道，不綁 SCG-4）
 - `/sdd-gate SCG-4` — Implementation Review Gate
 - `/rtm-generate verify` — RTM 覆蓋率確認
 - `/spec-compliance-check` — 規格合規性檢查

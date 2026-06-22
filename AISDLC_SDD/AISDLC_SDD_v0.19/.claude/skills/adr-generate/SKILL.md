@@ -241,7 +241,7 @@ src/models/ / migrations/
 
 ## 相關 Skill
 
-- `/sd-design` — 架構設計（觸發 ADR 的主要 Skill）
+- `/sd-architect` — 架構設計（觸發 ADR 的主要 Skill）
 - `/brownfield-analysis` — Brownfield 場景（archaeology 模式的上下文）
 - `/spec-compliance-check` — 驗證 ADR 格式
 - `/sdd-gate SCG-2` — 架構凍結閘門（所有 ADR Status: Accepted 才通過）

@@ -109,7 +109,7 @@ PM 是 SDD 需求階段的業務目標定義者。本 Skill 產出 PRD，與 SA 
 |------|------|------|---------|
 ```
 
-🔴 確認點：PRD 需利害關係人確認後，才能啟動 SA 分析（`/sa-analyze`）。
+🔴 確認點：PRD 需利害關係人確認後，才能啟動 SA 分析（`/sa-analyst`）。
 
 ---
 
@@ -181,8 +181,8 @@ PM 是 SDD 需求階段的業務目標定義者。本 Skill 產出 PRD，與 SA 
 
 **PRD 完成後**：
 ```
-/sa-analyze prd    # SA 從 PRD 產出 FRD
-/ba-validate prd   # BA 驗證 PRD 業務對齊
+/sa-analyst prd    # SA 從 PRD 產出 FRD
+/ba-analyst prd   # BA 驗證 PRD 業務對齊
 ```
 
 **Sprint 規劃後**：
@@ -196,8 +196,8 @@ PM 是 SDD 需求階段的業務目標定義者。本 Skill 產出 PRD，與 SA 
 
 ## 相關 Skill
 
-- `/sa-analyze` — 需求分析（PRD → FRD 轉化）
-- `/ba-validate` — 業務驗證（PRD 驗證）
+- `/sa-analyst` — 需求分析（PRD → FRD 轉化）
+- `/ba-analyst` — 業務驗證（PRD 驗證）
 - `/sprint-planning` — Sprint 啟動（Sprint 規劃的完整流程）
 - `/release-management` — 發布管理（產品路線圖執行）
 - `/sdd-gate SCG-0` — 需求凍結閘門

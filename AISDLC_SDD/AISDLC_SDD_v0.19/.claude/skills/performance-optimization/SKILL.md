@@ -1,5 +1,5 @@
 ---
-name: performance
+name: performance-optimization
 description: 效能優化，PBS Gate 前置定義基準規格，NFR 量化目標，優化結果更新 RTM
 user-invocable: true
 disable-model-invocation: false

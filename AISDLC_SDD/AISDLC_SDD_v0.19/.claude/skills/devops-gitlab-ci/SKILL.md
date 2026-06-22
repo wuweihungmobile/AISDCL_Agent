@@ -1,5 +1,5 @@
 ---
-name: devops-gitlab
+name: devops-gitlab-ci
 description: 建立 GitLab CI/CD Pipeline，嵌入 Contract 一致性驗證 Stage，對應 SDD_TESTING_CICD 規格
 user-invocable: true
 disable-model-invocation: false
@@ -20,9 +20,9 @@ CI/CD Pipeline 是 SDD 自動化閘門的執行者。本 Skill 在 GitLab Pipeli
 ## 觸發方式
 
 ```bash
-/devops-gitlab nodejs docker
-/devops-gitlab python k8s
-/devops-gitlab java aws
+/devops-gitlab-ci nodejs docker
+/devops-gitlab-ci python k8s
+/devops-gitlab-ci java aws
 ```
 
 ---

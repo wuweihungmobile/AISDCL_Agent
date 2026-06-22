@@ -166,7 +166,7 @@ allowed-tools:
 ## 相關 Skill
 
 - `/security-audit` — STRIDE 威脅模型（合規的安全基礎）
-- `/sa-analyze` — FRD NFR-COMP 定義（合規需求的規格依據）
+- `/sa-analyst` — FRD NFR-COMP 定義（合規需求的規格依據）
 - `/rtm-generate` — 合規 TC 追蹤
 - `/sdd-gate SCG-5` — 交付閘門（合規為必要條件）
 

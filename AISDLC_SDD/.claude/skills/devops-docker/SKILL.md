@@ -241,7 +241,7 @@ volumes:
 
 ## 相關 Skill
 
-- `/sd-design` — SRD 部署架構（Docker 設計的規格依據）
+- `/sd-architect` — SRD 部署架構（Docker 設計的規格依據）
 - `/adr-generate` — 容器化策略 ADR
 - `/devops-github-actions` — 使用 Docker 的 CI/CD Pipeline
 - `/devops-kubernetes` — K8s 部署（Docker Image 消費方）

@@ -58,10 +58,10 @@
 
 | 序號 | Skill 名稱 | 觸發命令 | 檔案路徑 | 狀態 |
 |------|-----------|---------|---------|------|
-| 1 | DevOps GitHub Actions | `/devops-github` | `devops-github-actions/SKILL.md` | ✅ 已建立 |
+| 1 | DevOps GitHub Actions | `/devops-github-actions` | `devops-github-actions/SKILL.md` | ✅ 已建立 |
 | 2 | Integration OAuth | `/integration-oauth` | `scenarios/integration-oauth.md` | ✅ 已建立 |
-| 3 | Brownfield Analysis | `/brownfield` | `scenarios/brownfield-analysis.md` | ✅ 已建立 |
-| 4 | SA Analyst | `/sa-analyze` | `agents/sa-analyst.md` | ✅ 已建立 |
+| 3 | Brownfield Analysis | `/brownfield-analysis` | `scenarios/brownfield-analysis.md` | ✅ 已建立 |
+| 4 | SA Analyst | `/sa-analyst` | `agents/sa-analyst.md` | ✅ 已建立 |
 
 ### 🥈 第二波 - 近期開發（擴展 Skills）
 
@@ -69,20 +69,20 @@
 
 | 序號 | Skill 名稱 | 觸發命令 | 檔案路徑 | 狀態 |
 |------|-----------|---------|---------|------|
-| 5 | Refactoring Code Quality | `/refactor` | `scenarios/refactoring-code-quality.md` | ✅ 已建立 |
-| 6 | Performance Optimization | `/performance` | `scenarios/performance-optimization.md` | ✅ 已建立 |
-| 7 | Testing Strategy | `/testing` | `scenarios/testing-strategy.md` | ✅ 已建立 |
-| 8 | DevOps Kubernetes | `/devops-k8s` | `scenarios/devops-kubernetes.md` | ✅ 已建立 |
+| 5 | Refactoring Code Quality | `/refactoring-code-quality` | `scenarios/refactoring-code-quality.md` | ✅ 已建立 |
+| 6 | Performance Optimization | `/performance-optimization` | `scenarios/performance-optimization.md` | ✅ 已建立 |
+| 7 | Testing Strategy | `/testing-strategy` | `scenarios/testing-strategy.md` | ✅ 已建立 |
+| 8 | DevOps Kubernetes | `/devops-kubernetes` | `scenarios/devops-kubernetes.md` | ✅ 已建立 |
 | 9 | Integration Stripe | `/integration-stripe` | `scenarios/integration-stripe.md` | ✅ 已建立 |
 
 ### 🥉 第三波 - 未來開發（專業 Skills）
 
 | 序號 | Skill 名稱 | 觸發命令 | 檔案路徑 | 狀態 |
 |------|-----------|---------|---------|------|
-| 10 | Security Audit | `/security` | `scenarios/security-audit.md` | ✅ 已建立 |
+| 10 | Security Audit | `/security-audit` | `scenarios/security-audit.md` | ✅ 已建立 |
 | 11 | Documentation API | `/doc-api` | `scenarios/documentation-api.md` | ✅ 已建立 |
-| 12 | SD Architect | `/sd-design` | `agents/sd-architect.md` | ✅ 已建立 |
-| 13 | QA Testing | `/qa-test` | `agents/qa-testing.md` | ✅ 已建立 |
+| 12 | SD Architect | `/sd-architect` | `agents/sd-architect.md` | ✅ 已建立 |
+| 13 | QA Testing | `/qa-testing` | `agents/qa-testing.md` | ✅ 已建立 |
 
 ---
 

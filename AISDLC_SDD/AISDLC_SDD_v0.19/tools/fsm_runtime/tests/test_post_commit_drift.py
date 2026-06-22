@@ -91,6 +91,64 @@ def test_hook_advisory_on_compute_failure(hook_module, tmp_path):
     assert "error" in warn.read_text(encoding="utf-8")
 
 
+class _NoAlarmSignal:
+    """Stand-in for the signal module without SIGALRM, to exercise the Windows
+    thread-guard path on any host (DEF-CLDREV-001)."""
+
+    # deliberately no SIGALRM attribute → hasattr(signal, "SIGALRM") is False
+
+
+def test_windows_thread_guard_timeout_fail_soft(hook_module, tmp_path):
+    """DEF-CLDREV-001: on the no-SIGALRM (Windows) path a slow compute_drift
+    must be bounded by the thread guard — hook returns within budget, writes a
+    timeout warning, exit 0 (advisory, never block). Pre-fix the Windows branch
+    set NO timeout at all, so this would hang for the full 2s sleep and fail the
+    elapsed assertion."""
+    import time as _time
+
+    git_dir = tmp_path / ".git"
+    git_dir.mkdir()
+
+    def _slow(*_a, **_k):
+        _time.sleep(2.0)  # far exceeds the shrunk budget below
+
+    with patch.object(hook_module, "signal", _NoAlarmSignal), \
+         patch.object(hook_module, "BUDGET_SEC", 0.3), \
+         patch.object(hook_module, "_current_sha", return_value="sha-slow"), \
+         patch.object(hook_module, "REPO_ROOT", tmp_path), \
+         patch.object(hook_module, "compute_drift", side_effect=_slow):
+        start = time.monotonic()
+        rc = hook_module.main()
+        elapsed = time.monotonic() - start
+
+    assert rc == 0  # never raises, never blocks the commit
+    assert elapsed < 1.5, f"thread guard did not bound the wait: {elapsed:.3f}s"
+    warn = git_dir / "COMMIT_DRIFT_WARNING"
+    assert warn.exists()
+    assert "timeout" in warn.read_text(encoding="utf-8").lower()
+
+
+def test_windows_thread_guard_normal_completion(hook_module, tmp_path):
+    """DEF-CLDREV-001 companion: on the no-SIGALRM path a fast compute_drift
+    still completes normally and writes the high-drift warning (guard does not
+    swallow the real result)."""
+    git_dir = tmp_path / ".git"
+    git_dir.mkdir()
+    from tools.fsm_runtime.drift_monitor import DriftReport
+
+    high = DriftReport(commit_sha="sha-win", api_drift=0.8, type_drift=0.0, total_score=0.5)
+    with patch.object(hook_module, "signal", _NoAlarmSignal), \
+         patch.object(hook_module, "_current_sha", return_value="sha-win"), \
+         patch.object(hook_module, "REPO_ROOT", tmp_path), \
+         patch.object(hook_module, "compute_drift", return_value=high), \
+         patch.object(hook_module, "check_consecutive_drift", return_value=(False, [])):
+        rc = hook_module.main()
+    assert rc == 0
+    warn = git_dir / "COMMIT_DRIFT_WARNING"
+    assert warn.exists()
+    assert "0.5" in warn.read_text(encoding="utf-8")
+
+
 def test_hook_consecutive_warning(hook_module, tmp_path):
     """Rule 9.17.3: when consecutive_drift detected → second warning."""
     git_dir = tmp_path / ".git"

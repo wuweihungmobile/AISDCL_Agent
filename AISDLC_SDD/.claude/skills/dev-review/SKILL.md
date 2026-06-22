@@ -1,6 +1,6 @@
 ---
 name: dev-review
-description: 以 Developer 角色進行代碼審查，驗證實作與規格（SRD/OpenAPI Contract）一致性，產出 SCG-4 通過依據
+description: 開發者「提交前自審」（self-review before commit/PR）— 輕量、開發者視角的快速自檢，提交 PR 前先抓明顯的規格偏差與品質問題。【何時用哪個】提交前先跑本 skill 自審；PR 後正式 SCG-4 規格一致性主審用 /sdd-review；通用程式品質（可讀性/重複/效能/壞味道，不綁 SCG-4）用 /code-review。
 user-invocable: true
 disable-model-invocation: false
 argument-hint: "[scope: pr|file|module] [focus: quality|security|performance|spec-compliance]"
@@ -10,20 +10,20 @@ allowed-tools:
   - Glob
 ---
 
-# Dev 代碼審查 Skill（SDD 原生）
+# Dev 提交前自審 Skill（SDD 原生）
 
-代碼審查的 SDD 核心目標：**驗證實作與規格一致性**。審查清單直接對照 SRD 和 OpenAPI Contract，確保代碼是規格的忠實實現。本 Skill 產出 SCG-4 的通過依據。
+本 Skill 是**開發者在提交 commit/PR 前的輕量自我審查**（self-review before commit/PR），以開發者視角快速自檢，把明顯的規格偏差與品質問題在送審前先解決。**它不是正式 SCG-4 閘門主審**——正式 SCG-4 規格一致性主審由 `/sdd-review` 負責；本 Skill 的自審結果僅作為提交前的事前準備，降低後續 SCG-4 被退回的機率。
 
 ---
 
 ## 觸發方式
 
 ```bash
-/dev-review                        # 完整審查（PR 提交後）
-/dev-review pr                     # 審查特定 Pull Request
-/dev-review spec-compliance        # 僅驗證規格一致性（SCG-4 核心）
-/dev-review security               # 安全聚焦審查
-/dev-review performance            # 效能聚焦審查
+/dev-review                        # 完整自審（提交 commit/PR 前）
+/dev-review file                   # 自審特定檔案
+/dev-review module                 # 自審特定模組
+/dev-review security               # 安全聚焦自審
+/dev-review performance            # 效能聚焦自審
 ```
 
 ---
@@ -62,10 +62,12 @@ docs/01_requirements/INVARIANT-SPEC-{SystemName}.md（若存在）
 
 ---
 
-### 階段 2：規格一致性審查（SCG-4 核心） 🔴
+### 階段 2：提交前規格自檢（事前準備，非 SCG-4 主審） 🔴
+
+> 本清單供開發者提交前自查，提早發現明顯偏差；正式 SCG-4 規格一致性裁決由 `/sdd-review` 執行。
 
 ```markdown
-## 規格一致性審查清單（SCG-4）
+## 提交前規格自檢清單
 
 ### API 實作 vs. Contract
 - [ ] 所有端點 URL 與 Contract 一致（無多餘或缺少）
@@ -159,15 +161,15 @@ docs/01_requirements/INVARIANT-SPEC-{SystemName}.md（若存在）
 ### 階段 6：審查報告產出 🔴
 
 ```markdown
-# 代碼審查報告 — {PR/模組名稱}
+# 提交前自審報告 — {模組/檔案名稱}
 
-**審查範圍**: {PR ID 或文件清單}
-**審查日期**: {YYYY-MM-DD}
-**審查者**: Dev Agent (David)
+**自審範圍**: {檔案清單或模組}
+**自審日期**: {YYYY-MM-DD}
+**自審者**: Dev（提交者本人）
 **對應規格**: SRD-{System} / CONTRACT-{Module}-v{N}
 
-## 規格一致性結果（SCG-4 依據）
-🟢 通過 / 🔴 未通過
+## 提交前規格自檢結果（事前準備，非 SCG-4 裁決）
+🟢 自檢通過 / 🔴 自檢發現問題（提交前先修）
 
 ### 規格不一致項目（若有）
 | 項目 | Contract 定義 | 代碼實作 | 修改建議 |
@@ -187,14 +189,14 @@ docs/01_requirements/INVARIANT-SPEC-{SystemName}.md（若存在）
 1. {問題描述}
 
 ## 結論
-- [ ] ✅ 通過審查（SCG-4 依據已建立）
-- [ ] 🔄 需要修改後重審（Critical 問題未修復）
+- [ ] ✅ 自審通過（可提交 PR，後續交 /sdd-review 進行 SCG-4 主審）
+- [ ] 🔄 提交前需先修（Critical 問題未修復）
 - [ ] ❌ 重大架構問題（需重新設計）
 
-**SCG-4 建議**: 🟢 可通過 / 🔴 需修正
+**提交建議**: 🟢 可提交 PR / 🔴 提交前先修
 ```
 
-執行 `/spec-compliance-check`（非必填，可選）後，🔴 確認點：PR 作者需確認審查結果。
+🔴 確認點：提交者需確認自審結果，明顯問題修復後再提 PR。
 
 ---
 
@@ -202,34 +204,33 @@ docs/01_requirements/INVARIANT-SPEC-{SystemName}.md（若存在）
 
 | 產出物 | 路徑 | 對應 SCG |
 |--------|------|---------|
-| 代碼審查報告 | `docs/06_quality/CODE-REVIEW-{PR/Module}-{date}.md` | SCG-4 |
-| 規格不一致清單（若有） | 包含在審查報告中 | SCG-4 修正依據 |
+| 提交前自審報告 | `docs/06_quality/DEV-SELF-REVIEW-{Module}-{date}.md` | SCG-4 事前準備 |
+| 自檢發現清單（若有） | 包含在自審報告中 | 提交前修正依據 |
 
 ---
 
 ## 後置動作
 
-若審查通過：
+若自審通過：
 ```
-/rtm-generate update    # 更新 RTM 中 TC 狀態為 ✅
-/sdd-gate SCG-4         # 執行 Implementation Review 閘門
-```
-
-若審查未通過：
-```
-# 退回修改，重新提 PR，重新執行 /dev-review
+/sdd-review             # 提交 PR 後執行正式 SCG-4 規格一致性主審
 ```
 
-🔷 **本 Skill 協助通過**：SCG-4（Implementation Review Gate）
+若自審未通過：
+```
+# 提交前先修，再重新執行 /dev-review 自審
+```
+
+🔷 **本 Skill 定位**：SCG-4 的**提交前事前準備**（正式 SCG-4 主審見 `/sdd-review`）
 
 ---
 
-## 相關 Skill
+## 相關 Skill（何時用哪個）
 
-- `/qa-test` — QA 測試（Contract Testing 結果作為審查參考）
+- `/sdd-review` — **提交 PR 後的正式 SCG-4 規格一致性主審**（Code vs Contract vs FRD 裁決）
+- `/code-review` — **通用程式品質審查**（可讀性/重複/效能/壞味道，不綁 SCG-4）
+- `/qa-testing` — QA 測試（Contract Testing 結果作為自審參考）
 - `/security-audit` — 深度安全審查（若發現重大安全問題）
-- `/refactoring-code-quality` — 代碼重構（解決 Major 問題）
-- `/sdd-gate SCG-4` — 實作審查閘門
 
 ---
 

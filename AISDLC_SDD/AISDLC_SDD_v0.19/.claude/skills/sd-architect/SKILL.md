@@ -1,5 +1,5 @@
 ---
-name: sd-design
+name: sd-architect
 description: 以 System Designer 角色設計系統架構，產出 SRD、C4 圖和 ADR，準備 SCG-1/SCG-2 架構閘門
 user-invocable: true
 disable-model-invocation: false
@@ -20,12 +20,12 @@ SD 在 SDD 工作流中負責從 FRD 到可執行架構的轉化。本 Skill 產
 ## 觸發方式
 
 ```bash
-/sd-design                         # 完整架構設計（Greenfield 全流程）
-/sd-design api                     # 僅 API 端點設計
-/sd-design c4                      # 僅 C4 架構圖設計
-/sd-design adr                     # 補建架構決策 ADR
-/sd-design brownfield              # Brownfield：As-Is → To-Be 架構設計
-/sd-design refactoring             # Refactoring：現有架構評估與改善設計
+/sd-architect                         # 完整架構設計（Greenfield 全流程）
+/sd-architect api                     # 僅 API 端點設計
+/sd-architect c4                      # 僅 C4 架構圖設計
+/sd-architect adr                     # 補建架構決策 ADR
+/sd-architect brownfield              # Brownfield：As-Is → To-Be 架構設計
+/sd-architect refactoring             # Refactoring：現有架構評估與改善設計
 ```
 
 ---
@@ -238,7 +238,7 @@ SRD 完成後執行 RTM 更新，加入 API 追溯：
 
 ## 相關 Skill
 
-- `/sa-analyze` — 需求分析（本 Skill 的前置）
+- `/sa-analyst` — 需求分析（本 Skill 的前置）
 - `/adr-generate` — 架構決策（在本 Skill 中呼叫）
 - `/contract-generate` — API Contract（SCG-2 通過後接棒）
 - `/brownfield-analysis` — Brownfield 場景 As-Is 分析

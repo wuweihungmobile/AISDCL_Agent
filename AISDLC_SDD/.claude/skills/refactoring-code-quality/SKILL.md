@@ -1,5 +1,5 @@
 ---
-name: refactor
+name: refactoring-code-quality
 description: 代碼重構，As-Is SRD 前置建立基線，Invariants 保護重構安全性，RTM 驗證不破壞 Business Invariants
 user-invocable: true
 disable-model-invocation: false

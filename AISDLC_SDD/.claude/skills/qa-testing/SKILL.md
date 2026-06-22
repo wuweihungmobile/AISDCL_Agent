@@ -1,5 +1,5 @@
 ---
-name: qa-test
+name: qa-testing
 description: 以 QA Engineer 角色制定測試策略，產出測試計畫和測試案例，更新 RTM 並準備 SCG-4/SCG-5 閘門
 user-invocable: true
 disable-model-invocation: false
@@ -20,12 +20,12 @@ QA 在 SDD 工作流中負責從 Contract 凍結（SCG-3）後制定測試策略
 ## 觸發方式
 
 ```bash
-/qa-test                           # 完整測試策略（SCG-3 通過後）
-/qa-test acceptance                # 驗收測試設計（從 AC 產出 TC）
-/qa-test contract                  # Contract Testing（從 OpenAPI 產出）
-/qa-test integration               # 整合測試規劃
-/qa-test e2e                       # 端到端測試
-/qa-test regression                # 回歸測試計畫
+/qa-testing                           # 完整測試策略（SCG-3 通過後）
+/qa-testing acceptance                # 驗收測試設計（從 AC 產出 TC）
+/qa-testing contract                  # Contract Testing（從 OpenAPI 產出）
+/qa-testing integration               # 整合測試規劃
+/qa-testing e2e                       # 端到端測試
+/qa-testing regression                # 回歸測試計畫
 ```
 
 ---
@@ -230,7 +230,7 @@ RTM 更新後，檢查覆蓋率：
 
 ## 相關 Skill
 
-- `/sa-analyze` — 需求分析（AC 來源）
+- `/sa-analyst` — 需求分析（AC 來源）
 - `/contract-generate` — API Contract（Contract Testing 的依據）
 - `/rtm-generate` — RTM 追溯（在本 Skill 中呼叫）
 - `/dev-review` — 代碼審查（SCG-4 協同）

@@ -8,6 +8,7 @@ Install: tools/install_post_commit_hook.sh / .ps1 (opt-in, not enforced via
 """
 from __future__ import annotations
 
+import concurrent.futures
 import signal
 import subprocess
 import sys
@@ -71,29 +72,58 @@ def _timeout_handler(signum, frame):  # pragma: no cover - signal callback
     raise _Timeout()
 
 
+def _compute_drift_for_head(sha: str):
+    return compute_drift(
+        sha,
+        openapi_path=REPO_ROOT / "docs" / "02_architecture" / "api" / "openapi.yaml",
+        frd_dir=REPO_ROOT / "docs" / "01_requirements",
+        code_dir=REPO_ROOT / "src",
+    )
+
+
 def main() -> int:
     sha = _current_sha()
-    # SIGALRM only on POSIX; Windows installs use plain run + thread guard
+    # SIGALRM only on POSIX; Windows has no SIGALRM, so the budget there is
+    # enforced via a ThreadPoolExecutor + future.result(timeout=...) guard
+    # (DEF-CLDREV-001). Both paths converge on the same fail-soft contract:
+    # advisory only, never block the commit (Rule 9.17.1).
     has_alarm = hasattr(signal, "SIGALRM")
     if has_alarm:
         signal.signal(signal.SIGALRM, _timeout_handler)
         signal.alarm(BUDGET_SEC)
-    try:
-        report = compute_drift(
-            sha,
-            openapi_path=REPO_ROOT / "docs" / "02_architecture" / "api" / "openapi.yaml",
-            frd_dir=REPO_ROOT / "docs" / "01_requirements",
-            code_dir=REPO_ROOT / "src",
-        )
-    except _Timeout:
-        _write_warning(f"drift hook timeout > {BUDGET_SEC}s for commit {sha[:12]} — skipped (Rule 9.17.1)")
-        return 0
-    except Exception as exc:
-        _write_warning(f"drift hook error for commit {sha[:12]}: {exc} — advisory")
-        return 0
-    finally:
-        if has_alarm:
+        try:
+            report = _compute_drift_for_head(sha)
+        except _Timeout:
+            _write_warning(
+                f"drift hook timeout > {BUDGET_SEC}s for commit {sha[:12]} — skipped (Rule 9.17.1)"
+            )
+            return 0
+        except Exception as exc:
+            _write_warning(f"drift hook error for commit {sha[:12]}: {exc} — advisory")
+            return 0
+        finally:
             signal.alarm(0)
+    else:
+        # Windows thread-guard path: run compute_drift in a worker thread and
+        # bound the wait to BUDGET_SEC. On timeout we cannot truly kill the
+        # thread, but the hook returns immediately (advisory, never-block); we
+        # deliberately avoid the `with` block's implicit shutdown(wait=True) so
+        # a slow compute can never make the hook overrun its budget.
+        pool = concurrent.futures.ThreadPoolExecutor(max_workers=1)
+        future = pool.submit(_compute_drift_for_head, sha)
+        try:
+            report = future.result(timeout=BUDGET_SEC)
+        except concurrent.futures.TimeoutError:
+            _write_warning(
+                f"drift hook timeout > {BUDGET_SEC}s for commit {sha[:12]} — skipped (Rule 9.17.1)"
+            )
+            pool.shutdown(wait=False, cancel_futures=True)
+            return 0
+        except Exception as exc:
+            _write_warning(f"drift hook error for commit {sha[:12]}: {exc} — advisory")
+            pool.shutdown(wait=False, cancel_futures=True)
+            return 0
+        pool.shutdown(wait=False)
 
     write_commit_report(report, repo_root=REPO_ROOT)
     if report.total_score >= 0.3:

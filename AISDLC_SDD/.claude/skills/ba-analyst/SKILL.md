@@ -1,5 +1,5 @@
 ---
-name: ba-validate
+name: ba-analyst
 description: 以 Business Analyst 角色驗證需求業務對齊，管理利害關係人，協助通過 SCG-0 需求凍結閘門
 user-invocable: true
 disable-model-invocation: false
@@ -20,11 +20,11 @@ BA 是 SCG-0 閘門的業務對齊守門員。本 Skill 在 SA 完成 FRD 後執
 ## 觸發方式
 
 ```bash
-/ba-validate                   # 全面驗證（PRD + FRD + 利害關係人）
-/ba-validate prd               # 驗證 PRD 業務需求
-/ba-validate frd               # 驗證 FRD 功能對齊
-/ba-validate user-story        # 驗證 User Story 業務價值
-/ba-validate stakeholder       # 利害關係人分析
+/ba-analyst                   # 全面驗證（PRD + FRD + 利害關係人）
+/ba-analyst prd               # 驗證 PRD 業務需求
+/ba-analyst frd               # 驗證 FRD 功能對齊
+/ba-analyst user-story        # 驗證 User Story 業務價值
+/ba-analyst stakeholder       # 利害關係人分析
 ```
 
 ---
@@ -33,7 +33,7 @@ BA 是 SCG-0 閘門的業務對齊守門員。本 Skill 在 SA 完成 FRD 後執
 
 | 閘門/文件 | 說明 | 驗證方式 |
 |---------|------|---------|
-| FRD 草稿存在 | `/sa-analyze` 已執行 | `docs/01_requirements/FRD-{System}.md` 存在 |
+| FRD 草稿存在 | `/sa-analyst` 已執行 | `docs/01_requirements/FRD-{System}.md` 存在 |
 | PRD 草稿存在 | 需求輸入源 | `docs/01_requirements/PRD-{System}.md` 或等效文件 |
 
 ---
@@ -191,7 +191,7 @@ BA 是 SCG-0 閘門的業務對齊守門員。本 Skill 在 SA 完成 FRD 後執
 
 ## 相關 Skill
 
-- `/sa-analyze` — 需求分析（本 Skill 的前置）
+- `/sa-analyst` — 需求分析（本 Skill 的前置）
 - `/pm-planning` — 產品規劃（業務目標對齊）
 - `/sdd-gate SCG-0` — 需求凍結閘門（BA 驗證是必要條件之一）
 

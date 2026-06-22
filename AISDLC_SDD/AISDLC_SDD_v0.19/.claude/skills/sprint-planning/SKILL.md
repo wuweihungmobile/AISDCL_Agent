@@ -33,7 +33,7 @@ Sprint 是 SDD 規格驅動執行的單元。本 Skill 確保每個進入 Sprint
 | 🔷 SCG-0 通過 | 需求凍結，FRD 已確定 | `/sdd-gate SCG-0` 報告存在 |
 | FRD 存在 | US-XXX/F-XXX 清單已定義 | `docs/01_requirements/FRD-{System}.md` |
 
-> 若 SCG-0 尚未通過，先執行 `/sa-analyze` → `/ba-validate` → `/sdd-gate SCG-0`
+> 若 SCG-0 尚未通過，先執行 `/sa-analyst` → `/ba-analyst` → `/sdd-gate SCG-0`
 
 ---
 
@@ -179,7 +179,7 @@ SP 參考:
 ## 後置動作
 
 ```
-/qa-test                    # QA 確認本 Sprint 的測試範圍
+/qa-testing                    # QA 確認本 Sprint 的測試範圍
 /devops-github-actions      # 確認 CI/CD 流水線就緒
 ```
 
@@ -190,7 +190,7 @@ SP 參考:
 ## 相關 Skill
 
 - `/pm-planning sprint` — PM Sprint 準備
-- `/sa-analyze` — 若 Story 需求不清，退回 SA 補充 FRD
+- `/sa-analyst` — 若 Story 需求不清，退回 SA 補充 FRD
 - `/sdd-gate SCG-0` — 必須通過才能啟動 Sprint
 - `/release-management` — Sprint 完成後的發布流程
 

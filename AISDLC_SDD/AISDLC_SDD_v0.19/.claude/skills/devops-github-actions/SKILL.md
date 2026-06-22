@@ -1,5 +1,5 @@
 ---
-name: devops-github
+name: devops-github-actions
 description: 建立 GitHub Actions CI/CD Pipeline，嵌入 Contract 一致性驗證 Step，對應 SDD_TESTING_CICD 規格
 user-invocable: true
 disable-model-invocation: false
@@ -20,9 +20,9 @@ CI/CD Pipeline 是 SDD 自動化閘門的執行者。本 Skill 在 Pipeline 中�
 ## 觸發方式
 
 ```bash
-/devops-github nodejs aws
-/devops-github python docker
-/devops-github java gcp
+/devops-github-actions nodejs aws
+/devops-github-actions python docker
+/devops-github-actions java gcp
 ```
 
 ---

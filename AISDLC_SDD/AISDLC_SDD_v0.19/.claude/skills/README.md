@@ -17,9 +17,9 @@
 
 ```bash
 # DevOps
-/devops-github          # GitHub Actions CI/CD
-/devops-k8s             # Kubernetes 部署
-/devops-gitlab          # GitLab CI/CD
+/devops-github-actions          # GitHub Actions CI/CD
+/devops-kubernetes             # Kubernetes 部署
+/devops-gitlab-ci          # GitLab CI/CD
 /devops-docker          # Docker 容器化
 /devops-monitoring      # 監控告警
 
@@ -37,20 +37,20 @@
 
 # Code Quality
 /code-review            # 代碼審查流程
-/refactor               # 代碼重構
-/performance            # 效能優化
-/testing                # 測試策略
+/refactoring-code-quality               # 代碼重構
+/performance-optimization            # 效能優化
+/testing-strategy                # 測試策略
 
 # Security / Compliance / Docs
-/security               # 安全審計
+/security-audit               # 安全審計
 /compliance-audit       # 合規審查 (GDPR/HIPAA/PCI-DSS)
 /documentation-api      # API 文檔
 
 # Agents
-/sa-analyze             # SA 需求分析
-/ba-validate            # BA 業務驗證
-/sd-design              # SD 架構設計
-/qa-test                # QA 測試策略
+/sa-analyst             # SA 需求分析
+/ba-analyst            # BA 業務驗證
+/sd-architect              # SD 架構設計
+/qa-testing                # QA 測試策略
 /dev-review             # Dev 代碼審查
 /pm-planning            # PM 產品規劃
 
@@ -59,7 +59,7 @@
 /release-management     # 發布管理
 
 # Scenario / Dev
-/brownfield             # 棕地系統分析
+/brownfield-analysis             # 棕地系統分析
 /database-migration     # 資料庫遷移
 /mobile-development     # 行動端開發
 
@@ -168,9 +168,9 @@
 ### DevOps 家族
 | 命令 | Skill | 用途 |
 |------|-------|------|
-| `/devops-github` | GitHub Actions | CI/CD Pipeline |
-| `/devops-k8s` | Kubernetes | 容器編排部署 |
-| `/devops-gitlab` | GitLab CI | GitLab Pipeline |
+| `/devops-github-actions` | GitHub Actions | CI/CD Pipeline |
+| `/devops-kubernetes` | Kubernetes | 容器編排部署 |
+| `/devops-gitlab-ci` | GitLab CI | GitLab Pipeline |
 | `/devops-docker` | Docker | 容器化 |
 | `/devops-monitoring` | Monitoring | Prometheus/Grafana |
 
@@ -192,24 +192,24 @@
 | 命令 | Skill | 用途 |
 |------|-------|------|
 | `/code-review` | Code Review | 標準化代碼審查 |
-| `/refactor` | Refactoring | 代碼重構、技術債清除 |
-| `/performance` | Performance | 效能分析與優化 |
-| `/testing` | Testing Strategy | 測試策略與測試案例 |
+| `/refactoring-code-quality` | Refactoring | 代碼重構、技術債清除 |
+| `/performance-optimization` | Performance | 效能分析與優化 |
+| `/testing-strategy` | Testing Strategy | 測試策略與測試案例 |
 
 ### Security / Compliance / Docs 家族
 | 命令 | Skill | 用途 |
 |------|-------|------|
-| `/security` | Security Audit | OWASP Top 10 安全審計 |
+| `/security-audit` | Security Audit | OWASP Top 10 安全審計 |
 | `/compliance-audit` | Compliance | GDPR/HIPAA/PCI-DSS/SOC2 |
 | `/documentation-api` | API Docs | OpenAPI/Swagger 文檔 |
 
 ### Agent 家族
 | 命令 | Agent | 專長 |
 |------|-------|------|
-| `/sa-analyze` | Amanda (SA) | 需求分析、FRD、User Stories |
-| `/ba-validate` | Beatrice (BA) | 需求驗證、利害關係人管理 |
-| `/sd-design` | Marcus (SD) | 架構設計、SRD、API 規格 |
-| `/qa-test` | Quincy (QA) | 測試策略、驗收準則 |
+| `/sa-analyst` | Amanda (SA) | 需求分析、FRD、User Stories |
+| `/ba-analyst` | Beatrice (BA) | 需求驗證、利害關係人管理 |
+| `/sd-architect` | Marcus (SD) | 架構設計、SRD、API 規格 |
+| `/qa-testing` | Quincy (QA) | 測試策略、驗收準則 |
 | `/dev-review` | David (Dev) | 代碼審查、最佳實踐 |
 | `/pm-planning` | Victoria (PM) | 產品規劃、Sprint/Backlog |
 
@@ -222,7 +222,7 @@
 ### Scenario / Dev 家族
 | 命令 | Skill | 用途 |
 |------|-------|------|
-| `/brownfield` | Brownfield Analysis | 既有系統分析、架構問題識別 |
+| `/brownfield-analysis` | Brownfield Analysis | 既有系統分析、架構問題識別 |
 | `/database-migration` | Database Migration | DB 平台遷移 (Oracle/MySQL → PostgreSQL) |
 | `/mobile-development` | Mobile Dev | Android/iOS/跨平台開發規劃 |
 

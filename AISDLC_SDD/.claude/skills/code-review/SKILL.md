@@ -1,9 +1,9 @@
 ---
 name: code-review
-description: 代碼審查，規格一致性清單為核心（Code vs Contract vs FRD），SCG-4 閘門依據
+description: 通用程式品質審查 — 可讀性、重複（DRY）、效能、壞味道、錯誤處理等工程品質面向，不綁 SCG-4 規格一致性。【何時用哪個】純品質/壞味道審查用本 skill；PR 後正式 SCG-4 規格一致性主審（Code vs Contract vs FRD）用 /sdd-review；提交 commit/PR 前的開發者輕量自審用 /dev-review。
 user-invocable: true
 disable-model-invocation: false
-argument-hint: "[pr_url: PR URL] [type: standard|security|architecture|spec-compliance]"
+argument-hint: "[pr_url: PR URL] [type: standard|security|performance|readability]"
 allowed-tools:
   - Read
   - Write
@@ -11,151 +11,139 @@ allowed-tools:
   - Glob
 ---
 
-# Code Review Skill（SDD 原生）
+# Code Review Skill（通用程式品質）
 
-SDD 的 Code Review 不只是「代碼風格審查」，而是「規格一致性審查」：實作必須符合凍結的 API Contract（SCG-3），業務邏輯必須對應 FRD AC，架構必須符合 SRD C4 設計。Code Review 是 SCG-4 閘門的必要依據。
+本 Skill 專注**通用程式品質審查**：可讀性、命名、重複（DRY）、巢狀深度、效能熱點、錯誤處理、壞味道（code smell）等工程品質面向。**它不負責 SCG-4 規格一致性裁決**——Code vs Contract vs FRD 的規格一致性主審由 `/sdd-review` 負責；提交 commit/PR 前的開發者輕量自審由 `/dev-review` 負責。三者分工互斥、報告路徑互異。
 
 ---
 
 ## 觸發方式
 
 ```bash
-/code-review standard
-/code-review spec-compliance
-/code-review security
+/code-review standard      # 通用品質全面審查
+/code-review readability   # 可讀性/命名/結構聚焦
+/code-review performance   # 效能熱點聚焦
+/code-review security      # 安全壞味道聚焦
 ```
 
 ---
 
-## 前置條件（SDD Spec-First）
+## 前置條件
 
-| 閘門 | 說明 | 驗證方式 |
+| 條件 | 說明 | 驗證方式 |
 |------|------|---------|
-| 🔷 SCG-3 通過 | Contract 已凍結（審查依據）| `CONTRACT-*.yaml` 存在 |
-| FRD 可讀 | 業務邏輯審查依據 | `docs/01_requirements/FRD-{System}.md` |
+| 代碼變更存在 | PR 或本地修改 | git diff 有內容 |
+
+> 本 Skill 為通用品質審查，**不以規格凍結為前置**；規格一致性（Contract/FRD/SRD 對照）不在本 skill 範圍，請改用 `/sdd-review`。
 
 ---
 
 ## 執行流程
 
-### 階段 1：規格文件準備
+### 階段 1：審查範圍準備
 
-讀取：
-- `docs/02_architecture/api/CONTRACT-{Module}-v{N}.yaml`（API 一致性依據）
-- `docs/01_requirements/FRD-{System}.md`（業務邏輯依據）
-- `docs/02_architecture/SRD-{System}.md`（架構依據）
+讀取待審代碼變更（PR diff 或指定檔案／模組），確認審查焦點（standard / readability / performance / security）。
 
 ---
 
-### 階段 2：SDD 規格一致性審查（核心）🔴
+### 階段 2：通用程式品質審查（核心）🔴
 
-**審查清單 A：API Contract vs 實作**
-
-| 審查項目 | 方法 | ✅/❌ |
-|---------|------|-------|
-| 所有 Contract 端點都已實作 | 比對 operationId vs handler | |
-| 請求 Schema 驗證完整 | 比對 requestBody properties vs DTO | |
-| 回應格式與 Contract 一致 | 比對 responses schema vs 實際回傳 | |
-| 所有 Contract 錯誤碼都已處理 | 比對 400/401/403/404/500 | |
-| 未定義的端點沒有被實作 | 無幽靈端點 | |
-
-**審查清單 B：FRD Business Logic vs 實作**
-
-| 審查項目 | 方法 | ✅/❌ |
-|---------|------|-------|
-| AC 驗收標準有對應的代碼邏輯 | AC-XXX-Y → 函數/條件 | |
-| Business Invariants（INV-XXX）有強制執行 | INV vs Guard Clause / DB Constraint | |
-| NFR 有對應的非功能實作 | NFR-P001（速率限制）/ NFR-SEC（加密）| |
-
-**審查清單 C：架構符合 SRD**
+**審查清單 A：結構與可讀性**
 
 | 審查項目 | ✅/❌ |
 |---------|-------|
-| 新模組符合 C4 Container 邊界 | |
-| 模組間依賴符合 SRD 依賴方向 | |
-| 外部整合使用 Integration Spec 設計 | |
-| 無未記錄的技術決策（需 ADR）| |
+| 命名規範清晰有意義（函數/變數/類別）| |
+| 單一職責（函數聚焦、無多重職責）| |
+| 巢狀深度 ≤ 3 層 | |
+| DRY 原則（無重複邏輯）| |
+| 無明顯壞味道（god function / magic number / dead code）| |
 
-**審查清單 D：代碼品質**
+**審查清單 B：錯誤處理**
 
 | 審查項目 | ✅/❌ |
 |---------|-------|
-| 單元測試覆蓋率 ≥ 80%（NFR 要求）| |
-| Contract Testing 通過 | |
-| 無硬編碼的密鑰（安全）| |
-| Error Handling 對應 Error Contract | |
+| 外部呼叫/IO 有錯誤處理 | |
+| 使用者輸入有驗證 | |
+| 錯誤訊息不洩漏系統內部資訊 | |
+
+**審查清單 C：效能**
+
+| 審查項目 | ✅/❌ |
+|---------|-------|
+| 無 N+1 查詢 | |
+| 大量查詢有分頁 | |
+| 無不必要的重複計算/迴圈內 IO | |
+| 適當使用快取 | |
+
+**審查清單 D：測試與安全壞味道**
+
+| 審查項目 | ✅/❌ |
+|---------|-------|
+| 變更有對應測試、覆蓋率未下降 | |
+| 無硬編碼的密鑰 | |
+| 無明顯注入面（拼接 SQL / 未編碼輸出）| |
 
 ---
 
-### 階段 3：SCG-4 審查報告產出
+### 階段 3：品質審查報告產出
 
-**文件路徑**：`docs/03_testing/SCG-4-REPORT-{System}-PR{N}.md`
+**文件路徑**：`docs/06_quality/CODE-QUALITY-REVIEW-{Module}-{date}.md`
 
 ```markdown
-# SCG-4 Code Review Report — PR #{N}
+# Code Quality Review Report — {模組/PR}
 
-**PR 標題**: {PR 標題}
-**對應 US-ID**: {US-XXX}
+**審查範圍**: {PR ID 或檔案清單}
 **審查者**: {name}
 **審查日期**: {YYYY-MM-DD}
 
-## 規格一致性結論
+## 品質審查結論
 
 | 審查類型 | 結果 | 問題數 |
 |---------|------|--------|
-| A: Contract vs 實作 | ✅ Pass / ❌ Fail | {N} |
-| B: FRD AC vs 實作 | ✅ Pass / ❌ Fail | {N} |
-| C: 架構符合 SRD | ✅ Pass / ❌ Fail | {N} |
-| D: 代碼品質 | ✅ Pass / ❌ Fail | {N} |
+| A: 結構與可讀性 | ✅ Pass / ❌ Fail | {N} |
+| B: 錯誤處理 | ✅ Pass / ❌ Fail | {N} |
+| C: 效能 | ✅ Pass / ❌ Fail | {N} |
+| D: 測試與安全壞味道 | ✅ Pass / ❌ Fail | {N} |
 
 ## 阻擋問題（必修復）
-- [ ] {問題描述}（對應 AC-XXX-Y / Contract 端點 XXX）
+- [ ] {問題描述} — {file:line}
 
 ## 建議改善（非阻擋）
 - {建議}
 
-## SCG-4 閘門結論
+## 品質審查結論
 → **Approved / Request Changes**
 ```
 
----
-
-### 階段 4：RTM 狀態更新 🔴
-
-```bash
-/rtm-generate update    # 更新審查後的 TC 狀態
-/spec-compliance-check  # 確認所有文件規格合規
-```
-
-🔴 確認點：阻擋問題全部修復後，SCG-4 Report 更新為 Approved。
+🔴 確認點：阻擋問題全部修復後，品質審查報告更新為 Approved。
 
 ---
 
-## 強制產出（SDD 文件）
+## 強制產出
 
-| 產出物 | 路徑 | 對應 SCG |
-|--------|------|---------|
-| SCG-4 Review Report | `docs/03_testing/SCG-4-REPORT-{System}-PR{N}.md` | SCG-4 |
+| 產出物 | 路徑 | 用途 |
+|--------|------|------|
+| Code Quality Review Report | `docs/06_quality/CODE-QUALITY-REVIEW-{Module}-{date}.md` | 通用程式品質審查（不綁 SCG-4） |
 
 ---
 
 ## 後置動作
 
 ```
-/sdd-gate SCG-4    # 審查通過後正式執行 SCG-4 閘門
+/refactoring-code-quality   # 依品質審查結果重構（解決壞味道/重複）
 ```
 
-🔷 **本 Skill 協助通過**：SCG-4（PR Review 閘門）
+> 規格一致性（SCG-4）不在本 skill 範圍；若需 SCG-4 規格一致性主審，請執行 `/sdd-review`。
 
 ---
 
-## 相關 Skill
+## 相關 Skill（何時用哪個）
 
-- `/dev-review` — 開發自我審查（提交前）
-- `/spec-compliance-check` — 自動規格驗證
-- `/sdd-gate SCG-4` — 正式閘門確認
+- `/sdd-review` — **PR 後正式 SCG-4 規格一致性主審**（Code vs Contract vs FRD 裁決）
+- `/dev-review` — **提交 commit/PR 前的開發者輕量自審**
+- `/refactoring-code-quality` — 依品質審查結果重構
 
 ---
 
 **基於**: AISDLC-SDD v0.01
-**閘門文件**: `workflow/sdd-spec-first-gate/SDD_SPEC_FIRST_GATE.md`
+**定位**: 通用程式品質審查（不綁 SCG-4；SCG-4 規格一致性主審見 `/sdd-review`）

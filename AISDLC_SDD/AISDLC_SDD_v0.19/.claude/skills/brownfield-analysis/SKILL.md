@@ -1,5 +1,5 @@
 ---
-name: brownfield
+name: brownfield-analysis
 description: 分析既有系統，執行逆向規格工程產出 As-Is SRD，完成 Gap Analysis 和 Tech Debt 量化，為 SDD Brownfield 場景提供 SCG-0/1 前置基線
 user-invocable: true
 disable-model-invocation: false
@@ -12,18 +12,18 @@ allowed-tools:
 
 # Brownfield 逆向規格工程 Skill（SDD 原生）
 
-Brownfield 是 SDD 中最複雜的場景。本 Skill 是 Brownfield 工作流的**起點**，從現有系統逆向產出 As-Is 規格，作為 SCG-0/1 的前置基線。完成後交棒給 `/sa-analyze` 和 `/sd-design`。
+Brownfield 是 SDD 中最複雜的場景。本 Skill 是 Brownfield 工作流的**起點**，從現有系統逆向產出 As-Is 規格，作為 SCG-0/1 的前置基線。完成後交棒給 `/sa-analyst` 和 `/sd-architect`。
 
 ---
 
 ## 觸發方式
 
 ```bash
-/brownfield                        # 完整逆向規格工程（Brownfield 起點）
-/brownfield as-is-srd              # 僅產出 As-Is SRD
-/brownfield gap-analysis           # 僅執行 Gap Analysis
-/brownfield tech-debt              # 僅量化技術債
-/brownfield arch                   # 僅分析架構問題
+/brownfield-analysis                        # 完整逆向規格工程（Brownfield 起點）
+/brownfield-analysis as-is-srd              # 僅產出 As-Is SRD
+/brownfield-analysis gap-analysis           # 僅執行 Gap Analysis
+/brownfield-analysis tech-debt              # 僅量化技術債
+/brownfield-analysis arch                   # 僅分析架構問題
 ```
 
 ---
@@ -211,8 +211,8 @@ Brownfield 是 SDD 中最複雜的場景。本 Skill 是 Brownfield 工作流的
 
 ```
 /adr-generate archaeology           # 逆向挖掘架構決策 ADR
-/sa-analyze brownfield              # SA 基於 As-Is SRD 分析 To-Be 需求
-/sd-design brownfield               # SD 設計 To-Be 架構
+/sa-analyst brownfield              # SA 基於 As-Is SRD 分析 To-Be 需求
+/sd-architect brownfield               # SD 設計 To-Be 架構
 ```
 
 🔷 **本 Skill 產出**：Brownfield 場景的 SCG-0/1 前置基線（非通過閘門，而是提供輸入）
@@ -223,7 +223,7 @@ Brownfield 是 SDD 中最複雜的場景。本 Skill 是 Brownfield 工作流的
 
 - `/adr-generate archaeology` — ADR 逆向挖掘（在本 Skill 中呼叫）
 - `/contract-generate reverse` — API Contract 逆向（在本 Skill 中呼叫）
-- `/sa-analyze brownfield` — 需求分析（本 Skill 完成後接棒）
+- `/sa-analyst brownfield` — 需求分析（本 Skill 完成後接棒）
 - `/refactoring-code-quality` — 代碼重構（依 Tech Debt Spec 執行）
 
 ---

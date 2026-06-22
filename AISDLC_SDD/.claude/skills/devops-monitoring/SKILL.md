@@ -237,7 +237,7 @@ receivers:
 
 ## 相關 Skill
 
-- `/sa-analyze` — 定義 NFR 量化值（monitoring 的閾值依據）
+- `/sa-analyst` — 定義 NFR 量化值（monitoring 的閾值依據）
 - `/devops-kubernetes` — K8s 指標採集（Pod 資源監控）
 - `/performance-optimization` — PBS Gate（效能基準監控）
 - `/release-management` — Runbook 中的監控回滾條件

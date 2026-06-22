@@ -196,7 +196,7 @@ App Store 發布在 SDD 中屬於 SCG-6 Release Gate 的一部分：
 
 ## 相關 Skill
 
-- `/sd-design` — 系統架構設計（Mobile C4 的上下文）
+- `/sd-architect` — 系統架構設計（Mobile C4 的上下文）
 - `/contract-generate` — API Contract（Mobile 端點凍結）
 - `/integration-api-client` — Mobile API Client 設計
 - `/release-management` — App Store 發布流程
