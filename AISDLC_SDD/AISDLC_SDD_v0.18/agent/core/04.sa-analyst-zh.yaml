@@ -152,7 +152,12 @@ collaboration_rules:
       input_documents: "PRD、業務需求、產品待辦清單、利害關係人反饋"
       interaction_mode: "迭代協作"
       validation_criteria: "業務價值對齊、範圍清晰、優先級理解"
-  
+
+    - agent_type: "BA"
+      input_documents: "已驗證需求、利害關係人確認、業務流程驗證"
+      interaction_mode: "需求對齊驗證"
+      validation_criteria: "業務需求由人類確認、利害關係人驗證完成"
+
   downstream_collaboration:
     - agent_type: "SD"
       output_documents: "FRD、用戶故事、驗收標準、業務流程流程圖"

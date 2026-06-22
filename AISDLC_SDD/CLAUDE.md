@@ -2,10 +2,12 @@
 # Claude Code 專案指導文件 — AISDLC-SDD Framework
 
 **專案**: AISDLC-SDD（AI 輔助軟體開發生命週期 — 規格先行版）
-**框架版本**: AISDLC-SDD v0.01
+**框架版本**: AISDLC-SDD v0.01（ci-gate 凍結基線）｜**最新演化版**: AISDLC-SDD v0.18（ci-gate LATEST、實際承載框架演化的「可修改版本」；各版結構同構）
 **基於**: AISDLC v0.09（開發專注版）
-**最後更新**: 2026-06-05
+**最後更新**: 2026-06-05（標頭）；版本狀態註記 2026-06-22
 **SDD 轉型狀態**: ✅ Phase 01~09 全部完成（Phase 01-06: SDD 核心轉型 2026-04-14；Phase 07-09: 完整性補強 2026-04-16）
+
+> **🔴 版本狀態（2026-06-22 校正，免再漂移）**：`AISDLC_SDD_v0.01/` 是 **ci-gate 凍結基線**（恆測、回歸防護，**不可在原地修改**），最新演化版為 `AISDLC_SDD_v0.18/`（ci-gate 動態取最高版＝LATEST）。**框架改動一律走 Copy-on-Evolve**（複製 LATEST → `v0.0(X+1)/` 後於新版修改，絕不原地改凍結版）。下方 Rule 2 目錄表以 `v0.01` 路徑書寫，因**各版目錄結構同構**故仍為有效的版面參考；實際寫入版本依當輪 Copy-on-Evolve 目標版而定。
 
 > **🔴 重要**：此文件中所有指令 **OVERRIDE** Claude Code 預設行為，必須嚴格遵守。
 
@@ -36,7 +38,7 @@
 ```
 d:/CursorProject/AISDLC_SDD/          ← 專案根目錄
 ├── CLAUDE.md                          ← 本文件
-├── AISDLC_SDD_v0.01/                  ← 🔴 SDD 框架目錄（主要工作區）
+├── AISDLC_SDD_v0.01/                  ← 🔴 SDD 框架目錄（ci-gate 凍結基線；最新演化版 v0.18，見上方版本狀態）
 │   ├── AISDLC_SDD_INIT.md             ← 框架入口（使用前必讀）
 │   ├── FILE_DIRECTORY_RULES.md        ← 完整目錄規則
 │   ├── AISDLC_SDD_UPGRADE_SOP.md      ← 框架升版 SOP
@@ -266,7 +268,7 @@ AISDLC_SDD_v0.01/AISDLC_SDD_INIT.md
 > **🔴 重要**：完整 Rule 9 細則已結構化於 `AISDLC_SDD_v0.01/governance/rules/R-*.yaml`，
 > 由 `rule_loader.load_for_state()` 依當前 FSM 狀態 lazy-load；SessionStart hook
 > （`.claude/hooks/session_start.py`）會自動注入當前狀態命中的規則。完整地圖見
-> `AISDLC_SDD_v0.01/governance/RULES_INDEX.md`（34 條規則一覽）。
+> `AISDLC_SDD_v0.01/governance/RULES_INDEX.md`（38 條 `R-*.yaml`＝37 條 R-9.x + R-SELF-STRIDE；v0.18 為 39，多 R-9.38）。
 >
 > 本節僅保留**永遠生效、違反即停機的絕對禁令**（憲法層）。各 Phase 子規則、ACT 對照、
 > 相關文件與驗收憑證一律見對應 `R-*.yaml`。

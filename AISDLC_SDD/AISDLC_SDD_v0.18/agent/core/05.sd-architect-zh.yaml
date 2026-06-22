@@ -159,7 +159,12 @@ collaboration_rules:
       input_documents: "業務約束、效能需求、預算考量"
       interaction_mode: "諮詢審查"
       validation_criteria: "業務對齊確認、技術權衡理解"
-  
+
+    - agent_type: "BA"
+      input_documents: "業務約束、已驗證需求、利害關係人優先級"
+      interaction_mode: "業務背景澄清"
+      validation_criteria: "業務需求由人類驗證和確認"
+
   downstream_collaboration:
     - agent_type: "Dev"
       output_documents: "SRD、技術規格、API合約、架構指導原則"

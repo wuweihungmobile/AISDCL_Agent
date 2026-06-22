@@ -369,10 +369,15 @@
 |----|----------|----------|-----------|--------|----------|------|
 | DEF-AGTREV-001 | 2026-06-22 | 審計（SD 鏡 find/test -f） | pm-planner 幻影 id：`sdd-orchestrator-zh.yaml:183` + `tools/fsm_runtime/subagent_contract.py:54` 登記 `pm-planner`，但實際 PM agent id=`pm-po`（`03.pm-po-agent-zh.yaml:6`）；契約測試僅比對 yaml↔runtime 故 CI 盲區 | P1（潛伏，目前 step_4 未實派 PM） | 框架程式 → v0.18 雙端對齊 | **fixed@v0.18**（grep 零殘留、契約測試 24 passed） |
 | DEF-AGTREV-002 | 2026-06-22 | 審計（SD 鏡） | ~75 條 broken `template_path` 指向不存在目錄/裸檔名（pre-SDD 基底配置未隨 SDD 轉型回填；`sdd_skills` 路徑全對） | P1（多展示性，runtime 衝擊低） | RFC + v0.0(X+1)（裁決書方案一） | **fixed@v0.18**（掌舵者 signoff 方案一：67 rewire + 26 正規化 + 9 刪除→功能性 broken=0；配套新增 `agent_template_lint` 接入 ci-gate 杜絕再生；裁決書 §5） |
-| DEF-AGTREV-003 | 2026-06-22 | 審計（SD 鏡） | collaboration_rules BA 下游斷鏈：`02.ba` downstream→SA/SD，但 `04.sa`/`05.sd` upstream 未列 BA（單向、語意非對稱） | P2 | 規格/文檔 → 下輪 | **routed**（語意一致性，本輪未改） |
+| DEF-AGTREV-003 | 2026-06-22 | 審計（SD 鏡） | collaboration_rules BA 下游斷鏈：`02.ba` downstream→SA/SD，但 `04.sa`/`05.sd` upstream 未列 BA（單向、語意非對稱） | P2 | 規格/文檔 | **fixed@v0.18**（2026-06-22 收尾：`04.sa`/`05.sd` upstream_collaboration 各補 `agent_type: "BA"` 項，鏡像 BA downstream 對其宣告之 output_documents，斷鏈轉雙向對稱；兩檔 `yaml.safe_load` 解析 OK） |
 | DEF-AGTREV-004 | 2026-06-22 | 審計（QA 鏡） | 根/子 `CLAUDE.md` + v0.17 README agent 計數失真（25 vs 26、18 vs 19、4 vs 5 runtime、14 vs 19 specialized）；v0.17 README 漏列 5 個 sdd-* runtime agent | P2 | 文檔 | **fixed@v0.18**（v0.18 README/INIT 計數已修；根/子 `CLAUDE.md` 已於 2026-06-22 加注最新 v0.18 計數＝26/19/5）。**zero-trust 釐清**：原「25 vs 26」措辭非「v0.01 寫錯」——v0.01 實測即 7 core + 18 specialized（含 4 sdd-* runtime）= 25，與其結構樹標注一致；26/19/5 僅屬 v0.18（多 `sdd-playbook-compiler`）。故採「保留 v0.01 數字 + 加注 v0.18 最新」而非翻改版本標籤（整份結構樹改標 v0.18 須連帶重驗 workflow/模板/skills 全部計數＝獨立刷新輪，未動 live override 檔之外的結構描述） |
 
 **本輪修復成果**：v0.18 套用 11 項可自主修復 + broken template 全面重新接線（掌舵者 signoff 方案一）→ DEF-AGTREV-001 全修、002 全修（功能性 broken=0 + 新 lint 兜底）、004 部分修（本接線輪僅修 v0.18 README/INIT 計數）。完整 `ci-gate.sh` 全綠（v0.01:1478 / v0.18:1611 / scripts/tests:56、arch_fitness fail=0、三 lint ✅），獨立 zero-trust 複審 OVERALL PASS。**誠實 flag（接線輪當下）**：DEF-AGTREV-003（BA 斷鏈）與 004 的根/子 CLAUDE.md 計數於本接線輪 routed**未改**，已分流不虛報。
 
-> **後續閉合追記（improving_43 收尾，commit f0e9163）**：DEF-AGTREV-004 剩餘部分（根/子 `CLAUDE.md` 計數加注 v0.18=26/19/5）已補齊 → **004 全閉，狀態見上表列 `fixed@v0.18`**。故上方「004 部分修／本輪未改」僅為**接線輪當時**之歷史 round-record，非現況；現況以表格列為準。**仍 routed 未閉者僅 DEF-AGTREV-003**（BA 下游單向斷鏈，歸入「CLAUDE.md 整體刷新 v0.01→v0.18」獨立輪一併處理）。
+> **後續閉合追記（improving_43 收尾，commit f0e9163）**：DEF-AGTREV-004 剩餘部分（根/子 `CLAUDE.md` 計數加注 v0.18=26/19/5）已補齊 → **004 全閉，狀態見上表列 `fixed@v0.18`**。故上方「004 部分修／本輪未改」僅為**接線輪當時**之歷史 round-record，非現況；現況以表格列為準。
+>
+> **全面收尾追記（2026-06-22，本次「不再延後」批次）**：DEF-AGTREV-003 與「CLAUDE.md 整體刷新」一併落地，**臨時審查塊 DEF-AGTREV-001~004 至此全閉、零 routed 殘留**：
+> 1. **DEF-AGTREV-003 fixed@v0.18**：`04.sa`/`05.sd` upstream 補 BA 項，斷鏈轉雙向（見上表列）。
+> 2. **CLAUDE.md 計數校正（實測對帳）**：governance R-*.yaml 由失真「35/34 條」改為 **38（v0.01）/39（v0.18）**（權威源 RULES_INDEX.md:9「R-9.1~9.38 共 38 條 + R-SELF-STRIDE」；「34」原為 2026-06-05 遷移批次數非檔數）。**經查正確無須改者**：workflow 23（README.md:11 = 8+13+1+1）、docs_template 59（INIT.md:200 = 56 md + 3 yaml）、skills 42、scenarios 10、agents 25/26 — 一律實測吻合。
+> 3. **版本標籤漂移校正（非翻改、零風險）**：根/子 `CLAUDE.md` 加注 `v0.01=ci-gate 凍結基線`、`v0.18=LATEST 可修改演化版`、各版結構同構、框架改動走 Copy-on-Evolve；**不做 30 列路徑硬翻改**（各版同構故 v0.01 路徑仍為有效版面參考，硬翻改反成下版即漂移之新債）。
 
