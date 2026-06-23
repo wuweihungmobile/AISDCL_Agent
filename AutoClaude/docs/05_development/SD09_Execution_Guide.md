@@ -206,6 +206,10 @@ fi
 # 1. 確認背景軸 A 健康（schtasks 是否每日跑 + jsonl 進帳）
 schtasks /query /TN "AutoClaude_Nightly" | findstr Status      # 期望 Ready 非 Disabled
 schtasks /query /TN "AutoClaude_Nightly" /V /FO LIST | findstr "Last Run"  # 期望近 24 小時
+# 1b. 漏跑補跑保障（2026-06-23 根因修復；06-19~21 連 3 天漏跑＝機器 02:00 關機 + StartWhenAvailable=false 不補跑 → 觀察期 #2/#3 順延）
+#     期望 StartWhenAvailable=True（開機後補跑錯過的排程）、DisallowStartIfOnBatteries=False（筆電電池不擋補跑）
+powershell -Command "(Get-ScheduledTask AutoClaude_Nightly).Settings | Select StartWhenAvailable,DisallowStartIfOnBatteries"
+#     若為 False/True → 須提權套用：Set-ScheduledTask（見下方 G0 NextAction 報告）
 
 # 2. 確認觀察期進度（紀律 #13 可見性）
 tail -1 logs/nightly_latest.log                                # 期望 END observation progress
