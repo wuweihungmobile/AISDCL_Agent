@@ -205,3 +205,67 @@ class TestClosureRoundTrip:
         assert rep.scenario == "greenfield"
         assert rep.failed_at_ids == ("AT-001-2-1",)
         assert rep.ac_covered == 1 and rep.ac_total == 2
+
+
+class TestDigestProvenanceInvariant:
+    """improving_56 W-56-2（DEF-56-001）：spec_digest 閉環署名不變量。
+
+    修復「全 digest 截斷成 8 字元 + prompt 正則反解」雙重脆弱漂移：逆向覆蓋報告之
+    spec_digest 必須是 forward adapter 填入之**權威全 "sha256:..." 值**，經 PlaybookTask
+    結構化欄傳遞，而非自人類可讀 prompt 反解。
+    """
+
+    _FULL = "sha256:" + "ab" * 32  # 完整 64 hex sha256
+
+    def _sdd_task(self, *, spec_digest=None, prompt="x"):
+        return PlaybookTask(
+            step_id="sdd-greenfield-at-001-1-1", name="AT-001-1-1",
+            prompt=prompt, spec_digest=spec_digest,
+        )
+
+    def test_structured_field_carries_full_digest(self):
+        """結構化欄存在 → 覆蓋報告帶完整 sha256（非 8 字元截斷）。"""
+        sink = _RecordingSink()
+        plugin = RtmWritebackPlugin(adapter=PlaybookToRtmAdapter(), sink=sink)
+        pb = _pb([self._sdd_task(spec_digest=self._FULL,
+                                 prompt="實作（digest abcdef12）")])
+        plugin.on_event(_post_run_ctx(pb, ["sdd-greenfield-at-001-1-1"]))
+        cov_doc = yaml.safe_load(sink.calls[0][1])
+        # 不變量：結構化全 digest 勝出，而非 prompt 內 8 字元截斷 "abcdef12"
+        assert cov_doc["spec_digest"] == self._FULL
+        assert cov_doc["spec_digest"] != "abcdef12"
+
+    def test_structured_field_wins_over_divergent_prompt(self):
+        """結構化欄與 prompt 反解值相異時，以結構化欄（權威源）為準，杜絕漂移。"""
+        sink = _RecordingSink()
+        plugin = RtmWritebackPlugin(adapter=PlaybookToRtmAdapter(), sink=sink)
+        pb = _pb([self._sdd_task(spec_digest=self._FULL,
+                                 prompt="stale 提示（digest deadbeef）")])
+        plugin.on_event(_post_run_ctx(pb, []))
+        cov_doc = yaml.safe_load(sink.calls[0][1])
+        assert cov_doc["spec_digest"] == self._FULL  # 非 "deadbeef"
+
+    def test_prompt_fallback_when_no_structured_field(self):
+        """向後相容：無結構化欄（外部/舊版 playbook）→ 回退 prompt 反解（零退化）。"""
+        sink = _RecordingSink()
+        plugin = RtmWritebackPlugin(adapter=PlaybookToRtmAdapter(), sink=sink)
+        pb = _pb([self._sdd_task(spec_digest=None, prompt="x（digest abcdef12）")])
+        plugin.on_event(_post_run_ctx(pb, []))
+        cov_doc = yaml.safe_load(sink.calls[0][1])
+        assert cov_doc["spec_digest"] == "abcdef12"
+
+    def test_forward_adapter_populates_full_digest_on_tasks(self):
+        """forward 橋接：compile_tasks 對每個 SDD task 填入權威全 digest（結構化欄）。"""
+        spec = SddSpec(
+            spec_path="docs/03_testing/TEST-CONTRACT-SPEC-Demo.md",
+            digest=self._FULL, scenario="greenfield",
+            contracts=(
+                SpecContract(
+                    ac_id="AC-001-1", at_id="AT-001-1-1", gherkin="Given ... Then PASS",
+                    expected_regex=r"\bPASS\b", evaluator_cmd='pytest tests -k "AT-001-1-1"',
+                    scg_gate="SCG-4",
+                ),
+            ),
+        )
+        tasks = SddToPlaybookAdapter().compile_tasks(spec)
+        assert tasks[0].spec_digest == self._FULL  # 全值，非 split[:8] 截斷

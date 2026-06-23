@@ -85,7 +85,17 @@ class RtmWritebackPlugin:
 
     @staticmethod
     def _extract_digest(sdd_tasks: list[Any]) -> str:
-        """自首個 SDD task 的 prompt 取回 spec digest（forward adapter 內插之 "digest xxxx"）。"""
+        """取回 spec digest 作覆蓋報告溯源指紋。
+
+        improving_56 W-56-2（DEF-56-001）：優先讀 PlaybookTask.spec_digest 結構化欄
+        （forward adapter 填入之權威全 "sha256:..." 值），消除「prompt 正則反解 + 8 字元
+        截斷」的脆弱漂移。僅當結構化欄缺漏（外部手寫 / 舊版編譯之 playbook）時，才回退
+        prompt 反解維持向後相容（零退化）。
+        """
+        for task in sdd_tasks:
+            structured = (getattr(task, "spec_digest", "") or "").strip()
+            if structured:
+                return structured
         for task in sdd_tasks:
             prompt = getattr(task, "prompt", "") or ""
             m = _DIGEST_RE.search(prompt)

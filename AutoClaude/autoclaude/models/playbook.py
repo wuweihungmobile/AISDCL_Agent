@@ -23,6 +23,11 @@ class PlaybookTask(BaseModel):
     max_retries: Optional[int] = None       # None → use global_invariants value
     maintain_context: bool = True           # True → pass --continue to claude
     evaluator_timeout_seconds: int = 120
+    # AutoSDD_improving_56 W-56-2（DEF-56-001）：SDD 規格溯源指紋（完整 "sha256:..."）。
+    # A 軌正向橋接 SddToPlaybookAdapter.compile_tasks 填入 spec.digest（權威全值），
+    # 供逆向橋接 RtmWritebackPlugin 以結構化欄消費（取代脆弱的 prompt 正則反解 +
+    # 8 字元截斷）。Optional 預設 None → YAML/checkpoint 向後相容；非 SDD task 留 None。
+    spec_digest: Optional[str] = None
     # SD_Improving_05 W2 (M-7)：per-step token_guard override
     # 為 dict（非 TokenGuardConfig）以保 YAML backward compat：既有 Playbook YAML
     # 不需修改即可載入；解析時由 TokenGuardPlugin.resolve_per_step_cfg() 套用至 global

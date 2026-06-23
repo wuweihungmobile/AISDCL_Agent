@@ -138,6 +138,9 @@ class SddToPlaybookAdapter:
                 max_retries=_RETRY_BY_GATE.get(c.scg_gate),
                 # 同一 AC 內連續 AT 維持脈絡；跨 AC 隔離污染（§3.1）
                 maintain_context=(c.ac_id == prev_ac),
+                # improving_56 W-56-2（DEF-56-001）：權威全 digest 結構化傳遞給逆向橋接，
+                # 取代 prompt 內 8 字元截斷（digest8 僅留作 prompt 人類可讀提示）。
+                spec_digest=spec.digest,
             ))
             prev_ac = c.ac_id
         return tasks
