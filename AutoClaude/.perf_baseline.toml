@@ -10,18 +10,18 @@ git_sha = "fa2d562"
 captured_at = "2026-06-12T20:06:34.735948+00:00"
 
 [dry_run_e2e]
-p50_ms = 3.517
+p50_ms = 3.035
 p95_ms = 6.201
-p99_ms = 6.201
+p99_ms = 5.38
 samples = 20
-git_sha = "e796c1f"
-captured_at = "2026-06-21T18:04:31.559926+00:00"
+git_sha = "8aa1846"
+captured_at = "2026-06-22T18:05:01.700255+00:00"
 
 [token_halt_roundtrip]
-p50_ms = 0.467
+p50_ms = 0.464
 p95_ms = 0.752
-p99_ms = 0.489
+p99_ms = 0.471
 samples = 20
-git_sha = "e796c1f"
-captured_at = "2026-06-21T18:04:31.559926+00:00"
+git_sha = "8aa1846"
+captured_at = "2026-06-22T18:05:01.700255+00:00"
 
