@@ -1,0 +1,354 @@
+# ============================================================
+# AISDLC v0.09 - Event-Driven Agent Notification System (P3)
+# GitHub Actions Workflow Template
+# ============================================================
+#
+# 使用方式:
+#   1. 複製此檔案至 .github/workflows/agent-notification.yml
+#   2. 配置 Slack Webhook URL (Secrets)
+#   3. 配置通知渠道（PR Comment / Slack / Email）
+#   4. 依情境調整觸發規則與 Agent 清單
+#
+# 事件驅動模型:
+#   pr_opened  → code-analyzer + security-engineer + qa-automation
+#   pr_approved → devops-engineer + qa-tester (deploy staging)
+#   release_tagged → devops-engineer + performance + security (deploy prod)
+#
+# 適用情境:
+#   🔴 強制: greenfield, brownfield, migration, integration, devops, security
+#   ⚠️ 選配: refactoring, performance, testing, documentation
+#
+# 參考文檔: Event_Driven_Agent_Notification_Template.md
+# ============================================================
+
+name: "🔔 Agent Notification System"
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+    branches: [main, develop]
+  pull_request_review:
+    types: [submitted]
+  push:
+    tags:
+      - 'v*'
+  workflow_run:
+    workflows: ["🔒 Layer 0: Security Baseline", "🏗️ Layer 1: Build & Verify"]
+    types: [completed]
+  workflow_dispatch:
+    inputs:
+      notify_channel:
+        description: '通知渠道 (pr_comment/slack/all)'
+        required: false
+        default: 'all'
+
+# ─── 權限 ───
+permissions:
+  contents: read
+  pull-requests: write
+  issues: write
+  deployments: read
+
+# ─── 環境變數 ───
+env:
+  SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+  NOTIFICATION_ENABLED: "true"
+  AGGREGATE_WINDOW: "60"  # 秒，通知聚合窗口
+
+jobs:
+  # ============================================================
+  # Job 1: 收集 Agent 執行結果（PR 事件）
+  # ============================================================
+  collect-agent-results:
+    name: "📊 Collect Agent Results"
+    runs-on: ubuntu-latest
+    if: github.event_name == 'workflow_run'
+    timeout-minutes: 5
+
+    outputs:
+      all_passed: ${{ steps.aggregate.outputs.all_passed }}
+      summary: ${{ steps.aggregate.outputs.summary }}
+      failed_agents: ${{ steps.aggregate.outputs.failed_agents }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # ─── 取得觸發 Workflow 的結果 ───
+      - name: Get Workflow Run Result
+        id: workflow-result
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const run = context.payload.workflow_run;
+            core.setOutput('workflow_name', run.name);
+            core.setOutput('conclusion', run.conclusion);
+            core.setOutput('run_url', run.html_url);
+            core.setOutput('head_sha', run.head_sha);
+
+            // 尋找相關 PR
+            const prs = run.pull_requests;
+            if (prs && prs.length > 0) {
+              core.setOutput('pr_number', prs[0].number);
+            }
+
+      # ─── 匯聚所有 Agent 結果 ───
+      - name: Aggregate Results
+        id: aggregate
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const conclusion = '${{ steps.workflow-result.outputs.conclusion }}';
+            const workflowName = '${{ steps.workflow-result.outputs.workflow_name }}';
+
+            // 收集本次 commit 的所有 workflow run 結果
+            const runs = await github.rest.actions.listWorkflowRunsForRepo({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              head_sha: '${{ steps.workflow-result.outputs.head_sha }}',
+              per_page: 20
+            });
+
+            let summary = [];
+            let allPassed = true;
+            let failedAgents = [];
+
+            for (const run of runs.data.workflow_runs) {
+              if (run.name === '🔔 Agent Notification System') continue;
+
+              const status = run.conclusion === 'success' ? '✅' :
+                           run.conclusion === 'failure' ? '🔴' : '⚠️';
+
+              if (run.conclusion !== 'success' && run.conclusion !== null) {
+                allPassed = false;
+                failedAgents.push(run.name);
+              }
+
+              summary.push(`| ${run.name} | ${status} ${run.conclusion || 'running'} | [查看](${run.html_url}) |`);
+            }
+
+            core.setOutput('all_passed', allPassed.toString());
+            core.setOutput('summary', summary.join('\n'));
+            core.setOutput('failed_agents', failedAgents.join(', '));
+
+  # ============================================================
+  # Job 2: PR Comment 通知（結果匯聚）
+  # ============================================================
+  notify-pr-comment:
+    name: "💬 PR Comment Notification"
+    runs-on: ubuntu-latest
+    needs: [collect-agent-results]
+    if: always() && needs.collect-agent-results.outputs.summary != ''
+    timeout-minutes: 3
+
+    steps:
+      - name: Post PR Comment
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const prNumber = '${{ needs.collect-agent-results.outputs.pr_number }}' || context.issue?.number;
+            if (!prNumber) {
+              console.log('No PR found, skipping comment');
+              return;
+            }
+
+            const allPassed = '${{ needs.collect-agent-results.outputs.all_passed }}' === 'true';
+            const summary = `${{ needs.collect-agent-results.outputs.summary }}`;
+            const failedAgents = '${{ needs.collect-agent-results.outputs.failed_agents }}';
+
+            const verdict = allPassed
+              ? '### ✅ 整體判定: 可合併'
+              : `### 🔴 整體判定: 需修復\n\n**失敗項**: ${failedAgents}`;
+
+            const body = `## 🔔 CI/CD Agent 協作報告
+
+### 狀態摘要
+| Agent | 狀態 | 詳情 |
+|-------|------|------|
+${summary}
+
+${verdict}
+
+---
+⏰ 更新時間: ${new Date().toISOString()}
+🤖 Generated by AISDLC Event-Driven Agent Notification System`;
+
+            // 更新或建立評論（避免重複）
+            const comments = await github.rest.issues.listComments({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: parseInt(prNumber)
+            });
+
+            const botComment = comments.data.find(c =>
+              c.body.includes('🔔 CI/CD Agent 協作報告')
+            );
+
+            if (botComment) {
+              await github.rest.issues.updateComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                comment_id: botComment.id,
+                body: body
+              });
+            } else {
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: parseInt(prNumber),
+                body: body
+              });
+            }
+
+  # ============================================================
+  # Job 3: Slack 通知
+  # ============================================================
+  notify-slack:
+    name: "📢 Slack Notification"
+    runs-on: ubuntu-latest
+    needs: [collect-agent-results]
+    if: always() && env.SLACK_WEBHOOK_URL != ''
+    timeout-minutes: 2
+
+    steps:
+      - name: Send Slack Notification
+        run: |
+          ALL_PASSED="${{ needs.collect-agent-results.outputs.all_passed }}"
+          FAILED="${{ needs.collect-agent-results.outputs.failed_agents }}"
+
+          if [ "$ALL_PASSED" = "true" ]; then
+            COLOR="#36a64f"
+            TITLE="✅ Pipeline 通過"
+            TEXT="所有 Agent 檢查通過"
+          else
+            COLOR="#e01e5a"
+            TITLE="🔴 Pipeline 失敗"
+            TEXT="失敗項: ${FAILED}"
+          fi
+
+          # 依嚴重程度決定是否發送
+          # Critical/High → 立即發送
+          # Medium/Low → 批次（此處簡化為全部即時）
+
+          curl -s -X POST "$SLACK_WEBHOOK_URL" \
+            -H 'Content-type: application/json' \
+            -d "{
+              \"attachments\": [{
+                \"color\": \"${COLOR}\",
+                \"title\": \"${TITLE}\",
+                \"text\": \"${TEXT}\",
+                \"fields\": [
+                  {\"title\": \"Repository\", \"value\": \"${{ github.repository }}\", \"short\": true},
+                  {\"title\": \"Branch\", \"value\": \"${{ github.head_ref || github.ref_name }}\", \"short\": true}
+                ],
+                \"footer\": \"AISDLC Agent Notification\",
+                \"ts\": $(date +%s)
+              }]
+            }" || echo "⚠️ Slack 通知發送失敗（不阻塞 Pipeline）"
+
+  # ============================================================
+  # Job 4: Release 部署通知
+  # ============================================================
+  notify-release:
+    name: "🚀 Release Notification"
+    runs-on: ubuntu-latest
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+    timeout-minutes: 3
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Get Release Info
+        id: release-info
+        run: |
+          TAG="${GITHUB_REF#refs/tags/}"
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          echo "date=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$GITHUB_OUTPUT"
+
+          # 取得最近的 changelog（如果有）
+          if [ -f "CHANGELOG.md" ]; then
+            # 取得最新版本的 changelog 內容（前 20 行）
+            head -20 CHANGELOG.md > /tmp/changelog-excerpt.txt
+            echo "has_changelog=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "has_changelog=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Notify Release via Slack
+        if: env.SLACK_WEBHOOK_URL != ''
+        run: |
+          TAG="${{ steps.release-info.outputs.tag }}"
+
+          curl -s -X POST "$SLACK_WEBHOOK_URL" \
+            -H 'Content-type: application/json' \
+            -d "{
+              \"attachments\": [{
+                \"color\": \"#2eb886\",
+                \"title\": \"🚀 版本 ${TAG} 開始部署\",
+                \"text\": \"生產環境部署已啟動，Canary 策略 5% → 25% → 50% → 100%\",
+                \"fields\": [
+                  {\"title\": \"版本\", \"value\": \"${TAG}\", \"short\": true},
+                  {\"title\": \"策略\", \"value\": \"Canary\", \"short\": true}
+                ],
+                \"footer\": \"AISDLC Agent Notification\",
+                \"ts\": $(date +%s)
+              }]
+            }" || echo "⚠️ Slack 通知發送失敗"
+
+      - name: Create GitHub Deployment Status
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const tag = '${{ steps.release-info.outputs.tag }}';
+
+            // 建立 deployment 記錄
+            const deployment = await github.rest.repos.createDeployment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              ref: tag,
+              environment: 'production',
+              description: `Deploy ${tag} to production`,
+              auto_merge: false,
+              required_contexts: []
+            });
+
+            if (deployment.data.id) {
+              await github.rest.repos.createDeploymentStatus({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                deployment_id: deployment.data.id,
+                state: 'in_progress',
+                description: 'Canary deployment started'
+              });
+            }
+
+  # ============================================================
+  # Job 5: Pipeline 失敗即時通知
+  # ============================================================
+  notify-failure:
+    name: "🔴 Failure Alert"
+    runs-on: ubuntu-latest
+    if: failure()
+    timeout-minutes: 2
+
+    steps:
+      - name: Alert on Pipeline Failure
+        if: env.SLACK_WEBHOOK_URL != ''
+        run: |
+          curl -s -X POST "$SLACK_WEBHOOK_URL" \
+            -H 'Content-type: application/json' \
+            -d "{
+              \"attachments\": [{
+                \"color\": \"#e01e5a\",
+                \"title\": \"🔴 Pipeline 失敗警報\",
+                \"text\": \"Agent Notification Pipeline 自身發生錯誤\",
+                \"fields\": [
+                  {\"title\": \"Repository\", \"value\": \"${{ github.repository }}\", \"short\": true},
+                  {\"title\": \"Workflow\", \"value\": \"${{ github.workflow }}\", \"short\": true},
+                  {\"title\": \"Run\", \"value\": \"${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}\", \"short\": false}
+                ],
+                \"footer\": \"AISDLC Agent Notification\",
+                \"ts\": $(date +%s)
+              }]
+            }" || true

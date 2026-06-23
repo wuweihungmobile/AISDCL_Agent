@@ -208,3 +208,9 @@ AISDLC_SDD_v0.19/chaos-report.json
 AISDLC_SDD_v0.20/build/reports/
 AISDLC_SDD_v0.20/arch-fitness.json
 AISDLC_SDD_v0.20/chaos-report.json
+
+# ── v0.21 runtime 取證產物排除（improving_55 B 軌：DEF-54-001 守門機制覆蓋度量 — enforcement_mechanism 五分類 SSOT + comprehensive_governance_coverage 誠實證書）──
+# 同 v0.13~v0.20：FSM 種子模板在 tracked 源碼位 tools/fsm_runtime/templates/，build/reports/ 整樹排除。
+AISDLC_SDD_v0.21/build/reports/
+AISDLC_SDD_v0.21/arch-fitness.json
+AISDLC_SDD_v0.21/chaos-report.json

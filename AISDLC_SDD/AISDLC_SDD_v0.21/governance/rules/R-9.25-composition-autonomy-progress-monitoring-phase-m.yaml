@@ -1,0 +1,40 @@
+id: R-9.25
+title: Phase M 組合級意圖自治形式化 + 自我演化進步性監測 + 組合級脆弱性
+trigger_states:
+  - BACKLOG_PRIORITIZED
+  - SCAFFOLD_GC
+  - MEMORY_CONSOLIDATION
+severity: high
+maturity: active
+spec: >
+  L10 完整奠基（組合級）+ 自我演化進步性形式化。9.25.1 組合協商有界（RenegotiationBounded）：
+  任兩意圖在共享 spec 節點的協商→否定→再協商循環 ≤ SDD_COMPOSITION_RENEG_MAX clamp[1,5]
+  預設 2，超限→CPLAN_ESCALATION，絕不無限協商 livelock；共享節點再協商必經
+  composition_halt_monitor.guard_negotiate，禁繞過。9.25.2 組合一致性（CompositionConsistent）：
+  進入 CPLAN_COMMIT/STABLE 的意圖集合在共享節點上兩兩不矛盾（未解衝突=0），帶未解衝突不得
+  commit（必導 NEGOTIATE/ESCALATION）；intent_composer 絕不自動 commit 跨意圖排程、繞過
+  BACKLOG_PRIORITIZED 人工 signoff（守 Rule 8 / Rule 9.23.2）。9.25.3 COMPOSITION_FSM 獨立
+  形式化：COMPOSITION_FSM.tla 自有命名空間，不併入單軌 SDD_FSM.tla；5 safety(TypeOK/
+  CompositionConsistent/RenegotiationBounded/ConflictResolvedOrEscalated/StableIsFixpoint)
+  +1 liveness(EventuallyComposed) No error + 離線 BFS reachable=N/N；單軌 SDD_FSM 維持 42、
+  META_FSM/FLEET_FSM 不回歸（CPLAN_* 不洩漏進單軌）。9.25.4 進步性監測 advisory + 不自我放水：
+  capability_trajectory_monitor 只標記/建議，plateau/regression 絕不自動觸發典範轉移或任何
+  spec/規則/鷹架變更，只導人類舵手；分數凍結 TRAJECTORY_PROFILE_VERSION，調權重須 bump。
+  9.25.5 淨負天花板鷹架退役須人工 gate：scaffold_ceiling_detector 只建議，退役仍在 fire 的
+  鷹架必經 rule_loader.set_maturity(reviewed_by=)，detector 絕不自呼叫退役（守 Rule 9.20.5）。
+  9.25.6 組合脆弱性 advisory：composition_blast_analyzer 只餵排程器/steersman 建議（高組合脆弱
+  →序列化），絕不自動改 spec、絕不阻塞 SCG；分數凍結 COMPOSITION_FRAGILITY_PROFILE_VERSION，
+  調權重須 bump。9.25.7 進步性訊號不可降級為 auto-action：plateau/regression/ceiling 三訊號一律
+  route 至人類舵手，絕不自動 paradigm-shift/退役/改排序（守 Rule 8 人類設計環境掌舵者）。
+  對應 intent_composer / composition_halt_monitor / capability_trajectory_monitor /
+  scaffold_ceiling_detector / composition_blast_analyzer。禁止：intent_composer 自動 commit 排程
+  繞過 BACKLOG_PRIORITIZED、COMPOSITION_FSM 併入單軌污染 reachable、跨意圖協商無上限 livelock、
+  trajectory plateau 自動觸發 paradigm-shift/退役、ceiling detector 自動退役仍在 fire 鷹架、
+  blast 自動改 spec 或阻塞 SCG、調 trajectory/blast 權重不 bump、COMPOSITION_FSM 不過 tlc_runner
+  /BFS 即宣稱組合停機、未經 OPEN-M.7 私自開 HTTP 外聯做 L9 完整活體實驗（破 OPEN-10.6）。
+test_ref: tools/fsm_runtime/tests/test_phase_m.py
+enforcement_mechanism: meta_loop
+scaffold_roi:
+  fire_count: 0
+  catch_count: 0
+  false_positive_count: 0
