@@ -303,7 +303,7 @@ tasks:
 
 **設定檔**：[.claude/settings.json](.claude/settings.json)（hooks 啟用列表）
 
-**目前啟用的 5 個 Hook**（SD_09 W0 後新增 4 個 + W2 nightly audit 後新增 1 個）：
+**目前啟用的 6 個 Hook**（SD_09 W0 後新增 4 個 + W2 nightly audit 後新增 1 個 + ps1 編碼根治 1 個）：
 
 | Hook | 事件 | Script | 動作 |
 |------|------|--------|------|
@@ -312,6 +312,7 @@ tasks:
 | LOC 預算檢查 | PostToolUse(Edit\|Write) | [loc_budget_check.py](tools/hooks/loc_budget_check.py) | `.py` 超 tier budget → warn；CLAUDE.md > 400 行或單行 > 800 codepoint → exit 2 阻斷（#10a） |
 | Snapshot 新鮮度 | Stop | [claude_md_freshness.py](tools/hooks/claude_md_freshness.py) | `snapshot_sync.py --check` drift → warn；CLAUDE.md > 400 行 → exit 2 |
 | .sh LF 行尾 | PostToolUse(Edit\|Write) | [check_sh_eol.py](tools/hooks/check_sh_eol.py) | `.sh`/`.bash` 含 CR/CRLF → exit 2 阻斷（紀律 #8 / SD_09 W2 nightly audit） |
+| ps1 編碼根治 | PostToolUse(Edit\|Write) | [check_ps1_encoding.py](tools/hooks/check_ps1_encoding.py) | `.ps1`/`.psm1`/`.psd1` 含非 ASCII 且無 BOM → **自動補 UTF-8 BOM**（防 PS5.1 ANSI 亂碼破壞 parser；auto-fix 不阻斷，因 Write 無法產 BOM）。同 wire 於根 `.claude/settings.json` 使 root session 亦生效 |
 
 **Backlog（暫未啟用）**：`build_test_cycle.py`（PostToolUse 每個 py edit 跑測試太慢）、`agent_autoloader.py`（yaml header 注入誤觸發風險高）、`check_id_naming.py`（誤判率高）、`nightly_guard.py`（後續評估）。
 

@@ -24,6 +24,10 @@
           {
             "type": "command",
             "command": "python tools/hooks/check_sh_eol.py"
+          },
+          {
+            "type": "command",
+            "command": "python tools/hooks/check_ps1_encoding.py"
           }
         ]
       }

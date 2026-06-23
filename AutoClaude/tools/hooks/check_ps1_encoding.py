@@ -1,0 +1,99 @@
+#!/usr/bin/env python
+"""PostToolUse(Edit|Write) — 對剛寫入的 PowerShell 腳本自動修復編碼（徹底根治 PS5.1 亂碼）。
+
+問題根因（已多次復發）：Write 工具把含中文的 .ps1 存成 UTF-8 **無 BOM** →
+Windows PowerShell 5.1 以系統 ANSI codepage（zh-TW=cp950/Big5）解讀 → 中文亂碼
+破壞 parser（MissingArrayIndexExpression / 字串遺漏結尾字元）。
+
+為何 auto-fix 而非 block（對比 check_sh_eol.py 的 exit 2 阻斷）：
+  Write 工具結構上無法輸出 BOM，光「規定要 BOM」永遠滿足不了 → 必須由 hook
+  在事後自動補 BOM，才能真正不復發、零人工/模型介入。
+
+行為（best-effort，永遠 exit 0，絕不阻斷工具流）：
+  - 非 .ps1/.psm1/.psd1               → no-op
+  - 已含 UTF-8 BOM (EF BB BF)         → no-op
+  - 純 ASCII（全部 < 0x80）            → no-op（PS5.1 解 ASCII 無虞，免動）
+  - 含非 ASCII 且無 BOM               → 自動於檔首補 UTF-8 BOM，stderr 提示
+
+root session 不遞迴載子目錄 hook，故本 script 同時 wire 於根 .claude/settings.json
+（以 ${CLAUDE_PROJECT_DIR}/AutoClaude/tools/hooks/ 絕對呼叫）與 AutoClaude/.claude。
+"""
+from __future__ import annotations
+
+import io
+import json
+import sys
+from pathlib import Path
+
+PS_SUFFIXES = {".ps1", ".psm1", ".psd1"}
+UTF8_BOM = b"\xef\xbb\xbf"
+
+
+def _init_utf8_streams() -> None:
+    try:
+        sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8", errors="replace")
+        sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding="utf-8", errors="replace")
+    except Exception:
+        pass
+
+
+def read_hook_payload() -> dict:
+    raw = sys.stdin.read().strip()
+    if not raw:
+        return {}
+    try:
+        return json.loads(raw)
+    except json.JSONDecodeError:
+        return {}
+
+
+def resolve_path(file_path: str) -> Path | None:
+    if not file_path:
+        return None
+    try:
+        p = Path(file_path)
+        return p if p.is_absolute() else p.resolve()
+    except (ValueError, OSError):
+        return None
+
+
+def fix_ps1_encoding(abs_path: Path) -> int:
+    """回傳 1 = 已補 BOM，0 = 未動（no-op）。"""
+    if abs_path.suffix.lower() not in PS_SUFFIXES:
+        return 0
+    if not abs_path.exists():
+        return 0
+    try:
+        raw = abs_path.read_bytes()
+    except OSError:
+        return 0
+    if raw.startswith(UTF8_BOM):
+        return 0
+    if all(b < 0x80 for b in raw):  # 純 ASCII，PS5.1 無虞
+        return 0
+    try:
+        abs_path.write_bytes(UTF8_BOM + raw)
+    except OSError:
+        return 0
+    print(
+        f"[check_ps1_encoding] AUTO-FIX: 已為 '{abs_path.name}' 補上 UTF-8 BOM"
+        f"（含非 ASCII 字元；防 PowerShell 5.1 ANSI 解讀亂碼破壞 parser）。",
+        file=sys.stderr,
+    )
+    return 1
+
+
+def main() -> int:
+    payload = read_hook_payload()
+    tool_input = payload.get("tool_input") or {}
+    file_path = tool_input.get("file_path") or ""
+    abs_path = resolve_path(file_path)
+    if abs_path is None:
+        return 0
+    fix_ps1_encoding(abs_path)
+    return 0  # auto-fix：永不阻斷
+
+
+if __name__ == "__main__":
+    _init_utf8_streams()
+    sys.exit(main())
