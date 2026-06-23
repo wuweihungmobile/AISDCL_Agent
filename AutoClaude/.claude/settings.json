@@ -27,7 +27,8 @@
           },
           {
             "type": "command",
-            "command": "python tools/hooks/check_ps1_encoding.py"
+            "command": "python tools/hooks/check_ps1_encoding.py",
+            "timeout": 10
           }
         ]
       }

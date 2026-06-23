@@ -13,7 +13,11 @@ Windows PowerShell 5.1 以系統 ANSI codepage（zh-TW=cp950/Big5）解讀 → �
   - 非 .ps1/.psm1/.psd1               → no-op
   - 已含 UTF-8 BOM (EF BB BF)         → no-op
   - 純 ASCII（全部 < 0x80）            → no-op（PS5.1 解 ASCII 無虞，免動）
-  - 含非 ASCII 且無 BOM               → 自動於檔首補 UTF-8 BOM，stderr 提示
+  - 含非 ASCII 但**非合法 UTF-8**      → no-op（UTF-16 BOM/Big5/cp950 等；補 UTF-8 BOM
+                                        只會製造雙 BOM 或「宣告 UTF-8 內容卻是 Big5」矛盾檔，
+                                        反而惡化——scope 前提是來源＝Claude Write＝UTF-8，
+                                        此分支為縱深防禦）
+  - 含非 ASCII 且為合法 UTF-8 且無 BOM → 自動於檔首補 UTF-8 BOM，stderr 提示
 
 root session 不遞迴載子目錄 hook，故本 script 同時 wire 於根 .claude/settings.json
 （以 ${CLAUDE_PROJECT_DIR}/AutoClaude/tools/hooks/ 絕對呼叫）與 AutoClaude/.claude。
@@ -42,9 +46,10 @@ def read_hook_payload() -> dict:
     if not raw:
         return {}
     try:
-        return json.loads(raw)
+        obj = json.loads(raw)
     except json.JSONDecodeError:
         return {}
+    return obj if isinstance(obj, dict) else {}  # 頂層非 dict（array/number/str）→ 視為空
 
 
 def resolve_path(file_path: str) -> Path | None:
@@ -53,7 +58,7 @@ def resolve_path(file_path: str) -> Path | None:
     try:
         p = Path(file_path)
         return p if p.is_absolute() else p.resolve()
-    except (ValueError, OSError):
+    except (ValueError, OSError, TypeError):  # TypeError：file_path 非 str 時 Path() 會拋
         return None
 
 
@@ -72,6 +77,10 @@ def fix_ps1_encoding(abs_path: Path) -> int:
     if all(b < 0x80 for b in raw):  # 純 ASCII，PS5.1 無虞
         return 0
     try:
+        raw.decode("utf-8")  # 僅對合法 UTF-8 補 BOM；UTF-16/Big5/cp950 等非 UTF-8 → no-op
+    except UnicodeDecodeError:
+        return 0
+    try:
         abs_path.write_bytes(UTF8_BOM + raw)
     except OSError:
         return 0
@@ -85,8 +94,12 @@ def fix_ps1_encoding(abs_path: Path) -> int:
 
 def main() -> int:
     payload = read_hook_payload()
-    tool_input = payload.get("tool_input") or {}
-    file_path = tool_input.get("file_path") or ""
+    tool_input = payload.get("tool_input")
+    if not isinstance(tool_input, dict):  # tool_input 為 list/str/null → 安全 no-op
+        return 0
+    file_path = tool_input.get("file_path")
+    if not isinstance(file_path, str) or not file_path:  # file_path 非 str/空 → 安全 no-op
+        return 0
     abs_path = resolve_path(file_path)
     if abs_path is None:
         return 0
