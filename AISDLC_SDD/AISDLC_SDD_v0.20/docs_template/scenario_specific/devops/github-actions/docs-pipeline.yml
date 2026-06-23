@@ -1,0 +1,293 @@
+# ============================================================
+# AISDLC v0.09 - Documentation Pipeline (P2)
+# GitHub Actions Workflow Template
+# ============================================================
+#
+# 使用方式:
+#   1. 複製此檔案至 .github/workflows/docs-pipeline.yml
+#   2. 依文檔工具調整 build 命令（預設 MkDocs）
+#   3. 配置部署目標（預設 GitHub Pages）
+#   4. 確保 Layer 0 已配置
+#
+# Pipeline 流程:
+#   PR 階段:  Doc Lint + Link Check（< 3 分鐘）
+#   Main 合併: Build + Deploy-Docs
+#   Nightly:   完整外部連結檢查
+#
+# 適用情境:
+#   🔴 強制: documentation
+#   ⚠️ 選配: greenfield, brownfield, migration, integration
+#
+# 參考文檔: Documentation_Pipeline_Template.md
+# ============================================================
+
+name: "📝 Documentation Pipeline"
+
+on:
+  pull_request:
+    branches: [main, develop]
+    paths:
+      - '**/*.md'
+      - 'docs/**'
+      - 'mkdocs.yml'
+      - '.markdownlint.yml'
+      - '.cspell.json'
+  push:
+    branches: [main]
+    paths:
+      - '**/*.md'
+      - 'docs/**'
+      - 'mkdocs.yml'
+  # Nightly 完整外部連結檢查
+  schedule:
+    - cron: '0 3 * * *'  # 每日 03:00 UTC
+  workflow_dispatch:
+
+# ─── 權限 ───
+permissions:
+  contents: read
+  pull-requests: write
+  pages: write
+  id-token: write
+
+jobs:
+  # ============================================================
+  # Job 1: Doc Lint（PR 階段）
+  # ============================================================
+  doc-lint:
+    name: "📋 Doc Lint"
+    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request' || github.event_name == 'push'
+    timeout-minutes: 3
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      # ─── Markdown Lint ───
+      - name: Install markdownlint-cli2
+        run: npm install -g markdownlint-cli2
+
+      - name: Run Markdown Lint
+        id: mdlint
+        continue-on-error: true
+        run: |
+          echo "::group::Markdown Lint"
+          markdownlint-cli2 "**/*.md" "#node_modules" 2>&1 | tee mdlint-output.txt
+          echo "exit_code=$?" >> "$GITHUB_OUTPUT"
+          echo "::endgroup::"
+
+      # ─── 拼字檢查 ───
+      - name: Install cspell
+        run: npm install -g cspell
+
+      - name: Run Spell Check
+        id: spellcheck
+        continue-on-error: true
+        run: |
+          echo "::group::Spell Check"
+          cspell "**/*.md" --no-progress 2>&1 | tee spell-output.txt
+          echo "exit_code=$?" >> "$GITHUB_OUTPUT"
+          echo "::endgroup::"
+
+      # ─── 結果判定 ───
+      - name: Evaluate Results
+        run: |
+          mdlint_exit="${{ steps.mdlint.outputs.exit_code }}"
+          spell_exit="${{ steps.spellcheck.outputs.exit_code }}"
+
+          if [ "$mdlint_exit" != "0" ]; then
+            echo "🔴 Markdown Lint 發現問題"
+            exit 1
+          fi
+
+          if [ "$spell_exit" != "0" ]; then
+            echo "⚠️ 拼字檢查發現問題（警告，不阻塞）"
+          fi
+
+          echo "✅ Doc Lint 通過"
+
+      - name: Upload Lint Results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: doc-lint-results
+          path: |
+            mdlint-output.txt
+            spell-output.txt
+          retention-days: 7
+
+  # ============================================================
+  # Job 2: Link Check（PR + Nightly）
+  # ============================================================
+  link-check:
+    name: "🔗 Link Check"
+    runs-on: ubuntu-latest
+    if: github.event_name != 'push'
+    timeout-minutes: 5
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # ─── 安裝 lychee ───
+      - name: Install lychee
+        run: |
+          curl -sL https://github.com/lycheeverse/lychee/releases/latest/download/lychee-x86_64-unknown-linux-gnu.tar.gz | tar xz
+          sudo mv lychee /usr/local/bin/
+
+      # ─── 內部連結檢查（PR 階段） ───
+      - name: Check Internal Links
+        id: internal-links
+        if: github.event_name == 'pull_request'
+        run: |
+          echo "::group::Internal Link Check"
+          lychee \
+            --offline \
+            --no-progress \
+            --format markdown \
+            --output internal-links-report.md \
+            '**/*.md' 2>&1 | tee link-check-output.txt
+          echo "exit_code=$?" >> "$GITHUB_OUTPUT"
+          echo "::endgroup::"
+
+      # ─── 完整連結檢查（Nightly） ───
+      - name: Check All Links (including external)
+        id: all-links
+        if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+        timeout-minutes: 30
+        continue-on-error: true
+        run: |
+          echo "::group::Full Link Check (Internal + External)"
+          lychee \
+            --no-progress \
+            --format markdown \
+            --output full-links-report.md \
+            --timeout 30 \
+            --max-concurrency 5 \
+            --accept 200,204,301,302 \
+            '**/*.md' 2>&1 | tee full-link-check-output.txt
+          echo "exit_code=$?" >> "$GITHUB_OUTPUT"
+          echo "::endgroup::"
+
+      # ─── PR 評論 ───
+      - name: Comment PR with Link Check Results
+        if: github.event_name == 'pull_request'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const linkFailed = '${{ steps.internal-links.outputs.exit_code }}' !== '0';
+
+            let body = `## 🔗 Link Check 結果\n\n`;
+
+            if (linkFailed) {
+              body += `🔴 **發現斷裂連結** — 請修復後重新提交\n\n`;
+              if (fs.existsSync('internal-links-report.md')) {
+                const report = fs.readFileSync('internal-links-report.md', 'utf8');
+                body += `<details><summary>斷裂連結詳情</summary>\n\n${report}\n\n</details>`;
+              }
+            } else {
+              body += `✅ **所有內部連結正常**\n`;
+            }
+
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+              body: body
+            });
+
+      # ─── 內部連結失敗阻塞 ───
+      - name: Fail on Broken Internal Links
+        if: github.event_name == 'pull_request' && steps.internal-links.outputs.exit_code != '0'
+        run: |
+          echo "🔴 發現斷裂的內部連結，請修復後重新提交 PR"
+          exit 1
+
+      - name: Upload Link Check Results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: link-check-results
+          path: |
+            *-links-report.md
+            *-link-check-output.txt
+          retention-days: 30
+
+  # ============================================================
+  # Job 3: Doc Build + Deploy（Main 合併後）
+  # ============================================================
+  doc-build-deploy:
+    name: "🚀 Build & Deploy Docs"
+    runs-on: ubuntu-latest
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    timeout-minutes: 10
+    # 依賴 doc-lint 通過
+    needs: [doc-lint]
+
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # ─── 建置文檔（依工具取消註解） ───
+
+      # --- MkDocs (推薦) ---
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install MkDocs
+        run: |
+          pip install mkdocs-material
+          pip install mkdocs-minify-plugin
+
+      - name: Build Docs
+        run: mkdocs build --strict
+
+      # --- Docusaurus ---
+      # - name: Setup Node.js
+      #   uses: actions/setup-node@v4
+      #   with:
+      #     node-version: '20'
+      # - name: Install & Build
+      #   run: |
+      #     cd docs
+      #     npm ci
+      #     npm run build
+
+      # --- VitePress ---
+      # - name: Build VitePress
+      #   run: |
+      #     npm ci
+      #     npx vitepress build docs
+
+      # ─── 部署至 GitHub Pages ───
+      - name: Setup Pages
+        uses: actions/configure-pages@v4
+
+      - name: Upload artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: 'site'  # MkDocs 預設輸出目錄
+
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
+
+      - name: Deployment Summary
+        run: |
+          echo "## 🚀 文檔部署完成" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "📖 文檔站點已更新" >> "$GITHUB_STEP_SUMMARY"
+          echo "⏰ 部署時間: $(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$GITHUB_STEP_SUMMARY"

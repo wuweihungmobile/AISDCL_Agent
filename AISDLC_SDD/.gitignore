@@ -202,3 +202,9 @@ AISDLC_SDD_v0.18/chaos-report.json
 AISDLC_SDD_v0.19/build/reports/
 AISDLC_SDD_v0.19/arch-fitness.json
 AISDLC_SDD_v0.19/chaos-report.json
+
+# ── v0.20 runtime 取證產物排除（improving_53 B 軌：DEF-CLDREV-030 hub_sync 對外/快取 yaml 大小上限 — billion-laughs/超大檔記憶體耗盡深防禦）──
+# 同 v0.13~v0.19：FSM 種子模板在 tracked 源碼位 tools/fsm_runtime/templates/，build/reports/ 整樹排除。
+AISDLC_SDD_v0.20/build/reports/
+AISDLC_SDD_v0.20/arch-fitness.json
+AISDLC_SDD_v0.20/chaos-report.json
