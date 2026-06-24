@@ -1,0 +1,57 @@
+id: R-9.29
+title: Phase Q 價值維度的自我擴充（meta-meta 層有界本體論演化）
+trigger_states:
+  - LEARNING_COMMIT
+  - MEMORY_CONSOLIDATION
+severity: high
+maturity: active
+spec: >
+  L10 完整之「離線活體 meta-meta 迴圈 · 價值維度自我擴充」切片：把 Phase O/P 只能在固定維度
+  集合內調權重（O 調 1 個評分器、P 一致調整套固定 8 維價值向量）的能力，推進到系統能自我提案
+  新增一條價值維度（新評判軸），並納管「擴充價值空間維度」憑空長出、N 維固定時不存在而 N+1
+  維才出現的新危害：維度 Goodhart（自利噪音軸 / 既有軸再投影的冗餘軸）、維度基數爆炸（無界
+  增維的 meta-meta 停機危害）、本體論劫持（一次大改系統在乎什麼）。9.29.1 維度自我擴充骨架
+  （SelfExpandingDimensionSkeleton）：價值維度提案經 value_dimension_registry 在 bounded 候選池
+  （節點 ≤ SDD_DIM_PROPOSE_BUDGET clamp[4,128] 預設 32）列舉；只提案、絕不自動納入、絕不自寫
+  維度集合常數；結構性不 import 任何必要性評估器 / 不讀必要性語料（對抗分離，編譯期隔離斷言）。
+  9.29.2 維度必要性反 Goodhart（DimensionAntiGoodhart）：任一候選新維度的 capability-delta tier
+  唯一合法來源為 proposer 不可見、content-hashed 凍結的維度必要性 held-out（增量覆蓋 ∧ 非冗餘）
+  勝率；proposer 自評 / 自算覆蓋率結構性禁止充當必要性 capability-delta；proposer 自評必要但
+  oracle 判不必要 / 冗餘一律以 oracle 為準；自利噪音軸（增量覆蓋 < 增量覆蓋門檻
+  SDD_DIM_COVERAGE_MARGIN clamp[0,1] 預設 0.10）+ 冗餘軸（與既有維度排序一致率
+  ≥ SDD_DIM_REDUNDANCY_MAX 預設 0.95）兩道正交門檻並列、攔截零漏放（增量覆蓋門檻由
+  value_dimension_registry 與 dimension_necessity_oracle 共用同一 env）；另
+  SDD_DIM_AUG_WEIGHT（預設 1.0）為 dimension_necessity_oracle 在 augmented 選擇時新維度的
+  次要可調權重旋鈕（利完整審計）。9.29.3 維度基數有界停機
+  （DimensionCardinalityBounded）：現存活躍 value-dimension 維度數 ≤ SDD_DIM_CARDINALITY_MAX
+  （clamp[1,32] 預設 16）；觸頂 → DimensionCardinalityExceeded → MFSM_ESCALATION
+  （meta_halt_monitor.guard_dimension_expansion）；value-dimension add↔retire 共用既有 META_FSM
+  churn/ratchet（退役維度再採納須挾 necessity capability-delta，沿用 GraduationRatchet）；誠實
+  標註：stock 天花板（每條新維度首採、per-fingerprint churn=0、且 value-dimension 不以
+  `-profile:` 結尾故 Phase P 聚合速率窗亦盲）是更緊的 runtime stock 精煉，由
+  guard_dimension_expansion + DIMENSION_EXPLOSION_FLAP chaos enforce；META_FSM.tla 的
+  DimensionCardinalityBounded 為 single-counter 抽象之歸約引用（增維迴圈 add↔retire 不無限抖動，
+  與單指紋 churn 迴圈同構）；重用既有 META_FSM、僅補 DimensionCardinalityBounded INVARIANT、不增
+  狀態 / 變數、不增第六軌；五軌 TLC（SDD 42 / META 13 / FLEET 7 / COMPOSITION 21 / OPTIMIZATION 12）
+  全不回歸、value-dimension 不污染單軌 SDD_FSM.tla。9.29.4 反 big-bang 本體論擴張
+  （NoUnboundedOntologyExpansion）：每週期至多 K_dim（SDD_DIM_EXPAND_K 預設 1，比 Phase P
+  calibration K=2 更嚴——增維是更高賭注的本體論改動）條新維度可進 proposed-pending-signoff，每條
+  必經人工 signoff（守 Rule 8 / 9.27.3 / 9.28.4）；registry / steersman 絕不自動 commit、絕不自動
+  納入、絕不一次劫持整個本體論。9.29.5 維度誠實 + 活體 horizon：必要性勝率 tier 為 capability_level
+  唯一合法來源，不得謊報、不得用自評充當；維度自我語意發明（候選池外）+ 活體 meta-meta 增維版受
+  OPEN-10.6 約束續列 horizon（OPEN-Q.x 承 OPEN-O.7/M.7/P.7 暫不放寬沙箱）。對應
+  value_dimension_registry / dimension_necessity_oracle / meta_halt/meta_halt_monitor
+  （guard_dimension_expansion）/ meta_halt/meta_ledger（active_value_dimensions）/ steersman_renderer
+  （render_ontology_expansion_proposal）。禁止：value_dimension_registry 自動納入新維度 / 自寫維度
+  集合常數繞過人工 signoff + guard_dimension_expansion、用 proposer 自評 / 自算覆蓋率充當維度必要性
+  capability-delta tier（維度 Goodhart 自評放水）、proposer 讀寫 / 影響 / import 必要性語料或評估器、
+  value-dimension 採納退役繞過 meta_halt_monitor 或忽略 DimensionCardinalityBounded stock 天花板而無界
+  增維 / 退役維度無 necessity capability-delta 地 re-adopt（維度震盪繞過棘輪）、候選維度搜尋無上限指數
+  爆炸、一週期同時新增 > K_dim 條維度一次劫持整個本體論、把 value-dimension 元迴圈併入單軌 SDD_FSM.tla
+  或新增第六軌污染五軌 reachable、未經 OPEN-O.7 私自開 HTTP 外聯做活體 meta-meta 增維（破 OPEN-10.6）。
+test_ref: tools/fsm_runtime/tests/test_phase_q.py
+enforcement_mechanism: meta_loop
+scaffold_roi:
+  fire_count: 0
+  catch_count: 0
+  false_positive_count: 0

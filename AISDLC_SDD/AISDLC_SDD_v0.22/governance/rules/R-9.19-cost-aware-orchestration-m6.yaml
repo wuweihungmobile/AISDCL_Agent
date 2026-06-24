@@ -1,0 +1,20 @@
+id: R-9.19
+title: Phase G M6 Cost-Aware Orchestration
+trigger_states:
+  - PR_REVIEW
+  - IMPLEMENTATION
+severity: high
+maturity: active
+spec: >
+  dispatch 從「派完才知超 token」升級為「派遣前估算 → 超預算即拒絕」。冷啟動樣本 <10
+  用保守 default 8000（不可調低）；每次拒絕寫 REJECTED log（含 proposed_alternative）；
+  連續 3 拒 → ESCALATION（reason=budget_exhausted，diagnostic sub_type=retry_exhausted
+  structural 不可 auto-recover）；估算偏差連 5 次 >50% 寫 CALIBRATION-WARN。
+  estimated = mean(samples_30) + 1.5×stddev；gate_pass = remaining > estimated×1.2。
+  對應 path_cost.py。
+test_ref: tools/fsm_runtime/tests/test_path_cost.py
+enforcement_mechanism: manual
+scaffold_roi:
+  fire_count: 0
+  catch_count: 0
+  false_positive_count: 0

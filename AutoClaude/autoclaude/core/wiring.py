@@ -384,6 +384,9 @@ def build_goal_decomposer(
     安全閘以 config.tool_invocation 驅動（預設 enabled=False 全 deny，flag-off 零行為變更）。
     """
     from ..execution.goal_decomposer import GoalDecomposer  # noqa: PLC0415
+    from ..infra.adapters.goal_freeze_gate import (  # noqa: PLC0415
+        BoundedGoalFreezeGate,
+    )
     from ..infra.adapters.tool_invocation_adapter import (  # noqa: PLC0415
         ToolInvocationAdapter,
     )
@@ -392,7 +395,12 @@ def build_goal_decomposer(
         allowlist=list(cfg.tool_invocation.allowlist),
         observability=observability,
     )
-    return GoalDecomposer(brain, observability=observability, tool_invocation=tool)
+    # improving_57 A 軌 L4：有界自動凍結 signoff 閘（fail-closed 回退人工）
+    freeze_gate = BoundedGoalFreezeGate()
+    return GoalDecomposer(
+        brain, observability=observability, tool_invocation=tool,
+        freeze_gate=freeze_gate,
+    )
 
 
 def build_coordinator(

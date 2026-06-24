@@ -1,0 +1,23 @@
+case_id: INV-true-03
+expect: true_invention
+invented:
+  op: mean
+  probe:
+  - oncall_pages
+  - runbook_depth
+candidates:
+- real_quality: 0.92
+  existing_cost: 7.0
+  features:
+    oncall_pages: 0.0
+    runbook_depth: 0.0
+- real_quality: 0.28
+  existing_cost: 3.0
+  features:
+    oncall_pages: 9.0
+    runbook_depth: 7.0
+- real_quality: 0.6
+  existing_cost: 5.0
+  features:
+    oncall_pages: 4.0
+    runbook_depth: 4.0

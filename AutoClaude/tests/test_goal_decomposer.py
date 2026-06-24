@@ -325,3 +325,148 @@ def test_wiring_injects_tool_invocation():
     assert isinstance(gd, GoalDecomposer)
     # F-A2 adapter 已注入（消費 allowlist 安全閘，預設 deny）
     assert gd._tool is not None
+
+
+# ── improving_57 A 軌 L4：有界自動凍結 signoff（auto_release）─────────
+from autoclaude.core.ports.goal_freeze_gate import FreezeVerdict  # noqa: E402
+from autoclaude.infra.adapters.goal_freeze_gate import (  # noqa: E402
+    DEFAULT_MAX_AUTO_STEPS,
+    BoundedGoalFreezeGate,
+)
+
+
+class _StubGate:
+    """可控 IGoalFreezeGate：固定回傳預設 verdict，並記錄被呼叫之原語。"""
+
+    def __init__(self, verdict: FreezeVerdict):
+        self._verdict = verdict
+        self.calls: list[dict] = []
+
+    def evaluate(self, *, goal_hash, step_count, prompts):
+        self.calls.append(
+            {"goal_hash": goal_hash, "step_count": step_count, "prompts": prompts}
+        )
+        return self._verdict
+
+
+def test_auto_release_no_gate_falls_back_to_manual():
+    """未注入 freeze_gate → auto_release 拒絕（回退 🔴 人工 signoff，零行為變更）。"""
+    gd = GoalDecomposer(_FakeBrain(_decision(2)))
+    draft = gd.decompose("g")
+    with pytest.raises(DecompositionError, match="未注入 IGoalFreezeGate"):
+        gd.auto_release(draft)
+    # 人工路徑仍完好
+    pb = gd.release_for_execution(gd.approve(draft, approver="human"))
+    assert len(pb.tasks) == 2
+
+
+def test_auto_release_bounded_gate_approves_small_clean_draft():
+    """有界閘對小規模乾淨拆解 → 自動 signoff 釋出；審計記 approver=auto:GoalFreezeGate。"""
+    obs = _RecordingObs()
+    gd = GoalDecomposer(
+        _FakeBrain(_decision(3)), observability=obs,
+        freeze_gate=BoundedGoalFreezeGate(),
+    )
+    draft = gd.decompose("build a small thing")
+    pb = gd.auto_release(draft)
+    assert pb is draft.playbook and len(pb.tasks) == 3
+    # 自動凍結審計（XAI 可解釋：approved + reason + conditions）
+    frz = [e for e in obs.events if e[0] == "decomposition_auto_freeze"][0][1]
+    assert frz["approved"] is True
+    assert frz["goal_hash"] == draft.goal_hash
+    assert any("step_count=3" in c for c in frz["conditions"])
+    # signoff 審計記自動簽署者（非匿名、可追溯）
+    signoff = [e for e in obs.events if e[0] == "decomposition_signoff"][0][1]
+    assert signoff["approver"] == "auto:GoalFreezeGate"
+
+
+def test_auto_release_rejects_oversize_draft_fails_closed():
+    """步驟數超自動上限 → 閘拒絕 → auto_release raise（fail-closed 回退人工，不釋出）。"""
+    obs = _RecordingObs()
+    n = DEFAULT_MAX_AUTO_STEPS + 1  # 13 > 12，仍 ≤ 硬上限 24（decompose 不擋，僅自動閘擋）
+    gd = GoalDecomposer(
+        _FakeBrain(_decision(n)), observability=obs,
+        freeze_gate=BoundedGoalFreezeGate(),
+    )
+    draft = gd.decompose("g")
+    with pytest.raises(DecompositionError, match="自動凍結閘拒絕"):
+        gd.auto_release(draft)
+    frz = [e for e in obs.events if e[0] == "decomposition_auto_freeze"][0][1]
+    assert frz["approved"] is False  # 審計留拒絕痕（誠實，非靜默）
+    # fail-closed：未自動釋出，但人工棘輪仍可放行
+    pb = gd.release_for_execution(gd.approve(draft, approver="human"))
+    assert len(pb.tasks) == n
+
+
+def test_auto_release_rejects_injection_tainted_prompt():
+    """prompt 含注入嫌疑字元 → 閘拒絕 → 回退人工（深度防禦，不自動放行攻擊向量）。"""
+    steps = [DecompositionStep(step_id="A", name="a", prompt="rm -rf / && echo $HOME")]
+    gd = GoalDecomposer(
+        _FakeBrain(DecompositionDecision(steps=steps)),
+        freeze_gate=BoundedGoalFreezeGate(),
+    )
+    draft = gd.decompose("g")
+    with pytest.raises(DecompositionError, match="注入嫌疑字元"):
+        gd.auto_release(draft)
+
+
+def test_auto_release_passes_primitives_not_draft_to_gate():
+    """auto_release 傳原語（goal_hash/step_count/prompts）給 gate，不傳 execution 物件。"""
+    gate = _StubGate(FreezeVerdict(True, "ok", ("c1",)))
+    gd = GoalDecomposer(_FakeBrain(_decision(2)), freeze_gate=gate)
+    draft = gd.decompose("g")
+    gd.auto_release(draft)
+    assert gate.calls[0]["goal_hash"] == draft.goal_hash
+    assert gate.calls[0]["step_count"] == 2
+    assert gate.calls[0]["prompts"] == ("do 1", "do 2")
+
+
+# ── BoundedGoalFreezeGate 單元（有界條件 + 可解釋裁決）───────────
+def test_bounded_gate_approves_within_bounds():
+    v = BoundedGoalFreezeGate().evaluate(
+        goal_hash="abc", step_count=5, prompts=("clean prompt", "another")
+    )
+    assert v.auto_approved is True
+    assert any("prompts_untainted" == c for c in v.conditions)
+
+
+def test_bounded_gate_rejects_empty_and_oversize():
+    g = BoundedGoalFreezeGate()
+    assert g.evaluate(goal_hash="a", step_count=0, prompts=()).auto_approved is False
+    over = g.evaluate(
+        goal_hash="a", step_count=DEFAULT_MAX_AUTO_STEPS + 1, prompts=("x",)
+    )
+    assert over.auto_approved is False and "超過自動放行上限" in over.reason
+
+
+def test_bounded_gate_rejects_missing_goal_hash():
+    v = BoundedGoalFreezeGate().evaluate(goal_hash="", step_count=2, prompts=("p",))
+    assert v.auto_approved is False and "goal_hash" in v.reason
+
+
+def test_bounded_gate_max_auto_steps_lowerable_not_raisable():
+    """max_auto_steps 可下調不可上調（鎖在 DEFAULT_MAX_AUTO_STEPS 之內）。"""
+    low = BoundedGoalFreezeGate(max_auto_steps=2)
+    assert low.evaluate(goal_hash="a", step_count=3, prompts=("p",)).auto_approved is False
+    high = BoundedGoalFreezeGate(max_auto_steps=999)  # 實際仍鎖 12
+    cap = high.evaluate(
+        goal_hash="a", step_count=DEFAULT_MAX_AUTO_STEPS, prompts=("p",) * DEFAULT_MAX_AUTO_STEPS
+    )
+    assert cap.auto_approved is True
+    assert high.evaluate(
+        goal_hash="a", step_count=DEFAULT_MAX_AUTO_STEPS + 1, prompts=("p",)
+    ).auto_approved is False
+
+
+def test_wiring_injects_freeze_gate():
+    """build_goal_decomposer 注入 BoundedGoalFreezeGate（A 軌 L4 自動凍結閘）。"""
+    from autoclaude.core.wiring import build_goal_decomposer
+    from autoclaude.decision.minimax_client import MinimaxClient
+    from autoclaude.infra.adapters.minimax_brain import MinimaxBrainAdapter
+    from autoclaude.utils.config import AppConfig
+
+    gd = build_goal_decomposer(
+        AppConfig(), brain=MinimaxBrainAdapter(MinimaxClient("k", "u", "m"))
+    )
+    assert gd._freeze_gate is not None
+    assert isinstance(gd._freeze_gate, BoundedGoalFreezeGate)

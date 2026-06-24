@@ -1,0 +1,19 @@
+id: R-9.13
+title: Phase F M3+M4 多模態 Spec 驗證
+trigger_states:
+  - SCG_VALIDATION
+  - SPEC_DRAFTING
+severity: high
+maturity: active
+spec: >
+  文字 Spec ↔ 非文字 artifact 一致性驗證（SCG-1/2 前置）。FRD/SRD 用
+  <!-- anchor:<modality>:<id> --> 宣告 4 種 modality（ui/api/db/c4）依賴；LLM Backend
+  三後端（session 預設零成本 / claude-api / minimax stub）；SLV-008~011 預設 proposed
+  advisory；media 統一存 docs/99_media/ 單檔 <500KB 硬上限。對應 multimodal_validator.py /
+  modality/ adapter。
+test_ref: tools/fsm_runtime/tests/test_multimodal_validator.py
+enforcement_mechanism: manual
+scaffold_roi:
+  fire_count: 0
+  catch_count: 0
+  false_positive_count: 0

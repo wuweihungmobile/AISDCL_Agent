@@ -214,3 +214,9 @@ AISDLC_SDD_v0.20/chaos-report.json
 AISDLC_SDD_v0.21/build/reports/
 AISDLC_SDD_v0.21/arch-fitness.json
 AISDLC_SDD_v0.21/chaos-report.json
+
+# ── v0.22 runtime 取證產物排除（improving_57 B 軌：AUTO_RECOVERY 常態化 — 流程自治 B-axis L3→L4，預設 ON + opt-out）──
+# 同 v0.13~v0.21：FSM 種子模板在 tracked 源碼位 tools/fsm_runtime/templates/，build/reports/ 整樹排除。
+AISDLC_SDD_v0.22/build/reports/
+AISDLC_SDD_v0.22/arch-fitness.json
+AISDLC_SDD_v0.22/chaos-report.json

@@ -32,6 +32,7 @@ from datetime import UTC, datetime
 import yaml
 
 from ..core.ports.brain import IBrain
+from ..core.ports.goal_freeze_gate import IGoalFreezeGate
 from ..core.ports.observability import IObservabilityPort, NullObservability
 from ..core.ports.tool_invocation import IToolInvocation
 from ..models.decision import DecompositionDecision, DecompositionStep
@@ -72,6 +73,7 @@ class GoalDecomposer:
         max_steps: int = MAX_DECOMPOSITION_STEPS,
         observability: IObservabilityPort | None = None,
         tool_invocation: IToolInvocation | None = None,
+        freeze_gate: IGoalFreezeGate | None = None,
     ):
         self._brain = brain
         # 硬上限 24：config 可下調不可上調（ADR-AGT-002 §2）
@@ -79,6 +81,8 @@ class GoalDecomposer:
         self._obs = observability or NullObservability()
         # F-A2 注入點：拆解出的步驟若需工具，經此 port 查 allowlist 可用性（保留擴充點）
         self._tool = tool_invocation
+        # improving_57 A 軌 L4：有界自動凍結 signoff 閘（None=僅人工路徑，零行為變更）
+        self._freeze_gate = freeze_gate
 
     # ──────────────────────────────────────────────
     # 公開 API
@@ -143,6 +147,35 @@ class GoalDecomposer:
                 "草稿未經 🔴 人工 signoff，拒絕釋出可執行 Playbook（ADR-AGT-002 §2.4）"
             )
         return draft.playbook
+
+    def auto_release(self, draft: DecompositionDraft) -> Playbook:
+        """improving_57 A 軌 L4：有界自動凍結 signoff 後釋出（fail-closed 回退人工）。
+
+        經注入之 IGoalFreezeGate 對草稿做有界、可稽核判定：條件全部成立則以
+        approver="auto:GoalFreezeGate" 自動 signoff 並釋出；任一條件不成立即 raise
+        （絕不弱化人工棘輪——回退 🔴 人工 approve()／release_for_execution()）。
+        裁決理由與條件清單全程入審計（XAI 拓樸可審）。
+        """
+        if self._freeze_gate is None:
+            raise DecompositionError(
+                "未注入 IGoalFreezeGate，無法自動釋出——回退 🔴 人工 signoff"
+            )
+        verdict = self._freeze_gate.evaluate(
+            goal_hash=draft.goal_hash,
+            step_count=len(draft.playbook.tasks),
+            prompts=tuple(t.prompt for t in draft.playbook.tasks),
+        )
+        self._audit(
+            "decomposition_auto_freeze", draft.goal,
+            approved=verdict.auto_approved, reason=verdict.reason,
+            conditions=list(verdict.conditions), goal_hash=draft.goal_hash,
+        )
+        if not verdict.auto_approved:
+            raise DecompositionError(
+                f"自動凍結閘拒絕（{verdict.reason}），回退 🔴 人工 signoff"
+            )
+        signed = self.approve(draft, approver="auto:GoalFreezeGate")
+        return self.release_for_execution(signed)
 
     @staticmethod
     def draft_to_yaml(playbook: Playbook) -> str:

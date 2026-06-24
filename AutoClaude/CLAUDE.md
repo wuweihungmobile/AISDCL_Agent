@@ -371,11 +371,12 @@ tasks:
 17. goto_counter
 18. checkpoint
 
-### Port 列表（16 個，autoclaude/core/ports/）
+### Port 列表（17 個，autoclaude/core/ports/）
 - brain
 - embedder
 - evaluator
 - executor
+- goal_freeze_gate
 - kb_metric_store
 - memory_store
 - observability
