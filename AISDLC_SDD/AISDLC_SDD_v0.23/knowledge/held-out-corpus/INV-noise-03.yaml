@@ -1,0 +1,19 @@
+case_id: INV-noise-03
+expect: noise_invention
+invented:
+  op: sum
+  probe:
+  - supply_chain_pins
+candidates:
+- real_quality: 0.5
+  existing_cost: 2.0
+  features:
+    supply_chain_pins: 7.0
+- real_quality: 0.5
+  existing_cost: 3.0
+  features:
+    supply_chain_pins: 0.0
+- real_quality: 0.42
+  existing_cost: 4.0
+  features:
+    supply_chain_pins: 9.0

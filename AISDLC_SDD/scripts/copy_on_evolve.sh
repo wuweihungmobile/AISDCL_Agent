@@ -95,3 +95,30 @@ if [ -f "${_SCRIPT_DIR}/skill_header_sync.py" ] && [ -f "${_SCRIPT_DIR}/sync_exp
 else
   echo "⚠️ 同層無 skill_header_sync.py / sync_exposed_skills.py（隔離環境）；略過戳記自動同步" >&2
 fi
+
+# ── DEF-59-001（P2 根因，DEF-58-002 同家族）：建版後自動補新版 .gitignore runtime 產物 block ──
+# WHY：新版的 build/reports/ / arch-fitness.json / chaos-report.json 為 untracked runtime 產物，
+#   須在 BASE/.gitignore 補排除 block，否則 ci-gate 的 gitignore 覆蓋 lint（DEF-37-001，
+#   test_gitignore_coverage_lint.py::test_real_repo_latest_covered）對 LATEST 失效報紅。此前為
+#   人工後步驟（與 DEF-58-002 戳記同步**同根因家族**：「人去記得改」＝從流程消失）；improving_59
+#   建 v0.23 即踩到帶紅。把它釘進建版腳本＝杜絕同類復發（對齊 DEF-58-002／DEF-CLDREV-007 哲學）。
+#   idempotent：block 已存在（grep 命中首行 path）則略過，重跑安全。lint 只查 3 path 行存在，
+#   自動補的 comment 用泛用敘述（改進輪敘述見 EVOLUTION_LOG.md）即足。
+_NEWVER="$(basename "$TO")"
+_GITIGNORE="${_BASE}/.gitignore"
+if [ -f "${_GITIGNORE}" ]; then
+  if grep -q "^${_NEWVER}/build/reports/" "${_GITIGNORE}"; then
+    echo "==> .gitignore 已含 ${_NEWVER} runtime 產物 block（idempotent 略過）"
+  else
+    {
+      echo ""
+      echo "# ── ${_NEWVER} runtime 取證產物排除（Copy-on-Evolve 自動補；改進輪敘述見 EVOLUTION_LOG.md）──"
+      echo "${_NEWVER}/build/reports/"
+      echo "${_NEWVER}/arch-fitness.json"
+      echo "${_NEWVER}/chaos-report.json"
+    } >> "${_GITIGNORE}"
+    echo "✅ 已自動補 ${_NEWVER} runtime 產物排除 block 至 .gitignore（DEF-59-001：免人工後步驟）"
+  fi
+else
+  echo "⚠️ 找不到 ${_GITIGNORE}（隔離環境）；略過 .gitignore 自動補" >&2
+fi

@@ -1,0 +1,131 @@
+# PII / Anonymizer fixture set — 20 samples
+#
+# Used by tools/fsm_runtime/tests/test_hub_sync.py (M2 D-30.14, A-30.2).
+# Each sample is annotated with the *expected* L2 hits (PII Scanner) and
+# the L1 categories that the Anonymizer should produce placeholders for.
+#
+# Coverage matrix:
+#   L2 categories : email, ip_address, api_token (4 sub-types), financial,
+#                   pii (TW ID), internal_domain, customer_name (deny-list)
+#   L1 categories : project_codename, module_name, issue_pr (#N + PR-N),
+#                   date, user_handle, file_path
+#   Clean        : 3 samples with NO L2 hits AND no L1 changes
+#
+# fields:
+#   id            unique label
+#   text          raw input
+#   expect_l2     list of expected L2 rule IDs that should fire (any line)
+#   expect_l1     list of L1 rule IDs whose category placeholder should appear
+#                 in anonymized output
+#   notes         optional free-form
+
+samples:
+  # ─────────────── L2 positive: 11 samples covering all 11 L2 categories ───────────────
+  - id: 01-email
+    text: "Reach out to alice.smith@acme.com for clarification."
+    expect_l2: [L2.email_named]
+    expect_l1: []
+
+  - id: 02-ipv4
+    text: "Server crashed at 10.0.42.18 around 14:00."
+    expect_l2: [L2.ipv4]
+    expect_l1: []
+
+  - id: 03-ipv6
+    text: "Bind to fe80::1234:5678:abcd:ef01 on the corporate VLAN."
+    expect_l2: [L2.ipv6]
+    expect_l1: []
+
+  - id: 04-token-openai
+    text: "Hardcoded key: sk-A1B2C3D4E5F6G7H8I9J0K1L2 — rotate ASAP."
+    expect_l2: [L2.api_token_openai]
+    expect_l1: []
+
+  - id: 05-token-github
+    text: "Auth header used ghp_abcdefghijklmnopqrstuvwxyz0123 in CI."
+    expect_l2: [L2.api_token_github]
+    expect_l1: []
+
+  - id: 06-token-aws
+    text: "Access key AKIAIOSFODNN7EXAMPLE was logged in error."
+    expect_l2: [L2.api_token_aws_access_key]
+    expect_l1: []
+
+  - id: 07-token-bearer
+    text: "Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9 was leaked."
+    expect_l2: [L2.api_token_bearer]
+    expect_l1: []
+
+  - id: 08-credit-card
+    text: "Card on file 4539 1488 0343 6467 needs to be tokenised."
+    expect_l2: [L2.credit_card]
+    expect_l1: []
+    notes: "Luhn-valid Visa test number"
+
+  - id: 09-tw-id
+    text: "客戶身分證 A123456789 已驗證。"
+    expect_l2: [L2.tw_id_number]
+    expect_l1: []
+
+  - id: 10-internal-domain
+    text: "Hit the staging cluster at order-api.corp.example."
+    expect_l2: [L2.internal_domain]
+    expect_l1: []
+
+  - id: 11-customer-name-denylist
+    text: "Customer ACME 公司 reports SLO miss on order pipeline."
+    expect_l2: [L2.customer_name_denylist]
+    expect_l1: []
+    deny_list_customers: ["ACME 公司"]
+    notes: "Activated only when deny_list_customers contains the matching string"
+
+  # ─────────────── L1 positive: 6 samples covering each L1 category ───────────────
+  - id: 12-project-codename
+    text: "We migrated proj-foo last sprint; no regressions."
+    expect_l2: []
+    expect_l1: [L1.project_codename]
+
+  - id: 13-module-name
+    text: "OrderModule ownership moved to PaymentModule team."
+    expect_l2: []
+    expect_l1: [L1.module_name_named]
+
+  - id: 14-issue-and-pr
+    text: "Closed #4521 via PR-3318 yesterday."
+    expect_l2: []
+    expect_l1: [L1.issue_number, L1.pr_explicit]
+
+  - id: 15-absolute-date
+    text: "Cutover scheduled for 2026-07-15, freeze on 2026-07-10."
+    expect_l2: []
+    expect_l1: [L1.absolute_date]
+
+  - id: 16-user-mention
+    text: "Approval pending from @alice and review by @bob_42."
+    expect_l2: []
+    expect_l1: [L1.user_mention]
+
+  - id: 17-file-path
+    text: "Refactored services/order/dispatcher.py to use the new bus."
+    expect_l2: []
+    expect_l1: [L1.repo_path_specific]
+
+  # ─────────────── Clean: 3 samples with no PII / no anonymization needed ───────────
+  - id: 18-clean-tech-allowlist
+    text: "PostgreSQL with Redis cache; OAuth via JWT bearer."
+    expect_l2: []
+    expect_l1: []
+    notes: "All tokens are in allow_list (PostgreSQL/Redis/OAuth/JWT) — no replacement"
+
+  - id: 19-clean-framework-terms
+    text: "Phase E SCG 通過後再進入 Phase F；FSM 與 RTM 一致。"
+    expect_l2: []
+    expect_l1: []
+
+  - id: 20-mixed-l2-and-l1
+    text: |
+      Incident on 2026-04-20: proj-bar leaked sk-XYZWORLD0123456789ABCD via
+      services/auth/handler.py. Ping @oncall for rotation; tracked in #99.
+    expect_l2: [L2.api_token_openai]
+    expect_l1: [L1.absolute_date, L1.project_codename, L1.repo_path_specific, L1.user_mention, L1.issue_number]
+    notes: "Mixed scenario: PII Scanner must still flag L2; if anonymized in isolation, L1 produces placeholders for the rest."

@@ -220,3 +220,9 @@ AISDLC_SDD_v0.21/chaos-report.json
 AISDLC_SDD_v0.22/build/reports/
 AISDLC_SDD_v0.22/arch-fitness.json
 AISDLC_SDD_v0.22/chaos-report.json
+
+# ── v0.23 runtime 取證產物排除（improving_59 B 軌：SLV 自動提議活體化 — 規則自演化 B-axis L4→L5，預設 ON + opt-out）──
+# 同 v0.13~v0.22：FSM 種子模板在 tracked 源碼位 tools/fsm_runtime/templates/，build/reports/ 整樹排除。
+AISDLC_SDD_v0.23/build/reports/
+AISDLC_SDD_v0.23/arch-fitness.json
+AISDLC_SDD_v0.23/chaos-report.json

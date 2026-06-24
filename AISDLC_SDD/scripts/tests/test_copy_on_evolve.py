@@ -286,3 +286,34 @@ def test_auto_syncs_skill_stamps_on_evolve_def_58_002(repo: Path):
     mirror = repo / ".claude" / "skills" / "foo" / "SKILL.md"
     assert mirror.is_file(), "父層曝光 skills 鏡像應隨建版重生"
     assert "**基於**: AISDLC-SDD v0.02" in mirror.read_text(encoding="utf-8")
+
+
+def test_auto_appends_gitignore_block_on_evolve_def_59_001(repo: Path):
+    """DEF-59-001 意圖鎖：copy_on_evolve 建出 v0.02 後，必自動補 v0.02 的 .gitignore runtime 產物 block。
+
+    WHY：新版 build/reports/ / arch-fitness.json / chaos-report.json 為 untracked runtime 產物；
+    若不自動補 BASE/.gitignore 排除 block，ci-gate 的 gitignore 覆蓋 lint（DEF-37-001，
+    test_gitignore_coverage_lint.py::test_real_repo_latest_covered）對 LATEST 失效報紅
+    （improving_59 建 v0.23 即實證人工漏補帶紅）。與 DEF-58-002 戳記同步**同根因家族**。
+    移除硬化（auto-append 區塊）→ 新版 block 不存在，本 assert 立即轉紅。並驗 block 不重複。
+    """
+    bash = _bash_with_python() or shutil.which("bash")
+    if bash is None:
+        pytest.skip("找不到可用 bash")
+    _setup_version_repo_with_scripts(repo)
+    gitignore = repo / ".gitignore"
+    gitignore.write_text(
+        "# tmp gitignore\nAISDLC_SDD_v0.01/build/reports/\n", encoding="utf-8"
+    )
+    proc = subprocess.run(
+        [bash, "scripts/copy_on_evolve.sh", "AISDLC_SDD_v0.01", "AISDLC_SDD_v0.02"],
+        cwd=str(repo), capture_output=True, text=True, encoding="utf-8", errors="replace",
+        timeout=60,
+    )
+    assert proc.returncode == 0, f"建版應 exit 0\nstdout:{proc.stdout}\nstderr:{proc.stderr}"
+    gi = gitignore.read_text(encoding="utf-8")
+    assert "AISDLC_SDD_v0.02/build/reports/" in gi, \
+        f"未自動補 v0.02 .gitignore block（DEF-59-001 帶紅入庫回歸）\n{gi}"
+    assert "AISDLC_SDD_v0.02/arch-fitness.json" in gi
+    assert "AISDLC_SDD_v0.02/chaos-report.json" in gi
+    assert gi.count("AISDLC_SDD_v0.02/build/reports/") == 1, "block 不應重複 append"
