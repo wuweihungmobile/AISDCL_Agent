@@ -208,6 +208,8 @@ def _build_plugin_set(
             observability=observability,
             enabled=cfg.playbook.enable_translation_auto_propose,
             max_proposals_per_run=cfg.playbook.translation_max_proposals_per_run,
+            # improving_61：第二信號 weak_regex 提議門檻（與失敗信號獨立）。
+            min_weak_runs=cfg.playbook.translation_min_weak_runs,
         ),
         "goto_counter": GotoCounterPlugin(playbook_cfg=cfg.playbook),
         # W4-T17 / M-11：CheckpointPlugin 解耦；attach_bus 由 _register_in_order 處理

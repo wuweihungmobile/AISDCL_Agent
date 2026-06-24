@@ -695,3 +695,43 @@ class TestInjectionDefense:
         deny = set("!`><~$&;")
         for c in spec.contracts:
             assert not (set(c.evaluator_cmd) & deny), c.evaluator_cmd
+
+
+class TestWeakRegexCarry:
+    """improving_61 W-61-1 / R-61-1：compile_tasks 將 SpecContract.weak_regex
+    搭載到 PlaybookTask.weak_regex（沿用 spec_digest 先例），供逆向橋接收集為
+    第二元學習信號。轉譯輸出（regex/cmd/step）語意不變。"""
+
+    @staticmethod
+    def _spec():
+        from autoclaude.core.ports.spec_source import SddSpec, SpecContract
+        return SddSpec(
+            spec_path="docs/x.md",
+            digest="sha256:deadbeef",
+            scenario="brownfield",
+            contracts=(
+                SpecContract(
+                    ac_id="AC-001-1", at_id="AT-001-1-1", gherkin="g1",
+                    expected_regex="strong", evaluator_cmd="pytest -q",
+                    scg_gate="SCG-4", weak_regex=False,
+                ),
+                SpecContract(
+                    ac_id="AC-001-1", at_id="AT-001-1-2", gherkin="g2",
+                    expected_regex=".*", evaluator_cmd="pytest -q",
+                    scg_gate="SCG-4", weak_regex=True,
+                ),
+            ),
+        )
+
+    def test_compile_tasks_carries_weak_regex(self):
+        tasks = SddToPlaybookAdapter().compile_tasks(self._spec())
+        by_id = {t.step_id: t for t in tasks}
+        assert by_id["sdd-brownfield-at-001-1-1"].weak_regex is False
+        assert by_id["sdd-brownfield-at-001-1-2"].weak_regex is True
+
+    def test_weak_regex_does_not_alter_translation_output(self):
+        """weak 旗標不改 regex/evaluator_cmd（零退化根保證：僅多搭旗標）。"""
+        tasks = SddToPlaybookAdapter().compile_tasks(self._spec())
+        weak_task = next(t for t in tasks if t.weak_regex)
+        assert weak_task.expected_output_regex == ".*"
+        assert weak_task.evaluator_command == "pytest -q"

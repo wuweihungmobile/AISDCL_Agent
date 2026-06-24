@@ -58,6 +58,9 @@ class PlaybookToRtmAdapter:
         scenario = ""
         # at_id -> passed(bool)；保序（首見順序）以利確定性輸出
         at_status: dict[str, bool] = {}
+        # improving_61 W-61-1：轉譯為 weak_regex 的 AT id（第二元學習信號）。任一搭載
+        # task 標記 weak 即視該 AT 弱（OR；同 at_id 多 task 保守取真）。
+        weak_at_ids: set[str] = set()
         for task in tasks:
             step_id = getattr(task, "step_id", "") or ""
             if not step_id.startswith(_SDD_STEP_PREFIX):
@@ -73,6 +76,8 @@ class PlaybookToRtmAdapter:
                 continue
             # 同一 AT 多次出現（理論上不應發生）採 OR：任一通過即視為通過
             at_status[at_id] = at_status.get(at_id, False) or (step_id in completed)
+            if getattr(task, "weak_regex", False):
+                weak_at_ids.add(at_id)
 
         total_at = len(at_status)
         passed_at = sum(1 for ok in at_status.values() if ok)
@@ -85,6 +90,7 @@ class PlaybookToRtmAdapter:
             passed_at=passed_at,
             failed_at_ids=failed_at_ids,
             ac_coverage=ac_coverage,
+            weak_regex_at_ids=tuple(sorted(weak_at_ids)),
         )
 
     # ──────────────────────────────────────────────────────────
@@ -112,6 +118,7 @@ class PlaybookToRtmAdapter:
                 for ac, passed, total in report.ac_coverage
             ],
             "failed_at_ids": list(report.failed_at_ids),
+            "weak_regex_at_ids": list(report.weak_regex_at_ids),  # improving_61 W-61-1
         }
         if generated_at:
             doc["generated_at"] = generated_at

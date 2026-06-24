@@ -54,6 +54,9 @@ def coverage_report_to_doc(
             for ac, passed, total in report.ac_coverage
         ],
         "failed_at_ids": list(report.failed_at_ids),
+        # improving_61 W-61-1：weak_regex 第二信號搭 history jsonl（additive；
+        # 舊紀錄無此欄 → from_doc 讀回 fail-soft 為 ()）。
+        "weak_regex_at_ids": list(report.weak_regex_at_ids),
     }
     if saved_at:
         doc["saved_at"] = saved_at
@@ -78,6 +81,8 @@ def coverage_report_from_doc(doc: dict[str, Any]) -> RtmCoverageReport:
         passed_at=int(summary.get("passed_at", 0)),
         failed_at_ids=tuple(str(x) for x in (doc.get("failed_at_ids") or [])),
         ac_coverage=ac_coverage,
+        # improving_61 W-61-1：fail-soft——舊 doc 無此欄回 ()，向後相容。
+        weak_regex_at_ids=tuple(str(x) for x in (doc.get("weak_regex_at_ids") or [])),
     )
 
 

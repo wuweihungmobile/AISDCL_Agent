@@ -322,7 +322,7 @@ tasks:
 
 ---
 
-**文檔元數據**：v7.7 | 建立 2025-01-11 | 最後更新 2026-06-24 | 適用 AISDLC v0.09+（v7.7：AutoSDD_improving_60 A 軌 A→L5 轉譯策略元學習活體化 — 新增 `translation_learner` plugin + `ITranslationLearningSink` port + `select_proposals` 元學習純函數；propose 預設 ON、apply 仍人工 signoff；full pytest 3,292/122、importlinter 8 kept、LOC=0。歷史 v7.6 Improving_012 Phase 2 明細見 [sprint_history.md §1.7.3](docs/05_development/sprint_history.md)）。
+**文檔元數據**：v7.8 | 建立 2025-01-11 | 最後更新 2026-06-24 | 適用 AISDLC v0.09+（v7.8：AutoSDD_improving_61 A 軌 L5 加固 — weak_regex 第二信號併入轉譯元學習（沿 spec_digest 先例搭既有 RTM-COVERAGE-HISTORY；`select_proposals` 雙信號 failure OR weak_regex；無新 plugin/port）；apply 仍人工 signoff；full pytest 3,315/122、importlinter 8 kept、LOC=0。歷史 v7.7 improving_60 明細見 [sprint_history.md §1.7.3](docs/05_development/sprint_history.md)）。
 
 <!-- ARCH_SNAPSHOT_BEGIN -->
 ## [Architecture Snapshot] — 由 tools/snapshot_sync.py 自動生成（請勿手動編輯本區段；以 `python tools/snapshot_sync.py` 重新生成）

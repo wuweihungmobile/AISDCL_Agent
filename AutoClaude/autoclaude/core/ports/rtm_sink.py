@@ -38,6 +38,10 @@ class RtmCoverageReport:
     failed_at_ids: tuple[str, ...] = field(default=())  # 未通過（含未達 / 失敗）的 AT id
     # (ac_id, passed_count, total_count)；依 ac_id 排序確定性輸出
     ac_coverage: tuple[tuple[str, int, int], ...] = field(default=())
+    # improving_61 W-61-1：本次 run 中轉譯為 weak_regex（Gherkin 無法編出強斷言）的 AT id。
+    # 與 failed_at_ids 正交的第二元學習信號（轉譯保真度本身的弱點）；additive 預設 ()，
+    # 舊 coverage doc 無此欄讀回 fail-soft 為空（向後相容）。
+    weak_regex_at_ids: tuple[str, ...] = field(default=())
 
     @property
     def coverage_pct(self) -> float:

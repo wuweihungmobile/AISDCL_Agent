@@ -69,3 +69,30 @@ def test_record_creates_dir(tmp_path):
     sink = FileTranslationLearningSink(str(nested))
     sink.record_proposal("proj", _p("AT-001"))
     assert (nested / "PROPOSALS-proj.jsonl").is_file()
+
+
+# ── improving_61 W-61-3 / R-61-8：weak_runs additive 持久化 ──────────────────
+
+def test_roundtrip_weak_runs(tmp_path):
+    """weak_runs 寫出後讀回保真（第二信號強度跨 session 持久化）。"""
+    sink = FileTranslationLearningSink(str(tmp_path))
+    sink.record_proposal("proj", TranslationProposal(
+        at_id="AT-009", failing_runs=0, total_runs=4, rationale="r", weak_runs=3,
+    ))
+    out = sink.list_proposals("proj")
+    assert len(out) == 1
+    assert out[0].weak_runs == 3
+    assert out[0].failing_runs == 0
+
+
+def test_legacy_proposal_missing_weak_runs_reads_zero(tmp_path):
+    """improving_60 既有 proposals 紀錄無 weak_runs 欄 → 讀回 0（向後相容）。"""
+    target = tmp_path / "PROPOSALS-proj.jsonl"
+    target.write_text(
+        '{"at_id":"AT-001","failing_runs":2,"total_runs":3,'
+        '"rationale":"r","status":"proposed"}\n',
+        encoding="utf-8",
+    )
+    out = FileTranslationLearningSink(str(tmp_path)).list_proposals("proj")
+    assert len(out) == 1
+    assert out[0].weak_runs == 0

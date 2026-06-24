@@ -86,3 +86,80 @@ def test_proposal_is_frozen_and_rationale_nonempty():
     assert isinstance(out[0], TranslationProposal)
     assert out[0].rationale  # XAI：人類可讀理由非空
     assert "AT-007" in out[0].rationale
+
+
+# ── improving_61 W-61-2：雙信號元學習（weak_regex 第二信號）─────────────────
+
+def _wreport(failed: tuple[str, ...] = (), weak: tuple[str, ...] = ()) -> RtmCoverageReport:
+    return RtmCoverageReport(
+        scenario="brownfield", spec_digest="sha256:x",
+        total_at=5, passed_at=5 - len(failed), failed_at_ids=failed,
+        weak_regex_at_ids=weak,
+    )
+
+
+def test_weak_only_signal_proposes():
+    """R-61-4：純 weak_regex 跨 2 run（全通過、零失敗）→ 仍達信號②門檻 → 提議。"""
+    history = (_wreport(weak=("AT-009",)), _wreport(weak=("AT-009",)))
+    out = select_proposals(history, frozenset())
+    assert len(out) == 1
+    assert out[0].at_id == "AT-009"
+    assert out[0].failing_runs == 0   # 正交：零執行失敗
+    assert out[0].weak_runs == 2
+    assert "weak_regex" in out[0].rationale
+
+
+def test_weak_below_threshold_no_propose():
+    """R-61-6：weak 僅 1 run < min_weak_runs（預設 2）且無失敗 → 不提議（降噪）。"""
+    history = (_wreport(weak=("AT-009",)),)
+    assert select_proposals(history, frozenset()) == ()
+
+
+def test_fail_only_still_proposes():
+    """R-61-5：純執行失敗信號（零 weak）仍提議（向後相容 improving_60 行為）。"""
+    history = (_wreport(failed=("AT-001",)), _wreport(failed=("AT-001",)))
+    out = select_proposals(history, frozenset())
+    assert len(out) == 1 and out[0].at_id == "AT-001"
+    assert out[0].weak_runs == 0
+    assert "執行未通過" in out[0].rationale and "weak_regex" not in out[0].rationale
+
+
+def test_dual_signal_rationale_distinguishes():
+    """R-61-5：同 at_id 兩信號齊發 → rationale 同時陳述兩信號與計數。"""
+    history = (_wreport(failed=("AT-007",), weak=("AT-007",)),
+               _wreport(failed=("AT-007",), weak=("AT-007",)))
+    out = select_proposals(history, frozenset())
+    assert len(out) == 1
+    p = out[0]
+    assert p.failing_runs == 2 and p.weak_runs == 2
+    assert "執行未通過" in p.rationale and "weak_regex" in p.rationale
+
+
+def test_dual_signal_bounded_and_deterministic():
+    """R-61-7：合併雙信號候選後仍受 max_new 截斷；確定性排序（較強信號優先）。
+
+    QA 突變鎖：4 個達門檻候選（混失敗/weak），max_new=2 → 恰 2 筆，且取信號最強的
+    前 2（AT-D weak=3 最強、AT-A fail=2）。若排序鍵或 max 邏輯被改 → 此斷言轉紅。
+    """
+    history = (
+        _wreport(failed=("AT-A", "AT-B"), weak=("AT-C", "AT-D")),
+        _wreport(failed=("AT-A", "AT-B"), weak=("AT-C", "AT-D")),
+        _wreport(weak=("AT-D",)),  # AT-D weak=3（最強信號）
+    )
+    out = select_proposals(history, frozenset(), max_new=2)
+    assert len(out) == 2  # 有界
+    assert out[0].at_id == "AT-D" and out[0].weak_runs == 3  # 最強信號排首
+    assert {p.at_id for p in out} == {"AT-D", "AT-A"}  # 取信號最強前 2
+
+
+def test_dual_signal_dedup_skips_already_proposed():
+    """R-61-7：已提議過的 at_id（不論信號）不重複提議（跨 session 收斂）。"""
+    history = (_wreport(weak=("AT-009",)), _wreport(weak=("AT-009",)))
+    assert select_proposals(history, frozenset({"AT-009"})) == ()
+
+
+def test_proposals_always_proposed_status_dual_signal():
+    """R-61-4/紅線：weak 信號提議仍恆 status='proposed'（apply 由人工）。"""
+    history = (_wreport(weak=("AT-009",)), _wreport(weak=("AT-009",)))
+    out = select_proposals(history, frozenset())
+    assert all(p.status == "proposed" for p in out)

@@ -160,3 +160,30 @@ class TestFailSoft:
         assert r.total_at == 0
         assert r.failed_at_ids == ()
         assert r.ac_coverage == ()
+
+
+class TestWeakRegexAtIdsDoc:
+    """improving_61 W-61-1 / R-61-3：weak_regex_at_ids 搭 history doc 往返；
+    舊紀錄無此欄 → from_doc fail-soft 回 ()（向後相容）。"""
+
+    def test_coverage_doc_roundtrip_weak_regex(self):
+        report = RtmCoverageReport(
+            scenario="brownfield", spec_digest="sha256:abc",
+            total_at=2, passed_at=2,
+            failed_at_ids=(), ac_coverage=(("AC-001-1", 2, 2),),
+            weak_regex_at_ids=("AT-001-1-1", "AT-001-1-2"),
+        )
+        restored = coverage_report_from_doc(coverage_report_to_doc(report))
+        assert restored.weak_regex_at_ids == ("AT-001-1-1", "AT-001-1-2")
+
+    def test_legacy_doc_missing_weak_field_defaults_empty(self):
+        """improving_60 既有 history 紀錄無 weak_regex_at_ids → 讀回 ()，不 raise。"""
+        legacy_doc = {
+            "kind": "rtm-coverage", "scenario": "x", "spec_digest": "sha256:1",
+            "summary": {"total_at": 1, "passed_at": 1},
+            "ac_coverage": [{"ac_id": "AC-001-1", "passed_at": 1, "total_at": 1}],
+            "failed_at_ids": [],
+            # 刻意無 weak_regex_at_ids
+        }
+        restored = coverage_report_from_doc(legacy_doc)
+        assert restored.weak_regex_at_ids == ()

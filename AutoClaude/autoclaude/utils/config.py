@@ -82,6 +82,11 @@ class PlaybookConfig(BaseModel):
     # 全程 no-op。
     translation_max_proposals_per_run: int = Field(default=3, ge=0, le=20)
     # 每次 POST_RUN 最多新提議數（有界硬閘，0~20，預設 3；超限截斷不重試）。
+    translation_min_weak_runs: int = Field(default=2, ge=1, le=20)
+    # AutoSDD_improving_61（A→L5 加固）：第二信號 weak_regex 的提議門檻——同一 AT
+    # 跨 session 轉譯為 weak_regex 達此 run 數即提議（與 min_failing_runs 獨立降噪，
+    # 預設 2；1~20）。weak_regex＝Gherkin 無法編出強斷言而 fallback，反映轉譯保真度
+    # 弱點，與「執行失敗」正交。提議仍恆 proposed（apply=人工 signoff，不變）。
 
 
 class TokenGuardConfig(BaseModel):

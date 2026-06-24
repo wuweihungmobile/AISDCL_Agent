@@ -31,6 +31,13 @@ class PlaybookTask(BaseModel):
     # SD_Improving_05 W2 (M-7)：per-step token_guard override
     # 為 dict（非 TokenGuardConfig）以保 YAML backward compat：既有 Playbook YAML
     # 不需修改即可載入；解析時由 TokenGuardPlugin.resolve_per_step_cfg() 套用至 global
+    # AutoSDD_improving_61 W-61-1：weak_regex 轉譯保真度旗標（第二元學習信號）。
+    # 沿用 spec_digest 先例：A 軌正向橋接 SddToPlaybookAdapter.compile_tasks 填入
+    # SpecContract.weak_regex（Gherkin 無法編出強斷言 regex 而 fallback 標記），供逆向
+    # 橋接 PlaybookToRtmAdapter 收集為 RtmCoverageReport.weak_regex_at_ids，餵入轉譯
+    # 元學習（select_proposals）作與「執行失敗」正交的第二信號。預設 False → YAML/
+    # checkpoint 向後相容；非 SDD / 強 regex task 留 False。
+    weak_regex: bool = False
     # 優先序：task.token_guard > AppConfig.token_guard
     # （W3 審查 SA-C3 已修正：原 docstring 寫三層含 playbook.global_invariants 層，
     #  但實作僅 task vs global 兩層；如需 playbook 層 override 屬 W3+ 範圍）

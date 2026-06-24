@@ -151,3 +151,42 @@ class TestBoundedAndDedup:
         evt, payload = obs.record_event.call_args[0]
         assert evt == "sdd.translation_proposal"
         assert payload["status"] == "proposed"
+
+
+def _wreport(failed=(), weak=()):
+    return RtmCoverageReport(
+        scenario="brownfield", spec_digest="sha256:x",
+        total_at=5, passed_at=5 - len(failed), failed_at_ids=tuple(failed),
+        weak_regex_at_ids=tuple(weak),
+    )
+
+
+class TestWeakRegexSecondSignal:
+    """improving_61 W-61-3 / R-61-9：plugin 將 min_weak_runs 接到 select_proposals，
+    使 weak_regex 第二信號（即使零執行失敗）也能驅動提議，並寫出 weak_runs。"""
+
+    def test_weak_signal_drives_proposal(self, tmp_path, monkeypatch):
+        monkeypatch.delenv("AUTOCLAUDE_ENABLE_TRANSLATION_AUTO_PROPOSE", raising=False)
+        fb = _feedback([_wreport(weak=["AT-009"]), _wreport(weak=["AT-009"])])
+        p, sink = _plugin(tmp_path, rtm_feedback=fb)  # 預設 min_weak_runs=2
+        p.on_event(_ctx())
+        out = sink.list_proposals("SddProj")
+        assert [x.at_id for x in out] == ["AT-009"]
+        assert out[0].failing_runs == 0 and out[0].weak_runs == 2
+
+    def test_min_weak_runs_threaded(self, tmp_path, monkeypatch):
+        """提高 min_weak_runs=3 → weak=2 不達門檻 → no-op（門檻確實接到純函數）。"""
+        monkeypatch.delenv("AUTOCLAUDE_ENABLE_TRANSLATION_AUTO_PROPOSE", raising=False)
+        fb = _feedback([_wreport(weak=["AT-009"]), _wreport(weak=["AT-009"])])
+        p, sink = _plugin(tmp_path, rtm_feedback=fb, min_weak_runs=3)
+        p.on_event(_ctx())
+        assert sink.list_proposals("SddProj") == ()
+
+    def test_observability_emits_weak_runs(self, tmp_path, monkeypatch):
+        monkeypatch.delenv("AUTOCLAUDE_ENABLE_TRANSLATION_AUTO_PROPOSE", raising=False)
+        obs = MagicMock()
+        fb = _feedback([_wreport(weak=["AT-009"]), _wreport(weak=["AT-009"])])
+        p, sink = _plugin(tmp_path, rtm_feedback=fb, observability=obs)
+        p.on_event(_ctx())
+        _evt, payload = obs.record_event.call_args[0]
+        assert payload["weak_runs"] == 2

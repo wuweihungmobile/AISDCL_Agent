@@ -46,6 +46,7 @@ class FileTranslationLearningSink(ITranslationLearningSink):
                     "total_runs": proposal.total_runs,
                     "rationale": proposal.rationale,
                     "status": proposal.status,
+                    "weak_runs": proposal.weak_runs,  # improving_61 W-61-3（additive）
                 },
                 ensure_ascii=False,
             )
@@ -77,6 +78,8 @@ class FileTranslationLearningSink(ITranslationLearningSink):
                     total_runs=int(doc.get("total_runs", 0)),
                     rationale=str(doc.get("rationale", "")),
                     status=str(doc.get("status", "proposed")),
+                    # improving_61：舊紀錄無 weak_runs → 讀回 0（向後相容）
+                    weak_runs=int(doc.get("weak_runs", 0)),
                 ))
             return tuple(out)
         except Exception as exc:  # noqa: BLE001 — fail-soft

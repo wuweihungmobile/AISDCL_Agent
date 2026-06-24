@@ -61,7 +61,8 @@ class TranslationLearnerPlugin:
         observability: Any | None = None,
         enabled: bool = True,                  # config flag（預設 ON＝活體）
         max_proposals_per_run: int = 3,        # 有界硬閘
-        min_failing_runs: int = 2,             # 元學習門檻（降噪）
+        min_failing_runs: int = 2,             # 信號①門檻（執行失敗，降噪）
+        min_weak_runs: int = 2,                # improving_61 信號②門檻（weak_regex，降噪）
     ):
         self._sink = sink
         self._rtm_feedback = rtm_feedback
@@ -69,6 +70,7 @@ class TranslationLearnerPlugin:
         self._enabled = enabled
         self._max = max(0, int(max_proposals_per_run))
         self._min_failing_runs = max(1, int(min_failing_runs))
+        self._min_weak_runs = max(1, int(min_weak_runs))
 
     def name(self) -> str:
         return "translation_learner"
@@ -98,6 +100,7 @@ class TranslationLearnerPlugin:
             proposals = select_proposals(
                 history, already,
                 min_failing_runs=self._min_failing_runs, max_new=self._max,
+                min_weak_runs=self._min_weak_runs,
             )
             for p in proposals:
                 self._sink.record_proposal(project, p)
@@ -121,6 +124,7 @@ class TranslationLearnerPlugin:
                 "project": project,
                 "at_id": proposal.at_id,
                 "failing_runs": proposal.failing_runs,
+                "weak_runs": proposal.weak_runs,  # improving_61 第二信號強度
                 "total_runs": proposal.total_runs,
                 "status": proposal.status,
             })

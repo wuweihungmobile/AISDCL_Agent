@@ -161,3 +161,39 @@ class TestRtmCoverageReportProps:
 
     def test_null_sink_noop(self):
         assert NullRtmSink().write_report("a", "b") == ""
+
+
+class TestWeakRegexCollection:
+    """improving_61 W-61-1 / R-61-2：compile_report 收集 weak_regex task 的 at_id
+    為 weak_regex_at_ids（第二元學習信號），與 failed_at_ids 正交。"""
+
+    @staticmethod
+    def _tasks_with_weak() -> list[PlaybookTask]:
+        return [
+            PlaybookTask(step_id="sdd-greenfield-at-001-1-1", name="AT-001-1-1",
+                         prompt="x", weak_regex=True),
+            PlaybookTask(step_id="sdd-greenfield-at-001-1-2", name="AT-001-1-2",
+                         prompt="x", weak_regex=False),
+            PlaybookTask(step_id="T99", name="non-sdd", prompt="x", weak_regex=True),
+        ]
+
+    def test_compile_report_collects_weak_regex_at_ids(self):
+        ad = PlaybookToRtmAdapter()
+        # 全通過：weak 與 pass/fail 正交——即使通過，weak AT 仍入 weak_regex_at_ids
+        completed = ["sdd-greenfield-at-001-1-1", "sdd-greenfield-at-001-1-2"]
+        rep = ad.compile_report(self._tasks_with_weak(), completed)
+        assert rep.weak_regex_at_ids == ("AT-001-1-1",)  # 非 SDD task 不計入
+        assert rep.failed_at_ids == ()  # 正交：全通過
+
+    def test_no_weak_defaults_empty(self):
+        ad = PlaybookToRtmAdapter()
+        tasks = [PlaybookTask(step_id="sdd-greenfield-at-001-1-1", name="AT-001-1-1",
+                              prompt="x")]
+        rep = ad.compile_report(tasks, [])
+        assert rep.weak_regex_at_ids == ()
+
+    def test_render_yaml_includes_weak_regex_at_ids(self):
+        ad = PlaybookToRtmAdapter()
+        rep = ad.compile_report(self._tasks_with_weak(), [])
+        doc = yaml.safe_load(ad.render_yaml(rep))
+        assert doc["weak_regex_at_ids"] == ["AT-001-1-1"]

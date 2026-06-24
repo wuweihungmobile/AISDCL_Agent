@@ -141,6 +141,9 @@ class SddToPlaybookAdapter:
                 # improving_56 W-56-2（DEF-56-001）：權威全 digest 結構化傳遞給逆向橋接，
                 # 取代 prompt 內 8 字元截斷（digest8 僅留作 prompt 人類可讀提示）。
                 spec_digest=spec.digest,
+                # improving_61 W-61-1：搭載 weak_regex 旗標（轉譯保真度第二信號），
+                # 供逆向橋接收集為 weak_regex_at_ids 餵轉譯元學習。轉譯輸出語意不變。
+                weak_regex=c.weak_regex,
             ))
             prev_ac = c.ac_id
         return tasks
