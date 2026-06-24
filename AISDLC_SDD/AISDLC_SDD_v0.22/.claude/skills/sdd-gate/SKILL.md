@@ -296,7 +296,7 @@ SCG-6 → 所有 SCG-0~5 驗證報告
 
 ---
 
-**基於**: AISDLC-SDD v0.21（SDD 專屬 Skill）
+**基於**: AISDLC-SDD v0.22（SDD 專屬 Skill）
 **強化版本**: v1.1（加入 FSM retry_count + pattern_detection）
 **對應 SDD 原則**: Spec-First Gate（所有 SCG 閘門）
 **對應工作流**: `workflow/sdd-spec-first-gate/SDD_SPEC_FIRST_GATE.md`

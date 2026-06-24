@@ -219,6 +219,6 @@ RTM 初版只填入 EPIC/Feature/US/AC 欄位，API 和 TC 欄位留空（稍後
 
 ---
 
-**基於**: AISDLC-SDD v0.21
+**基於**: AISDLC-SDD v0.22
 **對應 Agent**: `04.sa-analyst-zh.yaml`
 **對應 SDD Enhancement**: `scenarios/greenfield/SDD_GREENFIELD_ENHANCEMENT.md`

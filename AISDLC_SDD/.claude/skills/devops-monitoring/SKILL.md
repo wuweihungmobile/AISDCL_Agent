@@ -244,6 +244,6 @@ receivers:
 
 ---
 
-**基於**: AISDLC-SDD v0.21
+**基於**: AISDLC-SDD v0.22
 **對應 NFR 規格**: `docs/01_requirements/FRD-{System}.md` NFR 章節
 **對應 CI/CD 規格**: `cicd/SDD_PERFORMANCE_CICD.md`

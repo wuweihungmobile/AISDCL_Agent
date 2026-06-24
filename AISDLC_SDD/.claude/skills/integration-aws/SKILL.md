@@ -163,5 +163,5 @@ resource "aws_iam_role_policy" "app_s3_policy" {
 
 ---
 
-**基於**: AISDLC-SDD v0.21
+**基於**: AISDLC-SDD v0.22
 **對應情境**: Integration 場景

@@ -201,3 +201,88 @@ def test_wrong_arg_count(repo: Path):
     proc = _run(repo, "only-one-arg")
     assert proc.returncode == 2, "參數數不對應 exit 2"
     assert "用法" in proc.stderr
+
+
+# ── DEF-58-002（P1 根因）：建版後自動同步框架版本戳記 + 父層鏡像 ──────────────────────
+def _bash_with_python() -> str | None:
+    """解析一個「PATH 內含 python」的 bash。
+
+    WHY：本測試的 auto-sync 步驟需在 bash 內呼叫 python；Windows 上裸 `bash` 常解析到 WSL bash
+    （環境隔離、無 Windows python）。Git Bash（隨 git 安裝、繼承 Windows PATH）則有 python。
+    逐一探測候選（git 相鄰 bash + 裸 bash），回傳第一個 `command -v python` 成功者；皆無則 None
+    （→ 環境 gated skip，對齊既有 bash/tar/git skipif 慣例）。CI（Linux）裸 bash 即含 python。
+    """
+    candidates: list[str] = []
+    git = shutil.which("git")
+    if git:
+        gp = Path(git).resolve()
+        for up in list(gp.parents)[:4]:
+            for sub in ("usr/bin/bash.exe", "bin/bash.exe"):
+                c = up / sub
+                if c.exists():
+                    candidates.append(str(c))
+    candidates.append("bash")
+    for b in candidates:
+        try:
+            r = subprocess.run([b, "-c", "command -v python"], capture_output=True,
+                               text=True, timeout=15)
+            if r.returncode == 0 and r.stdout.strip():
+                return b
+        except Exception:
+            continue
+    return None
+
+
+_SYNC_SCRIPTS = (
+    "copy_on_evolve.sh",
+    "skill_header_sync.py",
+    "sync_exposed_skills.py",
+    "rfc_lifecycle_lint.py",  # skill_header_sync / sync_exposed 皆 import discover_frozen_versions
+)
+
+
+def _setup_version_repo_with_scripts(repo: Path) -> None:
+    """於 tmp repo 佈署真實 scripts/ 4 腳本 + 一個 v0.01 版本目錄（含帶 v0.01 戳記的 SKILL.md），
+    全部 commit。版本目錄採真實 `AISDLC_SDD_v0.0X` 樣式（discover_frozen_versions 之 VERSION_RE
+    要求數字版），使 skill_header_sync/sync_exposed 能在 tmp 基底辨識 LATEST。"""
+    (repo / "scripts").mkdir()
+    for name in _SYNC_SCRIPTS:
+        shutil.copy(str(REPO_ROOT / "scripts" / name), str(repo / "scripts" / name))
+    skill_dir = repo / "AISDLC_SDD_v0.01" / ".claude" / "skills" / "foo"
+    skill_dir.mkdir(parents=True)
+    # footer 戳記須對齊所在版本目錄；建版繼承後應被自動改寫為新版
+    (skill_dir / "SKILL.md").write_text(
+        "# Foo Skill\n\n內容\n\n---\n**基於**: AISDLC-SDD v0.01\n", encoding="utf-8"
+    )
+    _git(repo, "add", "scripts", "AISDLC_SDD_v0.01")
+    _git(repo, "commit", "-q", "-m", "scripts + v0.01 framework")
+
+
+def test_auto_syncs_skill_stamps_on_evolve_def_58_002(repo: Path):
+    """DEF-58-002 意圖鎖：copy_on_evolve 建出 v0.02 後，必自動同步 skill 戳記至 v0.02。
+
+    WHY：git archive 逐字繼承來源 v0.01 的 `**基於**: AISDLC-SDD v0.01` 戳記；若不自動
+    skill_header_sync --write，戳記停在 v0.01 → ci-gate 之 skill_header_sync --check 必紅
+    （DEF-CLDREV-007@v0.19、DEF-58-001@v0.22 兩度實證人工漏跑帶紅入庫）。本測試鎖「建版即
+    同步」——移除硬化（auto-sync 區塊）→ 新版戳記停 v0.01，本 assert 立即轉紅。
+    """
+    bash = _bash_with_python()
+    if bash is None:
+        pytest.skip("找不到 PATH 內含 python 的 bash（WSL bash 無 Windows python）")
+    _setup_version_repo_with_scripts(repo)
+    proc = subprocess.run(
+        [bash, "scripts/copy_on_evolve.sh", "AISDLC_SDD_v0.01", "AISDLC_SDD_v0.02"],
+        cwd=str(repo), capture_output=True, text=True, encoding="utf-8", errors="replace",
+        timeout=60,
+    )
+    assert proc.returncode == 0, f"建版+同步應 exit 0\nstdout:{proc.stdout}\nstderr:{proc.stderr}"
+    new_skill = repo / "AISDLC_SDD_v0.02" / ".claude" / "skills" / "foo" / "SKILL.md"
+    assert new_skill.is_file(), "新版 SKILL.md 應存在"
+    body = new_skill.read_text(encoding="utf-8")
+    assert "**基於**: AISDLC-SDD v0.02" in body, \
+        f"戳記未自動同步至 v0.02（仍停 v0.01＝DEF-58-001 帶紅入庫回歸）\n{body}"
+    assert "v0.01" not in body, "v0.01 戳記不應殘留"
+    # 父層鏡像（sync_exposed_skills --write）亦應重生
+    mirror = repo / ".claude" / "skills" / "foo" / "SKILL.md"
+    assert mirror.is_file(), "父層曝光 skills 鏡像應隨建版重生"
+    assert "**基於**: AISDLC-SDD v0.02" in mirror.read_text(encoding="utf-8")

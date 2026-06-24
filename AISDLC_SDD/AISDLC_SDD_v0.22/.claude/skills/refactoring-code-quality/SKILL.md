@@ -136,5 +136,5 @@ allowed-tools:
 
 ---
 
-**基於**: AISDLC-SDD v0.21
+**基於**: AISDLC-SDD v0.22
 **對應場景**: `scenarios/refactoring/SDD_REFACTORING_ENHANCEMENT.md`

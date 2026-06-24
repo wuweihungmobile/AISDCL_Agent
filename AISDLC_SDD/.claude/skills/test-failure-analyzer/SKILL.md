@@ -220,4 +220,4 @@ test_failure_analyzer:
 
 ---
 
-**基於**: AISDLC-SDD v0.21
+**基於**: AISDLC-SDD v0.22

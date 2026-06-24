@@ -192,5 +192,5 @@ describe('OrderService.createOrder', () => {
 
 ---
 
-**基於**: AISDLC-SDD v0.21
+**基於**: AISDLC-SDD v0.22
 **對應 CI/CD 規格**: `cicd/SDD_TESTING_CICD.md`

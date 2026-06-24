@@ -1,7 +1,7 @@
 # AISDLC Claude Skill 開發規劃
 # Claude Skill Development Plan
 
-**版本**: v0.21-SDD
+**版本**: v0.22-SDD
 **建立日期**: 2025-01-22
 **最後更新**: 2026-04-14
 **用途**: 規劃 AISDLC 九大情境和 Agent 轉化為 Claude Skill 的完整路線圖

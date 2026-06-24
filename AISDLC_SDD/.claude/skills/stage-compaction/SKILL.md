@@ -187,5 +187,5 @@ cd AISDLC_SDD_v0.0X && python -m tools.fsm_runtime.fsm_runtime complete-auto-com
 
 ---
 
-**基於**: AISDLC-SDD v0.21（SDD 原生新增 Skill）
+**基於**: AISDLC-SDD v0.22（SDD 原生新增 Skill）
 **對應藍圖**: SDD_improving_Automation_01.md Phase B — stage-compaction

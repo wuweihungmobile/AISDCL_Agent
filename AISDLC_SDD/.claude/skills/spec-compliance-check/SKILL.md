@@ -226,5 +226,5 @@ SDD 三大支柱之 **Spec-First Gate** 的自動驗證子任務。所有 Agent 
 
 ---
 
-**基於**: AISDLC-SDD v0.21（SDD 專屬 Skill）
+**基於**: AISDLC-SDD v0.22（SDD 專屬 Skill）
 **對應 SDD 原則**: Spec-First Gate（所有 SCG 閘門）

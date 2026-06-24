@@ -211,5 +211,5 @@ export { handler as GET, handler as POST };
 
 ---
 
-**基於**: AISDLC-SDD v0.21
+**基於**: AISDLC-SDD v0.22
 **對應情境**: Integration 場景

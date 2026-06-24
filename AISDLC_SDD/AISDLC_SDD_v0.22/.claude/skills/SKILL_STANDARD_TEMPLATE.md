@@ -90,7 +90,7 @@ allowed-tools:
 
 ---
 
-**基於**: AISDLC-SDD v0.21
+**基於**: AISDLC-SDD v0.22
 **對應 Agent**: `{NN}.{role}-zh.yaml`
 **對應 SDD Enhancement**: `scenarios/{scenario}/SDD_{SCENARIO}_ENHANCEMENT.md`
 

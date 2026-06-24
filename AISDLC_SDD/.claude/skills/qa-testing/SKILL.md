@@ -238,7 +238,7 @@ RTM 更新後，檢查覆蓋率：
 
 ---
 
-**基於**: AISDLC-SDD v0.21
+**基於**: AISDLC-SDD v0.22
 **對應 Agent**: `07.qa-tester-zh.yaml`
 **對應 SDD Enhancement**: `scenarios/greenfield/SDD_GREENFIELD_ENHANCEMENT.md`
 **對應 CI/CD 規格**: `cicd/SDD_TESTING_CICD.md`

@@ -346,5 +346,5 @@ python -m tools.fsm_runtime.multimodal_validator <spec_paths...> \
 
 ---
 
-**基於**: AISDLC-SDD v0.21（Phase E M4 / ACT-028 規則引擎化 + Phase F M4 / ACT-031 多模態擴充）
+**基於**: AISDLC-SDD v0.22（Phase E M4 / ACT-028 規則引擎化 + Phase F M4 / ACT-031 多模態擴充）
 **對應藍圖**: SDD_improving_Automation_04.md §ACT-028 + SDD_improving_Automation_05.md §伍 ACT-031（均已歸檔 ../../../build/planning/archive/）

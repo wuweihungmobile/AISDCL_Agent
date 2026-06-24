@@ -196,6 +196,6 @@ SP 參考:
 
 ---
 
-**基於**: AISDLC-SDD v0.21
+**基於**: AISDLC-SDD v0.22
 **對應工作流**: `workflow/core/SPRINT_WORKFLOW.md`
 **對應 SDD Enhancement**: `scenarios/greenfield/SDD_GREENFIELD_ENHANCEMENT.md`

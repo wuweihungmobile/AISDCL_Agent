@@ -1,7 +1,7 @@
 # AISDLC Claude Skills
 # Claude Code 技能套件
 
-**版本**: v0.21-SDD
+**版本**: v0.22-SDD
 **建立日期**: 2025-01-22
 **最後更新**: 2026-04-15
 **格式標準**: Claude Code Agent Skills Standard (`<name>/SKILL.md`)

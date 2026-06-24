@@ -188,6 +188,6 @@ EPIC-XXX（業務目標）
 
 ---
 
-**基於**: AISDLC-SDD v0.21（SDD 專屬 Skill）
+**基於**: AISDLC-SDD v0.22（SDD 專屬 Skill）
 **對應 SDD 原則**: Spec-First Gate（SCG-5 100% RTM 覆蓋）
 **對應範本**: `docs_template/sdd/testing/RTM-TEMPLATE.md`

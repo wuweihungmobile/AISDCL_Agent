@@ -197,6 +197,6 @@ BA 是 SCG-0 閘門的業務對齊守門員。本 Skill 在 SA 完成 FRD 後執
 
 ---
 
-**基於**: AISDLC-SDD v0.21
+**基於**: AISDLC-SDD v0.22
 **對應 Agent**: `02.ba-business-analyst-zh.yaml`
 **對應 SDD Enhancement**: `scenarios/greenfield/SDD_GREENFIELD_ENHANCEMENT.md`

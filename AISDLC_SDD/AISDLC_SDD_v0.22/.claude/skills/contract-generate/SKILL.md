@@ -305,6 +305,6 @@ x-sdd-gap:
 
 ---
 
-**基於**: AISDLC-SDD v0.21（SDD 專屬 Skill）
+**基於**: AISDLC-SDD v0.22（SDD 專屬 Skill）
 **對應 SDD 原則**: Contract-Driven Development（SCG-3）
 **對應範本**: `docs_template/sdd/api/CONTRACT-TEMPLATE.yaml`

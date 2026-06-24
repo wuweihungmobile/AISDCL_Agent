@@ -142,5 +142,5 @@ ALTER TABLE "Order"
 
 ---
 
-**基於**: AISDLC-SDD v0.21
+**基於**: AISDLC-SDD v0.22
 **DB Schema Contract**: `docs/07_design/DB-SCHEMA-CONTRACT-{System}.md`

@@ -248,5 +248,5 @@ volumes:
 
 ---
 
-**基於**: AISDLC-SDD v0.21
+**基於**: AISDLC-SDD v0.22
 **對應架構規格**: `docs/02_architecture/SRD-{System}.md` 第 8 章

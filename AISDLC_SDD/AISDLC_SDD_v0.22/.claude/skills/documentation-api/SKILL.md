@@ -189,6 +189,6 @@ SDD Living Doc：文件更新與 Contract 版本同步，非手動維護：
 
 ---
 
-**基於**: AISDLC-SDD v0.21
+**基於**: AISDLC-SDD v0.22
 **Contract 規格**: `docs/02_architecture/api/CONTRACT-*.yaml`
 **對應工作流**: `workflow/core/SDD_SPEC_FIRST_GATE.md`

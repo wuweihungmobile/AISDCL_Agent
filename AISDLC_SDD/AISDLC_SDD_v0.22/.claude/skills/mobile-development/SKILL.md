@@ -203,5 +203,5 @@ App Store 發布在 SDD 中屬於 SCG-6 Release Gate 的一部分：
 
 ---
 
-**基於**: AISDLC-SDD v0.21
+**基於**: AISDLC-SDD v0.22
 **對應場景**: `scenarios/greenfield/SDD_GREENFIELD_ENHANCEMENT.md`

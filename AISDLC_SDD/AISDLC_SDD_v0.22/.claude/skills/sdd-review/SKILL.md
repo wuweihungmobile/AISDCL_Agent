@@ -175,6 +175,6 @@ retry_count ≥ 5 次：
 
 ---
 
-**基於**: AISDLC-SDD v0.21
+**基於**: AISDLC-SDD v0.22
 **對應 Agent**: `07.qa-tester-zh.yaml`（主審）、`dev-senior-zh.yaml`（協同）
 **對應 SCG 閘門**: SCG-4（Implementation Review Gate）

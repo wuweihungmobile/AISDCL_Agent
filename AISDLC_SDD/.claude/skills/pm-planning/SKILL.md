@@ -204,6 +204,6 @@ PM 是 SDD 需求階段的業務目標定義者。本 Skill 產出 PRD，與 SA 
 
 ---
 
-**基於**: AISDLC-SDD v0.21
+**基於**: AISDLC-SDD v0.22
 **對應 Agent**: `03.pm-po-agent-zh.yaml`
 **對應 SDD Enhancement**: `scenarios/greenfield/SDD_GREENFIELD_ENHANCEMENT.md`
