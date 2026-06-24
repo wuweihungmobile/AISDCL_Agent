@@ -1,0 +1,19 @@
+case_id: INV-noise-01
+expect: noise_invention
+invented:
+  op: mean
+  probe:
+  - canary_gap
+candidates:
+- real_quality: 0.6
+  existing_cost: 2.0
+  features:
+    canary_gap: 5.0
+- real_quality: 0.6
+  existing_cost: 3.0
+  features:
+    canary_gap: 0.0
+- real_quality: 0.4
+  existing_cost: 4.0
+  features:
+    canary_gap: 8.0

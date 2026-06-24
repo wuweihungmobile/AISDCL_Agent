@@ -1,0 +1,22 @@
+id: R-9.38
+title: Playbook 翻譯保真（AT↔step 100% 雙向映射）
+trigger_states:
+  - IMPLEMENTATION
+  - PR_REVIEW
+severity: high
+maturity: active
+spec: >
+  Phase Z / ACT-164：SDD 規格經 sdd_compile（SddToPlaybookAdapter）編譯為 AutoClaude
+  playbook 時，TEST-CONTRACT-SPEC 的每條 AT 必須一對一映射為唯一 step
+  （step_id = sdd-{scenario}-{at_id}），且 playbook steps 數 == 規格 AT 條數；
+  缺漏（AT 無對應 step）或多餘（step 無對應 AT）即為翻譯保真違反 → 轉入 SPEC_AUDIT。
+  evaluator_command 僅得由白名單模板生成（自由字串 → SPEC_TAINTED 拒絕）；
+  Then 斷言不可推導而 fallback 的 weak_regex 必經 observability audit log 留痕，
+  禁止 silent fallback。編譯產物為待審工件，人工 review 通過後才得執行（SCG-4）。
+  詳見 workflow/sdd-autoclaude-bridge/SDD_AUTOCLAUDE_BRIDGE.md。
+test_ref: tools/fsm_runtime/tests/test_rule_938_translation_fidelity.py
+enforcement_mechanism: manual
+scaffold_roi:
+  fire_count: 0
+  catch_count: 0
+  false_positive_count: 0

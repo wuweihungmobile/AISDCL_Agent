@@ -1,0 +1,45 @@
+id: R-9.28
+title: Phase P 全評分器一體化自校準的耦合感知有界元最佳化
+trigger_states:
+  - LEARNING_COMMIT
+  - MEMORY_CONSOLIDATION
+severity: high
+maturity: active
+spec: >
+  L10 完整之「離線活體元迴圈 · 全評分器一體化」切片：把 Phase O 只示範在單一
+  composition_objective_scorer 的「tuner + held-out oracle + META_FSM 納管」骨架，泛化到
+  全評分器版本面（≥8 凍結側寫），並納管「多評分器同時自校準」憑空長出的新危害：跨評分器
+  接縫 Goodhart 與耦合式震盪。9.28.1 一體化骨架泛化（UnifiedCalibrationSkeleton）：全部 8 個
+  評分器經 scorer_calibration_registry 共用同一 ScorerTuner 協定 + per-scorer held-out + 既有
+  META_FSM 納管骨架；每個 tuner 候選搜尋節點 ≤ SDD_CALIB_TUNE_BUDGET clamp[8,256] 預設 64；
+  只提案、絕不自寫常數。9.28.2 跨評分器聯合反 Goodhart（JointAntiGoodhart）：任一候選價值向量的
+  capability-delta tier 唯一合法來源為全體 tuner 不可見、content-hashed 凍結的 pipeline 級聯合
+  held-out 勝率；per-scorer 自評/單獨 oracle 通過結構性禁止充當聯合 capability-delta；per 通過
+  但 joint 不通過一律以 joint 為準；接縫 Goodhart 攔截零漏放；生成器禁止 import joint oracle /
+  讀寫聯合語料（編譯期隔離斷言）。9.28.3 耦合感知聚合有界停機（CrossScorerChurnBounded）：8 命名
+  空間在滑動窗的總採納次數 ≤ SDD_CALIB_ADOPT_RATE_MAX（meta_halt_monitor.guard_calibration_adoption）；
+  偵測 A→B→A 耦合震盪環（per-fingerprint churn 皆 0）→ MFSM_ESCALATION（誠實標註：耦合環由
+  聚合速率窗 + distinct≥2 多命名空間診斷標籤「近似實現」〔single-counter 抽象〕，非顯式拓撲環偵測；
+  更緊語意由 runtime guard_calibration_adoption + JOINT_CALIBRATION_FLAP chaos enforce）；重用既有
+  META_FSM、僅補 CrossScorerChurnBounded INVARIANT、不增狀態、不增第六軌；五軌 TLC（SDD 42 / META 13 /
+  FLEET 7 / COMPOSITION 21 / OPTIMIZATION 12）全不回歸、calibration 不污染單軌 SDD_FSM.tla。9.28.4 反 big-bang
+  價值改寫（NoBigBangValueRewrite）：每週期至多 K 個（SDD_CALIB_BIGBANG_K 預設 2）評分器可進
+  proposed-pending-bump，每個 *_PROFILE_VERSION bump 必經人工逐項 signoff（守 Rule 8 / 9.26.4 /
+  9.27.3）；tuner/steersman 絕不自動 commit、絕不自動 bump、絕不一次改整套價值系統。9.28.5 全評分器
+  版本誠實 + 活體 horizon：全 8 個 *_PROFILE_VERSION/SCORER_VERSION 僅人工可 bump；聯合勝率 tier 為
+  capability_level 唯一合法來源，不得謊報、不得用自評充當；活體一體化版受 OPEN-10.6 約束續列 horizon
+  （OPEN-P.7 承 OPEN-O.7/M.7 暫不放寬沙箱）。對應 scorer_calibration_registry / joint_calibration_oracle /
+  meta_halt/meta_halt_monitor（guard_calibration_adoption）/ steersman_renderer
+  （render_unified_calibration_proposal）。禁止：任一 scorer tuner 自動 commit/自寫評分器權重常數
+  繞過人工 bump、用 per-scorer 自評/單獨 oracle 結果充當聯合 capability-delta tier（接縫 Goodhart
+  自評放水）、任一 tuner 讀寫/影響聯合 held-out 語料、8 命名空間採納退役繞過 meta_halt_monitor 或
+  忽略 CrossScorerChurnBounded 聚合速率/放任 A→B→A 耦合震盪不升 MFSM_ESCALATION、任一 tuner 候選
+  搜尋無上限指數爆炸、一週期同時 bump > K 個評分器一次改整套價值系統、把 calibration 元迴圈併入單軌
+  SDD_FSM.tla 或新增第六軌污染五軌 reachable、未經 OPEN-O.7 私自開 HTTP 外聯做活體一體化元最佳化
+  （破 OPEN-10.6）。
+test_ref: tools/fsm_runtime/tests/test_phase_p.py
+enforcement_mechanism: meta_loop
+scaffold_roi:
+  fire_count: 0
+  catch_count: 0
+  false_positive_count: 0

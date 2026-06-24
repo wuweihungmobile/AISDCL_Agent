@@ -1,0 +1,25 @@
+case_id: DPT-true-10
+expect: true_depth
+note: a depth-3 composite (squared squared sum = sum^4) rescues a low-magnitude high-quality
+  candidate (high existing_cost) that the shallow depth-<=2 operator family's existing_cost
+  baseline misses; depth genuinely needed (two stacked sq combinators, not expressible
+  at depth-2)
+candidates:
+- real_quality: 0.43
+  existing_cost: 1.9
+  features:
+    rollback_steps: 9.0
+    blast_radius: 8.0
+    canary_gap: 8.0
+- real_quality: 0.86
+  existing_cost: 4.7
+  features:
+    rollback_steps: 1.0
+    blast_radius: 3.0
+    canary_gap: 1.0
+- real_quality: 0.58
+  existing_cost: 2.9
+  features:
+    rollback_steps: 5.0
+    blast_radius: 3.0
+    canary_gap: 4.0

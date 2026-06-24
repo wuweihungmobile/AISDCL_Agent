@@ -1,0 +1,104 @@
+# ============================================================
+# AISDLC v0.09 - Layer 0 Security Baseline
+# Pre-commit Hook Configuration Template
+# ============================================================
+#
+# 使用方式:
+#   1. 複製此檔案至專案根目錄，命名為 .pre-commit-config.yaml
+#   2. 執行: pip install pre-commit && pre-commit install
+#   3. 依專案需求取消註解對應的 hooks
+#
+# 參考文檔: Layer0_Security_Baseline_Template.md
+# ============================================================
+
+repos:
+  # ═══════════════════════════════════════════
+  # 🔴 Secret Detection（必要 - 不可移除）
+  # ═══════════════════════════════════════════
+
+  # 選項 A: TruffleHog（推薦 - 中大型專案）
+  - repo: https://github.com/trufflesecurity/trufflehog
+    rev: v3.82.13  # TODO: 更新至最新版
+    hooks:
+      - id: trufflehog
+        name: "[Layer0] TruffleHog Secret Scan"
+        entry: trufflehog git file://. --since-commit HEAD --only-verified --fail
+        language: golang
+        stages: [pre-commit]
+
+  # 選項 B: gitleaks（輕量替代 - 小型專案）
+  # - repo: https://github.com/gitleaks/gitleaks
+  #   rev: v8.21.2  # TODO: 更新至最新版
+  #   hooks:
+  #     - id: gitleaks
+  #       name: "[Layer0] Gitleaks Secret Scan"
+  #       stages: [pre-commit]
+
+  # ═══════════════════════════════════════════
+  # 🔴 基礎安全檢查（必要）
+  # ═══════════════════════════════════════════
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v5.0.0
+    hooks:
+      # Secret 相關
+      - id: detect-private-key
+        name: "[Layer0] Detect Private Keys"
+
+      # 大檔案防護
+      - id: check-added-large-files
+        name: "[Layer0] Block Large Files"
+        args: ['--maxkb=1000']
+
+      # 合併衝突偵測
+      - id: check-merge-conflict
+        name: "[Layer0] Check Merge Conflicts"
+
+      # 格式安全
+      - id: check-yaml
+        name: "[Layer0] Validate YAML"
+      - id: check-json
+        name: "[Layer0] Validate JSON"
+      - id: check-toml
+        name: "[Layer0] Validate TOML"
+
+      # 基礎衛生
+      - id: end-of-file-fixer
+      - id: trailing-whitespace
+
+  # ═══════════════════════════════════════════
+  # ⚠️ 進階 SAST（選配 - 依語言啟用）
+  # ═══════════════════════════════════════════
+
+  # Semgrep - 多語言靜態分析（推薦）
+  # - repo: https://github.com/semgrep/semgrep
+  #   rev: v1.96.0  # TODO: 更新至最新版
+  #   hooks:
+  #     - id: semgrep
+  #       name: "[Layer0+] Semgrep SAST"
+  #       args: ['--config', 'auto', '--error']
+
+  # ═══════════════════════════════════════════
+  # ⚠️ 語言專屬 Lint（選配 - 依專案啟用）
+  # ═══════════════════════════════════════════
+
+  # Python
+  # - repo: https://github.com/astral-sh/ruff-pre-commit
+  #   rev: v0.8.4
+  #   hooks:
+  #     - id: ruff
+  #       name: "[Lint] Ruff Python Linter"
+
+  # JavaScript/TypeScript
+  # - repo: https://github.com/pre-commit/mirrors-eslint
+  #   rev: v9.17.0
+  #   hooks:
+  #     - id: eslint
+  #       name: "[Lint] ESLint"
+  #       types_or: [javascript, jsx, ts, tsx]
+
+  # Java（Checkstyle）
+  # - repo: https://github.com/pre-commit/pre-commit-hooks
+  #   rev: v5.0.0
+  #   hooks:
+  #     - id: check-xml
+  #       name: "[Lint] Validate XML (Java configs)"
