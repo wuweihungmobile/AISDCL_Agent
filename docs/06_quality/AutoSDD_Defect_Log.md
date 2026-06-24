@@ -69,6 +69,17 @@
 | DEF-23-002 | 2026-06-17 | improving_23 階段一 zero-trust 偵察（active planning 盤點） | 流程漂移：`AISDLC_SDD_v0.13/build/planning/active/SDD_improving_Automation_26.md`（Phase Y，§D 已載「✅ 已執行收官 2026-06-06」）與 `_27.md`（closure_evidence，§6 標「決策後 archive」、已落 v0.12）**兩份已完成 RFC 仍滯留 `build/planning/active/`**，違反框架自身「active=待決 / archive=已決」生命週期（archive/ 已有 _01~_23+，獨缺已完成的 _26/_27）| P3（流程衛生，無功能影響；但使 active 列表失真，誤導後續輪判斷待辦） | 框架程式/流程缺陷 → v0.14 `git mv` _26/_27 入 `build/planning/archive/`（隨 W-23-1 落版） | fixed@improving_23（證據：v0.14 archive/ 含 _26/_27、active/ 清空已完成項；**SA-SD 鏡複審連帶修**：`ID_REGISTRY.yaml:116` Phase Y `ref` 由 `active/SDD_improving_Automation_26.md` 同步改 `archive/...`，消除歸檔後 stale ref） |
 | DEF-59-001 | 2026-06-24 | improving_59 階段四 ci-gate（`test_gitignore_coverage_lint.py::test_real_repo_latest_covered` 當場揭露） | Copy-on-Evolve 結構摩擦（**DEF-58-002 / DEF-23-003 同根因家族**「人工後步驟未釘進腳本」復發）：建 v0.23 後 `AISDLC_SDD/.gitignore` 無 v0.23 runtime 產物 block → ci-gate 之 gitignore 覆蓋 lint 對 LATEST 報紅（missing `AISDLC_SDD_v0.23/build/reports`/`arch-fitness.json`/`chaos-report.json`）。improving_58 已把**戳記同步**釘進 `copy_on_evolve.sh`，但 **.gitignore block 補寫仍為人工後步驟**、漏補即帶紅（dogfooding 當場踩到） | P2（潔淨度/閘門帶紅；每輪 Copy-on-Evolve 復發，同 DEF-58-002 家族） | 共享 infra 即修（`AISDLC_SDD/scripts/copy_on_evolve.sh` 根因硬化，versioned 目錄外免 Copy-on-Evolve）+ `.gitignore` 補 v0.23 block | **fixed@improving_59**（證據：① 立即修 `.gitignore` 補 v0.23 block → ci-gate exit 0；② 根因硬化 `copy_on_evolve.sh` 建版後自動 append 新版 `.gitignore` block〔idempotent、grep-skip 首行 path〕；③ 回歸鎖 `test_copy_on_evolve.py::test_auto_appends_gitignore_block_on_evolve_def_59_001`〔scripts/tests 128→129〕，受控突變 **M-W593**〔`if false &&` 停用自動補 → 測試轉紅、還原 9 passed〕） |
 
+## improving_63 收尾註記（2026-06-25，B 軌 dogfooding：scaffold_gc 自動提議退役活體化，Copy-on-Evolve v0.24→v0.25）
+
+**本輪零新框架缺陷**（純翻 1 個布林預設 `_scaffold_gc_auto_propose_enabled` OFF→ON + conftest 隔離護欄 + wiring 測試對齊；三鏡 Architect/SA-SD/QA OVERALL PASS，QA 生產碼雙突變「翻紅→復綠」證測試非空殼）。**B 軸 opt-in→default-ON 翻環家族至此收齊**（AUTO_RECOVERY/SLV/fire/catch/scaffold_gc 五支全翻 ON）。上輪 open/routed 項複驗：
+
+- **DEF-62-001**（auto_recovery call-site 註解「預設 OFF」滯後，P3）：維持 **open（routed）**。QA 鏡複驗：v0.25 中行號因本輪 scaffold 翻環註解前插由 L410→**L420**，註解內容仍滯後；本輪守 Rule 3 surgical **不擴 scope** 修他域 auto_recovery feature 註解（scaffold 自身註解已與翻 ON 一致、無新 doc-lag），續留待 auto_recovery 相關輪或專設文件校正輪掃除。
+- **DEF-19-001**（catch 漸進覆蓋，P3）：維持 **routed**（escalation-scoped 結構天花板，非本輪 scope）。
+- **DEF-23-005**（RFC 生命週期自動化，P3）/ **DEF-30-001**（RFC 已決標記標準化，P3，按上表已 fixed@improving_33 但家族議題保留）/ **DEF-32-002**（負向狀態碼，P3）：維持 routed（非本輪 B 軌 scope）。
+- **DEF-35-001**（goal_synthesis mutmut 目錄，P2）：維持 **routed**（屬 C 軌 SD_09 W1，非本輪 B 軌 scope）。
+- **DEF-01-007**（cc-switch GUI，P3）：維持 **open**（環境工具缺裝，本輪不涉多後端 A/B，未觸發）。
+- **DEF-01-009**（sdd_governance_plugin LOC watch，P3）：維持 **open watch**（本輪純 SDD `tools/fsm_runtime/` 側，零擴充該檔，watch 不觸發）。
+
 ## improving_24 複驗註記（2026-06-17，A 軌雙向橋接 / SDD→Playbook 逆向回寫閉環）
 
 **本輪零新框架缺陷**（純 AutoClaude 整合層擴充，零框架 v0.0X 變更）。上輪 open/routed 項複驗：

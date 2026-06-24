@@ -1,0 +1,36 @@
+id: R-9.24
+title: Phase L 元迴圈形式化停機 + 離線反事實實驗 + 主動脆弱性預測
+trigger_states:
+  - LEARNING_COMMIT
+  - SCAFFOLD_GC
+  - SPEC_PATCH_PROPOSAL
+  - EXPERIMENT_REPLAY
+severity: high
+maturity: active
+spec: >
+  L9 入口（離線切片）+ L10 元停機形式化奠基。9.24.1 元迴圈 churn 有界：任一規則語意指紋
+  的 add→retire→re-add 循環 ≤ SDD_META_CHURN_MAX clamp[1,5] 預設 2，超限→MFSM_ESCALATION，
+  絕不無限抖動；學習層 exit_learning_commit(approved) 與 GC set_maturity() 必經
+  meta_halt_monitor，禁繞過。9.24.2 退役棘輪（GraduationRatchet）：被 GC 退役的指紋再採納
+  必須挾帶 capability_level 嚴格變化證據（churn ≤ cap），無 capability-delta 的同型 re-adopt
+  一律拒絕。9.24.3 META_FSM 獨立形式化：META_FSM.tla 自有命名空間，不併入單軌 SDD_FSM.tla；
+  5 safety(TypeOK/ChurnBounded/GraduationRatchet/ReadoptGated/StableIsFixpoint)+1 liveness(EventuallyMetaStable)
+  No error + 離線 BFS reachable=N/N；單軌 SDD_FSM reachable 維持 42（EXPERIMENT_REPLAY 為唯一新增，
+  非 meta 污染）。9.24.4 反事實重放 advisory + 有界：EXPERIMENT_REPLAY 重放筆數 ≤
+  SDD_REPLAY_MAX_CASES clamp[5,200] 預設 50，命中率僅為證據，絕不自動 approve/改寫補丁，
+  最終 approve 必經 HUMAN_PENDING（Rule 8）。9.24.5 脆弱性評分 advisory + 不自我放水：
+  spec_fragility_scorer 只標記/建議，絕不自動改 spec、絕不阻塞 SCG；分數凍結
+  FRAGILITY_PROFILE_VERSION，調權重須 bump（比照 SCORER_VERSION/ADVERSARIAL_PROFILE_VERSION）。
+  9.24.6 單軌三源 + 雙形式化同步：EXPERIMENT_REPLAY 同步 _HAPPY_PATH ↔ SDD_FSM.tla ↔
+  SDD_FSM_ENGINE.md（observation 有離開 transition、∉ Terminals）；META_FSM 與單軌雙形式化
+  皆過 tlc_runner + 離線 BFS。對應 meta_halt/meta_ledger / meta_halt/meta_halt_monitor /
+  counterfactual_replay / spec_fragility_scorer。禁止：繞過 meta_halt_monitor 採納/退役規則、
+  無 capability-delta 重新學回退役指紋、META_FSM 併入單軌污染 reachable、命中率自動 approve 補丁、
+  fragility 自動改 spec 或阻塞 SCG、調 fragility 權重不 bump、EXPERIMENT_REPLAY 不同步 .tla、
+  未經 OPEN-L.5 私自開 HTTP 外聯做活體實驗（破 OPEN-10.6）。
+test_ref: tools/fsm_runtime/tests/test_phase_l.py
+enforcement_mechanism: meta_loop
+scaffold_roi:
+  fire_count: 0
+  catch_count: 0
+  false_positive_count: 0

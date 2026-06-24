@@ -1,0 +1,22 @@
+id: R-9.1
+title: FSM Retry Budget
+trigger_states:
+  - SCG_VALIDATION
+  - PR_REVIEW
+  - RTM_VERIFY
+  - SPEC_REGRESSION_CHECK
+severity: critical
+maturity: active
+spec: >
+  SCG_VALIDATION 失敗 3 次 / PR_REVIEW 5 次 / RTM_VERIFY 2 次即進入 ESCALATION；
+  PR_REVIEW 同 pattern 3 次轉 SPEC_AUDIT。對應 transition_rules.RETRY_LIMITS。
+test_ref: tools/fsm_runtime/tests/test_transitions.py
+enforcement_mechanism: escalation
+failure_mode: >
+  gate retry budget 耗盡（SCG_VALIDATION≥3 / PR_REVIEW≥5 / RTM_VERIFY≥2 次失敗）觸發
+  ESCALATION。此即 R-9.1 守望的失敗模式——真實發生時 catch 側結構化歸因到 R-9.1（W-19
+  catch 契約三要件之一；對應 record_attempt escalate 分支）。
+scaffold_roi:
+  fire_count: 0
+  catch_count: 0
+  false_positive_count: 0

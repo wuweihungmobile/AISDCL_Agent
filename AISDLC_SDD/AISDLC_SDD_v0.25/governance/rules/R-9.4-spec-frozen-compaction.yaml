@@ -1,0 +1,16 @@
+id: R-9.4
+title: SPEC_FROZEN 強制壓縮
+trigger_states:
+  - SPEC_FROZEN
+severity: high
+maturity: active
+spec: >
+  每次通過 🔴 Human Checkpoint（SPEC_FROZEN）後必須執行 /stage-compaction：確認文件
+  已持久化至 docs/、清除詳細規格內容僅保留 Stage Summary、重置當前 Stage 的
+  retry_count。對應 stage-compaction skill 與 fsm_runtime record_spec_frozen。
+test_ref: tools/fsm_runtime/tests/test_auto_compact_rate_limit.py
+enforcement_mechanism: hook
+scaffold_roi:
+  fire_count: 0
+  catch_count: 0
+  false_positive_count: 0

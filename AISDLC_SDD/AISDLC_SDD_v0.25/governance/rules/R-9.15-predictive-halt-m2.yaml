@@ -1,0 +1,22 @@
+id: R-9.15
+title: Phase G M2 Predictive Halt Layer
+trigger_states:
+  - TRAJECTORY_PREDICTED
+  - IMPLEMENTATION
+  - PR_REVIEW
+  - RTM_VERIFY
+  - SCG_VALIDATION
+  - SPEC_REGRESSION_CHECK
+severity: high
+maturity: active
+spec: >
+  反應式停機升級為預測性停機。predictor 僅在 retry_count ≥ 1 時運作；4 信號（同 pattern
+  連續 ≥2 / retry 接近上限 / decision_trace 出現 spec 字樣 ≥2/5 / ledger drift >30%）等權
+  加總：≥2 信號 switch_to_audit、≥3 信號且 confidence ≥0.8 abort_early；false-positive
+  須寫 PREDICTOR-MISS log；同 gate 全 session switch ≤1 次（防抖動）。對應 trajectory_predictor.py。
+test_ref: tools/fsm_runtime/tests/test_trajectory_predictor.py
+enforcement_mechanism: manual
+scaffold_roi:
+  fire_count: 0
+  catch_count: 0
+  false_positive_count: 0
