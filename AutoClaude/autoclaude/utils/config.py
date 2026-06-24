@@ -72,6 +72,16 @@ class PlaybookConfig(BaseModel):
     # Gap-038：CONDITIONAL 突變的 condition_evaluator 執行超時秒數（預設 5 秒）
     max_goto_per_step: int = 3
     # Gap-049：GOTO_STEP 每個目標步驟的最大跳轉次數（預設 3，可配置以支援複雜 TDD 場景）
+    enable_translation_auto_propose: bool = True
+    # AutoSDD_improving_60 W-60-4（A 軌 A→L5 轉譯策略元學習活體化）：是否於 POST_RUN
+    # 自跨 session RTM coverage history 元學習出「轉譯改進候選」並自動提議（proposed）。
+    # 預設 True＝**活體**（鏡像 B 軌 SLV 自動提議 default-ON；env
+    # AUTOCLAUDE_ENABLE_TRANSLATION_AUTO_PROPOSE=0/false/no/off opt-out 還原零退化）。
+    # 🔴 紅線：proposals 純諮詢供人工 review，絕不自動改 SddToPlaybookAdapter 轉譯行為
+    # （apply=人工 signoff 守界，對齊 RTM/SPEC-PATCH「絕不自動套用」）。非 SDD playbook
+    # 全程 no-op。
+    translation_max_proposals_per_run: int = Field(default=3, ge=0, le=20)
+    # 每次 POST_RUN 最多新提議數（有界硬閘，0~20，預設 3；超限截斷不重試）。
 
 
 class TokenGuardConfig(BaseModel):

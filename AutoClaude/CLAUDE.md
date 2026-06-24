@@ -322,9 +322,7 @@ tasks:
 
 ---
 
-**文檔元數據**：v7.6 | 建立 2025-01-11 | 最後更新 2026-06-13 | 適用 AISDLC v0.09+
-
-**v7.6 重點**：**Improving_012 Phase 2 閉環強化（F-B1/F-B2）完成**（SCG-1/SCG-2 🔴 確認交付）。F-B1 AlertLadder 三階梯（WARNING→HINT→ESCALATE，flag `alert_ladder.enabled` 預設 on，2026-06-13 SCG-6 人工 waiver 提前轉正）攔截收斂升級唯一 call site；F-B2 CorrectionVerifier（signature/fail_count/exit_code 三分量本地比對）+ streak 提前升級 + KB 策略失效回寫。**無新 port/plugin、零 alembic**：計數落 `PlaybookCheckpoint.alert_ladder` additive 欄 + PG `counters` JSONB 子鍵。三方 zero-trust audit（P0=0 / P1×3 / P2×4 全修）+ QA 變異實證複審 PASS。full pytest **3,020/122**（前基線 2,972，+48）、coverage 100%、importlinter 8 kept、LOC=0。明細見 [sprint_history.md §1.7.3](docs/05_development/sprint_history.md) Phase 2 段。
+**文檔元數據**：v7.7 | 建立 2025-01-11 | 最後更新 2026-06-24 | 適用 AISDLC v0.09+（v7.7：AutoSDD_improving_60 A 軌 A→L5 轉譯策略元學習活體化 — 新增 `translation_learner` plugin + `ITranslationLearningSink` port + `select_proposals` 元學習純函數；propose 預設 ON、apply 仍人工 signoff；full pytest 3,292/122、importlinter 8 kept、LOC=0。歷史 v7.6 Improving_012 Phase 2 明細見 [sprint_history.md §1.7.3](docs/05_development/sprint_history.md)）。
 
 <!-- ARCH_SNAPSHOT_BEGIN -->
 ## [Architecture Snapshot] — 由 tools/snapshot_sync.py 自動生成（請勿手動編輯本區段；以 `python tools/snapshot_sync.py` 重新生成）
@@ -351,7 +349,7 @@ tasks:
 7. Plugins must not directly import utils.observability helpers (use IObservabilityPort)
 8. Plugin must not directly import IKbMetricStore (use FailureKnowledgeBase routing)
 
-### Plugin 列表（17 個 active / 18 個靜態，按 wiring._REGISTER_ORDER）
+### Plugin 列表（18 個 active / 19 個靜態，按 wiring._REGISTER_ORDER）
 1. pre_run_validator
 2. hotkey
 3. cross_step_validator
@@ -366,12 +364,13 @@ tasks:
 12. goal_synthesis
 13. goal_progress
 14. rtm_writeback
-15. convergence
-16. evolution
-17. goto_counter
-18. checkpoint
+15. translation_learner
+16. convergence
+17. evolution
+18. goto_counter
+19. checkpoint
 
-### Port 列表（17 個，autoclaude/core/ports/）
+### Port 列表（18 個，autoclaude/core/ports/）
 - brain
 - embedder
 - evaluator
@@ -388,6 +387,7 @@ tasks:
 - state_repository
 - tool_invocation
 - topology_dashboard
+- translation_learning
 - vector_search
 
 ### DAL 三後端 storage.mode 矩陣（autoclaude/infra/repositories/factory.py）

@@ -34,6 +34,7 @@ from ..plugins import (
     RtmWritebackPlugin,
     SddGovernancePlugin,
     TokenGuardPlugin,
+    TranslationLearnerPlugin,
 )
 from ..utils.checkpoint_manager import CheckpointManager
 from ..utils.config import AppConfig
@@ -82,6 +83,12 @@ _REGISTER_ORDER: tuple[str, ...] = (
     # AutoSDD_improving_24 W-24-2：rtm_writeback (priority=52) 逆向回寫閉環，
     # 置於 goal_progress(50) 之後、convergence(65) 之前；非 SDD playbook 全程 no-op
     "rtm_writeback",
+    # AutoSDD_improving_60 W-60-4：translation_learner (priority=55) A→L5 轉譯策略
+    # 元學習活體化，priority 介於 rtm_writeback(52) 與 convergence(65) 之間（與 A 軌
+    # 反饋族群相鄰）；非 SDD playbook 全程 no-op。POST_RUN 自跨 session history 元學習
+    # 提議（proposed，apply 仍人工）。priority=55 獨佔 → dispatch 序由數值唯一決定，
+    # 與 register 文字序無耦合。
+    "translation_learner",
     "convergence",
     "evolution",
     "goto_counter",
@@ -191,6 +198,17 @@ def _build_plugin_set(
             rtm_feedback=_build_rtm_feedback_source(cfg),
             enable_rtm_feedback=cfg.playbook.enable_rtm_feedback,
         ),
+        # AutoSDD_improving_60 W-60-4：A→L5 轉譯策略元學習活體化。sink（File-only，
+        # 沿用 rtm_sink 先例）+ rtm_feedback 於 wiring 注入（core-purity 唯一豁免點）。
+        # propose 預設 ON（cfg flag，env AUTOCLAUDE_ENABLE_TRANSLATION_AUTO_PROPOSE opt-out）；
+        # 非 SDD playbook / flag OFF → plugin 內短路 no-op（零退化）。apply 仍 🔴 人工。
+        "translation_learner": TranslationLearnerPlugin(
+            sink=_build_translation_learning_sink(cfg),
+            rtm_feedback=_build_rtm_feedback_source(cfg),
+            observability=observability,
+            enabled=cfg.playbook.enable_translation_auto_propose,
+            max_proposals_per_run=cfg.playbook.translation_max_proposals_per_run,
+        ),
         "goto_counter": GotoCounterPlugin(playbook_cfg=cfg.playbook),
         # W4-T17 / M-11：CheckpointPlugin 解耦；attach_bus 由 _register_in_order 處理
         "checkpoint": CheckpointPlugin(checkpoint_manager=checkpoint_mgr),
@@ -254,6 +272,19 @@ def _build_rtm_feedback_source(cfg: AppConfig):
         FileRtmFeedbackSource,
     )
     return FileRtmFeedbackSource(f"{cfg.checkpoint_dir}/rtm")
+
+
+def _build_translation_learning_sink(cfg: AppConfig):
+    """組裝 FileTranslationLearningSink（AutoSDD_improving_60 W-60-2）。
+
+    沿用 FileRtmFeedbackSource 先例（File-only，無 PG 後端）；延遲 import infra
+    （wiring core-purity 唯一豁免點）。建構零副作用（僅持 base_dir，不建目錄），
+    故 flag OFF 時建了也不觸碰檔案系統。
+    """
+    from ..infra.adapters.translation_learning_sink import (  # noqa: PLC0415
+        FileTranslationLearningSink,
+    )
+    return FileTranslationLearningSink(f"{cfg.checkpoint_dir}/translation_learning")
 
 
 def _register_in_order(bus: EventBus, plugins: dict[str, Any]) -> None:

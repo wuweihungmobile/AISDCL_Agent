@@ -29,6 +29,7 @@ from .preference_memory_plugin import PreferenceMemoryPlugin
 from .rtm_writeback_plugin import RtmWritebackPlugin
 from .sdd_governance_plugin import SddGovernancePlugin
 from .token_guard_plugin import TokenGuardPlugin
+from .translation_learner_plugin import TranslationLearnerPlugin
 
 __all__ = [
     # W5
@@ -61,4 +62,6 @@ __all__ = [
     "GoalProgressPlugin",
     # AutoSDD_improving_24 A 軌（W-24-2，PRIORITY=52 逆向回寫閉環）
     "RtmWritebackPlugin",
+    # AutoSDD_improving_60 A 軌（A→L5，PRIORITY=55 轉譯策略元學習活體化）
+    "TranslationLearnerPlugin",
 ]
