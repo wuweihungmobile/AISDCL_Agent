@@ -8,6 +8,18 @@ SD_09 W0 Pre-W0 audit B-07 修復（2026-05-20）：
   - 改為 100 次真實 MinimaxClient.decide_correction 呼叫
   - HTTP 層 stub（_call_with_retry → 固定 dict），避免外部依賴
   - 覆蓋 prompt build + Pydantic 驗證 + Hallucination Guard 完整流程
+
+AutoSDD improving_64 修復（2026-06-25，DEF-64-001）：
+  - 根因：B-07 的「真實呼叫」鏈含 `prompt_builder.build_file_state_snapshot`，
+    其每次呼叫 spawn 一個 `git diff --name-only HEAD` 子行程（prompt_builder.py:135）。
+    本 repo 為單一 monorepo（根單一 .git），從 AutoClaude/ 跑 git diff 會掃整個工作樹，
+    隨 Copy-on-Evolve 凍結版（v0.07→v0.25）與 docs 累積而逐輪變慢 → 基線量到的 99.7%
+    是 git 子行程 I/O，非 decide_correction 邏輯，造成「隨 monorepo 成長假退化」
+    且對真正的邏輯退化失明（邏輯僅占 ~0.3%）。實證：含 snapshot p95≈2943ms、
+    stub 後純邏輯 p95≈9.8ms（占比 99.7%）。
+  - 修法：與既有 HTTP 層 stub 同精神，於 workload 一併 stub git 層
+    （build_file_state_snapshot → ""），使基線量純 CPU-bound 邏輯、確定性、
+    不隨 monorepo 成長漂移（對齊 Nightly Forensic Discipline「基線須確定性 CPU-bound」）。
 """
 from __future__ import annotations
 
@@ -15,6 +27,7 @@ from unittest.mock import patch
 
 import pytest
 
+from autoclaude.decision import prompt_builder
 from autoclaude.utils.perf_baseline import measure
 
 pytestmark = pytest.mark.perf
@@ -49,8 +62,12 @@ def _make_workload():
     client = _build_minimax_client()
 
     def _workload() -> None:
+        # improving_64（DEF-64-001）：併 stub git 層快照——與既有 HTTP 層 stub 同精神，
+        # 避免基線量到 `git diff` 子行程 I/O（隨 monorepo 成長漂移、非 CPU-bound 邏輯）。
         with patch.object(
             client, "_call_with_retry", return_value=_MOCK_DECISION_PAYLOAD,
+        ), patch.object(
+            prompt_builder, "build_file_state_snapshot", return_value="",
         ):
             for i in range(100):
                 decision = client.decide_correction(
@@ -78,6 +95,14 @@ def test_decide_correction_baseline_smoke():
     assert baseline.scenario == "decide_correction"
     assert baseline.samples == 20
     assert baseline.p95_ms >= baseline.p50_ms
+
+    # improving_64（DEF-64-001）Rule-9 守衛：純邏輯 100 次呼叫 p95 應 << 500ms（實測 ~10ms）。
+    # 若 build_file_state_snapshot 等子行程 I/O 被重新計入量測，p95 會躍升至數千 ms
+    # （monorepo `git diff`），此斷言即 fail loud，防環境依賴假退化回歸。
+    assert baseline.p95_ms < 500, (
+        f"decide_correction 純邏輯基線 p95={baseline.p95_ms:.1f}ms 異常偏高，"
+        "疑似 git/subprocess I/O 重新潛入量測（見 improving_64 / DEF-64-001）"
+    )
 
     _record_baseline(baseline)
 
