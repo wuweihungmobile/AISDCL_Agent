@@ -45,6 +45,16 @@ CanUseToolPredicate = Callable[[str, dict], bool]
 ClientFactory = Callable[..., Any]
 
 
+class ActFirstOrderingError(RuntimeError):
+    """improving_70 W-70-1：act-first 排序明確不安全時的 fail-closed 阻斷例外。
+
+    當執行期判定 SDK autocompact 門檻可能搶先於 AutoClaude halt 觸發（形式化門檻權威
+    恐被撞掉），不再僅 warn 而是 raise 本例外擋下執行（fail-loud）。無關閉鍵——使用者
+    若要放行須調整 Token Guard 三槓桿（halt_pct / max_tokens / autocompact 門檻）使排序
+    回到安全，而非繞過本檢查（沿 commit 76a710e「act-first 無需關閉鍵」設計）。
+    """
+
+
 def build_tool_allowlist_predicate(allowed_tools: list[str]) -> CanUseToolPredicate:
     """improving_69 W-69-2：由工具名 allowlist 建 production can_use_tool predicate。
 
@@ -221,10 +231,15 @@ class SdkExecutorAdapter:
         return None
 
     async def _verify_act_first(self, client: Any) -> None:
-        """act-first（W-68-1）：驗 AutoClaude halt 是否先於 SDK autocompact 觸發。"""
+        """act-first（W-68-1 守門 / W-70-1 硬擋）：驗 AutoClaude halt 是否先於 SDK autocompact 觸發。
+
+        明確判定不安全（safe=False）時 **fail-closed raise** `ActFirstOrderingError` 擋下執行
+        （W-70-1：由 warn-only 升級為硬擋）；「無法判定」（取不到用量 / 非 dict / 缺
+        threshold|max_tokens）維持 best-effort early-return 放行，不誤擋。
+        """
         try:
             usage = await _maybe_await(client.get_context_usage())
-        except Exception:  # 取不到用量不阻斷執行（best-effort 守門）
+        except Exception:  # 取不到用量不阻斷執行（best-effort 守門；無法判定≠不安全）
             return
         if not isinstance(usage, dict):
             return
@@ -239,12 +254,11 @@ class SdkExecutorAdapter:
         )
         self._act_first_safe = safe
         if not safe:
-            logger.warning(
-                "act-first 排序不安全：SDK autocompact 門檻(%s tokens) 可能搶先於 "
-                "AutoClaude halt(%.1f%% of %s) 觸發；形式化門檻權威恐被撞掉。",
-                threshold,
-                self._halt_pct,
-                max_tokens,
+            raise ActFirstOrderingError(
+                f"act-first 排序不安全：SDK autocompact 門檻({threshold} tokens) 可能搶先於 "
+                f"AutoClaude halt({self._halt_pct:.1f}% of {max_tokens}) 觸發；形式化門檻權威恐被"
+                f"撞掉。請調整 Token Guard 三槓桿使排序回到安全（halt 換算 token 數須 < "
+                f"autocompact 門檻），本檢查無關閉鍵。"
             )
 
     async def _emit_token_pct(

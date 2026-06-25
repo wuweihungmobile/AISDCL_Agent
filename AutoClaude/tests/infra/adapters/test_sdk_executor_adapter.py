@@ -4,7 +4,8 @@
   R-68-2 串流訊息映射為 on_event 五事件 + ExecutionOutput
   R-68-3 can_use_tool 接注入的 allowlist predicate（安全閘不繞過、fail-closed）
   R-68-4 send_interrupt 可達（訊息邊界中斷 → completed=False）
-  R-68-1 act-first：執行期以 get_context_usage 驗排序，不安全則 warn（fail-closed 不阻斷）
+  R-68-1 / R-70-1 act-first：執行期以 get_context_usage 驗排序，明確不安全則 fail-closed
+    raise 硬擋（W-70-1 由 warn 升級）；無法判定維持 best-effort 放行
 
 紀律：本輪沙箱無外網，**不做活體 A/B**（R-68-7 PENDING）；此處全以 mock SDK client
 驗結構正確性。事件映射以「同名輕量假類別」測（adapter 按 type(msg).__name__ 解耦），
@@ -15,9 +16,11 @@ from __future__ import annotations
 import pytest
 
 pytest.importorskip("anyio")  # adapter.execute 走 anyio.run；無 anyio 整檔 skip
+import anyio  # noqa: E402
 
 from autoclaude.core.ports.executor import ExecutionEventKind  # noqa: E402
 from autoclaude.infra.adapters.sdk_executor_adapter import (  # noqa: E402
+    ActFirstOrderingError,
     SdkExecutorAdapter,
     build_tool_allowlist_predicate,
 )
@@ -285,46 +288,77 @@ def test_interrupt_at_message_boundary_sets_completed_false():
 
 
 # ─────────────────────────────────────────────────────────────────────
-# R-68-1：act-first 執行期守門（不安全 warn、安全靜默；皆不阻斷執行）
+# R-68-1 / R-70-1：act-first 執行期守門
+#   W-70-1 升級：明確判定不安全 → fail-closed RAISE 硬擋（非僅 warn）；
+#   安全 → 不擋正常完成；「無法判定」→ best-effort 放行不誤擋。
 # ─────────────────────────────────────────────────────────────────────
-def test_act_first_unsafe_warns(caplog):
+def test_act_first_unsafe_raises_actfirst_error():
     # halt 90% * 200000 = 180000 ≥ autocompact 100000 → 不安全
+    # 直接驗 _verify_act_first 拋 ActFirstOrderingError（突變核心：raise 改回 pass 即轉紅）
     fake = FakeSdkClient(
         messages=[ResultMessage()],
         context_usage={"maxTokens": 200000, "autoCompactThreshold": 100000},
     )
     adapter = SdkExecutorAdapter(AppConfig(), client_factory=_make_factory(fake))
-    import logging
-
-    with caplog.at_level(logging.WARNING):
-        adapter.execute("x")
+    with pytest.raises(ActFirstOrderingError):
+        anyio.run(adapter._verify_act_first, fake)
     assert adapter._act_first_safe is False
-    assert any("act-first" in r.message for r in caplog.records)
 
 
-def test_act_first_safe_no_warn(caplog):
-    # halt 90% * 200000 = 180000 < autocompact 190000 → 安全
+def test_act_first_unsafe_fails_closed_via_execute():
+    # 端對端：不安全設定 → execute() fail-loud 回 completed=False / exit_code=1（不靜默完成）
+    fake = FakeSdkClient(
+        messages=[ResultMessage()],
+        context_usage={"maxTokens": 200000, "autoCompactThreshold": 100000},
+    )
+    adapter = SdkExecutorAdapter(AppConfig(), client_factory=_make_factory(fake))
+
+    out = adapter.execute("x")
+    assert out.completed is False
+    assert out.exit_code == 1
+    assert adapter._act_first_safe is False
+    # query 不應被送出（守門在 query 之前；硬擋阻止任務啟動）
+    assert fake.query_prompts == []
+
+
+def test_act_first_safe_does_not_raise():
+    # halt 90% * 200000 = 180000 < autocompact 190000 → 安全 → 不擋，正常完成
     fake = FakeSdkClient(
         messages=[ResultMessage()],
         context_usage={"maxTokens": 200000, "autoCompactThreshold": 190000},
     )
     adapter = SdkExecutorAdapter(AppConfig(), client_factory=_make_factory(fake))
-    import logging
 
-    with caplog.at_level(logging.WARNING):
-        adapter.execute("x")
+    out = adapter.execute("x")
     assert adapter._act_first_safe is True
-    assert not any("act-first" in r.message for r in caplog.records)
+    assert out.completed is True
+    assert fake.query_prompts == ["x"]
 
 
-def test_act_first_skipped_when_usage_missing_fields():
-    # 無 autocompact 門檻欄位 → 不判定（_act_first_safe 維持 None），不誤報
+def test_act_first_missing_fields_does_not_raise():
+    # 無 autocompact 門檻欄位 → 無法判定（_act_first_safe 維持 None）→ best-effort 放行不誤擋
     fake = FakeSdkClient(
         messages=[ResultMessage()], context_usage={"percentage": 10.0}
     )
     adapter = SdkExecutorAdapter(AppConfig(), client_factory=_make_factory(fake))
-    adapter.execute("x")
+    out = adapter.execute("x")
     assert adapter._act_first_safe is None
+    assert out.completed is True
+    assert fake.query_prompts == ["x"]
+
+
+def test_act_first_usage_exception_does_not_raise():
+    # get_context_usage() 本身拋例外 → 無法判定（best-effort）→ 不誤擋，正常完成
+    class _BoomClient(FakeSdkClient):
+        async def get_context_usage(self) -> dict:
+            raise RuntimeError("SDK context lookup failure")
+
+    fake = _BoomClient(messages=[ResultMessage()])
+    adapter = SdkExecutorAdapter(AppConfig(), client_factory=_make_factory(fake))
+    out = adapter.execute("x")
+    assert adapter._act_first_safe is None
+    assert out.completed is True
+    assert fake.query_prompts == ["x"]
 
 
 # ─────────────────────────────────────────────────────────────────────
