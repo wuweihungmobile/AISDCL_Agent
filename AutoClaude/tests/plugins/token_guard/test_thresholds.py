@@ -16,6 +16,7 @@ from autoclaude.plugins.token_guard.thresholds import (
     get_dynamic_compact_threshold,
     should_compact_decision,
     should_halt_decision,
+    verify_act_first_ordering,
 )
 
 
@@ -99,3 +100,40 @@ class TestShouldHaltDecision:
 
     def test_above_halt_threshold(self):
         assert should_halt_decision(token_pct=95.0, halt_threshold=90.0) is True
+
+
+class TestVerifyActFirstOrdering:
+    """improving_68 W-68-1 / R-68-1：act-first 排序保 Token Guard 形式化門檻權威。
+
+    Rule 9：編碼「為何」——SDK autocompact 若搶在 AutoClaude halt 之前壓縮，會撞掉
+    80%/90% 形式化門檻。本函式必須在「halt 換算 token < SDK autocompact 門檻」時才判安全；
+    任何無法判定（門檻非正）必 fail-closed 回 False（寧可保守擋下）。
+    """
+
+    def test_safe_when_halt_tokens_below_autocompact(self):
+        # 200k 上限、halt 90% = 180k tokens；SDK autocompact 在 190k → AutoClaude 先發 → 安全
+        assert verify_act_first_ordering(
+            autocompact_threshold_tokens=190_000, max_tokens=200_000, halt_pct=90.0,
+        ) is True
+
+    def test_unsafe_when_autocompact_fires_first(self):
+        # SDK autocompact 在 150k，但 halt 90% = 180k → SDK 搶先壓縮 → 不安全（撞形式化門檻）
+        assert verify_act_first_ordering(
+            autocompact_threshold_tokens=150_000, max_tokens=200_000, halt_pct=90.0,
+        ) is False
+
+    def test_boundary_equal_is_unsafe(self):
+        # 相等不算先發（須嚴格小於）→ 保守判不安全
+        assert verify_act_first_ordering(
+            autocompact_threshold_tokens=180_000, max_tokens=200_000, halt_pct=90.0,
+        ) is False
+
+    def test_fail_closed_on_nonpositive_max_tokens(self):
+        assert verify_act_first_ordering(
+            autocompact_threshold_tokens=190_000, max_tokens=0, halt_pct=90.0,
+        ) is False
+
+    def test_fail_closed_on_nonpositive_autocompact(self):
+        assert verify_act_first_ordering(
+            autocompact_threshold_tokens=0, max_tokens=200_000, halt_pct=90.0,
+        ) is False
