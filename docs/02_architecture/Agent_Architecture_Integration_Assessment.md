@@ -291,11 +291,17 @@ SDD 的 meta⁸ 算子圖有 `verify_topology_consistency`（綁 `op_dict` schem
 
 | 問題 | 燈號 | 實證（已複核） |
 |------|------|---------------|
-| **Q1 Token Guard 相容** | 🟡 | `ClaudeAgentOptions` 無直接 `disable_compact` 欄，但 `env` + `extra_args` 注入管道**確認存在**（可透傳任意 CLI flag/env）；另有 `get_context_usage().percentage` 可餵 TokenGuardPlugin（比 PTY 解析更精準）。**唯一待辦**：autocompact 關閉旗標的確切名稱需活體 CLI 確認（本 spike 環境無外網）。 |
+| **Q1 Token Guard 相容** | 🟡→🟢（條件性，後續深掘已大幅去風險） | 見下方「Q1 深掘」。 |
 | **Q2 權限可控** | 🟢 | `permission_mode` 預設 = **`None`**（**修正本文件 §5.3 caveat②「預設 acceptEdits」之過度悲觀假設**）；`can_use_tool` 欄位存在（可接既有 `ToolInvocationAdapter` allowlist）；另有 `allowed_tools`/`disallowed_tools`。 |
 | **Q3 零退化 + 依賴** | 🟢 | `claude-agent-sdk` 依賴僅 `anyio, mcp, sniffio`（**無 pydantic 直接依賴**）；`pip check` 乾淨；pydantic 維持 2.13.3 未降版。加入骨架 adapter 檔後：pytest 3326 passed/0 failed、lint-imports 8 kept/0 broken、LOC violations=0（adapter 未 wire 進 live path）。 |
 
-**Spike 裁決：GO**（三題無紅燈）。**進 Phase 1 前唯一硬閘**：以活體 Claude Code CLI 確認 autocompact 關閉旗標確切名稱，並實測關閉後 AutoClaude 80%/90% Token Guard 維持權威、不被 SDK 自行壓縮搶先；若該旗標不存在或無法關，Q1 翻紅（撞掉形式化門檻），須先擋掉再往下。
+**Q1 深掘（2026-06-25，主 agent 親查系統 CLI + bundled binary + SDK options）**：系統 `claude`（`~/.local/bin/claude`）與 SDK `_bundled/claude.exe` 皆為 packed binary，`strings` 挖不到 autocompact 設定鍵名；但 `claude --help` 確認有 `--settings`（載任意設定 JSON），且 **`ClaudeAgentOptions` 實測具備全部注入向量**：`settings` / `setting_sources` / `env` / `extra_args`（透傳任意 CLI flag）/ `max_turns` / `hooks`。結合 types.py 已證的 `isAutoCompactEnabled`（per-session 開關）、`autoCompactThreshold`（可查詢門檻）、`get_context_usage().percentage`（可查詢用量）、**PreCompact hook**，Token Guard 權威可由**三條獨立槓桿**保住，其中兩條不需關閉旗標：
+
+1. **Act-first 排序（最穩，零依賴關閉鍵）**：AutoClaude 以 `get_context_usage().percentage` 監控,把 compact/halt 門檻(80%/90%)設在**低於可查詢的 `autoCompactThreshold`**,使 AutoClaude 先 checkpoint/halt → CLI 永遠來不及 autocompact。形式化門檻權威由「順序」保住,不需關閉 autocompact。
+2. **PreCompact hook 攔截**：SDK 支援 PreCompact hook,可在壓縮觸發前介入協調/checkpoint。
+3. **settings/env 關閉（最乾淨,僅缺鍵名）**：以 `settings`/`env`/`extra_args` 注入關閉 autocompact;機制確認存在,**唯一待辦＝確認設定鍵確切名稱**（需官方 settings 文件,本環境無外網）。
+
+**Spike 裁決：GO**。Q1 已從潛在紅燈去風險為「工程細節（鍵名查詢）+ 一條無需該鍵名的穩健 fallback（act-first）」——即使關閉鍵永遠查不到,act-first 仍可保住形式化門檻權威。**進 Phase 1 第一步**：實作 act-first（讀 `autoCompactThreshold` 設定 AutoClaude 門檻於其下）並活體實測門檻先發;同步查官方 settings 文件補關閉鍵名作為第二保險。Q2/Q3 已綠無待辦。
 
 > 註：spike 過程於全域 pyenv 環境（`3.11.9/site-packages`）裝入 `claude-agent-sdk`（site-packages 層、非 repo 檔，不影響 main 測試；Phase 1 本就需要，故保留）。worktree 與丟棄式骨架已清理。
 
