@@ -216,6 +216,25 @@ class StorageConfig(BaseModel):
         return self
 
 
+class ExecutorConfig(BaseModel):
+    """improving_68 W-68-3：執行器後端切換（PtyExecutor / SdkExecutorAdapter 並存）。
+
+    backend="pty"（預設）→ 既有 PtyExecutor，零行為變更；現有測試與 production
+    完全不受影響。backend="sdk" 為 opt-in，啟用以 Claude Agent SDK（JSON-over-stdio）
+    驅動 Claude Code（需 `pip install autoclaude[sdk]`）。
+
+    permission_mode：傳給 SDK 的權限模式（spike 證實安全值為 "default"，非 acceptEdits）。
+    model：SDK 模型覆寫（None＝SDK 預設）。
+    act-first 門檻（halt_pct / max_tokens / autocompact_threshold）由 adapter 於執行期
+    從 SDK get_context_usage() 即時取得，無需在此設定（見 W-68-1 verify_act_first_ordering）。
+    """
+    backend: Literal["pty", "sdk"] = "pty"
+    permission_mode: Literal[
+        "default", "acceptEdits", "plan", "bypassPermissions", "dontAsk", "auto"
+    ] = "default"
+    model: str | None = None
+
+
 class AppConfig(BaseModel):
     claude: ClaudeConfig = Field(default_factory=ClaudeConfig)
     minimax: MinimaxConfig = Field(default_factory=MinimaxConfig)
@@ -226,6 +245,7 @@ class AppConfig(BaseModel):
     notification: NotificationConfig = Field(default_factory=NotificationConfig)
     tool_invocation: ToolInvocationConfig = Field(default_factory=ToolInvocationConfig)
     storage: StorageConfig = Field(default_factory=StorageConfig)
+    executor: ExecutorConfig = Field(default_factory=ExecutorConfig)
     log_dir: str = "logs"
     backup_dir: str = "backups"
     scripts_dir: str = "scripts"

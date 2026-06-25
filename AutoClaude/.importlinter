@@ -101,14 +101,18 @@ forbidden_modules =
     autoclaude.core.ports.executor
     autoclaude.infra.adapters.pty_executor
     autoclaude.infra.adapters.dry_run_executor
+    autoclaude.infra.adapters.sdk_executor_adapter
 
 [importlinter:contract:executor-brain-isolation]
 name = Executor modules must not import Brain modules (use EventBus)
 type = forbidden
+; improving_68 W-68-2：新增 SdkExecutorAdapter（Claude Agent SDK 執行器）納入同一
+; brain/executor 隔離契約，確保新執行器後端同樣不可 import Brain 模組（ADR-SD06-001 R3）。
 source_modules =
     autoclaude.core.ports.executor
     autoclaude.infra.adapters.pty_executor
     autoclaude.infra.adapters.dry_run_executor
+    autoclaude.infra.adapters.sdk_executor_adapter
 forbidden_modules =
     autoclaude.core.ports.brain
     autoclaude.infra.adapters.minimax_brain

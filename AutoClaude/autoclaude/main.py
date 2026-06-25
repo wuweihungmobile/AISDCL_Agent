@@ -92,7 +92,18 @@ def main() -> int:
 
     # SD_Improving_05 W6：雙路徑已移除；Kernel 路徑為唯一正式路徑。
     # 舊 PlaybookRunner 直連模式已於 W6 拔除（DeprecationWarning 期已結束）。
-    executor = PtyExecutor(cfg)
+    # improving_68 W-68-3：執行器後端可切換（預設 pty → 零行為變更；sdk 為 opt-in）。
+    # SdkExecutorAdapter 採 lazy import，使預設 pty 路徑完全不耦合 claude_agent_sdk / anyio。
+    if cfg.executor.backend == "sdk":
+        from .infra.adapters.sdk_executor_adapter import SdkExecutorAdapter
+
+        # can_use_tool=None：交由 SDK permission_mode（預設 "default"，spike 證實非 acceptEdits）
+        # 守門。richer domain-allowlist predicate（橋接 tool_invocation）屬活體 A/B 後續，
+        # 其正確性需對真實 CLI 驗證，本輪不假裝（見 improving_68 §8）。
+        executor = SdkExecutorAdapter(cfg)
+        logger.info("執行器後端：Claude Agent SDK（permission_mode=%s）", cfg.executor.permission_mode)
+    else:
+        executor = PtyExecutor(cfg)
     evaluator = ShellEvaluator(cfg.playbook)
     state_repo = build_state_repository(cfg.checkpoint_dir, cfg.storage)
     # DEF-01-008：flag-gated brain 注入。預設 enable_kernel_brain=False → brain=None，

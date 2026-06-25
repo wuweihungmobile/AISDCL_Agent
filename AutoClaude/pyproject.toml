@@ -62,6 +62,13 @@ postgres = [
 pgvector = [
     "pgvector>=0.3",
 ]
+# Claude Agent SDK 執行器後端（improving_68 W-68-3 選配）：
+#   pip install autoclaude[sdk]
+# 啟用 config executor.backend="sdk"（SdkExecutorAdapter）以 JSON-over-stdio 驅動
+# Claude Code，取代 PtyExecutor 的 PTY 文字流。預設後端仍 pty，未裝本 extra 零影響。
+sdk = [
+    "claude-agent-sdk>=0.2.110",
+]
 
 [project.scripts]
 autoclaude = "autoclaude.main:main"

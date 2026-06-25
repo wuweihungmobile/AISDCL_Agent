@@ -93,6 +93,8 @@ _EXECUTOR_MODULES = (
     "autoclaude/core/ports/executor.py",
     "autoclaude/infra/adapters/pty_executor.py",
     "autoclaude/infra/adapters/dry_run_executor.py",
+    # improving_68 W-68-2：新執行器後端納入隔離靜態驗證
+    "autoclaude/infra/adapters/sdk_executor_adapter.py",
 )
 _BRAIN_NAMES = {
     "autoclaude.core.ports.brain",
@@ -102,6 +104,7 @@ _EXECUTOR_NAMES = {
     "autoclaude.core.ports.executor",
     "autoclaude.infra.adapters.pty_executor",
     "autoclaude.infra.adapters.dry_run_executor",
+    "autoclaude.infra.adapters.sdk_executor_adapter",
 }
 
 

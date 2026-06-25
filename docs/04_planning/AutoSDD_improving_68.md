@@ -3,6 +3,7 @@
 > **軌道**:① 整合迭代｜**本輪柱位**:**C 軌(指揮官 AutoClaude 執行器能力)× A 軌(同源升級驅動 Claude Code 的橋接)**｜**下一份**:`AutoSDD_improving_69.md`
 > **日期**:2026-06-25｜**驅動器**:`AutoSDD_Iteration_Prompt_Template.md`｜**依據**:`docs/02_architecture/Agent_Architecture_Integration_Assessment.md`(四鏡×2輪 + Phase0 spike GO,掌舵者批准開工)
 > **本輪性質**:把評估首選「Claude Agent SDK 替換 PtyExecutor」落為可回退的執行器後端切換。**新舊 adapter 並存、預設仍 PtyExecutor → 零行為變更**;SDK 路徑 opt-in。
+> **狀態(2026-06-25 完整收斂)**:W-68-1/2/3 三項全交付,階段四全綠(3345/122/0、8 kept、LOC 0、snapshot FRESH、ci-gate exit 0),多鏡審查 PASS。唯 R-68-7 活體 A/B 待網路環境(PENDING,不假裝)。
 > **🔴 環境限制(誠實前置)**:本輪「活體 A/B」(真的用 SDK 驅動 Claude Code、實測 Token Guard 先發)需可連 Anthropic API 之環境;本 session 沙箱無外網(spike 實證 WebFetch ECONNREFUSED)。故本輪交付 = **設計 + 實作 + mock 單元測試全綠 + 零退化**;**活體 A/B 驗收明確列為收尾閘,待具網路環境跑,絕不假裝跑過**([[no-fabricated-tool-output]])。
 
 ---
@@ -54,7 +55,8 @@
 - SDK 底層 spawn Claude Code CLI(JSON-over-stdio,bundled binary),非新增 `ToolInvocationPort` 外呼路徑;對 Anthropic API 的網路 I/O 等同既有 PtyExecutor 驅動 Claude Code(同源,無新威脅類別)。
 
 ### 4.5 Token Guard 權威保全(act-first,本輪核心安全設計)
-- SDK 內建 autocompact(`isAutoCompactEnabled`/`autoCompactThreshold`);**為保住 AutoClaude 形式化門檻(80% compact / 90% halt)權威**,採 act-first:讀 SDK 可查詢的 `autoCompactThreshold`,驗證 AutoClaude halt 門檻(換算 token 數)**低於**它 → AutoClaude 先 checkpoint/halt,CLI 來不及 autocompact。純函式 `verify_act_first_ordering` fail-closed(不安全則 warn/擋),完全可單元測試,**不依賴關閉旗標**(第二保險:settings/env 關閉 autocompact,鍵名待活體查)。
+- SDK 內建 autocompact(`isAutoCompactEnabled`/`autoCompactThreshold`);**為保住 AutoClaude 形式化門檻(80% compact / 90% halt)權威**,採 act-first:讀 SDK 可查詢的 `autoCompactThreshold`,驗證 AutoClaude halt 門檻(換算 token 數)**低於**它 → AutoClaude 先 checkpoint/halt,CLI 來不及 autocompact。純函式 `verify_act_first_ordering` fail-closed,完全可單元測試,**不依賴關閉旗標**(第二保險:settings/env 關閉 autocompact,鍵名待活體查)。
+  - **本輪實作精度(SA-SD 鏡誠實修正)**:adapter 執行期守門為 **warn-only**(不安全→`logger.warning`,執行照常起;取不到用量則 best-effort 略過不阻斷)。純函式本身 fail-closed(無法判定回 False),但 adapter **尚未把「不安全」升級為硬擋**(拒絕以該設定啟用 sdk 後端)。硬擋屬 improving_69 候選 W 項(需活體確認門檻可靠讀取後再升級,避免誤擋)。
 
 ---
 
@@ -92,10 +94,10 @@
 | RTM | 需求 | 設計落點 | 驗證(DoD) | 狀態 |
 |-----|------|---------|-----------|------|
 | R-68-1 | act-first:AutoClaude halt 先於 SDK autocompact(保形式化門檻權威) | W-68-1 `verify_act_first_ordering` | `TestVerifyActFirstOrdering`(5 測:安全/不安全/邊界相等/門檻非正×2,Rule 9 含「不安全必判 False」) | ✅(全套 3332 passed/0 failed 零退化) |
-| R-68-2 | SdkExecutorAdapter 結構實作 IExecutor(事件映射) | W-68-2 | `test_sdk_adapter_event_mapping`(mock SDK→斷言五事件 + ExecutionOutput) | ⏳ |
-| R-68-3 | can_use_tool 接既有 allowlist(安全閘不繞過) | W-68-2 | `test_sdk_adapter_can_use_tool_wired`(mock 工具呼叫→allowlist 被諮詢) | ⏳ |
-| R-68-4 | send_interrupt 可達 | W-68-2 | `test_sdk_adapter_interrupt` | ⏳ |
-| R-68-5 | 後端切換預設 pty 零行為變更 | W-68-3 | `test_wiring_default_backend_is_pty` + 全套 3327 零退化 | ⏳ |
+| R-68-2 | SdkExecutorAdapter 結構實作 IExecutor(事件映射) | W-68-2 [sdk_executor_adapter.py](../../AutoClaude/autoclaude/infra/adapters/sdk_executor_adapter.py) | `test_event_mapping_full_stream` + `test_result_message_is_error_maps_exit_code_1`(mock SDK→斷言 partial_output×2/tool_use/token_pct/completion + ExecutionOutput) | ✅(2 測) |
+| R-68-3 | can_use_tool 接注入 allowlist predicate(安全閘不繞過、fail-closed) | W-68-2 `_wrap_can_use_tool` | `test_can_use_tool_predicate_wired_and_consulted` + `_exception_fail_closed` + `_no_predicate_means_no_hook`(predicate 被諮詢、例外→Deny、未注入→None 交 SDK 守門) | ✅(3 測) |
+| R-68-4 | send_interrupt 可達 | W-68-2 | `test_send_interrupt_when_not_running_returns_false` + `test_interrupt_at_message_boundary_sets_completed_false`(訊息邊界中斷→interrupt 被呼叫、completed=False、後續訊息不累積) | ✅(2 測) |
+| R-68-5 | 後端切換預設 pty 零行為變更 | W-68-3 [main.py:95](../../AutoClaude/autoclaude/main.py) | `test_executor_config_defaults_to_pty` + `test_both_executors_structurally_satisfy_iexecutor` + 全套零退化(預設 pty 不變) | ✅ |
 | R-68-6 | 依賴零衝突 | W-68-3 | `pip check` 乾淨(§2e 已證) | ✅ |
 | R-68-7 | 活體 A/B:SDK 驅動 Claude Code 端到端 + token 門檻先發 | W-68-2 | **收尾閘:待網路環境活體實測**(本輪據實標 PENDING,不假裝) | ⏸️ PENDING(環境) |
 
@@ -103,22 +105,29 @@
 
 | 檢查 | 命令 | 通過條件 | 實測 |
 |------|------|---------|------|
-| AutoClaude 全套 | `python -m pytest tests/ -q` | ≥ **3327** / 0 failed(新測試只增不減,預設 pty 不變) | 待階段四 |
-| 架構契約 | `PYTHONUTF8=1 lint-imports` | 全 kept / 0 broken | 待 |
-| LOC 分級 | `python tools/check_loc_budget.py` | 全過(adapter≤400) | 待 |
-| Snapshot | `python tools/snapshot_sync.py --check` | FRESH | 待 |
-| AISLDC_SDD 閘門 | `bash scripts/ci-gate.sh` | exit 0(本輪零 SDD 變更,持平) | 待 |
-| 活體 A/B | (SDK 驅動 Claude Code) | token 門檻先發、輸出對等 PtyExecutor | ⏸️ PENDING(需網路環境) |
+| AutoClaude 全套 | `python -m pytest tests/ -q` | ≥ **3332** / 0 failed(新測試只增不減,預設 pty 不變) | ✅ **3345 passed / 122 skipped / 0 failed**(69.65s;floor 3332 + 12 sdk adapter 測 + 1 隔離契約 parametrize 新例) |
+| 架構契約 | `PYTHONUTF8=1 lint-imports` | 全 kept / 0 broken | ✅ **8 kept / 0 broken**(含 sdk_executor 納入 executor-brain isolation) |
+| LOC 分級 | `python tools/check_loc_budget.py` | 全過(adapter≤400) | ✅ **violations=0**(total=19344,sdk_executor_adapter ~280 行 < adapter 400) |
+| Snapshot | `python tools/snapshot_sync.py --check` | FRESH | ✅ **OK**(未動 port/plugin 清單;adapter 不入 __init__) |
+| AISLDC_SDD 閘門 | `bash scripts/ci-gate.sh` | exit 0(本輪零 SDD 變更,持平) | ✅ **exit 0**(v0.01:1478 / v0.26:1665 / scripts:129,與階段一基線逐字一致) |
+| 活體 A/B | (SDK 驅動 Claude Code) | token 門檻先發、輸出對等 PtyExecutor | ⏸️ PENDING(需網路環境,本輪不假裝) |
 
 ---
 
-## §7.1 本輪進度(checkpoint,掌舵者指示先停)
+## §7.1 本輪進度(完整四階段收斂)
 
-- **W-68-1 act-first 已落地結案**:`verify_act_first_ordering` + 5 測試;**全套 3332 passed / 122 skipped / 0 failed**(=floor 3327 + 5 新),零退化。本輪最關鍵的 make-or-break 邏輯(保 Token Guard 形式化門檻權威)已驗證。
-- **W-68-2(SdkExecutorAdapter)/ W-68-3(config 後端切換)順延下個 session**:掌舵者考量 session 已長 + W-68-2 活體 A/B 無法在無外網沙箱驗證,指示先停、保品質。本輪屬**部分結案 checkpoint**,非完整四階段收斂;下輪續做 W-68-2/3 並補階段四 + 多鏡審查。
+> **更新(2026-06-25 續做 session)**:前一 session 為部分結案 checkpoint(僅 W-68-1);本 session 接續完成 **W-68-2 + W-68-3**,補齊階段三實作 + 階段四收斂 + 多鏡審查。三 W 項全交付,改用 mock 收斂(活體 A/B R-68-7 仍 PENDING)。
+
+- **W-68-1 act-first**(前 session):`verify_act_first_ordering` + 5 測試,fail-closed。
+- **W-68-2 SdkExecutorAdapter**(本 session):[sdk_executor_adapter.py](../../AutoClaude/autoclaude/infra/adapters/sdk_executor_adapter.py)(~280 行,adapter tier)實作 IExecutor:串流訊息映射(partial_output/tool_use/token_pct/completion)+ 注入式 can_use_tool(fail-closed)+ 執行期 act-first 守門(從 `get_context_usage()` 取 maxTokens/autoCompactThreshold)+ send_interrupt(訊息邊界)。選配依賴 lazy import + 注入 client_factory → 模組在未裝 [sdk] 下可被測試 import。**12 mock 測全綠**。
+- **W-68-3 後端切換**(本 session):`ExecutorConfig(backend=pty|sdk,預設 pty)` + [main.py](../../AutoClaude/autoclaude/main.py) lazy-import sdk 分支 + pyproject `[sdk]` extra。**預設 pty → 零行為變更**(全套 3345 中無一測試引用 sdk 後端)。
+- **加固**:sdk_executor_adapter 納入 `.importlinter` executor-brain isolation 雙向契約 + AST 靜態驗證(8 kept / 0 broken)。
+- **階段四全項 PASS**:全套 3345/122/0(floor 3332)、lint 8 kept、LOC 0、snapshot FRESH、ci-gate exit 0。**零退化達成**。
+- **唯一 PENDING**:R-68-7 活體 A/B(需穩定 Anthropic API 環境;沙箱無外網,據實標 PENDING 不假裝)。
 
 ## §8 缺陷 / 延後
 
 - **活體 A/B 收尾閘(R-68-7)**:本 session 沙箱無外網,無法真實驅動 SDK 跑 Claude Code。本輪做到「設計 + adapter + mock 測全綠 + 零退化」;活體驗收待具網路環境跑,**據實標 PENDING,不偽稱完成**(Rule 12 fail loud)。
-- **autocompact 關閉鍵名**:act-first(不需此鍵)為主路徑;settings/env 關閉為第二保險,鍵名待活體查官方文件,列 backlog。
-- **本輪無新框架缺陷預期**(純新增 adapter + 純函式)。
+- **autocompact 關閉鍵名**:act-first(不需此鍵)為主路徑;settings/env 關閉為第二保險,鍵名待活體查官方文件,列 backlog。執行期 act-first 已可運作——`ClaudeSDKClient.get_context_usage()` 回傳的 `ContextUsageResponse` 直接含 `maxTokens`/`autoCompactThreshold`/`percentage`(本輪實測 SDK v0.2.110 型別),adapter 即以此餵 `verify_act_first_ordering`。
+- **🔴 設計摩擦(誠實修正 plan §4.3 假設)**:原 §4.3 寫「重用既有 `ToolInvocationAdapter` 接成 SDK `can_use_tool`」——實測型別不對位:`ToolInvocationAdapter.invoke(ToolRequest)` 是 AutoClaude **自身**的 3-kind 對外 I/O 模型(web_search/http_request/send_message,domain allowlist),而 SDK `can_use_tool` 是 gate **Claude Code 工具呼叫**(Bash/Read/Edit/WebFetch… + 任意 input dict)的 async callback。兩者語意不同類。**本輪修正**:adapter 改為注入泛型 `CanUseToolPredicate=(tool_name,input)->bool`,並包成 SDK async `PermissionResultAllow/Deny`(fail-closed);adapter「諮詢注入 predicate」之能力已由 mock 測證實(R-68-3)。main.py sdk 分支本輪以 `can_use_tool=None`(交 SDK `permission_mode="default"` 守門,spike 證安全),**richer domain-allowlist predicate 之 production 接線屬活體 A/B 後續**——因其對真實 tool_name 語意的正確性無法在無外網沙箱驗證,本輪不假裝接好。→ 列 improving_69 A 軌候選 W 項。
+- **本輪無新框架缺陷**(純新增 adapter + config + 純函式;AISLDC_SDD 本體零變更)。`can_use_tool` 型別不對位屬本輪計畫文件自身的設計假設修正,非框架缺陷,故不入 Defect_Log,於此誠實留證。
