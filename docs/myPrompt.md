@@ -114,6 +114,14 @@ PS: 以上PRD, 請輸出docs\01_requirements\Agent_ConsoleUI_PRD.md輸出
 2.我正在構建一套能讓軟體架構隨 AI 演進的自動化機制「AI 規格驅動開發 (AI SDD)」系統。請深度剖析我目前的系統設計，驗證其是否具備「圖靈完備的自動化閉環」能力。你的終極目標是協助我將此系統進化為 Level 10 自治開發流程。利用 Claude Code 建立一個具備自我修正能力的動態工作流程 (Dynamic Workflow)，用於深度重構與優化「AISDLC_SDD_v0.0X」。
 3.AutoClaude可以利用「AISDLC_SDD_v0.0X」進行相關的軟體開發, 建立兩者間完美的協調溝通機制, 成為自動化開發Agent!
 
+請派Agent(Architect/SA/SD/QA)專家進行深入分析, 目前這個專案若要整合一個開源Agent架構, 以下哪一個的Agent架構(或是複合式架構兩種以上), 最適合我現在現有的系統架構, 請詳細深入分析!
+1.Aider
+2.OpenHands
+3.Codex CLI
+4.LangGraph
+5.AutoGen
+6.其他
+
 目前需確認或解決問題
 ===================
 1.AutoClaude的驗證測試Nightly是否有繼續?

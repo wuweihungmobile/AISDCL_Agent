@@ -38,3 +38,10 @@ venv/
 # post_commit_drift.py 同以 git toplevel＝monorepo 根為 repo_root，write 到根
 # build/reports/drift/ 產生 COMMIT-<sha>.yaml（同 closure 之「輸出非輸入」runtime 產物）
 /build/reports/drift/
+
+# AutoClaude 測試/執行於 monorepo 根 cwd 落地的 runtime 產物（escalation dumps、
+# checkpoint、kb metrics/goal_progress jsonl、perf 結果等「輸出非輸入」可重生衍生物，
+# 同 build/reports 排除精神；以 / 前綴鎖根層，不誤傷子專案內同名目錄）
+/checkpoints/
+/logs/
+/perf_results.json
