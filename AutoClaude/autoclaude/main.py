@@ -95,13 +95,26 @@ def main() -> int:
     # improving_68 W-68-3：執行器後端可切換（預設 pty → 零行為變更；sdk 為 opt-in）。
     # SdkExecutorAdapter 採 lazy import，使預設 pty 路徑完全不耦合 claude_agent_sdk / anyio。
     if cfg.executor.backend == "sdk":
-        from .infra.adapters.sdk_executor_adapter import SdkExecutorAdapter
+        from .infra.adapters.sdk_executor_adapter import (
+            SdkExecutorAdapter,
+            build_tool_allowlist_predicate,
+        )
 
-        # can_use_tool=None：交由 SDK permission_mode（預設 "default"，spike 證實非 acceptEdits）
-        # 守門。richer domain-allowlist predicate（橋接 tool_invocation）屬活體 A/B 後續，
-        # 其正確性需對真實 CLI 驗證，本輪不假裝（見 improving_68 §8）。
-        executor = SdkExecutorAdapter(cfg)
-        logger.info("執行器後端：Claude Agent SDK（permission_mode=%s）", cfg.executor.permission_mode)
+        # improving_69 W-69-2：can_use_tool production 接線。
+        # sdk_tool_allowlist=None（預設）→ predicate=None，交由 SDK permission_mode
+        # （預設 "default"，spike 證實非 acceptEdits）守門 — 零行為變更，對齊 improving_68。
+        # 設為清單 → 嚴格 allowlist（deny-by-default，predicate 例外 fail-closed deny）。
+        # 已對真實 Claude Code CLI 活體驗證（improving_69 W-69-1）。
+        allowlist = cfg.executor.sdk_tool_allowlist
+        predicate = (
+            build_tool_allowlist_predicate(allowlist) if allowlist is not None else None
+        )
+        executor = SdkExecutorAdapter(cfg, can_use_tool=predicate)
+        logger.info(
+            "執行器後端：Claude Agent SDK（permission_mode=%s, tool_allowlist=%s）",
+            cfg.executor.permission_mode,
+            "None(permission_mode 守門)" if allowlist is None else allowlist,
+        )
     else:
         executor = PtyExecutor(cfg)
     evaluator = ShellEvaluator(cfg.playbook)

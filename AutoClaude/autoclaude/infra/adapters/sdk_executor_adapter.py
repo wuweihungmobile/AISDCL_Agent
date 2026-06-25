@@ -45,6 +45,22 @@ CanUseToolPredicate = Callable[[str, dict], bool]
 ClientFactory = Callable[..., Any]
 
 
+def build_tool_allowlist_predicate(allowed_tools: list[str]) -> CanUseToolPredicate:
+    """improving_69 W-69-2：由工具名 allowlist 建 production can_use_tool predicate。
+
+    deny-by-default：僅 allowed_tools 內的工具名放行，其餘一律 deny（含空 list = 全 deny）。
+    純函式、無副作用、不 import SDK；adapter 以 constructor 注入後由 _wrap_can_use_tool
+    包成 SDK async hook（predicate 例外時 fail-closed deny）。policy 與 adapter 解耦：
+    adapter 不知道也不硬編任何具體 allowlist，僅消費注入的 predicate。
+    """
+    allow_set = frozenset(allowed_tools)
+
+    def _predicate(tool_name: str, _tool_input: dict) -> bool:
+        return tool_name in allow_set
+
+    return _predicate
+
+
 def _default_client_factory(**options_kwargs: Any) -> Any:
     """預設 factory：lazy import claude_agent_sdk，組 ClaudeAgentOptions + ClaudeSDKClient。
 

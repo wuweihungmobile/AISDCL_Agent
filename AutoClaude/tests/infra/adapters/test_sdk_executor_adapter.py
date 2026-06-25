@@ -19,6 +19,7 @@ pytest.importorskip("anyio")  # adapter.execute 走 anyio.run；無 anyio 整檔
 from autoclaude.core.ports.executor import ExecutionEventKind  # noqa: E402
 from autoclaude.infra.adapters.sdk_executor_adapter import (  # noqa: E402
     SdkExecutorAdapter,
+    build_tool_allowlist_predicate,
 )
 from autoclaude.utils.config import AppConfig  # noqa: E402
 
@@ -206,6 +207,49 @@ def test_no_predicate_means_no_hook_passed():
     adapter.execute("x")
     # 未注入 predicate → can_use_tool=None（交由 SDK permission_mode 守門）
     assert captured.get("can_use_tool") is None
+
+
+# ─────────────────────────────────────────────────────────────────────
+# W-69-2：build_tool_allowlist_predicate（config 驅動泛型 allowlist，deny-by-default）
+# ─────────────────────────────────────────────────────────────────────
+def test_sdk_tool_allowlist_defaults_to_none():
+    # 零退化邊界：預設不設 allowlist → main.py 注入 can_use_tool=None（permission_mode 守門）
+    assert AppConfig().executor.sdk_tool_allowlist is None
+
+
+def test_build_predicate_allows_listed_denies_others():
+    pred = build_tool_allowlist_predicate(["Read", "Grep"])
+    assert pred("Read", {"path": "a"}) is True
+    assert pred("Grep", {"pattern": "x"}) is True
+    # deny-by-default：清單外工具一律不放行
+    assert pred("Bash", {"command": "rm -rf /"}) is False
+    assert pred("Write", {"path": "a"}) is False
+
+
+def test_build_predicate_empty_list_denies_all():
+    # 空 allowlist = 最嚴格（全 deny），含常見工具
+    pred = build_tool_allowlist_predicate([])
+    for name in ("Read", "Bash", "Write", "WebFetch"):
+        assert pred(name, {}) is False
+
+
+def test_build_predicate_injected_denies_unlisted_via_sdk_hook():
+    """整合：注入 builder 產的 predicate → SDK hook 對清單外工具回 Deny（fail-closed 一致）。"""
+    pytest.importorskip("claude_agent_sdk")
+    pred = build_tool_allowlist_predicate(["Read"])  # 僅放行 Read
+    fake = FakeSdkClient(messages=[ResultMessage()])
+    captured: dict = {}
+    adapter = SdkExecutorAdapter(
+        AppConfig(), can_use_tool=pred, client_factory=_make_factory(fake, captured)
+    )
+    adapter.execute("x")
+    hook = captured["can_use_tool"]
+
+    import anyio
+    from claude_agent_sdk import PermissionResultAllow, PermissionResultDeny
+
+    assert isinstance(anyio.run(hook, "Read", {}, None), PermissionResultAllow)
+    assert isinstance(anyio.run(hook, "Bash", {"command": "x"}, None), PermissionResultDeny)
 
 
 # ─────────────────────────────────────────────────────────────────────

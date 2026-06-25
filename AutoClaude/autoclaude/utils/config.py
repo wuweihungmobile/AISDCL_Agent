@@ -233,6 +233,11 @@ class ExecutorConfig(BaseModel):
         "default", "acceptEdits", "plan", "bypassPermissions", "dontAsk", "auto"
     ] = "default"
     model: str | None = None
+    # improving_69 W-69-2：SDK 工具 allowlist（can_use_tool production 接線）。
+    # None（預設）→ 不注入 predicate，交由 permission_mode 守門（零行為變更，對齊 improving_68）。
+    # list → 嚴格 allowlist：僅清單內工具名放行，其餘 deny-by-default（predicate 例外由
+    # adapter._wrap_can_use_tool fail-closed deny）；空 list = 全 deny（最嚴格）。
+    sdk_tool_allowlist: list[str] | None = None
 
 
 class AppConfig(BaseModel):
