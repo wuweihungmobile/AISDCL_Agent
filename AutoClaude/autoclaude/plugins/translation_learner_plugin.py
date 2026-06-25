@@ -127,6 +127,7 @@ class TranslationLearnerPlugin:
                 "weak_runs": proposal.weak_runs,  # improving_61 第二信號強度
                 "total_runs": proposal.total_runs,
                 "status": proposal.status,
+                "signal_class": proposal.signal_class,  # improving_67 W-67-1 審批分流
             })
         except Exception as exc:  # noqa: BLE001 — fail-soft
             logger.warning("translation_proposal emit fail-soft: %s", exc)

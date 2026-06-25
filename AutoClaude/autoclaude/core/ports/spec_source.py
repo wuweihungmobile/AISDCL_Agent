@@ -32,6 +32,14 @@ class SpecTaintedError(RuntimeError):
     """
 
 
+class SpecFormatVersionError(RuntimeError):
+    """SDD 規格宣告的格式版本不在 adapter 支援集（防漂移 fail-closed）。
+
+    對應 AutoSDD_improving_67.md W-67-2：SDD 框架跨版（v0.01→v0.26）AT 表/Gherkin
+    格式演進，未來不相容規格須被擋下而非靜默誤解析。缺版本欄者向後相容（預設 1.0 放行）。
+    """
+
+
 @dataclass(frozen=True)
 class SpecContract:
     """單條 AC→AT 契約（自 TEST-CONTRACT-SPEC 解析）。"""
@@ -76,6 +84,7 @@ class ISpecSource(Protocol):
         Raises:
             SpecNotFrozenError: 規格未凍結（Spec-First 硬閘）。
             SpecTaintedError: 規格含注入向量字元。
+            SpecFormatVersionError: 規格宣告的格式版本不受支援（防漂移 fail-closed）。
         """
         ...
 

@@ -190,3 +190,14 @@ class TestWeakRegexSecondSignal:
         p.on_event(_ctx())
         _evt, payload = obs.record_event.call_args[0]
         assert payload["weak_runs"] == 2
+
+    def test_observability_emits_signal_class(self, tmp_path, monkeypatch):
+        """improving_67 R-67-4：plugin 將 signal_class 入 observability 審計痕，
+        使舵手在審計事件層即可分流（純 weak → 'translation_weak'）。"""
+        monkeypatch.delenv("AUTOCLAUDE_ENABLE_TRANSLATION_AUTO_PROPOSE", raising=False)
+        obs = MagicMock()
+        fb = _feedback([_wreport(weak=["AT-009"]), _wreport(weak=["AT-009"])])
+        p, sink = _plugin(tmp_path, rtm_feedback=fb, observability=obs)
+        p.on_event(_ctx())
+        _evt, payload = obs.record_event.call_args[0]
+        assert payload["signal_class"] == "translation_weak"

@@ -163,3 +163,51 @@ def test_proposals_always_proposed_status_dual_signal():
     history = (_wreport(weak=("AT-009",)), _wreport(weak=("AT-009",)))
     out = select_proposals(history, frozenset())
     assert all(p.status == "proposed" for p in out)
+
+
+# ── improving_67 W-67-1：提議信號分類（XAI 可審批分流）─────────────────────
+# Rule 9：signal_class 編碼「為何分類」——舵手 review PROPOSALS 時需一眼分辨缺陷源頭
+# （規格弱 vs 實作弱 vs 雙弱），分類錯誤會誤導人工 review 方向。三類窮盡且互斥。
+
+def test_signal_class_execution_failure_only():
+    """R-67-1：純執行失敗達門檻（零 weak）→ signal_class='execution_failure'。"""
+    history = (_wreport(failed=("AT-001",)), _wreport(failed=("AT-001",)))
+    out = select_proposals(history, frozenset())
+    assert out[0].signal_class == "execution_failure"
+
+
+def test_signal_class_translation_weak_only():
+    """R-67-1：純 weak_regex 達門檻（零失敗）→ signal_class='translation_weak'。"""
+    history = (_wreport(weak=("AT-009",)), _wreport(weak=("AT-009",)))
+    out = select_proposals(history, frozenset())
+    assert out[0].signal_class == "translation_weak"
+
+
+def test_signal_class_both_is_deepest_concern():
+    """R-67-1：雙信號齊達門檻 → signal_class='both'（規格與實作雙弱，最該深查）。"""
+    history = (_wreport(failed=("AT-007",), weak=("AT-007",)),
+               _wreport(failed=("AT-007",), weak=("AT-007",)))
+    out = select_proposals(history, frozenset())
+    assert out[0].signal_class == "both"
+    # 與既有雙信號 rationale 正交並存（分類欄不取代理由）
+    assert "執行未通過" in out[0].rationale and "weak_regex" in out[0].rationale
+
+
+def test_signal_class_default_empty_backward_compat():
+    """R-67-2：直接構造（如舊 jsonl 讀回無此欄）→ signal_class 預設 ''（fail-soft 向後相容）。"""
+    p = TranslationProposal(at_id="AT-001", failing_runs=2, total_runs=2, rationale="x")
+    assert p.signal_class == ""
+
+
+def test_proposals_fully_deterministic_across_calls():
+    """R-67-3（折入 Explore W-67-4）：同輸入往復呼叫 select_proposals → 逐欄完全一致
+    （含 signal_class）。meta-learning dedup/收斂依賴此確定性，非確定會使提議跨 run 漂移。"""
+    history = (
+        _wreport(failed=("AT-A", "AT-B"), weak=("AT-C", "AT-D")),
+        _wreport(failed=("AT-A", "AT-B"), weak=("AT-C", "AT-D")),
+        _wreport(weak=("AT-D",)),
+    )
+    first = select_proposals(history, frozenset(), max_new=3)
+    second = select_proposals(history, frozenset(), max_new=3)
+    assert first == second  # frozen dataclass 逐欄相等
+    assert [p.signal_class for p in first] == [p.signal_class for p in second]

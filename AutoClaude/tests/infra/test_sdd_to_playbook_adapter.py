@@ -9,12 +9,14 @@
 from __future__ import annotations
 
 import re
+from unittest.mock import MagicMock
 
 import pytest
 import yaml
 
 from autoclaude.core.ports.spec_source import (
     ISpecSource,
+    SpecFormatVersionError,
     SpecNotFrozenError,
     SpecTaintedError,
 )
@@ -735,3 +737,66 @@ class TestWeakRegexCarry:
         weak_task = next(t for t in tasks if t.weak_regex)
         assert weak_task.expected_output_regex == ".*"
         assert weak_task.evaluator_command == "pytest -q"
+
+
+# ── improving_67 W-67-2：規格格式版本防漂移閘（fail-closed）─────────────────
+# Rule 9：版本閘編碼「為何」——SDD 框架跨版（v0.01→v0.26）AT 表/Gherkin 格式演進過，
+# 未來不相容規格若被靜默誤解析會產出錯誤 PlaybookTask；故未知版本須 fail-closed 擋下，
+# 既有規格（無版本欄）須零退化放行。
+
+_VERSION_MARKER = "\n<!-- spec-format-version: {v} -->\n"
+
+
+class TestSpecFormatVersionGate:
+    def test_missing_spec_version_defaults_1_0(self, tmp_path):
+        """R-67-6：既有規格無版本欄 → 預設 1.0 放行（向後相容、零退化）。"""
+        spec_dir = _write_spec(tmp_path)  # _SPEC_MD 無版本標記
+        _write_fsm_state(tmp_path)
+        spec = SddToPlaybookAdapter().load_spec(str(spec_dir))
+        assert spec.contracts  # 正常編譯
+
+    def test_supported_version_accepted(self, tmp_path):
+        """R-67-7：宣告支援版本（1.0）→ 放行。"""
+        spec_dir = _write_spec(tmp_path, text=_SPEC_MD + _VERSION_MARKER.format(v="1.0"))
+        _write_fsm_state(tmp_path)
+        spec = SddToPlaybookAdapter().load_spec(str(spec_dir))
+        assert spec.contracts
+
+    def test_unknown_spec_version_fail_closed(self, tmp_path):
+        """R-67-5：宣告未支援版本（2.0）→ SpecFormatVersionError（fail-closed 拒絕誤解析）。"""
+        spec_dir = _write_spec(tmp_path, text=_SPEC_MD + _VERSION_MARKER.format(v="2.0"))
+        _write_fsm_state(tmp_path)
+        with pytest.raises(SpecFormatVersionError, match="2.0"):
+            SddToPlaybookAdapter().load_spec(str(spec_dir))
+
+    def test_version_audit_event_emitted_on_accept(self, tmp_path):
+        """R-67-7：放行時經 IObservabilityPort 留審計痕（accepted=True + declared 標記）。"""
+        obs = MagicMock()
+        spec_dir = _write_spec(tmp_path, text=_SPEC_MD + _VERSION_MARKER.format(v="1.0"))
+        _write_fsm_state(tmp_path)
+        SddToPlaybookAdapter(observability=obs).load_spec(str(spec_dir))
+        calls = [c.args for c in obs.record_event.call_args_list
+                 if c.args[0] == "sdd.spec_format_version"]
+        assert calls and calls[-1][1] == {
+            "version": "1.0", "declared": True, "accepted": True}
+
+    def test_version_audit_event_emitted_on_reject(self, tmp_path):
+        """R-67-5：拒絕時亦留審計痕（accepted=False），fail-closed 路徑可觀測。"""
+        obs = MagicMock()
+        spec_dir = _write_spec(tmp_path, text=_SPEC_MD + _VERSION_MARKER.format(v="9.9"))
+        _write_fsm_state(tmp_path)
+        with pytest.raises(SpecFormatVersionError):
+            SddToPlaybookAdapter(observability=obs).load_spec(str(spec_dir))
+        rejected = [c.args[1] for c in obs.record_event.call_args_list
+                    if c.args[0] == "sdd.spec_format_version" and not c.args[1]["accepted"]]
+        assert rejected and rejected[0]["version"] == "9.9"
+
+    def test_default_version_marked_not_declared(self, tmp_path):
+        """缺欄走預設時審計痕 declared=False（區分「明示 1.0」vs「預設兜底 1.0」）。"""
+        obs = MagicMock()
+        spec_dir = _write_spec(tmp_path)
+        _write_fsm_state(tmp_path)
+        SddToPlaybookAdapter(observability=obs).load_spec(str(spec_dir))
+        evt = [c.args[1] for c in obs.record_event.call_args_list
+               if c.args[0] == "sdd.spec_format_version"][-1]
+        assert evt == {"version": "1.0", "declared": False, "accepted": True}

@@ -23,6 +23,7 @@ from ...core.ports.observability import IObservabilityPort, NullObservability
 from ...core.ports.spec_source import (
     SddSpec,
     SpecContract,
+    SpecFormatVersionError,
     SpecNotFrozenError,
     SpecTaintedError,
 )
@@ -84,6 +85,14 @@ _NEGATION_MARKER = re.compile(
 # 對齊 transition_rules RETRY_LIMITS：PR_REVIEW=5 / RTM_VERIFY=2
 _RETRY_BY_GATE = {"SCG-4": 5, "SCG-5": 2}
 
+# improving_67 W-67-2：規格格式版本防漂移閘（fail-closed）。
+# 擷取 spec-format-version / spec_format_version 後的 X.Y（不分大小寫、容忍 HTML 註解
+# 或 markdown 粗體列）；缺欄 → 預設 1.0（既有規格皆無此欄，向後相容零退化）；
+# 宣告值不在支援集 → raise SpecFormatVersionError（拒絕誤解析未來不相容格式）。
+_SUPPORTED_SPEC_FORMAT_VERSIONS = frozenset({"1.0"})
+_DEFAULT_SPEC_FORMAT_VERSION = "1.0"
+_SPEC_VERSION_RE = re.compile(r"spec[-_ ]format[-_ ]version\D{0,4}(\d+\.\d+)", re.I)
+
 
 class SddToPlaybookAdapter:
     """ISpecSource 實作：解析凍結後的 TEST-CONTRACT-SPEC，編譯為 PlaybookTask。"""
@@ -112,6 +121,7 @@ class SddToPlaybookAdapter:
     def load_spec(self, spec_dir: str) -> SddSpec:
         text, spec_file = self._read_contract_spec(spec_dir)
         self._assert_frozen(spec_dir)  # 凍結硬閘（Spec-First Gate）
+        self._check_spec_format_version(text)  # W-67-2 防漂移硬閘（fail-closed）
         digest = "sha256:" + hashlib.sha256(text.encode("utf-8")).hexdigest()
         return SddSpec(
             spec_path=str(spec_file),
@@ -167,6 +177,32 @@ class SddToPlaybookAdapter:
                 f"{state_file}: frozen_stages 為空且 current_state={current!r} "
                 f"未達 SPEC_FROZEN 之後狀態"
             )
+
+    def _check_spec_format_version(self, text: str) -> str:
+        """W-67-2：擷取並驗證規格格式版本（防漂移 fail-closed）。
+
+        缺版本欄 → 預設 1.0 放行（既有規格皆無此欄，向後相容）；宣告值不在支援集
+        → raise SpecFormatVersionError。無論放行/拒絕皆經 IObservabilityPort 留審計痕。
+        回傳解析（或預設）版本字串。
+        """
+        m = _SPEC_VERSION_RE.search(text)
+        version = m.group(1) if m else _DEFAULT_SPEC_FORMAT_VERSION
+        declared = bool(m)
+        if version not in _SUPPORTED_SPEC_FORMAT_VERSIONS:
+            self._obs.record_event(
+                "sdd.spec_format_version",
+                {"version": version, "declared": declared, "accepted": False},
+            )
+            raise SpecFormatVersionError(
+                f"規格格式版本 {version!r} 不在支援集 "
+                f"{sorted(_SUPPORTED_SPEC_FORMAT_VERSIONS)}——疑似 SDD 框架跨版格式漂移，"
+                f"依防漂移閘 fail-closed 拒絕（避免靜默誤解析）"
+            )
+        self._obs.record_event(
+            "sdd.spec_format_version",
+            {"version": version, "declared": declared, "accepted": True},
+        )
+        return version
 
     def _find_fsm_state(self, spec_dir: str) -> Path | None:
         if self._fsm_state_path:

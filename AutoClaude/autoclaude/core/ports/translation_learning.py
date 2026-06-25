@@ -35,6 +35,10 @@ class TranslationProposal:
     status: str = "proposed"   # 恆 "proposed"；絕不由機制自動改 verified/applied
     weak_runs: int = 0    # improving_61：跨 session weak_regex run 計數（信號②強度，
     #                       轉譯保真度弱點；與 failing_runs 正交）。additive 預設 0。
+    # improving_67 W-67-1：雙信號分類，供舵手 review 時一眼分流（XAI 可審批面）。
+    # "both"=規格與實作雙弱（最該深查）／"execution_failure"=純執行失敗／
+    # "translation_weak"=純轉譯保真度弱。additive 預設 ""；舊 jsonl 無此欄 fail-soft 讀回。
+    signal_class: str = ""
 
 
 @runtime_checkable
@@ -67,6 +71,24 @@ def _build_rationale(at_id: str, total_runs: int, fail_runs: int, weak_runs: int
         f"Gherkin→regex 轉譯保真度／契約可測性，必要時手動精修 SddToPlaybookAdapter "
         f"轉譯規則（不自動套用）。"
     )
+
+
+def _classify_signal(fail_runs: int, weak_runs: int,
+                     min_failing: int, min_weak: int) -> str:
+    """improving_67 W-67-1：依雙信號達標情況分類（XAI 審批分流）。
+
+    候選必至少一信號達門檻（select_proposals 過濾保證），故三類窮盡：
+      - 雙達標 → "both"（規格與實作雙弱，最該深查）
+      - 僅執行失敗達標 → "execution_failure"
+      - 僅 weak_regex 達標 → "translation_weak"
+    """
+    sig_fail = fail_runs >= min_failing
+    sig_weak = weak_runs >= min_weak
+    if sig_fail and sig_weak:
+        return "both"
+    if sig_fail:
+        return "execution_failure"
+    return "translation_weak"
 
 
 def select_proposals(
@@ -128,6 +150,9 @@ def select_proposals(
             rationale=_build_rationale(
                 at_id, total_runs, fail_runs, weak_runs,
                 min_failing_runs, min_weak_runs,
+            ),
+            signal_class=_classify_signal(
+                fail_runs, weak_runs, min_failing_runs, min_weak_runs,
             ),
         ))
     return tuple(proposals)
