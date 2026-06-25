@@ -52,6 +52,36 @@ def _validate_playbook_format(path: str) -> None:
         )
 
 
+def build_executor(cfg, hotkey=None, logger=None):
+    """依 cfg.executor.backend 建構執行器（pty 預設 / sdk opt-in）。
+
+    improving_71 DEF-71-001：原 main() 內 `PtyExecutor(cfg)` 接線錯誤——PtyExecutor 簽章
+    為 (claude_cfg, loop_cfg, log_dir, hotkey)，傳整個 AppConfig 當 claude_cfg 又缺 loop_cfg
+    → 預設 pty 經 CLI 必崩（TypeError）；因 executor 建構未被任何測試覆蓋而長期潛伏（測試
+    皆直接 `PtyExecutor(ClaudeConfig(), LoopConfig())`）。抽為可測單元並接線正確，由
+    tests/test_main_build_executor.py 守門。
+    """
+    if cfg.executor.backend == "sdk":
+        from .infra.adapters.sdk_executor_adapter import (
+            SdkExecutorAdapter,
+            build_tool_allowlist_predicate,
+        )
+
+        # improving_69 W-69-2：can_use_tool production 接線（None→permission_mode 守門）。
+        allowlist = cfg.executor.sdk_tool_allowlist
+        predicate = (
+            build_tool_allowlist_predicate(allowlist) if allowlist is not None else None
+        )
+        if logger is not None:
+            logger.info(
+                "執行器後端：Claude Agent SDK（permission_mode=%s, tool_allowlist=%s）",
+                cfg.executor.permission_mode,
+                "None(permission_mode 守門)" if allowlist is None else allowlist,
+            )
+        return SdkExecutorAdapter(cfg, can_use_tool=predicate)
+    return PtyExecutor(cfg.claude, cfg.loop, log_dir=cfg.log_dir, hotkey=hotkey)
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="AutoClaude — Claude Code Playbook 自動執行引擎")
     parser.add_argument("playbook", help="Playbook YAML 路徑（須含 tasks: 陣列）")
@@ -93,30 +123,8 @@ def main() -> int:
     # SD_Improving_05 W6：雙路徑已移除；Kernel 路徑為唯一正式路徑。
     # 舊 PlaybookRunner 直連模式已於 W6 拔除（DeprecationWarning 期已結束）。
     # improving_68 W-68-3：執行器後端可切換（預設 pty → 零行為變更；sdk 為 opt-in）。
-    # SdkExecutorAdapter 採 lazy import，使預設 pty 路徑完全不耦合 claude_agent_sdk / anyio。
-    if cfg.executor.backend == "sdk":
-        from .infra.adapters.sdk_executor_adapter import (
-            SdkExecutorAdapter,
-            build_tool_allowlist_predicate,
-        )
-
-        # improving_69 W-69-2：can_use_tool production 接線。
-        # sdk_tool_allowlist=None（預設）→ predicate=None，交由 SDK permission_mode
-        # （預設 "default"，spike 證實非 acceptEdits）守門 — 零行為變更，對齊 improving_68。
-        # 設為清單 → 嚴格 allowlist（deny-by-default，predicate 例外 fail-closed deny）。
-        # 已對真實 Claude Code CLI 活體驗證（improving_69 W-69-1）。
-        allowlist = cfg.executor.sdk_tool_allowlist
-        predicate = (
-            build_tool_allowlist_predicate(allowlist) if allowlist is not None else None
-        )
-        executor = SdkExecutorAdapter(cfg, can_use_tool=predicate)
-        logger.info(
-            "執行器後端：Claude Agent SDK（permission_mode=%s, tool_allowlist=%s）",
-            cfg.executor.permission_mode,
-            "None(permission_mode 守門)" if allowlist is None else allowlist,
-        )
-    else:
-        executor = PtyExecutor(cfg)
+    # improving_71 DEF-71-001：建構抽至可測的 build_executor()（修 PtyExecutor 接線崩潰）。
+    executor = build_executor(cfg, hotkey=hotkey, logger=logger)
     evaluator = ShellEvaluator(cfg.playbook)
     state_repo = build_state_repository(cfg.checkpoint_dir, cfg.storage)
     # DEF-01-008：flag-gated brain 注入。預設 enable_kernel_brain=False → brain=None，

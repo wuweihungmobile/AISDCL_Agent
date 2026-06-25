@@ -217,6 +217,13 @@ class PlaybookKernel:
                     return StepOutcome(action=StepAction.ESCALATE,
                                        failure_reason="Minimax API 故障，安全停止",
                                        attempts_used=attempt + 1)
+                # improving_71 W-71-2：CORRECTION 可觀測標記（observability-only，零行為變更）。
+                # Kernel 正式路徑原本無 correction log marker，致 pty/sdk A/B 無法計數
+                # CORRECTION 次數（tools/ab_compare_backends.py 依此行計數）。
+                logger.info(
+                    "=== STATE: CORRECTION | step=%s attempt=%d ===",
+                    task.step_id, attempt + 1,
+                )
                 if c.correction_prompt:
                     task.prompt = c.correction_prompt
                 mut = getattr(c, "step_mutation", None)

@@ -67,3 +67,39 @@ class TestPreferencesReachBrain:
 
         assert result.success
         assert "preferences_section" not in brain.calls[0].kwargs
+
+
+class TestCorrectionObservabilityMarker:
+    """improving_71 W-71-2：Kernel 取得有效修正時發 CORRECTION 可觀測標記，
+    使 pty/sdk A/B（tools/ab_compare_backends.py）能計數 CORRECTION 次數。
+    Rule 9：此標記是 A/B 第四指標的唯一可觀測來源，缺失即 A/B 無法量 CORRECTION。
+    """
+
+    def test_correction_marker_emitted_once_per_correction(self, caplog):
+        import logging
+
+        bus = EventBus()
+        brain = FakeBrain(next_decisions=[_correction()])
+        with caplog.at_level(logging.INFO, logger="autoclaude.core.kernel"):
+            result = _kernel(brain, bus).run(sample_playbook(n_tasks=1))
+
+        assert result.success  # 第二次 attempt 成功
+        markers = [r for r in caplog.records if "STATE: CORRECTION" in r.getMessage()]
+        assert len(markers) == 1  # 恰一次修正（第一次 attempt 失敗後）
+
+    def test_no_marker_when_first_attempt_passes(self, caplog):
+        """一次通過（無失敗）→ 不發 CORRECTION 標記（不可虛報修正）。"""
+        import logging
+
+        bus = EventBus()
+        evaluator = FakeEvaluator(next_results=[(None, "", 0)])  # 第一次即過
+        brain = FakeBrain(next_decisions=[_correction()])
+        kernel = PlaybookKernel(
+            executor=FakeExecutor(), evaluator=evaluator, bus=bus, brain=brain,
+        )
+        with caplog.at_level(logging.INFO, logger="autoclaude.core.kernel"):
+            result = kernel.run(sample_playbook(n_tasks=1))
+
+        assert result.success
+        markers = [r for r in caplog.records if "STATE: CORRECTION" in r.getMessage()]
+        assert markers == []
