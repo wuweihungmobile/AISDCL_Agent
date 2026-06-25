@@ -1,0 +1,61 @@
+id: R-9.36
+title: Phase X 具身接地接入 META_FSM（具身評估器接地元迴圈自我演化判定 + EmbodiedGroundingBounded 有界停機，因「真實沙箱可能 hang」是新不停機源）
+trigger_states:
+  - LEARNING_COMMIT
+  - MEMORY_CONSOLIDATION
+severity: high
+maturity: active
+spec: >
+  L10 完整剩餘之「具身接地的元迴圈」切片：Phase L~W 把元迴圈自我演化能力一路推到 meta⁸（互遞迴自我發明 +
+  良基停機證書），但其「評估」端一路是 dimension_necessity_oracle 的**合成語料勝率**——從不啟動沙箱、從不查
+  真實日誌、從不跑真 App（GAP-X1：元迴圈接地真空，由 Phase X 切片 FF-16〔arch_fitness〕量測 surface）。而框架
+  早在 Phase H（ACT-045~055）就建好具身評估器（sdd-evaluator + sandbox_runner + observability_query.logql_lite/
+  promql_lite + output_quality_scorer + EXECUTION_EVALUATION）與常駐鷹架 GC（sdd-gc + scaffold_gc + SCAFFOLD_GC），
+  卻被近 8 個 meta phase 晾在一邊。Phase X 完整版在 META_FSM 的納入（MFSM_GROW）路徑前插一道 EMBODIED_GROUNDING_GATE
+  （具身接地閘）：任何自我發明能力被納入前，須先由 sdd-evaluator 在隔離沙箱實跑、由 observability_query 查客觀
+  錯誤，產出具身 grounded-verdict（合成勝率〔必要〕∧ 具身 OQS 不退步〔充分〕雙簽）；grounded_fail / 無具身增益 →
+  REJECT（回 OBSERVE，不 churn）。9.36.1 具身接地閘骨架（EmbodiedGroundingGate / embodied_grounding_oracle）：
+  embodied_grounding_oracle.evaluate_embodied_grounding 給定自我發明能力在固定沙箱基準 spec 上的 baseline 與
+  candidate ExecutionObservation，用 output_quality_scorer 客觀計分產出 grounded-verdict（具身增益判據：OQS 不退步
+  ∧ 無新增 runtime_fail）；只**產出** verdict、絕不自動納入、絕不自寫常數；結構性**不 import** 任何 generator
+  （operator_*_genesis / dimension_semantics_synthesizer / vocabulary_genesis）/ 必要性 oracle（對抗分離，AST import
+  隔離斷言守）。9.36.2 具身接地對抗分離（EmbodiedGroundingAdversarialSeparation）：具身 oracle 對 generator 不可見
+  ——具身觀測是比「自演化 oracle」更可信的對抗分離來源（與其讓 oracle 自演化〔meta-oracle horizon，自指破壞反
+  Goodhart 地基〕，不如把 oracle 接地到人類無法竄改的客觀具身觀測〔沙箱 verdict〕）。9.36.3 具身接地閘 fail-closed
+  有界停機（EmbodiedGroundingBounded，本 Phase 紅線）：具身接地的停機反諷——為讓元迴圈在真實環境驗證，引入了「真實
+  沙箱可能 hang」這個新不停機源。meta_halt_monitor.guard_embodied_grounding 與 TLA+ EmbodiedGroundingBounded **100%
+  同構**的 fail-closed 三段：(i) grounded verdict 必基於 ExecutionObservation 客觀資料——grounding.observation 為 None
+  或 OQS 客觀計分判為 inconclusive（沙箱從未真正跑過/壞過，無客觀證據）→ raise EmbodiedGroundingViolation（呼叫端
+  轉 MFSM_ESCALATION）；**guard 獨立用 output_quality_scorer 重新計分驗證，不盲信 oracle 的 verdict 標籤**（杜絕零
+  觀測 false-green 納入：零觀測會四維皆 default 1.0 → false green，瓦解接地目的）；(ii) 沙箱硬 timeout（SandboxSpec.
+  timeout_sec）→ grounded_fail，allowed=False（FSM 不 wall-clock wait，收 verdict 而非等沙箱，把「真實沙箱可能 hang」
+  封死）；(iii) grounded_pass（OQS verdict==pass 且非 timeout）才允許 MFSM_GROW；其餘（runtime_fail / spec_defect）→
+  REJECT，回 OBSERVE 不增 churn。9.36.4 具身接地基數 + 命名空間隔離（EmbodiedGroundingNamespace）：每個具身接地
+  事件為一個 `embodied-grounding:` 命名空間指紋，其 add↔retire 與既有 SLV/scorer-profile/value-dimension/vocab/
+  operator/alphabet/depth/recursion-genesis 共用本軌同一 churn 預算（meta_ledger.is_embodied_grounding_fingerprint /
+  active_embodied_grounding_features）；與其他自我擴充迴圈分開治理。9.36.5 具身接地誠實 + 活體/meta⁹ horizon：
+  本份 EMBODIED_GROUNDING_GATE 的沙箱維持**本地、no-HTTP**（沿用 sandbox_runner 既有 boundary，守 OPEN-10.6）；活體
+  canary（真實流量）需放寬 OPEN-10.6，列 horizon（OPEN-X.x 承 OPEN-W.x…）；Phase X 是**橫向接地，不碰 meta⁹**——
+  meta⁹ 真圖靈完備（無良基測度約束/帶無界記憶使停機不可判定、無靜態 device 可保證停機）仍列 R-9.35.5 紅線 horizon；
+  meta-oracle 自演化（自我發明評估器）仍由人類凍結（具身觀測接地是它的對立解）。重用既有 META_FSM、僅補
+  EmbodiedGroundingBounded INVARIANT、不增狀態/變數、不增第六軌；五軌 TLC（SDD 831 / META 13 / FLEET 7 /
+  COMPOSITION 21 / OPTIMIZATION 12）全不回歸、具身接地不污染單軌 SDD_FSM.tla。對應 embodied_grounding_oracle
+  （evaluate_embodied_grounding / GroundedVerdict / GROUNDED_PASS/FAIL/SPEC_DEFECT/INCONCLUSIVE）/ output_quality_scorer
+  （ExecutionObservation / score / OQSResult）/ meta_halt/meta_ledger（is_embodied_grounding_fingerprint /
+  active_embodied_grounding_features / EMBODIED_GROUNDING_NAMESPACE）/ meta_halt/meta_halt_monitor
+  （guard_embodied_grounding / EmbodiedGroundingViolation / EmbodiedGroundingGuardResult）/ steersman_renderer
+  （render_embodied_grounding_proposal）/ chaos_runner（EMBODIED_GROUNDING_FLAP / _embodied_grounding_flap_is_bounded）/
+  formal/META_FSM（EmbodiedGroundingBounded）。禁止：embodied_grounding_oracle 自動納入具身接地 / 自寫常數繞過人工
+  signoff + guard_embodied_grounding、用 oracle 自評充當具身增益 capability-delta tier（具身接地 Goodhart 自評放水）、
+  embodied_grounding_oracle 讀寫 / 影響 / import 任何 generator（operator_*_genesis / dimension_semantics_synthesizer /
+  vocabulary_genesis）或 dimension_necessity_oracle / held-out 語料（破對抗分離）、grounded verdict 缺 ExecutionObservation
+  客觀資料卻放行納入（破 fail-closed，零觀測 false-green）、guard 盲信 oracle verdict 標籤而不獨立重新計分驗證、沙箱
+  硬 timeout 卻 wall-clock wait 或不映 grounded_fail（FSM 等沙箱破有界停機）、把 embodied-grounding 元迴圈併入單軌
+  SDD_FSM.tla 或新增第六軌污染五軌 reachable、未獲對抗分離不可繞過性證明即採納 meta-oracle 自演化（具身觀測接地是
+  其對立解）、未經 OPEN-X.x 私自開 HTTP 外聯做活體 canary 具身接地（破 OPEN-10.6）。
+test_ref: tools/fsm_runtime/tests/test_phase_x.py
+enforcement_mechanism: meta_loop
+scaffold_roi:
+  fire_count: 0
+  catch_count: 0
+  false_positive_count: 0

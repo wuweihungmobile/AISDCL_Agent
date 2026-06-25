@@ -236,3 +236,8 @@ AISDLC_SDD_v0.24/chaos-report.json
 AISDLC_SDD_v0.25/build/reports/
 AISDLC_SDD_v0.25/arch-fitness.json
 AISDLC_SDD_v0.25/chaos-report.json
+
+# ── AISDLC_SDD_v0.26 runtime 取證產物排除（improving_66 B 軌：GAP-Y2 可審批儀表板 CLI 觸達；Copy-on-Evolve 自動補；改進輪敘述見 EVOLUTION_LOG.md）──
+AISDLC_SDD_v0.26/build/reports/
+AISDLC_SDD_v0.26/arch-fitness.json
+AISDLC_SDD_v0.26/chaos-report.json

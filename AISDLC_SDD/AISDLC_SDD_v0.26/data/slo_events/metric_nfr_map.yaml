@@ -1,0 +1,9 @@
+# ACT-027 / OPEN-10.6 — Metric → NFR override map
+# 覆蓋 tools/fsm_runtime/production_monitor._BUILTIN_MAP，不存在時使用內建對應。
+# 本檔非事件檔，scan_inbox() 會自動略過（檔名 == metric_nfr_map.yaml 時）。
+metric_to_nfr:
+  p95_login_ms: "NFR-PERF-001"
+  p95_api_ms: "NFR-PERF-002"
+  p99_checkout_ms: "NFR-PERF-003"
+  error_rate_percent: "NFR-PERF-010"
+  throughput_rps: "NFR-PERF-020"

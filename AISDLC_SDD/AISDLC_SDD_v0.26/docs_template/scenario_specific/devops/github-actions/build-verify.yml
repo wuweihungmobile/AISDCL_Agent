@@ -1,0 +1,249 @@
+# ============================================================
+# AISDLC v0.09 - Layer 1 Build & Verify
+# GitHub Actions Workflow Template
+# ============================================================
+#
+# 使用方式:
+#   1. 複製此檔案至 .github/workflows/build-verify.yml
+#   2. 調整語言/框架設定（預設 Node.js，註解區有 Python/Java/Go）
+#   3. 設定 Coverage 閾值（預設 80%）
+#
+# 前置條件: Layer 0 Security Baseline 已配置
+# 參考文檔: Layer1_Build_Verify_Template.md
+# ============================================================
+
+name: "🏗️ Layer 1: Build & Verify"
+
+on:
+  pull_request:
+    branches: [main, develop, release/*]
+  push:
+    branches: [main, develop]
+
+concurrency:
+  group: build-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  pull-requests: write      # For coverage PR comment
+  checks: write             # For test result annotations
+
+# ─── 全域設定（依專案調整） ───
+env:
+  NODE_VERSION: '20.x'
+  # PYTHON_VERSION: '3.12'
+  # JAVA_VERSION: '21'
+  # GO_VERSION: '1.22'
+  COVERAGE_THRESHOLD: '80'
+
+jobs:
+  # ═══════════════════════════════════════════
+  # Job 1: Lint + Format Check
+  # ═══════════════════════════════════════════
+  lint:
+    name: "🔍 Lint & Format"
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # ─── Node.js ───
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+
+      - name: Install Dependencies
+        run: npm ci
+
+      - name: ESLint
+        run: npm run lint
+
+      - name: Prettier Check
+        run: npx prettier --check "src/**/*.{ts,tsx,js,jsx}"
+
+      # ─── Python（取消註解啟用） ───
+      # - name: Setup Python
+      #   uses: actions/setup-python@v5
+      #   with:
+      #     python-version: ${{ env.PYTHON_VERSION }}
+      # - name: Ruff Lint + Format Check
+      #   run: |
+      #     pip install ruff
+      #     ruff check .
+      #     ruff format --check .
+
+      # ─── Java Maven（取消註解啟用） ───
+      # - name: Setup Java
+      #   uses: actions/setup-java@v4
+      #   with:
+      #     java-version: ${{ env.JAVA_VERSION }}
+      #     distribution: 'temurin'
+      #     cache: 'maven'
+      # - name: Checkstyle + SpotBugs
+      #   run: mvn checkstyle:check spotbugs:check -DskipTests
+
+      # ─── Go（取消註解啟用） ───
+      # - name: Setup Go
+      #   uses: actions/setup-go@v5
+      #   with:
+      #     go-version: ${{ env.GO_VERSION }}
+      # - name: golangci-lint
+      #   uses: golangci/golangci-lint-action@v6
+      #   with:
+      #     version: latest
+
+  # ═══════════════════════════════════════════
+  # Job 2: Compile / Build
+  # ═══════════════════════════════════════════
+  build:
+    name: "📦 Build"
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    needs: lint                  # Lint 通過後才 Build
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # ─── Node.js ───
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+
+      - name: Install Dependencies
+        run: npm ci
+
+      - name: Build
+        run: npm run build
+
+      - name: Generate Version
+        id: version
+        run: |
+          echo "version=$(date +'%Y%m%d')-$(git rev-parse --short HEAD)" >> $GITHUB_OUTPUT
+
+      - name: Upload Build Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-${{ steps.version.outputs.version }}
+          path: dist/
+          retention-days: 7
+
+      # ─── Python（取消註解啟用） ───
+      # - name: Install Dependencies
+      #   run: pip install -r requirements.txt
+      # - name: Verify Imports
+      #   run: python -c "import src"
+
+      # ─── Java Maven（取消註解啟用） ───
+      # - name: Build (skip tests)
+      #   run: mvn compile -DskipTests -B
+
+      # ─── Go（取消註解啟用） ───
+      # - name: Build
+      #   run: go build ./...
+
+  # ═══════════════════════════════════════════
+  # Job 3: Unit Test + Coverage Gate
+  # ═══════════════════════════════════════════
+  test:
+    name: "🧪 Unit Test + Coverage"
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    needs: build                 # Build 通過後才 Test
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # ─── Node.js ───
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+
+      - name: Install Dependencies
+        run: npm ci
+
+      - name: Run Unit Tests with Coverage
+        run: npm run test -- --coverage --ci
+
+      - name: Coverage Gate Check
+        run: |
+          COVERAGE=$(cat coverage/coverage-summary.json | jq '.total.lines.pct')
+          echo "📊 Line Coverage: ${COVERAGE}%"
+          echo "📏 Threshold: ${{ env.COVERAGE_THRESHOLD }}%"
+
+          if (( $(echo "$COVERAGE < ${{ env.COVERAGE_THRESHOLD }}" | bc -l) )); then
+            echo "::error::🔴 Coverage ${COVERAGE}% is below threshold ${{ env.COVERAGE_THRESHOLD }}%"
+            exit 1
+          fi
+          echo "✅ Coverage ${COVERAGE}% meets threshold"
+
+      - name: Upload Coverage to Codecov
+        uses: codecov/codecov-action@v4
+        if: always()
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          files: ./coverage/lcov.info
+          fail_ci_if_error: false
+
+      # ─── Python（取消註解啟用） ───
+      # - name: Run Tests with Coverage
+      #   run: |
+      #     pip install pytest pytest-cov
+      #     pytest --cov=src --cov-report=xml --cov-fail-under=${{ env.COVERAGE_THRESHOLD }}
+
+      # ─── Java Maven（取消註解啟用） ───
+      # - name: Run Tests with JaCoCo
+      #   run: mvn test jacoco:report -B
+      # - name: JaCoCo Coverage Gate
+      #   run: mvn jacoco:check -B
+
+      # ─── Go（取消註解啟用） ───
+      # - name: Run Tests with Coverage
+      #   run: |
+      #     go test -race -coverprofile=coverage.out ./...
+      #     COVERAGE=$(go tool cover -func=coverage.out | tail -1 | awk '{print $3}' | sed 's/%//')
+      #     if (( $(echo "$COVERAGE < ${{ env.COVERAGE_THRESHOLD }}" | bc -l) )); then
+      #       echo "::error::Coverage ${COVERAGE}% below threshold"
+      #       exit 1
+      #     fi
+
+  # ═══════════════════════════════════════════
+  # Gate: All Layer 1 checks must pass
+  # ═══════════════════════════════════════════
+  build-verify-gate:
+    name: "🚦 Layer 1 Build & Verify Gate"
+    needs: [lint, build, test]
+    runs-on: ubuntu-latest
+    if: always()
+    steps:
+      - name: Evaluate Results
+        run: |
+          echo "=== Layer 1 Build & Verify Results ==="
+          echo "Lint:     ${{ needs.lint.result }}"
+          echo "Build:    ${{ needs.build.result }}"
+          echo "Test:     ${{ needs.test.result }}"
+          echo "======================================="
+
+          if [ "${{ needs.lint.result }}" != "success" ]; then
+            echo "::error::🔴 Lint FAILED - PR blocked"
+            exit 1
+          fi
+          if [ "${{ needs.build.result }}" != "success" ]; then
+            echo "::error::🔴 Build FAILED - PR blocked"
+            exit 1
+          fi
+          if [ "${{ needs.test.result }}" != "success" ]; then
+            echo "::error::🔴 Test/Coverage FAILED - PR blocked"
+            exit 1
+          fi
+
+          echo "✅ Layer 1 Build & Verify PASSED"
