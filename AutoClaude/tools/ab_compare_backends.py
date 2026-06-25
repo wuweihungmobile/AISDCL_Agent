@@ -28,9 +28,10 @@ from __future__ import annotations
 
 import argparse
 import re
+import statistics
 import subprocess
 import sys
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 
 # --- Kernel 真實輸出標記（與 core/kernel.py 對齊）---
@@ -142,6 +143,94 @@ def format_comparison(pty: RunMetrics, sdk: RunMetrics) -> str:
     return "\n".join(out)
 
 
+# ── W-72-2：多輪統計聚合（improving_72，完整統計 A/B）─────────────────
+@dataclass
+class AggregateMetrics:
+    """同一後端 N 輪 run 的指標聚合（純統計，無副作用）。
+
+    N=1 退化為單輪值（stdev=0）；N=0（空輸入）全回 0，誠實表「無樣本」。
+    一次通過率取 mean/stdev/min/max；CORRECTION / SDD 違反取 mean + total；
+    token 峰值取 mean/max；完成度以 success/escalated 計數 + completed_steps 均值表達。
+    """
+
+    backend: str = ""
+    n: int = 0
+    first_pass_rate_mean: float = 0.0
+    first_pass_rate_stdev: float = 0.0
+    first_pass_rate_min: float = 0.0
+    first_pass_rate_max: float = 0.0
+    correction_count_mean: float = 0.0
+    correction_count_total: int = 0
+    sdd_violation_count_total: int = 0
+    peak_token_pct_mean: float = 0.0
+    peak_token_pct_max: float = 0.0
+    completed_steps_mean: float = 0.0
+    total_steps: int = 0
+    success_count: int = 0
+    escalated_count: int = 0
+    per_run: list[RunMetrics] = field(default_factory=list)
+
+
+def aggregate_runs(runs: list[RunMetrics], backend: str = "") -> AggregateMetrics:
+    """把同一後端 N 輪 RunMetrics 聚合為統計指標（純函式）。
+
+    空 list → n=0 全零（誠實表無樣本）。stdev 用母體標準差（pstdev，n=1→0.0）。
+    backend 未指定時取首輪的 backend。
+    """
+    agg = AggregateMetrics(backend=backend or (runs[0].backend if runs else ""))
+    agg.n = len(runs)
+    if not runs:
+        return agg
+    fpr = [r.first_pass_rate for r in runs]
+    corr = [r.correction_count for r in runs]
+    tok = [r.peak_token_pct for r in runs]
+    comp = [r.completed_steps for r in runs]
+    agg.first_pass_rate_mean = statistics.mean(fpr)
+    agg.first_pass_rate_stdev = statistics.pstdev(fpr)  # n=1 → 0.0
+    agg.first_pass_rate_min = min(fpr)
+    agg.first_pass_rate_max = max(fpr)
+    agg.correction_count_mean = statistics.mean(corr)
+    agg.correction_count_total = sum(corr)
+    agg.sdd_violation_count_total = sum(r.sdd_violation_count for r in runs)
+    agg.peak_token_pct_mean = statistics.mean(tok)
+    agg.peak_token_pct_max = max(tok)
+    agg.completed_steps_mean = statistics.mean(comp)
+    agg.total_steps = max(r.total_steps for r in runs)
+    agg.success_count = sum(1 for r in runs if r.run_succeeded)
+    agg.escalated_count = sum(1 for r in runs if r.escalated)
+    agg.per_run = list(runs)
+    return agg
+
+
+def format_aggregate_comparison(pty: AggregateMetrics, sdk: AggregateMetrics) -> str:
+    """產出多輪統計 Markdown 對比表（pty vs sdk，含均值 ± 母體標準差 / 範圍 / 成功計數）。"""
+
+    def _fpr(a: AggregateMetrics) -> str:
+        return f"{_fmt_pct(a.first_pass_rate_mean)} ±{a.first_pass_rate_stdev * 100:.0f}% [{_fmt_pct(a.first_pass_rate_min)}~{_fmt_pct(a.first_pass_rate_max)}]"
+
+    rows = [
+        (f"樣本數 N", str(pty.n), str(sdk.n)),
+        ("一次通過率 (mean ±stdev [min~max])", _fpr(pty), _fpr(sdk)),
+        ("CORRECTION 次數 (mean / total)",
+         f"{pty.correction_count_mean:.1f} / {pty.correction_count_total}",
+         f"{sdk.correction_count_mean:.1f} / {sdk.correction_count_total}"),
+        ("SDD_CONTRACT_VIOLATION (total)",
+         str(pty.sdd_violation_count_total), str(sdk.sdd_violation_count_total)),
+        ("token 峰值 (mean / max)",
+         f"{pty.peak_token_pct_mean:.0f}% / {pty.peak_token_pct_max:.0f}%",
+         f"{sdk.peak_token_pct_mean:.0f}% / {sdk.peak_token_pct_max:.0f}%"),
+        ("完成步驟均值 / 總步驟",
+         f"{pty.completed_steps_mean:.1f}/{pty.total_steps}",
+         f"{sdk.completed_steps_mean:.1f}/{sdk.total_steps}"),
+        ("run 成功 / escalated (計數)",
+         f"{pty.success_count} / {pty.escalated_count}",
+         f"{sdk.success_count} / {sdk.escalated_count}"),
+    ]
+    out = ["| 指標 | pty | sdk |", "|------|-----|-----|"]
+    out += [f"| {name} | {a} | {b} |" for name, a, b in rows]
+    return "\n".join(out)
+
+
 def run_backend(playbook: str, backend: str, workdir: Path, config_path: str | None = None) -> tuple[str, RunMetrics]:
     """以指定 backend 實跑 playbook（subprocess），回傳 (log_text, RunMetrics)。
 
@@ -158,6 +247,25 @@ def run_backend(playbook: str, backend: str, workdir: Path, config_path: str | N
     return log_text, parse_run_metrics(log_text, backend=backend)
 
 
+def run_backend_n(playbook: str, backend: str, base_workdir: Path, n: int,
+                  config_path: str | None = None) -> tuple[list[str], list[RunMetrics]]:
+    """以指定 backend 連跑 N 次（每輪獨立乾淨子目錄 run_1..run_N），回傳 (logs, metrics)。
+
+    需授權 token：每輪實際呼叫 Claude。**每輪獨立子目錄**是必要的——smoke 會建檔
+    （smoke_add_test.py / smoke_add.py），同目錄重跑會使 S01「先別建 smoke_add.py」前提
+    被前一輪殘留檔破壞，污染 A/B。config_path 轉絕對路徑（subprocess cwd=子目錄）。
+    """
+    abs_cfg = str(Path(config_path).resolve()) if config_path else None
+    logs: list[str] = []
+    metrics: list[RunMetrics] = []
+    for i in range(1, n + 1):
+        run_dir = base_workdir / f"run_{i}"
+        log_text, m = run_backend(playbook, backend, run_dir, abs_cfg)
+        logs.append(log_text)
+        metrics.append(m)
+    return logs, metrics
+
+
 def _build_argparser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(description="pty vs sdk 後端 A/B 指標對比")
     p.add_argument("--pty-log", help="既有 pty run log 檔")
@@ -166,6 +274,8 @@ def _build_argparser() -> argparse.ArgumentParser:
     p.add_argument("--workdir", help="實跑工作目錄")
     p.add_argument("--pty-config", help="實跑模式：backend=pty 的 config")
     p.add_argument("--sdk-config", help="實跑模式：backend=sdk 的 config")
+    p.add_argument("--n", type=int, default=1,
+                   help="實跑模式：每後端連跑輪數（多輪統計 A/B；預設 1＝單輪對比）")
     return p
 
 
@@ -174,14 +284,22 @@ def main(argv: list[str] | None = None) -> int:
     if args.pty_log and args.sdk_log:
         pty = parse_run_metrics(Path(args.pty_log).read_text(encoding="utf-8", errors="replace"), "pty")
         sdk = parse_run_metrics(Path(args.sdk_log).read_text(encoding="utf-8", errors="replace"), "sdk")
+        print(format_comparison(pty, sdk))
     elif args.run and args.workdir:
         base = Path(args.workdir)
-        _, pty = run_backend(args.run, "pty", base / "pty", args.pty_config)
-        _, sdk = run_backend(args.run, "sdk", base / "sdk", args.sdk_config)
+        n = max(1, args.n)
+        if n == 1:
+            _, pty = run_backend(args.run, "pty", base / "pty", args.pty_config)
+            _, sdk = run_backend(args.run, "sdk", base / "sdk", args.sdk_config)
+            print(format_comparison(pty, sdk))
+        else:
+            _, pty_runs = run_backend_n(args.run, "pty", base / "pty", n, args.pty_config)
+            _, sdk_runs = run_backend_n(args.run, "sdk", base / "sdk", n, args.sdk_config)
+            print(format_aggregate_comparison(
+                aggregate_runs(pty_runs, "pty"), aggregate_runs(sdk_runs, "sdk")))
     else:
         print("需提供 --pty-log+--sdk-log（解析）或 --run+--workdir（實跑）", file=sys.stderr)
         return 2
-    print(format_comparison(pty, sdk))
     return 0
 
 

@@ -1,0 +1,25 @@
+# ab_sdk_config.yaml — pty-vs-sdk A/B 之 sdk 後端 config（AutoSDD improving_72 W-72-1）
+#
+# 用途：讓 scripts/sdd_bridge_smoke.yaml 在 sdk 後端「真的跑通兩步」，供完整統計 A/B。
+#   - executor.backend=sdk（SdkExecutorAdapter，Claude Agent SDK，JSON-over-stdio；需 [sdk] extra）。
+#   - executor.permission_mode=bypassPermissions：讓 SDK 能真正執行 Write/Edit 工具寫檔，
+#     否則 improving_71 真跑現象重演（S01 keyword [TEST_READY] 命中但 permission=default
+#     未核准 → 檔案實際未建 → S02 evaluator 親跑 pytest 抓到檔不存在 → escalated）。
+#   - sdk_tool_allowlist 不設（None）→ 不注入 predicate，交由 permission_mode 守門
+#     （對齊 improving_68/69 零行為變更設計；bypassPermissions 下放行寫檔）。
+#   - minimax.api_key 給 dummy + enable_kernel_brain=false：同 ab_pty_config 理由（建構非空檢查）。
+minimax:
+  api_key: "ab-smoke-dummy-sdk"
+  enable_kernel_brain: false
+
+executor:
+  backend: "sdk"
+  permission_mode: "bypassPermissions"
+
+storage:
+  mode: "yaml_only"
+
+playbook:
+  # 關閉 DONE 前的 global_goal 達成諮詢：避免每輪 DONE 用 dummy key 真打 minimax（含重試）
+  # 拖慢多輪。對 pty/sdk 兩後端一致關閉＝A/B 公平；且非四指標之一，不影響執行器層對比。
+  goal_synthesis_enabled: false

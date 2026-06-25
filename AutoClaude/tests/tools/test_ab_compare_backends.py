@@ -18,6 +18,8 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from tools.ab_compare_backends import (  # noqa: E402
+    aggregate_runs,
+    format_aggregate_comparison,
     format_comparison,
     parse_run_metrics,
 )
@@ -148,3 +150,73 @@ def test_log_file_roundtrip(tmp_path):
     f.write_text(_PERFECT, encoding="utf-8")
     m = parse_run_metrics(f.read_text(encoding="utf-8"), "pty")
     assert m.first_pass_rate == 1.0
+
+
+# ── W-72-2：多輪統計聚合測試（improving_72，完整統計 A/B）────────────
+def test_aggregate_empty_is_zero_no_crash():
+    """空輸入（無樣本）→ n=0 全零，誠實表「無樣本」而非崩潰或臆造。"""
+    a = aggregate_runs([], "pty")
+    assert a.n == 0
+    assert a.first_pass_rate_mean == 0.0
+    assert a.success_count == 0
+    assert a.escalated_count == 0
+    assert a.total_steps == 0
+
+
+def test_aggregate_single_run_degenerates_to_value_stdev_zero():
+    """N=1：均值＝該輪值、母體 stdev=0（單樣本無離散），意圖：多輪載具退化到單輪不失真。"""
+    a = aggregate_runs([parse_run_metrics(_PERFECT, "pty")], "pty")
+    assert a.n == 1
+    assert a.first_pass_rate_mean == 1.0
+    assert a.first_pass_rate_stdev == 0.0
+    assert a.first_pass_rate_min == 1.0
+    assert a.first_pass_rate_max == 1.0
+    assert a.success_count == 1
+    assert a.escalated_count == 0
+
+
+def test_aggregate_mean_stdev_range_across_runs():
+    """N=2 混合（完美 + 半通過）→ 均值 0.75、min 0.5/max 1.0、母體 stdev=0.25。
+
+    Rule 9：意圖＝多輪統計須真實反映輪間離散（一次通過率波動），非取首輪或末輪。
+    """
+    runs = [parse_run_metrics(_PERFECT, "sdk"),
+            parse_run_metrics(_ONE_CORRECTION, "sdk")]
+    a = aggregate_runs(runs, "sdk")
+    assert a.n == 2
+    assert a.first_pass_rate_mean == 0.75  # (1.0 + 0.5) / 2
+    assert a.first_pass_rate_min == 0.5
+    assert a.first_pass_rate_max == 1.0
+    assert abs(a.first_pass_rate_stdev - 0.25) < 1e-9  # 母體 stdev of {1.0,0.5}
+    assert a.correction_count_total == 1  # 僅 _ONE_CORRECTION 有 1 次
+    assert a.correction_count_mean == 0.5
+
+
+def test_aggregate_success_escalated_counts():
+    """成功 / escalated 以輪計數（N=3：2 成功 + 1 escalated）——統計 A/B 的完成度口徑。"""
+    runs = [parse_run_metrics(_PERFECT, "pty"),
+            parse_run_metrics(_ONE_CORRECTION, "pty"),
+            parse_run_metrics(_ESCALATED, "pty")]
+    a = aggregate_runs(runs, "pty")
+    assert a.n == 3
+    assert a.success_count == 2
+    assert a.escalated_count == 1
+    assert a.total_steps == 2
+
+
+def test_aggregate_backend_defaults_to_first_run():
+    """backend 未指定時取首輪 backend（標籤不漏）。"""
+    a = aggregate_runs([parse_run_metrics(_PERFECT, "sdk")])
+    assert a.backend == "sdk"
+
+
+def test_format_aggregate_has_both_backends_and_sample_size():
+    """多輪對比表含 pty/sdk 兩欄、樣本數 N、均值±stdev 欄位（報告可讀性契約）。"""
+    pty = aggregate_runs([parse_run_metrics(_PERFECT, "pty"),
+                          parse_run_metrics(_ESCALATED, "pty")], "pty")
+    sdk = aggregate_runs([parse_run_metrics(_PERFECT, "sdk")], "sdk")
+    out = format_aggregate_comparison(pty, sdk)
+    assert "| pty | sdk |" in out
+    assert "樣本數 N" in out
+    assert "mean" in out
+    assert "run 成功 / escalated" in out

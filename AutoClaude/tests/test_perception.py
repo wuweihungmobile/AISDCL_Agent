@@ -152,6 +152,27 @@ class TestPtyWrapper:
             assert result is None
             pty.close()
 
+    def test_wexpect_spawn_passes_args_as_list_not_shell_joined(self):
+        """DEF-72-001 回歸：複雜 prompt（反引號/換行/分號）須以 args=list 傳 wexpect.spawn，
+        嚴禁 ' '.join 成單一 shell 字串。
+
+        Rule 9 意圖：shell-join 會讓反引號被當命令替換、換行斷句 → claude 收到殘缺指令、
+        raw log 0 bytes（pty-vs-sdk 真跑揭露的執行器層真實缺陷）。此測直接守 spawn 呼叫形態：
+        command 為第一參數、完整 prompt 以 args list 原樣傳遞，且 command 字串不得吞進 prompt。
+        wexpect 為 Windows-only（CI 在 Linux 無此模組）→ create=True 跨平台 patch。
+        """
+        complex_prompt = "請建立 `t.py`; assert add(2,3)==5\n完成後輸出 [TEST_READY]"
+        fake_wexpect = MagicMock()
+        fake_wexpect.spawn.return_value = MagicMock()
+        with patch("autoclaude.perception.pty_wrapper._WEXPECT_AVAILABLE", True), \
+             patch("autoclaude.perception.pty_wrapper.wexpect", fake_wexpect, create=True):
+            pty = _make_pty(command="claude", args=["-p", complex_prompt])
+            pty.start()
+        call = fake_wexpect.spawn.call_args
+        assert call.args[0] == "claude"               # command 為第一參數（非長字串）
+        assert call.kwargs["args"] == ["-p", complex_prompt]  # prompt 原樣以 list 傳
+        assert complex_prompt not in call.args[0]      # 防回歸：未被 join 進 command 字串
+
     def test_send_writes_to_stdin(self):
         proc = _make_mock_proc([])
         with patch("autoclaude.perception.pty_wrapper._WEXPECT_AVAILABLE", False), \

@@ -56,11 +56,17 @@ class PtyWrapper:
             self._start_subprocess()
 
     def _start_wexpect(self) -> None:
-        cmd = " ".join([self._command] + self._args)
-        self._child = wexpect.spawn(cmd, encoding=self._encoding)
+        # improving_72 DEF-72-001：原以 " ".join([command]+args) 把含反引號/換行/分號的
+        # 多行 prompt 拼成單一 shell 字串傳 wexpect.spawn → 被 shell 解析搞爛（反引號當命令
+        # 替換、換行斷句），claude 收到殘缺指令、raw log 0 bytes（pty-vs-sdk 真跑揭露：
+        # 簡單 prompt 可擷取、複雜 prompt 全空）。改以 args=list 傳遞（wexpect.spawn 原生
+        # 支援；零 token 探針證實 list 路徑 prompt 原樣抵達子程序），不再經 shell parsing。
+        self._child = wexpect.spawn(
+            self._command, args=list(self._args), encoding=self._encoding
+        )
         if self._raw_logger:
             self._child.logfile_read = _RawLogAdapter(self._raw_logger, self._encoding)
-        logger.info("wexpect 模式啟動：%s", cmd)
+        logger.info("wexpect 模式啟動：%s args=%r", self._command, self._args)
 
     def _start_subprocess(self) -> None:
         self._proc = subprocess.Popen(

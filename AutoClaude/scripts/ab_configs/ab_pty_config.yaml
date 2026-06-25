@@ -1,0 +1,29 @@
+# ab_pty_config.yaml — pty-vs-sdk A/B 之 pty 後端 config（AutoSDD improving_72 W-72-1）
+#
+# 用途：讓 scripts/sdd_bridge_smoke.yaml 在 pty 後端「真的跑通兩步」，供完整統計 A/B。
+#   - executor.backend=pty（既有 PtyExecutor，claude -p print 模式）。
+#   - claude.extra_args 加 --permission-mode bypassPermissions：讓 claude -p 非互動模式
+#     能真正寫檔（建 smoke_add_test.py / smoke_add.py），否則 S01 無法完成、keyword 不出。
+#     （improving_71 真跑揭露 pty S01 [TEST_READY] 未擷取＝預設無寫檔權限所致。）
+#   - minimax.api_key 給 dummy：MinimaxClient.__init__ 要求非空（config.py:102）否則 main
+#     return 1；enable_kernel_brain=false → brain=None → 此 key 永不被真呼叫（盲重試、無 correction）。
+#   - storage.mode=yaml_only：零 PG 依賴，臨時工作目錄即可跑。
+minimax:
+  api_key: "ab-smoke-dummy-pty"
+  enable_kernel_brain: false
+
+executor:
+  backend: "pty"
+
+claude:
+  command: "claude"
+  extra_args: ["--permission-mode", "bypassPermissions"]
+
+storage:
+  mode: "yaml_only"
+
+playbook:
+  # 關閉 DONE 前的 global_goal 達成諮詢：避免每輪 DONE 用 dummy key 真打 minimax（含重試）
+  # 拖慢多輪。對 pty/sdk 兩後端一致關閉＝A/B 公平；且非四指標之一（一次通過率/CORRECTION/
+  # SDD 違反/token 峰值），不影響執行器層對比。
+  goal_synthesis_enabled: false
