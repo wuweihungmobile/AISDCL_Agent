@@ -122,6 +122,11 @@ PS: 以上PRD, 請輸出docs\01_requirements\Agent_ConsoleUI_PRD.md輸出
 5.AutoGen
 6.其他
 
+指揮官提出要解決事項:請確實派出Architect / SA / SD / QA 專家整體考量審查整合,
+1.請將兩附件內容, 整合至本專案的相對模組中(除了剛剛評估過的LangGraph除外)!
+2.功能若有重疊, 以Agent_ConsoleUI_PRD.md為主
+3.若需要修改AutoSDD_Iteration_Prompt_Template.md, 請一併處理!
+
 目前需確認或解決問題
 ===================
 1.AutoClaude的驗證測試Nightly是否有繼續?

@@ -31,6 +31,12 @@
 > 上捲規則 `L_合體 = min(A,B,C)`（不變式 `A ≤ min(B,C)`）——故**三軸必須一起升**才推得動北極星。
 > 每輪須**階段一實測**分評三軸現級並引證據，禁文件宣稱當事實（zero-trust）。
 
+> **能力 roadmap 對照（SSOT）**：端到端願景（PRD→可運行系統）拆解的 **7 大能力**（prd-ingestion／
+> agent-orchestration／code-manipulation／sandbox-execution／self-correction-loop／model-infrastructure／
+> version-control-integration）與三軌（A/B/C）模組的對應、現況（已有/部分/缺）及衝突校正
+> （**LangGraph 排除、brownfield 校正**），一律見 [`docs/04_planning/AutoSDD_Capability_Integration_Map.md`](AutoSDD_Capability_Integration_Map.md)。
+> 各輪 W 項由該圖長期 roadmap 衍生，**三軌結構與四階段紀律不變**。
+
 ## 🎯 核心任務（第 {{N}} 輪迭代）
 在「零退化 (Zero-Regression)」絕對前提下，推進**三軌迭代**（對齊北極星三點：指揮官 AutoClaude × 手腳 AISLDC_SDD × 雙向協作；每輪須明確標示本輪在哪一柱（A/B/C）推進、下一份檔名，防跨軌誤指）：
 - **A 軌（整合）**：推進 AISDLC-SDD 框架與 AutoClaude 多步驟 Playbook 引擎的深度整合。

@@ -6,6 +6,11 @@
 > **文件狀態**：Draft  
 > **負責人**：AISDLC 架構團隊  
 
+> **上位引擎願景對照**：本 PRD 是 AutoSDD 端到端願景（PRD→可運行系統）的 **UI/部署落地**。願景 7 大能力
+> ↔ 模組/三軌對照、現況與衝突校正（含 LangGraph 排除、brownfield 校正）見規劃層 SSOT
+> [`../04_planning/AutoSDD_Capability_Integration_Map.md`](../04_planning/AutoSDD_Capability_Integration_Map.md)；
+> 其中 `prd-ingestion` 對應本 PRD §5.2、`sandbox-execution` 部署面對應 §11。
+
 ---
 
 ## 目錄
