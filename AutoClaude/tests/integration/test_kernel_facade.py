@@ -47,7 +47,7 @@ GOLDEN_PLAYBOOKS = [
 
 class _RegexMatchingExecutor:
     """從 PlaybookTask.expected_output_regex 反推應該回傳的字串。"""
-    def execute(self, prompt, *, maintain_context=True, timeout=600, label=""):
+    def execute(self, prompt, *, maintain_context=True, timeout=600, label="", on_event=None):
         # label 是 step_id；prompt 含 prompt 本體；我們從 prompt 中嘗試找 [XYZ_DONE] 等 keyword
         # 簡化：尋找 prompt 內的 \[KEYWORD\] 模式並回傳該 keyword
         m = re.search(r'\[([A-Z][A-Z0-9_]+)\]', prompt)

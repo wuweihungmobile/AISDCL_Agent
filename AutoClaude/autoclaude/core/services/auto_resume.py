@@ -203,6 +203,14 @@ class AutoResumeService:
                 auto_resume_count = 0
                 continue
 
+            # improving_78 W-78-1（DEF-78-001）：token HALT → 先存 path-aware checkpoint，
+            # 使下輪 _resolve_start（與日後手動重跑）能從 halt_step_idx 續跑。
+            # Kernel 為純 DAG 不持有 path，故持久化落在握 path 的本協調層。
+            # 🔴 僅對「本輪新接線的 token-observer halt 路徑」生效（必帶 halt_step_idx）；
+            # halt_step_idx is None（既有/其他 halt 路徑已自存 checkpoint）→ 不覆蓋（防退化）。
+            if result.halted and result.halt_step_idx is not None:
+                self._persist_halt_checkpoint(_current_path, playbook, result)
+
             # Token HALT → 等待排程時間後自動恢復
             if (
                 result.halted
@@ -225,6 +233,48 @@ class AutoResumeService:
                 continue
 
             return result
+
+    def _persist_halt_checkpoint(
+        self, playbook_path: str, playbook: Playbook, result: KernelResult,
+    ) -> None:
+        """improving_78 W-78-1（DEF-78-001）：存最小 token HALT checkpoint。
+
+        resume 點 = ``result.halt_step_idx``（Kernel HALT 當下步驟）。Kernel 為純 DAG
+        不持有 path，故 path-aware 持久化落在本協調層（握 _current_path）。
+
+        state_repository=None（dry-run / 舊測試）→ no-op，維持向後相容。
+        🔴 誠實限制：跨 session 計數器（goto/inject/skip/evolution）本輪不隨此最小
+        checkpoint 持久化（預設空 dict）；核心 resume 資料（step_idx/peak/已完成）齊備。
+        """
+        if self._state_repo is None:
+            return
+        step_idx = result.halt_step_idx if result.halt_step_idx is not None else 0
+        step_id = (
+            playbook.tasks[step_idx].step_id
+            if 0 <= step_idx < len(playbook.tasks) else ""
+        )
+        # lazy import 避免 core/ → infra/ 反向依賴（與 _resolve_start 既有作法一致）
+        from ...infra.repositories.factory import canonical_playbook_id
+        from ...utils.checkpoint_manager import PlaybookCheckpoint
+        playbook_id = canonical_playbook_id(playbook_path, mode=self._cfg.storage.mode)
+        cp = PlaybookCheckpoint(
+            playbook_path=playbook_path,
+            step_idx=step_idx,
+            step_id=step_id,
+            total_steps=result.total_steps,
+            project=playbook.project,
+            completed_step_log=list(result.step_log),
+            completed_step_ids=list(result.completed_step_ids),
+            peak_token_pct=result.peak_token_pct,
+        )
+        try:
+            self._state_repo.save_checkpoint(playbook_id, cp)
+            logger.info(
+                "AutoResumeService | 已存 token HALT checkpoint（step_idx=%d, peak=%.0f%%）",
+                step_idx, result.peak_token_pct,
+            )
+        except (OSError, ValueError) as exc:
+            logger.warning("AutoResumeService | 存 HALT checkpoint 失敗: %s", exc)
 
 
 def load_playbook(path: str) -> Playbook:

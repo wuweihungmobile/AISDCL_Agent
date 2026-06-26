@@ -10,6 +10,7 @@ import logging
 
 from ..models.playbook import Playbook, PlaybookTask
 from ..models.step_mutation import StepMutationType
+from ._token_observer import TokenObserver
 from .event_bus import EventBus
 from .hookspec import HookContext, KernelPhase
 from .kernel_state import KernelResult, StepAction, StepOutcome
@@ -118,6 +119,8 @@ class PlaybookKernel:
                     total_steps=len(playbook.tasks),
                     step_log=step_log,
                     completed_step_ids=completed_ids,
+                    halt_step_idx=step_idx,
+                    peak_token_pct=outcome.peak_token_pct,
                 )
 
         # F-C2：POST_RUN 附帶 run 結果摘要（GoalProgressPlugin 記錄 L4 進度 ledger）；
@@ -174,10 +177,20 @@ class PlaybookKernel:
 
             full_prompt = (pre_attempt.accumulated_prefix or "") + task.prompt
             timeout = getattr(playbook.global_invariants, "step_timeout_seconds", 600)
+            # improving_78 W-78-1（DEF-78-001）：token 觀測器作為 on_event callback，
+            # 蒐集 executor 真實 token% 峰值（SDK TOKEN_PCT / PTY PARTIAL_OUTPUT）。
+            observer = TokenObserver()
             output = self._exec.execute(
                 full_prompt, maintain_context=task.maintain_context,
-                timeout=timeout, label=task.step_id,
+                timeout=timeout, label=task.step_id, on_event=observer,
             )
+            # improving_78 W-78-1（DEF-78-001）：production token-guard halt 接線。
+            # 僅在真有 token 訊號（peak>0）時 emit ON_TOKEN_USAGE → token_guard 決策；
+            # 無訊號（dry-run / 既有 fake）→ 不 emit、行為與接線前完全一致（零退化）。
+            halt_outcome = self._consult_token_guard(playbook, task, step_idx, attempt,
+                                                     max_retries, observer.peak_pct)
+            if halt_outcome is not None:
+                return halt_outcome
             failure_reason, _eval_out, _exit = self._eval.evaluate(task, output.text)
 
             if failure_reason is None:
@@ -257,6 +270,33 @@ class PlaybookKernel:
         return StepOutcome(action=StepAction.ESCALATE,
                            failure_reason=f"max_retries_exhausted: {last_failure_reason}",
                            attempts_used=attempt)
+
+    def _consult_token_guard(
+        self, playbook, task, step_idx, attempt, max_retries, peak_pct,
+    ) -> StepOutcome | None:
+        """improving_78 W-78-1（DEF-78-001）：production token-guard halt 接線。
+
+        以 executor 觀測到的真實 token% emit ON_TOKEN_USAGE；token_guard 判 ≥halt 門檻
+        則回傳 HALT StepOutcome（並印真誠 TOKEN_HALT marker 供載具計數），否則 None。
+        ≥compact 門檻的 request_compact 由 W-78-2 執行層處理，本輪 Kernel 不動作（純 DAG）。
+        peak_pct<=0（無 token 訊號，如 dry-run / 既有 fake）直接 None、不 emit → 零退化。
+        """
+        if peak_pct <= 0:
+            return None
+        tu = self._bus.emit(HookContext(
+            phase=KernelPhase.ON_TOKEN_USAGE, playbook=playbook, task=task,
+            step_idx=step_idx, attempt=attempt,
+            payload={"token_pct": peak_pct, "step_id": task.step_id,
+                     "max_retries": max_retries},
+        ))
+        if tu.request_halt:
+            logger.warning(
+                "=== STATE: TOKEN_HALT | [%s] context %.0f%% >= halt 門檻 ===",
+                task.step_id, peak_pct,
+            )
+            return StepOutcome(action=StepAction.HALT, attempts_used=attempt + 1,
+                               peak_token_pct=peak_pct)
+        return None
 
     def _apply_mutation(self, playbook, task, step_idx, mut, attempt) -> StepOutcome | None:
         """Brain correction step_mutation 處理；回傳 StepOutcome 表示需跳轉，None 表示繼續。"""

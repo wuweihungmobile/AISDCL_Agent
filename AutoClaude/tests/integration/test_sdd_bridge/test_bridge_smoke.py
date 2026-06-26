@@ -34,7 +34,7 @@ class _RegexExecutor:
         "sdd-brownfield-at-002-1-1": "3 PASSED in 1.2s",
     }
 
-    def execute(self, prompt, *, maintain_context=True, timeout=600, label=""):
+    def execute(self, prompt, *, maintain_context=True, timeout=600, label="", on_event=None):
         return ExecutionOutput(text=self._OUTPUT_BY_STEP.get(label, "OK"))
 
 

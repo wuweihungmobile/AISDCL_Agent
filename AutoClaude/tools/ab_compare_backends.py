@@ -146,11 +146,14 @@ def parse_run_metrics(log_text: str, backend: str = "") -> RunMetrics:
     #   `plugins/checkpoint/_token_halt.py:46`，帶 `[Sxx] context NN%`）。
     #   peak = 行內 % 最大值（最高水位）；compact_count = TOKEN_COMPACT 行數（≥80% churn 次數，
     #   W-75-1 差異維度）——halt 不計入 compact_count（halt≠compact churn），但其 % 計入 peak。
-    #   🔴 W-76-2 / DEF-76-001：原僅認 TOKEN_COMPACT，但該 marker 只在**已棄用** `_impl.py` 路徑印；
-    #   production 唯一正式路徑＝Kernel（`main.py:123`「雙路徑已移除」）**不印 TOKEN_COMPACT**，
-    #   故 improving_71/75 的 peak/compact 在 production 真跑恆 0。本輪納入 TOKEN_HALT（≥90% 帶
-    #   step+%）使「哪條路徑印就抓哪個」；production 端 Kernel observability marker 補強另案回流
-    #   （需動生產碼，仿 W-71-2 為 Kernel 補 CORRECTION 之前例，見 Defect_Log DEF-76-001）。
+    #   🔴 W-76-2 / DEF-76-001 / DEF-78-001：原僅認 TOKEN_COMPACT，但該 marker 只在**已棄用**
+    #   `_impl.py` 路徑印；DEF-78-001 揭露 production Kernel 路徑原本根本沒接 token-guard 編排
+    #   （compact/halt 全死碼），故 improving_71/75 的 peak/compact 在 production 真跑恆 0。
+    #   ✅ improving_78 W-78-1 已為 production Kernel halt 路徑接線並補真誠 TOKEN_HALT marker
+    #   （`core/kernel.py` `_consult_token_guard`，≥90% 真實 token% 觸發）→ **halt 維度此後在
+    #   production 真跑為真值**（本載具掃 TOKEN_HALT 即計入 peak）。
+    #   ⚠️ compact 維度（compact_count / ≥80% /compact 動作）仍待 W-78-2 接線（執行層 helper），
+    #   未做前 production 不送 /compact → compact_count 在 production 真跑仍為 0（誠實，非載具 bug）。
     #   未印→0/0 誠實表「無 token 壓力標記」。
     peak = 0.0
     compact_count = 0

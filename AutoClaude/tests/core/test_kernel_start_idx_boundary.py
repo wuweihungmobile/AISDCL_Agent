@@ -20,7 +20,7 @@ class _OkExecutor:
     def __init__(self):
         self.calls: list[str] = []
 
-    def execute(self, prompt, *, maintain_context=True, timeout=600, label=""):
+    def execute(self, prompt, *, maintain_context=True, timeout=600, label="", on_event=None):
         self.calls.append(prompt)
         return ExecutionOutput(text="OK")
 

@@ -40,7 +40,7 @@ class FakeExecutor:
         self.outputs = outputs
         self.calls: list[str] = []
 
-    def execute(self, prompt, *, maintain_context=True, timeout=600, label=""):
+    def execute(self, prompt, *, maintain_context=True, timeout=600, label="", on_event=None):
         self.calls.append(prompt)
         if isinstance(self.outputs, dict):
             text = self.outputs.get(label, "")

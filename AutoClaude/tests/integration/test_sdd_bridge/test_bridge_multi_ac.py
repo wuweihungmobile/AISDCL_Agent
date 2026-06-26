@@ -109,7 +109,7 @@ _OUTPUT_BY_STEP = {
 class _MapExecutor:
     """依 step label 合成可通過輸出（不啟動真實 PTY）。"""
 
-    def execute(self, prompt, *, maintain_context=True, timeout=600, label=""):
+    def execute(self, prompt, *, maintain_context=True, timeout=600, label="", on_event=None):
         return ExecutionOutput(text=_OUTPUT_BY_STEP.get(label, "OK"))
 
 

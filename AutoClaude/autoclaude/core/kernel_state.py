@@ -26,6 +26,9 @@ class StepOutcome:
     goto_idx: Optional[int] = None     # action == GOTO 時的目標
     failure_reason: str = ""
     attempts_used: int = 1
+    # improving_78 W-78-1（DEF-78-001）：HALT on token 時帶回觀測到的 token 峰值，
+    # 供 kernel.run 組裝 KernelResult.peak_token_pct → AutoResumeService 存 halt checkpoint。
+    peak_token_pct: float = 0.0
 
 
 @dataclass(frozen=True)
@@ -65,6 +68,10 @@ class KernelResult:
     scheduled_resume_at: Optional[str] = None
     evolved_playbook_path: Optional[str] = None
     evolution_fresh_required: bool = False
+    # improving_78 W-78-1（DEF-78-001）：token halt 時帶回 halt 發生的步驟索引與觀測峰值，
+    # 供 AutoResumeService 以 path-aware 方式存 halt checkpoint（resume 點 = halt_step_idx）。
+    halt_step_idx: Optional[int] = None
+    peak_token_pct: float = 0.0
 
     @property
     def halt_for_token(self) -> bool:
@@ -119,6 +126,8 @@ class KernelResult:
     def halted_(
         cls, completed_steps: int, total_steps: int,
         step_log: list[str], completed_step_ids: list[str],
+        halt_step_idx: Optional[int] = None,
+        peak_token_pct: float = 0.0,
     ) -> "KernelResult":
         return cls(
             success=False,
@@ -128,4 +137,6 @@ class KernelResult:
             step_log=step_log,
             completed_step_ids=completed_step_ids,
             halted=True,
+            halt_step_idx=halt_step_idx,
+            peak_token_pct=peak_token_pct,
         )

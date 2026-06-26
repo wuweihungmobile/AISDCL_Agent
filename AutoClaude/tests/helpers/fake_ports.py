@@ -32,6 +32,7 @@ class FakeExecutor:
         maintain_context: bool = True,
         timeout: int = 600,
         label: str = "",
+        on_event=None,
     ) -> ExecutionOutput:
         self.calls.append(prompt)
         if self._idx < len(self._outputs):

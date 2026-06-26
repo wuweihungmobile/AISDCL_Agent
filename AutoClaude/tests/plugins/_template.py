@@ -130,7 +130,7 @@ class FakeExecutor:
     calls: list[_Call] = field(default_factory=list)
 
     def execute(self, prompt: str, *, maintain_context: bool = True,
-                timeout: int = 600, label: str = ""):
+                timeout: int = 600, label: str = "", on_event=None):
         from autoclaude.core.ports.executor import ExecutionOutput
         self.calls.append(_Call(
             "execute", (prompt,),

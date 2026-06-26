@@ -25,7 +25,7 @@ from autoclaude.infra.adapters.shell_evaluator import ShellEvaluator
 
 
 class _DummyExecutor:
-    def execute(self, prompt, *, maintain_context=True, timeout=600, label=""):
+    def execute(self, prompt, *, maintain_context=True, timeout=600, label="", on_event=None):
         from autoclaude.core.ports.executor import ExecutionOutput
         return ExecutionOutput(text="", exit_code=0)
 
