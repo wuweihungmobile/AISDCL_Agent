@@ -340,19 +340,52 @@ def format_aggregate_comparison(pty: AggregateMetrics, sdk: AggregateMetrics) ->
     return "\n".join(out)
 
 
+# ── W-77-1：DEF-77-001 real-run 路徑 resolve + fail-loud（improving_77，A 軌）─────
+def _resolve_invocation_path(path: str | None) -> str | None:
+    """把 real-run 的 playbook / config 相對路徑對「呼叫端 cwd」resolve 成絕對字串。
+
+    real-run 以子目錄為 subprocess cwd（run_backend），相對路徑會在子目錄解析失敗
+    （DEF-77-001：傳 `scripts/x.yaml` 時 autoclaude 在 workdir 子目錄找不到 → 啟動即
+    失敗未建 log → 解析成全 0 偽裝成功）。故須在 cwd 仍為使用者 cwd 時（main 解析 args
+    後立即）先轉絕對。None 透傳（無 config 時）。resolve() 對已絕對路徑為冪等。
+    """
+    if path is None:
+        return None
+    return str(Path(path).resolve())
+
+
+def _load_log_or_raise(log_file: Path, backend: str, returncode: int, stderr: str) -> str:
+    """讀 real-run 引擎 log；log 不存在＝autoclaude 啟動即失敗 → fail loud（DEF-77-001）。
+
+    舊版 log 不存在時回空字串 → `parse_run_metrics("")` 全 0 → 偽裝「成功的平淡 A/B」
+    回 exit 0，把啟動失敗靜默吞掉（違反工程紀律第 12 條 Fail Loud）。本 helper 改為
+    raise RuntimeError（含 backend/returncode/stderr 尾），使真跑失敗顯式可見。log 存在
+    時（含 escalated/halted 輪本就有 log）照常回內容、解析語意與舊版完全一致。
+    """
+    if log_file.exists():
+        return log_file.read_text(encoding="utf-8", errors="replace")
+    tail = (stderr or "").strip()[-500:]
+    raise RuntimeError(
+        f"[{backend}] real-run 未產生引擎 log（{log_file}）；autoclaude 啟動即失敗"
+        f"（returncode={returncode}）。請確認 playbook/config 路徑正確。stderr 尾段：{tail}"
+    )
+
+
 def run_backend(playbook: str, backend: str, workdir: Path, config_path: str | None = None) -> tuple[str, RunMetrics]:
     """以指定 backend 實跑 playbook（subprocess），回傳 (log_text, RunMetrics)。
 
     需授權 token：實際呼叫 Claude。讀引擎 utf-8 log 檔（非 stdout，避免 Windows cp950
     mangle）；backend 透過 config_path（executor.backend）切換，由呼叫端提供對應 config。
+    🔴 playbook/config 須為絕對路徑（cwd=子目錄）——由 main 經 _resolve_invocation_path
+    先轉絕對（DEF-77-001）。log 不存在即 fail loud，不再靜默回 0/0（DEF-77-001）。
     """
     workdir.mkdir(parents=True, exist_ok=True)
     cmd = [sys.executable, "-m", "autoclaude", playbook, "--fresh"]
     if config_path:
         cmd += ["--config", config_path]
-    subprocess.run(cmd, cwd=str(workdir), capture_output=True, text=True, timeout=900)
+    proc = subprocess.run(cmd, cwd=str(workdir), capture_output=True, text=True, timeout=900)
     log_file = workdir / "logs" / "autoclaude.log"
-    log_text = log_file.read_text(encoding="utf-8", errors="replace") if log_file.exists() else ""
+    log_text = _load_log_or_raise(log_file, backend, proc.returncode, proc.stderr)
     return log_text, parse_run_metrics(log_text, backend=backend)
 
 
@@ -364,12 +397,13 @@ def run_backend_n(playbook: str, backend: str, base_workdir: Path, n: int,
     （smoke_add_test.py / smoke_add.py），同目錄重跑會使 S01「先別建 smoke_add.py」前提
     被前一輪殘留檔破壞，污染 A/B。config_path 轉絕對路徑（subprocess cwd=子目錄）。
     """
-    abs_cfg = str(Path(config_path).resolve()) if config_path else None
+    abs_pb = _resolve_invocation_path(playbook)        # DEF-77-001：playbook 亦須絕對
+    abs_cfg = _resolve_invocation_path(config_path)    # 共用 resolve helper（單一路徑）
     logs: list[str] = []
     metrics: list[RunMetrics] = []
     for i in range(1, n + 1):
         run_dir = base_workdir / f"run_{i}"
-        log_text, m = run_backend(playbook, backend, run_dir, abs_cfg)
+        log_text, m = run_backend(abs_pb, backend, run_dir, abs_cfg)
         logs.append(log_text)
         metrics.append(m)
     return logs, metrics
@@ -401,13 +435,17 @@ def main(argv: list[str] | None = None) -> int:
     elif args.run and args.workdir:
         base = Path(args.workdir)
         n = max(1, args.n)
+        # DEF-77-001：cwd 仍為使用者 cwd 時即把 playbook/config 轉絕對，避免子目錄解析失敗
+        run_pb = _resolve_invocation_path(args.run)
+        pty_cfg = _resolve_invocation_path(args.pty_config)
+        sdk_cfg = _resolve_invocation_path(args.sdk_config)
         if n == 1:
-            _, pty = run_backend(args.run, "pty", base / "pty", args.pty_config)
-            _, sdk = run_backend(args.run, "sdk", base / "sdk", args.sdk_config)
+            _, pty = run_backend(run_pb, "pty", base / "pty", pty_cfg)
+            _, sdk = run_backend(run_pb, "sdk", base / "sdk", sdk_cfg)
             print(format_comparison(pty, sdk))
         else:
-            _, pty_runs = run_backend_n(args.run, "pty", base / "pty", n, args.pty_config)
-            _, sdk_runs = run_backend_n(args.run, "sdk", base / "sdk", n, args.sdk_config)
+            _, pty_runs = run_backend_n(run_pb, "pty", base / "pty", n, pty_cfg)
+            _, sdk_runs = run_backend_n(run_pb, "sdk", base / "sdk", n, sdk_cfg)
             print(format_aggregate_comparison(
                 aggregate_runs(pty_runs, "pty"), aggregate_runs(sdk_runs, "sdk")))
     else:

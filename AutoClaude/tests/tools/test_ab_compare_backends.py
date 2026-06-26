@@ -16,8 +16,12 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 
+import pytest
+
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from tools.ab_compare_backends import (  # noqa: E402
+    _load_log_or_raise,
+    _resolve_invocation_path,
     aggregate_runs,
     format_aggregate_comparison,
     format_comparison,
@@ -514,3 +518,59 @@ def test_per_step_correction_is_lower_bound_for_untagged():
     assert m.correction_count == 2  # _RE_CORRECTION 中兩行（含「諮詢 Minimax」）
     assert sum(s.correction_count for s in m.per_step.values()) == 1  # 僅 step=S01 歸因（下界）
     assert m.per_step["S01"].correction_count == 1
+
+
+# ── W-77-1 / DEF-77-001：real-run 路徑 resolve + fail-loud（improving_77，A 軌）─────
+def test_resolve_invocation_path_relative_becomes_absolute():
+    """RTM-77-1：相對路徑對呼叫端 cwd resolve 成絕對。
+
+    Rule 9：意圖＝real-run 以子目錄為 subprocess cwd，相對 playbook/config 會在子目錄
+    解析失敗 → autoclaude 啟動即失敗 → 靜默 0/0（DEF-77-001 原貌）。故 main 須在 cwd 仍為
+    使用者 cwd 時先轉絕對。若此函式退化回原樣傳遞，相對路徑真跑會重現 DEF-77-001。
+    """
+    abs_p = _resolve_invocation_path("scripts/sdd_bridge_smoke.yaml")
+    assert abs_p is not None
+    assert Path(abs_p).is_absolute()
+    assert Path(abs_p).name == "sdd_bridge_smoke.yaml"
+
+
+def test_resolve_invocation_path_none_passes_through():
+    """RTM-77-1：無 config 時 None 透傳（不誤轉成 cwd 的絕對路徑）。"""
+    assert _resolve_invocation_path(None) is None
+
+
+def test_resolve_invocation_path_absolute_is_idempotent(tmp_path):
+    """RTM-77-1：已絕對路徑 resolve 冪等（main 轉一次 + run_backend_n 再轉一次不出錯）。"""
+    p = str(tmp_path / "x.yaml")
+    once = _resolve_invocation_path(p)
+    assert Path(once).is_absolute()
+    assert _resolve_invocation_path(once) == once  # 冪等
+
+
+def test_load_log_missing_raises_fail_loud(tmp_path):
+    """RTM-77-2：log 不存在＝autoclaude 啟動即失敗 → raise，不再靜默回空字串。
+
+    Rule 9：意圖＝Fail Loud（工程紀律第 12 條）。DEF-77-001 原貌＝log 缺失時回 ""→
+    parse_run_metrics("") 全 0 → 偽裝「成功的平淡 A/B」回 exit 0。若此函式退化回 return ""，
+    使用者會拿到假的全 0 報告而不知真跑根本沒跑。raise 訊息須含 backend/returncode/stderr 以利診斷。
+    """
+    missing = tmp_path / "logs" / "autoclaude.log"
+    with pytest.raises(RuntimeError) as ei:
+        _load_log_or_raise(missing, "pty", returncode=2, stderr="playbook 不存在：找不到檔案")
+    msg = str(ei.value)
+    assert "pty" in msg
+    assert "returncode=2" in msg
+    assert "找不到檔案" in msg  # stderr 尾段被帶出（可診斷）
+
+
+def test_load_log_existing_returns_content_unchanged(tmp_path):
+    """RTM-77-3：log 存在時照常回內容、語意與舊版完全一致（含 escalated 輪本就有 log，不誤 raise）。"""
+    log_file = tmp_path / "logs" / "autoclaude.log"
+    log_file.parent.mkdir(parents=True, exist_ok=True)
+    log_file.write_text(_ESCALATED, encoding="utf-8")
+    out = _load_log_or_raise(log_file, "sdk", returncode=1, stderr="")
+    assert out == _ESCALATED
+    # 解析語意不變：escalated 輪（returncode≠0 但有 log）照常解析、不誤 raise
+    m = parse_run_metrics(out, "sdk")
+    assert m.escalated is True
+    assert m.run_succeeded is False
