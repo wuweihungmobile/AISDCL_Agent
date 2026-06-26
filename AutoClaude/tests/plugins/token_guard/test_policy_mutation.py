@@ -188,11 +188,12 @@ class TestPriorityConstant:
         assert TokenGuardPlugin().name() == "token_guard"
 
     def test_subscribed_phases_includes_both(self):
-        """殺 list element mutation。"""
+        """殺 list element mutation。improving_79 W-78-2 新增 POST_COMPACT（Gap-008-E）。"""
         phases = TokenGuardPlugin().subscribed_phases()
         assert KernelPhase.POST_ATTEMPT in phases
         assert KernelPhase.ON_TOKEN_USAGE in phases
-        assert len(phases) == 2
+        assert KernelPhase.POST_COMPACT in phases
+        assert len(phases) == 3
 
 
 class TestPublicApiPreciseValues:

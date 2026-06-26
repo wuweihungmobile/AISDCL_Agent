@@ -10,6 +10,7 @@ import logging
 
 from ..models.playbook import Playbook, PlaybookTask
 from ..models.step_mutation import StepMutationType
+from ._token_compactor import perform_compact
 from ._token_observer import TokenObserver
 from .event_bus import EventBus
 from .hookspec import HookContext, KernelPhase
@@ -277,8 +278,8 @@ class PlaybookKernel:
         """improving_78 W-78-1（DEF-78-001）：production token-guard halt 接線。
 
         以 executor 觀測到的真實 token% emit ON_TOKEN_USAGE；token_guard 判 ≥halt 門檻
-        則回傳 HALT StepOutcome（並印真誠 TOKEN_HALT marker 供載具計數），否則 None。
-        ≥compact 門檻的 request_compact 由 W-78-2 執行層處理，本輪 Kernel 不動作（純 DAG）。
+        則回傳 HALT StepOutcome（並印真誠 TOKEN_HALT marker 供載具計數）；判 ≥compact 門檻
+        則委派 _handle_compact 送 /compact（improving_79 W-78-2）；皆未觸發則 None。
         peak_pct<=0（無 token 訊號，如 dry-run / 既有 fake）直接 None、不 emit → 零退化。
         """
         if peak_pct <= 0:
@@ -296,6 +297,38 @@ class PlaybookKernel:
             )
             return StepOutcome(action=StepAction.HALT, attempts_used=attempt + 1,
                                peak_token_pct=peak_pct)
+        if tu.request_compact:
+            return self._handle_compact(playbook, task, step_idx, attempt,
+                                        max_retries, peak_pct)
+        return None
+
+    def _handle_compact(
+        self, playbook, task, step_idx, attempt, max_retries, peak_pct,
+    ) -> StepOutcome | None:
+        """improving_79 W-78-2（DEF-78-001 compact 子路徑）：送 /compact + Gap-008-E。
+
+        token-guard ≥80% request_compact → 委派 _token_compactor 送 /compact（印真誠
+        TOKEN_COMPACT marker 供載具計 compact_count）→ emit POST_COMPACT 帶 compact 後
+        真實 token% → 真 TokenGuardPlugin 判 Gap-008-E（連續 compact 失敗達上限回
+        request_halt）→ Kernel 印 TOKEN_HALT marker + 回 HALT；否則 None（compact 成功/
+        未達上限 → 續評估原 output）。compact 動作為執行層業務邏輯、抽至 core helper；
+        Kernel 僅委派 + honor request（維持純 DAG）。
+        """
+        post_peak = perform_compact(self._exec, step_id=task.step_id, peak_pct=peak_pct)
+        pc = self._bus.emit(HookContext(
+            phase=KernelPhase.POST_COMPACT, playbook=playbook, task=task,
+            step_idx=step_idx, attempt=attempt,
+            payload={"token_pct": post_peak, "step_id": task.step_id,
+                     "max_retries": max_retries},
+        ))
+        if pc.request_halt:
+            logger.warning(
+                "=== STATE: TOKEN_HALT | [%s] context %.0f%% >= halt 門檻"
+                "（Gap-008-E 連續 compact 失敗）===",
+                task.step_id, max(peak_pct, post_peak),
+            )
+            return StepOutcome(action=StepAction.HALT, attempts_used=attempt + 1,
+                               peak_token_pct=max(peak_pct, post_peak))
         return None
 
     def _apply_mutation(self, playbook, task, step_idx, mut, attempt) -> StepOutcome | None:

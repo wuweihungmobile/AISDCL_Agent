@@ -55,7 +55,13 @@ class TokenGuardPlugin:
         return self.PRIORITY
 
     def subscribed_phases(self) -> list[KernelPhase]:
-        return [KernelPhase.POST_ATTEMPT, KernelPhase.ON_TOKEN_USAGE]
+        # improving_79 W-78-2（DEF-78-001）：新增 POST_COMPACT——production Kernel 送 /compact
+        # 後 emit，本 plugin 判 Gap-008-E（連續 compact 失敗 → 強制 HALT）。
+        return [
+            KernelPhase.POST_ATTEMPT,
+            KernelPhase.ON_TOKEN_USAGE,
+            KernelPhase.POST_COMPACT,
+        ]
 
     def on_event(self, ctx: HookContext) -> Optional[Any]:
         if not self._cfg.enabled:
@@ -64,6 +70,8 @@ class TokenGuardPlugin:
             return self._evaluate_resources(ctx)
         if ctx.phase == KernelPhase.ON_TOKEN_USAGE:
             return self._evaluate_resources(ctx)
+        if ctx.phase == KernelPhase.POST_COMPACT:
+            return self._evaluate_post_compact(ctx)
         return None
 
     # ──────────────────────────────────────────────
@@ -180,4 +188,36 @@ class TokenGuardPlugin:
                        f"{self.get_dynamic_compact_threshold(attempt, max_retries):.1f}%",
             )
 
+        return None
+
+    def _evaluate_post_compact(self, ctx: HookContext) -> Optional[ResourceRequest]:
+        """improving_79 W-78-2（DEF-78-001 / Gap-008-E）：compact 後重觀測判連續失敗。
+
+        Kernel 送 /compact 後 emit POST_COMPACT 帶壓縮後真實 token%（post_pct）。
+        compact 後仍達 compact 門檻 ＝ 本次 compact 失敗（未把 context 壓下來）；
+        經 CompactFailureState（SSOT）累計，連續達上限（預設 2 次）→ request_halt
+        （對齊棄用路徑 compact_controller.send_compact_impl 的 Gap-008-E 語意）。
+        失敗訊號來源差異（誠實註記）：棄用路徑以 ``compact_out.triggered_compact``
+        （compact 執行期間 TOKEN_COMPACT marker 是否再現）判失敗；本路徑以
+        ``should_compact(post_pct)``（compact 後峰值是否仍 ≥ 動態門檻）判失敗——
+        兩者語意一致（「context 沒壓下來」）但非同一信號源，本路徑為較乾淨的重導。
+        compact 成功（降到門檻下）→ 重設計數器、回 None（Kernel 續評估原 output）。
+        """
+        payload = ctx.payload or {}
+        post_pct = float(payload.get("token_pct", 0.0))
+        attempt = int(ctx.attempt or 0)
+        max_retries = int(payload.get("max_retries", 3))
+        still_high = self.should_compact(
+            token_pct=post_pct, attempt=attempt, max_retries=max_retries,
+        )
+        ok = self.process_compact_result(
+            triggered_compact=still_high, peak_token_pct=post_pct,
+        )
+        if not ok:
+            return ResourceRequest(
+                contributor=self.name(),
+                request_halt=True,
+                reason=f"Gap-008-E: 連續 compact 失敗 {self.compact_failure_count} 次，"
+                       f"強制 TOKEN_HALT（post_compact token_pct={post_pct:.1f}%）",
+            )
         return None

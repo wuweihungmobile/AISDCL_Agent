@@ -103,15 +103,20 @@ def test_low_token_pct_no_halt_advances(caplog):
     assert "TOKEN_HALT" not in caplog.text
 
 
-def test_compact_threshold_does_not_halt_this_round(caplog):
-    """85%（compact 區間，≥80 <90）→ token_guard 回 request_compact；本輪 Kernel 不動作
-    （W-78-2 才接 compact）→ 不 halt、步驟正常完成。守誠實邊界：compact 動作尚未接線。"""
+def test_compact_threshold_triggers_compact_not_halt(caplog):
+    """85%（compact 區間，≥80 <90）→ token_guard 回 request_compact → Kernel 送 /compact +
+    印 TOKEN_COMPACT marker（improving_79 W-78-2 已接線；compact 子路徑詳測見
+    test_kernel_token_compact.py）。單次 compact 失敗未達 Gap-008-E 上限 → 不 halt、步驟完成。
+
+    🔴 本測試於 improving_79 由「W-78-2 未接、Kernel 85% 不動作」更新為「W-78-2 已接、
+    85% 觸發 compact」——反映 compact 子路徑接線後的真實行為（Rule 9 測試驗意圖）。"""
     kernel, _ = _kernel_with_token_guard(TokenEmittingExecutor(pct=85.0))
-    with caplog.at_level(logging.WARNING, logger="autoclaude.core.kernel"):
+    with caplog.at_level(logging.INFO, logger="autoclaude.core.kernel"):
         result = kernel.run(_pb())
     assert result.halted is False
     assert result.success is True
-    assert "TOKEN_HALT" not in caplog.text
+    assert "=== STATE: TOKEN_COMPACT" in caplog.text  # W-78-2：85% 真送 /compact
+    assert "TOKEN_HALT" not in caplog.text             # 單次失敗未達 Gap-008-E 上限
 
 
 def test_no_token_event_does_not_emit_on_token_usage():

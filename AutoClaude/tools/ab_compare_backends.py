@@ -149,12 +149,14 @@ def parse_run_metrics(log_text: str, backend: str = "") -> RunMetrics:
     #   🔴 W-76-2 / DEF-76-001 / DEF-78-001：原僅認 TOKEN_COMPACT，但該 marker 只在**已棄用**
     #   `_impl.py` 路徑印；DEF-78-001 揭露 production Kernel 路徑原本根本沒接 token-guard 編排
     #   （compact/halt 全死碼），故 improving_71/75 的 peak/compact 在 production 真跑恆 0。
-    #   ✅ improving_78 W-78-1 已為 production Kernel halt 路徑接線並補真誠 TOKEN_HALT marker
-    #   （`core/kernel.py` `_consult_token_guard`，≥90% 真實 token% 觸發）→ **halt 維度此後在
-    #   production 真跑為真值**（本載具掃 TOKEN_HALT 即計入 peak）。
-    #   ⚠️ compact 維度（compact_count / ≥80% /compact 動作）仍待 W-78-2 接線（執行層 helper），
-    #   未做前 production 不送 /compact → compact_count 在 production 真跑仍為 0（誠實，非載具 bug）。
-    #   未印→0/0 誠實表「無 token 壓力標記」。
+    #   ✅ improving_78 W-78-1 已為 production Kernel **halt** 路徑接線並補真誠 TOKEN_HALT marker
+    #   （`core/kernel.py` `_consult_token_guard`，≥90% 真實 token% 觸發）→ halt 維度轉真值。
+    #   ✅ improving_79 W-78-2 已為 production Kernel **compact** 路徑接線：≥80% 真實 token% →
+    #   `_handle_compact` 經 `core/_token_compactor.perform_compact` 真送 /compact + 印真誠
+    #   TOKEN_COMPACT marker（並接 Gap-008-E：連續失敗 2 次 → TOKEN_HALT）→ **compact 維度
+    #   （compact_count / peak）此後在 production 真跑為真值**（本載具掃 TOKEN_COMPACT 即計入）。
+    #   DEF-78-001 halt + compact 雙子路徑至此全接線、全閉合。
+    #   未印→0/0 誠實表「無 token 壓力標記」（smoke playbook 過短不觸發門檻時為此情形）。
     peak = 0.0
     compact_count = 0
     for line in log_text.splitlines():

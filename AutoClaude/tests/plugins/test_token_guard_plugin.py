@@ -28,6 +28,8 @@ class TestTokenGuardPluginBasics:
         phases = TokenGuardPlugin().subscribed_phases()
         assert KernelPhase.POST_ATTEMPT in phases
         assert KernelPhase.ON_TOKEN_USAGE in phases
+        # improving_79 W-78-2：新增 POST_COMPACT（Gap-008-E 連續失敗判定）
+        assert KernelPhase.POST_COMPACT in phases
 
     def test_disabled_returns_none(self):
         plugin = TokenGuardPlugin(token_guard_cfg=TokenGuardConfig(enabled=False))
@@ -192,6 +194,55 @@ class TestTokenGuardPluginW2Coverage:
             attempt=0, payload={"token_pct": 95.0, "max_retries": 3},
         )
         assert plugin.on_event(ctx) is None
+
+
+class TestPostCompactGap008E:
+    """improving_79 W-78-2（DEF-78-001 / RTM-79-4）：POST_COMPACT 連續 compact 失敗判定。
+
+    驗證意圖（Rule 9）：compact 後若 context 仍壓不下來（仍達 compact 門檻），須累計失敗；
+    連續達上限（預設 2）必須升級為 request_halt——否則 token 失控時無安全網（Gap-008-E）。
+    CompactFailureState 為 SSOT、留在 plugin，不外洩 Kernel。
+    """
+
+    def _ctx(self, post_pct: float, attempt: int = 0) -> HookContext:
+        return HookContext(
+            phase=KernelPhase.POST_COMPACT, playbook=_pb(), task=_task(),
+            attempt=attempt, payload={"token_pct": post_pct, "max_retries": 3},
+        )
+
+    def test_compact_success_resets_and_returns_none(self):
+        """compact 後降到門檻下（50%）→ 回 None、計數器重設。"""
+        plugin = TokenGuardPlugin()
+        assert plugin.on_event(self._ctx(50.0)) is None
+        assert plugin.compact_failure_count == 0
+
+    def test_single_failure_no_halt_yet(self):
+        """compact 後仍高（85%）一次 → 記 1 次失敗，未達上限 → 尚不 halt。"""
+        plugin = TokenGuardPlugin()
+        assert plugin.on_event(self._ctx(85.0)) is None
+        assert plugin.compact_failure_count == 1
+
+    def test_consecutive_failures_trigger_halt(self):
+        """連續兩次 compact 後仍高 → 第 2 次達上限 → request_halt（Gap-008-E）。"""
+        plugin = TokenGuardPlugin()
+        assert plugin.on_event(self._ctx(85.0)) is None  # 1st failure
+        result = plugin.on_event(self._ctx(88.0))         # 2nd → critical
+        assert isinstance(result, ResourceRequest)
+        assert result.request_halt is True
+        assert "Gap-008-E" in result.reason
+
+    def test_success_between_failures_resets_counter(self):
+        """失敗後一次成功 compact → 計數器歸零，不會誤升級 halt。"""
+        plugin = TokenGuardPlugin()
+        plugin.on_event(self._ctx(85.0))   # failure 1
+        plugin.on_event(self._ctx(40.0))   # success → reset
+        assert plugin.compact_failure_count == 0
+        assert plugin.on_event(self._ctx(85.0)) is None  # 又 1 次，仍未達上限
+
+    def test_disabled_returns_none_for_post_compact(self):
+        """cfg.enabled=False → POST_COMPACT 短路回 None。"""
+        plugin = TokenGuardPlugin(token_guard_cfg=TokenGuardConfig(enabled=False))
+        assert plugin.on_event(self._ctx(95.0)) is None
 
     def test_should_halt_at_exact_threshold(self):
         """token_pct == halt_threshold → True（>= 邊界包含）。"""
