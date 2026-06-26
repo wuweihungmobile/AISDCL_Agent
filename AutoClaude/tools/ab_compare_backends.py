@@ -40,6 +40,10 @@ _RE_SUCCESS_MARK = re.compile(r"✓\s*\(attempt\s*(\d+)\)")
 _RE_CORRECTION = re.compile(r"STATE:\s*CORRECTION")
 _RE_SDD_VIOLATION = re.compile(r"SDD-VIOLATION\[")
 _RE_TOKEN_PCT = re.compile(r"(\d+(?:\.\d+)?)\s*%")
+# W-76-1：per-step 歸因——自 TOKEN_COMPACT/✓ 行抽 `[Sxx]` 步驟 id；CORRECTION 行抽 `step=Sxx`。
+# 生產碼鐵證：_impl.py:233 `[%s]`、kernel.py:185 `[{step_id}]`、kernel.py:224 `step=%s`。
+_RE_STEP_TAG = re.compile(r"\[([A-Za-z0-9_\-]+)\]")
+_RE_CORRECTION_STEP = re.compile(r"STATE:\s*CORRECTION\s*\|\s*step=([A-Za-z0-9_\-]+)")
 _RE_FIELD_INT = {
     "completed_steps": re.compile(r"completed_steps=(\d+)"),
     "total_steps": re.compile(r"total_steps=(\d+)"),
@@ -49,6 +53,20 @@ _RE_FIELD_BOOL = {
     "escalated": re.compile(r"escalated=(True|False)"),
     "halted": re.compile(r"halted=(True|False)"),
 }
+
+
+@dataclass
+class StepMetrics:
+    """單一步驟的成本/churn 指標（W-76-1，整輪指標的逐步驟拆分；純資料、無方法）。
+
+    三維皆既有整輪指標的 per-step 拆分：壓縮次數 / token 峰值 / CORRECTION 次數。
+    長 playbook 下整輪總和無法定位「哪步驟」驅動 pty/sdk 分歧，per-step 才分得出。
+    """
+
+    step_id: str = ""
+    compact_count: int = 0
+    peak_token_pct: float = 0.0
+    correction_count: int = 0
 
 
 @dataclass
@@ -66,6 +84,8 @@ class RunMetrics:
     run_succeeded: bool = False
     escalated: bool = False
     halted: bool = False
+    # W-76-1：per-step 歸因（step_id → StepMetrics）。空 dict＝log 無步驟標記（誠實表「無 per-step 資訊」）。
+    per_step: dict[str, "StepMetrics"] = field(default_factory=dict)
 
     @property
     def first_pass_rate(self) -> float:
@@ -84,6 +104,16 @@ def parse_run_metrics(log_text: str, backend: str = "") -> RunMetrics:
     m = RunMetrics(backend=backend)
     m.correction_count = len(_RE_CORRECTION.findall(log_text))
     m.sdd_violation_count = len(_RE_SDD_VIOLATION.findall(log_text))
+
+    # W-76-1：per-step CORRECTION 歸因（CORRECTION 行帶 `step=Sxx`）。
+    # 整輪 correction_count 維持以 _RE_CORRECTION 計（語意不變）；per-step 以 step= 旁路歸因。
+    # 🔴 誠實邊界（audit_76 SA-SD P1）：CORRECTION 有兩個 emit site——production 唯一正式路徑
+    # Kernel `kernel.py:224` 帶 `step=`（W-71-2 為載具補；per-step 在真跑有效、不變式成立）；
+    # 已棄用 PlaybookRunner 直連路徑 `_impl.py:437` 印 `諮詢 Minimax` **不帶 step=**。故 per-step
+    # correction 對「不帶 step= 的 CORRECTION 行」不歸因＝**下界**（sum(per_step) ≤ 整輪），
+    # 等號僅在 log 全為 Kernel 路徑（production 真跑）時成立。
+    for sid in _RE_CORRECTION_STEP.findall(log_text):
+        _step_of(m, sid).correction_count += 1
 
     # first-pass：step_log 內每個 ✓ (attempt N)；N==1 即一次通過
     attempts = [int(n) for n in _RE_SUCCESS_MARK.findall(log_text)]
@@ -111,20 +141,49 @@ def parse_run_metrics(log_text: str, backend: str = "") -> RunMetrics:
     if m.completed_steps == 0:
         m.completed_steps = completed_from_marks
 
-    # token 峰值＋壓縮次數：掃 TOKEN_COMPACT 行（達門檻才印）。
-    #   peak = 行內 % 最大值（最高水位）；compact_count = 行數（churn 次數，W-75-1 差異維度——
-    #   兩後端撞同一門檻時 peak 雙雙飽和分不出，壓縮次數才反映重整成本差）。未印→0/0 誠實表「無壓縮」。
+    # token 峰值＋壓縮次數：掃 token 壓力標記行（達門檻才印），兩種 marker 皆認——
+    #   TOKEN_COMPACT（≥80% 壓縮，`_impl.py:233`，帶 `[Sxx]`）+ TOKEN_HALT（≥90% halt，
+    #   `plugins/checkpoint/_token_halt.py:46`，帶 `[Sxx] context NN%`）。
+    #   peak = 行內 % 最大值（最高水位）；compact_count = TOKEN_COMPACT 行數（≥80% churn 次數，
+    #   W-75-1 差異維度）——halt 不計入 compact_count（halt≠compact churn），但其 % 計入 peak。
+    #   🔴 W-76-2 / DEF-76-001：原僅認 TOKEN_COMPACT，但該 marker 只在**已棄用** `_impl.py` 路徑印；
+    #   production 唯一正式路徑＝Kernel（`main.py:123`「雙路徑已移除」）**不印 TOKEN_COMPACT**，
+    #   故 improving_71/75 的 peak/compact 在 production 真跑恆 0。本輪納入 TOKEN_HALT（≥90% 帶
+    #   step+%）使「哪條路徑印就抓哪個」；production 端 Kernel observability marker 補強另案回流
+    #   （需動生產碼，仿 W-71-2 為 Kernel 補 CORRECTION 之前例，見 Defect_Log DEF-76-001）。
+    #   未印→0/0 誠實表「無 token 壓力標記」。
     peak = 0.0
     compact_count = 0
     for line in log_text.splitlines():
-        if "TOKEN_COMPACT" not in line:
+        is_compact = "TOKEN_COMPACT" in line
+        is_halt = "TOKEN_HALT" in line
+        if not (is_compact or is_halt):
             continue
-        compact_count += 1
+        line_peak = 0.0
         for pct in _RE_TOKEN_PCT.findall(line):
-            peak = max(peak, float(pct))
+            line_peak = max(line_peak, float(pct))
+        peak = max(peak, line_peak)
+        # W-76-1：per-step peak/compact 歸因（兩種 marker 皆帶 `[Sxx]`）。
+        tag = _RE_STEP_TAG.search(line)
+        sm = _step_of(m, tag.group(1)) if tag else None
+        if is_compact:
+            compact_count += 1
+            if sm is not None:
+                sm.compact_count += 1
+        if sm is not None:
+            sm.peak_token_pct = max(sm.peak_token_pct, line_peak)
     m.peak_token_pct = peak
     m.compact_count = compact_count
     return m
+
+
+def _step_of(m: RunMetrics, step_id: str) -> StepMetrics:
+    """取得（或建立）m.per_step 中該步驟的 StepMetrics（per-step 歸因 helper）。"""
+    sm = m.per_step.get(step_id)
+    if sm is None:
+        sm = StepMetrics(step_id=step_id)
+        m.per_step[step_id] = sm
+    return sm
 
 
 def _fmt_pct(value: float) -> str:
@@ -149,6 +208,35 @@ def format_comparison(pty: RunMetrics, sdk: RunMetrics) -> str:
     ]
     out = ["| 指標 | pty | sdk |", "|------|-----|-----|"]
     out += [f"| {name} | {a} | {b} |" for name, a, b in rows]
+    return "\n".join(out)
+
+
+# ── W-76-2：逐步驟 A/B 對比 + 有界渲染（improving_76，長 playbook 量測使能）──
+def _step_cell(sm: StepMetrics | None) -> str:
+    """單格＝「壓縮次數 / token 峰值 / CORRECTION 次數」。該後端此步無標記→0/0%/0（誠實補位）。"""
+    if sm is None:
+        return "0 / 0% / 0"
+    return f"{sm.compact_count} / {sm.peak_token_pct:.0f}% / {sm.correction_count}"
+
+
+def format_step_comparison(pty: RunMetrics, sdk: RunMetrics, max_steps: int = 30) -> str:
+    """產出逐步驟 pty vs sdk 對比表（每格 compact/peak/correction），含有界截斷。
+
+    步驟順序＝兩後端 step_id 聯集之穩定（lexical）排序；缺一邊的步驟以 0 補位（誠實表
+    「該後端此步未留標記」）。**有界渲染（防彈渲染器）**：超過 max_steps 只印前 max_steps
+    步 + `… (N more steps elided)` 一行，杜絕長 playbook（數十步）報告無限長/Token 爆炸。
+    """
+    step_ids = sorted(set(pty.per_step) | set(sdk.per_step))
+    out = [
+        "| 步驟 | pty (compact/peak/corr) | sdk (compact/peak/corr) |",
+        "|------|------|------|",
+    ]
+    shown = step_ids[: max(0, max_steps)]
+    for sid in shown:
+        out.append(f"| {sid} | {_step_cell(pty.per_step.get(sid))} | {_step_cell(sdk.per_step.get(sid))} |")
+    elided = len(step_ids) - len(shown)
+    if elided > 0:
+        out.append(f"| … | … ({elided} more steps elided) | … |")
     return "\n".join(out)
 
 
@@ -297,6 +385,8 @@ def _build_argparser() -> argparse.ArgumentParser:
     p.add_argument("--sdk-config", help="實跑模式：backend=sdk 的 config")
     p.add_argument("--n", type=int, default=1,
                    help="實跑模式：每後端連跑輪數（多輪統計 A/B；預設 1＝單輪對比）")
+    p.add_argument("--max-steps", type=int, default=30,
+                   help="逐步驟對比表有界渲染上限（超出截斷並印省略數；預設 30）")
     return p
 
 
@@ -306,6 +396,8 @@ def main(argv: list[str] | None = None) -> int:
         pty = parse_run_metrics(Path(args.pty_log).read_text(encoding="utf-8", errors="replace"), "pty")
         sdk = parse_run_metrics(Path(args.sdk_log).read_text(encoding="utf-8", errors="replace"), "sdk")
         print(format_comparison(pty, sdk))
+        print()
+        print(format_step_comparison(pty, sdk, max_steps=args.max_steps))
     elif args.run and args.workdir:
         base = Path(args.workdir)
         n = max(1, args.n)

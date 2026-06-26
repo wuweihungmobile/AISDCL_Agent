@@ -21,6 +21,7 @@ from tools.ab_compare_backends import (  # noqa: E402
     aggregate_runs,
     format_aggregate_comparison,
     format_comparison,
+    format_step_comparison,
     parse_run_metrics,
 )
 
@@ -328,3 +329,188 @@ def test_format_aggregate_has_compact():
     out = format_aggregate_comparison(pty, sdk)
     assert "壓縮次數" in out
     assert "halted" in out
+
+
+# ── improving_76 W-76：逐步驟（per-step）指標歸因 + 有界渲染 ─────────────
+# 「長 playbook」合成 log：多步、逐步驟不同 compact/correction 樣態（錨 production
+# 標記格式：TOKEN_COMPACT `[Sxx] NN%`、CORRECTION `step=Sxx`）。
+# 意圖：整輪總和分不出「哪步驟」驅動成本，per-step 才定位得到。
+_PER_STEP_LOG = (
+    "=== STATE: TOKEN_COMPACT | [S01] 82% >=  80% ===\n"
+    "=== STATE: CORRECTION | step=S01 attempt=1 ===\n"
+    "=== STATE: TOKEN_COMPACT | [S02] 85% >=  80% ===\n"
+    "=== STATE: TOKEN_COMPACT | [S02] 88% >=  80% ===\n"
+    "=== STATE: CORRECTION | step=S02 attempt=1 ===\n"
+    "=== STATE: CORRECTION | step=S02 attempt=2 ===\n"
+    "Playbook 結束 | KernelResult(success=True, completed_steps=2, total_steps=2, "
+    "step_log=['[S01] a ✓ (attempt 2)', '[S02] b ✓ (attempt 3)'], "
+    "halted=False, escalated=False)"
+)
+
+
+def _long_log(n_steps: int) -> str:
+    """n_steps 步、每步一次 TOKEN_COMPACT（[Sii] (80+i)%）的合成長 playbook log。"""
+    lines = [
+        f"=== STATE: TOKEN_COMPACT | [S{i:02d}] {80 + i}% >=  80% ==="
+        for i in range(1, n_steps + 1)
+    ]
+    lines.append(
+        f"Playbook 結束 | KernelResult(success=True, completed_steps={n_steps}, "
+        f"total_steps={n_steps}, halted=False, escalated=False)"
+    )
+    return "\n".join(lines)
+
+
+def test_per_step_compact_and_peak_attribution():
+    """W-76-1：TOKEN_COMPACT 行的 `[Sxx]` 把壓縮次數/峰值歸到各步驟。
+
+    Rule 9：意圖＝長 playbook 下「哪步驟壓最多次」才可行動——S02 壓 2 次 peak 88%、
+    S01 壓 1 次 peak 82%，整輪總和（壓 3 次 peak 88%）看不出此分布。
+    """
+    m = parse_run_metrics(_PER_STEP_LOG, "pty")
+    assert m.per_step["S01"].compact_count == 1
+    assert m.per_step["S01"].peak_token_pct == 82.0
+    assert m.per_step["S02"].compact_count == 2
+    assert m.per_step["S02"].peak_token_pct == 88.0  # 取該步最高水位（非門檻 80）
+
+
+def test_per_step_correction_attribution():
+    """W-76-2：CORRECTION 行的 `step=Sxx` 把 CORRECTION 次數歸到各步驟。
+
+    Rule 9：意圖＝定位「哪步驟最常被 Minimax CORRECTION」——S02 被 CORRECTION 2 次、
+    S01 1 次；整輪 correction_count=3 看不出此分布。
+    """
+    m = parse_run_metrics(_PER_STEP_LOG, "sdk")
+    assert m.per_step["S01"].correction_count == 1
+    assert m.per_step["S02"].correction_count == 2
+
+
+def test_per_step_sum_equals_whole_invariant():
+    """W-76-3：per_step 為整輪總和的精確拆分——生產格式（每筆標記皆帶步驟 id）下，
+    逐步驟和 == 整輪值（不變式，防 per-step 與整輪語意漂移）。"""
+    m = parse_run_metrics(_PER_STEP_LOG, "pty")
+    assert sum(s.compact_count for s in m.per_step.values()) == m.compact_count == 3
+    assert sum(s.correction_count for s in m.per_step.values()) == m.correction_count == 3
+
+
+def test_per_step_empty_when_no_markers():
+    """無任何步驟標記的 run → per_step 為空 dict（誠實表「無 per-step 資訊」，非崩潰、非臆造）。"""
+    m = parse_run_metrics(_PERFECT, "pty")  # _PERFECT 無 TOKEN_COMPACT/CORRECTION 標記
+    assert m.per_step == {}
+
+
+def test_format_step_comparison_shows_both_backends_and_steps():
+    """逐步驟對比表含 pty/sdk 兩欄與步驟列（報告可讀性契約）。"""
+    pty = parse_run_metrics(_PER_STEP_LOG, "pty")
+    sdk = parse_run_metrics(_PER_STEP_LOG, "sdk")
+    out = format_step_comparison(pty, sdk)
+    assert "| 步驟 |" in out
+    assert "pty (compact/peak/corr)" in out
+    assert "| S01 |" in out
+    assert "| S02 |" in out
+
+
+def test_format_step_comparison_missing_step_zero_filled():
+    """A/B 兩後端步驟集不同時，缺一邊的步驟以 `0 / 0% / 0` 補位（誠實表「此後端此步無標記」）。"""
+    pty = parse_run_metrics(
+        "=== STATE: TOKEN_COMPACT | [S01] 82% >=  80% ===", "pty")
+    sdk = parse_run_metrics(
+        "=== STATE: TOKEN_COMPACT | [S09] 91% >=  80% ===", "sdk")
+    out = format_step_comparison(pty, sdk)
+    lines = out.splitlines()
+    s01 = next(ln for ln in lines if ln.startswith("| S01 |"))
+    s09 = next(ln for ln in lines if ln.startswith("| S09 |"))
+    assert s01.endswith("| 0 / 0% / 0 |")   # sdk 在 S01 無標記
+    assert "| 0 / 0% / 0 |" in s09           # pty 在 S09 無標記
+
+
+def test_format_step_comparison_bounded_truncation():
+    """W-76-2（防彈渲染器）：步驟數超 max_steps → 只印前 max_steps 步 + 省略數一行，
+    尾部步驟不出現（杜絕長 playbook 報告無限長/Token 爆炸）。
+
+    Rule 9：意圖＝有界截斷必須真截斷——8 步 max_steps=5 → 含「(3 more steps elided)」、
+    含 S05、不含 S06/S08；行數有界（不隨步數線性膨脹至全列）。
+    """
+    pty = parse_run_metrics(_long_log(8), "pty")
+    sdk = parse_run_metrics(_long_log(8), "sdk")
+    out = format_step_comparison(pty, sdk, max_steps=5)
+    assert "(3 more steps elided)" in out
+    assert "| S05 |" in out
+    assert "| S06 |" not in out
+    assert "| S08 |" not in out
+    # 行數＝表頭 2 + 5 步 + 1 省略行 = 8（有界，不隨 8 步全列膨脹）
+    assert len(out.splitlines()) == 8
+
+
+def test_format_step_comparison_no_truncation_when_within_limit():
+    """步驟數未超 max_steps → 全列顯示、無省略行（截斷僅在超限時觸發，不誤截）。"""
+    pty = parse_run_metrics(_long_log(3), "pty")
+    sdk = parse_run_metrics(_long_log(3), "sdk")
+    out = format_step_comparison(pty, sdk, max_steps=30)
+    assert "elided" not in out
+    assert "| S03 |" in out
+
+
+def test_format_step_comparison_max_steps_zero_all_elided():
+    """W-76-3（audit_76 SA-SD P2）：max_steps=0 → 0 步列出 + 全進省略行，不崩潰（守 `max(0,..)` 負索引契約）。"""
+    pty = parse_run_metrics(_long_log(3), "pty")
+    sdk = parse_run_metrics(_long_log(3), "sdk")
+    out = format_step_comparison(pty, sdk, max_steps=0)
+    assert "(3 more steps elided)" in out
+    assert "| S01 |" not in out
+    assert len(out.splitlines()) == 3  # 表頭 2 + 省略行 1（有界，不崩潰）
+
+
+def test_format_step_comparison_both_empty_header_only():
+    """W-76-3（audit_76 SA-SD P3）：兩後端皆無 per-step 標記 → 純表頭、無資料列、無省略行
+    （誠實表「無 per-step 資訊」，對齊 test_per_step_empty_when_no_markers 的渲染端對稱）。"""
+    pty = parse_run_metrics(_PERFECT, "pty")  # _PERFECT 無 token/CORRECTION 標記
+    sdk = parse_run_metrics(_PERFECT, "sdk")
+    out = format_step_comparison(pty, sdk)
+    assert "| 步驟 |" in out
+    assert "elided" not in out
+    assert len(out.splitlines()) == 2  # 純表頭，無資料列
+
+
+# ── W-76-2 / DEF-76-001：載具納入 production token marker（TOKEN_HALT）─────────
+# 🔴 production 唯一正式路徑＝Kernel（main.py:123），**不印 TOKEN_COMPACT**（只棄用 _impl.py:233 印）；
+# Kernel 端 token 壓力以 TOKEN_HALT（≥90%，_token_halt.py:46，帶 [Sxx] context NN%）表達。
+# 載具原僅認 TOKEN_COMPACT → production peak/compact 恆 0（DEF-76-001）。本輪納入 TOKEN_HALT。
+_HALT_MARKER_LOG = (
+    "=== STATE: TOKEN_HALT | [S03] context 92% >=  halt 門檻 90% ===\n"
+    "Playbook 結束 | KernelResult(success=False, completed_steps=2, total_steps=3, "
+    "halted=True, escalated=False)"
+)
+
+# CORRECTION 兩路徑混合：Kernel 帶 step=（kernel.py:224）+ 已棄用 _impl.py:437 不帶 step=
+_MIXED_CORRECTION_LOG = (
+    "=== STATE: CORRECTION | step=S01 attempt=1 ===\n"
+    "=== STATE: CORRECTION | 諮詢 Minimax ===\n"
+    "Playbook 結束 | KernelResult(success=True, completed_steps=1, total_steps=1, "
+    "halted=False, escalated=False)"
+)
+
+
+def test_token_halt_marker_feeds_peak_and_per_step():
+    """W-76-2（DEF-76-001）：TOKEN_HALT（production ≥90% marker）的 % 餵入 peak + per-step peak。
+
+    Rule 9：意圖＝載具不能只認棄用路徑的 TOKEN_COMPACT——production Kernel 真跑發 TOKEN_HALT，
+    若不解析則 peak 在真跑恆 0。peak 取行內最高（context 92%，非門檻 90%）；歸到 S03。
+    halt≠compact churn → compact_count 不計入（仍 0），但 peak 反映 token 失控水位。
+    """
+    m = parse_run_metrics(_HALT_MARKER_LOG, "pty")
+    assert m.peak_token_pct == 92.0           # TOKEN_HALT 行的 context %（非門檻 90）
+    assert m.per_step["S03"].peak_token_pct == 92.0
+    assert m.per_step["S03"].compact_count == 0  # halt 不計入 compact churn
+    assert m.compact_count == 0                # 無 TOKEN_COMPACT 行
+    assert m.halted is True
+
+
+def test_per_step_correction_is_lower_bound_for_untagged():
+    """W-76-1（audit_76 SA-SD P1）：CORRECTION 有兩 emit site——Kernel 帶 step=、已棄用
+    _impl.py:437 不帶。per-step correction 對不帶 step= 者不歸因 → sum(per_step) ≤ 整輪（**下界**），
+    等號僅在 log 全為 Kernel 路徑（production 真跑）時成立。誠實固化此邊界，防把「皆帶 step=」當全稱真理。"""
+    m = parse_run_metrics(_MIXED_CORRECTION_LOG, "sdk")
+    assert m.correction_count == 2  # _RE_CORRECTION 中兩行（含「諮詢 Minimax」）
+    assert sum(s.correction_count for s in m.per_step.values()) == 1  # 僅 step=S01 歸因（下界）
+    assert m.per_step["S01"].correction_count == 1
