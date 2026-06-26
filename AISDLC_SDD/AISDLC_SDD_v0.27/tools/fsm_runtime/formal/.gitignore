@@ -1,0 +1,22 @@
+# TLC working artifacts (do not commit)
+states/
+tlc_run.log
+tlc_coverage.log
+tlc_dump.log
+*.dot
+SDD_FSM_TTrace_*.tla
+SDD_FSM_TTrace_*.bin
+trace.bin
+
+# TLC binary (auto-downloaded by run_tlc.sh / .ps1; never committed)
+lib/tla2tools.jar
+lib/*.jar
+
+# Phase I M5 / liveness run artifacts
+sdd_tlc.out
+tlc_full.out
+fleet_tlc.log
+fleet_tlc_liveness.log
+*.log
+FLEET_FSM_TTrace_*.tla
+FLEET_FSM_TTrace_*.bin

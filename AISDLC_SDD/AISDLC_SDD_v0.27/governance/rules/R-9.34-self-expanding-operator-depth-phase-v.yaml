@@ -1,0 +1,83 @@
+id: R-9.34
+title: Phase V 算子組合深度文法的自我擴充（meta⁷）（深度 <=2 外有界深度生成文法 + 深度可計算性閉包有界停機，因 cost==depth）
+trigger_states:
+  - LEARNING_COMMIT
+  - MEMORY_CONSOLIDATION
+severity: high
+maturity: active
+spec: >
+  L10 完整之「離線活體 meta⁷ 迴圈 · 算子組合深度文法自我擴充」切片：把 Phase T/U 只能在固定組合深度上界
+  （operator_genesis 的運算式樹深度硬編 <=2，每算子 cost() 結構性 <=3）之內自我發明算子（T）/ 字母（U）的
+  能力，推進到系統能自我發明一個組合深度比 2 更深的全新複合算子（= 擴充算子生成文法的『組合深度上界』這個
+  結構參數本身，深度外生成，meta⁷）。並納管「深度外生成」憑空長出、Phase T/U（固定深度）時不存在而 Phase V
+  才出現的新危害：(i) 深度可計算性閉包危害（DepthClosure，本 Phase 靈魂，且因 cost==depth 而為迄今最逼近停機
+  問題本質的紅線）——Phase T 的「每算子 cost<=3」、Phase U 的「擴充字母表後整代數 cost<=3」之所以成立，其地基
+  是『組合深度被人類凍結在 <=2，故 cost() 是小常數』；一旦讓系統自我發明組合深度本身，cost() 變成深度 d 的單調
+  遞增函數（本設計 cost==depth〔一元基底〕/ depth+1〔二元基底〕），「自我擴充組合深度」字面上就是「自我擴充
+  計算步數」，深度上界就是停機臨界；可計算性須由『字母表擴充下封閉』升級為『擴充深度 D→D' 後，文法 G(A,D')
+  生成的整個（仍有限的）深度算子代數中每一個算子皆全函式 ∧ cost==depth<=STEP_MAX』的深度閉包性質——這是
+  「圖靈完備 vs 保證停機」第一次反噬到框架自我擴充文法的結構性深度（步數）參數本身（meta⁷），且因 cost==depth
+  而最直接；(ii) 組合深度無界生成爆炸（深度 <=2 硬編上界消失，深度可往 ∞ 長）；(iii) 深度自我發明 Goodhart
+  （發明一個 base/chain/probe 計算自己核可訊號的自指自利深度算子）。9.34.1 深度生成文法自我擴充骨架
+  （DepthGenesis / BoundedDepthGrammar，meta⁷）：深度 <=2 外深度自我發明經 operator_depth_genesis 在 bounded
+  深度生成文法（有限深度-2 基底 G2〔operator_genesis.enumerate_genesis_operators〕× 一元鏈 DEPTH_CHAIN_COMBINATORS
+  〔abs/neg/clip01/sq，排除 identity 避免退化〕，鏈長 1..SDD_DIM_DEPTH_LIMIT-2）可枚舉、節點 ≤ SDD_DIM_DEPTH_BUDGET
+  （clamp[8,128] 預設 32）、深度 ≤ SDD_DIM_DEPTH_LIMIT（clamp[2,16] 預設 6）——「深度 <=2 外」≠「無界」；只提案、
+  絕不自動納入、絕不自寫常數；結構性不 import oracle / 不讀必要性語料（對抗分離，編譯期隔離斷言）。9.34.2 深度
+  自我發明反自利（DepthGenesisAntiSelfInterest）：深度自我發明的 capability-delta tier 唯一合法來源為
+  operator_depth_genesis 不可見、content-hashed 凍結的 feature-grounded 深度必要性 held-out（增量覆蓋 ∧ 非冗餘）
+  勝率；genesis 自評結構性禁止充當；genesis 自評必要但 oracle 判不必要/冗餘一律以 oracle 為準；深度自指守門結構性
+  拒絕（base/chain/probe 引用保留自指/proposer/oracle 內部信號 self_score/proposer_*/necessity/oracle_* … →
+  depth_self_reference_guard 在送 oracle 前攔，零漏放）；深度外噪音算子（增量覆蓋 < SDD_DIM_COVERAGE_MARGIN）+
+  冗餘深度算子（與既有 existing_cost 排序一致率 ≥ SDD_DIM_REDUNDANCY_MAX）兩道正交門檻並列攔截零漏放（新增
+  feature-grounded evaluate_genesis_depth 不靠算子名）。9.34.3 深度可計算性閉包有界停機（DepthClosureBounded，
+  本 Phase 靈魂、迄今最深停機紅線，因 cost==depth 而最直接）：每個自我發明深度算子結構性保證擴充深度後整個深度
+  算子代數全函式 + 有界步數 + 零遞迴零迴圈——(a) 深度算子 = total 深度-2 基底（Phase T 已證 total + cost∈{2,3}）∘
+  total 一元 combinator 鏈（皆 total + cost-1）→ cost==depth（一元基底）/ depth+1（二元基底）；(b) 採納前
+  guard_depth_closure 枚舉擴充深度後 G(A,depth) 整個深度算子代數，斷言每算子 fuzz-total（零例外、無 NaN/inf）∧
+  cost() ≤ SDD_DIM_OP_STEP_MAX（clamp[1,64] 預設 8；因 cost==depth，即深度 ≤ step_max）；(c) 深度求值路徑零 while/
+  零遞迴/零自呼叫（唯一 for 是有界鏈走訪；ast 斷言 apply/cost/depth）；觸發 DepthClosureViolation → MFSM_ESCALATION。
+  閉包定理（結構歸納）：total 深度-2 基底 ∘ total 一元鏈仍 total、cost==depth 線性於深度，故 I_d(A,D') 成立 ⟺
+  D'≤STEP_MAX——深度可計算性閉包等價於「深度本身有硬上界 = STEP_MAX」。把「圖靈完備 vs 保證停機」正面釘進框架
+  自我擴充文法的結構性深度（步數）參數本身——自我擴充深度 = 自我擴充步數，故深度上界就是停機臨界，而整個閉環仍靠
+  LLM+紙帶維持圖靈完備。9.34.4 深度基數 + 反 big-bang 深度發明（DepthGenesisBounded + NoUnboundedDepthGenesis）：
+  (i) 現存活躍 depth-genesis 算子數 ≤ SDD_DIM_DEPTH_MAX（clamp[1,64] 預設 16）→ 觸頂 DepthCardinalityExceeded →
+  MFSM_ESCALATION（meta_halt_monitor.guard_depth_genesis）；(ii) 每週期至多 K_depth（SDD_DIM_EXPAND_K 預設 1，沿用
+  Phase Q~U）個深度自我發明可進 proposed-pending-signoff，每個必經人工 signoff（守 Rule 8 / 9.27~9.33）；
+  genesis/steersman 絕不自動 commit、絕不自動納入、絕不一次劫持整個深度本體論；退役深度算子再採納須挾 necessity
+  capability-delta（沿用 GraduationRatchet）；誠實標註：深度算子 stock（每深度算子首採、per-fingerprint churn=0、
+  維度/詞彙/算子/字母 stock 天花板皆盲）與深度可計算性閉包（G(A,depth) 整代數 fuzz-total + cost==depth ≤ step_max +
+  ast 零遞迴零迴圈）是更緊的 runtime/結構精煉，由 guard_depth_genesis / guard_depth_closure +
+  DEPTH_GENESIS_GOODHART_FLAP / DEPTH_CLOSURE_FLAP chaos enforce/驗收；META_FSM.tla 的 DepthGenesisBounded +
+  DepthClosureBounded 為 single-counter 抽象之歸約引用（深度自我擴充的 add↔retire 迴圈與單指紋 churn 迴圈同構，
+  不無限抖動；被自我擴充的深度=步數參數使生成的整個代數有界停機）；重用既有 META_FSM、僅補 DepthGenesisBounded +
+  DepthClosureBounded INVARIANT、不增狀態 / 變數、不增第六軌；五軌 TLC（SDD 42 / META 13 / FLEET 7 / COMPOSITION 21 /
+  OPTIMIZATION 12）全不回歸、深度發明不污染單軌 SDD_FSM.tla。9.34.5 深度自我發明誠實 + 活體/meta-oracle horizon：
+  feature-grounded 深度必要性勝率 tier 為 capability_level 唯一合法來源，不得謊報、不得用自評充當；算子間互遞迴 /
+  圖靈完備算子代數（meta⁸：算子可互相呼叫 / 帶記憶，逸出 sub-Turing 保證，須全新停機判定機制）+ 自我發明評估器
+  （meta-oracle 自演化，最高 horizon——它自指地破壞所有 Phase 賴以成立的對抗分離地基〔generator 與 evaluator
+  收斂同基質會掏空全部反 Goodhart 保證〕，未獲 evaluator-of-evaluators 的更高階 held-out meta-corpus + 其反自利
+  證明等對抗分離不可繞過性證明前不得採納）+ 活體 meta⁷ 發明版受 OPEN-10.6 約束續列 horizon（OPEN-V.x 承
+  OPEN-U.x/T.x/S.x/R.x/Q.x/O.7/M.7/P.7 暫不放寬沙箱）。對應 operator_depth_genesis（enumerate_genesis_depth /
+  depth_self_reference_guard / depth_genesis / depth_genesis_round / adopt_genesis_depth / expanded_depth_ops /
+  verify_depth_closure / DepthOperator / DepthClosureReport / depth_budget / depth_limit）/ dimension_necessity_oracle
+  （evaluate_genesis_depth / necessity_score_depth / load_depth_corpus / depth_corpus_fingerprint / DepthCase /
+  DepthCandidate）/ meta_halt/meta_ledger（is_depth_genesis_fingerprint / active_depth_genesis_features）/
+  meta_halt/meta_halt_monitor（guard_depth_genesis / DepthCardinalityExceeded / guard_depth_closure /
+  DepthClosureViolation / dim_depth_max）/ steersman_renderer（render_depth_genesis_proposal）。禁止：
+  operator_depth_genesis 自動納入深度自我發明 / 自寫常數繞過人工 signoff + guard_depth_genesis / guard_depth_closure、
+  用 genesis 自評充當深度自我發明必要性 capability-delta tier（深度自我發明 Goodhart 自評放水）、深度自我發明
+  base/chain/probe 自指（引用保留自指 / proposer / oracle 內部信號繞過 depth_self_reference_guard）、
+  operator_depth_genesis 讀寫 / 影響 / import DPT-* 深度必要性語料或 dimension_necessity_oracle、深度自我發明搜尋超
+  SDD_DIM_DEPTH_BUDGET 仍指數展開 / 鏈長超 SDD_DIM_DEPTH_LIMIT-2（破有界深度文法）、自我發明深度算子使擴充深度後
+  G(A,depth) 整個深度算子代數出現非全函式 / cost 超 SDD_DIM_OP_STEP_MAX（因 cost==depth 即深度超界）/ 求值路徑含
+  遞迴 while 自呼叫的算子（破深度可計算性閉包——被自我擴充的步數參數本身不可證停機）、現存活躍 depth-genesis 算子超
+  SDD_DIM_DEPTH_MAX 仍無界擴充、一週期同時深度自我發明 > K_depth 個、把 depth-genesis 元迴圈併入單軌 SDD_FSM.tla 或
+  新增第六軌污染五軌 reachable、未獲對抗分離不可繞過性證明即採納自我發明評估器（meta-oracle 自演化，掏空全部反
+  Goodhart 對抗分離地基）、未經 OPEN-V.x 私自開 HTTP 外聯做活體 meta⁷ 發明（破 OPEN-10.6）。
+test_ref: tools/fsm_runtime/tests/test_phase_v.py
+enforcement_mechanism: meta_loop
+scaffold_roi:
+  fire_count: 0
+  catch_count: 0
+  false_positive_count: 0

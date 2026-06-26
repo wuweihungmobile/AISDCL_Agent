@@ -61,6 +61,10 @@ class SddSpec:
     digest: str         # "sha256:..."（規格全文指紋）
     scenario: str       # 10 場景之一（greenfield/brownfield/...）
     contracts: tuple[SpecContract, ...] = field(default=())
+    # improving_85 W-85-2：消費端表面化「已驗證的規格格式版本」（生產↔消費橋接閉合）。
+    # 生產端（SDD 框架 v0.27+ TCS 模板）宣告 spec-format-version → adapter 驗證後寫入此欄，
+    # 不再驗證即丟棄。缺欄 spec 維持 "1.0"（向後相容、零退化，與 _DEFAULT_SPEC_FORMAT_VERSION 一致）。
+    spec_format_version: str = "1.0"
 
 
 class ISpecSource(Protocol):

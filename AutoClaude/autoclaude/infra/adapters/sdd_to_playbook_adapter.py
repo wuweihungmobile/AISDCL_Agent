@@ -121,13 +121,15 @@ class SddToPlaybookAdapter:
     def load_spec(self, spec_dir: str) -> SddSpec:
         text, spec_file = self._read_contract_spec(spec_dir)
         self._assert_frozen(spec_dir)  # 凍結硬閘（Spec-First Gate）
-        self._check_spec_format_version(text)  # W-67-2 防漂移硬閘（fail-closed）
+        # W-67-2 防漂移硬閘（fail-closed）；W-85-2：接回已驗證版本表面化到 SddSpec（不再丟棄）
+        version = self._check_spec_format_version(text)
         digest = "sha256:" + hashlib.sha256(text.encode("utf-8")).hexdigest()
         return SddSpec(
             spec_path=str(spec_file),
             digest=digest,
             scenario=self._scenario_of(text),
             contracts=tuple(self._parse_contracts(text)),
+            spec_format_version=version,
         )
 
     def compile_tasks(self, spec: SddSpec) -> list[PlaybookTask]:

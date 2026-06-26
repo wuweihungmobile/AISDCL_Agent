@@ -17,7 +17,11 @@ from pathlib import Path
 
 import yaml
 
-from ..core.ports.spec_source import SpecNotFrozenError, SpecTaintedError
+from ..core.ports.spec_source import (
+    SpecFormatVersionError,
+    SpecNotFrozenError,
+    SpecTaintedError,
+)
 from ..infra.adapters.sdd_to_playbook_adapter import SddToPlaybookAdapter
 from ..models.playbook import Playbook
 
@@ -88,6 +92,11 @@ def main(argv: list[str] | None = None) -> int:
     except SpecTaintedError as exc:
         print(f"[sdd_compile] 規格遭汙染（SPEC_TAINTED）：{exc}", file=sys.stderr)
         return 3
+    except SpecFormatVersionError as exc:
+        # W-85-2：原 main() 未接此例外 → 版本漂移時噴未捕捉 traceback + exit 1（非乾淨退碼）。
+        print(f"[sdd_compile] 規格格式版本不受支援（防漂移 fail-closed）：{exc}",
+              file=sys.stderr)
+        return 5
     except (FileNotFoundError, ValueError) as exc:
         print(f"[sdd_compile] {exc}", file=sys.stderr)
         return 4

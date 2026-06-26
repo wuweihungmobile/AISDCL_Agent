@@ -1,0 +1,294 @@
+# ============================================================
+# AISDLC v0.09 - Migration Pipeline (Canary + Rollback)
+# GitLab CI Template
+# ============================================================
+#
+# 使用方式:
+#   1. 在 .gitlab-ci.yml 中引入:
+#      include:
+#        - local: 'ci-templates/migration-pipeline.yml'
+#   2. 調整技術棧（舊棧/新棧建置命令）
+#   3. 配置 Canary 部署目標
+#
+# 前置條件:
+#   - Layer 0 (security-baseline stage) 已配置
+#   - Layer 1 (lint/build/test stages) 已配置
+#
+# 參考文檔: Migration_Pipeline_Template.md
+# ============================================================
+
+# ─── Stage 定義（承接 Layer 0 + Layer 1） ───
+stages:
+  - security-baseline    # Layer 0
+  - lint                 # Layer 1.1
+  - build                # Layer 1.2
+  - test                 # Layer 1.3
+  - dual-build           # Layer 2.1 - Migration 專屬
+  - contract-test        # Layer 2.2 - Migration 專屬
+  - perf-compare         # Layer 2.3 - Migration 專屬
+  - db-dryrun            # Layer 3.1 - Migration 專屬
+  - canary-deploy        # Layer 3.2 - Migration 專屬
+  - validation           # Layer 3.3 - Migration 專屬
+
+# ─── 全域變數 ───
+variables:
+  NODE_VERSION: "20"
+  LEGACY_DIR: "legacy"
+  COVERAGE_THRESHOLD: "70"
+  CANARY_NAMESPACE: "production"
+
+# ═══════════════════════════════════════════
+# Layer 2.1: Dual-Build
+# ═══════════════════════════════════════════
+
+build-new-stack:
+  stage: dual-build
+  image: node:${NODE_VERSION}-alpine
+  timeout: 15 minutes
+  allow_failure: false
+  cache:
+    key:
+      files:
+        - package-lock.json
+    paths:
+      - node_modules/
+  script:
+    - npm ci
+    - npm run build
+    - npm run test -- --coverage --ci
+  artifacts:
+    paths:
+      - dist/
+    expire_in: 7 days
+  rules:
+    - if: '$CI_COMMIT_BRANCH =~ /^(migration|migrate)\//'
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+
+build-legacy-stack:
+  stage: dual-build
+  image: node:${NODE_VERSION}-alpine
+  timeout: 15 minutes
+  allow_failure: false
+  cache:
+    key:
+      files:
+        - ${LEGACY_DIR}/package-lock.json
+    paths:
+      - ${LEGACY_DIR}/node_modules/
+  script:
+    - cd ${LEGACY_DIR}
+    - npm ci
+    - npm run build
+    - npm run test -- --ci
+  rules:
+    - if: '$CI_COMMIT_BRANCH =~ /^(migration|migrate)\//'
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+
+# --- Python (取消註解啟用) ---
+# build-new-python:
+#   stage: dual-build
+#   image: python:3.12-slim
+#   script:
+#     - pip install -r requirements.txt
+#     - pytest --cov=src --cov-report=xml
+#
+# build-legacy-python:
+#   stage: dual-build
+#   image: python:3.12-slim
+#   script:
+#     - cd ${LEGACY_DIR}
+#     - pip install -r requirements.txt
+#     - pytest
+
+# --- Java Maven (取消註解啟用) ---
+# build-new-java:
+#   stage: dual-build
+#   image: maven:3.9-eclipse-temurin-21
+#   script:
+#     - mvn compile test -B
+#
+# build-legacy-java:
+#   stage: dual-build
+#   image: maven:3.9-eclipse-temurin-21
+#   script:
+#     - cd ${LEGACY_DIR}
+#     - mvn compile test -B
+
+# ═══════════════════════════════════════════
+# Layer 2.2: Contract Test
+# ═══════════════════════════════════════════
+
+contract-test:
+  stage: contract-test
+  image: node:${NODE_VERSION}-alpine
+  timeout: 10 minutes
+  allow_failure: false
+  script:
+    - npm ci
+    - echo "📋 Running API Contract Tests..."
+    - npm run test:contract
+    # 或使用 OpenAPI Schema 驗證:
+    # - npx swagger-cli validate api/openapi.yaml
+    # 或使用 Pact:
+    # - npx pact-provider-verifier --provider-base-url=http://localhost:3000
+  rules:
+    - if: '$CI_COMMIT_BRANCH =~ /^(migration|migrate)\//'
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+
+# --- Java Spring Cloud Contract (取消註解啟用) ---
+# contract-test-java:
+#   stage: contract-test
+#   image: maven:3.9-eclipse-temurin-21
+#   script:
+#     - mvn verify -Dspring.cloud.contract.verifier.enabled=true -B
+
+# ═══════════════════════════════════════════
+# Layer 2.3: Performance Comparison
+# ═══════════════════════════════════════════
+
+performance-compare:
+  stage: perf-compare
+  image: node:${NODE_VERSION}-alpine
+  timeout: 10 minutes
+  allow_failure: true           # 效能比對為警告級別
+  script:
+    - npm ci
+    - echo "⚡ Running Performance Micro-Benchmark..."
+    - npm run bench || echo "⚠️ Benchmark not configured"
+    - echo "📊 Comparing with legacy baseline..."
+    # 比對邏輯:
+    # 1. 讀取舊系統基準 (從 artifact/cache)
+    # 2. 比較 P50/P99/RPS
+    # 3. 若 P99 > 1.5x，標記警告
+  artifacts:
+    reports:
+      performance: performance-report.json
+    expire_in: 30 days
+  rules:
+    - if: '$CI_COMMIT_BRANCH =~ /^(migration|migrate)\//'
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+
+# ═══════════════════════════════════════════
+# Layer 3.1: DB Migration Dry-Run
+# ═══════════════════════════════════════════
+
+db-migration-dryrun:
+  stage: db-dryrun
+  image: node:${NODE_VERSION}-alpine
+  timeout: 10 minutes
+  allow_failure: false
+  script:
+    # 驗證回滾腳本存在
+    - |
+      if [ ! -f "deploy/rollback.sh" ]; then
+        echo "🔴 deploy/rollback.sh not found"
+        echo "Every migration PR must include a rollback script"
+        exit 1
+      fi
+    - bash -n deploy/rollback.sh
+    - echo "✅ Rollback script syntax valid"
+
+    # DB Migration Dry-Run
+    - echo "🗄️ Running DB migration dry-run..."
+    # Flyway:
+    # - flyway -url=$DB_URL -dryRunOutput=dryrun.sql migrate
+    # Prisma:
+    # - npx prisma migrate diff --from-schema-datasource --to-schema-datamodel
+    # Django:
+    # - python manage.py migrate --plan
+    - echo "✅ DB migration dry-run passed"
+
+    # DB Rollback 驗證
+    - |
+      if [ -f "deploy/db-rollback.sql" ]; then
+        echo "✅ DB rollback SQL found"
+      else
+        echo "⚠️ No db-rollback.sql (may not be needed)"
+      fi
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+
+# ═══════════════════════════════════════════
+# Layer 3.2: Canary Deploy (Staging)
+# ═══════════════════════════════════════════
+
+canary-deploy-staging:
+  stage: canary-deploy
+  image: bitnami/kubectl:latest
+  timeout: 30 minutes
+  allow_failure: false
+  environment:
+    name: staging
+    url: https://staging.${CI_PROJECT_NAME}.example.com
+    on_stop: rollback-staging
+  script:
+    - echo "🐤 Deploying canary to staging with 5% traffic..."
+    # K8s + Istio:
+    # - kubectl apply -f deploy/canary-config.yaml
+    # - kubectl set image deployment/${CI_PROJECT_NAME}-canary app=${CI_REGISTRY_IMAGE}:${CI_COMMIT_SHA}
+    - echo "✅ Canary deployed at 5%"
+
+    - echo "👀 Observing canary metrics for 5 minutes..."
+    # 實際觀察邏輯:
+    # - 查詢 Prometheus error_rate, latency_p99
+    # - 若超過閾值，觸發回滾
+    - echo "✅ Canary 5% metrics healthy"
+
+    - echo "📈 Promoting canary to 25%..."
+    - echo "✅ Canary at 25%, metrics healthy"
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+      when: manual                # 手動觸發 Staging Canary
+      allow_failure: false
+
+rollback-staging:
+  stage: canary-deploy
+  image: bitnami/kubectl:latest
+  environment:
+    name: staging
+    action: stop
+  script:
+    - echo "🔄 Rolling back canary deployment..."
+    - bash deploy/rollback.sh staging
+    - echo "✅ Rollback completed"
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+      when: manual
+
+# ═══════════════════════════════════════════
+# Layer 3.3: Smoke + E2E Validation
+# ═══════════════════════════════════════════
+
+smoke-test:
+  stage: validation
+  image: node:${NODE_VERSION}-alpine
+  timeout: 15 minutes
+  allow_failure: false
+  script:
+    - npm ci
+    - echo "🔍 Running smoke tests against canary..."
+    # - npm run test:smoke -- --target=staging
+    # - npm run test:e2e -- --target=staging
+    - echo "✅ Smoke + E2E tests passed"
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+
+# ═══════════════════════════════════════════
+# Production Canary (手動觸發，Release Tag)
+# ═══════════════════════════════════════════
+
+# canary-deploy-production:
+#   stage: canary-deploy
+#   image: bitnami/kubectl:latest
+#   environment:
+#     name: production
+#     url: https://${CI_PROJECT_NAME}.example.com
+#   script:
+#     - echo "🚀 Production canary deployment"
+#     - echo "Step 1: 5% traffic"
+#     - echo "Step 2: 25% traffic (after 15min observation)"
+#     - echo "Step 3: 50% traffic (after 30min observation)"
+#     - echo "Step 4: 100% traffic (after 60min observation)"
+#   rules:
+#     - if: '$CI_COMMIT_TAG =~ /^v\d+\.\d+\.\d+$/'
+#       when: manual

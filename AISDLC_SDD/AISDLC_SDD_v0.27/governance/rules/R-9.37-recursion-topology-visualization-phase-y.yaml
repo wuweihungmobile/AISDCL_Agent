@@ -1,0 +1,62 @@
+id: R-9.37
+title: Phase Y meta⁸ 互遞迴呼叫圖人類視覺化儀表板（可解釋性轉向：把可證良基終止 + 互遞迴呼叫圖有界、可稽核地投影成人類舵手可審批的拓樸 + VisualizationBounded 有界停機，因「渲染無界大圖可能 token 爆炸/OOM」是新不停機源）
+trigger_states:
+  - LEARNING_COMMIT
+  - MEMORY_CONSOLIDATION
+severity: high
+maturity: active
+spec: >
+  橫向加固 / 可解釋性轉向（暫停 meta⁹ 垂直加塔）：Phase L~X 把元迴圈自我演化推到 meta⁸（互遞迴自我發明 +
+  良基停機證書）+ 具身接地，但其全部停機證書（良基 ranking function、fuel、grounded-verdict）一路
+  machine-readable / machine-verified、**從未 human-auditable**——當被人類 K=1 signoff 的是一張帶 rank 的
+  互遞迴呼叫圖時，舵手事實上只能盲簽（GAP-Y1：可證性遠超可審批性 = 架構失控）。Phase Y 把「可審批性」
+  提升為與「可證性」對等的第一等公民：開發一套與 RecursiveOperator AST 同構的拓樸視覺化儀表板
+  （recursion_topology_view），把抽象算子代數 + rank/fuel 自動轉成人類舵手一眼看懂的拓樸 / 終止 / 接地
+  三視圖與 K=1 審批介面。9.37.1 AST 同構投影（PY-1，VisualizationProjection）：recursion_topology_view.
+  extract_topology 是 RecursiveOperator.to_dict() 序列化 dict 的**確定性純投影**（每個視覺元素可逆回溯到
+  to_dict() 一個欄位：ranks→節點 rank、edges→呼叫邊、rank[src]-rank[dst]→Δrank 標註、fuel→計數器），
+  **絕不獨立再推導拓樸**；render_mermaid / render_termination_ladder / render_grounding_panel / render_json
+  四出口同出於單一 TopologyView。9.37.2 拓樸防偽稽核（PY-2，TopologyConsistency，對抗）：verify_topology_
+  consistency 反解析渲染 JSON 回 (nodes, edges, ranks)，**獨立**從 op_dict 重算同一窗格子圖的正規化指紋比對
+  ——同型於 guard_embodied_grounding「獨立重算、不盲信 renderer 標籤」：渲染偷偷刪窗內真相邊（畫的圖比跑的
+  簡單）、偽造 rank（讓圖看起來更良基）、杜撰節點/邊 → 圖不同構 → raise TopologyConsistencyError（fail-closed
+  → MFSM_ESCALATION）；杜絕視覺欺騙。9.37.3 有界渲染 fail-closed 有界停機（VisualizationBounded，本 Phase
+  紅線）：可審批性的停機反諷——為讓人類看懂而引入「渲染無界大圖可能 token 爆炸 / OOM」這個新不停機源（同
+  Phase X「真實沙箱可能 hang」結構）。meta_halt_monitor.guard_visualization_bounded 與 TLA+ VisualizationBounded
+  **100% 同構**的 fail-closed 三段：(i) render budget 不可逃逸——render_json 顯示節點 > node_budget 卻未標
+  truncated，或 dashboard markdown 字元數 > char_budget（token 爆炸）→ raise VisualizationViolation；
+  extract_topology 不假設輸入有界（防禦縱深：對抗者可餵 10⁶ 節點圖），一律套 render budget（node/edge/depth/
+  char，皆 env 可調 clamp，預設 24/48/8/8000）硬截斷 + 分頁，只讀窗格切片 → O(node_budget) 輸出，輸入再大也
+  不卡死 / 不 OOM；(ii) 拓樸同構——guard 獨立呼叫 verify_topology_consistency，不同構（視覺欺騙）→ raise；
+  (iii) 接地不 false-green——grounding.grounded_verdict==grounded_pass 但 has_observation 為 False（零觀測卻綠）
+  → raise（複用 Phase X 接地 fail-closed）；接地視圖無客觀 ExecutionObservation / inconclusive 一律灰佔位。
+  9.37.4 對抗分離 + read-only 純觀察者（VisualizationReadOnly）：recursion_topology_view 結構性**不 import** 任何
+  generator（operator_*_genesis / dimension_semantics_synthesizer / vocabulary_genesis）/ dimension_necessity_
+  oracle / embodied_grounding_oracle（AST import 隔離斷言守，test_phase_y）；儀表板是元迴圈狀態的 read-only
+  投影，**永不 churn、不寫 FSM-STATE、不影響 meta-loop 狀態**——VisualizationBounded == churn <= MAX_CHURN
+  之歸約恆真的理由比 genesis 各 *Bounded 更強（read-only ⇒ churn 永不變動），這正是要斷言的安全性質「儀表板
+  是純觀察者」。9.37.5 可解釋性誠實 + horizon：本份產出靜態 Markdown/Mermaid/JSON（git-friendly、可審批、可
+  diff）；接地視圖 observation 維持本地/docker no-HTTP（守 OPEN-10.6），活體 Playwright 軌跡渲染需 HTTP 列
+  horizon（OPEN-Y.1 承 OPEN-X.x）；Phase Y 是**橫向可解釋性加固，不碰 meta⁹**（R-9.35.5 真圖靈完備紅線）、
+  **不碰 meta-oracle 自演化**（人類凍結），嚴禁藉「簡化視覺呈現」實質繞過此二紅線。重用既有 META_FSM、僅補
+  VisualizationBounded INVARIANT、不增狀態/變數、不增第六軌；五軌 TLC（SDD 831 / META 13 / FLEET 7 /
+  COMPOSITION 21 / OPTIMIZATION 12）全不回歸、visualization 不污染單軌 SDD_FSM.tla。對應 recursion_topology_view
+  （extract_topology / TopologyView / render_mermaid/termination_ladder/grounding_panel/json / verify_topology_
+  consistency / TopologyConsistencyError / render_budget）/ meta_halt/meta_halt_monitor（guard_visualization_
+  bounded / VisualizationViolation / VisualizationGuardResult）/ steersman_renderer（render_recursion_topology_
+  dashboard）/ chaos_runner（VISUALIZATION_FLAP / VISUALIZATION_TOPOLOGY_DRIFT_FLAP / _visualization_flap_is_
+  bounded / _visualization_topology_drift_flap_is_bounded）/ formal/META_FSM（VisualizationBounded）。禁止：
+  recursion_topology_view / guard_visualization_bounded 自動 signoff 納入繞過人工 K=1、視覺化模組寫 FSM-STATE /
+  影響 churn / 影響 meta-loop 狀態（破 read-only）、import 任何 generator 或 embodied_grounding_oracle 並影響其
+  輸出（破對抗分離）、渲染拓樸與 to_dict() 不同構卻放行（破 PY-2 拓樸防偽，視覺欺騙：畫的圖比跑的更良基/更
+  簡單）、guard 盲信 renderer 輸出標籤而不獨立從 to_dict() 反解析重算圖比對、渲染逃逸 render budget（node/edge/
+  depth/char）造成 token 爆炸 / OOM（破 VisualizationBounded，須有界截斷 + 分頁而非無界渲染）、接地視圖以零觀測
+  false-green 渲染綠勾（破 Phase X fail-closed 接地）、把 visualization 元迴圈併入單軌 SDD_FSM.tla 或新增第六軌
+  污染五軌 reachable、未經 OPEN-Y.x 私自開 HTTP 外聯做活體 Playwright 軌跡渲染（破 OPEN-10.6）、或藉視覺化
+  「簡化呈現」實質繞過 meta⁹（R-9.35.5）/ meta-oracle 自演化（人類凍結）紅線。
+test_ref: tools/fsm_runtime/tests/test_phase_y.py
+enforcement_mechanism: meta_loop
+scaffold_roi:
+  fire_count: 0
+  catch_count: 0
+  false_positive_count: 0

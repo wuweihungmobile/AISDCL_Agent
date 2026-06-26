@@ -12,7 +12,11 @@ import yaml
 from autoclaude.execution.pre_run_validator import PreRunValidator
 from autoclaude.models.playbook import Playbook
 from autoclaude.tools.sdd_compile import compile_spec, main
-from tests.infra.test_sdd_to_playbook_adapter import _write_fsm_state, _write_spec
+from tests.infra.test_sdd_to_playbook_adapter import (
+    _SPEC_MD,
+    _write_fsm_state,
+    _write_spec,
+)
 
 
 class TestCompileSpec:
@@ -86,3 +90,18 @@ class TestCliMain:
         rc = main(["--spec-dir", str(tmp_path / "docs"),
                    "--out", str(tmp_path / "o.yaml")])
         assert rc == 4
+
+    def test_unsupported_spec_version_exit_code_5(self, tmp_path, capsys):
+        """W-85-2 / RTM-85-4：宣告未支援版本 → main() 乾淨退碼 5（非未捕捉 traceback）。
+
+        修前 main() 不接 SpecFormatVersionError，版本漂移會噴 traceback + exit 1；本測試
+        鎖定「防漂移閘觸發時 CLI 仍乾淨退場」這條協作橋接契約（Rule 9：能因行為改變而失敗）。
+        """
+        # 生產端 bold 行格式宣告未支援版本 2.0 → load_spec raise SpecFormatVersionError
+        spec_dir = _write_spec(
+            tmp_path, text=_SPEC_MD + "\n**spec-format-version**: 2.0\n")
+        _write_fsm_state(tmp_path)
+        out = tmp_path / "o.yaml"
+        rc = main(["--spec-dir", str(spec_dir), "--out", str(out)])
+        assert rc == 5 and not out.exists()
+        assert "防漂移" in capsys.readouterr().err

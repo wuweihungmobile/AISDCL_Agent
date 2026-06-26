@@ -800,3 +800,50 @@ class TestSpecFormatVersionGate:
         evt = [c.args[1] for c in obs.record_event.call_args_list
                if c.args[0] == "sdd.spec_format_version"][-1]
         assert evt == {"version": "1.0", "declared": False, "accepted": True}
+
+    # ── W-85-2/3：消費端表面化已驗證版本到 SddSpec（生產↔消費橋接閉合）──────────────
+    # 生產端格式（v0.27 TCS 模板宣告，bold metadata 行）= adapter _SPEC_VERSION_RE 命中之
+    # 真實格式；以下測試以該真實格式驗證端到端 round-trip（RTM-85-1/85-2）。
+    _PRODUCER_DECL = "\n**spec-format-version**: 1.0  <!-- 生產端宣告 -->\n"
+
+    def test_spec_format_version_surfaced_when_declared(self, tmp_path):
+        """RTM-85-2：宣告版本（生產端 bold 行格式）→ SddSpec.spec_format_version 表面化為 "1.0"。"""
+        spec_dir = _write_spec(tmp_path, text=_SPEC_MD + self._PRODUCER_DECL)
+        _write_fsm_state(tmp_path)
+        spec = SddToPlaybookAdapter().load_spec(str(spec_dir))
+        assert spec.spec_format_version == "1.0"
+        assert spec.contracts  # 仍正常編譯（零退化）
+
+    def test_spec_format_version_surfaced_as_default_when_missing(self, tmp_path):
+        """RTM-85-3：缺欄 spec → SddSpec.spec_format_version 表面化為預設 "1.0"（向後相容）。"""
+        spec_dir = _write_spec(tmp_path)  # _SPEC_MD 無版本標記
+        _write_fsm_state(tmp_path)
+        spec = SddToPlaybookAdapter().load_spec(str(spec_dir))
+        assert spec.spec_format_version == "1.0"
+
+    def test_surfaced_version_reflects_parsed_value_not_default(self, tmp_path, monkeypatch):
+        """RTM-85-2（Rule 9 反空殼）：表面化欄須攜帶「解析到的版本」而非寫死預設 "1.0"。
+
+        因現支援集只有 {"1.0"}（宣告/缺欄皆 1.0），單測 =="1.0" 無法區分「真表面化」與
+        「永遠回預設」→ 暫擴支援集納 "1.1"，宣告 1.1，斷言 spec_format_version=="1.1"。
+        若 load_spec 還原成丟棄版本（用 SddSpec 預設），此斷言即轉紅（MUT-85-1）。
+        """
+        import autoclaude.infra.adapters.sdd_to_playbook_adapter as mod
+        monkeypatch.setattr(
+            mod, "_SUPPORTED_SPEC_FORMAT_VERSIONS", frozenset({"1.0", "1.1"}))
+        spec_dir = _write_spec(
+            tmp_path, text=_SPEC_MD + "\n**spec-format-version**: 1.1\n")
+        _write_fsm_state(tmp_path)
+        spec = SddToPlaybookAdapter().load_spec(str(spec_dir))
+        assert spec.spec_format_version == "1.1"
+
+    def test_producer_bold_declaration_emits_declared_true(self, tmp_path):
+        """RTM-85-1/85-2：生產端 bold 行宣告 → 審計痕 declared=True（非靜默預設兜底），
+        證實防漂移閘對真實框架格式 spec 端到端走「明示宣告」分支（缺口 §2.3-②閉合）。"""
+        obs = MagicMock()
+        spec_dir = _write_spec(tmp_path, text=_SPEC_MD + self._PRODUCER_DECL)
+        _write_fsm_state(tmp_path)
+        SddToPlaybookAdapter(observability=obs).load_spec(str(spec_dir))
+        evt = [c.args[1] for c in obs.record_event.call_args_list
+               if c.args[0] == "sdd.spec_format_version"][-1]
+        assert evt == {"version": "1.0", "declared": True, "accepted": True}

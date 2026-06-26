@@ -241,3 +241,8 @@ AISDLC_SDD_v0.25/chaos-report.json
 AISDLC_SDD_v0.26/build/reports/
 AISDLC_SDD_v0.26/arch-fitness.json
 AISDLC_SDD_v0.26/chaos-report.json
+
+# ── AISDLC_SDD_v0.27 runtime 取證產物排除（Copy-on-Evolve 自動補；改進輪敘述見 EVOLUTION_LOG.md）──
+AISDLC_SDD_v0.27/build/reports/
+AISDLC_SDD_v0.27/arch-fitness.json
+AISDLC_SDD_v0.27/chaos-report.json
