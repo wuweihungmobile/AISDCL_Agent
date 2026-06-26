@@ -1,0 +1,39 @@
+# lowthr_compact_config.yaml — token-guard「compact 編排」端到端真跑 demo config
+# （AutoSDD improving_84 W-84-1，C 軌）
+#
+# 用途：讓 scripts/sdd_bridge_smoke.yaml 在真跑中**真的撞 compact 門檻**，使 production
+#   Kernel 的 compact 編排（core/kernel.py:_handle_compact → perform_compact）真正觸發、
+#   留下 `TOKEN_COMPACT` marker——這是 improving_78/79 接線、81-83 修通訊號源後，首次以
+#   真跑（非 mock）端到端驗證 compact 編排會觸發。
+#
+# 策略（掌舵者拍板「調低門檻的真跑」）：上輪真跑觀測 token% 峰值 PTY 6.2 / SDK 2.0%，故
+#   把 compact 門檻調到 1.0%（遠低於峰值 → 必觸）、halt 門檻調到 99.0%（高於峰值 → 門檻層
+#   不觸 halt，**隔離出純 compact 路徑**）。驗證的是「observed% ≥ configured_threshold →
+#   觸發 compact 編排」這條與門檻數值無關的核心比對邏輯（見 improving_84 §8 忠實度邊界）。
+#
+# 註：若 POST_COMPACT 後 token% 仍 ≥1%，Gap-008-E（連續 2 次 compact 失敗）會接著轉 HALT；
+#   無論如何 `TOKEN_COMPACT` marker 出現即證 compact 編排已端到端觸發（真跑據實記錄）。
+#
+# 繼承 ab_pty_config.yaml 既有設定（backend=pty / dummy minimax / yaml_only /
+#   goal_synthesis_enabled=false），additive 加 token_guard section。
+minimax:
+  api_key: "ab-smoke-dummy-pty"
+  enable_kernel_brain: false
+
+executor:
+  backend: "pty"
+
+claude:
+  command: "claude"
+  extra_args: ["--permission-mode", "bypassPermissions"]
+
+storage:
+  mode: "yaml_only"
+
+playbook:
+  goal_synthesis_enabled: false
+
+token_guard:
+  enabled: true
+  compact_threshold_pct: 1.0     # 遠低於真跑峰值(~2~6%) → 必觸 compact
+  halt_threshold_pct: 99.0       # 高於真跑峰值 → 門檻層不觸 halt（隔離出 compact 路徑）

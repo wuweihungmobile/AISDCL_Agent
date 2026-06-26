@@ -26,12 +26,18 @@ def get_dynamic_compact_threshold(
 ) -> float:
     """Gap-009-F：依重試進度動態降低 compact 門檻。
 
-    公式：base - (attempt / max_retries) * decay_factor，下限 floor。
+    公式：base - (attempt / max_retries) * decay_factor，下限 floor（且 floor 不得高於 base）。
     """
     if max_retries <= 0:
         return base_threshold
+    # DEF-84-001（improving_84 真跑 dogfooding 揭露）：decay floor 不得高於 base_threshold。
+    # 否則 base_threshold < floor 時，max(..., floor) 會把使用者於 config 設定的低 compact
+    # 門檻（如 compact_threshold_pct=1）默默夾到 floor（65），形同忽略 config、違反契約。
+    # 夾住 effective_floor ≤ base 使動態門檻恆 ≤ base、誠實 honor config；base ≥ floor 的
+    # production 預設（base=80）不受影響：min(65, 80)=65，回傳值與修前完全一致（零退化）。
+    effective_floor = min(floor, base_threshold)
     ratio = min(attempt / max_retries, 1.0)
-    return max(base_threshold - ratio * decay_factor, floor)
+    return max(base_threshold - ratio * decay_factor, effective_floor)
 
 
 def should_compact_decision(

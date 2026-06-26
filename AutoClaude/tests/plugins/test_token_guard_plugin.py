@@ -65,6 +65,25 @@ class TestTokenGuardPluginThresholds:
         plugin = TokenGuardPlugin(TokenGuardConfig(compact_threshold_pct=80.0))
         assert plugin.get_dynamic_compact_threshold(0, 0) == 80.0
 
+    def test_dynamic_threshold_low_base_honored_not_clamped_to_floor(self):
+        """DEF-84-001（improving_84 真跑揭露）：compact_threshold_pct < floor(65) 時，
+        動態門檻必須 honor config 的低 base、不得被 decay floor 默默夾到 65。
+
+        修前：max(base - decay, 65) 在 base<65 時恆回 65（忽略 config）。
+        修後：effective_floor=min(floor,base) → 動態門檻恆 ≤ base、honor config。
+        """
+        plugin = TokenGuardPlugin(TokenGuardConfig(compact_threshold_pct=1.0))
+        # base=1 < floor 65 → 不該被夾到 65；任何 attempt 皆 ≤ 1（honor config）
+        assert plugin.get_dynamic_compact_threshold(0, 5) == 1.0
+        assert plugin.get_dynamic_compact_threshold(3, 5) == 1.0
+        assert plugin.get_dynamic_compact_threshold(10, 1) == 1.0
+        # base=50 < floor 65 → 同理 honor 50、不夾 65
+        p50 = TokenGuardPlugin(TokenGuardConfig(compact_threshold_pct=50.0))
+        assert p50.get_dynamic_compact_threshold(0, 5) == 50.0
+        # 迴歸守衛：base=80 ≥ floor 65 → 行為與修前完全一致（min(65,80)=65）
+        p80 = TokenGuardPlugin(TokenGuardConfig(compact_threshold_pct=80.0))
+        assert p80.get_dynamic_compact_threshold(10, 1) == 65.0
+
 
 class TestTokenGuardPluginResourceRequests:
     def test_halt_when_above_halt_threshold(self):

@@ -1,0 +1,39 @@
+# lowthr_halt_config.yaml — token-guard「halt 編排」端到端真跑 demo config
+# （AutoSDD improving_84 W-84-1，C 軌）
+#
+# 用途：讓 scripts/sdd_bridge_smoke.yaml 在真跑中**真的撞 halt 門檻**，使 production
+#   Kernel 的 halt 編排（core/kernel.py:_consult_token_guard → StepOutcome(HALT)）真正
+#   觸發、留下 `TOKEN_HALT` marker 並使 `KernelResult(halted=True)`——這是 improving_78
+#   接線、81-83 修通訊號源後，首次以真跑（非 mock）端到端驗證 halt 編排會觸發。
+#
+# 策略（掌舵者拍板「調低門檻的真跑」）：上輪真跑觀測 token% 峰值 PTY 6.2 / SDK 2.0%，故
+#   把 halt 門檻調到 1.0%（低於峰值 → 必觸）、compact 門檻 0.3%（更低；但因「halt 先判、
+#   優先於 compact」policy.py:172-178，peak ≥ halt 時直接 HALT，compact 路徑被 skip）。
+#   驗證的是「observed% ≥ configured_threshold → 觸發 halt 編排」這條與門檻數值無關的核心
+#   比對邏輯（見 improving_84 §8 忠實度邊界）。
+#
+# 繼承 ab_pty_config.yaml 既有設定（backend=pty / dummy minimax / yaml_only /
+#   goal_synthesis_enabled=false），additive 加 token_guard section。
+# 註：halt 會觸發 checkpoint 寫入 + 排程恢復（improving_78 既有行為）；本 demo 以 --fresh
+#   單跑取證，不續跑。
+minimax:
+  api_key: "ab-smoke-dummy-pty"
+  enable_kernel_brain: false
+
+executor:
+  backend: "pty"
+
+claude:
+  command: "claude"
+  extra_args: ["--permission-mode", "bypassPermissions"]
+
+storage:
+  mode: "yaml_only"
+
+playbook:
+  goal_synthesis_enabled: false
+
+token_guard:
+  enabled: true
+  compact_threshold_pct: 0.3     # 更低（但 halt 先判優先，compact 路徑會被 skip）
+  halt_threshold_pct: 1.0        # 低於真跑峰值 → peak ≥ 1% → 立即 HALT
