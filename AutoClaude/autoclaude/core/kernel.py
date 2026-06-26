@@ -189,7 +189,8 @@ class PlaybookKernel:
             # 僅在真有 token 訊號（peak>0）時 emit ON_TOKEN_USAGE → token_guard 決策；
             # 無訊號（dry-run / 既有 fake）→ 不 emit、行為與接線前完全一致（零退化）。
             halt_outcome = self._consult_token_guard(playbook, task, step_idx, attempt,
-                                                     max_retries, observer.peak_pct)
+                                                     max_retries, observer.peak_pct,
+                                                     last_failure_reason)
             if halt_outcome is not None:
                 return halt_outcome
             failure_reason, _eval_out, _exit = self._eval.evaluate(task, output.text)
@@ -274,6 +275,7 @@ class PlaybookKernel:
 
     def _consult_token_guard(
         self, playbook, task, step_idx, attempt, max_retries, peak_pct,
+        last_failure_reason="",
     ) -> StepOutcome | None:
         """improving_78 W-78-1（DEF-78-001）：production token-guard halt 接線。
 
@@ -299,11 +301,12 @@ class PlaybookKernel:
                                peak_token_pct=peak_pct)
         if tu.request_compact:
             return self._handle_compact(playbook, task, step_idx, attempt,
-                                        max_retries, peak_pct)
+                                        max_retries, peak_pct, last_failure_reason)
         return None
 
     def _handle_compact(
         self, playbook, task, step_idx, attempt, max_retries, peak_pct,
+        last_failure_reason="",
     ) -> StepOutcome | None:
         """improving_79 W-78-2（DEF-78-001 compact 子路徑）：送 /compact + Gap-008-E。
 
@@ -314,7 +317,13 @@ class PlaybookKernel:
         未達上限 → 續評估原 output）。compact 動作為執行層業務邏輯、抽至 core helper；
         Kernel 僅委派 + honor request（維持純 DAG）。
         """
-        post_peak = perform_compact(self._exec, step_id=task.step_id, peak_pct=peak_pct)
+        # improving_80 W-80-1：傳 anchor 素材（task/attempt/global_goal/last_failure）→
+        # compact prompt 帶 MEMORY ANCHOR，壓縮後保留關鍵任務記憶。
+        post_peak = perform_compact(
+            self._exec, step_id=task.step_id, peak_pct=peak_pct,
+            task=task, attempt=attempt, global_goal=playbook.global_goal,
+            failure_summary=last_failure_reason,
+        )
         pc = self._bus.emit(HookContext(
             phase=KernelPhase.POST_COMPACT, playbook=playbook, task=task,
             step_idx=step_idx, attempt=attempt,

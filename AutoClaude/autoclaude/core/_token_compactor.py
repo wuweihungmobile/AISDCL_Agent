@@ -14,34 +14,30 @@ compact 子路徑——production 唯一正式路徑（Kernel）原本零消費 
 設計原則：
   - 純委派：compact 決策（should_compact / 連續失敗計數）全在 TokenGuardPlugin（SSOT），
     本 helper 不持有任何 token-guard 狀態，亦不 import plugin / infra（維持 core-purity）。
-  - compact prompt 為 core-local 結構化保留提示常數（與 token_guard.compactor 同精神；
-    棄用路徑的 memory-anchor enrichment 本輪未移植，見 improving_79 §8 誠實標記）。
+  - compact prompt 由 core 共享 SSOT ``_compact_prompt.build_compact_prompt`` 組裝
+    （improving_80 W-80-1：原住 plugin 的純函式上移至 core，core 與 plugin 共用單一實作）；
+    帶 task/attempt/global_goal/failure_summary 時附加 ``=== MEMORY ANCHOR ===`` 區塊，
+    確保壓縮後關鍵任務記憶存活。task=None 時退回基本保留策略（逐字等價舊 core-local 常數）。
   - marker 格式對齊 A/B 載具解析（``"TOKEN_COMPACT" in line`` 計 compact_count、行內
     ``NN%`` 餵 peak、``[Sxx]`` 做 per-step 歸因）。
 """
 from __future__ import annotations
 
 import logging
+from typing import Any, Optional
 
+from ._compact_prompt import build_compact_prompt
 from ._token_observer import TokenObserver
 from .ports.executor import IExecutor
 
 logger = logging.getLogger("autoclaude.core.kernel")
 
-# core-local 結構化 /compact 提示（對齊 token_guard.compactor.build_compact_prompt 之保留策略，
-# 但不含 memory-anchor；不 import plugin 以維持 core-purity）。
-_COMPACT_PROMPT = (
-    "/compact\n"
-    "請在壓縮時優先保留：\n"
-    "1. 目前正在實作的檔案清單與關鍵函式名稱\n"
-    "2. 測試案例的名稱與期望行為\n"
-    "3. 最近一次的錯誤訊息（精確的 SyntaxError / AssertionError 位置）\n"
-    "可以丟棄：完整的 stdout log、已完成步驟的詳細操作記錄。"
-)
-
 
 def perform_compact(
-    executor: IExecutor, *, step_id: str, peak_pct: float, timeout: int = 60,
+    executor: IExecutor, *, step_id: str, peak_pct: float,
+    task: Optional[Any] = None, attempt: int = 0,
+    global_goal: Optional[str] = None, failure_summary: str = "",
+    timeout: int = 60,
 ) -> float:
     """送 /compact 並印真誠 TOKEN_COMPACT marker；回傳 compact 後觀測到的 token% 峰值。
 
@@ -49,6 +45,10 @@ def perform_compact(
         executor: Kernel 持有的 IExecutor（與步驟執行同一受信 executor）。
         step_id: 當前步驟 id（marker [Sxx] 歸因用）。
         peak_pct: 觸發 compact 的步驟峰值 token%（marker 顯示用）。
+        task: 當前 PlaybookTask（給定時 prompt 附加 MEMORY ANCHOR；None → 基本保留策略）。
+        attempt: 當前 attempt（anchor [ATTEMPT] 顯示用，0-based）。
+        global_goal: playbook 總目標（anchor [GLOBAL_GOAL] 注入用）。
+        failure_summary: 前次 attempt 失敗背景（anchor [LAST_FAILURE] 注入用，可空）。
         timeout: /compact 執行逾時秒數（預設 60，對齊棄用路徑）。
 
     Returns:
@@ -58,9 +58,13 @@ def perform_compact(
         "=== STATE: TOKEN_COMPACT | [%s] context %.0f%% >= compact 門檻 ===",
         step_id, peak_pct,
     )
+    prompt = build_compact_prompt(
+        task=task, attempt=attempt,
+        failure_summary=failure_summary, global_goal=global_goal,
+    )
     post_observer = TokenObserver()
     executor.execute(
-        _COMPACT_PROMPT, maintain_context=True, timeout=timeout,
+        prompt, maintain_context=True, timeout=timeout,
         label=f"{step_id}_compact", on_event=post_observer,
     )
     return post_observer.peak_pct
