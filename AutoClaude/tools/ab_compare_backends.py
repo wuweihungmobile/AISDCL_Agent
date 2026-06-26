@@ -62,8 +62,10 @@ class RunMetrics:
     correction_count: int = 0
     sdd_violation_count: int = 0
     peak_token_pct: float = 0.0
+    compact_count: int = 0
     run_succeeded: bool = False
     escalated: bool = False
+    halted: bool = False
 
     @property
     def first_pass_rate(self) -> float:
@@ -104,18 +106,24 @@ def parse_run_metrics(log_text: str, backend: str = "") -> RunMetrics:
                 bools[field] = mm.group(1) == "True"
         m.run_succeeded = bools.get("success", False)
         m.escalated = bools.get("escalated", False)
+        m.halted = bools.get("halted", False)  # DEF-75-001：修 dead-parse（原解析進 bools 卻丟棄）
     # 無 KernelResult 行（半途 log）→ 退回以 ✓ 標記計完成步數
     if m.completed_steps == 0:
         m.completed_steps = completed_from_marks
 
-    # token 峰值：僅取 TOKEN_COMPACT 行的百分比（達門檻才印；未印→0.0，誠實表「低於記錄門檻」）
+    # token 峰值＋壓縮次數：掃 TOKEN_COMPACT 行（達門檻才印）。
+    #   peak = 行內 % 最大值（最高水位）；compact_count = 行數（churn 次數，W-75-1 差異維度——
+    #   兩後端撞同一門檻時 peak 雙雙飽和分不出，壓縮次數才反映重整成本差）。未印→0/0 誠實表「無壓縮」。
     peak = 0.0
+    compact_count = 0
     for line in log_text.splitlines():
         if "TOKEN_COMPACT" not in line:
             continue
+        compact_count += 1
         for pct in _RE_TOKEN_PCT.findall(line):
             peak = max(peak, float(pct))
     m.peak_token_pct = peak
+    m.compact_count = compact_count
     return m
 
 
@@ -131,12 +139,13 @@ def format_comparison(pty: RunMetrics, sdk: RunMetrics) -> str:
         ("SDD_CONTRACT_VIOLATION 次數",
          str(pty.sdd_violation_count), str(sdk.sdd_violation_count)),
         ("token 峰值", f"{pty.peak_token_pct:.0f}%", f"{sdk.peak_token_pct:.0f}%"),
+        ("壓縮次數（compact）", str(pty.compact_count), str(sdk.compact_count)),
         ("完成步驟 / 總步驟",
          f"{pty.completed_steps}/{pty.total_steps}",
          f"{sdk.completed_steps}/{sdk.total_steps}"),
-        ("run 成功 / escalated",
-         f"{pty.run_succeeded} / {pty.escalated}",
-         f"{sdk.run_succeeded} / {sdk.escalated}"),
+        ("run 成功 / escalated / halted",
+         f"{pty.run_succeeded} / {pty.escalated} / {pty.halted}",
+         f"{sdk.run_succeeded} / {sdk.escalated} / {sdk.halted}"),
     ]
     out = ["| 指標 | pty | sdk |", "|------|-----|-----|"]
     out += [f"| {name} | {a} | {b} |" for name, a, b in rows]
@@ -164,10 +173,14 @@ class AggregateMetrics:
     sdd_violation_count_total: int = 0
     peak_token_pct_mean: float = 0.0
     peak_token_pct_max: float = 0.0
+    compact_count_mean: float = 0.0
+    compact_count_total: int = 0
+    compact_count_max: int = 0
     completed_steps_mean: float = 0.0
     total_steps: int = 0
     success_count: int = 0
     escalated_count: int = 0
+    halted_count: int = 0
     per_run: list[RunMetrics] = field(default_factory=list)
 
 
@@ -184,6 +197,7 @@ def aggregate_runs(runs: list[RunMetrics], backend: str = "") -> AggregateMetric
     fpr = [r.first_pass_rate for r in runs]
     corr = [r.correction_count for r in runs]
     tok = [r.peak_token_pct for r in runs]
+    cmp_ = [r.compact_count for r in runs]
     comp = [r.completed_steps for r in runs]
     agg.first_pass_rate_mean = statistics.mean(fpr)
     agg.first_pass_rate_stdev = statistics.pstdev(fpr)  # n=1 → 0.0
@@ -194,10 +208,14 @@ def aggregate_runs(runs: list[RunMetrics], backend: str = "") -> AggregateMetric
     agg.sdd_violation_count_total = sum(r.sdd_violation_count for r in runs)
     agg.peak_token_pct_mean = statistics.mean(tok)
     agg.peak_token_pct_max = max(tok)
+    agg.compact_count_mean = statistics.mean(cmp_)   # 平均每輪壓縮次數（churn 代理）
+    agg.compact_count_total = sum(cmp_)
+    agg.compact_count_max = max(cmp_)                # 最壞單輪壓縮次數
     agg.completed_steps_mean = statistics.mean(comp)
     agg.total_steps = max(r.total_steps for r in runs)
     agg.success_count = sum(1 for r in runs if r.run_succeeded)
     agg.escalated_count = sum(1 for r in runs if r.escalated)
+    agg.halted_count = sum(1 for r in runs if r.halted)  # 撞 ≥90% halt 的輪數（compact 孿生）
     agg.per_run = list(runs)
     return agg
 
@@ -219,12 +237,15 @@ def format_aggregate_comparison(pty: AggregateMetrics, sdk: AggregateMetrics) ->
         ("token 峰值 (mean / max)",
          f"{pty.peak_token_pct_mean:.0f}% / {pty.peak_token_pct_max:.0f}%",
          f"{sdk.peak_token_pct_mean:.0f}% / {sdk.peak_token_pct_max:.0f}%"),
+        ("壓縮次數 (mean / total / max)",
+         f"{pty.compact_count_mean:.1f} / {pty.compact_count_total} / {pty.compact_count_max}",
+         f"{sdk.compact_count_mean:.1f} / {sdk.compact_count_total} / {sdk.compact_count_max}"),
         ("完成步驟均值 / 總步驟",
          f"{pty.completed_steps_mean:.1f}/{pty.total_steps}",
          f"{sdk.completed_steps_mean:.1f}/{sdk.total_steps}"),
-        ("run 成功 / escalated (計數)",
-         f"{pty.success_count} / {pty.escalated_count}",
-         f"{sdk.success_count} / {sdk.escalated_count}"),
+        ("run 成功 / escalated / halted (計數)",
+         f"{pty.success_count} / {pty.escalated_count} / {pty.halted_count}",
+         f"{sdk.success_count} / {sdk.escalated_count} / {sdk.halted_count}"),
     ]
     out = ["| 指標 | pty | sdk |", "|------|-----|-----|"]
     out += [f"| {name} | {a} | {b} |" for name, a, b in rows]
