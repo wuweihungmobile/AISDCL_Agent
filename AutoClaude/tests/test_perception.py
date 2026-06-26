@@ -132,13 +132,21 @@ class _FakeWexpectChild:
     index=2。據此驗證 raw 擷取必由 readline 顯式寫入、不依賴 callback。
     """
 
-    def __init__(self, lines, eof_tail=None):
+    def __init__(self, lines, eof_tail=None, timeout_rounds=0, raise_on_expect=None):
         self._lines = list(lines)
         self.after = None
         self.before = None
         self._eof_tail = eof_tail
+        self._timeout_rounds = timeout_rounds  # 前 N 次 expect 回 index==1（TIMEOUT），不 pop line（improving_74 W-74-1）
+        self.sent = []                         # 記錄 sendline 自動回應內容（improving_74 W-74-2）
+        self._raise_on_expect = raise_on_expect  # expect 拋此例外（improving_74 W-74-4 except 分支）
 
     def expect(self, patterns, timeout=None):
+        if self._raise_on_expect is not None:
+            raise self._raise_on_expect
+        if self._timeout_rounds > 0:
+            self._timeout_rounds -= 1
+            return 1  # 對應 patterns[1] == wexpect.TIMEOUT（不碰 after/before、不消耗 line）
         if self._lines:
             self.after = self._lines.pop(0)
             self.before = ""
@@ -147,7 +155,7 @@ class _FakeWexpectChild:
         return 2  # 對應 patterns[2] == wexpect.EOF
 
     def sendline(self, text):
-        pass
+        self.sent.append(text)
 
     def close(self, force=False):
         pass
@@ -270,6 +278,88 @@ class TestPtyWrapper:
             assert pty.readline(timeout=0.1) is None  # EOF，擷取殘留尾段
             pty.close()
         assert raw_path.read_bytes() == b"L1\r\nTAIL_NO_NL"
+
+    def test_wexpect_readline_timeout_returns_empty_not_none(self, tmp_path):
+        """improving_74 R-74-1：wexpect readline TIMEOUT（index==1）須回 '' 非 None、
+        不寫 raw、不終止串流。
+
+        Rule 9 意圖：TIMEOUT 是「本輪暫無輸出」非「結束」。若退回 return None，上層讀取迴圈
+        會誤判 EOF 提前終止串流 → TIMEOUT 之後真正吐的輸出行永遠讀不到。本測先令 expect 回
+        TIMEOUT 確認得 ''，再確認 TIMEOUT 後仍能讀到後續行（守「不終止串流」），且 raw log
+        不含任何空寫入（守「TIMEOUT 不寫 raw」）。wexpect 為 Windows-only → create=True patch。
+        """
+        raw_path = tmp_path / "raw.log"
+        fake_child = _FakeWexpectChild(["AFTER_TIMEOUT\r\n"], timeout_rounds=1)
+        fake_wexpect = MagicMock()
+        fake_wexpect.TIMEOUT = object()
+        fake_wexpect.EOF = object()
+        fake_wexpect.spawn.return_value = fake_child
+        with patch("autoclaude.perception.pty_wrapper._WEXPECT_AVAILABLE", True), \
+             patch("autoclaude.perception.pty_wrapper.wexpect", fake_wexpect, create=True):
+            pty = _make_pty(raw_log_path=raw_path)
+            pty.start()
+            assert pty.readline(timeout=0.1) == ""                   # TIMEOUT → '' 非 None
+            assert pty.readline(timeout=0.1) == "AFTER_TIMEOUT\r\n"   # 串流未被終止
+            pty.close()
+        assert raw_path.read_bytes() == b"AFTER_TIMEOUT\r\n"          # TIMEOUT 未寫空 raw
+
+    def test_wexpect_auto_respond_via_sendline_on_pattern_match(self):
+        """improving_74 R-74-2：wexpect 模式偵測授權提示須經 child.sendline 自動回應。
+
+        Rule 9 意圖：既有三個 _auto_respond 測試全 patch _WEXPECT_AVAILABLE=False，只驗
+        subprocess 的 proc.stdin.write 分支；wexpect 模式 send()→child.sendline 分支零覆蓋。
+        若該分支壞掉（如 send() 漏掉 wexpect 分支），既有測試抓不到。本測直接守 child.sendline
+        被以 auth_response 呼叫。
+        """
+        fake_child = _FakeWexpectChild(["This action requires authorization. Proceed? (Y/n)\r\n"])
+        fake_wexpect = MagicMock()
+        fake_wexpect.TIMEOUT = object()
+        fake_wexpect.EOF = object()
+        fake_wexpect.spawn.return_value = fake_child
+        with patch("autoclaude.perception.pty_wrapper._WEXPECT_AVAILABLE", True), \
+             patch("autoclaude.perception.pty_wrapper.wexpect", fake_wexpect, create=True):
+            pty = _make_pty(auth_patterns=[r"Proceed\?\s*\(Y/n\)"], auth_response="y")
+            pty.start()
+            pty.readline(timeout=0.1)
+            pty.close()
+        assert fake_child.sent == ["y"]   # 經 wexpect child.sendline 回應，非 subprocess stdin
+
+    def test_wexpect_no_auto_respond_on_normal_line(self):
+        """improving_74 R-74-3：wexpect 模式正常行不誤觸發自動回應（對稱 subprocess 的
+        test_no_auth_on_normal_line）。pattern 不匹配 → child.sendline 不被呼叫。
+        """
+        fake_child = _FakeWexpectChild(["[INIT_DONE]\r\n"])
+        fake_wexpect = MagicMock()
+        fake_wexpect.TIMEOUT = object()
+        fake_wexpect.EOF = object()
+        fake_wexpect.spawn.return_value = fake_child
+        with patch("autoclaude.perception.pty_wrapper._WEXPECT_AVAILABLE", True), \
+             patch("autoclaude.perception.pty_wrapper.wexpect", fake_wexpect, create=True):
+            pty = _make_pty(auth_patterns=[r"Proceed\?\s*\(Y/n\)"], auth_response="y")
+            pty.start()
+            pty.readline(timeout=0.1)
+            pty.close()
+        assert fake_child.sent == []      # 正常行不誤觸發
+
+    def test_wexpect_readline_returns_empty_on_expect_exception(self):
+        """improving_74 R-74-6（audit_74 SA-SD 鏡發現）：_readline_wexpect 的 expect 拋例外時
+        須由 except 接住、回 '' 不崩潰（fail-soft），與既有四出口一致。
+
+        Rule 9 意圖：wexpect expect() 偶發拋例外（如底層 pipe 異常）不應讓讀取迴圈整個炸掉；
+        production 以 `except Exception: logger.debug(...); return ""` 吞錯回 ''。此分支本輪前
+        零覆蓋。若退回 `raise`（或回 None），本測轉紅。
+        """
+        fake_child = _FakeWexpectChild([], raise_on_expect=RuntimeError("simulated wexpect failure"))
+        fake_wexpect = MagicMock()
+        fake_wexpect.TIMEOUT = object()
+        fake_wexpect.EOF = object()
+        fake_wexpect.spawn.return_value = fake_child
+        with patch("autoclaude.perception.pty_wrapper._WEXPECT_AVAILABLE", True), \
+             patch("autoclaude.perception.pty_wrapper.wexpect", fake_wexpect, create=True):
+            pty = _make_pty()
+            pty.start()
+            assert pty.readline(timeout=0.1) == ""   # 例外被 except 接住、回 '' 不崩潰
+            pty.close()
 
     def test_send_writes_to_stdin(self):
         proc = _make_mock_proc([])
