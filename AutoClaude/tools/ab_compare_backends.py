@@ -117,6 +117,18 @@ class RunMetrics:
         """
         return self.observer_peak_token_pct > 0.0 or self.peak_token_pct > 0.0
 
+    @property
+    def effective_peak_token_pct(self) -> float:
+        """本次 run 的真實 token% 峰值（W-83-1 / DEF-83-001）。
+
+        ＝訊號層 observer 真值（KernelResult.peak_token_pct）與決策層 marker peak
+        （TOKEN_COMPACT/HALT 行）取最大。Kernel production 路徑 observer 看見全程
+        → observer ≥ marker；合成/legacy log 可能只有 marker（observer=0）→ 取 max
+        兩態皆正確。**DEF-83-001**：原顯示誤用 marker（未撞 80/90% 門檻時恆 0）→ 真跑
+        observer 已測得真值（如 6.2/2.0%）卻被盲報「0%」、與「已觀測」自相矛盾。
+        """
+        return max(self.observer_peak_token_pct, self.peak_token_pct)
+
 
 def parse_run_metrics(log_text: str, backend: str = "") -> RunMetrics:
     """從一次 run 的引擎 log 文字解析指標（純函式，無副作用）。
@@ -231,7 +243,9 @@ def _fmt_token_peak(m: RunMetrics) -> str:
     """
     if not m.token_signal_observed:
         return "0%（⚠ 訊號源未產出，非真值）"
-    return f"{m.peak_token_pct:.0f}%"
+    # W-83-1 / DEF-83-001：報 observer/marker 取最大的真實峰值，而非僅 marker peak
+    # （未撞門檻恆 0）——否則訊號已觀測卻盲報「0%」，藏掉真跑 A/B 真實 token 差異。
+    return f"{m.effective_peak_token_pct:.0f}%"
 
 
 def format_comparison(pty: RunMetrics, sdk: RunMetrics) -> str:
@@ -308,6 +322,9 @@ class AggregateMetrics:
     sdd_violation_count_total: int = 0
     peak_token_pct_mean: float = 0.0
     peak_token_pct_max: float = 0.0
+    # W-83-1 / DEF-83-001：observer/marker 取最大的真實峰值之聚合（取代 marker-only 盲報）。
+    effective_peak_token_pct_mean: float = 0.0
+    effective_peak_token_pct_max: float = 0.0
     compact_count_mean: float = 0.0
     compact_count_total: int = 0
     compact_count_max: int = 0
@@ -345,6 +362,9 @@ def aggregate_runs(runs: list[RunMetrics], backend: str = "") -> AggregateMetric
     agg.sdd_violation_count_total = sum(r.sdd_violation_count for r in runs)
     agg.peak_token_pct_mean = statistics.mean(tok)
     agg.peak_token_pct_max = max(tok)
+    eff = [r.effective_peak_token_pct for r in runs]  # W-83-1 / DEF-83-001：真實峰值聚合
+    agg.effective_peak_token_pct_mean = statistics.mean(eff)
+    agg.effective_peak_token_pct_max = max(eff)
     agg.compact_count_mean = statistics.mean(cmp_)   # 平均每輪壓縮次數（churn 代理）
     agg.compact_count_total = sum(cmp_)
     agg.compact_count_max = max(cmp_)                # 最壞單輪壓縮次數
@@ -367,7 +387,8 @@ def format_aggregate_comparison(pty: AggregateMetrics, sdk: AggregateMetrics) ->
 
     def _fmt_agg_token_peak(a: AggregateMetrics) -> str:
         # W-81-1 / DEF-81-001：N 輪皆無訊號 → 不裸印 0%，標明訊號缺失
-        base = f"{a.peak_token_pct_mean:.0f}% / {a.peak_token_pct_max:.0f}%"
+        # W-83-1 / DEF-83-001：用 effective（observer/marker 取最大）真實峰值，非 marker-only。
+        base = f"{a.effective_peak_token_pct_mean:.0f}% / {a.effective_peak_token_pct_max:.0f}%"
         if a.n > 0 and a.token_signal_observed_count == 0:
             return f"{base}（⚠ {a.n} 輪皆無訊號）"
         return base

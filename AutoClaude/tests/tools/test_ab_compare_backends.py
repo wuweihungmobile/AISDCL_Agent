@@ -20,6 +20,7 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from tools.ab_compare_backends import (  # noqa: E402
+    _fmt_token_peak,
     _load_log_or_raise,
     _resolve_invocation_path,
     aggregate_runs,
@@ -702,3 +703,84 @@ def test_main_parse_mode_renders_failloud_on_cp950_stdout(tmp_path, monkeypatch)
     fake.flush()
     rendered = fake.buffer.getvalue().decode("utf-8")
     assert "訊號源未產出" in rendered  # fail-loud ⚠ 報表確實輸出（utf-8 後）
+
+
+# ── W-83-1 / DEF-83-001：載具「token 峰值」報 observer 真實峰值（非 marker-only 盲報）──
+# 真跑鐵證：smoke 雙 backend KernelResult.peak_token_pct=6.2006(pty)/2.0(sdk)、未撞門檻無
+# marker → observer>0 但 marker=0。修前 _fmt_token_peak 印 marker（0%）與「已觀測」矛盾、
+# 藏掉真實 A/B token 差異。修後改報 effective=max(observer,marker)。
+# 真跑 KernelResult（observer peak=2.0，無任何 TOKEN_COMPACT/HALT marker）——複現 SDK 真跑情形。
+_REALRUN_SDK_PEAK_2 = (
+    "INFO autoclaude: 執行器後端：Claude Agent SDK\n"
+    "Playbook 結束 | KernelResult(success=True, completed_steps=2, total_steps=2, "
+    "reason='success', step_log=['[S01] x ✓ (attempt 1)', '[S02] y ✓ (attempt 1)'], "
+    "completed_step_ids=['S01','S02'], halted=False, escalated=False, "
+    "halt_step_idx=None, peak_token_pct=2.0)"
+)
+
+
+def test_effective_peak_is_max_of_observer_and_marker():
+    """RTM-83-4：effective_peak_token_pct = max(observer, marker)。意圖＝真實峰值須涵蓋
+    訊號層 observer 與決策層 marker 兩來源，任一改動（去 observer / 去 marker / 改 min）皆破壞。"""
+    m = parse_run_metrics(_REALRUN_OBSERVER_SIGNAL, "sdk")  # observer 12.5, marker 0
+    assert m.observer_peak_token_pct == 12.5
+    assert m.peak_token_pct == 0.0
+    assert m.effective_peak_token_pct == 12.5  # max(12.5, 0)
+
+
+def test_def_83_001_observer_peak_shown_when_no_marker():
+    """RTM-83-1（DEF-83-001 核心）：observer>0 且無 marker → 「token 峰值」報 observer 真值
+    （12%），非盲報 0%。修前印 m.peak_token_pct=0 → '0%'；修後印 effective=12.5 → '12%'。"""
+    m = parse_run_metrics(_REALRUN_OBSERVER_SIGNAL, "sdk")
+    cell = _fmt_token_peak(m)
+    assert cell == "12%"  # round(12.5)→12（.0f）
+    assert cell != "0%"
+
+
+def test_def_83_001_marker_peak_shown_when_no_observer():
+    """RTM-83-2 零退化：observer=0 且 marker>0（既有語意）→ 報 marker 值（85%）。
+    effective=max(0,85)=85 → 顯示不變，保住 W-81-1 既有行為。"""
+    log = "=== STATE: TOKEN_COMPACT | [S01] 85% >= 80% ===\n" + _PERFECT
+    m = parse_run_metrics(log, "pty")
+    assert m.observer_peak_token_pct == 0.0
+    assert m.peak_token_pct == 85.0
+    assert _fmt_token_peak(m) == "85%"
+
+
+def test_def_83_001_effective_peak_takes_max():
+    """RTM-83-3：observer>0 且 marker>0 → 報兩者最大（marker 91 > observer 12.5 → 91%）。
+    意圖＝改 max→min 即紅。"""
+    log = (
+        "=== STATE: TOKEN_HALT | [S01] context 91% >= 90% ===\n"
+        "Playbook 結束 | KernelResult(success=True, completed_steps=1, total_steps=1, "
+        "halted=True, escalated=False, peak_token_pct=12.5)"
+    )
+    m = parse_run_metrics(log, "pty")
+    assert m.observer_peak_token_pct == 12.5
+    assert m.peak_token_pct == 91.0
+    assert m.effective_peak_token_pct == 91.0
+    assert _fmt_token_peak(m) == "91%"
+
+
+def test_def_83_001_realrun_kernelresult_peak_rendered():
+    """RTM-83-5（真跑錨定）：複現 SDK 真跑（KernelResult peak=2.0、無 marker），
+    format_comparison 的 token 峰值列須顯示 2%，非 0%、非「訊號源未產出」。
+    這正是本輪真跑揭露的盲報缺陷之回歸鎖。"""
+    sdk = parse_run_metrics(_REALRUN_SDK_PEAK_2, "sdk")
+    pty = parse_run_metrics(_REALRUN_SDK_PEAK_2, "pty")
+    out = format_comparison(pty, sdk)
+    assert "2%" in out
+    assert "訊號源未產出" not in out  # 訊號已觀測（peak=2.0>0）
+    assert "已觀測" in out
+
+
+def test_def_83_001_aggregate_effective_peak():
+    """RTM-83-6：aggregate 以 effective（observer 真值）聚合；多輪 format 不藏真值。
+    兩輪 observer peak=12.5（無 marker）→ effective mean/max=12.5 → 報 12%，非 0%。"""
+    runs = [parse_run_metrics(_REALRUN_OBSERVER_SIGNAL, "sdk") for _ in range(2)]
+    a = aggregate_runs(runs, "sdk")
+    assert a.effective_peak_token_pct_mean == 12.5
+    assert a.effective_peak_token_pct_max == 12.5
+    pty = aggregate_runs([parse_run_metrics(_REALRUN_NO_SIGNAL, "pty")], "pty")
+    out = format_aggregate_comparison(pty, a)
+    assert "12%" in out  # sdk 真實峰值現身，非 marker-only 的 0%
