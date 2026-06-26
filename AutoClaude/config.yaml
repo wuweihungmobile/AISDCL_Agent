@@ -6,7 +6,10 @@ claude:
   encoding: utf-8
 
 minimax:
-  api_key: ""                       # 建議改用環境變數 MINIMAX_API_KEY
+  # 可改用環境變數 MINIMAX_API_KEY / MINIMAX_BASE_URL / MINIMAX_MODEL 覆寫本區塊（main.py:103-107）。
+  # ⚠ AutoClaude 不會自動載入 .env（無 python-dotenv / 無 load_dotenv）——env 變數須由啟動方式
+  #   自行注入（shell 先 source .env 或 export），否則 .env 內容不會生效；亦可直接填本檔/config.local.yaml。
+  api_key: ""
   base_url: "https://api.minimax.io/anthropic"
   model: "MiniMax-M2.7"
   timeout_seconds: 30
