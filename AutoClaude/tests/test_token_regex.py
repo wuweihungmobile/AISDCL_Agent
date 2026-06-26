@@ -7,7 +7,11 @@ from __future__ import annotations
 
 import pytest
 
-from autoclaude.utils.token_tracker import extract_context_pct, build_patterns
+from autoclaude.utils.token_tracker import (
+    build_patterns,
+    context_pct_from_claude_json,
+    extract_context_pct,
+)
 from autoclaude.utils.config import TokenGuardConfig
 
 
@@ -185,3 +189,82 @@ class TestEdgeCasesAndReDoS:
         # 999999 / 100 → 999999%，超出 0~100 範圍應被忽略
         result = extract_context_pct("999999 / 100 tokens")
         assert result is None
+
+
+# ══════════════════════════════════════════════
+# W-82-1 / DEF-81-001：context_pct_from_claude_json（claude -p --output-format json
+# 結構化用量推算近似 context%，PTY 訊號源根因修復）
+# ══════════════════════════════════════════════
+
+# claude 2.1.144 親跑真實 JSON 樣本（improving_82 §2.3 取證）：
+# used = 6 + 21676 + 37121 = 58803；window = max(200000, 1000000) = 1000000 → 5.8803%
+_REAL_CLAUDE_JSON = {
+    "type": "result",
+    "subtype": "success",
+    "result": "ok",
+    "usage": {
+        "input_tokens": 6,
+        "cache_creation_input_tokens": 37121,
+        "cache_read_input_tokens": 21676,
+        "output_tokens": 6,
+    },
+    "modelUsage": {
+        "claude-haiku-4-5-20251001": {"inputTokens": 441, "contextWindow": 200000},
+        "claude-opus-4-7[1m]": {"inputTokens": 6, "contextWindow": 1000000},
+    },
+}
+
+
+class TestContextPctFromClaudeJson:
+    def test_context_pct_from_real_claude_json(self):
+        """RTM-82-1：真實 JSON 樣本算出正確近似 context%（≈5.88%）。"""
+        pct = context_pct_from_claude_json(_REAL_CLAUDE_JSON)
+        assert pct is not None
+        assert abs(pct - 5.8803) < 0.001
+
+    def test_context_pct_uses_max_context_window(self):
+        """RTM-82-2：多模型取最大 contextWindow（主模型基準），非首個/最小。"""
+        # 同一 used，但若誤取 haiku 的 200000 會得 ~29.4% 而非 ~5.88%
+        pct = context_pct_from_claude_json(_REAL_CLAUDE_JSON)
+        used = 6 + 21676 + 37121
+        assert pct is not None and abs(pct - used / 1_000_000 * 100) < 0.001
+
+    def test_context_pct_none_on_missing_usage(self):
+        """RTM-82-3：缺 usage → None（訊號源未產出，非 0.0 偽裝）。"""
+        assert context_pct_from_claude_json({"modelUsage": {"m": {"contextWindow": 1000}}}) is None
+
+    def test_context_pct_none_on_missing_model_usage(self):
+        """RTM-82-3：缺 modelUsage → None。"""
+        assert context_pct_from_claude_json({"usage": {"input_tokens": 100}}) is None
+
+    def test_context_pct_none_on_zero_window(self):
+        """RTM-82-3：window<=0 → None（不除以零、不偽裝）。"""
+        parsed = {"usage": {"input_tokens": 100}, "modelUsage": {"m": {"contextWindow": 0}}}
+        assert context_pct_from_claude_json(parsed) is None
+
+    def test_context_pct_none_on_zero_used(self):
+        """RTM-82-3：used<=0 → None。"""
+        parsed = {"usage": {"input_tokens": 0}, "modelUsage": {"m": {"contextWindow": 1000}}}
+        assert context_pct_from_claude_json(parsed) is None
+
+    def test_context_pct_clamped_to_100(self):
+        """RTM-82-4：used > window（異常）時 clamp 至 100，不回報 >100。"""
+        parsed = {
+            "usage": {"input_tokens": 5_000_000},
+            "modelUsage": {"m": {"contextWindow": 1_000_000}},
+        }
+        assert context_pct_from_claude_json(parsed) == 100.0
+
+    def test_context_pct_none_on_non_dict(self):
+        """RTM-82-3：非 dict 輸入（None / 字串）→ None，不拋例外。"""
+        assert context_pct_from_claude_json(None) is None  # type: ignore[arg-type]
+        assert context_pct_from_claude_json("not a dict") is None  # type: ignore[arg-type]
+
+    def test_context_pct_ignores_bool_values(self):
+        """bool 是 int 子類；usage 欄位為 True/False 時不可誤當 token 數累加。"""
+        parsed = {
+            "usage": {"input_tokens": True, "cache_read_input_tokens": 500},
+            "modelUsage": {"m": {"contextWindow": 1000}},
+        }
+        # input_tokens=True 被忽略，只算 cache_read 500 → 50%
+        assert context_pct_from_claude_json(parsed) == 50.0

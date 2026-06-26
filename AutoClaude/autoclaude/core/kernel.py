@@ -98,9 +98,12 @@ class PlaybookKernel:
         step_log: list[str] = []
         completed_ids: list[str] = []
         contributors: list[str] = []
+        # W-82-4（DEF-81-001 端到端閉合）：全 run token% 峰值（跨步驟最高水位）。
+        run_peak_token_pct = 0.0
 
         while step_idx < len(playbook.tasks):
             outcome = self._run_step(playbook, step_idx, step_log, completed_ids, contributors)
+            run_peak_token_pct = max(run_peak_token_pct, outcome.peak_token_pct)
 
             if outcome.action == StepAction.ADVANCE:
                 step_idx += 1
@@ -142,6 +145,7 @@ class PlaybookKernel:
             step_log=step_log,
             completed_step_ids=completed_ids,
             contributors=contributors,
+            peak_token_pct=run_peak_token_pct,
         )
 
     # ── 內部：單一步驟 attempt loop ─────────────────────────────────────────────
@@ -202,7 +206,10 @@ class PlaybookKernel:
                                            task=task, step_idx=step_idx, attempt=attempt))
                 self._bus.emit(HookContext(phase=KernelPhase.POST_STEP, playbook=playbook,
                                            task=task, step_idx=step_idx))
-                return StepOutcome(action=StepAction.ADVANCE, attempts_used=attempt + 1)
+                # W-82-4（DEF-81-001 端到端閉合）：成功 step 帶回本 attempt 觀測到的 token%
+                # 峰值，供 run() 累積進 KernelResult.peak_token_pct（成功未觸門檻亦見真值）。
+                return StepOutcome(action=StepAction.ADVANCE, attempts_used=attempt + 1,
+                                   peak_token_pct=observer.peak_pct)
 
             last_failure_reason = failure_reason
             failure_history.append({

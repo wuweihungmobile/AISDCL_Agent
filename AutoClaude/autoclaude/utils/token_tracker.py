@@ -78,6 +78,54 @@ def extract_context_pct(
     return best
 
 
+# 用量欄位 → context 占用 token 數的累加鍵（input + 兩種 cache 皆計入當前 context 占用；
+# output_tokens 不計：那是本次生成側，不占輸入 context 視窗）。
+_CONTEXT_USAGE_KEYS = (
+    "input_tokens",
+    "cache_read_input_tokens",
+    "cache_creation_input_tokens",
+)
+
+
+def context_pct_from_claude_json(parsed: dict) -> Optional[float]:
+    """從 ``claude -p --output-format json`` 結果推算 context 使用率（範圍 0-100）。
+
+    DEF-81-001 PTY 支根因修復（W-82-1）：``claude -p`` 純文字輸出不含 context%，故
+    改以 ``--output-format json`` 的結構化用量推算：
+
+        used   = usage.input_tokens + cache_read_input_tokens + cache_creation_input_tokens
+        window = max(modelUsage[*].contextWindow)
+        pct    = clamp(used / window * 100, 0, 100)
+
+    缺 ``usage``/``modelUsage``、used<=0 或 window<=0 → 回 ``None``（訊號源未產出，由
+    上游 fail-loud 處理；嚴禁回 0.0 偽裝「context 真的 0%」）。
+
+    🔴 誠實邊界（improving_82 §8）：此為**近似** context%——claude JSON **無**直接的
+    ``percentage`` 欄（2.1.144 親跑實證），故由 usage ÷ 最大 contextWindow 推得，非
+    claude 自報值。多模型（如背景 haiku + 主 opus）取最大視窗為當前主模型 context 基準。
+    """
+    if not isinstance(parsed, dict):
+        return None
+    usage = parsed.get("usage")
+    model_usage = parsed.get("modelUsage")
+    if not isinstance(usage, dict) or not isinstance(model_usage, dict):
+        return None
+    used = 0.0
+    for key in _CONTEXT_USAGE_KEYS:
+        val = usage.get(key)
+        if isinstance(val, (int, float)) and not isinstance(val, bool):
+            used += float(val)
+    window = 0.0
+    for mu in model_usage.values():
+        if isinstance(mu, dict):
+            cw = mu.get("contextWindow")
+            if isinstance(cw, (int, float)) and not isinstance(cw, bool) and cw > window:
+                window = float(cw)
+    if used <= 0.0 or window <= 0.0:
+        return None
+    return max(0.0, min(100.0, used / window * 100.0))
+
+
 # ──────────────────────────────────────────────
 # Token 使用日誌（JSONL）
 # ──────────────────────────────────────────────

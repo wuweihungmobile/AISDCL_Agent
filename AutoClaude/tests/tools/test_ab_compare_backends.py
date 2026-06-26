@@ -26,6 +26,7 @@ from tools.ab_compare_backends import (  # noqa: E402
     format_aggregate_comparison,
     format_comparison,
     format_step_comparison,
+    main,
     parse_run_metrics,
 )
 
@@ -673,3 +674,31 @@ def test_rtm_81_4_aggregate_format_flags_all_absent():
     out = format_aggregate_comparison(pty, sdk)
     assert "輪皆無訊號" in out
     assert "token 訊號源" in out
+
+
+# ── DEF-82-001：報表 fail-loud ⚠ 在 Windows cp950 console print 不炸（improving_82 dogfooding）──
+def test_main_parse_mode_renders_failloud_on_cp950_stdout(tmp_path, monkeypatch):
+    """DEF-82-001：format 含 fail-loud「⚠」（W-81-1），模擬 cp950 console stdout，
+    main 應先 reconfigure utf-8 → 正常 print 不拋 UnicodeEncodeError。
+
+    驗證意圖（Rule 9）：守的是「真跑兩 backend 跑完卻在 print 階段炸」這個觀測缺陷的修復——
+    fake stdout 用 cp950 編碼（⚠ 不可編碼）；若移除 main 開頭 reconfigure，print ⚠ 即
+    UnicodeEncodeError 紅。peak_token_pct=0.0 + 無 marker → token_signal_observed False → 渲染 ⚠。"""
+    import io
+
+    kr = ("Playbook 結束 | KernelResult(success=True, completed_steps=2, total_steps=2, "
+          "reason='ok', completed_step_ids=['S01','S02'], halted=False, escalated=False, "
+          "peak_token_pct=0.0)\n")
+    pty_log = tmp_path / "pty.log"
+    sdk_log = tmp_path / "sdk.log"
+    pty_log.write_text(kr, encoding="utf-8")
+    sdk_log.write_text(kr, encoding="utf-8")
+
+    fake = io.TextIOWrapper(io.BytesIO(), encoding="cp950")  # 模擬 Windows console
+    monkeypatch.setattr(sys, "stdout", fake)
+
+    rc = main(["--pty-log", str(pty_log), "--sdk-log", str(sdk_log)])
+    assert rc == 0
+    fake.flush()
+    rendered = fake.buffer.getvalue().decode("utf-8")
+    assert "訊號源未產出" in rendered  # fail-loud ⚠ 報表確實輸出（utf-8 後）

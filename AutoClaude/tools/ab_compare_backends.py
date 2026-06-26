@@ -485,6 +485,13 @@ def _build_argparser() -> argparse.ArgumentParser:
 
 
 def main(argv: list[str] | None = None) -> int:
+    # DEF-82-001（improving_82 dogfooding 真跑揭露）：報表含 fail-loud「⚠」（W-81-1）/中文，
+    # Windows cp950 console 直接 print 會 UnicodeEncodeError 中斷（真跑兩 backend 已跑完卻在
+    # print 階段炸）。強制 stdout 走 utf-8（best-effort；非 TextIOWrapper / 不支援時靜默略過）。
+    try:
+        sys.stdout.reconfigure(encoding="utf-8")  # type: ignore[union-attr]
+    except (AttributeError, OSError):
+        pass
     args = _build_argparser().parse_args(argv)
     if args.pty_log and args.sdk_log:
         pty = parse_run_metrics(Path(args.pty_log).read_text(encoding="utf-8", errors="replace"), "pty")

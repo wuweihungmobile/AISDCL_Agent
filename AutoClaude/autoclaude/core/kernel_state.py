@@ -85,7 +85,11 @@ class KernelResult:
         cls, completed_steps: int, total_steps: int,
         step_log: list[str], completed_step_ids: list[str],
         contributors: list[str],
+        peak_token_pct: float = 0.0,
     ) -> "KernelResult":
+        # W-82-4（DEF-81-001 端到端閉合）：成功 run（未觸 halt/compact 門檻）亦帶回
+        # 全程觀測到的 token% 峰值，使載具讀 KernelResult.peak_token_pct 能見真值（非恆 0）。
+        # peak<=0（無 token 訊號，dry-run / 既有 fake）維持 0.0 → 與接線前完全一致（零退化）。
         return cls(
             success=True,
             completed_steps=completed_steps,
@@ -94,6 +98,7 @@ class KernelResult:
             step_log=step_log,
             completed_step_ids=completed_step_ids,
             contributors=contributors,
+            peak_token_pct=peak_token_pct,
         )
 
     @classmethod

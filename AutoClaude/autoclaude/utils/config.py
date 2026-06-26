@@ -27,6 +27,10 @@ class ClaudeConfig(BaseModel):
     extra_args: list[str] = Field(default_factory=lambda: ["--yes"])
     continue_flag: str = "--continue"   # 傳遞給 claude 以維持對話脈絡
     encoding: str = "utf-8"
+    # W-82-1 / DEF-81-001 PTY 支根因修復：PtyExecutor 以 `--output-format <fmt>` 啟動 claude -p。
+    # 預設 "json"＝啟用真接線（從結構化 usage 推算真實 context% → emit TOKEN_PCT，使 token-guard
+    # 在真跑可被觸發）。設 "" 則退回純文字舊行為（不加參數、不 parse，向後相容開關）。
+    output_format: str = "json"
 
 
 class LoopConfig(BaseModel):

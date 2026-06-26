@@ -271,14 +271,28 @@ class SdkExecutorAdapter:
             return
         try:
             usage = await _maybe_await(client.get_context_usage())
-        except Exception:
+        except Exception as exc:
+            # W-82-3 / DEF-81-001 SDK 支：取用量例外不再純靜默 → fail-loud 標記訊號源未產出
+            logger.warning(
+                "SDK get_context_usage 取用量例外，token%% 訊號源未產出（DEF-81-001 SDK 支）：%s",
+                exc,
+            )
             return
-        if isinstance(usage, dict) and usage.get("percentage") is not None:
+        pct = usage.get("percentage") if isinstance(usage, dict) else None
+        if pct is not None:
             self._emit(
                 on_event,
                 ExecutionEventKind.TOKEN_PCT,
-                {"pct": float(usage["percentage"])},
+                {"pct": float(pct)},
                 seq,
+            )
+        else:
+            # W-82-3 / DEF-81-001 SDK 支：盲區可觀測化——percentage 缺失時不再靜默跳過
+            # （improving_76~81 真跑 SDK 支恆 0 的根因），改 fail-loud warn 使盲區在真跑可見。
+            logger.warning(
+                "SDK get_context_usage 無 percentage 欄，token%% 訊號源未產出"
+                "（DEF-81-001 SDK 支）；usage keys=%s",
+                sorted(usage.keys()) if isinstance(usage, dict) else type(usage).__name__,
             )
 
     def _wrap_can_use_tool(self) -> Optional[Callable]:

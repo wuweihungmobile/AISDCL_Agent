@@ -140,6 +140,34 @@ def test_event_mapping_full_stream():
     assert comp.payload["text_len"] == len("hello world")
 
 
+def test_emit_token_pct_warns_when_percentage_missing(caplog):
+    """W-82-3 / RTM-82-9 / DEF-81-001 SDK 支：percentage 缺失 → 不 emit TOKEN_PCT 但
+    fail-loud warn（盲區可見，不再靜默跳過）。"""
+    fake = FakeSdkClient(
+        messages=[ResultMessage(is_error=False)],
+        context_usage={"maxTokens": 200000},  # 無 percentage 欄（模擬 SDK 支盲區）
+    )
+    adapter = SdkExecutorAdapter(AppConfig(), client_factory=_make_factory(fake))
+    events, on_event = _collect_events()
+    with caplog.at_level("WARNING", logger="autoclaude.infra.adapters.sdk_executor_adapter"):
+        adapter.execute("x", on_event=on_event)
+    assert ExecutionEventKind.TOKEN_PCT not in [e.kind for e in events]
+    assert any("訊號源未產出" in r.getMessage() for r in caplog.records)
+
+
+def test_emit_token_pct_emitted_when_percentage_present():
+    """RTM-82-10：percentage 有值 → 照常 emit（零退化）。"""
+    fake = FakeSdkClient(
+        messages=[ResultMessage(is_error=False)],
+        context_usage={"percentage": 33.0},
+    )
+    adapter = SdkExecutorAdapter(AppConfig(), client_factory=_make_factory(fake))
+    events, on_event = _collect_events()
+    adapter.execute("x", on_event=on_event)
+    pct_evs = [e for e in events if e.kind == ExecutionEventKind.TOKEN_PCT]
+    assert len(pct_evs) == 1 and pct_evs[0].payload == {"pct": 33.0}
+
+
 def test_result_message_is_error_maps_exit_code_1():
     fake = FakeSdkClient(messages=[ResultMessage(is_error=True)])
     adapter = SdkExecutorAdapter(AppConfig(), client_factory=_make_factory(fake))

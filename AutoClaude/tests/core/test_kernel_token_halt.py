@@ -129,3 +129,25 @@ def test_no_token_event_does_not_emit_on_token_usage():
     result = kernel.run(_pb())
     assert result.success is True
     assert spy.fired == 0  # 無 token 訊號 → 不 emit ON_TOKEN_USAGE
+
+
+def test_success_run_carries_peak_token_pct_end_to_end():
+    """W-82-4 / DEF-81-001 端到端閉合：成功 run（未觸 halt/compact 門檻）的
+    KernelResult.peak_token_pct 必須反映 observer 觀測到的真實峰值（非恆 0）。
+
+    驗證意圖（Rule 9）：這是載具讀 KernelResult.peak_token_pct 端到端見真值的關鍵——
+    修前成功路徑（StepAction.ADVANCE）丟棄 observer.peak_pct、success_ 無 peak 參數，
+    致真跑成功 run 的 peak 恆 0（DEF-81-001 上輪困境）。若本契約破壞即真值再次斷流。"""
+    kernel, _ = _kernel_with_token_guard(TokenEmittingExecutor(pct=42.0))
+    result = kernel.run(_pb())
+    assert result.success is True and result.halted is False
+    assert result.peak_token_pct == 42.0  # 修前此處為 0.0（成功路徑丟棄真值）
+
+
+def test_success_run_no_token_signal_peak_stays_zero():
+    """W-82-4 零退化：無 token 訊號（peak=0）→ 成功 KernelResult.peak_token_pct 維持 0.0
+    （dry-run / 既有 fake executor 行為與接線前完全一致）。"""
+    kernel = PlaybookKernel(TokenEmittingExecutor(pct=None), _PassEvaluator(), bus=EventBus())
+    result = kernel.run(_pb())
+    assert result.success is True
+    assert result.peak_token_pct == 0.0
