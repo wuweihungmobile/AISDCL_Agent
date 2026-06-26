@@ -64,8 +64,11 @@ class PtyWrapper:
         self._child = wexpect.spawn(
             self._command, args=list(self._args), encoding=self._encoding
         )
-        if self._raw_logger:
-            self._child.logfile_read = _RawLogAdapter(self._raw_logger, self._encoding)
+        # improving_73 DEF-73-001：原以 self._child.logfile_read = _RawLogAdapter(...) 擷取 raw，
+        # 但 wexpect 4.0.0 的 logfile_read callback 於 expect() 過程**完全不觸發**（零成本探針實證：
+        # 簡單正確指令、child.after 確讀到全部行，logfile_read 仍捕獲 0 字元）→ raw log 0 bytes
+        # 觀測缺口。改於 _readline_wexpect 讀到行時顯式寫 raw_logger（鏡像 subprocess 路徑），
+        # 不再依賴從不觸發的 callback；因 callback 從不觸發故無雙重記錄之虞。
         logger.info("wexpect 模式啟動：%s args=%r", self._command, self._args)
 
     def _start_subprocess(self) -> None:
@@ -96,9 +99,17 @@ class PtyWrapper:
             )
             if index == 0:
                 line = self._child.after
+                # DEF-73-001：顯式擷取 raw（wexpect logfile_read callback 不觸發），鏡像 subprocess 路徑
+                if self._raw_logger and line:
+                    self._raw_logger.write(line.encode(self._encoding, errors="replace"))
                 self._auto_respond(line)
                 return line
             if index == 2:
+                # DEF-73-001：EOF 前若有未換行殘留 buffer（child.before），結束前顯式擷取，
+                # 與 subprocess 路徑（iter readline 回傳 EOF 前最後一段未換行 chunk）對稱、避免尾段遺失。
+                tail = getattr(self._child, "before", None)
+                if self._raw_logger and tail:
+                    self._raw_logger.write(tail.encode(self._encoding, errors="replace"))
                 return None
             return ""
         except Exception as exc:
@@ -161,17 +172,3 @@ class PtyWrapper:
         if self._proc:
             return self._proc.poll() is None
         return False
-
-
-class _RawLogAdapter:
-    """將 wexpect logfile_read 的字串寫入 RawStreamLogger。"""
-
-    def __init__(self, raw_logger: RawStreamLogger, encoding: str):
-        self._raw = raw_logger
-        self._enc = encoding
-
-    def write(self, s: str) -> None:
-        self._raw.write(s.encode(self._enc, errors="replace"))
-
-    def flush(self) -> None:
-        pass

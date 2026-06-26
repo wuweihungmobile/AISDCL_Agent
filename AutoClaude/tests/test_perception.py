@@ -124,6 +124,38 @@ def _make_pty(**kwargs) -> PtyWrapper:
     return PtyWrapper(**defaults)
 
 
+class _FakeWexpectChild:
+    """精準可控的 fake wexpect child（DEF-73-001 回歸用）。
+
+    刻意**不提供** logfile_read callback 行為——複刻 wexpect 4.0.0 實況（callback 於 expect()
+    不觸發，零成本探針實證捕獲 0 字元）。每呼叫 expect 吐一行設於 self.after、index=0；行盡回 EOF
+    index=2。據此驗證 raw 擷取必由 readline 顯式寫入、不依賴 callback。
+    """
+
+    def __init__(self, lines, eof_tail=None):
+        self._lines = list(lines)
+        self.after = None
+        self.before = None
+        self._eof_tail = eof_tail
+
+    def expect(self, patterns, timeout=None):
+        if self._lines:
+            self.after = self._lines.pop(0)
+            self.before = ""
+            return 0
+        self.before = self._eof_tail or ""  # EOF 前未換行殘留（模擬 wexpect child.before）
+        return 2  # 對應 patterns[2] == wexpect.EOF
+
+    def sendline(self, text):
+        pass
+
+    def close(self, force=False):
+        pass
+
+    def isalive(self):
+        return bool(self._lines)
+
+
 class TestPtyWrapper:
     def test_readline_returns_decoded_line(self):
         proc = _make_mock_proc([b"hello world\n"])
@@ -172,6 +204,72 @@ class TestPtyWrapper:
         assert call.args[0] == "claude"               # command 為第一參數（非長字串）
         assert call.kwargs["args"] == ["-p", complex_prompt]  # prompt 原樣以 list 傳
         assert complex_prompt not in call.args[0]      # 防回歸：未被 join 進 command 字串
+
+    def test_wexpect_raw_log_captured_explicitly(self, tmp_path):
+        """DEF-73-001 回歸：wexpect 路徑讀到行時須**顯式**寫 raw_logger。
+
+        Rule 9 意圖：improving_72 真跑觀測 pty raw log 0 bytes，根因＝原碼僅靠
+        child.logfile_read callback 擷取，而 wexpect 4.0.0 該 callback 於 expect() 不觸發。
+        若退回「只靠 callback」此測必紅（fake child 永不呼叫 callback → raw 檔為空）。
+        """
+        raw_path = tmp_path / "raw.log"
+        fake_child = _FakeWexpectChild(["CLAUDE_OUT_LINE\r\n"])
+        fake_wexpect = MagicMock()
+        fake_wexpect.TIMEOUT = object()
+        fake_wexpect.EOF = object()
+        fake_wexpect.spawn.return_value = fake_child
+        with patch("autoclaude.perception.pty_wrapper._WEXPECT_AVAILABLE", True), \
+             patch("autoclaude.perception.pty_wrapper.wexpect", fake_wexpect, create=True):
+            pty = _make_pty(raw_log_path=raw_path)
+            pty.start()
+            assert pty.readline(timeout=0.1) == "CLAUDE_OUT_LINE\r\n"
+            pty.close()
+        assert raw_path.read_bytes() == b"CLAUDE_OUT_LINE\r\n"
+
+    def test_wexpect_raw_log_accumulates_and_no_logfile_read_dependency(self, tmp_path):
+        """DEF-73-001 回歸：多行跨 readline 累積；且 start() 不再掛載 logfile_read callback。
+
+        `assert not hasattr(fake_child, "logfile_read")` 守住死碼移除——若有人重新引入
+        `self._child.logfile_read = ...` 此測立即紅，固化「不依賴從不觸發的 callback」決策。
+        """
+        raw_path = tmp_path / "raw.log"
+        fake_child = _FakeWexpectChild(["L1\r\n", "L2\r\n"])
+        fake_wexpect = MagicMock()
+        fake_wexpect.TIMEOUT = object()
+        fake_wexpect.EOF = object()
+        fake_wexpect.spawn.return_value = fake_child
+        with patch("autoclaude.perception.pty_wrapper._WEXPECT_AVAILABLE", True), \
+             patch("autoclaude.perception.pty_wrapper.wexpect", fake_wexpect, create=True):
+            pty = _make_pty(raw_log_path=raw_path)
+            pty.start()
+            assert not hasattr(fake_child, "logfile_read")
+            assert pty.readline(timeout=0.1) == "L1\r\n"
+            assert pty.readline(timeout=0.1) == "L2\r\n"
+            assert pty.readline(timeout=0.1) is None
+            pty.close()
+        assert raw_path.read_bytes() == b"L1\r\nL2\r\n"
+
+    def test_wexpect_raw_log_captures_eof_residual_without_newline(self, tmp_path):
+        """DEF-73-001 回歸（audit_73 SA-SD 發現）：EOF 前未換行尾段（child.before）須擷取。
+
+        Rule 9 意圖：子程序最後吐一段不帶換行的尾段時，wexpect 放進 child.before、index==2
+        分支若直接 return None 會讓尾段從 raw log 遺失，與 subprocess 路徑（會回傳 EOF 前最後
+        chunk）不對稱。本測守「EOF 殘留也擷取」，使兩後端 raw 擷取真正一致。
+        """
+        raw_path = tmp_path / "raw.log"
+        fake_child = _FakeWexpectChild(["L1\r\n"], eof_tail="TAIL_NO_NL")
+        fake_wexpect = MagicMock()
+        fake_wexpect.TIMEOUT = object()
+        fake_wexpect.EOF = object()
+        fake_wexpect.spawn.return_value = fake_child
+        with patch("autoclaude.perception.pty_wrapper._WEXPECT_AVAILABLE", True), \
+             patch("autoclaude.perception.pty_wrapper.wexpect", fake_wexpect, create=True):
+            pty = _make_pty(raw_log_path=raw_path)
+            pty.start()
+            assert pty.readline(timeout=0.1) == "L1\r\n"
+            assert pty.readline(timeout=0.1) is None  # EOF，擷取殘留尾段
+            pty.close()
+        assert raw_path.read_bytes() == b"L1\r\nTAIL_NO_NL"
 
     def test_send_writes_to_stdin(self):
         proc = _make_mock_proc([])

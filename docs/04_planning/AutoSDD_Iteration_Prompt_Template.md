@@ -201,6 +201,12 @@ Tauri GUI 不上 PATH，因規劃期假設其為 PATH CLI，致 DEF-01-007 跨 9
 依上輪計畫的「實作順序」選取本輪 W 項（建議每輪 ≤3 項），對每項產出：介面 delta、
 LOC 預算落點、對 `.importlinter` 各 contract 的影響分析、checkpoint additive 欄位需求。
 B 軌：依 Brownfield SOP 走 SCG-0~3（產出落 monorepo `docs/` 對應編號目錄）。
+> **🔴 規格先行硬紀律（違反＝流程瑕疵，須於 §8 誠實標記）**：`docs/04_planning/AutoSDD_improving_{{N}}.md`
+> 這份**檔案**必須在**本階段就先落地**（寫入 §1 輸入、§2 階段一實測、§3 增量設計含
+> `<Architecture_Design_Review>`/介面 delta/RTM 需求列），**才可進階段三實作**；§5 驗證矩陣的
+> 「實測」欄、§4.2 真跑/突變結果等**只准在階段三/四回填**。**嚴禁**把計畫書留到最後一次寫齊
+> ——那會讓它變成「事後結案報告」而非「事前計畫」，違反 SDD 規格先行支柱（工程紀律第 4 條）。
+> 單一 agent 線性執行時尤其容易圖方便一次寫齊，務必先落地設計段、再動手寫 code。
 ### 階段三：實作與雙重驗證
 逐項實作；每項完成即跑單測 + 對應契約測試（DAL 三後端 round-trip、plugin coverage ≥90%）。
 觸發 `SDD_CONTRACT_VIOLATION` 路徑必有攻防測試（注入向量 + 越閘存取）。
@@ -220,6 +226,13 @@ B 軌：依 Brownfield SOP 走 SCG-0~3（產出落 monorepo `docs/` 對應編號
 | AISDLC_SDD 閘門 | `bash scripts/ci-gate.sh` | pytest not-chaos 全綠 + arch_fitness exit<2 |
 | DAL 等價 | equivalence job（含新 round-trip 契約測試） | 三後端等價 |
 | 五軌 TLC（僅 FSM 變更時） | `bash scripts/ci-gate.sh --full-tlc` | 五軌 0 violation |
+
+> **🔴 N/A 標註精確紀律（誠實性，違反＝半個虛報）**：矩陣任一格標 N/A 時，**必須言明屬哪一種**，
+> 不可含糊讓人誤以為「都沒驗證」：
+> - **「條件未觸發、本輪確實未跑」**（如五軌 TLC：未碰 `*.tla`/FSM，且 TLC 不在 pytest 全套、需 Java）
+>   →須附 git diff 鐵證「零碰觸發路徑」。
+> - **「既有測試隨全套已跑且通過、本輪無新契約」**（如 DAL 等價：`tests/equivalence/` N 個測試隨全套 pytest
+>   通過，只是本輪無新 DAL/checkpoint 改動故無新增 round-trip 契約）→須引測試數/檔路徑，**不可只寫 N/A**。
 
 需對比模型後端穩定度時，
 以 `cc-switch` 切換 profile 對同一 playbook 做 A/B（指標：一次通過率、CORRECTION 次數、
