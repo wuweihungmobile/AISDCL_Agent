@@ -48,6 +48,15 @@ _RE_FIELD_INT = {
     "completed_steps": re.compile(r"completed_steps=(\d+)"),
     "total_steps": re.compile(r"total_steps=(\d+)"),
 }
+# W-81-1 / DEF-81-001：observer 層真值——KernelResult 印的 peak_token_pct（kernel.py，
+# TokenObserver 真跑全程測得的最高 context%）。與載具自掃 marker 行的 peak 是**不同來源**：
+# 此為訊號源層（observer 收到的真值），marker 行 peak 為決策層（達門檻才印）。
+# 判據（零歧義）：context% = used/max，observer 真在運作則 peak 必 > 0（即使 1%）；
+# observer_peak == 0.0 嚴格意味 observer 從未收到任何可解析 token% 事件＝**訊號源未產出**
+# （非「context 真的 0%」）。真跑探測實證 pty/sdk 雙 backend 皆 peak_token_pct=0.0。
+_RE_FIELD_FLOAT = {
+    "peak_token_pct": re.compile(r"peak_token_pct=(\d+(?:\.\d+)?)"),
+}
 _RE_FIELD_BOOL = {
     "success": re.compile(r"success=(True|False)"),
     "escalated": re.compile(r"escalated=(True|False)"),
@@ -84,6 +93,9 @@ class RunMetrics:
     run_succeeded: bool = False
     escalated: bool = False
     halted: bool = False
+    # W-81-1 / DEF-81-001：observer 層真值（KernelResult.peak_token_pct）。預設 0.0＝真跑
+    # 無訊號（fail-loud：與「context 真的 0%」區分，見 token_signal_observed property）。
+    observer_peak_token_pct: float = 0.0
     # W-76-1：per-step 歸因（step_id → StepMetrics）。空 dict＝log 無步驟標記（誠實表「無 per-step 資訊」）。
     per_step: dict[str, "StepMetrics"] = field(default_factory=dict)
 
@@ -93,6 +105,17 @@ class RunMetrics:
         if self.completed_steps == 0:
             return 0.0
         return self.first_pass_steps / self.completed_steps
+
+    @property
+    def token_signal_observed(self) -> bool:
+        """token% 訊號源本次 run 是否產出過任何值（W-81-1 / DEF-81-001 fail-loud 判據）。
+
+        observer 層真值（KernelResult.peak_token_pct）或載具自掃 marker 行 % 任一 > 0
+        即「有訊號」。皆 0 → False＝訊號源未產出（非「context 真的 0%」）：真跑探測實證
+        pty（claude -p 不吐 context%）/sdk（get_context_usage 無 percentage 靜默跳過）雙
+        backend 皆落此情形，compact/halt 在真實負載從未觸發。報告層據此 fail-loud 標記。
+        """
+        return self.observer_peak_token_pct > 0.0 or self.peak_token_pct > 0.0
 
 
 def parse_run_metrics(log_text: str, backend: str = "") -> RunMetrics:
@@ -137,6 +160,12 @@ def parse_run_metrics(log_text: str, backend: str = "") -> RunMetrics:
         m.run_succeeded = bools.get("success", False)
         m.escalated = bools.get("escalated", False)
         m.halted = bools.get("halted", False)  # DEF-75-001：修 dead-parse（原解析進 bools 卻丟棄）
+        # W-81-1 / DEF-81-001：observer 層真值。KernelResult 欄名 peak_token_pct → 載具
+        # observer_peak_token_pct（與載具自掃 marker 行的 m.peak_token_pct 是不同來源，勿覆寫）。
+        # 無此欄 / 半途 log → 維持 0.0 = 無訊號（誠實）。
+        mm_obs = _RE_FIELD_FLOAT["peak_token_pct"].search(kr_blob)
+        if mm_obs:
+            m.observer_peak_token_pct = float(mm_obs.group(1))
     # 無 KernelResult 行（半途 log）→ 退回以 ✓ 標記計完成步數
     if m.completed_steps == 0:
         m.completed_steps = completed_from_marks
@@ -195,6 +224,16 @@ def _fmt_pct(value: float) -> str:
     return f"{value * 100:.0f}%"
 
 
+def _fmt_token_peak(m: RunMetrics) -> str:
+    """token 峰值渲染（W-81-1 / DEF-81-001 fail-loud）。
+
+    訊號源未產出時不裸印 0%（會被誤讀為「context 真的 0%」），而標明訊號缺失。
+    """
+    if not m.token_signal_observed:
+        return "0%（⚠ 訊號源未產出，非真值）"
+    return f"{m.peak_token_pct:.0f}%"
+
+
 def format_comparison(pty: RunMetrics, sdk: RunMetrics) -> str:
     """產出 Markdown 對比表（pty vs sdk 四指標 + 完成狀態）。"""
     rows = [
@@ -202,7 +241,10 @@ def format_comparison(pty: RunMetrics, sdk: RunMetrics) -> str:
         ("CORRECTION 次數", str(pty.correction_count), str(sdk.correction_count)),
         ("SDD_CONTRACT_VIOLATION 次數",
          str(pty.sdd_violation_count), str(sdk.sdd_violation_count)),
-        ("token 峰值", f"{pty.peak_token_pct:.0f}%", f"{sdk.peak_token_pct:.0f}%"),
+        ("token 峰值", _fmt_token_peak(pty), _fmt_token_peak(sdk)),
+        ("token 訊號源（W-81-1）",
+         "已觀測" if pty.token_signal_observed else "未產出",
+         "已觀測" if sdk.token_signal_observed else "未產出"),
         ("壓縮次數（compact）", str(pty.compact_count), str(sdk.compact_count)),
         ("完成步驟 / 總步驟",
          f"{pty.completed_steps}/{pty.total_steps}",
@@ -274,6 +316,8 @@ class AggregateMetrics:
     success_count: int = 0
     escalated_count: int = 0
     halted_count: int = 0
+    # W-81-1 / DEF-81-001：N 輪中 token% 訊號源產出過的輪數（0＝多輪皆無訊號，報告 fail-loud）。
+    token_signal_observed_count: int = 0
     per_run: list[RunMetrics] = field(default_factory=list)
 
 
@@ -309,6 +353,8 @@ def aggregate_runs(runs: list[RunMetrics], backend: str = "") -> AggregateMetric
     agg.success_count = sum(1 for r in runs if r.run_succeeded)
     agg.escalated_count = sum(1 for r in runs if r.escalated)
     agg.halted_count = sum(1 for r in runs if r.halted)  # 撞 ≥90% halt 的輪數（compact 孿生）
+    # W-81-1 / DEF-81-001：訊號源產出輪數（0 → 報告標「N 輪皆無訊號」fail-loud）
+    agg.token_signal_observed_count = sum(1 for r in runs if r.token_signal_observed)
     agg.per_run = list(runs)
     return agg
 
@@ -319,6 +365,13 @@ def format_aggregate_comparison(pty: AggregateMetrics, sdk: AggregateMetrics) ->
     def _fpr(a: AggregateMetrics) -> str:
         return f"{_fmt_pct(a.first_pass_rate_mean)} ±{a.first_pass_rate_stdev * 100:.0f}% [{_fmt_pct(a.first_pass_rate_min)}~{_fmt_pct(a.first_pass_rate_max)}]"
 
+    def _fmt_agg_token_peak(a: AggregateMetrics) -> str:
+        # W-81-1 / DEF-81-001：N 輪皆無訊號 → 不裸印 0%，標明訊號缺失
+        base = f"{a.peak_token_pct_mean:.0f}% / {a.peak_token_pct_max:.0f}%"
+        if a.n > 0 and a.token_signal_observed_count == 0:
+            return f"{base}（⚠ {a.n} 輪皆無訊號）"
+        return base
+
     rows = [
         (f"樣本數 N", str(pty.n), str(sdk.n)),
         ("一次通過率 (mean ±stdev [min~max])", _fpr(pty), _fpr(sdk)),
@@ -328,8 +381,10 @@ def format_aggregate_comparison(pty: AggregateMetrics, sdk: AggregateMetrics) ->
         ("SDD_CONTRACT_VIOLATION (total)",
          str(pty.sdd_violation_count_total), str(sdk.sdd_violation_count_total)),
         ("token 峰值 (mean / max)",
-         f"{pty.peak_token_pct_mean:.0f}% / {pty.peak_token_pct_max:.0f}%",
-         f"{sdk.peak_token_pct_mean:.0f}% / {sdk.peak_token_pct_max:.0f}%"),
+         _fmt_agg_token_peak(pty), _fmt_agg_token_peak(sdk)),
+        ("token 訊號源 (有訊號輪數 / N)",
+         f"{pty.token_signal_observed_count} / {pty.n}",
+         f"{sdk.token_signal_observed_count} / {sdk.n}"),
         ("壓縮次數 (mean / total / max)",
          f"{pty.compact_count_mean:.1f} / {pty.compact_count_total} / {pty.compact_count_max}",
          f"{sdk.compact_count_mean:.1f} / {sdk.compact_count_total} / {sdk.compact_count_max}"),

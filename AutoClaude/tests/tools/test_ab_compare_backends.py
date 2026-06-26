@@ -574,3 +574,102 @@ def test_load_log_existing_returns_content_unchanged(tmp_path):
     m = parse_run_metrics(out, "sdk")
     assert m.escalated is True
     assert m.run_succeeded is False
+
+
+# ── W-81-1 / DEF-81-001：真跑 token% 訊號源 fail-loud 護欄 ─────────────────
+# 真跑探測實證：pty（claude -p 不吐 context%）/sdk（get_context_usage 無 percentage）
+# 雙 backend 真跑 KernelResult 皆 peak_token_pct=0.0、無 TOKEN_COMPACT/HALT marker。
+# 護欄須在報告層區分「訊號源未產出」vs「context 真的 0%」，杜絕下輪誤宣稱取到真值。
+
+# production KernelResult 含 observer 真值 peak_token_pct（真跑探測實況：恆 0.0）。
+_REALRUN_NO_SIGNAL = (
+    "INFO autoclaude: 執行器後端：Claude Agent SDK\n"
+    "Playbook 結束 | KernelResult(success=True, completed_steps=2, total_steps=2, "
+    "reason='success', step_log=['[S01] x ✓ (attempt 1)', '[S02] y ✓ (attempt 1)'], "
+    "completed_step_ids=['S01','S02'], halted=False, escalated=False, "
+    "halt_step_idx=None, peak_token_pct=0.0)"
+)
+# 假想「訊號源已修復」：observer 測得非 0（未達 80% compact 門檻、無 marker）。
+_REALRUN_OBSERVER_SIGNAL = (
+    "Playbook 結束 | KernelResult(success=True, completed_steps=2, total_steps=2, "
+    "step_log=['[S01] x ✓ (attempt 1)'], halted=False, escalated=False, "
+    "peak_token_pct=12.5)"
+)
+
+
+def test_rtm_81_1_parse_observer_peak_from_kernel_result():
+    """RTM-81-1：自 KernelResult 解析 observer 層 peak_token_pct → observer_peak_token_pct，
+    且不覆寫載具自掃 marker 行的 peak_token_pct（兩者不同來源）。"""
+    m = parse_run_metrics(_REALRUN_OBSERVER_SIGNAL, "sdk")
+    assert m.observer_peak_token_pct == 12.5
+    assert m.peak_token_pct == 0.0  # 無 marker 行 → 載具掃出的 peak 仍 0，未被 observer 值汙染
+
+
+def test_rtm_81_1_no_kernel_result_observer_peak_zero():
+    """RTM-81-1：半途 log 無 KernelResult 行 → observer_peak_token_pct 維持 0.0（誠實，不臆造）。"""
+    m = parse_run_metrics("=== STATE: CORRECTION | step=S01 attempt=1 ===", "pty")
+    assert m.observer_peak_token_pct == 0.0
+
+
+def test_rtm_81_2_signal_absent_when_both_zero():
+    """RTM-81-2：observer 真值 0 且無 marker → token_signal_observed False（訊號源未產出）。
+    意圖＝這正是真跑探測的真實情形，必須與「context 真的 0%」區分。"""
+    m = parse_run_metrics(_REALRUN_NO_SIGNAL, "sdk")
+    assert m.observer_peak_token_pct == 0.0
+    assert m.peak_token_pct == 0.0
+    assert m.token_signal_observed is False
+
+
+def test_rtm_81_2_signal_present_via_observer():
+    """RTM-81-2：observer 真值 > 0（即使未達門檻、無 marker）→ signal_observed True。"""
+    m = parse_run_metrics(_REALRUN_OBSERVER_SIGNAL, "sdk")
+    assert m.token_signal_observed is True
+
+
+def test_rtm_81_2_signal_present_via_marker():
+    """RTM-81-2：有 TOKEN_COMPACT marker（達門檻）→ 即使無 observer 欄位也 signal True。"""
+    log = "=== STATE: TOKEN_COMPACT | [S01] 85% >= 80% ==="
+    m = parse_run_metrics(log, "pty")
+    assert m.peak_token_pct == 85.0
+    assert m.token_signal_observed is True
+
+
+def test_rtm_81_3_format_flags_absent_signal():
+    """RTM-81-3：單輪報告——訊號源未產出時 token 峰值標「⚠ 訊號源未產出」+ 訊號源狀態列。"""
+    pty = parse_run_metrics(_REALRUN_NO_SIGNAL, "pty")
+    sdk = parse_run_metrics(_REALRUN_NO_SIGNAL, "sdk")
+    out = format_comparison(pty, sdk)
+    assert "訊號源未產出" in out
+    assert "token 訊號源" in out
+    assert "未產出" in out
+
+
+def test_rtm_81_3_format_unchanged_when_signal_present():
+    """RTM-81-3 零退化：有訊號（marker 85%）→ token 峰值照常渲染 85%、不標警示。"""
+    log = "=== STATE: TOKEN_COMPACT | [S01] 85% >= 80% ===\n" + _PERFECT
+    m = parse_run_metrics(log, "pty")
+    out = format_comparison(m, m)
+    assert "85%" in out
+    assert "訊號源未產出" not in out
+    assert "已觀測" in out  # 訊號源狀態列標「已觀測」
+
+
+def test_rtm_81_4_aggregate_signal_count():
+    """RTM-81-4：aggregate_runs 聚合 token_signal_observed_count（多輪中有訊號的輪數）。"""
+    runs = [
+        parse_run_metrics(_REALRUN_NO_SIGNAL, "sdk"),       # 無訊號
+        parse_run_metrics(_REALRUN_OBSERVER_SIGNAL, "sdk"),  # 有訊號
+    ]
+    a = aggregate_runs(runs, "sdk")
+    assert a.token_signal_observed_count == 1
+    assert a.n == 2
+
+
+def test_rtm_81_4_aggregate_format_flags_all_absent():
+    """RTM-81-4：多輪皆無訊號 → 多輪報告 token 峰值列標「N 輪皆無訊號」。"""
+    runs = [parse_run_metrics(_REALRUN_NO_SIGNAL, "sdk") for _ in range(3)]
+    pty = aggregate_runs([parse_run_metrics(_REALRUN_NO_SIGNAL, "pty")], "pty")
+    sdk = aggregate_runs(runs, "sdk")
+    out = format_aggregate_comparison(pty, sdk)
+    assert "輪皆無訊號" in out
+    assert "token 訊號源" in out
