@@ -4,6 +4,29 @@ from pathlib import Path
 from logging.handlers import RotatingFileHandler
 
 
+class _EncodingSafeStreamHandler(logging.StreamHandler):
+    """console handler：依目標 stream 編碼 sanitize，杜絕 Windows cp950 對非 ASCII
+    （如 ✓ U+2713）丟 UnicodeEncodeError 的非致命噪音（DEF-87-002）。
+
+    utf-8 環境 sanitize 為無損 → 零退化；sanitize 為純函式 → 冪等。
+    可用 io.TextIOWrapper(BytesIO, encoding="cp950") 在 utf-8 平台重現 cp950 行為。
+    """
+
+    def emit(self, record: logging.LogRecord) -> None:
+        try:
+            msg = self.format(record)
+            stream = self.stream
+            enc = getattr(stream, "encoding", None) or "utf-8"
+            # backslashreplace → 不可編碼字元轉 \uXXXX（純 ASCII），保證後續 write 必可編碼
+            safe = msg.encode(enc, errors="backslashreplace").decode(enc, errors="replace")
+            stream.write(safe + self.terminator)
+            self.flush()
+        except RecursionError:  # 鏡像 CPython StreamHandler.emit：RecursionError 須上拋防無限遞迴
+            raise
+        except Exception:
+            self.handleError(record)
+
+
 def setup_logger(log_dir: str = "logs", level: int = logging.DEBUG) -> logging.Logger:
     root = logging.getLogger("autoclaude")
     root.setLevel(level)
@@ -29,7 +52,7 @@ def setup_logger(log_dir: str = "logs", level: int = logging.DEBUG) -> logging.L
     file_handler.setFormatter(fmt)
     file_handler.setLevel(logging.DEBUG)
 
-    console_handler = logging.StreamHandler(sys.stdout)
+    console_handler = _EncodingSafeStreamHandler(sys.stdout)
     console_handler.setFormatter(fmt)
     console_handler.setLevel(logging.INFO)
 
