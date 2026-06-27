@@ -6,11 +6,14 @@ claude:
   encoding: utf-8
 
 minimax:
-  # 可改用環境變數 MINIMAX_API_KEY / MINIMAX_BASE_URL / MINIMAX_MODEL 覆寫本區塊（main.py:103-107）。
-  # ⚠ AutoClaude 不會自動載入 .env（無 python-dotenv / 無 load_dotenv）——env 變數須由啟動方式
-  #   自行注入（shell 先 source .env 或 export），否則 .env 內容不會生效；亦可直接填本檔/config.local.yaml。
-  api_key: ""
-  base_url: "https://api.minimax.io/anthropic"
+  # 🔴 設定治理（improving_90 統一）：base_url / model / timeout 為【非機密預設】，本檔（入庫共享）
+  #    為唯一權威來源——請勿在 .env 重複設 MINIMAX_BASE_URL / MINIMAX_MODEL（會與此處漂移；
+  #    improving_90 已從 .env 移除該兩鍵）。
+  #    🔑【機密】api_key 絕不可填入本入庫檔！只能放 .env（gitignored）的 MINIMAX_API_KEY 或以環境變數注入。
+  #    讀取優先序：env 變數 > 本檔（main.py:103-107）；env 變數僅作臨時覆寫（如切 mock / local LLM）。
+  #    ⚠ AutoClaude 不自動載入 .env（無 python-dotenv）——env 須由啟動方式注入（shell 先 source .env 或 export）。
+  api_key: ""   # 留空；機密由 .env 的 MINIMAX_API_KEY 或環境變數提供
+  base_url: "https://api.minimax.io/v1/text/chatcompletion_v2"
   model: "MiniMax-M2.7"
   timeout_seconds: 30
 
