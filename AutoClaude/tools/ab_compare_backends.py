@@ -44,6 +44,12 @@ _RE_TOKEN_PCT = re.compile(r"(\d+(?:\.\d+)?)\s*%")
 # 生產碼鐵證：_impl.py:233 `[%s]`、kernel.py:185 `[{step_id}]`、kernel.py:224 `step=%s`。
 _RE_STEP_TAG = re.compile(r"\[([A-Za-z0-9_\-]+)\]")
 _RE_CORRECTION_STEP = re.compile(r"STATE:\s*CORRECTION\s*\|\s*step=([A-Za-z0-9_\-]+)")
+# W-86-2 / improving_86：per-step token% 真值來源——Kernel `_run_step` 在 observer.peak>0 時
+# 印的 STEP_TOKEN_PEAK 標記（kernel.py W-86-1）。與門檻 marker（TOKEN_COMPACT/HALT）不同：
+# 低負載真跑未撞 80/90% 門檻亦逐步驟可觀測，故 per-step token% 不再恆 0。
+# 鐵證格式：`=== STEP_TOKEN_PEAK | step=Sxx pct=NN.NNNN ===`。
+_RE_STEP_TOKEN_PEAK = re.compile(
+    r"STEP_TOKEN_PEAK\s*\|\s*step=([A-Za-z0-9_\-]+)\s+pct=(\d+(?:\.\d+)?)")
 _RE_FIELD_INT = {
     "completed_steps": re.compile(r"completed_steps=(\d+)"),
     "total_steps": re.compile(r"total_steps=(\d+)"),
@@ -220,6 +226,13 @@ def parse_run_metrics(log_text: str, backend: str = "") -> RunMetrics:
             sm.peak_token_pct = max(sm.peak_token_pct, line_peak)
     m.peak_token_pct = peak
     m.compact_count = compact_count
+
+    # W-86-2 / improving_86：per-step token% 真值（STEP_TOKEN_PEAK marker，不靠門檻）。
+    # 與整輪 m.peak_token_pct（門檻 marker peak）/ observer_peak_token_pct（KernelResult）並存，
+    # 僅補 per_step.peak_token_pct；同步驟多 attempt 多筆 → 取 max（該步 token 峰值）。
+    for mt in _RE_STEP_TOKEN_PEAK.finditer(log_text):
+        sm = _step_of(m, mt.group(1))
+        sm.peak_token_pct = max(sm.peak_token_pct, float(mt.group(2)))
     return m
 
 
@@ -303,6 +316,23 @@ def format_step_comparison(pty: RunMetrics, sdk: RunMetrics, max_steps: int = 30
 
 # ── W-72-2：多輪統計聚合（improving_72，完整統計 A/B）─────────────────
 @dataclass
+class StepAggregate:
+    """單一步驟跨 N 輪的聚合（W-86-2，per-step 多輪統計；純資料，無方法）。
+
+    候選 (3) 明標缺口：improving_76 備了單輪 per-step（StepMetrics），但多輪 per-step
+    聚合一直沒做。n＝該 step_id 出現於幾輪；token 峰值取 mean/max（W-86-1 STEP_TOKEN_PEAK
+    使 per-step token% 在低負載亦為真值）；compact/correction 取跨輪 total。
+    """
+
+    step_id: str = ""
+    n: int = 0
+    peak_token_pct_mean: float = 0.0
+    peak_token_pct_max: float = 0.0
+    compact_count_total: int = 0
+    correction_count_total: int = 0
+
+
+@dataclass
 class AggregateMetrics:
     """同一後端 N 輪 run 的指標聚合（純統計，無副作用）。
 
@@ -336,6 +366,8 @@ class AggregateMetrics:
     # W-81-1 / DEF-81-001：N 輪中 token% 訊號源產出過的輪數（0＝多輪皆無訊號，報告 fail-loud）。
     token_signal_observed_count: int = 0
     per_run: list[RunMetrics] = field(default_factory=list)
+    # W-86-2：per-step 多輪聚合（step_id → StepAggregate）。空＝N 輪皆無 per-step 標記。
+    per_step_agg: dict[str, "StepAggregate"] = field(default_factory=dict)
 
 
 def aggregate_runs(runs: list[RunMetrics], backend: str = "") -> AggregateMetrics:
@@ -376,6 +408,19 @@ def aggregate_runs(runs: list[RunMetrics], backend: str = "") -> AggregateMetric
     # W-81-1 / DEF-81-001：訊號源產出輪數（0 → 報告標「N 輪皆無訊號」fail-loud）
     agg.token_signal_observed_count = sum(1 for r in runs if r.token_signal_observed)
     agg.per_run = list(runs)
+    # W-86-2：per-step 多輪聚合——收集 N 輪所有 step_id 聯集，逐 step 取 mean/max/total。
+    step_ids = sorted({sid for r in runs for sid in r.per_step})
+    for sid in step_ids:
+        sms = [r.per_step[sid] for r in runs if sid in r.per_step]
+        peaks = [sm.peak_token_pct for sm in sms]
+        agg.per_step_agg[sid] = StepAggregate(
+            step_id=sid,
+            n=len(sms),
+            peak_token_pct_mean=statistics.mean(peaks),
+            peak_token_pct_max=max(peaks),
+            compact_count_total=sum(sm.compact_count for sm in sms),
+            correction_count_total=sum(sm.correction_count for sm in sms),
+        )
     return agg
 
 
@@ -418,6 +463,39 @@ def format_aggregate_comparison(pty: AggregateMetrics, sdk: AggregateMetrics) ->
     ]
     out = ["| 指標 | pty | sdk |", "|------|-----|-----|"]
     out += [f"| {name} | {a} | {b} |" for name, a, b in rows]
+    return "\n".join(out)
+
+
+# ── W-86-2：per-step 多輪聚合對比 + 有界渲染（improving_86，A 軌）────────
+def _step_agg_cell(sa: "StepAggregate | None") -> str:
+    """單格＝「token 峰值 mean/max% / compact total / corr total（出現 n 輪）」。
+    該後端此步無聚合（N 輪皆無標記）→ 0 補位（誠實表「無 per-step 資訊」）。
+    """
+    if sa is None:
+        return "0/0% / 0 / 0 (n=0)"
+    return (f"{sa.peak_token_pct_mean:.0f}/{sa.peak_token_pct_max:.0f}% / "
+            f"{sa.compact_count_total} / {sa.correction_count_total} (n={sa.n})")
+
+
+def format_step_aggregate_comparison(pty: AggregateMetrics, sdk: AggregateMetrics,
+                                     max_steps: int = 30) -> str:
+    """產出逐步驟「多輪聚合」pty vs sdk 對比表（每格 token mean/max、compact/corr total）。
+
+    步驟順序＝兩後端 step_id 聯集之穩定（lexical）排序；缺一邊以 0 補位。**有界渲染（防彈
+    渲染器）**：超過 max_steps 只印前 max_steps 步 + 省略行，杜絕長 playbook 報告無限長。
+    """
+    step_ids = sorted(set(pty.per_step_agg) | set(sdk.per_step_agg))
+    out = [
+        "| 步驟 | pty (peak mean/max / compact / corr) | sdk (peak mean/max / compact / corr) |",
+        "|------|------|------|",
+    ]
+    shown = step_ids[: max(0, max_steps)]
+    for sid in shown:
+        out.append(f"| {sid} | {_step_agg_cell(pty.per_step_agg.get(sid))} "
+                   f"| {_step_agg_cell(sdk.per_step_agg.get(sid))} |")
+    elided = len(step_ids) - len(shown)
+    if elided > 0:
+        out.append(f"| … | … ({elided} more steps elided) | … |")
     return "\n".join(out)
 
 
@@ -534,8 +612,11 @@ def main(argv: list[str] | None = None) -> int:
         else:
             _, pty_runs = run_backend_n(run_pb, "pty", base / "pty", n, pty_cfg)
             _, sdk_runs = run_backend_n(run_pb, "sdk", base / "sdk", n, sdk_cfg)
-            print(format_aggregate_comparison(
-                aggregate_runs(pty_runs, "pty"), aggregate_runs(sdk_runs, "sdk")))
+            pty_agg = aggregate_runs(pty_runs, "pty")
+            sdk_agg = aggregate_runs(sdk_runs, "sdk")
+            print(format_aggregate_comparison(pty_agg, sdk_agg))
+            print()
+            print(format_step_aggregate_comparison(pty_agg, sdk_agg, max_steps=args.max_steps))
     else:
         print("需提供 --pty-log+--sdk-log（解析）或 --run+--workdir（實跑）", file=sys.stderr)
         return 2

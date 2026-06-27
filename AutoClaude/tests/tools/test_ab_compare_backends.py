@@ -26,6 +26,7 @@ from tools.ab_compare_backends import (  # noqa: E402
     aggregate_runs,
     format_aggregate_comparison,
     format_comparison,
+    format_step_aggregate_comparison,
     format_step_comparison,
     main,
     parse_run_metrics,
@@ -784,3 +785,78 @@ def test_def_83_001_aggregate_effective_peak():
     pty = aggregate_runs([parse_run_metrics(_REALRUN_NO_SIGNAL, "pty")], "pty")
     out = format_aggregate_comparison(pty, a)
     assert "12%" in out  # sdk 真實峰值現身，非 marker-only 的 0%
+
+
+# ── improving_86 W-86-2：STEP_TOKEN_PEAK 解析 + per-step 多輪聚合（RTM-86-3/4/5）──
+# 真實 Kernel 輸出格式（取自 W-86-1 emit；kernel.py:`=== STEP_TOKEN_PEAK | step=Sxx pct=NN.NNNN ===`）
+_STEP_TOKEN_PEAK_LOG = (
+    "=== STEP_TOKEN_PEAK | step=S01 pct=3.2000 ===\n"
+    "=== STEP_TOKEN_PEAK | step=S02 pct=6.1566 ===\n"
+    "Playbook 結束 | KernelResult(success=True, completed_steps=2, total_steps=2, "
+    "reason='success', step_log=['[S01] x ✓ (attempt 1)', '[S02] y ✓ (attempt 1)'], "
+    "completed_step_ids=['S01','S02'], halted=False, escalated=False, peak_token_pct=6.1566)"
+)
+
+
+def test_parse_step_token_peak_into_per_step():
+    """RTM-86-3：載具把 STEP_TOKEN_PEAK 標記解析進 per_step[sid].peak_token_pct
+    （低負載真跑即真值，不靠 80/90% 門檻 marker；缺此解析 per-step token% 恆 0）。"""
+    m = parse_run_metrics(_STEP_TOKEN_PEAK_LOG, "pty")
+    assert m.per_step["S01"].peak_token_pct == pytest.approx(3.2)
+    assert m.per_step["S02"].peak_token_pct == pytest.approx(6.1566)
+    # 整輪 observer 真值（KernelResult）與 per-step 並存、互不污染
+    assert m.observer_peak_token_pct == pytest.approx(6.1566)
+    # 無門檻 marker → 整輪 marker peak 仍 0（per-step 來自 STEP_TOKEN_PEAK 而非門檻）
+    assert m.peak_token_pct == 0.0
+
+
+def test_parse_step_token_peak_takes_max_across_multiple_attempts():
+    """RTM-86-3（補）：同步驟多 attempt 多筆 STEP_TOKEN_PEAK → 取 max（該步 token 峰值）。"""
+    log = (
+        "=== STEP_TOKEN_PEAK | step=S01 pct=4.0000 ===\n"
+        "=== STEP_TOKEN_PEAK | step=S01 pct=9.5000 ===\n"  # 第二 attempt 更高
+        "=== STEP_TOKEN_PEAK | step=S01 pct=7.0000 ===\n"
+    )
+    m = parse_run_metrics(log, "pty")
+    assert m.per_step["S01"].peak_token_pct == pytest.approx(9.5)
+
+
+def test_aggregate_per_step_across_runs():
+    """RTM-86-4：per-step 多輪聚合——mean/max/total 跨 N 輪正確（候選 3 缺口）。"""
+    log_a = "=== STEP_TOKEN_PEAK | step=S01 pct=4.0000 ===\n"
+    log_b = "=== STEP_TOKEN_PEAK | step=S01 pct=8.0000 ===\n"
+    runs = [parse_run_metrics(log_a, "pty"), parse_run_metrics(log_b, "pty")]
+    agg = aggregate_runs(runs, "pty")
+    sa = agg.per_step_agg["S01"]
+    assert sa.n == 2
+    assert sa.peak_token_pct_mean == pytest.approx(6.0)   # (4+8)/2
+    assert sa.peak_token_pct_max == pytest.approx(8.0)
+
+
+def test_aggregate_per_step_partial_presence():
+    """RTM-86-4（補）：步驟只出現於部分輪 → n 反映實際出現輪數（誠實，不誤當每輪都有）。"""
+    runs = [
+        parse_run_metrics("=== STEP_TOKEN_PEAK | step=S01 pct=5.0000 ===\n", "pty"),
+        parse_run_metrics("=== STEP_TOKEN_PEAK | step=S02 pct=7.0000 ===\n", "pty"),  # 無 S01
+    ]
+    agg = aggregate_runs(runs, "pty")
+    assert agg.per_step_agg["S01"].n == 1
+    assert agg.per_step_agg["S02"].n == 1
+
+
+def test_format_step_aggregate_bounded():
+    """RTM-86-5：per-step 多輪聚合 format 有界截斷（防彈渲染器，杜絕長 playbook 報告爆炸）。"""
+    log = "\n".join(f"=== STEP_TOKEN_PEAK | step=S{i:02d} pct={i}.0000 ===" for i in range(1, 6))
+    agg = aggregate_runs([parse_run_metrics(log, "pty")], "pty")
+    sdk = aggregate_runs([parse_run_metrics("", "sdk")], "sdk")
+    out = format_step_aggregate_comparison(agg, sdk, max_steps=2)
+    assert "(3 more steps elided)" in out      # 5 步 - 顯示 2 步 = 3 截斷
+    assert "S01" in out and "S02" in out
+    assert "S05" not in out                     # 超出上限不印
+
+
+def test_format_step_aggregate_empty_safe():
+    """RTM-86-5（補）：兩後端皆無 per-step 聚合 → 空表頭、不崩（誠實表無樣本）。"""
+    out = format_step_aggregate_comparison(
+        aggregate_runs([], "pty"), aggregate_runs([], "sdk"))
+    assert "步驟" in out  # 表頭仍在

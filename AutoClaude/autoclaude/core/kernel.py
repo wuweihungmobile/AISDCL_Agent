@@ -189,6 +189,16 @@ class PlaybookKernel:
                 full_prompt, maintain_context=task.maintain_context,
                 timeout=timeout, label=task.step_id, on_event=observer,
             )
+            # improving_86 W-86-1：per-step token% 可觀測標記（observability-only，零行為變更）。
+            # Kernel 整輪只在 KernelResult.peak_token_pct 落一個整輪 peak；低負載真跑未撞
+            # 80/90% 門檻時無任何 per-step token 訊號 → A/B 載具 per-step token% 恆 0%。此標記
+            # 讓每 attempt 觀測到的真實 token%（peak>0 才印）逐步驟可觀測，載具據 `step=` 歸因。
+            # guard peak>0 與 _consult_token_guard 一致：無訊號（dry-run/fake）不印＝零退化。
+            if observer.peak_pct > 0:
+                logger.info(
+                    "=== STEP_TOKEN_PEAK | step=%s pct=%.4f ===",
+                    task.step_id, observer.peak_pct,
+                )
             # improving_78 W-78-1（DEF-78-001）：production token-guard halt 接線。
             # 僅在真有 token 訊號（peak>0）時 emit ON_TOKEN_USAGE → token_guard 決策；
             # 無訊號（dry-run / 既有 fake）→ 不 emit、行為與接線前完全一致（零退化）。
