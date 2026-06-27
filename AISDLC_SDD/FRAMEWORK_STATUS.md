@@ -5,14 +5,14 @@
 > CLAUDE.md 等文件一律 **version-agnostic** 並指向本檔，不重複數字——版本累積亦不再多檔漂移。
 
 - **凍結基線（ci-gate FROZEN_BASELINE，恆測防回歸）**：`AISDLC_SDD_v0.01`
-- **最新演化版（ci-gate LATEST＝`sort -V | tail -1` 動態取最高，可修改/承載演化）**：`AISDLC_SDD_v0.27`
+- **最新演化版（ci-gate LATEST＝`sort -V | tail -1` 動態取最高，可修改/承載演化）**：`AISDLC_SDD_v0.28`
 - 各版目錄結構同構；框架改動走 Copy-on-Evolve（複製 LATEST → 新版後於新版修改，不原地改凍結版）。
 
-| 指標 | 凍結基線 `AISDLC_SDD_v0.01` | 最新演化版 `AISDLC_SDD_v0.27` |
+| 指標 | 凍結基線 `AISDLC_SDD_v0.01` | 最新演化版 `AISDLC_SDD_v0.28` |
 |------|------|------|
-| Agents 總數 | 25 | 26 |
-| — core / specialized | 7 / 18 | 7 / 19 |
-| — 其中 runtime（specialized/sdd-*） | 4 | 5 |
+| Agents 總數 | 25 | 27 |
+| — core / specialized | 7 / 18 | 7 / 20 |
+| — 其中 runtime（specialized/sdd-*） | 4 | 6 |
 | Scenarios | 10 | 10 |
 | Workflows（workflow/README.md 宣稱） | 23 | 23 |
 | docs_template/sdd 模板（md + yaml） | 59（56 md + 3 yaml） | 59（56 md + 3 yaml） |

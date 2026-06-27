@@ -1,0 +1,18 @@
+id: R-9.6
+title: Phase D Hooks（Runtime 強制層，不可繞過）
+trigger_states:
+  - "*"
+severity: critical
+maturity: active
+spec: >
+  透過 .claude/settings.json 掛載 SessionStart / PreToolUse / PostToolUse hook，把
+  Rule 9.1~9.5 從紙上規則升級為 permissionDecision=deny 的強制攔截：FSM ∈
+  {ESCALATION, TERMINATED, TOKEN_BUDGET_CRITICAL} 拒所有工具；IMPLEMENTATION 期間
+  Write/Edit docs/01~03 規格拒絕。tools/fsm_runtime 為唯一合法 FSM 讀寫入口，禁止
+  繞過 FSMRuntime 直接 edit FSM-STATE-*.yaml，禁止停用/刪除 hooks。
+test_ref: tools/fsm_runtime/tests/test_context_ledger_pre_hook.py
+enforcement_mechanism: hook
+scaffold_roi:
+  fire_count: 0
+  catch_count: 0
+  false_positive_count: 0

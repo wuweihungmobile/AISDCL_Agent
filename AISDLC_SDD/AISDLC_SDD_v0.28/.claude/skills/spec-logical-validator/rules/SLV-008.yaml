@@ -1,0 +1,29 @@
+id: SLV-008
+name: UI mockup 與 FRD AC 不一致
+source: ACT-031 manual-authored 2026-04-25
+source_fpl: null   # 非 FPL 衍生（manual-authored per ACT-031）；per Rule 9.11.5 審計鏈顯式宣告
+trust_level: proposed
+scope: SCG-1
+purpose: |
+  FRD 中宣告 `<!-- anchor:ui:<id> -->` 的 AC 段落，必須與
+  docs/99_media/ui/<kebab(id)>.{html,md,png,...} 內描繪的 widget 對齊。
+  常見違反：AC 提到「登入按鈕」但 mockup 缺；mockup 多了 AC 未涵蓋的欄位。
+scan_targets:
+  - docs/01_requirements/FRD-*.md
+  - docs/02_architecture/SRD-*.md
+required_qualifiers:
+  - AC 中 UI 動詞（點擊／輸入／勾選）對應的元件須存在 mockup
+  - mockup 額外元件需在 AC 或 FRD 補充說明
+modality:
+  type: ui
+  validator_module: tools.fsm_runtime.modality.ui_adapter
+  validator_function: validate_anchor
+backend_hint: session   # OPEN-F.3 預設；session 不支援 PNG vision，僅檢查存在
+failure_examples:
+  - "AC：用戶輸入 Email + 密碼，點擊「登入」後導向首頁；mockup 缺「登入」button"
+  - "AC：用戶上傳頭像；mockup 內無 file input"
+pass_examples:
+  - "AC 提及 Email / 密碼 / 登入；mockup 含 input(name=email)、input(name=password)、button(name=login)"
+severity: HIGH
+blocks_scg: false       # proposed → advisory only（per Rule 9.11.3）
+anchor_type: ui

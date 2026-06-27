@@ -25,12 +25,23 @@ MAX_GOAL_TASK_DEPTH: int = 3
 
 
 class ExecutionItem(BaseModel):
-    """底層原子執行單元（W3 對應 execution_items 表）。"""
+    """底層原子執行單元（W3 對應 execution_items 表）。
+
+    AutoSDD_improving_94 W-94-1：新增三個 optional「可執行欄」，使底層單元裝得下一個
+    可被 AutoClaude runner 執行的 task 規格（原本只有 action 描述、攤不出可執行 playbook）。
+    tools/three_tier_to_playbook.py 攤平時：prompt→PlaybookTask.prompt（無則退回 action）、
+    expected_output_regex→同名欄、evaluator_command→經白名單消毒後填入。三欄皆 Optional
+    預設 None → 既有 sample_goal_tasks.yaml / migrate_yaml_to_db 既有資料向後相容。
+    """
 
     exec_id: str = Field(..., min_length=1, description="唯一 ID（W3 PK）")
     action: str = Field(..., min_length=1, description="動作描述")
     status: str = Field(default="pending", description="pending / ok / failed")
     estimated_minutes: Optional[int] = Field(default=None, ge=0)
+    # W-94-1 可執行欄（攤平為 PlaybookTask 用；Optional 向後相容）
+    prompt: Optional[str] = Field(default=None, description="可執行 task prompt（無則退回 action）")
+    expected_output_regex: Optional[str] = Field(default=None, description="期望輸出 regex")
+    evaluator_command: Optional[str] = Field(default=None, description="評估指令（白名單消毒）")
 
 
 class GoalTask(BaseModel):

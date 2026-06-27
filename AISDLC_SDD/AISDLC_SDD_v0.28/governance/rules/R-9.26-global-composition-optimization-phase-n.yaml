@@ -1,0 +1,29 @@
+id: R-9.26
+title: Phase N 全域組合最佳化 + NP-hard 搜尋形式化停機
+trigger_states:
+  - BACKLOG_PRIORITIZED
+  - INTENT_DECOMPOSITION
+severity: high
+maturity: active
+spec: >
+  L10 完整（組合級最優）。9.26.1 搜尋有界（SearchBounded）：composition_optimizer 的
+  bounded branch-and-bound 節點展開 ≤ SDD_OPT_NODE_BUDGET clamp[8,4096] 預設 256，超限即停止
+  搜尋（若尚無可行解導 OPT_ESCALATION），絕不指數爆炸無限搜尋；展開須經 optimization_halt_monitor
+  .guard_expand。9.26.2 OPTIMIZATION_FSM 獨立形式化：OPTIMIZATION_FSM.tla 自有命名空間，不併入
+  單軌 SDD_FSM.tla；5 safety(TypeOK/SearchBounded/ScheduledImpliesFound/EscalationExhausted/
+  StableIsFixpoint)+1 liveness(EventuallyScheduled) No error + 離線 BFS reachable=N/N；單軌
+  SDD_FSM 維持 42、META/FLEET/COMPOSITION 不回歸（OPT_* 不洩漏進單軌）。9.26.3 排程 advisory +
+  不自我裁決：composition_optimizer 只推薦排程，絕不自動 commit、繞過 BACKLOG_PRIORITIZED 人工
+  signoff（守 Rule 8 / Rule 9.23.2）。9.26.4 目標評分不自我放水：composition_objective_scorer 凍結
+  OBJECTIVE_PROFILE_VERSION，調權重須 bump；只算成本不改 spec、不阻塞 SCG。9.26.5 最優性誠實：
+  OPT_SCHEDULED 須回報 optimal(bool) 與 gap，預算耗盡只能宣稱 best-so-far + gap，不得謊報
+  proven-optimal。對應 composition_objective_scorer / composition_optimizer /
+  optimization_halt_monitor。禁止：搜尋無上限指數爆炸、OPTIMIZATION_FSM 併入單軌污染 reachable、
+  optimizer 自動 commit 排程繞過 BACKLOG_PRIORITIZED、調目標權重不 bump、謊報 proven-optimal、
+  未經 OPEN-M.7 私自開 HTTP 外聯做 L9 完整活體實驗（破 OPEN-10.6）。
+test_ref: tools/fsm_runtime/tests/test_phase_n.py
+enforcement_mechanism: meta_loop
+scaffold_roi:
+  fire_count: 0
+  catch_count: 0
+  false_positive_count: 0

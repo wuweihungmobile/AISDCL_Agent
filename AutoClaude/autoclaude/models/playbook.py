@@ -28,6 +28,13 @@ class PlaybookTask(BaseModel):
     # 供逆向橋接 RtmWritebackPlugin 以結構化欄消費（取代脆弱的 prompt 正則反解 +
     # 8 字元截斷）。Optional 預設 None → YAML/checkpoint 向後相容；非 SDD task 留 None。
     spec_digest: Optional[str] = None
+    # AutoSDD_improving_94 W-94-1：三層任務模型分組鍵。A 軌 PRD→playbook 橋接時，
+    # tools/three_tier_to_playbook.py 攤平 three_tier_schema.Project（專案→目標→任務）
+    # 為扁平 tasks[] 時，每 task 填入其所屬 GoalTask.goal_task_id，使攤平後仍能標記
+    # 「此任務屬哪個目標」，並與既有 PlaybookCheckpoint.goal_task_id（SD_06 W5）/
+    # GoalProgressLedger（鍵 goal_task_id）跨 run 進度彙總對齊。Optional 預設 None →
+    # YAML/checkpoint 向後相容；非三層來源 / 扁平 playbook 留 None（runner 不消費此欄）。
+    goal_task_id: Optional[str] = None
     # SD_Improving_05 W2 (M-7)：per-step token_guard override
     # 為 dict（非 TokenGuardConfig）以保 YAML backward compat：既有 Playbook YAML
     # 不需修改即可載入；解析時由 TokenGuardPlugin.resolve_per_step_cfg() 套用至 global

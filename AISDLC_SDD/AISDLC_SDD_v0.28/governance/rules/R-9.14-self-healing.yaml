@@ -1,0 +1,15 @@
+id: R-9.14
+title: Self-Healing 有界復原
+trigger_states:
+  - ESCALATION
+severity: critical
+maturity: active
+spec: >
+  DiagnosticAgent 判 transient 且未觸上限 → AUTO_RECOVERY_ATTEMPT（全 session ≤3、
+  同 reason ≤1）；structural 直升 ESCALATION_FINAL。對應 diagnostic.py / auto_recovery.py。
+test_ref: tools/fsm_runtime/tests/test_auto_recovery.py
+enforcement_mechanism: manual
+scaffold_roi:
+  fire_count: 0
+  catch_count: 0
+  false_positive_count: 0
