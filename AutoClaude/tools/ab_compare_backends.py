@@ -27,12 +27,28 @@
 from __future__ import annotations
 
 import argparse
+import json
+import math
 import re
 import statistics
 import subprocess
 import sys
 from dataclasses import dataclass, field
 from pathlib import Path
+
+
+def _percentile(values: list[float], q: float) -> float:
+    """nearest-rank 百分位（純函式）：空→0.0；n=1→該值；對小樣本誠實不內插。
+
+    W-93-2 / improving_93：長 playbook 多輪 per-step token% 分佈需要 p50/p95 才看得出
+    後端尾端行為差異（mean/max 遮蔽中位與尾部）。nearest-rank（非線性內插）對 n=3 等
+    小樣本語意清楚：p95 落在排序後 ceil(q/100*n) 名次，不憑空造出樣本間的虛構值。
+    """
+    if not values:
+        return 0.0
+    s = sorted(values)
+    rank = max(1, math.ceil(q / 100.0 * len(s)))
+    return float(s[min(rank, len(s)) - 1])
 
 # --- Kernel 真實輸出標記（與 core/kernel.py 對齊）---
 _RE_KERNEL_RESULT = re.compile(r"KernelResult\((.*)$")
@@ -328,6 +344,11 @@ class StepAggregate:
     n: int = 0
     peak_token_pct_mean: float = 0.0
     peak_token_pct_max: float = 0.0
+    # W-93-2 / improving_93：per-step token% 分佈統計——母體標準差 + 中位 + p95 尾部。
+    # mean/max 看不出後端逐步驟的離散度與尾端行為；長 playbook A/B 須這三者才量化得出差異。
+    peak_token_pct_stdev: float = 0.0
+    peak_token_pct_p50: float = 0.0
+    peak_token_pct_p95: float = 0.0
     compact_count_total: int = 0
     correction_count_total: int = 0
 
@@ -418,6 +439,9 @@ def aggregate_runs(runs: list[RunMetrics], backend: str = "") -> AggregateMetric
             n=len(sms),
             peak_token_pct_mean=statistics.mean(peaks),
             peak_token_pct_max=max(peaks),
+            peak_token_pct_stdev=statistics.pstdev(peaks),  # 母體標準差，n=1→0.0
+            peak_token_pct_p50=_percentile(peaks, 50),
+            peak_token_pct_p95=_percentile(peaks, 95),
             compact_count_total=sum(sm.compact_count for sm in sms),
             correction_count_total=sum(sm.correction_count for sm in sms),
         )
@@ -468,13 +492,16 @@ def format_aggregate_comparison(pty: AggregateMetrics, sdk: AggregateMetrics) ->
 
 # ── W-86-2：per-step 多輪聚合對比 + 有界渲染（improving_86，A 軌）────────
 def _step_agg_cell(sa: "StepAggregate | None") -> str:
-    """單格＝「token 峰值 mean/max% / compact total / corr total（出現 n 輪）」。
+    """單格＝「token 峰值 mean±stdev / p50 / p95 / max% · compact / corr（出現 n 輪）」。
     該後端此步無聚合（N 輪皆無標記）→ 0 補位（誠實表「無 per-step 資訊」）。
+    W-93-2：補 ±stdev/p50/p95（分佈離散度與尾部），長 playbook A/B 才看得出後端差異。
     """
     if sa is None:
-        return "0/0% / 0 / 0 (n=0)"
-    return (f"{sa.peak_token_pct_mean:.0f}/{sa.peak_token_pct_max:.0f}% / "
-            f"{sa.compact_count_total} / {sa.correction_count_total} (n={sa.n})")
+        return "0±0 / 0 / 0 / 0% · 0/0 (n=0)"
+    return (f"{sa.peak_token_pct_mean:.0f}±{sa.peak_token_pct_stdev:.0f} / "
+            f"{sa.peak_token_pct_p50:.0f} / {sa.peak_token_pct_p95:.0f} / "
+            f"{sa.peak_token_pct_max:.0f}% · "
+            f"{sa.compact_count_total}/{sa.correction_count_total} (n={sa.n})")
 
 
 def format_step_aggregate_comparison(pty: AggregateMetrics, sdk: AggregateMetrics,
@@ -486,7 +513,7 @@ def format_step_aggregate_comparison(pty: AggregateMetrics, sdk: AggregateMetric
     """
     step_ids = sorted(set(pty.per_step_agg) | set(sdk.per_step_agg))
     out = [
-        "| 步驟 | pty (peak mean/max / compact / corr) | sdk (peak mean/max / compact / corr) |",
+        "| 步驟 | pty (mean±sd/p50/p95/max% cmp/corr) | sdk (mean±sd/p50/p95/max% cmp/corr) |",
         "|------|------|------|",
     ]
     shown = step_ids[: max(0, max_steps)]
@@ -580,7 +607,53 @@ def _build_argparser() -> argparse.ArgumentParser:
                    help="實跑模式：每後端連跑輪數（多輪統計 A/B；預設 1＝單輪對比）")
     p.add_argument("--max-steps", type=int, default=30,
                    help="逐步驟對比表有界渲染上限（超出截斷並印省略數；預設 30）")
+    p.add_argument("--out", help="把 pty/sdk 聚合結果（含 per-step 統計）寫成 JSON 證據檔")
     return p
+
+
+def _agg_to_dict(agg: AggregateMetrics) -> dict:
+    """把 AggregateMetrics 序列化為精簡 JSON 證據（W-93-2）。
+
+    只輸出取證所需的聚合指標 + per-step 統計，**不** dump per_run 原始 log（避免證據檔
+    膨脹且洩漏路徑）。per_step 依 step_id 穩定排序，便於跨輪 diff。
+    """
+    return {
+        "backend": agg.backend,
+        "n": agg.n,
+        "first_pass_rate_mean": agg.first_pass_rate_mean,
+        "first_pass_rate_stdev": agg.first_pass_rate_stdev,
+        "correction_count_mean": agg.correction_count_mean,
+        "correction_count_total": agg.correction_count_total,
+        "sdd_violation_count_total": agg.sdd_violation_count_total,
+        "effective_peak_token_pct_mean": agg.effective_peak_token_pct_mean,
+        "effective_peak_token_pct_max": agg.effective_peak_token_pct_max,
+        "token_signal_observed_count": agg.token_signal_observed_count,
+        "success_count": agg.success_count,
+        "escalated_count": agg.escalated_count,
+        "halted_count": agg.halted_count,
+        "per_step": [
+            {
+                "step_id": sa.step_id,
+                "n": sa.n,
+                "peak_token_pct_mean": sa.peak_token_pct_mean,
+                "peak_token_pct_stdev": sa.peak_token_pct_stdev,
+                "peak_token_pct_p50": sa.peak_token_pct_p50,
+                "peak_token_pct_p95": sa.peak_token_pct_p95,
+                "peak_token_pct_max": sa.peak_token_pct_max,
+                "compact_count_total": sa.compact_count_total,
+                "correction_count_total": sa.correction_count_total,
+            }
+            for sid in sorted(agg.per_step_agg)
+            for sa in (agg.per_step_agg[sid],)
+        ],
+    }
+
+
+def _write_out_json(out_path: str, pty: AggregateMetrics, sdk: AggregateMetrics) -> None:
+    """把雙後端聚合寫成 JSON 證據檔（utf-8）。供 W-93-3 真跑落證據、跨輪比對。"""
+    payload = {"pty": _agg_to_dict(pty), "sdk": _agg_to_dict(sdk)}
+    Path(out_path).write_text(
+        json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -592,12 +665,16 @@ def main(argv: list[str] | None = None) -> int:
     except (AttributeError, OSError):
         pass
     args = _build_argparser().parse_args(argv)
+    # W-93-2：--out 證據檔需雙後端聚合；各分支結束時填好 pty_agg/sdk_agg 再統一輸出。
+    pty_agg: AggregateMetrics | None = None
+    sdk_agg: AggregateMetrics | None = None
     if args.pty_log and args.sdk_log:
         pty = parse_run_metrics(Path(args.pty_log).read_text(encoding="utf-8", errors="replace"), "pty")
         sdk = parse_run_metrics(Path(args.sdk_log).read_text(encoding="utf-8", errors="replace"), "sdk")
         print(format_comparison(pty, sdk))
         print()
         print(format_step_comparison(pty, sdk, max_steps=args.max_steps))
+        pty_agg, sdk_agg = aggregate_runs([pty], "pty"), aggregate_runs([sdk], "sdk")
     elif args.run and args.workdir:
         base = Path(args.workdir)
         n = max(1, args.n)
@@ -609,6 +686,7 @@ def main(argv: list[str] | None = None) -> int:
             _, pty = run_backend(run_pb, "pty", base / "pty", pty_cfg)
             _, sdk = run_backend(run_pb, "sdk", base / "sdk", sdk_cfg)
             print(format_comparison(pty, sdk))
+            pty_agg, sdk_agg = aggregate_runs([pty], "pty"), aggregate_runs([sdk], "sdk")
         else:
             _, pty_runs = run_backend_n(run_pb, "pty", base / "pty", n, pty_cfg)
             _, sdk_runs = run_backend_n(run_pb, "sdk", base / "sdk", n, sdk_cfg)
@@ -620,6 +698,9 @@ def main(argv: list[str] | None = None) -> int:
     else:
         print("需提供 --pty-log+--sdk-log（解析）或 --run+--workdir（實跑）", file=sys.stderr)
         return 2
+    if args.out and pty_agg is not None and sdk_agg is not None:
+        _write_out_json(args.out, pty_agg, sdk_agg)
+        print(f"\n[ab_compare] 證據已寫入 {args.out}")
     return 0
 
 

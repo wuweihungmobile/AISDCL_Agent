@@ -1,0 +1,104 @@
+# ab_long_playbook.yaml — pty-vs-sdk A/B「長 playbook」逐步驟 token% 分佈載具
+#
+# 用途（AutoSDD improving_93 W-93-1，C 軌）：既有 sdd_bridge_smoke.yaml 僅 2 步，
+#   測不出多步驟 per-step token% 分佈。本 playbook 以「逐函式 TDD」漸進建一個純函式
+#   數學模組 mathlib，7 步、每步 evaluator 親跑 pytest，maintain_context=true 累積對話脈絡
+#   → 後段步驟 context 漸增，使 STEP_TOKEN_PEAK marker 在各步呈現可量化分佈（pty/sdk 對比）。
+#
+# 設計（Rule 2 最小但可用）：
+#   - 自包含：不依賴外部 spec / FSM 狀態檔，臨時工作目錄即可重複跑（pty/sdk 皆能跑）。
+#   - 每步「先測後實作至綠」TDD：evaluator_command 親跑 pytest，AI 自稱完成不算數。
+#   - 步驟刻意遞增（add→sub→mul→divide→power→整合），讓逐步驟 token% 有分佈、不全為單點。
+#
+# 執行（於 AutoClaude/ 目錄，配 ab_pty_config / ab_sdk_config 之 bypassPermissions + brain off）：
+#   python tools/ab_compare_backends.py --run scripts/ab_long_playbook.yaml \
+#     --workdir <tmp> --pty-config scripts/ab_configs/ab_pty_config.yaml \
+#     --sdk-config scripts/ab_configs/ab_sdk_config.yaml --n 3 --out evidence.json
+version: "1.0"
+project: "AB_Long_Playbook"
+workflow_type: "auto"
+
+global_goal: |
+  以逐函式 TDD 方式漸進建立純函式數學模組 mathlib（add/sub/mul/divide/power），
+  每個函式先寫測試、再實作至 pytest 全綠。此為 pty/sdk 後端逐步驟 token% 分佈對比之長載具。
+
+global_invariants:
+  max_retries_per_step: 3
+  auto_compact_interval: 5
+
+tasks:
+  - step_id: "S01"
+    name: "TDD First — add 測試骨架（先測後實作）"
+    prompt: |
+      請在當前工作目錄建立 `test_mathlib.py`，內含 pytest 測試：
+        - test_add：from mathlib import add; assert add(2, 3) == 5; assert add(-1, 1) == 0
+      此步驟**先不要**建立 mathlib.py（規格先行：測試先於實作）。
+      完成後請嚴格輸出 Keyword：[S01_DONE]
+    expected_output_regex: "\\[S01_DONE\\]"
+    maintain_context: false
+
+  - step_id: "S02"
+    name: "實作 add 至綠（Evaluator 親跑）"
+    prompt: |
+      請建立 `mathlib.py`，實作 `def add(a, b): return a + b`，使 test_add 通過。
+      完成後輸出 Keyword：[S02_DONE]
+    expected_output_regex: "\\[S02_DONE\\]"
+    evaluator_command: "pytest test_mathlib.py -q"
+    evaluator_timeout_seconds: 60
+    maintain_context: true
+
+  - step_id: "S03"
+    name: "新增 sub — 先測後實作至綠"
+    prompt: |
+      請在 `test_mathlib.py` 追加 test_sub：from mathlib import sub; assert sub(5, 3) == 2; assert sub(0, 4) == -4。
+      接著在 `mathlib.py` 實作 `def sub(a, b): return a - b`，使全部測試通過。
+      完成後輸出 Keyword：[S03_DONE]
+    expected_output_regex: "\\[S03_DONE\\]"
+    evaluator_command: "pytest test_mathlib.py -q"
+    evaluator_timeout_seconds: 60
+    maintain_context: true
+
+  - step_id: "S04"
+    name: "新增 mul — 先測後實作至綠"
+    prompt: |
+      請在 `test_mathlib.py` 追加 test_mul：from mathlib import mul; assert mul(3, 4) == 12; assert mul(-2, 5) == -10。
+      接著在 `mathlib.py` 實作 `def mul(a, b): return a * b`，使全部測試通過。
+      完成後輸出 Keyword：[S04_DONE]
+    expected_output_regex: "\\[S04_DONE\\]"
+    evaluator_command: "pytest test_mathlib.py -q"
+    evaluator_timeout_seconds: 60
+    maintain_context: true
+
+  - step_id: "S05"
+    name: "新增 divide（含除零防呆）— 先測後實作至綠"
+    prompt: |
+      請在 `test_mathlib.py` 追加：
+        - test_divide：from mathlib import divide; assert divide(10, 2) == 5
+        - test_divide_by_zero：import pytest; with pytest.raises(ValueError): divide(1, 0)
+      接著在 `mathlib.py` 實作 divide：除數為 0 時 raise ValueError，否則回傳 a / b。
+      使全部測試通過。完成後輸出 Keyword：[S05_DONE]
+    expected_output_regex: "\\[S05_DONE\\]"
+    evaluator_command: "pytest test_mathlib.py -q"
+    evaluator_timeout_seconds: 60
+    maintain_context: true
+
+  - step_id: "S06"
+    name: "新增 power — 先測後實作至綠"
+    prompt: |
+      請在 `test_mathlib.py` 追加 test_power：from mathlib import power; assert power(2, 10) == 1024; assert power(5, 0) == 1。
+      接著在 `mathlib.py` 實作 `def power(base, exp): return base ** exp`，使全部測試通過。
+      完成後輸出 Keyword：[S06_DONE]
+    expected_output_regex: "\\[S06_DONE\\]"
+    evaluator_command: "pytest test_mathlib.py -q"
+    evaluator_timeout_seconds: 60
+    maintain_context: true
+
+  - step_id: "S07"
+    name: "整合驗收 — 全模組 pytest 全綠"
+    prompt: |
+      請執行 `pytest test_mathlib.py -v` 確認 mathlib 全部 5 個函式（add/sub/mul/divide/power）
+      的測試全數通過。確認全綠後輸出 Keyword：[S07_DONE]
+    expected_output_regex: "\\[S07_DONE\\]"
+    evaluator_command: "pytest test_mathlib.py -q"
+    evaluator_timeout_seconds: 60
+    maintain_context: true

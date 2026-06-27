@@ -20,9 +20,14 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from tools.ab_compare_backends import (  # noqa: E402
+    RunMetrics,
+    StepMetrics,
+    _agg_to_dict,
     _fmt_token_peak,
     _load_log_or_raise,
+    _percentile,
     _resolve_invocation_path,
+    _write_out_json,
     aggregate_runs,
     format_aggregate_comparison,
     format_comparison,
@@ -860,3 +865,91 @@ def test_format_step_aggregate_empty_safe():
     out = format_step_aggregate_comparison(
         aggregate_runs([], "pty"), aggregate_runs([], "sdk"))
     assert "步驟" in out  # 表頭仍在
+
+
+# ── W-93-1 / W-93-2（improving_93）：長 playbook schema + per-step 分佈統計 + --out JSON ──
+import json as _json  # noqa: E402
+
+from autoclaude.execution.boot_helper import load_playbook_impl  # noqa: E402
+
+_LONG_PB = Path(__file__).resolve().parents[2] / "scripts" / "ab_long_playbook.yaml"
+
+
+def test_ab_long_playbook_schema_loads():
+    """RTM-93-1：長 playbook 可被引擎載入、步驟 ≥6、每步具 keyword 與 evaluator（除首步）。
+
+    Rule 9 意圖：本 playbook 的價值在「多步驟讓 per-step token% 有分佈」——步驟數 < 6
+    即退化為 smoke，量不出分佈，故步驟數是業務不變量；keyword/evaluator 缺漏會讓真跑
+    無法判定步驟成功（A/B 指標失真），故一併鎖。
+    """
+    pb = load_playbook_impl(str(_LONG_PB))
+    assert len(pb.tasks) >= 6, "長 playbook 步驟數須 ≥6 才測得出 per-step 分佈"
+    for t in pb.tasks:
+        assert t.step_id and t.prompt and t.expected_output_regex
+    # 首步為 TDD 先測（無 evaluator）；其餘步驟須有 evaluator 親跑 pytest（雙重驗證）
+    assert pb.tasks[0].evaluator_command in (None, "")
+    assert all(t.evaluator_command for t in pb.tasks[1:]), "S02+ 每步須有 evaluator_command"
+
+
+def _mk_run(backend: str, step_pcts: dict[str, float]) -> RunMetrics:
+    """合成一輪 RunMetrics，per_step 帶指定 token% 峰值（不跑引擎、不花 token）。"""
+    return RunMetrics(
+        backend=backend, completed_steps=len(step_pcts), total_steps=len(step_pcts),
+        first_pass_steps=len(step_pcts), run_succeeded=True,
+        per_step={sid: StepMetrics(step_id=sid, peak_token_pct=p)
+                  for sid, p in step_pcts.items()},
+    )
+
+
+def test_step_aggregate_stats_stdev_p50_p95():
+    """RTM-93-2：per-step 跨輪 stdev/p50/p95 計算正確（合成多輪驗算）。
+
+    Rule 9 意圖：mean/max 遮蔽離散度與尾部；W-93-2 新增的三統計若算錯，長 playbook A/B
+    報告會給出錯誤的後端差異結論。以已知樣本鎖死期望值，計算邏輯一改即失敗。
+    """
+    # S01 在 3 輪的 token% = [2, 4, 9]
+    runs = [_mk_run("pty", {"S01": 2.0}), _mk_run("pty", {"S01": 4.0}),
+            _mk_run("pty", {"S01": 9.0})]
+    agg = aggregate_runs(runs, "pty")
+    sa = agg.per_step_agg["S01"]
+    assert sa.n == 3
+    assert sa.peak_token_pct_mean == 5.0          # (2+4+9)/3
+    assert sa.peak_token_pct_max == 9.0
+    assert sa.peak_token_pct_p50 == 4.0           # 中位（nearest-rank）
+    assert sa.peak_token_pct_p95 == 9.0           # 尾部（nearest-rank ceil(0.95*3)=3 → 第3名）
+    # 母體標準差 pstdev([2,4,9]) ≈ 2.9439
+    assert abs(sa.peak_token_pct_stdev - 2.943920) < 1e-4
+
+
+def test_percentile_nearest_rank_semantics():
+    """RTM-93-2：nearest-rank 百分位語意（空→0、n=1→該值、不內插）。"""
+    assert _percentile([], 95) == 0.0
+    assert _percentile([7.0], 95) == 7.0
+    assert _percentile([1.0, 2.0, 3.0, 4.0], 50) == 2.0   # ceil(0.5*4)=2 → 第2名
+    assert _percentile([1.0, 2.0, 3.0, 4.0], 95) == 4.0
+
+
+def test_ab_out_json_roundtrip(tmp_path):
+    """RTM-93-3：--out JSON 證據含 per-step 統計欄、可讀回（schema 完整）。
+
+    Rule 9 意圖：證據檔是 W-93-3 真跑取證與跨輪比對的唯一落地物；缺欄位或無法讀回
+    即無法審查，故鎖 schema 鍵集與 per-step 統計欄存在。
+    """
+    pty = aggregate_runs([_mk_run("pty", {"S01": 3.0, "S02": 6.0})], "pty")
+    sdk = aggregate_runs([_mk_run("sdk", {"S01": 1.0, "S02": 2.0})], "sdk")
+    out = tmp_path / "evidence.json"
+    _write_out_json(str(out), pty, sdk)
+    data = _json.loads(out.read_text(encoding="utf-8"))
+    assert set(data) == {"pty", "sdk"}
+    assert data["pty"]["backend"] == "pty"
+    step0 = data["pty"]["per_step"][0]
+    for k in ("step_id", "peak_token_pct_mean", "peak_token_pct_stdev",
+              "peak_token_pct_p50", "peak_token_pct_p95", "peak_token_pct_max"):
+        assert k in step0
+
+
+def test_agg_to_dict_excludes_per_run():
+    """RTM-93-3：證據 dict 不含 per_run 原始 log（防膨脹/路徑洩漏）。"""
+    d = _agg_to_dict(aggregate_runs([_mk_run("pty", {"S01": 3.0})], "pty"))
+    assert "per_run" not in d
+    assert d["per_step"][0]["step_id"] == "S01"
