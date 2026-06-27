@@ -1,0 +1,28 @@
+# correction_mock_config.yaml — W-87-1：mock brain × 真 Claude 的 self-correction 真跑 config。
+#
+# 關鍵差異（vs 既有 ab_*_config.yaml 的 enable_kernel_brain:false）：
+#   - enable_kernel_brain: true   → main.py:133 注入 MinimaxBrainAdapter（self-correction 生效）。
+#   - base_url 指向本機 mock_brain_server（localhost:9100，OpenAI-compatible）→ 確定性、零憑證、零成本。
+#     ⚠️ autoclaude 不自動載入 .env，但 env var 優先於本 config（main.py:106）；故 carrier 真跑時
+#        會顯式 export MINIMAX_BASE_URL=localhost mock 覆蓋環境，確保即使環境殘留真 key 也走 mock。
+#   - executor.backend: pty + bypassPermissions → 真 Claude CLI 能非互動寫檔（同 ab_pty_config）。
+#   - storage.mode: yaml_only → 零 PG 依賴，臨時工作目錄即可跑。
+minimax:
+  api_key: "mock"
+  base_url: "http://localhost:9100/v1/chat/completions"
+  enable_kernel_brain: true
+
+executor:
+  backend: "pty"
+
+claude:
+  command: "claude"
+  extra_args: ["--permission-mode", "bypassPermissions"]
+
+storage:
+  mode: "yaml_only"
+
+playbook:
+  # 關閉 DONE 前的 global_goal 達成諮詢：避免每輪 DONE 也走 Brain（mock 會回 is_achieved，
+  # 但本載具聚焦 correction 閉環，goal_synthesis 非本輪觀測目標），與既有 ab config 一致。
+  goal_synthesis_enabled: false

@@ -42,6 +42,20 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 # 請求序號 → 讓 correction_prompt 每次不同，繞過相似度幻覺防護
 _COUNTER = itertools.count(1)
 
+# improving_87 W-87-1：Brain 端互動的客觀觀測（RTM-87-2）。記錄收到的 POST 次數與
+# 各次決策型別摘要（不存敏感請求 body），供 correction_loop_verify carrier 經 GET /stats
+# 確認「Brain 真被 Kernel 呼叫 ≥1 次」。純程序內記憶體計數、零持久化。
+_STATS: dict = {"post_count": 0, "decision_types": []}
+
+
+def _decision_type(decision: dict) -> str:
+    """由決策 dict 反推型別標籤（供 /stats 摘要，不外洩請求內容）。"""
+    if "is_achieved" in decision:
+        return "goal_achievement"
+    if "evolution_type" in decision:
+        return "evolution"
+    return "correction"
+
 
 def _system_prompt(payload: dict) -> str:
     """取出 messages 中 role=system 的 content（找不到回空字串）。"""
@@ -120,8 +134,12 @@ class _Handler(BaseHTTPRequestHandler):
         self.wfile.write(data)
 
     def do_GET(self) -> None:  # noqa: N802 (stdlib 介面命名)
-        if self.path.rstrip("/") == "/health":
+        path = self.path.rstrip("/")
+        if path == "/health":
             self._send_json(200, {"status": "ok", "server": "mock_brain_server"})
+        elif path == "/stats":
+            # improving_87 W-87-1：回傳 Brain 端互動計數（RTM-87-2 客觀觀測）。
+            self._send_json(200, dict(_STATS))
         else:
             self._send_json(404, {"error": "not found"})
 
@@ -135,6 +153,9 @@ class _Handler(BaseHTTPRequestHandler):
             self._send_json(400, {"error": "invalid json or non-utf-8 body"})
             return
         decision = build_decision(payload)
+        # improving_87 W-87-1：累計 Brain 端互動（供 /stats 觀測，不存請求 body）。
+        _STATS["post_count"] += 1
+        _STATS["decision_types"].append(_decision_type(decision))
         self._send_json(200, _envelope(decision))
 
     def log_message(self, *args) -> None:  # 靜音預設 access log

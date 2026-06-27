@@ -1,0 +1,22 @@
+# correction_real_config.yaml — W-87-2：真 Minimax × 真 Claude 的 self-correction 真跑 config。
+#
+# 與 mock 版唯一差異：不在此設 base_url / api_key —— 改由環境變數提供真值（main.py:103-107
+# env 優先於 config；autoclaude 不自動載入 .env，故真跑前須先把 AutoClaude/.env 匯入環境）：
+#   set -a && . ./.env && set +a
+#   autoclaude scripts/correction_loop_smoke.yaml --config scripts/ab_configs/correction_real_config.yaml --fresh
+# 🔴 key 只經環境變數傳入，絕不寫進本檔或任何提交檔案。
+minimax:
+  enable_kernel_brain: true   # 注入 MinimaxBrainAdapter → self-correction 生效
+
+executor:
+  backend: "pty"
+
+claude:
+  command: "claude"
+  extra_args: ["--permission-mode", "bypassPermissions"]
+
+storage:
+  mode: "yaml_only"
+
+playbook:
+  goal_synthesis_enabled: false
