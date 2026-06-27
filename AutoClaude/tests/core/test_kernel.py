@@ -269,3 +269,98 @@ class TestKernelEmptyPlaybook:
         assert result.success is True
         assert result.completed_steps == 0
         assert result.completed_step_ids == []
+
+
+# ──────────────────────────────────────────────
+# improving_88 W-88-1 / DEF-87-001：self-correction × expected_output_regex 閘交互
+# 掌舵者裁示選項 A——套用 Brain CORRECTION 時 Kernel 確定性保留 regex 輸出契約。
+# ──────────────────────────────────────────────
+import re as _re
+
+from autoclaude.models.decision import CorrectionDecision
+
+
+class _EchoExecutor:
+    """回傳收到的 full_prompt 本身（模擬 Claude 完全照 prompt 輸出，使 prompt 內容直達 evaluator）。"""
+    def __init__(self):
+        self.calls: list[str] = []
+
+    def execute(self, prompt, *, maintain_context=True, timeout=600, label="", on_event=None):
+        self.calls.append(prompt)
+        return ExecutionOutput(text=prompt)
+
+
+class _RegexGateEvaluator:
+    """模擬 shell_evaluator 雙閘：先讓 evaluator 初次失敗（觸發 correction），
+    之後僅當 output 含 expected_output_regex 才算過（regex 閘）。"""
+    def __init__(self, fail_first_for: Optional[dict[str, int]] = None):
+        self._remaining = dict(fail_first_for or {})
+
+    def evaluate(self, task, output):
+        sid = task.step_id
+        if self._remaining.get(sid, 0) > 0:
+            self._remaining[sid] -= 1
+            return f"evaluator first-fail {sid}", output, 1
+        if task.expected_output_regex and not _re.search(task.expected_output_regex, output):
+            return f"regex 未匹配 {task.expected_output_regex}", output, 1
+        return None, output, 0
+
+
+class _DropKeywordBrain:
+    """模擬 Brain：修正 prompt 只談『修程式』、完全丟掉 keyword 要求（DEF-87-001 觸發條件）。"""
+    def __init__(self, correction_prompt="請修正程式碼讓它通過"):
+        self._cp = correction_prompt
+        self.calls = 0
+
+    def decide_correction(self, *, task, failure_reason, eval_output, attempt,
+                          global_goal, **kw):
+        self.calls += 1
+        return CorrectionDecision(correction_prompt=self._cp, reasoning="r")
+
+
+class TestKernelCorrectionPreservesRegex:
+    def test_correction_preserves_regex_converges(self):
+        """RTM-88-1：同掛 regex+evaluator 的 step，Brain 丟 keyword 的修正下仍能收斂成功。"""
+        brain = _DropKeywordBrain()
+        ex = _EchoExecutor()
+        ev = _RegexGateEvaluator(fail_first_for={"T01": 1})  # 第 1 次 evaluator 失敗 → 觸發 correction
+        kernel = PlaybookKernel(ex, ev, brain=brain)
+        # regex 用純 keyword（字面即自我匹配）：echo executor 不解釋 regex，故以「pattern 字串
+        # 回填進 prompt → echo 回 output → re.search 命中」模擬真 Claude 讀懂約束後產出匹配輸出。
+        result = kernel.run(_pb(_t("T01", regex=r"KEYWORD_X"), max_retries=3))
+        assert result.success is True
+        assert "T01" in result.completed_step_ids
+        assert brain.calls >= 1  # 確有走 correction 路徑
+
+    def test_correction_appends_regex_to_prompt(self):
+        """RTM-88-2：套用 correction 後 task.prompt（→ executor 收到的 prompt）含 regex 約束。"""
+        brain = _DropKeywordBrain(correction_prompt="只修程式")
+        ex = _EchoExecutor()
+        ev = _RegexGateEvaluator(fail_first_for={"T01": 1})
+        kernel = PlaybookKernel(ex, ev, brain=brain)
+        kernel.run(_pb(_t("T01", regex=r"KEYWORD_X"), max_retries=3))
+        # 第 1 次 call＝原 prompt；correction 後的 call 應含補回的 regex pattern
+        assert any("KEYWORD_X" in c for c in ex.calls[1:])
+
+    def test_no_regex_correction_prompt_unchanged(self):
+        """RTM-88-3：無 regex 的 step → 修正後 prompt 與 Brain 回傳位元級一致（零退化）。"""
+        out = PlaybookKernel._preserve_output_contract(_t("T01", regex=None), "BRAIN-FIX")
+        assert out == "BRAIN-FIX"
+
+    def test_idempotent_no_double_append(self):
+        """RTM-88-4：Brain 修正 prompt 已含 regex pattern → 不重複附加（冪等）。"""
+        task = _t("T01", regex=r"\[KEYWORD\]")
+        cp = r"請輸出 \[KEYWORD\] 並修程式"
+        out = PlaybookKernel._preserve_output_contract(task, cp)
+        assert out == cp  # 已含則原樣回傳
+        assert out.count(r"\[KEYWORD\]") == 1
+
+    def test_multi_correction_no_accumulation(self):
+        """RTM-88-5：多次套用以新鮮 correction_prompt 為基底 → 不累積膨脹。"""
+        task = _t("T01", regex=r"\[KEYWORD\]")
+        first = PlaybookKernel._preserve_output_contract(task, "fix-1")
+        second = PlaybookKernel._preserve_output_contract(task, "fix-2")
+        # 每次只附加一次約束；第二次不含第一次的內容
+        assert first.count("expected_output_regex") == 1
+        assert second.count("expected_output_regex") == 1
+        assert "fix-1" not in second

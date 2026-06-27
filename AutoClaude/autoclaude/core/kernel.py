@@ -257,7 +257,7 @@ class PlaybookKernel:
                     task.step_id, attempt + 1,
                 )
                 if c.correction_prompt:
-                    task.prompt = c.correction_prompt
+                    task.prompt = self._preserve_output_contract(task, c.correction_prompt)
                 mut = getattr(c, "step_mutation", None)
                 if mut is not None:
                     out = self._apply_mutation(playbook, task, step_idx, mut, attempt)
@@ -289,6 +289,28 @@ class PlaybookKernel:
         return StepOutcome(action=StepAction.ESCALATE,
                            failure_reason=f"max_retries_exhausted: {last_failure_reason}",
                            attempts_used=attempt)
+
+    @staticmethod
+    def _preserve_output_contract(task: PlaybookTask, correction_prompt: str) -> str:
+        """DEF-87-001（improving_88 W-88-1，掌舵者裁示選項 A）：Brain CORRECTION 整個取代
+        task.prompt 時，自動把該 step 的 expected_output_regex 輸出契約補回修正後 prompt。
+
+        否則「輸出須含某 keyword」要求隨原 prompt 一起被丟掉 → 程式即使修對、evaluator 過了，
+        regex 閘永遠不過 → 重試耗盡 escalate（首跑即實證 CORRECTION×3 後 escalated=True）。
+        以 Kernel 確定性保留（非靠 Brain 自律），兩道閘並存。
+
+        零退化/冪等：無 regex → 原樣回傳（與舊行為位元級一致）；correction_prompt 已含該
+        pattern → 原樣回傳（不重複附加）。永遠以當次新鮮 correction_prompt 為基底 → 多次
+        correction 不累積膨脹。
+        """
+        regex = getattr(task, "expected_output_regex", None)
+        if not regex or regex in correction_prompt:
+            return correction_prompt
+        return (
+            f"{correction_prompt}\n\n"
+            f"[硬約束·勿遺漏] 你的輸出仍必須匹配以下 expected_output_regex"
+            f"（此為本步驟驗收閘，不可省略）：{regex}"
+        )
 
     def _consult_token_guard(
         self, playbook, task, step_idx, attempt, max_retries, peak_pct,
