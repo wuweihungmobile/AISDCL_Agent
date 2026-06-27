@@ -69,14 +69,20 @@ def test_iembedder_protocol_runtime_check():
     assert isinstance(adapter, IEmbedder)
 
 
-def test_bge_dimension_default_1024():
-    """T2 BGE-M3 預設維度鎖死 1024（AC4-1 SSOT）。"""
+def test_bge_dimension_default_1024(monkeypatch):
+    """T2 BGE-M3 預設維度鎖死 1024（AC4-1 SSOT）。
+
+    hermetic（improving_92 起 adapter 會讀 TEI_EMBED_DIMENSIONS env）：須清 ambient env，
+    否則開發者 shell export TEI_EMBED_DIMENSIONS=512 時本測試偽 fail。
+    """
+    monkeypatch.delenv("TEI_EMBED_DIMENSIONS", raising=False)
     adapter = BGEM3LocalAdapter(http_client=_FakeHttpClient())
     assert adapter.dimension == 1024
 
 
-def test_bge_embed_preserves_order_and_count():
+def test_bge_embed_preserves_order_and_count(monkeypatch):
     """T3 batch embed 回傳順序與筆數需對齊輸入。"""
+    monkeypatch.delenv("TEI_EMBED_DIMENSIONS", raising=False)  # hermetic：見 T2 說明
     fake = _FakeHttpClient(post_payload=[
         [0.0] * 1024,
         [0.1] * 1024,
@@ -89,8 +95,9 @@ def test_bge_embed_preserves_order_and_count():
     assert vecs[1][0] == pytest.approx(0.1)
 
 
-def test_bge_dim_mismatch_raises():
+def test_bge_dim_mismatch_raises(monkeypatch):
     """T4 TEI 回傳維度不符 → EmbedderDimensionMismatchError（防髒資料）。"""
+    monkeypatch.delenv("TEI_EMBED_DIMENSIONS", raising=False)  # hermetic：見 T2 說明
     fake = _FakeHttpClient(post_payload=[[0.0] * 512])
     adapter = BGEM3LocalAdapter(http_client=fake)
     with pytest.raises(EmbedderDimensionMismatchError):
@@ -246,3 +253,103 @@ def test_embedder_model_from_env(monkeypatch):
     monkeypatch.setenv("MINIMAX_EMBED_MODEL", "embo-02-from-env")
     adapter = MinimaxEmbedderAdapter(api_key="dummy", group_id="G1", http_client=_FakeHttpClient())
     assert adapter.model_id == "embo-02-from-env"
+
+
+# ─────────────────────────────────────────────
+# improving_92 W-92-2/3：bge-m3 本地 TEI 設定來源優先序（方案 B 收尾）
+#   建構參數 > env（TEI_URL / TEI_MODEL_ID / TEI_EMBED_DIMENSIONS）> config 兜底 > 硬編
+# ─────────────────────────────────────────────
+
+_TEI_ENV_KEYS = ("TEI_URL", "TEI_MODEL_ID", "TEI_EMBED_DIMENSIONS")
+
+
+def test_bge_no_config_backward_compat(monkeypatch):
+    """RTM-92-3：config=None + 無 env（現有所有呼叫端形態）時行為與改版前 byte-level 一致。
+
+    WHY：W-92-2 新增 config 參數 + 補 TEI_MODEL_ID/TEI_EMBED_DIMENSIONS env 讀取必須 additive
+    ——若不傳 config 且無 env，兜底鏈須塌回原硬編（base_url=localhost:8080、model=BAAI/bge-m3、
+    dim=1024、timeout=30.0），否則所有既有呼叫端（皆不傳 config）會行為漂移＝退化。
+    清 ambient TEI env 確保斷言的是「硬編預設」而非開發者 shell 殘留值。
+    """
+    for k in _TEI_ENV_KEYS:
+        monkeypatch.delenv(k, raising=False)
+    adapter = BGEM3LocalAdapter(http_client=_FakeHttpClient())
+    assert adapter._base_url == "http://localhost:8080"
+    assert adapter.model_id == "BAAI/bge-m3"
+    assert adapter.dimension == 1024
+    assert adapter._timeout == 30.0
+
+
+def test_bge_config_fallback_when_no_env(monkeypatch):
+    """RTM-92-2：env 缺席時 config 兜底生效（TEI 非機密設定可集中於 config.yaml）。
+
+    WHY：方案 B 的核心價值＝非機密 embedder 設定可集中於 config.yaml。若 config 兜底不生效，
+    使用者填了 config.yaml 的 bge_m3_* 卻無效＝治理目標落空。
+    """
+    for k in _TEI_ENV_KEYS:
+        monkeypatch.delenv(k, raising=False)
+    cfg = EmbedderConfig(
+        bge_m3_url="http://cfg-tei:9090",
+        bge_m3_model="bge-m3-cfg",
+        bge_m3_dimension=768,
+        bge_m3_timeout_seconds=12.5,
+    )
+    adapter = BGEM3LocalAdapter(config=cfg, http_client=_FakeHttpClient())
+    assert adapter._base_url == "http://cfg-tei:9090"
+    assert adapter.model_id == "bge-m3-cfg"
+    assert adapter.dimension == 768
+    assert adapter._timeout == 12.5
+
+
+def test_bge_env_overrides_config(monkeypatch):
+    """RTM-92-2：env 優先於 config（與 chat / minimax embedder env>config 治理一致）。
+
+    WHY：env 是臨時覆寫管道（改 TEI 容器位址 / 換 model）；若 config 蓋過 env，臨時覆寫失效。
+    """
+    monkeypatch.setenv("TEI_URL", "http://env-tei:7070")
+    monkeypatch.setenv("TEI_MODEL_ID", "bge-m3-env")
+    monkeypatch.setenv("TEI_EMBED_DIMENSIONS", "256")
+    cfg = EmbedderConfig(bge_m3_url="http://cfg-tei:9090", bge_m3_model="bge-m3-cfg",
+                         bge_m3_dimension=768)
+    adapter = BGEM3LocalAdapter(config=cfg, http_client=_FakeHttpClient())
+    assert adapter._base_url == "http://env-tei:7070"
+    assert adapter.model_id == "bge-m3-env"
+    assert adapter.dimension == 256
+
+
+def test_bge_ctor_arg_overrides_env_and_config(monkeypatch):
+    """RTM-92-2：建構參數最高優先（> env > config）。
+
+    WHY：顯式注入（測試 fixture / DualEmbedderRouter 組裝）必須能完全主導，否則無法在不污染
+    env 的前提下精準建構特定 adapter。
+    """
+    monkeypatch.setenv("TEI_MODEL_ID", "bge-m3-env")
+    cfg = EmbedderConfig(bge_m3_model="bge-m3-cfg")
+    adapter = BGEM3LocalAdapter(model_id="bge-m3-arg", config=cfg, http_client=_FakeHttpClient())
+    assert adapter.model_id == "bge-m3-arg"
+
+
+def test_bge_model_from_env(monkeypatch):
+    """RTM-92-4 / DEF-92-001：TEI_MODEL_ID env 真正被讀取（先前硬編、env 失效）。
+
+    WHY：.env.example 白紙黑字宣告 TEI_MODEL_ID，但修復前 adapter `model_id` 為簽章硬編預設、
+    __init__ 從不讀該 env——文件宣稱可配置實則不可。本測試鎖死「env 設了就生效」，使
+    DEF-92-001 不會復活（回歸防護；MUT-92-1 驗牙）。
+    """
+    monkeypatch.delenv("TEI_URL", raising=False)
+    monkeypatch.setenv("TEI_MODEL_ID", "bge-m3-large-from-env")
+    adapter = BGEM3LocalAdapter(http_client=_FakeHttpClient())
+    assert adapter.model_id == "bge-m3-large-from-env"
+
+
+def test_bge_dimension_from_env(monkeypatch):
+    """RTM-92-5 / DEF-92-002：TEI_EMBED_DIMENSIONS env 真正被讀取（先前硬編、env 失效）。
+
+    WHY：.env.example 宣告 TEI_EMBED_DIMENSIONS，但修復前 adapter `dimension` 為簽章硬編預設、
+    __init__ 從不讀該 env。本測試鎖死「env 設了就生效」，使 DEF-92-002 不會復活
+    （回歸防護；MUT-92-2 驗牙）。非數字 env 應被忽略（`.isdigit()` 檢核）回退預設。
+    """
+    monkeypatch.delenv("TEI_URL", raising=False)
+    monkeypatch.setenv("TEI_EMBED_DIMENSIONS", "512")
+    adapter = BGEM3LocalAdapter(http_client=_FakeHttpClient())
+    assert adapter.dimension == 512

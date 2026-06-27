@@ -29,6 +29,15 @@ embedder:
   dimension: 1024
   timeout_seconds: 30
   api_key: ""   # 留空；機密由 .env 的 MINIMAX_API_KEY 或環境變數提供
+  # ── bge-m3 本地 TEI（improving_92 方案 B 收尾）：TEI 為本地容器端點、全非機密（無 api_key /
+  #    帳號識別），對應 .env.example 的 TEI_URL / TEI_MODEL_ID / TEI_EMBED_DIMENSIONS。
+  #    讀取優先序：建構參數 > env（TEI_URL / TEI_MODEL_ID / TEI_EMBED_DIMENSIONS）> 本檔兜底 >
+  #    硬編預設（bgem3_local.py）。（DEF-92-001/002 修復：TEI_MODEL_ID / TEI_EMBED_DIMENSIONS
+  #    先前 adapter 從未讀取，improving_92 起真正生效。）
+  bge_m3_url: "http://localhost:8080"
+  bge_m3_model: "BAAI/bge-m3"
+  bge_m3_dimension: 1024
+  bge_m3_timeout_seconds: 30
 
 loop:
   max_iterations: 20

@@ -43,6 +43,15 @@ class EmbedderConfig(BaseModel):
     dimension: int = 1024
     timeout_seconds: float = 30.0
     api_key: str = ""   # 機密：留空，由 env MINIMAX_API_KEY 提供，絕不入庫
+    # bge-m3 本地 TEI（improving_92 W-92-1，方案 B 收尾）：TEI 為本地容器端點、全非機密，
+    # 對應 .env.example 的 TEI_URL / TEI_MODEL_ID / TEI_EMBED_DIMENSIONS（後兩者先前 adapter
+    # 從未讀取＝DEF-92-001/002）。無 api_key/帳號識別＝無機密、無 RBAC 需求（與 Minimax
+    # embedder.api_key 不同，故 _PROTECTED_FIELDS 不為 bge-m3 新增任何欄位）。
+    # 優先序（adapter 端實作，見 bgem3_local.py）：建構參數 > env > 本 config 兜底 > 硬編預設。
+    bge_m3_url: str = "http://localhost:8080"
+    bge_m3_model: str = "BAAI/bge-m3"
+    bge_m3_dimension: int = 1024
+    bge_m3_timeout_seconds: float = 30.0
 
 
 class ClaudeConfig(BaseModel):

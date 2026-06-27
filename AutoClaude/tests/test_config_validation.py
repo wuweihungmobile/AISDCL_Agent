@@ -179,3 +179,33 @@ class TestEmbedderConfig:
         m = AppConfig().minimax
         assert m.base_url == "https://api.minimax.io/v1/text/chatcompletion_v2"
         assert m.model == "MiniMax-M2.7"
+
+    def test_embedder_bge_m3_defaults(self):
+        """RTM-92-1：EmbedderConfig bge-m3 非機密預設正確（方案 B 收尾）。
+
+        WHY：TEI 為本地容器、全非機密——預設須對齊 bgem3_local.py 硬編值（localhost:8080 /
+        BAAI/bge-m3 / 1024），且【不】夾帶任何 api_key 機密欄位（與 Minimax embedder 不同）。
+        """
+        e = AppConfig().embedder
+        assert e.bge_m3_url == "http://localhost:8080"
+        assert e.bge_m3_model == "BAAI/bge-m3"
+        assert e.bge_m3_dimension == 1024
+        assert e.bge_m3_timeout_seconds == 30.0
+        # 機密邊界：bge-m3 無任何 api_key 欄位（TEI 本地容器無認證）
+        assert not hasattr(e, "bge_m3_api_key")
+
+    def test_embedder_bge_m3_block_loaded(self):
+        """RTM-92-1 / DEF-92-003：config.yaml 的 embedder.bge_m3_* 被 Pydantic 接受、不被丟棄。
+
+        WHY：修復前 EmbedderConfig 無 bge_m3_* 欄位，使用者填的 bge-m3 設定會被 extra=ignore
+        靜默丟棄＝TEI 設定無法集中於 config.yaml。本測試鎖死「bge-m3 區塊真的進得了 AppConfig」。
+        """
+        cfg = AppConfig.model_validate(
+            {"embedder": {"bge_m3_url": "http://tei:9090", "bge_m3_model": "m2",
+                          "bge_m3_dimension": 768}}
+        )
+        assert cfg.embedder.bge_m3_url == "http://tei:9090"
+        assert cfg.embedder.bge_m3_model == "m2"
+        assert cfg.embedder.bge_m3_dimension == 768
+        # 同物件的 Minimax 欄位維持預設（互不干擾）
+        assert cfg.embedder.model == "embo-01"

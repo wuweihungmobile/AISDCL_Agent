@@ -22,6 +22,7 @@ from ...core.ports.embedder import (
     EmbedderHealth,
     EmbedderUnavailableError,
 )
+from ...utils.config import EmbedderConfig
 
 
 class BGEM3LocalAdapter:
@@ -34,19 +35,45 @@ class BGEM3LocalAdapter:
         self,
         *,
         base_url: Optional[str] = None,
-        model_id: str = "BAAI/bge-m3",
-        dimension: int = _DEFAULT_DIM,
-        timeout_seconds: float = 30.0,
+        model_id: Optional[str] = None,
+        dimension: Optional[int] = None,
+        timeout_seconds: Optional[float] = None,
+        config: Optional[EmbedderConfig] = None,
         http_client: Any = None,
     ) -> None:
-        self.dimension = int(dimension)
-        self.model_id = model_id
+        # 設定來源優先序（improving_92 W-92-2，對齊 improving_91 minimax_embedder 治理）：
+        #   建構參數 > env > config 兜底 > 硬編預設。config=None + 無 env 時兜底鏈塌回硬編
+        #   （byte-level 零退化：model_id=BAAI/bge-m3、dimension=1024、base_url 硬編、timeout=30.0）。
+        # model：DEF-92-001 修復——補 TEI_MODEL_ID env 讀取（先前簽章硬編、env 從未生效）
+        self.model_id = (
+            model_id
+            or os.environ.get("TEI_MODEL_ID")
+            or (config.bge_m3_model if config else None)
+            or "BAAI/bge-m3"
+        )
         self._base_url = (
             base_url
             or os.environ.get("TEI_URL")
+            or (config.bge_m3_url if config else None)
             or "http://localhost:8080"
         ).rstrip("/")
-        self._timeout = timeout_seconds
+        # dimension：DEF-92-002 修復——補 TEI_EMBED_DIMENSIONS env 讀取（先前簽章硬編、env 從未生效）
+        dim_env = os.environ.get("TEI_EMBED_DIMENSIONS", "").strip()
+        if dimension is not None:
+            self.dimension = int(dimension)
+        elif dim_env.isdigit():
+            self.dimension = int(dim_env)
+        elif config is not None:
+            self.dimension = int(config.bge_m3_dimension)
+        else:
+            self.dimension = self._DEFAULT_DIM
+        # timeout：參數 > config 兜底 > 硬編 30.0
+        if timeout_seconds is not None:
+            self._timeout = timeout_seconds
+        elif config is not None:
+            self._timeout = config.bge_m3_timeout_seconds
+        else:
+            self._timeout = 30.0
         # http_client 注入點供測試 mock；正式使用 httpx.Client（lazy import 避免裝置缺套件即崩）
         self._client = http_client
 
