@@ -1,0 +1,43 @@
+/* ══════════════════════════════════════════════════════════════════════════
+   意象若水 water_green — COLOR TOKENS
+   Light Mode ONLY. Do not add prefers-color-scheme: dark or dark: variants.
+   Flat aesthetic: colors carry hierarchy — NO shadows anywhere.
+   ════════════════════════════════════════════════════════════════════════ */
+:root {
+  /* ── Brand core ──────────────────────────────────────────────────────── */
+  --color-primary:   #498428; /* core CTA / active blocks / price / focus ring */
+  --color-secondary: #80B155; /* secondary / hover-contrast / 2nd logistics tag */
+  /* tertiary — AUTO: analogous to primary, markedly lighter/airier.
+     Used for sidebar-active backing & lightweight logistics-tag backgrounds.   */
+  --color-tertiary:  #E4EFD9;
+  --color-accent:    #E55B3C; /* discount tags, cart badge, warnings/attention   */
+
+  /* ── Surfaces ────────────────────────────────────────────────────────── */
+  --color-bg-base:    #F5F7F2; /* page floor */
+  --color-bg-surface: #FFFFFF; /* cards, panels */
+
+  /* ── Commerce header (relative-value logic: topbar darker > header lighter) */
+  --color-topbar-bg:   #336A29; /* announcement bar — recedes */
+  --color-header-bg:   #498428; /* main nav — lighter, "steps forward" */
+  --color-topbar-text: #FFFFFF; /* highest legibility on topbar */
+  --color-header-text: #FFFFFF; /* text/icons on the green main nav */
+
+  /* ── Text & lines ────────────────────────────────────────────────────── */
+  --color-text-main:   #2A3626;
+  --color-text-muted:  #7A8775;
+  --color-border:      #DCE3D6;
+
+  /* ── System states ───────────────────────────────────────────────────── */
+  --color-disabled-bg:   #E8EBE5;
+  --color-disabled-text: #A6B0A1;
+
+  /* ── Semantic / feedback ─────────────────────────────────────────────── */
+  --color-success: #498428; /* brand green — "added to cart" / done */
+  --color-warning: #F5A623; /* low stock / attention; also star ratings */
+  --color-error:   #D35B58; /* validation / payment failure */
+
+  /* ── Utility ─────────────────────────────────────────────────────────── */
+  --color-skeleton: #F3F4F6; /* skeleton placeholder fill (pulse only) */
+  --color-primary-strong: #336A29; /* darkened primary for solid-button hover  */
+  --color-accent-strong:  #C9492B; /* darkened accent for hover                 */
+}

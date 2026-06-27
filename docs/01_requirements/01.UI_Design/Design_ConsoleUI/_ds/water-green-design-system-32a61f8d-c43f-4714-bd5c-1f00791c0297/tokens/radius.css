@@ -1,0 +1,32 @@
+/* ══════════════════════════════════════════════════════════════════════════
+   意象若水 water_green — RADIUS, BORDERS & MOTION TOKENS
+   FLAT SYSTEM: no box-shadow anywhere. Depth comes from 1px solid borders,
+   bg-base vs bg-surface contrast, and 8pt whitespace only.
+   ════════════════════════════════════════════════════════════════════════ */
+:root {
+  /* ── Corner radius ───────────────────────────────────────────────────── */
+  --radius-sm:   4px;  /* tight active blocks / pagination chips */
+  --radius-md:   8px;  /* buttons, inputs, FAB, control bar */
+  --radius-lg:   12px; /* product cards & images */
+  --radius-full: 9999px; /* avatars, notification dots */
+
+  /* ── Borders (the ONLY elevation device) ─────────────────────────────── */
+  --border-hairline: 1px solid var(--color-border);
+  --border-width: 1px;
+  --sidebar-accent-width: 4px; /* left rail active anchor */
+
+  /* ── Focus ring (mandatory, replaces outline:none) ───────────────────── */
+  --focus-ring:   2px solid var(--color-primary);
+  --focus-offset: 2px;
+
+  /* ── Motion ──────────────────────────────────────────────────────────── */
+  --transition-base: all 0.2s ease-out; /* @kind other */
+  --hover-opacity: 0.85; /* @kind other */
+  --img-hover-scale: 1.05; /* @kind other */ /* product image zoom on card hover */
+
+  /* ── Iconography baseline ────────────────────────────────────────────── */
+  --icon-stroke: 1.5;
+}
+/* GLOBAL BAN (documented as tokens, enforced in lint):
+   no box-shadow / drop-shadow / shadow-* ; no gradients on overlays;
+   no translateY hover lifts; no rounded-full on buttons/cards. */

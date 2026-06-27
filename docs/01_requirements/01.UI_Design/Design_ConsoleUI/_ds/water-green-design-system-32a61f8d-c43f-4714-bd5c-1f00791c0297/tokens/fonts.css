@@ -1,0 +1,8 @@
+/* ── Webfonts ──────────────────────────────────────────────────────────────
+   意象若水 uses Inter (Latin/numerals) + Noto Sans TC (Traditional Chinese).
+   Both are loaded from the Google Fonts CDN — no local binaries were supplied
+   with the brief, and these are the exact families named in 00.tokens.
+   If you have licensed/self-hosted copies, drop them in assets/fonts/ and
+   replace this @import with @font-face rules pointing at them. */
+
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Noto+Sans+TC:wght@400;500;600;700&display=swap');

@@ -1,0 +1,1306 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="_ds/water-green-design-system-32a61f8d-c43f-4714-bd5c-1f00791c0297/tokens/fonts.css">
+<link rel="stylesheet" href="_ds/water-green-design-system-32a61f8d-c43f-4714-bd5c-1f00791c0297/tokens/colors.css">
+<link rel="stylesheet" href="_ds/water-green-design-system-32a61f8d-c43f-4714-bd5c-1f00791c0297/tokens/typography.css">
+<link rel="stylesheet" href="_ds/water-green-design-system-32a61f8d-c43f-4714-bd5c-1f00791c0297/tokens/spacing.css">
+<link rel="stylesheet" href="_ds/water-green-design-system-32a61f8d-c43f-4714-bd5c-1f00791c0297/tokens/radius.css">
+<link rel="stylesheet" href="_ds/water-green-design-system-32a61f8d-c43f-4714-bd5c-1f00791c0297/tokens/base.css">
+<link rel="stylesheet" href="_ds/water-green-design-system-32a61f8d-c43f-4714-bd5c-1f00791c0297/styles.css">
+<script src="_ds/water-green-design-system-32a61f8d-c43f-4714-bd5c-1f00791c0297/_ds_bundle.js"></script>
+<script src="https://unpkg.com/lucide@latest/dist/umd/lucide.js"></script>
+<script src="./WgIcon.js"></script>
+<style>
+  html,body{height:100%;}
+  *::-webkit-scrollbar{width:10px;height:10px;}
+  *::-webkit-scrollbar-thumb{background:#cdd6c4;border-radius:8px;}
+  *::-webkit-scrollbar-track{background:transparent;}
+  @keyframes wg-blink{0%,100%{opacity:1}50%{opacity:.35}}
+  @keyframes wg-fade{from{transform:translateY(6px)}to{transform:none}}
+  @keyframes wg-spin{to{transform:rotate(360deg)}}
+  textarea:focus,input:focus,select:focus{outline:2px solid var(--color-primary);outline-offset:2px;border-color:var(--color-primary)!important}
+  select.wg-sel{appearance:none;-webkit-appearance:none;background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24' fill='none' stroke='%237A8775' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");background-repeat:no-repeat;background-position:right 12px center;cursor:pointer}
+  .wg-input{width:100%;min-height:44px;padding:10px 16px;font-family:inherit;font-size:15px;color:var(--color-text-main);background:#fff;border:1px solid var(--color-border);border-radius:8px;outline:none;box-sizing:border-box}
+</style>
+</helmet>
+
+<div style="display:flex;flex-direction:column;height:100vh;background:var(--color-bg-base);font-family:var(--font-sans);color:var(--color-text-main);overflow:hidden">
+
+  <sc-if value="{{ notReady }}">
+    <div style="position:fixed;inset:0;display:flex;align-items:center;justify-content:center;background:var(--color-bg-base);z-index:200">
+      <span style="display:inline-block;width:40px;height:40px;border:3px solid var(--color-tertiary);border-top-color:var(--color-primary);border-radius:9999px;animation:wg-spin .8s linear infinite"></span>
+    </div>
+  </sc-if>
+
+  <sc-if value="{{ appReady }}" hint-placeholder-val="{{ true }}">
+  <!-- ░░ TOPBAR ░░ -->
+  <div style="background:var(--color-topbar-bg);color:var(--color-topbar-text);height:34px;flex:none">
+    <div style="max-width:1440px;margin:0 auto;padding:0 24px;height:100%;display:flex;align-items:center;justify-content:space-between;font-size:var(--fs-caption)">
+      <div style="display:flex;align-items:center;gap:16px;opacity:.95">
+        <span>說明文件</span>
+        <span style="opacity:.35">|</span>
+        <span>下載 CLI</span>
+        <span style="opacity:.35">|</span>
+        <span>GitHub</span>
+        <span style="opacity:.35">|</span>
+        <span style="opacity:.8">Engine Bridge · 已連線</span>
+        <span style="width:7px;height:7px;border-radius:9999px;background:#9fe08a;display:inline-block"></span>
+      </div>
+      <div style="display:flex;align-items:center;gap:16px">
+        <span style="display:inline-flex;align-items:center;gap:6px"><x-import component-from-global-scope="WgIcon" glyph="bell" px="14" col="#FFFFFF" hint-size="14px,14px"></x-import>通知總覽</span>
+        <span style="opacity:.35">|</span>
+        <span style="display:inline-flex;align-items:center;gap:6px"><x-import component-from-global-scope="WgIcon" glyph="circle-help" px="14" col="#FFFFFF" hint-size="14px,14px"></x-import>幫助中心</span>
+        <span style="opacity:.35">|</span>
+        <span style="display:inline-flex;align-items:center;gap:6px"><x-import component-from-global-scope="WgIcon" glyph="globe" px="14" col="#FFFFFF" hint-size="14px,14px"></x-import>繁體中文</span>
+        <span style="opacity:.35">|</span>
+        <span style="display:inline-flex;align-items:center;gap:6px"><span style="width:18px;height:18px;border-radius:9999px;background:#fff;color:var(--color-primary);display:inline-flex;align-items:center;justify-content:center;font-weight:600;font-size:11px">K</span>koala005</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- ░░ MASTHEAD ░░ -->
+  <div style="background:var(--color-header-bg);flex:none">
+    <div style="max-width:1440px;margin:0 auto;padding:18px 24px 16px;display:flex;align-items:center;gap:32px">
+      <!-- logo -->
+      <button onClick="{{ goDashboard }}" style="display:flex;align-items:center;gap:12px;background:transparent;border:none;cursor:pointer;color:#fff;flex:none">
+        <span style="width:46px;height:46px;border-radius:12px;background:#fff;display:inline-flex;align-items:center;justify-content:center"><x-import component-from-global-scope="WgIcon" glyph="bot" px="28" col="#498428" hint-size="28px,28px"></x-import></span>
+        <span style="display:flex;flex-direction:column;align-items:flex-start;line-height:1.15">
+          <span style="font-size:21px;font-weight:700;letter-spacing:.3px">AISDLC Console</span>
+          <span style="font-size:11px;opacity:.85;letter-spacing:2px">AGENT CONTROL PANEL</span>
+        </span>
+      </button>
+      <!-- search -->
+      <div style="flex:1;max-width:760px;display:flex;flex-direction:column;gap:6px">
+        <div style="display:flex;background:#fff;border-radius:8px;overflow:hidden;height:46px;align-items:stretch">
+          <input value="{{ search }}" onChange="{{ onSearchChange }}" onKeyDown="{{ onSearchKey }}" placeholder="搜尋專案、目標、任務…" style="flex:1;min-width:0;border:none;outline:none;background:transparent;padding:0 18px;font-family:inherit;font-size:14px;color:var(--color-text-main)" />
+          <button onClick="{{ onSearchSubmit }}" style="background:var(--color-primary);color:#fff;border:none;padding:0 26px;cursor:pointer;display:flex;align-items:center;justify-content:center"><x-import component-from-global-scope="WgIcon" glyph="search" px="20" col="#FFFFFF" hint-size="20px,20px"></x-import></button>
+        </div>
+        <div style="display:flex;gap:18px;font-size:12px;color:rgba(255,255,255,.92);flex-wrap:wrap">
+          <sc-for list="{{ recentChips }}" as="c" hint-placeholder-count="5">
+            <button onClick="{{ c.onClick }}" style="background:transparent;border:none;color:inherit;cursor:pointer;font-size:12px;padding:0;font-family:inherit">{{ c.name }}</button>
+          </sc-for>
+        </div>
+      </div>
+      <!-- actions -->
+      <div style="display:flex;align-items:center;gap:10px;flex:none">
+        <button onClick="{{ goNotifications }}" style="position:relative;width:44px;height:44px;display:inline-flex;align-items:center;justify-content:center;background:transparent;border:none;border-radius:9999px;cursor:pointer">
+          <x-import component-from-global-scope="WgIcon" glyph="bell" px="24" col="#FFFFFF" hint-size="24px,24px"></x-import>
+          <span style="position:absolute;top:4px;right:4px;min-width:18px;height:18px;padding:0 5px;background:var(--color-accent);color:#fff;border:2px solid var(--color-header-bg);border-radius:9999px;font-size:11px;font-weight:600;display:inline-flex;align-items:center;justify-content:center">3</span>
+        </button>
+        <button onClick="{{ goSignoffQueue }}" style="position:relative;width:52px;height:52px;display:inline-flex;align-items:center;justify-content:center;background:rgba(255,255,255,.14);border:none;border-radius:9999px;cursor:pointer">
+          <x-import component-from-global-scope="WgIcon" glyph="clipboard-check" px="26" col="#FFFFFF" hint-size="26px,26px"></x-import>
+          <span style="position:absolute;top:-2px;right:-4px;min-width:22px;height:22px;padding:0 6px;background:var(--color-accent);color:#fff;border:2px solid var(--color-header-bg);border-radius:9999px;font-size:12px;font-weight:700;display:inline-flex;align-items:center;justify-content:center">{{ draftCount }}</span>
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ░░ BODY ░░ -->
+  <div style="flex:1;min-height:0;display:flex;justify-content:center;overflow:hidden">
+    <div style="flex:1;max-width:1440px;display:flex;gap:32px;padding:24px;box-sizing:border-box;min-height:0">
+
+      <!-- SIDEBAR -->
+      <aside style="width:240px;flex:none;overflow-y:auto;padding-right:4px">
+        <div style="display:flex;align-items:center;gap:8px;padding:6px 12px 14px;color:var(--color-text-main)">
+          <x-import component-from-global-scope="WgIcon" glyph="layout-grid" px="20" col="#2A3626" hint-size="20px,20px"></x-import>
+          <span style="font-size:18px;font-weight:600">導航</span>
+        </div>
+        <hr style="border:0;height:1px;background:var(--color-border);margin:0 0 8px"/>
+        <sc-for list="{{ navItems }}" as="n" hint-placeholder-count="6">
+          <button onClick="{{ n.onClick }}" style="width:100%;display:flex;align-items:center;gap:10px;padding:11px 12px;text-align:left;font-size:16px;font-weight:500;color:var(--color-text-main);background:{{ n.bg }};border:none;border-left:4px solid {{ n.accent }};cursor:pointer;font-family:inherit;transition:background .15s" style-hover="background:var(--color-tertiary)">
+            <x-import component-from-global-scope="WgIcon" glyph="{{ n.icon }}" px="18" col="#2A3626" hint-size="18px,18px"></x-import>
+            <span>{{ n.label }}</span>
+          </button>
+        </sc-for>
+
+        <sc-if value="{{ showRail }}" hint-placeholder-val="{{ true }}">
+          <div style="margin-top:20px">
+            <div style="padding:6px 12px 10px;font-size:12px;letter-spacing:1px;color:var(--color-text-muted);text-transform:uppercase">我的專案</div>
+            <hr style="border:0;height:1px;background:var(--color-border);margin:0 0 4px"/>
+            <sc-for list="{{ railProjects }}" as="r" hint-placeholder-count="6">
+              <button onClick="{{ r.onClick }}" style="width:100%;display:flex;align-items:center;gap:10px;padding:9px 12px;background:transparent;border:none;border-left:4px solid transparent;cursor:pointer;text-align:left;font-family:inherit;font-size:14px;color:var(--color-text-main)">
+                <span style="width:8px;height:8px;border-radius:9999px;flex:none;background:{{ r.statusDot }}"></span>
+                <span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{{ r.name }}</span>
+              </button>
+            </sc-for>
+          </div>
+        </sc-if>
+      </aside>
+
+      <!-- MAIN -->
+      <main style="flex:1;min-width:0;overflow-y:auto;padding-bottom:48px">
+
+        <!-- ════ DASHBOARD ════ -->
+        <sc-if value="{{ isDashboard }}" hint-placeholder-val="{{ true }}">
+          <div>
+            <div style="display:flex;align-items:flex-end;justify-content:space-between;gap:16px;margin-bottom:20px">
+              <div>
+                <h2 style="font-size:30px;font-weight:700">總覽儀表板</h2>
+                <p style="color:var(--color-text-muted);margin-top:4px;font-size:15px">AISDLC 自治開發 Agent · 全局健康度與待辦</p>
+              </div>
+              <x-import component-from-global-scope="WaterGreenDesignSystem_32a61f.Button" iconLeft="upload" onClick="{{ goImport }}" hint-size="auto,40px">匯入 BRD / PRD</x-import>
+            </div>
+
+            <div style="display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:24px;margin-bottom:24px">
+              <div style="background:#fff;border:1px solid var(--color-border);border-radius:12px;padding:20px">
+                <div style="display:flex;align-items:center;justify-content:space-between">
+                  <span style="font-size:14px;color:var(--color-text-muted)">{{ kpi1.label }}</span>
+                  <span style="width:34px;height:34px;border-radius:8px;background:var(--color-tertiary);display:inline-flex;align-items:center;justify-content:center"><x-import component-from-global-scope="WgIcon" glyph="circle-check-big" px="18" col="#498428" hint-size="18px,18px"></x-import></span>
+                </div>
+                <div style="font-size:32px;font-weight:700;margin-top:12px;line-height:1">{{ kpi1.value }}</div>
+                <div style="font-size:13px;color:{{ kpi1.deltaColor }};margin-top:8px">{{ kpi1.delta }}</div>
+              </div>
+              <div style="background:#fff;border:1px solid var(--color-border);border-radius:12px;padding:20px">
+                <div style="display:flex;align-items:center;justify-content:space-between">
+                  <span style="font-size:14px;color:var(--color-text-muted)">{{ kpi2.label }}</span>
+                  <span style="width:34px;height:34px;border-radius:8px;background:var(--color-tertiary);display:inline-flex;align-items:center;justify-content:center"><x-import component-from-global-scope="WgIcon" glyph="list-checks" px="18" col="#498428" hint-size="18px,18px"></x-import></span>
+                </div>
+                <div style="font-size:32px;font-weight:700;margin-top:12px;line-height:1">{{ kpi2.value }}</div>
+                <div style="font-size:13px;color:{{ kpi2.deltaColor }};margin-top:8px">{{ kpi2.delta }}</div>
+              </div>
+              <div style="background:#fff;border:1px solid var(--color-border);border-radius:12px;padding:20px">
+                <div style="display:flex;align-items:center;justify-content:space-between">
+                  <span style="font-size:14px;color:var(--color-text-muted)">{{ kpi3.label }}</span>
+                  <span style="width:34px;height:34px;border-radius:8px;background:var(--color-tertiary);display:inline-flex;align-items:center;justify-content:center"><x-import component-from-global-scope="WgIcon" glyph="flame" px="18" col="#498428" hint-size="18px,18px"></x-import></span>
+                </div>
+                <div style="font-size:32px;font-weight:700;margin-top:12px;line-height:1">{{ kpi3.value }}</div>
+                <div style="font-size:13px;color:{{ kpi3.deltaColor }};margin-top:8px">{{ kpi3.delta }}</div>
+              </div>
+              <div style="background:#fff;border:1px solid var(--color-border);border-radius:12px;padding:20px">
+                <div style="display:flex;align-items:center;justify-content:space-between">
+                  <span style="font-size:14px;color:var(--color-text-muted)">{{ kpi4.label }}</span>
+                  <span style="width:34px;height:34px;border-radius:8px;background:var(--color-tertiary);display:inline-flex;align-items:center;justify-content:center"><x-import component-from-global-scope="WgIcon" glyph="clipboard-check" px="18" col="#498428" hint-size="18px,18px"></x-import></span>
+                </div>
+                <div style="font-size:32px;font-weight:700;margin-top:12px;line-height:1">{{ kpi4.value }}</div>
+                <div style="font-size:13px;color:{{ kpi4.deltaColor }};margin-top:8px">{{ kpi4.delta }}</div>
+              </div>
+            </div>
+
+            <div style="display:grid;grid-template-columns:1.6fr 1fr;gap:24px">
+              <div style="background:#fff;border:1px solid var(--color-border);border-radius:12px;padding:20px 22px">
+                <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px">
+                  <h3 style="font-size:18px;font-weight:600">進行中的執行</h3>
+                  <button onClick="{{ goProjects }}" style="background:transparent;border:none;color:var(--color-primary);cursor:pointer;font-size:14px;font-family:inherit">查看全部專案 →</button>
+                </div>
+                <sc-for list="{{ activeRuns }}" as="a" hint-placeholder-count="2">
+                  <div style="padding:14px 0;border-top:1px solid var(--color-border)">
+                    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">
+                      <button onClick="{{ a.onView }}" style="background:transparent;border:none;font-family:inherit;font-size:15px;font-weight:600;color:var(--color-text-main);cursor:pointer;padding:0">{{ a.name }}</button>
+                      <span style="display:inline-flex;align-items:center;gap:6px;font-size:13px;color:var(--color-text-muted)"><span style="width:8px;height:8px;border-radius:9999px;background:{{ a.statusDot }};animation:wg-blink 1.4s infinite"></span>{{ a.statusLabel }}</span>
+                    </div>
+                    <div style="height:8px;border-radius:9999px;background:var(--color-bg-base);overflow:hidden"><div style="height:100%;width:{{ a.progressPct }}%;background:var(--color-primary)"></div></div>
+                    <div style="display:flex;justify-content:space-between;font-size:12px;color:var(--color-text-muted);margin-top:6px"><span>{{ a.progressLabel }}</span><span>{{ a.progressPct }}%</span></div>
+                  </div>
+                </sc-for>
+              </div>
+
+              <div style="background:#fff;border:1px solid var(--color-border);border-radius:12px;padding:20px 22px">
+                <div style="display:flex;align-items:center;gap:8px;margin-bottom:14px">
+                  <h3 style="font-size:18px;font-weight:600">待人工審批</h3>
+                  <span style="background:var(--color-accent);color:#fff;font-size:12px;font-weight:700;border-radius:9999px;min-width:20px;height:20px;padding:0 6px;display:inline-flex;align-items:center;justify-content:center">{{ draftCount }}</span>
+                </div>
+                <p style="font-size:13px;color:var(--color-text-muted);margin-bottom:6px">AI 草案 signoff 硬閘 — 未審批禁止執行</p>
+                <sc-for list="{{ pendingSignoff }}" as="d" hint-placeholder-count="2">
+                  <div style="padding:12px 0;border-top:1px solid var(--color-border);display:flex;align-items:center;justify-content:space-between;gap:8px">
+                    <div style="min-width:0">
+                      <button onClick="{{ d.onView }}" style="background:transparent;border:none;font-family:inherit;font-size:14px;font-weight:600;color:var(--color-text-main);cursor:pointer;padding:0;text-align:left;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:160px;display:block">{{ d.name }}</button>
+                      <span style="font-size:12px;color:var(--color-text-muted)">{{ d.meta }}</span>
+                    </div>
+                    <x-import component-from-global-scope="WaterGreenDesignSystem_32a61f.Button" variant="ghost" size="sm" onClick="{{ d.onApprove }}" hint-size="auto,32px">審批</x-import>
+                  </div>
+                </sc-for>
+              </div>
+            </div>
+          </div>
+        </sc-if>
+
+        <!-- ════ PROJECTS ════ -->
+        <sc-if value="{{ isProjects }}" hint-placeholder-val="{{ true }}">
+          <div>
+            <div style="display:flex;align-items:flex-end;justify-content:space-between;gap:16px;margin-bottom:18px">
+              <div>
+                <h2 style="font-size:30px;font-weight:700">專案管理</h2>
+                <p style="color:var(--color-text-muted);margin-top:4px;font-size:15px">Project → Goal → Task 三層管理 · 共 {{ resultCount }} 筆</p>
+              </div>
+              <div style="display:flex;gap:10px">
+                <x-import component-from-global-scope="WaterGreenDesignSystem_32a61f.Button" variant="ghost" iconLeft="upload" onClick="{{ goImport }}" hint-size="auto,40px">匯入</x-import>
+                <x-import component-from-global-scope="WaterGreenDesignSystem_32a61f.Button" iconLeft="plus" onClick="{{ onNewProject }}" hint-size="auto,40px">新建專案</x-import>
+              </div>
+            </div>
+
+            <!-- toolbar (echoes the storefront control bar) -->
+            <div style="background:#fff;border:1px solid var(--color-border);border-radius:8px;padding:10px 14px;display:flex;align-items:center;gap:14px;margin-bottom:20px;flex-wrap:wrap">
+              <span style="display:inline-flex;align-items:center;gap:6px;color:var(--color-text-muted);font-size:14px;padding-right:6px"><x-import component-from-global-scope="WgIcon" glyph="sliders-horizontal" px="18" col="#7A8775" hint-size="18px,18px"></x-import>篩選</span>
+              <span style="width:1px;height:18px;background:var(--color-border)"></span>
+              <div style="display:flex;gap:6px;flex-wrap:wrap">
+                <sc-for list="{{ statusTabs }}" as="tab" hint-placeholder-count="6">
+                  <button onClick="{{ tab.onClick }}" style="padding:7px 16px;border-radius:8px;border:none;font-size:14px;font-weight:500;cursor:pointer;font-family:inherit;background:{{ tab.bg }};color:{{ tab.color }};transition:all .15s">{{ tab.label }}</button>
+                </sc-for>
+              </div>
+              <div style="flex:1"></div>
+              <select class="wg-sel" value="{{ sort }}" onChange="{{ onSort }}" style="border:1px solid var(--color-border);border-radius:8px;padding:8px 36px 8px 14px;font-family:inherit;font-size:14px;color:var(--color-text-main);background-color:#fff">
+                <sc-for list="{{ sortOptions }}" as="o" hint-placeholder-count="3"><option value="{{ o.id }}">{{ o.label }}</option></sc-for>
+              </select>
+              <span style="width:1px;height:18px;background:var(--color-border)"></span>
+              <div style="display:flex;align-items:center;gap:4px;color:var(--color-text-muted);font-size:14px">
+                <span style="color:var(--color-primary);font-weight:600">{{ page }}</span>/{{ totalPages }}
+                <x-import component-from-global-scope="WaterGreenDesignSystem_32a61f.IconButton" icon="chevron-left" label="上一頁" variant="ghost" size="32" onClick="{{ onPrevMini }}" hint-size="32px,32px"></x-import>
+                <x-import component-from-global-scope="WaterGreenDesignSystem_32a61f.IconButton" icon="chevron-right" label="下一頁" variant="ghost" size="32" onClick="{{ onNextMini }}" hint-size="32px,32px"></x-import>
+              </div>
+            </div>
+
+            <div style="display:flex;flex-direction:column;gap:16px">
+              <sc-for list="{{ pagedProjects }}" as="p" hint-placeholder-count="5">
+                <div style="background:#fff;border:1px solid var(--color-border);border-radius:12px;padding:18px 20px;display:flex;align-items:center;gap:20px">
+                  <span style="width:48px;height:48px;border-radius:10px;background:var(--color-tertiary);display:inline-flex;align-items:center;justify-content:center;flex:none"><x-import component-from-global-scope="WgIcon" glyph="folder" px="24" col="#498428" hint-size="24px,24px"></x-import></span>
+                  <div style="flex:1;min-width:0">
+                    <div style="display:flex;align-items:center;gap:10px;margin-bottom:6px">
+                      <button onClick="{{ p.onView }}" style="background:transparent;border:none;font-family:inherit;font-size:17px;font-weight:600;color:var(--color-text-main);cursor:pointer;padding:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{{ p.name }}</button>
+                      <span style="display:inline-flex;align-items:center;gap:6px;font-size:13px;color:var(--color-text-muted);flex:none"><span style="width:8px;height:8px;border-radius:9999px;background:{{ p.statusDot }}"></span>{{ p.statusLabel }}</span>
+                      <sc-if value="{{ p.isDraft }}"><span style="font-size:12px;background:#fdeee9;color:var(--color-accent);border-radius:4px;padding:2px 7px;font-weight:600">未審批</span></sc-if>
+                    </div>
+                    <div style="font-size:13px;color:var(--color-text-muted);display:flex;gap:16px;flex-wrap:wrap">
+                      <span>Lv.{{ p.autonomyLevel }} 自治</span>
+                      <span>目標 {{ p.goalsCount }}</span>
+                      <span>任務 {{ p.tasksDone }} / {{ p.tasksCount }}</span>
+                      <span>更新 {{ p.updatedAt }}</span>
+                      <span style="font-family:'JetBrains Mono',monospace;opacity:.75">{{ p.executionPath }}</span>
+                    </div>
+                  </div>
+                  <div style="display:flex;gap:6px;flex:none">
+                    <x-import component-from-global-scope="WaterGreenDesignSystem_32a61f.Button" variant="ghost" size="sm" onClick="{{ p.onView }}" hint-size="auto,32px">查看</x-import>
+                    <x-import component-from-global-scope="WaterGreenDesignSystem_32a61f.Button" variant="ghost" size="sm" onClick="{{ p.onEdit }}" hint-size="auto,32px">編輯</x-import>
+                    <x-import component-from-global-scope="WaterGreenDesignSystem_32a61f.Button" variant="ghost" size="sm" onClick="{{ p.onExecute }}" hint-size="auto,32px">執行</x-import>
+                    <x-import component-from-global-scope="WaterGreenDesignSystem_32a61f.Button" variant="ghost" size="sm" onClick="{{ p.onMonitor }}" hint-size="auto,32px">監控</x-import>
+                  </div>
+                </div>
+              </sc-for>
+            </div>
+
+            <div style="margin-top:28px;display:flex;align-items:center;justify-content:center;gap:12px">
+              <button onClick="{{ onPrevMini }}" style="width:44px;height:44px;border-radius:8px;border:none;background:transparent;color:var(--color-text-muted);cursor:pointer;display:inline-flex;align-items:center;justify-content:center"><x-import component-from-global-scope="WgIcon" glyph="chevron-left" px="22" col="#7A8775" hint-size="22px,22px"></x-import></button>
+              <sc-for list="{{ pageList }}" as="pg" hint-placeholder-count="2">
+                <button onClick="{{ pg.onClick }}" style="width:44px;height:44px;border-radius:8px;border:none;font-size:20px;font-family:inherit;cursor:pointer;background:{{ pg.bg }};color:{{ pg.color }}">{{ pg.n }}</button>
+              </sc-for>
+              <button onClick="{{ onNextMini }}" style="width:44px;height:44px;border-radius:8px;border:none;background:transparent;color:var(--color-text-muted);cursor:pointer;display:inline-flex;align-items:center;justify-content:center"><x-import component-from-global-scope="WgIcon" glyph="chevron-right" px="22" col="#7A8775" hint-size="22px,22px"></x-import></button>
+            </div>
+          </div>
+        </sc-if>
+
+        <!-- ════ PROJECT DETAIL ════ -->
+        <sc-if value="{{ isProjectDetail }}" hint-placeholder-val="{{ true }}">
+          <div>
+            <button onClick="{{ onBackProjects }}" style="display:inline-flex;align-items:center;gap:6px;background:transparent;border:none;color:var(--color-text-muted);cursor:pointer;font-family:inherit;font-size:14px;margin-bottom:14px"><x-import component-from-global-scope="WgIcon" glyph="arrow-left" px="16" hint-size="16px,16px"></x-import>返回專案列表</button>
+            <div style="display:flex;align-items:center;gap:14px;margin-bottom:6px">
+              <span style="width:48px;height:48px;border-radius:10px;background:var(--color-tertiary);display:inline-flex;align-items:center;justify-content:center;flex:none"><x-import component-from-global-scope="WgIcon" glyph="folder" px="26" col="#498428" hint-size="26px,26px"></x-import></span>
+              <h2 style="font-size:28px;font-weight:700">{{ proj.name }}</h2>
+              <span style="display:inline-flex;align-items:center;gap:6px;font-size:14px;color:var(--color-text-muted)"><span style="width:9px;height:9px;border-radius:9999px;background:{{ proj.statusDot }}"></span>{{ proj.statusLabel }}</span>
+            </div>
+            <div style="display:flex;gap:20px;font-size:14px;color:var(--color-text-muted);margin-bottom:18px;flex-wrap:wrap;padding-left:62px">
+              <span>自治等級 Lv.{{ proj.autonomyLevel }}</span><span>目標 {{ proj.goalsCount }} · 任務 {{ proj.tasksCount }}</span><span>更新 {{ proj.updatedAt }}</span><span>建立者 {{ proj.createdBy }}</span>
+            </div>
+
+            <sc-if value="{{ projSignoffNeeded }}">
+              <div style="background:#fdeee9;border:1px solid #f3c7bb;border-radius:8px;padding:14px 18px;display:flex;align-items:center;gap:12px;margin-bottom:20px">
+                <x-import component-from-global-scope="WgIcon" glyph="shield-alert" px="22" col="#E55B3C" hint-size="22px,22px"></x-import>
+                <div style="flex:1"><div style="font-weight:600;color:var(--color-accent)">AI 草案 — 待人工 signoff 硬閘</div><div style="font-size:13px;color:var(--color-text-muted)">此專案 signed_off=false，未經掌舵者審批前禁止執行（後端二次校驗 409）。</div></div>
+                <x-import component-from-global-scope="WaterGreenDesignSystem_32a61f.Button" iconLeft="check" onClick="{{ onApproveProj }}" hint-size="auto,40px">審批 signoff</x-import>
+              </div>
+            </sc-if>
+
+            <div style="display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:24px;margin-bottom:24px">
+              <div style="background:#fff;border:1px solid var(--color-border);border-radius:12px;padding:20px 22px">
+                <h3 style="font-size:18px;font-weight:600;margin-bottom:14px">基本資訊</h3>
+                <div style="font-size:13px;color:var(--color-text-muted);margin-bottom:4px">執行路徑</div>
+                <div style="font-family:'JetBrains Mono',monospace;font-size:14px;background:var(--color-bg-base);border:1px solid var(--color-border);border-radius:8px;padding:8px 12px;margin-bottom:16px;word-break:break-all">{{ proj.executionPath }}</div>
+                <div style="font-size:13px;color:var(--color-text-muted);margin-bottom:8px">通過標準</div>
+                <ul style="margin:0;padding-left:20px;display:flex;flex-direction:column;gap:6px">
+                  <sc-for list="{{ proj.passList }}" as="c" hint-placeholder-count="3"><li style="font-size:14px">{{ c }}</li></sc-for>
+                </ul>
+              </div>
+              <div style="background:#fff;border:1px solid var(--color-border);border-radius:12px;padding:20px 22px">
+                <h3 style="font-size:18px;font-weight:600;margin-bottom:14px">專案說明</h3>
+                <div style="display:flex;flex-direction:column;gap:10px">
+                  <sc-for list="{{ proj.descParas }}" as="para" hint-placeholder-count="2"><p style="font-size:15px;line-height:1.7">{{ para }}</p></sc-for>
+                </div>
+              </div>
+            </div>
+
+            <div style="background:#fff;border:1px solid var(--color-border);border-radius:12px;padding:20px 22px;margin-bottom:24px">
+              <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">
+                <h3 style="font-size:18px;font-weight:600">目標清單 ({{ proj.goalsCount }})</h3>
+                <x-import component-from-global-scope="WaterGreenDesignSystem_32a61f.Button" variant="ghost" size="sm" iconLeft="plus" onClick="{{ onAddGoal }}" hint-size="auto,32px">新增目標</x-import>
+              </div>
+              <sc-for list="{{ projGoals }}" as="g" hint-placeholder-count="3">
+                <div style="display:flex;align-items:center;gap:14px;padding:14px 0;border-top:1px solid var(--color-border)">
+                  <span style="width:10px;height:10px;border-radius:9999px;background:{{ g.statusDot }};flex:none"></span>
+                  <button onClick="{{ g.onOpen }}" style="background:transparent;border:none;font-family:inherit;font-size:15px;font-weight:600;color:var(--color-text-main);cursor:pointer;padding:0;flex:none">{{ g.name }}</button>
+                  <span style="font-size:13px;color:var(--color-text-muted)">{{ g.statusLabel }}</span>
+                  <div style="flex:1;display:flex;align-items:center;gap:10px;max-width:320px">
+                    <div style="flex:1;height:7px;border-radius:9999px;background:var(--color-bg-base);overflow:hidden"><div style="height:100%;width:{{ g.progressPct }}%;background:var(--color-primary)"></div></div>
+                    <span style="font-size:13px;color:var(--color-text-muted);white-space:nowrap">{{ g.taskDone }} / {{ g.taskTotal }}</span>
+                  </div>
+                  <x-import component-from-global-scope="WaterGreenDesignSystem_32a61f.Button" variant="ghost" size="sm" onClick="{{ g.onOpen }}" hint-size="auto,32px">查看</x-import>
+                </div>
+              </sc-for>
+            </div>
+
+            <div style="display:flex;gap:10px;flex-wrap:wrap">
+              <x-import component-from-global-scope="WaterGreenDesignSystem_32a61f.Button" iconLeft="play" onClick="{{ onExecuteProj }}" hint-size="auto,40px">執行專案</x-import>
+              <x-import component-from-global-scope="WaterGreenDesignSystem_32a61f.Button" variant="ghost" iconLeft="activity" onClick="{{ onMonitorProj }}" hint-size="auto,40px">查看監控</x-import>
+              <x-import component-from-global-scope="WaterGreenDesignSystem_32a61f.Button" variant="ghost" iconLeft="pencil" onClick="{{ onEditProject }}" hint-size="auto,40px">編輯專案</x-import>
+            </div>
+          </div>
+        </sc-if>
+
+        <!-- ════ GOAL DETAIL ════ -->
+        <sc-if value="{{ isGoalDetail }}" hint-placeholder-val="{{ true }}">
+          <sc-if value="{{ goal }}" hint-placeholder-val="{{ true }}">
+          <div>
+            <button onClick="{{ onBackProject }}" style="display:inline-flex;align-items:center;gap:6px;background:transparent;border:none;color:var(--color-text-muted);cursor:pointer;font-family:inherit;font-size:14px;margin-bottom:14px"><x-import component-from-global-scope="WgIcon" glyph="arrow-left" px="16" hint-size="16px,16px"></x-import>返回專案</button>
+            <div style="display:flex;align-items:center;gap:14px;margin-bottom:6px">
+              <span style="width:44px;height:44px;border-radius:10px;background:var(--color-tertiary);display:inline-flex;align-items:center;justify-content:center;flex:none"><x-import component-from-global-scope="WgIcon" glyph="target" px="24" col="#498428" hint-size="24px,24px"></x-import></span>
+              <h2 style="font-size:26px;font-weight:700">{{ goal.name }}</h2>
+              <span style="display:inline-flex;align-items:center;gap:6px;font-size:14px;color:var(--color-text-muted)"><span style="width:9px;height:9px;border-radius:9999px;background:{{ goal.statusDot }}"></span>{{ goal.statusLabel }}</span>
+            </div>
+            <div style="display:flex;gap:20px;font-size:14px;color:var(--color-text-muted);margin-bottom:18px;flex-wrap:wrap;padding-left:58px">
+              <span>所屬：{{ goal.projectName }}</span><span>進度 {{ goal.taskDone }} / {{ goal.taskTotal }} ({{ goal.progressPct }}%)</span><span>前置依賴：{{ goal.depLabel }}</span>
+            </div>
+
+            <sc-if value="{{ goal.isDraft }}">
+              <div style="background:#fdeee9;border:1px solid #f3c7bb;border-radius:8px;padding:14px 18px;display:flex;align-items:center;gap:12px;margin-bottom:20px">
+                <x-import component-from-global-scope="WgIcon" glyph="shield-alert" px="22" col="#E55B3C" hint-size="22px,22px"></x-import>
+                <div style="flex:1;font-size:14px"><b style="color:var(--color-accent)">草案未審批</b> — 此目標需 signoff 後方可執行。</div>
+                <x-import component-from-global-scope="WaterGreenDesignSystem_32a61f.Button" iconLeft="check" onClick="{{ onApproveGoal }}" hint-size="auto,40px">審批</x-import>
+              </div>
+            </sc-if>
+
+            <div style="display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:24px;margin-bottom:24px">
+              <div style="background:#fff;border:1px solid var(--color-border);border-radius:12px;padding:20px 22px">
+                <h3 style="font-size:18px;font-weight:600;margin-bottom:14px">目標說明</h3>
+                <sc-for list="{{ goal.descParas }}" as="para" hint-placeholder-count="1"><p style="font-size:15px;line-height:1.7">{{ para }}</p></sc-for>
+              </div>
+              <div style="background:#fff;border:1px solid var(--color-border);border-radius:12px;padding:20px 22px">
+                <h3 style="font-size:18px;font-weight:600;margin-bottom:14px">通過標準</h3>
+                <div style="display:flex;flex-direction:column;gap:10px">
+                  <sc-for list="{{ goal.passList }}" as="c" hint-placeholder-count="2">
+                    <div style="display:flex;align-items:center;gap:10px;font-size:14px">
+                      <span style="width:18px;height:18px;border-radius:4px;border:1px solid var(--color-border);display:inline-flex;align-items:center;justify-content:center;flex:none;background:{{ c.boxBg }}"><sc-if value="{{ c.done }}"><x-import component-from-global-scope="WgIcon" glyph="check" px="13" col="#FFFFFF" hint-size="13px,13px"></x-import></sc-if></span>{{ c.t }}
+                    </div>
+                  </sc-for>
+                </div>
+              </div>
+            </div>
+
+            <div style="background:#fff;border:1px solid var(--color-border);border-radius:12px;padding:20px 22px;margin-bottom:24px">
+              <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">
+                <h3 style="font-size:18px;font-weight:600">任務清單 ({{ goal.taskTotal }})</h3>
+                <x-import component-from-global-scope="WaterGreenDesignSystem_32a61f.Button" variant="ghost" size="sm" iconLeft="plus" onClick="{{ onAddTask }}" hint-size="auto,32px">新增任務</x-import>
+              </div>
+              <sc-for list="{{ goalTasks }}" as="t" hint-placeholder-count="4">
+                <div style="display:flex;align-items:center;gap:14px;padding:13px 0;border-top:1px solid var(--color-border)">
+                  <span style="width:10px;height:10px;border-radius:9999px;background:{{ t.statusDot }};flex:none"></span>
+                  <button onClick="{{ t.onOpen }}" style="background:transparent;border:none;font-family:inherit;font-size:15px;color:var(--color-text-main);cursor:pointer;padding:0;flex:1;text-align:left;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{{ t.name }}</button>
+                  <span style="font-size:13px;color:var(--color-text-muted);white-space:nowrap">{{ t.statusLabel }}</span>
+                  <span style="font-size:12px;color:var(--color-text-muted);white-space:nowrap">重試 {{ t.retryLabel }}</span>
+                  <x-import component-from-global-scope="WaterGreenDesignSystem_32a61f.Button" variant="ghost" size="sm" onClick="{{ t.onOpen }}" hint-size="auto,32px">詳情</x-import>
+                </div>
+              </sc-for>
+            </div>
+
+            <div style="display:flex;gap:10px">
+              <x-import component-from-global-scope="WaterGreenDesignSystem_32a61f.Button" variant="ghost" iconLeft="pencil" onClick="{{ onEditGoal }}" hint-size="auto,40px">編輯目標</x-import>
+            </div>
+          </div>
+          </sc-if>
+        </sc-if>
+
+        <!-- ════ TASK DETAIL ════ -->
+        <sc-if value="{{ isTaskDetail }}" hint-placeholder-val="{{ true }}">
+          <sc-if value="{{ task }}" hint-placeholder-val="{{ true }}">
+          <div>
+            <button onClick="{{ onBackGoal }}" style="display:inline-flex;align-items:center;gap:6px;background:transparent;border:none;color:var(--color-text-muted);cursor:pointer;font-family:inherit;font-size:14px;margin-bottom:14px"><x-import component-from-global-scope="WgIcon" glyph="arrow-left" px="16" hint-size="16px,16px"></x-import>返回目標</button>
+            <div style="display:flex;align-items:center;gap:14px;margin-bottom:6px">
+              <span style="width:44px;height:44px;border-radius:10px;background:var(--color-tertiary);display:inline-flex;align-items:center;justify-content:center;flex:none"><x-import component-from-global-scope="WgIcon" glyph="file-text" px="24" col="#498428" hint-size="24px,24px"></x-import></span>
+              <h2 style="font-size:26px;font-weight:700">{{ task.name }}</h2>
+              <span style="display:inline-flex;align-items:center;gap:6px;font-size:14px;color:var(--color-text-muted)"><span style="width:9px;height:9px;border-radius:9999px;background:{{ task.statusDot }}"></span>{{ task.statusLabel }}</span>
+            </div>
+            <div style="font-size:14px;color:var(--color-text-muted);margin-bottom:18px;padding-left:58px">{{ task.crumb }}　·　重試 {{ task.retryLabel }}　·　Agent {{ task.agent }}</div>
+
+            <div style="display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:16px;margin-bottom:24px">
+              <div style="background:#fff;border:1px solid var(--color-border);border-radius:12px;padding:16px 18px"><div style="font-size:13px;color:var(--color-text-muted);display:flex;align-items:center;gap:6px"><x-import component-from-global-scope="WgIcon" glyph="clock" px="15" col="#7A8775" hint-size="15px,15px"></x-import>開始時間</div><div style="font-size:24px;font-weight:700;margin-top:6px;font-family:'JetBrains Mono',monospace">{{ task.startedAt }}</div></div>
+              <div style="background:#fff;border:1px solid var(--color-border);border-radius:12px;padding:16px 18px"><div style="font-size:13px;color:var(--color-text-muted);display:flex;align-items:center;gap:6px"><x-import component-from-global-scope="WgIcon" glyph="flame" px="15" col="#7A8775" hint-size="15px,15px"></x-import>Token 消耗</div><div style="font-size:24px;font-weight:700;margin-top:6px;font-family:'JetBrains Mono',monospace">{{ task.tokensFmt }}</div></div>
+              <div style="background:#fff;border:1px solid var(--color-border);border-radius:12px;padding:16px 18px"><div style="font-size:13px;color:var(--color-text-muted);display:flex;align-items:center;gap:6px"><x-import component-from-global-scope="WgIcon" glyph="repeat" px="15" col="#7A8775" hint-size="15px,15px"></x-import>重試次數</div><div style="font-size:24px;font-weight:700;margin-top:6px;font-family:'JetBrains Mono',monospace">{{ task.retryLabel }}</div></div>
+            </div>
+
+            <div style="display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:24px;margin-bottom:24px">
+              <div style="background:#fff;border:1px solid var(--color-border);border-radius:12px;padding:20px 22px">
+                <h3 style="font-size:18px;font-weight:600;margin-bottom:14px">任務說明</h3>
+                <sc-for list="{{ task.descParas }}" as="para" hint-placeholder-count="1"><p style="font-size:15px;line-height:1.7">{{ para }}</p></sc-for>
+              </div>
+              <div style="background:#fff;border:1px solid var(--color-border);border-radius:12px;padding:20px 22px">
+                <h3 style="font-size:18px;font-weight:600;margin-bottom:14px">通過標準</h3>
+                <div style="display:flex;flex-direction:column;gap:10px">
+                  <sc-for list="{{ task.passList }}" as="c" hint-placeholder-count="2">
+                    <div style="display:flex;align-items:center;gap:10px;font-size:14px"><span style="width:18px;height:18px;border-radius:4px;border:1px solid var(--color-border);display:inline-flex;align-items:center;justify-content:center;flex:none;background:{{ c.boxBg }}"><sc-if value="{{ c.done }}"><x-import component-from-global-scope="WgIcon" glyph="check" px="13" col="#FFFFFF" hint-size="13px,13px"></x-import></sc-if></span>{{ c.t }}</div>
+                  </sc-for>
+                </div>
+              </div>
+            </div>
+
+            <div style="background:#fff;border:1px solid var(--color-border);border-radius:12px;padding:20px 22px;margin-bottom:24px">
+              <h3 style="font-size:18px;font-weight:600;margin-bottom:14px">執行日誌</h3>
+              <div style="background:#1c241a;border-radius:8px;padding:14px 16px;font-family:'JetBrains Mono',monospace;font-size:13px;line-height:1.8;color:#d7e4cd;max-height:260px;overflow-y:auto">
+                <sc-for list="{{ task.log }}" as="line" hint-placeholder-count="6"><div>{{ line }}</div></sc-for>
+              </div>
+            </div>
+
+            <div style="display:flex;gap:10px;flex-wrap:wrap">
+              <x-import component-from-global-scope="WaterGreenDesignSystem_32a61f.Button" iconLeft="rotate-ccw" onClick="{{ onRetryTask }}" hint-size="auto,40px">重試</x-import>
+              <x-import component-from-global-scope="WaterGreenDesignSystem_32a61f.Button" variant="ghost" iconLeft="pencil" onClick="{{ onEditTask }}" hint-size="auto,40px">編輯</x-import>
+            </div>
+          </div>
+          </sc-if>
+        </sc-if>
+
+        <!-- ════ IMPORT ════ -->
+        <sc-if value="{{ isImport }}" hint-placeholder-val="{{ true }}">
+          <div style="max-width:960px">
+            <h2 style="font-size:30px;font-weight:700;margin-bottom:4px">BRD / PRD 智能匯入</h2>
+            <p style="color:var(--color-text-muted);font-size:15px;margin-bottom:20px">AI 解析需求文件 → 自動拆解三層結構 → 🔴 人工 signoff 後落為正式專案</p>
+
+            <div style="background:#fff;border:1px solid var(--color-border);border-radius:12px;padding:22px;margin-bottom:24px">
+              <div style="display:flex;align-items:center;gap:8px;margin-bottom:18px"><span style="width:26px;height:26px;border-radius:9999px;background:var(--color-primary);color:#fff;display:inline-flex;align-items:center;justify-content:center;font-size:14px;font-weight:700">1</span><h3 style="font-size:18px;font-weight:600">輸入來源</h3></div>
+              <div style="display:flex;gap:8px;margin-bottom:18px">
+                <sc-for list="{{ importTabs }}" as="it" hint-placeholder-count="3">
+                  <button onClick="{{ it.onClick }}" style="display:inline-flex;align-items:center;gap:6px;padding:8px 16px;border-radius:8px;border:1px solid var(--color-border);font-size:14px;font-weight:500;cursor:pointer;font-family:inherit;background:{{ it.bg }};color:{{ it.color }}">
+                    <x-import component-from-global-scope="WgIcon" glyph="{{ it.icon }}" px="16" col="{{ it.iconColor }}" hint-size="16px,16px"></x-import>{{ it.label }}
+                  </button>
+                </sc-for>
+              </div>
+              <div style="border:2px dashed var(--color-border);border-radius:12px;padding:38px;text-align:center;background:var(--color-bg-base);margin-bottom:18px">
+                <x-import component-from-global-scope="WgIcon" glyph="upload-cloud" px="40" col="#80B155" hint-size="40px,40px"></x-import>
+                <div style="font-size:15px;font-weight:500;margin-top:10px">拖曳檔案至此，或點擊選擇</div>
+                <div style="font-size:13px;color:var(--color-text-muted);margin-top:4px">支援格式：.md · .pdf · .docx　|　檔案大小限制 10MB</div>
+              </div>
+              <div style="display:grid;grid-template-columns:200px minmax(0,1fr);gap:16px;align-items:start;margin-bottom:16px">
+                <label style="display:flex;flex-direction:column;gap:6px;font-size:14px;font-weight:500">自治等級
+                  <select class="wg-sel" value="{{ importAutonomy }}" onChange="{{ onImportAutonomy }}" style="border:1px solid var(--color-border);border-radius:8px;padding:11px 36px 11px 14px;font-family:inherit;font-size:15px;color:var(--color-text-main);background-color:#fff">
+                    <sc-for list="{{ importAutoOptions }}" as="o" hint-placeholder-count="10"><option value="{{ o.id }}">{{ o.label }}</option></sc-for>
+                  </select>
+                </label>
+                <label style="display:flex;flex-direction:column;gap:6px;font-size:14px;font-weight:500">執行路徑
+                  <input class="wg-input" value="{{ importPath }}" onChange="{{ onImportPath }}" />
+                </label>
+              </div>
+              <label style="display:flex;flex-direction:column;gap:6px;font-size:14px;font-weight:500;margin-bottom:18px">補充說明（可選）
+                <textarea value="{{ importPrompt }}" onChange="{{ onImportPrompt }}" placeholder="引導 AI 解析方向…" style="width:100%;min-height:70px;padding:10px 16px;font-family:inherit;font-size:15px;border:1px solid var(--color-border);border-radius:8px;resize:vertical;outline:none"></textarea>
+              </label>
+              <div style="display:flex;justify-content:flex-end">
+                <x-import component-from-global-scope="WaterGreenDesignSystem_32a61f.Button" iconLeft="sparkles" onClick="{{ onParse }}" hint-size="auto,44px">開始解析</x-import>
+              </div>
+            </div>
+
+            <sc-if value="{{ importParsing }}">
+              <div style="background:#fff;border:1px solid var(--color-border);border-radius:12px;padding:38px;text-align:center;margin-bottom:24px">
+                <span style="display:inline-block;width:34px;height:34px;border:3px solid var(--color-tertiary);border-top-color:var(--color-primary);border-radius:9999px;animation:wg-spin .8s linear infinite"></span>
+                <div style="margin-top:14px;font-size:15px;color:var(--color-text-muted)">AI 解析中… 拆解專案 → 目標 → 任務（套用有界閘：步驟 ≤24 / Kahn 無環 / prompt 非空）</div>
+              </div>
+            </sc-if>
+
+            <sc-if value="{{ importParsed }}">
+              <div style="background:#fff;border:1px solid var(--color-border);border-radius:12px;padding:22px">
+                <div style="display:flex;align-items:center;gap:8px;margin-bottom:16px"><span style="width:26px;height:26px;border-radius:9999px;background:var(--color-primary);color:#fff;display:inline-flex;align-items:center;justify-content:center;font-size:14px;font-weight:700">2</span><h3 style="font-size:18px;font-weight:600">結構預覽與編輯</h3></div>
+
+                <div style="border:1px solid var(--color-border);border-radius:8px;padding:16px;background:var(--color-bg-base);font-size:14px;line-height:2">
+                  <div style="display:flex;align-items:center;gap:8px;font-weight:600"><x-import component-from-global-scope="WgIcon" glyph="folder" px="18" col="#498428" hint-size="18px,18px"></x-import>AISDLC Notification Service <span style="font-size:12px;color:var(--color-text-muted);font-weight:400">(專案)</span></div>
+                  <div style="padding-left:20px">
+                    <div style="display:flex;align-items:center;gap:8px;font-weight:500;margin-top:6px"><x-import component-from-global-scope="WgIcon" glyph="target" px="16" col="#80B155" hint-size="16px,16px"></x-import>建立通知領域模型 <span style="font-size:12px;color:var(--color-text-muted);font-weight:400">(目標)</span></div>
+                    <div style="padding-left:24px;color:var(--color-text-muted)"><x-import component-from-global-scope="WgIcon" glyph="file-text" px="14" col="#7A8775" hint-size="14px,14px"></x-import> 定義 Notification 聚合根　·　<x-import component-from-global-scope="WgIcon" glyph="file-text" px="14" col="#7A8775" hint-size="14px,14px"></x-import> 實作 Repository</div>
+                    <div style="display:flex;align-items:center;gap:8px;font-weight:500;margin-top:6px"><x-import component-from-global-scope="WgIcon" glyph="target" px="16" col="#80B155" hint-size="16px,16px"></x-import>多通道推送整合 <span style="font-size:12px;color:var(--color-text-muted);font-weight:400">(目標)</span></div>
+                    <div style="padding-left:24px;color:var(--color-text-muted)"><x-import component-from-global-scope="WgIcon" glyph="file-text" px="14" col="#7A8775" hint-size="14px,14px"></x-import> Email Adapter　·　<x-import component-from-global-scope="WgIcon" glyph="file-text" px="14" col="#7A8775" hint-size="14px,14px"></x-import> SSE 即時推送　·　<x-import component-from-global-scope="WgIcon" glyph="file-text" px="14" col="#7A8775" hint-size="14px,14px"></x-import> 重試與退避</div>
+                  </div>
+                </div>
+
+                <div style="background:#fdeee9;border:1px solid #f3c7bb;border-radius:8px;padding:14px 18px;display:flex;align-items:center;gap:12px;margin-top:18px">
+                  <x-import component-from-global-scope="WgIcon" glyph="shield-alert" px="22" col="#E55B3C" hint-size="22px,22px"></x-import>
+                  <div style="flex:1;font-size:14px">AI 草案 <code style="font-family:monospace">signed_off=false</code> — 確認匯入即執行掌舵者 signoff，落為正式可執行專案。</div>
+                  <sc-if value="{{ importSignedOff }}"><span style="color:var(--color-primary);font-weight:600;display:inline-flex;align-items:center;gap:6px"><x-import component-from-global-scope="WgIcon" glyph="check-circle" px="18" col="#498428" hint-size="18px,18px"></x-import>已 signoff</span></sc-if>
+                  <sc-if value="{{ importNotSigned }}"><x-import component-from-global-scope="WaterGreenDesignSystem_32a61f.Button" size="sm" iconLeft="check" onClick="{{ onApproveImport }}" hint-size="auto,36px">signoff 審批</x-import></sc-if>
+                </div>
+
+                <div style="display:flex;justify-content:flex-end;gap:10px;margin-top:18px">
+                  <x-import component-from-global-scope="WaterGreenDesignSystem_32a61f.Button" variant="ghost" onClick="{{ onDiscardImport }}" hint-size="auto,40px">放棄</x-import>
+                  <x-import component-from-global-scope="WaterGreenDesignSystem_32a61f.Button" iconLeft="check" onClick="{{ onConfirmImport }}" hint-size="auto,40px">確認匯入</x-import>
+                </div>
+              </div>
+            </sc-if>
+          </div>
+        </sc-if>
+
+        <!-- ════ EXECUTE ════ -->
+        <sc-if value="{{ isExecute }}" hint-placeholder-val="{{ true }}">
+          <div>
+            <button onClick="{{ onBackProject }}" style="display:inline-flex;align-items:center;gap:6px;background:transparent;border:none;color:var(--color-text-muted);cursor:pointer;font-family:inherit;font-size:14px;margin-bottom:14px"><x-import component-from-global-scope="WgIcon" glyph="arrow-left" px="16" hint-size="16px,16px"></x-import>返回專案</button>
+            <h2 style="font-size:28px;font-weight:700;margin-bottom:4px;display:flex;align-items:center;gap:10px"><x-import component-from-global-scope="WgIcon" glyph="play" px="26" col="#498428" hint-size="26px,26px"></x-import>專案執行：{{ execProjName }}</h2>
+            <p style="color:var(--color-text-muted);font-size:15px;margin-bottom:20px">漸進式自治 · DAG 排程 · 斷點續行</p>
+
+            <sc-if value="{{ execSignoffBlocked }}">
+              <div style="background:#fdeee9;border:1px solid #f3c7bb;border-radius:8px;padding:14px 18px;display:flex;align-items:center;gap:12px;margin-bottom:20px">
+                <x-import component-from-global-scope="WgIcon" glyph="lock" px="22" col="#E55B3C" hint-size="22px,22px"></x-import>
+                <div style="flex:1;font-size:14px"><b style="color:var(--color-accent)">執行已鎖定</b> — 此專案草案未經 signoff，啟動將回 409 Conflict。</div>
+                <x-import component-from-global-scope="WaterGreenDesignSystem_32a61f.Button" iconLeft="check" onClick="{{ onApproveProj }}" hint-size="auto,40px">前往審批</x-import>
+              </div>
+            </sc-if>
+
+            <div style="display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1.2fr);gap:24px;margin-bottom:24px">
+              <div style="background:#fff;border:1px solid var(--color-border);border-radius:12px;padding:20px 22px">
+                <h3 style="font-size:18px;font-weight:600;margin-bottom:16px">執行控制</h3>
+                <div style="display:flex;gap:24px;align-items:center;margin-bottom:18px;flex-wrap:wrap">
+                  <label style="display:flex;flex-direction:column;gap:6px;font-size:13px;color:var(--color-text-muted)">自治等級<select class="wg-sel" value="{{ execAutonomy }}" onChange="{{ onExecAutonomy }}" style="border:1px solid var(--color-border);border-radius:8px;padding:9px 36px 9px 14px;font-family:inherit;font-size:15px;color:var(--color-text-main);background-color:#fff"><sc-for list="{{ autonomyOptions }}" as="o" hint-placeholder-count="10"><option value="{{ o.id }}">{{ o.label }}</option></sc-for></select></label>
+                  <div style="font-size:13px;color:var(--color-text-muted)">Token 預算<div style="font-size:20px;font-weight:700;color:var(--color-text-main);font-family:'JetBrains Mono',monospace">{{ budgetFmt }}</div></div>
+                </div>
+                <div style="font-size:13px;color:var(--color-text-muted);margin-bottom:8px">執行範圍</div>
+                <div style="display:flex;flex-direction:column;gap:6px;margin-bottom:18px">
+                  <sc-for list="{{ scopeItems }}" as="sc" hint-placeholder-count="5">
+                    <button onClick="{{ sc.onToggle }}" style="display:flex;align-items:center;gap:10px;background:transparent;border:none;cursor:pointer;font-family:inherit;font-size:14px;color:var(--color-text-main);text-align:left;padding:4px 0">
+                      <span style="width:20px;height:20px;border-radius:4px;border:1px solid {{ sc.boxBorder }};background:{{ sc.boxBg }};display:inline-flex;align-items:center;justify-content:center;flex:none"><sc-if value="{{ sc.on }}"><x-import component-from-global-scope="WgIcon" glyph="check" px="14" col="#FFFFFF" hint-size="14px,14px"></x-import></sc-if></span>
+                      {{ sc.label }} <span style="color:var(--color-text-muted)">({{ sc.count }} tasks)</span>
+                    </button>
+                  </sc-for>
+                </div>
+                <div style="display:flex;gap:8px;flex-wrap:wrap">
+                  <sc-if value="{{ execIdle }}"><x-import component-from-global-scope="WaterGreenDesignSystem_32a61f.Button" iconLeft="play" onClick="{{ onStart }}" hint-size="auto,40px">啟動執行</x-import></sc-if>
+                  <sc-if value="{{ execActive }}"><x-import component-from-global-scope="WaterGreenDesignSystem_32a61f.Button" variant="ghost" iconLeft="pause" onClick="{{ onPause }}" hint-size="auto,40px">暫停</x-import></sc-if>
+                  <sc-if value="{{ execPaused }}"><x-import component-from-global-scope="WaterGreenDesignSystem_32a61f.Button" iconLeft="play" onClick="{{ onResume }}" hint-size="auto,40px">恢復</x-import></sc-if>
+                  <x-import component-from-global-scope="WaterGreenDesignSystem_32a61f.Button" variant="ghost" iconLeft="square" onClick="{{ onCancel }}" hint-size="auto,40px">取消</x-import>
+                  <x-import component-from-global-scope="WaterGreenDesignSystem_32a61f.Button" variant="ghost" iconLeft="history" onClick="{{ onRestore }}" hint-size="auto,40px">從斷點恢復</x-import>
+                </div>
+              </div>
+
+              <div style="display:flex;flex-direction:column;gap:24px">
+                <div style="background:#fff;border:1px solid var(--color-border);border-radius:12px;padding:20px 22px">
+                  <div style="display:flex;align-items:center;gap:10px;margin-bottom:14px"><h3 style="font-size:18px;font-weight:600">執行進度</h3><span style="font-size:13px;color:var(--color-text-muted)">Run #3</span><span style="display:inline-flex;align-items:center;gap:6px;font-size:13px;color:var(--color-text-muted)"><span style="width:8px;height:8px;border-radius:9999px;background:{{ execDot }}"></span>{{ execStatusLabel }}</span></div>
+                  <div style="font-size:13px;color:var(--color-text-muted);margin-bottom:4px">{{ execTasksLabel }}</div>
+                  <div style="height:10px;border-radius:9999px;background:var(--color-bg-base);overflow:hidden;margin-bottom:14px"><div style="height:100%;width:{{ execProgressPct }}%;background:var(--color-primary);transition:width .4s"></div></div>
+                  <div style="font-size:13px;color:var(--color-text-muted);margin-bottom:4px">Token：{{ tokensFmt }} / {{ budgetFmt }}（{{ tokenPct }}%）</div>
+                  <div style="height:10px;border-radius:9999px;background:var(--color-bg-base);overflow:hidden"><div style="height:100%;width:{{ tokenPct }}%;background:{{ tokenBarColor }};transition:width .4s"></div></div>
+                </div>
+                <div style="background:#fff;border:1px solid var(--color-border);border-radius:12px;padding:20px 22px">
+                  <h3 style="font-size:18px;font-weight:600;margin-bottom:16px">DAG 依賴視覺化</h3>
+                  <div style="display:flex;align-items:center;gap:14px;overflow-x:auto;padding-bottom:6px">
+                    <div style="display:flex;flex-direction:column;align-items:center;gap:8px;flex:none"><span style="padding:8px 14px;border-radius:8px;background:var(--color-primary);color:#fff;font-size:13px;font-weight:500">G1 建立基礎</span><span style="font-size:11px;color:var(--color-primary)">✓ 完成</span></div>
+                    <span style="color:var(--color-border)">───</span>
+                    <div style="display:flex;flex-direction:column;align-items:center;gap:8px;flex:none"><span style="padding:8px 14px;border-radius:8px;background:var(--color-tertiary);color:var(--color-primary);font-size:13px;font-weight:600;border:1px solid var(--color-primary)">G2 核心模組</span><span style="font-size:11px;color:var(--color-text-muted)">⟳ 進行中 3/8</span></div>
+                    <span style="color:var(--color-border)">───</span>
+                    <div style="display:flex;flex-direction:column;align-items:center;gap:8px;flex:none"><span style="padding:8px 14px;border-radius:8px;background:var(--color-bg-base);color:var(--color-text-muted);font-size:13px;border:1px solid var(--color-border)">G3 API 整合</span><span style="font-size:11px;color:var(--color-text-muted)">待處理</span></div>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <div style="background:#fff;border:1px solid var(--color-border);border-radius:12px;padding:20px 22px;margin-bottom:24px">
+              <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px"><h3 style="font-size:18px;font-weight:600">即時日誌</h3><span style="font-size:12px;color:var(--color-text-muted);display:inline-flex;align-items:center;gap:6px"><span style="width:7px;height:7px;border-radius:9999px;background:{{ execDot }}"></span>SSE 串流</span></div>
+              <div id="exec-log" style="background:#1c241a;border-radius:8px;padding:14px 16px;font-family:'JetBrains Mono',monospace;font-size:13px;line-height:1.85;color:#d7e4cd;height:240px;overflow-y:auto">
+                <sc-for list="{{ execLogs }}" as="l" hint-placeholder-count="7"><div>{{ l.line }}</div></sc-for>
+              </div>
+            </div>
+
+            <div style="background:#fff;border:1px solid var(--color-border);border-radius:12px;padding:20px 22px">
+              <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px"><h3 style="font-size:18px;font-weight:600">待審核項目</h3><span style="background:var(--color-accent);color:#fff;font-size:12px;font-weight:700;border-radius:9999px;min-width:20px;height:20px;padding:0 6px;display:inline-flex;align-items:center;justify-content:center">{{ reviewCount }}</span></div>
+              <sc-for list="{{ pendingReviews }}" as="r" hint-placeholder-count="2">
+                <div style="padding:14px 0;border-top:1px solid var(--color-border);display:flex;align-items:center;gap:12px;flex-wrap:wrap">
+                  <x-import component-from-global-scope="WgIcon" glyph="alert-triangle" px="18" col="#F5A623" hint-size="18px,18px"></x-import>
+                  <span style="flex:1;font-size:14px;min-width:200px">{{ r.title }}</span>
+                  <div style="display:flex;gap:6px">
+                    <x-import component-from-global-scope="WaterGreenDesignSystem_32a61f.Button" size="sm" onClick="{{ r.onApprove }}" hint-size="auto,32px">通過</x-import>
+                    <x-import component-from-global-scope="WaterGreenDesignSystem_32a61f.Button" variant="ghost" size="sm" onClick="{{ r.onRetry }}" hint-size="auto,32px">重試</x-import>
+                    <x-import component-from-global-scope="WaterGreenDesignSystem_32a61f.Button" variant="ghost" size="sm" onClick="{{ r.onSkip }}" hint-size="auto,32px">跳過</x-import>
+                    <x-import component-from-global-scope="WaterGreenDesignSystem_32a61f.Button" variant="ghost" size="sm" onClick="{{ r.onReject }}" hint-size="auto,32px">拒絕</x-import>
+                  </div>
+                </div>
+              </sc-for>
+              <sc-if value="{{ noReviews }}"><div style="padding:16px 0;color:var(--color-text-muted);font-size:14px;border-top:1px solid var(--color-border)">目前沒有待審核項目。</div></sc-if>
+            </div>
+          </div>
+        </sc-if>
+
+        <!-- ════ MONITOR ════ -->
+        <sc-if value="{{ isMonitor }}" hint-placeholder-val="{{ true }}">
+          <div>
+            <button onClick="{{ onBackProject }}" style="display:inline-flex;align-items:center;gap:6px;background:transparent;border:none;color:var(--color-text-muted);cursor:pointer;font-family:inherit;font-size:14px;margin-bottom:14px"><x-import component-from-global-scope="WgIcon" glyph="arrow-left" px="16" hint-size="16px,16px"></x-import>返回專案</button>
+            <div style="display:flex;align-items:flex-end;justify-content:space-between;gap:16px;margin-bottom:20px;flex-wrap:wrap">
+              <div><h2 style="font-size:28px;font-weight:700;display:flex;align-items:center;gap:10px"><x-import component-from-global-scope="WgIcon" glyph="activity" px="26" col="#498428" hint-size="26px,26px"></x-import>專案監控：{{ monProjName }}</h2></div>
+              <div style="display:flex;gap:10px;align-items:center">
+                <select class="wg-sel" defaultValue="24h" style="border:1px solid var(--color-border);border-radius:8px;padding:9px 36px 9px 14px;font-family:inherit;font-size:14px;color:var(--color-text-main);background-color:#fff"><sc-for list="{{ timeRangeOptions }}" as="o" hint-placeholder-count="3"><option value="{{ o.id }}">{{ o.label }}</option></sc-for></select>
+              </div>
+            </div>
+
+            <div style="display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:16px;margin-bottom:24px">
+              <div style="background:#fff;border:1px solid var(--color-border);border-radius:12px;padding:18px"><div style="font-size:13px;color:var(--color-text-muted)">完成率</div><div style="font-size:30px;font-weight:700;margin-top:8px">34.8%</div><div style="font-size:13px;color:var(--color-primary);margin-top:6px">↑ 12.3%</div></div>
+              <div style="background:#fff;border:1px solid var(--color-border);border-radius:12px;padding:18px"><div style="font-size:13px;color:var(--color-text-muted)">任務成功率</div><div style="font-size:30px;font-weight:700;margin-top:8px">92.3%</div><div style="font-size:13px;color:var(--color-error);margin-top:6px">↓ 2.1%</div></div>
+              <div style="background:#fff;border:1px solid var(--color-border);border-radius:12px;padding:18px"><div style="font-size:13px;color:var(--color-text-muted)">重試率</div><div style="font-size:30px;font-weight:700;margin-top:8px">7.7%</div><div style="font-size:13px;color:var(--color-accent);margin-top:6px">↑ 1.5%</div></div>
+              <div style="background:#fff;border:1px solid var(--color-border);border-radius:12px;padding:18px"><div style="font-size:13px;color:var(--color-text-muted)">Token 消耗</div><div style="font-size:30px;font-weight:700;margin-top:8px">45,230</div><div style="font-size:13px;color:var(--color-accent);margin-top:6px">↑ 8,430</div></div>
+            </div>
+
+            <div style="background:#fff;border:1px solid var(--color-border);border-radius:12px;padding:20px 22px;margin-bottom:24px">
+              <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px"><h3 style="font-size:18px;font-weight:600">Token 使用趨勢</h3><span style="font-size:13px;color:var(--color-text-muted)">—— 使用量　- - 預算線</span></div>
+              <svg viewBox="0 0 720 200" style="width:100%;height:200px">
+                <line x1="40" y1="30" x2="720" y2="30" stroke="#DCE3D6" stroke-width="1" stroke-dasharray="5 5"/>
+                <text x="0" y="34" font-size="11" fill="#7A8775">100k</text>
+                <line x1="40" y1="170" x2="720" y2="170" stroke="#DCE3D6" stroke-width="1"/>
+                <polyline points="40,168 152,150 264,128 376,98 488,70 600,52 712,40" fill="none" stroke="#498428" stroke-width="2.5"/>
+                <polygon points="40,168 152,150 264,128 376,98 488,70 600,52 712,40 712,170 40,170" fill="#498428" opacity="0.08"/>
+                <text x="40" y="190" font-size="11" fill="#7A8775">10:00</text><text x="260" y="190" font-size="11" fill="#7A8775">12:00</text><text x="480" y="190" font-size="11" fill="#7A8775">14:00</text><text x="685" y="190" font-size="11" fill="#7A8775">15:00</text>
+              </svg>
+            </div>
+
+            <div style="display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:24px;margin-bottom:24px">
+              <div style="background:#fff;border:1px solid var(--color-border);border-radius:12px;padding:20px 22px">
+                <h3 style="font-size:18px;font-weight:600;margin-bottom:16px">任務狀態分佈</h3>
+                <div style="display:flex;flex-direction:column;gap:12px;font-size:13px">
+                  <div style="display:flex;align-items:center;gap:10px"><span style="width:70px;color:var(--color-text-muted)">完成 13</span><div style="flex:1;height:14px;background:var(--color-bg-base);border-radius:4px;overflow:hidden"><div style="width:57%;height:100%;background:#498428"></div></div></div>
+                  <div style="display:flex;align-items:center;gap:10px"><span style="width:70px;color:var(--color-text-muted)">執行中 2</span><div style="flex:1;height:14px;background:var(--color-bg-base);border-radius:4px;overflow:hidden"><div style="width:9%;height:100%;background:#80B155"></div></div></div>
+                  <div style="display:flex;align-items:center;gap:10px"><span style="width:70px;color:var(--color-text-muted)">失敗 1</span><div style="flex:1;height:14px;background:var(--color-bg-base);border-radius:4px;overflow:hidden"><div style="width:4%;height:100%;background:#D35B58"></div></div></div>
+                  <div style="display:flex;align-items:center;gap:10px"><span style="width:70px;color:var(--color-text-muted)">待處理 7</span><div style="flex:1;height:14px;background:var(--color-bg-base);border-radius:4px;overflow:hidden"><div style="width:30%;height:100%;background:#A6B0A1"></div></div></div>
+                </div>
+              </div>
+              <div style="background:#fff;border:1px solid var(--color-border);border-radius:12px;padding:20px 22px">
+                <h3 style="font-size:18px;font-weight:600;margin-bottom:16px">執行時間分佈</h3>
+                <div style="display:flex;align-items:flex-end;gap:14px;height:130px">
+                  <div style="flex:1;display:flex;flex-direction:column;align-items:center;gap:6px"><div style="width:100%;height:55px;background:var(--color-secondary);border-radius:4px 4px 0 0"></div><span style="font-size:11px;color:var(--color-text-muted)">T1 45s</span></div>
+                  <div style="flex:1;display:flex;flex-direction:column;align-items:center;gap:6px"><div style="width:100%;height:40px;background:var(--color-secondary);border-radius:4px 4px 0 0"></div><span style="font-size:11px;color:var(--color-text-muted)">T2 32s</span></div>
+                  <div style="flex:1;display:flex;flex-direction:column;align-items:center;gap:6px"><div style="width:100%;height:85px;background:var(--color-primary);border-radius:4px 4px 0 0"></div><span style="font-size:11px;color:var(--color-text-muted)">T3 68s</span></div>
+                  <div style="flex:1;display:flex;flex-direction:column;align-items:center;gap:6px"><div style="width:100%;height:24px;background:var(--color-secondary);border-radius:4px 4px 0 0"></div><span style="font-size:11px;color:var(--color-text-muted)">T4 18s</span></div>
+                </div>
+              </div>
+            </div>
+
+            <div style="background:#fff;border:1px solid var(--color-border);border-radius:12px;padding:20px 22px;margin-bottom:24px">
+              <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px"><h3 style="font-size:18px;font-weight:600">執行日誌查詢</h3><select class="wg-sel" value="{{ monLevel }}" onChange="{{ onMonLevel }}" style="border:1px solid var(--color-border);border-radius:8px;padding:8px 36px 8px 14px;font-family:inherit;font-size:14px;color:var(--color-text-main);background-color:#fff"><sc-for list="{{ monLevelOptions }}" as="o" hint-placeholder-count="4"><option value="{{ o.id }}">{{ o.label }}</option></sc-for></select></div>
+              <div style="background:var(--color-bg-base);border:1px solid var(--color-border);border-radius:8px;padding:12px 14px;font-family:'JetBrains Mono',monospace;font-size:13px;line-height:1.9">
+                <sc-for list="{{ monLogs }}" as="l" hint-placeholder-count="5">
+                  <div style="display:flex;gap:10px"><span style="color:var(--color-text-muted)">{{ l.t }}</span><span style="color:{{ l.color }};font-weight:600;width:48px">{{ l.lvl }}</span><span>{{ l.msg }}</span></div>
+                </sc-for>
+              </div>
+            </div>
+
+            <div style="background:#fff;border:1px solid var(--color-border);border-radius:12px;padding:20px 22px">
+              <h3 style="font-size:18px;font-weight:600;margin-bottom:8px">告警</h3>
+              <sc-for list="{{ alerts }}" as="a" hint-placeholder-count="1">
+                <div style="display:flex;align-items:center;gap:12px;padding:12px 14px;background:#fef7ea;border:1px solid #f5e2bd;border-radius:8px;margin-top:8px">
+                  <x-import component-from-global-scope="WgIcon" glyph="alert-triangle" px="20" col="#F5A623" hint-size="20px,20px"></x-import>
+                  <span style="font-size:13px;color:var(--color-text-muted)">{{ a.time }}</span>
+                  <span style="flex:1;font-size:14px">{{ a.msg }}</span>
+                  <sc-if value="{{ a.ack }}"><span style="font-size:13px;color:var(--color-primary)">已確認</span></sc-if>
+                  <sc-if value="{{ a.notAck }}"><x-import component-from-global-scope="WaterGreenDesignSystem_32a61f.Button" variant="ghost" size="sm" onClick="{{ a.onAck }}" hint-size="auto,32px">確認</x-import></sc-if>
+                </div>
+              </sc-for>
+            </div>
+          </div>
+        </sc-if>
+
+        <!-- ════ SETTINGS ════ -->
+        <sc-if value="{{ isSettings }}" hint-placeholder-val="{{ true }}">
+          <div>
+            <div style="display:flex;align-items:flex-end;justify-content:space-between;gap:16px;margin-bottom:18px;flex-wrap:wrap">
+              <div><h2 style="font-size:30px;font-weight:700;display:flex;align-items:center;gap:10px"><x-import component-from-global-scope="WgIcon" glyph="settings" px="26" col="#498428" hint-size="26px,26px"></x-import>系統參數設定</h2></div>
+              <div style="display:flex;gap:10px">
+                <x-import component-from-global-scope="WaterGreenDesignSystem_32a61f.Button" variant="ghost" iconLeft="download" onClick="{{ onResetAll }}" hint-size="auto,40px">匯出設定</x-import>
+                <x-import component-from-global-scope="WaterGreenDesignSystem_32a61f.Button" variant="ghost" iconLeft="upload" onClick="{{ onResetAll }}" hint-size="auto,40px">匯入設定</x-import>
+              </div>
+            </div>
+
+            <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:20px">
+              <sc-for list="{{ settingsTabs }}" as="st" hint-placeholder-count="6">
+                <button onClick="{{ st.onClick }}" style="display:inline-flex;align-items:center;gap:6px;padding:8px 16px;border-radius:8px;border:1px solid var(--color-border);font-size:14px;font-weight:500;cursor:pointer;font-family:inherit;background:{{ st.bg }};color:{{ st.color }}">
+                  <x-import component-from-global-scope="WgIcon" glyph="{{ st.icon }}" px="16" col="{{ st.iconColor }}" hint-size="16px,16px"></x-import>{{ st.label }}
+                </button>
+              </sc-for>
+            </div>
+
+            <div style="background:#fff;border:1px solid var(--color-border);border-radius:12px;padding:24px;margin-bottom:24px">
+              <div style="display:flex;flex-direction:column;gap:18px">
+                <sc-for list="{{ settingsParams }}" as="p" hint-placeholder-count="6">
+                  <div style="display:grid;grid-template-columns:220px minmax(0,1fr);gap:20px;align-items:start">
+                    <div><div style="font-size:14px;font-weight:500">{{ p.label }}</div><div style="font-size:12px;color:var(--color-text-muted);margin-top:2px">{{ p.desc }}</div></div>
+                    <div style="display:flex;align-items:center;gap:10px;max-width:520px">
+                      <sc-if value="{{ p.isText }}"><input class="wg-input" type="{{ p.inputType }}" value="{{ p.value }}" onChange="{{ p.onChange }}" style="flex:1" /></sc-if>
+                      <sc-if value="{{ p.isPassword }}">
+                        <input class="wg-input" type="{{ p.inputType }}" value="{{ p.value }}" onChange="{{ p.onChange }}" style="flex:1" />
+                        <button onClick="{{ onToggleApiKey }}" style="padding:0 14px;height:44px;border-radius:8px;border:1px solid var(--color-border);background:#fff;color:var(--color-text-muted);cursor:pointer;font-family:inherit;font-size:13px;white-space:nowrap">{{ eyeLabel }}</button>
+                      </sc-if>
+                      <sc-if value="{{ p.isEnum }}"><select class="wg-sel" value="{{ p.value }}" onChange="{{ p.onChange }}" style="border:1px solid var(--color-border);border-radius:8px;padding:11px 36px 11px 14px;font-family:inherit;font-size:15px;color:var(--color-text-main);background-color:#fff;min-width:220px"><sc-for list="{{ p.enumOptions }}" as="o" hint-placeholder-count="3"><option value="{{ o.id }}">{{ o.label }}</option></sc-for></select></sc-if>
+                      <sc-if value="{{ p.isBool }}">
+                        <button onClick="{{ p.onToggle }}" style="width:46px;height:26px;border-radius:9999px;border:none;cursor:pointer;background:{{ p.toggleBg }};position:relative;transition:all .2s;flex:none"><span style="position:absolute;top:3px;left:{{ p.knobLeft }};width:20px;height:20px;border-radius:9999px;background:#fff;transition:all .2s"></span></button>
+                        <span style="font-size:13px;color:var(--color-text-muted)">{{ p.boolLabel }}</span>
+                      </sc-if>
+                      <sc-if value="{{ p.error }}"><span style="font-size:12px;color:var(--color-error);font-weight:500">{{ p.error }}</span></sc-if>
+                      <x-import component-from-global-scope="WaterGreenDesignSystem_32a61f.IconButton" icon="rotate-ccw" label="重置" variant="ghost" size="36" onClick="{{ p.onReset }}" hint-size="36px,36px"></x-import>
+                    </div>
+                  </div>
+                </sc-for>
+              </div>
+
+              <sc-if value="{{ isModelTab }}">
+                <div style="margin-top:22px;padding-top:20px;border-top:1px solid var(--color-border);display:flex;align-items:center;gap:14px">
+                  <x-import component-from-global-scope="WaterGreenDesignSystem_32a61f.Button" variant="ghost" iconLeft="plug" onClick="{{ onTestConn }}" hint-size="auto,40px">測試連線</x-import>
+                  <sc-if value="{{ connTesting }}"><span style="font-size:14px;color:var(--color-text-muted)">測試中…</span></sc-if>
+                  <sc-if value="{{ connOk }}"><span style="font-size:14px;color:var(--color-primary);display:inline-flex;align-items:center;gap:6px"><x-import component-from-global-scope="WgIcon" glyph="check-circle" px="18" col="#498428" hint-size="18px,18px"></x-import>連線成功（延遲 230ms）</span></sc-if>
+                </div>
+              </sc-if>
+            </div>
+
+            <div style="background:#fff;border:1px solid var(--color-border);border-radius:12px;padding:20px 22px;margin-bottom:24px">
+              <h3 style="font-size:18px;font-weight:600;margin-bottom:12px">修改歷史</h3>
+              <div style="font-family:'JetBrains Mono',monospace;font-size:13px;color:var(--color-text-muted);line-height:2">
+                <div>2026-06-17 15:30　model.temperature　0.5 → 0.3　@admin</div>
+                <div>2026-06-16 10:00　model.name　gpt-4 → claude-sonnet-4　@admin</div>
+              </div>
+            </div>
+
+            <div style="display:flex;gap:10px">
+              <x-import component-from-global-scope="WaterGreenDesignSystem_32a61f.Button" iconLeft="check" onClick="{{ onResetAll }}" hint-size="auto,40px">儲存變更</x-import>
+              <x-import component-from-global-scope="WaterGreenDesignSystem_32a61f.Button" variant="ghost" iconLeft="rotate-ccw" onClick="{{ onResetAll }}" hint-size="auto,40px">全部重置為預設值</x-import>
+            </div>
+          </div>
+        </sc-if>
+
+      </main>
+    </div>
+  </div>
+
+  </sc-if>
+
+  <!-- ░░ DIALOG ░░ -->
+  <sc-if value="{{ dialogOpen }}">
+    <div style="position:fixed;inset:0;background:rgba(42,54,38,.32);display:flex;align-items:center;justify-content:center;z-index:80;padding:24px" onClick="{{ onDlgClose }}">
+      <div onClick="{{ stop }}" style="background:#fff;border-radius:12px;border:1px solid var(--color-border);width:560px;max-width:100%;max-height:88vh;overflow-y:auto">
+        <div style="padding:20px 24px;border-bottom:1px solid var(--color-border);display:flex;align-items:center;justify-content:space-between">
+          <h3 style="font-size:20px;font-weight:600">{{ dialogTitle }}</h3>
+          <x-import component-from-global-scope="WaterGreenDesignSystem_32a61f.IconButton" icon="x" label="關閉" variant="ghost" size="36" onClick="{{ onDlgClose }}" hint-size="36px,36px"></x-import>
+        </div>
+        <div style="padding:22px 24px;display:flex;flex-direction:column;gap:16px">
+          <label style="display:flex;flex-direction:column;gap:6px;font-size:14px;font-weight:500">{{ dlgEntityLabel }}名稱
+            <input class="wg-input" value="{{ form.name }}" onChange="{{ onDlgName }}" placeholder="輸入名稱…" />
+          </label>
+          <sc-if value="{{ dlgShowPath }}">
+            <label style="display:flex;flex-direction:column;gap:6px;font-size:14px;font-weight:500">執行路徑
+              <input class="wg-input" value="{{ form.path }}" onChange="{{ onDlgPath }}" placeholder="/home/user/projects/…" />
+            </label>
+          </sc-if>
+          <label style="display:flex;flex-direction:column;gap:6px;font-size:14px;font-weight:500">說明描述 <span style="font-weight:400;color:var(--color-text-muted)">(Markdown)</span>
+            <textarea value="{{ form.desc }}" onChange="{{ onDlgDesc }}" placeholder="## 概述…" style="width:100%;min-height:80px;padding:10px 16px;font-family:inherit;font-size:15px;color:var(--color-text-main);background:#fff;border:1px solid var(--color-border);border-radius:8px;resize:vertical;outline:none"></textarea>
+          </label>
+          <label style="display:flex;flex-direction:column;gap:6px;font-size:14px;font-weight:500">通過標準 <span style="font-weight:400;color:var(--color-text-muted)">(Markdown)</span>
+            <textarea value="{{ form.pass }}" onChange="{{ onDlgPass }}" placeholder="- 所有單元測試通過…" style="width:100%;min-height:80px;padding:10px 16px;font-family:inherit;font-size:15px;color:var(--color-text-main);background:#fff;border:1px solid var(--color-border);border-radius:8px;resize:vertical;outline:none"></textarea>
+          </label>
+          <sc-if value="{{ dlgShowNum }}">
+            <label style="display:flex;flex-direction:column;gap:6px;font-size:14px;font-weight:500">{{ dlgNumLabel }}
+              <input class="wg-input" type="number" value="{{ form.num }}" onChange="{{ onDlgNum }}" />
+            </label>
+          </sc-if>
+        </div>
+        <div style="padding:16px 24px;border-top:1px solid var(--color-border);display:flex;justify-content:flex-end;gap:10px">
+          <x-import component-from-global-scope="WaterGreenDesignSystem_32a61f.Button" variant="ghost" onClick="{{ onDlgClose }}" hint-size="auto,40px">取消</x-import>
+          <x-import component-from-global-scope="WaterGreenDesignSystem_32a61f.Button" iconLeft="check" onClick="{{ onDlgSave }}" hint-size="auto,40px">{{ dlgSaveLabel }}</x-import>
+        </div>
+      </div>
+    </div>
+  </sc-if>
+
+  <!-- ░░ TOAST ░░ -->
+  <sc-if value="{{ toast }}">
+    <div style="position:fixed;bottom:28px;left:50%;transform:translateX(-50%);background:var(--color-text-main);color:#fff;padding:12px 22px;border-radius:8px;font-size:14px;z-index:90;display:flex;align-items:center;gap:8px">
+      <x-import component-from-global-scope="WgIcon" glyph="check-circle" px="18" col="#9fe08a" hint-size="18px,18px"></x-import>{{ toast }}
+    </div>
+  </sc-if>
+
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props="{&quot;landingView&quot;:{&quot;editor&quot;:&quot;enum&quot;,&quot;default&quot;:&quot;dashboard&quot;,&quot;options&quot;:[&quot;dashboard&quot;,&quot;projects&quot;,&quot;import&quot;,&quot;execute&quot;,&quot;monitor&quot;,&quot;settings&quot;],&quot;tsType&quot;:&quot;string&quot;},&quot;showChipRow&quot;:{&quot;editor&quot;:&quot;boolean&quot;,&quot;default&quot;:true,&quot;tsType&quot;:&quot;boolean&quot;},&quot;showProjectRail&quot;:{&quot;editor&quot;:&quot;boolean&quot;,&quot;default&quot;:true,&quot;tsType&quot;:&quot;boolean&quot;}}">
+const PS = {DRAFT:['草稿','#7A8775'],READY:['就緒','#80B155'],EXECUTING:['執行中','#498428'],COMPLETED:['完成','#498428'],FAILED:['失敗','#D35B58'],ARCHIVED:['封存','#A6B0A1']};
+const GS = {PENDING:['待處理','#A6B0A1'],IN_PROGRESS:['進行中','#498428'],COMPLETED:['完成','#498428'],FAILED:['失敗','#D35B58'],SKIPPED:['跳過','#A6B0A1']};
+const TS = {PENDING:['待處理','#A6B0A1'],QUEUED:['排程中','#80B155'],BLOCKED:['阻塞','#F5A623'],RUNNING:['執行中','#498428'],VALIDATING:['驗證中','#80B155'],COMPLETED:['完成','#498428'],FAILED:['失敗','#D35B58'],ESCALATED:['待人工','#E55B3C'],PAUSED:['暫停','#7A8775'],SKIPPED:['跳過','#A6B0A1'],CANCELLED:['取消','#A6B0A1']};
+
+class Component extends DCLogic {
+  constructor(props){
+    super(props);
+    const projects = [
+      {id:'p1',name:'AISDLC Core Platform',status:'EXECUTING',autonomyLevel:3,executionPath:'/home/user/projects/aisdlc-core',goalsCount:5,tasksCount:23,tasksDone:8,updatedAt:'2026-06-17',signedOff:true,createdBy:'koala005',
+        descParas:['AISDLC 核心平台整合 AutoClaude 與 AISDLC_SDD 雙引擎，透過 Engine Bridge 旁車提供端到端自治開發。','採 Clean Architecture + DDD 四層分離，PostgreSQL 18 持久化。'],
+        passList:['所有單元測試通過率 ≥ 95%','整合測試全數通過','程式碼覆蓋率 ≥ 80%']},
+      {id:'p2',name:'AutoClaude v2.0',status:'DRAFT',autonomyLevel:3,executionPath:'/home/user/projects/autoclaude',goalsCount:3,tasksCount:12,tasksDone:0,updatedAt:'2026-06-16',signedOff:false,createdBy:'AI 解析',
+        descParas:['Hexagonal 微核心重構，17 Port 介面、雙腦修正（MiniMax + Claude Code CLI）。'],
+        passList:['Port 介面契約測試通過','checkpoint additive 寫入驗證']},
+      {id:'p3',name:'Engine Bridge 旁車',status:'READY',autonomyLevel:4,executionPath:'/home/user/projects/engine-bridge',goalsCount:4,tasksCount:16,tasksDone:0,updatedAt:'2026-06-15',signedOff:true,createdBy:'koala005',
+        descParas:['FastAPI 薄旁車（port 8081）包裝兩既有 CLI 引擎，對外 REST + SSE，path 前綴區分。'],
+        passList:['/runs 子程序物化成功','advisory lock 並發互斥','SSE 斷線重播 at-least-once']},
+      {id:'p4',name:'AISDLC_SDD v0.14 整合',status:'COMPLETED',autonomyLevel:5,executionPath:'/srv/aisdlc-sdd',goalsCount:6,tasksCount:28,tasksDone:28,updatedAt:'2026-06-12',signedOff:true,createdBy:'koala005',
+        descParas:['26 Agents / 10 Scenarios / 39 治理規則整合，純 CLI / Markdown / Hook。'],
+        passList:['RTM 覆蓋率 100%','FSM-STATE 一致性抽查通過']},
+      {id:'p5',name:'PostgreSQL 18 DR 演練',status:'EXECUTING',autonomyLevel:2,executionPath:'/ops/pg-dr',goalsCount:3,tasksCount:9,tasksDone:4,updatedAt:'2026-06-17',signedOff:true,createdBy:'koala005',
+        descParas:['WAL 連續歸檔 + 串流複製 standby + PITR + pgBackRest + 離站 S3/MinIO。'],
+        passList:['RTO < 15 分鐘','RPO < 1 分鐘','真實 restore 演練成功']},
+      {id:'p6',name:'Console UI 前端骨架',status:'FAILED',autonomyLevel:3,executionPath:'/home/user/projects/console-web',goalsCount:4,tasksCount:14,tasksDone:6,updatedAt:'2026-06-14',signedOff:true,createdBy:'koala005',
+        descParas:['Next.js 16 App Router + Tailwind 4 + shadcn/ui，Tremor 圖表相容性 spike。'],
+        passList:['LCP < 2 秒','Tremor × Tailwind4 相容驗證']},
+      {id:'p7',name:'監控告警子系統',status:'DRAFT',autonomyLevel:3,executionPath:'/home/user/projects/console-monitor',goalsCount:3,tasksCount:11,tasksDone:0,updatedAt:'2026-06-13',signedOff:false,createdBy:'AI 解析',
+        descParas:['Token 預算、連續失敗、Agent 無回應告警；SSE 即時指標推送。'],
+        passList:['告警觸發延遲 < 3 秒','Token 超限自動暫停']},
+      {id:'p8',name:'RTM 覆蓋率報表',status:'READY',autonomyLevel:4,executionPath:'/home/user/projects/rtm-report',goalsCount:4,tasksCount:13,tasksDone:0,updatedAt:'2026-06-11',signedOff:true,createdBy:'koala005',
+        descParas:['需求追溯矩陣（RTM）覆蓋率報表，PDF / CSV 匯出。'],
+        passList:['RTM 雙向追溯完整','報表匯出格式驗證']},
+    ];
+
+    // p1 goals (explicit)
+    const goals = [
+      {id:'g1',projectId:'p1',name:'建立基礎架構',status:'COMPLETED',sortOrder:1,signedOff:true,dependsOn:[],
+        descParas:['初始化 monorepo、CI/CD、Docker 基礎映像與程式碼規範。'],
+        passList:[{t:'CI/CD Pipeline 綠燈',done:true},{t:'Docker 基礎映像可建置',done:true}]},
+      {id:'g2',projectId:'p1',name:'實作核心模組',status:'IN_PROGRESS',sortOrder:2,signedOff:true,dependsOn:['建立基礎架構'],
+        descParas:['Domain Model、Repository、Use Case 與 REST Controller，含認證授權與日誌。'],
+        passList:[{t:'所有核心模組通過單元測試',done:false},{t:'API 契約驗證通過',done:false}]},
+      {id:'g3',projectId:'p1',name:'API 整合',status:'PENDING',sortOrder:3,signedOff:true,dependsOn:['實作核心模組'],
+        descParas:['OpenAPI 規格、SSE 推送端點、Engine Bridge 橋接與分頁回補。'],
+        passList:[{t:'OpenAPI 3.0 文件自動生成',done:false}]},
+      {id:'g4',projectId:'p1',name:'測試與品質',status:'PENDING',sortOrder:4,signedOff:true,dependsOn:['API 整合'],
+        descParas:['單元 / 整合 / E2E 測試，覆蓋率閘門。'],
+        passList:[{t:'後端覆蓋率 ≥ 80%',done:false}]},
+      {id:'g5',projectId:'p1',name:'部署與文件',status:'PENDING',sortOrder:5,signedOff:true,dependsOn:['測試與品質'],
+        descParas:['容器化部署、PG18 DR 與交付文件。'],
+        passList:[{t:'部署手冊與 ADR 完成',done:false}]},
+    ];
+    // p1 tasks (explicit, 23)
+    const tasks = [
+      ...['初始化專案結構','配置開發環境','建立 CI/CD Pipeline','設定程式碼規範','建立 Docker 基礎映像'].map((n,i)=>({id:'t1_'+i,goalId:'g1',name:n,status:'COMPLETED',sortOrder:i+1,signedOff:true,retryCount:0,maxRetries:3})),
+      {id:'t2_0',goalId:'g2',name:'建立 Domain Model',status:'COMPLETED',sortOrder:1,signedOff:true,retryCount:0,maxRetries:3},
+      {id:'t2_1',goalId:'g2',name:'實作 Repository',status:'COMPLETED',sortOrder:2,signedOff:true,retryCount:0,maxRetries:3},
+      {id:'t2_2',goalId:'g2',name:'實作 Use Cases',status:'COMPLETED',sortOrder:3,signedOff:true,retryCount:0,maxRetries:3},
+      {id:'t2_3',goalId:'g2',name:'建立 REST Controller',status:'RUNNING',sortOrder:4,signedOff:true,retryCount:0,maxRetries:3,assignedAgent:'AutoClaude-01',actualTokens:12450,startedAt:'14:32:05',
+        descParas:['以 Spring Boot 3.2 建立 ProjectController/GoalController/TaskController，套用統一回應格式與 traceId。'],
+        passList:[{t:'端點回傳通用回應格式',done:true},{t:'整合 SpringDoc OpenAPI',done:false}],
+        log:['[14:32:05] 🚀 開始執行任務…','[14:32:06] 📋 載入 Playbook: create-rest-controller','[14:32:10] ⚙️ 步驟 1/5: 產生 Controller 骨架…','[14:33:45] ✅ 步驟 1/5: 完成','[14:33:46] ⚙️ 步驟 2/5: 實作端點方法…','[14:35:12] ✅ 步驟 2/5: 完成','[14:35:13] ⚙️ 步驟 3/5: 套用 DTO 映射…']},
+      {id:'t2_4',goalId:'g2',name:'實作認證授權',status:'PENDING',sortOrder:5,signedOff:true,retryCount:0,maxRetries:3},
+      {id:'t2_5',goalId:'g2',name:'建立中介層',status:'PENDING',sortOrder:6,signedOff:true,retryCount:0,maxRetries:3},
+      {id:'t2_6',goalId:'g2',name:'錯誤處理',status:'ESCALATED',sortOrder:7,signedOff:true,retryCount:3,maxRetries:3,
+        descParas:['全域例外處理器與結構化錯誤回應。'],
+        passList:[{t:'NullPointerException 邊界處理',done:false}],
+        log:['[15:44:50] ⚙️ 開始: 錯誤處理','[15:45:12] ❌ NullPointerException at GlobalExceptionHandler:42','[15:45:13] 🔄 重試 1/3…','[15:46:40] ❌ 同樣錯誤','[15:48:02] 🔄 重試 3/3…','[15:49:20] 🛑 重試耗盡，升級人類審核']},
+      {id:'t2_7',goalId:'g2',name:'日誌整合',status:'PENDING',sortOrder:8,signedOff:true,retryCount:0,maxRetries:3},
+      ...['定義 OpenAPI 規格','實作 SSE 推送端點','Engine Bridge 橋接','分頁回補機制','DAG 排程器接線','Checkpoint 還原 API'].map((n,i)=>({id:'t3_'+i,goalId:'g3',name:n,status:'PENDING',sortOrder:i+1,signedOff:true,retryCount:0,maxRetries:3})),
+      ...['撰寫單元測試','整合測試套件','覆蓋率閘門'].map((n,i)=>({id:'t4_'+i,goalId:'g4',name:n,status:'PENDING',sortOrder:i+1,signedOff:true,retryCount:0,maxRetries:3})),
+      {id:'t5_0',goalId:'g5',name:'容器化部署與交付文件',status:'PENDING',sortOrder:1,signedOff:true,retryCount:0,maxRetries:3},
+    ];
+
+    const configs = {
+      model:[
+        {key:'model.provider',label:'模型提供者',type:'enum',value:'ANTHROPIC',opts:['ANTHROPIC','OPENAI','LOCAL','CUSTOM'],desc:'模型提供者'},
+        {key:'model.apiUrl',label:'API URL',type:'text',value:'https://api.anthropic.com',desc:'模型 API 基礎 URL（受 SEC-04 domain allowlist 校驗）'},
+        {key:'model.apiKey',label:'API Key',type:'password',value:'sk-ant-xxxxxxxxxxxxxxxx',desc:'API 金鑰（AES-256 加密儲存）'},
+        {key:'model.name',label:'模型名稱',type:'text',value:'claude-sonnet-4-20250514',desc:'預設模型名稱'},
+        {key:'model.maxTokensPerRequest',label:'最大 Token / 請求',type:'number',value:'8192',desc:'單次請求最大 Token 數'},
+        {key:'model.temperature',label:'溫度',type:'number',value:'0.3',desc:'temperature'},
+        {key:'model.topP',label:'Top-P',type:'number',value:'0.9',desc:'top-p'},
+        {key:'model.timeout',label:'請求逾時 (秒)',type:'number',value:'120',desc:'request timeout'},
+        {key:'model.rateLimitPerMinute',label:'每分鐘請求上限',type:'number',value:'60',desc:'rate limit'},
+      ],
+      agent:[
+        {key:'agent.defaultAutonomyLevel',label:'預設自治等級',type:'number',value:'3',desc:'1-10'},
+        {key:'agent.maxConcurrentTasks',label:'最大並行任務數',type:'number',value:'3',desc:''},
+        {key:'agent.taskTimeout',label:'單一任務逾時 (秒)',type:'number',value:'600',desc:''},
+        {key:'agent.maxRetries',label:'預設最大重試次數',type:'number',value:'3',desc:''},
+        {key:'agent.retryBackoffMs',label:'重試退避 (ms)',type:'number',value:'5000',desc:''},
+        {key:'agent.retryBackoffMultiplier',label:'重試退避倍數',type:'number',value:'2.0',desc:''},
+        {key:'agent.checkpointInterval',label:'自動 Checkpoint 間隔',type:'number',value:'5',desc:'每 N 個任務'},
+        {key:'agent.enableAutoMutation',label:'啟用自動突變 (Lv6+)',type:'bool',value:false,desc:''},
+        {key:'agent.enableSelfEvolution',label:'啟用自演化 (Lv7+)',type:'bool',value:false,desc:''},
+      ],
+      execution:[
+        {key:'execution.globalTokenBudget',label:'全域 Token 預算',type:'number',value:'1000000',desc:''},
+        {key:'execution.tokenBudgetWarningThreshold',label:'Token 預算警告閾值',type:'number',value:'0.8',desc:'80%'},
+        {key:'execution.maxParallelGoals',label:'最大並行目標數',type:'number',value:'2',desc:''},
+        {key:'execution.dagSchedulerStrategy',label:'排程策略',type:'enum',value:'TOPOLOGICAL',opts:['TOPOLOGICAL','PRIORITY','SHORTEST_FIRST'],desc:''},
+        {key:'execution.enableRollback',label:'啟用失敗回滾',type:'bool',value:true,desc:''},
+        {key:'execution.logRetentionDays',label:'日誌保留天數',type:'number',value:'90',desc:''},
+        {key:'execution.compactThresholdPct',label:'Compact 閾值 (%)',type:'number',value:'80',desc:'Token Guard：達此 % 觸發 /compact'},
+        {key:'execution.haltThresholdPct',label:'Halt 閾值 (%)',type:'number',value:'90',desc:'SEC-05 硬約束：halt 必須 > compact'},
+      ],
+      monitor:[
+        {key:'monitor.refreshIntervalMs',label:'刷新間隔 (ms)',type:'number',value:'3000',desc:''},
+        {key:'monitor.alertConsecutiveFailures',label:'連續失敗告警閾值',type:'number',value:'3',desc:''},
+        {key:'monitor.alertAgentTimeoutSec',label:'Agent 無回應告警 (秒)',type:'number',value:'300',desc:''},
+        {key:'monitor.alertTaskDurationMultiplier',label:'任務過長告警倍數',type:'number',value:'2.0',desc:''},
+        {key:'monitor.enableEmailNotification',label:'啟用 Email 通知',type:'bool',value:false,desc:''},
+        {key:'monitor.notificationEmail',label:'通知 Email',type:'text',value:'',desc:''},
+      ],
+      autoclaude:[
+        {key:'autoclaude.engineUrl',label:'Engine Bridge URL',type:'text',value:'http://engine-bridge:8081',desc:'單一旁車，路徑前綴 /autoclaude'},
+        {key:'autoclaude.healthCheckPath',label:'健康檢查端點',type:'text',value:'/health',desc:''},
+        {key:'autoclaude.eventBusType',label:'EventBus 類型',type:'enum',value:'INTERNAL',opts:['INTERNAL','KAFKA','RABBITMQ'],desc:''},
+        {key:'autoclaude.dalBackend',label:'DAL 後端',type:'enum',value:'POSTGRESQL',opts:['FILE','IN_MEMORY','POSTGRESQL'],desc:'對映 storage.mode'},
+        {key:'autoclaude.playbookPath',label:'Playbook 路徑',type:'text',value:'./playbooks',desc:''},
+      ],
+      sdd:[
+        {key:'sdd.engineUrl',label:'Engine Bridge URL',type:'text',value:'http://engine-bridge:8081',desc:'單一旁車，路徑前綴 /sdd'},
+        {key:'sdd.specFormat',label:'規格格式',type:'enum',value:'YAML',opts:['YAML','JSON','TOML'],desc:''},
+        {key:'sdd.workflowEngine',label:'工作流引擎',type:'enum',value:'DYNAMIC',opts:['STATIC','DYNAMIC','ADAPTIVE'],desc:''},
+        {key:'sdd.validationLevel',label:'驗證等級',type:'enum',value:'STRICT',opts:['LAX','NORMAL','STRICT'],desc:''},
+      ],
+    };
+
+    this.state = {
+      appReady: (typeof window!=='undefined' && !!window.lucide),
+      view: props.landingView || 'dashboard',
+      projectId:'p1', goalId:'g2', taskId:'t2_3',
+      projects, goals, tasks, configs,
+      search:'', statusFilter:'ALL', sort:'updated', page:1, pageSize:5,
+      dialog:{open:false},
+      toast:'',
+      settingsTab:'model', showApiKey:false, connResult:null,
+      importTab:'upload', importParsing:false, importParsed:false, importAutonomy:3, importPath:'/home/user/projects/new-service', importPrompt:'', importSignedOff:false,
+      exec:{running:false,paused:false,tokensUsed:45230,tokenBudget:100000,tasksDone:8,tasksTotal:23,autonomy:3,
+        scope:{g1:true,g2:true,g3:false,g4:false,g5:false},
+        logs:['[15:01:23] 🚀 Run #3 開始執行','[15:01:24] 📋 載入 DAG: 2 目標, 13 任務','[15:01:25] ⚙️ [目標1/任務1] 開始: 初始化專案結構','[15:02:30] ✅ [目標1/任務1] 完成 (Token: 3,200)','[15:02:31] ⚙️ [目標1/任務2] 開始: 配置開發環境','[15:45:12] ⚠️ [目標2/任務7] 執行失敗，自動重試 1/3','[15:45:13] 🔄 [目標2/任務7] 重試中…'],
+        reviews:[
+          {id:'r1',title:'[目標2] 目標完成，等待人類審核',kind:'goal'},
+          {id:'r2',title:'[目標2/任務7] 重試 3 次仍失敗，需要人類介入',kind:'task'},
+        ]},
+      monLevel:'ALL',
+      alerts:[{id:'a1',time:'15:45:12',msg:'[Token 預算警告] 已使用 80% Token 預算',ack:false}],
+    };
+    this._stop = (e)=>e.stopPropagation();
+  }
+
+  componentDidMount(){
+    if(typeof window!=='undefined' && !this.state.appReady){
+      const ready=()=>this.setState({appReady:true});
+      if(window.lucide){ ready(); return; }
+      this._li=setInterval(()=>{ if(window.lucide){ clearInterval(this._li); ready(); } },60);
+      this._lf=setTimeout(()=>{ clearInterval(this._li); ready(); },1500);
+    }
+  }
+  componentWillUnmount(){ clearInterval(this._li); clearTimeout(this._lf); clearInterval(this._run); clearTimeout(this._toast); }
+  componentDidUpdate(){ if(this.state.view==='execute'){ const el=document.getElementById('exec-log'); if(el) el.scrollTop=el.scrollHeight; } }
+
+  nav(view, patch){ this.setState({view, ...(patch||{})}); if(typeof window!=='undefined'){ const m=document.querySelector('main'); if(m) m.scrollTop=0; } }
+  flash(msg){ this.setState({toast:msg}); clearTimeout(this._toast); this._toast=setTimeout(()=>this.setState({toast:''}),2200); }
+
+  approve(kind,id){
+    this.setState(s=>{
+      const upd=arr=>arr.map(x=>x.id===id?{...x,signedOff:true}:x);
+      if(kind==='project') return {projects:upd(s.projects)};
+      if(kind==='goal') return {goals:upd(s.goals)};
+      if(kind==='task') return {tasks:upd(s.tasks)};
+      return {};
+    });
+    this.flash('已審批 — signoff 已記錄 (koala005)');
+  }
+
+  // ── dialog ──
+  openDialog(entity,mode,id){
+    let form={name:'',path:'',desc:'',pass:'',num: entity==='project'?3:3};
+    if(mode==='edit'){
+      const src=(entity==='project'?this.state.projects:entity==='goal'?this.state.goals:this.state.tasks).find(x=>x.id===id);
+      if(src){ form={name:src.name,path:src.executionPath||'',desc:(src.descParas||[]).join('\n'),pass:(src.passList||[]).map(p=>typeof p==='string'?p:p.t).join('\n'),num: src.autonomyLevel||src.maxRetries||3}; }
+    }
+    this.setState({dialog:{open:true,entity,mode,id,form}});
+  }
+  setF(k,v){ this.setState(s=>({dialog:{...s.dialog,form:{...s.dialog.form,[k]:v}}})); }
+  closeDialog(){ this.setState({dialog:{open:false}}); }
+  saveDialog(){
+    const d=this.state.dialog; const f=d.form;
+    if(!f.name || !f.name.trim()){ this.flash('名稱不能為空'); return; }
+    this.setState(s=>{
+      if(d.mode==='create'){
+        if(d.entity==='project'){
+          const np={id:'p'+(Date.now()),name:f.name,status:'DRAFT',autonomyLevel:Number(f.num)||3,executionPath:f.path||'/home/user/projects/new',goalsCount:0,tasksCount:0,tasksDone:0,updatedAt:'2026-06-18',signedOff:true,createdBy:'koala005',descParas:f.desc?f.desc.split('\n'):[],passList:f.pass?f.pass.split('\n').map(t=>t.replace(/^-\s*/,'')):[]};
+          return {projects:[np,...s.projects],dialog:{open:false}};
+        }
+        if(d.entity==='goal'){
+          const ng={id:'g'+(Date.now()),projectId:s.projectId,name:f.name,status:'PENDING',sortOrder:99,signedOff:true,dependsOn:[],descParas:f.desc?f.desc.split('\n'):[],passList:f.pass?f.pass.split('\n').map(t=>({t:t.replace(/^-\s*/,''),done:false})):[]};
+          return {goals:[...s.goals,ng],dialog:{open:false}};
+        }
+        const nt={id:'t'+(Date.now()),goalId:s.goalId,name:f.name,status:'PENDING',sortOrder:99,signedOff:true,retryCount:0,maxRetries:Number(f.num)||3,descParas:f.desc?f.desc.split('\n'):[],passList:f.pass?f.pass.split('\n').map(t=>({t:t.replace(/^-\s*/,''),done:false})):[]};
+        return {tasks:[...s.tasks,nt],dialog:{open:false}};
+      } else {
+        const apply=arr=>arr.map(x=>x.id===d.id?{...x,name:f.name,executionPath:f.path||x.executionPath,descParas:f.desc?f.desc.split('\n'):x.descParas,autonomyLevel:d.entity==='project'?(Number(f.num)||x.autonomyLevel):x.autonomyLevel,maxRetries:d.entity==='task'?(Number(f.num)||x.maxRetries):x.maxRetries}:x);
+        if(d.entity==='project') return {projects:apply(s.projects),dialog:{open:false}};
+        if(d.entity==='goal') return {goals:apply(s.goals),dialog:{open:false}};
+        return {tasks:apply(s.tasks),dialog:{open:false}};
+      }
+    });
+    this.flash('已儲存');
+  }
+
+  // ── execute ──
+  startExec(){
+    const p=this.state.projects.find(x=>x.id===this.state.projectId);
+    if(p && !p.signedOff){ this.flash('草案未經人工審批，禁止執行 (409)'); return; }
+    if(this.state.exec.running) return;
+    this.setState(s=>({exec:{...s.exec,running:true,paused:false,logs:[...s.exec.logs,'['+this.clock()+'] ▶ 恢復/啟動執行 Run #3']}}));
+    this._run=setInterval(()=>{
+      this.setState(s=>{
+        if(!s.exec.running||s.exec.paused) return {};
+        const e=s.exec; const done=Math.min(e.tasksTotal,e.tasksDone+1);
+        const lines=['⚙️ 分派任務: 建立 REST Controller','✅ 任務完成 (Token: '+(2000+Math.floor(Math.random()*3000))+')','📋 載入 Playbook 步驟','🔍 驗證通過標準…','✅ 驗證通過'];
+        const logs=[...e.logs,'['+this.clock()+'] '+lines[Math.floor(Math.random()*lines.length)]].slice(-40);
+        const tokensUsed=Math.min(e.tokenBudget,e.tokensUsed+Math.floor(1500+Math.random()*2500));
+        const running = done<e.tasksTotal;
+        return {exec:{...e,tasksDone:done,logs,tokensUsed,running}};
+      });
+    },1500);
+  }
+  pauseExec(){ this.setState(s=>({exec:{...s.exec,paused:true,logs:[...s.exec.logs,'['+this.clock()+'] ⏸ 已暫停 — 當前步驟完成後不再分派新任務']}})); }
+  resumeExec(){ this.setState(s=>({exec:{...s.exec,paused:false,running:true,logs:[...s.exec.logs,'['+this.clock()+'] ▶ 已恢復']}})); if(!this._run) this.startExec(); }
+  cancelExec(){ clearInterval(this._run); this._run=null; this.setState(s=>({exec:{...s.exec,running:false,paused:false,logs:[...s.exec.logs,'['+this.clock()+'] ⏹ 已取消 — SIGTERM→SIGKILL，QUEUED 任務標記 CANCELLED']}})); }
+  toggleScope(g){ this.setState(s=>({exec:{...s.exec,scope:{...s.exec.scope,[g]:!s.exec.scope[g]}}})); }
+  resolveReview(id,label){ this.setState(s=>({exec:{...s.exec,reviews:s.exec.reviews.filter(r=>r.id!==id),logs:[...s.exec.logs,'['+this.clock()+'] 👤 審核裁定: '+label]}})); this.flash('已處理審核項目'); }
+  clock(){ const d=new Date(); return [d.getHours(),d.getMinutes(),d.getSeconds()].map(n=>String(n).padStart(2,'0')).join(':'); }
+
+  // ── import ──
+  doParse(){ this.setState({importParsing:true,importParsed:false}); clearTimeout(this._pt); this._pt=setTimeout(()=>this.setState({importParsing:false,importParsed:true,importSignedOff:false}),1600); }
+  confirmImport(){ if(!this.state.importSignedOff){ this.flash('請先 signoff 審批草案'); return; } this.flash('已匯入 — 新專案已建立'); this.setState({importParsed:false}); this.nav('projects'); }
+
+  // ── settings ──
+  setConfig(cat,key,val){ this.setState(s=>({configs:{...s.configs,[cat]:s.configs[cat].map(c=>c.key===key?{...c,value:val}:c)}})); }
+  testConn(){ this.setState({connResult:'testing'}); clearTimeout(this._ct); this._ct=setTimeout(()=>this.setState({connResult:'ok'}),1100); }
+
+  enrichProject(p){
+    const meta=PS[p.status]||PS.DRAFT;
+    return {...p, statusLabel:meta[0], statusDot:meta[1], isDraft:!p.signedOff,
+      progressPct: p.tasksCount? Math.round(p.tasksDone/p.tasksCount*100):0,
+      progressLabel: p.tasksDone+' / '+p.tasksCount+' 任務完成',
+      onView:()=>this.nav('projectDetail',{projectId:p.id}),
+      onEdit:()=>this.openDialog('project','edit',p.id),
+      onExecute:()=>this.nav('execute',{projectId:p.id}),
+      onMonitor:()=>this.nav('monitor',{projectId:p.id}),
+      onApprove:()=>this.approve('project',p.id),
+    };
+  }
+
+  renderVals(){
+    const s=this.state;
+    const view=s.view;
+    const projObj = s.projects.find(x=>x.id===s.projectId)||s.projects[0];
+    const goalObj = s.goals.find(x=>x.id===s.goalId)||null;
+    const taskObj = s.tasks.find(x=>x.id===s.taskId)||null;
+    const draftProjects = s.projects.filter(p=>!p.signedOff);
+
+    // header / chips / rail
+    const recentChips = s.projects.slice(0,6).map(p=>({name:p.name,onClick:()=>this.nav('projectDetail',{projectId:p.id})}));
+    const railProjects = s.projects.slice(0,6).map(p=>({name:p.name,statusDot:(PS[p.status]||PS.DRAFT)[1],onClick:()=>this.nav('projectDetail',{projectId:p.id})}));
+    const navDef=[['dashboard','儀表板','layout-dashboard'],['projects','專案管理','folder'],['import','BRD/PRD 匯入','upload'],['execute','執行中心','play'],['monitor','監控中心','activity'],['settings','系統設定','settings']];
+    const navItems=navDef.map(([id,label,icon])=>{ const active=view===id||(id==='projects'&&['projectDetail','goalDetail','taskDetail'].includes(view)); return {label,icon,active,bg:active?'var(--color-tertiary)':'transparent',accent:active?'var(--color-primary)':'transparent',onClick:()=>{
+      if(id==='execute'||id==='monitor') this.nav(id,{projectId:s.projectId});
+      else this.nav(id);
+    }};});
+
+    // projects list
+    let list=s.projects.filter(p=>p.status!=='ARCHIVED');
+    if(s.statusFilter!=='ALL') list=list.filter(p=>p.status===s.statusFilter);
+    if(s.search.trim()){ const q=s.search.trim().toLowerCase(); list=list.filter(p=>p.name.toLowerCase().includes(q)); }
+    list=[...list].sort((a,b)=> s.sort==='name'? a.name.localeCompare(b.name): s.sort==='tasks'? b.tasksCount-a.tasksCount : b.updatedAt.localeCompare(a.updatedAt));
+    const totalPages=Math.max(1,Math.ceil(list.length/s.pageSize));
+    const page=Math.min(s.page,totalPages);
+    const pagedProjects=list.slice((page-1)*s.pageSize,page*s.pageSize).map(p=>this.enrichProject(p));
+
+    const statusTabsDef=[['ALL','全部'],['DRAFT','草稿'],['READY','就緒'],['EXECUTING','執行中'],['COMPLETED','完成'],['FAILED','失敗']];
+    const statusTabs=statusTabsDef.map(([id,label])=>{ const a=s.statusFilter===id; return {label,bg:a?'var(--color-primary)':'transparent',color:a?'#FFFFFF':'var(--color-text-main)',onClick:()=>this.setState({statusFilter:id,page:1})};});
+    const pageList=Array.from({length:totalPages},(_,i)=>{ const n=i+1; const a=n===page; return {n,bg:a?'var(--color-primary)':'transparent',color:a?'#FFFFFF':'var(--color-text-muted)',onClick:()=>this.setState({page:n})};});
+    const sortOptions=[{id:'updated',label:'最近更新'},{id:'name',label:'名稱'},{id:'tasks',label:'任務數'}];
+
+    // dashboard kpis
+    const totalP=s.projects.length, doneP=s.projects.filter(p=>p.status==='COMPLETED').length;
+    const totalT=s.projects.reduce((a,p)=>a+p.tasksCount,0), doneT=s.projects.reduce((a,p)=>a+p.tasksDone,0);
+    const kpis=[
+      {label:'專案完成率',icon:'circle-check-big',value:Math.round(doneP/totalP*100)+'%',delta:'已完成 '+doneP+' / '+totalP+' 專案',deltaColor:'var(--color-text-muted)'},
+      {label:'任務成功率',icon:'list-checks',value:'92.3%',delta:'↑ 已執行任務中通過率',deltaColor:'var(--color-primary)'},
+      {label:'Token 總消耗',icon:'flame',value:'45.2k',delta:'↑ 8,430 (近 24h)',deltaColor:'var(--color-accent)'},
+      {label:'待人工審批',icon:'clipboard-check',value:String(draftProjects.length),delta:draftProjects.length?'需 signoff 才可執行':'全部已審批',deltaColor:draftProjects.length?'var(--color-accent)':'var(--color-text-muted)'},
+    ];
+    const activeRuns=s.projects.filter(p=>p.status==='EXECUTING').map(p=>this.enrichProject(p));
+    const pendingSignoff=draftProjects.map(p=>({name:p.name,meta:'AI 草案 · '+p.goalsCount+' 目標 / '+p.tasksCount+' 任務',onView:()=>this.nav('projectDetail',{projectId:p.id}),onApprove:()=>this.approve('project',p.id)}));
+
+    // detail enrich
+    const proj=this.enrichProject(projObj);
+    proj.descParas=projObj.descParas||[]; proj.passList=projObj.passList||[];
+    const projGoals=s.goals.filter(g=>g.projectId===projObj.id).sort((a,b)=>a.sortOrder-b.sortOrder).map(g=>{
+      const tks=s.tasks.filter(t=>t.goalId===g.id); const dn=tks.filter(t=>t.status==='COMPLETED').length;
+      const total=tks.length||0; const meta=GS[g.status]||GS.PENDING;
+      return {...g,statusLabel:meta[0],statusDot:meta[1],isDraft:!g.signedOff,taskTotal:total,taskDone:dn,
+        progressPct: total?Math.round(dn/total*100):0,
+        onOpen:()=>this.nav('goalDetail',{goalId:g.id,projectId:g.projectId}),
+        onApprove:()=>this.approve('goal',g.id)};
+    });
+    // synth goals for projects without explicit ones
+    let projGoalsFinal=projGoals;
+    if(projGoals.length===0 && projObj.goalsCount>0){
+      const names=['需求與架構','核心開發','整合與測試','部署與文件','監控與優化','安全強化'];
+      const per=Math.floor(projObj.tasksCount/projObj.goalsCount);
+      projGoalsFinal=Array.from({length:projObj.goalsCount}).map((_,i)=>{
+        const total= i===projObj.goalsCount-1? projObj.tasksCount-per*(projObj.goalsCount-1): per;
+        const dn= projObj.status==='COMPLETED'? total : i===0&&projObj.tasksDone>0? Math.min(total,projObj.tasksDone): 0;
+        const st= dn>=total&&total>0?'COMPLETED': dn>0?'IN_PROGRESS':'PENDING'; const meta=GS[st];
+        return {id:projObj.id+'_sg'+i,name:names[i%names.length],statusLabel:meta[0],statusDot:meta[1],isDraft:!projObj.signedOff,taskTotal:total,taskDone:dn,progressPct: total?Math.round(dn/total*100):0,
+          onOpen:()=>this.flash('此示範專案的目標為自動生成摘要'),onApprove:()=>this.approve('project',projObj.id)};
+      });
+    }
+
+    const goalTasks=goalObj? s.tasks.filter(t=>t.goalId===goalObj.id).sort((a,b)=>a.sortOrder-b.sortOrder).map(t=>{
+      const meta=TS[t.status]||TS.PENDING;
+      return {...t,statusLabel:meta[0],statusDot:meta[1],isDraft:!t.signedOff,retryLabel:t.retryCount+' / '+t.maxRetries,
+        onOpen:()=>this.nav('taskDetail',{taskId:t.id,goalId:t.goalId}),onApprove:()=>this.approve('task',t.id)};
+    }):[];
+    const mapCheck=arr=>(arr||[]).map(c=>({t:c.t,done:c.done,boxBg:c.done?'var(--color-primary)':'transparent',icon:c.done?'check':''}));
+    let goalEnriched=null;
+    if(goalObj){ const meta=GS[goalObj.status]||GS.PENDING; const dn=goalTasks.filter(t=>t.status==='COMPLETED').length;
+      goalEnriched={...goalObj,statusLabel:meta[0],statusDot:meta[1],isDraft:!goalObj.signedOff,taskTotal:goalTasks.length,taskDone:dn,progressPct: goalTasks.length?Math.round(dn/goalTasks.length*100):0,depLabel:(goalObj.dependsOn&&goalObj.dependsOn.length)?goalObj.dependsOn.join('、'):'無',
+        projectName:projObj.name,descParas:goalObj.descParas||[],passList:mapCheck(goalObj.passList)}; }
+    let taskEnriched=null;
+    if(taskObj){ const meta=TS[taskObj.status]||TS.PENDING; const pg=s.goals.find(g=>g.id===taskObj.goalId);
+      taskEnriched={...taskObj,statusLabel:meta[0],statusDot:meta[1],isDraft:!taskObj.signedOff,retryLabel:taskObj.retryCount+' / '+taskObj.maxRetries,
+        crumb:projObj.name+' › '+(pg?pg.name:''),agent:taskObj.assignedAgent||'—',tokensFmt:taskObj.actualTokens?taskObj.actualTokens.toLocaleString():'—',startedAt:taskObj.startedAt||'—',
+        descParas:taskObj.descParas||['（尚無說明）'],passList:mapCheck(taskObj.passList),log:taskObj.log||['[--:--:--] 尚未開始執行']}; }
+
+    // dialog
+    const d=s.dialog; const entLabel=d.entity==='project'?'專案':d.entity==='goal'?'目標':'任務';
+    const dialogVals = d.open ? {
+      dialogOpen:true,
+      dialogTitle:(d.mode==='create'?'新建':'編輯')+entLabel,
+      dlgEntityLabel:entLabel, dlgSaveLabel:d.mode==='create'?'建立':'儲存',
+      dlgShowPath:d.entity==='project', dlgShowNum:d.entity==='project'||d.entity==='task',
+      dlgNumLabel:d.entity==='project'?'自治等級 (1-10)':'最大重試次數',
+      form:d.form,
+      onDlgName:(e)=>this.setF('name',e.target.value), onDlgPath:(e)=>this.setF('path',e.target.value),
+      onDlgDesc:(e)=>this.setF('desc',e.target.value), onDlgPass:(e)=>this.setF('pass',e.target.value),
+      onDlgNum:(e)=>this.setF('num',e.target.value),
+      onDlgSave:()=>this.saveDialog(), onDlgClose:()=>this.closeDialog(),
+    } : {dialogOpen:false, form:{}};
+
+    // settings
+    const settingsTabsDef=[['model','AI 模型','bot'],['agent','Agent 行為','sliders-horizontal'],['execution','執行引擎','zap'],['monitor','監控告警','bell'],['autoclaude','AutoClaude','plug'],['sdd','AISDLC_SDD','ruler']];
+    const settingsTabs=settingsTabsDef.map(([id,label,icon])=>{ const a=s.settingsTab===id; return {label,icon,active:a,bg:a?'var(--color-primary)':'var(--color-bg-surface)',color:a?'#FFFFFF':'var(--color-text-main)',iconColor:a?'#FFFFFF':'#498428',onClick:()=>this.setState({settingsTab:id,connResult:null})};});
+    const cat=s.settingsTab;
+    const compactV=Number((s.configs.execution.find(c=>c.key==='execution.compactThresholdPct')||{}).value);
+    const haltV=Number((s.configs.execution.find(c=>c.key==='execution.haltThresholdPct')||{}).value);
+    const settingsParams=s.configs[cat].map(c=>{
+      const isPass=c.type==='password';
+      return {...c,
+        isEnum:c.type==='enum',isBool:c.type==='bool',isPassword:isPass,isText:c.type==='text'||c.type==='number',
+        enumOptions:(c.opts||[]).map(o=>({id:o,label:o})),
+        display: isPass&&!s.showApiKey? '••••••••••••••••' : c.value,
+        inputType: isPass? (s.showApiKey?'text':'password') : (c.type==='number'?'number':'text'),
+        boolOn: c.value===true,
+        toggleBg: c.value===true?'#498428':'#DCE3D6', knobLeft: c.value===true?'23px':'3px', boolLabel: c.value===true?'啟用':'停用',
+        error: (cat==='execution'&&c.key==='execution.haltThresholdPct'&&!(haltV>compactV))?'halt 必須 > compact':'',
+        onChange:(e)=>this.setConfig(cat,c.key, e.target.value),
+        onToggle:()=>this.setConfig(cat,c.key,!c.value),
+        onReset:()=>this.flash('已重置 '+c.key+' 為預設值'),
+      };
+    });
+
+    // execute
+    const e=s.exec;
+    const execScopeDef=[['g1','目標 1: 建立基礎架構','5'],['g2','目標 2: 實作核心模組','8'],['g3','目標 3: API 整合','6'],['g4','目標 4: 測試與品質','3'],['g5','目標 5: 部署與文件','1']];
+    const scopeItems=execScopeDef.map(([id,label,n])=>({id,label,count:n,on:!!e.scope[id],onToggle:()=>this.toggleScope(id),boxBg:e.scope[id]?'var(--color-primary)':'transparent',boxBorder:e.scope[id]?'var(--color-primary)':'var(--color-border)',icon:e.scope[id]?'check':''}));
+    const execProgressPct=Math.round(e.tasksDone/e.tasksTotal*100);
+    const tokenPct=Math.round(e.tokensUsed/e.tokenBudget*100);
+    const execIdle=!e.running&&!e.paused, execActive=e.running&&!e.paused;
+    const execDot=execActive?'#498428':e.paused?'#F5A623':'#A6B0A1';
+    const execStatusLabel=execActive?'執行中':e.paused?'已暫停':'閒置';
+    const tokenBarColor=tokenPct>=90?'#D35B58':tokenPct>=80?'#F5A623':'#498428';
+    const pendingReviews=e.reviews.map(r=>({...r,
+      onApprove:()=>this.resolveReview(r.id,'通過'),onReject:()=>this.resolveReview(r.id,'拒絕'),
+      onRetry:()=>this.resolveReview(r.id,'重試'),onSkip:()=>this.resolveReview(r.id,'跳過')}));
+    const execSignoffBlocked = projObj && !projObj.signedOff;
+    const autonomyOptions=[1,2,3,4,5,6,7,8,9,10].map(n=>({id:String(n),label:'Level '+n}));
+    const importAutoOptions=autonomyOptions;
+
+    // monitor logs / alerts
+    const monLogs=[
+      {t:'15:01:23',lvl:'INFO',msg:'[Run#3] 專案執行開始'},
+      {t:'15:01:24',lvl:'INFO',msg:'[DAG] 載入 2 目標, 13 任務'},
+      {t:'15:32:09',lvl:'INFO',msg:'[T2.3] 建立 REST Controller 步驟 3/5'},
+      {t:'15:45:12',lvl:'ERROR',msg:'[T2.7] NullPointerException at GlobalExceptionHandler:42'},
+      {t:'15:45:13',lvl:'WARN',msg:'[Retry] 任務 T2.7 開始重試 (1/3)'},
+      {t:'15:49:20',lvl:'WARN',msg:'[Escalate] T2.7 重試耗盡，升級人類審核'},
+    ].filter(l=> s.monLevel==='ALL'||l.lvl===s.monLevel).map(l=>({...l,color: l.lvl==='ERROR'?'#D35B58':l.lvl==='WARN'?'#F5A623':'#7A8775'}));
+    const monLevelOptions=[{id:'ALL',label:'全部'},{id:'INFO',label:'INFO'},{id:'WARN',label:'WARN'},{id:'ERROR',label:'ERROR'}];
+    const alerts=s.alerts.map(a=>({...a,notAck:!a.ack,onAck:()=>{ this.setState(st=>({alerts:st.alerts.map(x=>x.id===a.id?{...x,ack:true}:x)})); this.flash('已確認告警'); }}));
+    const timeRangeOptions=[{id:'24h',label:'最近 24 小時'},{id:'7d',label:'最近 7 天'},{id:'30d',label:'最近 30 天'}];
+
+    return {
+      // chrome
+      goDashboard:()=>this.nav('dashboard'), goProjects:()=>this.nav('projects'), goImport:()=>this.nav('import'),
+      goNotifications:()=>this.flash('通知總覽（示範）'), goSignoffQueue:()=>this.nav('projects',{statusFilter:'DRAFT',page:1}),
+      search:s.search, onSearchChange:(e)=>this.setState({search:e.target.value}),
+      onSearchKey:(e)=>{ if(e.key==='Enter'){ this.nav('projects',{page:1}); } },
+      onSearchSubmit:()=>this.nav('projects',{page:1}),
+      draftCount:String(draftProjects.length),
+      recentChips, railProjects, navItems,
+      showRail: this.props.showProjectRail!==false,
+      showChips: this.props.showChipRow!==false,
+      toast:s.toast, stop:this._stop, appReady:s.appReady, notReady:!s.appReady,
+      // view flags
+      isDashboard:view==='dashboard', isProjects:view==='projects', isProjectDetail:view==='projectDetail',
+      isGoalDetail:view==='goalDetail', isTaskDetail:view==='taskDetail', isImport:view==='import',
+      isExecute:view==='execute', isMonitor:view==='monitor', isSettings:view==='settings',
+      // dashboard
+      kpis, kpi1:kpis[0], kpi2:kpis[1], kpi3:kpis[2], kpi4:kpis[3], activeRuns, pendingSignoff,
+      // projects
+      resultCount:list.length, statusTabs, sortOptions, sort:s.sort, onSort:(e)=>this.setState({sort:e.target.value}),
+      pagedProjects, page, totalPages, pageList, onPage:(p)=>this.setState({page:p}),
+      onPrevMini:()=>this.setState(st=>({page:Math.max(1,st.page-1)})), onNextMini:()=>this.setState(st=>({page:Math.min(totalPages,st.page+1)})),
+      onNewProject:()=>this.openDialog('project','create'),
+      // detail
+      proj, projGoals:projGoalsFinal, goal:goalEnriched, goalTasks, task:taskEnriched,
+      onBackProjects:()=>this.nav('projects'), onBackProject:()=>this.nav('projectDetail',{projectId:projObj.id}),
+      onBackGoal:()=>this.nav('goalDetail',{goalId:s.goalId}),
+      onEditProject:()=>this.openDialog('project','edit',projObj.id),
+      onExecuteProj:()=>this.nav('execute',{projectId:projObj.id}), onMonitorProj:()=>this.nav('monitor',{projectId:projObj.id}),
+      onApproveProj:()=>this.approve('project',projObj.id), projSignoffNeeded: proj.isDraft,
+      onAddGoal:()=>this.openDialog('goal','create'), onAddTask:()=>this.openDialog('task','create'),
+      onEditGoal:()=> goalObj&&this.openDialog('goal','edit',goalObj.id), onApproveGoal:()=> goalObj&&this.approve('goal',goalObj.id),
+      onEditTask:()=> taskObj&&this.openDialog('task','edit',taskObj.id), onRetryTask:()=>{ if(taskObj){ this.setState(st=>({tasks:st.tasks.map(t=>t.id===taskObj.id?{...t,status:'QUEUED',retryCount:t.retryCount+1}:t)})); this.flash('已重新排入佇列，retryCount +1'); } },
+      // dialog
+      ...dialogVals,
+      // import
+      importTab:s.importTab, importTabs:[{id:'upload',label:'上傳檔案',icon:'file-up'},{id:'paste',label:'貼上文字',icon:'clipboard'},{id:'history',label:'歷史記錄',icon:'history'}].map(t=>{ const a=s.importTab===t.id; return {...t,active:a,bg:a?'var(--color-primary)':'var(--color-bg-surface)',color:a?'#FFFFFF':'var(--color-text-main)',iconColor:a?'#FFFFFF':'#498428',onClick:()=>this.setState({importTab:t.id})};}),
+      importNotSigned: s.importParsed && !s.importSignedOff,
+      importParsing:s.importParsing, importParsed:s.importParsed,
+      importAutoOptions, importAutonomy:String(s.importAutonomy), onImportAutonomy:(e)=>this.setState({importAutonomy:Number(e.target.value)}),
+      importPath:s.importPath, onImportPath:(e)=>this.setState({importPath:e.target.value}),
+      importPrompt:s.importPrompt, onImportPrompt:(e)=>this.setState({importPrompt:e.target.value}),
+      onParse:()=>this.doParse(), onConfirmImport:()=>this.confirmImport(), onDiscardImport:()=>this.setState({importParsed:false}),
+      importSignedOff:s.importSignedOff, onApproveImport:()=>this.setState({importSignedOff:true}),
+      // execute
+      exec:e, execLogs:e.logs.map((l,i)=>({line:l,k:i})), scopeItems, execProgressPct, tokenPct,
+      tokensFmt:e.tokensUsed.toLocaleString(), budgetFmt:e.tokenBudget.toLocaleString(),
+      execRunning:e.running, execPaused:e.paused, execIdle, execActive, execDot, execStatusLabel, tokenBarColor,
+      reviewCount:String(e.reviews.length), noReviews:e.reviews.length===0, onRestore:()=>this.flash('列出可用 Checkpoint，選擇還原點續跑（示範）'),
+      onStart:()=>this.startExec(), onPause:()=>this.pauseExec(), onResume:()=>this.resumeExec(), onCancel:()=>this.cancelExec(),
+      pendingReviews, execSignoffBlocked, autonomyOptions, execAutonomy:String(e.autonomy), onExecAutonomy:(ev)=>this.setState(st=>({exec:{...st.exec,autonomy:Number(ev.target.value)}})),
+      execProjName:projObj.name, execTasksLabel:e.tasksDone+' / '+e.tasksTotal+' 任務完成',
+      // monitor
+      monLogs, monLevel:s.monLevel, monLevelOptions, onMonLevel:(e)=>this.setState({monLevel:e.target.value}),
+      alerts, timeRangeOptions, monProjName:projObj.name,
+      // settings
+      settingsTabs, settingsParams, settingsTab:s.settingsTab, isModelTab:s.settingsTab==='model',
+      showApiKey:s.showApiKey, onToggleApiKey:()=>this.setState(st=>({showApiKey:!st.showApiKey})), eyeIcon:s.showApiKey?'eye-off':'eye', eyeLabel:s.showApiKey?'隱藏':'顯示',
+      onTestConn:()=>this.testConn(), connResult:s.connResult, connTesting:s.connResult==='testing', connOk:s.connResult==='ok',
+      onResetAll:()=>this.flash('已全部重置為預設值'),
+    };
+  }
+}
+</script>
+</body>
+</html>

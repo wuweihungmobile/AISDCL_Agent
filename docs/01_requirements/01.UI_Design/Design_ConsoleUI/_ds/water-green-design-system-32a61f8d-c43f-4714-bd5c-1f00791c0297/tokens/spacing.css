@@ -1,0 +1,37 @@
+/* ══════════════════════════════════════════════════════════════════════════
+   意象若水 water_green — SPACING & LAYOUT TOKENS
+   Strict 8pt grid. No odd values that aren't multiples of 4/8.
+   Anti-compounding rule: the listed values ARE final visual gaps — never
+   stack parent gap + child margin to double them.
+   ════════════════════════════════════════════════════════════════════════ */
+:root {
+  /* ── Micro (inside buttons, adjacent text) ───────────────────────────── */
+  --space-1:  4px;
+  --space-2:  8px;
+  --space-4:  16px;
+  --space-6:  24px;
+
+  /* ── Component (between cards, inside modules) ───────────────────────── */
+  --space-8:  32px;
+  --space-12: 48px;
+  --space-16: 64px;
+
+  /* ── Macro whitespace (between sections — balances heavy CJK blocks) ──── */
+  --space-20: 80px;
+  --space-30: 120px;
+  --space-40: 160px;
+
+  /* ── Grid system ─────────────────────────────────────────────────────── */
+  --container-max: 1440px;
+  --footer-max:    1200px;
+  --grid-gap-desktop: 24px; /* 12 col */
+  --grid-gap-tablet:  20px; /* 8 col  */
+  --grid-gap-mobile:  16px; /* 4 col  */
+  --sidebar-width:    240px; /* fixed left category rail */
+  --sidebar-gap:      32px;  /* rail ↔ content (NOT 24px) */
+
+  /* ── Fixed module sizes ──────────────────────────────────────────────── */
+  --topbar-height:   32px;
+  --search-min-h:    48px;
+  --pagination-hit:  48px; /* w-12 h-12 click target */
+}

@@ -127,6 +127,10 @@ PS: 以上PRD, 請輸出docs\01_requirements\Agent_ConsoleUI_PRD.md輸出
 2.功能若有重疊, 以Agent_ConsoleUI_PRD.md為主
 3.若需要修改AutoSDD_Iteration_Prompt_Template.md, 請一併處理!
 
+ConsoleIU_頁面設計已經放入以下路徑中, D:\CursorProject\AISDCL_Agent\docs\01_requirements\01.UI_Design\Design_ConsoleUI
+1.請注意在程式套用的過程中, 把頁面分做四個部分1.Top,2.Tools(左區功能Bar), 3.Content(內容區), 4.Bottom(底部)
+2.1.Top, 2.Tools(左區功能Bar), 4.Bottom(底部), 可以設計成共用結構, 當有需要更動時, 這三個區塊因為共用, 只需要改一個地方, 方面維護
+
 目前需確認或解決問題
 ===================
 1.AutoClaude的驗證測試Nightly是否有繼續?
