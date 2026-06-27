@@ -73,8 +73,44 @@ token_guard:
     - "(\\d+)\\s*/\\s*(\\d+)\\s*tokens?"
     - "\\[CONTEXT_USAGE:\\s*(\\d+(?:\\.\\d+)?)%\\]"
 
+alert_ladder:
+  # F-B1 / ADR-AGT-004：漸進式告警階梯（WARNING→HINT→ESCALATE）。
+  enabled: true
+  no_improve_escalate_threshold: 2  # 同 error signature 連續 N 次無改善即提前升級（1~5）
+
 notification:
   enabled: true                     # 完成或需要人工介入時彈出桌面通知
+  # webhook_url（選配）：通知 webhook 端點。🔑 若為含 token 的私密 URL（如 Slack incoming
+  #   webhook），視為機密、請改用環境變數注入、勿填入本入庫檔；留空＝僅桌面通知。
+  # webhook_url: ""
+
+executor:
+  # improving_68：執行器後端切換。pty（預設）＝PtyExecutor，零行為變更；sdk＝Claude Agent
+  #   SDK（需 pip install autoclaude[sdk]）。
+  backend: pty
+  permission_mode: default          # SDK 權限模式（spike 證實安全值；pty 後端時忽略）
+  # model: ""                       # SDK 模型覆寫（留空＝SDK 預設）
+  # sdk_tool_allowlist: []          # SDK 工具 allowlist（null＝交由 permission_mode 守門；[]＝全 deny）
+
+storage:
+  # Phase 6 / SD_Improving_02 §2.8：State / Playbook 後端三段開關。
+  #   yaml_only（預設，零 PG 依賴）/ both（File 主寫 + PG 影子，灰度）/ db_only（純 PG）。
+  mode: yaml_only
+  # 🔑【機密】db_dsn 含資料庫帳密，絕不可填入本入庫檔！both/db_only 模式請改用 .env 的
+  #   AUTOCLAUDE_DB_DSN 注入（config_resolver._PROTECTED_FIELDS 對 storage.db_dsn 做 RBAC 保護）。
+  # db_dsn: ""
+  dual_write_strict: false          # both 模式 dual-write 失敗是否阻斷主寫（false＝僅 warning）
+  dual_read_resolution: yaml_wins   # both 模式 dual-read 不一致時：yaml_wins / db_wins / fail_loud
+
+tool_invocation:
+  # F-A2 / ADR-AGT-001：工具自主使用安全閘。預設 deny（enabled=false 全拒；即使 true，
+  #   allowlist 為空仍全拒）。allowlist 為 domain（web_search/http_request 比對 host）或通道名。
+  enabled: false
+  allowlist: []
+
+# preferences（選配）：啟動時 seed 至 IPreferenceStore（global scope）的偏好鍵值；冪等 last-wins。
+# 範例：preferences: { "preferred_test_runner": "pytest" }
+preferences: {}
 
 log_dir: logs
 backup_dir: backups
