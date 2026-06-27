@@ -65,6 +65,25 @@ def test_parse_correction_evidence_no_result_line_returns_none() -> None:
     assert ev["correction_count"] == 0
     assert ev["final_success"] is None
     assert ev["escalated"] is False
+    assert ev["regex_contract_preserved"] == 0
+
+
+_REGEX_PRESERVED_MARKER = (
+    "2026-06-27 10:00:03 [INFO] autoclaude: === REGEX CONTRACT PRESERVED | step=S02 ==="
+)
+
+
+def test_parse_counts_regex_contract_preserved() -> None:
+    """RTM-90-3：parse 正確計數 `REGEX CONTRACT PRESERVED` marker（improving_90 W-90-2：Kernel
+    在 regex+evaluator 雙閘 step 套用 CORRECTION 後仍保留 regex 約束的唯一路徑 → >=1 即證
+    DEF-87-001 修復在真模型迴圈被觸發）。"""
+    log = "\n".join([_CORRECTION_MARKER, _REGEX_PRESERVED_MARKER, _RESULT_SUCCESS])
+    ev = parse_correction_evidence(log)
+    assert ev["regex_contract_preserved"] == 1
+    assert ev["correction_count"] == 1
+    assert ev["final_success"] is True
+    # 既有三欄位語意不退化（RTM-90-4 additive）：無此 marker 時計數為 0
+    assert parse_correction_evidence(_RESULT_SUCCESS)["regex_contract_preserved"] == 0
 
 
 def test_parse_uses_last_result_line() -> None:

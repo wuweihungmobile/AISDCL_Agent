@@ -14,6 +14,7 @@
 """
 from __future__ import annotations
 
+import logging
 from typing import Any, Optional
 
 import pytest
@@ -364,3 +365,22 @@ class TestKernelCorrectionPreservesRegex:
         assert first.count("expected_output_regex") == 1
         assert second.count("expected_output_regex") == 1
         assert "fix-1" not in second
+
+    def test_preserve_output_contract_emits_marker_when_appended(self, caplog):
+        """RTM-90-1：實際附加 regex 約束時 emit `REGEX CONTRACT PRESERVED` marker（含 step_id），
+        供真跑載具確認 DEF-87-001 修復路徑在真模型迴圈中確被觸發（observability-only）。"""
+        task = _t("S02", regex=r"KEYWORD_X")
+        with caplog.at_level(logging.INFO, logger="autoclaude.core.kernel"):
+            out = PlaybookKernel._preserve_output_contract(task, "只修程式")
+        assert "KEYWORD_X" in out  # 確走附加分支
+        assert any("=== REGEX CONTRACT PRESERVED | step=S02 ===" in r.getMessage()
+                   for r in caplog.records)
+
+    def test_preserve_output_contract_no_marker_when_passthrough(self, caplog):
+        """RTM-90-2：零退化 passthrough 分支（無 regex / correction_prompt 已含 pattern）不 emit
+        marker——marker 必須僅標示「真的有保留約束」，否則載具計數失準。"""
+        with caplog.at_level(logging.INFO, logger="autoclaude.core.kernel"):
+            PlaybookKernel._preserve_output_contract(_t("T01", regex=None), "BRAIN-FIX")  # 無 regex
+            PlaybookKernel._preserve_output_contract(  # 已含 pattern（冪等 passthrough）
+                _t("T02", regex=r"\[K\]"), r"含 \[K\] 的修正")
+        assert not any("REGEX CONTRACT PRESERVED" in r.getMessage() for r in caplog.records)

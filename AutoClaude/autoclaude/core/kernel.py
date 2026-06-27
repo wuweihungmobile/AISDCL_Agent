@@ -306,6 +306,11 @@ class PlaybookKernel:
         regex = getattr(task, "expected_output_regex", None)
         if not regex or regex in correction_prompt:
             return correction_prompt
+        # improving_90 W-90-2：regex 約束保留可觀測標記（observability-only，零行為變更）。
+        # 鏡像 CORRECTION marker 慣例（本檔上方 _run_step）：僅於「實際附加 regex 約束」時 emit
+        #（零退化 passthrough 分支不發），供 correction_loop_verify 真跑載具確認 DEF-87-001 修復
+        # 路徑在真模型 CORRECTION 迴圈中確被觸發（非僅靠 final_success 隱含推斷）。
+        logger.info("=== REGEX CONTRACT PRESERVED | step=%s ===", task.step_id)
         return (
             f"{correction_prompt}\n\n"
             f"[硬約束·勿遺漏] 你的輸出仍必須匹配以下 expected_output_regex"

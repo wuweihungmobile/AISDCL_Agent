@@ -1,0 +1,65 @@
+# correction_regex_smoke.yaml — self-correction「regex 閘 + evaluator 閘雙閘並存」真跑載具（improving_90 W-90-1）
+#
+# 與 correction_loop_smoke.yaml（improving_87）的關鍵差異：S02 **同時掛** expected_output_regex
+# + evaluator_command。這正是 87 輪當時刻意避開、88 輪 W-88-1（_preserve_output_contract）修復、
+# 但**僅以 in-process FakeBrain 單元測驗證**的場景。本載具補上「真 Minimax × 真 Claude」端到端
+# 真跑的品質證據：驗 production Kernel 在真模型 CORRECTION 迴圈下，雙閘並存仍能收斂（不 escalate）。
+#
+# DEF-87-001 失效鏈（88 已修，本輪真跑驗）：
+#   S02 首次：calc.py = stub `return 0`，輸出含 [MULTIPLY_FIXED] → **regex 閘過**、但 pytest 失敗
+#     （0 != 12）→ evaluator 閘失敗 → 觸發 CORRECTION。
+#   Brain 修正 prompt 聚焦「修 multiply 程式」，自然不複述 keyword → 若 Kernel 整個取代 task.prompt，
+#     regex 約束就遺失 → 修正後即使 pytest 過、regex 永不過 → escalate（DEF-87-001 病灶）。
+#   88 修復：Kernel `_preserve_output_contract` 確定性把 regex 約束補回修正 prompt（並 emit
+#     `=== REGEX CONTRACT PRESERVED | step=S02 ===` marker，improving_90 W-90-2）→ attempt 1 改
+#     `return a*b` 且輸出 [MULTIPLY_FIXED] → 雙閘並存皆過 → 收斂成功。
+#
+# 執行（於 AutoClaude/ 目錄；須搭配 enable_kernel_brain:true 的 config）：
+#   W-90-1（真 Minimax × 真 Claude）：先把 .env 匯入環境，再
+#     set -a && . ./.env && set +a
+#     python tools/correction_loop_verify.py \
+#         --config scripts/ab_configs/correction_real_config.yaml \
+#         --playbook scripts/correction_regex_smoke.yaml
+#   退碼 0 = 閉環成立（CORRECTION>=1 且最終 success）；報告另印 REGEX CONTRACT PRESERVED 計數（需 >=1）。
+version: "1.0"
+project: "Correction_Regex_Smoke"
+workflow_type: "auto"
+
+global_goal: |
+  以 TDD 方式完成純函式 multiply(a, b)：先寫測試、再實作至 pytest 全綠，且每步輸出規定 keyword。
+  本載具刻意讓第一次實作為佔位 stub（會被 evaluator pytest 擋下），用以真跑驗證 production Kernel
+  在「step 同掛 regex 閘 + evaluator 閘」時，套用 Brain self-correction 後仍能保留 regex 輸出契約而收斂。
+
+global_invariants:
+  max_retries_per_step: 3
+  auto_compact_interval: 5
+
+tasks:
+  - step_id: "S01"
+    name: "TDD First — 撰寫規格測試（先測後實作）"
+    prompt: |
+      請在當前工作目錄建立 `calc_test.py`，內含 pytest 測試（from calc import multiply）：
+        - test_multiply_basic：assert multiply(3, 4) == 12
+        - test_multiply_zero：assert multiply(0, 7) == 0
+        - test_multiply_negative：assert multiply(-2, 5) == -10
+      此步驟**先不要**建立 calc.py（規格先行：測試先於實作）。
+      完成後請嚴格輸出 Keyword：[TEST_READY]
+    expected_output_regex: "\\[TEST_READY\\]"
+    maintain_context: false
+
+  - step_id: "S02"
+    name: "TDD red→green — regex 閘 + evaluator 閘雙閘並存（第一次刻意 stub 失敗，修正後雙閘皆綠）"
+    prompt: |
+      請建立 `calc.py`。**這一步請先只寫一個 TDD red 階段的佔位 stub**：
+        def multiply(a, b):
+            return 0
+      此 stub 刻意未完成（會讓 calc_test.py 失敗），用以驗證修正閉環。
+      完成後請嚴格輸出 Keyword：[MULTIPLY_FIXED]
+    # 🔴 本載具與 correction_loop_smoke.yaml 的本質差異：S02 **同時**掛 regex + evaluator 雙閘。
+    #    首次 stub return 0：輸出含 [MULTIPLY_FIXED]（regex 閘過）但 pytest 失敗（evaluator 閘擋）
+    #    → 觸發 CORRECTION。Brain 修正聚焦修程式、自然丟 keyword 要求，靠 88 輪 Kernel
+    #    _preserve_output_contract 把 regex 約束補回，雙閘並存才得以收斂（DEF-87-001 修復真跑驗證）。
+    expected_output_regex: "\\[MULTIPLY_FIXED\\]"
+    evaluator_command: "pytest calc_test.py -q"
+    evaluator_timeout_seconds: 60
+    maintain_context: true

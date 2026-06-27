@@ -34,6 +34,9 @@ from http.server import ThreadingHTTPServer
 from pathlib import Path
 
 _RE_CORRECTION = re.compile(r"=== STATE: CORRECTION \| step=(\S+) attempt=(\d+) ===")
+# improving_90 W-90-2：production Kernel `_preserve_output_contract` 實際附加 regex 約束時發此
+# marker（kernel.py），用以驗 DEF-87-001 修復路徑在真模型 CORRECTION 迴圈中確被觸發。
+_RE_REGEX_PRESERVED = re.compile(r"=== REGEX CONTRACT PRESERVED \| step=(\S+) ===")
 
 
 def parse_correction_evidence(log_text: str) -> dict:
@@ -45,8 +48,13 @@ def parse_correction_evidence(log_text: str) -> dict:
       final_success:    末段（最後一筆 "Playbook 結束" 之後）的 result repr 是否 success=True；
                         success=False → False；無法判定 → None（誠實留 None，不臆測）。
       escalated:        最終 result 是否 escalated=True 或 reason 含 max_retries_exhausted。
+      regex_contract_preserved: `=== REGEX CONTRACT PRESERVED | ... ===` marker 出現次數
+                        （improving_90 W-90-2：Kernel 在 step 同掛 regex+evaluator 時，套用 Brain
+                        CORRECTION 後仍把 expected_output_regex 約束保留回修正 prompt 的唯一路徑；
+                        >=1 即證 DEF-87-001 修復在真模型迴圈中被觸發）。
     """
     correction_count = len(_RE_CORRECTION.findall(log_text))
+    regex_contract_preserved = len(_RE_REGEX_PRESERVED.findall(log_text))
 
     idx = log_text.rfind("Playbook 結束")
     tail = log_text[idx:] if idx >= 0 else log_text
@@ -62,6 +70,7 @@ def parse_correction_evidence(log_text: str) -> dict:
         "correction_count": correction_count,
         "final_success": final_success,
         "escalated": escalated,
+        "regex_contract_preserved": regex_contract_preserved,
     }
 
 
@@ -122,6 +131,8 @@ def run_verification(
         print("\n========== self-correction 閉環真跑證據 ==========")
         print(f"  autoclaude 退碼            : {proc.returncode}")
         print(f"  CORRECTION marker 次數     : {evidence['correction_count']}  (RTM-87-1, 需 >=1)")
+        print(f"  REGEX CONTRACT PRESERVED   : {evidence['regex_contract_preserved']}  "
+              f"(RTM-90-5, regex+evaluator 雙閘 playbook 需 >=1)")
         print(f"  最終 success               : {evidence['final_success']}  (RTM-87-3)")
         print(f"  escalated                  : {evidence['escalated']}")
         if mock:
