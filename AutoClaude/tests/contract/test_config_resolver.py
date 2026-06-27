@@ -128,6 +128,19 @@ def test_runtime_cannot_override_storage_db_dsn():
         )
 
 
+def test_runtime_cannot_override_protected_embedder_api_key():
+    """RTM-91-2：runtime 層注入 embedder.api_key 機密必須被 RBAC 擋下（與 minimax.api_key 同級防洩漏）。
+
+    WHY：set_runtime_overrides 純靠 _PROTECTED_FIELDS（含 'embedder.api_key'）字串比對攔截，
+    本鎖確保該保護鍵存在且生效、不被誤刪。
+    （註：DEF-91-003 的「embedder 區塊不被 Pydantic 丟棄」由 test_embedder_block_loaded_not_dropped
+    鎖定；本測試與其互補——RBAC 攔截不依賴 AppConfig 是否有 embedder 欄位。）
+    """
+    resolver = ConfigResolver(global_cfg=AppConfig())
+    with pytest.raises(ProtectedFieldError, match="api_key"):
+        resolver.set_runtime_overrides({"embedder": {"api_key": "leaked"}})
+
+
 def test_workflow_layer_can_set_protected_field():
     """workflow / step / global 層仍可設定保護欄位（僅 runtime 受限）。"""
     resolver = ConfigResolver(global_cfg=AppConfig())

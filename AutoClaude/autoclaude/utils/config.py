@@ -11,8 +11,10 @@ from pydantic import BaseModel, Field, field_validator, model_validator
 
 class MinimaxConfig(BaseModel):
     api_key: str = ""
-    base_url: str = "https://api.minimax.chat/v1/text/chatcompletion_v2"
-    model: str = "MiniMax-Text-01"
+    # DEF-91-001（improving_91 W-91-3）：dataclass 預設須與 config.yaml 一致，否則 config.yaml
+    # 缺 minimax 欄位時 fallback 到舊端點/舊 model（improving_90 commit 6daa540 只改 config.yaml）。
+    base_url: str = "https://api.minimax.io/v1/text/chatcompletion_v2"
+    model: str = "MiniMax-M2.7"
     timeout_seconds: int = 30
     enable_kernel_brain: bool = False
     # DEF-01-008：是否把 MinimaxBrainAdapter 注入 PlaybookKernel + SddGovernancePlugin。
@@ -20,6 +22,27 @@ class MinimaxConfig(BaseModel):
     # 零退化）。設 True 啟用後：kernel.decide_correction 生效（改寫 prompt + step mutation）
     # 且 Minimax API 故障將觸發 ESCALATION（見 docs/04_planning/AutoSDD_improving_03.md §2.1）
     # —— operator 須知悉行為差異。
+
+
+class EmbedderConfig(BaseModel):
+    """improving_91 W-91-1：embedder 非機密設定的 config.yaml 權威源（對齊 minimax chat 治理）。
+
+    設定來源治理（延續 improving_90 commit 6daa540）：
+      - base_url / model / dimension / timeout_seconds 為【非機密預設】，入庫共享、config.yaml 為權威源。
+      - api_key 為【機密】，此處定義但預設留空（呼應 MinimaxConfig.api_key 慣例），實際值
+        由環境變數 MINIMAX_API_KEY 提供、**絕不入庫 config.yaml**；本欄位之存在使
+        config_resolver._PROTECTED_FIELDS 的 'embedder.api_key' RBAC 保護真正生效
+        （DEF-91-003：補齊前 AppConfig 無此欄位，RBAC 在保護幽靈欄位、且 config.yaml 的
+        embedder 區塊被 Pydantic extra=ignore 靜默丟棄）。
+      - group_id（帳號識別）刻意不納入本 config，維持只走 env MINIMAX_GROUP_ID（與 chat
+        config 無 group_id 一致，避免帳號綁定識別碼入庫）。
+    優先序（adapter 端實作，見 minimax_embedder.py）：建構參數 > env > 本 config 兜底 > 硬編預設。
+    """
+    base_url: str = "https://api.minimax.io/v1/embeddings"
+    model: str = "embo-01"
+    dimension: int = 1024
+    timeout_seconds: float = 30.0
+    api_key: str = ""   # 機密：留空，由 env MINIMAX_API_KEY 提供，絕不入庫
 
 
 class ClaudeConfig(BaseModel):
@@ -247,6 +270,7 @@ class ExecutorConfig(BaseModel):
 class AppConfig(BaseModel):
     claude: ClaudeConfig = Field(default_factory=ClaudeConfig)
     minimax: MinimaxConfig = Field(default_factory=MinimaxConfig)
+    embedder: EmbedderConfig = Field(default_factory=EmbedderConfig)
     loop: LoopConfig = Field(default_factory=LoopConfig)
     playbook: PlaybookConfig = Field(default_factory=PlaybookConfig)
     token_guard: TokenGuardConfig = Field(default_factory=TokenGuardConfig)

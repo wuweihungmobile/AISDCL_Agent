@@ -17,6 +17,19 @@ minimax:
   model: "MiniMax-M2.7"
   timeout_seconds: 30
 
+embedder:
+  # 🔴 設定治理（improving_91 方案 B）：embedder 非機密設定（base_url / model / dimension /
+  #    timeout_seconds）為【非機密預設】，本檔（入庫共享）為唯一權威來源——對齊上方 minimax chat 治理。
+  #    🔑【機密】api_key 絕不可填入本入庫檔！embedder 與 chat 共用 .env 的 MINIMAX_API_KEY（或環境變數）。
+  #    🔑 group_id（帳號識別）不在本檔——維持只走 .env 的 MINIMAX_GROUP_ID（避免帳號識別碼入庫）。
+  #    讀取優先序：建構參數 > env（MINIMAX_EMBED_BASE_URL / MINIMAX_EMBED_MODEL /
+  #    MINIMAX_EMBED_DIMENSIONS）> 本檔兜底 > 硬編預設（minimax_embedder.py）。
+  base_url: "https://api.minimax.io/v1/embeddings"
+  model: "embo-01"
+  dimension: 1024
+  timeout_seconds: 30
+  api_key: ""   # 留空；機密由 .env 的 MINIMAX_API_KEY 或環境變數提供
+
 loop:
   max_iterations: 20
   completion_pattern: "執行完畢[,，]\\s*報告如下"

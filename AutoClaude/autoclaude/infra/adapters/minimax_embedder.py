@@ -21,6 +21,7 @@ from ...core.ports.embedder import (
     EmbedderHealth,
     EmbedderUnavailableError,
 )
+from ...utils.config import EmbedderConfig
 from .circuit_breaker import CircuitBreaker
 
 
@@ -35,29 +36,53 @@ class MinimaxEmbedderAdapter:
         api_key: Optional[str] = None,
         group_id: Optional[str] = None,
         base_url: Optional[str] = None,
-        model_id: str = "embo-01",
+        model_id: Optional[str] = None,
         dimension: Optional[int] = None,
-        timeout_seconds: float = 30.0,
+        timeout_seconds: Optional[float] = None,
+        config: Optional[EmbedderConfig] = None,
         http_client: Any = None,
         breaker: Optional[CircuitBreaker] = None,
     ) -> None:
-        self._api_key = api_key or os.environ.get("MINIMAX_API_KEY", "")
+        # 設定來源優先序（improving_91 W-91-2，對齊 chat env>config 治理）：
+        #   建構參數 > env > config 兜底 > 硬編預設。config=None 時兜底鏈塌回原 or 鏈（byte-level 零退化）。
+        self._api_key = (
+            api_key
+            or os.environ.get("MINIMAX_API_KEY")
+            or (config.api_key if config else None)
+            or ""
+        )
+        # group_id 為帳號識別（機密邊界，見 EmbedderConfig docstring）：維持只走參數 / env，不吃 config
         self._group_id = group_id or os.environ.get("MINIMAX_GROUP_ID", "")
         self._base_url = (
             base_url
             or os.environ.get("MINIMAX_EMBED_BASE_URL")
+            or (config.base_url if config else None)
             or "https://api.minimax.io/v1/embeddings"
         )
-        self.model_id = model_id
-        # dimension：優先建構參數 → env → 預設 1024（與 BGE-M3 對齊）
+        # model：DEF-91-002 修復——補 MINIMAX_EMBED_MODEL env 讀取 + config 兜底（先前簽章硬編 embo-01、env 從未生效）
+        self.model_id = (
+            model_id
+            or os.environ.get("MINIMAX_EMBED_MODEL")
+            or (config.model if config else None)
+            or "embo-01"
+        )
+        # dimension：優先建構參數 → env → config 兜底 → 預設 1024（與 BGE-M3 對齊）
         dim_env = os.environ.get("MINIMAX_EMBED_DIMENSIONS", "").strip()
         if dimension is not None:
             self.dimension = int(dimension)
         elif dim_env.isdigit():
             self.dimension = int(dim_env)
+        elif config is not None:
+            self.dimension = int(config.dimension)
         else:
             self.dimension = 1024
-        self._timeout = timeout_seconds
+        # timeout：參數 > config 兜底 > 硬編 30.0
+        if timeout_seconds is not None:
+            self._timeout = timeout_seconds
+        elif config is not None:
+            self._timeout = config.timeout_seconds
+        else:
+            self._timeout = 30.0
         self._client = http_client
         self.breaker = breaker or CircuitBreaker(
             failure_threshold=3,

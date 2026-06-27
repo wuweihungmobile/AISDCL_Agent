@@ -30,6 +30,7 @@ from autoclaude.core.ports.embedder import (
 )
 from autoclaude.infra.adapters.bgem3_local import BGEM3LocalAdapter
 from autoclaude.infra.adapters.minimax_embedder import MinimaxEmbedderAdapter
+from autoclaude.utils.config import EmbedderConfig
 
 
 class _FakeResp:
@@ -157,3 +158,91 @@ def test_minimax_breaker_records_failure_on_http_error():
         with pytest.raises(EmbedderUnavailableError):
             adapter.embed_one("hi")
     assert adapter.breaker.state == "open"
+
+
+# ─────────────────────────────────────────────
+# improving_91 W-91-2/3：embedder 設定來源優先序（建構參數 > env > config 兜底 > 硬編）
+# ─────────────────────────────────────────────
+
+def test_embedder_no_config_backward_compat(monkeypatch):
+    """RTM-91-4：config=None（現有所有呼叫端形態）時行為與改版前 byte-level 一致。
+
+    WHY：W-91-2 新增 config 參數必須 additive——若不傳 config，兜底鏈須塌回原
+    `or env or 硬編`，否則所有既有呼叫端（皆不傳 config）會行為漂移＝退化。
+    清 ambient env 確保斷言的是「硬編預設」而非開發者 shell 殘留值。
+    """
+    for k in ("MINIMAX_EMBED_BASE_URL", "MINIMAX_EMBED_MODEL", "MINIMAX_EMBED_DIMENSIONS"):
+        monkeypatch.delenv(k, raising=False)
+    adapter = MinimaxEmbedderAdapter(api_key="dummy", group_id="G1", http_client=_FakeHttpClient())
+    # 改版前硬編預設：base_url=api.minimax.io/v1/embeddings、model=embo-01、dim=1024、timeout=30.0
+    assert adapter._base_url == "https://api.minimax.io/v1/embeddings"
+    assert adapter.model_id == "embo-01"
+    assert adapter.dimension == 1024
+    assert adapter._timeout == 30.0
+    # api_key / group_id 兜底鏈亦本輪改動（api_key 新增 config 分支）：config=None + 顯式參數時，
+    # 參數須最優先穿透（坐實「byte-level 零退化」涵蓋全 6 欄，非僅前 4 欄）。
+    assert adapter._api_key == "dummy"
+    assert adapter._group_id == "G1"
+
+
+def test_embedder_config_fallback_when_no_env(monkeypatch):
+    """RTM-91-3：env 缺席時 config 兜底生效（env > config 之 config 端）。
+
+    WHY：方案 B 的核心價值＝非機密 embedder 設定可集中於 config.yaml。若 config 兜底
+    不生效，使用者填了 config.yaml 卻無效＝治理目標落空。
+    """
+    for k in ("MINIMAX_EMBED_BASE_URL", "MINIMAX_EMBED_MODEL", "MINIMAX_EMBED_DIMENSIONS"):
+        monkeypatch.delenv(k, raising=False)
+    cfg = EmbedderConfig(
+        base_url="https://cfg.example/embeddings",
+        model="cfg-model",
+        dimension=768,
+        timeout_seconds=12.5,
+    )
+    adapter = MinimaxEmbedderAdapter(api_key="dummy", group_id="G1", config=cfg,
+                                     http_client=_FakeHttpClient())
+    assert adapter._base_url == "https://cfg.example/embeddings"
+    assert adapter.model_id == "cfg-model"
+    assert adapter.dimension == 768
+    assert adapter._timeout == 12.5
+
+
+def test_embedder_env_overrides_config(monkeypatch):
+    """RTM-91-3：env 優先於 config（與 chat env>config 治理一致）。
+
+    WHY：env 是臨時覆寫管道（切區域/換 model）；若 config 蓋過 env，臨時覆寫失效。
+    """
+    monkeypatch.setenv("MINIMAX_EMBED_BASE_URL", "https://env.example/embeddings")
+    monkeypatch.setenv("MINIMAX_EMBED_MODEL", "env-model")
+    monkeypatch.setenv("MINIMAX_EMBED_DIMENSIONS", "256")
+    cfg = EmbedderConfig(base_url="https://cfg.example/x", model="cfg-model", dimension=768)
+    adapter = MinimaxEmbedderAdapter(api_key="dummy", group_id="G1", config=cfg,
+                                     http_client=_FakeHttpClient())
+    assert adapter._base_url == "https://env.example/embeddings"
+    assert adapter.model_id == "env-model"
+    assert adapter.dimension == 256
+
+
+def test_embedder_ctor_arg_overrides_env_and_config(monkeypatch):
+    """RTM-91-3：建構參數最高優先（> env > config）。
+
+    WHY：顯式注入（如測試 fixture / DualEmbedderRouter 組裝）必須能完全主導，
+    否則無法在不污染 env 的前提下精準建構特定 adapter。
+    """
+    monkeypatch.setenv("MINIMAX_EMBED_MODEL", "env-model")
+    cfg = EmbedderConfig(model="cfg-model")
+    adapter = MinimaxEmbedderAdapter(api_key="dummy", group_id="G1", model_id="arg-model",
+                                     config=cfg, http_client=_FakeHttpClient())
+    assert adapter.model_id == "arg-model"
+
+
+def test_embedder_model_from_env(monkeypatch):
+    """RTM-91-5 / DEF-91-002：MINIMAX_EMBED_MODEL env 真正被讀取（先前硬編、env 失效）。
+
+    WHY：.env.example 白紙黑字宣告 MINIMAX_EMBED_MODEL，但修復前 adapter `model_id`
+    為簽章硬編預設、__init__ 從不讀該 env——文件宣稱可配置實則不可。本測試鎖死
+    「env 設了就生效」，使 DEF-91-002 不會復活（回歸防護）。
+    """
+    monkeypatch.setenv("MINIMAX_EMBED_MODEL", "embo-02-from-env")
+    adapter = MinimaxEmbedderAdapter(api_key="dummy", group_id="G1", http_client=_FakeHttpClient())
+    assert adapter.model_id == "embo-02-from-env"

@@ -135,3 +135,47 @@ class TestAppConfigDefaultsUnchanged:
         assert cfg.token_guard.compact_threshold_pct == 80.0
         assert cfg.token_guard.halt_threshold_pct == 90.0
         assert cfg.storage.mode == "yaml_only"
+
+
+# ─────────────────────────────────────────────
+# improving_91 W-91-1/3：EmbedderConfig + 設定治理一致性
+# ─────────────────────────────────────────────
+
+class TestEmbedderConfig:
+    def test_embedder_block_loaded_not_dropped(self):
+        """RTM-91-1 / DEF-91-003：config.yaml 的 embedder 區塊被 Pydantic 接受、不再靜默丟棄。
+
+        WHY：修復前 AppConfig 無 embedder 欄位 + Pydantic extra=ignore → 使用者填的
+        embedder 區塊被丟棄（hasattr 為 False），且 ConfigResolver 的 embedder.api_key
+        RBAC 在保護幽靈欄位。本測試鎖死「embedder 區塊真的進得了 AppConfig」。
+        """
+        cfg = AppConfig.model_validate(
+            {"embedder": {"base_url": "http://x/emb", "model": "m1", "dimension": 512}}
+        )
+        assert hasattr(cfg, "embedder")
+        assert cfg.embedder.base_url == "http://x/emb"
+        assert cfg.embedder.model == "m1"
+        assert cfg.embedder.dimension == 512
+
+    def test_embedder_defaults_are_non_secret(self):
+        """RTM-91-1：EmbedderConfig 非機密預設正確；api_key 預設留空（機密走 env）。
+
+        WHY：機密邊界紅線——api_key 入庫預設必須是空字串（同 MinimaxConfig），
+        確保模板/預設不會夾帶任何真實金鑰。
+        """
+        e = AppConfig().embedder
+        assert e.base_url == "https://api.minimax.io/v1/embeddings"
+        assert e.model == "embo-01"
+        assert e.dimension == 1024
+        assert e.api_key == ""
+
+    def test_minimax_dataclass_default_aligns_with_config_yaml(self):
+        """RTM-91-6 / DEF-91-001：MinimaxConfig dataclass 預設須與 config.yaml 一致。
+
+        WHY：improving_90 統一 config.yaml 為非機密權威源，但 dataclass 預設仍是舊端點/
+        舊 model；config.yaml 缺 minimax 欄位時會 fallback 到舊值＝設定漂移。鎖死預設＝
+        config.yaml 當前值，防漂移復活。
+        """
+        m = AppConfig().minimax
+        assert m.base_url == "https://api.minimax.io/v1/text/chatcompletion_v2"
+        assert m.model == "MiniMax-M2.7"
