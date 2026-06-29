@@ -38,9 +38,12 @@ goal_tasks:
           - 純函式、零第三方依賴（只用 Python 標準庫）。
           - 每個函式有 pytest 單元測試，邊界案例（空字串、超長、最小 n）全覆蓋。
 
-          寫完 SPEC.md 後，在最後一行輸出完成關鍵字：[SPEC_DONE]
-        expected_output_regex: "\\[SPEC_DONE\\]"
-        evaluator_command: null
+          寫完 SPEC.md 即可（不需輸出任何完成關鍵字；本步以 SPEC.md 是否真的產生來判定）。
+        # DEF-95-002 修復（improving_96）：doc/spec 產檔步改用 artifact-existence evaluator——
+        # 檢查 SPEC.md 真的產生（後端無關），不靠 keyword 回顯（pty --output-format json 擷取
+        # 脆弱會吞掉 keyword 致誤判）。expected_output_regex 留空，把關交 evaluator_command。
+        expected_output_regex: null
+        evaluator_command: "python -m autoclaude.artifact_check SPEC.md --min-bytes 200"
     sub_tasks: []
   - goal_task_id: "GT-IMPL"
     title: "實作至綠（SCG-4）：TDD 先測後實作 slugify 與 truncate"
@@ -61,9 +64,12 @@ goal_tasks:
             - assert slugify("") == ""
           - 以 pytest 風格撰寫（def test_xxx(): ...）。
 
-          完成後，在最後一行輸出完成關鍵字：[IMPL1_DONE]
-        expected_output_regex: "\\[IMPL1_DONE\\]"
-        evaluator_command: null
+          寫完 test_strutils.py 即可（不需輸出完成關鍵字；本步以檔案是否真的產生來判定）。
+        # improving_96 backend-robust：TDD 紅步（寫測試、strutils.py 尚未實作故 pytest 會紅），
+        # 以 artifact-existence 把關 test_strutils.py 真的產生；不靠 keyword 回顯。下一步 E-IMPL-2
+        # 的 pytest 會 import 此檔，形成 backstop（檔沒寫對下一步必失敗）。
+        expected_output_regex: null
+        evaluator_command: "python -m autoclaude.artifact_check test_strutils.py --min-bytes 80"
       - exec_id: "E-IMPL-2"
         action: "在當前工作目錄建立 strutils.py 實作 slugify，使 test_strutils.py 中 slugify 測試全綠"
         prompt: |
@@ -79,8 +85,10 @@ goal_tasks:
           - slugify("a---b") == "a-b"
           - slugify("") == ""
 
-          請執行 pytest test_strutils.py -q 確認 slugify 測試全綠。完成後在最後一行輸出完成關鍵字：[IMPL2_DONE]
-        expected_output_regex: "\\[IMPL2_DONE\\]"
+          請執行 pytest test_strutils.py -q 確認 slugify 測試全綠。
+        # improving_96 backend-robust：以 pytest evaluator 客觀把關（slugify 測試全綠）為唯一閘，
+        # expected_output_regex 留空——否則 keyword regex 先擋，pty 吞 keyword 時 pytest 根本不會跑。
+        expected_output_regex: null
         evaluator_command: "pytest test_strutils.py -q"
       - exec_id: "E-IMPL-3"
         action: "在 test_strutils.py 追加 truncate 的測試（依規格範例與 ValueError 邊界）"
@@ -98,9 +106,12 @@ goal_tasks:
             - import pytest 後，使用 with pytest.raises(ValueError): truncate("abc", 0)
           - 保留既有 slugify 測試不動。
 
-          完成後，在最後一行輸出完成關鍵字：[IMPL3_DONE]
-        expected_output_regex: "\\[IMPL3_DONE\\]"
-        evaluator_command: null
+          完成後即可（不需輸出完成關鍵字；本步以 test_strutils.py 是否已成長到含 truncate 測試來判定）。
+        # improving_96 backend-robust：TDD 紅步（追加 truncate 測試、truncate 尚未實作故會紅）。
+        # 以 artifact-existence + 較高 min-bytes 把關 test_strutils.py 已成長（追加了 truncate 測試）；
+        # 不靠 keyword 回顯。下一步 E-IMPL-4 的全套 pytest 為最終客觀 backstop。
+        expected_output_regex: null
+        evaluator_command: "python -m autoclaude.artifact_check test_strutils.py --min-bytes 160"
       - exec_id: "E-IMPL-4"
         action: "在 strutils.py 實作 truncate，使 test_strutils.py 全部測試（slugify + truncate）全綠"
         prompt: |
@@ -118,7 +129,9 @@ goal_tasks:
           - truncate("", 5) == ""
           - truncate("abc", 0) 會 raise ValueError
 
-          請執行 pytest test_strutils.py -q 確認全部測試全綠。完成後在最後一行輸出完成關鍵字：[IMPL4_DONE]
-        expected_output_regex: "\\[IMPL4_DONE\\]"
+          請執行 pytest test_strutils.py -q 確認全部測試全綠。
+        # improving_96 backend-robust：以全套 pytest（slugify + truncate）客觀把關為唯一閘，
+        # expected_output_regex 留空（同 E-IMPL-2 理由）。
+        expected_output_regex: null
         evaluator_command: "pytest test_strutils.py -q"
     sub_tasks: []

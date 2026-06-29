@@ -1,0 +1,29 @@
+id: R-9.21
+title: Phase I 可信賴的規模化現實自治
+trigger_states:
+  - SANDBOX_HARDENING_GATE
+  - EXECUTION_EVALUATION
+  - EVALUATOR_AUDIT
+  - MONITOR_VIOLATION
+  - MEMORY_CONSOLIDATION
+  - PRODUCTION_BEHAVIORAL_SIGNAL
+severity: high
+maturity: active
+spec: >
+  L6 入口（判官自審 + 系統增殖 + 證明可持續）。執行去隨機（hermetic 重跑 FLAKY_RERUN_N=5
+  取共識，混合 verdict→FLAKY 隔離不計分）；OQS 校準回饋鏈（連 3 次「pass 但生產違反」
+  → EVALUATOR_AUDIT，評分基準永不自動改）；Runtime Monitor 合成 .tla 4 safety invariant
+  → 違反進 MONITOR_VIOLATION → ESCALATION；成功結晶 SPL（≥3 同模式 proposed 草案，禁自動
+  verified）；value_planner 只排序不裁決（人工 signoff）；attention_budget P0/structural
+  永不折疊；艦隊 track 維度 + SpecDependencyLock 全域鎖序破循環等待。對應 sandbox_runner /
+  oqs_calibration / spec_monitor / spl_consolidator / value_planner / fleet_orchestrator。
+test_ref: tools/fsm_runtime/tests/test_phase_i.py
+enforcement_mechanism: escalation
+failure_mode: >
+  runtime monitor 偵測 .tla safety invariant 破壞 → MONITOR_VIOLATION → ESCALATION。
+  此即 R-9.21 守望的失敗模式——真實發生時 catch 側結構化歸因到 R-9.21（W-19 catch 契約
+  三要件之一；對應 exit_monitor_violation）。
+scaffold_roi:
+  fire_count: 0
+  catch_count: 0
+  false_positive_count: 0

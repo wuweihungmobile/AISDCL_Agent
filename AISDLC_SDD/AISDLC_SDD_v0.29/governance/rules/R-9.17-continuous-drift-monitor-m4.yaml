@@ -1,0 +1,20 @@
+id: R-9.17
+title: Phase G M4 Continuous Drift Monitor
+trigger_states:
+  - DRIFT_OBSERVATION
+  - SPEC_FROZEN
+  - IMPLEMENTATION
+  - PR_REVIEW
+severity: high
+maturity: active
+spec: >
+  spec ↔ code drift 從 gate-time 提前到 commit-time。PostCommit hook advisory（budget <2s、
+  超時/例外一律 exit 0 絕不擋 commit）；drift_score ≥0.3 進 DRIFT_OBSERVATION（非阻塞觀測態）；
+  連續 3 commits ≥0.3 → SPEC_AUDIT；每日 02:30 UTC DAILY 滾動 7 天報告。drift_score =
+  0.6×api_drift + 0.4×type_drift。對應 drift_monitor.py / post_commit_drift.py。
+test_ref: tools/fsm_runtime/tests/test_drift_monitor.py
+enforcement_mechanism: manual
+scaffold_roi:
+  fire_count: 0
+  catch_count: 0
+  false_positive_count: 0

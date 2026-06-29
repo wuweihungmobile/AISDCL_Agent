@@ -1,0 +1,330 @@
+# ============================================================
+# AISDLC v0.09 - Performance Benchmark Gate (P2)
+# GitHub Actions Workflow Template
+# ============================================================
+#
+# 使用方式:
+#   1. 複製此檔案至 .github/workflows/perf-benchmark.yml
+#   2. 依專案語言調整 benchmark 命令
+#   3. 設定 PERF_BASELINE_BRANCH（預設 main）
+#   4. 確保 Layer 0 + Layer 1 已配置
+#
+# 雙層效能測試模型:
+#   PR 階段:     Micro-Benchmark（< 2 分鐘）→ 退化 > 10% 阻塞
+#   Nightly 排程: Full Load Test（30-60 分鐘）→ 結果次日審查
+#
+# 適用情境:
+#   🔴 強制: performance
+#   ⚠️ 選配: greenfield, brownfield, refactoring, migration
+#
+# 參考文檔: Performance_Benchmark_Gate_Template.md
+# ============================================================
+
+name: "⚡ Performance Benchmark Gate"
+
+on:
+  pull_request:
+    branches: [main, develop, release/*]
+  push:
+    branches: [main]
+  # Nightly Full Load Test
+  schedule:
+    - cron: '0 2 * * *'  # 每日 02:00 UTC
+  workflow_dispatch:
+    inputs:
+      test_type:
+        description: '測試類型'
+        required: true
+        default: 'micro'
+        type: choice
+        options:
+          - micro
+          - full
+          - both
+
+env:
+  PERF_BASELINE_BRANCH: main
+  MICRO_BENCHMARK_TIMEOUT: 120    # 2 分鐘
+  FULL_LOAD_TIMEOUT: 3600         # 60 分鐘
+  REGRESSION_THRESHOLD: 10        # 退化 > 10% 阻塞
+
+# ─── 權限 ───
+permissions:
+  contents: read
+  pull-requests: write
+  checks: write
+
+jobs:
+  # ============================================================
+  # Job 1: Micro-Benchmark（PR 階段，< 2 分鐘）
+  # ============================================================
+  micro-benchmark:
+    name: "⚡ Micro-Benchmark"
+    runs-on: ubuntu-latest
+    if: >
+      github.event_name == 'pull_request' ||
+      github.event_name == 'push' ||
+      (github.event_name == 'workflow_dispatch' && github.event.inputs.test_type != 'full')
+    timeout-minutes: 5
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # ─── 基線快取 ───
+      - name: Restore Performance Baseline
+        uses: actions/cache@v4
+        id: perf-cache
+        with:
+          path: .perf-baseline/
+          key: perf-baseline-${{ env.PERF_BASELINE_BRANCH }}-${{ hashFiles('**/package-lock.json', '**/requirements.txt', '**/go.sum', '**/Cargo.lock') }}
+          restore-keys: |
+            perf-baseline-${{ env.PERF_BASELINE_BRANCH }}-
+
+      # ─── 環境設置（依語言取消註解） ───
+
+      # --- Node.js ---
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+      - name: Install Dependencies
+        run: npm ci
+
+      # --- Python ---
+      # - name: Setup Python
+      #   uses: actions/setup-python@v5
+      #   with:
+      #     python-version: '3.12'
+      # - name: Install Dependencies
+      #   run: pip install -r requirements.txt
+
+      # --- Go ---
+      # - name: Setup Go
+      #   uses: actions/setup-go@v5
+      #   with:
+      #     go-version: '1.22'
+
+      # --- Java ---
+      # - name: Setup Java
+      #   uses: actions/setup-java@v4
+      #   with:
+      #     java-version: '21'
+      #     distribution: 'temurin'
+
+      # ─── 執行 Micro-Benchmark ───
+      - name: Run Micro-Benchmark
+        id: benchmark
+        timeout-minutes: 2
+        run: |
+          echo "::group::Micro-Benchmark 執行"
+          # ┌─────────────────────────────────────────┐
+          # │ 依語言替換以下命令                        │
+          # │ Node.js: npm run bench                   │
+          # │ Python:  pytest --benchmark-only          │
+          # │ Go:      go test -bench=. -benchmem ./... │
+          # │ Java:    mvn exec:java -Dexec.mainClass   │
+          # │ Rust:    cargo bench                      │
+          # └─────────────────────────────────────────┘
+          npm run bench -- --outputFile=benchmark-results.json 2>&1 | tee bench-output.txt
+          echo "::endgroup::"
+
+      # ─── 退化偵測 ───
+      - name: Compare with Baseline
+        id: regression
+        if: steps.perf-cache.outputs.cache-hit == 'true'
+        run: |
+          echo "::group::效能退化偵測"
+          # 比較當前結果與基線
+          # 此處為範例邏輯，依實際 benchmark 工具調整
+          if [ -f .perf-baseline/baseline.json ] && [ -f benchmark-results.json ]; then
+            # 使用 jq 或專用工具比較
+            # benchmark-action 等工具可自動化此步驟
+            echo "regression_detected=false" >> "$GITHUB_OUTPUT"
+            echo "regression_percent=0" >> "$GITHUB_OUTPUT"
+          else
+            echo "regression_detected=false" >> "$GITHUB_OUTPUT"
+            echo "regression_percent=0" >> "$GITHUB_OUTPUT"
+            echo "⚠️ 基線不存在，跳過退化偵測"
+          fi
+          echo "::endgroup::"
+
+      # ─── 更新基線（僅 main 分支） ───
+      - name: Update Baseline
+        if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+        run: |
+          mkdir -p .perf-baseline
+          cp benchmark-results.json .perf-baseline/baseline.json 2>/dev/null || true
+          echo "$(date -u +%Y-%m-%dT%H:%M:%SZ)" > .perf-baseline/updated_at.txt
+
+      - name: Save Baseline Cache
+        if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+        uses: actions/cache/save@v4
+        with:
+          path: .perf-baseline/
+          key: perf-baseline-${{ env.PERF_BASELINE_BRANCH }}-${{ hashFiles('**/package-lock.json', '**/requirements.txt', '**/go.sum', '**/Cargo.lock') }}
+
+      # ─── PR 評論 ───
+      - name: Comment PR with Results
+        if: github.event_name == 'pull_request'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const regressionDetected = '${{ steps.regression.outputs.regression_detected }}' === 'true';
+            const regressionPercent = '${{ steps.regression.outputs.regression_percent }}';
+            const cacheHit = '${{ steps.perf-cache.outputs.cache-hit }}' === 'true';
+
+            let body = `## ⚡ Performance Micro-Benchmark 結果\n\n`;
+
+            if (!cacheHit) {
+              body += `⚠️ **無基線可比較** — 首次執行，已建立初始基線\n\n`;
+            } else if (regressionDetected) {
+              body += `🔴 **效能退化偵測**: ${regressionPercent}% (閾值: ${process.env.REGRESSION_THRESHOLD}%)\n\n`;
+            } else {
+              body += `✅ **效能檢查通過** — 無顯著退化\n\n`;
+            }
+
+            body += `| 指標 | 結果 |\n|------|------|\n`;
+            body += `| 退化偵測 | ${regressionDetected ? '🔴 是' : '✅ 否'} |\n`;
+            body += `| 退化閾值 | ${process.env.REGRESSION_THRESHOLD}% |\n`;
+            body += `| 基線比較 | ${cacheHit ? '✅ 已比較' : '⚠️ 無基線'} |\n\n`;
+            body += `> 📋 詳見 [Performance_Benchmark_Gate_Template](../docs) 了解完整配置`;
+
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+              body: body
+            });
+
+      # ─── 退化阻塞 ───
+      - name: Fail on Regression
+        if: steps.regression.outputs.regression_detected == 'true'
+        run: |
+          echo "🔴 效能退化 ${{ steps.regression.outputs.regression_percent }}% 超過閾值 ${REGRESSION_THRESHOLD}%"
+          echo "請優化效能後重新提交 PR"
+          exit 1
+
+      # ─── 上傳結果 ───
+      - name: Upload Benchmark Results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: micro-benchmark-results
+          path: |
+            benchmark-results.json
+            bench-output.txt
+          retention-days: 30
+
+  # ============================================================
+  # Job 2: Full Load Test（Nightly 排程，30-60 分鐘）
+  # ============================================================
+  full-load-test:
+    name: "🔥 Full Load Test"
+    runs-on: ubuntu-latest
+    if: >
+      github.event_name == 'schedule' ||
+      (github.event_name == 'workflow_dispatch' && github.event.inputs.test_type != 'micro')
+    timeout-minutes: 75
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # ─── 安裝 k6 ───
+      - name: Install k6
+        run: |
+          sudo gpg -k
+          sudo gpg --no-default-keyring --keyring /usr/share/keyrings/k6-archive-keyring.gpg \
+            --keyserver hkp://keyserver.ubuntu.com:80 --recv-keys C5AD17C747E3415A3642D57D77C6C491D6AC1D68
+          echo "deb [signed-by=/usr/share/keyrings/k6-archive-keyring.gpg] https://dl.k6.io/deb stable main" | \
+            sudo tee /etc/apt/sources.list.d/k6.list
+          sudo apt-get update
+          sudo apt-get install k6 -y
+
+      # ─── 啟動應用（依專案調整） ───
+      - name: Start Application
+        run: |
+          # 依專案替換啟動命令
+          # npm start &
+          # docker-compose up -d
+          echo "⚠️ 請替換為實際應用啟動命令"
+          sleep 5
+
+      # ─── Load Test ───
+      - name: Run Load Test
+        id: load-test
+        timeout-minutes: 15
+        continue-on-error: true
+        run: |
+          echo "::group::Load Test"
+          k6 run tests/performance/load-test.js \
+            --out json=load-test-results.json \
+            --summary-export=load-test-summary.json \
+            2>&1 | tee load-test-output.txt
+          echo "exit_code=$?" >> "$GITHUB_OUTPUT"
+          echo "::endgroup::"
+
+      # ─── Stress Test ───
+      - name: Run Stress Test
+        id: stress-test
+        timeout-minutes: 15
+        continue-on-error: true
+        run: |
+          echo "::group::Stress Test"
+          k6 run tests/performance/stress-test.js \
+            --out json=stress-test-results.json \
+            --summary-export=stress-test-summary.json \
+            2>&1 | tee stress-test-output.txt
+          echo "exit_code=$?" >> "$GITHUB_OUTPUT"
+          echo "::endgroup::"
+
+      # ─── Soak Test ───
+      - name: Run Soak Test
+        id: soak-test
+        timeout-minutes: 35
+        continue-on-error: true
+        run: |
+          echo "::group::Soak Test"
+          k6 run tests/performance/soak-test.js \
+            --out json=soak-test-results.json \
+            --summary-export=soak-test-summary.json \
+            2>&1 | tee soak-test-output.txt
+          echo "exit_code=$?" >> "$GITHUB_OUTPUT"
+          echo "::endgroup::"
+
+      # ─── 結果彙總 ───
+      - name: Summarize Results
+        if: always()
+        run: |
+          echo "## 🔥 Full Load Test 結果彙總" > full-load-summary.md
+          echo "" >> full-load-summary.md
+          echo "| 測試 | 狀態 |" >> full-load-summary.md
+          echo "|------|------|" >> full-load-summary.md
+
+          load_status="${{ steps.load-test.outputs.exit_code }}"
+          stress_status="${{ steps.stress-test.outputs.exit_code }}"
+          soak_status="${{ steps.soak-test.outputs.exit_code }}"
+
+          [ "$load_status" = "0" ] && echo "| Load Test | ✅ 通過 |" >> full-load-summary.md || echo "| Load Test | ⚠️ 未通過 |" >> full-load-summary.md
+          [ "$stress_status" = "0" ] && echo "| Stress Test | ✅ 通過 |" >> full-load-summary.md || echo "| Stress Test | ⚠️ 未通過 |" >> full-load-summary.md
+          [ "$soak_status" = "0" ] && echo "| Soak Test | ✅ 通過 |" >> full-load-summary.md || echo "| Soak Test | ⚠️ 未通過 |" >> full-load-summary.md
+
+          echo "" >> full-load-summary.md
+          echo "> ⏰ 執行時間: $(date -u +%Y-%m-%dT%H:%M:%SZ)" >> full-load-summary.md
+
+          cat full-load-summary.md >> "$GITHUB_STEP_SUMMARY"
+
+      # ─── 上傳結果 ───
+      - name: Upload Load Test Results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: full-load-test-results
+          path: |
+            *-results.json
+            *-summary.json
+            *-output.txt
+            full-load-summary.md
+          retention-days: 90

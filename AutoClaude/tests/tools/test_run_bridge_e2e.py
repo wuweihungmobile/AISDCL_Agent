@@ -36,10 +36,17 @@ def test_compile_strutils_plan_flattens_5_tasks_with_goal_grouping():
         by_goal.setdefault(t.goal_task_id, []).append(t.step_id)
     assert by_goal["GT-SPEC"] == ["E-SPEC-1"]
     assert by_goal["GT-IMPL"] == ["E-IMPL-1", "E-IMPL-2", "E-IMPL-3", "E-IMPL-4"]
-    # evaluator 只落在兩個「實作至綠」步，且經白名單消毒（pytest 開頭）
+    # improving_96 DEF-95-002 修復：全 5 步皆 backend-robust 客觀 evaluator、無 keyword regex。
+    # 兩類：①可跑測試的「實作至綠」步（E-IMPL-2/4）→ pytest；②產/改檔步（E-SPEC-1 寫 SPEC.md、
+    # E-IMPL-1/3 寫改 test_strutils.py）→ artifact-existence（python -m autoclaude.artifact_check）。
     evals = {t.step_id: t.evaluator_command for t in pb.tasks if t.evaluator_command}
-    assert set(evals) == {"E-IMPL-2", "E-IMPL-4"}
-    assert all(c.startswith("pytest ") for c in evals.values())
+    assert set(evals) == {"E-SPEC-1", "E-IMPL-1", "E-IMPL-2", "E-IMPL-3", "E-IMPL-4"}
+    assert evals["E-IMPL-2"].startswith("pytest ")
+    assert evals["E-IMPL-4"].startswith("pytest ")
+    for sid in ("E-SPEC-1", "E-IMPL-1", "E-IMPL-3"):
+        assert evals[sid].startswith("python -m autoclaude.artifact_check ")
+    # backend-robust 核心斷言：無任一步以 keyword 回顯（expected_output_regex）把關
+    assert all(t.expected_output_regex is None for t in pb.tasks)
     assert "tasks:" in yaml_text  # 可序列化
 
 
@@ -73,6 +80,18 @@ def test_bridge_e2e_evaluator_sanitize_chain_rejects_injection(tmp_path):
     )
     with pytest.raises(CompileError):
         rbe.compile_plan(evil)
+
+
+def test_artifact_check_evaluator_passes_sanitizer():
+    """RTM-96-2：artifact-existence evaluator 形態通過白名單消毒（improving_96 DEF-95-002）。
+
+    回歸鎖：doc/spec 步用的 `python -m autoclaude.artifact_check <path> --min-bytes N`
+    必須永遠通過 sanitize_evaluator（首 token python、-m 形態非 -c、無 shell 元字元）。
+    """
+    from three_tier_to_playbook import sanitize_evaluator  # noqa: E402
+
+    cmd = "python -m autoclaude.artifact_check SPEC.md --min-bytes 200"
+    assert sanitize_evaluator(cmd) == cmd
 
 
 # --- RTM-95-3：log 解析 + 證據 schema（餵 canned log，不打真 LLM）---
@@ -128,7 +147,7 @@ def test_build_evidence_joins_goal_task_and_aggregates():
     assert ev["aggregate"]["total_steps"] == 5
     assert ev["aggregate"]["success_steps"] == 5
     assert ev["aggregate"]["pass_rate"] == 1.0
-    assert ev["aggregate"]["evaluator_steps"] == 2  # E-IMPL-2 / E-IMPL-4
+    assert ev["aggregate"]["evaluator_steps"] == 5  # 全 5 步 backend-robust 客觀 evaluator
     assert ev["aggregate"]["escalated"] is False
     assert ev["aggregate"]["kernel_success"] is True
     # goal_task 分組
