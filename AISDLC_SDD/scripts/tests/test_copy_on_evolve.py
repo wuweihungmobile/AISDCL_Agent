@@ -237,7 +237,8 @@ _SYNC_SCRIPTS = (
     "copy_on_evolve.sh",
     "skill_header_sync.py",
     "sync_exposed_skills.py",
-    "rfc_lifecycle_lint.py",  # skill_header_sync / sync_exposed 皆 import discover_frozen_versions
+    "rfc_lifecycle_lint.py",  # skill_header_sync / sync_exposed / framework_status 皆 import discover_frozen_versions
+    "framework_status_snapshot.py",  # DEF-96-001：建版後重生 FRAMEWORK_STATUS.md SSOT
 )
 
 
@@ -317,3 +318,34 @@ def test_auto_appends_gitignore_block_on_evolve_def_59_001(repo: Path):
     assert "AISDLC_SDD_v0.02/arch-fitness.json" in gi
     assert "AISDLC_SDD_v0.02/chaos-report.json" in gi
     assert gi.count("AISDLC_SDD_v0.02/build/reports/") == 1, "block 不應重複 append"
+
+
+def test_auto_regens_framework_status_on_evolve_def_96_001(repo: Path):
+    """DEF-96-001 意圖鎖：copy_on_evolve 建出 v0.02 後，必自動重生 FRAMEWORK_STATUS.md 並指向 v0.02 為 LATEST。
+
+    WHY：framework_status_snapshot.py 算「最新演化版（LATEST＝sort -V|tail -1）」版本號/計數生成
+    SSOT；新版一建立 LATEST 即變 → 既有 FRAMEWORK_STATUS.md stale → ci-gate 之
+    framework_status_snapshot --check 必紅（improving_96 建 v0.29 即實證人工漏跑帶紅、手動 --write
+    後才綠）。與 DEF-58-002 戳記、DEF-59-001 .gitignore **同根因家族**「人工後步驟＝必然遺忘」。
+    本測試鎖「建版即重生 SSOT」——移除硬化（第三 auto-sync 區塊）→ 新版不被認列為 LATEST，本
+    assert 立即轉紅。
+    """
+    bash = _bash_with_python()
+    if bash is None:
+        pytest.skip("找不到 PATH 內含 python 的 bash（WSL bash 無 Windows python）")
+    _setup_version_repo_with_scripts(repo)
+    proc = subprocess.run(
+        [bash, "scripts/copy_on_evolve.sh", "AISDLC_SDD_v0.01", "AISDLC_SDD_v0.02"],
+        cwd=str(repo), capture_output=True, text=True, encoding="utf-8", errors="replace",
+        timeout=60,
+    )
+    assert proc.returncode == 0, f"建版+重生 SSOT 應 exit 0\nstdout:{proc.stdout}\nstderr:{proc.stderr}"
+    status = repo / "FRAMEWORK_STATUS.md"
+    assert status.is_file(), "建版後 FRAMEWORK_STATUS.md 應於 BASE 自動重生（DEF-96-001 帶紅入庫回歸）"
+    body = status.read_text(encoding="utf-8")
+    # render() 的「最新演化版」行格式：`...最新演化版（...）**：`AISDLC_SDD_v0.02``
+    assert "AISDLC_SDD_v0.02" in body, \
+        f"FRAMEWORK_STATUS.md 未認列新版 v0.02 為 LATEST（SSOT 未隨建版重生）\n{body}"
+    # idempotent 兼證：腳本輸出確有重生步驟（非靜默略過）
+    assert "framework_status_snapshot" in proc.stdout or "FRAMEWORK_STATUS" in proc.stdout, \
+        f"建版輸出應含 SSOT 重生步驟\n{proc.stdout}"

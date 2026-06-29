@@ -84,9 +84,11 @@ echo "✅ Copy-on-Evolve（git archive，純 tracked）: $FROM → $TO（匯出 
 #   既有 helper 測試；production scripts/ 恆具 siblings 故必跑。
 _SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 _BASE="$(cd "$(dirname "$TO")" && pwd)"
+# PYTHON 可覆寫（預設 python）：production／ci-gate 用 `python`，跨平台測試可注入 sys.executable。
+# 頂層單一定義，供下方三個建版後同步 block（戳記/鏡像、.gitignore、FRAMEWORK_STATUS）共用
+# ——避免 set -u 下某 block guard 不過致 _PY 未定義（DEF-96-001 補第三 block 時上提）。
+_PY="${PYTHON:-python}"
 if [ -f "${_SCRIPT_DIR}/skill_header_sync.py" ] && [ -f "${_SCRIPT_DIR}/sync_exposed_skills.py" ]; then
-  # PYTHON 可覆寫（預設 python）：production／ci-gate 用 `python`，跨平台測試可注入 sys.executable。
-  _PY="${PYTHON:-python}"
   echo "==> 同步新版框架版本戳記（skill_header_sync --write）"
   "${_PY}" "${_SCRIPT_DIR}/skill_header_sync.py" --write --repo-root "${_BASE}"
   echo "==> 重生父層曝光 skills 鏡像（sync_exposed_skills --write）"
@@ -121,4 +123,21 @@ if [ -f "${_GITIGNORE}" ]; then
   fi
 else
   echo "⚠️ 找不到 ${_GITIGNORE}（隔離環境）；略過 .gitignore 自動補" >&2
+fi
+
+# ── DEF-96-001（P2 根因，DEF-58-002／59-001 同家族）：建版後自動重生 FRAMEWORK_STATUS.md SSOT ──
+# WHY：framework_status_snapshot.py 掃磁碟+權威源算「最新演化版（LATEST＝sort -V|tail -1）」的
+#   版本號與各類資產計數並生成唯一真相源 FRAMEWORK_STATUS.md；**新版一建立 LATEST 即改變** →
+#   既有 FRAMEWORK_STATUS.md「最新演化版」段 stale → ci-gate 的「框架版本/計數 SSOT 新鮮度 lint」
+#   （framework_status_snapshot.py --check）報紅。此前為人工後步驟（improving_96 建 v0.29 即踩到
+#   首跑 ci-gate stale、手動 --write 後才綠）；與 DEF-58-002 戳記、DEF-59-001 .gitignore **同根因
+#   家族**「人去記得改＝從流程消失」。把 --write 釘進建版腳本＝杜絕同類復發（對齊 DEF-CLDREV-007
+#   哲學）。idempotent：--write 依磁碟現況重生、重跑安全；set -e ⇒ 失敗即 fail-loud 非零中止。
+#   import rfc_lifecycle_lint（discover_frozen_versions/latest_version）；隔離 harness 須一併佈署。
+if [ -f "${_SCRIPT_DIR}/framework_status_snapshot.py" ]; then
+  echo "==> 重生框架版本/計數 SSOT（framework_status_snapshot --write）"
+  "${_PY}" "${_SCRIPT_DIR}/framework_status_snapshot.py" --write --repo-root "${_BASE}"
+  echo "✅ FRAMEWORK_STATUS.md 已隨建版自動重生（DEF-96-001：免人工後步驟，杜絕 SSOT stale 帶紅入庫）"
+else
+  echo "⚠️ 同層無 framework_status_snapshot.py（隔離環境）；略過 SSOT 重生" >&2
 fi
