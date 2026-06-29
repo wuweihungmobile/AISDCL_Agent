@@ -1,0 +1,124 @@
+# strutils_prd_plan.yaml — Archy agent 真跑產物（AutoSDD_improving_95 W-95-1，A 軌）
+#
+# 來源 PRD：docs/01_requirements/AutoSDD_improving_95_strutils_prd.md
+# 產出方式：Archy（sdd-prd-to-playbook agent）真跑一次 LLM 拆解（2026-06-29），
+#   committed 為 fixture 使下游 compiler→AutoClaude 真跑可重現。
+# 下游：tools/three_tier_to_playbook.py 攤平 → playbook.yaml → python -m autoclaude 真跑。
+# 結構：1 GT-SPEC（regex 驗證的規格步）+ 1 GT-IMPL（4 自包含 TDD 步，2 個 pytest evaluator）。
+project_id: "PRJ-STRUTILS"
+name: "strutils 字串工具庫"
+description: "提供一個零依賴的純函式 Python 字串工具庫 strutils，以 slugify/truncate 兩個小而正確的函式為範圍，每個函式行為明確且可被 pytest 單元測試完全覆蓋（含空字串、超長、最小 n 等邊界）。以 SDD 規格先行 + TDD 先測後實作的方式建至 pytest 全綠。"
+goal_tasks:
+  - goal_task_id: "GT-SPEC"
+    title: "需求/設計凍結（SCG-0~1）：slugify/truncate 行為契約"
+    depth: 1
+    priority: 1
+    execution_items:
+      - exec_id: "E-SPEC-1"
+        action: "在當前工作目錄寫一份精簡規格檔 SPEC.md，記錄 slugify/truncate 的行為契約與邊界案例"
+        prompt: |
+          請在「當前工作目錄」建立一份精簡規格檔，檔名為 SPEC.md，記錄字串工具庫 strutils 兩個函式的行為契約與邊界。內容必須涵蓋：
+
+          ## slugify(s: str) -> str
+          - 轉小寫；空白與底線（_）轉連字號 -；移除非 [a-z0-9-] 的字元；合併連續連字號為單一 -；去除頭尾連字號。
+          - 契約範例：
+            - slugify("Hello World!") == "hello-world"
+            - slugify("  Foo__Bar  ") == "foo-bar"
+            - slugify("a---b") == "a-b"
+
+          ## truncate(s: str, n: int) -> str
+          - 將字串截斷至最多 n 個字元；若 len(s) > n，截到 n-1 個字元並補一個單一 Unicode 省略號 …（U+2026），使總長 == n。
+          - n 必須 >= 1；當 n < 1 時 raise ValueError。
+          - 契約範例：
+            - truncate("hello", 10) == "hello"（未超長原樣回傳）
+            - truncate("hello world", 8) == "hello w…"（總長 8）
+            - truncate("x", 1) == "x"
+
+          ## 非功能契約
+          - 純函式、零第三方依賴（只用 Python 標準庫）。
+          - 每個函式有 pytest 單元測試，邊界案例（空字串、超長、最小 n）全覆蓋。
+
+          寫完 SPEC.md 後，在最後一行輸出完成關鍵字：[SPEC_DONE]
+        expected_output_regex: "\\[SPEC_DONE\\]"
+        evaluator_command: null
+    sub_tasks: []
+  - goal_task_id: "GT-IMPL"
+    title: "實作至綠（SCG-4）：TDD 先測後實作 slugify 與 truncate"
+    depth: 1
+    priority: 2
+    execution_items:
+      - exec_id: "E-IMPL-1"
+        action: "在當前工作目錄建立 test_strutils.py，先寫 slugify 的測試骨架（依規格範例）"
+        prompt: |
+          這是 TDD 的「先寫測試」步驟。請在「當前工作目錄」建立檔案 test_strutils.py，僅針對 slugify 撰寫單元測試（此時 strutils.py 尚未實作，import 會失敗是預期的，不要實作 strutils.py）。
+
+          test_strutils.py 內容要求：
+          - 最上方 from strutils import slugify
+          - 至少包含以下具體 assert（依規格範例與邊界）：
+            - assert slugify("Hello World!") == "hello-world"
+            - assert slugify("  Foo__Bar  ") == "foo-bar"
+            - assert slugify("a---b") == "a-b"
+            - assert slugify("") == ""
+          - 以 pytest 風格撰寫（def test_xxx(): ...）。
+
+          完成後，在最後一行輸出完成關鍵字：[IMPL1_DONE]
+        expected_output_regex: "\\[IMPL1_DONE\\]"
+        evaluator_command: null
+      - exec_id: "E-IMPL-2"
+        action: "在當前工作目錄建立 strutils.py 實作 slugify，使 test_strutils.py 中 slugify 測試全綠"
+        prompt: |
+          這是 TDD 的「實作至綠」步驟。承接上一步在 test_strutils.py 中為 slugify 寫的測試，請在「當前工作目錄」建立 strutils.py，實作純函式 slugify，使既有 slugify 測試全部通過。
+
+          slugify(s: str) -> str 行為契約：
+          - 轉小寫；空白與底線（_）轉連字號 -；移除非 [a-z0-9-] 的字元；合併連續連字號為單一 -；去除頭尾連字號。
+          - 只用 Python 標準庫（可用 re），零第三方依賴。
+
+          必須滿足：
+          - slugify("Hello World!") == "hello-world"
+          - slugify("  Foo__Bar  ") == "foo-bar"
+          - slugify("a---b") == "a-b"
+          - slugify("") == ""
+
+          請執行 pytest test_strutils.py -q 確認 slugify 測試全綠。完成後在最後一行輸出完成關鍵字：[IMPL2_DONE]
+        expected_output_regex: "\\[IMPL2_DONE\\]"
+        evaluator_command: "pytest test_strutils.py -q"
+      - exec_id: "E-IMPL-3"
+        action: "在 test_strutils.py 追加 truncate 的測試（依規格範例與 ValueError 邊界）"
+        prompt: |
+          這是 TDD 的「先寫測試」步驟（第二個函式）。請在「當前工作目錄」既有的 test_strutils.py 中，追加針對 truncate 的單元測試（此時 strutils.py 尚未有 truncate，相關測試會紅是預期的，不要在本步驟實作 truncate）。
+
+          追加內容要求：
+          - 於檔案頂部 import 改為 from strutils import slugify, truncate
+          - 至少包含以下具體 assert（依規格範例與邊界）：
+            - assert truncate("hello", 10) == "hello"
+            - assert truncate("hello world", 8) == "hello w…"
+            - assert truncate("x", 1) == "x"
+            - assert truncate("", 5) == ""
+          - 並測試 n < 1 會 raise ValueError，例如：
+            - import pytest 後，使用 with pytest.raises(ValueError): truncate("abc", 0)
+          - 保留既有 slugify 測試不動。
+
+          完成後，在最後一行輸出完成關鍵字：[IMPL3_DONE]
+        expected_output_regex: "\\[IMPL3_DONE\\]"
+        evaluator_command: null
+      - exec_id: "E-IMPL-4"
+        action: "在 strutils.py 實作 truncate，使 test_strutils.py 全部測試（slugify + truncate）全綠"
+        prompt: |
+          這是 TDD 的「實作至綠」步驟（第二個函式）。承接上一步在 test_strutils.py 追加的 truncate 測試，請在「當前工作目錄」既有的 strutils.py 中新增純函式 truncate，使整個 test_strutils.py（slugify + truncate 全部測試）通過，且不得破壞既有 slugify。
+
+          truncate(s: str, n: int) -> str 行為契約：
+          - 將字串截斷至最多 n 個字元；若 len(s) > n，截到 n-1 個字元並補一個單一 Unicode 省略號 …（U+2026），使總長 == n。
+          - n 必須 >= 1；當 n < 1 時 raise ValueError。
+          - 只用 Python 標準庫，零第三方依賴。
+
+          必須滿足：
+          - truncate("hello", 10) == "hello"
+          - truncate("hello world", 8) == "hello w…"
+          - truncate("x", 1) == "x"
+          - truncate("", 5) == ""
+          - truncate("abc", 0) 會 raise ValueError
+
+          請執行 pytest test_strutils.py -q 確認全部測試全綠。完成後在最後一行輸出完成關鍵字：[IMPL4_DONE]
+        expected_output_regex: "\\[IMPL4_DONE\\]"
+        evaluator_command: "pytest test_strutils.py -q"
+    sub_tasks: []

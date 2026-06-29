@@ -1,0 +1,86 @@
+{
+  "schema": "autosdd_bridge_e2e_evidence/v1",
+  "source_plan": "scripts/bridge_e2e/strutils_prd_plan.yaml",
+  "config": "scripts/ab_configs/ab_pty_config.yaml",
+  "project": "strutils 字串工具庫",
+  "aggregate": {
+    "total_steps": 5,
+    "success_steps": 0,
+    "pass_rate": 0.0,
+    "evaluator_steps": 2,
+    "escalated": true,
+    "kernel_success": false,
+    "peak_token_pct": 0.0
+  },
+  "by_goal_task": {
+    "GT-SPEC": {
+      "steps": 1,
+      "success": 0
+    },
+    "GT-IMPL": {
+      "steps": 4,
+      "success": 0
+    }
+  },
+  "per_step": [
+    {
+      "step_id": "E-SPEC-1",
+      "goal_task_id": "GT-SPEC",
+      "name": "需求/設計凍結（SCG-0~1）：slugify/truncate 行為契約 / 在當前工作目錄寫一份精簡規格檔 SPEC.md，記錄 slugify/tru…",
+      "success": false,
+      "first_pass": false,
+      "has_evaluator": false,
+      "evaluator_command": null,
+      "token_pct": null
+    },
+    {
+      "step_id": "E-IMPL-1",
+      "goal_task_id": "GT-IMPL",
+      "name": "實作至綠（SCG-4）：TDD 先測後實作 slugify 與 truncate / 在當前工作目錄建立 test_strutils.py，先寫 slugif…",
+      "success": false,
+      "first_pass": false,
+      "has_evaluator": false,
+      "evaluator_command": null,
+      "token_pct": null
+    },
+    {
+      "step_id": "E-IMPL-2",
+      "goal_task_id": "GT-IMPL",
+      "name": "實作至綠（SCG-4）：TDD 先測後實作 slugify 與 truncate / 在當前工作目錄建立 strutils.py 實作 slugify，使 t…",
+      "success": false,
+      "first_pass": false,
+      "has_evaluator": true,
+      "evaluator_command": "pytest test_strutils.py -q",
+      "token_pct": null
+    },
+    {
+      "step_id": "E-IMPL-3",
+      "goal_task_id": "GT-IMPL",
+      "name": "實作至綠（SCG-4）：TDD 先測後實作 slugify 與 truncate / 在 test_strutils.py 追加 truncate 的測試（依…",
+      "success": false,
+      "first_pass": false,
+      "has_evaluator": false,
+      "evaluator_command": null,
+      "token_pct": null
+    },
+    {
+      "step_id": "E-IMPL-4",
+      "goal_task_id": "GT-IMPL",
+      "name": "實作至綠（SCG-4）：TDD 先測後實作 slugify 與 truncate / 在 strutils.py 實作 truncate，使 test_str…",
+      "success": false,
+      "first_pass": false,
+      "has_evaluator": true,
+      "evaluator_command": "pytest test_strutils.py -q",
+      "token_pct": null
+    }
+  ],
+  "kernel_result": {
+    "success": false,
+    "completed_steps": 0,
+    "total_steps": 5,
+    "escalated": true,
+    "peak_token_pct": 0.0
+  },
+  "backend": "pty",
+  "note": "對照：pty 後端 --output-format json 擷取對寫檔步驟不可靠（DEF-81-001 族）→ keyword 未擷到 → E-SPEC-1 escalated（Claude 實際已正確寫 SPEC.md，見 DEF-95-002）"
+}

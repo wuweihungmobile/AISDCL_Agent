@@ -1,0 +1,86 @@
+{
+  "schema": "autosdd_bridge_e2e_evidence/v1",
+  "source_plan": "scripts/bridge_e2e/strutils_prd_plan.yaml",
+  "config": "scripts/ab_configs/ab_sdk_config.yaml",
+  "project": "strutils 字串工具庫",
+  "aggregate": {
+    "total_steps": 5,
+    "success_steps": 5,
+    "pass_rate": 1.0,
+    "evaluator_steps": 2,
+    "escalated": false,
+    "kernel_success": true,
+    "peak_token_pct": 3.0
+  },
+  "by_goal_task": {
+    "GT-SPEC": {
+      "steps": 1,
+      "success": 1
+    },
+    "GT-IMPL": {
+      "steps": 4,
+      "success": 4
+    }
+  },
+  "per_step": [
+    {
+      "step_id": "E-SPEC-1",
+      "goal_task_id": "GT-SPEC",
+      "name": "需求/設計凍結（SCG-0~1）：slugify/truncate 行為契約 / 在當前工作目錄寫一份精簡規格檔 SPEC.md，記錄 slugify/tru…",
+      "success": true,
+      "first_pass": true,
+      "has_evaluator": false,
+      "evaluator_command": null,
+      "token_pct": 2.0
+    },
+    {
+      "step_id": "E-IMPL-1",
+      "goal_task_id": "GT-IMPL",
+      "name": "實作至綠（SCG-4）：TDD 先測後實作 slugify 與 truncate / 在當前工作目錄建立 test_strutils.py，先寫 slugif…",
+      "success": true,
+      "first_pass": true,
+      "has_evaluator": false,
+      "evaluator_command": null,
+      "token_pct": 3.0
+    },
+    {
+      "step_id": "E-IMPL-2",
+      "goal_task_id": "GT-IMPL",
+      "name": "實作至綠（SCG-4）：TDD 先測後實作 slugify 與 truncate / 在當前工作目錄建立 strutils.py 實作 slugify，使 t…",
+      "success": true,
+      "first_pass": true,
+      "has_evaluator": true,
+      "evaluator_command": "pytest test_strutils.py -q",
+      "token_pct": 3.0
+    },
+    {
+      "step_id": "E-IMPL-3",
+      "goal_task_id": "GT-IMPL",
+      "name": "實作至綠（SCG-4）：TDD 先測後實作 slugify 與 truncate / 在 test_strutils.py 追加 truncate 的測試（依…",
+      "success": true,
+      "first_pass": true,
+      "has_evaluator": false,
+      "evaluator_command": null,
+      "token_pct": 3.0
+    },
+    {
+      "step_id": "E-IMPL-4",
+      "goal_task_id": "GT-IMPL",
+      "name": "實作至綠（SCG-4）：TDD 先測後實作 slugify 與 truncate / 在 strutils.py 實作 truncate，使 test_str…",
+      "success": true,
+      "first_pass": true,
+      "has_evaluator": true,
+      "evaluator_command": "pytest test_strutils.py -q",
+      "token_pct": 3.0
+    }
+  ],
+  "kernel_result": {
+    "success": true,
+    "completed_steps": 5,
+    "total_steps": 5,
+    "escalated": false,
+    "peak_token_pct": 3.0
+  },
+  "backend": "sdk",
+  "note": "主證據：橋接端到端在 sdk 後端 5/5 全過、evaluator pytest 閉環真綠"
+}

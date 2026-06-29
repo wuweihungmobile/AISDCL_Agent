@@ -1,0 +1,100 @@
+project: strutils 字串工具庫
+global_goal: 提供一個零依賴的純函式 Python 字串工具庫 strutils，以 slugify/truncate 兩個小而正確的函式為範圍，每個函式行為明確且可被 pytest 單元測試完全覆蓋（含空字串、超長、最小
+  n 等邊界）。以 SDD 規格先行 + TDD 先測後實作的方式建至 pytest 全綠。
+workflow_type: aisdlc_sdd
+tasks:
+- step_id: E-SPEC-1
+  name: 需求/設計凍結（SCG-0~1）：slugify/truncate 行為契約 / 在當前工作目錄寫一份精簡規格檔 SPEC.md，記錄 slugify/tru…
+  prompt: "請在「當前工作目錄」建立一份精簡規格檔，檔名為 SPEC.md，記錄字串工具庫 strutils 兩個函式的行為契約與邊界。內容必須涵蓋：\n\n## slugify(s: str)\
+    \ -> str\n- 轉小寫；空白與底線（_）轉連字號 -；移除非 [a-z0-9-] 的字元；合併連續連字號為單一 -；去除頭尾連字號。\n- 契約範例：\n  - slugify(\"Hello\
+    \ World!\") == \"hello-world\"\n  - slugify(\"  Foo__Bar  \") == \"foo-bar\"\n  - slugify(\"a---b\"\
+    ) == \"a-b\"\n\n## truncate(s: str, n: int) -> str\n- 將字串截斷至最多 n 個字元；若 len(s) > n，截到 n-1 個字元並補一個單一\
+    \ Unicode 省略號 …（U+2026），使總長 == n。\n- n 必須 >= 1；當 n < 1 時 raise ValueError。\n- 契約範例：\n  - truncate(\"\
+    hello\", 10) == \"hello\"（未超長原樣回傳）\n  - truncate(\"hello world\", 8) == \"hello w…\"（總長 8）\n  - truncate(\"\
+    x\", 1) == \"x\"\n\n## 非功能契約\n- 純函式、零第三方依賴（只用 Python 標準庫）。\n- 每個函式有 pytest 單元測試，邊界案例（空字串、超長、最小 n）全覆蓋。\n\
+    \n寫完 SPEC.md 後，在最後一行輸出完成關鍵字：[SPEC_DONE]\n"
+  expected_output_regex: \[SPEC_DONE\]
+  goal_task_id: GT-SPEC
+- step_id: E-IMPL-1
+  name: 實作至綠（SCG-4）：TDD 先測後實作 slugify 與 truncate / 在當前工作目錄建立 test_strutils.py，先寫 slugif…
+  prompt: "這是 TDD 的「先寫測試」步驟。請在「當前工作目錄」建立檔案 test_strutils.py，僅針對 slugify 撰寫單元測試（此時 strutils.py 尚未實作，import\
+    \ 會失敗是預期的，不要實作 strutils.py）。\n\ntest_strutils.py 內容要求：\n- 最上方 from strutils import slugify\n- 至少包含以下具體\
+    \ assert（依規格範例與邊界）：\n  - assert slugify(\"Hello World!\") == \"hello-world\"\n  - assert slugify(\"\
+    \  Foo__Bar  \") == \"foo-bar\"\n  - assert slugify(\"a---b\") == \"a-b\"\n  - assert slugify(\"\"\
+    ) == \"\"\n- 以 pytest 風格撰寫（def test_xxx(): ...）。\n\n完成後，在最後一行輸出完成關鍵字：[IMPL1_DONE]\n"
+  expected_output_regex: \[IMPL1_DONE\]
+  goal_task_id: GT-IMPL
+- step_id: E-IMPL-2
+  name: 實作至綠（SCG-4）：TDD 先測後實作 slugify 與 truncate / 在當前工作目錄建立 strutils.py 實作 slugify，使 t…
+  prompt: '這是 TDD 的「實作至綠」步驟。承接上一步在 test_strutils.py 中為 slugify 寫的測試，請在「當前工作目錄」建立 strutils.py，實作純函式 slugify，使既有
+    slugify 測試全部通過。
+
+
+    slugify(s: str) -> str 行為契約：
+
+    - 轉小寫；空白與底線（_）轉連字號 -；移除非 [a-z0-9-] 的字元；合併連續連字號為單一 -；去除頭尾連字號。
+
+    - 只用 Python 標準庫（可用 re），零第三方依賴。
+
+
+    必須滿足：
+
+    - slugify("Hello World!") == "hello-world"
+
+    - slugify("  Foo__Bar  ") == "foo-bar"
+
+    - slugify("a---b") == "a-b"
+
+    - slugify("") == ""
+
+
+    請執行 pytest test_strutils.py -q 確認 slugify 測試全綠。完成後在最後一行輸出完成關鍵字：[IMPL2_DONE]
+
+    '
+  expected_output_regex: \[IMPL2_DONE\]
+  evaluator_command: pytest test_strutils.py -q
+  goal_task_id: GT-IMPL
+- step_id: E-IMPL-3
+  name: 實作至綠（SCG-4）：TDD 先測後實作 slugify 與 truncate / 在 test_strutils.py 追加 truncate 的測試（依…
+  prompt: "這是 TDD 的「先寫測試」步驟（第二個函式）。請在「當前工作目錄」既有的 test_strutils.py 中，追加針對 truncate 的單元測試（此時 strutils.py\
+    \ 尚未有 truncate，相關測試會紅是預期的，不要在本步驟實作 truncate）。\n\n追加內容要求：\n- 於檔案頂部 import 改為 from strutils import slugify,\
+    \ truncate\n- 至少包含以下具體 assert（依規格範例與邊界）：\n  - assert truncate(\"hello\", 10) == \"hello\"\n  - assert\
+    \ truncate(\"hello world\", 8) == \"hello w…\"\n  - assert truncate(\"x\", 1) == \"x\"\n  - assert\
+    \ truncate(\"\", 5) == \"\"\n- 並測試 n < 1 會 raise ValueError，例如：\n  - import pytest 後，使用 with pytest.raises(ValueError):\
+    \ truncate(\"abc\", 0)\n- 保留既有 slugify 測試不動。\n\n完成後，在最後一行輸出完成關鍵字：[IMPL3_DONE]\n"
+  expected_output_regex: \[IMPL3_DONE\]
+  goal_task_id: GT-IMPL
+- step_id: E-IMPL-4
+  name: 實作至綠（SCG-4）：TDD 先測後實作 slugify 與 truncate / 在 strutils.py 實作 truncate，使 test_str…
+  prompt: '這是 TDD 的「實作至綠」步驟（第二個函式）。承接上一步在 test_strutils.py 追加的 truncate 測試，請在「當前工作目錄」既有的 strutils.py 中新增純函式
+    truncate，使整個 test_strutils.py（slugify + truncate 全部測試）通過，且不得破壞既有 slugify。
+
+
+    truncate(s: str, n: int) -> str 行為契約：
+
+    - 將字串截斷至最多 n 個字元；若 len(s) > n，截到 n-1 個字元並補一個單一 Unicode 省略號 …（U+2026），使總長 == n。
+
+    - n 必須 >= 1；當 n < 1 時 raise ValueError。
+
+    - 只用 Python 標準庫，零第三方依賴。
+
+
+    必須滿足：
+
+    - truncate("hello", 10) == "hello"
+
+    - truncate("hello world", 8) == "hello w…"
+
+    - truncate("x", 1) == "x"
+
+    - truncate("", 5) == ""
+
+    - truncate("abc", 0) 會 raise ValueError
+
+
+    請執行 pytest test_strutils.py -q 確認全部測試全綠。完成後在最後一行輸出完成關鍵字：[IMPL4_DONE]
+
+    '
+  expected_output_regex: \[IMPL4_DONE\]
+  evaluator_command: pytest test_strutils.py -q
+  goal_task_id: GT-IMPL
