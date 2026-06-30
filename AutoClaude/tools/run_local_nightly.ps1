@@ -24,6 +24,11 @@ Stage 失敗不中斷後續 stage（與 CI continue-on-error: true 一致）。
 .NOTES
 排程：schtasks /create /SC DAILY /ST 02:00 /TN "AutoClaude_Nightly" `
   /TR "powershell.exe -NoProfile -ExecutionPolicy Bypass -File <repo>\tools\run_local_nightly.ps1"
+🔴 排程後務必執行（elevated）：tools/fix_nightly_catchup.ps1
+  schtasks.exe /create 建出的任務預設 WakeToRun=false + StartWhenAvailable=false，
+  機器睡眠/休眠或關機時排程到點不喚醒、不補跑 → 觀察期 idle 漏跑（improving_102）。
+  fix_nightly_catchup.ps1 啟用「喚醒啟動 WakeToRun + 開機補跑 StartWhenAvailable +
+  電池不擋」三項；若睡眠仍漏跑，依該腳本提示用 powercfg 開啟電源計畫的喚醒計時器。
 觀察期完成日：mutation #1 → 2026-06-01；AC4 #2 → 2026-06-02；drift #3 → 2026-06-17。
 
 SD_09 W0 zero-trust audit 修復清單（2026-05-20）：
