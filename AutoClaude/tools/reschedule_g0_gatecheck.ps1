@@ -28,7 +28,7 @@ if (-not $task) {
 $trigger = New-ScheduledTaskTrigger -Once -At $TargetWhen
 Set-ScheduledTask -TaskName $TaskName -Trigger $trigger | Out-Null
 
-# missed-run protection (improving_102): off -> catch-up; asleep -> wake; battery -> do not block
+# missed-run protection (2026-06-30 ops hotfix): off -> catch-up; asleep -> wake; battery -> do not block
 $t = Get-ScheduledTask -TaskName $TaskName
 $t.Settings.StartWhenAvailable = $true
 $t.Settings.WakeToRun = $true                     # wake the machine from sleep/hibernate to run at scheduled time

@@ -1,10 +1,10 @@
 # fix_nightly_catchup.ps1 -- one-shot remediation for AutoClaude_Nightly missed-run gap
 # Root causes of missed schtasks runs (must ALL be covered, else observation-period idle gaps):
 #   (1) machine POWERED OFF at scheduled time      -> StartWhenAvailable=true  (catch-up after boot)
-#   (2) machine ASLEEP/HIBERNATING at sched. time  -> WakeToRun=true           (wake to run; improving_102)
+#   (2) machine ASLEEP/HIBERNATING at sched. time  -> WakeToRun=true           (wake to run)
 #   (3) laptop ON BATTERY                           -> DisallowStartIfOnBatteries=false (do not block)
 #   Note 2026-06-23: 06-19~21 missed = powered off + StartWhenAvailable=false (Windows event 153).
-#   Note (improving_102): WakeToRun was only PRINTED, never SET -> sleep/hibernate at 02:00 still missed.
+#   Note (2026-06-30 ops hotfix): WakeToRun was only PRINTED, never SET -> sleep/hibernate at 02:00 still missed.
 # WakeToRun caveat: also requires the power plan's wake timers to be allowed. If runs still miss while
 #   asleep, run (elevated):  powercfg /SETACVALUEINDEX SCHEME_CURRENT SUB_SLEEP RTCWAKE 1; powercfg /SETACTIVE SCHEME_CURRENT
 # Requires elevation (Set-ScheduledTask on this S4U task needs admin). Run once in an ELEVATED PowerShell.
