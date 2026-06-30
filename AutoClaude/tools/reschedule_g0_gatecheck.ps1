@@ -32,7 +32,8 @@ Set-ScheduledTask -TaskName $TaskName -Trigger $trigger | Out-Null
 $t = Get-ScheduledTask -TaskName $TaskName
 $t.Settings.StartWhenAvailable = $true
 $t.Settings.WakeToRun = $true                     # wake the machine from sleep/hibernate to run at scheduled time
-$t.Settings.DisallowStartIfOnBatteries = $false
+$t.Settings.DisallowStartIfOnBatteries = $false   # do not block start on battery
+$t.Settings.StopIfGoingOnBatteries = $false       # do not kill a running job on AC->battery switch
 Set-ScheduledTask -TaskName $TaskName -Settings $t.Settings | Out-Null
 
 $info = Get-ScheduledTask -TaskName $TaskName | Get-ScheduledTaskInfo
