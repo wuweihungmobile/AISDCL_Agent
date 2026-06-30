@@ -310,6 +310,9 @@ jobs:
           mutmut results | tee mutation_token_guard.log
 
       # 連續 7 次達 ≥ 70%（目標 75% -5% 容忍）才鎖定 baseline
+      # ADR-SD09-011（improving_101）：unique-sha 鎖定累積主通道已改為 mutation-on-change.yml
+      # （token_guard 源碼變動觸發，解除日曆綁定）；本 nightly step 角色轉為「kill_rate 漂移監控
+      # + flaky 偵測」。改 sha 去重後 idle 重跑同 sha 只更新最新、不稀釋 tail，故 nightly 保留無害。
       - name: Lock baseline if 7 consecutive runs >= target
         if: always()
         # SD_09 W0 Z1 解除（2026-05-20，B-09）：X1/Y1/B-01/B-07/B-08 全綠後移除 continue-on-error: true

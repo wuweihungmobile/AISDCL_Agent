@@ -52,6 +52,20 @@ PYTEST_ARGS="${AUTOCLAUDE_PUSH_PYTEST_ARGS:-tests/ -q --tb=short}"
 # shellcheck disable=SC2086
 python -m pytest $PYTEST_ARGS || fail=1
 
+# 6. ADR-SD09-011：token_guard 源碼變動偵測（on-change mutation 觸發，opt-in 非阻塞）
+#    鎖定累積改由「源碼變動」驅動（取代每日 nightly 計時）；本地 opt-in 因 Windows 原生
+#    不支援 mutmut（需 WSL/docker），預設僅提示、CI mutation-on-change.yml 為權威累積通道。
+echo "[pre-push] (額外) ADR-SD09-011 token_guard 源碼變動偵測"
+if git diff --name-only origin/main...HEAD 2>/dev/null | grep -q 'autoclaude/plugins/token_guard/.*\.py'; then
+  if [ "${AUTOCLAUDE_MUTATION_ON_PUSH:-0}" = "1" ] && [ -f tools/run_mutmut_in_docker.sh ]; then
+    echo "[pre-push]   token_guard 源碼有變 + opt-in → 跑 mutation（需 WSL/docker）"
+    bash tools/run_mutmut_in_docker.sh token_guard || echo "[pre-push]   mutation 非阻塞"
+  else
+    echo "[pre-push]   ⚠ token_guard 源碼有變 → 由 CI mutation-on-change.yml 累積 unique sha 證據"
+    echo "[pre-push]     （本地累積：AUTOCLAUDE_MUTATION_ON_PUSH=1，需 WSL/docker）"
+  fi
+fi
+
 if [ "$fail" -ne 0 ]; then
   echo "[pre-push] ❌ 本機 CI 閘門失敗 — 請修復後再 push（這正是要在本機攔下的 CI 紅燈）"
   echo "           100% Linux 對等驗證：powershell -ExecutionPolicy Bypass -File tools/run_act.ps1 -Job test"

@@ -173,14 +173,30 @@ def _utc_date_of_record(record: dict[str, Any]) -> str | None:
         return None
 
 
-def append_history(history_path: Path, record: dict[str, Any]) -> None:
-    """附加一筆紀錄；同 module + 同 UTC date 已存在則覆寫該筆（M-05 修復對齊）。
+def _dedup_key(record: dict[str, Any]) -> str | None:
+    """ADR-SD09-010 去重鍵：source_sha256 優先，無則 fallback UTC date。
 
-    SD_09 W0 zero-trust audit M-05 修復：避免同日 mutmut 多 runs 偽造觀察期 #1 連續 7 次。
+    新生產紀錄皆帶 source_sha256（nightly/on-change 跑 mutmut 必算 sha）→ 按源碼版本去重；
+    無 sha 的 legacy 紀錄（2026-05-20/21）退回 UTC date 去重（向後相容）。
+    """
+    sha = record.get("source_sha256")
+    if sha:
+        return str(sha)
+    return _utc_date_of_record(record)
+
+
+def append_history(history_path: Path, record: dict[str, Any]) -> None:
+    """附加一筆紀錄；同 module + 同去重鍵（source_sha256 優先 / UTC date fallback）覆寫舊筆。
+
+    ADR-SD09-010（improving_101）：去重鍵自「UTC 日期」改為「source_sha256」，解除
+    「unique sha 每日上限 1」的日曆綁定——**同一天的多個不同 sha（真實 commit）全部計入**，
+    同 sha 重跑因 mutation 確定性只留最新一筆。原 M-05（SD_09 W0：同 UTC date 覆寫避免同日
+    多 run 偽造連續 7 次）之反作弊目的，改由「同 sha 留最新 + unique sha 計數」更精準達成；
+    無 source_sha256 的 legacy 紀錄沿用 UTC date fallback（向後相容，新生產紀錄皆帶 sha）。
     """
     history_path.parent.mkdir(parents=True, exist_ok=True)
     module = record.get("module")
-    new_date = _utc_date_of_record(record)
+    new_key = _dedup_key(record)
 
     existing: list[dict[str, Any]] = []
     if history_path.exists():
@@ -193,12 +209,12 @@ def append_history(history_path: Path, record: dict[str, Any]) -> None:
                     parsed = json.loads(line)
                 except json.JSONDecodeError:
                     continue
-                # 同 module + 同 UTC date → 跳過舊紀錄
+                # 同 module + 同去重鍵 → 跳過舊紀錄（保留新 record，反映最新量測）
                 if (
                     module
                     and parsed.get("module") == module
-                    and new_date
-                    and _utc_date_of_record(parsed) == new_date
+                    and new_key
+                    and _dedup_key(parsed) == new_key
                 ):
                     continue
                 existing.append(parsed)
@@ -225,6 +241,52 @@ def load_module_history(history_path: Path, module: str) -> list[dict[str, Any]]
             if rec.get("module") == module:
                 records.append(rec)
     return records
+
+
+def compact_history_by_sha(
+    history_path: Path, *, backup: bool = True
+) -> tuple[int, int]:
+    """ADR-SD09-010 方案 A：把既有 history 按 (module, 去重鍵) 一次性壓縮，每組留最新一筆。
+
+    既有 `.mutation_history.jsonl` 在改去重鍵前是按 UTC date 累積（同 sha 多筆重複，如
+    token_guard `20940e1b` 連續 21 筆 idle 重跑）。本函式按 `_dedup_key`（sha 優先 / date
+    fallback）去重、每組保留 timestamp 最新者，使 history 對齊「每源碼版本一筆」語意；
+    壓縮後 unique 筆數 ≤ 真實演進版本數 → **不會假鎖定**（誠實：真實只演進過 N 個版本）。
+    壓縮前備份原檔為 `<path>.pre_sd09_010.bak`。回傳 (壓縮前筆數, 壓縮後筆數)。
+    """
+    if not history_path.exists():
+        return (0, 0)
+    raw = history_path.read_text(encoding="utf-8")
+    records: list[dict[str, Any]] = []
+    for ln in raw.splitlines():
+        ln = ln.strip()
+        if not ln:
+            continue
+        try:
+            records.append(json.loads(ln))
+        except json.JSONDecodeError:
+            continue
+    before = len(records)
+    if backup:
+        history_path.with_name(history_path.name + ".pre_sd09_010.bak").write_text(
+            raw, encoding="utf-8"
+        )
+    # 按 (module, 去重鍵) 分組，保留首次出現順序、每組留 timestamp 最新一筆
+    by_group: dict[tuple[Any, str | None], dict[str, Any]] = {}
+    order: list[tuple[Any, str | None]] = []
+    for rec in records:
+        key = (rec.get("module"), _dedup_key(rec))
+        if key not in by_group:
+            order.append(key)
+            by_group[key] = rec
+        elif str(rec.get("timestamp", "")) >= str(by_group[key].get("timestamp", "")):
+            # ISO-8601 timestamp 字典序＝時序 → 留新
+            by_group[key] = rec
+    compacted = [by_group[k] for k in order]
+    with history_path.open("w", encoding="utf-8") as f:
+        for rec in compacted:
+            f.write(json.dumps(rec, ensure_ascii=False) + "\n")
+    return (before, len(compacted))
 
 
 def compute_source_sha256(module_path: Path) -> str:
@@ -478,11 +540,16 @@ def _check_log_mtime(log_path: Path, max_age_seconds: int) -> tuple[bool, float]
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Mutation baseline lock (SD_08 W3 T3-D3)")
-    parser.add_argument("module", choices=sorted(TARGETS.keys()))
-    parser.add_argument("--log", type=Path, required=True, help="mutmut results log 路徑")
+    parser.add_argument("module", nargs="?", choices=sorted(TARGETS.keys()))
+    parser.add_argument("--log", type=Path, help="mutmut results log 路徑")
     parser.add_argument("--history", type=Path, default=_REPO_ROOT / ".mutation_history.jsonl")
     parser.add_argument("--baseline", type=Path, default=_REPO_ROOT / ".mutation_baseline.toml")
     parser.add_argument("--json", action="store_true", help="輸出 JSON")
+    parser.add_argument(
+        "--migrate-compact-sha",
+        action="store_true",
+        help="ADR-SD09-010 方案 A：一次性按 source_sha256 壓縮既有 history（每組留最新 + 備份）後退出",
+    )
     parser.add_argument(
         "--require-log-mtime-within-seconds",
         type=int,
@@ -490,6 +557,21 @@ def main(argv: list[str] | None = None) -> int:
         help="若 > 0，驗證 log mtime 在 N 秒內（避免讀到 stale log）；超時 stage fail（P1-2）",
     )
     args = parser.parse_args(argv)
+
+    # ADR-SD09-010：migration 模式（不需 module/log）——壓縮既有 history 後退出
+    if args.migrate_compact_sha:
+        before, after = compact_history_by_sha(args.history)
+        print(
+            f"::notice::history compacted by sha: {before} -> {after} records "
+            f"(backup: {args.history}.pre_sd09_010.bak)"
+        )
+        return 0
+
+    # 非 migration 模式：module + log 必填（取代原 required=True，使 migration 免帶）
+    if not args.module:
+        parser.error("module is required（除非 --migrate-compact-sha）")
+    if not args.log:
+        parser.error("--log is required（除非 --migrate-compact-sha）")
 
     # P1-2：log mtime 守門（紀律 #7 cache fresh）
     if args.require_log_mtime_within_seconds > 0:

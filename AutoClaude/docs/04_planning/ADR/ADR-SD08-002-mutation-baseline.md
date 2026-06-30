@@ -59,6 +59,8 @@ mutmut run \
 
 ### 2.4 連續 7 次達標鎖定
 
+> ⚠️ **ADR-SD09-011（2026-06-30）supersede 本節的「日曆綁定」語意**：「連續 7 次」原為「7 個 nightly 日」（SD_08 兩週 pilot 觀察期遺留），改為「**7 個 unique source_sha256（源碼版本）**」，觸發從每日 nightly 改為「token_guard 源碼變動」。`CONSECUTIVE_RUNS=7` 與門檻數值不變，反作弊強度不減（見 ADR-SD09-011 §3）。
+
 W3 期間每 nightly 跑完後：
 
 ```python

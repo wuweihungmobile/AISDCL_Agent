@@ -1,0 +1,48 @@
+name: Mutation On-Change (token_guard)
+
+# ADR-SD09-011（improving_101）：mutation baseline 鎖定的 unique-sha 累積，改由
+# 「token_guard 源碼變動」觸發（取代每日 nightly 計時 — 解除日曆綁定、不空轉）。
+# nightly schedule（ci.yml）保留，角色轉為「kill_rate 漂移監控 + flaky 偵測」，不再
+# 充當鎖定計時器（紀律 #6 採集寬鬆 vs 升級嚴格分軌）。本 workflow 為 unique-sha 累積權威通道。
+on:
+  push:
+    paths:
+      - 'autoclaude/plugins/token_guard/**'
+  workflow_dispatch:
+
+jobs:
+  mutation-on-change:
+    name: token_guard mutation accrual (on source change)
+    runs-on: ubuntu-latest
+    # 非阻塞：mutation survived 屬正常，產出證據即可，不擋 push
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install deps
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[dev]"
+          pip install mutmut
+      # ADR-SD09-002 §2.3：單一時間 1 個 active pilot module（token_guard）
+      - name: Run mutation - TokenGuardPlugin
+        run: |
+          mutmut run --paths-to-mutate=autoclaude/plugins/token_guard \
+                     --tests-dir=tests/plugins/token_guard \
+                     --no-progress \
+                     -p no:xdist || true  # mutmut: survived 退出碼 != 0，容忍
+          mutmut results | tee mutation_token_guard.log
+      # ADR-SD09-011：累積一筆帶 source_sha256 的證據（同 sha 去重留最新；同日多 sha 皆計入）
+      - name: Accrue unique-sha evidence
+        run: |
+          python tools/mutation_baseline_lock.py token_guard \
+            --log mutation_token_guard.log \
+            --history .mutation_history.jsonl \
+            --baseline .mutation_baseline.toml
+      - name: Analyze survived (補測 backlog)
+        run: |
+          python tools/mutation_analysis.py token_guard \
+            --log mutation_token_guard.log \
+            --output mutation_backlog_token_guard.md

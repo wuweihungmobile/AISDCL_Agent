@@ -26,6 +26,7 @@ from tools.mutation_baseline_lock import (
     TOLERANCE,
     append_history,
     calc_kill_rate,
+    compact_history_by_sha,
     compute_consistency_warning,
     parse_mutmut_log,
     read_baseline,
@@ -233,7 +234,11 @@ def test_should_lock_old_70pct_threshold_no_longer_strict() -> None:
 
 
 def test_append_history_same_date_overwrites(tmp_path: Path) -> None:
-    """M-05 修復：同 module + 同 UTC date 重複寫入只保留最後一筆。"""
+    """M-05：同 module + 同 UTC date 重複寫入只保留最後一筆。
+
+    ADR-SD09-010 後語意：此 rec **無 source_sha256**（legacy 紀錄）→ 去重鍵 fallback
+    至 UTC date，行為與 M-05 相同（向後相容；新生產紀錄皆帶 sha、走 sha 去重，見下）。
+    """
     hist = tmp_path / "history.jsonl"
     rec1 = {
         "timestamp": "2026-05-21T08:00:00+00:00",
@@ -250,6 +255,80 @@ def test_append_history_same_date_overwrites(tmp_path: Path) -> None:
     records = [json.loads(ln) for ln in hist.read_text().splitlines() if ln.strip()]
     assert len(records) == 1
     assert records[0]["kill_rate"] == 0.7
+
+
+# ----- ADR-SD09-010：去重鍵 UTC 日期 → source_sha256（解除日曆綁定）-----
+
+
+def test_append_history_same_date_different_sha_all_kept(tmp_path: Path) -> None:
+    """RTM-101-1（核心新行為）：同 module 同 UTC date 但**不同 sha**（同日多個真實 commit）
+    → 兩筆皆保留（不再被日曆去重壓成 1）。這是解除「unique sha 每日上限 1」的關鍵。"""
+    hist = tmp_path / "history.jsonl"
+    rec1 = {
+        "timestamp": "2026-06-30T08:00:00+00:00",
+        "module": "token_guard", "kill_rate": 0.71, "source_sha256": "aaaa000000000001",
+    }
+    rec2 = {
+        "timestamp": "2026-06-30T20:00:00+00:00",
+        "module": "token_guard", "kill_rate": 0.72, "source_sha256": "bbbb000000000002",
+    }
+    append_history(hist, rec1)
+    append_history(hist, rec2)
+    records = [json.loads(ln) for ln in hist.read_text().splitlines() if ln.strip()]
+    assert len(records) == 2  # 同日不同 sha → 皆計入
+    assert {r["source_sha256"] for r in records} == {"aaaa000000000001", "bbbb000000000002"}
+
+
+def test_append_history_same_sha_keeps_latest(tmp_path: Path) -> None:
+    """RTM-101-2：同 module 同 sha 重跑（mutation 確定性）→ 只留最新一筆。"""
+    hist = tmp_path / "history.jsonl"
+    rec1 = {
+        "timestamp": "2026-06-30T08:00:00+00:00",
+        "module": "token_guard", "kill_rate": 0.70, "source_sha256": "cccc000000000003",
+    }
+    rec2 = {
+        "timestamp": "2026-06-30T20:00:00+00:00",
+        "module": "token_guard", "kill_rate": 0.76, "source_sha256": "cccc000000000003",
+    }
+    append_history(hist, rec1)
+    append_history(hist, rec2)
+    records = [json.loads(ln) for ln in hist.read_text().splitlines() if ln.strip()]
+    assert len(records) == 1
+    assert records[0]["kill_rate"] == 0.76
+
+
+def test_append_history_same_sha_idle_rerun_dedups_across_days(tmp_path: Path) -> None:
+    """idle 不稀釋 tail：同 sha 跨**不同日**重跑（源碼凍結期 nightly idle 重跑）→ 仍去重留最新，
+    不再產生重複筆稀釋 tail 窗口（這正是舊機制空轉的反面）。"""
+    hist = tmp_path / "history.jsonl"
+    for day in range(20, 28):  # 8 個不同日、同一個凍結 sha
+        append_history(hist, {
+            "timestamp": f"2026-06-{day:02d}T18:00:00+00:00",
+            "module": "token_guard", "kill_rate": 0.765, "source_sha256": "dddd000000000004",
+        })
+    records = [json.loads(ln) for ln in hist.read_text().splitlines() if ln.strip()]
+    assert len(records) == 1  # idle 8 天同 sha → 仍只 1 筆（不稀釋）
+
+
+def test_compact_history_by_sha_collapses_duplicates_with_backup(tmp_path: Path) -> None:
+    """RTM-101-5：方案 A migration — 既有「同 sha 多筆（idle 累積）」壓縮成每 sha 一筆、
+    留最新；原檔備份存在；壓縮後 unique 數 ≤ 真實版本數（不假鎖定）。"""
+    hist = tmp_path / "history.jsonl"
+    # 模擬既有按日累積：sha-A ×3（idle 重跑）+ sha-B ×1
+    recs = [
+        {"timestamp": "2026-06-20T18:00:00+00:00", "module": "token_guard", "kill_rate": 0.74, "source_sha256": "A0"},
+        {"timestamp": "2026-06-21T18:00:00+00:00", "module": "token_guard", "kill_rate": 0.75, "source_sha256": "A0"},
+        {"timestamp": "2026-06-22T18:00:00+00:00", "module": "token_guard", "kill_rate": 0.765, "source_sha256": "A0"},
+        {"timestamp": "2026-06-25T18:00:00+00:00", "module": "token_guard", "kill_rate": 0.76, "source_sha256": "B1"},
+    ]
+    hist.write_text("\n".join(json.dumps(r) for r in recs) + "\n", encoding="utf-8")
+    before, after = compact_history_by_sha(hist)
+    assert (before, after) == (4, 2)  # A0 ×3 壓成 1 + B1 = 2
+    records = [json.loads(ln) for ln in hist.read_text().splitlines() if ln.strip()]
+    assert {r["source_sha256"] for r in records} == {"A0", "B1"}
+    a0 = next(r for r in records if r["source_sha256"] == "A0")
+    assert a0["kill_rate"] == 0.765  # A0 留最新（06-22 那筆）
+    assert (hist.parent / (hist.name + ".pre_sd09_010.bak")).exists()  # 備份存在
 
 
 def test_append_history_different_dates_preserve_all(tmp_path: Path) -> None:

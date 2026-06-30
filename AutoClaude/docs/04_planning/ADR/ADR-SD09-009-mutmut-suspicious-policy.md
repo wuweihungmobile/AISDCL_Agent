@@ -242,6 +242,8 @@ def should_compact_decision(*, token_pct, threshold, in_correction_loop, correct
 
 ### 11.6 R47 audit 訂正（unique sha 達標路徑心智模型）
 
+> ⚠️ **ADR-SD09-011（2026-06-30，improving_101）supersede 本節「需 W1 active 改源碼 × 多日演進」的時間綁定**：根因偵察揭露 M-05 同 UTC 日去重 + 每日 nightly 使 unique sha 每日上限 1、7 個需 ≥7 日曆天、idle 稀釋 tail → 空轉。改為「去重鍵 source_sha256（同日多 sha 皆計入）+ 源碼變動觸發」解除日曆綁定。**unique sha 反作弊與「禁 churn 衝 sha」仍完全保留**（§11 line 231/240 不變）；只取消與安全無關的日曆懲罰。詳見 ADR-SD09-011。
+
 SD_09 W3 Round 47 Architect + SA 並行 zero-trust audit 獨立指出 §11.3 line 230 原敘述「靠自然多日 commit 累積相異 sha 解決（約 2026-06-02~03）」**與 line 231 自相矛盾且誤導**：
 
 - **根因**：`compute_source_sha256` 對 `autoclaude/plugins/token_guard/*.py` rglob 計算（[mutation_baseline_lock.py](../../../tools/mutation_baseline_lock.py)），**只反映 plugin 源碼**。token_guard 源碼自 2026-05-27 凍結 `20940e1b`（5/27~5/29 三日同 sha）；對 repo 其他部分的 commit **不改變** token_guard sha。
