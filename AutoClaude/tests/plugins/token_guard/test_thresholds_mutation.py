@@ -17,6 +17,7 @@ from autoclaude.plugins.token_guard.thresholds import (
     get_dynamic_compact_threshold,
     should_compact_decision,
     should_halt_decision,
+    verify_act_first_ordering,
 )
 
 
@@ -111,6 +112,33 @@ class TestDynamicThresholdArithmetic:
         assert result > 0
 
 
+class TestShouldCompactL49DeadBranchEquivalence:
+    """DEF-100-002（improving_100）：should_compact_decision 的 L49 分支
+    `if in_correction_loop and correction_history_len <= 1: return token_pct >= threshold`
+    為死分支——到達 L49 時 `token_pct >= threshold` 已恆成立（L48 已 return False 攔掉
+    `<` 情況），故該分支 ≡ `return True` ≡ 下方 `return True`。
+
+    因此 `.mutmut-cache` #122-124（`and`→`or`、`<=`→`<`、`1`→`2`）皆為**等價變異**，
+    補測試殺不掉（也不該硬殺，符 ADR-SD09-009 §11 等價變異天花板）。本測試 pin 住
+    「該分支對結果無影響」語意，作為等價性實證（RTM-100-5），並保護未來若 routed
+    重構移除冗餘分支時行為不變。
+
+    Rule 9（為何）：mutation pilot 的 survived 不全是測試缺口——區分「真缺口（補測）」
+    與「等價變異（死碼，標記/重構）」是 kill_rate 不應盲目衝 100% 的根本原因。
+    """
+
+    @pytest.mark.parametrize("in_loop", [True, False])
+    @pytest.mark.parametrize("hist", [0, 1, 2, 5])
+    def test_at_or_above_threshold_always_compacts_regardless_of_correction(
+        self, in_loop, hist,
+    ):
+        # token_pct >= threshold 時，無論 in_correction_loop / history_len 為何，恆 True
+        assert should_compact_decision(
+            token_pct=80.0, threshold=80.0,
+            in_correction_loop=in_loop, correction_history_len=hist,
+        ) is True
+
+
 class TestShouldCompactDecisionBoundaries:
     """殺 should_compact_decision 中 `<`, `>=`, `<=` 邊界 mutation。"""
 
@@ -165,3 +193,39 @@ class TestShouldHaltDecisionBoundaries:
     def test_zero_token_pct_below_threshold(self):
         """殺常量 mutation：halt_threshold > 0 時，pct=0 必 False。"""
         assert should_halt_decision(token_pct=0.0, halt_threshold=90.0) is False
+
+
+class TestVerifyActFirstOrderingFailClosedBoundary:
+    """殺 verify_act_first_ordering fail-closed 防呆行 #129-131 的 boundary mutation。
+
+    SD_09 W1 improving_100：improving_68 新增的 `if max_tokens <= 0 or
+    autocompact_threshold_tokens <= 0:` 在 `.mutmut-cache` 留 3 個 survived
+    （#129-131）。既有 test_thresholds.py 只測 max_tokens==0 / autocompact==0
+    兩個 fail-closed case，無法殺「`0`→`1`」常量 boundary 變異（需 ==1 才區分）。
+
+    Rule 9（為何）：防呆門檻若被 `<=0` 默默放寬成 `<=1`，會把 max_tokens=1
+    這種「極小但合法正值」誤判為無法判定 → fail-closed 回 False，使本可成立的
+    act-first 排序被錯誤擋下（SDK 後端啟用檢查誤報不安全）。
+    """
+
+    def test_max_tokens_one_is_valid_not_clamped_to_le_one(self):
+        """殺 `max_tokens <= 0` → `max_tokens <= 1`（常量 0→1）。
+
+        max_tokens=1 是極小但合法正值：原式 `1<=0` False → 進入計算
+        halt_tokens=0.9*1=0.9 < autocompact=190000 → 安全 True。
+        變異 `1<=1` True → fail-closed False。期望 True 殺之。
+        """
+        assert verify_act_first_ordering(
+            autocompact_threshold_tokens=190_000, max_tokens=1, halt_pct=90.0,
+        ) is True
+
+    def test_autocompact_one_is_valid_not_clamped_to_le_one(self):
+        """殺 `autocompact_threshold_tokens <= 0` → `<= 1`（常量 0→1）。
+
+        autocompact=1（極小正值）+ max_tokens=1 使 halt_tokens=0.9 < 1：
+        原式兩邊皆 False → 計算 `0.9 < 1` 安全 True。
+        變異 `autocompact<=1` 即 `1<=1` True → fail-closed False。期望 True 殺之。
+        """
+        assert verify_act_first_ordering(
+            autocompact_threshold_tokens=1, max_tokens=1, halt_pct=90.0,
+        ) is True

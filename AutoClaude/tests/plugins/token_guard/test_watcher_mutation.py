@@ -32,6 +32,28 @@ class TestObserveTokenLineMutations:
         assert c is False
         assert h is False
 
+    def test_pct_equals_peak_at_halt_threshold_no_reupdate(self):
+        """殺 `pct <= peak_pct` → `< peak_pct` boundary mutation（#71）。
+
+        SD_09 W1 improving_100：既有 test_pct_equals_peak_no_update 用 pct=70
+        （低於所有門檻）→ 變異走更新分支但 70 不觸發任何 flag、結果相同 → 殺不掉
+        （`.mutmut-cache` #71 survived 即此因）。本測試令 pct==peak==halt_threshold：
+        原式 `pct<=peak`(90<=90) True → 立即 return 不更新、triggered_halt 維持 False；
+        變異 `pct<peak`(90<90) False → 進入更新分支、`90>=90` 誤觸 new_halt=True。
+        期望 triggered_halt 維持 False 殺之。
+
+        Rule 9（為何）：pct 等於既有 peak 時必須短路不重算門檻，否則「持平不前進」
+        的觀測會重複觸發 halt，違反 peak 單調語意。
+        """
+        cfg = TokenGuardConfig(compact_threshold_pct=80.0, halt_threshold_pct=90.0)
+        peak, c, h = observe_token_line(
+            pct=90.0, peak_pct=90.0,
+            triggered_compact=False, triggered_halt=False, cfg=cfg,
+        )
+        assert peak == 90.0
+        assert h is False  # 持平不更新 → 不重觸 halt
+        assert c is False
+
     def test_pct_one_above_peak_updates(self):
         """殺 `pct > peak_pct` 邊界 mutation。"""
         cfg = TokenGuardConfig(compact_threshold_pct=80.0, halt_threshold_pct=90.0)
