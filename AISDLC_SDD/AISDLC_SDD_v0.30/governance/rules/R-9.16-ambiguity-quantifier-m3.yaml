@@ -1,0 +1,18 @@
+id: R-9.16
+title: Phase G M3 Spec Ambiguity Quantifier
+trigger_states:
+  - SCG_VALIDATION
+  - SPEC_DRAFTING
+severity: high
+maturity: active
+spec: >
+  把「Spec 模糊但未違反 SLV」的灰區量化為 0~1（僅對 FRD 的 AC 段落，6 維度加權）；
+  任一 AC ≥0.4 即 SCG-0 fail，報告寫 build/reports/scg/AMBIGUITY-*.yaml；例外需建立
+  AMBIGUITY-WAIVER（reviewer signoff）；評分公式變更必須 bump SCORER_VERSION 並 invalidate
+  快取。禁止對 invariants/architecture 評分（範圍越界）。對應 ambiguity_scorer.py。
+test_ref: tools/fsm_runtime/tests/test_ambiguity_scorer.py
+enforcement_mechanism: manual
+scaffold_roi:
+  fire_count: 0
+  catch_count: 0
+  false_positive_count: 0

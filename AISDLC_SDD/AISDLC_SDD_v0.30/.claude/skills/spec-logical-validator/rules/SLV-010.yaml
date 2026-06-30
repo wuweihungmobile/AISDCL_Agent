@@ -1,0 +1,30 @@
+id: SLV-010
+name: DB schema 與 FRD 資料需求不對齊
+source: ACT-031 manual-authored 2026-04-25
+source_fpl: null   # 非 FPL 衍生（manual-authored per ACT-031）；per Rule 9.11.5 審計鏈顯式宣告
+trust_level: proposed
+scope: SCG-1
+purpose: |
+  FRD AC 中宣告 `<!-- anchor:db:<table> -->` 的 table，必須存在於
+  docs/07_design/db/{schema.sql,*.yaml} 並覆蓋 FRD 中以 backtick 標示的
+  欄位（如 `email` / `created_at`）。常見違反：FRD 提到 `email` 但
+  schema.sql 漏建欄位；新增欄位但未更新 FRD。
+scan_targets:
+  - docs/01_requirements/FRD-*.md
+  - docs/02_architecture/SRD-*.md
+required_qualifiers:
+  - 每個 anchor:db 必能在 schema.sql 或 db/*.yaml 找到 CREATE TABLE
+  - FRD 內以 backtick 列出的欄位須在 schema.sql 對應 column 存在
+modality:
+  type: db
+  validator_module: tools.fsm_runtime.modality.db_schema_adapter
+  validator_function: validate_anchor
+backend_hint: session   # SQL DDL / YAML 純規則解析，不需 LLM
+failure_examples:
+  - "FRD：anchor:db:users + `email` + `created_at`；schema 缺 created_at → schema_mismatch"
+  - "anchor:db:orders；schema.sql 無 orders → missing_anchor_target"
+pass_examples:
+  - "FRD `email` `password` `created_at`；schema users 含三欄"
+severity: HIGH
+blocks_scg: false       # proposed → advisory only
+anchor_type: db

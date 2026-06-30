@@ -1,0 +1,23 @@
+case_id: OPR-true-08
+expect: true_operator
+note: spread/range-sensitive invented operator rescues low-spread good candidate that
+  baseline OPS miss
+candidates:
+- real_quality: 0.46
+  existing_cost: 2.0
+  features:
+    rollback_steps: 10.0
+    blast_radius: 1.0
+    canary_gap: 1.0
+- real_quality: 0.86
+  existing_cost: 3.0
+  features:
+    rollback_steps: 4.0
+    blast_radius: 4.0
+    canary_gap: 4.0
+- real_quality: 0.6
+  existing_cost: 5.0
+  features:
+    rollback_steps: 6.0
+    blast_radius: 3.0
+    canary_gap: 2.0

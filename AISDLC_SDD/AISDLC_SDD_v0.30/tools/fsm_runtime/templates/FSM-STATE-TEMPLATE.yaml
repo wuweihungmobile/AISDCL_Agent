@@ -1,0 +1,155 @@
+# FSM State Persistence Template
+# FSM 狀態持久化模板
+#
+# 使用說明：
+#   每次執行 SDD Agentic 閉環時，複製此模板並命名為 FSM-STATE-{project}-{date}.yaml
+#   在每次 retry_count 增加、SPEC_FROZEN、ESCALATION 時更新此文件
+#
+# 版本: v1.0
+# 建立日期: 2026-04-19
+# 對應 ACT: ACT-002（SDD_improving_Automation_02.md）
+
+fsm_state:
+  project: "{project_name}"
+  session_id: "{uuid}"
+  created_at: "{ISO8601}"
+  updated_at: "{ISO8601}"
+  current_state: "INIT"          # 當前 FSM 狀態
+  current_sprint: 1              # 當前 Sprint 編號（SpecTrace 分階段阻塞判斷用）
+
+  retry_history:
+    SCG_VALIDATION:
+      current_count: 0
+      max_limit: 3
+      history: []
+      # history 格式:
+      # - attempt: 1
+      #   date: "2026-04-19"
+      #   failure_reason: "FRD 缺少 NFR 量化目標"
+      #   scg_gate: "SCG-0"
+
+    PR_REVIEW:
+      current_count: 0
+      max_limit: 5
+      spec_audit_count: 0        # SPEC_AUDIT 執行次數（上限 2）
+      max_spec_audit: 2
+      same_pattern_count: 0
+      same_pattern_threshold: 3
+      last_failure_pattern: null
+      history: []
+      patterns: []  # 歷次 failure patterns（cap 20, ACT-021）
+      # patterns 格式（每次 PR_REVIEW FAIL 後 append 一筆，is_same_pattern 判定後寫 matched_prev）：
+      # - attempt: 3
+      #   ts: "2026-04-20T14:30:00Z"
+      #   reason: "test_login_p95 > 200ms at concurrency 100"
+      #   normalized: "test_login_p N ms gt concurrency N"
+      #   similarity_to_prev: 0.87          # max(SequenceMatcher, Jaccard)
+      #   matched_prev: true                 # True 代表 same_pattern_count +1
+      #   matched_history_idx: 1             # best_match() 回傳的索引
+      # 上限: 最近 20 筆；溢位直接捨棄最舊的
+
+    RTM_VERIFY:
+      current_count: 0
+      max_limit: 2
+      history: []
+
+  implementation_budget:
+    current_iteration: 0
+    max_iterations: 20
+    consecutive_compile_fail: 0
+    max_consecutive_compile_fail: 3
+    test_fail_without_spec_change: 0
+    max_test_fail_without_spec_change: 5
+
+  cumulative_history:
+    total_scg_retries_all_time: 0      # 跨 SPEC_FROZEN 不清除（防策略性重置）
+    total_spec_frozen_count: 0
+    total_pr_review_retries: 0
+    escalation_count: 0
+    spec_audit_total_count: 0
+    superficial_fix_count: 0           # Phase D / ACT-014：SPEC_REGRESSION_CHECK 偵測到的表面修正次數
+    audit_warning_threshold: 10        # total_scg_retries_all_time > 10 觸發 AUDIT 警告
+    superficial_fix_escalation_threshold: 2  # superficial_fix_count > 2 強制 ESCALATION
+
+  spec_regression_check:
+    last_run_at: null
+    last_outcome: null                 # PASS | SUPERFICIAL_FIX | N/A
+    recent_failures_rescanned: []      # 本次 check 重跑的 SLV 規則清單
+
+  # Phase E / ACT-023：HUMAN_PENDING 逾時檢查依賴的 wall-clock 時戳
+  human_pending_tracking:
+    entered_at: null                   # 最近一次進入 HUMAN_PENDING 的 ISO8601 時戳
+    reminder_sent_at: null             # 72h 提醒送出時間（避免重複提醒）
+    reminder_hours: 72                 # REMINDER 門檻（小時）
+    escalation_hours: 168              # ESCALATION 門檻（小時）
+
+  # Phase D / Auto-Compact：90% 閾值自動觸發狀態
+  auto_compact_state:
+    triggered_at: null               # 最近一次 AUTO_COMPACT_PENDING 觸發時間（ISO8601）
+    completed_at: null               # stage-compaction 完成時間
+    resume_state: null               # 觸發前的 FSM 狀態（compact 完成後回到此 state）
+    trigger_ratio: null              # 觸發當下的 cumulative_tokens / MAX_CONTEXT
+    trigger_cumulative_tokens: 0     # 觸發當下的 cumulative_tokens
+    trigger_count: 0                 # 本 session 累計觸發次數
+    completed_count: 0               # 本 session 累計完成次數
+    snapshot_path: null              # 本次 CONTEXT-SNAPSHOT-*.md 路徑
+    # Phase E / ACT-026：單一 stage 內的 auto-compact 觸發上限
+    count_per_stage: 0               # 當前 stage_key 內累計觸發次數（每次進入新 stage 歸零）
+    stage_key: null                  # 當前 stage 識別子（frozen_stages 最後一筆 stage，或 "initial"）
+    max_per_stage: 3                 # 單一 stage 上限，超過進入 ESCALATION（Rule 9.9）
+
+  # Phase E / ACT-025：Decision Trace — 每次 FSM transition 記錄「為什麼」
+  decision_trace: []
+  # 格式:
+  # - ts: "2026-04-20T14:30:00Z"
+  #   from: "SPEC_DRAFTING"
+  #   to: "SCG_VALIDATION"
+  #   trigger: "transition" | "gate_pass" | "gate_fail" | "spec_audit" | "spec_frozen" |
+  #            "auto_compact_trigger" | "auto_compact_complete"
+  #   reason: "SCG-0 SLV-005 PASS → 進入驗證"
+  #   spec_refs: ["docs/01_requirements/FRD-*.md"]
+  #   agents_consulted: ["sa-analyst"]
+  decision_trace_flushed: []         # 超過 max_keep=50 筆後歸檔至此（保留審計）
+
+  # Phase E / ACT-027：Production Feedback Layer（非阻塞監測）
+  production_signal_tracking:
+    inbox_dir: "data/slo_events"           # 事件檔落地位置（File-based Pull 模式）
+    quarantine_dir: "data/slo_events/quarantine"   # 簽章 / schema 失敗的事件
+    processed_dir: "data/slo_events/processed"     # 成功 ingest 的事件
+    drift_log: "build/reports/fsm/PBS-DRIFT-{date}.yaml"
+    last_scan_at: null                     # 最近一次 session_start.py scan 的時戳
+    events_ingested_count: 0               # 累計合法事件數
+    events_quarantined_count: 0            # 累計 quarantine 事件數
+    drift_reports_written: []              # 已產出的 PBS-DRIFT 報告路徑清單
+    persistent_threshold: 3                # 同一 metric 24h 內 ≥ N 次違反 → 產出 PBS-DRIFT report
+    window_hours: 24                       # 持續違反判定窗口
+
+  # Phase E M4 / ACT-028：Learning Layer（非阻塞背景狀態）
+  learning_commit_tracking:
+    entered_at: null                       # 進入 LEARNING_COMMIT 的時戳（ISO8601）
+    entered_from: null                     # 進入前的 state（ESCALATION / TERMINATED / RELEASE / PRODUCTION_SIGNAL）
+    fpl_id: null                           # 輸入 FPL 條目 ID（如 FPL-001）
+    proposed_slv_id: null                  # 產出 SLV 草案 ID（如 SLV-007）
+    proposed_rule_path: null               # 草案寫入位置（.claude/skills/spec-logical-validator/rules/SLV-00N.yaml）
+    review_status: null                    # pending | approved | rejected
+    reviewed_at: null                      # 人工 review 完成時戳
+    proposals_history: []                  # 歷次 propose/review 紀錄（FPL→SLV 審計鏈）
+
+  ci_events_pending: []              # 未處理的 CI-EVENT 文件路徑清單
+  # 格式: ["build/reports/fsm/CI-EVENT-2026-04-19-abc123.yaml"]
+
+  frozen_stages: []
+  # 已凍結的 Stage 清單（含 compaction 報告路徑）
+  # 格式:
+  # - stage: "Stage-1"
+  #   frozen_at: "2026-04-19T10:00:00Z"
+  #   compaction_report: "build/reports/compaction/COMPACT-Stage1-2026-04-19.md"
+  #   spec_docs:
+  #     - "docs/01_requirements/FRD-SystemName.md"
+
+  escalation_history: []
+  # 格式:
+  # - triggered_at: "2026-04-19T10:00:00Z"
+  #   trigger_reason: "SCG_VALIDATION retry_count ≥ 3"
+  #   resolved_at: null
+  #   resolution: null  # human_abort | human_fix_and_resume
