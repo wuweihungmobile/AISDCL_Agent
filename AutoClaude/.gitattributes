@@ -25,16 +25,20 @@ Makefile    text eol=lf
 
 # Windows-only 腳本（保留 CRLF）
 *.ps1       text eol=crlf
+*.psm1      text eol=crlf
+*.psd1      text eol=crlf
 *.cmd       text eol=crlf
 *.bat       text eol=crlf
 
 # 二進位（不轉換）
 *.png       binary
 *.jpg       binary
+*.jpeg      binary
 *.gif       binary
 *.ico       binary
 *.gz        binary
 *.zip       binary
 *.tar       binary
+*.jar       binary
 *.pdf       binary
 *.gpg       binary

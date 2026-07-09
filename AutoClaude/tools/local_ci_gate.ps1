@@ -95,6 +95,13 @@ if ($Pg) {
     $env:AUTOCLAUDE_TEST_PG_DSN = $asyncDsn
     $env:AUTOCLAUDE_ALLOW_INSECURE_DB = '1'
     alembic upgrade head
+    # alembic rc 防吞：migration 失敗即清理容器並記 FAIL，不讓後續指令 rc 蓋過
+    if ($LASTEXITCODE -ne 0) {
+      Write-Host 'alembic upgrade head 失敗'
+      docker compose -f docker-compose.ci.yml down -v | Out-Null
+      $global:LASTEXITCODE = 1
+      return
+    }
     python -m pytest tests/contract/test_pg_state_repository_contract.py -q --tb=short
     $pytestRc = $LASTEXITCODE
     docker compose -f docker-compose.ci.yml down -v | Out-Null

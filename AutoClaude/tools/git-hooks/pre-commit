@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # AutoClaude git pre-commit hook — 快速本地把關（目標 < 15s，僅針對已暫存檔）
-# 安裝：powershell -ExecutionPolicy Bypass -File tools/install_git_hooks.ps1（設 core.hooksPath=tools/git-hooks）
+# 安裝：tools/install_git_hooks.sh / .ps1（設 core.hooksPath=<repo根>/tools/git-hooks 根層 dispatcher，依路徑分流至本檔）
 # 緊急跳過：AUTOCLAUDE_SKIP_HOOKS=1 git commit ...  或  git commit --no-verify
 # ---------------------------------------------------------------------------
 set -uo pipefail
@@ -10,13 +10,15 @@ if [ "${AUTOCLAUDE_SKIP_HOOKS:-0}" = "1" ]; then
   exit 0
 fi
 
-ROOT="$(git rev-parse --show-toplevel)"
+# 自我定位：本檔位於 AutoClaude/tools/git-hooks/，往上兩層即 AutoClaude/
+# （monorepo 下 git rev-parse --show-toplevel 會回 monorepo 根，非本子專案根）
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 cd "$ROOT" || exit 1
 export PYTHONUTF8=1
 fail=0
 
 # 1. ruff lint（僅已暫存的 .py）
-staged_py="$(git diff --cached --name-only --diff-filter=ACM -- '*.py')"
+staged_py="$(git diff --cached --name-only --relative --diff-filter=ACM -- '*.py')"
 if [ -n "$staged_py" ]; then
   echo "[pre-commit] 1/4 ruff lint（已暫存 .py）"
   if command -v ruff >/dev/null 2>&1; then
@@ -44,7 +46,7 @@ fi
 
 # 4. .sh/.bash 必須 LF 行尾（取證紀律 #8；CRLF 會讓 Docker/Linux bash 噴 $'\r'）
 echo "[pre-commit] 4/4 .sh/.bash LF 行尾檢查"
-staged_sh="$(git diff --cached --name-only --diff-filter=ACM | grep -E '\.(sh|bash)$' || true)"
+staged_sh="$(git diff --cached --name-only --relative --diff-filter=ACM | grep -E '\.(sh|bash)$' || true)"
 for f in $staged_sh; do
   if [ -f "$f" ] && grep -q $'\r' "$f"; then
     echo "::error:: $f 含 CR/CRLF — .sh 必須 LF（取證紀律 #8）"

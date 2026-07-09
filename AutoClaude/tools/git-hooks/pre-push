@@ -2,7 +2,7 @@
 # AutoClaude git pre-push hook — push 前完整 CI 閘門鏡像（在本機把所有問題解決完才上版）
 # 鏡像 .github/workflows/ci.yml 的 push gating jobs：
 #   test（pytest + LOC + import-linter）/ claude-md-budget（CLAUDE.md + snapshot）/ equivalence
-# 安裝：powershell -ExecutionPolicy Bypass -File tools/install_git_hooks.ps1
+# 安裝：tools/install_git_hooks.sh / .ps1（設 core.hooksPath=<repo根>/tools/git-hooks 根層 dispatcher，依路徑分流至本檔）
 # 緊急跳過：AUTOCLAUDE_SKIP_HOOKS=1 git push ...  或  git push --no-verify
 # 注意：本 hook 在 Windows 跑本機 Python；如需 100% Linux 對等，請另跑 tools/run_act.ps1。
 # ---------------------------------------------------------------------------
@@ -13,7 +13,9 @@ if [ "${AUTOCLAUDE_SKIP_HOOKS:-0}" = "1" ]; then
   exit 0
 fi
 
-ROOT="$(git rev-parse --show-toplevel)"
+# 自我定位：本檔位於 AutoClaude/tools/git-hooks/，往上兩層即 AutoClaude/
+# （monorepo 下 git rev-parse --show-toplevel 會回 monorepo 根，非本子專案根）
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 cd "$ROOT" || exit 1
 export PYTHONUTF8=1
 fail=0

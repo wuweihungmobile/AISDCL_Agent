@@ -23,6 +23,7 @@ import logging
 import os
 import re
 import subprocess
+import sys
 from typing import Callable, Optional
 
 from ..core.hookspec import (
@@ -65,8 +66,9 @@ def _default_compiler(test_file: str, timeout: int) -> tuple[int, str]:
     """
     try:
         result = subprocess.run(
-            ["python", "-m", "py_compile", test_file],
+            [sys.executable, "-m", "py_compile", test_file],
             capture_output=True, text=True, timeout=timeout,
+            encoding="utf-8", errors="replace",
             env=_propagate_trace_env(),
         )
         return result.returncode, result.stderr or ""

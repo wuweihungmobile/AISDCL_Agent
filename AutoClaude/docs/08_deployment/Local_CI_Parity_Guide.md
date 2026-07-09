@@ -58,7 +58,7 @@ powershell -ExecutionPolicy Bypass -File tools/run_act.ps1                  # �
 - 安裝：
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File tools/install_git_hooks.ps1            # 設 core.hooksPath=tools/git-hooks
+powershell -ExecutionPolicy Bypass -File tools/install_git_hooks.ps1            # 設 core.hooksPath=根層 tools/git-hooks dispatcher（絕對路徑，見 §5）
 powershell -ExecutionPolicy Bypass -File tools/install_git_hooks.ps1 -Uninstall # 還原
 ```
 - 框架版（選用）：[`.pre-commit-config.yaml`](../../.pre-commit-config.yaml)（`pip install pre-commit && pre-commit install`），委派同一組原生 hook（SSOT，紀律 #4）。
@@ -114,7 +114,7 @@ powershell -ExecutionPolicy Bypass -File tools/local_ci_gate.ps1 -Pg         # �
 | act `authentication required - incorrect username or password` | Docker Desktop credsStore 對公開鏡像誤送認證；`run_act.ps1` 已用 `docker pull`+`--pull=false` 繞過。直接跑 act 時請先 `docker pull catthehacker/ubuntu:act-latest` |
 | act 報 Docker 連線失敗 | 開啟 Docker Desktop；`docker info` 應成功 |
 | pre-push pytest 太久 | `AUTOCLAUDE_PUSH_PYTEST_ARGS="tests/xxx -q"` 縮限；或先 `local_ci_gate.ps1` |
-| hook 沒觸發 | 確認 `git config --get core.hooksPath` = `tools/git-hooks`；重跑安裝腳本 |
+| hook 沒觸發 | 確認 `git config --get core.hooksPath` 指向 monorepo 根層 `tools/git-hooks`（絕對路徑，見 §5）；重跑安裝腳本 |
 | `.sh` 在容器噴 `$'\r'` | `.gitattributes` 已強制 LF；重新 checkout 或 `dos2unix` |
 | PG 測試本機過 CI 爆 | 確認用 `docker-compose.ci.yml`（pg17）而非主 compose（pg18） |
 
@@ -136,3 +136,19 @@ powershell -ExecutionPolicy Bypass -File tools/local_ci_gate.ps1 -Pg         # �
 | `tests/tools/test_mock_brain_server.py` | mock 契約測試（紀律 #4） |
 | `autoclaude/main.py` | 加 `MINIMAX_BASE_URL/MODEL` env 覆蓋 |
 | `.env.example` / `.gitattributes` | 接線文件 + hook LF |
+
+---
+
+## 5. 雙平台對照（macOS/Linux）
+
+本指南範例以 PowerShell 撰寫；macOS/Linux 已有對等 `.sh` 載具，用法一致：
+
+| 用途 | Windows | macOS / Linux |
+|------|---------|---------------|
+| 一鍵本機 CI 閘門 | `tools/local_ci_gate.ps1` | `tools/local_ci_gate.sh` |
+| act 跑真 CI（Docker） | `tools/run_act.ps1` | `tools/run_act.sh` |
+| 裝 git hooks | `tools/install_git_hooks.ps1` | `tools/install_git_hooks.sh` |
+| 環境設定（monorepo 根層） | `tools/bootstrap.ps1` | `tools/bootstrap.sh` |
+| 整合層閘門（monorepo 根層） | `tools/integration_gate.ps1` | `tools/integration_gate.sh` |
+
+git hooks 為**根層 dispatcher 架構**：任一支安裝腳本（`.sh`/`.ps1`）皆把 `core.hooksPath` 設為 monorepo 根層 `tools/git-hooks/` dispatcher 的**絕對路徑**，兩子專案閘門同時生效、不再互斥；dispatcher 依 commit/push 涉及的路徑自動分流。完整說明見根層 `ONBOARDING.md` §6。

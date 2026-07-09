@@ -1,0 +1,88 @@
+#!/usr/bin/env bash
+# 根層 dispatcher pre-push hook — monorepo 單一 git repo 的 hooks 分流器。
+#
+# 設計說明：
+#   本 repo 是「雙專案 monorepo + 單一 git repo」，core.hooksPath 只有一個值；
+#   本 dispatcher 由兩邊安裝腳本統一指向，依「本次 push 範圍涉及的路徑」自動分流，
+#   讓兩子專案閘門同時生效：
+#     - push 範圍變更含 AutoClaude/  → 執行 AutoClaude/tools/git-hooks/pre-push
+#     - push 範圍變更含 AISDLC_SDD/ → 執行 AISDLC_SDD/.githooks/pre-push
+#   分流條件（逐行解析 git 傳入 stdin 的 <local_ref> <local_sha> <remote_ref> <remote_sha>）：
+#     - remote_sha 全零（新分支）→ 用 git merge-base origin/main <local_sha> 回退為比較基準
+#     - local_sha 全零（刪除遠端分支）→ 該行跳過（無需驗證）
+#     - 任何無法判定的情況（merge-base 失敗、diff 失敗、stdin 空但仍被呼叫等）
+#       → fail-safe：視為兩子專案都有變更（跑全部閘門），寧可多跑不可漏跑
+#   stdin 會原樣轉發給各子 hook（printf '%s\n' "$STDIN" | bash <子hook>），
+#   使需要讀 stdin 的子 hook 行為不變。
+#   緊急跳過：AUTOCLAUDE_SKIP_HOOKS=1 git push ...  或  git push --no-verify
+# ---------------------------------------------------------------------------
+set -uo pipefail
+
+if [ "${AUTOCLAUDE_SKIP_HOOKS:-0}" = "1" ]; then
+  echo "[pre-push dispatcher] AUTOCLAUDE_SKIP_HOOKS=1 → 跳過所有檢查"
+  exit 0
+fi
+
+# 自我定位：本檔位於 <root>/tools/git-hooks/，往上兩層即 repo 根
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+rc=0
+
+ZERO_SHA='0000000000000000000000000000000000000000'
+STDIN="$(cat)"
+
+run_autoclaude=0
+run_sdd=0
+undeterminable=0
+parsed=0
+
+while read -r local_ref local_sha remote_ref remote_sha; do
+  [ -z "${local_ref:-}" ] && continue
+
+  # 刪除遠端分支：local_sha 全零 → 無東西可驗證，明確跳過（已判定，非 fail-safe 對象）
+  if [ "$local_sha" = "$ZERO_SHA" ]; then
+    parsed=1
+    continue
+  fi
+
+  base="$remote_sha"
+  if [ "$remote_sha" = "$ZERO_SHA" ]; then
+    # 新分支：以 origin/main 的 merge-base 為比較基準
+    if ! base="$(git merge-base origin/main "$local_sha" 2>/dev/null)" || [ -z "$base" ]; then
+      undeterminable=1
+      continue
+    fi
+  fi
+
+  if ! files="$(git diff --name-only "$base" "$local_sha" 2>/dev/null)"; then
+    undeterminable=1
+    continue
+  fi
+  parsed=1
+
+  printf '%s\n' "$files" | grep -q '^AutoClaude/'  && run_autoclaude=1
+  printf '%s\n' "$files" | grep -q '^AISDLC_SDD/' && run_sdd=1
+done <<EOF
+$STDIN
+EOF
+
+# fail-safe：任何無法判定的情況（merge-base/diff 失敗，或 stdin 非空卻無任何行可判定）
+# → 視為兩子專案都有變更（跑全部閘門），寧可多跑不可漏跑
+if [ "$undeterminable" -eq 1 ] || { [ "$parsed" -eq 0 ] && [ -n "$(printf '%s' "$STDIN" | tr -d '[:space:]')" ]; }; then
+  echo "[pre-push dispatcher] ⚠ 無法判定 push 範圍變更 → fail-safe：兩子專案閘門全跑"
+  run_autoclaude=1
+  run_sdd=1
+fi
+
+if [ "$run_autoclaude" -eq 1 ]; then
+  echo "[pre-push dispatcher] push 範圍含 AutoClaude/ → 執行 AutoClaude pre-push"
+  printf '%s\n' "$STDIN" | bash "$ROOT/AutoClaude/tools/git-hooks/pre-push" || rc=1
+fi
+
+if [ "$run_sdd" -eq 1 ]; then
+  if [ -f "$ROOT/AISDLC_SDD/.githooks/pre-push" ]; then
+    echo "[pre-push dispatcher] push 範圍含 AISDLC_SDD/ → 執行 AISDLC_SDD pre-push"
+    printf '%s\n' "$STDIN" | bash "$ROOT/AISDLC_SDD/.githooks/pre-push" || rc=1
+  fi
+fi
+
+exit $rc

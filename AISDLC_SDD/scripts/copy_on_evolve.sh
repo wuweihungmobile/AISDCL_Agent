@@ -68,7 +68,9 @@ mkdir -p "$TO"
 git -C "$TOP" archive "HEAD:$FROM_REL" | tar -x -C "$TO"
 
 _N="$(git -C "$TOP" ls-tree -r --name-only "HEAD:$FROM_REL" | wc -l | tr -d ' ')"
-echo "✅ Copy-on-Evolve（git archive，純 tracked）: $FROM → $TO（匯出 ${_N} tracked 檔；結構性排除所有 untracked/gitignored runtime 產物，含 build/reports/ 與 formal/states/，DEF-38-001）"
+# `$VAR` 後緊跟全形字元必須用 `${VAR}`——macOS bash 3.2 UTF-8 locale 會把全形字元
+# 首位元組吃進變數名，配 set -u 直接 unbound variable 崩潰。
+echo "✅ Copy-on-Evolve（git archive，純 tracked）: ${FROM} → ${TO}（匯出 ${_N} tracked 檔；結構性排除所有 untracked/gitignored runtime 產物，含 build/reports/ 與 formal/states/，DEF-38-001）"
 
 # ── DEF-58-002（P1 根因）：建版後自動同步框架版本戳記 + 父層鏡像 ────────────────────
 # WHY：新版以 git archive 逐字繼承來源版的 skill 版本戳（`**基於**: AISDLC-SDD vX.YY`、

@@ -1,0 +1,39 @@
+#!/usr/bin/env bash
+# 根層 dispatcher pre-commit hook — monorepo 單一 git repo 的 hooks 分流器。
+#
+# 設計說明：
+#   本 repo 是「雙專案 monorepo + 單一 git repo」，core.hooksPath 只有一個值；
+#   過去兩子專案的 hooks 互斥擇一是設計缺陷。本 dispatcher 由兩邊安裝腳本
+#   （AutoClaude/tools/install_git_hooks.* 與 AISDLC_SDD/scripts/install-hooks.*）
+#   統一指向，依「本次 commit 涉及的路徑」自動分流，讓兩子專案閘門同時生效：
+#     - 暫存變更含 AutoClaude/  → 執行 AutoClaude/tools/git-hooks/pre-commit
+#     - 暫存變更含 AISDLC_SDD/ → 執行 AISDLC_SDD/.githooks/pre-commit（存在才執行；
+#       目前 AISDLC_SDD 僅提供 pre-push，無 pre-commit，正常跳過）
+#   緊急跳過：AUTOCLAUDE_SKIP_HOOKS=1 git commit ...  或  git commit --no-verify
+# ---------------------------------------------------------------------------
+set -uo pipefail
+
+if [ "${AUTOCLAUDE_SKIP_HOOKS:-0}" = "1" ]; then
+  echo "[pre-commit dispatcher] AUTOCLAUDE_SKIP_HOOKS=1 → 跳過所有檢查"
+  exit 0
+fi
+
+# 自我定位：本檔位於 <root>/tools/git-hooks/，往上兩層即 repo 根
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+rc=0
+
+changed="$(git diff --cached --name-only)"
+
+if printf '%s\n' "$changed" | grep -q '^AutoClaude/'; then
+  echo "[pre-commit dispatcher] 暫存變更含 AutoClaude/ → 執行 AutoClaude pre-commit"
+  bash "$ROOT/AutoClaude/tools/git-hooks/pre-commit" || rc=1
+fi
+
+if printf '%s\n' "$changed" | grep -q '^AISDLC_SDD/'; then
+  if [ -f "$ROOT/AISDLC_SDD/.githooks/pre-commit" ]; then
+    echo "[pre-commit dispatcher] 暫存變更含 AISDLC_SDD/ → 執行 AISDLC_SDD pre-commit"
+    bash "$ROOT/AISDLC_SDD/.githooks/pre-commit" || rc=1
+  fi
+fi
+
+exit $rc

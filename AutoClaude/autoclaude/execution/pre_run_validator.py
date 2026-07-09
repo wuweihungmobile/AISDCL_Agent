@@ -12,6 +12,7 @@ import os
 import re
 import shutil
 import subprocess
+import sys
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional
@@ -84,8 +85,9 @@ class PreRunValidator:
                 continue
             try:
                 result = subprocess.run(
-                    ["python", "-m", "py_compile", test_file],
+                    [sys.executable, "-m", "py_compile", test_file],
                     capture_output=True, text=True, timeout=10,
+                    encoding="utf-8", errors="replace",
                     env=propagate_to_subprocess_env(dict(os.environ)),
                 )
                 if result.returncode != 0:

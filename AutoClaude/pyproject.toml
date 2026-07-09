@@ -22,6 +22,10 @@ dev = [
     "ruff>=0.4",
     "cachetools>=5.3",
     "hypothesis>=6.0",
+    # tools/ 開發腳本（run_bridge_e2e / migrate_yaml_to_db / three_tier_to_playbook）
+    # 使用 click；其單元測試 tests/tools/test_run_bridge_e2e.py 於 collection 期即 import。
+    # 原先未宣告、靠環境 ambient 安裝，fresh clone 會 ModuleNotFoundError（跨平台重現性缺口）。
+    "click>=8.0",
 ]
 # Mutation testing（SD_08 W3 / ADR-SD08-002 — TokenGuardPlugin pilot）
 # 鎖 2.4.3：mutmut 3.x CLI 重寫不支援 --paths-to-mutate / --tests-dir，

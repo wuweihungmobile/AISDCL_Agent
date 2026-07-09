@@ -5,6 +5,9 @@
 # 參考：docs/05_development/SD06_FK_DryRun_Report.md §1~§5
 #       docs/05_development/SD06_W3_DBA_Handover.md
 #
+# 跨平台注意：`$VAR` 後緊跟全形字元必須用 `${VAR}`——macOS bash 3.2 UTF-8 locale
+#   會把全形字元首位元組吃進變數名，配 set -u 直接 unbound variable 崩潰。
+#
 # 預設行為：dry-run（不實際下 alembic upgrade）— 須加 --execute 才會真正執行
 # 量測產出：tools/sd06_w3_dryrun_output/<timestamp>/
 #   ├── seed.log
@@ -104,7 +107,7 @@ ok "DB 連線成功"
 CURR_HEAD="$(alembic current 2>/dev/null | tail -1 || echo "")"
 [ -z "$CURR_HEAD" ] && fail "alembic current 失敗" 1
 log "目前 alembic head: $CURR_HEAD"
-echo "$CURR_HEAD" | grep -q "$ALEMBIC_HEAD_EXPECTED" || fail "alembic head 須為 $ALEMBIC_HEAD_EXPECTED；目前: $CURR_HEAD（請先 downgrade 或 upgrade）" 1
+echo "$CURR_HEAD" | grep -q "$ALEMBIC_HEAD_EXPECTED" || fail "alembic head 須為 ${ALEMBIC_HEAD_EXPECTED}；目前: ${CURR_HEAD}（請先 downgrade 或 upgrade）" 1
 ok "alembic head 符合預期：$ALEMBIC_HEAD_EXPECTED"
 
 # Safety guard：拒絕 production DB
@@ -132,7 +135,7 @@ if [ "$ORPHAN_COUNT" -gt 0 ] && [ "$EXECUTE" -eq 1 ]; then
 請先依 SD06_FK_DryRun_Report.md §5.0 處理（DELETE 或補 goal_task_id），再重跑此腳本。
 SQL：SELECT playbook_id, started_at FROM playbook_runs WHERE started_at >= '2026-05-20'::timestamptz;" 2
 fi
-ok "Safety guard：orphan post-cutoff 列檢查通過（count=$ORPHAN_COUNT）"
+ok "Safety guard：orphan post-cutoff 列檢查通過（count=${ORPHAN_COUNT}）"
 
 if [ "$EXECUTE" -eq 0 ]; then
     log "🔍 DRY-RUN 模式：以下為將執行的步驟摘要"
@@ -297,9 +300,9 @@ RATE="$(psql "$PSQL_DSN" -tA -c "
 SELECT count(*) FILTER (WHERE goal_task_id IS NOT NULL)::float / count(*)
 FROM playbook_runs;")"
 log "backfill_rate = $RATE"
-RATE_OK="$(echo "$RATE >= 0.95" | python3 -c 'import sys; print("yes" if eval(sys.stdin.read().strip().replace(">=", "@@").split("@@")[0]) >= 0.95 else "no")' 2>/dev/null || echo "no")"
-# 用 python3 算（避免 bc 不存在）
-[ "$(python3 -c "print('yes' if $RATE >= 0.95 else 'no')")" = "yes" ] || fail "backfill_rate $RATE < 0.95" 5
+RATE_OK="$(echo "$RATE >= 0.95" | python -c 'import sys; print("yes" if eval(sys.stdin.read().strip().replace(">=", "@@").split("@@")[0]) >= 0.95 else "no")' 2>/dev/null || echo "no")"
+# 用 python 算（避免 bc 不存在；venv 政策統一用裸 python，見 ONBOARDING.md §3）
+[ "$(python -c "print('yes' if $RATE >= 0.95 else 'no')")" = "yes" ] || fail "backfill_rate $RATE < 0.95" 5
 ok "backfill_rate $RATE ≥ 0.95"
 
 # Backfill checkpoints

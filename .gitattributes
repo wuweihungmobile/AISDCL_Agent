@@ -1,0 +1,54 @@
+# monorepo 根層行尾政策 — 跨平台（macOS ⇄ Windows）平價單一事實源。
+# 藍本＝AutoClaude/.gitattributes（已驗證 P0 政策），涵蓋範圍向根層與 AISDLC_SDD 對齊。
+#
+# 為何 P0：Windows git autocrlf 會把在 Linux / Docker / act 內以 bash 執行的 .sh
+# 與無副檔名 git hooks 轉成 CRLF，導致 `bash: $'\r': command not found` + syntax error
+# （AutoClaude Nightly 取證紀律 #8、AISDLC_SDD ADR-001）。
+# 🔴 遮蔽語意（準確版）：子專案 .gitattributes 的 `*` 規則會「整體遮蔽」根層特定
+# pattern（git 對每個檔案只採計「最深層那份 .gitattributes 中最後一條命中規則」，
+# 子專案的 `* text=auto eol=lf` 兜底會蓋掉根層的 *.ps1/*.jar 等特定規則），
+# 故根層 / AutoClaude / AISDLC_SDD 三檔必須各自完備，不能依賴根層補漏。
+
+* text=auto eol=lf
+
+# Unix/Linux 腳本與配置（強制 LF；跨 Docker / act / bash 執行）
+*.sh        text eol=lf
+*.bash      text eol=lf
+# git hooks（無副檔名，於 git-bash / Docker 以 bash 執行，CRLF 會噴 $'\r'）
+# tools/git-hooks/* ＝根層 dispatcher hooks（FIX-1；兩子專案閘門分流器）
+tools/git-hooks/* text eol=lf
+.githooks/*       text eol=lf
+.actrc      text eol=lf
+*.py        text eol=lf
+*.yaml      text eol=lf
+*.yml       text eol=lf
+*.toml      text eol=lf
+*.json      text eol=lf
+*.md        text eol=lf
+*.txt       text eol=lf
+*.cfg       text eol=lf
+*.ini       text eol=lf
+*.plist     text eol=lf
+Dockerfile  text eol=lf
+Dockerfile* text eol=lf
+Makefile    text eol=lf
+
+# Windows-only 腳本（保留 CRLF；macOS 上不執行）
+*.ps1       text eol=crlf
+*.psm1      text eol=crlf
+*.psd1      text eol=crlf
+*.cmd       text eol=crlf
+*.bat       text eol=crlf
+
+# 二進位（不轉換）
+*.png       binary
+*.jpg       binary
+*.jpeg      binary
+*.gif       binary
+*.ico       binary
+*.gz        binary
+*.zip       binary
+*.tar       binary
+*.jar       binary
+*.pdf       binary
+*.gpg       binary

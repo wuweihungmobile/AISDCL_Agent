@@ -2,11 +2,12 @@
 # Purpose: re-verify observation gates #1/#2/#3; write result to logs/.
 #   Run manually anytime, or fired once by a one-time schtasks on 2026-06-26.
 # Zero-trust: only reads real local jsonl honestly; never fabricates nightly / inflates progress.
-# Path: current monorepo d:\CursorProject\AISDCL_Agent\AutoClaude (NOT old d:\CursorProject\AutoClaude).
+# Path: derived from $PSScriptRoot (this script lives in <repo>/AutoClaude/tools/), so it
+#   works on any machine / drive / clone location (no hardcoded d:\ absolute path).
 # ASCII-only on purpose: PowerShell 5.1 parses non-BOM UTF-8 as ANSI -> mojibake; keep this script ASCII.
 
 $ErrorActionPreference = 'Continue'
-$Repo = 'd:\CursorProject\AISDCL_Agent\AutoClaude'
+$Repo = Split-Path -Parent $PSScriptRoot
 Set-Location $Repo
 
 $stamp = Get-Date -Format 'yyyy-MM-dd'

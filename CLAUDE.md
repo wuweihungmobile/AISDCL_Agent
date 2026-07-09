@@ -91,6 +91,8 @@ powershell -ExecutionPolicy Bypass -File tools/run_act.ps1 -Job test   # act：L
 powershell -ExecutionPolicy Bypass -File tools/run_local_nightly.ps1   # nightly 6 stage（mutation/pg-e2e/perf/drift/obs）
 docker compose -f docker-compose.ci.yml up -d                          # CI 對等 PG（pg17）
 ```
+- **macOS/Linux 對等腳本已存在**：AutoClaude 側 `tools/install_git_hooks.sh`、`tools/local_ci_gate.sh`、`tools/run_act.sh`；monorepo 根層另有 `tools/bootstrap.sh` 與 `tools/integration_gate.sh`。完整雙平台對照表見根層 [ONBOARDING.md](ONBOARDING.md) §6。
+- git hooks 為**根層 dispatcher**（monorepo 根 `tools/git-hooks/`）：任一支安裝腳本（`.sh`/`.ps1`）執行後**兩子專案閘門同時生效**，裝一次即可（詳見 ONBOARDING.md §6）。
 - CI（`.github/workflows/ci.yml`）jobs：`test`（pytest + LOC budget + lint-imports）、`claude-md-budget`（CLAUDE.md ≤ 400 行 + snapshot 新鮮度）、`equivalence`、`pg-contract`（continue-on-error）。
 - DB migrations：`alembic upgrade head`（同步 DSN／psycopg2；PostgreSQL 17 + pgvector）。
 

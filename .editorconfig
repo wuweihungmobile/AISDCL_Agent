@@ -1,0 +1,39 @@
+# EditorConfig — 跨平台（macOS ⇄ Windows）編輯器一致性單一事實源。
+# 搭配根 .gitattributes（行尾在 git 層強制）與 .python-version（直譯器版本）。
+# 官方：https://editorconfig.org
+root = true
+
+# 全域預設：LF 行尾、UTF-8、去尾端空白、檔末補換行。
+[*]
+end_of_line = lf
+charset = utf-8
+trim_trailing_whitespace = true
+insert_final_newline = true
+indent_style = space
+indent_size = 2
+
+# Python：4 空白（對齊 ruff / PEP 8；AutoClaude line-length=100）。
+[*.py]
+indent_size = 4
+
+# YAML / JSON / TOML：2 空白。
+[*.{yaml,yml,json,toml}]
+indent_size = 2
+
+# Markdown：保留尾端空白（兩個空白＝強制換行語意）。
+[*.md]
+trim_trailing_whitespace = false
+
+# PowerShell 腳本：Windows 原生 CRLF + UTF-8 BOM（對齊 .gitattributes 的 *.ps1 eol=crlf；
+# BOM 防 zh-TW Windows PS5.1 以 CP950 誤讀非 ASCII 而亂碼/破壞 parser）。
+[*.{ps1,psm1,psd1}]
+end_of_line = crlf
+charset = utf-8-bom
+
+# cmd/bat：CRLF 但「不加 BOM」（cmd.exe 對檔首 BOM 解析不良）。
+[*.{cmd,bat}]
+end_of_line = crlf
+
+# Makefile：必須用 tab 縮排。
+[Makefile]
+indent_style = tab

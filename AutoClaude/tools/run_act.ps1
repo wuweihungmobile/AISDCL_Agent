@@ -42,25 +42,33 @@ $RepoRoot = Split-Path -Parent $PSScriptRoot
 Set-Location $RepoRoot
 $Workflow = '.github/workflows/ci.yml'
 
-# ---- 1. 定位 act.exe（PATH 可能尚未刷新 → 退回 winget 安裝路徑）----
+# ---- 1. 定位 act.exe（PATH 可能尚未刷新 → 退回 winget 安裝路徑 → 退回 gh-act）----
+# 回傳字串陣列（指令 + 前置參數），gh-act 退回時為 @('gh','act')，對齊 run_act.sh 的偵測邏輯。
 function Resolve-Act {
   $cmd = Get-Command act -ErrorAction SilentlyContinue
-  if ($cmd) { return $cmd.Source }
+  if ($cmd) { return @($cmd.Source) }
   $wingetGlob = Join-Path $env:LOCALAPPDATA 'Microsoft\WinGet\Packages\nektos.act_*\act.exe'
   $found = Get-ChildItem -Path $wingetGlob -ErrorAction SilentlyContinue | Select-Object -First 1
-  if ($found) { return $found.FullName }
+  if ($found) { return @($found.FullName) }
+  # gh-act 退回（對齊 run_act.sh：act 不在 PATH 時檢查 gh extension list 是否含 nektos/gh-act）
+  if (Get-Command gh -ErrorAction SilentlyContinue) {
+    try { $extList = & gh extension list 2>$null } catch { $extList = '' }
+    if ("$extList" -match 'gh-act|nektos/gh-act') { return @('gh', 'act') }
+  }
   return $null
 }
 
-$Act = Resolve-Act
-if (-not $Act) {
+$Act = @(Resolve-Act | Where-Object { $_ })
+if ($Act.Count -eq 0) {
   Write-Host '[run_act] act 未安裝。請擇一安裝：' -ForegroundColor Red
   Write-Host '  winget install --id nektos.act -e'
   Write-Host '  scoop install act'
   Write-Host '  gh extension install https://github.com/nektos/gh-act   # 再以 gh act 呼叫'
   exit 127
 }
-Write-Host "[run_act] act = $Act" -ForegroundColor Cyan
+$ActExe = $Act[0]
+$ActPrefix = @($Act | Select-Object -Skip 1)
+Write-Host "[run_act] act = $($Act -join ' ')" -ForegroundColor Cyan
 
 # ---- 2. 確認 Docker daemon ----
 & docker info *> $null
@@ -71,7 +79,7 @@ if ($LASTEXITCODE -ne 0) {
 
 # ---- 3. List 模式 ----
 if ($List) {
-  & $Act -l -W $Workflow
+  & $ActExe @($ActPrefix + @('-l', '-W', $Workflow))
   exit $LASTEXITCODE
 }
 
@@ -114,9 +122,9 @@ $actArgs = @('push', '-W', $Workflow, '--pull=false', '--env-file', $EmptyEnv)
 if ($Job)    { $actArgs += @('-j', $Job) }
 if ($DryRun) { $actArgs += '-n' }
 
-Write-Host "[run_act] 執行: act $($actArgs -join ' ')" -ForegroundColor Cyan
+Write-Host "[run_act] 執行: $($Act -join ' ') $($actArgs -join ' ')" -ForegroundColor Cyan
 
-& $Act @actArgs
+& $ActExe @($ActPrefix + $actArgs)
 $rc = $LASTEXITCODE
 
 if ($rc -eq 0) {
