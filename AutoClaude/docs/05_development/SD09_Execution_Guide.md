@@ -252,7 +252,7 @@ tail -1 logs/nightly_latest.log                                # 期望 END obse
 
 # C 議題群：AC4 labeled PR 啟用（dormant trigger 開啟）
 [  ] T0-C1 確認 tools/ac4_progress_check.py --json 回報 ready_for_labeled_pr=true（觀察期 #2 通過）
-[  ] T0-C2 將 .github/workflows/pg-e2e-on-label.yml 由 dormant 切為 active（`on: pull_request labeled` trigger 啟用）
+[  ] T0-C2 將 .github/workflows/autoclaude-pg-e2e-on-label.yml 由 dormant 切為 active（`on: pull_request labeled` trigger 啟用）
 [  ] T0-C3 SD08_AC_Matrix.md AC4-1/AC4-2 升級為「實測 recall ≥ 0.95 + p95 < 50ms + cb_open=0」
 [  ] T0-C4（可選）新建 tools/ac4_dashboard.py — 視 PD 預算決定
 
@@ -294,7 +294,7 @@ tail -1 logs/nightly_latest.log                                # 期望 END obse
 [  ] ls docs/04_planning/ADR/ADR-SD09-*.md | wc -l                          # = 5（必）+ 1（若 PM #5=(a)，ADR-006 v0.1 PROPOSED）= 6
 [  ] ls docs/04_planning/ADR/ADR-SD09-005-pg-canary-stage-thresholds.md     # 存在
 [  ] grep -E "ready_for_labeled_pr=true" .ac4_history.jsonl                 # 命中（觀察期 #2 通過）
-[  ] grep -E "needs-pg-e2e" .github/workflows/pg-e2e-on-label.yml           # 命中（已啟用）
+[  ] grep -E "needs-pg-e2e" .github/workflows/autoclaude-pg-e2e-on-label.yml           # 命中（已啟用）
 [  ] ls docs/03_testing/SD09_AC_Matrix.md                                   # 存在
 [  ] grep -E "^### 1\.[1-5]" docs/05_development/sprint_history.md          # 含 §1.5 骨架
 [  ] ls docs/05_development/gate_audit.md && grep "§1-septies" docs/05_development/gate_audit.md  # 命中
@@ -320,11 +320,11 @@ tail -1 logs/nightly_latest.log                                # 期望 END obse
 ```
 [  ] T1-B1 git tag sd_09_w0_g0_pass（W1 前快照）
 [  ] T1-B2 確認 TokenGuardPlugin 已連續 7 次達 ≥ 70% 並鎖定 .mutation_baseline.toml（觀察期 #1）
-[  ] T1-B3 (**Architect M2 修復**) .github/workflows/ci.yml `mutation-test-nightly` job 重構：
+[  ] T1-B3 (**Architect M2 修復**) .github/workflows/autoclaude-ci.yml `mutation-test-nightly` job 重構：
        - TokenGuardPlugin step 從 nightly 移除，改為週 baseline 抽測（schedule: weekly）
        - 新增 GoalSynthesisPlugin nightly step：
          * `--paths-to-mutate=autoclaude/plugins/goal_synthesis_plugin.py --tests-dir=tests/plugins/test_goal_synthesis_plugin.py`
-           （**DEF-35-001 修復@improving_36**：goal_synthesis 為單檔非目錄，原 `.../plugins/goal_synthesis` 對不存在目錄；已於 ci.yml dormant job 同步單檔精準）
+           （**DEF-35-001 修復@improving_36**：goal_synthesis 為單檔非目錄，原 `.../plugins/goal_synthesis` 對不存在目錄；已於 autoclaude-ci.yml dormant job 同步單檔精準）
          * `-p no:xdist` + `--no-progress`
          * `timeout-minutes=45` + `continue-on-error=true`
        - 拆獨立 cron job（與 TG 週 baseline + 未來 Coordinator nightly 三個獨立 schedule，不同小時觸發）
@@ -337,8 +337,8 @@ tail -1 logs/nightly_latest.log                                # 期望 END obse
 
 **G1 驗證**：
 ```bash
-[  ] grep -E "paths-to-mutate=autoclaude/plugins/goal_synthesis_plugin.py" .github/workflows/ci.yml   # 命中（DEF-35-001：單檔精準）
-[  ] grep -E "schedule:" .github/workflows/ci.yml | wc -l                   # ≥ 3（TG 週 + GS nightly + 未來 Coord）
+[  ] grep -E "paths-to-mutate=autoclaude/plugins/goal_synthesis_plugin.py" .github/workflows/autoclaude-ci.yml   # 命中（DEF-35-001：單檔精準）
+[  ] grep -E "schedule:" .github/workflows/autoclaude-ci.yml | wc -l                   # ≥ 3（TG 週 + GS nightly + 未來 Coord）
 [  ] grep -E "token_guard" .mutation_baseline.toml                          # 命中（前置鎖定）
 [  ] ls docs/06_quality/SD09_Mutation_GoalSynthesis_Report.md               # 存在
 [  ] python -m pytest tests/contract/test_mutation_multi_module_lock.py -v  # ≥ 4 case 綠
@@ -360,7 +360,7 @@ tail -1 logs/nightly_latest.log                                # 期望 END obse
 ```
 [  ] T2-B1 git tag sd_09_w1_g1_pass
 [  ] T2-B2 確認 GoalSynthesisPlugin 已鎖定或進入 observing → 從 nightly 移除（ADR-SD09-002 §2.3）
-[  ] T2-B3 (**SD C2 修復**) .github/workflows/ci.yml 新增 OrchestrationCoordinator nightly step：
+[  ] T2-B3 (**SD C2 修復**) .github/workflows/autoclaude-ci.yml 新增 OrchestrationCoordinator nightly step：
        - `--paths-to-mutate=autoclaude/core/orchestration/coordinator.py`（**單檔精準，非整目錄**）
        - `--tests-dir=tests/core/orchestration`
        - 預檢：`ls tests/core/orchestration/ && find autoclaude/core/orchestration -name '*.py'`（G2 驗證納入）
@@ -386,7 +386,7 @@ tail -1 logs/nightly_latest.log                                # 期望 END obse
 
 **G2 驗證**：
 ```bash
-[  ] grep -E "paths-to-mutate=autoclaude/core/orchestration/coordinator.py" .github/workflows/ci.yml   # 命中（單檔精準）
+[  ] grep -E "paths-to-mutate=autoclaude/core/orchestration/coordinator.py" .github/workflows/autoclaude-ci.yml   # 命中（單檔精準）
 [  ] ls tests/core/orchestration/                                           # 存在
 [  ] ls docs/06_quality/SD09_Mutation_Coordinator_Report.md                 # 存在
 [  ] ls docs/06_quality/SD09_Perf_Machine_Procurement_Eval.md               # 存在

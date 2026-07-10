@@ -32,7 +32,7 @@ PM 拍板（SD_08 #3）：**分模組差異化目標 + W3 pilot 單模組兩週 
 
 ### 2.1 CI job 修正（T3-D2）
 
-`.github/workflows/ci.yml` `mutation-test-nightly` job：
+`.github/workflows/autoclaude-ci.yml` `mutation-test-nightly` job：
 - **Pilot 限定**：僅跑 TokenGuardPlugin（GoalSynthesis / Coordinator 兩個 step 暫停，延至 SD_09 啟用）
 - **mutmut 參數鎖定**：
   - `--paths-to-mutate=autoclaude/plugins/token_guard`（範圍縮限）
@@ -147,4 +147,4 @@ if len(history) >= 7 and all(rate >= TARGET[m] - 0.05 for rate in history[-7:]):
 - [ADR-SD08-002-mutation-baseline.md](../04_planning/ADR/ADR-SD08-002-mutation-baseline.md) v1.0
 - [SD_Improving_08.md](../04_planning/SD_Improving_08.md) v1.0 §6 PM #3
 - [SD08_Execution_Guide.md](../05_development/SD08_Execution_Guide.md) v1.0 §3 W3
-- `.github/workflows/ci.yml` `mutation-test-nightly` job
+- `.github/workflows/autoclaude-ci.yml` `mutation-test-nightly` job

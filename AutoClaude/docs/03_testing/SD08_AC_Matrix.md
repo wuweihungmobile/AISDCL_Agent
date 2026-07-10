@@ -20,8 +20,8 @@
   - `python tools/ac4_progress_check.py --json`（讀 `.ac4_history.jsonl` 評估，回傳 `ready_for_labeled_pr=true`）
 - **通過門檻（SD_09 T0-C3 升級實測語意）**：14 天 nightly 全綠連續 + **實測 recall@10 ≥ 0.95** + recall σ ≤ 0.02（**非工具就位即視為通過**，須觀察期累計實測數據）
 - **W2 G2 實測（2026-05-18）**：工具就位 ✅ + observing 觀察期啟動。**SD_09 W0 補述（2026-05-20）**：觀察期 #2 阻塞於 `tests/integration/test_pgvector_real_recall.py` 3 case 硬編碼 `pytest.skip` 與 `tools/seed_kb.py` 未實作（PM 拍板 X1 — 2026-05-19 已落地 fixture + `tools/seed_kb.py` 204 LOC + conditional skip），SD_09 W0 起 nightly 可實質採集 recall 數據；達標日預估 2026-06-02（觀察期 #2 結束）
-- **檔位**：`tools/ac4_nightly_collector.py` + `tools/ac4_progress_check.py` + `.github/workflows/ci.yml` `pg-e2e-nightly` job + `tests/fixtures/pgvector_real_queries.json` + `tests/fixtures/pgvector_real_ground_truth.json`（X1 落地）
-- **升級條件**：`tools/ac4_progress_check.py` 回報 `ready_for_labeled_pr=true` 後手動啟用 `pg-e2e-on-label.yml` workflow（SD_09 T0-C2）
+- **檔位**：`tools/ac4_nightly_collector.py` + `tools/ac4_progress_check.py` + `.github/workflows/autoclaude-ci.yml` `pg-e2e-nightly` job + `tests/fixtures/pgvector_real_queries.json` + `tests/fixtures/pgvector_real_ground_truth.json`（X1 落地）
+- **升級條件**：`tools/ac4_progress_check.py` 回報 `ready_for_labeled_pr=true` 後手動啟用 `autoclaude-pg-e2e-on-label.yml` workflow（SD_09 T0-C2）
 
 ### AC4-2：p95 latency < 50ms + CircuitBreaker open=0（**SD_09 T0-C3 升級為實測門檻**）
 
@@ -31,7 +31,7 @@
   - `python tools/ac4_progress_check.py --json` 輸出 `green_streak` + `consecutive_failures` + `recall_sigma` + `ready_for_labeled_pr` + `reasons`（**W1 補 `p95_latency_ms` + `cb_open_count` + `recall_p10` 三鍵匯出**對齊本門檻；目前工具讀取 nightly fields 但未上拋至 JSON top-level，SD_09 W0 QA zero-trust audit 已登 P1 修補）
 - **通過門檻（SD_09 T0-C3 升級實測語意）**：≥ 4 case 綠（未達 14 天 / 達 14 天全綠 / 黃線 3 次 / 紅線 5 次 CircuitBreaker open）+ **實測 p95 latency < 50ms** + **實測 cb_open_count = 0** 連續 14 天（**非工具就位即視為通過**，須觀察期累計實測數據）
 - **W2 G2 實測（2026-05-18）**：**6/6 PASSED ✅**（含 σ 邊界 + 空 history 兩條 bonus）。**SD_09 W0 補述（2026-05-20）**：observing 累計待 nightly 跑滿後評估 p95 < 50ms / cb_open=0；達標日預估 2026-06-02（與 AC4-1 同步觀察期 #2 結束）
-- **檔位**：`.github/workflows/pg-e2e-on-label.yml`（needs-pg-e2e label 觸發；觀察期 #2 通過後啟用，SD_09 T0-C2 dormant → active）
+- **檔位**：`.github/workflows/autoclaude-pg-e2e-on-label.yml`（needs-pg-e2e label 觸發；觀察期 #2 通過後啟用，SD_09 T0-C2 dormant → active）
 - **告警閾值**：黃線 ≥ 3 次未達綠線 / 紅線 ≥ 5 次未達綠線（自動 PR 評論）
 
 ---

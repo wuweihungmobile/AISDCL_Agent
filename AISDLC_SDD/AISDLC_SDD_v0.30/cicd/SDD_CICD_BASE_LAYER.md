@@ -213,7 +213,7 @@ fsm_sync_check:
 fsm_chaos_check:
   runner: ubuntu-latest          # P1-05 鎖定：seed 指令依賴 Python stdlib，runner 不可為 windows-*
   rounds: 100
-  reference_workflow: .github/workflows/fsm-chaos-nightly.yml  # P1-04 實體化的 nightly workflow
+  reference_workflow: .github/workflows/aisdlc-sdd-fsm-chaos-nightly.yml  # P1-04 實體化的 nightly workflow
   seed_strategy: "Python stdlib (跨 runner safe，不依賴 GNU/BSD date)"
   seed_command: 'python -c "import datetime; print(datetime.date.today().strftime(''%Y%m%d''))"'
   command: "python -m tools.fsm_runtime.chaos_runner --rounds 100 --seed ${SEED}"
@@ -613,15 +613,15 @@ docs/08_deployment/
 降 `retention-days`（observability-only，配額耗盡不判紅）；`drift-daily` 與
 `arch-fitness`(nightly) 共用 `main-push-serialize` concurrency + rebase-retry 消除
 推送競爭；action 升至 Node24 相容（checkout@v5 / setup-python@v6）；新增
-`.github/workflows/ci.yml` 於 push(main)/PR 跑離線閘門（呼叫同一份 `ci-gate.sh`）。
-另新增 `.github/workflows/artifact-cleanup.yml`（每日 03:00 UTC + 手動）用 gh CLI 刪除
+`.github/workflows/aisdlc-sdd-ci.yml`（monorepo 根層）於 push(main)/PR 跑離線閘門（呼叫同一份 `ci-gate.sh`）。
+另新增 `.github/workflows/aisdlc-sdd-artifact-cleanup.yml`（每日 03:00 UTC + 手動）用 gh CLI 刪除
 expired/逾齡 artifact，做配額長期治本（ADR-001 Next Action #1）。
 
 **啟用步驟**：
 ```bash
 bash scripts/install-hooks.sh            # 啟用 pre-push 閘門（或 .ps1）
 docker compose run --rm ci-runner        # 迷你正式環境跑離線閘門
-bash scripts/act-ci.sh                    # 選用：act 跑 ci.yml
+bash scripts/act-ci.sh                    # 選用：act 跑 aisdlc-sdd-ci.yml
 docker compose --profile llm up -d local-llm   # 選用：地端 LLM（Ollama）
 ```
 

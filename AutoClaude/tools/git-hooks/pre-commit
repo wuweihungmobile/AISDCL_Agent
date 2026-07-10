@@ -10,23 +10,37 @@ if [ "${AUTOCLAUDE_SKIP_HOOKS:-0}" = "1" ]; then
   exit 0
 fi
 
-# 自我定位：本檔位於 AutoClaude/tools/git-hooks/，往上兩層即 AutoClaude/
-# （monorepo 下 git rev-parse --show-toplevel 會回 monorepo 根，非本子專案根）
-ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+# 定位子專案根：git 執行 hooks 時 cwd＝該工作樹頂層，故以 --show-toplevel + /AutoClaude
+# 為第一優先（linked worktree 內 commit 時才會檢查「該 worktree 的樹」，而非安裝時的主
+# checkout）；取不到才 fallback BASH_SOURCE 自我定位（並印警告）。
+TOPLEVEL="$(git rev-parse --show-toplevel 2>/dev/null)"
+if [ -n "${TOPLEVEL:-}" ]; then
+  ROOT="$TOPLEVEL/AutoClaude"
+else
+  echo "[pre-commit] ⚠ git rev-parse --show-toplevel 失敗 → fallback BASH_SOURCE 自我定位（linked worktree 下可能指向主 checkout）" >&2
+  ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+fi
 cd "$ROOT" || exit 1
+# linked worktree：git 對 hook 匯出 GIT_DIR 但不匯出 GIT_WORK_TREE，cd 進子目錄後 git 會
+# 誤把 cwd 當工作樹頂層（--relative 不剝前綴 → 檔案檢查失效）；顯式錨定工作樹根。
+if [ -n "${GIT_DIR:-}" ] && [ -n "${TOPLEVEL:-}" ]; then
+  export GIT_WORK_TREE="$TOPLEVEL"
+fi
 export PYTHONUTF8=1
 fail=0
 
-# 1. ruff lint（僅已暫存的 .py）
-staged_py="$(git diff --cached --name-only --relative --diff-filter=ACM -- '*.py')"
-if [ -n "$staged_py" ]; then
+# 1. ruff lint（僅已暫存的 .py；while read 收集為陣列，含空白/非 ASCII 檔名安全，
+#    bash 3.2 相容不用 mapfile；quotepath=false 使非 ASCII 檔名不被引號包裹）
+staged_py=()
+while IFS= read -r f; do
+  [ -n "$f" ] && staged_py+=("$f")
+done < <(git -c core.quotepath=false diff --cached --name-only --relative --diff-filter=ACMR -- '*.py')
+if [ "${#staged_py[@]}" -gt 0 ]; then
   echo "[pre-commit] 1/4 ruff lint（已暫存 .py）"
   if command -v ruff >/dev/null 2>&1; then
-    # shellcheck disable=SC2086
-    ruff check $staged_py || fail=1
+    ruff check "${staged_py[@]}" || fail=1
   else
-    # shellcheck disable=SC2086
-    python -m ruff check $staged_py || fail=1
+    python -m ruff check "${staged_py[@]}" || fail=1
   fi
 fi
 
@@ -45,14 +59,15 @@ if [ -f CLAUDE.md ]; then
 fi
 
 # 4. .sh/.bash 必須 LF 行尾（取證紀律 #8；CRLF 會讓 Docker/Linux bash 噴 $'\r'）
+#    while read 逐行處理，含空白/非 ASCII 檔名安全（無引號 for 展開會依空白切字）
 echo "[pre-commit] 4/4 .sh/.bash LF 行尾檢查"
-staged_sh="$(git diff --cached --name-only --relative --diff-filter=ACM | grep -E '\.(sh|bash)$' || true)"
-for f in $staged_sh; do
+while IFS= read -r f; do
+  [ -z "$f" ] && continue
   if [ -f "$f" ] && grep -q $'\r' "$f"; then
     echo "::error:: $f 含 CR/CRLF — .sh 必須 LF（取證紀律 #8）"
     fail=1
   fi
-done
+done < <(git -c core.quotepath=false diff --cached --name-only --relative --diff-filter=ACMR | grep -E '\.(sh|bash)$' || true)
 
 if [ "$fail" -ne 0 ]; then
   echo "[pre-commit] ❌ 失敗 — 請於本機修復後再 commit"

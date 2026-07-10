@@ -363,7 +363,7 @@ PYTHONUTF8=1 lint-imports                          # 7 kept / 0 broken
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File tools/install_git_hooks.ps1     # 1) 裝 git hooks（commit/push 自動把關）
-powershell -ExecutionPolicy Bypass -File tools/local_ci_gate.ps1         # 2) 一鍵本機 CI 閘門（鏡像 ci.yml push jobs）
+powershell -ExecutionPolicy Bypass -File tools/local_ci_gate.ps1         # 2) 一鍵本機 CI 閘門（鏡像根層 autoclaude-ci.yml push jobs）
 powershell -ExecutionPolicy Bypass -File tools/run_act.ps1 -Job test     # 3) act：在 Linux 容器跑真 CI（攔 Win/Linux 差異）
 docker compose -f docker-compose.ci.yml up -d                            # CI 對等 PG（pg17）
 docker compose -f docker-compose.llm.yml --profile mock up -d            # 本地 LLM/Brain mock

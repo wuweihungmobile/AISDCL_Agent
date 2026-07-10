@@ -121,7 +121,7 @@ wc -l docs/05_development/sprint_history.md
 # E 議題群：CLAUDE.md 文件治理（ADR-SD08-001）
 [  ] T0-E1 升級 tools/check_loc_budget.py 加入 SPECIAL_FILES = {"CLAUDE.md": 400}
 [  ] T0-E2 新建 tools/snapshot_sync.py（從 wiring.py / ports/ / factory.py 自動回填 Snapshot 區段）
-[  ] T0-E3 .github/workflows/ci.yml 新增 claude-md-budget job（ADR-SD08-001 §4）
+[  ] T0-E3 .github/workflows/autoclaude-ci.yml 新增 claude-md-budget job（ADR-SD08-001 §4）
 [  ] T0-E4 CLAUDE.md 重整：
        (a) 加入頂端「快速導覽」3 行（規範看本檔 / sprint 脈絡看 sprint_history.md / 架構決策看 ADR/）
        (b) 加入 [Architecture Snapshot] SSOT 區段（LOC tiers + importlinter rules + Plugin list + Port list + DAL mode 矩陣）
@@ -153,7 +153,7 @@ wc -l docs/05_development/sprint_history.md
 [  ] grep -rn "NOTE(SD_07) m-Arch3\|NOTE(SD_07) m-SD3" autoclaude/ tests/   # = 0（A 議題群完成）
 [  ] python -m pytest tests/ -q --tb=no | tail -3                           # ≥ 2,015 passed（+3 W0 新測）
 [  ] PYTHONUTF8=1 lint-imports --config .importlinter                       # 6 kept / 0 broken
-[  ] grep -E "claude-md-budget" .github/workflows/ci.yml                    # 命中
+[  ] grep -E "claude-md-budget" .github/workflows/autoclaude-ci.yml                    # 命中
 ```
 
 **G0 通過條件**：CLAUDE.md ≤ 400 ✅ / Snapshot SSOT 就位 / 5 條 ADR PM 形式核准 / sprint_history.md SD_03~SD_05 完整下沉 / claude-md-budget CI job 就位
@@ -213,10 +213,10 @@ wc -l docs/05_development/sprint_history.md
        - 讀 .ac4_history.jsonl 最近 14 天
        - 計算 recall σ_14d + 全綠連續天數
        - 判定告警等級（黃 3 次 / 紅 5 次）
-[  ] T2-C4 .github/workflows/ci.yml 修正 pg-e2e-nightly job：
+[  ] T2-C4 .github/workflows/autoclaude-ci.yml 修正 pg-e2e-nightly job：
        - 加入 T2-C2 collector step（每 nightly 跑完寫入 history）
        - 加入 T2-C3 check step（告警通道）
-[  ] T2-C5 新建 .github/workflows/pg-e2e-on-label.yml：
+[  ] T2-C5 新建 .github/workflows/autoclaude-pg-e2e-on-label.yml：
        - 觸發：pull_request types=[labeled]
        - condition: github.event.label.name == 'needs-pg-e2e'
        - 跑 tests/integration/test_pgvector_real_recall.py（已存在）
@@ -229,7 +229,7 @@ wc -l docs/05_development/sprint_history.md
 **G2 驗證**：
 ```bash
 [  ] ls tools/ac4_nightly_collector.py tools/ac4_progress_check.py          # 兩檔存在
-[  ] ls .github/workflows/pg-e2e-on-label.yml                               # 存在
+[  ] ls .github/workflows/autoclaude-pg-e2e-on-label.yml                               # 存在
 [  ] python -m pytest tests/contract/test_ac4_progress_check.py -v          # ≥ 4 case 綠
 [  ] python -m pytest tests/ -q --tb=no | tail -3                           # ≥ 2,025 passed（+10）
 ```
@@ -248,7 +248,7 @@ wc -l docs/05_development/sprint_history.md
 **逐項打勾**：
 ```
 [  ] T3-D1 git tag sd_08_w2_g2_pass
-[  ] T3-D2 修正 .github/workflows/ci.yml `mutation-test-nightly` job：
+[  ] T3-D2 修正 .github/workflows/autoclaude-ci.yml `mutation-test-nightly` job：
        - 限定 pilot 範圍：僅 TokenGuardPlugin（暫停 GoalSynthesis + Coordinator nightly）
        - 加入 -p no:xdist 鎖序列（ADR-SD08-002 §2.3）
        - 加入 --paths-to-mutate=autoclaude/plugins/token_guard --tests-dir=tests/plugins/token_guard
@@ -263,8 +263,8 @@ wc -l docs/05_development/sprint_history.md
 
 **G3 驗證**：
 ```bash
-[  ] grep -E "paths-to-mutate=autoclaude/plugins/token_guard" .github/workflows/ci.yml   # 命中
-[  ] grep -E "no:xdist" .github/workflows/ci.yml                            # 命中
+[  ] grep -E "paths-to-mutate=autoclaude/plugins/token_guard" .github/workflows/autoclaude-ci.yml   # 命中
+[  ] grep -E "no:xdist" .github/workflows/autoclaude-ci.yml                            # 命中
 [  ] ls tools/mutation_baseline_lock.py tools/mutation_analysis.py          # 兩檔存在
 [  ] ls docs/06_quality/SD08_Mutation_Baseline_Report.md                    # 存在
 [  ] python -m pytest tests/contract/test_mutation_baseline_lock.py -v      # ≥ 4 case 綠
@@ -350,7 +350,7 @@ wc -l docs/05_development/sprint_history.md
 [  ] T5-G4 新建 tests/perf/test_decide_correction.py（≥ 1 case）
 [  ] T5-G5 新建 tests/perf/test_pgvector_recall_perf.py（≥ 1 case，pg_real marker，僅 perf machine 跑）
 [  ] T5-G6 新建 tools/perf_regression_check.py（annotation + PR comment 雙通道）
-[  ] T5-G7 .github/workflows/ci.yml 新增 perf-baseline-nightly job（ADR-SD08-003 §3）
+[  ] T5-G7 .github/workflows/autoclaude-ci.yml 新增 perf-baseline-nightly job（ADR-SD08-003 §3）
 [  ] T5-G8 W5 首次跑 7 次連續，鎖定 .perf_baseline.toml
 [  ] T5-G9 補 tests/contract/test_perf_regression_check.py（≥ 4 case：通過 / 警告 / 阻塞 / 缺 baseline）
 [  ] T5-G10 產 docs/06_quality/SD08_Perf_Baseline_Report.md
@@ -371,7 +371,7 @@ wc -l docs/05_development/sprint_history.md
 [  ] ls autoclaude/utils/perf_baseline.py tools/perf_regression_check.py    # 兩檔存在
 [  ] ls tests/perf/*.py | wc -l                                             # ≥ 4
 [  ] ls .perf_baseline.toml                                                 # 存在（W5 末鎖定）
-[  ] grep -E "perf-baseline-nightly" .github/workflows/ci.yml               # 命中
+[  ] grep -E "perf-baseline-nightly" .github/workflows/autoclaude-ci.yml               # 命中
 [  ] python -m pytest tests/contract/test_perf_regression_check.py -v       # ≥ 4 case 綠
 
 # H 議題群前置

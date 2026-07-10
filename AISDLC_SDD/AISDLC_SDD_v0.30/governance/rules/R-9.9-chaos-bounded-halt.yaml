@@ -8,7 +8,8 @@ spec: >
   chaos_runner 100 輪隨機故障注入，每輪必須停機於 {ESCALATION, TERMINATED, RELEASE}、
   bounded_ratio==1.0、平均 token < 25K；state_loader 偵測 primary YAML 損毀 fallback
   到 .bak（5 種 reason 分類），.bak 以 .bak.tmp + os.replace 原子輪替；nightly CI
-  fsm-chaos-nightly.yml 須位於 repo root（巢狀路徑 GitHub Actions 不註冊）。
+  aisdlc-sdd-fsm-chaos-nightly.yml 須位於 repo root .github/workflows/（巢狀路徑
+  GitHub Actions 不註冊；本 monorepo 已上移根層並加 aisdlc-sdd- 前綴）。
   禁止放寬 TERMINAL_STATES 假性通過。
 test_ref: tools/fsm_runtime/tests/test_chaos.py
 enforcement_mechanism: lint_tlc

@@ -64,7 +64,7 @@ perf-baseline-nightly:
   continue-on-error: true       # nightly 警示，不阻塞 main
 ```
 
-完整定義：[.github/workflows/ci.yml](../../.github/workflows/ci.yml) §perf-baseline-nightly。
+完整定義：[.github/workflows/autoclaude-ci.yml](../../../.github/workflows/autoclaude-ci.yml) §perf-baseline-nightly。
 
 ---
 

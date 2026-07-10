@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
-# run_act.sh — 在本機 Docker 內以 act 重現 GitHub Actions（ci.yml），push 前攔 CI 紅燈（macOS/Linux）。
+# run_act.sh — 在本機 Docker 內以 act 重現 GitHub Actions（autoclaude-ci.yml），push 前攔 CI 紅燈（macOS/Linux）。
 # Windows 對等：tools/run_act.ps1（本檔為其忠實對照）。
+# monorepo 根層接線（2026-07-10）：workflow 已遷至 monorepo 根層
+# .github/workflows/autoclaude-ci.yml → act 一律於 monorepo 根執行（讀根層 .actrc）。
 #
 # 用法：
 #   bash tools/run_act.sh --job test     # 最快：只跑主測試閘門
@@ -10,9 +12,10 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+# monorepo 根 = 本腳本(AutoClaude/tools/) 上兩層
+REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 cd "$REPO_ROOT"
-WORKFLOW='.github/workflows/ci.yml'
+WORKFLOW='.github/workflows/autoclaude-ci.yml'
 
 JOB=""; LIST=0; DRYRUN=0
 while [ $# -gt 0 ]; do

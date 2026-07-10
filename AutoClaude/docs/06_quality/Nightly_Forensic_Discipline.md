@@ -55,7 +55,7 @@ env override（如 `AUTOCLAUDE_TEST_P95_THRESHOLD_MS`）若同時影響「採集
 
 任何依賴 `.mutmut-cache` / `.pytest_cache` / `.ac4_junit.xml` / `perf_results.json` 等本地 cache 的 nightly stage，每次跑前 `rm -rf` 強制 fresh；避免「舊資料 + 當次 crash → 老 summary 騙過驗證」。對應 ps1:462（`.ac4_junit.xml`）、ps1:534（`perf_results.json`）、run_mutmut_in_docker.sh:67（`.mutmut-cache`）。
 
-**2026-06-12 強化（AutoClaude_Improving_012 Phase 0 TD-N01）**：perf stage 除跑前 fresh 外，pytest 跑完後必須**強制驗證 `perf_results.json` 確實產出**（由 `tests/perf/conftest.py` pytest_sessionfinish hook 寫出；對齊 `ci.yml`「Verify perf_results.json present」step），缺檔 stage rc=1 並記 ERROR — 防「fresh 清掉舊檔 + hook 未寫出 → regression check 走『baseline 或 results 不存在』WARN 分支假綠」。對應 [run_local_nightly.ps1](../../tools/run_local_nightly.ps1) perf-baseline stage（錨點關鍵字 `TD-N01`）。
+**2026-06-12 強化（AutoClaude_Improving_012 Phase 0 TD-N01）**：perf stage 除跑前 fresh 外，pytest 跑完後必須**強制驗證 `perf_results.json` 確實產出**（由 `tests/perf/conftest.py` pytest_sessionfinish hook 寫出；對齊 `autoclaude-ci.yml`「Verify perf_results.json present」step），缺檔 stage rc=1 並記 ERROR — 防「fresh 清掉舊檔 + hook 未寫出 → regression check 走『baseline 或 results 不存在』WARN 分支假綠」。對應 [run_local_nightly.ps1](../../tools/run_local_nightly.ps1) perf-baseline stage（錨點關鍵字 `TD-N01`）。
 
 ### 紀律 #8 — 載具腳本（.sh）必須 LF 行尾
 
@@ -167,7 +167,7 @@ env override（如 `AUTOCLAUDE_TEST_P95_THRESHOLD_MS`）若同時影響「採集
 **強制條款**：
 
 1. **cwd 一致**：所有工作樹驗證一律從專案 cwd（`AutoClaude/`）跑 `python -m pytest` / `python -c`；**禁 `python <repo 外絕對路徑>.py`**（sys.path 不含 cwd，易 shadow 至舊 editable 副本）。
-2. **editable 哨兵**：`local_ci_gate.ps1` gate 0 + 可選 CI 步驟斷言 `'AISDCL_Agent' in autoclaude.__file__`，殘留舊副本即 fail（流程改善 #9c，2026-06-13 落地）。
+2. **editable 哨兵**：`local_ci_gate`（.sh/.ps1）gate 0 + 可選 CI 步驟以 git rev-parse + pathlib **動態比對** `autoclaude.__file__` 位於當前 repo 根之下，殘留舊副本即 fail（流程改善 #9c，2026-06-13 落地；2026-07-09 跨平台修復輪自寫死 `'AISDCL_Agent'` 字串改為動態比對，repo 更名／搬移不誤判）。
 3. **殘留清除**：發現舊 `.pth` 指向遷移前路徑時，`pip install -e .` 重指向本 repo 覆蓋，或移除舊副本。
 
 對應實作：NextAction 流程問題 #9（(a) editable 重指向已於 2026-06-13 執行；(b) 本紀律 SOP +(c) `local_ci_gate.ps1` gate 0 哨兵於本輪落地）。

@@ -2,7 +2,7 @@
 # ===========================================================================
 # 目的：消除「本機（Windows）vs CI（Linux）」環境差異造成的 push 後 CI/CD 紅燈。
 #
-# 本檔 **精準對齊** .github/workflows/ci.yml 的 services.postgres：
+# 本檔 **精準對齊** monorepo 根層 .github/workflows/autoclaude-ci.yml 的 services.postgres：
 #   - image:  pgvector/pgvector:pg17   ← 必須與 CI 同版（主 docker-compose.yml 為 pg18 dev/prod 棧）
 #   - env:    autoclaude / autoclaude / autoclaude
 #   - port:   5432
@@ -23,7 +23,7 @@
 
 services:
   postgres-ci:
-    # 與 ci.yml / pg-e2e-on-label.yml 完全相同的鏡像（CI 真相）
+    # 與 autoclaude-ci.yml / autoclaude-pg-e2e-on-label.yml 完全相同的鏡像（CI 真相）
     image: pgvector/pgvector:pg17
     container_name: autoclaude_ci_pg
     environment:

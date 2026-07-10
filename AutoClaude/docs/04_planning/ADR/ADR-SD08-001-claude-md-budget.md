@@ -129,7 +129,7 @@ def check_special_files(repo_root: Path) -> list[Violation]:
 
 ## 4. CI 強制（claude-md-budget job 草稿）
 
-於 `.github/workflows/ci.yml` 新增 job（與 test job 平行）：
+於 `.github/workflows/autoclaude-ci.yml` 新增 job（與 test job 平行）：
 
 ```yaml
 claude-md-budget:
@@ -175,7 +175,7 @@ claude-md-budget:
 ```
 [  ] T0-A1 升級 tools/check_loc_budget.py 加入 SPECIAL_FILES = {"CLAUDE.md": 400}
 [  ] T0-A2 新建 tools/snapshot_sync.py（從 wiring.py / ports/ / factory.py 自動回填）
-[  ] T0-A3 .github/workflows/ci.yml 新增 claude-md-budget job
+[  ] T0-A3 .github/workflows/autoclaude-ci.yml 新增 claude-md-budget job
 [  ] T0-A4 CLAUDE.md 加入 [Architecture Snapshot] 區段 + 頂端「快速導覽」3 行
 [  ] T0-A5 sprint_history.md 骨架建立（依 §2.4 交叉索引）+ SD_03~SD_05 完整下沉
 [  ] T0-A6 補 tests/contract/test_claude_md_budget.py（≥ 3 case：wc-l / Snapshot 區段格式 / 必留章節存在）

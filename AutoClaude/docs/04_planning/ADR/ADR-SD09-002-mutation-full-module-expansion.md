@@ -47,7 +47,7 @@ W1 啟動前若 TokenGuardPlugin 連續 7 次達 ≥ 70% 條件**未達**（< 60
 
 ### §2.3 GHA cron job 拆分
 
-`.github/workflows/ci.yml` 拆分為 **3 個獨立 schedule cron job**（不同小時觸發，避免並行；**Arch-M2 修復：明訂 UTC 排程基準**）：
+`.github/workflows/autoclaude-ci.yml` 拆分為 **3 個獨立 schedule cron job**（不同小時觸發，避免並行；**Arch-M2 修復：明訂 UTC 排程基準**）：
 - `mutation-token-guard-weekly`：每週日 00:00 UTC（TG 鎖定後）
 - `mutation-active-pilot-nightly`：每日 02:00 UTC（active pilot module，W1=GS / W2=Coord）
 - `mutation-coordinator-pilot`：W2 啟用（單 active 規則）

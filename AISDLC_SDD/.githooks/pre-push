@@ -1,10 +1,25 @@
 #!/usr/bin/env bash
 # AISDLC-SDD — git pre-push hook（approach 三，零相依強制把關）。
 # 每次 `git push` 前自動跑本機 CI 閘門；任一硬閘門失敗即中止 push。
-# 啟用：bash scripts/install-hooks.sh  （或 git config core.hooksPath .githooks）
+# 啟用：bash scripts/install-hooks.sh（設 core.hooksPath=<monorepo根>/tools/git-hooks
+#       根層 dispatcher，依路徑分流至本檔。⚠ 勿手動 git config core.hooksPath .githooks——
+#       那會停用 dispatcher 與 AutoClaude 的全部閘門）
 # 繞過（僅緊急）：git push --no-verify
 set -euo pipefail
-REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+# 定位子專案根：git 執行 hooks 時 cwd＝該工作樹頂層，故以 --show-toplevel + /AISDLC_SDD
+# 為第一優先（linked worktree 內 push 時才會檢查「該 worktree 的樹」，而非安裝時的主
+# checkout）；取不到才 fallback BASH_SOURCE 自我定位（並印警告）。
+TOPLEVEL="$(git rev-parse --show-toplevel 2>/dev/null || true)"
+if [ -n "${TOPLEVEL:-}" ]; then
+  REPO_ROOT="$TOPLEVEL/AISDLC_SDD"
+else
+  echo "⚠ [pre-push] git rev-parse --show-toplevel 失敗 → fallback BASH_SOURCE 自我定位（linked worktree 下可能指向主 checkout）" >&2
+  REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+fi
 echo "🔒 [pre-push] 執行本機 CI 閘門 scripts/ci-gate.sh（push 前最後防線）…"
+# linked worktree：git 匯出 GIT_DIR 但不匯出 GIT_WORK_TREE，子目錄內相對路徑邏輯會失效；顯式錨定工作樹根
+if [ -n "${GIT_DIR:-}" ] && [ -n "${TOPLEVEL:-}" ]; then
+  export GIT_WORK_TREE="$TOPLEVEL"
+fi
 bash "${REPO_ROOT}/scripts/ci-gate.sh"
 echo "✅ [pre-push] 閘門通過，允許 push。"

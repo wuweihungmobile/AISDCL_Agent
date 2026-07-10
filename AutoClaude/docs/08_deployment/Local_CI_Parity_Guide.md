@@ -24,7 +24,7 @@
 
 ### 一、迷你正式環境（Docker Compose）
 - [`docker-compose.yml`](../../docker-compose.yml)：完整 dev/prod 棧（PG **pg18** + TEI embedder）。
-- [`docker-compose.ci.yml`](../../docker-compose.ci.yml)：**CI 對等** PG（**pg17**，精準對齊 `ci.yml` service）。
+- [`docker-compose.ci.yml`](../../docker-compose.ci.yml)：**CI 對等** PG（**pg17**，精準對齊 `autoclaude-ci.yml` service）。
   本地驗證 PG 相依測試時用此檔，避免 pg18/pg17 漂移造成「本機過、CI 爆」。
   > ⚠️ CI 改 PG 版本時**必須同步本檔**，否則本地驗證失真。
 
@@ -37,11 +37,11 @@ docker compose -f docker-compose.ci.yml down -v     # 用完即丟（tmpfs，無
 ### 二、地端直接跑 GitHub Actions（act）
 - 工具：`act`（nektos/act）— 安裝：`winget install --id nektos.act`（或 `scoop install act`）。
   `run_act.ps1` 會自動定位 act（含 winget 安裝路徑），未裝時印安裝指引。
-- 設定：[`.actrc`](../../.actrc)（runner = `catthehacker/ubuntu:act-latest`，`linux/amd64`）。
-- 載具：[`tools/run_act.ps1`](../../tools/run_act.ps1) — 自動定位 act、檢查 Docker、跑 `ci.yml`。
+- 設定：[`.actrc`](../../../.actrc)（**現位於 monorepo 根層**；runner = `catthehacker/ubuntu:act-latest`，`linux/amd64`）。
+- 載具：[`tools/run_act.ps1`](../../tools/run_act.ps1) — 自動定位 act、檢查 Docker、於 **monorepo 根**跑根層 `autoclaude-ci.yml`（workflows 已上移根層 `.github/workflows/`，見根層 ONBOARDING.md §6.1）。
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File tools/run_act.ps1 -List          # 看 ci.yml 有哪些 job
+powershell -ExecutionPolicy Bypass -File tools/run_act.ps1 -List          # 看 autoclaude-ci.yml 有哪些 job
 powershell -ExecutionPolicy Bypass -File tools/run_act.ps1 -Job test       # 最快：只跑主測試閘門（Linux 容器內）
 powershell -ExecutionPolicy Bypass -File tools/run_act.ps1                  # 完整：push 全部 gating job
 ```
@@ -61,7 +61,7 @@ powershell -ExecutionPolicy Bypass -File tools/run_act.ps1                  # �
 powershell -ExecutionPolicy Bypass -File tools/install_git_hooks.ps1            # 設 core.hooksPath=根層 tools/git-hooks dispatcher（絕對路徑，見 §5）
 powershell -ExecutionPolicy Bypass -File tools/install_git_hooks.ps1 -Uninstall # 還原
 ```
-- 框架版（選用）：[`.pre-commit-config.yaml`](../../.pre-commit-config.yaml)（`pip install pre-commit && pre-commit install`），委派同一組原生 hook（SSOT，紀律 #4）。
+- ⚠️ **monorepo 下不支援 pre-commit 框架路徑**：[`.pre-commit-config.yaml`](../../.pre-commit-config.yaml) 位於子目錄（`pre-commit install` 需 config 在 git 根），且框架 shim 會消化 pre-push 的 stdin（dispatcher 收到空 stdin 只能 fail-safe 全跑）。該檔僅存檔備考；**SSOT 為根層 dispatcher hooks**（上方安裝腳本）。
 - 緊急跳過：`AUTOCLAUDE_SKIP_HOOKS=1` 或 `git commit/push --no-verify`。
 
 ### 四、高擬真 API 與 AI 模型模擬
@@ -89,7 +89,7 @@ $env:MINIMAX_MODEL = "Qwen/Qwen2.5-1.5B-Instruct"
 ## 2. 標準工作流（push 前 SOP）
 
 ```powershell
-# 一鍵本機 CI 閘門（鏡像 ci.yml push jobs）—— 全綠才 push
+# 一鍵本機 CI 閘門（鏡像 autoclaude-ci.yml push jobs）—— 全綠才 push
 powershell -ExecutionPolicy Bypass -File tools/local_ci_gate.ps1            # LOC/CLAUDE.md/snapshot/import-linter/pytest
 powershell -ExecutionPolicy Bypass -File tools/local_ci_gate.ps1 -Act        # 再加 Linux 容器真 CI（最嚴格）
 powershell -ExecutionPolicy Bypass -File tools/local_ci_gate.ps1 -Pg         # 再加 pg17 PG 契約測
@@ -114,7 +114,7 @@ powershell -ExecutionPolicy Bypass -File tools/local_ci_gate.ps1 -Pg         # �
 | act `authentication required - incorrect username or password` | Docker Desktop credsStore 對公開鏡像誤送認證；`run_act.ps1` 已用 `docker pull`+`--pull=false` 繞過。直接跑 act 時請先 `docker pull catthehacker/ubuntu:act-latest` |
 | act 報 Docker 連線失敗 | 開啟 Docker Desktop；`docker info` 應成功 |
 | pre-push pytest 太久 | `AUTOCLAUDE_PUSH_PYTEST_ARGS="tests/xxx -q"` 縮限；或先 `local_ci_gate.ps1` |
-| hook 沒觸發 | 確認 `git config --get core.hooksPath` 指向 monorepo 根層 `tools/git-hooks`（絕對路徑，見 §5）；重跑安裝腳本 |
+| hook 沒觸發 | 確認 `git config --get core.hooksPath` 指向 monorepo 根層 `tools/git-hooks`（絕對路徑，見 §5）；**repo 搬移／改名後 hooksPath 絕對路徑失效、hooks 靜默全滅——必須重跑任一支安裝腳本**。`local_ci_gate` / `integration_gate` 開頭已內建 hooks liveness 偵測（hooksPath 未設／不符／目錄不存在時印警告不 fail；CI 環境跳過） |
 | `.sh` 在容器噴 `$'\r'` | `.gitattributes` 已強制 LF；重新 checkout 或 `dos2unix` |
 | PG 測試本機過 CI 爆 | 確認用 `docker-compose.ci.yml`（pg17）而非主 compose（pg18） |
 
@@ -126,11 +126,11 @@ powershell -ExecutionPolicy Bypass -File tools/local_ci_gate.ps1 -Pg         # �
 |------|------|
 | `docker-compose.ci.yml` | CI 對等 PG（pg17） |
 | `docker-compose.llm.yml` | mock-brain / vLLM 本地 LLM |
-| `.actrc` | act runner 設定 |
-| `tools/run_act.ps1` | act 本地 CI 載具 |
-| `tools/git-hooks/{pre-commit,pre-push}` | 自動攔截點 |
-| `tools/install_git_hooks.ps1` | hooks 安裝/移除 |
-| `.pre-commit-config.yaml` | pre-commit 框架（選用） |
+| `.actrc` | act runner 設定（現位於 monorepo 根層） |
+| `tools/run_act.ps1` | act 本地 CI 載具（於 monorepo 根執行） |
+| `tools/git-hooks/{pre-commit,pre-push}` | 子專案攔截點（由根層 dispatcher 分流呼叫） |
+| `tools/install_git_hooks.ps1` | hooks 安裝/移除（設根層 dispatcher） |
+| `.pre-commit-config.yaml` | 僅存檔備考（monorepo 下不支援，見 §1「三」） |
 | `tools/mock_brain_server.py` | 高擬真 Brain Mock |
 | `tools/local_ci_gate.ps1` | 一鍵本機 CI 閘門 |
 | `tests/tools/test_mock_brain_server.py` | mock 契約測試（紀律 #4） |

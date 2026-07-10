@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # AISDLC-SDD — 本機 CI 閘門（push 前必過）。
 #
-# 單一真相源：.github/workflows/ci.yml、docker-compose ci-runner、pre-push
-# hook、act 一律呼叫本腳本，確保「地端 = ubuntu-latest」跑同一組檢查。
+# 單一真相源：monorepo 根層 .github/workflows/aisdlc-sdd-ci.yml、docker-compose
+# ci-runner、pre-push hook、act 一律呼叫本腳本，確保「地端 = ubuntu-latest」跑同一組檢查。
 #
 # 用法：
 #   bash scripts/ci-gate.sh              # 離線閘門（pytest 含 offline reachability + arch_fitness）

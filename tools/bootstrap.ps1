@@ -79,6 +79,19 @@ if (Test-Path $VenvDir) {
       exit 1
     }
     Write-Host "使用直譯器：$BasePy"
+    # 與 bootstrap.sh 對等：選定直譯器與 .python-version 目標不一致時印警告（不 fail，維持 >= 3.11 可用語意）
+    $selParts = $BasePy -split '\s+'
+    $selArgs = if ($selParts.Length -gt 1) { @($selParts[1..($selParts.Length-1)]) } else { @() }
+    $prevSelEAP = $ErrorActionPreference
+    try {
+      $ErrorActionPreference = 'Continue'
+      $selVer = (& $selParts[0] @selArgs -c "import sys; print('%d.%d' % sys.version_info[:2])" 2>$null)
+    } finally {
+      $ErrorActionPreference = $prevSelEAP
+    }
+    if ($selVer -and $selVer.Trim() -ne $PyTarget) {
+      Write-Host "⚠️ 選定直譯器為 $($selVer.Trim())，與 .python-version 目標 $PyTarget 不一致（仍 >= 3.11 可用）" -ForegroundColor Yellow
+    }
   }
   Write-Host "建立虛擬環境：.venv"
   if ($UseUv) {
@@ -89,6 +102,11 @@ if (Test-Path $VenvDir) {
     $exeArgs = if ($parts.Length -gt 1) { @($parts[1..($parts.Length-1)]) } else { @() }
     & $parts[0] @exeArgs -m venv $VenvDir
   }
+  # PS 的 EAP=Stop 不會因 native 指令非零 rc 停下 → 必須顯式檢查 $LASTEXITCODE
+  if ($LASTEXITCODE -ne 0) {
+    Write-Host "❌ 建立 .venv 失敗（rc=$LASTEXITCODE）" -ForegroundColor Red
+    exit 1
+  }
 }
 
 $VenvPy = Join-Path $VenvDir 'Scripts\python.exe'
@@ -98,10 +116,21 @@ function Install-Deps {
   param([string[]]$PipArgs)
   if ($UseUv) { uv pip install --python $VenvPy @PipArgs }
   else { & $VenvPy -m pip install @PipArgs }
+  # PS 的 EAP=Stop 不會因 native 指令非零 rc 停下 → 顯式檢查，防「安裝失敗仍印 ✅ 完成」
+  if ($LASTEXITCODE -ne 0) {
+    Write-Host "❌ 依賴安裝失敗（rc=$LASTEXITCODE）：pip install $($PipArgs -join ' ')" -ForegroundColor Red
+    exit 1
+  }
 }
 
 Write-Host "`n----- 安裝依賴 -----" -ForegroundColor Cyan
-if (-not $UseUv) { & $VenvPy -m pip install --upgrade pip | Out-Null }
+if (-not $UseUv) {
+  & $VenvPy -m pip install --upgrade pip | Out-Null
+  if ($LASTEXITCODE -ne 0) {
+    Write-Host "❌ pip 升級失敗（rc=$LASTEXITCODE）" -ForegroundColor Red
+    exit 1
+  }
+}
 
 Write-Host "[1/2] AutoClaude（editable, [dev,notifications,lint]）"
 Install-Deps @("-e", "$Root\AutoClaude\.[dev,notifications,lint]")

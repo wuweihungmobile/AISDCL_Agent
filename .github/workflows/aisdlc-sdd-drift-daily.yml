@@ -1,8 +1,10 @@
 # AISDLC-SDD — Drift Daily Report (Phase G M4 / ACT-040, Rule 9.17.4)
 #
 # Placement: **active workflow at repo root** (framework dogfood Rule 9.17.4).
-# Sibling actively-scheduled workflow: fsm-chaos-nightly.yml (Rule 9.9.4).
-# Contrast with `AISDLC_SDD_v0.01/.github/workflows/hub-push.yml` which stays
+# monorepo 根層接線（2026-07-10）：自 AISDLC_SDD/.github/workflows/drift-daily.yml
+# 遷入 monorepo 根層 .github/workflows/；working-directory 改 AISDLC_SDD/ 前綴。
+# Sibling actively-scheduled workflow: aisdlc-sdd-fsm-chaos-nightly.yml (Rule 9.9.4).
+# Contrast with `AISDLC_SDD/AISDLC_SDD_v0.01/.github/workflows/hub-push.yml` which stays
 # nested as reference-only (intended for downstream Hub Registry repo).
 #
 # Generates one DAILY-{YYYY-MM-DD}.md per day from accumulated COMMIT-*.yaml
@@ -12,7 +14,7 @@
 #   - 02:30 UTC offset from chaos (02:00) to avoid runner contention.
 #   - `workflow_dispatch` for ad-hoc backfill / verification.
 #
-# Output: AISDLC_SDD_v0.01/build/reports/drift/DAILY-YYYY-MM-DD.md
+# Output: AISDLC_SDD/AISDLC_SDD_v0.01/build/reports/drift/DAILY-YYYY-MM-DD.md
 # Spec:   cicd/SDD_CICD_BASE_LAYER.md §Drift Daily Report
 
 name: drift-daily
@@ -51,14 +53,14 @@ jobs:
           python-version: "3.11"
 
       - name: Install dependencies
-        working-directory: AISDLC_SDD_v0.01
+        working-directory: AISDLC_SDD/AISDLC_SDD_v0.01
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements-ci.txt
 
       - name: Generate DAILY report
         id: gen
-        working-directory: AISDLC_SDD_v0.01
+        working-directory: AISDLC_SDD/AISDLC_SDD_v0.01
         env:
           OVERRIDE_DATE: ${{ github.event.inputs.date }}
         run: |
@@ -74,7 +76,7 @@ jobs:
           PY
 
       - name: Commit and push report
-        working-directory: AISDLC_SDD_v0.01
+        working-directory: AISDLC_SDD/AISDLC_SDD_v0.01
         run: |
           set -eu
           git config user.name  "sdd-drift-bot"

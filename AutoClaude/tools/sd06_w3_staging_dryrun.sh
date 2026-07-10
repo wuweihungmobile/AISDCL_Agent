@@ -26,7 +26,7 @@
 #   # 2. 完整執行（請務必先 backup！）
 #   bash tools/sd06_w3_staging_dryrun.sh --execute
 #
-#   # 3. 自訂 DSN（預設讀 $AUTOCLAUDE_DB_DSN）
+#   # 3. 自訂 DSN（預設讀 ${AUTOCLAUDE_DB_DSN}）
 #   AUTOCLAUDE_DB_DSN="postgresql://user:pass@staging:5432/db" \
 #       bash tools/sd06_w3_staging_dryrun.sh --execute
 #
@@ -97,6 +97,7 @@ command -v psql >/dev/null 2>&1 || fail "psql 不存在於 PATH" 1
 command -v alembic >/dev/null 2>&1 || fail "alembic 不存在於 PATH" 1
 command -v pg_dump >/dev/null 2>&1 || fail "pg_dump 不存在於 PATH" 1
 command -v pg_restore >/dev/null 2>&1 || fail "pg_restore 不存在於 PATH" 1
+command -v python >/dev/null 2>&1 || fail "python 不存在於 PATH（請先啟用 .venv，見 ONBOARDING.md §3）" 1
 
 # psql 連線測試
 PSQL_DSN="${DSN/+asyncpg/}"
@@ -300,7 +301,6 @@ RATE="$(psql "$PSQL_DSN" -tA -c "
 SELECT count(*) FILTER (WHERE goal_task_id IS NOT NULL)::float / count(*)
 FROM playbook_runs;")"
 log "backfill_rate = $RATE"
-RATE_OK="$(echo "$RATE >= 0.95" | python -c 'import sys; print("yes" if eval(sys.stdin.read().strip().replace(">=", "@@").split("@@")[0]) >= 0.95 else "no")' 2>/dev/null || echo "no")"
 # 用 python 算（避免 bc 不存在；venv 政策統一用裸 python，見 ONBOARDING.md §3）
 [ "$(python -c "print('yes' if $RATE >= 0.95 else 'no')")" = "yes" ] || fail "backfill_rate $RATE < 0.95" 5
 ok "backfill_rate $RATE ≥ 0.95"

@@ -15,6 +15,18 @@
 #   bash tools/install_git_hooks.sh --uninstall  # 還原 .git/hooks 預設
 set -euo pipefail
 
+# linked worktree 防護：core.hooksPath 寫入的是「共享 .git/config」；在 linked worktree
+# 內執行會把 worktree 路徑寫進去，worktree 刪除後主 checkout 閘門靜默全滅 → 拒絕執行。
+# 偵測法：git-dir 與 git-common-dir 不同即是 linked worktree。
+git_dir_abs="$(cd "$(git rev-parse --git-dir)" && pwd)"
+common_dir_abs="$(cd "$(git rev-parse --git-common-dir)" && pwd)"
+if [ "$git_dir_abs" != "$common_dir_abs" ]; then
+  echo "[install_git_hooks] ❌ 偵測到 linked worktree（git-dir ≠ git-common-dir）" >&2
+  echo "   core.hooksPath 寫入共享 .git/config，在 worktree 內安裝/卸載會毒化主 checkout" >&2
+  echo "   （worktree 刪除後閘門靜默全滅）。請在主 checkout 執行安裝。" >&2
+  exit 1
+fi
+
 if [ "${1:-}" = "--uninstall" ]; then
   git config --unset core.hooksPath 2>/dev/null || true
   echo "[install_git_hooks] 已移除 core.hooksPath（還原 .git/hooks 預設）"
@@ -24,8 +36,8 @@ fi
 TOPLEVEL="$(git rev-parse --show-toplevel)"
 HOOKS_DIR="$TOPLEVEL/tools/git-hooks"
 
-# 安裝前驗證：dispatcher hooks 必須存在
-for h in pre-commit pre-push; do
+# 安裝前驗證：dispatcher hooks 必須存在（post-commit 為 .git/hooks/post-commit 委派器）
+for h in pre-commit pre-push post-commit; do
   if [ ! -f "$HOOKS_DIR/$h" ]; then
     echo "[install_git_hooks] 缺少 dispatcher hook 檔：$HOOKS_DIR/$h" >&2
     exit 1
@@ -35,14 +47,15 @@ done
 
 git config core.hooksPath "$HOOKS_DIR"
 
-# 安裝後驗證：core.hooksPath 解析出的目錄實際存在且含兩支 hook 檔（杜絕假 ✅）
+# 安裝後驗證：core.hooksPath 解析出的目錄實際存在且含三支 hook 檔（杜絕假 ✅）
 cur="$(git config --get core.hooksPath || true)"
-if [ "$cur" = "$HOOKS_DIR" ] && [ -d "$cur" ] && [ -f "$cur/pre-commit" ] && [ -f "$cur/pre-push" ]; then
+if [ "$cur" = "$HOOKS_DIR" ] && [ -d "$cur" ] && [ -f "$cur/pre-commit" ] && [ -f "$cur/pre-push" ] && [ -f "$cur/post-commit" ]; then
   echo "[install_git_hooks] ✅ 已啟用根層 dispatcher hooks：core.hooksPath = $cur"
   echo "   兩子專案閘門同時生效（AutoClaude pre-commit/pre-push ＋ AISDLC_SDD pre-push，"
   echo "   依 commit/push 涉及路徑自動分流），不再互斥。"
   echo "   pre-commit  → ruff / LOC / CLAUDE.md / .sh EOL（commit 時）"
   echo "   pre-push    → pytest + import-linter + snapshot / ci-gate.sh（push 時）"
+  echo "   post-commit → 委派回 .git/hooks/post-commit（advisory，不影響 commit）"
   echo "   緊急跳過    → AUTOCLAUDE_SKIP_HOOKS=1 或 git commit/push --no-verify"
 else
   echo "[install_git_hooks] ❌ 設定失敗：core.hooksPath = '$cur'（目錄或 hook 檔不存在）" >&2

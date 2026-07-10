@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # AutoClaude git pre-push hook — push 前完整 CI 閘門鏡像（在本機把所有問題解決完才上版）
-# 鏡像 .github/workflows/ci.yml 的 push gating jobs：
+# 鏡像 .github/workflows/autoclaude-ci.yml 的 push gating jobs：
 #   test（pytest + LOC + import-linter）/ claude-md-budget（CLAUDE.md + snapshot）/ equivalence
 # 安裝：tools/install_git_hooks.sh / .ps1（設 core.hooksPath=<repo根>/tools/git-hooks 根層 dispatcher，依路徑分流至本檔）
 # 緊急跳過：AUTOCLAUDE_SKIP_HOOKS=1 git push ...  或  git push --no-verify
@@ -13,14 +13,26 @@ if [ "${AUTOCLAUDE_SKIP_HOOKS:-0}" = "1" ]; then
   exit 0
 fi
 
-# 自我定位：本檔位於 AutoClaude/tools/git-hooks/，往上兩層即 AutoClaude/
-# （monorepo 下 git rev-parse --show-toplevel 會回 monorepo 根，非本子專案根）
-ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+# 定位子專案根：git 執行 hooks 時 cwd＝該工作樹頂層，故以 --show-toplevel + /AutoClaude
+# 為第一優先（linked worktree 內 push 時才會檢查「該 worktree 的樹」，而非安裝時的主
+# checkout）；取不到才 fallback BASH_SOURCE 自我定位（並印警告）。
+TOPLEVEL="$(git rev-parse --show-toplevel 2>/dev/null)"
+if [ -n "${TOPLEVEL:-}" ]; then
+  ROOT="$TOPLEVEL/AutoClaude"
+else
+  echo "[pre-push] ⚠ git rev-parse --show-toplevel 失敗 → fallback BASH_SOURCE 自我定位（linked worktree 下可能指向主 checkout）" >&2
+  ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+fi
 cd "$ROOT" || exit 1
+# linked worktree：git 對 hook 匯出 GIT_DIR 但不匯出 GIT_WORK_TREE，cd 進子目錄後 git 會
+# 誤把 cwd 當工作樹頂層（相對路徑邏輯失效）；顯式錨定工作樹根。
+if [ -n "${GIT_DIR:-}" ] && [ -n "${TOPLEVEL:-}" ]; then
+  export GIT_WORK_TREE="$TOPLEVEL"
+fi
 export PYTHONUTF8=1
 fail=0
 
-echo "[pre-push] === 本機 CI 閘門（鏡像 ci.yml push jobs）==="
+echo "[pre-push] === 本機 CI 閘門（鏡像 autoclaude-ci.yml push jobs）==="
 
 # 1. LOC 預算（CI: test / claude-md-budget）
 echo "[pre-push] 1/5 LOC 預算"
@@ -56,14 +68,17 @@ python -m pytest $PYTEST_ARGS || fail=1
 
 # 6. ADR-SD09-011：token_guard 源碼變動偵測（on-change mutation 觸發，opt-in 非阻塞）
 #    鎖定累積改由「源碼變動」驅動（取代每日 nightly 計時）；本地 opt-in 因 Windows 原生
-#    不支援 mutmut（需 WSL/docker），預設僅提示、CI mutation-on-change.yml 為權威累積通道。
+#    不支援 mutmut（需 WSL/docker），預設僅提示、CI autoclaude-mutation-on-change.yml 為權威累積通道。
 echo "[pre-push] (額外) ADR-SD09-011 token_guard 源碼變動偵測"
-if git diff --name-only origin/main...HEAD 2>/dev/null | grep -q 'autoclaude/plugins/token_guard/.*\.py'; then
+# 先落地變數再以 herestring 餵 grep -q（不可 git diff | grep -q —— 清單 >64KB 且命中在
+# 前段時 grep -q 提早退出令 git 收 SIGPIPE，pipefail 判整條管線非零 → 偵測靜默漏跑）
+tg_files="$(git -c core.quotepath=false diff --name-only origin/main...HEAD 2>/dev/null || true)"
+if grep -q 'autoclaude/plugins/token_guard/.*\.py' <<<"$tg_files"; then
   if [ "${AUTOCLAUDE_MUTATION_ON_PUSH:-0}" = "1" ] && [ -f tools/run_mutmut_in_docker.sh ]; then
     echo "[pre-push]   token_guard 源碼有變 + opt-in → 跑 mutation（需 WSL/docker）"
     bash tools/run_mutmut_in_docker.sh token_guard || echo "[pre-push]   mutation 非阻塞"
   else
-    echo "[pre-push]   ⚠ token_guard 源碼有變 → 由 CI mutation-on-change.yml 累積 unique sha 證據"
+    echo "[pre-push]   ⚠ token_guard 源碼有變 → 由 CI autoclaude-mutation-on-change.yml 累積 unique sha 證據"
     echo "[pre-push]     （本地累積：AUTOCLAUDE_MUTATION_ON_PUSH=1，需 WSL/docker）"
   fi
 fi

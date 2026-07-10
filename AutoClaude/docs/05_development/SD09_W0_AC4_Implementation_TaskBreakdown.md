@@ -109,7 +109,7 @@ consecutive_failures += 1 每日累積 → ready_for_labeled_pr = false
 - [ ] **T4-1** 修 [tools/run_local_nightly.ps1 Stage 2](../../tools/run_local_nightly.ps1)：
   - alembic upgrade 後加：若 `tests/fixtures/queries_100.jsonl` 不存在 → 跑 `python tools/seed_kb.py ...`
   - 因 fixture 已 commit 進 git，僅首跑或 `--force` 重 seed
-- [ ] **T4-2** 修 [.github/workflows/ci.yml `pg-e2e-nightly` job](../../.github/workflows/ci.yml#L167)：alembic upgrade 後加 seed step
+- [ ] **T4-2** 修 [.github/workflows/autoclaude-ci.yml `pg-e2e-nightly` job](../../../.github/workflows/autoclaude-ci.yml#L167)：alembic upgrade 後加 seed step
 - [ ] **T4-3** 確認 BGE-M3 model 在 CI 上的快取策略（`actions/cache` ~/.cache/huggingface）
 
 ### T5 文件更新（0.1 PD）

@@ -18,11 +18,18 @@
 #
 # Runner：ubuntu-latest。downstream 採用者複製本檔到自家 repo root；
 #         若框架碼不在 AISDLC_SDD_v0.01/ 下，僅需改 working-directory。
+#
+# monorepo 根層接線（2026-07-10）：自 AISDLC_SDD/.github/workflows/arch-fitness.yml
+# 遷入根層；working-directory 與 artifact path 全部改 AISDLC_SDD/ 前綴（repo 根視角），
+# PR 觸發加 AISDLC_SDD/** paths 過濾；schedule 不受 paths 影響。
 
 name: arch-fitness
 
 on:
   pull_request:
+    paths:
+      - "AISDLC_SDD/**"
+      - ".github/workflows/aisdlc-sdd-arch-fitness.yml"
   schedule:
     - cron: "30 2 * * *"   # 02:30 UTC，排在 fsm-chaos-nightly(02:00) 之後
   workflow_dispatch:
@@ -46,12 +53,12 @@ jobs:
         with:
           python-version: "3.11"
       - name: Install deps
-        working-directory: AISDLC_SDD_v0.01
+        working-directory: AISDLC_SDD/AISDLC_SDD_v0.01
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements-ci.txt
       - name: Run fitness (advisory, never blocks)
-        working-directory: AISDLC_SDD_v0.01
+        working-directory: AISDLC_SDD/AISDLC_SDD_v0.01
         run: |
           # 一次跑：印報告到 stdout 並寫 JSON artifact；|| true 確保永不阻擋 PR
           report="$(python -m tools.arch_fitness.arch_fitness --json arch-fitness.json || true)"
@@ -68,7 +75,7 @@ jobs:
         uses: actions/upload-artifact@v5
         with:
           name: arch-fitness-findings
-          path: AISDLC_SDD_v0.01/arch-fitness.json
+          path: AISDLC_SDD/AISDLC_SDD_v0.01/arch-fitness.json
           retention-days: 7
 
   nightly-strict:
@@ -91,13 +98,13 @@ jobs:
         with:
           python-version: "3.11"
       - name: Install deps
-        working-directory: AISDLC_SDD_v0.01
+        working-directory: AISDLC_SDD/AISDLC_SDD_v0.01
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements-ci.txt
       - name: Run fitness (strict + trend)
         id: fitness
-        working-directory: AISDLC_SDD_v0.01
+        working-directory: AISDLC_SDD/AISDLC_SDD_v0.01
         run: |
           # --strict：structural fail → exit 2；advisory warn → exit 1。
           # --trend：把本次 score 追加進 TREND.yaml（單次執行，避免重複追加）。
@@ -117,7 +124,7 @@ jobs:
           exit 0
       - name: Persist score trend (commit back)
         if: always()
-        working-directory: AISDLC_SDD_v0.01
+        working-directory: AISDLC_SDD/AISDLC_SDD_v0.01
         run: |
           set -eu
           git config user.name  "sdd-arch-fitness-bot"
@@ -147,8 +154,8 @@ jobs:
         with:
           name: arch-fitness-findings-nightly
           path: |
-            AISDLC_SDD_v0.01/arch-fitness.json
-            AISDLC_SDD_v0.01/build/reports/fse/TREND.yaml
+            AISDLC_SDD/AISDLC_SDD_v0.01/arch-fitness.json
+            AISDLC_SDD/AISDLC_SDD_v0.01/build/reports/fse/TREND.yaml
           retention-days: 7
       - name: Enforce strict gate
         if: always()

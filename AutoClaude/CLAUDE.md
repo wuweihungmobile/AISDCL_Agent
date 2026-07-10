@@ -173,7 +173,7 @@ DSN 解析優先級：`AUTOCLAUDE_DB_DSN` > `AUTOCLAUDE_PG_DSN`（deprecated）>
 
 **主軸**：SD_08 三個觀察期由本地 nightly 採集（[`tools/run_local_nightly.ps1`](tools/run_local_nightly.ps1)）；#1 mutation pilot kill_rate ✅ 達標，unique sha 為**源碼演進閘門**（需 W1 改 token_guard 源碼，idle 凍結不達標，ADR-SD09-009 §11.6）；#2 AC4 14 天 p95<60ms tolerant（ADR-SD09-008 v0.4）達標日 **~2026-06-16**（R55 forensic 訂正：原 06-08 投影過樂觀；`ac4_progress_check.filter_recent` 為過去 14 日曆天滾動窗口需 14 連續筆，對 schtasks 漏跑日高度敏感；最後缺口 06-02 → 需 06-03~06-16 連續無缺口，任一漏跑即順延）；#3 drift_log 30 天零 severity≠info 達標日 **~2026-06-24**。詳見 [SD_Improving_09.md](docs/04_planning/SD_Improving_09.md) v1.0。
 
-**最新狀態（improving_101 校正，2026-06-30）**：**ADR-SD09-011 解除 mutation 鎖定的日曆綁定**（掌舵者質疑「空轉一個月是好設計嗎」）。根因＝M-05 同 UTC 日去重（`mutation_baseline_lock.py`）+ 每日 nightly → unique sha 每日上限 1、7 個需 ≥7 日曆天、idle 稀釋 → 空轉數週（DEF-101-001 P2 fixed@101）。**修法**：去重鍵 UTC日期→`source_sha256`（`_dedup_key`，同日多 sha 皆計入/同 sha 留最新），unique-sha 累積改由 token_guard 源碼變動觸發（新 `mutation-on-change.yml` + pre-push opt-in），nightly 角色轉 kill_rate 漂移監控/flaky（紀律#6 分軌）；**反作弊不減**（unique sha 守門/0.68 threshold/CONSECUTIVE_RUNS=7 全保留，ADR-SD09-011 §3）。既有 30 筆 history 方案A壓縮（`--migrate-compact-sha`）→ 6 筆/真實 **4 unique sha**，距 7 待 3 次真實 token_guard 演進（可隨開發節奏累積、不熬日曆；如 DEF-100-002 L49 重構即 +1），最終鎖定/退出仍需 PM 決策。零退化 3618→**3622**/0/122、lint 8 kept、零碰 autoclaude/ 微核心、三鏡 audit PASS。improving_100（殺 token_guard 真缺口 survived + L49 等價變異標記）史料見 sprint_history.md。
+**最新狀態（improving_101 校正，2026-06-30）**：**ADR-SD09-011 解除 mutation 鎖定的日曆綁定**（掌舵者質疑「空轉一個月」）。根因＝M-05 同 UTC 日去重（`mutation_baseline_lock.py`）+ 每日 nightly → unique sha 每日上限 1、7 個需 ≥7 日曆天、idle 稀釋 → 空轉數週（DEF-101-001 P2 fixed@101）。**修法**：去重鍵 UTC日期→`source_sha256`（`_dedup_key`，同日多 sha 皆計入/同 sha 留最新），unique-sha 累積改由 token_guard 源碼變動觸發（新 `autoclaude-mutation-on-change.yml`+pre-push opt-in），nightly 角色轉 kill_rate 漂移監控/flaky（紀律#6 分軌）；**反作弊不減**（unique sha 守門/0.68 threshold/CONSECUTIVE_RUNS=7 全保留，ADR-SD09-011 §3）。既有 30 筆 history 方案A壓縮（`--migrate-compact-sha`）→ 6 筆/真實 **4 unique sha**，距 7 待 3 次真實 token_guard 演進（隨開發節奏累積、不熬日曆；如 DEF-100-002 L49 重構即+1），最終鎖定/退出仍需 PM 決策。零退化 3618→**3622**/0/122、lint 8 kept、零碰 autoclaude/ 微核心、三鏡 audit PASS。improving_100（殺 token_guard 真缺口 survived + L49 等價變異標記）見 sprint_history.md。
 
 
 ## 📊 模型欄位（核心參考）
@@ -277,7 +277,7 @@ tasks:
 16. **pytest 數字 SSOT 必須註記隨機性與 fixture 前提** — 引用 pytest 數字（如 2,716 passed）時加註「pytest-randomly 未啟用，順序由 collection 確定」；pyproject.toml 不安裝 pytest-randomly；引入前需先補測試隔離（R40 P1-R40-1 偽陽性預防）
 17. **zero-trust 須雙向：agent audit 結論本身亦須複核** — subagent 聲稱「某檔案不存在」須以 `find`/`rg -l`/`ls` 獨立複核（嚴禁單憑 `fd`，未安裝時靜默回空 → 誤判不存在）；可機械驗證之 finding（檔案存在 / 數字驗算 / 行號）落入 backlog 前主 agent 須親跑複核，誤報與真缺陷同樣留證（R57 SD agent `fd` 誤報 `test_pg_memory_store_security.py:14` 不存在實則存在）
 18. **mutation 必須在隔離樹執行，禁止就地突變活體工作樹** — mutmut 就地改寫 volume-mount 源碼會與並行 pytest/audit 互踩產生假紅、kill 時殘留變異；載具須 tar 複製至 container 內 `/tmp/mutwork` 隔離樹（editable install 指向隔離樹），輸出物寫回 `/workspace` 維持取證鏈（Improving_012 Phase 1 QA P1-7）
-19. **驗證載具 import 路徑一致性** — 一律從專案 cwd 跑 `python -m pytest`/`python -c`，禁 `python <repo 外路徑>.py`（sys.path 不含 cwd → shadow 至舊 editable 副本）；`local_ci_gate.ps1` gate 0 哨兵斷言 `'AISDCL_Agent' in autoclaude.__file__`（流程問題 #9b/#9c，Improving_012 Phase 3）
+19. **驗證載具 import 路徑一致性** — 一律從專案 cwd 跑 `python -m pytest`/`python -c`，禁 `python <repo 外路徑>.py`（sys.path 不含 cwd → shadow 至舊 editable 副本）；`local_ci_gate` gate 0 哨兵以 git rev-parse + pathlib **動態比對** `autoclaude.__file__` 位於當前 repo 根之下（不再寫死 `'AISDCL_Agent'` 字串，repo 更名／搬移不誤判）（流程問題 #9b/#9c，Improving_012 Phase 3）
 
 > **採樣統計**：baseline lock 必須 `samples ≥ 20`；< 20 印 warning「statistical noise high; not blocking」；`perf_regression_check.py` baseline samples<20 自動 BLOCK→WARN；rc 三態 0/2/1 = 綠/warn/block；`Invoke-Stage` rc=2 視為 WARN（ADR-SD08-003 §2.6 v1.1）。
 
@@ -318,11 +318,11 @@ tasks:
 
 **單元測試**：[tests/tools/hooks/](tests/tools/hooks/)（每支 hook ≥ 3 case；SD_09 W0 §4「驗證鏡子自身要被驗證」紀律）。
 
-> **本機 CI 對等（push 前全綠）**：另有 **git hooks**（`tools/git-hooks/` pre-commit/pre-push，`tools/install_git_hooks.ps1` 安裝；有別於上述 Claude Code hooks）+ **act**（`tools/run_act.ps1` 在 Linux 容器跑 ci.yml）+ **docker-compose.ci.yml**（pg17 對齊 CI）+ **mock_brain_server.py**（本地 LLM mock）。一鍵：`tools/local_ci_gate.ps1`。詳見 [Local_CI_Parity_Guide](docs/08_deployment/Local_CI_Parity_Guide.md)。
+> **本機 CI 對等（push 前全綠）**：另有 **git hooks**（`tools/git-hooks/` pre-commit/pre-push，`tools/install_git_hooks.ps1` 安裝；有別於上述 Claude Code hooks）+ **act**（`tools/run_act.ps1` 在 Linux 容器跑根層 autoclaude-ci.yml，於 monorepo 根執行）+ **docker-compose.ci.yml**（pg17 對齊 CI）+ **mock_brain_server.py**（本地 LLM mock）。一鍵：`tools/local_ci_gate.ps1`。詳見 [Local_CI_Parity_Guide](docs/08_deployment/Local_CI_Parity_Guide.md)。
 
 ---
 
-**文檔元數據**：v7.8 | 建立 2025-01-11 | 最後更新 2026-06-24 | 適用 AISDLC v0.09+（v7.8：AutoSDD_improving_61 A 軌 L5 加固 — weak_regex 第二信號併入轉譯元學習（沿 spec_digest 先例搭既有 RTM-COVERAGE-HISTORY；`select_proposals` 雙信號 failure OR weak_regex；無新 plugin/port）；apply 仍人工 signoff；full pytest 3,315/122、importlinter 8 kept、LOC=0。歷史 v7.7 improving_60 明細見 [sprint_history.md §1.7.3](docs/05_development/sprint_history.md)）。
+**文檔元數據**：v7.8 | 建立 2025-01-11 | 最後更新 2026-06-24 | 適用 AISDLC v0.09+（v7.8：AutoSDD_improving_61 A 軌 L5 加固 — weak_regex 第二信號併入轉譯元學習（沿 spec_digest 先例搭既有 RTM-COVERAGE-HISTORY；`select_proposals` 雙信號 failure OR weak_regex；無新 plugin/port）；apply 仍人工 signoff；full pytest 3,529/181（2026-07-09 實測）、importlinter 8 kept、LOC=0。歷史 v7.7 improving_60 明細見 [sprint_history.md §1.7.3](docs/05_development/sprint_history.md)）。
 
 <!-- ARCH_SNAPSHOT_BEGIN -->
 ## [Architecture Snapshot] — 由 tools/snapshot_sync.py 自動生成（請勿手動編輯本區段；以 `python tools/snapshot_sync.py` 重新生成）

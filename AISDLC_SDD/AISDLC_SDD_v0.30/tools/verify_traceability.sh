@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 # ============================================================
 # AISDLC 追溯鏈驗證工具 (Traceability Chain Verification Tool)
 # ============================================================
@@ -52,25 +52,26 @@ echo ""
 
 # ID 模式定義 (AISDLC 標準)
 # F-XXX, BR-XXX, EPIC-XXX, US-XXX, AC-XXX-Y, API-XXX, TC-XXX-Y-Z, BUG-XXX, NFR-XXX
-declare -A ID_PATTERNS
+# bash 3.2 相容（macOS 內建 bash 無 declare -A 關聯陣列）：改用「名稱|模式」平行清單
 ID_PATTERNS=(
-    ["Feature"]="F-[0-9]{3}"
-    ["BusinessRule"]="BR-[0-9]{3}"
-    ["Epic"]="EPIC-[0-9]{3}"
-    ["UserStory"]="US-[0-9]{3}"
-    ["AcceptanceCriteria"]="AC-[0-9]{3}-[0-9]+"
-    ["API"]="API-[0-9]{3}"
-    ["TestCase"]="TC-[0-9]{3}-[0-9]+-[0-9]+"
-    ["Bug"]="BUG-[0-9]{3}"
-    ["NonFunctional"]="NFR-[A-Z]+-[0-9]{3}"
+    "Feature|F-[0-9]{3}"
+    "BusinessRule|BR-[0-9]{3}"
+    "Epic|EPIC-[0-9]{3}"
+    "UserStory|US-[0-9]{3}"
+    "AcceptanceCriteria|AC-[0-9]{3}-[0-9]+"
+    "API|API-[0-9]{3}"
+    "TestCase|TC-[0-9]{3}-[0-9]+-[0-9]+"
+    "Bug|BUG-[0-9]{3}"
+    "NonFunctional|NFR-[A-Z]+-[0-9]{3}"
 )
 
 # 掃描各類型 ID
 echo -e "${BLUE}[掃描] 各類型 ID 統計：${NC}"
 echo ""
 
-for id_type in "${!ID_PATTERNS[@]}"; do
-    pattern="${ID_PATTERNS[$id_type]}"
+for entry in "${ID_PATTERNS[@]}"; do
+    id_type="${entry%%|*}"
+    pattern="${entry#*|}"
     count=$(grep -rhoE "$pattern" "$DOCS_DIR" 2>/dev/null | sort -u | wc -l | tr -d ' ')
     if [ "$count" -gt 0 ]; then
         echo -e "  ${GREEN}✅${NC} $id_type ($pattern): $count 個唯一 ID"

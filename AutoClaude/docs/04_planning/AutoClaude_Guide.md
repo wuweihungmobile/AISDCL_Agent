@@ -722,7 +722,7 @@ SD_09 W0~W3 共 40+ 輪 audit 累積，違反任一條 → P0 audit。完整版�
 
 - **Claude Code hooks**（5 個）：`check_lang.py`（語言）/ `enforce_docs_path.py`（文件路徑）/ `loc_budget_check.py`（LOC）/ `claude_md_freshness.py`（snapshot 新鮮度）/ `check_sh_eol.py`（.sh LF）。設定於 [.claude/settings.json](../../.claude/settings.json)。
 - **git hooks**：`tools/git-hooks/` pre-commit / pre-push（`tools/install_git_hooks.ps1` 安裝）。
-- **act**：`tools/run_act.ps1` 在 Linux 容器跑 ci.yml；`docker-compose.ci.yml`（pg17 對齊 CI）；`mock_brain_server.py`（本地 LLM mock）。
+- **act**：`tools/run_act.ps1` 在 Linux 容器跑根層 autoclaude-ci.yml（於 monorepo 根執行）；`docker-compose.ci.yml`（pg17 對齊 CI）；`mock_brain_server.py`（本地 LLM mock）。
 - **一鍵**：`tools/local_ci_gate.ps1`。詳見 [Local_CI_Parity_Guide.md](../08_deployment/Local_CI_Parity_Guide.md)。
 
 ---

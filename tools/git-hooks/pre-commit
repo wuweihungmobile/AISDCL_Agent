@@ -18,21 +18,47 @@ if [ "${AUTOCLAUDE_SKIP_HOOKS:-0}" = "1" ]; then
   exit 0
 fi
 
-# 自我定位：本檔位於 <root>/tools/git-hooks/，往上兩層即 repo 根
-ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+# 定位 repo 根：git 執行 hooks 時 cwd＝該工作樹頂層，故以 --show-toplevel 為第一優先
+# （linked worktree 內 commit 時才會對「該 worktree 的樹」跑檢查，而非安裝時的主 checkout）；
+# 取不到才 fallback BASH_SOURCE 自我定位（並印警告）。
+TOPLEVEL="$(git rev-parse --show-toplevel 2>/dev/null)"
+if [ -z "${TOPLEVEL:-}" ]; then
+  echo "[pre-commit dispatcher] ⚠ git rev-parse --show-toplevel 失敗 → fallback BASH_SOURCE 自我定位（linked worktree 下可能指向主 checkout）" >&2
+  TOPLEVEL="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+fi
 rc=0
 
-changed="$(git diff --cached --name-only)"
-
-if printf '%s\n' "$changed" | grep -q '^AutoClaude/'; then
-  echo "[pre-commit dispatcher] 暫存變更含 AutoClaude/ → 執行 AutoClaude pre-commit"
-  bash "$ROOT/AutoClaude/tools/git-hooks/pre-commit" || rc=1
+# 分流判定：純 bash case 前綴比對（不可用 printf | grep -q —— 變更清單 >64KB 且命中在
+# 前段時 grep -q 提早退出令 printf 收 SIGPIPE，pipefail 判整條管線非零 → 閘門靜默漏跑）。
+# -c core.quotepath=false：非 ASCII 檔名不被引號包裹，前綴比對不逃逸。
+run_autoclaude=0
+run_sdd=0
+if changed="$(git -c core.quotepath=false diff --cached --name-only)"; then
+  case $'\n'"$changed" in *$'\n'AutoClaude/*)  run_autoclaude=1 ;; esac
+  case $'\n'"$changed" in *$'\n'AISDLC_SDD/*) run_sdd=1 ;; esac
+else
+  # git diff 失敗（rc≠0）→ 無法判定變更範圍 → fail-safe：兩子專案閘門全跑，寧可多跑不可漏跑
+  echo "[pre-commit dispatcher] ⚠ git diff --cached 失敗 → fail-safe：兩子專案閘門全跑"
+  run_autoclaude=1
+  run_sdd=1
 fi
 
-if printf '%s\n' "$changed" | grep -q '^AISDLC_SDD/'; then
-  if [ -f "$ROOT/AISDLC_SDD/.githooks/pre-commit" ]; then
+if [ "$run_autoclaude" -eq 1 ]; then
+  if [ -f "$TOPLEVEL/AutoClaude/tools/git-hooks/pre-commit" ]; then
+    echo "[pre-commit dispatcher] 暫存變更含 AutoClaude/ → 執行 AutoClaude pre-commit"
+    bash "$TOPLEVEL/AutoClaude/tools/git-hooks/pre-commit" || rc=1
+  else
+    # 子 hook 應存在卻缺失＝hooks 體系損壞 → fail-loud，拒絕放行
+    echo "[pre-commit dispatcher] ❌ 子 hook 缺失：$TOPLEVEL/AutoClaude/tools/git-hooks/pre-commit（hooks 體系損壞）" >&2
+    rc=1
+  fi
+fi
+
+if [ "$run_sdd" -eq 1 ]; then
+  # AISDLC_SDD by-design 僅提供 pre-push、無 pre-commit（見檔頭設計說明）→ 不存在時正常跳過
+  if [ -f "$TOPLEVEL/AISDLC_SDD/.githooks/pre-commit" ]; then
     echo "[pre-commit dispatcher] 暫存變更含 AISDLC_SDD/ → 執行 AISDLC_SDD pre-commit"
-    bash "$ROOT/AISDLC_SDD/.githooks/pre-commit" || rc=1
+    bash "$TOPLEVEL/AISDLC_SDD/.githooks/pre-commit" || rc=1
   fi
 fi
 

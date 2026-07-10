@@ -21,7 +21,7 @@
 | 架構契約 | `PYTHONUTF8=1 lint-imports` | 8 kept / 0 broken（improving_100 已驗，本輪零 import 變更） |
 
 ### 2.2 空轉根因（鐵證）
-1. **觸發**：`tools/run_local_nightly.ps1:25` schtasks `/SC DAILY` + `ci.yml:317` cron — 每日一次。
+1. **觸發**：`tools/run_local_nightly.ps1:25` schtasks `/SC DAILY` + `autoclaude-ci.yml:317` cron — 每日一次。
 2. **M-05 去重**：`mutation_baseline_lock.py:197-203` 去重鍵＝「同 module + 同 UTC 日期」（不看 sha）→ 同日多 sha 只留 1 筆。
 3. 疊加 ⇒ unique sha 每日最多 +1、7 個需 ≥7 日曆天、idle 稀釋 tail7 ⇒ 空轉。
 4. **確定性反證**：mutation test 確定性，同 sha 重跑無新資訊；防抖動已由 unique sha + ±2pp tolerance + `compute_consistency_warning`(L265) 三機制承擔 ⇒ 日曆綁定是無防護目標的遺留懲罰。
@@ -74,9 +74,9 @@
 - `should_lock` tail 語意：改 sha 去重後 history 每 sha 一筆、tail N 自然＝最近 N 個 unique sha，**邏輯無需改 code**（unique sha 守門/CONSECUTIVE_RUNS=7/0.68 threshold/MAX_BACKWARD_COMPAT_MISSING=2 全保留）。
 
 ### 4.3 W-101-2 觸發解耦（兩者皆備，掌舵者裁）
-- **CI**：新 `.github/workflows/mutation-on-change.yml`（`on: push: paths: token_guard/**` + workflow_dispatch、continue-on-error 非阻塞）＝unique-sha 累積權威通道。
+- **CI**：新 `.github/workflows/autoclaude-mutation-on-change.yml`（`on: push: paths: token_guard/**` + workflow_dispatch、continue-on-error 非阻塞）＝unique-sha 累積權威通道。
 - **本地**：`tools/git-hooks/pre-push` 加 on-change 偵測段（opt-in `AUTOCLAUDE_MUTATION_ON_PUSH=1`、非阻塞、誠實反映 Windows mutmut 限制）。
-- **nightly 角色轉監控**：`ci.yml` mutation step 加註解（鎖定累積改 on-change 驅動、nightly＝漂移監控/flaky，紀律 #6 分軌）。
+- **nightly 角色轉監控**：`autoclaude-ci.yml` mutation step 加註解（鎖定累積改 on-change 驅動、nightly＝漂移監控/flaky，紀律 #6 分軌）。
 
 ### 4.4 受控突變驗牙（MUT-101-1）+ 新測試（+4）
 - 新測試：`test_append_history_same_date_different_sha_all_kept`（RTM-101-1）、`_same_sha_keeps_latest`（RTM-101-2）、`_same_sha_idle_rerun_dedups_across_days`（idle 不稀釋）、`test_compact_history_by_sha_collapses_duplicates_with_backup`（RTM-101-5）。
@@ -109,7 +109,7 @@
 ## §8　誠實性標記
 1. **規格先行已守**：本輪分兩段——先產出設計（ADR-SD09-011 + 計畫書設計段）停在 signoff 閘門 → PM signoff（approve、方案 A、兩者皆備）後才動 `mutation_baseline_lock.py`。signoff 前確實未動 code。
 2. **收斂未結案、仍需源碼演進**：本輪解除「機制空轉」，但 token_guard 真實只演進 4 個 unique sha（壓縮後實證），距 7 還差 **3 次真實 token_guard 源碼改進**。新機制讓這 3 次可**隨開發節奏快速累積、不必熬日曆**（如 improving_102 的 DEF-100-002 L49 重構即會 +1）；最終鎖定/退出仍需 PM 決策（HUMAN_PENDING）。
-3. **Windows 無法本機跑 mutmut（需 WSL/docker）**：故 on-change 累積以 CI（`mutation-on-change.yml`）為權威通道、本地 hook 為 opt-in 提示。真實 kill_rate / unique sha 累積由 CI 在 Linux 跑。
+3. **Windows 無法本機跑 mutmut（需 WSL/docker）**：故 on-change 累積以 CI（`autoclaude-mutation-on-change.yml`）為權威通道、本地 hook 為 opt-in 提示。真實 kill_rate / unique sha 累積由 CI 在 Linux 跑。
 4. **N/A 兩型精確**：ci-gate/五軌 TLC＝類型①（git status 證零碰 AISLDC_SDD/*.tla/*.cfg）；DAL＝類型②（tests/equivalence 隨全套 3622 通過、無新 DAL 改動）。
 5. **本輪改 tracked 源碼（tools/）非純測試**（與 improving_100 不同），但零碰 autoclaude/ 微核心。
 

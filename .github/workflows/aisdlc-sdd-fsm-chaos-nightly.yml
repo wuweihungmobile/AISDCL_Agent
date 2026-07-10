@@ -9,6 +9,10 @@
 #      No path adjustment needed; only `working-directory` may differ if the
 #      downstream repo doesn't keep framework code under `AISDLC_SDD_v0.01/`.
 #
+# monorepo 根層接線（2026-07-10）：自 AISDLC_SDD/.github/workflows/fsm-chaos-nightly.yml
+# 遷入 monorepo 根層；working-directory / artifact path 改 AISDLC_SDD/ 前綴，
+# track-streak 的 WORKFLOW_FILE 同步改為 aisdlc-sdd-fsm-chaos-nightly.yml。
+#
 # Schedule rationale:
 #   - Daily at 02:00 UTC keeps chaos runs off the critical PR path while
 #     exercising the full §ACT-029 suite (13 chaos tests + 100-round sweep)
@@ -56,7 +60,7 @@ jobs:
           python-version: "3.11"
 
       - name: Install dependencies
-        working-directory: AISDLC_SDD_v0.01
+        working-directory: AISDLC_SDD/AISDLC_SDD_v0.01
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements-ci.txt
@@ -71,12 +75,12 @@ jobs:
           echo "Using seed=${SEED}"
 
       - name: Run chaos-marked pytest suite
-        working-directory: AISDLC_SDD_v0.01
+        working-directory: AISDLC_SDD/AISDLC_SDD_v0.01
         run: |
           python -m pytest tools/fsm_runtime/tests/ -m chaos -v
 
       - name: Run 100-round chaos sweep
-        working-directory: AISDLC_SDD_v0.01
+        working-directory: AISDLC_SDD/AISDLC_SDD_v0.01
         env:
           CHAOS_ROUNDS: ${{ github.event.inputs.rounds || '100' }}
         run: |
@@ -96,7 +100,7 @@ jobs:
         uses: actions/upload-artifact@v5
         with:
           name: fsm-chaos-report-${{ steps.seed.outputs.seed }}
-          path: AISDLC_SDD_v0.01/chaos-report.json
+          path: AISDLC_SDD/AISDLC_SDD_v0.01/chaos-report.json
           retention-days: 7
 
   # QA Round-3 P1-02 — enforce Rule 9.9.4「連 3 日 nightly 失敗鎖定 main」.
@@ -134,7 +138,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           REPO: ${{ github.repository }}
-          WORKFLOW_FILE: fsm-chaos-nightly.yml
+          WORKFLOW_FILE: aisdlc-sdd-fsm-chaos-nightly.yml
         run: |
           # Fetch the last 5 completed runs of THIS workflow, ordered newest first.
           # We treat the failing run that triggered this job as the newest entry.

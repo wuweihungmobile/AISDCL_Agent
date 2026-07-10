@@ -45,7 +45,7 @@
 
 同時硬化既有 workflow：upload-artifact 一律 `continue-on-error` + 降 retention；
 兩個推送 job 共用 `main-push-serialize` concurrency + rebase-retry；action 版本
-升至 Node24 相容；新增 `ci.yml` 在 push(main)/PR 跑離線閘門補缺口。
+升至 Node24 相容；新增 `aisdlc-sdd-ci.yml` 在 push(main)/PR 跑離線閘門補缺口。
 
 ---
 
@@ -95,13 +95,13 @@
 
 ## Next Action
 
-1. ✅ **artifact 配額治本（已落地）**：新增 `.github/workflows/artifact-cleanup.yml`
+1. ✅ **artifact 配額治本（已落地）**：新增 `.github/workflows/aisdlc-sdd-artifact-cleanup.yml`
    ——每日 03:00 UTC + workflow_dispatch，用 gh CLI（actions:write）刪除 expired/逾齡
    artifact（預設 > 7 天，對齊 retention）。首次可手動 `gh workflow run
-   artifact-cleanup.yml` 立即清掉既有累積、解除配額。
+   aisdlc-sdd-artifact-cleanup.yml` 立即清掉既有累積、解除配額。
 2. ⏳ **branch protection（待 repo admin 手動）**：將 `ci / offline-gate` 設為 main 的
    required status check（讓雲端閘門與本機 pre-push 雙層強制）。GITHUB_TOKEN 無 admin
    scope，無法由 workflow 自動設定，須在 repo Settings → Branches 手動啟用。
-3. **act 全 workflow 煙霧測試**：定期 `act -W .github/workflows/ci.yml` 驗證 YAML。
+3. **act 全 workflow 煙霧測試**：定期 `act -W .github/workflows/aisdlc-sdd-ci.yml` 驗證 YAML。
 
 **存放位置**: `docs/02_architecture/adr/ADR-001-local-first-ci-parity.md`

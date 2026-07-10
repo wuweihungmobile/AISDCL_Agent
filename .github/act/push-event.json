@@ -1,8 +1,8 @@
 {
   "ref": "refs/heads/main",
   "repository": {
-    "name": "AISDLC_SDD",
-    "full_name": "wuweihungmobile/AISDLC_SDD",
+    "name": "AISDCL_Agent",
+    "full_name": "wuweihungmobile/AISDCL_Agent",
     "default_branch": "main"
   },
   "pusher": { "name": "local-act" }

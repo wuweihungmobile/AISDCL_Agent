@@ -1,7 +1,9 @@
-# AISDLC-SDD — Dependabot（自動更新相依，免未來再撞 Node/action 退役或套件漏洞）。
+# monorepo 根層 Dependabot（自動更新相依，免未來再撞 Node/action 退役或套件漏洞）。
+# 2026-07-10 自 AISDLC_SDD/.github/dependabot.yml 遷入根層（GitHub 只讀根層）；
+# pip directory 改以 repo 根視角指向子專案路徑。
 #
-# 對應 ADR-001：本次 Node20→Node24 是人工救火；Dependabot 讓 action 版本與
-# pip 釘版日後自動進 PR，經 ci.yml offline-gate 驗證後再合入，避免重蹈覆轍。
+# 對應 AISDLC_SDD ADR-001：Node20→Node24 是人工救火；Dependabot 讓 action 版本與
+# pip 釘版日後自動進 PR，經 aisdlc-sdd-ci.yml offline-gate 驗證後再合入，避免重蹈覆轍。
 version: 2
 updates:
   # GitHub Actions：每週掃 .github/workflows/，action 有新版即開 PR。
@@ -17,7 +19,7 @@ updates:
 
   # pip：框架 CI 釘版相依（requirements-ci.txt）有新版即開 PR。
   - package-ecosystem: "pip"
-    directory: "/AISDLC_SDD_v0.01"
+    directory: "/AISDLC_SDD/AISDLC_SDD_v0.01"
     schedule:
       interval: "weekly"
       day: "monday"

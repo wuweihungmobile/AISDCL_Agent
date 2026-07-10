@@ -1,10 +1,21 @@
-name: CI
+name: AutoClaude CI
 
+# monorepo 根層接線（2026-07-10）：本 workflow 自 AutoClaude/.github/workflows/ci.yml
+# 遷入根層 .github/workflows/（GitHub Actions 只讀 repo 根層）。所有 run step 以
+# defaults.run.working-directory 定錨 AutoClaude/；uses step（checkout / artifact）
+# 的路徑一律以 repo 根視角書寫。push/PR 加 AutoClaude 前綴 paths 過濾，避免
+# AISDLC_SDD 側變更誤觸發；schedule / workflow_dispatch 不受 paths 影響。
 on:
   push:
     branches: [main]
+    paths:
+      - "AutoClaude/**"
+      - ".github/workflows/autoclaude-ci.yml"
   pull_request:
     branches: [main]
+    paths:
+      - "AutoClaude/**"
+      - ".github/workflows/autoclaude-ci.yml"
   # SD_07 W2 T2-6（PM #2）：nightly 跑真實 PG e2e（02:00 UTC）
   # SD_09 W0 M-01：mutation cron 拆 3 job — TG 03:00 UTC active；GS/Coord dormant 待 W1/W2 啟用
   # ADR-SD09-002 §2.3：單一時間 1 個 active pilot module（GS 04 / Coord 05 UTC schedule 待 W1/W2 開啟）
@@ -14,6 +25,10 @@ on:
     # - cron: "0 4 * * *" # mutation-test-goalsynthesis-nightly（dormant，待 W1 啟用）
     # - cron: "0 5 * * *" # mutation-test-coordinator-nightly（dormant，待 W2 啟用）
   workflow_dispatch:
+
+defaults:
+  run:
+    working-directory: AutoClaude
 
 jobs:
   test:
@@ -30,6 +45,9 @@ jobs:
         with:
           python-version: "3.11"
           cache: pip
+          # monorepo：repo 根無 requirements.txt（setup-python pip cache 預設 glob 會
+          # match 不到而報錯）→ 顯式指向子專案 pyproject.toml（repo 根視角）
+          cache-dependency-path: AutoClaude/pyproject.toml
 
       - name: Install dependencies
         run: |
@@ -107,6 +125,9 @@ jobs:
         with:
           python-version: "3.11"
           cache: pip
+          # monorepo：repo 根無 requirements.txt（setup-python pip cache 預設 glob 會
+          # match 不到而報錯）→ 顯式指向子專案 pyproject.toml（repo 根視角）
+          cache-dependency-path: AutoClaude/pyproject.toml
 
       - name: Install dependencies
         run: |
@@ -166,6 +187,9 @@ jobs:
         with:
           python-version: "3.11"
           cache: pip
+          # monorepo：repo 根無 requirements.txt（setup-python pip cache 預設 glob 會
+          # match 不到而報錯）→ 顯式指向子專案 pyproject.toml（repo 根視角）
+          cache-dependency-path: AutoClaude/pyproject.toml
 
       - name: Install postgres dependencies
         run: |
@@ -222,6 +246,9 @@ jobs:
         with:
           python-version: "3.11"
           cache: pip
+          # monorepo：repo 根無 requirements.txt（setup-python pip cache 預設 glob 會
+          # match 不到而報錯）→ 顯式指向子專案 pyproject.toml（repo 根視角）
+          cache-dependency-path: AutoClaude/pyproject.toml
 
       - name: Install dependencies
         run: |
@@ -261,8 +288,8 @@ jobs:
         with:
           name: ac4-history-${{ github.run_id }}
           path: |
-            .ac4_history.jsonl
-            .ac4_junit.xml
+            AutoClaude/.ac4_history.jsonl
+            AutoClaude/.ac4_junit.xml
           retention-days: 30
 
   # SD_09 W0 M-01：mutation cron 拆 3 job（ADR-SD09-002 §2.3 落地）
@@ -290,6 +317,9 @@ jobs:
         with:
           python-version: "3.11"
           cache: pip
+          # monorepo：repo 根無 requirements.txt（setup-python pip cache 預設 glob 會
+          # match 不到而報錯）→ 顯式指向子專案 pyproject.toml（repo 根視角）
+          cache-dependency-path: AutoClaude/pyproject.toml
 
       - name: Install dependencies + mutmut
         run: |
@@ -310,7 +340,7 @@ jobs:
           mutmut results | tee mutation_token_guard.log
 
       # 連續 7 次達 ≥ 70%（目標 75% -5% 容忍）才鎖定 baseline
-      # ADR-SD09-011（improving_101）：unique-sha 鎖定累積主通道已改為 mutation-on-change.yml
+      # ADR-SD09-011（improving_101）：unique-sha 鎖定累積主通道已改為 autoclaude-mutation-on-change.yml
       # （token_guard 源碼變動觸發，解除日曆綁定）；本 nightly step 角色轉為「kill_rate 漂移監控
       # + flaky 偵測」。改 sha 去重後 idle 重跑同 sha 只更新最新、不稀釋 tail，故 nightly 保留無害。
       - name: Lock baseline if 7 consecutive runs >= target
@@ -337,10 +367,10 @@ jobs:
         with:
           name: mutation-reports-token-guard-${{ github.run_id }}
           path: |
-            mutation_token_guard.log
-            mutation_backlog_token_guard.md
-            .mutation_history.jsonl
-            .mutation_baseline.toml
+            AutoClaude/mutation_token_guard.log
+            AutoClaude/mutation_backlog_token_guard.md
+            AutoClaude/.mutation_history.jsonl
+            AutoClaude/.mutation_baseline.toml
           retention-days: 30
 
   # === Job 2：GoalSynthesisPlugin（dormant，待 W1 啟用）===
@@ -364,6 +394,9 @@ jobs:
         with:
           python-version: "3.11"
           cache: pip
+          # monorepo：repo 根無 requirements.txt（setup-python pip cache 預設 glob 會
+          # match 不到而報錯）→ 顯式指向子專案 pyproject.toml（repo 根視角）
+          cache-dependency-path: AutoClaude/pyproject.toml
 
       - name: Install dependencies + mutmut
         run: |
@@ -389,7 +422,7 @@ jobs:
         with:
           name: mutation-reports-goal-synthesis-${{ github.run_id }}
           path: |
-            mutation_goal_synthesis.log
+            AutoClaude/mutation_goal_synthesis.log
           retention-days: 30
 
   # === Job 3：OrchestrationCoordinator（dormant，待 W2 啟用）===
@@ -413,6 +446,9 @@ jobs:
         with:
           python-version: "3.11"
           cache: pip
+          # monorepo：repo 根無 requirements.txt（setup-python pip cache 預設 glob 會
+          # match 不到而報錯）→ 顯式指向子專案 pyproject.toml（repo 根視角）
+          cache-dependency-path: AutoClaude/pyproject.toml
 
       - name: Install dependencies + mutmut
         run: |
@@ -435,7 +471,7 @@ jobs:
         with:
           name: mutation-reports-coordinator-${{ github.run_id }}
           path: |
-            mutation_coordinator.log
+            AutoClaude/mutation_coordinator.log
           retention-days: 30
 
   # SD_08 W5 T5-G7：perf baseline nightly job（ADR-SD08-003 §3）
@@ -461,6 +497,9 @@ jobs:
         with:
           python-version: "3.11"
           cache: pip
+          # monorepo：repo 根無 requirements.txt（setup-python pip cache 預設 glob 會
+          # match 不到而報錯）→ 顯式指向子專案 pyproject.toml（repo 根視角）
+          cache-dependency-path: AutoClaude/pyproject.toml
 
       - name: Install dependencies
         run: |
@@ -501,7 +540,7 @@ jobs:
         with:
           name: perf-baseline-${{ github.run_id }}
           path: |
-            perf_results.json
-            perf_regression_comment.md
-            .perf_baseline.toml
+            AutoClaude/perf_results.json
+            AutoClaude/perf_regression_comment.md
+            AutoClaude/.perf_baseline.toml
           retention-days: 90  # 季度趨勢分析

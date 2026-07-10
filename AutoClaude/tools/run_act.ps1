@@ -1,13 +1,14 @@
 ﻿<#
 .SYNOPSIS
-在本機 Docker 內以 act 重現 GitHub Actions（.github/workflows/ci.yml），push 前攔截 CI 紅燈。
+在本機 Docker 內以 act 重現 GitHub Actions（.github/workflows/autoclaude-ci.yml），push 前攔截 CI 紅燈。
+monorepo 根層接線（2026-07-10）：workflow 已遷至 monorepo 根層 → act 一律於 monorepo 根執行（讀根層 .actrc）。
 
 .DESCRIPTION
 解決「上版 GitHub 才發現 CI/CD 錯誤」的根因：CI 在 Linux 跑、開發在 Windows，
 環境差異（PG 鏡像版本、.sh CRLF、psycopg2、alembic、apt/pip 解析）只在 push 後暴露。
 act 讀取 workflow YAML，於 Linux 容器內跑與雲端同一套流程 → 本機即可重現並修復。
 
-對應 GitHub push/PR 觸發的 gating jobs（ci.yml）：
+對應 GitHub push/PR 觸發的 gating jobs（autoclaude-ci.yml）：
   test               pytest + LOC budget + import-linter（主閘門）
   claude-md-budget   CLAUDE.md <= 400 行 + snapshot freshness
   equivalence        equivalence snapshot（needs: test）
@@ -38,9 +39,10 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
-$RepoRoot = Split-Path -Parent $PSScriptRoot
+# monorepo 根 = 本腳本(AutoClaude/tools/) 上兩層
+$RepoRoot = Split-Path -Parent (Split-Path -Parent $PSScriptRoot)
 Set-Location $RepoRoot
-$Workflow = '.github/workflows/ci.yml'
+$Workflow = '.github/workflows/autoclaude-ci.yml'
 
 # ---- 1. 定位 act.exe（PATH 可能尚未刷新 → 退回 winget 安裝路徑 → 退回 gh-act）----
 # 回傳字串陣列（指令 + 前置參數），gh-act 退回時為 @('gh','act')，對齊 run_act.sh 的偵測邏輯。
@@ -71,8 +73,18 @@ $ActPrefix = @($Act | Select-Object -Skip 1)
 Write-Host "[run_act] act = $($Act -join ' ')" -ForegroundColor Cyan
 
 # ---- 2. 確認 Docker daemon ----
-& docker info *> $null
-if ($LASTEXITCODE -ne 0) {
+# 探測段局部 EAP=Continue：PS5.1 + EAP=Stop 下 native stderr 重導（*> $null）會擲
+# NativeCommandError（同 tools/bootstrap.ps1 Select-Python 已文件化的修法），daemon
+# 未啟動時才能走到下方友善錯誤訊息而非直接 crash。
+$prevEAP = $ErrorActionPreference
+try {
+  $ErrorActionPreference = 'Continue'
+  & docker info *> $null
+  $dockerRc = $LASTEXITCODE
+} finally {
+  $ErrorActionPreference = $prevEAP
+}
+if ($dockerRc -ne 0) {
   Write-Host '[run_act] Docker daemon 未啟動，請先開啟 Docker Desktop。' -ForegroundColor Red
   exit 1
 }
@@ -92,8 +104,17 @@ $NeededImages = @($RunnerImage)
 # 跑整份 push 圖（未指定 -Job）含 pg-contract → 需 postgres service 鏡像
 if (-not $Job) { $NeededImages += 'pgvector/pgvector:pg17' }
 foreach ($img in $NeededImages) {
-  & docker image inspect $img *> $null
-  if ($LASTEXITCODE -ne 0) {
+  # 探測段局部 EAP=Continue：鏡像不存在時 docker inspect 寫 stderr，EAP=Stop + *> 直接
+  # 擲 NativeCommandError → docker pull fallback 永遠到不了（同上 docker info 修法）。
+  $prevEAP = $ErrorActionPreference
+  try {
+    $ErrorActionPreference = 'Continue'
+    & docker image inspect $img *> $null
+    $imgRc = $LASTEXITCODE
+  } finally {
+    $ErrorActionPreference = $prevEAP
+  }
+  if ($imgRc -ne 0) {
     Write-Host "[run_act] 本地缺鏡像 $img → docker pull（首次約 1~1.5GB）…" -ForegroundColor Yellow
     & docker pull $img
     if ($LASTEXITCODE -ne 0) {
@@ -111,21 +132,26 @@ foreach ($img in $NeededImages) {
 #   (2) 忠實度：GitHub runner 無 .env，注入後會讓「預期 env 未設」的測試偽 fail
 #       （實測 test_minimax_missing_api_key 因 .env 的 MINIMAX_API_KEY 而 DID NOT RAISE）。
 # 解法：傳一個空的 --env-file 覆蓋預設 .env 載入（temp 空檔，免污染 repo / 免踩 .gitignore）。
-$EmptyEnv = Join-Path $env:TEMP 'autoclaude_act_empty.env'
-Set-Content -Path $EmptyEnv -Value '' -NoNewline -Encoding ascii
+# 唯一檔名 + try/finally 清理（對齊 run_act.sh 的 mktemp + trap；原固定檔名且無清理）。
+$EmptyEnv = [System.IO.Path]::GetTempFileName()
+try {
+  Set-Content -Path $EmptyEnv -Value '' -NoNewline -Encoding ascii
 
-# ---- 6. 組裝 act 參數 ----
-# push 事件 → ci.yml 的 nightly job（if: schedule/dispatch）自動排除；只跑 gating jobs。
-# --pull=false：用上一步已備妥的本地鏡像，繞過 credsStore 公開鏡像 401 bug。
-# --env-file 空檔：忠實對齊 GitHub CI（無 .env）。
-$actArgs = @('push', '-W', $Workflow, '--pull=false', '--env-file', $EmptyEnv)
-if ($Job)    { $actArgs += @('-j', $Job) }
-if ($DryRun) { $actArgs += '-n' }
+  # ---- 6. 組裝 act 參數 ----
+  # push 事件 → ci.yml 的 nightly job（if: schedule/dispatch）自動排除；只跑 gating jobs。
+  # --pull=false：用上一步已備妥的本地鏡像，繞過 credsStore 公開鏡像 401 bug。
+  # --env-file 空檔：忠實對齊 GitHub CI（無 .env）。
+  $actArgs = @('push', '-W', $Workflow, '--pull=false', '--env-file', $EmptyEnv)
+  if ($Job)    { $actArgs += @('-j', $Job) }
+  if ($DryRun) { $actArgs += '-n' }
 
-Write-Host "[run_act] 執行: $($Act -join ' ') $($actArgs -join ' ')" -ForegroundColor Cyan
+  Write-Host "[run_act] 執行: $($Act -join ' ') $($actArgs -join ' ')" -ForegroundColor Cyan
 
-& $ActExe @($ActPrefix + $actArgs)
-$rc = $LASTEXITCODE
+  & $ActExe @($ActPrefix + $actArgs)
+  $rc = $LASTEXITCODE
+} finally {
+  Remove-Item -LiteralPath $EmptyEnv -Force -ErrorAction SilentlyContinue
+}
 
 if ($rc -eq 0) {
   Write-Host "[run_act] ✅ 本地 CI 通過（act 退出碼 0）— 可安全 push。" -ForegroundColor Green

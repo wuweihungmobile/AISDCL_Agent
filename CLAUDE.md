@@ -73,7 +73,7 @@ autoclaude <playbook.yaml> --config config.local.yaml   # 安裝後 entrypoint
 
 ### 測試 / Lint
 ```bash
-python -m pytest tests/ -q                       # 全套（基線 2,972 passed / 122 skipped，2026-06-13 Improving_012 Phase 1 + audit 修復後實測）
+python -m pytest tests/ -q                       # 全套（基線 3,529 passed / 181 skipped，2026-07-09 local_ci_gate 實測）
 python -m pytest tests/test_playbook_runner.py -v # 單檔
 python -m pytest tests/ -k <substring> -v         # 單一測試
 python -m pytest tests/ -m pg_real                # 需 SD07_REAL_PG_E2E_ENABLED=true + PG DSN
@@ -86,14 +86,14 @@ ruff check .                                       # lint（line-length=100, py3
 ### 本機 CI 對等 / Nightly（push 前全綠，PowerShell）
 ```powershell
 powershell -ExecutionPolicy Bypass -File tools/install_git_hooks.ps1   # 裝 git hooks
-powershell -ExecutionPolicy Bypass -File tools/local_ci_gate.ps1       # 一鍵本機 CI 閘門（鏡像 ci.yml）
-powershell -ExecutionPolicy Bypass -File tools/run_act.ps1 -Job test   # act：Linux 容器跑真 CI
+powershell -ExecutionPolicy Bypass -File tools/local_ci_gate.ps1       # 一鍵本機 CI 閘門（鏡像 autoclaude-ci.yml）
+powershell -ExecutionPolicy Bypass -File tools/run_act.ps1 -Job test   # act：Linux 容器跑真 CI（於 monorepo 根執行、讀根層 .actrc）
 powershell -ExecutionPolicy Bypass -File tools/run_local_nightly.ps1   # nightly 6 stage（mutation/pg-e2e/perf/drift/obs）
 docker compose -f docker-compose.ci.yml up -d                          # CI 對等 PG（pg17）
 ```
 - **macOS/Linux 對等腳本已存在**：AutoClaude 側 `tools/install_git_hooks.sh`、`tools/local_ci_gate.sh`、`tools/run_act.sh`；monorepo 根層另有 `tools/bootstrap.sh` 與 `tools/integration_gate.sh`。完整雙平台對照表見根層 [ONBOARDING.md](ONBOARDING.md) §6。
 - git hooks 為**根層 dispatcher**（monorepo 根 `tools/git-hooks/`）：任一支安裝腳本（`.sh`/`.ps1`）執行後**兩子專案閘門同時生效**，裝一次即可（詳見 ONBOARDING.md §6）。
-- CI（`.github/workflows/ci.yml`）jobs：`test`（pytest + LOC budget + lint-imports）、`claude-md-budget`（CLAUDE.md ≤ 400 行 + snapshot 新鮮度）、`equivalence`、`pg-contract`（continue-on-error）。
+- CI（**根層** `.github/workflows/autoclaude-ci.yml`；兩子專案 workflows 已全數上移 monorepo 根層並加子專案前綴，對照見 ONBOARDING.md §6.1）jobs：`test`（pytest + LOC budget + lint-imports）、`claude-md-budget`（CLAUDE.md ≤ 400 行 + snapshot 新鮮度）、`equivalence`、`pg-contract`（continue-on-error）。
 - DB migrations：`alembic upgrade head`（同步 DSN／psycopg2；PostgreSQL 17 + pgvector）。
 
 ### 架構大圖

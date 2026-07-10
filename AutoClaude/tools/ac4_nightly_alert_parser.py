@@ -116,7 +116,7 @@ def parse(raw_output: str) -> AlertDecision:
             f"(tolerant<60ms streak={tolerant_streak}/14 "
             f"observation<50ms streak={observation_streak}/14; "
             f"ADR-SD09-008 v0.4 ACCEPTED) — "
-            f"需 PM 確認啟用 pg-e2e-on-label.yml workflow 並紀錄至 "
+            f"需 PM 確認啟用 autoclaude-pg-e2e-on-label.yml workflow 並紀錄至 "
             f"docs/06_quality/SD09_AC4_Activation_Approval.md"
         )
         return AlertDecision(

@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # local_ci_gate.sh — 本機 CI 閘門一鍵指令（macOS/Linux）。
-# Windows 對等：tools/local_ci_gate.ps1（本檔為其忠實對照，鏡像 .github/workflows/ci.yml push gating jobs）。
+# Windows 對等：tools/local_ci_gate.ps1（本檔為其忠實對照，鏡像 monorepo 根層 .github/workflows/autoclaude-ci.yml push gating jobs）。
 #
 # 依序（全綠才建議 push）：
 #   0. editable 哨兵       （autoclaude 指向本 monorepo）
@@ -28,6 +28,32 @@ export PYTHONUTF8=1
 # venv 提示：所有 gate 都靠裸 python，未啟用 venv 就直接失敗提示（勝過各 gate 逐一噴錯）
 command -v python >/dev/null || { echo '❌ 找不到 python — 請先 source .venv/bin/activate（見 ONBOARDING.md §3）'; exit 1; }
 
+# --- git hooks liveness 偵測（警告不擋）---
+# repo 搬移/改名或未安裝時 dispatcher hooks 會靜默失效（實證）；CI 環境（$CI 有值）跳過
+# （GitHub/act 環境無 hooks 屬正常）。與 tools/integration_gate.sh 的同名段落對稱。
+if [ -z "${CI:-}" ]; then
+  _hl_top="$(git rev-parse --show-toplevel 2>/dev/null || true)"
+  if [ -n "$_hl_top" ]; then
+    _hl_expected="$_hl_top/tools/git-hooks"
+    _hl_raw="$(git config --get core.hooksPath 2>/dev/null || true)"
+    # 正規化：installer .ps1 可能寫入混合分隔符（D:/repo\tools/git-hooks）→ 統一為 /
+    _hl_abs="$(printf '%s' "$_hl_raw" | tr '\\' '/')"
+    case "$_hl_abs" in
+      ""|/*|[A-Za-z]:/*) : ;;                    # 空值 / POSIX 絕對 / Windows 磁碟機絕對 → 原樣
+      *) _hl_abs="$_hl_top/$_hl_abs" ;;          # 相對值：以 repo 根解析（git 語意）
+    esac
+    if [ "$_hl_abs" != "$_hl_expected" ] || [ ! -d "$_hl_expected" ]; then
+      echo ''
+      echo '⚠️⚠️⚠️ [hooks liveness] dispatcher git hooks 未生效 — pre-commit/pre-push 閘門不會執行！'
+      echo "    core.hooksPath 目前值：${_hl_raw:-（未設定）}"
+      echo "    預期值：$_hl_expected"
+      echo '    請執行安裝腳本（兩子專案閘門同時生效，裝一次即可）：'
+      echo '        bash AutoClaude/tools/install_git_hooks.sh'
+      echo '    （本檢查僅警告、不阻擋閘門執行；CI 環境自動跳過）'
+    fi
+  fi
+fi
+
 DO_ACT=0; DO_PG=0
 PYTEST_ARGS="tests/ -q --tb=short"
 for arg in "$@"; do
@@ -50,7 +76,20 @@ run_gate() {
 }
 
 gate_editable() {
-  python -c "import autoclaude,sys; ok='AISDCL_Agent' in autoclaude.__file__; print('autoclaude:', autoclaude.__file__); sys.exit(0 if ok else 1)"
+  # 動態比對：autoclaude 套件須位於本 repo 根之下（勿硬編碼資料夾名——clone 到
+  # 任何目錄名皆應 PASS；舊寫法 'AISDCL_Agent' in __file__ 在改名 clone 誤報紅燈）
+  local top
+  top="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
+  AUTOCLAUDE_REPO_TOP="$top" python -c "
+import os, pathlib, sys
+import autoclaude
+pkg = pathlib.Path(autoclaude.__file__).resolve()
+root = pathlib.Path(os.environ['AUTOCLAUDE_REPO_TOP']).resolve()
+ok = root == pkg or root in pkg.parents
+print('autoclaude:', pkg)
+print('repo root :', root)
+sys.exit(0 if ok else 1)
+"
 }
 gate_loc()      { python tools/check_loc_budget.py; }
 gate_claudemd() {

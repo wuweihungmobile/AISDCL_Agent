@@ -1,12 +1,14 @@
-# pre-commit 框架設定（選用）—— 與 tools/git-hooks/ 原生 hook 等價，二擇一即可
+# ⚠️ 警告：monorepo 下「不支援」pre-commit 框架路徑 —— 本檔僅存檔備考
 # ===========================================================================
-# 推薦：Windows 用 tools/install_git_hooks.ps1（零依賴、設 core.hooksPath）。
-# 本檔給偏好 pre-commit 框架者：
-#   pip install pre-commit
-#   pre-commit install --hook-type pre-commit --hook-type pre-push
-#
-# 為維持單一真相（SSOT，取證紀律 #4），本設定直接委派至 tools/git-hooks/ 內的
-# 原生 hook，避免兩套檢查邏輯 drift。
+# 兩個原因（缺一即壞）：
+#   1. 本檔位於子目錄 AutoClaude/，不在 git 根 —— `pre-commit install` 要求
+#      config 位於 repo 根，monorepo 下無法直接安裝。
+#   2. pre-commit 框架的 shim 會「消化」pre-push 的 stdin（推送 ref 清單），
+#      根層 dispatcher pre-push 收到空 stdin 只能 fail-safe 兩子專案閘門全跑，
+#      精準分流失效。
+# 單一真相（SSOT）為「根層 dispatcher hooks」（monorepo 根 tools/git-hooks/）：
+#   一律使用安裝腳本 tools/install_git_hooks.ps1 或 tools/install_git_hooks.sh
+#   （任一支即可，兩子專案閘門同時生效）。請勿執行 `pre-commit install`。
 # ---------------------------------------------------------------------------
 repos:
   - repo: local

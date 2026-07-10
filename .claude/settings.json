@@ -1,13 +1,13 @@
 {
   "$schema": "https://json.schemastore.org/claude-code-settings.json",
-  "description": "monorepo 整合層 — 守衛式 SDD hook 橋接（AutoSDD_improving）。以 SDD_ACTIVE_VERSION 為守衛路由到 AISDLC_SDD/AISDLC_SDD_v0.0X 的實體 hooks；未設則 no-op，純 AutoClaude session 零污染。詳見 .claude/hooks/sdd_hook_router.py。",
+  "description": "monorepo 整合層 — 守衛式 SDD hook 橋接（AutoSDD_improving）。以 SDD_ACTIVE_VERSION 為守衛路由到 AISDLC_SDD/AISDLC_SDD_v0.0X 的實體 hooks；未設則 no-op，純 AutoClaude session 零污染。詳見 .claude/hooks/sdd_hook_router.py。hook command 用相對路徑（勿用 ${CLAUDE_PROJECT_DIR}：Windows cmd 不展開變數）；前提＝claude 於 monorepo 根目錄啟動（cwd=專案根，見 ONBOARDING §4）。",
   "hooks": {
     "SessionStart": [
       {
         "hooks": [
           {
             "type": "command",
-            "command": "python \"${CLAUDE_PROJECT_DIR}/.claude/hooks/sdd_hook_router.py\" session_start",
+            "command": "python .claude/hooks/sdd_hook_router.py session_start",
             "timeout": 30
           }
         ]
@@ -19,7 +19,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python \"${CLAUDE_PROJECT_DIR}/.claude/hooks/sdd_hook_router.py\" context_ledger_pre",
+            "command": "python .claude/hooks/sdd_hook_router.py context_ledger_pre",
             "timeout": 10
           }
         ]
@@ -31,7 +31,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python \"${CLAUDE_PROJECT_DIR}/.claude/hooks/sdd_hook_router.py\" context_ledger_post",
+            "command": "python .claude/hooks/sdd_hook_router.py context_ledger_post",
             "timeout": 10
           }
         ]
@@ -41,7 +41,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python \"${CLAUDE_PROJECT_DIR}/AutoClaude/tools/hooks/check_ps1_encoding.py\"",
+            "command": "python AutoClaude/tools/hooks/check_ps1_encoding.py",
             "timeout": 10
           }
         ]

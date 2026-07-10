@@ -181,7 +181,7 @@ Select-String "END nightly summary|WARN|ERROR" "logs\nightly_$yesterday.log" -Er
 
 - [ ] 執行確認指令：`python tools/ac4_progress_check.py --history .ac4_history.jsonl --json`
 - [ ] 確認輸出 `"ready_for_labeled_pr": true`
-- [ ] 建立 `needs-pg-e2e` labeled PR 觸發完整 e2e（`.github/workflows/ci.yml` on-label trigger）
+- [ ] 建立 `needs-pg-e2e` labeled PR 觸發完整 e2e（`.github/workflows/autoclaude-ci.yml` on-label trigger）
 - [ ] 更新 SD08_AC_Matrix.md AC4-2 行 → 實測達標日期 + 數值
 
 ### 觀察期 #3 達標（drift_log 30 天清零，預計 2026-06-17）

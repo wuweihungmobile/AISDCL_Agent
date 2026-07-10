@@ -520,7 +520,7 @@ def main():
         print("\n".join(violations)); sys.exit(1)
 ```
 
-CI 整合（`.github/workflows/ci.yml` 新增 step）：
+CI 整合（`.github/workflows/autoclaude-ci.yml` 新增 step）：
 ```yaml
 - name: Check LOC budget
   run: python tools/check_loc_budget.py

@@ -1,4 +1,8 @@
-# AISDLC-SDD — 本機 CI 閘門（Windows PowerShell 版；與 ci-gate.sh 等價）。
+﻿# AISDLC-SDD — 本機 CI 閘門（Windows PowerShell 版）。
+# ⚠️ 非 ci-gate.sh 完整對等（ONBOARDING.md §6）：本檔僅跑「v0.01 凍結基線」單軌 3-stage
+#   （pytest not-chaos + arch_fitness --strict + 選跑 TLC），不含 ci-gate.sh 的
+#   「凍結基線 + LATEST 演化版」雙軌覆蓋與 --full-tlc 五軌模式；完整閘門請用
+#   Git Bash 執行 bash scripts/ci-gate.sh。
 # 用法：  pwsh scripts/ci-gate.ps1            # 離線閘門
 #         $env:SDD_RUN_TLC=1; pwsh scripts/ci-gate.ps1   # 另跑五軌 TLC
 $ErrorActionPreference = "Stop"

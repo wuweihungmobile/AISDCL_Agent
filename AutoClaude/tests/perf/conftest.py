@@ -15,20 +15,20 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import TYPE_CHECKING, List
+from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:  # pragma: no cover
     from autoclaude.utils.perf_baseline import PerfBaseline
 
 
 # Module-level registry：perf 測試各自 append；pytest_sessionfinish 統一寫出。
-_PERF_RESULTS: "List[PerfBaseline]" = []
+_PERF_RESULTS: list[PerfBaseline] = []
 
 
 def pytest_sessionfinish(session, exitstatus):
     """SD_09 B-08：session 結束時將收集到的 PerfBaseline 寫成 perf_results.json。
 
-    對應 .github/workflows/ci.yml `perf-baseline-nightly` job — 後續 step
+    對應 monorepo 根層 .github/workflows/autoclaude-ci.yml `perf-baseline-nightly` job — 後續 step
     `perf_regression_check.py` 將比對 `perf_results.json` vs `.perf_baseline.toml`。
     """
     if not _PERF_RESULTS:

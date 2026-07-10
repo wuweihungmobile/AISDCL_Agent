@@ -135,6 +135,7 @@ def build_file_state_snapshot(working_dir: str = ".", max_files: int = 8) -> str
         result = subprocess.run(
             ["git", "diff", "--name-only", "HEAD"],
             capture_output=True, text=True, cwd=working_dir, timeout=10,
+            encoding="utf-8", errors="replace",
             env=propagate_to_subprocess_env(dict(os.environ)),
         )
         if result.returncode != 0:

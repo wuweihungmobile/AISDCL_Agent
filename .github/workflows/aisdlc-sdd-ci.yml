@@ -10,22 +10,38 @@
 #   - 不推送、不寫回 repo（純驗證），故不需 contents:write，也無推送競爭。
 #   - artifact 上傳 continue-on-error（observability-only，配額耗盡不判紅）。
 #   - chaos / 五軌完整 TLC 仍留 nightly（重；不上 PR 熱路徑）。
+#
+# monorepo 根層接線（2026-07-10）：本 workflow 自 AISDLC_SDD/.github/workflows/ci.yml
+# 遷入根層 .github/workflows/（GitHub Actions 只讀 repo 根層）。run step 以 defaults
+# 定錨 working-directory: AISDLC_SDD（ci-gate.sh 以自身路徑解析 REPO_ROOT，雙軌
+# 凍結基線 v0.01 + LATEST 測試不受影響）；paths 前綴 AISDLC_SDD/ 避免 AutoClaude
+# 側變更誤觸發。
 
-name: ci
+name: aisdlc-sdd-ci
 
 on:
   push:
     branches: [main]
+    paths:
+      - "AISDLC_SDD/**"
+      - ".github/workflows/aisdlc-sdd-ci.yml"
   pull_request:
+    paths:
+      - "AISDLC_SDD/**"
+      - ".github/workflows/aisdlc-sdd-ci.yml"
   workflow_dispatch:
 
 concurrency:
-  group: ci-${{ github.ref }}
+  group: aisdlc-sdd-ci-${{ github.ref }}
   cancel-in-progress: true
 
 # 純驗證、不寫回 repo → 最小權限唯讀（佐證無推送競爭）。
 permissions:
   contents: read
+
+defaults:
+  run:
+    working-directory: AISDLC_SDD
 
 jobs:
   offline-gate:
@@ -38,7 +54,7 @@ jobs:
         with:
           python-version: "3.11"
       - name: Install pinned deps
-        working-directory: AISDLC_SDD_v0.01
+        working-directory: AISDLC_SDD/AISDLC_SDD_v0.01
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements-ci.txt
@@ -50,6 +66,6 @@ jobs:
         uses: actions/upload-artifact@v5
         with:
           name: ci-arch-fitness-${{ github.run_id }}
-          path: AISDLC_SDD_v0.01/arch-fitness.json
+          path: AISDLC_SDD/AISDLC_SDD_v0.01/arch-fitness.json
           retention-days: 7
           if-no-files-found: ignore

@@ -7,7 +7,6 @@ from __future__ import annotations
 
 import os
 import subprocess
-from typing import Optional
 
 
 def _propagate_trace_env() -> dict[str, str]:
@@ -31,7 +30,7 @@ _WARNING_TEMPLATE = (
 
 def verify_correction_applied(
     attempt: int, *, cwd: str = ".", timeout: int = 10,
-) -> Optional[str]:
+) -> str | None:
     """SD_05 W2-1c：吸收 `_verify_correction_applied`（Gap-009-C）。
 
     attempt=0 時不檢查；其餘 attempt 後檢查 `git diff --stat HEAD`，若 stdout 為空
@@ -43,6 +42,7 @@ def verify_correction_applied(
         result = subprocess.run(
             ["git", "diff", "--stat", "HEAD"],
             capture_output=True, text=True, timeout=timeout, cwd=cwd,
+            encoding="utf-8", errors="replace",
             env=_propagate_trace_env(),
         )
         if result.returncode == 0 and not result.stdout.strip():

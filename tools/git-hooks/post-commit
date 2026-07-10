@@ -1,0 +1,40 @@
+#!/usr/bin/env bash
+# 根層 dispatcher post-commit hook — 委派回 .git/hooks/post-commit（advisory）。
+#
+# 設計說明：
+#   core.hooksPath 一經設定，git 對「所有」hook 種類都只查 dispatcher 目錄，
+#   原本安裝於 .git/hooks/ 的 post-commit（例如 AISDLC_SDD 框架 R-9.17.1 的
+#   post_commit_drift 告警機制寫入處）會整族靜默失效。本檔把 post-commit 轉呼叫回
+#   共享 git dir 下的 hooks/post-commit（存在且可執行才呼叫）。
+#   語意為 advisory：無論委派結果如何一律 exit 0（post-commit 本就不能影響 commit）。
+#   注意：取 hooks 目錄必須用 --git-common-dir——不可用 --git-path hooks（它會解析
+#   core.hooksPath 指回本 dispatcher 目錄，造成自我遞迴）。
+#   緊急跳過：AUTOCLAUDE_SKIP_HOOKS=1 git commit ...
+# ---------------------------------------------------------------------------
+set -u
+
+if [ "${AUTOCLAUDE_SKIP_HOOKS:-0}" = "1" ]; then
+  exit 0
+fi
+
+common_dir="$(git rev-parse --git-common-dir 2>/dev/null)" || exit 0
+[ -z "${common_dir:-}" ] && exit 0
+
+# 轉絕對路徑（在工作樹頂層執行時 --git-common-dir 可能回相對路徑，如 .git）
+case "$common_dir" in
+  /*) : ;;
+  *)  common_dir="$(cd "$common_dir" 2>/dev/null && pwd)" || exit 0 ;;
+esac
+
+target="$common_dir/hooks/post-commit"
+
+# 防呆：若解析出的目標就是本 dispatcher 目錄下的自己（異常設定），跳過避免自我遞迴
+self="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/post-commit"
+if [ "$target" = "$self" ]; then
+  exit 0
+fi
+
+if [ -x "$target" ]; then
+  "$target" || true
+fi
+exit 0

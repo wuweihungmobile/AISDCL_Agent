@@ -21,6 +21,10 @@ venv/
 .env.*
 !.env.example
 
+# Claude Code 本機個人設定（permission 條目含機器本地路徑，留在本機不入庫；
+# 各機器初次 pull 後從同目錄 settings.local.json.example 複製還原）
+**/.claude/settings.local.json
+
 # IDE
 .idea/
 .vscode/

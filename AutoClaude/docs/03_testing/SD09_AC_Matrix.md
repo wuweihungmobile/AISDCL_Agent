@@ -106,7 +106,7 @@
 
 | 欄位 | 內容 |
 |------|------|
-| 描述 | 觀察期 #2 達標（`ready_for_labeled_pr=true`）後啟用 `pg-e2e-on-label.yml` workflow（dormant → active）|
+| 描述 | 觀察期 #2 達標（`ready_for_labeled_pr=true`）後啟用 `autoclaude-pg-e2e-on-label.yml` workflow（dormant → active）|
 | 對應 test 檔 | `tests/contract/test_ac4_progress_check.py`（既有 6 case + 新增 ≥ 2 case：labeled PR 啟用 / 黃線紅線告警）|
 | 驗收門檻 | `tools/ac4_progress_check.py --json` 回報 `ready_for_labeled_pr=true` + workflow `on: pull_request labeled` 啟用 + 1 次成功 labeled PR run |
 | 阻塞 | 觀察期 #2 阻塞於 `tools/seed_kb.py` 缺實作 + `test_pgvector_real_recall.py` 3 case `pytest.skip` 硬編碼（R-SD09-CI-2）|

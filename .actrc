@@ -1,4 +1,7 @@
-# AISDLC-SDD — act 預設組態（approach 二：地端用 Docker 跑 .github/workflows/*）。
+# monorepo 根層 act 預設組態（地端用 Docker 跑根層 .github/workflows/*）。
+# 2026-07-10 合併自 AISDLC_SDD/.actrc（超集）+ AutoClaude/.actrc（-P ubuntu-latest 與
+# --container-architecture 兩項為共同子集）；workflows 遷根層後 act 一律於 monorepo
+# 根執行（AutoClaude/tools/run_act.sh|.ps1、AISDLC_SDD/scripts/act-ci.sh 已同步改根）。
 #
 # 以 catthehacker 中型 Ubuntu 鏡像貼近 GitHub ubuntu-latest（內含 python/node/
 # git 等常用工具）。act 讀 .github/workflows/ 的 YAML，用本機 Docker 起虛擬環境

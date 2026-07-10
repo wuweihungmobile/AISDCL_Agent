@@ -1,7 +1,10 @@
 name: PG E2E (Labeled PR)
 
 # SD_Improving_08 W2 T2-C5：漸進式升級為 labeled PR 觸發
-# 對應 [SD_Improving_08.md §3 W2 + PM #2 拍板](../docs/04_planning/SD_Improving_08.md)
+# 對應 [SD_Improving_08.md §3 W2 + PM #2 拍板](AutoClaude/docs/04_planning/SD_Improving_08.md)
+# monorepo 根層接線（2026-07-10）：自 AutoClaude/.github/workflows/pg-e2e-on-label.yml 遷入
+# 根層；run step 以 defaults 定錨 working-directory: AutoClaude，artifact 路徑改 repo 根視角。
+# 觸發維持 labeled PR（label 即人工閘門，不加 paths 過濾）。
 #
 # 觸發條件：PR 加上 `needs-pg-e2e` label 後執行（避免每 PR +8-12 min CI 額度爆預算）
 # 啟用條件：14 天 nightly 全綠 + recall σ ≤ 0.02 + CircuitBreaker open=0 後手動啟用
@@ -11,6 +14,10 @@ name: PG E2E (Labeled PR)
 on:
   pull_request:
     types: [labeled]
+
+defaults:
+  run:
+    working-directory: AutoClaude
 
 jobs:
   pg-e2e-on-label:
@@ -50,6 +57,8 @@ jobs:
         with:
           python-version: "3.11"
           cache: pip
+          # monorepo：repo 根無 requirements.txt → 顯式指向子專案 pyproject.toml
+          cache-dependency-path: AutoClaude/pyproject.toml
 
       - name: Install dependencies
         run: |
@@ -82,7 +91,8 @@ jobs:
             const { execSync } = require('child_process');
             let output = '';
             try {
-              output = execSync('python tools/ac4_progress_check.py --history .ac4_history.jsonl --json').toString();
+              // monorepo：github-script 的 cwd = repo 根 → 顯式切到 AutoClaude/
+              output = execSync('python tools/ac4_progress_check.py --history .ac4_history.jsonl --json', { cwd: 'AutoClaude' }).toString();
             } catch (e) {
               output = e.stdout ? e.stdout.toString() : 'AC4 progress check failed.';
             }
@@ -100,6 +110,6 @@ jobs:
         with:
           name: ac4-labeled-pr-${{ github.run_id }}
           path: |
-            .ac4_history.jsonl
-            .ac4_junit.xml
+            AutoClaude/.ac4_history.jsonl
+            AutoClaude/.ac4_junit.xml
           retention-days: 30

@@ -26,7 +26,7 @@
 
 | 項目 | 需求 | 說明 |
 |------|------|------|
-| 作業系統 | Windows 11（主要）/ Linux / macOS | 本 repo 開發於 Windows 11；CI 對等於 ubuntu-latest |
+| 作業系統 | macOS ⇄ Windows 11（雙平台對等）/ Linux | 雙平台開發完全相容（工具鏈對照見根層 [ONBOARDING.md](../ONBOARDING.md)）；CI 對等於 ubuntu-latest |
 | Python | **3.11+**（強制） | `pyproject.toml` 宣告 `requires-python = ">=3.11"` |
 | Claude Code CLI | 已安裝且可執行 `claude` | AutoClaude 透過 PTY/subprocess 包裝 Claude Code，**這是必要前置** |
 | Git | 已安裝 | CrossStepValidator 以 `git status` 偵測步驟間污染 |
@@ -49,32 +49,33 @@ git clone <repo-url> AISDLC_Agent
 cd AISDLC_Agent
 ```
 
-工作目錄根為 `d:\CursorProject\AISDCL_Agent\`，底下含 `AutoClaude/`、`AISDLC_SDD/` 兩個子專案與根整合層 `docs/`。
+工作目錄根即 clone 目的地（monorepo 根），底下含 `AutoClaude/`、`AISDLC_SDD/` 兩個子專案與根整合層 `docs/`。
 
 ### 1.2 安裝 AutoClaude 引擎（核心）
 
-> ⚠️ **路徑陷阱**：以下指令一律在 **`AutoClaude/` 子目錄**下執行（不是 monorepo 根）。
+> 🔴 **環境建置一律依根層 [ONBOARDING.md](../ONBOARDING.md) §1~§4**，以 bootstrap 一鍵完成，
+> **請勿在 `AutoClaude/` 下自建 venv**（會與根層 `.venv` SOP 相衝）。
 
 ```bash
-cd AutoClaude
+# 在 monorepo 根目錄執行（macOS / Linux）
+bash tools/bootstrap.sh
+# Windows（PowerShell）：
+# powershell -ExecutionPolicy Bypass -File tools/bootstrap.ps1
+```
 
-# 建議先建立虛擬環境（任選 venv / conda）
-python -m venv .venv
-# Windows PowerShell：
-.\.venv\Scripts\Activate.ps1
-# Bash：
-# source .venv/Scripts/activate
+bootstrap 會：檢查 Python ≥3.11 → 建立**根層** `.venv` → 安裝 AutoClaude（editable，`[dev,notifications,lint]`，含 pytest / ruff / hypothesis / import-linter / 桌面通知）+ AISDLC_SDD CI 依賴。
 
-# 安裝開發環境（含 pytest, ruff, hypothesis, 桌面通知）
-pip install -e .[dev,notifications]
+每個新終端機、每次開發前啟用根層 venv（🔴 必要，詳見 ONBOARDING.md §3）：
 
-# （選配）架構約束檢查工具 import-linter
-pip install -e .[lint]
+```bash
+source .venv/bin/activate        # macOS / Linux
+# .venv\Scripts\Activate.ps1     # Windows（PowerShell）
 ```
 
 #### 選配：PostgreSQL 後端（僅生產/灰度需要）
 
 ```bash
+# 啟用根層 venv 後，在 AutoClaude/ 目錄下執行
 pip install -e .[postgres]            # SQLAlchemy + asyncpg + psycopg2 + alembic + tenacity + cachetools
 pip install -e .[postgres,pgvector]   # 再加 pgvector 向量查詢
 ```
@@ -82,6 +83,8 @@ pip install -e .[postgres,pgvector]   # 再加 pgvector 向量查詢
 > ⚠️ `alembic` 走同步連線，需 `psycopg2-binary`（已含於 `[postgres]` extra）；缺少時 `alembic upgrade head` 會報 `ModuleNotFoundError`。
 
 ### 1.3 設定環境變數與設定檔
+
+> ⚠️ **路徑陷阱**：以下指令在 **`AutoClaude/` 子目錄**下執行（不是 monorepo 根）。
 
 ```bash
 # 1) API 憑證（.env 已被 .gitignore 排除，絕不會 commit）
@@ -307,7 +310,7 @@ python -m autoclaude scripts/my_playbook.yaml --fresh
 ```powershell
 # 在 AutoClaude/ 目錄下
 powershell -ExecutionPolicy Bypass -File tools/install_git_hooks.ps1   # 裝 git hooks（commit/push 自動把關）
-powershell -ExecutionPolicy Bypass -File tools/local_ci_gate.ps1       # 一鍵本機 CI 閘門（鏡像 ci.yml）
+powershell -ExecutionPolicy Bypass -File tools/local_ci_gate.ps1       # 一鍵本機 CI 閘門（鏡像根層 autoclaude-ci.yml）
 powershell -ExecutionPolicy Bypass -File tools/run_local_nightly.ps1   # nightly 6 stage（mutation/pg-e2e/perf/drift/obs）
 ```
 

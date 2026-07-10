@@ -32,7 +32,7 @@
 
 | 組 | 內容 | 實測證據 | 真實狀態 |
 |----|------|---------|---------|
-| **Z1** | 移除 11 處 nightly continue-on-error | `ci.yml` 12 行 `# ...continue-on-error` 全是「2026-05-20 B-09 已移除」註解；真正 active 僅 3 處（`ci.yml:138` SD_10 PG-track + `pg-e2e-on-label.yml:21,64`），全為刻意保留之延後項，移除反而錯 | ✅ 已完成 |
+| **Z1** | 移除 11 處 nightly continue-on-error | `autoclaude-ci.yml` 12 行 `# ...continue-on-error` 全是「2026-05-20 B-09 已移除」註解；真正 active 僅 3 處（`autoclaude-ci.yml:138` SD_10 PG-track + `autoclaude-pg-e2e-on-label.yml:21,64`），全為刻意保留之延後項，移除反而錯 | ✅ 已完成 |
 | **X1** | seed_kb.py + pgvector fixture | `tools/seed_kb.py`（13.7KB）、`tests/fixtures/pgvector_real_queries.json`（2.9MB）皆存在 | ✅ 已完成 |
 | **Y1** | F-01~F-09 + ADR-SD09-006 | `ADR-SD09-006` 存在、ADR-SD09 001~010 齊全、F-0x 落 `SD09_Pre_W0_Audit_Findings.md` | ✅ 已完成 |
 

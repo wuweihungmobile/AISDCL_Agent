@@ -83,7 +83,7 @@ postgresql://autoclaude_runtime:${STRONG_RUNTIME_PASS}@192.168.1.133/aisdlc?sslm
 | CI migration job | `autoclaude_migrate` | `AUTOCLAUDE_MIGRATE_DSN` |
 | 應用程式（both / db_only） | `autoclaude_runtime` | `AUTOCLAUDE_DB_DSN` |
 
-`.github/workflows/ci.yml` pg-contract job 範例（已實作，見 `.github/workflows/ci.yml`）：
+`.github/workflows/autoclaude-ci.yml` pg-contract job 範例（已實作，見 `.github/workflows/autoclaude-ci.yml`）：
 ```yaml
 env:
   AUTOCLAUDE_DB_DSN: postgresql+asyncpg://autoclaude_runtime:...@localhost/autoclaude?sslmode=require

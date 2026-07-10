@@ -1,4 +1,4 @@
-# Phase G M5 / ACT-042 / B5.6 — TLC runner (Windows / PowerShell)
+﻿# Phase G M5 / ACT-042 / B5.6 — TLC runner (Windows / PowerShell)
 #
 # 用途：本機開發者在 Windows 跑 TLC 對 SDD_FSM.tla 做形式化驗證。
 # 對應規則：CLAUDE.md Rule 9.18.1~9.18.4

@@ -12,7 +12,7 @@
 容器策略：優先沿用既有 autoclaude_pg；若不存在才新建臨時 container。
 既有 container 不在 Cleanup 中拆除。
 
-對應 .github/workflows/ci.yml jobs，輸出與 CI artifact 同格式：
+對應 monorepo 根層 .github/workflows/autoclaude-ci.yml jobs，輸出與 CI artifact 同格式：
   .mutation_history.jsonl / .mutation_baseline.toml / mutation_backlog_token_guard.md
   .ac4_history.jsonl / .ac4_junit.xml
   perf_results.json / perf_regression_comment.md
@@ -487,7 +487,7 @@ if ($script:DockerOK) {
         --history .ac4_history.jsonl --json
     }
     # SD_09 W3 zero-trust audit F2 修復（2026-05-24）：當 ready_for_labeled_pr 首次達標時，
-    # 主動發告警提示需 PM 拍板啟用 AC4 workflow（pg-e2e-on-label.yml 雖技術上 active，
+    # 主動發告警提示需 PM 拍板啟用 AC4 workflow（autoclaude-pg-e2e-on-label.yml 雖技術上 active，
     # 但 PM approval ceremony 為議題 C 升級的硬性程序）。
     # 紀律 #3「PASS 聲稱必須引用 RunId log 行號」— 此告警同步寫入 nightly_latest.log 留下取證軌跡。
     try {
@@ -524,7 +524,7 @@ if ($script:DockerOK) {
       $ac4Out = ($ac4JsonLines -join "`n")
       $ac4Json = $ac4Out | ConvertFrom-Json
       if ($ac4Json.ready_for_labeled_pr -eq $true) {
-        Log "[F2 ALERT] AC4 觀察期 #2 已達標 ready_for_labeled_pr=true (tolerant<60ms streak=$($ac4Json.tolerant_streak)/14 observation<50ms streak=$($ac4Json.observation_streak)/14; ADR-SD09-008 v0.4 ACCEPTED) — 需 PM 確認啟用 pg-e2e-on-label.yml workflow 並紀錄至 docs/06_quality/SD09_AC4_Activation_Approval.md" 'WARN'
+        Log "[F2 ALERT] AC4 觀察期 #2 已達標 ready_for_labeled_pr=true (tolerant<60ms streak=$($ac4Json.tolerant_streak)/14 observation<50ms streak=$($ac4Json.observation_streak)/14; ADR-SD09-008 v0.4 ACCEPTED) — 需 PM 確認啟用 autoclaude-pg-e2e-on-label.yml workflow 並紀錄至 docs/06_quality/SD09_AC4_Activation_Approval.md" 'WARN'
       } else {
         Log "[F2 OK] AC4 觀察期 #2 累計中 status=$($ac4Json.status) tolerant<60ms streak=$($ac4Json.tolerant_streak) observation<50ms streak=$($ac4Json.observation_streak) days=$($ac4Json.observation_days) reasons=$($ac4Json.reasons -join '; ')"
       }

@@ -55,7 +55,7 @@ DSN 解析優先級：環境變數 `AUTOCLAUDE_DB_DSN` > `AUTOCLAUDE_PG_DSN`（d
 | # | 項目 | 採納方 | 完成狀態 | 對應檔案 |
 |---|------|--------|---------|---------|
 | 1 | **docker-compose.yml**（postgres:17 + healthcheck） | Infra | ✅ 完成（2026-05-12） | [docker-compose.yml](../../docker-compose.yml) |
-| 2 | **CI workflow PG service container**（pg-contract job） | Infra | ✅ 完成（2026-05-12） | [.github/workflows/ci.yml:63](../../.github/workflows/ci.yml) |
+| 2 | **CI workflow PG service container**（pg-contract job） | Infra | ✅ 完成（2026-05-12） | [.github/workflows/autoclaude-ci.yml:63](../../../.github/workflows/autoclaude-ci.yml) |
 | 3 | **PG 連線 startup smoke test**（SELECT 1 + alembic head） | Infra | ✅ 完成（2026-05-12） | [factory.py:127-157](../../autoclaude/infra/repositories/factory.py) |
 | 4 | **PG 操作 retry 裝飾器**（tenacity max 3 backoff） | SRE | ✅ 完成（2026-05-12） | [pg_state_repository.py:102-115](../../autoclaude/infra/repositories/pg_state_repository.py) |
 | 5 | **metrics hook**（dual-write success rate / drift counter） | SRE | ✅ 完成（2026-05-12） | [dual_state_repository.py](../../autoclaude/infra/repositories/dual_state_repository.py) |

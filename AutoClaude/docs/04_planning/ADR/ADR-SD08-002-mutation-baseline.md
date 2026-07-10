@@ -96,7 +96,7 @@ W3 末若 score < 目標：
 
 ## 3. CI Job 修正
 
-`.github/workflows/ci.yml` 既有 `mutation-test-nightly` job 微調（W3 落地）：
+`.github/workflows/autoclaude-ci.yml` 既有 `mutation-test-nightly` job 微調（W3 落地）：
 
 ```yaml
 mutation-test-nightly:
@@ -152,4 +152,4 @@ mutation-test-nightly:
 
 **相關文件**：
 - [SD_Improving_08.md](../SD_Improving_08.md) v1.0 §6 PM 拍板 #3
-- `.github/workflows/ci.yml` `mutation-test-nightly` job（SD_07 W5 T5-6 既建）
+- `.github/workflows/autoclaude-ci.yml` `mutation-test-nightly` job（SD_07 W5 T5-6 既建）

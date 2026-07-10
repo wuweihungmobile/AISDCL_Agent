@@ -22,7 +22,7 @@
 
 Explore 盤點稱「C 軌 SD_09 有 X/Y/Z 可寫 delta」。主 agent 親查證實**已完成**（zero-trust 雙向，對 subagent 結論複核——同 Nightly 紀律 #17）：
 
-- **Z1**：`grep -rnE "^[[:space:]]*continue-on-error:" .github/workflows/` → 真正 active 僅 3 處（`ci.yml:138`、`pg-e2e-on-label.yml:21,64`），全為刻意保留延後項；`ci.yml` 12 行 `# ...continue-on-error` 皆「2026-05-20 B-09 已移除」註解。
+- **Z1**：`grep -rnE "^[[:space:]]*continue-on-error:" .github/workflows/` → 真正 active 僅 3 處（`autoclaude-ci.yml:138`、`autoclaude-pg-e2e-on-label.yml:21,64`），全為刻意保留延後項；`autoclaude-ci.yml` 12 行 `# ...continue-on-error` 皆「2026-05-20 B-09 已移除」註解。
 - **X1**：`ls tools/seed_kb.py tests/fixtures/pgvector_real_queries.json` → 皆存在（13.7KB / 2.9MB）。
 - **Y1**：`ls docs/04_planning/ADR/ | grep sd09` → ADR-SD09-001~010 齊全（含 006）。
 - **觀察期**（forensic 引 raw store）：nightly 06-24 END 行 `mutation=25/7 ac4=25/14 obs=25/30 drift=23/30`；`.ac4_history.jsonl` 末筆 p95=50.97ms；`.drift_log_history.jsonl` 末筆 count=0。→ #3/obs 未滿 30 天，**W1 本輪不能啟**。

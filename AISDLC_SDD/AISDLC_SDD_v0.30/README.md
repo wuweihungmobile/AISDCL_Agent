@@ -141,8 +141,8 @@ ubuntu-latest」跑同一組檢查，達成 **地端綠 ⇒ 雲端綠**。四支
 | 支柱 | 內容 |
 |------|------|
 | 迷你正式環境 | `docker/Dockerfile.ci`（python:3.11-slim + Java + tla2tools.jar）+ `docker-compose.yml` 的 `ci-runner`，鏡像 ubuntu-latest 消除 Windows/Linux 差異 |
-| act 地端跑 Actions | `.actrc` + `scripts/act-ci.sh`，用 Docker 在地端讀 `.github/workflows/` 模擬雲端流程 |
-| Pre-commit / pre-push 攔截 | `.pre-commit-config.yaml` + 零相依 `.githooks/pre-push`（`scripts/install-hooks` 設 `core.hooksPath`），push 前自動跑 `ci-gate.sh`，本機過才能 push |
+| act 地端跑 Actions | 根層 `.actrc` + `scripts/act-ci.sh`（於 monorepo 根執行），用 Docker 在地端讀根層 `.github/workflows/` 模擬雲端流程 |
+| Pre-commit / pre-push 攔截 | 零相依 `.githooks/pre-push`，由 **monorepo 根層 `tools/git-hooks/` dispatcher** 分流呼叫（`scripts/install-hooks` 設 `core.hooksPath`=根層 dispatcher，兩子專案閘門同時生效；pre-commit 框架路徑在 monorepo 下不支援），push 涉及 AISDLC_SDD/ 時自動跑 `ci-gate.sh`，本機過才能 push |
 | Mock 與地端 LLM | `llm_backend.py` 新增 `MockBackend`（確定性零外連）與 `LocalOpenAIBackend`（Ollama/vLLM，預設 OFF）；CI 預設 `session` 後端維持 hermetic |
 
 `scripts/ci-gate.sh` 三段閘門：**[1/3]** 離線 pytest（`-m "not chaos"`，含 offline
@@ -150,9 +150,9 @@ reachability BFS）→ **[2/3]** `arch_fitness --strict`（structural fail 阻�
 放行）→ **[3/3]** 五軌 TLA+/TLC（`--full-tlc` 啟用，預設由 offline reachability 代驗）。
 
 **Workflow 硬化**：upload-artifact 一律 `continue-on-error` + 降 retention；推送類 job 共用
-`main-push-serialize` concurrency + rebase-retry；action 版本升至 Node24 相容；新增 `ci.yml`
-在 push(main)/PR 跑離線閘門補缺口；新增 `artifact-cleanup.yml`（配額長期治本）+ Dependabot
-（github-actions + pip 每週自動更新）。
+`main-push-serialize` concurrency + rebase-retry；action 版本升至 Node24 相容；新增 `aisdlc-sdd-ci.yml`
+（現位於 monorepo 根層 `.github/workflows/`）在 push(main)/PR 跑離線閘門補缺口；新增
+`aisdlc-sdd-artifact-cleanup.yml`（配額長期治本）+ Dependabot（github-actions + pip 每週自動更新）。
 
 ---
 

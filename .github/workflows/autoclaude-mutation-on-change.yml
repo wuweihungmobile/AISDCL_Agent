@@ -2,13 +2,19 @@ name: Mutation On-Change (token_guard)
 
 # ADR-SD09-011（improving_101）：mutation baseline 鎖定的 unique-sha 累積，改由
 # 「token_guard 源碼變動」觸發（取代每日 nightly 計時 — 解除日曆綁定、不空轉）。
-# nightly schedule（ci.yml）保留，角色轉為「kill_rate 漂移監控 + flaky 偵測」，不再
+# nightly schedule（autoclaude-ci.yml）保留，角色轉為「kill_rate 漂移監控 + flaky 偵測」，不再
 # 充當鎖定計時器（紀律 #6 採集寬鬆 vs 升級嚴格分軌）。本 workflow 為 unique-sha 累積權威通道。
+# monorepo 根層接線（2026-07-10）：自 AutoClaude/.github/workflows/mutation-on-change.yml
+# 遷入根層；paths 前綴 AutoClaude/、run step 以 defaults 定錨 working-directory。
 on:
   push:
     paths:
-      - 'autoclaude/plugins/token_guard/**'
+      - 'AutoClaude/autoclaude/plugins/token_guard/**'
   workflow_dispatch:
+
+defaults:
+  run:
+    working-directory: AutoClaude
 
 jobs:
   mutation-on-change:

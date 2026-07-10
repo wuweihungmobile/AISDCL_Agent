@@ -17,7 +17,7 @@
 |------|------|-------|---------|---------|
 | W0 | G0 | 2026-05-18 | 2,028 passed | CLAUDE.md 714→324 行（≤ 400）+ Snapshot SSOT + sprint_history.md v1.0（SD_03~SD_05 完整下沉）+ ADR-SD08-001~005 落地 + `claude-md-budget` CI + `snapshot_sync.py` + `check_loc_budget SPECIAL_FILES` + `test_claude_md_budget.py` 16 case |
 | W1 | G1 | 2026-05-18 | 2,028 passed | v2 backlog 三項決議（`_impl.py` 維持合規 / `_runner_internals` 永久維護 / `prompt_builder.py` 維持 override）+ `Runner_Internals_Anti_Resurrection_Guard.md` v1.0 + `SD08_V2_Backlog_Evaluation.md` v1.0 |
-| W2 | G2 | 2026-05-18 | 2,034 passed（+6）| `ac4_nightly_collector.py` + `ac4_progress_check.py`（recall σ / green streak / 黃線 3 / 紅線 5）+ `pg-e2e-on-label.yml` workflow（label 觸發）+ `test_ac4_progress_check.py` 6 case |
+| W2 | G2 | 2026-05-18 | 2,034 passed（+6）| `ac4_nightly_collector.py` + `ac4_progress_check.py`（recall σ / green streak / 黃線 3 / 紅線 5）+ `autoclaude-pg-e2e-on-label.yml` workflow（label 觸發）+ `test_ac4_progress_check.py` 6 case |
 | W3 | G3 | 2026-05-18 | 2,045 passed（+11）| mutation pilot CI（TokenGuardPlugin only + `--paths-to-mutate` + `-p no:xdist`）+ `mutation_baseline_lock.py`（連續 7 次達標寫 baseline 取 min）+ `mutation_analysis.py`（survived 自動分類）+ `.mutation_baseline.toml` + `SD08_Mutation_Baseline_Report.md` v0.1 + `test_mutation_baseline_lock.py` 11 case |
 | W4 | G4 | 2026-05-18 | 2,079 passed（+34）| **核心 Wave**：`core/ports/observability.py` IObservabilityPort + ISpan + NullObservability + `infra/adapters/observability/local_logger.py` LocalLogger + `utils/trace_context.py` ContextVar + `utils/knowledge_base_metrics.py` 4 metric + EventBus auto trace_id inject + importlinter **Rule 7** + FailureKnowledgeBase 整合 emit + NonBlockingStreamReader `copy_context()` 包裝 + AutoResumeMetrics `esc_f12 / manual` wake_kinds 擴展 + 34 case 新增 |
 | W5 | G5 | 2026-05-18 | 2,094 passed（+15）| `utils/perf_baseline.py` + 4 場景 perf 測試 + `perf_regression_check.py` 三級告警（annotation + PR comment）+ `perf-baseline-nightly` CI job + `.perf_baseline.toml` + `infra/observability/pg_health.py` WAL lag adapter（三閾值 + 自動降級）+ `Production_Migration_SOP.md` §1-§3 草案 + ADR-SD08-005 W5 G5 簽核 |
@@ -47,7 +47,7 @@
 
 ### §2.3 mutation pilot 限定 TokenGuardPlugin（W3）
 
-`.github/workflows/ci.yml` `mutation-test-nightly` job — GoalSynthesis / Coordinator 兩 step **暫停** 至 SD_09；W3 pilot 範圍限定 TokenGuardPlugin（`--paths-to-mutate=autoclaude/plugins/token_guard --tests-dir=tests/plugins/token_guard --no-progress -p no:xdist`）。
+`.github/workflows/autoclaude-ci.yml` `mutation-test-nightly` job — GoalSynthesis / Coordinator 兩 step **暫停** 至 SD_09；W3 pilot 範圍限定 TokenGuardPlugin（`--paths-to-mutate=autoclaude/plugins/token_guard --tests-dir=tests/plugins/token_guard --no-progress -p no:xdist`）。
 
 **影響**：
 - 既有 nightly job 若依賴其他 plugin 的 mutation log 將收到空檔
@@ -216,7 +216,7 @@ thread.start()
 
 當 AC4 14 天 nightly 觀察期通過後（`tools/ac4_progress_check.py --json` 回報 `ready_for_labeled_pr=true`）：
 
-1. 手動啟用 `.github/workflows/pg-e2e-on-label.yml` workflow
+1. 手動啟用 `.github/workflows/autoclaude-pg-e2e-on-label.yml` workflow
 2. 在需跑 PG e2e 的 PR 加 `needs-pg-e2e` label 即觸發
 3. 預期 +8-12 min CI 時間 — 避免每 PR 跑（月度額度爆預算）
 
@@ -241,7 +241,7 @@ thread.start()
 | **1** | **PG production SOP 完整啟用**（議題 H）| §1-§3 草案落地（`Production_Migration_SOP.md` v0.1）+ WAL lag adapter + ADR-SD08-005 雙軌制（AI-Agent 演練 + 人類 DBA 親簽）| **雙條件齊備**：(a) 可觀測性 GA（IObservabilityPort + KB metric + trace_id 30 天 nightly 全綠）+ (b) 30 天零 drift（`drift_log` SLA）|
 | **2** | **mutation pilot 擴展至 GoalSynthesis + Coordinator**（議題 D）| TokenGuardPlugin 單模組 pilot（W3 觀察期 2026-05-19 起；首次評估 2026-05-25；W3 末判定 2026-06-01）| TokenGuardPlugin 連續 7 次達 ≥ 70% 鎖定 `.mutation_baseline.toml`，再擴展兩模組（分批 nightly）|
 | **3** | **perf machine 採購評估**（議題 G）| CI runner 跑 3 場景 CPU-bound（dry_run / TokenHalt / decide_correction）；pgvector 場景 SKIP 強制延 perf machine | 採購預算評估 + 季度校準排程確認 |
-| **4** | **AC4 labeled PR 觸發升級**（議題 C）| `pg-e2e-on-label.yml` workflow 就位（待手動啟用）+ collector / progress_check 工具落地 | 14 天 nightly 全綠 + `ready_for_labeled_pr=true` |
+| **4** | **AC4 labeled PR 觸發升級**（議題 C）| `autoclaude-pg-e2e-on-label.yml` workflow 就位（待手動啟用）+ collector / progress_check 工具落地 | 14 天 nightly 全綠 + `ready_for_labeled_pr=true` |
 | **5** | **OpenTelemetry 外掛**（議題 F 延伸）| 階段性混合（IObservabilityPort + LocalLogger adapter）= SD_10 後再外掛 OTel | SD_10 後啟動（分散式部署需求觸發）|
 | **6** | **dual_state drift_log 30 天零事件 SLA**（議題 H 前置）| `drift_log` partition 365 天 + dual_write_strict=fail_loud 已於 SD_06 完成 | nightly 連續 30 天 `drift_count=0`（W5 觀察期啟動 2026-05-18）|
 

@@ -130,7 +130,7 @@ locked_by = "SD_08 W5 G5"
 
 ## 3. CI Job 草稿（W5 落地）
 
-`.github/workflows/ci.yml` 新增 `perf-baseline-nightly` job：
+`.github/workflows/autoclaude-ci.yml` 新增 `perf-baseline-nightly` job：
 
 ```yaml
 perf-baseline-nightly:
@@ -182,7 +182,7 @@ perf-baseline-nightly:
 [  ] T5-G4 新建 tests/perf/test_decide_correction.py（≥ 1 case）
 [  ] T5-G5 新建 tests/perf/test_pgvector_recall_perf.py（≥ 1 case，pg_real marker，僅 perf machine 跑）
 [  ] T5-G6 新建 tools/perf_regression_check.py（雙通道告警）
-[  ] T5-G7 .github/workflows/ci.yml 新增 perf-baseline-nightly job
+[  ] T5-G7 .github/workflows/autoclaude-ci.yml 新增 perf-baseline-nightly job
 [  ] T5-G8 首次跑 7 次連續，鎖定 .perf_baseline.toml
 [  ] T5-G9 補 tests/contract/test_perf_regression_check.py（≥ 4 case：通過 / 警告 / 阻塞 / 缺 baseline）
 [  ] T5-G10 產 docs/06_quality/SD08_Perf_Baseline_Report.md（W5 末，含 4 場景 baseline 數字）

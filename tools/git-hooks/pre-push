@@ -23,8 +23,14 @@ if [ "${AUTOCLAUDE_SKIP_HOOKS:-0}" = "1" ]; then
   exit 0
 fi
 
-# 自我定位：本檔位於 <root>/tools/git-hooks/，往上兩層即 repo 根
-ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+# 定位 repo 根：git 執行 hooks 時 cwd＝該工作樹頂層，故以 --show-toplevel 為第一優先
+# （linked worktree 內 push 時才會對「該 worktree 的樹」跑檢查，而非安裝時的主 checkout）；
+# 取不到才 fallback BASH_SOURCE 自我定位（並印警告）。
+TOPLEVEL="$(git rev-parse --show-toplevel 2>/dev/null)"
+if [ -z "${TOPLEVEL:-}" ]; then
+  echo "[pre-push dispatcher] ⚠ git rev-parse --show-toplevel 失敗 → fallback BASH_SOURCE 自我定位（linked worktree 下可能指向主 checkout）" >&2
+  TOPLEVEL="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+fi
 rc=0
 
 ZERO_SHA='0000000000000000000000000000000000000000'
@@ -53,35 +59,49 @@ while read -r local_ref local_sha remote_ref remote_sha; do
     fi
   fi
 
-  if ! files="$(git diff --name-only "$base" "$local_sha" 2>/dev/null)"; then
+  # -c core.quotepath=false：非 ASCII 檔名不被引號包裹，前綴比對不逃逸
+  if ! files="$(git -c core.quotepath=false diff --name-only "$base" "$local_sha" 2>/dev/null)"; then
     undeterminable=1
     continue
   fi
   parsed=1
 
-  printf '%s\n' "$files" | grep -q '^AutoClaude/'  && run_autoclaude=1
-  printf '%s\n' "$files" | grep -q '^AISDLC_SDD/' && run_sdd=1
+  # 純 bash case 前綴比對（不可用 printf | grep -q —— 變更清單 >64KB 且命中在前段時
+  # grep -q 提早退出令 printf 收 SIGPIPE，pipefail 判整條管線非零 → 閘門靜默漏跑）
+  case $'\n'"$files" in *$'\n'AutoClaude/*)  run_autoclaude=1 ;; esac
+  case $'\n'"$files" in *$'\n'AISDLC_SDD/*) run_sdd=1 ;; esac
 done <<EOF
 $STDIN
 EOF
 
-# fail-safe：任何無法判定的情況（merge-base/diff 失敗，或 stdin 非空卻無任何行可判定）
+# fail-safe：任何無法判定的情況（merge-base/diff 失敗，或無任何行可判定——含 stdin 空。
+# 空 stdin 正是 pre-commit 框架等工具吃掉 stdin 的危險情境，一律 fail-safe 而非靜默放行）
 # → 視為兩子專案都有變更（跑全部閘門），寧可多跑不可漏跑
-if [ "$undeterminable" -eq 1 ] || { [ "$parsed" -eq 0 ] && [ -n "$(printf '%s' "$STDIN" | tr -d '[:space:]')" ]; }; then
+if [ "$undeterminable" -eq 1 ] || [ "$parsed" -eq 0 ]; then
   echo "[pre-push dispatcher] ⚠ 無法判定 push 範圍變更 → fail-safe：兩子專案閘門全跑"
   run_autoclaude=1
   run_sdd=1
 fi
 
 if [ "$run_autoclaude" -eq 1 ]; then
-  echo "[pre-push dispatcher] push 範圍含 AutoClaude/ → 執行 AutoClaude pre-push"
-  printf '%s\n' "$STDIN" | bash "$ROOT/AutoClaude/tools/git-hooks/pre-push" || rc=1
+  if [ -f "$TOPLEVEL/AutoClaude/tools/git-hooks/pre-push" ]; then
+    echo "[pre-push dispatcher] push 範圍含 AutoClaude/ → 執行 AutoClaude pre-push"
+    printf '%s\n' "$STDIN" | bash "$TOPLEVEL/AutoClaude/tools/git-hooks/pre-push" || rc=1
+  else
+    # 子 hook 應存在卻缺失＝hooks 體系損壞 → fail-loud，拒絕放行
+    echo "[pre-push dispatcher] ❌ 子 hook 缺失：$TOPLEVEL/AutoClaude/tools/git-hooks/pre-push（hooks 體系損壞）" >&2
+    rc=1
+  fi
 fi
 
 if [ "$run_sdd" -eq 1 ]; then
-  if [ -f "$ROOT/AISDLC_SDD/.githooks/pre-push" ]; then
+  if [ -f "$TOPLEVEL/AISDLC_SDD/.githooks/pre-push" ]; then
     echo "[pre-push dispatcher] push 範圍含 AISDLC_SDD/ → 執行 AISDLC_SDD pre-push"
-    printf '%s\n' "$STDIN" | bash "$ROOT/AISDLC_SDD/.githooks/pre-push" || rc=1
+    printf '%s\n' "$STDIN" | bash "$TOPLEVEL/AISDLC_SDD/.githooks/pre-push" || rc=1
+  else
+    # 子 hook 應存在卻缺失＝hooks 體系損壞 → fail-loud，拒絕放行
+    echo "[pre-push dispatcher] ❌ 子 hook 缺失：$TOPLEVEL/AISDLC_SDD/.githooks/pre-push（hooks 體系損壞）" >&2
+    rc=1
   fi
 fi
 

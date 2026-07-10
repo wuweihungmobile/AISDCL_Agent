@@ -1,4 +1,4 @@
-# Install PostCommit advisory hooks (Windows). Per Rule 9.17.1 / OPEN-G.4 / DEF-20-001.
+﻿# Install PostCommit advisory hooks (Windows). Per Rule 9.17.1 / OPEN-G.4 / DEF-20-001.
 # 串接 drift + closure evidence，皆 advisory 不阻擋 commit。
 # DEF-43-008（improving_44）：原寫死 drift→v0.01 / closure→v0.12，致修了 drift 的 repo-root bug
 # 也裝不到、且與「指向 LATEST」原則不一致。改為動態解析 LATEST（version 排序取最高），永不再 stale。

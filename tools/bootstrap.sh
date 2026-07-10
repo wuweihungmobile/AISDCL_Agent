@@ -22,6 +22,9 @@ cd "$ROOT"
 VENV_DIR="$ROOT/.venv"
 # redirect 順序：2>/dev/null 先於 < 檔案，檔案不存在時 shell 的 redirect 錯誤才會被吞掉
 PY_TARGET="$(tr -d ' \t\r\n' 2>/dev/null < "$ROOT/.python-version" || echo '3.11')"
+# 對齊 .ps1：三段版號（如 3.11.9）截為 major.minor（3.11）——「python3.11.9」命名的
+# 直譯器不存在、uv --python 也以 major.minor 解析，與 tools/bootstrap.ps1 行為對等
+PY_TARGET="$(printf '%s' "$PY_TARGET" | cut -d. -f1,2)"
 
 echo "===== AISDCL_Agent bootstrap（macOS/Linux）====="
 echo "repo 根：$ROOT"
@@ -60,6 +63,11 @@ else
       exit 1
     fi
     echo "使用直譯器：${BASE_PY}（$("$BASE_PY" --version 2>&1)）"
+    # 版本一致性提醒（不 fail，維持「>=3.11 可用」既有語意）：與 .python-version 目標不同時警告
+    ACTUAL_MM="$("$BASE_PY" -c 'import sys; print("%d.%d" % sys.version_info[:2])' 2>/dev/null || echo '')"
+    if [ -n "$ACTUAL_MM" ] && [ "$ACTUAL_MM" != "$PY_TARGET" ]; then
+      echo "⚠️  選定直譯器為 ${ACTUAL_MM}，與 .python-version 目標 ${PY_TARGET} 不一致（>=3.11 仍可用，僅提醒）"
+    fi
   fi
   echo "建立虛擬環境：.venv"
   if [ "$USE_UV" -eq 1 ]; then

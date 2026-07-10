@@ -75,8 +75,8 @@
 | **B-05** | `wire_plugins_with_registry` 缺 `observability` 參數 | [wiring.py:162-186](../../autoclaude/core/wiring.py) | 與 `build_kernel` 對稱性破損；測試路徑 KB metric / trace_id 不一致 | ✅ **CLOSED**（已加 observability 參數對齊 build_kernel）|
 | **B-06** | CLAUDE.md Architecture Snapshot 日期硬編碼 `2026-05-18` vs snapshot_sync 動態 `2026-05-19` | [CLAUDE.md:261](../../CLAUDE.md) | `snapshot_sync.py --check` 持續 DRIFT → CI 第 84 行 fail；PR block | ✅ **CLOSED**（標題改「由 tools/snapshot_sync.py 自動生成」，動態語意）|
 | **B-07** | `tests/perf/` 4 case 玩具負載（range(2000) 加總 / "x"\*4096 切半 / pass） | [test_dry_run_e2e.py / test_decide_correction.py / test_token_halt_roundtrip.py / test_pgvector_recall_perf.py](../../tests/perf/) | `.perf_baseline.toml` p95 = 0.006~1.705ms 級；ADR-SD08-003 「p95 < 15%」閾值在此量級下=雜訊放大器 | ✅ **CLOSED 2026-05-20**（zero-trust audit fix agent 重做 4 case 真實負載）|
-| **B-08** | `perf_results.json` 從未被生成 | autoclaude/utils/perf_baseline.py measure() 不寫檔；CI step 用 `[ -f ]` 兜底 | perf regression check 永遠走 echo warning 分支 | ✅ **CLOSED 2026-05-20**（write_perf_results helper + ci.yml + conftest.py caller 補入）|
-| **B-09** | CI `continue-on-error: true` 11 處 + 3 處 `\|\| true`（mutmut） | [.github/workflows/ci.yml](../../.github/workflows/ci.yml) | nightly 永遠綠燈，無法做為觀察期達標客觀證據 | ✅ **CLOSED 2026-05-20**（zero-trust audit fix agent Z1 落地：11 處 continue-on-error 全數移除；3 處 \|\| true 保留 mutmut 工具特性）|
+| **B-08** | `perf_results.json` 從未被生成 | autoclaude/utils/perf_baseline.py measure() 不寫檔；CI step 用 `[ -f ]` 兜底 | perf regression check 永遠走 echo warning 分支 | ✅ **CLOSED 2026-05-20**（write_perf_results helper + autoclaude-ci.yml + conftest.py caller 補入）|
+| **B-09** | CI `continue-on-error: true` 11 處 + 3 處 `\|\| true`（mutmut） | [.github/workflows/autoclaude-ci.yml](../../../.github/workflows/autoclaude-ci.yml) | nightly 永遠綠燈，無法做為觀察期達標客觀證據 | ✅ **CLOSED 2026-05-20**（zero-trust audit fix agent Z1 落地：11 處 continue-on-error 全數移除；3 處 \|\| true 保留 mutmut 工具特性）|
 | **B-10** | `sprint_history.md` line 4 / 16 / 368 / 390 元數據漂移 | [sprint_history.md](sprint_history.md) | SD_08 W6 已完成（22c03a7）但仍標「待啟動」；line 4 仍寫「SD_06+SD_07」 | ✅ **CLOSED**（line 4/16/368/390 元數據已修正）|
 | **B-11** | repo 空 `alembic/__init__.py` shadow pip-installed alembic | alembic/__init__.py (0 bytes) | `python -m alembic` / `python -c "from alembic.config..."` 失敗（只能透過 alembic.exe 跑） | ✅ **CLOSED**（git rm；工作目錄無此檔）|
 
@@ -86,7 +86,7 @@
 
 | # | 描述 | 對應 | 狀態 |
 |---|------|------|------|
-| **M-01** | mutation cron 3 個獨立 job 未拆 | [ADR-SD09-002:50-54](../04_planning/ADR/ADR-SD09-002-mutation-full-module-expansion.md) vs [ci.yml:252-316](../../.github/workflows/ci.yml) | ✅ **CLOSED**（ci.yml 已拆 3 job：TG 03:00 active / GS 04:00 dormant / Coord 05:00 dormant）|
+| **M-01** | mutation cron 3 個獨立 job 未拆 | [ADR-SD09-002:50-54](../04_planning/ADR/ADR-SD09-002-mutation-full-module-expansion.md) vs [autoclaude-ci.yml:252-316](../../../.github/workflows/autoclaude-ci.yml) | ✅ **CLOSED**（autoclaude-ci.yml 已拆 3 job：TG 03:00 active / GS 04:00 dormant / Coord 05:00 dormant）|
 | **M-02** | `tools/check_loc_budget.py` SPECIAL_FILES 僅 CLAUDE.md=400 | [check_loc_budget.py:93-95](../../tools/check_loc_budget.py) | ✅ **CLOSED**（SPECIAL_FILES 已加 Production_Migration_SOP.md=800 + sprint_history.md=2000）|
 | **M-03** | `wiring.py` HotkeyPlugin 條件式註冊 → 實際 13 或 14 plugin 浮動 | [wiring.py:139-140](../../autoclaude/core/wiring.py) / [snapshot_sync.py:147](../../tools/snapshot_sync.py) | ✅ **CLOSED**（count_active_plugins 動態呼叫；CLAUDE.md 顯示「13 active / 14 靜態」）|
 | **M-04** | trace_context.py 141 LOC 同 process only；9 處 subprocess 注入點未改造 | [trace_context.py](../../autoclaude/utils/trace_context.py) / [ADR-SD09-004:42-60](../04_planning/ADR/ADR-SD09-004-trace-id-multi-process.md) | ✅ **CLOSED 2026-05-20**（zero-trust audit fix agent 9 處 caller 全注入 propagate_to_subprocess_env）|
@@ -101,7 +101,7 @@
 
 ## 3. 🟢 已驗證實質運作（不需修，僅供參考）
 
-- `importlinter` 真實 7 條 rule 齊備 + CI 真實執行 lint-imports（`ci.yml:42-45`）
+- `importlinter` 真實 7 條 rule 齊備 + CI 真實執行 lint-imports（`autoclaude-ci.yml:42-45`）
 - core/ports 9 個 port 真實存在
 - `tools/check_loc_budget.py` LOC tier 真實檢查（fail-on-exceed）
 - `tools/snapshot_sync.py` AST 解析真實運作
