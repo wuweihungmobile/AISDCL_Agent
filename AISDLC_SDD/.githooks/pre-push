@@ -17,9 +17,10 @@ else
   REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 fi
 echo "🔒 [pre-push] 執行本機 CI 閘門 scripts/ci-gate.sh（push 前最後防線）…"
-# linked worktree：git 匯出 GIT_DIR 但不匯出 GIT_WORK_TREE，子目錄內相對路徑邏輯會失效；顯式錨定工作樹根
-if [ -n "${GIT_DIR:-}" ] && [ -n "${TOPLEVEL:-}" ]; then
-  export GIT_WORK_TREE="$TOPLEVEL"
-fi
-bash "${REPO_ROOT}/scripts/ci-gate.sh"
+# ⚠ env -u 清洗（P0）：GIT_DIR/GIT_WORK_TREE 絕不可傳染給下游測試子行程——
+# ci-gate.sh 內的 pytest 有「真 git fixture」（tmp repo 內 git init/add/commit），
+# 若繼承這兩個絕對路徑 env，git 會改操作「使用者真 repo」：髒工作樹時把 WIP 偷
+# commit 上真分支、乾淨樹時 fixture 炸掉造成閘門假紅。清洗後 git 自 cwd 正常
+# discovery（linked worktree 經 .git 檔解析亦正確）；hook 自身的 git rev-parse 不受影響。
+env -u GIT_DIR -u GIT_WORK_TREE bash "${REPO_ROOT}/scripts/ci-gate.sh"
 echo "✅ [pre-push] 閘門通過，允許 push。"

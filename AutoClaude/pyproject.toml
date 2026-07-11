@@ -17,9 +17,14 @@ dependencies = [
 
 [project.optional-dependencies]
 dev = [
-    "pytest>=8.0",
+    # DEF-101-006 鎖版：dev 工具鏈未鎖版致 fresh bootstrap 漂移 —
+    # pytest 鎖 9.0.3 與 AISDLC_SDD/AISDLC_SDD_v0.01/requirements-ci.txt 一致
+    # （消除 bootstrap「先裝 9.1.1 再降版」的安裝順序依賴）；
+    # ruff 鎖 0.15.21（QA 實測 fresh bootstrap 安裝版、baseline 1,339 筆一致，
+    # 未鎖版曾致 baseline 漂移）。升版規則比照 requirements-ci.txt：本機先升跑全綠再回寫釘選。
+    "pytest==9.0.3",
     "pytest-mock>=3.14",
-    "ruff>=0.4",
+    "ruff==0.15.21",
     "cachetools>=5.3",
     "hypothesis>=6.0",
     # tools/ 開發腳本（run_bridge_e2e / migrate_yaml_to_db / three_tier_to_playbook）

@@ -251,6 +251,7 @@ class DockerBackend:
         try:
             proc = subprocess.run(
                 cmd, capture_output=True, text=True,
+                encoding="utf-8", errors="replace",
                 timeout=spec.timeout_sec, check=False,
             )
         except subprocess.TimeoutExpired:

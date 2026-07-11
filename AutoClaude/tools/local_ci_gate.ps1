@@ -32,6 +32,13 @@ $RepoRoot = Split-Path -Parent $PSScriptRoot
 Set-Location $RepoRoot
 $env:PYTHONUTF8 = '1'
 
+# venv 提示：所有 gate 都靠裸 python，未啟用 venv 就直接失敗提示（勝過各 gate 逐一噴錯）
+# —— 與 local_ci_gate.sh 的 `command -v python` 前置守門對稱。
+if (-not (Get-Command python -ErrorAction SilentlyContinue)) {
+  Write-Host '❌ 找不到 python — 請先啟用 venv：.venv\Scripts\Activate.ps1（見 ONBOARDING.md §3）' -ForegroundColor Red
+  exit 1
+}
+
 # --- git hooks liveness 偵測（警告不擋）---
 # repo 搬移/改名或未安裝時 dispatcher hooks 會靜默失效（實證）；CI 環境（$env:CI 有值）
 # 跳過（GitHub/act 環境無 hooks 屬正常）。與 tools/integration_gate.ps1 的同名段落對稱。
@@ -72,9 +79,19 @@ $results = [System.Collections.Generic.List[object]]::new()
 function Invoke-Gate {
   param([string]$Name, [scriptblock]$Block)
   Write-Host "`n===== [$Name] =====" -ForegroundColor Cyan
-  & $Block
-  $rc = $LASTEXITCODE
-  if ($null -eq $rc) { $rc = 0 }
+  # 殘值 fail-open 防護：CommandNotFoundException 等例外不更新 $LASTEXITCODE，
+  # 前一 gate 的殘值 0 會讓本 gate 假 PASS → 每次執行前強制重置；
+  # 「指令拋例外 / 命令不存在」以 try/catch 明確判 FAIL（PS 5.1 相容）。
+  $global:LASTEXITCODE = 0
+  $rc = 0
+  try {
+    & $Block
+    $rc = $LASTEXITCODE
+    if ($null -eq $rc) { $rc = 0 }
+  } catch {
+    Write-Host "[$Name] 例外：$($_.Exception.Message)" -ForegroundColor Red
+    $rc = 1
+  }
   $status = if ($rc -eq 0) { 'PASS' } else { 'FAIL' }
   $color = if ($rc -eq 0) { 'Green' } else { 'Red' }
   Write-Host "[$Name] $status (rc=$rc)" -ForegroundColor $color

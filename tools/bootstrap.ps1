@@ -150,6 +150,8 @@ Write-Host @"
 
 下一步（每個新終端機都要做，或設進 profile / VSCode 直譯器）：
     .venv\Scripts\Activate.ps1
+    （若報「因為這個系統上已停用指令碼執行」：先跑
+      Set-ExecutionPolicy RemoteSigned -Scope CurrentUser 一次性放行，再重新啟用）
 
 啟用後驗證：
     Get-Command python      # 應指向 .venv\Scripts\python.exe

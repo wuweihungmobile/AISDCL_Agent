@@ -1,6 +1,6 @@
 # CLAUDE.md — Claude Code Project Guidance
 
-**Last Updated**: 2026-06-13 | **AISDLC Version**: v0.09 | **Status**: **Improving_012 完成（三能力 A/B/C 全交付）**。Phase 3 F-A1 GoalDecomposer 收尾：`IBrain.decide_decomposition` + `supports_decomposition`（additive，capability 守門不靜默降級）+ `execution/goal_decomposer.py`（三道有界閘 ≤24 硬上限／Kahn 無環／非空 prompt，超限拒絕不重試、1 次 Brain 呼叫非遞迴）+ 🔴 signoff 硬閘 + `wiring.build_goal_decomposer` 注入 F-A2 ToolInvocationAdapter（消費 allowlist）。三方 zero-trust audit OVERALL PASS（P0=0/P1=0）。full pytest **3,056 passed / 122 skipped**、coverage 100%、importlinter 8 kept、LOC=0。詳見 [AutoClaude_Improving_012.md](docs/04_planning/AutoClaude_Improving_012.md) §5 Phase 3。
+**Last Updated**: 2026-07-10 | **AISDLC Version**: v0.09 | **Status**: **Improving_012 完成（三能力 A/B/C 全交付）**。Phase 3 F-A1 GoalDecomposer 收尾：`IBrain.decide_decomposition` + `supports_decomposition`（additive，capability 守門不靜默降級）+ `execution/goal_decomposer.py`（三道有界閘 ≤24 硬上限／Kahn 無環／非空 prompt，超限拒絕不重試、1 次 Brain 呼叫非遞迴）+ 🔴 signoff 硬閘 + `wiring.build_goal_decomposer` 注入 F-A2 ToolInvocationAdapter（消費 allowlist）。三方 zero-trust audit OVERALL PASS（P0=0/P1=0）。full pytest 現行基線 **3,529 passed / 181 skipped**（2026-07-09 實測，同文末元數據）、coverage 100%、importlinter 8 kept、LOC=0。詳見 [AutoClaude_Improving_012.md](docs/04_planning/AutoClaude_Improving_012.md) §5 Phase 3。
 
 > **🔴 Important Notice 🔴** This file provides critical guidance for Claude Code (claude.ai/code). All instructions here OVERRIDE default behavior and must be followed exactly.
 

@@ -4,6 +4,18 @@
 # 把 upload 改 continue-on-error + 降 retention 止血；本 workflow 主動刪除過期/逾齡
 # artifact，讓配額不再累積撞頂（治本）。
 #
+# 🔴 刪除 allowlist 政策（四方複審 B1，2026-07-10）：workflows 上移 monorepo 根層後
+# artifact 命名空間合一——本 workflow 若對「整個 repo」刪超齡 artifact，會殲滅
+# AutoClaude 取證產物（mutation-reports-*/ac4-* retention 30 天、perf-baseline-*/
+# mutation-history 90 天 > 本檔 7 天門檻），斷 Nightly 取證紀律證據鏈。故改為
+# 「名稱前綴命中 aisdlc-sdd 家族清單」且超齡者才刪；不在清單內一律不動
+# （fail-safe：寧留勿刪）。allowlist 前綴 ↔ 來源 workflow 對照：
+#   ci-arch-fitness-       ← aisdlc-sdd-ci.yml（ci-arch-fitness-<run_id>，retention 7）
+#   arch-fitness-findings  ← aisdlc-sdd-arch-fitness.yml（arch-fitness-findings 與
+#                            arch-fitness-findings-nightly，前綴同時涵蓋，retention 7）
+#   fsm-chaos-report-      ← aisdlc-sdd-fsm-chaos-nightly.yml（fsm-chaos-report-<seed>，retention 7）
+# （aisdlc-sdd-drift-daily.yml 無 upload；新增 aisdlc-sdd artifact 時須同步本清單。）
+#
 # 觸發：每日 03:00 UTC（排在 chaos 02:00 / drift·arch-fitness 02:30 之後，清的是
 # 舊產物，不動當天剛產生的）；workflow_dispatch 可手動立即清理並自訂天數。
 #
@@ -18,7 +30,7 @@ on:
   workflow_dispatch:
     inputs:
       max_age_days:
-        description: "刪除超過幾天的 artifact（預設 7，對齊各 workflow 的 retention-days）"
+        description: "刪除超過幾天的 artifact（預設 7；僅作用於 aisdlc-sdd 家族 allowlist，見檔頭對照）"
         required: false
         default: "7"
 
@@ -36,47 +48,60 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
-      - name: Delete expired / aged artifacts
+      - name: Delete expired / aged artifacts (aisdlc-sdd allowlist only)
         env:
           GH_TOKEN: ${{ github.token }}
           REPO: ${{ github.repository }}
           MAX_AGE_DAYS: ${{ github.event.inputs.max_age_days || '7' }}
+          # 刪除 allowlist（前綴比對；換行分隔）— 僅 aisdlc-sdd 家族 artifact 可刪。
+          # 對照見檔頭；AutoClaude 家族（ac4-*/mutation-*/perf-baseline-*）絕不在此清單。
+          ALLOWLIST_PREFIXES: |
+            ci-arch-fitness-
+            arch-fitness-findings
+            fsm-chaos-report-
         run: |
           set -euo pipefail
-          echo "盤點 artifact，刪除 expired 或 created_at 超過 ${MAX_AGE_DAYS} 天者…"
+          echo "盤點 artifact，僅對 allowlist 命中者刪除 expired 或 created_at 超過 ${MAX_AGE_DAYS} 天者…"
 
-          # 取全部 artifact（id / created_at / expired），--paginate 自動翻頁。
+          # 取全部 artifact（id / name / created_at / expired），--paginate 自動翻頁。
           gh api --paginate \
             "/repos/${REPO}/actions/artifacts?per_page=100" \
-            --jq '.artifacts[] | [.id, .created_at, .expired] | @tsv' > all_artifacts.tsv || true
+            --jq '.artifacts[] | [.id, .name, .created_at, .expired] | @tsv' > all_artifacts.tsv || true
 
           total=$(wc -l < all_artifacts.tsv | tr -d ' ')
           echo "目前 artifact 總數：${total}"
 
           # 用 Python 精確比較 ISO8601 時間（避免字串比較的格式陷阱），輸出待刪 id。
+          # fail-safe：名稱未命中 allowlist 前綴（含 expired 者）一律不動，寧留勿刪。
           python3 - "${MAX_AGE_DAYS}" <<'PY' > to_delete.txt
-          import sys, datetime
+          import os, sys, datetime
           max_age = int(sys.argv[1])
           cutoff = datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(days=max_age)
+          prefixes = [p.strip() for p in os.environ.get("ALLOWLIST_PREFIXES", "").splitlines() if p.strip()]
           try:
               lines = open("all_artifacts.tsv", encoding="utf-8").read().splitlines()
           except FileNotFoundError:
               lines = []
+          skipped = 0
           for line in lines:
               parts = line.split("\t")
-              if len(parts) < 3:
+              if len(parts) < 4:
                   continue
-              aid, created, expired = parts[0], parts[1], parts[2]
+              aid, name, created, expired = parts[0], parts[1], parts[2], parts[3]
+              if not any(name.startswith(p) for p in prefixes):
+                  skipped += 1
+                  continue
               try:
                   dt = datetime.datetime.fromisoformat(created.replace("Z", "+00:00"))
               except ValueError:
                   continue
               if expired == "true" or dt < cutoff:
                   print(aid)
+          print(f"allowlist 未命中（保留不動）：{skipped} 個", file=sys.stderr)
           PY
 
           n=$(wc -l < to_delete.txt | tr -d ' ')
-          echo "待刪除：${n} 個"
+          echo "待刪除（allowlist 命中且超齡/expired）：${n} 個"
           while read -r id; do
             [ -z "${id}" ] && continue
             echo "  DELETE artifact #${id}"
@@ -84,9 +109,10 @@ jobs:
           done < to_delete.txt
 
           {
-            echo "### Artifact Cleanup"
+            echo "### Artifact Cleanup（aisdlc-sdd allowlist）"
             echo ""
             echo "- 總數（清理前）：${total}"
-            echo "- 刪除門檻：> ${MAX_AGE_DAYS} 天 或 expired"
+            echo "- 刪除門檻：allowlist 前綴命中 且（> ${MAX_AGE_DAYS} 天 或 expired）"
             echo "- 已刪除：${n}"
+            echo "- allowlist 未命中者一律保留（fail-safe，見檔頭對照表）"
           } >> "${GITHUB_STEP_SUMMARY}"

@@ -1,0 +1,90 @@
+# 根層基建 CI（四方複審 B4，2026-07-10）：workflows / hooks / 工具腳本上移 monorepo
+# 根層後，根層 tools/（bootstrap / integration_gate / git-hooks dispatcher）與
+# .gitattributes、.editorconfig、dependabot 等基建原本零 CI 覆蓋——壞掉只會在開發者
+# 本機爆。本 workflow 做三道輕量守門（僅 actions/checkout，不引其他外部 action，
+# 避免供應鏈風險）：
+#   1. bash -n     — 根層 tools/git-hooks/*（無副檔名 dispatcher）與 tools/*.sh 語法檢查
+#   2. pwsh parse  — tools/ 下 *.ps1 以 [System.Management.Automation.Language.Parser]
+#                    ::ParseFile 解析（ubuntu runner 內建 pwsh），parse error 即 fail
+#   3. EOL 守門    — git ls-files --eol：tools/ 下 .sh/.bash 與無副檔名 git hooks 不得
+#                    CRLF/mixed（取證紀律 #8；比照 AutoClaude pre-commit 檢法，作為
+#                    根層 .gitattributes `eol=lf` 政策的機械複核）
+
+name: root-infra-ci
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "tools/**"
+      - ".gitattributes"
+      - ".editorconfig"
+      - ".github/workflows/**"
+      - ".github/dependabot.yml"
+  pull_request:
+    paths:
+      - "tools/**"
+      - ".gitattributes"
+      - ".editorconfig"
+      - ".github/workflows/**"
+      - ".github/dependabot.yml"
+  workflow_dispatch:
+
+concurrency:
+  group: root-infra-ci-${{ github.ref }}
+  cancel-in-progress: true
+
+# 純驗證、不寫回 repo → 最小權限唯讀。
+permissions:
+  contents: read
+
+jobs:
+  root-infra:
+    name: root infra guard (bash -n + pwsh parse + EOL)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: bash -n 語法檢查（tools/git-hooks/* + tools/*.sh）
+        run: |
+          fail=0
+          for f in tools/git-hooks/* tools/*.sh; do
+            [ -f "$f" ] || continue
+            echo "bash -n ${f}"
+            bash -n "$f" || { echo "::error::${f} bash 語法錯誤"; fail=1; }
+          done
+          exit "$fail"
+
+      - name: pwsh 語法解析（tools/ 下 *.ps1）
+        run: |
+          pwsh -NoProfile -Command '
+            $files = @(Get-ChildItem -Path tools -Recurse -Filter *.ps1 -File)
+            Write-Host "待解析 .ps1 共 $($files.Count) 支"
+            $errCount = 0
+            foreach ($f in $files) {
+              $tokens = $null; $parseErrors = $null
+              [void][System.Management.Automation.Language.Parser]::ParseFile($f.FullName, [ref]$tokens, [ref]$parseErrors)
+              if ($parseErrors -and $parseErrors.Count -gt 0) {
+                Write-Host "::error::$($f.FullName) parse error"
+                foreach ($e in $parseErrors) { Write-Host "  $($e.Extent.StartLineNumber): $($e.Message)" }
+                $errCount += 1
+              } else {
+                Write-Host "OK: $($f.FullName)"
+              }
+            }
+            if ($errCount -gt 0) { exit 1 }
+          '
+
+      - name: EOL 守門（.sh 與無副檔名 hooks 不得 CRLF）
+        run: |
+          # git ls-files --eol 以 TAB 分隔「i/… w/… attr/…」屬性區與路徑；index（i/）
+          # 或 worktree（w/）出現 crlf / mixed 即違規（取證紀律 #8：CRLF 使 Linux bash
+          # 噴 $'\r'）。範圍：tools/ 下 .sh/.bash ＋ tools/git-hooks/ 無副檔名 hooks。
+          viol="$(git ls-files --eol -- tools/ | awk -F'\t' '$1 ~ /(i|w)\/(crlf|mixed)/ && ($2 ~ /\.(sh|bash)$/ || ($2 ~ /^tools\/git-hooks\// && $2 !~ /\.[^\/]*$/))')"
+          if [ -n "$viol" ]; then
+            echo "$viol"
+            echo "::error::上列檔案含 CRLF/mixed 行尾 — .sh 與 git hooks 必須 LF（取證紀律 #8 / 根層 .gitattributes）"
+            exit 1
+          fi
+          echo "EOL 檢查通過（tools/ 下 .sh/.bash 與 git-hooks 均為 LF）"

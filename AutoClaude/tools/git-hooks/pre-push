@@ -4,7 +4,8 @@
 #   test（pytest + LOC + import-linter）/ claude-md-budget（CLAUDE.md + snapshot）/ equivalence
 # 安裝：tools/install_git_hooks.sh / .ps1（設 core.hooksPath=<repo根>/tools/git-hooks 根層 dispatcher，依路徑分流至本檔）
 # 緊急跳過：AUTOCLAUDE_SKIP_HOOKS=1 git push ...  或  git push --no-verify
-# 注意：本 hook 在 Windows 跑本機 Python；如需 100% Linux 對等，請另跑 tools/run_act.ps1。
+# 注意：本 hook 在 macOS / Windows 皆跑本機 Python；如需 100% Linux 對等，
+#       macOS/Linux 另跑 bash tools/run_act.sh --job test、Windows 另跑 tools/run_act.ps1。
 # ---------------------------------------------------------------------------
 set -uo pipefail
 
@@ -61,10 +62,14 @@ else
 fi
 
 # 5. pytest 全測（CI: test + equivalence）。可用 AUTOCLAUDE_PUSH_PYTEST_ARGS 縮限。
+#    ⚠ env -u 清洗（P0）：GIT_DIR/GIT_WORK_TREE 絕不可傳染給 pytest——測試套件含
+#    「真 git fixture」（tmp repo 內 git init/add/commit），若繼承這兩個絕對路徑 env，
+#    git 會改操作「使用者真 repo」：髒工作樹時把 WIP 偷 commit 上真分支、乾淨樹時
+#    fixture 炸掉造成閘門假紅。hook 自身的 git diff（第 6 步）不清洗、行為不變。
 echo "[pre-push] 5/5 pytest（CI test+equivalence 鏡像）"
 PYTEST_ARGS="${AUTOCLAUDE_PUSH_PYTEST_ARGS:-tests/ -q --tb=short}"
 # shellcheck disable=SC2086
-python -m pytest $PYTEST_ARGS || fail=1
+env -u GIT_DIR -u GIT_WORK_TREE python -m pytest $PYTEST_ARGS || fail=1
 
 # 6. ADR-SD09-011：token_guard 源碼變動偵測（on-change mutation 觸發，opt-in 非阻塞）
 #    鎖定累積改由「源碼變動」驅動（取代每日 nightly 計時）；本地 opt-in 因 Windows 原生
@@ -76,7 +81,8 @@ tg_files="$(git -c core.quotepath=false diff --name-only origin/main...HEAD 2>/d
 if grep -q 'autoclaude/plugins/token_guard/.*\.py' <<<"$tg_files"; then
   if [ "${AUTOCLAUDE_MUTATION_ON_PUSH:-0}" = "1" ] && [ -f tools/run_mutmut_in_docker.sh ]; then
     echo "[pre-push]   token_guard 源碼有變 + opt-in → 跑 mutation（需 WSL/docker）"
-    bash tools/run_mutmut_in_docker.sh token_guard || echo "[pre-push]   mutation 非阻塞"
+    # 外部測試腳本亦清洗 GIT_DIR/GIT_WORK_TREE（同第 5 步理由，防傳染下游測試子行程）
+    env -u GIT_DIR -u GIT_WORK_TREE bash tools/run_mutmut_in_docker.sh token_guard || echo "[pre-push]   mutation 非阻塞"
   else
     echo "[pre-push]   ⚠ token_guard 源碼有變 → 由 CI autoclaude-mutation-on-change.yml 累積 unique sha 證據"
     echo "[pre-push]     （本地累積：AUTOCLAUDE_MUTATION_ON_PUSH=1，需 WSL/docker）"
@@ -85,7 +91,8 @@ fi
 
 if [ "$fail" -ne 0 ]; then
   echo "[pre-push] ❌ 本機 CI 閘門失敗 — 請修復後再 push（這正是要在本機攔下的 CI 紅燈）"
-  echo "           100% Linux 對等驗證：powershell -ExecutionPolicy Bypass -File tools/run_act.ps1 -Job test"
+  echo "           100% Linux 對等驗證（macOS/Linux）：bash tools/run_act.sh --job test"
+  echo "           100% Linux 對等驗證（Windows）  ：powershell -ExecutionPolicy Bypass -File tools/run_act.ps1 -Job test"
   echo "           緊急跳過：AUTOCLAUDE_SKIP_HOOKS=1 或 git push --no-verify"
   exit 1
 fi

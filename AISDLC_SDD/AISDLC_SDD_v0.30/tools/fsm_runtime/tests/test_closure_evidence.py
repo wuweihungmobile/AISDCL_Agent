@@ -6,6 +6,7 @@ verdict 合成驗三分支優先序。退化即紅。
 """
 from __future__ import annotations
 
+import os
 import subprocess
 from pathlib import Path
 
@@ -20,9 +21,23 @@ from tools.fsm_runtime import closure_evidence as ce
 # ─────────────────────────────────────────────────────────────
 
 
+def _clean_git_env() -> dict[str, str]:
+    """清洗 GIT_DIR/GIT_WORK_TREE/GIT_INDEX_FILE 後的環境（P0 防真 repo 污染）。
+
+    linked worktree 下 git 對 pre-push hook 注入絕對路徑 GIT_DIR（hook 又補
+    GIT_WORK_TREE），若傳染進本 fixture 的 git init/add/commit，cwd=tmp 會被
+    這些 env 覆寫 → 改操作「使用者真 repo」（偷 commit WIP / 閘門假紅）。"""
+    env = os.environ.copy()
+    for key in ("GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE"):
+        env.pop(key, None)
+    return env
+
+
 def _git(repo: Path, *args: str) -> str:
     return subprocess.run(
-        ["git", *args], cwd=str(repo), capture_output=True, text=True, check=True
+        ["git", *args], cwd=str(repo), capture_output=True, text=True, check=True,
+        encoding="utf-8", errors="replace",
+        env=_clean_git_env(),
     ).stdout.strip()
 
 

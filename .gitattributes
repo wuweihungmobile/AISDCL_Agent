@@ -17,7 +17,11 @@
 # git hooks（無副檔名，於 git-bash / Docker 以 bash 執行，CRLF 會噴 $'\r'）
 # tools/git-hooks/* ＝根層 dispatcher hooks（FIX-1；兩子專案閘門分流器）
 tools/git-hooks/* text eol=lf
-.githooks/*       text eol=lf
+# **/.githooks/* ＝任意層級 .githooks 目錄。原寫法 `.githooks/*` 含斜線會錨定根層，
+# 而根層無此目錄＝死規則。改 `**/` 後可命中子目錄，但**不是可靠兜底**：子專案自帶
+# .gitattributes 的 `*` 兜底規則仍會遮蔽本行（見頂部遮蔽語意），故各子專案的
+# .githooks 行尾政策仍須在其自身 .gitattributes 完備，本行僅涵蓋無自帶政策的目錄。
+**/.githooks/*    text eol=lf
 .actrc      text eol=lf
 *.py        text eol=lf
 *.yaml      text eol=lf

@@ -3,14 +3,39 @@ name: Mutation On-Change (token_guard)
 # ADR-SD09-011（improving_101）：mutation baseline 鎖定的 unique-sha 累積，改由
 # 「token_guard 源碼變動」觸發（取代每日 nightly 計時 — 解除日曆綁定、不空轉）。
 # nightly schedule（autoclaude-ci.yml）保留，角色轉為「kill_rate 漂移監控 + flaky 偵測」，不再
-# 充當鎖定計時器（紀律 #6 採集寬鬆 vs 升級嚴格分軌）。本 workflow 為 unique-sha 累積權威通道。
+# 充當鎖定計時器（紀律 #6 採集寬鬆 vs 升級嚴格分軌）。
 # monorepo 根層接線（2026-07-10）：自 AutoClaude/.github/workflows/mutation-on-change.yml
 # 遷入根層；paths 前綴 AutoClaude/、run step 以 defaults 定錨 working-directory。
+#
+# 🔴 GitHub Actions 側累積持久化（四方複審 B2，2026-07-10）：`.mutation_history.jsonl`
+# 已出庫（AutoClaude/.gitignore），fresh checkout 每次 run 只有 1 筆、run 完蒸發，
+# ADR-SD09-011 的 7 unique-sha 閘門永不推進。故本 workflow 採 restore → accumulate →
+# upload 三段式：run 開始以 gh api 下載最近一次 `mutation-history` artifact 還原
+# history → mutation_baseline_lock.py 照常 append 本次 sha → run 結束重新上傳
+# `mutation-history`（retention 90 天）與本次報告（30 天）。
+# 已知限制（如實揭露）：
+#   - artifact retention 上限 90 天 — 若連續 90 天無任何 token_guard 源碼變動觸發本
+#     workflow，鏈上累積鏈會斷（history 歸零重累）；Windows 本機 nightly
+#     （tools/run_local_nightly.ps1）仍為另一條獨立累積點，兩者互不同步。
+#   - `mutation-history` 屬 AutoClaude 取證家族，aisdlc-sdd-artifact-cleanup.yml 的
+#     刪除 allowlist 不含它（fail-safe 寧留勿刪），不會被 7 天清理殲滅。
 on:
   push:
     paths:
       - 'AutoClaude/autoclaude/plugins/token_guard/**'
   workflow_dispatch:
+
+# restore 步驟以 gh api 列舉/下載既往 run 的 artifact → 需 actions:read；其餘唯讀。
+permissions:
+  contents: read
+  actions: read
+
+# 累積原子性（四方複審第三輪 Architect，DEF-101-023）：restore→upload 非原子，併發
+# run 會互相覆蓋丟 sha（後開始先結束者的 sha 被較晚 created_at 的 artifact 蓋掉）。
+# 以 concurrency 串行化整條累積通道；cancel-in-progress=false＝排隊不取消（每筆 sha 都要入鏈）。
+concurrency:
+  group: mutation-history-accrual
+  cancel-in-progress: false
 
 defaults:
   run:
@@ -24,6 +49,29 @@ jobs:
     continue-on-error: true
     steps:
       - uses: actions/checkout@v4
+      # B2 第 1 段（restore）：還原最近一次 run 上傳的 mutation-history，讓
+      # mutation_baseline_lock.py 得以跨 run 累積 unique sha。找不到（首輪 / 已逾
+      # 90 天 retention）或下載失敗 → 印告警後從空 history 起累，不 fail。
+      - name: Restore mutation history (跨 run 累積還原)
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+        run: |
+          # list API 依 created_at 新→舊排序；取第一筆未過期者即最近一次成功上傳
+          aid=$(gh api "/repos/${REPO}/actions/artifacts?name=mutation-history&per_page=100" \
+                  --jq '[.artifacts[] | select(.expired == false)][0].id // empty') || aid=""
+          if [ -z "${aid}" ]; then
+            echo "::notice::無既往 mutation-history artifact（首輪或已逾 retention）— 從空 history 起累"
+          elif ! gh api "/repos/${REPO}/actions/artifacts/${aid}/zip" > /tmp/mutation_history.zip \
+            || ! unzip -o /tmp/mutation_history.zip -d .; then
+            # upload path 為單一檔案 → zip 根即 .mutation_history.jsonl；解到
+            # working-directory（AutoClaude/），對齊 baseline_lock --history 相對路徑。
+            # 下載或解壓失敗皆不 fail（清殘檔防半損 history），本輪從空 history 起累。
+            echo "::warning::mutation-history artifact #${aid} 下載/解壓失敗（rc != 0）— 本輪從空 history 起累"
+            rm -f .mutation_history.jsonl
+          else
+            echo "已還原 history：$(wc -l < .mutation_history.jsonl | tr -d ' ') 筆"
+          fi
       - uses: actions/setup-python@v5
         with:
           python-version: '3.11'
@@ -52,3 +100,26 @@ jobs:
           python tools/mutation_analysis.py token_guard \
             --log mutation_token_guard.log \
             --output mutation_backlog_token_guard.md
+      # B2 第 3 段（upload）：if: always() — 即使中途 step 失敗，已還原＋已累積的
+      # history 仍回寫 artifact，避免斷鏈；同名 mutation-history 每 run 各自成一份，
+      # restore 端永遠取最新未過期者。檔案不存在（如 restore 前即 crash）→ ignore
+      # 不產生空 artifact 假象。retention 90 天為 GitHub 上限，殘餘限制見檔頭。
+      - name: Upload mutation history (跨 run 累積持久化)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: mutation-history
+          path: AutoClaude/.mutation_history.jsonl
+          retention-days: 90
+          if-no-files-found: ignore
+      - name: Upload mutation report (本次證據)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: mutation-on-change-report-${{ github.run_id }}
+          path: |
+            AutoClaude/mutation_token_guard.log
+            AutoClaude/mutation_backlog_token_guard.md
+            AutoClaude/.mutation_baseline.toml
+          retention-days: 30
+          if-no-files-found: ignore

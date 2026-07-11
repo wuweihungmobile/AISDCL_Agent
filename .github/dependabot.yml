@@ -27,3 +27,15 @@ updates:
     labels: ["dependencies"]
     commit-message:
       prefix: "chore(deps)"
+
+  # pip：AutoClaude 應用相依（pyproject.toml，pip 生態可識別）有新版即開 PR。
+  # 四方複審 B3（2026-07-10）：原僅涵蓋 AISDLC_SDD，AutoClaude 側漏掃 → 補齊。
+  - package-ecosystem: "pip"
+    directory: "/AutoClaude"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+    open-pull-requests-limit: 5
+    labels: ["dependencies"]
+    commit-message:
+      prefix: "chore(deps)"

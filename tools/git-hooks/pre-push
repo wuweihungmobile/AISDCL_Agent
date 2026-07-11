@@ -60,7 +60,9 @@ while read -r local_ref local_sha remote_ref remote_sha; do
   fi
 
   # -c core.quotepath=false：非 ASCII 檔名不被引號包裹，前綴比對不逃逸
-  if ! files="$(git -c core.quotepath=false diff --name-only "$base" "$local_sha" 2>/dev/null)"; then
+  # --no-renames：rename 偵測只列「新路徑」一條，把檔案移出子專案時舊路徑消失 →
+  # 來源子專案閘門靜默漏跑（fail-open）；停用後拆成 A+D 兩條路徑，舊路徑重新可見
+  if ! files="$(git -c core.quotepath=false diff --name-only --no-renames "$base" "$local_sha" 2>/dev/null)"; then
     undeterminable=1
     continue
   fi

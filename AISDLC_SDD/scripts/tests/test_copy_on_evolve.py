@@ -21,6 +21,7 @@ untracked＝輸出，邊界由 git 單一事實源裁定。
 """
 from __future__ import annotations
 
+import os
 import shutil
 import subprocess
 import tempfile
@@ -38,10 +39,23 @@ pytestmark = pytest.mark.skipif(
 )
 
 
+def _clean_git_env() -> dict[str, str]:
+    """清洗 GIT_DIR/GIT_WORK_TREE/GIT_INDEX_FILE 後的環境（P0 防真 repo 污染）。
+
+    linked worktree 下 git 對 pre-push hook 注入絕對路徑 GIT_DIR（hook 又補
+    GIT_WORK_TREE），若傳染進本檔的 git init/add/commit 與 helper 內的 git archive，
+    cwd=tmp 會被這些 env 覆寫 → 改操作「使用者真 repo」（偷 commit WIP / 閘門假紅）。"""
+    env = os.environ.copy()
+    for key in ("GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE"):
+        env.pop(key, None)
+    return env
+
+
 def _git(repo: Path, *args: str) -> subprocess.CompletedProcess:
     return subprocess.run(
         ["git", "-c", "user.email=t@t.dev", "-c", "user.name=coe-test", *args],
         cwd=str(repo), capture_output=True, text=True, encoding="utf-8", errors="replace",
+        env=_clean_git_env(),
     )
 
 
@@ -58,7 +72,7 @@ def _run(repo: Path, *args: str) -> subprocess.CompletedProcess:
     return subprocess.run(
         ["bash", "_coe.sh", *args],
         cwd=str(repo), capture_output=True, text=True, encoding="utf-8", errors="replace",
-        timeout=60,
+        timeout=60, env=_clean_git_env(),
     )
 
 
@@ -225,7 +239,7 @@ def _bash_with_python() -> str | None:
     for b in candidates:
         try:
             r = subprocess.run([b, "-c", "command -v python"], capture_output=True,
-                               text=True, timeout=15)
+                               text=True, encoding="utf-8", errors="replace", timeout=15)
             if r.returncode == 0 and r.stdout.strip():
                 return b
         except Exception:
@@ -274,7 +288,7 @@ def test_auto_syncs_skill_stamps_on_evolve_def_58_002(repo: Path):
     proc = subprocess.run(
         [bash, "scripts/copy_on_evolve.sh", "AISDLC_SDD_v0.01", "AISDLC_SDD_v0.02"],
         cwd=str(repo), capture_output=True, text=True, encoding="utf-8", errors="replace",
-        timeout=60,
+        timeout=60, env=_clean_git_env(),
     )
     assert proc.returncode == 0, f"建版+同步應 exit 0\nstdout:{proc.stdout}\nstderr:{proc.stderr}"
     new_skill = repo / "AISDLC_SDD_v0.02" / ".claude" / "skills" / "foo" / "SKILL.md"
@@ -309,7 +323,7 @@ def test_auto_appends_gitignore_block_on_evolve_def_59_001(repo: Path):
     proc = subprocess.run(
         [bash, "scripts/copy_on_evolve.sh", "AISDLC_SDD_v0.01", "AISDLC_SDD_v0.02"],
         cwd=str(repo), capture_output=True, text=True, encoding="utf-8", errors="replace",
-        timeout=60,
+        timeout=60, env=_clean_git_env(),
     )
     assert proc.returncode == 0, f"建版應 exit 0\nstdout:{proc.stdout}\nstderr:{proc.stderr}"
     gi = gitignore.read_text(encoding="utf-8")
@@ -337,7 +351,7 @@ def test_auto_regens_framework_status_on_evolve_def_96_001(repo: Path):
     proc = subprocess.run(
         [bash, "scripts/copy_on_evolve.sh", "AISDLC_SDD_v0.01", "AISDLC_SDD_v0.02"],
         cwd=str(repo), capture_output=True, text=True, encoding="utf-8", errors="replace",
-        timeout=60,
+        timeout=60, env=_clean_git_env(),
     )
     assert proc.returncode == 0, f"建版+重生 SSOT 應 exit 0\nstdout:{proc.stdout}\nstderr:{proc.stderr}"
     status = repo / "FRAMEWORK_STATUS.md"

@@ -31,16 +31,139 @@ rc=0
 # 分流判定：純 bash case 前綴比對（不可用 printf | grep -q —— 變更清單 >64KB 且命中在
 # 前段時 grep -q 提早退出令 printf 收 SIGPIPE，pipefail 判整條管線非零 → 閘門靜默漏跑）。
 # -c core.quotepath=false：非 ASCII 檔名不被引號包裹，前綴比對不逃逸。
+# --no-renames：rename 偵測只列「新路徑」一條，若把檔案移出子專案（如 AutoClaude/x → docs/x），
+# 舊路徑消失 → 來源子專案閘門靜默漏跑（fail-open）。停用 rename 偵測使其拆成 A+D 兩條路徑，
+# 舊路徑重新可見、來源子專案照常命中分流。
 run_autoclaude=0
 run_sdd=0
-if changed="$(git -c core.quotepath=false diff --cached --name-only)"; then
+run_root_infra=0
+if changed="$(git -c core.quotepath=false diff --cached --name-only --no-renames)"; then
   case $'\n'"$changed" in *$'\n'AutoClaude/*)  run_autoclaude=1 ;; esac
   case $'\n'"$changed" in *$'\n'AISDLC_SDD/*) run_sdd=1 ;; esac
+  # 根層基建 leg（A4）：根層 tools/ / .gitattributes / .editorconfig / .github/ 有變更
+  # 即觸發（過去這些基建自身變更零閘門，改壞 dispatcher/bootstrap 只能事後發現）
+  case $'\n'"$changed" in *$'\n'tools/*)          run_root_infra=1 ;; esac
+  case $'\n'"$changed" in *$'\n'.github/*)        run_root_infra=1 ;; esac
+  case $'\n'"$changed" in *$'\n'.gitattributes*)  run_root_infra=1 ;; esac
+  case $'\n'"$changed" in *$'\n'.editorconfig*)   run_root_infra=1 ;; esac
 else
   # git diff 失敗（rc≠0）→ 無法判定變更範圍 → fail-safe：兩子專案閘門全跑，寧可多跑不可漏跑
   echo "[pre-commit dispatcher] ⚠ git diff --cached 失敗 → fail-safe：兩子專案閘門全跑"
   run_autoclaude=1
   run_sdd=1
+fi
+
+# ── NTFS 敵意檔名防護閘（A3）─────────────────────────────────────────────
+# 本 repo 為 macOS ⇄ Windows 雙平台開發：macOS(APFS) 允許的檔名在 Windows(NTFS)
+# checkout 時會直接炸掉（無法建檔）或靜默碰撞（大小寫不敏感覆蓋）。凡本次 commit
+# 新增（A/C）的路徑任一命中即 fail-loud 擋下（正確性閘，CI 環境亦不跳過）：
+#   1. 路徑任一段含 < > : " | ? * 或控制字元，或以空白/句點結尾（NTFS 不允許）
+#   2. 任一段去副檔名後（不分大小寫）為 Windows 保留裝置名 CON/PRN/AUX/NUL/COM1~9/LPT1~9
+#   3. 大小寫碰撞：新增路徑 lowercase 後與既有 tracked 路徑重複但原字串不同
+#      （NTFS 大小寫不敏感 → checkout 時兩檔互相覆蓋）
+# bash 3.2 相容：無 assoc array / ${var,,}，以 case pattern + tr + grep -iFx 實作。
+_ntfs_seg_bad() {  # $1=完整路徑；有問題 → stdout 印原因並回 0，乾淨 → 回 1
+  local p="$1" rest seg base up
+  # 控制字元（整條路徑一次檢查；LC_ALL=C 使 [:cntrl:] 按位元組判定）
+  if printf '%s' "$p" | LC_ALL=C grep -q '[[:cntrl:]]'; then
+    echo "含控制字元"
+    return 0
+  fi
+  rest="$p"
+  while :; do
+    seg="${rest%%/*}"
+    case "$seg" in
+      *'<'*|*'>'*|*':'*|*'"'*|*'|'*|*'?'*|*'*'*|*'\'*)
+        echo "路徑段「${seg}」含 Windows 不允許字元（< > : \" | ? * \\）"
+        return 0 ;;
+      *' '|*'.')
+        echo "路徑段「${seg}」以空白或句點結尾（NTFS 不允許）"
+        return 0 ;;
+    esac
+    base="${seg%%.*}"   # 去（第一個點起的）副檔名；Windows 對 CON.txt 一樣視為保留名
+    up="$(printf '%s' "$base" | tr '[:lower:]' '[:upper:]')"
+    case "$up" in
+      CON|PRN|AUX|NUL|COM[1-9]|LPT[1-9])
+        echo "路徑段「${seg}」為 Windows 保留裝置名（${up}）"
+        return 0 ;;
+    esac
+    case "$rest" in
+      */*) rest="${rest#*/}" ;;
+      *)   break ;;
+    esac
+  done
+  return 1
+}
+
+# 只在有新增檔時才做（--diff-filter=AC；--no-renames 使 rename 的新路徑以 A 現身受檢）
+if added="$(git -c core.quotepath=false diff --cached --name-only --no-renames --diff-filter=AC)"; then
+  if [ -n "$added" ]; then
+    tracked=""   # 全 repo tracked 清單只取一次（大小寫碰撞比對用）
+    while IFS= read -r f; do
+      [ -z "$f" ] && continue
+      if reason="$(_ntfs_seg_bad "$f")"; then
+        echo "[pre-commit dispatcher] ❌ NTFS 不相容檔名：$f — $reason" >&2
+        echo "                        修法：改名後重新暫存（git mv / git rm --cached 舊名）" >&2
+        rc=1
+        continue
+      fi
+      # 大小寫碰撞：grep -iFx 對 tracked 清單做「整行、固定字串、不分大小寫」比對；
+      # index 已含本次新增檔自身（原字串相同會被排除，不誤報）。grep 讀至 EOF 無 SIGPIPE 疑慮。
+      if [ -z "$tracked" ]; then
+        tracked="$(git -c core.quotepath=false ls-files)" || tracked=""
+      fi
+      collisions="$(printf '%s\n' "$tracked" | grep -iFx -e "$f" || true)"
+      while IFS= read -r m; do
+        [ -z "$m" ] && continue
+        if [ "$m" != "$f" ]; then
+          # ${f}/${m} 必須帶大括號：bash 3.2 對「$f 後緊接全形字元」的變數名邊界
+          # 判定有 multibyte bug（會把後續位元組併入變數名 → unbound variable）
+          echo "[pre-commit dispatcher] ❌ NTFS 大小寫碰撞：新增「${f}」與既有「${m}」僅大小寫不同" >&2
+          echo "                        修法：改名避開碰撞，或先 git rm 既有路徑" >&2
+          rc=1
+        fi
+      done <<EOF2
+$collisions
+EOF2
+    done <<EOF1
+$added
+EOF1
+  fi
+else
+  # 取不到新增清單＝無法驗證正確性閘 → fail-loud（不可靜默放行）
+  echo "[pre-commit dispatcher] ❌ 無法取得新增檔清單（git diff --diff-filter=AC 失敗）→ NTFS 檔名閘無法驗證，擋下" >&2
+  rc=1
+fi
+
+# ── 根層基建 leg（A4）────────────────────────────────────────────────────
+# 變更清單含根層 tools/ / .gitattributes / .editorconfig / .github/ 時，對「本次變更到的」
+# .sh 與無副檔名 hook 檔（tools/git-hooks/*）跑 bash -n 語法檢查（快速、零依賴）；
+# 失敗擋下——根層基建自身過去零閘門，改壞 dispatcher/bootstrap 只能事後在 hook 爆炸時發現。
+if [ "$run_root_infra" -eq 1 ]; then
+  echo "[pre-commit dispatcher] 變更含根層基建 → bash -n 語法檢查"
+  while IFS= read -r f; do
+    [ -z "$f" ] && continue
+    case "$f" in
+      tools/*|.github/*) : ;;   # 只檢查根層基建路徑（子專案腳本由各自 hook 把關）
+      *) continue ;;
+    esac
+    do_check=0
+    case "$f" in *.sh) do_check=1 ;; esac
+    case "$f" in
+      tools/git-hooks/*)
+        # 無副檔名 hook 檔（pre-commit / pre-push / post-commit …）
+        case "${f##*/}" in *.*) : ;; *) do_check=1 ;; esac ;;
+    esac
+    if [ "$do_check" -eq 1 ] && [ -f "$TOPLEVEL/$f" ]; then
+      if ! bash -n "$TOPLEVEL/$f"; then
+        # ${f} 帶大括號：bash 3.2 對「$f 後緊接全形字元」有 multibyte 變數名邊界 bug
+        echo "[pre-commit dispatcher] ❌ bash -n 語法檢查失敗：${f}（根層基建不可帶語法錯誤入庫）" >&2
+        rc=1
+      fi
+    fi
+  done <<EOF3
+$changed
+EOF3
 fi
 
 if [ "$run_autoclaude" -eq 1 ]; then

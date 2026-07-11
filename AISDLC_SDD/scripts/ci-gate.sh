@@ -21,6 +21,10 @@
 #   + 自動偵測之最新演化版」雙軌各跑一次完整閘門，使最新版恆納入官方閘門覆蓋。
 set -euo pipefail
 
+# 強制 Python 子程序統一 UTF-8（對齊 AutoClaude tools/local_ci_gate.sh 同名設定）：
+# macOS/Linux 無害；Windows git-bash 下防 zh-TW cp950 UnicodeDecodeError。
+export PYTHONUTF8=1
+
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
 # ── 版本解析（DEF-03-001 雙軌）─────────────────────────────────────────────

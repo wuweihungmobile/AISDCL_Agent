@@ -6,6 +6,9 @@
 # 用法：  pwsh scripts/ci-gate.ps1            # 離線閘門
 #         $env:SDD_RUN_TLC=1; pwsh scripts/ci-gate.ps1   # 另跑五軌 TLC
 $ErrorActionPreference = "Stop"
+# 強制 Python 子程序統一 UTF-8（對齊 AutoClaude tools/local_ci_gate.ps1 同名設定）：
+# zh-TW Windows 預設 cp950，fsm_runtime subprocess 輸出含中文時會 UnicodeDecodeError。
+$env:PYTHONUTF8 = "1"
 $repo = Split-Path -Parent $PSScriptRoot
 $fw   = Join-Path $repo "AISDLC_SDD_v0.01"
 Set-Location $fw

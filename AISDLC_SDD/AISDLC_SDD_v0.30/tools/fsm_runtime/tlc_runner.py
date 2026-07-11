@@ -90,7 +90,8 @@ def run_tlc(depth: int = 50, *, jar: Path | None = None,
         java, "-XX:+UseParallelGC", "-cp", str(jar), "tlc2.TLC",
         "-config", cfg, "-workers", "auto", "-depth", str(depth), tla,
     ]
-    proc = subprocess.run(cmd, cwd=str(FORMAL_DIR), capture_output=True, text=True)
+    proc = subprocess.run(cmd, cwd=str(FORMAL_DIR), capture_output=True, text=True,
+                          encoding="utf-8", errors="replace")
     out = proc.stdout + "\n" + proc.stderr
 
     no_error = "No error has been found" in out

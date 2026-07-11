@@ -93,6 +93,8 @@ def _run_git(args: List[str], repo_root: Path) -> "tuple[int, str]":
             cwd=str(repo_root),
             capture_output=True,
             text=True,
+            encoding="utf-8",
+            errors="replace",
             timeout=10,
         )
         return proc.returncode, (proc.stdout or "").strip()
