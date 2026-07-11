@@ -48,7 +48,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
       - uses: actions/setup-python@v6
         with:
           python-version: "3.11"
@@ -91,7 +91,7 @@ jobs:
     permissions:
       contents: write   # 回寫 build/reports/fse/TREND.yaml（趨勢累積）— 鏡像 drift-daily.yml
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0   # rebase-retry 需完整歷史，與 drift-daily 對齊（避免 shallow rebase 失敗）
       - uses: actions/setup-python@v6

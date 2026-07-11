@@ -48,7 +48,7 @@ jobs:
     # 非阻塞：mutation survived 屬正常，產出證據即可，不擋 push
     continue-on-error: true
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       # B2 第 1 段（restore）：還原最近一次 run 上傳的 mutation-history，讓
       # mutation_baseline_lock.py 得以跨 run 累積 unique sha。找不到（首輪 / 已逾
       # 90 天 retention）或下載失敗 → 印告警後從空 history 起累，不 fail。
