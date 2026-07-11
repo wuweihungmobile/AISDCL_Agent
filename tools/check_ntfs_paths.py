@@ -8,17 +8,25 @@
 範圍差異（by design）：hook 版只掃「本次 commit 新增（A/C）」路徑；本 CI 版掃
 `git ls-files` **全量 tracked 路徑**——已入庫的違規也要現形。
 
-檢查邏輯與 hook 版一致（tools/git-hooks/pre-commit `_ntfs_seg_bad` + 大小寫碰撞）：
+檢查邏輯與 hook 版一致（tools/git-hooks/pre-commit `_ntfs_seg_bad` + 大小寫碰撞 + 長度閘）：
   1. 路徑含控制字元（C locale [:cntrl:]＝0x00-0x1F + 0x7F），或任一路徑段含
      Windows 不允許字元 < > : " | ? * \\，或以空白/句點結尾（NTFS 不允許）
   2. 任一段去（第一個點起的）副檔名後（不分大小寫）為 Windows 保留裝置名
      CON / PRN / AUX / NUL / COM1~9 / LPT1~9
   3. 大小寫碰撞：兩 tracked 路徑 lowercase 後相同但原字串不同
      （NTFS 大小寫不敏感 → checkout 時互相覆蓋）
+  4. MAX_PATH 保守長度閘（DEF-101-039）：Windows 未開 core.longpaths 時絕對路徑上限
+     MAX_PATH=260 UTF-16 單位（含結尾 NUL，可用 259）；預留 clone 前綴 59 字元＋NUL
+     （C:\\Users\\<user>\\...\\<repo>\\，259−200＝59）→ repo 相對路徑 >200 字元 fail、
+     >180 字元 warn（不影響退出碼）。長度＝Unicode code point 數（len()；BMP 字元＝
+     1 UTF-16 單位；hook 版以「刪 UTF-8 連續位元組計數」達成同語意且 locale 無關；
+     astral 字元低估 1 單位屬可忽略邊角）。
 
-已知侷限（與 hook 版對齊，不另增檢查）：hook 版無路徑長度（MAX_PATH=260）檢查，
-本腳本維持一致；大小寫折疊用 str.lower()（hook 的 grep -iFx 在 UTF-8 locale 亦
-fold 非 ASCII 字母，方向一致）。
+已知侷限：大小寫折疊用 str.lower()（hook 的 grep -iFx 在 UTF-8 locale 亦
+fold 非 ASCII 字母，方向一致）。檔名內嵌換行/控制字元非缺口：git 對含控制字元
+路徑恆 C-quote（不受 core.quotepath=false 影響），hook 逐行讀所見之引號化表徵
+含 " 與 \\ 觸發第 1 項攔截；本腳本 -z 讀原始路徑由控制字元檢查攔截——兩側皆
+封閉（第五輪 SD/QA 雙實證）。
 
 使用：
   python3 tools/check_ntfs_paths.py   # 於 repo 內任意 cwd；違規印明細並 exit 1
@@ -34,6 +42,21 @@ _REPO_ROOT = Path(__file__).resolve().parents[1]
 
 _FORBIDDEN_CHARS = set('<>:"|?*\\')
 _RESERVED_RE = re.compile(r"^(CON|PRN|AUX|NUL|COM[1-9]|LPT[1-9])$")
+
+# MAX_PATH 保守長度閘（DEF-101-039）：
+# 可用 259（260 含 NUL）− 59（clone 前綴預留）＝ 200 fail；180 warn
+_LEN_FAIL = 200
+_LEN_WARN = 180
+
+
+def _length_level(path: str) -> str | None:
+    """路徑長度分級：>200 → "fail"、>180 → "warn"、其餘 → None（單位＝code point）。"""
+    n = len(path)
+    if n > _LEN_FAIL:
+        return "fail"
+    if n > _LEN_WARN:
+        return "warn"
+    return None
 
 
 def _ntfs_seg_bad(path: str) -> str | None:
@@ -67,11 +90,20 @@ def _tracked_files() -> list[str]:
 def main() -> int:
     files = _tracked_files()
     violations: list[str] = []
+    warnings: list[str] = []
 
     for f in files:
         reason = _ntfs_seg_bad(f)
         if reason:
             violations.append(f"NTFS 不相容檔名：{f} — {reason}")
+        level = _length_level(f)
+        if level == "fail":
+            violations.append(
+                f"路徑過長：{f}（{len(f)} > {_LEN_FAIL} 字元；"
+                f"Windows MAX_PATH=260 扣除 clone 前綴預留後超限）"
+            )
+        elif level == "warn":
+            warnings.append(f"路徑偏長：{f}（{len(f)} > {_LEN_WARN} 字元，>{_LEN_FAIL} 將擋下）")
 
     # 大小寫碰撞：全量 tracked 路徑 lowercase 分組，同組 >1 即互撞
     by_lower: dict[str, list[str]] = {}
@@ -81,6 +113,9 @@ def main() -> int:
         if len(group) > 1:
             joined = "」「".join(sorted(group))
             violations.append(f"NTFS 大小寫碰撞：「{joined}」僅大小寫不同（checkout 互相覆蓋）")
+
+    for w in warnings:
+        print(f"⚠ {w}", file=sys.stderr)
 
     if violations:
         for v in violations:
@@ -92,7 +127,11 @@ def main() -> int:
         )
         return 1
 
-    print(f"✅ NTFS 檔名檢查通過（{len(files)} 個 tracked 路徑，0 違規）")
+    max_len = max((len(f) for f in files), default=0)
+    print(
+        f"✅ NTFS 檔名檢查通過（{len(files)} 個 tracked 路徑，0 違規；"
+        f"最長 {max_len} 字元，warn>{_LEN_WARN}/fail>{_LEN_FAIL}）"
+    )
     return 0
 
 

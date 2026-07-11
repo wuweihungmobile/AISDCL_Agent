@@ -14,18 +14,22 @@ DEF-06-001（P3）= 雙軌 ci-gate 收斂行未印逐軌 `N passed`，零信任�
 """
 from __future__ import annotations
 
-import shutil
 import subprocess
 from pathlib import Path
 
 import pytest
 
+from scripts import bash_probe  # isort: skip（首方/三方分組隨 cwd 而異，跳過排序消除歧義）
+
 # scripts/tests/ → scripts/ → AISDLC_SDD（REPO_ROOT）
 REPO_ROOT = Path(__file__).resolve().parents[2]
 HELPER = REPO_ROOT / "scripts" / "pytest_passed_count.sh"
 
+# WSL 佔位 bash（System32）吃不下 Windows 路徑引數 → 紅燈而非 skip（第五輪 DEF-101 P3）
+_BASH = bash_probe.usable_bash()
+
 pytestmark = pytest.mark.skipif(
-    shutil.which("bash") is None, reason="pytest_passed_count.sh 為 bash 腳本，需 bash 解譯器"
+    _BASH is None, reason="pytest_passed_count.sh 為 bash 腳本，需可用 bash（非 WSL 佔位）"
 )
 
 
@@ -34,7 +38,7 @@ def _count(stdin_text: str) -> str:
     # 以 cwd=REPO_ROOT + 相對 posix 路徑呼叫，繞過 Windows→bash 反斜線路徑屏障
     # （與 test_ci_gate_version_resolution.py 同手法）。
     proc = subprocess.run(
-        ["bash", "scripts/pytest_passed_count.sh"],
+        [_BASH, "scripts/pytest_passed_count.sh"],
         cwd=str(REPO_ROOT),
         input=stdin_text,
         capture_output=True,

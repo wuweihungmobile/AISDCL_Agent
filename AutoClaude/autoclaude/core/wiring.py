@@ -114,7 +114,8 @@ def _build_plugin_set(
       註冊：pre_run_validator, hotkey?, cross_step_validator, token_guard,
             global_goal_anchor, playbook_persistence, sdd_governance, fast_path,
             notification, knowledge_base, preference_memory, goal_synthesis,
-            goal_progress, convergence, evolution, goto_counter, checkpoint
+            goal_progress, rtm_writeback, translation_learner, convergence,
+            evolution, goto_counter, checkpoint
       非註冊：mutation_service（注入 PlaybookKernel）
     """
     # SD_04 W2 三方審查 Dev-W2-Crit-1 / Arch-W2-Maj-1：id_resolver SSOT

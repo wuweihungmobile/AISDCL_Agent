@@ -61,6 +61,14 @@ fi
 #   2. 任一段去副檔名後（不分大小寫）為 Windows 保留裝置名 CON/PRN/AUX/NUL/COM1~9/LPT1~9
 #   3. 大小寫碰撞：新增路徑 lowercase 後與既有 tracked 路徑重複但原字串不同
 #      （NTFS 大小寫不敏感 → checkout 時兩檔互相覆蓋）
+#   4. MAX_PATH 保守長度閘（DEF-101-039）：Windows 未開 core.longpaths 時絕對路徑上限
+#      MAX_PATH=260 UTF-16 單位（含結尾 NUL，可用 259）；預留 clone 前綴 59 字元＋NUL
+#      （C:\Users\<user>\...\<repo>\，259−200＝59）→ repo 相對路徑 >200 字元擋下、
+#      >180 字元預警。長度＝code point 數：以「刪去 UTF-8 連續位元組（0x80-0xBF）後
+#      的位元組數」計，locale 無關（第五輪 DEF-101 修正：${#f} 在 C locale——GUI git
+#      client 常見——退化為位元組數，CJK 路徑 67 字元即誤擋，且與 CI 版 len() 分歧）。
+# 另註：merge/rebase/cherry-pick 不經 pre-commit（git 無此 hook 觸發點），本閘 1~4 項
+# 皆由 root-infra-ci（全變更觸發）之 check_ntfs_paths.py 雲端兜底。
 # bash 3.2 相容：無 assoc array / ${var,,}，以 case pattern + tr + grep -iFx 實作。
 _ntfs_seg_bad() {  # $1=完整路徑；有問題 → stdout 印原因並回 0，乾淨 → 回 1
   local p="$1" rest seg base up
@@ -101,6 +109,21 @@ if added="$(git -c core.quotepath=false diff --cached --name-only --no-renames -
     tracked=""   # 全 repo tracked 清單只取一次（大小寫碰撞比對用）
     while IFS= read -r f; do
       [ -z "$f" ] && continue
+      # MAX_PATH 保守長度閘（A3 第 4 項，DEF-101-039）：獨立於檔名字元檢查，先行必跑。
+      # 前濾零成本短路：${#f} 任一 locale 下 ≥ code point 數（UTF-8 locale＝相等、
+      # C locale＝位元組數只多不少），≤180 必然合規、免 spawn（現況最長 142 → 全量零 spawn）；
+      # 超標者才進精確 code point 管線＝刪去 UTF-8 連續位元組後的位元組數
+      # （locale 無關，與 CI 版 len() 一致）
+      if [ "${#f}" -gt 180 ]; then
+        flen=$(( $(printf '%s' "$f" | LC_ALL=C tr -d '\200-\277' | wc -c) ))
+        if [ "$flen" -gt 200 ]; then
+          echo "[pre-commit dispatcher] ❌ 路徑過長（${flen} > 200 字元）：${f}" >&2
+          echo "                        Windows MAX_PATH=260 扣除 clone 前綴預留後超限 — 修法：縮短檔名或目錄層級" >&2
+          rc=1
+        elif [ "$flen" -gt 180 ]; then
+          echo "[pre-commit dispatcher] ⚠ 路徑偏長（${flen} > 180 字元，>200 將擋下）：${f}" >&2
+        fi
+      fi
       if reason="$(_ntfs_seg_bad "$f")"; then
         echo "[pre-commit dispatcher] ❌ NTFS 不相容檔名：$f — $reason" >&2
         echo "                        修法：改名後重新暫存（git mv / git rm --cached 舊名）" >&2

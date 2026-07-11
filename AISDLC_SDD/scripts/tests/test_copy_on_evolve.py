@@ -29,13 +29,18 @@ from pathlib import Path
 
 import pytest
 
+from scripts import bash_probe  # isort: skip（首方/三方分組隨 cwd 而異，跳過排序消除歧義）
+
 # scripts/tests/ → scripts/ → AISDLC_SDD
 REPO_ROOT = Path(__file__).resolve().parents[2]
 HELPER = REPO_ROOT / "scripts" / "copy_on_evolve.sh"
 
+# WSL 佔位 bash（System32）吃不下 Windows 路徑引數 → 紅燈而非 skip（第五輪 DEF-101 P3）
+_BASH_PLAIN = bash_probe.usable_bash()
+
 pytestmark = pytest.mark.skipif(
-    shutil.which("bash") is None or shutil.which("tar") is None or shutil.which("git") is None,
-    reason="copy_on_evolve.sh 為 bash 腳本且依賴 git archive + GNU tar",
+    _BASH_PLAIN is None or shutil.which("tar") is None or shutil.which("git") is None,
+    reason="copy_on_evolve.sh 為 bash 腳本（需可用 bash，非 WSL 佔位）且依賴 git archive + GNU tar",
 )
 
 
@@ -70,7 +75,7 @@ def _run(repo: Path, *args: str) -> subprocess.CompletedProcess:
     if not local.exists():
         shutil.copy(str(HELPER), str(local))
     return subprocess.run(
-        ["bash", "_coe.sh", *args],
+        [_BASH_PLAIN, "_coe.sh", *args],
         cwd=str(repo), capture_output=True, text=True, encoding="utf-8", errors="replace",
         timeout=60, env=_clean_git_env(),
     )
@@ -235,7 +240,10 @@ def _bash_with_python() -> str | None:
                 c = up / sub
                 if c.exists():
                     candidates.append(str(c))
-    candidates.append("bash")
+    # 裸 bash 只在非 WSL 佔位（System32）時列為候選——WSL bash 的 python 是 WSL 側的，
+    # 跑不了 Windows 路徑引數（第五輪 DEF-101 P3，與 bash_probe 同判準）
+    if _BASH_PLAIN is not None:
+        candidates.append(_BASH_PLAIN)
     for b in candidates:
         try:
             r = subprocess.run([b, "-c", "command -v python"], capture_output=True,
@@ -312,7 +320,7 @@ def test_auto_appends_gitignore_block_on_evolve_def_59_001(repo: Path):
     （improving_59 建 v0.23 即實證人工漏補帶紅）。與 DEF-58-002 戳記同步**同根因家族**。
     移除硬化（auto-append 區塊）→ 新版 block 不存在，本 assert 立即轉紅。並驗 block 不重複。
     """
-    bash = _bash_with_python() or shutil.which("bash")
+    bash = _bash_with_python() or _BASH_PLAIN
     if bash is None:
         pytest.skip("找不到可用 bash")
     _setup_version_repo_with_scripts(repo)

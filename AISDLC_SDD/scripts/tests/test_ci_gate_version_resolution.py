@@ -16,18 +16,22 @@ WHY（測意圖非僅行為，Rule 9）：
 from __future__ import annotations
 
 import re
-import shutil
 import subprocess
 from pathlib import Path
 
 import pytest
 
+from scripts import bash_probe  # isort: skip（首方/三方分組隨 cwd 而異，跳過排序消除歧義）
+
 # scripts/tests/ → scripts/ → AISDLC_SDD（REPO_ROOT，即 ci-gate.sh 的 REPO_ROOT）
 REPO_ROOT = Path(__file__).resolve().parents[2]
 CI_GATE = REPO_ROOT / "scripts" / "ci-gate.sh"
 
+# WSL 佔位 bash（System32）吃不下 Windows 路徑引數 → 紅燈而非 skip（第五輪 DEF-101 P3）
+_BASH = bash_probe.usable_bash()
+
 pytestmark = pytest.mark.skipif(
-    shutil.which("bash") is None, reason="ci-gate.sh 為 bash 腳本，需 bash 解譯器"
+    _BASH is None, reason="ci-gate.sh 為 bash 腳本，需可用 bash（非 WSL 佔位）"
 )
 
 
@@ -41,7 +45,7 @@ def _dry_run(overrides: dict[str, str] | None = None) -> list[str]:
     assignments = {"SDD_GATE_DRY_RUN": "1", **(overrides or {})}
     prefix = " ".join(f"{k}={v}" for k, v in assignments.items())
     proc = subprocess.run(
-        ["bash", "-c", f"{prefix} bash scripts/ci-gate.sh"],
+        [_BASH, "-c", f"{prefix} bash scripts/ci-gate.sh"],
         cwd=str(REPO_ROOT),
         capture_output=True,
         text=True,
