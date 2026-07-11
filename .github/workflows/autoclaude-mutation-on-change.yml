@@ -106,7 +106,7 @@ jobs:
       # 不產生空 artifact 假象。retention 90 天為 GitHub 上限，殘餘限制見檔頭。
       - name: Upload mutation history (跨 run 累積持久化)
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: mutation-history
           path: AutoClaude/.mutation_history.jsonl
@@ -114,7 +114,7 @@ jobs:
           if-no-files-found: ignore
       - name: Upload mutation report (本次證據)
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: mutation-on-change-report-${{ github.run_id }}
           path: |

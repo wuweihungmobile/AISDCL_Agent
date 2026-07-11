@@ -63,7 +63,7 @@ jobs:
       - name: Upload arch-fitness findings
         if: always()
         continue-on-error: true   # observability-only；artifact 配額耗盡不得判紅
-        uses: actions/upload-artifact@v5
+        uses: actions/upload-artifact@v7
         with:
           name: ci-arch-fitness-${{ github.run_id }}
           # glob 涵蓋雙軌（凍結基線 v0.01 + LATEST）：ci-gate.sh 對每個受測版各產一份
