@@ -30,6 +30,8 @@ venv/
 .vscode/
 *.swp
 .DS_Store
+Thumbs.db
+desktop.ini
 
 # 大型模型快取（GB 級，GitHub 限制）
 .model_cache/

@@ -1,7 +1,8 @@
 {
   "$schema": "https://json.schemastore.org/claude-code-settings.json",
-  "description": "AISDLC-SDD SDD 治理 Hooks — SessionStart 注入 FSM bootstrap + 當前狀態規則；PreToolUse/PostToolUse 走 context-ledger 守門（版本中性，各版同構；DEF-43-008 起不再滯留 v0.01 標頭）。",
+  "description": "AISDLC-SDD SDD 治理 Hooks — SessionStart 注入 FSM bootstrap + 當前狀態規則；PreToolUse/PostToolUse 走 context-ledger 守門（版本中性，各版同構；DEF-43-008 起不再滯留 v0.01 標頭）。hook command 以 python -c shim 錨定專案根（python 自行讀 CLAUDE_PROJECT_DIR，不經 shell 展開故 Windows cmd 亦可用；缺檔 fail-open exit 0）——修復 cwd≠專案根時 python 缺檔 exit 2 誤觸 PreToolUse deny 之 P0（四方複審第四輪）。",
   "env": {
+    "PYTHONUTF8": "1",
     "SDD_SUBAGENT_CONTRACT": "soft",
     "SDD_PATTERN_MATCH_THRESHOLD": "0.75",
     "SDD_MULTIMODAL_BACKEND": "session"
@@ -12,7 +13,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python .claude/hooks/session_start.py",
+            "command": "python -c \"import os,sys,runpy; r=os.environ.get('CLAUDE_PROJECT_DIR') or os.getcwd(); p=os.path.join(r,*sys.argv[1].split('/')); os.path.isfile(p) or sys.exit(0); os.chdir(r); sys.argv=[p]+sys.argv[2:]; runpy.run_path(p,run_name='__main__')\" .claude/hooks/session_start.py",
             "timeout": 30
           }
         ]
@@ -24,7 +25,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python .claude/hooks/context_ledger_pre.py",
+            "command": "python -c \"import os,sys,runpy; r=os.environ.get('CLAUDE_PROJECT_DIR') or os.getcwd(); p=os.path.join(r,*sys.argv[1].split('/')); os.path.isfile(p) or sys.exit(0); os.chdir(r); sys.argv=[p]+sys.argv[2:]; runpy.run_path(p,run_name='__main__')\" .claude/hooks/context_ledger_pre.py",
             "timeout": 10
           }
         ]
@@ -36,7 +37,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python .claude/hooks/context_ledger_post.py",
+            "command": "python -c \"import os,sys,runpy; r=os.environ.get('CLAUDE_PROJECT_DIR') or os.getcwd(); p=os.path.join(r,*sys.argv[1].split('/')); os.path.isfile(p) or sys.exit(0); os.chdir(r); sys.argv=[p]+sys.argv[2:]; runpy.run_path(p,run_name='__main__')\" .claude/hooks/context_ledger_post.py",
             "timeout": 10
           }
         ]

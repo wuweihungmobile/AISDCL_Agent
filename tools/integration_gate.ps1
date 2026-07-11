@@ -23,6 +23,14 @@ $failures = @()
 $passCount = 0   # P2-1：通過段數（含 cc-switch 已安裝段）
 $skipCount = 0   # P2-1：SKIP 段數（cc-switch 未安裝時 = 1）
 
+# venv 提示：各節都靠裸 python，未啟用 venv 就直接失敗提示（勝過各節逐一噴錯）
+# —— 與 tools/integration_gate.sh 的 `command -v python` 前置守門對稱
+# （作法同 AutoClaude/tools/local_ci_gate.ps1 的 Get-Command python fail-fast）。
+if (-not (Get-Command python -ErrorAction SilentlyContinue)) {
+  Write-Host '❌ 找不到 python — 請先啟用 venv：.venv\Scripts\Activate.ps1（見 ONBOARDING.md §3）' -ForegroundColor Red
+  exit 1
+}
+
 # --- git hooks liveness 偵測（警告不擋）---
 # repo 搬移/改名或未安裝時 dispatcher hooks 會靜默失效（實證）；CI 環境（$env:CI 有值）
 # 跳過（GitHub/act 環境無 hooks 屬正常）。與 AutoClaude/tools/local_ci_gate.ps1 對稱。
@@ -62,6 +70,10 @@ if (-not $env:CI) {
 function Invoke-Section {
     param([string]$Label, [scriptblock]$Body)
     Write-Host "`n==> $Label" -ForegroundColor Cyan
+    # 殘值 fail-open 防護：$Body 內指令若未更新 $LASTEXITCODE（如檔案不存在拋例外），
+    # 前一段的殘值 0 會讓本段假 PASS → 每段執行前強制重置
+    # （與姊妹檔 AutoClaude/tools/local_ci_gate.ps1 Invoke-Gate 同一防護）。
+    $global:LASTEXITCODE = 0
     & $Body
     if ($LASTEXITCODE -ne 0) {
         $script:failures += "$Label (exit=$LASTEXITCODE)"

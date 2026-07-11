@@ -75,6 +75,22 @@ AISDLC_SDD_v0.01/arch-fitness.json
 # 本機 CI 閘門 / chaos 暫時產物（ci-gate.sh / chaos sweep 重生，不追蹤）
 AISDLC_SDD_v0.01/chaos-report.json
 
+# ── v0.02~v0.04 arch-fitness.json 排除（跨平台抖動修復）──
+# 此三版複製於 per-version 排除政策（DEF-11-001，v0.05 起）建立之前，arch-fitness.json
+# 誤入庫殘留；其 evidence 欄嵌機器絕對路徑（Windows=D:\...、macOS=/Users/...），
+# 任一機器重生即全檔 diff 抖動。無任何程式/測試消費入庫副本（CI artifact 於 run 中重生），
+# 比照 v0.01 / v0.05~v0.30 既定政策出庫（git rm --cached，磁碟檔保留）。
+AISDLC_SDD_v0.02/arch-fitness.json
+AISDLC_SDD_v0.03/arch-fitness.json
+AISDLC_SDD_v0.04/arch-fitness.json
+
+# ── v0.02~v0.04 findings.json 同族殘留排除（四方複審第四輪 Architect 終裁 (b)）──
+# 同為 arch_fitness SENSE 每次重生輸出（v0.01 於上方明文忽略、v0.05+ 由 build/reports/
+# 整段排除），此三版複製於政策建立前誤入庫；比照 arch-fitness.json 出庫（磁碟檔保留）。
+AISDLC_SDD_v0.02/build/reports/fse/findings*.json
+AISDLC_SDD_v0.03/build/reports/fse/findings*.json
+AISDLC_SDD_v0.04/build/reports/fse/findings*.json
+
 # ── v0.05 runtime 取證產物排除（DEF-11-001 修正版：Copy-on-Evolve 只入真框架源碼）──
 # build/reports/ 全為運行時取證輸出（abort/drift/fsm/test-analysis/formal/…），
 # 由 ci-gate.sh / chaos / arch_fitness / FSM runtime 每次跑都重生（輸出非輸入），

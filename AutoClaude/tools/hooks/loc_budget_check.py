@@ -48,7 +48,14 @@ except ImportError as exc:  # pragma: no cover — 安全 fallback
 
 
 def read_hook_payload() -> dict:
-    raw = sys.stdin.read().strip()
+    # zh-TW Windows pipe 預設 cp950：裸 sys.stdin.read() 遇含中文的 UTF-8 payload 會拋
+    # UnicodeDecodeError → 阻斷級 hook 靜默失效。改讀 bytes 端以 UTF-8+replace 解碼；
+    # 無 buffer（如測試以 StringIO 替身）時回退文字端。
+    stdin_buffer = getattr(sys.stdin, "buffer", None)
+    if stdin_buffer is not None:
+        raw = stdin_buffer.read().decode("utf-8", "replace").strip()
+    else:
+        raw = sys.stdin.read().strip()
     if not raw:
         return {}
     try:
@@ -77,13 +84,15 @@ def check_python_file(rel: Path) -> int:
     tier, budget = classify_file(rel)
     if loc > ABSOLUTE_LIMIT:
         print(
-            f"[loc_budget_check] WARN: '{rel.as_posix()}' loc={loc} 超絕對紅線 {ABSOLUTE_LIMIT}（ADR-SD07-001）。",
+            f"[loc_budget_check] WARN: '{rel.as_posix()}' loc={loc} "
+            f"超絕對紅線 {ABSOLUTE_LIMIT}（ADR-SD07-001）。",
             file=sys.stderr,
         )
         return 1
     if loc > budget:
         print(
-            f"[loc_budget_check] WARN: '{rel.as_posix()}' loc={loc} 超 tier '{tier}' budget {budget}（ADR-SD07-001）。",
+            f"[loc_budget_check] WARN: '{rel.as_posix()}' loc={loc} "
+            f"超 tier '{tier}' budget {budget}（ADR-SD07-001）。",
             file=sys.stderr,
         )
         return 1
@@ -117,7 +126,8 @@ def check_special_file(rel: Path) -> int:
         remaining = max_lines - actual
         print(
             f"[loc_budget_check] WARN: '{rel_posix}' 行數 {actual} ≥ 預警閾值 {warn_threshold} "
-            f"（紅線 {max_lines}；剩 {remaining} 行 buffer）。請考慮下沉至 docs/05_development/sprint_history.md "
+            f"（紅線 {max_lines}；剩 {remaining} 行 buffer）。"
+            f"請考慮下沉至 docs/05_development/sprint_history.md "
             f"§1.x（W 期間骨架先行 SOP）或對應 docs/06_quality/。",
             file=sys.stderr,
         )

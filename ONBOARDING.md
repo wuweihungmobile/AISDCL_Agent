@@ -39,7 +39,7 @@ bash tools/bootstrap.sh
 powershell -ExecutionPolicy Bypass -File tools/bootstrap.ps1
 ```
 
-bootstrap 會：① 檢查 Python ≥3.11 → ② 建立 `.venv`（有 uv 就用 uv 加速）→ ③ 安裝 AutoClaude（editable, `[dev,notifications,lint]`，含 import-linter，`lint-imports` 出廠即可用）+ AISDLC_SDD CI 依賴 → ④ 印出後續指引。git hooks 另以 §6 對照表的安裝腳本設定（任一支即可，兩子專案閘門同時生效，見 §6 dispatcher 說明）。讀取 [.python-version](.python-version) 時，三段版號（如 `3.11.9`）會自動截為 major.minor 比對，新建 `.venv` 選定直譯器與 pinned 版本不一致時印警告（`.sh`/`.ps1` 兩版對等）；既有 `.venv` 一律沿用、不做版本檢查（需重建請先刪除 `.venv`）。
+bootstrap 會：① 檢查 Python ≥3.11 → ② 建立 `.venv`（有 uv 就用 uv 加速）→ ③ 安裝 AutoClaude（editable, `[dev,notifications,lint]`，含 import-linter，`lint-imports` 出廠即可用）+ AISDLC_SDD CI 依賴 → ④ 印出後續指引。git hooks 另以 §6 對照表的安裝腳本設定（任一支即可，兩子專案閘門同時生效，見 §6 dispatcher 說明）。讀取 [.python-version](.python-version) 時，三段版號（如 `3.11.9`）會自動截為 major.minor 比對，新建 `.venv` 選定直譯器與 pinned 版本不一致時印警告（`.sh`/`.ps1` 兩版對等）；既有 `.venv` 沿用前會先驗證**平台形狀**（POSIX 需 `bin/python`、Windows 需 `Scripts\python.exe`；跨平台共用工作目錄時以對方平台建的 `.venv` 會被 fail-fast 擋下並提示刪除重建），版本不做檢查（需重建請先刪除 `.venv`）。
 
 ---
 
@@ -61,7 +61,7 @@ source .venv/bin/activate
 
 ## 4. 啟動 Claude Code（重要）
 
-- **CLI**：先在終端機 `source .venv/bin/activate`（Mac）或 `Activate.ps1`（Windows），**再**於 **monorepo 根目錄**啟動 `claude`。這樣 hooks 子行程才繼承到 venv 的 `python`；勿於子目錄啟動——根層 `.claude/settings.json` 的 hooks 以相對路徑解析（Windows cmd 不展開 `${VAR}` 的相容性取捨），cwd 非專案根時會靜默失效。
+- **CLI**：先在終端機 `source .venv/bin/activate`（Mac）或 `Activate.ps1`（Windows），**再**於 **monorepo 根目錄**啟動 `claude`。這樣 hooks 子行程才繼承到 venv 的 `python`，且根層 `.claude/settings.json` 的治理 hooks 才會載入（於子目錄啟動則根層 hooks 整組不載入）。hooks 指令已改以 python -c shim 錨定 `CLAUDE_PROJECT_DIR`（四方複審第四輪 P0 修復）：session 中即使 shell cwd 移到子目錄，hooks 仍正確解析；環境變數缺失時缺檔 fail-open（靜默失效，不再誤觸 PreToolUse deny 鎖死全部工具）。契約鎖：`AISDLC_SDD/scripts/tests/test_hook_wiring_cwd_safety.py`。
 - **VSCode 擴充**：右下角 Python 直譯器選 `.venv`；整合終端機會自動啟用 venv。
 
 驗證 hooks 正常（未報 `python not found`）：重開一個 session，SessionStart 若印出 `[SDD-ROUTER] SDD 治理 hooks 休眠中…` 即為正常（純 AutoClaude 工作時 hooks 本應休眠）。要對 SDD 框架做 dogfooding 時才 `export SDD_ACTIVE_VERSION=<版本號>`（值＝當前最新版號，一律以 [AISDLC_SDD/FRAMEWORK_STATUS.md](AISDLC_SDD/FRAMEWORK_STATUS.md) 為唯一真相源；本文撰寫時為 `0.30`）。
@@ -80,6 +80,7 @@ source .venv/bin/activate
 | cd 進 repo 後 pyenv shim 報 `version 3.11 is not installed` | [.python-version](.python-version) 只寫兩位版號 `3.11`：uv 與 Windows `py` launcher 原生支援，但 **pyenv 需 ≥ 2.4** 才支援前綴解析（pyenv-win 視版本而定） | 升級 pyenv ≥ 2.4；或先 `pyenv install 3.11.x` 並確保該版可被解析；或改用 uv |
 | 全新 Windows 11 跑 `.venv\Scripts\Activate.ps1` 報「因為這個系統上已停用指令碼執行」 | Windows 預設 `ExecutionPolicy=Restricted` 擋所有 `.ps1`（bootstrap 本身以 `-ExecutionPolicy Bypass` 呼叫故能跑，**只有日常啟用 venv 會卡**） | 一次性放行：`Set-ExecutionPolicy RemoteSigned -Scope CurrentUser` |
 | 文件裡的路徑是 `d:\CursorProject\...` | 文件在 Windows 上撰寫 | 純說明性路徑，忽略即可；實際指令請用相對路徑 |
+| GUI 發起的 git commit（如 VSCode Source Control 按鈕）被 hooks 擋下：`python: command not found`（mac）或缺 ruff 的系統 Python（Windows） | GUI App 不繼承終端機 venv PATH，hooks fail-loud 擋下 | 從已啟用 venv 的終端機啟動編輯器（如 `code .`），或改用終端機 commit |
 
 ---
 
@@ -92,10 +93,10 @@ source .venv/bin/activate
 | 裝 AutoClaude git hooks ※ | `AutoClaude\tools\install_git_hooks.ps1` | `AutoClaude/tools/install_git_hooks.sh` |
 | act 跑真 CI（Docker） | `AutoClaude\tools\run_act.ps1` | `AutoClaude/tools/run_act.sh` |
 | 整合層閘門 | `tools\integration_gate.ps1` | `tools/integration_gate.sh` |
-| AISDLC_SDD 本機閘門 | `AISDLC_SDD\scripts\ci-gate.ps1` ⚠️（僅 v0.01 基線，見下） | `AISDLC_SDD/scripts/ci-gate.sh`（既有） |
+| AISDLC_SDD 本機閘門 | `AISDLC_SDD\scripts\ci-gate.ps1`（偵測到 Git Bash 即薄委派 `ci-gate.sh`＝完整對等；無 Git Bash 才退回 v0.01 3-stage fallback 並警告，見下） | `AISDLC_SDD/scripts/ci-gate.sh`（既有） |
 | 裝 AISDLC_SDD git hooks ※ | `AISDLC_SDD\scripts\install-hooks.ps1` | `AISDLC_SDD/scripts/install-hooks.sh`（既有） |
 
-> ⚠️ **`ci-gate.ps1` 不是 `ci-gate.sh` 的完整對等**：ps1 僅測 v0.01 凍結基線（3 stage）；`.sh` 測「凍結基線 v0.01 ＋ LATEST（動態最高版）＋ `scripts/tests/` 共享 infra ＋ 多項 lint 硬閘」。Windows 上要拿完整閘門綠燈，請於 Git Bash（Git for Windows 內建）執行 `bash scripts/ci-gate.sh`。
+> ⚠️ **`ci-gate.ps1` 的覆蓋範圍取決於有無 Git Bash**：找得到 bash.exe（排除 WSL `System32\bash.exe`）時薄委派 `bash scripts/ci-gate.sh`，覆蓋與 `.sh` 完整對等（凍結基線 v0.01 ＋ LATEST 動態最高版 ＋ `scripts/tests/` 共享 infra ＋ 多項 lint 硬閘）；找不到才退回僅測 v0.01 的 3-stage fallback 並印黃色警告。Git for Windows 內建 Git Bash，正常安裝下皆走完整對等路徑。
 
 > ℹ️ **bash-only 工具（無 `.ps1` 對等）**：`AISDLC_SDD/scripts/act-ci.sh`、`AISDLC_SDD/scripts/copy_on_evolve.sh`、`AISDLC_SDD/scripts/pytest_passed_count.sh`、`AutoClaude/tools/run_mutmut_in_docker.sh`、`AutoClaude/tools/sd06_w3_staging_dryrun.sh`、各版 `tools/verify_traceability.sh` —— Windows 上以 Git Bash 執行（`bash xxx.sh`）。
 
@@ -108,6 +109,7 @@ source .venv/bin/activate
 - **已知縫隙**：merge / rebase 自動產生的 commit 天然繞過 pre-commit 家族（git 行為，非本 repo 缺陷），由 pre-push 兜底把關。另一縫隙「rename 移出子專案 fail-open」（`git mv AutoClaude/x docs/x` 時 rename 偵測只列新路徑、來源子專案閘門靜默漏跑）已於四方複審第三輪修復——dispatcher diff 加 `--no-renames`（DEF-101-008）。
 - **pre-commit 新增兩道閘（四方複審第三輪，commit 可能因此被攔的新原因）**：① **NTFS 檔名閘**——新增檔名含 Windows 不允許字元（`< > : " | ? *`／控制字元）、保留裝置名（CON/PRN/AUX/NUL/COM1~9/LPT1~9）、尾隨空白/句點、或與既有路徑僅大小寫不同（NTFS 碰撞）會被 rc=1 擋下，改名後重新暫存即可（DEF-101-011）；② **根層基建 leg**——commit 涉及根層 `tools/`、`.github/`、`.gitattributes`、`.editorconfig` 時，對變更到的 `.sh`／無副檔名 hook 檔跑 `bash -n` 語法檢查，語法錯誤擋下（DEF-101-012）。
 - **執行權限政策**：「755 入庫」範圍**僅指 `tools/git-hooks/` 的 hook 檔**（git 直接執行）；其他 `.sh` 工具一律以 `bash xxx.sh` 呼叫，不依賴 executable bit。
+- **雙腳本對等機械守護**：上表三對 `.sh`/`.ps1`（bootstrap／integration_gate／local_ci_gate）的 step 標籤清單由 `tools/check_script_parity.py` 於 `root-infra-ci` 機械比對——改任一邊的 step 須同步另一邊，否則 CI 紅。其餘三對（install_git_hooks、AISDLC_SDD install-hooks、run_act）無可抽取的標籤錨點，**暫無機械比對**——改任一邊須人工同步另一邊（明文侷限，見 check_script_parity.py docstring）。
 
 ### 6.1 CI workflows（GitHub Actions，根層接線）
 
@@ -123,7 +125,7 @@ source .venv/bin/activate
 | `aisdlc-sdd-artifact-cleanup.yml` | `AISDLC_SDD/.github/workflows/artifact-cleanup.yml` |
 | `aisdlc-sdd-drift-daily.yml` | `AISDLC_SDD/.github/workflows/drift-daily.yml` |
 | `aisdlc-sdd-fsm-chaos-nightly.yml` | `AISDLC_SDD/.github/workflows/fsm-chaos-nightly.yml` |
-| `root-infra-ci.yml` | （四方複審第三輪新增，非遷移）根層基建守門：paths＝`tools/**`、`.gitattributes`、`.editorconfig`、`.github/workflows/**`、`.github/dependabot.yml` 觸發，bash -n＋pwsh parse＋EOL 三道檢查（DEF-101-012） |
+| `root-infra-ci.yml` | （四方複審第三輪新增，非遷移）根層基建守門：**全變更觸發**（NTFS 檔名閘須守任意路徑，paths 白名單必留盲區），五道檢查——bash -n＋pwsh parse/BOM（active .ps1：根層 `tools/`＋`AutoClaude/tools/`＋`AISDLC_SDD/scripts/`＋LATEST 版，凍結版排除）＋EOL＋NTFS 檔名閘（`tools/check_ntfs_paths.py`，pre-commit NTFS 閘的 CI 對等）＋腳本對等閘（`tools/check_script_parity.py`：三對 `.sh`/`.ps1` step 標籤清單＋pytest 釘選雙處同版）（DEF-101-012、四方複審第四輪擴充） |
 
 `dependabot.yml` 與 `.actrc` 亦已上移根層；`run_act`（AutoClaude 側）與 `act-ci.sh`（AISDLC_SDD 側）現於 **monorepo 根**執行、讀根層 `.actrc`。
 
@@ -140,7 +142,7 @@ PYTHONUTF8=1 lint-imports             # 架構約束（8 kept / 0 broken）
 bash scripts/ci-gate.sh               # 本機 CI 閘門（pytest + arch_fitness）
 ```
 
-> 註：bootstrap 出廠環境（未裝 `[postgres]` 等選配）full pytest 實測基線約 **3,528~3,529 passed / 181~182 skipped**（總數 3,710；passed/skipped 邊界差 ±個位數，視外部工具與選配依賴現況而定；與根層 CLAUDE.md 記載的 2026-07-09 實測基線 3,529 / 181 一致）；skipped 中屬選配依賴缺席者（PG DSN 未設／sqlalchemy 與 `[postgres]` 未裝／claude_agent_sdk 未裝）為預期，非測試退化。
+> 註：bootstrap 出廠環境（未裝 `[postgres]` 等選配）full pytest 實測基線約 **3,542~3,543 passed / 181~182 skipped**（總數 3,724；passed/skipped 邊界差 ±個位數，視外部工具與選配依賴現況而定；與根層 CLAUDE.md 記載的 2026-07-11 實測基線 3,543 / 181 一致；四方複審第四輪新增 14 case：`tests/tools/hooks/test_hooks_stdin_utf8.py` 6 ＋ `tests/utils/test_notifier.py` 8 起算入基線）；skipped 中屬選配依賴缺席者（PG DSN 未設／sqlalchemy 與 `[postgres]` 未裝／claude_agent_sdk 未裝）為預期，非測試退化。AISDLC_SDD `ci-gate.sh` 的逐軌 passed 計數對 **docker daemon 可用性**敏感（daemon 停用時 v0.01／v0.30 各 -3＝`test_phase_h` 的 docker 場景 SKIP），±3 屬環境因素非退化。
 
 ---
 
@@ -192,5 +194,9 @@ macOS 若要手動或半自動跑 nightly，可先參考以下 `launchd` 範本�
 | **mutation artifact 累積鏈 90 天上限**（GitHub retention 上限） | 連續 90 天無 token_guard 源碼變動觸發 → GitHub 側 `mutation-history` 過期、累積歸零重累 | Windows 本機 nightly 為另一獨立累積點（兩者互不同步）；限制已註記於 workflow 檔頭（DEF-101-021） |
 | **`closure_evidence._run_git` 自身繼承呼叫端 env** | read-only git 查詢，理論上可被敵意 GIT_DIR 導向；實害受限 | 防線＝hook 層 `env -u` 清洗；縱深防禦（函式內自清）留待後續（DEF-101-022） |
 | **根層基建 bash -n leg 檢查「工作樹版本」而非 staged blob** | staged 壞＋工作樹好的罕見組合會本機假綠入庫 | 雲端 `root-infra-ci.yml` 對 push 後內容機械攔回；與既有 ruff-on-worktree 慣例一致（DEF-101-025） |
+| **AutoClaude PTY 模式在 macOS 無 POSIX 實作**（`wexpect` 為 win32 專屬，無 pexpect 分支） | 引擎在 mac 一律走 subprocess fallback，部分互動提示可能無法自動回應 | 改用 `executor.backend="sdk"`（Claude Agent SDK，opt-in），或接受 subprocess 模式 |
+| **凍結版 v0.01 `post_commit_drift.py` 在 Windows 無 SIGALRM、亦無 thread guard**（docstring 宣稱 thread guard 但實作缺席，docstring 與實作不符） | 該 hook 在 Windows 無 2s 預算保護（advisory hook 卡住時無界） | v0.30 已補 thread guard；凍結版依紀律不回改 |
+| **macOS 桌面通知 plyer 後端需 `pyobjus`**（`notifications` extra 未宣告，刻意不加重依賴） | plyer 在 mac 必然 `ModuleNotFoundError` 失敗 | **已支援**：notifier 內建 darwin `osascript` fallback 自動承接（ESCALATION 通知不再靜默降級 log-only）；log 仍為最後手段 |
+| **凍結版 v0.01~v0.29 settings.json 無 `PYTHONUTF8` env、hook command 仍為裸相對路徑**（僅 v0.30／根層已改 shim；凍結版依紀律不回改，DEF-101 凍結版豁免家族） | 直啟凍結版子專案 session 時：① hooks 在 zh-TW Windows（cp950）的 stdin/stdout 解碼風險不受 env 保護；② cwd 漂移時裸相對路徑同樣有 exit-2 deny-lock 風險（DEF-101-028 同場景） | 根層 router 路由情境已由根層／v0.30 覆蓋；直啟凍結版屬 dogfooding 邊角情境，必要時先手動設 `PYTHONUTF8=1` 並保持 cwd 於版本根 |
 
-> 對應缺陷帳本：前兩條＝[AutoSDD_Defect_Log.md](docs/06_quality/AutoSDD_Defect_Log.md) DEF-101-003／DEF-101-004（wontfix＋凍結版紀律）；末五條＝DEF-101-019／DEF-101-020（wontfix＋凍結版紀律）與 DEF-101-021／DEF-101-022／DEF-101-025（open）。另有 **DEF-101-005**（`verify_traceability.sh` 的 `set -e`＋grep 零命中提前靜默退出，所有 bash 版本皆然、v0.30 亦未修，**open** 待 RFC）與 **DEF-101-018**（ruff 存量 baseline 1,339 筆待分批清理，open；其「未鎖版跨機器漂移」根因 DEF-101-006 已 fixed@四方複審第三輪）非平台缺口、不列本表。
+> 對應缺陷帳本：前兩條＝[AutoSDD_Defect_Log.md](docs/06_quality/AutoSDD_Defect_Log.md) DEF-101-003／DEF-101-004（wontfix＋凍結版紀律）；第 4~8 條＝DEF-101-019／DEF-101-020（wontfix＋凍結版紀律）與 DEF-101-021／DEF-101-022／DEF-101-025（open）。另有 **DEF-101-005**（`verify_traceability.sh` 的 `set -e`＋grep 零命中提前靜默退出，所有 bash 版本皆然、v0.30 亦未修，**open** 待 RFC）與 **DEF-101-018**（ruff 存量 baseline 1,339 筆待分批清理，open；其「未鎖版跨機器漂移」根因 DEF-101-006 已 fixed@四方複審第三輪）非平台缺口、不列本表。

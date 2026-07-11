@@ -1,33 +1,34 @@
-# 根層基建 CI（四方複審 B4，2026-07-10）：workflows / hooks / 工具腳本上移 monorepo
-# 根層後，根層 tools/（bootstrap / integration_gate / git-hooks dispatcher）與
-# .gitattributes、.editorconfig、dependabot 等基建原本零 CI 覆蓋——壞掉只會在開發者
-# 本機爆。本 workflow 做三道輕量守門（僅 actions/checkout，不引其他外部 action，
-# 避免供應鏈風險）：
-#   1. bash -n     — 根層 tools/git-hooks/*（無副檔名 dispatcher）與 tools/*.sh 語法檢查
-#   2. pwsh parse  — tools/ 下 *.ps1 以 [System.Management.Automation.Language.Parser]
-#                    ::ParseFile 解析（ubuntu runner 內建 pwsh），parse error 即 fail
-#   3. EOL 守門    — git ls-files --eol：tools/ 下 .sh/.bash 與無副檔名 git hooks 不得
-#                    CRLF/mixed（取證紀律 #8；比照 AutoClaude pre-commit 檢法，作為
-#                    根層 .gitattributes `eol=lf` 政策的機械複核）
+# 根層基建 CI（四方複審 B4，2026-07-10；防禦縱深補洞 2026-07-11）：workflows / hooks /
+# 工具腳本上移 monorepo 根層後，根層 tools/（bootstrap / integration_gate / git-hooks
+# dispatcher）與 .gitattributes、.editorconfig、dependabot 等基建原本零 CI 覆蓋——壞掉
+# 只會在開發者本機爆。本 workflow 做五道輕量守門（僅 actions/checkout，不引其他外部
+# action，避免供應鏈風險）：
+#   1. bash -n       — 根層 tools/git-hooks/*（無副檔名 dispatcher）與 tools/*.sh 語法檢查
+#   2. pwsh parse    — active .ps1（根層 tools/ + AutoClaude/tools/ + AISDLC_SDD/scripts/
+#                      + AISDLC_SDD LATEST 版；凍結版 v0.01~v0.(N-1) 有已知缺陷且依紀律
+#                      不回改 → 排除）以 Parser::ParseFile 解析，parse error 即 fail；
+#                      同 step 加 UTF-8 BOM 守門 — 含非 ASCII 的 active .ps1 必須有
+#                      EF BB BF（.editorconfig utf-8-bom 政策的 CI 機械複核；本機僅
+#                      Claude Code hook check_ps1_encoding.py 補 BOM，人工編輯器 /
+#                      GitHub web 可繞過 → zh-TW PS5.1 以 CP950 誤讀亂碼/破壞 parser）
+#   3. EOL 守門      — git ls-files --eol：tools/ 下 .sh/.bash 與無副檔名 git hooks 不得
+#                      CRLF/mixed（取證紀律 #8；比照 AutoClaude pre-commit 檢法，作為
+#                      根層 .gitattributes `eol=lf` 政策的機械複核）
+#   4. NTFS 檔名閘   — tools/check_ntfs_paths.py 掃 git ls-files 全量（本機 pre-commit
+#                      A3 閘的 CI 對等；--no-verify / GitHub web / 未裝 hooks 可繞過本機閘）
+#   5. 腳本對等閘    — tools/check_script_parity.py：三對 .sh/.ps1 的 gate/step 標籤
+#                      清單一致 + pytest 釘選雙處（pyproject.toml / requirements-ci.txt）同版
+#
+# 觸發不設 paths 過濾（2026-07-11 起）：第 4 道 NTFS 檔名閘守的是「任何路徑」新增的
+# 敵意檔名（一旦入庫所有 Windows checkout 直接壞），paths 白名單必留盲區；本 job 全部
+# 步驟輕量（< 1 分鐘、零依賴安裝），全變更觸發成本可忽略。
 
 name: root-infra-ci
 
 on:
   push:
     branches: [main]
-    paths:
-      - "tools/**"
-      - ".gitattributes"
-      - ".editorconfig"
-      - ".github/workflows/**"
-      - ".github/dependabot.yml"
   pull_request:
-    paths:
-      - "tools/**"
-      - ".gitattributes"
-      - ".editorconfig"
-      - ".github/workflows/**"
-      - ".github/dependabot.yml"
   workflow_dispatch:
 
 concurrency:
@@ -40,7 +41,7 @@ permissions:
 
 jobs:
   root-infra:
-    name: root infra guard (bash -n + pwsh parse + EOL)
+    name: root infra guard (bash -n + pwsh parse/BOM + EOL + NTFS + parity)
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
@@ -56,11 +57,24 @@ jobs:
           done
           exit "$fail"
 
-      - name: pwsh 語法解析（tools/ 下 *.ps1）
+      - name: pwsh 語法解析 + UTF-8 BOM 守門（active .ps1）
         run: |
           pwsh -NoProfile -Command '
+            # active .ps1 範圍：根層 tools/ + AutoClaude/tools/ + AISDLC_SDD/scripts/
+            # + AISDLC_SDD LATEST 版（凍結版依紀律不回改 → 排除；LATEST 偵測鏡射
+            # AISDLC_SDD/scripts/ci-gate.sh 的 sort -V 取最高版語意）
             $files = @(Get-ChildItem -Path tools -Recurse -Filter *.ps1 -File)
-            Write-Host "待解析 .ps1 共 $($files.Count) 支"
+            $files += @(Get-ChildItem -Path AutoClaude/tools -Recurse -Filter *.ps1 -File)
+            $files += @(Get-ChildItem -Path AISDLC_SDD/scripts -Filter *.ps1 -File)
+            $latest = Get-ChildItem -Path AISDLC_SDD -Directory |
+              Where-Object { $_.Name -match "^AISDLC_SDD_v[0-9]+\.[0-9]+$" } |
+              Sort-Object { [version]($_.Name -replace "^AISDLC_SDD_v", "") } |
+              Select-Object -Last 1
+            if ($latest) {
+              Write-Host "AISDLC_SDD LATEST 版：$($latest.Name)（其餘凍結版排除）"
+              $files += @(Get-ChildItem -Path $latest.FullName -Recurse -Filter *.ps1 -File)
+            }
+            Write-Host "待檢查 active .ps1 共 $($files.Count) 支"
             $errCount = 0
             foreach ($f in $files) {
               $tokens = $null; $parseErrors = $null
@@ -69,9 +83,22 @@ jobs:
                 Write-Host "::error::$($f.FullName) parse error"
                 foreach ($e in $parseErrors) { Write-Host "  $($e.Extent.StartLineNumber): $($e.Message)" }
                 $errCount += 1
-              } else {
-                Write-Host "OK: $($f.FullName)"
+                continue
               }
+              # BOM 守門：含非 ASCII 的 .ps1 必須以 EF BB BF 開頭（.editorconfig
+              # utf-8-bom 政策；無 BOM 時 zh-TW Windows PS5.1 以 CP950 誤讀）
+              $bytes = [System.IO.File]::ReadAllBytes($f.FullName)
+              $hasBom = ($bytes.Length -ge 3 -and $bytes[0] -eq 0xEF -and $bytes[1] -eq 0xBB -and $bytes[2] -eq 0xBF)
+              if (-not $hasBom) {
+                $nonAscii = $false
+                foreach ($b in $bytes) { if ($b -gt 0x7F) { $nonAscii = $true; break } }
+                if ($nonAscii) {
+                  Write-Host "::error::$($f.FullName) 含非 ASCII 字元但無 UTF-8 BOM（.editorconfig 要求 utf-8-bom；zh-TW PS5.1 會以 CP950 誤讀）"
+                  $errCount += 1
+                  continue
+                }
+              }
+              Write-Host "OK: $($f.FullName)"
             }
             if ($errCount -gt 0) { exit 1 }
           '
@@ -88,3 +115,9 @@ jobs:
             exit 1
           fi
           echo "EOL 檢查通過（tools/ 下 .sh/.bash 與 git-hooks 均為 LF）"
+
+      - name: NTFS 敵意檔名守門（pre-commit A3 閘的 CI 對等，掃全量 tracked 路徑）
+        run: python3 tools/check_ntfs_paths.py
+
+      - name: 雙平台腳本對等 + pytest 釘選一致（三對 .sh/.ps1 標籤清單）
+        run: python3 tools/check_script_parity.py

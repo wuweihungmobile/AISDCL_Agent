@@ -22,6 +22,7 @@ dev = [
     # （消除 bootstrap「先裝 9.1.1 再降版」的安裝順序依賴）；
     # ruff 鎖 0.15.21（QA 實測 fresh bootstrap 安裝版、baseline 1,339 筆一致，
     # 未鎖版曾致 baseline 漂移）。升版規則比照 requirements-ci.txt：本機先升跑全綠再回寫釘選。
+    # pytest 釘選與 requirements-ci.txt 的一致性由根層 tools/check_script_parity.py 機械比對（root-infra-ci）。
     "pytest==9.0.3",
     "pytest-mock>=3.14",
     "ruff==0.15.21",

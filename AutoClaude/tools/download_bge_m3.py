@@ -7,11 +7,11 @@
     python tools/download_bge_m3.py
 
 下載目標：
-    D:\\CursorProject\\AutoClaude\\.model_cache\\   （或由 --cache-dir 指定）
+    <repo>/AutoClaude/.model_cache/   （或由 --cache-dir 指定）
 
 完成後更新 docker-compose.yml 的 tei_cache volume 為 bind mount，
 或直接用：
-    TEI_CACHE_DIR=D:\\...\\model_cache docker compose up -d embedder
+    TEI_CACHE_DIR=<repo>/AutoClaude/.model_cache docker compose up -d embedder
 """
 from __future__ import annotations
 
@@ -44,8 +44,8 @@ def main() -> int:
     cache_dir.mkdir(parents=True, exist_ok=True)
 
     print(f"→ 下載 {args.model_id} 到 {cache_dir}")
-    print(f"  預計大小：~1.2GB，依網速需 1~10 分鐘")
-    print(f"  下載完成後可重複使用（container 重建不需重下載）")
+    print("  預計大小：~1.2GB，依網速需 1~10 分鐘")
+    print("  下載完成後可重複使用（container 重建不需重下載）")
     print()
 
     try:
@@ -63,13 +63,13 @@ def main() -> int:
     print()
     print("─" * 60)
     print("📋 後續動作：")
-    print(f"  1. 在 docker-compose.yml 將 tei_cache volume 改為 bind mount：")
-    print(f"       volumes:")
+    print("  1. 在 docker-compose.yml 將 tei_cache volume 改為 bind mount：")
+    print("       volumes:")
     print(f"         - {cache_dir}:/data")
-    print(f"  2. 重啟 embedder：")
-    print(f"       docker compose up -d --force-recreate embedder")
-    print(f"  3. 驗證：")
-    print(f"       curl http://localhost:8080/health")
+    print("  2. 重啟 embedder：")
+    print("       docker compose up -d --force-recreate embedder")
+    print("  3. 驗證：")
+    print("       curl http://localhost:8080/health")
     return 0
 
 

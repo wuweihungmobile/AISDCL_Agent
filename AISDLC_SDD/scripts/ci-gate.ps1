@@ -1,15 +1,44 @@
 ﻿# AISDLC-SDD — 本機 CI 閘門（Windows PowerShell 版）。
-# ⚠️ 非 ci-gate.sh 完整對等（ONBOARDING.md §6）：本檔僅跑「v0.01 凍結基線」單軌 3-stage
-#   （pytest not-chaos + arch_fitness --strict + 選跑 TLC），不含 ci-gate.sh 的
-#   「凍結基線 + LATEST 演化版」雙軌覆蓋與 --full-tlc 五軌模式；完整閘門請用
-#   Git Bash 執行 bash scripts/ci-gate.sh。
-# 用法：  pwsh scripts/ci-gate.ps1            # 離線閘門
-#         $env:SDD_RUN_TLC=1; pwsh scripts/ci-gate.ps1   # 另跑五軌 TLC
+# 行為（薄委派，防 .ps1 與 .sh 覆蓋差距單向擴大）：
+#   1. 偵測到 Git Bash（bash.exe）→ 薄委派 `bash scripts/ci-gate.sh`（單一真相源，
+#      完整覆蓋：凍結基線 + LATEST 演化版雙軌 + 全部硬閘；參數與 exit code 原樣傳遞，
+#      故 --full-tlc 等旗標直接可用）。
+#   2. 找不到 Git Bash → 退回下方 fallback 3-stage（僅「v0.01 凍結基線」單軌：
+#      pytest not-chaos + arch_fitness --strict + 選跑 TLC），並明確警告
+#      覆蓋範圍小於 ci-gate.sh。
+# 用法：  pwsh scripts/ci-gate.ps1 [ci-gate.sh 參數，如 --full-tlc]  # 有 Git Bash → 完整閘門
+#         $env:SDD_RUN_TLC=1; pwsh scripts/ci-gate.ps1               # fallback 時另跑五軌 TLC
 $ErrorActionPreference = "Stop"
 # 強制 Python 子程序統一 UTF-8（對齊 AutoClaude tools/local_ci_gate.ps1 同名設定）：
 # zh-TW Windows 預設 cp950，fsm_runtime subprocess 輸出含中文時會 UnicodeDecodeError。
 $env:PYTHONUTF8 = "1"
 $repo = Split-Path -Parent $PSScriptRoot
+
+# --- 薄委派：找得到 Git Bash 就跑完整 ci-gate.sh ---
+# 排除 WSL 的 System32\bash.exe：那是 Linux 環境（無本 repo 的 Windows venv/依賴），
+# 委派過去語意不對等；只認 Git for Windows 的 bash（PATH 或常見安裝路徑）。
+$bashExe = $null
+$bashCmd = Get-Command bash -ErrorAction SilentlyContinue
+if ($bashCmd -and $bashCmd.Source -and ($bashCmd.Source -notmatch '\\System32\\')) {
+  $bashExe = $bashCmd.Source
+}
+if (-not $bashExe) {
+  foreach ($cand in @("$env:ProgramFiles\Git\bin\bash.exe",
+                      "${env:ProgramFiles(x86)}\Git\bin\bash.exe",
+                      "$env:LocalAppData\Programs\Git\bin\bash.exe")) {
+    if ($cand -and (Test-Path -LiteralPath $cand)) { $bashExe = $cand; break }
+  }
+}
+if ($bashExe) {
+  Write-Host "==> 偵測到 Git Bash（$bashExe）→ 薄委派 bash scripts/ci-gate.sh（完整雙軌閘門）"
+  Set-Location $repo
+  & $bashExe scripts/ci-gate.sh @args
+  exit $LASTEXITCODE
+}
+
+Write-Host "⚠️ 找不到 Git Bash（bash.exe）→ 退回 fallback 3-stage（僅 v0.01 凍結基線單軌）。" -ForegroundColor Yellow
+Write-Host "⚠️ 覆蓋範圍小於 ci-gate.sh（無 LATEST 演化版軌與其餘硬閘）；建議安裝 Git for Windows 後重跑。" -ForegroundColor Yellow
+
 $fw   = Join-Path $repo "AISDLC_SDD_v0.01"
 Set-Location $fw
 

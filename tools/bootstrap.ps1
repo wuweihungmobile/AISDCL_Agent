@@ -66,6 +66,14 @@ function Select-Python {
 
 # --- 1. 建立 .venv（存在檢查先行：venv 已存在就不需選直譯器）---
 if (Test-Path $VenvDir) {
+  # 形狀檢查：跨平台共用工作目錄時，macOS/Linux 建的 .venv 只有 bin/python（無
+  # Scripts\python.exe），沿用會到後續 pip 安裝才以不友善錯誤失敗 → 這裡先 fail-fast。
+  if (-not (Test-Path (Join-Path $VenvDir 'Scripts\python.exe'))) {
+    Write-Host ""
+    Write-Host "❌ 既有 .venv 缺 Scripts\python.exe（多半是 macOS/Linux 上建立的 .venv）— 本平台無法沿用。" -ForegroundColor Red
+    Write-Host "   請刪除後重建：Remove-Item -Recurse -Force .venv；再跑 powershell -ExecutionPolicy Bypass -File tools/bootstrap.ps1" -ForegroundColor Yellow
+    exit 1
+  }
   Write-Host "偵測到既有 .venv → 沿用（如需重建請先 Remove-Item -Recurse -Force .venv）"
 } else {
   $BasePy = $null

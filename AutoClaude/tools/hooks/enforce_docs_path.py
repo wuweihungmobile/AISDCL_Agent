@@ -52,7 +52,14 @@ ROOT_WHITELIST = {
 
 
 def read_hook_payload() -> dict:
-    raw = sys.stdin.read().strip()
+    # zh-TW Windows pipe 預設 cp950：裸 sys.stdin.read() 遇含中文的 UTF-8 payload 會拋
+    # UnicodeDecodeError → 阻斷級 hook 靜默失效。改讀 bytes 端以 UTF-8+replace 解碼；
+    # 無 buffer（如測試以 StringIO 替身）時回退文字端。
+    stdin_buffer = getattr(sys.stdin, "buffer", None)
+    if stdin_buffer is not None:
+        raw = stdin_buffer.read().decode("utf-8", "replace").strip()
+    else:
+        raw = sys.stdin.read().strip()
     if not raw:
         return {}
     try:
@@ -108,7 +115,8 @@ def main() -> int:
         f"[enforce_docs_path] 阻斷：文件路徑 '{rel_posix}' 違反 CLAUDE.md §專案文檔目錄規範。\n"
         "  允許位置：docs/0[1-8]_<type>/（八個編號子目錄）\n"
         f"  根層白名單：{sorted(ROOT_WHITELIST)}\n"
-        "  若需新增白名單，請更新 tools/hooks/enforce_docs_path.py 的 ALLOWED_DIR_PREFIXES / ROOT_WHITELIST。"
+        "  若需新增白名單，請更新 tools/hooks/enforce_docs_path.py 的 "
+        "ALLOWED_DIR_PREFIXES / ROOT_WHITELIST。"
     )
     print(msg, file=sys.stderr)
     return 2

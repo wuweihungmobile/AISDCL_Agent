@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # DEF-38-001（P3）Copy-on-Evolve git-archive 版 —— 結構性只匯 git tracked 源碼。
 #
-# 用法：
-#   scripts/copy_on_evolve.sh <from_dir> <to_dir>
+# 用法（以 bash 呼叫 — repo 政策：755 入庫僅限 tools/git-hooks/，其餘 .sh 一律 bash xxx.sh）：
+#   bash scripts/copy_on_evolve.sh <from_dir> <to_dir>
 #     <from_dir>  既有凍結版本目錄（須為 git tracked 且 committed 於 HEAD）
 #     <to_dir>    新版本目錄（必須尚不存在，拒絕覆蓋）
 #

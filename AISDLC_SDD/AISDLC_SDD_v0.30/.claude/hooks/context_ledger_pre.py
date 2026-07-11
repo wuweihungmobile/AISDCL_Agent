@@ -241,7 +241,16 @@ def _build_subagent_notice(tool: str, tool_input: dict, runtime=None) -> str | N
 
 
 def main() -> int:
-    raw = sys.stdin.read() if not sys.stdin.isatty() else "{}"
+    # zh-TW Windows pipe 預設 cp950：裸 sys.stdin.read() 遇含中文的 UTF-8 payload 會拋
+    # UnicodeDecodeError → hook fail-open。改讀 bytes 端以 UTF-8+replace 解碼；
+    # 無 buffer（如測試以 StringIO 替身）時回退文字端。
+    _stdin_buffer = getattr(sys.stdin, "buffer", None)
+    if sys.stdin.isatty():
+        raw = "{}"
+    elif _stdin_buffer is not None:
+        raw = _stdin_buffer.read().decode("utf-8", "replace")
+    else:
+        raw = sys.stdin.read()
     try:
         inp = json.loads(raw or "{}")
     except json.JSONDecodeError:

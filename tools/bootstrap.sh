@@ -51,6 +51,14 @@ fi
 
 # --- 2. 建立 .venv（存在檢查先行：venv 已存在就不需系統有 >=3.11 直譯器）---
 if [ -d "$VENV_DIR" ]; then
+  # 形狀檢查：跨平台共用工作目錄時，Windows 建的 .venv 只有 Scripts\python.exe（無
+  # bin/python），沿用會到後續 pip/pytest 才以不友善錯誤失敗 → 這裡先 fail-fast。
+  if [ ! -x "$VENV_DIR/bin/python" ]; then
+    echo "" >&2
+    echo "❌ 既有 .venv 缺 bin/python（多半是 Windows 上建立的 .venv）— 本平台無法沿用。" >&2
+    echo "   請刪除後重建：rm -rf .venv && bash tools/bootstrap.sh" >&2
+    exit 1
+  fi
   echo "偵測到既有 .venv → 沿用（如需重建請先 rm -rf .venv）"
 else
   BASE_PY=""

@@ -66,6 +66,8 @@ jobs:
         uses: actions/upload-artifact@v5
         with:
           name: ci-arch-fitness-${{ github.run_id }}
-          path: AISDLC_SDD/AISDLC_SDD_v0.01/arch-fitness.json
+          # glob 涵蓋雙軌（凍結基線 v0.01 + LATEST）：ci-gate.sh 對每個受測版各產一份
+          # arch-fitness.json；原本寫死 v0.01 使 LATEST 軌取證物遺失（P3-1，2026-07-11）
+          path: AISDLC_SDD/AISDLC_SDD_v*/arch-fitness.json
           retention-days: 7
           if-no-files-found: ignore

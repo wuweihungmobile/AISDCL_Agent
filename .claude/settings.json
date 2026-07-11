@@ -1,13 +1,16 @@
 {
   "$schema": "https://json.schemastore.org/claude-code-settings.json",
-  "description": "monorepo 整合層 — 守衛式 SDD hook 橋接（AutoSDD_improving）。以 SDD_ACTIVE_VERSION 為守衛路由到 AISDLC_SDD/AISDLC_SDD_v0.0X 的實體 hooks；未設則 no-op，純 AutoClaude session 零污染。詳見 .claude/hooks/sdd_hook_router.py。hook command 用相對路徑（勿用 ${CLAUDE_PROJECT_DIR}：Windows cmd 不展開變數）；前提＝claude 於 monorepo 根目錄啟動（cwd=專案根，見 ONBOARDING §4）。",
+  "description": "monorepo 整合層 — 守衛式 SDD hook 橋接（AutoSDD_improving）。以 SDD_ACTIVE_VERSION 為守衛路由到 AISDLC_SDD/AISDLC_SDD_v0.0X 的實體 hooks；未設則 no-op，純 AutoClaude session 零污染。詳見 .claude/hooks/sdd_hook_router.py。hook command 以 python -c shim 錨定專案根：python 自行讀 CLAUDE_PROJECT_DIR 環境變數（CC 注入、不經 shell 變數展開，Windows cmd 亦可用），未設時回退 cwd；目標腳本缺檔＝fail-open exit 0（靜默失效）——修復「cwd≠專案根時 python 缺檔 exit 2 誤觸 PreToolUse deny、全工具硬鎖死」P0（四方複審第四輪；舊版勿用 ${VAR} 之限制不再適用，因變數由 python 讀非 shell 展開）。env.PYTHONUTF8=1 為 zh-TW Windows（cp950）防禦縱深：強制 hook 子行程 stdin/stdout/stderr 一律 UTF-8，跨平台無副作用。",
+  "env": {
+    "PYTHONUTF8": "1"
+  },
   "hooks": {
     "SessionStart": [
       {
         "hooks": [
           {
             "type": "command",
-            "command": "python .claude/hooks/sdd_hook_router.py session_start",
+            "command": "python -c \"import os,sys,runpy; r=os.environ.get('CLAUDE_PROJECT_DIR') or os.getcwd(); p=os.path.join(r,*sys.argv[1].split('/')); os.path.isfile(p) or sys.exit(0); os.chdir(r); sys.argv=[p]+sys.argv[2:]; runpy.run_path(p,run_name='__main__')\" .claude/hooks/sdd_hook_router.py session_start",
             "timeout": 30
           }
         ]
@@ -19,7 +22,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python .claude/hooks/sdd_hook_router.py context_ledger_pre",
+            "command": "python -c \"import os,sys,runpy; r=os.environ.get('CLAUDE_PROJECT_DIR') or os.getcwd(); p=os.path.join(r,*sys.argv[1].split('/')); os.path.isfile(p) or sys.exit(0); os.chdir(r); sys.argv=[p]+sys.argv[2:]; runpy.run_path(p,run_name='__main__')\" .claude/hooks/sdd_hook_router.py context_ledger_pre",
             "timeout": 10
           }
         ]
@@ -31,7 +34,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python .claude/hooks/sdd_hook_router.py context_ledger_post",
+            "command": "python -c \"import os,sys,runpy; r=os.environ.get('CLAUDE_PROJECT_DIR') or os.getcwd(); p=os.path.join(r,*sys.argv[1].split('/')); os.path.isfile(p) or sys.exit(0); os.chdir(r); sys.argv=[p]+sys.argv[2:]; runpy.run_path(p,run_name='__main__')\" .claude/hooks/sdd_hook_router.py context_ledger_post",
             "timeout": 10
           }
         ]
@@ -41,7 +44,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python AutoClaude/tools/hooks/check_ps1_encoding.py",
+            "command": "python -c \"import os,sys,runpy; r=os.environ.get('CLAUDE_PROJECT_DIR') or os.getcwd(); p=os.path.join(r,*sys.argv[1].split('/')); os.path.isfile(p) or sys.exit(0); os.chdir(r); sys.argv=[p]+sys.argv[2:]; runpy.run_path(p,run_name='__main__')\" AutoClaude/tools/hooks/check_ps1_encoding.py",
             "timeout": 10
           }
         ]

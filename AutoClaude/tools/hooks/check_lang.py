@@ -46,7 +46,14 @@ SIMPLIFIED_RE = re.compile(f"[{re.escape(SIMPLIFIED_HIGH_FREQ)}]")
 
 
 def read_hook_payload() -> dict:
-    raw = sys.stdin.read().strip()
+    # zh-TW Windows pipe 預設 cp950：裸 sys.stdin.read() 遇含中文的 UTF-8 payload 會拋
+    # UnicodeDecodeError → 阻斷級 hook 靜默失效。改讀 bytes 端以 UTF-8+replace 解碼；
+    # 無 buffer（如測試以 StringIO 替身）時回退文字端。
+    stdin_buffer = getattr(sys.stdin, "buffer", None)
+    if stdin_buffer is not None:
+        raw = stdin_buffer.read().decode("utf-8", "replace").strip()
+    else:
+        raw = sys.stdin.read().strip()
     if not raw:
         return {}
     try:

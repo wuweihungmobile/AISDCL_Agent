@@ -39,9 +39,13 @@ from pathlib import Path
 # WARN 訊息、轉發 child 輸出）時會被 cp950 編碼，CC 端以 UTF-8 讀回 → 亂碼（DEF-43-001
 # 之 b：連 no-op 休眠訊息都亂碼）。對齊 sibling 腳本（sync_exposed_skills.py /
 # framework_status_snapshot.py）強制自身串流為 UTF-8，確保整條鏈端到端 UTF-8。
-for _stream in (sys.stdout, sys.stderr):
-    if hasattr(_stream, "reconfigure"):
-        _stream.reconfigure(encoding="utf-8", errors="replace")  # type: ignore[attr-defined]
+# stdin 亦須納入：CC 送入的 UTF-8 JSON payload 含中文時，cp950 解碼會使
+# sys.stdin.read() 拋 UnicodeDecodeError → router 崩潰、SDD 守門 fail-open。
+for _stream in (sys.stdin, sys.stdout, sys.stderr):
+    try:
+        _stream.reconfigure(encoding="utf-8", errors="replace")  # type: ignore[union-attr]
+    except (AttributeError, ValueError, OSError):
+        pass  # 非 TextIOWrapper（如測試替身）或串流已關閉 → 維持原樣，不讓 router 崩潰
 
 # router 位於 <repo_root>/.claude/hooks/sdd_hook_router.py → parents[2] == repo_root。
 # 優先採 CC 注入的 CLAUDE_PROJECT_DIR（最可靠），否則回退 __file__ 自我定位。
