@@ -38,6 +38,7 @@ import argparse
 import hashlib
 import json
 import platform as _platform
+import re
 import shutil
 import subprocess
 import sys
@@ -123,6 +124,94 @@ def _venv_python(flavor: str) -> Path:
     return _venv_python_at(ROOT / ".venv", flavor)
 
 
+def _safe_exists(p: Path) -> bool:
+    """`.exists()` 但吞 OSError（P1-3：快取目錄 chmod 000 時純讀取探測不可裸崩）。"""
+    try:
+        return p.exists()
+    except OSError as e:
+        _warn(f"無法讀取 {p}（{e}）— 視為不存在")
+        return False
+
+
+def _safe_is_dir(p: Path) -> bool:
+    """`.is_dir()` 但吞 OSError（同上，P1-3）。"""
+    try:
+        return p.is_dir()
+    except OSError as e:
+        _warn(f"無法讀取 {p}（{e}）— 視為不是目錄")
+        return False
+
+
+_VENV_ORIGIN_MARKER = ".dev_venv_origin"
+
+
+def _write_origin_marker(venv_dir: Path, label: str) -> None:
+    """記錄「這份 venv 內容實際是哪個平台建的」（P1-1 根本解①）。
+
+    寫在 venv 目錄內部（而非快取目錄層級），這樣不管內容目前叫 .venv 還是
+    .venv-cache-<flavor>，換手 rename 時標記都隨內容一起搬動，不需要在每個
+    rename 點手動同步。flavor 只分兩桶（windows/posix）分不出 mac vs
+    linux，本標記記錄 _now_label() 的三分類，足以識別。
+    """
+    try:
+        (venv_dir / _VENV_ORIGIN_MARKER).write_text(label, encoding="utf-8")
+    except OSError as e:
+        _warn(f"寫入 {venv_dir.name}/{_VENV_ORIGIN_MARKER} 失敗（{e}）— 不影響本次整備，"
+              f"但下次跨機判斷可能失準")
+
+
+def _read_origin_marker(venv_dir: Path) -> str | None:
+    p = venv_dir / _VENV_ORIGIN_MARKER
+    try:
+        if p.is_file():
+            text = p.read_text(encoding="utf-8", errors="replace").strip()
+            return text or None
+    except OSError:
+        pass
+    return None
+
+
+def _venv_healthy(py: Path) -> tuple[bool, str]:
+    """對候選直譯器做可執行性健檢（P1-1 根本解②：即使標記機制失準仍能兜底）。
+
+    catch 例外/非零 rc——包含二進位格式不相容（如 macOS Mach-O 拿到 Linux
+    上跑會是 OSError: Exec format error）與檔案根本不可執行等情況。
+    """
+    try:
+        r = subprocess.run([str(py), "--version"], capture_output=True, timeout=15)
+    except OSError as e:
+        return False, str(e)
+    except subprocess.TimeoutExpired:
+        return False, "執行逾時（>15s）"
+    if r.returncode != 0:
+        return False, f"rc={r.returncode}"
+    return True, "ok"
+
+
+def _cache_restore_trust(cache_dir: Path, flavor: str, now: str) -> tuple[bool, str]:
+    """單一權威判斷：cache_dir 內容是否可信任還原為本平台 .venv（P1-1）。
+
+    Architect 審查指出平台判斷散落在多個呼叫點，是三機輪替快取誤還原 bug
+    的結構性根因——本函式把「這次換手是否可信任」收斂成單一判斷點，取代
+    原本單靠 flavor 兩桶（windows/posix，分不出 mac vs linux）決定是否還原
+    的邏輯。兩道防線都要過：①origin marker 比對 now（根本解，但舊快取/
+    未來漏洞可能沒有或繞過標記）；②不論①結果一律對候選直譯器健檢（兜底，
+    對「binary 格式不相容」這類 marker 機制以外的失效模式仍能攔下）。
+    """
+    py = _venv_python_at(cache_dir, flavor)
+    if not _safe_exists(py):
+        return False, "候選目錄內無可用直譯器"
+    origin = _read_origin_marker(cache_dir)
+    marker_ok = origin is None or origin == now
+    healthy, detail = _venv_healthy(py)
+    if not healthy:
+        extra = f"；標記建於 {origin}，與目前平台 {now} 不符" if not marker_ok else ""
+        return False, f"直譯器健檢失敗（{detail}）{extra}"
+    if not marker_ok:
+        return False, f"標記建於 {origin}，與目前平台 {now} 不符"
+    return True, "ok"
+
+
 def _load_state() -> dict:
     if not STATE_FILE.is_file():
         return {}
@@ -138,11 +227,48 @@ def _load_state() -> dict:
         return {}
 
 
+_TOML_SECTION_RE = re.compile(r"^\[([\w.\-]+)\]\s*$")
+_TOML_DEPS_SECTIONS = {"project", "project.optional-dependencies"}
+_TOML_NON_DEPS_KEY_RE = re.compile(r"^\s*(name|version|description|requires-python)\s*=")
+
+
+def _deps_relevant_lines(text: str, scoped: bool) -> list[str]:
+    """過濾出與依賴宣告直接相關的行（P2：縮小 _deps_hash 誤觸發面）。
+
+    整檔位元組雜湊對註解/版本字串/[tool.ruff] 等無關編輯過度敏感，觸發不
+    必要的整包重裝。scoped=True（如 pyproject.toml）時只保留 [project] /
+    [project.optional-dependencies] 區段內容，並剔除該區段內與依賴無關的
+    純中繼資料鍵（name/version/description/requires-python）；scoped=False
+    （如純 requirements.txt）整檔皆視為依賴宣告。兩種情形皆濾掉註解/空白行。
+    """
+    section: str | None = None
+    out: list[str] = []
+    for raw in text.splitlines():
+        line = raw.strip()
+        if not line or line.startswith("#"):
+            continue
+        if scoped:
+            m = _TOML_SECTION_RE.match(line)
+            if m:
+                section = m.group(1)
+                continue
+            if section not in _TOML_DEPS_SECTIONS or _TOML_NON_DEPS_KEY_RE.match(line):
+                continue
+        out.append(line)
+    return out
+
+
 def _deps_hash() -> str:
     h = hashlib.sha256()
     for f in DEPS_FILES:
         h.update(f.name.encode("utf-8"))
-        h.update(f.read_bytes() if f.is_file() else b"<missing>")
+        if not f.is_file():
+            h.update(b"<missing>")
+            continue
+        text = f.read_text(encoding="utf-8", errors="replace")
+        for line in _deps_relevant_lines(text, scoped=(f.suffix == ".toml")):
+            h.update(line.encode("utf-8"))
+            h.update(b"\n")
     return h.hexdigest()
 
 
@@ -263,18 +389,43 @@ def _ensure_venv_shape(now: str) -> str:
     flavor = _flavor(now)
     other = "windows" if flavor == "posix" else "posix"
     venv = ROOT / ".venv"
-    if venv.is_dir() and not _venv_python(flavor).exists():
-        if _venv_python_at(venv, other).exists():
+
+    # 斷裂 symlink（目標已消失，如外接碟拔除/同步中斷）：is_dir()/exists() 對此
+    # 恆回 False，會整段跳過下面的清理邏輯、直接落到 "missing"，但底層目錄項目
+    # 仍留存（lstat 可見），導致下游 bootstrap 的 `python3 -m venv .venv`
+    # 撞 Errno 17: File exists（Architect + SD + QA 審查 P1-2）→ 在此提前攔截清除。
+    if venv.is_symlink() and not _safe_exists(venv):
+        try:
+            venv.unlink()
+            _warn("偵測到失效的 .venv 符號連結（可能是外接碟已拔除或同步中斷）— 已清除，將重新建置")
+        except OSError as e:
+            _warn(f".venv 斷裂符號連結清除失敗（{e}）— 請手動刪除 .venv 後重跑")
+
+    if _safe_is_dir(venv) and not _safe_exists(_venv_python(flavor)):
+        if _safe_exists(_venv_python_at(venv, other)):
             # 確為另一平台形狀才換手保留；不驗形狀就 park 會讓「同平台壞損 venv」
             # 先摧毀真正的對方快取、再錯標入快取且永不自癒（Architect 審查 P1）
             cache_other = ROOT / f".venv-cache-{other}"
+            cache_other_ready = True
             try:
-                if cache_other.exists():
+                if _safe_exists(cache_other):
+                    try:
+                        if any(cache_other.iterdir()):
+                            _warn(f"{cache_other.name}/ 已有內容 — 換手保留即將覆蓋（不可逆）；"
+                                  f"若該內容仍需要請先手動備份")
+                    except OSError:
+                        pass  # 列不出內容不影響後續判斷，仍嘗試 rmtree
                     shutil.rmtree(cache_other)
-                venv.rename(cache_other)
-                print(f"    偵測到另一平台形狀的 .venv → 換手保留為 {cache_other.name}/")
             except OSError as e:
-                _warn(f".venv 換手失敗（{e}）— 請手動刪除 .venv 後重跑")
+                # 卡住的資源是 cache_other，不是 .venv——訊息須指名真正病灶（Architect 審查 P2）
+                _warn(f"清除既有 {cache_other.name}/ 失敗（{e}）— 請先手動處理該目錄後重跑")
+                cache_other_ready = False
+            if cache_other_ready:
+                try:
+                    venv.rename(cache_other)
+                    print(f"    偵測到另一平台形狀的 .venv → 換手保留為 {cache_other.name}/")
+                except OSError as e:
+                    _warn(f".venv 換手失敗（改名為 {cache_other.name}/ 時發生 {e}）— 請手動刪除 .venv 後重跑")
         else:
             # 兩平台直譯器皆缺＝壞損 venv（如 symlink 斷裂）→ 移除重建，不動任何快取
             try:
@@ -285,19 +436,26 @@ def _ensure_venv_shape(now: str) -> str:
                 print("    偵測到壞損 .venv（兩平台直譯器皆缺）→ 已移除，將重建")
             except OSError as e:
                 _warn(f"壞損 .venv 移除失敗（{e}）— 請手動刪除 .venv 後重跑")
-    if not venv.exists():
+
+    if not _safe_exists(venv):
         cache_mine = ROOT / f".venv-cache-{flavor}"
         if cache_mine.is_symlink():
             # symlink 快取換回會讓 .venv 指向外部目錄、後續 bootstrap 污染目標 → 拒用
             _warn(f"{cache_mine.name} 是 symlink — 不換回（避免寫入外部目標），改重建 .venv")
-        elif _venv_python_at(cache_mine, flavor).exists():
-            try:
-                cache_mine.rename(venv)
-                print(f"    自 {cache_mine.name}/ 秒級換回本平台 .venv")
-                return "restored"
-            except OSError as e:
-                _warn(f"venv 快取換回失敗（{e}）")
-    return "ok" if _venv_python(flavor).exists() else "missing"
+        elif _safe_exists(cache_mine):
+            trustworthy, reason = _cache_restore_trust(cache_mine, flavor, now)
+            if trustworthy:
+                try:
+                    cache_mine.rename(venv)
+                    print(f"    自 {cache_mine.name}/ 秒級換回本平台 .venv")
+                    return "restored"
+                except OSError as e:
+                    _warn(f"venv 快取換回失敗（{e}）")
+            else:
+                # 不得靜默 return "missing" 放著壞快取佔磁碟不聲不響（Architect 審查 P1-1 / P2）
+                _warn(f"偵測到 {cache_mine.name}/ 內容無效（{reason}）— 已略過（不會自動清除，"
+                      f"避免誤刪使用者手動放的東西；可手動檢視/清除該目錄），將視為 missing 重新整備")
+    return "ok" if _safe_exists(_venv_python(flavor)) else "missing"
 
 
 def _run_bootstrap(now: str, reason: str) -> bool:
@@ -358,6 +516,8 @@ def step_venv(now: str, state: dict, force: bool, cross_same_flavor: bool = Fals
         ok = False
     if ok:
         SUMMARY.setdefault("venv", "bootstrap 完成（依賴已安裝）")
+        # 記錄「這份 .venv 內容是本平台建的」，供下次跨機換手判斷可信度（P1-1）
+        _write_origin_marker(ROOT / ".venv", now)
     else:
         SUMMARY["venv"] = "❌ 失敗（見上方錯誤）"
     return ok
@@ -386,7 +546,10 @@ def step_hooks(now: str, is_repo: bool) -> None:
     hooks_ok = False
     if cur:
         try:
-            same = Path(cur).resolve() == HOOKS_DIR.resolve()
+            # ROOT 為基準展開（若 cur 本身已是絕對路徑，ROOT / cur 仍等同 Path(cur)——
+            # pathlib 的 / 對絕對右運算元會直接取代左邊）；否則相對路徑會誤依「執行時
+            # cwd」而非 repo ROOT 展開，造成假性漂移判定（Architect 審查 P2）
+            same = (ROOT / cur).resolve() == HOOKS_DIR.resolve()
         except OSError:
             same = False
         hooks_ok = same and all(

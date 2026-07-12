@@ -3,7 +3,7 @@
 # dispatcher）與 .gitattributes、.editorconfig、dependabot 等基建原本零 CI 覆蓋——壞掉
 # 只會在開發者本機爆。本 workflow 做六道輕量守門（僅 actions/checkout，不引其他外部
 # action，避免供應鏈風險）：
-#   1. bash -n       — 根層 tools/git-hooks/*（無副檔名 dispatcher）與 tools/*.sh 語法檢查
+#   1. bash -n       — 根層 tools/git-hooks/ 與 tools/*.sh（遞迴涵蓋子目錄）語法檢查
 #   2. pwsh parse    — active .ps1（根層 tools/ + AutoClaude/tools/ + AISDLC_SDD/scripts/
 #                      + AISDLC_SDD LATEST 版；凍結版 v0.01~v0.(N-1) 有已知缺陷且依紀律
 #                      不回改 → 排除）以 Parser::ParseFile 解析，parse error 即 fail；
@@ -18,9 +18,10 @@
 #                      A3 閘的 CI 對等；--no-verify / GitHub web / 未裝 hooks 可繞過本機閘）
 #   5. 腳本對等閘    — tools/check_script_parity.py：三對 .sh/.ps1 的 gate/step 標籤
 #                      清單一致 + pytest 釘選雙處（pyproject.toml / requirements-ci.txt）同版
-#   6. py_compile    — 根層 tools/*.py（dev_start / check_* 等基建工具）語法檢查；
-#                      這些 .py 無測試套件覆蓋，語法錯誤可經 --no-verify / GitHub web
-#                      靜默入庫 → CI 兜底（dev_start 四方審查 P2，2026-07-12）
+#   6. py_compile    — 根層 tools/ 下所有 *.py（遞迴涵蓋子目錄；dev_start / check_* 等
+#                      基建工具）語法檢查；這些 .py 無測試套件覆蓋，語法錯誤可經
+#                      --no-verify / GitHub web 靜默入庫 → CI 兜底（dev_start 四方審查
+#                      P2，2026-07-12；子目錄遞迴盲區修復 2026-07-13）
 #
 # 觸發不設 paths 過濾（2026-07-11 起）：第 4 道 NTFS 檔名閘守的是「任何路徑」新增的
 # 敵意檔名（一旦入庫所有 Windows checkout 直接壞），paths 白名單必留盲區；本 job 全部
@@ -50,24 +51,22 @@ jobs:
     steps:
       - uses: actions/checkout@v5
 
-      - name: bash -n 語法檢查（tools/git-hooks/* + tools/*.sh）
+      - name: bash -n 語法檢查（tools/git-hooks/ + tools/*.sh，遞迴涵蓋子目錄）
         run: |
           fail=0
-          for f in tools/git-hooks/* tools/*.sh; do
-            [ -f "$f" ] || continue
+          while IFS= read -r -d '' f; do
             echo "bash -n ${f}"
             bash -n "$f" || { echo "::error::${f} bash 語法錯誤"; fail=1; }
-          done
+          done < <(find tools -type f \( -path 'tools/git-hooks/*' -o -name '*.sh' \) -print0)
           exit "$fail"
 
-      - name: py_compile 語法檢查（根層 tools/*.py）
+      - name: py_compile 語法檢查（根層 tools/ 下所有 *.py，遞迴涵蓋子目錄）
         run: |
           fail=0
-          for f in tools/*.py; do
-            [ -f "$f" ] || continue
+          while IFS= read -r -d '' f; do
             echo "py_compile ${f}"
             python3 -m py_compile "$f" || { echo "::error::${f} Python 語法錯誤"; fail=1; }
-          done
+          done < <(find tools -name '*.py' -type f -print0)
           exit "$fail"
 
       - name: pwsh 語法解析 + UTF-8 BOM 守門（active .ps1）

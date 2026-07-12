@@ -10,6 +10,11 @@ dev_start wrapper（Windows）。macOS/Linux 對等：tools/dev_start.sh
 .EXAMPLE
   . tools\dev_start.ps1        # 推薦：dot-source，核心完成後自動啟用 .venv
   powershell -ExecutionPolicy Bypass -File tools\dev_start.ps1   # 僅執行整備
+
+.NOTES
+  dot-source 呼叫端判斷成功/失敗請讀 $LASTEXITCODE，不要用 $?：
+  dot-source 後任何「執行成功」的陳述式（包含本檔內 `$rc = $LASTEXITCODE` 這行賦值本身）
+  都會把 $? 重設為 $true，導致 $? 無法反映核心邏輯（tools\dev_start.py）的真實結果。
 #>
 [CmdletBinding()]
 param([Parameter(ValueFromRemainingArguments = $true)][string[]]$RestArgs = @())
@@ -44,6 +49,9 @@ if (-not $Py) {
 }
 
 & $Py $Core @RestArgs
+# ⚠️ rc 語意陷阱（dot-source 專屬，PowerShell 語言本身如此、無法在腳本內修正）：
+# 下一行賦值陳述式本身「執行成功」，會把 $? 重設為 $true——即使 $LASTEXITCODE 存的是失敗值。
+# 因此呼叫端（尤其未來自動化 wrapper）判斷本腳本成功/失敗務必讀 $LASTEXITCODE，不可用 $?。
 $rc = $LASTEXITCODE
 
 if ($DotSourced) {

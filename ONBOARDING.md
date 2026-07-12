@@ -50,12 +50,18 @@ bootstrap 是「第一次」；之後每次開工改用 **dev_start**，不需�
 source tools/dev_start.sh    # 推薦：完成後自動啟用 .venv（bash tools/dev_start.sh 亦可，結尾印啟用指引）
 ```
 
+> ℹ️ 本指令需要互動式 shell 為 bash 或 zsh（使用 `source` builtin 與 bash 專屬語法）；純 POSIX `sh`/`dash` 不支援，常見於部分 Linux 最小化映像的預設 `/bin/sh`。
+
 **Windows（PowerShell）**
 ```powershell
 . tools\dev_start.ps1        # 推薦：dot-source，完成後自動啟用 .venv
 ```
 
-> 🔴 **全新 Windows 首次前置**：預設 `ExecutionPolicy=Restricted` 會擋所有 `.ps1`（**含上行 dot-source**）。先一次性放行 `Set-ExecutionPolicy RemoteSigned -Scope CurrentUser`（詳見 §5 對照表），或首次改用 `powershell -ExecutionPolicy Bypass -File tools\dev_start.ps1`（此形態可跑整備但不會自動啟用 venv）。
+> 🔴 **全新 Windows 首次前置**：預設 `ExecutionPolicy=Restricted` 會擋所有 `.ps1`（**含上行 dot-source**）。**唯一建議的一次性前置動作**：執行 `Set-ExecutionPolicy RemoteSigned -Scope CurrentUser`（詳見 §5 對照表；此操作**不需要**以系統管理員身分開啟 PowerShell，一般使用者權限即可）。
+>
+> `powershell -ExecutionPolicy Bypass -File tools\dev_start.ps1` **不是**上述放行的替代方案，僅適合單次、非互動、CI 風格執行（例如只是想立刻跑一次整備看結果）：此形態可跑整備但**不會自動啟用 venv**，而且**不會解除 ExecutionPolicy=Restricted 本身**——選這條路之後，日常要用的 `. tools\dev_start.ps1`（dot-source）與 §3 的 `.venv\Scripts\Activate.ps1` 仍會被同樣的「已停用指令碼執行」錯誤擋下，必須之後還是補做上面的一次性放行才能使用日常指令。
+>
+> 若已執行放行仍被擋：用 `Get-ExecutionPolicy -List` 檢查各 Scope——企業機器可能被 Group Policy 設定的 `MachinePolicy` 鎖定覆蓋，此時 `-Scope CurrentUser` 對此無效，需洽 IT 協助調整。
 
 dev_start 七步驟（邏輯集中於 `tools/dev_start.py` 跨平台單一核心，`.sh`/`.ps1` 僅薄殼）：
 ① **環境偵測**（讀 gitignored 狀態檔 `.dev_env_state.json` 的上次開發平台 Developing vs 當前 Now）→ ② **GitHub 同步**（fetch + `--ff-only` pull；髒工作樹／分叉／離線一律明示不硬做，**絕不自動 stash／rebase／push**；未追蹤檔不擋同步）→ ③ **平台切換**（Developing≠Now 時清除含絕對路徑的 `.pytest_cache`/`.ruff_cache`）→ ④ **venv／依賴整備**（另一平台形狀的 `.venv` **換手保留**至 `.venv-cache-<flavor>/`，本平台快取存在則**秒級換回**；缺 `.venv` 或依賴檔（`pyproject.toml`/`requirements-ci.txt`）hash 變動 → 自動重跑 §2 bootstrap）→ ⑤ **git hooks 檢核**（`core.hooksPath` 未設／漂移 → 自動重跑安裝腳本，治 §6「搬移後 hooks 靜默全滅」）→ ⑥ **平台健檢**（Windows 自動設 `core.longpaths=true`）→ ⑦ **狀態寫回＋摘要**。
@@ -127,7 +133,7 @@ source .venv/bin/activate
 ※ **git hooks 注意（monorepo，根層 dispatcher 架構）**：本 repo 是單一 git repo，`core.hooksPath` 只有一個值——現統一指向**根層 `tools/git-hooks/`**（**三支 hook**：pre-commit + pre-push dispatcher ＋ post-commit advisory 委派器；以主 checkout 根解析為**絕對路徑**）。上表四支安裝腳本（AutoClaude 與 AISDLC_SDD 各 `.sh`/`.ps1`）**任一支皆設定同一個根層 dispatcher，兩子專案閘門同時生效**——裝一次即可，舊的「兩子專案互斥擇一」已廢除；安裝腳本會驗證三支 hook 檔齊備才回報成功。dispatcher 依 commit/push 涉及的路徑自動分流：`AutoClaude/` 變更 → AutoClaude hooks；`AISDLC_SDD/` 變更 → AISDLC_SDD pre-push。
 
 - **※ repo 搬移／改名後 hooks 靜默失效（QA 實證）**：`core.hooksPath` 寫的是絕對路徑，整個 repo 目錄搬移或改名後 git 找不到 dispatcher，**不會報錯、閘門直接全滅**。搬移後**必須重跑任一支安裝腳本**。四支閘門腳本（`local_ci_gate.sh/.ps1`、`integration_gate.sh/.ps1`）開頭已內建 **hooks liveness 偵測**：hooksPath 未設定／與預期不符／目錄不存在時印醒目警告（不 fail；CI 環境自動跳過）。
-- **linked worktree**：四支安裝腳本在 linked worktree 內執行（含 `--uninstall`）一律**拒絕並 exit 1**——`core.hooksPath` 寫入共享 `.git/config`，在 worktree 內安裝會毒化主 checkout。請在**主 checkout** 安裝一次；hooks 執行期以 `git rev-parse --show-toplevel` 動態定位，之後在任何 worktree 內 commit/push 都自動對該 worktree 的樹生效。
+- **linked worktree**：四支安裝腳本在 linked worktree 內執行（含 `--uninstall`）一律**拒絕並 exit 1**——`core.hooksPath` 寫入共享 `.git/config`，在 worktree 內安裝會毒化主 checkout。請在**主 checkout** 安裝一次；hooks 執行期以 `git rev-parse --show-toplevel` 動態定位，之後在任何 worktree 內 commit/push 都自動對該 worktree 的樹生效。**注意**：`.venv`／bootstrap 不隨 git worktree 共用——每個新建的 linked worktree 第一次執行本指令（`dev_start`）仍需完整跑一次 bootstrap（裝全部依賴），不是「一個指令、隨開隨用」的秒級體驗；僅 git hooks 設定會如實跳過並沿用主 checkout。
 - **post-commit 委派器**：`core.hooksPath` 一經設定，git 對所有 hook 種類只查 dispatcher 目錄，原裝在 `.git/hooks/post-commit` 的機制（如 AISDLC_SDD 框架 R-9.17.1 drift 告警）會整族靜默失效——故 dispatcher 第三支 `post-commit` 轉呼叫共享 `.git/hooks/post-commit`，advisory 語意（無論結果 exit 0）。
 - **fail-safe / fail-loud 語意**：pre-push 收到**空 stdin**（如被 pre-commit 框架 shim 吃掉）＝fail-safe **兩子專案閘門全跑**；pre-commit 的 `git diff` 失敗亦 fail-safe 全跑；刪除遠端分支（zero push）維持跳過。分流**命中**但對應子 hook 檔缺失 → **fail-loud rc=1 擋下**（不靜默放行）。大型 commit/push（>64KB 變更清單）已修復 SIGPIPE 缺陷，不再靜默漏跑。
 - **已知縫隙**：merge / rebase 自動產生的 commit 天然繞過 pre-commit 家族（git 行為，非本 repo 缺陷），由 pre-push 兜底把關。另一縫隙「rename 移出子專案 fail-open」（`git mv AutoClaude/x docs/x` 時 rename 偵測只列新路徑、來源子專案閘門靜默漏跑）已於四方複審第三輪修復——dispatcher diff 加 `--no-renames`（DEF-101-008）。
