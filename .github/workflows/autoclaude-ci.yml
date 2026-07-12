@@ -208,8 +208,12 @@ jobs:
           pip install -e ".[dev,postgres]"
 
       - name: Run alembic migrations
+        # DEF-101-049：持久化守門——env.py 交易語意缺陷曾使 upgrade「exit 0 但整包
+        # rollback」（零輸出零資料表），下游測試 UndefinedTable 難歸因。current 必須
+        # 已蓋 head，否則本步即紅、根因就地現形。
         run: |
           alembic upgrade head
+          alembic current | grep -q "(head)" || { echo "❌ migration 未持久化（alembic current 未達 head）— env.py 交易語意回歸？"; exit 1; }
 
       - name: Run PG contract tests
         run: |
@@ -267,8 +271,18 @@ jobs:
           pip install -e ".[dev,postgres]"
 
       - name: Run alembic migrations (含 0007/0008 pgvector + halfvec)
+        # DEF-101-049：持久化守門（同 pg-contract job 之守門，防 upgrade 靜默 rollback）
         run: |
           alembic upgrade head
+          alembic current | grep -q "(head)" || { echo "❌ migration 未持久化（alembic current 未達 head）— env.py 交易語意回歸？"; exit 1; }
+
+      # DEF-101-050：X1 seed 接線——recall 測試前置明載「seed_kb.py 已 seed 100 列」，
+      # 但本 job 自 monorepo 匯入起即缺 seed 步驟 → knowledge_entries 空表、recall 恆 0.000
+      # （fixture 檔在庫故測試不 skip）。seed 同時重生 queries/ground-truth fixture 於
+      # runner 工作區，與當次 seed 資料嚴格配對。
+      - name: Seed KB corpus + fixtures (X1, tools/seed_kb.py)
+        run: |
+          python tools/seed_kb.py --mock-pg-seed --pg-dsn "$AUTOCLAUDE_TEST_PG_DSN"
 
       - name: Run SD_07 W2 真實 PG e2e（pg_real marker）+ junit XML
         id: pgvector_run

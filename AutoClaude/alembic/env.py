@@ -13,11 +13,13 @@
 from __future__ import annotations
 
 import os
+import re
 import sys
 
 try:
-    from alembic import context
     from sqlalchemy import engine_from_config, pool
+
+    from alembic import context
 except ImportError:
     print(
         "❌ alembic 未安裝。請先執行：pip install autoclaude[postgres]",
@@ -38,8 +40,7 @@ if not dsn:
     )
     sys.exit(2)
 # asyncpg 是 async 驅動，alembic 只支援同步連線；strip +asyncpg 改用 psycopg2
-import re as _re
-dsn = _re.sub(r"\+asyncpg", "", dsn)
+dsn = re.sub(r"\+asyncpg", "", dsn)
 config.set_main_option("sqlalchemy.url", dsn)
 
 
@@ -72,6 +73,15 @@ def run_migrations_online() -> None:
             "version_num VARCHAR(128) NOT NULL, "
             "CONSTRAINT alembic_version_pkc PRIMARY KEY (version_num))"
         )
+        # DEF-101-049 修復：上行 exec_driver_sql 觸發 SQLAlchemy 2.0 autobegin 交易，
+        # alembic 偵測「呼叫端已有進行中交易」即切換 caller-managed 模式、不再自行
+        # commit——而本函式從未 commit → with 區塊結束 close() 把「16 個 migration
+        # ＋版本戳＋上面的 CREATE TABLE」整包 rollback：`alembic upgrade head`
+        # exit 0、零輸出、零資料表（pg-contract / pg-e2e-nightly 兩 job
+        # UndefinedTable 之根因；CI 對等容器沙箱實證加本行後 46 表全建＋
+        # alembic_version=head）。commit 結清 autobegin，讓 alembic 回到自管
+        # 交易模式（transactional DDL 於 run_migrations 完成後自行 commit）。
+        connection.commit()
         context.configure(connection=connection)
         with context.begin_transaction():
             context.run_migrations()

@@ -66,8 +66,15 @@ jobs:
           pip install -e ".[dev,postgres]"
 
       - name: Run alembic migrations (含 0007/0008 pgvector + halfvec)
+        # DEF-101-049：持久化守門（同 autoclaude-ci PG jobs 之守門，防 upgrade 靜默 rollback）
         run: |
           alembic upgrade head
+          alembic current | grep -q "(head)" || { echo "❌ migration 未持久化（alembic current 未達 head）— env.py 交易語意回歸？"; exit 1; }
+
+      # DEF-101-050：X1 seed 接線（同 autoclaude-ci pg-e2e-nightly，recall 前置資料）
+      - name: Seed KB corpus + fixtures (X1, tools/seed_kb.py)
+        run: |
+          python tools/seed_kb.py --mock-pg-seed --pg-dsn "$AUTOCLAUDE_TEST_PG_DSN"
 
       - name: Run labeled PR 真實 PG e2e（pg_real marker）+ junit XML
         continue-on-error: true
