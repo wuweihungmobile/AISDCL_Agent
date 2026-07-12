@@ -15,11 +15,16 @@
         ⚠️ DEF-101-051 / 0017：0010 原 ck_runs_post_cutoff_has_goal（時間 cutoff 判別）
            已由 0017 ck_runs_three_tier_has_goal（run_kind 判別）取代；本測試斷言 head
            狀態，故驗證後者。
-  T9  STEP 3：ck_versions_post_cutoff_has_project CHECK constraint 存在（0017 未動）
+  T9  STEP 3：version→project CHECK 存在且 validated
+        ⚠️ DEF-101-054 / 0018：0010 原 ck_versions_post_cutoff_has_project（時間 cutoff
+           判別）已由 0018 ck_versions_project_scoped_has_project（version_kind 判別）取代
+           + 新增 ck_versions_version_kind；本測試斷言 head 狀態，故驗證後者並斷言舊 CHECK 已移除。
   T10 STEP 3：run→goal CHECK 行為（0017 後）— three_tier run 無 goal 被拒；
         standalone run 無 goal 允許（orphan-run 政策）
   T11 SD ❌11：FK 為 ON DELETE SET NULL（不 CASCADE，保留 audit）
   T12 downgrade -1 可清空全部 4 個 FK + CHECK + function
+  T13 STEP 3：version→project CHECK 行為（0018 後）— project_scoped version 無 project 被拒；
+        非法 version_kind 被拒；standalone version 無 project 允許（消除時間炸彈，DEF-101-054）
 """
 from __future__ import annotations
 
@@ -134,7 +139,10 @@ class TestStep1AddNullableFK:
         assert row[0] is True, "fk_runs_goal_task 必須 VALIDATED（step 3）"
 
     def test_kb_fk_propagated_to_13_partitions(self, conn, alembic_head):
-        """T4：knowledge_entries.fk_kb_execution_item 自動傳播至 12 月 + 1 default + 1 parent = 14 列。"""
+        """T4：knowledge_entries.fk_kb_execution_item 自動傳播至各分區。
+
+        12 月分區 + 1 default + 1 parent = 14 列。
+        """
         with conn.cursor() as cur:
             cur.execute(
                 "SELECT count(*) FROM pg_constraint "
@@ -226,16 +234,34 @@ class TestStep3CheckConstraints:
         assert row[0] is True, "CHECK 必為 VALIDATED"
         assert old == 0, "0017 應已移除舊 ck_runs_post_cutoff_has_goal（時間炸彈）"
 
-    def test_ck_versions_post_cutoff_exists(self, conn, alembic_head):
-        """T9：ck_versions_post_cutoff_has_project CHECK 存在。"""
+    def test_ck_versions_project_scoped_exists_and_validated(self, conn, alembic_head):
+        """T9：version→project CHECK 存在且已 VALIDATE（DEF-101-054 / 0018）。
+
+        head 狀態下為 ck_versions_project_scoped_has_project（取代 0010 的
+        ck_versions_post_cutoff_has_project 時間炸彈）+ ck_versions_version_kind 判別欄
+        CHECK；同時斷言舊時間炸彈 CHECK 已移除。
+        """
         with conn.cursor() as cur:
             cur.execute(
                 "SELECT convalidated FROM pg_constraint "
+                "WHERE conname = 'ck_versions_project_scoped_has_project';"
+            )
+            scoped = cur.fetchone()
+            cur.execute(
+                "SELECT convalidated FROM pg_constraint "
+                "WHERE conname = 'ck_versions_version_kind';"
+            )
+            kind = cur.fetchone()
+            cur.execute(
+                "SELECT count(*) FROM pg_constraint "
                 "WHERE conname = 'ck_versions_post_cutoff_has_project';"
             )
-            row = cur.fetchone()
-        assert row is not None, "ck_versions_post_cutoff_has_project 不存在"
-        assert row[0] is True
+            old = cur.fetchone()[0]
+        assert scoped is not None, "ck_versions_project_scoped_has_project 不存在（0018 未套用？）"
+        assert scoped[0] is True, "ck_versions_project_scoped_has_project 必為 VALIDATED"
+        assert kind is not None, "ck_versions_version_kind 不存在（0018 未套用？）"
+        assert kind[0] is True, "ck_versions_version_kind 必為 VALIDATED"
+        assert old == 0, "0018 應已移除舊 ck_versions_post_cutoff_has_project（時間炸彈）"
 
     def test_ck_blocks_three_tier_run_without_goal(self, conn, alembic_head):
         """T10：three_tier run 無 goal_task_id 應被 CHECK 拒（DEF-101-051 / 0017）。
@@ -299,6 +325,77 @@ class TestStep3CheckConstraints:
                 row = cur.fetchone()
                 assert row is not None, "standalone run 應允許 NULL goal_task_id"
                 assert row[1] == "standalone", "未指定時 run_kind 應預設 standalone"
+        finally:
+            c.rollback()
+            c.close()
+
+    def test_ck_blocks_project_scoped_version_without_project(self, conn, alembic_head):
+        """T13：project_scoped version 無 project_id 應被 CHECK 拒（DEF-101-054 / 0018）。
+
+        判別欄語意：宣稱自己隸屬 project（version_kind='project_scoped'）就必須帶
+        project_id，否則違反 ck_versions_project_scoped_has_project。此為保留 version→
+        project 關聯能力的核心（非放寬約束，與 runs T10 同精神）。
+        """
+        psycopg2 = pytest.importorskip("psycopg2")
+        c = _new_conn()
+        try:
+            with c.cursor() as cur:
+                # match= 綁定 constraint 名，確保是「對的原因」被拒（Rule 9）
+                with pytest.raises(
+                    psycopg2.errors.CheckViolation,
+                    match="ck_versions_project_scoped_has_project",
+                ):
+                    cur.execute(
+                        "INSERT INTO playbook_versions "
+                        "(original_playbook_id, generation, yaml_content, version_kind) "
+                        "VALUES ('scoped_pb', 1, 'v1', 'project_scoped');"
+                    )
+        finally:
+            c.rollback()
+            c.close()
+
+    def test_ck_versions_kind_rejects_invalid_value(self, conn, alembic_head):
+        """T13b：version_kind 只允許 {standalone, project_scoped}。
+
+        非法值被 ck_versions_version_kind 拒。
+        """
+        psycopg2 = pytest.importorskip("psycopg2")
+        c = _new_conn()
+        try:
+            with c.cursor() as cur:
+                with pytest.raises(
+                    psycopg2.errors.CheckViolation, match="ck_versions_version_kind"
+                ):
+                    cur.execute(
+                        "INSERT INTO playbook_versions "
+                        "(original_playbook_id, generation, yaml_content, version_kind) "
+                        "VALUES ('bad_kind_pb', 1, 'v1', 'garbage');"
+                    )
+        finally:
+            c.rollback()
+            c.close()
+
+    def test_ck_allows_standalone_version_without_project(self, conn, alembic_head):
+        """T13c：standalone version（plain playbook evolution）無 project_id 應允許。
+
+        DEF-101-054 / 0018：改採 version_kind 判別後，無時間依賴——不論 created_at 為
+        cutoff 前後，standalone version 皆合法無 project（消除 0010 時間炸彈）。
+        """
+        c = _new_conn()
+        try:
+            with c.cursor() as cur:
+                # 明確設 created_at 為 cutoff 後（2026-05-21）：舊時間炸彈 CHECK 會拒，
+                # 新 version_kind CHECK 應放行（version_kind 預設 'standalone'）。
+                cur.execute(
+                    "INSERT INTO playbook_versions "
+                    "(original_playbook_id, generation, yaml_content, created_at) "
+                    "VALUES ('standalone_v', 1, 'v1', "
+                    "        '2026-05-21 00:00:00+00'::timestamptz) "
+                    "RETURNING version_id, version_kind;"
+                )
+                row = cur.fetchone()
+                assert row is not None, "standalone version 應允許 NULL project_id"
+                assert row[1] == "standalone", "未指定時 version_kind 應預設 standalone"
         finally:
             c.rollback()
             c.close()

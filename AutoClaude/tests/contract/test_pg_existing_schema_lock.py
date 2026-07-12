@@ -54,6 +54,9 @@ EXPECTED_COLUMNS: dict[str, set[str]] = {
     "playbook_versions": {
         "version_id", "original_playbook_id", "generation",
         "yaml_content", "mutation_log", "parent_version_id", "created_at",
+        # DEF-101-054 / 0018：version→project 接線 + version_kind 判別欄。
+        # project_id 於 0010 已建 DB 欄（此前 ORM 未映射＝半成品）；version_kind 為 0018 新增。
+        "project_id", "version_kind",
     },
     # SD_06 W5-T5-5
     "drift_log": {
@@ -110,6 +113,7 @@ EXPECTED_NOT_NULL: dict[str, set[str]] = {
     "playbook_versions": {
         "version_id", "original_playbook_id", "generation",
         "yaml_content", "mutation_log", "created_at",
+        "version_kind",  # DEF-101-054 / 0018：NOT NULL DEFAULT 'standalone'
     },
     # drift_log NOT NULL：PK 兩欄 + playbook_id + source × 2 + field_drift + severity
     "drift_log": {
@@ -160,10 +164,17 @@ EXPECTED_INDEX_NAMES: dict[str, set[str]] = {
 }
 
 EXPECTED_CHECK_CONSTRAINT_NAMES: dict[str, set[str]] = {
-    "playbook_runs": {"ck_playbook_runs_status"},
+    # DEF-101-051 / 0017：runs 判別欄 CHECK（ck_runs_run_kind / ck_runs_three_tier_has_goal）
+    # 一併納入 baseline，使離線 snapshot 真正鎖住判別欄 CHECK（見下方 parametrized 測試）。
+    "playbook_runs": {
+        "ck_playbook_runs_status", "ck_runs_run_kind", "ck_runs_three_tier_has_goal",
+    },
     "checkpoints": set(),
     "knowledge_entries": {"ck_kb_outcome"},
-    "playbook_versions": set(),
+    # DEF-101-054 / 0018：version_kind 判別欄 + project_scoped 需 project 之 CHECK。
+    "playbook_versions": {
+        "ck_versions_version_kind", "ck_versions_project_scoped_has_project",
+    },
     "drift_log": {"ck_drift_severity"},
     "config_audit_log": {"ck_config_audit_layer", "ck_config_audit_action"},
     # Improving_012 Phase 1：無 CHECK constraint
@@ -257,6 +268,25 @@ class TestDDLSnapshot:
         missing = expected - actual
         assert not missing, f"{table_name} 索引缺失：{missing}"
 
+    @pytest.mark.parametrize("table_name", sorted(EXPECTED_TABLES))
+    def test_check_constraint_names_match_baseline(self, metadata, table_name):
+        """DEF-101-053 QA follow-up：EXPECTED_CHECK_CONSTRAINT_NAMES 須被實際消費。
+
+        此常數過去為「死常數」（僅定義、無 assertion 迭代）→ 從 ORM 刪任一 CHECK
+        離線測試仍全綠，與本檔「任何 ORM 漂移立即 fail」宣稱矛盾。比照
+        test_index_names_match_baseline 加此 parametrized 測試，使判別欄 CHECK
+        （ck_runs_run_kind / ck_runs_three_tier_has_goal / ck_versions_version_kind /
+        ck_versions_project_scoped_has_project）於離線層真正上鎖（Rule 9：測試須能 fail）。
+        """
+        from sqlalchemy import CheckConstraint
+        table = metadata.tables[table_name]
+        actual = {
+            c.name for c in table.constraints if isinstance(c, CheckConstraint)
+        }
+        expected = EXPECTED_CHECK_CONSTRAINT_NAMES[table_name]
+        missing = expected - actual
+        assert not missing, f"{table_name} CHECK 約束缺失：{missing}"
+
     def test_checkpoint_run_id_index_is_unique(self, metadata):
         """C-6 修復鎖定：idx_ck_run_id 必須為 UNIQUE（多 run 並存策略）。"""
         table = metadata.tables["checkpoints"]
@@ -328,7 +358,16 @@ class TestCRUDBehaviorSnapshot:
     @pytest.fixture(autouse=True)
     def _setup(self):
         from sqlalchemy.ext.asyncio import create_async_engine
-        self.engine = create_async_engine(_PG_DSN, echo=False)
+        from sqlalchemy.pool import NullPool
+        # DEF-101-053 修復（比照姊妹檔 test_pg_state_repository_contract.py R56 P0-1f）：
+        # 各 CRUD 測試為 sync 方法，內部各自 asyncio.run（獨立 event loop）。預設 QueuePool
+        # 會把 asyncpg 連線快取並綁在「首次 asyncio.run（_truncate_all）」的 loop；該 loop
+        # 關閉後，後續 test body 取到死 loop 連線 → RuntimeError（attached to a different
+        # loop）。此前本檔遺漏此修復：2 支測試（uniqueness/versions_self_fk）於首個 execute
+        # 撞 RuntimeError 而紅；另 2 支（status/kb CHECK）把唯一 execute 包在 pytest.raises
+        # (Exception) 內 → loop RuntimeError 被吞成假綠（CHECK 從未真測，比紅更危險，Rule 9）。
+        # NullPool 不跨呼叫快取連線 → 每次 acquire 於當前 loop 全新建立，根治此問題。
+        self.engine = create_async_engine(_PG_DSN, echo=False, poolclass=NullPool)
         import asyncio
         asyncio.run(self._truncate_all())
         yield
@@ -352,7 +391,11 @@ class TestCRUDBehaviorSnapshot:
 
         async def _run():
             async with self.engine.begin() as conn:
-                with pytest.raises(Exception):
+                # DEF-101-053：match= 綁定 constraint 名，確保是 status CHECK「對的原因」被拒，
+                # 而非 loop RuntimeError 等被寬鬆 Exception 吞成假綠（Rule 9）。
+                # ⚠️ 綁「DB 實際名」playbook_runs_status_check（0001_initial 之 PG 預設名），
+                # 非 ORM metadata 的 ck_playbook_runs_status——兩者命名分歧（見 DEF-101-055 記事）。
+                with pytest.raises(Exception, match="playbook_runs_status_check"):
                     await conn.execute(
                         text(
                             "INSERT INTO playbook_runs (playbook_id, project, status) "
@@ -369,7 +412,9 @@ class TestCRUDBehaviorSnapshot:
 
         async def _run():
             async with self.engine.begin() as conn:
-                with pytest.raises(Exception):
+                # DEF-101-053：match= 綁定 DB 實際名 knowledge_entries_outcome_check（partitioned
+                # 子表繼承之 PG 預設名），確保是 outcome CHECK「對的原因」被拒（Rule 9）。
+                with pytest.raises(Exception, match="knowledge_entries_outcome_check"):
                     await conn.execute(
                         text(
                             "INSERT INTO knowledge_entries "
@@ -408,7 +453,8 @@ class TestCRUDBehaviorSnapshot:
                     ),
                     {"r": run_id},
                 )
-                with pytest.raises(Exception):
+                # DEF-101-053：match= 綁定 idx_ck_run_id，確保是 UNIQUE 索引被拒（Rule 9）。
+                with pytest.raises(Exception, match="idx_ck_run_id"):
                     await conn.execute(
                         text(
                             "INSERT INTO checkpoints "

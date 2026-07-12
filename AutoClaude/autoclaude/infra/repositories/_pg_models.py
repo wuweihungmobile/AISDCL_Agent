@@ -149,7 +149,25 @@ class PlaybookVersion(Base):
     mutation_log = Column(ARRAY(Text), nullable=False, server_default="{}")
     parent_version_id = Column(UUID(as_uuid=True), ForeignKey("playbook_versions.version_id"))
     created_at = Column(TIMESTAMP(timezone=True), nullable=False, server_default=func.now())
+    # DEF-101-054：version→project 接線。DB 欄 + FK（fk_versions_project）由 alembic
+    # 0010 建立；此前 ORM 未映射（＝與 runs.goal_task_id 同型半成品）。不在 ORM 宣告
+    # ForeignKey——projects 非本模組 ORM 模型，FK 於 DB 層強制即可（與 PlaybookRun.
+    # goal_task_id 同慣例）。
+    project_id = Column(UUID(as_uuid=True), nullable=True)
+    # DEF-101-054 / 0018：version 種類判別欄。'project_scoped'（隸屬三層 project，必須有
+    # project_id）vs 'standalone'（plain playbook evolution，合法無 project）。CHECK
+    # ck_versions_project_scoped_has_project 於 alembic 0018 強制，消除 0010 時間炸彈。
+    # 現行 persist_evolution 未攜 project 脈絡 → PG 落地版本恆為 standalone（server_default）。
+    version_kind = Column(Text, nullable=False, server_default="standalone")
     __table_args__ = (
+        CheckConstraint(
+            "version_kind IN ('standalone', 'project_scoped')",
+            name="ck_versions_version_kind",
+        ),
+        CheckConstraint(
+            "version_kind <> 'project_scoped' OR project_id IS NOT NULL",
+            name="ck_versions_project_scoped_has_project",
+        ),
         Index("idx_pv_playbook", "original_playbook_id", "generation"),
     )
 

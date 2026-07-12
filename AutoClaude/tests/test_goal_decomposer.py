@@ -112,6 +112,33 @@ def test_exactly_max_steps_accepted():
     assert len(draft.playbook.tasks) == MAX_DECOMPOSITION_STEPS
 
 
+# ── DEF-101-054 follow-up：goal_task_id passthrough（runtime gap 收口）──────
+def test_goal_task_id_threaded_into_every_task():
+    """呼叫端提供 goal_task_id → 攤平至每個 PlaybookTask（run 得標 three_tier）。
+
+    Rule 9：驗證的是「動態分解 run 不再恆 standalone」的意圖——三層 goal UUID 必須傳達
+    到每個 task，才能在 PG 落地經 _ensure_run_id 標 run_kind='three_tier'（對齊離線工具路徑）。
+    """
+    obs = _RecordingObs()
+    gd = GoalDecomposer(_FakeBrain(_decision(3)), observability=obs)
+    gtid = "11111111-2222-3333-4444-555555555555"
+    draft = gd.decompose("g", goal_task_id=gtid)
+    assert [t.goal_task_id for t in draft.playbook.tasks] == [gtid, gtid, gtid]
+    # 審計留痕 goal_task_id（XAI 可審）
+    accepted = [e for e in obs.events if e[0] == "decomposition_accepted"][-1][1]
+    assert accepted["goal_task_id"] == gtid
+
+
+def test_goal_task_id_defaults_none_stays_standalone():
+    """未提供 goal_task_id（純自由文字 goal，無持久化 goal_task）→ task.goal_task_id 恆 None。
+
+    這是合法 standalone 路徑，非缺陷：GoalDecomposer 不自造 UUID（strategy tier 零 infra）。
+    """
+    gd = GoalDecomposer(_FakeBrain(_decision(2)))
+    draft = gd.decompose("g")
+    assert all(t.goal_task_id is None for t in draft.playbook.tasks)
+
+
 def test_config_can_lower_not_raise_cap():
     """config 可下調上限；不可上調過硬上限 24。"""
     # 下調至 2：3 步被拒

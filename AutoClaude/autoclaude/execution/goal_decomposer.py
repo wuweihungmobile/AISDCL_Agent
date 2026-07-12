@@ -93,8 +93,19 @@ class GoalDecomposer:
         *,
         context: str = "",
         project: str = "decomposed-goal",
+        goal_task_id: str | None = None,
     ) -> DecompositionDraft:
-        """拆解 goal 為 Playbook 草稿（未 signoff）。任一有界閘不過即 raise。"""
+        """拆解 goal 為 Playbook 草稿（未 signoff）。任一有界閘不過即 raise。
+
+        DEF-101-054 follow-up（runtime gap）：呼叫端若持有此 goal 對應的 goal_task UUID
+        （三層模型），經 goal_task_id 傳入 → 賦值到每個 PlaybookTask.goal_task_id，使攤平後
+        的 run 於 PG 落地時標 run_kind='three_tier'（對齊離線工具 three_tier_to_playbook 路徑，
+        消除「動態分解 run 恆 standalone」的 gap）。未提供時（如純自由文字 goal，無持久化
+        goal_task）維持 None → run 合法為 standalone。GoalDecomposer 本身不持久化 goal_task
+        （strategy tier 零 infra 依賴）；產生 UUID 為呼叫端（具 infra 存取者）之責。
+        ⚠️ 現況：runtime 呼叫端（OrchestrationCoordinator）尚未接入 decompose 亦未傳入此
+        參數＝dormant capability；端到端動態分解接線為另一 runtime 工項（見 SD_10 NextAction）。
+        """
         if not goal or not goal.strip():
             self._audit("decomposition_rejected", goal, reason="empty_goal")
             raise DecompositionError("goal 為空，拒絕拆解")
@@ -115,11 +126,11 @@ class GoalDecomposer:
 
         self._validate_bounded(goal, decision)  # 三道有界閘
         ordered = self._topological_order(decision.steps)  # 無環 + 拓撲序
-        playbook = self._to_playbook_draft(goal, project, ordered)
+        playbook = self._to_playbook_draft(goal, project, ordered, goal_task_id)
         goal_hash = self._goal_hash(goal)
         self._audit(
             "decomposition_accepted", goal, reason="ok", steps=len(ordered),
-            goal_hash=goal_hash,
+            goal_hash=goal_hash, goal_task_id=goal_task_id or "",
         )
         return DecompositionDraft(
             playbook=playbook, goal=goal, goal_hash=goal_hash,
@@ -255,13 +266,18 @@ class GoalDecomposer:
     @staticmethod
     def _to_playbook_draft(
         goal: str, project: str, ordered: list[DecompositionStep],
+        goal_task_id: str | None = None,
     ) -> Playbook:
+        # DEF-101-054 follow-up：goal_task_id（呼叫端提供之三層 goal UUID）攤平至每個
+        # task，使 run 於 PG 落地標 three_tier；未提供則維持 None（standalone），對齊
+        # PlaybookTask.goal_task_id 既有語意（models/playbook.py）。
         tasks = [
             PlaybookTask(
                 step_id=s.step_id,
                 name=s.name or s.step_id,
                 prompt=s.prompt,
                 evaluator_command=s.evaluator_command,
+                goal_task_id=goal_task_id,
             )
             for s in ordered
         ]
