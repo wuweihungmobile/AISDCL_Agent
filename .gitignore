@@ -15,6 +15,12 @@ htmlcov/
 # 虛擬環境
 .venv/
 venv/
+# dev_start 平台 venv 快取（跨平台共用工作目錄時保留另一平台 venv，秒級換手）
+/.venv-cache-*/
+
+# dev_start 環境偵測狀態檔（Developing 平台紀錄；共用工作目錄時隨磁碟跨機、
+# 雙 clone 時各機獨立，皆不入庫）
+/.dev_env_state.json
 
 # 環境設定（API Key 絕不 commit）
 .env

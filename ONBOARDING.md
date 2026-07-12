@@ -41,6 +41,29 @@ powershell -ExecutionPolicy Bypass -File tools/bootstrap.ps1
 
 bootstrap 會：① 檢查 Python ≥3.11 → ② 建立 `.venv`（有 uv 就用 uv 加速）→ ③ 安裝 AutoClaude（editable, `[dev,notifications,lint]`，含 import-linter，`lint-imports` 出廠即可用）+ AISDLC_SDD CI 依賴 → ④ 印出後續指引。git hooks 另以 §6 對照表的安裝腳本設定（任一支即可，兩子專案閘門同時生效，見 §6 dispatcher 說明）。讀取 [.python-version](.python-version) 時，三段版號（如 `3.11.9`）會自動截為 major.minor 比對，新建 `.venv` 選定直譯器與 pinned 版本不一致時印警告（`.sh`/`.ps1` 兩版對等）；既有 `.venv` 沿用前會先驗證**平台形狀**（POSIX 需 `bin/python`、Windows 需 `Scripts\python.exe`；跨平台共用工作目錄時以對方平台建的 `.venv` 會被 fail-fast 擋下並提示刪除重建），版本不做檢查（需重建請先刪除 `.venv`）。
 
+### 2.1 每日開工一鍵啟動（dev_start — 自動偵測環境＋切換＋GitHub 同步）
+
+bootstrap 是「第一次」；之後每次開工改用 **dev_start**，不需手動判斷「上次是不是在另一個平台開發」：
+
+**macOS / Linux**
+```bash
+source tools/dev_start.sh    # 推薦：完成後自動啟用 .venv（bash tools/dev_start.sh 亦可，結尾印啟用指引）
+```
+
+**Windows（PowerShell）**
+```powershell
+. tools\dev_start.ps1        # 推薦：dot-source，完成後自動啟用 .venv
+```
+
+> 🔴 **全新 Windows 首次前置**：預設 `ExecutionPolicy=Restricted` 會擋所有 `.ps1`（**含上行 dot-source**）。先一次性放行 `Set-ExecutionPolicy RemoteSigned -Scope CurrentUser`（詳見 §5 對照表），或首次改用 `powershell -ExecutionPolicy Bypass -File tools\dev_start.ps1`（此形態可跑整備但不會自動啟用 venv）。
+
+dev_start 七步驟（邏輯集中於 `tools/dev_start.py` 跨平台單一核心，`.sh`/`.ps1` 僅薄殼）：
+① **環境偵測**（讀 gitignored 狀態檔 `.dev_env_state.json` 的上次開發平台 Developing vs 當前 Now）→ ② **GitHub 同步**（fetch + `--ff-only` pull；髒工作樹／分叉／離線一律明示不硬做，**絕不自動 stash／rebase／push**；未追蹤檔不擋同步）→ ③ **平台切換**（Developing≠Now 時清除含絕對路徑的 `.pytest_cache`/`.ruff_cache`）→ ④ **venv／依賴整備**（另一平台形狀的 `.venv` **換手保留**至 `.venv-cache-<flavor>/`，本平台快取存在則**秒級換回**；缺 `.venv` 或依賴檔（`pyproject.toml`/`requirements-ci.txt`）hash 變動 → 自動重跑 §2 bootstrap）→ ⑤ **git hooks 檢核**（`core.hooksPath` 未設／漂移 → 自動重跑安裝腳本，治 §6「搬移後 hooks 靜默全滅」）→ ⑥ **平台健檢**（Windows 自動設 `core.longpaths=true`）→ ⑦ **狀態寫回＋摘要**。
+
+適用兩種拓撲：**共用工作目錄**（外接碟／同步資料夾，macOS ⇄ Windows 輪開同一份）由 ③④ 吸收全部切換成本；**雙機各自 clone** 則 ①③ 恆為「無切換」，由 ②④ 把另一台 push 的變更同步進來並保持依賴新鮮。旗標：`--no-sync`（離線跳過 ②）、`--force-bootstrap`（強制重裝依賴）。
+
+補充：狀態檔 `.dev_env_state.json` 損毀時自動視為首次執行（可隨時安全刪除重生，只多付一次依賴基準記錄）；VSCode 使用者在**整合終端機**執行同指令即可（或把指令掛進 shell profile，開終端機即自動整備）。
+
 ---
 
 ## 3. 啟用 venv（🔴 每個新終端機、每次開發前）
@@ -78,7 +101,7 @@ source .venv/bin/activate
 | `tools\xxx.ps1` 在 macOS 跑不了 | PowerShell 腳本是 Windows 專屬 | 用對應的 `.sh`（見 §6 對照表） |
 | Windows `git pull` 後 `AISDLC_SDD/.claude/settings.local.json` 從工作樹消失 | 該檔已出庫（gitignore），倉內僅留 example | 複製同目錄 `settings.local.json.example` 為 `settings.local.json`（本機個人設定，之後不會再被 git 動到） |
 | cd 進 repo 後 pyenv shim 報 `version 3.11 is not installed` | [.python-version](.python-version) 只寫兩位版號 `3.11`：uv 與 Windows `py` launcher 原生支援，但 **pyenv 需 ≥ 2.4** 才支援前綴解析（pyenv-win 視版本而定） | 升級 pyenv ≥ 2.4；或先 `pyenv install 3.11.x` 並確保該版可被解析；或改用 uv |
-| 全新 Windows 11 跑 `.venv\Scripts\Activate.ps1` 報「因為這個系統上已停用指令碼執行」 | Windows 預設 `ExecutionPolicy=Restricted` 擋所有 `.ps1`（bootstrap 本身以 `-ExecutionPolicy Bypass` 呼叫故能跑，**只有日常啟用 venv 會卡**） | 一次性放行：`Set-ExecutionPolicy RemoteSigned -Scope CurrentUser` |
+| 全新 Windows 11 跑 `.venv\Scripts\Activate.ps1` 報「因為這個系統上已停用指令碼執行」 | Windows 預設 `ExecutionPolicy=Restricted` 擋所有 `.ps1`（bootstrap／dev_start 以 `-ExecutionPolicy Bypass -File` 呼叫可跑，但**日常啟用 venv 與 `. tools\dev_start.ps1` dot-source 都會被擋**，見 §2.1 前置） | 一次性放行：`Set-ExecutionPolicy RemoteSigned -Scope CurrentUser` |
 | 文件裡的路徑是 `d:\CursorProject\...` | 文件在 Windows 上撰寫 | 純說明性路徑，忽略即可；實際指令請用相對路徑 |
 | GUI 發起的 git commit（如 VSCode Source Control 按鈕）被 hooks 擋下：`python: command not found`（mac）或缺 ruff 的系統 Python（Windows） | GUI App 不繼承終端機 venv PATH，hooks fail-loud 擋下 | 從已啟用 venv 的終端機啟動編輯器（如 `code .`），或改用終端機 commit |
 
@@ -89,6 +112,7 @@ source .venv/bin/activate
 | 用途 | Windows | macOS / Linux |
 |------|---------|---------------|
 | 環境設定 | `tools\bootstrap.ps1` | `tools/bootstrap.sh` |
+| 每日開工自動啟動（§2.1） | `. tools\dev_start.ps1` | `source tools/dev_start.sh` |
 | AutoClaude 本機 CI 閘門 | `AutoClaude\tools\local_ci_gate.ps1` | `AutoClaude/tools/local_ci_gate.sh` |
 | 裝 AutoClaude git hooks ※ | `AutoClaude\tools\install_git_hooks.ps1` | `AutoClaude/tools/install_git_hooks.sh` |
 | act 跑真 CI（Docker） | `AutoClaude\tools\run_act.ps1` | `AutoClaude/tools/run_act.sh` |
@@ -109,7 +133,7 @@ source .venv/bin/activate
 - **已知縫隙**：merge / rebase 自動產生的 commit 天然繞過 pre-commit 家族（git 行為，非本 repo 缺陷），由 pre-push 兜底把關。另一縫隙「rename 移出子專案 fail-open」（`git mv AutoClaude/x docs/x` 時 rename 偵測只列新路徑、來源子專案閘門靜默漏跑）已於四方複審第三輪修復——dispatcher diff 加 `--no-renames`（DEF-101-008）。
 - **pre-commit 新增兩道閘（四方複審第三輪，commit 可能因此被攔的新原因）**：① **NTFS 檔名閘**——新增檔名含 Windows 不允許字元（`< > : " | ? *`／控制字元）、保留裝置名（CON/PRN/AUX/NUL/COM1~9/LPT1~9）、尾隨空白/句點、或與既有路徑僅大小寫不同（NTFS 碰撞）會被 rc=1 擋下，改名後重新暫存即可（DEF-101-011）；repo 相對路徑 **>200 字元**（code point 計，locale 無關）亦 rc=1 擋下、>180 預警——Windows MAX_PATH=260 保守閘，縮短檔名或目錄層級即可（DEF-101-039，四方複審第五輪）；② **根層基建 leg**——commit 涉及根層 `tools/`、`.github/`、`.gitattributes`、`.editorconfig` 時，對變更到的 `.sh`／無副檔名 hook 檔跑 `bash -n` 語法檢查，語法錯誤擋下（DEF-101-012）。
 - **執行權限政策**：「755 入庫」範圍**僅指 `tools/git-hooks/` 的 hook 檔**（git 直接執行）；其他 `.sh` 工具一律以 `bash xxx.sh` 呼叫，不依賴 executable bit。
-- **雙腳本對等機械守護**：上表三對 `.sh`/`.ps1`（bootstrap／integration_gate／local_ci_gate）的 step 標籤清單由 `tools/check_script_parity.py` 於 `root-infra-ci` 機械比對——改任一邊的 step 須同步另一邊，否則 CI 紅。其餘三對（install_git_hooks、AISDLC_SDD install-hooks、run_act）無可抽取的標籤錨點，**暫無機械比對**——改任一邊須人工同步另一邊（明文侷限，見 check_script_parity.py docstring）。
+- **雙腳本對等機械守護**：上表三對 `.sh`/`.ps1`（bootstrap／integration_gate／local_ci_gate）的 step 標籤清單由 `tools/check_script_parity.py` 於 `root-infra-ci` 機械比對——改任一邊的 step 須同步另一邊，否則 CI 紅。其餘三對（install_git_hooks、AISDLC_SDD install-hooks、run_act）無可抽取的標籤錨點，**暫無機械比對**——改任一邊須人工同步另一邊（明文侷限，見 check_script_parity.py docstring）。`dev_start` 對不在上述任一類——七步驟業務邏輯集中於跨平台單一核心 `tools/dev_start.py`，**無業務邏輯漂移面**；兩薄殼仍各有直譯器選擇／venv 啟用等樣板（無標籤錨點、暫無機械比對），改任一邊須人工同步另一邊。
 
 ### 6.1 CI workflows（GitHub Actions，根層接線）
 
