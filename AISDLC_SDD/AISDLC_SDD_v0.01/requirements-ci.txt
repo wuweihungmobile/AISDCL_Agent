@@ -11,4 +11,4 @@
 # 升版規則：本機先 `pip install -U` 跑全綠後，再回寫釘選版本並 commit。
 
 pyyaml==6.0.3
-pytest==9.0.3
+pytest==9.1.1
