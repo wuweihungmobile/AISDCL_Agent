@@ -25,6 +25,13 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     if: github.event.label.name == 'needs-pg-e2e'
+    # DEF-101-052：預設 GITHUB_TOKEN 唯讀 → 「Comment AC4 progress on PR」步驟
+    # 恆 HttpError（Resource not accessible by integration）；顯式授 PR 留言權
+    # （dependabot 觸發之 run 依 GitHub 政策仍強制唯讀，該情境留言步驟照舊會紅，
+    # 屬平台限制不另處理——取證勿用 dependabot PR 當載具）
+    permissions:
+      contents: read
+      pull-requests: write
     continue-on-error: true  # 同 nightly：警示不阻塞 PR merge
 
     services:
