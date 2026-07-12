@@ -52,6 +52,8 @@ def handle_token_halt_impl(
         step_id=task.step_id,
         total_steps=total,
         project=playbook.project,
+        # DEF-101-051：帶當前 task 之 goal_task_id（三層來源時非 None），使 PG run 標 three_tier
+        goal_task_id=getattr(task, "goal_task_id", None),
         completed_step_log=list(step_log),
         peak_token_pct=peak_token_pct,
         failure_history=tracker.to_checkpoint_records() if tracker else [],

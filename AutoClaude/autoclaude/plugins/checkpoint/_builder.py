@@ -56,6 +56,13 @@ def build_checkpoint_from_ctx(
         step_id=payload.get("step_id", ctx.task.step_id if ctx.task else ""),
         total_steps=int(payload.get("total_steps", len(ctx.playbook.tasks))),
         project=ctx.playbook.project,
+        # DEF-101-051：接通 SD_06 W5 遺留之三層欄位——由當前 task 之 goal_task_id
+        # 帶入 checkpoint，使 PgStateRepository 得以將該 run 標記為 three_tier。
+        # 無 goal 分解時為 None（standalone run，合法無 goal）。
+        goal_task_id=(
+            payload.get("goal_task_id")
+            or (getattr(ctx.task, "goal_task_id", None) if ctx.task else None)
+        ),
         completed_step_log=list(payload.get("completed_step_log", [])),
         peak_token_pct=float(payload.get("peak_token_pct", 0.0)),
         failure_history=list(payload.get("failure_history", [])),

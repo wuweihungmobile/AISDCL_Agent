@@ -158,16 +158,12 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     needs: test
-    # SD_09 R56 P0-1f/1g：本 job 因上游 test job 長期紅而被 skip，從未在 CI 真綠。修復
-    # P0-1c（psycopg2）/P0-1d（pgvector image）/P0-1e（alembic version_num>32）後 alembic
-    # 可達 head，但 contract test 仍有兩項 pre-existing 缺陷需 PG-production track 正式重構：
-    #   (1) fixture 以 asyncio.run-per-method 重用 async engine（NullPool 已緩解連線跨 loop，
-    #       見 test 檔 P0-1f）；(2) `relation "playbook_runs" does not exist`——migration 鏈
-    #       到 head 後仍缺三層父表，屬 schema/migration 議題。
-    # 依 ADR-SD08-005「PG production 延 SD_09 W4-W5 / SD_10（人類 DBA staging + 親簽）」，
-    # 此 job 暫標 continue-on-error（非阻塞、log 仍完整可見真實狀態，非掩蓋），SD_10 PG-track
-    # 正式修復 contract test fixture + 三層 schema 後移除。詳見 sprint_history §1.7.3 R56。
-    continue-on-error: true
+    # DEF-101-051（SD_10 PG-track）已補完三層 goal_task_id 接線 + alembic 0017 run_kind
+    # 判別欄（CHECK 改為「僅三層 run 需 goal」，消除 playbook_runs 時間炸彈；playbook_versions
+    # 平行炸彈另見 DEF-101-054），pg_state_repository contract 全綠 → 本 job 自即日轉「硬閘」
+    # （移除 continue-on-error）。硬閘僅顯式覆蓋此檔；migration 語意（T8/T10）由本機/nightly 驗。
+    # 歷史（R56）：曾因 P0-1f 連線跨 loop（NullPool 已修）+ goal_task_id 半成品時間炸彈
+    # 而長期非阻塞。詳見 docs/06_quality/AutoSDD_Defect_Log.md DEF-101-051。
 
     services:
       postgres:

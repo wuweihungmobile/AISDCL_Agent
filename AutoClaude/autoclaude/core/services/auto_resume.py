@@ -249,10 +249,10 @@ class AutoResumeService:
         if self._state_repo is None:
             return
         step_idx = result.halt_step_idx if result.halt_step_idx is not None else 0
-        step_id = (
-            playbook.tasks[step_idx].step_id
-            if 0 <= step_idx < len(playbook.tasks) else ""
+        _halt_task = (
+            playbook.tasks[step_idx] if 0 <= step_idx < len(playbook.tasks) else None
         )
+        step_id = _halt_task.step_id if _halt_task else ""
         # lazy import 避免 core/ → infra/ 反向依賴（與 _resolve_start 既有作法一致）
         from ...infra.repositories.factory import canonical_playbook_id
         from ...utils.checkpoint_manager import PlaybookCheckpoint
@@ -263,6 +263,8 @@ class AutoResumeService:
             step_id=step_id,
             total_steps=result.total_steps,
             project=playbook.project,
+            # DEF-101-051：HALT 點 task 之 goal_task_id（三層來源時非 None）
+            goal_task_id=getattr(_halt_task, "goal_task_id", None),
             completed_step_log=list(result.step_log),
             completed_step_ids=list(result.completed_step_ids),
             peak_token_pct=result.peak_token_pct,

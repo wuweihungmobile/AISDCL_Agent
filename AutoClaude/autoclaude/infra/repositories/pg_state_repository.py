@@ -24,6 +24,7 @@ from __future__ import annotations
 
 import logging
 import re
+import uuid
 from collections import OrderedDict  # Dev-3：移至模組頂部，避免每次 fallback 重複 import
 from datetime import datetime, timedelta, timezone
 from typing import Any, Optional
@@ -269,8 +270,8 @@ class PgStateRepository:
         from sqlalchemy.ext.asyncio import AsyncSession
         async with AsyncSession(self._engine) as session:
             async with session.begin():
-                # M4：確保 playbook_runs 記錄存在，取得 run_id
-                run_id = await self._ensure_run_id(session, playbook_id, cp.project)
+                # M4 + DEF-101-051：確保 run 存在並帶 cp.goal_task_id（三層 run 標記）
+                run_id = await self._ensure_run_id(session, playbook_id, cp.project, cp.goal_task_id)
                 # W4-T15 m-4：PlaybookVersion 連續性驗證（warning-only，不影響 save）
                 await self._validate_version_continuity(session, playbook_id)
                 counters = {
@@ -282,13 +283,18 @@ class PgStateRepository:
                     # 子鍵，零 schema migration（SRD_AGT_Phase2 §0 實證）
                     "alert_ladder": getattr(cp, "alert_ladder", {}) or {},
                 }
+                # checkpoint model 以 ISO 字串保存 scheduled_resume_at（File/InMemory 相容），
+                # 但 TIMESTAMPTZ 欄位需 datetime；asyncpg 不接受 str → 此處還原型別。
+                sched = cp.scheduled_resume_at
+                if isinstance(sched, str):
+                    sched = datetime.fromisoformat(sched)
                 stmt = pg_insert(CheckpointRow).values(
                     run_id=run_id,
                     playbook_id=playbook_id,
                     step_idx=cp.step_idx,
                     step_id=cp.step_id,
                     total_steps=cp.total_steps,
-                    scheduled_resume_at=cp.scheduled_resume_at,
+                    scheduled_resume_at=sched,
                     peak_token_pct=cp.peak_token_pct,
                     counters=counters,
                     completed_step_log=list(cp.completed_step_log),
@@ -369,13 +375,19 @@ class PgStateRepository:
     # ──────────────────────────────────────────────
     # M4：playbook_runs 記錄確保
     # ──────────────────────────────────────────────
-    async def _ensure_run_id(self, session, playbook_id: str, project: str) -> str:
+    async def _ensure_run_id(
+        self, session, playbook_id: str, project: str, goal_task_id: str | None = None,
+    ) -> str:
         """確保 playbook_runs 中存在對應記錄，回傳 run_id（str UUID）。
 
         查找順序：
         1. 內存快取 (_run_cache)
         2. 查詢 checkpoints.run_id（process 重啟後恢復）
         3. INSERT playbook_runs（首次呼叫）
+
+        DEF-101-051：帶「合法 UUID」goal_task_id 時標 three_tier（滿足 0017 CHECK），非 UUID
+        （如 fixture GT-xxx）退回 standalone + warn（稽核標記不得弄垮 checkpoint 續跑韌性）；僅
+        INSERT 首筆決定（best-effort 標記，per-goal 進度以 goal_progress ledger 為 canonical）。
         """
         # 1. 快取命中
         if playbook_id in self._run_cache:
@@ -395,12 +407,15 @@ class PgStateRepository:
             self._run_cache[playbook_id] = run_id_str
             return run_id_str
         # 3. 首次呼叫：INSERT playbook_runs
+        values: dict[str, Any] = {"playbook_id": playbook_id, "project": project or playbook_id, "status": "running"}
+        # DEF-101-051：合法 UUID goal → three_tier；非 UUID（fixture GT-xxx）退回 standalone + warn
+        if goal_task_id:
+            try:
+                values.update(goal_task_id=uuid.UUID(str(goal_task_id)), run_kind="three_tier")
+            except ValueError:
+                logger.warning("goal_task_id 非 UUID，run 退回 standalone: %s", goal_task_id)
         result = await session.execute(
-            pg_insert(PlaybookRun).values(
-                playbook_id=playbook_id,
-                project=project or playbook_id,
-                status="running",
-            ).returning(PlaybookRun.run_id)
+            pg_insert(PlaybookRun).values(**values).returning(PlaybookRun.run_id)
         )
         run_id_str = str(result.scalar())
         self._run_cache[playbook_id] = run_id_str

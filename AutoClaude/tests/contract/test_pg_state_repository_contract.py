@@ -141,6 +141,73 @@ class TestPgStateRepositoryContract:
         loaded = self.repo.load_checkpoint("pb_pg_m4_002")
         assert loaded.total_steps == 5, "演化後 total_steps 應更新至 5"
 
+    def test_three_tier_run_marks_run_kind(self):
+        """DEF-101-051：帶 goal_task_id 的 checkpoint → run 標記 three_tier 並滿足 0017 CHECK。
+
+        走真實 save_checkpoint 流程（Rule 9，非 fake 路徑）：先 seed 一條真實
+        projects→goal_tasks（三層模型上游產物），再存帶 goal_task_id 的 checkpoint，
+        驗證 playbook_runs.run_kind='three_tier' 且 goal_task_id 正確寫入。此測試證明
+        判別欄非裝飾——three_tier 分支確實由資料驅動、被真實流程走到。
+        """
+        import asyncio
+        from sqlalchemy import text
+        from .test_state_repository_contract import _make_sample_checkpoint
+
+        async def _seed_goal_task():
+            async with self.engine.begin() as conn:
+                # 冪等：清前次遺留（projects.name 唯一；ON DELETE CASCADE 連帶清 goal_tasks）
+                await conn.execute(text(
+                    "DELETE FROM projects WHERE name = 'def101051-proj'"
+                ))
+                pid = (await conn.execute(text(
+                    "INSERT INTO projects (name) VALUES ('def101051-proj') "
+                    "RETURNING project_id"
+                ))).scalar()
+                gid = (await conn.execute(text(
+                    "INSERT INTO goal_tasks (project_id, title, depth) "
+                    "VALUES (:pid, 'root goal', 1) RETURNING goal_task_id"
+                ), {"pid": pid})).scalar()
+                return str(gid)
+
+        goal_id = asyncio.run(_seed_goal_task())
+        cp = _make_sample_checkpoint(goal_task_id=goal_id)
+        self.repo.save_checkpoint("pb_pg_three_tier", cp)
+
+        async def _fetch_run():
+            async with self.engine.connect() as conn:
+                return (await conn.execute(text(
+                    "SELECT run_kind, goal_task_id::text FROM playbook_runs "
+                    "WHERE playbook_id = 'pb_pg_three_tier'"
+                ))).one()
+
+        run_kind, gtid = asyncio.run(_fetch_run())
+        assert run_kind == "three_tier", "帶 goal_task_id 的 run 應標記 three_tier"
+        assert gtid == goal_id, "goal_task_id 應正確寫入 playbook_runs"
+
+    def test_non_uuid_goal_falls_back_to_standalone(self):
+        """DEF-101-051 guard：非 UUID goal_task_id（如 fixture GT-xxx）不得弄垮 checkpoint save。
+
+        稽核標記瑕疵不應犧牲續跑韌性——`_ensure_run_id` 對非 UUID 值 warn + 退回 standalone，
+        而非讓 `uuid.UUID(...)` raise ValueError 使整筆 save_checkpoint 失敗。
+        """
+        import asyncio
+        from sqlalchemy import text
+        from .test_state_repository_contract import _make_sample_checkpoint
+
+        cp = _make_sample_checkpoint(goal_task_id="GT-001-A")  # 非 UUID（canonical fixture 格式）
+        self.repo.save_checkpoint("pb_pg_nonuuid", cp)  # 不應 raise
+
+        async def _fetch_run():
+            async with self.engine.connect() as conn:
+                return (await conn.execute(text(
+                    "SELECT run_kind, goal_task_id FROM playbook_runs "
+                    "WHERE playbook_id = 'pb_pg_nonuuid'"
+                ))).one()
+
+        run_kind, gtid = asyncio.run(_fetch_run())
+        assert run_kind == "standalone", "非 UUID goal 應退回 standalone"
+        assert gtid is None, "非 UUID goal 不應寫入 playbook_runs.goal_task_id"
+
 
 # ──────────────────────────────────────────────
 # 即使 PG 不可用，仍驗證骨架可 import 且 raise 友善訊息

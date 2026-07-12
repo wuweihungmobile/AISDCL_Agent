@@ -1,8 +1,9 @@
 # SD_10 PG-track Next-Action — 補完三層 goal_task_id 接線（DEF-101-051）
 
-> **狀態**：open（SD_10 PG-track；**本輪維持非阻塞** — `autoclaude-ci.yml` pg-contract job `continue-on-error: true`，第 170 行）。
-> **方向已定案**：**反向補完三層功能**（run 應有 goal_task_id 為正確設計意圖）；**非**放寬約束（見下方「已否決」）。
-> **為何本輪不落地**：屬跨 plugin/DB/契約測試的真功能開發 + 需新設計 orphan-run 政策，非可草率修掉的 bug；PG production 尚未上線（ADR-SD09-001 仍 gated），零資料風險，適合排程 SD_10 正式處理。帳本 DEF-101-051 如實記 open。
+> **狀態**：**✅ 已落地（2026-07-12 · nightly 追查輪 + 四方審查閉環）**。使用者拍板 orphan-run 政策 **(c)＝CHECK 加判別欄**；pg-contract 已由 `continue-on-error` 轉**硬閘**。DEF-101-051 帳本 = fixed。
+> **方向定案（已執行）**：**補完三層功能**（run 應有 goal_task_id 為正確設計意圖）；**非**放寬約束（見「已否決」）。
+> **落地摘要**：alembic 0017 加 `run_kind` 判別欄、CHECK 改 `run_kind<>'three_tier' OR goal_task_id IS NOT NULL`（無時間依賴，消除時間炸彈）；ORM 補欄；`_ensure_run_id` + 5 條 checkpoint 落地路徑接通 goal_task_id；契約測試對齊 + 硬閘。四方審查（DBA/Dev/QA/Architect）→全修→複審。
+> **衍生 follow-up**（見文末）：DEF-101-053（schema_lock QueuePool loop bug + 假綠）、DEF-101-054（playbook_versions 平行時間炸彈）。
 
 ## 精確根因 — 「三層 goal_task_id 是半成品功能」
 
@@ -18,15 +19,22 @@ schema 側齊全、應用層從未接線：
 
 **後果**：cutoff（2026-05-20＝migration 撰寫日）過後，**100% 的 checkpoint save 都撞 CHECK**（非邊角）。兩支 contract test 因此**要求互斥**：`test_alembic_0010` 要求「裸 run 必須被拒」、`test_pg_state_repository_contract`（M4）要求「save_checkpoint 必須成功建裸 run」。現況 **5 passed / 7 CheckViolation / 1 skipped**。
 
-## SD_10 Work Items（補完功能）
+## SD_10 Work Items（補完功能）— 完成度
 
-1. **ORM 補欄**：`PlaybookRun` model 加 `goal_task_id`（nullable，對齊 0010 FK）。
-2. **端到端接線**：goal_synthesis / OrchestrationCoordinator 產出 goal_task 後，把 `goal_task_id` 一路帶進 `PlaybookCheckpoint.goal_task_id`，再由 `_ensure_run_id` 傳入 `playbook_runs` INSERT。
-3. **orphan-run 政策（關鍵設計決策）**：決定 plain-playbook（無 goal 分解、`cp.goal_task_id=None`）在 db_only/both 模式 post-cutoff 的語意 —— 三選一：(a) db_only 強制三層（plain playbook 走 file backend）；(b) 為 orphan run 綁定 default/synthetic goal_task；(c) CHECK 加「僅對三層 run 生效」的判別欄。此決策定調後才動 schema。
-4. **兩套關聯機制收斂**：`playbook_runs.goal_task_id` FK vs `goal_progress` ledger —— 定 canonical，避免雙軌漂移。
-5. **契約測試對齊**：`test_pg_state_repository_contract` fixture 建 goal_tasks FK 列 + 設 `cp.goal_task_id`，使 run 合規（**須反映真實流程**，不得造 fake 路徑 — Rule 9）。
-6. **收尾**：全 12 案綠後，移除 pg-contract job `continue-on-error: true`（`autoclaude-ci.yml:170`，檔頭第 168-169 行明訂之解除條件），pg-contract 轉硬閘。
-7. **cutoff 語意複審**：現 CHECK 綁 migration 撰寫日；SD_10 應改綁**真實 PG cutover 日**（ADR-SD09-001 DBA 親簽日），消除時間炸彈。
+1. ✅ **ORM 補欄**：`PlaybookRun` 加 `goal_task_id`（UUID nullable，對齊 0010 FK；不宣告 ORM FK，goal_tasks 非本模組 ORM 模型）+ `run_kind`（`_pg_models.py`）。
+2. ✅/🟡 **端到端接線**：`_ensure_run_id` 依 `cp.goal_task_id` 標 `run_kind='three_tier'` + 寫入該欄；5 條 checkpoint 落地路徑（`_builder`/`_token_halt`/`_interrupt`/`_evolution`/`auto_resume`）帶 `task.goal_task_id`。**已通**：離線工具（`three_tier_to_playbook.flatten_project` / `migrate_yaml_to_db`）以**真實 goal_tasks UUID** 產生之三層 playbook 端到端可標 three_tier。**guard**：`_ensure_run_id` 對非 UUID goal_task_id（如 fixture `sample_goal_tasks.yaml` 的 `GT-001-A`）以 `try/except ValueError` 退回 standalone + warn——稽核標記瑕疵不弄垮 checkpoint 續跑韌性（避免 db_only/both 崩、消除與 yaml_only 的 LSP 分歧）。**🟡 已知 gap**：runtime 動態分解（GoalDecomposer / OrchestrationCoordinator）尚未把 goal_task_id 賦值到 `PlaybookTask.goal_task_id`——此路徑 run 仍為 standalone，屬另一 runtime 接線工項。
+3. ✅ **orphan-run 政策**：**使用者拍板 (c)**——加 `run_kind` 判別欄，CHECK 改「僅 three_tier run 需 goal」；standalone（plain playbook）合法無 goal。alembic **0017** 落地。
+4. ✅ **兩套關聯機制 canonical 定案**：`playbook_runs.goal_task_id`（UUID FK→goal_tasks）＝**run 的擁有 goal**（首個 checkpoint 之 goal，best-effort audit 標記，1:1）；`goal_progress` ledger（`goal_task_id` **TEXT**，合成 `GT-{digest}` 形式）＝**per-goal 進度事件流**（N:M append-only）。二者職責不同、非冗餘；⚠️ 兩軌 key 型別不同（UUID vs TEXT），未來若需 join 須先對齊型別。本輪以程式 + 文件定調，不強制物理合併（PG 未上線、無真實 dual-write）。
+5. ✅ **契約測試對齊**：`test_pg_state_repository_contract::test_three_tier_run_marks_run_kind` 走真實 `save_checkpoint`（seed 真實 projects→goal_tasks，非 fake — Rule 9）；`test_alembic_0010` T8/T10/T10b/T10c 更新至 0017 語意（含 `match=` 綁 constraint 名）；`test_checkpoint_builder_goal_task` 直測 builder threading 3 case。
+6. ✅ **收尾＝轉硬閘**：移除 `autoclaude-ci.yml` pg-contract `continue-on-error`（CI 模擬 13P/1S 綠）。
+7. ✅ **cutoff 時間炸彈消除**：0017 新 CHECK 無時間依賴（改 run_kind 判別），**runs 時間炸彈根除**，不再需綁真實 cutover 日。⚠️ `playbook_versions` 平行時間炸彈未處理 → DEF-101-054。
+
+## Follow-up（本輪衍生，SD_10 PG-track 續辦）
+
+- **DEF-101-053**（P2）：`test_pg_existing_schema_lock.py` CRUD fixture 缺 `poolclass=NullPool`（R56 只修姊妹檔）→ 2 支紅（loop error）+ 2 支**假綠**（loop RuntimeError 被 `pytest.raises(Exception)` 吞，CHECK 從未真測；已探針取證）。修法＝加 NullPool（不得 xfail）。非 pg-contract 硬閘範圍，不阻塞本輪。
+- **DEF-101-054**（P1）：`playbook_versions.project_id` 平行時間炸彈活體生效（0017 只修 runs）。修法＝比照 (c) 為 versions 補 `version_kind` 判別欄或補 project_id 接線；屬另一 orphan-policy 決策，需定調後動 schema。
+- **#2 runtime gap**：runtime 動態分解接 goal_task_id（見上 work item #2 🟡）。
+- **goal FK robustness（P3，四方審查殘餘）**：guard 已消除「非 UUID goal」崩潰；但「合法 UUID 格式但不存在於 goal_tasks」仍走 guard 外的 FK `IntegrityError` → save 失敗（fail-loud，屬真正參照完整性錯誤，較可辯護）。PG 未上線、canonical fixture 主要撞擊面已消除，故留註記，未來若需可於 runtime 賦值端保證 goal_task_id 恆為既存 UUID。
 
 ## 已否決方向（存證，防後續 session 回頭提）
 

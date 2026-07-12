@@ -26,13 +26,16 @@ def save_evolution_resume_checkpoint_impl(
 ) -> bool:
     """W3-1a：Gap-041 演化後儲存 checkpoint；回傳是否成功。"""
     try:
-        _first_task_id = playbook.tasks[0].step_id if playbook.tasks else "T01"
+        _first_task = playbook.tasks[0] if playbook.tasks else None
+        _first_task_id = _first_task.step_id if _first_task else "T01"
         _cp = PlaybookCheckpoint(
             playbook_path=evolved_path,
             step_idx=0,
             step_id=_first_task_id,
             total_steps=len(playbook.tasks),
             project=playbook.project,
+            # DEF-101-051：resume 點 task（step_idx=0）之 goal_task_id（三層來源時非 None）
+            goal_task_id=getattr(_first_task, "goal_task_id", None),
             completed_step_log=list(step_log),
             completed_step_ids=list(completed_step_ids),
             step_evolution_counter=(

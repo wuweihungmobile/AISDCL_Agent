@@ -58,12 +58,28 @@ class PlaybookRun(Base):
     started_at = Column(TIMESTAMP(timezone=True), nullable=False, server_default=func.now())
     finished_at = Column(TIMESTAMP(timezone=True))
     status = Column(Text, nullable=False)
+    # DEF-101-051：三層 goal_task_id 接線。DB 欄 + FK（fk_runs_goal_task）由 alembic
+    # 0010 建立；此處補 ORM 映射使 repository 得以寫入。不在 ORM 宣告 ForeignKey——
+    # goal_tasks 非本模組 ORM 模型，FK 於 DB 層強制即可（與 GoalProgressRow 同慣例）。
+    goal_task_id = Column(UUID(as_uuid=True), nullable=True)
+    # DEF-101-051 / 0017：run 種類判別欄。'three_tier'（來自 goal 分解，必須有
+    # goal_task_id）vs 'standalone'（plain playbook，合法無 goal）。CHECK
+    # ck_runs_three_tier_has_goal 於 alembic 0017 強制。
+    run_kind = Column(Text, nullable=False, server_default="standalone")
     # 命名說明見類別 docstring。
     metadata_ = Column("metadata", JSONB, nullable=False, server_default="{}")
     __table_args__ = (
         CheckConstraint(
             "status IN ('running', 'success', 'escalated', 'halted', 'interrupted')",
             name="ck_playbook_runs_status",
+        ),
+        CheckConstraint(
+            "run_kind IN ('standalone', 'three_tier')",
+            name="ck_runs_run_kind",
+        ),
+        CheckConstraint(
+            "run_kind <> 'three_tier' OR goal_task_id IS NOT NULL",
+            name="ck_runs_three_tier_has_goal",
         ),
         Index("idx_runs_status", "status"),
     )

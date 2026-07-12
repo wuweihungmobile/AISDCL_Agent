@@ -11,9 +11,13 @@
   T5  STEP 1：PM #8 partial index idx_runs_active_per_goal（WHERE status='running'）
   T6  STEP 2：backfill_legacy_fk(text, int) function 存在且可呼叫
   T7  STEP 2：backfill 對未知 target_table 應 raise
-  T8  STEP 3：ck_runs_post_cutoff_has_goal CHECK constraint 存在
-  T9  STEP 3：ck_versions_post_cutoff_has_project CHECK constraint 存在
-  T10 STEP 3：CHECK validated（legacy 豁免，新資料必須有 FK）
+  T8  STEP 3：run→goal CHECK 存在且 validated
+        ⚠️ DEF-101-051 / 0017：0010 原 ck_runs_post_cutoff_has_goal（時間 cutoff 判別）
+           已由 0017 ck_runs_three_tier_has_goal（run_kind 判別）取代；本測試斷言 head
+           狀態，故驗證後者。
+  T9  STEP 3：ck_versions_post_cutoff_has_project CHECK constraint 存在（0017 未動）
+  T10 STEP 3：run→goal CHECK 行為（0017 後）— three_tier run 無 goal 被拒；
+        standalone run 無 goal 允許（orphan-run 政策）
   T11 SD ❌11：FK 為 ON DELETE SET NULL（不 CASCADE，保留 audit）
   T12 downgrade -1 可清空全部 4 個 FK + CHECK + function
 """
@@ -201,16 +205,26 @@ class TestStep2BackfillFunction:
 class TestStep3CheckConstraints:
     """STEP 3：CHECK constraint NOT VALID + VALIDATE。"""
 
-    def test_ck_runs_post_cutoff_exists_and_validated(self, conn, alembic_head):
-        """T8：ck_runs_post_cutoff_has_goal CHECK 存在且已 VALIDATE。"""
+    def test_ck_runs_three_tier_has_goal_exists_and_validated(self, conn, alembic_head):
+        """T8：run→goal CHECK 存在且已 VALIDATE。
+
+        DEF-101-051 / 0017：head 狀態下為 ck_runs_three_tier_has_goal（取代 0010 的
+        ck_runs_post_cutoff_has_goal 時間炸彈）；同時斷言舊 CHECK 已移除。
+        """
         with conn.cursor() as cur:
             cur.execute(
                 "SELECT convalidated FROM pg_constraint "
-                "WHERE conname = 'ck_runs_post_cutoff_has_goal';"
+                "WHERE conname = 'ck_runs_three_tier_has_goal';"
             )
             row = cur.fetchone()
-        assert row is not None, "ck_runs_post_cutoff_has_goal 不存在"
-        assert row[0] is True, "CHECK 必為 VALIDATED（step 3）"
+            cur.execute(
+                "SELECT count(*) FROM pg_constraint "
+                "WHERE conname = 'ck_runs_post_cutoff_has_goal';"
+            )
+            old = cur.fetchone()[0]
+        assert row is not None, "ck_runs_three_tier_has_goal 不存在（0017 未套用？）"
+        assert row[0] is True, "CHECK 必為 VALIDATED"
+        assert old == 0, "0017 應已移除舊 ck_runs_post_cutoff_has_goal（時間炸彈）"
 
     def test_ck_versions_post_cutoff_exists(self, conn, alembic_head):
         """T9：ck_versions_post_cutoff_has_project CHECK 存在。"""
@@ -223,38 +237,68 @@ class TestStep3CheckConstraints:
         assert row is not None, "ck_versions_post_cutoff_has_project 不存在"
         assert row[0] is True
 
-    def test_ck_blocks_new_row_without_fk(self, conn, alembic_head):
-        """T10：cutoff 後（2026-05-20+）新 row 必須有 FK；無 FK 應失敗。"""
+    def test_ck_blocks_three_tier_run_without_goal(self, conn, alembic_head):
+        """T10：three_tier run 無 goal_task_id 應被 CHECK 拒（DEF-101-051 / 0017）。
+
+        判別欄語意：宣稱自己是三層 run（run_kind='three_tier'）就必須帶 goal_task_id，
+        否則違反 ck_runs_three_tier_has_goal。此為保留三層追蹤能力的核心（非放寬約束）。
+        """
         psycopg2 = pytest.importorskip("psycopg2")
         c = _new_conn()
         try:
             with c.cursor() as cur:
-                # 明確設 started_at 為 cutoff 後（2026-05-21），且 goal_task_id NULL
-                # CHECK 應 raise；2026-05-20 為 G0 啟動日，當天起新 row 必有 FK
-                with pytest.raises(psycopg2.errors.CheckViolation):
+                # match= 綁定 constraint 名，確保是「對的原因」被拒（Rule 9）
+                with pytest.raises(
+                    psycopg2.errors.CheckViolation, match="ck_runs_three_tier_has_goal"
+                ):
                     cur.execute(
                         "INSERT INTO playbook_runs "
-                        "(playbook_id, project, status, metadata, started_at) "
-                        "VALUES ('test_pb', 'test_proj', 'running', '{}'::jsonb, "
-                        "        '2026-05-21 00:00:00+00'::timestamptz);"
+                        "(playbook_id, project, status, metadata, run_kind) "
+                        "VALUES ('three_tier_pb', 'proj', 'running', '{}'::jsonb, "
+                        "        'three_tier');"
                     )
         finally:
             c.rollback()
             c.close()
 
-    def test_ck_allows_legacy_row(self, conn, alembic_head):
-        """T10b：cutoff 前 row 豁免（started_at < 2026-05-20）。"""
+    def test_ck_run_kind_rejects_invalid_value(self, conn, alembic_head):
+        """T10c：run_kind 只允許 {standalone, three_tier}；非法值被 ck_runs_run_kind 拒。"""
+        psycopg2 = pytest.importorskip("psycopg2")
         c = _new_conn()
         try:
             with c.cursor() as cur:
+                with pytest.raises(
+                    psycopg2.errors.CheckViolation, match="ck_runs_run_kind"
+                ):
+                    cur.execute(
+                        "INSERT INTO playbook_runs "
+                        "(playbook_id, project, status, metadata, run_kind) "
+                        "VALUES ('bad_kind_pb', 'proj', 'running', '{}'::jsonb, 'garbage');"
+                    )
+        finally:
+            c.rollback()
+            c.close()
+
+    def test_ck_allows_standalone_run_without_goal(self, conn, alembic_head):
+        """T10b：standalone run（plain playbook）無 goal_task_id 應允許（orphan-run 政策）。
+
+        DEF-101-051 / 0017：改採 run_kind 判別後，無時間依賴——不論 started_at 為
+        cutoff 前後，standalone run 皆合法無 goal（消除 0010 時間炸彈）。
+        """
+        c = _new_conn()
+        try:
+            with c.cursor() as cur:
+                # 明確設 started_at 為 cutoff 後（2026-05-21）：舊時間炸彈 CHECK 會拒，
+                # 新 run_kind CHECK 應放行（run_kind 預設 'standalone'）。
                 cur.execute(
                     "INSERT INTO playbook_runs "
                     "(playbook_id, project, status, metadata, started_at) "
-                    "VALUES ('legacy_pb', 'legacy_proj', 'running', '{}'::jsonb, "
-                    "        '2026-01-01 00:00:00+00') RETURNING run_id;"
+                    "VALUES ('standalone_pb', 'proj', 'running', '{}'::jsonb, "
+                    "        '2026-05-21 00:00:00+00'::timestamptz) RETURNING run_id, run_kind;"
                 )
                 row = cur.fetchone()
-                assert row is not None, "legacy row 應允許 NULL goal_task_id"
+                assert row is not None, "standalone run 應允許 NULL goal_task_id"
+                assert row[1] == "standalone", "未指定時 run_kind 應預設 standalone"
         finally:
             c.rollback()
             c.close()

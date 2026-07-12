@@ -37,6 +37,9 @@ EXPECTED_COLUMNS: dict[str, set[str]] = {
     "playbook_runs": {
         "run_id", "playbook_id", "project", "started_at",
         "finished_at", "status", "metadata",
+        # DEF-101-051 / 0017（schema review）：三層 goal_task_id 接線 + run_kind 判別欄。
+        # goal_task_id 於 0010 已建 DB 欄（此前 ORM 未映射＝半成品）；run_kind 為 0017 新增。
+        "goal_task_id", "run_kind",
     },
     "checkpoints": {
         "checkpoint_id", "run_id", "playbook_id", "step_idx", "step_id",
@@ -90,7 +93,10 @@ EXPECTED_PRIMARY_KEYS: dict[str, set[str]] = {
 }
 
 EXPECTED_NOT_NULL: dict[str, set[str]] = {
-    "playbook_runs": {"run_id", "playbook_id", "project", "started_at", "status", "metadata"},
+    "playbook_runs": {
+        "run_id", "playbook_id", "project", "started_at", "status", "metadata",
+        "run_kind",  # DEF-101-051 / 0017：NOT NULL DEFAULT 'standalone'
+    },
     "checkpoints": {
         "checkpoint_id", "run_id", "playbook_id", "step_idx", "step_id",
         "total_steps", "saved_at", "peak_token_pct", "counters",
