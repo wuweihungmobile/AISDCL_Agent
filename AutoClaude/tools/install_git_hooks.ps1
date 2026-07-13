@@ -49,7 +49,11 @@ if ($LASTEXITCODE -ne 0 -or -not $TopLevel) {
   Write-Host '[install_git_hooks] ❌ 不在 git repo 內（git rev-parse --show-toplevel 失敗）' -ForegroundColor Red
   exit 1
 }
-$HooksDir = Join-Path $TopLevel 'tools/git-hooks'
+# Mac/Windows 相容性優化：`git rev-parse --show-toplevel` 回傳正斜線路徑，Join-Path
+# 用反斜線銜接會產出混合分隔符字串（寫入 core.hooksPath 後靠下游 tools/integration_gate.*、
+# AutoClaude/tools/local_ci_gate.* 四處各自正規化補丁）。改於源頭一次正規化，
+# 下游既有補丁邏輯保留不動（避免影響尚未涵蓋到的呼叫路徑）。
+$HooksDir = [System.IO.Path]::GetFullPath((Join-Path $TopLevel 'tools/git-hooks'))
 
 # 安裝前驗證：dispatcher hooks 必須存在（post-commit 為 .git/hooks/post-commit 委派器）
 foreach ($h in @('pre-commit', 'pre-push', 'post-commit')) {
@@ -77,6 +81,19 @@ if ($curOk) {
   Write-Host '   pre-push    → pytest + import-linter + snapshot / ci-gate.sh（push 時）'
   Write-Host '   post-commit → 委派回 .git/hooks/post-commit（advisory，不影響 commit）'
   Write-Host '   緊急跳過    → AUTOCLAUDE_SKIP_HOOKS=1 或 git commit/push --no-verify'
+
+  # Mac/Windows 相容性優化：dispatcher hooks（pre-commit/pre-push/post-commit）皆為
+  # #!/usr/bin/env bash，需 POSIX shell 直譯器才能執行。core.hooksPath 設定成功不代表
+  # commit/push 時真的能跑——非標準 Git for Windows 安裝（缺 Git Bash）會讓使用者要到
+  # 第一次 commit/push 才遇到難懂錯誤。此處僅警告、不阻斷安裝（理論上仍可能有其他方式
+  # 讓 bash 可執行）。排除 WSL 的 System32\bash.exe（非 Git for Windows 隨附版本）。
+  $bashCmd = Get-Command bash -ErrorAction SilentlyContinue
+  $bashFound = $bashCmd -and $bashCmd.Source -and ($bashCmd.Source -notmatch '\\System32\\')
+  if (-not $bashFound) {
+    Write-Host '   ⚠️  偵測不到 Git Bash（bash.exe）：上述 dispatcher hooks 皆為 bash 腳本，' -ForegroundColor Yellow
+    Write-Host '       需要 Git for Windows 內建的 Git Bash 才能執行；若非標準 Git for Windows' -ForegroundColor Yellow
+    Write-Host '       安裝，commit/push 時可能因找不到直譯器而中止。建議安裝 Git for Windows。' -ForegroundColor Yellow
+  }
 } else {
   Write-Host "[install_git_hooks] ❌ 設定失敗：core.hooksPath = '$cur'（目錄或 hook 檔不存在）" -ForegroundColor Red
   exit 1

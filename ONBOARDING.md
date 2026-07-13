@@ -13,7 +13,7 @@
 |------|------|
 | **Python ≥ 3.11** | 版本鎖定於 [.python-version](.python-version)（`3.11`，對齊 CI 與 Docker）。**系統內建的舊 Python（如 macOS 的 3.9）不夠**。 |
 | **Git** | 已 clone 本 repo。行尾政策由 [.gitattributes](.gitattributes) 自動處理（見 §5）。 |
-| Docker（選用） | 只有要跑 `run_act` / PG 契約測 / nightly mutation 時才需要。 |
+| Docker（選用） | 只有要跑 `run_act` / PG 契約測 / nightly mutation 時才需要。**Windows 須確認 Docker Desktop 啟用 WSL2 backend**（預設值；仍在用 Hyper-V backend 的舊機器/公司鎖定環境請切換，否則 `run_act` 等容器操作可能無法正常啟動）。macOS（Apple Silicon）執行 `run_act` 時，`.actrc` 的 `--container-architecture linux/amd64` 會強制走 QEMU 模擬（刻意設計，貼近雲端 amd64 runner），預期較慢屬正常代價。 |
 | Java（選用） | 只有要跑 AISDLC_SDD 的 TLA+/TLC 形式化驗證時才需要。 |
 
 安裝 Python 3.11：
@@ -230,5 +230,6 @@ macOS 若要手動或半自動跑 nightly，可先參考以下 `launchd` 範本�
 | **凍結版 v0.01 `post_commit_drift.py` 在 Windows 無 SIGALRM、亦無 thread guard**（docstring 宣稱 thread guard 但實作缺席，docstring 與實作不符） | 該 hook 在 Windows 無 2s 預算保護（advisory hook 卡住時無界） | v0.30 已補 thread guard；凍結版依紀律不回改 |
 | **macOS 桌面通知 plyer 後端需 `pyobjus`**（`notifications` extra 未宣告，刻意不加重依賴） | plyer 在 mac 必然 `ModuleNotFoundError` 失敗 | **已支援**：notifier 內建 darwin `osascript` fallback 自動承接（ESCALATION 通知不再靜默降級 log-only）；log 仍為最後手段 |
 | **凍結版 v0.01~v0.29 settings.json 無 `PYTHONUTF8` env、hook command 仍為裸相對路徑**（僅 v0.30／根層已改 shim；凍結版依紀律不回改，DEF-101 凍結版豁免家族） | 直啟凍結版子專案 session 時：① hooks 在 zh-TW Windows（cp950）的 stdin/stdout 解碼風險不受 env 保護；② cwd 漂移時裸相對路徑同樣有 exit-2 deny-lock 風險（DEF-101-028 同場景） | 根層 router 路由情境已由根層／v0.30 覆蓋；直啟凍結版屬 dogfooding 邊角情境，必要時先手動設 `PYTHONUTF8=1` 並保持 cwd 於版本根 |
+| **凍結版 v0.01~v0.29 `install_post_commit.ps1` 用 `-Encoding ascii` 寫 hook，非 ASCII 路徑會被靜默替換為 `?`**（v0.30 已修：改 `[System.IO.File]::WriteAllText` + `UTF8Encoding($false)`） | 手動 cd 進舊版目錄執行 hook 安裝（非官方流程）時，含中文字元的使用者路徑會讓 drift/closure advisory hook 內嵌路徑損毀、靜默失效；`v0.12~v0.29`（18 支）另因缺 BOM 會先 parser 斷裂根本跑不到此行 | `AutoClaude/tools/install_hooks/install_post_commit.ps1` 已設計為動態解析 LATEST（v0.30），正常安裝流程不會觸及舊版；凍結版依紀律不回改 |
 
-> 對應缺陷帳本：前兩條＝[AutoSDD_Defect_Log.md](docs/06_quality/AutoSDD_Defect_Log.md) DEF-101-003／DEF-101-004（wontfix＋凍結版紀律）；第 4~8 條＝DEF-101-019／DEF-101-020（wontfix＋凍結版紀律）與 DEF-101-021／DEF-101-022／DEF-101-025（open）；末條（凍結版 settings 兩面向）＝DEF-101-040（wontfix＋凍結版紀律）。另有 **DEF-101-005**（`verify_traceability.sh` 的 `set -e`＋grep 零命中提前靜默退出，所有 bash 版本皆然、v0.30 亦未修，**open** 待 RFC）與 **DEF-101-018**（ruff 存量 baseline 1,339 筆待分批清理，open；其「未鎖版跨機器漂移」根因 DEF-101-006 已 fixed@四方複審第三輪）非平台缺口、不列本表。
+> 對應缺陷帳本：前兩條＝[AutoSDD_Defect_Log.md](docs/06_quality/AutoSDD_Defect_Log.md) DEF-101-003／DEF-101-004（wontfix＋凍結版紀律）；第 4~8 條＝DEF-101-019／DEF-101-020（wontfix＋凍結版紀律）與 DEF-101-021／DEF-101-022／DEF-101-025（open）；倒數第二條（凍結版 settings 兩面向）＝DEF-101-040（wontfix＋凍結版紀律）；末條（`install_post_commit.ps1` ASCII 編碼）＝DEF-101-056（open，記事存證）。另有 **DEF-101-005**（`verify_traceability.sh` 的 `set -e`＋grep 零命中提前靜默退出，所有 bash 版本皆然、v0.30 亦未修，**open** 待 RFC）與 **DEF-101-018**（ruff 存量 baseline 1,339 筆待分批清理，open；其「未鎖版跨機器漂移」根因 DEF-101-006 已 fixed@四方複審第三輪）非平台缺口、不列本表。

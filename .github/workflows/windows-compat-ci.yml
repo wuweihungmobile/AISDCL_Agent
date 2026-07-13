@@ -1,0 +1,210 @@
+# Windows 11 相容性驗證（Mac/Windows 架構優化，Architect/SA/SD/QA 四方複審前置）。
+#
+# 背景：三份獨立掃描報告一致確認 monorepo 既有 workflow（9 檔、19 處 runs-on）
+# 100% 為 ubuntu-latest；root-infra-ci.yml 對 .ps1 僅做 pwsh AST 語法解析（不執行
+# 腳本邏輯），容易被誤讀為「已驗證 Windows」。「Windows 11 相容性」長期只靠人工
+# 對照與文件宣稱，從未被機器驗證過——這正是 pty_wrapper.py claude.cmd 啟動失敗
+# （P0）、install_post_commit.ps1 用 -Encoding ascii 損毀非 ASCII 路徑（P1）等 bug
+# 能長期潛伏的根本原因。本 workflow 補上這道機械驗證，並直接迴歸鎖定上述兩項修復。
+#
+# 設計（比照本 repo 既有「快速 PR 閘門 + 深度 nightly」兩層慣例，如
+# autoclaude-mutation-on-change.yml / autoclaude-ci.yml 的 mutation-test-nightly）：
+#   - windows-smoke：PR/push 閘門，只在觸及平台敏感路徑時觸發，實際「執行」關鍵
+#     腳本（非僅語法解析），快速攔下 runtime 級回歸。
+#   - windows-nightly-full：schedule + workflow_dispatch，continue-on-error 非阻斷，
+#     跑兩子專案完整測試套件在 windows-latest 上的深度回歸網，避免 Windows runner
+#     偶發性拖垮每次 PR。
+#
+# R1 四方複審修正（2026-07-13，Architect/SA/SD/QA 首輪 REJECT 後）：
+#   - SA 發現「Windows 開發者從零開始」路徑最前段（tools/bootstrap.ps1、
+#     tools/dev_start.ps1）從未被實際執行過，只靠 root-infra-ci.yml 的 AST 語法
+#     解析頂替 → windows-smoke 新增實際執行這兩支腳本的步驟。
+#   - SA 發現 AISDLC_SDD/scripts/install-hooks.ps1（ONBOARDING §6 同列為官方
+#     入口）與 AutoClaude/tools/install_git_hooks.ps1 同一 bug 只修了一半、且
+#     從未被本 workflow 觸及 → 補上對應驗證步驟 + paths 過濾。
+#   - SD 發現原本的「hook 內容編碼損毀」斷言在 windows-latest 的純 ASCII checkout
+#     路徑下永遠測不到損毀（原始 P1 bug 只在非 ASCII 路徑才觸發）→ 改用
+#     `git worktree add` 建一個路徑含中文字元的副本重現原始觸發條件。
+
+name: windows-compat-ci
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "AutoClaude/autoclaude/perception/**"
+      - "AutoClaude/autoclaude/utils/**"
+      - "AutoClaude/pyproject.toml"
+      - "AutoClaude/tests/**"
+      - "AutoClaude/tools/install_git_hooks.ps1"
+      - "AISDLC_SDD/scripts/install-hooks.ps1"
+      - "tools/bootstrap.ps1"
+      - "tools/dev_start.ps1"
+      - "tools/dev_start.py"
+      - "**/*.ps1"
+      - "tools/git-hooks/**"
+      - "AISDLC_SDD/AISDLC_SDD_v0.30/tools/install_hooks/**"
+      - ".github/workflows/windows-compat-ci.yml"
+  pull_request:
+    paths:
+      - "AutoClaude/autoclaude/perception/**"
+      - "AutoClaude/autoclaude/utils/**"
+      - "AutoClaude/pyproject.toml"
+      - "AutoClaude/tests/**"
+      - "AutoClaude/tools/install_git_hooks.ps1"
+      - "AISDLC_SDD/scripts/install-hooks.ps1"
+      - "tools/bootstrap.ps1"
+      - "tools/dev_start.ps1"
+      - "tools/dev_start.py"
+      - "**/*.ps1"
+      - "tools/git-hooks/**"
+      - "AISDLC_SDD/AISDLC_SDD_v0.30/tools/install_hooks/**"
+      - ".github/workflows/windows-compat-ci.yml"
+  schedule:
+    - cron: "0 6 * * *"   # windows-nightly-full：每日 06:00 UTC 深度回歸（非阻斷）
+  workflow_dispatch:
+
+concurrency:
+  group: windows-compat-ci-${{ github.ref }}
+  cancel-in-progress: true
+
+# 純驗證、不寫回 repo → 最小權限唯讀。
+permissions:
+  contents: read
+
+jobs:
+  windows-smoke:
+    name: Windows smoke（實際執行關鍵腳本，非僅語法解析）
+    if: github.event_name != 'schedule'
+    runs-on: windows-latest
+    timeout-minutes: 25
+
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.11"
+
+      - name: 執行 tools/bootstrap.ps1（R1 SA 發現：Windows 新人上手入口從未被實測）
+        shell: pwsh
+        run: |
+          ./tools/bootstrap.ps1
+          if (-not (Test-Path .venv)) { throw "bootstrap.ps1 執行後 .venv 未建立" }
+          Write-Host "bootstrap.ps1 執行成功，.venv 已建立"
+
+      - name: dot-source tools/dev_start.ps1（同上，日常開工入口）
+        shell: pwsh
+        run: |
+          . ./tools/dev_start.ps1
+          if ($LASTEXITCODE -ne 0) { throw "dev_start.ps1 核心邏輯（tools/dev_start.py）回報失敗，exit=$LASTEXITCODE" }
+          Write-Host "dev_start.ps1 執行成功"
+
+      - name: Install AutoClaude deps
+        working-directory: AutoClaude
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[dev]"
+
+      - name: pty_wrapper / hotkey_handler 平台解析單元測試
+        working-directory: AutoClaude
+        run: python -m pytest tests/test_perception.py -q --tb=short
+
+      - name: 安裝 AISDLC_SDD pinned deps
+        working-directory: AISDLC_SDD/AISDLC_SDD_v0.01
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements-ci.txt
+
+      - name: 執行（非僅解析）ci-gate.ps1（凍結基線 + LATEST 雙軌）
+        # 誠實揭露殘留覆蓋率限制（四方複審 R1/R2 Architect 發現，先前兩輪未回應）：
+        # ci-gate.ps1 採「偵測到 Git Bash 就薄委派給 ci-gate.sh」設計；GitHub 官方
+        # windows-latest runner 內建 Git for Windows（含 bash.exe），本步驟幾乎必然
+        # 走委派分支（跑到的是 ci-gate.sh 的完整雙軌邏輯），ci-gate.ps1 自身原生
+        # PowerShell fallback 分支（僅 v0.01 凍結基線單軌，找不到 Git Bash 時才會走）
+        # 覆蓋率趨近於零——本步驟的綠燈不代表該原生分支已被驗證過。若要驗證原生
+        # 分支本身，需另外在暫時隱藏/改名 bash.exe 的環境下重跑，目前未做（該分支
+        # 邏輯遠簡於委派路徑、且僅在非標準 Windows 安裝下才會被觸發，暫列為已知
+        # 限制而非本輪必須解決項）。
+        working-directory: AISDLC_SDD
+        shell: pwsh
+        run: ./scripts/ci-gate.ps1
+
+      - name: install_git_hooks.ps1 安裝／解除往返驗證
+        shell: pwsh
+        run: |
+          ./AutoClaude/tools/install_git_hooks.ps1
+          $hooksPath = git config --get core.hooksPath
+          if (-not $hooksPath) { throw "core.hooksPath 未設定" }
+          Write-Host "core.hooksPath = $hooksPath"
+          ./AutoClaude/tools/install_git_hooks.ps1 -Uninstall
+          $hooksPathAfter = git config --get core.hooksPath
+          if ($hooksPathAfter) { throw "core.hooksPath 卸載後仍殘留：$hooksPathAfter" }
+          Write-Host "install_git_hooks.ps1 安裝／解除往返驗證通過"
+
+      - name: AISDLC_SDD/scripts/install-hooks.ps1 驗證（R1 SA 發現：第二入口從未被測到）
+        shell: pwsh
+        run: |
+          ./AISDLC_SDD/scripts/install-hooks.ps1
+          $hooksPath = git config --get core.hooksPath
+          if (-not $hooksPath) { throw "core.hooksPath 未設定" }
+          if ($hooksPath -match '/' -and $hooksPath -match '\\') { throw "core.hooksPath 含混合分隔符：$hooksPath" }
+          Write-Host "install-hooks.ps1 驗證通過：core.hooksPath = $hooksPath"
+          git config --unset core.hooksPath
+
+      - name: install_post_commit.ps1 執行 + 非 ASCII 路徑編碼損毀斷言（P1 回歸鎖，R1 SD 發現修正）
+        shell: pwsh
+        run: |
+          # R1 SD 發現：原斷言直接在 windows-latest 的純 ASCII checkout 路徑下跑，
+          # 原始 P1 bug（-Encoding ascii 損毀非 ASCII 路徑）在此環境永遠測不到、是死斷言。
+          # 用 git worktree 建一個路徑含中文字元的副本，重現原始觸發條件
+          # （$RepoRoot/$HookSrcDrift/$HookSrcClosure 組出的字串含非 ASCII 字元）。
+          $chineseDir = Join-Path $env:RUNNER_TEMP "測試目錄"
+          git worktree add --detach $chineseDir HEAD
+          try {
+            Push-Location $chineseDir
+            try {
+              ./AISDLC_SDD/AISDLC_SDD_v0.30/tools/install_hooks/install_post_commit.ps1
+              $bytes = [System.IO.File]::ReadAllBytes(".git/hooks/post-commit")
+              $content = [System.Text.Encoding]::UTF8.GetString($bytes)
+              if ($content -match "[?]") { throw "hook 內容含 '?' 替代字元 —— 非 ASCII 路徑遭編碼損毀（Out-File -Encoding ascii 回歸）" }
+              if ($content -notmatch "測試目錄") { throw "hook 內容遺失非 ASCII 路徑片段，損毀方式與預期不同" }
+              if ($content -notmatch "post_commit_drift\.py") { throw "hook 內容缺 drift hook 路徑" }
+              if ($content -notmatch "closure_evidence_verify\.py") { throw "hook 內容缺 closure hook 路徑" }
+              Write-Host "install_post_commit.ps1 非 ASCII 路徑編碼驗證通過（無損毀）"
+            } finally {
+              Pop-Location
+            }
+          } finally {
+            git worktree remove --force $chineseDir
+          }
+
+  windows-nightly-full:
+    name: Windows nightly full suite（深度回歸，非阻斷）
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    runs-on: windows-latest
+    timeout-minutes: 60
+    continue-on-error: true
+
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.11"
+
+      - name: AutoClaude 全套 pytest
+        working-directory: AutoClaude
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[dev]"
+          python -m pytest tests/ -q --tb=short
+
+      - name: AISDLC_SDD LATEST（v0.30）fsm_runtime pytest（排除 chaos）
+        working-directory: AISDLC_SDD/AISDLC_SDD_v0.30
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements-ci.txt
+          python -m pytest tools/fsm_runtime/tests/ -m "not chaos" -q --tb=short

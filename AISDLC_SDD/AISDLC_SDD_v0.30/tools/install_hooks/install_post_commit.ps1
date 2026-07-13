@@ -24,12 +24,19 @@ if (-not (Test-Path $HookSrcClosure)) {
   exit 1
 }
 
-@"
+# DEF（Mac/Windows 相容性優化）：原用 `Out-File -Encoding ascii` 寫入，非 ASCII 字元
+# （如中文使用者路徑）會被靜默替換為 `?`，導致 hook 內嵌路徑損毀、advisory hook 永久靜默失效
+# （|| true 吞錯不會有任何提示）。`-Encoding utf8` 在 PowerShell 5.1 會加 UTF-8 BOM，混進
+# `#!/usr/bin/env bash` shebang 前會讓 bash 無法辨識直譯器；改用 .NET UTF8Encoding($false)
+# 寫入不帶 BOM 的 UTF-8，且統一正規化為 LF（避免 .ps1 檔案本身 CRLF 混進 bash 腳本內容）。
+$HookContent = @"
 #!/usr/bin/env bash
 # PostCommit advisory hooks - never block commit
 python "$HookSrcDrift" "`$@" || true
 python "$HookSrcClosure" "`$@" || true
-"@ | Out-File -FilePath $HookTarget -Encoding ascii
+"@
+$HookContent = $HookContent -replace "`r`n", "`n"
+[System.IO.File]::WriteAllText($HookTarget, $HookContent, (New-Object System.Text.UTF8Encoding($false)))
 
 Write-Output "Installed PostCommit advisory hooks at: $HookTarget"
 Write-Output "  - drift   -> .git/COMMIT_DRIFT_WARNING"

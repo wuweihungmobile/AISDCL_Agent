@@ -9,14 +9,24 @@
 from __future__ import annotations
 
 import io
+import logging
+import subprocess
+import threading
 import time
 from io import BytesIO
 from unittest.mock import MagicMock, patch
 
+import autoclaude.perception.hotkey_handler as hotkey_handler
+from autoclaude.perception.hotkey_handler import HotkeyHandler
+from autoclaude.perception.pty_wrapper import (
+    PtyWrapper,
+    _build_cmd_shim_line,
+    _is_cmd_shim,
+    _quote_cmd_shim_argv,
+    _resolve_command,
+)
 from autoclaude.perception.stream_reader import NonBlockingStreamReader
 from autoclaude.perception.text_utils import strip_ansi
-from autoclaude.perception.pty_wrapper import PtyWrapper
-
 
 # ──────────────────────────────────────────────
 # NonBlockingStreamReader
@@ -103,6 +113,268 @@ class TestStripAnsi:
 
 
 # ──────────────────────────────────────────────
+# HotkeyHandler.register（macOS Accessibility 授權缺失例外防護，P2 修復回歸）
+# ──────────────────────────────────────────────
+
+class TestHotkeyHandlerRegister:
+    def setup_method(self):
+        # register() 呼叫 _install_listener_excepthook()，會全域性修改
+        # threading.excepthook（見 TestListenerExcepthook 說明）；四方複審
+        # R2 SD 發現本類別先前缺此 setup/teardown，導致 hook 永久殘留污染
+        # 同一 pytest 行程內後續測試。比照 TestListenerExcepthook 做法。
+        self._original_hook = threading.excepthook
+        hotkey_handler._excepthook_installed = False
+
+    def teardown_method(self):
+        threading.excepthook = self._original_hook
+        hotkey_handler._excepthook_installed = False
+
+    def test_register_swallows_exception_and_stays_unregistered(self):
+        """macOS 無 Accessibility 授權時 keyboard.add_hotkey 可能丟例外；
+        register() 須捕捉並保持物件可用，不得讓例外往呼叫端炸穿。"""
+        fake_keyboard = MagicMock()
+        fake_keyboard.add_hotkey.side_effect = RuntimeError("no accessibility permission")
+        with patch("autoclaude.perception.hotkey_handler._KEYBOARD_AVAILABLE", True), \
+             patch("autoclaude.perception.hotkey_handler.keyboard", fake_keyboard, create=True):
+            handler = HotkeyHandler()
+            handler.register()  # 不應拋出
+            assert handler._registered is False
+
+    def test_register_succeeds_when_add_hotkey_ok(self):
+        fake_keyboard = MagicMock()
+        with patch("autoclaude.perception.hotkey_handler._KEYBOARD_AVAILABLE", True), \
+             patch("autoclaude.perception.hotkey_handler.keyboard", fake_keyboard, create=True):
+            handler = HotkeyHandler()
+            handler.register()
+            assert handler._registered is True
+            fake_keyboard.add_hotkey.assert_called_once()
+
+
+class TestListenerExcepthook:
+    """四方複審 R1 Architect 發現（keyboard==0.13.5 原始碼＋本機重現實證）：
+    keyboard.add_hotkey() 把 listen() 丟進背景 daemon thread，macOS 缺
+    Accessibility 授權的真實失敗（os.geteuid() 檢查）在該執行緒內非同步拋出，
+    包住 add_hotkey() 呼叫本身的 try/except 攔不到。此類測試改驗證
+    threading.excepthook 是否正確轉為 warning log、且不吞掉不相關執行緒的例外。
+    """
+
+    def setup_method(self):
+        # threading.excepthook 為全域可變狀態；模組層 _excepthook_installed
+        # 旗標會讓 _install_listener_excepthook() 只裝一次——每個測試前重置，
+        # 避免測試間互相污染（前一測試裝好的 hook 殘留到下一測試）。
+        self._original_hook = threading.excepthook
+        hotkey_handler._excepthook_installed = False
+
+    def teardown_method(self):
+        threading.excepthook = self._original_hook
+        hotkey_handler._excepthook_installed = False
+
+    def test_async_listener_thread_failure_logs_warning(self, caplog):
+        fake_keyboard = MagicMock()
+        fake_listener = MagicMock()
+        fake_thread = threading.Thread(target=lambda: None)
+        fake_listener.listening_thread = fake_thread
+        fake_keyboard._listener = fake_listener
+        with patch("autoclaude.perception.hotkey_handler._KEYBOARD_AVAILABLE", True), \
+             patch("autoclaude.perception.hotkey_handler.keyboard", fake_keyboard, create=True):
+            handler = HotkeyHandler()
+            handler.register()
+            args = threading.ExceptHookArgs(
+                (OSError, OSError("Error 13 - Must be run as administrator"), None, fake_thread)
+            )
+            with caplog.at_level(logging.WARNING, logger="autoclaude.perception"):
+                threading.excepthook(args)
+        assert any("背景監聽執行緒失敗" in r.message for r in caplog.records)
+
+    def test_unrelated_thread_exception_is_chained_not_swallowed(self):
+        """非 keyboard 監聽執行緒的例外必須照舊鏈給前一個 hook，不可被誤吞。"""
+        fake_keyboard = MagicMock()
+        fake_listener = MagicMock()
+        fake_listener.listening_thread = threading.Thread(target=lambda: None)
+        fake_keyboard._listener = fake_listener
+        previous_hook_calls = []
+        threading.excepthook = lambda args: previous_hook_calls.append(args)
+        with patch("autoclaude.perception.hotkey_handler._KEYBOARD_AVAILABLE", True), \
+             patch("autoclaude.perception.hotkey_handler.keyboard", fake_keyboard, create=True):
+            handler = HotkeyHandler()
+            handler.register()
+            unrelated_thread = threading.Thread(target=lambda: None)
+            args = threading.ExceptHookArgs(
+                (RuntimeError, RuntimeError("unrelated"), None, unrelated_thread)
+            )
+            threading.excepthook(args)
+        assert previous_hook_calls == [args]
+
+
+# ──────────────────────────────────────────────
+# _resolve_command（Windows npm .cmd/.bat shim 解析，P0 修復回歸）
+# ──────────────────────────────────────────────
+
+class TestResolveCommand:
+    def test_posix_returns_command_unchanged(self):
+        with patch("autoclaude.perception.pty_wrapper.sys.platform", "darwin"):
+            assert _resolve_command("claude") == ["claude"]
+
+    def test_windows_cmd_shim_wrapped_with_cmd_c(self):
+        """npm 全域安裝在 Windows 上是 claude.cmd；CreateProcess 無法直接執行批次檔，
+        須改經 cmd /c 呼叫，否則 WinError 2（DEF 回歸）。"""
+        with patch("autoclaude.perception.pty_wrapper.sys.platform", "win32"), \
+             patch("autoclaude.perception.pty_wrapper.shutil.which",
+                   return_value=r"C:\Users\x\AppData\Roaming\npm\claude.cmd"):
+            assert _resolve_command("claude") == [
+                "cmd", "/c", r"C:\Users\x\AppData\Roaming\npm\claude.cmd"
+            ]
+
+    def test_windows_exe_used_directly(self):
+        with patch("autoclaude.perception.pty_wrapper.sys.platform", "win32"), \
+             patch("autoclaude.perception.pty_wrapper.shutil.which",
+                   return_value=r"C:\tools\claude.exe"):
+            assert _resolve_command("claude") == [r"C:\tools\claude.exe"]
+
+    def test_windows_not_found_falls_back_to_original_string(self):
+        """找不到時保留原字串，讓錯誤自然浮現（不吞例外、不靜默改行為）。"""
+        with patch("autoclaude.perception.pty_wrapper.sys.platform", "win32"), \
+             patch("autoclaude.perception.pty_wrapper.shutil.which", return_value=None):
+            assert _resolve_command("claude") == ["claude"]
+
+    def test_windows_subprocess_start_uses_cmd_shim_line(self):
+        """_start_subprocess 端到端：解析到 .cmd 時 Popen 收到 _build_cmd_shim_line()
+        組出的單一命令列字串（非 list），見 R1 QA 發現的 cmd.exe 多引號 token 回歸。"""
+        proc = _make_mock_proc([])
+        with patch("autoclaude.perception.pty_wrapper._WEXPECT_AVAILABLE", False), \
+             patch("autoclaude.perception.pty_wrapper.sys.platform", "win32"), \
+             patch("autoclaude.perception.pty_wrapper.shutil.which",
+                   return_value=r"C:\npm\claude.cmd"), \
+             patch("autoclaude.perception.pty_wrapper.subprocess.Popen",
+                   return_value=proc) as mock_popen:
+            pty = _make_pty(command="claude", args=["-p", "hi"])
+            pty.start()
+            argv = mock_popen.call_args.args[0]
+            assert argv == 'cmd /d /s /c "C:\\npm\\claude.cmd -p hi"'
+            pty.close()
+
+    def test_windows_cmd_shim_bypasses_wexpect_even_when_available(self):
+        """四方複審 R3 回歸（Architect/SD/QA 三方獨立驗證確認的結構性限制）：
+        即使 wexpect 可用，.cmd/.bat shim 一律改走 _start_subprocess()，
+        wexpect.spawn 完全不應被呼叫。
+
+        根因：wexpect 內部（host.py 啟動 console-reader + __main__.py 轉發）
+        用自己天真的 join_args() 逐 token 加引號，兩層轉發後把結果交給
+        `cmd /d /s /c`；但 cmd.exe 對 `/C` 之後的內容有非標準 CRT 的特例
+        解析規則（見 `cmd /?`）：只有「命令列恰好含兩個引號字元」時才完整
+        保留引號，否則一律剝除第一個與最後一個引號字元、放任中間孤兒引號
+        殘留。shim_path 與 args 只要同時含空白（如 `C:\\Program Files\\...`
+        安裝路徑 + 多字 prompt），remainder 就會超過兩個引號字元，觸發腰斬。
+        R2 曾嘗試「不預先加引號、讓 wexpect 逐 token 處理」（比照 DEF-72-001
+        既有慣例），但 R3 SD 用官方 cmd 文件＋wexpect 原始碼＋真實 Node.js
+        同類 bug 報告三方交叉驗證，證實這依然會腰斬——因為 wexpect 的
+        join_args() 逐 token 加引號、不會產生 cmd.exe 這個特例規則所需的
+        「單一整體外層引號」結構（唯有 _build_cmd_shim_line 的合併＋外層
+        包一層引號技巧才做得到，而該技巧經證實對 wexpect 路徑無效）。
+        結論：不透過 wexpect 的 args-list 機制啟動 .cmd/.bat shim 是目前
+        唯一確認可行的方案。"""
+        proc = _make_mock_proc([])
+        fake_wexpect = MagicMock()
+        with patch("autoclaude.perception.pty_wrapper._WEXPECT_AVAILABLE", True), \
+             patch("autoclaude.perception.pty_wrapper.wexpect", fake_wexpect, create=True), \
+             patch("autoclaude.perception.pty_wrapper.sys.platform", "win32"), \
+             patch("autoclaude.perception.pty_wrapper.shutil.which",
+                   return_value=r"C:\Program Files\npm\claude.cmd"), \
+             patch("autoclaude.perception.pty_wrapper.subprocess.Popen",
+                   return_value=proc) as mock_popen:
+            pty = _make_pty(command="claude", args=["-p", "fix the bug"])
+            pty.start()
+            fake_wexpect.spawn.assert_not_called()
+            mock_popen.assert_called_once()
+            argv = mock_popen.call_args.args[0]
+            assert argv == (
+                'cmd /d /s /c "'
+                + subprocess.list2cmdline([r"C:\Program Files\npm\claude.cmd", "-p", "fix the bug"])
+                + '"'
+            )
+            pty.close()
+
+    def test_windows_non_shim_command_still_uses_wexpect_when_available(self):
+        """對照組：非 .cmd/.bat shim（一般 .exe 或裸命令）時，wexpect 可用仍應
+        優先使用（PTY 模擬不因本輪 shim 修復而被誤波及）。"""
+        fake_wexpect = MagicMock()
+        fake_wexpect.spawn.return_value = MagicMock()
+        with patch("autoclaude.perception.pty_wrapper._WEXPECT_AVAILABLE", True), \
+             patch("autoclaude.perception.pty_wrapper.wexpect", fake_wexpect, create=True), \
+             patch("autoclaude.perception.pty_wrapper.sys.platform", "win32"), \
+             patch("autoclaude.perception.pty_wrapper.shutil.which",
+                   return_value=r"C:\tools\claude.exe"):
+            pty = _make_pty(command="claude", args=["-p", "hi"])
+            pty.start()
+        fake_wexpect.spawn.assert_called_once()
+        call = fake_wexpect.spawn.call_args
+        assert call.args[0] == r"C:\tools\claude.exe"
+        assert call.kwargs["args"] == ["-p", "hi"]
+
+    def test_windows_subprocess_start_handles_path_and_arg_with_spaces(self):
+        """R1 QA 發現的核心回歸案例：npm 預設安裝路徑常含空白
+        （如 `C:\\Program Files\\...`），且 prompt 幾乎必然含空白。修復前用
+        plain argv list 會被 Python list2cmdline 對每個 token 個別加引號，
+        觸發 cmd.exe `/C` 舊式剝引號規則（cmd /? 記載：只有『恰好兩個引號
+        字元』時才保留引號）把路徑腰斬。此測鎖定：組出的命令列字串本身
+        對路徑與 prompt 都正確加了引號，且用 `/S` 停用該舊式捷徑。"""
+        proc = _make_mock_proc([])
+        shim_path = r"C:\Program Files\npm\claude.cmd"
+        prompt = "fix the bug"
+        with patch("autoclaude.perception.pty_wrapper._WEXPECT_AVAILABLE", False), \
+             patch("autoclaude.perception.pty_wrapper.sys.platform", "win32"), \
+             patch("autoclaude.perception.pty_wrapper.shutil.which", return_value=shim_path), \
+             patch("autoclaude.perception.pty_wrapper.subprocess.Popen",
+                   return_value=proc) as mock_popen:
+            pty = _make_pty(command="claude", args=["-p", prompt])
+            pty.start()
+            argv = mock_popen.call_args.args[0]
+            assert isinstance(argv, str)  # 字串型 args：Windows 上繞過 Popen 的二次加引號
+            assert argv == f'cmd /d /s /c "{subprocess.list2cmdline([shim_path, "-p", prompt])}"'
+            # 路徑與 prompt 各自被正確引號包住，且未被腰斬成兩個獨立 token
+            assert '"C:\\Program Files\\npm\\claude.cmd"' in argv
+            assert '"fix the bug"' in argv
+            pty.close()
+
+
+# ──────────────────────────────────────────────
+# _build_cmd_shim_line / _is_cmd_shim（純字串邏輯，R1 QA 回歸）
+# ──────────────────────────────────────────────
+
+class TestBuildCmdShimLine:
+    def test_is_cmd_shim_true_for_resolved_shim(self):
+        assert _is_cmd_shim(["cmd", "/c", r"C:\npm\claude.cmd"]) is True
+
+    def test_is_cmd_shim_false_for_plain_command(self):
+        assert _is_cmd_shim(["claude"]) is False
+        assert _is_cmd_shim([r"C:\tools\claude.exe"]) is False
+
+    def test_build_cmd_shim_line_wraps_with_slash_s_and_outer_quotes(self):
+        """`/S` 讓 cmd.exe 停用僅在『恰好兩個引號字元』時才保留引號的舊式
+        剝引號捷徑（見 _quote_cmd_shim_argv docstring），改用一般解析。"""
+        line = _build_cmd_shim_line(r"C:\Program Files\npm\claude.cmd", ["-p", "fix the bug"])
+        assert line.startswith('cmd /d /s /c "')
+        assert line.endswith('"')
+        assert line == (
+            'cmd /d /s /c "'
+            + subprocess.list2cmdline([r"C:\Program Files\npm\claude.cmd", "-p", "fix the bug"])
+            + '"'
+        )
+
+    def test_build_cmd_shim_line_no_args(self):
+        line = _build_cmd_shim_line(r"C:\npm\claude.cmd", [])
+        assert line == 'cmd /d /s /c "C:\\npm\\claude.cmd"'
+
+    def test_quote_cmd_shim_argv_excludes_cmd_prefix(self):
+        """_quote_cmd_shim_argv 只回傳 list2cmdline 結果，不含 cmd /d /s /c
+        前綴——這是 _start_wexpect 之前重複套用 _build_cmd_shim_line 導致
+        前綴出現兩次那個 bug 的直接回歸鎖。"""
+        result = _quote_cmd_shim_argv(r"C:\npm\claude.cmd", ["-p", "hi"])
+        assert result == r"C:\npm\claude.cmd -p hi"
+        assert "cmd /d /s /c" not in result
+
+
+# ──────────────────────────────────────────────
 # PtyWrapper（subprocess 模式）
 # ──────────────────────────────────────────────
 
@@ -137,9 +409,11 @@ class _FakeWexpectChild:
         self.after = None
         self.before = None
         self._eof_tail = eof_tail
-        self._timeout_rounds = timeout_rounds  # 前 N 次 expect 回 index==1（TIMEOUT），不 pop line（improving_74 W-74-1）
-        self.sent = []                         # 記錄 sendline 自動回應內容（improving_74 W-74-2）
-        self._raise_on_expect = raise_on_expect  # expect 拋此例外（improving_74 W-74-4 except 分支）
+        # 前 N 次 expect 回 index==1（TIMEOUT），不 pop line（improving_74 W-74-1）
+        self._timeout_rounds = timeout_rounds
+        self.sent = []  # 記錄 sendline 自動回應內容（improving_74 W-74-2）
+        # expect 拋此例外（improving_74 W-74-4 except 分支）
+        self._raise_on_expect = raise_on_expect
 
     def expect(self, patterns, timeout=None):
         if self._raise_on_expect is not None:
@@ -349,7 +623,9 @@ class TestPtyWrapper:
         production 以 `except Exception: logger.debug(...); return ""` 吞錯回 ''。此分支本輪前
         零覆蓋。若退回 `raise`（或回 None），本測轉紅。
         """
-        fake_child = _FakeWexpectChild([], raise_on_expect=RuntimeError("simulated wexpect failure"))
+        fake_child = _FakeWexpectChild(
+            [], raise_on_expect=RuntimeError("simulated wexpect failure")
+        )
         fake_wexpect = MagicMock()
         fake_wexpect.TIMEOUT = object()
         fake_wexpect.EOF = object()

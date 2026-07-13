@@ -1,7 +1,7 @@
 # 根層基建 CI（四方複審 B4，2026-07-10；防禦縱深補洞 2026-07-11）：workflows / hooks /
 # 工具腳本上移 monorepo 根層後，根層 tools/（bootstrap / integration_gate / git-hooks
 # dispatcher）與 .gitattributes、.editorconfig、dependabot 等基建原本零 CI 覆蓋——壞掉
-# 只會在開發者本機爆。本 workflow 做七道輕量守門（僅 actions/checkout，不引其他外部
+# 只會在開發者本機爆。本 workflow 做八道輕量守門（僅 actions/checkout，不引其他外部
 # action，避免供應鏈風險）：
 #   1. bash -n       — 根層 tools/git-hooks/ 與 tools/*.sh（遞迴涵蓋子目錄）語法檢查
 #   2. pwsh parse    — active .ps1（根層 tools/ + AutoClaude/tools/ + AISDLC_SDD/scripts/
@@ -11,19 +11,24 @@
 #                      EF BB BF（.editorconfig utf-8-bom 政策的 CI 機械複核；本機僅
 #                      Claude Code hook check_ps1_encoding.py 補 BOM，人工編輯器 /
 #                      GitHub web 可繞過 → zh-TW PS5.1 以 CP950 誤讀亂碼/破壞 parser）
-#   3. EOL 守門      — git ls-files --eol：tools/ 下 .sh/.bash 與無副檔名 git hooks 不得
+#   3. EOL 守門（.sh）— git ls-files --eol：tools/ 下 .sh/.bash 與無副檔名 git hooks 不得
 #                      CRLF/mixed（取證紀律 #8；比照 AutoClaude pre-commit 檢法，作為
 #                      根層 .gitattributes `eol=lf` 政策的機械複核）
-#   4. NTFS 檔名閘   — tools/check_ntfs_paths.py 掃 git ls-files 全量（本機 pre-commit
+#   4. EOL 守門（.ps1）— 反方向補洞：全庫 *.ps1 工作樹須為 CRLF（.gitattributes
+#                      `eol=crlf`）；只查 `w/`（index 恆 lf 正規化非訊號）。Mac/Windows
+#                      相容性優化四方複審發現 tools/dev_start.ps1 工作樹曾違規且
+#                      git status/diff 均不可見，第 3 道既有守門完全不涵蓋 .ps1 方向
+#                      （2026-07-13 補洞）
+#   5. NTFS 檔名閘   — tools/check_ntfs_paths.py 掃 git ls-files 全量（本機 pre-commit
 #                      A3 閘的 CI 對等；--no-verify / GitHub web / 未裝 hooks 可繞過本機閘）
-#   5. 腳本對等閘    — tools/check_script_parity.py：三對 .sh/.ps1 的 gate/step 標籤
+#   6. 腳本對等閘    — tools/check_script_parity.py：三對 .sh/.ps1 的 gate/step 標籤
 #                      清單一致 + pytest 釘選雙處（pyproject.toml / requirements-ci.txt）同版
-#   6. py_compile    — 根層 tools/ 下所有 *.py（遞迴涵蓋子目錄；dev_start / check_* 等
+#   7. py_compile    — 根層 tools/ 下所有 *.py（遞迴涵蓋子目錄；dev_start / check_* 等
 #                      基建工具）語法檢查；這些 .py 過去僅語法檢查、零單元測試覆蓋，
-#                      邏輯回歸可經 --no-verify / GitHub web 靜默入庫 → 第 7 道補上
+#                      邏輯回歸可經 --no-verify / GitHub web 靜默入庫 → 第 8 道補上
 #                      （dev_start 四方審查 P2，2026-07-12；子目錄遞迴盲區修復
 #                      2026-07-13）
-#   7. unittest      — tools/tests/ 下 dev_start.py 純邏輯函式與已修復迴歸點的單元測試
+#   8. unittest      — tools/tests/ 下 dev_start.py 純邏輯函式與已修復迴歸點的單元測試
 #                      （純 stdlib unittest，零依賴安裝，維持本 job 輕量原則；四方複審
 #                      2026-07-13 REJECT 原因之一即「核心邏輯複雜度已超過 py_compile
 #                      能守住的範圍」，本道步驟收斂該落差）
@@ -50,7 +55,7 @@ permissions:
 
 jobs:
   root-infra:
-    name: root infra guard (bash -n + pwsh parse/BOM + EOL + NTFS + parity + py_compile + unittest)
+    name: root infra guard (bash -n + pwsh parse/BOM + EOL(.sh) + EOL(.ps1) + NTFS + parity + py_compile + unittest)
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
@@ -132,6 +137,30 @@ jobs:
             exit 1
           fi
           echo "EOL 檢查通過（tools/ 下 .sh/.bash 與 git-hooks 均為 LF）"
+
+      - name: EOL 守門（.ps1 工作樹須為 CRLF，Mac/Windows 相容性優化補洞）
+        run: |
+          # 反方向補洞：`.gitattributes` 規定 `*.ps1 text eol=crlf`，但 git 內部物件儲存
+          # 一律 LF 正規化（`i/` 恆為 lf，非違規訊號），只有工作樹（`w/`）出現 lf/mixed
+          # 才代表 checkout/smudge 政策未生效。
+          #
+          # R1 四方複審 SA 發現並更正歸因：`actions/checkout@v5` 一律做全新 checkout，
+          # 只要 `.gitattributes` 的 `*.ps1 eol=crlf` 規則本身完好，smudge 在 CI 上
+          # 是**確定性**套用（每次都會產出 w/crlf）——CI 天生看不到、也重現不了
+          # 「本機非 git-aware 工具繞過 smudge 直接寫壞已存在工作樹」這種本機專屬漂移
+          # （四方複審發現 tools/dev_start.ps1 當時正是這種本機漂移，且已在該次修復
+          # 单独處理，見同輪 commit）。本步驟真正能攔到的是：`.gitattributes` 規則
+          # 本身未來被誤刪/改壞、或新增 .ps1 檔案不慎落在既有 pattern 涵蓋範圍外，
+          # 屬於「政策本身回歸」的機械複核，而非本機漂移的偵測（結構上不可能做到，
+          # 只能靠開發者本機自行 renormalize；本檢查是防線之一，非唯一防線）。
+          # 另補 Architect 發現：w/mixed（部分行 CRLF、部分行仍 LF）先前遺漏，一併涵蓋。
+          viol="$(git ls-files --eol -- '*.ps1' | awk -F'\t' '$1 ~ /w\/(lf|mixed)/')"
+          if [ -n "$viol" ]; then
+            echo "$viol"
+            echo "::error::上列 .ps1 檔案工作樹非 CRLF（.gitattributes *.ps1 eol=crlf 規則可能已被破壞）"
+            exit 1
+          fi
+          echo ".ps1 EOL 檢查通過（全部工作樹為 CRLF）"
 
       - name: NTFS 敵意檔名守門（pre-commit A3 閘的 CI 對等，掃全量 tracked 路徑）
         run: python3 tools/check_ntfs_paths.py

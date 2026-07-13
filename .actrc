@@ -15,6 +15,11 @@
 -P ubuntu-latest=catthehacker/ubuntu:act-latest
 -P ubuntu-24.04=catthehacker/ubuntu:act-latest
 -P ubuntu-22.04=catthehacker/ubuntu:act-22.04
+# Mac/Windows 相容性優化補註：此設定在 Apple Silicon（arm64）Mac 上會強制整條 act
+# pipeline（含 runner 映像與內部起的 PG 容器）走 QEMU amd64 模擬，即使映像本身有原生
+# arm64 版本也用不到，會明顯變慢、偶發不穩定。此為刻意設計、非疏漏：GitHub Actions
+# 雲端 runner 一律是 amd64，改成 arm64 反而會破壞「地端 act ＝ 雲端 CI」的平價承諾，
+# 不應為了本機效能犧牲這個保證。Apple Silicon 使用者請預期 act 執行較慢屬正常代價。
 --container-architecture linux/amd64
 # 用本地已拉的鏡像，避免 act 的 forcePull 帶 Docker 認證導致
 # 「authentication required」失敗（公開鏡像但 act 送出 ~/.docker 認證）。

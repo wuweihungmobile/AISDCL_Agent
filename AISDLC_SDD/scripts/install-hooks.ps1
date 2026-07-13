@@ -30,7 +30,10 @@ if ($LASTEXITCODE -ne 0 -or -not $TopLevel) {
   Write-Host "❌ 不在 git repo 內（git rev-parse --show-toplevel 失敗）" -ForegroundColor Red
   exit 1
 }
-$HooksDir = Join-Path $TopLevel 'tools/git-hooks'
+# Mac/Windows 相容性優化（四方複審 R1 SA 發現：與 AutoClaude/tools/install_git_hooks.ps1
+# 同一 bug 只修了一半）：`git rev-parse --show-toplevel` 回傳正斜線路徑，Join-Path
+# 用反斜線銜接會產出混合分隔符字串；改於源頭一次正規化，對齊 install_git_hooks.ps1 的修法。
+$HooksDir = [System.IO.Path]::GetFullPath((Join-Path $TopLevel 'tools/git-hooks'))
 
 # 安裝前驗證：dispatcher hooks 必須存在（post-commit 為 .git/hooks/post-commit 委派器）
 foreach ($h in @('pre-commit', 'pre-push', 'post-commit')) {
@@ -55,7 +58,19 @@ if ($curOk) {
   Write-Host "   兩子專案閘門同時生效（AutoClaude pre-commit/pre-push ＋ AISDLC_SDD pre-push，"
   Write-Host "   依 commit/push 涉及路徑自動分流），不再互斥。"
   Write-Host "   AISDLC_SDD pre-push 閘門：push 涉及 AISDLC_SDD/ 時自動跑 scripts/ci-gate.sh"
-  Write-Host "   Git for Windows 會用內建 bash 執行 hook 本體。"
+
+  # Mac/Windows 相容性優化（四方複審 R1 SA 發現）：dispatcher hooks（pre-commit/pre-push/
+  # post-commit）皆為 #!/usr/bin/env bash，需要 Git for Windows 內建的 Git Bash 才能執行；
+  # 原文字「Git for Windows 會用內建 bash 執行 hook 本體」是無保留的斷言，非標準 Git for
+  # Windows 安裝（缺 Git Bash）時仍會回報安裝成功，但 commit/push 才會遇到難懂錯誤。
+  # 此處僅警告、不阻斷安裝。排除 WSL 的 System32\bash.exe（非 Git for Windows 隨附版本）。
+  $bashCmd = Get-Command bash -ErrorAction SilentlyContinue
+  $bashFound = $bashCmd -and $bashCmd.Source -and ($bashCmd.Source -notmatch '\\System32\\')
+  if (-not $bashFound) {
+    Write-Host '   ⚠️  偵測不到 Git Bash（bash.exe）：上述 dispatcher hooks 皆為 bash 腳本，' -ForegroundColor Yellow
+    Write-Host '       需要 Git for Windows 內建的 Git Bash 才能執行；若非標準 Git for Windows' -ForegroundColor Yellow
+    Write-Host '       安裝，commit/push 時可能因找不到直譯器而中止。建議安裝 Git for Windows。' -ForegroundColor Yellow
+  }
 } else {
   Write-Host "❌ 設定失敗：core.hooksPath='$cur'（目錄或 hook 檔不存在）" -ForegroundColor Red
   exit 1
