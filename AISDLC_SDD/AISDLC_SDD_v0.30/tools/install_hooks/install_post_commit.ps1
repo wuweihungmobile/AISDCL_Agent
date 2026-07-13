@@ -3,7 +3,12 @@
 # DEF-43-008（improving_44）：原寫死 drift→v0.01 / closure→v0.12，致修了 drift 的 repo-root bug
 # 也裝不到、且與「指向 LATEST」原則不一致。改為動態解析 LATEST（version 排序取最高），永不再 stale。
 $RepoRoot = (git rev-parse --show-toplevel).Trim()
-$HookTarget = Join-Path $RepoRoot ".git\hooks\post-commit"
+# 用 --git-common-dir（非硬編 "$RepoRoot\.git"）：worktree checkout 下 <worktree>\.git
+# 是指向主 repo 的純文字檔而非目錄，".git\hooks\..." 會炸「找不到路徑一部分」；
+# --git-common-dir 正確解析回主 repo 真正的 .git，且不受 core.hooksPath 影響
+# （此設定僅影響 git 自己找 hook，不影響本檔要直寫的真實 .git/hooks/）。
+$GitCommonDir = (git rev-parse --path-format=absolute --git-common-dir).Trim()
+$HookTarget = Join-Path $GitCommonDir "hooks\post-commit"
 # DEF-43-002：monorepo 收斂後 git rev-parse --show-toplevel = monorepo 根，
 # 各版位於 AISDLC_SDD\ 子目錄下，故路徑須含 AISDLC_SDD\ 中間層（原缺此層致裝不起來）。
 $Latest = (Get-ChildItem -Path (Join-Path $RepoRoot "AISDLC_SDD") -Directory -Filter "AISDLC_SDD_v*" |

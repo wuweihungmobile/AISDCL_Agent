@@ -8,7 +8,12 @@
 # 改為動態解析 LATEST（對齊 ci-gate.sh 的 sort -V | tail -1），永不再 stale、修復立即生效。
 set -e
 REPO_ROOT="$(git rev-parse --show-toplevel)"
-HOOK_TARGET="$REPO_ROOT/.git/hooks/post-commit"
+# 用 --git-common-dir（非硬編 "$REPO_ROOT/.git"）：worktree checkout 下 <worktree>/.git
+# 是指向主 repo 的純文字檔而非目錄，".git/hooks/..." 會找不到路徑；--git-common-dir
+# 正確解析回主 repo 真正的 .git，且不受 core.hooksPath 影響（該設定只影響 git 自己
+# 找 hook，不影響本檔要直寫的真實 .git/hooks/）。
+GIT_COMMON_DIR="$(git rev-parse --path-format=absolute --git-common-dir)"
+HOOK_TARGET="$GIT_COMMON_DIR/hooks/post-commit"
 # DEF-43-002：monorepo 收斂後 git rev-parse --show-toplevel = monorepo 根，
 # 各版位於 AISDLC_SDD/ 子目錄下，故路徑須含 AISDLC_SDD/ 中間層（原缺此層致裝不起來）。
 # 三 glob 同 ci-gate.sh：v0.0*（~v0.09）+ v0.[1-9]*（v0.10+）+ v[1-9]*（v1.x+，`|| true` 吞無匹配）。
