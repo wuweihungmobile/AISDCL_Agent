@@ -12,7 +12,8 @@
   1. 路徑含控制字元（C locale [:cntrl:]＝0x00-0x1F + 0x7F），或任一路徑段含
      Windows 不允許字元 < > : " | ? * \\，或以空白/句點結尾（NTFS 不允許）
   2. 任一段去（第一個點起的）副檔名後（不分大小寫）為 Windows 保留裝置名
-     CON / PRN / AUX / NUL / COM1~9 / LPT1~9
+     CON / PRN / AUX / NUL / COM0~9 / LPT0~9（COM0/LPT0 非 Microsoft 官方保留名，
+     但比照 sindresorhus/filename-reserved-regex 等業界防禦性實作採保守納入）
   3. 大小寫碰撞：兩 tracked 路徑 lowercase 後相同但原字串不同
      （NTFS 大小寫不敏感 → checkout 時互相覆蓋）
   4. MAX_PATH 保守長度閘（DEF-101-039）：Windows 未開 core.longpaths 時絕對路徑上限
@@ -41,7 +42,7 @@ from pathlib import Path
 _REPO_ROOT = Path(__file__).resolve().parents[1]
 
 _FORBIDDEN_CHARS = set('<>:"|?*\\')
-_RESERVED_RE = re.compile(r"^(CON|PRN|AUX|NUL|COM[1-9]|LPT[1-9])$")
+_RESERVED_RE = re.compile(r"^(CON|PRN|AUX|NUL|COM[0-9]|LPT[0-9])$")
 
 # MAX_PATH 保守長度閘（DEF-101-039）：
 # 可用 259（260 含 NUL）− 59（clone 前綴預留）＝ 200 fail；180 warn

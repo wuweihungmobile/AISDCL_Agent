@@ -73,7 +73,7 @@ autoclaude <playbook.yaml> --config config.local.yaml   # 安裝後 entrypoint
 
 ### 測試 / Lint
 ```bash
-python -m pytest tests/ -q                       # 全套（基線 3,543 passed / 181 skipped，2026-07-11 實測；四方複審第四輪 +14 case）
+python -m pytest tests/ -q                       # 全套（基線 3,566 passed / 196 skipped，2026-07-13 乾淨 bootstrap 實測；出廠環境未裝 [postgres] 等選配）
 python -m pytest tests/test_playbook_runner.py -v # 單檔
 python -m pytest tests/ -k <substring> -v         # 單一測試
 python -m pytest tests/ -m pg_real                # 需 SD07_REAL_PG_E2E_ENABLED=true + PG DSN

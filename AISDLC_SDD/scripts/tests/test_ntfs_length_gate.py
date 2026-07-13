@@ -194,7 +194,7 @@ def test_seg_bad_python_table():
     """Python 版第 1~2 項表驅動：保留裝置名／禁字／尾空白句點／正常路徑。"""
     mod = _load_ntfs_module()
     bad = ["CON.txt", "docs/aux.md", "nul.tar.gz", "a<b.txt", "back\\slash.txt",
-           "dir /f.txt", "trailing./f.txt"]
+           "dir /f.txt", "trailing./f.txt", "COM0.txt", "lpt0.log"]
     good = ["normal/ok.txt", "COM10.txt", "CONtext.txt", "中文/路徑.md"]
     for p in bad:
         assert mod._ntfs_seg_bad(p) is not None, f"應判違規：{p}"

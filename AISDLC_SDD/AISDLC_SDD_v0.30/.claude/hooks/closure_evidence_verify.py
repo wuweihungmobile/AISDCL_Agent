@@ -15,15 +15,16 @@ from __future__ import annotations
 
 import concurrent.futures
 import signal
+import subprocess
 import sys
 from pathlib import Path
 
 # 純函式邏輯模組（同 post_commit_drift → drift_monitor 慣例）
-sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+_PKG_ROOT = Path(__file__).resolve().parents[2]
+sys.path.insert(0, str(_PKG_ROOT))
 
 from tools.fsm_runtime.closure_evidence import (  # noqa: E402
     evaluate_closure,
-    repo_root_from,
     write_verdict_report,
 )
 
@@ -36,6 +37,45 @@ class _Timeout(Exception):
 
 def _timeout_handler(signum, frame):  # pragma: no cover - signal callback
     raise _Timeout()
+
+
+def repo_root_from() -> Path:
+    """以 `--git-common-dir` 的父目錄定位 monorepo 根（hook 在版本目錄但 commit 在根）；
+    fallback `_PKG_ROOT`。
+
+    DEF-101-059：舊版委派 `tools.fsm_runtime.closure_evidence.repo_root_from()`
+    （內部用 `git rev-parse --show-toplevel`）定位 repo_root，再天真拼接
+    `repo_root / ".git"`。在 git worktree 情境下真的用 `git commit` 觸發本 hook
+    時，git 會替 post-commit 子行程注入 `GIT_DIR`（指向
+    `<主repo>/.git/worktrees/<name>`）。實測證實：只要繼承到 `GIT_DIR`，
+    `--show-toplevel` 無論 `cwd` 為何一律退化成直接回顯 `cwd` 本身（不再向上
+    尋根），導致 repo_root 誤算成版本目錄（`.../AISDLC_SDD_v0.30`）——這個路徑
+    本無 `.git`，`_write_flag` 的 `git_dir.exists()` 恆 False，
+    CLOSURE_EVIDENCE_VERDICT 靜默蒸發（DEF-20-001 反幻覺閘門在 worktree 下真實
+    失效，且完全不報錯，使用者無感）。`--git-common-dir` 不受此汙染：不論有無
+    `GIT_DIR`、不論 `cwd` 落在主 repo 或 worktree，皆正確解回真正共用的 `.git`
+    （與 install_post_commit.sh/.ps1 同手法）。取其父目錄即為主 repo 根——一旦
+    repo_root 正確落在主 repo（其 `.git` 恆為真實目錄，不是 worktree 那種指標
+    檔），下游 `_write_flag` 沿用 `repo_root / ".git"` 天真拼接就重新變安全，SD
+    發現的 naive join 問題隨之消除（根因是 repo_root 算錯，不是拼接手法本身）。
+
+    本函式改為本檔自帶實作（不再 import 共用模組同名函式），刻意保留
+    `repo_root_from` 這個名稱與零參數簽名，讓既有測試
+    （tools/fsm_runtime/tests/test_closure_evidence.py 的
+    `patch.object(closure_hook, "repo_root_from", ...)`）不需改動即可繼續運作。
+    """
+    try:
+        out = subprocess.check_output(
+            ["git", "rev-parse", "--path-format=absolute", "--git-common-dir"],
+            cwd=_PKG_ROOT,
+            stderr=subprocess.DEVNULL,
+        )
+        s = out.decode().strip()
+        if s:
+            return Path(s).parent
+    except (subprocess.CalledProcessError, FileNotFoundError, OSError):
+        pass
+    return _PKG_ROOT
 
 
 def _write_flag(repo_root: Path, msg: str) -> None:

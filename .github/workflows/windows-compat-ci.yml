@@ -25,6 +25,22 @@
 #   - SD 發現原本的「hook 內容編碼損毀」斷言在 windows-latest 的純 ASCII checkout
 #     路徑下永遠測不到損毀（原始 P1 bug 只在非 ASCII 路徑才觸發）→ 改用
 #     `git worktree add` 建一個路徑含中文字元的副本重現原始觸發條件。
+#
+# R2 Architect/SD 複審修正（2026-07-13，修復包 D）：
+#   - Architect 發現 tools/integration_gate.ps1 與 AutoClaude/tools/local_ci_gate.ps1
+#     兩支腳本仍只靠 root-infra-ci.yml 的 AST 語法解析頂替，從未被本 workflow 實際
+#     執行 → windows-smoke 新增 `integration_gate.ps1 -SkipFull`（快速迴圈）、
+#     windows-nightly-full 新增 `local_ci_gate.ps1`（涵蓋 pytest 全套較耗時，故放
+#     深度回歸網而非 PR 閘門）。
+#   - SD 實測 pwsh 7.6.3（與 windows-latest runner 同引擎）證實 `Push-Location`
+#     不會同步 `[Environment]::CurrentDirectory`，install_post_commit.ps1 worktree
+#     驗證原本用 `[System.IO.File]::ReadAllBytes(".git/hooks/post-commit")` 這種
+#     相對路徑讀回，實際是巧合式通過（該原生 .NET 呼叫照 CWD 而非 $PWD 解析）→
+#     改用 `git -C $chineseDir rev-parse --git-common-dir` 明確解析後讀回。
+#   - Architect 發現 AISDLC_SDD 版本路徑硬編碼 v0.30，與 root-infra-ci.yml 的動態
+#     LATEST 解析慣例（sort -V 取最高版語意）脫節 → paths 過濾器改用
+#     `AISDLC_SDD_v*` glob 涵蓋所有版本目錄，install_post_commit.ps1 驗證與
+#     windows-nightly-full 的 fsm_runtime pytest 兩處皆改為動態解析 LATEST 版本目錄。
 
 name: windows-compat-ci
 
@@ -43,7 +59,7 @@ on:
       - "tools/dev_start.py"
       - "**/*.ps1"
       - "tools/git-hooks/**"
-      - "AISDLC_SDD/AISDLC_SDD_v0.30/tools/install_hooks/**"
+      - "AISDLC_SDD/AISDLC_SDD_v*/tools/install_hooks/**"
       - ".github/workflows/windows-compat-ci.yml"
   pull_request:
     paths:
@@ -58,7 +74,7 @@ on:
       - "tools/dev_start.py"
       - "**/*.ps1"
       - "tools/git-hooks/**"
-      - "AISDLC_SDD/AISDLC_SDD_v0.30/tools/install_hooks/**"
+      - "AISDLC_SDD/AISDLC_SDD_v*/tools/install_hooks/**"
       - ".github/workflows/windows-compat-ci.yml"
   schedule:
     - cron: "0 6 * * *"   # windows-nightly-full：每日 06:00 UTC 深度回歸（非阻斷）
@@ -111,6 +127,17 @@ jobs:
         working-directory: AutoClaude
         run: python -m pytest tests/test_perception.py -q --tb=short
 
+      - name: 執行 tools/integration_gate.ps1 -SkipFull（實際執行，非僅語法解析；P1 Architect 發現修正）
+        # Architect 發現：root-infra-ci.yml 對 .ps1 僅做 AST 語法解析，本 workflow
+        # 先前把 6 個入口點升級為實際執行，但漏了 tools/integration_gate.ps1（monorepo
+        # 整合層薄聚合閘門），仍停留在僅語法解析的曝險狀態。
+        # -SkipFull 只跑 [3/5]SDD bridge 整合煙霧 + [4/5]回退驗證 + [5/5]cc-switch A/B
+        # 偵測（未裝 CLI 時 SKIP，不計失敗），略過 [1/5]/[2/5] 兩段完整套件重複執行
+        # （AutoClaude 全套測試已於本 job 另跑、AISDLC_SDD ci-gate.ps1 於下一步跑），
+        # 符合 PR-gate 快速迴圈定位；depends 僅需前一步已安裝的 AutoClaude deps。
+        shell: pwsh
+        run: ./tools/integration_gate.ps1 -SkipFull
+
       - name: 安裝 AISDLC_SDD pinned deps
         working-directory: AISDLC_SDD/AISDLC_SDD_v0.01
         run: |
@@ -156,26 +183,48 @@ jobs:
           Write-Host "install-hooks.ps1 驗證通過：core.hooksPath = $hooksPath"
           git config --unset core.hooksPath
 
-      - name: install_post_commit.ps1 執行 + 非 ASCII 路徑編碼損毀斷言（P1 回歸鎖，R1 SD 發現修正）
+      - name: install_post_commit.ps1 執行 + 非 ASCII 路徑編碼損毀斷言（P1 回歸鎖，R1 SD 發現修正；R2 SD/Architect 發現再修正）
         shell: pwsh
         run: |
           # R1 SD 發現：原斷言直接在 windows-latest 的純 ASCII checkout 路徑下跑，
           # 原始 P1 bug（-Encoding ascii 損毀非 ASCII 路徑）在此環境永遠測不到、是死斷言。
           # 用 git worktree 建一個路徑含中文字元的副本，重現原始觸發條件
           # （$RepoRoot/$HookSrcDrift/$HookSrcClosure 組出的字串含非 ASCII 字元）。
+          #
+          # R2 Architect 發現：AISDLC_SDD 版本路徑先前寫死 v0.30，與 root-infra-ci.yml
+          # 動態解析 LATEST 版本（sort -V 取最高版語意）的慣例脫節——版本演化到 v0.31
+          # 時本 step 不會有機械訊號提醒更新，會繼續測已非 LATEST 的舊版。改為與
+          # root-infra-ci.yml 同一套動態解析邏輯，永遠鎖定當下真正的 LATEST 版本。
+          $latest = Get-ChildItem -Path AISDLC_SDD -Directory |
+            Where-Object { $_.Name -match "^AISDLC_SDD_v[0-9]+\.[0-9]+$" } |
+            Sort-Object { [version]($_.Name -replace "^AISDLC_SDD_v", "") } |
+            Select-Object -Last 1
+          if (-not $latest) { throw "找不到任何 AISDLC_SDD_v* 版本目錄" }
+          Write-Host "AISDLC_SDD LATEST 版：$($latest.Name)"
+          $installScriptRel = "./AISDLC_SDD/$($latest.Name)/tools/install_hooks/install_post_commit.ps1"
+
           $chineseDir = Join-Path $env:RUNNER_TEMP "測試目錄"
           git worktree add --detach $chineseDir HEAD
           try {
             Push-Location $chineseDir
             try {
-              ./AISDLC_SDD/AISDLC_SDD_v0.30/tools/install_hooks/install_post_commit.ps1
-              $bytes = [System.IO.File]::ReadAllBytes(".git/hooks/post-commit")
+              if (-not (Test-Path $installScriptRel)) { throw "找不到 $installScriptRel（worktree 內）" }
+              & $installScriptRel
+              # R2 SD 發現：`Push-Location` 只更新 pwsh 的 $PWD，不會同步
+              # [Environment]::CurrentDirectory；原本以相對路徑 ".git/hooks/post-commit"
+              # 讀回是靠 [System.IO.File]::ReadAllBytes 這種原生 .NET 呼叫照 CWD（而非
+              # $PWD）解析、剛好落回 $GITHUB_WORKSPACE/.git（worktree 的 --git-common-dir
+              # 也解回同一實體檔案）才「巧合式通過」，並未真正驗證「從 worktree 目錄出發
+              # 解析相對路徑」這件事。改用 `git -C $chineseDir` 明確以 worktree 目錄解析
+              # 出 common dir 再組絕對路徑讀回，不依賴任何 CWD 同步巧合。
+              $commonDir = (git -C $chineseDir rev-parse --path-format=absolute --git-common-dir).Trim()
+              $bytes = [System.IO.File]::ReadAllBytes((Join-Path $commonDir "hooks/post-commit"))
               $content = [System.Text.Encoding]::UTF8.GetString($bytes)
               if ($content -match "[?]") { throw "hook 內容含 '?' 替代字元 —— 非 ASCII 路徑遭編碼損毀（Out-File -Encoding ascii 回歸）" }
               if ($content -notmatch "測試目錄") { throw "hook 內容遺失非 ASCII 路徑片段，損毀方式與預期不同" }
               if ($content -notmatch "post_commit_drift\.py") { throw "hook 內容缺 drift hook 路徑" }
               if ($content -notmatch "closure_evidence_verify\.py") { throw "hook 內容缺 closure hook 路徑" }
-              Write-Host "install_post_commit.ps1 非 ASCII 路徑編碼驗證通過（無損毀）"
+              Write-Host "install_post_commit.ps1 非 ASCII 路徑編碼驗證通過（無損毀，LATEST=$($latest.Name)）"
             } finally {
               Pop-Location
             }
@@ -198,16 +247,41 @@ jobs:
         with:
           python-version: "3.11"
 
-      - name: AutoClaude 全套 pytest
+      - name: 安裝 AutoClaude 開發 + lint 依賴（供 local_ci_gate.ps1 使用）
         working-directory: AutoClaude
         run: |
           python -m pip install --upgrade pip
-          pip install -e ".[dev]"
-          python -m pytest tests/ -q --tb=short
+          pip install -e ".[dev,lint]"
 
-      - name: AISDLC_SDD LATEST（v0.30）fsm_runtime pytest（排除 chaos）
-        working-directory: AISDLC_SDD/AISDLC_SDD_v0.30
+      - name: 執行 AutoClaude/tools/local_ci_gate.ps1（實際執行，非僅語法解析；P1 Architect 發現修正）
+        # Architect 發現：本 workflow 先前只對 local_ci_gate.ps1 做 AST 語法解析
+        # （root-infra-ci.yml），從未實際執行過。本腳本鏡像 autoclaude-ci.yml 的
+        # push gating jobs（editable 哨兵 + LOC 預算 + CLAUDE.md 行數/長行 + snapshot
+        # 可重現 + import-linter + pytest 全套），涵蓋範圍比原本單純呼叫 pytest 更完整，
+        # 故取代（而非疊加）原本的裸 pytest 呼叫，避免同一 job 內重複跑一次全套測試。
+        # 放進 nightly-full（非 windows-smoke）：pytest 全套 3,500+ case 在 Windows
+        # runner 上執行時間較長，符合本 job continue-on-error 深度回歸網的定位。
+        working-directory: AutoClaude
+        shell: pwsh
+        run: ./tools/local_ci_gate.ps1
+
+      - name: AISDLC_SDD LATEST fsm_runtime pytest（排除 chaos；動態解析 LATEST 版本，R2 Architect 發現修正）
+        # Architect 發現：原寫死 v0.30，與 root-infra-ci.yml 動態解析 LATEST 版本
+        # （sort -V 取最高版語意）的慣例脫節，版本演化到 v0.31 時本 step 不會有機械
+        # 訊號提醒更新。改為同一套動態解析邏輯，永遠鎖定當下真正的 LATEST 版本。
+        shell: pwsh
         run: |
-          python -m pip install --upgrade pip
-          pip install -r requirements-ci.txt
-          python -m pytest tools/fsm_runtime/tests/ -m "not chaos" -q --tb=short
+          $latest = Get-ChildItem -Path AISDLC_SDD -Directory |
+            Where-Object { $_.Name -match "^AISDLC_SDD_v[0-9]+\.[0-9]+$" } |
+            Sort-Object { [version]($_.Name -replace "^AISDLC_SDD_v", "") } |
+            Select-Object -Last 1
+          if (-not $latest) { throw "找不到任何 AISDLC_SDD_v* 版本目錄" }
+          Write-Host "AISDLC_SDD LATEST 版：$($latest.Name)"
+          Push-Location $latest.FullName
+          try {
+            python -m pip install --upgrade pip
+            pip install -r requirements-ci.txt
+            python -m pytest tools/fsm_runtime/tests/ -m "not chaos" -q --tb=short
+          } finally {
+            Pop-Location
+          }

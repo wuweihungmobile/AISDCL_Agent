@@ -1,0 +1,311 @@
+# macOS 相容性驗證（Mac/Windows 架構優化，四方複審發現的第二個 P0 缺口）。
+#
+# 背景：四方獨立審查交叉確認 `.github/workflows/` 下全部 workflow、21 處 `runs-on`
+# 只有 ubuntu-latest 與 windows-latest，完全沒有 macos-latest job——但本 repo 的目標
+# 是「Mac/Windows 11 皆能正常部署、執行、開發」，且開發實際上就在 macOS 機器上進行，
+# macOS 端長期只靠人工對照與文件宣稱，從未被機器化驗證過。同一輪審查也證實：光靠
+# 「四方複審 APPROVE」擋不住真實平台 bug——`5c180b2` 聲稱四輪 APPROVE 後，補上
+# windows-latest CI（見 windows-compat-ci.yml）就連續抓到 4 個真實 bug（py launcher
+# 誤判 / NTFS 保留裝置名搶先擋下測試 / install_git_hooks 往返驗證誤判 rc=1 / worktree
+# 下 install_post_commit 寫入路徑錯誤）。本 workflow 補上 macOS 側同等的機械安全網。
+#
+# 設計（比照 windows-compat-ci.yml 的 smoke + nightly-full 兩層慣例）：
+#   - macos-smoke      ：PR/push 閘門，只在觸及平台敏感路徑時觸發，實際「執行」關鍵
+#                        腳本（非僅語法解析），快速攔下 runtime 級回歸。
+#   - macos-nightly-full：schedule + workflow_dispatch，continue-on-error 非阻斷，
+#                        跑兩子專案完整測試套件在 macos-latest 上的深度回歸網，
+#                        避免 macOS runner 偶發性拖垮每次 PR。
+#
+# 本 workflow 額外涵蓋兩個「連在 ubuntu-latest / windows-latest 上都測不到」的路徑：
+#   1. `tools/dev_start.py` 的 `cross_same_flavor` 分支——`_now_label()` 在 Linux 上
+#      恆為 `"linux"`、在 Windows 上恆為 `"windows"`，只有真正跑在 `sys.platform ==
+#      "darwin"` 的 macOS runner 上，`_now_label()` 才會回傳 `"mac"`，讓「上次於 Linux
+#      開發、這次切到 mac（同為 posix venv 形狀）」這條強制重建 `.venv` 的分支得以被
+#      機械驗證（手法：偽造 `.dev_env_state.json` 的 `developing:"linux"` 後重跑
+#      `dev_start.sh`，斷言 `.venv` 被移除重建、`developing` 寫回 `"mac"`）。
+#   2. macOS 內建系統 bash（`/bin/bash`，3.2，2007 年凍結版，不支援 `declare -A` /
+#      `readarray` / `mapfile` 等 bash 4+ 語法）——根層 `tools/git-hooks/` 三支
+#      dispatcher 的 shebang 是 `#!/usr/bin/env bash`，若經由 `git commit`/`git push`
+#      觸發，實際執行的 bash 版本取決於 runner PATH 上第一個 `bash`（可能是 Homebrew
+#      裝的 5.x，掩蓋 3.2 相容性問題）。本 workflow 額外用 `/bin/bash <script>` 明確
+#      指定系統 bash 直接執行，不依賴 PATH 解析，才能真正驗證這三支 dispatcher（已
+#      在原始碼註解中聲明「bash 3.2 相容」）在最嚴苛環境下仍正確運作。
+
+name: macos-compat-ci
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "AutoClaude/autoclaude/perception/**"
+      - "AutoClaude/autoclaude/utils/**"
+      - "AutoClaude/pyproject.toml"
+      - "AutoClaude/tests/**"
+      - "AutoClaude/tools/install_git_hooks.sh"
+      - "AISDLC_SDD/scripts/install-hooks.sh"
+      - "AISDLC_SDD/scripts/ci-gate.sh"
+      - "AISDLC_SDD/AISDLC_SDD_v0.01/requirements-ci.txt"
+      - "tools/bootstrap.sh"
+      - "tools/dev_start.sh"
+      - "tools/dev_start.py"
+      - "tools/tests/**"
+      - "tools/check_script_parity.py"
+      - "tools/check_ntfs_paths.py"
+      - "**/*.sh"
+      - "tools/git-hooks/**"
+      - "AISDLC_SDD/AISDLC_SDD_v*/tools/install_hooks/**"
+      - ".github/workflows/macos-compat-ci.yml"
+  pull_request:
+    paths:
+      - "AutoClaude/autoclaude/perception/**"
+      - "AutoClaude/autoclaude/utils/**"
+      - "AutoClaude/pyproject.toml"
+      - "AutoClaude/tests/**"
+      - "AutoClaude/tools/install_git_hooks.sh"
+      - "AISDLC_SDD/scripts/install-hooks.sh"
+      - "AISDLC_SDD/scripts/ci-gate.sh"
+      - "AISDLC_SDD/AISDLC_SDD_v0.01/requirements-ci.txt"
+      - "tools/bootstrap.sh"
+      - "tools/dev_start.sh"
+      - "tools/dev_start.py"
+      - "tools/tests/**"
+      - "tools/check_script_parity.py"
+      - "tools/check_ntfs_paths.py"
+      - "**/*.sh"
+      - "tools/git-hooks/**"
+      - "AISDLC_SDD/AISDLC_SDD_v*/tools/install_hooks/**"
+      - ".github/workflows/macos-compat-ci.yml"
+  schedule:
+    - cron: "0 7 * * *"   # macos-nightly-full：每日 07:00 UTC 深度回歸（非阻斷；較 windows-compat-ci 錯開 1 小時，避免同時搶 runner）
+  workflow_dispatch:
+
+concurrency:
+  group: macos-compat-ci-${{ github.ref }}
+  cancel-in-progress: true
+
+# 純驗證、不寫回 repo → 最小權限唯讀。
+permissions:
+  contents: read
+
+jobs:
+  macos-smoke:
+    name: macOS smoke（實際執行關鍵腳本，非僅語法解析）
+    if: github.event_name != 'schedule'
+    runs-on: macos-latest
+    timeout-minutes: 35
+
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.11"
+
+      - name: 執行 tools/bootstrap.sh（全新 .venv 建立情境）
+        run: |
+          bash tools/bootstrap.sh
+          test -x .venv/bin/python || { echo "::error::bootstrap.sh 執行後 .venv/bin/python 不存在"; exit 1; }
+          echo "bootstrap.sh 全新 .venv 建立情境通過"
+
+      - name: 將 .venv/bin 加入 PATH（比照本機開發慣例，供後續步驟裸呼叫 python）
+        run: echo "$PWD/.venv/bin" >> "$GITHUB_PATH"
+
+      - name: 重跑 tools/bootstrap.sh（既有 .venv 沿用情境）
+        run: |
+          bash tools/bootstrap.sh
+          test -x .venv/bin/python || { echo "::error::既有 .venv 重跑後 .venv/bin/python 不存在"; exit 1; }
+          echo "bootstrap.sh 既有 .venv 重跑情境通過"
+
+      - name: 執行 tools/dev_start.sh（一般 checkout 情境，首次記錄依賴基準）
+        run: |
+          rm -f .dev_env_state.json
+          bash tools/dev_start.sh --no-sync
+          test -f .dev_env_state.json || { echo "::error::dev_start.sh 執行後 .dev_env_state.json 未寫回"; exit 1; }
+          echo "dev_start.sh 一般 checkout 情境通過"
+
+      - name: 觸發 tools/dev_start.py 的 cross_same_flavor 分支（linux→mac，僅 macOS runner 可測）
+        # _now_label() 只有真正跑在 sys.platform == "darwin" 才回傳 "mac"；本步驟偽造
+        # 上次開發平台為 "linux"（與 mac 同為 posix venv 形狀，但 venv 二進位不相容），
+        # 驗證 dev_start.py 正確移除既有 .venv 並強制重跑 bootstrap 重建。
+        run: |
+          python3 -c "
+          import json
+          state = json.load(open('.dev_env_state.json'))
+          state['developing'] = 'linux'
+          json.dump(state, open('.dev_env_state.json', 'w'))
+          "
+          bash tools/dev_start.sh --no-sync
+          developing="$(python3 -c "import json; print(json.load(open('.dev_env_state.json'))['developing'])")"
+          if [ "$developing" != "mac" ]; then
+            echo "::error::cross_same_flavor 執行後 developing 應為 mac，實際=$developing"
+            exit 1
+          fi
+          test -x .venv/bin/python || { echo "::error::cross_same_flavor 重建後 .venv/bin/python 不存在"; exit 1; }
+          echo "cross_same_flavor（linux→mac）分支驗證通過"
+
+      - name: AutoClaude/tools/install_git_hooks.sh 安裝／解除往返驗證（一般 checkout）
+        run: |
+          bash AutoClaude/tools/install_git_hooks.sh
+          hp="$(git config --get core.hooksPath || true)"
+          if [ -z "$hp" ]; then echo "::error::core.hooksPath 未設定"; exit 1; fi
+          echo "core.hooksPath = $hp"
+          bash AutoClaude/tools/install_git_hooks.sh --uninstall
+          hp2="$(git config --get core.hooksPath || true)"
+          if [ -n "$hp2" ]; then echo "::error::core.hooksPath 卸載後仍殘留：$hp2"; exit 1; fi
+          echo "install_git_hooks.sh 安裝／解除往返驗證通過"
+
+      - name: AutoClaude/tools/install_git_hooks.sh 於 linked worktree 下應正確拒絕（fail-loud）
+        run: |
+          wt="$RUNNER_TEMP/wt-install-git-hooks-reject"
+          git worktree add --detach "$wt" HEAD
+          set +e
+          ( cd "$wt" && bash AutoClaude/tools/install_git_hooks.sh )
+          rc=$?
+          set -e
+          git worktree remove --force "$wt"
+          if [ "$rc" -ne 1 ]; then
+            echo "::error::預期在 linked worktree 下 install_git_hooks.sh 應 exit 1，實際 rc=$rc"
+            exit 1
+          fi
+          echo "install_git_hooks.sh worktree 拒絕驗證通過（rc=1 as expected）"
+
+      - name: AISDLC_SDD/scripts/install-hooks.sh 安裝／解除往返驗證（一般 checkout）
+        run: |
+          bash AISDLC_SDD/scripts/install-hooks.sh
+          hp="$(git config --get core.hooksPath || true)"
+          if [ -z "$hp" ]; then echo "::error::core.hooksPath 未設定（install-hooks.sh）"; exit 1; fi
+          echo "install-hooks.sh 驗證通過：core.hooksPath = $hp"
+          git config --unset core.hooksPath || true
+
+      - name: AISDLC_SDD/scripts/install-hooks.sh 於 linked worktree 下應正確拒絕（fail-loud）
+        run: |
+          wt="$RUNNER_TEMP/wt-install-hooks-reject"
+          git worktree add --detach "$wt" HEAD
+          set +e
+          ( cd "$wt" && bash AISDLC_SDD/scripts/install-hooks.sh )
+          rc=$?
+          set -e
+          git worktree remove --force "$wt"
+          if [ "$rc" -ne 1 ]; then
+            echo "::error::預期在 linked worktree 下 install-hooks.sh 應 exit 1，實際 rc=$rc"
+            exit 1
+          fi
+          echo "install-hooks.sh worktree 拒絕驗證通過（rc=1 as expected）"
+
+      - name: 根層 dispatcher hooks：安裝 + 真實 git commit 觸發 pre-commit（經 core.hooksPath）
+        run: |
+          bash AutoClaude/tools/install_git_hooks.sh
+          echo "ci probe" > _ci_macos_hook_probe.txt
+          git add _ci_macos_hook_probe.txt
+          git -c user.email=ci@example.com -c user.name=ci -c commit.gpgsign=false \
+            commit -m "ci: macos hook probe (throwaway, not pushed)" -q
+          echo "git commit 經 core.hooksPath 成功觸發 pre-commit dispatcher（exit 0）"
+          git rm -q _ci_macos_hook_probe.txt
+          git -c user.email=ci@example.com -c user.name=ci -c commit.gpgsign=false \
+            commit -m "ci: revert macos hook probe (throwaway, not pushed)" -q
+
+      - name: 根層 dispatcher hooks：/bin/bash（系統 bash 3.2，非 Homebrew 新版）直接執行驗證
+        # 三支 dispatcher 的 shebang 為 #!/usr/bin/env bash，經 git commit/push 觸發時
+        # 實際執行的 bash 版本取決於 runner PATH 解析、可能是較新版本，掩蓋 3.2 相容性
+        # 問題。此處以 /bin/bash 明確指定系統 bash 直接呼叫，才能真正驗證 declare -A /
+        # readarray / mapfile 等 bash 4+ 限定語法未被誤用。
+        run: |
+          /bin/bash --version | head -1
+
+          echo "probe" > _ci_probe_clean.txt
+          git add _ci_probe_clean.txt
+          /bin/bash tools/git-hooks/pre-commit
+          git reset -q _ci_probe_clean.txt
+          rm -f _ci_probe_clean.txt
+          echo "pre-commit dispatcher 於系統 bash 下執行成功（乾淨變更）"
+
+          touch "CON.txt"
+          git add "CON.txt"
+          set +e
+          /bin/bash tools/git-hooks/pre-commit
+          rc=$?
+          set -e
+          git reset -q "CON.txt" || true
+          rm -f "CON.txt"
+          if [ "$rc" -eq 0 ]; then
+            echo "::error::預期 NTFS 保留裝置名（CON.txt）應被擋下，但 dispatcher 回報成功"
+            exit 1
+          fi
+          echo "pre-commit dispatcher 正確擋下 NTFS 保留裝置名（rc=$rc as expected）"
+
+          /bin/bash tools/git-hooks/post-commit
+          echo "post-commit dispatcher 於系統 bash 下執行成功"
+
+          ZERO_SHA='0000000000000000000000000000000000000000'
+          head_sha="$(git rev-parse HEAD)"
+          printf 'refs/heads/ci-probe %s refs/heads/ci-probe %s\n' "$ZERO_SHA" "$head_sha" \
+            | /bin/bash tools/git-hooks/pre-push
+          echo "pre-push dispatcher 於系統 bash 下執行成功（刪除分支跳過路徑）"
+
+      - name: AISDLC_SDD LATEST/tools/install_hooks/install_post_commit.sh 於 worktree 執行，驗證寫入共用 .git/hooks/post-commit
+        # R2 Architect 複審發現：原寫死 v0.30，與 windows-compat-ci.yml 已修正的動態解析
+        # LATEST（sort -V 取最高版語意，鏡射 ci-gate.sh 慣例）慣例脫節，版本演化到 v0.31
+        # 時本 step 不會有機械訊號提醒更新。改為同一套動態解析邏輯。
+        run: |
+          latest="$(ls -d AISDLC_SDD/AISDLC_SDD_v0.0* AISDLC_SDD/AISDLC_SDD_v0.[1-9]* AISDLC_SDD/AISDLC_SDD_v[1-9]* 2>/dev/null | sort -V | tail -1)"
+          test -n "$latest" || { echo "::error::找不到任何 AISDLC_SDD_v* 版本目錄"; exit 1; }
+          echo "AISDLC_SDD LATEST 版：$latest"
+          wt="$RUNNER_TEMP/wt-install-post-commit"
+          git worktree add --detach "$wt" HEAD
+          ( cd "$wt" && bash "$latest/tools/install_hooks/install_post_commit.sh" )
+          target="$(git rev-parse --path-format=absolute --git-common-dir)/hooks/post-commit"
+          test -x "$target" || { echo "::error::post-commit 未正確安裝於 $target"; exit 1; }
+          grep -q "post_commit_drift.py" "$target" || { echo "::error::post-commit 缺 drift hook 路徑"; exit 1; }
+          grep -q "closure_evidence_verify.py" "$target" || { echo "::error::post-commit 缺 closure hook 路徑"; exit 1; }
+          echo "install_post_commit.sh 於 worktree 執行、寫入共用 hooks 驗證通過：$target"
+          git worktree remove --force "$wt"
+
+      - name: pty_wrapper / hotkey_handler 平台解析單元測試（AutoClaude tests/test_perception.py）
+        working-directory: AutoClaude
+        run: python -m pytest tests/test_perception.py -q --tb=short
+
+      - name: 執行（非僅解析）AISDLC_SDD/scripts/ci-gate.sh（凍結基線 v0.01 + LATEST 雙軌）
+        working-directory: AISDLC_SDD
+        run: bash scripts/ci-gate.sh
+
+      - name: tools/check_script_parity.py（雙平台腳本對等 + pytest 釘選一致）
+        run: python3 tools/check_script_parity.py
+
+      - name: tools/check_ntfs_paths.py（NTFS 敵意檔名，全量 tracked 路徑）
+        run: python3 tools/check_ntfs_paths.py
+
+  macos-nightly-full:
+    name: macOS nightly full suite（深度回歸，非阻斷）
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    runs-on: macos-latest
+    timeout-minutes: 60
+    continue-on-error: true
+
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.11"
+
+      - name: AutoClaude 全套 pytest
+        working-directory: AutoClaude
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[dev]"
+          python -m pytest tests/ -q --tb=short
+
+      - name: AISDLC_SDD LATEST fsm_runtime pytest（排除 chaos；動態解析 LATEST 版本，R2 Architect 複審發現修正）
+        # R2 Architect 複審發現：原寫死 v0.30 於 working-directory 靜態欄位，與
+        # windows-compat-ci.yml 已修正的動態解析 LATEST 慣例脫節。working-directory
+        # 是靜態 YAML 欄位無法動態運算，改於 run: 內動態解析後 cd 進去。
+        run: |
+          latest="$(ls -d AISDLC_SDD/AISDLC_SDD_v0.0* AISDLC_SDD/AISDLC_SDD_v0.[1-9]* AISDLC_SDD/AISDLC_SDD_v[1-9]* 2>/dev/null | sort -V | tail -1)"
+          test -n "$latest" || { echo "::error::找不到任何 AISDLC_SDD_v* 版本目錄"; exit 1; }
+          echo "AISDLC_SDD LATEST 版：$latest"
+          cd "$latest"
+          python -m pip install --upgrade pip
+          pip install -r requirements-ci.txt
+          python -m pytest tools/fsm_runtime/tests/ -m "not chaos" -q --tb=short

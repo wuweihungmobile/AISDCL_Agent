@@ -91,7 +91,7 @@ _ntfs_seg_bad() {  # $1=完整路徑；有問題 → stdout 印原因並回 0，
     base="${seg%%.*}"   # 去（第一個點起的）副檔名；Windows 對 CON.txt 一樣視為保留名
     up="$(printf '%s' "$base" | tr '[:lower:]' '[:upper:]')"
     case "$up" in
-      CON|PRN|AUX|NUL|COM[1-9]|LPT[1-9])
+      CON|PRN|AUX|NUL|COM[0-9]|LPT[0-9])
         echo "路徑段「${seg}」為 Windows 保留裝置名（${up}）"
         return 0 ;;
     esac

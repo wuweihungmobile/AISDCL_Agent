@@ -1,6 +1,6 @@
 # CLAUDE.md — Claude Code Project Guidance
 
-**Last Updated**: 2026-07-10 | **AISDLC Version**: v0.09 | **Status**: **Improving_012 完成（三能力 A/B/C 全交付）**。Phase 3 F-A1 GoalDecomposer 收尾：`IBrain.decide_decomposition` + `supports_decomposition`（additive，capability 守門不靜默降級）+ `execution/goal_decomposer.py`（三道有界閘 ≤24 硬上限／Kahn 無環／非空 prompt，超限拒絕不重試、1 次 Brain 呼叫非遞迴）+ 🔴 signoff 硬閘 + `wiring.build_goal_decomposer` 注入 F-A2 ToolInvocationAdapter（消費 allowlist）。三方 zero-trust audit OVERALL PASS（P0=0/P1=0）。full pytest 現行基線 **3,543 passed / 181 skipped**（2026-07-11 實測，同文末元數據；四方複審第四輪 +14 case）、coverage 100%、importlinter 8 kept、LOC=0。詳見 [AutoClaude_Improving_012.md](docs/04_planning/AutoClaude_Improving_012.md) §5 Phase 3。
+**Last Updated**: 2026-07-10 | **AISDLC Version**: v0.09 | **Status**: **Improving_012 完成（三能力 A/B/C 全交付）**。Phase 3 F-A1 GoalDecomposer 收尾：`IBrain.decide_decomposition` + `supports_decomposition`（additive，capability 守門不靜默降級）+ `execution/goal_decomposer.py`（三道有界閘 ≤24 硬上限／Kahn 無環／非空 prompt，超限拒絕不重試、1 次 Brain 呼叫非遞迴）+ 🔴 signoff 硬閘 + `wiring.build_goal_decomposer` 注入 F-A2 ToolInvocationAdapter（消費 allowlist）。三方 zero-trust audit OVERALL PASS（P0=0/P1=0）。full pytest 現行基線 **3,566 passed / 196 skipped**（2026-07-13 乾淨 bootstrap 實測，同文末元數據；出廠環境未裝 `[postgres]` 等選配——先前一版曾誤用已裝 `[postgres]` 選配的既有 `.venv` 量測得到 3,664/132，經複審抓出方法論不符 ONBOARDING 自稱的「出廠環境」而校正回乾淨值）、coverage 100%、importlinter 8 kept、LOC=0。詳見 [AutoClaude_Improving_012.md](docs/04_planning/AutoClaude_Improving_012.md) §5 Phase 3。
 
 > **🔴 Important Notice 🔴** This file provides critical guidance for Claude Code (claude.ai/code). All instructions here OVERRIDE default behavior and must be followed exactly.
 
@@ -322,7 +322,7 @@ tasks:
 
 ---
 
-**文檔元數據**：v7.8 | 建立 2025-01-11 | 最後更新 2026-06-24 | 適用 AISDLC v0.09+（v7.8：AutoSDD_improving_61 A 軌 L5 加固 — weak_regex 第二信號併入轉譯元學習（沿 spec_digest 先例搭既有 RTM-COVERAGE-HISTORY；`select_proposals` 雙信號 failure OR weak_regex；無新 plugin/port）；apply 仍人工 signoff；full pytest 3,543/181（2026-07-11 實測；四方複審第四輪 +14 case）、importlinter 8 kept、LOC=0。歷史 v7.7 improving_60 明細見 [sprint_history.md §1.7.3](docs/05_development/sprint_history.md)）。
+**文檔元數據**：v7.8 | 建立 2025-01-11 | 最後更新 2026-06-24 | 適用 AISDLC v0.09+（v7.8：AutoSDD_improving_61 A 軌 L5 加固 — weak_regex 第二信號併入轉譯元學習（沿 spec_digest 先例搭既有 RTM-COVERAGE-HISTORY；`select_proposals` 雙信號 failure OR weak_regex；無新 plugin/port）；apply 仍人工 signoff；full pytest 3,566/196（2026-07-13 乾淨 bootstrap 實測；出廠環境未裝 `[postgres]` 等選配）、importlinter 8 kept、LOC=0。歷史 v7.7 improving_60 明細見 [sprint_history.md §1.7.3](docs/05_development/sprint_history.md)）。
 
 <!-- ARCH_SNAPSHOT_BEGIN -->
 ## [Architecture Snapshot] — 由 tools/snapshot_sync.py 自動生成（請勿手動編輯本區段；以 `python tools/snapshot_sync.py` 重新生成）
