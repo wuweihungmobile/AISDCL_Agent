@@ -61,6 +61,7 @@ on:
       - "tools/git-hooks/**"
       - "AISDLC_SDD/AISDLC_SDD_v*/tools/install_hooks/**"
       - "AISDLC_SDD/AISDLC_SDD_v*/tools/fsm_runtime/tests/**"
+      - "AISDLC_SDD/AISDLC_SDD_v*/.claude/hooks/**"
       - ".github/workflows/windows-compat-ci.yml"
   pull_request:
     paths:
@@ -77,6 +78,7 @@ on:
       - "tools/git-hooks/**"
       - "AISDLC_SDD/AISDLC_SDD_v*/tools/install_hooks/**"
       - "AISDLC_SDD/AISDLC_SDD_v*/tools/fsm_runtime/tests/**"
+      - "AISDLC_SDD/AISDLC_SDD_v*/.claude/hooks/**"
       - ".github/workflows/windows-compat-ci.yml"
   schedule:
     - cron: "0 6 * * *"   # windows-nightly-full：每日 06:00 UTC 深度回歸（非阻斷）

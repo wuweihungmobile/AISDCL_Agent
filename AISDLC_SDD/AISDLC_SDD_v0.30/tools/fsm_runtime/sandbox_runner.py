@@ -204,14 +204,32 @@ class LocalStubBackend:
 
 
 def docker_available() -> bool:
-    """docker CLI 存在且 daemon 可連線。"""
+    """docker CLI 存在、daemon 可連線，且能實際跑起本檔測試用的 Linux 容器。
+
+    `docker info` 成功只證明 daemon 可達，不保證能跑 Linux 容器——Windows
+    runner 的 Docker daemon 常預設為 Windows containers 模式，此時對 Linux-only
+    映像（如 busybox）`docker run` 會直接失敗（no matching manifest），但
+    `docker info` 依然回報成功，導致 `@requires_docker` 測試被誤判為「可跑」
+    而非確定性失敗（2026-07 Mac/Windows 相容性四方複審 QA/Architect 複審輪
+    在 windows-latest GitHub runner 上連續兩次重現：`docker info` 過關，
+    `docker run --rm busybox ...` 卻回傳 nonzero exit 且 stdout 為空）。改用
+    一次性最小 Linux 容器試跑取代單純 daemon 可達性檢查，才是這些測試真正
+    需要的前置條件；探測失敗（含映像拉取失敗等其他環境問題）一律視為不可用
+    並讓測試正常 skip，而非讓 CI 出現不確定性的紅燈。
+    """
     if shutil.which("docker") is None:
         return False
     try:
         r = subprocess.run(
             ["docker", "info"], capture_output=True, timeout=10, check=False,
         )
-        return r.returncode == 0
+        if r.returncode != 0:
+            return False
+        probe = subprocess.run(
+            ["docker", "run", "--rm", "busybox", "true"],
+            capture_output=True, timeout=30, check=False,
+        )
+        return probe.returncode == 0
     except (subprocess.SubprocessError, OSError):
         return False
 
