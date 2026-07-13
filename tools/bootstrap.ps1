@@ -41,10 +41,19 @@ if ($UseUv) { Write-Host "偵測到 uv → 使用 uv 建立/安裝（加速）" 
 
 # --- 選一個 >=3.11 的直譯器（僅 .venv 不存在且 uv 未裝時需要）---
 function Select-Python {
-  # 優先用 py launcher 指定版本，再回退各命名。
+  # 優先用 py launcher 指定版本，再回退各命名；CI 下改優先採 PATH python/python3。
+  # 原因（2026-07-13 windows-compat-ci run 29253791094 實測）：windows-2025-vs2026
+  # runner 上 `py -3.11 -m venv` 於 ~52ms 內回報 rc=0 但未產出 Scripts\python.exe
+  # （正常 venv 建立含 ensurepip，需數秒），研判該 runner 上 py launcher 的版本
+  # 解析不可靠；而 actions/setup-python 已保證 PATH 上的 python 為正確可用版本。
   # 探測段以 try/finally 局部設 EAP=Continue：PS5.1 下 native 指令 stderr 重導（2>$null）
   # 遇 $ErrorActionPreference='Stop' 會直接 throw（NativeCommandError），必須局部放寬。
-  $candidates = @("py -$PyTarget", "py -3.12", "py -3.11", "python", "python3")
+  $IsCI = ($env:GITHUB_ACTIONS -eq 'true') -or ($env:CI -eq 'true')
+  $candidates = if ($IsCI) {
+    @("python", "python3", "py -$PyTarget", "py -3.12", "py -3.11")
+  } else {
+    @("py -$PyTarget", "py -3.12", "py -3.11", "python", "python3")
+  }
   $prevEAP = $ErrorActionPreference
   try {
     $ErrorActionPreference = 'Continue'
@@ -113,6 +122,15 @@ if (Test-Path $VenvDir) {
   # PS 的 EAP=Stop 不會因 native 指令非零 rc 停下 → 必須顯式檢查 $LASTEXITCODE
   if ($LASTEXITCODE -ne 0) {
     Write-Host "❌ 建立 .venv 失敗（rc=$LASTEXITCODE）" -ForegroundColor Red
+    exit 1
+  }
+  # fail-fast：與既有 .venv 重用分支（上方）對稱 —— rc=0 不保證真的產出可用
+  # Scripts\python.exe（2026-07-13 實測：某 runner 上建立指令秒退回報成功但未產出）。
+  if (-not (Test-Path (Join-Path $VenvDir 'Scripts\python.exe'))) {
+    $UsedInterp = if ($UseUv) { "uv --python $PyTarget" } else { $BasePy }
+    Write-Host ""
+    Write-Host "❌ .venv 建立指令回報成功（rc=0）但 Scripts\python.exe 不存在（直譯器：$UsedInterp）。" -ForegroundColor Red
+    Write-Host "   請刪除後重試：Remove-Item -Recurse -Force .venv；再跑 powershell -ExecutionPolicy Bypass -File tools/bootstrap.ps1" -ForegroundColor Yellow
     exit 1
   }
 }
