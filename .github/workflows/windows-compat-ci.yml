@@ -142,6 +142,9 @@ jobs:
           $hooksPathAfter = git config --get core.hooksPath
           if ($hooksPathAfter) { throw "core.hooksPath 卸載後仍殘留：$hooksPathAfter" }
           Write-Host "install_git_hooks.ps1 安裝／解除往返驗證通過"
+          # git config --get 對已移除的 key 回報 rc=1（這正是本測試要斷言的期望結果），
+          # 若不顯式歸零，pwsh 會把這個「預期中的非零」誤傳為本 step 的失敗結果。
+          exit 0
 
       - name: AISDLC_SDD/scripts/install-hooks.ps1 驗證（R1 SA 發現：第二入口從未被測到）
         shell: pwsh
