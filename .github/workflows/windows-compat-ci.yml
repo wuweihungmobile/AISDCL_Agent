@@ -60,6 +60,7 @@ on:
       - "**/*.ps1"
       - "tools/git-hooks/**"
       - "AISDLC_SDD/AISDLC_SDD_v*/tools/install_hooks/**"
+      - "AISDLC_SDD/AISDLC_SDD_v*/tools/fsm_runtime/tests/**"
       - ".github/workflows/windows-compat-ci.yml"
   pull_request:
     paths:
@@ -75,6 +76,7 @@ on:
       - "**/*.ps1"
       - "tools/git-hooks/**"
       - "AISDLC_SDD/AISDLC_SDD_v*/tools/install_hooks/**"
+      - "AISDLC_SDD/AISDLC_SDD_v*/tools/fsm_runtime/tests/**"
       - ".github/workflows/windows-compat-ci.yml"
   schedule:
     - cron: "0 6 * * *"   # windows-nightly-full：每日 06:00 UTC 深度回歸（非阻斷）
@@ -285,3 +287,70 @@ jobs:
           } finally {
             Pop-Location
           }
+
+  # QA 四方複審發現（P1）：windows-nightly-full 為 continue-on-error: true，失敗會
+  # 永久靜默、無任何人工提醒機制（本 repo 已有 aisdlc-sdd-fsm-chaos-nightly.yml 的
+  # streak-lock 前例，但這兩個新 job 完全沒有套用）。本 job 補上最小可行的提醒管道：
+  # 用 GitHub Issue 追蹤失敗、恢復綠燈後自動關單，避免重覆開單洗版。
+  # 刻意不比照 chaos-nightly 收緊 branch protection：(1) 本 repo 為單一開發者直推
+  # main、不開 PR/分支（既有工作流慣例），required_pull_request_reviews 這類設定
+  # 對此工作流無意義；(2) 已實測 `gh api repos/:owner/:repo/branches/main/protection`
+  # 回應 403（此 repo 方案層級不支援 branch protection API），嘗試收緊只會是必然
+  # 失敗的空動作。
+  windows-nightly-alert:
+    name: Windows nightly 失敗提醒（best-effort，不影響 nightly-full 本身的 continue-on-error）
+    runs-on: ubuntu-latest
+    needs: windows-nightly-full
+    if: always() && (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch')
+    permissions:
+      actions: read
+      issues: write
+    steps:
+      - name: 讀取本次 windows-nightly-full 實際結論
+        # continue-on-error: true 會讓 needs.windows-nightly-full.result 恆為
+        # success，無法用來判斷真實失敗，故直接查該 job 在本次 run 的實際 conclusion。
+        id: check
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          conclusion=$(gh api "/repos/${REPO}/actions/runs/${{ github.run_id }}/jobs" \
+            --jq '[.jobs[] | select(.name | startswith("Windows nightly full"))][0].conclusion // "unknown"')
+          echo "windows-nightly-full 本次結論：${conclusion}"
+          if [ "$conclusion" = "failure" ]; then
+            echo "failed=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "failed=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: 失敗時開單或於既有單留言（title 比對避免每日重覆開單）
+        if: steps.check.outputs.failed == 'true'
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          set -euo pipefail
+          TITLE="[P1] windows-nightly-full 深度回歸失敗"
+          existing=$(gh issue list --repo "${REPO}" --state open --search "\"${TITLE}\" in:title" --json number --jq '.[0].number // empty')
+          if [ -n "$existing" ]; then
+            gh issue comment "$existing" --repo "${REPO}" --body "再次失敗：${RUN_URL}"
+          else
+            gh issue create --repo "${REPO}" --title "${TITLE}" --body "windows-nightly-full（continue-on-error 非阻斷 job，不會擋 push/PR）失敗，需人工排查，請勿長期忽略。首次偵測到失敗的執行：${RUN_URL}。修復並綠燈後本 job 會自動關閉本 issue。"
+          fi
+
+      - name: 綠燈時若有既有失敗 issue 則自動關閉
+        if: steps.check.outputs.failed == 'false'
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          TITLE="[P1] windows-nightly-full 深度回歸失敗"
+          existing=$(gh issue list --repo "${REPO}" --state open --search "\"${TITLE}\" in:title" --json number --jq '.[0].number // empty')
+          if [ -n "$existing" ]; then
+            gh issue close "$existing" --repo "${REPO}" --comment "windows-nightly-full 已恢復綠燈：${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+          fi

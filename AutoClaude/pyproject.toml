@@ -27,7 +27,13 @@ dev = [
     "pytest-mock>=3.14",
     "ruff==0.15.21",
     "cachetools>=5.3",
-    "hypothesis>=6.0",
+    # DEF-101-058 鎖版：原建議「加 <7 上限」經 SA/SD 四方複審獨立複核證實無效——
+    # PyPI 從未發布過 hypothesis 7.x（現行最新即 6.156.6），<7 上限不改變任何解析
+    # 結果，且今日已無法重現當初宣稱的 19 個測試失敗。比照同區塊 pytest/ruff 的
+    # 精確鎖版慣例（DEF-101-006）改為精確版號：本機以全新 venv 驗證
+    # hypothesis==6.156.6 下全套測試綠燈（3,566 passed / 196 skipped，含全部
+    # property-based 測試），才回寫釘選，防止未來全新環境再度浮動安裝到未經驗證的版本。
+    "hypothesis==6.156.6",
     # tools/ 開發腳本（run_bridge_e2e / migrate_yaml_to_db / three_tier_to_playbook）
     # 使用 click；其單元測試 tests/tools/test_run_bridge_e2e.py 於 collection 期即 import。
     # 原先未宣告、靠環境 ambient 安裝，fresh clone 會 ModuleNotFoundError（跨平台重現性缺口）。

@@ -54,6 +54,7 @@ on:
       - "**/*.sh"
       - "tools/git-hooks/**"
       - "AISDLC_SDD/AISDLC_SDD_v*/tools/install_hooks/**"
+      - "AISDLC_SDD/AISDLC_SDD_v*/tools/fsm_runtime/tests/**"
       - ".github/workflows/macos-compat-ci.yml"
   pull_request:
     paths:
@@ -74,6 +75,7 @@ on:
       - "**/*.sh"
       - "tools/git-hooks/**"
       - "AISDLC_SDD/AISDLC_SDD_v*/tools/install_hooks/**"
+      - "AISDLC_SDD/AISDLC_SDD_v*/tools/fsm_runtime/tests/**"
       - ".github/workflows/macos-compat-ci.yml"
   schedule:
     - cron: "0 7 * * *"   # macos-nightly-full：每日 07:00 UTC 深度回歸（非阻斷；較 windows-compat-ci 錯開 1 小時，避免同時搶 runner）
@@ -309,3 +311,65 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements-ci.txt
           python -m pytest tools/fsm_runtime/tests/ -m "not chaos" -q --tb=short
+
+  # QA 四方複審發現（P1，與 windows-compat-ci.yml 同款缺口）：macos-nightly-full 為
+  # continue-on-error: true，失敗會永久靜默、無任何人工提醒機制。設計理由與
+  # windows-compat-ci.yml 的 windows-nightly-alert 完全相同（見該檔同名 job 註解）：
+  # 不比照 aisdlc-sdd-fsm-chaos-nightly.yml 收緊 branch protection（本 repo 直推
+  # main、無 PR，且已實測此 repo 方案不支援 branch protection API），改用 GitHub
+  # Issue 追蹤失敗、恢復綠燈後自動關單。
+  macos-nightly-alert:
+    name: macOS nightly 失敗提醒（best-effort，不影響 nightly-full 本身的 continue-on-error）
+    runs-on: ubuntu-latest
+    needs: macos-nightly-full
+    if: always() && (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch')
+    permissions:
+      actions: read
+      issues: write
+    steps:
+      - name: 讀取本次 macos-nightly-full 實際結論
+        id: check
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          conclusion=$(gh api "/repos/${REPO}/actions/runs/${{ github.run_id }}/jobs" \
+            --jq '[.jobs[] | select(.name | startswith("macOS nightly full"))][0].conclusion // "unknown"')
+          echo "macos-nightly-full 本次結論：${conclusion}"
+          if [ "$conclusion" = "failure" ]; then
+            echo "failed=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "failed=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: 失敗時開單或於既有單留言（title 比對避免每日重覆開單）
+        if: steps.check.outputs.failed == 'true'
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          set -euo pipefail
+          TITLE="[P1] macos-nightly-full 深度回歸失敗"
+          existing=$(gh issue list --repo "${REPO}" --state open --search "\"${TITLE}\" in:title" --json number --jq '.[0].number // empty')
+          if [ -n "$existing" ]; then
+            gh issue comment "$existing" --repo "${REPO}" --body "再次失敗：${RUN_URL}"
+          else
+            gh issue create --repo "${REPO}" --title "${TITLE}" --body "macos-nightly-full（continue-on-error 非阻斷 job，不會擋 push/PR）失敗，需人工排查，請勿長期忽略。首次偵測到失敗的執行：${RUN_URL}。修復並綠燈後本 job 會自動關閉本 issue。"
+          fi
+
+      - name: 綠燈時若有既有失敗 issue 則自動關閉
+        if: steps.check.outputs.failed == 'false'
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          TITLE="[P1] macos-nightly-full 深度回歸失敗"
+          existing=$(gh issue list --repo "${REPO}" --state open --search "\"${TITLE}\" in:title" --json number --jq '.[0].number // empty')
+          if [ -n "$existing" ]; then
+            gh issue close "$existing" --repo "${REPO}" --comment "macos-nightly-full 已恢復綠燈：${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+          fi
