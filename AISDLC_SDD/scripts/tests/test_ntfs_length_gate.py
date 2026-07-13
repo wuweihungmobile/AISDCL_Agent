@@ -86,8 +86,21 @@ pytestmark_bash = pytest.mark.skipif(
 
 
 def _stage_paths(repo: str, rel_paths: list[str]) -> None:
-    """在 repo 以 --cacheinfo 暫存 rel_paths（不落地建檔）。"""
+    """在 repo 以 --cacheinfo 暫存 rel_paths（不落地建檔）。
+
+    關閉 core.protectNTFS/protectHFS：這兩項 Git 內建保護預設值因平台而異
+    （Windows 上 protectNTFS 預設 true，其餘平台預設 false），會在
+    update-index --cacheinfo 階段就搶先擋下保留裝置名（如 CON.txt），
+    使本檔測試的「hook 自身邏輯是否正確擋下」永遠測不到——關閉後才輪得到
+    hook-under-test 自己判斷。
+    """
     subprocess.run(["git", "-C", repo, "init", "-q"], check=True, timeout=30)
+    subprocess.run(
+        ["git", "-C", repo, "config", "core.protectNTFS", "false"], check=True, timeout=30,
+    )
+    subprocess.run(
+        ["git", "-C", repo, "config", "core.protectHFS", "false"], check=True, timeout=30,
+    )
     blob = subprocess.run(
         ["git", "-C", repo, "hash-object", "-w", "--stdin"],
         input="x", capture_output=True, text=True, check=True, timeout=30,
