@@ -45,6 +45,7 @@ from __future__ import annotations
 import shutil
 import stat
 import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -145,8 +146,13 @@ def test_install_writes_hook_in_plain_checkout(tmp_path):
     hook_path = repo / ".git" / "hooks" / "post-commit"
     assert hook_path.is_file(), "post-commit hook 未寫入 .git/hooks/"
 
-    mode = hook_path.stat().st_mode
-    assert mode & stat.S_IXUSR, "post-commit hook 未被 chmod +x"
+    if not sys.platform.startswith("win"):
+        # Windows（NTFS）沒有真正的 POSIX 執行位元；Git Bash 下 chmod +x 的效果
+        # 不會反映在 Python os.stat().st_mode 上（Windows 上 st_mode 是由唯讀屬性
+        # 合成的，不是真實的 owner/group/other 權限位元），故此斷言僅在 POSIX 平台
+        # 有意義。腳本本身（含路徑解析邏輯）仍在 Windows 上實際執行並被下方斷言驗證。
+        mode = hook_path.stat().st_mode
+        assert mode & stat.S_IXUSR, "post-commit hook 未被 chmod +x"
 
     content = hook_path.read_text(encoding="utf-8")
     assert "post_commit_drift.py" in content, "hook 內容缺 drift hook 路徑"
@@ -194,8 +200,11 @@ def test_install_writes_hook_to_shared_git_dir_from_worktree(tmp_path):
     assert "post_commit_drift.py" in text, "hook 內容缺 drift hook 路徑"
     assert "closure_evidence_verify.py" in text, "hook 內容缺 closure hook 路徑"
 
-    mode = shared_hook.stat().st_mode
-    assert mode & stat.S_IXUSR, "post-commit hook 未被 chmod +x"
+    if not sys.platform.startswith("win"):
+        # 見 test_install_writes_hook_in_plain_checkout 的同款註解：Windows 上
+        # chmod +x 不會反映在 Python os.stat().st_mode，此斷言僅在 POSIX 平台有意義。
+        mode = shared_hook.stat().st_mode
+        assert mode & stat.S_IXUSR, "post-commit hook 未被 chmod +x"
 
     # 反向 sanity：worktree 自己底下絕不應該出現一份 hooks/post-commit（若出現，代表
     # 腳本用了某種「兩邊都寫」的取巧邏輯，掩蓋了真正的路徑解析問題）。
