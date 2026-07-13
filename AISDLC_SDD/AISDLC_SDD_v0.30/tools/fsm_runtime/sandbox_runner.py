@@ -206,16 +206,19 @@ class LocalStubBackend:
 def docker_available() -> bool:
     """docker CLI 存在、daemon 可連線，且能實際跑起本檔測試用的 Linux 容器。
 
-    `docker info` 成功只證明 daemon 可達，不保證能跑 Linux 容器——Windows
-    runner 的 Docker daemon 常預設為 Windows containers 模式，此時對 Linux-only
-    映像（如 busybox）`docker run` 會直接失敗（no matching manifest），但
-    `docker info` 依然回報成功，導致 `@requires_docker` 測試被誤判為「可跑」
-    而非確定性失敗（2026-07 Mac/Windows 相容性四方複審 QA/Architect 複審輪
-    在 windows-latest GitHub runner 上連續兩次重現：`docker info` 過關，
-    `docker run --rm busybox ...` 卻回傳 nonzero exit 且 stdout 為空）。改用
-    一次性最小 Linux 容器試跑取代單純 daemon 可達性檢查，才是這些測試真正
-    需要的前置條件；探測失敗（含映像拉取失敗等其他環境問題）一律視為不可用
-    並讓測試正常 skip，而非讓 CI 出現不確定性的紅燈。
+    `docker info` 成功只證明 daemon 可達，不保證能跑 Linux 容器，也不保證
+    `DockerBackend` 實際會用的完整安全旗標組合（`--network none`/`--cap-drop
+    ALL`/`--read-only`/`--user 65534:65534`/`--pids-limit`/`--cpus` 等）在該
+    環境下可正常運作。2026-07 Mac/Windows 相容性四方複審 QA/Architect 複審輪
+    在 windows-latest GitHub runner 上連續重現兩層問題：① `docker info` 過關
+    但裸 `docker run --rm busybox true`（無安全旗標）也過關；② 即便①過關，
+    套用 `DockerBackend` 實際使用的完整安全旗標組合後，同一映像仍確定性失敗
+    （`nonzero_exit=True`，無法解析輸出）——代表問題出在旗標組合與該環境的
+    相容性，而非映像本身能否執行。故探測必須完全複用 `DockerBackend` 走的
+    同一段程式碼與同一組安全 profile，才能真實反映「測試等一下要做的事，
+    現在到底做不做得到」；任何一層失敗（含映像拉取失敗等其他環境問題）一律
+    視為不可用並讓 `@requires_docker` 測試正常 skip，而非讓 CI 出現不確定性
+    的紅燈。
     """
     if shutil.which("docker") is None:
         return False
@@ -225,12 +228,15 @@ def docker_available() -> bool:
         )
         if r.returncode != 0:
             return False
-        probe = subprocess.run(
-            ["docker", "run", "--rm", "busybox", "true"],
-            capture_output=True, timeout=30, check=False,
+        probe_spec = SandboxSpec(
+            app_id="docker-availability-probe",
+            image="busybox",
+            test_cmd=["true"],
+            timeout_sec=20,
         )
-        return probe.returncode == 0
-    except (subprocess.SubprocessError, OSError):
+        obs = DockerBackend().run(probe_spec)
+        return not obs.nonzero_exit
+    except (subprocess.SubprocessError, OSError, SandboxPolicyViolation, ValueError):
         return False
 
 

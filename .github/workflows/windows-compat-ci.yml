@@ -60,7 +60,7 @@ on:
       - "**/*.ps1"
       - "tools/git-hooks/**"
       - "AISDLC_SDD/AISDLC_SDD_v*/tools/install_hooks/**"
-      - "AISDLC_SDD/AISDLC_SDD_v*/tools/fsm_runtime/tests/**"
+      - "AISDLC_SDD/AISDLC_SDD_v*/tools/fsm_runtime/**"
       - "AISDLC_SDD/AISDLC_SDD_v*/.claude/hooks/**"
       - ".github/workflows/windows-compat-ci.yml"
   pull_request:
@@ -77,7 +77,7 @@ on:
       - "**/*.ps1"
       - "tools/git-hooks/**"
       - "AISDLC_SDD/AISDLC_SDD_v*/tools/install_hooks/**"
-      - "AISDLC_SDD/AISDLC_SDD_v*/tools/fsm_runtime/tests/**"
+      - "AISDLC_SDD/AISDLC_SDD_v*/tools/fsm_runtime/**"
       - "AISDLC_SDD/AISDLC_SDD_v*/.claude/hooks/**"
       - ".github/workflows/windows-compat-ci.yml"
   schedule:
