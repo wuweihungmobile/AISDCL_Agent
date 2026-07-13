@@ -157,7 +157,12 @@ def test_install_writes_hook_in_plain_checkout(tmp_path):
     content = hook_path.read_text(encoding="utf-8")
     assert "post_commit_drift.py" in content, "hook 內容缺 drift hook 路徑"
     assert "closure_evidence_verify.py" in content, "hook 內容缺 closure hook 路徑"
-    assert str(repo) in content, "hook 內容未含正確解析的 REPO_ROOT 路徑"
+    # 用 as_posix() 而非 str()：install_post_commit.sh 透過 Git Bash（MSYS2）呼叫
+    # `git rev-parse` 取得的路徑一律是正斜線形式（即使在 Windows 上），但
+    # `pathlib.WindowsPath.__str__()` 會渲染成反斜線，兩者永遠不會相符——
+    # 這正是 Windows 上真實 CI 才會現形的路徑分隔符假設錯誤（chmod +x 之後
+    # 由 windows-compat-ci 真實跑出的第二個回歸）。
+    assert repo.as_posix() in content, "hook 內容未含正確解析的 REPO_ROOT 路徑"
 
 
 def test_install_writes_hook_to_shared_git_dir_from_worktree(tmp_path):
