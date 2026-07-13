@@ -35,6 +35,7 @@ tools/dev_start.ps1 —— 皆為薄殼，邏輯集中本檔，無 .sh/.ps1 雙�
 from __future__ import annotations
 
 import argparse
+import ctypes
 import hashlib
 import json
 import os
@@ -45,9 +46,11 @@ import subprocess
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import Callable
 
 ROOT = Path(__file__).resolve().parents[1]
 STATE_FILE = ROOT / ".dev_env_state.json"
+LOCK_FILE = ROOT / ".dev_start.lock"
 HOOKS_DIR = ROOT / "tools" / "git-hooks"
 DEPS_FILES = (
     ROOT / "AutoClaude" / "pyproject.toml",
@@ -88,20 +91,28 @@ def _git(*args: str, timeout: int = 60) -> subprocess.CompletedProcess:
             stdout="", stderr=f"git {' '.join(args)} 逾時（>{timeout}s）")
 
 
-def _stream(cmd: list[str]) -> int:
+def _stream(cmd: list[str], on_start: Callable[[int], None] | None = None) -> int:
     """即時輸出地執行外部指令（bootstrap / pull / hooks 安裝）。
 
     flush：stdout 為 pipe（CI log）時 Python 端有緩衝，不 flush 會讓子行程
     輸出插隊到步驟標頭之前，破壞取證順序。
     刻意不設 timeout：pull/bootstrap 屬互動長工（合法耗時數分鐘），任意上限
     會誤殺；掛住時使用者可 Ctrl-C，且發生於 state 寫回之前（重入安全）。
+    改用 Popen（而非 subprocess.run）：on_start 讓呼叫端在子行程一建立就能拿到
+    其「真實」PID（Architect + SA 複審 P1：venv bootstrap 互斥鎖過去只記錄
+    orchestrator 自己的 PID，orchestrator 被 SIGKILL 後子行程變孤兒仍會繼續寫
+    .venv，鎖對孤兒毫無防護——鎖真正該追蹤的存活對象是實際執行 bootstrap 的
+    子行程，而不是呼叫它的 dev_start.py 本體）。
     """
     print(f"    $ {' '.join(cmd)}", flush=True)
     try:
-        return subprocess.run(cmd, cwd=str(ROOT)).returncode
+        proc = subprocess.Popen(cmd, cwd=str(ROOT))
     except FileNotFoundError:
         print(f"    ❌ 找不到指令：{cmd[0]}", file=sys.stderr)
         return 127
+    if on_start is not None:
+        on_start(proc.pid)
+    return proc.wait()
 
 
 def _now_label() -> str:
@@ -232,7 +243,7 @@ def _cache_restore_trust(cache_dir: Path, flavor: str, now: str) -> tuple[bool, 
 
 
 def _load_state() -> dict:
-    if not STATE_FILE.is_file():
+    if not _safe_is_file(STATE_FILE):
         return {}
     try:
         data = json.loads(STATE_FILE.read_text(encoding="utf-8"))
@@ -426,7 +437,7 @@ def _ensure_venv_shape(now: str) -> str:
     # 恆回 False，會整段跳過下面的清理邏輯、直接落到 "missing"，但底層目錄項目
     # 仍留存（lstat 可見），導致下游 bootstrap 的 `python3 -m venv .venv`
     # 撞 Errno 17: File exists（Architect + SD + QA 審查 P1-2）→ 在此提前攔截清除。
-    if venv.is_symlink() and not _safe_exists(venv):
+    if _safe_is_symlink(venv) and not _safe_exists(venv):
         try:
             venv.unlink()
             _warn("偵測到失效的 .venv 符號連結（可能是外接碟已拔除或同步中斷）— 已清除，將重新建置")
@@ -470,7 +481,7 @@ def _ensure_venv_shape(now: str) -> str:
         else:
             # 兩平台直譯器皆缺＝壞損 venv（如 symlink 斷裂）→ 移除重建，不動任何快取
             try:
-                if venv.is_symlink():
+                if _safe_is_symlink(venv):
                     venv.unlink()
                 else:
                     shutil.rmtree(venv)
@@ -480,7 +491,7 @@ def _ensure_venv_shape(now: str) -> str:
 
     if not _safe_exists(venv):
         cache_mine = ROOT / f".venv-cache-{flavor}"
-        if cache_mine.is_symlink():
+        if _safe_is_symlink(cache_mine):
             # symlink 快取換回會讓 .venv 指向外部目錄、後續 bootstrap 污染目標 → 拒用
             _warn(f"{cache_mine.name} 是 symlink — 不換回（避免寫入外部目標），改重建 .venv")
         elif _safe_exists(cache_mine):
@@ -499,22 +510,155 @@ def _ensure_venv_shape(now: str) -> str:
     return "ok" if _safe_exists(_venv_python(flavor)) else "missing"
 
 
-def _run_bootstrap(now: str, reason: str) -> bool:
+def _run_bootstrap(now: str, reason: str, on_start: Callable[[int], None] | None = None) -> bool:
     print(f"    需要 bootstrap：{reason}")
     if _flavor(now) == "windows":
         cmd = ["powershell", "-ExecutionPolicy", "Bypass", "-File",
                str(ROOT / "tools" / "bootstrap.ps1")]
     else:
         cmd = ["bash", str(ROOT / "tools" / "bootstrap.sh")]
-    rc = _stream(cmd)
+    rc = _stream(cmd, on_start=on_start)
     if rc != 0:
         print(f"    ❌ bootstrap 失敗（rc={rc}）— 請依上方輸出排除後重跑", file=sys.stderr)
         return False
     return True
 
 
+def _pid_alive(pid: int) -> bool:
+    """判斷 PID 是否仍存活（P1-3：venv bootstrap 互斥鎖用來辨識陳舊鎖）。
+
+    POSIX：`os.kill(pid, 0)` 送訊號 0 不會真的送出訊號，只探測目標是否存在／
+    呼叫者是否有權限對其送訊號。ProcessLookupError＝PID 不存在（真的已死，
+    陳舊鎖可安全清除）；PermissionError＝PID 存在但呼叫者無權限對它送訊號
+    （常見於不同使用者擁有的行程）——這種情況代表行程仍存活，不可誤判為
+    陳舊鎖去清除別人正在使用的鎖，兩者語意相反、必須分開處理。
+    Windows：os.kill 不支援訊號 0 的存活探測語意，改以 OpenProcess 是否能
+    成功開啟該 PID 判斷；開啟失敗時再以 GetLastError()==ERROR_ACCESS_DENIED(5)
+    區分「行程存在但無權限探測」（視為存活，比照 POSIX PermissionError 分支）
+    與其他失敗（如 ERROR_INVALID_PARAMETER，行程真的已死）——P2（Architect/
+    SA/QA 三方複審交叉印證）：過去把任何 OpenProcess 失敗都當作「已死」，
+    未區分這兩種語意相反的情況。
+    """
+    if os.name == "nt":
+        try:
+            handle = ctypes.windll.kernel32.OpenProcess(0x1000, False, pid)
+        except OSError:
+            return False
+        if handle:
+            ctypes.windll.kernel32.CloseHandle(handle)
+            return True
+        err = ctypes.windll.kernel32.GetLastError()
+        return err == 5  # ERROR_ACCESS_DENIED：行程存在但無權限探測，視為存活
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True
+    except OSError:
+        return False
+    return True
+
+
+def _acquire_bootstrap_lock() -> int | None:
+    """嘗試取得 venv bootstrap 互斥鎖（P1-3）。
+
+    背景（SA 審查以真實並行執行 + kill 重跑實測證實）：兩個並行 dev_start
+    呼叫、或 bootstrap 執行到一半被 SIGKILL 後使用者本能重跑，都會讓兩個
+    bootstrap 行程競態寫入同一個 .venv，且雙方都回報「✅ 完成」——其中一方
+    的環境其實已被覆蓋。以 O_CREAT|O_EXCL 原子建立鎖檔＋寫入自身 PID；鎖檔
+    已存在時讀出其中 PID 判斷是否仍存活：存活 → 回傳 None（拿不到鎖，呼叫端
+    須中止，不可靜默略過，否則使用者會誤以為環境是新的）；已死（陳舊鎖，
+    如上次執行被 SIGKILL）→ 清除後重試一次。
+    回傳值為鎖檔 fd，呼叫端須以 try/finally 搭配 _release_bootstrap_lock 釋放。
+    """
+    for _attempt in range(2):
+        try:
+            fd = os.open(str(LOCK_FILE), os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+        except FileExistsError:
+            try:
+                text = LOCK_FILE.read_text(encoding="utf-8", errors="replace").strip()
+                pid = int(text)
+            except (OSError, ValueError) as e:
+                _warn(f"venv bootstrap 鎖檔（{LOCK_FILE.name}）內容無法辨識（{e}）— "
+                      f"為安全起見視為仍被持有，本次中止；請確認無其他 dev_start 執行中"
+                      f"後手動刪除該檔")
+                return None
+            if _pid_alive(pid):
+                _warn(f"偵測到另一個 dev_start 正在整備 venv（PID {pid}），"
+                      f"本次中止以避免競態寫入，請稍後重試")
+                return None
+            try:
+                LOCK_FILE.unlink()
+            except OSError as e:
+                _warn(f"清除陳舊 venv bootstrap 鎖檔失敗（{e}）— 本次中止，"
+                      f"請手動刪除 {LOCK_FILE.name}")
+                return None
+            continue
+        except OSError as e:
+            _warn(f"建立 venv bootstrap 鎖檔失敗（{e}）— 本次中止")
+            return None
+        try:
+            os.write(fd, str(os.getpid()).encode("utf-8"))
+        except OSError:
+            pass  # 互斥語意已靠 O_EXCL 原子建立達成，寫入 PID 失敗不影響本次持鎖
+        return fd
+    return None
+
+
+def _release_bootstrap_lock(fd: int) -> None:
+    """釋放 venv bootstrap 互斥鎖（P1-3）；釋放失敗不該讓整體流程失敗，故吞 OSError。"""
+    try:
+        os.close(fd)
+    except OSError:
+        pass
+    try:
+        LOCK_FILE.unlink()
+    except OSError:
+        pass
+
+
+def _record_lock_pid(fd: int, pid: int) -> None:
+    """bootstrap 子行程啟動後，把鎖檔內容從 orchestrator PID 換成子行程 PID
+    （Architect + SA 複審 P1：orchestrator 被 SIGKILL 後子行程變孤兒仍會寫入
+    .venv，鎖檔若仍記著已死的 orchestrator PID，陳舊鎖判斷會誤判「已死可
+    清除」，讓孤兒與新行程競態覆寫——鎖真正該追蹤的存活對象是子行程）。
+    """
+    try:
+        os.ftruncate(fd, 0)
+        os.lseek(fd, 0, os.SEEK_SET)
+        os.write(fd, str(pid).encode("utf-8"))
+    except OSError:
+        pass  # 寫入失敗最壞情況退回記錄 orchestrator PID，不影響鎖的原子建立語意
+
+
+def _peek_bootstrap_lock() -> int | None:
+    """非破壞性檢查：鎖是否被目前仍存活的行程持有（不嘗試取鎖/不清理陳舊鎖，
+    純讀取判斷）。回傳存活 PID 或 None。
+
+    P1（Architect + SA 複審實測重現）：`_acquire_bootstrap_lock()` 只在
+    `reason is not None`（需要跑 bootstrap）時才會被呼叫，但 `prev is None`
+    （既有 .venv 沿用、只記首次依賴基準）分支完全不設 reason、也就完全不會
+    取鎖——orchestrator 被 SIGKILL 後孤兒子行程仍在寫 .venv，使用者重跑若
+    恰好落入這個分支，鎖形同虛設。本函式在 step_venv() 最開頭無條件檢查，
+    不論後續走哪個分支都能攔下。
+    """
+    try:
+        text = LOCK_FILE.read_text(encoding="utf-8", errors="replace").strip()
+        pid = int(text)
+    except (OSError, ValueError):
+        return None
+    return pid if _pid_alive(pid) else None
+
+
 def step_venv(now: str, state: dict, force: bool, cross_same_flavor: bool = False) -> bool:
     _hr(4, "venv／依賴整備")
+    busy_pid = _peek_bootstrap_lock()
+    if busy_pid is not None:
+        print(f"    ❌ 偵測到另一個 dev_start 正在整備 venv（PID {busy_pid}）— "
+              f"本次中止以避免競態寫入，請稍後重試", file=sys.stderr)
+        SUMMARY["venv"] = "❌ 失敗（另一個 dev_start 執行中，見上方警告）"
+        return False
     shape = _ensure_venv_shape(now)
     flavor = _flavor(now)
     prev = state.get("deps_hash", {}).get(flavor)
@@ -528,7 +672,7 @@ def step_venv(now: str, state: dict, force: bool, cross_same_flavor: bool = Fals
         # `--force-bootstrap` 與跨 OS 切換同時發生時會整段跳過本清理，讓
         # force 這個「救援旗標」在最需要救援時反而失敗。
         venv = ROOT / ".venv"
-        if venv.exists() or venv.is_symlink():
+        if _safe_exists(venv) or _safe_is_symlink(venv):
             try:
                 if venv.is_symlink():
                     venv.unlink()
@@ -538,26 +682,49 @@ def step_venv(now: str, state: dict, force: bool, cross_same_flavor: bool = Fals
             except OSError as e:
                 _warn(f"移除跨 OS .venv 失敗（{e}）— bootstrap 可能沿用後失敗，屆時請手動刪除 .venv 重跑")
 
+    reason: str | None = None
+    ok = True
     if force:
-        ok = _run_bootstrap(now, "--force-bootstrap 指定")
+        reason = "--force-bootstrap 指定"
     elif cross_same_flavor:
-        ok = _run_bootstrap(now, "跨 OS 同 flavor 切換（如 mac⇄linux）— venv 二進位不相容需重建")
+        reason = "跨 OS 同 flavor 切換（如 mac⇄linux）— venv 二進位不相容需重建"
     elif shape == "missing":
-        ok = _run_bootstrap(now, "本平台無可用 .venv（首次／跨平台切換且無快取／換手失敗殘留）")
+        reason = "本平台無可用 .venv（首次／跨平台切換且無快取／換手失敗殘留）"
     elif prev is None:
-        # 既有 .venv 但無狀態紀錄：視為已由 bootstrap 建好，只記基準、不重裝
-        print("    既有 .venv 沿用；首次記錄依賴基準（如疑不完整可 --force-bootstrap）")
-        SUMMARY["venv"] = "沿用既有 .venv（首次記錄依賴基準）"
-        ok = True
+        # 既有 .venv 但無狀態紀錄：過去完全信任現狀、只記基準、不重裝，未做任何
+        # 健檢（Architect 建議一併修：這個分支正是 P1 busy-lock 檢查要堵住的
+        # 繞過路徑——若不健檢，孤兒行程覆寫過的壞損 .venv 會被靜默沿用）。
+        # 健檢通過才維持原行為；健檢失敗視同壞損，改走正常 bootstrap 路徑。
+        healthy, detail = _venv_healthy(_venv_python(flavor))
+        if healthy:
+            print("    既有 .venv 沿用；首次記錄依賴基準（如疑不完整可 --force-bootstrap）")
+            SUMMARY["venv"] = "沿用既有 .venv（首次記錄依賴基準）"
+        else:
+            reason = f"既有 .venv 健檢失敗（{detail}）— 視為壞損重新整備"
     elif prev != cur:
-        ok = _run_bootstrap(now, "依賴檔變動（pyproject.toml / requirements-ci.txt hash 不符）")
+        reason = "依賴檔變動（pyproject.toml / requirements-ci.txt hash 不符）"
     else:
         msg = "快取秒級換回，依賴新鮮" if shape == "restored" else "依賴新鮮（hash 未變）"
         print(f"    ✅ {msg} — 跳過重裝")
         SUMMARY["venv"] = msg
-        ok = True
 
-    if ok and not _venv_python(flavor).exists():
+    if reason is not None:
+        # P1-3：bootstrap 會整包改寫 .venv，兩個並行 dev_start（或執行到一半被
+        # SIGKILL 後使用者本能重跑）會競態寫入同一份 .venv，且雙方都回報「✅
+        # 完成」——其中一方環境其實已被覆蓋。用 PID lock 互斥，拿不到鎖就中止
+        # （fail loud），不可靜默略過讓使用者誤以為環境是新的。
+        lock_fd = _acquire_bootstrap_lock()
+        if lock_fd is None:
+            print("    ❌ 無法取得 venv bootstrap 互斥鎖 — 本次中止（見上方警告），請稍後重試",
+                  file=sys.stderr)
+            SUMMARY["venv"] = "❌ 失敗（bootstrap 鎖被佔用，見上方警告）"
+            return False
+        try:
+            ok = _run_bootstrap(now, reason, on_start=lambda pid: _record_lock_pid(lock_fd, pid))
+        finally:
+            _release_bootstrap_lock(lock_fd)
+
+    if ok and not _safe_exists(_venv_python(flavor)):
         print("    ❌ 整備後仍找不到 venv 直譯器 — 請檢查 bootstrap 輸出", file=sys.stderr)
         ok = False
     if ok:
@@ -613,7 +780,7 @@ def step_hooks(now: str, is_repo: bool) -> None:
         except OSError:
             same = False
         hooks_ok = same and all(
-            (hooks_dir / h).is_file() for h in ("pre-commit", "pre-push", "post-commit"))
+            _safe_is_file(hooks_dir / h) for h in ("pre-commit", "pre-push", "post-commit"))
     if hooks_ok:
         print("    ✅ core.hooksPath 指向根層 dispatcher，三支 hook 齊備")
         SUMMARY["hooks"] = "正常"
@@ -675,7 +842,11 @@ def step_finalize(now: str, state: dict, is_repo: bool) -> None:
     # 會在最後一步、venv/hooks 皆已整備成功後裸崩潰，把已可用的環境誤報為失敗；
     # ②Architect 審查 P2——併發執行下非原子寫入可能讓另一行程讀到截斷/交錯內容
     # （現有 _load_state 已能自癒，但改為 temp+replace 從根本避免這個暫態視窗）。
-    tmp = STATE_FILE.with_name(f"{STATE_FILE.name}.tmp-{os.getpid()}")
+    # tmp 檔名納入 hostname（P2-3）：本功能明文旗艦情境是外接碟/同步資料夾雙機共用，
+    # PID 只在單機內保證唯一——mac 與 windows 兩台機器湊巧同時執行且 PID 相同時，
+    # 純 PID 檔名會撞在一起；sanitize 只為防禦 hostname 含檔名不安全字元的低機率邊角。
+    host = re.sub(r"[^A-Za-z0-9_.-]", "_", _platform.node()) or "unknown-host"
+    tmp = STATE_FILE.with_name(f"{STATE_FILE.name}.tmp-{host}-{os.getpid()}")
     try:
         tmp.write_text(payload, encoding="utf-8")
         tmp.replace(STATE_FILE)

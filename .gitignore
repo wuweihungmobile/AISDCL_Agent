@@ -16,11 +16,20 @@ htmlcov/
 .venv/
 venv/
 # dev_start 平台 venv 快取（跨平台共用工作目錄時保留另一平台 venv，秒級換手）
-/.venv-cache-*/
+# 不留尾隨斜線：尾隨 / 只匹配目錄，但 _ensure_venv_shape() 明文處理該路徑本身是
+# symlink 的拓樸（換手來源/目標皆可能是 symlink）——拿掉尾隨斜線同時涵蓋目錄與 symlink
+/.venv-cache-*
 
 # dev_start 環境偵測狀態檔（Developing 平台紀錄；共用工作目錄時隨磁碟跨機、
 # 雙 clone 時各機獨立，皆不入庫）
 /.dev_env_state.json
+# step_finalize() 原子寫入（temp+replace）用的暫存檔；正常完成會自動清掉，
+# 只有寫入中途被中斷才會殘留
+/.dev_env_state.json.tmp-*
+
+# dev_start venv bootstrap 互斥鎖（防止併發/中斷重跑競態寫入 .venv；正常完成
+# 會自動釋放清除，非預期殘留代表上次執行未正常結束，見 _acquire_bootstrap_lock）
+/.dev_start.lock
 
 # 環境設定（API Key 絕不 commit）
 .env
