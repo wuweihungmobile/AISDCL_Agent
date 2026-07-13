@@ -156,8 +156,20 @@ jobs:
         # 分支本身，需另外在暫時隱藏/改名 bash.exe 的環境下重跑，目前未做（該分支
         # 邏輯遠簡於委派路徑、且僅在非標準 Windows 安裝下才會被觸發，暫列為已知
         # 限制而非本輪必須解決項）。
+        #
+        # DEF-101-062：windows-latest runner 的 Docker Linux 容器支援本身環境不穩定
+        # （連續三次真實 CI run 1 成功/2 失敗，非確定性 bug）。LATEST(v0.30) 已改
+        # requires_docker_success marker 在 Windows 上正確 skip，但 ci-gate.ps1 同時
+        # 跑的凍結基線 v0.01 依框架治理規則不可原地修改（見 AISDLC_SDD/CLAUDE.md
+        # 「凍結基線不可在原地修改」），其 test_phase_h.py 仍是舊版無條件 requires_docker。
+        # 故在此以 CI 組態層級（而非改動凍結原始碼）用標準 PYTEST_ADDOPTS 對兩個
+        # 「需要容器成功執行」的測試做 keyword 排除，兩條軌（v0.01 與 v0.30）皆吃得到
+        # 這個環境變數；v0.30 的 requires_docker_success 本身已 skip，此排除對它是
+        # 冗餘但無害的雙重保險。
         working-directory: AISDLC_SDD
         shell: pwsh
+        env:
+          PYTEST_ADDOPTS: -k "not test_docker_backend_real_pass and not test_docker_backend_e2e_through_fsm"
         run: ./scripts/ci-gate.ps1
 
       - name: install_git_hooks.ps1 安裝／解除往返驗證
