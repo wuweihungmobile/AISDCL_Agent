@@ -37,6 +37,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import os
 import platform as _platform
 import re
 import shutil
@@ -142,6 +143,24 @@ def _safe_is_dir(p: Path) -> bool:
         return False
 
 
+def _safe_is_file(p: Path) -> bool:
+    """`.is_file()` 但吞 OSError（同上，P1-3）。"""
+    try:
+        return p.is_file()
+    except OSError as e:
+        _warn(f"無法讀取 {p}（{e}）— 視為不存在")
+        return False
+
+
+def _safe_is_symlink(p: Path) -> bool:
+    """`.is_symlink()` 但吞 OSError（同上，P1-3）。"""
+    try:
+        return p.is_symlink()
+    except OSError as e:
+        _warn(f"無法讀取 {p}（{e}）— 視為不是符號連結")
+        return False
+
+
 _VENV_ORIGIN_MARKER = ".dev_venv_origin"
 
 
@@ -166,8 +185,8 @@ def _read_origin_marker(venv_dir: Path) -> str | None:
         if p.is_file():
             text = p.read_text(encoding="utf-8", errors="replace").strip()
             return text or None
-    except OSError:
-        pass
+    except OSError as e:
+        _warn(f"無法讀取 {p}（{e}）— 將僅依賴直譯器健檢判斷可信度")
     return None
 
 
@@ -228,7 +247,7 @@ def _load_state() -> dict:
 
 
 _TOML_SECTION_RE = re.compile(r"^\[([\w.\-]+)\]\s*$")
-_TOML_DEPS_SECTIONS = {"project", "project.optional-dependencies"}
+_TOML_DEPS_SECTIONS = {"project", "project.optional-dependencies", "build-system"}
 _TOML_NON_DEPS_KEY_RE = re.compile(r"^\s*(name|version|description|requires-python)\s*=")
 
 
@@ -237,9 +256,11 @@ def _deps_relevant_lines(text: str, scoped: bool) -> list[str]:
 
     整檔位元組雜湊對註解/版本字串/[tool.ruff] 等無關編輯過度敏感，觸發不
     必要的整包重裝。scoped=True（如 pyproject.toml）時只保留 [project] /
-    [project.optional-dependencies] 區段內容，並剔除該區段內與依賴無關的
-    純中繼資料鍵（name/version/description/requires-python）；scoped=False
-    （如純 requirements.txt）整檔皆視為依賴宣告。兩種情形皆濾掉註解/空白行。
+    [project.optional-dependencies] / [build-system]（QA/Architect/SD 四方
+    複審共同確認的殘留缺口：build-backend/requires 變動先前不觸發重裝）
+    區段內容，並剔除該區段內與依賴無關的純中繼資料鍵（name/version/
+    description/requires-python）；scoped=False（如純 requirements.txt）
+    整檔皆視為依賴宣告。兩種情形皆濾掉註解/空白行。
     """
     section: str | None = None
     out: list[str] = []
@@ -262,10 +283,15 @@ def _deps_hash() -> str:
     h = hashlib.sha256()
     for f in DEPS_FILES:
         h.update(f.name.encode("utf-8"))
-        if not f.is_file():
+        if not _safe_is_file(f):
             h.update(b"<missing>")
             continue
-        text = f.read_text(encoding="utf-8", errors="replace")
+        try:
+            text = f.read_text(encoding="utf-8", errors="replace")
+        except OSError as e:
+            _warn(f"無法讀取 {f}（{e}）— 依賴 hash 略過此檔（可能誤判為未變動）")
+            h.update(b"<unreadable>")
+            continue
         for line in _deps_relevant_lines(text, scoped=(f.suffix == ".toml")):
             h.update(line.encode("utf-8"))
             h.update(b"\n")
@@ -318,7 +344,13 @@ def step_sync(no_sync: bool, is_repo: bool) -> None:
         SUMMARY["sync"] = "跳過（計數失敗）"
         return
     # 只看已追蹤檔的修改：未追蹤檔不擋同步（ff pull 對未追蹤檔安全，git 會自我保護）
-    dirty = bool(_git("status", "--porcelain", "--untracked-files=no").stdout.strip())
+    status_r = _git("status", "--porcelain", "--untracked-files=no")
+    if status_r.returncode != 0:
+        # 空 stdout 不可等同「乾淨」——returncode 非零時無法判定，不冒險 pull
+        _warn("git status 失敗 — 無法判定工作樹是否乾淨，跳過 pull（可稍後手動 git pull --ff-only）")
+        SUMMARY["sync"] = "跳過（git status 失敗）"
+        return
+    dirty = bool(status_r.stdout.strip())
 
     if behind == 0:
         msg = f"已是最新（origin/{branch}）"
@@ -356,19 +388,19 @@ def step_switch(env_changed: bool) -> None:
     for base in _CACHE_BASES:
         for name in _CACHE_DIRS:
             p = base / name
-            if p.is_symlink():
+            if _safe_is_symlink(p):
                 # rmtree(ignore_errors) 對 symlink 靜默拒刪 → 明確 unlink 只斷連結不動目標
                 try:
                     p.unlink()
                 except OSError:
                     pass
-            elif p.is_dir():
+            elif _safe_is_dir(p):
                 shutil.rmtree(p, ignore_errors=True)
             else:
                 continue
             rel = str(p.relative_to(ROOT))
             # 事後驗證實刪，不做未經查證的「已清除」宣稱
-            if p.exists() or p.is_symlink():
+            if _safe_exists(p) or _safe_is_symlink(p):
                 leftovers.append(rel)
             else:
                 removed.append(rel)
@@ -409,13 +441,22 @@ def _ensure_venv_shape(now: str) -> str:
             cache_other_ready = True
             try:
                 if _safe_exists(cache_other):
+                    has_content = False
                     try:
-                        if any(cache_other.iterdir()):
-                            _warn(f"{cache_other.name}/ 已有內容 — 換手保留即將覆蓋（不可逆）；"
-                                  f"若該內容仍需要請先手動備份")
+                        has_content = any(cache_other.iterdir())
                     except OSError:
-                        pass  # 列不出內容不影響後續判斷，仍嘗試 rmtree
-                    shutil.rmtree(cache_other)
+                        pass  # 列不出內容不影響後續判斷，仍嘗試處理
+                    if has_content:
+                        # QA 審查指出：先前訊息宣稱「請先手動備份」卻在同一次呼叫立即
+                        # rmtree，使用者讀到警告時已來不及——改為改名為時間戳記備份，
+                        # 讓「不可逆」的宣稱名副其實（非阻塞覆蓋，事後仍可自行檢視/刪除）
+                        ts = datetime.now(timezone.utc).strftime("%Y%m%d%H%M%S")
+                        backup = ROOT / f".venv-cache-{other}.bak-{ts}"
+                        cache_other.rename(backup)
+                        _warn(f"{cache_other.name}/ 已有內容 — 換手保留前已改名為 {backup.name}/"
+                              f"（未覆蓋；確認不需要可自行刪除該備份目錄）")
+                    else:
+                        shutil.rmtree(cache_other)
             except OSError as e:
                 # 卡住的資源是 cache_other，不是 .venv——訊息須指名真正病灶（Architect 審查 P2）
                 _warn(f"清除既有 {cache_other.name}/ 失敗（{e}）— 請先手動處理該目錄後重跑")
@@ -479,12 +520,13 @@ def step_venv(now: str, state: dict, force: bool, cross_same_flavor: bool = Fals
     prev = state.get("deps_hash", {}).get(flavor)
     cur = _deps_hash()
 
-    if force:
-        ok = _run_bootstrap(now, "--force-bootstrap 指定")
-    elif cross_same_flavor:
+    if cross_same_flavor:
         # mac⇄linux 同為 posix 形狀：形狀檢查與 per-flavor hash 都分不出跨 OS，
         # 但 venv 二進位跨 OS 不相容 → 先移除既有 .venv 再 bootstrap（不移除的話
-        # bootstrap 的「既有 .venv 沿用」分支會以跨 OS 直譯器跑 pip 而失敗）
+        # bootstrap 的「既有 .venv 沿用」分支會以跨 OS 直譯器跑 pip 而失敗）。
+        # 獨立於 force 判斷之外執行（SD 審查 P1）：先前寫在 elif 鏈裡，
+        # `--force-bootstrap` 與跨 OS 切換同時發生時會整段跳過本清理，讓
+        # force 這個「救援旗標」在最需要救援時反而失敗。
         venv = ROOT / ".venv"
         if venv.exists() or venv.is_symlink():
             try:
@@ -495,6 +537,10 @@ def step_venv(now: str, state: dict, force: bool, cross_same_flavor: bool = Fals
                 print("    跨 OS 同 flavor：既有 .venv 已移除（避免 bootstrap 沿用跨 OS 二進位）")
             except OSError as e:
                 _warn(f"移除跨 OS .venv 失敗（{e}）— bootstrap 可能沿用後失敗，屆時請手動刪除 .venv 重跑")
+
+    if force:
+        ok = _run_bootstrap(now, "--force-bootstrap 指定")
+    elif cross_same_flavor:
         ok = _run_bootstrap(now, "跨 OS 同 flavor 切換（如 mac⇄linux）— venv 二進位不相容需重建")
     elif shape == "missing":
         ok = _run_bootstrap(now, "本平台無可用 .venv（首次／跨平台切換且無快取／換手失敗殘留）")
@@ -529,17 +575,31 @@ def step_hooks(now: str, is_repo: bool) -> None:
         _warn("非 git repo — 跳過 hooks 檢核")
         SUMMARY["hooks"] = "跳過（非 git repo）"
         return
-    # linked worktree：core.hooksPath 屬主 checkout 管轄（絕對路徑指向主 checkout 的
-    # dispatcher，對本 worktree 的 commit/push 仍生效）；在此重設會被安裝腳本的
-    # worktree 防護擋下且誤報「閘門未生效」→ 如實跳過（Architect 審查 P2）
+    # linked worktree：core.hooksPath 寫在共享 .git/config（無 extensions.worktreeConfig
+    # 時對所有 worktree 共用），故仍照常讀取比對——過去版本一偵測到 linked worktree
+    # 就直接跳過檢查、斷言「對本 worktree 仍生效」，但從未真的驗證主 checkout 是否
+    # 裝過 hooks；若主 checkout 從未安裝，會在零警告下讓 commit/push 閘門形同虛設
+    # （Architect 複審 P1，實測重現：全新 clone 後立即建 worktree，hooksPath 未設定
+    # 時舊版仍印出「仍生效」）。差異只在於：偵測到未生效時，linked worktree 內
+    # 不嘗試自動修（安裝腳本的 worktree 防護會拒絕執行並誤報「安裝失敗」），
+    # 而是明確指向主 checkout。
     gd = _git("rev-parse", "--git-dir").stdout.strip()
     gcd = _git("rev-parse", "--git-common-dir").stdout.strip()
+    is_linked_worktree = False
+    hooks_dir = HOOKS_DIR
     if gd and gcd:
         try:
-            if Path(gd).resolve() != Path(gcd).resolve():
-                print("    linked worktree — 跳過（hooksPath 屬主 checkout 管轄，對本 worktree 仍生效）")
-                SUMMARY["hooks"] = "跳過（linked worktree，主 checkout 管轄）"
-                return
+            gd_resolved = Path(gd).resolve()
+            gcd_resolved = Path(gcd).resolve()
+            is_linked_worktree = gd_resolved != gcd_resolved
+            if is_linked_worktree:
+                # 比較基準必須是主 checkout 的 HOOKS_DIR，不能用本 worktree 自己的
+                # ROOT 算出來的 HOOKS_DIR——core.hooksPath 永遠指向主 checkout 絕對
+                # 路徑，兩者physical 目錄天生不同，用 worktree 自己的 HOOKS_DIR 比對
+                # 會恆為 False（Architect 複審發現：上一輪修復本身引入的新 P1，任何
+                # worktree 內執行 dev_start 都會 100% 誤判「未生效」，即使主 checkout
+                # 完全正確）。gcd 為主 checkout 共用的 .git 目錄，其 parent 即主根。
+                hooks_dir = gcd_resolved.parent / "tools" / "git-hooks"
         except OSError:
             pass
     cur = _git("config", "--get", "core.hooksPath").stdout.strip()
@@ -549,16 +609,22 @@ def step_hooks(now: str, is_repo: bool) -> None:
             # ROOT 為基準展開（若 cur 本身已是絕對路徑，ROOT / cur 仍等同 Path(cur)——
             # pathlib 的 / 對絕對右運算元會直接取代左邊）；否則相對路徑會誤依「執行時
             # cwd」而非 repo ROOT 展開，造成假性漂移判定（Architect 審查 P2）
-            same = (ROOT / cur).resolve() == HOOKS_DIR.resolve()
+            same = (ROOT / cur).resolve() == hooks_dir.resolve()
         except OSError:
             same = False
         hooks_ok = same and all(
-            (HOOKS_DIR / h).is_file() for h in ("pre-commit", "pre-push", "post-commit"))
+            (hooks_dir / h).is_file() for h in ("pre-commit", "pre-push", "post-commit"))
     if hooks_ok:
         print("    ✅ core.hooksPath 指向根層 dispatcher，三支 hook 齊備")
         SUMMARY["hooks"] = "正常"
         return
     reason = "未設定" if not cur else f"漂移（目前={cur}）"
+    if is_linked_worktree:
+        _warn(f"linked worktree：core.hooksPath {reason} — 本 worktree 無法自行安裝"
+              f"（會被安裝腳本的 worktree 防護拒絕），請至主 checkout 執行任一支 "
+              f"install_git_hooks（見 ONBOARDING §6）")
+        SUMMARY["hooks"] = f"未生效（linked worktree，{reason}，需至主 checkout 安裝）"
+        return
     print(f"    core.hooksPath {reason} → 重跑安裝腳本")
     if _flavor(now) == "windows":
         cmd = ["powershell", "-ExecutionPolicy", "Bypass", "-File",
@@ -603,9 +669,24 @@ def step_finalize(now: str, state: dict, is_repo: bool) -> None:
         if head.returncode == 0:
             state["head"] = head.stdout.strip()
     state["updated_at"] = datetime.now(timezone.utc).isoformat(timespec="seconds")
-    STATE_FILE.write_text(json.dumps(state, ensure_ascii=False, indent=2) + "\n",
-                          encoding="utf-8")
-    print(f"    已寫回 {STATE_FILE.name}（developing={now}）")
+    payload = json.dumps(state, ensure_ascii=False, indent=2) + "\n"
+    # temp+replace（原子寫入，per-pid 檔名避免併發 dev_start 互踩）：
+    # ①SA 審查 P1——先前直接 write_text 無防護，唯讀外接碟（本功能明文旗艦情境）
+    # 會在最後一步、venv/hooks 皆已整備成功後裸崩潰，把已可用的環境誤報為失敗；
+    # ②Architect 審查 P2——併發執行下非原子寫入可能讓另一行程讀到截斷/交錯內容
+    # （現有 _load_state 已能自癒，但改為 temp+replace 從根本避免這個暫態視窗）。
+    tmp = STATE_FILE.with_name(f"{STATE_FILE.name}.tmp-{os.getpid()}")
+    try:
+        tmp.write_text(payload, encoding="utf-8")
+        tmp.replace(STATE_FILE)
+        print(f"    已寫回 {STATE_FILE.name}（developing={now}）")
+    except OSError as e:
+        _warn(f"{STATE_FILE.name} 寫入失敗（{e}）— 本次整備仍已完成，"
+              f"但下次執行可能誤判 Developing/依賴基準，請確認 {ROOT} 可寫入")
+        try:
+            tmp.unlink()
+        except OSError:
+            pass
 
 
 def _print_summary(ok: bool) -> None:

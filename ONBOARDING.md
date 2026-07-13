@@ -43,7 +43,7 @@ bootstrap 會：① 檢查 Python ≥3.11 → ② 建立 `.venv`（有 uv 就用
 
 ### 2.1 每日開工一鍵啟動（dev_start — 自動偵測環境＋切換＋GitHub 同步）
 
-bootstrap 是「第一次」；之後每次開工改用 **dev_start**，不需手動判斷「上次是不是在另一個平台開發」：
+bootstrap 是「第一次」；之後每次開工改用 **dev_start**，不需手動判斷「上次是不是在另一個平台開發」。全新機器也可以**直接**執行 dev_start（`.venv` 不存在時第④步會自動觸發 §2 bootstrap，且額外自動裝妥 git hooks）——§2 bootstrap 保留給只想單純建 venv、不需同步/hooks 自動化的場合：
 
 **macOS / Linux**
 ```bash
@@ -67,6 +67,8 @@ dev_start 七步驟（邏輯集中於 `tools/dev_start.py` 跨平台單一核心
 ① **環境偵測**（讀 gitignored 狀態檔 `.dev_env_state.json` 的上次開發平台 Developing vs 當前 Now）→ ② **GitHub 同步**（fetch + `--ff-only` pull；髒工作樹／分叉／離線一律明示不硬做，**絕不自動 stash／rebase／push**；未追蹤檔不擋同步）→ ③ **平台切換**（Developing≠Now 時清除含絕對路徑的 `.pytest_cache`/`.ruff_cache`）→ ④ **venv／依賴整備**（另一平台形狀的 `.venv` **換手保留**至 `.venv-cache-<flavor>/`，本平台快取存在則**秒級換回**；缺 `.venv` 或依賴檔（`pyproject.toml`/`requirements-ci.txt`）hash 變動 → 自動重跑 §2 bootstrap）→ ⑤ **git hooks 檢核**（`core.hooksPath` 未設／漂移 → 自動重跑安裝腳本，治 §6「搬移後 hooks 靜默全滅」）→ ⑥ **平台健檢**（Windows 自動設 `core.longpaths=true`）→ ⑦ **狀態寫回＋摘要**。
 
 適用兩種拓撲：**共用工作目錄**（外接碟／同步資料夾，macOS ⇄ Windows 輪開同一份）由 ③④ 吸收全部切換成本；**雙機各自 clone** 則 ①③ 恆為「無切換」，由 ②④ 把另一台 push 的變更同步進來並保持依賴新鮮。旗標：`--no-sync`（離線跳過 ②）、`--force-bootstrap`（強制重裝依賴）。
+
+> ⚠️ **mac⇄linux 例外**（Linux 為 macOS/Windows 之外自行延伸支援的第三平台）：venv 快取鍵僅分 `windows`/`posix` 兩桶，mac 與 Linux 同屬 `posix` 但二進位不相容，彼此切換時**無法秒級換手**，每次都會完整重跑一次 bootstrap（安全但較慢）；此例外不影響本節主要訴求的 macOS ⇄ Windows 雙平台切換。
 
 補充：狀態檔 `.dev_env_state.json` 損毀時自動視為首次執行（可隨時安全刪除重生，只多付一次依賴基準記錄）；VSCode 使用者在**整合終端機**執行同指令即可（或把指令掛進 shell profile，開終端機即自動整備）。
 

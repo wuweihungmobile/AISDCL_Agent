@@ -1,7 +1,7 @@
 # 根層基建 CI（四方複審 B4，2026-07-10；防禦縱深補洞 2026-07-11）：workflows / hooks /
 # 工具腳本上移 monorepo 根層後，根層 tools/（bootstrap / integration_gate / git-hooks
 # dispatcher）與 .gitattributes、.editorconfig、dependabot 等基建原本零 CI 覆蓋——壞掉
-# 只會在開發者本機爆。本 workflow 做六道輕量守門（僅 actions/checkout，不引其他外部
+# 只會在開發者本機爆。本 workflow 做七道輕量守門（僅 actions/checkout，不引其他外部
 # action，避免供應鏈風險）：
 #   1. bash -n       — 根層 tools/git-hooks/ 與 tools/*.sh（遞迴涵蓋子目錄）語法檢查
 #   2. pwsh parse    — active .ps1（根層 tools/ + AutoClaude/tools/ + AISDLC_SDD/scripts/
@@ -19,9 +19,14 @@
 #   5. 腳本對等閘    — tools/check_script_parity.py：三對 .sh/.ps1 的 gate/step 標籤
 #                      清單一致 + pytest 釘選雙處（pyproject.toml / requirements-ci.txt）同版
 #   6. py_compile    — 根層 tools/ 下所有 *.py（遞迴涵蓋子目錄；dev_start / check_* 等
-#                      基建工具）語法檢查；這些 .py 無測試套件覆蓋，語法錯誤可經
-#                      --no-verify / GitHub web 靜默入庫 → CI 兜底（dev_start 四方審查
-#                      P2，2026-07-12；子目錄遞迴盲區修復 2026-07-13）
+#                      基建工具）語法檢查；這些 .py 過去僅語法檢查、零單元測試覆蓋，
+#                      邏輯回歸可經 --no-verify / GitHub web 靜默入庫 → 第 7 道補上
+#                      （dev_start 四方審查 P2，2026-07-12；子目錄遞迴盲區修復
+#                      2026-07-13）
+#   7. unittest      — tools/tests/ 下 dev_start.py 純邏輯函式與已修復迴歸點的單元測試
+#                      （純 stdlib unittest，零依賴安裝，維持本 job 輕量原則；四方複審
+#                      2026-07-13 REJECT 原因之一即「核心邏輯複雜度已超過 py_compile
+#                      能守住的範圍」，本道步驟收斂該落差）
 #
 # 觸發不設 paths 過濾（2026-07-11 起）：第 4 道 NTFS 檔名閘守的是「任何路徑」新增的
 # 敵意檔名（一旦入庫所有 Windows checkout 直接壞），paths 白名單必留盲區；本 job 全部
@@ -45,7 +50,7 @@ permissions:
 
 jobs:
   root-infra:
-    name: root infra guard (bash -n + pwsh parse/BOM + EOL + NTFS + parity + py_compile)
+    name: root infra guard (bash -n + pwsh parse/BOM + EOL + NTFS + parity + py_compile + unittest)
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
@@ -133,3 +138,6 @@ jobs:
 
       - name: 雙平台腳本對等 + pytest 釘選一致（三對 .sh/.ps1 標籤清單）
         run: python3 tools/check_script_parity.py
+
+      - name: unittest（tools/tests/：dev_start.py 純邏輯函式 + 已修復迴歸點）
+        run: python3 -m unittest discover -s tools/tests -p "test_*.py" -v
