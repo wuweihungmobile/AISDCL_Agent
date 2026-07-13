@@ -53,9 +53,8 @@ on:
       - "tools/check_ntfs_paths.py"
       - "**/*.sh"
       - "tools/git-hooks/**"
-      - "AISDLC_SDD/AISDLC_SDD_v*/tools/install_hooks/**"
-      - "AISDLC_SDD/AISDLC_SDD_v*/tools/fsm_runtime/**"
-      - "AISDLC_SDD/AISDLC_SDD_v*/.claude/hooks/**"
+      - "AISDLC_SDD/AISDLC_SDD_v*/tools/**"
+      - "AISDLC_SDD/AISDLC_SDD_v*/.claude/**"
       - ".github/workflows/macos-compat-ci.yml"
   pull_request:
     paths:
@@ -75,9 +74,8 @@ on:
       - "tools/check_ntfs_paths.py"
       - "**/*.sh"
       - "tools/git-hooks/**"
-      - "AISDLC_SDD/AISDLC_SDD_v*/tools/install_hooks/**"
-      - "AISDLC_SDD/AISDLC_SDD_v*/tools/fsm_runtime/**"
-      - "AISDLC_SDD/AISDLC_SDD_v*/.claude/hooks/**"
+      - "AISDLC_SDD/AISDLC_SDD_v*/tools/**"
+      - "AISDLC_SDD/AISDLC_SDD_v*/.claude/**"
       - ".github/workflows/macos-compat-ci.yml"
   schedule:
     - cron: "0 7 * * *"   # macos-nightly-full：每日 07:00 UTC 深度回歸（非阻斷；較 windows-compat-ci 錯開 1 小時，避免同時搶 runner）
