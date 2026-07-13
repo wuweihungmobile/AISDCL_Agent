@@ -14,9 +14,12 @@ import json
 import os
 import re
 import shutil
+import signal
 import subprocess
 import sys
 import tempfile
+import threading
+import time
 import unittest
 from pathlib import Path
 from unittest import mock
@@ -45,11 +48,17 @@ class TestFlavor(DevStartTestCase):
         self.assertEqual(dev_start._venv_python_at(base, "posix"), base / "bin/python")
 
 
-class TestDepsRelevantLines(DevStartTestCase):
-    def test_build_system_section_included(self):
+class TestTomlDepsSnapshot(DevStartTestCase):
+    """MUST FIX #3：先前手寫正則掃描（_TOML_SECTION_RE 等）改用標準庫 tomllib
+    正確解析。以下涵蓋 QA 用實際函式呼叫重現的三個正則邊角案例，以及既有
+    build-system／metadata 排除行為的等價覆蓋。
+    """
+
+    def test_project_dependencies_included_metadata_and_tool_excluded(self):
         text = (
             "[build-system]\n"
             'requires = ["hatchling"]\n'
+            'build-backend = "hatchling.build"\n'
             "\n"
             "[project]\n"
             'name = "x"\n'
@@ -59,16 +68,115 @@ class TestDepsRelevantLines(DevStartTestCase):
             "[tool.ruff]\n"
             "line-length = 100\n"
         )
-        lines = dev_start._deps_relevant_lines(text, scoped=True)
-        self.assertIn('requires = ["hatchling"]', lines)
-        self.assertIn('dependencies = ["a==1"]', lines)
-        self.assertNotIn('name = "x"', lines)
-        self.assertNotIn('version = "1.0"', lines)
-        self.assertNotIn("line-length = 100", lines)
+        snapshot = dev_start._toml_deps_snapshot(text, Path("pyproject.toml"))
+        self.assertIn("a==1", snapshot)
+        self.assertIn("hatchling", snapshot)
+        self.assertNotIn('"x"', snapshot, "name 中繼資料不應納入")
+        self.assertNotIn("line-length", snapshot, "[tool.ruff] 與依賴無關，不應納入")
 
-    def test_unscoped_keeps_everything_non_comment(self):
+    def test_optional_dependencies_included(self):
+        """SHOULD FIX #6c：project.optional-dependencies（本 repo 真實
+        AutoClaude/pyproject.toml 的 dev/notifications/postgres/pgvector 四組
+        extras 正是用這個段落）必須被納入依賴 hash。"""
+        text = (
+            "[project]\n"
+            'dependencies = ["a==1"]\n'
+            "\n"
+            "[project.optional-dependencies]\n"
+            'dev = ["pytest==8.0.0"]\n'
+        )
+        snapshot = dev_start._toml_deps_snapshot(text, Path("pyproject.toml"))
+        self.assertIn("pytest==8.0.0", snapshot)
+
+        changed = text.replace("pytest==8.0.0", "pytest==9.0.0")
+        snapshot_changed = dev_start._toml_deps_snapshot(changed, Path("pyproject.toml"))
+        self.assertNotEqual(snapshot, snapshot_changed,
+                             "optional-dependencies 內容變動應反映在 snapshot 上")
+
+    def test_case_a_inline_comment_after_section_header(self):
+        """案例 a（P1，fail-silent 最嚴重）：正則方案下 `[project]  # comment`
+        不匹配表頭正則，section 沿用前一個值，真正的依賴宣告被完全排除在
+        hash 之外且零警告。tomllib 正確解析，不受行內註解影響。"""
+        without_comment = '[project]\ndependencies = ["a==1"]\n'
+        with_inline_comment = '[project]  # main package metadata\ndependencies = ["a==2"]\n'
+        snap1 = dev_start._toml_deps_snapshot(without_comment, Path("pyproject.toml"))
+        snap2 = dev_start._toml_deps_snapshot(with_inline_comment, Path("pyproject.toml"))
+        self.assertIn("a==2", snap2)
+        self.assertNotEqual(snap1, snap2, "表頭後接註解時仍應正確辨識依賴變動")
+
+    def test_case_b_nested_array_table_not_misfiled(self):
+        """案例 b：`[[table.array]]` 巢狀陣列表不匹配表頭正則，正則方案下會被
+        誤判歸入前一個區段（過度觸發重裝，方向安全但邏輯錯）。"""
+        text = (
+            "[project]\n"
+            'dependencies = ["a==1"]\n'
+            "\n"
+            "[[tool.custom.plugins]]\n"
+            'name = "unrelated-plugin"\n'
+        )
+        snapshot = dev_start._toml_deps_snapshot(text, Path("pyproject.toml"))
+        self.assertNotIn("unrelated-plugin", snapshot)
+
+    def test_case_c_multiline_triple_quoted_string_not_hashed(self):
+        """案例 c：多行三引號字串的續行內容，正則方案下會被誤納入 hash
+        （純文案異動誤觸發重裝）。"""
+        quote = '"""'
+        base = (
+            "[project]\n"
+            'dependencies = ["a==1"]\n'
+            f"description = {quote}line one\n"
+            f'line two mentions dependencies = ["fake"]\n{quote}\n'
+        )
+        changed = base.replace("line two mentions", "line two now says")
+        snap_base = dev_start._toml_deps_snapshot(base, Path("pyproject.toml"))
+        snap_changed = dev_start._toml_deps_snapshot(changed, Path("pyproject.toml"))
+        self.assertEqual(snap_base, snap_changed,
+                          "description 內文字變動不應觸發依賴 hash 改變")
+
+    def test_invalid_toml_falls_back_to_whole_text_and_warns(self):
+        text = "[project\ndependencies = [1, 2\n"  # 語法錯誤：未閉合的表頭/陣列
+        snapshot = dev_start._toml_deps_snapshot(text, Path("pyproject.toml"))
+        self.assertIn(text, snapshot)
+        self.assertTrue(any("非合法 TOML" in w for w in dev_start.WARNINGS))
+
+    def test_case_1_bare_date_dependency_falls_back_instead_of_crashing(self):
+        """MUST FIX #1（SD 複審發現的 P1 迴歸）：`dependencies = [2024-01-01]`
+        語法合法（tomllib 解析成 datetime.date），但 json.dumps() 無法序列化
+        會裸拋 TypeError。修復前只保護 tomllib.loads() 本身，這裡驗證裸崩潰
+        已改為 fail-loud 的警告 + 退回整檔內容路徑。"""
+        text = '[project]\nname = "x"\ndependencies = [2024-01-01]\n'
+        snapshot = dev_start._toml_deps_snapshot(text, Path("pyproject.toml"))
+        self.assertIn(text, snapshot)
+        self.assertTrue(any("TOML" in w for w in dev_start.WARNINGS))
+
+    def test_case_2_project_as_scalar_falls_back_instead_of_crashing(self):
+        """MUST FIX #1：`project = "oops-not-a-table"` 語法合法，但
+        data.get("project", {}) 拿到字串而非 dict，後續 project.get(...) 會
+        裸拋 AttributeError。同上，驗證改為 fail-loud 警告路徑。"""
+        text = 'project = "oops-not-a-table"\n'
+        snapshot = dev_start._toml_deps_snapshot(text, Path("pyproject.toml"))
+        self.assertIn(text, snapshot)
+        self.assertTrue(any("TOML" in w for w in dev_start.WARNINGS))
+
+    def test_deps_hash_does_not_crash_on_malformed_shape_toml(self):
+        """驗證 _deps_hash() 這個上游呼叫端同樣不會被這兩個案例拖累裸崩潰
+        （不只是 _toml_deps_snapshot() 單元本身）。"""
+        with tempfile.TemporaryDirectory() as td:
+            pyproject = Path(td) / "pyproject.toml"
+            pyproject.write_text(
+                '[project]\nname = "x"\ndependencies = [2024-01-01]\n', encoding="utf-8")
+            with mock.patch.object(dev_start, "DEPS_FILES", (pyproject,)):
+                try:
+                    digest = dev_start._deps_hash()
+                except (TypeError, AttributeError):
+                    self.fail("_deps_hash 不應在依賴檔含合法但形狀不符的 TOML 時裸崩潰")
+            self.assertIsInstance(digest, str)
+
+
+class TestPlainRelevantLines(DevStartTestCase):
+    def test_keeps_everything_non_comment(self):
         text = "pytest==8.0.0\n# comment\n\nmypy==1.0\n"
-        lines = dev_start._deps_relevant_lines(text, scoped=False)
+        lines = dev_start._plain_relevant_lines(text)
         self.assertEqual(lines, ["pytest==8.0.0", "mypy==1.0"])
 
 
@@ -465,6 +573,74 @@ class TestBootstrapLock(DevStartTestCase):
             self.assertFalse(lock_file.is_file(), "釋放鎖後鎖檔應被刪除")
 
 
+class TestAcquireBootstrapLockPartialAliveMiddleState(DevStartTestCase):
+    """MUST FIX C（QA 複審發現的測試覆蓋缺口）：現有測試只涵蓋
+    `_acquire_bootstrap_lock()` 的『單一 PID 全存活』（見上方
+    `test_alive_pid_holder_blocks_acquisition`）與『全部 PID 死透』（見上方
+    `test_stale_lock_is_cleared_and_acquired`）兩端；`TestMultiGrandchildLockNotPrematurelyStale`
+    (MUST FIX A 重寫前) 對『A 死 B 活』中間態只透過 `_peek_bootstrap_lock()`
+    （讀取端）驗證，從未在同一中間態下直接呼叫 `_acquire_bootstrap_lock()`
+    （取得端）。QA 把 `_acquire_bootstrap_lock()` 的邏輯改成『全部存活才忙碌』
+    （不安全反轉：只要有一個死的就會誤判整把鎖陳舊）後，既有測試套件零失敗，
+    證實這是真實的覆蓋盲區。
+
+    本測試直接建構一個鎖檔內容含『一個已死 PID + 一個存活 PID』的情境，直接
+    呼叫 `_acquire_bootstrap_lock()`（不透過 `_peek_bootstrap_lock()`），斷言
+    回傳 None（拿不到鎖，因為還有存活成員）——且鎖檔不應被清除。
+
+    MUST FIX A 之後鎖檔語意隨平台改變（POSIX 可能是 process group id、Windows
+    是個別 PID），但 `_lock_target_alive()` 對『一般存活 PID』（非 pgid）一律
+    先用 `_pid_alive()` 判斷即回真，不需要動用 killpg——故本測試無需區分平台、
+    用一個單純的存活子行程即可等價驗證『部分存活即忙碌』這個核心語意，兩平台
+    通用。
+    """
+
+    def test_partial_alive_pid_list_blocks_acquisition_via_acquire_not_just_peek(self):
+        with tempfile.TemporaryDirectory() as td:
+            lock_file = Path(td) / ".dev_start.lock"
+            dead_pid = os.getpid() + 100000
+            while dev_start._pid_alive(dead_pid):
+                dead_pid += 1
+            alive_proc = subprocess.Popen(
+                [sys.executable, "-c", "import time; time.sleep(5)"])
+            try:
+                lock_file.write_text(json.dumps([dead_pid, alive_proc.pid]),
+                                      encoding="utf-8")
+                with mock.patch.object(dev_start, "LOCK_FILE", lock_file):
+                    result = dev_start._acquire_bootstrap_lock()
+                self.assertIsNone(
+                    result,
+                    "清單中一個 PID 已死、另一個仍存活時，_acquire_bootstrap_lock() "
+                    "應拿不到鎖（不可誤判為『全部存活才忙碌』的不安全反轉）")
+                self.assertTrue(lock_file.is_file(),
+                                 "部分存活的鎖檔不應被 _acquire_bootstrap_lock() 清除")
+            finally:
+                alive_proc.kill()
+                alive_proc.wait()
+
+    def test_all_dead_in_list_is_cleared_and_acquired_for_contrast(self):
+        """對照組：清單中全部 PID 皆死透時，才應被視為真正陳舊、可清除重新
+        取得——確保上一個測試不是因為函式邏輯整個壞掉（如永遠回傳 None）而
+        巧合通過。"""
+        with tempfile.TemporaryDirectory() as td:
+            lock_file = Path(td) / ".dev_start.lock"
+            dead_pid_1 = os.getpid() + 100000
+            while dev_start._pid_alive(dead_pid_1):
+                dead_pid_1 += 1
+            dead_pid_2 = dead_pid_1 + 1
+            while dev_start._pid_alive(dead_pid_2):
+                dead_pid_2 += 1
+            lock_file.write_text(json.dumps([dead_pid_1, dead_pid_2]), encoding="utf-8")
+            fd = None
+            try:
+                with mock.patch.object(dev_start, "LOCK_FILE", lock_file):
+                    fd = dev_start._acquire_bootstrap_lock()
+                self.assertIsNotNone(fd, "清單中全部 PID 皆死透時應能清除陳舊鎖並重新取得")
+            finally:
+                if fd is not None:
+                    os.close(fd)
+
+
 class TestStepVenvLockedAborts(DevStartTestCase):
     """P1-3 迴歸測試：另一個存活 PID 持有鎖時，step_venv() 應中止且不進行 bootstrap
     （不要真的競態啟動兩個行程去測，改用「先手動建立一個假鎖檔、寫入本測試行程自己
@@ -731,35 +907,47 @@ class TestAcquireBootstrapLockMalformedContent(DevStartTestCase):
             self.assertTrue(any("無法辨識" in w for w in dev_start.WARNINGS))
 
 
-class TestRecordLockPid(DevStartTestCase):
-    """本輪核心修法之一：_record_lock_pid() 把鎖檔內容從 orchestrator PID
-    改寫成真正執行 bootstrap 的子行程 PID，驗證覆寫行為正確（截斷舊內容、
-    不是附加）。
+class TestRecordLockPids(DevStartTestCase):
+    """本輪核心修法之一：_record_lock_pids() 把鎖檔內容從 orchestrator PID
+    改寫成真正執行 bootstrap 的子行程 PID 清單（JSON 陣列），驗證覆寫行為
+    正確（截斷舊內容、不是附加）。MUST FIX #2 起改為接受 PID 清單而非單一 PID。
     """
 
-    def test_overwrites_lock_file_content_with_given_pid(self):
+    def test_overwrites_lock_file_content_with_given_pids(self):
         with tempfile.TemporaryDirectory() as td:
             lock_file = Path(td) / ".dev_start.lock"
             fd = os.open(str(lock_file), os.O_CREAT | os.O_EXCL | os.O_WRONLY)
             try:
                 os.write(fd, str(os.getpid()).encode("utf-8"))
-                dev_start._record_lock_pid(fd, 999999)
+                dev_start._record_lock_pids(fd, [999999])
             finally:
                 os.close(fd)
-            self.assertEqual(lock_file.read_text(encoding="utf-8").strip(), "999999")
+            self.assertEqual(
+                json.loads(lock_file.read_text(encoding="utf-8")), [999999])
 
-    def test_overwrite_with_shorter_pid_leaves_no_trailing_garbage(self):
-        """舊內容（如 "123456789"）比新內容（如 "42"）長時，若忘記 ftruncate，
-        檔案會殘留舊內容尾巴（"42456789"）而非乾淨的 "42"。"""
+    def test_overwrite_with_shorter_content_leaves_no_trailing_garbage(self):
+        """舊內容（如 "123456789"）比新內容（如 "[42]"）長時，若忘記
+        ftruncate，檔案會殘留舊內容尾巴而非乾淨的 "[42]"。"""
         with tempfile.TemporaryDirectory() as td:
             lock_file = Path(td) / ".dev_start.lock"
             fd = os.open(str(lock_file), os.O_CREAT | os.O_EXCL | os.O_WRONLY)
             try:
                 os.write(fd, b"123456789")
-                dev_start._record_lock_pid(fd, 42)
+                dev_start._record_lock_pids(fd, [42])
             finally:
                 os.close(fd)
-            self.assertEqual(lock_file.read_text(encoding="utf-8").strip(), "42")
+            self.assertEqual(json.loads(lock_file.read_text(encoding="utf-8")), [42])
+
+    def test_records_multiple_pids_sorted(self):
+        with tempfile.TemporaryDirectory() as td:
+            lock_file = Path(td) / ".dev_start.lock"
+            fd = os.open(str(lock_file), os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+            try:
+                dev_start._record_lock_pids(fd, [999, 111, 555])
+            finally:
+                os.close(fd)
+            self.assertEqual(
+                json.loads(lock_file.read_text(encoding="utf-8")), [111, 555, 999])
 
 
 class TestPeekBootstrapLock(DevStartTestCase):
@@ -827,6 +1015,131 @@ class TestStreamOnStartCallback(DevStartTestCase):
         self.assertEqual(rc, 127)
 
 
+class TestStreamOtherOSErrorDoesNotCrash(DevStartTestCase):
+    """MUST FIX 3（SA 複審發現，P2）：`_stream()` 過去只 catch `FileNotFoundError`。
+    若執行環境限制 `setsid()`（例如受限 seccomp/沙盒設定拒絕該系統呼叫），
+    `Popen(..., start_new_session=True)` 會在子行程端呼叫失敗、經內部 pipe
+    回報，父行程端拋出 `PermissionError`（`OSError` 子類別，但不是
+    `FileNotFoundError`）——SA 用函式層級 mock 實測驗證這個例外先前完全沒被
+    攔截，會直接向上傳播讓整支工具在 `_run_bootstrap()`/`step_venv()`/`main()`
+    裸崩潰。
+
+    本測試 mock `subprocess.Popen` 拋出 `PermissionError`，驗證 `_stream()` 不
+    裸崩潰、回傳合理的非零 rc 並印出警告，而不是讓例外往上炸穿。
+    """
+
+    def test_permission_error_from_popen_returns_nonzero_without_crashing(self):
+        with mock.patch.object(
+                dev_start.subprocess, "Popen",
+                side_effect=PermissionError("setsid() 遭沙盒拒絕")):
+            rc = dev_start._stream(["irrelevant-cmd"])
+        self.assertIsInstance(rc, int)
+        self.assertNotEqual(rc, 0, "Popen 失敗不可被誤判為成功")
+
+    def test_other_oserror_from_popen_also_does_not_crash(self):
+        """對照組：不只 PermissionError，任意其他非 FileNotFoundError 的
+        OSError 子類別（如 BlockingIOError）也必須走同一條安全網分支，證明
+        修法接住的是『OSError 大類』而非只特化處理 PermissionError 這一種。"""
+        with mock.patch.object(
+                dev_start.subprocess, "Popen",
+                side_effect=BlockingIOError("模擬其他 OSError 子類別")):
+            rc = dev_start._stream(["irrelevant-cmd"])
+        self.assertIsInstance(rc, int)
+        self.assertNotEqual(rc, 0)
+
+    def test_file_not_found_still_returns_127_not_swallowed_by_broader_oserror(self):
+        """對照組：擴大 except 範圍後，FileNotFoundError 的既有語意（rc=127，
+        訊息為『找不到指令』）不可被更廣的 OSError 分支蓋掉——必須確認
+        except 子句宣告順序仍讓 FileNotFoundError 優先匹配。"""
+        rc = dev_start._stream(["definitely-not-a-real-command-xyz"])
+        self.assertEqual(rc, 127)
+
+    def test_run_bootstrap_propagates_false_instead_of_crashing_on_oserror(self):
+        """端到端：_run_bootstrap() 呼叫鏈上真正會踩到此例外的路徑
+        （_stream() 內 Popen 失敗）不應讓 _run_bootstrap() 裸崩潰，而是要能
+        繼續完成收尾（哨兵/鎖狀態）並回傳可預期的結果，供 step_venv()/main()
+        正常往下走錯誤處理路徑，而非整支工具中止。"""
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            with mock.patch.object(dev_start, "ROOT", root), \
+                 mock.patch.object(
+                     dev_start.subprocess, "Popen",
+                     side_effect=PermissionError("setsid() 遭沙盒拒絕")):
+                try:
+                    ok = dev_start._run_bootstrap("mac", "測試原因")
+                except OSError:
+                    self.fail("_run_bootstrap() 不應讓 Popen 的 OSError 裸崩穿透")
+            self.assertFalse(ok, "_stream() 回傳非零 rc 時 _run_bootstrap() 應回傳 False")
+
+
+class TestStreamNewProcessGroup(DevStartTestCase):
+    """MUST FIX A：`_stream(new_process_group=True)` 的基本行為——POSIX 上應讓
+    子行程自身 PID 等於其 pgid（`start_new_session=True` 語意）；Windows 上
+    絕不可把 `start_new_session` 傳給 `subprocess.Popen`（Python 文件明載該
+    參數為 POSIX-only，Windows 上傳入非假值會拋 `ValueError`）。
+    """
+
+    @unittest.skipIf(os.name == "nt", "pgid 語意僅適用 POSIX")
+    def test_posix_child_pid_equals_its_own_pgid(self):
+        captured: dict = {}
+
+        def on_start(pid):
+            captured["pid"] = pid
+            captured["pgid"] = os.getpgid(pid)
+
+        rc = dev_start._stream(
+            [sys.executable, "-c", "import time; time.sleep(0.2)"],
+            on_start=on_start,
+            new_process_group=True,
+        )
+        self.assertEqual(rc, 0)
+        self.assertEqual(captured["pgid"], captured["pid"],
+                          "start_new_session=True 應使子行程自身 PID 等於其 pgid")
+
+    def test_windows_never_receives_start_new_session_kwarg(self):
+        captured_kwargs: dict = {}
+
+        class FakeProc:
+            pid = 4242
+
+            def wait(self):
+                return 0
+
+        def fake_popen(_cmd, **kwargs):
+            captured_kwargs.update(kwargs)
+            return FakeProc()
+
+        with mock.patch.object(dev_start.os, "name", "nt"), \
+             mock.patch.object(dev_start.subprocess, "Popen", side_effect=fake_popen):
+            rc = dev_start._stream(["irrelevant"], new_process_group=True)
+
+        self.assertEqual(rc, 0)
+        self.assertNotIn(
+            "start_new_session", captured_kwargs,
+            "Windows 上不可傳遞 start_new_session（POSIX-only kwarg，Windows 上"
+            "subprocess.Popen 對非假值會拋 ValueError）")
+
+    @unittest.skipIf(os.name == "nt", "pgid 語意僅適用 POSIX")
+    def test_new_process_group_false_does_not_isolate(self):
+        """對照組：new_process_group 預設 False（既有呼叫端，如 git pull／hooks
+        安裝）不應被本輪修改影響——子行程仍與呼叫端同一 process group。"""
+        captured: dict = {}
+
+        def on_start(pid):
+            captured["pid"] = pid
+            captured["pgid"] = os.getpgid(pid)  # 須在子行程仍存活時查詢
+
+        rc = dev_start._stream(
+            [sys.executable, "-c", "import time; time.sleep(0.2)"],
+            on_start=on_start,
+        )
+        self.assertEqual(rc, 0)
+        self.assertEqual(
+            captured["pgid"], os.getpgid(0),
+            "未指定 new_process_group 時，子行程應沿用呼叫端的 process group"
+            "（不應獨立成新 session），維持既有 Ctrl-C 行為不變")
+
+
 class TestOrphanChildLockRegression(DevStartTestCase):
     """收尾要求：本輪核心修法（子行程 PID 追蹤 + step_venv 頂部 busy-lock 檢查）
     的端到端迴歸測試。Architect 明確指出上一輪測試抓不到問題正是因為只用函式
@@ -891,6 +1204,467 @@ class TestOrphanChildLockRegression(DevStartTestCase):
             self.assertEqual(bootstrap_calls, [], "不應執行 bootstrap")
 
 
+class TestStreamNewProcessGroupSurvivesDirectChildDeath(DevStartTestCase):
+    """MUST FIX A 核心迴歸測試（Architect 第三輪複審用真實驗證證明「事後 ppid
+    回溯」在因果上必然太晚：production 呼叫鏈是 `_stream()` 的 `proc.wait()`
+    等到直接子行程確實死亡才返回 → `_run_bootstrap()` 返回 → `step_venv()` 才
+    呼叫回溯邏輯，此時直接子行程的 ppid 早已被核心過繼給 subreaper，以其 PID
+    為根的事後回溯注定撲空）。
+
+    根本重做：`_stream(new_process_group=True)` 讓 bootstrap 直接子行程呼叫
+    `start_new_session=True`（POSIX 對應 `setsid()`），使其成為新 session 的
+    group leader——其自身 PID 同時即為 process group id。之後不論該子行程
+    fork 出多少層、多少個孫行程，只要仍有任一成員存活，`os.killpg(pgid, 0)`
+    就會成功；這不受「父行程死亡時子行程 ppid 被核心過繼」影響，因為過繼只
+    改變 ppid，不改變 process group membership。本測試用真實 subprocess（非
+    函式層級 mock）直接驗證這個核心因果宣稱本身。
+    """
+
+    @unittest.skipIf(os.name == "nt",
+                      "process group / os.killpg 僅適用 POSIX；Windows 維持既有"
+                      " _DescendantWatcher 設計，見 dev_start.py 對應 docstring")
+    def test_killpg_survives_direct_child_kill_while_grandchild_alive(self):
+        with tempfile.TemporaryDirectory() as td:
+            pidfile = Path(td) / "grandchild.pid"
+            script = (
+                "import subprocess, sys\n"
+                "gc = subprocess.Popen([sys.executable, '-c', "
+                "'import time; time.sleep(5)'])\n"
+                f"open({str(pidfile)!r}, 'w').write(str(gc.pid))\n"
+                "gc.wait()\n"
+            )
+            result: dict = {}
+
+            def runner():
+                result["rc"] = dev_start._stream(
+                    [sys.executable, "-c", script],
+                    on_start=lambda pid: result.setdefault("pgid", pid),
+                    new_process_group=True,
+                )
+
+            thread = threading.Thread(target=runner)
+            thread.start()
+            try:
+                deadline = time.monotonic() + 5
+                while "pgid" not in result and time.monotonic() < deadline:
+                    time.sleep(0.02)
+                self.assertIn("pgid", result, "應已透過 on_start 取得直接子行程 PID（測試前提）")
+                pgid = result["pgid"]
+                self.assertEqual(os.getpgid(pgid), pgid,
+                                  "new_process_group=True 應使直接子行程自身 PID 等於其 pgid"
+                                  "（setsid 語意）")
+
+                deadline = time.monotonic() + 5
+                while not pidfile.is_file() and time.monotonic() < deadline:
+                    time.sleep(0.05)
+                self.assertTrue(pidfile.is_file(), "孫行程應已 fork 出來（測試前提）")
+                grandchild_pid = int(pidfile.read_text(encoding="utf-8").strip())
+
+                # 模擬使用者/監控工具只精準 kill 掉直接子行程（不碰整個 group）
+                os.kill(pgid, signal.SIGKILL)
+                thread.join(timeout=10)
+                self.assertFalse(thread.is_alive(), "背景執行緒應已隨直接子行程死亡而結束")
+                self.assertLess(result["rc"], 0, "直接子行程應被訊號終止（負值 rc）")
+
+                # 核心斷言：直接子行程已死，但孫行程仍存活——os.killpg 不受 ppid
+                # 過繼影響，仍應成功（不像事後 ps 回溯注定撲空）。
+                try:
+                    os.killpg(pgid, 0)
+                except ProcessLookupError:
+                    self.fail("直接子行程死亡但孫行程仍存活時，os.killpg 不應回報"
+                              "process group 已消失——這正是本輪要修的因果性 bug")
+
+                deadline = time.monotonic() + 6
+                while dev_start._pid_alive(grandchild_pid) and time.monotonic() < deadline:
+                    time.sleep(0.1)
+                self.assertFalse(dev_start._pid_alive(grandchild_pid), "孫行程應已結束（測試前提）")
+
+                with self.assertRaises(ProcessLookupError):
+                    os.killpg(pgid, 0)
+            finally:
+                if thread.is_alive():
+                    thread.join(timeout=5)
+
+
+class TestBootstrapProcessGroupSurvivesDirectChildKill(DevStartTestCase):
+    """MUST FIX A 迴歸測試（取代舊版 TestGrandchildOrphanSurvivesDirectChildKill /
+    TestMultiGrandchildLockNotPrematurelyStale 對『事後 ppid 回溯』的測試方式）：
+    Architect 第三輪複審已用真實驗證證明那個修法在因果上必然無效（見上方
+    TestStreamNewProcessGroupSurvivesDirectChildDeath 與 dev_start.py 內
+    `_stream`/`_lock_target_alive`/`_DescendantWatcher` docstring 的完整推導），
+    舊測試的 `root_pid` 用的是測試行程自己（全程沒有死亡），跟真正的 bug
+    （直接子行程本身已經死亡、孫行程被過繼）完全是兩回事。
+
+    新設計：`_run_bootstrap()` 對 POSIX 呼叫 `_stream(..., new_process_group=True)`，
+    讓直接子行程以 `start_new_session=True` 成為新 session 的 group leader
+    （pgid == 自身 PID）。`step_venv()` 不再需要背景輪詢採樣後代 PID——直接用
+    `os.killpg(pgid, 0)` 判斷整個 group（含任意數量、任意深度的孫行程）是否
+    仍有成員存活，鎖檔內容全程維持記錄這一個 pgid 不變，不需要『事後發現多個
+    孫行程 PID 再改寫鎖檔』（舊設計 MUST FIX #2 修的『只記錄 min(live) 單一
+    PID』整個 bug class，在 pgid + killpg 設計下結構性不可能發生）。
+
+    本測試模擬兩個孫行程（壽命不同）一次驗證：①任一孫行程存活時鎖不釋放；
+    ②鎖檔內容全程是最初的 pgid（不像舊設計需要改寫成觀察到的孫行程 PID）；
+    ③下一輪 `_peek_bootstrap_lock()` 透過 `_lock_target_alive()` 的 killpg
+    fallback 仍正確判斷忙碌；④兩個孫行程都結束後鎖能被正常清除重新取得，不
+    會永久卡死。
+    """
+
+    @unittest.skipIf(os.name == "nt",
+                      "process group / os.killpg 僅適用 POSIX；Windows 維持既有"
+                      " _DescendantWatcher 設計，見 dev_start.py 對應分支")
+    def test_lock_stays_busy_via_killpg_while_any_grandchild_alive_then_clears(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            lock_file = root / ".dev_start.lock"
+            pidfile_a = root / "grandchild_a.pid"
+            pidfile_b = root / "grandchild_b.pid"
+
+            # 假 bootstrap 的直接子行程：前景 fork 出兩個壽命不同的孫行程並等待
+            # 兩者結束——A 壽命短，B 壽命長（比照真實 uv 平行化下載時各任務
+            # 耗時不同）。
+            direct_child_script = (
+                "import subprocess, sys\n"
+                "gc_a = subprocess.Popen([sys.executable, '-c', "
+                "'import time; time.sleep(2)'])\n"
+                "gc_b = subprocess.Popen([sys.executable, '-c', "
+                "'import time; time.sleep(6)'])\n"
+                f"open({str(pidfile_a)!r}, 'w').write(str(gc_a.pid))\n"
+                f"open({str(pidfile_b)!r}, 'w').write(str(gc_b.pid))\n"
+                "gc_a.wait()\n"
+                "gc_b.wait()\n"
+            )
+            direct_child_holder: dict = {}
+
+            def fake_stream(_cmd, on_start=None, **_kwargs):
+                # 模擬 _stream(new_process_group=True) 的真實行為：只 mock
+                # 「跑哪個指令」這一層（不用真的 bootstrap.sh），行程樹本身
+                # 的 OS 語意（start_new_session=True）如實重現。
+                direct_child = subprocess.Popen(
+                    [sys.executable, "-c", direct_child_script],
+                    start_new_session=True,
+                )
+                direct_child_holder["proc"] = direct_child
+                if on_start is not None:
+                    on_start(direct_child.pid)
+                for _ in range(100):  # 最多等 5s 讓兩個孫行程真的 fork 出來
+                    if pidfile_a.is_file() and pidfile_b.is_file():
+                        break
+                    time.sleep(0.05)
+                time.sleep(0.3)
+                # 模擬使用者/監控工具只 kill 掉直接子行程本身（不碰整個 group）
+                os.kill(direct_child.pid, signal.SIGKILL)
+                return direct_child.wait()  # 被 SIGKILL：負值 rc
+
+            try:
+                with mock.patch.object(dev_start, "ROOT", root), \
+                     mock.patch.object(dev_start, "LOCK_FILE", lock_file), \
+                     mock.patch.object(dev_start, "_ensure_venv_shape", return_value="ok"), \
+                     mock.patch.object(dev_start, "_deps_hash", return_value="h"), \
+                     mock.patch.object(dev_start, "_stream", side_effect=fake_stream):
+                    ok = dev_start.step_venv("mac", {}, force=True)
+
+                self.assertTrue(pidfile_a.is_file() and pidfile_b.is_file(),
+                                 "兩個孫行程應已 fork 出來（測試前提）")
+                pid_a = int(pidfile_a.read_text(encoding="utf-8").strip())
+                pid_b = int(pidfile_b.read_text(encoding="utf-8").strip())
+                pgid = direct_child_holder["proc"].pid
+
+                self.assertFalse(ok, "任一孫行程仍存活時 step_venv 應回報失敗")
+                self.assertTrue(lock_file.is_file(), "孫行程仍存活時鎖檔不應被移除")
+                self.assertTrue(
+                    any("process group" in w and "仍有行程存活" in w for w in dev_start.WARNINGS),
+                    "應有明確警告告知 bootstrap process group 仍有行程存活、鎖未釋放")
+
+                recorded = json.loads(lock_file.read_text(encoding="utf-8"))
+                self.assertEqual(recorded, [pgid],
+                                  "鎖檔內容應全程是最初記錄的 pgid（直接子行程自身 PID），"
+                                  "不需要像舊設計那樣事後改寫成觀察到的孫行程 PID")
+
+                # 等 A（短命）先結束，此時 B（長壽命）應仍存活
+                deadline = time.monotonic() + 5
+                while dev_start._pid_alive(pid_a) and time.monotonic() < deadline:
+                    time.sleep(0.1)
+                self.assertFalse(dev_start._pid_alive(pid_a), "A 應已結束（測試前提）")
+                self.assertTrue(dev_start._pid_alive(pid_b), "B 應仍存活（測試前提）")
+
+                with mock.patch.object(dev_start, "LOCK_FILE", lock_file):
+                    still_busy = dev_start._peek_bootstrap_lock()
+                self.assertIsNotNone(
+                    still_busy,
+                    "直接子行程已死、A 已死，但 B（孫行程）仍存活時，鎖不應被誤判陳舊"
+                    "——os.killpg(pgid, 0) 只要 group 內任一成員存活就會成功，不像"
+                    "事後 ppid 回溯需要逐一追蹤個別 PID")
+
+                # 等 B 也結束，鎖才應能被正常清除重新取得
+                deadline = time.monotonic() + 8
+                while dev_start._pid_alive(pid_b) and time.monotonic() < deadline:
+                    time.sleep(0.1)
+                self.assertFalse(dev_start._pid_alive(pid_b), "B 應已結束（測試前提）")
+
+                with mock.patch.object(dev_start, "LOCK_FILE", lock_file):
+                    fd = dev_start._acquire_bootstrap_lock()
+                self.assertIsNotNone(fd, "A、B 皆已結束後，鎖應能被正常清除並重新取得")
+                if fd is not None:
+                    os.close(fd)
+                    lock_file.unlink(missing_ok=True)
+            finally:
+                proc = direct_child_holder.get("proc")
+                if proc is not None and proc.poll() is None:
+                    try:
+                        os.killpg(proc.pid, signal.SIGKILL)
+                    except OSError:
+                        pass
+                    proc.wait()
+
+
+class TestSigintForwardsToBootstrapProcessGroup(DevStartTestCase):
+    """MUST FIX A 必要配套的迴歸測試（POSIX only）：`_stream(new_process_group=True)`
+    讓 bootstrap 直接子行程脫離終端機 foreground process group 後，使用者按
+    Ctrl-C（SIGINT 只送到 foreground process group）將不再自然傳到 bootstrap
+    樹，可能讓它在背景孤兒繼續跑而使用者誤以為已中止。
+
+    本測試用『真實訊號』（而非函式層級 mock）驗證：dev_start.py 安裝
+    `_forward_signal_to_bootstrap_group` 為 SIGINT handler 後，模擬使用者在
+    bootstrap 執行期間按 Ctrl-C（對自己送出真實 SIGINT），驗證整個 bootstrap
+    process group（含直接子行程與孫行程）確實收到訊號終止，不會變成背景孤兒
+    繼續執行。
+    """
+
+    def setUp(self) -> None:
+        super().setUp()
+        dev_start._set_active_bootstrap_pgid(None)
+
+    def tearDown(self) -> None:
+        dev_start._set_active_bootstrap_pgid(None)
+        super().tearDown()
+
+    @unittest.skipIf(os.name == "nt", "SIGINT/os.killpg 訊號轉發僅適用 POSIX；"
+                      "Windows 未使用 start_new_session，既有 Ctrl-C 行為不變（見"
+                      " main() 內對應安裝條件）")
+    def test_real_sigint_terminates_direct_child_and_grandchild(self):
+        with tempfile.TemporaryDirectory() as td:
+            pidfile = Path(td) / "grandchild.pid"
+            script = (
+                "import subprocess, sys\n"
+                "gc = subprocess.Popen([sys.executable, '-c', "
+                "'import time; time.sleep(30)'])\n"
+                f"open({str(pidfile)!r}, 'w').write(str(gc.pid))\n"
+                "gc.wait()\n"
+            )
+            result: dict = {}
+
+            def runner():
+                def on_start(pid):
+                    dev_start._set_active_bootstrap_pgid(pid)
+                    result["pgid"] = pid
+                result["rc"] = dev_start._stream(
+                    [sys.executable, "-c", script],
+                    on_start=on_start,
+                    new_process_group=True,
+                )
+
+            thread = threading.Thread(target=runner)
+            old_handler = signal.signal(signal.SIGINT,
+                                         dev_start._forward_signal_to_bootstrap_group)
+            try:
+                thread.start()
+                deadline = time.monotonic() + 5
+                while "pgid" not in result and time.monotonic() < deadline:
+                    time.sleep(0.02)
+                self.assertIn("pgid", result, "應已取得直接子行程 pgid（測試前提）")
+
+                deadline = time.monotonic() + 5
+                while not pidfile.is_file() and time.monotonic() < deadline:
+                    time.sleep(0.05)
+                self.assertTrue(pidfile.is_file(), "孫行程應已 fork 出來（測試前提）")
+                grandchild_pid = int(pidfile.read_text(encoding="utf-8").strip())
+
+                # 模擬使用者在 bootstrap 執行期間按下 Ctrl-C：對自己送出真實 SIGINT
+                time.sleep(0.1)
+                os.kill(os.getpid(), signal.SIGINT)
+
+                thread.join(timeout=10)
+                self.assertFalse(thread.is_alive(),
+                                  "handler 轉發訊號後，直接子行程應已終止、背景執行緒應已結束")
+                self.assertLess(result["rc"], 0, "直接子行程應被訊號終止（負值 rc）")
+
+                deadline = time.monotonic() + 3
+                while dev_start._pid_alive(grandchild_pid) and time.monotonic() < deadline:
+                    time.sleep(0.1)
+                self.assertFalse(
+                    dev_start._pid_alive(grandchild_pid),
+                    "孫行程應已隨 process group 一併終止，而非變成背景孤兒繼續執行")
+            finally:
+                signal.signal(signal.SIGINT, old_handler)
+                if thread.is_alive():
+                    thread.join(timeout=5)
+
+    def test_no_active_bootstrap_falls_back_to_keyboard_interrupt(self):
+        """對照組：沒有進行中的 bootstrap 時（如 step_sync/step_hooks 期間），
+        handler 應退回 Python 預設行為（拋出 KeyboardInterrupt），不改變既有
+        Ctrl-C 語意——這是 handler 的『安全網』分支，須直接單元測試（不涉及
+        真實子行程）。"""
+        self.assertIsNone(dev_start._ACTIVE_BOOTSTRAP_PGID)
+        with self.assertRaises(KeyboardInterrupt):
+            dev_start._forward_signal_to_bootstrap_group(signal.SIGINT, None)
+
+
+class TestNormalBootstrapFlowUnaffectedByProcessGroupChange(DevStartTestCase):
+    """交付要求 2(i)：MUST FIX A 是一個牽涉「子行程怎麼被產生」的結構性改動
+    （`_stream()` 新增 `new_process_group=True` 分支、`step_venv()` 改走 pgid/
+    killpg 路徑），必須用真實 subprocess 端到端驗證『正常成功的 bootstrap 流程
+    完全不受影響』——不能只驗證新機制本身，還要證明沒有把好路徑弄壞：rc 仍
+    正確傳遞（0）、真實孫行程仍能正常結束、鎖仍會在成功後正常釋放（不會被
+    誤判為『process group 仍有人存活』而卡住）、`_ACTIVE_BOOTSTRAP_PGID` 仍會
+    在流程結束後正確清除。
+    """
+
+    @unittest.skipIf(os.name == "nt", "pgid 語意僅適用 POSIX；Windows 分支未變動")
+    def test_successful_bootstrap_with_short_lived_grandchild_releases_lock_cleanly(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            lock_file = root / ".dev_start.lock"
+            venv_python = root / ".venv" / "bin" / "python"
+
+            # 模擬真實 bootstrap.sh 正常成功：前景 fork 一個短命孫行程（如
+            # pip install 的子步驟）並等它結束，接著建好 venv 直譯器、rc=0。
+            direct_child_script = (
+                "import subprocess, sys\n"
+                "gc = subprocess.Popen([sys.executable, '-c', 'pass'])\n"
+                "gc.wait()\n"
+            )
+
+            def fake_stream(_cmd, on_start=None, **_kwargs):
+                direct_child = subprocess.Popen(
+                    [sys.executable, "-c", direct_child_script],
+                    start_new_session=True,
+                )
+                if on_start is not None:
+                    on_start(direct_child.pid)
+                rc = direct_child.wait()
+                if rc == 0:
+                    venv_python.parent.mkdir(parents=True, exist_ok=True)
+                    venv_python.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+                    venv_python.chmod(0o755)
+                return rc
+
+            with mock.patch.object(dev_start, "ROOT", root), \
+                 mock.patch.object(dev_start, "LOCK_FILE", lock_file), \
+                 mock.patch.object(dev_start, "_ensure_venv_shape", return_value="missing"), \
+                 mock.patch.object(dev_start, "_deps_hash", return_value="h"), \
+                 mock.patch.object(dev_start, "_venv_python", return_value=venv_python), \
+                 mock.patch.object(dev_start, "_stream", side_effect=fake_stream):
+                ok = dev_start.step_venv("mac", {}, force=True)
+
+            self.assertTrue(ok, "正常成功的 bootstrap 流程應回報成功，不受 pgid 改動影響")
+            self.assertIn("bootstrap 完成", dev_start.SUMMARY.get("venv", ""))
+            self.assertFalse(lock_file.is_file(), "成功且行程樹已全數結束時，鎖應正常釋放")
+            self.assertIsNone(
+                dev_start._ACTIVE_BOOTSTRAP_PGID,
+                "_run_bootstrap() 返回後，無論成功與否都應清除 _ACTIVE_BOOTSTRAP_PGID"
+                "（避免遺留給下一次無關的 Ctrl-C 誤轉發）")
+
+    @unittest.skipIf(os.name == "nt", "pgid 語意僅適用 POSIX；Windows 分支未變動")
+    def test_stream_rc_and_stdout_passthrough_unaffected_by_new_process_group(self):
+        """對照組：`_stream(new_process_group=True)` 對一個會印出 stdout 且
+        正常結束的指令，rc 仍正確傳遞、且 Popen 未攔截 stdout（維持即時可見，
+        不因新增 process group 隔離而被緩衝/吞掉）。"""
+        marker = "DEV_START_STREAM_PASSTHROUGH_CHECK"
+        inner_cmd = [sys.executable, "-c", f"print({marker!r})"]
+        outer_script = (
+            "import sys, dev_start\n"
+            f"rc = dev_start._stream({inner_cmd!r}, new_process_group=True)\n"
+            "sys.exit(rc)\n"
+        )
+        proc = subprocess.run(
+            [sys.executable, "-c", outer_script],
+            cwd=str(Path(dev_start.__file__).resolve().parent),
+            capture_output=True, text=True, timeout=15,
+        )
+        self.assertEqual(proc.returncode, 0, f"stderr={proc.stderr}")
+        self.assertIn(marker, proc.stdout,
+                      "new_process_group=True 不應攔截/吞掉子行程 stdout —— "
+                      "Popen 未設定 stdout=PIPE，應照常繼承並即時可見")
+
+
+class TestDescendantWatcherFinalSyncSampleWindows(DevStartTestCase):
+    """MUST FIX #3 迴歸測試（Windows 版）：`_DescendantWatcher` 自 MUST FIX A
+    起僅供 Windows 使用（POSIX 已改用 pgid + os.killpg，見上方兩個新測試類別）；
+    舊版 `TestDescendantWatcherFinalSyncSample` 是在這台 macOS 開發機上直接
+    呼叫 `_DescendantWatcher`，實際命中的是已被移除的 POSIX 分支
+    （`_list_pid_ppid_pairs_posix`）——該分支代表的機制在生產環境已不再被任何
+    平台呼叫（POSIX 不用，且該分支本身已刪除），繼續測它沒有意義。
+
+    本測試改用 `mock ctypes.windll` 的既有慣例（比照 `TestPidAliveWindowsBranch`）
+    模擬 Windows Toolhelp32 API，在 Windows 分支上重新驗證 MUST FIX #3 這個
+    「stop_and_collect() 必須自己補一次同步採樣、不能只靠背景執行緒排程」的
+    修復——這個機制對 Windows 而言仍然成立且仍在生產程式碼路徑上（見
+    `_DescendantWatcher` docstring：Windows 的 th32ParentProcessID 是靜態
+    快照，事後回溯本身沒有 POSIX 那個因果性缺陷，但『背景輪詢的取樣空窗』
+    這個獨立問題兩平台通用，仍需要 stop_and_collect() 的同步補採樣）。
+    """
+
+    def test_child_born_in_polling_gap_is_still_captured_on_windows(self):
+        root_pid = 42
+        grandchild_pid = 4242
+        state = {"grandchild_born": False}
+
+        class FakeEntry:
+            th32ProcessID = 0
+            th32ParentProcessID = 0
+
+        class FakeKernel32:
+            def CreateToolhelp32Snapshot(self, _flags, _pid):
+                return 1  # 非 0/-1 的假 handle
+
+            def Process32First(self, _snapshot, entry_ptr):
+                pairs = self._current_pairs()
+                self._pairs = pairs
+                self._idx = 0
+                return self._fill(entry_ptr)
+
+            def Process32Next(self, _snapshot, entry_ptr):
+                self._idx += 1
+                return self._fill(entry_ptr)
+
+            def _current_pairs(self):
+                base = [(root_pid, 1)]
+                if state["grandchild_born"]:
+                    base.append((grandchild_pid, root_pid))
+                return base
+
+            def _fill(self, entry_ptr):
+                if self._idx >= len(self._pairs):
+                    return 0
+                pid, ppid = self._pairs[self._idx]
+                entry_ptr.contents.th32ProcessID = pid
+                entry_ptr.contents.th32ParentProcessID = ppid
+                return 1
+
+            def CloseHandle(self, _snapshot):
+                return 1
+
+        fake_windll = mock.Mock(kernel32=FakeKernel32())
+        with mock.patch.object(ctypes, "windll", fake_windll, create=True), \
+             mock.patch.object(dev_start.os, "name", "nt"):
+            # 放大 poll_interval（3 秒）讓背景執行緒排定的下一次採樣遠晚於孫
+            # 行程誕生與 stop_and_collect() 被呼叫的時間點，決定性重現空窗。
+            watcher = dev_start._DescendantWatcher(root_pid, poll_interval=3.0)
+            watcher.start()
+            time.sleep(0.1)  # 讓背景執行緒完成「第一次」採樣（此時孫行程尚未誕生）
+
+            state["grandchild_born"] = True
+            time.sleep(0.05)
+            observed = watcher.stop_and_collect()
+
+        self.assertIn(
+            grandchild_pid, observed,
+            "stop_and_collect() 應透過同步補採樣抓到剛誕生的孫行程，"
+            "即使背景執行緒尚未排到下一次採樣（poll_interval 空窗）——"
+            "Windows 上此機制仍在生產程式碼路徑上，須維持通過")
+
+
 class TestStepVenvPrevNoneHealthCheck(DevStartTestCase):
     """Architect 建議（非阻塞但一併修）：既有 .venv 沿用、只記首次依賴基準的
     `prev is None` 分支過去完全不做健檢就信任現狀。修復後健檢失敗應視同壞損，
@@ -944,6 +1718,544 @@ class TestStepVenvPrevNoneHealthCheck(DevStartTestCase):
             self.assertTrue(ok)
             self.assertEqual(len(bootstrap_calls), 1)
             self.assertIn("健檢失敗", bootstrap_calls[0])
+
+
+class TestBootstrapIncompleteMarker(DevStartTestCase):
+    """MUST FIX #2 迴歸測試：Architect 發現 venv 建立成功但 pip install 失敗時
+    （tools/bootstrap.sh 用 set -euo pipefail，兩步驟獨立），bootstrap 回傳非 0
+    → main() 跳過 step_finalize()，狀態檔不寫入。使用者重跑時 state={}（prev=None）
+    但 .venv/bin/python 已存在 → 過去只做 _venv_healthy()（只驗證 python --version
+    能跑，不驗證套件是否裝好）就沿用，把「其實半殘」的 venv 靜默漂白成功。
+    修復後：bootstrap 失敗且 .venv 已建立時寫入哨兵；下次即使健檢通過，哨兵
+    存在也要視同壞損、改走正常 bootstrap 路徑。
+    """
+
+    def test_partial_failure_leaves_marker_and_forces_rebootstrap_next_run(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            venv_python = root / ".venv" / "bin" / "python"
+
+            def fake_stream_partial_failure(_cmd, on_start=None, **_kwargs):
+                # 模擬 tools/bootstrap.sh 的真實行為：venv 建立成功（bin/python
+                # 出現）但後段 pip install 失敗，整體 bootstrap 回傳非 0。哨兵
+                # 邏輯寫在 _run_bootstrap() 內部，故這裡改 mock 更底層的
+                # _stream()，讓真正的 _run_bootstrap() 執行（含哨兵讀寫）。
+                venv_python.parent.mkdir(parents=True, exist_ok=True)
+                venv_python.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+                venv_python.chmod(0o755)
+                return 1
+
+            with mock.patch.object(dev_start, "ROOT", root), \
+                 mock.patch.object(dev_start, "LOCK_FILE", root / ".dev_start.lock"), \
+                 mock.patch.object(dev_start, "_ensure_venv_shape", return_value="missing"), \
+                 mock.patch.object(dev_start, "_deps_hash", return_value="h"), \
+                 mock.patch.object(dev_start, "_stream",
+                                    side_effect=fake_stream_partial_failure):
+                first_ok = dev_start.step_venv("mac", {}, force=False)
+
+            self.assertFalse(first_ok, "bootstrap 失敗時 step_venv 應回傳 False")
+            marker = root / ".venv" / dev_start._BOOTSTRAP_INCOMPLETE_MARKER
+            self.assertTrue(marker.is_file(), "bootstrap 部分失敗後哨兵應保留在 .venv 內")
+
+            # main() 會在 ok=False 時跳過 step_finalize()，狀態檔不寫入
+            # → 下次重跑時 state 仍是 {}（prev=None），但 .venv/bin/python 已存在
+            # → _ensure_venv_shape() 會回傳 "ok"（本平台直譯器存在）。
+            dev_start.WARNINGS.clear()
+            dev_start.SUMMARY.clear()
+            second_bootstrap_calls = []
+
+            def fake_run_bootstrap_second(_now, reason, on_start=None):
+                second_bootstrap_calls.append(reason)
+                dev_start._clear_bootstrap_incomplete(root / ".venv")
+                return True
+
+            with mock.patch.object(dev_start, "ROOT", root), \
+                 mock.patch.object(dev_start, "LOCK_FILE", root / ".dev_start.lock"), \
+                 mock.patch.object(dev_start, "_ensure_venv_shape", return_value="ok"), \
+                 mock.patch.object(dev_start, "_deps_hash", return_value="h"), \
+                 mock.patch.object(dev_start, "_venv_python", return_value=venv_python), \
+                 mock.patch.object(dev_start, "_write_origin_marker"), \
+                 mock.patch.object(dev_start, "_run_bootstrap",
+                                    side_effect=fake_run_bootstrap_second):
+                second_ok = dev_start.step_venv("mac", {}, force=False)
+
+            self.assertTrue(second_ok)
+            self.assertEqual(len(second_bootstrap_calls), 1,
+                              "哨兵殘留時，第二次呼叫應觸發重新 bootstrap，"
+                              "而非誤判『既有 .venv 沿用』靜默漂白成功")
+            self.assertIn("哨兵", second_bootstrap_calls[0])
+            self.assertNotIn("沿用既有", dev_start.SUMMARY.get("venv", ""))
+
+    def test_healthy_and_no_marker_still_reuses_without_bootstrap(self):
+        """對照組：健檢通過且無哨兵殘留時，仍應維持原行為（沿用既有 .venv，
+        不因本輪新增的哨兵檢查而誤觸發不必要的重裝）。"""
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            venv_python = root / ".venv" / "bin" / "python"
+            venv_python.parent.mkdir(parents=True)
+            venv_python.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+            venv_python.chmod(0o755)
+            bootstrap_calls = []
+
+            with mock.patch.object(dev_start, "ROOT", root), \
+                 mock.patch.object(dev_start, "LOCK_FILE", root / ".dev_start.lock"), \
+                 mock.patch.object(dev_start, "_ensure_venv_shape", return_value="ok"), \
+                 mock.patch.object(dev_start, "_deps_hash", return_value="h"), \
+                 mock.patch.object(dev_start, "_venv_python", return_value=venv_python), \
+                 mock.patch.object(dev_start, "_run_bootstrap",
+                                    side_effect=lambda *a, **k: bootstrap_calls.append(a) or True):
+                ok = dev_start.step_venv("mac", {}, force=False)
+
+            self.assertTrue(ok)
+            self.assertEqual(bootstrap_calls, [], "無哨兵殘留時不應觸發 bootstrap")
+            self.assertIn("沿用既有", dev_start.SUMMARY.get("venv", ""))
+
+
+class TestRootLevelBootstrapIncompleteMarker(DevStartTestCase):
+    """MUST FIX #4 迴歸測試（Architect 複審發現，門檻遠低於原本描述的 P1）：
+    首次建置期間，最普通的 Ctrl-C 會讓 SIGINT 同時打中 dev_start.py 本體與
+    bootstrap 子行程（前景 process group），dev_start.py 立即死亡，
+    `_run_bootstrap()` 內 `rc = _stream(...)` 之後的「rc!=0 補寫哨兵」程式碼
+    永遠執行不到——過去 `.venv` 內部哨兵只在 `.venv` 目錄「已存在」時才會於
+    呼叫 bootstrap 前先寫入，對「首次建置、.venv 完全不存在」這個情境完全沒有
+    防護。修復後 ROOT 層級哨兵無條件於呼叫 `_stream()` 之前落地，不受 `.venv`
+    是否存在限制、也不依賴任何「`_stream()` 之後」才執行到的程式碼。
+    """
+
+    def test_root_marker_survives_process_death_before_stream_returns(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            # 模擬「dev_start.py 本體在 bootstrap 呼叫後、還沒執行到任何後續
+            # 程式碼前就被中止」：直接呼叫 _mark_root_bootstrap_incomplete()
+            # （對應 _run_bootstrap() 呼叫 _stream() 之前的無條件寫入點），
+            # 之後不再執行任何 _run_bootstrap() 內剩餘程式碼——代表 dev_start.py
+            # 在此處已死亡（.venv 尚未建立、rc 補寫哨兵永遠執行不到）。
+            with mock.patch.object(dev_start, "ROOT", root):
+                dev_start._mark_root_bootstrap_incomplete()
+                # 模擬 bootstrap.sh 死前來得及建好 venv 目錄與可執行直譯器，
+                # 但本體已死，不會再執行到任何後續程式碼。
+                venv_python = root / ".venv" / "bin" / "python"
+                venv_python.parent.mkdir(parents=True)
+                venv_python.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+                venv_python.chmod(0o755)
+
+            marker_path = root / dev_start._BOOTSTRAP_INCOMPLETE_MARKER
+            self.assertTrue(marker_path.is_file(),
+                             "ROOT 層級哨兵應在呼叫 _stream() 之前就已落地，"
+                             "即使後續程式碼完全沒有機會執行")
+
+            # 使用者原地重跑：state={}（本體死亡時 step_finalize 從未執行到）、
+            # .venv/bin/python 已存在 → 驗證 step_venv() 不會誤判「沿用既有
+            # .venv」（過去只看 .venv 內部哨兵，該哨兵在此情境下從未被寫入）。
+            bootstrap_calls = []
+
+            def fake_run_bootstrap(_now, reason, **_kwargs):
+                bootstrap_calls.append(reason)
+                dev_start._clear_bootstrap_incomplete(root / ".venv")
+                dev_start._clear_root_bootstrap_incomplete()
+                return True
+
+            with mock.patch.object(dev_start, "ROOT", root), \
+                 mock.patch.object(dev_start, "LOCK_FILE", root / ".dev_start.lock"), \
+                 mock.patch.object(dev_start, "_ensure_venv_shape", return_value="ok"), \
+                 mock.patch.object(dev_start, "_deps_hash", return_value="h"), \
+                 mock.patch.object(dev_start, "_venv_python", return_value=venv_python), \
+                 mock.patch.object(dev_start, "_write_origin_marker"), \
+                 mock.patch.object(dev_start, "_run_bootstrap", side_effect=fake_run_bootstrap):
+                ok = dev_start.step_venv("mac", {}, force=False)
+
+            self.assertTrue(ok)
+            self.assertEqual(len(bootstrap_calls), 1,
+                              "ROOT 層級哨兵殘留時，應觸發重新 bootstrap，"
+                              "而非誤判『沿用既有 .venv』回報虛假成功")
+            self.assertIn("哨兵", bootstrap_calls[0])
+            self.assertNotIn("沿用既有", dev_start.SUMMARY.get("venv", ""))
+
+    def test_healthy_and_no_root_marker_still_reuses_without_bootstrap(self):
+        """對照組：健檢通過且 ROOT 層級哨兵不存在時，仍應維持原行為（沿用既有
+        .venv，不因本輪新增的檢查而誤觸發不必要的重裝）。"""
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            venv_python = root / ".venv" / "bin" / "python"
+            venv_python.parent.mkdir(parents=True)
+            venv_python.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+            venv_python.chmod(0o755)
+            bootstrap_calls = []
+
+            with mock.patch.object(dev_start, "ROOT", root), \
+                 mock.patch.object(dev_start, "LOCK_FILE", root / ".dev_start.lock"), \
+                 mock.patch.object(dev_start, "_ensure_venv_shape", return_value="ok"), \
+                 mock.patch.object(dev_start, "_deps_hash", return_value="h"), \
+                 mock.patch.object(dev_start, "_venv_python", return_value=venv_python), \
+                 mock.patch.object(dev_start, "_run_bootstrap",
+                                    side_effect=lambda *a, **k: bootstrap_calls.append(a) or True):
+                ok = dev_start.step_venv("mac", {}, force=False)
+
+            self.assertTrue(ok)
+            self.assertEqual(bootstrap_calls, [], "無 ROOT 層級哨兵殘留時不應觸發 bootstrap")
+            self.assertIn("沿用既有", dev_start.SUMMARY.get("venv", ""))
+
+
+class TestRunBootstrapWiresRootMarkerBeforeStream(DevStartTestCase):
+    """MUST FIX B（QA 複審發現的測試覆蓋缺口）：既有
+    `TestRootLevelBootstrapIncompleteMarker` 都是直接呼叫
+    `_mark_root_bootstrap_incomplete()` 手動模擬「哨兵已經落地」的終態，從未
+    驗證 `_run_bootstrap()` 本身真的有在呼叫 `_stream()` 之前無條件呼叫這個
+    函式——QA 把 `_run_bootstrap()` 裡那行呼叫拿掉後，全套既有測試零失敗，
+    證實這是真實的覆蓋盲區（只驗證了消費端/讀取端行為，沒驗證生產端接線）。
+
+    本測試 mock 掉 `_stream()`，讓它在被呼叫的當下記錄「此刻 ROOT 層級哨兵
+    是否已落地」，直接呼叫真正的 `_run_bootstrap()`（不是 fake），證明生產端
+    接線順序正確：哨兵先落地、才開始跑 bootstrap（而不是事後才補寫）。
+    """
+
+    def test_root_marker_present_at_the_moment_stream_is_invoked(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            marker_present_at_call_time = []
+
+            def fake_stream(_cmd, on_start=None, **_kwargs):
+                marker_present_at_call_time.append(
+                    dev_start._root_bootstrap_incomplete_marker_present())
+                return 0
+
+            with mock.patch.object(dev_start, "ROOT", root), \
+                 mock.patch.object(dev_start, "_stream", side_effect=fake_stream):
+                ok = dev_start._run_bootstrap("mac", "測試原因")
+
+            self.assertTrue(ok)
+            self.assertEqual(len(marker_present_at_call_time), 1,
+                              "_stream() 應被 _run_bootstrap() 呼叫恰好一次")
+            self.assertTrue(
+                marker_present_at_call_time[0],
+                "_run_bootstrap() 必須在呼叫 _stream() 之前就無條件寫入 ROOT 層級"
+                "哨兵——這是唯一能涵蓋『dev_start.py 本體被 Ctrl-C 打死、_stream()"
+                "永遠不會返回』情境的落地點，不能只驗證讀取端（哨兵存在時的後續"
+                "行為）而不驗證寫入時機本身")
+
+    def test_root_marker_absent_before_run_bootstrap_called_at_all(self):
+        """對照組：_run_bootstrap() 被呼叫之前，哨兵不應無中生有地存在——確保
+        上一個測試的「哨兵存在」斷言真的是 _run_bootstrap() 造成的，而非測試
+        環境殘留或其他副作用。"""
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            with mock.patch.object(dev_start, "ROOT", root):
+                self.assertFalse(dev_start._root_bootstrap_incomplete_marker_present())
+
+
+class TestRunBootstrapPassesNewProcessGroupToStream(DevStartTestCase):
+    """MUST FIX 1（QA 第四輪複審發現的測試覆蓋缺口）：既有涉及 process group
+    語意的測試（`TestBootstrapProcessGroupSurvivesDirectChildKill`、
+    `TestNormalBootstrapFlowUnaffectedByProcessGroupChange` 等）都是 mock 掉
+    `_stream()` 並在假實作裡『自己』手動設定 `start_new_session=True`，從未
+    驗證 production `_run_bootstrap()` 本身是否真的把 `new_process_group=True`
+    傳給 `_stream()`——QA 把 `_run_bootstrap()` 裡那個實參改成 `False` 後，
+    92 個既有測試零失敗，證實這是真實的覆蓋盲區（只驗證了消費端/假實作行為，
+    沒驗證生產端接線本身）。
+
+    本測試直接 mock `_stream()`（單純記錄呼叫參數、不用假實作模擬效果），
+    呼叫真正的 `_run_bootstrap()`，斷言傳給 `_stream()` 的呼叫確實包含
+    `new_process_group=True`。
+    """
+
+    def test_run_bootstrap_passes_new_process_group_true(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            with mock.patch.object(dev_start, "ROOT", root), \
+                 mock.patch.object(dev_start, "_stream", return_value=0) as mock_stream:
+                ok = dev_start._run_bootstrap("mac", "測試原因")
+
+            self.assertTrue(ok)
+            mock_stream.assert_called_once()
+            _, call_kwargs = mock_stream.call_args
+            self.assertIn(
+                "new_process_group", call_kwargs,
+                "_run_bootstrap() 呼叫 _stream() 時必須明確傳遞 new_process_group")
+            self.assertTrue(
+                call_kwargs["new_process_group"],
+                "_run_bootstrap() 必須把 new_process_group=True 傳給 _stream()，"
+                "否則 bootstrap 子行程不會獨立成新 process group，Ctrl-C 訊號轉發"
+                "（_forward_signal_to_bootstrap_group）與 step_venv() 的 killpg "
+                "存活判斷都會完全失效卻無法被任何既有測試發現")
+
+
+class TestNowLabelPlatformMapping(DevStartTestCase):
+    """MUST FIX #4c：QA 用 bug-injection 重現——把 win32→"windows"／darwin→"mac"
+    兩支互換後現有 54 個測試全過。_now_label() 是「跨平台自動偵測」整支工具
+    最根本的函式（決定走 mac/windows/linux 哪個分支），過去完全沒有直接測試。
+    """
+
+    def test_win32_maps_to_windows(self):
+        with mock.patch.object(sys, "platform", "win32"):
+            self.assertEqual(dev_start._now_label(), "windows")
+
+    def test_darwin_maps_to_mac(self):
+        with mock.patch.object(sys, "platform", "darwin"):
+            self.assertEqual(dev_start._now_label(), "mac")
+
+    def test_other_platform_maps_to_linux(self):
+        with mock.patch.object(sys, "platform", "linux"):
+            self.assertEqual(dev_start._now_label(), "linux")
+
+
+class TestStepSwitchCacheCleanup(DevStartTestCase):
+    """MUST FIX #4a：QA 用 bug-injection 重現——把 `if not env_changed:` 反轉成
+    `if env_changed:` 後現有 54 個測試全過。用真實 tmp 目錄建立假的
+    .pytest_cache/.ruff_cache（含 symlink 與一般目錄兩種情況），驗證
+    env_changed=True 時確實被清除、env_changed=False 時確實不動——絕不觸碰
+    這個 repo 真正的快取目錄，全程沙盒化。
+    """
+
+    def test_env_changed_removes_cache_dir_and_symlink(self):
+        with tempfile.TemporaryDirectory() as td:
+            base = Path(td)
+            real_target = base / "real-target"
+            real_target.mkdir()
+            (real_target / "keep.txt").write_text("keep", encoding="utf-8")
+
+            pytest_cache = base / ".pytest_cache"
+            pytest_cache.mkdir()
+            (pytest_cache / "marker.txt").write_text("x", encoding="utf-8")
+
+            ruff_cache_link = base / ".ruff_cache"
+            ruff_cache_link.symlink_to(real_target, target_is_directory=True)
+
+            with mock.patch.object(dev_start, "ROOT", base), \
+                 mock.patch.object(dev_start, "_CACHE_BASES", (base,)):
+                dev_start.step_switch(env_changed=True)
+
+            self.assertFalse(pytest_cache.exists(), "跨平台切換時應清除 .pytest_cache 目錄")
+            self.assertFalse(
+                ruff_cache_link.exists() or ruff_cache_link.is_symlink(),
+                "跨平台切換時應清除 .ruff_cache symlink 本身")
+            self.assertTrue(real_target.is_dir(), "symlink 清除不應波及其指向的真實目錄內容")
+            self.assertTrue((real_target / "keep.txt").is_file())
+
+    def test_env_unchanged_does_not_touch_cache_dirs(self):
+        with tempfile.TemporaryDirectory() as td:
+            base = Path(td)
+            pytest_cache = base / ".pytest_cache"
+            pytest_cache.mkdir()
+            marker = pytest_cache / "marker.txt"
+            marker.write_text("keep-me", encoding="utf-8")
+
+            with mock.patch.object(dev_start, "ROOT", base), \
+                 mock.patch.object(dev_start, "_CACHE_BASES", (base,)):
+                dev_start.step_switch(env_changed=False)
+
+            self.assertTrue(pytest_cache.is_dir(), "無跨平台切換時不應清除快取")
+            self.assertEqual(marker.read_text(encoding="utf-8"), "keep-me")
+
+
+class TestStepPlatformLongpaths(DevStartTestCase):
+    """MUST FIX #4b：QA 用 bug-injection 重現——把 `if lp != "true":` 反轉成
+    `if lp == "true":` 後現有 54 個測試全過。用真實 git tmp repo 驗證：
+    core.longpaths 尚未設為 true 時會被設定、已經是 true 時不會重複觸發設定。
+    """
+
+    @staticmethod
+    def _make_repo(base: Path) -> Path:
+        repo = base / "repo"
+        repo.mkdir()
+        subprocess.run(["git", "init", "--quiet"], cwd=str(repo), check=True)
+        subprocess.run(["git", "config", "user.email", "test@example.com"],
+                        cwd=str(repo), check=True)
+        subprocess.run(["git", "config", "user.name", "Test"], cwd=str(repo), check=True)
+        return repo
+
+    def test_sets_longpaths_when_not_true(self):
+        with tempfile.TemporaryDirectory() as td:
+            repo = self._make_repo(Path(td))
+            with mock.patch.object(dev_start, "ROOT", repo):
+                dev_start.step_platform("windows", is_repo=True)
+            r = subprocess.run(
+                ["git", "-C", str(repo), "config", "--get", "core.longpaths"],
+                capture_output=True, text=True)
+            self.assertEqual(r.stdout.strip().lower(), "true")
+            self.assertIn("已設", dev_start.SUMMARY.get("platform", ""))
+
+    def test_does_not_reset_when_already_true(self):
+        with tempfile.TemporaryDirectory() as td:
+            repo = self._make_repo(Path(td))
+            subprocess.run(["git", "-C", str(repo), "config", "core.longpaths", "true"],
+                            check=True)
+            with mock.patch.object(dev_start, "ROOT", repo):
+                dev_start.step_platform("windows", is_repo=True)
+            self.assertEqual(dev_start.SUMMARY.get("platform"), "無需調整",
+                              "已是 true 時不應重複觸發設定")
+
+
+class TestMainIntegrationGate(DevStartTestCase):
+    """MUST FIX #4d：QA 用 bug-injection 重現——把 main() 的 `if ok:` 改成
+    `if True:` 後現有 54 個測試全過，代表 bootstrap 失敗時 step_finalize()/
+    step_hooks()/step_platform() 仍會被執行這件事完全沒有整合層級測試防護。
+    """
+
+    def test_step_venv_failure_skips_finalize_and_returns_nonzero(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            state_file = root / ".dev_env_state.json"
+            hooks_calls = []
+            platform_calls = []
+            finalize_calls = []
+
+            with mock.patch.object(dev_start, "ROOT", root), \
+                 mock.patch.object(dev_start, "STATE_FILE", state_file), \
+                 mock.patch.object(dev_start, "_git",
+                                    return_value=subprocess.CompletedProcess(
+                                        args=[], returncode=1, stdout="", stderr="")), \
+                 mock.patch.object(dev_start, "step_sync"), \
+                 mock.patch.object(dev_start, "step_switch"), \
+                 mock.patch.object(dev_start, "step_venv", return_value=False), \
+                 mock.patch.object(dev_start, "step_hooks",
+                                    side_effect=lambda *a: hooks_calls.append(a)), \
+                 mock.patch.object(dev_start, "step_platform",
+                                    side_effect=lambda *a: platform_calls.append(a)), \
+                 mock.patch.object(dev_start, "step_finalize",
+                                    side_effect=lambda *a: finalize_calls.append(a)):
+                rc = dev_start.main([])
+
+            self.assertNotEqual(rc, 0, "step_venv 失敗時 main() 應回傳非 0")
+            self.assertEqual(finalize_calls, [], "step_venv 失敗時不應呼叫 step_finalize")
+            self.assertEqual(hooks_calls, [], "step_venv 失敗時不應呼叫 step_hooks")
+            self.assertEqual(platform_calls, [], "step_venv 失敗時不應呼叫 step_platform")
+            self.assertFalse(state_file.exists(), "step_venv 失敗時狀態檔不應被寫入")
+
+    def test_step_venv_success_runs_remaining_steps(self):
+        """對照組：step_venv 成功時，後續三步驟仍應正常執行（避免只驗證失敗
+        路徑，讓『恆為 False』這類反向 mutant 也被抓到）。"""
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            state_file = root / ".dev_env_state.json"
+            hooks_calls = []
+            platform_calls = []
+            finalize_calls = []
+
+            with mock.patch.object(dev_start, "ROOT", root), \
+                 mock.patch.object(dev_start, "STATE_FILE", state_file), \
+                 mock.patch.object(dev_start, "_git",
+                                    return_value=subprocess.CompletedProcess(
+                                        args=[], returncode=1, stdout="", stderr="")), \
+                 mock.patch.object(dev_start, "step_sync"), \
+                 mock.patch.object(dev_start, "step_switch"), \
+                 mock.patch.object(dev_start, "step_venv", return_value=True), \
+                 mock.patch.object(dev_start, "step_hooks",
+                                    side_effect=lambda *a: hooks_calls.append(a)), \
+                 mock.patch.object(dev_start, "step_platform",
+                                    side_effect=lambda *a: platform_calls.append(a)), \
+                 mock.patch.object(dev_start, "step_finalize",
+                                    side_effect=lambda *a: finalize_calls.append(a)):
+                rc = dev_start.main([])
+
+            self.assertEqual(rc, 0, "step_venv 成功時 main() 應回傳 0")
+            self.assertEqual(len(finalize_calls), 1)
+            self.assertEqual(len(hooks_calls), 1)
+            self.assertEqual(len(platform_calls), 1)
+
+
+class TestMainInstallsSignalHandlerReference(DevStartTestCase):
+    """MUST FIX 2（QA 第四輪複審發現的測試覆蓋缺口）：既有
+    `TestSigintForwardsToBootstrapProcessGroup` 底下兩個測試都是自己手動呼叫
+    `signal.signal(signal.SIGINT, dev_start._forward_signal_to_bootstrap_group)`
+    模擬「已安裝好 handler」的狀態，從未透過 `main()` 走完整安裝路徑——QA 把
+    `main()`（約 1462-1463 行）安裝 handler 那兩行改裝成 `signal.SIG_DFL`（保留
+    正確的還原邏輯，不觸發任何裸崩潰）後，92 個既有測試零失敗，證實這是真實
+    的覆蓋盲區：沒有任何測試驗證 production `main()` 本身真的有做這件事。
+
+    本測試呼叫真正的 `main()`，mock 掉 `step_venv()` 讓它在被呼叫的當下（此刻
+    handler 理應已安裝、且尚未被 `finally` 還原）記錄
+    `signal.getsignal(SIGINT/SIGTERM)`，斷言兩者確實『引用等於』
+    `dev_start._forward_signal_to_bootstrap_group`——不是只驗證「裝了某個非
+    預設 handler」，而是驗證裝的正是這個函式本身。
+    """
+
+    @unittest.skipIf(os.name == "nt", "本 handler 僅在 POSIX 安裝（見 main() 內"
+                      "對應條件判斷與其 docstring）")
+    def test_main_installs_forward_signal_handler_during_step_venv(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            state_file = root / ".dev_env_state.json"
+            captured: dict = {}
+
+            def fake_step_venv(now, state, force, cross_same_flavor=False):
+                captured["sigint"] = signal.getsignal(signal.SIGINT)
+                captured["sigterm"] = signal.getsignal(signal.SIGTERM)
+                return False
+
+            old_sigint = signal.getsignal(signal.SIGINT)
+            old_sigterm = signal.getsignal(signal.SIGTERM)
+            try:
+                with mock.patch.object(dev_start, "ROOT", root), \
+                     mock.patch.object(dev_start, "STATE_FILE", state_file), \
+                     mock.patch.object(dev_start, "_git",
+                                        return_value=subprocess.CompletedProcess(
+                                            args=[], returncode=1, stdout="", stderr="")), \
+                     mock.patch.object(dev_start, "step_sync"), \
+                     mock.patch.object(dev_start, "step_switch"), \
+                     mock.patch.object(dev_start, "step_venv", side_effect=fake_step_venv), \
+                     mock.patch.object(dev_start, "step_hooks"), \
+                     mock.patch.object(dev_start, "step_platform"), \
+                     mock.patch.object(dev_start, "step_finalize"):
+                    dev_start.main([])
+            finally:
+                # main() 自身的 try/finally 理應已還原；這裡是測試層級的保險絲，
+                # 避免萬一斷言失敗中途拋出時，汙染後續其他測試的訊號狀態。
+                signal.signal(signal.SIGINT, old_sigint)
+                signal.signal(signal.SIGTERM, old_sigterm)
+
+            self.assertIn("sigint", captured, "step_venv() 應已被 main() 呼叫（測試前提）")
+            self.assertIs(
+                captured["sigint"], dev_start._forward_signal_to_bootstrap_group,
+                "main() 必須在呼叫 step_venv() 之前，把 SIGINT handler 安裝為"
+                "『真正的』_forward_signal_to_bootstrap_group 函式引用，而不只是"
+                "『裝了某個非預設 handler』")
+            self.assertIs(
+                captured["sigterm"], dev_start._forward_signal_to_bootstrap_group,
+                "main() 必須在呼叫 step_venv() 之前，把 SIGTERM handler 安裝為"
+                "『真正的』_forward_signal_to_bootstrap_group 函式引用")
+
+            self.assertEqual(
+                signal.getsignal(signal.SIGINT), old_sigint,
+                "main() 結束後必須把 SIGINT handler 還原成呼叫前的狀態")
+            self.assertEqual(
+                signal.getsignal(signal.SIGTERM), old_sigterm,
+                "main() 結束後必須把 SIGTERM handler 還原成呼叫前的狀態")
+
+
+class TestEnsureVenvShapeBothMissingActuallyRemoves(DevStartTestCase):
+    """SHOULD FIX #6a：_ensure_venv_shape() 「兩平台直譯器皆缺 → 移除重建」
+    分支（壞損 .venv，如 symlink 斷裂）過去只驗證回傳值是 "missing"，沒有
+    斷言磁碟上的壞損目錄真的被刪除。
+    """
+
+    def test_broken_venv_directory_is_actually_removed_from_disk(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            venv = root / ".venv"
+            # 兩平台直譯器皆缺：既非 posix(bin/python) 也非 windows(Scripts/python.exe)
+            (venv / "lib").mkdir(parents=True)
+            (venv / "lib" / "leftover.txt").write_text("junk", encoding="utf-8")
+
+            with mock.patch.object(dev_start, "ROOT", root):
+                shape = dev_start._ensure_venv_shape("mac")
+
+            self.assertEqual(shape, "missing")
+            self.assertFalse(venv.exists(), "壞損 .venv 應已從磁碟實際移除，而非只回傳狀態字串")
+
+
+class TestGitTimeoutExpired(DevStartTestCase):
+    """SHOULD FIX #6b：_git() 的 TimeoutExpired 例外處理分支零測試覆蓋。
+    驗證逾時時回傳 rc=124（不是被誤判成功的 rc=0），避免上游呼叫端誤判
+    git 指令成功。
+    """
+
+    def test_timeout_expired_returns_rc_124(self):
+        with mock.patch.object(
+                dev_start.subprocess, "run",
+                side_effect=subprocess.TimeoutExpired(cmd="git", timeout=60)):
+            result = dev_start._git("fetch", "origin")
+        self.assertEqual(result.returncode, 124)
+        self.assertNotEqual(result.returncode, 0, "逾時不可被誤判為成功")
 
 
 if __name__ == "__main__":

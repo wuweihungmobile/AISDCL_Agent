@@ -42,8 +42,12 @@ import os
 import platform as _platform
 import re
 import shutil
+import signal
 import subprocess
 import sys
+import threading
+import time
+import tomllib
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Callable
@@ -91,28 +95,129 @@ def _git(*args: str, timeout: int = 60) -> subprocess.CompletedProcess:
             stdout="", stderr=f"git {' '.join(args)} 逾時（>{timeout}s）")
 
 
-def _stream(cmd: list[str], on_start: Callable[[int], None] | None = None) -> int:
+def _stream(cmd: list[str], on_start: Callable[[int], None] | None = None,
+            new_process_group: bool = False) -> int:
     """即時輸出地執行外部指令（bootstrap / pull / hooks 安裝）。
 
     flush：stdout 為 pipe（CI log）時 Python 端有緩衝，不 flush 會讓子行程
     輸出插隊到步驟標頭之前，破壞取證順序。
     刻意不設 timeout：pull/bootstrap 屬互動長工（合法耗時數分鐘），任意上限
-    會誤殺；掛住時使用者可 Ctrl-C，且發生於 state 寫回之前（重入安全）。
+    會誤殺；掛住時使用者可 Ctrl-C（見 `_forward_signal_to_bootstrap_group`
+    對 `new_process_group=True` 呼叫的訊號轉發配套），且發生於 state 寫回之前
+    （重入安全）。
     改用 Popen（而非 subprocess.run）：on_start 讓呼叫端在子行程一建立就能拿到
     其「真實」PID（Architect + SA 複審 P1：venv bootstrap 互斥鎖過去只記錄
     orchestrator 自己的 PID，orchestrator 被 SIGKILL 後子行程變孤兒仍會繼續寫
     .venv，鎖對孤兒毫無防護——鎖真正該追蹤的存活對象是實際執行 bootstrap 的
     子行程，而不是呼叫它的 dev_start.py 本體）。
+
+    `new_process_group`（MUST FIX A，Architect 第三輪複審用真實驗證證明「事後
+    ppid 回溯」在因果上必然太晚後的根本重做）：僅 POSIX 生效（`os.name != "nt"`
+    時傳遞 `start_new_session=True`，令子行程呼叫 `setsid()` 成為新 session 的
+    group leader，其自身 PID 同時即為 process group id）。之後不論該子行程
+    fork 出多少層、多少個孫行程，只要仍有任一成員存活，`os.killpg(pgid, 0)`
+    就會成功——不受「父行程死亡時子行程 ppid 被核心過繼給 subreaper」影響
+    （過繼只改變 ppid，不改變 process group membership）。Windows 不支援
+    `start_new_session`（Python `subprocess` 文件明載此參數為 POSIX-only，
+    Windows 上傳入非假值會拋 `ValueError`），故明確以 `os.name` 守門，不可
+    無條件傳遞。呼叫端須自行處理 Ctrl-C 轉發配套（見模組層級
+    `_ACTIVE_BOOTSTRAP_PGID` / `_forward_signal_to_bootstrap_group`）——
+    `start_new_session=True` 會讓子行程脫離終端機 foreground process group，
+    否則 Ctrl-C（SIGINT 只送到 foreground process group）不會再傳到它。
     """
     print(f"    $ {' '.join(cmd)}", flush=True)
+    popen_kwargs: dict = {"cwd": str(ROOT)}
+    if new_process_group and os.name != "nt":
+        popen_kwargs["start_new_session"] = True
     try:
-        proc = subprocess.Popen(cmd, cwd=str(ROOT))
+        proc = subprocess.Popen(cmd, **popen_kwargs)
     except FileNotFoundError:
         print(f"    ❌ 找不到指令：{cmd[0]}", file=sys.stderr)
         return 127
+    except OSError as e:
+        # P2（SA 複審發現）：FileNotFoundError 只涵蓋「指令不存在」。當
+        # new_process_group=True 且執行環境限制 setsid()（如受限 seccomp/
+        # 沙盒設定拒絕該系統呼叫）時，Popen(..., start_new_session=True) 會在
+        # 子行程端呼叫失敗、經內部 pipe 回報，父行程端拋出 PermissionError
+        # （OSError 子類別，非 FileNotFoundError）——若不接住會直接向上傳播，
+        # 讓 _run_bootstrap()/step_venv()/main() 裸崩潰。FileNotFoundError 本身
+        # 也是 OSError 子類別，但因已在上一個 except 分支處理，Python 依例外
+        # 子句宣告順序比對、先到者優先匹配，不會落到這裡。
+        print(f"    ❌ 執行指令失敗（{cmd[0]}）：{e}", file=sys.stderr)
+        return 126
     if on_start is not None:
         on_start(proc.pid)
     return proc.wait()
+
+
+_ACTIVE_BOOTSTRAP_PGID: int | None = None
+
+
+def _set_active_bootstrap_pgid(pgid: int | None) -> None:
+    """記錄目前是否有正在執行的 bootstrap process group（MUST FIX A 配套：
+    Ctrl-C 訊號轉發）。呼叫端須在 bootstrap 子行程啟動當下設定，並在
+    `_run_bootstrap()` 返回（不論成功/失敗/例外）後立刻清除，`try/finally`
+    包住，避免遺留一個「其實已死」的 pgid 讓下次無關的 Ctrl-C 誤轉發。"""
+    global _ACTIVE_BOOTSTRAP_PGID
+    _ACTIVE_BOOTSTRAP_PGID = pgid
+
+
+def _forward_signal_to_bootstrap_group(signum: int, frame) -> None:
+    """SIGINT/SIGTERM handler（MUST FIX A 必要配套，POSIX only）。
+
+    背景：`_run_bootstrap()` 對 bootstrap 直接子行程呼叫
+    `Popen(..., start_new_session=True)`，使其（連同所有孫行程）脫離
+    dev_start.py 所在終端機的 foreground process group——SIGINT 只送到
+    foreground process group，使用者按 Ctrl-C 將不再自然傳到 bootstrap 樹，
+    可能讓它在背景孤兒繼續跑而使用者誤以為已中止。
+
+    本 handler 在 dev_start.py 自己收到訊號時：若目前有進行中的 bootstrap
+    process group（`_ACTIVE_BOOTSTRAP_PGID` 非 None），主動 `os.killpg()`
+    轉發 SIGTERM 給整個 group，給一段緩衝時間輪詢其是否已終止，逾時仍未終止
+    才升級 SIGKILL——之後直接 return（不拋例外）：`_stream()` 內
+    `proc.wait()` 底層的 `os.waitpid()` 依 PEP 475 在被訊號中斷、handler
+    未拋例外時會自動重試，此時直接子行程已因剛才的轉發而終止（或即將終止），
+    `wait()` 很快就會以「被訊號終止」的負值 rc 正常返回——不需要額外拋例外
+    打斷呼叫堆疊，既有的 rc!=0 失敗處理（哨兵/警告/摘要）可原樣沿用。
+
+    沒有進行中的 bootstrap 時，回退為 Python 的預設行為：SIGINT 呼叫
+    `signal.default_int_handler()`（即拋出 `KeyboardInterrupt`，與未安裝本
+    handler 時完全一致，不影響 step_sync/step_hooks 等其他步驟原有的 Ctrl-C
+    行為——那些步驟的子行程未使用 `start_new_session`，仍與 dev_start.py
+    同處一個 foreground process group，終端機 Ctrl-C 本就會直接送達，不需要
+    本 handler 介入）；SIGTERM 則暫時恢復預設處置（終止行程）後對自己重新
+    送出同一訊號，比照「未安裝本 handler 時的預設行為」，不擅自改變語意。
+    """
+    if _ACTIVE_BOOTSTRAP_PGID is None:
+        if signum == signal.SIGINT:
+            signal.default_int_handler(signum, frame)
+            return
+        signal.signal(signal.SIGTERM, signal.SIG_DFL)
+        os.kill(os.getpid(), signal.SIGTERM)
+        return
+
+    pgid = _ACTIVE_BOOTSTRAP_PGID
+    try:
+        signame = signal.Signals(signum).name
+    except ValueError:
+        signame = str(signum)
+    print(f"\n    ⚠️  收到中止訊號（{signame}）— 轉發至 bootstrap process group"
+          f"（pgid={pgid}），避免其在背景孤兒繼續執行 …", file=sys.stderr)
+    try:
+        os.killpg(pgid, signal.SIGTERM)
+    except OSError:
+        pass
+    deadline = time.monotonic() + 5
+    while time.monotonic() < deadline:
+        try:
+            os.killpg(pgid, 0)
+        except OSError:
+            return  # 已全數終止（ProcessLookupError）或無法判斷，不再升級
+        time.sleep(0.2)
+    try:
+        os.killpg(pgid, signal.SIGKILL)
+    except OSError:
+        pass
 
 
 def _now_label() -> str:
@@ -201,6 +306,81 @@ def _read_origin_marker(venv_dir: Path) -> str | None:
     return None
 
 
+_BOOTSTRAP_INCOMPLETE_MARKER = ".dev_venv_bootstrap_incomplete"
+
+
+def _mark_bootstrap_incomplete(venv_dir: Path) -> None:
+    """標記「這份 .venv 的 bootstrap 尚未完整成功」（P1，四方複審共同發現）。
+
+    背景：tools/bootstrap.sh 用 `set -euo pipefail`，`python -m venv .venv` 與
+    `pip install` 是獨立步驟——venv 建立成功但 pip install 失敗（常見失敗模式：
+    網路中斷）時，整體 bootstrap 回傳非 0，但 .venv 內已有一顆可執行的
+    python。下次執行若落入「既有 .venv、無狀態紀錄」分支，過去只做
+    `_venv_healthy()`（僅驗證 python --version 能跑，完全不驗證套件是否真的
+    裝好）就會把這份「其實半殘」的 venv 誤判為完整、印出「✅ 成功」，並用
+    `_write_origin_marker()` 標記為本平台正常建置，連帶污染未來的跨機信任判斷。
+    """
+    try:
+        (venv_dir / _BOOTSTRAP_INCOMPLETE_MARKER).write_text("incomplete", encoding="utf-8")
+    except OSError as e:
+        _warn(f"寫入 bootstrap 未完成哨兵失敗（{e}）— 下次可能誤判此 .venv 為完整")
+
+
+def _clear_bootstrap_incomplete(venv_dir: Path) -> None:
+    try:
+        (venv_dir / _BOOTSTRAP_INCOMPLETE_MARKER).unlink()
+    except OSError:
+        pass  # 不存在或刪除失敗皆不影響：本次已成功，下次判斷改看 _venv_healthy()
+
+
+def _bootstrap_incomplete_marker_present(venv_dir: Path) -> bool:
+    return _safe_is_file(venv_dir / _BOOTSTRAP_INCOMPLETE_MARKER)
+
+
+def _root_bootstrap_incomplete_marker() -> Path:
+    """ROOT 層級（與 LOCK_FILE / STATE_FILE 同一層級）哨兵路徑（MUST FIX #4，
+    Architect 複審發現）。刻意用函式而非模組層級凍結常數：`ROOT` 本身可能被
+    測試 monkeypatch（`mock.patch.object(dev_start, "ROOT", ...)`），用函式讓
+    每次呼叫都重新讀取當下的 ROOT，測試沙盒化才能正確生效、不誤寫真實 repo。
+    """
+    return ROOT / _BOOTSTRAP_INCOMPLETE_MARKER
+
+
+def _mark_root_bootstrap_incomplete() -> None:
+    """在 ROOT 層級無條件標記「本次 bootstrap 尚未完整成功」（MUST FIX #4，
+    Architect 用真實 SIGINT 實驗發現）。
+
+    背景：`_mark_bootstrap_incomplete(venv_dir)` 只在 `.venv` 目錄「已存在」時
+    才會於呼叫 bootstrap 前先寫入，對「首次建置、.venv 完全不存在」這個情境
+    完全沒有防護——首次建置期間使用者按下最普通的 Ctrl-C，SIGINT 會送到整個
+    前景 process group，同時打中 dev_start.py 本體與 bootstrap 子行程，
+    dev_start.py 幾乎與 bootstrap 同時死亡：`_run_bootstrap()` 內
+    `rc = _stream(...)` 之後的「rc!=0 補寫哨兵」程式碼永遠執行不到。使用者
+    原地重跑：`.venv/bin/python` 已存在（bootstrap 死前建好的）、無任何哨兵、
+    `state={}` → 落入 `prev is None` 分支 → 健檢通過（直譯器能跑，只是套件
+    沒裝完）→ 誤判「沿用既有 .venv」、回報虛假成功。
+
+    本函式必須在 `_run_bootstrap()` 呼叫 `_stream()` 之前、不受 `.venv` 是否
+    已存在限制、無條件呼叫，才能在行程被訊號中止的情況下仍留下紀錄——不依賴
+    任何「_stream() 之後」才執行到的程式碼。
+    """
+    try:
+        _root_bootstrap_incomplete_marker().write_text("incomplete", encoding="utf-8")
+    except OSError as e:
+        _warn(f"寫入 ROOT 層級 bootstrap 未完成哨兵失敗（{e}）— 下次可能誤判本次整備已完整")
+
+
+def _clear_root_bootstrap_incomplete() -> None:
+    try:
+        _root_bootstrap_incomplete_marker().unlink()
+    except OSError:
+        pass  # 不存在或刪除失敗皆不影響：本次已成功，下次判斷改看 _venv_healthy()
+
+
+def _root_bootstrap_incomplete_marker_present() -> bool:
+    return _safe_is_file(_root_bootstrap_incomplete_marker())
+
+
 def _venv_healthy(py: Path) -> tuple[bool, str]:
     """對候選直譯器做可執行性健檢（P1-1 根本解②：即使標記機制失準仍能兜底）。
 
@@ -257,36 +437,61 @@ def _load_state() -> dict:
         return {}
 
 
-_TOML_SECTION_RE = re.compile(r"^\[([\w.\-]+)\]\s*$")
-_TOML_DEPS_SECTIONS = {"project", "project.optional-dependencies", "build-system"}
-_TOML_NON_DEPS_KEY_RE = re.compile(r"^\s*(name|version|description|requires-python)\s*=")
+def _toml_deps_snapshot(text: str, source: Path) -> str:
+    """解析 pyproject.toml，只萃取與依賴安裝直接相關的結構化內容並序列化為
+    穩定字串，取代先前手寫正則逐行掃描（P1：QA 用實際函式呼叫重現三個正則
+    邊角案例——①表頭後接行內註解（如 `[project]  # comment`）時，正則要求
+    整行精確符合 `[section]` 結尾只能是空白，不匹配時 section 沿用前一個值，
+    導致 [project] 底下真正的依賴宣告被完全排除在 hash 之外且零警告；
+    ②`[[table.array]]` 巢狀陣列表同樣不匹配表頭正則，內容被誤判歸入前一個
+    區段；③多行三引號字串（如 description 欄位用三個雙引號包住的多行文字）
+    的續行內容會被當成一般內容誤納入 hash，純文案異動誤觸發重裝。tomllib 是標準庫的正確
+    TOML parser，天生不受這三者影響，故直接取代手寫正則掃描。
 
-
-def _deps_relevant_lines(text: str, scoped: bool) -> list[str]:
-    """過濾出與依賴宣告直接相關的行（P2：縮小 _deps_hash 誤觸發面）。
-
-    整檔位元組雜湊對註解/版本字串/[tool.ruff] 等無關編輯過度敏感，觸發不
-    必要的整包重裝。scoped=True（如 pyproject.toml）時只保留 [project] /
-    [project.optional-dependencies] / [build-system]（QA/Architect/SD 四方
-    複審共同確認的殘留缺口：build-backend/requires 變動先前不觸發重裝）
-    區段內容，並剔除該區段內與依賴無關的純中繼資料鍵（name/version/
-    description/requires-python）；scoped=False（如純 requirements.txt）
-    整檔皆視為依賴宣告。兩種情形皆濾掉註解/空白行。
+    只保留 project.dependencies／project.optional-dependencies／build-system
+    三塊與依賴安裝直接相關的內容（其餘如 name/version/description/
+    requires-python 等中繼資料、[tool.*] 等一律不納入，改用白名單精確萃取，
+    不再依賴黑名單排除法——不會漏未來新增的中繼資料 key）。
+    解析失敗（語法錯誤）時退回「整檔視為相關」並警告：寧可誤觸發重裝，也
+    不可像正則方案一樣悄悄漏掉真正的依賴變動（fail loud 優先於 fail silent）。
     """
-    section: str | None = None
+    # MUST FIX #1（SD 複審發現的 P1 迴歸）：先前只把 tomllib.loads() 包在
+    # try/except 裡，但後面的 project.get(...) 與 json.dumps(...) 完全沒有例外
+    # 防護。以下兩種語法合法（tomllib 不會拋 TOMLDecodeError）的內容會讓整支
+    # 工具裸崩潰：①依賴欄位誤填 TOML 原生日期型別（如 `dependencies =
+    # [2024-01-01]`），tomllib 解析成 datetime.date，json.dumps 無法序列化
+    # （TypeError）；②[project] 誤寫成純量賦值（如 `project = "x"`），
+    # data.get("project", {}) 拿到字串而非 dict，project.get(...) 裸拋
+    # AttributeError。故把 tomllib.loads() 到 json.dumps() 全部收攏進同一個
+    # try 區塊，任何解析/結構/序列化錯誤都同樣退回 <invalid-toml> 並警告
+    # （fail loud 優先於 fail silent，與既有 TOMLDecodeError 分支一致）。
+    try:
+        data = tomllib.loads(text)
+        project = data.get("project", {})
+        extracted = {
+            "project.dependencies": project.get("dependencies"),
+            "project.optional-dependencies": project.get("optional-dependencies"),
+            "build-system": data.get("build-system"),
+        }
+        return json.dumps(extracted, sort_keys=True, ensure_ascii=False)
+    except tomllib.TOMLDecodeError as e:
+        _warn(f"{source.name} 非合法 TOML（{e}）— 依賴 hash 改用整檔內容，"
+              f"可能誤觸發重裝，請修正語法")
+        return f"<invalid-toml>{text}"
+    except (TypeError, AttributeError) as e:
+        _warn(f"{source.name} TOML 內容形狀不符預期（{e}）— 依賴 hash 改用整檔內容，"
+              f"可能誤觸發重裝，請修正語法")
+        return f"<invalid-toml>{text}"
+
+
+def _plain_relevant_lines(text: str) -> list[str]:
+    """純 requirements.txt 類檔案（非 TOML）：整檔皆視為依賴宣告，只濾掉
+    註解/空白行。"""
     out: list[str] = []
     for raw in text.splitlines():
         line = raw.strip()
-        if not line or line.startswith("#"):
-            continue
-        if scoped:
-            m = _TOML_SECTION_RE.match(line)
-            if m:
-                section = m.group(1)
-                continue
-            if section not in _TOML_DEPS_SECTIONS or _TOML_NON_DEPS_KEY_RE.match(line):
-                continue
-        out.append(line)
+        if line and not line.startswith("#"):
+            out.append(line)
     return out
 
 
@@ -303,9 +508,12 @@ def _deps_hash() -> str:
             _warn(f"無法讀取 {f}（{e}）— 依賴 hash 略過此檔（可能誤判為未變動）")
             h.update(b"<unreadable>")
             continue
-        for line in _deps_relevant_lines(text, scoped=(f.suffix == ".toml")):
-            h.update(line.encode("utf-8"))
-            h.update(b"\n")
+        if f.suffix == ".toml":
+            h.update(_toml_deps_snapshot(text, f).encode("utf-8"))
+        else:
+            for line in _plain_relevant_lines(text):
+                h.update(line.encode("utf-8"))
+                h.update(b"\n")
     return h.hexdigest()
 
 
@@ -512,15 +720,42 @@ def _ensure_venv_shape(now: str) -> str:
 
 def _run_bootstrap(now: str, reason: str, on_start: Callable[[int], None] | None = None) -> bool:
     print(f"    需要 bootstrap：{reason}")
+    venv_dir = ROOT / ".venv"
     if _flavor(now) == "windows":
         cmd = ["powershell", "-ExecutionPolicy", "Bypass", "-File",
                str(ROOT / "tools" / "bootstrap.ps1")]
     else:
         cmd = ["bash", str(ROOT / "tools" / "bootstrap.sh")]
-    rc = _stream(cmd, on_start=on_start)
+    # P1（四方複審共同發現）：既有 .venv 上重跑 bootstrap（如依賴變動／
+    # --force-bootstrap／健檢失敗）前先寫哨兵——涵蓋「dev_start.py 本體被強制
+    # 中止」這類比乾淨失敗（rc!=0）更難事後補救的情況。純首次建置（.venv 尚
+    # 不存在）則留待失敗後再補寫：提前在此建立 .venv 只為了放哨兵，會讓
+    # bootstrap.sh 自身「既有 .venv 但缺 bin/python」防呆條件成立而整段失敗
+    # （bootstrap.sh 對「目錄已存在」與「目錄內已有完整直譯器」不做區分）。
+    if _safe_is_dir(venv_dir):
+        _mark_bootstrap_incomplete(venv_dir)
+    # MUST FIX #4（Architect 用真實 SIGINT 實驗發現）：上面這份哨兵只在 .venv
+    # 已存在時才會落地，對「首次建置、.venv 完全不存在」時使用者按下最普通的
+    # Ctrl-C（訊號同時打中 dev_start.py 本體與 bootstrap 子行程，dev_start.py
+    # 死亡後 rc!=0 補寫哨兵永遠執行不到）完全沒有防護。ROOT 層級哨兵不受
+    # .venv 是否存在限制，無條件於呼叫 _stream() 之前落地。
+    _mark_root_bootstrap_incomplete()
+    # new_process_group=True（MUST FIX A）：僅 POSIX 生效（_stream 內以 os.name
+    # 守門），讓 bootstrap 子行程獨立成新 process group，供 step_venv() 改用
+    # os.killpg 判斷整個行程樹（含孫行程）是否仍存活；Windows 無此參數，維持
+    # 既有 _DescendantWatcher／ppid 回溯設計不變（見 step_venv 內對應分支與
+    # docstring 說明的技術依據）。
+    rc = _stream(cmd, on_start=on_start, new_process_group=True)
     if rc != 0:
         print(f"    ❌ bootstrap 失敗（rc={rc}）— 請依上方輸出排除後重跑", file=sys.stderr)
+        if _safe_is_dir(venv_dir):
+            # venv 建立成功但後段（如 pip install）失敗：留下哨兵，避免下次
+            # 沿用時被誤判為「完整可用」而靜默漂白成功。
+            _mark_bootstrap_incomplete(venv_dir)
         return False
+    if _safe_is_dir(venv_dir):
+        _clear_bootstrap_incomplete(venv_dir)
+    _clear_root_bootstrap_incomplete()
     return True
 
 
@@ -560,6 +795,161 @@ def _pid_alive(pid: int) -> bool:
     return True
 
 
+def _lock_target_alive(x: int) -> bool:
+    """判斷鎖檔中記錄的識別碼是否仍有人存活（MUST FIX A：POSIX 改用 process
+    group 追蹤後，鎖檔內同一個整數欄位隨情境橫跨兩種語意，本函式統一判斷）。
+
+    鎖檔內容橫跨本工具生命週期兩種不同語意，且無法單從數字本身分辨是哪一種：
+    ①`_acquire_bootstrap_lock()` 剛取得鎖、尚未決定是否需要 bootstrap 時，
+    寫入的是 orchestrator（dev_start.py 自己）的一般 PID——這不是它自己的
+    process group id（實測：一般由 shell job control 啟動的行程，pid 與自身
+    pgid 通常不同），只能用 `_pid_alive()` 判斷；②POSIX 上一旦真的開始執行
+    bootstrap，`step_venv()` 記錄的是其直接子行程 PID——因
+    `_stream(..., new_process_group=True)` 對其呼叫 `start_new_session=True`
+    （`setsid()`），此 PID 同時也是該 process group 的 pgid，直接子行程死亡
+    後仍可能有孫行程存活，只有 `os.killpg()` 才能正確判斷（`_pid_alive()` 對
+    已死的直接子行程只會回報 False，正是本輪要修的舊 bug）。
+
+    做法：先用 `_pid_alive()` 檢查（涵蓋①，也涵蓋②『直接子行程本身尚存活』
+    的情況）；仍判定為死時，POSIX 上再用 `os.killpg()` 補check 一次（涵蓋②
+    『直接子行程已死但 process group 內仍有孫行程存活』）。兩者任一回報存活
+    即視為存活——寧可保守誤判仍忙碌，也不可誤判陳舊而讓另一個 dev_start 搶
+    進場競態寫入，與本工具一貫的 fail-loud 安全哲學一致。
+    """
+    if _pid_alive(x):
+        return True
+    if os.name == "nt":
+        return False
+    try:
+        os.killpg(x, 0)
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True
+    except OSError:
+        return False
+    return True
+
+
+def _list_pid_ppid_pairs_windows() -> list[tuple[int, int]] | None:
+    """列舉 Windows 系統目前所有行程的 (pid, ppid) 對照（同上，P1）。
+
+    比照 _pid_alive() 現有的 ctypes + kernel32 風格：不新增外部依賴、不 shell
+    out 到 wmic/PowerShell，改用 CreateToolhelp32Snapshot + Process32First/Next
+    列舉全系統行程建立對照表。
+    """
+    th32cs_snapprocess = 0x00000002
+
+    class _PROCESSENTRY32(ctypes.Structure):
+        _fields_ = [
+            ("dwSize", ctypes.c_uint32),
+            ("cntUsage", ctypes.c_uint32),
+            ("th32ProcessID", ctypes.c_uint32),
+            ("th32DefaultHeapID", ctypes.c_void_p),
+            ("th32ModuleID", ctypes.c_uint32),
+            ("cntThreads", ctypes.c_uint32),
+            ("th32ParentProcessID", ctypes.c_uint32),
+            ("pcPriClassBase", ctypes.c_long),
+            ("dwFlags", ctypes.c_uint32),
+            ("szExeFile", ctypes.c_char * 260),
+        ]
+
+    kernel32 = ctypes.windll.kernel32
+    try:
+        snapshot = kernel32.CreateToolhelp32Snapshot(th32cs_snapprocess, 0)
+    except OSError:
+        return None
+    if not snapshot or snapshot == -1:
+        return None
+    pairs: list[tuple[int, int]] = []
+    try:
+        entry = _PROCESSENTRY32()
+        entry.dwSize = ctypes.sizeof(_PROCESSENTRY32)
+        if kernel32.Process32First(snapshot, ctypes.pointer(entry)):
+            while True:
+                pairs.append((entry.th32ProcessID, entry.th32ParentProcessID))
+                if not kernel32.Process32Next(snapshot, ctypes.pointer(entry)):
+                    break
+    finally:
+        kernel32.CloseHandle(snapshot)
+    return pairs
+
+
+def _collect_descendant_pids(root_pid: int, pairs: list[tuple[int, int]]) -> set[int]:
+    """從 (pid, ppid) 對照表遞迴算出 root_pid 的所有後代 PID（不含自己）。"""
+    children_of: dict[int, list[int]] = {}
+    for pid, ppid in pairs:
+        children_of.setdefault(ppid, []).append(pid)
+    descendants: set[int] = set()
+    frontier = [root_pid]
+    while frontier:
+        current = frontier.pop()
+        for child in children_of.get(current, []):
+            if child not in descendants:
+                descendants.add(child)
+                frontier.append(child)
+    return descendants
+
+
+class _DescendantWatcher:
+    """背景輪詢並累積目標行程存活期間出現過的後代 PID（P1：孫行程孤兒防護）。
+
+    MUST FIX A（Architect 第三輪複審後改版）：**本機制自本輪起僅供 Windows
+    使用**（`step_venv()` 只在 `os.name == "nt"` 分支建構本類別）。POSIX 已改
+    用 `_stream(new_process_group=True)` + `os.killpg()`（見 `_lock_target_alive`
+    docstring）——Architect 用真實 subprocess + SIGKILL 實驗證實：POSIX 行程
+    死亡時，其子行程會被核心立即過繼給 subreaper（PID 1），ppid 連結在死亡
+    當下就已斷裂；事後才用「目前 ps 快照」回溯死亡行程的後代注定撲空。這正是
+    本類別存在的理由（存活期間持續採樣，而非事後回溯），但 process group 語意
+    讓 POSIX 不再需要「持續採樣＋事後回溯」這整套機制——`os.killpg()` 天生就
+    不受 ppid 過繼影響，一次查詢即可涵蓋任意深度的孫行程。
+
+    Windows 維持本機制不變：實測查證（見 dev_start.py 模組頂層設計說明／
+    最終報告）顯示 Windows 的 `th32ParentProcessID` 只是行程建立當下的靜態
+    快照，父行程死亡時系統不會重寫它（不像 POSIX 的 ppid 會被動態過繼）——
+    故「事後回溯行程樹」在 Windows 上不像在 POSIX 上那樣『因果上必然太晚』，
+    背景輪詢＋事後補採樣的既有設計繼續有效，不隨本輪 POSIX 重做而變動。
+    """
+
+    def __init__(self, pid: int, poll_interval: float = 0.3) -> None:
+        self._pid = pid
+        self._poll_interval = poll_interval
+        self._seen: set[int] = set()
+        self._stop = threading.Event()
+        self._thread = threading.Thread(target=self._run, daemon=True)
+
+    def start(self) -> None:
+        self._thread.start()
+
+    def _run(self) -> None:
+        while True:
+            pairs = _list_pid_ppid_pairs_windows()
+            if pairs is not None:
+                self._seen |= _collect_descendant_pids(self._pid, pairs)
+            if self._stop.wait(self._poll_interval):
+                return
+
+    def stop_and_collect(self) -> set[int]:
+        """停止輪詢並回傳存活期間觀察到的後代 PID 聯集（呼叫端仍須自行以
+        _pid_alive() 檢查其中哪些現在仍存活——本函式只負責『曾經看過誰』）。
+
+        MUST FIX #3（SA + Architect 各自獨立重現的 P2，Windows 適用）：`_run()`
+        迴圈是「採樣 → wait(poll_interval)」，過去 `stop_and_collect()` 只 set
+        stop event 讓 wait() 提前醒來、不會在醒來時多做最後一次採樣——從
+        「最後一次排定採樣」到「本函式被呼叫」之間，有最多一個 poll_interval
+        長的空窗，若孫行程恰好在這個空窗內誕生且仍存活，會被完全漏記。這裡在
+        背景執行緒停止後，自己再同步做一次採樣並 union 進 `_seen`，用一次廉價
+        的同步呼叫換掉這個結構性空窗（而非單純縮小 poll_interval——那只降低
+        機率、不消除本質問題）。
+        """
+        self._stop.set()
+        self._thread.join(timeout=12)  # 對齊單次 Toolhelp32 逾時(10s)+緩衝
+        pairs = _list_pid_ppid_pairs_windows()
+        if pairs is not None:
+            self._seen |= _collect_descendant_pids(self._pid, pairs)
+        return set(self._seen)
+
+
 def _acquire_bootstrap_lock() -> int | None:
     """嘗試取得 venv bootstrap 互斥鎖（P1-3）。
 
@@ -570,6 +960,15 @@ def _acquire_bootstrap_lock() -> int | None:
     已存在時讀出其中 PID 判斷是否仍存活：存活 → 回傳 None（拿不到鎖，呼叫端
     須中止，不可靜默略過，否則使用者會誤以為環境是新的）；已死（陳舊鎖，
     如上次執行被 SIGKILL）→ 清除後重試一次。
+
+    MUST FIX #2（SA + QA 各自獨立重現的 P1）：鎖檔可能記錄多個 PID（JSON
+    陣列，見 `_parse_lock_pids`）——只要其中「任一」PID 仍存活就視為忙碌；
+    必須「全部」PID 皆已死透，才視為真正陳舊、可安全清除重試。
+
+    MUST FIX A：存活判斷改用 `_lock_target_alive()` 而非單純 `_pid_alive()`——
+    鎖檔內容可能是 orchestrator 自己的一般 PID，也可能是 POSIX 上 bootstrap
+    直接子行程的 pgid（其死亡不代表 process group 內孫行程也死了），見該函式
+    docstring。
     回傳值為鎖檔 fd，呼叫端須以 try/finally 搭配 _release_bootstrap_lock 釋放。
     """
     for _attempt in range(2):
@@ -577,15 +976,21 @@ def _acquire_bootstrap_lock() -> int | None:
             fd = os.open(str(LOCK_FILE), os.O_CREAT | os.O_EXCL | os.O_WRONLY)
         except FileExistsError:
             try:
-                text = LOCK_FILE.read_text(encoding="utf-8", errors="replace").strip()
-                pid = int(text)
-            except (OSError, ValueError) as e:
+                text = LOCK_FILE.read_text(encoding="utf-8", errors="replace")
+            except OSError as e:
                 _warn(f"venv bootstrap 鎖檔（{LOCK_FILE.name}）內容無法辨識（{e}）— "
                       f"為安全起見視為仍被持有，本次中止；請確認無其他 dev_start 執行中"
                       f"後手動刪除該檔")
                 return None
-            if _pid_alive(pid):
-                _warn(f"偵測到另一個 dev_start 正在整備 venv（PID {pid}），"
+            pids = _parse_lock_pids(text)
+            if pids is None:
+                _warn(f"venv bootstrap 鎖檔（{LOCK_FILE.name}）內容無法辨識（非合法 PID/PID"
+                      f"清單）— 為安全起見視為仍被持有，本次中止；請確認無其他 dev_start "
+                      f"執行中後手動刪除該檔")
+                return None
+            alive = [p for p in pids if _lock_target_alive(p)]
+            if alive:
+                _warn(f"偵測到另一個 dev_start 正在整備 venv（PID {sorted(alive)}），"
                       f"本次中止以避免競態寫入，請稍後重試")
                 return None
             try:
@@ -618,23 +1023,55 @@ def _release_bootstrap_lock(fd: int) -> None:
         pass
 
 
-def _record_lock_pid(fd: int, pid: int) -> None:
-    """bootstrap 子行程啟動後，把鎖檔內容從 orchestrator PID 換成子行程 PID
-    （Architect + SA 複審 P1：orchestrator 被 SIGKILL 後子行程變孤兒仍會寫入
-    .venv，鎖檔若仍記著已死的 orchestrator PID，陳舊鎖判斷會誤判「已死可
-    清除」，讓孤兒與新行程競態覆寫——鎖真正該追蹤的存活對象是子行程）。
+def _parse_lock_pids(text: str) -> list[int] | None:
+    """解析鎖檔內容為 PID 清單（MUST FIX #2：SA + QA 各自獨立重現的 P1 ——多孫
+    行程同時存活時，鎖檔若只記錄單一 PID，其中一個死亡就會讓整把鎖被誤判陳舊，
+    即使其他孫行程仍存活繼續寫 .venv）。
+
+    鎖檔格式改為 JSON 陣列（如 `[123, 456]`），取代先前的單一整數純文字。純
+    整數本身即合法 JSON scalar，故舊格式（單一 PID 純文字，如首次
+    `_acquire_bootstrap_lock()` 寫入 orchestrator PID 時）天然可被本函式解析
+    為單元素清單，不需要額外的雙格式分支。解析失敗或內容並非 int / int 陣列
+    時回傳 None，呼叫端須視為「無法辨識」（比照修復前對非數字內容的處理，不
+    可裸崩潰也不可誤判為可清除）。
     """
     try:
+        data = json.loads(text.strip())
+    except (ValueError, AttributeError):
+        return None
+    if isinstance(data, bool):
+        return None  # bool 是 int 子類別，明確排除避免誤判
+    if isinstance(data, int):
+        return [data]
+    if isinstance(data, list) and all(
+            isinstance(x, int) and not isinstance(x, bool) for x in data):
+        return data
+    return None
+
+
+def _record_lock_pids(fd: int, pids: list[int]) -> None:
+    """bootstrap 子行程啟動後（或偵測到存活孫行程後），把鎖檔內容改寫成目前
+    需要追蹤存活的 PID 清單（MUST FIX #2）。
+
+    背景：先前 `_record_lock_pid(fd, pid)` 只能記錄單一 PID——orchestrator
+    被 SIGKILL 後子行程變孤兒仍會寫入 .venv 是前一輪修的問題；本輪 SA/QA 各自
+    重現的是「直接子行程一次 fork 出多個孫行程（如真實 uv 內部平行化下載/
+    建置），只記錄 min(live) 其中一個」——短命的那個一死，鎖就被誤判全數陳舊。
+    改為記錄完整清單，任一仍存活都要能被 `_peek_bootstrap_lock()` /
+    `_acquire_bootstrap_lock()` 偵測為忙碌。
+    """
+    try:
+        payload = json.dumps(sorted(pids)).encode("utf-8")
         os.ftruncate(fd, 0)
         os.lseek(fd, 0, os.SEEK_SET)
-        os.write(fd, str(pid).encode("utf-8"))
+        os.write(fd, payload)
     except OSError:
-        pass  # 寫入失敗最壞情況退回記錄 orchestrator PID，不影響鎖的原子建立語意
+        pass  # 寫入失敗最壞情況退回記錄先前內容，不影響鎖的原子建立語意
 
 
 def _peek_bootstrap_lock() -> int | None:
     """非破壞性檢查：鎖是否被目前仍存活的行程持有（不嘗試取鎖/不清理陳舊鎖，
-    純讀取判斷）。回傳存活 PID 或 None。
+    純讀取判斷）。回傳其中一個存活 PID（供警告訊息沿用既有格式）或 None。
 
     P1（Architect + SA 複審實測重現）：`_acquire_bootstrap_lock()` 只在
     `reason is not None`（需要跑 bootstrap）時才會被呼叫，但 `prev is None`
@@ -642,13 +1079,23 @@ def _peek_bootstrap_lock() -> int | None:
     取鎖——orchestrator 被 SIGKILL 後孤兒子行程仍在寫 .venv，使用者重跑若
     恰好落入這個分支，鎖形同虛設。本函式在 step_venv() 最開頭無條件檢查，
     不論後續走哪個分支都能攔下。
+
+    MUST FIX #2：鎖檔內容改為 PID 清單，只要其中任一 PID 仍存活就視為忙碌，
+    不可只看清單中的某一個。
+
+    MUST FIX A：存活判斷改用 `_lock_target_alive()`（見該函式 docstring）——
+    POSIX 上鎖檔可能記錄的是一個 process group id（直接子行程已死但孫行程
+    仍存活時，單純 `_pid_alive()` 會誤判為陳舊）。
     """
     try:
-        text = LOCK_FILE.read_text(encoding="utf-8", errors="replace").strip()
-        pid = int(text)
-    except (OSError, ValueError):
+        text = LOCK_FILE.read_text(encoding="utf-8", errors="replace")
+    except OSError:
         return None
-    return pid if _pid_alive(pid) else None
+    pids = _parse_lock_pids(text)
+    if pids is None:
+        return None
+    alive = sorted(p for p in pids if _lock_target_alive(p))
+    return alive[0] if alive else None
 
 
 def step_venv(now: str, state: dict, force: bool, cross_same_flavor: bool = False) -> bool:
@@ -659,81 +1106,181 @@ def step_venv(now: str, state: dict, force: bool, cross_same_flavor: bool = Fals
               f"本次中止以避免競態寫入，請稍後重試", file=sys.stderr)
         SUMMARY["venv"] = "❌ 失敗（另一個 dev_start 執行中，見上方警告）"
         return False
-    shape = _ensure_venv_shape(now)
-    flavor = _flavor(now)
-    prev = state.get("deps_hash", {}).get(flavor)
-    cur = _deps_hash()
 
-    if cross_same_flavor:
-        # mac⇄linux 同為 posix 形狀：形狀檢查與 per-flavor hash 都分不出跨 OS，
-        # 但 venv 二進位跨 OS 不相容 → 先移除既有 .venv 再 bootstrap（不移除的話
-        # bootstrap 的「既有 .venv 沿用」分支會以跨 OS 直譯器跑 pip 而失敗）。
-        # 獨立於 force 判斷之外執行（SD 審查 P1）：先前寫在 elif 鏈裡，
-        # `--force-bootstrap` 與跨 OS 切換同時發生時會整段跳過本清理，讓
-        # force 這個「救援旗標」在最需要救援時反而失敗。
-        venv = ROOT / ".venv"
-        if _safe_exists(venv) or _safe_is_symlink(venv):
-            try:
-                if venv.is_symlink():
-                    venv.unlink()
-                else:
-                    shutil.rmtree(venv)
-                print("    跨 OS 同 flavor：既有 .venv 已移除（避免 bootstrap 沿用跨 OS 二進位）")
-            except OSError as e:
-                _warn(f"移除跨 OS .venv 失敗（{e}）— bootstrap 可能沿用後失敗，屆時請手動刪除 .venv 重跑")
+    # P2（SA 審查）：鎖的取得點提前到 _ensure_venv_shape() 呼叫之前，涵蓋整個
+    # step_venv() 從換手判斷到 bootstrap 執行的全程——過去鎖只包住 _run_bootstrap()，
+    # 兩個「鎖檔都還不存在、幾乎同時起跑」的 dev_start 呼叫，_ensure_venv_shape()
+    # 的換手 rename 邏輯完全不受保護（僅靠 Path.rename()/os.replace() 對目的地
+    # 已存在天生失敗僥倖沒有資料損毀，不是設計出來的保證）。
+    lock_fd = _acquire_bootstrap_lock()
+    if lock_fd is None:
+        print("    ❌ 無法取得 venv bootstrap 互斥鎖 — 本次中止（見上方警告），請稍後重試",
+              file=sys.stderr)
+        SUMMARY["venv"] = "❌ 失敗（bootstrap 鎖被佔用，見上方警告）"
+        return False
 
-    reason: str | None = None
-    ok = True
-    if force:
-        reason = "--force-bootstrap 指定"
-    elif cross_same_flavor:
-        reason = "跨 OS 同 flavor 切換（如 mac⇄linux）— venv 二進位不相容需重建"
-    elif shape == "missing":
-        reason = "本平台無可用 .venv（首次／跨平台切換且無快取／換手失敗殘留）"
-    elif prev is None:
-        # 既有 .venv 但無狀態紀錄：過去完全信任現狀、只記基準、不重裝，未做任何
-        # 健檢（Architect 建議一併修：這個分支正是 P1 busy-lock 檢查要堵住的
-        # 繞過路徑——若不健檢，孤兒行程覆寫過的壞損 .venv 會被靜默沿用）。
-        # 健檢通過才維持原行為；健檢失敗視同壞損，改走正常 bootstrap 路徑。
-        healthy, detail = _venv_healthy(_venv_python(flavor))
-        if healthy:
-            print("    既有 .venv 沿用；首次記錄依賴基準（如疑不完整可 --force-bootstrap）")
-            SUMMARY["venv"] = "沿用既有 .venv（首次記錄依賴基準）"
+    release_lock = True
+    try:
+        shape = _ensure_venv_shape(now)
+        flavor = _flavor(now)
+        prev = state.get("deps_hash", {}).get(flavor)
+        cur = _deps_hash()
+
+        if cross_same_flavor:
+            # mac⇄linux 同為 posix 形狀：形狀檢查與 per-flavor hash 都分不出跨 OS，
+            # 但 venv 二進位跨 OS 不相容 → 先移除既有 .venv 再 bootstrap（不移除的話
+            # bootstrap 的「既有 .venv 沿用」分支會以跨 OS 直譯器跑 pip 而失敗）。
+            # 獨立於 force 判斷之外執行（SD 審查 P1）：先前寫在 elif 鏈裡，
+            # `--force-bootstrap` 與跨 OS 切換同時發生時會整段跳過本清理，讓
+            # force 這個「救援旗標」在最需要救援時反而失敗。
+            venv = ROOT / ".venv"
+            if _safe_exists(venv) or _safe_is_symlink(venv):
+                try:
+                    if venv.is_symlink():
+                        venv.unlink()
+                    else:
+                        shutil.rmtree(venv)
+                    print("    跨 OS 同 flavor：既有 .venv 已移除（避免 bootstrap 沿用跨 OS 二進位）")
+                except OSError as e:
+                    _warn(f"移除跨 OS .venv 失敗（{e}）— bootstrap 可能沿用後失敗，屆時請手動刪除 .venv 重跑")
+
+        reason: str | None = None
+        ok = True
+        if force:
+            reason = "--force-bootstrap 指定"
+        elif cross_same_flavor:
+            reason = "跨 OS 同 flavor 切換（如 mac⇄linux）— venv 二進位不相容需重建"
+        elif shape == "missing":
+            reason = "本平台無可用 .venv（首次／跨平台切換且無快取／換手失敗殘留）"
+        elif prev is None:
+            # 既有 .venv 但無狀態紀錄：過去完全信任現狀、只記基準、不重裝，未做任何
+            # 健檢（Architect 建議一併修：這個分支正是 P1 busy-lock 檢查要堵住的
+            # 繞過路徑——若不健檢，孤兒行程覆寫過的壞損 .venv 會被靜默沿用）。
+            # 健檢通過才維持原行為；健檢失敗視同壞損，改走正常 bootstrap 路徑。
+            # 本輪新增：即使健檢通過，也要檢查 bootstrap 未完成哨兵（P1，四方
+            # 複審共同發現——venv 建立成功但 pip install 失敗時，健檢只跑得動
+            # python --version，完全不驗證套件是否真的裝好，會把「其實半殘」
+            # 的 venv 誤判為完整並標記為本平台正常建置）。MUST FIX #4：除了
+            # .venv 內部原有哨兵，也要檢查 ROOT 層級哨兵——涵蓋「首次建置期間
+            # dev_start.py 本體被 Ctrl-C 打死，.venv 內部哨兵完全沒機會寫入」
+            # 這個門檻更低的情境。
+            healthy, detail = _venv_healthy(_venv_python(flavor))
+            incomplete = (_bootstrap_incomplete_marker_present(ROOT / ".venv")
+                          or _root_bootstrap_incomplete_marker_present())
+            if healthy and not incomplete:
+                print("    既有 .venv 沿用；首次記錄依賴基準（如疑不完整可 --force-bootstrap）")
+                SUMMARY["venv"] = "沿用既有 .venv（首次記錄依賴基準）"
+            elif not healthy:
+                reason = f"既有 .venv 健檢失敗（{detail}）— 視為壞損重新整備"
+            else:
+                reason = "偵測到上次 bootstrap 未完整結束（哨兵標記殘留）— 視為壞損重新整備"
+        elif prev != cur:
+            reason = "依賴檔變動（pyproject.toml / requirements-ci.txt hash 不符）"
         else:
-            reason = f"既有 .venv 健檢失敗（{detail}）— 視為壞損重新整備"
-    elif prev != cur:
-        reason = "依賴檔變動（pyproject.toml / requirements-ci.txt hash 不符）"
-    else:
-        msg = "快取秒級換回，依賴新鮮" if shape == "restored" else "依賴新鮮（hash 未變）"
-        print(f"    ✅ {msg} — 跳過重裝")
-        SUMMARY["venv"] = msg
+            msg = "快取秒級換回，依賴新鮮" if shape == "restored" else "依賴新鮮（hash 未變）"
+            print(f"    ✅ {msg} — 跳過重裝")
+            SUMMARY["venv"] = msg
 
-    if reason is not None:
-        # P1-3：bootstrap 會整包改寫 .venv，兩個並行 dev_start（或執行到一半被
-        # SIGKILL 後使用者本能重跑）會競態寫入同一份 .venv，且雙方都回報「✅
-        # 完成」——其中一方環境其實已被覆蓋。用 PID lock 互斥，拿不到鎖就中止
-        # （fail loud），不可靜默略過讓使用者誤以為環境是新的。
-        lock_fd = _acquire_bootstrap_lock()
-        if lock_fd is None:
-            print("    ❌ 無法取得 venv bootstrap 互斥鎖 — 本次中止（見上方警告），請稍後重試",
-                  file=sys.stderr)
-            SUMMARY["venv"] = "❌ 失敗（bootstrap 鎖被佔用，見上方警告）"
-            return False
-        try:
-            ok = _run_bootstrap(now, reason, on_start=lambda pid: _record_lock_pid(lock_fd, pid))
-        finally:
+        if reason is not None:
+            # P1-3：bootstrap 會整包改寫 .venv，兩個並行 dev_start（或執行到一半被
+            # SIGKILL 後使用者本能重跑）會競態寫入同一份 .venv，且雙方都回報「✅
+            # 完成」——其中一方環境其實已被覆蓋。用 PID lock 互斥，拿不到鎖就中止
+            # （fail loud），不可靜默略過讓使用者誤以為環境是新的。
+            #
+            # MUST FIX A（Architect 第三輪複審用真實驗證證明「事後 ppid 回溯」在
+            # 因果上必然太晚後的根本重做）：POSIX 與 Windows 從此分道——
+            # POSIX 改用 process group（`_stream(new_process_group=True)` 令
+            # 直接子行程 setsid 成為新 session leader，其 PID 即 pgid）+
+            # `os.killpg()` 判斷整個行程樹是否仍有成員存活，不再需要背景輪詢
+            # 事後回溯（`_DescendantWatcher`）；Windows 維持既有設計不變——
+            # 實測查證 Windows 的 `th32ParentProcessID` 是行程建立當下的靜態
+            # 快照，父行程死亡不會被系統重寫（不像 POSIX 的 ppid 會被動態過繼
+            # 給 subreaper），故「事後回溯」在 Windows 上不像在 POSIX 上那樣
+            # 因果必然太晚，沿用原機制是可接受、有明確技術依據的判斷。
+            if os.name == "nt":
+                watcher_box: dict[str, _DescendantWatcher] = {}
+
+                def _on_bootstrap_start(pid: int) -> None:
+                    _record_lock_pids(lock_fd, [pid])
+                    watcher = _DescendantWatcher(pid)
+                    watcher.start()
+                    watcher_box["watcher"] = watcher
+
+                ok = _run_bootstrap(now, reason, on_start=_on_bootstrap_start)
+
+                # P1（SA + QA 各自用真實 subprocess+kill 重現）：鎖過去只追蹤
+                # 「直接子行程」PID，精準 kill 掉它後，其前景 fork 出的孫行程
+                # （如真實 bootstrap.ps1 呼叫 pip install 內部再開的子行程）
+                # 仍存活繼續寫 .venv，若在此無條件釋放鎖，下一輪 dev_start 可
+                # 在孫行程還在跑時立即重新取鎖進場，造成競態覆寫。改為檢查
+                # 直接子行程存活期間觀察到的所有後代，任一仍存活就不可靜默
+                # 釋放——並把鎖檔內容改指向「全部」存活後代（MUST FIX #2：
+                # SA + QA 各自重現多孫行程同時存活時，先前只記錄 min(live)
+                # 單一 PID，其中壽命較短的一個先死就會讓鎖被誤判全數陳舊，
+                # 即使壽命較長的仍存活——沿用既有陳舊鎖偵測機制：全部後代終
+                # 將結束，屆時 _acquire_bootstrap_lock() 會自然偵測到「皆已
+                # 死」並清除，鎖不會永久卡死，不需要另外設計一套解鎖路徑）。
+                watcher = watcher_box.get("watcher")
+                observed = watcher.stop_and_collect() if watcher is not None else set()
+                live = {p for p in observed if _pid_alive(p)}
+                if live:
+                    # 短暫寬限重查一次：避免把「剛結束、尚待系統收屍」的良性
+                    # 殭屍誤判為孤兒（zombie 對 OpenProcess 而言仍算存活）。
+                    time.sleep(0.5)
+                    live = {p for p in live if _pid_alive(p)}
+                if live:
+                    _record_lock_pids(lock_fd, sorted(live))
+                    _warn(f"偵測到 bootstrap 遺留的孫行程仍存活（PID {sorted(live)}）— "
+                          f"鎖暫不釋放，請確認該行程結束後手動刪除 {LOCK_FILE.name} 或稍後重試"
+                          f"（該行程結束後鎖會自動視為陳舊並清除，無需手動處理）")
+                    ok = False
+                    release_lock = False
+            else:
+                # POSIX：直接子行程獨立成新 process group（見 _stream 與
+                # _run_bootstrap docstring），pgid 恆等於其自身 PID。用
+                # os.killpg 判斷整個 group（含任意深度的孫行程）是否仍有成員
+                # 存活，取代事後 ppid 回溯——天然涵蓋多孫行程情境，不需要再
+                # 追蹤個別 PID 清單，鎖檔內容全程維持最初記錄的這一個 pgid
+                # 不變（不需要像 Windows 分支那樣事後改寫成觀察到的後代 PID）。
+                pgid_holder: dict[str, int] = {}
+
+                def _on_bootstrap_start(pid: int) -> None:
+                    _record_lock_pids(lock_fd, [pid])
+                    _set_active_bootstrap_pgid(pid)  # 供 Ctrl-C 訊號轉發使用
+                    pgid_holder["pgid"] = pid
+
+                try:
+                    ok = _run_bootstrap(now, reason, on_start=_on_bootstrap_start)
+                finally:
+                    # 無論成功/失敗/例外都要清除，避免遺留一個「其實已死」的
+                    # pgid 讓下次無關的 Ctrl-C（如 step_hooks 期間）誤轉發。
+                    _set_active_bootstrap_pgid(None)
+
+                pgid = pgid_holder.get("pgid")
+                if pgid is not None and _lock_target_alive(pgid):
+                    # 短暫寬限重查一次：避免把「剛結束、尚待系統收屍」的良性
+                    # 殭屍誤判為孤兒（比照 Windows 分支既有邏輯，見上）。
+                    time.sleep(0.5)
+                if pgid is not None and _lock_target_alive(pgid):
+                    _warn(f"偵測到 bootstrap process group 仍有行程存活（pgid={pgid}）— "
+                          f"鎖暫不釋放，請確認相關行程結束後手動刪除 {LOCK_FILE.name} 或"
+                          f"稍後重試（該行程結束後鎖會自動視為陳舊並清除，無需手動處理）")
+                    ok = False
+                    release_lock = False
+
+        if ok and not _safe_exists(_venv_python(flavor)):
+            print("    ❌ 整備後仍找不到 venv 直譯器 — 請檢查 bootstrap 輸出", file=sys.stderr)
+            ok = False
+        if ok:
+            SUMMARY.setdefault("venv", "bootstrap 完成（依賴已安裝）")
+            # 記錄「這份 .venv 內容是本平台建的」，供下次跨機換手判斷可信度（P1-1）
+            _write_origin_marker(ROOT / ".venv", now)
+        else:
+            SUMMARY["venv"] = "❌ 失敗（見上方錯誤）"
+        return ok
+    finally:
+        if release_lock:
             _release_bootstrap_lock(lock_fd)
-
-    if ok and not _safe_exists(_venv_python(flavor)):
-        print("    ❌ 整備後仍找不到 venv 直譯器 — 請檢查 bootstrap 輸出", file=sys.stderr)
-        ok = False
-    if ok:
-        SUMMARY.setdefault("venv", "bootstrap 完成（依賴已安裝）")
-        # 記錄「這份 .venv 內容是本平台建的」，供下次跨機換手判斷可信度（P1-1）
-        _write_origin_marker(ROOT / ".venv", now)
-    else:
-        SUMMARY["venv"] = "❌ 失敗（見上方錯誤）"
-    return ok
 
 
 def step_hooks(now: str, is_repo: bool) -> None:
@@ -912,13 +1459,31 @@ def main(argv: list[str] | None = None) -> int:
     else:
         SUMMARY["env"] = f"{now}（無切換）" if developing else f"{now}（首次紀錄）"
 
-    step_sync(args.no_sync, is_repo)
-    step_switch(env_changed)
-    ok = step_venv(now, state, args.force_bootstrap, cross_same_flavor)
-    if ok:
-        step_hooks(now, is_repo)
-        step_platform(now, is_repo)
-        step_finalize(now, state, is_repo)
+    # MUST FIX A 必要配套：POSIX 上 step_venv() 對 bootstrap 直接子行程呼叫
+    # start_new_session=True，使其脫離終端機 foreground process group，Ctrl-C
+    # 不會再自然傳到 bootstrap 樹——安裝 SIGINT/SIGTERM handler，於有進行中的
+    # bootstrap 時主動轉發訊號給整個 process group（見
+    # _forward_signal_to_bootstrap_group docstring）。僅 POSIX 安裝：Windows
+    # 分支未使用 start_new_session，既有行為（Ctrl-C 由終端機直接送達整個
+    # 前景 process group）不受影響，不需要、也不應額外安裝本 handler。
+    # 用 try/finally 確保無論如何結束都還原成呼叫前的 handler，不汙染呼叫端
+    # （如測試、或未來把 main() 包進更大程式的情境）。
+    old_sigint = old_sigterm = None
+    if os.name != "nt":
+        old_sigint = signal.signal(signal.SIGINT, _forward_signal_to_bootstrap_group)
+        old_sigterm = signal.signal(signal.SIGTERM, _forward_signal_to_bootstrap_group)
+    try:
+        step_sync(args.no_sync, is_repo)
+        step_switch(env_changed)
+        ok = step_venv(now, state, args.force_bootstrap, cross_same_flavor)
+        if ok:
+            step_hooks(now, is_repo)
+            step_platform(now, is_repo)
+            step_finalize(now, state, is_repo)
+    finally:
+        if os.name != "nt":
+            signal.signal(signal.SIGINT, old_sigint)
+            signal.signal(signal.SIGTERM, old_sigterm)
 
     _print_summary(ok)
     return 0 if ok else 1
