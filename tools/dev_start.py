@@ -68,6 +68,21 @@ _TOTAL = 7
 WARNINGS: list[str] = []
 SUMMARY: dict[str, str] = {}
 
+# R3 四方複審 QA 發現：tools/tests/ 先前從未在真實 Windows 上執行過，本輪首次
+# 真實執行後，_warn()/_hr() 的 print() 在 Windows 非 UTF-8 終端（如 zh-TW 預設
+# cp1252 codepage、或任何非互動/被導向的 stdout）下對 ⚠️/✅ 等符號直接
+# UnicodeEncodeError 崩潰——先前只有 main()（CLI 入口）內重設編碼，測試套件與
+# 任何未經 main() 直接呼叫模組內部函式的呼叫端（未來的 import 使用者）不會套用
+# 到這道保護。改在模組載入當下就重設，涵蓋所有呼叫路徑，且與 main() 原本的保護
+# 邏輯等價（stdout/stderr 皆改 UTF-8 + errors="replace"，不支援 reconfigure 的
+# 串流如測試用 io.StringIO 會被 hasattr 守門跳過，零副作用）。
+for _stream in (sys.stdout, sys.stderr):
+    if hasattr(_stream, "reconfigure"):
+        try:
+            _stream.reconfigure(encoding="utf-8", errors="replace")
+        except (OSError, ValueError):
+            pass
+
 
 def _hr(n: int, title: str) -> None:
     print(f"\n[{n}/{_TOTAL}] {title}")
@@ -1425,13 +1440,7 @@ def _print_summary(ok: bool) -> None:
 
 
 def main(argv: list[str] | None = None) -> int:
-    for stream in (sys.stdout, sys.stderr):
-        if hasattr(stream, "reconfigure"):
-            try:
-                stream.reconfigure(encoding="utf-8", errors="replace")
-            except (OSError, ValueError):
-                pass
-
+    # 編碼重設已於模組載入時處理（見檔案上方），涵蓋含本函式在內的所有呼叫路徑。
     ap = argparse.ArgumentParser(
         description="跨平台自動偵測啟動：環境偵測 → GitHub 同步 → 切換 → venv/hooks 整備")
     ap.add_argument("--no-sync", action="store_true", help="跳過 GitHub 同步（離線）")

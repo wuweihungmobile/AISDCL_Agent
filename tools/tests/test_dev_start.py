@@ -28,6 +28,18 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import dev_start  # noqa: E402
 
 
+def _rmtree_force(path: Path) -> None:
+    """跨平台安全的 rmtree（R3 QA 發現：Windows 上刪 git repo 直接 shutil.rmtree()
+    炸 PermissionError——git 物件檔（.git/objects/**）預設唯讀，POSIX 刪檔看的是
+    父目錄寫入權限（唯讀位元不擋刪除），但 Windows 刪檔會檢查檔案本身唯讀屬性，
+    需先清除才能刪除；POSIX 上呼叫此函式與裸 shutil.rmtree 行為等價，零副作用）。
+    """
+    def _on_error(func, p, exc_info):
+        os.chmod(p, 0o700)
+        func(p)
+    shutil.rmtree(path, onerror=_on_error)
+
+
 class DevStartTestCase(unittest.TestCase):
     """每個測試前重置模組層級可變狀態（WARNINGS/SUMMARY），避免測試互相污染。"""
 
@@ -777,7 +789,7 @@ class TestStepSyncRealGitRepo(DevStartTestCase):
         with tempfile.TemporaryDirectory() as td:
             base = Path(td)
             origin, local = self._make_pair(base)
-            shutil.rmtree(origin)  # 模擬離線：origin 路徑消失，fetch 必失敗
+            _rmtree_force(origin)  # 模擬離線：origin 路徑消失，fetch 必失敗
 
             with mock.patch.object(dev_start, "ROOT", local):
                 dev_start.step_sync(no_sync=False, is_repo=True)
@@ -798,7 +810,12 @@ class TestCacheRestoreTrustRestoredBranch(DevStartTestCase):
     def _make_fake_interpreter(py: Path, healthy: bool) -> None:
         py.parent.mkdir(parents=True, exist_ok=True)
         if healthy:
-            py.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+            # R3 QA 發現：shebang 腳本（#!/bin/sh）只在 POSIX 上可執行，Windows
+            # 上 _venv_healthy() 實際 subprocess.run([py, "--version"]) 會撞
+            # WinError 193（非合法 PE 格式），使「健康」情境在 Windows 上永遠
+            # 走到「不健康」分支——改複製當前真正在跑的直譯器本體，三平台皆為
+            # 合法可執行檔，能真實驗證 _venv_healthy() 的 subprocess 呼叫成功。
+            shutil.copy(sys.executable, py)
         else:
             # 損毀的假二進位：非合法可執行格式（無 shebang、非 ELF/Mach-O）→ exec 失敗
             py.write_bytes(b"\x7fbroken-not-a-real-binary\x00\x01")
@@ -819,7 +836,7 @@ class TestCacheRestoreTrustRestoredBranch(DevStartTestCase):
             self.assertFalse(cache_mine.exists(), "換回後快取目錄應已被 rename 走")
             restored_py = root / ".venv" / "bin" / "python"
             self.assertTrue(restored_py.is_file())
-            self.assertEqual(restored_py.read_text(encoding="utf-8"), "#!/bin/sh\nexit 0\n",
+            self.assertEqual(restored_py.read_bytes(), Path(sys.executable).read_bytes(),
                               "換回後內容須與原快取一致")
 
     def test_origin_marker_mismatch_rejects_restore(self):
@@ -1153,19 +1170,27 @@ class TestOrphanChildLockRegression(DevStartTestCase):
         with tempfile.TemporaryDirectory() as td:
             lock_file = Path(td) / ".dev_start.lock"
             proc = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(2)"])
+            pid = proc.pid
             try:
-                lock_file.write_text(str(proc.pid), encoding="utf-8")
+                lock_file.write_text(str(pid), encoding="utf-8")
                 with mock.patch.object(dev_start, "LOCK_FILE", lock_file):
-                    self.assertEqual(dev_start._peek_bootstrap_lock(), proc.pid,
+                    self.assertEqual(dev_start._peek_bootstrap_lock(), pid,
                                       "① 子行程存活期間 peek 應回傳其 PID")
                 proc.wait(timeout=5)
-                with mock.patch.object(dev_start, "LOCK_FILE", lock_file):
-                    self.assertIsNone(dev_start._peek_bootstrap_lock(),
-                                       "② 子行程結束後 peek 應回傳 None")
             finally:
                 if proc.poll() is None:
                     proc.kill()
                     proc.wait()
+            # R3 QA 發現（Windows-only）：Popen 物件本身持有子行程 handle，即使
+            # 子行程已真正結束，只要此 handle 未關閉，Windows 仍視該行程物件為
+            # 存活（OpenProcess 可成功開啟），造成 _pid_alive() 誤判仍存活——這
+            # 與正式場景（另一個全新 dev_start 行程檢查陌生 PID、從未持有其
+            # handle）不同，顯式釋放本行程自己持有的 handle 才能正確模擬「已
+            # 終止且無人持有」的情境。POSIX 上 del 對測試結果無影響。
+            del proc
+            with mock.patch.object(dev_start, "LOCK_FILE", lock_file):
+                self.assertIsNone(dev_start._peek_bootstrap_lock(),
+                                   "② 子行程結束後 peek 應回傳 None")
 
     def test_step_venv_aborts_when_lock_holds_live_child_pid_even_without_reason(self):
         """③ 核心迴歸：模擬『orchestrator 死掉但子行程還活著』——鎖檔一旦被
@@ -1676,7 +1701,9 @@ class TestStepVenvPrevNoneHealthCheck(DevStartTestCase):
             root = Path(td)
             venv_python = root / ".venv" / "bin" / "python"
             venv_python.parent.mkdir(parents=True)
-            venv_python.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+            # R3 QA 發現：shebang 腳本在 Windows 上非合法 PE、_venv_healthy() 會撞
+            # WinError 193，改複製當前真正在跑的直譯器本體，三平台皆可真實執行。
+            shutil.copy(sys.executable, venv_python)
             venv_python.chmod(0o755)
             bootstrap_calls = []
 
@@ -1836,7 +1863,9 @@ class TestRootLevelBootstrapIncompleteMarker(DevStartTestCase):
                 # 但本體已死，不會再執行到任何後續程式碼。
                 venv_python = root / ".venv" / "bin" / "python"
                 venv_python.parent.mkdir(parents=True)
-                venv_python.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+                # R3 QA 發現：shebang 腳本在 Windows 上非合法 PE、_venv_healthy()
+                # 會撞 WinError 193，改複製當前真正在跑的直譯器本體。
+                shutil.copy(sys.executable, venv_python)
                 venv_python.chmod(0o755)
 
             marker_path = root / dev_start._BOOTSTRAP_INCOMPLETE_MARKER
@@ -1878,7 +1907,9 @@ class TestRootLevelBootstrapIncompleteMarker(DevStartTestCase):
             root = Path(td)
             venv_python = root / ".venv" / "bin" / "python"
             venv_python.parent.mkdir(parents=True)
-            venv_python.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+            # R3 QA 發現：shebang 腳本在 Windows 上非合法 PE、_venv_healthy() 會撞
+            # WinError 193，改複製當前真正在跑的直譯器本體，三平台皆可真實執行。
+            shutil.copy(sys.executable, venv_python)
             venv_python.chmod(0o755)
             bootstrap_calls = []
 
