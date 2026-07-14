@@ -1768,7 +1768,9 @@ class TestBootstrapIncompleteMarker(DevStartTestCase):
                 # 邏輯寫在 _run_bootstrap() 內部，故這裡改 mock 更底層的
                 # _stream()，讓真正的 _run_bootstrap() 執行（含哨兵讀寫）。
                 venv_python.parent.mkdir(parents=True, exist_ok=True)
-                venv_python.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+                # R3 QA 發現：shebang 腳本在 Windows 上非合法 PE、_venv_healthy()
+                # 會撞 WinError 193，改複製當前真正在跑的直譯器本體。
+                shutil.copy(sys.executable, venv_python)
                 venv_python.chmod(0o755)
                 return 1
 
@@ -1820,7 +1822,9 @@ class TestBootstrapIncompleteMarker(DevStartTestCase):
             root = Path(td)
             venv_python = root / ".venv" / "bin" / "python"
             venv_python.parent.mkdir(parents=True)
-            venv_python.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+            # R3 QA 發現：shebang 腳本在 Windows 上非合法 PE、_venv_healthy() 會撞
+            # WinError 193，改複製當前真正在跑的直譯器本體，三平台皆可真實執行。
+            shutil.copy(sys.executable, venv_python)
             venv_python.chmod(0o755)
             bootstrap_calls = []
 
