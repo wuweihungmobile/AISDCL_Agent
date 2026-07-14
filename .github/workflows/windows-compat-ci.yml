@@ -41,6 +41,22 @@
 #     LATEST 解析慣例（sort -V 取最高版語意）脫節 → paths 過濾器改用
 #     `AISDLC_SDD_v*` glob 涵蓋所有版本目錄，install_post_commit.ps1 驗證與
 #     windows-nightly-full 的 fsm_runtime pytest 兩處皆改為動態解析 LATEST 版本目錄。
+#
+# R3 四方複審修正（2026-07-14，不採信既有 APPROVE 自稱、全新 session 重新獨立複核）：
+#   - Architect 發現 paths 白名單漏根層消費檔（`.claude/hooks/sdd_hook_router.py`／
+#     `.claude/settings.json`／`AutoClaude/.claude/settings.json`）—— DEF-101-061
+#     聲稱的 fnmatch 驗證實際驗證的是版本化子目錄下的同名檔，非此處根層檔案 →
+#     補 `.claude/**`／`AutoClaude/.claude/**` 兩條寬 pattern；另補
+#     `AISDLC_SDD/scripts/**`（涵蓋 ci-gate.sh 本體／router_hook_coverage_lint.py／
+#     scripts/tests/*.py，先前只列出 install-hooks.ps1 一支）。
+#   - QA 發現 `tools/tests/**`（SIGPIPE 回歸鎖＋dev_start.py 平台邏輯 mock）先前既未
+#     被本 workflow 的 paths 涵蓋，也從未被任何 step 實際執行過，只在
+#     root-infra-ci.yml 的 ubuntu-latest 上以 mock 驗證——但這正是本 workflow 存在
+#     的理由（於真實 Windows 驗證平台假設）→ 補 paths + windows-smoke 新增實際執行
+#     該測試目錄的 step。
+#   - QA 發現 windows-nightly-alert 的「紅色路徑」（開單/留言）從未在真實環境驗證
+#     過（nightly-full 至今從未真的失敗過）→ 補 `simulate_nightly_failure`
+#     workflow_dispatch 輸入，可一次性驗證三條分支邏輯而不需等待真實失敗。
 
 name: windows-compat-ci
 
@@ -53,12 +69,15 @@ on:
       - "AutoClaude/pyproject.toml"
       - "AutoClaude/tests/**"
       - "AutoClaude/tools/install_git_hooks.ps1"
-      - "AISDLC_SDD/scripts/install-hooks.ps1"
+      - "AutoClaude/.claude/**"
+      - "AISDLC_SDD/scripts/**"
       - "tools/bootstrap.ps1"
       - "tools/dev_start.ps1"
       - "tools/dev_start.py"
+      - "tools/tests/**"
       - "**/*.ps1"
       - "tools/git-hooks/**"
+      - ".claude/**"
       - "AISDLC_SDD/AISDLC_SDD_v*/tools/**"
       - "AISDLC_SDD/AISDLC_SDD_v*/.claude/**"
       - ".github/workflows/windows-compat-ci.yml"
@@ -69,18 +88,26 @@ on:
       - "AutoClaude/pyproject.toml"
       - "AutoClaude/tests/**"
       - "AutoClaude/tools/install_git_hooks.ps1"
-      - "AISDLC_SDD/scripts/install-hooks.ps1"
+      - "AutoClaude/.claude/**"
+      - "AISDLC_SDD/scripts/**"
       - "tools/bootstrap.ps1"
       - "tools/dev_start.ps1"
       - "tools/dev_start.py"
+      - "tools/tests/**"
       - "**/*.ps1"
       - "tools/git-hooks/**"
+      - ".claude/**"
       - "AISDLC_SDD/AISDLC_SDD_v*/tools/**"
       - "AISDLC_SDD/AISDLC_SDD_v*/.claude/**"
       - ".github/workflows/windows-compat-ci.yml"
   schedule:
     - cron: "0 6 * * *"   # windows-nightly-full：每日 06:00 UTC 深度回歸（非阻斷）
   workflow_dispatch:
+    inputs:
+      simulate_nightly_failure:
+        description: "手動驗證 windows-nightly-alert 紅色路徑：覆寫視同 nightly-full 失敗（R3 QA 發現：紅色路徑從未在真實環境驗證過，不影響 nightly-full 本身執行結果）"
+        type: boolean
+        default: false
 
 concurrency:
   group: windows-compat-ci-${{ github.ref }}
@@ -104,6 +131,10 @@ jobs:
         uses: actions/setup-python@v6
         with:
           python-version: "3.11"
+
+      - name: tools/tests/（SIGPIPE 回歸鎖 + dev_start.py 平台邏輯；R3 QA 發現：先前只在 root-infra-ci.yml 的 ubuntu-latest 上以 mock 跑過，從未在真實 Windows 執行過）
+        shell: pwsh
+        run: python -m unittest discover -s tools/tests -p "test_*.py" -v
 
       - name: 執行 tools/bootstrap.ps1（R1 SA 發現：Windows 新人上手入口從未被實測）
         shell: pwsh
@@ -321,19 +352,30 @@ jobs:
       - name: 讀取本次 windows-nightly-full 實際結論
         # continue-on-error: true 會讓 needs.windows-nightly-full.result 恆為
         # success，無法用來判斷真實失敗，故直接查該 job 在本次 run 的實際 conclusion。
+        #
+        # R3 QA 四方複審發現（P1）：本 job 的「紅色路徑」（開單/留言分支）在此之前
+        # 從未於真實環境執行過一次（nightly-full 至今從未真的失敗過）。補
+        # simulate_nightly_failure 手動輸入，可在不需要真的搞壞 nightly-full 的前提下，
+        # 一次性驗證開單/留言/自動關單三條分支邏輯是否正確。
         id: check
         env:
           GH_TOKEN: ${{ github.token }}
           REPO: ${{ github.repository }}
+          SIMULATE: ${{ github.event.inputs.simulate_nightly_failure }}
         run: |
           set -euo pipefail
-          conclusion=$(gh api "/repos/${REPO}/actions/runs/${{ github.run_id }}/jobs" \
-            --jq '[.jobs[] | select(.name | startswith("Windows nightly full"))][0].conclusion // "unknown"')
-          echo "windows-nightly-full 本次結論：${conclusion}"
-          if [ "$conclusion" = "failure" ]; then
+          if [ "${SIMULATE:-false}" = "true" ]; then
+            echo "⚠️ simulate_nightly_failure=true，強制視為失敗（供驗證 alert 紅色路徑用，不代表 nightly-full 真的失敗）"
             echo "failed=true" >> "$GITHUB_OUTPUT"
           else
-            echo "failed=false" >> "$GITHUB_OUTPUT"
+            conclusion=$(gh api "/repos/${REPO}/actions/runs/${{ github.run_id }}/jobs" \
+              --jq '[.jobs[] | select(.name | startswith("Windows nightly full"))][0].conclusion // "unknown"')
+            echo "windows-nightly-full 本次結論：${conclusion}"
+            if [ "$conclusion" = "failure" ]; then
+              echo "failed=true" >> "$GITHUB_OUTPUT"
+            else
+              echo "failed=false" >> "$GITHUB_OUTPUT"
+            fi
           fi
 
       - name: 失敗時開單或於既有單留言（title 比對避免每日重覆開單）

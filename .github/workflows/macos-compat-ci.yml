@@ -30,6 +30,21 @@
 #      裝的 5.x，掩蓋 3.2 相容性問題）。本 workflow 額外用 `/bin/bash <script>` 明確
 #      指定系統 bash 直接執行，不依賴 PATH 解析，才能真正驗證這三支 dispatcher（已
 #      在原始碼註解中聲明「bash 3.2 相容」）在最嚴苛環境下仍正確運作。
+#
+# R3 四方複審修正（2026-07-14，不採信既有 APPROVE 自稱、全新 session 重新獨立複核）：
+#   - Architect 發現 paths 白名單同樣漏根層消費檔（`.claude/**`／
+#     `AutoClaude/.claude/**`）與 `AISDLC_SDD/scripts/**`（`router_hook_coverage_lint.py`／
+#     `scripts/tests/*.py` 等 `.py` 檔不受既有 `**/*.sh` 涵蓋）→ 補齊，詳見
+#     windows-compat-ci.yml 同輪同款修正說明。
+#   - QA 發現 paths 雖已涵蓋 `tools/tests/**`，但從未有任何 step 真的執行過這批
+#     測試（SIGPIPE 回歸鎖＋dev_start.py 平台邏輯 mock），只在 root-infra-ci.yml
+#     的 ubuntu-latest 上跑過 → macos-smoke 新增實際執行該測試目錄的 step。
+#   - QA 發現 macos-nightly-alert 至此之前從未於真實環境執行過一次（0 筆
+#     schedule/workflow_dispatch run），連 green path 都未驗證，遑論紅色路徑 →
+#     補 `simulate_nightly_failure` workflow_dispatch 輸入。
+#   - QA 發現本 workflow 對「docker 測試在 macos-latest 官方 runner 上因無 Docker
+#     daemon 而恆被 skip」這個已知限制，不像 windows-compat-ci.yml 對其 ci-gate.ps1
+#     fallback 覆蓋率限制那樣誠實揭露——已於下方 ci-gate.sh 執行步驟補註記。
 
 name: macos-compat-ci
 
@@ -42,8 +57,8 @@ on:
       - "AutoClaude/pyproject.toml"
       - "AutoClaude/tests/**"
       - "AutoClaude/tools/install_git_hooks.sh"
-      - "AISDLC_SDD/scripts/install-hooks.sh"
-      - "AISDLC_SDD/scripts/ci-gate.sh"
+      - "AutoClaude/.claude/**"
+      - "AISDLC_SDD/scripts/**"
       - "AISDLC_SDD/AISDLC_SDD_v0.01/requirements-ci.txt"
       - "tools/bootstrap.sh"
       - "tools/dev_start.sh"
@@ -53,6 +68,7 @@ on:
       - "tools/check_ntfs_paths.py"
       - "**/*.sh"
       - "tools/git-hooks/**"
+      - ".claude/**"
       - "AISDLC_SDD/AISDLC_SDD_v*/tools/**"
       - "AISDLC_SDD/AISDLC_SDD_v*/.claude/**"
       - ".github/workflows/macos-compat-ci.yml"
@@ -63,8 +79,8 @@ on:
       - "AutoClaude/pyproject.toml"
       - "AutoClaude/tests/**"
       - "AutoClaude/tools/install_git_hooks.sh"
-      - "AISDLC_SDD/scripts/install-hooks.sh"
-      - "AISDLC_SDD/scripts/ci-gate.sh"
+      - "AutoClaude/.claude/**"
+      - "AISDLC_SDD/scripts/**"
       - "AISDLC_SDD/AISDLC_SDD_v0.01/requirements-ci.txt"
       - "tools/bootstrap.sh"
       - "tools/dev_start.sh"
@@ -74,12 +90,18 @@ on:
       - "tools/check_ntfs_paths.py"
       - "**/*.sh"
       - "tools/git-hooks/**"
+      - ".claude/**"
       - "AISDLC_SDD/AISDLC_SDD_v*/tools/**"
       - "AISDLC_SDD/AISDLC_SDD_v*/.claude/**"
       - ".github/workflows/macos-compat-ci.yml"
   schedule:
     - cron: "0 7 * * *"   # macos-nightly-full：每日 07:00 UTC 深度回歸（非阻斷；較 windows-compat-ci 錯開 1 小時，避免同時搶 runner）
   workflow_dispatch:
+    inputs:
+      simulate_nightly_failure:
+        description: "手動驗證 macos-nightly-alert 紅色路徑：覆寫視同 nightly-full 失敗（R3 QA 發現：至今連 green path 都從未真正觸發過，不影響 nightly-full 本身執行結果）"
+        type: boolean
+        default: false
 
 concurrency:
   group: macos-compat-ci-${{ github.ref }}
@@ -103,6 +125,9 @@ jobs:
         uses: actions/setup-python@v6
         with:
           python-version: "3.11"
+
+      - name: tools/tests/（SIGPIPE 回歸鎖 + dev_start.py 平台邏輯；R3 QA 發現：paths 雖已涵蓋 tools/tests/**，但先前從未有任何 step 真的執行過，只在 root-infra-ci.yml 的 ubuntu-latest 上以 mock 跑過）
+        run: python3 -m unittest discover -s tools/tests -p "test_*.py" -v
 
       - name: 執行 tools/bootstrap.sh（全新 .venv 建立情境）
         run: |
@@ -268,6 +293,13 @@ jobs:
         run: python -m pytest tests/test_perception.py -q --tb=short
 
       - name: 執行（非僅解析）AISDLC_SDD/scripts/ci-gate.sh（凍結基線 v0.01 + LATEST 雙軌）
+        # 已知覆蓋率限制（R3 QA 複審發現，比照 windows-compat-ci.yml 的誠實揭露慣例）：
+        # GitHub-hosted macos-latest runner 沒有 Docker daemon，`docker_available()`
+        # 恆回 False，v0.01/v0.30 的 3 個 docker 執行測試（test_docker_backend_real_pass／
+        # test_docker_backend_real_runtime_fail／test_docker_backend_e2e_through_fsm）
+        # 在此 job 恆被乾淨 skip（本機開發者 macOS 若已裝 Docker Desktop 則會真實執行，
+        # 詳見 AutoSDD_Defect_Log.md DEF-101-062 相關記錄）。本步驟綠燈不代表這 3 個
+        # docker 測試的邏輯已在 macOS CI 上被驗證過。
         working-directory: AISDLC_SDD
         run: bash scripts/ci-gate.sh
 
@@ -328,19 +360,29 @@ jobs:
       issues: write
     steps:
       - name: 讀取本次 macos-nightly-full 實際結論
+        # R3 QA 四方複審發現（P1）：本 job 至此之前從未於真實環境執行過一次（0 筆
+        # schedule/workflow_dispatch run），連 green path 都未驗證過，紅色路徑（開單/
+        # 留言分支）更未驗證。補 simulate_nightly_failure 手動輸入，可在不需要真的
+        # 搞壞 nightly-full 的前提下，一次性驗證開單/留言/自動關單三條分支邏輯。
         id: check
         env:
           GH_TOKEN: ${{ github.token }}
           REPO: ${{ github.repository }}
+          SIMULATE: ${{ github.event.inputs.simulate_nightly_failure }}
         run: |
           set -euo pipefail
-          conclusion=$(gh api "/repos/${REPO}/actions/runs/${{ github.run_id }}/jobs" \
-            --jq '[.jobs[] | select(.name | startswith("macOS nightly full"))][0].conclusion // "unknown"')
-          echo "macos-nightly-full 本次結論：${conclusion}"
-          if [ "$conclusion" = "failure" ]; then
+          if [ "${SIMULATE:-false}" = "true" ]; then
+            echo "⚠️ simulate_nightly_failure=true，強制視為失敗（供驗證 alert 紅色路徑用，不代表 nightly-full 真的失敗）"
             echo "failed=true" >> "$GITHUB_OUTPUT"
           else
-            echo "failed=false" >> "$GITHUB_OUTPUT"
+            conclusion=$(gh api "/repos/${REPO}/actions/runs/${{ github.run_id }}/jobs" \
+              --jq '[.jobs[] | select(.name | startswith("macOS nightly full"))][0].conclusion // "unknown"')
+            echo "macos-nightly-full 本次結論：${conclusion}"
+            if [ "$conclusion" = "failure" ]; then
+              echo "failed=true" >> "$GITHUB_OUTPUT"
+            else
+              echo "failed=false" >> "$GITHUB_OUTPUT"
+            fi
           fi
 
       - name: 失敗時開單或於既有單留言（title 比對避免每日重覆開單）

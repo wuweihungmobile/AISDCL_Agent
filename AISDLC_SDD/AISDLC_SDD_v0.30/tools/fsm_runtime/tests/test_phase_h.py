@@ -234,6 +234,12 @@ def test_docker_backend_real_pass():
 
 @requires_docker
 def test_docker_backend_real_runtime_fail():
+    # R3 四方複審 QA 發現（P2）：本測試在 Windows 上不受 requires_docker_success 排除，
+    # 依賴的假設是「windows-latest 環境不穩定本身也會產生 nonzero_exit，恰好符合此測試
+    # 預期」——此假設目前僅有經驗證據支持（5 次真實失敗 run 皆只出現另兩個測試失敗、
+    # 從未出現本測試失敗），並非程式碼層面強制保證。若未來 LCOW 不穩定改以其他形式
+    # （如 subprocess 逾時、非 nonzero_exit 的例外）呈現，本測試會直接把不確定性暴露成
+    # CI 紅燈且無防護。暫不變更行為（證據仍支持現況），僅記錄此脆弱點供後續留意。
     # 真實執行接地：容器實跑失敗（exit 1 + stderr）→ OQS runtime_fail。
     from tools.fsm_runtime.sandbox_runner import SandboxSpec, evaluate
     spec = SandboxSpec(app_id="demo", image="busybox",

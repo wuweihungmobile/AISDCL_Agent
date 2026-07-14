@@ -1,7 +1,10 @@
 """
-Windows PTY 包裝器。
-使用 wexpect 模擬終端，讓 Claude Code 認為自己在 TTY 環境中執行。
-若 wexpect 不可用，退回到 subprocess + NonBlockingStreamReader。
+PTY 包裝器（全平台唯一實作；R3 四方複審 Architect 發現原文檔誤稱「Windows PTY 包裝器」——
+wexpect 於 pyproject.toml 已 scope 為 sys_platform == "win32"，macOS/Linux 上
+_WEXPECT_AVAILABLE 恆為 False，一律走 subprocess + pipe fallback，並非真正的 POSIX pty；
+本模組實為三平台共用的唯一實作，非 Windows 專屬）。
+Windows 上優先使用 wexpect 模擬終端，讓 Claude Code 認為自己在 TTY 環境中執行；
+若 wexpect 不可用（含所有非 Windows 平台），退回到 subprocess + NonBlockingStreamReader。
 """
 from __future__ import annotations
 
