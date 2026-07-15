@@ -40,6 +40,11 @@ venv/
 # 各機器初次 pull 後從同目錄 settings.local.json.example 複製還原）
 **/.claude/settings.local.json
 
+# Claude Code Agent 工具 isolation:"worktree" 建立的隔離副本（每個是全 repo 的臨時
+# git worktree checkout，agent 沒清乾淨時會殘留數千個檔案，讓 VSCode Source Control
+# 誤判為大量未提交變更；本身即受 git worktree 機制管理，不應被主 repo 追蹤）
+.claude/worktrees/
+
 # IDE
 .idea/
 .vscode/
