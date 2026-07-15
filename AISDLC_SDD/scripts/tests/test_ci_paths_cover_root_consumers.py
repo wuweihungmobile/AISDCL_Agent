@@ -1,25 +1,76 @@
-"""aisdlc-sdd-ci paths 覆蓋根層消費檔 meta contract — DEF-101-042 治本鎖（第五輪複審）.
+"""CI paths 覆蓋根層消費檔 meta contract — DEF-101-042 治本鎖 / DEF-101-068(a) 擴充（S6）.
 
-WHY（Rule 9 / Rule 12 fail-loud）：scripts/tests 的 contract test 消費 monorepo
-根層檔案時，其唯一 CI 載體 aisdlc-sdd-ci 的 paths 過濾必須包含該根層檔，否則
-「只改根層消費檔」的變更下回歸鎖恰好不跑（假綠盲區）。此同構缺陷已三度出現
+WHY（Rule 9 / Rule 12 fail-loud）：測試目錄的 contract test 消費 monorepo
+根層檔案時，其 CI 載體的 paths 過濾必須包含該根層檔，否則「只改根層消費檔」的
+變更下回歸鎖恰好不跑（假綠盲區）。此同構缺陷已三度出現於 aisdlc-sdd-ci
 （DEF-101-037 → DEF-101-042 → 複審抓 sdd_hook_router.py 殘漏），人工盤點 paths
 已被實證不可靠——本鎖把「paths 與消費點同步」升級為機械斷言，永久終結打地鼠：
 未來任何測試新增根層消費點而漏補 paths，本測試即紅。
 
-做法：正則掃描本目錄所有 test_*.py 源碼的兩種根層消費慣用法——
-  ``os.path.join(_monorepo_root(), "a", "b")`` 與 ``_monorepo_root() / "a" / "b"``
-——重組 repo 相對路徑；凡指向磁碟上存在且不在 AISDLC_SDD/ 下（該前綴由
-"AISDLC_SDD/**" 天然覆蓋）的檔案，斷言被 workflow push＋pull_request paths
-覆蓋（fnmatch glob 語意）。另附兩道防呆：push/PR 清單對稱鎖（防單側漏補）、
-已知 5 條消費檔必被掃出（防正則退化令本鎖形同虛設）。
+S6（第六輪複審 DEF-101-068(a)）：先前本鎖只讀 aisdlc-sdd-ci.yml 一份、只掃
+AISDLC_SDD/scripts/tests/ 一個目錄，對 windows-compat-ci.yml／macos-compat-ci.yml
+與其實際執行的 tools/tests/ 完全零機械保護——這正是先前一輪 windows-compat-ci.yml
+漏補 tools/check_ntfs_paths.py 能夠逃過檢測的結構性根因。現擴充為「workflow ↔
+其實際執行的測試目錄」對照表，逐一參數化驗證：
+
+  - aisdlc-sdd-ci.yml      ↔ AISDLC_SDD/scripts/tests/（`python -m pytest scripts/tests/`）
+  - windows-compat-ci.yml  ↔ tools/tests/（`unittest discover -s tools/tests`）
+  - macos-compat-ci.yml    ↔ tools/tests/（`unittest discover -s tools/tests`）
+
+做法：正則掃描對應目錄所有 test_*.py 源碼的根層消費慣用法——
+  ``os.path.join(_monorepo_root(), "a", "b")`` / ``_monorepo_root() / "a" / "b"``
+（AISDLC_SDD/scripts/tests/ 慣用法）與
+  ``os.path.join(REPO_ROOT, "a", "b")`` / ``REPO_ROOT / "a" / "b"``
+（tools/tests/ 慣用法，該目錄下 ``REPO_ROOT = Path(__file__).resolve().parents[2]``
+剛好等於 monorepo 根）——重組 repo 相對路徑；凡指向磁碟上存在且不在 AISDLC_SDD/
+下（該前綴由 "AISDLC_SDD/**" 天然覆蓋）的檔案，斷言被對應 workflow 的
+push＋pull_request paths 覆蓋（fnmatch glob 語意）。另附兩道防呆：push/PR
+清單對稱鎖（防單側漏補，三份 workflow 皆驗）、已知消費檔必被掃出（防正則退化
+令本鎖形同虛設）。
+
+S26（第八輪複審 R6，Architect 親自實測 fnmatch 逐一比對抓到）：`_scan_dir_for_root_paths()`
+先前只認得 `os.path.join(REPO_ROOT, "a", "b")` / `REPO_ROOT / "a" / "b"` 這種「引用固定
+路徑字串」的慣用法，完全沒有涵蓋 `tools/tests/` 三支新測試檔
+（test_check_hooks_liveness.py／test_check_defect_log_crossref.py／
+test_check_wrapper_thinness.py）皆使用的 `import check_hooks_liveness as m`（搭配
+`sys.path.insert(0, str(Path(__file__).resolve().parents[1]))` 把待測目錄的父目錄
+塞進 sys.path）這種「直接 import 根層同儕模組」慣用法——導致
+windows-compat-ci.yml／macos-compat-ci.yml 皆漏收 tools/check_hooks_liveness.py／
+check_defect_log_crossref.py／check_wrapper_thinness.py／_stdio_utf8.py 四支模組
+（後者透過前三者遞移 import 被消費）卻毫無機械訊號。新增 `_scan_import_consumed_paths()`：
+以 BFS 從 `directory` 內的 test_*.py 出發，掃描其 `import <module>`／
+`import <module> as <alias>` 頂層陳述式，將 `module` 解析為「該來源檔自身所在目錄」
+下的 `<module>.py`（對齊本 repo `sys.path.insert(0, parents[1])` 慣例），並對新發現的
+根層 .py 檔遞迴重複同一掃描（fixed point，關閉「測試只 import A，A 內部又 import B」
+的第二層盲區，如 check_hooks_liveness.py → _stdio_utf8.py）。與既有
+`os.path.join`/`REPO_ROOT /` 正則並行執行、聯集後再套用磁碟存在性過濾器，兩種偵測
+機制互不排斥。
+
+S12（第七輪複審 DEF-101-068(a) 續）：四份 workflow 中 root-infra-ci.yml 是唯一
+「刻意不設 paths 過濾」者（見該檔頭註解：NTFS 敵意檔名閘需對任何路徑生效，
+paths 白名單必留盲區）——硬套上方「消費檔 ⊆ paths」同一套正則毫無意義（沒有
+paths 可比對）。root-infra-ci.yml 真正的同構風險改頭換面成另一種盲區：它的
+bash -n／py_compile 兩個步驟只用 ``find tools ...`` 掃描根層 ``tools/`` 一個
+目錄；若日後在 monorepo 根新增另一個含 .sh／.py 腳本的目錄（如 ``scripts/``、
+``bin/``），該目錄會完全逃過 root-infra-ci 的語法守門而不自知——這正是
+DEF-101-042／DEF-101-068(a) 那種「消費者存在但守門忘了看它」的同一類缺陷，
+只是發生在「掃描根目錄清單」而非「觸發 paths 清單」上。故本節另立兩道專屬
+root-infra-ci.yml 的機械鎖（見檔案下方）：
+  1. 鎖死「刻意不設 paths」的設計決策本身，防止日後被誤「補全」paths 而
+     重新引入假綠盲區；
+  2. 掃描 git 追蹤的全部 .sh／.py 檔，斷言不在 AutoClaude/、AISDLC_SDD/、
+     .claude/（皆各自已有獨立 CI／既有 paths 鎖覆蓋）之外、也不在 tools/
+     之內的「無主根層腳本」為空集——一旦出現即代表有新目錄逃過 root-infra-ci
+     的語法守門。
 """
 from __future__ import annotations
 
 import fnmatch
 import os
 import re
+import subprocess
 
+import pytest
 import yaml
 
 _TESTS_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -30,25 +81,47 @@ def _monorepo_root() -> str:
     return os.path.dirname(os.path.dirname(os.path.dirname(_TESTS_DIR)))
 
 
-def _workflow_paths() -> tuple[list[str], list[str]]:
-    wf = os.path.join(_monorepo_root(), ".github", "workflows", "aisdlc-sdd-ci.yml")
+_WORKFLOWS_DIR = os.path.join(_monorepo_root(), ".github", "workflows")
+
+# workflow 檔名 ↔ 其實際執行的測試目錄（見各 workflow 內對應 run: 步驟）。
+_WORKFLOW_TEST_DIRS: dict[str, str] = {
+    "aisdlc-sdd-ci.yml": _TESTS_DIR,
+    "windows-compat-ci.yml": os.path.join(_monorepo_root(), "tools", "tests"),
+    "macos-compat-ci.yml": os.path.join(_monorepo_root(), "tools", "tests"),
+}
+
+
+def _workflow_paths(workflow_filename: str) -> tuple[list[str], list[str]]:
+    wf = os.path.join(_WORKFLOWS_DIR, workflow_filename)
     with open(wf, encoding="utf-8") as f:
         data = yaml.safe_load(f)
     on = data.get("on") or data.get(True)  # YAML 1.1 把裸 key `on` 解析為布林 True
     return on["push"]["paths"], on["pull_request"]["paths"]
 
 
-_JOIN_RE = re.compile(r"os\.path\.join\(\s*_monorepo_root\(\)\s*,([^)]*)\)")
-_SLASH_RE = re.compile(r'_monorepo_root\(\)((?:\s*/\s*"[^"]+")+)')
+# _monorepo_root()（AISDLC_SDD/scripts/tests/ 慣用法）與 REPO_ROOT（tools/tests/
+# 慣用法，該目錄下巧合等於 monorepo 根）皆可能出現在被掃描目錄中；兩者統一辨識，
+# 誤配對到的候選路徑會被下方「磁碟上存在」過濾器自然濾除（安全網）。
+_JOIN_RE = re.compile(r"os\.path\.join\(\s*(?:_monorepo_root\(\)|REPO_ROOT)\s*,([^)]*)\)")
+_SLASH_RE = re.compile(r'(?:_monorepo_root\(\)|REPO_ROOT)((?:\s*/\s*"[^"]+")+)')
 _STR_RE = re.compile(r'"([^"]+)"')
 
+# S26：`import <module>` / `import <module> as <alias>` 頂層陳述式（tools/tests/ 三支
+# 新測試檔的「直接 import 根層同儕模組」慣用法，見上方檔頭 S26 說明）。
+_IMPORT_RE = re.compile(
+    r"^import\s+([A-Za-z_][A-Za-z0-9_]*)(?:\s+as\s+[A-Za-z_][A-Za-z0-9_]*)?\s*(?:#.*)?$",
+    re.MULTILINE,
+)
 
-def _consumed_root_paths() -> set[str]:
+
+def _scan_dir_for_root_paths(directory: str) -> set[str]:
     found: set[str] = set()
-    for name in sorted(os.listdir(_TESTS_DIR)):
+    if not os.path.isdir(directory):
+        return found
+    for name in sorted(os.listdir(directory)):
         if not (name.startswith("test_") and name.endswith(".py")):
             continue
-        with open(os.path.join(_TESTS_DIR, name), encoding="utf-8") as f:
+        with open(os.path.join(directory, name), encoding="utf-8") as f:
             src = f.read()
         for m in _JOIN_RE.finditer(src):
             segs = _STR_RE.findall(m.group(1))
@@ -58,38 +131,166 @@ def _consumed_root_paths() -> set[str]:
             segs = _STR_RE.findall(m.group(1))
             if segs:
                 found.add("/".join(segs))
+    return found
+
+
+def _scan_import_consumed_paths(directory: str) -> set[str]:
+    """BFS 掃描 `directory` 內 test_*.py 的頂層 `import <module>`，將 module 解析為
+    「來源檔自身所在目錄」或「其父目錄」下的 `<module>.py`（本 repo 兩種並存慣例：
+    tools/*.py 用 `sys.path.insert(0, ...parent)`＝自身目錄；tools/tests/test_*.py
+    用 `sys.path.insert(0, ...parents[1])`＝父目錄——兩者恰好都解到 tools/ 本身，
+    故兩層候選皆試、以磁碟上實際存在者為準），並對新發現的根層 .py 檔遞迴重複同一
+    掃描（fixed point），關閉「測試只 import A、A 內部又 import B」的第二層盲區
+    （見檔頭 S26）。
+    """
+    if not os.path.isdir(directory):
+        return set()
+    seed_files = [
+        os.path.join(directory, name)
+        for name in sorted(os.listdir(directory))
+        if name.startswith("test_") and name.endswith(".py")
+    ]
+    consumed: set[str] = set()
+    visited: set[str] = set()
+    queue = list(seed_files)
+    while queue:
+        f = os.path.abspath(queue.pop(0))
+        if f in visited or not os.path.isfile(f):
+            continue
+        visited.add(f)
+        with open(f, encoding="utf-8") as fh:
+            src = fh.read()
+        own_dir = os.path.dirname(f)
+        candidate_base_dirs = [own_dir, os.path.dirname(own_dir)]
+        for m in _IMPORT_RE.finditer(src):
+            for base_dir in candidate_base_dirs:
+                candidate_abs = os.path.join(base_dir, m.group(1) + ".py")
+                if not os.path.isfile(candidate_abs):
+                    continue
+                rel = os.path.relpath(candidate_abs, _monorepo_root()).replace(os.sep, "/")
+                consumed.add(rel)
+                queue.append(candidate_abs)
+    return consumed
+
+
+def _consumed_root_paths(directory: str) -> set[str]:
+    found = _scan_dir_for_root_paths(directory) | _scan_import_consumed_paths(directory)
     # 只留「磁碟上存在的檔案」——join 到目錄／動態片段者非本鎖標的
     return {p for p in found if os.path.isfile(os.path.join(_monorepo_root(), p))}
 
 
-def test_push_and_pr_paths_symmetric():
-    push, pr = _workflow_paths()
-    assert push == pr, f"push 與 pull_request paths 不對稱（單側漏補）：{push} vs {pr}"
+@pytest.mark.parametrize("workflow_filename", sorted(_WORKFLOW_TEST_DIRS))
+def test_push_and_pr_paths_symmetric(workflow_filename):
+    push, pr = _workflow_paths(workflow_filename)
+    assert push == pr, (
+        f"{workflow_filename}: push 與 pull_request paths 不對稱（單側漏補）：{push} vs {pr}"
+    )
 
 
 def test_known_consumers_detected():
-    """正則退化防呆：已知 5 條根層消費檔必被掃出，否則本鎖形同虛設。"""
-    consumed = _consumed_root_paths()
+    """正則退化防呆：已知消費檔必被掃出，否則本鎖形同虛設。"""
+    consumed: set[str] = set()
+    for directory in _WORKFLOW_TEST_DIRS.values():
+        consumed |= _consumed_root_paths(directory)
     expected = {
         "tools/check_ntfs_paths.py",
         "tools/git-hooks/pre-commit",
         ".claude/settings.json",
         "AutoClaude/.claude/settings.json",
         ".claude/hooks/sdd_hook_router.py",
+        # S26：import-based BFS 新增偵測（見上方檔頭 S26 說明）
+        "tools/check_hooks_liveness.py",
+        "tools/check_defect_log_crossref.py",
+        "tools/check_wrapper_thinness.py",
+        "tools/_stdio_utf8.py",  # 經 check_hooks_liveness.py 等三檔遞移 import 偵得
     }
     missing = expected - consumed
     assert not missing, f"掃描器漏抓已知消費檔（正則退化）：{missing}"
 
 
-def test_all_root_consumers_covered_by_ci_paths():
-    push, _ = _workflow_paths()
+@pytest.mark.parametrize("workflow_filename", sorted(_WORKFLOW_TEST_DIRS))
+def test_all_root_consumers_covered_by_ci_paths(workflow_filename):
+    push, _ = _workflow_paths(workflow_filename)
+    tests_dir = _WORKFLOW_TEST_DIRS[workflow_filename]
     uncovered = [
         p
-        for p in sorted(_consumed_root_paths())
+        for p in sorted(_consumed_root_paths(tests_dir))
         if not p.startswith("AISDLC_SDD/")
         and not any(fnmatch.fnmatch(p, pat) for pat in push)
     ]
     assert not uncovered, (
-        f"根層消費檔未列入 aisdlc-sdd-ci paths"
+        f"根層消費檔未列入 {workflow_filename} paths"
         f"（只改該檔時其回歸鎖不會跑，DEF-101-042 同構）：{uncovered}"
     )
+
+
+# --- root-infra-ci.yml 專屬機械鎖（S12 / DEF-101-068(a)）---------------------------
+# root-infra-ci.yml 刻意不設 paths 過濾，上方 _workflow_paths()/_consumed_root_paths()
+# 一套「消費檔 ⊆ paths」正則對它不適用（沒有 paths 可比對）。以下改針對它真正的
+# 同構風險（掃描根目錄清單而非觸發 paths 清單）另立專屬檢核，見檔頭 S12 說明。
+
+_ROOT_INFRA_CI_PATH = os.path.join(_WORKFLOWS_DIR, "root-infra-ci.yml")
+
+# bash -n／py_compile 兩步驟只掃描根層 tools/；AutoClaude/、AISDLC_SDD/、.claude/
+# 各自已有獨立 CI 或既有 paths 鎖覆蓋其 .sh／.py（見 test_known_consumers_detected
+# 已驗證 .claude/hooks/sdd_hook_router.py 被 windows-compat-ci.yml／aisdlc-sdd-ci.yml
+# paths 覆蓋），故豁免；其餘任何根層 .sh／.py 若不在 tools/ 之下即為無主腳本。
+_ROOT_INFRA_SCAN_EXEMPT_PREFIXES = ("AutoClaude/", "AISDLC_SDD/", ".claude/", "tools/")
+
+
+def _git_ls_files(pathspec: str) -> list[str]:
+    result = subprocess.run(
+        ["git", "ls-files", "--", pathspec],
+        cwd=_monorepo_root(),
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    return [line for line in result.stdout.splitlines() if line]
+
+
+def test_root_infra_ci_has_no_paths_filter():
+    """鎖死 root-infra-ci.yml「刻意不設 paths 過濾」的設計決策（見該檔頭註解）。
+
+    NTFS 敵意檔名閘必須對任何路徑的新增檔案生效，paths 白名單天生必留盲區，
+    故此 workflow 唯一安全做法是不設 paths（每次 push/PR 全跑，皆為輕量步驟，
+    成本可忽略）。若日後有人「比照其餘三份 workflow」補上 paths 清單，會
+    重新引入本測試檔案存在的目的正要根除的假綠盲區——只改被排除路徑時，
+    NTFS 閘／腳本語法閘就不會跑。本鎖鎖死此決策，防止被誤「補全」。
+    """
+    with open(_ROOT_INFRA_CI_PATH, encoding="utf-8") as f:
+        data = yaml.safe_load(f)
+    on = data.get("on") or data.get(True)
+    push = on.get("push") or {}
+    pull_request = on.get("pull_request") or {}
+    assert "paths" not in push, (
+        "root-infra-ci.yml 的 push 觸發不應設 paths 過濾"
+        "（NTFS 敵意檔名閘需對任何路徑生效，見該檔頭註解；補 paths 會重新引入假綠盲區）"
+    )
+    assert "paths" not in pull_request, (
+        "root-infra-ci.yml 的 pull_request 觸發不應設 paths 過濾（理由同 push，見上）"
+    )
+
+
+def test_root_infra_ci_bash_and_py_scan_roots_have_no_stray_scripts():
+    """root-infra-ci.yml 的 bash -n／py_compile 步驟只掃描根層 tools/。
+
+    若日後在 monorepo 根新增另一個含 .sh／.py 腳本、且不屬於 AutoClaude/、
+    AISDLC_SDD/、.claude/（各自已有獨立 CI 或既有 paths 鎖）的目錄，該目錄會
+    完全逃過 root-infra-ci 的語法守門而不自知——與 DEF-101-042／DEF-101-068(a)
+    同一類「消費者存在但守門忘了看它」缺陷，只是發生在掃描根目錄清單而非
+    觸發 paths 清單。本鎖機械斷言：git 追蹤的全部 .sh／.py 檔，扣除上述三個
+    有獨立覆蓋的子專案／目錄後，必須全部落在 tools/ 之下。
+    """
+    for ext in (".sh", ".py"):
+        tracked = _git_ls_files(f"*{ext}")
+        stray = [
+            p
+            for p in tracked
+            if not p.startswith(_ROOT_INFRA_SCAN_EXEMPT_PREFIXES)
+        ]
+        assert not stray, (
+            f"發現不在 tools/ 下、也不屬於 AutoClaude/／AISDLC_SDD/／.claude/ 的根層"
+            f"{ext} 腳本，root-infra-ci.yml 的 bash -n／py_compile 掃描不到"
+            f"（DEF-101-068(a) 同構盲區）：{stray}"
+        )

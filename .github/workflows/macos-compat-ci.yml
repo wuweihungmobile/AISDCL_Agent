@@ -45,6 +45,12 @@
 #   - QA 發現本 workflow 對「docker 測試在 macos-latest 官方 runner 上因無 Docker
 #     daemon 而恆被 skip」這個已知限制，不像 windows-compat-ci.yml 對其 ci-gate.ps1
 #     fallback 覆蓋率限制那樣誠實揭露——已於下方 ci-gate.sh 執行步驟補註記。
+#
+# R6 四方複審修正（2026-07-15，與 windows-compat-ci.yml 同輪同款發現，見該檔同名
+# 段落說明）：本輪新增的 4 支根層生產模組（tools/check_hooks_liveness.py／
+# check_defect_log_crossref.py／check_wrapper_thinness.py／_stdio_utf8.py）皆漏列
+# paths → 補齊四條；同時修復 test_ci_paths_cover_root_consumers.py 對
+# `import X as m` 慣用法的偵測盲區（含遞移一層）。
 
 name: macos-compat-ci
 
@@ -66,6 +72,10 @@ on:
       - "tools/tests/**"
       - "tools/check_script_parity.py"
       - "tools/check_ntfs_paths.py"
+      - "tools/check_hooks_liveness.py"
+      - "tools/check_defect_log_crossref.py"
+      - "tools/check_wrapper_thinness.py"
+      - "tools/_stdio_utf8.py"
       - "**/*.sh"
       - "tools/git-hooks/**"
       - ".claude/**"
@@ -88,6 +98,10 @@ on:
       - "tools/tests/**"
       - "tools/check_script_parity.py"
       - "tools/check_ntfs_paths.py"
+      - "tools/check_hooks_liveness.py"
+      - "tools/check_defect_log_crossref.py"
+      - "tools/check_wrapper_thinness.py"
+      - "tools/_stdio_utf8.py"
       - "**/*.sh"
       - "tools/git-hooks/**"
       - ".claude/**"
@@ -399,7 +413,7 @@ jobs:
           if [ -n "$existing" ]; then
             gh issue comment "$existing" --repo "${REPO}" --body "再次失敗：${RUN_URL}"
           else
-            gh issue create --repo "${REPO}" --title "${TITLE}" --body "macos-nightly-full（continue-on-error 非阻斷 job，不會擋 push/PR）失敗，需人工排查，請勿長期忽略。首次偵測到失敗的執行：${RUN_URL}。修復並綠燈後本 job 會自動關閉本 issue。"
+            gh issue create --repo "${REPO}" --title "${TITLE}" --label "p1,macos,nightly" --body "macos-nightly-full（continue-on-error 非阻斷 job，不會擋 push/PR）失敗，需人工排查，請勿長期忽略。首次偵測到失敗的執行：${RUN_URL}。修復並綠燈後本 job 會自動關閉本 issue。"
           fi
 
       - name: 綠燈時若有既有失敗 issue 則自動關閉

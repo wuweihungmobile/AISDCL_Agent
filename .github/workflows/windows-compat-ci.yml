@@ -57,6 +57,40 @@
 #   - QA 發現 windows-nightly-alert 的「紅色路徑」（開單/留言）從未在真實環境驗證
 #     過（nightly-full 至今從未真的失敗過）→ 補 `simulate_nightly_failure`
 #     workflow_dispatch 輸入，可一次性驗證三條分支邏輯而不需等待真實失敗。
+#
+# R4 複審修正（2026-07-14，S5 發現）：
+#   - DEF-101-067⑤ 記載 tools/check_ntfs_paths.py 未被本 workflow 涵蓋的缺口重新
+#     核對仍存在（先前輪次未真正修復）；且新發現 tools/check_script_parity.py
+#     同樣缺席——對照組 macos-compat-ci.yml 的 paths 與執行步驟皆已涵蓋兩者，
+#     形成「同一輪、同一設計模式，卻只有一邊做對」的不對稱。check_ntfs_paths.py
+#     本質是 NTFS（Windows 檔案系統）相容性檢查，先前卻只在 macOS/Linux 上被驗證
+#     過，從未在它真正要保護的目標平台上跑過，邏輯上本末倒置。補 paths 白名單
+#     兩條 + windows-smoke 新增兩個實際執行步驟（比照 macos-compat-ci.yml 寫法）。
+#
+# R5 複審修正（2026-07-14，S8 發現）：
+#   - 本 workflow 全部步驟一律 `shell: pwsh`（PowerShell 7 / Core），但官方文件
+#     （CLAUDE.md 安裝段落／docs/AISDLC_Agent_UserGuide.md）教使用者用的是
+#     `powershell -ExecutionPolicy Bypass -File ...`（Windows 內建 PowerShell 5.1）
+#     ——CI 驗證的執行引擎與文件教使用者實際會用的執行引擎不同，此前從未被機械
+#     驗證過。掃描 bootstrap.ps1／dev_start.ps1／install_git_hooks.ps1／
+#     install-hooks.ps1／integration_gate.ps1／local_ci_gate.ps1／ci-gate.ps1 均未見
+#     PS7-only 語法（??／?.／&&|| 鏈接／-AsHashtable／ForEach-Object -Parallel），
+#     故非緊急阻斷項，但補在 windows-nightly-full（非 PR 閘門）新增一步驟，以
+#     `shell: powershell` 實際執行文件教學的第一入口 tools/bootstrap.ps1 +
+#     tools/dev_start.ps1，驗證「文件教的那條路」而非只驗證「CI 選的那條路」。
+#
+# R6 四方複審修正（2026-07-15，Architect 親自實測 fnmatch 逐一比對抓到）：
+#   - 本輪新增的 4 支根層生產模組（tools/check_hooks_liveness.py／
+#     check_defect_log_crossref.py／check_wrapper_thinness.py／_stdio_utf8.py）
+#     皆漏列 paths，只改其中一支時本 workflow 完全不會觸發，回歸鎖須等每日
+#     schedule 才跑到（DEF-101-042／DEF-101-068(a) 同構缺口，本 session 自己新增
+#     的檔案自己踩進去）→ 補齊四條 paths。
+#   - 同輪發現機械鎖 AISDLC_SDD/scripts/tests/test_ci_paths_cover_root_consumers.py
+#     對此毫無反應的根因：其正則只認 `os.path.join(REPO_ROOT, ...)` / `REPO_ROOT /
+#     "a" / "b"` 字串引用慣用法，未涵蓋 `import check_hooks_liveness as m` 這種
+#     tools/tests/ 測試檔直接 import 根層同儕模組的慣用法（三支新測試檔皆用此
+#     寫法）→ 已於該測試檔補一道 import-based BFS 掃描（含遞移一層，涵蓋
+#     check_hooks_liveness.py 內部再 import _stdio_utf8.py 的情形），關閉此偵測盲區。
 
 name: windows-compat-ci
 
@@ -75,6 +109,12 @@ on:
       - "tools/dev_start.ps1"
       - "tools/dev_start.py"
       - "tools/tests/**"
+      - "tools/check_script_parity.py"
+      - "tools/check_ntfs_paths.py"
+      - "tools/check_hooks_liveness.py"
+      - "tools/check_defect_log_crossref.py"
+      - "tools/check_wrapper_thinness.py"
+      - "tools/_stdio_utf8.py"
       - "**/*.ps1"
       - "tools/git-hooks/**"
       - ".claude/**"
@@ -94,6 +134,12 @@ on:
       - "tools/dev_start.ps1"
       - "tools/dev_start.py"
       - "tools/tests/**"
+      - "tools/check_script_parity.py"
+      - "tools/check_ntfs_paths.py"
+      - "tools/check_hooks_liveness.py"
+      - "tools/check_defect_log_crossref.py"
+      - "tools/check_wrapper_thinness.py"
+      - "tools/_stdio_utf8.py"
       - "**/*.ps1"
       - "tools/git-hooks/**"
       - ".claude/**"
@@ -277,6 +323,14 @@ jobs:
             git worktree remove --force $chineseDir
           }
 
+      - name: tools/check_script_parity.py（雙平台腳本對等 + pytest 釘選一致；R4 複審發現：先前僅 macOS 側涵蓋）
+        shell: pwsh
+        run: python tools/check_script_parity.py
+
+      - name: tools/check_ntfs_paths.py（NTFS 敵意檔名，全量 tracked 路徑；R4 複審發現：本工具本質為 Windows/NTFS 相容性檢查，先前卻只在 macOS/Linux 上被驗證過，從未在真正的目標平台 Windows 上跑過）
+        shell: pwsh
+        run: python tools/check_ntfs_paths.py
+
   windows-nightly-full:
     name: Windows nightly full suite（深度回歸，非阻斷）
     if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
@@ -291,6 +345,26 @@ jobs:
         uses: actions/setup-python@v6
         with:
           python-version: "3.11"
+
+      - name: Windows PowerShell 5.1（非 pwsh）驗證 bootstrap.ps1 + dev_start.ps1（R5/S8 發現：本 workflow 其餘步驟一律 shell:pwsh，與文件教使用者實際會用的引擎不同，此路徑此前從未被機械驗證過）
+        # 文件（CLAUDE.md／docs/AISDLC_Agent_UserGuide.md）教使用者用
+        # `powershell -ExecutionPolicy Bypass -File tools/bootstrap.ps1`（Windows 內建
+        # PowerShell 5.1 引擎），本 workflow 其餘所有步驟卻一律 `shell: pwsh`
+        # （PowerShell 7 / Core）——CI 驗證的引擎與文件教學的引擎不同。掃描
+        # bootstrap.ps1/dev_start.ps1 等關鍵腳本未見 PS7-only 語法，兩引擎預設輸出
+        # 編碼（UTF-8 vs UTF-16LE）等差異仍從未機械驗證過「文件教的那條路」是否
+        # 真的走得通。放在 windows-nightly-full（而非 windows-smoke）：這是文件路徑
+        # 對等性的深度回歸，不需卡 PR 閘門節奏；用完即刪 .venv，不影響本 job 後續
+        # 使用全域 python/pip 的步驟。
+        shell: powershell
+        run: |
+          ./tools/bootstrap.ps1
+          if (-not (Test-Path .venv\Scripts\python.exe)) { throw "bootstrap.ps1（Windows PowerShell 5.1）執行後 .venv\Scripts\python.exe 未建立" }
+          Write-Host "bootstrap.ps1（Windows PowerShell 5.1）執行成功，.venv 已建立"
+          . ./tools/dev_start.ps1
+          if ($LASTEXITCODE -ne 0) { throw "dev_start.ps1（Windows PowerShell 5.1）核心邏輯（tools/dev_start.py）回報失敗，exit=$LASTEXITCODE" }
+          Write-Host "dev_start.ps1（Windows PowerShell 5.1）執行成功"
+          Remove-Item -Recurse -Force .venv
 
       - name: 安裝 AutoClaude 開發 + lint 依賴（供 local_ci_gate.ps1 使用）
         working-directory: AutoClaude
@@ -392,7 +466,7 @@ jobs:
           if [ -n "$existing" ]; then
             gh issue comment "$existing" --repo "${REPO}" --body "再次失敗：${RUN_URL}"
           else
-            gh issue create --repo "${REPO}" --title "${TITLE}" --body "windows-nightly-full（continue-on-error 非阻斷 job，不會擋 push/PR）失敗，需人工排查，請勿長期忽略。首次偵測到失敗的執行：${RUN_URL}。修復並綠燈後本 job 會自動關閉本 issue。"
+            gh issue create --repo "${REPO}" --title "${TITLE}" --label "p1,windows,nightly" --body "windows-nightly-full（continue-on-error 非阻斷 job，不會擋 push/PR）失敗，需人工排查，請勿長期忽略。首次偵測到失敗的執行：${RUN_URL}。修復並綠燈後本 job 會自動關閉本 issue。"
           fi
 
       - name: 綠燈時若有既有失敗 issue 則自動關閉

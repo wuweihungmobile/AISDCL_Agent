@@ -468,6 +468,13 @@ fsm_drift_daily:
 - 實作：[`tools/fsm_runtime/drift_monitor.py`](../tools/fsm_runtime/drift_monitor.py)
 - 安裝腳本：[`tools/install_hooks/install_post_commit.sh`](../tools/install_hooks/install_post_commit.sh) / `.ps1`
 - 規則出處：CLAUDE.md Rule 9.17.1 ~ 9.17.4
+- ⚠️ **worktree 安全性僅保證於本版（LATEST）**：`AISDLC_SDD_v0.01`（凍結基線）～`v0.29`
+  這 29 個版本的 `install_post_commit.{sh,ps1}` 仍是舊寫法
+  （`git rev-parse --show-toplevel` + `.git/hooks/`），在 linked git worktree 內執行
+  會因 `<worktree>/.git` 是純文字檔而非目錄而寫入失敗（見
+  `tools/fsm_runtime/tests/test_install_post_commit_worktree.py` 對本版的回歸鎖）。
+  若需在 worktree 內對這些舊版跑安裝腳本，請改在主 checkout 執行，或改用本版
+  （LATEST）的等效腳本；依 Copy-on-Evolve 原則不逐版回填修復。
 
 ---
 

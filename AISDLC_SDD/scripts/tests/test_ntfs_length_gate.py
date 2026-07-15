@@ -218,6 +218,13 @@ def _run_ci_tool_in_sandbox(tmp_path, rel_paths: list[str]) -> subprocess.Comple
     tools_dir = os.path.join(repo, "tools")
     os.makedirs(tools_dir, exist_ok=True)
     shutil.copy(_ntfs_tool_path(), os.path.join(tools_dir, "check_ntfs_paths.py"))
+    # S7 修復：check_ntfs_paths.py 改 import 同目錄的 _stdio_utf8.py（Windows 非
+    # UTF-8 終端防崩潰保護）；sandbox 需比照真實部署一併複製此同目錄依賴檔，
+    # 否則 sandbox 內 import 會找不到模組。
+    shutil.copy(
+        os.path.join(os.path.dirname(_ntfs_tool_path()), "_stdio_utf8.py"),
+        os.path.join(tools_dir, "_stdio_utf8.py"),
+    )
     _stage_paths(repo, rel_paths)
     env = {**os.environ, "PYTHONUTF8": "1"}
     return subprocess.run(

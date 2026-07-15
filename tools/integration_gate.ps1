@@ -19,6 +19,7 @@ param(
 )
 $ErrorActionPreference = "Stop"
 $Root = Split-Path -Parent $PSScriptRoot
+$env:PYTHONUTF8 = '1'
 $failures = @()
 $passCount = 0   # P2-1：通過段數（含 cc-switch 已安裝段）
 $skipCount = 0   # P2-1：SKIP 段數（cc-switch 未安裝時 = 1）
@@ -33,37 +34,16 @@ if (-not (Get-Command python -ErrorAction SilentlyContinue)) {
 
 # --- git hooks liveness 偵測（警告不擋）---
 # repo 搬移/改名或未安裝時 dispatcher hooks 會靜默失效（實證）；CI 環境（$env:CI 有值）
-# 跳過（GitHub/act 環境無 hooks 屬正常）。與 AutoClaude/tools/local_ci_gate.ps1 對稱。
+# 跳過（GitHub/act 環境無 hooks 屬正常）。偵測邏輯抽共用（S11）：見
+# tools/check_hooks_liveness.py（單一真相源，供本檔與 AutoClaude/tools/local_ci_gate.ps1 呼叫）；
+# $env:PYTHONUTF8（見上）第二層防護非 UTF-8 終端下的中文 print() 崩潰（對齊
+# AutoClaude/tools/local_ci_gate.ps1 既有做法）。
 if (-not $env:CI) {
-  $prevEAP = $ErrorActionPreference
   try {
-    # 探測段局部 EAP=Continue：PS5.1 + EAP=Stop 下 native stderr 重導（2>$null）會擲
-    # NativeCommandError（同 tools/bootstrap.ps1 Select-Python 已文件化的修法）
-    $ErrorActionPreference = 'Continue'
-    $hlTop = (& git -C $Root rev-parse --show-toplevel 2>$null | Out-String).Trim()
-    if ($hlTop) {
-      $hlExpected = [System.IO.Path]::GetFullPath((Join-Path $hlTop 'tools/git-hooks'))
-      $hlRaw = (& git -C $Root config --get core.hooksPath 2>$null | Out-String).Trim()
-      $hlAbs = ''
-      if ($hlRaw) {
-        if ([System.IO.Path]::IsPathRooted($hlRaw)) { $hlAbs = [System.IO.Path]::GetFullPath($hlRaw) }
-        else { $hlAbs = [System.IO.Path]::GetFullPath((Join-Path $hlTop $hlRaw)) }
-      }
-      if ((-not $hlAbs) -or ($hlAbs -ne $hlExpected) -or (-not (Test-Path -LiteralPath $hlExpected))) {
-        $hlShown = if ($hlRaw) { $hlRaw } else { '（未設定）' }
-        Write-Host ''
-        Write-Host '⚠️⚠️⚠️ [hooks liveness] dispatcher git hooks 未生效 — pre-commit/pre-push 閘門不會執行！' -ForegroundColor Yellow
-        Write-Host "    core.hooksPath 目前值：$hlShown" -ForegroundColor Yellow
-        Write-Host "    預期值：$hlExpected" -ForegroundColor Yellow
-        Write-Host '    請執行安裝腳本（兩子專案閘門同時生效，裝一次即可）：' -ForegroundColor Yellow
-        Write-Host '        powershell -ExecutionPolicy Bypass -File AutoClaude/tools/install_git_hooks.ps1' -ForegroundColor Yellow
-        Write-Host '    （本檢查僅警告、不阻擋閘門執行；CI 環境自動跳過）' -ForegroundColor Yellow
-      }
-    }
+    $hlScript = Join-Path $Root 'tools/check_hooks_liveness.py'
+    if (Test-Path -LiteralPath $hlScript) { & python $hlScript }
   } catch {
     # liveness 為 advisory：任何探測失敗都不得影響閘門本體
-  } finally {
-    $ErrorActionPreference = $prevEAP
   }
 }
 

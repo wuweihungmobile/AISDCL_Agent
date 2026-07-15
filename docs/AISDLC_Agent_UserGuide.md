@@ -76,8 +76,12 @@ source .venv/bin/activate        # macOS / Linux
 
 ```bash
 # 啟用根層 venv 後，在 AutoClaude/ 目錄下執行
-pip install -e .[postgres]            # SQLAlchemy + asyncpg + psycopg2 + alembic + tenacity + cachetools
-pip install -e .[postgres,pgvector]   # 再加 pgvector 向量查詢
+# 🔴 若根層 .venv 是 bootstrap 用 uv 建的（偵測到 uv 時的預設路徑），venv 內部沒有
+#    pip 模組（python -m pip 會報 No module named pip，實機驗證重現），一律改用
+#    uv pip install（uv 已安裝時對任何已啟用 venv 皆可用）；只有走傳統
+#    python -m venv 回退路徑（未裝 uv）才會有 pip 模組可直接用 pip install。
+uv pip install -e .[postgres]            # SQLAlchemy + asyncpg + psycopg2 + alembic + tenacity + cachetools
+uv pip install -e .[postgres,pgvector]   # 再加 pgvector 向量查詢
 ```
 
 > ⚠️ `alembic` 走同步連線，需 `psycopg2-binary`（已含於 `[postgres]` extra）；缺少時 `alembic upgrade head` 會報 `ModuleNotFoundError`。
@@ -357,10 +361,19 @@ docker compose -f docker-compose.ci.yml down -v
 
 ### 4.4 移除 git hooks（如需停用本機把關）
 
-```powershell
-# 重新安裝會覆蓋；要完全停用可手動移除 .git/hooks 下對應檔案
-# （install_git_hooks.ps1 安裝的是 pre-commit / pre-push）
+`install_git_hooks.{ps1,sh}` 安裝的是根層 dispatcher，設定 `core.hooksPath` 指向 `tools/git-hooks/`（絕對路徑），實際生效的是 **pre-commit / pre-push / post-commit 三支**（post-commit 為 `.git/hooks/post-commit` 委派器，觸發 drift 偵測）。因此**手動移除 `.git/hooks/` 下的檔案沒有用**——那個目錄底下本來就沒有 pre-commit/post-commit（`core.hooksPath` 已經指向別處），閘門實際生效與否只看 `core.hooksPath` 這個 git 設定值。要完全停用，兩支安裝腳本都支援 `--uninstall`（等同 `git config --unset core.hooksPath`，還原成 `.git/hooks` 預設）：
+
+```bash
+# macOS / Linux
+bash AutoClaude/tools/install_git_hooks.sh --uninstall
 ```
+
+```powershell
+# Windows
+powershell -ExecutionPolicy Bypass -File AutoClaude/tools/install_git_hooks.ps1 -Uninstall
+```
+
+要重新啟用，再跑一次不帶旗標的安裝指令即可。
 
 ### 4.5 完整卸載（清理環境）
 
@@ -379,12 +392,13 @@ deactivate                          # 退出虛擬環境（若用 venv）
 |------|---------|------|
 | 啟動即報 `claude` 找不到 | 未安裝 Claude Code CLI 或不在 PATH | 安裝 Claude Code 並確認 `claude --version` 可執行 |
 | Minimax 回 `status_code=2049 invalid api key` | API key 與 endpoint 區域不匹配 | 對齊 `.env` 的 `MINIMAX_API_KEY` 與 `MINIMAX_BASE_URL` 區域（國際版 vs 中國版） |
-| `alembic upgrade head` 報 `ModuleNotFoundError` | 缺 `psycopg2` | `pip install -e .[postgres]`（含 psycopg2-binary） |
+| `alembic upgrade head` 報 `ModuleNotFoundError` | 缺 `psycopg2` | `uv pip install -e .[postgres]`（含 psycopg2-binary；venv 若無 pip 模組見上方 1.2 節說明） |
 | PG 連線被拒 / TLS 錯誤 | DSN 缺 `?sslmode=require` | 生產加 `?sslmode=require`；本機 dev 可設 `AUTOCLAUDE_ALLOW_INSECURE_DB=1` |
 | 回覆語言變成韓/日/簡體 | 長對話語言漂移 | 本專案 Stop hook `check_lang.py` 會 warn；請維持繁體中文 |
 | `.sh` 在 bash 噴 `$'\r'` | Windows autocrlf 把行尾轉成 CRLF | `.gitattributes` 已設 `*.sh text eol=lf`；確認檔案為 LF 行尾 |
 | Bash 工具呼叫 `tools\xxx.ps1` exit 127 | 反斜線被 escape 吞噬 | 路徑一律用正斜線 `tools/xxx.ps1` |
-| 測試/lint 失敗 | 環境未裝齊 | 確認 `pip install -e .[dev,notifications,lint]` 並用 Python 3.11+ |
+| 測試/lint 失敗 | 環境未裝齊 | 確認 `uv pip install -e .[dev,notifications,lint]` 並用 Python 3.11+ |
+| `python -m pip` 報 `No module named pip` | 根層 `.venv` 是 bootstrap 用 uv 建的，內部本來就沒有 pip 模組 | 改用 `uv pip install ...`（見 1.2 節） |
 
 ---
 

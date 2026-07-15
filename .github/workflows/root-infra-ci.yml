@@ -32,6 +32,11 @@
 #                      （純 stdlib unittest，零依賴安裝，維持本 job 輕量原則；四方複審
 #                      2026-07-13 REJECT 原因之一即「核心邏輯複雜度已超過 py_compile
 #                      能守住的範圍」，本道步驟收斂該落差）
+#   9. 缺陷帳本跨文件狀態一致閘 — tools/check_defect_log_crossref.py：機械比對
+#                      `ONBOARDING.md` 內對 DEF-\d+-\d+ 的狀態宣稱（open/fixed/wontfix/…）
+#                      與 `docs/06_quality/AutoSDD_Defect_Log.md` 該 ID 最新狀態是否矛盾
+#                      （DEF-101-066 這類「改帳本忘同步姊妹文件」曾真實發生一次，
+#                      本道步驟即該問題類別的治本機械守護，DEF-101-068(e) 落地）
 #
 # 觸發不設 paths 過濾（2026-07-11 起）：第 4 道 NTFS 檔名閘守的是「任何路徑」新增的
 # 敵意檔名（一旦入庫所有 Windows checkout 直接壞），paths 白名單必留盲區；本 job 全部
@@ -55,7 +60,7 @@ permissions:
 
 jobs:
   root-infra:
-    name: root infra guard (bash -n + pwsh parse/BOM + EOL(.sh) + EOL(.ps1) + NTFS + parity + py_compile + unittest)
+    name: root infra guard (bash -n + pwsh parse/BOM + EOL(.sh) + EOL(.ps1) + NTFS + parity + py_compile + unittest + defect-log-crossref)
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
@@ -170,3 +175,6 @@ jobs:
 
       - name: unittest（tools/tests/：dev_start.py 純邏輯函式 + 已修復迴歸點）
         run: python3 -m unittest discover -s tools/tests -p "test_*.py" -v
+
+      - name: 缺陷帳本跨文件狀態一致（ONBOARDING.md 對 DEF-* 狀態宣稱 vs 帳本實況）
+        run: python3 tools/check_defect_log_crossref.py

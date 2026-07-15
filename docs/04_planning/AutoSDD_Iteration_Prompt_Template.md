@@ -123,6 +123,14 @@ Graph)**」開發**人類視覺化儀表板／拓樸結構輸出工具**：把�
      `python .claude/hooks/...`，需以 `v0.0X/` 為 cwd 才正確解析。
    （FSM 相對路徑 `build/reports/fsm/` 由各 hook 以 `Path(__file__).parents[2]` 自我定位，
    不依賴 cwd。）
+   > ⚠️ **worktree 限制（S10）**：上述 (a)/(b) 只解決 `.claude/hooks/` 路由，**不含**
+   > `tools/install_hooks/install_post_commit.{sh,ps1}`（PostCommit advisory hook 安裝
+   > 腳本）。該腳本在 v0.01～v0.29 仍是舊寫法（`git rev-parse --show-toplevel` +
+   > `.git/hooks/`），在 **linked git worktree** 內對非 LATEST 版本執行會因
+   > `<worktree>/.git` 是純文字檔而非目錄而寫入失敗（只有 LATEST 已修復並有回歸鎖
+   > `test_install_post_commit_worktree.py`）。若本輪 B 軌需要在 worktree 內對指定的
+   > `SDD_ACTIVE_VERSION` 舊版安裝該 hook，請改在主 checkout 執行，或改用 LATEST 版
+   > 的等效腳本；不要嘗試回填舊版腳本（違反 Copy-on-Evolve 凍結快照原則）。
 2. 設定 `SDD_PROJECT=AutoSDD_iter_{{N}}`。SessionStart hook
    （`.claude/hooks/session_start.py`）自動呼叫 `FSMRuntime.bootstrap()`
    （`session_start.py:74`），project 取自 `SDD_PROJECT` 環境變數

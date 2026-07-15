@@ -22,6 +22,18 @@ discovery of hook files）。因此從 monorepo 根啟動 session 時，
   原樣轉發 stdin / stdout / stderr / exit code。
 - 版本目錄不存在 → 不讓 CC 崩潰：印 WARN（additionalContext）後 exit 0。
 
+⚠️ **已知限制（S10，worktree × 非 LATEST 版）**：本 router 只負責路由 `.claude/hooks/`
+（SessionStart / PreToolUse / PostToolUse）。若在 `SDD_ACTIVE_VERSION` 指向非 LATEST 的
+凍結版本（如 `0.18`）下，於 **linked git worktree** 內另外執行該版
+`tools/install_hooks/install_post_commit.{sh,ps1}`，該腳本在 v0.01～v0.29 仍是舊寫法
+`REPO_ROOT="$(git rev-parse --show-toplevel)"` + `"$REPO_ROOT/.git/hooks/post-commit"`
+（worktree 下 `<worktree>/.git` 是純文字檔而非目錄，寫入會失敗）——只有 LATEST（目前
+v0.30）已修復為 `--git-common-dir` 寫法並有回歸鎖
+（`tools/fsm_runtime/tests/test_install_post_commit_worktree.py`）。此為已知且刻意
+不回填的歷史快照限制（Copy-on-Evolve：舊版目錄視為凍結時間點，不逐版位元對位打補丁），
+非本 router 的職責範圍。若需在 worktree 內對非 LATEST 版本安裝 PostCommit advisory
+hook，請改在**主 checkout**（非 worktree）執行，或直接使用 LATEST 版的等效腳本。
+
 此檔屬整合層，刪除根 .claude/settings.json 即完全回退，不觸及任何凍結版本體
 （合 Copy-on-Evolve）；屬「新增載入橋接讓 hooks 重新生效」而非停用 hooks
 （合 Rule 9 絕對禁令 #2 之精神並補強之）。

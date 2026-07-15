@@ -26,7 +26,8 @@ toplevel），`cat > .../post-commit` 會因路徑中途元件（`.git`）是檔
 （ubuntu-latest）上自動被收集執行、不需改動任何 CI YAML」，本檔改放在
 `tools/fsm_runtime/tests/`（ci-gate.sh 對本版本顯式執行的既有路徑），零 CI/腳本
 改動即可生效。`windows-compat-ci.yml` 的 `windows-nightly-full`（continue-on-error，
-非阻斷）也會額外把本檔跑一遍，故加了 WSL 佔位 bash 的 skip 防線（見 `_usable_bash`）。
+非阻斷）也會額外把本檔跑一遍，故加了 WSL 佔位 bash 的 skip 防線（見
+`scripts/bash_probe.usable_bash`）。
 
 三道防線：
 1. `test_install_writes_hook_in_plain_checkout`：一般（非 worktree）checkout 下，
@@ -42,7 +43,6 @@ toplevel），`cat > .../post-commit` 會因路徑中途元件（`.git`）是檔
 """
 from __future__ import annotations
 
-import shutil
 import stat
 import subprocess
 import sys
@@ -54,21 +54,16 @@ import pytest
 _TOOLS_DIR = Path(__file__).resolve().parents[2]
 INSTALL_SCRIPT = _TOOLS_DIR / "install_hooks" / "install_post_commit.sh"
 
-
-def _usable_bash() -> str | None:
-    """回傳可用 bash 路徑；Windows 上常見的 WSL 佔位 `System32\\bash.exe` 視為不可用。
-
-    本檔只在 ubuntu-latest（aisdlc-sdd-ci.yml）與 macOS/Linux 本機為硬閘；
-    `windows-compat-ci.yml` 的 windows-nightly-full 亦會額外跑到本檔（continue-on-error
-    非阻斷），此 skip 防線避免在 WSL 佔位 bash 環境下誤判為紅燈。
-    """
-    bash = shutil.which("bash")
-    if not bash:
-        return None
-    if "system32" in bash.replace("/", "\\").lower():
-        return None
-    return bash
-
+# 可用 bash 偵測（Windows 上常見的 WSL 佔位 `System32\bash.exe` 視為不可用）改用
+# AISDLC_SDD/scripts/bash_probe.py 共用 helper（DEF-101-068(c) 樣板去重，非本檔獨立重寫）。
+# 本檔 → fsm_runtime/tests(0) → fsm_runtime(1) → tools(2) → AISDLC_SDD_v0.30(3) → AISDLC_SDD(4)。
+# 官方閘門（ci-gate.sh）以 `cd AISDLC_SDD_v0.30 && pytest tools/fsm_runtime/tests/` 執行，
+# cwd 不含 AISDLC_SDD/ 根，故不能仰賴 `from scripts import bash_probe`（僅 cwd=AISDLC_SDD/
+# 時可行，見 scripts/tests/test_copy_on_evolve.py），須顯式 sys.path 插入（比照根
+# `AISDLC_SDD/conftest.py` 對 `scripts/cross_version_guard.py` 的既有做法）。
+_AISDLC_SDD_ROOT = Path(__file__).resolve().parents[4]
+sys.path.insert(0, str(_AISDLC_SDD_ROOT / "scripts"))
+from bash_probe import usable_bash as _usable_bash  # noqa: E402
 
 _BASH = _usable_bash()
 

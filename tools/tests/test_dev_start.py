@@ -26,6 +26,10 @@ from unittest import mock
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import dev_start  # noqa: E402
+from _platform_helpers import (  # noqa: E402
+    copy_functional_interpreter as _copy_functional_interpreter,
+)
+from _platform_helpers import create_symlink_or_skip  # noqa: E402
 
 
 def _rmtree_force(path: Path) -> None:
@@ -813,9 +817,10 @@ class TestCacheRestoreTrustRestoredBranch(DevStartTestCase):
             # R3 QA 發現：shebang 腳本（#!/bin/sh）只在 POSIX 上可執行，Windows
             # 上 _venv_healthy() 實際 subprocess.run([py, "--version"]) 會撞
             # WinError 193（非合法 PE 格式），使「健康」情境在 Windows 上永遠
-            # 走到「不健康」分支——改複製當前真正在跑的直譯器本體，三平台皆為
-            # 合法可執行檔，能真實驗證 _venv_healthy() 的 subprocess 呼叫成功。
-            shutil.copy(sys.executable, py)
+            # 走到「不健康」分支——改複製當前真正在跑的直譯器本體（含 pyvenv.cfg，
+            # 見 _copy_functional_interpreter），三平台皆為合法可執行檔，能真實
+            # 驗證 _venv_healthy() 的 subprocess 呼叫成功。
+            _copy_functional_interpreter(py)
         else:
             # 損毀的假二進位：非合法可執行格式（無 shebang、非 ELF/Mach-O）→ exec 失敗
             py.write_bytes(b"\x7fbroken-not-a-real-binary\x00\x01")
@@ -1702,8 +1707,9 @@ class TestStepVenvPrevNoneHealthCheck(DevStartTestCase):
             venv_python = root / ".venv" / "bin" / "python"
             venv_python.parent.mkdir(parents=True)
             # R3 QA 發現：shebang 腳本在 Windows 上非合法 PE、_venv_healthy() 會撞
-            # WinError 193，改複製當前真正在跑的直譯器本體，三平台皆可真實執行。
-            shutil.copy(sys.executable, venv_python)
+            # WinError 193，改複製當前真正在跑的直譯器本體（含 pyvenv.cfg，見
+            # _copy_functional_interpreter），三平台皆可真實執行。
+            _copy_functional_interpreter(venv_python)
             venv_python.chmod(0o755)
             bootstrap_calls = []
 
@@ -1769,8 +1775,9 @@ class TestBootstrapIncompleteMarker(DevStartTestCase):
                 # _stream()，讓真正的 _run_bootstrap() 執行（含哨兵讀寫）。
                 venv_python.parent.mkdir(parents=True, exist_ok=True)
                 # R3 QA 發現：shebang 腳本在 Windows 上非合法 PE、_venv_healthy()
-                # 會撞 WinError 193，改複製當前真正在跑的直譯器本體。
-                shutil.copy(sys.executable, venv_python)
+                # 會撞 WinError 193，改複製當前真正在跑的直譯器本體（含 pyvenv.cfg，
+                # 見 _copy_functional_interpreter）。
+                _copy_functional_interpreter(venv_python)
                 venv_python.chmod(0o755)
                 return 1
 
@@ -1823,8 +1830,9 @@ class TestBootstrapIncompleteMarker(DevStartTestCase):
             venv_python = root / ".venv" / "bin" / "python"
             venv_python.parent.mkdir(parents=True)
             # R3 QA 發現：shebang 腳本在 Windows 上非合法 PE、_venv_healthy() 會撞
-            # WinError 193，改複製當前真正在跑的直譯器本體，三平台皆可真實執行。
-            shutil.copy(sys.executable, venv_python)
+            # WinError 193，改複製當前真正在跑的直譯器本體（含 pyvenv.cfg，見
+            # _copy_functional_interpreter），三平台皆可真實執行。
+            _copy_functional_interpreter(venv_python)
             venv_python.chmod(0o755)
             bootstrap_calls = []
 
@@ -1868,8 +1876,9 @@ class TestRootLevelBootstrapIncompleteMarker(DevStartTestCase):
                 venv_python = root / ".venv" / "bin" / "python"
                 venv_python.parent.mkdir(parents=True)
                 # R3 QA 發現：shebang 腳本在 Windows 上非合法 PE、_venv_healthy()
-                # 會撞 WinError 193，改複製當前真正在跑的直譯器本體。
-                shutil.copy(sys.executable, venv_python)
+                # 會撞 WinError 193，改複製當前真正在跑的直譯器本體（含 pyvenv.cfg，
+                # 見 _copy_functional_interpreter）。
+                _copy_functional_interpreter(venv_python)
                 venv_python.chmod(0o755)
 
             marker_path = root / dev_start._BOOTSTRAP_INCOMPLETE_MARKER
@@ -1912,8 +1921,9 @@ class TestRootLevelBootstrapIncompleteMarker(DevStartTestCase):
             venv_python = root / ".venv" / "bin" / "python"
             venv_python.parent.mkdir(parents=True)
             # R3 QA 發現：shebang 腳本在 Windows 上非合法 PE、_venv_healthy() 會撞
-            # WinError 193，改複製當前真正在跑的直譯器本體，三平台皆可真實執行。
-            shutil.copy(sys.executable, venv_python)
+            # WinError 193，改複製當前真正在跑的直譯器本體（含 pyvenv.cfg，見
+            # _copy_functional_interpreter），三平台皆可真實執行。
+            _copy_functional_interpreter(venv_python)
             venv_python.chmod(0o755)
             bootstrap_calls = []
 
@@ -2053,7 +2063,7 @@ class TestStepSwitchCacheCleanup(DevStartTestCase):
             (pytest_cache / "marker.txt").write_text("x", encoding="utf-8")
 
             ruff_cache_link = base / ".ruff_cache"
-            ruff_cache_link.symlink_to(real_target, target_is_directory=True)
+            create_symlink_or_skip(self, ruff_cache_link, real_target, target_is_directory=True)
 
             with mock.patch.object(dev_start, "ROOT", base), \
                  mock.patch.object(dev_start, "_CACHE_BASES", (base,)):

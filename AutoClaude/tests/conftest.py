@@ -9,11 +9,12 @@ PostgreSQL DSN 環境變數命名（L2 finding 統一說明）
 
 AutoClaude 在不同情境下會讀取下列三個環境變數，請勿混用：
 
-| 變數名稱                      | 用途                                              | 讀取位置                                                       |
-|------------------------------|---------------------------------------------------|---------------------------------------------------------------|
-| `AUTOCLAUDE_DB_DSN`          | Production / 一般測試的主要 DSN（推薦使用）       | `autoclaude/infra/repositories/factory.py`、`alembic/env.py`    |
-| `AUTOCLAUDE_PG_DSN`          | Legacy 名稱（已 deprecated，仍向後相容）           | `factory.py` 解析優先級為 `AUTOCLAUDE_DB_DSN > AUTOCLAUDE_PG_DSN` |
-| `AUTOCLAUDE_TEST_PG_DSN`     | **契約測試專用**，避免污染本地正式 DB             | `tests/contract/test_pg_state_repository_contract.py`         |
+- `AUTOCLAUDE_DB_DSN`：Production / 一般測試主要 DSN（推薦使用）。
+  讀取位置：`factory.py`、`alembic/env.py`。
+- `AUTOCLAUDE_PG_DSN`：Legacy 名稱（已 deprecated，仍向後相容）。
+  `factory.py` 解析優先序為 `AUTOCLAUDE_DB_DSN` > 本項。
+- `AUTOCLAUDE_TEST_PG_DSN`：**契約測試專用**，避免污染本地正式 DB。
+  讀取位置：`tests/contract/test_pg_state_repository_contract.py`。
 
 設定方式範例（PowerShell）：
 
@@ -22,12 +23,24 @@ AutoClaude 在不同情境下會讀取下列三個環境變數，請勿混用：
 
 未設定 `AUTOCLAUDE_TEST_PG_DSN` 時，PG 契約測會自動 skip — 這是預期行為，
 本機開發者 **不需** 安裝 PG 也能跑完所有 925+ 測試。
+
+──────────────────────────────────────────────
+跨平台測試 fixture 撰寫紀律（四方複審 S21）
+──────────────────────────────────────────────
+
+若本套件日後出現「複製 `sys.executable` 偽裝健康 venv」或「建立 symlink 模擬快取」
+這類平台敏感 fixture 需求，請比照 `tools/tests/_platform_helpers.py`
+（`copy_functional_interpreter()` / `create_symlink_or_skip()`）的邏輯撰寫對稱
+fixture——該檔已記錄 DEF-101-064／DEF-101-069 的完整踩雷細節（sys.executable 在
+Windows venv-launcher 佈局下依賴同層 pyvenv.cfg、非管理者帳號無 symlink 建立權限
+等），不必重新踩雷。兩套測試框架 pytest root 不同，不強求共用同一檔案，但邏輯必須
+一致、且新 fixture 合入前須至少於一次目標平台的真實 CI run 驗證過（mock
+`sys.platform` 不算數；見根層 ONBOARDING.md §10 與 DEF-101-064／DEF-101-069）。
 """
 from __future__ import annotations
 
 import os
 import re
-from typing import Optional
 
 import pytest
 
@@ -83,7 +96,7 @@ def _preserve_cwd():
 # ──────────────────────────────────────────────────────────────
 
 
-def _resolve_real_pg_dsn() -> Optional[str]:
+def _resolve_real_pg_dsn() -> str | None:
     if os.environ.get("SD07_REAL_PG_E2E_ENABLED", "").lower() != "true":
         return None
     raw = (

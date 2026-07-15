@@ -22,6 +22,7 @@ set -uo pipefail   # 刻意不設 -e：逐項收集結果，最後彙總（對�
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+MONO_ROOT="$(cd "$REPO_ROOT/.." && pwd)"   # monorepo 根（AutoClaude 上一層）— 定位共用 tools/
 cd "$REPO_ROOT"
 export PYTHONUTF8=1
 
@@ -30,28 +31,12 @@ command -v python >/dev/null || { echo '❌ 找不到 python — 請先 source .
 
 # --- git hooks liveness 偵測（警告不擋）---
 # repo 搬移/改名或未安裝時 dispatcher hooks 會靜默失效（實證）；CI 環境（$CI 有值）跳過
-# （GitHub/act 環境無 hooks 屬正常）。與 tools/integration_gate.sh 的同名段落對稱。
+# （GitHub/act 環境無 hooks 屬正常）。偵測邏輯抽共用（S11）：見
+# tools/check_hooks_liveness.py（單一真相源，供本檔與 tools/integration_gate.sh 呼叫）。
 if [ -z "${CI:-}" ]; then
-  _hl_top="$(git rev-parse --show-toplevel 2>/dev/null || true)"
-  if [ -n "$_hl_top" ]; then
-    _hl_expected="$_hl_top/tools/git-hooks"
-    _hl_raw="$(git config --get core.hooksPath 2>/dev/null || true)"
-    # 正規化：installer .ps1 可能寫入混合分隔符（D:/repo\tools/git-hooks）→ 統一為 /
-    _hl_abs="$(printf '%s' "$_hl_raw" | tr '\\' '/')"
-    case "$_hl_abs" in
-      ""|/*|[A-Za-z]:/*) : ;;                    # 空值 / POSIX 絕對 / Windows 磁碟機絕對 → 原樣
-      *) _hl_abs="$_hl_top/$_hl_abs" ;;          # 相對值：以 repo 根解析（git 語意）
-    esac
-    if [ "$_hl_abs" != "$_hl_expected" ] || [ ! -d "$_hl_expected" ]; then
-      echo ''
-      echo '⚠️⚠️⚠️ [hooks liveness] dispatcher git hooks 未生效 — pre-commit/pre-push 閘門不會執行！'
-      echo "    core.hooksPath 目前值：${_hl_raw:-（未設定）}"
-      echo "    預期值：$_hl_expected"
-      echo '    請執行安裝腳本（兩子專案閘門同時生效，裝一次即可）：'
-      echo '        bash AutoClaude/tools/install_git_hooks.sh'
-      echo '    （本檢查僅警告、不阻擋閘門執行；CI 環境自動跳過）'
-    fi
-  fi
+  _hl_script="$MONO_ROOT/tools/check_hooks_liveness.py"
+  [ -f "$_hl_script" ] && python "$_hl_script"
+  true
 fi
 
 DO_ACT=0; DO_PG=0

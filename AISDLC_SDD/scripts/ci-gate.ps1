@@ -17,18 +17,9 @@ $repo = Split-Path -Parent $PSScriptRoot
 # --- 薄委派：找得到 Git Bash 就跑完整 ci-gate.sh ---
 # 排除 WSL 的 System32\bash.exe：那是 Linux 環境（無本 repo 的 Windows venv/依賴），
 # 委派過去語意不對等；只認 Git for Windows 的 bash（PATH 或常見安裝路徑）。
-$bashExe = $null
-$bashCmd = Get-Command bash -ErrorAction SilentlyContinue
-if ($bashCmd -and $bashCmd.Source -and ($bashCmd.Source -notmatch '\\System32\\')) {
-  $bashExe = $bashCmd.Source
-}
-if (-not $bashExe) {
-  foreach ($cand in @("$env:ProgramFiles\Git\bin\bash.exe",
-                      "${env:ProgramFiles(x86)}\Git\bin\bash.exe",
-                      "$env:LocalAppData\Programs\Git\bin\bash.exe")) {
-    if ($cand -and (Test-Path -LiteralPath $cand)) { $bashExe = $cand; break }
-  }
-}
+# 偵測邏輯抽共用（S11）：見 tools/lib/Find-GitBash.ps1。
+. "$PSScriptRoot/../../tools/lib/Find-GitBash.ps1"
+$bashExe = Find-GitBash
 if ($bashExe) {
   Write-Host "==> 偵測到 Git Bash（$bashExe）→ 薄委派 bash scripts/ci-gate.sh（完整雙軌閘門）"
   Set-Location $repo

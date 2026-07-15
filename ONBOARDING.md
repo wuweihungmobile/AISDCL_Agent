@@ -114,6 +114,7 @@ source .venv/bin/activate
 | 文件裡的路徑是 `d:\CursorProject\...` | 文件在 Windows 上撰寫 | 純說明性路徑，忽略即可；實際指令請用相對路徑 |
 | GUI 發起的 git commit（如 VSCode Source Control 按鈕）被 hooks 擋下：`python: command not found`（mac）或缺 ruff 的系統 Python（Windows） | GUI App 不繼承終端機 venv PATH，hooks fail-loud 擋下 | 從已啟用 venv 的終端機啟動編輯器（如 `code .`），或改用終端機 commit |
 | Windows 上首次 `pip install`／`pytest` 異常緩慢 | Windows Defender 即時掃描大量小型 Python 檔案（`.venv`、`__pycache__`） | 非必要但建議：把 `.venv` 與本 repo 目錄加入 Defender 排除清單，可顯著加速 |
+| 手動補裝套件時 `python -m pip ...` 報 `No module named pip` | `.venv` 是 bootstrap 偵測到 `uv` 時走 `uv venv` + `uv pip install` 建的，這種 venv **內部本來就沒有 `pip` 模組**（Mac/Windows 四方複審實機驗證重現） | 改用 `uv pip install -e .[...]`（uv 已安裝時對任何已啟用的 venv 皆可用）；完整警語見 [CLAUDE.md](CLAUDE.md)「AutoClaude — 常用指令與架構」§安裝/執行 與 [docs/AISDLC_Agent_UserGuide.md](docs/AISDLC_Agent_UserGuide.md) §1.2 |
 
 ---
 
@@ -143,7 +144,7 @@ source .venv/bin/activate
 - **已知縫隙**：merge / rebase 自動產生的 commit 天然繞過 pre-commit 家族（git 行為，非本 repo 缺陷），由 pre-push 兜底把關。另一縫隙「rename 移出子專案 fail-open」（`git mv AutoClaude/x docs/x` 時 rename 偵測只列新路徑、來源子專案閘門靜默漏跑）已於四方複審第三輪修復——dispatcher diff 加 `--no-renames`（DEF-101-008）。
 - **pre-commit 新增兩道閘（四方複審第三輪，commit 可能因此被攔的新原因）**：① **NTFS 檔名閘**——新增檔名含 Windows 不允許字元（`< > : " | ? *`／控制字元）、保留裝置名（CON/PRN/AUX/NUL/COM0~9/LPT0~9，COM0/LPT0 比照業界防禦性實作採保守納入）、尾隨空白/句點、或與既有路徑僅大小寫不同（NTFS 碰撞）會被 rc=1 擋下，改名後重新暫存即可（DEF-101-011）；repo 相對路徑 **>200 字元**（code point 計，locale 無關）亦 rc=1 擋下、>180 預警——Windows MAX_PATH=260 保守閘，縮短檔名或目錄層級即可（DEF-101-039，四方複審第五輪）；② **根層基建 leg**——commit 涉及根層 `tools/`、`.github/`、`.gitattributes`、`.editorconfig` 時，對變更到的 `.sh`／無副檔名 hook 檔跑 `bash -n` 語法檢查，語法錯誤擋下（DEF-101-012）。
 - **執行權限政策**：「755 入庫」範圍**僅指 `tools/git-hooks/` 的 hook 檔**（git 直接執行）；其他 `.sh` 工具一律以 `bash xxx.sh` 呼叫，不依賴 executable bit。
-- **雙腳本對等機械守護**：上表三對 `.sh`/`.ps1`（bootstrap／integration_gate／local_ci_gate）的 step 標籤清單由 `tools/check_script_parity.py` 於 `root-infra-ci` 機械比對——改任一邊的 step 須同步另一邊，否則 CI 紅。其餘三對（install_git_hooks、AISDLC_SDD install-hooks、run_act）無可抽取的標籤錨點，**暫無機械比對**——改任一邊須人工同步另一邊（明文侷限，見 check_script_parity.py docstring）。`dev_start` 對不在上述任一類——七步驟業務邏輯集中於跨平台單一核心 `tools/dev_start.py`，**無業務邏輯漂移面**；兩薄殼仍各有直譯器選擇／venv 啟用等樣板（無標籤錨點、暫無機械比對），改任一邊須人工同步另一邊。
+- **雙腳本對等機械守護**：上表三對 `.sh`/`.ps1`（bootstrap／integration_gate／local_ci_gate）的 step 標籤清單由 `tools/check_script_parity.py` 於 `root-infra-ci` 機械比對——改任一邊的 step 須同步另一邊，否則 CI 紅。其餘三對（install_git_hooks、AISDLC_SDD install-hooks、run_act）無可抽取的標籤錨點，**暫無機械比對**——改任一邊須人工同步另一邊（明文侷限，見 check_script_parity.py docstring）。`dev_start` 對不在上述任一類——七步驟業務邏輯集中於跨平台單一核心 `tools/dev_start.py`，**無業務邏輯漂移面**；兩薄殼仍各有直譯器選擇／venv 啟用等樣板（無標籤錨點、暫無機械比對），改任一邊須人工同步另一邊。**薄殼退化守門**：`tools/check_wrapper_thinness.py`（`tools/tests/test_check_wrapper_thinness.py` 隨 `unittest discover` 於 `root-infra-ci` 步驟 8 一併機械執行）守住「兩薄殼不再長回業務邏輯」——行數上限＋禁止樣板關鍵字（迴圈、JSON 解析），非上述的 step 標籤對等比對，四方複審 S20 finding 落地。
 
 ### 6.1 CI workflows（GitHub Actions，根層接線）
 
@@ -159,7 +160,7 @@ source .venv/bin/activate
 | `aisdlc-sdd-artifact-cleanup.yml` | `AISDLC_SDD/.github/workflows/artifact-cleanup.yml` |
 | `aisdlc-sdd-drift-daily.yml` | `AISDLC_SDD/.github/workflows/drift-daily.yml` |
 | `aisdlc-sdd-fsm-chaos-nightly.yml` | `AISDLC_SDD/.github/workflows/fsm-chaos-nightly.yml` |
-| `root-infra-ci.yml` | （四方複審第三輪新增，非遷移）根層基建守門：**全變更觸發**（NTFS 檔名閘須守任意路徑，paths 白名單必留盲區），五道檢查——bash -n＋pwsh parse/BOM（active .ps1：根層 `tools/`＋`AutoClaude/tools/`＋`AISDLC_SDD/scripts/`＋LATEST 版，凍結版排除）＋EOL＋NTFS 檔名閘（`tools/check_ntfs_paths.py`，pre-commit NTFS 閘的 CI 對等）＋腳本對等閘（`tools/check_script_parity.py`：三對 `.sh`/`.ps1` step 標籤清單＋pytest 釘選雙處同版）（DEF-101-012、四方複審第四輪擴充） |
+| `root-infra-ci.yml` | （四方複審第三輪新增，非遷移）根層基建守門：**全變更觸發**（NTFS 檔名閘須守任意路徑，paths 白名單必留盲區），現行**八道**輕量檢查（詳細內容以 workflow 檔頭註解為準，避免每次擴充都要同步改動兩處）——1. `bash -n`（根層 `tools/git-hooks/`＋`tools/*.sh`）；2. pwsh parse＋UTF-8 BOM（active `.ps1`：根層 `tools/`＋`AutoClaude/tools/`＋`AISDLC_SDD/scripts/`＋LATEST 版，凍結版排除）；3. EOL 守門（`.sh`，須為 LF）；4. EOL 守門（`.ps1`，反方向須為 CRLF，2026-07-13 補洞）；5. NTFS 檔名閘（`tools/check_ntfs_paths.py`，pre-commit NTFS 閘的 CI 對等）；6. 腳本對等閘（`tools/check_script_parity.py`：三對 `.sh`/`.ps1` step 標籤清單＋pytest 釘選雙處同版）；7. `py_compile`（根層 `tools/` 下所有 `*.py` 語法檢查，dev_start 四方審查 P2）；8. `unittest`（`tools/tests/` 下 dev_start.py 純邏輯函式，收斂 py_compile 守不到的邏輯回歸落差）（DEF-101-012、四方複審第四／五輪擴充） |
 
 `.actrc` 亦已上移根層；`run_act`（AutoClaude 側）與 `act-ci.sh`（AISDLC_SDD 側）現於 **monorepo 根**執行、讀根層 `.actrc`。（Dependabot 已於 2026-07-12 完全停用並移除根層 `dependabot.yml`——單人 main-only 工作流不採自動相依 PR；GitHub 端 security updates／vulnerability alerts 亦為停用。相依更新改為日後手動盯版或重新啟用。）
 
@@ -237,4 +238,34 @@ macOS 若要手動或半自動跑 nightly，可先參考以下 `launchd` 範本�
 | **凍結版 v0.01~v0.29 `install_post_commit.ps1` 用 `-Encoding ascii` 寫 hook，非 ASCII 路徑會被靜默替換為 `?`**（v0.30 已修：改 `[System.IO.File]::WriteAllText` + `UTF8Encoding($false)`） | 手動 cd 進舊版目錄執行 hook 安裝（非官方流程）時，含中文字元的使用者路徑會讓 drift/closure advisory hook 內嵌路徑損毀、靜默失效；`v0.12~v0.29`（18 支）另因缺 BOM 會先 parser 斷裂根本跑不到此行 | `AutoClaude/tools/install_hooks/install_post_commit.ps1` 已設計為動態解析 LATEST（v0.30），正常安裝流程不會觸及舊版；凍結版依紀律不回改 |
 | **`AutoClaude/pyproject.toml` 的 `hypothesis` 已於 R3 精確鎖版**（`hypothesis==6.156.6`；此前 `>=6.0` 未鎖上限曾於 Wave 1 全新環境 `pip install` 下被懷疑導致約 19 個測試連鎖失敗，後經 SA/SD 兩方獨立以全新 venv 重驗**無法重現**，原始診斷已訂正為未經證實的記事，見 DEF-101-058） | 全新環境 `pip install -e ".[dev]"` 解析依賴版本的跨平台漂移風險，不因鎖版而完全消除——`pyproject.toml` 另有 ~18 條相依（`pydantic`／`sqlalchemy`／`httpx` 等）仍未鎖版本上限，屬同類風險（見 DEF-101-060，尚未處理） | 已修：`pyproject.toml` 鎖定為經本機全新 venv 驗證綠燈的 `hypothesis==6.156.6`（DEF-101-058，fixed@Mac/Windows 四方複審 2026-07-14）。其餘 ~18 條未鎖依賴為 DEF-101-060，記事存證待後續輪逐一評估鎖版 |
 
-> 對應缺陷帳本：前兩條＝[AutoSDD_Defect_Log.md](docs/06_quality/AutoSDD_Defect_Log.md) DEF-101-003／DEF-101-004（wontfix＋凍結版紀律）；第 4~8 條＝DEF-101-019／DEF-101-020（wontfix＋凍結版紀律）與 DEF-101-021／DEF-101-022／DEF-101-025（open）；倒數第三條（凍結版 settings 兩面向）＝DEF-101-040（wontfix＋凍結版紀律）；倒數第二條（`install_post_commit.ps1` ASCII 編碼）＝DEF-101-056（open，記事存證）；末條（`hypothesis` 版本鎖定）＝DEF-101-058（**fixed@Mac/Windows 四方複審 2026-07-14**；R3 複審發現本文件先前敘述與此已修復實況不同步，已訂正）。另有 **DEF-101-005**（`verify_traceability.sh` 的 `set -e`＋grep 零命中提前靜默退出，所有 bash 版本皆然、v0.30 亦未修，**open** 待 RFC）、**DEF-101-018**（ruff 存量 baseline 1,339 筆待分批清理，open；其「未鎖版跨機器漂移」根因 DEF-101-006 已 fixed@四方複審第三輪）、**DEF-101-057**（`install_post_commit.{sh,ps1}` worktree 路徑解析 bug 在 v0.01~v0.29 之殘留，open，記事存證；不佔本表列，因與上方 DEF-101-056 同源議題已合併敘述於缺陷帳本本身）與 **DEF-101-060**（`pyproject.toml` 另有 ~18 條相依未鎖版本上限，open，記事存證，見上表 hypothesis 列）非平台缺口、不列本表。
+> 對應缺陷帳本：前兩條＝[AutoSDD_Defect_Log.md](docs/06_quality/AutoSDD_Defect_Log.md) DEF-101-003／DEF-101-004（wontfix＋凍結版紀律）；第 4~8 條＝DEF-101-019／DEF-101-020（wontfix＋凍結版紀律）與 DEF-101-021／DEF-101-022／DEF-101-025（open）；倒數第三條（凍結版 settings 兩面向）＝DEF-101-040（wontfix＋凍結版紀律）；倒數第二條（`install_post_commit.ps1` ASCII 編碼）＝DEF-101-056（wontfix＋凍結版紀律，記事存證；本文件先前誤記為 open，經 `tools/check_defect_log_crossref.py` 機械揪出已訂正）；末條（`hypothesis` 版本鎖定）＝DEF-101-058（**fixed@Mac/Windows 四方複審 2026-07-14**；R3 複審發現本文件先前敘述與此已修復實況不同步，已訂正）。另有 **DEF-101-005**（`verify_traceability.sh` 的 `set -e`＋grep 零命中提前靜默退出，所有 bash 版本皆然、v0.30 亦未修，**open** 待 RFC）、**DEF-101-018**（ruff 存量 baseline 1,339 筆待分批清理，open；其「未鎖版跨機器漂移」根因 DEF-101-006 已 fixed@四方複審第三輪）、**DEF-101-057**（`install_post_commit.{sh,ps1}` worktree 路徑解析 bug 在 v0.01~v0.29 之殘留，wontfix＋凍結版紀律，記事存證；本文件先前誤記為 open，經 `tools/check_defect_log_crossref.py` 機械揪出已訂正；不佔本表列，因與上方 DEF-101-056 同源議題已合併敘述於缺陷帳本本身）與 **DEF-101-060**（`pyproject.toml` 另有 ~18 條相依未鎖版本上限，open，記事存證，見上表 hypothesis 列）非平台缺口、不列本表。
+
+---
+
+## 10. 跨平台測試 fixture 撰寫紀律（強制檢查點）
+
+**規則**：任何新增的跨平台測試 fixture（涉及檔案系統／直譯器／symlink／subprocess 等
+平台假設，例如 mock `sys.platform`、複製 `sys.executable` 偽裝健康 venv、建立
+symlink 模擬快取等），**在合入前必須至少於一次目標平台的真實 CI run 驗證過，mock
+`sys.platform` 不算數**。
+
+**理由（血淚教訓，見 [AutoSDD_Defect_Log.md](docs/06_quality/AutoSDD_Defect_Log.md)
+DEF-101-064／DEF-101-069）**：`tools/tests/test_dev_start.py` 這批平台邏輯測試長期
+只在 `ubuntu-latest`（靠 mock `sys.platform` 模擬）跑過；`windows-compat-ci.yml` 補上
+真正在 windows-latest 執行後，**第一次真跑就一口氣揪出 16 個真實失敗**
+（`UnicodeEncodeError`／shebang 腳本非合法 PE 格式／唯讀 git 物件檔無法用 POSIX
+語意刪除等）——證明「本機或 CI mock 綠燈」不能代表「目標平台真的能跑」，這類假設
+只有真的在對應作業系統上執行一次才會顯形。
+
+**落地方式**：
+- PR 觸及 `tools/tests/**`、`AutoClaude/tests/**` 等含平台假設的測試檔時，
+  `windows-compat-ci.yml` / `macos-compat-ci.yml` 的 paths 白名單須涵蓋（見
+  DEF-101-064 修復），且對應 smoke job 須有實際「執行」該測試檔的 step，非僅語法
+  解析。
+- 新增測試若需要「健康的既有 venv/直譯器」或「symlink」等平台敏感 fixture，優先重用
+  `tools/tests/_platform_helpers.py`（`copy_functional_interpreter()` /
+  `create_symlink_or_skip()`），不要重新手刻——這兩個 helper 本身就是
+  DEF-101-064／DEF-101-069 修復的產物，內含完整踩雷紀錄；`AutoClaude/tests/`
+  若有對等需求，比照同一邏輯在 `conftest.py` 撰寫對稱 fixture（見該檔說明）。
+- 合入前至少手動觸發一次對應平台的 `workflow_dispatch`（或等待該 PR/nightly 真跑），
+  不可只憑本機同平台或 `ubuntu-latest` mock 的綠燈就視為「跨平台已驗證」。

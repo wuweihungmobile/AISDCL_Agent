@@ -478,8 +478,14 @@ class TestPtyWrapper:
         complex_prompt = "請建立 `t.py`; assert add(2,3)==5\n完成後輸出 [TEST_READY]"
         fake_wexpect = MagicMock()
         fake_wexpect.spawn.return_value = MagicMock()
+        # Mac/Windows 四方複審實機發現：命令是否解析成「原樣字串」還是「已解析
+        # 絕對路徑」取決於本機 PATH 上是否真的裝了 claude CLI（shutil.which 結果），
+        # 讓斷言值隨開發機器現況飄動——本測真正要守的是「args 以 list 傳、不被
+        # shell-join 成單一字串」，command 本身是否已被解析為絕對路徑無關，故明確
+        # patch shutil.which 回傳 None，固定為「找不到→原樣回傳 command」分支。
         with patch("autoclaude.perception.pty_wrapper._WEXPECT_AVAILABLE", True), \
-             patch("autoclaude.perception.pty_wrapper.wexpect", fake_wexpect, create=True):
+             patch("autoclaude.perception.pty_wrapper.wexpect", fake_wexpect, create=True), \
+             patch("autoclaude.perception.pty_wrapper.shutil.which", return_value=None):
             pty = _make_pty(command="claude", args=["-p", complex_prompt])
             pty.start()
         call = fake_wexpect.spawn.call_args

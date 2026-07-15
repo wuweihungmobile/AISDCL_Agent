@@ -74,14 +74,11 @@ SUMMARY: dict[str, str] = {}
 # UnicodeEncodeError 崩潰——先前只有 main()（CLI 入口）內重設編碼，測試套件與
 # 任何未經 main() 直接呼叫模組內部函式的呼叫端（未來的 import 使用者）不會套用
 # 到這道保護。改在模組載入當下就重設，涵蓋所有呼叫路徑，且與 main() 原本的保護
-# 邏輯等價（stdout/stderr 皆改 UTF-8 + errors="replace"，不支援 reconfigure 的
-# 串流如測試用 io.StringIO 會被 hasattr 守門跳過，零副作用）。
-for _stream in (sys.stdout, sys.stderr):
-    if hasattr(_stream, "reconfigure"):
-        try:
-            _stream.reconfigure(encoding="utf-8", errors="replace")
-        except (OSError, ValueError):
-            pass
+# 邏輯等價。R4 複審 S7 發現：此保護抽成 tools/_stdio_utf8.py 共用 helper（避免
+# check_ntfs_paths.py / check_script_parity.py 各自複製貼上第三份同款程式碼）。
+import _stdio_utf8  # noqa: E402,F401
+# step_hooks() 與 tools/check_hooks_liveness.py 共用同一份判定邏輯（S22，見該函式註解）。
+import check_hooks_liveness  # noqa: E402
 
 
 def _hr(n: int, title: str) -> None:
@@ -1312,43 +1309,24 @@ def step_hooks(now: str, is_repo: bool) -> None:
     # 時舊版仍印出「仍生效」）。差異只在於：偵測到未生效時，linked worktree 內
     # 不嘗試自動修（安裝腳本的 worktree 防護會拒絕執行並誤報「安裝失敗」），
     # 而是明確指向主 checkout。
+    #
+    # 判定演算法（是否為 linked worktree、預期 dispatcher 目錄在哪、core.hooksPath
+    # 是否生效）與 tools/check_hooks_liveness.py（供 integration_gate/local_ci_gate
+    # 呼叫的 advisory-only 檢查）共用同一份純函式 evaluate()，避免兩處各自重寫一份
+    # 同款演算法後行為分歧（四方複審 S22 / DEF-101-068(c)）。本函式只負責「取得輸入」
+    # （沿用既有 _git()，固定 -C ROOT、不依賴 cwd）與「拿到結果後要自動修復」；
+    # is_file 檢查注入自家的 _safe_is_file（吞外接碟/網路磁碟抖動的 OSError，見
+    # TestStepHooksIsFileOSError 迴歸測試），判定邏輯本身不在此重寫。
     gd = _git("rev-parse", "--git-dir").stdout.strip()
     gcd = _git("rev-parse", "--git-common-dir").stdout.strip()
-    is_linked_worktree = False
-    hooks_dir = HOOKS_DIR
-    if gd and gcd:
-        try:
-            gd_resolved = Path(gd).resolve()
-            gcd_resolved = Path(gcd).resolve()
-            is_linked_worktree = gd_resolved != gcd_resolved
-            if is_linked_worktree:
-                # 比較基準必須是主 checkout 的 HOOKS_DIR，不能用本 worktree 自己的
-                # ROOT 算出來的 HOOKS_DIR——core.hooksPath 永遠指向主 checkout 絕對
-                # 路徑，兩者physical 目錄天生不同，用 worktree 自己的 HOOKS_DIR 比對
-                # 會恆為 False（Architect 複審發現：上一輪修復本身引入的新 P1，任何
-                # worktree 內執行 dev_start 都會 100% 誤判「未生效」，即使主 checkout
-                # 完全正確）。gcd 為主 checkout 共用的 .git 目錄，其 parent 即主根。
-                hooks_dir = gcd_resolved.parent / "tools" / "git-hooks"
-        except OSError:
-            pass
     cur = _git("config", "--get", "core.hooksPath").stdout.strip()
-    hooks_ok = False
-    if cur:
-        try:
-            # ROOT 為基準展開（若 cur 本身已是絕對路徑，ROOT / cur 仍等同 Path(cur)——
-            # pathlib 的 / 對絕對右運算元會直接取代左邊）；否則相對路徑會誤依「執行時
-            # cwd」而非 repo ROOT 展開，造成假性漂移判定（Architect 審查 P2）
-            same = (ROOT / cur).resolve() == hooks_dir.resolve()
-        except OSError:
-            same = False
-        hooks_ok = same and all(
-            _safe_is_file(hooks_dir / h) for h in ("pre-commit", "pre-push", "post-commit"))
-    if hooks_ok:
+    result = check_hooks_liveness.evaluate(ROOT, gd, gcd, cur, is_file=_safe_is_file)
+    if result.ok:
         print("    ✅ core.hooksPath 指向根層 dispatcher，三支 hook 齊備")
         SUMMARY["hooks"] = "正常"
         return
     reason = "未設定" if not cur else f"漂移（目前={cur}）"
-    if is_linked_worktree:
+    if result.is_linked_worktree:
         _warn(f"linked worktree：core.hooksPath {reason} — 本 worktree 無法自行安裝"
               f"（會被安裝腳本的 worktree 防護拒絕），請至主 checkout 執行任一支 "
               f"install_git_hooks（見 ONBOARDING §6）")

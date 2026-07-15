@@ -5,11 +5,11 @@
 > **微核心化架構**：Hexagonal Architecture（9 Ports）+ Kernel/EventBus + 13 Plugin + DAL 三後端（File / InMemory / PostgreSQL）。
 
 [![Python](https://img.shields.io/badge/python-3.11%2B-blue)]()
-[![Tests](https://img.shields.io/badge/tests-2732%20passed%20%2F%20122%20skipped-brightgreen)]()
+[![Tests](https://img.shields.io/badge/tests-3567%20passed%20%2F%20195%20skipped-brightgreen)]()
 [![Status](https://img.shields.io/badge/status-active-green)]()
 [![Autonomy](https://img.shields.io/badge/autonomy-Level%205%20(Evo--006)-orange)]()
-[![Sprint](https://img.shields.io/badge/sprint-SD__09%20W3%20(R61)-blue)]()
-[![Arch](https://img.shields.io/badge/import--linter-7%20kept%20%2F%200%20broken-blueviolet)]()
+[![Sprint](https://img.shields.io/badge/sprint-verified%202026--07--15-blue)]()
+[![Arch](https://img.shields.io/badge/import--linter-8%20kept%20%2F%200%20broken-blueviolet)]()
 
 ---
 
@@ -67,19 +67,23 @@
 
 ### 1. 安裝
 
+> ℹ️ **本專案現為 monorepo 子目錄**：AutoClaude 已併入單一 monorepo `AISDCL_Agent`（2026-06-13 移除巢狀 `.git`），不再是獨立倉庫。請從 monorepo 根 clone，再依 [根層 ONBOARDING.md](../ONBOARDING.md) 執行一鍵設定（`tools/bootstrap.sh` / `tools/bootstrap.ps1`），bootstrap 會自動處理本子目錄的依賴安裝。以下步驟示範單獨在 `AutoClaude/` 內手動安裝依賴（例如已用根層 bootstrap 建好 `.venv` 後，只想針對本子專案加裝 extras）：
+
 ```bash
-git clone https://github.com/wuweihungmobile/AutoClaude.git
-cd AutoClaude
-pip install -e .[dev,notifications]
+git clone https://github.com/wuweihungmobile/AISDCL_Agent.git
+cd AISDCL_Agent/AutoClaude
+uv pip install -e .[dev,notifications]
 
 # 架構約束檢查（import-linter）
-pip install -e .[lint]
+uv pip install -e .[lint]
 
 # PostgreSQL 後端（選配，Phase 6）
-pip install -e .[postgres]            # SQLAlchemy + asyncpg + psycopg2 + alembic + tenacity + cachetools
-pip install -e .[postgres,pgvector]   # 加 pgvector 向量查詢
+uv pip install -e .[postgres]            # SQLAlchemy + asyncpg + psycopg2 + alembic + tenacity + cachetools
+uv pip install -e .[postgres,pgvector]   # 加 pgvector 向量查詢
 ```
 
+> ⚠️ **venv 若是 uv 建立的，內部沒有 `pip` 模組**：monorepo 根層 `tools/bootstrap.ps1`/`.sh` 偵測到 `uv` 時一律用 `uv venv` 建置 `.venv`，此類 venv 內 `python -m pip` 會報 `No module named pip`（實機驗證重現），一律改用 `uv pip install`（uv 已安裝時對任何已啟用 venv 皆可用）；只有走傳統 `python -m venv` 回退路徑（未裝 uv）才會有 `pip` 模組可直接用 `pip install`。
+>
 > ⚠️ `alembic` 走同步連線，migration 工具需 `psycopg2-binary`（已含於 `[postgres]` extra）；缺少時 `alembic upgrade head` 會報 `ModuleNotFoundError`。
 
 ### 2. 設定
@@ -225,11 +229,11 @@ alembic/versions/               # DB migrations（0001 → 0015，共 15 個）
 ├── 0009_three_tier_schema.py … 0011_rbac_tables.py
 └── 0013_drift_log.py / 0014_config_audit_log.py / 0015_merge_sd06_optional_gin.py
 
-tests/                          # 2,732 passed / 122 skipped（SD_09 W3 R61 基線）
+tests/                          # 3,567 passed / 195 skipped（2026-07-15 實測基線；SD_09 W3 R61 舊基線為 2,732/122，2026-06-12）
 ├── core/ plugins/ infra/       # Kernel / 13 Plugin / adapters + repositories
 ├── contract/                   # DAL 契約測試（File vs PG 行為等價）+ runner 防護
 ├── equivalence/ cli/ integration/ perf/   # 等價 / CLI / 整合 / 性能 baseline
-└── tools/                      # hooks / nightly 驗證鏡子自身測試（421 passed，2026-06-12 實測；R61 原 404）
+└── tools/                      # hooks / nightly 驗證鏡子自身測試（587 passed，2026-07-15 實測；R61 原 421）
 ```
 
 ### Plugin 註冊順序（`wiring._REGISTER_ORDER` — SSOT）
@@ -238,7 +242,7 @@ tests/                          # 2,732 passed / 122 skipped（SD_09 W3 R61 基�
 
 > EventBus 排序主鍵為 `plugin.priority()`，tie-breaker 為註冊順序；`fast_path` / `notification` / `knowledge_base` / `goal_synthesis` 共用 priority=50，順序即 tie-breaker，重排會破壞 PRE_ATTEMPT 早觸發語意。
 
-### 架構約束（import-linter 7 kept / 0 broken）
+### 架構約束（import-linter 8 kept / 0 broken）
 
 | # | Contract | 規則 |
 |---|----------|------|
@@ -249,6 +253,7 @@ tests/                          # 2,732 passed / 122 skipped（SD_09 W3 R61 基�
 | 5 | executor-brain-isolation | Executor 模組不可 import Brain 模組（走 EventBus） |
 | 6 | runner-no-checkpoint-logic | `playbook_runner` / strategy 不可 import checkpoint 內部模組（走 CheckpointPlugin 公開 API） |
 | 7 | plugin-no-utils-observability | Plugin 不可直接 import `utils.observability` helpers（走 IObservabilityPort） |
+| 8 | plugin-no-direct-kb-metric-store | Plugin 不可直接 import `IKbMetricStore`（走 `FailureKnowledgeBase` routing） |
 
 ### DAL 三後端策略
 
@@ -336,7 +341,7 @@ INIT → PRE_RUN_VALIDATE → CONTEXT_NEGOTIATION → EXECUTE(step N)
 ## 🧪 測試
 
 ```bash
-# 全部測試（2,732 passed / 122 skipped，SD_09 W3 R61 基線）
+# 全部測試（3,567 passed / 195 skipped，2026-07-15 實測基線）
 python -m pytest tests/ -q
 
 # 特定模組
@@ -347,7 +352,7 @@ python -m pytest tests/infra/ tests/contract/ -v   # DAL 三後端 + 契約等�
 python -m pytest tests/tools/ -v                   # hooks / nightly 驗證鏡子自身測試
 
 # 架構約束檢查（import-linter）
-PYTHONUTF8=1 lint-imports                          # 7 kept / 0 broken
+PYTHONUTF8=1 lint-imports                          # 8 kept / 0 broken
 ```
 
 > **隨機性註記**：`pytest-randomly` 未啟用，測試順序由 collection 確定（紀律 #16）。
@@ -416,9 +421,11 @@ powershell -ExecutionPolicy Bypass -File tools/run_local_nightly.ps1
 | SD_06 | PG 三層任務模型 + Brain/Executor EventBus 分工 + `_runner_internals` 物理刪除 | ✅ 完成 |
 | SD_07 | LOC 分級政策（ADR-SD07-001）+ 肥胖檔案二度拆 + 6 議題 e2e；**2,012 passed** | ✅ 完成 |
 | SD_08 | 文件治理（CLAUDE.md ≤ 400）+ 可觀測性 IObservabilityPort + mutation/perf baseline + 5 ADR；**≥ 2,100 passed** | ✅ 完成 |
-| **SD_09** | **觀察期 #1/#2/#3 nightly 採集 + W3 zero-trust audit 連 38 輪閉環（R24~R61）；2,732 passed / 122 skipped** | 🟡 進行中 |
+| **SD_09** | **觀察期 #1/#2/#3 nightly 採集 + W3 zero-trust audit 連 38 輪閉環（R24~R61）；後續 improving_100/101 等輪持續累積，2026-07-15 實測 3,567 passed / 195 skipped** | 🟡 進行中 |
 
-**最新基線（SD_09 W3 R61，2026-06-12）**：**2,732 passed / 122 skipped**（88.69s）；import-linter **7 kept / 0 broken**；LOC violations = **0**；ADR 共 **17 條**（SD06~SD09）；nightly 6 stage 全綠（kill_rate 76.51%、perf green）。四方 zero-trust audit OVERALL PASS（0 P0 / 0 P1 / 0 P2）。
+**R61 歷史基線（SD_09 W3 R61，2026-06-12）**：2,732 passed / 122 skipped（88.69s）；import-linter 7 kept / 0 broken；LOC violations = 0；ADR 共 17 條（SD06~SD09）；nightly 6 stage 全綠（kill_rate 76.51%、perf green）。四方 zero-trust audit OVERALL PASS（0 P0 / 0 P1 / 0 P2）。
+
+**最新實測基線（2026-07-15，跨平台相容性修復輪次後）**：**3,567 passed / 195 skipped**（57.53s）；import-linter **8 kept / 0 broken**；`tests/tools/` 鏡子自身測試 587 passed。
 
 > **觀察期進度**：#1 mutation kill_rate 達標（unique sha 源碼演進閘門待 W1）；#2 AC4 p95<60ms 達標日 ~2026-06-16；#3 drift_log 30 天零 severity 達標日 ~2026-06-24。
 
@@ -429,8 +436,8 @@ powershell -ExecutionPolicy Bypass -File tools/run_local_nightly.ps1
 ### 快速啟用（Both 模式灰度）
 
 ```bash
-# 1. 安裝依賴
-pip install -e .[postgres]
+# 1. 安裝依賴（venv 若是 uv 建的無 pip 模組，見上方「快速開始」警語）
+uv pip install -e .[postgres]
 
 # 2. 設定環境變數
 export AUTOCLAUDE_DB_DSN="postgresql+asyncpg://koala:koala5@192.168.1.133/aisdlc?sslmode=require"
@@ -495,11 +502,13 @@ storage:
 | `pgvector>=0.3` | 向量查詢（需 pgvector extension） | `pgvector` |
 
 ```bash
-pip install -e .[dev,notifications]           # 開發環境
-pip install -e .[lint]                        # 架構約束檢查
-pip install -e .[postgres]                    # 加 PostgreSQL 後端
-pip install -e .[postgres,pgvector]           # 加向量查詢
+uv pip install -e .[dev,notifications]           # 開發環境
+uv pip install -e .[lint]                        # 架構約束檢查
+uv pip install -e .[postgres]                    # 加 PostgreSQL 後端
+uv pip install -e .[postgres,pgvector]           # 加向量查詢
 ```
+
+> ⚠️ 上述 `uv pip install` 前提是已啟用 uv 建的 venv（見「快速開始」警語）；若走傳統 `python -m venv` 回退路徑，直接用 `pip install -e ...` 即可。
 
 > Python `>=3.11` required。
 
