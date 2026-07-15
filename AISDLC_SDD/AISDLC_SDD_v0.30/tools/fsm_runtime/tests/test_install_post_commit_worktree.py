@@ -33,10 +33,12 @@ toplevel），`cat > .../post-commit` 會因路徑中途元件（`.git`）是檔
 1. `test_install_writes_hook_in_plain_checkout`：一般（非 worktree）checkout 下，
    hook 正確寫入 `.git/hooks/post-commit`、可執行、內容含兩支 advisory hook 路徑。
 2. `test_install_writes_hook_to_shared_git_dir_from_worktree`：本檔核心情境——linked
-   worktree（比照 SA/QA 手動驗證手法，故意用含非 ASCII 字元的路徑重現真實案例）下，
-   斷言 (a) 腳本 exit 0、(b) hook 寫入**主 repo**共用 `.git/hooks/post-commit`
-   （而非 worktree 自己的 `.git`，那本來就不是目錄）、(c) hook 內容正確、
-   非 ASCII 路徑片段未被亂碼污染（無 U+FFFD 替代字元 / 無 `?` 替代字元）。
+   worktree 下，斷言 (a) 腳本 exit 0、(b) hook 寫入**主 repo**共用 `.git/hooks/post-commit`
+   （而非 worktree 自己的 `.git`，那本來就不是目錄）、(c) hook 內容正確、非 ASCII
+   路徑片段未被亂碼污染（無 U+FFFD 替代字元 / 無 `?` 替代字元）。2026-07-16 訂正：
+   非 ASCII 路徑改建在**主 checkout 自身**（而非 worktree 目錄名）——P1 修復（見下方）
+   之後來源路徑解回主 checkout，worktree 名稱不再出現在 hook 內容中，另補一條斷言
+   鎖死「hook 內容不應含 worktree 自身路徑」以固定修復意圖。
 3. 退回硬編碼寫法的回歸重現驗證：因無法對 tracked 檔案做「改壞再測」而不留痕，
    已改於 scratch 副本人工驗證（非本檔內容，見任務完成報告），確認退回舊寫法時
    `test_install_writes_hook_to_shared_git_dir_from_worktree` 會如預期失敗。
@@ -85,14 +87,17 @@ def _git(*args: str, cwd: Path, check: bool = True) -> subprocess.CompletedProce
     )
 
 
-def _make_fake_monorepo(base: Path, version_name: str = "AISDLC_SDD_v0.99") -> Path:
+def _make_fake_monorepo(
+    base: Path, version_name: str = "AISDLC_SDD_v0.99", repo_name: str = "repo"
+) -> Path:
     """建立最小化假 monorepo：`AISDLC_SDD/<version>/.claude/hooks/{drift,closure}.py` 並 commit。
 
     `install_post_commit.sh` 只在存在性檢查與 LATEST 版本解析階段依賴這兩支檔案；
     本測試不觸發真實 commit hook 執行，只驗證安裝腳本本身的寫入行為，故內容用 dummy
-    placeholder 即可，不需可執行的真實 hook 邏輯。
+    placeholder 即可，不需可執行的真實 hook 邏輯。`repo_name` 可指定非 ASCII 目錄名，
+    供 worktree 測試重現編碼驗證情境（見下方 P1 修復訂正說明）。
     """
-    repo = base / "repo"
+    repo = base / repo_name
     repo.mkdir()
     _git("init", "-q", cwd=repo)
     hooks_dir = repo / "AISDLC_SDD" / version_name / ".claude" / "hooks"
@@ -163,12 +168,20 @@ def test_install_writes_hook_in_plain_checkout(tmp_path):
 def test_install_writes_hook_to_shared_git_dir_from_worktree(tmp_path):
     """核心回歸鎖：linked git worktree 下，hook 必須寫入主 repo 共用的 .git/hooks/。
 
-    比照 SA/QA 手動驗證手法與 windows-compat-ci.yml 對 .ps1 版本的既有測試，用含
-    非 ASCII 字元的路徑建立 worktree，重現真實案例觸發條件。
+    2026-07-16 四方複審 R8 訂正（Architect 二審發現 P1 修復的連帶回歸，本檔原斷言
+    會實際 FAIL）：`install_post_commit.sh`/`.ps1` 的 P1 修復把來源路徑（`HOOK_SRC_DRIFT`/
+    `HOOK_SRC_CLOSURE`）從「呼叫端 worktree 自身根目錄」（`--show-toplevel`，worktree
+    刪除後失效的 bug 根因）改為「主 checkout 根目錄」（`dirname(--git-common-dir)`）。
+    這代表 hook 內嵌路徑**不再**含呼叫端 worktree 的目錄名——這正是修復的重點，而非
+    退化。原本用「worktree 路徑含非 ASCII 字元」重現編碼驗證的手法因此失效（來源路徑
+    不再含 worktree 名稱可供斷言）。改為讓「主 checkout 本身」建在非 ASCII 路徑下
+    延續驗證編碼正確性（比照 `windows-compat-ci.yml` 對 `.ps1` 版本已改用「獨立 clone
+    到中文路徑」的同款訂正邏輯），並新增一條斷言鎖死修復意圖本身：hook 內容不應含
+    worktree 自己的路徑片段（若含，代表來源路徑解析退回呼叫端 worktree、P1 bug 復發）。
     """
-    repo = _make_fake_monorepo(tmp_path)
+    repo = _make_fake_monorepo(tmp_path, repo_name="主檢出目錄")
 
-    worktree_dir = tmp_path / "測試目錄"
+    worktree_dir = tmp_path / "worktree_checkout"
     _git("worktree", "add", "--detach", str(worktree_dir), "HEAD", cwd=repo)
 
     # sanity：worktree 的 .git 必須是「指向主 repo 的純文字檔」而非目錄——這正是原 bug
@@ -196,7 +209,14 @@ def test_install_writes_hook_to_shared_git_dir_from_worktree(tmp_path):
 
     text = raw.decode("utf-8")
     assert "?" not in text, "hook 內容含 '?' 替代字元——非 ASCII 路徑疑似遭編碼損毀"
-    assert "測試目錄" in text, "hook 內容遺失非 ASCII worktree 路徑片段"
+    assert "主檢出目錄" in text, (
+        "hook 內容遺失非 ASCII 主 checkout 路徑片段——P1 修復後來源路徑應解回主"
+        "checkout（含其非 ASCII 目錄名），而非呼叫端 worktree 自身"
+    )
+    assert "worktree_checkout" not in text, (
+        "hook 內容不應包含呼叫端 worktree 自己的路徑片段——若出現代表來源路徑解析"
+        "又退回 --show-toplevel（P1 bug 復發：worktree 刪除後路徑將失效）"
+    )
     assert "post_commit_drift.py" in text, "hook 內容缺 drift hook 路徑"
     assert "closure_evidence_verify.py" in text, "hook 內容缺 closure hook 路徑"
 
