@@ -16,6 +16,7 @@ Gap-039 ~ Gap-049 測試（Evo-006）。
 """
 from __future__ import annotations
 
+import os
 import shutil
 from pathlib import Path
 from unittest.mock import MagicMock
@@ -23,17 +24,22 @@ from unittest.mock import MagicMock
 import pytest
 import yaml
 
+from autoclaude.execution.playbook_runner import PlaybookRunner
 from autoclaude.models.playbook import PlaybookTask
-from autoclaude.execution.playbook_runner import PlaybookRunner, PlaybookResult
 from autoclaude.utils.config import AppConfig
 
 # SD_09 R56 zero-trust audit：CI runner 無 `claude` CLI binary；dry_run=False 真實執行測試
 # 經 perception/pty_wrapper spawn `claude` → FileNotFoundError。環境前提閘門（同
 # autoclaude/execution/pre_run_validator.py:56 shutil.which 與 ~50 PG importorskip 慣例）：
 # 本地有 claude 照常驗證；CI 無 binary → graceful skip（非掩蓋 code bug）。SD_10 P3-R56-2 重寫。
+#
+# DEF-101-089 補強：本機裝有 `claude` CLI 且從巢狀 Claude Code session 執行 pytest 時，這裡
+# spawn 的巢狀 `claude` 子行程會無限掛起（見 test_gap014_020.py 同款註解的完整根因說明）。
+# `CLAUDECODE=1` 為 Claude Code 官方啟動時設定的環境變數，非行程樹猜測。
 requires_claude_cli = pytest.mark.skipif(
-    shutil.which("claude") is None,
-    reason="需要 claude CLI binary（dry_run=False 真實執行 spawn claude）；CI 無 claude → 環境前提 skip",
+    shutil.which("claude") is None or os.environ.get("CLAUDECODE") == "1",
+    reason="需要 claude CLI binary 且非巢狀 Claude Code session（CLAUDECODE=1 時真實 spawn 會"
+    "死結，見 DEF-101-089）；CI 無 claude 或本機巢狀 session → 環境前提 skip",
 )
 
 
@@ -169,11 +175,14 @@ def test_gap040_achievement_summary_no_truncation_for_small_log():
 
 def test_gap041_evolution_resumes_from_last_successful_step(tmp_path):
     """Gap-041：干跑驗證已完成步驟被跳過（completed_step_ids 從 checkpoint 讀取）。"""
-    from autoclaude.utils.checkpoint_manager import PlaybookCheckpoint, CheckpointManager
+    from autoclaude.utils.checkpoint_manager import CheckpointManager, PlaybookCheckpoint
     pb_path = _write_playbook(tmp_path, [
-        {"step_id": "T01", "name": "步驟1", "prompt": "p1", "expected_output_regex": "dry-run-pass"},
-        {"step_id": "T02", "name": "步驟2", "prompt": "p2", "expected_output_regex": "dry-run-pass"},
-        {"step_id": "T03", "name": "步驟3", "prompt": "p3", "expected_output_regex": "dry-run-pass"},
+        {"step_id": "T01", "name": "步驟1", "prompt": "p1",
+         "expected_output_regex": "dry-run-pass"},
+        {"step_id": "T02", "name": "步驟2", "prompt": "p2",
+         "expected_output_regex": "dry-run-pass"},
+        {"step_id": "T03", "name": "步驟3", "prompt": "p3",
+         "expected_output_regex": "dry-run-pass"},
     ])
     # 使用隔離 checkpoint 目錄，防止 checkpoints/pb.mutated.yaml 等跨測試污染
     cp_dir = str(tmp_path / "cp")
@@ -196,8 +205,8 @@ def test_gap041_evolution_resumes_from_last_successful_step(tmp_path):
 
 def test_gap041_save_evolution_resume_checkpoint(tmp_path):
     """Gap-041：_save_evolution_resume_checkpoint 正確儲存 completed_step_ids。"""
-    from autoclaude.utils.checkpoint_manager import CheckpointManager
     from autoclaude.models.playbook import Playbook
+    from autoclaude.utils.checkpoint_manager import CheckpointManager
     cp_mgr = CheckpointManager(str(tmp_path / "cp"))
     runner = _make_runner(dry_run=True, checkpoint_mgr=cp_mgr)
     evolved_path = str(tmp_path / "evolved.yaml")
@@ -227,8 +236,8 @@ def test_gap041_save_evolution_resume_checkpoint(tmp_path):
 def test_gap042_goto_counter_persisted_in_checkpoint(tmp_path):
     """Gap-042：_handle_token_halt() 儲存的 checkpoint 包含 goto_counter 等計數器。"""
     from autoclaude.execution.playbook_runner import _StepOutput
-    from autoclaude.models.playbook import Playbook
     from autoclaude.execution.workflow_detector import WorkflowType
+    from autoclaude.models.playbook import Playbook
     from autoclaude.utils.checkpoint_manager import CheckpointManager
 
     cp_mgr = CheckpointManager(str(tmp_path))
@@ -263,7 +272,7 @@ def test_gap042_goto_counter_persisted_in_checkpoint(tmp_path):
 
 def test_gap042_goto_counter_restored_from_checkpoint(tmp_path):
     """Gap-042：checkpoint 帶有 goto_counter 時 _run_steps() 正常載入不崩潰。"""
-    from autoclaude.utils.checkpoint_manager import PlaybookCheckpoint, CheckpointManager
+    from autoclaude.utils.checkpoint_manager import CheckpointManager, PlaybookCheckpoint
     pb_path = _write_playbook(tmp_path, [
         {"step_id": "T01", "name": "N", "prompt": "p", "expected_output_regex": "dry-run-pass"},
     ])
@@ -327,8 +336,8 @@ def test_gap042_interrupt_checkpoint_persists_counters(tmp_path):
 def test_gap048_step_evolution_counter_persisted_in_token_halt(tmp_path):
     """Gap-048 修復（問題 #3）：_handle_token_halt 應持久化 step_evolution_counter。"""
     from autoclaude.execution.playbook_runner import _StepOutput
-    from autoclaude.models.playbook import Playbook
     from autoclaude.execution.workflow_detector import WorkflowType
+    from autoclaude.models.playbook import Playbook
     from autoclaude.utils.checkpoint_manager import CheckpointManager
 
     cp_mgr = CheckpointManager(str(tmp_path))
@@ -360,8 +369,9 @@ def test_gap048_step_evolution_counter_persisted_in_token_halt(tmp_path):
 
 
 def test_gap048_step_evolution_counter_restored_into_run_steps(tmp_path):
-    """Gap-048 修復（問題 #3）：_run_steps 初始化時應從 resume_checkpoint 讀取 step_evolution_counter。"""
-    from autoclaude.utils.checkpoint_manager import PlaybookCheckpoint, CheckpointManager
+    """Gap-048 修復（問題 #3）：_run_steps 初始化時應從 resume_checkpoint 讀取
+    step_evolution_counter。"""
+    from autoclaude.utils.checkpoint_manager import CheckpointManager, PlaybookCheckpoint
     pb_path = _write_playbook(tmp_path, [
         {"step_id": "T01", "name": "N", "prompt": "p", "expected_output_regex": "dry-run-pass"},
     ])
@@ -479,8 +489,10 @@ def test_gap044_goal_synthesis_inject_step_returns_evolved_path(tmp_path):
 def test_gap045_knowledge_base_preseeded_for_evolved_steps(tmp_path):
     """Gap-045：演化後重啟時，新注入步驟的 KB 建議已被預播種。"""
     pb_path = _write_playbook(tmp_path, [
-        {"step_id": "T01_PRE", "name": "前置", "prompt": "安裝", "expected_output_regex": "dry-run-pass"},
-        {"step_id": "T01", "name": "主任務", "prompt": "執行", "expected_output_regex": "dry-run-pass"},
+        {"step_id": "T01_PRE", "name": "前置", "prompt": "安裝",
+         "expected_output_regex": "dry-run-pass"},
+        {"step_id": "T01", "name": "主任務", "prompt": "執行",
+         "expected_output_regex": "dry-run-pass"},
     ], extra={
         "evolution_metadata": {
             "original_step_id": "T01",
@@ -508,7 +520,7 @@ def test_gap045_kb_fallback_query_hits_preseeded_step_id(tmp_path):
 
     # 模擬演化後重啟時 KB 已被預播種（注入 kb 而非存取 internal alias）
     kb = FailureKnowledgeBase(str(tmp_path / "kb.jsonl"))
-    runner = _make_runner(dry_run=True, knowledge_base=kb)
+    _make_runner(dry_run=True, knowledge_base=kb)
     kb.record_success(
         "import:T01_PRE:env_setup", "PINPOINT", "T01_PRE", error_class="import",
     )
@@ -578,8 +590,9 @@ def test_gap046_production_runner_rejects_chain_in_conditional(tmp_path):
     pb_path = _write_playbook(tmp_path, [
         {"step_id": "T01", "name": "N", "prompt": "P"},
     ])
-    from autoclaude.models.playbook import Playbook
     import yaml as _yaml
+
+    from autoclaude.models.playbook import Playbook
     with open(pb_path) as f:
         playbook = Playbook(**_yaml.safe_load(f))
 

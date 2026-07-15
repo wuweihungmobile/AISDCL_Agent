@@ -2,7 +2,8 @@
 Gap-014 ~ Gap-020 整合驗證測試。
 
 涵蓋：
-- Gap-014: GoalAchievementDecision 模型 / validate_goal_achievement API / GOAL_SYNTHESIS 注入 / 防遞迴
+- Gap-014: GoalAchievementDecision 模型 / validate_goal_achievement API / GOAL_SYNTHESIS 注入
+  / 防遞迴
 - Gap-015: _prepend_global_goal_brief / 所有步驟首次 attempt 注入
 - Gap-016: MinimaxEvolver AI 演化提議 / propose_evolution API / fallback 至規則引擎
 - Gap-017: SKIP_TO 突變 / 向前跳轉 / 防向後 / 最多 1 次防護
@@ -13,6 +14,7 @@ Gap-014 ~ Gap-020 整合驗證測試。
 from __future__ import annotations
 
 import json
+import os
 import shutil
 from pathlib import Path
 from unittest.mock import MagicMock, patch
@@ -20,33 +22,43 @@ from unittest.mock import MagicMock, patch
 import pytest
 import yaml
 
-from autoclaude.models.step_mutation import StepMutation, StepMutationType
-from autoclaude.models.decision import (
-    CorrectionDecision, GoalAchievementDecision, EvolutionDecision,
-)
-from autoclaude.models.playbook import PlaybookTask
-from autoclaude.utils.config import AppConfig, PlaybookConfig
-from autoclaude.execution.playbook_runner import PlaybookRunner, PlaybookResult
 from autoclaude.decision.minimax_client import MinimaxClient, MinimaxError
 from autoclaude.decision.prompt_builder import (
-    GOAL_VALIDATION_SYSTEM_PROMPT,
     EVOLUTION_SYSTEM_PROMPT,
-    build_goal_validation_message,
+    GOAL_VALIDATION_SYSTEM_PROMPT,
     build_evolution_message,
+    build_goal_validation_message,
 )
-from autoclaude.evolution.playbook_evolver import PlaybookEvolver
 from autoclaude.evolution.minimax_evolver import MinimaxEvolver
+from autoclaude.evolution.playbook_evolver import PlaybookEvolver
+from autoclaude.execution.playbook_runner import PlaybookRunner
+from autoclaude.models.decision import (
+    EvolutionDecision,
+    GoalAchievementDecision,
+)
 from autoclaude.models.escalation import EscalationDump
+from autoclaude.models.playbook import PlaybookTask
+from autoclaude.models.step_mutation import StepMutation, StepMutationType
+from autoclaude.utils.config import AppConfig, PlaybookConfig
 from tests.helpers.kernel_fixtures import make_service
 
 # SD_09 R56 zero-trust audit：CI runner 無 `claude` CLI binary；dry_run=False 真實執行測試
 # 經 perception/pty_wrapper spawn `claude` → FileNotFoundError。環境前提閘門（同
 # autoclaude/execution/pre_run_validator.py:56 shutil.which 與 ~50 PG importorskip 慣例）：
 # 本地有 claude 照常驗證 escalation/evolution 真實路徑；CI 無 binary → graceful skip（非掩蓋
-# code bug，純環境缺 binary）。完整 CI 覆蓋（改用 make_service fake-executor 重寫）列 SD_10 P3-R56-2。
+# code bug，純環境缺 binary）。完整 CI 覆蓋（改用 make_service fake-executor 重寫）列
+# SD_10 P3-R56-2。
+#
+# DEF-101-089 補強（R4 Mac/Windows 複審主 agent 發現，親推 push 時實機重現）：本機裝有
+# `claude` CLI 且從「本身已是存活 Claude Code session」巢狀執行 pytest（不論本機開發驗證
+# 或 pre-push hook）時，這裡 spawn 的巢狀 `claude` 子行程會無限掛起（wexpect helper 行程
+# CPU delta=0 確定性死結，非負載慢）。`CLAUDECODE=1` 是 Claude Code 執行環境官方在啟動時
+# 就會設定的環境變數（非行程樹猜測），用它額外 skip 巢狀 session 情境是可靠訊號、非
+# heuristic 賭注——一般 CI runner／非巢狀本機開發環境不受影響（該變數不存在）。
 requires_claude_cli = pytest.mark.skipif(
-    shutil.which("claude") is None,
-    reason="需要 claude CLI binary（dry_run=False 真實執行 spawn claude）；CI 無 claude → 環境前提 skip",
+    shutil.which("claude") is None or os.environ.get("CLAUDECODE") == "1",
+    reason="需要 claude CLI binary 且非巢狀 Claude Code session（CLAUDECODE=1 時真實 spawn 會"
+    "死結，見 DEF-101-089）；CI 無 claude 或本機巢狀 session → 環境前提 skip",
 )
 
 
@@ -411,7 +423,9 @@ class TestGap015GlobalGoalBrief:
         runner = PlaybookRunner(cfg, MagicMock(), MagicMock(), dry_run=True)
         runner._hotkey.triggered = False
         long_goal = "A" * 200
-        result = runner._goal_synthesis_plugin.prepend_global_goal_brief("p", long_goal, runner._cfg)
+        result = runner._goal_synthesis_plugin.prepend_global_goal_brief(
+            "p", long_goal, runner._cfg
+        )
         assert "…" in result  # truncation indicator
         # Brief part should be at most 50 chars + "…"
         brief_part = result.split("\n\n")[0].replace("[總目標方向] ", "")
@@ -424,7 +438,9 @@ class TestGap015GlobalGoalBrief:
 
     def test_brief_returns_original_when_no_goal(self):
         runner = _make_runner()
-        result = runner._goal_synthesis_plugin.prepend_global_goal_brief("原始 prompt", None, runner._cfg)
+        result = runner._goal_synthesis_plugin.prepend_global_goal_brief(
+            "原始 prompt", None, runner._cfg
+        )
         assert result == "原始 prompt"
 
     def test_non_first_step_gets_brief_in_dry_run(self, tmp_path):
@@ -523,7 +539,7 @@ class TestGap016MinimaxProposeEvolution:
 
 class TestGap016MinimaxEvolver:
     def _make_playbook(self, steps: int = 2):
-        from autoclaude.models.playbook import Playbook, GlobalInvariants
+        from autoclaude.models.playbook import GlobalInvariants, Playbook
         tasks = [
             PlaybookTask(step_id=f"T0{i+1}", name=f"step {i+1}", prompt=f"prompt {i+1}")
             for i in range(steps)
@@ -609,7 +625,7 @@ class TestGap016MinimaxEvolver:
 
 class TestGap018SplitContextBridge:
     def _make_playbook_with_stuck_step(self):
-        from autoclaude.models.playbook import Playbook, GlobalInvariants
+        from autoclaude.models.playbook import GlobalInvariants, Playbook
         tasks = [
             PlaybookTask(
                 step_id="T01",
@@ -650,7 +666,7 @@ class TestGap018SplitContextBridge:
 
     def test_split_step_part_b_has_evaluator(self):
         evolver = PlaybookEvolver()
-        from autoclaude.models.playbook import Playbook, GlobalInvariants
+        from autoclaude.models.playbook import GlobalInvariants, Playbook
         tasks = [
             PlaybookTask(
                 step_id="T01",
@@ -754,7 +770,6 @@ class TestGap019BatchMutationRunner:
             {"step_id": "T01", "name": "t", "prompt": "p",
              "expected_output_regex": "pass", "max_retries": 2},
         ])
-        call_count = {"n": 0}
 
         def fake_get_correction(task, failure_reason, eval_output, attempt, **kwargs):
             # 第一次：回傳 batch_mutations（REVISE_CURRENT + INJECT_AFTER）
@@ -790,7 +805,6 @@ class TestGap019BatchMutationRunner:
     def test_batch_mutations_truncated_to_3(self, tmp_path):
         """Gap-019-B：batch_mutations 超過 3 個時 runner 截斷至前 3 個。"""
         from unittest.mock import patch as upatch
-        applied_mutations = []
         minimax = MagicMock()
         runner = _make_runner(dry_run=False, minimax_mock=minimax)
         pb_path = _write_playbook(tmp_path, [
@@ -906,8 +920,6 @@ class TestGap017SkipToRunnerExtended:
             reasoning="should be ignored",
         )
 
-        correction_count = {"n": 0}
-
         def fake_get_correction(task, failure_reason, eval_output, attempt, **kwargs):
             return ("fix", "reasoning", None, backward_skip)
 
@@ -953,8 +965,6 @@ class TestGap017SkipToRunnerExtended:
         def fake_get_correction(task, failure_reason, eval_output, attempt, **kwargs):
             return ("fix", "reasoning", None, skip_mutation)
 
-        skip_log_count = {"n": 0}
-
         with upatch("autoclaude.execution.playbook_runner.notify"), \
              upatch.object(runner, "_evaluate", side_effect=fake_eval), \
              upatch.object(runner, "_get_correction", side_effect=fake_get_correction):
@@ -976,7 +986,8 @@ class TestGap014GoalSynthesisInjectionExtended:
         """目標未達成時 GOAL_SYNTHESIS 步驟確實被注入並執行。"""
         from unittest.mock import patch as upatch
         minimax = MagicMock()
-        # validate_goal_achievement 回傳未達成 → completion_prompt（Gap-030：用 GoalAchievementDecision 確保 suggested_evaluator=None）
+        # validate_goal_achievement 回傳未達成 → completion_prompt
+        # （Gap-030：用 GoalAchievementDecision 確保 suggested_evaluator=None）
         minimax.validate_goal_achievement.return_value = GoalAchievementDecision(
             is_achieved=False,
             completion_prompt="請補完：整合 Auth 與 DB 模組",
@@ -1057,7 +1068,7 @@ class TestGap014GoalSynthesisInjectionExtended:
                 text="[dry-run] pass", peak_token_pct=0.0,
                 triggered_compact=False, triggered_halt=False
             )
-            result = runner.run(pb_path)
+            runner.run(pb_path)
 
         # validate_goal_achievement 只應被呼叫 1 次（防遞迴保護）
         assert minimax.validate_goal_achievement.call_count == 1
@@ -1081,6 +1092,7 @@ class TestGap016CMinimaxEvolverFallback:
     def test_minimax_evolver_used_when_proposal_available(self, tmp_path):
         """MinimaxEvolver.propose_evolution_via_ai 回傳有效 proposal → PlaybookRunner 使用它。"""
         from unittest.mock import patch as upatch
+
         from autoclaude.evolution.playbook_evolver import PlaybookEvolutionProposal
         minimax = MagicMock()
         runner = _make_runner(dry_run=False, minimax_mock=minimax)
@@ -1114,7 +1126,7 @@ class TestGap016CMinimaxEvolverFallback:
                            return_value=None) as mock_rule, \
              upatch.object(runner._evolver, "apply_evolution",
                            return_value=None):
-            result = runner.run(pb_path)
+            runner.run(pb_path)
 
         # MinimaxEvolver.propose_evolution_via_ai 應被呼叫
         assert mock_ai.call_count >= 1
@@ -1122,7 +1134,8 @@ class TestGap016CMinimaxEvolverFallback:
         assert mock_rule.call_count == 0
 
     def test_fallback_to_rule_engine_when_ai_returns_none(self, tmp_path):
-        """MinimaxEvolver.propose_evolution_via_ai 回傳 None → PlaybookRunner fallback 至規則引擎。"""
+        """MinimaxEvolver.propose_evolution_via_ai 回傳 None → PlaybookRunner fallback
+        至規則引擎。"""
         from unittest.mock import patch as upatch
         minimax = MagicMock()
         runner = _make_runner(dry_run=False, minimax_mock=minimax)
@@ -1142,7 +1155,7 @@ class TestGap016CMinimaxEvolverFallback:
                            return_value=None) as mock_ai, \
              upatch.object(runner._evolver, "propose_evolution",
                            return_value=None) as mock_rule:
-            result = runner.run(pb_path)
+            runner.run(pb_path)
 
         # MinimaxEvolver.propose_evolution_via_ai 應被呼叫
         assert mock_ai.call_count >= 1
@@ -1152,7 +1165,7 @@ class TestGap016CMinimaxEvolverFallback:
     def test_convergence_escalation_also_uses_minimax_evolver(self, tmp_path):
         """收斂評估觸發的 ESCALATION（現有路徑）也使用 MinimaxEvolver，驗證兩條路徑一致。"""
         from unittest.mock import patch as upatch
-        from autoclaude.execution.convergence_monitor import ConvergenceMonitor
+
         minimax = MagicMock()
         runner = _make_runner(dry_run=False, minimax_mock=minimax)
         pb_path = _write_playbook(tmp_path, [
@@ -1182,7 +1195,7 @@ class TestGap016CMinimaxEvolverFallback:
             mock_instance = MagicMock()
             mock_instance.evaluate.return_value = mock_report
             mock_cm.return_value = mock_instance
-            result = runner.run(pb_path)
+            runner.run(pb_path)
 
         # 收斂 ESCALATION 也應呼叫 MinimaxEvolver
         assert mock_ai.call_count >= 1
