@@ -24,6 +24,12 @@
 _GIT_HOOKS_INSTALL_COMMON_SH_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 _GIT_HOOKS_INSTALL_COMMON_PY="$_GIT_HOOKS_INSTALL_COMMON_SH_DIR/../git_hooks_install_common.py"
 
+# venv 提示：下列各函式都靠裸 python 呼叫 _GIT_HOOKS_INSTALL_COMMON_PY，未啟用 venv
+# 就直接失敗提示（勝過各函式逐一噴原生「python: command not found」）——與
+# tools/integration_gate.sh / AutoClaude/tools/local_ci_gate.sh 的
+# `command -v python` 前置守門對稱，source 本檔時即檢查一次。
+command -v python >/dev/null || { echo '❌ 找不到 python — 請先 source .venv/bin/activate（見 ONBOARDING.md §3）'; exit 1; }
+
 # 防護：core.hooksPath 寫入的是「共享 .git/config」；在 linked worktree 內執行會把
 # worktree 路徑寫進去，worktree 刪除後主 checkout 閘門靜默全滅 → 拒絕執行。
 # 判定邏輯見 tools/git_hooks_install_common.py 的 `assert-not-linked-worktree`

@@ -28,6 +28,7 @@ while [ $# -gt 0 ]; do
 done
 
 # ---- 1. 定位 act（含 gh-act 退回）----
+echo "[1/6] 定位 act（含 gh-act 退回）"
 ACT=""
 if command -v act >/dev/null 2>&1; then
   ACT="act"
@@ -47,17 +48,20 @@ fi
 echo "[run_act] act = $ACT"
 
 # ---- 2. 確認 Docker daemon ----
+echo "[2/6] 確認 Docker daemon"
 if ! docker info >/dev/null 2>&1; then
   echo '[run_act] Docker daemon 未啟動，請先開啟 Docker Desktop。' >&2
   exit 1
 fi
 
 # ---- 3. List 模式 ----
+echo "[3/6] List 模式"
 if [ "$LIST" -eq 1 ]; then
   $ACT -l -W "$WORKFLOW"; exit $?
 fi
 
 # ---- 4. 預先 pull 鏡像（繞過 act forcePull 對公開鏡像送無效認證的 401 bug）----
+echo "[4/6] 預先 pull 鏡像"
 RUNNER_IMAGE='catthehacker/ubuntu:act-latest'
 NEEDED=("$RUNNER_IMAGE")
 [ -z "$JOB" ] && NEEDED+=('pgvector/pgvector:pg17')
@@ -71,12 +75,14 @@ for img in "${NEEDED[@]}"; do
 done
 
 # ---- 5. 空 .env 覆蓋（安全 + 忠實：GitHub runner 無 .env，避免注入個人憑證/偽 fail）----
+echo "[5/6] 空 .env 覆蓋"
 # mktemp 不用 -t：BSD(macOS) 與 GNU 的 -t 語意不同，改用明確模板路徑統一兩平台語意
 EMPTY_ENV="$(mktemp "${TMPDIR:-/tmp}/autoclaude_act_empty.XXXXXX")"
 : > "$EMPTY_ENV"
 trap 'rm -f "$EMPTY_ENV"' EXIT
 
 # ---- 6. 組裝並執行 ----
+echo "[6/6] 組裝並執行"
 ACT_ARGS=(push -W "$WORKFLOW" --pull=false --env-file "$EMPTY_ENV")
 [ -n "$JOB" ] && ACT_ARGS+=(-j "$JOB")
 [ "$DRYRUN" -eq 1 ] && ACT_ARGS+=(-n)

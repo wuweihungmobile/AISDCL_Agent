@@ -20,8 +20,10 @@
     僅取**最後一列**的狀態為準（視為對前列的訂正）——即使最後一列的狀態欄文字無法
     辨識任何已知關鍵字，也視為「該 ID 目前狀態不明」而非沿用更早一列的舊值
     （獨立複審 finding：舊實作在此情境下會靜默沿用前一列，與本條承諾矛盾，已修正）。
-  - 掃描範圍刻意限縮於 `ONBOARDING.md`（DEF-101-066 這類「改帳本忘同步姊妹文件」
-    真實復發過一次的高風險文件），非涵蓋 repo 全部文件；未來如需擴大範圍，
+  - 掃描範圍限縮於 `ONBOARDING.md` + `.github/workflows/{windows,macos}-compat-ci.yml`
+    （DEF-101-066 這類「改帳本忘同步姊妹文件」真實復發過一次的高風險文件；R4 複審
+    QA 發現 windows-compat-ci.yml 的 R4 複審修正段落明確引用 DEF-101-067⑤ 卻未同步
+    更新帳本狀態，補入此二檔擴大覆蓋），非涵蓋 repo 全部文件；未來如需擴大範圍，
     加入 `_CROSSREF_TARGETS` 即可，不需改動核心比對邏輯。
 
 為何需要：DEF-101-066 實際發生過一次——commit 只改帳本把 DEF-101-058 標記 fixed，
@@ -45,6 +47,8 @@ _REPO_ROOT = Path(__file__).resolve().parents[1]
 _DEFECT_LOG = _REPO_ROOT / "docs" / "06_quality" / "AutoSDD_Defect_Log.md"
 _CROSSREF_TARGETS = [
     _REPO_ROOT / "ONBOARDING.md",
+    _REPO_ROOT / ".github" / "workflows" / "windows-compat-ci.yml",
+    _REPO_ROOT / ".github" / "workflows" / "macos-compat-ci.yml",
 ]
 
 _ID_RE = re.compile(r"DEF-\d+-\d+")

@@ -27,6 +27,15 @@ tools/lib/git_hooks_install_common.sh 兩份 thin wrapper 呼叫，兩者只保�
 $script:GitHooksInstallCommonPy = [System.IO.Path]::GetFullPath(
   (Join-Path $PSScriptRoot '../git_hooks_install_common.py'))
 
+# venv 提示：下列各函式都靠裸 python 呼叫 GitHooksInstallCommonPy，未啟用 venv 就
+# 直接失敗提示（勝過各函式逐一噴原生「'python' 不是內部或外部命令」）——與
+# tools/integration_gate.ps1 / AutoClaude/tools/local_ci_gate.ps1 的
+# `Get-Command python` 前置守門對稱，dot-source 本檔時即檢查一次。
+if (-not (Get-Command python -ErrorAction SilentlyContinue)) {
+  Write-Host '❌ 找不到 python — 請先啟用 venv：.venv\Scripts\Activate.ps1（見 ONBOARDING.md §3）' -ForegroundColor Red
+  exit 1
+}
+
 function Assert-NotLinkedWorktree {
   <#
   .SYNOPSIS

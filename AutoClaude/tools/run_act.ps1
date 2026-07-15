@@ -45,6 +45,7 @@ Set-Location $RepoRoot
 $Workflow = '.github/workflows/autoclaude-ci.yml'
 
 # ---- 1. 定位 act.exe（PATH 可能尚未刷新 → 退回 winget 安裝路徑 → 退回 gh-act）----
+Write-Host "[1/6] 定位 act（含 gh-act 退回）" -ForegroundColor Cyan
 # 回傳字串陣列（指令 + 前置參數），gh-act 退回時為 @('gh','act')，對齊 run_act.sh 的偵測邏輯。
 function Resolve-Act {
   $cmd = Get-Command act -ErrorAction SilentlyContinue
@@ -73,6 +74,7 @@ $ActPrefix = @($Act | Select-Object -Skip 1)
 Write-Host "[run_act] act = $($Act -join ' ')" -ForegroundColor Cyan
 
 # ---- 2. 確認 Docker daemon ----
+Write-Host "[2/6] 確認 Docker daemon" -ForegroundColor Cyan
 # 探測段局部 EAP=Continue：PS5.1 + EAP=Stop 下 native stderr 重導（*> $null）會擲
 # NativeCommandError（同 tools/bootstrap.ps1 Select-Python 已文件化的修法），daemon
 # 未啟動時才能走到下方友善錯誤訊息而非直接 crash。
@@ -90,12 +92,14 @@ if ($dockerRc -ne 0) {
 }
 
 # ---- 3. List 模式 ----
+Write-Host "[3/6] List 模式" -ForegroundColor Cyan
 if ($List) {
   & $ActExe @($ActPrefix + @('-l', '-W', $Workflow))
   exit $LASTEXITCODE
 }
 
 # ---- 4. 預先 pull 所需鏡像（用 docker pull 而非 act forcePull）----
+Write-Host "[4/6] 預先 pull 鏡像" -ForegroundColor Cyan
 # 根因：act forcePull 透過 Docker Desktop credsStore 對「公開」鏡像送出無效認證
 #       → Docker Hub 回 401 authentication required。改由本腳本以 docker pull 確保鏡像
 #       存在（公開 pull 不送認證、可成功），再對 act 傳 --pull=false 用本地鏡像，繞過此 bug。
@@ -127,6 +131,7 @@ foreach ($img in $NeededImages) {
 }
 
 # ---- 5. 阻止 act 預設載入 repo .env（關鍵）----
+Write-Host "[5/6] 空 .env 覆蓋" -ForegroundColor Cyan
 # act 預設會把 cwd 的 .env 注入容器。本 repo .env 含真實 MINIMAX_API_KEY / DB 憑證：
 #   (1) 安全：不應把個人憑證注入容器；
 #   (2) 忠實度：GitHub runner 無 .env，注入後會讓「預期 env 未設」的測試偽 fail
@@ -138,6 +143,7 @@ try {
   Set-Content -Path $EmptyEnv -Value '' -NoNewline -Encoding ascii
 
   # ---- 6. 組裝 act 參數 ----
+  Write-Host "[6/6] 組裝並執行" -ForegroundColor Cyan
   # push 事件 → ci.yml 的 nightly job（if: schedule/dispatch）自動排除；只跑 gating jobs。
   # --pull=false：用上一步已備妥的本地鏡像，繞過 credsStore 公開鏡像 401 bug。
   # --env-file 空檔：忠實對齊 GitHub CI（無 .env）。
