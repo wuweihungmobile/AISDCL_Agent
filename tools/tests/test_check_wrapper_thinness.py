@@ -142,6 +142,68 @@ class TestCheckWrapperThinness(unittest.TestCase):
                 problems = m.check_wrapper_thinness()
         self.assertTrue(any("ConvertFrom-Json" in p for p in problems))
 
+    def test_forbidden_c_style_for_no_space_in_sh_detected(self) -> None:
+        """2026-07-16 四方複審 SD 發現第三輪繞過：`for((i=0;i<3;i++))` 的 "for"
+        緊接 "((" 無空格，原黑名單只收 "for "（含空格）完全不命中。"""
+        import tempfile
+
+        with tempfile.TemporaryDirectory() as td:
+            fake_root = self._make_fake_root(
+                Path(td),
+                sh_text="for((i=0;i<3;i++)); do echo \"$i\"; done\n",
+                ps1_text="# fine\n",
+            )
+            with mock.patch.object(m, "ROOT", fake_root):
+                problems = m.check_wrapper_thinness()
+        self.assertTrue(any("'for('" in p for p in problems))
+
+    def test_forbidden_foreach_no_space_in_ps1_detected(self) -> None:
+        """2026-07-16 四方複審 SD 發現第三輪繞過：`foreach($x in $y){...}` 無空格，
+        原黑名單只收 "foreach ("（含空格）完全不命中。"""
+        import tempfile
+
+        with tempfile.TemporaryDirectory() as td:
+            fake_root = self._make_fake_root(
+                Path(td),
+                sh_text="# fine\n",
+                ps1_text="foreach($x in @(1,2,3)){ Write-Host $x }\n",
+            )
+            with mock.patch.object(m, "ROOT", fake_root):
+                problems = m.check_wrapper_thinness()
+        self.assertTrue(any("'foreach('" in p for p in problems))
+
+    def test_forbidden_system_text_json_in_ps1_detected(self) -> None:
+        """2026-07-16 四方複審 SD 發現第三輪繞過：.NET
+        `[System.Text.Json.JsonSerializer]::Deserialize(...)` 語意等同
+        ConvertFrom-Json/ConvertTo-Json，但完全不含這兩個 cmdlet 字串。"""
+        import tempfile
+
+        with tempfile.TemporaryDirectory() as td:
+            fake_root = self._make_fake_root(
+                Path(td),
+                sh_text="# fine\n",
+                ps1_text="$o = [System.Text.Json.JsonSerializer]::Deserialize('{}', [object])\n",
+            )
+            with mock.patch.object(m, "ROOT", fake_root):
+                problems = m.check_wrapper_thinness()
+        self.assertTrue(any("[System.Text.Json" in p for p in problems))
+
+    def test_forbidden_array_foreach_method_in_ps1_detected(self) -> None:
+        """2026-07-16 四方複審 SD 發現第三輪繞過：`(1,2,3).ForEach({...})` 是陣列
+        型別的 .ForEach() 方法而非 ForEach-Object cmdlet，語意等同迴圈但完全不含
+        該 cmdlet 字串。"""
+        import tempfile
+
+        with tempfile.TemporaryDirectory() as td:
+            fake_root = self._make_fake_root(
+                Path(td),
+                sh_text="# fine\n",
+                ps1_text="(1,2,3).ForEach({ Write-Host $_ })\n",
+            )
+            with mock.patch.object(m, "ROOT", fake_root):
+                problems = m.check_wrapper_thinness()
+        self.assertTrue(any("'.ForEach('" in p for p in problems))
+
     def test_main_exit_code_reflects_result(self) -> None:
         with mock.patch.object(m, "check_wrapper_thinness", return_value=[]):
             self.assertEqual(m.main(), 0)

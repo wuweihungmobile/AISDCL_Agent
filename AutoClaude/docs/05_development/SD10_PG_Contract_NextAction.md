@@ -49,5 +49,5 @@ schema 側齊全、應用層從未接線：
 
 ## 追蹤
 
-- 帳本：DEF-101-051（open，SD_10 PG-track）
+- 帳本：DEF-101-051（fixed，SD_10 PG-track）
 - SD_10 尚無 `SD_Improving_10.md`（`SD_Improving_09.md:30` 僅預告 W6 末建大綱）；本檔為 SD_10 PG-track 具體種子項，開 track 時併入 backlog 並依 G0~G6 展開。

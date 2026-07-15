@@ -314,6 +314,23 @@ jobs:
           echo "install_post_commit.sh 於 worktree 執行、寫入共用 hooks 驗證通過：$target"
           git worktree remove --force "$wt"
 
+          # 2026-07-16 四方複審 SD 發現的 P1 回歸鎖：上面的斷言都是在 worktree 還存在時
+          # 就讀取，install_post_commit.sh 原本用 `git rev-parse --show-toplevel`（linked
+          # worktree 下回傳呼叫端 worktree 自己的根目錄，非主 checkout）組出 drift/closure
+          # hook 來源路徑，worktree 一旦被移除，寫入共享 hook 內嵌的路徑就會失效，而 hook
+          # 本身用 `|| true` 靜默吞掉這個失敗——drift（Rule 9.17.1）與 closure（DEF-20-001）
+          # 兩個 advisory 閘門會在主 checkout 上永久靜默失效、零告警。這個 bug 在 worktree
+          # 存在期間永遠測不到，必須等 worktree 移除後才會現形，這正是先前 CI 沒抓到本次
+          # bug 的原因。故在此追加：worktree 移除後重新讀取共用 hook 內容，擷取內嵌的 .py
+          # 路徑並斷言其仍存在於磁碟（這才是真正證明修復有效的關鍵）。
+          drift_path="$(grep -o '"[^"]*post_commit_drift\.py"' "$target" | tr -d '"' | head -1)"
+          closure_path="$(grep -o '"[^"]*closure_evidence_verify\.py"' "$target" | tr -d '"' | head -1)"
+          test -n "$drift_path" || { echo "::error::worktree 移除後無法從 hook 擷取 drift hook 路徑"; exit 1; }
+          test -n "$closure_path" || { echo "::error::worktree 移除後無法從 hook 擷取 closure hook 路徑"; exit 1; }
+          test -f "$drift_path" || { echo "::error::worktree 移除後，hook 內嵌的 drift hook 路徑已不存在於磁碟：$drift_path（P1 回歸重現）"; exit 1; }
+          test -f "$closure_path" || { echo "::error::worktree 移除後，hook 內嵌的 closure hook 路徑已不存在於磁碟：$closure_path（P1 回歸重現）"; exit 1; }
+          echo "install_post_commit.sh worktree 移除後路徑仍有效驗證通過：drift=$drift_path closure=$closure_path"
+
       - name: pty_wrapper / hotkey_handler 平台解析單元測試（AutoClaude tests/test_perception.py）
         working-directory: AutoClaude
         run: python -m pytest tests/test_perception.py -q --tb=short
@@ -353,17 +370,38 @@ jobs:
         with:
           python-version: "3.11"
 
-      - name: AutoClaude 全套 pytest
+      - name: 執行 AutoClaude/tools/local_ci_gate.sh（實際執行，非僅裸 pytest；2026-07-16 四方複審 SA 發現修正）
+        # SA 發現：windows-compat-ci.yml 的 windows-nightly-full 已改執行
+        # `local_ci_gate.ps1`（鏡像 autoclaude-ci.yml push gating jobs：editable 哨兵 +
+        # LOC 預算 + CLAUDE.md 行數/長行 + snapshot 可重現 + import-linter + pytest 全套），
+        # 本 job 卻仍停留在只裝 `[dev]` + 裸 pytest 的舊模式，涵蓋範圍比對岸窄很多。改裝
+        # `[dev,lint]`（import-linter 需要）並執行 local_ci_gate.sh，取代（而非疊加）原本
+        # 的裸 pytest 呼叫，避免同一 job 內重複跑一次全套測試。
+        #
+        # 2026-07-16 四方複審 QA 發現：job 層級 continue-on-error 只影響「整個
+        # workflow run 對外呈現的結論」，不會讓同一 job 內、失敗 step 之後的其餘
+        # step 繼續執行（GitHub Actions 每個 step 預設隱含 if: success()）。若本
+        # step 失敗，下一步（AISDLC_SDD fsm_runtime pytest）當晚完全不會執行，但
+        # continue-on-error 讓 job 結論只顯示「失敗」而非「跳過一半」，nightly-alert
+        # 開的 issue 也看不出「深度回歸其實只跑了一步就死」。改用
+        # if: ${{ !cancelled() }}（而非 always()——always() 連使用者手動取消都會
+        # 硬跑，!cancelled() 才是「前面失敗仍照跑，但使用者主動取消時不硬跑」的
+        # 正確語意）。
+        if: ${{ !cancelled() }}
         working-directory: AutoClaude
         run: |
           python -m pip install --upgrade pip
-          pip install -e ".[dev]"
-          python -m pytest tests/ -q --tb=short
+          pip install -e ".[dev,lint]"
+          bash tools/local_ci_gate.sh
 
       - name: AISDLC_SDD LATEST fsm_runtime pytest（排除 chaos；動態解析 LATEST 版本，R2 Architect 複審發現修正）
         # R2 Architect 複審發現：原寫死 v0.30 於 working-directory 靜態欄位，與
         # windows-compat-ci.yml 已修正的動態解析 LATEST 慣例脫節。working-directory
         # 是靜態 YAML 欄位無法動態運算，改於 run: 內動態解析後 cd 進去。
+        #
+        # 2026-07-16 四方複審 QA 發現：加 !cancelled()，同上——本 step 與前一步彼此
+        # 獨立，不應因前一步失敗而被跳過。
+        if: ${{ !cancelled() }}
         run: |
           latest="$(ls -d AISDLC_SDD/AISDLC_SDD_v0.0* AISDLC_SDD/AISDLC_SDD_v0.[1-9]* AISDLC_SDD/AISDLC_SDD_v[1-9]* 2>/dev/null | sort -V | tail -1)"
           test -n "$latest" || { echo "::error::找不到任何 AISDLC_SDD_v* 版本目錄"; exit 1; }

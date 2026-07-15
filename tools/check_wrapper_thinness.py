@@ -43,6 +43,9 @@ _FORBIDDEN: dict[str, tuple[str, ...]] = {
     "tools/dev_start.sh": (
         "while ",       # 迴圈：wrapper 不該有迭代式業務邏輯
         "for ",         # 迴圈（bash for）：同上，與 .ps1 側 foreach ( 對稱收錄
+        "for(",         # C-style for 無空格寫法（2026-07-16 四方複審 SD 發現第三輪
+                         # 繞過：`for((i=0;i<3;i++))` 的 "for" 緊接 "((" 無空格，"for "
+                         # 完全不命中；與 "for " 並收使有無空格皆可攔）
         "jq ",          # JSON 解析（外部工具）
         "python -c",    # 內嵌 Python 業務邏輯，應改為呼叫 dev_start.py 本體
         "python3 -c",   # 同上，版本前綴不同的常見等義寫法（獨立複審發現：原本
@@ -51,13 +54,22 @@ _FORBIDDEN: dict[str, tuple[str, ...]] = {
     "tools/dev_start.ps1": (
         "ConvertFrom-Json",  # JSON 解析
         "ConvertTo-Json",
+        "[System.Text.Json",  # .NET JSON 反序列化（2026-07-16 四方複審 SD 發現第三輪
+                               # 繞過：`[System.Text.Json.JsonSerializer]::Deserialize(...)`
+                               # 語意等同 ConvertFrom-Json/ConvertTo-Json 但完全不含這兩個
+                               # cmdlet 字串）
         "foreach (",         # 迴圈
+        "foreach(",          # 無空格寫法（2026-07-16 四方複審 SD 發現第三輪繞過：
+                              # `foreach($x in $y){...}` 不含 "foreach ("）
         "while (",
         "for (",             # C-style 迴圈：與 foreach ( 是不同拼法，需各自收錄
                               # （獨立複審發現：原本漏收，"for (" 不是 "foreach (" 的子字串）
         "ForEach-Object",     # 管線 cmdlet 迭代（含業務邏輯常見寫法），語意等同迴圈
                               # （獨立複審發現：原本漏收，別名 "%" 因過於通用會誤中一般
                               # 內容故不收錄，僅收明確的 cmdlet 全名）
+        ".ForEach(",          # 陣列 .ForEach() 方法（2026-07-16 四方複審 SD 發現第三輪
+                              # 繞過：`(1,2,3).ForEach({...})` 是陣列型別方法而非
+                              # ForEach-Object cmdlet，語意等同迴圈但完全不含該字串）
     ),
 }
 

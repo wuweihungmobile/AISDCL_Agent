@@ -7,23 +7,30 @@
 # repo-root bug 也裝不到（仍裝舊 v0.01 buggy 版）、(b) 與 skills SSOT「指向 LATEST」原則不一致。
 # 改為動態解析 LATEST（對齊 ci-gate.sh 的 sort -V | tail -1），永不再 stale、修復立即生效。
 set -e
-REPO_ROOT="$(git rev-parse --show-toplevel)"
 # 用 --git-common-dir（非硬編 "$REPO_ROOT/.git"）：worktree checkout 下 <worktree>/.git
 # 是指向主 repo 的純文字檔而非目錄，".git/hooks/..." 會找不到路徑；--git-common-dir
 # 正確解析回主 repo 真正的 .git，且不受 core.hooksPath 影響（該設定只影響 git 自己
 # 找 hook，不影響本檔要直寫的真實 .git/hooks/）。
 GIT_COMMON_DIR="$(git rev-parse --path-format=absolute --git-common-dir)"
 HOOK_TARGET="$GIT_COMMON_DIR/hooks/post-commit"
+# 2026-07-16 四方複審 SD 發現：原本用 `git rev-parse --show-toplevel` 算 REPO_ROOT
+# 來源解析 LATEST 版本目錄與 HOOK_SRC_DRIFT/HOOK_SRC_CLOSURE，但 --show-toplevel 在
+# linked worktree 內回傳的是「該 worktree 自己的根目錄」，不是主 checkout；worktree
+# 一旦被移除，寫入共享 .git/hooks/post-commit 內嵌的路徑就會失效（且被 `|| true` 靜默
+# 吞掉，drift/closure 兩個 advisory 閘門會永久靜默失效、零告警）。改用 GIT_COMMON_DIR
+# 反推主 checkout 根目錄（GIT_COMMON_DIR 在任何 linked worktree 下都正確指向主 checkout
+# 的 .git，故其父目錄即為主 checkout 根目錄），不受呼叫端是否位於 worktree 影響。
+MAIN_CHECKOUT_ROOT="$(dirname "$GIT_COMMON_DIR")"
 # DEF-43-002：monorepo 收斂後 git rev-parse --show-toplevel = monorepo 根，
 # 各版位於 AISDLC_SDD/ 子目錄下，故路徑須含 AISDLC_SDD/ 中間層（原缺此層致裝不起來）。
 # 三 glob 同 ci-gate.sh：v0.0*（~v0.09）+ v0.[1-9]*（v0.10+）+ v[1-9]*（v1.x+，`|| true` 吞無匹配）。
-LATEST="$(cd "$REPO_ROOT/AISDLC_SDD" && { ls -d AISDLC_SDD_v0.0* AISDLC_SDD_v0.[1-9]* AISDLC_SDD_v[1-9]* 2>/dev/null || true; } | sort -V | tail -1)"
+LATEST="$(cd "$MAIN_CHECKOUT_ROOT/AISDLC_SDD" && { ls -d AISDLC_SDD_v0.0* AISDLC_SDD_v0.[1-9]* AISDLC_SDD_v[1-9]* 2>/dev/null || true; } | sort -V | tail -1)"
 if [ -z "$LATEST" ]; then
-  echo "ERROR: 找不到任何 AISDLC_SDD_v* 版本目錄於 $REPO_ROOT/AISDLC_SDD" >&2
+  echo "ERROR: 找不到任何 AISDLC_SDD_v* 版本目錄於 $MAIN_CHECKOUT_ROOT/AISDLC_SDD" >&2
   exit 1
 fi
-HOOK_SRC_DRIFT="$REPO_ROOT/AISDLC_SDD/$LATEST/.claude/hooks/post_commit_drift.py"
-HOOK_SRC_CLOSURE="$REPO_ROOT/AISDLC_SDD/$LATEST/.claude/hooks/closure_evidence_verify.py"
+HOOK_SRC_DRIFT="$MAIN_CHECKOUT_ROOT/AISDLC_SDD/$LATEST/.claude/hooks/post_commit_drift.py"
+HOOK_SRC_CLOSURE="$MAIN_CHECKOUT_ROOT/AISDLC_SDD/$LATEST/.claude/hooks/closure_evidence_verify.py"
 
 if [ ! -f "$HOOK_SRC_DRIFT" ]; then
   echo "ERROR: drift hook source not found at $HOOK_SRC_DRIFT" >&2

@@ -343,7 +343,7 @@ jobs:
           Write-Host "install-hooks.ps1 worktree 拒絕驗證通過（rc=1 as expected）"
           exit 0
 
-      - name: install_post_commit.ps1 執行 + 非 ASCII 路徑編碼損毀斷言（P1 回歸鎖，R1 SD 發現修正；R2 SD/Architect 發現再修正）
+      - name: install_post_commit.ps1 執行 + 非 ASCII 路徑編碼損毀斷言（P1 回歸鎖，R1 SD 發現修正；R2 SD/Architect 發現再修正；2026-07-16 R8 SD 發現 linked-worktree 路徑解析 bug 修復後再修正）
         shell: pwsh
         run: |
           # R1 SD 發現：原斷言直接在 windows-latest 的純 ASCII checkout 路徑下跑，
@@ -363,20 +363,32 @@ jobs:
           Write-Host "AISDLC_SDD LATEST 版：$($latest.Name)"
           $installScriptRel = "./AISDLC_SDD/$($latest.Name)/tools/install_hooks/install_post_commit.ps1"
 
+          # 2026-07-16 R8 SD 發現的 P1 修復：install_post_commit.ps1 原本用
+          # `git rev-parse --show-toplevel`（linked worktree 下回傳呼叫端 worktree 自己的
+          # 根目錄）組出 drift/closure hook 來源路徑；修復後改用 --git-common-dir 反推
+          # 「主 checkout 根目錄」，故不論從哪個 linked worktree 呼叫，寫入 hook 內容的來源
+          # 路徑一律指向主 checkout（本 CI 下即 $env:GITHUB_WORKSPACE，恆為 ASCII 路徑）。
+          # 這代表下面「用含中文字元的 linked worktree 名稱觸發非 ASCII 編碼損毀」這個 R1
+          # 原本的重現手法，在 P1 修復後不再能讓 hook 內容出現非 ASCII 字元（來源路徑不再
+          # 含呼叫端 worktree 的目錄名）。改用一個獨立本地 clone（非 linked worktree）建到
+          # 中文路徑下——clone 自己的 --git-common-dir 就是自己，主 checkout 根目錄＝中文
+          # 路徑本身——才能繼續驗證原本 Out-File -Encoding ascii → UTF8Encoding 的編碼修復
+          # 仍然有效。
           $chineseDir = Join-Path $env:RUNNER_TEMP "測試目錄"
-          git worktree add --detach $chineseDir HEAD
+          $headSha = (git rev-parse HEAD).Trim()
+          git clone --quiet . $chineseDir
+          git -C $chineseDir checkout --quiet $headSha
           try {
             Push-Location $chineseDir
             try {
-              if (-not (Test-Path $installScriptRel)) { throw "找不到 $installScriptRel（worktree 內）" }
+              if (-not (Test-Path $installScriptRel)) { throw "找不到 $installScriptRel（獨立 clone 內）" }
               & $installScriptRel
               # R2 SD 發現：`Push-Location` 只更新 pwsh 的 $PWD，不會同步
               # [Environment]::CurrentDirectory；原本以相對路徑 ".git/hooks/post-commit"
               # 讀回是靠 [System.IO.File]::ReadAllBytes 這種原生 .NET 呼叫照 CWD（而非
-              # $PWD）解析、剛好落回 $GITHUB_WORKSPACE/.git（worktree 的 --git-common-dir
-              # 也解回同一實體檔案）才「巧合式通過」，並未真正驗證「從 worktree 目錄出發
-              # 解析相對路徑」這件事。改用 `git -C $chineseDir` 明確以 worktree 目錄解析
-              # 出 common dir 再組絕對路徑讀回，不依賴任何 CWD 同步巧合。
+              # $PWD）解析，並未真正驗證「從 chineseDir 目錄出發解析相對路徑」這件事。
+              # 改用 `git -C $chineseDir` 明確以該目錄解析出 common dir 再組絕對路徑讀回，
+              # 不依賴任何 CWD 同步巧合。
               $commonDir = (git -C $chineseDir rev-parse --path-format=absolute --git-common-dir).Trim()
               $bytes = [System.IO.File]::ReadAllBytes((Join-Path $commonDir "hooks/post-commit"))
               $content = [System.Text.Encoding]::UTF8.GetString($bytes)
@@ -389,8 +401,55 @@ jobs:
               Pop-Location
             }
           } finally {
-            git worktree remove --force $chineseDir
+            Remove-Item -Recurse -Force $chineseDir
           }
+
+      - name: install_post_commit.ps1 於 linked worktree 移除後仍應解析出有效路徑（P1 回歸鎖，2026-07-16 四方複審 SD 發現）
+        shell: pwsh
+        run: |
+          # 2026-07-16 四方複審 SD 發現：install_post_commit.ps1 原本用 --show-toplevel
+          # 算來源路徑，該路徑在 linked worktree 下回傳的是呼叫端 worktree 自己的根目錄；
+          # worktree 一旦被移除，寫入共享 .git/hooks/post-commit 內嵌的路徑就會失效，而
+          # hook 本身用 `|| true` 靜默吞掉這個失敗——drift（Rule 9.17.1）與 closure
+          # （DEF-20-001）兩個 advisory 閘門會在主 checkout 上永久靜默失效、零告警。上面
+          # 那個 step 的斷言全部是在 worktree 還存在時就讀取，原本的 bug 在 worktree 存在
+          # 期間永遠測不到，必須等 worktree 移除後才會現形，這正是先前 CI 沒抓到本次 bug
+          # 的原因。本 step 在 worktree 移除「後」才讀取 hook 內容，驗證其中路徑仍存在於磁碟。
+          $latest = Get-ChildItem -Path AISDLC_SDD -Directory |
+            Where-Object { $_.Name -match "^AISDLC_SDD_v[0-9]+\.[0-9]+$" } |
+            Sort-Object { [version]($_.Name -replace "^AISDLC_SDD_v", "") } |
+            Select-Object -Last 1
+          if (-not $latest) { throw "找不到任何 AISDLC_SDD_v* 版本目錄" }
+          $installScriptRel = "./AISDLC_SDD/$($latest.Name)/tools/install_hooks/install_post_commit.ps1"
+
+          $wt = Join-Path $env:RUNNER_TEMP "wt-install-post-commit-removal"
+          git worktree add --detach $wt HEAD
+          Push-Location $wt
+          try {
+            & $installScriptRel
+          } finally {
+            Pop-Location
+          }
+          git worktree remove --force $wt
+
+          $commonDir = (git rev-parse --path-format=absolute --git-common-dir).Trim()
+          $hookTarget = Join-Path $commonDir "hooks/post-commit"
+          $content = Get-Content -Raw $hookTarget
+          if ($content -notmatch "post_commit_drift\.py") { throw "worktree 移除後 hook 內容缺 drift hook 路徑引用" }
+          if ($content -notmatch "closure_evidence_verify\.py") { throw "worktree 移除後 hook 內容缺 closure hook 路徑引用" }
+          if ($content -match 'python\s+"([^"]*post_commit_drift\.py)"') {
+            $driftPath = $Matches[1]
+          } else {
+            throw "無法從 hook 內容擷取 drift hook 路徑"
+          }
+          if ($content -match 'python\s+"([^"]*closure_evidence_verify\.py)"') {
+            $closurePath = $Matches[1]
+          } else {
+            throw "無法從 hook 內容擷取 closure hook 路徑"
+          }
+          if (-not (Test-Path $driftPath)) { throw "worktree 移除後，hook 內嵌的 drift hook 路徑已不存在於磁碟：$driftPath（P1 回歸重現）" }
+          if (-not (Test-Path $closurePath)) { throw "worktree 移除後，hook 內嵌的 closure hook 路徑已不存在於磁碟：$closurePath（P1 回歸重現）" }
+          Write-Host "install_post_commit.ps1 worktree 移除後路徑仍有效驗證通過（LATEST=$($latest.Name)，drift=$driftPath，closure=$closurePath）"
 
       - name: tools/check_script_parity.py（雙平台腳本對等 + pytest 釘選一致；R4 複審發現：先前僅 macOS 側涵蓋）
         shell: pwsh
@@ -425,6 +484,16 @@ jobs:
         # 真的走得通。放在 windows-nightly-full（而非 windows-smoke）：這是文件路徑
         # 對等性的深度回歸，不需卡 PR 閘門節奏；用完即刪 .venv，不影響本 job 後續
         # 使用全域 python/pip 的步驟。
+        #
+        # 2026-07-16 四方複審 QA 發現：job 層級 continue-on-error 只影響「整個
+        # workflow run 對外呈現的結論」，不會讓同一 job 內、失敗 step 之後的其餘
+        # step 繼續執行（GitHub Actions 每個 step 預設隱含 if: success()）。若本
+        # step 失敗，後面三步當晚完全不會執行，但 continue-on-error 讓 job 結論
+        # 只顯示「失敗」而非「跳過大半」，nightly-alert 開的 issue 也看不出「深度
+        # 回歸其實只跑了一步就死」。改用 if: ${{ !cancelled() }}（而非
+        # always()——always() 連使用者手動取消都會硬跑，!cancelled() 才是「前面
+        # 失敗仍照跑，但使用者主動取消時不硬跑」的正確語意）。
+        if: ${{ !cancelled() }}
         shell: powershell
         run: |
           ./tools/bootstrap.ps1
@@ -436,6 +505,10 @@ jobs:
           Remove-Item -Recurse -Force .venv
 
       - name: 安裝 AutoClaude 開發 + lint 依賴（供 local_ci_gate.ps1 使用）
+        # 2026-07-16 四方複審 QA 發現：見上一 step 註解——job 層級 continue-on-error
+        # 不會讓失敗 step 之後的其餘 step 繼續跑（隱式 if: success()），加
+        # !cancelled() 使後續深度回歸 step 不因前一步失敗而靜默 skip。
+        if: ${{ !cancelled() }}
         working-directory: AutoClaude
         run: |
           python -m pip install --upgrade pip
@@ -449,6 +522,9 @@ jobs:
         # 故取代（而非疊加）原本的裸 pytest 呼叫，避免同一 job 內重複跑一次全套測試。
         # 放進 nightly-full（非 windows-smoke）：pytest 全套 3,500+ case 在 Windows
         # runner 上執行時間較長，符合本 job continue-on-error 深度回歸網的定位。
+        #
+        # 2026-07-16 四方複審 QA 發現：加 !cancelled()，同上。
+        if: ${{ !cancelled() }}
         working-directory: AutoClaude
         shell: pwsh
         run: ./tools/local_ci_gate.ps1
@@ -457,6 +533,10 @@ jobs:
         # Architect 發現：原寫死 v0.30，與 root-infra-ci.yml 動態解析 LATEST 版本
         # （sort -V 取最高版語意）的慣例脫節，版本演化到 v0.31 時本 step 不會有機械
         # 訊號提醒更新。改為同一套動態解析邏輯，永遠鎖定當下真正的 LATEST 版本。
+        #
+        # 2026-07-16 四方複審 QA 發現：加 !cancelled()，同上——本 step 與前一步彼此
+        # 獨立（各自從頭 checkout 狀態算起），不應因前一步失敗而被跳過。
+        if: ${{ !cancelled() }}
         shell: pwsh
         run: |
           $latest = Get-ChildItem -Path AISDLC_SDD -Directory |

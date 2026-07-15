@@ -49,6 +49,11 @@ _CROSSREF_TARGETS = [
     _REPO_ROOT / "ONBOARDING.md",
     _REPO_ROOT / ".github" / "workflows" / "windows-compat-ci.yml",
     _REPO_ROOT / ".github" / "workflows" / "macos-compat-ci.yml",
+    # 2026-07-16 四方複審 SA 發現：本檔會對 DEF-101-051 等 PG-track 缺陷做明確狀態宣稱
+    # （曾實際自相矛盾——同檔第 3 行宣稱 fixed、第 52 行「追蹤」段落仍宣稱 open，且與
+    # 帳本最新狀態不一致），先前不在掃描範圍內故未被機械鎖抓到。只新增此一檔，不擴大為
+    # 全 repo 掃描（那是架構層級更大改動，非本輪範圍）。
+    _REPO_ROOT / "AutoClaude" / "docs" / "05_development" / "SD10_PG_Contract_NextAction.md",
 ]
 
 _ID_RE = re.compile(r"DEF-\d+-\d+")
