@@ -11,10 +11,13 @@ from __future__ import annotations
 import io
 import logging
 import subprocess
+import sys
 import threading
 import time
 from io import BytesIO
 from unittest.mock import MagicMock, patch
+
+import pytest
 
 import autoclaude.perception.hotkey_handler as hotkey_handler
 from autoclaude.perception.hotkey_handler import HotkeyHandler
@@ -335,6 +338,58 @@ class TestResolveCommand:
             assert '"C:\\Program Files\\npm\\claude.cmd"' in argv
             assert '"fix the bug"' in argv
             pty.close()
+
+
+@pytest.mark.skipif(sys.platform != "win32", reason="cmd shim 孤兒孫行程問題僅存在於 Windows")
+class TestCloseKillsCmdShimGrandchild:
+    """P1 回歸（真實子行程重現）：.cmd/.bat shim 啟動時，close() 若只 terminate
+    外層 cmd.exe，真正執行 CLI 的孫行程會變孤兒繼續跑（見 close() 內註解）。"""
+
+    def test_close_kills_grandchild_spawned_via_cmd_shim(self, tmp_path):
+        marker = tmp_path / "child_pid.txt"
+        child_script = tmp_path / "child_sleep.py"
+        child_script.write_text(
+            "import os, time, pathlib\n"
+            f"pathlib.Path(r'{marker}').write_text(str(os.getpid()))\n"
+            "time.sleep(30)\n"
+        )
+        shim = tmp_path / "fake_claude.cmd"
+        shim.write_text(f'@echo off\r\npython "{child_script}"\r\n')
+
+        pty = PtyWrapper(command=str(shim), args=[], auth_patterns=[], auth_response="y")
+        with patch("autoclaude.perception.pty_wrapper._WEXPECT_AVAILABLE", False), \
+             patch("autoclaude.perception.pty_wrapper.shutil.which", return_value=str(shim)):
+            pty.start()
+        try:
+            deadline = time.time() + 10
+            while not marker.exists() and time.time() < deadline:
+                time.sleep(0.1)
+            assert marker.exists(), "孫行程未在時限內啟動（測試環境問題，非本次修復範圍）"
+            child_pid = int(marker.read_text().strip())
+
+            pty.close()
+
+            # 修復前：外層 cmd.exe 已死，但孫行程（真正執行 CLI 者）仍存活；
+            # 修復後 taskkill /T 應遞迴一併終止整棵行程樹。
+            deadline = time.time() + 5
+            alive = True
+            while time.time() < deadline:
+                result = subprocess.run(
+                    ["tasklist", "/FI", f"PID eq {child_pid}"],
+                    capture_output=True,
+                )
+                stdout = result.stdout.decode(errors="replace")
+                alive = str(child_pid) in stdout
+                if not alive:
+                    break
+                time.sleep(0.2)
+            assert not alive, f"孫行程 PID {child_pid} 於 close() 後仍存活（P1 缺陷回歸）"
+        finally:
+            # 測試安全網：即使斷言失敗也不留下背景行程
+            subprocess.run(
+                ["taskkill", "/T", "/F", "/PID", str(pty._proc.pid)],
+                capture_output=True,
+            )
 
 
 # ──────────────────────────────────────────────

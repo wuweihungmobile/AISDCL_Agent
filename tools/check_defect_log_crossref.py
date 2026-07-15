@@ -17,7 +17,9 @@
   - 括號內文字**巢狀提及**另一個 DEF ID 的狀態（例如 A 的括號內順帶一句「其根因 B
     已 fixed」）不會被拆成 B 的獨立宣稱——只有「緊鄰括號」的最外層 ID 才會被判讀。
   - 帳本表格若同一 ID 出現多列（理論上 append-only 帳本不應如此，但若發生），
-    僅取**最後一列**的狀態為準（視為對前列的訂正）。
+    僅取**最後一列**的狀態為準（視為對前列的訂正）——即使最後一列的狀態欄文字無法
+    辨識任何已知關鍵字，也視為「該 ID 目前狀態不明」而非沿用更早一列的舊值
+    （獨立複審 finding：舊實作在此情境下會靜默沿用前一列，與本條承諾矛盾，已修正）。
   - 掃描範圍刻意限縮於 `ONBOARDING.md`（DEF-101-066 這類「改帳本忘同步姊妹文件」
     真實復發過一次的高風險文件），非涵蓋 repo 全部文件；未來如需擴大範圍，
     加入 `_CROSSREF_TARGETS` 即可，不需改動核心比對邏輯。
@@ -48,18 +50,28 @@ _CROSSREF_TARGETS = [
 _ID_RE = re.compile(r"DEF-\d+-\d+")
 _ROW_RE = re.compile(r"^\|\s*DEF-\d+-\d+\s*\|")
 # 一個或多個「(粗體)DEF-id(粗體)(分隔符)」緊接一個括號 → 該括號內文字視為這些 ID 的狀態宣稱。
+# 括號內容不設人為字數上限：曾以 {0,150} 限制，結果本 repo 慣用的長句敘述（例如
+# DEF-101-057 的括號內容實測 186 字元）一旦超過上限便整段比對失敗、被靜默略過，
+# 且不會有任何警告——等同複製本工具本應防止的 DEF-101-066 doc-drift 假綠情境
+# （複審實測：帳本刻意設為與文件矛盾的狀態，_scan_target 仍回報空清單）。
+# 改用 `[^）()]*`：因排除左右括號字元本身，最多只會掃到下一個括號為止，屬線性掃描、
+# 無 catastrophic backtracking 風險，可安全移除上限。
 _CLAIM_RE = re.compile(
-    r"((?:\*{0,2}DEF-\d+-\d+\*{0,2}[、，,／/\s]*)+)[（(]([^）()]{0,150})[）)]"
+    r"((?:\*{0,2}DEF-\d+-\d+\*{0,2}[、，,／/\s]*)+)[（(]([^）()]*)[）)]"
 )
 
 # 狀態關鍵字（對應帳本《格式定義》§ 狀態欄合法值）；用各自獨立 regex 各找最早出現位置，
 # 而非 alternation 依 dict 順序短路——wontfix 不含 "fixed" 子字串，兩者互不干擾。
+# 邊界改用 (?<![A-Za-z0-9])...(?![A-Za-z0-9]) 而非 \b：Python re 預設 Unicode 語意下 \b 把
+# CJK 表意文字也視為 word 字元，中文字緊貼英文狀態詞（如「修復後open尚待驗證」）時兩側都判
+# 定為非邊界，導致 \b 比對靜默找不到（已用 _classify() 實測重現）；改成明確只把 ASCII
+# 英數字視為邊界字元，CJK／標點／空白都視為合法邊界，才能正確比對中英夾雜文字。
 _STATUS_KEYWORDS: dict[str, re.Pattern[str]] = {
     "wontfix": re.compile(r"wontfix"),
     "closed-by-decision": re.compile(r"closed-by-decision"),
-    "routed": re.compile(r"\brouted\b"),
-    "fixed": re.compile(r"\bfixed\b"),
-    "open": re.compile(r"\bopen\b"),
+    "routed": re.compile(r"(?<![A-Za-z0-9])routed(?![A-Za-z0-9])"),
+    "fixed": re.compile(r"(?<![A-Za-z0-9])fixed(?![A-Za-z0-9])"),
+    "open": re.compile(r"(?<![A-Za-z0-9])open(?![A-Za-z0-9])"),
 }
 
 
@@ -75,9 +87,13 @@ def _classify(text: str) -> str | None:
     return best_label
 
 
-def _load_ledger_status() -> dict[str, str]:
-    """解析缺陷帳本表格列，回傳 {DEF-ID: 狀態分類}。同 ID 重複出現時，以最後一列為準。"""
-    status: dict[str, str] = {}
+def _load_ledger_status() -> dict[str, str | None]:
+    """解析缺陷帳本表格列，回傳 {DEF-ID: 狀態分類}。同 ID 重複出現時，以最後一列為準——
+
+    最後一列一律覆寫（即使該列狀態欄無法辨識任何已知關鍵字，此時存 None，代表
+    「該 ID 目前狀態不明」），不會靜默沿用更早一列的舊分類值。
+    """
+    status: dict[str, str | None] = {}
     text = _DEFECT_LOG.read_text(encoding="utf-8-sig")
     for line in text.splitlines():
         if not _ROW_RE.match(line):
@@ -88,13 +104,11 @@ def _load_ledger_status() -> dict[str, str]:
         def_id, status_cell = cells[0], cells[-1]
         if not _ID_RE.fullmatch(def_id):
             continue
-        label = _classify(status_cell)
-        if label:
-            status[def_id] = label
+        status[def_id] = _classify(status_cell)
     return status
 
 
-def _scan_target(path: Path, ledger: dict[str, str]) -> list[str]:
+def _scan_target(path: Path, ledger: dict[str, str | None]) -> list[str]:
     problems: list[str] = []
     text = path.read_text(encoding="utf-8-sig")
     for m in _CLAIM_RE.finditer(text):
@@ -103,10 +117,17 @@ def _scan_target(path: Path, ledger: dict[str, str]) -> list[str]:
         if not claimed:
             continue
         for def_id in _ID_RE.findall(ids_blob):
-            actual = ledger.get(def_id)
-            if actual is None:
+            if def_id not in ledger:
                 problems.append(
                     f"{path.name}：{def_id} 宣稱狀態「{claimed}」，但缺陷帳本查無此 ID"
+                    f"（claim 片段：{claim_text[:60]!r}）"
+                )
+                continue
+            actual = ledger[def_id]
+            if actual is None:
+                problems.append(
+                    f"{path.name}：{def_id} 宣稱狀態「{claimed}」，但缺陷帳本裡該 ID 最後"
+                    f"一列的狀態欄文字無法辨識任何已知關鍵字，帳本自身狀態含糊"
                     f"（claim 片段：{claim_text[:60]!r}）"
                 )
             elif actual != claimed:

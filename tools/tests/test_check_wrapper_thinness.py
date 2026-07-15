@@ -63,6 +63,72 @@ class TestCheckWrapperThinness(unittest.TestCase):
                 problems = m.check_wrapper_thinness()
         self.assertTrue(any("'while '" in p for p in problems))
 
+    def test_forbidden_for_loop_in_sh_detected(self) -> None:
+        """P1 回歸防護：bash for 迴圈需與 .ps1 側 foreach ( 對稱收錄，
+        否則迭代式業務邏輯（含 case 分支）外溢回 wrapper 會 false green。"""
+        import tempfile
+
+        with tempfile.TemporaryDirectory() as td:
+            fake_root = self._make_fake_root(
+                Path(td),
+                sh_text=(
+                    "for f in \"$@\"; do\n"
+                    "  case \"$f\" in\n"
+                    "    --extra-flag) echo handling extra business logic ;;\n"
+                    "  esac\n"
+                    "done\n"
+                ),
+                ps1_text="# fine\n",
+            )
+            with mock.patch.object(m, "ROOT", fake_root):
+                problems = m.check_wrapper_thinness()
+        self.assertTrue(any("'for '" in p for p in problems))
+
+    def test_forbidden_python3_dash_c_in_sh_detected(self) -> None:
+        """獨立複審回歸鎖：黑名單原本只收 "python -c"，"python3 -c" 版本前綴不同、
+        非其子字串，可完全繞過偵測——內嵌 Python 業務邏輯改用 python3 仍應被攔下。"""
+        import tempfile
+
+        with tempfile.TemporaryDirectory() as td:
+            fake_root = self._make_fake_root(
+                Path(td),
+                sh_text='result=$(python3 -c "import sys; print(sys.argv)")\n',
+                ps1_text="# fine\n",
+            )
+            with mock.patch.object(m, "ROOT", fake_root):
+                problems = m.check_wrapper_thinness()
+        self.assertTrue(any("'python3 -c'" in p for p in problems))
+
+    def test_forbidden_c_style_for_loop_in_ps1_detected(self) -> None:
+        """獨立複審回歸鎖：.ps1 側原本只收 "foreach ("，C-style `for (...)` 迴圈是
+        不同拼法、非其子字串，可完全繞過偵測。"""
+        import tempfile
+
+        with tempfile.TemporaryDirectory() as td:
+            fake_root = self._make_fake_root(
+                Path(td),
+                sh_text="# fine\n",
+                ps1_text="for ($i=0; $i -lt 5; $i++) { Write-Host $i }\n",
+            )
+            with mock.patch.object(m, "ROOT", fake_root):
+                problems = m.check_wrapper_thinness()
+        self.assertTrue(any("'for ('" in p for p in problems))
+
+    def test_forbidden_foreach_object_cmdlet_in_ps1_detected(self) -> None:
+        """獨立複審回歸鎖：ForEach-Object 管線 cmdlet 迭代語意等同迴圈，原黑名單
+        完全未收錄，可讓迭代式業務邏輯（含 JSON 解析）繞過偵測。"""
+        import tempfile
+
+        with tempfile.TemporaryDirectory() as td:
+            fake_root = self._make_fake_root(
+                Path(td),
+                sh_text="# fine\n",
+                ps1_text="Get-Content x.json | ForEach-Object { $_ }\n",
+            )
+            with mock.patch.object(m, "ROOT", fake_root):
+                problems = m.check_wrapper_thinness()
+        self.assertTrue(any("ForEach-Object" in p for p in problems))
+
     def test_forbidden_keyword_in_ps1_detected(self) -> None:
         import tempfile
 

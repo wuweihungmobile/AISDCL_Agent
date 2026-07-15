@@ -246,7 +246,7 @@ tasks:
     prompt: |
       給 Claude Code 的詳細 prompt
     expected_output_regex: "\\[DONE\\]"
-    evaluator_command: "pytest tests/test_foo.py -v"   # 可選，雙重驗證
+    evaluator_command: "pytest tests/test_foo.py -v"   # 可選，雙重驗證；shell=True 走平台原生殼（Windows=cmd.exe，非 bash），勿用 POSIX 專屬語法（test/單引號/grep 等）
     evaluator_timeout_seconds: 60                       # 可選，預設 120
     max_retries: 2                                      # 可選，使用全域設定
     maintain_context: true                              # 可選，預設 true

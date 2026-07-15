@@ -100,7 +100,9 @@ def probe(
     return {"body": body, "latency_ms": elapsed_ms, "http_status": resp.status, "url": url}
 
 
-def list_models(api_key: str, region_base: str = "https://api.minimax.io", timeout: int = 15) -> int:
+def list_models(
+    api_key: str, region_base: str = "https://api.minimax.io", timeout: int = 15
+) -> int:
     """呼叫 GET /v1/models 列出可用模型，用於確認 key 有效性與 embo-01 訂閱狀態。"""
     url = f"{region_base}/v1/models"
     req = urllib.request.Request(
@@ -135,6 +137,13 @@ def list_models(api_key: str, region_base: str = "https://api.minimax.io", timeo
 
 
 def main() -> int:
+    # DEF-101-070 對照缺口（R5 複審發現）：報表含 ✅/❌/📋/⚠️ 等符號，Windows cp950
+    # console 直接 print 會 UnicodeEncodeError 中斷；stdout + stderr 皆強制 utf-8。
+    for _stream in (sys.stdout, sys.stderr):
+        try:
+            _stream.reconfigure(encoding="utf-8")  # type: ignore[union-attr]
+        except (AttributeError, OSError):
+            pass
     parser = argparse.ArgumentParser(description="Minimax embo-01 API probe")
     parser.add_argument("--api-key", help="覆寫 MINIMAX_API_KEY")
     parser.add_argument("--group-id", help="覆寫 MINIMAX_GROUP_ID（必填）")
@@ -189,7 +198,9 @@ def main() -> int:
     )
 
     if not api_key or api_key == "your_minimax_api_key_here":
-        print("❌ 找不到 MINIMAX_API_KEY；請先 cp .env.example .env 並填入 API key", file=sys.stderr)
+        print(
+            "❌ 找不到 MINIMAX_API_KEY；請先 cp .env.example .env 並填入 API key", file=sys.stderr
+        )
         return 2
     if not group_id or group_id == "your_minimax_group_id_here":
         print(
@@ -224,7 +235,9 @@ def main() -> int:
     if status_code != 0:
         print(f"❌ Minimax 業務錯誤：status_code={status_code}", file=sys.stderr)
         print(f"   status_msg: {status_msg}", file=sys.stderr)
-        print(f"   完整 response: {json.dumps(body, ensure_ascii=False, indent=2)}", file=sys.stderr)
+        print(
+            f"   完整 response: {json.dumps(body, ensure_ascii=False, indent=2)}", file=sys.stderr
+        )
         print()
         print("常見錯誤對照：", file=sys.stderr)
         print("  1002 → API key 無效或過期", file=sys.stderr)
@@ -234,7 +247,10 @@ def main() -> int:
         print("  2013 → GroupId 無效", file=sys.stderr)
         print("  2049 → invalid api key — **常見原因：endpoint 區域不匹配**", file=sys.stderr)
         print("         國際版 key（platform.minimax.io 取得）→ 用 api.minimax.io", file=sys.stderr)
-        print("         中國版 key（platform.minimaxi.com 取得）→ 用 api.minimaxi.com", file=sys.stderr)
+        print(
+            "         中國版 key（platform.minimaxi.com 取得）→ 用 api.minimaxi.com",
+            file=sys.stderr,
+        )
         return 1
 
     vectors = body.get("vectors") or body.get("data") or body.get("embeddings") or []

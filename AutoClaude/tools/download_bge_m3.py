@@ -21,6 +21,13 @@ from pathlib import Path
 
 
 def main() -> int:
+    # DEF-101-070 對照缺口（R5 複審發現）：報表含 ✅/❌/📋 等符號，Windows cp950
+    # console 直接 print 會 UnicodeEncodeError 中斷；stdout + stderr 皆強制 utf-8。
+    for _stream in (sys.stdout, sys.stderr):
+        try:
+            _stream.reconfigure(encoding="utf-8")  # type: ignore[union-attr]
+        except (AttributeError, OSError):
+            pass
     parser = argparse.ArgumentParser(description="Download BGE-M3 for TEI local use")
     parser.add_argument(
         "--cache-dir",

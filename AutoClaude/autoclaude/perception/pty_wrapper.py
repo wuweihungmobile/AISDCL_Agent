@@ -256,6 +256,26 @@ class PtyWrapper:
             except Exception:
                 pass
         if self._proc:
+            # .cmd/.bat shim（見 _build_cmd_shim_line）啟動的是外層 cmd.exe，
+            # terminate()（Windows 對映 TerminateProcess）只殺這層直接子行程；
+            # 其下真正執行 CLI 的孫行程會變孤兒繼續跑（P1，真實子行程重現：
+            # 外層 cmd.exe terminate 後 poll()==1 已死，孫行程 PID 仍存活、
+            # ParentProcessId 指向已死行程、繼續執行至逾時）。Windows 上先用
+            # `taskkill /T /F` 遞迴終止整棵行程樹涵蓋此缺口，再呼叫
+            # terminate() 作為既有防線（對已死行程安全，Popen.terminate()
+            # 內部吞掉 ERROR_ACCESS_DENIED）。pid 須為真實整數才觸發——
+            # 測試以 MagicMock 充當 self._proc，其 `.pid` 非 int，自然跳過、
+            # 不會在單元測試中真的呼叫 taskkill。
+            if sys.platform == "win32" and isinstance(self._proc.pid, int):
+                try:
+                    subprocess.run(
+                        ["taskkill", "/T", "/F", "/PID", str(self._proc.pid)],
+                        stdout=subprocess.DEVNULL,
+                        stderr=subprocess.DEVNULL,
+                        timeout=5,
+                    )
+                except Exception:
+                    pass
             self._proc.terminate()
         if self._reader:
             self._reader.close(timeout=1.0)

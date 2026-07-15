@@ -410,20 +410,26 @@ class TestStepVenvForceCrossFlavor(DevStartTestCase):
 
 
 class TestHooksConstantsConsistency(DevStartTestCase):
-    """Architect 複審 P2：dev_start.py 與 install_git_hooks.sh 各自硬編碼同一組
+    """Architect 複審 P2：dev_start.py 與 git hooks 安裝腳本各自硬編碼同一組
     「dispatcher 目錄名＋三支 hook 檔名」假設，過去無機械比對——本測試補上這道守門。
+
+    獨立複審 finding（GitHooksInstallCommon.ps1 雙軌重寫）修復後，判定邏輯的單一
+    真相源改為 tools/git_hooks_install_common.py（tools/lib/GitHooksInstallCommon.ps1
+    與 tools/lib/git_hooks_install_common.sh 皆改為呼叫它的薄殼層，各自不再宣告
+    HOOKS_DIR／hook 檔名），本測試改比對該 Python 檔。
     """
 
     def test_hooks_dir_and_filenames_match_install_script(self):
-        install_sh = dev_start.ROOT / "AutoClaude" / "tools" / "install_git_hooks.sh"
-        text = install_sh.read_text(encoding="utf-8")
-        m = re.search(r'HOOKS_DIR="\$TOPLEVEL/([^"]+)"', text)
-        self.assertIsNotNone(m, "install_git_hooks.sh 的 HOOKS_DIR 宣告格式已變，需同步本測試")
-        self.assertEqual(dev_start.HOOKS_DIR, dev_start.ROOT / m.group(1))
+        common_py = dev_start.ROOT / "tools" / "git_hooks_install_common.py"
+        text = common_py.read_text(encoding="utf-8")
+        m = re.search(r'Path\(top\) / "([^"]+)" / "([^"]+)"', text)
+        self.assertIsNotNone(m, "git_hooks_install_common.py 的 HOOKS_DIR 宣告格式已變，需同步本測試")
+        self.assertEqual(dev_start.HOOKS_DIR, dev_start.ROOT / m.group(1) / m.group(2))
 
-        m2 = re.search(r"for h in ([\w\- ]+); do", text)
-        self.assertIsNotNone(m2, "install_git_hooks.sh 的 hook 檔名清單宣告格式已變，需同步本測試")
-        self.assertEqual(tuple(m2.group(1).split()), ("pre-commit", "pre-push", "post-commit"))
+        m2 = re.search(r"HOOK_FILENAMES = \(([^)]+)\)", text)
+        self.assertIsNotNone(m2, "git_hooks_install_common.py 的 hook 檔名清單宣告格式已變，需同步本測試")
+        filenames = tuple(re.findall(r'"([^"]+)"', m2.group(1)))
+        self.assertEqual(filenames, ("pre-commit", "pre-push", "post-commit"))
 
 
 class TestVenvCacheHandoffBackup(DevStartTestCase):

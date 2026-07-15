@@ -91,6 +91,21 @@
 #     tools/tests/ 測試檔直接 import 根層同儕模組的慣用法（三支新測試檔皆用此
 #     寫法）→ 已於該測試檔補一道 import-based BFS 掃描（含遞移一層，涵蓋
 #     check_hooks_liveness.py 內部再 import _stdio_utf8.py 的情形），關閉此偵測盲區。
+#
+# R7 獨立重新複審追記（2026-07-15，`gh run list`／`gh api .../annotations` 親查
+# 實際執行紀錄後發現，見 DEF-101-081）：
+#   - 上一輪「四方複審終裁全 APPROVE」的收斂 commit（`a8e4b73`／`1175555`）在真實
+#     GitHub Actions 上從未成功執行過本 workflow 一次——本 repo 帳戶帳單問題導致
+#     runner 從未被配置（annotation：「recent account payments have failed or your
+#     spending limit needs to be increased」），非本 workflow 任何 step 的邏輯回歸；
+#     同一時窗 macos-compat-ci／root-infra-ci／AutoClaude CI／aisdlc-sdd-ci 四個
+#     workflow 同步失敗、同款帳單訊息。**這不是可用 workflow YAML 修復的 bug**——
+#     job 在任何 step 執行前就被平台攔下，本檔案不論怎麼改都無法偵測或繞過帳戶層級
+#     的攔阻，根因修復需帳號所有者至 GitHub「Billing & plans」處理。
+#   - 留此註記的目的：日後若見本 workflow（或上述四者）同步在數秒內 failure，先查
+#     GitHub Actions run 的 annotation 是否為同款帳單訊息，而非誤判為程式碼回歸；
+#     完整揭露與後續處理步驟見 docs/06_quality/AutoSDD_Defect_Log.md 的 DEF-101-081
+#     （P0 open，需人工處理，非本輪程式碼可解）。
 
 name: windows-compat-ci
 
@@ -156,7 +171,21 @@ on:
         default: false
 
 concurrency:
-  group: windows-compat-ci-${{ github.ref }}
+  # R7 複審修正（2026-07-15，獨立重新複審發現 P1）：先前 group 只含 github.ref，
+  # push（windows-smoke）與 schedule/workflow_dispatch（windows-nightly-full +
+  # windows-nightly-alert）在 main 分支上算出完全相同的 group 字串
+  # （schedule 事件的 github.ref 就是預設分支 refs/heads/main），導致同組。
+  # cancel-in-progress:true 是整個 workflow run 層級生效，一次尋常的 push 會把正在
+  # 跑的 nightly-full（+其下游 nightly-alert）整包取消——取消後 conclusion 是
+  # cancelled 不是 failure，nightly-alert 的 `if [ "$conclusion" = "failure" ]`
+  # 永遠不會為真，紅色路徑因此形同虛設且是靜默損失。已用 gh run list 實測驗證
+  # cancel-in-progress 在本 repo 確實會取消同 group 的舊 run（29334931071／
+  # 29333612257 conclusion 皆為 cancelled）。改為 group 額外併入
+  # github.event_name，讓 push 與 schedule/workflow_dispatch 落在不同 group，
+  # 兩者互不取消；同一觸發來源內部仍保有「新 run 取消舊 run」的原意（比照
+  # autoclaude-mutation-on-change.yml DEF-101-023 的累積原子性經驗，不同觸發來源
+  # 不可共用同一把 concurrency 鎖）。
+  group: windows-compat-ci-${{ github.ref }}-${{ github.event_name }}
   cancel-in-progress: true
 
 # 純驗證、不寫回 repo → 最小權限唯讀。
@@ -264,6 +293,30 @@ jobs:
           # 若不顯式歸零，pwsh 會把這個「預期中的非零」誤傳為本 step 的失敗結果。
           exit 0
 
+      - name: GitHooksInstallCommon.ps1 Assert-NotLinkedWorktree 於 linked worktree 下應正確拒絕（fail-loud；獨立複審發現：macOS 側已測、Windows 側零覆蓋 P0）
+        # 獨立複審發現：本輪「架構最佳化」把 linked worktree 防護抽成
+        # tools/lib/GitHooksInstallCommon.ps1 共用函式，macos-compat-ci.yml 對兩個
+        # 呼叫端（install_git_hooks.sh / install-hooks.sh）都各自驗證「於 linked
+        # worktree 下應 fail-loud」，但 windows-compat-ci.yml 從未補上對等步驟——
+        # 上面兩個既有 step 只在一般 checkout（非 worktree）下跑安裝/解除往返，從未
+        # 觸發 Assert-NotLinkedWorktree 的拒絕分支。
+        # 注意：pwsh 呼叫另一支 .ps1（`&`／直接路徑呼叫）時，被呼叫腳本內的
+        # `exit N` 只會結束該腳本自身、不會終止呼叫端 run block 的其餘敘述，但會
+        # 正確設定 $LASTEXITCODE 供呼叫端讀取——故用 $LASTEXITCODE 斷言、不依賴
+        # 整個 step 因 exit 而提前結束。
+        shell: pwsh
+        run: |
+          $wt = Join-Path $env:RUNNER_TEMP "wt-install-git-hooks-reject"
+          git worktree add --detach $wt HEAD
+          Push-Location $wt
+          ./AutoClaude/tools/install_git_hooks.ps1
+          $rc = $LASTEXITCODE
+          Pop-Location
+          git worktree remove --force $wt
+          if ($rc -ne 1) { throw "預期在 linked worktree 下 install_git_hooks.ps1 應 exit 1，實際 rc=$rc" }
+          Write-Host "install_git_hooks.ps1 worktree 拒絕驗證通過（rc=1 as expected）"
+          exit 0
+
       - name: AISDLC_SDD/scripts/install-hooks.ps1 驗證（R1 SA 發現：第二入口從未被測到）
         shell: pwsh
         run: |
@@ -273,6 +326,20 @@ jobs:
           if ($hooksPath -match '/' -and $hooksPath -match '\\') { throw "core.hooksPath 含混合分隔符：$hooksPath" }
           Write-Host "install-hooks.ps1 驗證通過：core.hooksPath = $hooksPath"
           git config --unset core.hooksPath
+
+      - name: AISDLC_SDD/scripts/install-hooks.ps1 於 linked worktree 下應正確拒絕（fail-loud；同上，第二入口同樣零覆蓋）
+        shell: pwsh
+        run: |
+          $wt = Join-Path $env:RUNNER_TEMP "wt-install-hooks-reject"
+          git worktree add --detach $wt HEAD
+          Push-Location $wt
+          ./AISDLC_SDD/scripts/install-hooks.ps1
+          $rc = $LASTEXITCODE
+          Pop-Location
+          git worktree remove --force $wt
+          if ($rc -ne 1) { throw "預期在 linked worktree 下 install-hooks.ps1 應 exit 1，實際 rc=$rc" }
+          Write-Host "install-hooks.ps1 worktree 拒絕驗證通過（rc=1 as expected）"
+          exit 0
 
       - name: install_post_commit.ps1 執行 + 非 ASCII 路徑編碼損毀斷言（P1 回歸鎖，R1 SD 發現修正；R2 SD/Architect 發現再修正）
         shell: pwsh

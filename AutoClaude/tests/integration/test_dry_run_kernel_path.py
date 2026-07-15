@@ -9,14 +9,17 @@
 from __future__ import annotations
 
 from pathlib import Path
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
 import pytest
-
 import yaml as _yaml
 
 from autoclaude.core.kernel_state import KernelResult
-from autoclaude.core.services.auto_resume import AutoResumeService, load_playbook, seconds_until_resume
+from autoclaude.core.services.auto_resume import (
+    AutoResumeService,
+    load_playbook,
+    seconds_until_resume,
+)
 from autoclaude.core.wiring import build_kernel
 from autoclaude.infra.adapters.dry_run_executor import DryRunExecutor
 from autoclaude.infra.adapters.shell_evaluator import ShellEvaluator
@@ -37,8 +40,16 @@ def _make_executor_from_fixture(fixture_path: str) -> DryRunExecutor:
     return DryRunExecutor(step_outputs)
 
 
-def _make_service(fixture_path: str | None = None, cfg: AppConfig | None = None) -> AutoResumeService:
+def _make_service(
+    fixture_path: str | None = None, cfg: AppConfig | None = None
+) -> AutoResumeService:
     cfg = cfg or AppConfig()
+    # 測試不應觸發真實桌面通知：NotificationPlugin 訂閱 POST_RUN/ON_AUTO_RESUME_WAKE，
+    # notify() 在 Windows 經 plyer 產生背景執行緒（win32 balloon tip），其內部
+    # time.sleep(timeout) 與其他測試 `patch(".../time.sleep")` 共享同一個 stdlib
+    # time 模組物件（非各自獨立 mock），導致殘留背景執行緒的 sleep 呼叫可能競態
+    # 落入「另一個」測試的 mock 視窗內，造成與本測試邏輯無關的 flaky 斷言失敗。
+    cfg.notification.enabled = False
     if fixture_path:
         executor = _make_executor_from_fixture(fixture_path)
     else:
@@ -85,6 +96,8 @@ class TestAutoResumeServiceDryRun:
         cfg = AppConfig()
         cfg.token_guard.auto_resume = True
         cfg.token_guard.max_auto_resumes = 2
+        # 避免真實通知背景執行緒污染 time.sleep mock（見上方 _make_service）
+        cfg.notification.enabled = False
 
         # mock kernel: 前 2 次 halted=True，第 3 次 success=True
         call_count = {"n": 0}
@@ -123,6 +136,8 @@ class TestAutoResumeServiceDryRun:
         cfg = AppConfig()
         cfg.token_guard.auto_resume = True
         cfg.token_guard.max_auto_resumes = 2
+        # 避免真實通知背景執行緒污染 time.sleep mock（見上方 _make_service）
+        cfg.notification.enabled = False
 
         def always_halt(playbook, start_idx: int = 0):
             return KernelResult(
@@ -153,6 +168,8 @@ class TestAutoResumeServiceDryRun:
 
         cfg = AppConfig()
         cfg.playbook.max_evolutions = 1
+        # 避免真實通知背景執行緒污染 time.sleep mock（見上方 _make_service）
+        cfg.notification.enabled = False
 
         call_count = {"n": 0}
 

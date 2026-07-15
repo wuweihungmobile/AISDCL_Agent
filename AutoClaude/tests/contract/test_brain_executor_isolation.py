@@ -16,13 +16,10 @@ from __future__ import annotations
 
 import ast
 import configparser
-import shutil
 import subprocess
-import sys
 from pathlib import Path
 
 import pytest
-
 
 _ROOT = Path(__file__).resolve().parents[2]
 _IMPORTLINTER = _ROOT / ".importlinter"
@@ -134,18 +131,23 @@ class TestStaticImportIsolation:
 class TestImportLinterCLI:
     def test_lint_imports_passes(self):
         """執行 lint-imports CLI 確認 0 broken。"""
-        if shutil.which("lint-imports") is None:
+        # 不用 shutil.which() 預判是否「已安裝」——Windows 上 shutil.which 會依 PATHEXT
+        # 找到 PATH 上任何同名 .bat/.cmd（例如與本 repo 無關的 pyenv-win shim），
+        # 但緊接著 subprocess.run(shell=False) 對純 .bat 直接執行會拋 FileNotFoundError，
+        # 造成「判定已安裝、卻執行失敗」的不一致。改為直接嘗試執行，
+        # 找不到可執行檔（包含上述情境）一律視為未安裝並 skip。
+        try:
+            result = subprocess.run(
+                ["lint-imports", "--config", ".importlinter"],
+                cwd=str(_ROOT),
+                capture_output=True,
+                text=True,
+                encoding="utf-8",
+                errors="replace",
+                env={**dict(__import__("os").environ), "PYTHONUTF8": "1"},
+            )
+        except FileNotFoundError:
             pytest.skip("lint-imports CLI 未安裝（pip install autoclaude[lint]）")
-
-        result = subprocess.run(
-            ["lint-imports", "--config", ".importlinter"],
-            cwd=str(_ROOT),
-            capture_output=True,
-            text=True,
-            encoding="utf-8",
-            errors="replace",
-            env={**dict(__import__("os").environ), "PYTHONUTF8": "1"},
-        )
         # 兩條 brain-executor contract 名稱必須出現在 KEPT 中
         assert "brain-executor-isolation" in result.stdout.lower() or \
                "Brain modules must not import Executor modules" in result.stdout, \

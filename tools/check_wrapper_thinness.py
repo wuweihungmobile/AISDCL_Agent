@@ -42,14 +42,22 @@ MAX_LINES = 100
 _FORBIDDEN: dict[str, tuple[str, ...]] = {
     "tools/dev_start.sh": (
         "while ",       # 迴圈：wrapper 不該有迭代式業務邏輯
+        "for ",         # 迴圈（bash for）：同上，與 .ps1 側 foreach ( 對稱收錄
         "jq ",          # JSON 解析（外部工具）
         "python -c",    # 內嵌 Python 業務邏輯，應改為呼叫 dev_start.py 本體
+        "python3 -c",   # 同上，版本前綴不同的常見等義寫法（獨立複審發現：原本
+                         # 只收 "python -c"，"python3 -c" 不是其子字串，完全繞過）
     ),
     "tools/dev_start.ps1": (
         "ConvertFrom-Json",  # JSON 解析
         "ConvertTo-Json",
         "foreach (",         # 迴圈
         "while (",
+        "for (",             # C-style 迴圈：與 foreach ( 是不同拼法，需各自收錄
+                              # （獨立複審發現：原本漏收，"for (" 不是 "foreach (" 的子字串）
+        "ForEach-Object",     # 管線 cmdlet 迭代（含業務邏輯常見寫法），語意等同迴圈
+                              # （獨立複審發現：原本漏收，別名 "%" 因過於通用會誤中一般
+                              # 內容故不收錄，僅收明確的 cmdlet 全名）
     ),
 }
 

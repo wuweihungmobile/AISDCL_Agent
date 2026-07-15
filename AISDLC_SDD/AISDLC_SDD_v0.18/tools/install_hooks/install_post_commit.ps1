@@ -16,12 +16,14 @@ if (-not (Test-Path $HookSrcClosure)) {
   exit 1
 }
 
-@"
+$HookContent = @"
 #!/usr/bin/env bash
 # PostCommit advisory hooks - never block commit
 python "$HookSrcDrift" "`$@" || true
 python "$HookSrcClosure" "`$@" || true
-"@ | Out-File -FilePath $HookTarget -Encoding ascii
+"@
+$HookContent = $HookContent -replace "`r`n", "`n"
+[System.IO.File]::WriteAllText($HookTarget, $HookContent, (New-Object System.Text.UTF8Encoding($false)))
 
 Write-Output "Installed PostCommit advisory hooks at: $HookTarget"
 Write-Output "  - drift   -> .git/COMMIT_DRIFT_WARNING"

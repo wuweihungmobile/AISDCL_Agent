@@ -56,6 +56,22 @@ class TestClassify(unittest.TestCase):
     def test_closed_by_decision_detected(self) -> None:
         self.assertEqual(m._classify("closed-by-decision（本輪四方複審拍板）"), "closed-by-decision")
 
+    def test_cjk_adjacent_to_status_word_without_separator_still_detected(self) -> None:
+        """中文字緊貼英文狀態詞、無空格/標點分隔 → 仍須判讀出來。
+
+        Python re 的 \\b 在預設 Unicode 語意下把 CJK 表意文字也算 word 字元，
+        中文字緊貼英文狀態詞時兩側都判定為非邊界，\\b 比對會靜默找不到，
+        導致該筆狀態直接從解析結果消失（而非被誤判）——此為回歸鎖。
+        """
+        self.assertEqual(m._classify("修復後open尚待驗證"), "open")
+        self.assertEqual(m._classify("結論fixed，已核實"), "fixed")
+        self.assertEqual(m._classify("經routed轉派處理"), "routed")
+
+    def test_status_word_as_substring_of_longer_english_word_not_matched(self) -> None:
+        """邊界改用 ASCII 字元類判斷後，仍不可誤判 "reopened"/"unfixed" 這類複合字內的子字串。"""
+        self.assertIsNone(m._classify("已reopened"))
+        self.assertIsNone(m._classify("unfixed issue"))
+
 
 class TestLoadLedgerStatus(unittest.TestCase):
     def test_parses_last_column_as_status(self) -> None:
@@ -77,6 +93,20 @@ class TestLoadLedgerStatus(unittest.TestCase):
         with mock.patch.object(m, "_DEFECT_LOG", _write_tmp(text)):
             status = m._load_ledger_status()
         self.assertEqual(status["DEF-01-001"], "fixed")
+
+    def test_last_row_unclassifiable_does_not_inherit_earlier_row(self) -> None:
+        """獨立複審回歸鎖：若『最後一列』狀態欄文字無法辨識任何已知關鍵字，必須視為
+        『狀態不明』（None），不可靜默沿用更早一列的舊分類值——舊實作在此情境下會
+        因迴圈只在 `label` 為真時才覆寫字典，讓前一列的 fixed 殘留下來，與本函式
+        docstring「僅取最後一列」的承諾矛盾（已修正：無論能否分類，一律覆寫）。"""
+        text = _ledger_text(
+            "| DEF-01-001 | 2026-06-12 | 情境 | 現象 | P2 | 去向 | fixed@第一列 |\n"
+            "| DEF-01-001 | 2026-06-13 | 情境 | 現象 | P2 | 去向 | pending-reassessment（無合法關鍵字） |\n"
+        )
+        with mock.patch.object(m, "_DEFECT_LOG", _write_tmp(text)):
+            status = m._load_ledger_status()
+        self.assertIn("DEF-01-001", status)
+        self.assertIsNone(status["DEF-01-001"])
 
     def test_non_table_lines_ignored(self) -> None:
         text = _ledger_text("一般敘述文字提到 DEF-01-001 但不是表格列，不應被誤解析\n")
@@ -121,12 +151,39 @@ class TestScanTarget(unittest.TestCase):
         self.assertEqual(len(problems), 1)
         self.assertIn("查無此 ID", problems[0])
 
+    def test_ledger_status_none_flagged_distinctly_from_unknown_id(self) -> None:
+        """帳本『有這個 ID 但最後一列狀態不明』(None) 與『帳本裡根本沒這個 ID』
+        是兩種不同情況，訊息不可混淆（None 不應被誤判為與任何宣稱狀態一致而放行）。"""
+        ledger = {"DEF-01-001": None}
+        target = _write_tmp("某文件敘述 DEF-01-001（open，記事存證）。\n")
+        problems = m._scan_target(target, ledger)
+        self.assertEqual(len(problems), 1)
+        self.assertIn("狀態欄文字無法辨識", problems[0])
+        self.assertNotIn("查無此 ID", problems[0])
+
     def test_markdown_bold_around_id_still_matches(self) -> None:
         target = _write_tmp("重點：**DEF-01-002**（open，記事存證）。\n")
         self.assertEqual(m._scan_target(target, self.ledger), [])
         target2 = _write_tmp("重點：**DEF-01-001**（open，記事存證）。\n")
         problems = m._scan_target(target2, self.ledger)
         self.assertEqual(len(problems), 1)
+
+    def test_long_parenthetical_over_150_chars_still_flagged(self) -> None:
+        """括號內容超過 150 字元的長句敘述仍須被偵測到矛盾（回歸鎖：曾因 _CLAIM_RE 括號
+        內容量詞硬性上限 {0,150} 導致超長度的真實宣稱被靜默跳過比對，複審實測 ONBOARDING.md
+        DEF-101-057 的括號內容達 186 字元，工具因此完全沒抓到該筆宣稱，帳本狀態即使被刻意
+        改成與文件矛盾也不會被回報——本測試以同等長度的長句重現，並鎖住修復後的行為）。"""
+        long_claim = (
+            "install_post_commit.{sh,ps1} worktree 路徑解析 bug 在 v0.01~v0.29 之殘留，"
+            "open，記事存證；本文件先前誤記為某狀態，經機械檢查揪出已訂正；"
+            "不佔本表列，因與上方另一筆同源議題已合併敘述於缺陷帳本本身，"
+            "此處刻意加長以確保超過 150 字元的舊上限，補足長度用的贅字贅字贅字贅字贅字贅字"
+        )
+        self.assertGreater(len(long_claim), 150)
+        target = _write_tmp(f"某文件敘述 DEF-01-001（{long_claim}）尚待處理。\n")
+        problems = m._scan_target(target, self.ledger)
+        self.assertEqual(len(problems), 1, "括號內容超長不應導致該筆宣稱被靜默跳過偵測")
+        self.assertIn("DEF-01-001", problems[0])
 
 
 class TestMain(unittest.TestCase):

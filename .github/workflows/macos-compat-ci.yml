@@ -51,6 +51,17 @@
 # check_defect_log_crossref.py／check_wrapper_thinness.py／_stdio_utf8.py）皆漏列
 # paths → 補齊四條；同時修復 test_ci_paths_cover_root_consumers.py 對
 # `import X as m` 慣用法的偵測盲區（含遞移一層）。
+#
+# 獨立複審發現（2026-07-15，P1）：原 workflow 層級 concurrency
+# `group: macos-compat-ci-${{ github.ref }}` 把 push 觸發的 macos-smoke 與
+# schedule/workflow_dispatch 觸發的 macos-nightly-full（+macos-nightly-alert）
+# 綁進同一把 key——push 期間會靜默取消整組深度回歸與告警（取消狀態非 failure，
+# macos-nightly-alert 的失敗判斷式偵測不到，紅色路徑失效且無聲）。改為 job 層級
+# concurrency：macos-smoke 維持 per-ref + cancel-in-progress:true（取消過時的
+# smoke 重跑本身合理）；macos-nightly-full／macos-nightly-alert 改用不含
+# github.ref 的固定字串 group + cancel-in-progress:false（比照本 repo
+# aisdlc-sdd-fsm-chaos-nightly.yml／autoclaude-mutation-on-change.yml 既有前例），
+# 兩者互不干擾。
 
 name: macos-compat-ci
 
@@ -117,10 +128,6 @@ on:
         type: boolean
         default: false
 
-concurrency:
-  group: macos-compat-ci-${{ github.ref }}
-  cancel-in-progress: true
-
 # 純驗證、不寫回 repo → 最小權限唯讀。
 permissions:
   contents: read
@@ -131,6 +138,9 @@ jobs:
     if: github.event_name != 'schedule'
     runs-on: macos-latest
     timeout-minutes: 35
+    concurrency:
+      group: macos-compat-ci-smoke-${{ github.ref }}
+      cancel-in-progress: true
 
     steps:
       - uses: actions/checkout@v5
@@ -329,6 +339,9 @@ jobs:
     runs-on: macos-latest
     timeout-minutes: 60
     continue-on-error: true
+    concurrency:
+      group: macos-compat-ci-nightly-full
+      cancel-in-progress: false
 
     steps:
       - uses: actions/checkout@v5
@@ -369,6 +382,9 @@ jobs:
     runs-on: ubuntu-latest
     needs: macos-nightly-full
     if: always() && (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch')
+    concurrency:
+      group: macos-compat-ci-nightly-full
+      cancel-in-progress: false
     permissions:
       actions: read
       issues: write

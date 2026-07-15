@@ -37,6 +37,12 @@
 #                      與 `docs/06_quality/AutoSDD_Defect_Log.md` 該 ID 最新狀態是否矛盾
 #                      （DEF-101-066 這類「改帳本忘同步姊妹文件」曾真實發生一次，
 #                      本道步驟即該問題類別的治本機械守護，DEF-101-068(e) 落地）
+#   10. dev_start wrapper 薄殼守門 — tools/check_wrapper_thinness.py：獨立具名 step
+#                      執行（先前唯一執行路徑是 tools/tests/test_check_wrapper_thinness.py
+#                      裡一個不帶 mock 的測試方法，靠第 8 道 unittest 間接跑到，不像同批
+#                      其他 check_*.py 有具名 step 可一眼看出有沒有被 CI 涵蓋；未來若該
+#                      測試被改用 mock/fixture 或誤判精簡掉，這道機械回歸防護會無聲失效
+#                      且無第二訊號可查覺——四方複審 P2 finding 修復）
 #
 # 觸發不設 paths 過濾（2026-07-11 起）：第 4 道 NTFS 檔名閘守的是「任何路徑」新增的
 # 敵意檔名（一旦入庫所有 Windows checkout 直接壞），paths 白名單必留盲區；本 job 全部
@@ -60,7 +66,7 @@ permissions:
 
 jobs:
   root-infra:
-    name: root infra guard (bash -n + pwsh parse/BOM + EOL(.sh) + EOL(.ps1) + NTFS + parity + py_compile + unittest + defect-log-crossref)
+    name: root infra guard (bash -n + pwsh parse/BOM + EOL(.sh) + EOL(.ps1) + NTFS + parity + py_compile + unittest + defect-log-crossref + wrapper-thinness)
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
@@ -178,3 +184,6 @@ jobs:
 
       - name: 缺陷帳本跨文件狀態一致（ONBOARDING.md 對 DEF-* 狀態宣稱 vs 帳本實況）
         run: python3 tools/check_defect_log_crossref.py
+
+      - name: dev_start wrapper 薄殼守門（tools/check_wrapper_thinness.py）
+        run: python3 tools/check_wrapper_thinness.py

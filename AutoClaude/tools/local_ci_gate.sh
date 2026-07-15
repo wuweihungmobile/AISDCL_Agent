@@ -18,6 +18,7 @@
 #   bash tools/local_ci_gate.sh
 #   bash tools/local_ci_gate.sh --act
 #   bash tools/local_ci_gate.sh --pg
+#   bash tools/local_ci_gate.sh -k test_foo -v   # 非 --act/--pg 的參數整批取代預設 pytest 參數
 set -uo pipefail   # 刻意不設 -e：逐項收集結果，最後彙總（對齊 .ps1 的 Continue 語意）
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -40,12 +41,16 @@ if [ -z "${CI:-}" ]; then
 fi
 
 DO_ACT=0; DO_PG=0
-PYTEST_ARGS="tests/ -q --tb=short"
+PYTEST_ARGS=(tests/ -q --tb=short)
+_pytest_args_overridden=0
 for arg in "$@"; do
   case "$arg" in
     --act) DO_ACT=1 ;;
     --pg)  DO_PG=1 ;;
-    *)     PYTEST_ARGS="$arg" ;;
+    *)
+      if [ "$_pytest_args_overridden" -eq 0 ]; then PYTEST_ARGS=(); _pytest_args_overridden=1; fi
+      PYTEST_ARGS+=("$arg")
+      ;;
   esac
 done
 
@@ -88,7 +93,7 @@ gate_importlinter() {
   if command -v lint-imports >/dev/null 2>&1; then lint-imports;
   else echo 'lint-imports 未安裝（pip install -e .[lint]）'; return 1; fi
 }
-gate_pytest() { python -m pytest $PYTEST_ARGS; }
+gate_pytest() { python -m pytest "${PYTEST_ARGS[@]}"; }
 
 run_gate 'editable sentinel' gate_editable
 run_gate 'LOC budget'        gate_loc
