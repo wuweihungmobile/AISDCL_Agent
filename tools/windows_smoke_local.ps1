@@ -51,6 +51,10 @@
 #   - [6] 的編碼斷言直讀 .git/config 位元組（UTF-8），不依賴主控台解碼；若在傳統
 #     cp950 主控台下 FAIL，反映的是該環境下安裝腳本對非 ASCII 路徑的真實缺陷，
 #     而非本載具誤報。
+#   - 🔴 載具要求：請以「原生 PowerShell」執行（PowerShell 視窗／schtasks／
+#     Windows Terminal）。經 Git Bash 間接呼叫 powershell.exe 時，msys→Win32
+#     引數/主控台編碼轉換會弄壞 [6] 中文路徑情境（R10 實測：Git Bash 載具
+#     PASS=7 假紅、原生 PowerShell PASS=8 全綠）——載具問題非生產缺陷。
 #
 # 用法：powershell -NoProfile -ExecutionPolicy Bypass -File tools\windows_smoke_local.ps1
 # Exit：0＝全部 PASS；1＝任一 FAIL（結尾彙總）或前置守門失敗。
