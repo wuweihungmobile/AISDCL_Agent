@@ -1551,6 +1551,11 @@ _CI_GATE_LATEST_GLOB_RE = re.compile(r"ls\s+-d\s+AISDLC_SDD_v0\.[0-9\[*]")
 _CI_GATE_SORT_V_RE = re.compile(r"sort\s+-V")
 _CI_GATE_TAIL_RE = re.compile(r"tail\s+-1")
 _CI_GATE_APPEND_LATEST_RE = re.compile(r"FW_VERSIONS\+=\([^)]*LATEST")
+# R10 DEF-101-133：LATEST 解析 SSOT 化後的新慣用語——LATEST 賦值行改呼叫
+# scripts/sdd_version.py（git tracked 過濾＋錨定 regex＋數值排序皆收斂於 SSOT 內，
+# 舊 bash glob 尾端未錨定會被 .bak／檔總管複製品汙染，R10 實測重現）。
+# 舊 glob 三錨點保留為可接受變體（OR 語意）：downstream 舊拷貝的閘門不誤紅。
+_CI_GATE_SSOT_RESOLVER_RE = re.compile(r"LATEST=\"?\$\([^)]*sdd_version\.py")
 
 
 def _latest_version_dir() -> Optional[str]:
@@ -1588,16 +1593,23 @@ def check_ff17_evolution_version_gate_coverage(report: FitnessReport) -> None:
             evidence=[str(CI_GATE_PATH)]))
         return
 
-    # 動態最新版偵測慣用語（DEF-03-001 雙軌）：ls -d AISDLC_SDD_v0.0* | sort -V | tail -1
-    # 併入 FW_VERSIONS。四個錨點皆在 = 最新演化版恆被官方閘門涵蓋（即便磁碟新增 v0.0(X+1)
-    # 也自動納入，無需改腳本）。任一缺失 = 退回靜態寫死風險 → DEF-03-001 回歸。
-    missing = []
+    # 動態最新版偵測慣用語（DEF-03-001 雙軌）——兩種可接受機制擇一（OR）：
+    #   (a) R10 SSOT（DEF-101-133）：LATEST=$(python …/scripts/sdd_version.py …)；
+    #   (b) 舊 glob 三錨點：ls -d AISDLC_SDD_v0.<glob> | sort -V | tail -1（downstream 舊拷貝）。
+    # 加上 FW_VERSIONS 併入錨點 = 最新演化版恆被官方閘門涵蓋（磁碟新增 v0.0(X+1)
+    # 自動納入，無需改腳本）。動態偵測與併入任一缺失 = 退回靜態寫死風險 → DEF-03-001 回歸。
+    ssot_ok = bool(_CI_GATE_SSOT_RESOLVER_RE.search(gate))
+    legacy_missing = []
     if not _CI_GATE_LATEST_GLOB_RE.search(gate):
-        missing.append("動態版本 glob（ls -d AISDLC_SDD_v0.<glob>；v0.0* / v0.[0-9]* / v0.* 皆可）")
+        legacy_missing.append("動態版本 glob（ls -d AISDLC_SDD_v0.<glob>；v0.0* / v0.[0-9]* / v0.* 皆可）")
     if not _CI_GATE_SORT_V_RE.search(gate):
-        missing.append("語意版本排序（sort -V）")
+        legacy_missing.append("語意版本排序（sort -V）")
     if not _CI_GATE_TAIL_RE.search(gate):
-        missing.append("取最高版（tail -1）")
+        legacy_missing.append("取最高版（tail -1）")
+    missing = []
+    if not ssot_ok and legacy_missing:
+        missing.append("動態偵測機制（SSOT：LATEST=$(python …/scripts/sdd_version.py …)；"
+                       "或舊 glob 慣用語——缺項：" + "、".join(legacy_missing) + "）")
     if not _CI_GATE_APPEND_LATEST_RE.search(gate):
         missing.append("最新版併入版本陣列（FW_VERSIONS+=(…LATEST…)）")
 

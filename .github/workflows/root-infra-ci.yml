@@ -103,10 +103,11 @@ jobs:
             $files += @(Get-ChildItem -Path AutoClaude/tools -Recurse -Filter *.ps1 -File)
             $files += @(Get-ChildItem -Path AISDLC_SDD/scripts -Filter *.ps1 -File)
             $latestName = (& python3 AISDLC_SDD/scripts/sdd_version.py --sdd-root AISDLC_SDD | Out-String).Trim()
-            if ($latestName) {
-              Write-Host "AISDLC_SDD LATEST 版：$latestName（其餘凍結版排除）"
-              $files += @(Get-ChildItem -Path (Join-Path "AISDLC_SDD" $latestName) -Recurse -Filter *.ps1 -File)
-            }
+            # R10 二審 SD P3：解析失敗改 fail-loud（對齊 windows-compat-ci 同款遷移的
+            # throw 語意）——空值 silent skip 會讓 LATEST 版 .ps1 靜默逸出掃描面
+            if (-not $latestName) { throw "sdd_version.py SSOT 解析失敗 - 找不到 LATEST 版本目錄" }
+            Write-Host "AISDLC_SDD LATEST 版：$latestName（其餘凍結版排除）"
+            $files += @(Get-ChildItem -Path (Join-Path "AISDLC_SDD" $latestName) -Recurse -Filter *.ps1 -File)
             Write-Host "待檢查 active .ps1 共 $($files.Count) 支"
             $errCount = 0
             foreach ($f in $files) {

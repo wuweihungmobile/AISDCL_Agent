@@ -133,6 +133,12 @@ if [ "$run_sdd" -eq 0 ] && [ -n "$ALL_FILES" ]; then
       | sort -u)"
     while IFS= read -r f; do
       [ -z "${f:-}" ] && continue
+      # 清單 SSOT 自身變更也觸發（R10 二審 SD P3）：守這份清單的 meta 鎖
+      # （test_ci_paths_cover_root_consumers）住在 SDD suite——CI 停擺期間單獨
+      # 改壞本 yml 直推 main 原本零機械訊號、且會讓後續消費檔 push 漏跑本 leg。
+      case "$f" in
+        .github/workflows/aisdlc-sdd-ci.yml) run_sdd_consumer=1 ;;
+      esac
       while IFS= read -r c; do
         [ -z "${c:-}" ] && continue
         case "$f" in

@@ -82,6 +82,11 @@ on:
       - "tools/dev_start.py"
       - "tools/tests/**"
       - "tools/run_root_unittests.py"
+      # R10：tools/tests 內含讀取這兩支 workflow 的回歸鎖（test_root_infra_parity
+      # / test_pre_push_dispatcher 經 pre-push 消費 aisdlc-sdd-ci paths）——只改
+      # 該兩支 yml 時本 workflow 也須重跑該鎖（DEF-101-042 同構）
+      - ".github/workflows/root-infra-ci.yml"
+      - ".github/workflows/aisdlc-sdd-ci.yml"
       - "tools/check_script_parity.py"
       - "tools/check_ntfs_paths.py"
       - "tools/check_hooks_liveness.py"
@@ -110,6 +115,11 @@ on:
       - "tools/dev_start.py"
       - "tools/tests/**"
       - "tools/run_root_unittests.py"
+      # R10：tools/tests 內含讀取這兩支 workflow 的回歸鎖（test_root_infra_parity
+      # / test_pre_push_dispatcher 經 pre-push 消費 aisdlc-sdd-ci paths）——只改
+      # 該兩支 yml 時本 workflow 也須重跑該鎖（DEF-101-042 同構）
+      - ".github/workflows/root-infra-ci.yml"
+      - ".github/workflows/aisdlc-sdd-ci.yml"
       - "tools/check_script_parity.py"
       - "tools/check_ntfs_paths.py"
       - "tools/check_hooks_liveness.py"

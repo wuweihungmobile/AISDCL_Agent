@@ -161,7 +161,6 @@ source .venv/bin/activate
 | `aisdlc-sdd-drift-daily.yml` | `AISDLC_SDD/.github/workflows/drift-daily.yml` |
 | `aisdlc-sdd-fsm-chaos-nightly.yml` | `AISDLC_SDD/.github/workflows/fsm-chaos-nightly.yml` |
 | `root-infra-ci.yml` | （四方複審第三輪新增，非遷移）根層基建守門：**全變更觸發**（NTFS 檔名閘須守任意路徑，paths 白名單必留盲區），現行**十道**輕量檢查（詳細內容以 workflow 檔頭註解為準，避免每次擴充都要同步改動兩處）——1. `bash -n`（根層 `tools/git-hooks/`＋`tools/*.sh`）；2. pwsh parse＋UTF-8 BOM（active `.ps1`：根層 `tools/`＋`AutoClaude/tools/`＋`AISDLC_SDD/scripts/`＋LATEST 版，凍結版排除）；3. EOL 守門（`.sh`，須為 LF）；4. EOL 守門（`.ps1`，反方向須為 CRLF，2026-07-13 補洞）；5. NTFS 檔名閘（`tools/check_ntfs_paths.py`，pre-commit NTFS 閘的 CI 對等）；6. 腳本對等閘（`tools/check_script_parity.py`：四對 `.sh`/`.ps1` step 標籤清單＋pytest 釘選三處同版）；7. `py_compile`（根層 `tools/` 下所有 `*.py` 語法檢查，dev_start 四方審查 P2）；8. `unittest`（`tools/tests/`，R10 起經 `tools/run_root_unittests.py` 執行、含測試數量下限釘選——裸 discover 對 0 個測試回 rc=0 的 fail-open 已堵；收斂 py_compile 守不到的邏輯回歸落差）；9. 缺陷帳本跨文件狀態一致（`tools/check_defect_log_crossref.py`）；10. wrapper 薄殼守門（`tools/check_wrapper_thinness.py`）（DEF-101-012、四方複審第四／五輪＋R8 擴充） |
-
 | `windows-compat-ci.yml` | （Mac/Windows 相容性輪新增，非遷移）Windows 側執行級驗證：windows-smoke（bootstrap/dev_start/install 腳本/PS 5.1 專測/dispatcher 真實 commit 觸發）＋ windows-nightly-full（深度回歸）；本地補償對等＝`tools/windows_smoke_local.ps1`（R10） |
 | `macos-compat-ci.yml` | （Mac/Windows 相容性輪新增，非遷移）macOS 側執行級驗證：macos-smoke（bash 3.2 直呼/安裝腳本/worktree/ci-gate 雙軌）＋ macos-nightly-full；本地補償對等＝`tools/macos_smoke_local.sh`（R9）。詳見 §8/§10 |
 

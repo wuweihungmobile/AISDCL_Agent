@@ -317,6 +317,14 @@ else
 fi
 
 # ── 彙總 ─────────────────────────────────────────────────────────────────────
+# R10 二審 QA 觀察項：PASS 下限釘選（比照 run_root_unittests MIN_TESTS 精神）——
+# 只斷言 FAIL==0 時，驗證段落被整段刪除仍 exit 0（靜默縮面）；PASS 低於下限即紅。
+# 刻意刪減驗證項時同步下修本值（現況滿版 PASS=10，含非 macOS 平台 NTFS 子測試
+# 的 SKIP-計-PASS 分支）。
+MIN_PASS=10
+if [ "$PASS" -lt "$MIN_PASS" ]; then
+  fail "PASS 總數 $PASS 低於下限 $MIN_PASS——驗證段落疑似被刪減（靜默縮面）"
+fi
 echo ""
 echo "===== 彙總：PASS=$PASS FAIL=$FAIL ====="
 if [ "$FAIL" -gt 0 ]; then

@@ -383,6 +383,13 @@ try {
 }
 
 # ── 彙總 ─────────────────────────────────────────────────────────────────────
+# R10 二審 QA 觀察項：PASS 下限釘選（比照 run_root_unittests MIN_TESTS 精神）——
+# 只斷言 FAIL==0 時，驗證段落被整段刪除仍 exit 0（靜默縮面）；PASS 低於下限即紅。
+# 刻意刪減驗證項時同步下修本值（現況滿版 PASS=8）。
+$MinPass = 8
+if ($script:Pass -lt $MinPass) {
+  Fail-Item "PASS 總數 $($script:Pass) 低於下限 ${MinPass}——驗證段落疑似被刪減（靜默縮面）"
+}
 Write-Host ''
 Write-Host "===== 彙總：PASS=$($script:Pass) FAIL=$($script:Fail) ====="
 if ($script:Fail -gt 0) {

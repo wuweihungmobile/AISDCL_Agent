@@ -1033,6 +1033,45 @@ def test_ff17_dual_track_passes(tmp_path, monkeypatch):
     assert ok and "AISDLC_SDD_v0.05" in ok[0].title  # 取磁碟語意最高版
 
 
+# R10 DEF-101-133：LATEST 解析 SSOT 化（scripts/sdd_version.py）後的新慣用語。
+# 真 repo 的 ci-gate.sh 已改走 SSOT——舊 glob 三錨點消失是刻意遷移非 DEF-03-001
+# 回歸；checker 以 OR 語意同時接受兩種機制（舊 glob 保留給 downstream 舊拷貝）。
+_FF17_SSOT_GATE = (
+    'FROZEN_BASELINE="AISDLC_SDD_v0.01"\n'
+    'LATEST="$(python "${REPO_ROOT}/scripts/sdd_version.py" || true)"\n'
+    'FW_VERSIONS=("${FROZEN_BASELINE}")\n'
+    'FW_VERSIONS+=("${LATEST}")\n'
+)
+
+
+def test_ff17_ssot_resolver_passes(tmp_path, monkeypatch):
+    """R10：合成 SSOT 閘門（sdd_version.py 慣用語，無舊 glob 三錨點）→ PASS。
+
+    WHY：ci-gate.sh 的 LATEST 解析已收斂至 scripts/sdd_version.py 單一真相源；
+    若 checker 仍只認舊 glob，SSOT 遷移會被誤判為「退回靜態寫死」假紅
+    （R10 ci-gate 首跑實證此假紅），意圖鎖必須隨機制升級。"""
+    _ff17_setup(tmp_path, monkeypatch, _FF17_SSOT_GATE)
+    report = af.FitnessReport()
+    af.check_ff17_evolution_version_gate_coverage(report)
+    assert not report.fails, [f.title for f in report.fails]
+    ok = [f for f in report.findings if f.fingerprint == "ff17-ok"]
+    assert ok and "AISDLC_SDD_v0.05" in ok[0].title
+
+
+def test_ff17_ssot_without_append_still_fails(tmp_path, monkeypatch):
+    """R10 反向鎖：有 SSOT 解析但缺 FW_VERSIONS 併入錨點 → 仍 structural fail
+    （動態偵測與併入是兩個獨立必要條件，OR 只作用於偵測機制）。"""
+    gate = (
+        'FROZEN_BASELINE="AISDLC_SDD_v0.01"\n'
+        'LATEST="$(python "${REPO_ROOT}/scripts/sdd_version.py" || true)"\n'
+        'FW_VERSIONS=("${FROZEN_BASELINE}")\n'
+    )
+    _ff17_setup(tmp_path, monkeypatch, gate)
+    report = af.FitnessReport()
+    af.check_ff17_evolution_version_gate_coverage(report)
+    assert any(f.fingerprint == "ff17-static-pin" for f in report.fails)
+
+
 def test_ff17_hardcoded_single_version_fails(tmp_path, monkeypatch):
     """DEF-03-001 回歸：FW_DIR 寫死單版、無動態偵測 → structural fail（測試會紅）。"""
     _ff17_setup(tmp_path, monkeypatch,
