@@ -9,8 +9,12 @@
 #     - push 範圍變更含 AISDLC_SDD/ → 執行 AISDLC_SDD/.githooks/pre-push
 #     - push 範圍變更含「根層檔」（不在上述兩子專案底下的任何路徑，如 tools/、
 #       docs/、.github/workflows/）→ 執行 root-infra leg（py_compile + tools/tests
-#       unittest + 四支守門工具），對齊 root-infra-ci.yml 的本地接線（R9 複審：
-#       原本純根層變更 push 一個閘門都不跑，CI 帳單停擺期間零防護）
+#       unittest（含數量下限釘選，R10 QA-2）+ 四支守門工具），對齊 root-infra-ci.yml
+#       的本地接線（R9 複審：原本純根層變更 push 一個閘門都不跑，CI 停擺期間零防護）
+#     - push 範圍命中「根層消費檔」（aisdlc-sdd-ci.yml paths 承認的非 AISDLC_SDD/
+#       條目，如 tools/check_ntfs_paths.py、.claude/hooks/sdd_hook_router.py）且
+#       SDD leg 未觸發 → 補跑 AISDLC_SDD/scripts/tests 回歸鎖（R10 ARCH-1：這些檔
+#       的回歸鎖住在 SDD suite，純根層 push 原本永遠不執行它們）
 #   分流條件（逐行解析 git 傳入 stdin 的 <local_ref> <local_sha> <remote_ref> <remote_sha>）：
 #     - remote_sha 全零（新分支）→ 用 git merge-base origin/main <local_sha> 回退為比較基準
 #     - local_sha 全零（刪除遠端分支）→ 該行跳過（無需驗證）
@@ -45,6 +49,7 @@ run_sdd=0
 run_rootinfra=0
 undeterminable=0
 parsed=0
+ALL_FILES=""
 
 while read -r local_ref local_sha remote_ref remote_sha; do
   [ -z "${local_ref:-}" ] && continue
@@ -78,6 +83,10 @@ while read -r local_ref local_sha remote_ref remote_sha; do
   case $'\n'"$files" in *$'\n'AutoClaude/*)  run_autoclaude=1 ;; esac
   case $'\n'"$files" in *$'\n'AISDLC_SDD/*) run_sdd=1 ;; esac
 
+  # 累積全部變更路徑（供下方根層消費檔比對，R10 ARCH-1）
+  ALL_FILES="${ALL_FILES}
+$files"
+
   # 根層檔偵測：存在任一「不在兩子專案底下」的變更路徑即觸發 root-infra leg。
   # 「不以某前綴開頭」無法用單一 case 對整個 blob 判定 → 逐行 case（bash 3.2 相容，
   # 同樣不走 printf | grep 管線；內層 heredoc 有自己的 fd，不干擾外層 stdin 迴圈）
@@ -102,6 +111,40 @@ if [ "$undeterminable" -eq 1 ] || [ "$parsed" -eq 0 ]; then
   run_autoclaude=1
   run_sdd=1
   run_rootinfra=1
+fi
+
+# 根層消費檔偵測（R10 ARCH-1 / DEF-101-125）：aisdlc-sdd-ci.yml paths 承認的
+# 非 AISDLC_SDD/ 條目（NTFS 閘、pre-commit、settings.json、sdd_hook_router.py 等）
+# 之回歸鎖住在 AISDLC_SDD/scripts/tests/，但 SDD leg 只在 push 涉 AISDLC_SDD/ 時
+# 觸發——CI 停擺期間改壞這些檔可零機械訊號直推 main。清單機械讀取該 yml
+# （單一真相源，勿手抄第二份）；SDD leg 已觸發時 ci-gate.sh 內含 scripts/tests，
+# 免重複跑。消費檔條目以 bash case glob 語意比對（現行皆字面路徑）。
+run_sdd_consumer=0
+if [ "$run_sdd" -eq 0 ] && [ -n "$ALL_FILES" ]; then
+  SDD_CI_YML="$TOPLEVEL/.github/workflows/aisdlc-sdd-ci.yml"
+  if [ ! -f "$SDD_CI_YML" ]; then
+    echo "[pre-push dispatcher] ❌ 找不到 $SDD_CI_YML（根層消費檔清單來源；hooks 體系損壞）" >&2
+    rc=1
+  else
+    consumer_paths="$( { grep -E '^[[:space:]]*-[[:space:]]*"' "$SDD_CI_YML" || true; } \
+      | sed 's/^[^"]*"//; s/".*$//' \
+      | { grep -v '^AISDLC_SDD/' || true; } \
+      | { grep -v '^\.github/workflows/' || true; } \
+      | sort -u)"
+    while IFS= read -r f; do
+      [ -z "${f:-}" ] && continue
+      while IFS= read -r c; do
+        [ -z "${c:-}" ] && continue
+        case "$f" in
+          $c) run_sdd_consumer=1 ;;
+        esac
+      done <<CONSUMER_EOF
+$consumer_paths
+CONSUMER_EOF
+    done <<ALLFILES_EOF
+$ALL_FILES
+ALLFILES_EOF
+  fi
 fi
 
 if [ "$run_autoclaude" -eq 1 ]; then
@@ -139,14 +182,19 @@ if [ "$run_rootinfra" -eq 1 ]; then
     (
       cd "$TOPLEVEL" || exit 1
       leg_rc=0
-      # ① tools/ 全部 *.py 遞迴 py_compile（find -exec：免 mapfile、空白檔名安全；
-      #    py_compile 對多檔逐一編譯、任一失敗即非零）
-      if ! find tools -name '*.py' -not -path '*/__pycache__/*' -exec python -m py_compile {} +; then
-        echo "[pre-push dispatcher] ❌ root-infra：tools/ py_compile 失敗" >&2
+      # ① 根層 Python 全量 py_compile：tools/ + .claude/hooks/（R10 ARCH-1 補：
+      #    sdd_hook_router.py 等根層消費檔有 CI paths 覆蓋，本地原本連語法檢查
+      #    都沒有）（find -exec：免 mapfile、空白檔名安全；py_compile 對多檔
+      #    逐一編譯、任一失敗即非零）
+      pydirs="tools"
+      [ -d .claude/hooks ] && pydirs="$pydirs .claude/hooks"
+      if ! find $pydirs -name '*.py' -not -path '*/__pycache__/*' -exec python -m py_compile {} +; then
+        echo "[pre-push dispatcher] ❌ root-infra：根層 Python py_compile 失敗" >&2
         leg_rc=1
       fi
-      # ② tools/tests 單元測試
-      if ! python -m unittest discover -s tools/tests -p "test_*.py"; then
+      # ② tools/tests 單元測試（R10 QA-2：改走 run_root_unittests.py——裸 discover
+      #    對「發現 0 個測試」回 rc=0，數量下限釘選堵住此 fail-open）
+      if ! python tools/run_root_unittests.py; then
         echo "[pre-push dispatcher] ❌ root-infra：tools/tests unittest 失敗" >&2
         leg_rc=1
       fi
@@ -160,6 +208,20 @@ if [ "$run_rootinfra" -eq 1 ]; then
       done
       exit $leg_rc
     ) || rc=1
+  fi
+fi
+
+# 根層消費檔 leg（R10 ARCH-1 / DEF-101-125）：於「消費檔命中且 SDD leg 未觸發」時
+# 補跑 AISDLC_SDD/scripts/tests（test_ntfs_length_gate 六道防線、hook wiring cwd
+# 安全、router 家族等回歸鎖的唯一住址）。
+if [ "$run_sdd_consumer" -eq 1 ]; then
+  echo "[pre-push dispatcher] push 涉根層消費檔（aisdlc-sdd-ci.yml paths）→ 執行 AISDLC_SDD/scripts/tests 回歸鎖"
+  if ! command -v python >/dev/null 2>&1; then
+    echo "[pre-push dispatcher] ❌ 找不到 python — 消費檔回歸鎖無法執行；請先啟用 venv（見 ONBOARDING.md §3）" >&2
+    rc=1
+  elif ! (cd "$TOPLEVEL/AISDLC_SDD" && python -m pytest scripts/tests -q); then
+    echo "[pre-push dispatcher] ❌ 根層消費檔回歸鎖失敗（AISDLC_SDD/scripts/tests）" >&2
+    rc=1
   fi
 fi
 

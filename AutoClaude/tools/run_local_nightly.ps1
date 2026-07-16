@@ -3,11 +3,14 @@
 本地 nightly 排程腳本（SD_09 觀察期 #1/#2/#3 採集）
 
 .DESCRIPTION
-取代 GitHub Actions nightly cron job，於本地依序執行：
+取代 GitHub Actions nightly cron job，於本地依序執行（7 stage）：
+  - local_ci_gate 全套（Stage L）          — R9：push 空窗期每日全套訊號
   - mutation-test (Docker / Linux mutmut) — 觀察期 #1（Docker 解 Windows 限制）
-  - pg-e2e-nightly + AC4 collector        — 觀察期 #2
+  - pg-e2e-nightly + AC4 collector        — 觀察期 #2（R9 含 PG contract；R10 recall rc [ref]）
   - perf-baseline-nightly                  — 補強信號
   - drift_log 被動掃描                     — 觀察期 #3
+  - observability-snapshot                 — D-16 30 天取證
+  - sdd-fsm-chaos                          — R10：Rule 9.9.4 本地補償（CI 停擺期間）
 
 容器策略：優先沿用既有 autoclaude_pg；若不存在才新建臨時 container。
 既有 container 不在 Cleanup 中拆除。
@@ -233,6 +236,28 @@ function Get-JsonlCount {
   if (-not (Test-Path $Path)) { return 0 }
   return @(Get-Content -Path $Path -ErrorAction SilentlyContinue | Where-Object { $_.Trim() -ne '' }).Count
 }
+
+# R10 SA-2（DEF-101-142）：mutation 軌自 ADR-SD09-011 起以 source_sha256 去重
+# （同日多 sha 全計入、同 sha 留最新）——END 進度不可再拿原始列數對 7 門檻
+# （R10 實測：live 檔 29 筆原始列會虛報 29/7；壓縮後 7 筆中僅 5 unique sha）。
+# 語意：「/7」的分子＝unique source_sha256 累積證據數（module 過濾；legacy 缺
+# sha 紀錄非源碼演進證據、不計入），對齊 should_lock 的 sha 檢查方向與
+# tools/mutation_baseline_lock.py（去重 SSOT）；改動去重語意須同步兩處。
+function Get-MutationUniqueCount {
+  param([string]$Path, [string]$Module = 'token_guard')
+  if (-not (Test-Path $Path)) { return 0 }
+  $keys = @{}
+  foreach ($line in @(Get-Content -Path $Path -ErrorAction SilentlyContinue)) {
+    $t = ([string]$line).Trim()
+    if ($t -eq '') { continue }
+    try { $rec = $t | ConvertFrom-Json } catch { continue }
+    if (-not ($rec.PSObject.Properties.Name -contains 'module') -or [string]$rec.module -ne $Module) { continue }
+    if ($rec.PSObject.Properties.Name -contains 'source_sha256' -and $rec.source_sha256) {
+      $keys['sha:' + [string]$rec.source_sha256] = $true
+    }
+  }
+  return $keys.Count
+}
 $script:PreMutationCount = Get-JsonlCount (Join-Path $RepoRoot '.mutation_history.jsonl')
 $script:PreAc4Count = Get-JsonlCount (Join-Path $RepoRoot '.ac4_history.jsonl')
 $script:PreObsCount = Get-JsonlCount (Join-Path $RepoRoot '.observability_history.jsonl')
@@ -361,8 +386,12 @@ if ($script:DockerOK) {
     Invoke-Native { python tools/validate_mutmut_log.py $MutLog --require-version-marker }
     $validateRc = $LASTEXITCODE
     if ($validateRc -ne 0) {
+      # R10 QA-3（DEF-101-128）：原設 rc=2 與 Invoke-Stage「rc=2=WARN 不算 fail」及
+      # R9 終端 exit 決策「rc=2 排除」相撞——「防假 pass 守門自身觸發」反而以 WARN
+      # 綠出場（schtasks Last Result=0），正是 R9 修復要杜絕的形狀。log 驗證失敗＝
+      # mutation 沒有真的跑＝真實失敗，改 rc=1。
       Log "mutation_token_guard.log 未含真實 mutmut 統計（validate_rc=$validateRc）— 標記 stage 失敗（避免假 pass）" 'ERROR'
-      $global:LASTEXITCODE = 2
+      $global:LASTEXITCODE = 1
       return
     }
     Log "mutation_token_guard.log 通過真實性驗證（docker_rc=$dockerRc）"
@@ -481,10 +510,15 @@ if ($script:DockerOK) {
       Remove-Item '.ac4_junit.xml' -Force -ErrorAction SilentlyContinue
       Log '.ac4_junit.xml 移除（強制 fresh）'
     }
+    # R10 QA-4（DEF-101-129）：recall pytest rc 以 [ref] 捕捉（D-10 模式）——原本其
+    # rc 被 collector（main() 恆 return 0）/ progress_check（連續 ≥3 次未達綠線才
+    # 非零）覆蓋，單日真紅 → stage rc=0 假綠；CI 對等 job 該 step 是當場硬紅。
+    $recallRcRef = [ref] 0
     Invoke-Native {
       python -m pytest tests/integration/test_pgvector_real_recall.py `
         -v --tb=short -m pg_real --junitxml=.ac4_junit.xml
     }
+    $recallRcRef.Value = $LASTEXITCODE
     # R9 複審 (a)：pg-e2e stage 補 PG contract 測試（AUTOCLAUDE_TEST_PG_DSN 於本
     # stage 前已設好）。刻意獨立呼叫、不併入上面的 recall pytest：① 該檔無
     # pg_real marker，併入 `-m pg_real` 會被整檔 deselect（假接線）；② 不寫
@@ -559,6 +593,12 @@ if ($script:DockerOK) {
     if ($contractRcRef.Value -ne 0) {
       Log "PG contract 測試失敗 rc=$($contractRcRef.Value) — 標記 stage fail" 'ERROR'
       $global:LASTEXITCODE = $contractRcRef.Value
+    }
+    # R10 QA-4（DEF-101-129）：recall 失敗同樣反映到 stage rc（單日真紅即翻紅，
+    # 不再等 progress_check 連紅 3 天的間接訊號）
+    if ($recallRcRef.Value -ne 0) {
+      Log "pgvector recall 測試失敗 rc=$($recallRcRef.Value) — 標記 stage fail" 'ERROR'
+      $global:LASTEXITCODE = $recallRcRef.Value
     }
   }
 } else {
@@ -725,6 +765,46 @@ $rc5 = Invoke-Stage 'observability-snapshot' {
   }
 }
 
+# ----- Stage 6: AISDLC_SDD FSM chaos（R10 QA-6 / DEF-101-131）-----
+# CI 停擺（DEF-101-081）期間，aisdlc-sdd-fsm-chaos-nightly.yml（Rule 9.9.4「必跑、
+# 連 3 日失敗鎖 main」）零本地補償——FSM runtime 只在 chaos 情境破壞有界停機的
+# 迴歸，pre-push（-m "not chaos"）永遠測不到。本 stage 鏡射該 workflow 兩步
+# （pytest -m chaos + 100 輪 chaos_runner sweep；範圍同該 workflow＝僅 v0.01；
+# 2026-07-17 實測合計 <1 分鐘）。seed 用 UTC 日期（鏡射 CI date-seed，可重現）。
+# 不依賴 Docker，恆跑。
+$rcChaos = Invoke-Stage 'sdd-fsm-chaos (鏡射 aisdlc-sdd-fsm-chaos-nightly)' {
+  $sddV001 = Join-Path (Split-Path -Parent $RepoRoot) 'AISDLC_SDD\AISDLC_SDD_v0.01'
+  if (-not (Test-Path $sddV001)) {
+    Log "找不到 $sddV001 — SDD chaos 補償無法執行" 'ERROR'
+    $global:LASTEXITCODE = 1
+    return
+  }
+  $chaosSeed = (Get-Date).ToUniversalTime().ToString('yyyyMMdd')
+  Push-Location $sddV001
+  try {
+    Invoke-Native { python -m pytest tools/fsm_runtime/tests/ -m chaos -q }
+    $chaosPytestRc = $LASTEXITCODE
+    Invoke-Native {
+      python -m tools.fsm_runtime.chaos_runner --rounds 100 --seed $chaosSeed --json |
+        Out-File -Encoding utf8 chaos-report.json
+    }
+    $chaosSweepRc = $LASTEXITCODE
+    # 鏡射 CI 的 bounded 摘要行（report 無效 JSON 時此步非零＝取證失敗）
+    Invoke-Native {
+      python -c "import json; d=json.load(open('chaos-report.json', encoding='utf-8-sig')); print('chaos sweep bounded=%s/%s avg_tokens=%s max_steps=%s' % (d['bounded_rounds'], d['total_rounds'], d['avg_tokens'], d['max_steps']))"
+    }
+    $chaosParseRc = $LASTEXITCODE
+    if ($chaosPytestRc -ne 0 -or $chaosSweepRc -ne 0 -or $chaosParseRc -ne 0) {
+      Log ("SDD chaos 補償失敗：pytest_rc={0} sweep_rc={1} parse_rc={2}" -f $chaosPytestRc, $chaosSweepRc, $chaosParseRc) 'ERROR'
+      $global:LASTEXITCODE = 1
+    } else {
+      $global:LASTEXITCODE = 0
+    }
+  } finally {
+    Pop-Location
+  }
+}
+
 # ----- Cleanup（僅清掉本次新建的臨時 container；既有的不動）-----
 # SD_09 W3 Round 21 audit QA P1-R21-2 修復（紀律 #1 真實 rc）：
 #   舊版 `$global:LASTEXITCODE = 0` 強制清零會吞掉 docker rm 失敗的真實 rc，
@@ -753,9 +833,10 @@ $rc3Label = Format-Rc $rc3
 $rc4Label = Format-Rc $rc4
 $rc5Label = Format-Rc $rc5
 $rcGateLabel = Format-Rc $rcGate
+$rcChaosLabel = Format-Rc $rcChaos
 # R9 複審 (b)：local_ci_gate 欄位附加於既有五欄之後（不動既有欄位順序，下游以
-# 具名欄位解析不受影響）
-Log "END nightly summary: mutation=$rc1Label pg-e2e=$rc2Label perf=$rc3Label drift=$rc4Label obs=$rc5Label local_ci_gate=$rcGateLabel"
+# 具名欄位解析不受影響）；R10 QA-6：sdd_chaos 依同慣例再附加於其後。
+Log "END nightly summary: mutation=$rc1Label pg-e2e=$rc2Label perf=$rc3Label drift=$rc4Label obs=$rc5Label local_ci_gate=$rcGateLabel sdd_chaos=$rcChaosLabel"
 $summaryJson = ConvertTo-Json -Compress -InputObject @{
   mutation = [int]$rc1
   'pg-e2e' = [int]$rc2
@@ -763,18 +844,21 @@ $summaryJson = ConvertTo-Json -Compress -InputObject @{
   drift = [int]$rc4
   obs = [int]$rc5
   local_ci_gate = [int]$rcGate
+  sdd_chaos = [int]$rcChaos
   skip_sentinel = $SKIP_RC
 }
 Log "END nightly summary json: $summaryJson"
 
 # SD_09 W3 Round 5 audit P1-2 修復（紀律 #3 取證可見性）：
-#   印觀察期累計進度供人類即時判斷。jsonl 同 UTC date dedup（M-05 設計）→
-#   同日多 run 不會增加 record；本段讓 user 看到「N/門檻」避免「user 以為進帳實際被覆寫」失準。
+#   印觀察期累計進度供人類即時判斷；讓 user 看到「N/門檻」避免「以為進帳實際被覆寫」失準。
 # SD_09 W3 Round 19 audit P1-AUDIT-R18-2 修復（紀律 #13 觀察期 jsonl delta 取證）：
 #   新增 pre/post delta 與 stage rc 對照，明示「本次 run 是否真進帳」。
-#   例：mutation=4/7 (delta=0; stage=0) → stage 成功但 dedup 同日覆寫，未進帳新天數
-#       ac4=4/14 (delta=0; stage=99 EXCEPTION) → stage crash, jsonl 凍結（首次自動跑 P0 BUG 場景）
+#   例：ac4=4/14 (delta=0; stage=99 EXCEPTION) → stage crash, jsonl 凍結（首次自動跑 P0 BUG 場景）
+# R10 SA-2（DEF-101-142）去重語意分軌：mutation 軌自 ADR-SD09-011 起按 source_sha256
+#   去重（同日多 sha 全計入），進度改印 unique-sha 對 7 門檻（should_lock 同源語意），
+#   原始列數以 records= 併印；ac4/obs/drift 三軌維持 same UTC-date dedup per M-05。
 $mutCount = Get-JsonlCount (Join-Path $RepoRoot '.mutation_history.jsonl')
+$mutUnique = Get-MutationUniqueCount (Join-Path $RepoRoot '.mutation_history.jsonl')
 $ac4Count = Get-JsonlCount (Join-Path $RepoRoot '.ac4_history.jsonl')
 $obsCount = Get-JsonlCount (Join-Path $RepoRoot '.observability_history.jsonl')
 $driftCount = Get-JsonlCount (Join-Path $RepoRoot '.drift_log_history.jsonl')
@@ -782,21 +866,49 @@ $mutDelta = $mutCount - $script:PreMutationCount
 $ac4Delta = $ac4Count - $script:PreAc4Count
 $obsDelta = $obsCount - $script:PreObsCount
 $driftDelta = $driftCount - $script:PreDriftCount
-Log ("END observation progress: mutation={0}/7 (delta={1}; stage={2}) ac4={3}/14 (delta={4}; stage={5}) obs={6}/30 (delta={7}; stage={8}) drift={9}/30 (delta={10}; stage={11}) — same UTC-date dedup per M-05; delta=0 with stage!=0 表示本次未進帳" -f $mutCount, $mutDelta, $rc1Label, $ac4Count, $ac4Delta, $rc2Label, $obsCount, $obsDelta, $rc5Label, $driftCount, $driftDelta, $rc4Label)
+Log ("END observation progress: mutation={0}/7 unique-sha (records={1}; delta={2}; stage={3}) ac4={4}/14 (delta={5}; stage={6}) obs={7}/30 (delta={8}; stage={9}) drift={10}/30 (delta={11}; stage={12}) — mutation 按 source_sha256 去重（ADR-SD09-011）、其餘三軌 same UTC-date dedup per M-05; delta=0 with stage!=0 表示本次未進帳" -f $mutUnique, $mutCount, $mutDelta, $rc1Label, $ac4Count, $ac4Delta, $rc2Label, $obsCount, $obsDelta, $rc5Label, $driftCount, $driftDelta, $rc4Label)
+
+# R10 QA-11（DEF-101-140）：Docker 長期不可用偵測——單次 SKIP 屬合理設計（Docker
+# Desktop 未開），但連續 ≥3 次 SKIP 代表 mutation/pg-e2e/drift（含 PG contract 硬閘
+# 本地對等）已多日零機械通道，CI 停擺期間即驗證真空。以 .docker_skip_streak 檔
+# （gitignored）累計：Docker 可用即歸零清檔；連續 ≥3 次列入 finalFailures（exit 1，
+# schtasks Last Result 翻紅）。
+$skipStreakPath = Join-Path $RepoRoot '.docker_skip_streak'
+$dockerSkipStreak = 0
+if (-not $script:DockerOK) {
+  if (Test-Path $skipStreakPath) {
+    try {
+      $dockerSkipStreak = [int](@(Get-Content $skipStreakPath -ErrorAction Stop)[0].Trim())
+    } catch { $dockerSkipStreak = 0 }
+  }
+  $dockerSkipStreak += 1
+  Set-Content -Path $skipStreakPath -Value $dockerSkipStreak -Encoding ascii
+  if ($dockerSkipStreak -ge 3) {
+    Log ("Docker 連續 {0} 次 nightly 不可用——mutation/pg-e2e/drift 多日 SKIP，驗證真空升級為失敗（QA-11）" -f $dockerSkipStreak) 'ERROR'
+  } else {
+    Log ("Docker 本次不可用（連續 {0} 次；累計 ≥3 次將升級為失敗）" -f $dockerSkipStreak) 'WARN'
+  }
+} elseif (Test-Path $skipStreakPath) {
+  Remove-Item $skipStreakPath -Force -ErrorAction SilentlyContinue
+}
 
 # R9 複審 (c)：終端 exit code 帶訊號（schtasks Last Result 取證；原本恆 0）。
 # 失敗判定與 Invoke-Stage 既有語意一致：SKIP（$SKIP_RC=-1，Docker 不可用等）與
 # WARN（rc=2，見 Invoke-Stage 的 P0-6 註解「不算 fail」）不計失敗；其餘非零＝失敗。
 # 判定先於 pointer 更新寫入 log（取證），實際 exit 置於 pointer 更新之後——
 # 不破壞「stage 失敗不中斷後續 stage」設計（所有 stage 此時已跑完）。
+# R10：清單加入 sdd_chaos（QA-6）；Docker 連續 SKIP ≥3 亦計失敗（QA-11）。
 $finalFailures = @()
 foreach ($pair in @(
     @('local_ci_gate', $rcGate), @('mutation', $rc1), @('pg-e2e', $rc2),
-    @('perf', $rc3), @('drift', $rc4), @('obs', $rc5))) {
+    @('perf', $rc3), @('drift', $rc4), @('obs', $rc5), @('sdd_chaos', $rcChaos))) {
   $stageRc = [int]$pair[1]
   if ($stageRc -ne $SKIP_RC -and $stageRc -ne 0 -and $stageRc -ne 2) {
     $finalFailures += ('{0}={1}' -f $pair[0], $stageRc)
   }
+}
+if ($dockerSkipStreak -ge 3) {
+  $finalFailures += ('docker_skip_streak={0}' -f $dockerSkipStreak)
 }
 if ($finalFailures.Count -gt 0) {
   Log ("END exit decision: exit=1 (failed stages: {0})" -f ($finalFailures -join ', ')) 'ERROR'

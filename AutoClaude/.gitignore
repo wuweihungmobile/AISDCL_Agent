@@ -59,6 +59,7 @@ tools/c6_report_*.json
 
 # SD_Improving_08 W3 T3-D6：mutation pilot nightly 累計檔（CI artifact 為 SSOT）
 .mutation_history.jsonl
+.docker_skip_streak
 mutation_*.log
 mutation_*.log.header*
 mutation_backlog_*.md

@@ -389,3 +389,124 @@ def test_observability_ts_field_isomorphic_with_snapshot_tool(ps1_content: str) 
     assert "timezone.utc" in py_src, (
         "observability_snapshot.py 必須以 timezone.utc 寫入 ts（UTC 語意同構）"
     )
+
+
+# --- R10 四方複審修復鏡子（QA-5 / DEF-101-130：R9 三修復 + R10 四修復零錨點補齊） ---
+# QA 發現：本檔的存在理由是「每個 nightly 修復配一個靜態錨點」，但 R9 的
+# (a) Stage L local_ci_gate、(b) PG contract、(c) 終端 exit decision 三段皆無錨點——
+# 任何人「精簡 nightly」都能無聲退回 R9 前狀態。下列 case 17~24 補齊 R9 + R10 全部錨點。
+
+
+def test_stage_l_local_ci_gate_present(ps1_content: str) -> None:
+    """case 17（R9 (b)）：Stage L 必須實跑 tools/local_ci_gate.ps1 全套。"""
+    block = _extract_stage_block(ps1_content, "Invoke-Stage 'local-ci-gate full")
+    assert "local_ci_gate.ps1" in block, (
+        "Stage L 必須呼叫 tools/local_ci_gate.ps1（R9 (b) 深度回歸；刪除＝push 空窗"
+        "期間零全套訊號的無聲退化）"
+    )
+    assert "local_ci_gate=" in ps1_content, "END summary 必須含 local_ci_gate 欄位"
+
+
+def test_pg_contract_wired_with_ref_capture(ps1_content: str) -> None:
+    """case 18（R9 (a)）：pg-e2e stage 必須跑 PG contract 測試且以 [ref] 捕捉 rc。"""
+    assert "tests/contract/test_pg_state_repository_contract.py" in ps1_content, (
+        "pg-e2e stage 必須含 PG contract 測試（R9 (a)；CI 停擺期間唯一機械通道）"
+    )
+    assert "$contractRcRef" in ps1_content, (
+        "contract rc 必須以 [ref] 捕捉（不被 collector/progress_check 覆蓋）"
+    )
+    assert re.search(
+        r"if \(\$contractRcRef\.Value -ne 0\)", ps1_content
+    ), "contract rc 非零必須回寫 stage rc（fail-loud 分支）"
+
+
+def test_terminal_exit_decision_present(ps1_content: str) -> None:
+    """case 19（R9 (c)）：終端 exit code 必須帶訊號（schtasks Last Result 取證）。"""
+    assert "END exit decision" in ps1_content, (
+        "ps1 末段必須印 END exit decision（R9 (c)；刪除＝Last Result 恆 0x0 退化）"
+    )
+    assert "$finalFailures" in ps1_content, "exit 決策必須以 $finalFailures 聚合失敗 stage"
+    assert re.search(
+        r"-ne \$SKIP_RC -and \$stageRc -ne 0 -and \$stageRc -ne 2", ps1_content
+    ), "exit 決策必須維持 SKIP(-1)/WARN(2) 不計失敗的既有語意"
+    assert re.search(r"if \(\$finalFailures\.Count -gt 0\) \{ exit 1 \}", ps1_content), (
+        "失敗時必須真的 exit 1（判定與 exit 分離但兩者都要在）"
+    )
+
+
+def test_mutation_validate_failure_is_rc1_not_warn(ps1_content: str) -> None:
+    """case 20（R10 QA-3 / DEF-101-128）：validate_mutmut_log 失敗必須設 rc=1。
+
+    意圖：rc=2 是 WARN（Invoke-Stage 不算 fail、終端 exit 決策排除）——「防假 pass
+    守門自身觸發」若設 rc=2 會 WARN 綠出場，正是 R9 Last Result 修復要杜絕的形狀。
+    """
+    block = _extract_stage_block(ps1_content, "Invoke-Stage 'mutation-test", "Invoke-Stage 'pg-e2e")
+    guard_idx = block.find("if ($validateRc -ne 0)")
+    assert guard_idx > 0, "mutation stage 必須含 validate rc 守門分支"
+    branch = block[guard_idx : guard_idx + 700]
+    assert "$global:LASTEXITCODE = 1" in branch, (
+        "validate 失敗分支必須設 rc=1（真實失敗）——不得改回 rc=2 WARN（QA-3）"
+    )
+    executable = [
+        line for line in branch.splitlines() if not line.strip().startswith("#")
+    ]
+    assert not any("$global:LASTEXITCODE = 2" in line for line in executable), (
+        "validate 失敗分支禁止 rc=2（WARN 會讓終端 exit=0 假綠；QA-3）"
+    )
+
+
+def test_recall_pytest_rc_captured_with_ref(ps1_content: str) -> None:
+    """case 21（R10 QA-4 / DEF-101-129）：recall pytest rc 必須以 [ref] 捕捉並回寫。
+
+    意圖：collector（恆 return 0）/ progress_check（連紅 3 次才非零）會覆蓋
+    $LASTEXITCODE——recall 單日真紅必須當日翻紅（CI 對等 job 該 step 是硬紅）。
+    """
+    assert "$recallRcRef" in ps1_content, "recall pytest rc 必須以 [ref] 捕捉（QA-4）"
+    assert re.search(
+        r"if \(\$recallRcRef\.Value -ne 0\)", ps1_content
+    ), "recall rc 非零必須回寫 stage rc（fail-loud 分支；QA-4）"
+
+
+def test_sdd_chaos_stage_mirrors_ci_workflow(ps1_content: str) -> None:
+    """case 22（R10 QA-6 / DEF-101-131）：SDD chaos 本地補償 stage 必須存在且入決策。
+
+    意圖：CI 停擺期間 aisdlc-sdd-fsm-chaos-nightly.yml（Rule 9.9.4 必跑）零本地
+    補償——FSM 有界停機只在 chaos 情境可測，pre-push `-m "not chaos"` 永遠測不到。
+    """
+    block = _extract_stage_block(ps1_content, "Invoke-Stage 'sdd-fsm-chaos")
+    assert "-m chaos" in block, "chaos stage 必須跑 pytest -m chaos（鏡射 CI step 1）"
+    assert "chaos_runner" in block, "chaos stage 必須跑 100 輪 chaos_runner sweep（鏡射 CI step 2）"
+    assert "sdd_chaos=" in ps1_content, "END summary 必須含 sdd_chaos 欄位"
+    assert re.search(r"@\('sdd_chaos', \$rcChaos\)", ps1_content), (
+        "sdd_chaos 必須列入終端 exit 決策 pairs（失敗要翻紅 Last Result）"
+    )
+
+
+def test_docker_skip_streak_escalation(ps1_content: str) -> None:
+    """case 23（R10 QA-11 / DEF-101-140）：Docker 連續 SKIP ≥3 必須升級為失敗。
+
+    意圖：單次 SKIP 合理（Docker Desktop 未開），但連續多日＝mutation/pg-e2e/drift
+    （含 PG contract 本地對等）長期零機械通道；CI 停擺期間即驗證真空，不可無聲。
+    """
+    assert ".docker_skip_streak" in ps1_content, "必須以 .docker_skip_streak 檔累計連續 SKIP"
+    assert re.search(
+        r"if \(\$dockerSkipStreak -ge 3\)[\s\S]{0,200}\$finalFailures \+=", ps1_content
+    ), "連續 ≥3 次 Docker SKIP 必須列入 finalFailures（exit 1；QA-11）"
+    assert re.search(
+        r"elseif \(Test-Path \$skipStreakPath\)", ps1_content
+    ), "Docker 恢復可用時必須清零 streak 檔（避免永久紅）"
+
+
+def test_mutation_progress_uses_unique_sha(ps1_content: str) -> None:
+    """case 24（R10 SA-2 / DEF-101-142）：END 進度 mutation 軌必須印 unique-sha 計數。
+
+    意圖：ADR-SD09-011 後 mutation 以 source_sha256 去重——原始列數對 7 門檻會虛報
+    （R10 實測 29 列 vs 5 unique sha）。分子必須是 unique sha 證據數。
+    """
+    assert "function Get-MutationUniqueCount" in ps1_content, (
+        "必須有 Get-MutationUniqueCount helper（sha 證據計數）"
+    )
+    assert "unique-sha" in ps1_content, "END observation progress 必須標示 unique-sha 語意"
+    assert re.search(
+        r"mutation=\{0\}/7 unique-sha \(records=\{1\}", ps1_content
+    ), "mutation 進度格式必須為 unique/7 + records 併印（SA-2）"

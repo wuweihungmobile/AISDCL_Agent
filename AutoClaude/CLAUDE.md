@@ -256,7 +256,7 @@ tasks:
 
 ## 🔴 Nightly / CI 取證紀律（SD_09 W0 教訓 — 防止再犯）
 
-**完整版**：[docs/06_quality/Nightly_Forensic_Discipline.md](docs/06_quality/Nightly_Forensic_Discipline.md) v1.6（19 條）。SD_09 W0~W3 40 輪 audit 累積；違反任一條 → P0 audit。**任何紀律新增 / 修訂必須先改完整版，再同步本摘要**。
+**完整版**：[docs/06_quality/Nightly_Forensic_Discipline.md](docs/06_quality/Nightly_Forensic_Discipline.md) v1.7（19 條）。SD_09 W0~W3 40 輪 audit 累積；違反任一條 → P0 audit。**任何紀律新增 / 修訂必須先改完整版，再同步本摘要**。
 
 1. **stage rc 必須區分「真實失敗」vs「工具標準回報」** — bitmask 工具不可單純 `rc != 0` 判 fail（mutmut：`rc & 1 != 0`）
 2. **log 必須含完整統計** — 不信任預設 dump（如 `mutmut results` 缺 Killed → kill_rate=0% 假象）；直查 raw store（sqlite Mutant 表）
@@ -271,7 +271,7 @@ tasks:
 10. **fallback 真實 jsonl 可區分** — `try/except` 後 mock fallback 須寫布林標記欄（如 `emit_real:bool`），拒絕 `=False` 紀錄
 11. **latest log pointer 完整 run** — 末段 `Copy-Item` 自當次完整 $Log 寫入，禁 partial buffer；Windows file lock 用 `FileShare.ReadWrite` + retry
 12. **mutation history 必含 source_sha256** — tail 7 unique sha ≥ 7，防同 commit 重跑 7 次騙鎖；舊紀錄缺欄位寬鬆通過
-13. **觀察期 jsonl 進度可見** — 末段印 `END observation progress: ... (delta=N; stage=R)`；R19 強化 delta 取證明示「未進帳因 stage crash」
+13. **觀察期 jsonl 進度可見** — 末段印 `END observation progress: ... (delta=N; stage=R)`；R19 強化 delta 取證明示「未進帳因 stage crash」；R10：mutation 軌分子改 unique-sha（ADR-SD09-011，原始列數會虛報）
 14. **schtasks vs 互動 PATH 等價 + StrictMode $null.Property 保護** — ps1 開頭自動補 pyenv-win Scripts；禁 `(Get-Command X -EA SilentlyContinue).<Prop>` 鏈式；改兩步式（R19 P0-AUDIT-R18-1 修復）
 15. **呼叫端工具路徑分隔符相容性（Bash 反斜線吞噬根治）** — Bash 工具呼叫 `tools\run_local_nightly.ps1` 時反斜線被 escape 吞噬 → `toolsrun_local_nightly.ps1` 找不到檔案 → exit 127。CLAUDE.md / SOP 範例**一律用正斜線** `tools/run_local_nightly.ps1`；schtasks 用絕對 Windows 路徑；以 PowerShell 工具呼叫亦可（R40 P2-R40-2 修復）
 16. **pytest 數字 SSOT 必須註記隨機性與 fixture 前提** — 引用 pytest 數字（如 2,716 passed）時加註「pytest-randomly 未啟用，順序由 collection 確定」；pyproject.toml 不安裝 pytest-randomly；引入前需先補測試隔離（R40 P1-R40-1 偽陽性預防）
@@ -322,7 +322,7 @@ tasks:
 
 ---
 
-**文檔元數據**：v7.9 | 建立 2025-01-11 | 最後更新 2026-07-16 | 適用 AISDLC v0.09+（v7.9：R9 跨平台複審——基線補巢狀 Claude Code session（CLAUDECODE=1）變因註記：該環境下全套為 3,557/206（requires_claude_cli 條件 skip，DEF-101-091，屬預期非退化）；Nightly 紀律完整版連結 v1.2→v1.6 訂正。v7.8：AutoSDD_improving_61 A 軌 L5 加固 — weak_regex 第二信號併入轉譯元學習（沿 spec_digest 先例搭既有 RTM-COVERAGE-HISTORY；`select_proposals` 雙信號 failure OR weak_regex；無新 plugin/port）；apply 仍人工 signoff；full pytest 3,566/196（2026-07-13 乾淨 bootstrap 實測；出廠環境未裝 `[postgres]` 等選配）、importlinter 8 kept、LOC=0。歷史 v7.7 improving_60 明細見 [sprint_history.md §1.7.3](docs/05_development/sprint_history.md)）。
+**文檔元數據**：v7.10 | 建立 2025-01-11 | 最後更新 2026-07-17 | 適用 AISDLC v0.09+（v7.10：R10 跨平台複審——nightly 五變更（sdd-fsm-chaos stage／recall rc [ref] 捕捉／mutmut 驗證失敗 rc=1／Docker 連續 SKIP ≥3 升級 exit 1／END 進度改 unique-sha 分子），紀律完整版連結 v1.6→v1.7；mutation history 壓縮落盤 29→7 筆（DEF-101-148：improving_101 宣稱之方案 A 壓縮實未執行於本機 live 檔）。v7.9：R9 跨平台複審——基線補巢狀 Claude Code session（CLAUDECODE=1）變因註記：該環境下全套為 3,557/206（requires_claude_cli 條件 skip，DEF-101-091，屬預期非退化）；紀律連結 v1.2→v1.6 訂正。歷史 v7.8 以前明細見 [sprint_history.md §1.7.3](docs/05_development/sprint_history.md)）。
 
 <!-- ARCH_SNAPSHOT_BEGIN -->
 ## [Architecture Snapshot] — 由 tools/snapshot_sync.py 自動生成（請勿手動編輯本區段；以 `python tools/snapshot_sync.py` 重新生成）

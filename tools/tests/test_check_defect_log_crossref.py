@@ -278,6 +278,53 @@ class TestMain(unittest.TestCase):
         )
         self.assertIn("逼近輪替上限", printed)
 
+    def _make_isolated_ledger_dir(self, name: str, archive_bytes: int) -> Path:
+        """R10 QA-9（DEF-101-138）：archive 守門測試需獨立目錄——archive glob 掃
+        `_DEFECT_LOG.parent`，若沿用共用 _TMP_DIR，超線 archive 會污染其他 case。"""
+        d = Path(_TMP_DIR) / name
+        d.mkdir(parents=True, exist_ok=True)
+        ledger = d / "AutoSDD_Defect_Log.md"
+        ledger.write_text(
+            _ledger_text("| DEF-01-001 | 2026-06-12 | 情境 | 現象 | P2 | 去向 | fixed@x |\n"),
+            encoding="utf-8",
+        )
+        (d / "AutoSDD_Defect_Log_archive_99.md").write_text(
+            "x" * archive_bytes, encoding="utf-8"
+        )
+        return ledger
+
+    def test_main_fails_when_archive_exceeds_limit(self) -> None:
+        """R10 QA-9 回歸鎖：archive 檔 ≥ 256KB 必須 fail——R9 補的 archive glob 迴圈
+        先前零測試覆蓋（fixture 目錄天然無 archive，迴圈從未被驗證會紅），glob
+        pattern / parent 路徑被改壞時主檔測試仍綠、DEF-99-001 政策的一半守門無聲失效。"""
+        ledger = self._make_isolated_ledger_dir(
+            "archive_fail", m._LEDGER_FAIL_BYTES + 10
+        )
+        with mock.patch.object(m, "_DEFECT_LOG", ledger), \
+             mock.patch.object(m, "_CROSSREF_TARGETS", []), \
+             mock.patch("builtins.print") as fake_print:
+            self.assertEqual(m.main(), 1)
+        printed = " ".join(
+            str(arg) for call in fake_print.call_args_list for arg in call.args
+        )
+        self.assertIn("帳本歸檔", printed)
+        self.assertIn("archive_99", printed)
+
+    def test_main_warns_but_passes_when_archive_approaches_limit(self) -> None:
+        """R10 QA-9：archive 檔於 240KB~256KB 預警帶 → warning 不 fail。"""
+        ledger = self._make_isolated_ledger_dir(
+            "archive_warn", m._LEDGER_WARN_BYTES + 100
+        )
+        with mock.patch.object(m, "_DEFECT_LOG", ledger), \
+             mock.patch.object(m, "_CROSSREF_TARGETS", []), \
+             mock.patch("builtins.print") as fake_print:
+            self.assertEqual(m.main(), 0)
+        printed = " ".join(
+            str(arg) for call in fake_print.call_args_list for arg in call.args
+        )
+        self.assertIn("已逼近上限", printed)
+        self.assertIn("archive_99", printed)
+
     def test_main_against_real_repo_is_clean(self) -> None:
         """對真實 repo 現況跑一次（無 mock）——本次修復 DEF-101-056/057 的 ONBOARDING.md
         誤記後，這是防止未來再度漂移而未被察覺的迴歸鎖。"""

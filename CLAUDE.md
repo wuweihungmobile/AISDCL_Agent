@@ -91,7 +91,7 @@ ruff check .                                       # lint（line-length=100, py3
 powershell -ExecutionPolicy Bypass -File tools/install_git_hooks.ps1   # 裝 git hooks
 powershell -ExecutionPolicy Bypass -File tools/local_ci_gate.ps1       # 一鍵本機 CI 閘門（鏡像 autoclaude-ci.yml）
 powershell -ExecutionPolicy Bypass -File tools/run_act.ps1 -Job test   # act：Linux 容器跑真 CI（於 monorepo 根執行、讀根層 .actrc）
-powershell -ExecutionPolicy Bypass -File tools/run_local_nightly.ps1   # nightly 6 stage（mutation/pg-e2e/perf/drift/obs）
+powershell -ExecutionPolicy Bypass -File tools/run_local_nightly.ps1   # nightly 7 stage（local_ci_gate/mutation/pg-e2e/perf/drift/obs/sdd-chaos）
 docker compose -f docker-compose.ci.yml up -d                          # CI 對等 PG（pg17）
 ```
 - **macOS/Linux 對等腳本已存在**：AutoClaude 側 `tools/install_git_hooks.sh`、`tools/local_ci_gate.sh`、`tools/run_act.sh`；monorepo 根層另有 `tools/bootstrap.sh` 與 `tools/integration_gate.sh`。完整雙平台對照表見根層 [ONBOARDING.md](ONBOARDING.md) §6。

@@ -204,15 +204,21 @@ case "$sub_rc" in
 esac
 
 # 3b. install_git_hooks.sh 於 linked worktree 下應正確拒絕（fail-loud）
+# R10 SD-1/QA-7（DEF-101-135）：原本 worktree add 未檢查，add 失敗時 subshell 的
+# cd 失敗 rc=1 恰等於「拒絕成功」預期值 → 受測腳本根本沒跑也 PASS 的假陽性。
+# add 顯式檢查；subshell 內 cd 失敗改走獨立哨兵 9（比照 [2] 段 `|| exit 9` 手法）。
 wt="$WORK/wt-install-git-hooks-reject"
-git -C "$FAKE" worktree add --quiet --detach "$wt" HEAD
-( cd "$wt" && bash AutoClaude/tools/install_git_hooks.sh )
-rc=$?
-git -C "$FAKE" worktree remove --force "$wt"
-if [ "$rc" -eq 1 ]; then
-  pass "install_git_hooks.sh linked worktree 拒絕（rc=1 as expected）"
+if git -C "$FAKE" worktree add --quiet --detach "$wt" HEAD; then
+  ( cd "$wt" || exit 9; bash AutoClaude/tools/install_git_hooks.sh )
+  rc=$?
+  git -C "$FAKE" worktree remove --force "$wt"
+  if [ "$rc" -eq 1 ]; then
+    pass "install_git_hooks.sh linked worktree 拒絕（rc=1 as expected）"
+  else
+    fail "install_git_hooks.sh 於 linked worktree 應 exit 1，實際 rc=$rc"
+  fi
 else
-  fail "install_git_hooks.sh 於 linked worktree 應 exit 1，實際 rc=$rc"
+  fail "worktree add 失敗——install_git_hooks.sh 拒絕情境未能執行（非假 PASS）"
 fi
 
 # 3c. AISDLC_SDD/scripts/install-hooks.sh 安裝往返
@@ -232,24 +238,31 @@ else
 fi
 
 # 3d. install-hooks.sh 於 linked worktree 下應正確拒絕（fail-loud）
+# R10 SD-1/QA-7（DEF-101-135）：同 3b——add 顯式檢查 + cd 失敗哨兵 9，堵假 PASS。
 wt="$WORK/wt-install-hooks-reject"
-git -C "$FAKE" worktree add --quiet --detach "$wt" HEAD
-( cd "$wt" && bash AISDLC_SDD/scripts/install-hooks.sh )
-rc=$?
-git -C "$FAKE" worktree remove --force "$wt"
-if [ "$rc" -eq 1 ]; then
-  pass "install-hooks.sh linked worktree 拒絕（rc=1 as expected）"
+if git -C "$FAKE" worktree add --quiet --detach "$wt" HEAD; then
+  ( cd "$wt" || exit 9; bash AISDLC_SDD/scripts/install-hooks.sh )
+  rc=$?
+  git -C "$FAKE" worktree remove --force "$wt"
+  if [ "$rc" -eq 1 ]; then
+    pass "install-hooks.sh linked worktree 拒絕（rc=1 as expected）"
+  else
+    fail "install-hooks.sh 於 linked worktree 應 exit 1，實際 rc=$rc"
+  fi
 else
-  fail "install-hooks.sh 於 linked worktree 應 exit 1，實際 rc=$rc"
+  fail "worktree add 失敗——install-hooks.sh 拒絕情境未能執行（非假 PASS）"
 fi
 
 # ── [4/5] AISDLC_SDD LATEST install_post_commit.sh 於 worktree 實跑 ────────────
 echo ""
 echo "--- [4/5] install_post_commit.sh worktree 實跑 + 移除後路徑斷言（fake repo）---"
-# 動態解析 LATEST（sort -V 取最高版語意，鏡射 ci-gate.sh / CI 同款；macOS BSD sort
-# 支援 -V，CI macos-latest 已實證）。
-latest="$(cd "$FAKE" && { ls -d AISDLC_SDD/AISDLC_SDD_v0.0* AISDLC_SDD/AISDLC_SDD_v0.[1-9]* AISDLC_SDD/AISDLC_SDD_v[1-9]* 2>/dev/null || true; } | sort -V | tail -1)"
-if [ -z "$latest" ]; then
+# 動態解析 LATEST：委派 AISDLC_SDD/scripts/sdd_version.py（R10 DEF-101-133 SSOT，
+# 鏡射 ci-gate.sh 同款；fake repo 為完整 clone，tracked 過濾語意成立；python 已於
+# 檔頭前置守門）。原 `ls -d ... | sort -V | tail -1` 尾端未錨定＋掃磁碟，複製品目錄
+# 會汙染選版（R10 ARCH-3）。
+latest_name="$(cd "$FAKE" && python AISDLC_SDD/scripts/sdd_version.py --sdd-root AISDLC_SDD || true)"
+latest="AISDLC_SDD/${latest_name}"
+if [ -z "$latest_name" ]; then
   fail "找不到任何 AISDLC_SDD_v* 版本目錄（fake repo）"
 else
   echo "AISDLC_SDD LATEST 版：$latest"

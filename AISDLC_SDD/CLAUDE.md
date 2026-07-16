@@ -49,10 +49,10 @@ d:/CursorProject/AISDLC_SDD/          ← 專案根目錄
 │   ├── scenarios/                     ← 場景（greenfield/brownfield/refactoring/documentation/devops/integration/migration/performance/security/testing）
 │   ├── workflow/                      ← 工作流（1 SDD Gate + core + scenario + ADR）
 │   ├── docs_template/                 ← 文檔模板（含 SDD 專屬模板：md + yaml）
-│   ├── cicd/                          ← 9 個 SDD CI/CD 規格
-│   ├── guides/                        ← 55+ 參考指南
+│   ├── cicd/                          ← SDD CI/CD 規格
+│   ├── guides/                        ← 參考指南
 │   ├── .claude/skills/                ← Claude Code Skills（繼承強化 + SDD 核心）
-│   ├── prompts/                       ← 15 個場景指令集與快速啟動指引
+│   ├── prompts/                       ← 場景指令集與快速啟動指引
 │   ├── releases/                      ← 框架發布包（v0.01 tar.gz + sha256）
 │   ├── tools/                         ← 工具腳本
 │   ├── build/                         ← 建置產出（報告/日誌/規劃歸檔）

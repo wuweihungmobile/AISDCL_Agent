@@ -86,5 +86,44 @@ class TestExtractFloor(unittest.TestCase):
         self.assertIn("bootstrap", printed)
 
 
+class TestPairEnrollment(unittest.TestCase):
+    """R10 拍板案(a)（DEF-101-134）：成對腳本註冊完整性發現鎖。
+
+    WHY：marker_pairs / thinness 對象皆硬編碼——過去新增一對 .sh/.ps1 而不掛
+    任何守門是零訊號的結構性缺口（Architect『新增腳本可繞過 parity 守門』）。
+    此鎖使未納管對子紅燈、註冊清單 stale 亦紅燈。
+    """
+
+    def test_real_tree_enrollment_passes(self) -> None:
+        self.assertTrue(m._check_pair_enrollment())
+
+    def test_unknown_pair_detected(self) -> None:
+        fake_root = _TMP_DIR / "enroll_unknown"
+        (fake_root / "tools").mkdir(parents=True, exist_ok=True)
+        (fake_root / "tools" / "rogue_pair.sh").write_text("#!/bin/sh\n", encoding="utf-8")
+        (fake_root / "tools" / "rogue_pair.ps1").write_text("# x\n", encoding="utf-8")
+        with mock.patch.object(m, "_REPO_ROOT", fake_root), \
+             mock.patch("builtins.print") as fake_print:
+            ok = m._check_pair_enrollment()
+        self.assertFalse(ok)
+        printed = " ".join(
+            str(arg) for call in fake_print.call_args_list for arg in call.args
+        )
+        self.assertIn("rogue_pair", printed)
+        self.assertIn("未註冊的成對腳本", printed)
+
+    def test_stale_registration_detected(self) -> None:
+        fake_root = _TMP_DIR / "enroll_stale"
+        (fake_root / "tools").mkdir(parents=True, exist_ok=True)  # 空目錄，無任何對子
+        with mock.patch.object(m, "_REPO_ROOT", fake_root), \
+             mock.patch("builtins.print") as fake_print:
+            ok = m._check_pair_enrollment()
+        self.assertFalse(ok)
+        printed = " ".join(
+            str(arg) for call in fake_print.call_args_list for arg in call.args
+        )
+        self.assertIn("stale", printed)
+
+
 if __name__ == "__main__":
     unittest.main()

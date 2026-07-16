@@ -27,17 +27,16 @@ export PYTHONUTF8=1
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
-# ── 版本解析（DEF-03-001 雙軌）─────────────────────────────────────────────
+# ── 版本解析（DEF-03-001 雙軌；R10 DEF-101-133 改走 SSOT）───────────────────
 FROZEN_BASELINE="AISDLC_SDD_v0.01"   # 凍結基線：恆測，回歸防護
-# 自動偵測最新演化版（sort -V 取語意版本最高者）
-# DEF-19-002：原單一 glob `AISDLC_SDD_v0.0*` 在版本跨越十位數（v0.09→v0.10，開頭變 v0.1）時
-# 漏掉 v0.10+，致最新演化版不入官方閘門（FF-17 初衷反被 glob 邊界破功）。雙 glob 修復：
-# 保留 `v0.0*`（v0.01~v0.09，亦為 FF-17 凍結基線 regex 向後相容子串）+ `v0.[1-9]*`（v0.10~v0.99）。
-# DEF-43-003：補第三支 `v[1-9]*`（v1.x+ major bump），與 rfc_lifecycle_lint VERSION_RE 放寬同步，
-# 否則升 v1.00 時 shell 端亦集體漏掉、LATEST 退回 v0.x（sort -V 仍正確排序 v0.18<v1.00）。
-# `|| true`：v[1-9]* 在 v0 階段無匹配，ls 對 literal pattern 回非零，須在 set -euo pipefail 下吞掉
-# （否則無匹配 glob 擊垮 pipeline；DEF-43-003 修復當場揭露此 pipefail 交互）。
-LATEST="$(cd "${REPO_ROOT}" && { ls -d AISDLC_SDD_v0.0* AISDLC_SDD_v0.[1-9]* AISDLC_SDD_v[1-9]* 2>/dev/null || true; } | sort -V | tail -1)"
+# 自動偵測最新演化版：委派 scripts/sdd_version.py（LATEST 解析單一真相源）。
+# 歷史：原三重 glob `ls -d ... | sort -V | tail -1`（DEF-19-002/DEF-43-003 演進）尾端未錨定
+# 且掃磁碟非 git tracked——`AISDLC_SDD_v0.30.bak`、檔總管複製品「v0.30 - Copy」、未 commit
+# 手動複製目錄都會被選成 LATEST，閘門綠燈實為測錯樹（R10 ARCH-3 實測重現）。SSOT 語意：
+# git tracked（含 index）＋完整錨定 `^AISDLC_SDD_v\d+\.\d+$`＋(major,minor) 數值取最大。
+# `|| true`：resolver 找不到任何版本目錄時 exit 1，維持原「LATEST 可為空」語意
+# （空 → 僅測凍結基線；stderr 警告直通 console 不吞）。
+LATEST="$(python "${REPO_ROOT}/scripts/sdd_version.py" || true)"
 
 FW_VERSIONS=("${FROZEN_BASELINE}")
 if [[ -n "${LATEST}" && "${LATEST}" != "${FROZEN_BASELINE}" ]]; then

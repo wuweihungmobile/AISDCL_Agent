@@ -164,5 +164,27 @@ class TestIsHooksEffective(unittest.TestCase):
         self.assertEqual(len(calls), 3)  # pre-commit / pre-push / post-commit
 
 
+class TestRunEncodingRegression(unittest.TestCase):
+    """R10 QA-8（DEF-101-137）：_run() 的顯式 encoding 回歸鎖。
+
+    WHY：R9 修復「text=True 無 encoding 在 zh-TW Windows 走 cp950 → 非 ASCII repo
+    路徑 UnicodeDecodeError → liveness 靜默失效（無法判定＝不警告）」，但 13 個既有
+    case 全 mock _run，重構移除 encoding 參數時測試依然全綠。本 case 直接鎖住
+    subprocess.run 的呼叫參數（同輪同款修復在 test_git_hooks_install_common 有鎖，
+    此處補齊對稱）。
+    """
+
+    def test_run_passes_explicit_utf8_encoding(self) -> None:
+        with mock.patch.object(m.subprocess, "run") as fake_run:
+            fake_run.return_value = mock.Mock(returncode=0, stdout="ok\n")
+            out = m._run(["git", "rev-parse", "--show-toplevel"])
+        self.assertEqual(out, "ok")
+        _args, kwargs = fake_run.call_args
+        self.assertEqual(kwargs.get("encoding"), "utf-8",
+                         "_run 必須顯式 encoding='utf-8'（cp950 UnicodeDecodeError 防護）")
+        self.assertEqual(kwargs.get("errors"), "replace",
+                         "_run 必須 errors='replace'（劣化為亂碼而非例外）")
+
+
 if __name__ == "__main__":
     unittest.main()

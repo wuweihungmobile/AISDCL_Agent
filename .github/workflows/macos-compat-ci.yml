@@ -81,6 +81,7 @@ on:
       - "tools/dev_start.sh"
       - "tools/dev_start.py"
       - "tools/tests/**"
+      - "tools/run_root_unittests.py"
       - "tools/check_script_parity.py"
       - "tools/check_ntfs_paths.py"
       - "tools/check_hooks_liveness.py"
@@ -108,6 +109,7 @@ on:
       - "tools/dev_start.sh"
       - "tools/dev_start.py"
       - "tools/tests/**"
+      - "tools/run_root_unittests.py"
       - "tools/check_script_parity.py"
       - "tools/check_ntfs_paths.py"
       - "tools/check_hooks_liveness.py"
@@ -153,7 +155,9 @@ jobs:
           python-version: "3.11"
 
       - name: tools/tests/（SIGPIPE 回歸鎖 + dev_start.py 平台邏輯；R3 QA 發現：paths 雖已涵蓋 tools/tests/**，但先前從未有任何 step 真的執行過，只在 root-infra-ci.yml 的 ubuntu-latest 上以 mock 跑過）
-        run: python3 -m unittest discover -s tools/tests -p "test_*.py" -v
+        # R10 QA-2（DEF-101-127）：裸 discover 對「發現 0 個測試」回 rc=0——改走
+        # tools/run_root_unittests.py（數量下限釘選，低於下限紅燈不執行）。
+        run: python3 tools/run_root_unittests.py
 
       - name: 執行 tools/bootstrap.sh（全新 .venv 建立情境）
         run: |
@@ -321,8 +325,12 @@ jobs:
         # LATEST（sort -V 取最高版語意，鏡射 ci-gate.sh 慣例）慣例脫節，版本演化到 v0.31
         # 時本 step 不會有機械訊號提醒更新。改為同一套動態解析邏輯。
         run: |
-          latest="$(ls -d AISDLC_SDD/AISDLC_SDD_v0.0* AISDLC_SDD/AISDLC_SDD_v0.[1-9]* AISDLC_SDD/AISDLC_SDD_v[1-9]* 2>/dev/null | sort -V | tail -1)"
-          test -n "$latest" || { echo "::error::找不到任何 AISDLC_SDD_v* 版本目錄"; exit 1; }
+          # R10 DEF-101-133：LATEST 解析委派 AISDLC_SDD/scripts/sdd_version.py 單一真相源
+          # （tracked 過濾＋錨定＋數值排序）；原三重 glob 尾端未錨定，`.bak`／檔總管
+          # 複製品目錄會汙染選版（R10 ARCH-3 實測重現）。
+          latest_name="$(python3 AISDLC_SDD/scripts/sdd_version.py --sdd-root AISDLC_SDD || true)"
+          test -n "$latest_name" || { echo "::error::找不到任何 AISDLC_SDD_v* 版本目錄（sdd_version.py SSOT）"; exit 1; }
+          latest="AISDLC_SDD/${latest_name}"
           echo "AISDLC_SDD LATEST 版：$latest"
           wt="$RUNNER_TEMP/wt-install-post-commit"
           git worktree add --detach "$wt" HEAD
@@ -423,8 +431,12 @@ jobs:
         # 獨立，不應因前一步失敗而被跳過。
         if: ${{ !cancelled() }}
         run: |
-          latest="$(ls -d AISDLC_SDD/AISDLC_SDD_v0.0* AISDLC_SDD/AISDLC_SDD_v0.[1-9]* AISDLC_SDD/AISDLC_SDD_v[1-9]* 2>/dev/null | sort -V | tail -1)"
-          test -n "$latest" || { echo "::error::找不到任何 AISDLC_SDD_v* 版本目錄"; exit 1; }
+          # R10 DEF-101-133：LATEST 解析委派 AISDLC_SDD/scripts/sdd_version.py 單一真相源
+          # （tracked 過濾＋錨定＋數值排序）；原三重 glob 尾端未錨定，`.bak`／檔總管
+          # 複製品目錄會汙染選版（R10 ARCH-3 實測重現）。
+          latest_name="$(python3 AISDLC_SDD/scripts/sdd_version.py --sdd-root AISDLC_SDD || true)"
+          test -n "$latest_name" || { echo "::error::找不到任何 AISDLC_SDD_v* 版本目錄（sdd_version.py SSOT）"; exit 1; }
+          latest="AISDLC_SDD/${latest_name}"
           echo "AISDLC_SDD LATEST 版：$latest"
           cd "$latest"
           python -m pip install --upgrade pip

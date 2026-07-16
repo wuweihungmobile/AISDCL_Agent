@@ -32,8 +32,8 @@
 
 另含 pytest 釘選一致性（P3-2；R4 複審 SA P2 擴充至三處）：AutoClaude/pyproject.toml、
 AISDLC_SDD/AISDLC_SDD_v0.01/requirements-ci.txt（凍結基線）與 AISDLC_SDD 下動態解析
-出的 LATEST 演化版（比照 AISDLC_SDD/scripts/ci-gate.sh 的 `sort -V | tail -1` 版本解析
-邏輯，於 Python 端以 pathlib 重寫等價邏輯）三處 `pytest==X` 版本字串必須相等
+出的 LATEST 演化版（R10 DEF-101-133 起委派 AISDLC_SDD/scripts/sdd_version.py 單一真相源，
+不再各語言重寫「等價邏輯」）三處 `pytest==X` 版本字串必須相等
 （bootstrap 把 AutoClaude 與 v0.01 裝進同一 .venv；`AISDLC_SDD/scripts/ci-gate.sh` 跑
 LATEST 版 fsm_runtime 測試時沿用同一共用 venv 的 pytest，從未依 LATEST 自己的
 requirements-ci.txt 重新安裝——LATEST 宣告的版本號若漂移即為從未生效的假象）。
@@ -54,6 +54,7 @@ DEF-101-082 抽出至 `tools/git_hooks_install_common.py` 單一真相源，兩�
 from __future__ import annotations
 
 import re
+import subprocess
 import sys
 from pathlib import Path
 
@@ -132,29 +133,32 @@ def _compare(label: str, sh_items: list[str], ps1_items: list[str]) -> bool:
     return False
 
 
-_SDD_VERSION_DIR_RE = re.compile(r"^AISDLC_SDD_v(\d+)\.(\d+)$")
-
-
 def _find_latest_sdd_version(aisdlc_sdd_dir: Path) -> Path | None:
-    """比照 AISDLC_SDD/scripts/ci-gate.sh 第 40 行的版本解析邏輯
-    （`ls -d AISDLC_SDD_v0.0* AISDLC_SDD_v0.[1-9]* AISDLC_SDD_v[1-9]* | sort -V | tail -1`），
-    於 Python 端以 pathlib 重寫等價邏輯：列出 AISDLC_SDD/ 下符合 `AISDLC_SDD_v\\d+\\.\\d+`
-    的目錄名，用可比較的 version tuple 排序取最大者。找不到任何符合目錄回傳 None。"""
-    best: tuple[int, int] | None = None
-    best_path: Path | None = None
-    if not aisdlc_sdd_dir.is_dir():
+    """委派 LATEST 解析 SSOT（AISDLC_SDD/scripts/sdd_version.py，R10 DEF-101-133）。
+
+    歷史：本函式曾以 pathlib 重寫 ci-gate.sh glob 的「等價邏輯」——正是 R10 ARCH-3
+    指出的多語言多實作漂移面（bash 未錨定/掃磁碟 vs 此處錨定/掃磁碟，語意已分歧）。
+    改為 subprocess 呼叫 SSOT（tracked 過濾＋錨定＋數值排序），解析失敗回傳 None
+    （維持原「找不到→None」語意，由呼叫端決定後果）。"""
+    resolver = aisdlc_sdd_dir / "scripts" / "sdd_version.py"
+    if not resolver.is_file():
         return None
-    for child in aisdlc_sdd_dir.iterdir():
-        if not child.is_dir():
-            continue
-        m = _SDD_VERSION_DIR_RE.match(child.name)
-        if not m:
-            continue
-        version = (int(m.group(1)), int(m.group(2)))
-        if best is None or version > best:
-            best = version
-            best_path = child
-    return best_path
+    try:
+        proc = subprocess.run(
+            [sys.executable, str(resolver), "--sdd-root", str(aisdlc_sdd_dir)],
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            check=True,
+        )
+    except (OSError, subprocess.CalledProcessError):
+        return None
+    name = proc.stdout.strip()
+    if proc.stderr.strip():
+        print(proc.stderr.strip(), file=sys.stderr)  # SSOT 警告（未 tracked 目錄等）直通
+    if not name:
+        return None
+    return aisdlc_sdd_dir / name
 
 
 def _check_pytest_pin() -> bool:
@@ -195,15 +199,77 @@ def _check_pytest_pin() -> bool:
     return ok
 
 
+# ── 成對腳本註冊完整性（enrollment 發現鎖）— R10 拍板案(a)，DEF-101-134 ────────
+# 過去「新增一對同名 .sh/.ps1 而不掛任何守門」零機械訊號（marker_pairs 與 thinness
+# 釘選對象皆硬編碼清單，磁碟上長出新對子沒人發現）。此檢查掃描宣告目錄（非遞迴）
+# 下的同名 .sh/.ps1 對，斷言每一對必屬 {parity 標籤比對, thinness hash 釘選,
+# 明文豁免（附決策依據）} 之一；並反向檢查註冊清單無 stale 條目（防清單腐化）。
+_MARKER_PAIRS = [
+    ("bootstrap", "tools/bootstrap.sh", "tools/bootstrap.ps1"),
+    ("integration_gate", "tools/integration_gate.sh", "tools/integration_gate.ps1"),
+    ("run_act", "AutoClaude/tools/run_act.sh", "AutoClaude/tools/run_act.ps1"),
+]
+_PAIR_SCAN_DIRS = ("tools", "AutoClaude/tools", "AISDLC_SDD/scripts")
+_THINNESS_ENROLLED = {"tools/dev_start"}  # tools/check_wrapper_thinness.py hash 釘選
+_EXEMPT_PAIRS = {
+    "AutoClaude/tools/install_git_hooks": (
+        "DEF-101-088 closed-by-decision：判定邏輯已下沉 tools/git_hooks_install_common.py "
+        "單一真相源，殼層無標籤錨點"
+    ),
+    "AISDLC_SDD/scripts/install-hooks": "DEF-101-088 closed-by-decision：同 install_git_hooks",
+    "AISDLC_SDD/scripts/ci-gate": (
+        "ci-gate.ps1 為薄委派殼（Find-GitBash → bash ci-gate.sh 單一真相源），非第二實作"
+    ),
+}
+
+
+def _enrolled_pairs() -> set[str]:
+    parity = {sh_rel[: -len(".sh")] for _label, sh_rel, _ps1 in _MARKER_PAIRS}
+    parity.add("AutoClaude/tools/local_ci_gate")  # gate-call 抽取比對（非 [n/m] 標籤）
+    return parity | _THINNESS_ENROLLED | set(_EXEMPT_PAIRS)
+
+
+def _discover_pairs() -> list[str]:
+    pairs: list[str] = []
+    for rel_dir in _PAIR_SCAN_DIRS:
+        d = _REPO_ROOT / rel_dir
+        if not d.is_dir():
+            continue
+        for sh in sorted(d.glob("*.sh")):
+            if (d / f"{sh.stem}.ps1").is_file():
+                pairs.append(f"{rel_dir}/{sh.stem}")
+    return pairs
+
+
+def _check_pair_enrollment() -> bool:
+    known = _enrolled_pairs()
+    pairs = _discover_pairs()
+    unknown = [p for p in pairs if p not in known]
+    stale = sorted(known - set(pairs))
+    ok = True
+    for p in unknown:
+        print(
+            f"❌ 未註冊的成對腳本：{p}.sh / {p}.ps1 —— 新增成對腳本必須擇一納管："
+            f"(1) 有標籤錨點 → 加入 _MARKER_PAIRS；(2) 薄殼 → 掛 check_wrapper_thinness "
+            f"hash 釘選；(3) 決策豁免 → 加入 _EXEMPT_PAIRS 並附缺陷帳本依據",
+            file=sys.stderr,
+        )
+        ok = False
+    for p in stale:
+        print(
+            f"❌ 註冊清單 stale：{p} 已不存在同名 .sh/.ps1 對 —— 請自對應清單移除",
+            file=sys.stderr,
+        )
+        ok = False
+    if ok:
+        print(f"✅ 成對腳本註冊完整性：{len(pairs)} 對皆已納管（掃描 {len(_PAIR_SCAN_DIRS)} 目錄）")
+    return ok
+
+
 def main() -> int:
     ok = True
 
-    marker_pairs = [
-        ("bootstrap", "tools/bootstrap.sh", "tools/bootstrap.ps1"),
-        ("integration_gate", "tools/integration_gate.sh", "tools/integration_gate.ps1"),
-        ("run_act", "AutoClaude/tools/run_act.sh", "AutoClaude/tools/run_act.ps1"),
-    ]
-    for label, sh_rel, ps1_rel in marker_pairs:
+    for label, sh_rel, ps1_rel in _MARKER_PAIRS:
         sh_items = _extract_markers(_REPO_ROOT / sh_rel)
         ps1_items = _extract_markers(_REPO_ROOT / ps1_rel)
         if not sh_items or not ps1_items:
@@ -229,12 +295,13 @@ def main() -> int:
         ok = _compare("local_ci_gate", gate_sh, gate_ps1) and ok
 
     ok = _check_pytest_pin() and ok
+    ok = _check_pair_enrollment() and ok
 
     if not ok:
         print("\n❌ 雙平台腳本對等檢查未通過 — .sh/.ps1 必須同步修改（見上列 diff）",
               file=sys.stderr)
         return 1
-    print("\n✅ 雙平台腳本對等檢查通過（4 對腳本 + pytest 釘選）")
+    print("\n✅ 雙平台腳本對等檢查通過（4 對腳本 + pytest 釘選 + 對子註冊完整性）")
     return 0
 
 

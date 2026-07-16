@@ -4,7 +4,7 @@
 |------|------|
 | 來源 | SD_09 W0 教訓 + W3 Round 1~42 zero-trust audit 累積 |
 | 上層 ADR | [ADR-SD08-001](../04_planning/ADR/ADR-SD08-001-claude-md-budget.md) §2.1 規範性內容可外移細節 |
-| 對應實作 | [tools/run_local_nightly.ps1](../../tools/run_local_nightly.ps1)（行數快照已移除防漂移，見下列行號註記）+ [tools/](../../tools/)（10 helper + unit test）。R9（2026-07-16）三變更：前置新增 local-ci-gate 全套 stage（對齊 windows-nightly-full）；pg-e2e 加跑 PG contract 測試（獨立 pytest 呼叫，不寫 .ac4_junit.xml 防污染 AC4 取證）；終端 exit code 帶訊號（任一 stage 失敗→exit 1，SKIP=-1/WARN=2 不計）——schtasks「上次結果」從此可反映 stage 健康，取證時不可再假設其恆 0x0 |
+| 對應實作 | [tools/run_local_nightly.ps1](../../tools/run_local_nightly.ps1)（行數快照已移除防漂移，見下列行號註記）+ [tools/](../../tools/)（10 helper + unit test）。R9（2026-07-16）三變更：前置新增 local-ci-gate 全套 stage（對齊 windows-nightly-full）；pg-e2e 加跑 PG contract 測試（獨立 pytest 呼叫，不寫 .ac4_junit.xml 防污染 AC4 取證）；終端 exit code 帶訊號（任一 stage 失敗→exit 1，SKIP=-1/WARN=2 不計）——schtasks「上次結果」從此可反映 stage 健康，取證時不可再假設其恆 0x0。R10（2026-07-17）五變更：mutmut log 驗證失敗 rc 2→1（QA-3，防「假 pass 守門自身觸發」被 WARN 綠出場）；recall pytest rc 以 [ref] 捕捉（QA-4）；新增 sdd-fsm-chaos stage（QA-6，Rule 9.9.4 本地補償）；Docker 連續 ≥3 次 SKIP 升級 exit 1（QA-11，`.docker_skip_streak`）；END mutation 進度改 unique-sha 分子（SA-2）——全部由 test_run_local_nightly_static.py 24 錨點鎖住 |
 | 行號註記 | 本檔 file:line 引用為 commit 當下取證；ps1 變動後行號漂移屬正常，以錨點關鍵字（如 `AUTOCLAUDE_*_P95_THRESHOLD_MS` / `F2 OK` / `ac4_junit.xml`）為準（R42 audit 校正）|
 | 對應根因報告 | [SD09_W0_Nightly_RootCause_Report.md](../05_development/SD09_W0_Nightly_RootCause_Report.md) |
 | 維護 | 任一條紀律違反 → P0 audit；新增紀律由 audit 發現 → 編號累加，**不可重排** |
@@ -85,13 +85,15 @@ env override（如 `AUTOCLAUDE_TEST_P95_THRESHOLD_MS`）若同時影響「採集
 
 ### 紀律 #13 — 觀察期 jsonl 累計進度必須可見
 
-`tools/run_local_nightly.ps1` 末段必須印 `END observation progress: mutation=N/7 ac4=N/14 obs=N/30 drift=N/30 (jsonl records; same UTC-date dedup per M-05)`。jsonl 採同 UTC date dedup（防同日多 run 灌水偽造觀察期）→ user 連跑 N 次 nightly jsonl 只進帳 1 筆；缺進度可見性 → user 誤判「跑了 N 次都進帳」實際只進帳 1（紀律 #3 取證可見性延伸）。SD_09 W3 Round 5 audit P1-AUDIT-R4-2 修復項。
+`tools/run_local_nightly.ps1` 末段必須印 `END observation progress: mutation=U/7 unique-sha (records=N; delta=…; stage=…) ac4=N/14 obs=N/30 drift=N/30`。ac4/obs/drift 三軌採同 UTC date dedup（M-05，防同日多 run 灌水偽造觀察期）→ user 連跑 N 次 nightly jsonl 只進帳 1 筆；缺進度可見性 → user 誤判「跑了 N 次都進帳」實際只進帳 1（紀律 #3 取證可見性延伸）。SD_09 W3 Round 5 audit P1-AUDIT-R4-2 修復項。
+
+**R10 訂正（SA-2 / DEF-101-142——mutation 軌語意分軌）**：mutation 去重鍵自 ADR-SD09-011 起改為 `source_sha256`（同日多 sha 全計入、同 sha 留最新，見紀律 #12 與 `mutation_baseline_lock._dedup_key` SSOT）——「同日多 run 不進帳」對 mutation 已**反轉**（同日不同 sha 會進帳、跨日同 sha 不進帳），且進度分子必須是 **unique-sha 證據數**、不可用原始列數（R10 實測：live 檔 29 列僅 5 unique sha，原格式會虛報 29/7；並揭露 improving_101 宣稱的方案 A 壓縮從未在本機落盤＝DEF-101-148，R10 已補跑 `--migrate-compact-sha` 29→7 筆）。靜態錨點：`tests/tools/test_run_local_nightly_static.py` case 24。
 
 **SD_09 W3 Round 19 強化（P1-AUDIT-R18-2）**：除 `N/門檻` 外，須同時印 `delta=N; stage=R` 雙印 — `delta=0; stage!=0` 即明示「本次未進帳因 stage crash」，避免 `ac4=4/14` 持平讓 user 誤以為觀察期未進帳是 dedup 結果（實際是 stage exception）。對應 ps1 跑前 `Get-JsonlCount` pre-snapshot + 跑後 delta 比對。
 
 ### 紀律 #14 — schtasks 自動跑 vs 互動跑必須 PATH 等價 + StrictMode 3.0 嚴格保護 $null.Property
 
-**背景（SD_09 W3 Round 19 nightly 第 14 跑首次自動跑 P0）**：02:00 schtasks 自動跑（SYSTEM 帳號）vs 互動 PowerShell（user 帳號）**PATH 不等價** — pyenv-win 互動 hook 動態注入 `versions/<ver>/Scripts/` 但 schtasks spawn 的 powershell **不繼承** → `Get-Command alembic.exe` 回 `$null`。配合 StrictMode 3.0 開啟（紀律 #11 後續落地），任何 `(Get-Command X -ErrorAction SilentlyContinue).Source` 鏈式存取在 `$null.Source` 時拋 PropertyNotFoundException → 整個 stage 36ms 內 crash（[logs/nightly_2026-05-26_020001.log:172-174](../../logs/nightly_2026-05-26_020001.log)）。互動模式因 pyenv hook 注入 Scripts 路徑而 14 輪躲過此 BUG，直到首次 schtasks 自動跑曝光。
+**背景（SD_09 W3 Round 19 nightly 第 14 跑首次自動跑 P0）**：02:00 schtasks 自動跑（SYSTEM 帳號）vs 互動 PowerShell（user 帳號）**PATH 不等價** — pyenv-win 互動 hook 動態注入 `versions/<ver>/Scripts/` 但 schtasks spawn 的 powershell **不繼承** → `Get-Command alembic.exe` 回 `$null`。配合 StrictMode 3.0 開啟（紀律 #11 後續落地），任何 `(Get-Command X -ErrorAction SilentlyContinue).Source` 鏈式存取在 `$null.Source` 時拋 PropertyNotFoundException → 整個 stage 36ms 內 crash（原始取證：logs/nightly_2026-05-26_020001.log:172-174——`logs/` 為 gitignored 且該檔已依保留策略輪替，任何機器上皆不可復驗，僅存本段文字轉述；R10 SA-7/DEF-101-147 註記：已輪替的關鍵取證一律改文字存證，不留死連結）。互動模式因 pyenv hook 注入 Scripts 路徑而 14 輪躲過此 BUG，直到首次 schtasks 自動跑曝光。
 
 **強制條款**：
 
@@ -193,4 +195,4 @@ CLAUDE.md §「Nightly / CI 取證紀律」維持 19 條編號標題清單（一
 
 ---
 
-**文檔元數據**：v1.6（R9 跨平台複審 — 標題/§2 計數 16→19 訂正〔紀律實際已達 19 條，標題自 #17~#19 新增後未同步〕、header 表載具行數快照移除防漂移、載具 R9 三變更註記〔local-ci-gate stage／PG contract／終端 exit code 帶訊號〕，CLAUDE.md 摘要連結已同步 v1.6。v1.5：Improving_012 Phase 3 收尾 — 新增紀律 #19 驗證載具 import 路徑一致性／流程問題 #9b+#9c，CLAUDE.md 摘要已同步）| 建立 2026-05-26 | 最後更新 2026-07-16 | 維護者：Tech Lead
+**文檔元數據**：v1.7（R10 跨平台複審 — 紀律 #13 補 mutation 軌 unique-sha 語意分軌訂正〔SA-2/DEF-101-142，含 DEF-101-148 壓縮未落盤揭露〕、紀律 #14 死 log 連結改文字存證〔SA-7/DEF-101-147〕、header 表載具 R10 五變更註記，CLAUDE.md 摘要連結已同步 v1.7。v1.6：R9 計數 16→19 訂正＋行數快照移除＋R9 三變更。v1.5：Improving_012 Phase 3 收尾 — 新增紀律 #19）| 建立 2026-05-26 | 最後更新 2026-07-17 | 維護者：Tech Lead

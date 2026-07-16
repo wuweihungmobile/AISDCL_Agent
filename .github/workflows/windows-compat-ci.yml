@@ -127,6 +127,7 @@ on:
       - "tools/dev_start.ps1"
       - "tools/dev_start.py"
       - "tools/tests/**"
+      - "tools/run_root_unittests.py"
       - "tools/check_script_parity.py"
       - "tools/check_ntfs_paths.py"
       - "tools/check_hooks_liveness.py"
@@ -155,6 +156,7 @@ on:
       - "tools/dev_start.ps1"
       - "tools/dev_start.py"
       - "tools/tests/**"
+      - "tools/run_root_unittests.py"
       - "tools/check_script_parity.py"
       - "tools/check_ntfs_paths.py"
       - "tools/check_hooks_liveness.py"
@@ -216,7 +218,9 @@ jobs:
 
       - name: tools/tests/（SIGPIPE 回歸鎖 + dev_start.py 平台邏輯；R3 QA 發現：先前只在 root-infra-ci.yml 的 ubuntu-latest 上以 mock 跑過，從未在真實 Windows 執行過）
         shell: pwsh
-        run: python -m unittest discover -s tools/tests -p "test_*.py" -v
+        # R10 QA-2（DEF-101-127）：裸 discover 對「發現 0 個測試」回 rc=0——改走
+        # tools/run_root_unittests.py（數量下限釘選，低於下限紅燈不執行）。
+        run: python tools/run_root_unittests.py
 
       - name: 執行 tools/bootstrap.ps1（R1 SA 發現：Windows 新人上手入口從未被實測）
         shell: pwsh
@@ -433,11 +437,11 @@ jobs:
           # 動態解析 LATEST 版本（sort -V 取最高版語意）的慣例脫節——版本演化到 v0.31
           # 時本 step 不會有機械訊號提醒更新，會繼續測已非 LATEST 的舊版。改為與
           # root-infra-ci.yml 同一套動態解析邏輯，永遠鎖定當下真正的 LATEST 版本。
-          $latest = Get-ChildItem -Path AISDLC_SDD -Directory |
-            Where-Object { $_.Name -match "^AISDLC_SDD_v[0-9]+\.[0-9]+$" } |
-            Sort-Object { [version]($_.Name -replace "^AISDLC_SDD_v", "") } |
-            Select-Object -Last 1
-          if (-not $latest) { throw "找不到任何 AISDLC_SDD_v* 版本目錄" }
+          # R10 DEF-101-133：LATEST 解析委派 scripts/sdd_version.py 單一真相源
+          # （tracked 過濾＋錨定＋數值排序），不再內嵌 pwsh regex 重寫「等價邏輯」。
+          $latestName = (& python AISDLC_SDD/scripts/sdd_version.py --sdd-root AISDLC_SDD | Out-String).Trim()
+          if (-not $latestName) { throw "找不到任何 AISDLC_SDD_v* 版本目錄（sdd_version.py SSOT 解析失敗）" }
+          $latest = Get-Item (Join-Path "AISDLC_SDD" $latestName)
           Write-Host "AISDLC_SDD LATEST 版：$($latest.Name)"
           $installScriptRel = "./AISDLC_SDD/$($latest.Name)/tools/install_hooks/install_post_commit.ps1"
 
@@ -493,11 +497,11 @@ jobs:
           # 那個 step 的斷言全部是在 worktree 還存在時就讀取，原本的 bug 在 worktree 存在
           # 期間永遠測不到，必須等 worktree 移除後才會現形，這正是先前 CI 沒抓到本次 bug
           # 的原因。本 step 在 worktree 移除「後」才讀取 hook 內容，驗證其中路徑仍存在於磁碟。
-          $latest = Get-ChildItem -Path AISDLC_SDD -Directory |
-            Where-Object { $_.Name -match "^AISDLC_SDD_v[0-9]+\.[0-9]+$" } |
-            Sort-Object { [version]($_.Name -replace "^AISDLC_SDD_v", "") } |
-            Select-Object -Last 1
-          if (-not $latest) { throw "找不到任何 AISDLC_SDD_v* 版本目錄" }
+          # R10 DEF-101-133：LATEST 解析委派 scripts/sdd_version.py 單一真相源
+          # （tracked 過濾＋錨定＋數值排序），不再內嵌 pwsh regex 重寫「等價邏輯」。
+          $latestName = (& python AISDLC_SDD/scripts/sdd_version.py --sdd-root AISDLC_SDD | Out-String).Trim()
+          if (-not $latestName) { throw "找不到任何 AISDLC_SDD_v* 版本目錄（sdd_version.py SSOT 解析失敗）" }
+          $latest = Get-Item (Join-Path "AISDLC_SDD" $latestName)
           $installScriptRel = "./AISDLC_SDD/$($latest.Name)/tools/install_hooks/install_post_commit.ps1"
 
           $wt = Join-Path $env:RUNNER_TEMP "wt-install-post-commit-removal"
@@ -617,11 +621,11 @@ jobs:
         if: ${{ !cancelled() }}
         shell: pwsh
         run: |
-          $latest = Get-ChildItem -Path AISDLC_SDD -Directory |
-            Where-Object { $_.Name -match "^AISDLC_SDD_v[0-9]+\.[0-9]+$" } |
-            Sort-Object { [version]($_.Name -replace "^AISDLC_SDD_v", "") } |
-            Select-Object -Last 1
-          if (-not $latest) { throw "找不到任何 AISDLC_SDD_v* 版本目錄" }
+          # R10 DEF-101-133：LATEST 解析委派 scripts/sdd_version.py 單一真相源
+          # （tracked 過濾＋錨定＋數值排序），不再內嵌 pwsh regex 重寫「等價邏輯」。
+          $latestName = (& python AISDLC_SDD/scripts/sdd_version.py --sdd-root AISDLC_SDD | Out-String).Trim()
+          if (-not $latestName) { throw "找不到任何 AISDLC_SDD_v* 版本目錄（sdd_version.py SSOT 解析失敗）" }
+          $latest = Get-Item (Join-Path "AISDLC_SDD" $latestName)
           Write-Host "AISDLC_SDD LATEST 版：$($latest.Name)"
           Push-Location $latest.FullName
           try {

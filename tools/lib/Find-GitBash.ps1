@@ -1,4 +1,4 @@
-<#
+﻿<#
 .SYNOPSIS
 共用 Git Bash（bash.exe）偵測函式 — S11 抽出。
 
