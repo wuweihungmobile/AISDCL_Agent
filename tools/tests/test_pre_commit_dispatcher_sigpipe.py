@@ -82,7 +82,8 @@ class TestPreCommitDispatcherSigpipe(unittest.TestCase):
 
         env_skip = dict(os.environ, AUTOCLAUDE_SKIP_HOOKS="1")
         add1 = subprocess.run(
-            ["git", "add", "-A"], cwd=str(self.repo), capture_output=True, text=True, timeout=60
+            ["git", "add", "-A"], cwd=str(self.repo), capture_output=True, text=True,
+            encoding="utf-8", errors="replace", timeout=60
         )
         self.assertEqual(add1.returncode, 0, add1.stderr)
         commit1 = subprocess.run(
@@ -90,6 +91,8 @@ class TestPreCommitDispatcherSigpipe(unittest.TestCase):
             cwd=str(self.repo),
             capture_output=True,
             text=True,
+            encoding="utf-8",
+            errors="replace",
             env=env_skip,
             timeout=60,
         )

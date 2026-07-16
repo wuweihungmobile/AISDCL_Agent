@@ -103,7 +103,8 @@ def _stage_paths(repo: str, rel_paths: list[str]) -> None:
     )
     blob = subprocess.run(
         ["git", "-C", repo, "hash-object", "-w", "--stdin"],
-        input="x", capture_output=True, text=True, check=True, timeout=30,
+        input="x", capture_output=True, text=True, encoding="utf-8", errors="replace",
+        check=True, timeout=30,
     ).stdout.strip()
     for p in rel_paths:
         subprocess.run(
@@ -270,7 +271,7 @@ def test_no_existing_tracked_path_exceeds_fail_threshold():
     out = subprocess.run(
         ["git", "-c", "core.quotepath=false", "ls-files", "-z"],
         cwd=_monorepo_root(), capture_output=True, text=True,
-        encoding="utf-8", check=True, timeout=60,
+        encoding="utf-8", errors="replace", check=True, timeout=60,
     ).stdout
     offenders = [p for p in out.split("\0") if p and len(p) > mod._LEN_FAIL]
     assert not offenders, f"存量 tracked 路徑超過 fail 門檻 {mod._LEN_FAIL}：{offenders}"

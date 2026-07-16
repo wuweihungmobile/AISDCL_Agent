@@ -54,11 +54,14 @@ echo "[pre-push] 3/5 snapshot_sync.py --check"
 python tools/snapshot_sync.py --check || fail=1
 
 # 4. import-linter 架構約束（CI: test 的 lint-imports）
+#    未安裝即 fail（與 local_ci_gate.sh gate_importlinter 同語意；R9 複審：原本軟跳過
+#    宣稱「CI 仍會檢查」，CI 帳單停擺期間即為 fail-open）
 echo "[pre-push] 4/5 import-linter（架構約束）"
 if command -v lint-imports >/dev/null 2>&1; then
   lint-imports || fail=1
 else
-  echo "[pre-push]   lint-imports 未安裝（pip install -e .[lint]）— 略過，CI 仍會檢查" >&2
+  echo "[pre-push]   ❌ lint-imports 未安裝（uv pip install -e .[lint]）— 架構約束閘門無法執行" >&2
+  fail=1
 fi
 
 # 5. pytest 全測（CI: test + equivalence）。可用 AUTOCLAUDE_PUSH_PYTEST_ARGS 縮限。

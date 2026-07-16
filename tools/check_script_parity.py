@@ -7,7 +7,7 @@
 實作漂移（同名 step 做了不同事）仍需人工審查，不可把本工具的綠燈當成雙平台
 行為等價的證明。詳見下方「覆蓋範圍與侷限」。
 
-為何需要：bootstrap / integration_gate / local_ci_gate 三對腳本互稱「忠實對照」，
+為何需要：bootstrap / integration_gate / local_ci_gate / run_act 四對腳本的兩側宣稱對等，
 但閘門清單過去純靠人工雙改——單邊加減 step 不會有任何機械訊號。本腳本抽取兩版
 的「step 標籤字串」逐一比對，不一致即 exit 1（供 root-infra-ci 與本機執行）。
 
@@ -26,6 +26,9 @@
   - 只比對「標籤序列」（數量、順序、字面文字），不比對各 step 的實作內容是否
     語意對等——實作漂移仍靠人工審查與 ONBOARDING 對照表。
   - 內嵌字串裡的行內 `#` 不視為註解（僅剝除「首個非空白字元為 #」的整行）。
+  - 抽取數量另設下限釘選 `_MIN_EXTRACT_COUNTS`（R9 跨平台複審）：宣告 pattern 被
+    兩側同步改寫時，step 會靜默退出守護範圍且無 diff 訊號——數量低於釘選即紅燈；
+    刻意刪減 step 時須同步更新釘選值。
 
 另含 pytest 釘選一致性（P3-2；R4 複審 SA P2 擴充至三處）：AutoClaude/pyproject.toml、
 AISDLC_SDD/AISDLC_SDD_v0.01/requirements-ci.txt（凍結基線）與 AISDLC_SDD 下動態解析
@@ -79,8 +82,39 @@ def _extract_markers(path: Path) -> list[str]:
 
 
 def _extract_gate_calls(path: Path, call_name: str) -> list[str]:
+    """抽取 `run_gate '…'`／`Invoke-Gate "…"` 的 gate 名——單/雙引號皆接受。
+
+    R9 跨平台複審：舊版只認單引號，兩側**同步**改成雙引號時該 gate 會靜默退出
+    守護範圍（雙邊一致故 _compare 也不會有 diff 訊號），守護悄悄變窄。"""
     text = path.read_text(encoding="utf-8-sig")
-    return re.findall(rf"^\s*{call_name}\s+'([^']+)'", text, re.MULTILINE)
+    pairs = re.findall(
+        rf"^\s*{call_name}\s+(?:'([^']+)'|\"([^\"]+)\")", text, re.MULTILINE
+    )
+    return [single or double for single, double in pairs]
+
+
+# 抽取數量下限釘選（R9 跨平台複審）：抽取全靠固定宣告 pattern，pattern 被改寫
+# （如兩側同步換引號風格/換函式名）時 step 會「靜默退出守護範圍」且雙邊一致、
+# _compare 不會有任何 diff 訊號。以「抽取數量不得低於釘選值」補上機械訊號；
+# 釘選值＝2026-07-16 工具實跑輸出（bootstrap 3 / integration_gate 5 / run_act 6 /
+# local_ci_gate 9）。刻意刪減 step 時須同步更新本表（工具會在訊息中指路）。
+_MIN_EXTRACT_COUNTS = {
+    "bootstrap": 3,
+    "integration_gate": 5,
+    "run_act": 6,
+    "local_ci_gate": 9,
+}
+
+
+def _check_extract_floor(label: str, sh_items: list[str], ps1_items: list[str]) -> bool:
+    floor = _MIN_EXTRACT_COUNTS[label]
+    if len(sh_items) >= floor and len(ps1_items) >= floor:
+        return True
+    print(f"❌ {label}：抽取數量（.sh {len(sh_items)} / .ps1 {len(ps1_items)}）低於"
+          f"釘選下限 {floor} — 最可能是宣告 pattern 被改寫、step 靜默退出守護範圍；"
+          f"若確為刻意刪減 step，請同步更新本腳本 _MIN_EXTRACT_COUNTS['{label}'] 釘選值",
+          file=sys.stderr)
+    return False
 
 
 def _compare(label: str, sh_items: list[str], ps1_items: list[str]) -> bool:
@@ -178,6 +212,7 @@ def main() -> int:
                   file=sys.stderr)
             ok = False
             continue
+        ok = _check_extract_floor(label, sh_items, ps1_items) and ok
         ok = _compare(label, sh_items, ps1_items) and ok
 
     gate_sh = _extract_gate_calls(
@@ -190,6 +225,7 @@ def main() -> int:
               file=sys.stderr)
         ok = False
     else:
+        ok = _check_extract_floor("local_ci_gate", gate_sh, gate_ps1) and ok
         ok = _compare("local_ci_gate", gate_sh, gate_ps1) and ok
 
     ok = _check_pytest_pin() and ok

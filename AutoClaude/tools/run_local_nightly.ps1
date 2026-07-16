@@ -239,6 +239,16 @@ $script:PreObsCount = Get-JsonlCount (Join-Path $RepoRoot '.observability_histor
 $script:PreDriftCount = Get-JsonlCount (Join-Path $RepoRoot '.drift_log_history.jsonl')
 Log ("BEGIN observation pre-snapshot: mutation={0} ac4={1} obs={2} drift={3} (jsonl records before this run; delta will be printed at END)" -f $script:PreMutationCount, $script:PreAc4Count, $script:PreObsCount, $script:PreDriftCount)
 
+# ----- Stage L: local_ci_gate 全套（R9 複審 (b)；對齊 windows-compat-ci.yml 的
+# windows-nightly-full job「執行 AutoClaude/tools/local_ci_gate.ps1」深度回歸步驟）-----
+# 刻意放在最前：PG DSN / SD07_REAL_PG_E2E_ENABLED 等 env 於 Stage 0 之後才設，
+# 此處環境等同開發者手動跑 tools/local_ci_gate.ps1，不受 nightly PG env 污染。
+# 失敗不中斷後續 stage（Invoke-Stage 既有 continue-on-error 精神），rc 進
+# summary 與終端 exit code。
+$rcGate = Invoke-Stage 'local-ci-gate full (對齊 windows-nightly-full)' {
+  Invoke-Native { powershell -NoProfile -ExecutionPolicy Bypass -File tools/local_ci_gate.ps1 }
+}
+
 # ----- Stage 0: Docker / PG 準備（優先沿用既有 autoclaude_pg）-----
 # SD_09 W3 Round 4 audit P1-AUDIT-R3-4 修復：所有跨 scope 變數統一 $script: 前綴。
 # 避免未來重構為 function 時，內層 $script:DockerOK 寫入 vs 外層裸 $DockerOK 讀
@@ -475,6 +485,19 @@ if ($script:DockerOK) {
       python -m pytest tests/integration/test_pgvector_real_recall.py `
         -v --tb=short -m pg_real --junitxml=.ac4_junit.xml
     }
+    # R9 複審 (a)：pg-e2e stage 補 PG contract 測試（AUTOCLAUDE_TEST_PG_DSN 於本
+    # stage 前已設好）。刻意獨立呼叫、不併入上面的 recall pytest：① 該檔無
+    # pg_real marker，併入 `-m pg_real` 會被整檔 deselect（假接線）；② 不寫
+    # .ac4_junit.xml，避免 contract 結果污染 ac4_nightly_collector 的 AC4 觀察期
+    # 取證（collector 對 junit 內任一 failure/skip 都會降級 status）。
+    # rc 以 [ref] 捕捉（D-10 模式），stage 末端還原，不被 collector /
+    # progress_check 的 rc 蓋掉（紀律 #1 真實 rc）。
+    $contractRcRef = [ref] 0
+    Invoke-Native {
+      python -m pytest tests/contract/test_pg_state_repository_contract.py `
+        -v --tb=short
+    }
+    $contractRcRef.Value = $LASTEXITCODE
     Invoke-Native {
       python tools/ac4_nightly_collector.py `
         --junit-xml .ac4_junit.xml `
@@ -530,6 +553,12 @@ if ($script:DockerOK) {
       }
     } catch {
       Log "[F2 WARN] AC4 readiness 解析失敗：$_" 'WARN'
+    }
+    # R9 複審 (a)：contract 測試失敗必須反映到 stage rc（不被 F2 區塊尾端的
+    # $LASTEXITCODE 蓋掉；紀律 #1 真實 rc）
+    if ($contractRcRef.Value -ne 0) {
+      Log "PG contract 測試失敗 rc=$($contractRcRef.Value) — 標記 stage fail" 'ERROR'
+      $global:LASTEXITCODE = $contractRcRef.Value
     }
   }
 } else {
@@ -723,13 +752,17 @@ $rc2Label = Format-Rc $rc2
 $rc3Label = Format-Rc $rc3
 $rc4Label = Format-Rc $rc4
 $rc5Label = Format-Rc $rc5
-Log "END nightly summary: mutation=$rc1Label pg-e2e=$rc2Label perf=$rc3Label drift=$rc4Label obs=$rc5Label"
+$rcGateLabel = Format-Rc $rcGate
+# R9 複審 (b)：local_ci_gate 欄位附加於既有五欄之後（不動既有欄位順序，下游以
+# 具名欄位解析不受影響）
+Log "END nightly summary: mutation=$rc1Label pg-e2e=$rc2Label perf=$rc3Label drift=$rc4Label obs=$rc5Label local_ci_gate=$rcGateLabel"
 $summaryJson = ConvertTo-Json -Compress -InputObject @{
   mutation = [int]$rc1
   'pg-e2e' = [int]$rc2
   perf = [int]$rc3
   drift = [int]$rc4
   obs = [int]$rc5
+  local_ci_gate = [int]$rcGate
   skip_sentinel = $SKIP_RC
 }
 Log "END nightly summary json: $summaryJson"
@@ -751,6 +784,26 @@ $obsDelta = $obsCount - $script:PreObsCount
 $driftDelta = $driftCount - $script:PreDriftCount
 Log ("END observation progress: mutation={0}/7 (delta={1}; stage={2}) ac4={3}/14 (delta={4}; stage={5}) obs={6}/30 (delta={7}; stage={8}) drift={9}/30 (delta={10}; stage={11}) — same UTC-date dedup per M-05; delta=0 with stage!=0 表示本次未進帳" -f $mutCount, $mutDelta, $rc1Label, $ac4Count, $ac4Delta, $rc2Label, $obsCount, $obsDelta, $rc5Label, $driftCount, $driftDelta, $rc4Label)
 
+# R9 複審 (c)：終端 exit code 帶訊號（schtasks Last Result 取證；原本恆 0）。
+# 失敗判定與 Invoke-Stage 既有語意一致：SKIP（$SKIP_RC=-1，Docker 不可用等）與
+# WARN（rc=2，見 Invoke-Stage 的 P0-6 註解「不算 fail」）不計失敗；其餘非零＝失敗。
+# 判定先於 pointer 更新寫入 log（取證），實際 exit 置於 pointer 更新之後——
+# 不破壞「stage 失敗不中斷後續 stage」設計（所有 stage 此時已跑完）。
+$finalFailures = @()
+foreach ($pair in @(
+    @('local_ci_gate', $rcGate), @('mutation', $rc1), @('pg-e2e', $rc2),
+    @('perf', $rc3), @('drift', $rc4), @('obs', $rc5))) {
+  $stageRc = [int]$pair[1]
+  if ($stageRc -ne $SKIP_RC -and $stageRc -ne 0 -and $stageRc -ne 2) {
+    $finalFailures += ('{0}={1}' -f $pair[0], $stageRc)
+  }
+}
+if ($finalFailures.Count -gt 0) {
+  Log ("END exit decision: exit=1 (failed stages: {0})" -f ($finalFailures -join ', ')) 'ERROR'
+} else {
+  Log 'END exit decision: exit=0 (no failed stages; SKIP/WARN 不計失敗)'
+}
+
 # P1-1：更新 latest pointer，並 echo 給人工 retrieve
 try {
   Copy-Item -Path $Log -Destination $LatestLog -Force -ErrorAction Stop
@@ -760,3 +813,5 @@ try {
 }
 Write-Host ("Nightly log: {0}" -f $Log)
 Write-Host ("Nightly latest pointer: {0}" -f $LatestLog)
+if ($finalFailures.Count -gt 0) { exit 1 }
+exit 0

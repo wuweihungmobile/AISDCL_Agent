@@ -71,9 +71,22 @@ if (-not $SkipFull) {
         finally { Pop-Location }
     }
 
+    # Git Bash 偵測抽共用（S11）：裸呼叫 bash 會被解析到 WSL 的 System32\bash.exe
+    # （語意不對等假紅），無 bash 機器則 CommandNotFoundException 直接中斷整支腳本。
+    # 改用 tools/lib/Find-GitBash.ps1（同 AISDLC_SDD/scripts/ci-gate.ps1 作法）。
+    . (Join-Path $Root 'tools/lib/Find-GitBash.ps1')
+    $bashExe = Find-GitBash
+
     Invoke-Section "[2/5] AISDLC_SDD ci-gate.sh" {
+        if ($null -eq $bashExe) {
+            # 不 throw（$ErrorActionPreference=Stop 會中斷整支）——記 FAIL 後續段照跑
+            Write-Host ('❌ 找不到 Git Bash（bash.exe）→ 無法執行 scripts/ci-gate.sh。' +
+                '請安裝 Git for Windows（https://git-scm.com/download/win）後重跑。') -ForegroundColor Red
+            $global:LASTEXITCODE = 1
+            return
+        }
         Push-Location (Join-Path $Root "AISDLC_SDD")
-        try { bash scripts/ci-gate.sh }
+        try { & $bashExe scripts/ci-gate.sh }
         finally { Pop-Location }
     }
 }

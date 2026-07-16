@@ -45,10 +45,16 @@ HOOK_FILENAMES = ("pre-commit", "pre-push", "post-commit")
 
 
 def _run(cmd: list[str]) -> str:
-    """跑一個 git 子指令，回傳 stripped stdout；任何失敗一律回傳空字串。"""
+    """跑一個 git 子指令，回傳 stripped stdout；任何失敗一律回傳空字串。
+
+    encoding 必須顯式指定：`text=True` 無 encoding 在無 PYTHONUTF8 的 Windows 終端
+    走 locale（zh-TW＝cp950），git 輸出的 UTF-8 非 ASCII repo 路徑會 UnicodeDecodeError
+    → liveness 偵測靜默失效（無法判定＝不警告；R9 跨平台複審實證）。
+    """
     try:
         result = subprocess.run(
-            cmd, capture_output=True, text=True, timeout=10, check=False
+            cmd, capture_output=True, text=True, encoding="utf-8", errors="replace",
+            timeout=10, check=False
         )
         if result.returncode != 0:
             return ""

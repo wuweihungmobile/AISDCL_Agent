@@ -67,7 +67,8 @@ def _run(command: str, cwd: str, extra_env: dict[str, str] | None = None,
         env.update(extra_env)
     return subprocess.run(
         command, shell=True, cwd=cwd, env=env,
-        input=stdin_payload, capture_output=True, text=True, timeout=60,
+        input=stdin_payload, capture_output=True, text=True,
+        encoding="utf-8", errors="replace", timeout=60,
     )
 
 

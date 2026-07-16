@@ -72,6 +72,20 @@ class TestClassify(unittest.TestCase):
         self.assertIsNone(m._classify("已reopened"))
         self.assertIsNone(m._classify("unfixed issue"))
 
+    def test_workaround_classified_as_open(self) -> None:
+        """R9 跨平台複審詞彙補充：workaround＝流程繞過、程式碼缺陷仍在 → open
+        （帳本實例 DEF-101-089 workaround-applied，舊詞彙表辨識不出而成含糊列）。"""
+        self.assertEqual(m._classify("**workaround-applied，未改程式碼（本輪範圍判斷）**"), "open")
+
+    def test_no_action_needed_classified_as_closed_by_decision(self) -> None:
+        """R9 跨平台複審詞彙補充：no_action_needed／no action needed＝查證後決定
+        不需修復 → closed-by-decision（帳本實例 DEF-101-077）。"""
+        self.assertEqual(
+            m._classify("**no_action_needed（[E31] 查證結果：已落地屬實）**"),
+            "closed-by-decision",
+        )
+        self.assertEqual(m._classify("no action needed（查證結果）"), "closed-by-decision")
+
 
 class TestLoadLedgerStatus(unittest.TestCase):
     def test_parses_last_column_as_status(self) -> None:
@@ -207,10 +221,62 @@ class TestMain(unittest.TestCase):
              mock.patch("builtins.print"):
             self.assertEqual(m.main(), 0)
 
+    def test_main_separates_vague_rows_from_valid_count_and_does_not_fail(self) -> None:
+        """R9 跨平台複審：狀態含糊列（_classify 回 None）不可被計入「有效狀態紀錄」，
+        須以 warning 列出 ID 分開呈現；含糊本身是帳本品質提示，不 fail（exit 0）。"""
+        ledger_text = _ledger_text(
+            "| DEF-01-001 | 2026-06-12 | 情境 | 現象 | P2 | 去向 | wontfix+凍結版紀律 |\n"
+            "| DEF-01-002 | 2026-06-13 | 情境 | 現象 | P3 | 去向 | pending-reassessment（無合法關鍵字） |\n"
+        )
+        target_text = "文件敘述 DEF-01-001（wontfix，記事存證）。\n"
+        with mock.patch.object(m, "_DEFECT_LOG", _write_tmp(ledger_text)), \
+             mock.patch.object(m, "_CROSSREF_TARGETS", [_write_tmp(target_text)]), \
+             mock.patch("builtins.print") as fake_print:
+            self.assertEqual(m.main(), 0)
+        printed = " ".join(
+            str(arg) for call in fake_print.call_args_list for arg in call.args
+        )
+        self.assertIn("狀態含糊", printed)
+        self.assertIn("DEF-01-002", printed)          # 含糊列 ID 有被列出
+        self.assertIn("1 筆有效狀態紀錄", printed)     # 有效數＝總數 2 − 含糊 1
+
     def test_main_returns_1_when_ledger_missing(self) -> None:
         missing = Path(_TMP_DIR) / "does_not_exist_defect_log.md"
         with mock.patch.object(m, "_DEFECT_LOG", missing), mock.patch("builtins.print"):
             self.assertEqual(m.main(), 1)
+
+    def test_main_fails_when_ledger_exceeds_rotation_limit(self) -> None:
+        """DEF-101-123 回歸鎖：主檔 ≥ 256KB（DEF-99-001 輪替界線）必須 fail——
+        R9 發現主檔默默長到 272KB 超線，政策先前零機械守門。"""
+        ledger_text = _ledger_text(
+            "| DEF-01-001 | 2026-06-12 | 情境 | 現象 | P2 | 去向 | fixed@x |\n"
+        )
+        padded = ledger_text + "> pad\n" * ((m._LEDGER_FAIL_BYTES // 6) + 1)
+        with mock.patch.object(m, "_DEFECT_LOG", _write_tmp(padded)), \
+             mock.patch.object(m, "_CROSSREF_TARGETS", []), \
+             mock.patch("builtins.print") as fake_print:
+            self.assertEqual(m.main(), 1)
+        printed = " ".join(
+            str(arg) for call in fake_print.call_args_list for arg in call.args
+        )
+        self.assertIn("輪替上限", printed)
+
+    def test_main_warns_but_passes_when_ledger_approaches_rotation_limit(self) -> None:
+        """DEF-101-123：主檔介於 240KB~256KB 之間 → warning 不 fail（預警帶）。"""
+        ledger_text = _ledger_text(
+            "| DEF-01-001 | 2026-06-12 | 情境 | 現象 | P2 | 去向 | fixed@x |\n"
+        )
+        base = len(ledger_text.encode("utf-8"))
+        pad_bytes = m._LEDGER_WARN_BYTES - base + 100  # 落在預警帶內、未達 fail 線
+        padded = ledger_text + "x" * pad_bytes
+        with mock.patch.object(m, "_DEFECT_LOG", _write_tmp(padded)), \
+             mock.patch.object(m, "_CROSSREF_TARGETS", []), \
+             mock.patch("builtins.print") as fake_print:
+            self.assertEqual(m.main(), 0)
+        printed = " ".join(
+            str(arg) for call in fake_print.call_args_list for arg in call.args
+        )
+        self.assertIn("逼近輪替上限", printed)
 
     def test_main_against_real_repo_is_clean(self) -> None:
         """對真實 repo 現況跑一次（無 mock）——本次修復 DEF-101-056/057 的 ONBOARDING.md

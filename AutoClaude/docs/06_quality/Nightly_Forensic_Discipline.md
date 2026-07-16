@@ -1,10 +1,10 @@
-# Nightly / CI 取證紀律（SD_09 W0 教訓 — 16 條強制紀律 + 採樣統計）
+# Nightly / CI 取證紀律（SD_09 W0 教訓 — 19 條強制紀律 + 採樣統計）
 
 | 項目 | 內容 |
 |------|------|
 | 來源 | SD_09 W0 教訓 + W3 Round 1~42 zero-trust audit 累積 |
 | 上層 ADR | [ADR-SD08-001](../04_planning/ADR/ADR-SD08-001-claude-md-budget.md) §2.1 規範性內容可外移細節 |
-| 對應實作 | [tools/run_local_nightly.ps1](../../tools/run_local_nightly.ps1)（707 行）+ [tools/](../../tools/)（10 helper + unit test）|
+| 對應實作 | [tools/run_local_nightly.ps1](../../tools/run_local_nightly.ps1)（行數快照已移除防漂移，見下列行號註記）+ [tools/](../../tools/)（10 helper + unit test）。R9（2026-07-16）三變更：前置新增 local-ci-gate 全套 stage（對齊 windows-nightly-full）；pg-e2e 加跑 PG contract 測試（獨立 pytest 呼叫，不寫 .ac4_junit.xml 防污染 AC4 取證）；終端 exit code 帶訊號（任一 stage 失敗→exit 1，SKIP=-1/WARN=2 不計）——schtasks「上次結果」從此可反映 stage 健康，取證時不可再假設其恆 0x0 |
 | 行號註記 | 本檔 file:line 引用為 commit 當下取證；ps1 變動後行號漂移屬正常，以錨點關鍵字（如 `AUTOCLAUDE_*_P95_THRESHOLD_MS` / `F2 OK` / `ac4_junit.xml`）為準（R42 audit 校正）|
 | 對應根因報告 | [SD09_W0_Nightly_RootCause_Report.md](../05_development/SD09_W0_Nightly_RootCause_Report.md) |
 | 維護 | 任一條紀律違反 → P0 audit；新增紀律由 audit 發現 → 編號累加，**不可重排** |
@@ -13,11 +13,11 @@
 
 ## 1. 紀律的由來
 
-前 3 輪 W0 修復都「載具修了根因沒修」，第 4 輪二次 audit 打中載具根因，第 5 輪三次 audit 才打中**判定邏輯**根因，第 6 輪 W3 audit 打中**跨 stage 一致性**根因。下列 13 條為**強制紀律**，CLAUDE.md §「Nightly / CI 取證紀律」維持編號清單摘要 + 連結至本檔。
+前 3 輪 W0 修復都「載具修了根因沒修」，第 4 輪二次 audit 打中載具根因，第 5 輪三次 audit 才打中**判定邏輯**根因，第 6 輪 W3 audit 打中**跨 stage 一致性**根因。下列 19 條為**強制紀律**（R9 訂正：本句與標題計數隨 #14~#19 新增未同步，長期停在舊值），CLAUDE.md §「Nightly / CI 取證紀律」維持編號清單摘要 + 連結至本檔。
 
 ---
 
-## 2. 16 條強制紀律（完整版）
+## 2. 19 條強制紀律（完整版）
 
 ### 紀律 #1 — stage rc 必須區分「真實失敗」vs「工具標準回報」
 
@@ -193,4 +193,4 @@ CLAUDE.md §「Nightly / CI 取證紀律」維持 19 條編號標題清單（一
 
 ---
 
-**文檔元數據**：v1.5（Improving_012 Phase 3 收尾 — 新增紀律 #19 驗證載具 import 路徑一致性／流程問題 #9b+#9c，CLAUDE.md 摘要已同步）| 建立 2026-05-26 | 最後更新 2026-06-13 | 維護者：Tech Lead
+**文檔元數據**：v1.6（R9 跨平台複審 — 標題/§2 計數 16→19 訂正〔紀律實際已達 19 條，標題自 #17~#19 新增後未同步〕、header 表載具行數快照移除防漂移、載具 R9 三變更註記〔local-ci-gate stage／PG contract／終端 exit code 帶訊號〕，CLAUDE.md 摘要連結已同步 v1.6。v1.5：Improving_012 Phase 3 收尾 — 新增紀律 #19 驗證載具 import 路徑一致性／流程問題 #9b+#9c，CLAUDE.md 摘要已同步）| 建立 2026-05-26 | 最後更新 2026-07-16 | 維護者：Tech Lead

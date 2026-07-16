@@ -120,6 +120,9 @@ on:
       - "AutoClaude/tools/install_git_hooks.ps1"
       - "AutoClaude/.claude/**"
       - "AISDLC_SDD/scripts/**"
+      # R9 Fix-C：windows-smoke 實際安裝 v0.01 requirements-ci.txt（見下方「安裝
+      # AISDLC_SDD pinned deps」step），卻不被它的變更觸發（macos-compat-ci.yml 已列）
+      - "AISDLC_SDD/AISDLC_SDD_v0.01/requirements-ci.txt"
       - "tools/bootstrap.ps1"
       - "tools/dev_start.ps1"
       - "tools/dev_start.py"
@@ -146,6 +149,8 @@ on:
       - "AutoClaude/tools/install_git_hooks.ps1"
       - "AutoClaude/.claude/**"
       - "AISDLC_SDD/scripts/**"
+      # R9 Fix-C：同上（push 段說明），pull_request 段同步補齊
+      - "AISDLC_SDD/AISDLC_SDD_v0.01/requirements-ci.txt"
       - "tools/bootstrap.ps1"
       - "tools/dev_start.ps1"
       - "tools/dev_start.py"
@@ -219,6 +224,21 @@ jobs:
           ./tools/bootstrap.ps1
           if (-not (Test-Path .venv)) { throw "bootstrap.ps1 執行後 .venv 未建立" }
           Write-Host "bootstrap.ps1 執行成功，.venv 已建立"
+
+      - name: 重跑 tools/bootstrap.ps1（既有 .venv 沿用情境；R9 Fix-D）
+        # R9 Fix-D：macos-compat-ci.yml 對 bootstrap.sh 跑兩次（全新 + 沿用），本 job
+        # 先前只跑一次——tools/bootstrap.ps1 的「偵測到既有 .venv → 沿用」分支
+        # （bootstrap.ps1 的 .venv 存在檢查 + Scripts\python.exe 形狀檢查）零覆蓋。
+        # 斷言字串對照 bootstrap.ps1 沿用分支實際輸出：「偵測到既有 .venv → 沿用」。
+        # Write-Host 走 information stream，需 *>&1 合流才捕捉得到。
+        shell: pwsh
+        run: |
+          $out = ./tools/bootstrap.ps1 *>&1 | Out-String
+          Write-Host $out
+          if ($LASTEXITCODE -ne 0) { throw "既有 .venv 重跑 bootstrap.ps1 失敗（rc=$LASTEXITCODE）" }
+          if (-not (Test-Path .venv\Scripts\python.exe)) { throw "既有 .venv 重跑後 .venv\Scripts\python.exe 不存在" }
+          if ($out -notlike '*偵測到既有 .venv*沿用*') { throw "未見沿用訊息——bootstrap.ps1 未走既有 .venv 沿用分支" }
+          Write-Host "bootstrap.ps1 既有 .venv 沿用情境通過"
 
       - name: dot-source tools/dev_start.ps1（同上，日常開工入口）
         shell: pwsh
@@ -342,6 +362,64 @@ jobs:
           if ($rc -ne 1) { throw "預期在 linked worktree 下 install-hooks.ps1 應 exit 1，實際 rc=$rc" }
           Write-Host "install-hooks.ps1 worktree 拒絕驗證通過（rc=1 as expected）"
           exit 0
+
+      - name: 根層 dispatcher hooks：安裝 + 真實 git commit 經 core.hooksPath 觸發 dispatcher（R9 ARCH-F3）
+        # R9 ARCH-F3：dispatcher 三支 hook（tools/git-hooks/pre-commit／post-commit／
+        # pre-push）在 Windows 由 Git for Windows 的 msys bash 執行，此前本 workflow 只
+        # 驗證安裝腳本寫入 core.hooksPath，從未讓真實 git commit 經 core.hooksPath 實際
+        # 執行過 dispatcher 一次（零實跑覆蓋）；macos-compat-ci.yml 已有對等 step，此為鏡射。
+        # 隔離做法照抄 macos 版：CI workspace checkout 本身即 throwaway（permissions:
+        # contents: read，probe commit 不推送、事後 revert），git config 只寫進 CI 副本；
+        # 結尾 --uninstall 還原，不影響本 job 其餘 step。
+        # 可觀測訊號（兩道）：(1) probe 檔放 tools/ 下，dispatcher 根層基建 leg 會印
+        # 「[pre-commit dispatcher]」marker，從 commit 輸出 grep 斷言 dispatcher 真的被
+        # git 執行（而非 hooks 未生效、commit 裸通過）；(2) 負路徑：帶語法錯誤的
+        # tools/*.sh 必須被 dispatcher 的 bash -n 閘擋下——macos 版負路徑用 CON.txt，
+        # 在 NTFS 上該檔名根本建不出來，Windows 改用語法錯誤閘作對等負路徑。
+        shell: bash
+        run: |
+          bash AutoClaude/tools/install_git_hooks.sh
+          hp="$(git config --get core.hooksPath || true)"
+          test -n "$hp" || { echo "::error::core.hooksPath 未設定"; exit 1; }
+
+          printf '%s\n' '#!/usr/bin/env bash' 'echo ok' > tools/_ci_windows_hook_probe.sh
+          git add tools/_ci_windows_hook_probe.sh
+          set +e
+          out="$(git -c user.email=ci@example.com -c user.name=ci -c commit.gpgsign=false \
+            commit -m "ci: windows hook probe (throwaway, not pushed)" 2>&1)"
+          rc=$?
+          set -e
+          echo "$out"
+          if [ "$rc" -ne 0 ]; then
+            echo "::error::probe commit 失敗（rc=$rc）——dispatcher 應放行乾淨變更"
+            exit 1
+          fi
+          echo "$out" | grep -F "[pre-commit dispatcher]" >/dev/null || {
+            echo "::error::commit 輸出未見 dispatcher marker——hooks 未經 core.hooksPath 實際執行"; exit 1; }
+          echo "git commit 經 core.hooksPath 成功觸發 pre-commit dispatcher（exit 0 + marker 可觀測）"
+
+          printf '%s\n' '#!/usr/bin/env bash' 'if true; then' > tools/_ci_windows_hook_probe_bad.sh
+          git add tools/_ci_windows_hook_probe_bad.sh
+          set +e
+          git -c user.email=ci@example.com -c user.name=ci -c commit.gpgsign=false \
+            commit -m "ci: windows bad probe (must be rejected)" -q
+          rc=$?
+          set -e
+          git reset -q HEAD tools/_ci_windows_hook_probe_bad.sh
+          rm -f tools/_ci_windows_hook_probe_bad.sh
+          if [ "$rc" -eq 0 ]; then
+            echo "::error::帶語法錯誤的 tools/*.sh 應被 dispatcher bash -n 閘擋下，commit 卻成功"
+            exit 1
+          fi
+          echo "dispatcher 正確擋下語法錯誤的根層 .sh（rc=$rc as expected）"
+
+          git rm -q tools/_ci_windows_hook_probe.sh
+          git -c user.email=ci@example.com -c user.name=ci -c commit.gpgsign=false \
+            commit -m "ci: revert windows hook probe (throwaway, not pushed)" -q
+          bash AutoClaude/tools/install_git_hooks.sh --uninstall
+          hp2="$(git config --get core.hooksPath || true)"
+          test -z "$hp2" || { echo "::error::--uninstall 後 core.hooksPath 仍殘留：$hp2"; exit 1; }
+          echo "dispatcher 真實 commit 驗證完成，hooks 已還原"
 
       - name: install_post_commit.ps1 執行 + 非 ASCII 路徑編碼損毀斷言（P1 回歸鎖，R1 SD 發現修正；R2 SD/Architect 發現再修正；2026-07-16 R8 SD 發現 linked-worktree 路徑解析 bug 修復後再修正）
         shell: pwsh

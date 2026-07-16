@@ -7,6 +7,10 @@
 #   讓兩子專案閘門同時生效：
 #     - push 範圍變更含 AutoClaude/  → 執行 AutoClaude/tools/git-hooks/pre-push
 #     - push 範圍變更含 AISDLC_SDD/ → 執行 AISDLC_SDD/.githooks/pre-push
+#     - push 範圍變更含「根層檔」（不在上述兩子專案底下的任何路徑，如 tools/、
+#       docs/、.github/workflows/）→ 執行 root-infra leg（py_compile + tools/tests
+#       unittest + 四支守門工具），對齊 root-infra-ci.yml 的本地接線（R9 複審：
+#       原本純根層變更 push 一個閘門都不跑，CI 帳單停擺期間零防護）
 #   分流條件（逐行解析 git 傳入 stdin 的 <local_ref> <local_sha> <remote_ref> <remote_sha>）：
 #     - remote_sha 全零（新分支）→ 用 git merge-base origin/main <local_sha> 回退為比較基準
 #     - local_sha 全零（刪除遠端分支）→ 該行跳過（無需驗證）
@@ -38,6 +42,7 @@ STDIN="$(cat)"
 
 run_autoclaude=0
 run_sdd=0
+run_rootinfra=0
 undeterminable=0
 parsed=0
 
@@ -72,6 +77,19 @@ while read -r local_ref local_sha remote_ref remote_sha; do
   # grep -q 提早退出令 printf 收 SIGPIPE，pipefail 判整條管線非零 → 閘門靜默漏跑）
   case $'\n'"$files" in *$'\n'AutoClaude/*)  run_autoclaude=1 ;; esac
   case $'\n'"$files" in *$'\n'AISDLC_SDD/*) run_sdd=1 ;; esac
+
+  # 根層檔偵測：存在任一「不在兩子專案底下」的變更路徑即觸發 root-infra leg。
+  # 「不以某前綴開頭」無法用單一 case 對整個 blob 判定 → 逐行 case（bash 3.2 相容，
+  # 同樣不走 printf | grep 管線；內層 heredoc 有自己的 fd，不干擾外層 stdin 迴圈）
+  while IFS= read -r f; do
+    [ -z "${f:-}" ] && continue
+    case "$f" in
+      AutoClaude/*|AISDLC_SDD/*) ;;
+      *) run_rootinfra=1 ;;
+    esac
+  done <<FILES_EOF
+$files
+FILES_EOF
 done <<EOF
 $STDIN
 EOF
@@ -80,9 +98,10 @@ EOF
 # 空 stdin 正是 pre-commit 框架等工具吃掉 stdin 的危險情境，一律 fail-safe 而非靜默放行）
 # → 視為兩子專案都有變更（跑全部閘門），寧可多跑不可漏跑
 if [ "$undeterminable" -eq 1 ] || [ "$parsed" -eq 0 ]; then
-  echo "[pre-push dispatcher] ⚠ 無法判定 push 範圍變更 → fail-safe：兩子專案閘門全跑"
+  echo "[pre-push dispatcher] ⚠ 無法判定 push 範圍變更 → fail-safe：三 leg 閘門全跑（兩子專案 + root-infra）"
   run_autoclaude=1
   run_sdd=1
+  run_rootinfra=1
 fi
 
 if [ "$run_autoclaude" -eq 1 ]; then
@@ -104,6 +123,43 @@ if [ "$run_sdd" -eq 1 ]; then
     # 子 hook 應存在卻缺失＝hooks 體系損壞 → fail-loud，拒絕放行
     echo "[pre-push dispatcher] ❌ 子 hook 缺失：$TOPLEVEL/AISDLC_SDD/.githooks/pre-push（hooks 體系損壞）" >&2
     rc=1
+  fi
+fi
+
+# root-infra leg（R9 複審接線）：純根層變更（tools/、docs/、workflows 等）原本
+# 一個閘門都不跑——root-infra-ci.yml 的守門在 CI 帳單停擺期間本地零接線。
+# 內容對齊 root-infra-ci.yml：py_compile 全 tools/*.py + tools/tests unittest +
+# 四支守門工具；失敗累積進 rc（不中斷其他 leg），python 缺席 fail-loud 不軟跳過。
+if [ "$run_rootinfra" -eq 1 ]; then
+  echo "[pre-push dispatcher] push 範圍含根層檔 → 執行 root-infra 閘門"
+  if ! command -v python >/dev/null 2>&1; then
+    echo "[pre-push dispatcher] ❌ 找不到 python — root-infra 閘門無法執行；請先啟用 venv（Windows: .venv/Scripts/activate；macOS/Linux: source .venv/bin/activate，見 ONBOARDING.md §3）" >&2
+    rc=1
+  else
+    (
+      cd "$TOPLEVEL" || exit 1
+      leg_rc=0
+      # ① tools/ 全部 *.py 遞迴 py_compile（find -exec：免 mapfile、空白檔名安全；
+      #    py_compile 對多檔逐一編譯、任一失敗即非零）
+      if ! find tools -name '*.py' -not -path '*/__pycache__/*' -exec python -m py_compile {} +; then
+        echo "[pre-push dispatcher] ❌ root-infra：tools/ py_compile 失敗" >&2
+        leg_rc=1
+      fi
+      # ② tools/tests 單元測試
+      if ! python -m unittest discover -s tools/tests -p "test_*.py"; then
+        echo "[pre-push dispatcher] ❌ root-infra：tools/tests unittest 失敗" >&2
+        leg_rc=1
+      fi
+      # ③ 四支守門工具（逐支跑完累積，不因單支失敗提早退出）
+      for guard in tools/check_script_parity.py tools/check_ntfs_paths.py \
+                   tools/check_defect_log_crossref.py tools/check_wrapper_thinness.py; do
+        if ! python "$guard"; then
+          echo "[pre-push dispatcher] ❌ root-infra：$guard 失敗" >&2
+          leg_rc=1
+        fi
+      done
+      exit $leg_rc
+    ) || rc=1
   fi
 fi
 

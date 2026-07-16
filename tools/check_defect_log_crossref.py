@@ -77,10 +77,15 @@ _CLAIM_RE = re.compile(
 # 英數字視為邊界字元，CJK／標點／空白都視為合法邊界，才能正確比對中英夾雜文字。
 _STATUS_KEYWORDS: dict[str, re.Pattern[str]] = {
     "wontfix": re.compile(r"wontfix"),
-    "closed-by-decision": re.compile(r"closed-by-decision"),
+    # `no_action_needed`／`no action needed`（帳本實例：DEF-101-077）＝查證後決定
+    # 不需修復 → 歸類 closed-by-decision（R9 跨平台複審：原詞彙表缺此詞導致該列
+    # 被計入「有效狀態紀錄」卻實為 None 含糊）。
+    "closed-by-decision": re.compile(r"closed-by-decision|no[_ ]action[_ ]needed"),
     "routed": re.compile(r"(?<![A-Za-z0-9])routed(?![A-Za-z0-9])"),
     "fixed": re.compile(r"(?<![A-Za-z0-9])fixed(?![A-Za-z0-9])"),
-    "open": re.compile(r"(?<![A-Za-z0-9])open(?![A-Za-z0-9])"),
+    # `workaround`（帳本實例：DEF-101-089 workaround-applied）＝以流程繞過、
+    # 程式碼缺陷本身仍在 → 歸類 open（workaround 非程式修復）。
+    "open": re.compile(r"(?<![A-Za-z0-9])open(?![A-Za-z0-9])|workaround"),
 }
 
 
@@ -147,15 +152,54 @@ def _scan_target(path: Path, ledger: dict[str, str | None]) -> list[str]:
     return problems
 
 
+# 帳本輪替界線（DEF-99-001 政策：主檔 < 256KB Read 上限；DEF-101-123 機械化——
+# R9 發現主檔已默默長到 272KB 超線，政策沒有任何機械守門）。
+# 逼近（>= _LEDGER_WARN_BYTES）印 warning；超線（>= _LEDGER_FAIL_BYTES）直接 fail，
+# 強制執行既定輪替程序（已結列搬遷 archive_NN）。
+_LEDGER_WARN_BYTES = 240 * 1024
+_LEDGER_FAIL_BYTES = 256 * 1024
+
+
 def main() -> int:
     if not _DEFECT_LOG.exists():
         print(f"❌ 找不到缺陷帳本：{_DEFECT_LOG}", file=sys.stderr)
         return 1
+    ledger_bytes = _DEFECT_LOG.stat().st_size
+    if ledger_bytes >= _LEDGER_FAIL_BYTES:
+        print(f"❌ 缺陷帳本主檔 {ledger_bytes} bytes ≥ 輪替上限 {_LEDGER_FAIL_BYTES}"
+              "（DEF-99-001 政策 <256KB）——請將已結列搬遷至下一個 "
+              "AutoSDD_Defect_Log_archive_NN.md（參照 DEF-101-123 之 R9 輪替程序）",
+              file=sys.stderr)
+        return 1
+    if ledger_bytes >= _LEDGER_WARN_BYTES:
+        print(f"⚠️  缺陷帳本主檔 {ledger_bytes} bytes 已逼近輪替上限 "
+              f"{_LEDGER_FAIL_BYTES}（DEF-99-001 政策），請規劃已結列搬遷 archive",
+              file=sys.stderr)
+    # DEF-99-001 政策同時要求「每一個 archive 檔」< 256KB（單一 archive 逼近即拆下
+    # 一個 archive）——Architect 二審 OBS-3：守門不可只量主檔。
+    for arch in sorted(_DEFECT_LOG.parent.glob("AutoSDD_Defect_Log_archive_*.md")):
+        arch_bytes = arch.stat().st_size
+        if arch_bytes >= _LEDGER_FAIL_BYTES:
+            print(f"❌ 帳本歸檔 {arch.name} {arch_bytes} bytes ≥ 上限 "
+                  f"{_LEDGER_FAIL_BYTES}（DEF-99-001 政策）——請拆分至下一個 archive_NN",
+                  file=sys.stderr)
+            return 1
+        if arch_bytes >= _LEDGER_WARN_BYTES:
+            print(f"⚠️  帳本歸檔 {arch.name} {arch_bytes} bytes 已逼近上限 "
+                  f"{_LEDGER_FAIL_BYTES}（DEF-99-001 政策），請規劃拆分", file=sys.stderr)
     ledger = _load_ledger_status()
     if not ledger:
         print("❌ 缺陷帳本解析結果為空 — 表格格式可能已改版導致比對邏輯失效，"
               "請同步本腳本的 _ROW_RE / 欄位解析", file=sys.stderr)
         return 1
+
+    # 「有效」與「含糊」分開呈現（R9 跨平台複審：舊版把 _classify 回 None 的列
+    # 也一併計入「有效狀態紀錄」總數，帳本自身品質問題被靜默吞掉）。
+    # 含糊 >0 只印 warning 不 fail：這是帳本品質提示，非跨文件矛盾。
+    vague_ids = sorted(def_id for def_id, cls in ledger.items() if cls is None)
+    if vague_ids:
+        print(f"⚠️  帳本狀態含糊 {len(vague_ids)} 筆（狀態欄辨識不出已知關鍵字）："
+              f"{'、'.join(vague_ids)}", file=sys.stderr)
 
     all_problems: list[str] = []
     for target in _CROSSREF_TARGETS:
@@ -170,8 +214,9 @@ def main() -> int:
             print(f"  - {p}", file=sys.stderr)
         return 1
 
-    print(f"✅ 缺陷帳本跨文件狀態一致：帳本 {len(ledger)} 筆有效狀態紀錄、"
-          f"{len(_CROSSREF_TARGETS)} 份掃描目標皆無矛盾")
+    vague_note = f"（另 {len(vague_ids)} 筆狀態含糊，見 warning）" if vague_ids else ""
+    print(f"✅ 缺陷帳本跨文件狀態一致：帳本 {len(ledger) - len(vague_ids)} 筆有效狀態紀錄"
+          f"{vague_note}、{len(_CROSSREF_TARGETS)} 份掃描目標皆無矛盾")
     return 0
 
 

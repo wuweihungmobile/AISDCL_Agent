@@ -197,6 +197,26 @@ jobs:
           test -x .venv/bin/python || { echo "::error::cross_same_flavor 重建後 .venv/bin/python 不存在"; exit 1; }
           echo "cross_same_flavor（linux→mac）分支驗證通過"
 
+      - name: zsh source tools/dev_start.sh（macOS 預設 shell 的 source 路徑；R9 Fix-E）
+        # R9 Fix-E：dev_start.sh 有 zsh 專屬邏輯（ZSH_EVAL_CONTEXT 判定 sourced +
+        # ${(%):-%x} 解析自身路徑），檔頭教學就是 `source tools/dev_start.sh`，而 macOS
+        # 使用者預設 shell 是 zsh——但本 job 其餘步驟全用 bash 跑，zsh 分支此前零實跑
+        # 覆蓋。dev_start.py 無 --check-only／dry-run 模式（僅 --no-sync／--force-bootstrap，
+        # 見 tools/dev_start.py main()），故沿用本 job bash 步驟同款的最小副作用模式
+        # --no-sync；此時 .venv 已由前面步驟建好，本步驟收斂為快路徑。
+        # 斷言兩道：source 後 rc=0，且 VIRTUAL_ENV 已被 activate 設定（證明 zsh 分支
+        # 的 sourced 偵測 + 自動啟用 .venv 真的走通，而非 fallback 到 bash 分支或未啟用）。
+        run: |
+          zsh --version
+          zsh -c '
+            source tools/dev_start.sh --no-sync
+            rc=$?
+            [ "$rc" -eq 0 ] || { echo "::error::zsh source dev_start.sh 失敗（rc=$rc）"; exit "$rc"; }
+            [ -n "$VIRTUAL_ENV" ] || { echo "::error::zsh source 後 VIRTUAL_ENV 未設定——.venv 未被自動啟用（zsh sourced 偵測失效）"; exit 1; }
+            echo "zsh 下 python → $(command -v python)"
+          '
+          echo "zsh source dev_start.sh 驗證通過（sourced 偵測 + .venv 自動啟用）"
+
       - name: AutoClaude/tools/install_git_hooks.sh 安裝／解除往返驗證（一般 checkout）
         run: |
           bash AutoClaude/tools/install_git_hooks.sh

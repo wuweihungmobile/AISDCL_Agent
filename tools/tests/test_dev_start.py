@@ -720,7 +720,8 @@ class TestStepSyncRealGitRepo(DevStartTestCase):
 
     @staticmethod
     def _run_git(args: list[str], cwd: Path) -> subprocess.CompletedProcess:
-        return subprocess.run(["git", *args], cwd=str(cwd), capture_output=True, text=True)
+        return subprocess.run(["git", *args], cwd=str(cwd), capture_output=True, text=True,
+                              encoding="utf-8", errors="replace")
 
     def _make_pair(self, base: Path) -> tuple[Path, Path]:
         """建立 origin（本地倉）+ local（clone）一組配對，供 step_sync 整合測試使用。"""
@@ -1616,7 +1617,7 @@ class TestNormalBootstrapFlowUnaffectedByProcessGroupChange(DevStartTestCase):
         proc = subprocess.run(
             [sys.executable, "-c", outer_script],
             cwd=str(Path(dev_start.__file__).resolve().parent),
-            capture_output=True, text=True, timeout=15,
+            capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=15,
         )
         self.assertEqual(proc.returncode, 0, f"stderr={proc.stderr}")
         self.assertIn(marker, proc.stdout,
@@ -2121,7 +2122,7 @@ class TestStepPlatformLongpaths(DevStartTestCase):
                 dev_start.step_platform("windows", is_repo=True)
             r = subprocess.run(
                 ["git", "-C", str(repo), "config", "--get", "core.longpaths"],
-                capture_output=True, text=True)
+                capture_output=True, text=True, encoding="utf-8", errors="replace")
             self.assertEqual(r.stdout.strip().lower(), "true")
             self.assertIn("已設", dev_start.SUMMARY.get("platform", ""))
 

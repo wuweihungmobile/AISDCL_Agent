@@ -13,6 +13,7 @@ dev_start 對子行數上限，降低變更風險）。
 """
 from __future__ import annotations
 
+import os
 import subprocess
 import sys
 import tempfile
@@ -84,17 +85,28 @@ class TestIsHooksPathInstalled(unittest.TestCase):
     def test_relative_current_value_resolved_against_repo_root_not_cwd(self) -> None:
         """獨立複審回歸鎖：core.hooksPath 存相對路徑時，判定結果不可依呼叫時的
         cwd 而異——必須固定相對 repo_root 解讀（比照 check_hooks_liveness.py 的
-        is_hooks_effective() 已有的正確行為）。"""
+        is_hooks_effective() 已有的正確行為）。
+
+        真的切換 cwd 呼叫兩次（R9 跨平台複審修正：舊版同輸入同 cwd 連呼兩次
+        assertEqual 恆真，鎖不住任何退化）：若實作退化為依 cwd 解析相對路徑
+        （如 `Path(current_value).resolve()`），第一次呼叫（cwd＝repo 根）仍 True、
+        第二次（cwd＝無關目錄）轉 False → assertEqual 轉紅。"""
         with tempfile.TemporaryDirectory() as td:
-            repo_root = Path(td)
+            repo_root = Path(td) / "repo"
+            repo_root.mkdir()
             hooks_dir = _make_hooks_dir(repo_root / "tools")  # -> repo_root/tools/git-hooks
             relative_value = "tools/git-hooks"
+            unrelated_cwd = Path(td) / "unrelated"
+            unrelated_cwd.mkdir()
 
-            # 用同一組 (repo_root, hooks_dir, relative_value) 輸入，模擬「呼叫時
-            # cwd 不同」不應影響結果：is_hooks_path_installed 本身不吃 cwd，只吃
-            # 顯式傳入的 repo_root，故直接重複呼叫兩次即驗證了 cwd 無關性。
-            result_a = m.is_hooks_path_installed(repo_root, hooks_dir, relative_value)
-            result_b = m.is_hooks_path_installed(repo_root, hooks_dir, relative_value)
+            original_cwd = os.getcwd()
+            try:
+                os.chdir(repo_root)
+                result_a = m.is_hooks_path_installed(repo_root, hooks_dir, relative_value)
+                os.chdir(unrelated_cwd)
+                result_b = m.is_hooks_path_installed(repo_root, hooks_dir, relative_value)
+            finally:
+                os.chdir(original_cwd)
             self.assertTrue(result_a)
             self.assertEqual(result_a, result_b)
 
@@ -116,7 +128,8 @@ class TestCliSmoke(unittest.TestCase):
         result = subprocess.run(
             [sys.executable, str(_REPO_ROOT / "tools" / "git_hooks_install_common.py"),
              "get-hooks-dir"],
-            cwd=str(_REPO_ROOT), capture_output=True, text=True, timeout=10,
+            cwd=str(_REPO_ROOT), capture_output=True, text=True,
+            encoding="utf-8", errors="replace", timeout=10,
         )
         self.assertEqual(result.returncode, 0, result.stderr)
         printed = Path(result.stdout.strip())
@@ -128,12 +141,70 @@ class TestCliSmoke(unittest.TestCase):
         result = subprocess.run(
             [sys.executable, str(_REPO_ROOT / "tools" / "git_hooks_install_common.py"),
              "check-installed", hooks_dir],
-            cwd=str(_REPO_ROOT), capture_output=True, text=True, timeout=10,
+            cwd=str(_REPO_ROOT), capture_output=True, text=True,
+            encoding="utf-8", errors="replace", timeout=10,
         )
         self.assertEqual(result.returncode, 0, result.stderr)
         lines = result.stdout.strip().splitlines()
         self.assertTrue(any(line.startswith("CUR=") for line in lines))
         self.assertTrue(any(line.startswith("OK=") for line in lines))
+
+
+class TestCliNonAsciiRepoPathEncoding(unittest.TestCase):
+    """R9 跨平台複審回歸鎖：`_run()` 的 subprocess 必須顯式 `encoding="utf-8"`。
+
+    未顯式指定時 `text=True` 走 locale（zh-TW Windows 無 PYTHONUTF8 ＝ cp950），
+    git 輸出的 UTF-8 非 ASCII repo 路徑會 UnicodeDecodeError → get-hooks-dir 假報
+    「不在 git repo 內」、check-installed 靜默退回 cwd 推算。以剝除 PYTHONUTF8／
+    PYTHONIOENCODING 的子行程環境重現；POSIX 下 locale 天然 UTF-8 不會炸，
+    但 rc=0 + 路徑正確的斷言仍有效。"""
+
+    def _make_non_ascii_fake_repo(self, td: str) -> tuple[Path, Path]:
+        repo = Path(td) / "中文測試repo"
+        hooks_dir = repo / "tools" / "git-hooks"
+        hooks_dir.mkdir(parents=True)
+        for name in m.HOOK_FILENAMES:
+            (hooks_dir / name).write_text("#!/usr/bin/env bash\nexit 0\n", encoding="utf-8")
+        subprocess.run(["git", "init", "-q", str(repo)], check=True, timeout=30)
+        subprocess.run(
+            ["git", "-C", str(repo), "config", "core.hooksPath", "tools/git-hooks"],
+            check=True, timeout=10,
+        )
+        return repo, hooks_dir
+
+    @staticmethod
+    def _env_without_utf8_overrides() -> dict[str, str]:
+        return {k: v for k, v in os.environ.items()
+                if k not in ("PYTHONUTF8", "PYTHONIOENCODING")}
+
+    def test_get_hooks_dir_on_non_ascii_repo_without_pythonutf8(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            repo, hooks_dir = self._make_non_ascii_fake_repo(td)
+            result = subprocess.run(
+                [sys.executable, str(_REPO_ROOT / "tools" / "git_hooks_install_common.py"),
+                 "get-hooks-dir"],
+                cwd=str(repo), env=self._env_without_utf8_overrides(),
+                capture_output=True, text=True, encoding="utf-8", errors="replace",
+                timeout=10,
+            )
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertEqual(Path(result.stdout.strip()), hooks_dir.resolve())
+
+    def test_check_installed_from_subdir_on_non_ascii_repo_without_pythonutf8(self) -> None:
+        # cwd 刻意設在 repo 子目錄：修復前 --show-toplevel 解碼崩潰會退回
+        # Path.cwd()（＝子目錄）推算 repo 根 → OK=0 假陰性；修復後 OK=1。
+        with tempfile.TemporaryDirectory() as td:
+            repo, hooks_dir = self._make_non_ascii_fake_repo(td)
+            result = subprocess.run(
+                [sys.executable, str(_REPO_ROOT / "tools" / "git_hooks_install_common.py"),
+                 "check-installed", str(hooks_dir.resolve())],
+                cwd=str(repo / "tools"), env=self._env_without_utf8_overrides(),
+                capture_output=True, text=True, encoding="utf-8", errors="replace",
+                timeout=10,
+            )
+            self.assertEqual(result.returncode, 0, result.stderr)
+            lines = result.stdout.strip().splitlines()
+            self.assertIn("OK=1", lines)
 
 
 class TestWrapperThinnessGuard(unittest.TestCase):

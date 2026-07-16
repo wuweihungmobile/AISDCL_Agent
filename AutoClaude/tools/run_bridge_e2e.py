@@ -8,7 +8,8 @@
     three_tier plan YAML
       └─[compile：複用 W-94-2 compile_to_playbook（含 evaluator 白名單消毒）]
           └─→ playbook.yaml
-              └─[run：subprocess `python -m autoclaude <pb> --config <cfg> --fresh`（真 Claude token）]
+              └─[run：subprocess `python -m autoclaude <pb> --config <cfg> --fresh`
+                     （真 Claude token）]
                   └─[parse：解析引擎 log（step ✓ / STEP_TOKEN_PEAK / KernelResult）]
                       └─→ evidence JSON（per-step：step_id/goal_task_id/success/evaluator/token_pct
                           + aggregate：steps/pass_rate/escalated/peak_token_pct）
@@ -35,7 +36,6 @@ import re
 import subprocess
 import sys
 from pathlib import Path
-from typing import Optional
 
 import click
 
@@ -47,8 +47,9 @@ for _p in (str(_REPO_ROOT), str(_TOOLS_DIR)):
     if _p not in sys.path:
         sys.path.insert(0, _p)
 
-from autoclaude.models.playbook import Playbook  # noqa: E402
 from three_tier_to_playbook import compile_to_playbook, playbook_to_yaml  # noqa: E402
+
+from autoclaude.models.playbook import Playbook  # noqa: E402
 
 # --- 引擎 log 解析錨點（與 core/kernel.py 輸出對齊；同 ab_compare_backends 的真值來源）---
 # 成功 step：kernel step_log `[E-IMPL-2] <name> ✓ (attempt N)`（kernel.py:_run_step）。
@@ -62,7 +63,8 @@ _RE_QUOTED_ID = re.compile(r"'([^']+)'")
 # per-step token% 真值：`=== STEP_TOKEN_PEAK | step=E-IMPL-2 pct=12.3456 ===`（kernel.py W-86-1）。
 _RE_STEP_TOKEN = re.compile(
     r"STEP_TOKEN_PEAK\s*\|\s*step=([A-Za-z0-9_\-]+)\s+pct=(\d+(?:\.\d+)?)")
-# 整輪權威：`KernelResult(success=True, completed_steps=5, total_steps=5, ... escalated=False ...)`。
+# 整輪權威：`KernelResult(success=True, completed_steps=5, total_steps=5,
+# ... escalated=False ...)`。
 _RE_KERNEL_RESULT = re.compile(r"KernelResult\((.*)$")
 _RE_KR_SUCCESS = re.compile(r"success=(True|False)")
 _RE_KR_COMPLETED = re.compile(r"completed_steps=(\d+)")
@@ -78,7 +80,7 @@ class BridgeE2EError(RuntimeError):
 def compile_plan(
     source_path: Path,
     *,
-    project_id: Optional[str] = None,
+    project_id: str | None = None,
     workflow_type: str = "aisdlc_sdd",
 ) -> tuple[Playbook, str]:
     """three_tier plan YAML → (Playbook, 攤平 playbook YAML 文字)。複用 W-94-2 compiler。"""
@@ -112,7 +114,7 @@ def parse_e2e_log(log_text: str) -> dict:
         v = float(pct)
         step_token[sid] = max(step_token.get(sid, 0.0), v)
 
-    kr: Optional[dict] = None
+    kr: dict | None = None
     kr_matches = _RE_KERNEL_RESULT.findall(log_text)
     if kr_matches:
         blob = kr_matches[-1]  # 取最後一個（最終態權威）
@@ -198,7 +200,8 @@ def run_autoclaude(
     workdir.mkdir(parents=True, exist_ok=True)
     cmd = [sys.executable, "-m", "autoclaude", str(Path(playbook_path).resolve()),
            "--config", str(Path(config_path).resolve()), "--fresh"]
-    subprocess.run(cmd, cwd=str(workdir), capture_output=True, text=True, timeout=timeout)
+    subprocess.run(cmd, cwd=str(workdir), capture_output=True, text=True,
+                   encoding="utf-8", errors="replace", timeout=timeout)
     log_file = workdir / "logs" / "autoclaude.log"
     if not log_file.exists():
         raise BridgeE2EError(f"引擎 log 未產生：{log_file}（subprocess 可能啟動即失敗）")

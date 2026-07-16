@@ -118,8 +118,9 @@ class RunMetrics:
     # W-81-1 / DEF-81-001：observer 層真值（KernelResult.peak_token_pct）。預設 0.0＝真跑
     # 無訊號（fail-loud：與「context 真的 0%」區分，見 token_signal_observed property）。
     observer_peak_token_pct: float = 0.0
-    # W-76-1：per-step 歸因（step_id → StepMetrics）。空 dict＝log 無步驟標記（誠實表「無 per-step 資訊」）。
-    per_step: dict[str, "StepMetrics"] = field(default_factory=dict)
+    # W-76-1：per-step 歸因（step_id → StepMetrics）。
+    # 空 dict＝log 無步驟標記（誠實表「無 per-step 資訊」）。
+    per_step: dict[str, StepMetrics] = field(default_factory=dict)
 
     @property
     def first_pass_rate(self) -> float:
@@ -323,7 +324,10 @@ def format_step_comparison(pty: RunMetrics, sdk: RunMetrics, max_steps: int = 30
     ]
     shown = step_ids[: max(0, max_steps)]
     for sid in shown:
-        out.append(f"| {sid} | {_step_cell(pty.per_step.get(sid))} | {_step_cell(sdk.per_step.get(sid))} |")
+        out.append(
+            f"| {sid} | {_step_cell(pty.per_step.get(sid))} "
+            f"| {_step_cell(sdk.per_step.get(sid))} |"
+        )
     elided = len(step_ids) - len(shown)
     if elided > 0:
         out.append(f"| … | … ({elided} more steps elided) | … |")
@@ -388,7 +392,7 @@ class AggregateMetrics:
     token_signal_observed_count: int = 0
     per_run: list[RunMetrics] = field(default_factory=list)
     # W-86-2：per-step 多輪聚合（step_id → StepAggregate）。空＝N 輪皆無 per-step 標記。
-    per_step_agg: dict[str, "StepAggregate"] = field(default_factory=dict)
+    per_step_agg: dict[str, StepAggregate] = field(default_factory=dict)
 
 
 def aggregate_runs(runs: list[RunMetrics], backend: str = "") -> AggregateMetrics:
@@ -452,7 +456,10 @@ def format_aggregate_comparison(pty: AggregateMetrics, sdk: AggregateMetrics) ->
     """產出多輪統計 Markdown 對比表（pty vs sdk，含均值 ± 母體標準差 / 範圍 / 成功計數）。"""
 
     def _fpr(a: AggregateMetrics) -> str:
-        return f"{_fmt_pct(a.first_pass_rate_mean)} ±{a.first_pass_rate_stdev * 100:.0f}% [{_fmt_pct(a.first_pass_rate_min)}~{_fmt_pct(a.first_pass_rate_max)}]"
+        return (
+            f"{_fmt_pct(a.first_pass_rate_mean)} ±{a.first_pass_rate_stdev * 100:.0f}% "
+            f"[{_fmt_pct(a.first_pass_rate_min)}~{_fmt_pct(a.first_pass_rate_max)}]"
+        )
 
     def _fmt_agg_token_peak(a: AggregateMetrics) -> str:
         # W-81-1 / DEF-81-001：N 輪皆無訊號 → 不裸印 0%，標明訊號缺失
@@ -463,7 +470,7 @@ def format_aggregate_comparison(pty: AggregateMetrics, sdk: AggregateMetrics) ->
         return base
 
     rows = [
-        (f"樣本數 N", str(pty.n), str(sdk.n)),
+        ("樣本數 N", str(pty.n), str(sdk.n)),
         ("一次通過率 (mean ±stdev [min~max])", _fpr(pty), _fpr(sdk)),
         ("CORRECTION 次數 (mean / total)",
          f"{pty.correction_count_mean:.1f} / {pty.correction_count_total}",
@@ -491,7 +498,7 @@ def format_aggregate_comparison(pty: AggregateMetrics, sdk: AggregateMetrics) ->
 
 
 # ── W-86-2：per-step 多輪聚合對比 + 有界渲染（improving_86，A 軌）────────
-def _step_agg_cell(sa: "StepAggregate | None") -> str:
+def _step_agg_cell(sa: StepAggregate | None) -> str:
     """單格＝「token 峰值 mean±stdev / p50 / p95 / max% · compact / corr（出現 n 輪）」。
     該後端此步無聚合（N 輪皆無標記）→ 0 補位（誠實表「無 per-step 資訊」）。
     W-93-2：補 ±stdev/p50/p95（分佈離散度與尾部），長 playbook A/B 才看得出後端差異。
@@ -557,7 +564,9 @@ def _load_log_or_raise(log_file: Path, backend: str, returncode: int, stderr: st
     )
 
 
-def run_backend(playbook: str, backend: str, workdir: Path, config_path: str | None = None) -> tuple[str, RunMetrics]:
+def run_backend(
+    playbook: str, backend: str, workdir: Path, config_path: str | None = None
+) -> tuple[str, RunMetrics]:
     """以指定 backend 實跑 playbook（subprocess），回傳 (log_text, RunMetrics)。
 
     需授權 token：實際呼叫 Claude。讀引擎 utf-8 log 檔（非 stdout，避免 Windows cp950
@@ -569,7 +578,8 @@ def run_backend(playbook: str, backend: str, workdir: Path, config_path: str | N
     cmd = [sys.executable, "-m", "autoclaude", playbook, "--fresh"]
     if config_path:
         cmd += ["--config", config_path]
-    proc = subprocess.run(cmd, cwd=str(workdir), capture_output=True, text=True, timeout=900)
+    proc = subprocess.run(cmd, cwd=str(workdir), capture_output=True, text=True,
+                          encoding="utf-8", errors="replace", timeout=900)
     log_file = workdir / "logs" / "autoclaude.log"
     log_text = _load_log_or_raise(log_file, backend, proc.returncode, proc.stderr)
     return log_text, parse_run_metrics(log_text, backend=backend)
@@ -669,8 +679,10 @@ def main(argv: list[str] | None = None) -> int:
     pty_agg: AggregateMetrics | None = None
     sdk_agg: AggregateMetrics | None = None
     if args.pty_log and args.sdk_log:
-        pty = parse_run_metrics(Path(args.pty_log).read_text(encoding="utf-8", errors="replace"), "pty")
-        sdk = parse_run_metrics(Path(args.sdk_log).read_text(encoding="utf-8", errors="replace"), "sdk")
+        pty_text = Path(args.pty_log).read_text(encoding="utf-8", errors="replace")
+        sdk_text = Path(args.sdk_log).read_text(encoding="utf-8", errors="replace")
+        pty = parse_run_metrics(pty_text, "pty")
+        sdk = parse_run_metrics(sdk_text, "sdk")
         print(format_comparison(pty, sdk))
         print()
         print(format_step_comparison(pty, sdk, max_steps=args.max_steps))

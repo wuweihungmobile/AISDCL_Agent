@@ -1942,8 +1942,11 @@ services:
 > 
 > # 自動清理超過 1 小時的測試環境
 > cleanup_stale_envs() {
+>   # 跨平台寫法：`xargs -r`（無輸入不執行）為 GNU-only，BSD/macOS xargs 無 -r；
+>   # while read 迴圈天然跳過空輸入，macOS/Linux 皆可原樣照抄
 >   docker ps -a --filter "label=com.docker.compose.project=test-*" \
->     --filter "status=exited" --format "{{.ID}}" | xargs -r docker rm -v
+>     --filter "status=exited" --format "{{.ID}}" \
+>     | while read -r id; do docker rm -v "$id"; done
 > }
 > ```
 
@@ -2009,7 +2012,9 @@ afterAll(async () => {
 #!/bin/bash
 check_version_consistency() {
   PROD_POSTGRES=$(kubectl get deployment -n prod -o jsonpath='{.spec.template.spec.containers[0].image}')
-  TEST_POSTGRES=$(grep -oP 'postgres:\K[^\s"]+' docker-compose.test.yml)
+  # 跨平台寫法：`grep -oP`（PCRE 的 \K）為 GNU-only，BSD/macOS grep 無 -P；
+  # 以 POSIX BRE 的 sed 等價擷取（head -1 確保多筆命中時輸出單一值）
+  TEST_POSTGRES=$(sed -n 's/.*postgres:\([^"[:space:]]*\).*/\1/p' docker-compose.test.yml | head -1)
 
   if [[ "$PROD_POSTGRES" != "$TEST_POSTGRES" ]]; then
     echo "⚠️ 版本不一致: Prod=$PROD_POSTGRES, Test=$TEST_POSTGRES"

@@ -256,7 +256,7 @@ tasks:
 
 ## 🔴 Nightly / CI 取證紀律（SD_09 W0 教訓 — 防止再犯）
 
-**完整版**：[docs/06_quality/Nightly_Forensic_Discipline.md](docs/06_quality/Nightly_Forensic_Discipline.md) v1.2。SD_09 W0~W3 40 輪 audit 累積；違反任一條 → P0 audit。**任何紀律新增 / 修訂必須先改完整版，再同步本摘要**。
+**完整版**：[docs/06_quality/Nightly_Forensic_Discipline.md](docs/06_quality/Nightly_Forensic_Discipline.md) v1.6（19 條）。SD_09 W0~W3 40 輪 audit 累積；違反任一條 → P0 audit。**任何紀律新增 / 修訂必須先改完整版，再同步本摘要**。
 
 1. **stage rc 必須區分「真實失敗」vs「工具標準回報」** — bitmask 工具不可單純 `rc != 0` 判 fail（mutmut：`rc & 1 != 0`）
 2. **log 必須含完整統計** — 不信任預設 dump（如 `mutmut results` 缺 Killed → kill_rate=0% 假象）；直查 raw store（sqlite Mutant 表）
@@ -322,7 +322,7 @@ tasks:
 
 ---
 
-**文檔元數據**：v7.8 | 建立 2025-01-11 | 最後更新 2026-06-24 | 適用 AISDLC v0.09+（v7.8：AutoSDD_improving_61 A 軌 L5 加固 — weak_regex 第二信號併入轉譯元學習（沿 spec_digest 先例搭既有 RTM-COVERAGE-HISTORY；`select_proposals` 雙信號 failure OR weak_regex；無新 plugin/port）；apply 仍人工 signoff；full pytest 3,566/196（2026-07-13 乾淨 bootstrap 實測；出廠環境未裝 `[postgres]` 等選配）、importlinter 8 kept、LOC=0。歷史 v7.7 improving_60 明細見 [sprint_history.md §1.7.3](docs/05_development/sprint_history.md)）。
+**文檔元數據**：v7.9 | 建立 2025-01-11 | 最後更新 2026-07-16 | 適用 AISDLC v0.09+（v7.9：R9 跨平台複審——基線補巢狀 Claude Code session（CLAUDECODE=1）變因註記：該環境下全套為 3,557/206（requires_claude_cli 條件 skip，DEF-101-091，屬預期非退化）；Nightly 紀律完整版連結 v1.2→v1.6 訂正。v7.8：AutoSDD_improving_61 A 軌 L5 加固 — weak_regex 第二信號併入轉譯元學習（沿 spec_digest 先例搭既有 RTM-COVERAGE-HISTORY；`select_proposals` 雙信號 failure OR weak_regex；無新 plugin/port）；apply 仍人工 signoff；full pytest 3,566/196（2026-07-13 乾淨 bootstrap 實測；出廠環境未裝 `[postgres]` 等選配）、importlinter 8 kept、LOC=0。歷史 v7.7 improving_60 明細見 [sprint_history.md §1.7.3](docs/05_development/sprint_history.md)）。
 
 <!-- ARCH_SNAPSHOT_BEGIN -->
 ## [Architecture Snapshot] — 由 tools/snapshot_sync.py 自動生成（請勿手動編輯本區段；以 `python tools/snapshot_sync.py` 重新生成）

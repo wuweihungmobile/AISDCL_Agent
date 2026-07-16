@@ -37,7 +37,9 @@ else
   # 即提早退出，上游收 SIGPIPE → 管線非零 → 偵測靜默失敗。比照 tools/git-hooks/pre-push
   # 的作法：先落地變數（|| true 容忍 gh 未安裝），再 herestring 餵 grep。
   GH_EXT_LIST="$(gh extension list 2>/dev/null || true)"
-  if grep -q 'gh-act\|nektos/gh-act' <<<"$GH_EXT_LIST"; then ACT="gh act"; fi
+  # 只留 'gh-act'：'nektos/gh-act' 本含此子字串（交替冗餘）；且 BRE 的 \| 交替是 GNU
+  # 擴充，macOS BSD grep 不支援 → 退回偵測在 Mac 上靜默失效（R9 跨平台複審）
+  if grep -q 'gh-act' <<<"$GH_EXT_LIST"; then ACT="gh act"; fi
 fi
 if [ -z "$ACT" ]; then
   echo '[run_act] act 未安裝。請擇一安裝：' >&2

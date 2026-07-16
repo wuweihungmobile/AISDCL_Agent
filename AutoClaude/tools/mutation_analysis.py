@@ -168,6 +168,8 @@ def show_mutation_diff(mutation_id: str, timeout: float = 10.0) -> str | None:
             ["mutmut", "show", mutation_id],
             capture_output=True,
             text=True,
+            encoding="utf-8",
+            errors="replace",
             timeout=timeout,
             check=False,
         )
@@ -196,7 +198,8 @@ def render_backlog(module: str, classified: dict[str, list[dict[str, str]]]) -> 
     lines = [
         f"# Mutation Survived Backlog — {module}",
         "",
-        f"自動產出（SD_Improving_08 W3 T3-D4 / ADR-SD08-002 §2.5）。共 {total} 個 survived mutation。",
+        f"自動產出（SD_Improving_08 W3 T3-D4 / ADR-SD08-002 §2.5）。"
+        f"共 {total} 個 survived mutation。",
         "",
         "## 分類摘要",
         "",
@@ -237,7 +240,9 @@ def render_backlog(module: str, classified: dict[str, list[dict[str, str]]]) -> 
     return "\n".join(lines)
 
 
-def analyze(log_path: Path, module: str, output_path: Path, skip_show: bool = False) -> dict[str, int]:
+def analyze(
+    log_path: Path, module: str, output_path: Path, skip_show: bool = False
+) -> dict[str, int]:
     survived_ids = extract_survived_ids(log_path)
     classified: dict[str, list[dict[str, str]]] = defaultdict(list)
     if not survived_ids:
