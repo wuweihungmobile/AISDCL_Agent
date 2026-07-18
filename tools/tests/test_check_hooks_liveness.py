@@ -14,6 +14,10 @@ from unittest import mock
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import check_hooks_liveness as m  # noqa: E402
 
+# 平台中立的假「絕對」repo 根（WHY 見 _platform_helpers 常數旁註解；R11 真 Mac
+# 首跑實證：寫死 "D:/repo" 在 POSIX 非絕對路徑 → join/resolve 語意分歧假紅）。
+from _platform_helpers import ABS_FAKE_REPO  # noqa: E402
+
 
 class TestCheckHooksLiveness(unittest.TestCase):
     def test_not_in_git_repo_returns_true_silently(self) -> None:
@@ -26,7 +30,7 @@ class TestCheckHooksLiveness(unittest.TestCase):
 
         def fake_run(cmd: list[str]) -> str:
             if cmd[:2] == ["git", "rev-parse"]:
-                return "D:/repo"
+                return str(ABS_FAKE_REPO)
             if "config" in cmd:
                 return "tools/git-hooks"
             return ""
@@ -39,12 +43,13 @@ class TestCheckHooksLiveness(unittest.TestCase):
 
     def test_mismatched_hooks_path_returns_false_with_warning(self) -> None:
         """core.hooksPath 指向錯誤路徑 → FAIL，印出警告（含目前值與預期值）。"""
+        wrong_abs = str(ABS_FAKE_REPO.parent / "wrong" / "path")
 
         def fake_run(cmd: list[str]) -> str:
             if cmd[:2] == ["git", "rev-parse"]:
-                return "D:/repo"
+                return str(ABS_FAKE_REPO)
             if "config" in cmd:
-                return "D:/wrong/path"
+                return wrong_abs
             return ""
 
         with mock.patch.object(m, "_run", side_effect=fake_run), \
@@ -52,14 +57,14 @@ class TestCheckHooksLiveness(unittest.TestCase):
             self.assertFalse(m.check_hooks_liveness())
             printed = "\n".join(str(c.args[0]) for c in mock_print.call_args_list if c.args)
             self.assertIn("dispatcher git hooks 未生效", printed)
-            self.assertIn("D:/wrong/path", printed)
+            self.assertIn(wrong_abs, printed)
 
     def test_unset_hooks_path_shows_placeholder(self) -> None:
         """core.hooksPath 完全未設定 → 警告顯示「（未設定）」而非空字串。"""
 
         def fake_run(cmd: list[str]) -> str:
             if cmd[:2] == ["git", "rev-parse"]:
-                return "D:/repo"
+                return str(ABS_FAKE_REPO)
             return ""
 
         with mock.patch.object(m, "_run", side_effect=fake_run), \
@@ -105,21 +110,23 @@ class TestResolveExpectedHooksDir(unittest.TestCase):
     check_hooks_liveness() 共用同一份判定，此處直接單元測試演算法本身。"""
 
     def test_non_worktree_uses_repo_root(self) -> None:
-        hooks_dir, is_linked = m.resolve_expected_hooks_dir(Path("D:/repo"), "", "")
+        hooks_dir, is_linked = m.resolve_expected_hooks_dir(ABS_FAKE_REPO, "", "")
         self.assertFalse(is_linked)
-        self.assertEqual(hooks_dir, (Path("D:/repo") / "tools" / "git-hooks").resolve())
+        self.assertEqual(hooks_dir, (ABS_FAKE_REPO / "tools" / "git-hooks").resolve())
 
     def test_linked_worktree_resolves_to_main_checkout(self) -> None:
         hooks_dir, is_linked = m.resolve_expected_hooks_dir(
-            Path("D:/repo-wt1"),
-            "D:/repo/.git/worktrees/wt",
-            "D:/repo/.git",
+            Path(f"{ABS_FAKE_REPO}-wt1"),
+            str(ABS_FAKE_REPO / ".git" / "worktrees" / "wt"),
+            str(ABS_FAKE_REPO / ".git"),
         )
         self.assertTrue(is_linked)
-        self.assertEqual(hooks_dir, (Path("D:/repo") / "tools" / "git-hooks").resolve())
+        self.assertEqual(hooks_dir, (ABS_FAKE_REPO / "tools" / "git-hooks").resolve())
 
     def test_same_git_dir_and_common_dir_is_not_linked_worktree(self) -> None:
-        _, is_linked = m.resolve_expected_hooks_dir(Path("D:/repo"), "D:/repo/.git", "D:/repo/.git")
+        _, is_linked = m.resolve_expected_hooks_dir(
+            ABS_FAKE_REPO, str(ABS_FAKE_REPO / ".git"), str(ABS_FAKE_REPO / ".git")
+        )
         self.assertFalse(is_linked)
 
 
@@ -127,23 +134,29 @@ class TestIsHooksEffective(unittest.TestCase):
     """`is_hooks_effective()` 純函式：路徑比對 + 三支 hook 檔齊備 + is_file 可注入。"""
 
     def test_empty_current_value_is_not_effective(self) -> None:
-        self.assertFalse(m.is_hooks_effective(Path("D:/repo"), Path("D:/repo/tools/git-hooks"), ""))
+        self.assertFalse(
+            m.is_hooks_effective(ABS_FAKE_REPO, ABS_FAKE_REPO / "tools" / "git-hooks", "")
+        )
 
     def test_mismatched_path_is_not_effective(self) -> None:
         self.assertFalse(
-            m.is_hooks_effective(Path("D:/repo"), Path("D:/repo/tools/git-hooks"), "D:/wrong")
+            m.is_hooks_effective(
+                ABS_FAKE_REPO,
+                ABS_FAKE_REPO / "tools" / "git-hooks",
+                str(ABS_FAKE_REPO.parent / "wrong"),
+            )
         )
 
     def test_matching_path_defers_to_injected_is_file(self) -> None:
-        hooks_dir = Path("D:/repo/tools/git-hooks")
+        hooks_dir = ABS_FAKE_REPO / "tools" / "git-hooks"
         self.assertTrue(
             m.is_hooks_effective(
-                Path("D:/repo"), hooks_dir, str(hooks_dir), is_file=lambda _p: True
+                ABS_FAKE_REPO, hooks_dir, str(hooks_dir), is_file=lambda _p: True
             )
         )
         self.assertFalse(
             m.is_hooks_effective(
-                Path("D:/repo"), hooks_dir, str(hooks_dir), is_file=lambda _p: False
+                ABS_FAKE_REPO, hooks_dir, str(hooks_dir), is_file=lambda _p: False
             )
         )
 
@@ -156,9 +169,9 @@ class TestIsHooksEffective(unittest.TestCase):
             calls.append(p)
             return True
 
-        hooks_dir = Path("D:/repo/tools/git-hooks")
+        hooks_dir = ABS_FAKE_REPO / "tools" / "git-hooks"
         result = m.is_hooks_effective(
-            Path("D:/repo"), hooks_dir, str(hooks_dir), is_file=safe_is_file
+            ABS_FAKE_REPO, hooks_dir, str(hooks_dir), is_file=safe_is_file
         )
         self.assertTrue(result)
         self.assertEqual(len(calls), 3)  # pre-commit / pre-push / post-commit

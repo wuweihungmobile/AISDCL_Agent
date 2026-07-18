@@ -15,6 +15,9 @@
 #   - macos-nightly-full：schedule + workflow_dispatch，continue-on-error 非阻斷，
 #                        跑兩子專案完整測試套件在 macos-latest 上的深度回歸網，
 #                        避免 macOS runner 偶發性拖垮每次 PR。
+#   - 可本地化 step 的本地聚合鏡射：tools/macos_smoke_local.sh（DEF-101-081 補償控制），
+#     與本 workflow 對應 step 同步維護（改這邊記得改那邊；由
+#     tools/tests/test_smoke_ci_sync.py 機械鎖本注記與 PASS 釘選）。
 #
 # 本 workflow 額外涵蓋兩個「連在 ubuntu-latest / windows-latest 上都測不到」的路徑：
 #   1. `tools/dev_start.py` 的 `cross_same_flavor` 分支——`_now_label()` 在 Linux 上
@@ -99,6 +102,12 @@ on:
       - ".claude/**"
       - "AISDLC_SDD/AISDLC_SDD_v*/tools/**"
       - "AISDLC_SDD/AISDLC_SDD_v*/.claude/**"
+      # R11：tools/tests/test_smoke_ci_sync.py 互鎖兩平台 smoke 釘選值、ONBOARDING §8
+      # PASS 數字與雙 workflow 同步注記——其消費檔改動時本 workflow 須重跑該鎖
+      #（DEF-101-042 同構；.sh 已由 **/*.sh 覆蓋，此處補 .ps1 側與文件）
+      - "ONBOARDING.md"
+      - "tools/windows_smoke_local.ps1"
+      - ".github/workflows/windows-compat-ci.yml"
       - ".github/workflows/macos-compat-ci.yml"
   pull_request:
     paths:
@@ -132,9 +141,18 @@ on:
       - ".claude/**"
       - "AISDLC_SDD/AISDLC_SDD_v*/tools/**"
       - "AISDLC_SDD/AISDLC_SDD_v*/.claude/**"
+      # R11：tools/tests/test_smoke_ci_sync.py 互鎖兩平台 smoke 釘選值、ONBOARDING §8
+      # PASS 數字與雙 workflow 同步注記——其消費檔改動時本 workflow 須重跑該鎖
+      #（DEF-101-042 同構；.sh 已由 **/*.sh 覆蓋，此處補 .ps1 側與文件）
+      - "ONBOARDING.md"
+      - "tools/windows_smoke_local.ps1"
+      - ".github/workflows/windows-compat-ci.yml"
       - ".github/workflows/macos-compat-ci.yml"
   schedule:
-    - cron: "0 7 * * *"   # macos-nightly-full：每日 07:00 UTC 深度回歸（非阻斷；較 windows-compat-ci 錯開 1 小時，避免同時搶 runner）
+    # R11 額度治理：每日 → 每週一（macOS runner 分鐘數計價倍率高、且 mac 側已有本地
+    # 補償控制 macos_smoke_local.sh + run_local_nightly.sh 聚合器承接每日訊號）；
+    # 需要時可 workflow_dispatch 手動觸發。仍較 windows-compat-ci 錯開 1 小時避免搶 runner。
+    - cron: "0 7 * * 1"   # macos-nightly-full：每週一 07:00 UTC 深度回歸（非阻斷）
   workflow_dispatch:
     inputs:
       simulate_nightly_failure:

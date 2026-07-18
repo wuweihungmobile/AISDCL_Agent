@@ -278,8 +278,9 @@ class DockerBackend:
                 encoding="utf-8", errors="replace",
                 timeout=spec.timeout_sec, check=False,
             )
-        except subprocess.TimeoutExpired:
-            # 逾時 = runtime 故障（保有界停機，不無限等待）
+        except (subprocess.TimeoutExpired, UnicodeDecodeError, OSError):
+            # 逾時／輸出解碼失敗／OS 層錯誤（如 docker 於探測後消失）＝ runtime 故障
+            # （保有界停機，不無限等待；回傳失敗觀測而非冒泡——R11 對齊本檔既有失敗語意）
             return ExecutionObservation(
                 tests_total=0, tests_passed=0, runtime_errors=1, nonzero_exit=True,
             )

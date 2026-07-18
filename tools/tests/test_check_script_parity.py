@@ -125,5 +125,82 @@ class TestPairEnrollment(unittest.TestCase):
         self.assertIn("stale", printed)
 
 
+class TestSingleSidedEnrollment(unittest.TestCase):
+    """R11 架構改善 C2：單邊（孤兒）腳本納管發現鎖。
+
+    WHY：R11 前 _discover_pairs 只認同名成對——新增一支只有 .sh 或只有 .ps1 的
+    腳本零機械訊號（跨平台對等從未被追問）。此鎖使未登記單邊紅燈、豁免清單
+    stale（檔案消失或對邊已出現）亦紅燈。
+    """
+
+    @staticmethod
+    def _patched(fake_root: Path, single_exempt: dict[str, str]):
+        """把全部註冊清單 mock 成空、只保留受測的單邊豁免——隔離真 repo 清單。"""
+        return (
+            mock.patch.object(m, "_REPO_ROOT", fake_root),
+            mock.patch.object(m, "_MARKER_PAIRS", []),
+            mock.patch.object(m, "_GATECALL_ENROLLED", set()),
+            mock.patch.object(m, "_THINNESS_ENROLLED", set()),
+            mock.patch.object(m, "_EXEMPT_PAIRS", {}),
+            mock.patch.object(m, "_SINGLE_SIDED_EXEMPT", single_exempt),
+        )
+
+    def _run_enrollment(self, fake_root: Path, single_exempt: dict[str, str]):
+        patches = self._patched(fake_root, single_exempt)
+        with patches[0], patches[1], patches[2], patches[3], patches[4], patches[5], \
+             mock.patch("builtins.print") as fake_print:
+            ok = m._check_pair_enrollment()
+        printed = " ".join(
+            str(arg) for call in fake_print.call_args_list for arg in call.args
+        )
+        return ok, printed
+
+    def test_unregistered_single_sided_script_fails(self) -> None:
+        """反例：磁碟上有未登記的單邊腳本 → 必紅並點名。"""
+        fake_root = _TMP_DIR / "single_unknown"
+        (fake_root / "tools").mkdir(parents=True, exist_ok=True)
+        (fake_root / "tools" / "rogue_single.sh").write_text("#!/bin/sh\n", encoding="utf-8")
+        ok, printed = self._run_enrollment(fake_root, {})
+        self.assertFalse(ok)
+        self.assertIn("rogue_single.sh", printed)
+        self.assertIn("未納管的單邊腳本", printed)
+
+    def test_exempted_single_sided_script_passes(self) -> None:
+        """正例：已附決策依據登記的單邊腳本 → 綠。"""
+        fake_root = _TMP_DIR / "single_exempt"
+        (fake_root / "tools").mkdir(parents=True, exist_ok=True)
+        (fake_root / "tools" / "lonely.ps1").write_text("# x\n", encoding="utf-8")
+        ok, printed = self._run_enrollment(
+            fake_root, {"tools/lonely.ps1": "測試豁免依據"}
+        )
+        self.assertTrue(ok, f"已豁免單邊不應紅燈，輸出：{printed}")
+
+    def test_stale_single_sided_exemption_file_gone_fails(self) -> None:
+        """stale 之一：豁免清單條目的檔案已消失 → 紅（防清單腐化）。"""
+        fake_root = _TMP_DIR / "single_stale_gone"
+        (fake_root / "tools").mkdir(parents=True, exist_ok=True)
+        ok, printed = self._run_enrollment(
+            fake_root, {"tools/ghost.sh": "測試豁免依據"}
+        )
+        self.assertFalse(ok)
+        self.assertIn("ghost.sh", printed)
+        self.assertIn("stale", printed)
+
+    def test_stale_single_sided_exemption_pair_appeared_fails(self) -> None:
+        """stale 之二：對邊腳本已出現（不再是單邊）→ 紅並指路重新納管——
+        run_local_nightly.sh 已於 R11（DEF-101-163）落地並依本語意轉登記為
+        _EXEMPT_PAIRS 成對豁免（本案例正是當時實際出訊號的機制）。"""
+        fake_root = _TMP_DIR / "single_stale_paired"
+        (fake_root / "tools").mkdir(parents=True, exist_ok=True)
+        (fake_root / "tools" / "lonely.sh").write_text("#!/bin/sh\n", encoding="utf-8")
+        (fake_root / "tools" / "lonely.ps1").write_text("# x\n", encoding="utf-8")
+        ok, printed = self._run_enrollment(
+            fake_root, {"tools/lonely.ps1": "測試豁免依據"}
+        )
+        self.assertFalse(ok)
+        self.assertIn("對邊腳本已出現", printed)
+        self.assertIn("未註冊的成對腳本", printed)  # 新對子 unknown 的第二訊號
+
+
 if __name__ == "__main__":
     unittest.main()

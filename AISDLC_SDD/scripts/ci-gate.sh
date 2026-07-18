@@ -78,7 +78,8 @@ run_gate_for_version() {
   # tee 保留串流到 console；set -o pipefail 確保 pytest 失敗（非零）時此處即中止，
   # 收斂彙總絕不會在任一軌紅燈時印出（硬閘語意不變）。
   local PYTEST_LOG
-  PYTEST_LOG="$(mktemp)"
+  # mktemp 帶模板（R11）：repo 對 BSD mktemp 是否需模板存在兩套假設（實測現代 macOS 皆可，統一帶模板為最保守跨平台寫法）
+  PYTEST_LOG="$(mktemp "${TMPDIR:-/tmp}/ci_gate_pytest.XXXXXX")"
   python -m pytest tools/fsm_runtime/tests/ -m "not chaos" -q 2>&1 | tee "${PYTEST_LOG}"
   # DEF-06-001：擷取逐軌 `N passed` 收斂計數（取證友善性，純函式 helper 單獨可測）
   local PASSED
@@ -124,7 +125,8 @@ done
 # set -o pipefail + set -e：scripts/tests 任一紅燈 → 管線非零 → 此處即中止，硬閘語意一致。
 echo "############## CI 閘門：共享 infra scripts/tests/ ##############"
 cd "${REPO_ROOT}"
-INFRA_LOG="$(mktemp)"
+# mktemp 帶模板（R11）：同上，統一帶模板為最保守跨平台寫法
+INFRA_LOG="$(mktemp "${TMPDIR:-/tmp}/ci_gate_infra.XXXXXX")"
 python -m pytest scripts/tests/ -q 2>&1 | tee "${INFRA_LOG}"
 INFRA_PASSED="$(bash "${REPO_ROOT}/scripts/pytest_passed_count.sh" < "${INFRA_LOG}")"
 rm -f "${INFRA_LOG}"

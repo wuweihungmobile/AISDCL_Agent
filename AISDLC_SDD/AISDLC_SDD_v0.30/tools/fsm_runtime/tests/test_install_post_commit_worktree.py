@@ -45,6 +45,7 @@ toplevel），`cat > .../post-commit` 會因路徑中途元件（`.git`）是檔
 """
 from __future__ import annotations
 
+import shutil
 import stat
 import subprocess
 import sys
@@ -96,10 +97,21 @@ def _make_fake_monorepo(
     本測試不觸發真實 commit hook 執行，只驗證安裝腳本本身的寫入行為，故內容用 dummy
     placeholder 即可，不需可執行的真實 hook 邏輯。`repo_name` 可指定非 ASCII 目錄名，
     供 worktree 測試重現編碼驗證情境（見下方 P1 修復訂正說明）。
+
+    R11（DEF-101-133）：install_post_commit.sh 的 LATEST 解析改委派
+    `AISDLC_SDD/scripts/sdd_version.py` SSOT，故 fixture 須比照真實 monorepo checkout
+    放入一份真 resolver（scripts/ 恆隨 checkout 存在）並隨 `git add -A` 進 tracked
+    （resolver 的 tracked 過濾語意才成立——版本目錄已 commit，符合選版條件）。
     """
     repo = base / repo_name
     repo.mkdir()
     _git("init", "-q", cwd=repo)
+    scripts_dir = repo / "AISDLC_SDD" / "scripts"
+    scripts_dir.mkdir(parents=True)
+    shutil.copy(
+        _AISDLC_SDD_ROOT / "scripts" / "sdd_version.py",
+        scripts_dir / "sdd_version.py",
+    )
     hooks_dir = repo / "AISDLC_SDD" / version_name / ".claude" / "hooks"
     hooks_dir.mkdir(parents=True)
     (hooks_dir / "post_commit_drift.py").write_text(

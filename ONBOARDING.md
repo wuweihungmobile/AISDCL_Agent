@@ -185,24 +185,26 @@ bash scripts/ci-gate.sh               # 本機 CI 閘門（pytest + arch_fitness
 
 ## 8. Nightly 排程層（跨平台現況與後續）
 
-AutoClaude 有一套 nightly 取證流程（7 stage：local_ci_gate / mutation / pg-e2e / perf / drift / obs / sdd-fsm-chaos）。**目前排程自動化僅實作 Windows 版**：
+AutoClaude 有一套 nightly 取證流程（7 stage：local_ci_gate / mutation / pg-e2e / perf / drift / obs / sdd-fsm-chaos）。**排程自動化現況：Windows 深度版完整可用；macOS 為 R11 新增的薄聚合器（刻意非對等移植，見下）**：
 
 - **Windows（既有，可用）**：`AutoClaude/tools/run_local_nightly.ps1` 由 Windows 工作排程器 `schtasks` 每日 02:00 觸發（任務名 `AutoClaude_Nightly`）。設定校正見 `AutoClaude/tools/fix_nightly_catchup.ps1`。R9 三項強化：①前置新增 local_ci_gate 全套 stage（對齊 `windows-nightly-full` 深度回歸，push 空窗期也有每日全套訊號）；②pg-e2e stage 加跑 PG contract 測試（`tests/contract/test_pg_state_repository_contract.py`，CI 硬閘的本地對等）；③終端 exit code 帶訊號（任一 stage 失敗→exit 1；SKIP/WARN 不計）——schtasks「上次結果」從此可反映 stage 健康，不再恆 0x0。R10 五項強化：④新增 **sdd-fsm-chaos stage**（鏡射 `aisdlc-sdd-fsm-chaos-nightly.yml` 兩步：pytest `-m chaos`＋100 輪 chaos_runner sweep，CI 停擺期間 Rule 9.9.4 的本地補償，實測 <1 分鐘）；⑤pgvector recall pytest rc 以 `[ref]` 捕捉（先前被 collector 覆蓋，單日真紅假綠）；⑥mutmut log 驗證失敗改 rc=1（先前誤設 WARN 級 rc=2，「防假 pass 守門自身觸發」反而綠出場）；⑦Docker 連續 ≥3 次不可用升級為 exit 1（`.docker_skip_streak` 累計；單次 SKIP 仍屬合理）；⑧END 進度 mutation 軌改印 unique-sha 計數（ADR-SD09-011 語意，原始列數會虛報）。全部強化由 `tests/tools/test_run_local_nightly_static.py` 24 個靜態錨點鎖住。
-- **macOS（尚未自動化，本輪擱置）**：`schtasks` 在 macOS 無對應；等價機制是 `launchd`（推薦）或 `cron`。`run_local_nightly.ps1` 尚未移植成 `.sh`；過渡期可先用 `tools/macos_smoke_local.sh`（見下方 R9 補償控制）。
+- **macOS（R11 已落地薄聚合器）**：`schtasks` 在 macOS 無對應；等價機制是 `launchd`（推薦）或 `cron`。R11 依 Architect D1 拍板落地 `AutoClaude/tools/run_local_nightly.sh`——**薄聚合器**，只串接四支既有腳本、不重寫任何檢查（四 stage：`tools/macos_smoke_local.sh` 強制系統 bash 3.2 ＋ 根層 `tools/run_root_unittests.py` ＋ AutoClaude `tools/local_ci_gate.sh` ＋ SDD `scripts/ci-gate.sh`；任一 stage 失敗記名續跑、結尾彙總、exit 1——對齊 `.ps1` R9 ③ exit 語意），下方 launchd/cron 範本即可直接啟用。**如實揭露：這不是 `.ps1` 的對等移植，而是刻意的薄聚合**——mac 側只要「平台相容性＋回歸」每日訊號（R11 教訓：smoke 全綠 ≠ unittest 全綠，故兩者都必跑），深度 stage（mutation Docker/pg-e2e/perf/obs）維持 Windows 主開發機承載；七軌其餘兩軌去向——drift＝nightly 取證帳本紀律由 Windows 主開發機承載（drift_log_history 例行 commit 即其產物）、sdd-fsm-chaos＝非平台敏感之純 Python 邏輯回歸（Windows 本地 nightly 每日承接＋CI chaos workflow 覆蓋），mac 薄聚合器均不重複。
 
-> ⚠️ **本機排程自動化仍未完成**：macOS nightly **本機**自動化（`run_local_nightly.sh` + launchd/cron，比照 Windows `schtasks` 的個人開發機定期背景任務）為**後續工作**，本輪未實作。整個 ops 排程家族（`g0_gate_check.ps1`、`reschedule_g0_gatecheck.ps1`、`fix_nightly_catchup.ps1`、`run_local_nightly.ps1`）皆屬 Windows-only、無 `.sh` 對等，均涵蓋於本節「排程自動化僅 Windows」的明示缺口。
+> ⚠️ **ops 排程家族其餘三支仍 Windows-only**：`run_local_nightly` 已有 `.sh`（R11 薄聚合器，見上；launchd/cron 排程檔本身仍需開發者依下方範本手動載入一次）；但 ops 排程家族其餘三支（`g0_gate_check.ps1`、`reschedule_g0_gatecheck.ps1`、`fix_nightly_catchup.ps1`）仍屬 Windows-only、無 `.sh` 對等，為本節的明示缺口。
 >
 > ✅ **不同軌的另一層已補上：雲端機械化 CI 安全網（`.github/workflows/macos-compat-ci.yml`）**：上面講的是「開發者個人機器上的排程自動化」缺口；與此無關的是——在本輪之前，macOS 端**完全沒有任何機械化 CI 驗證**（全部 workflow 的 `runs-on` 只有 `ubuntu-latest`／`windows-latest`，macOS 側長期僅靠人工對照與文件宣稱）。Mac/Windows 相容性修復輪新增了 `macos-compat-ci.yml`，補上先前完全沒有的 macOS 機器化覆蓋：**`macos-smoke`**（PR/push 閘門，觸及平台敏感路徑才觸發，實際「執行」而非僅語法解析）涵蓋 `bootstrap.sh`／`dev_start.sh`（含 mac 專屬的 `cross_same_flavor` 分支）、`install_git_hooks.sh`／`install-hooks.sh`（含 linked worktree 拒絕情境）、`install_post_commit.sh` 在 **git worktree** 下的寫入情境、根層 `tools/git-hooks/` 三支 dispatcher 在 macOS **系統內建 bash 3.2**（非 Homebrew 新版）下的直接執行、`AISDLC_SDD/scripts/ci-gate.sh`（凍結基線 v0.01 + LATEST 雙軌）；**`macos-nightly-full`**（`schedule`/`workflow_dispatch`）另跑兩子專案完整測試套件在 `macos-latest` 上的深度回歸。因此「開發迴圈（測試／lint／ci-gate／整合閘門）在 macOS 已對等」現在**有機器驗證佐證**，不再只是文件宣稱——但仍有限制須如實揭露：① `macos-nightly-full` 為 `continue-on-error: true` 非阻斷 job，失敗不擋 PR、僅供事後觀察；② GitHub-hosted `macos-latest` runner 與開發者個人 Mac 的實際硬體／OS 版本仍可能有落差；③ 此 CI 與本節開頭的「本機排程自動化」（launchd/cron）屬不同層次缺口，未被本次新增的 CI 覆蓋，該缺口依然存在。
 >
-> ✅ **R9 補償控制（DEF-101-081 CI 帳單停擺期間）**：上段 CI 安全網停擺期間，macOS 專屬回歸（bash 3.2 語法、`.sh` 安裝腳本 worktree 防護等）在任何機器上都不會自動跑——R9 新增 `tools/macos_smoke_local.sh`（本地聚合驗證：`bash -n` 全量＋dispatcher 直呼煙霧＋兩支安裝腳本往返/worktree 拒絕＋LATEST `install_post_commit.sh` worktree 與移除後路徑斷言＋NTFS/parity 兩支守門，與 `macos-compat-ci.yml` 對應 step 同步維護），Mac 開發者可手動（或 launchd 排程）執行補位。已於 Windows Git Bash 實跑全綠（PASS=10 FAIL=0）；**真 macOS `/bin/bash` 3.2 實跑待 Mac 機器或 CI 恢復後補驗**（腳本已通過 bash 3.2／BSD 工具相容性靜態自查：無 declare -A/mapfile/`${var,,}`、無 sed -i/readlink -f/grep -P/BRE 交替）。
+> ✅ **R9 補償控制（DEF-101-081 CI 帳單停擺期間）**：上段 CI 安全網停擺期間，macOS 專屬回歸（bash 3.2 語法、`.sh` 安裝腳本 worktree 防護等）在任何機器上都不會自動跑——R9 新增 `tools/macos_smoke_local.sh`（本地聚合驗證：`bash -n` 全量＋dispatcher 直呼煙霧＋兩支安裝腳本往返/worktree 拒絕＋LATEST `install_post_commit.sh` worktree 與移除後路徑斷言＋NTFS/parity 兩支守門，與 `macos-compat-ci.yml` 對應 step 同步維護），Mac 開發者可手動（或 launchd 排程）執行補位。已於 Windows Git Bash 實跑全綠（PASS=10 FAIL=0）；**真 macOS 實跑已於 R11 補驗關閉**：2026-07-17 真 Mac（macOS 26.5.2 arm64、系統 `/bin/bash` 3.2.57）多次獨立實跑全綠（PASS=10 FAIL=0，R11 修改 `install_post_commit.sh` 後的端到端重驗證據實體＝隔離 clone 疊上變更後 scratch commit 的 smoke [4] 全綠＋v0.30 worktree 回歸鎖 3 tests——本 repo 工作樹 smoke [4] 依設計自 HEAD clone、未 commit 變更不在其驗證範圍；DEF-101-113 殘留正式關閉。腳本另通過 bash 3.2／BSD 工具相容性靜態自查：無 declare -A/mapfile/`${var,,}`、無 sed -i/readlink -f/grep -P/BRE 交替）。
+>
+> 🔴 **R11 補驗紀律（DEF-101-149 教訓）**：任一平台聲稱「全綠」，證據**必須含該平台的 `tools/run_root_unittests.py` 輸出，不得只附 smoke 彙總**——R11 真 Mac 首跑即實證兩者可分歧（smoke PASS=10 綠的同時，根層 unittest 有 2 個 Windows 假路徑案例在 POSIX 假紅）；smoke 驗「平台載具」、unittest 驗「工具鏈邏輯」，缺一不可。
 >
 > ✅ **R10 Windows 側對等補償（DEF-101-139）**：對稱地，`windows-compat-ci.yml` 的「執行級」`.ps1` 驗證（install 兩腳本 worktree 拒絕、LATEST `install_post_commit.ps1` worktree 實跑＋移除後路徑斷言、非 ASCII 路徑安裝）同樣只活在停擺的雲端、SDD 回歸測試明文只鎖 `.sh` 版——R10 新增 `tools/windows_smoke_local.ps1`（本地聚合驗證，PASS=8：active `.ps1` Parser 全量＋fake repo＋`install_git_hooks.ps1`／`install-hooks.ps1` 往返與 worktree 拒絕＋LATEST `install_post_commit.ps1` worktree 實跑＋中文路徑（`煙霧測試`）安裝抽驗；PowerShell 5.1 實跑全綠；LATEST 解析走 `AISDLC_SDD/scripts/sdd_version.py` 單一真相源）。兩平台 smoke 自此對稱：macOS＝`macos_smoke_local.sh`、Windows＝`windows_smoke_local.ps1`。
 
-macOS 若要手動或半自動跑 nightly，可先參考以下 `launchd` 範本（待 `.sh` 版就緒後啟用）：
+macOS 若要手動或半自動跑 nightly，可用以下 `launchd` 範本（`run_local_nightly.sh` 已就緒，可直接啟用）：
 
 ```xml
 <?xml version="1.0" encoding="UTF-8"?>
-<!-- ~/Library/LaunchAgents/com.autoclaude.nightly.plist（範本；待 run_local_nightly.sh 就緒）-->
+<!-- ~/Library/LaunchAgents/com.autoclaude.nightly.plist（範本；run_local_nightly.sh 已就緒）-->
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>

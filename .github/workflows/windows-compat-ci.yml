@@ -14,6 +14,9 @@
 #   - windows-nightly-full：schedule + workflow_dispatch，continue-on-error 非阻斷，
 #     跑兩子專案完整測試套件在 windows-latest 上的深度回歸網，避免 Windows runner
 #     偶發性拖垮每次 PR。
+#   - 可本地化 step 的本地聚合鏡射：tools/windows_smoke_local.ps1（DEF-101-081 補償
+#     控制），與本 workflow 對應 step 同步維護（改這邊記得改那邊；由
+#     tools/tests/test_smoke_ci_sync.py 機械鎖本注記與 PASS 釘選）。
 #
 # R1 四方複審修正（2026-07-13，Architect/SA/SD/QA 首輪 REJECT 後）：
 #   - SA 發現「Windows 開發者從零開始」路徑最前段（tools/bootstrap.ps1、
@@ -145,6 +148,12 @@ on:
       - ".claude/**"
       - "AISDLC_SDD/AISDLC_SDD_v*/tools/**"
       - "AISDLC_SDD/AISDLC_SDD_v*/.claude/**"
+      # R11：tools/tests/test_smoke_ci_sync.py 互鎖兩平台 smoke 釘選值、ONBOARDING §8
+      # PASS 數字與雙 workflow 同步注記——其消費檔改動時本 workflow 須重跑該鎖
+      #（DEF-101-042 同構；.ps1 已由 **/*.ps1 覆蓋，此處補 .sh 側與文件）
+      - "ONBOARDING.md"
+      - "tools/macos_smoke_local.sh"
+      - ".github/workflows/macos-compat-ci.yml"
       - ".github/workflows/windows-compat-ci.yml"
   pull_request:
     paths:
@@ -179,9 +188,17 @@ on:
       - ".claude/**"
       - "AISDLC_SDD/AISDLC_SDD_v*/tools/**"
       - "AISDLC_SDD/AISDLC_SDD_v*/.claude/**"
+      # R11：tools/tests/test_smoke_ci_sync.py 互鎖兩平台 smoke 釘選值、ONBOARDING §8
+      # PASS 數字與雙 workflow 同步注記——其消費檔改動時本 workflow 須重跑該鎖
+      #（DEF-101-042 同構；.ps1 已由 **/*.ps1 覆蓋，此處補 .sh 側與文件）
+      - "ONBOARDING.md"
+      - "tools/macos_smoke_local.sh"
+      - ".github/workflows/macos-compat-ci.yml"
       - ".github/workflows/windows-compat-ci.yml"
   schedule:
-    - cron: "0 6 * * *"   # windows-nightly-full：每日 06:00 UTC 深度回歸（非阻斷）
+    # R11 額度治理：每日 → 每週一（CI 額度緊張、Windows 側已有 schtasks 本地 nightly
+    # run_local_nightly.ps1 承接每日訊號）；需要時可 workflow_dispatch 手動觸發。
+    - cron: "0 6 * * 1"   # windows-nightly-full：每週一 06:00 UTC 深度回歸（非阻斷）
   workflow_dispatch:
     inputs:
       simulate_nightly_failure:
@@ -529,12 +546,14 @@ jobs:
           $content = Get-Content -Raw $hookTarget
           if ($content -notmatch "post_commit_drift\.py") { throw "worktree 移除後 hook 內容缺 drift hook 路徑引用" }
           if ($content -notmatch "closure_evidence_verify\.py") { throw "worktree 移除後 hook 內容缺 closure hook 路徑引用" }
-          if ($content -match 'python\s+"([^"]*post_commit_drift\.py)"') {
+          # R11：hook 內容改為 `"$PY" "<路徑>"`（python fallback，DEF-101 家族），擷取
+          # 改抓「引號包住的 .py 路徑」本身、不再錨定 `python ` 前綴（新舊格式皆匹配）。
+          if ($content -match '"([^"]*post_commit_drift\.py)"') {
             $driftPath = $Matches[1]
           } else {
             throw "無法從 hook 內容擷取 drift hook 路徑"
           }
-          if ($content -match 'python\s+"([^"]*closure_evidence_verify\.py)"') {
+          if ($content -match '"([^"]*closure_evidence_verify\.py)"') {
             $closurePath = $Matches[1]
           } else {
             throw "無法從 hook 內容擷取 closure hook 路徑"

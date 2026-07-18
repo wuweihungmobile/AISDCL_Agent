@@ -5,7 +5,9 @@
 #   2. improving_21 closure evidence（DEF-20-001）
 # DEF-43-008（improving_44）：原寫死 drift→v0.01 / closure→v0.12，致 (a) 修了 drift 的
 # repo-root bug 也裝不到（仍裝舊 v0.01 buggy 版）、(b) 與 skills SSOT「指向 LATEST」原則不一致。
-# 改為動態解析 LATEST（對齊 ci-gate.sh 的 sort -V | tail -1），永不再 stale、修復立即生效。
+# 改為動態解析 LATEST，永不再 stale、修復立即生效；R11 起 LATEST 解析委派
+# scripts/sdd_version.py 單一真相源（git tracked + 錨定 fullmatch + 數值排序，
+# DEF-101-133——早期 `sort -V | tail -1` 版有未錨定 glob 與掃磁碟兩病）。
 set -e
 # 用 --git-common-dir（非硬編 "$REPO_ROOT/.git"）：worktree checkout 下 <worktree>/.git
 # 是指向主 repo 的純文字檔而非目錄，".git/hooks/..." 會找不到路徑；--git-common-dir
@@ -23,10 +25,18 @@ HOOK_TARGET="$GIT_COMMON_DIR/hooks/post-commit"
 MAIN_CHECKOUT_ROOT="$(dirname "$GIT_COMMON_DIR")"
 # DEF-43-002：monorepo 收斂後 git rev-parse --show-toplevel = monorepo 根，
 # 各版位於 AISDLC_SDD/ 子目錄下，故路徑須含 AISDLC_SDD/ 中間層（原缺此層致裝不起來）。
-# 三 glob 同 ci-gate.sh：v0.0*（~v0.09）+ v0.[1-9]*（v0.10+）+ v[1-9]*（v1.x+，`|| true` 吞無匹配）。
-LATEST="$(cd "$MAIN_CHECKOUT_ROOT/AISDLC_SDD" && { ls -d AISDLC_SDD_v0.0* AISDLC_SDD_v0.[1-9]* AISDLC_SDD_v[1-9]* 2>/dev/null || true; } | sort -V | tail -1)"
+# R11（DEF-101-133）：LATEST 解析委派 scripts/sdd_version.py SSOT——原
+# `ls -d ... | sort -V | tail -1` 尾端未錨定（.bak／檔總管複製品會汙染選版）
+# 且掃磁碟非 git tracked，而 ci-gate/smoke/CI 全在乾淨 clone 跑、永遠測不到（假綠）。
+# 現代 macOS 乾淨 PATH 只有 python3 沒有 python，故先解析直譯器、缺席 fail-loud。
+PY="$(command -v python || command -v python3 || true)"
+if [ -z "$PY" ]; then
+  echo "ERROR: 找不到 python/python3 — 請啟用 venv 或安裝 python3 後重試" >&2
+  exit 1
+fi
+LATEST="$("$PY" "$MAIN_CHECKOUT_ROOT/AISDLC_SDD/scripts/sdd_version.py" --sdd-root "$MAIN_CHECKOUT_ROOT/AISDLC_SDD")" || LATEST=""
 if [ -z "$LATEST" ]; then
-  echo "ERROR: 找不到任何 AISDLC_SDD_v* 版本目錄於 $MAIN_CHECKOUT_ROOT/AISDLC_SDD" >&2
+  echo "ERROR: LATEST 解析失敗——找不到任何 AISDLC_SDD_v* 版本目錄於 $MAIN_CHECKOUT_ROOT/AISDLC_SDD，或 sdd_version.py 執行失敗（詳見上方 stderr）" >&2
   exit 1
 fi
 HOOK_SRC_DRIFT="$MAIN_CHECKOUT_ROOT/AISDLC_SDD/$LATEST/.claude/hooks/post_commit_drift.py"
@@ -41,11 +51,19 @@ if [ ! -f "$HOOK_SRC_CLOSURE" ]; then
   exit 1
 fi
 
+# R11（DEF-101 家族）：hook 內容補 python fallback——現代 macOS 乾淨 PATH 只有
+# python3 沒有 python，且 git hook 執行環境不繼承 venv，缺 fallback 時兩個 advisory
+# hook 會被 `|| true` 吞掉、永久靜默失效零告警。
 cat > "$HOOK_TARGET" <<HOOK
 #!/usr/bin/env bash
-# PostCommit advisory hooks — never block commit
-python "$HOOK_SRC_DRIFT" "\$@" || true
-python "$HOOK_SRC_CLOSURE" "\$@" || true
+# PostCommit advisory hooks - never block commit
+PY="\$(command -v python || command -v python3 || true)"
+if [ -z "\$PY" ]; then
+  echo "[post-commit advisory] 找不到 python/python3 — drift/closure advisory 本次跳過（不阻擋 commit）" >&2
+  exit 0
+fi
+"\$PY" "$HOOK_SRC_DRIFT" "\$@" || true
+"\$PY" "$HOOK_SRC_CLOSURE" "\$@" || true
 HOOK
 chmod +x "$HOOK_TARGET"
 echo "Installed PostCommit advisory hooks at: $HOOK_TARGET"

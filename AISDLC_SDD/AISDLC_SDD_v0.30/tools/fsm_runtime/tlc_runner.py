@@ -109,6 +109,13 @@ def run_tlc(depth: int = 50, *, jar: Path | None = None,
 
 
 def main(argv: list[str]) -> int:
+    # Windows 主控台預設 cp950/cp1252 無法輸出中文/— — 強制 UTF-8（R11，對齊
+    # scripts/gitignore_coverage_lint.py 慣例，防 CLI 輸出反以 UnicodeEncodeError 炸掉）。
+    for stream in (sys.stdout, sys.stderr):
+        try:
+            stream.reconfigure(encoding="utf-8", errors="replace")  # type: ignore[attr-defined]
+        except Exception:  # pragma: no cover - 舊版 / 非 TextIO
+            pass
     ap = argparse.ArgumentParser(description="跨平台 TLC 執行器（SDD_FSM / META_FSM 窮舉驗證）")
     ap.add_argument("--depth", type=int, default=50)
     ap.add_argument("--download", action="store_true", help="缺 jar 時先下載 tla2tools.jar")

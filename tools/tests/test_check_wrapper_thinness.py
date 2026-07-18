@@ -18,6 +18,8 @@ from unittest import mock
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import check_wrapper_thinness as m  # noqa: E402
 
+from _platform_helpers import ABS_FAKE_REPO  # noqa: E402  # 平台中立假絕對路徑（R11）
+
 
 class TestCheckWrapperThinness(unittest.TestCase):
     def test_real_wrappers_pass_today(self) -> None:
@@ -27,7 +29,9 @@ class TestCheckWrapperThinness(unittest.TestCase):
         self.assertEqual(problems, [])
 
     def test_missing_wrapper_reported(self) -> None:
-        with mock.patch.object(m, "ROOT", Path("Z:/nonexistent-repo-root")):
+        # 平台中立的「不存在絕對路徑」（原寫死 Z: 磁碟機路徑在 POSIX 是相對路徑，
+        # 碰巧綠——見 test_platform_neutral_paths.py WHY）。
+        with mock.patch.object(m, "ROOT", ABS_FAKE_REPO.parent / "nonexistent-repo-root"):
             problems = m.check_wrapper_thinness()
         self.assertEqual(len(problems), 2)  # 兩份 wrapper 皆回報不存在
         self.assertTrue(all("檔案不存在" in p for p in problems))

@@ -83,6 +83,16 @@ else
   else
     "$BASE_PY" -m venv "$VENV_DIR"
   fi
+  # fail-fast（對照 tools/bootstrap.ps1 同款守門）：建立指令 rc=0 不保證真的產出
+  # 可用直譯器（2026-07-13 runner 真實事故：建立指令秒退回報成功但未產出）。
+  # set -e 只擋非零 rc，這裡補「假成功」驗證，與上方既有 .venv 沿用分支對稱。
+  if [ ! -x "$VENV_DIR/bin/python" ]; then
+    if [ "$USE_UV" -eq 1 ]; then USED_INTERP="uv --python $PY_TARGET"; else USED_INTERP="$BASE_PY"; fi
+    echo "" >&2
+    echo "❌ .venv 建立指令回報成功（rc=0）但 bin/python 不存在（直譯器：$USED_INTERP）。" >&2
+    echo "   請刪除後重試：rm -rf .venv && bash tools/bootstrap.sh" >&2
+    exit 1
+  fi
 fi
 
 VENV_PY="$VENV_DIR/bin/python"

@@ -19,6 +19,14 @@ import unittest
 from pathlib import Path
 
 
+# 平台中立的假「絕對」repo 根（R11 真 Mac 首跑實證，抽自 test_check_hooks_liveness.py）：
+# 受測函式常依賴「repo_root / 絕對路徑 → 直接取代」的 pathlib join 語意，但 "D:/repo"
+# 只在 Windows 是絕對路徑；POSIX 上 join 會變成 D:/repo/D:/repo/…、resolve 後恆不相等
+# → Windows 全綠、Mac/Linux 假紅。凡測試需要「絕對路徑」語意者一律用本常數，
+# 不可寫死磁碟機代號（tools/tests/test_platform_neutral_paths.py 機械掃描守護）。
+ABS_FAKE_REPO = Path("D:/repo") if sys.platform == "win32" else Path("/repo")
+
+
 def copy_functional_interpreter(dest: Path) -> None:
     """把目前真正在跑的直譯器複製到 dest，供測試偽裝成「健康的既有 venv」。
 

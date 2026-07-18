@@ -346,8 +346,10 @@ try {
           $content2 = [System.IO.File]::ReadAllText($target, [System.Text.Encoding]::UTF8)
           $driftPath = $null
           $closurePath = $null
-          if ($content2 -match 'python\s+"([^"]*post_commit_drift\.py)"') { $driftPath = $Matches[1] }
-          if ($content2 -match 'python\s+"([^"]*closure_evidence_verify\.py)"') { $closurePath = $Matches[1] }
+          # R11：hook 內容改為 `"$PY" "<路徑>"`（python fallback，DEF-101 家族），擷取
+          # 改抓「引號包住的 .py 路徑」本身、不再錨定 `python ` 前綴（新舊格式皆匹配）。
+          if ($content2 -match '"([^"]*post_commit_drift\.py)"') { $driftPath = $Matches[1] }
+          if ($content2 -match '"([^"]*closure_evidence_verify\.py)"') { $closurePath = $Matches[1] }
           if ([string]::IsNullOrEmpty($driftPath) -or [string]::IsNullOrEmpty($closurePath)) {
             Fail-Item '[5] worktree 移除後無法從 hook 擷取 drift/closure 路徑'
           } elseif (-not (Test-Path -LiteralPath $driftPath) -or -not (Test-Path -LiteralPath $closurePath)) {

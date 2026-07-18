@@ -18,10 +18,20 @@ $HookTarget = Join-Path $GitCommonDir "hooks\post-commit"
 $MainCheckoutRoot = Split-Path -Parent $GitCommonDir
 # DEF-43-002：monorepo 收斂後 git rev-parse --show-toplevel = monorepo 根，
 # 各版位於 AISDLC_SDD\ 子目錄下，故路徑須含 AISDLC_SDD\ 中間層（原缺此層致裝不起來）。
-$Latest = (Get-ChildItem -Path (Join-Path $MainCheckoutRoot "AISDLC_SDD") -Directory -Filter "AISDLC_SDD_v*" |
-  Sort-Object { [version]($_.Name -replace '^AISDLC_SDD_v','') } | Select-Object -Last 1).Name
-if (-not $Latest) {
-  Write-Error "找不到任何 AISDLC_SDD_v* 版本目錄於 $MainCheckoutRoot\AISDLC_SDD"
+# R11（DEF-101-133）：LATEST 解析委派 scripts/sdd_version.py SSOT——原
+# Get-ChildItem + [version] 排序尾端未錨定（.bak／檔總管複製品會汙染選版）且掃磁碟
+# 非 git tracked。Windows 環境有 python 才會裝 hook（本腳本本就依賴 python），
+# 解析失敗即 fail-loud。
+$SddRoot = Join-Path $MainCheckoutRoot "AISDLC_SDD"
+# R11 P4：python 缺席前置檢查（與 .sh 的 command -v 守門對稱）——否則 `& python`
+# 直接丟 CommandNotFoundException，訊息不指路。
+if (-not (Get-Command python -ErrorAction SilentlyContinue)) {
+  Write-Error "找不到 python — 請啟用 venv 或安裝 Python 後重試"
+  exit 1
+}
+$Latest = (& python (Join-Path $SddRoot "scripts\sdd_version.py") --sdd-root $SddRoot | Out-String).Trim()
+if ($LASTEXITCODE -ne 0 -or -not $Latest) {
+  Write-Error "LATEST 解析失敗（sdd_version.py SSOT）：找不到任何 AISDLC_SDD_v* 版本目錄於 $SddRoot"
   exit 1
 }
 $HookSrcDrift = Join-Path $MainCheckoutRoot "AISDLC_SDD\$Latest\.claude\hooks\post_commit_drift.py"
@@ -41,13 +51,25 @@ if (-not (Test-Path $HookSrcClosure)) {
 # （|| true 吞錯不會有任何提示）。`-Encoding utf8` 在 PowerShell 5.1 會加 UTF-8 BOM，混進
 # `#!/usr/bin/env bash` shebang 前會讓 bash 無法辨識直譯器；改用 .NET UTF8Encoding($false)
 # 寫入不帶 BOM 的 UTF-8，且統一正規化為 LF（避免 .ps1 檔案本身 CRLF 混進 bash 腳本內容）。
+# R11（DEF-101 家族）：hook 內容補 python fallback——現代 macOS 乾淨 PATH 只有
+# python3 沒有 python，且 git hook 執行環境不繼承 venv，缺 fallback 時兩個 advisory
+# hook 會被 `|| true` 吞掉、永久靜默失效零告警（與 .sh 產生器寫出同款 hook 內容）。
 $HookContent = @"
 #!/usr/bin/env bash
 # PostCommit advisory hooks - never block commit
-python "$HookSrcDrift" "`$@" || true
-python "$HookSrcClosure" "`$@" || true
+PY="`$(command -v python || command -v python3 || true)"
+if [ -z "`$PY" ]; then
+  echo "[post-commit advisory] 找不到 python/python3 — drift/closure advisory 本次跳過（不阻擋 commit）" >&2
+  exit 0
+fi
+"`$PY" "$HookSrcDrift" "`$@" || true
+"`$PY" "$HookSrcClosure" "`$@" || true
 "@
 $HookContent = $HookContent -replace "`r`n", "`n"
+# R11 四方複審（SD-1/QA-7/SA-1）：here-string 產物天生無檔尾換行，而 .sh 的 heredoc
+# 有——差這 1 byte 使「兩產生器輸出逐位元一致」宣稱為假。補單一 \n（EndsWith 守門，
+# 絕不會補成兩個），使 pwsh/bash 雙產生器 cmp BYTE_IDENTICAL 為真。
+if (-not $HookContent.EndsWith("`n")) { $HookContent += "`n" }
 [System.IO.File]::WriteAllText($HookTarget, $HookContent, (New-Object System.Text.UTF8Encoding($false)))
 
 Write-Output "Installed PostCommit advisory hooks at: $HookTarget"

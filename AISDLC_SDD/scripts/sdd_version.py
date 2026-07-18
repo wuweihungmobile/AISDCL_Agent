@@ -114,6 +114,14 @@ def latest_version_name(sdd_root: Path, *, warn=None) -> str | None:
 
 
 def main(argv: list[str] | None = None) -> int:
+    # Windows 主控台預設 cp950/cp1252 無法輸出 emoji / 中文 — 強制 UTF-8（對齊
+    # gitignore_coverage_lint / rfc_lifecycle_lint；否則錯誤分支的 ❌ 會反以
+    # UnicodeEncodeError 掩蓋真錯誤）。
+    for stream in (sys.stdout, sys.stderr):
+        try:
+            stream.reconfigure(encoding="utf-8", errors="replace")  # type: ignore[attr-defined]
+        except Exception:  # pragma: no cover - 舊版 / 非 TextIO
+            pass
     parser = argparse.ArgumentParser(description="AISDLC_SDD LATEST 版本解析 SSOT")
     parser.add_argument(
         "--sdd-root",

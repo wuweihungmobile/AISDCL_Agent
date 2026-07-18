@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 # AISDLC 專案初始化腳本 (Mac/Linux)
 # 版本: v3.3-SDD
 # 最後更新: 2026-04-15
@@ -148,7 +148,8 @@ download_aisdlc() {
         echo -e "${GREEN}✅ 偵測到本地 AISDLC v${version}，跳過網路下載${NC}"
     else
         # === 遠端模式：從 GitHub 下載 ===
-        local temp_dir=$(mktemp -d)
+        # mktemp 帶模板（R11）：repo 對 BSD mktemp 是否需模板存在兩套假設（實測現代 macOS 皆可，統一帶模板為最保守跨平台寫法）
+        local temp_dir=$(mktemp -d "${TMPDIR:-/tmp}/aisdlc_init.XXXXXX")
         source_dir="${temp_dir}/repo"
 
         # 選擇 URL

@@ -173,6 +173,13 @@ def persist_from_result(result: "DebateResult", *, verdict: Optional[str] = None
 
 
 def main(argv: List[str]) -> int:
+    # Windows 主控台預設 cp950/cp1252 無法輸出中文 — 強制 UTF-8（R11，對齊
+    # scripts/gitignore_coverage_lint.py 慣例，防 CLI 輸出反以 UnicodeEncodeError 炸掉）。
+    for stream in (sys.stdout, sys.stderr):
+        try:
+            stream.reconfigure(encoding="utf-8", errors="replace")  # type: ignore[attr-defined]
+        except Exception:  # pragma: no cover - 舊版 / 非 TextIO
+            pass
     if len(argv) < 2:
         print('用法：python -m tools.fsm_runtime.spec_debate "<AC 文字>"')
         return 2

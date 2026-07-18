@@ -1,5 +1,12 @@
 #!/usr/bin/env python3
-"""雙平台腳本對等機械守護 — .sh / .ps1 四對腳本的 gate/step 清單一致性 + pytest 釘選一致性。
+"""雙平台腳本對等機械守護 — .sh / .ps1 四對腳本的 gate/step 清單一致性 + pytest 釘選一致性
++ 掃描目錄內全部 .sh/.ps1（成對與單邊）的納管完整性（R11 架構改善 C2）。
+
+納管語意（R11 起）：tools/、AutoClaude/tools/、AISDLC_SDD/scripts/ 三目錄（非遞迴）下的
+每支 .sh/.ps1 必屬四類之一，否則 fail-loud 列出未納管檔名：
+  (1) 成對納管（_MARKER_PAIRS / gate-call 抽取）；(2) 薄殼 hash 釘選（_THINNESS_ENROLLED）；
+  (3) 成對豁免（_EXEMPT_PAIRS，附決策依據）；(4) 單邊豁免（_SINGLE_SIDED_EXEMPT，附決策
+  依據）。各清單另有 stale 反向檢查（防清單腐化），詳見 _check_pair_enrollment 區塊註解。
 
 🔴 本工具的邊界（務必先讀）：本工具只機械比對「標籤序列」（數量、順序、字面文字），
 **不比對、也無能力比對**各 step 背後的實作內容是否語意對等。**本工具通過（exit 0）
@@ -199,11 +206,15 @@ def _check_pytest_pin() -> bool:
     return ok
 
 
-# ── 成對腳本註冊完整性（enrollment 發現鎖）— R10 拍板案(a)，DEF-101-134 ────────
+# ── 成對/單邊腳本註冊完整性（enrollment 發現鎖）— R10 拍板案(a)，DEF-101-134；
+#    R11 架構改善 C2 擴充至單邊 ─────────────────────────────────────────────────
 # 過去「新增一對同名 .sh/.ps1 而不掛任何守門」零機械訊號（marker_pairs 與 thinness
 # 釘選對象皆硬編碼清單，磁碟上長出新對子沒人發現）。此檢查掃描宣告目錄（非遞迴）
-# 下的同名 .sh/.ps1 對，斷言每一對必屬 {parity 標籤比對, thinness hash 釘選,
-# 明文豁免（附決策依據）} 之一；並反向檢查註冊清單無 stale 條目（防清單腐化）。
+# 下的**所有** .sh/.ps1，斷言每支必屬四類之一：{成對 parity 標籤比對, 薄殼 thinness
+# hash 釘選, 成對明文豁免（附決策依據）, 單邊明文豁免（附決策依據）}，否則
+# fail-loud 列出未納管檔名（R11 前單邊腳本零訊號）；並反向檢查各註冊清單無 stale
+# 條目（防清單腐化）——單邊豁免的 stale 含兩種：檔案已消失、或對邊已出現（不再
+# 是單邊，須改登記為成對類）。
 _MARKER_PAIRS = [
     ("bootstrap", "tools/bootstrap.sh", "tools/bootstrap.ps1"),
     ("integration_gate", "tools/integration_gate.sh", "tools/integration_gate.ps1"),
@@ -211,6 +222,7 @@ _MARKER_PAIRS = [
 ]
 _PAIR_SCAN_DIRS = ("tools", "AutoClaude/tools", "AISDLC_SDD/scripts")
 _THINNESS_ENROLLED = {"tools/dev_start"}  # tools/check_wrapper_thinness.py hash 釘選
+_GATECALL_ENROLLED = {"AutoClaude/tools/local_ci_gate"}  # gate-call 抽取比對（非 [n/m] 標籤）
 _EXEMPT_PAIRS = {
     "AutoClaude/tools/install_git_hooks": (
         "DEF-101-088 closed-by-decision：判定邏輯已下沉 tools/git_hooks_install_common.py "
@@ -220,32 +232,69 @@ _EXEMPT_PAIRS = {
     "AISDLC_SDD/scripts/ci-gate": (
         "ci-gate.ps1 為薄委派殼（Find-GitBash → bash ci-gate.sh 單一真相源），非第二實作"
     ),
+    "AutoClaude/tools/run_local_nightly": (
+        ".ps1=Windows 深度 7-stage nightly、.sh=mac 薄聚合器串接既有腳本，"
+        "語意刻意不同、不做標籤對等比對；R11 Architect D1 拍板"
+    ),
 }
+# 單邊豁免清單（R11 架構改善 C2）：掃描目錄內只有 .sh 或只有 .ps1 單邊存在的腳本，
+# 必須在此附決策依據登記，否則 fail-loud（過去單邊腳本零訊號）。
+_SINGLE_SIDED_EXEMPT = {
+    # 兩平台 smoke 聚合器互為對等品但 stem 刻意不同（macos_smoke_local ↔
+    # windows_smoke_local），非同名對；行為層由 macos/windows-compat-ci.yml 覆蓋
+    "tools/macos_smoke_local.sh": "對等品=windows_smoke_local.ps1（stem 刻意不同）",
+    "tools/windows_smoke_local.ps1": "對等品=macos_smoke_local.sh（stem 刻意不同）",
+    # Windows schtasks 排程家族三支（ONBOARDING.md §8 明文 Windows-only、無 .sh 對等；
+    # run_local_nightly 於 R11 已成對——mac .sh 薄聚合器落地——移登記至 _EXEMPT_PAIRS）
+    "AutoClaude/tools/fix_nightly_catchup.ps1": "schtasks 排程家族（ONBOARDING §8）",
+    "AutoClaude/tools/g0_gate_check.ps1": "schtasks 排程家族（ONBOARDING §8）",
+    "AutoClaude/tools/reschedule_g0_gatecheck.ps1": "schtasks 排程家族（ONBOARDING §8）",
+    # bash-only 工具（ONBOARDING.md §6 明文無 .ps1 對等，Windows 以 Git Bash 執行）
+    "AutoClaude/tools/run_mutmut_in_docker.sh": "bash-only 工具（ONBOARDING §6）",
+    "AutoClaude/tools/sd06_w3_staging_dryrun.sh": "bash-only 工具（ONBOARDING §6）",
+    "AISDLC_SDD/scripts/act-ci.sh": "bash-only 工具（ONBOARDING §6）",
+    "AISDLC_SDD/scripts/copy_on_evolve.sh": "bash-only 工具（ONBOARDING §6）",
+    "AISDLC_SDD/scripts/pytest_passed_count.sh": "bash-only 工具（ONBOARDING §6）",
+}
+# R11 P4 清單互斥自檢：同一 stem 不得同時掛成對豁免與單邊豁免——對邊落地轉成對
+# 豁免後若殘留單邊條目即「殭屍豁免」，import 即 fail-loud（防清單腐化零訊號）。
+_zombie_exempt = sorted(
+    s for s in _SINGLE_SIDED_EXEMPT if s.rsplit(".", 1)[0] in _EXEMPT_PAIRS
+)
+if _zombie_exempt:
+    raise AssertionError(
+        f"殭屍豁免（stem 已登記 _EXEMPT_PAIRS）：{_zombie_exempt} —— 請自 _SINGLE_SIDED_EXEMPT 移除"
+    )
 
 
 def _enrolled_pairs() -> set[str]:
     parity = {sh_rel[: -len(".sh")] for _label, sh_rel, _ps1 in _MARKER_PAIRS}
-    parity.add("AutoClaude/tools/local_ci_gate")  # gate-call 抽取比對（非 [n/m] 標籤）
-    return parity | _THINNESS_ENROLLED | set(_EXEMPT_PAIRS)
+    return parity | _GATECALL_ENROLLED | _THINNESS_ENROLLED | set(_EXEMPT_PAIRS)
 
 
-def _discover_pairs() -> list[str]:
+def _discover_scripts() -> tuple[list[str], list[str]]:
+    """掃描宣告目錄（非遞迴）→（同名成對 stem 清單, 單邊腳本相對路徑清單）。"""
     pairs: list[str] = []
+    singles: list[str] = []
     for rel_dir in _PAIR_SCAN_DIRS:
         d = _REPO_ROOT / rel_dir
         if not d.is_dir():
             continue
-        for sh in sorted(d.glob("*.sh")):
-            if (d / f"{sh.stem}.ps1").is_file():
-                pairs.append(f"{rel_dir}/{sh.stem}")
-    return pairs
+        sh_stems = {p.stem for p in d.glob("*.sh")}
+        ps1_stems = {p.stem for p in d.glob("*.ps1")}
+        pairs.extend(f"{rel_dir}/{stem}" for stem in sorted(sh_stems & ps1_stems))
+        singles.extend(f"{rel_dir}/{stem}.sh" for stem in sorted(sh_stems - ps1_stems))
+        singles.extend(f"{rel_dir}/{stem}.ps1" for stem in sorted(ps1_stems - sh_stems))
+    return pairs, singles
 
 
 def _check_pair_enrollment() -> bool:
     known = _enrolled_pairs()
-    pairs = _discover_pairs()
+    pairs, singles = _discover_scripts()
     unknown = [p for p in pairs if p not in known]
     stale = sorted(known - set(pairs))
+    unknown_singles = [s for s in singles if s not in _SINGLE_SIDED_EXEMPT]
+    stale_singles = sorted(set(_SINGLE_SIDED_EXEMPT) - set(singles))
     ok = True
     for p in unknown:
         print(
@@ -261,8 +310,29 @@ def _check_pair_enrollment() -> bool:
             file=sys.stderr,
         )
         ok = False
+    for s in unknown_singles:
+        print(
+            f"❌ 未納管的單邊腳本：{s} —— 新增單邊 .sh/.ps1 必須附決策依據登記至 "
+            f"_SINGLE_SIDED_EXEMPT（或補上對邊腳本走成對納管）",
+            file=sys.stderr,
+        )
+        ok = False
+    for s in stale_singles:
+        if (_REPO_ROOT / s).is_file():
+            print(
+                f"❌ 單邊豁免 stale：{s} 的對邊腳本已出現（不再是單邊）—— 請自 "
+                f"_SINGLE_SIDED_EXEMPT 移除，並將該對依四類語意重新納管",
+                file=sys.stderr,
+            )
+        else:
+            print(
+                f"❌ 單邊豁免 stale：{s} 已不存在 —— 請自 _SINGLE_SIDED_EXEMPT 移除",
+                file=sys.stderr,
+            )
+        ok = False
     if ok:
-        print(f"✅ 成對腳本註冊完整性：{len(pairs)} 對皆已納管（掃描 {len(_PAIR_SCAN_DIRS)} 目錄）")
+        print(f"✅ 腳本註冊完整性：{len(pairs)} 對 + {len(singles)} 支單邊皆已納管"
+              f"（掃描 {len(_PAIR_SCAN_DIRS)} 目錄）")
     return ok
 
 
@@ -301,7 +371,7 @@ def main() -> int:
         print("\n❌ 雙平台腳本對等檢查未通過 — .sh/.ps1 必須同步修改（見上列 diff）",
               file=sys.stderr)
         return 1
-    print("\n✅ 雙平台腳本對等檢查通過（4 對腳本 + pytest 釘選 + 對子註冊完整性）")
+    print("\n✅ 雙平台腳本對等檢查通過（4 對腳本 + pytest 釘選 + 成對/單邊註冊完整性）")
     return 0
 
 

@@ -7,6 +7,10 @@
 #
 # 跨平台注意：`$VAR` 後緊跟全形字元必須用 `${VAR}`——macOS bash 3.2 UTF-8 locale
 #   會把全形字元首位元組吃進變數名，配 set -u 直接 unbound variable 崩潰。
+# 載具限定：本腳本為 Linux staging DBA 工具（需 psql/pg_dump/alembic），計時採
+#   `date +%s%N`（%N 奈秒為 GNU 擴充；Linux 與現代 macOS BSD date 皆支援〔R11 真 Mac
+#   實測〕，但老舊/嚴格 BSD 會輸出字面 "N" 使算術崩潰）——不支援在非 GNU date 的
+#   老舊 BSD 環境執行，Windows 請走 WSL。
 #
 # 預設行為：dry-run（不實際下 alembic upgrade）— 須加 --execute 才會真正執行
 # 量測產出：tools/sd06_w3_dryrun_output/<timestamp>/
