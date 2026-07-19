@@ -64,12 +64,31 @@ run_stage() {  # $1=編號 $2=名稱 $3...=指令；失敗記名不中斷（逐 
 
 sdd_gate() { (cd "$ROOT/AISDLC_SDD" && bash scripts/ci-gate.sh); }
 
+# 心跳檔（R12 ARCH-R12-2）：launchd/cron 是否真的在跑過去零機械查核（DEF-101-164
+# ARCH-8），CI 停擺（DEF-101-081）期間本地 nightly 是唯一每日兜底層。成功與失敗
+# 路徑皆寫（tools/dev_start.py step_platform 讀 mtime 做 advisory 三態哨兵）。
+# logs/ 已 gitignored（AutoClaude/.gitignore）；寫入失敗絕不改變 nightly exit 語意。
+write_heartbeat() {
+  _hb_dir="${ROOT}/AutoClaude/logs"
+  _hb_file="${_hb_dir}/nightly_mac_latest.log"
+  if mkdir -p "${_hb_dir}" 2>/dev/null; then
+    {
+      printf 'nightly_mac heartbeat（UTC）：%s\n' "$(date -u '+%Y-%m-%dT%H:%M:%SZ')"
+      printf '===== nightly 彙總：PASS=%s FAIL=%s =====\n' "${PASS}" "${FAIL}"
+      if [ "${FAIL}" -gt 0 ]; then printf '失敗 stage：%s\n' "${FAIL_NAMES}"; fi
+    } > "${_hb_file}" 2>/dev/null || echo "⚠️ 心跳檔寫入失敗（不影響 nightly exit 語意）：${_hb_file}" >&2
+  else
+    echo "⚠️ 心跳目錄建立失敗（不影響 nightly exit 語意）：${_hb_dir}" >&2
+  fi
+}
+
 run_stage 1 macos_smoke     /bin/bash "$ROOT/tools/macos_smoke_local.sh"
 run_stage 2 root_unittests  "$PY" "$ROOT/tools/run_root_unittests.py"
 run_stage 3 autoclaude_gate bash "$ROOT/AutoClaude/tools/local_ci_gate.sh"
 run_stage 4 sdd_ci_gate     sdd_gate
 
 printf '\n===== nightly 彙總：PASS=%s FAIL=%s =====\n' "$PASS" "$FAIL"
+write_heartbeat
 if [ "$FAIL" -gt 0 ]; then
   echo "失敗 stage：$FAIL_NAMES" >&2
   exit 1

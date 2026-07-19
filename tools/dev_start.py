@@ -1349,6 +1349,39 @@ def step_hooks(now: str, is_repo: bool) -> None:
         SUMMARY["hooks"] = "安裝失敗（見警告）"
 
 
+# nightly 心跳過期門檻（天）：>8 天 = 兩個週末都沒跑過，排程幾乎必已停擺。
+_HEARTBEAT_MAX_AGE_DAYS = 8
+
+
+def _check_nightly_heartbeat(now: str) -> str:
+    """nightly 心跳哨兵（R12 ARCH-R12-2，純 advisory）——回傳 summary 片段。
+
+    WHY：launchd/schtasks 排程是否真的在跑過去零機械查核（DEF-101-164 ARCH-8），
+    而 CI 停擺（DEF-101-081）期間本地 nightly 是唯一每日兜底層。nightly 腳本結尾
+    寫心跳檔（windows→.ps1 既有 nightly_latest.log；mac/posix→run_local_nightly.sh
+    R12 起寫 nightly_mac_latest.log），此處只做純 mtime 三態比對：
+      缺席   → 提示行＋summary（不入 WARNINGS——排程未啟用是可接受狀態，但要可見）
+      >8 天  → _warn（advisory，不阻擋、不改 exit code）
+      新鮮   → 一行 OK
+    任何 OSError（外接碟抖動等）都不得讓 dev_start 失敗。"""
+    name = "nightly_latest.log" if _flavor(now) == "windows" else "nightly_mac_latest.log"
+    hb = ROOT / "AutoClaude" / "logs" / name
+    try:
+        mtime = hb.stat().st_mtime
+    except OSError:  # 缺席或不可讀 → 提示（不入 WARNINGS）
+        print(f"    nightly 心跳未偵測（AutoClaude/logs/{name} 不存在）— 排程可能未啟用，"
+              f"設定見 ONBOARDING §8；CI 停擺期間本地 nightly 為唯一每日兜底")
+        return "nightly 心跳未偵測（排程未啟用？見 ONBOARDING §8）"
+    age_days = (time.time() - mtime) / 86400.0
+    if age_days > _HEARTBEAT_MAX_AGE_DAYS:
+        _warn(f"nightly 心跳過期（AutoClaude/logs/{name} 距今 {age_days:.1f} 天 > "
+              f"{_HEARTBEAT_MAX_AGE_DAYS} 天）— 排程可能已停擺，請檢查 launchd/schtasks"
+              f"（ONBOARDING §8）")
+        return f"nightly 心跳過期（{age_days:.1f} 天，見警告）"
+    print(f"    ✅ nightly 心跳新鮮（AutoClaude/logs/{name}，距今 {age_days:.1f} 天）")
+    return "nightly 心跳新鮮"
+
+
 def step_platform(now: str, is_repo: bool) -> None:
     _hr(6, "平台專屬健檢")
     notes = []
@@ -1363,7 +1396,8 @@ def step_platform(now: str, is_repo: bool) -> None:
         print(f"    {n}")
     if not notes:
         print("    無需調整")
-    SUMMARY["platform"] = "；".join(notes) if notes else "無需調整"
+    hb_note = _check_nightly_heartbeat(now)
+    SUMMARY["platform"] = "；".join((notes if notes else ["無需調整"]) + [hb_note])
 
 
 def step_finalize(now: str, state: dict, is_repo: bool) -> None:

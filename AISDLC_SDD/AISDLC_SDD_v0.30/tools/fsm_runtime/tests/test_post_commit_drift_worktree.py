@@ -87,7 +87,8 @@ pytestmark = pytest.mark.skipif(
 
 def _run(cmd: list[str], cwd: Path, timeout: int = 30) -> subprocess.CompletedProcess:
     return subprocess.run(
-        cmd, cwd=str(cwd), capture_output=True, text=True, timeout=timeout
+        cmd, cwd=str(cwd), capture_output=True, text=True, timeout=timeout,
+        encoding="utf-8", errors="replace",
     )
 
 

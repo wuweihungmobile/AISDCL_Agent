@@ -21,8 +21,9 @@
 #                      （2026-07-13 補洞）
 #   5. NTFS 檔名閘   — tools/check_ntfs_paths.py 掃 git ls-files 全量（本機 pre-commit
 #                      A3 閘的 CI 對等；--no-verify / GitHub web / 未裝 hooks 可繞過本機閘）
-#   6. 腳本對等閘    — tools/check_script_parity.py：四對 .sh/.ps1 的 gate/step 標籤
-#                      清單一致（R9 起抽取兼容單/雙引號＋各對數量下限釘選）+ pytest
+#   6. 腳本對等閘    — tools/check_script_parity.py：成對 .sh/.ps1 的 step 標籤
+#                      清單一致（R9 起抽取兼容單/雙引號＋各對數量下限釘選；R12 起含
+#                      LATEST tools 遞迴納管與 run_tlc FSM 軌鎖）+ pytest
 #                      釘選三處（pyproject.toml / v0.01 與 LATEST requirements-ci.txt）同版
 #   7. py_compile    — 根層 tools/ 下所有 *.py（遞迴涵蓋子目錄；dev_start / check_* 等
 #                      基建工具）語法檢查；這些 .py 過去僅語法檢查、零單元測試覆蓋，
@@ -40,7 +41,7 @@
 #                      與 `docs/06_quality/AutoSDD_Defect_Log.md` 該 ID 最新狀態是否矛盾
 #                      （DEF-101-066 這類「改帳本忘同步姊妹文件」曾真實發生一次，
 #                      本道步驟即該問題類別的治本機械守護，DEF-101-068(e) 落地）
-#   10. dev_start wrapper 薄殼守門 — tools/check_wrapper_thinness.py：獨立具名 step
+#   10. wrapper 薄殼守門 — tools/check_wrapper_thinness.py（dev_start＋local_ci_gate 對子）：獨立具名 step
 #                      執行（先前唯一執行路徑是 tools/tests/test_check_wrapper_thinness.py
 #                      裡一個不帶 mock 的測試方法，靠第 8 道 unittest 間接跑到，不像同批
 #                      其他 check_*.py 有具名 step 可一眼看出有沒有被 CI 涵蓋；未來若該
@@ -180,7 +181,7 @@ jobs:
       - name: NTFS 敵意檔名守門（pre-commit A3 閘的 CI 對等，掃全量 tracked 路徑）
         run: python3 tools/check_ntfs_paths.py
 
-      - name: 雙平台腳本對等 + pytest 釘選一致（四對 .sh/.ps1 標籤清單）
+      - name: 雙平台腳本對等 + pytest 釘選一致（成對 .sh/.ps1 標籤清單＋LATEST 納管）
         run: python3 tools/check_script_parity.py
 
       - name: unittest（tools/tests/：dev_start.py 純邏輯函式 + 已修復迴歸點；含數量下限釘選）
@@ -189,5 +190,5 @@ jobs:
       - name: 缺陷帳本跨文件狀態一致（ONBOARDING.md 對 DEF-* 狀態宣稱 vs 帳本實況）
         run: python3 tools/check_defect_log_crossref.py
 
-      - name: dev_start wrapper 薄殼守門（tools/check_wrapper_thinness.py）
+      - name: wrapper 薄殼守門（tools/check_wrapper_thinness.py：dev_start＋local_ci_gate）
         run: python3 tools/check_wrapper_thinness.py

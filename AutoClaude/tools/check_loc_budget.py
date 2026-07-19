@@ -29,9 +29,9 @@ import fnmatch
 import json
 import sys
 import tomllib
+from collections.abc import Iterable
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Iterable
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 BASELINE_FILE = PROJECT_ROOT / ".loc_baseline"
@@ -320,6 +320,13 @@ def check(update_baseline: bool = False, as_json: bool = False) -> int:
 
 
 def main() -> int:
+    # DEF-82-001/DEF-101-070 家族慣例：報表含中文/→ 等非 ASCII，Windows cp950 console
+    # 直接 print 會 UnicodeEncodeError 中斷；stdout + stderr 皆強制 utf-8。
+    for _stream in (sys.stdout, sys.stderr):
+        try:
+            _stream.reconfigure(encoding="utf-8")  # type: ignore[union-attr]
+        except (AttributeError, OSError):
+            pass
     update = "--update" in sys.argv
     as_json = "--json" in sys.argv
     return check(update_baseline=update, as_json=as_json)

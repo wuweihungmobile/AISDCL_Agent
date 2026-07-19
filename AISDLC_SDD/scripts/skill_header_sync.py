@@ -18,7 +18,9 @@ Copy-on-Evolve（複製 LATEST → 新版）時手改 → 系統性漏改：v0.1
 SSOT 決策
 ---------
 skill 版本戳的唯一真相源 = **其所在版本目錄名**。本 lint 只校 ci-gate LATEST
-（`sort -V | tail -1`，複用 rfc_lifecycle_lint，對齊既有「最新演化版＝LATEST」原則）；
+（複用 rfc_lifecycle_lint 磁碟掃描，對齊 `scripts/sdd_version.py` SSOT 的 LATEST 語意；
+沿用磁碟掃描之 WHY——copy_on_evolve.sh 建版後新版尚未 git add 即呼叫本腳本 --write——
+見該檔豁免註記）；
 凍結基線（v0.01）的戳記本就對齊自身目錄（實證 v0.01 footer 即 v0.01），不需也不會被
 本 lint 重寫。Copy-on-Evolve 產生新 LATEST 後，舊版戳記仍 stale → `--check` 立即在
 CI 紅，強制 `--write` 同步 → 「人去記得改」從流程消失。

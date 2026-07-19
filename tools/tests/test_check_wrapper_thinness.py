@@ -28,12 +28,27 @@ class TestCheckWrapperThinness(unittest.TestCase):
         problems = m.check_wrapper_thinness()
         self.assertEqual(problems, [])
 
+    def test_pin_table_key_set_floor(self) -> None:
+        """鍵集合釘選（R12 QA 一審 QA-1）：pin 表被清空/刪鍵時 `len(problems)==
+        len(_PINNED_SHA256)` 類動態斷言會退化為 0==0 全綠——此鎖釘死已知四鍵
+        必須存在（新增薄殼對時擴充本集合）。"""
+        self.assertGreaterEqual(
+            set(m._PINNED_SHA256),
+            {
+                "tools/dev_start.sh",
+                "tools/dev_start.ps1",
+                "AutoClaude/tools/local_ci_gate.sh",
+                "AutoClaude/tools/local_ci_gate.ps1",
+            },
+        )
+
     def test_missing_wrapper_reported(self) -> None:
         # 平台中立的「不存在絕對路徑」（原寫死 Z: 磁碟機路徑在 POSIX 是相對路徑，
         # 碰巧綠——見 test_platform_neutral_paths.py WHY）。
         with mock.patch.object(m, "ROOT", ABS_FAKE_REPO.parent / "nonexistent-repo-root"):
             problems = m.check_wrapper_thinness()
-        self.assertEqual(len(problems), 2)  # 兩份 wrapper 皆回報不存在
+        # 全部釘選 wrapper 皆回報不存在（R12 起釘選對象不只 dev_start，數量隨表走）
+        self.assertEqual(len(problems), len(m._PINNED_SHA256))
         self.assertTrue(all("檔案不存在" in p for p in problems))
 
     def _make_fake_root(self, tmp_dir: Path, sh_text: str, ps1_text: str) -> Path:
@@ -243,7 +258,13 @@ class TestCheckWrapperThinness(unittest.TestCase):
                 sh_text=real_sh + "\n# 註解調整不應觸發 hash\n",
                 ps1_text=real_ps1 + "\n# 同上\n\n",
             )
-            with mock.patch.object(m, "ROOT", fake_root):
+            # fixture 只鋪 dev_start 對——釘選表縮至受測子集（R12 起表內另有
+            # local_ci_gate 對，缺檔會汙染本測試的「零問題」斷言）
+            dev_start_pins = {
+                k: v for k, v in m._PINNED_SHA256.items() if k.startswith("tools/dev_start")
+            }
+            with mock.patch.object(m, "ROOT", fake_root), \
+                 mock.patch.object(m, "_PINNED_SHA256", dev_start_pins):
                 problems = m.check_wrapper_thinness()
         self.assertEqual(problems, [])
 

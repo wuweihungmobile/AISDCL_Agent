@@ -28,7 +28,8 @@ DEF-AGTREV-003 只修了 BA→SA/SD 一處；本 lint 機械強制全圖對稱�
   * 註解掉的 YAML（``#`` 開頭）：由 ``yaml.safe_load`` 自然忽略。
 
 掃磁碟最新演化版（``discover_frozen_versions`` + ``latest_version``，複用
-``rfc_lifecycle_lint``，對齊 ci-gate.sh ``sort -V | tail -1``）的 ``agent/core/*.yaml``。
+``rfc_lifecycle_lint``，對齊 ``scripts/sdd_version.py`` SSOT 的 LATEST 語意；沿用磁碟
+掃描之 WHY 見該檔豁免註記）的 ``agent/core/*.yaml``。
 
 用法：python scripts/collaboration_symmetry_lint.py <REPO_ROOT>
 Exit：0 全對稱；1 任一不對稱（內部↔內部邊）。

@@ -12,7 +12,9 @@
   * ci-gate ``--check`` 重生並比對，stale 即 CI 紅 → 「人去記得改多處」這件事從流程消失。
 
 版本探測複用 ``rfc_lifecycle_lint``（``discover_frozen_versions`` + ``latest_version``，
-對齊 ci-gate.sh ``sort -V | tail -1``），是版本無關 shared infra，不隨 Copy-on-Evolve。
+錨定 fullmatch 磁碟掃描，對齊 ``scripts/sdd_version.py`` SSOT 的 LATEST 語意——committed
+狀態下兩者一致；沿用磁碟掃描係刻意設計（copy_on_evolve.sh 建版後新版尚未 git add 即呼叫
+本腳本 ``--write``），WHY 詳見該檔豁免註記），是版本無關 shared infra，不隨 Copy-on-Evolve。
 
 用法：
   python scripts/framework_status_snapshot.py --write   # 重生 SSOT 檔（改框架資產後跑）
@@ -131,7 +133,8 @@ def render(repo_root: str) -> str:
         "> CLAUDE.md 等文件一律 **version-agnostic** 並指向本檔，不重複數字——版本累積亦不再多檔漂移。",
         "",
         f"- **凍結基線（ci-gate FROZEN_BASELINE，恆測防回歸）**：`{baseline}`",
-        f"- **最新演化版（ci-gate LATEST＝`sort -V | tail -1` 動態取最高，可修改/承載演化）**：`{latest}`",
+        f"- **最新演化版（ci-gate LATEST，語意由 `scripts/sdd_version.py` SSOT 定案："
+        f"git tracked＋錨定 fullmatch＋數值排序取最高；可修改/承載演化）**：`{latest}`",
         "- 各版目錄結構同構；框架改動走 Copy-on-Evolve（複製 LATEST → 新版後於新版修改，不原地改凍結版）。",
         "",
         f"| 指標 | 凍結基線 `{baseline}` | 最新演化版 `{latest}` |",

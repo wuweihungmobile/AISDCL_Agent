@@ -27,14 +27,14 @@ import json
 import sys
 import tomllib
 from pathlib import Path
-from typing import Optional
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 
 WARN_THRESHOLD = 0.10  # 10% — 觸發 ::warning::
 BLOCK_THRESHOLD = 0.15  # 15% — 觸發 ::error:: + block
 
-# SD_09 W3 Round 52 — sub-ms jitter 絕對下限（解 token_halt_roundtrip baseline samples=7 deadlock）。
+# SD_09 W3 Round 52 — sub-ms jitter 絕對下限
+# （解 token_halt_roundtrip baseline samples=7 deadlock）。
 # 亞毫秒場景（如 token_halt_roundtrip ~0.5ms）相對門檻 15% 僅 ~0.07ms 絕對窗，遠小於自然
 # 量測 jitter（~0.3ms）→ current 一跳高即觸 WARN 且 baseline 永遠卡 samples=7 無法 re-lock。
 # 修法：|current - baseline| < 此值視為量測噪音（green）；真實 regression（abs >> floor，
@@ -142,7 +142,7 @@ def check(
     results_path: Path,
     baseline_path: Path,
     *,
-    comment_out: Optional[Path] = None,
+    comment_out: Path | None = None,
 ) -> int:
     baseline_data = load_baseline(baseline_path)
     results = load_results(results_path)
@@ -150,7 +150,8 @@ def check(
     if not baseline_data:
         print(f"::error::baseline 不存在或為空：{baseline_path}", flush=True)
         print(
-            "Hint: 首次跑請執行 `python tools/perf_baseline_lock.py --init` 或手動寫入 .perf_baseline.toml"
+            "Hint: 首次跑請執行 `python tools/perf_baseline_lock.py --init` "
+            "或手動寫入 .perf_baseline.toml"
         )
         return 1
 
@@ -198,7 +199,8 @@ def check(
             #   long-term：等 baseline_lock 累積 7 次 samples=20 後自動切回嚴格 BLOCK。
             if undersampled and level == "block":
                 print(
-                    f"::notice::scenario={scenario} BLOCK→WARN downgrade due to undersampled baseline "
+                    f"::notice::scenario={scenario} BLOCK→WARN downgrade "
+                    f"due to undersampled baseline "
                     f"(samples={baseline_samples} <{MIN_BASELINE_SAMPLES})"
                 )
                 level = "warn"
@@ -232,7 +234,8 @@ def check(
         comment_out.write_text(build_pr_comment(rows), encoding="utf-8")
         print(f"\nPR comment markdown 已寫入：{comment_out}")
 
-    print(f"\nTotal: green={len(rows) - warn_count - block_count} warn={warn_count} block={block_count}")
+    green = len(rows) - warn_count - block_count
+    print(f"\nTotal: green={green} warn={warn_count} block={block_count}")
     # SD_09 W3 Round 2 audit P0-6 修復（三態）：
     #   0=全綠 / 2=有 WARN（含 undersampled BLOCK→WARN 退化）/ 1=有 BLOCK
     # 讓 ps1 summary 區分「綠」與「觀察期等待」— 不再用單 rc 0 蓋過真實 WARN 信號
@@ -244,6 +247,13 @@ def check(
 
 
 def main() -> int:
+    # DEF-82-001/DEF-101-070 家族慣例：報表含中文/非 ASCII 符號，Windows cp950 console
+    # 直接 print 會 UnicodeEncodeError 中斷；stdout + stderr 皆強制 utf-8。
+    for _stream in (sys.stdout, sys.stderr):
+        try:
+            _stream.reconfigure(encoding="utf-8")  # type: ignore[union-attr]
+        except (AttributeError, OSError):
+            pass
     parser = argparse.ArgumentParser(description="Perf regression checker (ADR-SD08-003)")
     parser.add_argument("results", type=Path, help="perf_results.json")
     parser.add_argument(

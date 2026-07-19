@@ -110,7 +110,8 @@ def test_scans_only_latest_semantic(tmp_path):
     """只掃最新版（語意版本 v0.10 > v0.9）：舊版齊備、最新版缺 → 仍回報最新版缺。
 
     為何重要：cruft 風險只在最新（實際被 ci-gate 跑而生成產物）的演化版；對齊
-    ci-gate sort -V | tail -1，且舊版 block 齊備不得掩蓋最新版缺漏。
+    scripts/sdd_version.py SSOT 的 LATEST 數值排序語意（本 lint 為磁碟掃描面），
+    且舊版 block 齊備不得掩蓋最新版缺漏。
     """
     repo = _mk_repo(
         tmp_path,

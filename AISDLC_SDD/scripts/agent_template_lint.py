@@ -48,7 +48,7 @@ def detect_latest(repo_root):
              glob.glob(os.path.join(repo_root, "AISDLC_SDD_v0.[1-9]*")):
         if os.path.isdir(p):
             cands.append(os.path.basename(p))
-    # sort -V 等價：以 (major, minor) 數值排序
+    # 數值排序取最高（排序語意對齊 scripts/sdd_version.py SSOT；本 lint 為磁碟掃描面）
     def key(name):
         m = re.search(r'v0\.(\d+)$', name)
         return int(m.group(1)) if m else -1

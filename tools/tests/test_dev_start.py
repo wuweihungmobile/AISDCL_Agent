@@ -2133,8 +2133,12 @@ class TestStepPlatformLongpaths(DevStartTestCase):
                             check=True)
             with mock.patch.object(dev_start, "ROOT", repo):
                 dev_start.step_platform("windows", is_repo=True)
-            self.assertEqual(dev_start.SUMMARY.get("platform"), "無需調整",
-                              "已是 true 時不應重複觸發設定")
+            # R12 起 summary 尾端附 nightly 心跳註記——本測試意圖只鎖「已是 true
+            # 時不重複觸發設定」，改斷言前綴（若誤觸發會以「已設」開頭）
+            self.assertTrue(
+                dev_start.SUMMARY.get("platform", "").startswith("無需調整"),
+                "已是 true 時不應重複觸發設定",
+            )
 
 
 class TestMainIntegrationGate(DevStartTestCase):
@@ -2295,6 +2299,98 @@ class TestEnsureVenvShapeBothMissingActuallyRemoves(DevStartTestCase):
             self.assertFalse(venv.exists(), "壞損 .venv 應已從磁碟實際移除，而非只回傳狀態字串")
 
 
+class TestNightlyHeartbeat(DevStartTestCase):
+    """R12 ARCH-R12-2：nightly 心跳哨兵三態（缺席／新鮮／過期）。
+
+    WHY：launchd/schtasks 是否真的在跑過去零機械查核（DEF-101-164 ARCH-8），
+    CI 停擺期間本地 nightly 是唯一每日兜底層。三態語意：缺席→提示不入
+    WARNINGS（排程未啟用可接受但須可見）；過期（>8 天）→ _warn advisory；
+    新鮮→OK。路徑一律以 tempfile + pathlib 構造（平台中立，守
+    test_platform_neutral_paths）。"""
+
+    def _run(self, root: Path, now: str = "mac") -> str:
+        with mock.patch.object(dev_start, "ROOT", root), \
+             mock.patch("builtins.print"):
+            return dev_start._check_nightly_heartbeat(now)
+
+    def test_absent_heartbeat_is_hint_not_warning(self):
+        """缺席：記入 summary 片段但不入 WARNINGS（不可誤傷未啟用排程者）。"""
+        with tempfile.TemporaryDirectory() as td:
+            note = self._run(Path(td))
+        self.assertIn("未偵測", note)
+        self.assertIn("ONBOARDING", note)
+        self.assertEqual(dev_start.WARNINGS, [],
+                         "心跳缺席是提示不是警告——不得進 WARNINGS")
+
+    def test_fresh_heartbeat_is_ok(self):
+        """新鮮（剛寫入）：OK、零警告。"""
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            logs = root / "AutoClaude" / "logs"
+            logs.mkdir(parents=True)
+            (logs / "nightly_mac_latest.log").write_text("heartbeat\n", encoding="utf-8")
+            note = self._run(root)
+        self.assertIn("新鮮", note)
+        self.assertEqual(dev_start.WARNINGS, [])
+
+    def test_stale_heartbeat_warns_but_stays_advisory(self):
+        """過期（mtime 9 天前 > 門檻 8 天）：_warn 進 WARNINGS，但不拋例外、
+        不改流程（advisory——step_platform 不因此失敗）。"""
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            logs = root / "AutoClaude" / "logs"
+            logs.mkdir(parents=True)
+            hb = logs / "nightly_mac_latest.log"
+            hb.write_text("heartbeat\n", encoding="utf-8")
+            nine_days_ago = time.time() - 9 * 86400
+            os.utime(hb, (nine_days_ago, nine_days_ago))
+            note = self._run(root)
+        self.assertIn("過期", note)
+        self.assertTrue(any("nightly 心跳過期" in w for w in dev_start.WARNINGS),
+                        f"過期須 _warn，實際 WARNINGS={dev_start.WARNINGS}")
+
+    def test_windows_flavor_reads_ps1_heartbeat_filename(self):
+        """flavor 選檔：windows → nightly_latest.log（.ps1 既有心跳），
+        posix → nightly_mac_latest.log（run_local_nightly.sh R12 起寫入）。"""
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            logs = root / "AutoClaude" / "logs"
+            logs.mkdir(parents=True)
+            (logs / "nightly_latest.log").write_text("heartbeat\n", encoding="utf-8")
+            note_win = self._run(root, now="windows")
+            note_mac = self._run(root, now="mac")
+        self.assertIn("新鮮", note_win)
+        self.assertIn("未偵測", note_mac, "posix 不得誤讀 windows 心跳檔")
+
+    def test_stat_oserror_never_fails_dev_start(self):
+        """任何 OSError（外接碟抖動等）都不得讓 dev_start 失敗——降級為缺席提示。"""
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            with mock.patch.object(dev_start, "ROOT", root), \
+                 mock.patch.object(dev_start.Path, "stat",
+                                   side_effect=OSError("I/O error")), \
+                 mock.patch("builtins.print"):
+                note = dev_start._check_nightly_heartbeat("mac")
+        self.assertIn("未偵測", note)
+        self.assertEqual(dev_start.WARNINGS, [])
+
+    def test_step_platform_summary_includes_heartbeat_note(self):
+        """step_platform 整合：summary『平台健檢』欄必含心跳片段，且七步驟
+        標頭（[6/7] 平台專屬健檢）不變。"""
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            with mock.patch.object(dev_start, "ROOT", root), \
+                 mock.patch("builtins.print") as fake_print:
+                dev_start.step_platform("mac", is_repo=False)
+        printed = " ".join(
+            str(arg) for call in fake_print.call_args_list for arg in call.args
+        )
+        self.assertIn("平台專屬健檢", printed)
+        self.assertIn("nightly 心跳", dev_start.SUMMARY["platform"])
+        self.assertIn("無需調整", dev_start.SUMMARY["platform"],
+                      "既有『無需調整』語意必須保留（心跳為附加片段）")
+
+
 class TestGitTimeoutExpired(DevStartTestCase):
     """SHOULD FIX #6b：_git() 的 TimeoutExpired 例外處理分支零測試覆蓋。
     驗證逾時時回傳 rc=124（不是被誤判成功的 rc=0），避免上游呼叫端誤判
@@ -2308,6 +2404,38 @@ class TestGitTimeoutExpired(DevStartTestCase):
             result = dev_start._git("fetch", "origin")
         self.assertEqual(result.returncode, 124)
         self.assertNotEqual(result.returncode, 0, "逾時不可被誤判為成功")
+
+
+class TestNightlyHeartbeatFilenameContract(unittest.TestCase):
+    """心跳檔名契約寫讀兩端機械繫結（R12 QA 一審 QA-5／SD 一審 SD-4）。
+
+    WHY：`nightly_mac_latest.log` 硬編於 writer（run_local_nightly.sh）與 reader
+    （dev_start.py）兩處字面值——單側改名後 dev_start 永遠報「未偵測」且該態刻意
+    不入 WARNINGS，靜默退化零訊號。本測試以靜態錨點鎖住：兩端檔名一致＋writer
+    呼叫位置在最終彙總之後、exit 判定之前（成功/失敗皆寫的語意錨點）。Windows 側
+    （nightly_latest.log ↔ run_local_nightly.ps1）同構加鎖。"""
+
+    _REPO = Path(dev_start.__file__).resolve().parents[1]
+
+    def test_mac_writer_reader_filename_and_call_position(self) -> None:
+        sh = (self._REPO / "AutoClaude" / "tools" / "run_local_nightly.sh").read_text(
+            encoding="utf-8")
+        src = Path(dev_start.__file__).read_text(encoding="utf-8")
+        self.assertIn("nightly_mac_latest.log", sh, "writer 檔名錨點消失")
+        self.assertIn("nightly_mac_latest.log", src, "reader 檔名錨點消失")
+        pos_summary = sh.rfind("nightly 彙總：PASS=")  # 最終彙總（def 內另有一處故 rfind）
+        pos_call = sh.find("\nwrite_heartbeat\n")      # 裸呼叫行（def 行為 `write_heartbeat() {`）
+        pos_exit = sh.find('if [ "$FAIL" -gt 0 ]')
+        self.assertGreater(pos_summary, 0, "最終彙總 printf 錨點消失")
+        self.assertGreater(pos_call, pos_summary, "write_heartbeat 呼叫須在最終彙總之後")
+        self.assertGreater(pos_exit, pos_call, "write_heartbeat 呼叫須在 exit 判定之前（失敗路徑也要寫）")
+
+    def test_windows_reader_filename_matches_ps1_writer(self) -> None:
+        ps1 = (self._REPO / "AutoClaude" / "tools" / "run_local_nightly.ps1").read_text(
+            encoding="utf-8-sig")
+        src = Path(dev_start.__file__).read_text(encoding="utf-8")
+        self.assertIn("nightly_latest.log", ps1, "Windows writer 檔名錨點消失")
+        self.assertIn('"nightly_latest.log"', src, "Windows reader 檔名錨點消失")
 
 
 if __name__ == "__main__":

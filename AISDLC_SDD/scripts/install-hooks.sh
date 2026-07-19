@@ -20,7 +20,10 @@ assert_not_linked_worktree
 
 HOOKS_DIR="$(get_dispatcher_hooks_dir)"
 assert_dispatcher_hooks_present "$HOOKS_DIR"
-chmod +x .githooks/* scripts/*.sh 2>/dev/null || true
+# 只補 hook 檔執行位元（索引本就 755，冪等不弄髒工作樹）；scripts/*.sh 一律以
+# bash 呼叫、索引 644——舊版在此 chmod scripts/*.sh 會在 POSIX（core.filemode=true）
+# 產生 5 檔 mode-only diff 憑空弄髒工作樹，且違反 ONBOARDING §6 執行權限政策（R12）。
+chmod +x .githooks/* 2>/dev/null || true
 
 git config core.hooksPath "$HOOKS_DIR"
 

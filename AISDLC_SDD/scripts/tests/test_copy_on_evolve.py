@@ -345,7 +345,8 @@ def test_auto_appends_gitignore_block_on_evolve_def_59_001(repo: Path):
 def test_auto_regens_framework_status_on_evolve_def_96_001(repo: Path):
     """DEF-96-001 意圖鎖：copy_on_evolve 建出 v0.02 後，必自動重生 FRAMEWORK_STATUS.md 並指向 v0.02 為 LATEST。
 
-    WHY：framework_status_snapshot.py 算「最新演化版（LATEST＝sort -V|tail -1）」版本號/計數生成
+    WHY：framework_status_snapshot.py 算「最新演化版（LATEST＝rfc_lifecycle_lint 磁碟掃描語意，
+    剛建的未 add 新版亦被選中）」版本號/計數生成
     SSOT；新版一建立 LATEST 即變 → 既有 FRAMEWORK_STATUS.md stale → ci-gate 之
     framework_status_snapshot --check 必紅（improving_96 建 v0.29 即實證人工漏跑帶紅、手動 --write
     後才綠）。與 DEF-58-002 戳記、DEF-59-001 .gitignore **同根因家族**「人工後步驟＝必然遺忘」。

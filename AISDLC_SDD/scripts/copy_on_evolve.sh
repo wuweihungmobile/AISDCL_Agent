@@ -81,7 +81,9 @@ echo "✅ Copy-on-Evolve（git archive，純 tracked）: ${FROM} → ${TO}（匯
 #   記得改」從流程消失（對齊 DEF-CLDREV-007 哲學）。set -e ⇒ 同步失敗即 fail-loud 非零中止，
 #   不容假綠。顯式傳 `--repo-root <BASE>`（BASE＝新版 TO 的父目錄＝版本目錄群所在）：production
 #   下 BASE＝AISDLC_SDD/，與兩腳本預設 dirname(dirname(__file__)) 等價；顯式化使隔離測試可指向
-#   tmp 版本基底而不誤觸真實 v0.0X。兩腳本以 `sort -V | tail -1` 取 LATEST（剛建的新版即 LATEST）。
+#   tmp 版本基底而不誤觸真實 v0.0X。兩腳本以 rfc_lifecycle_lint 磁碟掃描取 LATEST（剛建的新版
+#   **尚未 git add 亦被選中**＝LATEST——正因如此不可改用 scripts/sdd_version.py 的 tracked 閘門
+#   語意，否則本 block 自動同步會選到舊版而落空；R12 SH-3 拍板，詳見該檔豁免註記）。
 #   同層 sibling 存在性 guard：隔離 harness（僅複製本腳本、無 siblings）優雅略過並 warn，不破壞
 #   既有 helper 測試；production scripts/ 恆具 siblings 故必跑。
 _SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -128,7 +130,8 @@ else
 fi
 
 # ── DEF-96-001（P2 根因，DEF-58-002／59-001 同家族）：建版後自動重生 FRAMEWORK_STATUS.md SSOT ──
-# WHY：framework_status_snapshot.py 掃磁碟+權威源算「最新演化版（LATEST＝sort -V|tail -1）」的
+# WHY：framework_status_snapshot.py 掃磁碟+權威源算「最新演化版（LATEST，rfc_lifecycle_lint
+#   磁碟掃描語意——剛建的未 add 新版亦被選中；見 scripts/sdd_version.py 豁免註記）」的
 #   版本號與各類資產計數並生成唯一真相源 FRAMEWORK_STATUS.md；**新版一建立 LATEST 即改變** →
 #   既有 FRAMEWORK_STATUS.md「最新演化版」段 stale → ci-gate 的「框架版本/計數 SSOT 新鮮度 lint」
 #   （framework_status_snapshot.py --check）報紅。此前為人工後步驟（improving_96 建 v0.29 即踩到

@@ -10,8 +10,9 @@ framework_status_snapshot.py 只計數各「版本目錄」內的 skills，從�
 
 SSOT 決策
 ---------
-對外曝光 skills 的唯一真相源 = **ci-gate LATEST 版**（`sort -V | tail -1` 動態取最高，
-複用 rfc_lifecycle_lint，對齊既有「最新演化版＝LATEST」原則）。父層副本是 LATEST 的
+對外曝光 skills 的唯一真相源 = **ci-gate LATEST 版**（複用 rfc_lifecycle_lint 磁碟掃描，
+對齊 `scripts/sdd_version.py` SSOT 的 LATEST 語意；沿用磁碟掃描之 WHY——copy_on_evolve.sh
+建版後新版尚未 git add 即呼叫本腳本 --write——見該檔豁免註記）。父層副本是 LATEST 的
 **機械鏡像**，不手動維護（手動維護正是它今天漂移的原因）。
 
 用法

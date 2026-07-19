@@ -25,8 +25,9 @@ read-only 純觀察者（不寫 FSM-STATE、不影響 churn/meta-loop）。
   * 無 ``scenario_usage`` 的 runtime agent（``sdd-*``，runtime-schema）。
   * 統計段未列之 agent：僅受「內部一致」約束，不受 SSOT 約束（無對應權威值）。
 
-掃磁碟最新演化版（``discover_frozen_versions`` + ``latest_version``，對齊 ci-gate.sh
-``sort -V | tail -1``）的 ``agent/core/*.yaml`` + ``agent/specialized/*.yaml``，
+掃磁碟最新演化版（``discover_frozen_versions`` + ``latest_version``，對齊
+``scripts/sdd_version.py`` SSOT 的 LATEST 語意；沿用磁碟掃描之 WHY 見該檔豁免註記）
+的 ``agent/core/*.yaml`` + ``agent/specialized/*.yaml``，
 SSOT 來源為同版 ``scenarios/SCENARIO_AGENT_MAPPING.md``。
 
 用法：python scripts/scenario_frequency_lint.py <REPO_ROOT>

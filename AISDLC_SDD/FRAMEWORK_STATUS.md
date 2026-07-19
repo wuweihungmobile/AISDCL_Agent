@@ -5,7 +5,7 @@
 > CLAUDE.md 等文件一律 **version-agnostic** 並指向本檔，不重複數字——版本累積亦不再多檔漂移。
 
 - **凍結基線（ci-gate FROZEN_BASELINE，恆測防回歸）**：`AISDLC_SDD_v0.01`
-- **最新演化版（ci-gate LATEST＝`sort -V | tail -1` 動態取最高，可修改/承載演化）**：`AISDLC_SDD_v0.30`
+- **最新演化版（ci-gate LATEST，語意由 `scripts/sdd_version.py` SSOT 定案：git tracked＋錨定 fullmatch＋數值排序取最高；可修改/承載演化）**：`AISDLC_SDD_v0.30`
 - 各版目錄結構同構；框架改動走 Copy-on-Evolve（複製 LATEST → 新版後於新版修改，不原地改凍結版）。
 
 | 指標 | 凍結基線 `AISDLC_SDD_v0.01` | 最新演化版 `AISDLC_SDD_v0.30` |

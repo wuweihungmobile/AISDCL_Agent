@@ -26,7 +26,7 @@ from __future__ import annotations
 import argparse
 import json
 import sys
-from datetime import datetime, date
+from datetime import date, datetime
 from pathlib import Path
 from typing import Any
 
@@ -99,6 +99,13 @@ def _connect(pg_dsn: str):
 
 
 def main(argv: list[str] | None = None) -> int:
+    # DEF-82-001/DEF-101-070 家族慣例：訊息含中文/→ 等非 ASCII，Windows cp950 console
+    # 直接 print 會 UnicodeEncodeError 中斷；stdout + stderr 皆強制 utf-8。
+    for _stream in (sys.stdout, sys.stderr):
+        try:
+            _stream.reconfigure(encoding="utf-8")  # type: ignore[union-attr]
+        except (AttributeError, OSError):
+            pass
     parser = argparse.ArgumentParser(
         description="SD_09 ADR-SD09-001 §5 — PG → YAML rollback dump"
     )

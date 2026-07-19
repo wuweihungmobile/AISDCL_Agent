@@ -17,6 +17,7 @@ W5 変更（T-044）：
   python tools/check_frozen_surface_shim.py        # 驗證（CI gate）
 """
 from __future__ import annotations
+
 import ast
 import sys
 from pathlib import Path
@@ -76,6 +77,13 @@ def _check_shim(method: ast.FunctionDef) -> list[str]:
 
 
 def main() -> int:
+    # DEF-82-001/DEF-101-070 家族慣例：報表含中文/• 等非 ASCII，Windows cp950 console
+    # 直接 print 會 UnicodeEncodeError 中斷；stdout + stderr 皆強制 utf-8。
+    for _stream in (sys.stdout, sys.stderr):
+        try:
+            _stream.reconfigure(encoding="utf-8")  # type: ignore[union-attr]
+        except (AttributeError, OSError):
+            pass
     src = RUNNER_PATH.read_text(encoding="utf-8")
     tree = ast.parse(src, filename=str(RUNNER_PATH))
 

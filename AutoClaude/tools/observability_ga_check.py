@@ -40,7 +40,7 @@ KB_METRIC_REQUIRED_KEYS = (
 # - ts < cutoff 的紀錄：缺欄位寬鬆放行（保留歷史；不可 backfill 偽造，紀律 #10）
 # - ts >= cutoff 的紀錄：缺欄位強制拒絕（新 nightly 必須寫入欄位）
 # 取代 W3 Round 2 P1-1「最新 3 筆 strict」滑動窗口設計（語義不明確）。
-EMIT_REAL_REQUIRED_FROM = _dt.datetime(2026, 5, 24, tzinfo=_dt.timezone.utc)
+EMIT_REAL_REQUIRED_FROM = _dt.datetime(2026, 5, 24, tzinfo=_dt.UTC)
 
 
 def _parse_ts(record: dict[str, Any]) -> _dt.datetime | None:
@@ -100,7 +100,10 @@ def _is_green(record: dict[str, Any], *, strict_emit_real: bool = False) -> tupl
     # 已隨 Round 3 改為 cutoff-based；此處同步文字避免 reviewer 誤讀。
     if "observability_emit_real" not in record:
         if strict_emit_real:
-            return False, "observability_emit_real missing (strict mode; ts >= EMIT_REAL_REQUIRED_FROM cutoff requires explicit field)"
+            return False, (
+                "observability_emit_real missing (strict mode; "
+                "ts >= EMIT_REAL_REQUIRED_FROM cutoff requires explicit field)"
+            )
     elif record.get("observability_emit_real") is False:
         return False, "observability_emit_real=False (LocalLogger fallback mock; not real emit)"
 
@@ -168,6 +171,13 @@ def _compute_green_streak(records: list[dict[str, Any]]) -> tuple[int, list[dict
 
 
 def main(argv: list[str] | None = None) -> int:
+    # DEF-82-001/DEF-101-070 家族慣例：報表含中文/非 ASCII 符號，Windows cp950 console
+    # 直接 print 會 UnicodeEncodeError 中斷；stdout + stderr 皆強制 utf-8。
+    for _stream in (sys.stdout, sys.stderr):
+        try:
+            _stream.reconfigure(encoding="utf-8")  # type: ignore[union-attr]
+        except (AttributeError, OSError):
+            pass
     parser = argparse.ArgumentParser(
         description="SD_09 W5 雙條件可觀測性 GA 取證工具"
     )

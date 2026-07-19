@@ -18,14 +18,29 @@ git tracked——未 commit 的手動複製目錄即可汙染閘門選版（閘�
     `git add`；debug 仍可用 `SDD_FW_VERSION` 覆寫單版）；
   - git 不可用／非 repo（tarball 場景）→ fallback 錨定磁碟掃描並印 stderr 警告。
 
-呼叫端（migration 完成清單）：
-  bash  ：scripts/ci-gate.sh、根層 tools/macos_smoke_local.sh
-  pwsh  ：根層 .github/workflows/root-infra-ci.yml、windows-compat-ci.yml
-  python：根層 tools/check_script_parity.py（subprocess 呼叫）
+呼叫端（migration 完成清單；R12 ARCH-R12-8 校齊實況）：
+  bash  ：scripts/ci-gate.sh、根層 tools/macos_smoke_local.sh、
+          根層 .github/workflows/macos-compat-ci.yml、
+          LATEST 版 tools/install_hooks/install_post_commit.sh（隨 Copy-on-Evolve 繼承）
+  pwsh  ：根層 tools/windows_smoke_local.ps1、根層 .github/workflows/root-infra-ci.yml、
+          windows-compat-ci.yml、LATEST 版 tools/install_hooks/install_post_commit.ps1
+  python：根層 tools/check_script_parity.py、tools/tests/test_platform_neutral_paths.py
+          （皆 subprocess 呼叫；後者為 R12 掃描面擴面新增——SA 一審 SA-8 補列）
 
-註：scripts/rfc_lifecycle_lint.py 的 discover_frozen_versions / latest_version 服務
-「既存版本集合」語意（RFC 落地版存在性檢查，磁碟存在即算），非 LATEST 閘門選版，
-維持既有實作不遷移（見該檔 docstring）。
+註（R12 SH-3 拍板）：scripts/rfc_lifecycle_lint.py 的 discover_frozen_versions /
+latest_version（錨定 fullmatch 磁碟掃描、無 tracked 過濾）維持既有實作不遷移，
+豁免涵蓋兩類消費者：
+  (1) rfc_lifecycle_lint 自身——「既存版本集合」語意（RFC 落地版存在性檢查，
+      磁碟存在即算），非 LATEST 閘門選版；
+  (2) 複用其 latest_version 的 ci-gate lint 家族（framework_status_snapshot /
+      skill_header_sync / sync_exposed_skills / scenario_frequency_lint /
+      collaboration_symmetry_lint / gitignore_coverage_lint）——沿用磁碟語意係刻意
+      設計：copy_on_evolve.sh 建版後**新版尚未 git add** 即呼叫其中三支 ``--write``
+      自動同步戳記/鏡像/FRAMEWORK_STATUS（DEF-58-002/59-001/96-001），tracked 語意
+      會選不到剛建的新版使該自動化落空；且其隔離測試以 tmp 非 git 目錄為
+      --repo-root。錨定 fullmatch 與本檔一致（.bak／" - Copy" 不會中選）；殘餘分歧
+      僅「合法名但未 tracked 的目錄」，該情境 --check 面 fail-loud 非假綠，且
+      ci-gate 首步經本檔解析時 stderr 警告亦會揭露。
 
 CLI：python scripts/sdd_version.py [--sdd-root PATH] → stdout 印 LATEST 目錄名；
      找不到任何版本目錄時 stderr 報錯並 exit 1。

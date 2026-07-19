@@ -35,45 +35,24 @@ def _write_tmp(text: str, suffix: str = ".sh") -> Path:
     return p
 
 
-class TestExtractGateCallsQuoteStyles(unittest.TestCase):
-    def test_double_quoted_gate_calls_extracted(self) -> None:
-        """R9 回歸鎖：雙引號 gate 呼叫必須被抽取（舊版只認單引號 → 兩側同步改
-        雙引號時該 gate 靜默退出守護範圍且無 diff 訊號）。"""
-        path = _write_tmp(
-            'run_gate "pytest full suite" cmd_a\n'
-            'run_gate "lint-imports" cmd_b\n'
-        )
-        self.assertEqual(
-            m._extract_gate_calls(path, "run_gate"),
-            ["pytest full suite", "lint-imports"],
-        )
-
-    def test_mixed_single_and_double_quotes_preserve_order(self) -> None:
-        path = _write_tmp(
-            "run_gate 'gate one' cmd_a\n"
-            'run_gate "gate two" cmd_b\n'
-            "run_gate 'gate three' cmd_c\n"
-        )
-        self.assertEqual(
-            m._extract_gate_calls(path, "run_gate"),
-            ["gate one", "gate two", "gate three"],
-        )
+# （歷史：TestExtractGateCallsQuoteStyles 隨 local_ci_gate R12 薄殼化收斂移除——
+#   gate-call 抽取已自 check_script_parity 退場，該對改由 thinness hash 釘選守門。）
 
 
 class TestExtractFloor(unittest.TestCase):
     def test_below_floor_is_red(self) -> None:
         """R9 回歸鎖：任一側抽取數量低於 _MIN_EXTRACT_COUNTS 釘選即紅燈——
         即使雙邊清單完全一致（同步改壞宣告 pattern 的典型形狀）。"""
-        floor = m._MIN_EXTRACT_COUNTS["local_ci_gate"]
-        short = [f"gate {i}" for i in range(floor - 1)]
+        floor = m._MIN_EXTRACT_COUNTS["run_act"]
+        short = [f"step {i}" for i in range(floor - 1)]
         with mock.patch("builtins.print"):
-            self.assertFalse(m._check_extract_floor("local_ci_gate", short, short))
+            self.assertFalse(m._check_extract_floor("run_act", short, short))
 
     def test_at_floor_passes(self) -> None:
-        floor = m._MIN_EXTRACT_COUNTS["local_ci_gate"]
-        items = [f"gate {i}" for i in range(floor)]
+        floor = m._MIN_EXTRACT_COUNTS["run_act"]
+        items = [f"step {i}" for i in range(floor)]
         with mock.patch("builtins.print"):
-            self.assertTrue(m._check_extract_floor("local_ci_gate", items, items))
+            self.assertTrue(m._check_extract_floor("run_act", items, items))
 
     def test_red_message_points_to_pin_update(self) -> None:
         """紅燈訊息必須指路：刻意刪減 step 時要同步更新釘選值（訊息說清楚）。"""
@@ -135,19 +114,27 @@ class TestSingleSidedEnrollment(unittest.TestCase):
 
     @staticmethod
     def _patched(fake_root: Path, single_exempt: dict[str, str]):
-        """把全部註冊清單 mock 成空、只保留受測的單邊豁免——隔離真 repo 清單。"""
+        """把全部註冊清單 mock 成空、只保留受測的單邊豁免——隔離真 repo 清單。
+
+        R12 起 _check_pair_enrollment 內建 LATEST 解析（fail-loud），fixture 假
+        root 無 sdd_version.py 會誤紅——mock _resolve_latest_tools 指向 fixture
+        內的空 LATEST tools 目錄（掃描邊界存在但無腳本，中立於受測情境）。"""
+        latest_tools = fake_root / "_latest_tools"
+        latest_tools.mkdir(parents=True, exist_ok=True)
         return (
             mock.patch.object(m, "_REPO_ROOT", fake_root),
             mock.patch.object(m, "_MARKER_PAIRS", []),
-            mock.patch.object(m, "_GATECALL_ENROLLED", set()),
             mock.patch.object(m, "_THINNESS_ENROLLED", set()),
             mock.patch.object(m, "_EXEMPT_PAIRS", {}),
             mock.patch.object(m, "_SINGLE_SIDED_EXEMPT", single_exempt),
+            mock.patch.object(m, "_TLC_TRACK_ENROLLED", set()),
+            mock.patch.object(m, "_resolve_latest_tools", lambda: latest_tools),
         )
 
     def _run_enrollment(self, fake_root: Path, single_exempt: dict[str, str]):
         patches = self._patched(fake_root, single_exempt)
         with patches[0], patches[1], patches[2], patches[3], patches[4], patches[5], \
+             patches[6], \
              mock.patch("builtins.print") as fake_print:
             ok = m._check_pair_enrollment()
         printed = " ".join(
@@ -200,6 +187,190 @@ class TestSingleSidedEnrollment(unittest.TestCase):
         self.assertFalse(ok)
         self.assertIn("對邊腳本已出現", printed)
         self.assertIn("未註冊的成對腳本", printed)  # 新對子 unknown 的第二訊號
+
+
+class TestLatestToolsEnrollment(unittest.TestCase):
+    """R12 ARCH-R12-3：LATEST 版 tools 遞迴掃描納管完整性。
+
+    WHY：v0.30 tools 下 4 對同名 .sh/.ps1 完全在 _PAIR_SCAN_DIRS 邊界外（其中
+    run_tlc 有 DEF-101-100 實證漂移前科），新增/移除 LATEST 對子過去零機械訊號。
+    """
+
+    def test_latest_rogue_pair_in_subdir_detected(self) -> None:
+        """遞迴掃描：LATEST tools 子目錄深處的未登記對子必紅（非遞迴會漏）。"""
+        fake_root = _TMP_DIR / "latest_rogue"
+        latest_tools = fake_root / "_latest_tools"
+        deep = latest_tools / "sub" / "deep"
+        deep.mkdir(parents=True, exist_ok=True)
+        (deep / "rogue.sh").write_text("#!/bin/sh\n", encoding="utf-8")
+        (deep / "rogue.ps1").write_text("# x\n", encoding="utf-8")
+        with mock.patch.object(m, "_REPO_ROOT", fake_root), \
+             mock.patch.object(m, "_MARKER_PAIRS", []), \
+             mock.patch.object(m, "_THINNESS_ENROLLED", set()), \
+             mock.patch.object(m, "_EXEMPT_PAIRS", {}), \
+             mock.patch.object(m, "_SINGLE_SIDED_EXEMPT", {}), \
+             mock.patch.object(m, "_TLC_TRACK_ENROLLED", set()), \
+             mock.patch("builtins.print") as fake_print:
+            ok = m._check_pair_enrollment(latest_tools)
+        printed = " ".join(
+            str(arg) for call in fake_print.call_args_list for arg in call.args
+        )
+        self.assertFalse(ok)
+        self.assertIn("LATEST/tools/sub/deep/rogue", printed)
+
+    def test_latest_resolution_failure_is_fail_loud_red(self) -> None:
+        """LATEST 解析失敗（SSOT 缺席/執行失敗）→ 紅燈，不得靜默縮小掃描邊界。"""
+        fake_root = _TMP_DIR / "latest_fail"
+        (fake_root / "tools").mkdir(parents=True, exist_ok=True)
+        with mock.patch.object(m, "_REPO_ROOT", fake_root), \
+             mock.patch.object(m, "_resolve_latest_tools", lambda: None), \
+             mock.patch("builtins.print") as fake_print:
+            ok = m._check_pair_enrollment()
+        printed = " ".join(
+            str(arg) for call in fake_print.call_args_list for arg in call.args
+        )
+        self.assertFalse(ok)
+        self.assertIn("LATEST 解析失敗", printed)
+
+    def test_real_tree_latest_pairs_all_enrolled(self) -> None:
+        """真磁碟整合：LATEST 四對＋verify_traceability.sh 單邊皆已納管（綠）。"""
+        latest_tools = m._resolve_latest_tools()
+        self.assertIsNotNone(latest_tools, "真 repo 內 LATEST 解析不得失敗（fail-loud）")
+        pairs, singles = m._discover_scripts(latest_tools)
+        latest_pairs = [p for p in pairs if p.startswith(m._LATEST_PREFIX)]
+        self.assertIn("LATEST/tools/fsm_runtime/formal/run_tlc", latest_pairs)
+        known = m._enrolled_pairs()
+        self.assertEqual([p for p in latest_pairs if p not in known], [],
+                         "LATEST 成對腳本必須全數納管")
+        latest_singles = [s for s in singles if s.startswith(m._LATEST_PREFIX)]
+        for s in latest_singles:
+            self.assertIn(s, m._SINGLE_SIDED_EXEMPT,
+                          f"LATEST 單邊腳本 {s} 未附決策依據登記")
+
+
+class TestRunTlcTrackLock(unittest.TestCase):
+    """R12 ARCH-R12-3：run_tlc FSM 軌錨點集合鎖紅/綠自證（fixture 注入變異）。
+
+    WHY：DEF-101-100——run_tlc.ps1 曾缺整條 FLEET_FSM 軌而 .sh 有，零機械訊號。
+    軌 token（*_FSM*.tla/.cfg）集合比對恰好攔此型漂移。
+    """
+
+    _SH_FULL = (
+        "#!/usr/bin/env bash\n"
+        "# 註解裡的 GHOST_FSM.tla 不得入抽取\n"
+        "java -cp x tlc2.TLC -config SDD_FSM.cfg SDD_FSM.tla\n"
+        "java -cp x tlc2.TLC -config FLEET_FSM.cfg FLEET_FSM.tla\n"
+        "java -cp x tlc2.TLC -config FLEET_FSM_LIVENESS.cfg FLEET_FSM.tla\n"
+    )
+
+    def _make_pair(self, name: str, sh_body: str, ps1_body: str) -> Path:
+        latest_tools = _TMP_DIR / name / "tools"
+        formal = latest_tools / "fsm_runtime" / "formal"
+        formal.mkdir(parents=True, exist_ok=True)
+        (formal / "run_tlc.sh").write_text(sh_body, encoding="utf-8")
+        (formal / "run_tlc.ps1").write_text(ps1_body, encoding="utf-8")
+        return latest_tools
+
+    def test_matching_tracks_green(self) -> None:
+        ps1 = self._SH_FULL.replace("java -cp", "& java -cp")  # 形態不同、token 相同
+        latest_tools = self._make_pair("tlc_green", self._SH_FULL, ps1)
+        with mock.patch("builtins.print"):
+            self.assertTrue(m._check_run_tlc_tracks(latest_tools))
+
+    def test_missing_fleet_track_on_ps1_is_red(self) -> None:
+        """變異自證：.ps1 刪整條 FLEET 軌（DEF-101-100 原型）→ 必紅。"""
+        ps1_lines = [ln for ln in self._SH_FULL.splitlines() if "FLEET" not in ln]
+        latest_tools = self._make_pair(
+            "tlc_red", self._SH_FULL, "\n".join(ps1_lines) + "\n")
+        with mock.patch("builtins.print") as fake_print:
+            ok = m._check_run_tlc_tracks(latest_tools)
+        printed = " ".join(
+            str(arg) for call in fake_print.call_args_list for arg in call.args
+        )
+        self.assertFalse(ok)
+        self.assertIn("FLEET_FSM", printed)
+
+    def test_comment_only_tracks_not_extracted(self) -> None:
+        """註解行的軌字樣不入抽取（GHOST_FSM.tla 只出現在 # 註解）。"""
+        latest_tools = self._make_pair("tlc_comment", self._SH_FULL, self._SH_FULL)
+        tracks = m._extract_tlc_tracks(
+            latest_tools / "fsm_runtime" / "formal" / "run_tlc.sh")
+        self.assertNotIn("GHOST_FSM.tla", tracks)
+        # multiset 語意（SD-2）：FLEET_FSM.tla 兩處引用各自入列 → 6 個 token
+        self.assertEqual(len(tracks), 6, f"軌 multiset 應恰為 6，實得 {tracks}")
+
+    def test_floor_pins_five_tracks(self) -> None:
+        """釘選：兩側同步刪到 4 軌（floor=5 以下）也必紅——防同步改寫假綠。"""
+        four = "\n".join(
+            ln for ln in self._SH_FULL.splitlines() if "LIVENESS" not in ln) + "\n"
+        latest_tools = self._make_pair("tlc_floor", four, four)
+        with mock.patch("builtins.print"):
+            self.assertFalse(m._check_run_tlc_tracks(latest_tools))
+
+    def test_renamed_track_same_count_is_red_via_compare(self) -> None:
+        """兩側皆 ≥floor 但集合不同（單側改名）必紅——_compare 專屬路徑回歸鎖。
+
+        WHY（R12 QA 二審 EXP4 轉正）：其餘紅案例的 token 數同時低於 floor，
+        floor 與 _compare 雙訊號並發；_compare 被突變恆 True 時它們仍紅、
+        改名型漂移卻會漏。本案例兩側各 6 token（等量）僅名字不同——只有
+        _compare 能攔，補上 meta 級防護。"""
+        renamed = self._SH_FULL.replace("SDD_FSM", "SDX_FSM")
+        latest_tools = self._make_pair("tlc_rename", self._SH_FULL, renamed)
+        with mock.patch("builtins.print") as fake_print:
+            self.assertFalse(m._check_run_tlc_tracks(latest_tools))
+        printed = " ".join(
+            str(arg) for call in fake_print.call_args_list for arg in call.args
+        )
+        self.assertIn("SDX_FSM", printed, "diff 須點名改名後的 token")
+
+    def test_missing_script_is_red(self) -> None:
+        """run_tlc 檔案消失 → 紅（指路更新 _TLC_TRACK_ENROLLED）。"""
+        empty = _TMP_DIR / "tlc_missing" / "tools"
+        empty.mkdir(parents=True, exist_ok=True)
+        with mock.patch("builtins.print"):
+            self.assertFalse(m._check_run_tlc_tracks(empty))
+
+    def test_real_tree_run_tlc_green(self) -> None:
+        """真磁碟整合：LATEST run_tlc 兩側軌集合一致（DEF-101-100 已修狀態）。"""
+        latest_tools = m._resolve_latest_tools()
+        self.assertIsNotNone(latest_tools)
+        with mock.patch("builtins.print"):
+            self.assertTrue(m._check_run_tlc_tracks(latest_tools))
+
+
+class TestThinnessCrossLock(unittest.TestCase):
+    """parity↔thinness 鍵集合交叉鎖（R12 QA 一審 QA-1）。
+
+    WHY：兩份獨立字面清單（_THINNESS_ENROLLED vs _PINNED_SHA256）同 commit 雙邊
+    各刪一行即雙工具全綠——交叉鎖使任一邊單獨腐化必紅。"""
+
+    def test_current_tables_consistent_green(self) -> None:
+        with mock.patch("builtins.print"):
+            self.assertTrue(m._check_thinness_cross_lock())
+
+    def test_missing_pin_key_is_red(self) -> None:
+        import check_wrapper_thinness as t
+        pins = {k: v for k, v in t._PINNED_SHA256.items()
+                if k != "AutoClaude/tools/local_ci_gate.ps1"}
+        with mock.patch.object(t, "_PINNED_SHA256", pins), \
+             mock.patch("builtins.print") as fake_print:
+            self.assertFalse(m._check_thinness_cross_lock())
+        printed = " ".join(
+            str(arg) for call in fake_print.call_args_list for arg in call.args
+        )
+        self.assertIn("local_ci_gate.ps1", printed)
+
+    def test_extra_pin_without_enrollment_is_red(self) -> None:
+        import check_wrapper_thinness as t
+        pins = dict(t._PINNED_SHA256)
+        pins["tools/rogue_wrapper.sh"] = "0" * 64
+        with mock.patch.object(t, "_PINNED_SHA256", pins), \
+             mock.patch("builtins.print") as fake_print:
+            self.assertFalse(m._check_thinness_cross_lock())
+        printed = " ".join(
+            str(arg) for call in fake_print.call_args_list for arg in call.args
+        )
+        self.assertIn("rogue_wrapper.sh", printed)
 
 
 if __name__ == "__main__":

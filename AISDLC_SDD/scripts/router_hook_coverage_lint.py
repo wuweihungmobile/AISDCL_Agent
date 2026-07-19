@@ -14,8 +14,9 @@
 （無機械守護＝maintainability 破口）。
 
 機械強制（read-only 純觀察者，不寫 FSM-STATE、不影響 churn/meta-loop）：偵測磁碟**最新演化版**
-（``discover_frozen_versions`` + ``latest_version``，複用 ``rfc_lifecycle_lint``，對齊 ci-gate
-``sort -V | tail -1``）的 ``.claude/settings.json`` 宣告的 CC hook event，斷言其**子集**於
+（``discover_frozen_versions`` + ``latest_version``，複用 ``rfc_lifecycle_lint``，對齊
+``scripts/sdd_version.py`` SSOT 的 LATEST 語意；沿用磁碟掃描之 WHY 見該檔豁免註記）
+的 ``.claude/settings.json`` 宣告的 CC hook event，斷言其**子集**於
 「router ``_HOOK_MAP`` 涵蓋 ∩ 根 settings wire」之 event 集合。任一 event 不可達即**非零硬閘**
 擋下（與 gitignore advisory 不同——不可達治理 hook 是真正的正確性破口，須 fail-loud，Rule 12）。
 

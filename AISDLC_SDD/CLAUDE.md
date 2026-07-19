@@ -4,7 +4,7 @@
 **專案**: AISDLC-SDD（AI 輔助軟體開發生命週期 — 規格先行版）
 **框架版本**: AISDLC-SDD v0.01（ci-gate 凍結基線）｜**最新演化版**: ci-gate LATEST（由 `scripts/sdd_version.py` SSOT 解析：git tracked + 錨定 fullmatch + 數值排序取最高、實際承載框架演化的「可修改版本」；具體版本號見 `FRAMEWORK_STATUS.md`；各版結構同構）
 **基於**: AISDLC v0.09（開發專注版）
-**最後更新**: 2026-06-05（標頭）；版本狀態註記 2026-06-22
+**最後更新**: 2026-07-18（日期快照易漂——權威以本檔 git log 為準）
 **SDD 轉型狀態**: ✅ Phase 01~09 全部完成（Phase 01-06: SDD 核心轉型 2026-04-14；Phase 07-09: 完整性補強 2026-04-16）
 
 > **🔴 版本狀態（2026-06-22 校正，免再漂移）**：`AISDLC_SDD_v0.01/` 是 **ci-gate 凍結基線**（恆測、回歸防護，**不可在原地修改**），最新演化版＝ci-gate LATEST（由 `scripts/sdd_version.py` SSOT 解析——git tracked + 錨定 fullmatch + 數值排序取最高版，具體版本號見 `FRAMEWORK_STATUS.md`，免寫死於本檔再漂移）。**框架改動一律走 Copy-on-Evolve**（複製 LATEST → `v0.0(X+1)/` 後於新版修改，絕不原地改凍結版）。下方 Rule 2 目錄表以 `v0.01` 路徑書寫，因**各版目錄結構同構**故仍為有效的版面參考；實際寫入版本依當輪 Copy-on-Evolve 目標版而定。**各類資產數量與最新版本號一律見唯一真相源 [`FRAMEWORK_STATUS.md`](FRAMEWORK_STATUS.md)**（`scripts/framework_status_snapshot.py` 自磁碟+權威源生成、ci-gate `--check` 機械守新鮮）——本檔不重複數字，版本累積亦不再多檔漂移。
@@ -355,7 +355,7 @@ AISDLC_SDD_v0.01/AISDLC_SDD_INIT.md
 
 ---
 
-## 🟢 SDD CI/CD 規格完整清單（9 個）
+## 🟢 SDD CI/CD 規格完整清單
 
 | 情境 | CI/CD 規格 | 核心閘門 |
 |------|-----------|---------|
@@ -368,6 +368,9 @@ AISDLC_SDD_v0.01/AISDLC_SDD_INIT.md
 | Security | `cicd/SDD_SECURITY_CICD.md` | SCG-5 + STRIDE Validate |
 | Migration | `cicd/SDD_MIGRATION_CICD.md` | MCM Validate + Contract Test Auto-Gen |
 | Integration | `cicd/SDD_INTEGRATION_CICD.md` | Consumer Contract + Chaos Contract |
+| Drift Monitor（漂移觀測層） | `cicd/SDD_DRIFT_MONITOR.md` | drift_score 門檻 → DRIFT_OBSERVATION / SPEC_AUDIT（非阻塞觀測） |
+| Hub Sync（跨專案學習） | `cicd/SDD_HUB_SYNC.md` | PII 掃描 + 雙層驗證 + GPG 簽章；promote 需人工 signoff（HUB_SYNC 非阻塞） |
+| Production Feedback（生產回饋） | `cicd/SDD_PRODUCTION_FEEDBACK.md` | HMAC-SHA256 簽章 + PBS-DRIFT 漂移偵測（PRODUCTION_SIGNAL 非阻塞） |
 
 ---
 

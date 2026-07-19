@@ -22,7 +22,16 @@ logger = logging.getLogger("autoclaude.execution.playbook")
 _SAFE_COND_PATTERN = re.compile(r'^[\w\s\-./=:!"\']+$')
 
 
-def handle_conditional(ctx: "MutationCtx", mutation: "StepMutation", result: "_MutationResult") -> None:
+def handle_conditional(ctx: MutationCtx, mutation: StepMutation, result: _MutationResult) -> None:
+    """依 condition_evaluator 的 exit code 選擇 true/false 分支並遞迴 dispatch。
+
+    跨平台注意（對稱 execution/evaluator.py Evaluator.run 警語）：condition_evaluator
+    以 subprocess.run(shell=True) 執行，實際呼叫的是「作業系統原生殼」——Windows 為
+    cmd.exe，POSIX 為 /bin/sh，而非固定的 bash。因此 condition_evaluator 必須寫成
+    可攜指令（如 `python -c "..."`），避免 POSIX 專屬語法（test -f、grep 等 shell
+    builtin/GNU 工具），否則在 Windows 上會被 cmd.exe 解讀出非預期結果，而非清楚的
+    「找不到指令」失敗。（`&&`/`||` 則已被上方 Gap-046 _SAFE_COND_PATTERN 擋下。）
+    """
     if not mutation.condition_evaluator:
         logger.warning("=== Gap-021 | CONDITIONAL 缺少 condition_evaluator，略過 ===")
         return

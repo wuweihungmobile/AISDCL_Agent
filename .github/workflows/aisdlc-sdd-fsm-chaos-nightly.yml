@@ -15,7 +15,7 @@
 #
 # Schedule rationale:
 #   - Daily at 02:00 UTC keeps chaos runs off the critical PR path while
-#     exercising the full §ACT-029 suite (13 chaos tests + 100-round sweep)
+#     exercising the full §ACT-029 suite (the chaos-marked pytest suite + 100-round sweep)
 #     on a predictable cadence.
 #   - `workflow_dispatch` allows manual re-runs during incident triage.
 #

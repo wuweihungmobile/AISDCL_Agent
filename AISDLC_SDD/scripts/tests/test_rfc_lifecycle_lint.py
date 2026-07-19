@@ -118,7 +118,7 @@ def test_scans_only_latest_version(tmp_path):
 
 
 def test_latest_version_semantic(tmp_path):
-    """語意版本：v0.10 > v0.9（非字典序），對齊 ci-gate sort -V。"""
+    """語意版本：v0.10 > v0.9（非字典序），對齊 scripts/sdd_version.py SSOT 的數值排序語意。"""
     assert lint.latest_version({"AISDLC_SDD_v0.9", "AISDLC_SDD_v0.10"}) == "AISDLC_SDD_v0.10"
     assert lint.latest_version(set()) is None
 

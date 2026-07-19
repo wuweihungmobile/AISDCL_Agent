@@ -66,7 +66,7 @@ def _disk_versions() -> list[str]:
     （含 v0.10+）。否則 helper 漏 v0.10 → 誤算「磁碟最高版=v0.09」，與腳本實測 v0.10 不符。
     """
     dirs = [p.name for p in REPO_ROOT.glob("AISDLC_SDD_v0.*") if p.is_dir()]
-    # 與腳本 `sort -V` 等價：以版本數值排序
+    # 以版本數值排序（對齊 scripts/sdd_version.py SSOT 的排序語意）
     return sorted(dirs, key=lambda n: [int(x) for x in re.findall(r"\d+", n)])
 
 

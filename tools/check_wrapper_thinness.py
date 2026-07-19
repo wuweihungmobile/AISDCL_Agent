@@ -1,11 +1,13 @@
 #!/usr/bin/env python3
-"""dev_start 薄殼 wrapper 退化守門 — 正規化內容 hash 釘選（R10 拍板案(a)，DEF-101-134）。
+"""薄殼 wrapper 退化守門 — 正規化內容 hash 釘選（R10 拍板案(a)，DEF-101-134）。
 
-背景：tools/dev_start.py 是本 repo 目前唯一貫徹「薄殼 + Python 核心」模式的
-範例 —— tools/dev_start.sh / tools/dev_start.ps1 依其自身 docstring 只做
-「選直譯器 → 轉呼叫核心（dev_start.py）→ 視需要啟用 venv」三件事，業務邏輯
-全部收斂在 dev_start.py。本工具守護「已經薄殼化」的 dev_start 對子不再退化
-回去長業務邏輯。
+背景：tools/dev_start.py 是本 repo 首個貫徹「薄殼 + Python 核心」模式的範例
+—— tools/dev_start.sh / tools/dev_start.ps1 依其自身 docstring 只做「選直譯器
+→ 轉呼叫核心（dev_start.py）→ 視需要啟用 venv」三件事，業務邏輯全部收斂在
+dev_start.py。R12（DEF-101-070 ② 收斂案）AutoClaude/tools/local_ci_gate 對子
+亦收斂為同模式（核心＝AutoClaude/tools/local_ci_gate.py，薄殼只做「確認直譯器
+→ 參數映射 → 轉呼叫核心」）。本工具守護「已經薄殼化」的對子不再退化回去長
+業務邏輯。
 
 守門策略演進（R10 拍板案(a)）：
   初版為「業務邏輯樣板關鍵字黑名單」——但列舉惡意是不可判定的軍備競賽，
@@ -34,7 +36,8 @@ import _stdio_utf8  # noqa: E402,F401  # Windows 非 UTF-8 終端 print(✅/❌)
 
 ROOT = Path(__file__).resolve().parent.parent
 
-# 目前 dev_start.sh=78 行、dev_start.ps1=75 行；上限抓 100 行，留自然增長空間。
+# 目前 dev_start.sh=78 行、dev_start.ps1=75 行、local_ci_gate.sh=23 行、
+# local_ci_gate.ps1=39 行；上限抓 100 行，留自然增長空間。
 MAX_LINES = 100
 
 _PS1_BLOCK_COMMENT_RE = re.compile(r"<#.*?#>", re.DOTALL)
@@ -48,6 +51,13 @@ _PINNED_SHA256: dict[str, str] = {
     ),
     "tools/dev_start.ps1": (
         "90ae5db991a75e2907bd0d3a743f75a129c75bc4e2ebd23dd22f132248daec14"
+    ),
+    # R12（DEF-101-070 ②）：local_ci_gate 收斂為薄殼＋Python 核心後納入釘選
+    "AutoClaude/tools/local_ci_gate.sh": (
+        "8a077fc86de14495a7d62fd49b350c4f7a089cb3f654c278a15de37f38c6f00b"
+    ),
+    "AutoClaude/tools/local_ci_gate.ps1": (
+        "4143c4580317e72db09e7184601595fb19a7b1a576f23bc99f4d4262692efdb5"
     ),
 }
 
@@ -72,6 +82,26 @@ _FORBIDDEN: dict[str, tuple[str, ...]] = {
         "for (",
         "ForEach-Object",
         ".ForEach(",          # 陣列方法呼叫（第三輪繞過史料）
+    ),
+    # local_ci_gate 薄殼沿用 dev_start 同款診斷關鍵字（R12 納入時複製，非新增判準）
+    "AutoClaude/tools/local_ci_gate.sh": (
+        "while ",
+        "for ",
+        "for(",
+        "jq ",
+        "python -c",
+        "python3 -c",
+    ),
+    "AutoClaude/tools/local_ci_gate.ps1": (
+        "ConvertFrom-Json",
+        "ConvertTo-Json",
+        "[System.Text.Json",
+        "foreach (",
+        "foreach(",
+        "while (",
+        "for (",
+        "ForEach-Object",
+        ".ForEach(",
     ),
 }
 
@@ -133,9 +163,9 @@ def main(argv: list[str] | None = None) -> int:
         return 0
     problems = check_wrapper_thinness()
     if not problems:
-        print("✅ dev_start wrapper 薄殼守門通過（hash 釘選 + 行數上限皆正常）")
+        print(f"✅ wrapper 薄殼守門通過（{len(_PINNED_SHA256)} 支殼 hash 釘選 + 行數上限皆正常）")
         return 0
-    print("❌ dev_start wrapper 薄殼守門失敗：")
+    print("❌ wrapper 薄殼守門失敗：")
     for p in problems:
         print(f"  - {p}")
     return 1

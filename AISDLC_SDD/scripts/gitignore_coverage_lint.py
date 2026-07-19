@@ -14,7 +14,8 @@
 
 機械強制（read-only 純觀察者，不寫 FSM-STATE、不影響 churn/meta-loop）：偵測**磁碟最新演化版**
 （``discover_frozen_versions`` + ``latest_version``，複用 ``rfc_lifecycle_lint``，對齊
-``ci-gate.sh`` 的 ``sort -V | tail -1``），檢 ``.gitignore`` 是否對該版三類 runtime 產物各有
+``scripts/sdd_version.py`` SSOT 的 LATEST 語意；沿用磁碟掃描之 WHY 見該檔豁免註記），
+檢 ``.gitignore`` 是否對該版三類 runtime 產物各有
 排除行。**缺即 advisory warn**（P3，不阻擋、不改 ci-gate exit 語意；對齊 DEF-37-001 routed
 「缺即 warn」定性），與 ``rfc_lifecycle_lint`` 的 ``missing_status`` advisory 同範式。
 

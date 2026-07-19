@@ -56,7 +56,8 @@ def discover_frozen_versions(repo_root: str) -> set[str]:
 
 
 def latest_version(versions: set[str]) -> str | None:
-    """以語意版本（major, minor 數值）取最高者，對齊 ci-gate.sh 的 ``sort -V | tail -1``。"""
+    """以語意版本（major, minor 數值）取最高者（磁碟掃描語意；排序與 ``scripts/sdd_version.py``
+    SSOT 一致，沿用磁碟掃描之 WHY 見該檔豁免註記）。"""
     def key(v: str) -> tuple[int, int]:
         # DEF-43-003：擷取真正的 (major, minor)，不再硬寫死 major=0（否則 v1.00 被當 minor=-1）。
         m = re.search(r"v(\d+)\.(\d+)", v)

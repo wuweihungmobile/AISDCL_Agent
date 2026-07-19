@@ -114,7 +114,7 @@ powershell -ExecutionPolicy Bypass -File tools/local_ci_gate.ps1 -Pg         # �
 | act `authentication required - incorrect username or password` | Docker Desktop credsStore 對公開鏡像誤送認證；`run_act.ps1` 已用 `docker pull`+`--pull=false` 繞過。直接跑 act 時請先 `docker pull catthehacker/ubuntu:act-latest` |
 | act 報 Docker 連線失敗 | 開啟 Docker Desktop；`docker info` 應成功 |
 | pre-push pytest 太久 | `AUTOCLAUDE_PUSH_PYTEST_ARGS="tests/xxx -q"` 縮限；或先 `local_ci_gate.ps1` |
-| hook 沒觸發 | 確認 `git config --get core.hooksPath` 指向 monorepo 根層 `tools/git-hooks`（絕對路徑，見 §5）；**repo 搬移／改名後 hooksPath 絕對路徑失效、hooks 靜默全滅——必須重跑任一支安裝腳本**。`local_ci_gate` / `integration_gate` 開頭已內建 hooks liveness 偵測（hooksPath 未設／不符／目錄不存在時印警告不 fail；CI 環境跳過） |
+| hook 沒觸發 | 確認 `git config --get core.hooksPath` 指向 monorepo 根層 `tools/git-hooks`（絕對路徑，見 §5）；**repo 搬移／改名後 hooksPath 絕對路徑失效、hooks 靜默全滅——必須重跑任一支安裝腳本**。`local_ci_gate`（R12 起位於其 Python 核心 `local_ci_gate.py`）／`integration_gate`（腳本開頭）已內建 hooks liveness 偵測（hooksPath 未設／不符／目錄不存在時印警告不 fail；CI 環境跳過） |
 | `.sh` 在容器噴 `$'\r'` | `.gitattributes` 已強制 LF；重新 checkout 或 `dos2unix` |
 | PG 測試本機過 CI 爆 | 確認用 `docker-compose.ci.yml`（pg17）而非主 compose（pg18） |
 

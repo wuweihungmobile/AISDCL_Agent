@@ -264,6 +264,13 @@ def analyze(
 
 
 def main(argv: list[str] | None = None) -> int:
+    # DEF-82-001/DEF-101-070 家族慣例：訊息含中文/→ 等非 ASCII，Windows cp950 console
+    # 直接 print 會 UnicodeEncodeError 中斷；stdout + stderr 皆強制 utf-8。
+    for _stream in (sys.stdout, sys.stderr):
+        try:
+            _stream.reconfigure(encoding="utf-8")  # type: ignore[union-attr]
+        except (AttributeError, OSError):
+            pass
     parser = argparse.ArgumentParser(description="Mutation survived analysis (SD_08 W3 T3-D4)")
     parser.add_argument("module", help="模組代號（token_guard / goal_synthesis / coordinator）")
     parser.add_argument("--log", type=Path, required=True)

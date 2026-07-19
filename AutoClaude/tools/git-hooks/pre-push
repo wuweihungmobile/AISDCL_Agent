@@ -65,6 +65,9 @@ else
 fi
 
 # 5. pytest 全測（CI: test + equivalence）。可用 AUTOCLAUDE_PUSH_PYTEST_ARGS 縮限。
+#    ⚠ 本步驟刻意「直跑 pytest、不經 tools/local_ci_gate」（R12 QA-2 紀律）：
+#    local_ci_gate 收斂為單核心後，gate 名單的機械凍結繫於其單元測試；本步驟是
+#    獨立第二訊號——若改為經 local_ci_gate 呼叫，兩訊號合流即單點化，勿改。
 #    ⚠ env -u 清洗（P0）：GIT_DIR/GIT_WORK_TREE 絕不可傳染給 pytest——測試套件含
 #    「真 git fixture」（tmp repo 內 git init/add/commit），若繼承這兩個絕對路徑 env，
 #    git 會改操作「使用者真 repo」：髒工作樹時把 WIP 偷 commit 上真分支、乾淨樹時

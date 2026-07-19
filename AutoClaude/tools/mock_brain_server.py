@@ -37,6 +37,7 @@ from __future__ import annotations
 import argparse
 import itertools
 import json
+import sys
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 # 請求序號 → 讓 correction_prompt 每次不同，繞過相似度幻覺防護
@@ -117,7 +118,10 @@ def _envelope(decision: dict) -> dict:
         "choices": [
             {
                 "index": 0,
-                "message": {"role": "assistant", "content": json.dumps(decision, ensure_ascii=False)},
+                "message": {
+                    "role": "assistant",
+                    "content": json.dumps(decision, ensure_ascii=False),
+                },
                 "finish_reason": "stop",
             }
         ],
@@ -163,6 +167,13 @@ class _Handler(BaseHTTPRequestHandler):
 
 
 def main() -> None:
+    # DEF-82-001/DEF-101-070 家族慣例：訊息含中文，Windows cp950 console
+    # 直接 print 會 UnicodeEncodeError 中斷；stdout + stderr 皆強制 utf-8。
+    for _stream in (sys.stdout, sys.stderr):
+        try:
+            _stream.reconfigure(encoding="utf-8")  # type: ignore[union-attr]
+        except (AttributeError, OSError):
+            pass
     parser = argparse.ArgumentParser(description="AutoClaude 本地 Brain Mock 伺服器")
     parser.add_argument("--host", default="127.0.0.1")
     parser.add_argument("--port", type=int, default=9100)

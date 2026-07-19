@@ -24,8 +24,8 @@ import json
 import math
 import random
 import sys
+from collections.abc import Iterable
 from pathlib import Path
-from typing import Iterable
 
 _REPO_ROOT = Path(__file__).resolve().parent.parent
 DEFAULT_EMBEDDING_DIM = 384  # BGE-M3 dense head 為 1024，但純 mock 採 384 以節省 fixture 體積
@@ -54,7 +54,9 @@ def _cosine(a: list[float], b: list[float]) -> float:
     return sum(x * y for x, y in zip(a, b))
 
 
-def _top_k_ids(query: list[float], doc_ids: list[str], doc_vecs: list[list[float]], k: int) -> list[str]:
+def _top_k_ids(
+    query: list[float], doc_ids: list[str], doc_vecs: list[list[float]], k: int
+) -> list[str]:
     sims = [(doc_ids[i], _cosine(query, doc_vecs[i])) for i in range(len(doc_ids))]
     sims.sort(key=lambda x: x[1], reverse=True)
     return [doc_id for doc_id, _ in sims[:k]]
@@ -106,7 +108,8 @@ def _validate_queries(queries: Iterable[dict], dim: int) -> None:
         emb = q["embedding"]
         if not isinstance(emb, list) or len(emb) != dim:
             raise ValueError(
-                f"query[{idx}] embedding dim mismatch: got {len(emb) if isinstance(emb, list) else type(emb)}"
+                f"query[{idx}] embedding dim mismatch: "
+                f"got {len(emb) if isinstance(emb, list) else type(emb)}"
             )
         norm = math.sqrt(sum(v * v for v in emb))
         if abs(norm - 1.0) > 1e-3:
@@ -120,7 +123,8 @@ def _validate_ground_truth(gt: dict[str, list[str]], queries: list[dict], top_k:
             raise ValueError(f"ground_truth has unknown query id: {q_id}")
         if not isinstance(doc_list, list) or len(doc_list) != top_k:
             raise ValueError(
-                f"ground_truth[{q_id}] length mismatch: got {len(doc_list) if isinstance(doc_list, list) else type(doc_list)}, want {top_k}"
+                f"ground_truth[{q_id}] length mismatch: want {top_k}, "
+                f"got {len(doc_list) if isinstance(doc_list, list) else type(doc_list)}"
             )
 
 
@@ -144,6 +148,7 @@ def seed_pg_mock(
     - ground truth 使用實際 DB entry_id（UUID）確保測試可還原
     """
     import re as _re
+
     import psycopg2
     import psycopg2.extras
 
@@ -236,6 +241,13 @@ def seed_pg_mock(
 
 
 def main(argv: list[str] | None = None) -> int:
+    # DEF-82-001/DEF-101-070 家族慣例：進度訊息含中文/≥ 等非 ASCII（印到 stderr），
+    # Windows cp950 console 直接 print 會 UnicodeEncodeError 中斷；stdout + stderr 皆強制 utf-8。
+    for _stream in (sys.stdout, sys.stderr):
+        try:
+            _stream.reconfigure(encoding="utf-8")  # type: ignore[union-attr]
+        except (AttributeError, OSError):
+            pass
     parser = argparse.ArgumentParser(
         description="SD_09 W0 議題 C 觀察期 #2 — pgvector real recall fixture 播種"
     )

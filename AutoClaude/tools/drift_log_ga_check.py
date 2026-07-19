@@ -84,6 +84,13 @@ def _compute_green_streak(records: list[dict[str, Any]]) -> tuple[int, list[dict
 
 
 def main(argv: list[str] | None = None) -> int:
+    # DEF-82-001/DEF-101-070 家族慣例：報表含中文/非 ASCII 符號，Windows cp950 console
+    # 直接 print 會 UnicodeEncodeError 中斷；stdout + stderr 皆強制 utf-8。
+    for _stream in (sys.stdout, sys.stderr):
+        try:
+            _stream.reconfigure(encoding="utf-8")  # type: ignore[union-attr]
+        except (AttributeError, OSError):
+            pass
     parser = argparse.ArgumentParser(
         description="SD_09 W3 Round 2 audit P0-3 — drift_log 30 天零事件 GA 取證工具"
     )
