@@ -2,8 +2,9 @@
 """雙平台腳本對等機械守護 — .sh / .ps1 三對腳本的 step 標籤一致性 + pytest 釘選一致性
 + 掃描目錄內全部 .sh/.ps1（成對與單邊）的納管完整性（R11 架構改善 C2）。
 
-納管語意（R11 起；R12 ARCH-R12-3 擴面）：tools/、AutoClaude/tools/、AISDLC_SDD/scripts/
-三目錄（非遞迴），加上 AISDLC_SDD **LATEST 演化版** `<LATEST>/tools/`（**遞迴**；LATEST
+納管語意（R11 起；R12 ARCH-R12-3 擴面；R13 ARCH-R13-4 增列 tools/lib）：tools/、
+tools/lib/、AutoClaude/tools/、AISDLC_SDD/scripts/
+四目錄（非遞迴），加上 AISDLC_SDD **LATEST 演化版** `<LATEST>/tools/`（**遞迴**；LATEST
 以 scripts/sdd_version.py SSOT 動態解析，解析失敗 fail-loud——parity 只在 repo 內跑，
 git 必在；凍結版 v0.01~v0.2X 依鐵律不掃）下的每支 .sh/.ps1 必屬五類之一，否則
 fail-loud 列出未納管檔名：
@@ -294,7 +295,7 @@ _MARKER_PAIRS = [
     ("integration_gate", "tools/integration_gate.sh", "tools/integration_gate.ps1"),
     ("run_act", "AutoClaude/tools/run_act.sh", "AutoClaude/tools/run_act.ps1"),
 ]
-_PAIR_SCAN_DIRS = ("tools", "AutoClaude/tools", "AISDLC_SDD/scripts")
+_PAIR_SCAN_DIRS = ("tools", "tools/lib", "AutoClaude/tools", "AISDLC_SDD/scripts")
 # LATEST 納管 key 前綴（R12 ARCH-R12-3）：登記用「相對 LATEST 的路徑」，版本升版
 # （copy-on-evolve）時登記不失效；實體路徑由 _resolve_latest_tools() 動態解析。
 _LATEST_PREFIX = "LATEST/tools/"
@@ -337,6 +338,28 @@ _SINGLE_SIDED_EXEMPT = {
     # windows_smoke_local），非同名對；行為層由 macos/windows-compat-ci.yml 覆蓋
     "tools/macos_smoke_local.sh": "對等品=windows_smoke_local.ps1（stem 刻意不同）",
     "tools/windows_smoke_local.ps1": "對等品=macos_smoke_local.sh（stem 刻意不同）",
+    # ── tools/lib（R13 ARCH-R13-4 增列掃描）─────────────────────────────────
+    # install 共用層兩支互為「異名對等品」——stem 刻意不同（POSIX snake_case vs
+    # PowerShell PascalCase 各依平台慣例），非同名對、_discover_scripts 只認同名
+    # 故各以單邊登記（比照 macos/windows smoke 先例）；行為對等另有
+    # tools/tests/test_git_hooks_install_common.py 行數守門。
+    "tools/lib/git_hooks_install_common.sh": (
+        "對等品=GitHooksInstallCommon.ps1（異名對等，stem 刻意不同；"
+        "test_git_hooks_install_common.py 守門）"
+    ),
+    "tools/lib/GitHooksInstallCommon.ps1": (
+        "對等品=git_hooks_install_common.sh（異名對等，stem 刻意不同；"
+        "test_git_hooks_install_common.py 守門）"
+    ),
+    "tools/lib/Find-GitBash.ps1": (
+        "PowerShell 專屬 Git Bash 探測 helper——POSIX 側本來就在 bash 內，無需對等"
+    ),
+    # mac nightly launchd 安裝器（R13 ARCH-R13-3）：launchd 為 macOS 專屬機制，
+    # Windows 對等＝schtasks 排程家族（fix_nightly_catchup.ps1，見 ONBOARDING §8）
+    "tools/install_mac_nightly.sh": (
+        "launchd 專屬安裝器（macOS-only）；Windows 對等=schtasks 家族 "
+        "fix_nightly_catchup.ps1（ONBOARDING §8）"
+    ),
     # Windows schtasks 排程家族三支（ONBOARDING.md §8 明文 Windows-only、無 .sh 對等；
     # run_local_nightly 於 R11 已成對——mac .sh 薄聚合器落地——移登記至 _EXEMPT_PAIRS）
     "AutoClaude/tools/fix_nightly_catchup.ps1": "schtasks 排程家族（ONBOARDING §8）",
@@ -452,11 +475,23 @@ def _check_pair_enrollment(latest_tools: Path | None = None) -> bool:
     for s in stale_singles:
         p = _registered_path(s, latest_tools)
         if p is not None and p.is_file():
-            print(
-                f"❌ 單邊豁免 stale：{s} 的對邊腳本已出現（不再是單邊）—— 請自 "
-                f"_SINGLE_SIDED_EXEMPT 移除，並將該對依納管類別語意重新納管",
-                file=sys.stderr,
-            )
+            # SD-R13-8 訊息分流：is_file 有兩個成因——(a) 對邊真的出現（成對了）；
+            # (b) 所在目錄被自 _PAIR_SCAN_DIRS 移除（檔案仍在、掃描面縮小）。
+            # 兩者都紅，但誤導的排障方向會浪費修復時間，故查對邊實存後分流。
+            _other = p.with_suffix(".ps1" if p.suffix == ".sh" else ".sh")
+            if _other.is_file():
+                print(
+                    f"❌ 單邊豁免 stale：{s} 的對邊腳本已出現（不再是單邊）—— 請自 "
+                    f"_SINGLE_SIDED_EXEMPT 移除，並將該對依納管類別語意重新納管",
+                    file=sys.stderr,
+                )
+            else:
+                print(
+                    f"❌ 單邊豁免 stale：{s} 仍在磁碟但未被掃描發現——其所在目錄疑似"
+                    f"已自 _PAIR_SCAN_DIRS 移除（守門縮面），請恢復掃描目錄或連同"
+                    f"豁免登記一併遷移",
+                    file=sys.stderr,
+                )
         else:
             print(
                 f"❌ 單邊豁免 stale：{s} 已不存在 —— 請自 _SINGLE_SIDED_EXEMPT 移除",

@@ -2437,6 +2437,23 @@ class TestNightlyHeartbeatFilenameContract(unittest.TestCase):
         self.assertIn("nightly_latest.log", ps1, "Windows writer 檔名錨點消失")
         self.assertIn('"nightly_latest.log"', src, "Windows reader 檔名錨點消失")
 
+    def test_installer_third_site_filename_and_threshold(self) -> None:
+        """R13 第三站點（install_mac_nightly.sh --status）納入契約鎖（ARCH-R13-REV-2）。
+
+        WHY：安裝器 --status 自帶心跳三態、硬編檔名與 8 天門檻各一份——僅靠註解
+        宣稱「與 dev_start 同值同語意」。任一端漂移＝--status 說謊零機械訊號，
+        正是 R13 ARCH-R13-1 在消滅的「多站點註解同步」同構病灶。"""
+        installer = (self._REPO / "tools" / "install_mac_nightly.sh").read_text(
+            encoding="utf-8")
+        self.assertIn("nightly_mac_latest.log", installer, "安裝器心跳檔名錨點消失")
+        self.assertIn(
+            f"HEARTBEAT_MAX_AGE_DAYS={dev_start._HEARTBEAT_MAX_AGE_DAYS}",
+            installer,
+            "安裝器過期門檻須與 dev_start._HEARTBEAT_MAX_AGE_DAYS 同值（8 天）",
+        )
+        # SD-R13-1 迴歸鎖：過期判定必須以秒比較（整數天除法在 (8,9) 天窗口誤判新鮮）
+        self.assertIn("* 86400", installer, "安裝器過期判定須以秒比較（防整數天截斷回歸）")
+
 
 if __name__ == "__main__":
     unittest.main()

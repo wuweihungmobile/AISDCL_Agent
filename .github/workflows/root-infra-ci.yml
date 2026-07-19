@@ -1,7 +1,7 @@
 # 根層基建 CI（四方複審 B4，2026-07-10；防禦縱深補洞 2026-07-11）：workflows / hooks /
 # 工具腳本上移 monorepo 根層後，根層 tools/（bootstrap / integration_gate / git-hooks
 # dispatcher）與 .gitattributes、.editorconfig、dependabot 等基建原本零 CI 覆蓋——壞掉
-# 只會在開發者本機爆。本 workflow 做十道輕量守門（僅 actions/checkout，不引其他外部
+# 只會在開發者本機爆。本 workflow 做十一道輕量守門（僅 actions/checkout，不引其他外部
 # action，避免供應鏈風險）：
 #   1. bash -n       — 根層 tools/git-hooks/ 與 tools/*.sh（遞迴涵蓋子目錄）語法檢查
 #   2. pwsh parse    — active .ps1（根層 tools/ + AutoClaude/tools/ + AISDLC_SDD/scripts/
@@ -11,9 +11,10 @@
 #                      EF BB BF（.editorconfig utf-8-bom 政策的 CI 機械複核；本機僅
 #                      Claude Code hook check_ps1_encoding.py 補 BOM，人工編輯器 /
 #                      GitHub web 可繞過 → zh-TW PS5.1 以 CP950 誤讀亂碼/破壞 parser）
-#   3. EOL 守門（.sh）— git ls-files --eol：tools/ 下 .sh/.bash 與無副檔名 git hooks 不得
-#                      CRLF/mixed（取證紀律 #8；比照 AutoClaude pre-commit 檢法，作為
-#                      根層 .gitattributes `eol=lf` 政策的機械複核）
+#   3. EOL 守門（.sh）— git ls-files --eol：全庫 .sh/.bash（R13 CI-8 起，原僅 tools/）
+#                      與三處無副檔名 git hooks 目錄不得 CRLF/mixed（取證紀律 #8；
+#                      比照 AutoClaude pre-commit 檢法，作為根層 .gitattributes
+#                      `eol=lf` 政策的機械複核；範圍依據見該 step 內註解）
 #   4. EOL 守門（.ps1）— 反方向補洞：全庫 *.ps1 工作樹須為 CRLF（.gitattributes
 #                      `eol=crlf`）；只查 `w/`（index 恆 lf 正規化非訊號）。Mac/Windows
 #                      相容性優化四方複審發現 tools/dev_start.ps1 工作樹曾違規且
@@ -47,6 +48,12 @@
 #                      其他 check_*.py 有具名 step 可一眼看出有沒有被 CI 涵蓋；未來若該
 #                      測試被改用 mock/fixture 或誤判精簡掉，這道機械回歸防護會無聲失效
 #                      且無第二訊號可查覺——四方複審 P2 finding 修復）
+#   11. pytest 基線站點鎖 — tools/check_pytest_baseline_sites.py：pytest 基線數字
+#                      （如 3,566 passed）只准住 SSOT（ONBOARDING.md §7），其餘高風險
+#                      文件（CLAUDE.md／useMacWin.md／AutoClaude/{CLAUDE,README}.md）
+#                      命中即紅；SSOT 自身零命中亦紅（anchor 自檢）。歷史紀錄性數字
+#                      以行內 `baseline-ok:` 豁免並逐次列印稽核（DEF-101-045／
+#                      ARCH-R12-7／R13 README 漂移三度實證，R13 ARCH-R13-1 落地）
 #
 # 注：上列編號為清單序，與 job 內實際執行順序無關（如第 7 道 py_compile 實體 step
 # 緊接第 1 道 bash -n 之後執行）——R11 文件掃描[關注-3]澄清。
@@ -73,7 +80,7 @@ permissions:
 
 jobs:
   root-infra:
-    name: root infra guard (bash -n + pwsh parse/BOM + EOL(.sh) + EOL(.ps1) + NTFS + parity + py_compile + unittest + defect-log-crossref + wrapper-thinness)
+    name: root infra guard (bash -n + pwsh parse/BOM + EOL(.sh) + EOL(.ps1) + NTFS + parity + py_compile + unittest + defect-log-crossref + wrapper-thinness + pytest-baseline-sites)
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
@@ -105,7 +112,9 @@ jobs:
             # scripts/sdd_version.py 單一真相源——R10 DEF-101-133，不再內嵌 regex 重寫）
             $files = @(Get-ChildItem -Path tools -Recurse -Filter *.ps1 -File)
             $files += @(Get-ChildItem -Path AutoClaude/tools -Recurse -Filter *.ps1 -File)
-            $files += @(Get-ChildItem -Path AISDLC_SDD/scripts -Filter *.ps1 -File)
+            # R13 CI-4：補 -Recurse 對齊上兩行——AISDLC_SDD/scripts/ 新增子目錄 .ps1
+            # 時不再逸出 parse＋BOM 掃描面（現況子目錄僅 tests/*.py，屬預防性收斂）
+            $files += @(Get-ChildItem -Path AISDLC_SDD/scripts -Recurse -Filter *.ps1 -File)
             $latestName = (& python3 AISDLC_SDD/scripts/sdd_version.py --sdd-root AISDLC_SDD | Out-String).Trim()
             # R10 二審 SD P3：解析失敗改 fail-loud（對齊 windows-compat-ci 同款遷移的
             # throw 語意）——空值 silent skip 會讓 LATEST 版 .ps1 靜默逸出掃描面
@@ -145,14 +154,23 @@ jobs:
         run: |
           # git ls-files --eol 以 TAB 分隔「i/… w/… attr/…」屬性區與路徑；index（i/）
           # 或 worktree（w/）出現 crlf / mixed 即違規（取證紀律 #8：CRLF 使 Linux bash
-          # 噴 $'\r'）。範圍：tools/ 下 .sh/.bash ＋ tools/git-hooks/ 無副檔名 hooks。
-          viol="$(git ls-files --eol -- tools/ | awk -F'\t' '$1 ~ /(i|w)\/(crlf|mixed)/ && ($2 ~ /\.(sh|bash)$/ || ($2 ~ /^tools\/git-hooks\// && $2 !~ /\.[^\/]*$/))')"
+          # 噴 $'\r'）。
+          # R13 CI-8 放寬：原僅掃 tools/，AutoClaude/ 與 AISDLC_SDD/（含 smoke 實跑的
+          # ci-gate.sh／install-hooks.sh）的 .sh 零 EOL 守門。範圍依據＝2026-07-19
+          # `git ls-files --eol '*.sh' '*.bash'` 全庫盤點：166/166 皆 i/lf w/lf（含全部
+          # 凍結版 AISDLC_SDD_v0.01~），全庫掃描不會使凍結版恆紅（凍結版鐵律不可回改，
+          # 若有存量違規則必須排除；實測無），故直接放寬為**全庫** .sh/.bash ＋三處
+          # 無副檔名 git hooks 目錄（tools/git-hooks/、AutoClaude/tools/git-hooks/、
+          # AISDLC_SDD/.githooks/，盤點同為全 LF）。
+          # -c core.quotePath=false：非 ASCII 檔名預設輸出為引號包裹＋八進位逸出形，
+          # 行尾引號會使 $2 的 /\.(sh|bash)$/ 錨定不匹配而靜默漏掃（SD-R13-6）。
+          viol="$(git -c core.quotePath=false ls-files --eol | awk -F'\t' '$1 ~ /(i|w)\/(crlf|mixed)/ && ($2 ~ /\.(sh|bash)$/ || (($2 ~ /^tools\/git-hooks\// || $2 ~ /^AutoClaude\/tools\/git-hooks\// || $2 ~ /^AISDLC_SDD\/\.githooks\//) && $2 !~ /\.[^\/]*$/))')"
           if [ -n "$viol" ]; then
             echo "$viol"
             echo "::error::上列檔案含 CRLF/mixed 行尾 — .sh 與 git hooks 必須 LF（取證紀律 #8 / 根層 .gitattributes）"
             exit 1
           fi
-          echo "EOL 檢查通過（tools/ 下 .sh/.bash 與 git-hooks 均為 LF）"
+          echo "EOL 檢查通過（全庫 .sh/.bash 與三處 git-hooks 目錄均為 LF）"
 
       - name: EOL 守門（.ps1 工作樹須為 CRLF，Mac/Windows 相容性優化補洞）
         run: |
@@ -189,6 +207,9 @@ jobs:
 
       - name: 缺陷帳本跨文件狀態一致（ONBOARDING.md 對 DEF-* 狀態宣稱 vs 帳本實況）
         run: python3 tools/check_defect_log_crossref.py
+
+      - name: pytest 基線站點鎖（tools/check_pytest_baseline_sites.py：基線數字只准住 ONBOARDING §7）
+        run: python3 tools/check_pytest_baseline_sites.py
 
       - name: wrapper 薄殼守門（tools/check_wrapper_thinness.py：dev_start＋local_ci_gate）
         run: python3 tools/check_wrapper_thinness.py

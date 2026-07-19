@@ -57,7 +57,7 @@ d:/CursorProject/AISDLC_SDD/          ← 專案根目錄
 │   ├── tools/                         ← 工具腳本
 │   ├── build/                         ← 建置產出（報告/日誌/規劃歸檔）
 │   └── docs/                          ← 🔴 專案文檔輸出（使用 SDD 時產生）
-├── AISDLC_v0.09/                      ← 舊版框架（保留參考，不直接修改）
+├── AISDLC_v0.09/                      ← 舊版框架（⚠️ 未隨 monorepo 入庫，僅存於原始獨立 repo——R13 DOC-2 查證；本樹列出僅為歷史結構參考）
 └── docs/                              ← 本框架專案文檔（框架自身的 SDD 產出）
 ```
 
@@ -100,7 +100,7 @@ d:/CursorProject/AISDLC_SDD/          ← 專案根目錄
 **❌ 絕對禁止**：
 - 寫入 `/tmp/`、`/var/`、系統目錄
 - 在框架版本根目錄（`AISDLC_SDD_v0.01/`）直接建立臨時檔案
-- 修改 `AISDLC_v0.09/` 的任何檔案（僅供參考）
+- 修改 `AISDLC_v0.09/` 的任何檔案（該目錄未隨 monorepo 入庫，僅存於原始獨立 repo；在 monorepo 內本條天然滿足）
 
 ---
 

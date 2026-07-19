@@ -34,7 +34,7 @@ _TESTS_DIR = Path(__file__).resolve().parent / "tests"
 
 # 下限釘選：低於此數＝測試大規模靜默消失（目錄/pattern/路徑壞掉），紅燈。
 # 刻意刪減測試時同步下修；新增測試不需動（下限語意）。
-MIN_TESTS = 210  # R12 QA-9 ratchet：二審收斂後實況 226（R10 設 177 後未隨基線上修，緩衝過寬）
+MIN_TESTS = 235  # R13 ratchet：Wave1 收斂後實況 244（R12 設 210 時實況 226，緩衝比例同步維持）
 
 
 def discover_suite(start_dir: Path) -> unittest.TestSuite:

@@ -95,6 +95,7 @@ on:
       - "tools/check_hooks_liveness.py"
       - "tools/check_defect_log_crossref.py"
       - "tools/check_wrapper_thinness.py"
+      - "tools/check_pytest_baseline_sites.py"
       - "tools/git_hooks_install_common.py"
       - "tools/_stdio_utf8.py"
       - "**/*.sh"
@@ -134,6 +135,7 @@ on:
       - "tools/check_hooks_liveness.py"
       - "tools/check_defect_log_crossref.py"
       - "tools/check_wrapper_thinness.py"
+      - "tools/check_pytest_baseline_sites.py"
       - "tools/git_hooks_install_common.py"
       - "tools/_stdio_utf8.py"
       - "**/*.sh"
@@ -186,6 +188,11 @@ jobs:
         # R10 QA-2（DEF-101-127）：裸 discover 對「發現 0 個測試」回 rc=0——改走
         # tools/run_root_unittests.py（數量下限釘選，低於下限紅燈不執行）。
         run: python3 tools/run_root_unittests.py
+
+      - name: install_mac_nightly.sh --render-only（plist 產出＋plutil -lint；鏡射本機 smoke [6]，QA-R13-3 補齊四向互鎖缺角）
+        run: |
+          bash tools/install_mac_nightly.sh --render-only "$RUNNER_TEMP/com.autoclaude.nightly.plist"
+          plutil -lint "$RUNNER_TEMP/com.autoclaude.nightly.plist"
 
       - name: 執行 tools/bootstrap.sh（全新 .venv 建立情境）
         run: |
@@ -483,7 +490,14 @@ jobs:
     needs: macos-nightly-full
     if: always() && (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch')
     concurrency:
-      group: macos-compat-ci-nightly-full
+      # R13 CI-5：alert 改用獨立 group（原與 macos-nightly-full 共用同一把
+      # macos-compat-ci-nightly-full）——GitHub job 層 concurrency 在
+      # cancel-in-progress:false 下同 group 仍只允許**一個 pending**：run A 的
+      # nightly-full 佔住 group 時，若 run B 的 nightly-full 先排入 pending，
+      # 稍後才 eligible 的 run A alert（needs 下游）會把 pending 位驅逐/被驅逐，
+      # 被驅逐方 conclusion=cancelled（≠failure），告警路徑靜默蒸發、開單/關單
+      # 分支永不執行。alert 本身輕量無重疊風險，獨立 group 即可根絕互踩。
+      group: macos-compat-ci-nightly-alert
       cancel-in-progress: false
     permissions:
       actions: read

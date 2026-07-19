@@ -5,7 +5,7 @@
 > **微核心化架構**：Hexagonal Architecture（9 Ports）+ Kernel/EventBus + 13 Plugin + DAL 三後端（File / InMemory / PostgreSQL）。
 
 [![Python](https://img.shields.io/badge/python-3.11%2B-blue)]()
-[![Tests](https://img.shields.io/badge/tests-3567%20passed%20%2F%20195%20skipped-brightgreen)]()
+[![Tests](https://img.shields.io/badge/tests-passing-brightgreen)]()
 [![Status](https://img.shields.io/badge/status-active-green)]()
 [![Autonomy](https://img.shields.io/badge/autonomy-Level%205%20(Evo--006)-orange)]()
 [![Sprint](https://img.shields.io/badge/sprint-verified%202026--07--15-blue)]()
@@ -229,11 +229,11 @@ alembic/versions/               # DB migrations（0001 → 0015，共 15 個）
 ├── 0009_three_tier_schema.py … 0011_rbac_tables.py
 └── 0013_drift_log.py / 0014_config_audit_log.py / 0015_merge_sd06_optional_gin.py
 
-tests/                          # 3,567 passed / 195 skipped（2026-07-15 實測基線；SD_09 W3 R61 舊基線為 2,732/122，2026-06-12）
+tests/                          # 全套測試（🔴 基線數字唯一出處＝根層 ONBOARDING.md §7，本檔不重複數字）
 ├── core/ plugins/ infra/       # Kernel / 13 Plugin / adapters + repositories
 ├── contract/                   # DAL 契約測試（File vs PG 行為等價）+ runner 防護
 ├── equivalence/ cli/ integration/ perf/   # 等價 / CLI / 整合 / 性能 baseline
-└── tools/                      # hooks / nightly 驗證鏡子自身測試（587 passed，2026-07-15 實測；R61 原 421）
+└── tools/                      # hooks / nightly 驗證鏡子自身測試
 ```
 
 ### Plugin 註冊順序（`wiring._REGISTER_ORDER` — SSOT）
@@ -341,7 +341,7 @@ INIT → PRE_RUN_VALIDATE → CONTEXT_NEGOTIATION → EXECUTE(step N)
 ## 🧪 測試
 
 ```bash
-# 全部測試（3,567 passed / 195 skipped，2026-07-15 實測基線）
+# 全部測試（🔴 基線數字唯一出處＝根層 ONBOARDING.md §7）
 python -m pytest tests/ -q
 
 # 特定模組
@@ -419,13 +419,13 @@ powershell -ExecutionPolicy Bypass -File tools/run_local_nightly.ps1
 | SD_04 | god-object 拆解 | ✅ 完成 |
 | SD_05 | Counter SSOT + TokenGuard 下沉 5 子模組 + Mutation v2 | ✅ 完成 |
 | SD_06 | PG 三層任務模型 + Brain/Executor EventBus 分工 + `_runner_internals` 物理刪除 | ✅ 完成 |
-| SD_07 | LOC 分級政策（ADR-SD07-001）+ 肥胖檔案二度拆 + 6 議題 e2e；**2,012 passed** | ✅ 完成 |
-| SD_08 | 文件治理（CLAUDE.md ≤ 400）+ 可觀測性 IObservabilityPort + mutation/perf baseline + 5 ADR；**≥ 2,100 passed** | ✅ 完成 |
-| **SD_09** | **觀察期 #1/#2/#3 nightly 採集 + W3 zero-trust audit 連 38 輪閉環（R24~R61）；後續 improving_100/101 等輪持續累積，2026-07-15 實測 3,567 passed / 195 skipped** | 🟡 進行中 |
+| SD_07 | LOC 分級政策（ADR-SD07-001）+ 肥胖檔案二度拆 + 6 議題 e2e；**2,012 passed** | ✅ 完成 | <!-- baseline-ok: SD_07 歷史里程碑快照，非現行基線 -->
+| SD_08 | 文件治理（CLAUDE.md ≤ 400）+ 可觀測性 IObservabilityPort + mutation/perf baseline + 5 ADR；**≥ 2,100 passed** | ✅ 完成 | <!-- baseline-ok: SD_08 歷史里程碑快照，非現行基線 -->
+| **SD_09** | **觀察期 #1/#2/#3 nightly 採集 + W3 zero-trust audit 連 38 輪閉環（R24~R61）；後續 improving_100/101 等輪持續累積（現行基線見根層 ONBOARDING.md §7）** | 🟡 進行中 |
 
-**R61 歷史基線（SD_09 W3 R61，2026-06-12）**：2,732 passed / 122 skipped（88.69s）；import-linter 7 kept / 0 broken；LOC violations = 0；ADR 共 17 條（SD06~SD09）；nightly 6 stage 全綠（kill_rate 76.51%、perf green）。四方 zero-trust audit OVERALL PASS（0 P0 / 0 P1 / 0 P2）。
+**R61 歷史基線（SD_09 W3 R61，2026-06-12）**：2,732 passed / 122 skipped（88.69s）；import-linter 7 kept / 0 broken；LOC violations = 0；ADR 共 17 條（SD06~SD09）；nightly 6 stage 全綠（kill_rate 76.51%、perf green）。四方 zero-trust audit OVERALL PASS（0 P0 / 0 P1 / 0 P2）。<!-- baseline-ok: R61 歷史基線快照（2026-06-12 時點紀錄），非現行基線 -->
 
-**最新實測基線（2026-07-15，跨平台相容性修復輪次後）**：**3,567 passed / 195 skipped**（57.53s）；import-linter **8 kept / 0 broken**；`tests/tools/` 鏡子自身測試 587 passed。
+**現行基線**：pytest 基線數字 🔴 唯一出處＝根層 [ONBOARDING.md §7](../ONBOARDING.md)（R13 收斂，`tools/check_pytest_baseline_sites.py` 機械鎖防數字長回本檔）；import-linter 8 kept / 0 broken。
 
 > **觀察期進度**：#1 mutation kill_rate 達標（unique sha 源碼演進閘門待 W1）；#2 AC4 p95<60ms 達標日 ~2026-06-16；#3 drift_log 30 天零 severity 達標日 ~2026-06-24。
 

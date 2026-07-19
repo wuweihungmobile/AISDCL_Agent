@@ -31,6 +31,17 @@ param(
     [switch]$Apply
 )
 
+# R13 SH-2（比照 fsm_runtime/formal/run_tlc.ps1 的 R9 D-1 導流；DEF-101-124 同款病灶）：
+# 本腳本的 native stderr 重定向模式（`git … 2>$null`，見 FSE_ROLLBACK 清理行）在
+# Windows PowerShell 5.1 + $ErrorActionPreference=Stop 下會把 stderr 行包成 ErrorRecord
+# 拋 NativeCommandError 中斷——引擎級行為，pwsh 7+ 無此問題。與其讓使用者在迭代中途
+# 撞難解錯誤，這裡明確 fail-loud 導流。
+if ($PSVersionTable.PSVersion.Major -lt 6) {
+    Write-Host "ERROR: 本腳本需 pwsh 7+（PowerShell 5.1 對 native stderr 的 ErrorRecord 包裝會在 git 清理行中斷）。" -ForegroundColor Red
+    Write-Host "  請改用：pwsh tools/arch_fitness/run_self_evolution.ps1" -ForegroundColor Yellow
+    exit 5  # 獨立退出碼：1/2=dry-run 訊號、3=缺 claude、4=ESCALATION 皆已占用
+}
+
 $ErrorActionPreference = "Stop"
 $OutputEncoding = [System.Text.Encoding]::UTF8
 # 讓 python 子進程 open() 一律 utf-8（Windows 預設 cp950 會爆 UTF-8 JSON）
@@ -80,7 +91,8 @@ if (-not $Apply) {
         Write-Host "         --max-turns 6 --allowedTools `"Read`" `"Grep`" `"Glob`" --permission-mode plan --output-format json"
     }
     Write-Host "`n加 -Apply 進入完整 SENSE→...→VERIFY 有界閉環（含 🔴 人工閘）。"
-    # 注意：避免 PS7-only 三元運算子，相容 Windows PowerShell 5.1
+    # 寫法沿革：早期為相容 PS 5.1 避開三元運算子；R13 起檔頭已強制 pwsh 7+
+    # （SH-2 導流，PS 5.1 於 native stderr 重定向處必崩），非三元寫法保留無害
     if ($report.n_fail -gt 0) { exit 2 } else { exit 1 }
 }
 

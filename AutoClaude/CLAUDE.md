@@ -1,6 +1,6 @@
 # CLAUDE.md — Claude Code Project Guidance
 
-**Last Updated**: 2026-07-10 | **AISDLC Version**: v0.09 | **Status**: **Improving_012 完成（三能力 A/B/C 全交付）**。Phase 3 F-A1 GoalDecomposer 收尾：`IBrain.decide_decomposition` + `supports_decomposition`（additive，capability 守門不靜默降級）+ `execution/goal_decomposer.py`（三道有界閘 ≤24 硬上限／Kahn 無環／非空 prompt，超限拒絕不重試、1 次 Brain 呼叫非遞迴）+ 🔴 signoff 硬閘 + `wiring.build_goal_decomposer` 注入 F-A2 ToolInvocationAdapter（消費 allowlist）。三方 zero-trust audit OVERALL PASS（P0=0/P1=0）。full pytest 現行基線 **3,566 passed / 196 skipped**（2026-07-13 乾淨 bootstrap 實測，同文末元數據；出廠環境未裝 `[postgres]` 等選配——先前一版曾誤用已裝 `[postgres]` 選配的既有 `.venv` 量測得到 3,664/132，經複審抓出方法論不符 ONBOARDING 自稱的「出廠環境」而校正回乾淨值）、coverage 100%、importlinter 8 kept、LOC=0。詳見 [AutoClaude_Improving_012.md](docs/04_planning/AutoClaude_Improving_012.md) §5 Phase 3。
+**Last Updated**: 2026-07-19（權威以 git log 為準） | **AISDLC Version**: v0.09 | **Status**: **Improving_012 完成（三能力 A/B/C 全交付）**。Phase 3 F-A1 GoalDecomposer 收尾：`IBrain.decide_decomposition` + `supports_decomposition`（additive，capability 守門不靜默降級）+ `execution/goal_decomposer.py`（三道有界閘 ≤24 硬上限／Kahn 無環／非空 prompt，超限拒絕不重試、1 次 Brain 呼叫非遞迴）+ 🔴 signoff 硬閘 + `wiring.build_goal_decomposer` 注入 F-A2 ToolInvocationAdapter（消費 allowlist）。三方 zero-trust audit OVERALL PASS（P0=0/P1=0）。full pytest 🔴 基線數字唯一出處＝根層 ONBOARDING.md §7（出廠環境定義、選配與巢狀 session 變因、歷史校正記事均收斂該節，本檔不重複數字——R13 收斂＋`tools/check_pytest_baseline_sites.py` 機械鎖）、coverage 100%、importlinter 8 kept、LOC=0。詳見 [AutoClaude_Improving_012.md](docs/04_planning/AutoClaude_Improving_012.md) §5 Phase 3。
 
 > **🔴 Important Notice 🔴** This file provides critical guidance for Claude Code (claude.ai/code). All instructions here OVERRIDE default behavior and must be followed exactly.
 
@@ -10,7 +10,7 @@
 
 - **規範 / 開發循環 / 模型 / CLI**：本檔（CLAUDE.md，≤ 400 行）
 - **Sprint 完整脈絡（SD_03 起）**：[docs/05_development/sprint_history.md](docs/05_development/sprint_history.md)
-- **架構決策（ADR）**：[docs/04_planning/ADR/](docs/04_planning/ADR/)（SD06~SD09 共 17 條）
+- **架構決策（ADR）**：[docs/04_planning/ADR/](docs/04_planning/ADR/)（SD06~SD09；條數以目錄實數為準，本檔不重複計數）
 - **新 Sprint W 期間紀錄 SOP**：W 期間 Round 直接寫 `sprint_history.md §1.N`；CLAUDE.md sprint H3 ≤ 15 行（[Sprint_Round_Recording_SOP](docs/05_development/Sprint_Round_Recording_SOP.md) + [ADR §9](docs/04_planning/ADR/ADR-SD08-001-claude-md-budget.md)）
 
 ---
@@ -79,6 +79,7 @@
 | **ba-business-analyst** | 業務分析 | 業務邏輯驗證 | [02](AISDLC_v0.09/agent/core/02.ba-business-analyst-zh.yaml) |
 
 **自動載入流程**：識別任務類型 → 讀對應 YAML → 載入 core_principles / quality_standards / collaboration_rules → 按 Agent 規範執行。使用 AISDLC workflow 前載入 [AISDLC_INIT.md](AISDLC_v0.09/AISDLC_INIT.md)；情境啟動 `AISDLC [情境代碼] [專案簡述]`，詳見 [SCENARIO_SELECTOR.md](AISDLC_v0.09/guides/user/onboarding/SCENARIO_SELECTOR.md)。
+> ⚠️ 本檔所有 `AISDLC_v0.09/` 連結指向的目錄**未隨 monorepo 入庫**（僅存於原始獨立 AutoClaude repo；R13 DOC-2 查證全 repo 零命中）——在本 monorepo 內點按必失效；方法論資產請改用姊妹專案 [../AISDLC_SDD/](../AISDLC_SDD/)（LATEST 版）。
 
 ---
 
@@ -157,17 +158,17 @@ DSN 解析優先級：`AUTOCLAUDE_DB_DSN` > `AUTOCLAUDE_PG_DSN`（deprecated）>
 
 **主軸**：(a) ADR-SD07-001 LOC 分級政策（取消 250 一刀切，分級 150/250/300/400/500 + 絕對紅線 750）；(b) `_impl.py` 736 行拆解（service tier ≤ 500，拆出 `_escalation_handler.py` + `_correction_helpers.py`）；(c) 6 大議題 e2e 整合驗證（Brain/Executor + 三層 CRUD + pgvector real + multi-run resume + ConfigResolver 4 層 property-based）；(d) SD_06 §5 三項物理拔除（`_consecutive_compact_failures` property 5 patch path + `_prepend_global_goal_brief` shim 4 patch path + `PlaybookResult` class → KernelResult factory + property alias 路線）；(e) 14 Plugin walk-through + `runner-no-checkpoint-logic` importlinter Rule 6 升級；(f) token_guard 拆 5 子模組（thresholds/compactor/git_verifier/watcher/policy）；(g) mutation-test-nightly + pg-e2e-nightly CI job 建立（continue-on-error=true 非阻塞）。
 
-**主要 Wave**：W0~W6 共 7 Wave / 28 PD。**G6 末基線**：**2,012 passed / 121 skipped**（2026-05-18）；importlinter **6 kept / 0 broken**；LOC violations=**0**（baseline 永久鎖定 14058）；equivalence **83/83**；NOTE(SD_07)=0。**核心交付**：[SD07_Migration_Guide.md](docs/08_deployment/SD07_Migration_Guide.md) v1.0 + [SD07_Plugin_Audit_Report.md](docs/06_quality/SD07_Plugin_Audit_Report.md) v1.0 + AC Matrix 19 條 + `factory function + property alias` 路線（零 caller 改動）。詳見 [sprint_history.md §1.5](docs/05_development/sprint_history.md)。
+**主要 Wave**：W0~W6 共 7 Wave / 28 PD。**G6 末基線**：**2,012 passed / 121 skipped**（2026-05-18）<!-- baseline-ok: SD_07 G6 歷史快照，非現行基線 -->；importlinter **6 kept / 0 broken**；LOC violations=**0**（baseline 永久鎖定 14058）；equivalence **83/83**；NOTE(SD_07)=0。**核心交付**：[SD07_Migration_Guide.md](docs/08_deployment/SD07_Migration_Guide.md) v1.0 + [SD07_Plugin_Audit_Report.md](docs/06_quality/SD07_Plugin_Audit_Report.md) v1.0 + AC Matrix 19 條 + `factory function + property alias` 路線（零 caller 改動）。詳見 [sprint_history.md §1.5](docs/05_development/sprint_history.md)。
 
 ### SD_Improving_08（文件治理 + 可觀測性 + mutation/perf baseline）— ✅ 全程 G0~G6 完成 2026-05-18
 
 **主軸**（8 議題群 × 7 Wave / 44 PD，PM 拍板優先順序 A→F→D→C→E→B→G→H）：(A) SD_07 遺留收尾 + (E) CLAUDE.md ≤ 400 + Architecture Snapshot SSOT + sprint_history.md 滾動窗口 N=2（W0）；(F) **可觀測性升級** — IObservabilityPort + LocalLogger adapter + trace_id ContextVar + KB metric 4 項（W4，核心 Wave）；(D) mutation pilot — TokenGuardPlugin 兩週 + 分模組目標 75/70/65%（W3）；(C) AC4 nightly 14 天採集 + `needs-pg-e2e` labeled PR 觸發（W2）；(B) Migration Guide v2 backlog 三項評估 + `_runner_internals` contract 文件化（W1）；(G) 性能 baseline 雙軌 — CI nightly + 季度 perf machine + p95 < 15%（W5）；**(H) PG production SOP 延 SD_09**，SD_08 W5 僅做前置（`pg_health.py` WAL lag adapter + ADR-SD08-005 雙軌制）。
 
-**新增 5 條 ADR**：[ADR-SD08-001](docs/04_planning/ADR/ADR-SD08-001-claude-md-budget.md) CLAUDE.md 治理 / [002](docs/04_planning/ADR/ADR-SD08-002-mutation-baseline.md) mutation 分模組 / [003](docs/04_planning/ADR/ADR-SD08-003-perf-regression-policy.md) perf 告警 / [004](docs/04_planning/ADR/ADR-SD08-004-observability-port.md) IObservabilityPort / [005](docs/04_planning/ADR/ADR-SD08-005-pg-production-dual-track.md) PG 雙軌制。預估 W6 末 ≥ 2,100 passed。詳見 [SD_Improving_08.md](docs/04_planning/SD_Improving_08.md) v1.0 + [SD08_Execution_Guide.md](docs/05_development/SD08_Execution_Guide.md) v1.0。
+**新增 5 條 ADR**：[ADR-SD08-001](docs/04_planning/ADR/ADR-SD08-001-claude-md-budget.md) CLAUDE.md 治理 / [002](docs/04_planning/ADR/ADR-SD08-002-mutation-baseline.md) mutation 分模組 / [003](docs/04_planning/ADR/ADR-SD08-003-perf-regression-policy.md) perf 告警 / [004](docs/04_planning/ADR/ADR-SD08-004-observability-port.md) IObservabilityPort / [005](docs/04_planning/ADR/ADR-SD08-005-pg-production-dual-track.md) PG 雙軌制。預估 W6 末 ≥ 2,100 passed<!-- baseline-ok: SD_08 規劃期預估值歷史快照，非現行基線 -->。詳見 [SD_Improving_08.md](docs/04_planning/SD_Improving_08.md) v1.0 + [SD08_Execution_Guide.md](docs/05_development/SD08_Execution_Guide.md) v1.0。
 
 **W0~W6 已通過 2026-05-18**（摘要）：W0 CLAUDE.md ≤ 400 + Snapshot SSOT + 5 ADR；W1 v2 backlog 三項決議 + Runner_Internals 防復活柵欄；W2 AC4 nightly collector + progress_check + pg-e2e-on-label；W3 mutation pilot TokenGuard + baseline_lock/mutation_analysis + 11 case contract；W4 核心 IObservabilityPort + LocalLogger + trace_id ContextVar + KB metric 4 項 + Rule 7 + 34 新 case；W5 perf_baseline + 4 場景 perf 測試 + perf_regression_check 三級告警 + perf-baseline-nightly CI + pg_health.py WAL lag adapter + Production_Migration_SOP §1-§3 + ADR-SD08-005；**W6** SD08_Migration_Guide.md v1.0 + AC Matrix 29 條 + 四方審查 + PM 簽核 + SD_06 滾動下沉 §1.4 + SD_Improving_09.md 大綱。
 
-**G6 實測**：≥ 2,100 passed / importlinter 7 kept / 0 broken / LOC=0 / equivalence 83/83。R-SD08-A-1/C-1/D-1/D-2/E-1/F-1/F-2/G-1/H-1/PM-#3~#8 — **全數 CLOSED**。詳見 [gate_audit.md SD08-G0~G6](docs/05_development/gate_audit.md) + [risk_log.md §14](docs/05_development/risk_log.md) + [SD08_Migration_Guide.md](docs/08_deployment/SD08_Migration_Guide.md) v1.0 + [sprint_history.md §1.6](docs/05_development/sprint_history.md)。
+**G6 實測**：≥ 2,100 passed<!-- baseline-ok: SD_08 G6 歷史快照，非現行基線 --> / importlinter 7 kept / 0 broken / LOC=0 / equivalence 83/83。R-SD08-A-1/C-1/D-1/D-2/E-1/F-1/F-2/G-1/H-1/PM-#3~#8 — **全數 CLOSED**。詳見 [gate_audit.md SD08-G0~G6](docs/05_development/gate_audit.md) + [risk_log.md §14](docs/05_development/risk_log.md) + [SD08_Migration_Guide.md](docs/08_deployment/SD08_Migration_Guide.md) v1.0 + [sprint_history.md §1.6](docs/05_development/sprint_history.md)。
 
 ### SD_Improving_09（觀察期 #1/#2/#3 採集中 + W3 zero-trust audit 連 25 輪 + R48 四方並行 audit 揪修 R47 殘留 P0「CLAUDE.md 3 行 >800cp 破 contract test」）— 🟡 W0 啟動 2026-05-20
 
@@ -265,8 +266,7 @@ tasks:
 5. **跨工具數字對齊 assertion** — 同來源多 parser 不一致時印 WARN，summary 為單一真相
 6. **採集寬鬆 vs 升級嚴格分軌** — 雙 env（採集容忍 + 升級嚴格）；單 env 同時控兩語意即放棄門檻
 7. **cache 路徑強制 fresh** — `.mutmut-cache` / `.pytest_cache` / `.ac4_junit.xml` 跑前 `rm -rf`，避免舊資料騙過驗證
-8. **載具 .sh 必須 LF 行尾** — Windows autocrlf 轉 CRLF → bash 噴 `$'
-'`；`.gitattributes *.sh text eol=lf` + hook `check_sh_eol.py`
+8. **載具 .sh 必須 LF 行尾** — Windows autocrlf 轉 CRLF → bash 報錯訊息尾帶「dollar 引號包住反斜線＋小寫 r」逸出字樣（本句刻意全中文描述，防反斜線再遭寫入管道吞掉致本行自身格式毀損——R12 SA-3R 同款根絕法，R13 DOC-5 實證本行原文已毀）；`.gitattributes *.sh text eol=lf` + hook `check_sh_eol.py`
 9. **Docker SKIP 跨 stage 一致** — Docker 不可用時所有依賴 stage 同模式 SKIP，禁空殼 if 跳過回 rc=0 偽綠燈
 10. **fallback 真實 jsonl 可區分** — `try/except` 後 mock fallback 須寫布林標記欄（如 `emit_real:bool`），拒絕 `=False` 紀錄
 11. **latest log pointer 完整 run** — 末段 `Copy-Item` 自當次完整 $Log 寫入，禁 partial buffer；Windows file lock 用 `FileShare.ReadWrite` + retry
@@ -274,7 +274,7 @@ tasks:
 13. **觀察期 jsonl 進度可見** — 末段印 `END observation progress: ... (delta=N; stage=R)`；R19 強化 delta 取證明示「未進帳因 stage crash」；R10：mutation 軌分子改 unique-sha（ADR-SD09-011，原始列數會虛報）
 14. **schtasks vs 互動 PATH 等價 + StrictMode $null.Property 保護** — ps1 開頭自動補 pyenv-win Scripts；禁 `(Get-Command X -EA SilentlyContinue).<Prop>` 鏈式；改兩步式（R19 P0-AUDIT-R18-1 修復）
 15. **呼叫端工具路徑分隔符相容性（Bash 反斜線吞噬根治）** — Bash 工具呼叫 `tools\run_local_nightly.ps1` 時反斜線被 escape 吞噬 → `toolsrun_local_nightly.ps1` 找不到檔案 → exit 127。CLAUDE.md / SOP 範例**一律用正斜線** `tools/run_local_nightly.ps1`；schtasks 用絕對 Windows 路徑；以 PowerShell 工具呼叫亦可（R40 P2-R40-2 修復）
-16. **pytest 數字 SSOT 必須註記隨機性與 fixture 前提** — 引用 pytest 數字（如 2,716 passed）時加註「pytest-randomly 未啟用，順序由 collection 確定」；pyproject.toml 不安裝 pytest-randomly；引入前需先補測試隔離（R40 P1-R40-1 偽陽性預防）
+16. **pytest 數字 SSOT 必須註記隨機性與 fixture 前提** — 引用 pytest 數字（如 2,716 passed）時加註「pytest-randomly 未啟用，順序由 collection 確定」<!-- baseline-ok: 紀律敘例之歷史數字，非現行基線站點 -->；pyproject.toml 不安裝 pytest-randomly；引入前需先補測試隔離（R40 P1-R40-1 偽陽性預防）
 17. **zero-trust 須雙向：agent audit 結論本身亦須複核** — subagent 聲稱「某檔案不存在」須以 `find`/`rg -l`/`ls` 獨立複核（嚴禁單憑 `fd`，未安裝時靜默回空 → 誤判不存在）；可機械驗證之 finding（檔案存在 / 數字驗算 / 行號）落入 backlog 前主 agent 須親跑複核，誤報與真缺陷同樣留證（R57 SD agent `fd` 誤報 `test_pg_memory_store_security.py:14` 不存在實則存在）
 18. **mutation 必須在隔離樹執行，禁止就地突變活體工作樹** — mutmut 就地改寫 volume-mount 源碼會與並行 pytest/audit 互踩產生假紅、kill 時殘留變異；載具須 tar 複製至 container 內 `/tmp/mutwork` 隔離樹（editable install 指向隔離樹），輸出物寫回 `/workspace` 維持取證鏈（Improving_012 Phase 1 QA P1-7）
 19. **驗證載具 import 路徑一致性** — 一律從專案 cwd 跑 `python -m pytest`/`python -c`，禁 `python <repo 外路徑>.py`（sys.path 不含 cwd → shadow 至舊 editable 副本）；`local_ci_gate` gate 0 哨兵以 git rev-parse + pathlib **動態比對** `autoclaude.__file__` 位於當前 repo 根之下（不再寫死 `'AISDCL_Agent'` 字串，repo 更名／搬移不誤判）（流程問題 #9b/#9c，Improving_012 Phase 3）
@@ -318,11 +318,11 @@ tasks:
 
 **單元測試**：[tests/tools/hooks/](tests/tools/hooks/)（每支 hook ≥ 3 case；SD_09 W0 §4「驗證鏡子自身要被驗證」紀律）。
 
-> **本機 CI 對等（push 前全綠）**：另有 **git hooks**（`tools/git-hooks/` pre-commit/pre-push，`tools/install_git_hooks.ps1` 安裝；有別於上述 Claude Code hooks）+ **act**（`tools/run_act.ps1` 在 Linux 容器跑根層 autoclaude-ci.yml，於 monorepo 根執行）+ **docker-compose.ci.yml**（pg17 對齊 CI）+ **mock_brain_server.py**（本地 LLM mock）。一鍵：`tools/local_ci_gate.ps1`。詳見 [Local_CI_Parity_Guide](docs/08_deployment/Local_CI_Parity_Guide.md)。
+> **本機 CI 對等（push 前全綠）**：另有 **git hooks**（`tools/git-hooks/` pre-commit/pre-push，`tools/install_git_hooks.ps1` 安裝；有別於上述 Claude Code hooks）+ **act**（`tools/run_act.ps1` 在 Linux 容器跑根層 autoclaude-ci.yml，於 monorepo 根執行）+ **docker-compose.ci.yml**（pg17 對齊 CI）+ **mock_brain_server.py**（本地 LLM mock）。一鍵：`tools/local_ci_gate.ps1`。macOS 對等 `.sh` 載具（`install_git_hooks.sh`／`run_act.sh`／`local_ci_gate.sh`／`run_local_nightly.sh`）完整對照見根層 ONBOARDING.md §6。詳見 [Local_CI_Parity_Guide](docs/08_deployment/Local_CI_Parity_Guide.md)。
 
 ---
 
-**文檔元數據**：v7.10 | 建立 2025-01-11 | 最後更新 2026-07-17 | 適用 AISDLC v0.09+（v7.10：R10 跨平台複審——nightly 五變更（sdd-fsm-chaos stage／recall rc [ref] 捕捉／mutmut 驗證失敗 rc=1／Docker 連續 SKIP ≥3 升級 exit 1／END 進度改 unique-sha 分子），紀律完整版連結 v1.6→v1.7；mutation history 壓縮落盤 29→7 筆（DEF-101-148：improving_101 宣稱之方案 A 壓縮實未執行於本機 live 檔）。v7.9：R9 跨平台複審——基線補巢狀 Claude Code session（CLAUDECODE=1）變因註記：該環境下全套為 3,557/206（requires_claude_cli 條件 skip，DEF-101-091，屬預期非退化）；紀律連結 v1.2→v1.6 訂正。歷史 v7.8 以前明細見 [sprint_history.md §1.7.3](docs/05_development/sprint_history.md)）。
+**文檔元數據**：v7.11 | 建立 2025-01-11 | 最後更新 2026-07-19（權威以 git log 為準） | 適用 AISDLC v0.09+（v7.11：R13 跨平台複審——pytest 基線數字收斂根層 ONBOARDING §7 單一出處（check_pytest_baseline_sites 機械鎖）、AISDLC_v0.09 未入庫註記、ADR 去計數、紀律 8 毀損字樣全中文化。v7.10：R10 跨平台複審——nightly 五變更（sdd-fsm-chaos stage／recall rc [ref] 捕捉／mutmut 驗證失敗 rc=1／Docker 連續 SKIP ≥3 升級 exit 1／END 進度改 unique-sha 分子），紀律完整版連結 v1.6→v1.7；mutation history 壓縮落盤 29→7 筆（DEF-101-148：improving_101 宣稱之方案 A 壓縮實未執行於本機 live 檔）。v7.9：R9 跨平台複審——基線補巢狀 Claude Code session（CLAUDECODE=1）變因註記：該環境下全套為 3,557/206（requires_claude_cli 條件 skip，DEF-101-091，屬預期非退化）；紀律連結 v1.2→v1.6 訂正。歷史 v7.8 以前明細見 [sprint_history.md §1.7.3](docs/05_development/sprint_history.md)）。
 
 <!-- ARCH_SNAPSHOT_BEGIN -->
 ## [Architecture Snapshot] — 由 tools/snapshot_sync.py 自動生成（請勿手動編輯本區段；以 `python tools/snapshot_sync.py` 重新生成）

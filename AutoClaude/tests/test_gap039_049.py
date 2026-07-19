@@ -593,7 +593,7 @@ def test_gap046_production_runner_rejects_chain_in_conditional(tmp_path):
     import yaml as _yaml
 
     from autoclaude.models.playbook import Playbook
-    with open(pb_path) as f:
+    with open(pb_path, encoding="utf-8") as f:
         playbook = Playbook(**_yaml.safe_load(f))
 
     # CONDITIONAL 突變帶有鏈式攻擊

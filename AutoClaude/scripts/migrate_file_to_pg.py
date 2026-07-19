@@ -35,6 +35,7 @@ logger = logging.getLogger("migrate_file_to_pg")
 def _build_pg_repo(dsn: str):
     try:
         from sqlalchemy.ext.asyncio import create_async_engine
+
         from autoclaude.infra.repositories.pg_state_repository import PgStateRepository
     except ImportError:
         logger.error("缺少相依套件，請執行：pip install autoclaude[postgres]")
@@ -88,7 +89,9 @@ def _migrate_checkpoints(
                 if skip_existing:
                     existing = pg_state.load_checkpoint(playbook_id)
                     if existing is not None:
-                        logger.debug("SKIP（PG 已存在）: %s  step_idx=%s", playbook_id, existing.step_idx)
+                        logger.debug(
+                            "SKIP（PG 已存在）: %s  step_idx=%s", playbook_id, existing.step_idx
+                        )
                         skipped += 1
                         continue
                 pg_state.save_checkpoint(playbook_id, cp)
@@ -158,6 +161,13 @@ def _migrate_kb(
 
 
 def main() -> int:
+    # R13 DEF-101-168 家族：Windows 主控台預設碼頁（如 cp950）印 ❌/中文會
+    # UnicodeEncodeError，守護式 reconfigure 為 UTF-8（慣例同 tools/seed_kb.py）。
+    for _stream in (sys.stdout, sys.stderr):
+        try:
+            _stream.reconfigure(encoding="utf-8")  # type: ignore[union-attr]
+        except (AttributeError, OSError):
+            pass
     parser = argparse.ArgumentParser(
         description="File backend → PostgreSQL 一次性遷移工具（P1 #9）"
     )

@@ -189,6 +189,47 @@ class TestSingleSidedEnrollment(unittest.TestCase):
         self.assertIn("未註冊的成對腳本", printed)  # 新對子 unknown 的第二訊號
 
 
+class TestR13LibAndInstallerEnrollment(unittest.TestCase):
+    """R13 ARCH-R13-4／CI-3：tools/lib 納入掃描邊界＋mac nightly 安裝器單邊納管。
+
+    WHY：tools/lib/ 三支（install 共用層「異名對等品」×2＋PowerShell 專屬 helper）
+    過去完全在 _PAIR_SCAN_DIRS 邊界外——增刪/改名零機械訊號；install_mac_nightly.sh
+    （R13 ARCH-R13-3 launchd 安裝器）為新增單邊 .sh，皆須附決策依據納管。
+    計數註記（R13 擴充依據）：「13 對＋11 支單邊」是 R12 時期工具的動態實跑輸出、
+    並無任何測試釘選值鎖定該計數（enrollment 守護靠 unknown/stale 名單而非總數），
+    R13 擴面後實跑輸出為 13 對＋15 支單邊，無需同步任何釘選。
+    """
+
+    _R13_SINGLES = (
+        "tools/lib/git_hooks_install_common.sh",
+        "tools/lib/GitHooksInstallCommon.ps1",
+        "tools/lib/Find-GitBash.ps1",
+        "tools/install_mac_nightly.sh",
+    )
+
+    def test_tools_lib_in_scan_dirs(self) -> None:
+        """掃描邊界必含 tools/lib（回退即紅——邊界縮面零訊號的防護本體）。"""
+        self.assertIn("tools/lib", m._PAIR_SCAN_DIRS)
+
+    def test_r13_singles_exempted_with_rationale(self) -> None:
+        """四支 R13 納管腳本必在單邊豁免表且附非空決策依據。"""
+        for rel in self._R13_SINGLES:
+            self.assertIn(rel, m._SINGLE_SIDED_EXEMPT,
+                          f"{rel} 未登記 _SINGLE_SIDED_EXEMPT——R13 納管回退")
+            self.assertTrue(m._SINGLE_SIDED_EXEMPT[rel].strip(),
+                            f"{rel} 的豁免依據為空——豁免必須附 WHY")
+
+    def test_real_tree_r13_singles_discovered(self) -> None:
+        """真磁碟整合：四支確實被掃描「發現」為單邊（不只是表上有名字）——
+        豁免表條目若失去磁碟對應物，另有 stale 反向檢查兜底；此處鎖正向：
+        掃描器真的看得到它們（tools/lib 目錄真的入掃）。"""
+        latest_tools = m._resolve_latest_tools()
+        self.assertIsNotNone(latest_tools, "真 repo 內 LATEST 解析不得失敗（fail-loud）")
+        _pairs, singles = m._discover_scripts(latest_tools)
+        for rel in self._R13_SINGLES:
+            self.assertIn(rel, singles, f"{rel} 未被掃描發現——掃描邊界疑似回退")
+
+
 class TestLatestToolsEnrollment(unittest.TestCase):
     """R12 ARCH-R12-3：LATEST 版 tools 遞迴掃描納管完整性。
 

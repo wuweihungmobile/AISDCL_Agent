@@ -37,6 +37,13 @@ on:
     # - cron: "0 5 * * *" # mutation-test-coordinator-nightly（dormant，待 W2 啟用）
   workflow_dispatch:
 
+# R13 CI-7：顯式最小權限（先前全檔未宣告 permissions → 各 job 繼承 repo 預設，
+# 可能為 write-all）。全檔僅 checkout / setup-python / pytest / alembic /
+# upload-artifact（artifact 上傳走 ACTIONS_RUNTIME_TOKEN，不受本區塊限制），
+# 無 issue comment / label / push 等 GITHUB_TOKEN 寫行為 → contents: read 即足。
+permissions:
+  contents: read
+
 defaults:
   run:
     working-directory: AutoClaude

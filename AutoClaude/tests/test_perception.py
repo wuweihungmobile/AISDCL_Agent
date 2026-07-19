@@ -346,6 +346,9 @@ class TestCloseKillsCmdShimGrandchild:
     外層 cmd.exe，真正執行 CLI 的孫行程會變孤兒繼續跑（見 close() 內註解）。"""
 
     def test_close_kills_grandchild_spawned_via_cmd_shim(self, tmp_path):
+        # 意圖鎖：本 fixture 的 write_text/read_text 刻意用預設編碼——.cmd shim 由
+        # cmd.exe 以系統碼頁解讀、marker 由子行程以預設編碼寫入，內容皆 ASCII-only，
+        # 勿「好心」補 encoding="utf-8"（R13 DEF-101-121 家族審查裁定維持現狀）。
         marker = tmp_path / "child_pid.txt"
         child_script = tmp_path / "child_sleep.py"
         child_script.write_text(

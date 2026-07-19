@@ -13,8 +13,6 @@ import subprocess
 import sys
 from pathlib import Path
 
-import pytest
-
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 TOOL_PATH = PROJECT_ROOT / "tools" / "perf_regression_check.py"
 
@@ -58,6 +56,8 @@ def _run_tool(results: Path, baseline: Path, tmp_path: Path) -> subprocess.Compl
         ],
         capture_output=True,
         text=True,
+        encoding="utf-8",
+        errors="replace",
         cwd=str(PROJECT_ROOT),
     )
 
@@ -104,6 +104,8 @@ def test_perf_regression_check_block(tmp_path):
         ],
         capture_output=True,
         text=True,
+        encoding="utf-8",
+        errors="replace",
         cwd=str(PROJECT_ROOT),
     )
 

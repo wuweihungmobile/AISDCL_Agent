@@ -100,7 +100,8 @@ def test_same_day_prefers_table_exists(tmp_path: Path) -> None:
     assert append_snapshot(history, r_skip) == "kept_existing"
 
     # 驗證真實取值仍留存
-    lines = [json.loads(ln) for ln in history.read_text().splitlines() if ln.strip()]
+    raw = history.read_text(encoding="utf-8")
+    lines = [json.loads(ln) for ln in raw.splitlines() if ln.strip()]
     assert len(lines) == 1
     assert lines[0]["passed"] is True
     assert lines[0]["drift_log_table_exists"] is True
@@ -121,6 +122,7 @@ def test_same_day_skip_can_be_upgraded_to_real(tmp_path: Path) -> None:
     # 不能 kept_existing：舊紀錄是 SKIP，新紀錄是真實取值 → 必須 replaced
     assert append_snapshot(history, r_real) == "replaced"
 
-    lines = [json.loads(ln) for ln in history.read_text().splitlines() if ln.strip()]
+    raw = history.read_text(encoding="utf-8")
+    lines = [json.loads(ln) for ln in raw.splitlines() if ln.strip()]
     assert len(lines) == 1
     assert lines[0]["passed"] is True

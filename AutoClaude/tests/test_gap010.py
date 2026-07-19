@@ -52,7 +52,6 @@ class TestNonStandardTestFileNaming:
 
     def test_failure_tracker_test_file_re_module_constant(self):
         """模組層級 _TEST_FILE_RE 常數應匹配兩種格式。"""
-        import re
         from autoclaude.execution.failure_tracker import _TEST_FILE_RE
         assert _TEST_FILE_RE.search("auth_test.py")
         assert _TEST_FILE_RE.search("test_auth.py")
@@ -372,7 +371,7 @@ class TestCrossStepValidatorPlaybookRunnerIntegration:
     def test_cross_step_validator_called_for_step_idx_gt_zero(self, mock_cls, tmp_path):
         """non-dry-run 模式，step_idx > 0 時應呼叫 CrossStepStateValidator。"""
         from autoclaude.execution.playbook_runner import PlaybookRunner
-        from autoclaude.models.playbook import Playbook, PlaybookTask, GlobalInvariants
+        from autoclaude.models.playbook import GlobalInvariants, Playbook, PlaybookTask
         from autoclaude.utils.config import AppConfig
 
         mock_instance = MagicMock()
@@ -398,7 +397,7 @@ class TestCrossStepValidatorPlaybookRunnerIntegration:
         )
         playbook_path = str(tmp_path / "test.yaml")
         import yaml
-        with open(playbook_path, "w") as f:
+        with open(playbook_path, "w", encoding="utf-8") as f:
             yaml.dump(playbook.model_dump(exclude_none=True), f, allow_unicode=True)
 
         runner = PlaybookRunner(AppConfig(), MagicMock(), hotkey, dry_run=False)
@@ -424,8 +423,8 @@ class TestMetaLearningOptimizer:
         注意：門檻是「不同策略種類數」而非「成功筆數」。
         即使有 N 筆相同策略的成功記錄，若種類 < 3 仍視為不足。
         """
-        from autoclaude.utils.knowledge_base import FailureKnowledgeBase
         from autoclaude.execution.failure_tracker import STRATEGY_TYPES
+        from autoclaude.utils.knowledge_base import FailureKnowledgeBase
         kb = FailureKnowledgeBase(str(tmp_path / "kb.jsonl"))
         # 只有 2 種不同策略（REWRITE × 2 + PINPOINT × 0 = 1 種 = len(strategy_stats)=1 < 3）
         kb.record_success("sig1", "REWRITE", "T01", error_class="syntax")
@@ -448,8 +447,8 @@ class TestMetaLearningOptimizer:
 
     def test_get_strategy_priority_different_error_class_not_mixed(self, tmp_path):
         """不同 error_class 的成功記錄不應影響彼此的優先順序。"""
-        from autoclaude.utils.knowledge_base import FailureKnowledgeBase
         from autoclaude.execution.failure_tracker import STRATEGY_TYPES
+        from autoclaude.utils.knowledge_base import FailureKnowledgeBase
         kb = FailureKnowledgeBase(str(tmp_path / "kb.jsonl"))
         # syntax 成功 3 次使用 SIMPLIFY
         for i in range(3):
@@ -469,8 +468,8 @@ class TestMetaLearningOptimizer:
 
     def test_failure_tracker_next_strategy_uses_kb_priority(self, tmp_path):
         """FailureTracker.next_strategy() 應優先使用 KB 建議的策略。"""
-        from autoclaude.utils.knowledge_base import FailureKnowledgeBase
         from autoclaude.execution.failure_tracker import FailureTracker
+        from autoclaude.utils.knowledge_base import FailureKnowledgeBase
         kb = FailureKnowledgeBase(str(tmp_path / "kb.jsonl"))
         # SPLIT 策略對 assertion 成功 3 次
         for i in range(3):
@@ -555,7 +554,7 @@ class TestProgressiveContextSummarization:
 # ──────────────────────────────────────────────
 
 def _make_playbook(n_tasks: int = 3):
-    from autoclaude.models.playbook import Playbook, PlaybookTask, GlobalInvariants
+    from autoclaude.models.playbook import GlobalInvariants, Playbook, PlaybookTask
     return Playbook(
         version="1.0",
         project="TestProject",
@@ -656,7 +655,7 @@ class TestPlaybookEvolver:
         playbook_path = str(tmp_path / "test.yaml")
         # 建立虛擬 playbook 檔
         import yaml
-        with open(playbook_path, "w") as f:
+        with open(playbook_path, "w", encoding="utf-8") as f:
             yaml.dump({"version": "1.0", "project": "test", "tasks": []}, f)
         evolved_path = ev.apply_evolution(playbook, proposal, playbook_path)
         assert "evolved_test.yaml" in evolved_path
@@ -686,7 +685,7 @@ class TestPlaybookEvolver:
         )
         playbook_path = str(tmp_path / "split_test.yaml")
         import yaml
-        with open(playbook_path, "w") as f:
+        with open(playbook_path, "w", encoding="utf-8") as f:
             yaml.dump({"version": "1.0", "project": "test", "tasks": []}, f)
         evolved_path = ev.apply_evolution(playbook, proposal, playbook_path)
 
@@ -702,9 +701,10 @@ class TestPlaybookEvolver:
 
     def test_apply_evolution_preserves_global_goal(self, tmp_path):
         """apply_evolution 後，演化 Playbook 應保留 global_goal（Gap-011-A）。"""
-        from autoclaude.evolution.playbook_evolver import PlaybookEvolutionProposal
-        from autoclaude.models.playbook import PlaybookTask, Playbook, GlobalInvariants
         import yaml
+
+        from autoclaude.evolution.playbook_evolver import PlaybookEvolutionProposal
+        from autoclaude.models.playbook import GlobalInvariants, Playbook, PlaybookTask
         playbook = Playbook(
             version="1.0",
             project="TestProject",
@@ -721,7 +721,7 @@ class TestPlaybookEvolver:
             new_step=new_step,
         )
         playbook_path = str(tmp_path / "goal_test.yaml")
-        with open(playbook_path, "w") as f:
+        with open(playbook_path, "w", encoding="utf-8") as f:
             yaml.dump({"version": "1.0", "project": "test", "tasks": []}, f)
         evolved_path = ev.apply_evolution(playbook, proposal, playbook_path)
         with open(evolved_path, encoding="utf-8") as f:

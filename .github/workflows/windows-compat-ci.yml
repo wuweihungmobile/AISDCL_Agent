@@ -141,6 +141,7 @@ on:
       - "tools/check_hooks_liveness.py"
       - "tools/check_defect_log_crossref.py"
       - "tools/check_wrapper_thinness.py"
+      - "tools/check_pytest_baseline_sites.py"
       - "tools/git_hooks_install_common.py"
       - "tools/_stdio_utf8.py"
       - "**/*.ps1"
@@ -181,6 +182,7 @@ on:
       - "tools/check_hooks_liveness.py"
       - "tools/check_defect_log_crossref.py"
       - "tools/check_wrapper_thinness.py"
+      - "tools/check_pytest_baseline_sites.py"
       - "tools/git_hooks_install_common.py"
       - "tools/_stdio_utf8.py"
       - "**/*.ps1"
@@ -274,7 +276,10 @@ jobs:
       - name: dot-source tools/dev_start.ps1（同上，日常開工入口）
         shell: pwsh
         run: |
-          . ./tools/dev_start.ps1
+          # R13 CI-6：補 --no-sync 對齊 macos-compat-ci.yml 三處 dev_start 既有寫法
+          # （CI 內不需 git 同步、省一次網路 fetch；dev_start.ps1 以
+          # ValueFromRemainingArguments 的 $RestArgs 原樣透傳給核心 tools/dev_start.py）
+          . ./tools/dev_start.ps1 --no-sync
           if ($LASTEXITCODE -ne 0) { throw "dev_start.ps1 核心邏輯（tools/dev_start.py）回報失敗，exit=$LASTEXITCODE" }
           Write-Host "dev_start.ps1 執行成功"
 
@@ -610,7 +615,9 @@ jobs:
           ./tools/bootstrap.ps1
           if (-not (Test-Path .venv\Scripts\python.exe)) { throw "bootstrap.ps1（Windows PowerShell 5.1）執行後 .venv\Scripts\python.exe 未建立" }
           Write-Host "bootstrap.ps1（Windows PowerShell 5.1）執行成功，.venv 已建立"
-          . ./tools/dev_start.ps1
+          # R13 CI-6：補 --no-sync（同 windows-smoke dot-source step 的說明——對齊
+          # macos 側既有寫法；$RestArgs 透傳，PS5.1 與 pwsh 參數機制相同）
+          . ./tools/dev_start.ps1 --no-sync
           if ($LASTEXITCODE -ne 0) { throw "dev_start.ps1（Windows PowerShell 5.1）核心邏輯（tools/dev_start.py）回報失敗，exit=$LASTEXITCODE" }
           Write-Host "dev_start.ps1（Windows PowerShell 5.1）執行成功"
           Remove-Item -Recurse -Force .venv

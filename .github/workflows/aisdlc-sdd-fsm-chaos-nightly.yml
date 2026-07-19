@@ -33,6 +33,14 @@ concurrency:
   group: fsm-chaos-nightly
   cancel-in-progress: false
 
+# R13 CI-7：workflow 層顯式最小權限——chaos job 先前未宣告（繼承 repo 預設，可能為
+# write-all），其步驟僅 checkout / pytest / chaos_runner / upload-artifact（artifact
+# 走 ACTIONS_RUNTIME_TOKEN，不受此限）→ contents: read 即足。track-streak-and-lock
+# 已有 job 層 permissions（actions/contents/issues）——job 層宣告整塊覆寫本區塊，
+# 其 gh issue create 等寫行為不受影響。
+permissions:
+  contents: read
+
 on:
   schedule:
     # 02:00 UTC daily — out of the PR hotpath, before APAC working hours so

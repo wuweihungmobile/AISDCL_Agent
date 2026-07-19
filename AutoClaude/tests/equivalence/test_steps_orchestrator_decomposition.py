@@ -2,7 +2,8 @@
 SD_07 W1: steps_orchestrator/_impl.py 拆解後行為等價測試
 
 驗證項目（≥ 8 case）：
-1. `_escalation_handler.py` 公開 API 存在（handle_convergence_escalation / handle_max_retries_escalation）
+1. `_escalation_handler.py` 公開 API 存在
+   （handle_convergence_escalation / handle_max_retries_escalation）
 2. `_correction_helpers.py` 公開 API 存在（apply_step_mutations / validate_and_retry_correction）
 3. `_escalation_handler._handle_goal_synthesis_recovery` private helper 存在
 4. 模組 import 不引入額外副作用（top-level import 無錯誤）
@@ -21,9 +22,6 @@ import inspect
 import subprocess
 import sys
 from pathlib import Path
-
-import pytest
-
 
 # ──────────────────────────────────────────────────────────────
 # Test 1-3：拆解後子模組公開 API
@@ -170,7 +168,7 @@ def test_decomposed_modules_import_cleanly():
             "import autoclaude.execution.steps_orchestrator._correction_helpers; "
             "print('OK')",
         ],
-        capture_output=True, text=True, timeout=30,
+        capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=30,
     )
     assert result.returncode == 0, f"import 失敗：{result.stderr}"
     assert "OK" in result.stdout

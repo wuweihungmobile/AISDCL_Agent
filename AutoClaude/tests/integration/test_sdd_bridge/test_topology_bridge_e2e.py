@@ -64,14 +64,16 @@ def _produce_real_artifact(tmp_path: Path) -> Path:
     # 以 -c 執行（cwd=v0.05 namespace root → sys.path[0]="" 解析為 cwd，tools.fsm_runtime 可載）。
     proc = subprocess.run(
         [sys.executable, "-c", _PRODUCER, str(md), str(sidecar)],
-        cwd=str(_SDD_DIR), capture_output=True, text=True, timeout=120)
+        cwd=str(_SDD_DIR), capture_output=True, text=True,
+        encoding="utf-8", errors="replace", timeout=120)
     assert proc.returncode == 0, f"SDD producer 失敗：{proc.stderr}"
     assert md.is_file() and sidecar.is_file()
     return md
 
 
 def test_consume_real_sdd_rendered_dashboard(tmp_path):
-    """AT-14-3-1：AutoClaude adapter 消費真實 SDD 渲染產物 → 還原拓樸（presenter 契約端到端成立）。"""
+    """AT-14-3-1：AutoClaude adapter 消費真實 SDD 渲染產物 → 還原拓樸
+    （presenter 契約端到端成立）。"""
     md = _produce_real_artifact(tmp_path)
     dash = SddTopologyDashboardAdapter().load_dashboard(str(md))
 

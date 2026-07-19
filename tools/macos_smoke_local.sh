@@ -19,6 +19,10 @@
 #       （比照 CI 對應 step，含 2026-07-16 P1 回歸鎖）
 #   [5] python tools/check_ntfs_paths.py + tools/check_script_parity.py（唯讀，
 #       直接對本 repo 跑）
+#   [6] install_mac_nightly.sh --render-only 產 plist 至 temp + plutil -lint
+#       （R13 ARCH-R13-3 隨安裝器新增；只驗 render，不做 launchctl 實載；
+#       CI 對應 step 已補於 macos-compat-ci.yml macos-smoke job〔QA-R13-3〕，
+#       CI 帳務停擺中、其首次真跑取證待帳務恢復）
 #
 # 限制（如實揭露）：
 #   - fake repo 以 git clone 自本 repo HEAD 建立 → 未 commit 的變更不在驗證範圍
@@ -85,9 +89,9 @@ if [ -n "$(git -C "$REPO_ROOT" status --porcelain 2>/dev/null | head -1)" ]; the
   echo "⚠ 本 repo 有未 commit 變更——[2][3][4] 驗證的是 HEAD（clone），未含這些變更"
 fi
 
-# ── [1/5] bash -n：根層 tools/ 全部 .sh + 三支 dispatcher hooks ────────────────
+# ── [1/6] bash -n：根層 tools/ 全部 .sh + 三支 dispatcher hooks ────────────────
 echo ""
-echo "--- [1/5] bash -n 語法檢查（根層 .sh + dispatcher hooks）---"
+echo "--- [1/6] bash -n 語法檢查（根層 .sh + dispatcher hooks）---"
 # heredoc 迴圈（非管線）：計數器在主 shell 累積——bash 3.2 無 lastpipe，
 # 管線尾端 while 的變數變更會隨 subshell 消失（同 tools/git-hooks/pre-commit 手法）。
 sh_files="$(find "$REPO_ROOT/tools" -type f -name '*.sh')"
@@ -126,9 +130,9 @@ else
   exit 1
 fi
 
-# ── [2/5] dispatcher 直呼煙霧（比照 CI /bin/bash 直接執行 step）────────────────
+# ── [2/6] dispatcher 直呼煙霧（比照 CI /bin/bash 直接執行 step）────────────────
 echo ""
-echo "--- [2/5] dispatcher 直呼煙霧（$SYS_BASH 直接執行，fake repo）---"
+echo "--- [2/6] dispatcher 直呼煙霧（$SYS_BASH 直接執行，fake repo）---"
 (
   cd "$FAKE" || exit 9
 
@@ -180,9 +184,9 @@ case "$sub_rc" in
   *) fail "dispatcher 直呼煙霧異常中斷（rc=$sub_rc）" ;;
 esac
 
-# ── [3/5] hooks 安裝／解除往返 + linked worktree 拒絕 ─────────────────────────
+# ── [3/6] hooks 安裝／解除往返 + linked worktree 拒絕 ─────────────────────────
 echo ""
-echo "--- [3/5] install_git_hooks.sh / install-hooks.sh 往返 + worktree 拒絕（fake repo）---"
+echo "--- [3/6] install_git_hooks.sh / install-hooks.sh 往返 + worktree 拒絕（fake repo）---"
 
 # 3a. AutoClaude/tools/install_git_hooks.sh 安裝／解除往返
 (
@@ -253,9 +257,9 @@ else
   fail "worktree add 失敗——install-hooks.sh 拒絕情境未能執行（非假 PASS）"
 fi
 
-# ── [4/5] AISDLC_SDD LATEST install_post_commit.sh 於 worktree 實跑 ────────────
+# ── [4/6] AISDLC_SDD LATEST install_post_commit.sh 於 worktree 實跑 ────────────
 echo ""
-echo "--- [4/5] install_post_commit.sh worktree 實跑 + 移除後路徑斷言（fake repo）---"
+echo "--- [4/6] install_post_commit.sh worktree 實跑 + 移除後路徑斷言（fake repo）---"
 # 動態解析 LATEST：委派 AISDLC_SDD/scripts/sdd_version.py（R10 DEF-101-133 SSOT，
 # 鏡射 ci-gate.sh 同款；fake repo 為完整 clone，tracked 過濾語意成立；python 已於
 # 檔頭前置守門）。原 `ls -d ... | sort -V | tail -1` 尾端未錨定＋掃磁碟，複製品目錄
@@ -302,9 +306,9 @@ else
   fi
 fi
 
-# ── [5/5] 守門工具（唯讀，直接對本 repo）──────────────────────────────────────
+# ── [5/6] 守門工具（唯讀，直接對本 repo）──────────────────────────────────────
 echo ""
-echo "--- [5/5] check_ntfs_paths.py + check_script_parity.py（本 repo，唯讀）---"
+echo "--- [5/6] check_ntfs_paths.py + check_script_parity.py（本 repo，唯讀）---"
 if (cd "$REPO_ROOT" && python tools/check_ntfs_paths.py); then
   pass "tools/check_ntfs_paths.py"
 else
@@ -316,12 +320,31 @@ else
   fail "tools/check_script_parity.py"
 fi
 
+# ── [6/6] install_mac_nightly.sh --render-only plist 產出＋plutil -lint ────────
+echo ""
+echo "--- [6/6] install_mac_nightly.sh --render-only plist 產出＋plutil -lint ---"
+# R13 ARCH-R13-3：只驗 render＋plutil -lint，絕不做 launchctl 實載（真安裝屬
+# 使用者 ops）。非 macOS（無 launchd/plutil，安裝器依設計 fail-loud exit 1）時
+# 明確 SKIP-計-PASS（比照 [2] NTFS 子測試慣例，不偽裝成已驗）。
+if [ "$(uname)" = "Darwin" ]; then
+  plist_out="$WORK/com.autoclaude.nightly.plist"
+  if "$SYS_BASH" "$REPO_ROOT/tools/install_mac_nightly.sh" --render-only "$plist_out" \
+      && plutil -lint "$plist_out" >/dev/null; then
+    pass "install_mac_nightly.sh --render-only plist 產出＋plutil -lint"
+  else
+    fail "install_mac_nightly.sh --render-only 產出或 plutil -lint 失敗"
+  fi
+else
+  echo "  （SKIP）非 macOS 無 launchd/plutil——plist render 驗證待真 macOS 實跑"
+  pass "install_mac_nightly.sh --render-only（SKIP-計-PASS：非 macOS）"
+fi
+
 # ── 彙總 ─────────────────────────────────────────────────────────────────────
 # R10 二審 QA 觀察項：PASS 下限釘選（比照 run_root_unittests MIN_TESTS 精神）——
 # 只斷言 FAIL==0 時，驗證段落被整段刪除仍 exit 0（靜默縮面）；PASS 低於下限即紅。
-# 刻意刪減驗證項時同步下修本值（現況滿版 PASS=10，含非 macOS 平台 NTFS 子測試
-# 的 SKIP-計-PASS 分支）。
-MIN_PASS=10
+# 刻意刪減驗證項時同步下修本值（現況滿版 PASS=11——R13 [6] plist render 步入列，
+# 含非 macOS 平台 NTFS／plist 兩子測試的 SKIP-計-PASS 分支）。
+MIN_PASS=11
 if [ "$PASS" -lt "$MIN_PASS" ]; then
   fail "PASS 總數 $PASS 低於下限 $MIN_PASS——驗證段落疑似被刪減（靜默縮面）"
 fi

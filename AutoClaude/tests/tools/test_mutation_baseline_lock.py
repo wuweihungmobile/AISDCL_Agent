@@ -13,7 +13,6 @@
 """
 from __future__ import annotations
 
-import datetime as _dt
 import json
 from pathlib import Path
 
@@ -33,7 +32,6 @@ from tools.mutation_baseline_lock import (
     should_lock,
     write_baseline,
 )
-
 
 # ----- parse_mutmut_log -----
 
@@ -207,7 +205,8 @@ def test_should_lock_below_extra_tolerance_still_rejects(tmp_path: Path) -> None
         {"kill_rate": 0.71, "module": "token_guard", "source_sha256": f"u{i:015d}"}
         for i in range(6)
     ]
-    history.append({"kill_rate": 0.67, "module": "token_guard", "source_sha256": "u006"})  # 第 7 筆 67% < 68%
+    # 第 7 筆 67% < 68%
+    history.append({"kill_rate": 0.67, "module": "token_guard", "source_sha256": "u006"})
     locked, value = should_lock(history, "token_guard")
     assert locked is False
     assert value is None
@@ -252,7 +251,7 @@ def test_append_history_same_date_overwrites(tmp_path: Path) -> None:
     }
     append_history(hist, rec1)
     append_history(hist, rec2)
-    records = [json.loads(ln) for ln in hist.read_text().splitlines() if ln.strip()]
+    records = [json.loads(ln) for ln in hist.read_text(encoding="utf-8").splitlines() if ln.strip()]
     assert len(records) == 1
     assert records[0]["kill_rate"] == 0.7
 
@@ -274,7 +273,7 @@ def test_append_history_same_date_different_sha_all_kept(tmp_path: Path) -> None
     }
     append_history(hist, rec1)
     append_history(hist, rec2)
-    records = [json.loads(ln) for ln in hist.read_text().splitlines() if ln.strip()]
+    records = [json.loads(ln) for ln in hist.read_text(encoding="utf-8").splitlines() if ln.strip()]
     assert len(records) == 2  # 同日不同 sha → 皆計入
     assert {r["source_sha256"] for r in records} == {"aaaa000000000001", "bbbb000000000002"}
 
@@ -292,7 +291,7 @@ def test_append_history_same_sha_keeps_latest(tmp_path: Path) -> None:
     }
     append_history(hist, rec1)
     append_history(hist, rec2)
-    records = [json.loads(ln) for ln in hist.read_text().splitlines() if ln.strip()]
+    records = [json.loads(ln) for ln in hist.read_text(encoding="utf-8").splitlines() if ln.strip()]
     assert len(records) == 1
     assert records[0]["kill_rate"] == 0.76
 
@@ -306,7 +305,7 @@ def test_append_history_same_sha_idle_rerun_dedups_across_days(tmp_path: Path) -
             "timestamp": f"2026-06-{day:02d}T18:00:00+00:00",
             "module": "token_guard", "kill_rate": 0.765, "source_sha256": "dddd000000000004",
         })
-    records = [json.loads(ln) for ln in hist.read_text().splitlines() if ln.strip()]
+    records = [json.loads(ln) for ln in hist.read_text(encoding="utf-8").splitlines() if ln.strip()]
     assert len(records) == 1  # idle 8 天同 sha → 仍只 1 筆（不稀釋）
 
 
@@ -316,15 +315,19 @@ def test_compact_history_by_sha_collapses_duplicates_with_backup(tmp_path: Path)
     hist = tmp_path / "history.jsonl"
     # 模擬既有按日累積：sha-A ×3（idle 重跑）+ sha-B ×1
     recs = [
-        {"timestamp": "2026-06-20T18:00:00+00:00", "module": "token_guard", "kill_rate": 0.74, "source_sha256": "A0"},
-        {"timestamp": "2026-06-21T18:00:00+00:00", "module": "token_guard", "kill_rate": 0.75, "source_sha256": "A0"},
-        {"timestamp": "2026-06-22T18:00:00+00:00", "module": "token_guard", "kill_rate": 0.765, "source_sha256": "A0"},
-        {"timestamp": "2026-06-25T18:00:00+00:00", "module": "token_guard", "kill_rate": 0.76, "source_sha256": "B1"},
+        {"timestamp": "2026-06-20T18:00:00+00:00", "module": "token_guard",
+         "kill_rate": 0.74, "source_sha256": "A0"},
+        {"timestamp": "2026-06-21T18:00:00+00:00", "module": "token_guard",
+         "kill_rate": 0.75, "source_sha256": "A0"},
+        {"timestamp": "2026-06-22T18:00:00+00:00", "module": "token_guard",
+         "kill_rate": 0.765, "source_sha256": "A0"},
+        {"timestamp": "2026-06-25T18:00:00+00:00", "module": "token_guard",
+         "kill_rate": 0.76, "source_sha256": "B1"},
     ]
     hist.write_text("\n".join(json.dumps(r) for r in recs) + "\n", encoding="utf-8")
     before, after = compact_history_by_sha(hist)
     assert (before, after) == (4, 2)  # A0 ×3 壓成 1 + B1 = 2
-    records = [json.loads(ln) for ln in hist.read_text().splitlines() if ln.strip()]
+    records = [json.loads(ln) for ln in hist.read_text(encoding="utf-8").splitlines() if ln.strip()]
     assert {r["source_sha256"] for r in records} == {"A0", "B1"}
     a0 = next(r for r in records if r["source_sha256"] == "A0")
     assert a0["kill_rate"] == 0.765  # A0 留最新（06-22 那筆）
@@ -340,7 +343,7 @@ def test_append_history_different_dates_preserve_all(tmp_path: Path) -> None:
             "kill_rate": 0.6 + 0.05 * day,
         }
         append_history(hist, rec)
-    records = [json.loads(ln) for ln in hist.read_text().splitlines() if ln.strip()]
+    records = [json.loads(ln) for ln in hist.read_text(encoding="utf-8").splitlines() if ln.strip()]
     assert len(records) == 3
 
 
@@ -348,10 +351,11 @@ def test_append_history_different_modules_dont_overwrite(tmp_path: Path) -> None
     """同日不同 module 不應彼此覆寫。"""
     hist = tmp_path / "history.jsonl"
     rec_tg = {"timestamp": "2026-05-21T08:00:00+00:00", "module": "token_guard", "kill_rate": 0.7}
-    rec_gs = {"timestamp": "2026-05-21T08:00:00+00:00", "module": "goal_synthesis", "kill_rate": 0.6}
+    rec_gs = {"timestamp": "2026-05-21T08:00:00+00:00", "module": "goal_synthesis",
+              "kill_rate": 0.6}
     append_history(hist, rec_tg)
     append_history(hist, rec_gs)
-    records = [json.loads(ln) for ln in hist.read_text().splitlines() if ln.strip()]
+    records = [json.loads(ln) for ln in hist.read_text(encoding="utf-8").splitlines() if ln.strip()]
     assert len(records) == 2
 
 
@@ -520,7 +524,8 @@ def test_partial_missing_sha_with_enough_unique_should_lock() -> None:
 
     部分缺 sha + non-None 部分全 unique 且 ≥ N - MAX_BACKWARD_COMPAT_MISSING = 5 → 寬鬆鎖定。
 
-    取證情境：sha 欄位導入過渡期（前 2 筆舊紀錄缺欄位 5/20-5/21 + 後 5 筆每筆不同 commit）→ 允許鎖定。
+    取證情境：sha 欄位導入過渡期（前 2 筆舊紀錄缺欄位 5/20-5/21 + 後 5 筆每筆不同 commit）
+    → 允許鎖定。
     """
     history = [
         {"kill_rate": 0.80, "module": "token_guard"},  # 缺欄位 ×2（前置 legacy）

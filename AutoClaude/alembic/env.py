@@ -16,6 +16,16 @@ import os
 import re
 import sys
 
+# R13 DEF-101-168 家族：本檔由 alembic 載入（無 main()），下方兩處 ❌ 訊息
+# （ImportError / 缺 DSN）在 Windows 主控台預設碼頁（如 cp950）會
+# UnicodeEncodeError，故於首個輸出可能發生前守護式 reconfigure 為 UTF-8
+# （慣例同 tools/seed_kb.py）。
+for _stream in (sys.stdout, sys.stderr):
+    try:
+        _stream.reconfigure(encoding="utf-8")  # type: ignore[union-attr]
+    except (AttributeError, OSError):
+        pass
+
 try:
     from sqlalchemy import engine_from_config, pool
 

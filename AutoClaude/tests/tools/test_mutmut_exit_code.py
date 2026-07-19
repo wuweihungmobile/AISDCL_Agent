@@ -202,7 +202,7 @@ class TestCli:
     def test_classify_rc_zero_exits_zero(self):
         result = subprocess.run(
             [sys.executable, "tools/mutmut_exit_code.py", "classify", "0"],
-            capture_output=True, text=True,
+            capture_output=True, text=True, encoding="utf-8", errors="replace",
         )
         assert result.returncode == 0
         data = json.loads(result.stdout)
@@ -213,7 +213,7 @@ class TestCli:
         """bit0 set → CLI 退出碼=1（給 stage 判 fail 用）。"""
         result = subprocess.run(
             [sys.executable, "tools/mutmut_exit_code.py", "classify", "1"],
-            capture_output=True, text=True,
+            capture_output=True, text=True, encoding="utf-8", errors="replace",
         )
         assert result.returncode == 1
         data = json.loads(result.stdout)
@@ -223,7 +223,7 @@ class TestCli:
         """bit1 only（survived）→ 退出碼=0（觀察期預期），但 JSON 留 survived=True。"""
         result = subprocess.run(
             [sys.executable, "tools/mutmut_exit_code.py", "classify", "2"],
-            capture_output=True, text=True,
+            capture_output=True, text=True, encoding="utf-8", errors="replace",
         )
         assert result.returncode == 0
         data = json.loads(result.stdout)
@@ -234,7 +234,7 @@ class TestCli:
         """survived+timeout → 仍非 real_fail。"""
         result = subprocess.run(
             [sys.executable, "tools/mutmut_exit_code.py", "classify", "6"],
-            capture_output=True, text=True,
+            capture_output=True, text=True, encoding="utf-8", errors="replace",
         )
         assert result.returncode == 0
 
