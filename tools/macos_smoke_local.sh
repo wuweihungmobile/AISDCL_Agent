@@ -328,11 +328,14 @@ echo "--- [6/6] install_mac_nightly.sh --render-only plist 產出＋plutil -lint
 # 明確 SKIP-計-PASS（比照 [2] NTFS 子測試慣例，不偽裝成已驗）。
 if [ "$(uname)" = "Darwin" ]; then
   plist_out="$WORK/com.autoclaude.nightly.plist"
+  # R14 QA-R14-REV-4：lint 之外加驗 log 落點內容——plist 範本若回退 /tmp
+  #（macOS 週期清理會毀取證，DEF-101-201），純語法 lint 照綠、零訊號。
   if "$SYS_BASH" "$REPO_ROOT/tools/install_mac_nightly.sh" --render-only "$plist_out" \
-      && plutil -lint "$plist_out" >/dev/null; then
-    pass "install_mac_nightly.sh --render-only plist 產出＋plutil -lint"
+      && plutil -lint "$plist_out" >/dev/null \
+      && grep -q "AutoClaude/logs/nightly_mac_launchd.log" "$plist_out"; then
+    pass "install_mac_nightly.sh --render-only plist 產出＋plutil -lint＋log 落點斷言"
   else
-    fail "install_mac_nightly.sh --render-only 產出或 plutil -lint 失敗"
+    fail "install_mac_nightly.sh --render-only 產出、plutil -lint 或 log 落點斷言失敗"
   fi
 else
   echo "  （SKIP）非 macOS 無 launchd/plutil——plist render 驗證待真 macOS 實跑"

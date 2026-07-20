@@ -15,7 +15,7 @@
 SD_09 W1 mutation pilot（TokenGuardPlugin）`should_lock` 需 tail 7 筆紀錄、7 個 unique `source_sha256`。實測（improving_100，2026-06-30）：kill_rate 閘已過（tail7 最小 0.6956 ≥ 0.68），但 unique sha 卡在 **3/7**，懸停逾 G0 deadline（2026-06-26）。
 
 ### 1.2 根因：兩機制把「源碼演進證據」綁死成「日曆天數」
-1. **觸發點**：`tools/run_local_nightly.ps1:25` schtasks `/SC DAILY /ST 02:00` + `autoclaude-ci.yml` cron — **每天只跑一次**。
+1. **觸發點**：`tools/run_local_nightly.ps1:25` schtasks `/SC DAILY /ST 02:00` + `autoclaude-ci.yml` cron — **每天只跑一次**（R14 註：GHA cron 已於 2026-07-20 CI-2 額度裁決降為每週一，每日觸發僅剩本地 schtasks——本節其餘推論不受影響，unique-sha 累積反而更慢，更凸顯本 ADR 解耦決策的必要）。
 2. **M-05 去重**：`mutation_baseline_lock.py:197-203` 去重鍵＝「同 module + 同 **UTC 日期**」（**不看 sha**）→ 同一天即使源碼改 N 次（N 個不同 sha），也只留最後一筆。
 
 兩者疊加 ⇒ **unique sha 每 UTC 日最多 +1** ⇒ 7 個 unique sha **至少需 7 個日曆天**；中間任一日 idle，tail 7 窗口被重複 sha 稀釋 ⇒ 可能永不收斂（空轉數週至一月）。

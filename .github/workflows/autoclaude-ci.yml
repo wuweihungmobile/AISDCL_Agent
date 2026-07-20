@@ -27,14 +27,20 @@ on:
       - "AISDLC_SDD/AISDLC_SDD_v0.01/**"
       - "AISDLC_SDD/AISDLC_SDD_v0.02/**"
       - "AISDLC_SDD/AISDLC_SDD_v0.05/**"
-  # SD_07 W2 T2-6（PM #2）：nightly 跑真實 PG e2e（02:00 UTC）
+  # SD_07 W2 T2-6（PM #2）：真實 PG e2e（02:00 UTC）
   # SD_09 W0 M-01：mutation cron 拆 3 job — TG 03:00 UTC active；GS/Coord dormant 待 W1/W2 啟用
   # ADR-SD09-002 §2.3：單一時間 1 個 active pilot module（GS 04 / Coord 05 UTC schedule 待 W1/W2 開啟）
+  # R14 CI-2 額度裁決（2026-07-20，使用者核可）：pg-e2e/perf/mutation 由每日降為每週一，
+  # 對齊 macos/windows-compat weekly 的「週一深度回歸窗口」。每日兜底＝本地 nightly，
+  # 且深度三軌（pg-e2e/perf/mutation）僅由 Windows 7-stage（run_local_nightly.ps1 +
+  # schtasks）承擔；mac 側為 4-stage 薄聚合器（run_local_nightly.sh + launchd，R11 D1
+  # 拍板不載深度軌），不覆蓋此三軌（R14 SCAN-CI-1 精確化）。job id/name 依 R11 compat
+  # 降頻先例保留 *-nightly 不改（文件引用面大；語意以本註記與 cron 為準）。
   schedule:
-    - cron: "0 2 * * *"   # pg-e2e-nightly（pgvector recall + p95）
-    - cron: "0 3 * * *"   # mutation-test-tokenguard-nightly（active pilot）
-    # - cron: "0 4 * * *" # mutation-test-goalsynthesis-nightly（dormant，待 W1 啟用）
-    # - cron: "0 5 * * *" # mutation-test-coordinator-nightly（dormant，待 W2 啟用）
+    - cron: "0 2 * * 1"   # pg-e2e-nightly + perf-baseline（每週一 02:00 UTC）
+    - cron: "0 3 * * 1"   # mutation-test-tokenguard-nightly（active pilot，每週一 03:00 UTC）
+    # - cron: "0 4 * * 1" # mutation-test-goalsynthesis-nightly（dormant，待 W1 啟用）
+    # - cron: "0 5 * * 1" # mutation-test-coordinator-nightly（dormant，待 W2 啟用）
   workflow_dispatch:
 
 # R13 CI-7：顯式最小權限（先前全檔未宣告 permissions → 各 job 繼承 repo 預設，
@@ -53,6 +59,10 @@ jobs:
     name: Tests + LOC Budget
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    # R14 SCAN-CI-6：push 閘四 job（test/claude-md-budget/equivalence/pg-contract）不隨
+    # 每週一兩個 cron 重跑（先前每次 schedule 都完整重跑＝純額度洩漏；額度緊縮期裁決砍除，
+    # 排程窗口只跑 *-nightly 三 job；push/PR/dispatch 行為不變）。
+    if: github.event_name != 'schedule'
 
     steps:
       - name: Checkout
@@ -90,6 +100,8 @@ jobs:
     name: CLAUDE.md Budget + Snapshot Freshness
     runs-on: ubuntu-latest
     timeout-minutes: 3
+    # R14 SCAN-CI-6：同 test job——schedule 事件不重跑 push 閘。
+    if: github.event_name != 'schedule'
 
     steps:
       - name: Checkout
@@ -132,6 +144,8 @@ jobs:
     name: Equivalence Snapshot
     runs-on: ubuntu-latest
     timeout-minutes: 10
+    # R14 SCAN-CI-6：同 test job——schedule 事件不重跑 push 閘。
+    if: github.event_name != 'schedule'
     needs: test
 
     steps:
@@ -164,6 +178,8 @@ jobs:
     name: PG Contract Tests
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    # R14 SCAN-CI-6：同 test job——schedule 事件不重跑 push 閘。
+    if: github.event_name != 'schedule'
     needs: test
     # DEF-101-051（SD_10 PG-track）已補完三層 goal_task_id 接線 + alembic 0017 run_kind
     # 判別欄（CHECK 改為「僅三層 run 需 goal」，消除 playbook_runs 時間炸彈；playbook_versions
@@ -230,7 +246,8 @@ jobs:
     timeout-minutes: 30
     # DEF-01-004（improving_02 W2）：綁定 pg-e2e 自身 02:00 UTC cron，避免 03:00
     # mutation cron 也觸發致每晚雙跑（對齊 mutation `0 3` / perf-baseline `0 2` 既有過濾）。
-    if: (github.event_name == 'schedule' && github.event.schedule == '0 2 * * *') || github.event_name == 'workflow_dispatch'
+    # R14 CI-2：cron 降週頻後 if 比對字串同步改（漏改會使本 job 永不觸發）。
+    if: (github.event_name == 'schedule' && github.event.schedule == '0 2 * * 1') || github.event_name == 'workflow_dispatch'
     # SD_09 W0 Z1 解除（2026-05-20，B-09）：X1/Y1/B-01/B-07/B-08 全綠後移除 continue-on-error: true
 
     services:
@@ -332,8 +349,8 @@ jobs:
     name: Mutation Test - TokenGuardPlugin (active pilot) - 03:00 UTC
     runs-on: ubuntu-latest
     timeout-minutes: 45
-    # 觸發：03:00 UTC nightly + 手動 workflow_dispatch
-    if: (github.event_name == 'schedule' && github.event.schedule == '0 3 * * *') || github.event_name == 'workflow_dispatch'
+    # 觸發：每週一 03:00 UTC（R14 CI-2 降頻）+ 手動 workflow_dispatch
+    if: (github.event_name == 'schedule' && github.event.schedule == '0 3 * * 1') || github.event_name == 'workflow_dispatch'
     # SD_09 W0 Z1 解除（2026-05-20，B-09）：X1/Y1/B-01/B-07/B-08 全綠後移除 continue-on-error: true
 
     steps:
@@ -510,8 +527,8 @@ jobs:
     name: Perf Baseline (CPU-bound scenarios) - nightly
     runs-on: ubuntu-latest
     timeout-minutes: 30
-    # 觸發：跟原 pg-e2e-nightly 同 02:00 UTC（含 03:00 UTC TG 也會跑，無傷）
-    if: (github.event_name == 'schedule' && github.event.schedule == '0 2 * * *') || github.event_name == 'workflow_dispatch'
+    # 觸發：跟 pg-e2e-nightly 同每週一 02:00 UTC cron（R14 CI-2 降頻；if 過濾後 03:00 cron 不會觸發本 job）
+    if: (github.event_name == 'schedule' && github.event.schedule == '0 2 * * 1') || github.event_name == 'workflow_dispatch'
     # SD_09 W0 Z1 解除（2026-05-20，B-09）：X1/Y1/B-01/B-07/B-08 全綠後移除 continue-on-error: true
 
     steps:

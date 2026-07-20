@@ -72,6 +72,20 @@ $HookContent = $HookContent -replace "`r`n", "`n"
 if (-not $HookContent.EndsWith("`n")) { $HookContent += "`n" }
 [System.IO.File]::WriteAllText($HookTarget, $HookContent, (New-Object System.Text.UTF8Encoding($false)))
 
+# 非 Windows 載體（pwsh on macOS/Linux——R11 取證即實際走過此載體）下 git 要求 hook
+# 有 exec bit：WriteAllText 不設 file mode，缺位時 git 直呼僅印 hint 後忽略、根層
+# dispatcher 的 [ -x ] 判 false 後零告警跳過（advisory 恆 exit 0）＝靜默失效
+#（R14 SCAN-SH-2）。PS 5.1 無 $IsWindows 自動變數，改以 OSVersion.Platform 判 Unix。
+if ([System.Environment]::OSVersion.Platform -eq 'Unix') {
+    & chmod +x $HookTarget
+    # chmod 失敗 fail-loud（R14 一審 SD-R14-REV-2：.sh 版在 set -e 下 chmod 失敗即中止，
+    # .ps1 無 Stop preference 時 native 失敗屬 non-terminating——不攔即靜默裝出壞 hook）。
+    if ($LASTEXITCODE -ne 0) {
+        Write-Error "chmod +x failed for ${HookTarget} (exit ${LASTEXITCODE}) - git would silently ignore a non-executable hook"
+        exit 1
+    }
+}
+
 Write-Output "Installed PostCommit advisory hooks at: $HookTarget"
 Write-Output "  - drift   -> .git/COMMIT_DRIFT_WARNING"
 Write-Output "  - closure -> .git/CLOSURE_EVIDENCE_VERDICT (DEF-20-001)"

@@ -131,6 +131,9 @@ on:
       - "tools/dev_start.py"
       - "tools/tests/**"
       - "tools/run_root_unittests.py"
+      # R14：tools/tests/test_subprocess_encoding_hygiene.py 單檔掃描清單消費此檔
+      #（樹外 tracked 零散 .py 納管）——只改該檔時其回歸鎖須跑（DEF-101-042 同構）
+      - "AutoClaude/tmp_lint_check.py"
       # R10：tools/tests 內含讀取這兩支 workflow 的回歸鎖（test_root_infra_parity
       # / test_pre_push_dispatcher 經 pre-push 消費 aisdlc-sdd-ci paths）——只改
       # 該兩支 yml 時本 workflow 也須重跑該鎖（DEF-101-042 同構）
@@ -172,6 +175,9 @@ on:
       - "tools/dev_start.py"
       - "tools/tests/**"
       - "tools/run_root_unittests.py"
+      # R14：tools/tests/test_subprocess_encoding_hygiene.py 單檔掃描清單消費此檔
+      #（樹外 tracked 零散 .py 納管）——只改該檔時其回歸鎖須跑（DEF-101-042 同構）
+      - "AutoClaude/tmp_lint_check.py"
       # R10：tools/tests 內含讀取這兩支 workflow 的回歸鎖（test_root_infra_parity
       # / test_pre_push_dispatcher 經 pre-push 消費 aisdlc-sdd-ci paths）——只改
       # 該兩支 yml 時本 workflow 也須重跑該鎖（DEF-101-042 同構）
@@ -684,6 +690,7 @@ jobs:
   windows-nightly-alert:
     name: Windows nightly 失敗提醒（best-effort，不影響 nightly-full 本身的 continue-on-error）
     runs-on: ubuntu-latest
+    timeout-minutes: 10   # R14 QA-R14-RR-1：輕量 alert job（發 gh issue），補 timeout 防卡死燒滿 360 分鐘
     needs: windows-nightly-full
     if: always() && (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch')
     permissions:

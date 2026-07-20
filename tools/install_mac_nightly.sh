@@ -14,7 +14,9 @@
 #
 # plist 內容對齊 ONBOARDING.md §8 現行範本語意：Label=com.autoclaude.nightly、
 # ProgramArguments=/bin/bash + AutoClaude/tools/run_local_nightly.sh 絕對路徑、
-# StartCalendarInterval 02:00、StandardOut/ErrorPath=/tmp/autoclaude_nightly.{log,err}。
+# StartCalendarInterval 02:00、StandardOut/ErrorPath=AutoClaude/logs/nightly_mac_launchd.{log,err}
+#（R14 ARCH-GAP-3：原導 /tmp 會被 macOS 週期清理＋重開機清空，深夜失敗數日後排查 log 已散失；
+# 改與心跳檔同目錄（gitignored）集中取證，install 時 mkdir -p 保證目錄存在）。
 #
 # --status 心跳三態語意對齊 tools/dev_start.py _check_nightly_heartbeat（R12
 # ARCH-R12-2）：缺席→提示（排程可能未啟用）；mtime > 8 天→過期警告；否則新鮮。
@@ -43,6 +45,8 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 NIGHTLY_SH="${REPO_ROOT}/AutoClaude/tools/run_local_nightly.sh"
 HEARTBEAT="${REPO_ROOT}/AutoClaude/logs/nightly_mac_latest.log"
+# launchd stdout/stderr 落點（R14 ARCH-GAP-3：遷出 /tmp，與心跳檔同目錄集中取證）
+LOG_DIR="${REPO_ROOT}/AutoClaude/logs"
 LABEL="com.autoclaude.nightly"
 PLIST_DIR="${HOME}/Library/LaunchAgents"
 PLIST_PATH="${PLIST_DIR}/${LABEL}.plist"
@@ -75,8 +79,8 @@ render_plist() {
   </array>
   <key>StartCalendarInterval</key>
   <dict><key>Hour</key><integer>2</integer><key>Minute</key><integer>0</integer></dict>
-  <key>StandardOutPath</key><string>/tmp/autoclaude_nightly.log</string>
-  <key>StandardErrorPath</key><string>/tmp/autoclaude_nightly.err</string>
+  <key>StandardOutPath</key><string>${LOG_DIR}/nightly_mac_launchd.log</string>
+  <key>StandardErrorPath</key><string>${LOG_DIR}/nightly_mac_launchd.err</string>
 </dict>
 </plist>
 EOF_PLIST
@@ -107,6 +111,8 @@ report_heartbeat() {
 
 cmd_install() {
   mkdir -p "${PLIST_DIR}"
+  # launchd 不會自動建 StandardOutPath 的目錄，缺目錄時 log 靜默丟失（R14 ARCH-GAP-3）
+  mkdir -p "${LOG_DIR}"
   # write-validate-install：先 render 到暫存檔、lint 通過才 mv 進最終路徑，
   # 避免 lint 失敗時壞檔殘留 LaunchAgents（launchd 掃描噪音＋--status 誤報，SD-R13-3）。
   _tmp_plist="$(mktemp "${TMPDIR:-/tmp}/imn_plist.XXXXXX")"

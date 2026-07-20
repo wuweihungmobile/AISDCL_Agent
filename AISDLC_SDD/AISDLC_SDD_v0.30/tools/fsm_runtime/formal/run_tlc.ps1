@@ -27,7 +27,8 @@ param(
 )
 
 # R9 SD 二審 D-1（DEF-101-124）：本腳本的 native stderr 重定向模式（java -version 2>&1、
-# TLC *>&1 | Tee-Object）在 Windows PowerShell 5.1 + $ErrorActionPreference=Stop 下會把
+# TLC *>&1 | Out-File——R14 前為 Tee-Object，DEF-101-190 改寫，5.1 限制不變）在
+# Windows PowerShell 5.1 + $ErrorActionPreference=Stop 下會把
 # stderr 行包成 ErrorRecord 拋 NativeCommandError（於下方 Java 版本行即中斷，永遠跑不到
 # TLC）——此為既有限制，pwsh 7+ 無此行為。與其讓使用者撞難解錯誤，這裡明確 fail-loud 導流。
 if ($PSVersionTable.PSVersion.Major -lt 6) {
@@ -79,7 +80,7 @@ try {
         -config SDD_FSM.cfg `
         -workers auto `
         -depth $Depth `
-        SDD_FSM.tla *>&1 | Tee-Object -FilePath $LogFile | Out-Null
+        SDD_FSM.tla *>&1 | Out-File -FilePath $LogFile -Encoding utf8
     $TlcExit = $LASTEXITCODE
 
     # Step 4 — 解析結果
@@ -120,7 +121,7 @@ try {
     & java "-XX:+UseParallelGC" -cp $JarPath tlc2.TLC `
         -config FLEET_FSM.cfg `
         -workers auto `
-        FLEET_FSM.tla *>&1 | Tee-Object -FilePath $FleetLog | Out-Null
+        FLEET_FSM.tla *>&1 | Out-File -FilePath $FleetLog -Encoding utf8
     $FleetExit = $LASTEXITCODE
     if ($FleetExit -ne 0) {
         Write-Host "[run_tlc] FAIL FLEET_FSM safety 驗證失敗（見 $FleetLog）" -ForegroundColor Red
@@ -133,7 +134,7 @@ try {
     & java "-XX:+UseParallelGC" -cp $JarPath tlc2.TLC `
         -config FLEET_FSM_LIVENESS.cfg `
         -workers auto `
-        FLEET_FSM.tla *>&1 | Tee-Object -FilePath $FleetLiveLog | Out-Null
+        FLEET_FSM.tla *>&1 | Out-File -FilePath $FleetLiveLog -Encoding utf8
     $FleetLiveExit = $LASTEXITCODE
     if ($FleetLiveExit -eq 0) {
         Write-Host "[run_tlc] OK FLEET_FSM liveness 通過（AllEventuallyDone，無 symmetry 健全驗證）" -ForegroundColor Green

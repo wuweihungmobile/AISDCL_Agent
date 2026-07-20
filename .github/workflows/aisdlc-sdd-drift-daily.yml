@@ -34,8 +34,9 @@ jobs:
     name: emit DAILY drift report
     runs-on: ubuntu-latest
     timeout-minutes: 10
-    # 與 arch-fitness nightly-strict 共用同一 cron 視窗且都 push main；
-    # 共用 job-level concurrency 群組序列化推送，避免 non-fast-forward 競爭。
+    # 與 arch-fitness nightly-strict 都 push main（R14 CI-2 降頻後僅每週一 02:30
+    # 重疊，其餘日子本 job 獨跑）；共用 job-level concurrency 群組序列化推送，
+    # 避免重疊窗口的 non-fast-forward 競爭（序列化仍必要，R14 SA-R14-REV-1）。
     concurrency:
       group: main-push-serialize
       cancel-in-progress: false

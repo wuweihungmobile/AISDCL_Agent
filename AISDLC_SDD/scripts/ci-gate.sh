@@ -27,6 +27,15 @@ export PYTHONUTF8=1
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
+# python 缺席 fail-loud（R14 SCAN-SH-1）：現代 macOS 乾淨 PATH 只有 python3 沒有
+# python，未啟 venv 直跑時下方 LATEST 解析的 `|| true` 會把 127（command not found）
+# 靜默吞成「無演化版」——dry-run 假綠、非 dry-run 雙軌閘門靜默降為單軌 v0.01。
+# 與姊妹腳本（tools/integration_gate.sh / AutoClaude/tools/local_ci_gate.sh）同款守門。
+if ! command -v python >/dev/null 2>&1; then
+  echo "❌ 找不到 python — 請先啟用 venv（macOS/Linux: source .venv/bin/activate；Windows: .venv/Scripts/activate；見 ONBOARDING.md §3）" >&2
+  exit 1
+fi
+
 # ── 版本解析（DEF-03-001 雙軌；R10 DEF-101-133 改走 SSOT）───────────────────
 FROZEN_BASELINE="AISDLC_SDD_v0.01"   # 凍結基線：恆測，回歸防護
 # 自動偵測最新演化版：委派 scripts/sdd_version.py（LATEST 解析單一真相源）。
@@ -35,7 +44,9 @@ FROZEN_BASELINE="AISDLC_SDD_v0.01"   # 凍結基線：恆測，回歸防護
 # 手動複製目錄都會被選成 LATEST，閘門綠燈實為測錯樹（R10 ARCH-3 實測重現）。SSOT 語意：
 # git tracked（含 index）＋完整錨定 `^AISDLC_SDD_v\d+\.\d+$`＋(major,minor) 數值取最大。
 # `|| true`：resolver 找不到任何版本目錄時 exit 1，維持原「LATEST 可為空」語意
-# （空 → 僅測凍結基線；stderr 警告直通 console 不吞）。
+# （空 → 僅測凍結基線；stderr 警告直通 console 不吞）。python 缺席已由檔頭守門
+# fail-loud 攔下，此處 `|| true` 只剩「resolver 自身失敗/無版本」兩情境，均以下方
+# 降軌警示可見化（R14 SCAN-SH-1：杜絕「驗證鏡子靜默縮面」）。
 LATEST="$(python "${REPO_ROOT}/scripts/sdd_version.py" || true)"
 
 FW_VERSIONS=("${FROZEN_BASELINE}")
@@ -46,6 +57,12 @@ fi
 # 可選覆寫：SDD_FW_VERSION 指定單一版本（debug / 二分定位用），跳過雙軌
 if [[ -n "${SDD_FW_VERSION:-}" ]]; then
   FW_VERSIONS=("${SDD_FW_VERSION}")
+fi
+
+# 降軌警示置於 FW_VERSIONS 定案後（R14 一審 SD-R14-REV-1：若先印再被 SDD_FW_VERSION
+# 覆寫，會出現「警示說僅測基線、實際測覆寫版」的誤導）；覆寫時不警示。
+if [[ -z "${LATEST}" && -z "${SDD_FW_VERSION:-}" ]]; then
+  echo "⚠️ LATEST 解析為空（resolver 失敗或無演化版目錄）— 本次僅測凍結基線 ${FROZEN_BASELINE}" >&2
 fi
 
 # dry-run：僅印出將測版本即離開（供 test_ci_gate_version_resolution.py 鎖定解析邏輯）

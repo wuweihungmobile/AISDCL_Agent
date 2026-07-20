@@ -2314,13 +2314,37 @@ class TestNightlyHeartbeat(DevStartTestCase):
             return dev_start._check_nightly_heartbeat(now)
 
     def test_absent_heartbeat_is_hint_not_warning(self):
-        """缺席：記入 summary 片段但不入 WARNINGS（不可誤傷未啟用排程者）。"""
+        """缺席：記入 summary 片段但不入 WARNINGS（不可誤傷未啟用排程者）。
+
+        R14 OPT-3：缺席文案必須含「尚未首跑」消歧——launchd/schtasks 剛安裝、首輪
+        02:00 未到前心跳檔必然缺席，只說「未啟用」會誤導剛裝完的人（本機 R14 實證
+        處於此誤導窗；語意對齊 install_mac_nightly.sh --status 文案）。"""
         with tempfile.TemporaryDirectory() as td:
             note = self._run(Path(td))
         self.assertIn("未偵測", note)
+        self.assertIn("尚未首跑", note,
+                      "缺席文案缺「尚未首跑」消歧——剛安裝未首跑者會被誤導為未啟用")
         self.assertIn("ONBOARDING", note)
         self.assertEqual(dev_start.WARNINGS, [],
                          "心跳缺席是提示不是警告——不得進 WARNINGS")
+
+    def test_absent_heartbeat_print_gives_flavor_specific_verify_cmd(self):
+        """R14 一審 QA-R14-REV-5＋SD-R14-REV-4：print 側消歧句須含依 flavor 的查證
+        指令（mac→install_mac_nightly.sh --status；windows→schtasks），print 是
+        獨立站點，僅斷言 return 值鎖不住它。"""
+        for flavor, expect in (
+            ("mac", "install_mac_nightly.sh --status"),
+            ("windows", "schtasks /query /tn AutoClaude_Nightly"),
+        ):
+            with tempfile.TemporaryDirectory() as td, \
+                 mock.patch.object(dev_start, "ROOT", Path(td)), \
+                 mock.patch("builtins.print") as fake_print:
+                dev_start._check_nightly_heartbeat(flavor)
+            printed = " ".join(str(c) for c in fake_print.call_args_list)
+            self.assertIn("尚未跑過第一輪", printed,
+                          f"{flavor}：print 消歧句消失（QA-R14-REV-5）")
+            self.assertIn(expect, printed,
+                          f"{flavor}：缺 flavor 對等查證指令（SD-R14-REV-4）")
 
     def test_fresh_heartbeat_is_ok(self):
         """新鮮（剛寫入）：OK、零警告。"""

@@ -28,7 +28,7 @@
    [3/7] 跨平台切換時清除失效快取
    [4/7] 整備/修復 .venv（含跨平台換手保留、依賴 hash 比對、必要時自動跑 bootstrap）
    [5/7] 檢查並修復 git hooks（core.hooksPath）
-   [6/7] 平台健檢（含 nightly 心跳三態檢查——「未偵測」表示本機排程未啟用，屬 advisory 不會 ❌；Windows 專屬項目在 mac 上會跳過）
+   [6/7] 平台健檢（含 nightly 心跳三態檢查——「未偵測」表示本機排程未啟用**或已安裝但尚未跑過第一輪**（R14 消歧，查證指令見輸出），屬 advisory 不會 ❌；Windows 專屬項目在 mac 上會跳過）
    [7/7] 狀態寫回
 
 3. 檢查輸出的「dev_start 摘要」：
@@ -76,7 +76,7 @@
    [3/7] 跨平台切換時清除失效快取
    [4/7] 整備/修復 .venv（含跨平台換手保留、依賴 hash 比對、必要時自動跑 bootstrap）
    [5/7] 檢查並修復 git hooks（core.hooksPath）
-   [6/7] 平台健檢（自動設定 core.longpaths=true，避免 MAX_PATH=260 限制炸掉深路徑；含 nightly 心跳三態檢查，「未偵測」屬 advisory 不會 ❌）
+   [6/7] 平台健檢（自動設定 core.longpaths=true，避免 MAX_PATH=260 限制炸掉深路徑；含 nightly 心跳三態檢查，「未偵測」＝排程未啟用**或已安裝但尚未跑過第一輪**（R14 消歧），屬 advisory 不會 ❌）
    [7/7] 狀態寫回
 
 3. 檢查輸出的「dev_start 摘要」：

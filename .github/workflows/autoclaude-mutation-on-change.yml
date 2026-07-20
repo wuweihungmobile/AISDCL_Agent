@@ -47,6 +47,11 @@ jobs:
     runs-on: ubuntu-latest
     # 非阻塞：mutation survived 屬正常，產出證據即可，不擋 push
     continue-on-error: true
+    # R14 SCAN-CI-5：唯一會燒滿 GitHub 預設上限 360 分鐘的重量級 job（mutmut/Docker
+    # 卡死時）；帳本記載正常 20~45 分鐘，取 60 緩衝。R14 複審 QA-R14-RR-1 訂正原「全
+    # repo 唯一無 timeout」措辭之誤（另有 3 個輕量 alert/lock job 亦曾無 timeout，本輪
+    # 一併補齊，並由 test_workflow_timeout_coverage.py 機械鎖住「所有 job 皆有 timeout」）。
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@v4
       # B2 第 1 段（restore）：還原最近一次 run 上傳的 mutation-history，讓

@@ -93,7 +93,25 @@ def _scan_roots() -> list[tuple[Path, int]]:
         (_REPO_ROOT / ".claude" / "hooks", 1),
         (_REPO_ROOT / "AISDLC_SDD" / "scripts", 24),
         (latest / "tools" / "fsm_runtime", 129),
+        # R14 SCAN-PY-1：LATEST tools/ 下 fsm_runtime 之外唯一 Python 樹——現況零
+        # subprocess 站點（arch_fitness.py 明文「不執行 shell」），納管防未來引入
+        # 漏網（升版由 _latest_root() 動態跟隨）。實掃 2 檔（__init__ + 本體），下限 1。
+        (latest / "tools" / "arch_fitness", 1),
         (latest / ".claude" / "hooks", 4),
+    ]
+
+
+# R14 SCAN-PY-2：樹清單外的零散活躍 .py 以顯式單檔清單納管（目錄機制掃不到、
+# 又不能把整個 AISDLC_SDD/ 根樹納入——rglob 會誤掃凍結版 v0.01~v0.29）。
+# 清單由 TestScanRootsConfigPinning 一併釘選。R14 一審（SD-R14-REV-3＋ARCH-R14-REV-4
+# 獨立交叉發現）以 `git ls-files '*.py'` 全列舉打破「唯一漏網」宣稱，補齊為 3 檔；
+# tmp_lint_check.py 為 tracked 暫存殘留（2026-06-12 入庫、命名即臨時檔），去留另裁決
+# ——刪檔時 pinning 紅燈會提醒同步本清單。
+def _scan_single_files() -> list[Path]:
+    return [
+        _REPO_ROOT / "AISDLC_SDD" / "conftest.py",
+        _REPO_ROOT / "AutoClaude" / "tmp_lint_check.py",
+        _latest_root() / "tools" / "__init__.py",
     ]
 
 
@@ -206,6 +224,16 @@ class TestSubprocessEncodingHygiene(unittest.TestCase):
             "encoding-ok 豁免標記 stale（防清單腐化）：\n" + "\n".join(stale),
         )
 
+    def test_single_file_sites_have_no_unencoded_text_subprocess(self) -> None:
+        """R14 SCAN-PY-2：樹清單外零散活躍 .py 的單檔納管（同判準同豁免機制）。"""
+        files = _scan_single_files()
+        for f in files:
+            self.assertTrue(f.is_file(), f"單檔掃描目標缺席：{f}（邊界不得靜默縮小）")
+        off, st, pf = scan_files(sorted(files), _REPO_ROOT)
+        self.assertEqual(pf, [], "單檔掃描 parse 失敗：\n" + "\n".join(pf))
+        self.assertEqual(off, [], "單檔掃描發現無 encoding 站點：\n" + "\n".join(off))
+        self.assertEqual(st, [], "單檔掃描豁免標記 stale：\n" + "\n".join(st))
+
     # ── 以下以注入 fixture 自證判準紅綠（fixture 僅存在於 tmp，不留違規樣本於 repo）──
 
     def _scan_fixture(self, source: str) -> tuple[list[str], list[str], list[str]]:
@@ -301,7 +329,25 @@ class TestScanRootsConfigPinning(unittest.TestCase):
                 "AutoClaude/alembic",
                 "AISDLC_SDD/scripts",
                 "AISDLC_SDD/LATEST/tools/fsm_runtime",
+                "AISDLC_SDD/LATEST/tools/arch_fitness",
                 "AISDLC_SDD/LATEST/.claude/hooks",
+            },
+        )
+
+    def test_scan_single_files_pinned(self) -> None:
+        """R14 SCAN-PY-2：單檔清單釘選——刪一列即該檔靜默出界，同樹清單防護語意。
+        LATEST 版名正規化，升版不失效（同樹清單慣例）。"""
+        latest_name = _latest_root().name
+        rels = {
+            f.relative_to(_REPO_ROOT).as_posix().replace(latest_name, "LATEST")
+            for f in _scan_single_files()
+        }
+        self.assertEqual(
+            rels,
+            {
+                "AISDLC_SDD/conftest.py",
+                "AutoClaude/tmp_lint_check.py",
+                "AISDLC_SDD/LATEST/tools/__init__.py",
             },
         )
 

@@ -98,3 +98,89 @@ def test_single_version_override_collapses_to_one():
     """SDD_FW_VERSION 覆寫須收斂為單一指定版本（debug 逃生口）。"""
     versions = _dry_run({"SDD_FW_VERSION": "AISDLC_SDD_v0.04"})
     assert versions == ["AISDLC_SDD_v0.04"], f"覆寫應僅測單版，實得 {versions}"
+
+
+def test_missing_python_fails_loud_not_silent_downgrade():
+    """R14 DEF-101-188 守門鎖：python 缺席須 rc=1 指路 venv，不得假綠。
+
+    WHY：現代 macOS 乾淨 PATH 只有 python3 無 python，修復前 LATEST 解析的
+    `|| true` 把 127 靜默吞成「無演化版」——dry-run 假綠 exit 0、非 dry-run
+    雙軌閘門靜默降為單軌 v0.01（驗證鏡子靜默縮面家族）。本測試鎖住守門分支，
+    防日後誤刪守門塊零訊號（R14 一審 ARCH-R14-REV-1 / QA-R14-REV-1）。
+    """
+    probe = subprocess.run(
+        [_BASH, "-c", "PATH=/usr/bin:/bin command -v python"],
+        capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=30,
+    )
+    if probe.returncode == 0:
+        pytest.skip("此環境 /usr/bin:/bin 內有 python，無法模擬缺席情境")
+    proc = subprocess.run(
+        [_BASH, "-c", "PATH=/usr/bin:/bin SDD_GATE_DRY_RUN=1 bash scripts/ci-gate.sh"],
+        cwd=str(REPO_ROOT),
+        capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=60,
+    )
+    assert proc.returncode == 1, (
+        f"python 缺席應 rc=1 fail-loud，實得 rc={proc.returncode}（假綠復發？）\n"
+        f"stdout={proc.stdout!r}\nstderr={proc.stderr!r}"
+    )
+    assert "找不到 python" in proc.stderr, f"stderr 應含指路文案，實得：{proc.stderr!r}"
+    assert "SDD_GATE_VERSIONS" not in proc.stdout, "守門應在版本解析前攔下，不得輸出版本清單"
+
+
+def test_resolver_failure_downgrades_with_stderr_warning():
+    """R14 DEF-101-188 守門鎖：resolver 失敗須 stderr 降軌警示、stdout 純淨、僅測基線。
+
+    以 tmp 沙盒複製 ci-gate.sh ＋ 換入恆 exit 1 的 sdd_version.py stub 模擬 resolver
+    自身故障（QA-R14 一審驗證此注入法可行）：降軌不再靜默（可見化），且警示走 stderr
+    不污染 dry-run 的 stdout 機械輸出。
+    """
+    import shutil
+    import tempfile
+
+    with tempfile.TemporaryDirectory() as td:
+        sandbox = Path(td)
+        (sandbox / "scripts").mkdir()
+        shutil.copy2(CI_GATE, sandbox / "scripts" / "ci-gate.sh")
+        (sandbox / "scripts" / "sdd_version.py").write_text(
+            "import sys; sys.exit(1)\n", encoding="utf-8"
+        )
+        proc = subprocess.run(
+            [_BASH, "-c", "SDD_GATE_DRY_RUN=1 bash scripts/ci-gate.sh"],
+            cwd=str(sandbox),
+            capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=60,
+        )
+    assert proc.returncode == 0, f"降軌屬容忍情境應 rc=0：{proc.stderr}"
+    m = re.search(r"^SDD_GATE_VERSIONS=(.*)$", proc.stdout, re.MULTILINE)
+    assert m and m.group(1).split() == ["AISDLC_SDD_v0.01"], (
+        f"resolver 失敗應僅測凍結基線，實得：{proc.stdout!r}"
+    )
+    assert "LATEST 解析為空" in proc.stderr, (
+        f"降軌須 stderr 警示可見化（勿再靜默縮面），實得 stderr={proc.stderr!r}"
+    )
+
+
+def test_override_with_failed_resolver_suppresses_downgrade_warning():
+    """R14 一審 SD-R14-REV-1 鎖：SDD_FW_VERSION 覆寫時不印降軌警示（避免「警示說
+    僅測基線、實際測覆寫版」的自相矛盾訊息）。"""
+    import shutil
+    import tempfile
+
+    with tempfile.TemporaryDirectory() as td:
+        sandbox = Path(td)
+        (sandbox / "scripts").mkdir()
+        shutil.copy2(CI_GATE, sandbox / "scripts" / "ci-gate.sh")
+        (sandbox / "scripts" / "sdd_version.py").write_text(
+            "import sys; sys.exit(1)\n", encoding="utf-8"
+        )
+        proc = subprocess.run(
+            [_BASH, "-c",
+             "SDD_GATE_DRY_RUN=1 SDD_FW_VERSION=AISDLC_SDD_v0.04 bash scripts/ci-gate.sh"],
+            cwd=str(sandbox),
+            capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=60,
+        )
+    assert proc.returncode == 0
+    m = re.search(r"^SDD_GATE_VERSIONS=(.*)$", proc.stdout, re.MULTILINE)
+    assert m and m.group(1).split() == ["AISDLC_SDD_v0.04"]
+    assert "LATEST 解析為空" not in proc.stderr, (
+        f"覆寫時不應印降軌警示（SD-R14-REV-1），實得 stderr={proc.stderr!r}"
+    )

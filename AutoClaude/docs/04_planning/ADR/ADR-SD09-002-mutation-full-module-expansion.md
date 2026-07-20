@@ -53,6 +53,10 @@ W1 啟動前若 TokenGuardPlugin 連續 7 次達 ≥ 70% 條件**未達**（< 60
 - `mutation-coordinator-pilot`：W2 啟用（單 active 規則）
 - **Coordinator cron 排程**：每日 **04:00 UTC**（與 GS active 錯開 2 小時）
 - 觀察期 #1 統計**以 UTC 日界為準**（SD_09.md §1.2 觀察期計數對齊）
+- **R14 修訂註記（2026-07-20，CI-2 額度裁決）**：本節為 W0 規劃時設計；現行實況＝
+  TG（TokenGuard）active pilot 於 `0 3 * * 1` **每週一** 03:00 UTC（原每日 03:00，
+  R14 降頻），GS/Coord cron 仍 dormant（註解態，啟用時依降頻後慣例應設週頻）。
+  每日 mutation 訊號改由 Windows 本地 nightly mutation stage 承擔。
 
 ### §2.4 單檔精準 mutation 路徑
 

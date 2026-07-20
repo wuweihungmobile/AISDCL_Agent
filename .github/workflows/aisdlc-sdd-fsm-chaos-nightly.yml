@@ -120,6 +120,7 @@ jobs:
   track-streak-and-lock:
     name: enforce 3-day streak lockdown
     runs-on: ubuntu-latest
+    timeout-minutes: 10   # R14 QA-R14-RR-1：輕量 streak 判定 job，補 timeout 防卡死燒滿 360 分鐘
     needs: chaos
     if: failure()
     permissions:

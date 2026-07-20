@@ -1369,9 +1369,19 @@ def _check_nightly_heartbeat(now: str) -> str:
     try:
         mtime = hb.stat().st_mtime
     except OSError:  # 缺席或不可讀 → 提示（不入 WARNINGS）
+        # R14 OPT-3：補「或已安裝但尚未首跑」——launchd/schtasks 剛安裝、首輪 02:00 未到
+        # 前心跳檔必然缺席，舊文案只說「未啟用」會誤導剛裝完的人（文案語意對齊
+        # install_mac_nightly.sh --status）。查證指令依 flavor 給對等物（R14 一審
+        # SD-R14-REV-4＋ARCH-R14-REV-5：勿讓 Windows 使用者拿到 mac-only 指令）。
+        verify_cmd = (
+            "schtasks /query /tn AutoClaude_Nightly"
+            if _flavor(now) == "windows"
+            else "bash tools/install_mac_nightly.sh --status"
+        )
         print(f"    nightly 心跳未偵測（AutoClaude/logs/{name} 不存在）— 排程可能未啟用，"
-              f"設定見 ONBOARDING §8；CI 停擺期間本地 nightly 為唯一每日兜底")
-        return "nightly 心跳未偵測（排程未啟用？見 ONBOARDING §8）"
+              f"或已安裝但尚未跑過第一輪（查證：{verify_cmd}），設定見 ONBOARDING §8；"
+              f"CI 停擺期間本地 nightly 為唯一每日兜底")
+        return "nightly 心跳未偵測（排程未啟用？或尚未首跑？見 ONBOARDING §8）"
     age_days = (time.time() - mtime) / 86400.0
     if age_days > _HEARTBEAT_MAX_AGE_DAYS:
         _warn(f"nightly 心跳過期（AutoClaude/logs/{name} 距今 {age_days:.1f} 天 > "

@@ -5,12 +5,16 @@
 #   - tools/arch_fitness/arch_fitness.py（FF-1~FF-14 全數實作：三源/governance/孤兒/觀測態/§9/
 #     連結/引用/規則強制可追溯/Scaffold-ROI/死規則/Skill frontmatter/critical 錯置/Agent YAML/
 #     CI workflow 工具模組引用）
-#   - nightly 以 --trend 把每日 score 累積回寫 build/reports/fse/TREND.yaml（R4 趨勢可觀測）
+#   - nightly 以 --trend 把每次排程（R14 起每週一）score 累積回寫 build/reports/fse/TREND.yaml（R4 趨勢可觀測）
 #
 # 雙軌（呼應框架 advisory vs blocking 哲學，Rule 9.11.3）：
 #   1. pr-advisory   — 每個 PR 跑非 strict，把 fitness 報告貼進 Step Summary；
 #                      永遠 exit 0、絕不阻擋（governance 遷移等屬漸進式 advisory）。
-#   2. nightly-strict— 每日 02:30 UTC 跑 --strict；structural fail（FF-1 不一致 /
+#   2. nightly-strict— 每週一 02:30 UTC 跑 --strict（R14 CI-2 額度裁決由每日降週頻。
+#                      每日兜底＝mac 本地 nightly sdd 軌：macos_smoke→ci-gate.sh 內含
+#                      arch_fitness --strict 雙軌 v0.01+LATEST，覆蓋較本 job 的 v0.01
+#                      單軌更廣；Windows 7-stage 無 arch-fitness 軌，此兜底為 mac 單腿
+#                      且以心跳哨兵取證——R14 SCAN-CI-4 精確化）；structural fail（FF-1 不一致 /
 #                      FF-3 孤兒 / FF-4 ∩Terminals / FF-8 規則無有效強制測試 /
 #                      FF-9 scaffold_roi 基座缺漏 / FF-10 死規則 / FF-11 skill frontmatter 不全 /
 #                      FF-12 critical 規則錯置 / FF-14 workflow 引用不存在的工具模組）即紅，
@@ -31,7 +35,7 @@ on:
       - "AISDLC_SDD/**"
       - ".github/workflows/aisdlc-sdd-arch-fitness.yml"
   schedule:
-    - cron: "30 2 * * *"   # 02:30 UTC，排在 fsm-chaos-nightly(02:00) 之後
+    - cron: "30 2 * * 1"   # 每週一 02:30 UTC（R14 CI-2 降頻），排在 fsm-chaos-nightly(02:00) 之後
   workflow_dispatch:
 
 # PR-advisory 併發以分支序列化（同分支新 push 取消舊跑，省 runner）；
