@@ -257,7 +257,7 @@ tasks:
 
 ## 🔴 Nightly / CI 取證紀律（SD_09 W0 教訓 — 防止再犯）
 
-**完整版**：[docs/06_quality/Nightly_Forensic_Discipline.md](docs/06_quality/Nightly_Forensic_Discipline.md) v1.7（19 條）。SD_09 W0~W3 40 輪 audit 累積；違反任一條 → P0 audit。**任何紀律新增 / 修訂必須先改完整版，再同步本摘要**。
+**完整版**：[docs/06_quality/Nightly_Forensic_Discipline.md](docs/06_quality/Nightly_Forensic_Discipline.md) v1.8（19 條）。SD_09 W0~W3 40 輪 audit 累積；違反任一條 → P0 audit。**任何紀律新增 / 修訂必須先改完整版，再同步本摘要**。
 
 1. **stage rc 必須區分「真實失敗」vs「工具標準回報」** — bitmask 工具不可單純 `rc != 0` 判 fail（mutmut：`rc & 1 != 0`）
 2. **log 必須含完整統計** — 不信任預設 dump（如 `mutmut results` 缺 Killed → kill_rate=0% 假象）；直查 raw store（sqlite Mutant 表）

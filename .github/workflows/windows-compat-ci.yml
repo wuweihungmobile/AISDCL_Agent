@@ -139,6 +139,11 @@ on:
       # 該兩支 yml 時本 workflow 也須重跑該鎖（DEF-101-042 同構）
       - ".github/workflows/root-infra-ci.yml"
       - ".github/workflows/aisdlc-sdd-ci.yml"
+      # R15：test_workflow_permission_concurrency_lock.py 新增消費這兩支 workflow
+      # 內容（permissions/concurrency 結構斷言）——只改該兩支 yml 時本 workflow
+      # 也須重跑該鎖（DEF-101-042 同構，test_ci_paths_cover_root_consumers 實測揪出）
+      - ".github/workflows/aisdlc-sdd-arch-fitness.yml"
+      - ".github/workflows/autoclaude-ci.yml"
       - "tools/check_script_parity.py"
       - "tools/check_ntfs_paths.py"
       - "tools/check_hooks_liveness.py"
@@ -183,6 +188,11 @@ on:
       # 該兩支 yml 時本 workflow 也須重跑該鎖（DEF-101-042 同構）
       - ".github/workflows/root-infra-ci.yml"
       - ".github/workflows/aisdlc-sdd-ci.yml"
+      # R15：test_workflow_permission_concurrency_lock.py 新增消費這兩支 workflow
+      # 內容（permissions/concurrency 結構斷言）——只改該兩支 yml 時本 workflow
+      # 也須重跑該鎖（DEF-101-042 同構，test_ci_paths_cover_root_consumers 實測揪出）
+      - ".github/workflows/aisdlc-sdd-arch-fitness.yml"
+      - ".github/workflows/autoclaude-ci.yml"
       - "tools/check_script_parity.py"
       - "tools/check_ntfs_paths.py"
       - "tools/check_hooks_liveness.py"
@@ -291,8 +301,13 @@ jobs:
 
       - name: Install AutoClaude deps
         working-directory: AutoClaude
+        # R15 SCAN-C-10：Windows runner 的 run 步驟預設 shell 即 pwsh，GitHub pwsh
+        # 包裝只回傳「最後一條」native 指令的 exit code（$ErrorActionPreference 不攔
+        # native）——pip 升級失敗會被最後一條成功吞沒。對非最後一條 native 指令逐條
+        # 斷言（鏡射本檔既有 $LASTEXITCODE throw 慣例）。
         run: |
           python -m pip install --upgrade pip
+          if ($LASTEXITCODE -ne 0) { throw "python -m pip 升級失敗（rc=$LASTEXITCODE）" }
           pip install -e ".[dev]"
 
       - name: pty_wrapper / hotkey_handler 平台解析單元測試
@@ -671,8 +686,14 @@ jobs:
           Write-Host "AISDLC_SDD LATEST 版：$($latest.Name)"
           Push-Location $latest.FullName
           try {
+            # R15 SCAN-C-10：pwsh 只回傳最後一條 native 指令 exit code——兩條 pip
+            # 失敗會被結尾 pytest 成功吞沒（依賴裝失敗卻假綠）。逐條斷言（鏡射
+            # 本檔既有 $LASTEXITCODE throw 慣例）；pytest 為最後一條，exit code
+            # 由 GitHub pwsh 包裝自然傳遞（Pop-Location 為 cmdlet 不重置）。
             python -m pip install --upgrade pip
+            if ($LASTEXITCODE -ne 0) { throw "python -m pip 升級失敗（rc=$LASTEXITCODE）" }
             pip install -r requirements-ci.txt
+            if ($LASTEXITCODE -ne 0) { throw "requirements-ci.txt 安裝失敗（rc=$LASTEXITCODE）" }
             python -m pytest tools/fsm_runtime/tests/ -m "not chaos" -q --tb=short
           } finally {
             Pop-Location

@@ -32,6 +32,7 @@ from __future__ import annotations
 import argparse
 import os
 import shutil
+import stat
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -44,6 +45,36 @@ for _stream in (sys.stdout, sys.stderr):
 
 _EXCLUDE_DIRS = {"__pycache__"}
 _EXCLUDE_SUFFIX = (".pyc",)
+
+
+def _rmtree_windows_safe(path: str) -> None:
+    """Windows 韌性 rmtree（R15 SCAN-B-2）：唯讀屬性檔案會讓裸 shutil.rmtree 炸
+    PermissionError 且留下半刪目錄 → 下次 copytree 再炸 FileExistsError。
+    onerror 先清唯讀再重試一次（Python 3.11 尚無 3.12 的 onexc；POSIX 上與裸
+    rmtree 行為等價零副作用——同 tools/tests/test_dev_start.py::_rmtree_force
+    pattern）；重試仍失敗（檔案遭編輯器/防毒暫鎖）則丟出帶可讀訊息的例外，
+    不留裸 traceback。
+    """
+
+    def _on_error(func, p, exc_info):  # onerror 固定簽名
+        orig = exc_info[1]
+        try:
+            os.chmod(p, stat.S_IWRITE)
+            func(p)
+        except (OSError, TypeError):
+            # TypeError：Python 3.11 POSIX fd-based rmtree 的 func 可能是
+            # os.open（另需 flags 參數），func(p) 重試簽名不符；連同重試仍失敗
+            # 的 OSError 一律回拋「原始」錯誤，交外層轉可讀訊息（沙盒煙測實證
+            # 盲目 func(p) 會讓 TypeError 逸出 except OSError）。
+            raise orig from None
+
+    try:
+        shutil.rmtree(path, onerror=_on_error)
+    except OSError as exc:
+        raise RuntimeError(
+            f"[skills-ssot] 無法刪除舊父層鏡像：{path}（{exc}）；"
+            "請關閉佔用該目錄的編輯器/防毒後重試 --write"
+        ) from exc
 
 
 def _skill_files(root: str) -> dict[str, bytes]:
@@ -114,7 +145,7 @@ def write(repo_root: str) -> int:
         print(f"[skills-ssot] LATEST({latest}) 無 .claude/skills，無法鏡像", file=sys.stderr)
         return 1
     if os.path.isdir(parent_skills):
-        shutil.rmtree(parent_skills)
+        _rmtree_windows_safe(parent_skills)
     shutil.copytree(
         latest_skills,
         parent_skills,

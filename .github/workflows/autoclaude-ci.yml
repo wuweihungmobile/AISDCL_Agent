@@ -50,6 +50,15 @@ on:
 permissions:
   contents: read
 
+# R15 SCAN-C-5：本 workflow 先前是唯一無 concurrency 的 push 閘——連續 push 疊跑
+# 4 個 push 閘 job（test/claude-md-budget/equivalence/pg-contract）全跑到底、純
+# 額度洩漏（R14 CI-2 額度裁決背景下更值得堵）。group 納入 event_name/event.schedule，
+# 使兩條 nightly cron（0 2/0 3 * * 1）各自成組、互不取消（僅同 ref 的 push 組互相
+# 取消，不影響 push 組），push 連發時僅同 ref 的舊 push run 被取消。
+concurrency:
+  group: autoclaude-ci-${{ github.ref }}-${{ github.event_name }}-${{ github.event.schedule }}
+  cancel-in-progress: true
+
 defaults:
   run:
     working-directory: AutoClaude

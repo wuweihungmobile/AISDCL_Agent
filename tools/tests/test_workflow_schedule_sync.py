@@ -13,6 +13,14 @@ cron（DEF-01-004 修復模式）——代價是 cron 與 if 字串**逐字耦�
 
 以 regex 抽取而非 yaml 解析：零第三方依賴（根層 unittest 環境不保證 pyyaml），
 且 `# - cron:` 註解態（dormant）天然不被行首錨定匹配吸入。
+
+R15 SCAN-C-9：`_IF_REF_RE` 無行首錨定、掃全文——若未來刪 job 時留下含
+`github.event.schedule == '...'` 字樣的整行註解（本檔 dormant cron 註記慣例正是
+這種形態），集合仍相等、cron 白燒 runner 而零訊號。修法：比對前先剝除「整行註解」
+（`\\s*#` 起頭的行）。取捨說明：只剝整行、不剝行尾註解——(1) 行尾註解形態在受掃
+workflow 現況不存在，主要風險面（刪 job 留整行註解）已被覆蓋；(2) 行尾剝法需分辨
+字串常值內的 `#`（如 cron 欄位雖不含 # 但 run 指令行可能含），保守整行剝除
+零誤剝風險。若未來出現行尾註解含 schedule 字樣的形態，再擴充剝法。
 """
 from __future__ import annotations
 
@@ -29,12 +37,22 @@ _CRON_RE = re.compile(r'^\s*- cron: "([^"]+)"', re.MULTILINE)
 _IF_REF_RE = re.compile(r"github\.event\.schedule == '([^']+)'")
 
 
+def _strip_full_line_comments(text: str) -> str:
+    """剝除 YAML 整行註解（`\\s*#` 起頭的行），防註解殘骸誤入集合比對。
+
+    R15 SCAN-C-9：不剝行尾註解——取捨理由見模組 docstring。
+    """
+    return "\n".join(
+        ln for ln in text.splitlines() if not ln.lstrip().startswith("#")
+    )
+
+
 class TestWorkflowScheduleSync(unittest.TestCase):
     def test_cron_and_if_reference_sets_are_equal(self) -> None:
         for rel in _WORKFLOWS_WITH_CRON_IF_PAIRING:
             path = _REPO_ROOT / rel
             self.assertTrue(path.is_file(), f"workflow 缺席：{rel}（掃描面不得靜默縮小）")
-            text = path.read_text(encoding="utf-8")
+            text = _strip_full_line_comments(path.read_text(encoding="utf-8"))
             crons = set(_CRON_RE.findall(text))
             refs = set(_IF_REF_RE.findall(text))
             self.assertTrue(crons, f"{rel}：未抽到任何 active cron——regex 或檔案結構疑似改版")
@@ -44,6 +62,33 @@ class TestWorkflowScheduleSync(unittest.TestCase):
                 f"改 cron 忘 if（job 永不觸發）或加 cron 忘 job（白燒 runner）。"
                 f"cron={sorted(crons)}，if 引用={sorted(refs)}",
             )
+
+    def test_comment_residue_not_counted_as_reference(self) -> None:
+        """R15 SCAN-C-9 自證：刪 job 留下的整行註解殘骸不得再被計為 if 引用。
+
+        先前 _IF_REF_RE 掃全文含註解：真 job 刪除後只要註解殘骸仍含
+        `github.event.schedule == '...'` 字樣，集合照樣相等（假綠）。
+        """
+        cron_and_job = (
+            "on:\n"
+            "  schedule:\n"
+            '    - cron: "0 9 * * 1"\n'
+            "jobs:\n"
+            "  # 殘骸範例：if: github.event.schedule == '0 9 * * 1'\n"
+            "  real:\n"
+            "    if: github.event.schedule == '0 9 * * 1'\n"
+        )
+        stripped = _strip_full_line_comments(cron_and_job)
+        # 真 job 在場：剝註解後引用仍抽得到（不誤剝有效行）
+        self.assertEqual(set(_IF_REF_RE.findall(stripped)), {"0 9 * * 1"})
+        self.assertEqual(set(_CRON_RE.findall(stripped)), {"0 9 * * 1"})
+        # 真 job 已刪、只剩註解殘骸：引用集合須為空 → 與 cron 集合不等 → 守門紅
+        job_deleted = cron_and_job.replace(
+            "  real:\n    if: github.event.schedule == '0 9 * * 1'\n", ""
+        )
+        stripped_deleted = _strip_full_line_comments(job_deleted)
+        self.assertEqual(set(_IF_REF_RE.findall(stripped_deleted)), set())
+        self.assertEqual(set(_CRON_RE.findall(stripped_deleted)), {"0 9 * * 1"})
 
 
 if __name__ == "__main__":

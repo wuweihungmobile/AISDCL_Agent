@@ -13,6 +13,14 @@ R-P6-01/02（2026-05-15）：改用 AUTOCLAUDE_DB_DSN env var，移除 hardcoded
 import os
 import sys
 
+# DEF-82-001/DEF-101-069/154 家族慣例：報表含 ✅/❌ 等非 ASCII，Windows cp950 console
+# 直接 print 會 UnicodeEncodeError 中斷（連 PASS 路徑也炸）；stdout + stderr 皆強制 utf-8。
+for _stream in (sys.stdout, sys.stderr):
+    try:
+        _stream.reconfigure(encoding="utf-8")  # type: ignore[union-attr]
+    except (AttributeError, OSError):
+        pass
+
 dsn = os.environ.get("AUTOCLAUDE_DB_DSN") or os.environ.get("AUTOCLAUDE_PG_DSN")
 if not dsn:
     print(
@@ -23,8 +31,10 @@ if not dsn:
     )
     sys.exit(1)
 
-from autoclaude.utils.config import StorageConfig
-from autoclaude.infra.repositories.factory import build_state_repository
+# 刻意延遲 import：先做 DSN 環境變數檢查並 fail-fast，避免缺少必要設定時仍載入
+# 這兩個較重的模組。
+from autoclaude.utils.config import StorageConfig  # noqa: E402, I001
+from autoclaude.infra.repositories.factory import build_state_repository  # noqa: E402
 
 cfg = StorageConfig(
     mode="both",

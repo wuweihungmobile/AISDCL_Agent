@@ -14,7 +14,9 @@
 #
 # plist 內容對齊 ONBOARDING.md §8 現行範本語意：Label=com.autoclaude.nightly、
 # ProgramArguments=/bin/bash + AutoClaude/tools/run_local_nightly.sh 絕對路徑、
-# StartCalendarInterval 02:00、StandardOut/ErrorPath=AutoClaude/logs/nightly_mac_launchd.{log,err}
+# StartCalendarInterval 02:00、RunAtLoad（R15 SCAN-C-1：02:00 關機/睡眠錯過時，
+# 開機/載入即補跑；載體自帶「心跳當日去重」故不重複跑——等價 Windows
+# StartWhenAvailable）、StandardOut/ErrorPath=AutoClaude/logs/nightly_mac_launchd.{log,err}
 #（R14 ARCH-GAP-3：原導 /tmp 會被 macOS 週期清理＋重開機清空，深夜失敗數日後排查 log 已散失；
 # 改與心跳檔同目錄（gitignored）集中取證，install 時 mkdir -p 保證目錄存在）。
 #
@@ -79,6 +81,7 @@ render_plist() {
   </array>
   <key>StartCalendarInterval</key>
   <dict><key>Hour</key><integer>2</integer><key>Minute</key><integer>0</integer></dict>
+  <key>RunAtLoad</key><true/>
   <key>StandardOutPath</key><string>${LOG_DIR}/nightly_mac_launchd.log</string>
   <key>StandardErrorPath</key><string>${LOG_DIR}/nightly_mac_launchd.err</string>
 </dict>
@@ -88,7 +91,7 @@ EOF_PLIST
     echo "❌ 產出的 plist 未通過 plutil -lint：${_target}" >&2
     return 1
   }
-  echo "✅ plist 已產出並通過 plutil -lint：${_target}"
+  echo "✅ plist 已產出並通過 plutil -lint：${_target}（含 RunAtLoad 開機/載入補跑，載體當日去重）"
 }
 
 # 心跳三態（advisory；語意鏡射 tools/dev_start.py _check_nightly_heartbeat）。
@@ -125,6 +128,7 @@ cmd_install() {
   "${LAUNCHCTL}" unload "${PLIST_PATH}" 2>/dev/null || true
   "${LAUNCHCTL}" load "${PLIST_PATH}"
   echo "✅ 已安裝並載入 launchd 排程：${LABEL}（每日 02:00 → ${NIGHTLY_SH}）"
+  echo "   另含 RunAtLoad：開機/載入時補跑當日錯過的一輪（載體自帶當日去重，不重複跑）"
   echo "   驗證：bash tools/install_mac_nightly.sh --status"
 }
 

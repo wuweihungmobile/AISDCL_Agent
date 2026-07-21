@@ -14,7 +14,9 @@ $stamp = Get-Date -Format 'yyyy-MM-dd'
 $Log = Join-Path $Repo "logs\g0_gate_check_$stamp.log"
 if (-not (Test-Path (Split-Path $Log))) { New-Item -ItemType Directory -Force (Split-Path $Log) | Out-Null }
 
-function W($m) { $line = "$(Get-Date -Format 'yyyy-MM-ddTHH:mm:ssK') $m"; Write-Output $line; Add-Content -Path $Log -Value $line }
+# SCAN-A-3 (R15): -Encoding utf8 -- PS 5.1 Add-Content defaults to ANSI (zh-TW cp950);
+#   chars outside cp950 in tool output would silently degrade to '?' in the log file.
+function W($m) { $line = "$(Get-Date -Format 'yyyy-MM-ddTHH:mm:ssK') $m"; Write-Output $line; Add-Content -Path $Log -Value $line -Encoding utf8 }
 
 W "=== SD_09 W0 G0 gate check START (action list: docs/04_planning/AutoSDD_improving_34.md SS4) ==="
 W "repo=$Repo"

@@ -45,6 +45,14 @@ concurrency:
   group: arch-fitness-${{ github.ref }}
   cancel-in-progress: true
 
+# R15 SCAN-C-4（比照 autoclaude-ci.yml R13 CI-7）：顯式最小權限——先前全檔未宣告
+# workflow 層 permissions，pr-advisory job 零宣告即繼承 repo 預設（可能為 write-all）。
+# pr-advisory 僅 checkout / setup-python / 跑 fitness / upload-artifact（artifact 走
+# ACTIONS_RUNTIME_TOKEN，不受本區塊限制）→ contents: read 即足；nightly-strict 需
+# 回寫 TREND.yaml，由其既有 job 層 permissions（contents: write）覆寫本預設。
+permissions:
+  contents: read
+
 jobs:
   pr-advisory:
     name: architecture fitness (advisory)

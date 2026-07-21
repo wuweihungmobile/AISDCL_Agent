@@ -18,7 +18,19 @@
 #   [3/4] autoclaude_gate — AutoClaude tools/local_ci_gate.sh（鏡像 CI push gating）
 #   [4/4] sdd_ci_gate     — AISDLC_SDD scripts/ci-gate.sh（凍結基線 + LATEST 雙軌）
 #
-# log：stdout 直出（launchd 範本已導向 log 檔），不做輪替。
+# log（R15 DEF-101-201②）：RunId log——開頭將輸出 exec 改道
+# AutoClaude/logs/nightly_mac_<時間戳>.log（BEGIN 首行帶 run_id，鏡射 .ps1 RunId 語意；
+# 保留 14 天，心跳寫完後 find -mtime +14 輪替）。launchd log
+#（nightly_mac_launchd.{log,err}）輪替**明確不做**：輸出改道後只剩 exec 前的啟動
+# 錯誤，自限量（ARCH-R14-REV-2 結案理由）。互動終端機（`[ -t 1 ]`）手動執行時改走
+# tee 雙寫，保留即時終端機輸出（ARCH-R15-REV-2 訂正：純 exec 改道會讓手動執行時
+# 終端機零輸出，是未被評估的行為回歸）。
+# 補跑（R15 SCAN-C-1）：plist 加 RunAtLoad 後，開機/載入亦觸發本腳本——以「心跳檔
+# mtime 當日去重」保證每日至多完整跑一輪（等價 Windows StartWhenAvailable 補跑
+# 語意）；手動重跑以 --force 繞過去重。**去重判斷置於 RunId log exec 改道之前**
+#（ARCH-R15-REV-1 訂正：原順序下每次被去重跳過的 RunAtLoad 觸發都會留下一份僅含
+# BEGIN+跳過訊息的殘留 RunId log——本機曾真實產生 nightly_mac_20260720_183245.log
+# 等殘骸為證；去重時直出 stdout，由 launchd StandardOutPath／終端機自行承接）。
 # 相容性：bash 3.2（macOS /bin/bash；禁 declare -A / mapfile / ${var,,}）。
 set -u
 
@@ -30,6 +42,45 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 # prepend 進 PATH，否則排程執行時必在 venv 守門處 fail。
 if [ -d "$ROOT/.venv/bin" ]; then
   PATH="$ROOT/.venv/bin:$PATH"; export PATH
+fi
+
+# 當日去重（R15 SCAN-C-1；ARCH-R15-REV-1 訂正：判斷提前至 RunId log exec 改道之前
+# ——原順序下每次去重跳過都會留下一份僅含 BEGIN+跳過訊息的殘留 RunId log）：
+# launchd 呼叫載體為 `/bin/bash <本腳本>` 無參數——排程路徑（StartCalendarInterval
+# 02:00 與 RunAtLoad 補跑）永遠走本去重。心跳檔 mtime 日期（BSD stat）等於今日＝
+# 當日已完整跑過一輪 → 跳過（直出 stdout，無 RunId log 副作用；launchd 呼叫時由
+# StandardOutPath／nightly_mac_launchd.log 兜底承接），使 RunAtLoad 語意成為
+#「載入時若今日尚未跑過才補跑」，冪等重裝/多次開機不重複跑；stat 失敗視為無心跳
+# 照常執行；手動重跑：--force 繞過。
+HB_FILE="${ROOT}/AutoClaude/logs/nightly_mac_latest.log"
+if [ "${1:-}" != "--force" ] && [ -f "${HB_FILE}" ]; then
+  _hb_day="$(stat -f %Sm -t %Y-%m-%d "${HB_FILE}" 2>/dev/null || true)"
+  if [ -n "${_hb_day}" ] && [ "${_hb_day}" = "$(date +%Y-%m-%d)" ]; then
+    echo "今日已有心跳（${_hb_day}）——RunAtLoad 補跑去重，跳過本輪（手動重跑：--force）"
+    exit 0
+  fi
+fi
+
+# RunId log（R15 DEF-101-201②，Architect 設計）：心跳檔＝「最新一輪」指標、RunId log
+# ＝當輪完整實體（取證紀律 #3「PASS 聲稱引 RunId log:L」自此可在 mac 履行）。
+# 互動終端機（ARCH-R15-REV-2 訂正）：tee 雙寫，保留手動執行時的即時終端機輸出；
+# 非互動（launchd/排程）：純 exec 改道，避免額外 tee 行程。mkdir 失敗 → 不 exec、
+# 照舊直出 stdout 並印警告（launchd StandardOutPath 兜底），不改 exit 語意。
+# 已知限制（ARCH-R15-RR-1，R15 複審觀察）：tee 是腳本的子行程，本腳本 exit 時不
+# `wait` 它——理論上存在「腳本已回報 exit code、tee 尚未 flush 最後幾行進 RUN_LOG」
+# 的競態窗口（170 次真機壓力測試 0 次重現，見複審記錄；心跳檔走獨立同步寫入不經
+# tee，三站點契約不受影響；RunId log 定位人工/audit 事後取證，非即時機器解析）。
+RUN_TS="$(date +%Y%m%d_%H%M%S)"
+RUN_LOG="${ROOT}/AutoClaude/logs/nightly_mac_${RUN_TS}.log"
+if mkdir -p "${ROOT}/AutoClaude/logs" 2>/dev/null; then
+  if [ -t 1 ]; then
+    exec > >(tee -a "${RUN_LOG}") 2>&1
+  else
+    exec >> "${RUN_LOG}" 2>&1
+  fi
+  printf 'BEGIN nightly_mac run_id=%s log=%s\n' "${RUN_TS}" "${RUN_LOG}"
+else
+  echo "⚠️ logs 目錄建立失敗——RunId log 停用，輸出照舊直出 stdout（launchd log 兜底）：${ROOT}/AutoClaude/logs" >&2
 fi
 
 # python 解析：優先 monorepo .venv（存在即用），否則退回 PATH 上的 python/python3。
@@ -73,9 +124,14 @@ write_heartbeat() {
   _hb_file="${_hb_dir}/nightly_mac_latest.log"
   if mkdir -p "${_hb_dir}" 2>/dev/null; then
     {
+      # 🔴 前 2 行格式為三站點契約（dev_start.py mtime 讀取／install_mac_nightly.sh
+      # --status／本函式寫入），絕不可變；彙總行之後（FAIL>0 時多一行失敗 stage）
+      # 附 log= 末行指標（R15 DEF-101-201②：心跳＝指標、RunId log＝實體；SA-R15-REV-1
+      # 訂正：FAIL=0 常態時 log= 落在第 3 行、非固定第 4 行）。
       printf 'nightly_mac heartbeat（UTC）：%s\n' "$(date -u '+%Y-%m-%dT%H:%M:%SZ')"
       printf '===== nightly 彙總：PASS=%s FAIL=%s =====\n' "${PASS}" "${FAIL}"
       if [ "${FAIL}" -gt 0 ]; then printf '失敗 stage：%s\n' "${FAIL_NAMES}"; fi
+      printf 'log=%s\n' "${RUN_LOG}"
     } > "${_hb_file}" 2>/dev/null || echo "⚠️ 心跳檔寫入失敗（不影響 nightly exit 語意）：${_hb_file}" >&2
   else
     echo "⚠️ 心跳目錄建立失敗（不影響 nightly exit 語意）：${_hb_dir}" >&2
@@ -89,6 +145,10 @@ run_stage 4 sdd_ci_gate     sdd_gate
 
 printf '\n===== nightly 彙總：PASS=%s FAIL=%s =====\n' "$PASS" "$FAIL"
 write_heartbeat
+# RunId log 輪替（R15）：保留 14 天；pattern 只掃 nightly_mac_2*.log（時間戳家族），
+# 絕不觸及 nightly_mac_latest.log（心跳）與 nightly_mac_launchd.{log,err}（launchd
+# 兜底，依 ARCH-R14-REV-2 明確不輪替）；BSD find 相容；失敗不改 exit 語意。
+find "${ROOT}/AutoClaude/logs" -name 'nightly_mac_2*.log' -mtime +14 -delete 2>/dev/null || true
 if [ "$FAIL" -gt 0 ]; then
   echo "失敗 stage：$FAIL_NAMES" >&2
   exit 1

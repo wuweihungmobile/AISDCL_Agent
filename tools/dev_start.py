@@ -410,6 +410,41 @@ def _venv_healthy(py: Path) -> tuple[bool, str]:
     return True, "ok"
 
 
+def _python_version_target() -> str | None:
+    """讀 ROOT/.python-version 的目標版本，截為 major.minor（DEF-101-207）。
+
+    截斷語意對齊 tools/bootstrap.sh 的 `cut -d. -f1,2`（三段版號如 3.11.9 截為
+    3.11——「python3.11.9」命名的直譯器不存在、uv --python 也以 major.minor
+    解析）。缺檔/不可讀回 None 靜默：pin 不存在是合法狀態，不是缺陷。
+    """
+    try:
+        raw = (ROOT / ".python-version").read_text(encoding="utf-8").strip()
+    except OSError:
+        return None
+    if not raw:
+        return None
+    return ".".join(raw.split(".")[:2])
+
+
+def _venv_python_minor(py: Path) -> str | None:
+    """實測 venv 直譯器的 major.minor 版本；任何失敗回 None（DEF-101-207）。
+
+    防護樣式參考 _venv_healthy()：catch OSError（二進位不相容/不可執行）與
+    逾時，非零 rc 同樣視為查不到——本哨兵是 advisory，查不到就靜默。
+    """
+    try:
+        r = subprocess.run(
+            [str(py), "-c", "import sys;print('%d.%d'%sys.version_info[:2])"],
+            timeout=15, capture_output=True, encoding="utf-8", errors="replace",
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+    if r.returncode != 0:
+        return None
+    out = (r.stdout or "").strip()
+    return out or None
+
+
 def _cache_restore_trust(cache_dir: Path, flavor: str, now: str) -> tuple[bool, str]:
     """單一權威判斷：cache_dir 內容是否可信任還原為本平台 .venv（P1-1）。
 
@@ -1285,6 +1320,18 @@ def step_venv(now: str, state: dict, force: bool, cross_same_flavor: bool = Fals
             ok = False
         if ok:
             SUMMARY.setdefault("venv", "bootstrap 完成（依賴已安裝）")
+            # WHY（DEF-101-207）：.python-version 升版後，bootstrap 對「既有 .venv
+            # 沿用」路徑不會換直譯器（uv/venv 只在建立當下選版），而 pin 檔不在
+            # DEPS_FILES 內、hash 觸發是無效藥——唯一可見點是整備成功後對 venv
+            # 直譯器實測版本。放在收尾塊涵蓋沿用/快取換回/hash 未變/bootstrap
+            # 完成全部路徑；純 advisory，任一端查不到（None）即靜默。
+            target = _python_version_target()
+            if target is not None:
+                actual = _venv_python_minor(_venv_python(flavor))
+                if actual is not None and actual != target:
+                    _warn(f"venv Python {actual} 與 .python-version 目標 {target} "
+                          f"不一致——bootstrap 沿用既有 venv 不換直譯器（DEF-101-207），"
+                          f"需對齊請刪除 .venv 後重跑 dev_start")
             # 記錄「這份 .venv 內容是本平台建的」，供下次跨機換手判斷可信度（P1-1）
             _write_origin_marker(ROOT / ".venv", now)
         else:
@@ -1352,6 +1399,50 @@ def step_hooks(now: str, is_repo: bool) -> None:
 # nightly 心跳過期門檻（天）：>8 天 = 兩個週末都沒跑過，排程幾乎必已停擺。
 _HEARTBEAT_MAX_AGE_DAYS = 8
 
+# launchd 排程 label：與 tools/install_mac_nightly.sh 的 LABEL 同值同語意
+# （雙站點由 test_dev_start.py 的跨站字面互鎖機械繫結，ARCH-R15-3）。
+_NIGHTLY_LAUNCHD_LABEL = "com.autoclaude.nightly"
+
+
+def _launchd_nightly_loaded() -> bool | None:
+    """launchctl 精確查核 nightly 排程是否已載入（DEF-101-203②，純 advisory）。
+
+    三態：True＝已載入；False＝未載入；None＝查不到（非 darwin／launchctl 失敗
+    或逾時）。launchctl list 輸出格式為「PID Status Label」三欄（PID 可為 `-`），
+    第 3 欄用精確等值比對——防前綴誤中（如 com.autoclaude.nightly2）。
+    """
+    if sys.platform != "darwin":
+        return None
+    try:
+        r = subprocess.run(["launchctl", "list"], timeout=10, capture_output=True,
+                           encoding="utf-8", errors="replace")
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+    if r.returncode != 0:
+        return None
+    for line in (r.stdout or "").splitlines():
+        cols = line.split()
+        if len(cols) >= 3 and cols[2] == _NIGHTLY_LAUNCHD_LABEL:
+            return True
+    return False
+
+
+def _heartbeat_fail_count(hb: Path) -> int | None:
+    """自心跳檔前 3 行抽取 FAIL 計數（ARCH-R15-1）；讀不到/無錨點回 None。
+
+    FAIL=（heartbeat 時戳行之後的「彙總 PASS=… FAIL=…」行）恆為固定第 2 行契約；
+    第 3 行僅 FAIL>0 時才存在（失敗 stage 行）。讀前 3 行足夠涵蓋兩態、且防未來
+    檔案膨脹（SA-R15-REV-1 訂正：非「3 行恆存在」，regex 對缺席的第 3 行無害）。
+    任何 OSError 靜默跳過——本哨兵是 advisory，絕不影響 dev_start 行為。
+    """
+    try:
+        with hb.open(encoding="utf-8", errors="replace") as f:
+            head = "".join(next(f, "") for _ in range(3))
+    except OSError:
+        return None
+    m = re.search(r"FAIL=(\d+)", head)
+    return int(m.group(1)) if m else None
+
 
 def _check_nightly_heartbeat(now: str) -> str:
     """nightly 心跳哨兵（R12 ARCH-R12-2，純 advisory）——回傳 summary 片段。
@@ -1369,6 +1460,23 @@ def _check_nightly_heartbeat(now: str) -> str:
     try:
         mtime = hb.stat().st_mtime
     except OSError:  # 缺席或不可讀 → 提示（不入 WARNINGS）
+        # R15 DEF-101-203②：mac 側缺席不再停留於「雙可能」猜測——launchctl list
+        # 是 read-only 精確查核，三態消歧：已載入尚未首跑＝正常／未載入＝要裝／
+        # 查不到（None）＝維持下方既有雙可能文案。長解釋不再造第三份完整三態
+        # 措辭，指向 install_mac_nightly.sh --status。Windows 分支完全不動
+        # （schtasks 精確查核路由 DEF-101-200 Windows 輪）。
+        if _flavor(now) != "windows":
+            loaded = _launchd_nightly_loaded()
+            if loaded is True:
+                print(f"    nightly 心跳未偵測（AutoClaude/logs/{name} 不存在）— "
+                      f"launchd 已載入、尚未跑過第一輪（正常；首輪 02:00 後產生心跳，"
+                      f"詳見 bash tools/install_mac_nightly.sh --status）")
+                return "nightly 心跳未偵測（launchd 已載入，尚未首跑—正常）"
+            if loaded is False:
+                print(f"    nightly 心跳未偵測（AutoClaude/logs/{name} 不存在）— "
+                      f"launchd 未載入——安裝：bash tools/install_mac_nightly.sh"
+                      f"（見 ONBOARDING §8）")
+                return "nightly 心跳未偵測（launchd 未載入，見 ONBOARDING §8）"
         # R14 OPT-3：補「或已安裝但尚未首跑」——launchd/schtasks 剛安裝、首輪 02:00 未到
         # 前心跳檔必然缺席，舊文案只說「未啟用」會誤導剛裝完的人（文案語意對齊
         # install_mac_nightly.sh --status）。查證指令依 flavor 給對等物（R14 一審
@@ -1383,13 +1491,84 @@ def _check_nightly_heartbeat(now: str) -> str:
               f"CI 停擺期間本地 nightly 為唯一每日兜底")
         return "nightly 心跳未偵測（排程未啟用？或尚未首跑？見 ONBOARDING §8）"
     age_days = (time.time() - mtime) / 86400.0
+    # ARCH-R15-1：mtime 只證明「在跑」不證明「在綠」——CI 停擺期間 nightly 是唯一
+    # 每日活體，連續全紅時晨間 dev_start 仍 ✅ 是盲區。心跳存在（新鮮或過期皆檢查）
+    # 且非 windows flavor 時讀內容抽 FAIL 計數；Windows 側 nightly_latest.log 是
+    # 全量 log 非 3 行心跳契約，明確不讀（路由 DEF-101-200 Windows 輪）。
+    fail_note = ""
+    if _flavor(now) != "windows":
+        fail_n = _heartbeat_fail_count(hb)
+        if fail_n is not None and fail_n > 0:
+            _warn(f"nightly 最近一輪有 FAIL={fail_n}（AutoClaude/logs/{name}）——"
+                  f"排程在跑但驗證未全綠，請查 AutoClaude/logs/ 最新 nightly_mac log"
+                  f"（ARCH-R15-1）")
+            fail_note = f"；最近一輪 FAIL={fail_n}（見警告）"
     if age_days > _HEARTBEAT_MAX_AGE_DAYS:
         _warn(f"nightly 心跳過期（AutoClaude/logs/{name} 距今 {age_days:.1f} 天 > "
               f"{_HEARTBEAT_MAX_AGE_DAYS} 天）— 排程可能已停擺，請檢查 launchd/schtasks"
               f"（ONBOARDING §8）")
-        return f"nightly 心跳過期（{age_days:.1f} 天，見警告）"
+        return f"nightly 心跳過期（{age_days:.1f} 天，見警告）{fail_note}"
     print(f"    ✅ nightly 心跳新鮮（AutoClaude/logs/{name}，距今 {age_days:.1f} 天）")
-    return "nightly 心跳新鮮"
+    return f"nightly 心跳新鮮{fail_note}"
+
+
+def _check_ci_liveness(is_repo: bool) -> str | None:
+    """CI 活性哨兵（DEF-101-208，純 advisory）——回傳 summary 片段，None＝靜默跳過。
+
+    WHY：CI 額度停擺（DEF-101-081）期間 GitHub Actions 可能長期紅/停，push 者
+    以為雲端有兜底其實沒有——本哨兵用 gh 的 read-only API（零 Actions 額度）
+    查最新 run 結論。三道靜默跳過閘：無 gh／step_sync 已判定離線或跳過（重用
+    其判定，不做第二次網路探測）／非 git repo。全函式 try/except 兜底：任何
+    例外不得改變 dev_start 行為（同心跳哨兵契約）。
+
+    SD-R15-REV-1 訂正：GitHub Actions API 對尚未跑完的 run（queued/in_progress）
+    `conclusion` 恆為 null——若只看 conclusion、剛 push 完就跑本哨兵極易把「還在
+    跑」誤判為「帳務停擺/失敗」。故先查 `status`，非 completed 一律視為正常
+    （執行中），不落入 `_warn` 異常分支。
+    """
+    try:
+        if shutil.which("gh") is None:
+            return None
+        sync = SUMMARY.get("sync", "")
+        if sync.startswith("離線") or sync.startswith("跳過"):
+            return None
+        if not is_repo:
+            return None
+        try:
+            r = subprocess.run(
+                ["gh", "run", "list", "--limit", "1",
+                 "--json", "status,conclusion,updatedAt,workflowName"],
+                timeout=15, capture_output=True, encoding="utf-8", errors="replace",
+            )
+        except (OSError, subprocess.TimeoutExpired):
+            r = None
+        if r is None or r.returncode != 0:
+            # 不入 WARNINGS：gh 未登入/網路抖動是常態，溫和一行即可
+            print("    CI 活性未知（gh 不可用或未登入）")
+            return "CI 活性未知"
+        try:
+            runs = json.loads(r.stdout or "")
+        except ValueError:
+            runs = None
+        if not isinstance(runs, list) or not runs or not isinstance(runs[0], dict):
+            print("    CI 活性未知（gh 回應無可解析的 run 資料）")
+            return "CI 活性未知"
+        status = runs[0].get("status")
+        conclusion = runs[0].get("conclusion")
+        workflow = runs[0].get("workflowName", "?")
+        if status != "completed":
+            print(f"    CI 活性正常（最新 run：{workflow} 執行中，status={status}）")
+            return "CI 活性正常（執行中）"
+        if conclusion == "success":
+            print(f"    ✅ GitHub CI 活性正常（最新 run：{workflow}=success）")
+            return "CI 活性正常"
+        _warn(f"GitHub CI 最新 run {workflow}={conclusion}"
+              f"（{runs[0].get('updatedAt', '?')}）——帳務停擺/失敗中，"
+              f"本地 pre-push＋nightly 為唯一活體驗證（DEF-101-081/208）")
+        return f"CI 活性異常（最新 run={conclusion}，見警告）"
+    except Exception:
+        # 兜底：哨兵絕不可改變 dev_start 的 exit code 或流程
+        return None
 
 
 def step_platform(now: str, is_repo: bool) -> None:
@@ -1407,7 +1586,12 @@ def step_platform(now: str, is_repo: bool) -> None:
     if not notes:
         print("    無需調整")
     hb_note = _check_nightly_heartbeat(now)
-    SUMMARY["platform"] = "；".join((notes if notes else ["無需調整"]) + [hb_note])
+    parts = (notes if notes else ["無需調整"]) + [hb_note]
+    # R15 DEF-101-208：CI 活性哨兵接在心跳哨兵之後；None＝靜默跳過不入 summary
+    ci_note = _check_ci_liveness(is_repo)
+    if ci_note is not None:
+        parts.append(ci_note)
+    SUMMARY["platform"] = "；".join(parts)
 
 
 def step_finalize(now: str, state: dict, is_repo: bool) -> None:

@@ -4,7 +4,7 @@
 |------|------|
 | 來源 | SD_09 W0 教訓 + W3 Round 1~42 zero-trust audit 累積 |
 | 上層 ADR | [ADR-SD08-001](../04_planning/ADR/ADR-SD08-001-claude-md-budget.md) §2.1 規範性內容可外移細節 |
-| 對應實作 | [tools/run_local_nightly.ps1](../../tools/run_local_nightly.ps1)（行數快照已移除防漂移，見下列行號註記）+ [tools/](../../tools/)（10 helper + unit test）。R9（2026-07-16）三變更：前置新增 local-ci-gate 全套 stage（對齊 windows-nightly-full）；pg-e2e 加跑 PG contract 測試（獨立 pytest 呼叫，不寫 .ac4_junit.xml 防污染 AC4 取證）；終端 exit code 帶訊號（任一 stage 失敗→exit 1，SKIP=-1/WARN=2 不計）——schtasks「上次結果」從此可反映 stage 健康，取證時不可再假設其恆 0x0。R10（2026-07-17）五變更：mutmut log 驗證失敗 rc 2→1（QA-3，防「假 pass 守門自身觸發」被 WARN 綠出場）；recall pytest rc 以 [ref] 捕捉（QA-4）；新增 sdd-fsm-chaos stage（QA-6，Rule 9.9.4 本地補償）；Docker 連續 ≥3 次 SKIP 升級 exit 1（QA-11，`.docker_skip_streak`）；END mutation 進度改 unique-sha 分子（SA-2）——全部由 test_run_local_nightly_static.py 24 錨點鎖住 |
+| 對應實作 | [tools/run_local_nightly.ps1](../../tools/run_local_nightly.ps1)（行數快照已移除防漂移，見下列行號註記）+ [tools/](../../tools/)（10 helper + unit test）。R9（2026-07-16）三變更：前置新增 local-ci-gate 全套 stage（對齊 windows-nightly-full）；pg-e2e 加跑 PG contract 測試（獨立 pytest 呼叫，不寫 .ac4_junit.xml 防污染 AC4 取證）；終端 exit code 帶訊號（任一 stage 失敗→exit 1，SKIP=-1/WARN=2 不計）——schtasks「上次結果」從此可反映 stage 健康，取證時不可再假設其恆 0x0。R10（2026-07-17）五變更：mutmut log 驗證失敗 rc 2→1（QA-3，防「假 pass 守門自身觸發」被 WARN 綠出場）；recall pytest rc 以 [ref] 捕捉（QA-4）；新增 sdd-fsm-chaos stage（QA-6，Rule 9.9.4 本地補償）；Docker 連續 ≥3 次 SKIP 升級 exit 1（QA-11，`.docker_skip_streak`）；END mutation 進度改 unique-sha 分子（SA-2）——全部由 test_run_local_nightly_static.py 24 錨點鎖住。mac 薄聚合器對等（R15，2026-07-20）：[tools/run_local_nightly.sh](../../tools/run_local_nightly.sh)（四 stage：macos_smoke／root_unittests／autoclaude_gate／sdd_ci_gate；成功失敗皆寫心跳 `logs/nightly_mac_latest.log`＋RunId log `logs/nightly_mac_<ts>.log` 14 天輪替＋launchd RunAtLoad 當日去重補跑；靜態錨點由 `tools/macos_smoke_local.sh` [7/7] 鎖住） |
 | 行號註記 | 本檔 file:line 引用為 commit 當下取證；ps1 變動後行號漂移屬正常，以錨點關鍵字（如 `AUTOCLAUDE_*_P95_THRESHOLD_MS` / `F2 OK` / `ac4_junit.xml`）為準（R42 audit 校正）|
 | 對應根因報告 | [SD09_W0_Nightly_RootCause_Report.md](../05_development/SD09_W0_Nightly_RootCause_Report.md) |
 | 維護 | 任一條紀律違反 → P0 audit；新增紀律由 audit 發現 → 編號累加，**不可重排** |
@@ -34,6 +34,8 @@
 ### 紀律 #3 — PASS 聲稱必須引用 RunId log 行號
 
 文件 / 報告寫「✅ 修復後綠燈」必須附 `logs/nightly_YYYY-MM-DD_HHMMSS.log:L行號`；不接受「歷史某輪綠燈快照」概括表述。`logs/nightly_latest.log` 為單一真相。
+
+**mac 註記（R15，2026-07-20 / DEF-101-201②）**：mac 薄聚合器 RunId log＝`AutoClaude/logs/nightly_mac_<ts>.log`（`run_local_nightly.sh` 開頭 exec 改道、BEGIN 首行帶 run_id；保留 14 天）——本輪起 mac 側 PASS 聲稱同樣可（且必須）引 RunId log:L。心跳檔 `logs/nightly_mac_latest.log` 為 latest **指標**（前 2 行三站點契約；彙總行後〔FAIL>0 時多一行失敗 stage〕以 `log=` 末行指向當輪 RunId log），取證一律以 RunId log 為準（同 TD-N04 pointer 語意）。
 
 ### 紀律 #4 — 驗證鏡子自身要被驗證
 
@@ -195,4 +197,4 @@ CLAUDE.md §「Nightly / CI 取證紀律」維持 19 條編號標題清單（一
 
 ---
 
-**文檔元數據**：v1.7（R10 跨平台複審 — 紀律 #13 補 mutation 軌 unique-sha 語意分軌訂正〔SA-2/DEF-101-142，含 DEF-101-148 壓縮未落盤揭露〕、紀律 #14 死 log 連結改文字存證〔SA-7/DEF-101-147〕、header 表載具 R10 五變更註記，CLAUDE.md 摘要連結已同步 v1.7。v1.6：R9 計數 16→19 訂正＋行數快照移除＋R9 三變更。v1.5：Improving_012 Phase 3 收尾 — 新增紀律 #19）| 建立 2026-05-26 | 最後更新 2026-07-17 | 維護者：Tech Lead
+**文檔元數據**：v1.8（R15 跨平台複審 — 紀律 #3 補 mac RunId log 註記〔DEF-101-201②：`nightly_mac_<ts>.log` 14 天輪替＋心跳降級為 latest 指標〕、header 表補 mac 薄聚合器對應實作現況〔SCAN-D-4：四 stage＋心跳＋RunId log＋RunAtLoad 當日去重補跑〕；條數不變仍 19 條。v1.7：R10 跨平台複審 — 紀律 #13 補 mutation 軌 unique-sha 語意分軌訂正〔SA-2/DEF-101-142，含 DEF-101-148 壓縮未落盤揭露〕、紀律 #14 死 log 連結改文字存證〔SA-7/DEF-101-147〕、header 表載具 R10 五變更註記。v1.6：R9 計數 16→19 訂正＋行數快照移除＋R9 三變更。v1.5：Improving_012 Phase 3 收尾 — 新增紀律 #19）| 建立 2026-05-26 | 最後更新 2026-07-20 | 維護者：Tech Lead

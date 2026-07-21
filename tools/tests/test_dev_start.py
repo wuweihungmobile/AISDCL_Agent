@@ -2118,7 +2118,11 @@ class TestStepPlatformLongpaths(DevStartTestCase):
     def test_sets_longpaths_when_not_true(self):
         with tempfile.TemporaryDirectory() as td:
             repo = self._make_repo(Path(td))
-            with mock.patch.object(dev_start, "ROOT", repo):
+            # R15 起 step_platform 尾端接 CI 活性哨兵——本測試意圖只鎖 longpaths，
+            # mock 掉避免測試中打真實 gh 網路呼叫（SUMMARY["sync"] 未設時三閘不攔）。
+            with mock.patch.object(dev_start, "ROOT", repo), \
+                 mock.patch.object(dev_start, "_check_ci_liveness",
+                                   return_value=None):
                 dev_start.step_platform("windows", is_repo=True)
             r = subprocess.run(
                 ["git", "-C", str(repo), "config", "--get", "core.longpaths"],
@@ -2131,7 +2135,10 @@ class TestStepPlatformLongpaths(DevStartTestCase):
             repo = self._make_repo(Path(td))
             subprocess.run(["git", "-C", str(repo), "config", "core.longpaths", "true"],
                             check=True)
-            with mock.patch.object(dev_start, "ROOT", repo):
+            # 同上：mock 掉 CI 活性哨兵避免真實 gh 網路呼叫
+            with mock.patch.object(dev_start, "ROOT", repo), \
+                 mock.patch.object(dev_start, "_check_ci_liveness",
+                                   return_value=None):
                 dev_start.step_platform("windows", is_repo=True)
             # R12 起 summary 尾端附 nightly 心跳註記——本測試意圖只鎖「已是 true
             # 時不重複觸發設定」，改斷言前綴（若誤觸發會以「已設」開頭）
@@ -2309,7 +2316,12 @@ class TestNightlyHeartbeat(DevStartTestCase):
     test_platform_neutral_paths）。"""
 
     def _run(self, root: Path, now: str = "mac") -> str:
+        # R15 起缺席分支會呼叫 _launchd_nightly_loaded()（DEF-101-203②）——本類
+        # 測試鎖的是「三態 mtime 比對」既有語意，固定 None（查不到）維持原文案，
+        # 也避免在真 mac 上打到真實 launchctl 造成結果隨本機排程狀態漂移。
         with mock.patch.object(dev_start, "ROOT", root), \
+             mock.patch.object(dev_start, "_launchd_nightly_loaded",
+                               return_value=None), \
              mock.patch("builtins.print"):
             return dev_start._check_nightly_heartbeat(now)
 
@@ -2338,6 +2350,8 @@ class TestNightlyHeartbeat(DevStartTestCase):
         ):
             with tempfile.TemporaryDirectory() as td, \
                  mock.patch.object(dev_start, "ROOT", Path(td)), \
+                 mock.patch.object(dev_start, "_launchd_nightly_loaded",
+                                   return_value=None), \
                  mock.patch("builtins.print") as fake_print:
                 dev_start._check_nightly_heartbeat(flavor)
             printed = " ".join(str(c) for c in fake_print.call_args_list)
@@ -2393,6 +2407,8 @@ class TestNightlyHeartbeat(DevStartTestCase):
             with mock.patch.object(dev_start, "ROOT", root), \
                  mock.patch.object(dev_start.Path, "stat",
                                    side_effect=OSError("I/O error")), \
+                 mock.patch.object(dev_start, "_launchd_nightly_loaded",
+                                   return_value=None), \
                  mock.patch("builtins.print"):
                 note = dev_start._check_nightly_heartbeat("mac")
         self.assertIn("未偵測", note)
@@ -2403,7 +2419,11 @@ class TestNightlyHeartbeat(DevStartTestCase):
         標頭（[6/7] 平台專屬健檢）不變。"""
         with tempfile.TemporaryDirectory() as td:
             root = Path(td)
+            # _launchd_nightly_loaded 固定 None：鎖既有缺席文案不隨本機 launchd
+            # 狀態漂移；_check_ci_liveness 走 is_repo=False 閘自然回 None。
             with mock.patch.object(dev_start, "ROOT", root), \
+                 mock.patch.object(dev_start, "_launchd_nightly_loaded",
+                                   return_value=None), \
                  mock.patch("builtins.print") as fake_print:
                 dev_start.step_platform("mac", is_repo=False)
         printed = " ".join(
@@ -2477,6 +2497,342 @@ class TestNightlyHeartbeatFilenameContract(unittest.TestCase):
         )
         # SD-R13-1 迴歸鎖：過期判定必須以秒比較（整數天除法在 (8,9) 天窗口誤判新鮮）
         self.assertIn("* 86400", installer, "安裝器過期判定須以秒比較（防整數天截斷回歸）")
+
+
+class TestVenvPythonVersionSentinel(DevStartTestCase):
+    """R15 DEF-101-207：venv Python 版本比對哨兵。
+
+    WHY：.python-version 升版後 bootstrap 對「既有 .venv 沿用」路徑不換直譯器，
+    pin 檔不在 DEPS_FILES 內、hash 觸發是無效藥——唯一可見點是整備成功收尾塊
+    對 venv 直譯器實測版本。驅動真實 step_venv()（hash 未變的沿用路徑），
+    monkeypatch 兩支新純函式鎖三態：不一致→警告；一致→零警告；pin 缺席→
+    零警告且不得 spawn 直譯器（短路）。
+    """
+
+    def _run_step_venv(self, target, minor_mock) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            fake_py = root / ".venv" / "bin" / "python"
+            fake_py.parent.mkdir(parents=True)
+            fake_py.write_text("", encoding="utf-8")  # 只需存在（過 _safe_exists 守門）
+            state = {"deps_hash": {"posix": "h"}}  # prev == cur → 走「hash 未變」沿用路徑
+            with mock.patch.object(dev_start, "ROOT", root), \
+                 mock.patch.object(dev_start, "LOCK_FILE", root / ".dev_start.lock"), \
+                 mock.patch.object(dev_start, "_ensure_venv_shape", return_value="ok"), \
+                 mock.patch.object(dev_start, "_deps_hash", return_value="h"), \
+                 mock.patch.object(dev_start, "_venv_python", return_value=fake_py), \
+                 mock.patch.object(dev_start, "_write_origin_marker"), \
+                 mock.patch.object(dev_start, "_python_version_target",
+                                   return_value=target), \
+                 mock.patch.object(dev_start, "_venv_python_minor", minor_mock), \
+                 mock.patch("builtins.print"):
+                ok = dev_start.step_venv("mac", state, force=False)
+            self.assertTrue(ok, "版本哨兵是 advisory——不得改變 step_venv 成敗")
+
+    def test_mismatch_warns(self):
+        self._run_step_venv("3.12", mock.Mock(return_value="3.11"))
+        self.assertTrue(
+            any("venv Python 3.11" in w and ".python-version 目標 3.12" in w
+                and "DEF-101-207" in w for w in dev_start.WARNINGS),
+            f"目標/實際不一致須 _warn，實際 WARNINGS={dev_start.WARNINGS}")
+
+    def test_match_no_warning(self):
+        self._run_step_venv("3.11", mock.Mock(return_value="3.11"))
+        self.assertEqual(dev_start.WARNINGS, [], "版本一致不得出現任何警告")
+
+    def test_pin_absent_silent_and_short_circuits(self):
+        # pin 缺席（target=None）→ 零警告，且不得呼叫 _venv_python_minor
+        # （短路：不 spawn 直譯器子行程）
+        minor = mock.Mock(side_effect=AssertionError("pin 缺席時不得實測直譯器版本"))
+        self._run_step_venv(None, minor)
+        self.assertEqual(dev_start.WARNINGS, [], "pin 缺席是合法狀態——靜默")
+        minor.assert_not_called()
+
+
+class TestVenvPythonVersionRealBody(DevStartTestCase):
+    """QA-R15-REV-3：_python_version_target()／_venv_python_minor() 真身驅動。
+
+    WHY：TestVenvPythonVersionSentinel 只驗證 step_venv 依兩支函式回傳值決定
+    要不要 _warn，兩支函式本身（讀 .python-version 截斷邏輯、subprocess 呼叫
+    子行程取版本）全程被 mock 掉、零真身覆蓋（R15 四方一審 QA-R15-REV-3 揭露）。
+    本測試以 tempfile 真檔案＋sys.executable 真直譯器直接驅動函式本體。
+    """
+
+    def test_target_two_segment_version(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            (root / ".python-version").write_text("3.11\n", encoding="utf-8")
+            with mock.patch.object(dev_start, "ROOT", root):
+                self.assertEqual(dev_start._python_version_target(), "3.11")
+
+    def test_target_three_segment_truncated_to_major_minor(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            (root / ".python-version").write_text("3.11.9", encoding="utf-8")
+            with mock.patch.object(dev_start, "ROOT", root):
+                self.assertEqual(dev_start._python_version_target(), "3.11")
+
+    def test_target_strips_surrounding_whitespace(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            (root / ".python-version").write_text("  3.12  \n", encoding="utf-8")
+            with mock.patch.object(dev_start, "ROOT", root):
+                self.assertEqual(dev_start._python_version_target(), "3.12")
+
+    def test_target_missing_file_returns_none(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)  # 不建立 .python-version
+            with mock.patch.object(dev_start, "ROOT", root):
+                self.assertIsNone(dev_start._python_version_target())
+
+    def test_target_blank_content_returns_none(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            (root / ".python-version").write_text("   \n", encoding="utf-8")
+            with mock.patch.object(dev_start, "ROOT", root):
+                self.assertIsNone(dev_start._python_version_target())
+
+    def test_minor_real_subprocess_call_against_current_interpreter(self):
+        # 用當前測試執行的直譯器本身（sys.executable）真實 spawn 子行程，
+        # 驗證輸出解析為 "major.minor" 字串（非 mock 掉 subprocess.run）。
+        result = dev_start._venv_python_minor(Path(sys.executable))
+        expected = f"{sys.version_info.major}.{sys.version_info.minor}"
+        self.assertEqual(result, expected)
+
+    def test_minor_nonexistent_interpreter_returns_none(self):
+        result = dev_start._venv_python_minor(Path("/nonexistent/path/to/python"))
+        self.assertIsNone(result)
+
+    def test_minor_nonzero_exit_returns_none(self):
+        with tempfile.TemporaryDirectory() as td:
+            fake_py = Path(td) / "fail_py.sh"
+            fake_py.write_text("#!/bin/sh\nexit 1\n", encoding="utf-8")
+            fake_py.chmod(0o755)
+            result = dev_start._venv_python_minor(fake_py)
+            self.assertIsNone(result)
+
+
+class TestLaunchdNightlyLoaded(DevStartTestCase):
+    """R15 DEF-101-203②：launchctl 精確查核三態（含干擾列防前綴誤中）。
+
+    以 fake launchctl 輸出驅動 _check_nightly_heartbeat 缺席分支端到端，
+    鎖三態對應文案；非 darwin 直接回 None（不 spawn launchctl）。
+    """
+
+    _DECOY = "123\t0\tcom.autoclaude.nightly2"  # 前綴干擾列：精確等值不得誤中
+
+    def _heartbeat_with_launchctl(self, stdout: str, rc: int = 0):
+        """在空 ROOT（心跳必缺席）+ 假 darwin + 假 launchctl 下跑心跳哨兵。"""
+        fake = subprocess.CompletedProcess(args=["launchctl", "list"],
+                                           returncode=rc, stdout=stdout, stderr="")
+        with tempfile.TemporaryDirectory() as td, \
+             mock.patch.object(dev_start, "ROOT", Path(td)), \
+             mock.patch.object(sys, "platform", "darwin"), \
+             mock.patch.object(dev_start.subprocess, "run", return_value=fake), \
+             mock.patch("builtins.print") as fake_print:
+            note = dev_start._check_nightly_heartbeat("mac")
+        printed = " ".join(str(c) for c in fake_print.call_args_list)
+        return note, printed
+
+    def test_loaded_true_despite_decoy_gives_normal_wording(self):
+        # 干擾列在前、真 label 在後（PID 欄為 `-`＝未在跑，launchctl 真實輸出形態）
+        out = f"{self._DECOY}\n-\t0\tcom.autoclaude.nightly\n"
+        note, printed = self._heartbeat_with_launchctl(out)
+        self.assertIn("launchd 已載入、尚未跑過第一輪", printed,
+                      "True 態須明示「已載入、尚未首跑＝正常」消歧")
+        self.assertIn("install_mac_nightly.sh --status", printed,
+                      "長解釋須指向 --status，不得再造第三份完整三態措辭")
+        self.assertIn("launchd 已載入", note)
+        self.assertEqual(dev_start.WARNINGS, [], "True 態是正常狀態——不得 _warn")
+
+    def test_decoy_only_is_false_gives_install_wording(self):
+        note, printed = self._heartbeat_with_launchctl(f"{self._DECOY}\n")
+        self.assertIn("launchd 未載入", printed,
+                      "只有前綴干擾列時必須判 False——精確等值不得誤中 nightly2")
+        self.assertIn("bash tools/install_mac_nightly.sh", printed)
+        self.assertIn("launchd 未載入", note)
+        self.assertEqual(dev_start.WARNINGS, [], "False 態是提示不是警告")
+
+    def test_launchctl_failure_is_none_keeps_dual_wording(self):
+        note, printed = self._heartbeat_with_launchctl("", rc=1)
+        self.assertIn("排程可能未啟用", printed,
+                      "None 態必須維持現行雙可能文案不變")
+        self.assertIn("尚未跑過第一輪", printed)
+        self.assertIn("排程未啟用？或尚未首跑？", note)
+
+    def test_non_darwin_returns_none_without_spawning(self):
+        with mock.patch.object(sys, "platform", "linux"), \
+             mock.patch.object(dev_start.subprocess, "run") as fake_run:
+            self.assertIsNone(dev_start._launchd_nightly_loaded())
+        fake_run.assert_not_called()
+
+
+class TestHeartbeatFailSentinel(DevStartTestCase):
+    """R15 ARCH-R15-1：心跳 FAIL 內容哨兵（mac 側）。
+
+    WHY：mtime 只證明「在跑」不證明「在綠」——CI 停擺期間 nightly 是唯一每日
+    活體，連續全紅晨間 dev_start 仍 ✅ 是盲區。心跳前 3 行是
+    run_local_nightly.sh write_heartbeat() 的固定契約。
+    """
+
+    @staticmethod
+    def _write_heartbeat(root: Path, fail: int) -> None:
+        logs = root / "AutoClaude" / "logs"
+        logs.mkdir(parents=True)
+        (logs / "nightly_mac_latest.log").write_text(
+            "nightly_mac heartbeat（UTC）：2026-07-20T02:00:00Z\n"
+            f"===== nightly 彙總：PASS=5 FAIL={fail} =====\n"
+            "失敗 stage：mutation pg-e2e\n",
+            encoding="utf-8")
+
+    def _run(self, root: Path) -> str:
+        with mock.patch.object(dev_start, "ROOT", root), \
+             mock.patch("builtins.print"):
+            return dev_start._check_nightly_heartbeat("mac")
+
+    def test_fail_gt_zero_warns_with_count_and_defect_id(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            self._write_heartbeat(root, fail=2)
+            note = self._run(root)
+        self.assertTrue(
+            any("FAIL=2" in w and "ARCH-R15-1" in w and "未全綠" in w
+                for w in dev_start.WARNINGS),
+            f"FAIL>0 須 _warn（含計數與缺陷編號），實際 WARNINGS={dev_start.WARNINGS}")
+        self.assertIn("FAIL=2", note, "summary 片段須附註 FAIL 計數")
+
+    def test_fail_zero_no_warning(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            self._write_heartbeat(root, fail=0)
+            note = self._run(root)
+        self.assertEqual(dev_start.WARNINGS, [], "FAIL=0（全綠）不得出現任何警告")
+        self.assertEqual(note, "nightly 心跳新鮮")
+
+
+class TestCiLiveness(DevStartTestCase):
+    """R15 DEF-101-208：CI 活性哨兵——gh read-only API 查最新 run 結論。
+
+    三道靜默跳過閘（無 gh／sync 離線或跳過／非 repo）＋四態輸出。全部
+    advisory：None＝不入 summary；「未知」不入 WARNINGS；僅非 success _warn。
+    """
+
+    @staticmethod
+    def _gh_result(payload: str, rc: int = 0) -> subprocess.CompletedProcess:
+        return subprocess.CompletedProcess(args=["gh"], returncode=rc,
+                                           stdout=payload, stderr="")
+
+    def test_no_gh_returns_none_silently(self):
+        with mock.patch.object(dev_start.shutil, "which", return_value=None), \
+             mock.patch("builtins.print") as fake_print:
+            self.assertIsNone(dev_start._check_ci_liveness(is_repo=True))
+        self.assertEqual(dev_start.WARNINGS, [])
+        fake_print.assert_not_called()
+
+    def test_offline_sync_returns_none_without_network_probe(self):
+        # 重用 step_sync 判定：離線時不做第二次網路探測。不能用 side_effect 拋錯
+        # 驗證（兜底 except 會吞掉假失敗），改記錄呼叫並雙重斷言。
+        dev_start.SUMMARY["sync"] = "離線（fetch 失敗）"
+        with mock.patch.object(dev_start.shutil, "which", return_value="/usr/bin/gh"), \
+             mock.patch.object(dev_start.subprocess, "run") as fake_run, \
+             mock.patch("builtins.print"):
+            self.assertIsNone(dev_start._check_ci_liveness(is_repo=True))
+        fake_run.assert_not_called()
+
+    def test_failure_conclusion_warns_with_local_fallback_hint(self):
+        dev_start.SUMMARY["sync"] = "已是最新（origin/main）"
+        payload = json.dumps([{"status": "completed", "conclusion": "failure",
+                               "updatedAt": "2026-07-19T18:00:00Z",
+                               "workflowName": "autoclaude-ci"}])
+        with mock.patch.object(dev_start.shutil, "which", return_value="/usr/bin/gh"), \
+             mock.patch.object(dev_start.subprocess, "run",
+                               return_value=self._gh_result(payload)), \
+             mock.patch("builtins.print"):
+            note = dev_start._check_ci_liveness(is_repo=True)
+        self.assertIn("CI 活性異常", note)
+        self.assertTrue(
+            any("autoclaude-ci=failure" in w and "DEF-101-081/208" in w
+                and "pre-push＋nightly" in w for w in dev_start.WARNINGS),
+            f"非 success 須 _warn（含 workflow/結論/本地兜底提示），"
+            f"實際 WARNINGS={dev_start.WARNINGS}")
+
+    def test_success_returns_normal_fragment_without_warning(self):
+        dev_start.SUMMARY["sync"] = "已是最新（origin/main）"
+        payload = json.dumps([{"status": "completed", "conclusion": "success",
+                               "updatedAt": "2026-07-20T01:00:00Z",
+                               "workflowName": "autoclaude-ci"}])
+        with mock.patch.object(dev_start.shutil, "which", return_value="/usr/bin/gh"), \
+             mock.patch.object(dev_start.subprocess, "run",
+                               return_value=self._gh_result(payload)), \
+             mock.patch("builtins.print"):
+            note = dev_start._check_ci_liveness(is_repo=True)
+        self.assertEqual(note, "CI 活性正常")
+        self.assertEqual(dev_start.WARNINGS, [])
+
+    def test_in_progress_status_is_normal_not_warning(self):
+        """SD-R15-REV-1：run 尚未跑完時 conclusion 恆為 null——不得誤判為帳務停擺/失敗。"""
+        dev_start.SUMMARY["sync"] = "已是最新（origin/main）"
+        payload = json.dumps([{"status": "in_progress", "conclusion": None,
+                               "updatedAt": "2026-07-20T01:00:00Z",
+                               "workflowName": "autoclaude-ci"}])
+        with mock.patch.object(dev_start.shutil, "which", return_value="/usr/bin/gh"), \
+             mock.patch.object(dev_start.subprocess, "run",
+                               return_value=self._gh_result(payload)), \
+             mock.patch("builtins.print"):
+            note = dev_start._check_ci_liveness(is_repo=True)
+        self.assertEqual(note, "CI 活性正常（執行中）")
+        self.assertEqual(dev_start.WARNINGS, [],
+                          "run 尚未跑完不得誤判為異常並 _warn")
+
+    def test_queued_status_is_normal_not_warning(self):
+        dev_start.SUMMARY["sync"] = "已是最新（origin/main）"
+        payload = json.dumps([{"status": "queued", "conclusion": None,
+                               "updatedAt": "2026-07-20T01:00:00Z",
+                               "workflowName": "autoclaude-ci"}])
+        with mock.patch.object(dev_start.shutil, "which", return_value="/usr/bin/gh"), \
+             mock.patch.object(dev_start.subprocess, "run",
+                               return_value=self._gh_result(payload)), \
+             mock.patch("builtins.print"):
+            note = dev_start._check_ci_liveness(is_repo=True)
+        self.assertEqual(note, "CI 活性正常（執行中）")
+        self.assertEqual(dev_start.WARNINGS, [])
+
+
+class TestCrossSiteLiteralLocks(unittest.TestCase):
+    """R15 雙站點字面互鎖（機械鎖漂移；同 TestNightlyHeartbeatFilenameContract 病灶）。
+
+    dev_start.py 與 install_mac_nightly.sh 各硬編一份 launchd label 與心跳門檻，
+    單側改動另一側零訊號——regex 自兩側原始碼抽字面值斷言相等。
+    install_mac_nightly.sh 本測試只讀不寫。
+    """
+
+    _REPO = Path(dev_start.__file__).resolve().parents[1]
+
+    def _installer_text(self) -> str:
+        return (self._REPO / "tools" / "install_mac_nightly.sh").read_text(
+            encoding="utf-8")
+
+    def test_launchd_label_matches_installer(self) -> None:
+        """ARCH-R15-3：label 兩站點相等（launchctl 查核比對的就是這個字串）。"""
+        src = Path(dev_start.__file__).read_text(encoding="utf-8")
+        m_dev = re.search(r'_NIGHTLY_LAUNCHD_LABEL = "([^"]+)"', src)
+        m_ins = re.search(r'^LABEL="([^"]+)"', self._installer_text(), re.MULTILINE)
+        self.assertIsNotNone(m_dev, "dev_start.py 的 launchd label 錨點消失")
+        self.assertIsNotNone(m_ins, "install_mac_nightly.sh 的 LABEL= 錨點消失")
+        self.assertEqual(m_dev.group(1), "com.autoclaude.nightly")
+        self.assertEqual(m_dev.group(1), m_ins.group(1),
+                         "兩站點 label 漂移——launchctl 查核將永遠 False")
+
+    def test_heartbeat_threshold_matches_installer(self) -> None:
+        """ARCH-R15-2：心跳過期門檻兩站點相等（--status 與 dev_start 同語意）。"""
+        src = Path(dev_start.__file__).read_text(encoding="utf-8")
+        m_dev = re.search(r"_HEARTBEAT_MAX_AGE_DAYS = (\d+)", src)
+        m_ins = re.search(r"^HEARTBEAT_MAX_AGE_DAYS=(\d+)",
+                          self._installer_text(), re.MULTILINE)
+        self.assertIsNotNone(m_dev, "dev_start.py 的門檻常數錨點消失")
+        self.assertIsNotNone(m_ins, "install_mac_nightly.sh 的門檻常數錨點消失")
+        self.assertEqual(m_dev.group(1), m_ins.group(1),
+                         "兩站點心跳門檻漂移——--status 與 dev_start 判定分歧")
 
 
 if __name__ == "__main__":

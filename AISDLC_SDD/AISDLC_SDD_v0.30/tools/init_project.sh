@@ -149,7 +149,11 @@ download_aisdlc() {
     else
         # === 遠端模式：從 GitHub 下載 ===
         # mktemp 帶模板（R11）：repo 對 BSD mktemp 是否需模板存在兩套假設（實測現代 macOS 皆可，統一帶模板為最保守跨平台寫法）
-        local temp_dir=$(mktemp -d "${TMPDIR:-/tmp}/aisdlc_init.XXXXXX")
+        # 宣告與賦值分離（R15 SCAN-A-1）：`local x=$(cmd)` 整行 rc 恆為 local 的 0，
+        # set -e 下 mktemp 失敗被遮蔽 → temp_dir 空字串 → 後續路徑退化成 /repo 誤導；
+        # 分離後賦值失敗即觸發 set -e 停機（bash 3.2 相容寫法）。
+        local temp_dir
+        temp_dir="$(mktemp -d "${TMPDIR:-/tmp}/aisdlc_init.XXXXXX")"
         source_dir="${temp_dir}/repo"
 
         # 選擇 URL
