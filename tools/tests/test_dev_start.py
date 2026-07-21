@@ -895,8 +895,10 @@ class TestPidAliveWindowsBranch(DevStartTestCase):
         fake_kernel32 = mock.Mock()
         fake_kernel32.OpenProcess.return_value = 12345  # 非 0 = 成功開啟 handle
         fake_windll = mock.Mock(kernel32=fake_kernel32)
+        # R17 DEF-101-231：_pid_alive() 的 Windows 判斷改呼叫 platform_utils.is_windows()
+        # （不再讀 os.name），故 mock 目標同步改為該函式，而非 dev_start.os.name。
         with mock.patch.object(ctypes, "windll", fake_windll, create=True), \
-             mock.patch.object(dev_start.os, "name", "nt"):
+             mock.patch.object(dev_start.platform_utils, "is_windows", return_value=True):
             self.assertTrue(dev_start._pid_alive(4242))
         fake_kernel32.CloseHandle.assert_called_once_with(12345)
 
@@ -906,7 +908,7 @@ class TestPidAliveWindowsBranch(DevStartTestCase):
         fake_kernel32.GetLastError.return_value = 5  # ERROR_ACCESS_DENIED
         fake_windll = mock.Mock(kernel32=fake_kernel32)
         with mock.patch.object(ctypes, "windll", fake_windll, create=True), \
-             mock.patch.object(dev_start.os, "name", "nt"):
+             mock.patch.object(dev_start.platform_utils, "is_windows", return_value=True):
             self.assertTrue(dev_start._pid_alive(4242))
 
     def test_open_process_fails_with_other_error_is_dead(self):
@@ -915,7 +917,7 @@ class TestPidAliveWindowsBranch(DevStartTestCase):
         fake_kernel32.GetLastError.return_value = 87  # ERROR_INVALID_PARAMETER
         fake_windll = mock.Mock(kernel32=fake_kernel32)
         with mock.patch.object(ctypes, "windll", fake_windll, create=True), \
-             mock.patch.object(dev_start.os, "name", "nt"):
+             mock.patch.object(dev_start.platform_utils, "is_windows", return_value=True):
             self.assertFalse(dev_start._pid_alive(4242))
 
 
@@ -1138,7 +1140,9 @@ class TestStreamNewProcessGroup(DevStartTestCase):
             captured_kwargs.update(kwargs)
             return FakeProc()
 
-        with mock.patch.object(dev_start.os, "name", "nt"), \
+        # R17 DEF-101-231：_stream() 的 new_process_group Windows 判斷改呼叫
+        # platform_utils.is_windows()（不再讀 os.name），mock 目標同步改為該函式。
+        with mock.patch.object(dev_start.platform_utils, "is_windows", return_value=True), \
              mock.patch.object(dev_start.subprocess, "Popen", side_effect=fake_popen):
             rc = dev_start._stream(["irrelevant"], new_process_group=True)
 

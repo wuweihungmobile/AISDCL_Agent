@@ -22,7 +22,7 @@
 
 | 軌道 | 環境 | 頻率 | 量測場景 | 用途 |
 |------|------|------|----------|------|
-| **(b) CI nightly** | GitHub Actions ubuntu-latest | 每週一 02:00 UTC（與 pg-e2e-nightly 同步；**R14 修訂**：CI-2 額度裁決 2026-07-20 由每日降週頻，每日訊號改由 Windows 本地 nightly perf-baseline stage 承擔）| **CPU-bound only**：dry_run 全步驟 / TokenHalt 往返 / decide_correction 單次 | 趨勢監控 + 相對閾值 |
+| **(b) CI nightly** | GitHub Actions ubuntu-latest | 每週一 **02:07 UTC**（與 pg-e2e-nightly 同步；**R14 修訂**：CI-2 額度裁決 2026-07-20 由每日降週頻，每日訊號改由 Windows 本地 nightly perf-baseline stage 承擔；**R16 修訂**：cron 自整點 `0 2 * * 1` 錯開至 `7 2 * * 1`——全倉 8 條 cron 排程原全落在整點/半點且與其他排程精準相撞，DEF-101-226 修復統一錯開避開 GitHub 官方建議的整點/半點延遲風險，相對先後順序不變）| **CPU-bound only**：dry_run 全步驟 / TokenHalt 往返 / decide_correction 單次 | 趨勢監控 + 相對閾值 |
 | **(c) perf machine** | 專用機（SD_09 採購評估）| 季度（每 3 個月）| **IO/IO-bound**：pgvector recall@10 + p95 / multi-run resume | 絕對基準 + production SLA |
 
 **禁止**：(a) 本地 dev（無法重現 + 無歷史趨勢）

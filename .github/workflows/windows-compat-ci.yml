@@ -152,6 +152,17 @@ on:
       - "tools/check_pytest_baseline_sites.py"
       - "tools/git_hooks_install_common.py"
       - "tools/_stdio_utf8.py"
+      # R17：tools/tests/test_platform_utils_dedup.py 消費此根層檔——只改該檔時
+      # 本 workflow 也須重跑該鎖（DEF-101-042 同構；.py 無 **/*.py 兜底 glob，需
+      # 顯式列舉；tools/lib/Find-GitBash.ps1 已由下方 **/*.ps1 覆蓋不需重複列舉）
+      - "tools/integration_gate_core.py"
+      # R17 四方一審 Architect+SA 交叉發現（F1/F2）：test_ci_paths_cover_root_consumers.py
+      # 的 import 消費掃描器認不出 test_platform_utils_dedup.py 對這三檔採用的
+      # `rglob`/`sys.path.insert(0, parents[1] / "lib")` 掃描慣用法，故本輪核心 SSOT
+      # 檔案未被機械鎖偵測為「消費檔」——手動補列對稱涵蓋（DEF-101-042 同款假綠盲區）。
+      - "tools/lib/platform_utils.py"
+      - "tools/bootstrap_core.py"
+      - "AutoClaude/tools/run_act_core.py"
       - "**/*.ps1"
       - "tools/git-hooks/**"
       - ".claude/**"
@@ -201,6 +212,17 @@ on:
       - "tools/check_pytest_baseline_sites.py"
       - "tools/git_hooks_install_common.py"
       - "tools/_stdio_utf8.py"
+      # R17：tools/tests/test_platform_utils_dedup.py 消費此根層檔——只改該檔時
+      # 本 workflow 也須重跑該鎖（DEF-101-042 同構；.py 無 **/*.py 兜底 glob，需
+      # 顯式列舉；tools/lib/Find-GitBash.ps1 已由下方 **/*.ps1 覆蓋不需重複列舉）
+      - "tools/integration_gate_core.py"
+      # R17 四方一審 Architect+SA 交叉發現（F1/F2）：test_ci_paths_cover_root_consumers.py
+      # 的 import 消費掃描器認不出 test_platform_utils_dedup.py 對這三檔採用的
+      # `rglob`/`sys.path.insert(0, parents[1] / "lib")` 掃描慣用法，故本輪核心 SSOT
+      # 檔案未被機械鎖偵測為「消費檔」——手動補列對稱涵蓋（DEF-101-042 同款假綠盲區）。
+      - "tools/lib/platform_utils.py"
+      - "tools/bootstrap_core.py"
+      - "AutoClaude/tools/run_act_core.py"
       - "**/*.ps1"
       - "tools/git-hooks/**"
       - ".claude/**"

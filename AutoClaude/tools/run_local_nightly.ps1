@@ -140,6 +140,38 @@ function Add-LogLineSafe {
   return $false
 }
 
+# R17 DEF-101-235③ 修復（紀律 #11 latest log pointer 完整 run — Windows file lock）：
+# 原 Copy-Item 更新 nightly_latest.log pointer 失敗時僅於 try/catch 內降級為一行
+# WARN，完全沒有重試——與上方 Add-LogLineSafe（逐行寫入）已有的 FileShare.ReadWrite
+# + 退避重試機制處理同一類問題（tail -F / Less 等併發讀取造成的 Windows file lock
+# 競態）卻做法不一致。沿用 Add-LogLineSafe 的重試次數（5）與退避間隔公式
+# （50 * (i+1) ms）新增同款 wrapper；不直接改用 Add-LogLineSafe 本身——它以
+# FileMode.Append 逐行寫入為語意，不適用於本處整檔覆蓋複製。
+# 注意（R17 四方一審 SD+SA 交叉發現）：本 wrapper 最後一次（第 5 次）失敗後不再
+# sleep 即返回（`if ($i -lt $maxRetries-1)` 守衛），真實累計退避上限為
+# 50+100+150+200=**500ms**；Add-LogLineSafe 對每次失敗（含最後一次）皆 sleep，
+# 真實累計上限是 50+100+150+200+250=750ms——兩者退避總時間**不對等**（僅重試
+# 次數與間隔公式相同），本 wrapper 少一次收尾前的無意義 sleep 反而更省時，非缺陷。
+function Copy-ItemWithRetry {
+  param([string]$SourcePath, [string]$DestinationPath)
+  $maxRetries = 5
+  $lastError = $null
+  for ($i = 0; $i -lt $maxRetries; $i++) {
+    try {
+      Copy-Item -Path $SourcePath -Destination $DestinationPath -Force -ErrorAction Stop
+      return @{ Success = $true; Error = $null }
+    } catch {
+      $lastError = $_
+      if ($i -lt ($maxRetries - 1)) {
+        Start-Sleep -Milliseconds (50 * ($i + 1))
+        continue
+      }
+    }
+  }
+  [Console]::Error.WriteLine("[Copy-ItemWithRetry] WARN giving up after $maxRetries retries: $SourcePath -> $DestinationPath : $lastError")
+  return @{ Success = $false; Error = $lastError }
+}
+
 function Log {
   param([string]$Msg, [string]$Level = 'INFO')
   $ts = Get-Date -Format 'yyyy-MM-dd HH:mm:ss'
@@ -917,11 +949,13 @@ if ($finalFailures.Count -gt 0) {
 }
 
 # P1-1：更新 latest pointer，並 echo 給人工 retrieve
-try {
-  Copy-Item -Path $Log -Destination $LatestLog -Force -ErrorAction Stop
+# R17 DEF-101-235③ 修復：改用 Copy-ItemWithRetry（比照 Add-LogLineSafe 退避重試機制），
+# 最終仍失敗時維持既有降級行為（WARN，不阻斷 exit code）。
+$copyLatestResult = Copy-ItemWithRetry -SourcePath $Log -DestinationPath $LatestLog
+if ($copyLatestResult.Success) {
   Log "Latest log pointer 已更新: $LatestLog"
-} catch {
-  Log "Latest log pointer 更新失敗：$_" 'WARN'
+} else {
+  Log "Latest log pointer 更新失敗（已重試 5 次）：$($copyLatestResult.Error)" 'WARN'
 }
 Write-Host ("Nightly log: {0}" -f $Log)
 Write-Host ("Nightly latest pointer: {0}" -f $LatestLog)

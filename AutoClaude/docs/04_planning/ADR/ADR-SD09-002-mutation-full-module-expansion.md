@@ -54,9 +54,13 @@ W1 啟動前若 TokenGuardPlugin 連續 7 次達 ≥ 70% 條件**未達**（< 60
 - **Coordinator cron 排程**：每日 **04:00 UTC**（與 GS active 錯開 2 小時）
 - 觀察期 #1 統計**以 UTC 日界為準**（SD_09.md §1.2 觀察期計數對齊）
 - **R14 修訂註記（2026-07-20，CI-2 額度裁決）**：本節為 W0 規劃時設計；現行實況＝
-  TG（TokenGuard）active pilot 於 `0 3 * * 1` **每週一** 03:00 UTC（原每日 03:00，
+  TG（TokenGuard）active pilot 於 **每週一 03:07 UTC**（原每日 03:00，
   R14 降頻），GS/Coord cron 仍 dormant（註解態，啟用時依降頻後慣例應設週頻）。
   每日 mutation 訊號改由 Windows 本地 nightly mutation stage 承擔。
+- **R16 修訂註記（2026-07-21，DEF-101-226）**：上述 cron 自整點 `0 3 * * 1` 錯開至
+  `7 3 * * 1`（=03:07 UTC）——全倉 8 條 cron 排程原全落在整點/半點且彼此精準相撞，
+  統一錯開避開 GitHub 官方建議的整點/半點延遲風險，相對先後順序（排在 artifact-cleanup
+  03:03 之後）不變。
 
 ### §2.4 單檔精準 mutation 路徑
 

@@ -42,6 +42,17 @@ _KNOWN_CALL_SITES = (
 # 只比對「函式定義」而非呼叫（呼叫點理應保留 `_init_utf8_streams()` 這行）。
 _DEF_RE = re.compile(r"^\s*def\s+_?init_utf8_streams\s*\(")
 
+# R17 DEF-101-231 觀察點 1+2：同一輪新增的 tools/bootstrap_core.py /
+# tools/integration_gate_core.py / AutoClaude/tools/run_act_core.py 三份核心，與
+# 既有 tools/dev_start.py，全都各自重寫過一份 `os.name == "nt"` 判斷邏輯／
+# 「Scripts/python.exe vs bin/python」判斷邏輯，從未 import platform_utils——
+# 收斂為 is_windows() / os_label() / venv_python_path() 三個函式後，同款掃描
+# 手法（機械掃描 `def <name>(` 是否第二次出現）追加鎖住這三個函式名。
+_EXTRA_DEF_RES = {
+    name: re.compile(rf"^\s*def\s+{re.escape(name)}\s*\(")
+    for name in ("is_windows", "os_label", "venv_python_path")
+}
+
 
 class TestPlatformUtilsApi(unittest.TestCase):
     def test_os_label_three_states(self) -> None:
@@ -144,6 +155,31 @@ class TestNoDuplicateDefinitions(unittest.TestCase):
             "init_utf8_streams 的定義只應出現在 tools/lib/platform_utils.py 一處；"
             f"實際命中：{offenders}",
         )
+
+    def test_platform_judgment_helpers_defined_only_in_platform_utils(self) -> None:
+        """R17 DEF-101-231 觀察點 1+2：is_windows/os_label/venv_python_path 三個
+        平台判斷 helper 同樣只應在 tools/lib/platform_utils.py 定義一處；
+        tools/dev_start.py、tools/bootstrap_core.py、tools/integration_gate_core.py、
+        AutoClaude/tools/run_act_core.py 四份核心改為 import 呼叫，不得各自重寫
+        第二份。掃描手法與 test_definition_exists_only_in_platform_utils 相同
+        （機械掃描 `def <name>(` 出現的檔案清單，非行號釘選）。"""
+        for name, pattern in _EXTRA_DEF_RES.items():
+            offenders: list[str] = []
+            for base in (_REPO_ROOT / "AutoClaude", _REPO_ROOT / "tools"):
+                for py in base.rglob("*.py"):
+                    parts = py.parts
+                    if any(p in {".venv", "__pycache__", "node_modules"} for p in parts):
+                        continue
+                    for line in py.read_text(encoding="utf-8", errors="replace").splitlines():
+                        if pattern.match(line):
+                            offenders.append(py.relative_to(_REPO_ROOT).as_posix())
+                            break
+            self.assertEqual(
+                offenders,
+                ["tools/lib/platform_utils.py"],
+                f"{name} 的定義只應出現在 tools/lib/platform_utils.py 一處；"
+                f"實際命中：{offenders}",
+            )
 
 
 if __name__ == "__main__":

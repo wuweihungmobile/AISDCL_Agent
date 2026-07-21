@@ -131,9 +131,25 @@ function Test-InstallRoundtrip {
       return
     }
     if ($NonAsciiProbe -ne '') {
-      # 直讀共享 .git/config 的 UTF-8 位元組，不經主控台解碼——編碼損毀（cp950
-      # 誤讀成 mojibake / '?'）會在此現形（R9 修復主題）。
-      $cfgPath = Join-Path $TargetRepo '.git\config'
+      # 直讀共享 config 的 UTF-8 位元組，不經主控台解碼——編碼損毀（cp950
+      # 誤讀成 mojibake / '?'）會在此現形（R9 修復主題）。用 --git-common-dir
+      # 解析實際 config 位置（而非硬編 .git\config，DEF-101-235②）：一般
+      # `git clone` 下 .git 是目錄，解析結果等同 .git；linked worktree
+      # （`git worktree add`）下 .git 是內含 `gitdir: <path>` 一行文字的檔案，
+      # core.hooksPath 寫入的是共享 config（主 repo 的 .git/config）——
+      # --git-common-dir 兩種情境皆正確解析、不受此陷阱影響（同本檔 [5]
+      # 既有用法，需 git >= 2.31）。
+      # R17 四方一審 SD 發現：git < 2.31 不認得 --path-format 時，rev-parse 不會
+      # 以非零 rc 報錯，而是把未知旗標原樣 echo 成額外一行輸出（`rev-parse` 既有
+      # 文件行為），令 $LASTEXITCODE/IsNullOrEmpty 兩道守衛皆偵測不到、把夾雜
+      # 旗標字串的多行輸出誤當合法路徑餵進 Join-Path。強制用 @() 收成陣列並斷言
+      # 恰好一行，才是能真正攔住此情境的判準。
+      $commonDirLines = @(git -C $TargetRepo rev-parse --path-format=absolute --git-common-dir 2>$null)
+      if ($LASTEXITCODE -ne 0 -or $commonDirLines.Count -ne 1 -or [string]::IsNullOrEmpty($commonDirLines[0])) {
+        Fail-Item "${Label}：git rev-parse --git-common-dir 失敗（需 git >= 2.31）——無法定位共享 config"
+        return
+      }
+      $cfgPath = Join-Path $commonDirLines[0].Trim() 'config'
       $cfgText = [System.IO.File]::ReadAllText($cfgPath, [System.Text.Encoding]::UTF8)
       if ($cfgText -notmatch [regex]::Escape($NonAsciiProbe)) {
         Fail-Item "${Label}：.git/config 內 core.hooksPath 遺失非 ASCII 片段「${NonAsciiProbe}」（編碼損毀，R9 cp950 類回歸）"
@@ -321,12 +337,16 @@ try {
           # Push-Location 失敗 → rc 停在哨兵 9
         }
         $step5Ok = $true
-        $commonDirRaw = git -C $Fake rev-parse --path-format=absolute --git-common-dir
-        if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrEmpty($commonDirRaw)) {
+        # R17 四方一審 SD 發現（與本檔 [4] Test-InstallRoundtrip 同構修復）：git < 2.31
+        # 不認得 --path-format 時不會以非零 rc 報錯，而是把未知旗標原樣 echo 成額外
+        # 一行輸出，令 $LASTEXITCODE/IsNullOrEmpty 兩道守衛皆偵測不到。強制用 @()
+        # 收成陣列並斷言恰好一行。
+        $commonDirLines = @(git -C $Fake rev-parse --path-format=absolute --git-common-dir 2>$null)
+        if ($LASTEXITCODE -ne 0 -or $commonDirLines.Count -ne 1 -or [string]::IsNullOrEmpty($commonDirLines[0])) {
           Fail-Item '[5] git rev-parse --git-common-dir 失敗（需 git >= 2.31）'
           $step5Ok = $false
         } else {
-          $target = Join-Path ([string]$commonDirRaw).Trim() 'hooks\post-commit'
+          $target = Join-Path $commonDirLines[0].Trim() 'hooks\post-commit'
           if ($rc -ne 0) {
             Fail-Item "[5] install_post_commit.ps1 於 worktree 執行失敗（rc=${rc}；9=哨兵：腳本未被執行）"
             $step5Ok = $false

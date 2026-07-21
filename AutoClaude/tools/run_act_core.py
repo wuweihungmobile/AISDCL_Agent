@@ -49,6 +49,13 @@ WORKFLOW = ".github/workflows/autoclaude-ci.yml"
 RUNNER_IMAGE = "catthehacker/ubuntu:act-latest"
 PG_IMAGE = "pgvector/pgvector:pg17"
 
+# platform_utils 位於 monorepo 根 tools/lib/ 子目錄，本檔在 AutoClaude/tools/ 下，
+# 需顯式插入 sys.path 才能 import——手法對齊本輪其他核心檔案既有慣例（R17
+# DEF-101-231 觀察點 1+2：收斂 is_windows/os_label/venv_python_path 平台判斷邏輯
+# 的第二次重複）。
+sys.path.insert(0, str(MONOREPO_ROOT / "tools" / "lib"))
+import platform_utils  # noqa: E402
+
 
 def parse_args(argv: list[str]) -> argparse.Namespace:
     parser = argparse.ArgumentParser(add_help=True)
@@ -86,7 +93,7 @@ def resolve_act() -> list[str] | None:
     exe = shutil.which("act")
     if exe:
         return [exe]
-    if os.name == "nt":
+    if platform_utils.is_windows():
         local_appdata = os.environ.get("LOCALAPPDATA", "")
         if local_appdata:
             glob_pattern = "Microsoft/WinGet/Packages/nektos.act_*/act.exe"
@@ -100,7 +107,7 @@ def resolve_act() -> list[str] | None:
 
 def _print_install_hint() -> None:
     print("[run_act] act 未安裝。請擇一安裝：", file=sys.stderr)
-    if os.name == "nt":
+    if platform_utils.is_windows():
         print("  winget install --id nektos.act -e", file=sys.stderr)
         print("  scoop install act", file=sys.stderr)
     else:

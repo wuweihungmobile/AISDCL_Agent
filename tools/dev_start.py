@@ -80,6 +80,13 @@ import _stdio_utf8  # noqa: E402,F401
 # step_hooks() 與 tools/check_hooks_liveness.py 共用同一份判定邏輯（S22，見該函式註解）。
 import check_hooks_liveness  # noqa: E402
 
+# platform_utils 位於 tools/lib/ 子目錄（非本檔同層），需顯式插入 sys.path 才能
+# import——手法對齊本輪其他核心檔案（AutoClaude/tools/scaffold_sprint_section.py 等）
+# 既有慣例（R17 DEF-101-231 觀察點 1+2：收斂 is_windows/os_label/venv_python_path
+# 平台判斷邏輯的第二次重複）。
+sys.path.insert(0, str(ROOT / "tools" / "lib"))
+import platform_utils  # noqa: E402
+
 
 def _hr(n: int, title: str) -> None:
     print(f"\n[{n}/{_TOTAL}] {title}")
@@ -139,7 +146,7 @@ def _stream(cmd: list[str], on_start: Callable[[int], None] | None = None,
     """
     print(f"    $ {' '.join(cmd)}", flush=True)
     popen_kwargs: dict = {"cwd": str(ROOT)}
-    if new_process_group and os.name != "nt":
+    if new_process_group and not platform_utils.is_windows():
         popen_kwargs["start_new_session"] = True
     try:
         proc = subprocess.Popen(cmd, **popen_kwargs)
@@ -233,11 +240,7 @@ def _forward_signal_to_bootstrap_group(signum: int, frame) -> None:
 
 
 def _now_label() -> str:
-    if sys.platform == "win32":
-        return "windows"
-    if sys.platform == "darwin":
-        return "mac"
-    return "linux"
+    return platform_utils.os_label()
 
 
 def _flavor(label: str) -> str:
@@ -246,7 +249,7 @@ def _flavor(label: str) -> str:
 
 
 def _venv_python_at(base: Path, flavor: str) -> Path:
-    return base / ("Scripts/python.exe" if flavor == "windows" else "bin/python")
+    return platform_utils.venv_python_path(base, is_windows=(flavor == "windows"))
 
 
 def _venv_python(flavor: str) -> Path:
@@ -821,7 +824,7 @@ def _pid_alive(pid: int) -> bool:
     SA/QA 三方複審交叉印證）：過去把任何 OpenProcess 失敗都當作「已死」，
     未區分這兩種語意相反的情況。
     """
-    if os.name == "nt":
+    if platform_utils.is_windows():
         try:
             handle = ctypes.windll.kernel32.OpenProcess(0x1000, False, pid)
         except OSError:
@@ -865,7 +868,7 @@ def _lock_target_alive(x: int) -> bool:
     """
     if _pid_alive(x):
         return True
-    if os.name == "nt":
+    if platform_utils.is_windows():
         return False
     try:
         os.killpg(x, 0)
@@ -1244,7 +1247,7 @@ def step_venv(now: str, state: dict, force: bool, cross_same_flavor: bool = Fals
             # 快照，父行程死亡不會被系統重寫（不像 POSIX 的 ppid 會被動態過繼
             # 給 subreaper），故「事後回溯」在 Windows 上不像在 POSIX 上那樣
             # 因果必然太晚，沿用原機制是可接受、有明確技術依據的判斷。
-            if os.name == "nt":
+            if platform_utils.is_windows():
                 watcher_box: dict[str, _DescendantWatcher] = {}
 
                 def _on_bootstrap_start(pid: int) -> None:
@@ -1684,7 +1687,7 @@ def main(argv: list[str] | None = None) -> int:
     # 用 try/finally 確保無論如何結束都還原成呼叫前的 handler，不汙染呼叫端
     # （如測試、或未來把 main() 包進更大程式的情境）。
     old_sigint = old_sigterm = None
-    if os.name != "nt":
+    if not platform_utils.is_windows():
         old_sigint = signal.signal(signal.SIGINT, _forward_signal_to_bootstrap_group)
         old_sigterm = signal.signal(signal.SIGTERM, _forward_signal_to_bootstrap_group)
     try:
@@ -1696,7 +1699,7 @@ def main(argv: list[str] | None = None) -> int:
             step_platform(now, is_repo)
             step_finalize(now, state, is_repo)
     finally:
-        if os.name != "nt":
+        if not platform_utils.is_windows():
             signal.signal(signal.SIGINT, old_sigint)
             signal.signal(signal.SIGTERM, old_sigterm)
 

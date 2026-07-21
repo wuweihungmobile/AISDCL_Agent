@@ -25,9 +25,15 @@ import shutil
 import subprocess
 import sys
 from collections.abc import Callable
-from pathlib import Path
+from pathlib import Path, PureWindowsPath
 
 ROOT = Path(__file__).resolve().parent.parent  # monorepo 根（tools/ 的上一層）
+
+# platform_utils 位於 tools/lib/ 子目錄（非本檔同層），需顯式插入 sys.path 才能
+# import——手法對齊本輪其他核心檔案既有慣例（R17 DEF-101-231 觀察點 1+2：收斂
+# is_windows/os_label/venv_python_path 平台判斷邏輯的第二次重複）。
+sys.path.insert(0, str(ROOT / "tools" / "lib"))
+import platform_utils  # noqa: E402
 
 _CC_CLI_NAMES = ("cc-switch", "cc-switch-cli", "ccs")
 
@@ -59,6 +65,21 @@ def _hooks_liveness_advisory() -> None:
         pass
 
 
+def _has_system32_segment(path_str: str) -> bool:
+    """`path_str` 是否含 System32 這一個完整路徑段（不分大小寫）。
+
+    DEF-101-236 修復：原本用 `"system32" not in found.lower()` 任意子字串命中即
+    排除，較 tools/lib/Find-GitBash.ps1 的 regex `-notmatch '\\System32\\'`（要求
+    前後皆為路徑分隔符的完整路徑段匹配）寬鬆，可能誤傷路徑含 "system32" 子字串但
+    非該目錄段的候選（如使用者自訂安裝路徑 `C:\\MySystem32Tools\\bash.exe`）。改用
+    `PureWindowsPath` 依反斜線切段逐一比對——用 `PureWindowsPath`（而非 `Path`）是
+    因為候選路徑一律是 Windows 路徑字面值，即使本函式在非 Windows 主機上被單元
+    測試直接呼叫（`find_git_bash()` 本身僅在 `os.name == "nt"` 呼叫路徑下才有意義），
+    仍須依反斜線正確切段，不可依賴宿主 OS 的路徑分隔符判斷。
+    """
+    return any(part.lower() == "system32" for part in PureWindowsPath(path_str).parts)
+
+
 def find_git_bash() -> str | None:
     """Windows 上尋找真正的 Git Bash（bash.exe），排除 WSL 的 System32 佔位。
 
@@ -68,7 +89,7 @@ def find_git_bash() -> str | None:
     System32（WSL 佔位）亦不可用（那是 Linux 環境，無本 repo 的 Windows venv/依賴）。
     """
     found = shutil.which("bash")
-    if found and "system32" not in found.lower():
+    if found and not _has_system32_segment(found):
         return found
     for env_var in ("ProgramFiles", "ProgramFiles(x86)", "LocalAppData"):
         base = os.environ.get(env_var)
@@ -88,7 +109,7 @@ def find_git_bash() -> str | None:
 def sec_autoclaude() -> int:
     """[1/5] AutoClaude local_ci_gate。"""
     cwd = ROOT / "AutoClaude"
-    if os.name == "nt":
+    if platform_utils.is_windows():
         cmd = ["powershell", "-ExecutionPolicy", "Bypass", "-File", "tools/local_ci_gate.ps1"]
     else:
         cmd = ["bash", "tools/local_ci_gate.sh"]
@@ -98,7 +119,7 @@ def sec_autoclaude() -> int:
 def sec_sdd() -> int:
     """[2/5] AISDLC_SDD ci-gate.sh（Windows 端需先找到 Git Bash）。"""
     cwd = ROOT / "AISDLC_SDD"
-    if os.name == "nt":
+    if platform_utils.is_windows():
         bash_exe = find_git_bash()
         if bash_exe is None:
             print(

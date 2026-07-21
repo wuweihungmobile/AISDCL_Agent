@@ -15,10 +15,18 @@ from __future__ import annotations
 
 import io
 import sys
+from pathlib import Path
 
 
 def is_windows() -> bool:
     return sys.platform == "win32"
+
+
+# 供 venv_python_path() 內部呼叫的別名（R17 DEF-101-231 觀察點 1+2）：該函式的
+# `is_windows` 參數名與本函式同名，函式體內 `is_windows` 一律指向參數（區域變數
+# 遮蔽全域函式，Python 詞法範圍規則），故需在此另存一個不同名稱的參照才能在
+# 參數為 None 時呼叫到真正的平台判斷。
+_is_windows = is_windows
 
 
 def is_macos() -> bool:
@@ -36,6 +44,23 @@ def os_label() -> str:
     if sys.platform == "darwin":
         return "mac"
     return "linux"
+
+
+def venv_python_path(venv_dir: Path, is_windows: bool | None = None) -> Path:
+    """venv_dir 內對應本平台的直譯器路徑：windows → Scripts/python.exe，否則 bin/python。
+
+    收斂背景（R17 DEF-101-231 觀察點 1+2）：`tools/dev_start.py::_venv_python_at()`
+    與 `tools/bootstrap_core.py::venv_python_path()` 各自獨立寫了同一款
+    「Scripts/python.exe vs bin/python」判斷，本函式收斂為單一真相源。
+
+    `is_windows` 參數為 `None`（預設）時呼叫本模組的 `is_windows()` 判斷目前執行
+    平台；保留可覆寫參數是因為呼叫端（如 dev_start.py 的 venv 換手快取邏輯）需要
+    針對「目標平台形狀」而非「目前執行平台」算路徑（例：判斷另一平台快取目錄內
+    的直譯器是否存在），與目前程序實際執行的平台無關。
+    """
+    if is_windows is None:
+        is_windows = _is_windows()
+    return venv_dir / "Scripts" / "python.exe" if is_windows else venv_dir / "bin" / "python"
 
 
 def init_utf8_streams() -> None:

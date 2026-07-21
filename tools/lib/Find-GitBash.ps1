@@ -27,10 +27,17 @@ function Find-GitBash {
   if ($bashCmd -and $bashCmd.Source -and ($bashCmd.Source -notmatch '\\System32\\')) {
     return $bashCmd.Source
   }
-  foreach ($cand in @("$env:ProgramFiles\Git\bin\bash.exe",
-                      "${env:ProgramFiles(x86)}\Git\bin\bash.exe",
-                      "$env:LocalAppData\Programs\Git\bin\bash.exe")) {
-    if ($cand -and (Test-Path -LiteralPath $cand)) { return $cand }
+  # DEF-101-236 修復：先前對 $env:ProgramFiles(x86) 等環境變數不存在時直接做字串
+  # 插值，未設定時會插出空字串（如 "${env:ProgramFiles(x86)}\Git\bin\bash.exe"
+  # 缺變數時變成裸路徑 "\Git\bin\bash.exe"），仍會呼叫 Test-Path——比對端
+  # tools/integration_gate_core.py::find_git_bash() 對此明確 `if not base: continue`
+  # 跳過。改用 GetEnvironmentVariable + 明確空值判斷對齊兩邊行為。
+  foreach ($envVarName in @('ProgramFiles', 'ProgramFiles(x86)', 'LocalAppData')) {
+    $base = [System.Environment]::GetEnvironmentVariable($envVarName)
+    if (-not $base) { continue }
+    $sub = if ($envVarName -eq 'LocalAppData') { 'Programs\Git\bin\bash.exe' } else { 'Git\bin\bash.exe' }
+    $cand = Join-Path $base $sub
+    if (Test-Path -LiteralPath $cand) { return $cand }
   }
   return $null
 }

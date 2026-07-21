@@ -33,7 +33,14 @@ from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 VENV_DIR = REPO_ROOT / ".venv"
-IS_WINDOWS = os.name == "nt"
+
+# platform_utils 位於 tools/lib/ 子目錄（非本檔同層），需顯式插入 sys.path 才能
+# import——手法對齊本輪其他核心檔案既有慣例（R17 DEF-101-231 觀察點 1+2：收斂
+# is_windows/os_label/venv_python_path 平台判斷邏輯的第二次重複）。
+sys.path.insert(0, str(REPO_ROOT / "tools" / "lib"))
+import platform_utils  # noqa: E402
+
+IS_WINDOWS = platform_utils.is_windows()
 
 _VERSION_CHECK_CODE = "import sys; sys.exit(0 if sys.version_info[:2] >= (3,11) else 1)"
 _VERSION_PRINT_CODE = "import sys; print('%d.%d' % sys.version_info[:2])"
@@ -120,12 +127,8 @@ def pick_python(py_target: str) -> str | None:
     return None
 
 
-def venv_python_path(venv_dir: Path) -> Path:
-    return (venv_dir / "Scripts" / "python.exe") if IS_WINDOWS else (venv_dir / "bin" / "python")
-
-
 def _venv_python_usable(venv_dir: Path) -> bool:
-    vpy = venv_python_path(venv_dir)
+    vpy = platform_utils.venv_python_path(venv_dir, is_windows=IS_WINDOWS)
     if IS_WINDOWS:
         return vpy.is_file()
     return vpy.is_file() and os.access(vpy, os.X_OK)
@@ -332,7 +335,7 @@ def main() -> int:
     if rc != 0:
         return rc
 
-    venv_py = venv_python_path(VENV_DIR)
+    venv_py = platform_utils.venv_python_path(VENV_DIR, is_windows=IS_WINDOWS)
     rc = install_dependencies(use_uv, venv_py)
     if rc != 0:
         return rc
