@@ -240,7 +240,8 @@ class TestConditionalStrategy:
 
     def test_apply_rejects_unsafe_command(self):
         s = ConditionalStrategy()
-        # SD_05 W4 三方審查 SA-M1：擴張至 ≥ 12 種 unsafe pattern（含 backtick / redirect / newline / heredoc / history expansion）
+        # SD_05 W4 三方審查 SA-M1：擴張至 ≥ 12 種 unsafe pattern
+        # （含 backtick / redirect / newline / heredoc / history expansion）
         unsafe_cases = [
             "ls | grep x",              # 管線
             "echo $HOME",               # 變數展開
@@ -263,6 +264,44 @@ class TestConditionalStrategy:
                 condition_evaluator=unsafe,
             )
             assert s.apply(m, _pb(_t("T01")), 0) is False, f"unsafe={unsafe!r}"
+
+    def test_apply_rejects_windows_backslash_path_with_warning_logged(self, caplog):
+        """R16 P2：白名單不含反斜線，Windows 風格路徑（`C:\\path\\to\\check.py`）
+        會被拒絕——但拒絕不能再是靜默的（舊行為：apply() 直接 return False，
+        沒有任何 log，除錯時完全無跡可尋）。姊妹實作
+        execution/mutation_applier/_conditional.py 對同樣情境會印警告，本測試
+        確保 core/services/mutation/conditional.py 現在行為一致。"""
+        s = ConditionalStrategy()
+        windows_path_cmd = r"C:\Users\dev\check.bat"  # platform-ok: 測試字面值，非路徑 join
+        m = StepMutation(
+            mutation_type=StepMutationType.CONDITIONAL,
+            condition_evaluator=windows_path_cmd,
+        )
+        import logging
+        with caplog.at_level(logging.WARNING):
+            result = s.apply(m, _pb(_t("T01")), 0)
+        assert result is False
+        assert any(
+            "CONDITIONAL evaluator 包含不安全字符" in r.message
+            for r in caplog.records
+        ), "拒絕 Windows 反斜線路徑時必須留下警告 log，不可靜默"
+
+    def test_apply_accepts_forward_slash_windows_path(self):
+        """R16 P2：白名單本就接受正斜線（`/` 已在白名單內），Windows 使用者改寫
+        `C:/Users/dev/check.py` 而非 `C:\\Users\\dev\\check.py` 即可通過三層防禦
+        ——文件化的可攜寫法，不需要放寬白名單去接受反斜線。"""
+        s = ConditionalStrategy(evaluator=lambda cmd, t: 0)
+        m = StepMutation(
+            mutation_type=StepMutationType.CONDITIONAL,
+            condition_evaluator="C:/Users/dev/check.py --flag",  # platform-ok: 字面值
+            true_mutation=StepMutation(
+                mutation_type=StepMutationType.REVISE_CURRENT, revised_prompt="NEW",
+            ),
+        )
+        svc = MutationApplyService(strategies=[ReviseCurrentStrategy(), s])
+        pb = _pb(_t("T01", "old"))
+        assert svc.apply(m, pb, 0) is True
+        assert pb.tasks[0].prompt == "NEW"
 
     def test_apply_selects_true_branch_on_exit_zero(self):
         # 注入假 evaluator 避免真 IO

@@ -1,12 +1,12 @@
 ﻿<#
 .SYNOPSIS
-在本機 Docker 內以 act 重現 GitHub Actions（.github/workflows/autoclaude-ci.yml），push 前攔截 CI 紅燈。
-monorepo 根層接線（2026-07-10）：workflow 已遷至 monorepo 根層 → act 一律於 monorepo 根執行（讀根層 .actrc）。
+在本機 Docker 內以 act 重現 GitHub Actions（.github/workflows/autoclaude-ci.yml）薄殼（Windows）。
+macOS/Linux 對等：tools/run_act.sh
 
 .DESCRIPTION
-解決「上版 GitHub 才發現 CI/CD 錯誤」的根因：CI 在 Linux 跑、開發在 Windows，
-環境差異（PG 鏡像版本、.sh CRLF、psycopg2、alembic、apt/pip 解析）只在 push 後暴露。
-act 讀取 workflow YAML，於 Linux 容器內跑與雲端同一套流程 → 本機即可重現並修復。
+  邏輯全部集中在 tools/run_act_core.py（跨平台單一事實源；仿 R12 DEF-101-070 ② local_ci_gate
+  收斂模式）。本檔只做：確認直譯器 → 參數映射 → 轉呼叫核心 → 傳遞 exit code。介面
+  （-Job / -List / -DryRun）與收斂前完全相容。
 
 對應 GitHub push/PR 觸發的 gating jobs（autoclaude-ci.yml）：
   test               pytest + LOC budget + import-linter（主閘門）
@@ -39,129 +39,16 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
-# monorepo 根 = 本腳本(AutoClaude/tools/) 上兩層
-$RepoRoot = Split-Path -Parent (Split-Path -Parent $PSScriptRoot)
-Set-Location $RepoRoot
-$Workflow = '.github/workflows/autoclaude-ci.yml'
 
-# ---- 1. 定位 act.exe（PATH 可能尚未刷新 → 退回 winget 安裝路徑 → 退回 gh-act）----
-Write-Host "[1/6] 定位 act（含 gh-act 退回）" -ForegroundColor Cyan
-# 回傳字串陣列（指令 + 前置參數），gh-act 退回時為 @('gh','act')，對齊 run_act.sh 的偵測邏輯。
-function Resolve-Act {
-  $cmd = Get-Command act -ErrorAction SilentlyContinue
-  if ($cmd) { return @($cmd.Source) }
-  $wingetGlob = Join-Path $env:LOCALAPPDATA 'Microsoft\WinGet\Packages\nektos.act_*\act.exe'
-  $found = Get-ChildItem -Path $wingetGlob -ErrorAction SilentlyContinue | Select-Object -First 1
-  if ($found) { return @($found.FullName) }
-  # gh-act 退回（對齊 run_act.sh：act 不在 PATH 時檢查 gh extension list 是否含 nektos/gh-act）
-  if (Get-Command gh -ErrorAction SilentlyContinue) {
-    try { $extList = & gh extension list 2>$null } catch { $extList = '' }
-    if ("$extList" -match 'gh-act|nektos/gh-act') { return @('gh', 'act') }
-  }
-  return $null
-}
-
-$Act = @(Resolve-Act | Where-Object { $_ })
-if ($Act.Count -eq 0) {
-  Write-Host '[run_act] act 未安裝。請擇一安裝：' -ForegroundColor Red
-  Write-Host '  winget install --id nektos.act -e'
-  Write-Host '  scoop install act'
-  Write-Host '  gh extension install https://github.com/nektos/gh-act   # 再以 gh act 呼叫'
-  exit 127
-}
-$ActExe = $Act[0]
-$ActPrefix = @($Act | Select-Object -Skip 1)
-Write-Host "[run_act] act = $($Act -join ' ')" -ForegroundColor Cyan
-
-# ---- 2. 確認 Docker daemon ----
-Write-Host "[2/6] 確認 Docker daemon" -ForegroundColor Cyan
-# 探測段局部 EAP=Continue：PS5.1 + EAP=Stop 下 native stderr 重導（*> $null）會擲
-# NativeCommandError（同 tools/bootstrap.ps1 Select-Python 已文件化的修法），daemon
-# 未啟動時才能走到下方友善錯誤訊息而非直接 crash。
-$prevEAP = $ErrorActionPreference
-try {
-  $ErrorActionPreference = 'Continue'
-  & docker info *> $null
-  $dockerRc = $LASTEXITCODE
-} finally {
-  $ErrorActionPreference = $prevEAP
-}
-if ($dockerRc -ne 0) {
-  Write-Host '[run_act] Docker daemon 未啟動，請先開啟 Docker Desktop。' -ForegroundColor Red
+if (-not (Get-Command python -ErrorAction SilentlyContinue)) {
+  Write-Host '❌ 找不到 python — 請先啟用 venv：.venv\Scripts\Activate.ps1（見 ONBOARDING.md §3）' -ForegroundColor Red
   exit 1
 }
 
-# ---- 3. List 模式 ----
-Write-Host "[3/6] List 模式" -ForegroundColor Cyan
-if ($List) {
-  & $ActExe @($ActPrefix + @('-l', '-W', $Workflow))
-  exit $LASTEXITCODE
-}
-
-# ---- 4. 預先 pull 所需鏡像（用 docker pull 而非 act forcePull）----
-Write-Host "[4/6] 預先 pull 鏡像" -ForegroundColor Cyan
-# 根因：act forcePull 透過 Docker Desktop credsStore 對「公開」鏡像送出無效認證
-#       → Docker Hub 回 401 authentication required。改由本腳本以 docker pull 確保鏡像
-#       存在（公開 pull 不送認證、可成功），再對 act 傳 --pull=false 用本地鏡像，繞過此 bug。
-$RunnerImage = 'catthehacker/ubuntu:act-latest'
-$NeededImages = @($RunnerImage)
-# 跑整份 push 圖（未指定 -Job）含 pg-contract → 需 postgres service 鏡像
-if (-not $Job) { $NeededImages += 'pgvector/pgvector:pg17' }
-foreach ($img in $NeededImages) {
-  # 探測段局部 EAP=Continue：鏡像不存在時 docker inspect 寫 stderr，EAP=Stop + *> 直接
-  # 擲 NativeCommandError → docker pull fallback 永遠到不了（同上 docker info 修法）。
-  $prevEAP = $ErrorActionPreference
-  try {
-    $ErrorActionPreference = 'Continue'
-    & docker image inspect $img *> $null
-    $imgRc = $LASTEXITCODE
-  } finally {
-    $ErrorActionPreference = $prevEAP
-  }
-  if ($imgRc -ne 0) {
-    Write-Host "[run_act] 本地缺鏡像 $img → docker pull（首次約 1~1.5GB）…" -ForegroundColor Yellow
-    & docker pull $img
-    if ($LASTEXITCODE -ne 0) {
-      Write-Host "[run_act] docker pull $img 失敗。" -ForegroundColor Red
-      exit 1
-    }
-  } else {
-    Write-Host "[run_act] 鏡像已就緒：$img" -ForegroundColor DarkGray
-  }
-}
-
-# ---- 5. 阻止 act 預設載入 repo .env（關鍵）----
-Write-Host "[5/6] 空 .env 覆蓋" -ForegroundColor Cyan
-# act 預設會把 cwd 的 .env 注入容器。本 repo .env 含真實 MINIMAX_API_KEY / DB 憑證：
-#   (1) 安全：不應把個人憑證注入容器；
-#   (2) 忠實度：GitHub runner 無 .env，注入後會讓「預期 env 未設」的測試偽 fail
-#       （實測 test_minimax_missing_api_key 因 .env 的 MINIMAX_API_KEY 而 DID NOT RAISE）。
-# 解法：傳一個空的 --env-file 覆蓋預設 .env 載入（temp 空檔，免污染 repo / 免踩 .gitignore）。
-# 唯一檔名 + try/finally 清理（對齊 run_act.sh 的 mktemp + trap；原固定檔名且無清理）。
-$EmptyEnv = [System.IO.Path]::GetTempFileName()
-try {
-  Set-Content -Path $EmptyEnv -Value '' -NoNewline -Encoding ascii
-
-  # ---- 6. 組裝 act 參數 ----
-  Write-Host "[6/6] 組裝並執行" -ForegroundColor Cyan
-  # push 事件 → ci.yml 的 nightly job（if: schedule/dispatch）自動排除；只跑 gating jobs。
-  # --pull=false：用上一步已備妥的本地鏡像，繞過 credsStore 公開鏡像 401 bug。
-  # --env-file 空檔：忠實對齊 GitHub CI（無 .env）。
-  $actArgs = @('push', '-W', $Workflow, '--pull=false', '--env-file', $EmptyEnv)
-  if ($Job)    { $actArgs += @('-j', $Job) }
-  if ($DryRun) { $actArgs += '-n' }
-
-  Write-Host "[run_act] 執行: $($Act -join ' ') $($actArgs -join ' ')" -ForegroundColor Cyan
-
-  & $ActExe @($ActPrefix + $actArgs)
-  $rc = $LASTEXITCODE
-} finally {
-  Remove-Item -LiteralPath $EmptyEnv -Force -ErrorAction SilentlyContinue
-}
-
-if ($rc -eq 0) {
-  Write-Host "[run_act] ✅ 本地 CI 通過（act 退出碼 0）— 可安全 push。" -ForegroundColor Green
-} else {
-  Write-Host "[run_act] ❌ 本地 CI 失敗（act 退出碼 $rc）— 請於本機修復後再 push。" -ForegroundColor Red
-}
-exit $rc
+$env:PYTHONUTF8 = '1'
+$CliArgs = @()
+if ($Job) { $CliArgs += @('--job', $Job) }
+if ($List) { $CliArgs += '--list' }
+if ($DryRun) { $CliArgs += '--dry-run' }
+& python (Join-Path $PSScriptRoot 'run_act_core.py') @CliArgs
+exit $LASTEXITCODE

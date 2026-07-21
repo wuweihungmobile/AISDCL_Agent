@@ -16,22 +16,17 @@
 from __future__ import annotations
 
 import ast
-import io
 import re
 import sys
 from pathlib import Path
 
-def _init_utf8_streams() -> None:
-    """Windows console UTF-8；只在 __main__ 觸發，避免污染 pytest stdout/stderr。"""
-    if sys.platform != "win32":
-        return
-    try:
-        sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8", errors="replace")
-        sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding="utf-8", errors="replace")
-    except Exception:
-        pass
-
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
+
+sys.path.insert(0, str(PROJECT_ROOT.parent / "tools" / "lib"))
+from platform_utils import (  # noqa: E402
+    init_utf8_streams as _init_utf8_streams,  # type: ignore[import-not-found]
+)
+
 WIRING_FILE = PROJECT_ROOT / "autoclaude" / "core" / "wiring.py"
 PORTS_DIR = PROJECT_ROOT / "autoclaude" / "core" / "ports"
 FACTORY_FILE = PROJECT_ROOT / "autoclaude" / "infra" / "repositories" / "factory.py"
@@ -252,7 +247,8 @@ def check_sprint_skeleton_alignment() -> list[str]:
     missing = sorted(claude_nns - history_nns)
     for nn in missing:
         issues.append(
-            f"CLAUDE.md 含 ### SD_Improving_{nn} 但 sprint_history.md 缺對應 ### 1.X SD_Improving_{nn} 骨架；"
+            f"CLAUDE.md 含 ### SD_Improving_{nn} 但 sprint_history.md 缺對應 "
+            f"### 1.X SD_Improving_{nn} 骨架；"
             f"請跑 `python tools/scaffold_sprint_section.py --sprint {nn} --title <主軸>`"
         )
 

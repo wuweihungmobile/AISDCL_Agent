@@ -40,29 +40,34 @@ def _write_tmp(text: str, suffix: str = ".sh") -> Path:
 
 
 class TestExtractFloor(unittest.TestCase):
+    """R16 起改用合成 label（mock.patch.dict 注入），不再耦合 bootstrap/run_act 這類
+    實際登記——三對已於 R16 薄殼化收斂退出 _MIN_EXTRACT_COUNTS（見 check_script_parity
+    檔頭），若測試繼續硬編實際 key，下次任何一對再退場又會無關地弄壞這裡。"""
+
     def test_below_floor_is_red(self) -> None:
         """R9 回歸鎖：任一側抽取數量低於 _MIN_EXTRACT_COUNTS 釘選即紅燈——
         即使雙邊清單完全一致（同步改壞宣告 pattern 的典型形狀）。"""
-        floor = m._MIN_EXTRACT_COUNTS["run_act"]
-        short = [f"step {i}" for i in range(floor - 1)]
-        with mock.patch("builtins.print"):
-            self.assertFalse(m._check_extract_floor("run_act", short, short))
+        with mock.patch.dict(m._MIN_EXTRACT_COUNTS, {"_synthetic": 6}):
+            short = [f"step {i}" for i in range(5)]
+            with mock.patch("builtins.print"):
+                self.assertFalse(m._check_extract_floor("_synthetic", short, short))
 
     def test_at_floor_passes(self) -> None:
-        floor = m._MIN_EXTRACT_COUNTS["run_act"]
-        items = [f"step {i}" for i in range(floor)]
-        with mock.patch("builtins.print"):
-            self.assertTrue(m._check_extract_floor("run_act", items, items))
+        with mock.patch.dict(m._MIN_EXTRACT_COUNTS, {"_synthetic": 6}):
+            items = [f"step {i}" for i in range(6)]
+            with mock.patch("builtins.print"):
+                self.assertTrue(m._check_extract_floor("_synthetic", items, items))
 
     def test_red_message_points_to_pin_update(self) -> None:
         """紅燈訊息必須指路：刻意刪減 step 時要同步更新釘選值（訊息說清楚）。"""
-        with mock.patch("builtins.print") as fake_print:
-            m._check_extract_floor("bootstrap", ["a"], ["a"])
+        with mock.patch.dict(m._MIN_EXTRACT_COUNTS, {"_synthetic": 2}):
+            with mock.patch("builtins.print") as fake_print:
+                m._check_extract_floor("_synthetic", ["a"], ["a"])
         printed = " ".join(
             str(arg) for call in fake_print.call_args_list for arg in call.args
         )
         self.assertIn("_MIN_EXTRACT_COUNTS", printed)
-        self.assertIn("bootstrap", printed)
+        self.assertIn("_synthetic", printed)
 
 
 class TestPairEnrollment(unittest.TestCase):

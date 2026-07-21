@@ -6,7 +6,19 @@
 # 是指向主 repo 的純文字檔而非目錄，".git\hooks\..." 會炸「找不到路徑一部分」；
 # --git-common-dir 正確解析回主 repo 真正的 .git，且不受 core.hooksPath 影響
 # （此設定僅影響 git 自己找 hook，不影響本檔要直寫的真實 .git/hooks/）。
-$GitCommonDir = (git rev-parse --path-format=absolute --git-common-dir).Trim()
+# R16（P2 相容性掃描）：同類姊妹腳本皆設 $ErrorActionPreference='Stop'，本檔原缺；
+# 且原本 (git rev-parse ...).Trim() 在非 git repo 下 git 印完 fatal 訊息後回傳空字串，
+# .Trim() 對 $null 呼叫方法會直接拋例外，未設 Stop 時 PowerShell 會繼續執行下一行，
+# 串連出 5 個非終止性錯誤（Join-Path/Split-Path 疊加吃 $null）才終於走到本檔自己設計的
+# 乾淨 Write-Error。設 Stop + 明確判斷 $LASTEXITCODE/$GitCommonDir，讓失敗在第一時間
+# 乾淨導流，不再串連炸出一串難解錯誤。
+$ErrorActionPreference = 'Stop'
+$GitCommonDir = (git rev-parse --path-format=absolute --git-common-dir 2>$null)
+if ($LASTEXITCODE -ne 0 -or -not $GitCommonDir) {
+  Write-Error "找不到 git repository（git rev-parse --git-common-dir 失敗）— 請在 git repo 內執行本腳本"
+  exit 1
+}
+$GitCommonDir = $GitCommonDir.Trim()
 $HookTarget = Join-Path $GitCommonDir "hooks\post-commit"
 # 2026-07-16 四方複審 SD 發現：原本用 `git rev-parse --show-toplevel` 算 $RepoRoot
 # 來源解析 LATEST 版本目錄與 $HookSrcDrift/$HookSrcClosure，但 --show-toplevel 在

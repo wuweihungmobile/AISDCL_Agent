@@ -14,9 +14,13 @@
 # track-streak 的 WORKFLOW_FILE 同步改為 aisdlc-sdd-fsm-chaos-nightly.yml。
 #
 # Schedule rationale:
-#   - Daily at 02:00 UTC keeps chaos runs off the critical PR path while
+#   - Daily at 02:03 UTC keeps chaos runs off the critical PR path while
 #     exercising the full §ACT-029 suite (the chaos-marked pytest suite + 100-round sweep)
-#     on a predictable cadence.
+#     on a predictable cadence. Offset by a few minutes off the top of the
+#     hour (R16 SCAN-C-4: GitHub recommends avoiding exact :00/:30 to reduce
+#     scheduling delay risk); still the earliest of the 02:0x/02:3x/03:0x tier
+#     chain (drift-daily / arch-fitness / artifact-cleanup / mutation-test-
+#     tokenguard-nightly all intentionally scheduled after this one).
 #   - `workflow_dispatch` allows manual re-runs during incident triage.
 #
 # Runner lock-in:
@@ -43,9 +47,10 @@ permissions:
 
 on:
   schedule:
-    # 02:00 UTC daily — out of the PR hotpath, before APAC working hours so
-    # failures surface early for the engineering lead.
-    - cron: "0 2 * * *"
+    # 02:03 UTC daily — out of the PR hotpath, before APAC working hours so
+    # failures surface early for the engineering lead. 03 分偏移見上方
+    # Schedule rationale（R16 SCAN-C-4，避開整點）。
+    - cron: "3 2 * * *"
   workflow_dispatch:
     inputs:
       rounds:

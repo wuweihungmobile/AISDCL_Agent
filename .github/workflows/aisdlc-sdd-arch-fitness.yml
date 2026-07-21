@@ -10,7 +10,9 @@
 # 雙軌（呼應框架 advisory vs blocking 哲學，Rule 9.11.3）：
 #   1. pr-advisory   — 每個 PR 跑非 strict，把 fitness 報告貼進 Step Summary；
 #                      永遠 exit 0、絕不阻擋（governance 遷移等屬漸進式 advisory）。
-#   2. nightly-strict— 每週一 02:30 UTC 跑 --strict（R14 CI-2 額度裁決由每日降週頻。
+#   2. nightly-strict— 每週一 02:37 UTC 跑 --strict（R16 SCAN-C-4：由 02:30 錯開
+#                      3~7 分避開整點/半點並讓 drift-daily 的 02:33 先行；R14
+#                      CI-2 額度裁決由每日降週頻。
 #                      每日兜底＝mac 本地 nightly sdd 軌：macos_smoke→ci-gate.sh 內含
 #                      arch_fitness --strict 雙軌 v0.01+LATEST，覆蓋較本 job 的 v0.01
 #                      單軌更廣；Windows 7-stage 無 arch-fitness 軌，此兜底為 mac 單腿
@@ -35,7 +37,7 @@ on:
       - "AISDLC_SDD/**"
       - ".github/workflows/aisdlc-sdd-arch-fitness.yml"
   schedule:
-    - cron: "30 2 * * 1"   # 每週一 02:30 UTC（R14 CI-2 降頻），排在 fsm-chaos-nightly(02:00) 之後
+    - cron: "37 2 * * 1"   # 每週一 02:37 UTC（R14 CI-2 降頻；R16 SCAN-C-4 由 02:30 錯開避開整點/半點），排在 fsm-chaos-nightly(02:03)/drift-daily(02:33) 之後
   workflow_dispatch:
 
 # PR-advisory 併發以分支序列化（同分支新 push 取消舊跑，省 runner）；
@@ -95,7 +97,8 @@ jobs:
     if: github.event_name == 'schedule'
     runs-on: ubuntu-latest
     timeout-minutes: 10
-    # 與 drift-daily 共用同一 cron(02:30) 且都 push main；用全域 job-level
+    # 與 drift-daily 都 push main、時段相近（02:37 vs 02:33，R16 SCAN-C-4 起
+    # 不再精準同分鐘，但執行時長可能仍重疊）；用全域 job-level
     # concurrency 群組序列化兩者的推送，避免 non-fast-forward 競爭。
     concurrency:
       group: main-push-serialize

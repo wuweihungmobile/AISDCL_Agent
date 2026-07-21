@@ -44,6 +44,61 @@ if [ -d "$ROOT/.venv/bin" ]; then
   PATH="$ROOT/.venv/bin:$PATH"; export PATH
 fi
 
+# 觸發來源判定（R16 SCAN-C-3）：BEGIN 行需可歸因本輪是 launchd 排程觸發還是
+# 手動/--force 呼叫，未來再遇到「同日兩輪 PASS」才能機械判讀是合理的手動重跑
+# 還是真正的去重漏洞（R16 掃描時，2026-07-21 同日兩輪完整 PASS=4 因缺這行
+# 無法單靠 log 本身歸因）。XPC_SERVICE_NAME 是 launchd 對其管理 job 行程注入的
+# 慣例環境變數，手動終端呼叫不具備；--force 與互動終端（[ -t 1 ]）進一步區分
+# 手動重跑樣態。
+if [ "${1:-}" = "--force" ]; then
+  TRIGGER_SRC="manual-force"
+elif [ -n "${XPC_SERVICE_NAME:-}" ]; then
+  TRIGGER_SRC="launchd(XPC_SERVICE_NAME=${XPC_SERVICE_NAME})"
+elif [ -t 1 ]; then
+  TRIGGER_SRC="manual-interactive"
+else
+  TRIGGER_SRC="non-interactive-unknown"
+fi
+
+# 去重鎖（R16 SCAN-C-2）：下面的心跳 mtime 判斷本身是 check-then-act，若 launchd
+# 的 RunAtLoad 與 StartCalendarInterval(02:00) 兩個觸發源、或手動重跑與排程觸發
+# 時間點重疊，兩個行程可能同時通過「今日尚未有心跳」的檢查，導致重複跑一整套
+# 4-stage gate。本機查無 `flock`（GNU 專屬，macOS 無此指令）；`shlock` 雖存在
+# 但非所有 macOS 版本保證都有，改用最保險的 POSIX `mkdir` atomic lock pattern
+# （同一路徑下 mkdir 建立目錄具原子性，兩個行程不可能同時成功）。陳舊鎖清除
+# 比照 tools/dev_start.py `_acquire_bootstrap_lock()` 慣例：以鎖檔內 PID 是否
+# 仍存活判斷（而非固定逾時秒數）——4-stage gate 本身執行時間會變動，固定逾時
+# 容易誤殺仍在跑的合法行程。
+NIGHTLY_LOCK_DIR="${ROOT}/AutoClaude/logs/.nightly_mac.lock"
+_nightly_lock_release() {
+  rm -f "${NIGHTLY_LOCK_DIR}/pid" 2>/dev/null
+  rmdir "${NIGHTLY_LOCK_DIR}" 2>/dev/null
+}
+_nightly_lock_acquire() {
+  mkdir -p "${ROOT}/AutoClaude/logs" 2>/dev/null
+  _attempt=1
+  while [ "${_attempt}" -le 2 ]; do
+    if mkdir "${NIGHTLY_LOCK_DIR}" 2>/dev/null; then
+      echo "$$" > "${NIGHTLY_LOCK_DIR}/pid" 2>/dev/null || true
+      return 0
+    fi
+    _lock_pid="$(cat "${NIGHTLY_LOCK_DIR}/pid" 2>/dev/null || true)"
+    if [ -n "${_lock_pid}" ] && kill -0 "${_lock_pid}" 2>/dev/null; then
+      return 1  # 另一行程仍存活，真的忙碌
+    fi
+    # 陳舊鎖（pid 檔缺失、內容非法或行程已死）：清除後重試一次
+    rm -f "${NIGHTLY_LOCK_DIR}/pid" 2>/dev/null
+    rmdir "${NIGHTLY_LOCK_DIR}" 2>/dev/null
+    _attempt=$((_attempt + 1))
+  done
+  return 1
+}
+if ! _nightly_lock_acquire; then
+  echo "另一個 nightly 行程持有去重鎖（${NIGHTLY_LOCK_DIR}）——本輪跳過，避免 launchd 多觸發源或手動重跑時間重疊造成重複執行整套 gate（觸發來源：${TRIGGER_SRC}）"
+  exit 0
+fi
+trap _nightly_lock_release EXIT
+
 # 當日去重（R15 SCAN-C-1；ARCH-R15-REV-1 訂正：判斷提前至 RunId log exec 改道之前
 # ——原順序下每次去重跳過都會留下一份僅含 BEGIN+跳過訊息的殘留 RunId log）：
 # launchd 呼叫載體為 `/bin/bash <本腳本>` 無參數——排程路徑（StartCalendarInterval
@@ -51,7 +106,8 @@ fi
 # 當日已完整跑過一輪 → 跳過（直出 stdout，無 RunId log 副作用；launchd 呼叫時由
 # StandardOutPath／nightly_mac_launchd.log 兜底承接），使 RunAtLoad 語意成為
 #「載入時若今日尚未跑過才補跑」，冪等重裝/多次開機不重複跑；stat 失敗視為無心跳
-# 照常執行；手動重跑：--force 繞過。
+# 照常執行；手動重跑：--force 繞過。R16 SCAN-C-2 起本檢查已受上方去重鎖保護，
+# 不再有 TOCTOU 窗口。
 HB_FILE="${ROOT}/AutoClaude/logs/nightly_mac_latest.log"
 if [ "${1:-}" != "--force" ] && [ -f "${HB_FILE}" ]; then
   _hb_day="$(stat -f %Sm -t %Y-%m-%d "${HB_FILE}" 2>/dev/null || true)"
@@ -78,7 +134,7 @@ if mkdir -p "${ROOT}/AutoClaude/logs" 2>/dev/null; then
   else
     exec >> "${RUN_LOG}" 2>&1
   fi
-  printf 'BEGIN nightly_mac run_id=%s log=%s\n' "${RUN_TS}" "${RUN_LOG}"
+  printf 'BEGIN nightly_mac run_id=%s trigger=%s log=%s\n' "${RUN_TS}" "${TRIGGER_SRC}" "${RUN_LOG}"
 else
   echo "⚠️ logs 目錄建立失敗——RunId log 停用，輸出照舊直出 stdout（launchd log 兜底）：${ROOT}/AutoClaude/logs" >&2
 fi

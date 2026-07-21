@@ -72,7 +72,9 @@ echo ""
 for entry in "${ID_PATTERNS[@]}"; do
     id_type="${entry%%|*}"
     pattern="${entry#*|}"
-    count=$(grep -rhoE "$pattern" "$DOCS_DIR" 2>/dev/null | sort -u | wc -l | tr -d ' ')
+    # grep 找不到匹配時 exit 1，pipefail 下會被 set -e 當成賦值敘述式失敗而終止腳本；
+    # 「找不到」是本工具設計上的正常分支（下方印 ⚠️ 警告），故補 || true 吸收
+    count=$(grep -rhoE "$pattern" "$DOCS_DIR" 2>/dev/null | sort -u | wc -l | tr -d ' ') || true
     if [ "$count" -gt 0 ]; then
         echo -e "  ${GREEN}✅${NC} $id_type ($pattern): $count 個唯一 ID"
         TOTAL_CHECKS=$((TOTAL_CHECKS + 1))
@@ -94,11 +96,13 @@ echo ""
 
 # 檢查 F-XXX → US-XXX 追溯
 echo -e "${BLUE}[檢查] Feature → User Story 追溯鏈：${NC}"
-feature_ids=$(grep -rhoE "F-[0-9]{3}" "$DOCS_DIR" 2>/dev/null | sort -u)
+# grep 找不到匹配時 exit 1，pipefail 下會被 set -e 當成賦值敘述式失敗而終止腳本；
+# 「找不到」是本工具設計上的正常分支，故補 || true 吸收
+feature_ids=$(grep -rhoE "F-[0-9]{3}" "$DOCS_DIR" 2>/dev/null | sort -u) || true
 if [ -n "$feature_ids" ]; then
     while IFS= read -r fid; do
         # 檢查該 Feature 是否被任何 User Story 引用
-        us_refs=$(grep -rl "$fid" "$DOCS_DIR" 2>/dev/null | wc -l | tr -d ' ')
+        us_refs=$(grep -rl "$fid" "$DOCS_DIR" 2>/dev/null | wc -l | tr -d ' ') || true
         if [ "$us_refs" -gt 1 ]; then
             echo -e "  ${GREEN}✅${NC} $fid - 在 $us_refs 個文件中被引用"
             PASS_COUNT=$((PASS_COUNT + 1))
@@ -120,11 +124,13 @@ echo ""
 
 # 檢查 US-XXX → AC-XXX-Y 追溯
 echo -e "${BLUE}[檢查] User Story → Acceptance Criteria 追溯鏈：${NC}"
-us_ids=$(grep -rhoE "US-[0-9]{3}" "$DOCS_DIR" 2>/dev/null | sort -u)
+# grep 找不到匹配時 exit 1，pipefail 下會被 set -e 當成賦值敘述式失敗而終止腳本；
+# 「找不到」是本工具設計上的正常分支，故補 || true 吸收
+us_ids=$(grep -rhoE "US-[0-9]{3}" "$DOCS_DIR" 2>/dev/null | sort -u) || true
 if [ -n "$us_ids" ]; then
     while IFS= read -r usid; do
         us_num=$(echo "$usid" | grep -oE "[0-9]{3}")
-        ac_count=$(grep -rhoE "AC-${us_num}-[0-9]+" "$DOCS_DIR" 2>/dev/null | sort -u | wc -l | tr -d ' ')
+        ac_count=$(grep -rhoE "AC-${us_num}-[0-9]+" "$DOCS_DIR" 2>/dev/null | sort -u | wc -l | tr -d ' ') || true
         if [ "$ac_count" -gt 0 ]; then
             echo -e "  ${GREEN}✅${NC} $usid → $ac_count 個 AC"
             PASS_COUNT=$((PASS_COUNT + 1))
@@ -143,10 +149,12 @@ echo ""
 
 # 檢查 API-XXX 是否在 SRD 或 API Spec 中定義
 echo -e "${BLUE}[檢查] API ID 定義與引用：${NC}"
-api_ids=$(grep -rhoE "API-[0-9]{3}" "$DOCS_DIR" 2>/dev/null | sort -u)
+# grep 找不到匹配時 exit 1，pipefail 下會被 set -e 當成賦值敘述式失敗而終止腳本；
+# 「找不到」是本工具設計上的正常分支，故補 || true 吸收
+api_ids=$(grep -rhoE "API-[0-9]{3}" "$DOCS_DIR" 2>/dev/null | sort -u) || true
 if [ -n "$api_ids" ]; then
     while IFS= read -r apiid; do
-        api_files=$(grep -rl "$apiid" "$DOCS_DIR" 2>/dev/null | wc -l | tr -d ' ')
+        api_files=$(grep -rl "$apiid" "$DOCS_DIR" 2>/dev/null | wc -l | tr -d ' ') || true
         if [ "$api_files" -gt 1 ]; then
             echo -e "  ${GREEN}✅${NC} $apiid - 在 $api_files 個文件中引用（含定義和使用）"
             PASS_COUNT=$((PASS_COUNT + 1))
@@ -170,7 +178,9 @@ echo "--- 3. 孤立 ID 檢查 ---"
 echo ""
 
 echo -e "${BLUE}[檢查] 尋找僅出現一次的 ID（可能為孤立定義）：${NC}"
-all_ids=$(grep -rhoE "(F|BR|EPIC|US|AC|API|TC|BUG|NFR)-[A-Z]*-?[0-9]{3}(-[0-9]+)*" "$DOCS_DIR" 2>/dev/null | sort | uniq -c | sort -rn)
+# grep 找不到匹配時 exit 1，pipefail 下會被 set -e 當成賦值敘述式失敗而終止腳本；
+# 「找不到」是本工具設計上的正常分支，故補 || true 吸收
+all_ids=$(grep -rhoE "(F|BR|EPIC|US|AC|API|TC|BUG|NFR)-[A-Z]*-?[0-9]{3}(-[0-9]+)*" "$DOCS_DIR" 2>/dev/null | sort | uniq -c | sort -rn) || true
 orphan_count=0
 if [ -n "$all_ids" ]; then
     while IFS= read -r line; do
@@ -227,7 +237,9 @@ broken_links=0
 total_links=0
 while IFS= read -r file; do
     # 提取 Markdown 連結中的相對路徑
-    links=$(grep -oE '\[.*?\]\([^)#]+\)' "$file" 2>/dev/null | grep -oE '\(([^)#]+)\)' | tr -d '()' | grep -v '^http' | grep -v '^mailto')
+    # 同上：任一 grep 環節找不到匹配（如該檔無連結）即 exit 1，pipefail 下會被 set -e
+    # 當成賦值敘述式失敗而終止腳本，故補 || true 吸收
+    links=$(grep -oE '\[.*?\]\([^)#]+\)' "$file" 2>/dev/null | grep -oE '\(([^)#]+)\)' | tr -d '()' | grep -v '^http' | grep -v '^mailto') || true
     if [ -n "$links" ]; then
         dir=$(dirname "$file")
         while IFS= read -r link; do

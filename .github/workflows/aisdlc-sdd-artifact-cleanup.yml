@@ -16,8 +16,9 @@
 #   fsm-chaos-report-      ← aisdlc-sdd-fsm-chaos-nightly.yml（fsm-chaos-report-<seed>，retention 7）
 # （aisdlc-sdd-drift-daily.yml 無 upload；新增 aisdlc-sdd artifact 時須同步本清單。）
 #
-# 觸發：每日 03:00 UTC（排在 chaos 02:00 / drift·arch-fitness 02:30 之後，清的是
-# 舊產物，不動當天剛產生的）；workflow_dispatch 可手動立即清理並自訂天數。
+# 觸發：每日 03:03 UTC（排在 chaos 02:03 / drift 02:33 / arch-fitness 02:37 之後，
+# 清的是舊產物，不動當天剛產生的；R16 SCAN-C-4 由整點 03:00 錯開 3 分避開
+# GitHub 建議避免的整點排程時段）；workflow_dispatch 可手動立即清理並自訂天數。
 #
 # Runner：ubuntu-latest；用內建 gh CLI + GITHUB_TOKEN（actions:write），不引第三方
 # action（避免供應鏈風險）。個別刪除失敗以 || true 容錯，整體永不判紅。
@@ -26,7 +27,7 @@ name: artifact-cleanup
 
 on:
   schedule:
-    - cron: "0 3 * * *"
+    - cron: "3 3 * * *"
   workflow_dispatch:
     inputs:
       max_age_days:

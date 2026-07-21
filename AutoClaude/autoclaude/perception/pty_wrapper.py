@@ -12,8 +12,10 @@ import logging
 import os
 import re
 import shutil
+import signal
 import subprocess
 import sys
+import time
 from pathlib import Path
 
 from ..utils.logger import RawStreamLogger
@@ -167,12 +169,23 @@ class PtyWrapper:
             argv: list[str] | str = _build_cmd_shim_line(resolved[2], list(self._args))
         else:
             argv = resolved + self._args
+        popen_kwargs: dict = {}
+        if sys.platform != "win32":
+            # R16 P2：讓子行程獨立成新 session 的 process group leader（其 PID
+            # 即 pgid），供 close() 用 os.killpg() 連同任意深度的孫行程一併終止
+            # ——比照 Windows 側 close() 已用 taskkill /T 遞迴殺整棵行程樹解決的
+            # 同一類問題（單純 terminate()/SIGTERM 只殺直接子行程，底層 CLI 若經
+            # shell wrapper fork 出孫行程會變孤兒）。start_new_session 為 POSIX
+            # only 參數（Windows 上不支援，故以 sys.platform 守門，見 close()
+            # 對應分支）。
+            popen_kwargs["start_new_session"] = True
         self._proc = subprocess.Popen(
             argv,
             stdin=subprocess.PIPE,
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
             env=propagate_to_subprocess_env(dict(os.environ)),
+            **popen_kwargs,
         )
         self._reader = NonBlockingStreamReader(self._proc.stdout)
         logger.info("subprocess 模式啟動：%s", argv)
@@ -275,6 +288,30 @@ class PtyWrapper:
                         timeout=5,
                     )
                 except Exception:
+                    pass
+            elif sys.platform != "win32" and isinstance(self._proc.pid, int):
+                # R16 P2 對稱修復：POSIX 側同樣的孤兒孫行程問題（_start_subprocess
+                # 已用 start_new_session=True 令直接子行程獨立成新 process group，
+                # 其 PID 即 pgid）——單純 terminate() 只送 SIGTERM 給直接子行程，
+                # 底層 CLI 若經 shell wrapper fork 出孫行程會變孤兒不被回收。改用
+                # os.killpg() 連同任意深度的孫行程一併終止：先 SIGTERM 給緩衝機會
+                # 優雅結束，短暫輪詢後仍存活才升級 SIGKILL。pid 須為真實整數才
+                # 觸發——測試以 MagicMock 充當 self._proc 時自然跳過。
+                try:
+                    pgid = os.getpgid(self._proc.pid)
+                    os.killpg(pgid, signal.SIGTERM)
+                    deadline = time.monotonic() + 2
+                    still_alive = True
+                    while time.monotonic() < deadline:
+                        try:
+                            os.killpg(pgid, 0)
+                        except OSError:
+                            still_alive = False
+                            break
+                        time.sleep(0.05)
+                    if still_alive:
+                        os.killpg(pgid, signal.SIGKILL)
+                except OSError:
                     pass
             self._proc.terminate()
         if self._reader:

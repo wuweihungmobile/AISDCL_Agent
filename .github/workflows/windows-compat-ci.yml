@@ -216,7 +216,9 @@ on:
   schedule:
     # R11 額度治理：每日 → 每週一（CI 額度緊張、Windows 側已有 schtasks 本地 nightly
     # run_local_nightly.ps1 承接每日訊號）；需要時可 workflow_dispatch 手動觸發。
-    - cron: "0 6 * * 1"   # windows-nightly-full：每週一 06:00 UTC 深度回歸（非阻斷）
+    # R16 SCAN-C-4：原整點 06:00 UTC 錯開避開 GitHub 建議避免的整點排程時段
+    # （與其他 6 條 cron 無時間相依，僅單純避開 :00/:30）。
+    - cron: "12 6 * * 1"   # windows-nightly-full：每週一 06:12 UTC 深度回歸（非阻斷）
   workflow_dispatch:
     inputs:
       simulate_nightly_failure:

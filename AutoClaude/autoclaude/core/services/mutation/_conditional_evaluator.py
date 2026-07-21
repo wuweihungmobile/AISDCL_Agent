@@ -20,6 +20,11 @@ from ....utils.trace_context import propagate_to_subprocess_env
 logger = logging.getLogger(__name__)
 
 # 白名單：英數、空白、`-./=:_` 與引號（SD_05 W4 三方審查 Arch-M1/SD-M2/SA-M1 收窄）
+# R16 P2：刻意不含反斜線 —— 即便將來因 Windows 路徑需求想放寬，`_default_evaluator`
+# 用 POSIX 模式 shlex.split 會把反斜線當跳脫字元吃掉（`shlex.split(r"C:\Users\dev\x.py")`
+# → `['C:Usersdevx.py', ...]`，路徑被靜默破壞而非清楚拒絕），故放寬前必須先把
+# _default_evaluator 改用 `shlex.split(cmd, posix=False)` 或等效正規化，兩者需同動；
+# 見 conditional.py 模組 docstring「跨平台注意」— 使用者應改寫正斜線路徑。
 _SAFE_COND_PATTERN = re.compile(r"^[\w\s\-./=:'\"]+$")
 # 黑名單：縱深防禦，即便落入白名單也必拒
 _DENY_CHARS = frozenset("!`$~><|&;()*?\\\n\r\t")

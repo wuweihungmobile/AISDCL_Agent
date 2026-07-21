@@ -170,7 +170,9 @@ on:
     # R11 額度治理：每日 → 每週一（macOS runner 分鐘數計價倍率高、且 mac 側已有本地
     # 補償控制 macos_smoke_local.sh + run_local_nightly.sh 聚合器承接每日訊號）；
     # 需要時可 workflow_dispatch 手動觸發。仍較 windows-compat-ci 錯開 1 小時避免搶 runner。
-    - cron: "0 7 * * 1"   # macos-nightly-full：每週一 07:00 UTC 深度回歸（非阻斷）
+    # R16 SCAN-C-4：原整點 07:00 UTC 錯開避開 GitHub 建議避免的整點排程時段
+    # （與其他 6 條 cron 無時間相依，僅單純避開 :00/:30）。
+    - cron: "18 7 * * 1"   # macos-nightly-full：每週一 07:18 UTC 深度回歸（非阻斷）
   workflow_dispatch:
     inputs:
       simulate_nightly_failure:

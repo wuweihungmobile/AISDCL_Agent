@@ -20,19 +20,19 @@ fail-loud 列出未納管檔名：
 實作漂移（同名 step 做了不同事）仍需人工審查，不可把本工具的綠燈當成雙平台
 行為等價的證明。詳見下方「覆蓋範圍與侷限」。
 
-為何需要：bootstrap / integration_gate / run_act 三對腳本的兩側宣稱對等，
-但閘門清單過去純靠人工雙改——單邊加減 step 不會有任何機械訊號。本腳本抽取兩版
-的「step 標籤字串」逐一比對，不一致即 exit 1（供 root-infra-ci 與本機執行）。
-（歷史：local_ci_gate 曾為第四對、以 gate-call 抽取比對；R12 DEF-101-070 ② 收斂為
-tools/local_ci_gate.py 單核心＋兩薄殼後，該對改由 check_wrapper_thinness.py hash
-釘選守門，gate 清單漂移面已物理消滅、gate-call 抽取隨之退場。）
+為何需要：本機制本用來守護「兩側宣稱對等、但實作各自平行維護」的腳本對——
+單邊加減 step 不會有任何機械訊號，故抽取兩版的「step 標籤字串」逐一比對，
+不一致即 exit 1（供 root-infra-ci 與本機執行）。
 
-抽取策略（依各對腳本的固定宣告 pattern）：
-  1. tools/bootstrap.{sh,ps1}          — `[n/m]` 步驟標籤（echo / Write-Host 字面值）
-  2. tools/integration_gate.{sh,ps1}   — `[n/m]` 段落標籤（run_section / Invoke-Section）
-  3. AutoClaude/tools/run_act.{sh,ps1} — `[n/m]` 段落標籤（echo / Write-Host 字面值，
-     比照 bootstrap 樣式；R4 複審 Architect P2 補上，原六段僅靠純數字 `# ---- N. ----`
-     註解對齊、無機械訊號）
+（歷史：local_ci_gate 曾為 _MARKER_PAIRS 第四對，以 gate-call 抽取比對；R12
+DEF-101-070 ② 收斂為 tools/local_ci_gate.py 單核心＋兩薄殼後，該對改由
+check_wrapper_thinness.py hash 釘選守門，gate 清單漂移面已物理消滅、gate-call
+抽取隨之退場。R16（Architect 建議 B）比照同一模式，把 bootstrap / integration_gate
+/ run_act 三對雙原生實作收斂為「Python 單核心（bootstrap_core.py /
+integration_gate_core.py / run_act_core.py）＋兩薄殼」，三對業務邏輯漂移面同樣
+物理消滅，改由 check_wrapper_thinness.py hash 釘選守門，_MARKER_PAIRS 標籤比對
+隨之退場——`_MARKER_PAIRS` 目前為空清單，保留作為未來若有新對「雙原生實作」腳本
+需要標籤比對納管時的既有機制，非死碼。）
 
 覆蓋範圍與侷限（docstring 即契約）：
   - `[n/m]` 標籤先剝除註解行（.sh/.ps1 整行 `#` 註解 + .ps1 `<# … #>` 區塊），再以
@@ -100,13 +100,10 @@ def _extract_markers(path: Path) -> list[str]:
 # 抽取數量下限釘選（R9 跨平台複審）：抽取全靠固定宣告 pattern，pattern 被改寫
 # （如兩側同步換引號風格/換函式名）時 step 會「靜默退出守護範圍」且雙邊一致、
 # _compare 不會有任何 diff 訊號。以「抽取數量不得低於釘選值」補上機械訊號；
-# 釘選值＝2026-07-16 工具實跑輸出（bootstrap 3 / integration_gate 5 / run_act 6；
-# local_ci_gate 9 已隨 R12 薄殼化收斂退場，見檔頭）。刻意刪減 step 時須同步更新
+# bootstrap/integration_gate/run_act 三對已隨 R16 薄殼化收斂退場（同 R12
+# local_ci_gate 先例，見 _THINNESS_ENROLLED）。刻意刪減 step 時須同步更新
 # 本表（工具會在訊息中指路）。
 _MIN_EXTRACT_COUNTS = {
-    "bootstrap": 3,
-    "integration_gate": 5,
-    "run_act": 6,
     # R12 ARCH-R12-3：LATEST run_tlc FSM 軌錨點 token multiset（SDD_FSM.cfg/.tla +
     # FLEET_FSM.cfg/.tla×2 + FLEET_FSM_LIVENESS.cfg = 6，2026-07-18 實跑輸出釘選；
     # SD 一審 SD-2 改 multiset 語意後含重複次數）
@@ -290,18 +287,22 @@ def _check_pytest_pin() -> bool:
 # fail-loud 列出未納管檔名（R11 前單邊腳本零訊號）；並反向檢查各註冊清單無 stale
 # 條目（防清單腐化）——單邊豁免的 stale 含兩種：檔案已消失、或對邊已出現（不再
 # 是單邊，須改登記為成對類）。
-_MARKER_PAIRS = [
-    ("bootstrap", "tools/bootstrap.sh", "tools/bootstrap.ps1"),
-    ("integration_gate", "tools/integration_gate.sh", "tools/integration_gate.ps1"),
-    ("run_act", "AutoClaude/tools/run_act.sh", "AutoClaude/tools/run_act.ps1"),
-]
+_MARKER_PAIRS: list[tuple[str, str, str]] = []
 _PAIR_SCAN_DIRS = ("tools", "tools/lib", "AutoClaude/tools", "AISDLC_SDD/scripts")
 # LATEST 納管 key 前綴（R12 ARCH-R12-3）：登記用「相對 LATEST 的路徑」，版本升版
 # （copy-on-evolve）時登記不失效；實體路徑由 _resolve_latest_tools() 動態解析。
 _LATEST_PREFIX = "LATEST/tools/"
 # tools/check_wrapper_thinness.py hash 釘選（R12 起 local_ci_gate 收斂為薄殼＋
-# tools/local_ci_gate.py 單核心後加入，DEF-101-070 ②；gate-call 抽取比對隨之退場）
-_THINNESS_ENROLLED = {"tools/dev_start", "AutoClaude/tools/local_ci_gate"}
+# tools/local_ci_gate.py 單核心後加入，DEF-101-070 ②；gate-call 抽取比對隨之退場。
+# R16（Architect 建議 B）比照同一模式收斂 bootstrap/integration_gate/run_act 三對，
+# 原 _MARKER_PAIRS 標籤比對隨之退場，見上方 docstring）
+_THINNESS_ENROLLED = {
+    "tools/dev_start",
+    "AutoClaude/tools/local_ci_gate",
+    "tools/bootstrap",
+    "tools/integration_gate",
+    "AutoClaude/tools/run_act",
+}
 # run_tlc FSM 軌錨點集合鎖（R12；見 _check_run_tlc_tracks 區塊註解）
 _TLC_TRACK_ENROLLED = {"LATEST/tools/fsm_runtime/formal/run_tlc"}
 _EXEMPT_PAIRS = {
@@ -539,7 +540,7 @@ def main() -> int:
         print("\n❌ 雙平台腳本對等檢查未通過 — .sh/.ps1 必須同步修改（見上列 diff）",
               file=sys.stderr)
         return 1
-    print("\n✅ 雙平台腳本對等檢查通過（3 對標籤腳本 + LATEST run_tlc 軌鎖 + "
+    print(f"\n✅ 雙平台腳本對等檢查通過（{len(_MARKER_PAIRS)} 對標籤腳本 + LATEST run_tlc 軌鎖 + "
           "pytest 釘選 + 成對/單邊註冊完整性；薄殼對子另由 check_wrapper_thinness 釘選）")
     return 0
 

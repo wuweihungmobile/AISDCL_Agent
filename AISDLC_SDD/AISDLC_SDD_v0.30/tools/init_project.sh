@@ -141,7 +141,13 @@ download_aisdlc() {
         if [ ! -d "${source_dir}/${aisdlc_dir}" ]; then
             echo -e "${RED}❌ 本地路徑找不到版本 v${version}${NC}"
             echo -e "${YELLOW}   可用版本:${NC}"
-            ls -d "${source_dir}"/AISDLC_v* 2>/dev/null | xargs -n1 basename | sed 's/AISDLC_v/   - v/'
+            # SDD 模式目錄命名為 AISDLC_SDD_v*，非 SDD 模式為 AISDLC_v*——固定用後者
+            # 過濾會使 --sdd 模式印出空清單（R16 相容性掃描）
+            if [ "$USE_SDD" = true ]; then
+                ls -d "${source_dir}"/AISDLC_SDD_v* 2>/dev/null | xargs -n1 basename | sed 's/AISDLC_SDD_v/   - v/'
+            else
+                ls -d "${source_dir}"/AISDLC_v* 2>/dev/null | xargs -n1 basename | sed 's/AISDLC_v/   - v/'
+            fi
             exit 1
         fi
 
@@ -188,7 +194,13 @@ download_aisdlc() {
         if [ ! -d "${source_dir}/${aisdlc_dir}" ]; then
             echo -e "${RED}❌ 找不到版本 v${version}${NC}"
             echo -e "${YELLOW}   可用版本:${NC}"
-            ls -d "${source_dir}"/AISDLC_v* 2>/dev/null | xargs -n1 basename | sed 's/AISDLC_v/   - v/'
+            # SDD 模式目錄命名為 AISDLC_SDD_v*，非 SDD 模式為 AISDLC_v*——固定用後者
+            # 過濾會使 --sdd 模式印出空清單（R16 相容性掃描）
+            if [ "$USE_SDD" = true ]; then
+                ls -d "${source_dir}"/AISDLC_SDD_v* 2>/dev/null | xargs -n1 basename | sed 's/AISDLC_SDD_v/   - v/'
+            else
+                ls -d "${source_dir}"/AISDLC_v* 2>/dev/null | xargs -n1 basename | sed 's/AISDLC_v/   - v/'
+            fi
             rm -rf "${temp_dir}"
             exit 1
         fi

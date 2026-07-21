@@ -16,24 +16,18 @@
 from __future__ import annotations
 
 import argparse
-import io
 import re
 import sys
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
-def _init_utf8_streams() -> None:
-    """Windows console UTF-8；只在 __main__ 觸發，避免污染 pytest stdout/stderr。"""
-    if sys.platform != "win32":
-        return
-    try:
-        sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8", errors="replace")
-        sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding="utf-8", errors="replace")
-    except Exception:
-        pass
-
-
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
+
+sys.path.insert(0, str(PROJECT_ROOT.parent / "tools" / "lib"))
+from platform_utils import (  # noqa: E402
+    init_utf8_streams as _init_utf8_streams,  # type: ignore[import-not-found]
+)
+
 SPRINT_HISTORY = PROJECT_ROOT / "docs" / "05_development" / "sprint_history.md"
 
 SPRINT_H3_PATTERN = re.compile(r"^### 1\.(\d+) SD_Improving_(\d+)")
@@ -128,17 +122,21 @@ def main() -> int:
 
     sprint_nn = args.sprint.zfill(2)  # 09 / 10 / 11 ...
     title = args.title
-    today = args.date or datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    today = args.date or datetime.now(UTC).strftime("%Y-%m-%d")
 
     if not SPRINT_HISTORY.exists():
-        print(f"[scaffold_sprint_section] 找不到 sprint_history.md: {SPRINT_HISTORY}", file=sys.stderr)
+        print(
+            f"[scaffold_sprint_section] 找不到 sprint_history.md: {SPRINT_HISTORY}",
+            file=sys.stderr,
+        )
         return 1
 
     content = SPRINT_HISTORY.read_text(encoding="utf-8")
     existing_x, max_x = find_existing(content, sprint_nn)
     if existing_x is not None:
         print(
-            f"[scaffold_sprint_section] §1.{existing_x} SD_Improving_{sprint_nn} 已存在；拒絕覆寫。",
+            f"[scaffold_sprint_section] §1.{existing_x} SD_Improving_{sprint_nn} "
+            f"已存在；拒絕覆寫。",
             file=sys.stderr,
         )
         return 1
@@ -149,7 +147,8 @@ def main() -> int:
     if args.dry_run:
         print(skeleton)
         print(
-            f"[scaffold_sprint_section] DRY-RUN: 將於 §1.{next_x} 插入 SD_Improving_{sprint_nn} 骨架",
+            f"[scaffold_sprint_section] DRY-RUN: 將於 §1.{next_x} 插入 "
+            f"SD_Improving_{sprint_nn} 骨架",
             file=sys.stderr,
         )
         return 0

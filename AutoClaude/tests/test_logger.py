@@ -10,7 +10,12 @@ from unittest import mock
 
 import pytest
 
-from autoclaude.utils.logger import _EncodingSafeStreamHandler, setup_logger
+from autoclaude.utils.logger import (
+    RawStreamLogger,
+    _EncodingSafeStreamHandler,
+    _sanitize_log_filename,
+    setup_logger,
+)
 
 # step_log repr 內實際出現、cp950 無法編碼的字元（DEF-87-002 原始崩潰元兇）
 _CHECK = "✓"  # ✓
@@ -144,3 +149,75 @@ def test_recursionerror_propagates_not_swallowed():
         handler.emit(_make_record("anything"))
 
     handler.handleError.assert_not_called()
+
+
+# --- DEF-101（Mac/Windows 相容性 R16）：raw log 檔名淨化 + RawStreamLogger 崩潰防護 ---
+#
+# 根因：raw log 檔名由 playbook 作者自訂的 task.step_id 組成（見
+# infra/adapters/pty_executor.py、execution/prompt_dispatcher.py），像
+# `step_id: "Step 1: Setup"` 這種很自然的寫法在 macOS/Linux 上完全合法（檔名規則
+# 寬鬆，僅 / 與 NUL 不合法），但同一字串在 Windows(NTFS) 上因含冒號會讓
+# RawStreamLogger.__init__ 的 open() 拋出未捕捉的 OSError，導致該 step 每次重試
+# 都對同一個壞檔名再炸一次——且此問題在 Mac/Linux 開發與 CI 上完全隱形。
+# 以下測試不需要真的在 Windows 上跑：直接對 sanitize 函式套用 Windows 禁用字元集合
+# 驗證輸出、並用「目標目錄不存在」構造一個跨平台皆會讓 open() 失敗的情境驗證 fallback。
+
+
+@pytest.mark.parametrize(
+    "raw,expected",
+    [
+        ("Step 1: Setup", "Step 1_ Setup"),      # 冒號（P1 案例的真實觸發字元）
+        ("a<b", "a_b"),
+        ('a"b|c?d*e', "a_b_c_d_e"),
+        (r"C:\Users\dev", "C__Users_dev"),  # 反斜線冒號需淨化 # platform-ok: 字面值非路徑 join
+        ("trailing dot.", "trailing dot"),        # NTFS 不允許以句點結尾
+        ("trailing space ", "trailing space"),    # NTFS 不允許以空白結尾
+    ],
+)
+def test_sanitize_log_filename_strips_windows_forbidden_chars(raw, expected):
+    """驗證 Windows 禁用字元（< > : " | ? * \\）被取代、結尾空白/句點被剝除——
+    這是 P1 修復的核心保證：淨化後的檔名在任何平台都能安全 open()。"""
+    assert _sanitize_log_filename(raw) == expected
+
+
+@pytest.mark.parametrize("reserved", ["CON", "con", "PRN", "NUL", "COM1", "LPT9"])
+def test_sanitize_log_filename_guards_windows_reserved_device_names(reserved):
+    """CON/PRN/AUX/NUL/COM1-9/LPT1-9（大小寫不敏感）為 Windows 保留裝置名，
+    即使不含禁用字元也必須被改名，否則 Windows 上 open() 會開到裝置而非檔案。"""
+    result = _sanitize_log_filename(reserved)
+    assert result != reserved
+    assert result == f"_{reserved}"
+
+
+def test_raw_stream_logger_survives_windows_forbidden_step_id(tmp_path):
+    """端對端：step_id 含 Windows 禁用字元時，RawStreamLogger 仍能成功開檔寫入，
+    不再讓整個 playbook 執行因未捕捉的 OSError 而崩潰（P1 根因情境重現）。"""
+    log_path = tmp_path / 'playbook_Step 1: Setup.log'
+
+    rl = RawStreamLogger(log_path)
+    try:
+        rl.write(b"hello\n")
+    finally:
+        rl.close()
+
+    written = [p for p in tmp_path.iterdir() if p.is_file()]
+    assert len(written) == 1
+    assert ":" not in written[0].name
+    assert written[0].read_bytes() == b"hello\n"
+
+
+def test_raw_stream_logger_falls_back_when_open_fails(tmp_path, caplog):
+    """open() 因非檔名成因失敗時（此處以不存在且不自動建立的目錄模擬，跨平台皆會
+    觸發 FileNotFoundError），RawStreamLogger 必須 fallback 到暫存目錄而非向上拋例外
+    ——驗證 try/except 縱深防禦確實生效，而非只靠淨化這一層。"""
+    missing_dir_path = tmp_path / "does_not_exist" / "playbook_T01.log"
+
+    with caplog.at_level(logging.WARNING, logger="autoclaude.utils.logger"):
+        rl = RawStreamLogger(missing_dir_path)
+    try:
+        rl.write(b"fallback-data\n")
+    finally:
+        rl.close()
+
+    assert any("開啟 log 檔" in r.message for r in caplog.records)
+    assert not missing_dir_path.exists()

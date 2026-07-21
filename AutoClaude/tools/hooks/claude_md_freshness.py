@@ -14,21 +14,17 @@ fail-open：
 """
 from __future__ import annotations
 
-import io
 import subprocess
 import sys
 from pathlib import Path
 
-
-def _init_utf8_streams() -> None:
-    """Windows console UTF-8；只在 __main__ 觸發，避免污染 pytest stdout/stderr。"""
-    try:
-        sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8", errors="replace")
-        sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding="utf-8", errors="replace")
-    except Exception:
-        pass
-
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
+
+sys.path.insert(0, str(PROJECT_ROOT.parent / "tools" / "lib"))
+from platform_utils import (  # noqa: E402
+    init_utf8_streams as _init_utf8_streams,  # type: ignore[import-not-found]
+)
+
 CLAUDE_MD = PROJECT_ROOT / "CLAUDE.md"
 SNAPSHOT_TOOL = PROJECT_ROOT / "tools" / "snapshot_sync.py"
 MAX_LINES = 400  # ADR-SD08-001 §2.1

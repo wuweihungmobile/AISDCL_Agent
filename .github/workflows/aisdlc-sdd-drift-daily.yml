@@ -11,7 +11,11 @@
 # drift records. Advisory only — never fails main; never blocks PRs.
 #
 # Schedule rationale:
-#   - 02:30 UTC offset from chaos (02:00) to avoid runner contention.
+#   - 02:33 UTC offset from chaos (02:03) to avoid runner contention. Nudged
+#     3 min off the exact half-hour (R16 SCAN-C-4: GitHub recommends avoiding
+#     :00/:30 to reduce scheduling delay risk); the weekly arch-fitness
+#     nightly-strict job is intentionally scheduled a few minutes after this
+#     one (02:37 on Mondays), preserving "daily runs, then weekly follows".
 #   - `workflow_dispatch` for ad-hoc backfill / verification.
 #
 # Output: AISDLC_SDD/AISDLC_SDD_v0.01/build/reports/drift/DAILY-YYYY-MM-DD.md
@@ -21,7 +25,7 @@ name: drift-daily
 
 on:
   schedule:
-    - cron: "30 2 * * *"
+    - cron: "33 2 * * *"
   workflow_dispatch:
     inputs:
       date:
@@ -34,9 +38,11 @@ jobs:
     name: emit DAILY drift report
     runs-on: ubuntu-latest
     timeout-minutes: 10
-    # 與 arch-fitness nightly-strict 都 push main（R14 CI-2 降頻後僅每週一 02:30
-    # 重疊，其餘日子本 job 獨跑）；共用 job-level concurrency 群組序列化推送，
-    # 避免重疊窗口的 non-fast-forward 競爭（序列化仍必要，R14 SA-R14-REV-1）。
+    # 與 arch-fitness nightly-strict 都 push main（R14 CI-2 降頻後僅每週一相近時段
+    # 重疊——R16 SCAN-C-4 起兩者 cron 已錯開至 02:33/02:37，不再精準同分鐘觸發，
+    # 但執行時長可能仍重疊，故序列化保留；其餘日子本 job 獨跑）；共用 job-level
+    # concurrency 群組序列化推送，避免重疊窗口的 non-fast-forward 競爭
+    # （序列化仍必要，R14 SA-R14-REV-1）。
     concurrency:
       group: main-push-serialize
       cancel-in-progress: false

@@ -14,22 +14,18 @@ Linux bash 噴 `$'\\r': command not found` + syntax error，視為 P0。
 """
 from __future__ import annotations
 
-import io
 import json
 import sys
 from pathlib import Path
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 
+sys.path.insert(0, str(PROJECT_ROOT.parent / "tools" / "lib"))
+from platform_utils import (  # noqa: E402
+    init_utf8_streams as _init_utf8_streams,  # type: ignore[import-not-found]
+)
+
 SHELL_SUFFIXES = {".sh", ".bash"}
-
-
-def _init_utf8_streams() -> None:
-    try:
-        sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8", errors="replace")
-        sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding="utf-8", errors="replace")
-    except Exception:
-        pass
 
 
 def read_hook_payload() -> dict:

@@ -14,23 +14,15 @@ JSON stdin 協議（Claude Code hooks）：
 """
 from __future__ import annotations
 
-import io
 import json
 import re
 import sys
 from pathlib import Path
 
-
-def _init_utf8_streams() -> None:
-    """Windows console UTF-8（防止 cp950 寫入失敗）。
-
-    只在 `__main__` 進入點觸發；避免被 pytest import 時污染 stdout/stderr。
-    """
-    try:
-        sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8", errors="replace")
-        sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding="utf-8", errors="replace")
-    except Exception:
-        pass
+sys.path.insert(0, str(Path(__file__).resolve().parents[3] / "tools" / "lib"))
+from platform_utils import (  # noqa: E402
+    init_utf8_streams as _init_utf8_streams,  # type: ignore[import-not-found]
+)
 
 # 偵測目標字元集：
 #   韓文音節：U+AC00 ~ U+D7A3

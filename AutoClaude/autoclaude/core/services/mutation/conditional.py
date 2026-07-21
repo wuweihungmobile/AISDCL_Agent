@@ -9,6 +9,14 @@
       (3) 預設 evaluator 使用 ``shell=False`` + ``shlex.split``，根絕 shell 介入
   - 巢狀 CONDITIONAL 上限：遞迴深度 > 4 直接拒絕，防 IO 風暴（SD_05 W4 SD-M1）
 
+跨平台注意（R16 P2；比照 execution/evaluator.py Evaluator.run 的可攜指令慣例）：
+``_SAFE_COND_PATTERN`` 白名單刻意不含反斜線，Windows 風格路徑（如
+``C:\\path\\to\\check.py``）會被拒絕並記警告（見 ``apply()``）。condition_evaluator
+若需寫路徑，請一律用正斜線（``C:/path/to/check.py``，Windows API 原生接受）；
+不要放寬白名單去接受反斜線 —— ``_default_evaluator`` 用 POSIX 模式
+``shlex.split``，反斜線會被當跳脫字元吃掉、把路徑拆爛而非清楚拒絕
+（見 ``_conditional_evaluator.py`` docstring）。
+
 設計原則：
   - 為維持 Layer 2 純度，subprocess 透過注入的 ``evaluator`` callable 執行
   - shell 安全層拆至 ``_conditional_evaluator.py``（W4 三方審查 LOC ≤ 80 預算）
@@ -19,7 +27,8 @@
 from __future__ import annotations
 
 import logging
-from typing import Callable, Optional, TYPE_CHECKING
+from collections.abc import Callable
+from typing import TYPE_CHECKING
 
 from ....models.playbook import Playbook
 from ....models.step_mutation import StepMutation, StepMutationType
@@ -44,14 +53,14 @@ class ConditionalStrategy:
 
     def __init__(
         self,
-        evaluator: Optional[Callable[[str, int], int]] = None,
+        evaluator: Callable[[str, int], int] | None = None,
         timeout_seconds: int = _DEFAULT_TIMEOUT_SECONDS,
     ):
         self._evaluator = evaluator or _default_evaluator
         self._timeout = timeout_seconds
-        self._service: Optional["MutationApplyService"] = None
+        self._service: MutationApplyService | None = None
 
-    def _set_service(self, service: "MutationApplyService") -> None:
+    def _set_service(self, service: MutationApplyService) -> None:
         """由 MutationApplyService 於建構末注入自身（避免循環依賴）。
 
         TODO(SD_05 W6 / SA-M3)：W6 改 constructor 必填參數。
@@ -82,8 +91,19 @@ class ConditionalStrategy:
             return False
         cmd = mutation.condition_evaluator.strip()
         if not cmd or not _SAFE_COND_PATTERN.match(cmd):
+            # R16 P2：對齊姊妹實作 execution/mutation_applier/_conditional.py 的
+            # 警告訊息（原本靜默拒絕，Windows 路徑如 C:\path\to\check.py 因白名單
+            # 不含反斜線被拒時完全無跡可尋，難以除錯）。
+            logger.warning(
+                "=== Gap-046 | CONDITIONAL evaluator 包含不安全字符，略過: %s ===",
+                cmd[:80],
+            )
             return False
         if any(ch in _DENY_CHARS for ch in cmd):
+            logger.warning(
+                "=== Gap-046 | CONDITIONAL evaluator 包含不安全字符，略過: %s ===",
+                cmd[:80],
+            )
             return False
         exit_code = self._evaluator(cmd, self._timeout)
         branch = mutation.true_mutation if exit_code == 0 else mutation.false_mutation

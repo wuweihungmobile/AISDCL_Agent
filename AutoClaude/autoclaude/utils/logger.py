@@ -1,7 +1,10 @@
+import hashlib
 import logging
+import re
 import sys
-from pathlib import Path
+import tempfile
 from logging.handlers import RotatingFileHandler
+from pathlib import Path
 
 
 class _EncodingSafeStreamHandler(logging.StreamHandler):
@@ -61,10 +64,41 @@ def setup_logger(log_dir: str = "logs", level: int = logging.DEBUG) -> logging.L
     return root
 
 
+# DEF-101（Mac/Windows 相容性 R16）：raw log 檔名由 playbook 作者自訂的
+# task.step_id 組成（見 pty_executor.py / prompt_dispatcher.py），在 macOS/Linux
+# 上檔名規則寬鬆（僅 / 與 NUL 不合法）完全合法；同一字串若含 Windows 禁用字元
+# （< > : " | ? * \）、以空白/句點結尾、或恰為保留裝置名（CON/PRN/...），Windows
+# 上 open() 會拋出未捕捉的 OSError，導致該 step 每次重試都對同一個壞檔名再炸一次。
+_WIN_FORBIDDEN_CHARS = frozenset('<>:"|?*\\')
+_WIN_RESERVED_NAME_RE = re.compile(r"^(CON|PRN|AUX|NUL|COM[0-9]|LPT[0-9])$", re.IGNORECASE)
+
+
+def _sanitize_log_filename(name: str) -> str:
+    """把檔名淨化為跨平台（含 Windows/NTFS）相容格式。"""
+    sanitized = "".join("_" if ch in _WIN_FORBIDDEN_CHARS else ch for ch in name)
+    sanitized = sanitized.rstrip(" .") or "untitled"
+    stem = sanitized.rsplit(".", 1)[0]
+    if _WIN_RESERVED_NAME_RE.match(stem):
+        sanitized = f"_{sanitized}"
+    return sanitized
+
+
 # 串流寫入給 PTY 輸出的原始 log
 class RawStreamLogger:
     def __init__(self, path: Path):
-        self._file = open(path, "ab")
+        safe_path = path.with_name(_sanitize_log_filename(path.name))
+        try:
+            self._file = open(safe_path, "ab")
+        except OSError as exc:
+            # 縱深防禦：淨化後仍失敗（如目標目錄不存在等非檔名成因）時，fallback
+            # 改寫入系統暫存目錄（幾乎必存在可寫），避免整個 playbook 執行崩潰。
+            digest = hashlib.sha256(path.name.encode("utf-8", errors="replace")).hexdigest()[:12]
+            fallback = Path(tempfile.gettempdir()) / f"playbook_fallback_{digest}.log"
+            logging.getLogger("autoclaude.utils.logger").warning(
+                "RawStreamLogger: 開啟 log 檔 %s 失敗（%s），改用安全檔名 %s",
+                safe_path, exc, fallback,
+            )
+            self._file = open(fallback, "ab")
 
     def write(self, data: bytes) -> None:
         self._file.write(data)

@@ -10,6 +10,8 @@ from __future__ import annotations
 
 import io
 import logging
+import os
+import signal
 import subprocess
 import sys
 import threading
@@ -393,6 +395,55 @@ class TestCloseKillsCmdShimGrandchild:
                 ["taskkill", "/T", "/F", "/PID", str(pty._proc.pid)],
                 capture_output=True,
             )
+
+
+def _pid_alive(pid: int) -> bool:
+    try:
+        os.kill(pid, 0)
+    except OSError:
+        return False
+    return True
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="POSIX process-group 孤兒防護僅適用於 POSIX")
+class TestCloseKillsPosixGrandchild:
+    """R16 P2（Mac/Windows 相容性掃描）：POSIX 側 close() 修復前只呼叫
+    self._proc.terminate()（只殺直接子行程 sh），若 sh 再背景 fork 出孫行程
+    （如底層 CLI 經 shell wrapper 啟動），孫行程會變孤兒不被回收——跟 Windows
+    側已修的 cmd shim 孤兒孫行程問題（見 TestCloseKillsCmdShimGrandchild）同一類。
+    修復後 _start_subprocess() 用 start_new_session=True 令直接子行程獨立成新
+    process group，close() 改用 os.killpg() 連同孫行程一併終止。"""
+
+    def test_close_kills_grandchild_spawned_via_shell_background_job(self, tmp_path):
+        marker = tmp_path / "grandchild_pid.txt"
+        # sh 直接子行程背景啟動 sleep 30（= 孫行程，因由 sh fork 而非 Python），
+        # 寫入 $!（背景工作 PID）後 wait 阻塞，模擬 shell wrapper fork 出真正工作
+        # 行程的情境。
+        script = f"sleep 30 & echo $! > '{marker}'; wait"
+        pty = PtyWrapper(command="sh", args=["-c", script], auth_patterns=[], auth_response="y")
+        pty.start()
+        try:
+            deadline = time.time() + 10
+            while not marker.exists() and time.time() < deadline:
+                time.sleep(0.1)
+            assert marker.exists(), "孫行程未在時限內啟動（測試環境問題，非本次修復範圍）"
+            grandchild_pid = int(marker.read_text().strip())
+            assert _pid_alive(grandchild_pid), "孫行程應已啟動存活"
+
+            pty.close()
+
+            deadline = time.time() + 5
+            alive = _pid_alive(grandchild_pid)
+            while alive and time.time() < deadline:
+                time.sleep(0.1)
+                alive = _pid_alive(grandchild_pid)
+            assert not alive, f"孫行程 PID {grandchild_pid} 於 close() 後仍存活（P2 缺陷回歸）"
+        finally:
+            # 測試安全網：即使斷言失敗也不留下背景行程
+            try:
+                os.kill(grandchild_pid, signal.SIGKILL)
+            except (NameError, OSError):
+                pass
 
 
 # ──────────────────────────────────────────────

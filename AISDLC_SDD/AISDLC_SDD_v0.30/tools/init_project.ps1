@@ -159,8 +159,11 @@ function Get-AISDLC {
         if (-not (Test-Path $versionPath)) {
             Write-Host "❌ 本地路徑找不到版本 v$TargetVersion" -ForegroundColor Red
             Write-Host "   可用版本:" -ForegroundColor Yellow
-            Get-ChildItem $sourceDir -Directory -Filter "AISDLC_v*" | ForEach-Object {
-                $vName = $_.Name -replace "AISDLC_v", ""
+            # SDD 模式目錄命名為 AISDLC_SDD_v*，非 SDD 模式為 AISDLC_v*——固定用後者
+            # 過濾會使 -SDD 模式印出空清單（R16 相容性掃描）
+            $fallbackFilter = if ($UseSDD) { "AISDLC_SDD_v*" } else { "AISDLC_v*" }
+            Get-ChildItem $sourceDir -Directory -Filter $fallbackFilter | ForEach-Object {
+                $vName = $_.Name -replace $fallbackFilter.TrimEnd('*'), ""
                 Write-Host "   - v$vName"
             }
             exit 1
@@ -185,13 +188,21 @@ function Get-AISDLC {
         }
         Write-Host "   倉庫: $GITHUB_REPO" -ForegroundColor Blue
 
-        try {
+        # R16（DEF-101-124 同款病灶；比照 fsm_runtime/formal/run_tlc.ps1 R9 D-1 /
+        # arch_fitness/run_self_evolution.ps1 R13 SH-2）：`2>&1 | Out-Null` 在
+        # Windows PowerShell 5.1 + 上方全域 $ErrorActionPreference="Stop" 下，git clone
+        # 只要對 stderr 寫入任何一行（即使 clone 本身成功，git 仍常態性印進度到 stderr）
+        # 就會被包成 ErrorRecord 拋出 NativeCommandError，被下方 catch 誤判為連線失敗。
+        # PS 5.1 改用不合併串流的 2>$null，直接以 $LASTEXITCODE 判斷成敗，不再依賴
+        # try/catch 攔截 stderr 觸發的例外（pwsh 7+ 維持原行為不變）。
+        # 註記：此守衛僅在 PS 5.1 環境重現，本機為 pwsh 7+ 無法實測，留待下一輪真機驗證。
+        if ($PSVersionTable.PSVersion.Major -lt 6) {
+            git clone --depth 1 --quiet $gitUrl $sourceDir 2>$null
+        } else {
             git clone --depth 1 --quiet $gitUrl $sourceDir 2>&1 | Out-Null
+        }
 
-            if ($LASTEXITCODE -ne 0) {
-                throw "Git clone failed"
-            }
-        } catch {
+        if ($LASTEXITCODE -ne 0) {
             Write-Host "❌ 無法連線到 GitHub 倉庫" -ForegroundColor Red
             if (-not $UseSSH -and -not $Token) {
                 Write-Host "   若為私有倉庫，請使用 -SSH 或 -Token YOUR_PAT 選項" -ForegroundColor Yellow
@@ -209,8 +220,11 @@ function Get-AISDLC {
         if (-not (Test-Path $versionPath)) {
             Write-Host "❌ 找不到版本 v$TargetVersion" -ForegroundColor Red
             Write-Host "   可用版本:" -ForegroundColor Yellow
-            Get-ChildItem $sourceDir -Directory -Filter "AISDLC_v*" | ForEach-Object {
-                $vName = $_.Name -replace "AISDLC_v", ""
+            # SDD 模式目錄命名為 AISDLC_SDD_v*，非 SDD 模式為 AISDLC_v*——固定用後者
+            # 過濾會使 -SDD 模式印出空清單（R16 相容性掃描）
+            $fallbackFilter = if ($UseSDD) { "AISDLC_SDD_v*" } else { "AISDLC_v*" }
+            Get-ChildItem $sourceDir -Directory -Filter $fallbackFilter | ForEach-Object {
+                $vName = $_.Name -replace $fallbackFilter.TrimEnd('*'), ""
                 Write-Host "   - v$vName"
             }
             Remove-Item -Recurse -Force $tempDir

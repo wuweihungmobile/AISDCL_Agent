@@ -109,6 +109,10 @@ select = ["E", "F", "I", "UP"]
 # prompt 模板長行為「資料內容」：三引號模板內斷行會改變送往 LLM 的 prompt 語意，
 # E501 對其無意義（Improving_012 Phase 1 ruff 觸碰檔清理決議）
 "autoclaude/decision/prompt_builder.py" = ["E501"]
+# 同一理由（R16 跨平台複審 SA 一審發現的既有債，同輪一併清理）：
+# build_skeleton() 回傳的三引號模板是寫入 sprint_history.md 的實際 markdown
+# 內容，模板內斷行會改變產出檔案語意，E501 對其無意義。
+"tools/scaffold_sprint_section.py" = ["E501"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

@@ -252,7 +252,12 @@ try {
   Write-Host ''
   Write-Host '--- 建立 fake repo（git clone HEAD → OS temp）---'
   $Fake = Join-Path $Work 'repo'
-  # -c core.longpaths=true：避免 temp 下深層路徑撞 Windows MAX_PATH（鏡射 .sh 版）。
+  # -c core.longpaths=true：僅保護 git 自身內部的路徑處理（clone/checkout 等），
+  # 不涵蓋本腳本後續 Test-Path／New-Item／[System.IO.File]::ReadAllText 等
+  # .NET／PowerShell 5.1 原生 API 對同一批深路徑的操作——這些 API 在 PS 5.1 上
+  # 若無系統級 LongPathsEnabled 登錄機碼 + app-manifest opt-in，不會自動獲得
+  # 長路徑保護，MAX_PATH=260 風險依然存在（尤其隨 AISDLC_SDD_v0.NN 版本號
+  # 增加路徑深度）；如需徹底解決需系統級開啟 LongPathsEnabled（鏡射 .sh 版）。
   git clone --quiet -c core.longpaths=true $RepoRoot $Fake
   $FakeReady = $false
   if ($LASTEXITCODE -eq 0 -and (Test-Path -LiteralPath (Join-Path $Fake '.git'))) {

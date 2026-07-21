@@ -37,7 +37,8 @@ import _stdio_utf8  # noqa: E402,F401  # Windows 非 UTF-8 終端 print(✅/❌)
 ROOT = Path(__file__).resolve().parent.parent
 
 # 目前 dev_start.sh=78 行、dev_start.ps1=75 行、local_ci_gate.sh=23 行、
-# local_ci_gate.ps1=39 行；上限抓 100 行，留自然增長空間。
+# local_ci_gate.ps1=39 行、bootstrap.sh=24/.ps1=30、integration_gate.sh=23/.ps1=30、
+# run_act.sh=21/.ps1=54（R16 三對收斂）；上限抓 100 行，留自然增長空間。
 MAX_LINES = 100
 
 _PS1_BLOCK_COMMENT_RE = re.compile(r"<#.*?#>", re.DOTALL)
@@ -58,6 +59,28 @@ _PINNED_SHA256: dict[str, str] = {
     ),
     "AutoClaude/tools/local_ci_gate.ps1": (
         "4143c4580317e72db09e7184601595fb19a7b1a576f23bc99f4d4262692efdb5"
+    ),
+    # R16（Architect 建議 B）：bootstrap/integration_gate/run_act 收斂為薄殼＋
+    # 各自 Python 核心（bootstrap_core.py／integration_gate_core.py／
+    # run_act_core.py）後，由 check_script_parity.py 的 _MARKER_PAIRS 標籤比對
+    # 遷移至此 hash 釘選（同 R12 local_ci_gate 先例；gate-call 抽取比對隨之退場）
+    "tools/bootstrap.sh": (
+        "dc11cfbecb4cab979da1492a8a0646ad8dbb97b25173e4c6552fdaae6c06fd46"
+    ),
+    "tools/bootstrap.ps1": (
+        "f5596876e03d3a7e382d3c336918da146f720aa43b700367ee049e4b97490b5c"
+    ),
+    "tools/integration_gate.sh": (
+        "6a7d08e438d25d0ffeb223e5b4a3ebcc7869065b2088c50b52aa2ebd2f8c6c83"
+    ),
+    "tools/integration_gate.ps1": (
+        "0c9efcddc4ab83b7a1b214ae698f28f8b04bbce093c664b585ccdcaa95ee8daa"
+    ),
+    "AutoClaude/tools/run_act.sh": (
+        "d1603a0f6e32dbdf036ec95e0ee3cc646c92669ad7f8f5be8b6bc321e0f55990"
+    ),
+    "AutoClaude/tools/run_act.ps1": (
+        "e90016dc7c6855fa2febb728297e2ff82909155cdd0777746d97791e4279b064"
     ),
 }
 
@@ -93,6 +116,64 @@ _FORBIDDEN: dict[str, tuple[str, ...]] = {
         "python3 -c",
     ),
     "AutoClaude/tools/local_ci_gate.ps1": (
+        "ConvertFrom-Json",
+        "ConvertTo-Json",
+        "[System.Text.Json",
+        "foreach (",
+        "foreach(",
+        "while (",
+        "for (",
+        "ForEach-Object",
+        ".ForEach(",
+    ),
+    # R16：bootstrap/integration_gate/run_act 薄殼沿用同款診斷關鍵字（複製非新增判準）
+    "tools/bootstrap.sh": (
+        "while ",
+        "for ",
+        "for(",
+        "jq ",
+        "python -c",
+        "python3 -c",
+    ),
+    "tools/bootstrap.ps1": (
+        "ConvertFrom-Json",
+        "ConvertTo-Json",
+        "[System.Text.Json",
+        "foreach (",
+        "foreach(",
+        "while (",
+        "for (",
+        "ForEach-Object",
+        ".ForEach(",
+    ),
+    "tools/integration_gate.sh": (
+        "while ",
+        "for ",
+        "for(",
+        "jq ",
+        "python -c",
+        "python3 -c",
+    ),
+    "tools/integration_gate.ps1": (
+        "ConvertFrom-Json",
+        "ConvertTo-Json",
+        "[System.Text.Json",
+        "foreach (",
+        "foreach(",
+        "while (",
+        "for (",
+        "ForEach-Object",
+        ".ForEach(",
+    ),
+    "AutoClaude/tools/run_act.sh": (
+        "while ",
+        "for ",
+        "for(",
+        "jq ",
+        "python -c",
+        "python3 -c",
+    ),
+    "AutoClaude/tools/run_act.ps1": (
         "ConvertFrom-Json",
         "ConvertTo-Json",
         "[System.Text.Json",

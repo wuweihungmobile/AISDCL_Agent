@@ -24,21 +24,17 @@ root session 不遞迴載子目錄 hook，故本 script 同時 wire 於根 .clau
 """
 from __future__ import annotations
 
-import io
 import json
 import sys
 from pathlib import Path
 
+sys.path.insert(0, str(Path(__file__).resolve().parents[3] / "tools" / "lib"))
+from platform_utils import (  # noqa: E402
+    init_utf8_streams as _init_utf8_streams,  # type: ignore[import-not-found]
+)
+
 PS_SUFFIXES = {".ps1", ".psm1", ".psd1"}
 UTF8_BOM = b"\xef\xbb\xbf"
-
-
-def _init_utf8_streams() -> None:
-    try:
-        sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8", errors="replace")
-        sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding="utf-8", errors="replace")
-    except Exception:
-        pass
 
 
 def read_hook_payload() -> dict:
