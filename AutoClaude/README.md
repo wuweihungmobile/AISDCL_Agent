@@ -8,7 +8,7 @@
 [![Tests](https://img.shields.io/badge/tests-passing-brightgreen)]()
 [![Status](https://img.shields.io/badge/status-active-green)]()
 [![Autonomy](https://img.shields.io/badge/autonomy-Level%205%20(Evo--006)-orange)]()
-[![Sprint](https://img.shields.io/badge/sprint-verified%202026--07--15-blue)]()
+[![Sprint](https://img.shields.io/badge/sprint-verified%202026--07--22-blue)]()
 [![Arch](https://img.shields.io/badge/import--linter-8%20kept%20%2F%200%20broken-blueviolet)]()
 
 ---

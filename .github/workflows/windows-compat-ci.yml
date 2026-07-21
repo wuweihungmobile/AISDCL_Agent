@@ -351,8 +351,12 @@ jobs:
 
       - name: 安裝 AISDLC_SDD pinned deps
         working-directory: AISDLC_SDD/AISDLC_SDD_v0.01
+        # R18 全面掃描：鏡射本檔「Install AutoClaude deps」步驟既有修復（R15
+        # SCAN-C-10）——pwsh 只回傳「最後一條」native 指令的 exit code，pip 升級
+        # 失敗會被 pip install -r 的成功吞沒，對非最後一條 native 指令逐條斷言。
         run: |
           python -m pip install --upgrade pip
+          if ($LASTEXITCODE -ne 0) { throw "python -m pip 升級失敗（rc=$LASTEXITCODE）" }
           pip install -r requirements-ci.txt
 
       - name: 執行（非僅解析）ci-gate.ps1（凍結基線 + LATEST 雙軌）
@@ -671,10 +675,14 @@ jobs:
         # 2026-07-16 四方複審 QA 發現：見上一 step 註解——job 層級 continue-on-error
         # 不會讓失敗 step 之後的其餘 step 繼續跑（隱式 if: success()），加
         # !cancelled() 使後續深度回歸 step 不因前一步失敗而靜默 skip。
+        # R18 SA 複審發現：本步驟與上方「Install AutoClaude deps」同款 R15
+        # SCAN-C-10 缺陷（pwsh 只回傳最後一條 native 指令 exit code，pip 升級
+        # 失敗會被之後成功的 pip install 吞沒）當時漏改，本輪補齊。
         if: ${{ !cancelled() }}
         working-directory: AutoClaude
         run: |
           python -m pip install --upgrade pip
+          if ($LASTEXITCODE -ne 0) { throw "python -m pip 升級失敗（rc=$LASTEXITCODE）" }
           pip install -e ".[dev,lint]"
 
       - name: 執行 AutoClaude/tools/local_ci_gate.ps1（實際執行，非僅語法解析；P1 Architect 發現修正）

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""集中式平台判斷模組（monorepo 根層共用，AutoClaude 與 AISDLC_SDD 兩側皆可用）。
+"""平台判斷 + hook 腳本 I/O 初始化共用模組（monorepo 根層共用，AutoClaude 與 AISDLC_SDD 兩側皆可用）。
 
 收斂背景：`_init_utf8_streams()` 曾被複製貼上到至少 8 個檔案，其中 6 份漏了
 `sys.platform != "win32"` 守衛，在 macOS/Linux 上也會無條件把 sys.stdout/stderr

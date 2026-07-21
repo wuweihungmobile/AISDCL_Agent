@@ -1414,7 +1414,7 @@ def _launchd_nightly_loaded() -> bool | None:
     或逾時）。launchctl list 輸出格式為「PID Status Label」三欄（PID 可為 `-`），
     第 3 欄用精確等值比對——防前綴誤中（如 com.autoclaude.nightly2）。
     """
-    if sys.platform != "darwin":
+    if not platform_utils.is_macos():
         return None
     try:
         r = subprocess.run(["launchctl", "list"], timeout=10, capture_output=True,
