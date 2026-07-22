@@ -2,26 +2,26 @@
 # Lock policy: SD_09 W2 升 samples ≥ 20 + 連續 7 次 達標寫入（ADR-SD08-003 v1.1 §2.6）
 
 [decide_correction]
-p50_ms = 1.647
+p50_ms = 1.655
 p95_ms = 2.187
-p99_ms = 2.134
+p99_ms = 2.017
 samples = 20
-git_sha = "8f77d4a"
-captured_at = "2026-07-22T10:40:43.434675+00:00"
+git_sha = "23f9c40"
+captured_at = "2026-07-22T18:04:16.186032+00:00"
 
 [dry_run_e2e]
-p50_ms = 3.226
+p50_ms = 3.093
 p95_ms = 4.218
-p99_ms = 4.149
+p99_ms = 3.851
 samples = 20
-git_sha = "8f77d4a"
-captured_at = "2026-07-22T10:40:43.434675+00:00"
+git_sha = "23f9c40"
+captured_at = "2026-07-22T18:04:16.186032+00:00"
 
 [token_halt_roundtrip]
-p50_ms = 0.514
-p95_ms = 0.652
-p99_ms = 0.652
+p50_ms = 0.508
+p95_ms = 0.596
+p99_ms = 0.561
 samples = 20
-git_sha = "8f77d4a"
-captured_at = "2026-07-22T10:40:43.434675+00:00"
+git_sha = "23f9c40"
+captured_at = "2026-07-22T18:04:16.186032+00:00"
 
