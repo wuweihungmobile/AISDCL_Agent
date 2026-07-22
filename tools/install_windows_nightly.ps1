@@ -76,8 +76,11 @@ function Show-NightlyStatus {
 }
 
 if ($Status) {
-  Show-NightlyStatus | Out-Null
-  exit 0
+  if ($Uninstall) {
+    Write-Warning "-Status 與 -Uninstall 同時給出，-Uninstall 已被忽略（僅查詢狀態，不做任何變更）。"
+  }
+  $loaded = Show-NightlyStatus
+  if ($loaded) { exit 0 } else { exit 1 }
 }
 
 if (-not (Test-Path -LiteralPath $NightlyPs1)) {
@@ -118,11 +121,22 @@ $trigger = New-ScheduledTaskTrigger -Daily -At '02:00'
 #   WakeToRun          = True   睡眠/休眠時，喚醒機器準時執行
 #   DisallowStartIfOnBatteries = False  筆電吃電池時不擋啟動
 #   StopIfGoingOnBatteries     = False  執行中切到電池不中途砍掉
+# DEF-101-249（R20 真 Windows 機器驗證）：New-ScheduledTaskSettingsSet 這個「建構」
+# cmdlet 的參數名與 Settings 物件本身的屬性名極易混淆——物件屬性叫
+# DisallowStartIfOnBatteries／StopIfGoingOnBatteries（fix_nightly_catchup.ps1 讀寫既有
+# 任務時用的正是這兩個屬性名，那裡沒錯），但這個「建構」cmdlet 的參數名極性相反、
+# 名稱也不同：-AllowStartIfOnBatteries（開關，給了＝物件屬性 Disallow...=False）／
+# -DontStopIfGoingOnBatteries（開關，給了＝物件屬性 Stop...=False）。原參數名
+# -DisallowStartIfOnBatteries/-StopIfGoingOnBatteries 在這個 cmdlet 上根本不存在，
+# 只在磁碟真機（非 -WhatIf 也非純語法解析）呼叫時才會拋
+# ParameterBindingException（NamedParameterNotFound）——CI 與既有測試只做語法解析，
+# 從未真的呼叫過這個 cmdlet，R19 未曾發現；真機實測 New-ScheduledTaskSettingsSet
+# 後讀物件屬性確認兩者對應正確（本節新參數名產出的 Settings 物件屬性值符合預期）。
 $settings = New-ScheduledTaskSettingsSet `
   -StartWhenAvailable `
   -WakeToRun `
-  -DisallowStartIfOnBatteries:$false `
-  -StopIfGoingOnBatteries:$false
+  -AllowStartIfOnBatteries `
+  -DontStopIfGoingOnBatteries
 
 if ($PSCmdlet.ShouldProcess($TaskName, 'Register-ScheduledTask')) {
   $existing = Get-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue
@@ -135,3 +149,4 @@ if ($PSCmdlet.ShouldProcess($TaskName, 'Register-ScheduledTask')) {
   Write-Output "   另含 StartWhenAvailable/WakeToRun 補跑保護（關機/睡眠錯過仍可補跑）"
   Write-Output "   驗證：powershell -File tools\install_windows_nightly.ps1 -Status"
 }
+exit 0

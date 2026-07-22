@@ -92,6 +92,38 @@ try {
   Write-Host "[bootstrap] WARN PATH augmentation failed: $_"
 }
 
+# DEF-101-228（R20 真 Windows 機器驗證）：mac 側 run_local_nightly.sh 已有 mkdir
+# atomic lock，防「排程觸發與手動重跑時間重疊時重複跑一整套 gate」；Windows 側先前
+# 完全無對等機制，只靠 Task Scheduler 對「同一個登記任務」的 MultipleInstances 設定
+# （本機 Get-ScheduledTask 實測預設值＝IgnoreNew）防護——但 IgnoreNew 只管同一個
+# Task Scheduler 任務自己跟自己重疊，管不到「使用者在終端機手動直接跑本腳本」與
+# 排程觸發重疊的情境（與 mac 側鎖要防的情境同構）。Windows 原生慣用手法是具名
+# Mutex（System.Threading.Mutex），不必像 bash 版土法煉刻意 mkdir 目錄；本腳本每次
+# 呼叫皆為獨立 powershell.exe 行程，行程結束（含 exit N）時 OS 會自動回收 Mutex 擁有
+# 權，不需要、也沒有機會顯式呼叫 ReleaseMutex()——真機實測確認：前一行程未釋放即
+# 結束後，下一行程的 WaitOne() 仍可正常取得鎖（不會永久卡死）；同時實測確認前一
+# 行程仍在跑（未結束）時，第二行程的 WaitOne(0) 正確回傳 False（非阻塞式互斥）。
+# Global\ 命名空間確保跨 session 皆能互斥（排程任務與手動終端機可能在不同 session）；
+# 真機實測非管理員一般使用者可正常建立 Global\ 具名 Mutex，無需特殊權限。
+# SD/SA 四方一審建議（非阻斷，本輪落地）：只接 AbandonedMutexException 不夠——
+# 罕見環境（例如跨權限層級 session 互開同一個 Global\ 具名物件撞
+# UnauthorizedAccessException）會讓例外未被捕捉、直接讓整支 963 行 nightly 腳本
+# 在任何 stage 執行前就崩潰。鎖機制本身是「防重複跑」的錦上添花，不該因為它自己
+# 失敗就讓整晚的驗證訊號開天窗，故對其餘例外一律降級為警告並視同已取得繼續執行。
+try {
+  $NightlyMutex = New-Object System.Threading.Mutex($false, 'Global\AutoClaude_Nightly_Run')
+  $NightlyMutexAcquired = $NightlyMutex.WaitOne(0)
+} catch [System.Threading.AbandonedMutexException] {
+  $NightlyMutexAcquired = $true  # 前次持有者未正常釋放即結束——視同成功取得（本鎖本就靠行程終止自動回收，不主動釋放）
+} catch {
+  Write-Warning "去重鎖建立/取得時發生非預期例外（$($_.Exception.GetType().FullName)：$($_.Exception.Message)）——鎖機制本身失敗不應讓整套 nightly gate 開天窗，視同已取得繼續執行"
+  $NightlyMutexAcquired = $true
+}
+if (-not $NightlyMutexAcquired) {
+  Write-Output '另一個 nightly 行程持有去重鎖（Global\AutoClaude_Nightly_Run）——本輪跳過，避免排程觸發與手動重跑時間重疊造成重複執行整套 gate'
+  exit 0
+}
+
 # ----- 日誌 -----
 $LogDir = Join-Path $RepoRoot 'logs'
 if (-not (Test-Path $LogDir)) { New-Item -ItemType Directory -Path $LogDir | Out-Null }

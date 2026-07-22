@@ -178,6 +178,60 @@ class TestSmokeCiSync(unittest.TestCase):
             "釘選值本身寫錯或步驟增減未同步",
         )
 
+    def test_exclusive_pass_groups_are_genuinely_branch_separated(self) -> None:
+        """DEF-101-246⑤／DEF-101-247④（R19 QA 二審提案，R20 落地）：
+        `_SH_EXCLUSIVE_PASS_GROUPS` 顯式登記表本身完全信任人工登記——R19 QA
+        bug-injection 證實：在 macos_smoke_local.sh 插入兩個實際非互斥、但謊報
+        登記進登記表的假互斥 `pass` 呼叫（連同同步竄改 MIN_PASS 與 ONBOARDING
+        排除交叉訊號），test_min_pass_equals_actual_step_count 仍全綠。
+
+        QA 提出的輕量緩解（非完整控制流解析，成本遠低於此）：斷言登記表內
+        每組訊息在原始碼中的兩個錨點之間（a）存在 `else`/`;;` 其中之一的字面
+        字串，且（b）行距不超過寬鬆上限——不能杜絕蓄意造假，但能擋下「兩個
+        無條件執行、彼此相鄰又無分支關鍵字」這種注入手法。"""
+        sh_text = _read(_SH)
+        lines = sh_text.splitlines()
+        msg_line: dict[str, int] = {}
+        for i, line in enumerate(lines, start=1):
+            m = _SH_PASS_RE.search(line)
+            if m:
+                msg_line.setdefault(m.group(1), i)
+
+        separator_re = re.compile(r";;|(?<!\w)else(?!\w)")
+        max_separation = 30
+        for group in _SH_EXCLUSIVE_PASS_GROUPS:
+            group_lines = []
+            for msg in group:
+                self.assertIn(
+                    msg, msg_line,
+                    f"macos_smoke_local.sh 找不到 pass 訊息所在行：{msg!r}——"
+                    "登記表已腐化，需人工重新核對 _SH_EXCLUSIVE_PASS_GROUPS",
+                )
+                group_lines.append(msg_line[msg])
+            group_lines.sort()
+            for start, end in zip(group_lines, group_lines[1:]):
+                distance = end - start
+                self.assertLessEqual(
+                    distance, max_separation,
+                    f"macos_smoke_local.sh 互斥組兩錨點（行 {start}/{end}）行距 "
+                    f"{distance} 超過寬鬆上限 {max_separation}——登記表可信度存疑，"
+                    "需人工重新核對是否真的是同一組互斥分支",
+                )
+                # R20 四方一審 SD 訂正：`lines` 是 0-indexed、`start`/`end` 是 1-indexed
+                # 行號，故 `lines[start:end]` 實際排除第一個錨點自身那一行、但包含
+                # 第二個錨點自身那一行（而非原註解宣稱的「不含兩端」）——對 case 分支
+                # （兩錨點緊鄰、distance=1）而言，`;;` 恰好落在第二個錨點自身的行尾，
+                # 檢查因此仍然有效，但邏輯上是「第二錨點行是否含分隔符」而非真的檢查
+                # 兩錨點之間；如實記錄此邊界，非本輪修復範圍（QA 已知 word-in-comment
+                # 繞過亦不受此訂正影響，見 DEF-101-247④ 既有方法論邊界）。
+                segment = "\n".join(lines[start:end])
+                self.assertRegex(
+                    segment, separator_re,
+                    f"macos_smoke_local.sh 互斥組兩錨點（行 {start}~{end}）之間找不到 "
+                    "`else`/`;;` 任一分支關鍵字——這兩個 pass 呼叫可能實際上是無條件"
+                    "相鄰執行、被謊報登記為互斥分支（DEF-101-247④ 緩解目標情境）",
+                )
+
     def test_sync_maintenance_comments_present(self) -> None:
         """四向同步注記仍在（防有人刪注記後兩邊靜默分道揚鑣）。"""
         checks = [

@@ -12,7 +12,7 @@
 # （install 共用層 tools/git_hooks_install_common.py 與 LATEST 解析 SSOT 都要用）。
 # Windows PowerShell 5.1 相容（禁 &&/|| 鏈接、三元、??、?.；$LASTEXITCODE 顯式檢查）。
 #
-# 涵蓋（對照 windows-compat-ci.yml windows-smoke 各 step；預期 PASS 總數 = 10）：
+# 涵蓋（對照 windows-compat-ci.yml windows-smoke 各 step；預期 PASS 總數 = 11）：
 #   [1] PowerShell parse 檢查：根層 tools/（含 tools/lib/）全部 active .ps1 以
 #       [System.Management.Automation.Language.Parser]::ParseFile 驗 0 error
 #       （對本 repo 直跑、唯讀。凍結版 AISDLC_SDD/AISDLC_SDD_v0.01~v0.29 位於
@@ -40,6 +40,10 @@
 #       掃描補齊——這兩支純 Python、平台無關的檢查先前僅由 macos_smoke_local.sh [5]
 #       覆蓋，Windows 本機 smoke 從未在 Windows 環境下實際跑過，消除兩平台 smoke
 #       覆蓋不對稱）
+#   [8] tools\install_windows_nightly.ps1 -WhatIf 預覽（R20 全面掃描補齊——R19 新增
+#       此安裝器後從未被任何 smoke 涵蓋，鏡射 macos_smoke_local.sh [6/7] 對
+#       install_mac_nightly.sh --render-only 的精神；-WhatIf 不需 elevation、不真的
+#       動 Task Scheduler，可安全對本 repo 直跑）
 #
 # 限制（如實揭露）：
 #   - fake repo 以 git clone 自本 repo HEAD 建立 → 未 commit 的變更不在驗證範圍
@@ -242,9 +246,9 @@ if ($dirty) {
 }
 
 try {
-  # ── [1/7] PowerShell parse 檢查（根層 tools/ 全部 active .ps1，唯讀）──────────
+  # ── [1/8] PowerShell parse 檢查（根層 tools/ 全部 active .ps1，唯讀）──────────
   Write-Host ''
-  Write-Host '--- [1/7] Parser 解析檢查（根層 tools/ 含 tools/lib/ 全部 .ps1，對本 repo 直跑）---'
+  Write-Host '--- [1/8] Parser 解析檢查（根層 tools/ 含 tools/lib/ 全部 .ps1，對本 repo 直跑）---'
   $ps1Files = @(Get-ChildItem -Path (Join-Path $RepoRoot 'tools') -Recurse -Filter *.ps1 -File)
   $parseBad = 0
   foreach ($f in $ps1Files) {
@@ -285,29 +289,29 @@ try {
   }
 
   if ($FakeReady) {
-    # ── [2/7] install_git_hooks.ps1 安裝／解除往返（fake repo）───────────────────
+    # ── [2/8] install_git_hooks.ps1 安裝／解除往返（fake repo）───────────────────
     Write-Host ''
-    Write-Host '--- [2/7] AutoClaude/tools/install_git_hooks.ps1 安裝／解除往返（fake repo）---'
+    Write-Host '--- [2/8] AutoClaude/tools/install_git_hooks.ps1 安裝／解除往返（fake repo）---'
     Test-InstallRoundtrip -TargetRepo $Fake -InstallerRel 'AutoClaude\tools\install_git_hooks.ps1' `
       -UninstallSwitch -Label '[2] install_git_hooks.ps1'
 
-    # ── [3/7] install_git_hooks.ps1 linked worktree 拒絕 ─────────────────────────
+    # ── [3/8] install_git_hooks.ps1 linked worktree 拒絕 ─────────────────────────
     Write-Host ''
-    Write-Host '--- [3/7] install_git_hooks.ps1 於 linked worktree 應拒絕（fail-loud）---'
+    Write-Host '--- [3/8] install_git_hooks.ps1 於 linked worktree 應拒絕（fail-loud）---'
     Test-WorktreeReject -BaseRepo $Fake -InstallerRel 'AutoClaude\tools\install_git_hooks.ps1' `
       -WorktreeName 'wt-install-git-hooks-reject' -Label '[3] install_git_hooks.ps1'
 
-    # ── [4/7] install-hooks.ps1 安裝往返 + linked worktree 拒絕 ──────────────────
+    # ── [4/8] install-hooks.ps1 安裝往返 + linked worktree 拒絕 ──────────────────
     Write-Host ''
-    Write-Host '--- [4/7] AISDLC_SDD/scripts/install-hooks.ps1 往返 + worktree 拒絕（fake repo）---'
+    Write-Host '--- [4/8] AISDLC_SDD/scripts/install-hooks.ps1 往返 + worktree 拒絕（fake repo）---'
     Test-InstallRoundtrip -TargetRepo $Fake -InstallerRel 'AISDLC_SDD\scripts\install-hooks.ps1' `
       -CheckSeparators -Label '[4] install-hooks.ps1'
     Test-WorktreeReject -BaseRepo $Fake -InstallerRel 'AISDLC_SDD\scripts\install-hooks.ps1' `
       -WorktreeName 'wt-install-hooks-reject' -Label '[4] install-hooks.ps1'
 
-    # ── [5/7] LATEST install_post_commit.ps1 worktree 實跑 + 移除後路徑斷言 ───────
+    # ── [5/8] LATEST install_post_commit.ps1 worktree 實跑 + 移除後路徑斷言 ───────
     Write-Host ''
-    Write-Host '--- [5/7] install_post_commit.ps1 worktree 實跑 + 移除後路徑斷言（fake repo）---'
+    Write-Host '--- [5/8] install_post_commit.ps1 worktree 實跑 + 移除後路徑斷言（fake repo）---'
     # LATEST 解析一律走 SSOT resolver（DEF-101-133）；resolver 檔取自真 repo、
     # --sdd-root 指向 fake repo（resolver 屬驗證工具、不必來自被測樹）。
     $resolver = Join-Path $RepoRoot 'AISDLC_SDD\scripts\sdd_version.py'
@@ -387,9 +391,9 @@ try {
       }
     }
 
-    # ── [6/7] 非 ASCII 路徑防護抽驗（中文目錄 clone + 安裝往返）───────────────────
+    # ── [6/8] 非 ASCII 路徑防護抽驗（中文目錄 clone + 安裝往返）───────────────────
     Write-Host ''
-    Write-Host '--- [6/7] 非 ASCII 路徑防護抽驗（「煙霧測試」目錄 clone + install_git_hooks.ps1 往返）---'
+    Write-Host '--- [6/8] 非 ASCII 路徑防護抽驗（「煙霧測試」目錄 clone + install_git_hooks.ps1 往返）---'
     $cnParent = Join-Path $Work '煙霧測試'
     New-Item -ItemType Directory -Path $cnParent -ErrorAction SilentlyContinue | Out-Null
     $cnRepo = Join-Path $cnParent 'repo'
@@ -402,13 +406,13 @@ try {
     }
   }
 
-  # ── [7/7] check_ntfs_paths.py + check_script_parity.py（本 repo，唯讀）───────
+  # ── [7/8] check_ntfs_paths.py + check_script_parity.py（本 repo，唯讀）───────
   # R18 全面掃描補齊：這兩支純 Python、平台無關的檢查先前僅由 macos_smoke_local.sh
   # [5/7] 覆蓋，Windows 本機 smoke 從未在 Windows 環境下實際跑過（CI push gate
   # 另有覆蓋，但不是「Windows 本機 smoke」）。兩腳本皆以 `Path(__file__).resolve()`
   # 自行定位 repo 根，不依賴呼叫端 cwd，故不需 fake repo / Push-Location。
   Write-Host ''
-  Write-Host '--- [7/7] check_ntfs_paths.py + check_script_parity.py（本 repo，唯讀）---'
+  Write-Host '--- [7/8] check_ntfs_paths.py + check_script_parity.py（本 repo，唯讀）---'
   & python (Join-Path $RepoRoot 'tools\check_ntfs_paths.py')
   if ($LASTEXITCODE -eq 0) {
     Pass-Item 'tools\check_ntfs_paths.py'
@@ -420,6 +424,26 @@ try {
     Pass-Item 'tools\check_script_parity.py'
   } else {
     Fail-Item "tools\check_script_parity.py（rc=$LASTEXITCODE）"
+  }
+
+  # ── [8/8] install_windows_nightly.ps1 -WhatIf 預覽（本 repo，唯讀）───────────
+  # R20 全面掃描補齊：R19 新增此安裝器後從未被任何 smoke 涵蓋（鏡射
+  # macos_smoke_local.sh [6/7] 對 install_mac_nightly.sh --render-only 的精神）。
+  # -WhatIf 不需 elevation、不真的呼叫 Register-ScheduledTask，可對本 repo 直跑
+  # （不需 fake repo：預覽模式不變更任何系統狀態）。
+  # R20 四方一審 SA 建議（非阻斷，本輪落地）：只斷言 exit=0 只驗到「不 crash」，
+  # 沒驗到「-WhatIf 真的印出將執行的動作」這層內容——改用獨立子行程呼叫（ShouldProcess
+  # 的 WhatIf 預覽訊息走 host-only 輸出、同行程內 `& script` 呼叫無法用一般串流重導向
+  # 捕捉；真機實測獨立子行程呼叫可正確捕捉）並斷言輸出內容含 Register-ScheduledTask。
+  Write-Host ''
+  Write-Host '--- [8/8] tools\install_windows_nightly.ps1 -WhatIf 預覽（本 repo，唯讀）---'
+  $whatIfOutput = & powershell.exe -NoProfile -ExecutionPolicy Bypass `
+    -File (Join-Path $RepoRoot 'tools\install_windows_nightly.ps1') -WhatIf 2>&1 | Out-String
+  $whatIfRc = $LASTEXITCODE
+  if ($whatIfRc -eq 0 -and $whatIfOutput -match 'Register-ScheduledTask') {
+    Pass-Item 'tools\install_windows_nightly.ps1 -WhatIf 預覽'
+  } else {
+    Fail-Item "tools\install_windows_nightly.ps1 -WhatIf（rc=${whatIfRc}；輸出未含預期的 Register-ScheduledTask 內容）"
   }
 } finally {
   # cleanup：離開 temp 再整棵刪除；絕不對真 repo 做 git config 變更（所有 git config
@@ -437,9 +461,9 @@ try {
 # ── 彙總 ─────────────────────────────────────────────────────────────────────
 # R10 二審 QA 觀察項：PASS 下限釘選（比照 run_root_unittests MIN_TESTS 精神）——
 # 只斷言 FAIL==0 時，驗證段落被整段刪除仍 exit 0（靜默縮面）；PASS 低於下限即紅。
-# 刻意刪減驗證項時同步下修本值（現況滿版 PASS=10——R18 新增 [7/7] check_ntfs_paths.py
-# + check_script_parity.py 兩項計點）。
-$MinPass = 10
+# 刻意刪減驗證項時同步下修本值（現況滿版 PASS=11——R18 新增 [7/8] check_ntfs_paths.py
+# + check_script_parity.py 兩項計點；R20 新增 [8/8] install_windows_nightly.ps1 -WhatIf 一項計點）。
+$MinPass = 11
 if ($script:Pass -lt $MinPass) {
   Fail-Item "PASS 總數 $($script:Pass) 低於下限 ${MinPass}——驗證段落疑似被刪減（靜默縮面）"
 }

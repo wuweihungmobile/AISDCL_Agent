@@ -23,7 +23,10 @@ SD_09 W3 Round 19 audit P0-AUDIT-R18-2 修復（紀律 #4「驗證鏡子自身�
 """
 from __future__ import annotations
 
+import platform
 import re
+import subprocess
+import time
 from pathlib import Path
 
 import pytest
@@ -136,6 +139,108 @@ def test_no_unguarded_get_command_source_pattern(ps1_content: str) -> None:
         "禁止 `(Get-Command X -ErrorAction Stop).<Prop>` 鏈式存取（紀律一致性）。"
         f"違規行：{matches}"
     )
+
+
+def test_concurrency_guard_mutex_present(ps1_content: str) -> None:
+    """case 7（DEF-101-228，R20 真 Windows 機器驗證）：具名 Mutex 去重鎖必須存在，
+    且必須在任何 stage（BEGIN log／Stage 1 等）之前就先檢查，防排程觸發與手動重跑
+    時間重疊時重複執行整套 gate（mac 側 run_local_nightly.sh 已有對等 mkdir lock）。
+
+    真機驗證（R20）已實測確認：① Global\\ 命名空間下非管理員一般使用者可正常建立
+    具名 Mutex；② 另一行程仍持有鎖時 WaitOne(0) 正確回傳 False（非阻塞式互斥）；
+    ③ 前一行程未顯式釋放即結束（含 exit N／被砍）後，鎖仍會由 OS 自動回收，不會
+    永久卡死下一輪。本測試僅做靜態文字驗證；QA 二審對抗式 bug-injection 發現此
+    靜態鎖可被繞過（見下方 `TestConcurrencyGuardBehavior` 的行為驗證）。
+    """
+    assert "Global\\AutoClaude_Nightly_Run" in ps1_content, (
+        "缺具名 Mutex 去重鎖（Global\\AutoClaude_Nightly_Run）——"
+        "排程觸發與手動重跑時間重疊時會重複執行整套 gate（DEF-101-228）"
+    )
+    assert re.search(r"System\.Threading\.Mutex", ps1_content), (
+        "去重鎖必須用 System.Threading.Mutex（Windows 原生慣用手法，非 mkdir 土法煉刻）"
+    )
+    assert "AbandonedMutexException" in ps1_content, (
+        "必須處理 AbandonedMutexException——前次持有者未正常釋放鎖時仍應視同成功取得，"
+        "不可讓例外未捕捉而讓 stage 中斷"
+    )
+
+    mutex_guard_pos = ps1_content.find("Global\\AutoClaude_Nightly_Run")
+    begin_log_pos = ps1_content.find("BEGIN nightly run")
+    assert mutex_guard_pos != -1 and begin_log_pos != -1, (
+        "找不到去重鎖或 BEGIN log 區塊——結構已變動"
+    )
+    assert mutex_guard_pos < begin_log_pos, (
+        "去重鎖必須在 BEGIN nightly run log 之前檢查——否則被鎖擋下的行程仍會建立一份"
+        "只含開頭訊息的殘留 log 檔（與 mac 側 ARCH-R15-REV-1 訂正的教訓同構）"
+    )
+
+
+_TEST_MUTEX_NAME = "Global\\AutoClaude_Nightly_Run_TestOnly"
+
+
+def _extract_mutex_guard_snippet(ps1_content: str) -> str:
+    """抽出 DEF-101-228 去重鎖判斷片段（`try { ... } catch [...] { ... }` +
+    `if (-not $NightlyMutexAcquired) { ... }`），並把正式鎖名代換成測試專用名稱
+    ——避免測試執行時撞上真實排程 nightly 使用的正式鎖（`Global\\AutoClaude_Nightly_Run`），
+    以免互相干擾或造成測試對真實 nightly run 產生副作用。"""
+    m = re.search(
+        r"try \{\s*\n\s*\$NightlyMutex = New-Object System\.Threading\.Mutex.*?"
+        r"\nif \(-not \$NightlyMutexAcquired\) \{.*?\n\}",
+        ps1_content, re.DOTALL,
+    )
+    assert m is not None, "找不到 Mutex 去重鎖判斷片段——結構已變動，需同步更新此測試"
+    snippet = m.group(0)
+    assert "Global\\AutoClaude_Nightly_Run" in snippet, "抽出片段未含正式鎖名——抽取範圍可能錯位"
+    return snippet.replace("Global\\AutoClaude_Nightly_Run", _TEST_MUTEX_NAME)
+
+
+@pytest.mark.skipif(
+    platform.system() != "Windows",
+    reason="System.Threading.Mutex 具名核心物件跨行程互斥語意，只在 Windows 上真機驗證有意義",
+)
+class TestConcurrencyGuardBehavior:
+    """DEF-101-228（R20 QA 二審對抗式 bug-injection 發現）：`test_concurrency_guard_mutex_present`
+    只做字面比對——把判斷式改成恆不觸發 skip（邏輯完全廢掉、`Global\\AutoClaude_Nightly_Run`／
+    `System.Threading.Mutex`／`AbandonedMutexException` 字面全數保留）該靜態測試仍全綠，是
+    真實的假陽性。本測試直接抽出原始碼裡的鎖判斷片段（代換成測試專用 Mutex 名稱，不觸碰
+    真實排程用的正式鎖），真機執行驗證兩種真實行為，而非只信任文字存在：
+    ① 另一行程持有鎖時會被擋下（不會執行到鎖之後的程式碼）；
+    ② 鎖是空的時會正常繼續執行。"""
+
+    def test_guard_blocks_when_another_process_holds_the_mutex(self, ps1_content: str) -> None:
+        snippet = _extract_mutex_guard_snippet(ps1_content)
+        holder = subprocess.Popen(
+            [
+                "powershell.exe", "-NoProfile", "-Command",
+                f"$m = New-Object System.Threading.Mutex($false, '{_TEST_MUTEX_NAME}'); "
+                "$m.WaitOne(0) | Out-Null; Start-Sleep -Seconds 6",
+            ],
+        )
+        try:
+            time.sleep(2)  # 讓 holder 行程先取得鎖
+            proc = subprocess.run(
+                [
+                    "powershell.exe", "-NoProfile", "-Command",
+                    f"{snippet}\nWrite-Output 'PAST_GUARD'",
+                ],
+                capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=20,
+            )
+            assert "PAST_GUARD" not in proc.stdout, (
+                "另一行程持有鎖時，本應被鎖擋下（不執行到鎖之後的 PAST_GUARD 標記）——"
+                f"實際輸出：{proc.stdout!r}\n{proc.stderr!r}"
+            )
+        finally:
+            holder.wait(timeout=15)
+
+    def test_guard_proceeds_when_mutex_is_free(self, ps1_content: str) -> None:
+        snippet = _extract_mutex_guard_snippet(ps1_content)
+        proc = subprocess.run(
+            ["powershell.exe", "-NoProfile", "-Command", f"{snippet}\nWrite-Output 'PAST_GUARD'"],
+            capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=20,
+        )
+        assert "PAST_GUARD" in proc.stdout, (
+            f"鎖是空的時應該繼續執行到 PAST_GUARD 標記，實際輸出：{proc.stdout!r}\n{proc.stderr!r}"
+        )
 
 
 # --- adversarial / negative cases（紀律 #4「假 PASS 場景驗證」）-----------------

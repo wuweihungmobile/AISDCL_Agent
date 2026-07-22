@@ -2678,15 +2678,26 @@ class TestLaunchdNightlyLoaded(DevStartTestCase):
         R19 四方一審 QA 對抗式 bug-injection 標的：只 mock `subprocess.run` 對
         `Popen`/`os.system` 這類其他子行程 API 完全無視野——同時 mock 這三個入口，
         確保「提早 return、不 spawn 任何子行程」的意圖真的被完整鎖住，而不只鎖住
-        目前實作剛好用到的那一個 API。"""
+        目前實作剛好用到的那一個 API。
+
+        DEF-101-247③（R19 複審，記入 backlog；R20 補齊）：三重 mock 仍未涵蓋
+        `os.spawnv`/`os.posix_spawn` 等不經 `Popen` 的行程建立 API——本專案風格
+        全走 subprocess，發生機率低，但既然要鎖「不 spawn 任何子行程」的意圖，
+        補齊視野比留下已知縫隙划算。`os.posix_spawn` 為 POSIX-only（Windows
+        `os` 模組無此屬性），`create=True` 讓 mock 在任何平台上都能安全掛上去，
+        不因屬性不存在而先於斷言就 AttributeError。"""
         with mock.patch.object(sys, "platform", "win32"), \
              mock.patch.object(dev_start.subprocess, "run") as fake_run, \
              mock.patch.object(dev_start.subprocess, "Popen") as fake_popen, \
-             mock.patch.object(dev_start.os, "system") as fake_system:
+             mock.patch.object(dev_start.os, "system") as fake_system, \
+             mock.patch.object(dev_start.os, "spawnv") as fake_spawnv, \
+             mock.patch.object(dev_start.os, "posix_spawn", create=True) as fake_posix_spawn:
             self.assertIsNone(dev_start._launchd_nightly_loaded())
         fake_run.assert_not_called()
         fake_popen.assert_not_called()
         fake_system.assert_not_called()
+        fake_spawnv.assert_not_called()
+        fake_posix_spawn.assert_not_called()
 
 
 class TestHeartbeatFailSentinel(DevStartTestCase):
