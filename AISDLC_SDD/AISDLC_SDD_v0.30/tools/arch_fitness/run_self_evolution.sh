@@ -100,9 +100,13 @@ for ((iter=1; iter<=MAX_ITER; iter++)); do
     still="$(python -c "import json,sys;d=json.load(open('$AFTER'));print(1 if any(f['fingerprint']=='$fp' for f in d['findings']) else 0)")"
 
     if [[ "$pytest_ok" -eq 1 && "$SCORE_AFTER" -lt "$SCORE_BEFORE" && "$still" -eq 0 ]]; then
-      echo "FSE_COMMIT：通過（score $SCORE_BEFORE → $SCORE_AFTER）。"
-      git add -A && git commit -m "fse: 修正 arch_fitness finding $fp" >/dev/null
-      applied=1; break
+      # git add/commit 包在 if 條件內：set -e 對 if 測試中的失敗有豁免，失敗不中止腳本，
+      # 而是落到下方 FSE_WARN + rollback——避免「驗證段過但未真正 commit」被當作已解決放行。
+      if git add -A && git commit -m "fse: 修正 arch_fitness finding $fp" >/dev/null; then
+        echo "FSE_COMMIT：通過（score $SCORE_BEFORE → $SCORE_AFTER）。"
+        applied=1; break
+      fi
+      echo "FSE_WARN：git add/commit 失敗，本次嘗試視為未完成，進入 rollback 重試。" >&2
     fi
     [[ "$still" -eq 1 ]] && echo "同指紋復現，修正未生效。"
     echo "FSE_ROLLBACK：未收斂（pytest=$pytest_ok score $SCORE_BEFORE→$SCORE_AFTER），復原。"

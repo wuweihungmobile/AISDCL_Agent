@@ -43,6 +43,11 @@ if ($PSVersionTable.PSVersion.Major -lt 6) {
 }
 
 $ErrorActionPreference = "Stop"
+# 顯式關閉：讓原生指令（git）非零 exit code 一律走 $LASTEXITCODE 顯式檢查，
+# 不讓 $PSNativeCommandUseErrorActionPreference（pwsh 7.3+ 預設 $true，行為隨版本/
+# 設定而異，見下方 FSE_APPLY 段落註解）把它另外升級成例外，避免顯式檢查變成
+# 版本相依的不可達分支——這是本腳本唯一支援版本無關的判斷依據。
+$PSNativeCommandUseErrorActionPreference = $false
 $OutputEncoding = [System.Text.Encoding]::UTF8
 # 讓 python 子進程 open() 一律 utf-8（Windows 預設 cp950 會爆 UTF-8 JSON）
 $env:PYTHONUTF8 = "1"
@@ -128,6 +133,15 @@ for ($iter = 1; $iter -le $MaxIterations; $iter++) {
     # FSE_APPLY（隔離分支）+ retry budget
     $branch = "fse/$($top.fingerprint)-$(Get-Date -Format yyyyMMddHHmmss)"
     git switch -c $branch | Out-Null
+    if ($LASTEXITCODE -ne 0) {
+        # 鏡像 .sh 側 `set -e` 對「單獨陳述式」的語意：git switch -c 失敗必須立即中止，
+        # 不可能落到分支已建立失敗、卻仍往下對錯誤分支跑 APPLY 的狀態。
+        # 不可倚賴 $ErrorActionPreference="Stop" 讓原生指令失敗自動終止腳本——
+        # 這只在 pwsh 7.3+ 且 $PSNativeCommandUseErrorActionPreference 維持預設 $true 時成立，
+        # 本腳本僅要求 PSVersion.Major -ge 6，故顯式檢查 $LASTEXITCODE 才是跨版本一致的作法。
+        Write-Host "FSE_FATAL：git switch -c 失敗（exit $LASTEXITCODE），中止（鏡像 .sh 側 set -e 語意）。" -ForegroundColor Red
+        exit 6  # 獨立退出碼：1/2=dry-run 訊號、3=缺 claude、4=ESCALATION、5=PS 版本過舊皆已占用
+    }
     $applied = $false
     for ($r = 1; $r -le $RetryBudget; $r++) {
         Write-Host "FSE_APPLY（嘗試 $r/$RetryBudget，branch=$branch）..."
@@ -142,10 +156,22 @@ for ($iter = 1; $iter -le $MaxIterations; $iter++) {
         $stillThere = $after.findings | Where-Object { $_.fingerprint -eq $top.fingerprint }
 
         if ($pytestOk -and ($scoreAfter -lt $scoreBefore) -and (-not $stillThere)) {
-            Write-Host ("FSE_COMMIT：通過（score {0} → {1}）。" -f $scoreBefore, $scoreAfter) -ForegroundColor Green
-            git add -A; git commit -m "fse: 修正 arch_fitness finding $($top.fingerprint)" | Out-Null
-            $applied = $true
-            break
+            # 鏡像 .sh 側 `git add -A && git commit ...` 的短路語意：add 失敗時 commit 不得執行，
+            # 且 add/commit 失敗時不得標記 $applied（避免「驗證段過但未真正 commit」被當作
+            # 已解決放行）——舊寫法先無條件印 FSE_COMMIT、再無條件設 $applied=$true/break，
+            # add 失敗時仍會落到「已完成」狀態，與驗證意圖不符。
+            git add -A
+            if ($LASTEXITCODE -eq 0) {
+                git commit -m "fse: 修正 arch_fitness finding $($top.fingerprint)" | Out-Null
+                if ($LASTEXITCODE -eq 0) {
+                    Write-Host ("FSE_COMMIT：通過（score {0} → {1}）。" -f $scoreBefore, $scoreAfter) -ForegroundColor Green
+                    $applied = $true
+                    break
+                }
+                Write-Host "FSE_WARN：git commit 失敗（exit $LASTEXITCODE），本次嘗試視為未完成，進入 rollback 重試。" -ForegroundColor Yellow
+            } else {
+                Write-Host "FSE_WARN：git add 失敗（exit $LASTEXITCODE），本次嘗試視為未完成，進入 rollback 重試。" -ForegroundColor Yellow
+            }
         }
 
         # 同指紋復現（防線 4）
