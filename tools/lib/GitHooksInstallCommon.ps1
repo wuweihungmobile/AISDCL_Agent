@@ -22,10 +22,29 @@ tools/lib/git_hooks_install_common.sh 兩份 thin wrapper 呼叫，兩者只保�
   git config core.hooksPath $HooksDir
   $result = Test-GitHooksPathInstalled -HooksDir $HooksDir
   if ($result.Ok) { ... } else { ... }
+
+.NOTES
+  僅供「子行程/獨立腳本方式」呼叫的上層 .ps1 dot-source 本檔（如上例）。若在
+  互動式 shell 直接手動 dot-source 本檔以逐一測試函式，失敗分支會改用 return
+  （見下方 dot-source 陷阱防護），不會誤殺你的互動 shell，但也代表失敗時呼叫
+  鏈不會像生產路徑一樣中止——僅供探索/除錯用途，正式安裝請透過既有呼叫端腳本。
 #>
 
 $script:GitHooksInstallCommonPy = [System.IO.Path]::GetFullPath(
   (Join-Path $PSScriptRoot '../git_hooks_install_common.py'))
+
+# dot-source 陷阱防護（DEF-101-261）：.EXAMPLE 示範直接互動式 dot-source 本檔，
+# 但下列驗證失敗分支歷史上直接 exit 1——若使用者在互動式 shell 真的照做並命中
+# 任一失敗分支，會把整個互動 shell 關掉。用呼叫棧最外層 frame 判斷「這條呼叫鏈
+# 的源頭是不是一支真正的 .ps1 腳本檔」：生產呼叫端（install_git_hooks.ps1 等）
+# 皆以 powershell -File 執行、內部再 dot-source 本檔，此時最外層 frame.ScriptName
+# 非空；若使用者在互動提示字元直接 dot-source 本檔，最外層 frame 沒有腳本檔
+# （Command=<ScriptBlock> 或提示字元本身，ScriptName 為空字串）。命中失敗分支時：
+# 前者維持 exit（生產行為零改變）、後者改用 return（不誤殺使用者 shell）。與
+# tools/dev_start.ps1 的 dot-source 偵測同一精神，但改用呼叫棧而非
+# $MyInvocation.InvocationName——因為本檔是函式庫，失敗分支散落在稍後才被呼叫
+# 的函式內部（return 只會跳出該函式本身），並非本檔自身頂層。
+$script:GitHooksInstallCommonScriptDriven = [bool]((Get-PSCallStack)[-1].ScriptName)
 
 # venv 提示：下列各函式都靠裸 python 呼叫 GitHooksInstallCommonPy，未啟用 venv 就
 # 直接失敗提示（勝過各函式逐一噴原生「'python' 不是內部或外部命令」）——與
@@ -33,7 +52,10 @@ $script:GitHooksInstallCommonPy = [System.IO.Path]::GetFullPath(
 # `Get-Command python` 前置守門對稱，dot-source 本檔時即檢查一次。
 if (-not (Get-Command python -ErrorAction SilentlyContinue)) {
   Write-Host '❌ 找不到 python — 請先啟用 venv：.venv\Scripts\Activate.ps1（見 ONBOARDING.md §3）' -ForegroundColor Red
-  exit 1
+  # 頂層本體（不在函式內）呼叫 exit 只終止本檔自身載入、不終止外層呼叫行程
+  # （與下方函式內 exit 語意不同）；裸 `exit 1` 會讓 script-driven 呼叫端不受
+  # 阻擋繼續跑，違反 fail-loud（DEF-101-261 追加修復，R23 SA/QA 命中）。
+  if ($script:GitHooksInstallCommonScriptDriven) { [Environment]::Exit(1) } else { return }
 }
 
 function Assert-NotLinkedWorktree {
@@ -51,7 +73,9 @@ function Assert-NotLinkedWorktree {
   # token（`--prefix` `''`）時會被靜默吞掉（PS 5.1 實測重現：argparse 收到
   # `--prefix` 卻找不到值報錯），故一律用單一 token 的 `--prefix=值` 形式。
   & python $script:GitHooksInstallCommonPy assert-not-linked-worktree "--prefix=$Prefix"
-  if ($LASTEXITCODE -ne 0) { exit 1 }
+  if ($LASTEXITCODE -ne 0) {
+    if ($script:GitHooksInstallCommonScriptDriven) { exit 1 } else { return }
+  }
 }
 
 function Get-DispatcherHooksDir {
@@ -65,7 +89,9 @@ function Get-DispatcherHooksDir {
   param([string]$Prefix = '')
 
   $out = & python $script:GitHooksInstallCommonPy get-hooks-dir "--prefix=$Prefix"
-  if ($LASTEXITCODE -ne 0) { exit 1 }
+  if ($LASTEXITCODE -ne 0) {
+    if ($script:GitHooksInstallCommonScriptDriven) { exit 1 } else { return }
+  }
   return ($out | Select-Object -Last 1)
 }
 
@@ -83,7 +109,9 @@ function Test-DispatcherHooksPresent {
   )
 
   & python $script:GitHooksInstallCommonPy assert-hooks-present $HooksDir "--prefix=$Prefix"
-  if ($LASTEXITCODE -ne 0) { exit 1 }
+  if ($LASTEXITCODE -ne 0) {
+    if ($script:GitHooksInstallCommonScriptDriven) { exit 1 } else { return }
+  }
 }
 
 function Test-GitHooksPathInstalled {

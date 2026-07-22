@@ -14,6 +14,7 @@ dev_start 對子行數上限，降低變更風險）。
 from __future__ import annotations
 
 import os
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -230,6 +231,183 @@ class TestWrapperThinnessGuard(unittest.TestCase):
     def test_sh_wrapper_within_line_budget(self) -> None:
         text = _SH_WRAPPER.read_text(encoding="utf-8")
         self.assertLessEqual(len(text.splitlines()), self._SH_MAX_LINES)
+
+
+def _usable_bash() -> str | None:
+    """回傳可跑 repo bash 腳本的 bash 路徑；只有 WSL 佔位 bash 或無 bash → None。
+
+    邏輯鏡自 AISDLC_SDD/scripts/bash_probe.py（該檔是子專案 scripts/tests 的
+    SSOT，tools/tests/test_pre_push_dispatcher.py 已有同款鏡）；根層 tools/tests
+    刻意不跨子專案 import——子專案檔案搬移不應弄壞根層閘門。若該檔邏輯更新，
+    請三處同步。裸 `shutil.which("bash")` 在本機常誤中 Windows CreateProcess
+    搜尋順序優先於 PATH 的 `C:\\Windows\\System32\\bash.exe`（WSL 佔位，完全不同
+    的檔案系統視角，會讓本檔案案 Windows 側路徑一律「找不到檔案」而非真失敗）。
+    """
+    candidates: list[str] = []
+    git = shutil.which("git")
+    if git:
+        gp = Path(git).resolve()
+        for up in list(gp.parents)[:4]:
+            for sub in ("usr/bin/bash.exe", "bin/bash.exe"):
+                c = up / sub
+                if c.exists():
+                    candidates.append(str(c))
+    bare = shutil.which("bash")
+    if bare and "system32" not in bare.replace("/", "\\").lower():
+        candidates.append(bare)
+    for cand in candidates:
+        try:
+            r = subprocess.run(
+                [cand, "-c", "echo ok"],
+                capture_output=True, text=True, encoding="utf-8",
+                errors="replace", timeout=15,
+            )
+            if r.returncode == 0 and r.stdout.strip() == "ok":
+                return cand
+        except Exception:
+            continue
+    return None
+
+
+_USABLE_BASH = _usable_bash()
+
+
+class TestDotSourceTrapSafety(unittest.TestCase):
+    """DEF-101-261 回歸鎖：兩份共用庫的 .EXAMPLE/用法示範直接互動式 dot-source／
+    source，內部驗證失敗分支歷史上直接裸 exit 1——若使用者真的照做並命中失敗
+    分支，會把整個互動 shell 關掉。修復後須雙向驗證：
+
+    1. 生產情境（子行程/獨立腳本方式呼叫，如 `bash caller.sh` / `powershell -File
+       caller.ps1`）：失敗時仍必須 exit 1 終止整個行程——既有行為零改變的回歸鎖，
+       防止「不誤殺互動 shell」的修復意外退化成「生產路徑靜默略過繼續執行」。
+    2. 互動情境（無外層腳本檔，直接以 `bash -c` / `powershell -Command` source／
+       dot-source 本檔後呼叫函式）：失敗時必須 return 而非 exit——同一 shell
+       之後的指令仍須能繼續執行（不誤殺使用者 shell）。
+    """
+
+    @staticmethod
+    def _run(cmd: list[str], cwd: str) -> subprocess.CompletedProcess:
+        return subprocess.run(
+            cmd, cwd=cwd, capture_output=True, text=True,
+            encoding="utf-8", errors="replace", timeout=30,
+        )
+
+    @unittest.skipIf(_USABLE_BASH is None, "需要非 WSL 佔位的可用 bash")
+    def test_sh_script_driven_failure_still_terminates_whole_process(self) -> None:
+        # ignore_cleanup_errors：Windows 上 bash.exe 以此目錄為 cwd 結束後，OS 偶爾
+        # 會延遲釋放目錄 handle（與本測試邏輯無關的環境雜訊），寬容跳過清理失敗。
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as td:
+            non_git_dir = Path(td) / "not_a_repo"
+            non_git_dir.mkdir()
+            caller = Path(td) / "caller.sh"
+            caller.write_text(
+                "#!/usr/bin/env bash\n"
+                f'source "{_SH_WRAPPER.as_posix()}"\n'
+                'assert_not_linked_worktree "[t] "\n'
+                "echo SHOULD_NOT_PRINT\n",
+                encoding="utf-8",
+            )
+            # Windows Git Bash 吃正斜線絕對路徑（C:/...），反斜線會被當跳脫（既有
+            # contract 慣例，見 test_ntfs_length_gate.py 的 hook.replace 同款處理）。
+            proc = self._run(
+                [_USABLE_BASH, str(caller).replace("\\", "/")], cwd=str(non_git_dir)
+            )
+            self.assertEqual(proc.returncode, 1, proc.stdout + proc.stderr)
+            self.assertNotIn("SHOULD_NOT_PRINT", proc.stdout)
+
+    @unittest.skipIf(_USABLE_BASH is None, "需要非 WSL 佔位的可用 bash")
+    def test_sh_interactive_style_failure_does_not_kill_shell(self) -> None:
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as td:
+            non_git_dir = Path(td) / "not_a_repo"
+            non_git_dir.mkdir()
+            script = (
+                f'source "{_SH_WRAPPER.as_posix()}"; '
+                'assert_not_linked_worktree "[t] "; '
+                "echo STILL_ALIVE"
+            )
+            proc = self._run([_USABLE_BASH, "-c", script], cwd=str(non_git_dir))
+            self.assertEqual(proc.returncode, 0, proc.stdout + proc.stderr)
+            self.assertIn("STILL_ALIVE", proc.stdout)
+
+    @unittest.skipIf(
+        shutil.which("powershell") is None and shutil.which("pwsh") is None,
+        "需要 powershell/pwsh",
+    )
+    def test_ps1_top_level_python_missing_script_driven_terminates_process(
+        self,
+    ) -> None:
+        """R23 SA/QA 必修條件回歸鎖：模組**頂層**（不在任何函式內）「找不到
+        python」檢查歷史上用裸 `exit 1`——PowerShell 對「被 dot-source 的巢狀
+        腳本頂層本體」呼叫 exit 的作用域規則是只終止該巢狀腳本自身的載入，不
+        終止外層真正呼叫它的腳本／行程（與本檔其餘 3 個失敗分支不同——那些都
+        在函式內，exit 語意正確）。若退化為裸 `exit 1`，script-driven 情境下
+        呼叫端（install_git_hooks.ps1 等）會不受阻擋繼續往下跑，之後才因不相關
+        錯誤失敗甚至以 exit 0 收尾，違反 fail-loud。
+
+        用清空 PATH（換成保證不含 python.exe 的空目錄）讓 `Get-Command python`
+        真的找不到 python，以 `-File` 呼叫端（模擬生產 dot-source 鏈路）斷言
+        整個呼叫行程 exit code 非 0，且 dot-source 之後的陳述式不會被執行到。
+        """
+        exe = shutil.which("powershell") or shutil.which("pwsh")
+        with tempfile.TemporaryDirectory() as td:
+            caller = Path(td) / "caller.ps1"
+            caller.write_text(
+                f'. "{_PS1_WRAPPER}"\n'
+                "Write-Host 'SHOULD_NOT_PRINT'\n",
+                encoding="utf-8",
+            )
+            empty_path_dir = Path(td) / "empty_path"
+            empty_path_dir.mkdir()
+            env = dict(os.environ)
+            env["PATH"] = str(empty_path_dir)
+            proc = subprocess.run(
+                [exe, "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", str(caller)],
+                cwd=td, capture_output=True, text=True,
+                encoding="utf-8", errors="replace", timeout=30, env=env,
+            )
+            self.assertNotEqual(proc.returncode, 0, proc.stdout + proc.stderr)
+            self.assertNotIn("SHOULD_NOT_PRINT", proc.stdout)
+
+    @unittest.skipIf(
+        shutil.which("powershell") is None and shutil.which("pwsh") is None,
+        "需要 powershell/pwsh",
+    )
+    def test_ps1_script_driven_failure_still_terminates_whole_process(self) -> None:
+        exe = shutil.which("powershell") or shutil.which("pwsh")
+        with tempfile.TemporaryDirectory() as td:
+            non_git_dir = Path(td) / "not_a_repo"
+            non_git_dir.mkdir()
+            caller = Path(td) / "caller.ps1"
+            caller.write_text(
+                f'. "{_PS1_WRAPPER}"\n'
+                "Assert-NotLinkedWorktree -Prefix '[t] '\n"
+                "Write-Host 'SHOULD_NOT_PRINT'\n",
+                encoding="utf-8",
+            )
+            proc = self._run(
+                [exe, "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", str(caller)],
+                cwd=str(non_git_dir),
+            )
+            self.assertEqual(proc.returncode, 1, proc.stdout + proc.stderr)
+            self.assertNotIn("SHOULD_NOT_PRINT", proc.stdout)
+
+    @unittest.skipIf(
+        shutil.which("powershell") is None and shutil.which("pwsh") is None,
+        "需要 powershell/pwsh",
+    )
+    def test_ps1_interactive_style_failure_does_not_kill_shell(self) -> None:
+        exe = shutil.which("powershell") or shutil.which("pwsh")
+        with tempfile.TemporaryDirectory() as td:
+            non_git_dir = Path(td) / "not_a_repo"
+            non_git_dir.mkdir()
+            script = (
+                f". '{_PS1_WRAPPER}'; "
+                "Assert-NotLinkedWorktree -Prefix '[t] '; "
+                "Write-Host 'STILL_ALIVE'"
+            )
+            proc = self._run([exe, "-NoProfile", "-Command", script], cwd=str(non_git_dir))
+            self.assertEqual(proc.returncode, 0, proc.stdout + proc.stderr)
+            self.assertIn("STILL_ALIVE", proc.stdout)
 
 
 if __name__ == "__main__":

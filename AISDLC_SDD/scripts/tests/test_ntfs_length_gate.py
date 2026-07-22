@@ -263,6 +263,40 @@ def test_ci_main_seg_bad_and_case_collision_wiring(tmp_path):
 
 # ── 防線 3：存量一致性鎖 ────────────────────────────────────────────────────
 
+# ── 防線 7：_tracked_files 非法 UTF-8 位元組韌性鎖（DEF-101-260）───────────
+
+def test_tracked_files_passes_errors_replace_and_survives_invalid_utf8(monkeypatch):
+    """DEF-101-260 回歸鎖：`_tracked_files()` 的 subprocess.run 呼叫必須帶
+    `errors="replace"`（與全庫 `text=True, encoding="utf-8"` 慣例一致）。修復前
+    只設 `encoding="utf-8"`，一旦 tracked 路徑含非法 UTF-8 位元組序列，
+    `.stdout` 解碼會拋出未捕捉的 UnicodeDecodeError，讓這支「NTFS 敵意檔名
+    防護」CI 腳本自己先崩潰，而非印出乾淨的違規清單。
+
+    以 mock 模擬 subprocess.run：side_effect 依實際傳入的 encoding/errors kwargs
+    對含非法位元組的假輸出做解碼（重現真實 subprocess text-mode 行為），藉此
+    證明——若呼叫端漏了 errors="replace"，這裡會先以 UnicodeDecodeError 炸掉；
+    修復後應安全通過並確實把 kwargs 傳對。
+    """
+    mod = _load_ntfs_module()
+    raw_bytes = b"good.txt\x00" + b"\xff\xfebad.txt\x00"
+    captured: dict = {}
+
+    def _fake_run(*args, **kwargs):
+        captured.update(kwargs)
+        encoding = kwargs.get("encoding", "utf-8")
+        errors = kwargs.get("errors", "strict")  # subprocess 預設即 strict
+        decoded = raw_bytes.decode(encoding, errors=errors)
+        return subprocess.CompletedProcess(args[0] if args else kwargs.get("args"), 0,
+                                            stdout=decoded, stderr="")
+
+    monkeypatch.setattr(mod.subprocess, "run", _fake_run)
+    files = mod._tracked_files()  # 修復前：errors 缺省→strict→此處拋 UnicodeDecodeError
+    assert captured.get("errors") == "replace", (
+        '_tracked_files() 的 subprocess.run 必須傳 errors="replace"（與全庫慣例一致）'
+    )
+    assert "good.txt" in files
+
+
 def test_no_existing_tracked_path_exceeds_fail_threshold():
     """閘門本應攔下（>fail）卻已在庫＝自我矛盾。warn 帶（181~200）依政策可入庫，
     不在此斷言（防「合法 warn 路徑入庫 → 無辜後續 commit 在此爆紅」的嫁禍陷阱）。

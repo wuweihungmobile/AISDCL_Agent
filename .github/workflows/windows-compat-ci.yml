@@ -254,23 +254,20 @@ on:
         type: boolean
         default: false
 
-concurrency:
-  # R7 複審修正（2026-07-15，獨立重新複審發現 P1）：先前 group 只含 github.ref，
-  # push（windows-smoke）與 schedule/workflow_dispatch（windows-nightly-full +
-  # windows-nightly-alert）在 main 分支上算出完全相同的 group 字串
-  # （schedule 事件的 github.ref 就是預設分支 refs/heads/main），導致同組。
-  # cancel-in-progress:true 是整個 workflow run 層級生效，一次尋常的 push 會把正在
-  # 跑的 nightly-full（+其下游 nightly-alert）整包取消——取消後 conclusion 是
-  # cancelled 不是 failure，nightly-alert 的 `if [ "$conclusion" = "failure" ]`
-  # 永遠不會為真，紅色路徑因此形同虛設且是靜默損失。已用 gh run list 實測驗證
-  # cancel-in-progress 在本 repo 確實會取消同 group 的舊 run（29334931071／
-  # 29333612257 conclusion 皆為 cancelled）。改為 group 額外併入
-  # github.event_name，讓 push 與 schedule/workflow_dispatch 落在不同 group，
-  # 兩者互不取消；同一觸發來源內部仍保有「新 run 取消舊 run」的原意（比照
-  # autoclaude-mutation-on-change.yml DEF-101-023 的累積原子性經驗，不同觸發來源
-  # 不可共用同一把 concurrency 鎖）。
-  group: windows-compat-ci-${{ github.ref }}-${{ github.event_name }}
-  cancel-in-progress: true
+# SCAN-C-11（DEF-101-200 rider，R23 修復）：原本是 workflow 層級單一 concurrency
+# group（`windows-compat-ci-${{ github.ref }}-${{ github.event_name }}`，
+# cancel-in-progress:true）——R7 已修過 push vs schedule/workflow_dispatch 同組
+# 的問題（併入 github.event_name），但**同一 event_name 內部仍共用一把鎖**：
+# 兩次 workflow_dispatch 連發（例如手動驗證 simulate_nightly_failure）時，
+# cancel-in-progress:true 對整個 workflow run 生效，會把先前那次 run 的
+# windows-nightly-full（+其下游 windows-nightly-alert）一併取消——取消後
+# conclusion=cancelled（≠failure），紅色路徑（開單/留言）靜默蒸發。改為 job
+# 層級三組獨立 concurrency（比照 macos-compat-ci.yml 已於 R13/CI-5 完成的同款
+# 修復，見該檔 macos-smoke／macos-nightly-full／macos-nightly-alert 三處）：
+# windows-smoke 維持 per-ref + cancel-in-progress:true（取消過時的 smoke 重跑
+# 本身合理）；windows-nightly-full／windows-nightly-alert 改用不含 github.ref
+# 的固定字串 group + cancel-in-progress:false，兩者互不干擾，各自見下方對應
+# job 的 concurrency 區塊。
 
 # 純驗證、不寫回 repo → 最小權限唯讀。
 permissions:
@@ -282,6 +279,9 @@ jobs:
     if: github.event_name != 'schedule'
     runs-on: windows-latest
     timeout-minutes: 25
+    concurrency:
+      group: windows-compat-ci-smoke-${{ github.ref }}
+      cancel-in-progress: true
 
     steps:
       - uses: actions/checkout@v5
@@ -636,6 +636,9 @@ jobs:
     runs-on: windows-latest
     timeout-minutes: 60
     continue-on-error: true
+    concurrency:
+      group: windows-compat-ci-nightly-full
+      cancel-in-progress: false
 
     steps:
       - uses: actions/checkout@v5
@@ -752,6 +755,16 @@ jobs:
     timeout-minutes: 10   # R14 QA-R14-RR-1：輕量 alert job（發 gh issue），補 timeout 防卡死燒滿 360 分鐘
     needs: windows-nightly-full
     if: always() && (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch')
+    concurrency:
+      # SCAN-C-11／比照 macos-compat-ci.yml R13 CI-5：alert 若與 nightly-full 共用
+      # 同一把 group，GitHub job 層 concurrency 在 cancel-in-progress:false 下同
+      # group 仍只允許**一個 pending**：run A 的 nightly-full 佔住 group 時，若
+      # run B 的 nightly-full 先排入 pending，稍後才 eligible 的 run A alert
+      # （needs 下游）會把 pending 位驅逐/被驅逐，被驅逐方 conclusion=cancelled
+      # （≠failure），告警路徑靜默蒸發、開單/關單分支永不執行。alert 本身輕量
+      # 無重疊風險，獨立 group 即可根絕互踩。
+      group: windows-compat-ci-nightly-alert
+      cancel-in-progress: false
     permissions:
       actions: read
       issues: write

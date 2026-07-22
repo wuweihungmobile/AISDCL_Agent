@@ -2743,6 +2743,131 @@ class TestHeartbeatFailSentinel(DevStartTestCase):
         self.assertEqual(note, "nightly 心跳新鮮")
 
 
+class TestWindowsHeartbeatFailSentinel(DevStartTestCase):
+    """DEF-101-200 rider ARCH-R15-1（Windows 側，R23 補完）：Windows nightly log
+    是全量 log（含完整 pytest/mutmut 輸出）非 mac 的 3 行心跳契約，改 tail 掃描
+    `run_local_nightly.ps1` 既有（非本輪新增）的 `END exit decision: exit=N
+    (failed stages: ...)` 收尾行。驗證涵蓋：exit=1 有 failed stages → 警告＋
+    summary 片段；exit=0 → 零警告；大型全量 log（tail 窗格前有雜訊）仍能命中
+    尾端錨點；找不到錨點時安全回 None（advisory，不得讓 dev_start 崩潰）。
+    """
+
+    @staticmethod
+    def _write_windows_log(root: Path, body: str) -> Path:
+        logs = root / "AutoClaude" / "logs"
+        logs.mkdir(parents=True)
+        p = logs / "nightly_latest.log"
+        p.write_text(body, encoding="utf-8")
+        return p
+
+    def _run(self, root: Path) -> str:
+        with mock.patch.object(dev_start, "ROOT", root), \
+             mock.patch("builtins.print"):
+            return dev_start._check_nightly_heartbeat("windows")
+
+    def test_exit_1_with_failed_stages_warns_with_note(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            self._write_windows_log(
+                root,
+                "[2026-07-22 02:00:00][INFO] BEGIN nightly run\n"
+                "[2026-07-22 02:30:00][INFO] END nightly summary: mutation=1 "
+                "pg-e2e=0 perf=0 drift=0 obs=0 local_ci_gate=0 sdd_chaos=0\n"
+                "[2026-07-22 02:30:00][ERROR] END exit decision: exit=1 "
+                "(failed stages: mutation=1)\n"
+                "[2026-07-22 02:30:01][INFO] Latest log pointer 已更新: x\n",
+            )
+            note = self._run(root)
+        self.assertTrue(
+            any("exit=1" in w and "mutation=1" in w and "ARCH-R15-1" in w
+                for w in dev_start.WARNINGS),
+            f"exit=1 須 _warn（含 exit code 與 failed stages），"
+            f"實際 WARNINGS={dev_start.WARNINGS}")
+        self.assertIn("exit=1", note, "summary 片段須附註 exit code")
+        self.assertIn("mutation=1", note, "summary 片段須附註 failed stages")
+
+    def test_exit_0_no_warning(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            self._write_windows_log(
+                root,
+                "[2026-07-22 02:00:00][INFO] BEGIN nightly run\n"
+                "[2026-07-22 02:30:00][INFO] END nightly summary: mutation=0 "
+                "pg-e2e=0 perf=0 drift=0 obs=0 local_ci_gate=0 sdd_chaos=0\n"
+                "[2026-07-22 02:30:00][INFO] END exit decision: exit=0 "
+                "(no failed stages; SKIP/WARN 不計失敗)\n",
+            )
+            note = self._run(root)
+        self.assertEqual(dev_start.WARNINGS, [], "exit=0（全綠）不得出現任何警告")
+        self.assertEqual(note, "nightly 心跳新鮮")
+
+    def test_large_log_tail_scan_still_finds_marker(self):
+        """全量 log 可能數 MB（完整 pytest/mutmut 輸出）——驗證 tail 視窗機制在
+        錨點前有大量雜訊時仍能命中，不需整檔載入。"""
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            noise = "[2026-07-22 01:00:00][INFO] " + ("x" * 200) + "\n"
+            body = noise * 500 + (
+                "[2026-07-22 03:00:00][ERROR] END exit decision: exit=1 "
+                "(failed stages: perf=1, drift=2)\n"
+            )
+            self._write_windows_log(root, body)
+            note = self._run(root)
+        self.assertIn("exit=1", note)
+        self.assertIn("perf=1", note)
+
+    def test_no_marker_found_returns_none_safely(self):
+        """讀不到/無錨點（如安裝早期版本或檔案截斷）→ 安全回 None，不入警告、
+        不崩潰（advisory 契約）。"""
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            self._write_windows_log(root, "[2026-07-22 02:00:00][INFO] BEGIN nightly run\n")
+            note = self._run(root)
+        self.assertEqual(dev_start.WARNINGS, [])
+        self.assertEqual(note, "nightly 心跳新鮮")
+
+    def test_extra_space_after_colon_still_detected(self):
+        """R23 SD 點名假陰性 #1：`decision:` 後多一個空白（`exit=1` 前）。
+        修復前 `_WINDOWS_EXIT_DECISION_RE` 對空白數量零容忍 → findall 零命中 →
+        靜默回 None（即使 nightly 其實記錄失敗，也不發警告，違反 fail-loud）。"""
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            self._write_windows_log(
+                root,
+                "[2026-07-22 02:30:00][ERROR] END exit decision:  exit=1 "
+                "(failed stages: mutation=1)\n",
+            )
+            note = self._run(root)
+        self.assertIn("exit=1", note, "多一空白仍須偵測到 FAIL，不可假陰性")
+        self.assertIn("mutation=1", note)
+
+    def test_lowercase_end_still_detected(self):
+        """R23 SD 點名假陰性 #2：`END` 寫成小寫 `end`。"""
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            self._write_windows_log(
+                root,
+                "[2026-07-22 02:30:00][ERROR] end exit decision: exit=1 "
+                "(failed stages: perf=1)\n",
+            )
+            note = self._run(root)
+        self.assertIn("exit=1", note, "小寫 end 仍須偵測到 FAIL，不可假陰性")
+        self.assertIn("perf=1", note)
+
+    def test_extra_space_after_end_still_detected(self):
+        """R23 SD 點名假陰性 #3：`END` 後多一個空白（`exit` 前）。"""
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            self._write_windows_log(
+                root,
+                "[2026-07-22 02:30:00][ERROR] END  exit decision: exit=1 "
+                "(failed stages: drift=2)\n",
+            )
+            note = self._run(root)
+        self.assertIn("exit=1", note, "END 後多一空白仍須偵測到 FAIL，不可假陰性")
+        self.assertIn("drift=2", note)
+
+
 class TestCiLiveness(DevStartTestCase):
     """R15 DEF-101-208：CI 活性哨兵——gh read-only API 查最新 run 結論。
 

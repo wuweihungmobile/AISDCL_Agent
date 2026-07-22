@@ -86,6 +86,7 @@ def _tracked_files() -> list[str]:
         capture_output=True,
         text=True,
         encoding="utf-8",
+        errors="replace",
         check=True,
     ).stdout
     return [p for p in out.split("\0") if p]

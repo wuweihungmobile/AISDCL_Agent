@@ -1447,6 +1447,52 @@ def _heartbeat_fail_count(hb: Path) -> int | None:
     return int(m.group(1)) if m else None
 
 
+# Windows 側 FAIL 內容偵測（DEF-101-200 rider ARCH-R15-1，R23 補完）：
+# nightly_latest.log 是全量 log（含完整 pytest/mutmut 輸出，可能數 MB），不像
+# mac 側是固定前 3 行心跳契約，故不能沿用 _heartbeat_fail_count 的「讀前 3 行」
+# 作法。但 run_local_nightly.ps1 收尾處本已穩定寫入一行機械可讀的終審結論
+# （R9 複審 (c) 既有設計，非本輪新增）：
+#   `Log 'END exit decision: exit=0 (no failed stages; SKIP/WARN 不計失敗)'`
+#   `Log ("END exit decision: exit=1 (failed stages: {0})" -f (...))`
+# 此行在檔案「尾端」附近（其後只剩 pointer 更新／14 天輪替兩行 advisory log），
+# 故用 tail 位元組窗格讀取（避免整檔載入大型全量 log）+ regex 擷取。
+_WINDOWS_NIGHTLY_TAIL_BYTES = 16384
+# R23 SD/QA 補完：兩邊字面量（本正則 vs run_local_nightly.ps1 的 Log(...) 呼叫）
+# 目前一致，但只是巧合式耦合、沒有機械鎖——任何一方未來格式微幅漂移（多一個
+# 空白、大小寫變化）都會讓本正則零比對，靜默回傳 None（假陰性：nightly 其實
+# 記錄了失敗，卻不發警告，違反 fail-loud）。SD 實測命中三種偏離：冒號後多一
+# 空白、`END`→`end` 小寫、`END` 後多一空白。用 `\s+`（取代固定單一空白）+
+# `re.IGNORECASE`（取代大小寫敏感）換取對這類偏離的容忍度，屬 advisory 偵測用
+# 途、非正式契約比對，寬容不影響本函式既有語意（仍要求完整字串結構存在）。
+_WINDOWS_EXIT_DECISION_RE = re.compile(
+    r"end\s+exit\s+decision:\s*exit=(\d+)(?:\s*\(failed\s+stages:\s*([^)]*)\))?",
+    re.IGNORECASE,
+)
+
+
+def _windows_heartbeat_fail_note(hb: Path) -> str | None:
+    """Windows nightly 心跳 FAIL 內容偵測；tail 掃描既有 `END exit decision` 行。
+
+    讀不到/無錨點 → None（advisory，絕不影響 dev_start 行為）。取最後一次命中
+    （同一次 run 的 log 本只會寫入一次，多次命中純屬防禦）。exit=0 → None
+    （視為全綠，不入警告）。"""
+    try:
+        size = hb.stat().st_size
+        with hb.open("rb") as f:
+            f.seek(max(0, size - _WINDOWS_NIGHTLY_TAIL_BYTES))
+            tail = f.read().decode("utf-8", errors="replace")
+    except OSError:
+        return None
+    matches = _WINDOWS_EXIT_DECISION_RE.findall(tail)
+    if not matches:
+        return None
+    exit_code, failed_stages = matches[-1]
+    if exit_code == "0":
+        return None
+    stages = failed_stages.strip() or "未知"
+    return f"最近一輪 exit={exit_code}（failed stages: {stages}）"
+
+
 def _check_nightly_heartbeat(now: str) -> str:
     """nightly 心跳哨兵（R12 ARCH-R12-2，純 advisory）——回傳 summary 片段。
 
@@ -1496,8 +1542,9 @@ def _check_nightly_heartbeat(now: str) -> str:
     age_days = (time.time() - mtime) / 86400.0
     # ARCH-R15-1：mtime 只證明「在跑」不證明「在綠」——CI 停擺期間 nightly 是唯一
     # 每日活體，連續全紅時晨間 dev_start 仍 ✅ 是盲區。心跳存在（新鮮或過期皆檢查）
-    # 且非 windows flavor 時讀內容抽 FAIL 計數；Windows 側 nightly_latest.log 是
-    # 全量 log 非 3 行心跳契約，明確不讀（路由 DEF-101-200 Windows 輪）。
+    # 時依平台分讀：mac 是固定前 3 行心跳契約（_heartbeat_fail_count）；Windows
+    # 側 nightly_latest.log 是全量 log 非 3 行契約，改 tail 掃描既有
+    # `END exit decision` 收尾行（R23 補完，見 _windows_heartbeat_fail_note）。
     fail_note = ""
     if _flavor(now) != "windows":
         fail_n = _heartbeat_fail_count(hb)
@@ -1506,6 +1553,13 @@ def _check_nightly_heartbeat(now: str) -> str:
                   f"排程在跑但驗證未全綠，請查 AutoClaude/logs/ 最新 nightly_mac log"
                   f"（ARCH-R15-1）")
             fail_note = f"；最近一輪 FAIL={fail_n}（見警告）"
+    else:
+        win_fail = _windows_heartbeat_fail_note(hb)
+        if win_fail is not None:
+            _warn(f"nightly 最近一輪有失敗（AutoClaude/logs/{name}）——{win_fail}，"
+                  f"排程在跑但驗證未全綠，請查 AutoClaude/logs/ 最新 nightly log"
+                  f"（ARCH-R15-1）")
+            fail_note = f"；{win_fail}（見警告）"
     if age_days > _HEARTBEAT_MAX_AGE_DAYS:
         _warn(f"nightly 心跳過期（AutoClaude/logs/{name} 距今 {age_days:.1f} 天 > "
               f"{_HEARTBEAT_MAX_AGE_DAYS} 天）— 排程可能已停擺，請檢查 launchd/schtasks"
