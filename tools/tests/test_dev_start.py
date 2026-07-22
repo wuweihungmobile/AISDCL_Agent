@@ -2670,6 +2670,24 @@ class TestLaunchdNightlyLoaded(DevStartTestCase):
             self.assertIsNone(dev_start._launchd_nightly_loaded())
         fake_run.assert_not_called()
 
+    def test_win32_returns_none_without_spawning(self):
+        """DEF-101-243③：既有三態測試只覆蓋 darwin/linux，缺 win32 專屬案例
+        （launchd 為純 macOS 機制，win32 上 platform_utils.is_macos() 應同樣判 False
+        並提早 return，不嘗試呼叫 launchctl）。
+
+        R19 四方一審 QA 對抗式 bug-injection 標的：只 mock `subprocess.run` 對
+        `Popen`/`os.system` 這類其他子行程 API 完全無視野——同時 mock 這三個入口，
+        確保「提早 return、不 spawn 任何子行程」的意圖真的被完整鎖住，而不只鎖住
+        目前實作剛好用到的那一個 API。"""
+        with mock.patch.object(sys, "platform", "win32"), \
+             mock.patch.object(dev_start.subprocess, "run") as fake_run, \
+             mock.patch.object(dev_start.subprocess, "Popen") as fake_popen, \
+             mock.patch.object(dev_start.os, "system") as fake_system:
+            self.assertIsNone(dev_start._launchd_nightly_loaded())
+        fake_run.assert_not_called()
+        fake_popen.assert_not_called()
+        fake_system.assert_not_called()
+
 
 class TestHeartbeatFailSentinel(DevStartTestCase):
     """R15 ARCH-R15-1：心跳 FAIL 內容哨兵（mac 側）。

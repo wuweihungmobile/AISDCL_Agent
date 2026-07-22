@@ -44,6 +44,12 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parent.parent  # AutoClaude repo 根
 MONO_ROOT = REPO_ROOT.parent                        # monorepo 根 — 定位共用 tools/
 
+# platform_utils 位於 monorepo 根 tools/lib/ 子目錄（非本檔同層），需顯式插入
+# sys.path 才能 import——手法對齊本輪其他核心檔案既有慣例（R17 DEF-101-231 觀察點
+# 1+2：收斂 is_windows/os_label/venv_python_path 平台判斷邏輯的第二次重複）。
+sys.path.insert(0, str(MONO_ROOT / "tools" / "lib"))
+import platform_utils  # noqa: E402
+
 DEFAULT_PYTEST_ARGS = ["tests/", "-q", "--tb=short"]
 
 _PG_DSN = "postgresql+asyncpg://autoclaude:autoclaude@localhost:5432/autoclaude"
@@ -223,7 +229,7 @@ def gate_act() -> int:
     修漏史料）。探測順序 powershell → pwsh：對齊 tools/dev_start.py 先例與
     Local_CI_Parity_NextAction「pwsh→powershell（本機僅 PS5.1）」修正。
     """
-    if os.name == "nt":
+    if platform_utils.is_windows():
         shell = shutil.which("powershell") or shutil.which("pwsh")
         if shell is None:
             print("找不到 PowerShell（powershell / pwsh）— 無法執行 tools/run_act.ps1")

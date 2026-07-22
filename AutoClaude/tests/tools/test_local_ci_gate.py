@@ -168,7 +168,7 @@ def test_pytest_gate_receives_overridden_args(monkeypatch: pytest.MonkeyPatch) -
 def test_gate_act_posix_uses_bash_run_act_sh(monkeypatch: pytest.MonkeyPatch) -> None:
     calls: list[list[str]] = []
     monkeypatch.setattr(m, "_stream", lambda cmd: calls.append(list(cmd)) or 0)
-    monkeypatch.setattr(m.os, "name", "posix")
+    monkeypatch.setattr(m.platform_utils, "is_windows", lambda: False)
     assert m.gate_act() == 0
     assert calls == [["bash", str(m.REPO_ROOT / "tools" / "run_act.sh"), "--job", "test"]]
 
@@ -208,7 +208,7 @@ def test_gate_act_windows_uses_powershell_file_carrier(
 ) -> None:
     calls: list[list[str]] = []
     monkeypatch.setattr(m, "_stream", lambda cmd: calls.append(list(cmd)) or 0)
-    monkeypatch.setattr(m.os, "name", "nt")
+    monkeypatch.setattr(m.platform_utils, "is_windows", lambda: True)
     monkeypatch.setattr(
         m.shutil, "which",
         # mock which() 回傳值＋下方純字串斷言，無 pathlib join 語意：
@@ -228,7 +228,7 @@ def test_gate_act_windows_uses_powershell_file_carrier(
 def test_gate_act_windows_falls_back_to_pwsh(monkeypatch: pytest.MonkeyPatch) -> None:
     calls: list[list[str]] = []
     monkeypatch.setattr(m, "_stream", lambda cmd: calls.append(list(cmd)) or 0)
-    monkeypatch.setattr(m.os, "name", "nt")
+    monkeypatch.setattr(m.platform_utils, "is_windows", lambda: True)
     monkeypatch.setattr(
         m.shutil, "which", lambda name: "/usr/bin/pwsh" if name == "pwsh" else None
     )
@@ -239,7 +239,7 @@ def test_gate_act_windows_falls_back_to_pwsh(monkeypatch: pytest.MonkeyPatch) ->
 def test_gate_act_windows_no_powershell_fails(
     monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    monkeypatch.setattr(m.os, "name", "nt")
+    monkeypatch.setattr(m.platform_utils, "is_windows", lambda: True)
     monkeypatch.setattr(m.shutil, "which", lambda name: None)
     assert m.gate_act() == 1
     assert "找不到 PowerShell" in capsys.readouterr().out

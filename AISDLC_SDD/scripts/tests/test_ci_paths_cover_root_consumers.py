@@ -113,6 +113,43 @@ _IMPORT_RE = re.compile(
     re.MULTILINE,
 )
 
+# R19 四方一審 QA 對抗式 bug-injection 發現：`_IMPORT_RE` 只認 `import X`／
+# `import X as Y`，`from X import Y` 這種同樣常見的頂層 import 陳述式完全零防護
+# （QA 實測：建一支根層模組＋一支測試以 `from <module> import <name>` 消費，掃描器
+# 10 passed 全綠、完全偵測不到）。補一支對稱正則堵上這第三種消費模式。
+_FROM_IMPORT_RE = re.compile(
+    r"^from\s+([A-Za-z_][A-Za-z0-9_]*)\s+import\s+",
+    re.MULTILINE,
+)
+
+# R19 修復包 A 盲區 A：`sys.path.insert(0, str(Path(__file__).resolve().parents[N]))`
+# 或其後接 `/ "seg1" / "seg2" ...` 路徑片段（如 tools/tests/test_platform_utils_dedup.py
+# 的 `parents[1] / "lib"`，把 tools/lib/ 塞進 sys.path 才能 `import platform_utils`）。
+# 舊版 candidate_base_dirs 只猜「own_dir / parent(own_dir)」兩層寫死候選，platform_utils.py
+# 實際多一層 lib/ 子目錄，兩個候選都撲空。本正則動態抓出原始碼裡實際出現的
+# sys.path.insert 陳述式所指向的路徑，相對於來源檔自身位置解析 parents[N]，
+# 取代猜測。
+_SYSPATH_PARENTS_RE = re.compile(
+    r"sys\.path\.insert\(\s*0\s*,\s*str\(\s*Path\(__file__\)\.resolve\(\)\.parents\[(\d+)\]"
+    r"((?:\s*/\s*\"[^\"]+\")*)\s*\)\s*\)"
+)
+
+
+def _resolve_sys_path_insert_dirs(src: str, source_file: str) -> list[str]:
+    """動態解析 `source_file` 原始碼中 `sys.path.insert(0, str(Path(__file__)
+    .resolve().parents[N] / "seg" ...))` 陳述式實際指向的絕對目錄（見上方 R19 說明），
+    取代「own_dir / parent(own_dir)」兩層寫死猜測（盲區 A）。
+    """
+    dirs: list[str] = []
+    for m in _SYSPATH_PARENTS_RE.finditer(src):
+        n = int(m.group(1))
+        base = source_file
+        for _ in range(n + 1):
+            base = os.path.dirname(base)
+        segs = _STR_RE.findall(m.group(2))
+        dirs.append(os.path.join(base, *segs) if segs else base)
+    return dirs
+
 
 def _scan_dir_for_root_paths(directory: str) -> set[str]:
     found: set[str] = set()
@@ -161,10 +198,16 @@ def _scan_import_consumed_paths(directory: str) -> set[str]:
         with open(f, encoding="utf-8") as fh:
             src = fh.read()
         own_dir = os.path.dirname(f)
-        candidate_base_dirs = [own_dir, os.path.dirname(own_dir)]
-        for m in _IMPORT_RE.finditer(src):
+        candidate_base_dirs = [
+            own_dir,
+            os.path.dirname(own_dir),
+            *_resolve_sys_path_insert_dirs(src, f),
+        ]
+        module_names = [m.group(1) for m in _IMPORT_RE.finditer(src)]
+        module_names += [m.group(1) for m in _FROM_IMPORT_RE.finditer(src)]
+        for module_name in module_names:
             for base_dir in candidate_base_dirs:
-                candidate_abs = os.path.join(base_dir, m.group(1) + ".py")
+                candidate_abs = os.path.join(base_dir, module_name + ".py")
                 if not os.path.isfile(candidate_abs):
                     continue
                 rel = os.path.relpath(candidate_abs, _monorepo_root()).replace(os.sep, "/")
@@ -203,6 +246,9 @@ def test_known_consumers_detected():
         "tools/check_defect_log_crossref.py",
         "tools/check_wrapper_thinness.py",
         "tools/_stdio_utf8.py",  # 經 check_hooks_liveness.py 等三檔遞移 import 偵得
+        # R19 修復包 A 盲區 A：test_platform_utils_dedup.py 的
+        # `sys.path.insert(0, ...parents[1] / "lib")` 動態解析偵得
+        "tools/lib/platform_utils.py",
     }
     missing = expected - consumed
     assert not missing, f"掃描器漏抓已知消費檔（正則退化）：{missing}"
@@ -272,6 +318,39 @@ def test_root_infra_ci_has_no_paths_filter():
     assert "paths" not in pull_request, (
         "root-infra-ci.yml 的 pull_request 觸發不應設 paths 過濾（理由同 push，見上）"
     )
+
+
+# --- 執行期子行程消費（盲區 B，R19 修復包 A）---------------------------------------
+# tools/bootstrap_core.py／AutoClaude/tools/run_act_core.py 完全不被 tools/tests/
+# 下任何測試檔以 import 或路徑字串引用——它們是被 bootstrap.sh/.ps1、run_act.sh/.ps1
+# 以「子行程呼叫殼腳本」方式消費，測試測的是黑盒殼腳本行為（subprocess 呼叫 shell
+# script），而非直接 import 核心邏輯。這類「執行期子行程消費」關係，上方
+# `_scan_import_consumed_paths()` 的靜態正則 import-BFS 結構上永遠看不到——與盲區 A
+# 不同性質（盲區 A 是解析器猜測範圍不夠，這裡是掃描器方法論邊界），故不再對此加新
+# 正則規則（過去 S6→S12→S26 三輪皆是加新正則打地鼠），改用顯式清單 + 機械斷言其被
+# 對應 workflow 的 push+pull_request paths 覆蓋（fail-loud：檔案不存在或未被覆蓋
+# 即讓本測試紅），手法仿照上方 test_known_consumers_detected() 的 expected 顯式集合。
+_KNOWN_SUBPROCESS_ONLY_CONSUMERS: dict[str, tuple[str, ...]] = {
+    "tools/bootstrap_core.py": ("macos-compat-ci.yml", "windows-compat-ci.yml"),
+    "AutoClaude/tools/run_act_core.py": ("macos-compat-ci.yml", "windows-compat-ci.yml"),
+}
+
+
+def test_known_subprocess_only_consumers_covered_by_ci_paths():
+    """盲區 B 機械鎖：見上方 _KNOWN_SUBPROCESS_ONLY_CONSUMERS 說明。"""
+    for rel_path, workflow_filenames in _KNOWN_SUBPROCESS_ONLY_CONSUMERS.items():
+        abs_path = os.path.join(_monorepo_root(), rel_path)
+        assert os.path.isfile(abs_path), (
+            f"{rel_path} 不存在（已改名/搬移？）— _KNOWN_SUBPROCESS_ONLY_CONSUMERS "
+            "顯式清單須同步更新，否則本鎖名不符實"
+        )
+        for workflow_filename in workflow_filenames:
+            push, pr = _workflow_paths(workflow_filename)
+            for label, paths in (("push", push), ("pull_request", pr)):
+                assert any(fnmatch.fnmatch(rel_path, pat) for pat in paths), (
+                    f"{rel_path}（執行期子行程消費，靜態 import-BFS 結構上看不到）"
+                    f"未被 {workflow_filename} 的 {label} paths 覆蓋"
+                )
 
 
 def test_root_infra_ci_bash_and_py_scan_roots_have_no_stray_scripts():

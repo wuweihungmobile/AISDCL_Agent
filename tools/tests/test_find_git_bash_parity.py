@@ -26,12 +26,17 @@ from __future__ import annotations
 
 import ast
 import re
+import sys
 import unittest
 from pathlib import Path
+from unittest import mock
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 _PS1_PATH = _REPO_ROOT / "tools" / "lib" / "Find-GitBash.ps1"
 _PY_PATH = _REPO_ROOT / "tools" / "integration_gate_core.py"
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+import integration_gate_core  # noqa: E402
 
 
 def _find_line(text: str, needle: str, source_label: str) -> str:
@@ -136,6 +141,133 @@ class TestFindGitBashParity(unittest.TestCase):
             py_word.lower(),
             ps1_word.lower(),
             f"System32 排除目標片語不一致：Python={py_word!r} / PS1={ps1_word!r}",
+        )
+
+
+class TestFindGitBashBehavior(unittest.TestCase):
+    """行為驅動測試（R19 修復包 B，DEF-101-242①）：直接呼叫函式斷言真實行為，
+    不依賴上方的原始碼結構比對。R19 Scan-A 已 bug-injection 證實：把 find_git_bash()
+    呼叫點改回舊版寬鬆判斷（`"system32" not in found.lower()`），上方結構比對測試
+    仍全綠——本類別補上呼叫點行為本身的回歸鎖。"""
+
+    def test_has_system32_segment_true_for_full_path_segment(self) -> None:
+        self.assertTrue(
+            integration_gate_core._has_system32_segment(r"C:\Windows\System32\bash.exe")  # platform-ok: 純字串傳入，非真實檔案路徑
+        )
+        self.assertTrue(
+            integration_gate_core._has_system32_segment(r"C:\WINDOWS\system32\bash.exe"),  # platform-ok: 同上
+            "應不分大小寫",
+        )
+
+    def test_has_system32_segment_false_for_substring_or_legit_path(self) -> None:
+        self.assertFalse(
+            integration_gate_core._has_system32_segment(r"C:\Program Files\Git\bin\bash.exe")  # platform-ok: 同上
+        )
+        self.assertFalse(
+            integration_gate_core._has_system32_segment(r"C:\MySystem32Tools\bash.exe"),  # platform-ok: 同上
+            "含 'system32' 子字串但非完整路徑段，不應被排除（DEF-101-236 修復標的）",
+        )
+
+    def test_find_git_bash_prefers_path_bash_when_not_system32(self) -> None:
+        with mock.patch.object(
+            integration_gate_core.shutil, "which",
+            return_value=r"C:\Program Files\Git\bin\bash.exe",  # platform-ok: mock 回傳值＋下方純字串斷言
+        ):
+            self.assertEqual(
+                integration_gate_core.find_git_bash(), r"C:\Program Files\Git\bin\bash.exe"  # platform-ok: 同上
+            )
+
+    def test_find_git_bash_skips_system32_false_positive_and_falls_back_to_env_var(
+        self,
+    ) -> None:
+        """PATH 上的 bash 是 WSL System32 佔位（假陽性）時，應跳過並改查環境變數候選。"""
+        with (
+            mock.patch.object(
+                integration_gate_core.shutil, "which",
+                return_value=r"C:\Windows\System32\bash.exe",  # platform-ok: mock 回傳值
+            ),
+            mock.patch.object(
+                integration_gate_core.os, "environ",
+                {"ProgramFiles": r"C:\Program Files"},  # platform-ok: mock 環境變數值
+            ),
+            mock.patch.object(integration_gate_core.Path, "is_file", return_value=True),
+        ):
+            result = integration_gate_core.find_git_bash()
+            # 對齊 find_git_bash() 實作：sub 是含反斜線的單一字面字串（Windows 路徑片段），
+            # 在本機（POSIX）以 Path 組合時反斜線不會被當成路徑分隔符切開。
+            self.assertEqual(
+                result, str(Path(r"C:\Program Files") / "Git\\bin\\bash.exe")  # platform-ok: 純字串斷言，鏡射受測函式的字面組合行為
+            )
+
+    def test_find_git_bash_does_not_reject_substring_false_positive_on_path(self) -> None:
+        """呼叫點層級的迴歸鎖（R19 Scan-A bug-injection 標的）：PATH 上的 bash 位於
+        「含 system32 子字串但非完整路徑段」的合法路徑時，不應被誤排除——若呼叫點
+        退化回舊版寬鬆判斷 `"system32" not in found.lower()`，本測試須變紅。"""
+        legit_path = r"C:\MySystem32Tools\bash.exe"  # platform-ok: 純字串 mock 值，非真實檔案路徑
+        with mock.patch.object(integration_gate_core.shutil, "which", return_value=legit_path):
+            self.assertEqual(integration_gate_core.find_git_bash(), legit_path)
+
+    def test_find_git_bash_returns_none_when_nothing_found(self) -> None:
+        with (
+            mock.patch.object(integration_gate_core.shutil, "which", return_value=None),
+            mock.patch.object(integration_gate_core.os, "environ", {}),
+        ):
+            self.assertIsNone(integration_gate_core.find_git_bash())
+
+    def test_find_git_bash_skips_env_var_candidate_that_does_not_exist_on_disk(self) -> None:
+        """R19 四方一審 QA 對抗式 bug-injection 標的：環境變數候選路徑的存在性檢查
+        （`cand.is_file()`）若被拿掉，函式會無條件回傳幽靈路徑（磁碟上根本不存在的
+        路徑）。上面 `test_find_git_bash_prefers_path_bash_when_not_system32` 等測試
+        只驗證了 PATH 檢查那條分支，完全沒保護這條環境變數候選分支——本測試補上：
+        PATH 上找不到 bash、環境變數候選路徑存在但磁碟上該檔不存在時，必須回傳
+        None，不得回傳幽靈路徑。"""
+        with (
+            mock.patch.object(integration_gate_core.shutil, "which", return_value=None),
+            mock.patch.object(
+                integration_gate_core.os, "environ", {"ProgramFiles": r"C:\Program Files"},  # platform-ok: mock 環境變數值
+            ),
+            mock.patch.object(integration_gate_core.Path, "is_file", return_value=False),
+        ):
+            self.assertIsNone(integration_gate_core.find_git_bash())
+
+    def test_find_git_bash_continues_to_next_env_var_candidate_when_earlier_one_missing(
+        self,
+    ) -> None:
+        """R19 四方一審 QA 二審對抗式 bug-injection 標的：上一個測試只 mock 了單一
+        環境變數候選，QA 二審證實這種寫法無法區分「正確回 None」與「迴圈提前
+        中止（第一個候選不存在就直接放棄，不再檢查後續候選）」這兩種行為——兩者在
+        單候選情境下觀察到的結果都是 None。改用兩個候選（`ProgramFiles` 磁碟上不
+        存在、`LocalAppData` 磁碟上存在）才能區分：Git for Windows per-user 安裝
+        預設就落在 `LocalAppData`，若 `ProgramFiles` 剛好沒有 Git、迴圈卻提前中止，
+        會誤判「找不到 Git Bash」——這是有實務風險的情境，不只是理論案例。"""
+        program_files_cand = str(Path(r"C:\Program Files") / "Git\\bin\\bash.exe")  # platform-ok: 純字串斷言
+        local_appdata_cand = str(
+            Path(r"C:\Users\me\AppData\Local") / "Programs\\Git\\bin\\bash.exe"  # platform-ok: 純字串斷言
+        )
+
+        def _fake_is_file(self: Path) -> bool:
+            return str(self) == local_appdata_cand
+
+        with (
+            mock.patch.object(integration_gate_core.shutil, "which", return_value=None),
+            mock.patch.object(
+                integration_gate_core.os, "environ",
+                {
+                    "ProgramFiles": r"C:\Program Files",  # platform-ok: mock 環境變數值，磁碟上不存在
+                    "LocalAppData": r"C:\Users\me\AppData\Local",  # platform-ok: mock 環境變數值，磁碟上存在
+                },
+            ),
+            mock.patch.object(integration_gate_core.Path, "is_file", _fake_is_file),
+        ):
+            result = integration_gate_core.find_git_bash()
+        self.assertNotEqual(
+            result, program_files_cand,
+            "不應命中 ProgramFiles 候選（磁碟上不存在，mock 已設為 False）",
+        )
+        self.assertEqual(
+            result, local_appdata_cand,
+            "ProgramFiles 候選不存在時應繼續檢查下一候選（LocalAppData），"
+            "不得提前 return None（Git for Windows per-user 安裝落在 LocalAppData 的常見情境）",
         )
 
 
