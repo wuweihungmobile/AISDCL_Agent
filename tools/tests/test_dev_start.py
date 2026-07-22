@@ -2868,5 +2868,77 @@ class TestCrossSiteLiteralLocks(unittest.TestCase):
                          "兩站點心跳門檻漂移——--status 與 dev_start 判定分歧")
 
 
+class TestCopyFunctionalInterpreterDllCopy(unittest.TestCase):
+    """QA 要求的環境無關自證測試（R21 四方一審，DEF-101-256）：直接驗證
+    `_copy_functional_interpreter()`（`tools/tests/_platform_helpers.py`）新增
+    的 DLL 複製行為本身，不依賴本機當前 Python 安裝佈局是否恰好是裸
+    pyenv-win——monkeypatch `sys.executable` 指向暫時假來源目錄，不論在哪台
+    機器跑都能抓到退化（QA 明確要求：不能只靠「機器剛好是裸 pyenv-win 佈局」
+    才會抓到退化）。
+    """
+
+    def test_copies_named_dll_patterns_beside_dest(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            fake_src_dir = root / "fake_interpreter_dir"
+            fake_src_dir.mkdir(parents=True)
+            fake_exe = fake_src_dir / "python.exe"
+            fake_exe.write_bytes(b"fake-interpreter-body")
+            # 兩個應被複製的具名 pattern，加一個刻意排除的無關 DLL（驗證
+            # 「具名 glob pattern，非裸 *.dll 全複製」——Architect 的必修要求）。
+            (fake_src_dir / "python311.dll").write_bytes(b"dll-a")
+            (fake_src_dir / "vcruntime140_1.dll").write_bytes(b"dll-b")
+            (fake_src_dir / "sqlite3.dll").write_bytes(b"dll-should-not-copy")
+
+            dest_dir = root / "dest_venv" / "Scripts"
+            dest_dir.mkdir(parents=True)
+            dest = dest_dir / "python.exe"
+
+            with mock.patch.object(sys, "executable", str(fake_exe)):
+                _copy_functional_interpreter(dest)
+
+            self.assertTrue(dest.is_file(), "直譯器本體未被複製")
+            self.assertEqual(dest.read_bytes(), b"fake-interpreter-body")
+            self.assertTrue(
+                (dest_dir / "python311.dll").is_file(),
+                "python3*.dll 具名 pattern 應被複製到 dest 同層",
+            )
+            self.assertTrue(
+                (dest_dir / "vcruntime140_1.dll").is_file(),
+                "vcruntime140*.dll 具名 pattern 應被複製到 dest 同層",
+            )
+            self.assertFalse(
+                (dest_dir / "sqlite3.dll").exists(),
+                "不在具名 pattern 內的 DLL 不應被複製（避免誤複製 sqlite3/"
+                "libssl/tcl-tk 等不必要的 DLL，增加 I/O 與被鎖檔風險）",
+            )
+
+    def test_no_dlls_present_is_a_safe_noop(self) -> None:
+        """來源目錄沒有任何 .dll（macOS/Linux 上 sys.executable 同層的常態）
+        時，函式不應丟例外、也不應多複製任何檔案——無條件 glob-and-copy 對
+        此類環境天生就是 no-op，不需要任何 `if is_windows()` 平台分支（QA
+        要求優先選擇的寫法：三平台行為天生一致）。
+        """
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            fake_src_dir = root / "fake_interpreter_dir"
+            fake_src_dir.mkdir(parents=True)
+            fake_exe = fake_src_dir / "python"
+            fake_exe.write_bytes(b"fake-interpreter-body")
+
+            dest_dir = root / "dest_venv" / "bin"
+            dest_dir.mkdir(parents=True)
+            dest = dest_dir / "python"
+
+            with mock.patch.object(sys, "executable", str(fake_exe)):
+                _copy_functional_interpreter(dest)
+
+            self.assertTrue(dest.is_file())
+            self.assertEqual(
+                sorted(p.name for p in dest_dir.iterdir()), ["python"],
+                "無 DLL 來源時不應多出任何檔案",
+            )
+
+
 if __name__ == "__main__":
     unittest.main()

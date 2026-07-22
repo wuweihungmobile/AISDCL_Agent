@@ -19,7 +19,7 @@
 
 安裝 Python 3.11：
 - **macOS**：`brew install python@3.11`
-- **Windows**：`winget install Python.Python.3.11`（或用 pyenv-win）
+- **Windows**：`winget install Python.Python.3.11`（即官方 python.org 安裝器版型；或用 pyenv-win）
 - 兩平台皆可改用 [uv](https://docs.astral.sh/uv/)（bootstrap 會自動偵測並加速）：
   - macOS：`curl -LsSf https://astral.sh/uv/install.sh | sh`
   - Windows：`winget install astral-sh.uv`
@@ -115,6 +115,7 @@ source .venv/bin/activate
 | GUI 發起的 git commit（如 VSCode Source Control 按鈕）被 hooks 擋下：`python: command not found`（mac）或缺 ruff 的系統 Python（Windows） | GUI App 不繼承終端機 venv PATH，hooks fail-loud 擋下 | 從已啟用 venv 的終端機啟動編輯器（如 `code .`），或改用終端機 commit |
 | Windows 上首次 `pip install`／`pytest` 異常緩慢 | Windows Defender 即時掃描大量小型 Python 檔案（`.venv`、`__pycache__`） | 非必要但建議：把 `.venv` 與本 repo 目錄加入 Defender 排除清單，可顯著加速 |
 | 手動補裝套件時 `python -m pip ...` 報 `No module named pip` | `.venv` 是 bootstrap 偵測到 `uv` 時走 `uv venv` + `uv pip install` 建的，這種 venv **內部本來就沒有 `pip` 模組**（Mac/Windows 四方複審實機驗證重現） | 改用 `uv pip install -e .[...]`（uv 已安裝時對任何已啟用的 venv 皆可用）；完整警語見 [CLAUDE.md](CLAUDE.md)「AutoClaude — 常用指令與架構」§安裝/執行 與 [docs/AISDLC_Agent_UserGuide.md](docs/AISDLC_Agent_UserGuide.md) §1.2 |
+| pytest 在 Windows 上報 DLL not found／`rc=0xC0000135`（`STATUS_DLL_NOT_FOUND`） | 未啟用 `.venv` 就直接用裸系統直譯器（pyenv-win／winget／python.org 安裝器版型）跑測試，`tools/tests` 部分 fixture 會複製當前直譯器模擬健康 venv，缺同層 DLL 導致複製出的 exe 啟動失敗（DEF-101-256） | 先啟用專案 `.venv`（對照 §3）再跑 pytest |
 
 ---
 

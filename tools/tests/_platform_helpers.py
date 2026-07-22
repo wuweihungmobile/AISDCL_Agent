@@ -38,11 +38,35 @@ def copy_functional_interpreter(dest: Path) -> None:
     但 subprocess 執行 rc=106（"No pyvenv.cfg file"）的壞掉直譯器，讓本應
     測「健康」情境的測試誤判為「不健康」。一併複製 pyvenv.cfg（若源頭存在）
     並維持同層相對位置（dest 上一層），讓複製後的直譯器仍可正確解析 home=。
+
+    R21 四方一審（Architect/SA/SD/QA）追加（DEF-101-256）：當 sys.executable
+    本身**不是**透過 venv 執行時（任何未啟用 venv 的官方支援直譯器安裝
+    路徑皆會命中同一情境——pyenv-win、winget／python.org 安裝器版型，見
+    ONBOARDING.md §1；uv 管理的直譯器因走上面 pyvenv.cfg 分支已被涵蓋），
+    複製出的直譯器旁邊沒有同層相依 DLL（`python3*.dll`／`vcruntime140*.dll`），
+    在 Windows 上啟動會因 STATUS_DLL_NOT_FOUND（0xC0000135）失敗
+    （rc=3221225781）。修法無條件（不做任何 `if is_windows()` 平台分支）
+    從 exe 本身同層 glob 具名 DLL pattern 並複製到 dest 同層——macOS/Linux
+    上 sys.executable 同層通常沒有 `.dll` 副檔名檔案，glob 自然空手，本身
+    即是安全的 no-op，三平台行為天生一致，不需要平台條件判斷（避開
+    R19/R20 QA 抓到過的「條件分支寫反/從未真正執行卻沒人發現」風險形態）。
+    刻意使用具名 glob pattern（非裸 `*.dll` 全複製）避免誤複製到
+    sqlite3/libssl/tcl-tk 等不必要的 DLL（增加 I/O 與被鎖檔風險）。
     """
     shutil.copy(sys.executable, dest)
     src_cfg = Path(sys.executable).resolve().parent.parent / "pyvenv.cfg"
     if src_cfg.is_file():
         shutil.copy(src_cfg, dest.parent.parent / "pyvenv.cfg")
+
+    # DLL 來源目錄變數與上面 pyvenv.cfg 分支的 src_cfg 目錄變數完全分開、
+    # 獨立命名（SD 指出的關鍵風險：混用同一個 `.parent.parent` 表達式會
+    # 讓 glob 恆空，看起來改了程式碼但實際上什麼都沒複製到，比現狀更
+    # 隱蔽的退化）——DLL 與 exe 本體同層，用 exe 本身的 `.parent`，
+    # 不是 venv 根目錄層級的 `.parent.parent`。
+    interpreter_dll_dir = Path(sys.executable).parent
+    for dll_pattern in ("python3*.dll", "vcruntime140*.dll"):
+        for dll_src in interpreter_dll_dir.glob(dll_pattern):
+            shutil.copy(dll_src, dest.parent / dll_src.name)
 
 
 def create_symlink_or_skip(
