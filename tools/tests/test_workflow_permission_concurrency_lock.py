@@ -21,6 +21,8 @@ from pathlib import Path
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 _ARCH_FITNESS = _REPO_ROOT / ".github" / "workflows" / "aisdlc-sdd-arch-fitness.yml"
 _AUTOCLAUDE_CI = _REPO_ROOT / ".github" / "workflows" / "autoclaude-ci.yml"
+_WINDOWS_COMPAT_CI = _REPO_ROOT / ".github" / "workflows" / "windows-compat-ci.yml"
+_MACOS_COMPAT_CI = _REPO_ROOT / ".github" / "workflows" / "macos-compat-ci.yml"
 
 # workflow 層 permissions（頂層、非 job 縮排下的 "permissions:" 起頭，後接
 # 兩格縮排的 "contents: read"）——用行首錨定排除 job 層縮排版本誤中。
@@ -35,6 +37,41 @@ _CONCURRENCY_RE = re.compile(
     r"-\$\{\{ github\.event\.schedule \}\}\n"
     r"  cancel-in-progress: true\s*$",
     re.MULTILINE,
+)
+
+# R25 DEF-101-263③：windows-compat-ci.yml／macos-compat-ci.yml 各自 3 個 job 層
+# concurrency 區塊（smoke／nightly-full／nightly-alert）先前無任何機械回歸鎖——
+# 仿上方 _CONCURRENCY_RE 手法，逐 job 錨定 group/cancel-in-progress 字面值；
+# nightly-alert 區塊在 concurrency: 與 group: 之間夾了說明性註解行（R13 CI-5／
+# SCAN-C-11），用 `(?:\s*#.*\n)*` 容忍（比照 _TOP_LEVEL_PERMISSIONS_RE 既有作法）。
+def _job_concurrency_re(group: str, cancel_in_progress: str, allow_comments: bool = False) -> re.Pattern[str]:
+    comment_gap = r"(?:\s*#.*\n)*" if allow_comments else ""
+    return re.compile(
+        r"^    concurrency:\n"
+        + comment_gap
+        + rf"      group: {re.escape(group)}\n"
+        rf"      cancel-in-progress: {cancel_in_progress}\s*$",
+        re.MULTILINE,
+    )
+
+
+_WINDOWS_SMOKE_CONCURRENCY_RE = _job_concurrency_re(
+    "windows-compat-ci-smoke-${{ github.ref }}", "true"
+)
+_WINDOWS_NIGHTLY_FULL_CONCURRENCY_RE = _job_concurrency_re(
+    "windows-compat-ci-nightly-full", "false"
+)
+_WINDOWS_NIGHTLY_ALERT_CONCURRENCY_RE = _job_concurrency_re(
+    "windows-compat-ci-nightly-alert", "false", allow_comments=True
+)
+_MACOS_SMOKE_CONCURRENCY_RE = _job_concurrency_re(
+    "macos-compat-ci-smoke-${{ github.ref }}", "true"
+)
+_MACOS_NIGHTLY_FULL_CONCURRENCY_RE = _job_concurrency_re(
+    "macos-compat-ci-nightly-full", "false"
+)
+_MACOS_NIGHTLY_ALERT_CONCURRENCY_RE = _job_concurrency_re(
+    "macos-compat-ci-nightly-alert", "false", allow_comments=True
 )
 
 
@@ -68,6 +105,63 @@ class TestAutoclaudeCiConcurrencyLock(unittest.TestCase):
             "autoclaude-ci.yml 缺 concurrency 區塊或 group 鍵值漂移（SCAN-C-5 回歸——"
             "連續 push 將疊跑洩額度；group 須含 event_name/event.schedule 使兩條"
             "nightly cron 各自成組、不互相取消）",
+        )
+
+
+class TestCompatCiConcurrencyLock(unittest.TestCase):
+    """R25 DEF-101-263③：windows-compat-ci.yml／macos-compat-ci.yml 各 3 個 job
+    層 concurrency 區塊（smoke／nightly-full／nightly-alert）先前完全未被任何
+    機械測試鎖定——`_ARCH_FITNESS`/`_AUTOCLAUDE_CI` 僅覆蓋另兩份 workflow，本檔
+    案名雖稱「concurrency lock」實際留有兩平台 compat CI 的治理縫隙（R25 Scan-C
+    全面掃描坐實 R23 DEF-101-263 backlog）。"""
+
+    def test_windows_smoke_concurrency_present(self):
+        text = _WINDOWS_COMPAT_CI.read_text(encoding="utf-8")
+        self.assertRegex(
+            text, _WINDOWS_SMOKE_CONCURRENCY_RE,
+            "windows-compat-ci.yml windows-smoke job 缺 concurrency 區塊或"
+            "group/cancel-in-progress 字面值漂移（per-ref cancel，PR 疊跑省額度）",
+        )
+
+    def test_windows_nightly_full_concurrency_present(self):
+        text = _WINDOWS_COMPAT_CI.read_text(encoding="utf-8")
+        self.assertRegex(
+            text, _WINDOWS_NIGHTLY_FULL_CONCURRENCY_RE,
+            "windows-compat-ci.yml windows-nightly-full job 缺 concurrency 區塊或"
+            "字面值漂移（固定 group，避免多次排程/手動觸發疊跑）",
+        )
+
+    def test_windows_nightly_alert_concurrency_present(self):
+        text = _WINDOWS_COMPAT_CI.read_text(encoding="utf-8")
+        self.assertRegex(
+            text, _WINDOWS_NIGHTLY_ALERT_CONCURRENCY_RE,
+            "windows-compat-ci.yml windows-nightly-alert job 缺獨立 concurrency"
+            "group（SCAN-C-11——與 nightly-full 共用 group 會導致 pending 位互踩，"
+            "告警路徑靜默蒸發）",
+        )
+
+    def test_macos_smoke_concurrency_present(self):
+        text = _MACOS_COMPAT_CI.read_text(encoding="utf-8")
+        self.assertRegex(
+            text, _MACOS_SMOKE_CONCURRENCY_RE,
+            "macos-compat-ci.yml macos-smoke job 缺 concurrency 區塊或"
+            "group/cancel-in-progress 字面值漂移",
+        )
+
+    def test_macos_nightly_full_concurrency_present(self):
+        text = _MACOS_COMPAT_CI.read_text(encoding="utf-8")
+        self.assertRegex(
+            text, _MACOS_NIGHTLY_FULL_CONCURRENCY_RE,
+            "macos-compat-ci.yml macos-nightly-full job 缺 concurrency 區塊或"
+            "字面值漂移",
+        )
+
+    def test_macos_nightly_alert_concurrency_present(self):
+        text = _MACOS_COMPAT_CI.read_text(encoding="utf-8")
+        self.assertRegex(
+            text, _MACOS_NIGHTLY_ALERT_CONCURRENCY_RE,
+            "macos-compat-ci.yml macos-nightly-alert job 缺獨立 concurrency"
+            "group（R13 CI-5 同款設計，與 nightly-full 共用 group 會互踩）",
         )
 
 

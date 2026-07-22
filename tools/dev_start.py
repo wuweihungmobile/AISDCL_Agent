@@ -1464,8 +1464,15 @@ _WINDOWS_NIGHTLY_TAIL_BYTES = 16384
 # 空白、`END`→`end` 小寫、`END` 後多一空白。用 `\s+`（取代固定單一空白）+
 # `re.IGNORECASE`（取代大小寫敏感）換取對這類偏離的容忍度，屬 advisory 偵測用
 # 途、非正式契約比對，寬容不影響本函式既有語意（仍要求完整字串結構存在）。
+# R25 訂正（DEF-101-263⑤）：上述放寬移除了原本大小寫敏感字面 END 帶來的隱性
+# 單字邊界效果，end 前若無邊界防護會讓任何以 end 結尾的單字（append/weekend/
+# backend...）緊接 exit decision: exit=N 字面文字誤觸發。四方一審 SA 二審複核時
+# 指出單純 \b 仍留一個縫：連字號結尾單字（high-end/front-end，"-" 非 \w，\b 在
+# 字母與 "-" 之間仍算邊界）會被誤傷。改用負向後顧 (?<![\w-])（排除單字字元與
+# 連字號兩種前置字元）一併收斂兩類假陽性；不影響任何真實 log 行命中（真實輸出
+# 中 END/end 前恆為換行或空白，兩者皆不在排除集合內）。
 _WINDOWS_EXIT_DECISION_RE = re.compile(
-    r"end\s+exit\s+decision:\s*exit=(\d+)(?:\s*\(failed\s+stages:\s*([^)]*)\))?",
+    r"(?<![\w-])end\s+exit\s+decision:\s*exit=(\d+)(?:\s*\(failed\s+stages:\s*([^)]*)\))?",
     re.IGNORECASE,
 )
 

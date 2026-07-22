@@ -2867,6 +2867,87 @@ class TestWindowsHeartbeatFailSentinel(DevStartTestCase):
         self.assertIn("exit=1", note, "END 後多一空白仍須偵測到 FAIL，不可假陰性")
         self.assertIn("drift=2", note)
 
+    def test_word_boundary_prevents_false_positive_on_end_suffixed_word(self):
+        """R25 DEF-101-263⑤：R23 為容忍大小寫/空白偏離把字面 `END` 改成
+        `re.IGNORECASE` 的 `end`，副作用是移除了原本字面 `END` 帶來的隱性單字
+        邊界——任何以 end 結尾的單字（backend/weekend/append…）緊接
+        `exit decision: exit=N` 字面文字會被誤判為真正的收尾錨點。本測試模擬
+        一行不是收尾錨點、只是巧合包含該字尾的雜訊行，驗證加 `\\b` 後不誤觸發
+        （修復前會誤判為 exit=1 並發出假警告）。"""
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            self._write_windows_log(
+                root,
+                "[2026-07-23 02:00:00][INFO] BEGIN nightly run\n"
+                "[2026-07-23 02:15:00][DEBUG] daemon backend exit decision: "
+                "exit=1 (failed stages: ghost=1)\n",
+            )
+            note = self._run(root)
+        self.assertEqual(
+            dev_start.WARNINGS, [],
+            "「backend」等 end 結尾單字不得誤觸發 END 收尾錨點警告",
+        )
+        self.assertEqual(note, "nightly 心跳新鮮")
+
+    def test_hyphenated_end_word_prevents_false_positive(self):
+        """R25 DEF-101-263⑤ 四方一審 SA 二審複核追加：純 `\\b` 仍留一個縫——
+        連字號結尾單字（high-end/front-end，`-` 不是 `\\w`，`\\b` 在字母與 `-`
+        之間仍算邊界）緊接 `exit decision: exit=N` 字面文字一樣會誤觸發。改用
+        負向後顧 `(?<![\\w-])` 後一併收斂，本測試驗證不誤觸發。"""
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            self._write_windows_log(
+                root,
+                "[2026-07-23 02:00:00][INFO] BEGIN nightly run\n"
+                "[2026-07-23 02:15:00][DEBUG] high-end exit decision: "
+                "exit=1 (failed stages: ghost=1)\n",
+            )
+            note = self._run(root)
+        self.assertEqual(
+            dev_start.WARNINGS, [],
+            "「high-end」等連字號結尾單字不得誤觸發 END 收尾錨點警告",
+        )
+        self.assertEqual(note, "nightly 心跳新鮮")
+
+    def test_ps1_literal_end_exit_decision_lines_present_and_matched(self):
+        """R25 DEF-101-263②：`_WINDOWS_EXIT_DECISION_RE` 與
+        `run_local_nightly.ps1` 的 `Log(...)` 字面量目前靠人工核對一致、無機械
+        鎖——任一方未來格式漂移會讓本正則靜默零比對（假陰性）。本測試跨檔讀取
+        `.ps1` 實際字面量並斷言正則能命中，仿 `test_schedule_capability_parity.py`
+        的「鏡子自證」模式：先斷言字面量真的存在於檔案中（避免抽取本身失準造成
+        測試裝飾性通過），再驗證正則對其確實有鑑別力。"""
+        ps1_path = (
+            Path(__file__).resolve().parents[2]
+            / "AutoClaude" / "tools" / "run_local_nightly.ps1"
+        )
+        ps1_text = ps1_path.read_text(encoding="utf-8-sig")
+        fail_literal = (
+            'Log ("END exit decision: exit=1 (failed stages: {0})" -f '
+            "($finalFailures -join ', ')) 'ERROR'"
+        )
+        ok_literal = (
+            "Log 'END exit decision: exit=0 (no failed stages; "
+            "SKIP/WARN 不計失敗)'"
+        )
+        self.assertIn(
+            fail_literal, ps1_text,
+            "鏡子自證：.ps1 側失敗分支字面量若已改版，本斷言先炸，"
+            "避免下方正則比對在錯誤前提下裝飾性通過",
+        )
+        self.assertIn(
+            ok_literal, ps1_text,
+            "鏡子自證：.ps1 側成功分支字面量若已改版，本斷言先炸",
+        )
+        rendered_fail = fail_literal.replace("{0}", "mutation=1, perf=2").split(
+            '" -f', 1)[0].split('Log ("', 1)[1]
+        match = dev_start._WINDOWS_EXIT_DECISION_RE.search(rendered_fail)
+        self.assertIsNotNone(match, "正則須能命中 .ps1 實際失敗分支字面量渲染後結果")
+        self.assertEqual(match.group(1), "1")
+        rendered_ok = ok_literal.split("Log '", 1)[1].rstrip("'")
+        match_ok = dev_start._WINDOWS_EXIT_DECISION_RE.search(rendered_ok)
+        self.assertIsNotNone(match_ok, "正則須能命中 .ps1 實際成功分支字面量")
+        self.assertEqual(match_ok.group(1), "0")
+
 
 class TestCiLiveness(DevStartTestCase):
     """R15 DEF-101-208：CI 活性哨兵——gh read-only API 查最新 run 結論。
