@@ -97,7 +97,7 @@ env override（如 `AUTOCLAUDE_TEST_P95_THRESHOLD_MS`）若同時影響「採集
 
 ### 紀律 #14 — schtasks 自動跑 vs 互動跑必須 PATH 等價 + StrictMode 3.0 嚴格保護 $null.Property
 
-**背景（SD_09 W3 Round 19 nightly 第 14 跑首次自動跑 P0）**：02:00 schtasks 自動跑（SYSTEM 帳號）vs 互動 PowerShell（user 帳號）**PATH 不等價** — pyenv-win 互動 hook 動態注入 `versions/<ver>/Scripts/` 但 schtasks spawn 的 powershell **不繼承** → `Get-Command alembic.exe` 回 `$null`。配合 StrictMode 3.0 開啟（紀律 #11 後續落地），任何 `(Get-Command X -ErrorAction SilentlyContinue).Source` 鏈式存取在 `$null.Source` 時拋 PropertyNotFoundException → 整個 stage 36ms 內 crash（原始取證：logs/nightly_2026-05-26_020001.log:172-174——`logs/` 為 gitignored 且該檔已依保留策略輪替，任何機器上皆不可復驗，僅存本段文字轉述；R10 SA-7/DEF-101-147 註記：已輪替的關鍵取證一律改文字存證，不留死連結）。互動模式因 pyenv hook 注入 Scripts 路徑而 14 輪躲過此 BUG，直到首次 schtasks 自動跑曝光。
+**背景（SD_09 W3 Round 19 nightly 第 14 跑首次自動跑 P0）**：02:00 schtasks 自動跑（SYSTEM 帳號）vs 互動 PowerShell（user 帳號）**PATH 不等價** — pyenv-win 互動 hook 動態注入 `versions/<ver>/Scripts/` 但 schtasks spawn 的 powershell **不繼承** → `Get-Command alembic.exe` 回 `$null`。配合 StrictMode 3.0 開啟（紀律 #11 後續落地），任何 `(Get-Command X -ErrorAction SilentlyContinue).Source` 鏈式存取在 `$null.Source` 時拋 PropertyNotFoundException → 整個 stage 36ms 內 crash（原始取證：logs/nightly_2026-05-26_020001.log:172-174——`logs/` 為 gitignored 且該檔已不復存在（確切原因不明，Windows 側斯時尚無自動輪替機制——R22 DEF-101-200 ARCH-R15-5 修復前，`run_local_nightly.ps1` 對 dated log 從無刪除邏輯，此前任何機器上的消失皆非「保留策略」所致；R22 起已補 14 天輪替，此後同類引用方可稱「依保留期政策輪替」），任何機器上皆不可復驗，僅存本段文字轉述；R10 SA-7/DEF-101-147 註記：已輪替的關鍵取證一律改文字存證，不留死連結）。互動模式因 pyenv hook 注入 Scripts 路徑而 14 輪躲過此 BUG，直到首次 schtasks 自動跑曝光。
 
 **強制條款**：
 

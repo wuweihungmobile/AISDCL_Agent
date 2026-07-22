@@ -364,13 +364,19 @@ _SINGLE_SIDED_EXEMPT = {
     ),
     # Windows nightly 排程一鍵安裝器（R19 修復包 D）：對等品=install_mac_nightly.sh，
     # stem 刻意不同（install_mac_nightly ↔ install_windows_nightly，同上 macos/windows
-    # smoke 先例）；行為對等由 tools/tests/test_install_windows_nightly.py 守門。
+    # smoke 先例）；本檔（check_script_parity）只比對 step 標籤序列，兩者本質是「兩種
+    # 平台慣例、部分能力靠語言原生機制承載」的不同形態，不適合塞進本檔的字面比對。
+    # 跨檔能力對照（R22 DEF-101-233 修復，訂正 R19~R21 舊註解「行為對等由
+    # test_install_windows_nightly.py 守門」之誤——該檔實際只驗證 Windows 側自身結構，
+    # 從未跨檔比對 mac 側能力集合）改由 tools/tests/test_schedule_capability_parity.py
+    # 以語意能力對照表比對（install/uninstall/status/render-preview 四能力，非字面
+    # 旗標字串集合——mac `--render-only` 與 windows `-WhatIf` 語意對等但字面不同）。
     # 措辭刻意不含「schtasks」/「§8」字面——本項屬 macOS/Windows stem 相異對等品，
     # 不屬 test_onboarding_parity_interlock.py 鎖住的「§8 ops 排程家族（無 .sh 對等
     # 的純 Windows-only 三支）」清單語意，避免誤觸該互鎖交叉比對。
     "tools/install_windows_nightly.ps1": (
         "對等品=install_mac_nightly.sh（stem 刻意不同，如 macos/windows_smoke_local 先例）；"
-        "test_install_windows_nightly.py 守門"
+        "能力對照由 test_schedule_capability_parity.py 守門"
     ),
     # Windows schtasks 排程家族三支（ONBOARDING.md §8 明文 Windows-only、無 .sh 對等；
     # run_local_nightly 於 R11 已成對——mac .sh 薄聚合器落地——移登記至 _EXEMPT_PAIRS）

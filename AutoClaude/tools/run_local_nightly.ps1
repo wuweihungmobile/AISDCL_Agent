@@ -989,6 +989,19 @@ if ($copyLatestResult.Success) {
 } else {
   Log "Latest log pointer 更新失敗（已重試 5 次）：$($copyLatestResult.Error)" 'WARN'
 }
+
+# RunId log 輪替（R22 DEF-101-200 ARCH-R15-5 修復）：保留 14 天；pattern 只掃
+# nightly_2*.log（時間戳家族，開頭必為年份數字），絕不觸及 nightly_latest.log
+# （心跳指標檔，字首非數字）；對齊 mac 側 run_local_nightly.sh 既有 14 天政策
+# （find ... -mtime +14 -delete）；刪除失敗（檔案鎖定等）不影響 exit 語意。
+try {
+  Get-ChildItem -Path $LogDir -Filter 'nightly_2*.log' -File -ErrorAction Stop |
+    Where-Object { $_.Name -ne 'nightly_latest.log' -and $_.LastWriteTime -lt (Get-Date).AddDays(-14) } |
+    Remove-Item -Force -ErrorAction Stop
+} catch {
+  Log "nightly log 14 天輪替清理失敗（不影響本次 exit 語意）：$($_.Exception.Message)" 'WARN'
+}
+
 Write-Host ("Nightly log: {0}" -f $Log)
 Write-Host ("Nightly latest pointer: {0}" -f $LatestLog)
 if ($finalFailures.Count -gt 0) { exit 1 }

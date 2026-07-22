@@ -175,6 +175,10 @@ on:
       - "tools/macos_smoke_local.sh"
       - ".github/workflows/macos-compat-ci.yml"
       - ".github/workflows/windows-compat-ci.yml"
+      # R22：tools/tests/test_schedule_capability_parity.py 讀取此 mac 側腳本原始碼
+      # 做跨平台能力對照（DEF-101-233/259）——只改該檔時本 workflow 須重跑該鎖
+      #（DEF-101-042 同構，test_ci_paths_cover_root_consumers 實測揪出）
+      - "tools/install_mac_nightly.sh"
   pull_request:
     paths:
       - "AutoClaude/autoclaude/perception/**"
@@ -235,6 +239,8 @@ on:
       - "tools/macos_smoke_local.sh"
       - ".github/workflows/macos-compat-ci.yml"
       - ".github/workflows/windows-compat-ci.yml"
+      # R22：同上（push 段說明），pull_request 段同步補齊
+      - "tools/install_mac_nightly.sh"
   schedule:
     # R11 額度治理：每日 → 每週一（CI 額度緊張、Windows 側已有 schtasks 本地 nightly
     # run_local_nightly.ps1 承接每日訊號）；需要時可 workflow_dispatch 手動觸發。

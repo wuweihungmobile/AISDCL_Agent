@@ -602,6 +602,29 @@ def test_docker_skip_streak_escalation(ps1_content: str) -> None:
     ), "Docker 恢復可用時必須清零 streak 檔（避免永久紅）"
 
 
+def test_nightly_log_retention_rotation_present(ps1_content: str) -> None:
+    """case 25（R22 DEF-101-200 ARCH-R15-5）：dated nightly log 必須有 14 天保留期輪替。
+
+    意圖：mac 側 run_local_nightly.sh 早於 R15 就有
+    `find ... -name 'nightly_mac_2*.log' -mtime +14 -delete`；Windows 側自 R15
+    記為已知 backlog（ARCH-R15-5）卻遲遲未落地，log 目錄無界累積。修復後必須：
+    ①實際刪除超過 14 天的 dated log，②絕不誤刪 nightly_latest.log 心跳指標檔。
+    """
+    assert re.search(
+        r"-Filter\s+'nightly_2\*\.log'", ps1_content
+    ), "必須以 nightly_2*.log pattern 掃描 dated log（與 mac 側 nightly_mac_2*.log 同構）"
+    assert re.search(
+        r"AddDays\(-14\)", ps1_content
+    ), "保留期必須為 14 天（對齊 mac 側既有政策）"
+    rotation_idx = ps1_content.find("nightly_2*.log")
+    assert rotation_idx > 0, "找不到輪替區塊"
+    block = ps1_content[rotation_idx : rotation_idx + 400]
+    assert "nightly_latest.log" in block, (
+        "輪替判斷式必須明確排除 nightly_latest.log（防誤刪心跳指標檔）"
+    )
+    assert "Remove-Item" in block, "輪替區塊必須實際執行 Remove-Item（非只是掃描不刪除）"
+
+
 def test_mutation_progress_uses_unique_sha(ps1_content: str) -> None:
     """case 24（R10 SA-2 / DEF-101-142）：END 進度 mutation 軌必須印 unique-sha 計數。
 
