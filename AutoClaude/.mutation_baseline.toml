@@ -1,9 +1,6 @@
 # SD_Improving_08 W3 T3-D5 — mutation kill rate baseline（連續 7 次達標鎖定值）
 # 自動寫入：tools/mutation_baseline_lock.py（ADR-SD08-002 §2.4）
 # 鎖定後升級條件視 SD_09 評估；continue-on-error 維持非阻塞。
-#
-# 初始狀態：W3 啟動（2026-05-18），尚未累積 7 次 nightly 達標紀錄。
-# 預期：W3 連續兩週 nightly mutmut（限 token_guard），達 ≥ 70%（目標 75% -5% 容忍）後寫入 baseline。
-# 落地策略：W3 末若觀察期未滿 7 次或抖動，僅累積觀察，不寫入；fall-back 至 SD_09 接續 pilot。
 
 [scores]
+token_guard = 0.7071
