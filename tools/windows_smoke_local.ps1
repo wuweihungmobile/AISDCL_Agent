@@ -226,8 +226,12 @@ function Test-WorktreeRejectNestedCommand {
   }
   $installer = Join-Path $wt $InstallerRel
   # 刻意用 -Command 包一層 `& '<installer>'`（而非 -File 直接指向 installer），
-  # 重現「最外層呼叫棧 frame 非真實 .ps1 檔案」的非典型呼叫鏈情境。
-  & powershell -NoProfile -Command "& '$installer'" | Out-Null
+  # 重現「最外層呼叫棧 frame 非真實 .ps1 檔案」的非典型呼叫鏈情境。子行程須先
+  # Set-Location 進 worktree 目錄——linked worktree 偵測靠當前目錄的
+  # git-dir/git-common-dir 判斷，子行程繼承呼叫端 cwd（本 repo 根，非 worktree），
+  # 不切換目錄會讓偵測邏輯連「這是 worktree」都判斷不到，與 [3][4] 既有
+  # Push-Location 進 worktree 再呼叫同一精神。
+  & powershell -NoProfile -Command "Set-Location -LiteralPath '$wt'; & '$installer'" | Out-Null
   $rc = $LASTEXITCODE
   git -C $BaseRepo worktree remove --force $wt
   if ($rc -eq 1) {
