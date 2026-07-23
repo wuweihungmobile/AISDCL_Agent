@@ -129,6 +129,9 @@ on:
       - "AutoClaude/tools/fix_nightly_catchup.ps1"
       - "AutoClaude/tools/run_local_nightly.ps1"
       - "tools/install_windows_nightly.ps1"
+      # R27：新增 tools/tests/test_bootstrap_ps1.py 直接以路徑引用 tools/bootstrap.ps1
+      # 這支根層消費檔（DEF-101-042 同構，test_ci_paths_cover_root_consumers.py 實測揪出）
+      - "tools/bootstrap.ps1"
       - "**/*.sh"
       - "tools/git-hooks/**"
       - ".claude/**"
@@ -197,6 +200,9 @@ on:
       - "AutoClaude/tools/fix_nightly_catchup.ps1"
       - "AutoClaude/tools/run_local_nightly.ps1"
       - "tools/install_windows_nightly.ps1"
+      # R27：新增 tools/tests/test_bootstrap_ps1.py 直接以路徑引用 tools/bootstrap.ps1
+      # 這支根層消費檔（DEF-101-042 同構，test_ci_paths_cover_root_consumers.py 實測揪出）
+      - "tools/bootstrap.ps1"
       - "**/*.sh"
       - "tools/git-hooks/**"
       - ".claude/**"
