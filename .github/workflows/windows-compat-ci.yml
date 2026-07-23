@@ -297,6 +297,19 @@ jobs:
         # tools/run_root_unittests.py（數量下限釘選，低於下限紅燈不執行）。
         run: python tools/run_root_unittests.py
 
+      - name: install_windows_nightly.ps1 -WhatIf 預覽（R26 Scan-C 發現：從未在真實 CI 執行過；鏡射 macos-compat-ci.yml install_mac_nightly.sh --render-only 步驟，DEF-101-269）
+        # -WhatIf 不需 elevation、不真的呼叫 Register-ScheduledTask，windows-latest runner
+        # 可安全直跑。斷言寫法鏡射 tools/windows_smoke_local.ps1 [8/8]（獨立子行程呼叫，
+        # ShouldProcess 的 WhatIf 訊息屬子行程原生 stdout，2>&1 合流後即可捕捉得到）。
+        shell: pwsh
+        run: |
+          $whatIfOutput = & powershell.exe -NoProfile -ExecutionPolicy Bypass `
+            -File ./tools/install_windows_nightly.ps1 -WhatIf 2>&1 | Out-String
+          Write-Host $whatIfOutput
+          if ($LASTEXITCODE -ne 0) { throw "install_windows_nightly.ps1 -WhatIf 失敗（rc=$LASTEXITCODE）" }
+          if ($whatIfOutput -notmatch 'Register-ScheduledTask') { throw "install_windows_nightly.ps1 -WhatIf 輸出未含預期的 Register-ScheduledTask 內容" }
+          Write-Host "install_windows_nightly.ps1 -WhatIf 預覽通過"
+
       - name: 執行 tools/bootstrap.ps1（R1 SA 發現：Windows 新人上手入口從未被實測）
         shell: pwsh
         run: |
