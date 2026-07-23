@@ -60,8 +60,23 @@ class TestBootstrapWindowsAppsGuard(unittest.TestCase):
     ) -> None:
         """WindowsApps 空殼與真直譯器同時在 PATH 上時（空殼排在前面），必須
         跳過空殼、採用後面真正的候選——證明 guard 是「排除」而非「一找到
-        python 就用」的裸邏輯退化。用 python3.exe 作真候選（迴圈第三順位），
-        避免需要模擬完整可執行的 py/python 直譯器行為。
+        python 就用」的裸邏輯退化。
+
+        R27 二審 QA 對抗式驗證揪出首版本此測試唯一斷言
+        `assertNotIn("找不到 python/py/python3", ...)` 對「選中空殼後執行失敗」
+        與「選中真候選後執行失敗」兩條路徑皆為真（皆不含「找不到」字樣）——
+        對 bug-injection（改回舊版裸迴圈、誤選空殼）跑此測試**不會變紅**，屬
+        裝飾性斷言、未真正背書 docstring 宣稱的「證明選中真候選」。改用
+        `.cmd` 假直譯器（Windows PATHEXT 解析下 `Get-Command python3`／`& python3`
+        皆會找到 `python3.cmd`，經實測確認）取代先前不可執行的 "MZ" 佔位位元
+        組，令假直譯器被呼叫時印出唯一標記字串，正向斷言該標記真的出現——
+        直接證明 bootstrap.ps1 選中並執行了 python3 這個候選，而非空殼（不
+        斷言 exit code：實測 `-Command "& 'script.ps1'"` 這種巢狀呼叫下，內層
+        腳本的 `exit N` 不會透傳成外層 powershell.exe 行程自身的 exit code
+        〔最小 repro 確認：`exit 42` 單獨測試外層恆回 1〕，這是 `-Command`
+        巢狀呼叫本身的獨立行為特性、非 bootstrap.ps1 缺陷，與本輪
+        `GitHooksInstallCommon.ps1` 呼叫棧語意同屬「`-Command` 巢狀呼叫有
+        自己一套規則」家族，不宜作為斷言依據，故本測試只驗證標記字串）。
         """
         with tempfile.TemporaryDirectory() as td:
             stub_dir = Path(td) / "WindowsApps"
@@ -69,17 +84,12 @@ class TestBootstrapWindowsAppsGuard(unittest.TestCase):
             (stub_dir / "python.exe").write_bytes(b"")
             real_dir = Path(td) / "real"
             real_dir.mkdir()
-            # 只需要 Get-Command 找得到、且被 & 呼叫時不會無限掛住；用一個會
-            # 立刻印出可辨識字串並以非 0 結束的假直譯器，觀察 bootstrap.ps1
-            # 是否真的選中它（而非空殼）去呼叫。
-            fake = real_dir / "python3.exe"
-            fake.write_bytes(b"MZ")  # 佔位位元組，PowerShell Get-Command 只看副檔名/存在性
+            fake = real_dir / "python3.cmd"
+            fake.write_text("@echo off\r\necho FAKE_PYTHON3_INVOKED\r\nexit /b 42\r\n",
+                             encoding="ascii")
             proc = self._run([stub_dir, real_dir])
-            # 空殼被排除、python3 被選中後會嘗試以其執行 bootstrap_core.py；
-            # 假直譯器不是真正可執行的 PE（僅 "MZ" 兩位元組），呼叫會失敗，
-            # 但失敗訊息必須來自「嘗試執行選中的候選」而非「找不到 python」，
-            # 藉此區分兩種失敗成因、確認 guard 真的往下選到了候選而非卡在空殼。
-            self.assertNotIn("找不到 python/py/python3", proc.stdout + proc.stderr)
+            self.assertIn("FAKE_PYTHON3_INVOKED", proc.stdout + proc.stderr,
+                          proc.stdout + proc.stderr)
 
 
 if __name__ == "__main__":
