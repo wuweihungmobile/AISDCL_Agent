@@ -10,12 +10,27 @@ test_copy_on_evolve / test_pytest_passed_count 四檔共用的 skipif 慣例）�
 Git Bash（隨 git 安裝、繼承 Windows PATH）優先，非 System32 的裸 bash 次之；
 每個候選以 `echo ok` 實跑驗活。皆無 → None（呼叫端 skipif）。
 macOS/Linux 行為不變（裸 bash 直接驗活回傳）。
+
+R31 Scan-B 修復：System32 排除原本用 `"system32" not in bare...lower()` 任意
+子字串命中即排除，較 `tools/integration_gate_core.py::_has_system32_segment()`
+（DEF-101-236 修復後的正確版本）寬鬆，會誤傷路徑含 "system32" 子字串但非該
+目錄段的合法候選（如 `C:\\MySystem32Tools\\bash.exe`）。本檔與
+`tools/integration_gate_core.py` 分屬不同子專案，刻意各自獨立實作（見下方
+`usable_bash()` 呼叫端註解），故改用 `PureWindowsPath` 逐段精確比對對齊語意，
+而非跨子專案共用 import。
 """
 from __future__ import annotations
 
 import shutil
 import subprocess
-from pathlib import Path
+from pathlib import Path, PureWindowsPath
+
+
+def _has_system32_segment(path_str: str) -> bool:
+    """依路徑段精確比對是否含完整 "system32" 段（不分大小寫），對齊
+    `tools/integration_gate_core.py::_has_system32_segment()` 的判斷語意
+    （DEF-101-236）。"""
+    return any(part.lower() == "system32" for part in PureWindowsPath(path_str).parts)
 
 
 def usable_bash() -> str | None:
@@ -30,7 +45,7 @@ def usable_bash() -> str | None:
                 if c.exists():
                     candidates.append(str(c))
     bare = shutil.which("bash")
-    if bare and "system32" not in bare.replace("/", "\\").lower():
+    if bare and not _has_system32_segment(bare):
         candidates.append(bare)
     for cand in candidates:
         try:

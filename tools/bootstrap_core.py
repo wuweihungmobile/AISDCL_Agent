@@ -29,7 +29,7 @@ import os
 import shutil
 import subprocess
 import sys
-from pathlib import Path
+from pathlib import Path, PureWindowsPath
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 VENV_DIR = REPO_ROOT / ".venv"
@@ -106,6 +106,18 @@ def _probe_version_display(exe: str) -> str:
     return (proc.stdout + proc.stderr).strip()
 
 
+def _is_windows_apps_stub(resolved_path: str) -> bool:
+    """WHY: WindowsApps 底下的 python.exe/python3.exe 常是系統自動註冊的 App
+    Execution Alias 空殼——`shutil.which()` 找得到、但實際執行只會跳出
+    Microsoft Store 安裝提示，不會執行任何 Python 碼。`tools/bootstrap.ps1`
+    （DEF-101-273/279）已對 `python`/`python3` 裸名候選加了同款靜態路徑排除
+    guard（`_probe_ok()` 用執行結果判斷在此情境不可靠，正是 `.ps1` 改用靜態
+    路徑比對而非執行探測的原因）；本函式對稱補齊 Python 核心 `pick_python()`
+    （R31 Scan-B 掃描實證：兩邊此前不對稱，只有 `.ps1` 有 guard）。
+    """
+    return any(part.lower() == "windowsapps" for part in PureWindowsPath(resolved_path).parts)
+
+
 def pick_python(py_target: str) -> str | None:
     """挑一個 >= 3.11 的直譯器；回傳可直接 .split() 餵給 subprocess 的字串。"""
     if IS_WINDOWS:
@@ -120,7 +132,13 @@ def pick_python(py_target: str) -> str | None:
 
     for candidate in candidates:
         parts = candidate.split()
-        if shutil.which(parts[0]) is None:
+        resolved = shutil.which(parts[0])
+        if resolved is None:
+            continue
+        # `py` launcher 候選（含空格，parts[0] == "py"）不需要此 guard——它本身
+        # 就是官方解析真直譯器的入口，不會是 WindowsApps 空殼（同 bootstrap.ps1
+        # 註解）；只有裸名 "python"/"python3" 候選會命中空殼別名。
+        if IS_WINDOWS and parts[0] in ("python", "python3") and _is_windows_apps_stub(resolved):
             continue
         if _probe_ok(parts):
             return candidate
