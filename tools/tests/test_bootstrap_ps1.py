@@ -91,6 +91,39 @@ class TestBootstrapWindowsAppsGuard(unittest.TestCase):
             self.assertIn("FAKE_PYTHON3_INVOKED", proc.stdout + proc.stderr,
                           proc.stdout + proc.stderr)
 
+    def test_windowsapps_python_and_python3_stubs_both_skipped_and_reports_not_found(
+        self,
+    ) -> None:
+        """DEF-101-279 回歸鎖：PATH 上 `python.exe` 與 `python3.exe` 兩者皆位於
+        WindowsApps 路徑下（皆為空殼），且無 `py`。R27 只替 `python` 候選補上
+        `-notlike '*\\WindowsApps\\*'` guard（DEF-101-273），`elseif` 分支的
+        `python3` 候選當時沒同步補——全新 Windows 11 機器上兩者常常都是系統
+        自動註冊的空殼，此情境下舊邏輯會選中 `python3` 空殼並嘗試呼叫，
+        重現與 DEF-101-273 相同的失敗模式（跳出 Store 提示、永遠不會整備
+        環境）而非回報「找不到」。
+
+        用 `.cmd` 假直譯器取代 `python3.exe`（同 R27 QA 教訓：純位元組佔位檔
+        不可執行、對 bug-injection 不會變紅，屬裝飾性斷言）：若 `python3`
+        分支漏 guard，PowerShell 會呼叫此假直譯器並印出標記字串——修復前
+        本測試斷言標記字串「不」出現且回報「找不到」，此斷言在修復前必為
+        **紅**（標記字串真的會出現、不含「找不到」字樣）；修復後 guard 生效、
+        兩個空殼皆被排除，標記字串不出現、回報「找不到」，斷言轉綠。
+        """
+        with tempfile.TemporaryDirectory() as td:
+            stub_dir = Path(td) / "WindowsApps"
+            stub_dir.mkdir()
+            (stub_dir / "python.exe").write_bytes(b"")
+            fake_python3 = stub_dir / "python3.cmd"
+            fake_python3.write_text(
+                "@echo off\r\necho FAKE_PYTHON3_STUB_INVOKED\r\nexit /b 42\r\n",
+                encoding="ascii",
+            )
+            proc = self._run([stub_dir])
+            output = proc.stdout + proc.stderr
+            self.assertNotIn("FAKE_PYTHON3_STUB_INVOKED", output, output)
+            self.assertNotEqual(proc.returncode, 0, output)
+            self.assertIn("找不到", output)
+
 
 if __name__ == "__main__":
     unittest.main()

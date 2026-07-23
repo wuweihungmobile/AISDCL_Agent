@@ -37,8 +37,9 @@ import _stdio_utf8  # noqa: E402,F401  # Windows 非 UTF-8 終端 print(✅/❌)
 ROOT = Path(__file__).resolve().parent.parent
 
 # 目前 dev_start.sh=78 行、dev_start.ps1=75 行、local_ci_gate.sh=23 行、
-# local_ci_gate.ps1=39 行、bootstrap.sh=24/.ps1=30、integration_gate.sh=23/.ps1=30、
-# run_act.sh=21/.ps1=54（R16 三對收斂）；上限抓 100 行，留自然增長空間。
+# local_ci_gate.ps1=39 行、bootstrap.sh=24/.ps1=50（R29 DEF-101-279 補 guard 後行數增長）、
+# integration_gate.sh=23/.ps1=30、run_act.sh=21/.ps1=54（R16 三對收斂）；
+# 上限抓 100 行，留自然增長空間。
 MAX_LINES = 100
 
 _PS1_BLOCK_COMMENT_RE = re.compile(r"<#.*?#>", re.DOTALL)
@@ -67,8 +68,9 @@ _PINNED_SHA256: dict[str, str] = {
     "tools/bootstrap.sh": (
         "dc11cfbecb4cab979da1492a8a0646ad8dbb97b25173e4c6552fdaae6c06fd46"
     ),
+    # DEF-101-279：python3 候選補上與 python 候選同款 WindowsApps 排除 guard
     "tools/bootstrap.ps1": (
-        "d82f5aba4c707cefa631d4b2c7170447adb3196a8ca92bb866c07ae023650328"
+        "0aaaf64e16f5c17dc7735e24ee7d4da71c5fce9477cbefd516dc95c8e4c1a4da"
     ),
     "tools/integration_gate.sh": (
         "6a7d08e438d25d0ffeb223e5b4a3ebcc7869065b2088c50b52aa2ebd2f8c6c83"

@@ -16,6 +16,9 @@ monorepo 一鍵開發環境整備薄殼（Windows）。macOS/Linux 對等腳本�
 
 $PyExe = $null
 if (Get-Command py -ErrorAction SilentlyContinue) {
+  # `py` launcher 不需要 WindowsApps 排除 guard：Windows Store 的 App Execution
+  # Alias 只自動註冊 python.exe／python3.exe 空殼，不會註冊 py.exe——`py` 只在
+  # 真的裝了 Python（或等效安裝程式）時才會出現，命中即代表可信任。
   $PyExe = 'py'
 } else {
   # 排除 Windows Store App Execution Alias stub（DEF-101-273，比照 tools/dev_start.ps1
@@ -23,13 +26,19 @@ if (Get-Command py -ErrorAction SilentlyContinue) {
   # WindowsApps 底下的空殼 python.exe（實際執行只跳出 Microsoft Store 提示，不會執行
   # 任何 Python 程式碼）；本檔是「`.venv` 尚未存在、不可假設已啟用」的第一步 onboarding
   # 入口，恰是最需要此 guard 的情境，故候選順序改為 py → python（排除 WindowsApps）→
-  # python3。dev_start.ps1 同款 guard 邏輯一致，但候選清單非逐字相同（該檔假設 venv
-  # 可能已啟用、無 python3 兜底；本檔 venv 尚不存在，保留 python3 作為第三候選）。
+  # python3（排除 WindowsApps）。dev_start.ps1 同款 guard 邏輯一致，但候選清單非逐字
+  # 相同（該檔假設 venv 可能已啟用、無 python3 兜底；本檔 venv 尚不存在，保留 python3
+  # 作為第三候選）。DEF-101-279：python3 分支原本沒有同款 guard——全新 Windows 11
+  # 機器上 python.exe 與 python3.exe 常常都是系統自動註冊的 WindowsApps 空殼，漏 guard
+  # 會讓 python3 分支重現與 DEF-101-273 相同的失敗模式，故此處補齊同款排除。
   $PyCand = Get-Command python -ErrorAction SilentlyContinue
   if ($PyCand -and $PyCand.Source -notlike '*\WindowsApps\*') {
     $PyExe = 'python'
-  } elseif (Get-Command python3 -ErrorAction SilentlyContinue) {
-    $PyExe = 'python3'
+  } else {
+    $Py3Cand = Get-Command python3 -ErrorAction SilentlyContinue
+    if ($Py3Cand -and $Py3Cand.Source -notlike '*\WindowsApps\*') {
+      $PyExe = 'python3'
+    }
   }
 }
 if (-not $PyExe) {
