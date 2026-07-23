@@ -15,10 +15,20 @@ monorepo 一鍵開發環境整備薄殼（Windows）。macOS/Linux 對等腳本�
 #>
 
 $PyExe = $null
-foreach ($candidate in @('python', 'py', 'python3')) {
-  if (Get-Command $candidate -ErrorAction SilentlyContinue) {
-    $PyExe = $candidate
-    break
+if (Get-Command py -ErrorAction SilentlyContinue) {
+  $PyExe = 'py'
+} else {
+  # 排除 Windows Store App Execution Alias stub（DEF-101-273，比照 tools/dev_start.ps1
+  # 既有 guard）：全新 Windows 11 機器未裝真 Python 時，`Get-Command python` 仍會找到
+  # WindowsApps 底下的空殼 python.exe（實際執行只跳出 Microsoft Store 提示，不會執行
+  # 任何 Python 程式碼）；本檔是「`.venv` 尚未存在、不可假設已啟用」的第一步 onboarding
+  # 入口，恰是最需要此 guard 的情境，故候選順序改為 py → python（排除 WindowsApps）→
+  # python3，與 dev_start.ps1 一致。
+  $PyCand = Get-Command python -ErrorAction SilentlyContinue
+  if ($PyCand -and $PyCand.Source -notlike '*\WindowsApps\*') {
+    $PyExe = 'python'
+  } elseif (Get-Command python3 -ErrorAction SilentlyContinue) {
+    $PyExe = 'python3'
   }
 }
 if (-not $PyExe) {

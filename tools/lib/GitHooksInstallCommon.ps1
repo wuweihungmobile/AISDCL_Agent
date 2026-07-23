@@ -33,19 +33,16 @@ tools/lib/git_hooks_install_common.sh 兩份 thin wrapper 呼叫，兩者只保�
 $script:GitHooksInstallCommonPy = [System.IO.Path]::GetFullPath(
   (Join-Path $PSScriptRoot '../git_hooks_install_common.py'))
 
-# dot-source 陷阱防護（DEF-101-261）：.EXAMPLE 示範直接互動式 dot-source 本檔，
-# 但下列驗證失敗分支歷史上直接 exit 1——若使用者在互動式 shell 真的照做並命中
-# 任一失敗分支，會把整個互動 shell 關掉。用呼叫棧最外層 frame 判斷「這條呼叫鏈
-# 的源頭是不是一支真正的 .ps1 腳本檔」：生產呼叫端（install_git_hooks.ps1 等）
-# 皆以 powershell -File 執行、內部再 dot-source 本檔，此時最外層 frame.ScriptName
-# 非空；若使用者在互動提示字元直接 dot-source 本檔，最外層 frame 沒有腳本檔
-# （Command=<ScriptBlock> 或提示字元本身，ScriptName 為空字串）。命中失敗分支時：
-# 前者維持 exit（生產行為零改變）、後者改用 return（不誤殺使用者 shell）。與
-# tools/dev_start.ps1 的 dot-source 偵測同一精神，但改用呼叫棧而非
-# $MyInvocation.InvocationName——因為本檔是函式庫，失敗分支散落在稍後才被呼叫
-# 的函式內部（return 只會跳出該函式本身），並非本檔自身頂層。
-$script:GitHooksInstallCommonScriptDriven = [bool]((Get-PSCallStack)[-1].ScriptName)
-
+# dot-source 陷阱防護（DEF-101-261，R27 訂正 DEF-101-272）：互動式手動 dot-source
+# 本檔命中失敗分支若直接 exit 1 會關掉整個 shell，故需判斷是否為腳本驅動。舊版
+# （R23~R26）只看呼叫棧**最外層** frame 的 ScriptName：巢狀呼叫（如
+# `-Command "...; ./windows_smoke_local.ps1"`、該 .ps1 內再 `& $installer` 呼叫
+# install_git_hooks.ps1）下最外層是 `-Command` 命令列本身（ScriptName 空），
+# 合法腳本驅動鏈被誤判互動式，防呆靜默失效（R27 實測重現：[3][4] rc=1→0/哨兵9）。
+# 改看**呼叫棧[1]**（本檔 dot-source 點的直接呼叫者，非本檔自身/非最外層）：
+# 純互動 `-Command ". thisFile"` 時 [1] 為空白 ScriptBlock → return；被任何真實
+# .ps1 dot-source 進去時，無論該 .ps1 再往上被如何呼叫，[1] 恆非空 → exit。
+$script:GitHooksInstallCommonScriptDriven = [bool]((Get-PSCallStack)[1].ScriptName)
 # venv 提示：下列各函式都靠裸 python 呼叫 GitHooksInstallCommonPy，未啟用 venv 就
 # 直接失敗提示（勝過各函式逐一噴原生「'python' 不是內部或外部命令」）——與
 # tools/integration_gate.ps1 / AutoClaude/tools/local_ci_gate.ps1 的

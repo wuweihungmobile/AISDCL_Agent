@@ -12,7 +12,7 @@
 # （install 共用層 tools/git_hooks_install_common.py 與 LATEST 解析 SSOT 都要用）。
 # Windows PowerShell 5.1 相容（禁 &&/|| 鏈接、三元、??、?.；$LASTEXITCODE 顯式檢查）。
 #
-# 涵蓋（對照 windows-compat-ci.yml windows-smoke 各 step；預期 PASS 總數 = 11）：
+# 涵蓋（對照 windows-compat-ci.yml windows-smoke 各 step；預期 PASS 總數 = 12）：
 #   [1] PowerShell parse 檢查：根層 tools/（含 tools/lib/）全部 active .ps1 以
 #       [System.Management.Automation.Language.Parser]::ParseFile 驗 0 error
 #       （對本 repo 直跑、唯讀。凍結版 AISDLC_SDD/AISDLC_SDD_v0.01~v0.29 位於
@@ -36,11 +36,19 @@
 #       跑 [2] 同款安裝往返一次，並直讀 .git/config（UTF-8 bytes、不經主控台解碼）
 #       斷言 core.hooksPath 保有「煙霧測試」片段未被編碼損毀（cp950 炸裂是 R9 修復
 #       主題；對應 windows-compat-ci install_post_commit 編碼斷言的精神抽驗）
-#   [7] check_ntfs_paths.py + check_script_parity.py（唯讀，直接對本 repo；R18 全面
+#   [7] install_git_hooks.ps1 於「-Command 非典型呼叫鏈」下 linked worktree 拒絕仍生效
+#       （R27 訂正 DEF-101-263④：該列原判定「pwsh -Command 包裝 dot-source 呼叫全庫
+#       零命中、純理論性」，本輪以 `powershell -NoProfile -Command "& '<installer>'"`
+#       重現：tools/lib/GitHooksInstallCommon.ps1 的 dot-source 陷阱防護若只檢查呼叫棧
+#       「最外層」frame 的 ScriptName，此類非 -File 頂層呼叫會讓 Assert-NotLinkedWorktree
+#       失敗分支從 exit 1 靜默降級為 return，linked worktree 防呆因而失效。已改為改看
+#       呼叫棧 [1]（dot-source 點的直接呼叫者）是否有真實 .ps1 檔案，本步驟即為此修復
+#       的回歸鎖）
+#   [8] check_ntfs_paths.py + check_script_parity.py（唯讀，直接對本 repo；R18 全面
 #       掃描補齊——這兩支純 Python、平台無關的檢查先前僅由 macos_smoke_local.sh [5]
 #       覆蓋，Windows 本機 smoke 從未在 Windows 環境下實際跑過，消除兩平台 smoke
 #       覆蓋不對稱）
-#   [8] tools\install_windows_nightly.ps1 -WhatIf 預覽（R20 全面掃描補齊——R19 新增
+#   [9] tools\install_windows_nightly.ps1 -WhatIf 預覽（R20 全面掃描補齊——R19 新增
 #       此安裝器後從未被任何 smoke 涵蓋，鏡射 macos_smoke_local.sh [6/7] 對
 #       install_mac_nightly.sh --render-only 的精神；-WhatIf 不需 elevation、不真的
 #       動 Task Scheduler，可安全對本 repo 直跑）
@@ -189,6 +197,46 @@ function Test-InstallRoundtrip {
 # linked worktree 拒絕共用（[3][4b]）——DEF-101-135 假 PASS 防護：
 # worktree add 顯式檢查（失敗即 FAIL，不得默默把「沒跑到」當拒絕成功）；
 # Push-Location 失敗或安裝腳本不存在時 rc 停在哨兵 9（受測腳本根本沒執行 ≠ 拒絕成功）。
+function Test-WorktreeRejectNestedCommand {
+  <#
+  .SYNOPSIS
+  linked worktree 拒絕守門的「非典型呼叫鏈」回歸鎖（DEF-101-263④ 訂正 / R27）：
+  安裝器不是以典型 `powershell -File installer.ps1` 頂層執行，而是被包在
+  `powershell -Command "& 'installer.ps1'"` 這種寫法之下（例如某些自動化/CI
+  包裝器慣用 -Command 而非 -File 呼叫子腳本）。此寫法下最外層呼叫棧 frame 沒有
+  真實 .ps1 檔案（ScriptName 為空），R23~R26 的偵測寫法
+  `[bool]((Get-PSCallStack)[-1].ScriptName)` 只看最外層，會誤判為「使用者互動式
+  探索」而把 Assert-NotLinkedWorktree 的失敗分支從 exit 1 降級為 return——linked
+  worktree 防呆因而在此類呼叫情境下靜默失效（R27 手動重現：改用此呼叫寫法後
+  [3][4] 由預期 rc=1 變成 rc=0 或哨兵 rc=9）。修復後改看呼叫棧 [1]（dot-source
+  點的直接呼叫者，非本檔自身/非最外層），本函式即模擬此呼叫寫法、確認修復後
+  仍正確 exit 1，避免此偵測邏輯未來再度悄悄退化為只看最外層。
+  #>
+  param(
+    [Parameter(Mandatory = $true)][string]$BaseRepo,
+    [Parameter(Mandatory = $true)][string]$InstallerRel,
+    [Parameter(Mandatory = $true)][string]$WorktreeName,
+    [Parameter(Mandatory = $true)][string]$Label
+  )
+  $wt = Join-Path $script:Work $WorktreeName
+  git -C $BaseRepo worktree add --quiet --detach $wt HEAD
+  if ($LASTEXITCODE -ne 0) {
+    Fail-Item "${Label}：worktree add 失敗——非典型呼叫鏈拒絕情境未能執行（非假 PASS）"
+    return
+  }
+  $installer = Join-Path $wt $InstallerRel
+  # 刻意用 -Command 包一層 `& '<installer>'`（而非 -File 直接指向 installer），
+  # 重現「最外層呼叫棧 frame 非真實 .ps1 檔案」的非典型呼叫鏈情境。
+  & powershell -NoProfile -Command "& '$installer'" | Out-Null
+  $rc = $LASTEXITCODE
+  git -C $BaseRepo worktree remove --force $wt
+  if ($rc -eq 1) {
+    Pass-Item "${Label}（-Command 非典型呼叫鏈）linked worktree 拒絕（rc=1 as expected）"
+  } else {
+    Fail-Item "${Label}（-Command 非典型呼叫鏈）：於 linked worktree 應 exit 1，實際 rc=${rc}"
+  }
+}
+
 function Test-WorktreeReject {
   param(
     [Parameter(Mandatory = $true)][string]$BaseRepo,
@@ -246,9 +294,9 @@ if ($dirty) {
 }
 
 try {
-  # ── [1/8] PowerShell parse 檢查（根層 tools/ 全部 active .ps1，唯讀）──────────
+  # ── [1/9] PowerShell parse 檢查（根層 tools/ 全部 active .ps1，唯讀）──────────
   Write-Host ''
-  Write-Host '--- [1/8] Parser 解析檢查（根層 tools/ 含 tools/lib/ 全部 .ps1，對本 repo 直跑）---'
+  Write-Host '--- [1/9] Parser 解析檢查（根層 tools/ 含 tools/lib/ 全部 .ps1，對本 repo 直跑）---'
   $ps1Files = @(Get-ChildItem -Path (Join-Path $RepoRoot 'tools') -Recurse -Filter *.ps1 -File)
   $parseBad = 0
   foreach ($f in $ps1Files) {
@@ -289,29 +337,29 @@ try {
   }
 
   if ($FakeReady) {
-    # ── [2/8] install_git_hooks.ps1 安裝／解除往返（fake repo）───────────────────
+    # ── [2/9] install_git_hooks.ps1 安裝／解除往返（fake repo）───────────────────
     Write-Host ''
-    Write-Host '--- [2/8] AutoClaude/tools/install_git_hooks.ps1 安裝／解除往返（fake repo）---'
+    Write-Host '--- [2/9] AutoClaude/tools/install_git_hooks.ps1 安裝／解除往返（fake repo）---'
     Test-InstallRoundtrip -TargetRepo $Fake -InstallerRel 'AutoClaude\tools\install_git_hooks.ps1' `
       -UninstallSwitch -Label '[2] install_git_hooks.ps1'
 
-    # ── [3/8] install_git_hooks.ps1 linked worktree 拒絕 ─────────────────────────
+    # ── [3/9] install_git_hooks.ps1 linked worktree 拒絕 ─────────────────────────
     Write-Host ''
-    Write-Host '--- [3/8] install_git_hooks.ps1 於 linked worktree 應拒絕（fail-loud）---'
+    Write-Host '--- [3/9] install_git_hooks.ps1 於 linked worktree 應拒絕（fail-loud）---'
     Test-WorktreeReject -BaseRepo $Fake -InstallerRel 'AutoClaude\tools\install_git_hooks.ps1' `
       -WorktreeName 'wt-install-git-hooks-reject' -Label '[3] install_git_hooks.ps1'
 
-    # ── [4/8] install-hooks.ps1 安裝往返 + linked worktree 拒絕 ──────────────────
+    # ── [4/9] install-hooks.ps1 安裝往返 + linked worktree 拒絕 ──────────────────
     Write-Host ''
-    Write-Host '--- [4/8] AISDLC_SDD/scripts/install-hooks.ps1 往返 + worktree 拒絕（fake repo）---'
+    Write-Host '--- [4/9] AISDLC_SDD/scripts/install-hooks.ps1 往返 + worktree 拒絕（fake repo）---'
     Test-InstallRoundtrip -TargetRepo $Fake -InstallerRel 'AISDLC_SDD\scripts\install-hooks.ps1' `
       -CheckSeparators -Label '[4] install-hooks.ps1'
     Test-WorktreeReject -BaseRepo $Fake -InstallerRel 'AISDLC_SDD\scripts\install-hooks.ps1' `
       -WorktreeName 'wt-install-hooks-reject' -Label '[4] install-hooks.ps1'
 
-    # ── [5/8] LATEST install_post_commit.ps1 worktree 實跑 + 移除後路徑斷言 ───────
+    # ── [5/9] LATEST install_post_commit.ps1 worktree 實跑 + 移除後路徑斷言 ───────
     Write-Host ''
-    Write-Host '--- [5/8] install_post_commit.ps1 worktree 實跑 + 移除後路徑斷言（fake repo）---'
+    Write-Host '--- [5/9] install_post_commit.ps1 worktree 實跑 + 移除後路徑斷言（fake repo）---'
     # LATEST 解析一律走 SSOT resolver（DEF-101-133）；resolver 檔取自真 repo、
     # --sdd-root 指向 fake repo（resolver 屬驗證工具、不必來自被測樹）。
     $resolver = Join-Path $RepoRoot 'AISDLC_SDD\scripts\sdd_version.py'
@@ -391,9 +439,9 @@ try {
       }
     }
 
-    # ── [6/8] 非 ASCII 路徑防護抽驗（中文目錄 clone + 安裝往返）───────────────────
+    # ── [6/9] 非 ASCII 路徑防護抽驗（中文目錄 clone + 安裝往返）───────────────────
     Write-Host ''
-    Write-Host '--- [6/8] 非 ASCII 路徑防護抽驗（「煙霧測試」目錄 clone + install_git_hooks.ps1 往返）---'
+    Write-Host '--- [6/9] 非 ASCII 路徑防護抽驗（「煙霧測試」目錄 clone + install_git_hooks.ps1 往返）---'
     $cnParent = Join-Path $Work '煙霧測試'
     New-Item -ItemType Directory -Path $cnParent -ErrorAction SilentlyContinue | Out-Null
     $cnRepo = Join-Path $cnParent 'repo'
@@ -404,15 +452,21 @@ try {
       Test-InstallRoundtrip -TargetRepo $cnRepo -InstallerRel 'AutoClaude\tools\install_git_hooks.ps1' `
         -UninstallSwitch -NonAsciiProbe '煙霧測試' -Label '[6] 中文路徑（煙霧測試）install_git_hooks.ps1'
     }
+
+    # ── [7/9] linked worktree 拒絕於非典型呼叫鏈（-Command 包裝）下仍生效 ────────
+    Write-Host ''
+    Write-Host '--- [7/9] install_git_hooks.ps1 於「-Command 非典型呼叫鏈」linked worktree 仍應拒絕 ---'
+    Test-WorktreeRejectNestedCommand -BaseRepo $Fake -InstallerRel 'AutoClaude\tools\install_git_hooks.ps1' `
+      -WorktreeName 'wt-install-git-hooks-reject-nested-command' -Label '[7] install_git_hooks.ps1'
   }
 
-  # ── [7/8] check_ntfs_paths.py + check_script_parity.py（本 repo，唯讀）───────
+  # ── [8/9] check_ntfs_paths.py + check_script_parity.py（本 repo，唯讀）───────
   # R18 全面掃描補齊：這兩支純 Python、平台無關的檢查先前僅由 macos_smoke_local.sh
   # [5/7] 覆蓋，Windows 本機 smoke 從未在 Windows 環境下實際跑過（CI push gate
   # 另有覆蓋，但不是「Windows 本機 smoke」）。兩腳本皆以 `Path(__file__).resolve()`
   # 自行定位 repo 根，不依賴呼叫端 cwd，故不需 fake repo / Push-Location。
   Write-Host ''
-  Write-Host '--- [7/8] check_ntfs_paths.py + check_script_parity.py（本 repo，唯讀）---'
+  Write-Host '--- [8/9] check_ntfs_paths.py + check_script_parity.py（本 repo，唯讀）---'
   & python (Join-Path $RepoRoot 'tools\check_ntfs_paths.py')
   if ($LASTEXITCODE -eq 0) {
     Pass-Item 'tools\check_ntfs_paths.py'
@@ -426,7 +480,7 @@ try {
     Fail-Item "tools\check_script_parity.py（rc=$LASTEXITCODE）"
   }
 
-  # ── [8/8] install_windows_nightly.ps1 -WhatIf 預覽（本 repo，唯讀）───────────
+  # ── [9/9] install_windows_nightly.ps1 -WhatIf 預覽（本 repo，唯讀）───────────
   # R20 全面掃描補齊：R19 新增此安裝器後從未被任何 smoke 涵蓋（鏡射
   # macos_smoke_local.sh [6/7] 對 install_mac_nightly.sh --render-only 的精神）。
   # -WhatIf 不需 elevation、不真的呼叫 Register-ScheduledTask，可對本 repo 直跑
@@ -436,7 +490,7 @@ try {
   # 的 WhatIf 預覽訊息走 host-only 輸出、同行程內 `& script` 呼叫無法用一般串流重導向
   # 捕捉；真機實測獨立子行程呼叫可正確捕捉）並斷言輸出內容含 Register-ScheduledTask。
   Write-Host ''
-  Write-Host '--- [8/8] tools\install_windows_nightly.ps1 -WhatIf 預覽（本 repo，唯讀）---'
+  Write-Host '--- [9/9] tools\install_windows_nightly.ps1 -WhatIf 預覽（本 repo，唯讀）---'
   $whatIfOutput = & powershell.exe -NoProfile -ExecutionPolicy Bypass `
     -File (Join-Path $RepoRoot 'tools\install_windows_nightly.ps1') -WhatIf 2>&1 | Out-String
   $whatIfRc = $LASTEXITCODE
@@ -461,9 +515,11 @@ try {
 # ── 彙總 ─────────────────────────────────────────────────────────────────────
 # R10 二審 QA 觀察項：PASS 下限釘選（比照 run_root_unittests MIN_TESTS 精神）——
 # 只斷言 FAIL==0 時，驗證段落被整段刪除仍 exit 0（靜默縮面）；PASS 低於下限即紅。
-# 刻意刪減驗證項時同步下修本值（現況滿版 PASS=11——R18 新增 [7/8] check_ntfs_paths.py
-# + check_script_parity.py 兩項計點；R20 新增 [8/8] install_windows_nightly.ps1 -WhatIf 一項計點）。
-$MinPass = 11
+# 刻意刪減驗證項時同步下修本值（現況滿版 PASS=12——R18 新增 [8/9] check_ntfs_paths.py
+# + check_script_parity.py 兩項計點；R20 新增 [9/9] install_windows_nightly.ps1 -WhatIf 一項計點；
+# R27 新增 [7/9] linked worktree 拒絕於「-Command 非典型呼叫鏈」下仍生效一項計點，
+# 修復 DEF-101-263④ 訂正——原判定「全庫零命中、純理論性」經本輪實測推翻，見該列訂正）。
+$MinPass = 12
 if ($script:Pass -lt $MinPass) {
   Fail-Item "PASS 總數 $($script:Pass) 低於下限 ${MinPass}——驗證段落疑似被刪減（靜默縮面）"
 }

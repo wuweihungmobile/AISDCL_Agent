@@ -68,7 +68,7 @@ _PINNED_SHA256: dict[str, str] = {
         "dc11cfbecb4cab979da1492a8a0646ad8dbb97b25173e4c6552fdaae6c06fd46"
     ),
     "tools/bootstrap.ps1": (
-        "f5596876e03d3a7e382d3c336918da146f720aa43b700367ee049e4b97490b5c"
+        "d82f5aba4c707cefa631d4b2c7170447adb3196a8ca92bb866c07ae023650328"
     ),
     "tools/integration_gate.sh": (
         "6a7d08e438d25d0ffeb223e5b4a3ebcc7869065b2088c50b52aa2ebd2f8c6c83"
