@@ -120,6 +120,7 @@ on:
       # 未被機械鎖偵測為「消費檔」——若未來 commit 只改其中一份，本 workflow 不會
       # 被觸發（DEF-101-042 同款假綠盲區）。手動補列對稱涵蓋。
       - "tools/lib/platform_utils.py"
+      - "tools/lib/bash_probe_spec.py"
       - "tools/bootstrap_core.py"
       - "AutoClaude/tools/run_act_core.py"
       # R19 修復包 D：tools/tests/test_install_windows_nightly.py（同活在本
@@ -194,6 +195,7 @@ on:
       # 未被機械鎖偵測為「消費檔」——若未來 commit 只改其中一份，本 workflow 不會
       # 被觸發（DEF-101-042 同款假綠盲區）。手動補列對稱涵蓋。
       - "tools/lib/platform_utils.py"
+      - "tools/lib/bash_probe_spec.py"
       - "tools/bootstrap_core.py"
       - "AutoClaude/tools/run_act_core.py"
       # R19 修復包 D：同上 push 區塊說明

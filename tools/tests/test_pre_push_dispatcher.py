@@ -37,6 +37,13 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 DISPATCHER = REPO_ROOT / "tools" / "git-hooks" / "pre-push"
 ZERO_SHA = "0000000000000000000000000000000000000000"
 
+# R32 Architect 架構最佳化：驗活探測「參數」（指令/期望輸出/System32 排除段）
+# 抽為共用資料規格（tools/lib/bash_probe_spec.py），三份獨立實作各自 import 取得
+# 同一份規則資料；驗活的 subprocess 執行邏輯本檔仍獨立寫死，不共用函式（見下方
+# `_usable_bash()` docstring）。
+sys.path.insert(0, str(REPO_ROOT / "tools" / "lib"))
+import bash_probe_spec as _spec  # noqa: E402
+
 # fake 消費檔清單來源：格式鏡真實 aisdlc-sdd-ci.yml（`- "..."` 雙引號條目）。
 # dispatcher 機械解析此檔（單一真相源），本測試據此鎖住「解析→比對→補跑」全鏈。
 _FAKE_SDD_CI_YML = """\
@@ -51,15 +58,23 @@ on:
 
 
 def _usable_bash() -> str | None:
-    """回傳可跑 repo bash 腳本的 bash 路徑；只有 WSL 佔位 bash 或無 bash → None。
+    """回傳可跑 repo bash 腳本的 bash 路徑；只有 WSL 佔位 bash、缺 coreutils 的
+    殘缺 bash、或無 bash → None。
 
     邏輯鏡自 AISDLC_SDD/scripts/bash_probe.py（該檔是子專案 scripts/tests 的
-    SSOT）；根層 tools/tests 刻意不跨子專案 import——子專案檔案搬移不應弄壞
-    根層閘門。若該檔邏輯更新，請兩處同步。
+    SSOT）；根層 tools/tests 刻意不跨子專案 import 該檔的執行邏輯——子專案檔案
+    搬移不應弄壞根層閘門。驗活探測「參數」（指令/期望輸出/System32 排除段）
+    改為共用 `tools/lib/bash_probe_spec.py`（R32 Architect 架構最佳化），三處
+    讀同一份規則資料，但本檔的 subprocess 執行邏輯仍獨立寫死；若執行邏輯本身
+    更新，請三處同步。
 
     R31 Scan-B 修復：System32 排除改用 `PureWindowsPath` 逐段精確比對（對齊
     `tools/integration_gate_core.py::_has_system32_segment()`，DEF-101-236），
     不再用任意子字串命中即排除。
+
+    R32 修復 DEF-101-275（R27 開出、連續 5 輪未收斂）：原本只用 `echo ok` 驗活，
+    未驗 coreutils（如 `dirname`），精簡版 Git Bash 會誤判為可用。改用
+    `_spec.PROBE_CMD`（echo + dirname 兩段串接）驗活。
     """
     candidates: list[str] = []
     git = shutil.which("git")
@@ -71,16 +86,24 @@ def _usable_bash() -> str | None:
                 if c.exists():
                     candidates.append(str(c))
     bare = shutil.which("bash")
-    if bare and not any(part.lower() == "system32" for part in PureWindowsPath(bare).parts):
+    if bare and not any(
+        part.lower() == _spec.SYSTEM32_SEGMENT for part in PureWindowsPath(bare).parts
+    ):
         candidates.append(bare)
     for cand in candidates:
         try:
             r = subprocess.run(
-                [cand, "-c", "echo ok"],
+                [cand, "-c", _spec.PROBE_CMD],
                 capture_output=True, text=True, encoding="utf-8",
                 errors="replace", timeout=15,
             )
-            if r.returncode == 0 and r.stdout.strip() == "ok":
+            lines = r.stdout.splitlines()
+            if (
+                r.returncode == 0
+                and len(lines) >= 2
+                and lines[0].strip() == _spec.PROBE_EXPECT_ECHO
+                and lines[1].strip() == _spec.PROBE_EXPECT_DIRNAME
+            ):
                 return cand
         except Exception:
             continue
@@ -116,7 +139,36 @@ class TestUsableBashSystem32Guard(unittest.TestCase):
             mock.patch.object(subprocess, "run") as mock_run,
         ):
             mock_which.side_effect = lambda name: legit_path if name == "bash" else None
-            mock_run.return_value = mock.Mock(returncode=0, stdout="ok\n")
+            mock_run.return_value = mock.Mock(returncode=0, stdout="probe_ok\n/tmp/probe_dir\n")
+            result = _usable_bash()
+        self.assertEqual(result, legit_path)
+
+    def test_rejects_bash_missing_coreutils_dirname(self) -> None:
+        """R32 bug-injection 標的（DEF-101-275，R27 開出、連續 5 輪未收斂）：
+        精簡版 Git Bash 只有 `echo` 可用、缺 `dirname` 這類 coreutils 時，
+        `&&` 串接的第二段會以非 0 回傳碼失敗——必須被拒絕，不能只驗 echo 就
+        誤判為可用。若退化回舊版只驗 `echo ok`，本測試須變紅。"""
+        legit_path = r"C:\Program Files\Git\usr\bin\bash.exe"  # platform-ok: mock 回傳值
+        with (
+            mock.patch.object(shutil, "which") as mock_which,
+            mock.patch.object(subprocess, "run") as mock_run,
+        ):
+            mock_which.side_effect = lambda name: legit_path if name == "bash" else None
+            # bash: dirname: command not found → echo 段已輸出，但整串 && 鏈
+            # 因第二段找不到指令而以 rc=127 失敗。
+            mock_run.return_value = mock.Mock(returncode=127, stdout="probe_ok\n")
+            result = _usable_bash()
+        self.assertIsNone(result, "缺 coreutils（dirname）的殘缺 bash 應被拒絕")
+
+    def test_accepts_bash_with_working_coreutils(self) -> None:
+        """正向案例：echo 與 dirname 皆正確輸出、rc=0 時應被接受。"""
+        legit_path = r"C:\Program Files\Git\usr\bin\bash.exe"  # platform-ok: mock 回傳值
+        with (
+            mock.patch.object(shutil, "which") as mock_which,
+            mock.patch.object(subprocess, "run") as mock_run,
+        ):
+            mock_which.side_effect = lambda name: legit_path if name == "bash" else None
+            mock_run.return_value = mock.Mock(returncode=0, stdout="probe_ok\n/tmp/probe_dir\n")
             result = _usable_bash()
         self.assertEqual(result, legit_path)
 

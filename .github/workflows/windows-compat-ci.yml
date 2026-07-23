@@ -161,6 +161,7 @@ on:
       # `rglob`/`sys.path.insert(0, parents[1] / "lib")` 掃描慣用法，故本輪核心 SSOT
       # 檔案未被機械鎖偵測為「消費檔」——手動補列對稱涵蓋（DEF-101-042 同款假綠盲區）。
       - "tools/lib/platform_utils.py"
+      - "tools/lib/bash_probe_spec.py"
       - "tools/bootstrap_core.py"
       - "AutoClaude/tools/run_act_core.py"
       - "**/*.ps1"
@@ -225,6 +226,7 @@ on:
       # `rglob`/`sys.path.insert(0, parents[1] / "lib")` 掃描慣用法，故本輪核心 SSOT
       # 檔案未被機械鎖偵測為「消費檔」——手動補列對稱涵蓋（DEF-101-042 同款假綠盲區）。
       - "tools/lib/platform_utils.py"
+      - "tools/lib/bash_probe_spec.py"
       - "tools/bootstrap_core.py"
       - "AutoClaude/tools/run_act_core.py"
       - "**/*.ps1"

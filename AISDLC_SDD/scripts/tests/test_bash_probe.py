@@ -71,9 +71,58 @@ class TestUsableBashSystem32Guard(unittest.TestCase):
             mock.patch.object(bash_probe.subprocess, "run") as mock_run,
         ):
             mock_which.side_effect = lambda name: legit_path if name == "bash" else None
-            mock_run.return_value = mock.Mock(returncode=0, stdout="ok\n")
+            mock_run.return_value = mock.Mock(returncode=0, stdout="probe_ok\n/tmp/probe_dir\n")
             result = bash_probe.usable_bash()
         self.assertEqual(result, legit_path)
+
+
+class TestUsableBashCoreutilsValidation(unittest.TestCase):
+    """DEF-101-275（R27 開出、連續 5 輪〔R27~R31〕未收斂）回歸鎖：`usable_bash()`
+    原本只用 `echo ok` 驗活，未驗證 coreutils（如 `dirname`）真的可執行，精簡版
+    Git Bash（缺 coreutils）會通過驗活、實際跑腳本才失敗。R32 改用
+    `bash_probe_spec.PROBE_CMD`（echo + dirname 兩段 `&&` 串接）驗活，本類別鎖住
+    正向（真的可用的 bash 應通過）與負向（只有 echo、沒有 dirname 的殘缺 bash
+    應被拒絕）兩分支。"""
+
+    def test_accepts_bash_with_working_coreutils(self) -> None:
+        """正向：echo 與 dirname 皆正確輸出、rc=0 時應被接受。"""
+        legit_path = r"C:\Program Files\Git\usr\bin\bash.exe"  # platform-ok: mock 回傳值
+        with (
+            mock.patch.object(bash_probe.shutil, "which") as mock_which,
+            mock.patch.object(bash_probe.subprocess, "run") as mock_run,
+        ):
+            mock_which.side_effect = lambda name: legit_path if name == "bash" else None
+            mock_run.return_value = mock.Mock(returncode=0, stdout="probe_ok\n/tmp/probe_dir\n")
+            result = bash_probe.usable_bash()
+        self.assertEqual(result, legit_path)
+
+    def test_rejects_bash_missing_coreutils_dirname(self) -> None:
+        """R32 bug-injection 標的：只有 `echo` 可用、缺 `dirname` 的殘缺 Git
+        Bash（`bash: dirname: command not found`）——echo 段已輸出，但 `&&` 串接
+        的第二段因指令不存在而使整串以非 0 回傳碼失敗，必須被拒絕。若退化回舊版
+        只驗 `echo ok`，本測試須變紅。"""
+        legit_path = r"C:\Program Files\Git\usr\bin\bash.exe"  # platform-ok: mock 回傳值
+        with (
+            mock.patch.object(bash_probe.shutil, "which") as mock_which,
+            mock.patch.object(bash_probe.subprocess, "run") as mock_run,
+        ):
+            mock_which.side_effect = lambda name: legit_path if name == "bash" else None
+            mock_run.return_value = mock.Mock(returncode=127, stdout="probe_ok\n")
+            result = bash_probe.usable_bash()
+        self.assertIsNone(result, "缺 coreutils（dirname）的殘缺 bash 應被拒絕")
+
+    def test_rejects_bash_with_wrong_dirname_output(self) -> None:
+        """負向補強：rc=0 但 dirname 輸出與期望不符（假設某環境的 dirname 行為
+        異常），不應被誤判為可用——驗證比對的是精確輸出，不只是 rc。"""
+        legit_path = r"C:\Program Files\Git\usr\bin\bash.exe"  # platform-ok: mock 回傳值
+        with (
+            mock.patch.object(bash_probe.shutil, "which") as mock_which,
+            mock.patch.object(bash_probe.subprocess, "run") as mock_run,
+        ):
+            mock_which.side_effect = lambda name: legit_path if name == "bash" else None
+            mock_run.return_value = mock.Mock(returncode=0, stdout="probe_ok\nsomething_wrong\n")
+            result = bash_probe.usable_bash()
+        self.assertIsNone(result, "dirname 輸出與期望不符時應被拒絕")
 
 
 if __name__ == "__main__":

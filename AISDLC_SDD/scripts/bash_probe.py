@@ -18,23 +18,37 @@ R31 Scan-B 修復：System32 排除原本用 `"system32" not in bare...lower()` 
 `tools/integration_gate_core.py` 分屬不同子專案，刻意各自獨立實作（見下方
 `usable_bash()` 呼叫端註解），故改用 `PureWindowsPath` 逐段精確比對對齊語意，
 而非跨子專案共用 import。
+
+R32 Architect 架構最佳化修復 DEF-101-275（R27 開出、連續 5 輪未收斂）：原本只用
+`echo ok` 驗活，未驗 coreutils（如 `dirname`），精簡版 Git Bash（缺 coreutils）
+會誤判為可用、實際跑腳本才失敗。改用 `tools/lib/bash_probe_spec.py` 提供的
+`PROBE_CMD`（串接 echo + dirname 兩段探測）驗活；探測「參數」（指令與期望輸出、
+System32 排除段）與 `tools/tests/test_pre_push_dispatcher.py`／
+`test_git_hooks_install_common.py` 的獨立重寫版共用同一份規格資料，但驗活的
+subprocess 執行邏輯本檔仍獨立寫死，不抽成跨檔共用函式。
 """
 from __future__ import annotations
 
 import shutil
 import subprocess
+import sys
 from pathlib import Path, PureWindowsPath
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "tools" / "lib"))
+import bash_probe_spec as _spec  # noqa: E402
 
 
 def _has_system32_segment(path_str: str) -> bool:
     """依路徑段精確比對是否含完整 "system32" 段（不分大小寫），對齊
     `tools/integration_gate_core.py::_has_system32_segment()` 的判斷語意
     （DEF-101-236）。"""
-    return any(part.lower() == "system32" for part in PureWindowsPath(path_str).parts)
+    return any(part.lower() == _spec.SYSTEM32_SEGMENT for part in PureWindowsPath(path_str).parts)
 
 
 def usable_bash() -> str | None:
-    """回傳可跑 repo bash 腳本的 bash 路徑；只有 WSL 佔位 bash 或無 bash → None。"""
+    """回傳可跑 repo bash 腳本的 bash 路徑；只有 WSL 佔位 bash、缺 coreutils
+    的殘缺 bash、或無 bash → None（DEF-101-275：coreutils 亦需驗活，非只驗 echo）。
+    """
     candidates: list[str] = []
     git = shutil.which("git")
     if git:
@@ -50,11 +64,17 @@ def usable_bash() -> str | None:
     for cand in candidates:
         try:
             r = subprocess.run(
-                [cand, "-c", "echo ok"],
+                [cand, "-c", _spec.PROBE_CMD],
                 capture_output=True, text=True, encoding="utf-8",
                 errors="replace", timeout=15,
             )
-            if r.returncode == 0 and r.stdout.strip() == "ok":
+            lines = r.stdout.splitlines()
+            if (
+                r.returncode == 0
+                and len(lines) >= 2
+                and lines[0].strip() == _spec.PROBE_EXPECT_ECHO
+                and lines[1].strip() == _spec.PROBE_EXPECT_DIRNAME
+            ):
                 return cand
         except Exception:
             continue

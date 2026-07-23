@@ -321,17 +321,20 @@ def test_root_infra_ci_has_no_paths_filter():
 
 
 # --- 執行期子行程消費（盲區 B，R19 修復包 A）---------------------------------------
-# tools/bootstrap_core.py／AutoClaude/tools/run_act_core.py 完全不被 tools/tests/
-# 下任何測試檔以 import 或路徑字串引用——它們是被 bootstrap.sh/.ps1、run_act.sh/.ps1
-# 以「子行程呼叫殼腳本」方式消費，測試測的是黑盒殼腳本行為（subprocess 呼叫 shell
-# script），而非直接 import 核心邏輯。這類「執行期子行程消費」關係，上方
-# `_scan_import_consumed_paths()` 的靜態正則 import-BFS 結構上永遠看不到——與盲區 A
-# 不同性質（盲區 A 是解析器猜測範圍不夠，這裡是掃描器方法論邊界），故不再對此加新
-# 正則規則（過去 S6→S12→S26 三輪皆是加新正則打地鼠），改用顯式清單 + 機械斷言其被
-# 對應 workflow 的 push+pull_request paths 覆蓋（fail-loud：檔案不存在或未被覆蓋
-# 即讓本測試紅），手法仿照上方 test_known_consumers_detected() 的 expected 顯式集合。
+# AutoClaude/tools/run_act_core.py 完全不被 tools/tests/ 下任何測試檔以 import 或
+# 路徑字串引用——它是被 run_act.sh/.ps1 以「子行程呼叫殼腳本」方式消費，測試測的是
+# 黑盒殼腳本行為（subprocess 呼叫 shell script），而非直接 import 核心邏輯。這類
+# 「執行期子行程消費」關係，上方 `_scan_import_consumed_paths()` 的靜態正則 import-BFS
+# 結構上永遠看不到——與盲區 A 不同性質（盲區 A 是解析器猜測範圍不夠，這裡是掃描器
+# 方法論邊界），故不再對此加新正則規則（過去 S6→S12→S26 三輪皆是加新正則打地鼠），
+# 改用顯式清單 + 機械斷言其被對應 workflow 的 push+pull_request paths 覆蓋
+# （fail-loud：檔案不存在或未被覆蓋即讓本測試紅），手法仿照上方
+# test_known_consumers_detected() 的 expected 顯式集合。
+# R32 Scan-B 訂正：tools/bootstrap_core.py 已於 R31（DEF-101-281）新增
+# tools/tests/test_bootstrap_core.py 直接 import 之，不再是「執行期子行程消費」，
+# 已被上方 `_scan_import_consumed_paths()` 一般掃描器自動涵蓋，故自本清單移除；
+# 僅 run_act_core.py 仍屬此盲區（見 DEF-101-286 待補測試）。
 _KNOWN_SUBPROCESS_ONLY_CONSUMERS: dict[str, tuple[str, ...]] = {
-    "tools/bootstrap_core.py": ("macos-compat-ci.yml", "windows-compat-ci.yml"),
     "AutoClaude/tools/run_act_core.py": ("macos-compat-ci.yml", "windows-compat-ci.yml"),
 }
 

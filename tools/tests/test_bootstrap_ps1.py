@@ -19,6 +19,21 @@ _REPO_ROOT = Path(__file__).resolve().parents[2]
 _BOOTSTRAP_PS1 = _REPO_ROOT / "tools" / "bootstrap.ps1"
 
 
+def _windows_pwsh_available() -> bool:
+    """回傳「目前確實在 Windows 平台上，且有可用的 powershell/pwsh」。
+
+    僅供依賴 Windows PATHEXT／`.cmd` 解析語意的測試使用（見各該測試
+    docstring）：這類測試用 `.cmd` 假直譯器讓 `Get-Command python3`／
+    `& python3` 命中它，但 `.cmd` 需要 `cmd.exe` 解譯——在裝有 pwsh 的
+    macOS/Linux 開發機上呼叫 `.cmd` 檔案會靜默無回應（無輸出、
+    `$LASTEXITCODE` 為空），使測試確定性失敗而非雜訊。單純檢查
+    `shutil.which("pwsh")` 不足以排除這類機器，必須同時檢查平台本身。
+    """
+    return sys.platform.startswith("win") and (
+        shutil.which("powershell") is not None or shutil.which("pwsh") is not None
+    )
+
+
 @unittest.skipIf(
     shutil.which("powershell") is None and shutil.which("pwsh") is None,
     "需要 powershell/pwsh",
@@ -55,6 +70,11 @@ class TestBootstrapWindowsAppsGuard(unittest.TestCase):
             self.assertNotEqual(proc.returncode, 0, proc.stdout + proc.stderr)
             self.assertIn("找不到", proc.stdout + proc.stderr)
 
+    @unittest.skipUnless(
+        _windows_pwsh_available(),
+        "此測試用 .cmd 假直譯器驗證 WindowsApps guard，依賴 Windows PATHEXT "
+        "解析語意，僅能在真 Windows 平台上跑（見 _windows_pwsh_available 說明）",
+    )
     def test_real_python_outside_windowsapps_is_used_even_when_windowsapps_stub_present_first(
         self,
     ) -> None:
@@ -91,6 +111,11 @@ class TestBootstrapWindowsAppsGuard(unittest.TestCase):
             self.assertIn("FAKE_PYTHON3_INVOKED", proc.stdout + proc.stderr,
                           proc.stdout + proc.stderr)
 
+    @unittest.skipUnless(
+        _windows_pwsh_available(),
+        "此測試用 .cmd 假直譯器驗證 WindowsApps guard，依賴 Windows PATHEXT "
+        "解析語意，僅能在真 Windows 平台上跑（見 _windows_pwsh_available 說明）",
+    )
     def test_windowsapps_python_and_python3_stubs_both_skipped_and_reports_not_found(
         self,
     ) -> None:

@@ -322,7 +322,7 @@ tasks:
 
 ---
 
-**文檔元數據**：v7.12 | 建立 2025-01-11 | 最後更新 2026-07-23（權威以 git log 為準） | 適用 AISDLC v0.09+（v7.12：R31 複審訂正——本 footer 曾落後 R26 實際編修（DEF-101-283）：R26（08ee85c）改了上方 Nightly 連結版本號卻漏同步本行日期/沿革，本次補記並訂正。v7.11：R13 跨平台複審——pytest 基線數字收斂根層 ONBOARDING §7 單一出處（check_pytest_baseline_sites 機械鎖）、AISDLC_v0.09 未入庫註記、ADR 去計數、紀律 8 毀損字樣全中文化。v7.10：R10 跨平台複審——nightly 五變更（sdd-fsm-chaos stage／recall rc [ref] 捕捉／mutmut 驗證失敗 rc=1／Docker 連續 SKIP ≥3 升級 exit 1／END 進度改 unique-sha 分子），紀律完整版連結 v1.6→v1.7；mutation history 壓縮落盤 29→7 筆（DEF-101-148：improving_101 宣稱之方案 A 壓縮實未執行於本機 live 檔）。v7.9：R9 跨平台複審——基線補巢狀 Claude Code session（CLAUDECODE=1）變因註記：該環境下全套為 3,557/206（requires_claude_cli 條件 skip，DEF-101-091，屬預期非退化）；紀律連結 v1.2→v1.6 訂正。歷史 v7.8 以前明細見 [sprint_history.md §1.7.3](docs/05_development/sprint_history.md)）。
+**文檔元數據**：v7.13 | 建立 2025-01-11 | 最後更新 2026-07-24（權威以 git log 為準） | 適用 AISDLC v0.09+（v7.13：R32 訂正 v7.12 footer 日期少算一天（同構復發，Scan-D 發現），僅訂正日期。v7.12：R31 複審訂正——本 footer 曾落後 R26 實際編修（DEF-101-283）：R26（08ee85c）改了上方 Nightly 連結版本號卻漏同步本行日期/沿革，本次補記並訂正。v7.11：R13 跨平台複審——pytest 基線數字收斂根層 ONBOARDING §7 單一出處（check_pytest_baseline_sites 機械鎖）、AISDLC_v0.09 未入庫註記、ADR 去計數、紀律 8 毀損字樣全中文化。v7.10：R10 跨平台複審——nightly 五變更（sdd-fsm-chaos stage／recall rc [ref] 捕捉／mutmut 驗證失敗 rc=1／Docker 連續 SKIP ≥3 升級 exit 1／END 進度改 unique-sha 分子），紀律完整版連結 v1.6→v1.7；mutation history 壓縮落盤 29→7 筆（DEF-101-148：improving_101 宣稱之方案 A 壓縮實未執行於本機 live 檔）。歷史 v7.9 以前明細見 [sprint_history.md §1.7.3](docs/05_development/sprint_history.md)）。
 
 <!-- ARCH_SNAPSHOT_BEGIN -->
 ## [Architecture Snapshot] — 由 tools/snapshot_sync.py 自動生成（請勿手動編輯本區段；以 `python tools/snapshot_sync.py` 重新生成）
