@@ -23,7 +23,8 @@ if (Get-Command py -ErrorAction SilentlyContinue) {
   # WindowsApps 底下的空殼 python.exe（實際執行只跳出 Microsoft Store 提示，不會執行
   # 任何 Python 程式碼）；本檔是「`.venv` 尚未存在、不可假設已啟用」的第一步 onboarding
   # 入口，恰是最需要此 guard 的情境，故候選順序改為 py → python（排除 WindowsApps）→
-  # python3，與 dev_start.ps1 一致。
+  # python3。dev_start.ps1 同款 guard 邏輯一致，但候選清單非逐字相同（該檔假設 venv
+  # 可能已啟用、無 python3 兜底；本檔 venv 尚不存在，保留 python3 作為第三候選）。
   $PyCand = Get-Command python -ErrorAction SilentlyContinue
   if ($PyCand -and $PyCand.Source -notlike '*\WindowsApps\*') {
     $PyExe = 'python'
