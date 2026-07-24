@@ -97,6 +97,23 @@ def test_milestone_fires_once_at_30th_sample(tmp_path):
     assert body["subagent"] == "dev-senior"
 
 
+def test_milestone_sanitizes_subagent_path_traversal(tmp_path):
+    """R39 Scan-A：subagent/classification 未淨化即組 CALIBRATION-MILESTONE-*.yaml
+    檔名，路徑穿越輸入應被 state_loader._sanitize_component 收斂，不逃出
+    build/reports/orchestrator。"""
+    e = PathCostEstimator(repo_root=tmp_path)
+    paths = []
+    for i in range(30):
+        p = e.record_sample("../../evil", "../../../also-evil", 5000 + i)
+        if p is not None:
+            paths.append(p)
+    assert len(paths) == 1
+    milestone = paths[0]
+    expected_dir = (tmp_path / "build" / "reports" / "orchestrator").resolve()
+    assert milestone.resolve().parent == expected_dir
+    assert milestone.exists()
+
+
 def test_milestone_isolated_per_pair(tmp_path):
     e = PathCostEstimator(repo_root=tmp_path)
     for i in range(30):

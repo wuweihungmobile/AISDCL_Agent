@@ -68,6 +68,21 @@ def test_hermetic_flaky_isolated(tmp_path):
     assert r.flaky_report_path and Path(r.flaky_report_path).exists()
 
 
+def test_hermetic_flaky_report_sanitizes_app_id_path_traversal(tmp_path):
+    """R39 Scan-A：SandboxSpec.app_id 未淨化即組 FLAKY-*.yaml 檔名，路徑穿越
+    輸入應被 state_loader._sanitize_component 收斂，不逃出 report_dir。"""
+    from tools.fsm_runtime.sandbox_runner import (
+        evaluate_hermetic, SandboxSpec, ExecutionObservation)
+    mix = ([ExecutionObservation(tests_total=5, tests_passed=5)] * 3
+           + [ExecutionObservation(tests_total=5, tests_passed=0, nonzero_exit=True)] * 2)
+    r = evaluate_hermetic(SandboxSpec(app_id="../../evil"), observation_overrides=mix,
+                          report_dir=tmp_path)
+    assert r.flaky_report_path
+    written = Path(r.flaky_report_path)
+    assert written.resolve().parent == tmp_path.resolve()
+    assert written.exists()
+
+
 def test_hermetic_rerun_capped():
     from tools.fsm_runtime.sandbox_runner import (
         evaluate_hermetic, SandboxSpec, ExecutionObservation, FLAKY_RERUN_N)
@@ -319,6 +334,31 @@ def test_production_to_fpl_threshold(tmp_path):
     assert written
     txt = Path(written[0]).read_text(encoding="utf-8")
     assert "trust_level" in txt and "proposed" in txt
+
+
+def test_production_to_fpl_sanitizes_path_traversal_ac_id(tmp_path):
+    """R39 Scan-A：ac_id/divergence_kind 為生產遙測衍生、外部可控，未淨化即組檔名
+    可路徑穿越（DEF-101-3xx 系列同類缺陷，收斂為重用 state_loader._sanitize_component）。"""
+    from tools.fsm_runtime import production_to_fpl as p2f
+    path_str = p2f.generate_fpl_draft(
+        "../../evil", "../../../also-evil", occurrences=3, out_dir=tmp_path, today="2026-06-01"
+    )
+    written = Path(path_str)
+    assert written.resolve().parent == tmp_path.resolve()
+    assert written.exists()
+
+
+def test_production_to_fpl_sanitizes_explicit_fpl_id_override(tmp_path):
+    """R39 一審 SD 發現：explicit `fpl_id` 覆寫分支原本完全繞過淨化（只有
+    fallback 組裝分支有淨化），為本輪修復範圍內未收斂完整的同一縫隙。"""
+    from tools.fsm_runtime import production_to_fpl as p2f
+    path_str = p2f.generate_fpl_draft(
+        "AC-1", "kind", occurrences=3, out_dir=tmp_path, today="2026-06-01",
+        fpl_id="../../escaped-evil",
+    )
+    written = Path(path_str)
+    assert written.resolve().parent == tmp_path.resolve()
+    assert written.exists()
 
 
 def test_production_behavioral_signal_transitions(tmp_path):

@@ -507,6 +507,31 @@ class TestConflictResolver:
         assert report.outcome == merge_mod.MergeOutcome.CONFLICT
         assert report.written_path is not None and report.written_path.exists()
 
+    def test_conflict_report_sanitizes_rule_id_path_traversal(self, tmp_path):
+        """R39 Scan-A：rule_id 未淨化即組 CONFLICTS/{rule_id}-{ts}.yaml 檔名，
+        Hub 內容本質不可信（`hub_sync.py` 明文視為 untrusted），路徑穿越輸入
+        應被 state_loader._sanitize_component 收斂，不逃出 conflicts_dir。"""
+        base = self._write_rule(tmp_path / "base.yaml", {
+            "id": "SLV-304", "name": "n", "trust_level": "external",
+            "scope": "SCG-0", "severity": "low", "description": "base-text",
+        })
+        local = self._write_rule(tmp_path / "local.yaml", {
+            "id": "SLV-304", "name": "n", "trust_level": "external",
+            "scope": "SCG-0", "severity": "low", "description": "local-edit",
+        })
+        remote = self._write_rule(tmp_path / "remote.yaml", {
+            "id": "SLV-304", "name": "n", "trust_level": "external",
+            "scope": "SCG-0", "severity": "low", "description": "remote-edit",
+        })
+        conflicts_dir = tmp_path / "CONFLICTS"
+        report = merge_mod.detect_conflict(
+            "../../evil", local=local, base=base, remote=remote,
+            conflicts_dir=conflicts_dir,
+        )
+        assert report.outcome == merge_mod.MergeOutcome.CONFLICT
+        assert report.written_path is not None and report.written_path.exists()
+        assert report.written_path.resolve().parent == conflicts_dir.resolve()
+
 
 # ─────────────────────────────────────────────
 # FSM HUB_SYNC observation state (D-30.12)
