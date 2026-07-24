@@ -51,8 +51,10 @@ _PINNED_SHA256: dict[str, str] = {
     "tools/dev_start.sh": (
         "8a70670e8d48e9644b7ac1857beba95f7a048e1e7b5629ca493e2aa7379eeb68"
     ),
+    # R37：WindowsApps 空殼排除 guard 收斂為 dot-source tools/lib/WindowsAppsGuard.ps1
+    # 共用函式（DEF-101-273/279/300/303 反覆復發後的架構收斂）
     "tools/dev_start.ps1": (
-        "a948df7b44d25b51843539a5558ae8833da05c28b0f332729e5913069c53c396"
+        "5a3e51a4343c90d8995b234dc81cee1a363a0d32c9158f24bb761d91f1dae4ae"
     ),
     # R12（DEF-101-070 ②）：local_ci_gate 收斂為薄殼＋Python 核心後納入釘選
     "AutoClaude/tools/local_ci_gate.sh": (
@@ -68,9 +70,10 @@ _PINNED_SHA256: dict[str, str] = {
     "tools/bootstrap.sh": (
         "dc11cfbecb4cab979da1492a8a0646ad8dbb97b25173e4c6552fdaae6c06fd46"
     ),
-    # DEF-101-279：python3 候選補上與 python 候選同款 WindowsApps 排除 guard
+    # R37：WindowsApps 空殼排除 guard 收斂為 dot-source tools/lib/WindowsAppsGuard.ps1
+    # 共用函式（DEF-101-273/279/300/303 反覆復發後的架構收斂）
     "tools/bootstrap.ps1": (
-        "0aaaf64e16f5c17dc7735e24ee7d4da71c5fce9477cbefd516dc95c8e4c1a4da"
+        "98b5756438fe844e31fc5375e58b26cadbd91966f4b5edc68736feaebe6241ea"
     ),
     "tools/integration_gate.sh": (
         "6a7d08e438d25d0ffeb223e5b4a3ebcc7869065b2088c50b52aa2ebd2f8c6c83"

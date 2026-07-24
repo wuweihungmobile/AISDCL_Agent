@@ -31,14 +31,17 @@ if (-not $Root) {
 $Core = Join-Path $Root 'tools\dev_start.py'
 $VenvPy = Join-Path $Root '.venv\Scripts\python.exe'
 
+# WindowsApps 空殼排除 guard 共用實作（R37 抽出，DEF-101-273/279/300/303 反覆
+# 復發後收斂為單一真相源）：見 tools/lib/WindowsAppsGuard.ps1。
+. "$PSScriptRoot/lib/WindowsAppsGuard.ps1"
+
 $Py = $null
 if (Test-Path $VenvPy) { $Py = $VenvPy }
 elseif (Get-Command py -ErrorAction SilentlyContinue) { $Py = 'py' }
 else {
   # 排除 Windows Store App Execution Alias stub（未真裝 Python 時 python.exe
-  # 是開商店的假直譯器）；兩步式取 .Source（紀律 #14）
-  $PyCand = Get-Command python -ErrorAction SilentlyContinue
-  if ($PyCand -and $PyCand.Source -notlike '*\WindowsApps\*') { $Py = 'python' }
+  # 是開商店的假直譯器）
+  if (Test-IsRealPython -CandidateName 'python') { $Py = 'python' }
 }
 
 if (-not $Py) {

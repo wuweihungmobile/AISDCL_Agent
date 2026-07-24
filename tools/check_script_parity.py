@@ -355,6 +355,10 @@ _SINGLE_SIDED_EXEMPT = {
     "tools/lib/Find-GitBash.ps1": (
         "PowerShell 專屬 Git Bash 探測 helper——POSIX 側本來就在 bash 內，無需對等"
     ),
+    "tools/lib/WindowsAppsGuard.ps1": (
+        "PowerShell 專屬 WindowsApps 空殼排除 guard（R37 抽出，DEF-101-273/279/300/303"
+        "反覆復發後收斂）——POSIX 側無 WindowsApps 概念，無需對等"
+    ),
     # mac nightly launchd 安裝器（R13 ARCH-R13-3）：launchd 為 macOS 專屬機制，
     # Windows 對等＝schtasks 排程家族（tools/install_windows_nightly.ps1，R19 新增
     # 一鍵建立；設定事後校正另見 fix_nightly_catchup.ps1，見 ONBOARDING §8）

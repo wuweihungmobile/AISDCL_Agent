@@ -17,7 +17,6 @@ from autoclaude.core.hookspec import HookContext, KernelPhase
 from autoclaude.models.playbook import GlobalInvariants, Playbook, PlaybookTask
 from autoclaude.plugins import (
     CheckpointPlugin,
-    CounterSnapshot,
     GotoCounterPlugin,
 )
 from autoclaude.utils.checkpoint_manager import CheckpointManager, PlaybookCheckpoint
@@ -33,7 +32,9 @@ def _task() -> PlaybookTask:
     return PlaybookTask(step_id="T01", name="n", prompt="p")
 
 
-def _make_plugin(tmp_path: Path, with_counter: bool = True) -> tuple[CheckpointPlugin, GotoCounterPlugin]:
+def _make_plugin(
+    tmp_path: Path, with_counter: bool = True
+) -> tuple[CheckpointPlugin, GotoCounterPlugin]:
     """SD_05 W6：CheckpointPlugin 不再持有 GotoCounterPlugin 參考。
 
     解耦透過 EventBus 廣播 ON_CHECKPOINT_RESTORE / ON_CHECKPOINT_SAVE_REQUEST 完成。
@@ -254,8 +255,9 @@ class TestW3PersistenceRequestPositive:
     def test_escalation_dump_request_returns_real_dump_path(self, tmp_path):
         """SD_05 W3 Arch-C1/SD-C1 修復驗證：EscalationDumpedResult.dump_path
         必須等於 dump.save() 真實寫入路徑（非手構字串）。"""
-        from autoclaude.core.hookspec import EscalationDumpedResult
         from unittest.mock import MagicMock
+
+        from autoclaude.core.hookspec import EscalationDumpedResult
         plugin, _ = _make_plugin(tmp_path)
         tracker = MagicMock()
         tracker.history = []
@@ -292,6 +294,7 @@ class TestW3PersistenceRequestPositive:
     ):
         """SD_05 W3 SD-M1 修復驗證：dump.save 失敗時 notify_callback 收到 dump_path=None。"""
         from unittest.mock import MagicMock
+
         from autoclaude.models import escalation as esc_mod
 
         plugin, _ = _make_plugin(tmp_path)
@@ -320,6 +323,53 @@ class TestW3PersistenceRequestPositive:
         assert notify_calls[0]["dump_path"] is None, (
             "dump.save 失敗時 notify_callback dump_path 必須為 None（不是空字串）"
         )
+
+    def test_escalation_dump_sanitizes_step_id_with_windows_forbidden_chars(
+        self, tmp_path,
+    ):
+        """DEF-101（Mac/Windows 相容性）：task.step_id 是完全自由格式欄位，playbook
+        作者手寫 YAML 可能寫成 "Step 1: Setup" 這種含冒號的自然字串。驗證：
+        (1) dump.save() 實際落地的檔名不含任何 Windows 禁用字元；
+        (2) last_log_path 顯示字串也套用同一淨化規則，與 RawStreamLogger 實際
+            落地時對相同原始檔名產生的結果一致（不再顯示與真實檔案不符的路徑）。
+        """
+        from pathlib import Path as _P
+        from unittest.mock import MagicMock
+
+        from autoclaude.utils.logger import _WIN_FORBIDDEN_CHARS, _sanitize_log_filename
+
+        plugin, _ = _make_plugin(tmp_path)
+        tracker = MagicMock()
+        tracker.history = []
+        tracker.to_checkpoint_records = MagicMock(return_value=[])
+        tracker.to_failure_chain = MagicMock(return_value=[])
+        for m in ("is_stuck", "is_diverging", "suspect_test_file_error",
+                  "is_oscillating", "is_worsening",
+                  "suspect_assertion_baseline_mismatch"):
+            setattr(tracker, m, MagicMock(return_value=False))
+
+        bad_task = PlaybookTask(step_id="Step 1: Setup", name="n", prompt="p")
+        dump = plugin.save_escalation_dump(
+            tracker=tracker, task=bad_task, playbook_path="x.yaml",
+            final_eval_output="err", checkpoint_dir=str(tmp_path),
+            log_dir=str(tmp_path),
+        )
+
+        saved_path = _P(plugin._last_dump_path)
+        assert saved_path.exists()
+        for ch in _WIN_FORBIDDEN_CHARS:
+            assert ch not in saved_path.name, (
+                f"禁用字元 {ch!r} 洩漏進 EscalationDump 真實落地檔名 {saved_path.name!r}"
+            )
+
+        # last_log_path 為純文字顯示欄位（無實體檔案），需與 RawStreamLogger 對
+        # 同一原始檔名套用 _sanitize_log_filename() 後的結果一致
+        expected_log_name = _sanitize_log_filename("playbook_Step 1: Setup_attempt0.log")
+        assert _P(dump.last_log_path).name == expected_log_name
+        for ch in _WIN_FORBIDDEN_CHARS:
+            assert ch not in dump.last_log_path, (
+                f"禁用字元 {ch!r} 洩漏進顯示用 last_log_path {dump.last_log_path!r}"
+            )
 
 
 class TestW3EvolutionPluginNewPhases:

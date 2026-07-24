@@ -13,10 +13,11 @@ notify_escalation（業務動作）改由 EvolutionPlugin 訂閱
 from __future__ import annotations
 
 import logging
+from collections.abc import Callable
 from pathlib import Path
-from typing import Callable, Optional
 
 from ...models.escalation import EscalationDump
+from ...utils.logger import _sanitize_log_filename
 
 logger = logging.getLogger("autoclaude.plugins.checkpoint")
 
@@ -30,7 +31,7 @@ def save_escalation_dump_impl(
     checkpoint_dir: str,
     log_dir: str,
     human_hint: str = "",
-    notify_callback: Optional[Callable[..., None]] = None,
+    notify_callback: Callable[..., None] | None = None,
     topology_dashboard: str = "",
 ) -> EscalationDump:
     """W3-1d：組裝 EscalationDump + 持久化 + 觸發 notify。
@@ -43,9 +44,14 @@ def save_escalation_dump_impl(
     參數直傳。notify_callback 接收 (title, message, dump_path) 參數。
     """
     last_attempt = max(0, len(tracker.history) - 1)
-    last_log_path = str(
-        Path(log_dir) / f"playbook_{task.step_id}_attempt{last_attempt}.log"
+    # DEF-101（伴生症狀）：此字串僅供 markdown 顯示，但 RawStreamLogger 實際落地時
+    # 會對同一檔名呼叫 _sanitize_log_filename()（見 pty_wrapper.py /
+    # prompt_dispatcher.py）；若這裡不淨化，含 Windows 禁用字元的 step_id 會讓
+    # 顯示路徑與真實落地路徑不一致（macOS/Linux 上也會，因為純屬文字不一致問題）。
+    last_log_filename = _sanitize_log_filename(
+        f"playbook_{task.step_id}_attempt{last_attempt}.log"
     )
+    last_log_path = str(Path(log_dir) / last_log_filename)
     checkpoint_resume_hint = f"autoclaude {playbook_path}"
     dump = EscalationDump(
         playbook_path=playbook_path,

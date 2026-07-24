@@ -113,6 +113,11 @@ on:
       # windows-compat-ci.yml 側則已被既有 **/*.ps1 覆蓋不需重複列舉）
       - "tools/integration_gate_core.py"
       - "tools/lib/Find-GitBash.ps1"
+      # R37：tools/tests/test_windowsapps_guard_cross_consistency.py 直接讀取/
+      # dot-source 此檔驗證 bootstrap.ps1／dev_start.ps1 共用同一份 WindowsApps
+      # guard 實作（DEF-101-303 結構性收斂）；同款 .ps1 無 **/*.ps1 兜底 glob 缺口
+      # （windows-compat-ci.yml 側已被既有 **/*.ps1 覆蓋不需重複列舉）
+      - "tools/lib/WindowsAppsGuard.ps1"
       # R17 四方一審 Architect 發現（F1）：test_ci_paths_cover_root_consumers.py
       # 的 import 消費掃描器認不出 test_platform_utils_dedup.py 對 platform_utils
       # 採用的 `sys.path.insert(0, parents[1] / "lib")` 第三種匯入慣例，也認不出
@@ -191,6 +196,8 @@ on:
       # windows-compat-ci.yml 側則已被既有 **/*.ps1 覆蓋不需重複列舉）
       - "tools/integration_gate_core.py"
       - "tools/lib/Find-GitBash.ps1"
+      # R37：同上 push 區塊說明（DEF-101-303 結構性收斂新增消費檔）
+      - "tools/lib/WindowsAppsGuard.ps1"
       # R17 四方一審 Architect 發現（F1）：test_ci_paths_cover_root_consumers.py
       # 的 import 消費掃描器認不出 test_platform_utils_dedup.py 對 platform_utils
       # 採用的 `sys.path.insert(0, parents[1] / "lib")` 第三種匯入慣例，也認不出

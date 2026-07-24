@@ -14,6 +14,10 @@ monorepo 一鍵開發環境整備薄殼（Windows）。macOS/Linux 對等腳本�
   powershell -ExecutionPolicy Bypass -File tools/bootstrap.ps1
 #>
 
+# WindowsApps 空殼排除 guard 共用實作（R37 抽出，DEF-101-273/279/300/303 反覆
+# 復發後收斂為單一真相源）：見 tools/lib/WindowsAppsGuard.ps1。
+. "$PSScriptRoot/lib/WindowsAppsGuard.ps1"
+
 $PyExe = $null
 if (Get-Command py -ErrorAction SilentlyContinue) {
   # `py` launcher 不需要 WindowsApps 排除 guard：Windows Store 的 App Execution
@@ -31,12 +35,10 @@ if (Get-Command py -ErrorAction SilentlyContinue) {
   # 作為第三候選）。DEF-101-279：python3 分支原本沒有同款 guard——全新 Windows 11
   # 機器上 python.exe 與 python3.exe 常常都是系統自動註冊的 WindowsApps 空殼，漏 guard
   # 會讓 python3 分支重現與 DEF-101-273 相同的失敗模式，故此處補齊同款排除。
-  $PyCand = Get-Command python -ErrorAction SilentlyContinue
-  if ($PyCand -and $PyCand.Source -notlike '*\WindowsApps\*') {
+  if (Test-IsRealPython -CandidateName 'python') {
     $PyExe = 'python'
   } else {
-    $Py3Cand = Get-Command python3 -ErrorAction SilentlyContinue
-    if ($Py3Cand -and $Py3Cand.Source -notlike '*\WindowsApps\*') {
+    if (Test-IsRealPython -CandidateName 'python3') {
       $PyExe = 'python3'
     }
   }

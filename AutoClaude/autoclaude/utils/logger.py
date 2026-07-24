@@ -77,14 +77,29 @@ def setup_logger(log_dir: str = "logs", level: int = logging.DEBUG) -> logging.L
 # （會讓純 pip 安裝、脫離 monorepo checkout 的情境下失效），故不比照
 # tools/lib/bash_probe_spec.py 的「共用資料規格」模式合併。三者一致性由
 # tools/tests/test_windows_forbidden_filename_parity.py 機械鎖住。
+#
+# 套件內部（同屬 autoclaude 一個 pip 套件）的呼叫端則一律 import 本函式，
+# 不得另寫一份：models/escalation.py（EscalationDump.save 組 escalation 檔名）
+# 與 plugins/checkpoint/_escalation.py（last_log_path 顯示字串）皆 import
+# `_sanitize_log_filename`，理由同上——同一規則被多處獨立實作正是本缺陷類別
+# （DEF-101-219／DEF-101-295）反覆復發的根因。
 _WIN_FORBIDDEN_CHARS = frozenset('<>:"|?*\\')
 _WIN_RESERVED_NAME_RE = re.compile(r"^(CON|PRN|AUX|NUL|COM[0-9]|LPT[0-9])$", re.IGNORECASE)
 
 
 def _sanitize_log_filename(name: str) -> str:
-    """把檔名淨化為跨平台（含 Windows/NTFS）相容格式。"""
+    """把檔名淨化為跨平台（含 Windows/NTFS）相容格式。
+
+    `/` 不在 `_WIN_FORBIDDEN_CHARS`（該常數與 `check_ntfs_paths.py`／pre-commit
+    的 `_ntfs_seg_bad()` 三處鎖定同一組「已切割路徑片段」的 NTFS 合法性判準，
+    `/` 本就是切割用的分隔符，不會出現在單一片段內）；但本函式的輸入是**尚未
+    切割**的任意字串（如呼叫端直接組出的完整檔名），`/` 在此脈絡下會被
+    `pathlib.Path.__truediv__` 解讀為額外路徑層級，導致產生非預期子目錄，甚至
+    `step_id="../../x"` 類輸入造成路徑穿越（R37 QA 一審實測 `PermissionError`）。
+    故獨立於 `_WIN_FORBIDDEN_CHARS` 之外，於此額外淨化 `/`，不影響上述三方
+    parity 鎖（該鎖比較的是常數本身，不比較本函式的實際淨化行為）。"""
     sanitized = "".join(
-        "_" if ch in _WIN_FORBIDDEN_CHARS or ord(ch) < 0x20 or ord(ch) == 0x7F else ch
+        "_" if ch in _WIN_FORBIDDEN_CHARS or ch == "/" or ord(ch) < 0x20 or ord(ch) == 0x7F else ch
         for ch in name
     )
     sanitized = sanitized.rstrip(" .") or "untitled"
@@ -92,6 +107,27 @@ def _sanitize_log_filename(name: str) -> str:
     if _WIN_RESERVED_NAME_RE.match(stem):
         sanitized = f"_{sanitized}"
     return sanitized
+
+
+def write_text_with_fallback(path: Path, content: str, fallback_prefix: str) -> Path:
+    """原子寫入文字檔（tmp + replace）；`_sanitize_log_filename()` 只淨化禁用字元、
+    不截斷長度，超長檔名等非字元因素仍可能讓 `open()` 拋出 OSError——失敗時改寫入
+    系統暫存目錄的雜湊檔名，避免內容完全遺失（比照既有 `RawStreamLogger` 的
+    fallback 精神，供其他一次性寫入的呼叫端共用，不再各自重寫一份）。"""
+    tmp = path.with_suffix(".tmp")
+    try:
+        tmp.write_text(content, encoding="utf-8")
+        tmp.replace(path)
+        return path
+    except OSError as exc:
+        digest = hashlib.sha256(path.name.encode("utf-8", errors="replace")).hexdigest()[:12]
+        fallback = Path(tempfile.gettempdir()) / f"{fallback_prefix}_{digest}{path.suffix}"
+        logging.getLogger("autoclaude.utils.logger").warning(
+            "write_text_with_fallback: 寫入 %s 失敗（%s），改用安全檔名 %s",
+            path, exc, fallback,
+        )
+        fallback.write_text(content, encoding="utf-8")
+        return fallback
 
 
 # 串流寫入給 PTY 輸出的原始 log

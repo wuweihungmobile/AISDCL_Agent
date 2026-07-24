@@ -3,9 +3,18 @@ ESCALATION 或強制中斷時儲存的完整診斷快照。
 提供 to_markdown() 讓人類快速接手診斷。
 """
 from __future__ import annotations
+
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
+
+# DEF-101（Mac/Windows 相容性）：step_id 為 PlaybookTask 上完全自由格式、無驗證
+# 的欄位（playbook 作者手寫 YAML 可能寫成 "Step 1: Setup" 這種含冒號的自然字串），
+# 若未淨化直接組進檔名，在 Windows 上會因禁用字元 / 保留裝置名導致 open() 拋出
+# 未捕捉的 OSError。本檔刻意重用 utils/logger.py 既有的 `_sanitize_log_filename()`
+# （RawStreamLogger 已用它解決同類問題），而非另寫一份相似邏輯——避免重蹈
+# DEF-101-219／DEF-101-295 同一淨化規則被多處獨立實作、其一漏改即復發的根因。
+from ..utils.logger import _sanitize_log_filename, write_text_with_fallback
 
 
 @dataclass
@@ -15,14 +24,14 @@ class EscalationDump:
     step_id: str
     step_name: str
     total_attempts: int
-    failure_chain: list[dict]       # [{attempt, failure_reason, error_signature, minimax_reasoning, exit_code, correction_prompt_sent, error_class}]
+    failure_chain: list[dict]  # dict keys 見 to_markdown() 消費處
     final_eval_output: str
     is_stuck: bool
     is_diverging: bool
     suspect_test_file: bool
     is_oscillating: bool = False              # 振盪模式（ABAB 交替）診斷旗標
-    is_worsening: bool = False                # Gap-008-A：失敗數遞增（Minimax 越改越壞）
-    suspect_assertion_mismatch: bool = False  # Gap-008-C：疑似測試期望值寫錯（AssertionError 無法收斂）
+    is_worsening: bool = False                # Gap-008-A：失敗數遞增（越改越壞）
+    suspect_assertion_mismatch: bool = False  # Gap-008-C：測試期望值疑似寫錯
     saved_at: str = field(default_factory=lambda: datetime.now().isoformat(timespec="seconds"))
     human_hint: str = ""
     last_log_path: str = ""
@@ -132,14 +141,14 @@ class EscalationDump:
             f"- 失敗數惡化（越改越多）: {yes if self.is_worsening else no}",
             f"- 振盪錯誤（ABAB 交替）: {yes if self.is_oscillating else no}",
             f"- 疑似測試檔本身有語法/Import 錯誤: {yes if self.suspect_test_file else no}",
-            f"- 疑似測試期望值寫錯（AssertionError 多次無法收斂）: {yes if self.suspect_assertion_mismatch else no}",
+            f"- 疑似測試期望值寫錯: {yes if self.suspect_assertion_mismatch else no}",
             "",
             "## 建議行動",
             self.human_hint or "請檢查上方失敗鏈，優先確認測試檔是否有獨立錯誤。",
         ]
         if self.topology_dashboard:
             lines += ["", "## 🧭 meta⁸ 互遞迴拓樸審批儀表板（指揮官端可審批）",
-                      "> SDD 渲染、已過 PY-2 拓樸防偽 + 本端 fail-closed 稽核；🔴=最耗 fuel 算子、⛔=計數器強制打斷。",
+                      "> SDD 渲染、已過拓樸防偽 + fail-closed 稽核；🔴=耗 fuel、⛔=強制打斷。",
                       "", self.topology_dashboard]
         if self.last_log_path:
             lines += ["", "## 最後執行 Log", f"`{self.last_log_path}`"]
@@ -158,10 +167,13 @@ class EscalationDump:
     def save(self, dump_dir: str) -> Path:
         """將快照儲存為 Markdown 檔案，回傳實際路徑。"""
         ts = datetime.now().strftime("%Y%m%d_%H%M%S")
-        filename = f"escalation_{self.step_id}_{ts}.md"
+        filename = _sanitize_log_filename(f"escalation_{self.step_id}_{ts}.md")
         path = Path(dump_dir) / filename
         path.parent.mkdir(parents=True, exist_ok=True)
-        tmp = path.with_suffix(".tmp")
-        tmp.write_text(self.to_markdown(), encoding="utf-8")
-        tmp.replace(path)
-        return path
+        # `_sanitize_log_filename()` 只淨化禁用字元，不截斷長度——超長 step_id（無
+        # 驗證的自由格式欄位）仍可能讓檔名超出檔案系統上限；共用 helper 失敗時會
+        # fallback 寫入系統暫存目錄，避免 ESCALATION 診斷快照（失敗復盤關鍵材料）
+        # 因此完全遺失。
+        return write_text_with_fallback(
+            path, self.to_markdown(), fallback_prefix="escalation_fallback"
+        )

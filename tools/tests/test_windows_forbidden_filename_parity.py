@@ -5,6 +5,15 @@
 實作是刻意決策（bash 版無法 import Python 模組；logger.py 屬獨立可 pip 安裝的
 `autoclaude` 套件，不可依賴 monorepo 根層 `tools/lib/*.py`，見 logger.py 內註解），
 本檔只負責「漂移即知」，不合併三者。
+
+DEF-101（後續修復）：`AutoClaude/autoclaude/models/escalation.py`
+（EscalationDump.save）與 `AutoClaude/autoclaude/plugins/checkpoint/_escalation.py`
+（last_log_path 顯示字串）曾是同一淨化規則的第四、五個消費者候選——若各自照抄
+一份字元集合，即會重蹈本檔存在的理由（同一規則多處獨立實作、其一漏改即復發）。
+兩者最終選擇直接 `import` `autoclaude.utils.logger._sanitize_log_filename`（同一顆
+函式物件），而非另寫一份，故不需要在本檔新增第四個獨立條目——
+`TestEscalationModulesReuseSharedSanitizer` 僅作存在性檢查，鎖住「未來不會有人
+在這兩處又內嵌一份新的淨化邏輯」。
 """
 
 import re
@@ -215,6 +224,36 @@ class TestControlCharCrossConsistency(unittest.TestCase):
             rc, out = _run_bash_seg_check(f"file{ch}name")
             self.assertEqual(rc, 0, f"bash 未攔下控制字元 {ch!r}：{out!r}")
             self.assertIn("控制字元", out)
+
+
+class TestEscalationModulesReuseSharedSanitizer(unittest.TestCase):
+    """DEF-101（後續修復）：`autoclaude.models.escalation`（EscalationDump.save 組
+    escalation_*.md 檔名）與 `autoclaude.plugins.checkpoint._escalation`
+    （last_log_path 顯示字串）皆消費 task.step_id（自由格式、無驗證欄位）組檔名，
+    是本檔既有三處之外的第四、五個潛在消費者。兩者選擇直接 import
+    `autoclaude.utils.logger._sanitize_log_filename`（同一顆函式物件）而非另寫一份
+    ——本測試只做存在性檢查，鎖住這個決策不被靜默推翻（未來若有人在這兩處內嵌
+    一份新的字元集合，本測試會立即失敗）。"""
+
+    def test_escalation_model_reuses_shared_sanitizer(self) -> None:
+        from autoclaude.models import escalation as autoclaude_escalation
+
+        self.assertIs(
+            autoclaude_escalation._sanitize_log_filename,
+            autoclaude_logger._sanitize_log_filename,
+            "escalation.py 必須 import 共用的 _sanitize_log_filename，"
+            "不可另寫一份相似邏輯（DEF-101-219/DEF-101-295 反覆復發根因）",
+        )
+
+    def test_checkpoint_escalation_helper_reuses_shared_sanitizer(self) -> None:
+        from autoclaude.plugins.checkpoint import _escalation as autoclaude_checkpoint_escalation
+
+        self.assertIs(
+            autoclaude_checkpoint_escalation._sanitize_log_filename,
+            autoclaude_logger._sanitize_log_filename,
+            "plugins/checkpoint/_escalation.py 必須 import 共用的 "
+            "_sanitize_log_filename，不可另寫一份相似邏輯",
+        )
 
 
 if __name__ == "__main__":
