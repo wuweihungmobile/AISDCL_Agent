@@ -42,6 +42,13 @@ except ImportError as exc:  # pragma: no cover
         "PyYAML is required. Install with: pip install pyyaml"
     ) from exc
 
+# R38 Architect 複審收斂：本檔原本獨立實作一套與 state_loader._sanitize_component()
+# 幾乎逐字重複的 Windows 禁用字元/保留裝置名/截斷淨化邏輯（同一 package 內第三次
+# 分岔風險，且已經發生）。state_loader.py 未 import 本檔，無循環 import 風險，故
+# 比照 spec_patch_proposer.py 已示範的做法直接重用（見下方 `_sanitize_nfr_id()`）。
+from .state_loader import _MAX_COMPONENT_LEN as _NFR_ID_MAX_LEN
+from .state_loader import _sanitize_component
+
 
 # --------------------------------------------------------------------------- #
 # Paths                                                                       #
@@ -77,10 +84,25 @@ REQUIRED_FIELDS = (
     "duration_minutes",
 )
 
+# nfr_id 為選填欄位（未提供時由 map_metric_to_nfr() 自動推導，見
+# ingest_slo_violation()），因此不列入 REQUIRED_FIELDS（validate_schema 不強制
+# 要求它存在）。但它會被用來組出 PBS-DRIFT 報告的檔名（見 _report_path()），
+# 若不納入簽章覆蓋範圍，攻擊者可在既有合法簽章事件上「事後夾帶」nfr_id 而不
+# 被 HMAC 偵測（R38 Scan-A 揪出的缺口）。故獨立列出、由 signed_fields_default()
+# 併入 REQUIRED_FIELDS 一起回傳，使其永遠落在簽章覆蓋範圍內。
+OPTIONAL_SIGNED_FIELDS = ("nfr_id",)
+
 
 def signed_fields_default() -> Tuple[str, ...]:
-    """Fields included in the HMAC canonicalisation (order matters)."""
-    return REQUIRED_FIELDS
+    """Fields included in the HMAC canonicalisation (order matters).
+
+    固定納入 OPTIONAL_SIGNED_FIELDS（目前只有 nfr_id）：即使事件未附帶該欄位，
+    `_canonical_payload()` 的 `event.get(f, "")` 仍會以空字串佔位參與簽章運算，
+    確保「事後夾帶未簽章欄位」這個攻擊面本身會被 HMAC 擋下——`verify_signature()`
+    會鎖死 `signed_fields` 必須恰好等於本函式回傳值，攻擊者附加 nfr_id 卻不重簽
+    即會被判定 `unexpected_signed_fields` 或 `signature_mismatch`。
+    """
+    return REQUIRED_FIELDS + OPTIONAL_SIGNED_FIELDS
 
 
 # --------------------------------------------------------------------------- #
@@ -317,10 +339,37 @@ def recent_entries_for_nfr(
 # PBS-DRIFT report (markdown)                                                 #
 # --------------------------------------------------------------------------- #
 
+# nfr_id 進入 signed_fields_default() 的簽章覆蓋範圍後，偽造/夾帶 nfr_id 這件事
+# 本身已被 HMAC 擋下；但這裡仍獨立做第二層淨化（雙重防護 — 其中一層失效另一層
+# 仍擋得住）：組檔名前一律淨化 nfr_id，擋路徑分隔符 / 路徑穿越 / Windows 禁用
+# 字元 / 保留裝置名 / 超長字串 / 控制字元。判準與 AutoClaude/autoclaude/utils/
+# logger.py 的 `_sanitize_log_filename()` 同一強度；核心淨化邏輯重用同 package
+# 的 state_loader._sanitize_component()（R38 Architect 複審收斂，見上方 import
+# 註解），本檔不再重複一整套 Windows 禁用字元常數 / 保留裝置名正則 / 截斷邏輯。
+
+
+def _sanitize_nfr_id(nfr_id: Any) -> str:
+    """把 nfr_id 淨化為可安全嵌入檔名的片段。
+
+    委派給 `state_loader._sanitize_component()` 做核心淨化（禁用字元 / 保留裝置
+    名 / 截斷 / rstrip），本函式只保留 nfr_id 情境專屬的兩項加碼：
+    ① `..` 深度防禦中性化 —— 即使不含路徑分隔符也一併中性化（state_loader 的
+       通用版本不做這層，是 nfr_id 場景特有的縱深防禦）；
+    ② 淨化後落回 state_loader 的通用預設值 "untitled" 時，改用 nfr_id 情境專屬
+       的 "UNKNOWN-NFR"，避免與其他呼叫端（project/track_id/ac_id）的預設值
+       語意混淆。
+    """
+    text = nfr_id if isinstance(nfr_id, str) else str(nfr_id)
+    text = text.replace("..", "__")
+    sanitized = _sanitize_component(text)
+    return "UNKNOWN-NFR" if sanitized == "untitled" else sanitized
+
+
 def _report_path(nfr_id: str, day: Optional[_dt.date] = None, root: Optional[Path] = None) -> Path:
     base = root or DEFAULT_DRIFT_REPORT_DIR
     target_day = day or _dt.date.today()
-    return base / f"PBS-DRIFT-{nfr_id}-{target_day.isoformat()}.md"
+    safe_nfr_id = _sanitize_nfr_id(nfr_id)
+    return base / f"PBS-DRIFT-{safe_nfr_id}-{target_day.isoformat()}.md"
 
 
 def _suggest_nfr_update(entries: List[Dict[str, Any]]) -> Dict[str, Any]:

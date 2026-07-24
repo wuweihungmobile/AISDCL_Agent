@@ -20,8 +20,11 @@
 # 根層消費檔 paths（DEF-101-042，四方複審第五輪）：scripts/tests/ 的 contract test
 # 消費 monorepo 根層檔案（test_ntfs_length_gate.py → tools/check_ntfs_paths.py 與
 # tools/git-hooks/pre-commit；test_hook_wiring_cwd_safety.py → 根層與 AutoClaude 的
-# .claude/settings.json）——只改這些根層檔的變更也必須觸發本 workflow，否則回歸鎖
-# 在「它專門要抓的那類變更」上恰好不跑（DEF-101-037 同構）。
+# .claude/settings.json；R38 新增 test_install_post_commit_windowsapps_guard.py →
+# tools/lib/WindowsAppsGuard.ps1，Architect 一審 REJECT 收斂 install_post_commit.ps1
+# 內嵌 WindowsApps guard 副本後改 dot-source 共用函式）——只改這些根層檔的變更也
+# 必須觸發本 workflow，否則回歸鎖在「它專門要抓的那類變更」上恰好不跑（DEF-101-037
+# 同構）。
 
 name: aisdlc-sdd-ci
 
@@ -34,6 +37,7 @@ on:
       - "tools/check_ntfs_paths.py"
       - "tools/git-hooks/pre-commit"
       - "tools/lib/bash_probe_spec.py"
+      - "tools/lib/WindowsAppsGuard.ps1"
       - ".claude/settings.json"
       - ".claude/hooks/sdd_hook_router.py"
       - "AutoClaude/.claude/settings.json"
@@ -44,6 +48,7 @@ on:
       - "tools/check_ntfs_paths.py"
       - "tools/git-hooks/pre-commit"
       - "tools/lib/bash_probe_spec.py"
+      - "tools/lib/WindowsAppsGuard.ps1"
       - ".claude/settings.json"
       - ".claude/hooks/sdd_hook_router.py"
       - "AutoClaude/.claude/settings.json"

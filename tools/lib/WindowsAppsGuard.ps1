@@ -8,7 +8,10 @@
 `tools/bootstrap.ps1`（`python`／`python3` 兩處候選）與 `tools/dev_start.ps1`
 （`python` 一處候選）共逐字內嵌三份，彼此互不相通，同一缺陷類別連續復發
 （DEF-101-273／279／300／303）。本檔抽出為單一真相源，供三處呼叫點 dot-source
-後改一行呼叫（比照 `tools/lib/Find-GitBash.ps1` 既有先例 S11 同款模式）。
+後改一行呼叫（比照 `tools/lib/Find-GitBash.ps1` 既有先例 S11 同款模式）。R38
+起 `AISDLC_SDD/AISDLC_SDD_v0.30/tools/install_hooks/install_post_commit.ps1`
+亦改 dot-source 呼叫本檔（第 4 個呼叫點；Architect 一審 REJECT 原地內嵌
+的第 4~5 個獨立副本並收斂）。
 
 全新 Windows 11 機器未裝真 Python 時，`Get-Command python`／`Get-Command python3`
 仍會找到 WindowsApps 底下系統自動註冊的空殼 `python.exe`／`python3.exe`——

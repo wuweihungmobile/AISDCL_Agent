@@ -20,6 +20,9 @@ import pytest
 
 # scripts/tests/ → scripts/ → AISDLC_SDD（REPO_ROOT）
 REPO_ROOT = Path(__file__).resolve().parents[2]
+# AISDLC_SDD 的父目錄 = monorepo 根（R38 改 dot-source 後，安裝器需要
+# monorepo 根層 tools/lib/WindowsAppsGuard.ps1 存在，fake repo 需一併備妥）。
+MONOREPO_ROOT = REPO_ROOT.parent
 _PWSH = shutil.which("pwsh")
 
 pytestmark = [
@@ -53,6 +56,13 @@ def test_ps1_installer_sets_exec_bit_on_posix() -> None:
         shutil.copy2(
             REPO_ROOT / "scripts" / "sdd_version.py",
             repo / "AISDLC_SDD" / "scripts" / "sdd_version.py",
+        )
+        # R38 改 dot-source 共用函式 Test-IsRealPython 後，安裝器前置檢查要求
+        # monorepo 根層 tools/lib/WindowsAppsGuard.ps1 存在，fake repo 需一併備妥。
+        (repo / "tools" / "lib").mkdir(parents=True)
+        shutil.copy2(
+            MONOREPO_ROOT / "tools" / "lib" / "WindowsAppsGuard.ps1",
+            repo / "tools" / "lib" / "WindowsAppsGuard.ps1",
         )
         hooks_src = repo / "AISDLC_SDD" / "AISDLC_SDD_v0.01" / ".claude" / "hooks"
         hooks_src.mkdir(parents=True)

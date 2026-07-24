@@ -25,6 +25,95 @@ def test_track_state_path_single_vs_multi():
     assert pa.name == "FSM-STATE-proj-feat-a.yaml"
 
 
+# ==================== R38：_sanitize_component 跨平台淨化強化 ====================
+# DEF-101 系列同缺陷類別姊妹未覆蓋位置：project（project_from_env，讀 SDD_PROJECT
+# 環境變數）與 track_id（TrackRegistry.register，外部可控）皆流入 track_state_path
+# 組出 FSM-STATE-{project}-{track_id}.yaml，此檔是 FSM 治理閉環的 SSOT 狀態檔。
+
+def test_sanitize_component_strips_windows_forbidden_chars():
+    from tools.fsm_runtime.state_loader import _sanitize_component
+    for ch in '<>:"|?*\\':
+        sanitized = _sanitize_component(f"proj{ch}name")
+        assert ch not in sanitized, f"未淨化禁用字元 {ch!r}：{sanitized!r}"
+
+
+def test_sanitize_component_strips_control_chars():
+    from tools.fsm_runtime.state_loader import _sanitize_component
+    for code in list(range(0x00, 0x20)) + [0x7F]:
+        ch = chr(code)
+        sanitized = _sanitize_component(f"proj{ch}name")
+        assert ch not in sanitized, f"未淨化控制字元 {code:#x}：{sanitized!r}"
+
+
+def test_sanitize_component_escapes_reserved_device_names():
+    from tools.fsm_runtime.state_loader import _sanitize_component
+    for name in ("CON", "PRN", "AUX", "NUL", "COM1", "COM9", "LPT1", "LPT9", "con", "Com3"):
+        sanitized = _sanitize_component(name)
+        assert sanitized.startswith("_"), f"未攔下保留裝置名 {name!r}：{sanitized!r}"
+
+
+def test_sanitize_component_does_not_flag_non_reserved_names():
+    from tools.fsm_runtime.state_loader import _sanitize_component
+    for name in ("CONSOLE", "PRINTER", "COM10", "LPTX", "hello"):
+        sanitized = _sanitize_component(name)
+        assert sanitized == name
+
+
+def test_sanitize_component_neutralizes_path_traversal():
+    from tools.fsm_runtime.state_loader import _sanitize_component
+    # 路徑分隔符已被淨化為 "_"，不再構成多層路徑
+    assert "/" not in _sanitize_component("../../etc/passwd")
+    assert "\\" not in _sanitize_component("..\\..\\windows\\system32")
+    # 純句點片段（穿越 token 本身）被 rstrip(" .") 整段吃光，回退安全預設值，
+    # 不殘留任何具穿越意義的字面 ".."／"."
+    assert _sanitize_component("..") == "untitled"
+    assert _sanitize_component(".") == "untitled"
+    assert _sanitize_component("...") == "untitled"
+
+
+def test_sanitize_component_truncates_overlong_strings():
+    from tools.fsm_runtime.state_loader import _sanitize_component, _MAX_COMPONENT_LEN
+    sanitized = _sanitize_component("A" * 5000)
+    assert len(sanitized) <= _MAX_COMPONENT_LEN
+
+
+def test_sanitize_component_reserved_name_padding_bypass_regression():
+    """R38 四方複審 SD bug-injection 揪出的順序缺口回歸鎖。
+
+    舊實作順序為「淨化禁用字元 → 保留裝置名檢查 → 截斷 → 第二次獨立 rstrip」：
+    保留名檢查發生在截斷之前，若輸入是「保留名 + 大量空格（非句點）+ 一個不會
+    被 rstrip(" .") 剝除的字元」且總長超過 `_MAX_COMPONENT_LEN`，截斷前 rstrip
+    因結尾非空白不觸發、保留名檢查因此誤判「不是保留名」而放行；截斷把那個
+    阻擋字元切掉後，第二次 rstrip 才把露出的空格清除，卻不再重跑保留名檢查，
+    讓保留名裸露輸出（guard 被繞過）。修復後「淨化 → 截斷 → 最終 rstrip →
+    保留名檢查」只執行一輪，必須正確攔下。
+    """
+    from tools.fsm_runtime.state_loader import _sanitize_component
+
+    for reserved in ("CON", "PRN", "AUX", "NUL", "COM1"):
+        padded = reserved + " " * 77 + "X"  # 總長 81 > _MAX_COMPONENT_LEN(80)
+        sanitized = _sanitize_component(padded)
+        assert sanitized.startswith("_"), (
+            f"padding-bypass 未被攔下：{reserved!r} -> {sanitized!r}"
+        )
+
+    assert _sanitize_component("CON" + " " * 77 + "X") == "_CON"
+
+
+def test_track_state_path_survives_hostile_project_and_track_id(tmp_path):
+    """組合驗證：即便 project/track_id 同時夾帶禁用字元/保留名/穿越/超長，
+    track_state_path 產生的最終路徑仍是單層平坦檔名，落在 DEFAULT_STATE_DIR 下
+    （不會逃逸出目錄，也不會拋例外）。"""
+    from tools.fsm_runtime import state_loader as sl
+    hostile_project = 'CON<>:"|?*' + "X" * 300
+    hostile_track = "../../etc/passwd"
+    p = sl.track_state_path(hostile_project, hostile_track)
+    assert p.parent == sl.DEFAULT_STATE_DIR
+    assert p.name.startswith("FSM-STATE-")
+    for ch in '<>:"|?*\\':
+        assert ch not in p.name
+
+
 def test_track_state_isolation(tmp_path):
     from tools.fsm_runtime.state_loader import load_track_state, save_state
     # 兩軌獨立狀態，互不污染

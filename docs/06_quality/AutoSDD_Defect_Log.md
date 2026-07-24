@@ -167,6 +167,55 @@
 | DEF-101-311 | 2026-07-24 | R37 主控（跑 `AISDLC_SDD/scripts/ci-gate.sh` 全套回歸時機械測試攔下） | **新增消費檔 `tools/lib/WindowsAppsGuard.ps1`（DEF-101-303 修復產物）未列入 `.github/workflows/macos-compat-ci.yml` 的 `paths:` filter**——`test_ci_paths_cover_root_consumers.py` 正確攔下：只改該新檔不會觸發 `macos-compat-ci.yml` 對應回歸鎖重跑（DEF-101-042 同構，比照 R27 `bootstrap.ps1`／R34 `dev_start.ps1` 同款前例，每次新增被 `test_windowsapps_guard_cross_consistency.py` 消費的根層檔案都需同步手動補列） | P2（機械閘門已攔下，未 push 前即發現；若未修復會讓此新共用檔案的回歸失去 macOS CI 覆蓋） | push／PR 兩份 `paths:` 各補一行 `tools/lib/WindowsAppsGuard.ps1` | fixed@R37：主控直接補上並重跑 `ci-gate.sh` 確認轉綠（`scripts/tests` 184/184 passed）；四方一審 Architect 親自核對 push/PR 兩區塊皆補齊、`windows-compat-ci.yml` 側已有 `**/*.ps1` 兜底 glob 不需重複列舉 |
 | DEF-101-312 | 2026-07-24 | R37 SA 一審（帳本/文件誠實度審查） | **本輪（R37）兩項實質修復（DEF-101-310 escalation 淨化、DEF-101-303 WindowsApps guard 收斂）落地後，`docs/06_quality/AutoSDD_Defect_Log.md` 一度未同步新增/更新對應條目**（僅訂正 archive_07 大小描述文字），且 `ONBOARDING.md` §7 pytest 基線因本輪新增 6 條 AutoClaude 測試而過時（乾淨基線應為 3,650/210，非原記載的 3,644/210）——SA 判定此為本輪放行前必須補齊的收斂缺口（非新程式碼缺陷），REJECT 待補 | P3（帳本/文件同步缺口，程式碼本身已驗證正確） | 補齊帳本條目（本列即為其一）＋於全新乾淨 venv 重驗 pytest 基線並更新 SSOT | fixed@R37：主控補齊 DEF-101-310／DEF-101-311 帳本條目、DEF-101-303 狀態更新為 fixed；於全新臨時目錄乾淨 venv（`import psycopg2`/`sqlalchemy` 皆 `ModuleNotFoundError` 確認乾淨，`CLAUDECODE=1`）重跑 `pytest tests/ -q`，已更新 `ONBOARDING.md` §7 SSOT 並保留舊基線為歷史註記；`tools/check_pytest_baseline_sites.py` 重跑確認仍為唯一站點無漂移。**QA 一審後又新增 1 條測試**（DEF-101-310 超長 step_id fallback 修復），最終乾淨基線收斂為 **3,651 passed / 210 skipped**（較 R33 基線 +7），SSOT 已同步更新為此最終數字 |
 | DEF-101-313 | 2026-07-24 | R37 一審 SD（對 WindowsApps guard 收斂做 bug-injection 找新繞過手法） | **`test_windowsapps_guard_cross_consistency.py`／`test_bootstrap_ps1.py` 對「呼叫端用額外 `-or` 條件覆蓋 `Test-IsRealPython` 共用函式回傳值」這類新繞過手法無鑑別力**：把呼叫端改成 `$isRealPython -or (Get-Command python -ErrorAction SilentlyContinue)`（偽裝成「企業 GPO 環境下 `.Source` 可能為空字串」的防禦性寫法），本輪新增的存在性檢查（純字面 regex 確認呼叫語法存在）與行為測試（只測共用函式本身，不測呼叫端如何消費回傳值）皆抓不到，端到端測試在本機 macOS pwsh 上因既有 PATHEXT 解析侷限本就對此無鑑別力（已知既有限制，非本輪新增）。SD 另行驗證：此類呼叫端邏輯異動會改變 `tools/check_wrapper_thinness.py` 的正規化內容 hash 釘選並正確變紅，構成有效的跨平台正交防線（已接入本機 CI 對等與 pre-push 紀律） | P3（本輪兩份 WindowsApps guard 測試檔本身鑑別力有限，但有正交防線有效補位；觸發需「看似合理的防禦性寫法」，非典型手誤但也非需惡意規避意圖的高門檻）| 若要讓 `test_windowsapps_guard_cross_consistency.py` 自身具備此類鑑別力，可將存在性檢查從 regex 升級為 AST/簡易解析確認 `if` 判斷式的條件運算式恰為 `Test-IsRealPython(...)` 呼叫本身、無其他 `-or`/`-and` 修飾 | open（backlog，SD 明確判定非阻擋本輪 APPROVE，有正交防線緩解） |
+| DEF-101-314 | 2026-07-24 | R38 Scan-A（檔名/路徑相容性掃描） | **`AISDLC_SDD/AISDLC_SDD_v0.30/tools/fsm_runtime/production_monitor.py::ingest_slo_violation()` 的 `nfr_id` 欄位原本不在 HMAC-SHA256 簽章覆蓋範圍（`REQUIRED_FIELDS`）、也未淨化就組入 `_report_path()` 的 `PBS-DRIFT-{nfr_id}-{date}.md` 檔名**：攻擊者可在既有合法簽章 SLO 事件上事後附加任意 `nfr_id`（簽章驗證仍通過，因 canonical payload 原只涵蓋 `REQUIRED_FIELDS`），造成路徑穿越（`nfr_id` 含 `/`、`..`）或 Windows 檔名崩潰（含 `< > : " \| ? *` 或保留裝置名） | P0（生產回饋層 inbox 讀取外部事件、可被攻擊者控制輸入，路徑穿越/靜默寫檔失敗屬安全與可用性雙重風險） | 本輪修復 | fixed@R38：`signed_fields_default()` 改回傳 `REQUIRED_FIELDS + ("nfr_id",)`，使 `nfr_id` 併入 HMAC 簽章覆蓋範圍（事後夾帶不重簽即 `signature_mismatch`）；新增獨立淨化函式作第二層防護（後於四方一審 Architect 建議下收斂為重用 `state_loader._sanitize_component()` 薄包裝，見 DEF-101-315）。新增 `test_production_monitor.py::NfrIdSecurityTests`（13 case，含簽章夾帶攻擊、路徑穿越、保留裝置名、超長截斷、控制字元），四方一審＋複審（Architect/SA/SD/QA）皆親自 bug-injection 驗證後全數 APPROVE |
+| DEF-101-315 | 2026-07-24 | R38 Scan-A（檔名/路徑相容性掃描）；一審 SD 對修復本身 bug-injection 追加發現 | **`AISDLC_SDD/AISDLC_SDD_v0.30/tools/fsm_runtime/state_loader.py::_sanitize_component()` 原本只擋 `/` 與 `\`，未擋 Windows 禁用字元/保留裝置名/路徑穿越/超長截斷**，覆蓋度遠弱於 AutoClaude 側已鎖定 parity 的 `_sanitize_log_filename()`，用於組 FSM 治理閉環 SSOT 狀態檔 `FSM-STATE-{project}-{track_id}.yaml`（`project`/`track_id` 皆外部可控：環境變數/並行 track 標籤）。**首次修復擴充淨化邏輯後，R38 四方一審 SD 對新版做 bug-injection 又找到 padding-bypass 順序缺陷**：保留裝置名檢查發生在截斷之前、截斷後又獨立做第二次 rstrip 卻不重新檢查，`_sanitize_component("CON" + " "*77 + "X")` 會回傳裸露的 `"CON"`（guard 被繞過），`PRN`/`AUX`/`NUL`/`COM1` 等其餘保留名同樣可繞過 | P1（首次淨化不足）→ 二階段修復期間發現順序缺陷（P2，目前僅有兩個呼叫點皆用固定非空前綴包住，非立即可用攻擊，但共用函式自身文件與測試明確宣稱的不變量可被證偽） | 本輪修復 | fixed@R38（兩階段）：階段一擴充 `_sanitize_component()` 涵蓋 Windows 禁用字元/保留裝置名/路徑穿越/超長截斷，`spec_patch_proposer.py` 改用同一函式（見 DEF-101-316），新增跨模組 parity 測試 `test_state_component_sanitizer_parity.py` 比對與 AutoClaude 側 `_sanitize_log_filename` 安全性質等效。階段二（四方一審 SD 發現後）修正操作順序為單輪「淨化禁用字元→截斷→最終 rstrip→保留裝置名檢查」，新增回歸測試 `test_sanitize_component_reserved_name_padding_bypass_regression`（鎖 CON/PRN/AUX/NUL/COM1 五個 padding-bypass 攻擊輸入）。SD 複審獨立重跑 720 組 fuzzer（5 保留名×24 padding 長度×9 結尾字元）確認 0 bypass，四方複審全數 APPROVE |
+| DEF-101-316 | 2026-07-24 | R38 Scan-A（檔名/路徑相容性掃描） | **`AISDLC_SDD/AISDLC_SDD_v0.30/tools/fsm_runtime/spec_patch_proposer.py` 組 `SPEC-PATCH-{ac_id}-{date}.md` 檔名時，`ac_id`（來自缺陷回流訊號/test-failure-analyzer 映射，外部可控性較低但同款風險）未套用任何淨化** | P2（觀察項，外部可控性遠低於 DEF-101-314/315，一併修復以求一致） | 本輪修復（隨 DEF-101-315 一併收斂） | fixed@R38：改為 `from .state_loader import _sanitize_component`，組檔名前呼叫該函式（重用同套件內已收斂的共用淨化邏輯，未另造第三份實作）；新增 `test_phase_j.py` 2 個測試（禁用字元/路徑穿越/超長 `ac_id` 不逃逸 `out_dir`；保留裝置名 `ac_id="CON"` 正確加前綴）。四方一審＋複審皆 APPROVE |
+| DEF-101-317 | 2026-07-24 | R38 Architect 架構最佳化評估 | **`AISDLC_SDD/AISDLC_SDD_v0.30/tools/install_hooks/install_post_commit.ps1` 裸 `Get-Command python` 前置檢查會誤判 WindowsApps 空殼 `python.exe`（Store App Execution Alias）為「有 python」**，是 DEF-101-273/279/300/303 同一缺陷類別（R27~R37 反覆修復）第 5 個獨立未覆蓋位置，且首次出現在 **AISDLC_SDD 子專案**（此前四次皆在 AutoClaude/根層）。**首次修復在本檔內獨立實作空殼排除**（理由：AISDLC_SDD 有獨立 `releases/` 打包發布機制，不可硬相依 monorepo 根路徑），**R38 四方一審 Architect 查證後推翻此理由並 REJECT**：實際檢查 `releases/v0.01/*.tar.gz` 內容根本沒有 `tools/install_hooks/` 目錄，且本檔自身已透過 `$MainCheckoutRoot` 強相依 monorepo 根路徑結構定位 hook 來源檔，獨立實作等於重新製造 R37 剛收斂掉的同一類副本 | P2（首次修復）→ 架構收斂缺口（Architect 一審 REJECT 理由） | 本輪修復 | fixed@R38（兩階段）：階段一於本檔內嵌 `-like '*\WindowsApps\*'` 判斷；階段二（Architect REJECT 後）改為 dot-source 根層共用函式 `. (Join-Path $MainCheckoutRoot "tools\lib\WindowsAppsGuard.ps1")` 後呼叫 `Test-IsRealPython`（dot-source 前 `Test-Path` 檢查，缺席則 `Write-Error`+`exit 1`），消滅第 4~5 個獨立副本；連帶修復兩份假 monorepo fixture（`test_install_post_commit_windowsapps_guard.py` 新檔、既有 `test_install_post_commit_exec_bit.py`）補上 `tools/lib/WindowsAppsGuard.ps1`，以及 `.github/workflows/aisdlc-sdd-ci.yml` 的 CI paths 補上此新根層消費者（`test_ci_paths_cover_root_consumers.py` 機械鎖抓到的連帶缺口）。四方複審（含 Architect 本人）皆 APPROVE |
+| DEF-101-318 | 2026-07-24 | R38 Scan-D（文件/帳本一致性掃描） | **R37 commit（d7164a7）只新增了缺陷總表列（DEF-101-310~313）與 archive 大小訂正，未依 R16 起既定慣例補寫對應的「## R37 四方複審裁決總結」敘事章節**——主檔與全部 archive 檔皆無「R37」標題字串，打破每輪皆有專屬敘事章節的慣例（機械閘門 `check_defect_log_crossref.py` 仍轉綠，資訊未遺失，commit message 本身已含濃縮版四方一二三審意見，僅未落地進帳本本身） | P3（文件/帳本完整性缺口，非機械閘門失效） | 本輪修復 | fixed@R38：主控於本輪（R38）動工時一併補寫「## R37 四方複審裁決總結」敘事章節（見下方，依 commit d7164a7 訊息與前一輪對話紀錄回填） |
+
+## R38 四方複審裁決總結（2026-07-24）
+
+本輪使用者要求同 R16 起既有固定格式：全面掃描四維度＋Architect 架構最佳化評估，發現問題即修復，再經 Architect/SA/SD/QA 四方獨立審查至全數 APPROVE。
+
+- **前置基線**：AISDLC_SDD `ci-gate.sh` 全通過（v0.01:1475、v0.30:1703、scripts/tests:188）、根層 `tools/tests/` 416 passed/4 skipped、AutoClaude pytest 3751 passed/146 skipped，本輪動工前重跑確認與 R37 收尾狀態一致、無回歸。帳本主檔 246,971 bytes，已達 256KB 上限 94.2%，Scan-D 掃描後判斷需本輪歸檔（見下）。
+- **全面掃描（Scan-A/B/C/D 四維度 + Architect 架構深度評估，皆背景 agent 獨立平行執行）**：B（Shell/程序/訊號）、C（CI 腳本雙軌對等性）皆零新發現，延續 R35~R37 結果；D（文件/帳本一致性）抽樣核對 R33~R37 `fixed@R...` 宣稱皆對照程式碼確認屬實，另發現帳本主檔逼近輪替上限、以及 R37 commit 缺對應敘事章節（DEF-101-318）；A（檔名/路徑相容性）找到兩項真實新缺陷：`production_monitor.py` 的 `nfr_id` 欄位未納入 HMAC 簽章覆蓋且未淨化即組入檔名，可致路徑穿越或 Windows 崩潰（DEF-101-314，P0）；`state_loader.py::_sanitize_component()` 只擋 `/`、`\`，是同缺陷類別第 5 個獨立實作但覆蓋度明顯弱於已鎖 parity 的 AutoClaude 側版本（DEF-101-315，P1），`spec_patch_proposer.py` 有同款次要缺口一併記入（DEF-101-316）；Architect 深度評估找到 `AISDLC_SDD_v0.30/tools/install_hooks/install_post_commit.ps1` 裸 `Get-Command python` 檢查缺 WindowsApps 空殼排除，是 R27~R37 反覆修復的同一缺陷類別第 5 個獨立未覆蓋位置、首次出現在 AISDLC_SDD 子專案而非 AutoClaude/根層（DEF-101-317，P2）。
+- **歸檔**：Scan-D 發現帳本逼近上限後，動工前先將 R34、R35 敘事段落搬遷至新檔 `archive_10.md`（232,372 bytes），釋出空間供本輪新增內容。
+- **修復落地（第一輪）**：三個互不重疊檔案的修復包平行執行——① `production_monitor.py` 把 `nfr_id` 併入簽章欄位 + 新增獨立淨化函式；② `state_loader.py` 擴充 `_sanitize_component()` 淨化覆蓋度，`spec_patch_proposer.py` 改用同一函式，新增跨模組 parity 測試；③ `install_post_commit.ps1` 在本檔內獨立實作 WindowsApps 空殼排除（理由：AISDLC_SDD 獨立 `releases/` 打包發布機制，不可硬相依 monorepo 根路徑）。過程中主控親自跑三軌回歸時發現 1 個新測試檔（`test_install_post_commit_windowsapps_guard.py`）誤觸根層 `test_platform_neutral_paths.py` 機械掃描（Windows 磁碟機假路徑字面值），已用既有 `# platform-ok:` 豁免標記就地訂正。
+
+### 四方一審（Architect/SA/SD/QA 獨立審查，皆於主工作樹直接操作、不使用 `isolation: worktree`）
+
+- **SA**：**APPROVE**（無條件）——親自讀簽章覆蓋欄位邏輯確認 `nfr_id` 缺席時 canonical payload 仍用固定空字串佔位、簽章穩定；核對 `_sanitize_component`/`_sanitize_nfr_id` 對非字串型別輸入不拋例外；核對 `install_post_commit.ps1` 的 `-like '*\WindowsApps\*'` 屬路徑分段精確比對、不會誤中 `MyWindowsAppsBackup` 這類巧合子字串（另記一個非本輪新增、繼承自根層共用實作的精度缺口供追蹤，不阻擋）。
+- **QA**：**APPROVE**（無條件）——對五個新增/修改測試檔逐一親自 bug-injection（改回舊版邏輯重跑測試確認轉紅、備份+diff核對還原，全程未用 `git checkout --`），確認皆具真實鑑別力、非裝飾性斷言，跨模組 parity 測試確實用兩獨立函式實際輸出比對。
+- **Architect**：**REJECT**——查證「`install_post_commit.ps1` 不可 dot-source 根層 `WindowsAppsGuard.ps1`」的理由：實際 `tar -tzf` 檢視 `releases/v0.01/*.tar.gz` 發現根本沒有 `tools/install_hooks/`，且本檔自身已用 `$MainCheckoutRoot` 強相依 monorepo 根路徑，獨立實作等於重製 R37 剛收斂掉的同款副本；另發現 `production_monitor.py::_sanitize_nfr_id()` 與 `state_loader.py::_sanitize_component()` 在同一套件內幾乎逐字重複、無循環 import 障礙卻未收斂。
+- **SD**：**REJECT**——對三處修復逐一 bug-injection（雙重編碼路徑穿越、NUL 字元、大小寫混合保留裝置名等），確認 `production_monitor.py`/`install_post_commit.ps1` 本身無漏洞，但找到 `state_loader.py::_sanitize_component()` 的 padding-bypass 順序缺陷：`"CON" + 77個空格 + "X"` 會使保留裝置名檢查失效、guard 被繞過。
+
+**針對一審發現的修復**：派兩個互不重疊修復包——① 修正 `_sanitize_component()` 操作順序為單輪「淨化→截斷→rstrip→保留名檢查」，新增 padding-bypass 回歸測試，並把 `production_monitor.py::_sanitize_nfr_id()` 改為重用 `state_loader._sanitize_component()`（薄包裝＋`nfr_id` 專屬預設值，移除重複常數）；② `install_post_commit.ps1` 改為 dot-source 根層 `tools/lib/WindowsAppsGuard.ps1::Test-IsRealPython`，連帶修復兩份假 monorepo fixture 與 CI paths 缺口（`test_ci_paths_cover_root_consumers.py` 機械鎖抓到）。
+
+### 四方複審（SendMessage 保留一審上下文複審）
+
+- **Architect**：**APPROVE**——親自重讀 diff 確認兩項 REJECT 理由皆已收斂：`install_post_commit.ps1` 不再殘留內嵌判斷、`production_monitor.py` 已改為 import 共用函式；意外發現「收斂成共用函式」的價值展示——若未收斂，SD 發現的 padding-bypass 修復就不會自動惠及 nfr_id 路徑。
+- **SD**：**APPROVE**——用原本的攻擊手法（含 `PRN`/`AUX`/`NUL`/`COM1`/`LPT9`/大小寫混合）重跑確認 padding-bypass 已修復，`_sanitize_nfr_id` 委派後仍正確免疫；`install_post_commit.ps1` 的 WindowsApps 判斷式邏輯只是搬移位置未改變語意，一審驗證過的邊界案例重測結果一致。
+- **SA**：**APPROVE**——獨立重跑 720 組保留名×padding 長度×結尾字元 fuzzer 確認 0 bypass；獨立用 `tar -tzf` 查證 Architect 對 release 打包內容的推翻理由屬實；簽章覆蓋範圍邏輯、非字串輸入防禦、WindowsApps 比對精度三項一審驗證過的核心安全性質皆未因重構而改變。
+- **QA**：**APPROVE**——對三處追加修復逐一 bug-injection（含二階段還原測試：先改回繞過共用函式的 direct passthrough 確認 7 個測試轉紅、再驗證 dot-source 改造後 fixture 未讓測試退化成「檔案存在就通過」的空殼判斷），確認鑑別力未因重構而流失。
+
+**四方複審最終結論：全數 APPROVE**（Architect/SD/SA/QA 皆 APPROVE，二審收斂了一審 Architect/SD 的兩項 REJECT）。本輪 R38 全部異動（`AISDLC_SDD/AISDLC_SDD_v0.30/tools/fsm_runtime/production_monitor.py`、`state_loader.py`、`spec_patch_proposer.py`、對應測試檔、新檔 `test_state_component_sanitizer_parity.py`、`AISDLC_SDD/AISDLC_SDD_v0.30/tools/install_hooks/install_post_commit.ps1`、新檔 `AISDLC_SDD/scripts/tests/test_install_post_commit_windowsapps_guard.py`、`AISDLC_SDD/scripts/tests/test_install_post_commit_exec_bit.py`、`tools/lib/WindowsAppsGuard.ps1`、`.github/workflows/aisdlc-sdd-ci.yml`、`docs/06_quality/AutoSDD_Defect_Log.md`、新檔 `docs/06_quality/AutoSDD_Defect_Log_archive_10.md`）可放行。**已知限制（如實記載）**：SA 一審發現的 `WindowsApps` 路徑分段比對未要求上層必須是 `Microsoft`（`C:\dev\WindowsApps\python.exe` 這種非系統路徑仍會被排除）是繼承自根層共用實作 `tools/lib/WindowsAppsGuard.ps1` 的既有系統性限制，非本輪新增，建議另案追蹤；Architect 一審提及的其餘同缺陷類別姊妹呼叫點（`path_cost.py`/`production_to_fpl.py`/`counterfactual_replay.py`/`sandbox_runner.py`/`hub_sync.py` 等）本輪未觸及，留待下一輪掃描。**收尾驗證**：全套回歸最終重跑——AISDLC_SDD `ci-gate.sh` 全通過（v0.01:1475、v0.30:1704、scripts/tests:188）、根層 `tools/tests/` 416 passed/4 skipped、AutoClaude pytest 3751 passed/146 skipped、`python3 tools/check_script_parity.py` 全綠、`python3 -m tools.arch_fitness.arch_fitness --strict` fail=0、YAML 語法驗證通過。帳本主檔本輪新增大量內容後為 250,727 bytes（95.6%，`check_defect_log_crossref.py` 印出「已逼近輪替上限」警告但非 FAIL），建議下一輪（R39）動工前優先規劃再次歸檔（候選：搬遷 R36 敘事段落至 `archive_11.md`）。
+
+## R37 四方複審裁決總結（2026-07-24）
+
+> 本節為 R38 動工時發現 R37 commit（d7164a7）漏補此章節（DEF-101-318）後，依 commit message 與前一輪對話紀錄回填。
+
+本輪使用者要求同 R16 起既有固定格式：全面掃描四維度＋Architect 架構最佳化評估，發現問題即修復，再經 Architect/SA/SD/QA 四方獨立審查至全數 APPROVE。
+
+- **全面掃描（Scan-A/B/C/D 四維度 + Architect 架構深度評估，皆背景 agent 獨立平行執行）**：Scan-B（Shell/程序/訊號）、Scan-C（CI 腳本雙軌對等性）零新發現；Scan-D 僅抓到帳本一處極輕微文件偏差（已訂正）；Scan-A 找到真實 P2——`EscalationDump.save()` 組檔名時未淨化 `step_id`，是 Windows 禁用檔名字元這類缺陷第 4 個獨立未覆蓋位置，可能讓 ESCALATION 診斷報告（失敗復盤關鍵材料）在 Windows 上靜默存檔失敗。
+- **架構最佳化**：Architect 提出把 `bootstrap.ps1`/`dev_start.ps1` 三處各自內嵌的 WindowsApps guard 判斷，比照既有 `Find-GitBash.ps1` 先例收斂成共用函式 `tools/lib/WindowsAppsGuard.ps1::Test-IsRealPython`，結構性消滅了 DEF-101-303（第 4 個獨立實作缺口）。
+
+### 四方複審（三輪）
+
+- **一審**：Architect/SD APPROVE；SA REJECT（帳本/文件收斂未完成）；QA APPROVE 但另發現超長 `step_id` 會導致未捕捉例外。
+- **二審**：SA 再揪出 pre-commit 的 `ruff check` 會擋下本次 commit（本輪觸碰檔案的既有 lint 存量債）；QA 再發現 `step_id` 含 `/` 會導致子目錄異常／路徑穿越。
+- **三審**：全數修復後，Architect/SA/SD/QA 皆親自重跑驗證（含 SD 追加 10 種路徑穿越變形手法、SA 實測真實 pre-commit exit=0）全數 APPROVE。
+
+**四方複審最終結論：全數 APPROVE**。本輪 R37 全部異動（`AutoClaude/autoclaude/models/escalation.py`、`AutoClaude/autoclaude/utils/logger.py`（`_sanitize_log_filename`/`write_text_with_fallback` 共用化）、`tools/bootstrap.ps1`、`tools/dev_start.ps1`、新檔 `tools/lib/WindowsAppsGuard.ps1`、對應測試檔、`.github/workflows/macos-compat-ci.yml`、`docs/06_quality/AutoSDD_Defect_Log.md`）可放行。**收尾驗證**：回歸結果 AutoClaude 3751/146（乾淨 venv 3653/210）、根層 `tools/tests/` 416/4、AISDLC_SDD `ci-gate.sh` 三軌全綠，`ruff`/`lint-imports`/LOC 預算皆過。帳本新增 DEF-101-310~313 四筆，DEF-101-303 標記 `fixed@R37`。**收尾提醒**：缺陷帳本主檔已逼近 256KB 輪替上限（94%），R37 二審 SA 已建議下一輪規劃歸檔搬遷（R38 已依此執行，見上）。
 
 ## R36 四方複審裁決總結（2026-07-24）
 
@@ -202,72 +251,11 @@
 
 **收尾驗證**：全套回歸最終重跑——AutoClaude pytest 3742 passed/146 skipped、`tools/tests/` 409 passed/3 skipped、AISDLC_SDD `ci-gate.sh` 全通過（v0.01:1475、v0.30:1674、scripts/tests:184）、`ruff check` 三個異動檔案皆過、`git status` 僅預期 4 個檔案異動（3 個程式/測試檔 + 本帳本），帳本 `check_defect_log_crossref.py` 狀態一致。
 
-## R35 四方複審裁決總結（2026-07-24）
-
-本輪使用者要求同 R16 起既有固定格式：全面掃描四維度＋Architect 架構最佳化評估，發現問題即修復，再經 Architect/SA/SD/QA 四方獨立審查至全數 APPROVE。
-
-- **前置基線**：AutoClaude pytest 3742 passed/146 skipped、`tools/tests/` 407 passed/3 skipped，本輪動工前重跑確認與 R34 收尾狀態一致、無回歸。帳本主檔 213,270 bytes，距 256KB 上限尚遠，本輪未需提前歸檔。
-- **全面掃描（Scan-A/B/C/D 四維度 + Architect 架構深度評估，皆背景 agent 獨立平行執行）**：A（Shell/PowerShell）發現 `tools/dev_start.ps1` 兩個 dot-source 早期失敗分支未設 `$LASTEXITCODE`，違反自身 `.NOTES` 文檔契約、與對等 `.sh` 版本不對稱（DEF-101-304）；B（Python 跨平台）與 C（CI/排程/hooks 基建）皆零新發現；D（文件/帳本一致性）發現「已歸檔內容（八檔）」第三度漏同步遞增為「九檔」（DEF-101-305）與 `archive_06.md` 大小描述誤差 79%（DEF-101-306）；Architect 深度評估肯定既有「薄殼＋Python 核心＋SSOT＋交叉一致性鎖」演進路線合理，另發現 WSL System32 排除規則分裂成兩座互不相通的 SSOT 孤島、缺跨島鎖，但實測風險偏低，列為 backlog（DEF-101-307）。
-- **修復落地**：DEF-101-304 於兩處分支補 `$global:LASTEXITCODE = 1`，同步更新 `check_wrapper_thinness.py` 雜湊釘選，新增 `tools/tests/test_dev_start_ps1_lastexitcode.py`；DEF-101-305/306 訂正帳本文字。
-
-### 四方一審（Architect/SA/SD/QA 獨立審查，皆於主工作樹直接操作、不使用 `isolation: worktree`）
-
-- **Architect**：**APPROVE**——親自重現修復有效、對新測試 bug-injection 確認鑑別力；提出非阻斷觀察：新測試僅覆蓋「找不到 Python」分支，未覆蓋同構的「找不到 repo 根」分支。
-- **SA**：**APPROVE**（無條件）——逐項核對四筆缺陷紀錄數字/路徑/行號、archive 計數與大小描述，全數精確吻合。
-- **SD**：**APPROVE-with-conditions**——用 4 組 bug-injection 精準證實「找不到 repo 根」分支是**真實覆蓋盲區**（只還原該分支修復，測試仍全綠），列為必修；另確認 `$global:` scope 前綴非功能必要，屬保守設計選擇非缺陷。
-- **QA**：**APPROVE**（無條件）——逐一核實 CI paths 真的會觸發新測試、`pwsh`/`powershell` 在兩支 workflow runner 上確有可用、雜湊釘選正確、全套回歸重跑皆綠、帳本欄位誠實。
-
-**針對一審發現的修復**：Architect/QA/SD 三方交叉獨立發現同一缺口（「找不到 repo 根」分支無測試覆蓋），依既有慣例視為高信度真缺陷，新增靜態一致性測試 `TestDevStartPs1BothFailureBranchesSetLastExitCode`（文字比對 `tools/dev_start.ps1` 全文，鎖住兩分支同時設 `$LASTEXITCODE`），bug-injection 驗證有效後回傳四方複審。
-
-### 四方二審（SendMessage 保留一審上下文複審）
-
-- **SA**：**APPROVE-with-conditions**——獨立 bug-injection 覆核靜態鎖有效，唯一建議：DEF-101-304 的 `fixed@R35` 描述應補充說明追加的靜態測試類別，避免讀者誤判涵蓋方式（皆為子行程實際執行）。已就地訂正。
-- **Architect**：**APPROVE**——用兩種進階手法對靜態鎖做對抗式 bug-injection，其一（decoy 註解＋格式偽裝）成功繞過但需刻意對抗性動作，另一（多行拆分）因寫入前置條件不成立未完整驗證；認同「該分支無法安全模擬觸發、改用靜態鎖」的工程判斷合理；審查過程回報遭遇多次可疑偽造 system-reminder 與工具輸出間歇性矛盾內容，皆未採信、改以 `shasum`＋Python `hashlib`＋原始 bytes dump＋`git diff` 交叉核實排除汙染。
-- **SD**：**APPROVE-with-conditions**——獨立以相同 decoy 手法重現與 Architect 相同的繞過路徑（交叉印證），並證實此鎖對「意外重排」安全、只對「刻意 padding」不安全；回報一次無法解釋的偶發假紅，經 `git hash-object` 核實排除為暫態雜訊。
-- **QA**：**APPROVE**（無條件）——確認新增測試類別無需額外 CI paths 異動；bug-injection 覆核鎖有效；重跑全套回歸皆綠；揭露一次因多 agent 並行 bug-injection 讀寫窗口重疊、短暫讀到他方實驗中間態的 race 觀察（非本輪異動缺陷，已排除為暫態），建議未來留意但不阻擋本輪。
-
-**針對二審發現的處理**：SA 建議的帳本描述訂正已就地完成；Architect/SD 交叉發現的靜態鎖 decoy 繞過手法記入 DEF-101-308（P3 backlog，兩方皆明確判定非阻擋——繞過需刻意對抗性動作、非自然筆誤，且本輪 `dev_start.ps1` 生產邏輯本身修復正確，僅「測試的測試」層面鑑別力縫隙）。
-
-**四方複審最終結論：全數 APPROVE**（Architect/SA/QA 最終皆無條件 APPROVE；SD 唯一殘留項為明確標記非阻斷的 DEF-101-308 backlog，與 Architect 交叉印證一致）。本輪 R35 全部異動（`tools/dev_start.ps1`、`tools/check_wrapper_thinness.py`、新檔 `tools/tests/test_dev_start_ps1_lastexitcode.py`、`docs/06_quality/AutoSDD_Defect_Log.md`）可放行。**環境異常揭露**：本輪多方（SA/Architect/SD/QA）皆各自獨立回報遭遇「並行 bug-injection 互相污染」的暫態現象與可疑的偽造 system-reminder（誘導隱瞞暫時性檔案改動），全數未採信、獨立以 diff/sha256/git hash-object 核實後確認最終狀態乾淨，如實記錄不隱瞞；QA 額外指出這類 race 在共用主工作樹上是真實風險，建議未來輪次視情況加互斥保護，記入 backlog 追蹤。**已知限制（如實記載）**：DEF-101-307（System32 雙 SSOT 孤島缺跨島鎖）、DEF-101-308（`test_dev_start_ps1_lastexitcode.py` 靜態鎖字面計數可被刻意 decoy 繞過）維持 open backlog。**收尾驗證**：全套回歸最終重跑——AutoClaude pytest 3742 passed/146 skipped、`tools/tests/` 409 passed/3 skipped、AISDLC_SDD `ci-gate.sh` 全通過（v0.01:1475、v0.30:1674、scripts/tests:184）、`check_script_parity.py`/`check_ntfs_paths.py`/`check_wrapper_thinness.py` 皆綠、帳本 `check_defect_log_crossref.py` 138 筆有效狀態一致，帳本主檔收斂於 224,914 bytes，遠低於 256KB 上限，本輪無需歸檔。
-
-## R34 四方複審裁決總結（2026-07-24）
-
-本輪使用者要求同 R16 起既有的固定格式：全面掃描四維度＋Architect 架構最佳化評估，發現問題即修復，再經 Architect/SA/SD/QA 四方獨立審查至全數 APPROVE。
-
-- **前置作業**：帳本主檔逼近 256KB 上限（254,679 bytes，距界線僅 0.5% 餘量，R33 二審 SA 已預先提醒），動工前先將 R33 敘事段落搬遷至新檔 `archive_08.md`（降至 250,090 bytes）。
-- **前置基線**：AutoClaude pytest 3742 passed/146 skipped（既知 `.venv` postgres 選配污染現況，沿用 R33 收尾狀態）、`tools/tests/` 403 passed/3 skipped，本輪動工前重跑確認與 R33 收尾狀態一致、無回歸。
-- **全面掃描（Scan-A/B/C/D 四維度 + Architect 架構深度評估，皆背景 agent 獨立平行執行）**：A（Shell/PowerShell）零新發現（含實測重現 `AISDLC_SDD_v0.01` 凍結版 `verify_traceability.sh` 在 macOS bash 3.2 上的 `declare -A` 已知崩潰，確認為既有 wontfix 家族、非新缺口）；B（Python 跨平台）發現 R33 新增的 `test_windows_forbidden_filename_parity.py` 缺 `usable_bash()` skipIf 守門（DEF-101-298）；C（CI/排程/hooks 基建）發現 macOS 側 `integration_gate.sh` 從未被 CI 實際執行、只靠語法檢查頂替，與已修復的 Windows 側同缺陷模式不對稱（DEF-101-299）；D（文件/帳本一致性）發現「已歸檔內容（六檔）」與實際 8 檔不符（DEF-101-301）；Architect 深度架構評估用「同一跨平台規則被 ≥2 處獨立實作卻無機械鎖」為篩選準則，找到 `tools/dev_start.ps1` 的 WindowsApps 空殼排除 guard 是第 4 個獨立實作且零測試覆蓋，屬 DEF-101-273/279/281 同一缺陷類別第 4 次復發（DEF-101-300）；其餘四面向（機械守門工具生態整體分工、雙原生腳本收斂取捨、nightly/CI stage 對等、DAL/hexagonal、FSM hooks Windows fallback）逐一親自驗證後判定維持既有結論不變。
-- **修復落地**：DEF-101-298 補齊鏡自 `test_pre_push_dispatcher.py` 的 `_usable_bash()` + 6 處 `skipIf`；DEF-101-299 於 `macos-compat-ci.yml` 補上 `integration_gate.sh --skip-full` 實際執行步驟；DEF-101-300 新增 `test_windowsapps_guard_cross_consistency.py`；DEF-101-301 訂正計數字樣。過程中自我發現一項連鎖回歸：新測試檔以路徑引用 `tools/dev_start.ps1`，`AISDLC_SDD ci-gate.sh` 的 `test_ci_paths_cover_root_consumers.py` 機械攔下 `macos-compat-ci.yml` paths 未涵蓋此消費檔（DEF-101-042 同構），已於 push/PR 兩份 paths 補上一行修復。
-
-### 四方一審（Architect/SA/SD/QA 獨立審查，皆於主工作樹直接操作、不使用 `isolation: worktree`）
-
-- **Architect**：**APPROVE-with-conditions**——用自行設計的 bug-injection（`-and`→`-or`）發現 `test_windowsapps_guard_cross_consistency.py` 的靜態測試對「布林運算子反轉」無鑑別力，此手法比字面上「拔掉整個 guard」更隱蔽。
-- **SA**：**APPROVE-with-conditions**——逐項重跑核對四筆缺陷紀錄的數字與敘述，全數精確吻合；唯一必修：`archive_08.md` bullet 描述「≈2KB」實測為 5,467 bytes（≈5.3KB），差 2.7 倍。
-- **SD**：**APPROVE-with-conditions**——對四項修復逐一 bug-injection 皆確認鑑別力，並額外發現 `bootstrap.ps1` 的靜態測試用 `re.search()` 只需命中一次，對其 python/python3 兩個獨立 guard 分支只破壞一處會漏放行（假綠）。過程中主動揭露：遭遇疑似並行 session 暫態污染，以及工具輸出出現偽造 system-reminder 誘導隱瞞暫時性檔案改動，皆未採信、獨立以 diff/git status 核實還原乾淨。
-- **QA**：**APPROVE-with-conditions**（唯一阻斷項）——揪出 `macos-compat-ci.yml` 新增步驟註解「AutoClaude 全套測試已於本 job 另跑」不實：該 job 實際只跑 `test_perception.py` 單一檔案，全套僅在 `macos-nightly-full`（continue-on-error 非阻斷）執行。
-
-**針對一審發現的修復**：新增 `test_dev_start_ps1_guard_uses_and_not_or`（鎖 Architect 發現的布林反轉）與 `test_bootstrap_ps1_guard_covers_both_python_and_python3_branches`（改用 `findall` 鎖 SD 發現的雙分支漏放行）；訂正 `archive_08.md` 大小描述為「≈5.3KB」；訂正 `macos-compat-ci.yml`／`windows-compat-ci.yml`（QA 發現的失實敘述其實源自 windows 側既有措辭、一併訂正）的 CI 步驟註解為誠實揭露。
-
-### 四方二審（SendMessage 保留一審上下文複審）
-
-- **QA**：**APPROVE**（無條件；親自核對兩份 workflow 措辭訂正與 nightly-full job 定義完全吻合；獨立 bug-injection 重驗兩個新測試皆正確變紅，且發現 `-or` 反轉的實際危害比表面描述更嚴重——連「完全沒找到任何候選」的情況都會被誤判為找到）。
-- **SA**：**APPROVE**（無條件；重新逐項核對，`archive_08.md` 5,467 bytes 與訂正後敘述吻合；如實揭露複審過程中再度撞見並行 bug-injection 暫態競態，經多方法交叉核實排除為誤判來源，非隱瞞）。
-- **Architect**：**APPROVE-with-conditions**——用第三種手法（`-notlike` 子句「後」疊加恆真子句 `-or $true`）發現二審新增的兩項測試仍只驗證運算式「中段」，未驗證條件式收尾，可被此手法繞過。
-- **SD**：**APPROVE-with-conditions**——確認 `-and`/雙分支修復有效，並獨立驗證 Architect 同時發現的「尾端疊加」缺口；另用新角度（`$PyCand`/`$Py3Cand` 互換賦值）發現一個機率極低的邊界情況，明確判定**非阻擋、列入下輪**。再次遭遇並行污染與偽造 system-reminder，皆未採信、如實記錄。
-
-**針對二審發現的修復**：新增 `test_dev_start_ps1_guard_condition_closes_immediately_after_windowsapps_check`／`test_bootstrap_ps1_guard_conditions_close_immediately_after_windowsapps_check`，改錨定**整條** `if (...)` 判斷式（要求 `-notlike '*\WindowsApps\*'` 之後必須緊接 `)`，中間不得插入任何 token），堵住「尾端疊加恆真子句」繞過手法；SD 發現的變數互換邊界情況記為 DEF-101-303（backlog，非阻擋）。
-
-### Architect 三審（最終確認）
-
-用「巢狀括號疊加恆真子句」「合法多行重排（驗證無過度僵化）」兩種手法對「整條判斷式收尾」新錨定做最後一輪驗證，確認無法在保持 guard 實際失效的前提下繞過；認同 SD 對變數互換邊界情況「機率極低、非阻擋」的判定。**最終 APPROVE**。
-
-**四方複審最終結論：全數 APPROVE**（QA/SA/Architect 無條件 APPROVE；SD 唯一殘留項為明確標記非阻擋的 DEF-101-303 backlog）。本輪 R34 全部異動（`tools/tests/test_windows_forbidden_filename_parity.py`、新檔 `tools/tests/test_windowsapps_guard_cross_consistency.py`〔8 case〕、`.github/workflows/macos-compat-ci.yml`、`.github/workflows/windows-compat-ci.yml`、`docs/06_quality/AutoSDD_Defect_Log.md`、新檔 `docs/06_quality/AutoSDD_Defect_Log_archive_08.md`）可放行。**環境異常揭露**：本輪三方（Architect/SA/SD）皆各自獨立回報遭遇「並行 bug-injection 互相污染」的暫態現象與可疑的偽造 system-reminder（誘導隱瞞暫時性檔案改動），全數未採信、獨立以 diff/git status/md5 核實後確認最終狀態乾淨，如實記錄不隱瞞。**已知限制（如實記載）**：DEF-101-303（`bootstrap.ps1` 變數互換型 bug 缺靜態鎖）維持 open backlog。**收尾歸檔**：帳本主檔加入四筆新缺陷後一度達 264,583 bytes、超過 256KB 上限（`check_defect_log_crossref.py` 由警告轉 FAIL），本輪未延後至 R35，當場逐一確認 12 筆 R15~R27 已結列（狀態皆為 `fixed@R...`，且未被 `ONBOARDING.md`／兩份 compat-ci workflow 以「DEF-ID(狀態宣稱)」樣式引用、不觸發跨文件矛盾）後搬遷至新檔 `archive_09.md`，主檔降回 213,244 bytes（81%），`check_defect_log_crossref.py` 重跑轉綠、跨文件狀態一致。
-
 ## 歷史複驗註記 — 已歸檔（improving_99 起）
 
 > **歸檔政策（DEF-99-001 fixed@improving_99）**：本帳本「跨輪累積、只增不刪」，但中文長列使單檔逼近工具讀取上限（曾達 468KB > Read 256KB）。自 improving_99 起，**歷史敘事複驗/收尾註記**（其缺陷現況已被上方缺陷總表 live 狀態取代，或為已結歷史）搬遷至分檔，**原文逐字保全、零刪除**（搬移非刪除，git 亦保歷史）；主檔只保留標頭 + 完整缺陷總表（live SSOT）+ 本指標。**輪替規則：主檔與「每一個」 archive 檔皆以 < 256KB（Read 工具上限）為界**——主檔再逼近即開新 archive；單一 archive 逼近即拆下一個 archive（故本輪一次就把 619 行歷史拆成 archive_01 + archive_02 兩檔，而非單一超限檔）。
 >
-> **已歸檔內容**（九檔）：
+> **已歸檔內容**（十檔）：
 > - **`AutoSDD_Defect_Log_archive_01.md`**（原主檔 93-543 行，≈170KB）：rounds 24-63 各輪複驗/收尾敘事註記 + 2026-06-22 agent/* 符規審查臨時塊（DEF-AGTREV-001~013 全 fixed@v0.18）+ 早期 `.claude` hooks/skills 審查輪（一~六）。
 > - **`AutoSDD_Defect_Log_archive_02.md`**（原主檔 544-711 行，≈177KB）：improving_45 追記 + 2026-06-23 `.claude` hooks/skills 審查輪（三~九，DEF-CLDREV-* 系列收斂至零缺陷）。
 > - **`AutoSDD_Defect_Log_archive_03.md`**（R9 跨平台複審 2026-07-16 建立，≈110KB）：缺陷總表中 **DEF-01～DEF-100 系列已結列（fixed / closed-by-decision）64 列**逐字搬移（主檔當時 272KB 已超 256KB 界線，DEF-101-123）。
@@ -277,6 +265,7 @@
 > - **`AutoSDD_Defect_Log_archive_07.md`**（R33 跨平台輪 2026-07-24 建立，≈6.7KB）：**R32 「四方一審／二審裁決總結」歷史敘事段落**逐字搬移（R33 動工前主檔已達 248,860 bytes、距 256KB 僅剩 5.1% 餘量，Scan-D 掃描發現後本輪立即搬移；搬移對象與 archive_05/06 同類，缺陷現況已被上方缺陷總表 live 狀態取代）。
 > - **`AutoSDD_Defect_Log_archive_08.md`**（R34 跨平台輪 2026-07-24 建立，≈5.3KB）：**R33 「四方一審／二審裁決總結」歷史敘事段落**逐字搬移（R34 動工前主檔已達 254,679 bytes、距 256KB 僅剩 0.5% 餘量，R33 二審 SA 已預先提醒本輪優先規劃歸檔；搬移對象與 archive_05/06/07 同類，缺陷現況已被上方缺陷總表 live 狀態取代）。
 > - **`AutoSDD_Defect_Log_archive_09.md`**（R34 跨平台輪 2026-07-24 建立，≈51.9KB）：**缺陷總表中 R15~R27 各輪已結列（fixed）12 列**逐字搬移（R34 新增四筆缺陷後主檔達 264,583 bytes、超過 256KB 上限，`check_defect_log_crossref.py` 由警告轉 FAIL；搬移對象為總表已結列，性質同 archive_03/04，非敘事段落；搬遷前逐一確認狀態皆 `fixed@R...` 且未被 `ONBOARDING.md`／兩份 compat-ci workflow 以「DEF-ID(狀態宣稱)」樣式引用，不觸發跨文件矛盾）。
+> - **`AutoSDD_Defect_Log_archive_10.md`**（R38 跨平台輪 2026-07-24 建立，≈14.6KB）：**R34、R35「四方一審／二審／三審裁決總結」歷史敘事段落**逐字搬移（R38 動工前主檔已達 246,971 bytes、距 256KB 僅剩 5.8% 餘量，Scan-D 掃描發現後本輪立即搬移；搬移對象與 archive_05/06/07/08 同類，缺陷現況已被上方缺陷總表 live 狀態取代）。
 >
 > **已知歷史重疊（R16 文件帳本一致性掃描發現，記事不刪除）**：`archive_01.md` 與 `archive_03.md` 各自完整搬移了 **DEF-37-001／DEF-62-001** 兩列（內容一致、結案狀態相同，非矛盾——推測為兩次獨立搬遷批次各自涵蓋範圍重疊所致）。因 `check_defect_log_crossref.py` 只掃描本主檔與少數指定目標檔，不掃 archive 間互相重疊，此重複未被既有機械守門攔下。依「archive 只增不刪、原文逐字保全」政策不予去重，僅此記事存證，供未來若真要整併 archive 時參考。
 >

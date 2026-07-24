@@ -271,6 +271,97 @@ class IngestTests(unittest.TestCase):
         self.assertIn("700", content)
 
 
+class NfrIdSecurityTests(unittest.TestCase):
+    """R38 Scan-A（DEF-101-3xx）：nfr_id 未落在簽章覆蓋範圍 + 組檔名前未淨化的
+    雙重防護回歸測試。
+
+    攻擊情境：任何人在既有合法簽章事件上額外附加 `nfr_id` 欄位（簽章驗證舊行為
+    仍會通過，因為 payload 只對 REQUIRED_FIELDS 做規範化），可讓 `nfr_id` 帶入
+    任意字串，進而 (a) 路徑穿越 或 (b) Windows 保留裝置名/禁用字元造成 `open()`
+    未捕捉例外。修復：① `nfr_id` 併入 `signed_fields_default()` 簽章覆蓋範圍
+    （夾帶/偽造即被 HMAC 擋下）；② `_report_path()` 組檔名前一律呼叫
+    `_sanitize_nfr_id()`（即使簽章這層失效，淨化仍擋得住）。
+    """
+
+    def test_signed_fields_default_covers_nfr_id(self) -> None:
+        self.assertIn("nfr_id", pm.signed_fields_default())
+
+    def test_signature_covers_appended_nfr_id(self) -> None:
+        """簽章時未帶 nfr_id 的合法事件，事後夾帶 nfr_id 卻不重簽必須被擋下。"""
+        event = make_signed_event(event_id="attack-append", metric="p95_login_ms", observed=450, target=200)
+        self.assertNotIn("nfr_id", event)  # baseline：簽章當下確實沒有 nfr_id
+        event["nfr_id"] = "../../../etc/passwd"  # 攻擊者事後夾帶，未重簽
+        ok, reason = pm.verify_signature(event, secret=TEST_SECRET)
+        self.assertFalse(ok)
+        self.assertEqual(reason, "signature_mismatch")
+
+    def test_ingest_rejects_event_with_appended_nfr_id(self) -> None:
+        """端到端：夾帶 nfr_id 的攻擊事件整個 ingest 必須被拒絕（quarantine 路徑）。"""
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            event = make_signed_event(
+                event_id="attack-ingest", metric="p95_login_ms", observed=450, target=200,
+            )
+            event["nfr_id"] = "CON"  # 攻擊者事後夾帶保留裝置名，未重簽
+            result = pm.ingest_slo_violation(
+                event,
+                secret=TEST_SECRET,
+                drift_log_root=root / "drift",
+                report_root=root / "reports",
+            )
+            self.assertFalse(result.applied)
+            self.assertEqual(result.reason, "signature_mismatch")
+
+    def test_normal_nfr_id_unchanged(self) -> None:
+        self.assertEqual(pm._sanitize_nfr_id("NFR-PERF-001"), "NFR-PERF-001")
+
+    def test_path_traversal_neutralized(self) -> None:
+        sanitized = pm._sanitize_nfr_id("../../../etc/passwd")
+        self.assertNotIn("/", sanitized)
+        self.assertNotIn("..", sanitized)
+
+    def test_backslash_path_separator_neutralized(self) -> None:
+        sanitized = pm._sanitize_nfr_id("..\\..\\Windows\\System32")
+        self.assertNotIn("\\", sanitized)
+        self.assertNotIn("..", sanitized)
+
+    def test_windows_forbidden_chars_neutralized(self) -> None:
+        sanitized = pm._sanitize_nfr_id('NFR<PERF>:001|test?*"')
+        for ch in '<>:"|?*':
+            self.assertNotIn(ch, sanitized)
+
+    def test_windows_reserved_device_name_neutralized(self) -> None:
+        for reserved in ("CON", "PRN", "AUX", "NUL", "COM1", "LPT9"):
+            sanitized = pm._sanitize_nfr_id(reserved)
+            self.assertNotEqual(sanitized.upper(), reserved)
+            self.assertTrue(sanitized.startswith("_"), sanitized)
+
+    def test_overlong_nfr_id_truncated(self) -> None:
+        sanitized = pm._sanitize_nfr_id("X" * 500)
+        self.assertLessEqual(len(sanitized), pm._NFR_ID_MAX_LEN)
+
+    def test_control_characters_neutralized(self) -> None:
+        sanitized = pm._sanitize_nfr_id("NFR\x00PERF\n001")
+        self.assertNotIn("\x00", sanitized)
+        self.assertNotIn("\n", sanitized)
+
+    def test_report_path_stays_within_root_for_malicious_nfr_id(self) -> None:
+        """即使簽章層被繞過，`_report_path()` 本身也不得產生越界路徑。"""
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            path = pm._report_path("../../../../etc/passwd", root=root)
+            self.assertEqual(path.resolve().parent, root.resolve())
+
+    def test_report_path_reserved_device_name_does_not_crash(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            path = pm._report_path("CON", root=root)
+            # 應可正常寫入（不因保留裝置名拋出未捕捉例外）
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text("test", encoding="utf-8")
+            self.assertTrue(path.exists())
+
+
 class ScanInboxTests(unittest.TestCase):
     def setUp(self) -> None:
         self._tmp = tempfile.TemporaryDirectory()

@@ -19,7 +19,7 @@ from pathlib import Path
 from typing import List, Optional
 
 from .pattern_matcher import is_same_pattern
-from .state_loader import REPO_ROOT
+from .state_loader import REPO_ROOT, _sanitize_component
 
 DEFAULT_OUT_DIR = REPO_ROOT / "docs" / "01_requirements"
 MAX_PATCH_PER_AC = 2  # Rule 9.22.5（與 FSM tracking 對齊）
@@ -99,7 +99,10 @@ def propose(
     target = out_dir or DEFAULT_OUT_DIR
     target.mkdir(parents=True, exist_ok=True)
     date = today or _dt.date.today().isoformat()
-    path = target / f"SPEC-PATCH-{ac_id}-{date}.md"
+    # R38：ac_id 來自缺陷回流訊號（test-failure-analyzer 映射），外部可控性雖較低，
+    # 仍屬 state_loader.py 同一缺陷類別的姊妹位置——共用同一顆消毒函式，不另寫一份
+    # （檔名本身的顯示文字 proposal.ac_id 保留原始值，只有組檔名時消毒）。
+    path = target / f"SPEC-PATCH-{_sanitize_component(ac_id)}-{date}.md"
     lines = [
         f"# SPEC-PATCH — {ac_id}（{date}）",
         "",

@@ -373,6 +373,25 @@ def test_spec_patch_after_contains_clarification():
     assert "規格補強" in p.after and "空集合未定義" in p.after
 
 
+# R38：ac_id 來自缺陷回流訊號（test-failure-analyzer 映射），與 state_loader.py 的
+# project/track_id 同一缺陷類別姊妹位置，共用 _sanitize_component（見 state_loader.py）。
+def test_spec_patch_filename_sanitizes_hostile_ac_id(tmp_path):
+    hostile_ac_id = 'CON<>:"|?*../../etc' + "X" * 300
+    p = SPP.propose(hostile_ac_id, "x", [_sig(ac=hostile_ac_id)],
+                     today="2026-06-01", out_dir=tmp_path)
+    written = Path(p.report_path)
+    assert written.parent == tmp_path  # 未逃逸出 out_dir
+    for ch in '<>:"|?*\\':
+        assert ch not in written.name
+    assert len(written.name) < 200
+
+
+def test_spec_patch_filename_escapes_reserved_device_name_ac_id(tmp_path):
+    p = SPP.propose("CON", "x", [_sig(ac="CON")], today="2026-06-01", out_dir=tmp_path)
+    written = Path(p.report_path)
+    assert written.name.startswith("SPEC-PATCH-_CON-")
+
+
 # =====================================================================
 # ACT-074 — ADVERSARIAL_EVALUATION FSM wiring + diagnostic
 # =====================================================================

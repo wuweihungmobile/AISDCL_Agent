@@ -37,7 +37,28 @@ $MainCheckoutRoot = Split-Path -Parent $GitCommonDir
 $SddRoot = Join-Path $MainCheckoutRoot "AISDLC_SDD"
 # R11 P4：python 缺席前置檢查（與 .sh 的 command -v 守門對稱）——否則 `& python`
 # 直接丟 CommandNotFoundException，訊息不指路。
-if (-not (Get-Command python -ErrorAction SilentlyContinue)) {
+# R38 四方複審 Architect 一審 REJECT（DEF-101-273/279/300/303 同類第 4~5 個獨立
+# 位置，R37 已抽出 tools/lib/WindowsAppsGuard.ps1 單一真相源）：
+# 全新 Windows 11 機器未裝真 Python 時，`Get-Command python` 仍會命中 WindowsApps
+# 底下系統自動註冊的空殼 python.exe（Store App Execution Alias）——找得到但執行
+# 只會跳出 Microsoft Store 安裝提示，不是可判讀例外。裸 `Get-Command` 存在性判斷
+# 會誤判為「有 python」，讓下面 `& python ...` 靜默失敗或掛起，而非本檔自己設計
+# 的乾淨 Write-Error。
+# 原判斷曾以「本框架有 releases/ 獨立打包發布機制，硬相依 monorepo 根路徑的共用
+# 檔會找不到檔案」為由內嵌獨立實作一份；Architect 查證推翻：實際 releases/
+# 打包產物（如 releases/v0.01/AISDLC-SDD_v0.01_release_2026-04-16.tar.gz）內
+# 根本沒有 tools/install_hooks/ 目錄，本檔從未被獨立打包過，該場景從未發生。
+# 且本檔已用同一個 $MainCheckoutRoot 組出 $HookSrcDrift/$HookSrcClosure 等強
+# 相依 monorepo 根路徑結構的路徑，找不到就直接 Write-Error 中止——早已 100%
+# 綁死在「必須跑在 monorepo checkout 裡」的前提上，改 dot-source 不增加任何新
+# 耦合，故改用共用函式，消滅第 4~5 個獨立副本。
+$WindowsAppsGuardPath = Join-Path $MainCheckoutRoot "tools\lib\WindowsAppsGuard.ps1"
+if (-not (Test-Path $WindowsAppsGuardPath)) {
+  Write-Error "找不到共用函式 $WindowsAppsGuardPath（tools/lib/WindowsAppsGuard.ps1）— 請在完整 monorepo checkout 內執行本腳本"
+  exit 1
+}
+. $WindowsAppsGuardPath
+if (-not (Test-IsRealPython -CandidateName 'python')) {
   Write-Error "找不到 python — 請啟用 venv 或安裝 Python 後重試"
   exit 1
 }
