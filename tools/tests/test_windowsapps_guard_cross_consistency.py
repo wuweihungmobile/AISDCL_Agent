@@ -322,5 +322,260 @@ class TestDevStartPs1WindowsAppsGuard(unittest.TestCase):
                           proc.stdout + proc.stderr)
 
 
+# ---------------------------------------------------------------------------
+# ④ repo-wide 前瞻防增生鎖：不得有新的 WindowsApps guard 獨立副本繞過 SSOT
+#    （R40 Architect 架構最佳化）。
+#
+# 背景：本檔頂部 docstring 記載的復發模式（DEF-101-273/279/300/303）過去每次
+# 都是「內嵌重寫」被人工掃描碰運氣抓到；R37 抽出 SSOT 後，①②節只鎖「3 個
+# 已知具名檔案」的行為細節，若有人在 repo 別處新增第 4、5 個呼叫點卻忘記
+# dot-source SSOT（或乾脆內嵌重寫一份判斷式），①②節完全看不見——這正是本節
+# 要收斂的缺口：repo-wide 掃描「有沒有經過 SSOT」，不管新檔案叫什麼名字、
+# 放在哪裡。
+# ---------------------------------------------------------------------------
+def _latest_sdd_root() -> Path:
+    """LATEST 版根目錄（sdd_version.py SSOT；解析失敗即 AssertionError）。
+
+    手法與 tools/tests/test_ps1_bom.py 等既有測試一致：subprocess 呼叫
+    scripts/sdd_version.py CLI（而非 process 內 import），避免 sys.path 汙染。
+    """
+    sdd_root = _REPO_ROOT / "AISDLC_SDD"
+    resolver = sdd_root / "scripts" / "sdd_version.py"
+    proc = subprocess.run(
+        [sys.executable, str(resolver), "--sdd-root", str(sdd_root)],
+        capture_output=True, text=True, encoding="utf-8", errors="replace",
+    )
+    name = proc.stdout.strip()
+    if proc.returncode != 0 or not name:
+        raise AssertionError(
+            f"LATEST 解析失敗（sdd_version.py rc={proc.returncode}；stderr="
+            f"{proc.stderr.strip()!r}）——掃描邊界不得靜默縮小"
+        )
+    return sdd_root / name
+
+
+def _tracked_files(pattern: str) -> list[str]:
+    """git tracked 且符合 glob pattern 的 repo-relative 路徑清單（fail-loud）。
+
+    用 `git ls-files` 而非 `Path.rglob`：天然排除 `.git`／`.venv`／
+    `__pycache__`／`node_modules`（只要未被 commit），且與同目錄下
+    test_ps1_bom.py／test_bash32_compat.py 等既有測試同款慣例。
+    """
+    proc = subprocess.run(
+        ["git", "-C", str(_REPO_ROOT), "-c", "core.quotePath=false",
+         "ls-files", "--", pattern],
+        capture_output=True, text=True, encoding="utf-8", errors="replace",
+    )
+    if proc.returncode != 0:
+        raise AssertionError(
+            f"git ls-files 失敗（rc={proc.returncode}；stderr="
+            f"{proc.stderr.strip()!r}）——掃描邊界不得靜默縮小"
+        )
+    return [line for line in proc.stdout.splitlines() if line]
+
+
+_FROZEN_SDD_VERSION_RE = re.compile(r"^AISDLC_SDD/(AISDLC_SDD_v\d+\.\d+)/")
+
+
+def _exclude_frozen_sdd_versions(paths: list[str], latest_name: str) -> list[str]:
+    """排除 AISDLC_SDD 凍結版本（v0.01 ~ 除 LATEST 以外者）——凍結版依鐵律
+    (CLAUDE.md「Copy-on-Evolve」慣例) 不應被新規則追殺歷史快照。"""
+    kept = []
+    for rel in paths:
+        m = _FROZEN_SDD_VERSION_RE.match(rel)
+        if m and m.group(1) != latest_name:
+            continue
+        kept.append(rel)
+    return kept
+
+
+_WINDOWSAPPS_LITERAL = "WindowsApps"
+_SSOT_REL_PATH = "tools/lib/WindowsAppsGuard.ps1"
+
+# 真正的 dot-source 呼叫語法（PowerShell dot-source 運算子只能出現在陳述式
+# 開頭：行首（可有前導空白）緊接 `.` + 空白）。兩種既有呼叫端寫法皆須涵蓋：
+#   ① 字面路徑：`. "$PSScriptRoot/lib/WindowsAppsGuard.ps1"`（bootstrap.ps1／
+#      dev_start.ps1）
+#   ② 變數持有路徑：`. $WindowsAppsGuardPath`（install_post_commit.ps1，變數
+#      名稱本身含 WindowsAppsGuard，其值由前面 `Join-Path ... "...
+#      WindowsAppsGuard.ps1"` 組出）
+# 只鎖「提及字串」會被 SD 對抗式驗證構造的偽裝繞過（把兩個子字串塞進註解／
+# 字串常數即可放行）；改鎖「陳述式開頭的 dot-source 語法」才是本質判準。
+_DOT_SOURCE_SSOT_RE = re.compile(
+    r'^[ \t]*\.\s+(?:"[^"\n]*WindowsAppsGuard\.ps1"|\$\w*WindowsAppsGuard\w*)'
+)
+_TEST_IS_REAL_PYTHON_CALL_RE = re.compile(
+    r'\bTest-IsRealPython\s+-CandidateName\b'
+)
+
+
+def _line_is_comment(line: str) -> bool:
+    return line.lstrip().startswith("#")
+
+
+def _strip_trailing_line_comment(line: str) -> str:
+    """移除行尾不在字串常值內的 `#` 註解（PowerShell 行內註解字元）。
+
+    R40 QA 二審對抗式驗證揪出：舊版只濾掉「整行以 `#` 開頭」的註解，未濾掉
+    「程式碼陳述式後緊接的行尾註解」——攻擊者可在同一行放一段完全不相關的
+    真實敘述（如 `Write-Host $x`），再接行尾註解裝飾性提及
+    `Test-IsRealPython -CandidateName`，讓掃描器誤判為「真正呼叫」。逐字掃
+    描追蹤是否身處雙/單引號字串內，遇到不在字串內的 `#` 即截斷該行之後的
+    內容，關閉此裝飾性行尾註解繞過向量。"""
+    in_double = False
+    in_single = False
+    for i, ch in enumerate(line):
+        if ch == '"' and not in_single:
+            in_double = not in_double
+        elif ch == "'" and not in_double:
+            in_single = not in_single
+        elif ch == "#" and not in_double and not in_single:
+            return line[:i]
+    return line
+
+
+def _quote_parity_open(line: str, pos: int) -> bool:
+    """`pos` 之前的同一行文字內，雙引號或單引號的出現次數是否為奇數（代表
+    `pos` 落在尚未關閉的字串常值內）。不處理跳脫字元——本專案 .ps1 呼叫端
+    寫法皆簡單，足以擋下「呼叫語法整段藏在字串常數/註解裡偽裝」的繞過手法。
+    """
+    prefix = line[:pos]
+    return (prefix.count('"') % 2 == 1) or (prefix.count("'") % 2 == 1)
+
+
+def _has_real_dot_source_of_ssot(text: str) -> bool:
+    """檔案中是否存在「真正的」dot-source SSOT 陳述式（非註解、非字串常值、
+    非行尾裝飾性註解）。"""
+    for raw_line in text.splitlines():
+        if _line_is_comment(raw_line):
+            continue
+        line = _strip_trailing_line_comment(raw_line)
+        m = _DOT_SOURCE_SSOT_RE.search(line)
+        if m and not _quote_parity_open(line, m.start()):
+            return True
+    return False
+
+
+def _has_real_test_is_real_python_call(text: str) -> bool:
+    """檔案中是否存在「真正呼叫」`Test-IsRealPython -CandidateName ...` 的陳
+    述式（非註解、非字串常值、非行尾裝飾性註解——單純提及函式名稱不算，也
+    不能是另一個函式名稱如 `Test-IsRealPython-Reimplemented` 的一部分，
+    `-CandidateName` 參數名稱要求已天然排除此類命名混淆）。"""
+    for raw_line in text.splitlines():
+        if _line_is_comment(raw_line):
+            continue
+        line = _strip_trailing_line_comment(raw_line)
+        for m in _TEST_IS_REAL_PYTHON_CALL_RE.finditer(line):
+            if not _quote_parity_open(line, m.start()):
+                return True
+    return False
+
+
+class TestNoOrphanWindowsAppsImplementation(unittest.TestCase):
+    """repo-wide 前瞻防增生鎖——任何新增的呼叫點／獨立副本都逃不過。
+
+    ①②節（`TestWindowsAppsGuardEnrollment`／`TestWindowsAppsGuardSharedFunctionBehavior`）
+    只守「3 個已知呼叫端」的行為細節；本 class 守「repo-wide 有沒有新的獨立
+    副本繞過 SSOT」——兩者分工互補，缺一不可。
+    """
+
+    def test_ps1_mentions_of_windowsapps_all_go_through_ssot(self) -> None:
+        """任何提及 `WindowsApps` 字面字串的 .ps1 檔案，必須是 SSOT 本身，或
+        同時具備「真正的」dot-source SSOT 陳述式與「真正呼叫」
+        `Test-IsRealPython` 的陳述式——否則列為 offender（獨立副本嫌疑）。
+
+        R40 SD 對抗式驗證實測揪出前版漏洞：舊判定僅檢查全檔文字是否「同時
+        含有 `WindowsAppsGuard.ps1` 與 `Test-IsRealPython` 兩個子字串」，
+        SD 構造出一個完全獨立重寫判斷邏輯、從未 dot-source SSOT 的 .ps1，
+        只在註解裡提及這兩個子字串做偽裝，就騙過了測試（PASSED，本該
+        FAILED）。改為 `_has_real_dot_source_of_ssot` /
+        `_has_real_test_is_real_python_call`：要求匹配的是陳述式開頭的
+        dot-source 語法、以及非註解非字串常值的實際函式呼叫，而非任意位置
+        的文字提及；並在此基礎上濾掉行尾裝飾性註解（`_strip_trailing_line_comment`），
+        關閉 QA 二審用「真實程式碼行 + 行尾裝飾性註解偽裝呼叫」構造出的第二
+        種繞過。
+
+        **已知殘留限制（如實記載，非本測試涵蓋範圍，列 R41 backlog）**：本
+        測試是逐行靜態文字/正則掃描，非真正的 PowerShell AST 解析或執行期
+        驗證，因此仍可被以下手法繞過（R40 四方複審中 Architect 與 QA 各自
+        獨立構造並驗證成立，判定為此類前瞻鎖依 Rule 2 比例原則暫不需要更
+        重的 AST 層修復，但必須誠實記載，不可讓人誤以為已完全封閉）：
+        (a) 檔案中存在「真實但死碼」的 dot-source SSOT 陳述式（語法正確、
+            執行期真的會讀入該檔案），但實際生效的判斷邏輯是另一個完全獨立
+            重寫的函式，`Test-IsRealPython` 只在從未被呼叫的死碼分支或無關
+            變數指派中「提及」（Architect 複審實測構造）；
+        (b) 把兩段魔法字串包進 PowerShell here-string（`@"..."@`/`@'...'@`）
+            當誘餌，本測試的逐行引號奇偶追蹤不追蹤跨行 here-string 開闔狀
+            態，門外的真正獨立重寫邏輯因此不會被辨識為 offender（QA 複審
+            實測構造）。
+        若未來要徹底封閉，需要真正的 PowerShell AST 解析（追蹤變數賦值是否
+        被實際呼叫使用、正確處理 here-string 狀態機），而非本測試目前採用
+        的逐行正則掃描；在該投入被判定值得之前，此為已知的方法論邊界。
+        """
+        latest_name = _latest_sdd_root().name
+        scoped_ps1 = _exclude_frozen_sdd_versions(_tracked_files("*.ps1"), latest_name)
+
+        offenders = []
+        for rel in scoped_ps1:
+            text = (_REPO_ROOT / rel).read_text(encoding="utf-8", errors="replace")
+            if _WINDOWSAPPS_LITERAL not in text:
+                continue
+            if rel == _SSOT_REL_PATH:
+                continue  # SSOT 本身
+            if _has_real_dot_source_of_ssot(text) and _has_real_test_is_real_python_call(text):
+                continue  # 正確經過 SSOT dot-source + 呼叫
+            offenders.append(rel)
+
+        self.assertEqual(
+            offenders, [],
+            "發現提及 WindowsApps 但未經 SSOT（須同時具備真正的 dot-source "
+            "tools/lib/WindowsAppsGuard.ps1 陳述式 + 真正呼叫 "
+            f"Test-IsRealPython 陳述式）的 .ps1 檔案，疑似獨立副本繞過共用"
+            f"函式：{offenders}——新呼叫點須 dot-source tools/lib/"
+            "WindowsAppsGuard.ps1 後呼叫 Test-IsRealPython，不得內嵌重新發明"
+            "判斷式（同本檔頂部 docstring 記載的 DEF-101-273/279/300/303 復發模式）",
+        )
+
+    def test_known_call_sites_still_exist(self) -> None:
+        """已知清單防腐化：3 個正確呼叫端須持續存在，避免清單本身腐化成
+        「檔案已刪除／改名但測試仍宣稱通過」的假綠。"""
+        latest_name = _latest_sdd_root().name
+        known = [
+            _REPO_ROOT / "tools" / "bootstrap.ps1",
+            _REPO_ROOT / "tools" / "dev_start.ps1",
+            _REPO_ROOT / "AISDLC_SDD" / latest_name / "tools" / "install_hooks"
+            / "install_post_commit.ps1",
+        ]
+        for path in known:
+            self.assertTrue(path.is_file(), f"已知呼叫端遺失：{path}")
+
+    def test_is_windows_apps_stub_defined_exactly_once(self) -> None:
+        """Python 側 SSOT（`_is_windows_apps_stub`）的 `def` 定義只應出現一次
+        （tools/bootstrap_core.py）。掃描範圍：`AutoClaude/` + 根層 `tools/` +
+        AISDLC_SDD LATEST 版目錄（同 Architect 方案）。若在範圍內出現第二處
+        定義，代表 Python 側判斷邏輯被重新發明，繞過 SSOT。
+        """
+        latest_name = _latest_sdd_root().name
+        scoped_prefixes = (
+            "AutoClaude/", "tools/", f"AISDLC_SDD/{latest_name}/",
+        )
+        all_py = _exclude_frozen_sdd_versions(_tracked_files("*.py"), latest_name)
+        candidate_py = [rel for rel in all_py if rel.startswith(scoped_prefixes)]
+
+        def_re = re.compile(r"^\s*def _is_windows_apps_stub\b", re.MULTILINE)
+        hits = []
+        for rel in candidate_py:
+            text = (_REPO_ROOT / rel).read_text(encoding="utf-8", errors="replace")
+            if def_re.search(text):
+                hits.append(rel)
+
+        self.assertEqual(
+            hits, ["tools/bootstrap_core.py"],
+            "`_is_windows_apps_stub` 的 def 定義應恰出現一次"
+            f"（tools/bootstrap_core.py），實際找到：{hits}——出現第二處代表 "
+            "Python 側判斷邏輯被重新發明，繞過 SSOT",
+        )
+
+
 if __name__ == "__main__":
     unittest.main()

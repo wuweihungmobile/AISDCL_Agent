@@ -149,10 +149,13 @@ ubuntu-latest」跑同一組檢查，達成 **地端綠 ⇒ 雲端綠**。四支
 reachability BFS）→ **[2/3]** `arch_fitness --strict`（structural fail 阻擋、advisory warn
 放行）→ **[3/3]** 五軌 TLA+/TLC（`--full-tlc` 啟用，預設由 offline reachability 代驗）。
 
-**Workflow 硬化**：upload-artifact 一律 `continue-on-error` + 降 retention；推送類 job 共用
-`main-push-serialize` concurrency + rebase-retry；action 版本升至 Node24 相容；新增 `aisdlc-sdd-ci.yml`
+**Workflow 硬化**：upload-artifact 一律 `continue-on-error` + 降 retention；action 版本升至
+Node24 相容；新增 `aisdlc-sdd-ci.yml`
 （現位於 monorepo 根層 `.github/workflows/`）在 push(main)/PR 跑離線閘門補缺口；新增
 `aisdlc-sdd-artifact-cleanup.yml`（配額長期治本）+ Dependabot（github-actions + pip 每週自動更新）。
+**R40 校正**：`aisdlc-sdd-drift-daily.yml`／`aisdlc-sdd-arch-fitness.yml`（nightly-strict）
+已改為 `actions/upload-artifact`（90 天保留）取代原本對 v0.01 凍結基線的 commit/push，
+`main-push-serialize` concurrency 群組已隨之移除（v0.01 為凍結基線，不應再被 git 回寫）。
 
 ---
 

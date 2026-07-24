@@ -10,7 +10,8 @@
 # 載具限定：本腳本為 Linux staging DBA 工具（需 psql/pg_dump/alembic），計時採
 #   `date +%s%N`（%N 奈秒為 GNU 擴充；Linux 與現代 macOS BSD date 皆支援〔R11 真 Mac
 #   實測〕，但老舊/嚴格 BSD 會輸出字面 "N" 使算術崩潰）——不支援在非 GNU date 的
-#   老舊 BSD 環境執行，Windows 請走 WSL。
+#   老舊 BSD 環境執行；Windows 上 Git Bash 內建 MSYS2 移植的 GNU coreutils date（支援
+#   %N，與 ONBOARDING.md §6 一致，R40 跨平台輪實測確認），亦可走 WSL。
 #
 # 預設行為：dry-run（不實際下 alembic upgrade）— 須加 --execute 才會真正執行
 # 量測產出：tools/sd06_w3_dryrun_output/<timestamp>/

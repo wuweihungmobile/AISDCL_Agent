@@ -5,7 +5,8 @@
 #   - tools/arch_fitness/arch_fitness.py（FF-1~FF-14 全數實作：三源/governance/孤兒/觀測態/§9/
 #     連結/引用/規則強制可追溯/Scaffold-ROI/死規則/Skill frontmatter/critical 錯置/Agent YAML/
 #     CI workflow 工具模組引用）
-#   - nightly 以 --trend 把每次排程（R14 起每週一）score 累積回寫 build/reports/fse/TREND.yaml（R4 趨勢可觀測）
+#   - nightly 以 --trend 把每次排程（R14 起每週一）score 寫入 build/reports/fse/TREND.yaml（R4 趨勢可觀測；
+#     R40 起改僅上傳 CI artifact，不再 commit 回 build/reports/fse/TREND.yaml — 見下方 R40 說明）
 #
 # 雙軌（呼應框架 advisory vs blocking 哲學，Rule 9.11.3）：
 #   1. pr-advisory   — 每個 PR 跑非 strict，把 fitness 報告貼進 Step Summary；
@@ -21,6 +22,11 @@
 #                      FF-9 scaffold_roi 基座缺漏 / FF-10 死規則 / FF-11 skill frontmatter 不全 /
 #                      FF-12 critical 規則錯置 / FF-14 workflow 引用不存在的工具模組）即紅，
 #                      作為架構回歸硬守門。
+#                      R40 起：build/reports/fse/TREND.yaml 已 git-ignore（v0.01 凍結基線
+#                      不可再被原地寫入，且比照 v0.05+ 既有政策——該檔本為純本地/單次
+#                      執行磁碟輸出，非跨 CI run 累積），本 job 不再 commit/push 回 main；
+#                      --trend 仍每次執行寫入單次 score entry，隨 arch-fitness.json 一併
+#                      只上傳為 CI artifact（90 天保留，用以彌補失去 git 歷史後的可觀測期）。
 #
 # Runner：ubuntu-latest。downstream 採用者複製本檔到自家 repo root；
 #         若框架碼不在 AISDLC_SDD_v0.01/ 下，僅需改 working-directory。
@@ -40,9 +46,9 @@ on:
     - cron: "37 2 * * 1"   # 每週一 02:37 UTC（R14 CI-2 降頻；R16 SCAN-C-4 由 02:30 錯開避開整點/半點），排在 fsm-chaos-nightly(02:03)/drift-daily(02:33) 之後
   workflow_dispatch:
 
-# PR-advisory 併發以分支序列化（同分支新 push 取消舊跑，省 runner）；
-# nightly-strict 推送 main 的序列化改用 job-level `main-push-serialize`
-# 群組（與 drift-daily 共用），見下方 job。
+# PR-advisory 併發以分支序列化（同分支新 push 取消舊跑，省 runner）。
+# R40 起 nightly-strict 不再 push main，先前與 drift-daily 共用的
+# `main-push-serialize` 序列化群組已移除（見下方 job 註解）。
 concurrency:
   group: arch-fitness-${{ github.ref }}
   cancel-in-progress: true
@@ -50,8 +56,8 @@ concurrency:
 # R15 SCAN-C-4（比照 autoclaude-ci.yml R13 CI-7）：顯式最小權限——先前全檔未宣告
 # workflow 層 permissions，pr-advisory job 零宣告即繼承 repo 預設（可能為 write-all）。
 # pr-advisory 僅 checkout / setup-python / 跑 fitness / upload-artifact（artifact 走
-# ACTIONS_RUNTIME_TOKEN，不受本區塊限制）→ contents: read 即足；nightly-strict 需
-# 回寫 TREND.yaml，由其既有 job 層 permissions（contents: write）覆寫本預設。
+# ACTIONS_RUNTIME_TOKEN，不受本區塊限制）→ contents: read 即足；R40 起 nightly-strict
+# 亦不再需要 write（TREND.yaml 已 git-ignore，不再回寫），兩 job 統一繼承本層 read-only。
 permissions:
   contents: read
 
@@ -97,18 +103,11 @@ jobs:
     if: github.event_name == 'schedule'
     runs-on: ubuntu-latest
     timeout-minutes: 10
-    # 與 drift-daily 都 push main、時段相近（02:37 vs 02:33，R16 SCAN-C-4 起
-    # 不再精準同分鐘，但執行時長可能仍重疊）；用全域 job-level
-    # concurrency 群組序列化兩者的推送，避免 non-fast-forward 競爭。
-    concurrency:
-      group: main-push-serialize
-      cancel-in-progress: false
-    permissions:
-      contents: write   # 回寫 build/reports/fse/TREND.yaml（趨勢累積）— 鏡像 drift-daily.yml
+    # R40 起：本 job 不再 commit/push 回 main（TREND.yaml 已 git-ignore），故先前
+    # 與 drift-daily 共用、用來序列化推送的 `main-push-serialize` 併發群組已無必要，
+    # 一併移除；contents 權限降回 workflow 層預設 read-only（不再需要 write）。
     steps:
       - uses: actions/checkout@v5
-        with:
-          fetch-depth: 0   # rebase-retry 需完整歷史，與 drift-daily 對齊（避免 shallow rebase 失敗）
       - uses: actions/setup-python@v6
         with:
           python-version: "3.11"
@@ -122,7 +121,9 @@ jobs:
         working-directory: AISDLC_SDD/AISDLC_SDD_v0.01
         run: |
           # --strict：structural fail → exit 2；advisory warn → exit 1。
-          # --trend：把本次 score 追加進 TREND.yaml（單次執行，避免重複追加）。
+          # --trend：把本次 score 寫進 TREND.yaml。R40 起 TREND.yaml 已 git-ignore，
+          # ephemeral CI checkout 每次都讀不到前次入庫檔，故本檔僅含本次單筆 entry
+          # （非跨 run 累積）；累積趨勢改依下方 artifact 逐週保留取得，不再靠 git 提交。
           set +e
           report="$(python -m tools.arch_fitness.arch_fitness --strict \
                       --json arch-fitness.json --trend build/reports/fse/TREND.yaml)"
@@ -137,32 +138,7 @@ jobs:
             echo '```'
           } >> "${GITHUB_STEP_SUMMARY}"
           exit 0
-      - name: Persist score trend (commit back)
-        if: always()
-        working-directory: AISDLC_SDD/AISDLC_SDD_v0.01
-        run: |
-          set -eu
-          git config user.name  "sdd-arch-fitness-bot"
-          git config user.email "sdd-arch-fitness-bot@users.noreply.github.com"
-          git add build/reports/fse/TREND.yaml
-          if git diff --cached --quiet; then
-            echo "No TREND change to commit."
-          else
-            git commit -m "chore(arch-fitness): score trend $(date -u +%Y-%m-%dT%H:%MZ) [skip ci]"
-            # rebase-retry：另一支 nightly 可能已先 push，避免 non-fast-forward 失敗。
-            n=0
-            until git push; do
-              n=$((n+1))
-              if [ "$n" -ge 5 ]; then
-                echo "::error::push TREND failed after 5 retries"; exit 1
-              fi
-              echo "push rejected (attempt $n) — rebasing onto origin/main…"
-              git rebase --abort 2>/dev/null || true   # 清除前次殘留 rebase 狀態
-              git pull --rebase --autostash origin main || true
-              sleep 3
-            done
-          fi
-      - name: Upload findings + trend
+      - name: Upload findings + trend (artifact — 凍結基線不回寫 git)
         if: always()
         continue-on-error: true   # observability-only；artifact 配額耗盡不得判紅
         uses: actions/upload-artifact@v5
@@ -171,7 +147,7 @@ jobs:
           path: |
             AISDLC_SDD/AISDLC_SDD_v0.01/arch-fitness.json
             AISDLC_SDD/AISDLC_SDD_v0.01/build/reports/fse/TREND.yaml
-          retention-days: 7
+          retention-days: 90   # R40 起彌補失去 git 歷史後的可觀測期（原 7 天）
       - name: Enforce strict gate
         if: always()
         run: |

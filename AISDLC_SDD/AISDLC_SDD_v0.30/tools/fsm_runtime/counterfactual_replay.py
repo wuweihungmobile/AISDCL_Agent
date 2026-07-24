@@ -33,6 +33,7 @@ import yaml
 
 from .file_lock import file_lock
 from .pattern_matcher import is_same_pattern, normalize
+from .state_loader import _sanitize_component
 
 _ROOT = Path(__file__).resolve().parents[2]
 REPLAY_REPORT_DIR = _ROOT / "build" / "reports" / "replay"
@@ -181,7 +182,13 @@ def write_report(patch: PatchProposal, report: ReplayReport, *,
     target_dir = out_dir or REPLAY_REPORT_DIR
     target_dir.mkdir(parents=True, exist_ok=True)
     date = today or _dt.datetime.now(_dt.timezone.utc).date().isoformat()
-    path = target_dir / f"REPLAY-{patch.ac_id or 'unknown'}-{date}.md"
+    # 同目錄姊妹位置（state_loader.py::_default_state_path /
+    # spec_patch_proposer.py 組 SPEC-PATCH-{ac_id}-{date}.md）共用同一顆消毒點：
+    # patch.ac_id 外部可控性與 spec_patch_proposer 的 ac_id 同源（缺陷回流訊號），
+    # 組檔名前必須淨化，避免 Windows 禁用字元 `< > : " | ? *` 等造成落盤失敗
+    # （檔名顯示文字 patch.ac_id 保留原始值，只有組檔名時消毒）。
+    safe_ac_id = _sanitize_component(patch.ac_id) if patch.ac_id else "unknown"
+    path = target_dir / f"REPLAY-{safe_ac_id}-{date}.md"
     lines = [
         f"# 反事實重放報告 — {patch.ac_id} — {date}",
         "",

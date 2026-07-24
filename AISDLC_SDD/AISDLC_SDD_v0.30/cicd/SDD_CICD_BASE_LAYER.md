@@ -617,12 +617,16 @@ docs/08_deployment/
 | 四、Mock / 地端 LLM | `tools/fsm_runtime/modality/llm_backend.py`（`MockBackend`、`LocalOpenAIBackend`） | 外部 API/LLM 地端 Mock 或指向 localhost（Ollama/vLLM）；CI 預設 `session` 維持 hermetic |
 
 **雲端硬化（同 ADR-001）**：所有 `upload-artifact` 改 `continue-on-error: true` +
-降 `retention-days`（observability-only，配額耗盡不判紅）；`drift-daily` 與
-`arch-fitness`(nightly) 共用 `main-push-serialize` concurrency + rebase-retry 消除
-推送競爭；action 升至 Node24 相容（checkout@v5 / setup-python@v6）；新增
+降 `retention-days`（observability-only，配額耗盡不判紅）；action 升至 Node24 相容
+（checkout@v5 / setup-python@v6）；新增
 `.github/workflows/aisdlc-sdd-ci.yml`（monorepo 根層）於 push(main)/PR 跑離線閘門（呼叫同一份 `ci-gate.sh`）。
 另新增 `.github/workflows/aisdlc-sdd-artifact-cleanup.yml`（每日 03:00 UTC + 手動）用 gh CLI 刪除
 expired/逾齡 artifact，做配額長期治本（ADR-001 Next Action #1）。
+**R40 校正**：`drift-daily` 與 `arch-fitness`(nightly-strict) 原本共用的
+`main-push-serialize` concurrency + rebase-retry（消除對 v0.01 的推送競爭）已移除——
+兩者已改為 `actions/upload-artifact`（90 天保留）取代對 v0.01 凍結基線的
+commit/push，凍結基線不應再被 git 回寫，推送競爭問題隨之消失（非用序列化緩解，
+是移除推送本身）。
 
 **啟用步驟**：
 ```bash

@@ -30,6 +30,7 @@ _TOP_LEVEL_PERMISSIONS_RE = re.compile(
     r"^permissions:\n(?:#.*\n)*  contents: read\s*$", re.MULTILINE
 )
 _JOB_LEVEL_WRITE_RE = re.compile(r"^\s{4,}permissions:\n\s{4,}contents: write", re.MULTILINE)
+_NIGHTLY_STRICT_JOB_RE = re.compile(r"^  nightly-strict:\n(?:.*\n)*?(?=^  \S|\Z)", re.MULTILINE)
 
 _CONCURRENCY_RE = re.compile(
     r"^concurrency:\n"
@@ -76,7 +77,15 @@ _MACOS_NIGHTLY_ALERT_CONCURRENCY_RE = _job_concurrency_re(
 
 
 class TestArchFitnessWorkflowLevelPermissions(unittest.TestCase):
-    """SCAN-C-4：workflow 層最小權限，nightly-strict job 層 write 覆寫仍在。"""
+    """SCAN-C-4：workflow 層最小權限。
+
+    R40 更新：`nightly-strict` job 原本需要 job 層 `contents: write` 覆寫來
+    回寫 `TREND.yaml`；R40 起該檔已 git-ignore（凍結基線 v0.01 不應再被回寫，
+    見 DEF-101-329/330），`nightly-strict` 改用 `actions/upload-artifact` 取代
+    commit/push，不再需要寫入權限，job 層 write 覆寫已隨之移除——本測試改為
+    鎖「job 層不應再出現 write 覆寫」（read-only 已足夠），防止未來又不慎重新
+    加回不必要的寫入權限（最小權限原則）。
+    """
 
     def test_workflow_level_contents_read_present(self):
         text = _ARCH_FITNESS.read_text(encoding="utf-8")
@@ -86,12 +95,16 @@ class TestArchFitnessWorkflowLevelPermissions(unittest.TestCase):
             "（SCAN-C-4 回歸——pr-advisory job 將繼承 repo 預設，可能 write-all）",
         )
 
-    def test_nightly_strict_job_level_write_override_still_present(self):
+    def test_nightly_strict_job_no_longer_needs_write_override(self):
         text = _ARCH_FITNESS.read_text(encoding="utf-8")
-        self.assertRegex(
-            text, _JOB_LEVEL_WRITE_RE,
-            "nightly-strict job 層 contents: write 覆寫缺失——回寫 TREND.yaml"
-            "會被 workflow 層 read 權限擋下",
+        m = _NIGHTLY_STRICT_JOB_RE.search(text)
+        self.assertIsNotNone(m, "找不到 nightly-strict job 區塊——workflow 結構是否變動？")
+        job_text = m.group(0)
+        self.assertNotRegex(
+            job_text, _JOB_LEVEL_WRITE_RE,
+            "nightly-strict job 層出現多餘的 contents: write 覆寫——R40 起本 job 已"
+            "改用 upload-artifact 取代 commit/push（DEF-101-330），不應再宣告寫入權限"
+            "（最小權限原則；若未來重新引入 push 行為，須連同本測試一併重新評估）",
         )
 
 

@@ -47,6 +47,13 @@
 兩個推送 job 共用 `main-push-serialize` concurrency + rebase-retry；action 版本
 升至 Node24 相容；新增 `aisdlc-sdd-ci.yml` 在 push(main)/PR 跑離線閘門補缺口。
 
+> **R40 後續更新（本 ADR 歷史敘述不改，比照 DEF-101-198 既定慣例僅追記現況）**：
+> `drift-daily`／`arch-fitness`(nightly-strict) 兩個推送 job 已改為
+> `actions/upload-artifact`（90 天保留）取代對 `AISDLC_SDD_v0.01`（凍結基線）的
+> commit/push，`main-push-serialize` concurrency 已隨之移除——凍結基線不應再被
+> git 回寫，故推送競爭問題是被移除而非繼續靠序列化緩解。上述「兩個推送 job 共用
+> main-push-serialize」描述僅反映決策當下（本 ADR 建立時）的設計，非現行狀態。
+
 ---
 
 ## 理由（Rationale）

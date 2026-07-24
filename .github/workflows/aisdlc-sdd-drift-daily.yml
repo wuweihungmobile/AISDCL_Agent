@@ -19,6 +19,10 @@
 #   - `workflow_dispatch` for ad-hoc backfill / verification.
 #
 # Output: AISDLC_SDD/AISDLC_SDD_v0.01/build/reports/drift/DAILY-YYYY-MM-DD.md
+#         （R40 起：AISDLC_SDD_v0.01/build/reports/drift/DAILY-*.md 已 git-ignore
+#          — v0.01 為 ci-gate 凍結基線，不可再被自動化 bot 原地寫入。本 job 仍每日
+#          從已入庫的 COMMIT-*.yaml 重算報告，但只上傳為 CI artifact，不再
+#          commit/push 回 main；歷史保留改依 artifact retention，不依賴 git log。）
 # Spec:   cicd/SDD_CICD_BASE_LAYER.md §Drift Daily Report
 
 name: drift-daily
@@ -38,21 +42,15 @@ jobs:
     name: emit DAILY drift report
     runs-on: ubuntu-latest
     timeout-minutes: 10
-    # 與 arch-fitness nightly-strict 都 push main（R14 CI-2 降頻後僅每週一相近時段
-    # 重疊——R16 SCAN-C-4 起兩者 cron 已錯開至 02:33/02:37，不再精準同分鐘觸發，
-    # 但執行時長可能仍重疊，故序列化保留；其餘日子本 job 獨跑）；共用 job-level
-    # concurrency 群組序列化推送，避免重疊窗口的 non-fast-forward 競爭
-    # （序列化仍必要，R14 SA-R14-REV-1）。
-    concurrency:
-      group: main-push-serialize
-      cancel-in-progress: false
+    # R40 起：本 job 不再 commit/push 回 main（DAILY-*.md 已 git-ignore，v0.01 凍結
+    # 基線不可再被原地寫入），故先前與 arch-fitness nightly-strict 共用的
+    # `main-push-serialize` 併發群組／push 競爭序列化已無必要，一併移除；
+    # contents 權限降為 read-only（僅 checkout + upload-artifact，不再需要 write）。
     permissions:
-      contents: write
+      contents: read
     steps:
       - name: Checkout
         uses: actions/checkout@v5
-        with:
-          fetch-depth: 0
 
       - name: Set up Python
         uses: actions/setup-python@v6
@@ -79,30 +77,19 @@ jobs:
           print(f"GENERATED::{path}")
           # Surface to step summary
           with open(os.environ["GITHUB_STEP_SUMMARY"], "a", encoding="utf-8") as f:
-              f.write(f"## Drift Daily Report\n\nGenerated: `{path}`\n")
+              f.write(f"## Drift Daily Report\n\nGenerated: `{path}`\n\n")
+              f.write(
+                  "> v0.01 為 ci-gate 凍結基線，本報告不再 commit 回 repo"
+                  "（build/reports/drift/DAILY-*.md 已 git-ignore）；"
+                  "僅供人工透過下方 artifact 訂閱查看。\n"
+              )
           PY
 
-      - name: Commit and push report
-        working-directory: AISDLC_SDD/AISDLC_SDD_v0.01
-        run: |
-          set -eu
-          git config user.name  "sdd-drift-bot"
-          git config user.email "sdd-drift-bot@users.noreply.github.com"
-          git add build/reports/drift/DAILY-*.md
-          if git diff --cached --quiet; then
-            echo "No DAILY report changes to commit."
-          else
-            git commit -m "chore(drift): DAILY report $(date -u +%Y-%m-%d) [skip ci]"
-            # rebase-retry：arch-fitness nightly 可能已先 push，避免 non-fast-forward。
-            n=0
-            until git push; do
-              n=$((n+1))
-              if [ "$n" -ge 5 ]; then
-                echo "::error::push DAILY report failed after 5 retries"; exit 1
-              fi
-              echo "push rejected (attempt $n) — rebasing onto origin/main…"
-              git rebase --abort 2>/dev/null || true   # 清除前次殘留 rebase 狀態
-              git pull --rebase --autostash origin main || true
-              sleep 3
-            done
-          fi
+      - name: Upload DAILY report (artifact — 凍結基線不回寫 git)
+        if: always()
+        continue-on-error: true   # observability-only；artifact 配額耗盡不得判紅（比照 arch-fitness）
+        uses: actions/upload-artifact@v5
+        with:
+          name: drift-daily-report
+          path: AISDLC_SDD/AISDLC_SDD_v0.01/build/reports/drift/DAILY-*.md
+          retention-days: 90

@@ -436,6 +436,180 @@ class TestHubSyncClient:
 
 
 # ─────────────────────────────────────────────
+# diff() path traversal hardening (P0 security fix — rule_id is an
+# externally-controlled CLI positional arg / direct API param that is
+# joined into filesystem paths without sanitization. Mirrors the
+# _sanitize_component() SSOT hardening already applied to hub_merge.py /
+# path_cost.py / production_to_fpl.py / sandbox_runner.py /
+# production_monitor.py / spec_patch_proposer.py).
+# ─────────────────────────────────────────────
+class TestDiffPathTraversal:
+    """diff(rule_id, ...) must not let a hostile rule_id escape either the
+    local rules/failure-patterns tree (REPO_ROOT-anchored) or the endpoint
+    cache tree (cache_root-anchored) via `../` sequences, and must not choke
+    on Windows-reserved device names (CON/PRN/...).
+    """
+
+    @staticmethod
+    def _make_client(tmp_path: Path) -> "sync_mod.HubSyncClient":
+        hub_root = _setup_local_hub(tmp_path)
+        reg = _make_registry(tmp_path, endpoints=[{
+            "id": "local-test",
+            "url": f"file://{hub_root}",
+            "protocol": "file",
+        }])
+        client = sync_mod.HubSyncClient(reg)
+        client.pull("local-test")  # populate cache_dir with SLV-100.yaml etc.
+        return client
+
+    def test_diff_blocks_local_path_traversal(self, tmp_path, monkeypatch):
+        """Attack vector 1: local_paths (REPO_ROOT / .claude/skills/.../rules/{rule_id}.yaml).
+
+        rules/ sits 4 levels below REPO_ROOT, so 5x "../" walks past a
+        monkeypatched fake REPO_ROOT into its parent directory, where a
+        "secret" file lives outside the repo tree entirely.
+        """
+        fake_repo_root = tmp_path / "fake_repo"
+        rules_dir = fake_repo_root / ".claude" / "skills" / "spec-logical-validator" / "rules"
+        rules_dir.mkdir(parents=True)
+        monkeypatch.setattr(sync_mod, "REPO_ROOT", fake_repo_root)
+
+        secret_dir = tmp_path / "secret_dir"
+        secret_dir.mkdir()
+        (secret_dir / "leak.yaml").write_text("TOP-SECRET-CONTENT", encoding="utf-8")
+
+        client = self._make_client(tmp_path)
+        malicious_rule_id = "../" * 5 + "secret_dir/leak"
+
+        result = client.diff(malicious_rule_id, endpoint_id="local-test")
+
+        if result.local_path is not None:
+            # Must stay confined under the fake repo's rules dir — never resolve
+            # to (or contain the contents of) the outside secret file.
+            assert fake_repo_root.resolve() in result.local_path.resolve().parents, (
+                f"path traversal escaped repo root: {result.local_path}"
+            )
+        assert "TOP-SECRET-CONTENT" not in result.diff_text
+
+    def test_diff_blocks_cache_path_traversal(self, tmp_path, monkeypatch):
+        """Attack vector 2: cache_dir.rglob(f"{rule_id}.*").
+
+        cache_dir == cache_root / endpoint.id, i.e. 2 levels below cache_root,
+        so 2x "../" walks out of the endpoint's own cache directory into a
+        sibling "secret_dir" that was never pulled from any registered hub.
+        """
+        fake_repo_root = tmp_path / "fake_repo2"
+        fake_repo_root.mkdir()
+        monkeypatch.setattr(sync_mod, "REPO_ROOT", fake_repo_root)
+
+        secret_dir = tmp_path / "cache" / "secret_dir"
+        secret_dir.mkdir(parents=True)
+        (secret_dir / "leak.yaml").write_text("TOP-SECRET-CACHE-CONTENT", encoding="utf-8")
+
+        client = self._make_client(tmp_path)
+        cache_dir = client._endpoint_cache_dir(client._resolve_endpoint("local-test"))
+        malicious_rule_id = "../" * 2 + "secret_dir/leak"
+
+        result = client.diff(malicious_rule_id, endpoint_id="local-test")
+
+        if result.cached_hub_path is not None:
+            assert cache_dir.resolve() in result.cached_hub_path.resolve().parents, (
+                f"path traversal escaped cache_dir: {result.cached_hub_path}"
+            )
+        assert "TOP-SECRET-CACHE-CONTENT" not in result.diff_text
+
+    def test_diff_windows_reserved_device_name_does_not_crash(self, tmp_path, monkeypatch):
+        """A rule_id equal to a Windows-reserved device name (CON/PRN/...) must
+        not blow up path construction or the diff, AND must actually be routed
+        through `_sanitize_component()` (sanitized to `_CON`, `_PRN`, ...) —
+        not merely "happen to find nothing" regardless of sanitization.
+
+        QA bug-injection finding: the original version of this test only
+        asserted `local_path is None` / `cached_hub_path is None`. Since the
+        fixture never creates a file literally named `CON.yaml`, that
+        assertion holds true whether or not `diff()` sanitizes `rule_id` at
+        all — deleting `safe_rule_id = _sanitize_component(rule_id)` from
+        `hub_sync.py::diff()` left this test green. It only proved "no crash",
+        never "sanitization happened".
+
+        This version adds two real discrimination layers (platform-portable;
+        runs identically on macOS/Linux CI, no Windows-only path semantics
+        required — it only exercises the `_sanitize_component()` string
+        transform and plain file existence, both OS-agnostic):
+
+        1. Direct assertion on `_sanitize_component()` itself: a reserved
+           device name must come out changed (prefixed with `_`), never
+           passed through unchanged.
+        2. An end-to-end, observable `diff()` behavior difference: a file is
+           created under the *sanitized* filename (e.g. `_CON.yaml`). Calling
+           `diff()` with the raw reserved name only finds that file if
+           `diff()` internally sanitizes `rule_id` before building
+           `local_paths` — if sanitization is removed, `diff()` looks for the
+           literal `CON.yaml` (which doesn't exist) and `local_path` stays
+           `None`. So this test flips from green to red under the exact
+           bug-injection QA identified.
+        """
+        fake_repo_root = tmp_path / "fake_repo3"
+        rules_dir = fake_repo_root / ".claude" / "skills" / "spec-logical-validator" / "rules"
+        rules_dir.mkdir(parents=True)
+        monkeypatch.setattr(sync_mod, "REPO_ROOT", fake_repo_root)
+
+        client = self._make_client(tmp_path)
+        for reserved in ("CON", "PRN", "AUX", "NUL", "COM1", "LPT1"):
+            sanitized = state_loader_mod._sanitize_component(reserved)
+            # Layer 1: sanitization must actually mutate a reserved device
+            # name, not pass it through as-is.
+            assert sanitized == f"_{reserved}", (
+                f"_sanitize_component did not prefix reserved name {reserved!r} "
+                f"as expected (got {sanitized!r})"
+            )
+
+            # Layer 2: diff() must route rule_id through that same
+            # sanitization — create the file under its *sanitized* name and
+            # confirm the raw reserved-name lookup still finds it.
+            (rules_dir / f"{sanitized}.yaml").write_text(
+                f"id: {sanitized}\n", encoding="utf-8",
+            )
+            result = client.diff(reserved, endpoint_id="local-test")
+            assert result.local_path is not None, (
+                f"diff() failed to locate the sanitized file for reserved "
+                f"name {reserved!r} — indicates diff() is no longer routing "
+                "rule_id through _sanitize_component()"
+            )
+            assert result.local_path.name == f"{sanitized}.yaml"
+            assert result.cached_hub_path is None
+
+    def test_diff_normal_rule_id_still_finds_local_and_cached(self, tmp_path, monkeypatch):
+        """Regression: sanitization must not break the legitimate, common
+        case — a normal SLV-### rule_id must still resolve both the local
+        copy and the cached hub copy and produce a diff when they differ.
+        """
+        fake_repo_root = tmp_path / "fake_repo4"
+        rules_dir = fake_repo_root / ".claude" / "skills" / "spec-logical-validator" / "rules"
+        rules_dir.mkdir(parents=True)
+        monkeypatch.setattr(sync_mod, "REPO_ROOT", fake_repo_root)
+        (rules_dir / "SLV-100.yaml").write_text(
+            yaml.safe_dump({
+                "id": "SLV-100",
+                "name": "remote-rule-one",
+                "trust_level": "external",
+                "scope": "SCG-0",
+                "severity": "medium",
+                "description": "LOCALLY EDITED — differs from hub copy",
+            }, sort_keys=False),
+            encoding="utf-8",
+        )
+
+        client = self._make_client(tmp_path)
+        result = client.diff("SLV-100", endpoint_id="local-test")
+
+        assert result.local_path is not None
+        assert result.cached_hub_path is not None
+        assert result.differs is True
+        assert "LOCALLY EDITED" in result.diff_text
+
+
+# ─────────────────────────────────────────────
 # Conflict Resolver (D-30.8)
 # ─────────────────────────────────────────────
 class TestConflictResolver:

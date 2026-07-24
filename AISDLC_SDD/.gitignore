@@ -68,12 +68,21 @@ AISDLC_SDD_v0.01/build/reports/abort/ABORT-RAW-*.yaml
 AISDLC_SDD_v0.01/build/reports/fsm/MONITOR-VIOLATION-*.yaml
 AISDLC_SDD_v0.01/build/reports/test-analysis/DISPATCH-LOG-*.yaml
 
-# arch_fitness 暫時性 SENSE 輸出（TREND.yaml 為累積趨勢、追蹤；findings 每次重生、忽略）
+# arch_fitness 暫時性 SENSE 輸出（findings 每次重生、忽略）
 AISDLC_SDD_v0.01/build/reports/fse/findings*.json
 AISDLC_SDD_v0.01/arch-fitness.json
 
 # 本機 CI 閘門 / chaos 暫時產物（ci-gate.sh / chaos sweep 重生，不追蹤）
 AISDLC_SDD_v0.01/chaos-report.json
+
+# ── v0.01 drift monitor 治理缺口修正（掃描 agent 發現：sdd-drift-bot 每日 commit 新
+# DAILY-*.md、arch-fitness-bot 持續改寫 TREND.yaml，v0.01 舊版窄清單從未涵蓋此二類—
+# 補齊比照 v0.05+ 已行之有年的 build/reports/* 整段排除政策，v0.01 不再新增追蹤）──
+# 註：舊註解原載「TREND.yaml 為累積趨勢、追蹤」，惟 v0.05~v0.30 共 26 版一致不追蹤
+# 此檔（同一份 arch_fitness.py write_trend() 邏輯、同一輸出路徑），純本地/CI 磁碟累積
+# 非靠 git 提交累積，故此處改依現行（v0.05+）已確立政策收斂，不再依附該過時設計註解。
+AISDLC_SDD_v0.01/build/reports/drift/DAILY-*.md
+AISDLC_SDD_v0.01/build/reports/fse/TREND.yaml
 
 # ── v0.02~v0.04 arch-fitness.json 排除（跨平台抖動修復）──
 # 此三版複製於 per-version 排除政策（DEF-11-001，v0.05 起）建立之前，arch-fitness.json
