@@ -53,9 +53,12 @@ _ghic_bail() {
 
 # venv 提示：下列各函式都靠裸 python 呼叫 _GIT_HOOKS_INSTALL_COMMON_PY，未啟用 venv
 # 就直接失敗提示（勝過各函式逐一噴原生「python: command not found」）——與
-# tools/integration_gate.sh / AutoClaude/tools/local_ci_gate.sh 的
-# `command -v python` 前置守門對稱，source 本檔時即檢查一次。
-command -v python >/dev/null || { echo '❌ 找不到 python — 請先 source .venv/bin/activate（見 ONBOARDING.md §3）'; _ghic_bail; }
+# tools/integration_gate.sh / AutoClaude/tools/local_ci_gate.sh 的前置守門對稱，
+# source 本檔時即檢查一次。R43 Scan-B（DEF-101-353）：三處皆改用共用 guard
+# is_real_python_candidate 排除 WindowsApps 空殼候選，取代原本裸 `command -v`。
+# shellcheck disable=SC1091
+. "$_GIT_HOOKS_INSTALL_COMMON_SH_DIR/windowsapps_guard.sh"
+is_real_python_candidate python || { echo '❌ 找不到 python — 請先 source .venv/bin/activate（見 ONBOARDING.md §3）'; _ghic_bail; }
 
 # 防護：core.hooksPath 寫入的是「共享 .git/config」；在 linked worktree 內執行會把
 # worktree 路徑寫進去，worktree 刪除後主 checkout 閘門靜默全滅 → 拒絕執行。

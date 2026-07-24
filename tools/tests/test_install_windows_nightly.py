@@ -214,7 +214,8 @@ class TestInstallWindowsNightlySyntax(unittest.TestCase):
 
 @unittest.skipUnless(
     platform.system() == "Windows",
-    "New-ScheduledTaskSettingsSet 屬 ScheduledTasks 模組，只在 Windows 上真的可呼叫",
+    "[WINDOWS-NATIVE-ONLY] New-ScheduledTaskSettingsSet 屬 ScheduledTasks 模組，只在 "
+    "Windows 上真的可呼叫（R43 DEF-101-348 標籤，供 run_root_unittests.py 彙整可見度）",
 )
 class TestInstallWindowsNightlySettingsConstruction(unittest.TestCase):
     """DEF-101-249（R20 真 Windows 機器驗證）：New-ScheduledTaskSettingsSet 是「建構」

@@ -41,6 +41,10 @@ if [ -z "${TOPLEVEL:-}" ]; then
 fi
 rc=0
 
+# R43 Scan-B（DEF-101-353）：WindowsApps 空殼 python 排除 guard（純函式定義，無副作用）。
+# shellcheck disable=SC1091
+. "$TOPLEVEL/tools/lib/windowsapps_guard.sh"
+
 ZERO_SHA='0000000000000000000000000000000000000000'
 STDIN="$(cat)"
 
@@ -181,7 +185,7 @@ fi
 # 五支守門工具；失敗累積進 rc（不中斷其他 leg），python 缺席 fail-loud 不軟跳過。
 if [ "$run_rootinfra" -eq 1 ]; then
   echo "[pre-push dispatcher] push 範圍含根層檔 → 執行 root-infra 閘門"
-  if ! command -v python >/dev/null 2>&1; then
+  if ! is_real_python_candidate python; then
     echo "[pre-push dispatcher] ❌ 找不到 python — root-infra 閘門無法執行；請先啟用 venv（Windows: .venv/Scripts/activate；macOS/Linux: source .venv/bin/activate，見 ONBOARDING.md §3）" >&2
     rc=1
   else
@@ -224,7 +228,7 @@ fi
 # 安全、router 家族等回歸鎖的唯一住址）。
 if [ "$run_sdd_consumer" -eq 1 ]; then
   echo "[pre-push dispatcher] push 涉根層消費檔（aisdlc-sdd-ci.yml paths）→ 執行 AISDLC_SDD/scripts/tests 回歸鎖"
-  if ! command -v python >/dev/null 2>&1; then
+  if ! is_real_python_candidate python; then
     echo "[pre-push dispatcher] ❌ 找不到 python — 消費檔回歸鎖無法執行；請先啟用 venv（見 ONBOARDING.md §3）" >&2
     rc=1
   elif ! (cd "$TOPLEVEL/AISDLC_SDD" && python -m pytest scripts/tests -q); then

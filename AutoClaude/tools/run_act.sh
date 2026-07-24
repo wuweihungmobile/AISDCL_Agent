@@ -14,7 +14,11 @@ set -u
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
-command -v python >/dev/null || { echo '❌ 找不到 python — 請先 source .venv/bin/activate（見 ONBOARDING.md §3）'; exit 1; }
+# R43 Scan-B（DEF-101-353）：WindowsApps 空殼排除 guard（純函式定義，無副作用）。
+# shellcheck disable=SC1091
+. "$SCRIPT_DIR/../../tools/lib/windowsapps_guard.sh"
+
+is_real_python_candidate python || { echo '❌ 找不到 python — 請先 source .venv/bin/activate（見 ONBOARDING.md §3）'; exit 1; }
 
 export PYTHONUTF8=1
 python "$SCRIPT_DIR/run_act_core.py" "$@"

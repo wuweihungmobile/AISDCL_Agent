@@ -27,6 +27,14 @@ from scripts import bash_probe  # isort: skip（首方/三方分組隨 cwd 而�
 REPO_ROOT = Path(__file__).resolve().parents[2]
 CI_GATE = REPO_ROOT / "scripts" / "ci-gate.sh"
 
+# R43 Scan-B（DEF-101-353）：ci-gate.sh 現以 `../../tools/lib/windowsapps_guard.sh`
+# dot-source monorepo 根層共用 guard；沙盒 fixture 需同步備有此檔（相對於
+# sandbox/scripts/ci-gate.sh 的 `../..` 落在 sandbox 的**上一層**，即 tempdir 本身
+# ——因為 sandbox 本身扮演的是 AISDLC_SDD/ 這一層，故 guard 需放在 sandbox 的
+# 手足目錄，而非 sandbox 內部）。
+_MONOREPO_ROOT = REPO_ROOT.parent
+_GUARD_SH = _MONOREPO_ROOT / "tools" / "lib" / "windowsapps_guard.sh"
+
 # WSL 佔位 bash（System32）吃不下 Windows 路徑引數 → 紅燈而非 skip（第五輪 DEF-101 P3）
 _BASH = bash_probe.usable_bash()
 
@@ -138,12 +146,19 @@ def test_resolver_failure_downgrades_with_stderr_warning():
     import tempfile
 
     with tempfile.TemporaryDirectory() as td:
-        sandbox = Path(td)
+        # sandbox 扮演 AISDLC_SDD/ 這一層（比照 REPO_ROOT），故須巢狀一層，
+        # 讓 tools/lib/windowsapps_guard.sh 能放在 td 底下、與 sandbox 手足並列
+        # ——對齊 ci-gate.sh 內 `../../tools/lib/windowsapps_guard.sh` 的兩層相對路徑。
+        sandbox = Path(td) / "AISDLC_SDD"
+        sandbox.mkdir()
         (sandbox / "scripts").mkdir()
         shutil.copy2(CI_GATE, sandbox / "scripts" / "ci-gate.sh")
         (sandbox / "scripts" / "sdd_version.py").write_text(
             "import sys; sys.exit(1)\n", encoding="utf-8"
         )
+        guard_dir = Path(td) / "tools" / "lib"
+        guard_dir.mkdir(parents=True)
+        shutil.copy2(_GUARD_SH, guard_dir / "windowsapps_guard.sh")
         proc = subprocess.run(
             [_BASH, "-c", "SDD_GATE_DRY_RUN=1 bash scripts/ci-gate.sh"],
             cwd=str(sandbox),
@@ -166,12 +181,17 @@ def test_override_with_failed_resolver_suppresses_downgrade_warning():
     import tempfile
 
     with tempfile.TemporaryDirectory() as td:
-        sandbox = Path(td)
+        # sandbox 扮演 AISDLC_SDD/ 這一層（見上一測試同款說明）。
+        sandbox = Path(td) / "AISDLC_SDD"
+        sandbox.mkdir()
         (sandbox / "scripts").mkdir()
         shutil.copy2(CI_GATE, sandbox / "scripts" / "ci-gate.sh")
         (sandbox / "scripts" / "sdd_version.py").write_text(
             "import sys; sys.exit(1)\n", encoding="utf-8"
         )
+        guard_dir = Path(td) / "tools" / "lib"
+        guard_dir.mkdir(parents=True)
+        shutil.copy2(_GUARD_SH, guard_dir / "windowsapps_guard.sh")
         proc = subprocess.run(
             [_BASH, "-c",
              "SDD_GATE_DRY_RUN=1 SDD_FW_VERSION=AISDLC_SDD_v0.04 bash scripts/ci-gate.sh"],

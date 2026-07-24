@@ -17,6 +17,7 @@ import time
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from ..utils.logger import _sanitize_log_filename
 from ..utils.token_tracker import extract_context_pct
 from .types import _StepOutput
 
@@ -27,7 +28,7 @@ logger = logging.getLogger("autoclaude.execution.playbook")
 
 
 def execute_prompt_impl(
-    runner: "PlaybookRunner",
+    runner: PlaybookRunner,
     prompt: str,
     maintain_context: bool,
     timeout: int,
@@ -47,7 +48,10 @@ def execute_prompt_impl(
         args.append(cfg.claude.continue_flag)
     args += ["-p", prompt]
 
-    log_path = Path(cfg.log_dir) / f"playbook_{step_label}.log"
+    # R43 SD 一審（DEF-101-352 同構第二例）：step_label 源自 `f"{task.step_id}_attempt{n}"`
+    # （task.step_id 為 YAML 可控字串），未淨化直接組檔名可逃出 log_dir；比照
+    # pty_executor.py 同款修法委派 SSOT（該函式對空字串已回退 "untitled"）。
+    log_path = Path(cfg.log_dir) / f"playbook_{_sanitize_log_filename(step_label)}.log"
     pty = _pr().PtyWrapper(
         command=cfg.claude.command,
         args=args,
@@ -95,7 +99,9 @@ def execute_prompt_impl(
                             "Context %.0f%% 達 halt 門檻 %.0f%%，步驟完成後將儲存 checkpoint",
                             peak_pct, cfg.token_guard.halt_threshold_pct,
                         )
-                    elif should_compact and not (_prev_peak >= cfg.token_guard.compact_threshold_pct):
+                    elif should_compact and not (
+                        _prev_peak >= cfg.token_guard.compact_threshold_pct
+                    ):
                         logger.info(
                             "Context %.0f%% 達 compact 門檻 %.0f%%，步驟完成後觸發 /compact",
                             peak_pct, cfg.token_guard.compact_threshold_pct,

@@ -35,11 +35,15 @@ _ds_main() {
   script_dir="$(cd "$(dirname "$script_path")" && pwd)" || return 1
   root="$(cd "$script_dir/.." && pwd)" || return 1
 
+  # R43 Scan-B（DEF-101-353）：WindowsApps 空殼排除 guard（純函式定義，無副作用）。
+  # shellcheck disable=SC1091
+  . "$root/tools/lib/windowsapps_guard.sh"
+
   if [ -x "$root/.venv/bin/python" ]; then
     py="$root/.venv/bin/python"
-  elif command -v python3 >/dev/null 2>&1; then
+  elif is_real_python_candidate python3; then
     py="python3"
-  elif command -v python >/dev/null 2>&1; then
+  elif is_real_python_candidate python; then
     py="python"
   else
     echo "❌ 找不到 Python 直譯器（dev_start 核心需 Python 3）。" >&2

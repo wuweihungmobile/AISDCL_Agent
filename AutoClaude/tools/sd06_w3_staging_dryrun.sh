@@ -102,7 +102,10 @@ command -v psql >/dev/null 2>&1 || fail "psql 不存在於 PATH" 1
 command -v alembic >/dev/null 2>&1 || fail "alembic 不存在於 PATH" 1
 command -v pg_dump >/dev/null 2>&1 || fail "pg_dump 不存在於 PATH" 1
 command -v pg_restore >/dev/null 2>&1 || fail "pg_restore 不存在於 PATH" 1
-command -v python >/dev/null 2>&1 || fail "python 不存在於 PATH（請先啟用 .venv，見 ONBOARDING.md §3）" 1
+# R43 Scan-B（DEF-101-353）：WindowsApps 空殼排除 guard（純函式定義，無副作用）。
+# shellcheck disable=SC1091
+. "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/../../tools/lib/windowsapps_guard.sh"
+is_real_python_candidate python || fail "python 不存在於 PATH（請先啟用 .venv，見 ONBOARDING.md §3）" 1
 
 # psql 連線測試
 PSQL_DSN="${DSN/+asyncpg/}"

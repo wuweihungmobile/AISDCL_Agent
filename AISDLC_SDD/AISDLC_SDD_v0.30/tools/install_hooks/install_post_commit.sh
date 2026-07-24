@@ -29,7 +29,18 @@ MAIN_CHECKOUT_ROOT="$(dirname "$GIT_COMMON_DIR")"
 # `ls -d ... | sort -V | tail -1` 尾端未錨定（.bak／檔總管複製品會汙染選版）
 # 且掃磁碟非 git tracked，而 ci-gate/smoke/CI 全在乾淨 clone 跑、永遠測不到（假綠）。
 # 現代 macOS 乾淨 PATH 只有 python3 沒有 python，故先解析直譯器、缺席 fail-loud。
-PY="$(command -v python || command -v python3 || true)"
+# R43 Scan-B（DEF-101-353，Architect 一審複查追加）：排除 WindowsApps 空殼候選
+# （guard 檔不存在時降級回退舊行為，不阻擋安裝）。
+if [ -f "$MAIN_CHECKOUT_ROOT/tools/lib/windowsapps_guard.sh" ]; then
+  # shellcheck disable=SC1091
+  . "$MAIN_CHECKOUT_ROOT/tools/lib/windowsapps_guard.sh"
+  PY=""
+  if is_real_python_candidate python; then PY=python
+  elif is_real_python_candidate python3; then PY=python3
+  fi
+else
+  PY="$(command -v python || command -v python3 || true)"
+fi
 if [ -z "$PY" ]; then
   echo "ERROR: 找不到 python/python3 — 請啟用 venv 或安裝 python3 後重試" >&2
   exit 1
@@ -54,10 +65,24 @@ fi
 # R11（DEF-101 家族）：hook 內容補 python fallback——現代 macOS 乾淨 PATH 只有
 # python3 沒有 python，且 git hook 執行環境不繼承 venv，缺 fallback 時兩個 advisory
 # hook 會被 `|| true` 吞掉、永久靜默失效零告警。
+# R43 Scan-B（DEF-101-353，Architect 一審複查追加）：本檔可由 Git Bash on Windows
+# 呼叫（無 macOS-only 限制），生成的 hook 內容也會在裝機當下的平台上實際執行；
+# 兩處 python 候選判斷皆補上 WindowsApps 空殼排除 guard（`$GUARD_SRC` 於安裝當下
+# 展開為絕對路徑字面值，同 `$HOOK_SRC_DRIFT`/`$HOOK_SRC_CLOSURE` 慣例；guard 檔
+# 不存在時降級回退舊行為，不阻擋安裝）。
+GUARD_SRC="$MAIN_CHECKOUT_ROOT/tools/lib/windowsapps_guard.sh"
 cat > "$HOOK_TARGET" <<HOOK
 #!/usr/bin/env bash
 # PostCommit advisory hooks - never block commit
-PY="\$(command -v python || command -v python3 || true)"
+PY=""
+if [ -f "$GUARD_SRC" ]; then
+  . "$GUARD_SRC"
+  if is_real_python_candidate python; then PY=python
+  elif is_real_python_candidate python3; then PY=python3
+  fi
+else
+  PY="\$(command -v python || command -v python3 || true)"
+fi
 if [ -z "\$PY" ]; then
   echo "[post-commit advisory] 找不到 python/python3 — drift/closure advisory 本次跳過（不阻擋 commit）" >&2
   exit 0

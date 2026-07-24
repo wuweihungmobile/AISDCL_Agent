@@ -16,7 +16,6 @@ import json
 import logging
 import time
 from pathlib import Path
-from typing import Optional
 
 from ...core.ports.executor import (
     ExecutionEvent,
@@ -26,6 +25,7 @@ from ...core.ports.executor import (
 )
 from ...perception.pty_wrapper import PtyWrapper
 from ...utils.config import ClaudeConfig, LoopConfig
+from ...utils.logger import _sanitize_log_filename
 from ...utils.token_tracker import context_pct_from_claude_json
 
 logger = logging.getLogger("autoclaude.infra.adapters.pty_executor")
@@ -39,7 +39,7 @@ class PtyExecutor:
         claude_cfg: ClaudeConfig,
         loop_cfg: LoopConfig,
         log_dir: str = "logs",
-        hotkey: Optional[object] = None,
+        hotkey: object | None = None,
     ):
         self._claude = claude_cfg
         self._loop = loop_cfg
@@ -66,7 +66,7 @@ class PtyExecutor:
         maintain_context: bool = True,
         timeout: int = 600,
         label: str = "",
-        on_event: Optional[ExecutionEventCallback] = None,
+        on_event: ExecutionEventCallback | None = None,
     ) -> ExecutionOutput:
         args = list(self._claude.extra_args)
         if maintain_context and self._claude.continue_flag:
@@ -78,7 +78,10 @@ class PtyExecutor:
             args += ["--output-format", output_format]
         args += ["-p", prompt]
 
-        log_path = Path(self._log_dir) / f"playbook_{label or 'untitled'}.log"
+        # R43 Scan-A（DEF-101-352）：label 源自 PlaybookTask.step_id（YAML 可控字串），
+        # 未淨化直接組檔名可逃出 log_dir（如 step_id="../../evil"）；比照 SSOT
+        # utils/logger.py::_sanitize_log_filename（該函式對空字串已回退為 "untitled"）。
+        log_path = Path(self._log_dir) / f"playbook_{_sanitize_log_filename(label)}.log"
         pty = PtyWrapper(
             command=self._claude.command,
             args=args,
@@ -180,7 +183,7 @@ class PtyExecutor:
         )
 
     @staticmethod
-    def _try_parse_json(raw: str) -> Optional[dict]:
+    def _try_parse_json(raw: str) -> dict | None:
         """容錯解析 claude --output-format json 輸出為 dict；失敗回 None（不拋）。
 
         claude -p --output-format json 為 single-result：整段 stdout 即一個 JSON object。

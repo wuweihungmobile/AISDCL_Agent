@@ -22,9 +22,11 @@
 # tools/git-hooks/pre-commit；test_hook_wiring_cwd_safety.py → 根層與 AutoClaude 的
 # .claude/settings.json；R38 新增 test_install_post_commit_windowsapps_guard.py →
 # tools/lib/WindowsAppsGuard.ps1，Architect 一審 REJECT 收斂 install_post_commit.ps1
-# 內嵌 WindowsApps guard 副本後改 dot-source 共用函式）——只改這些根層檔的變更也
-# 必須觸發本 workflow，否則回歸鎖在「它專門要抓的那類變更」上恰好不跑（DEF-101-037
-# 同構）。
+# 內嵌 WindowsApps guard 副本後改 dot-source 共用函式；R43 Scan-B 新增
+# tools/lib/windowsapps_guard.sh——bash 側對稱實作，test_ci_gate_version_resolution.py
+# 沙盒 fixture 現會複製此檔，ci-gate.sh 亦改 dot-source 之，DEF-101-353）——只改
+# 這些根層檔的變更也必須觸發本 workflow，否則回歸鎖在「它專門要抓的那類變更」上
+# 恰好不跑（DEF-101-037 同構）。
 
 name: aisdlc-sdd-ci
 
@@ -38,6 +40,7 @@ on:
       - "tools/git-hooks/pre-commit"
       - "tools/lib/bash_probe_spec.py"
       - "tools/lib/WindowsAppsGuard.ps1"
+      - "tools/lib/windowsapps_guard.sh"
       - ".claude/settings.json"
       - ".claude/hooks/sdd_hook_router.py"
       - "AutoClaude/.claude/settings.json"
@@ -49,6 +52,7 @@ on:
       - "tools/git-hooks/pre-commit"
       - "tools/lib/bash_probe_spec.py"
       - "tools/lib/WindowsAppsGuard.ps1"
+      - "tools/lib/windowsapps_guard.sh"
       - ".claude/settings.json"
       - ".claude/hooks/sdd_hook_router.py"
       - "AutoClaude/.claude/settings.json"

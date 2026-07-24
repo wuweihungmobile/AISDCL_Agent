@@ -10,10 +10,14 @@ set -u
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
+# R43 Scan-B（DEF-101-353）：WindowsApps 空殼排除 guard（純函式定義，無副作用）。
+# shellcheck disable=SC1091
+. "$SCRIPT_DIR/lib/windowsapps_guard.sh"
+
 PY=""
-if command -v python3 >/dev/null 2>&1; then
+if is_real_python_candidate python3; then
   PY=python3
-elif command -v python >/dev/null 2>&1; then
+elif is_real_python_candidate python; then
   PY=python
 else
   echo "❌ 找不到 python3/python — 無法啟動 bootstrap_core.py。請先安裝 Python >= 3.11。" >&2

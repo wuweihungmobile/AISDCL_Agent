@@ -237,6 +237,16 @@ class TestPrePushDispatcher(unittest.TestCase):
         shutil.copy(DISPATCHER, hooks_dir / "pre-push")
         os.chmod(hooks_dir / "pre-push", 0o755)
 
+        # R43 Scan-B（DEF-101-353）：dispatcher 現以 `. "$TOPLEVEL/tools/lib/
+        # windowsapps_guard.sh"` 載入共用 guard，fake repo 樹需同步備有此檔，
+        # 否則 source 失敗、guard 函式未定義，兩處 leg 判斷會誤判「找不到 python」。
+        guard_lib_dir = self.repo / "tools" / "lib"
+        guard_lib_dir.mkdir(parents=True, exist_ok=True)
+        shutil.copy(
+            REPO_ROOT / "tools" / "lib" / "windowsapps_guard.sh",
+            guard_lib_dir / "windowsapps_guard.sh",
+        )
+
         # marker 檔（tmp 層、repo 外）：各 leg 真的執行到的鐵證。
         self.marker_autoclaude = self.tmp / "MARKER_AUTOCLAUDE_SUBHOOK"
         self.marker_sdd = self.tmp / "MARKER_SDD_SUBHOOK"

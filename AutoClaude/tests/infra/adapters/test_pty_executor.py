@@ -8,6 +8,7 @@
 from __future__ import annotations
 
 import json
+from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 from autoclaude.core.ports import ExecutionOutput
@@ -107,6 +108,51 @@ class TestPtyExecutorBehavior:
         assert out.exit_code == 0
 
 
+class TestPtyExecutorLabelSanitization:
+    """R43 Scan-A（DEF-101-352）：label 源自 PlaybookTask.step_id（YAML 可控字串），
+    組 raw_log_path 前必須經 SSOT 淨化，否則可逃出 log_dir 或落地為 Windows 保留裝置名。"""
+
+    @patch("autoclaude.infra.adapters.pty_executor.PtyWrapper")
+    def test_path_traversal_label_does_not_escape_log_dir(self, mock_pty_class):
+        pty = MagicMock()
+        pty.is_alive = False
+        pty.readline.return_value = None
+        mock_pty_class.return_value = pty
+
+        ex = PtyExecutor(ClaudeConfig(), LoopConfig(), log_dir="logs")
+        ex.execute("p", timeout=10, label="../../../evil")
+
+        raw_log_path = mock_pty_class.call_args.kwargs["raw_log_path"]
+        assert ".." not in raw_log_path.parts
+        assert raw_log_path.parent == Path("logs")
+
+    @patch("autoclaude.infra.adapters.pty_executor.PtyWrapper")
+    def test_reserved_device_name_label_not_written_bare(self, mock_pty_class):
+        pty = MagicMock()
+        pty.is_alive = False
+        pty.readline.return_value = None
+        mock_pty_class.return_value = pty
+
+        ex = PtyExecutor(ClaudeConfig(), LoopConfig(), log_dir="logs")
+        ex.execute("p", timeout=10, label="CON")
+
+        raw_log_path = mock_pty_class.call_args.kwargs["raw_log_path"]
+        assert raw_log_path.stem != "playbook_CON"
+
+    @patch("autoclaude.infra.adapters.pty_executor.PtyWrapper")
+    def test_empty_label_falls_back_to_untitled(self, mock_pty_class):
+        pty = MagicMock()
+        pty.is_alive = False
+        pty.readline.return_value = None
+        mock_pty_class.return_value = pty
+
+        ex = PtyExecutor(ClaudeConfig(), LoopConfig(), log_dir="logs")
+        ex.execute("p", timeout=10, label="")
+
+        raw_log_path = mock_pty_class.call_args.kwargs["raw_log_path"]
+        assert raw_log_path.name == "playbook_untitled.log"
+
+
 class TestPtyExecutorJsonTokenPct:
     """W-82-2 / DEF-81-001：PTY 以 --output-format json 接通真實 context% 訊號源。"""
 
@@ -140,7 +186,9 @@ class TestPtyExecutorJsonTokenPct:
         assert abs(token_events[0].payload["pct"] - 5.8803) < 0.001
         kinds = [e.kind for e in events]
         assert ExecutionEventKind.COMPLETION in kinds
-        assert kinds.index(ExecutionEventKind.TOKEN_PCT) < kinds.index(ExecutionEventKind.COMPLETION)
+        assert kinds.index(ExecutionEventKind.TOKEN_PCT) < kinds.index(
+            ExecutionEventKind.COMPLETION
+        )
 
     @patch("autoclaude.infra.adapters.pty_executor.PtyWrapper")
     def test_pty_json_parse_failure_failloud_fallback(self, mock_pty_class):

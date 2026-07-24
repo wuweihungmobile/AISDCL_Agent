@@ -60,5 +60,44 @@ class RunRootUnittestsTest(unittest.TestCase):
         self.assertGreaterEqual(suite.countTestCases(), run_root_unittests.MIN_TESTS)
 
 
+class ReportWindowsNativeSkipsTest(unittest.TestCase):
+    """R43 Architect P1（DEF-101-348 方向①）：`[WINDOWS-NATIVE-ONLY]` 標籤的 skip
+    必須從一般 `skipped=N` 摘要中被獨立點名，不能混在裡面看不出來。"""
+
+    def _run_fixture(self, tagged_condition: bool, plain_condition: bool):
+        class _Dummy(unittest.TestCase):
+            @unittest.skipUnless(tagged_condition, "[WINDOWS-NATIVE-ONLY] 僅原生 Windows 才具驗證價值")
+            def test_tagged(self):
+                pass
+
+            @unittest.skipUnless(plain_condition, "本機缺某工具，一般性 skip")
+            def test_plain(self):
+                pass
+
+            def test_always_runs(self):
+                self.assertTrue(True)
+
+        suite = unittest.TestLoader().loadTestsFromTestCase(_Dummy)
+        result = unittest.TestResult()
+        suite.run(result)
+        return result
+
+    def test_tagged_skip_is_singled_out(self):
+        result = self._run_fixture(tagged_condition=False, plain_condition=True)
+        tagged_ids = run_root_unittests.report_windows_native_skips(result)
+        self.assertEqual(len(tagged_ids), 1)
+        self.assertIn("test_tagged", tagged_ids[0])
+
+    def test_plain_skip_is_not_flagged(self):
+        result = self._run_fixture(tagged_condition=True, plain_condition=False)
+        tagged_ids = run_root_unittests.report_windows_native_skips(result)
+        self.assertEqual(tagged_ids, [], "一般性 skip（無標籤）不應被誤標為 Windows 專屬未驗證")
+
+    def test_no_skips_reports_empty(self):
+        result = self._run_fixture(tagged_condition=True, plain_condition=True)
+        tagged_ids = run_root_unittests.report_windows_native_skips(result)
+        self.assertEqual(tagged_ids, [])
+
+
 if __name__ == "__main__":
     unittest.main()

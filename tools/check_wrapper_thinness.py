@@ -48,17 +48,20 @@ _PS1_BLOCK_COMMENT_RE = re.compile(r"<#.*?#>", re.DOTALL)
 # 「選直譯器／轉呼叫核心／啟用 venv」薄殼職責，再以本檔 --print-hash 取新值
 # 同步更新此表（並跑 tools/tests 確認）。
 _PINNED_SHA256: dict[str, str] = {
+    # R43：WindowsApps 空殼排除 guard 收斂為 dot-source tools/lib/windowsapps_guard.sh
+    # 共用函式（Scan-B 系統性缺口收斂，DEF-101-353；bash 側對稱 .ps1 側 R37 先例）
     "tools/dev_start.sh": (
-        "8a70670e8d48e9644b7ac1857beba95f7a048e1e7b5629ca493e2aa7379eeb68"
+        "97ccccbcee98781352eb46162fd066f6f2978d05612d4f6f9d30a0c3a6b230e0"
     ),
     # R37：WindowsApps 空殼排除 guard 收斂為 dot-source tools/lib/WindowsAppsGuard.ps1
     # 共用函式（DEF-101-273/279/300/303 反覆復發後的架構收斂）
     "tools/dev_start.ps1": (
         "5a3e51a4343c90d8995b234dc81cee1a363a0d32c9158f24bb761d91f1dae4ae"
     ),
-    # R12（DEF-101-070 ②）：local_ci_gate 收斂為薄殼＋Python 核心後納入釘選
+    # R12（DEF-101-070 ②）：local_ci_gate 收斂為薄殼＋Python 核心後納入釘選；
+    # R43：補上 WindowsApps guard dot-source（同上 DEF-101-353）
     "AutoClaude/tools/local_ci_gate.sh": (
-        "8a077fc86de14495a7d62fd49b350c4f7a089cb3f654c278a15de37f38c6f00b"
+        "551e36b7158e3d1ee8808e92c0dddb21ffe4abace055cc6cdb8526855742b484"
     ),
     "AutoClaude/tools/local_ci_gate.ps1": (
         "4143c4580317e72db09e7184601595fb19a7b1a576f23bc99f4d4262692efdb5"
@@ -67,22 +70,25 @@ _PINNED_SHA256: dict[str, str] = {
     # 各自 Python 核心（bootstrap_core.py／integration_gate_core.py／
     # run_act_core.py）後，由 check_script_parity.py 的 _MARKER_PAIRS 標籤比對
     # 遷移至此 hash 釘選（同 R12 local_ci_gate 先例；gate-call 抽取比對隨之退場）
+    # R43：補上 WindowsApps guard dot-source（同上 DEF-101-353）
     "tools/bootstrap.sh": (
-        "dc11cfbecb4cab979da1492a8a0646ad8dbb97b25173e4c6552fdaae6c06fd46"
+        "666b6062bd3071a36b2485b055b693aca7e71f155fe43cf770a7dee985c16a20"
     ),
     # R37：WindowsApps 空殼排除 guard 收斂為 dot-source tools/lib/WindowsAppsGuard.ps1
     # 共用函式（DEF-101-273/279/300/303 反覆復發後的架構收斂）
     "tools/bootstrap.ps1": (
         "98b5756438fe844e31fc5375e58b26cadbd91966f4b5edc68736feaebe6241ea"
     ),
+    # R43：補上 WindowsApps guard dot-source（同上 DEF-101-353）
     "tools/integration_gate.sh": (
-        "6a7d08e438d25d0ffeb223e5b4a3ebcc7869065b2088c50b52aa2ebd2f8c6c83"
+        "0f9d2b674f821f37e543d15b7e8a87c6b9f92f82c6ab3ba957f55e692219ed89"
     ),
     "tools/integration_gate.ps1": (
         "0c9efcddc4ab83b7a1b214ae698f28f8b04bbce093c664b585ccdcaa95ee8daa"
     ),
+    # R43：補上 WindowsApps guard dot-source（同上 DEF-101-353）
     "AutoClaude/tools/run_act.sh": (
-        "d1603a0f6e32dbdf036ec95e0ee3cc646c92669ad7f8f5be8b6bc321e0f55990"
+        "5dbe64e0c72312b1172968b396456c6a22f523e11d9de5b855d4949dd224115a"
     ),
     "AutoClaude/tools/run_act.ps1": (
         "e90016dc7c6855fa2febb728297e2ff82909155cdd0777746d97791e4279b064"

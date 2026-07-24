@@ -14,9 +14,13 @@ set -u
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
+# R43 Scan-B（DEF-101-353）：WindowsApps 空殼排除 guard（純函式定義，無副作用）。
+# shellcheck disable=SC1091
+. "$SCRIPT_DIR/lib/windowsapps_guard.sh"
+
 # 直譯器選擇維持收斂前語意：PATH 上的 python（所有段落都靠已啟用的 venv），
 # 未啟用 venv 就直接失敗提示（勝過各段落逐一噴錯）
-command -v python >/dev/null || { echo '❌ 找不到 python — 請先 source .venv/bin/activate（見 ONBOARDING.md §3）'; exit 1; }
+is_real_python_candidate python || { echo '❌ 找不到 python — 請先 source .venv/bin/activate（見 ONBOARDING.md §3）'; exit 1; }
 
 export PYTHONUTF8=1
 python "$SCRIPT_DIR/integration_gate_core.py" "$@"

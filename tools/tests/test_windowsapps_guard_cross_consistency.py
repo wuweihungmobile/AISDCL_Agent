@@ -295,8 +295,10 @@ class TestDevStartPs1WindowsAppsGuard(unittest.TestCase):
 
     @unittest.skipUnless(
         _windows_pwsh_available(),
-        "此測試用 .cmd 假直譯器驗證 WindowsApps guard，依賴 Windows PATHEXT "
-        "解析語意，僅能在真 Windows 平台上跑（見 _windows_pwsh_available 說明）",
+        "[WINDOWS-NATIVE-ONLY] 此測試用 .cmd 假直譯器驗證 WindowsApps guard，依賴 "
+        "Windows PATHEXT 解析語意，僅能在真 Windows 平台上跑（見 "
+        "_windows_pwsh_available 說明；R43 DEF-101-348 標籤，供 run_root_unittests.py "
+        "彙整可見度）",
     )
     def test_windowsapps_stub_present_first_is_rejected_not_silently_bypassed(
         self,

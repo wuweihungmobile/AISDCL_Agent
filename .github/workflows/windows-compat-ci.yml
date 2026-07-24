@@ -162,6 +162,18 @@ on:
       # 檔案未被機械鎖偵測為「消費檔」——手動補列對稱涵蓋（DEF-101-042 同款假綠盲區）。
       - "tools/lib/platform_utils.py"
       - "tools/lib/bash_probe_spec.py"
+      # R43：tools/tests/test_windowsapps_guard_bash_parity.py 消費此根層檔（bash 側
+      # WindowsApps guard SSOT，DEF-101-353）與其全部已知呼叫端——只改任一檔時本
+      # workflow 須重跑該鎖（DEF-101-042 同構；.sh 本檔無 **/*.sh 兜底 glob〔對稱
+      # macos-compat-ci.yml 廣義涵蓋，windows 側刻意保留逐一列舉慣例〕，需顯式列舉）
+      - "tools/lib/windowsapps_guard.sh"
+      - "tools/lib/git_hooks_install_common.sh"
+      - "tools/bootstrap.sh"
+      - "tools/dev_start.sh"
+      - "tools/integration_gate.sh"
+      - "AutoClaude/tools/local_ci_gate.sh"
+      - "AutoClaude/tools/run_act.sh"
+      - "AutoClaude/tools/sd06_w3_staging_dryrun.sh"
       - "tools/bootstrap_core.py"
       - "AutoClaude/tools/run_act_core.py"
       - "**/*.ps1"
@@ -227,6 +239,18 @@ on:
       # 檔案未被機械鎖偵測為「消費檔」——手動補列對稱涵蓋（DEF-101-042 同款假綠盲區）。
       - "tools/lib/platform_utils.py"
       - "tools/lib/bash_probe_spec.py"
+      # R43：tools/tests/test_windowsapps_guard_bash_parity.py 消費此根層檔（bash 側
+      # WindowsApps guard SSOT，DEF-101-353）與其全部已知呼叫端——只改任一檔時本
+      # workflow 須重跑該鎖（DEF-101-042 同構；.sh 本檔無 **/*.sh 兜底 glob〔對稱
+      # macos-compat-ci.yml 廣義涵蓋，windows 側刻意保留逐一列舉慣例〕，需顯式列舉）
+      - "tools/lib/windowsapps_guard.sh"
+      - "tools/lib/git_hooks_install_common.sh"
+      - "tools/bootstrap.sh"
+      - "tools/dev_start.sh"
+      - "tools/integration_gate.sh"
+      - "AutoClaude/tools/local_ci_gate.sh"
+      - "AutoClaude/tools/run_act.sh"
+      - "AutoClaude/tools/sd06_w3_staging_dryrun.sh"
       - "tools/bootstrap_core.py"
       - "AutoClaude/tools/run_act_core.py"
       - "**/*.ps1"

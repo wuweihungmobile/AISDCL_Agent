@@ -36,6 +36,13 @@ _TESTS_DIR = Path(__file__).resolve().parent / "tests"
 # 刻意刪減測試時同步下修；新增測試不需動（下限語意）。
 MIN_TESTS = 290  # R15 ratchet：三支新守門（bash32/ps1_bom/onboarding_parity_interlock）落地當下實況 290，直接釘實際數（主控收輪統一重釘）
 
+# R43 Architect P1（DEF-101-348 方向①）：DEF-101-343~345 揪出 5 支 Windows 專屬
+# 回歸測試連續 5+ 輪「全 APPROVE」卻從未在原生 Windows 上真正跑過——`unittest`
+# 預設摘要（`skipped=N`）不區分「一般性 skip」與「這支測試的驗證價值僅在原生
+# Windows 上成立、這次環境不符沒跑」，是造成該漏洞連續多輪未被發現的根因之一。
+# 凡 skip 理由帶此標籤的測試，於摘要末另印一段醒目清單，供複審者一眼辨識。
+WINDOWS_NATIVE_SKIP_TAG = "[WINDOWS-NATIVE-ONLY]"
+
 
 def discover_suite(start_dir: Path) -> unittest.TestSuite:
     # 每次新建 TestLoader：defaultTestLoader 有狀態（_top_level_dir 殘留），
@@ -57,7 +64,23 @@ def run_with_floor(start_dir: Path, min_tests: int) -> int:
         return 1
     print(f"✅ unittest 數量下限釘選通過：發現 {count} 個測試（下限 {min_tests}）")
     result = unittest.TextTestRunner(verbosity=1).run(suite)
+    report_windows_native_skips(result)
     return 0 if result.wasSuccessful() else 1
+
+
+def report_windows_native_skips(result: unittest.TestResult) -> list[str]:
+    """在一般 `skipped=N` 摘要之外，另印出「僅原生 Windows 上才具驗證價值」
+    的 skip 清單（DEF-101-348 方向①）；回傳被標記的測試 id 清單供呼叫端／
+    測試斷言使用。"""
+    tagged = [test for test, reason in result.skipped if WINDOWS_NATIVE_SKIP_TAG in reason]
+    if tagged:
+        print(
+            f"⚠️  {len(tagged)} 個 Windows 專屬測試本次「未在原生 Windows 環境驗證」"
+            f"（非一般 skip，見 DEF-101-348/R43）："
+        )
+        for test in tagged:
+            print(f"   - {test.id()}")
+    return [test.id() for test in tagged]
 
 
 def main() -> int:

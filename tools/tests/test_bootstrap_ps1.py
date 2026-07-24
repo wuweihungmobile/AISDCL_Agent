@@ -72,8 +72,10 @@ class TestBootstrapWindowsAppsGuard(unittest.TestCase):
 
     @unittest.skipUnless(
         _windows_pwsh_available(),
-        "此測試用 .cmd 假直譯器驗證 WindowsApps guard，依賴 Windows PATHEXT "
-        "解析語意，僅能在真 Windows 平台上跑（見 _windows_pwsh_available 說明）",
+        "[WINDOWS-NATIVE-ONLY] 此測試用 .cmd 假直譯器驗證 WindowsApps guard，依賴 "
+        "Windows PATHEXT 解析語意，僅能在真 Windows 平台上跑（見 "
+        "_windows_pwsh_available 說明；R43 DEF-101-348 標籤，供 run_root_unittests.py "
+        "彙整可見度）",
     )
     def test_real_python_outside_windowsapps_is_used_even_when_windowsapps_stub_present_first(
         self,
@@ -113,8 +115,10 @@ class TestBootstrapWindowsAppsGuard(unittest.TestCase):
 
     @unittest.skipUnless(
         _windows_pwsh_available(),
-        "此測試用 .cmd 假直譯器驗證 WindowsApps guard，依賴 Windows PATHEXT "
-        "解析語意，僅能在真 Windows 平台上跑（見 _windows_pwsh_available 說明）",
+        "[WINDOWS-NATIVE-ONLY] 此測試用 .cmd 假直譯器驗證 WindowsApps guard，依賴 "
+        "Windows PATHEXT 解析語意，僅能在真 Windows 平台上跑（見 "
+        "_windows_pwsh_available 說明；R43 DEF-101-348 標籤，供 run_root_unittests.py "
+        "彙整可見度）",
     )
     def test_windowsapps_python_and_python3_stubs_both_skipped_and_reports_not_found(
         self,

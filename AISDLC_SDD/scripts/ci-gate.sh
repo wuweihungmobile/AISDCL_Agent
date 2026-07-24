@@ -27,11 +27,17 @@ export PYTHONUTF8=1
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
+# R43 Scan-B（DEF-101-353）：WindowsApps 空殼排除 guard（純函式定義，無副作用）；
+# 比照既有 scripts/install-hooks.sh 同款跨子專案 dot-source monorepo 根層
+# tools/lib/*.sh 慣例（該檔第 17 行 source git_hooks_install_common.sh）。
+# shellcheck disable=SC1091
+. "$(dirname "${BASH_SOURCE[0]}")/../../tools/lib/windowsapps_guard.sh"
+
 # python 缺席 fail-loud（R14 SCAN-SH-1）：現代 macOS 乾淨 PATH 只有 python3 沒有
 # python，未啟 venv 直跑時下方 LATEST 解析的 `|| true` 會把 127（command not found）
 # 靜默吞成「無演化版」——dry-run 假綠、非 dry-run 雙軌閘門靜默降為單軌 v0.01。
 # 與姊妹腳本（tools/integration_gate.sh / AutoClaude/tools/local_ci_gate.sh）同款守門。
-if ! command -v python >/dev/null 2>&1; then
+if ! is_real_python_candidate python; then
   echo "❌ 找不到 python — 請先啟用 venv（macOS/Linux: source .venv/bin/activate；Windows: .venv/Scripts/activate；見 ONBOARDING.md §3）" >&2
   exit 1
 fi
