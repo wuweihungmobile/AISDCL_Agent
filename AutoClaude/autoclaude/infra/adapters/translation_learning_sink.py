@@ -21,6 +21,7 @@ from ...core.ports.translation_learning import (
     ITranslationLearningSink,
     TranslationProposal,
 )
+from ...utils.logger import _sanitize_log_filename
 
 logger = logging.getLogger("autoclaude.infra.translation_learning")
 
@@ -88,13 +89,30 @@ class FileTranslationLearningSink(ITranslationLearningSink):
 
 
 def _sanitize(name: str) -> str:
-    """與 FileRtmFeedbackSource._sanitize 對稱：報告基名消毒，防路徑穿越。
+    """委派 SSOT `_sanitize_log_filename`（DEF-101-343，R42 收斂），與
+    `FileRtmFeedbackSource._sanitize` 對稱：報告基名消毒，防路徑穿越，並補齊
+    Windows 保留裝置名防護（舊版獨立實作缺漏）。
 
-    與先例完全對齊：去除前後 `.`/`_`（防 `.`/`..` 起頭挾帶）並提供空字串兜底。
+    `.lstrip("._")` 對稱既有先例：`_sanitize_log_filename` 只 `rstrip` 尾端
+    空白/句點，不清前導句點/底線，須補一層維持「不留字面 ``..`` 前綴」保證。
+
     本檔基名恆有固定前綴 `PROPOSALS-`，理論上不會空/dot-起頭，兜底為防禦冗餘。
-    """
-    cleaned = "".join(c if (c.isalnum() or c in "-_.") else "_" for c in name)
-    return cleaned.strip("._") or "proposals-report"
+    `_sanitize_log_filename` 對「淨化後整段為空」回傳 `"untitled"`；本模組既有
+    對外行為為 `"proposals-report"`，委派後改寫回原字面值，維持既有可觀察行為
+    不變。
+
+    R42 二審修復（DEF-101-346 追記）：`.lstrip("._")` 會把 `_sanitize_log_filename`
+    為保留裝置名（如 ``CON`` → ``_CON``）補上的前導底線逃逸字元一併剝除，導致
+    ``CON`` 經 lstrip 後又變回裸 ``CON``——保留名防護被 wrapper 自己抵銷。故在
+    lstrip 之後，對非 fallback 結果**再委派一次** `_sanitize_log_filename`，
+    讓保留名偵測在 lstrip 之後重新執行、補回逃逸前綴。"""
+    sanitized = _sanitize_log_filename(name)
+    if sanitized == "untitled":
+        return "proposals-report"
+    result = sanitized.lstrip("._") or "proposals-report"
+    if result == "proposals-report":
+        return result
+    return _sanitize_log_filename(result)
 
 
 __all__ = ["FileTranslationLearningSink"]

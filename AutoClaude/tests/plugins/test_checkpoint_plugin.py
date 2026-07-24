@@ -365,10 +365,11 @@ class TestW3PersistenceRequestPositive:
         # last_log_path 為純文字顯示欄位（無實體檔案），需與 RawStreamLogger 對
         # 同一原始檔名套用 _sanitize_log_filename() 後的結果一致
         expected_log_name = _sanitize_log_filename("playbook_Step 1: Setup_attempt0.log")
-        assert _P(dump.last_log_path).name == expected_log_name
+        last_log_name = _P(dump.last_log_path).name
+        assert last_log_name == expected_log_name
         for ch in _WIN_FORBIDDEN_CHARS:
-            assert ch not in dump.last_log_path, (
-                f"禁用字元 {ch!r} 洩漏進顯示用 last_log_path {dump.last_log_path!r}"
+            assert ch not in last_log_name, (
+                f"禁用字元 {ch!r} 洩漏進顯示用 last_log_path 檔名分量 {last_log_name!r}"
             )
 
 

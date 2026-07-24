@@ -255,6 +255,42 @@ class TestEscalationModulesReuseSharedSanitizer(unittest.TestCase):
             "_sanitize_log_filename，不可另寫一份相似邏輯",
         )
 
+    def test_rtm_file_sink_reuses_shared_sanitizer(self) -> None:
+        """DEF-101-343（R42）：rtm_file_sink.py 曾獨立重寫一份限縮字元集合的
+        `_sanitize_name`，缺 Windows 保留裝置名防護，改為委派共用函式。"""
+        from autoclaude.infra.adapters import rtm_file_sink
+
+        self.assertIs(
+            rtm_file_sink._sanitize_log_filename,
+            autoclaude_logger._sanitize_log_filename,
+            "infra/adapters/rtm_file_sink.py 必須 import 共用的 "
+            "_sanitize_log_filename，不可另寫一份相似邏輯",
+        )
+
+    def test_rtm_file_feedback_source_reuses_shared_sanitizer(self) -> None:
+        """DEF-101-343（R42）：rtm_file_feedback_source.py 曾獨立重寫一份與
+        rtm_file_sink 對稱但缺 Windows 保留裝置名防護的 `_sanitize`。"""
+        from autoclaude.infra.adapters import rtm_file_feedback_source
+
+        self.assertIs(
+            rtm_file_feedback_source._sanitize_log_filename,
+            autoclaude_logger._sanitize_log_filename,
+            "infra/adapters/rtm_file_feedback_source.py 必須 import 共用的 "
+            "_sanitize_log_filename，不可另寫一份相似邏輯",
+        )
+
+    def test_translation_learning_sink_reuses_shared_sanitizer(self) -> None:
+        """DEF-101-343（R42）：translation_learning_sink.py 曾獨立重寫一份與
+        rtm_file_feedback_source 對稱但缺 Windows 保留裝置名防護的 `_sanitize`。"""
+        from autoclaude.infra.adapters import translation_learning_sink
+
+        self.assertIs(
+            translation_learning_sink._sanitize_log_filename,
+            autoclaude_logger._sanitize_log_filename,
+            "infra/adapters/translation_learning_sink.py 必須 import 共用的 "
+            "_sanitize_log_filename，不可另寫一份相似邏輯",
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

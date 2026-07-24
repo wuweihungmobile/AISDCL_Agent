@@ -48,6 +48,22 @@ class TestFileRtmSink:
         path = sink.write_report("...", "x")
         assert Path(path).stem == "rtm-report"
 
+    def test_reserved_device_name_not_written_bare(self, tmp_path):
+        """R42 二審回歸（DEF-101-346 追記）：`_sanitize_name` 的 `.lstrip("._")`
+        曾把 SSOT `_sanitize_log_filename` 為保留裝置名補上的逃逸前導底線
+        （``CON`` → ``_CON``）一併剝除，導致落地檔名裸露為 ``CON.yaml``，Windows
+        保留裝置名防護完全沒生效。本測試為行為級：實際呼叫 `write_report`，
+        檢查磁碟上真實落地的檔名，而非只重測純函式。"""
+        sink = FileRtmSink(str(tmp_path))
+        for reserved in ("CON", "con", "NUL", "PRN", "COM1", "LPT9"):
+            path = sink.write_report(reserved, "x", fmt="yaml")
+            p = Path(path)
+            assert p.is_file()
+            assert p.stem.upper() != reserved.upper(), (
+                f"保留裝置名 {reserved!r} 落地檔名裸露無防護：{p.name!r}"
+            )
+            assert p.stem.lstrip("_").upper() == reserved.upper()
+
     def test_observability_event_emitted(self, tmp_path):
         """寫出時發 rtm_report_written 事件（審計鏈）。"""
         events = []

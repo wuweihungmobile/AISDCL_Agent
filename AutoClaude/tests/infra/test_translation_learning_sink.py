@@ -64,6 +64,29 @@ def test_project_name_path_traversal_sanitized(tmp_path):
     assert len(files) == 1  # 落在 base_dir 內
 
 
+def test_sanitize_reserved_name_writes_safe_real_file(tmp_path):
+    """R42 二審回歸（DEF-101-346 追記）：`_sanitize`（本模組私有函式）的
+    `.lstrip("._")` 曾把 SSOT `_sanitize_log_filename` 為保留裝置名補上的逃逸
+    前導底線一併剝除，導致淨化後裸露為保留名本身，防護沒生效。
+
+    注意：本模組公開方法（`record_proposal`/`list_proposals`）一律先固定字面
+    前綴 ``PROPOSALS-`` 再消毒，故 project 參數即使是 `"CON"`，組出的完整字串
+    `"PROPOSALS-CON"` 也不等於保留名——無法透過公開方法端到端觸發本缺陷
+    （結構性不可達）。因此本測試直接呼叫私有 `_sanitize` 函式，並把結果**實際
+    寫入磁碟檔案**驗證真實落地檔名，而非僅比較字串。"""
+    from autoclaude.infra.adapters.translation_learning_sink import _sanitize
+
+    for reserved in ("CON", "con", "NUL", "PRN", "COM1", "LPT9"):
+        safe_name = _sanitize(reserved)
+        target = tmp_path / f"{safe_name}.jsonl"
+        target.write_text("x", encoding="utf-8")
+        assert target.is_file()
+        assert target.stem.upper() != reserved.upper(), (
+            f"保留裝置名 {reserved!r} 消毒後仍裸露：{target.name!r}"
+        )
+        assert target.stem.lstrip("_").upper() == reserved.upper()
+
+
 def test_record_creates_dir(tmp_path):
     nested = tmp_path / "sub" / "dir"
     sink = FileTranslationLearningSink(str(nested))

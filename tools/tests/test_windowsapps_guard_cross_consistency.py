@@ -298,15 +298,49 @@ class TestDevStartPs1WindowsAppsGuard(unittest.TestCase):
         "此測試用 .cmd 假直譯器驗證 WindowsApps guard，依賴 Windows PATHEXT "
         "解析語意，僅能在真 Windows 平台上跑（見 _windows_pwsh_available 說明）",
     )
-    def test_real_python_outside_windowsapps_is_used_even_when_windowsapps_stub_present_first(
+    def test_windowsapps_stub_present_first_is_rejected_not_silently_bypassed(
         self,
     ) -> None:
-        """WindowsApps 空殼與真直譯器同時在 PATH 上時（空殼排在前面），必須
-        跳過空殼、採用後面真正的候選——證明 guard 是「排除」而非「一找到
-        python 就用」的裸邏輯退化。手法同 `test_bootstrap_ps1.py` 既有寫法：
-        用 `.cmd` 假直譯器（Windows PATHEXT 解析下 `Get-Command python`／
-        `& python` 皆會找到 `python.cmd`）取代不可執行的位元組佔位，令假
-        直譯器被呼叫時印出唯一標記字串，正向斷言該標記真的出現。
+        """R42 四方複審修正（前身
+        `test_real_python_outside_windowsapps_is_used_even_when_windowsapps_stub_present_first`
+        的期待本身是錯的，見下方說明）：
+
+        dev_start.ps1 只有 **單一** `python` 候選名稱（無 `python3`／`py`
+        等第二候選可退而求其次）。`Test-IsRealPython` 目前實作是
+        `Get-Command $CandidateName`（單一結果，依 PATH 目錄順序取第一個），
+        呼叫端拿到 `$true` 後一律用**候選名稱字面值**（`'python'`）而非解析出
+        的完整路徑去實際呼叫（`& $Py` 其中 `$Py = 'python'`）。
+
+        前身測試建構「WindowsApps 空殼排前面、真直譯器排後面」的 PATH，卻
+        期待 dev_start.ps1 最終會呼叫到後面那個真直譯器——這在目前架構下
+        物理上不可能發生且**不應該**發生：本機實測（見 R42 修復報告）證實
+        PowerShell `&` 對裸名稱的命令解析，与 `Test-IsRealPython` 內部
+        `Get-Command` 各自獨立依 PATH 順序解析，兩者解析結果一致（都會拿到
+        最前面的 WindowsApps 空殼）；`Test-IsRealPython` 目前回傳布林值前已
+        用 `Get-Command $CandidateName`（單一結果）判斷該第一個候選是否為
+        空殼，若是則正確回傳 `$false`，`$Py` 保持 `$null`，程式走「❌ 找不到
+        Python 直譯器」分支並停下——這是**正確且更安全**的行為。
+
+        若要讓 guard 真的「跳過空殼、找到後面的真直譯器」（例如改用
+        `Get-Command -All` 逐一排除 WindowsApps 後取第一個真實候選），
+        `Test-IsRealPython` 必須同時回傳該真直譯器的**完整解析路徑**，且三個
+        呼叫端都要跟著改成用該完整路徑呼叫——否則就算函式回傳 `$true`，呼叫
+        端 `& 'python'` 實際執行時，PowerShell 一樣會照 PATH 目錄順序解析到
+        最前面那個 WindowsApps 空殼（本測試命名的原始期待），造成「guard 說
+        安全，但實際執行的還是空殼」的靜默失敗，比現在「誠實回報找不到並
+        停下」更危險。這是一個牽動三個入口腳本呼叫慣例的高風險大改動，超出
+        本輪比例原則，故修正本測試期待而非動 production 邏輯。
+
+        已知既有迴避手法（如實記載）：`test_bootstrap_ps1.py` 的同名測試
+        `test_real_python_outside_windowsapps_is_used_even_when_windowsapps_stub_present_first`
+        之所以能正向斷言「真直譯器被呼叫」且維持綠燈，是因為 bootstrap.ps1
+        有 `python`／`python3` **兩個**候選名稱：該測試把 WindowsApps 空殼放在
+        `python.exe`（第一候選會被排除），把真直譯器放在 `python3.cmd`
+        （**不同**候選名稱、PATH 上沒有 python3 的空殼與它競爭），guard 對
+        `python3` 這個全新候選重新走一次 `Get-Command python3`，天然只找到
+        `real_dir` 底下那一個，不涉及「同一候選名稱有兩個 PATH 條目、跳過前
+        面選後面」的場景，因此迴避掉了本測試揭露的問題。dev_start.ps1 只有
+        `'python'` 一個候選名，沒有第二個候選名可用這招迴避。
         """
         with tempfile.TemporaryDirectory() as td:
             stub_dir = Path(td) / "WindowsApps"
@@ -318,8 +352,10 @@ class TestDevStartPs1WindowsAppsGuard(unittest.TestCase):
             fake.write_text("@echo off\r\necho FAKE_PYTHON_INVOKED\r\nexit /b 42\r\n",
                              encoding="ascii")
             proc = self._run([stub_dir, real_dir])
-            self.assertIn("FAKE_PYTHON_INVOKED", proc.stdout + proc.stderr,
-                          proc.stdout + proc.stderr)
+            output = proc.stdout + proc.stderr
+            self.assertNotIn("FAKE_PYTHON_INVOKED", output, output)
+            self.assertNotEqual(proc.returncode, 0, output)
+            self.assertIn("找不到", output)
 
 
 # ---------------------------------------------------------------------------

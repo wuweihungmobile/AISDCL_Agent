@@ -7,9 +7,9 @@ SDD 側 / 人類可由該路徑撷取，作為 SCG-5 諮詢輸入——不直接
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Optional
 
 from ...core.ports.observability import IObservabilityPort, NullObservability
+from ...utils.logger import _sanitize_log_filename
 
 _EXT_BY_FMT = {"yaml": ".yaml", "md": ".md"}
 
@@ -21,7 +21,7 @@ class FileRtmSink:
         self,
         base_dir: str,
         *,
-        observability: Optional[IObservabilityPort] = None,
+        observability: IObservabilityPort | None = None,
     ) -> None:
         self._base = Path(base_dir)
         self._obs = observability or NullObservability()
@@ -58,10 +58,34 @@ class FileRtmSink:
 
 
 def _sanitize_name(name: str) -> str:
-    """報告基名消毒：僅保留檔名安全字元，杜絕路徑穿越（../、絕對路徑）。"""
-    cleaned = "".join(c if (c.isalnum() or c in "-_.") else "_" for c in name)
-    cleaned = cleaned.strip("._") or "rtm-report"
-    return cleaned
+    """報告基名消毒：委派 SSOT `_sanitize_log_filename`（DEF-101-343，R42 收斂第 4~6
+    處獨立重寫）取得字元層淨化，杜絕路徑穿越（../、絕對路徑）並補齊 Windows
+    保留裝置名（CON/PRN/AUX/NUL/COM[0-9]/LPT[0-9]）防護——舊版僅限縮字元集合，
+    未檢查保留裝置名。
+
+    `_sanitize_log_filename` 只 `rstrip` 尾端空白/句點，不清前導句點/底線；舊版
+    `_sanitize_name` 額外用 `.strip("._")` 兩端一併清除（既有測試
+    `test_path_traversal_sanitized`／`test_append_sanitizes_name` 鎖定「``..``
+    不得以任何形式殘留於檔名」，即使已無 `/` 分隔符也不留字面 `..` 前綴）。委派
+    後在此補一層 `.lstrip("._")` 保留該既有保證，不依賴猜測、已用兩測試驗證。
+
+    `_sanitize_log_filename` 對「淨化後整段為空」回傳固定字面值 `"untitled"`；
+    本模組既有對外行為（測試 `test_empty_name_defaults` 鎖定）為 `"rtm-report"`，
+    委派後在此改寫回原字面值，維持既有可觀察行為不變（`lstrip` 後同樣可能變
+    空，一併兜底）。
+
+    R42 二審修復（DEF-101-346 追記）：`.lstrip("._")` 會把 `_sanitize_log_filename`
+    為保留裝置名（如 ``CON`` → ``_CON``）補上的前導底線逃逸字元一併剝除，導致
+    ``CON`` 經 lstrip 後又變回裸 ``CON``——保留名防護被 wrapper 自己抵銷。故在
+    lstrip 之後，對非 fallback 結果**再委派一次** `_sanitize_log_filename`，
+    讓保留名偵測在 lstrip 之後重新執行、補回逃逸前綴。"""
+    sanitized = _sanitize_log_filename(name)
+    if sanitized == "untitled":
+        return "rtm-report"
+    result = sanitized.lstrip("._") or "rtm-report"
+    if result == "rtm-report":
+        return result
+    return _sanitize_log_filename(result)
 
 
 __all__ = ["FileRtmSink"]

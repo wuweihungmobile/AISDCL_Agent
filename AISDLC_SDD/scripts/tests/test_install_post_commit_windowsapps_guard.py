@@ -144,6 +144,7 @@ def _run_with_shadowed_python(
         escaped = source.replace('"', '`"')
         get_command_body = f'return [PSCustomObject]@{{ Source = "{escaped}" }}'
     script = (
+        "[Console]::OutputEncoding=[System.Text.Encoding]::UTF8;\n"
         "function Get-Command {\n"
         "  param(\n"
         "    [Parameter(Position=0)][string]$Name,\n"
@@ -261,9 +262,26 @@ def _windows_pwsh_available() -> bool:
     return sys.platform.startswith("win") and _PWSH is not None
 
 
+def _git_dir() -> str | None:
+    """git.exe 所在目錄——`install_post_commit.ps1` 第一步就呼叫
+    `git rev-parse --git-common-dir`，若 `_run_with_path` 建構的 PATH 完全
+    排除 git，腳本會在尚未執行到 WindowsApps guard 邏輯前就先因「'git' 詞彙
+    無法辨識」中止，導致測試斷言的 guard 行為（「找不到」/ 標記字串）根本沒
+    機會出現（R42 修正：測試 fixture 缺陷，非 install_post_commit.ps1 本身
+    的 bug）。"""
+    git_path = shutil.which("git")
+    if not git_path:
+        return None
+    return str(Path(git_path).resolve().parent)
+
+
 def _run_with_path(installer: Path, cwd: Path, path_dirs: list[Path]) -> subprocess.CompletedProcess:
     env = dict(os.environ)
-    env["PATH"] = os.pathsep.join(str(p) for p in path_dirs)
+    all_dirs = [str(p) for p in path_dirs]
+    git_dir = _git_dir()
+    if git_dir:
+        all_dirs.append(git_dir)
+    env["PATH"] = os.pathsep.join(all_dirs)
     cmd = (
         "[Console]::OutputEncoding=[System.Text.Encoding]::UTF8; "
         f"& '{installer}'"
@@ -301,9 +319,29 @@ def test_windowsapps_only_python_stub_is_skipped_and_reports_not_found_real_path
 
 
 @_WINDOWS_PATHEXT_SKIP
-def test_real_python_outside_windowsapps_is_used_even_when_windowsapps_stub_present_first_real_pathext(
+def test_windowsapps_stub_present_first_is_rejected_not_silently_bypassed_real_pathext(
     tmp_path,
 ) -> None:
+    """R42 四方複審修正（前身
+    `test_real_python_outside_windowsapps_is_used_even_when_windowsapps_stub_present_first_real_pathext`
+    的期待本身是錯的）：
+
+    `install_post_commit.ps1` 只有 **單一** `python` 候選名稱（第 61 行
+    `Test-IsRealPython -CandidateName 'python'`，沒有 `python3`／`py` 等第二
+    候選可退而求其次——與根層 `tools/dev_start.ps1` 同構）。共用函式
+    `Test-IsRealPython`（`tools/lib/WindowsAppsGuard.ps1`）目前實作是
+    `Get-Command $CandidateName`（單一結果，依 PATH 目錄順序取第一個），
+    呼叫端拿到 `$true`/`$false` 後一律用**候選名稱字面值** `'python'` 去實際
+    呼叫。PATH 上「WindowsApps 空殼排前面、真直譯器排後面」時，`Get-Command
+    python` 與後續 `& python` 兩者都會解析到 PATH 最前面的 WindowsApps 空殼
+    ——guard 正確判斷第一候選是空殼並回傳 `$false`，腳本回報「找不到」並停
+    下，這是正確且更安全的行為（見根層
+    `tools/tests/test_windowsapps_guard_cross_consistency.py` 同款修正的完整
+    推導與本機實測證據，該處的分析對本檔同樣成立）。前身測試期待「跳過空殼
+    採用後面真直譯器」在目前架構下不可能發生、也不應該發生：若要讓 guard
+    真的跳過空殼，`Test-IsRealPython` 必須改回傳完整路徑且三個呼叫端都要
+    改用該路徑呼叫，屬於超出本輪比例原則的高風險大改動。
+    """
     installer = _latest_installer()
     repo = _make_fake_monorepo(tmp_path)
     stub_dir = tmp_path / "WindowsApps"
@@ -318,4 +356,6 @@ def test_real_python_outside_windowsapps_is_used_even_when_windowsapps_stub_pres
     )
     proc = _run_with_path(installer, repo, [stub_dir, real_dir])
     output = proc.stdout + proc.stderr
-    assert "FAKE_PYTHON_INVOKED" in output, output
+    assert "FAKE_PYTHON_INVOKED" not in output, output
+    assert proc.returncode != 0, output
+    assert "找不到" in output, output

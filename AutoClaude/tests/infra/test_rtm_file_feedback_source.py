@@ -99,6 +99,32 @@ class TestReadHistory:
         assert len(history) == 2  # 兩 good，畸形行與空行跳過
 
 
+class TestReservedDeviceNameSanitization:
+    """R42 二審回歸（DEF-101-346 追記）：`_sanitize`（本模組私有函式）的
+    `.lstrip("._")` 曾把 SSOT `_sanitize_log_filename` 為保留裝置名補上的逃逸
+    前導底線一併剝除，導致淨化後裸露為保留名本身，防護沒生效。
+
+    注意：本模組公開方法（`read_report`/`read_history`）一律先固定字面前綴
+    （``RTM-COVERAGE-``/``RTM-COVERAGE-HISTORY-``）再消毒，故 project 參數本身
+    即使是 `"CON"`，組出的完整字串 `"RTM-COVERAGE-CON"` 也不會等於保留名——
+    無法透過這兩個公開方法端到端觸發本缺陷（結構性不可達）。因此本測試直接呼叫
+    私有 `_sanitize` 函式，並把結果**實際寫入磁碟檔案**驗證真實落地檔名，而非
+    僅比較字串——行為級驗證仍落在真實檔案系統，而非純函式回傳值比對。"""
+
+    def test_sanitize_reserved_name_writes_safe_real_file(self, tmp_path):
+        from autoclaude.infra.adapters.rtm_file_feedback_source import _sanitize
+
+        for reserved in ("CON", "con", "NUL", "PRN", "COM1", "LPT9"):
+            safe_name = _sanitize(reserved)
+            target = tmp_path / f"{safe_name}.yaml"
+            target.write_text("x", encoding="utf-8")
+            assert target.is_file()
+            assert target.stem.upper() != reserved.upper(), (
+                f"保留裝置名 {reserved!r} 消毒後仍裸露：{target.name!r}"
+            )
+            assert target.stem.lstrip("_").upper() == reserved.upper()
+
+
 class TestPathSafety:
     def test_traversal_project_name_sanitized(self, tmp_path):
         """AT-27-2-5：惡意 project 名消毒，與 sink 寫出對稱（讀回同一安全路徑、不越界）。"""

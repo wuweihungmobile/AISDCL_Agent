@@ -56,7 +56,23 @@ DEF-101-334〔測試鑑別力補強〕），過去 7+ 輪皆是「Scan 掃到才
     不是遺漏。
   - 若某識別字被重新命名為完全不同的變數名後才組檔名（如 `x = ac_id` 再用
     `{x}`），本檢查不會追蹤此重新指派，屬已知盲點（同 WindowsApps 鎖不追蹤
-    here-string 跨行狀態的方法論邊界同級）。
+    here-string 跨行狀態的方法論邊界同級）。【R42 QA 一審 bug-injection 修正
+    語氣】此盲點的實際觸發門檻比本段原本語氣暗示的低很多：不需要「完全不同
+    的變數名」，QA 實測只需多一行普通重新指派（如 `_renamed_ac_id = ac_id`
+    再用 `f"...{_renamed_ac_id}...yaml"`）即可完全繞過偵測，是日常重構就可能
+    無意間觸發的盲點，非需要刻意規避構造的邊界案例，判讀風險應更保守。
+  - 【R42 SD 一審 + QA 一審實驗驗證新增，均為零真實呼叫點的純理論繞過，比照
+    Rule 2 比例原則僅記載不強修】以下三種組檔名寫法目前的 AST 偵測邏輯完全
+    偵測不到：
+      (a) 巢狀 f-string（`f"{f'{rule_id}'}.yaml"`）——`_joinedstr_looks_like_
+          filename` 只掃外層 `JoinedStr` 直接子節點的 `FormattedValue`，未遞迴
+          進入內層 `JoinedStr` 再取其 `FormattedValue`；
+      (b) pathlib `/` 運算子鏈（`out_dir / rule_id / "leaf.yaml"`）——`ast.BinOp`
+          分支（`_mod_format_operands`／字串串接鏈）只認 `ast.Mod`／`ast.Add`，
+          無 `ast.Div` 分支，`Path.__truediv__` 組路徑完全落在掃描範圍外；
+      (c) `str.join()`（`"-".join([..., rule_id]) + ".yaml"`）——
+          `_format_call_operands` 只認 `.format` 這一個方法名稱，`.join` 呼叫
+          不會被辨識為組檔名情境。
   - 透過 `globals()["_sanitize_component"](...)` 這類動態／間接呼叫派送淨化，
     AST 靜態掃描無法辨識呼叫目標，屬已知盲點（R41 SD 一審構造驗證：全 repo
     現況零實例採此寫法，非立即可利用，僅記載方法論邊界）。
