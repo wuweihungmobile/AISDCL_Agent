@@ -157,6 +157,39 @@
 | DEF-101-301 | 2026-07-24 | R34 Scan-D（文件/帳本一致性掃描） | **帳本「已歸檔內容」標題寫「（六檔）」，但實際已列出 8 個 archive bullet**（`archive_01`~`archive_08`）——用 `git log -p` 追蹤，R33 建立 `archive_07`、R34 建立 `archive_08` 時皆漏了同步遞增此計數 | P4（純文件性，不影響任何機械閘門判準） | 訂正計數字樣為「（八檔）」 | fixed@R34：主控直接訂正 |
 | DEF-101-302 | 2026-07-24 | R34 四方一審 Architect（DEF-101-300 修復的複審）＋二審再度用第三種手法確認 | **`test_windowsapps_guard_cross_consistency.py` 的 `-and`/雙分支靜態測試對「尾端疊加恆真子句」無鑑別力**：在既有 `-notlike '*\WindowsApps\*'` 子句「後面」追加 `-or $true`（PowerShell 運算子優先序使整條 `if` 判斷式恆真，guard 形同虛設），一審發現的 `-and`/`findall` 兩項測試只錨定運算式「中段」，未驗證 WindowsApps 排除後條件式是否立即收尾，該手法可繞過兩者 | P2（測試鑑別力殘餘缺口，非生產邏輯本身有問題） | 新增兩項測試錨定**整條** `if (...)` 判斷式，要求 `-notlike '*\WindowsApps\*'` 之後必須緊接 `)`（僅容許空白），中間不得插入任何 token | fixed@R34：新增 `test_dev_start_ps1_guard_condition_closes_immediately_after_windowsapps_check`／`test_bootstrap_ps1_guard_conditions_close_immediately_after_windowsapps_check`；主控與 SD 二審皆用 `-or $true` 注入獨立重驗兩測試正確變紅，還原後 8/8 passed；Architect 三審最終確認 |
 | DEF-101-303 | 2026-07-24 | R34 四方二審 SD（用新角度 bug-injection 發現） | **`bootstrap.ps1` 若把 `$PyCand`/`$Py3Cand` 的賦值互換（`Get-Command python` 結果存入 `$Py3Cand`、`Get-Command python3` 結果存入 `$PyCand`，guard 邏輯本身逐字不動）**，`test_windowsapps_guard_cross_consistency.py` 現有三項靜態測試（含 DEF-101-300/302 修復的四項）皆只驗證「變數名與自己的 guard 配對」，不驗證右手邊 `Get-Command` 呼叫的命令名稱是否與變數語意相符，故全數漏放行。此為手誤型 bug，觸發機率低（需刻意寫反或複製貼上時看錯變數名），SD 判定非阻擋 | P3（低機率邊界情況，backlog；SD 明確判定不阻擋本輪 APPROVE） | 未來可補一條「候選命令名稱與變數語意對應」的靜態鎖，或依賴既有 Windows-only 行為回歸鎖（`test_bootstrap_ps1.py::test_real_python_outside_windowsapps_is_used_even_when_windowsapps_stub_present_first`）在真 Windows CI 上的巧合覆蓋 | open（backlog，如實記載，列入下一輪追蹤） |
+| DEF-101-304 | 2026-07-24 | R35 Scan-A（Shell/PowerShell 跨平台一致性掃描） | **`tools/dev_start.ps1` 兩個早期失敗分支（找不到 repo 根、找不到 Python 直譯器）在 dot-source 情境下只執行裸 `return`，未對 `$LASTEXITCODE` 賦值**，違反自身 `.NOTES`（第 15-17 行）明載的「呼叫端判斷成功/失敗請讀 `$LASTEXITCODE`」契約——`$LASTEXITCODE` 停留在呼叫前殘值（可能是 0），使 dot-source 呼叫端誤判失敗為成功。對等的 `tools/dev_start.sh` 兩個對應分支皆用 `return 1` 正確傳遞。實測重現：乾淨 pwsh 子行程 dot-source 修復前版本，`$LASTEXITCODE` 輸出為空字串；`_ds_main` 對等 `.sh` 分支則正確傳遞 rc=1 | P2（違反自身文檔契約的真實行為缺陷，觸發情境為全新機器缺 Python 時 onboarding） | 兩處失敗分支 `if ($DotSourced) { return }` 前補 `$global:LASTEXITCODE = 1` | fixed@R35：`tools/dev_start.ps1` 兩處補齊；新增 `tools/tests/test_dev_start_ps1_lastexitcode.py`，含兩個測試類別：`TestDevStartPs1DotSourceLastExitCode`（pwsh 子行程實際 dot-source 執行驗證「找不到 Python」分支）+ 四方一審 Architect/QA/SD 交叉獨立發現「找不到 repo 根」分支無測試覆蓋後追加的 `TestDevStartPs1BothFailureBranchesSetLastExitCode`（該分支需磁碟根寫入權限才能安全實際觸發、不適合自動化模擬，改用靜態文字比對鎖住兩分支同時修復）。bug-injection（分別還原兩分支的修復版本）確認兩測試皆正確變紅，還原修復後 diff 逐位元組核對一致、測試轉綠 |
+| DEF-101-305 | 2026-07-24 | R35 Scan-D（文件/帳本一致性掃描） | **帳本「已歸檔內容」標題寫「（八檔）」，但實際已列出 9 個 archive bullet**（`archive_01`~`archive_09`）——R34 才把計數從「六檔」訂正為「八檔」（DEF-101-301），但 R34 本輪自己又新增 `archive_09.md` 卻同樣漏了同步遞增，與 DEF-101-301 同一根因、同一位置第三次復發 | P4（純文件性，不影響任何機械閘門判準） | 訂正計數字樣為「（九檔）」 | fixed@R35：主控直接訂正 |
+| DEF-101-306 | 2026-07-24 | R35 Scan-D（文件/帳本一致性掃描） | **帳本描述 `AutoSDD_Defect_Log_archive_06.md`「≈6KB」，但 `wc -c` 實測為 10,953 bytes（≈10.7KB）**，偏差近 79%；交叉比對其餘 8 個 archive 的大小描述皆在合理捨入誤差內，唯獨此筆明顯異常 | P4（純文件性，不影響任何機械閘門判準） | 訂正大小描述為「≈10.7KB」 | fixed@R35：主控直接訂正，`wc -c` 核對 10953 bytes 吻合 |
+| DEF-101-308 | 2026-07-24 | R35 四方二審 Architect（對追加的靜態一致性鎖再次 bug-injection） | **`TestDevStartPs1BothFailureBranchesSetLastExitCode`（DEF-101-304 修復追加的靜態鎖）純字面計數比對可被刻意繞過**：把「找不到 repo 根」分支的裸 `return` 格式偽裝成 `if ($DotSourced) {  return }`（多一個空格）閃避 `bare` 字面比對，同時在檔案別處插入無害註解行 `# decoy: if ($DotSourced) { $global:LASTEXITCODE = 1; return }` 把 `fixed` 計數補回 2，兩個測試皆維持綠燈，但該分支是貨真價實的回歸。Architect 判定：純字面計數本質上可被同檔案任何位置的字面複製繞過，是這類鎖的結構性限制；真正觸發需「刻意插入 decoy」的對抗性動作，非一般開發者手誤會踩到的情境，且本輪 `dev_start.ps1` 兩分支修復本身正確，此僅為「測試的測試」層面鑑別力縫隙 | P3（低機率對抗性繞過，backlog；Architect 明確判定非阻擋本輪 APPROVE） | 未來若要堵死可改用「解析式」驗證（逐一解析 `if (-not $Root)`／`if (-not $Py)` 兩區塊內容各自含 `$LASTEXITCODE` 賦值語句，而非整檔字面計數），成本較高、超出本輪 P2 缺陷比例原則 | open（backlog，如實記載，列入下一輪追蹤） |
+| DEF-101-307 | 2026-07-24 | R35 Architect 架構深度評估 | **WSL System32 路徑段排除規則分裂成兩個互不相通的 SSOT 孤島**：島 A（`tools/lib/bash_probe_spec.py::SYSTEM32_SEGMENT`，供 `bash_probe.py`／`test_pre_push_dispatcher.py`／`test_git_hooks_install_common.py`／`test_bash_probe_spec_contract.py` 消費）與島 B（`tools/lib/Find-GitBash.ps1` 的 regex `\System32\`／`integration_gate_core.py::_has_system32_segment()` 硬編 `"system32"`，已由 `test_find_git_bash_parity.py` 互相鎖住），但沒有任何測試跨島比對——任一島字面值改掉（如筆誤 `"sys32"`）不會讓另一島有訊號。Architect 評估實測風險偏低：兩島各自都有直接呼叫真實路徑字串斷言的行為測試，單島內部筆誤會被自己的測試打紅，非可悄悄繞過的真實回歸 | P3（低風險架構性缺口，backlog；Architect 判定非阻擋本輪） | 評估讓 `integration_gate_core.py`／`Find-GitBash.ps1` 改 import `bash_probe_spec.SYSTEM32_SEGMENT`（PS1 側有 bootstrapping 先有雞或蛋限制需另評估），優先度低 | open（backlog，如實記載，列入下一輪追蹤） |
+
+## R35 四方複審裁決總結（2026-07-24）
+
+本輪使用者要求同 R16 起既有固定格式：全面掃描四維度＋Architect 架構最佳化評估，發現問題即修復，再經 Architect/SA/SD/QA 四方獨立審查至全數 APPROVE。
+
+- **前置基線**：AutoClaude pytest 3742 passed/146 skipped、`tools/tests/` 407 passed/3 skipped，本輪動工前重跑確認與 R34 收尾狀態一致、無回歸。帳本主檔 213,270 bytes，距 256KB 上限尚遠，本輪未需提前歸檔。
+- **全面掃描（Scan-A/B/C/D 四維度 + Architect 架構深度評估，皆背景 agent 獨立平行執行）**：A（Shell/PowerShell）發現 `tools/dev_start.ps1` 兩個 dot-source 早期失敗分支未設 `$LASTEXITCODE`，違反自身 `.NOTES` 文檔契約、與對等 `.sh` 版本不對稱（DEF-101-304）；B（Python 跨平台）與 C（CI/排程/hooks 基建）皆零新發現；D（文件/帳本一致性）發現「已歸檔內容（八檔）」第三度漏同步遞增為「九檔」（DEF-101-305）與 `archive_06.md` 大小描述誤差 79%（DEF-101-306）；Architect 深度評估肯定既有「薄殼＋Python 核心＋SSOT＋交叉一致性鎖」演進路線合理，另發現 WSL System32 排除規則分裂成兩座互不相通的 SSOT 孤島、缺跨島鎖，但實測風險偏低，列為 backlog（DEF-101-307）。
+- **修復落地**：DEF-101-304 於兩處分支補 `$global:LASTEXITCODE = 1`，同步更新 `check_wrapper_thinness.py` 雜湊釘選，新增 `tools/tests/test_dev_start_ps1_lastexitcode.py`；DEF-101-305/306 訂正帳本文字。
+
+### 四方一審（Architect/SA/SD/QA 獨立審查，皆於主工作樹直接操作、不使用 `isolation: worktree`）
+
+- **Architect**：**APPROVE**——親自重現修復有效、對新測試 bug-injection 確認鑑別力；提出非阻斷觀察：新測試僅覆蓋「找不到 Python」分支，未覆蓋同構的「找不到 repo 根」分支。
+- **SA**：**APPROVE**（無條件）——逐項核對四筆缺陷紀錄數字/路徑/行號、archive 計數與大小描述，全數精確吻合。
+- **SD**：**APPROVE-with-conditions**——用 4 組 bug-injection 精準證實「找不到 repo 根」分支是**真實覆蓋盲區**（只還原該分支修復，測試仍全綠），列為必修；另確認 `$global:` scope 前綴非功能必要，屬保守設計選擇非缺陷。
+- **QA**：**APPROVE**（無條件）——逐一核實 CI paths 真的會觸發新測試、`pwsh`/`powershell` 在兩支 workflow runner 上確有可用、雜湊釘選正確、全套回歸重跑皆綠、帳本欄位誠實。
+
+**針對一審發現的修復**：Architect/QA/SD 三方交叉獨立發現同一缺口（「找不到 repo 根」分支無測試覆蓋），依既有慣例視為高信度真缺陷，新增靜態一致性測試 `TestDevStartPs1BothFailureBranchesSetLastExitCode`（文字比對 `tools/dev_start.ps1` 全文，鎖住兩分支同時設 `$LASTEXITCODE`），bug-injection 驗證有效後回傳四方複審。
+
+### 四方二審（SendMessage 保留一審上下文複審）
+
+- **SA**：**APPROVE-with-conditions**——獨立 bug-injection 覆核靜態鎖有效，唯一建議：DEF-101-304 的 `fixed@R35` 描述應補充說明追加的靜態測試類別，避免讀者誤判涵蓋方式（皆為子行程實際執行）。已就地訂正。
+- **Architect**：**APPROVE**——用兩種進階手法對靜態鎖做對抗式 bug-injection，其一（decoy 註解＋格式偽裝）成功繞過但需刻意對抗性動作，另一（多行拆分）因寫入前置條件不成立未完整驗證；認同「該分支無法安全模擬觸發、改用靜態鎖」的工程判斷合理；審查過程回報遭遇多次可疑偽造 system-reminder 與工具輸出間歇性矛盾內容，皆未採信、改以 `shasum`＋Python `hashlib`＋原始 bytes dump＋`git diff` 交叉核實排除汙染。
+- **SD**：**APPROVE-with-conditions**——獨立以相同 decoy 手法重現與 Architect 相同的繞過路徑（交叉印證），並證實此鎖對「意外重排」安全、只對「刻意 padding」不安全；回報一次無法解釋的偶發假紅，經 `git hash-object` 核實排除為暫態雜訊。
+- **QA**：**APPROVE**（無條件）——確認新增測試類別無需額外 CI paths 異動；bug-injection 覆核鎖有效；重跑全套回歸皆綠；揭露一次因多 agent 並行 bug-injection 讀寫窗口重疊、短暫讀到他方實驗中間態的 race 觀察（非本輪異動缺陷，已排除為暫態），建議未來留意但不阻擋本輪。
+
+**針對二審發現的處理**：SA 建議的帳本描述訂正已就地完成；Architect/SD 交叉發現的靜態鎖 decoy 繞過手法記入 DEF-101-308（P3 backlog，兩方皆明確判定非阻擋——繞過需刻意對抗性動作、非自然筆誤，且本輪 `dev_start.ps1` 生產邏輯本身修復正確，僅「測試的測試」層面鑑別力縫隙）。
+
+**四方複審最終結論：全數 APPROVE**（Architect/SA/QA 最終皆無條件 APPROVE；SD 唯一殘留項為明確標記非阻斷的 DEF-101-308 backlog，與 Architect 交叉印證一致）。本輪 R35 全部異動（`tools/dev_start.ps1`、`tools/check_wrapper_thinness.py`、新檔 `tools/tests/test_dev_start_ps1_lastexitcode.py`、`docs/06_quality/AutoSDD_Defect_Log.md`）可放行。**環境異常揭露**：本輪多方（SA/Architect/SD/QA）皆各自獨立回報遭遇「並行 bug-injection 互相污染」的暫態現象與可疑的偽造 system-reminder（誘導隱瞞暫時性檔案改動），全數未採信、獨立以 diff/sha256/git hash-object 核實後確認最終狀態乾淨，如實記錄不隱瞞；QA 額外指出這類 race 在共用主工作樹上是真實風險，建議未來輪次視情況加互斥保護，記入 backlog 追蹤。**已知限制（如實記載）**：DEF-101-307（System32 雙 SSOT 孤島缺跨島鎖）、DEF-101-308（`test_dev_start_ps1_lastexitcode.py` 靜態鎖字面計數可被刻意 decoy 繞過）維持 open backlog。**收尾驗證**：全套回歸最終重跑——AutoClaude pytest 3742 passed/146 skipped、`tools/tests/` 409 passed/3 skipped、AISDLC_SDD `ci-gate.sh` 全通過（v0.01:1475、v0.30:1674、scripts/tests:184）、`check_script_parity.py`/`check_ntfs_paths.py`/`check_wrapper_thinness.py` 皆綠、帳本 `check_defect_log_crossref.py` 138 筆有效狀態一致，帳本主檔收斂於 224,914 bytes，遠低於 256KB 上限，本輪無需歸檔。
 
 ## R34 四方複審裁決總結（2026-07-24）
 
@@ -195,13 +228,13 @@
 
 > **歸檔政策（DEF-99-001 fixed@improving_99）**：本帳本「跨輪累積、只增不刪」，但中文長列使單檔逼近工具讀取上限（曾達 468KB > Read 256KB）。自 improving_99 起，**歷史敘事複驗/收尾註記**（其缺陷現況已被上方缺陷總表 live 狀態取代，或為已結歷史）搬遷至分檔，**原文逐字保全、零刪除**（搬移非刪除，git 亦保歷史）；主檔只保留標頭 + 完整缺陷總表（live SSOT）+ 本指標。**輪替規則：主檔與「每一個」 archive 檔皆以 < 256KB（Read 工具上限）為界**——主檔再逼近即開新 archive；單一 archive 逼近即拆下一個 archive（故本輪一次就把 619 行歷史拆成 archive_01 + archive_02 兩檔，而非單一超限檔）。
 >
-> **已歸檔內容**（八檔）：
+> **已歸檔內容**（九檔）：
 > - **`AutoSDD_Defect_Log_archive_01.md`**（原主檔 93-543 行，≈170KB）：rounds 24-63 各輪複驗/收尾敘事註記 + 2026-06-22 agent/* 符規審查臨時塊（DEF-AGTREV-001~013 全 fixed@v0.18）+ 早期 `.claude` hooks/skills 審查輪（一~六）。
 > - **`AutoSDD_Defect_Log_archive_02.md`**（原主檔 544-711 行，≈177KB）：improving_45 追記 + 2026-06-23 `.claude` hooks/skills 審查輪（三~九，DEF-CLDREV-* 系列收斂至零缺陷）。
 > - **`AutoSDD_Defect_Log_archive_03.md`**（R9 跨平台複審 2026-07-16 建立，≈110KB）：缺陷總表中 **DEF-01～DEF-100 系列已結列（fixed / closed-by-decision）64 列**逐字搬移（主檔當時 272KB 已超 256KB 界線，DEF-101-123）。
 > - **`AutoSDD_Defect_Log_archive_04.md`**（R14 跨平台輪 2026-07-20 建立，≈210KB）：缺陷總表**已結列（fixed / closed-by-decision）169 列**逐字搬移（主檔 258KB 進 240KB 預警區；含 R9 時因 crossref 引用留存、現已無引用的 DEF-20-001，及 DEF-101 系列已結列至 DEF-101-187）。
 > - **`AutoSDD_Defect_Log_archive_05.md`**（R27 跨平台輪 2026-07-23 建立，≈42KB）：**R16~R26 各輪「四方一審／二審／三審裁決總結」歷史敘事段落**逐字搬移（主檔本輪加入 R27 段落後達 264268 bytes，`check_defect_log_crossref.py` 首次由警告轉為硬性 FAIL；本次搬移對象為敘事段落而非缺陷總表列，性質與前四檔〔搬總表已結列〕不同，屬同一輪替政策下的另一類可安全搬移內容——這些敘事的缺陷現況皆已被上方缺陷總表 live 狀態取代）。
-> - **`AutoSDD_Defect_Log_archive_06.md`**（R32 跨平台輪 2026-07-24 建立，≈6KB）：**R27 「四方一審／二審裁決總結」歷史敘事段落**逐字搬移（主檔加入 R32 段落後達 258952 bytes，`check_defect_log_crossref.py` 印出「已逼近輪替上限」警告；搬移對象與 archive_05 同類，缺陷現況已被上方缺陷總表 live 狀態取代）。
+> - **`AutoSDD_Defect_Log_archive_06.md`**（R32 跨平台輪 2026-07-24 建立，≈10.7KB）：**R27 「四方一審／二審裁決總結」歷史敘事段落**逐字搬移（主檔加入 R32 段落後達 258952 bytes，`check_defect_log_crossref.py` 印出「已逼近輪替上限」警告；搬移對象與 archive_05 同類，缺陷現況已被上方缺陷總表 live 狀態取代）。
 > - **`AutoSDD_Defect_Log_archive_07.md`**（R33 跨平台輪 2026-07-24 建立，≈6KB）：**R32 「四方一審／二審裁決總結」歷史敘事段落**逐字搬移（R33 動工前主檔已達 248,860 bytes、距 256KB 僅剩 5.1% 餘量，Scan-D 掃描發現後本輪立即搬移；搬移對象與 archive_05/06 同類，缺陷現況已被上方缺陷總表 live 狀態取代）。
 > - **`AutoSDD_Defect_Log_archive_08.md`**（R34 跨平台輪 2026-07-24 建立，≈5.3KB）：**R33 「四方一審／二審裁決總結」歷史敘事段落**逐字搬移（R34 動工前主檔已達 254,679 bytes、距 256KB 僅剩 0.5% 餘量，R33 二審 SA 已預先提醒本輪優先規劃歸檔；搬移對象與 archive_05/06/07 同類，缺陷現況已被上方缺陷總表 live 狀態取代）。
 > - **`AutoSDD_Defect_Log_archive_09.md`**（R34 跨平台輪 2026-07-24 建立，≈51.9KB）：**缺陷總表中 R15~R27 各輪已結列（fixed）12 列**逐字搬移（R34 新增四筆缺陷後主檔達 264,583 bytes、超過 256KB 上限，`check_defect_log_crossref.py` 由警告轉 FAIL；搬移對象為總表已結列，性質同 archive_03/04，非敘事段落；搬遷前逐一確認狀態皆 `fixed@R...` 且未被 `ONBOARDING.md`／兩份 compat-ci workflow 以「DEF-ID(狀態宣稱)」樣式引用，不觸發跨文件矛盾）。

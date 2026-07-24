@@ -52,7 +52,7 @@ _PINNED_SHA256: dict[str, str] = {
         "8a70670e8d48e9644b7ac1857beba95f7a048e1e7b5629ca493e2aa7379eeb68"
     ),
     "tools/dev_start.ps1": (
-        "90ae5db991a75e2907bd0d3a743f75a129c75bc4e2ebd23dd22f132248daec14"
+        "a948df7b44d25b51843539a5558ae8833da05c28b0f332729e5913069c53c396"
     ),
     # R12（DEF-101-070 ②）：local_ci_gate 收斂為薄殼＋Python 核心後納入釘選
     "AutoClaude/tools/local_ci_gate.sh": (

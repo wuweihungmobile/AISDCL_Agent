@@ -25,7 +25,7 @@ $DotSourced = $MyInvocation.InvocationName -eq '.'
 if (-not $Root) {
   # 只有 script 不在 <repo>/tools/ 下時會發生（如被複製到磁碟根）；fail loud 防連鎖怪錯
   Write-Host "❌ 無法解析 repo 根（本腳本必須位於 <repo>/tools/ 下執行）" -ForegroundColor Red
-  if ($DotSourced) { return }
+  if ($DotSourced) { $global:LASTEXITCODE = 1; return }
   exit 1
 }
 $Core = Join-Path $Root 'tools\dev_start.py'
@@ -44,7 +44,7 @@ else {
 if (-not $Py) {
   Write-Host "❌ 找不到 Python 直譯器（dev_start 核心需 Python 3）。" -ForegroundColor Red
   Write-Host "   Windows 安裝建議：winget install Python.Python.3.11（或 winget install astral-sh.uv）" -ForegroundColor Yellow
-  if ($DotSourced) { return }
+  if ($DotSourced) { $global:LASTEXITCODE = 1; return }
   exit 1
 }
 
