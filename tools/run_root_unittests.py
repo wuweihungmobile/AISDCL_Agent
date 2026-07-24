@@ -68,19 +68,30 @@ def run_with_floor(start_dir: Path, min_tests: int) -> int:
     return 0 if result.wasSuccessful() else 1
 
 
+def windows_native_skips(result: unittest.TestResult) -> list[str]:
+    """純函式（無 I/O 副作用）：從 `result.skipped` 篩出帶 `[WINDOWS-NATIVE-ONLY]`
+    標籤者，回傳測試 id 清單。與 `report_windows_native_skips` 分離（R43 二審 SA
+    複查揪出：原本印出副作用寫在同一函式內，導致 `test_run_root_unittests.py::
+    ReportWindowsNativeSkipsTest` 自測時直接呼叫它，會把 fixture 用的假測試 id
+    也印到 `python tools/run_root_unittests.py` 的真實終端輸出裡，混淆複審者
+    對「本次是否真有 Windows 專屬測試未驗證」的判讀——測試應只斷言回傳值，不該
+    觸發生產端的列印副作用）。"""
+    tagged = [test for test, reason in result.skipped if WINDOWS_NATIVE_SKIP_TAG in reason]
+    return [test.id() for test in tagged]
+
+
 def report_windows_native_skips(result: unittest.TestResult) -> list[str]:
     """在一般 `skipped=N` 摘要之外，另印出「僅原生 Windows 上才具驗證價值」
-    的 skip 清單（DEF-101-348 方向①）；回傳被標記的測試 id 清單供呼叫端／
-    測試斷言使用。"""
-    tagged = [test for test, reason in result.skipped if WINDOWS_NATIVE_SKIP_TAG in reason]
-    if tagged:
+    的 skip 清單（DEF-101-348 方向①）；回傳被標記的測試 id 清單。"""
+    tagged_ids = windows_native_skips(result)
+    if tagged_ids:
         print(
-            f"⚠️  {len(tagged)} 個 Windows 專屬測試本次「未在原生 Windows 環境驗證」"
+            f"⚠️  {len(tagged_ids)} 個 Windows 專屬測試本次「未在原生 Windows 環境驗證」"
             f"（非一般 skip，見 DEF-101-348/R43）："
         )
-        for test in tagged:
-            print(f"   - {test.id()}")
-    return [test.id() for test in tagged]
+        for test_id in tagged_ids:
+            print(f"   - {test_id}")
+    return tagged_ids
 
 
 def main() -> int:

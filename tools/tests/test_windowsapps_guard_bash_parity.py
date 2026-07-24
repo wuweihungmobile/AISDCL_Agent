@@ -73,6 +73,24 @@ _EXEMPT_SH_FILES = {
 }
 
 
+def _has_unmigrated_raw_check(text: str) -> bool:
+    """純函式（供直接單元測試）：判斷一段 `.sh` 內文是否仍殘留未收斂的裸
+    `command -v python`/`python3` 判斷。「已收斂」定義為同時含
+    `windowsapps_guard.sh`（source）與 `is_real_python_candidate`（實際呼叫）；
+    只有 source 行、沒有任何呼叫（如被局部退化改回裸判斷）不算已收斂
+    （R43 三審 QA bug-injection 揪出，訂正二審初版「只要有 source 行就整檔
+    豁免」的鑑別力缺口）。"""
+    if "windowsapps_guard.sh" in text and "is_real_python_candidate" in text:
+        return False
+    for line in text.splitlines():
+        stripped = line.strip()
+        if stripped.startswith("#"):
+            continue
+        if _LOOSE_RAW_CHECK_RE.search(line):
+            return True
+    return False
+
+
 def _tracked_sh_files() -> list[str]:
     """git tracked 的全部 `*.sh` repo-relative 路徑（含子專案），比照既有
     `test_windowsapps_guard_cross_consistency.py::_tracked_files` 慣例，用
@@ -153,6 +171,51 @@ class TestSharedGuardShellFunctionBehavior(unittest.TestCase):
         self.assertTrue(self._run("MyWindowsAppsBackup"))
 
 
+class TestHasUnmigratedRawCheck(unittest.TestCase):
+    """R43 三審 QA bug-injection 揪出的鑑別力缺口回歸鎖：直接對 `_has_unmigrated_raw_check`
+    純函式單元測試「已 migrate 但被局部退化」情境（source 行還在、呼叫被整段
+    改回裸判斷），確認不再被誤判為已收斂。"""
+
+    def test_fully_unmigrated_file_is_flagged(self) -> None:
+        text = 'command -v python >/dev/null 2>&1 || echo missing\n'
+        self.assertTrue(_has_unmigrated_raw_check(text))
+
+    def test_properly_migrated_file_is_not_flagged(self) -> None:
+        text = (
+            '. "$root/tools/lib/windowsapps_guard.sh"\n'
+            'if is_real_python_candidate python; then PY=python; fi\n'
+        )
+        self.assertFalse(_has_unmigrated_raw_check(text))
+
+    def test_migrated_with_fallback_branch_is_not_flagged(self) -> None:
+        """install_post_commit.sh 這類「guard 檔缺席時降級回退裸判斷」的合法設計
+        不應被誤判為未收斂（fallback 分支本身就是刻意保留的裸 command -v）。"""
+        text = (
+            'GUARD_SRC="$MAIN_CHECKOUT_ROOT/tools/lib/windowsapps_guard.sh"\n'
+            'if [ -f "$GUARD_SRC" ]; then\n'
+            '  . "$GUARD_SRC"\n'
+            '  is_real_python_candidate python && PY=python\n'
+            'else\n'
+            '  PY="$(command -v python || command -v python3 || true)"\n'
+            'fi\n'
+        )
+        self.assertFalse(_has_unmigrated_raw_check(text))
+
+    def test_sourced_but_never_called_is_flagged(self) -> None:
+        """R43 三審 QA 揪出的真實鑑別力缺口：source 行還在，但呼叫端已被整段改回
+        裸判斷（如遭局部退化/regression）——舊版「只要含 windowsapps_guard.sh 字串
+        就整檔豁免」會誤放行，本測試鎖住訂正後的行為。"""
+        text = (
+            '. "$root/tools/lib/windowsapps_guard.sh"\n'
+            'if command -v python >/dev/null 2>&1; then PY=python; fi\n'
+        )
+        self.assertTrue(_has_unmigrated_raw_check(text))
+
+    def test_comment_only_mention_is_not_flagged(self) -> None:
+        text = '# 比照 tools/integration_gate.sh 的 command -v python 判斷慣例\n'
+        self.assertFalse(_has_unmigrated_raw_check(text))
+
+
 class TestBashCallersEnrollment(unittest.TestCase):
     """所有已知呼叫端須改用共用函式，且不得殘留繞過它的裸 command -v 判斷。"""
 
@@ -197,7 +260,14 @@ class TestBashCallersEnrollment(unittest.TestCase):
         `AISDLC_SDD/AISDLC_SDD_v0.30/tools/install_hooks/install_post_commit.sh`）。
         本測試改為對 git-tracked 全部 `*.sh` 做前瞻掃描：逐行跳過註解，命中裸
         `command -v python`/`python3` 判斷、且該檔案既不在 `_CALLER_FILES`（已收斂）
-        也不在 `_EXEMPT_SH_FILES`（明確記載豁免理由）者視為未收斂新缺口。"""
+        也不在 `_EXEMPT_SH_FILES`（明確記載豁免理由）者視為未收斂新缺口。
+
+        R43 三審 QA 用 bug-injection 揪出的鑑別力缺口（訂正二審初版）：原本只要
+        檔案內文字含有 `"windowsapps_guard.sh"` 字串（即有 source 這一行）就整檔
+        跳過，不管該檔是否仍殘留裸判斷——「已 migrate 但被局部退化」（source 行
+        還在、但呼叫端改回裸判斷）的情境會被誤放行。改為要求同時含
+        `is_real_python_candidate`（實際呼叫共用函式）才視為已收斂，只 source
+        不呼叫（或呼叫被整段刪掉、只留 source 行）不再豁免。"""
         known_relpaths = {str(f.relative_to(_REPO_ROOT)).replace("\\", "/") for f in _CALLER_FILES}
         unmigrated: list[str] = []
         for rel in _tracked_sh_files():
@@ -207,15 +277,8 @@ class TestBashCallersEnrollment(unittest.TestCase):
             if not path.is_file():
                 continue
             text = path.read_text(encoding="utf-8", errors="replace")
-            if "windowsapps_guard.sh" in text:
-                continue  # 已 source 共用 guard，即使仍含 fallback 分支的裸判斷也不算未收斂
-            for line in text.splitlines():
-                stripped = line.strip()
-                if stripped.startswith("#"):
-                    continue
-                if _LOOSE_RAW_CHECK_RE.search(line):
-                    unmigrated.append(rel)
-                    break
+            if _has_unmigrated_raw_check(text):
+                unmigrated.append(rel)
         self.assertEqual(
             unmigrated, [],
             f"發現未收斂的裸 python 可用性判斷（未 source windowsapps_guard.sh 且未登記"

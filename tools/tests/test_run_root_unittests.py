@@ -84,18 +84,18 @@ class ReportWindowsNativeSkipsTest(unittest.TestCase):
 
     def test_tagged_skip_is_singled_out(self):
         result = self._run_fixture(tagged_condition=False, plain_condition=True)
-        tagged_ids = run_root_unittests.report_windows_native_skips(result)
+        tagged_ids = run_root_unittests.windows_native_skips(result)
         self.assertEqual(len(tagged_ids), 1)
         self.assertIn("test_tagged", tagged_ids[0])
 
     def test_plain_skip_is_not_flagged(self):
         result = self._run_fixture(tagged_condition=True, plain_condition=False)
-        tagged_ids = run_root_unittests.report_windows_native_skips(result)
+        tagged_ids = run_root_unittests.windows_native_skips(result)
         self.assertEqual(tagged_ids, [], "一般性 skip（無標籤）不應被誤標為 Windows 專屬未驗證")
 
     def test_no_skips_reports_empty(self):
         result = self._run_fixture(tagged_condition=True, plain_condition=True)
-        tagged_ids = run_root_unittests.report_windows_native_skips(result)
+        tagged_ids = run_root_unittests.windows_native_skips(result)
         self.assertEqual(tagged_ids, [])
 
 
