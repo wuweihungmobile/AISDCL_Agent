@@ -203,7 +203,13 @@ CONTROL_CHARS = [chr(c) for c in range(0x01, 0x20)] + [chr(0x7F)]
 # 不會出現在任一行的「內容」裡讓 [[:cntrl:]] 比對到；兩個 Python 版（`ord(ch) < 0x20`
 # 逐字元比對）不受此限。CI 端 check_ntfs_paths.py 仍會擋下，非完全繞過，故不在本輪
 # 改寫 bash 邏輯（範圍外），僅在此排除、避免測試本身對已知限制誤報。
-_BASH_CONTROL_CHARS = [c for c in CONTROL_CHARS if c != "\n"]
+#
+# \r（0x0D）同理排除（R42 修復，DEF-101-350）：本機真實 Windows 11 + Git Bash 實測
+# 確認 `\r` 與 `\n` 同一根因——Git Bash 的 pipe（`printf '%s' "$p" | grep`）在此環境
+# 對兩者皆有等效的行終結符消耗行為，`\r` 內容同樣不會出現在 grep 看到的行內容裡。
+# 已用 `check_ntfs_paths._ntfs_seg_bad()` 實測確認 CI 端 Python 版仍會擋下 `\r`，非
+# 完全繞過，比照 `\n` 既有判例僅在此排除、避免測試本身對已知限制誤報。
+_BASH_CONTROL_CHARS = [c for c in CONTROL_CHARS if c not in ("\n", "\r")]
 
 
 class TestControlCharCrossConsistency(unittest.TestCase):

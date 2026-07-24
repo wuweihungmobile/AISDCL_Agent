@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import shutil
 import subprocess
+import tempfile
 import unittest
 from pathlib import Path
 
@@ -32,18 +33,47 @@ _DEV_START_PS1 = _REPO_ROOT / "tools" / "dev_start.ps1"
 class TestDevStartPs1DotSourceLastExitCode(unittest.TestCase):
     def _run(self) -> subprocess.CompletedProcess:
         exe = shutil.which("powershell") or shutil.which("pwsh")
-        # PATH 只留最基本目錄，排除任何 py/python/.venv 候選，穩定觸發
-        # 「找不到 Python 直譯器」這條 dot-source 失敗分支。
-        cmd = (
-            '$env:PATH = "/usr/bin:/bin"; '
-            f". '{_DEV_START_PS1}'; "
-            'Write-Output "RC_AFTER=$LASTEXITCODE"'
-        )
-        return subprocess.run(
-            [exe, "-NoProfile", "-Command", cmd],
-            capture_output=True, text=True, encoding="utf-8", errors="replace",
-            timeout=30,
-        )
+        # R42 修復（DEF-101-350）：本機真實 Windows 11 開發機已有真實 `.venv`，
+        # dev_start.ps1 的 `$VenvPy = Join-Path $Root '.venv\Scripts\python.exe'`
+        # 用 Test-Path 短路判斷排在 PATH 查詢之前——原本只清空 PATH 的手法在「本
+        # repo 目前開發中、已有真實 .venv」的機器上完全觸發不到「找不到 Python」
+        # 分支（`Test-Path $VenvPy` 恆真，PATH 清空與否已不相關）。改把
+        # dev_start.ps1 複製到隔離的臨時 `tools/` 目錄下執行（`$PSScriptRoot` 因而
+        # 解析到臨時 $Root，`$VenvPy` 保證不存在），比照本 repo 既有 WindowsApps
+        # guard 測試的臨時目錄隔離慣例，不依賴真實開發機器上是否已有 `.venv`。
+        with tempfile.TemporaryDirectory() as td:
+            tmp_tools = Path(td) / "tools"
+            tmp_tools.mkdir()
+            tmp_ps1 = tmp_tools / "dev_start.ps1"
+            tmp_ps1.write_text(_DEV_START_PS1.read_text(encoding="utf-8"), encoding="utf-8")
+            # dev_start.ps1 用相對路徑 dot-source `lib/WindowsAppsGuard.ps1`，
+            # 隔離目錄需一併複製，否則 dot-source 找不到檔案會在抵達
+            # 「找不到 Python」分支之前就先拋出無關的腳本錯誤。
+            tmp_lib = tmp_tools / "lib"
+            tmp_lib.mkdir()
+            guard_src = _REPO_ROOT / "tools" / "lib" / "WindowsAppsGuard.ps1"
+            (tmp_lib / "WindowsAppsGuard.ps1").write_text(
+                guard_src.read_text(encoding="utf-8"), encoding="utf-8"
+            )
+            # PATH 只留最基本目錄，排除任何 py/python 候選，穩定觸發
+            # 「找不到 Python 直譯器」這條 dot-source 失敗分支。
+            # [Console]::OutputEncoding 設 UTF-8（R42 修復，DEF-101-350）：本機
+            # 為繁體中文 Windows（Big5/950 codepage），dev_start.ps1 的中文錯誤
+            # 訊息若不明確指定輸出編碼會被以錯誤 codepage 解讀成亂碼，斷言
+            # 因而誤判失敗——同一根因/同一修法比照本輪稍早
+            # test_install_post_commit_windowsapps_guard.py::_run_with_shadowed_python()
+            # 的既有修復。
+            cmd = (
+                '[Console]::OutputEncoding=[System.Text.Encoding]::UTF8; '
+                '$env:PATH = "/usr/bin:/bin"; '
+                f". '{tmp_ps1}'; "
+                'Write-Output "RC_AFTER=$LASTEXITCODE"'
+            )
+            return subprocess.run(
+                [exe, "-NoProfile", "-Command", cmd],
+                capture_output=True, text=True, encoding="utf-8", errors="replace",
+                timeout=30,
+            )
 
     def test_python_not_found_sets_lastexitcode_nonzero_after_dot_source(self) -> None:
         """dot-source 情境下「找不到 Python」必須讓 $LASTEXITCODE 為非零值，
