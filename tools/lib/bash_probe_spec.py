@@ -28,6 +28,12 @@ coreutils 探測串接——精簡版 Git Bash 若缺 `dirname` 這類 coreutils
 from __future__ import annotations
 
 # 排除的 Windows 路徑段（WSL 系統目錄佔位 bash.exe）；逐段精確比對、不分大小寫。
+# 消費者：AISDLC_SDD/scripts/bash_probe.py、tools/tests/test_pre_push_dispatcher.py、
+# tools/tests/test_windows_forbidden_filename_parity.py、
+# tools/tests/test_git_hooks_install_common.py，以及 tools/integration_gate_core.py
+#（R36 DEF-101-307 收斂併入，原為獨立硬編字面值的第二座 SSOT 孤島；PS1 側
+# tools/lib/Find-GitBash.ps1 因無法直接 import Python 常數、仍維持獨立字面值，
+# 由 tools/tests/test_find_git_bash_parity.py 鎖住兩邊字面值同步）。
 SYSTEM32_SEGMENT = "system32"
 
 # 驗活探測指令：`&&` 串接 echo（基本存活）與 dirname（coreutils 真的可執行，

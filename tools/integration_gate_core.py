@@ -33,6 +33,7 @@ ROOT = Path(__file__).resolve().parent.parent  # monorepo 根（tools/ 的上一
 # import——手法對齊本輪其他核心檔案既有慣例（R17 DEF-101-231 觀察點 1+2：收斂
 # is_windows/os_label/venv_python_path 平台判斷邏輯的第二次重複）。
 sys.path.insert(0, str(ROOT / "tools" / "lib"))
+import bash_probe_spec as _spec  # noqa: E402  （SYSTEM32_SEGMENT SSOT，DEF-101-307 收斂）
 import platform_utils  # noqa: E402
 
 _CC_CLI_NAMES = ("cc-switch", "cc-switch-cli", "ccs")
@@ -76,8 +77,14 @@ def _has_system32_segment(path_str: str) -> bool:
     因為候選路徑一律是 Windows 路徑字面值，即使本函式在非 Windows 主機上被單元
     測試直接呼叫（`find_git_bash()` 本身僅在 `os.name == "nt"` 呼叫路徑下才有意義），
     仍須依反斜線正確切段，不可依賴宿主 OS 的路徑分隔符判斷。
+
+    DEF-101-307 收斂（R36 Architect 架構最佳化評估）：排除段字面值原本與
+    tools/lib/Find-GitBash.ps1 的 regex 各自硬編 "system32"，形成無交叉鎖的
+    SSOT 孤島；PS1 側因無法直接 import Python 常數、維持獨立字面值，但 Python
+    側改 import `bash_probe_spec.SYSTEM32_SEGMENT`（AISDLC_SDD/scripts/bash_probe.py
+    既有消費的同一常數），併入既有 SSOT，不再另立第二份 Python 字面值。
     """
-    return any(part.lower() == "system32" for part in PureWindowsPath(path_str).parts)
+    return any(part.lower() == _spec.SYSTEM32_SEGMENT for part in PureWindowsPath(path_str).parts)
 
 
 def find_git_bash() -> str | None:

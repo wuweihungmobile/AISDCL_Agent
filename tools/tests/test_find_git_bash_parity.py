@@ -91,9 +91,19 @@ def _extract_ps1_candidates(text: str) -> list[tuple[str, str]]:
 
 
 def _extract_py_system32_word(text: str) -> str:
-    m = re.search(r'part\.lower\(\)\s*==\s*"([^"]*)"', text)
-    assert m, "integration_gate_core.py 找不到 System32 排除比對片語"
-    return m.group(1)
+    """DEF-101-307 收斂：Python 端已改 import `bash_probe_spec.SYSTEM32_SEGMENT`
+    （tools/lib 單一真相源，AISDLC_SDD/scripts/bash_probe.py 既有消費者），不再
+    硬編字面值。結構比對改為斷言原始碼確實依賴該常數（防退回硬編字面值），
+    實際比對值改由 import 取得 runtime 常數——與舊有「抽字面值」手法功能等價。
+    """
+    m = re.search(r"part\.lower\(\)\s*==\s*_spec\.SYSTEM32_SEGMENT\b", text)
+    assert m, (
+        "integration_gate_core.py 的 System32 排除比對未依賴 _spec.SYSTEM32_SEGMENT"
+        "——DEF-101-307 收斂後不可退回硬編字面值（如 `part.lower() == \"system32\"`）"
+    )
+    import bash_probe_spec  # noqa: PLC0415  （tools/lib 已由 `import integration_gate_core` 的 side effect 插入 sys.path）
+
+    return bash_probe_spec.SYSTEM32_SEGMENT
 
 
 def _extract_ps1_system32_word(text: str) -> str:
