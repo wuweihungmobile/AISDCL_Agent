@@ -133,6 +133,9 @@ on:
       # R27：新增 tools/tests/test_bootstrap_ps1.py 直接以路徑引用 tools/bootstrap.ps1
       # 這支根層消費檔（DEF-101-042 同構，test_ci_paths_cover_root_consumers.py 實測揪出）
       - "tools/bootstrap.ps1"
+      # R34：新增 tools/tests/test_windowsapps_guard_cross_consistency.py 直接以路徑
+      # 引用 tools/dev_start.ps1 這支根層消費檔（同上同構，DEF-101-300 修復揪出）
+      - "tools/dev_start.ps1"
       - "**/*.sh"
       - "tools/git-hooks/**"
       - ".claude/**"
@@ -205,6 +208,9 @@ on:
       # R27：新增 tools/tests/test_bootstrap_ps1.py 直接以路徑引用 tools/bootstrap.ps1
       # 這支根層消費檔（DEF-101-042 同構，test_ci_paths_cover_root_consumers.py 實測揪出）
       - "tools/bootstrap.ps1"
+      # R34：新增 tools/tests/test_windowsapps_guard_cross_consistency.py 直接以路徑
+      # 引用 tools/dev_start.ps1 這支根層消費檔（同上同構，DEF-101-300 修復揪出）
+      - "tools/dev_start.ps1"
       - "**/*.sh"
       - "tools/git-hooks/**"
       - ".claude/**"
@@ -466,6 +472,25 @@ jobs:
       - name: pty_wrapper / hotkey_handler 平台解析單元測試（AutoClaude tests/test_perception.py）
         working-directory: AutoClaude
         run: python -m pytest tests/test_perception.py -q --tb=short
+
+      - name: 執行 tools/integration_gate.sh --skip-full（實際執行，非僅語法解析；R34 Scan-C 發現修正）
+        # Scan-C 發現：windows-compat-ci.yml 先前已修過同一缺陷模式（P1 Architect 發現：
+        # root-infra-ci.yml 對 .ps1/.sh 僅做語法解析，非實際執行），並補上 windows-smoke
+        # 實跑 `integration_gate.ps1 -SkipFull`，但對等的 macOS/Linux 薄殼
+        # tools/integration_gate.sh 一直漏補，只靠 root-infra-ci.yml 的 `bash -n` 語法檢查
+        # 頂替，等同 windows 側修復前的原始曝險狀態。
+        # --skip-full 僅跑 [3/5]SDD bridge 整合煙霧 + [4/5]回退驗證 + [5/5]cc-switch A/B
+        # 偵測（未裝 CLI 時 SKIP，不計失敗），略過 [1/5]AutoClaude local_ci_gate 全套／
+        # [2/5]AISDLC_SDD ci-gate 全套的完整重跑。
+        # 已知覆蓋率限制（R34 一審 QA 發現修正，比照下方 ci-gate.sh 步驟既有誠實揭露
+        # 慣例）：[2/5] 確實由本 job 下一步 `bash scripts/ci-gate.sh` 涵蓋；但 [1/5]
+        # （`tools/local_ci_gate.{sh,ps1}` 全套，含 editable 哨兵/LOC 預算/import-linter/
+        # pytest 全套）**並未**在本 smoke job 另跑——本 job 上方只執行了單一檔案
+        # `pytest tests/test_perception.py`，AutoClaude 完整測試套件在 macOS PR/push
+        # 閘門上零覆蓋，只靠每週一次的 `macos-nightly-full`（continue-on-error 非阻斷）
+        # 執行 `local_ci_gate.sh`。此為既有侷限（非本步驟新增），如實記載，避免「已於
+        # 本 job 另跑」的失實宣稱誤導後續維護者。
+        run: bash tools/integration_gate.sh --skip-full
 
       - name: 執行（非僅解析）AISDLC_SDD/scripts/ci-gate.sh（凍結基線 v0.01 + LATEST 雙軌）
         # 已知覆蓋率限制（R3 QA 複審發現，比照 windows-compat-ci.yml 的誠實揭露慣例）：

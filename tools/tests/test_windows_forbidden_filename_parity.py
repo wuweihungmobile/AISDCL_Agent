@@ -8,16 +8,20 @@
 """
 
 import re
+import shutil
 import subprocess
 import sys
 import unittest
-from pathlib import Path
+from pathlib import Path, PureWindowsPath
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 _TOOLS_DIR = REPO_ROOT / "tools"
 if str(_TOOLS_DIR) not in sys.path:
     sys.path.insert(0, str(_TOOLS_DIR))
 import check_ntfs_paths  # noqa: E402
+
+sys.path.insert(0, str(_TOOLS_DIR / "lib"))
+import bash_probe_spec as _spec  # noqa: E402
 
 _AUTOCLAUDE_DIR = REPO_ROOT / "AutoClaude"
 if str(_AUTOCLAUDE_DIR) not in sys.path:
@@ -32,6 +36,56 @@ RESERVED_NAMES = ["CON", "PRN", "AUX", "NUL", "COM1", "COM9", "LPT1", "LPT9"]
 NON_RESERVED_NAMES = ["CONSOLE", "PRINTER", "COM10", "LPTX", "NULLABLE", "hello"]
 
 
+def _usable_bash() -> str | None:
+    """回傳可跑 repo bash 腳本的 bash 路徑；只有 WSL 佔位 bash、缺 coreutils 的
+    殘缺 bash、或無 bash → None。
+
+    邏輯鏡自 `tools/tests/test_pre_push_dispatcher.py::_usable_bash()`（根層
+    tools/tests 的既有慣例，本身又鏡自 AISDLC_SDD/scripts/bash_probe.py）——R34
+    Scan-B 發現本檔（R33 DEF-101-295 新增）直接無條件呼叫
+    `subprocess.run(["bash", ...])`，未比照既有慣例做 skipIf 守門，在 bash 不可用
+    或為 WSL 佔位版的環境會拋出未攔截的 FileNotFoundError（ERROR 而非優雅
+    SKIP）。刻意獨立複製一份而非跨檔 import 執行邏輯，維持本 repo「共用資料規格
+    改走 tools/lib/bash_probe_spec.py，執行邏輯各自獨立」的既有架構決策。
+    """
+    candidates: list[str] = []
+    git = shutil.which("git")
+    if git:
+        gp = Path(git).resolve()
+        for up in list(gp.parents)[:4]:
+            for sub in ("usr/bin/bash.exe", "bin/bash.exe"):
+                c = up / sub
+                if c.exists():
+                    candidates.append(str(c))
+    bare = shutil.which("bash")
+    if bare and not any(
+        part.lower() == _spec.SYSTEM32_SEGMENT for part in PureWindowsPath(bare).parts
+    ):
+        candidates.append(bare)
+    for cand in candidates:
+        try:
+            r = subprocess.run(
+                [cand, "-c", _spec.PROBE_CMD],
+                capture_output=True, text=True, encoding="utf-8",
+                errors="replace", timeout=15,
+            )
+            lines = r.stdout.splitlines()
+            if (
+                r.returncode == 0
+                and len(lines) >= 2
+                and lines[0].strip() == _spec.PROBE_EXPECT_ECHO
+                and lines[1].strip() == _spec.PROBE_EXPECT_DIRNAME
+            ):
+                return cand
+        except Exception:
+            continue
+    return None
+
+
+_BASH = _usable_bash()
+_SKIP_REASON = "本測試需可用 bash（非 WSL 佔位）驗活 pre-commit 的 _ntfs_seg_bad()"
+
+
 def _extract_bash_function() -> str:
     text = PRE_COMMIT_HOOK.read_text(encoding="utf-8")
     m = _FUNC_RE.search(text)
@@ -43,7 +97,7 @@ def _run_bash_seg_check(segment: str) -> tuple[int, str]:
     """實際執行 pre-commit 的 `_ntfs_seg_bad()`（動態抽取＋source），非靜態文字比對。"""
     func_src = _extract_bash_function()
     proc = subprocess.run(
-        ["bash", "-c", f'{func_src}\n_ntfs_seg_bad "$1"', "check", segment],
+        [_BASH, "-c", f'{func_src}\n_ntfs_seg_bad "$1"', "check", segment],
         capture_output=True,
         text=True,
         encoding="utf-8",
@@ -60,12 +114,14 @@ class TestForbiddenCharsCrossConsistency(unittest.TestCase):
             set(autoclaude_logger._WIN_FORBIDDEN_CHARS),
         )
 
+    @unittest.skipIf(_BASH is None, _SKIP_REASON)
     def test_bash_flags_every_char_in_python_forbidden_set(self) -> None:
         for ch in sorted(check_ntfs_paths._FORBIDDEN_CHARS):
             rc, out = _run_bash_seg_check(f"file{ch}name")
             self.assertEqual(rc, 0, f"bash 未攔下 Python 集合內的禁用字元 {ch!r}：{out!r}")
             self.assertIn("不允許字元", out)
 
+    @unittest.skipIf(_BASH is None, _SKIP_REASON)
     def test_bash_does_not_flag_chars_outside_python_forbidden_set(self) -> None:
         safe_chars = [c for c in "!#$%&'()+,-.0123456789ABCabc_~" if c not in check_ntfs_paths._FORBIDDEN_CHARS]
         for ch in safe_chars:
@@ -87,12 +143,14 @@ class TestReservedNameCrossConsistency(unittest.TestCase):
             self.assertFalse(check_ntfs_paths._RESERVED_RE.match(name), name)
             self.assertFalse(autoclaude_logger._WIN_RESERVED_NAME_RE.match(name), name)
 
+    @unittest.skipIf(_BASH is None, _SKIP_REASON)
     def test_bash_flags_every_reserved_name_python_flags(self) -> None:
         for name in RESERVED_NAMES:
             rc, out = _run_bash_seg_check(name)
             self.assertEqual(rc, 0, f"bash 未攔下保留裝置名 {name!r}：{out!r}")
             self.assertIn("保留裝置名", out)
 
+    @unittest.skipIf(_BASH is None, _SKIP_REASON)
     def test_bash_does_not_flag_non_reserved_names(self) -> None:
         for name in NON_RESERVED_NAMES:
             rc, out = _run_bash_seg_check(name)
@@ -111,6 +169,7 @@ class TestMultiExtensionReservedNameCrossConsistency(unittest.TestCase):
         for name in MULTI_EXTENSION_RESERVED:
             self.assertIsNotNone(check_ntfs_paths._ntfs_seg_bad(name), name)
 
+    @unittest.skipIf(_BASH is None, _SKIP_REASON)
     def test_bash_flags_multi_extension_reserved_names(self) -> None:
         for name in MULTI_EXTENSION_RESERVED:
             rc, out = _run_bash_seg_check(name)
@@ -150,6 +209,7 @@ class TestControlCharCrossConsistency(unittest.TestCase):
             sanitized = autoclaude_logger._sanitize_log_filename(segment)
             self.assertNotIn(ch, sanitized, f"logger.py 未淨化控制字元 {ch!r}：{sanitized!r}")
 
+    @unittest.skipIf(_BASH is None, _SKIP_REASON)
     def test_bash_flags_every_control_char(self) -> None:
         for ch in _BASH_CONTROL_CHARS:
             rc, out = _run_bash_seg_check(f"file{ch}name")

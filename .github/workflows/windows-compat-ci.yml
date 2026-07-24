@@ -364,9 +364,17 @@ jobs:
         # 先前把 6 個入口點升級為實際執行，但漏了 tools/integration_gate.ps1（monorepo
         # 整合層薄聚合閘門），仍停留在僅語法解析的曝險狀態。
         # -SkipFull 只跑 [3/5]SDD bridge 整合煙霧 + [4/5]回退驗證 + [5/5]cc-switch A/B
-        # 偵測（未裝 CLI 時 SKIP，不計失敗），略過 [1/5]/[2/5] 兩段完整套件重複執行
-        # （AutoClaude 全套測試已於本 job 另跑、AISDLC_SDD ci-gate.ps1 於下一步跑），
-        # 符合 PR-gate 快速迴圈定位；depends 僅需前一步已安裝的 AutoClaude deps。
+        # 偵測（未裝 CLI 時 SKIP，不計失敗），略過 [1/5]AutoClaude local_ci_gate 全套／
+        # [2/5]AISDLC_SDD ci-gate 全套的完整重跑。
+        # 已知覆蓋率限制（R34 一審 QA 於 macos-compat-ci.yml 同款措辭發現修正，本檔為
+        # 同一失實敘述的原始出處，一併訂正）：[2/5] 確實由本 job 下一步涵蓋；但
+        # [1/5]（`tools/local_ci_gate.{sh,ps1}` 全套，含 pytest 全套）**並未**在本
+        # windows-smoke job 另跑——本 job 上方只執行了單一檔案
+        # `pytest tests/test_perception.py`，AutoClaude 完整測試套件在本 PR/push 閘門
+        # 上零覆蓋，只靠每週一次的 `windows-nightly-full`（continue-on-error 非阻斷）
+        # 執行 `local_ci_gate.ps1`（見本檔頂部 R2 段落既有揭露）。如實記載，避免「已於
+        # 本 job 另跑」的失實宣稱誤導後續維護者；符合 PR-gate 快速迴圈定位；depends
+        # 僅需前一步已安裝的 AutoClaude deps。
         shell: pwsh
         run: ./tools/integration_gate.ps1 -SkipFull
 
