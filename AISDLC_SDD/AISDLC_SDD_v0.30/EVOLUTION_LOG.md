@@ -2,6 +2,22 @@
 
 > 依 `docs/04_planning/AutoSDD_improving_01.md` §6 版本演化規則（Copy-on-Evolve）。
 > 舊版 `AISDLC_SDD_v0.01/` ～ `AISDLC_SDD_v0.29/` 凍結唯讀；本目錄（v0.30）為演化後的可修改版本。
+> 下方「凍結基線例外」章節記錄對已凍結版本的**原地回補例外**（非版本演化本身，但比照本檔既有欄位結構化存證，供未來查詢「Copy-on-Evolve 是否曾被打破、在什麼條件下」）。
+
+## 凍結基線例外：v0.01～v0.29 P0 路徑穿越回補（R44，2026-07-25）
+
+> **注意**：本節不是「複製產生新版本」的正常 Copy-on-Evolve 演化事件——沒有新版本目錄產生，而是對既有 29 個**凍結基線版本原地打補丁**。依 Copy-on-Evolve 規則，凍結版本本應唯讀不可修改；此為 43 輪跨平台複審帳本史上首次對凍結基線做例外回補，特此比照本檔既有版本演化記錄的結構化欄位存證。完整逐版驗證細節見根層 `docs/06_quality/AutoSDD_Defect_Log.md` DEF-101-357／358／367（本節為其權威索引，不重複散文敘述）。
+
+| 欄位 | 內容 |
+|------|------|
+| **範圍** | `AISDLC_SDD_v0.01/` ～ `AISDLC_SDD_v0.29/`（29 個凍結基線版本）× `tools/fsm_runtime/` 7 支檔案（`hub_sync.py`／`production_monitor.py`／`hub_merge.py`／`spec_patch_proposer.py`／`production_to_fpl.py`／`sandbox_runner.py`／`counterfactual_replay.py`），共 203 處呼叫點；不含 v0.30（LATEST，本輪之前已修復） |
+| **日期／signoff** | 2026-07-25（R44 跨平台相容性複審 FrozenPatch 階段）；🔴 人工 signoff：使用者本輪明確核准破例，核准範圍嚴格限定於「已證實可利用的路徑穿越／任意檔案讀取」（不含同批發現、性質不同的 DEF-101-358／359 等其他殘留項——見 DEF-101-359 記事，該項仍依既有凍結版紀律 wontfix，未獲本次例外覆蓋） |
+| **打破 Copy-on-Evolve 的理由** | `rule_id`／`nfr_id`／`ac_id`／`fpl_id`／`divergence_kind` 等使用者可控字串未經淨化即組進 f-string 檔案路徑，構成生產路徑上真實可利用的任意檔案讀取（P0，對抗式驗證逐版證實可利用，非理論性）。嚴重度遠超過去 DEF-101-004／019／020／040／056／057 等凍結版缺口的 wontfix 判例（那些皆屬「需人工手動 cd 進舊版目錄」才會觸發的邊角情境）。 |
+| **修法** | 逐版套用「呼叫該版本既有（較弱版）`_sanitize_component()`」的最小修法，與 v0.30 既有修復模式等價；不升版、不新增版本目錄，僅原地補丁既有 29 個凍結版本。 |
+| **TLC 證據** | N/A——本次改動限於上述 7 支檔案的字串淨化呼叫點，未觸碰任一版本的 `_HAPPY_PATH` 或任何 `*.tla`/`.cfg`，各版既有五軌 TLC 證明維持有效。 |
+| **驗證** | 逐版 `python -m pytest tools/fsm_runtime/tests/ -m "not chaos" -q` 全綠（除既有無關失敗 DEF-03-001）；對每版 `hub_sync.py::diff()` 用 monkeypatch `_sanitize_component` 為恆等函式模擬修復前 vs 真實修復後雙軌對照，29 版一致證實修復生效。新增 repo-wide 前瞻回歸鎖 `tools/tests/test_sanitize_component_frozen_sdd_versions_lock.py`（DEF-101-367）鎖住全部 29 版 × 7 檔的淨化呼叫式存在，防未來任一版本意外還原無人發現。 |
+| **殘留落差** | 29 版的 `_sanitize_component()` 本身仍是較弱版本（未比照 v0.30 做 Windows 保留裝置名／控制字元／長度上限強化）——足以阻斷本次驗證之路徑穿越攻擊面，但防護縱深不及 v0.30；是否 backport 強化版留待下輪評估（見 DEF-101-358，open/watch）。 |
+| **回退指引** | 若日後需要回退（例如發現本次修法本身有誤），逐版還原 203 處呼叫點為修復前原始碼即可；**不建議回退**——回退會重新打開已證實可利用的任意檔案讀取漏洞。回退不影響任何版本的 API/FSM 狀態/`*.tla`（純字串淨化呼叫，無其他變更）。 |
 
 ## v0.29 → v0.30
 

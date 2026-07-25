@@ -30,6 +30,18 @@ if ($bashExe) {
 Write-Host "⚠️ 找不到 Git Bash（bash.exe）→ 退回 fallback 3-stage（僅 v0.01 凍結基線單軌）。" -ForegroundColor Yellow
 Write-Host "⚠️ 覆蓋範圍小於 ci-gate.sh（無 LATEST 演化版軌與其餘硬閘）；建議安裝 Git for Windows 後重跑。" -ForegroundColor Yellow
 
+# WindowsApps 空殼排除 guard（R44 二審 Architect 揪出：本 fallback 分支下方三處
+# 裸 `python -m ...` 呼叫零可用性判斷，guard 檔案本身其實存在、只是先前沒接上
+# ——比照 tools/bootstrap.ps1／tools/dev_start.ps1 既有先例收斂，見 tools/lib/
+# WindowsAppsGuard.ps1）。全新 Windows 11 機器未裝真 Python、又剛好沒裝 Git Bash
+# 時，`Get-Command python` 仍會找到 WindowsApps 底下的空殼，若不排除，下方
+# `python -m pytest ...` 只會跳出 Microsoft Store 安裝提示。
+. "$PSScriptRoot/../../tools/lib/WindowsAppsGuard.ps1"
+if (-not (Test-IsRealPython -CandidateName 'python')) {
+  Write-Host "❌ 找不到 python（或偵測到的是 WindowsApps 空殼別名）— 無法執行 fallback 3-stage。請先安裝 Python >= 3.11。" -ForegroundColor Red
+  exit 1
+}
+
 $fw   = Join-Path $repo "AISDLC_SDD_v0.01"
 Set-Location $fw
 

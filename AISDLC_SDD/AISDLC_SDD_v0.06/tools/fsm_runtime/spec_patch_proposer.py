@@ -19,7 +19,7 @@ from pathlib import Path
 from typing import List, Optional
 
 from .pattern_matcher import is_same_pattern
-from .state_loader import REPO_ROOT
+from .state_loader import REPO_ROOT, _sanitize_component
 
 DEFAULT_OUT_DIR = REPO_ROOT / "docs" / "01_requirements"
 MAX_PATCH_PER_AC = 2  # Rule 9.22.5（與 FSM tracking 對齊）
@@ -99,7 +99,7 @@ def propose(
     target = out_dir or DEFAULT_OUT_DIR
     target.mkdir(parents=True, exist_ok=True)
     date = today or _dt.date.today().isoformat()
-    path = target / f"SPEC-PATCH-{ac_id}-{date}.md"
+    path = target / f"SPEC-PATCH-{_sanitize_component(ac_id)}-{date}.md"
     lines = [
         f"# SPEC-PATCH — {ac_id}（{date}）",
         "",

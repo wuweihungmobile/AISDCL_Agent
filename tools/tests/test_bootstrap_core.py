@@ -142,5 +142,53 @@ class TestPickPythonWindowsAppsGuard(unittest.TestCase):
             self.assertTrue(bootstrap_core._is_windows_apps_stub(stub_path))
 
 
+class TestMainReconfiguresStdioUtf8(unittest.TestCase):
+    """main() 對 sys.stdout/stderr 的 reconfigure 呼叫必須帶
+    `encoding="utf-8", errors="replace"`（R44 複審 DEF-101-362：先前只設定
+    `line_buffering=True`、獨漏 encoding，本檔大量輸出 ✅/❌/⚠️/🔴 等符號，
+    在被導向（如 CI 用 `*>&1 | Out-String` 擷取）的 Windows 非 UTF-8 codepage
+    （cp950/cp1252）下會 UnicodeEncodeError 崩潰。手法比照
+    tools/tests/test_stdio_utf8.py：以 mock.Mock() 取代 sys.stdout/stderr，
+    不需真的切換 Windows codepage 也能驗證。"""
+
+    def test_reconfigure_called_with_utf8_and_line_buffering(self) -> None:
+        fake_stdout = mock.Mock()
+        fake_stderr = mock.Mock()
+        with (
+            mock.patch.object(sys, "stdout", fake_stdout),
+            mock.patch.object(sys, "stderr", fake_stderr),
+            mock.patch.object(bootstrap_core.os, "chdir"),
+            mock.patch.object(bootstrap_core, "ensure_venv", return_value=1),
+        ):
+            rc = bootstrap_core.main()
+
+        fake_stdout.reconfigure.assert_called_once_with(
+            encoding="utf-8", errors="replace", line_buffering=True
+        )
+        fake_stderr.reconfigure.assert_called_once_with(
+            encoding="utf-8", errors="replace", line_buffering=True
+        )
+        self.assertEqual(rc, 1, "ensure_venv 回傳非 0 時 main() 應提早 return 該值")
+
+    def test_reconfigure_errors_are_swallowed_without_crashing(self) -> None:
+        """reconfigure() 拋 OSError/ValueError（例如串流不支援該切換）時必須被吞掉，
+        不得讓 main() 崩潰——對抗式驗證：若把 except 子句拿掉，本測試會轉紅。"""
+        fake_stdout = mock.Mock()
+        fake_stdout.reconfigure.side_effect = OSError("boom")
+        fake_stderr = mock.Mock()
+        fake_stderr.reconfigure.side_effect = ValueError("boom")
+        with (
+            mock.patch.object(sys, "stdout", fake_stdout),
+            mock.patch.object(sys, "stderr", fake_stderr),
+            mock.patch.object(bootstrap_core.os, "chdir"),
+            mock.patch.object(bootstrap_core, "ensure_venv", return_value=1),
+        ):
+            rc = bootstrap_core.main()  # 不應拋例外
+
+        self.assertEqual(rc, 1)
+        fake_stdout.reconfigure.assert_called_once()
+        fake_stderr.reconfigure.assert_called_once()
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -23,6 +23,7 @@ from pathlib import Path
 from typing import List, Optional, Protocol
 
 from .output_quality_scorer import ExecutionObservation, OQSResult, score
+from .state_loader import _sanitize_component
 
 class SandboxPolicyViolation(RuntimeError):
     """Phase I M1 / ACT-060 — 容器安全政策違反（image 不在 allow-list 等）。
@@ -445,7 +446,8 @@ def _write_flaky_report(
     target = report_dir or _flaky_report_dir()
     target.mkdir(parents=True, exist_ok=True)
     date = today or _dt.date.today().isoformat()
-    path = target / f"FLAKY-{date}-{spec.app_id}.yaml"
+    # R44: spec.app_id is externally-influenceable — sanitize before path assembly.
+    path = target / f"FLAKY-{date}-{_sanitize_component(spec.app_id)}.yaml"
     doc = {
         "app_id": spec.app_id,
         "image": spec.image,

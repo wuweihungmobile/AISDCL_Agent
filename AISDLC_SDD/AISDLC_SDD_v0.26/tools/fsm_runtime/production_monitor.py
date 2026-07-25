@@ -42,6 +42,10 @@ except ImportError as exc:  # pragma: no cover
         "PyYAML is required. Install with: pip install pyyaml"
     ) from exc
 
+# R44: reuse the package SSOT sanitizer for filename-unsafe components
+# (rather than re-implementing path-traversal defence a third time).
+from .state_loader import _sanitize_component
+
 
 # --------------------------------------------------------------------------- #
 # Paths                                                                       #
@@ -77,10 +81,19 @@ REQUIRED_FIELDS = (
     "duration_minutes",
 )
 
+# R44: nfr_id is optional on ingest (auto-derived by map_metric_to_nfr() when
+# absent), so it is intentionally NOT in REQUIRED_FIELDS (validate_schema does
+# not require it to be present). But it is used to build the PBS-DRIFT report
+# filename (_report_path()); if it is left out of the signed-fields coverage,
+# an attacker can tack nfr_id onto an already-legitimately-signed event without
+# being caught by HMAC verification. Listed separately and folded into
+# signed_fields_default() so it always falls within signature coverage.
+OPTIONAL_SIGNED_FIELDS = ("nfr_id",)
+
 
 def signed_fields_default() -> Tuple[str, ...]:
     """Fields included in the HMAC canonicalisation (order matters)."""
-    return REQUIRED_FIELDS
+    return REQUIRED_FIELDS + OPTIONAL_SIGNED_FIELDS
 
 
 # --------------------------------------------------------------------------- #
@@ -320,7 +333,11 @@ def recent_entries_for_nfr(
 def _report_path(nfr_id: str, day: Optional[_dt.date] = None, root: Optional[Path] = None) -> Path:
     base = root or DEFAULT_DRIFT_REPORT_DIR
     target_day = day or _dt.date.today()
-    return base / f"PBS-DRIFT-{nfr_id}-{target_day.isoformat()}.md"
+    # R44: nfr_id is attacker-influenceable (event payload) — sanitize before
+    # it is used to build a filesystem path (path traversal defence-in-depth;
+    # signature coverage above is the primary defence).
+    safe_nfr_id = _sanitize_component(nfr_id)
+    return base / f"PBS-DRIFT-{safe_nfr_id}-{target_day.isoformat()}.md"
 
 
 def _suggest_nfr_update(entries: List[Dict[str, Any]]) -> Dict[str, Any]:

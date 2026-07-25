@@ -40,7 +40,9 @@ param(
 
 $ErrorActionPreference = 'Stop'
 
-if (-not (Get-Command python -ErrorAction SilentlyContinue)) {
+# WindowsApps 空殼排除比照 tools/bootstrap.ps1／tools/dev_start.ps1 既有 SSOT（R44 收斂）
+. "$PSScriptRoot/../../tools/lib/WindowsAppsGuard.ps1"
+if (-not (Test-IsRealPython -CandidateName 'python')) {
   Write-Host '❌ 找不到 python — 請先啟用 venv：.venv\Scripts\Activate.ps1（見 ONBOARDING.md §3）' -ForegroundColor Red
   exit 1
 }

@@ -297,8 +297,9 @@ def _run_with_path(installer: Path, cwd: Path, path_dirs: list[Path]) -> subproc
 _WINDOWS_PATHEXT_SKIP = pytest.mark.skipif(
     not _windows_pwsh_available(),
     reason=(
-        "此測試依賴 Windows PATHEXT／App Execution Alias 解析語意，僅能在真 "
-        "Windows 平台上跑（見 _windows_pwsh_available 說明）"
+        "[WINDOWS-NATIVE-ONLY] 此測試依賴 Windows PATHEXT／App Execution Alias 解析語意，僅能在真 "
+        "Windows 平台上跑（見 _windows_pwsh_available 說明；R44 DEF-101-348 標籤，"
+        "比照 tools/tests/ 既有用法，供未來彙整可見度）"
     ),
 )
 

@@ -42,6 +42,8 @@ except ImportError as exc:  # pragma: no cover
         "PyYAML is required. Install with: pip install pyyaml"
     ) from exc
 
+from .state_loader import _sanitize_component
+
 
 # --------------------------------------------------------------------------- #
 # Paths                                                                       #
@@ -78,9 +80,18 @@ REQUIRED_FIELDS = (
 )
 
 
+# nfr_id 為選填欄位（未提供時由 map_metric_to_nfr() 自動推導，見
+# ingest_slo_violation()），因此不列入 REQUIRED_FIELDS（validate_schema 不強制
+# 要求它存在）。但它會被用來組出 PBS-DRIFT 報告的檔名（見 _report_path()），
+# 若不納入簽章覆蓋範圍，攻擊者可在既有合法簽章事件上「事後夾帶」nfr_id 而不
+# 被 HMAC 偵測。故獨立列出、由 signed_fields_default() 併入 REQUIRED_FIELDS
+# 一起回傳，使其永遠落在簽章覆蓋範圍內。
+OPTIONAL_SIGNED_FIELDS = ("nfr_id",)
+
+
 def signed_fields_default() -> Tuple[str, ...]:
     """Fields included in the HMAC canonicalisation (order matters)."""
-    return REQUIRED_FIELDS
+    return REQUIRED_FIELDS + OPTIONAL_SIGNED_FIELDS
 
 
 # --------------------------------------------------------------------------- #
@@ -320,7 +331,8 @@ def recent_entries_for_nfr(
 def _report_path(nfr_id: str, day: Optional[_dt.date] = None, root: Optional[Path] = None) -> Path:
     base = root or DEFAULT_DRIFT_REPORT_DIR
     target_day = day or _dt.date.today()
-    return base / f"PBS-DRIFT-{nfr_id}-{target_day.isoformat()}.md"
+    safe_nfr_id = _sanitize_component(nfr_id)
+    return base / f"PBS-DRIFT-{safe_nfr_id}-{target_day.isoformat()}.md"
 
 
 def _suggest_nfr_update(entries: List[Dict[str, Any]]) -> Dict[str, Any]:

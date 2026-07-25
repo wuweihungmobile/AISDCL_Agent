@@ -100,6 +100,33 @@ AISDLC_SDD_v0.02/build/reports/fse/findings*.json
 AISDLC_SDD_v0.03/build/reports/fse/findings*.json
 AISDLC_SDD_v0.04/build/reports/fse/findings*.json
 
+# ── v0.02~v0.04 build/reports/{abort,fsm,test-analysis} 執行期取證產物排除（R44 SA 一審 P3）──
+# 同 v0.01（56~69 行）：ABORT-*.md／ABORT-RAW-*.yaml／CONTEXT-SNAPSHOT-*-auto(-*).md／
+# MONITOR-VIOLATION-*.yaml／DISPATCH-LOG-*.yaml 皆為 ci-gate.sh／chaos／FSM runtime 每次
+# 跑就重生的執行期取證產物，非框架源碼；此三版此前只排除 arch-fitness.json／findings*.json
+# 兩類（見上方 87~101 行），未涵蓋此批類型，導致測試殘留檔長期 untracked、有被誤 commit
+# 進凍結基線之風險。已存在的同名 tracked 歷史檔（歷史快照）不受影響，僅新產生的免入庫。
+AISDLC_SDD_v0.02/build/reports/abort/CONTEXT-SNAPSHOT-*-auto.md
+AISDLC_SDD_v0.02/build/reports/abort/CONTEXT-SNAPSHOT-*-auto-*.md
+AISDLC_SDD_v0.02/build/reports/abort/ABORT-*.md
+AISDLC_SDD_v0.02/build/reports/abort/ABORT-RAW-*.yaml
+AISDLC_SDD_v0.02/build/reports/fsm/MONITOR-VIOLATION-*.yaml
+AISDLC_SDD_v0.02/build/reports/test-analysis/DISPATCH-LOG-*.yaml
+
+AISDLC_SDD_v0.03/build/reports/abort/CONTEXT-SNAPSHOT-*-auto.md
+AISDLC_SDD_v0.03/build/reports/abort/CONTEXT-SNAPSHOT-*-auto-*.md
+AISDLC_SDD_v0.03/build/reports/abort/ABORT-*.md
+AISDLC_SDD_v0.03/build/reports/abort/ABORT-RAW-*.yaml
+AISDLC_SDD_v0.03/build/reports/fsm/MONITOR-VIOLATION-*.yaml
+AISDLC_SDD_v0.03/build/reports/test-analysis/DISPATCH-LOG-*.yaml
+
+AISDLC_SDD_v0.04/build/reports/abort/CONTEXT-SNAPSHOT-*-auto.md
+AISDLC_SDD_v0.04/build/reports/abort/CONTEXT-SNAPSHOT-*-auto-*.md
+AISDLC_SDD_v0.04/build/reports/abort/ABORT-*.md
+AISDLC_SDD_v0.04/build/reports/abort/ABORT-RAW-*.yaml
+AISDLC_SDD_v0.04/build/reports/fsm/MONITOR-VIOLATION-*.yaml
+AISDLC_SDD_v0.04/build/reports/test-analysis/DISPATCH-LOG-*.yaml
+
 # ── v0.05 runtime 取證產物排除（DEF-11-001 修正版：Copy-on-Evolve 只入真框架源碼）──
 # build/reports/ 全為運行時取證輸出（abort/drift/fsm/test-analysis/formal/…），
 # 由 ci-gate.sh / chaos / arch_fitness / FSM runtime 每次跑都重生（輸出非輸入），

@@ -56,7 +56,7 @@ except ImportError as exc:  # pragma: no cover
 
 from .anonymizer import anonymize, load_rules as load_anon_config, AnonymizerConfig
 from .pii_scanner import load_l2_rules, scan, write_quarantine, ScanResult
-from .state_loader import REPO_ROOT
+from .state_loader import REPO_ROOT, _sanitize_component
 
 
 DEFAULT_REGISTRY_PATH = REPO_ROOT / "knowledge" / "hub-registry.yaml"
@@ -544,17 +544,20 @@ class HubSyncClient:
 
     # ─────────── diff ───────────
     def diff(self, rule_id: str, endpoint_id: Optional[str] = None) -> DiffResult:
+        # Path traversal defence: rule_id is externally-controlled (CLI arg /
+        # direct API call). Sanitize before it is used to compose any path.
+        safe_rule_id = _sanitize_component(rule_id)
         ep = self._resolve_endpoint(endpoint_id)
         cache_dir = self._endpoint_cache_dir(ep)
         # Locate the rule in cache (may be under rules/ or failure-patterns/)
         cached_path: Optional[Path] = None
-        for candidate in cache_dir.rglob(f"{rule_id}.*"):
+        for candidate in cache_dir.rglob(f"{safe_rule_id}.*"):
             cached_path = candidate
             break
         # Locate same id locally (rules/SLV-XXX.yaml or knowledge/failure-patterns/FPL-XXX.md)
         local_paths = [
-            REPO_ROOT / ".claude" / "skills" / "spec-logical-validator" / "rules" / f"{rule_id}.yaml",
-            REPO_ROOT / "knowledge" / "failure-patterns" / f"{rule_id}.md",
+            REPO_ROOT / ".claude" / "skills" / "spec-logical-validator" / "rules" / f"{safe_rule_id}.yaml",
+            REPO_ROOT / "knowledge" / "failure-patterns" / f"{safe_rule_id}.md",
         ]
         local_path = next((p for p in local_paths if p.exists()), None)
 

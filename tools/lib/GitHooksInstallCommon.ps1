@@ -46,8 +46,10 @@ $script:GitHooksInstallCommonScriptDriven = [bool]((Get-PSCallStack)[1].ScriptNa
 # venv 提示：下列各函式都靠裸 python 呼叫 GitHooksInstallCommonPy，未啟用 venv 就
 # 直接失敗提示（勝過各函式逐一噴原生「'python' 不是內部或外部命令」）——與
 # tools/integration_gate.ps1 / AutoClaude/tools/local_ci_gate.ps1 的
-# `Get-Command python` 前置守門對稱，dot-source 本檔時即檢查一次。
-if (-not (Get-Command python -ErrorAction SilentlyContinue)) {
+# `Get-Command python` 前置守門對稱，dot-source 本檔時即檢查一次。WindowsApps
+# 空殼排除比照 tools/bootstrap.ps1／tools/dev_start.ps1 既有 SSOT（R44 收斂）。
+. "$PSScriptRoot/WindowsAppsGuard.ps1"
+if (-not (Test-IsRealPython -CandidateName 'python')) {
   Write-Host '❌ 找不到 python — 請先啟用 venv：.venv\Scripts\Activate.ps1（見 ONBOARDING.md §3）' -ForegroundColor Red
   # 頂層本體（不在函式內）呼叫 exit 只終止本檔自身載入、不終止外層呼叫行程
   # （與下方函式內 exit 語意不同）；裸 `exit 1` 會讓 script-driven 呼叫端不受

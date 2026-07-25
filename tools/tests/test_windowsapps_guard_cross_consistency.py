@@ -430,6 +430,32 @@ def _exclude_frozen_sdd_versions(paths: list[str], latest_name: str) -> list[str
 _WINDOWSAPPS_LITERAL = "WindowsApps"
 _SSOT_REL_PATH = "tools/lib/WindowsAppsGuard.ps1"
 
+# R44 Architect 深度架構評估找到的系統性缺口：`test_ps1_mentions_of_windowsapps_all_go_through_ssot`
+# 只掃「檔案內文字提及 WindowsApps 字面值」者——若一支 .ps1 直接裸呼叫 python
+# 卻從未提及 WindowsApps 這個字（例如只寫了 `Get-Command python` 或連
+# `Get-Command` 判斷都沒有、直接 `& python ...`），舊判準完全不會去檢查它，
+# 是比「有判斷但沒 SSOT」更原始的繞過形狀。以下為此新掃描（不再要求先提及
+# WindowsApps 字面值）已知需要豁免的檔案，皆附理由：
+#
+# R44 二審 Architect 對抗式複審揪出：本清單原本還登記 `AISDLC_SDD/scripts/
+# ci-gate.ps1`，理由引用 bash 側 `test_migrated_with_fallback_branch_is_not_flagged`
+# 判例（guard 檔案物理缺席才降級用裸判斷）——但親自檢查 ci-gate.ps1 原始碼後
+# 發現兩者並不對等：`tools/lib/WindowsAppsGuard.ps1` 在該情境下明明存在、可以
+# 像本輪其他呼叫端一樣直接 dot-source 後判斷，只是先前選擇不接上，並非「做不
+# 到」。既然可補救、成本又低（僅需 2 行），已直接補上 guard（見 ci-gate.ps1
+# fallback 分支開頭），故該檔已從本豁免清單移除——多出的 SSOT dot-source +
+# `Test-IsRealPython` 呼叫自然通過下方 repo-wide 掃描，成為新的回歸鎖。
+#
+# R44 SA 另一位一審對抗式複審（同一輪、獨立於上一段的 Architect 二審）對僅存的
+# `AutoClaude/tools/g0_gate_check.ps1` 一筆豁免提出同款質疑：豁免理由（假設呼叫
+# 者已透過 bootstrap.ps1／dev_start.ps1 整備過環境）本身只是「未強制的假設」——
+# 沒有任何機制保證排程／人工執行這支腳本時，該次環境真的整備成功過，只要機器上
+# 仍只有 WindowsApps 空殼，一樣會重現本輪要修的原始缺口。親自確認 `tools/lib/
+# WindowsAppsGuard.ps1` 在該情境下同樣物理存在、可補救、成本同樣低（同款 2 行）
+# ——故已直接補上 guard（見 g0_gate_check.ps1 開頭，`$Log`／`W()` 定義好之後、
+# 兩處裸 `python` 呼叫之前），該檔已從本豁免清單移除，目前無殘留豁免項。
+_EXEMPT_PS1_FILES: set[str] = set()
+
 # 真正的 dot-source 呼叫語法（PowerShell dot-source 運算子只能出現在陳述式
 # 開頭：行首（可有前導空白）緊接 `.` + 空白）。兩種既有呼叫端寫法皆須涵蓋：
 #   ① 字面路徑：`. "$PSScriptRoot/lib/WindowsAppsGuard.ps1"`（bootstrap.ps1／
@@ -494,6 +520,39 @@ def _has_real_dot_source_of_ssot(text: str) -> bool:
     return False
 
 
+_BLOCK_COMMENT_RE = re.compile(r"<#.*?#>", re.DOTALL)
+_BARE_PYTHON_WORD_RE = re.compile(r"\bpython3?\b")
+
+
+def _strip_block_comments(text: str) -> str:
+    """移除 PowerShell `<# ... #>` 區塊註解（含 comment-based help），保留原本
+    的換行數（用等量 `\\n` 取代整段，而非直接刪空）——避免區塊註解前後文字
+    因刪除而被意外接合到同一行，干擾逐行掃描與同行的引號奇偶追蹤。"""
+    return _BLOCK_COMMENT_RE.sub(lambda m: "\n" * m.group(0).count("\n"), text)
+
+
+def _invokes_python_in_ps1(text: str) -> bool:
+    """R44 Architect 深度架構評估找到的系統性缺口：檔案是否有呼叫
+    python/python3 的痕跡——刻意用寬鬆的全字比對（不限定 `& python` 呼叫運算子
+    語法），因為既有 7 支真實命中檔案的呼叫寫法不一致（`& python (...)`／裸
+    `python -m ...`／裸 `python <script>.py ...`皆有）。逐行跳過整行註解 +
+    行尾裝飾性註解（沿用 `_line_is_comment` / `_strip_trailing_line_comment`），
+    並用 `_quote_parity_open` 排除純字串常值內的提及（如 Write-Host 印出的
+    說明文字、或 `-CandidateName 'python'` 這種傳給共用函式的字面值參數，
+    不是直接呼叫直譯器本身）。呼叫前須先 `_strip_block_comments`，否則
+    `.DESCRIPTION`／`.EXAMPLE` 這類 comment-based help 區塊內提及 python 的
+    說明文字會被誤判為真實呼叫。"""
+    stripped_text = _strip_block_comments(text)
+    for raw_line in stripped_text.splitlines():
+        if _line_is_comment(raw_line):
+            continue
+        line = _strip_trailing_line_comment(raw_line)
+        for m in _BARE_PYTHON_WORD_RE.finditer(line):
+            if not _quote_parity_open(line, m.start()):
+                return True
+    return False
+
+
 def _has_real_test_is_real_python_call(text: str) -> bool:
     """檔案中是否存在「真正呼叫」`Test-IsRealPython -CandidateName ...` 的陳
     述式（非註解、非字串常值、非行尾裝飾性註解——單純提及函式名稱不算，也
@@ -507,6 +566,226 @@ def _has_real_test_is_real_python_call(text: str) -> bool:
             if not _quote_parity_open(line, m.start()):
                 return True
     return False
+
+
+# ---------------------------------------------------------------------------
+# R44 SA 一審對抗式複審揪出：`test_python_calls_in_ps1_all_go_through_ssot` 舊版
+# 只做「檔案層級」判斷——`if _has_real_dot_source_of_ssot(text) and
+# _has_real_test_is_real_python_call(text): continue` 只要檔案內某處存在真正
+# 的 dot-source SSOT 陳述式、某處存在真正呼叫 Test-IsRealPython 的陳述式，
+# 全檔即視為安全，不檢查每一個裸 python 呼叫點是否真的受該次判斷保護。實測：
+# 把 `AutoClaude/tools/run_local_nightly.ps1` 改回「僅 1 處 guard、其餘 15+
+# 處裸呼叫且與 guard 判斷結果無關」的狀態（bug-injection 對抗式驗證，改壞後
+# 確認測試仍綠），該測試依舊全綠——因為判準只看「guard 是否存在」，不看
+# 「guard 的判斷結果是否真的擋住了這些呼叫」。
+#
+# 修復：改為呼叫點層級判斷。掃描現存全部正確呼叫端（bootstrap.ps1／
+# dev_start.ps1／local_ci_gate.ps1／run_act.ps1／integration_gate.ps1／
+# GitHooksInstallCommon.ps1／windows_smoke_local.ps1／ci-gate.ps1／
+# install_post_commit.ps1／run_self_evolution.ps1）後歸納出兩種目前皆存在、
+# 皆合法的安全形狀：
+#   (A) 「fail-fast 後裸呼叫」：guard 判斷失敗時緊接 `exit`/`return`/`throw`
+#       提前結束，之後的裸 `python` 呼叫因此保證只在 guard 判斷通過時才會
+#       執行到——這批呼叫端在 guard 呼叫後數行內（實測最大間隔 7 行）即有此
+#       提前結束陳述式；
+#   (B) 「變數替換」：guard 判斷結果存進變數（如 `$script:PyExe`），之後全部
+#       呼叫點一律改用該變數（`& $script:PyExe ...`），檔案裡 `python` 字面值
+#       本身不再作為呼叫出現（只留在 guard 呼叫自身的 `-CandidateName` 字面
+#       值參數裡，本就已被引號奇偶排除）。
+# 只要 guard 呼叫附近（同一視窗內）找不到提前結束陳述式，且檔案裡仍有真正的
+# 裸 `python`/`python3` 呼叫，代表 guard 的判斷結果對這些呼叫點形同虛設，判
+# 定為未受保護。
+# ---------------------------------------------------------------------------
+_EARLY_EXIT_RE = re.compile(r"\b(?:exit|return|throw)\b", re.IGNORECASE)
+# 排除 Docker image tag 這種 `python:3.11-slim` 寫法（`run_local_nightly.ps1`
+# 既有真實案例）——冒號緊接在後代表這是映像檔標籤字面值，不是呼叫直譯器。
+_CALL_SHAPED_PYTHON_RE = re.compile(r"\bpython3?\b(?!:)")
+# 觀察到的最大「guard 呼叫→提前結束陳述式」間隔為 7 行（tools/dev_start.ps1／
+# tools/bootstrap.ps1 巢狀候選分支各自的判斷式與其提前結束陳述式之間）；window
+# 取 15 行留有餘裕，同時遠小於 run_local_nightly.ps1 guard 呼叫到檔尾無關
+# `exit 0` 的行距（750+ 行），不會誤將無關的檔尾退出陳述式當成此 guard 的
+# fail-fast 保護。
+_EARLY_EXIT_WINDOW = 15
+
+
+def _real_match_line_indices(text: str, pattern: re.Pattern[str]) -> list[int]:
+    """逐行掃描 `pattern`（先經 `_strip_block_comments` 前處理，保留行號對齊），
+    回傳所有「真正」命中（非整行註解、非行尾裝飾性註解、非字串常值內）的
+    0-based 行號列表。"""
+    stripped_text = _strip_block_comments(text)
+    indices: list[int] = []
+    for i, raw_line in enumerate(stripped_text.splitlines()):
+        if _line_is_comment(raw_line):
+            continue
+        line = _strip_trailing_line_comment(raw_line)
+        for m in pattern.finditer(line):
+            if not _quote_parity_open(line, m.start()):
+                indices.append(i)
+                break
+    return indices
+
+
+def _all_python_invocations_are_ssot_protected(text: str) -> bool:
+    """呼叫點層級判斷（取代舊版純檔案層級判斷）：檔案內每一個真正的裸
+    `python`/`python3` 呼叫，是否都能歸類到上方 docstring 記載的兩種已知安全
+    形狀之一——(A) guard 判斷失敗時緊接 fail-fast、(B) guard 判斷結果存進變
+    數後檔案裡已無真正的裸字面值呼叫。任一裸呼叫點找不到歸類即回傳 False。"""
+    if not _has_real_dot_source_of_ssot(text):
+        return False
+    guard_lines = _real_match_line_indices(text, _TEST_IS_REAL_PYTHON_CALL_RE)
+    if not guard_lines:
+        return False
+    call_lines = _real_match_line_indices(text, _CALL_SHAPED_PYTHON_RE)
+    if not call_lines:
+        return True  # (B) 變數替換：檔案裡已無真正的裸字面值呼叫
+    guard_line = max(guard_lines)
+    exit_lines = _real_match_line_indices(text, _EARLY_EXIT_RE)
+    nearby_exit = [
+        e for e in exit_lines if guard_line <= e <= guard_line + _EARLY_EXIT_WINDOW
+    ]
+    if not nearby_exit:
+        return False  # (A) 不成立：guard 判斷附近找不到提前結束陳述式
+    gate_line = min(nearby_exit)
+    return all(c > gate_line for c in call_lines)  # 所有裸呼叫皆在提前結束之後
+
+
+class TestInvokesPythonInPs1(unittest.TestCase):
+    """R44 Architect 深度架構評估新增的鑑別力回歸鎖：直接對
+    `_invokes_python_in_ps1` 純函式單元測試各種情境，確認寬鬆的全字比對不會
+    誤判註解／字串內的提及為真實呼叫，也不會漏放各種既有呼叫寫法。"""
+
+    def test_call_operator_invocation_is_detected(self) -> None:
+        text = "& python (Join-Path $PSScriptRoot 'local_ci_gate.py') @CliArgs\n"
+        self.assertTrue(_invokes_python_in_ps1(text))
+
+    def test_bare_module_invocation_without_call_operator_is_detected(self) -> None:
+        text = 'python -m tools.arch_fitness.arch_fitness --strict --quiet --json $JsonOut | Out-Null\n'
+        self.assertTrue(_invokes_python_in_ps1(text))
+
+    def test_bare_script_path_invocation_is_detected(self) -> None:
+        text = '$ac4 = python tools/ac4_progress_check.py --history .ac4_history.jsonl --json 2>&1 | Out-String\n'
+        self.assertTrue(_invokes_python_in_ps1(text))
+
+    def test_mention_inside_double_quoted_string_is_not_flagged(self) -> None:
+        text = (
+            'Write-Host "  替代：bash tools/fsm_runtime/formal/run_tlc.sh，'
+            '或五軌權威路徑 python -m tools.fsm_runtime.tlc_runner" -ForegroundColor Yellow\n'
+        )
+        self.assertFalse(_invokes_python_in_ps1(text))
+
+    def test_candidate_name_literal_argument_is_not_flagged(self) -> None:
+        """傳給共用函式的字面值參數（`-CandidateName 'python'`）是字串常值，
+        不是直接呼叫直譯器——即使被漏判，這類檔案本就因具備
+        `_has_real_dot_source_of_ssot` + `_has_real_test_is_real_python_call`
+        而在上層被排除，本測試單純鎖住 helper 本身的鑑別力。"""
+        text = "Test-IsRealPython -CandidateName 'python'\n"
+        self.assertFalse(_invokes_python_in_ps1(text))
+
+    def test_mention_inside_line_comment_is_not_flagged(self) -> None:
+        text = "#    python -m tools.fsm_runtime.tlc_runner --module <五軌各一>\n"
+        self.assertFalse(_invokes_python_in_ps1(text))
+
+    def test_mention_inside_block_comment_help_is_not_flagged(self) -> None:
+        text = (
+            "<#\n.SYNOPSIS\n本地 nightly 排程腳本\n.EXAMPLE\n"
+            "    python -m tools.arch_fitness.arch_fitness\n#>\n"
+            "Write-Host 'ok'\n"
+        )
+        self.assertFalse(_invokes_python_in_ps1(text))
+
+    def test_no_mention_at_all_is_not_flagged(self) -> None:
+        self.assertFalse(_invokes_python_in_ps1("Write-Host 'hello'\n"))
+
+
+class TestAllPythonInvocationsAreSsotProtected(unittest.TestCase):
+    """R44 SA 一審對抗式複審回歸鎖：直接對
+    `_all_python_invocations_are_ssot_protected` 純函式單元測試，鎖住「呼叫點
+    層級」判斷的鑑別力——尤其是舊版「檔案層級」判準會誤判為安全的部分覆蓋情
+    境（guard 存在，但呼叫點與其判斷結果無關）。"""
+
+    _GUARD_HEADER = (
+        '. "$PSScriptRoot/lib/WindowsAppsGuard.ps1"\n'
+        "if (Test-IsRealPython -CandidateName 'python') { $script:PyExe = 'python' }\n"
+    )
+
+    def test_fail_fast_pattern_with_many_bare_calls_after_is_protected(self) -> None:
+        """(A) 形狀：guard 判斷失敗時緊接 exit，之後任意多個裸呼叫皆安全
+        （比照 tools/bootstrap.ps1／local_ci_gate.ps1 既有實作）。"""
+        text = (
+            '. "$PSScriptRoot/lib/WindowsAppsGuard.ps1"\n'
+            "if (-not (Test-IsRealPython -CandidateName 'python')) {\n"
+            "  Write-Host 'not found'\n"
+            "  exit 1\n"
+            "}\n"
+            "& python tools/a.py\n"
+            "python -m tools.b\n"
+            "python tools/c.py\n"
+        )
+        self.assertTrue(_all_python_invocations_are_ssot_protected(text))
+
+    def test_variable_substitution_pattern_with_no_bare_calls_is_protected(self) -> None:
+        """(B) 形狀：guard 判斷結果存進變數，之後全部呼叫點改用該變數，檔案裡
+        已無真正的裸字面值呼叫（比照 AutoClaude/tools/run_local_nightly.ps1
+        既有實作，且不要求 guard 附近有 exit——設計上刻意不 fail-fast）。"""
+        text = (
+            self._GUARD_HEADER
+            + "if (-not $script:PyExe) { Log 'not found' }\n"
+            + "& $script:PyExe tools/a.py\n"
+            + "& $script:PyExe -m tools.b\n"
+        )
+        self.assertTrue(_all_python_invocations_are_ssot_protected(text))
+
+    def test_docker_image_tag_is_not_mistaken_for_a_bare_call(self) -> None:
+        """`python:3.11-slim` 是 Docker image tag 字面值，不是呼叫直譯器——
+        比照 AutoClaude/tools/run_local_nightly.ps1 mutation stage 既有實作，
+        不應被計入需要保護的裸呼叫點。"""
+        text = (
+            self._GUARD_HEADER
+            + "if (-not $script:PyExe) { Log 'not found' }\n"
+            + "docker run --rm python:3.11-slim bash script.sh\n"
+            + "& $script:PyExe tools/a.py\n"
+        )
+        self.assertTrue(_all_python_invocations_are_ssot_protected(text))
+
+    def test_guard_exists_but_unrelated_bare_calls_afterward_is_not_protected(self) -> None:
+        """R44 SA 一審對抗式複審實測構造的核心反例：guard（dot-source +
+        Test-IsRealPython 呼叫）確實存在，但其判斷結果從未 gate 任何東西——
+        既未 fail-fast、也未存進變數給後續呼叫點使用——後續裸呼叫點與 guard
+        判斷結果無關。舊版檔案層級判準只看「guard 是否存在」會誤判為安全
+        （PASSED，本該 FAILED）；本測試鎖住新版呼叫點層級判準能正確抓到。"""
+        text = (
+            self._GUARD_HEADER
+            + "if (-not $script:PyExe) { Log 'not found' 'ERROR' } else { Log 'ok' }\n"
+            + "& python tools/a.py\n"  # 裸呼叫：與 $script:PyExe 判斷結果無關
+            + "python -m tools.b\n"
+        )
+        self.assertFalse(_all_python_invocations_are_ssot_protected(text))
+
+    def test_bare_call_before_the_guard_is_not_protected(self) -> None:
+        """即使檔案稍後有 fail-fast，發生在 guard 判斷之前的裸呼叫仍不安全
+        （guard 尚未執行，判斷結果不可能保護到它）。"""
+        text = (
+            "& python tools/too_early.py\n"
+            + '. "$PSScriptRoot/lib/WindowsAppsGuard.ps1"\n'
+            + "if (-not (Test-IsRealPython -CandidateName 'python')) {\n"
+            + "  exit 1\n"
+            + "}\n"
+        )
+        self.assertFalse(_all_python_invocations_are_ssot_protected(text))
+
+    def test_missing_dot_source_is_not_protected_even_with_guard_call(self) -> None:
+        text = (
+            "if (-not (Test-IsRealPython -CandidateName 'python')) { exit 1 }\n"
+            "& python tools/a.py\n"
+        )
+        self.assertFalse(_all_python_invocations_are_ssot_protected(text))
+
+    def test_missing_guard_call_is_not_protected_even_with_dot_source(self) -> None:
+        text = (
+            '. "$PSScriptRoot/lib/WindowsAppsGuard.ps1"\n'
+            "& python tools/a.py\n"
+        )
+        self.assertFalse(_all_python_invocations_are_ssot_protected(text))
 
 
 class TestNoOrphanWindowsAppsImplementation(unittest.TestCase):
@@ -574,15 +853,80 @@ class TestNoOrphanWindowsAppsImplementation(unittest.TestCase):
             "判斷式（同本檔頂部 docstring 記載的 DEF-101-273/279/300/303 復發模式）",
         )
 
+    def test_python_calls_in_ps1_all_go_through_ssot(self) -> None:
+        """R44 Architect 深度架構評估找到的系統性缺口：上一測試
+        （`test_ps1_mentions_of_windowsapps_all_go_through_ssot`）只掃『檔案內
+        文字提及 WindowsApps 字面值』者，抓不到『整支檔案從頭到尾根本沒有
+        任何 WindowsApps 相關字樣、直接裸呼叫 python』這個更原始形狀——例如
+        `AutoClaude/tools/local_ci_gate.ps1`／`run_act.ps1`／
+        `tools/integration_gate.ps1`／`tools/lib/GitHooksInstallCommon.ps1`／
+        `tools/windows_smoke_local.ps1` 確實有 `Get-Command python` 判斷，但
+        從未提及 WindowsApps，故被舊判準完全忽略；
+        `AutoClaude/tools/run_local_nightly.ps1` 與
+        `AISDLC_SDD/AISDLC_SDD_v0.30/tools/arch_fitness/run_self_evolution.ps1`
+        更是連 `Get-Command python` 判斷都沒有，直接裸呼叫。
+
+        本測試 repo-wide 掃描全部 tracked `*.ps1`（同上排除凍結版本），找出
+        「呼叫 python 但未 dot-source WindowsAppsGuard.ps1 且未呼叫
+        Test-IsRealPython」者，不再要求先提及 WindowsApps 字面值才檢查。
+
+        R44 SA 一審對抗式複審追加揪出：初版判準仍是「檔案層級」——只要檔案內
+        某處存在 dot-source SSOT 陳述式、某處存在 Test-IsRealPython 呼叫，全
+        檔即視為安全，不檢查每個裸 python 呼叫點是否真的受該次判斷保護。實測
+        把 `AutoClaude/tools/run_local_nightly.ps1` 改回「僅 1 處 guard、其餘
+        15+ 處裸呼叫且與 guard 判斷結果無關」的狀態，該測試仍全綠，證實此掃描
+        鎖抓不到「guard 已檢查、但呼叫點根本沒接上其判斷結果」的部分覆蓋缺口
+        （已修復＋自動化鎖護航的雙重假象）。改用
+        `_all_python_invocations_are_ssot_protected`：改為呼叫點層級，要求每
+        一個真正的裸呼叫都能歸類到現存兩種已知安全形狀之一——(A) guard 判斷
+        失敗時緊接 fail-fast（`exit`/`return`/`throw`），之後的裸呼叫因此保
+        證只在判斷通過時才會執行到；或 (B) guard 判斷結果存進變數、之後全部
+        呼叫點改用該變數（檔案裡已無真正的裸字面值呼叫）。任一裸呼叫點找不
+        到歸類即判定未受保護（見該函式與其呼叫的 helper docstring）。
+        """
+        latest_name = _latest_sdd_root().name
+        scoped_ps1 = _exclude_frozen_sdd_versions(_tracked_files("*.ps1"), latest_name)
+
+        offenders = []
+        for rel in scoped_ps1:
+            if rel == _SSOT_REL_PATH or rel in _EXEMPT_PS1_FILES:
+                continue
+            text = (_REPO_ROOT / rel).read_text(encoding="utf-8", errors="replace")
+            if not _invokes_python_in_ps1(text):
+                continue
+            if _all_python_invocations_are_ssot_protected(text):
+                continue  # 每個真正的裸呼叫點皆已歸類到已知安全形狀 (A)/(B)
+            offenders.append(rel)
+
+        self.assertEqual(
+            offenders, [],
+            "發現呼叫 python 但未經 SSOT（須同時具備真正的 dot-source "
+            "tools/lib/WindowsAppsGuard.ps1 陳述式 + 真正呼叫 "
+            f"Test-IsRealPython 陳述式）的 .ps1 檔案：{offenders}——新呼叫點須"
+            "dot-source tools/lib/WindowsAppsGuard.ps1 後呼叫 "
+            "Test-IsRealPython，不得裸呼叫 python（同本檔頂部 docstring 記載的"
+            "DEF-101-273/279/300/303 復發模式；R44 Architect 深度架構評估：舊"
+            "判準僅在檔案提及 WindowsApps 字面值時才檢查，本測試移除此前提，"
+            "或於 _EXEMPT_PS1_FILES 附理由登記豁免）",
+        )
+
     def test_known_call_sites_still_exist(self) -> None:
-        """已知清單防腐化：3 個正確呼叫端須持續存在，避免清單本身腐化成
-        「檔案已刪除／改名但測試仍宣稱通過」的假綠。"""
+        """已知清單防腐化：5 個正確呼叫端須持續存在，避免清單本身腐化成
+        「檔案已刪除／改名但測試仍宣稱通過」的假綠。
+
+        `AISDLC_SDD/scripts/ci-gate.ps1` 為 R44 二審新收斂的第 4 個呼叫端
+        （原豁免清單登記，經對抗式複審揪出豁免理由與既有判例不對等後補上
+        guard，見 `_EXEMPT_PS1_FILES` 前方註解）。`AutoClaude/tools/
+        g0_gate_check.ps1` 為同輪另一位一審對抗式複審對僅存豁免提出同款質疑後
+        新收斂的第 5 個呼叫端（同一原因：豁免清單現已清空）。"""
         latest_name = _latest_sdd_root().name
         known = [
             _REPO_ROOT / "tools" / "bootstrap.ps1",
             _REPO_ROOT / "tools" / "dev_start.ps1",
             _REPO_ROOT / "AISDLC_SDD" / latest_name / "tools" / "install_hooks"
             / "install_post_commit.ps1",
+            _REPO_ROOT / "AISDLC_SDD" / "scripts" / "ci-gate.ps1",
+            _REPO_ROOT / "AutoClaude" / "tools" / "g0_gate_check.ps1",
         ]
         for path in known:
             self.assertTrue(path.is_file(), f"已知呼叫端遺失：{path}")

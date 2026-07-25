@@ -33,6 +33,9 @@ import yaml
 
 from .file_lock import file_lock
 from .pattern_matcher import is_same_pattern, normalize
+# R44: patch.ac_id 外部可控，組檔名前需淨化防路徑穿越；同 package 既有
+# state_loader._sanitize_component() 為 SSOT。
+from .state_loader import _sanitize_component
 
 _ROOT = Path(__file__).resolve().parents[2]
 REPLAY_REPORT_DIR = _ROOT / "build" / "reports" / "replay"
@@ -181,7 +184,9 @@ def write_report(patch: PatchProposal, report: ReplayReport, *,
     target_dir = out_dir or REPLAY_REPORT_DIR
     target_dir.mkdir(parents=True, exist_ok=True)
     date = today or _dt.datetime.now(_dt.timezone.utc).date().isoformat()
-    path = target_dir / f"REPLAY-{patch.ac_id or 'unknown'}-{date}.md"
+    # R44: patch.ac_id 外部可控，組檔名前先淨化防路徑穿越（報告內文標題仍顯示原始值）。
+    safe_ac_id = _sanitize_component(patch.ac_id) if patch.ac_id else "unknown"
+    path = target_dir / f"REPLAY-{safe_ac_id}-{date}.md"
     lines = [
         f"# 反事實重放報告 — {patch.ac_id} — {date}",
         "",

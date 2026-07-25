@@ -17,8 +17,10 @@ param(
 )
 
 # 直譯器選擇維持收斂前語意：PATH 上的 python（所有段落都靠已啟用的 venv），
-# 未啟用 venv 就直接失敗提示（勝過各段落逐一噴錯）
-if (-not (Get-Command python -ErrorAction SilentlyContinue)) {
+# 未啟用 venv 就直接失敗提示（勝過各段落逐一噴錯）；WindowsApps 空殼排除
+# 比照 tools/bootstrap.ps1／tools/dev_start.ps1 既有 SSOT（R44 收斂）
+. "$PSScriptRoot/lib/WindowsAppsGuard.ps1"
+if (-not (Test-IsRealPython -CandidateName 'python')) {
   Write-Host '❌ 找不到 python — 請先啟用 venv：.venv\Scripts\Activate.ps1（見 ONBOARDING.md §3）' -ForegroundColor Red
   exit 1
 }

@@ -33,6 +33,7 @@ import yaml
 
 from .file_lock import file_lock
 from .pattern_matcher import is_same_pattern, normalize
+from .state_loader import _sanitize_component
 
 _ROOT = Path(__file__).resolve().parents[2]
 REPLAY_REPORT_DIR = _ROOT / "build" / "reports" / "replay"
@@ -181,7 +182,10 @@ def write_report(patch: PatchProposal, report: ReplayReport, *,
     target_dir = out_dir or REPLAY_REPORT_DIR
     target_dir.mkdir(parents=True, exist_ok=True)
     date = today or _dt.datetime.now(_dt.timezone.utc).date().isoformat()
-    path = target_dir / f"REPLAY-{patch.ac_id or 'unknown'}-{date}.md"
+    # Path traversal defence: patch.ac_id is externally-controlled (R44
+    # cross-platform review fix; see state_loader.py _sanitize_component()).
+    safe_ac_id = _sanitize_component(patch.ac_id) if patch.ac_id else "unknown"
+    path = target_dir / f"REPLAY-{safe_ac_id}-{date}.md"
     lines = [
         f"# 反事實重放報告 — {patch.ac_id} — {date}",
         "",

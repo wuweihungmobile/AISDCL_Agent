@@ -16,6 +16,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import List, Optional
 
+from .state_loader import _sanitize_component
+
 # 同 divergence 窗口內 ≥ N 次 → 生成 FPL 草案
 DRIFT_WINDOW_THRESHOLD = 3
 
@@ -59,7 +61,9 @@ def generate_fpl_draft(
     target = out_dir or FAILURE_PATTERNS_DIR
     target.mkdir(parents=True, exist_ok=True)
     date = today or _dt.date.today().isoformat()
-    fid = fpl_id or f"FPL-PROD-{ac_id}-{divergence_kind}"
+    fid = _sanitize_component(fpl_id) if fpl_id else (
+        f"FPL-PROD-{_sanitize_component(ac_id)}-{_sanitize_component(divergence_kind)}"
+    )
     path = target / f"{fid}.md"
     content = f"""# {fid} — 生產 behavioral 偏差（自動衍生草案）
 

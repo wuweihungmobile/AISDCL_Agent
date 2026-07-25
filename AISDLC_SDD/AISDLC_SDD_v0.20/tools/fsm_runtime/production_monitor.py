@@ -35,6 +35,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional, Tuple
 
+from .state_loader import _sanitize_component
+
 try:
     import yaml
 except ImportError as exc:  # pragma: no cover
@@ -79,8 +81,14 @@ REQUIRED_FIELDS = (
 
 
 def signed_fields_default() -> Tuple[str, ...]:
-    """Fields included in the HMAC canonicalisation (order matters)."""
-    return REQUIRED_FIELDS
+    """Fields included in the HMAC canonicalisation (order matters).
+
+    nfr_id 併入簽章覆蓋範圍（R44 cross-platform review fix）：nfr_id 雖非
+    REQUIRED_FIELDS（未提供時由 map_metric_to_nfr() 自動推導），但會被用來
+    組出 PBS-DRIFT 報告的檔名（見 _report_path()）；若不納入簽章，攻擊者可
+    在既有合法簽章事件上事後夾帶 nfr_id 而不被 HMAC 偵測。
+    """
+    return REQUIRED_FIELDS + ("nfr_id",)
 
 
 # --------------------------------------------------------------------------- #
@@ -320,7 +328,10 @@ def recent_entries_for_nfr(
 def _report_path(nfr_id: str, day: Optional[_dt.date] = None, root: Optional[Path] = None) -> Path:
     base = root or DEFAULT_DRIFT_REPORT_DIR
     target_day = day or _dt.date.today()
-    return base / f"PBS-DRIFT-{nfr_id}-{target_day.isoformat()}.md"
+    # Path traversal defence: nfr_id is externally-controlled (R44 cross-platform
+    # review fix; see state_loader.py _sanitize_component()).
+    safe_nfr_id = _sanitize_component(nfr_id)
+    return base / f"PBS-DRIFT-{safe_nfr_id}-{target_day.isoformat()}.md"
 
 
 def _suggest_nfr_update(entries: List[Dict[str, Any]]) -> Dict[str, Any]:

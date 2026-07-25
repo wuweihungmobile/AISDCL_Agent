@@ -28,6 +28,15 @@ cd "$FRAMEWORK_ROOT"
 REPORT_DIR="build/reports/fse"
 mkdir -p "$REPORT_DIR"
 
+# R44 跨平台複審：本檔多處直接呼叫 python（py_field/top_fp/sense，以及 --apply
+# 迭代閉環內的 `python -m pytest`/`python -c`），先前從未做過任何可用性判斷——全新
+# 未裝真 Python 的 Windows 11 機器上，Git Bash 繼承 Windows PATH 會命中 WindowsApps
+# App Execution Alias 空殼（`command -v python` 判定「存在」，實際執行只跳出
+# Microsoft Store 安裝提示）。dot-source 共用 guard（比照 tools/bootstrap.sh 等
+# 已收斂呼叫點），在首次呼叫 python 前 fail-loud。
+. "$SCRIPT_DIR/../../../../tools/lib/windowsapps_guard.sh"
+is_real_python_candidate python || { echo "❌ 找不到可用的 python 直譯器（PATH 上找不到，或僅命中 WindowsApps 空殼）" >&2; exit 5; }
+
 py_field() { python -c "import json,sys;print(json.load(open(sys.argv[1])).get(sys.argv[2],''))" "$1" "$2"; }
 top_fp() {  # 印 "severity|ff|title|fingerprint" 給最高 ROI finding（fail 優先）
   python - "$1" <<'PY'

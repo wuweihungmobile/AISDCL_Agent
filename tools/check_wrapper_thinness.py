@@ -63,8 +63,9 @@ _PINNED_SHA256: dict[str, str] = {
     "AutoClaude/tools/local_ci_gate.sh": (
         "551e36b7158e3d1ee8808e92c0dddb21ffe4abace055cc6cdb8526855742b484"
     ),
+    # R44：python 前置檢查改走 tools/lib/WindowsAppsGuard.ps1::Test-IsRealPython SSOT
     "AutoClaude/tools/local_ci_gate.ps1": (
-        "4143c4580317e72db09e7184601595fb19a7b1a576f23bc99f4d4262692efdb5"
+        "dc470fdc94fa9a1c44477bcab6e1bb72181ae8f10b7076da03a66e3abb37a758"
     ),
     # R16（Architect 建議 B）：bootstrap/integration_gate/run_act 收斂為薄殼＋
     # 各自 Python 核心（bootstrap_core.py／integration_gate_core.py／
@@ -83,15 +84,17 @@ _PINNED_SHA256: dict[str, str] = {
     "tools/integration_gate.sh": (
         "0f9d2b674f821f37e543d15b7e8a87c6b9f92f82c6ab3ba957f55e692219ed89"
     ),
+    # R44：python 前置檢查改走 tools/lib/WindowsAppsGuard.ps1::Test-IsRealPython SSOT
     "tools/integration_gate.ps1": (
-        "0c9efcddc4ab83b7a1b214ae698f28f8b04bbce093c664b585ccdcaa95ee8daa"
+        "080ffdd66da1410099430a3c63ebf96508257895296437997360ef257a08c800"
     ),
     # R43：補上 WindowsApps guard dot-source（同上 DEF-101-353）
     "AutoClaude/tools/run_act.sh": (
         "5dbe64e0c72312b1172968b396456c6a22f523e11d9de5b855d4949dd224115a"
     ),
+    # R44：python 前置檢查改走 tools/lib/WindowsAppsGuard.ps1::Test-IsRealPython SSOT
     "AutoClaude/tools/run_act.ps1": (
-        "e90016dc7c6855fa2febb728297e2ff82909155cdd0777746d97791e4279b064"
+        "227c28c4b688dca899f068deb33a594a421ebeb1dd7f222a54aba9d03fd0e167"
     ),
 }
 

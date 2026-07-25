@@ -342,7 +342,11 @@ class TestResolveCommand:
             pty.close()
 
 
-@pytest.mark.skipif(sys.platform != "win32", reason="cmd shim 孤兒孫行程問題僅存在於 Windows")
+@pytest.mark.skipif(
+    sys.platform != "win32",
+    reason="[WINDOWS-NATIVE-ONLY] cmd shim 孤兒孫行程問題僅存在於 Windows（R44 "
+    "DEF-101-348 標籤，供 conftest.py::pytest_terminal_summary 彙整可見度）",
+)
 class TestCloseKillsCmdShimGrandchild:
     """P1 回歸（真實子行程重現）：.cmd/.bat shim 啟動時，close() 若只 terminate
     外層 cmd.exe，真正執行 CLI 的孫行程會變孤兒繼續跑（見 close() 內註解）。"""

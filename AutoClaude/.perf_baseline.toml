@@ -4,24 +4,24 @@
 [decide_correction]
 p50_ms = 1.655
 p95_ms = 2.187
-p99_ms = 2.017
+p99_ms = 1.998
 samples = 20
-git_sha = "23f9c40"
-captured_at = "2026-07-22T18:04:16.186032+00:00"
+git_sha = "5ccccb0"
+captured_at = "2026-07-24T18:04:23.418542+00:00"
 
 [dry_run_e2e]
-p50_ms = 3.093
+p50_ms = 3.254
 p95_ms = 4.218
-p99_ms = 3.851
+p99_ms = 4.022
 samples = 20
-git_sha = "23f9c40"
-captured_at = "2026-07-22T18:04:16.186032+00:00"
+git_sha = "5ccccb0"
+captured_at = "2026-07-24T18:04:23.418542+00:00"
 
 [token_halt_roundtrip]
-p50_ms = 0.508
+p50_ms = 0.51
 p95_ms = 0.596
-p99_ms = 0.561
+p99_ms = 0.528
 samples = 20
-git_sha = "23f9c40"
-captured_at = "2026-07-22T18:04:16.186032+00:00"
+git_sha = "5ccccb0"
+captured_at = "2026-07-24T18:04:23.418542+00:00"
 

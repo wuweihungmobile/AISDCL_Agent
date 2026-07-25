@@ -196,7 +196,9 @@ def _extract_mutex_guard_snippet(ps1_content: str) -> str:
 
 @pytest.mark.skipif(
     platform.system() != "Windows",
-    reason="System.Threading.Mutex 具名核心物件跨行程互斥語意，只在 Windows 上真機驗證有意義",
+    reason="[WINDOWS-NATIVE-ONLY] System.Threading.Mutex 具名核心物件跨行程互斥語意，"
+    "只在 Windows 上真機驗證有意義（R44 DEF-101-348 標籤，供 "
+    "conftest.py::pytest_terminal_summary 彙整可見度）",
 )
 class TestConcurrencyGuardBehavior:
     """DEF-101-228（R20 QA 二審對抗式 bug-injection 發現）：`test_concurrency_guard_mutex_present`

@@ -58,6 +58,24 @@ Set-Location $FrameworkRoot
 $ReportDir = Join-Path $FrameworkRoot "build/reports/fse"
 New-Item -ItemType Directory -Force -Path $ReportDir | Out-Null
 
+# R44 跨平台複審：本檔的 Invoke-Fitness／FSE_APPLY／FSE_VERIFY 三處直接呼叫
+# python，先前從未做過任何可用性判斷——全新未裝真 Python 的 Windows 11 機器上，
+# `Get-Command python` 仍會命中 WindowsApps App Execution Alias 空殼（找得到但
+# 執行只跳出 Microsoft Store 安裝提示）。dot-source 共用 guard（比照
+# tools/bootstrap.ps1／tools/dev_start.ps1／LATEST install_post_commit.ps1 三個
+# 已收斂呼叫點），在首次呼叫 python 前 fail-loud。
+$RepoRoot = Split-Path -Parent (Split-Path -Parent $FrameworkRoot)
+$WindowsAppsGuardPath = Join-Path $RepoRoot "tools/lib/WindowsAppsGuard.ps1"
+if (-not (Test-Path $WindowsAppsGuardPath)) {
+    Write-Host "ERROR: 找不到共用函式 $WindowsAppsGuardPath（tools/lib/WindowsAppsGuard.ps1）— 請在完整 monorepo checkout 內執行本腳本" -ForegroundColor Red
+    exit 7  # 獨立退出碼：1/2=dry-run 訊號、3=缺 claude、4=ESCALATION、5=PS 版本過舊、6=git switch -c 失敗皆已占用
+}
+. $WindowsAppsGuardPath
+if (-not (Test-IsRealPython -CandidateName 'python')) {
+    Write-Host "ERROR: 找不到可用的 python 直譯器（PATH 上找不到，或僅命中 WindowsApps 空殼）" -ForegroundColor Red
+    exit 7
+}
+
 function Invoke-Fitness {
     param([string]$JsonOut)
     # --quiet 只寫 JSON，避免主控台編碼問題；退出碼 0/1/2 由呼叫端解讀

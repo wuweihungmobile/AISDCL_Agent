@@ -44,6 +44,12 @@ import re
 
 import pytest
 
+# 啟用 pytester 內建 plugin —— test_windows_native_skip_report.py 用它以子行程
+# 方式驗證 pytest_terminal_summary() 的印出副作用（見該檔說明）。這是 pytest 官方
+# 文件記載的啟用方式，須放在 testpaths 的頂層 conftest.py（本檔即是），放在巢狀
+# conftest.py 會被 pytest 拒絕。
+pytest_plugins = ["pytester"]
+
 
 def pytest_addoption(parser):
     parser.addoption(
@@ -134,3 +140,67 @@ def pytest_collection_modifyitems(config, items):  # noqa: ARG001
     for item in items:
         if "pg_real" in item.keywords:
             item.add_marker(skip_marker)
+
+
+# ──────────────────────────────────────────────────────────────
+# R44（DEF-101-348 方向①遺漏補完）：[WINDOWS-NATIVE-ONLY] skip 可見度機制
+# ──────────────────────────────────────────────────────────────
+# R43 已為 tools/tests/（unittest 執行路徑）補上此機制
+# （tools/run_root_unittests.py 的 `WINDOWS_NATIVE_SKIP_TAG` /
+# `report_windows_native_skips()`），但完全沒有涵蓋 AutoClaude/tests/（pytest
+# 執行路徑）——test_perception.py::TestCloseKillsCmdShimGrandchild 正是該機制
+# 最初的動機來源（DEF-101-348 質疑的就是這支測試），實作範圍卻漏掉它。
+# 本節補上 pytest 對等版：於 `pytest_terminal_summary` 掃描本次 session 的
+# skipped 清單，篩出 reason 內含 `[WINDOWS-NATIVE-ONLY]` 標籤者另印一段清單
+# （即使 `-q` 也不會被吞掉——terminal summary 一律印出，不受 verbosity 影響）。
+WINDOWS_NATIVE_SKIP_TAG = "[WINDOWS-NATIVE-ONLY]"
+
+
+def _skip_reason(report) -> str | None:
+    """從一則 skipped `TestReport` 取出 reason 文字。
+
+    pytest 對 skip 的 `report.longrepr` 固定是 `(path, lineno, "Skipped: <reason>")`
+    三元組（`pytest.mark.skipif` 與 `pytest.skip()` 走同一條 `TestReport.from_item_and_call`
+    路徑，格式一致；已用實際跑出的 report 驗證過，非憑印象假設 `_pytest/reports.py`
+    行為）。非此形狀（例如 collect error 之類）一律回 None，呼叫端視為「非本機制
+    對象」略過，不誤判。
+    """
+    longrepr = getattr(report, "longrepr", None)
+    if isinstance(longrepr, tuple) and len(longrepr) == 3:
+        return str(longrepr[2])
+    return None
+
+
+def windows_native_skips(terminalreporter) -> list[str]:
+    """純函式（無 I/O 副作用）：從 `terminalreporter.stats["skipped"]` 篩出帶
+    `[WINDOWS-NATIVE-ONLY]` 標籤者，回傳 nodeid 清單。與 `pytest_terminal_summary`
+    的印出副作用分離（比照 tools/run_root_unittests.py::windows_native_skips 同款
+    設計：純函式可獨立單元測試，不會因為呼叫它而污染真實終端輸出）。
+    """
+    tagged: list[str] = []
+    for report in terminalreporter.stats.get("skipped", []):
+        reason = _skip_reason(report)
+        if reason and WINDOWS_NATIVE_SKIP_TAG in reason:
+            tagged.append(report.nodeid)
+    return tagged
+
+
+def pytest_terminal_summary(terminalreporter, exitstatus, config):  # noqa: ARG001
+    """在一般 `skipped=N` 摘要之外，另印出「僅原生 Windows 上才具驗證價值」的
+    skip 清單（R44，DEF-101-348 方向①補完；對等
+    tools/run_root_unittests.py::report_windows_native_skips()）。刻意不用
+    emoji（✅/❌/⚠️）——`tools/_stdio_utf8.py` 記載的 DEF-101-069 landmine：
+    Windows 非 UTF-8 終端印 emoji 會直接 UnicodeEncodeError 崩潰，而
+    `terminalreporter` 底層 TerminalWriter 未做這層保護，用純 ASCII 分隔線
+    （`write_sep`）換取同等「不會被淹沒在 -q 摘要裡」的醒目效果更安全。
+    """
+    tagged_ids = windows_native_skips(terminalreporter)
+    if not tagged_ids:
+        return
+    terminalreporter.write_sep("=", "WINDOWS-NATIVE-ONLY SKIPS (未在原生 Windows 環境驗證)")
+    terminalreporter.write_line(
+        f"{len(tagged_ids)} 個 Windows 專屬測試本次「未在原生 Windows 環境驗證」"
+        f"（非一般 skip，見 DEF-101-348/R44）："
+    )
+    for node_id in tagged_ids:
+        terminalreporter.write_line(f"  - {node_id}")

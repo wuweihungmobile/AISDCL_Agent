@@ -27,6 +27,20 @@
 #   （同 ci-gate.sh / conftest.py / cross_version_guard.py 精神）。
 set -euo pipefail
 
+# R44 跨平台複審：WindowsApps 空殼排除 guard——dot-source 於腳本頭部（早於下方
+# 各項參數/來源驗證），供後面 `_PY="${PYTHON:-python}"` 判斷使用。比照本檔既有
+# 「同層 sibling 缺席即優雅略過」慣例（skill_header_sync.py／
+# sync_exposed_skills.py／framework_status_snapshot.py 三處皆然）：隔離測試
+# harness（test_copy_on_evolve.py 之 `_run()` 只複製本檔到孤立 tmp repo，無完整
+# monorepo tools/lib/ 結構）guard 檔缺席時降級略過並 warn，不影響既有測試。
+_WINDOWSAPPS_GUARD="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/../../tools/lib/windowsapps_guard.sh"
+if [ -f "$_WINDOWSAPPS_GUARD" ]; then
+  # shellcheck disable=SC1090
+  . "$_WINDOWSAPPS_GUARD"
+else
+  echo "⚠️ 找不到 ${_WINDOWSAPPS_GUARD}（隔離環境）；略過 WindowsApps 空殼排除判斷" >&2
+fi
+
 if [ "$#" -ne 2 ]; then
   echo "用法: $0 <from_dir> <to_dir>" >&2
   exit 2
@@ -91,6 +105,17 @@ _BASE="$(cd "$(dirname "$TO")" && pwd)"
 # PYTHON 可覆寫（預設 python）：production／ci-gate 用 `python`，跨平台測試可注入 sys.executable。
 # 頂層單一定義，供下方三個建版後同步 block（戳記/鏡像、.gitignore、FRAMEWORK_STATUS）共用
 # ——避免 set -u 下某 block guard 不過致 _PY 未定義（DEF-96-001 補第三 block 時上提）。
+# R44：只在使用預設值 'python'（PYTHON 環境變數未明確指定）時才需要 WindowsApps
+# 空殼排除判斷——PYTHON 已明確指定代表呼叫端（如跨平台測試注入 sys.executable）
+# 已知情選定直譯器，不需要 guard 二次把關。guard 函式若因隔離環境缺席（見上方
+# 頭部略過分支）則跳過判斷，行為與收斂前一致。
+if [ -z "${PYTHON:-}" ] && command -v is_real_python_candidate >/dev/null 2>&1; then
+  is_real_python_candidate python || {
+    echo "❌ 找不到可用的 python 直譯器（PATH 上找不到，或僅命中 WindowsApps 空殼；" >&2
+    echo "   可設定 PYTHON 環境變數明確指定直譯器路徑繞過本判斷）" >&2
+    exit 1
+  }
+fi
 _PY="${PYTHON:-python}"
 if [ -f "${_SCRIPT_DIR}/skill_header_sync.py" ] && [ -f "${_SCRIPT_DIR}/sync_exposed_skills.py" ]; then
   echo "==> 同步新版框架版本戳記（skill_header_sync --write）"

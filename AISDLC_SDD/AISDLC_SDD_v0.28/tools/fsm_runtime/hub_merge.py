@@ -35,7 +35,7 @@ try:
 except ImportError as exc:  # pragma: no cover
     raise SystemExit("PyYAML required: pip install pyyaml") from exc
 
-from .state_loader import REPO_ROOT
+from .state_loader import REPO_ROOT, _sanitize_component
 
 
 DEFAULT_CONFLICTS_DIR = REPO_ROOT / "knowledge" / "hub" / "CONFLICTS"
@@ -187,7 +187,11 @@ def _write_conflict_report(
     target_dir = Path(conflicts_dir) if conflicts_dir else DEFAULT_CONFLICTS_DIR
     target_dir.mkdir(parents=True, exist_ok=True)
     ts = _dt.datetime.now(_dt.timezone.utc).strftime("%Y%m%dT%H%M%SZ")
-    out = target_dir / f"{rule_id}-{ts}.yaml"
+    # R44: rule_id is externally-controlled — sanitize before using it to
+    # build a filesystem path (path traversal defence). Payload below keeps
+    # the raw rule_id (display only).
+    safe_rule_id = _sanitize_component(rule_id)
+    out = target_dir / f"{safe_rule_id}-{ts}.yaml"
 
     local_yaml = _yaml_dump(local)
     base_yaml = _yaml_dump(base)

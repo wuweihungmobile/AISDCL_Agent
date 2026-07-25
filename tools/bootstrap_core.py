@@ -327,13 +327,17 @@ git hooks（選用）：安裝根層 dispatcher hooks — 兩子專案閘門同�
 
 
 def main() -> int:
-    # 自身 stdout/stderr best-effort 行緩衝：非 TTY（管線/log 擷取）下 Python 預設對
-    # stdout 做 full buffering，會讓本檔狀態訊息與子行程（uv/pip）即時輸出交錯錯亂
-    # （對齊 tools/local_ci_gate.py／AutoClaude/tools/run_act_core.py main() 同款收斂；
-    # R16 一審 Architect 抓到本檔獨漏，此為補齊）。
+    # 自身 stdout/stderr best-effort 行緩衝 + UTF-8 編碼：非 TTY（管線/log 擷取）下
+    # Python 預設對 stdout 做 full buffering，會讓本檔狀態訊息與子行程（uv/pip）
+    # 即時輸出交錯錯亂（對齊 tools/local_ci_gate.py／AutoClaude/tools/run_act_core.py
+    # main() 同款收斂；R16 一審 Architect 抓到本檔獨漏，此為補齊）。R44 複審發現本檔
+    # 獨漏 encoding="utf-8", errors="replace"：本檔大量輸出 ✅/❌/⚠️/🔴 等符號，被導向
+    # （如 CI 用 `*>&1 | Out-String` 擷取）的 Windows 非 UTF-8 codepage（cp950/cp1252）
+    # 終端下會 UnicodeEncodeError 崩潰，補齊對齊 AutoClaude/tools/run_act_core.py 同款
+    # reconfigure() 呼叫（DEF-101-362）。
     for stream in (sys.stdout, sys.stderr):
         try:
-            stream.reconfigure(line_buffering=True)
+            stream.reconfigure(encoding="utf-8", errors="replace", line_buffering=True)
         except (AttributeError, OSError, ValueError):
             pass
 

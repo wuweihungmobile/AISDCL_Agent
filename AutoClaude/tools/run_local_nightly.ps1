@@ -271,6 +271,29 @@ function Format-Rc {
   return [string]$Rc
 }
 
+# R44 二審修復（P1，SA 一審對抗式複審全面掃描發現）：前次 R44 一審只在 Stage 2
+# alembic.exe 偵測 fallback 補了一處 WindowsApps guard，本檔其餘 mutation/
+# pg-e2e/perf/drift/obs/chaos 等 stage 內至少 15+ 處裸 `python ...` 呼叫（含
+# SA 點名的 perf-baseline stage `python -m pytest tests/perf/`）完全未經
+# 可用性判斷；`.NOTES` 區塊明文本檔典型觸發方式為 schtasks 排程（無互動式已啟用
+# venv 的 shell），此情境下 PATH 解析到 WindowsApps 空殼的風險與原始缺陷情境相同，
+# 非理論性。修復比照 tools/bootstrap.ps1／tools/dev_start.ps1／
+# AutoClaude/tools/local_ci_gate.ps1 既有 SSOT：腳本一開始統一驗證一次真 python，
+# 全檔所有呼叫點一律改用 `& $script:PyExe`（不再逐處裸打 `python`）。找不到真
+# python 時不在此處直接 exit——保留本檔既有「stage 失敗不中斷後續 stage」設計：
+# 已在 Invoke-Stage try/catch 範圍內的呼叫點會自然拋例外 → rc=99 被判為 stage
+# 失敗（沿用既有機制，無需額外程式碼）；唯一不在 Invoke-Stage 保護範圍內的呼叫點
+# （Stage 4 drift Docker-不可用分支，見下方該處）另補顯式判斷，避免未捕捉例外
+# 中止整支腳本、波及 Stage 5/6/Cleanup/summary。
+. "$PSScriptRoot/../../tools/lib/WindowsAppsGuard.ps1"
+$script:PyExe = $null
+if (Test-IsRealPython -CandidateName 'python') { $script:PyExe = 'python' }
+if (-not $script:PyExe) {
+  Log 'python 命令在 PATH 上找不到，或為 WindowsApps 空殼別名（schtasks 排程情境下執行帳號的 PATH 可能未含已啟用 venv 的 Scripts/）— 本檔幾乎所有相依 host-side python 的 stage 將被標記為失敗' 'ERROR'
+} else {
+  Log "python 可用性驗證通過（非 WindowsApps 空殼）：$script:PyExe"
+}
+
 # SD_09 W2 nightly audit P0-1 修復（紀律 #1）：
 # 原 `& git ... 2>&1 | Select-Object -First 1 -as [string]` 在 PS 5.1 觸發 NativeCommandError
 # pipeline 物件 → 強制轉型 [string] 拿到空字串，導致 log header `branch=` `commit=` 全空 +
@@ -447,7 +470,7 @@ if ($script:DockerOK) {
     # TD-N02 修復（2026-06-12）：--require-version-marker — log 必須含
     # run_mutmut_in_docker.sh 版本守門通過標記（mutmut version OK: 2.4.3），
     # 防衛 mutmut 換版後輸出格式漂移仍假 pass（exit=3 取證可區分）。
-    Invoke-Native { python tools/validate_mutmut_log.py $MutLog --require-version-marker }
+    Invoke-Native { & $script:PyExe tools/validate_mutmut_log.py $MutLog --require-version-marker }
     $validateRc = $LASTEXITCODE
     if ($validateRc -ne 0) {
       # R10 QA-3（DEF-101-128）：原設 rc=2 與 Invoke-Stage「rc=2=WARN 不算 fail」及
@@ -465,7 +488,7 @@ if ($script:DockerOK) {
     #   bit 2 (4) = surviving timeout > 0（容忍）
     #   bit 3 (8) = suspicious > 0（容忍）
     # 退出碼：0=正常結束 / 1=real_fail（bit0=1）
-    Invoke-Native { python tools/mutmut_exit_code.py classify $dockerRc }
+    Invoke-Native { & $script:PyExe tools/mutmut_exit_code.py classify $dockerRc }
     $exitClassifyRc = $LASTEXITCODE
     if ($exitClassifyRc -eq 1) {
       Log "mutmut 真實失敗（rc=$dockerRc，bit0=exception/baseline-crash）— 標記 stage fail" 'ERROR'
@@ -480,7 +503,7 @@ if ($script:DockerOK) {
     # SD_09 W3 Round 2 audit P1-2 修復（紀律 #7 cache fresh）：
     # require log mtime 在 1 小時內，避免讀到 stale mutation log（如前次 crash 殘留）
     Invoke-Native {
-      python tools/mutation_baseline_lock.py token_guard `
+      & $script:PyExe tools/mutation_baseline_lock.py token_guard `
         --log mutation_token_guard.log `
         --history .mutation_history.jsonl `
         --baseline .mutation_baseline.toml `
@@ -502,7 +525,7 @@ if ($script:DockerOK) {
     #   helper 為 SSOT；本 ps1 區塊退化為 thin wrapper。任何邏輯變動同步更新 helper +
     #   重跑 tests/tools/test_mutmut_counts_parser.py（紀律 #4 鏡子被驗證）。
     if (Test-Path $MutLog) {
-      $parserOutput = & python tools/mutmut_counts_parser.py $MutLog 2>&1
+      $parserOutput = & $script:PyExe tools/mutmut_counts_parser.py $MutLog 2>&1
       $parserRc = $LASTEXITCODE
       foreach ($line in @($parserOutput)) {
         if ($null -ne $line -and "$line".Trim() -ne '') {
@@ -539,11 +562,13 @@ if ($script:DockerOK) {
     $alembicExe = $null
     if ($alembicCmd) { $alembicExe = $alembicCmd.Source }
     if (-not $alembicExe) {
-      $pyCmd = Get-Command python -ErrorAction SilentlyContinue
-      if ($pyCmd) {
-        $pyExe = $pyCmd.Source
+      # R44 二審修復（P1 收斂）：原本此處自行重新偵測 python（Test-IsRealPython +
+      # Get-Command + 再次 dot-source guard），與腳本開頭新增的統一驗證重複。
+      # 改為直接沿用腳本開頭已解析、驗證過的 $script:PyExe（SSOT，避免同一支
+      # 腳本內對「python 是否為 WindowsApps 空殼」重複偵測兩次）。
+      if ($script:PyExe) {
         try {
-          $realPy = & $pyExe -c "import sys; print(sys.executable)" 2>$null
+          $realPy = & $script:PyExe -c "import sys; print(sys.executable)" 2>$null
           if ($realPy) {
             $alembicExe = Join-Path (Split-Path $realPy -Parent) 'Scripts\alembic.exe'
           }
@@ -551,7 +576,7 @@ if ($script:DockerOK) {
           Log "python 解析 sys.executable 失敗：$_" 'WARN'
         }
       } else {
-        Log 'python 命令在 PATH 上找不到（schtasks SYSTEM 帳號需檢查 PATH）' 'ERROR'
+        Log 'python 命令在 PATH 上找不到，或為 WindowsApps 空殼別名（schtasks SYSTEM 帳號需檢查 PATH）' 'ERROR'
       }
     }
     if (Test-Path $alembicExe) {
@@ -566,7 +591,7 @@ if ($script:DockerOK) {
     }
     # seed 100 筆 1024-dim mock 向量（idempotent；已有資料時自動跳過）
     $syncDsn = 'postgresql://autoclaude:autoclaude@localhost:5432/autoclaude'
-    Invoke-Native { python tools/seed_kb.py --mock-pg-seed --pg-dsn $syncDsn }
+    Invoke-Native { & $script:PyExe tools/seed_kb.py --mock-pg-seed --pg-dsn $syncDsn }
     # SD_09 W3 nightly audit P1-CACHE-1 修復（紀律 #7 cache fresh）：
     # 跑前移除舊 .ac4_junit.xml 避免 pytest 中途 crash 留下舊 junit →
     # ac4_nightly_collector 解出舊資料 → 假 pass
@@ -579,7 +604,7 @@ if ($script:DockerOK) {
     # 非零）覆蓋，單日真紅 → stage rc=0 假綠；CI 對等 job 該 step 是當場硬紅。
     $recallRcRef = [ref] 0
     Invoke-Native {
-      python -m pytest tests/integration/test_pgvector_real_recall.py `
+      & $script:PyExe -m pytest tests/integration/test_pgvector_real_recall.py `
         -v --tb=short -m pg_real --junitxml=.ac4_junit.xml
     }
     $recallRcRef.Value = $LASTEXITCODE
@@ -592,19 +617,19 @@ if ($script:DockerOK) {
     # progress_check 的 rc 蓋掉（紀律 #1 真實 rc）。
     $contractRcRef = [ref] 0
     Invoke-Native {
-      python -m pytest tests/contract/test_pg_state_repository_contract.py `
+      & $script:PyExe -m pytest tests/contract/test_pg_state_repository_contract.py `
         -v --tb=short
     }
     $contractRcRef.Value = $LASTEXITCODE
     Invoke-Native {
-      python tools/ac4_nightly_collector.py `
+      & $script:PyExe tools/ac4_nightly_collector.py `
         --junit-xml .ac4_junit.xml `
         --history .ac4_history.jsonl
     }
     # SD_09 W2 audit P0-AUDIT-08 修復：不再 swap，progress_check 已綁定 AUTOCLAUDE_STRICT_P95_THRESHOLD_MS
     # 雙軌 env 在 ps1 開頭已分別設定（80 採集 / 50 升級）
     Invoke-Native {
-      python tools/ac4_progress_check.py `
+      & $script:PyExe tools/ac4_progress_check.py `
         --history .ac4_history.jsonl --json
     }
     # SD_09 W3 zero-trust audit F2 修復（2026-05-24）：當 ready_for_labeled_pr 首次達標時，
@@ -630,7 +655,7 @@ if ($script:DockerOK) {
       # 為 JSON array 起點 → ConvertFrom-Json 失敗走 catch → 假 F2 WARN）。
       # 現對齊 helper line 51：僅接受 `{` 為 JSON 起點；以 `[` 開頭的行進 stderr 攔截。
       # ac4_progress_check.py --json 永遠回 dict（非 list），故拒絕 `[` 不影響合法 JSON。
-      $ac4Raw = python tools/ac4_progress_check.py --history .ac4_history.jsonl --json 2>&1 | Out-String
+      $ac4Raw = & $script:PyExe tools/ac4_progress_check.py --history .ac4_history.jsonl --json 2>&1 | Out-String
       $ac4Lines = $ac4Raw -split "`n"
       $ac4JsonLines = @()
       foreach ($line in $ac4Lines) {
@@ -677,7 +702,7 @@ if (Test-Path 'perf_results.json') {
   Log 'perf_results.json 移除（強制 fresh）'
 }
 $rc3 = Invoke-Stage 'perf-baseline' {
-  Invoke-Native { python -m pytest tests/perf/ -v --tb=short -m perf }
+  Invoke-Native { & $script:PyExe -m pytest tests/perf/ -v --tb=short -m perf }
   # TD-N01 修復（2026-06-12，AutoClaude_Improving_012 Phase 0）：
   # 對齊 ci.yml「Verify perf_results.json present」step — pytest 跑完後強制驗證
   # perf_results.json 確實由 tests/perf/conftest.py pytest_sessionfinish hook 產出。
@@ -694,7 +719,7 @@ $rc3 = Invoke-Stage 'perf-baseline' {
   $baselineLockRcRef = [ref] 0
   if ((Test-Path .perf_baseline.toml) -and (Test-Path perf_results.json)) {
     Invoke-Native {
-      python tools/perf_regression_check.py perf_results.json .perf_baseline.toml `
+      & $script:PyExe tools/perf_regression_check.py perf_results.json .perf_baseline.toml `
         --comment-out perf_regression_comment.md
     }
     $regressionRcRef.Value = $LASTEXITCODE
@@ -706,7 +731,7 @@ $rc3 = Invoke-Stage 'perf-baseline' {
   if (Test-Path perf_results.json) {
     $shortSha = if ($sha) { $sha } else { 'unknown' }
     Invoke-Native {
-      python tools/perf_baseline_lock.py `
+      & $script:PyExe tools/perf_baseline_lock.py `
         --results perf_results.json `
         --history .perf_history.jsonl `
         --baseline .perf_baseline.toml `
@@ -747,7 +772,7 @@ if ($script:DockerOK) {
       Log 'drift_log 表不存在（alembic_version 落後 0013_drift_log）— 標記 N/A 並回 rc=2 (WARN)，不計入觀察期 #3 天數' 'WARN'
       # SD_09 W2 nightly audit P1-5 修復：寫入 jsonl 持久化（table_missing=True → passed=False）
       Invoke-Native {
-        python tools/drift_log_snapshot.py --severity-count 0 --table-missing `
+        & $script:PyExe tools/drift_log_snapshot.py --severity-count 0 --table-missing `
           --history .drift_log_history.jsonl
       }
       # SD_09 W3 Round 3 audit P1-3 修復：table_missing 不可回 rc=0（語意衝突 — snapshot 標
@@ -766,7 +791,7 @@ if ($script:DockerOK) {
       # SD_09 W2 nightly audit P1-5 修復：持久化累計（紀律 #2 — 完整證據）
       # 觀察期 #3「30 天零事件」需 jsonl 累計可審計，不能只靠 ps1 log 末筆
       Invoke-Native {
-        python tools/drift_log_snapshot.py --severity-count $n `
+        & $script:PyExe tools/drift_log_snapshot.py --severity-count $n `
           --history .drift_log_history.jsonl
       }
     } else {
@@ -779,9 +804,18 @@ if ($script:DockerOK) {
   Log 'Skip drift_log-scan（Docker 不可用）— 寫 N/A jsonl，不計入觀察期 #3 天數' 'WARN'
   # P0-DRIFT-1：Docker 不可用時也持久化一筆 table_missing record（passed=False），
   # 確保 .drift_log_history.jsonl 累計可審計 = mutation/pg-e2e SKIP 對稱語意。
-  Invoke-Native {
-    python tools/drift_log_snapshot.py --severity-count 0 --table-missing `
-      --history .drift_log_history.jsonl
+  # R44 二審修復（P1）：此呼叫不在任何 Invoke-Stage try/catch 保護範圍內（本分支
+  # 是 Docker-不可用 if/else 的頂層程式碼，不像其餘 python 呼叫點包在 Invoke-Stage
+  # 的 scriptblock 裡）——若 $script:PyExe 為 $null，直接 `& $null` 會拋未捕捉例外，
+  # 中止整支腳本（Stage 5/6/Cleanup/summary 全部不會執行），波及範圍遠大於單一
+  # stage 失敗，故此處需顯式判斷而非仰賴 Invoke-Stage 既有的例外捕捉機制。
+  if ($script:PyExe) {
+    Invoke-Native {
+      & $script:PyExe tools/drift_log_snapshot.py --severity-count 0 --table-missing `
+        --history .drift_log_history.jsonl
+    }
+  } else {
+    Log 'python 不可用，無法寫入 drift_log table_missing N/A 記錄（.drift_log_history.jsonl 本次不會新增記錄）' 'ERROR'
   }
   # SD_09 W3 Round 3 audit P1-3 修復：rc=0 → rc4 由 'SKIP' 變綠 → summary `drift=SKIP`
   # 已正確；無需改變外層 rc4='SKIP'（已在 line 425 設定）。本分支不寫入 rc，保持 SKIP 語意。
@@ -790,7 +824,7 @@ if ($script:DockerOK) {
 # ----- Stage 5: observability-snapshot（D-16 / W5 雙條件 (1a) 30 天取證）-----
 # 每日寫 1 筆至 .observability_history.jsonl；同日去重；30 天起算 2026-05-22
 $rc5 = Invoke-Stage 'observability-snapshot' {
-  Invoke-Native { python tools/observability_snapshot.py }
+  Invoke-Native { & $script:PyExe tools/observability_snapshot.py }
   $snapRc = $LASTEXITCODE
   if ($snapRc -ne 0) { return }   # 保留 snapshot 真實 rc（紀律 #1）
   # TD-N03 修復（2026-06-12，AutoClaude_Improving_012 Phase 0）：整合驗證 —
@@ -846,16 +880,16 @@ $rcChaos = Invoke-Stage 'sdd-fsm-chaos (鏡射 aisdlc-sdd-fsm-chaos-nightly)' {
   $chaosSeed = (Get-Date).ToUniversalTime().ToString('yyyyMMdd')
   Push-Location $sddV001
   try {
-    Invoke-Native { python -m pytest tools/fsm_runtime/tests/ -m chaos -q }
+    Invoke-Native { & $script:PyExe -m pytest tools/fsm_runtime/tests/ -m chaos -q }
     $chaosPytestRc = $LASTEXITCODE
     Invoke-Native {
-      python -m tools.fsm_runtime.chaos_runner --rounds 100 --seed $chaosSeed --json |
+      & $script:PyExe -m tools.fsm_runtime.chaos_runner --rounds 100 --seed $chaosSeed --json |
         Out-File -Encoding utf8 chaos-report.json
     }
     $chaosSweepRc = $LASTEXITCODE
     # 鏡射 CI 的 bounded 摘要行（report 無效 JSON 時此步非零＝取證失敗）
     Invoke-Native {
-      python -c "import json; d=json.load(open('chaos-report.json', encoding='utf-8-sig')); print('chaos sweep bounded=%s/%s avg_tokens=%s max_steps=%s' % (d['bounded_rounds'], d['total_rounds'], d['avg_tokens'], d['max_steps']))"
+      & $script:PyExe -c "import json; d=json.load(open('chaos-report.json', encoding='utf-8-sig')); print('chaos sweep bounded=%s/%s avg_tokens=%s max_steps=%s' % (d['bounded_rounds'], d['total_rounds'], d['avg_tokens'], d['max_steps']))"
     }
     $chaosParseRc = $LASTEXITCODE
     if ($chaosPytestRc -ne 0 -or $chaosSweepRc -ne 0 -or $chaosParseRc -ne 0) {

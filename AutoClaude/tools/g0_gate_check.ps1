@@ -21,6 +21,17 @@ function W($m) { $line = "$(Get-Date -Format 'yyyy-MM-ddTHH:mm:ssK') $m"; Write-
 W "=== SD_09 W0 G0 gate check START (action list: docs/04_planning/AutoSDD_improving_34.md SS4) ==="
 W "repo=$Repo"
 
+# WindowsApps stub exclusion guard (DEF-101-364/365 follow-up): the previous
+#   exemption for this file assumed bootstrap.ps1/dev_start.ps1 already ran
+#   successfully on this machine before schtasks fires this script -- that
+#   assumption is not enforced anywhere, so guard directly instead (same SSOT
+#   as tools/bootstrap.ps1/tools/dev_start.ps1/AutoClaude/tools/local_ci_gate.ps1).
+. "$PSScriptRoot/../../tools/lib/WindowsAppsGuard.ps1"
+if (-not (Test-IsRealPython -CandidateName 'python')) {
+  W "[ERROR] python not found (or is a WindowsApps stub alias) -- cannot run G0 gate check. Install Python >= 3.11 first."
+  exit 1
+}
+
 # --- #2 AC4 (need ready_for_labeled_pr=true / 14 days) ---
 W "--- #2 AC4 progress (ac4_progress_check --json) ---"
 $ac4 = python tools/ac4_progress_check.py --history .ac4_history.jsonl --json 2>&1 | Out-String

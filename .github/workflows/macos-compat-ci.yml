@@ -141,6 +141,12 @@ on:
       # R34：新增 tools/tests/test_windowsapps_guard_cross_consistency.py 直接以路徑
       # 引用 tools/dev_start.ps1 這支根層消費檔（同上同構，DEF-101-300 修復揪出）
       - "tools/dev_start.ps1"
+      # R44：DEF-101-364/366 為 tools/tests/test_windowsapps_guard_cross_consistency.py
+      # 新增直接以路徑引用 AutoClaude/tools/g0_gate_check.ps1 這支根層消費檔（讀取其
+      # 內容驗證 WindowsApps guard 呼叫式已補齊）；windows-compat-ci.yml 側已被既有
+      # **/*.ps1 覆蓋，本檔無 .ps1 兜底 glob，需顯式列舉（DEF-101-042 同構，
+      # test_ci_paths_cover_root_consumers.py 實測揪出）
+      - "AutoClaude/tools/g0_gate_check.ps1"
       - "**/*.sh"
       - "tools/git-hooks/**"
       - ".claude/**"
@@ -218,6 +224,12 @@ on:
       # R34：新增 tools/tests/test_windowsapps_guard_cross_consistency.py 直接以路徑
       # 引用 tools/dev_start.ps1 這支根層消費檔（同上同構，DEF-101-300 修復揪出）
       - "tools/dev_start.ps1"
+      # R44：DEF-101-364/366 為 tools/tests/test_windowsapps_guard_cross_consistency.py
+      # 新增直接以路徑引用 AutoClaude/tools/g0_gate_check.ps1 這支根層消費檔（讀取其
+      # 內容驗證 WindowsApps guard 呼叫式已補齊）；windows-compat-ci.yml 側已被既有
+      # **/*.ps1 覆蓋，本檔無 .ps1 兜底 glob，需顯式列舉（DEF-101-042 同構，
+      # test_ci_paths_cover_root_consumers.py 實測揪出）
+      - "AutoClaude/tools/g0_gate_check.ps1"
       - "**/*.sh"
       - "tools/git-hooks/**"
       - ".claude/**"
