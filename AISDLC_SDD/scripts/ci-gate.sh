@@ -25,6 +25,17 @@ set -euo pipefail
 # macOS/Linux 無害；Windows git-bash 下防 zh-TW cp950 UnicodeDecodeError。
 export PYTHONUTF8=1
 
+# ── pytest 收斂數下限鎖（DEF-101-386 collection-floor lock）─────────────────
+# 先例：tools/run_root_unittests.py:37 的 MIN_TESTS——目錄/pattern 打字或誤增
+# conftest skip-all 會讓套件靜默縮小、其餘閘門仍全綠，此為與該類失敗同構的
+# 缺口（本腳本三套 pytest 過去皆無此鎖）。下方 PASSED/INFRA_PASSED 算出後即
+# 檢查；下限留有餘裕（非緊貼實測值，避免良性 collection-order/parametrization
+# 噪聲觸發假紅）。往後每輪只可把下限「往上棘輪」，往下調整僅限伴隨蓄意刪測試。
+MIN_TESTS_FROZEN=1400   # R47 實測 AISDLC_SDD_v0.01=1478（留 ~78 餘裕）
+MIN_TESTS_LATEST=1650   # R47 二審修復後實測 LATEST=1729（留 ~79 餘裕；此數字會隨後續各輪
+                        # 新增測試自然漂移，門檻本身不逐輪重新對齊，留有餘裕即可）
+MIN_TESTS_SHARED=190    # R47 三審複核後實測 scripts/tests=224（留 ~34 餘裕；同上，預期漂移）
+
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
 # R43 Scan-B（DEF-101-353）：WindowsApps 空殼排除 guard（純函式定義，無副作用）；
@@ -111,6 +122,25 @@ run_gate_for_version() {
   echo "==> [1/3] ${VER}: ${PASSED} passed（not chaos）"
   GATE_SUMMARY+=("${VER}:${PASSED}")
 
+  # DEF-101-386：collection-floor 鎖 — pytest_passed_count.sh 本身刻意 fail-soft
+  # （無匹配印 0，見該檔 docstring），下限守門必須放在呼叫端（本檔）。
+  # R47 二審修復：下限僅在 VER 為凍結基線或「動態解析之」LATEST 時才有校準值可用；
+  # SDD_FW_VERSION 指向兩者以外之歷史版（檔頭註解記載的 ad-hoc debug/bisection
+  # escape hatch）沒有對應下限（~29 個歷史版通過數各異，如 v0.10=1544 <
+  # MIN_TESTS_LATEST），誤套 MIN_TESTS_LATEST 會使合法的歷史版 debug 呼叫假紅。
+  # 故此情況直接略過下限檢查，不為全歷史版逐一校準門檻（與此 escape hatch 的
+  # ad-hoc/debug-only 定位不成比例）。
+  local MIN_TESTS_FOR_VER=""
+  if [[ "${VER}" == "${FROZEN_BASELINE}" ]]; then
+    MIN_TESTS_FOR_VER="${MIN_TESTS_FROZEN}"
+  elif [[ "${VER}" == "${LATEST}" ]]; then
+    MIN_TESTS_FOR_VER="${MIN_TESTS_LATEST}"
+  fi
+  if [[ -n "${MIN_TESTS_FOR_VER}" && "${PASSED}" -lt "${MIN_TESTS_FOR_VER}" ]]; then
+    echo "::error:: ${VER} pytest 通過數 ${PASSED} 低於下限 ${MIN_TESTS_FOR_VER}（DEF-101-386 collection-floor lock；疑似目錄/pattern 打字或誤增 conftest skip-all 靜默縮小套件，見 tools/run_root_unittests.py:37 MIN_TESTS 先例）"
+    exit 1
+  fi
+
   echo "==> [2/3] 架構適應度 arch_fitness（structural fail 阻擋；advisory warn 放行）"
   # 必帶 --strict：唯有 --strict 時 structural fail 才回傳 exit 2（見 arch_fitness.py
   # `if args.strict and report.fails: return 2`）；否則即使有 structural fail 也只回 1
@@ -155,6 +185,12 @@ INFRA_PASSED="$(bash "${REPO_ROOT}/scripts/pytest_passed_count.sh" < "${INFRA_LO
 rm -f "${INFRA_LOG}"
 echo "==> 共享 infra scripts/tests/: ${INFRA_PASSED} passed"
 GATE_SUMMARY+=("scripts/tests:${INFRA_PASSED}")
+
+# DEF-101-386：collection-floor 鎖（同上，呼叫端守門；pytest_passed_count.sh 維持 fail-soft）
+if [[ "${INFRA_PASSED}" -lt "${MIN_TESTS_SHARED}" ]]; then
+  echo "::error:: 共享 infra scripts/tests/ pytest 通過數 ${INFRA_PASSED} 低於下限 ${MIN_TESTS_SHARED}（DEF-101-386 collection-floor lock；見 tools/run_root_unittests.py:37 MIN_TESTS 先例）"
+  exit 1
+fi
 
 # ── RFC 生命週期 lint（DEF-23-005 機械強制）─────────────────────────────────
 # 框架明定「active=待決 / archive=已決」RFC 生命週期但過去無機械強制 → 已決 RFC 曾滯留

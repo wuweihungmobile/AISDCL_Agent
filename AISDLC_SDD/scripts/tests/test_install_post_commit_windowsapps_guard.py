@@ -66,6 +66,7 @@ def _pwsh_exe() -> str | None:
 
 
 _PWSH = _pwsh_exe()
+_BASH = shutil.which("bash")
 
 pytestmark = pytest.mark.skipif(_PWSH is None, reason="需要 powershell/pwsh")
 
@@ -108,6 +109,13 @@ def _make_fake_monorepo(base: Path) -> Path:
     shutil.copy2(
         MONOREPO_ROOT / "tools" / "lib" / "WindowsAppsGuard.ps1",
         guard_dir / "WindowsAppsGuard.ps1",
+    )
+    # R47（DEF-101-383）：產生器現會把 `$GuardSrcBash` 內嵌進產出的 hook 內容
+    # （bash 側共用函式 `tools/lib/windowsapps_guard.sh`），假 monorepo 需一併
+    # 備妥此檔，否則 hook 內容測試會讀到「guard 檔缺席、降級回退舊行為」分支。
+    shutil.copy2(
+        MONOREPO_ROOT / "tools" / "lib" / "windowsapps_guard.sh",
+        guard_dir / "windowsapps_guard.sh",
     )
     hooks_dir = repo / "AISDLC_SDD" / "AISDLC_SDD_v0.01" / ".claude" / "hooks"
     hooks_dir.mkdir(parents=True)
@@ -246,6 +254,99 @@ def test_real_python_outside_windowsapps_is_accepted_and_hook_installs(tmp_path)
     assert proc.returncode == 0, f"真實 python 不應被 guard 誤擋：\n{output}"
     hook = repo / ".git" / "hooks" / "post-commit"
     assert hook.is_file(), f"guard 放行後應完成安裝、hook 未寫入：\n{output}"
+
+
+def test_installer_writes_hook_referencing_shared_bash_guard(tmp_path) -> None:
+    """端到端內容驗證（R47/DEF-101-383）：`.ps1` 產生器寫入的
+    `.git/hooks/post-commit` 內容必須 source 共用 `tools/lib/windowsapps_guard.sh`
+    並呼叫 `is_real_python_candidate`，與 `.sh` 側同款 guard 對稱（見
+    `test_install_post_commit_sh_windowsapps_guard.py::
+    test_installer_and_generated_hook_use_shared_guard`）。
+
+    修復前本檔既有測試只驗證安裝器**自身**前置檢查（`Get-Command` shadowing）
+    是否正確判斷「能不能裝」，從未檢查安裝器**寫到磁碟的 hook 內容**本身有沒有
+    guard——即使 `.ps1` 產生器寫出的 hook 內容仍是裸 `command -v python`
+    完全未收斂（本測試修復前的真實狀態），既有測試組也測不出這個落差，這正是
+    本測試要補的缺口。
+    """
+    installer = _latest_installer()
+    assert installer.is_file(), f"安裝器缺席：{installer}"
+    repo = _make_fake_monorepo(tmp_path)
+
+    proc = subprocess.run(
+        [_PWSH, "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", str(installer)],
+        cwd=str(repo),
+        capture_output=True, text=True, encoding="utf-8", errors="replace",
+        timeout=60,
+    )
+    assert proc.returncode == 0, f"安裝器非零退出：{proc.stdout!r} {proc.stderr!r}"
+    hook = repo / ".git" / "hooks" / "post-commit"
+    assert hook.is_file(), f"hook 未產出：{proc.stdout!r} {proc.stderr!r}"
+    text = hook.read_text(encoding="utf-8")
+    assert "windowsapps_guard.sh" in text, f"產出的 hook 未 source 共用 guard：\n{text}"
+    assert "is_real_python_candidate" in text, f"產出的 hook 未改用共用函式判斷：\n{text}"
+
+
+@pytest.mark.skipif(_BASH is None, reason="需要 bash（Windows 上可由 Git-Bash 提供）")
+def test_windowsapps_stub_first_falls_through_to_real_python3_via_ps1_installer(
+    tmp_path,
+) -> None:
+    """端到端**行為**驗證（R47 第二輪修補，補強
+    `test_installer_writes_hook_referencing_shared_bash_guard` 的覆蓋缺口）：
+
+    QA 以 bug-injection 證明上一測試只驗證 hook 檔文字「是否包含」
+    `windowsapps_guard.sh`／`is_real_python_candidate` 兩個子字串——即使把
+    共用 guard 的呼叫邏輯整個反轉（`if is_real_python_candidate python` →
+    `if ! is_real_python_candidate python`，讓 guard 變成「接受空殼、拒絕真
+    python」），兩個子字串仍原封不動存在於 hook 內容中，上一測試依然綠燈，
+    對這個完全行為反轉的回歸沒有任何鑑別力。
+
+    本測試改為實際用 `bash` 執行 `.ps1` 安裝器產出的 `.git/hooks/post-commit`
+    （hook 本體是 bash 腳本，即使由 `.ps1` 產生器寫出亦同），佈署「WindowsApps
+    空殼 `python` 排 PATH 最前面、真正的 `python3` 排在後面」的 PATH，驗證
+    guard 的**實際判斷結果**：空殼必須被跳過（不得被誤執行）、後面真正的
+    `python3` 必須被選中執行。若 guard 邏輯被反轉，空殼會被誤判為真 python
+    並執行、其 `STUB_SHOULD_NOT_RUN` 標記會出現在輸出中，本測試會轉紅——
+    移植自 `.sh` 姊妹測試
+    `test_install_post_commit_sh_windowsapps_guard.py::
+    test_windowsapps_stub_first_falls_through_to_real_python3` 同款手法。
+    """
+    installer = _latest_installer()
+    assert installer.is_file(), f"安裝器缺席：{installer}"
+    repo = _make_fake_monorepo(tmp_path)
+
+    proc = subprocess.run(
+        [_PWSH, "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", str(installer)],
+        cwd=str(repo),
+        capture_output=True, text=True, encoding="utf-8", errors="replace",
+        timeout=60,
+    )
+    assert proc.returncode == 0, f"安裝器非零退出：{proc.stdout!r} {proc.stderr!r}"
+    hook = repo / ".git" / "hooks" / "post-commit"
+    assert hook.is_file(), f"hook 未產出：{proc.stdout!r} {proc.stderr!r}"
+
+    stub_dir = tmp_path / "WindowsApps"
+    stub_dir.mkdir()
+    stub = stub_dir / "python"
+    stub.write_text("#!/usr/bin/env bash\necho STUB_SHOULD_NOT_RUN\n", encoding="utf-8")
+    stub.chmod(0o755)
+
+    real_dir = tmp_path / "real"
+    real_dir.mkdir()
+    real = real_dir / "python3"
+    real.write_text("#!/usr/bin/env bash\necho REAL_PYTHON3_RAN\n", encoding="utf-8")
+    real.chmod(0o755)
+
+    env = dict(os.environ)
+    env["PATH"] = f"{stub_dir}{os.pathsep}{real_dir}{os.pathsep}{env.get('PATH', '')}"
+    result = subprocess.run(
+        [_BASH, str(hook)], cwd=str(repo),
+        capture_output=True, text=True, encoding="utf-8", errors="replace",
+        timeout=30, env=env,
+    )
+    combined = result.stdout + result.stderr
+    assert "STUB_SHOULD_NOT_RUN" not in combined, f"WindowsApps 空殼未被排除、被誤執行：{combined!r}"
+    assert "REAL_PYTHON3_RAN" in combined, f"guard 未正確 fall through 到後面的真 python3：{combined!r}"
 
 
 # ---------------------------------------------------------------------------

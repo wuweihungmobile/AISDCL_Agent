@@ -19,13 +19,12 @@ from abc import ABC, abstractmethod
 from datetime import datetime
 from pathlib import Path
 
-import pytest
-
 from autoclaude.infra.repositories import (
     FileStateRepository,
     InMemoryStateRepository,
 )
 from autoclaude.utils.checkpoint_manager import PlaybookCheckpoint
+from autoclaude.utils.logger import _sanitize_log_filename
 
 
 def _make_sample_checkpoint(**overrides) -> PlaybookCheckpoint:
@@ -145,3 +144,38 @@ class TestFileStateRepositoryContract(IStateRepositoryContract):
 class TestInMemoryStateRepositoryContract(IStateRepositoryContract):
     def _make_repo(self, tmp_path: Path):
         return InMemoryStateRepository()
+
+
+# ──────────────────────────────────────────────
+# DEF-101-384（R47）：playbook_id 落地檔名 Windows 相容性淨化
+# （行為級：檢查磁碟上真實落地的檔名，比照
+#  test_rtm_file_sink.py::test_reserved_device_name_not_written_bare）
+# ──────────────────────────────────────────────
+class TestFileStateRepositoryPlaybookIdSanitization:
+    def test_forbidden_char_playbook_id_sanitized_on_disk(self, tmp_path: Path):
+        """playbook_id 含 Windows 禁用字元（如 ':'）時，落地檔名須淨化，
+        不可裸露寫入（否則 Windows 上 open() 會拋未捕捉的 OSError）。"""
+        repo = FileStateRepository(checkpoint_dir=str(tmp_path))
+        playbook_id = "weird:name"
+        repo.save_checkpoint(playbook_id, _make_sample_checkpoint())
+        files = list(tmp_path.glob("*.checkpoint.json"))
+        assert len(files) == 1
+        assert ":" not in files[0].name
+        assert files[0].name == f"{_sanitize_log_filename(playbook_id)}.checkpoint.json"
+        loaded = repo.load_checkpoint(playbook_id)
+        assert loaded is not None
+        assert loaded.step_id == "T03"
+
+    def test_reserved_device_name_playbook_id_not_written_bare(self, tmp_path: Path):
+        """playbook_id 恰為 Windows 保留裝置名（CON/NUL/COM1/...）時，
+        落地檔名須帶逃逸前導底線，不可裸露寫入。"""
+        repo = FileStateRepository(checkpoint_dir=str(tmp_path))
+        for reserved in ("CON", "con", "NUL", "PRN", "COM1", "LPT9"):
+            repo.save_checkpoint(reserved, _make_sample_checkpoint())
+            bare = tmp_path / f"{reserved}.checkpoint.json"
+            assert not bare.exists(), f"保留裝置名 {reserved!r} 落地檔名裸露無防護"
+            sanitized = tmp_path / f"{_sanitize_log_filename(reserved)}.checkpoint.json"
+            assert sanitized.is_file()
+            loaded = repo.load_checkpoint(reserved)
+            assert loaded is not None
+            assert loaded.step_id == "T03"

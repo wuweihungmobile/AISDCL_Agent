@@ -10,10 +10,10 @@ import logging
 from dataclasses import asdict
 from datetime import datetime, timedelta
 from pathlib import Path
-from typing import Optional
 
 from ...core.ports.state_repository import StateRepositoryError
 from ...utils.checkpoint_manager import PlaybookCheckpoint
+from ...utils.logger import _sanitize_log_filename
 
 logger = logging.getLogger("autoclaude.infra.file_state")
 
@@ -28,7 +28,11 @@ class FileStateRepository:
         self._dir.mkdir(parents=True, exist_ok=True)
 
     def _path(self, playbook_id: str) -> Path:
-        return self._dir / f"{playbook_id}{_SUFFIX}"
+        # DEF-101-384（R47）：playbook_id 經 canonical_playbook_id() 可能是
+        # Path(playbook_path).stem（未過濾 Windows 禁用字元/保留裝置名），
+        # 委派 SSOT `_sanitize_log_filename`（見 utils/logger.py 頂部說明），
+        # 與 rtm_file_sink.py / translation_learning_sink.py / pty_executor.py 同一先例。
+        return self._dir / f"{_sanitize_log_filename(playbook_id)}{_SUFFIX}"
 
     def save_checkpoint(self, playbook_id: str, checkpoint: PlaybookCheckpoint) -> None:
         """符合 StateRepositoryPort 契約：回傳 None。"""
@@ -51,12 +55,13 @@ class FileStateRepository:
         except OSError as exc:
             raise StateRepositoryError(f"save_checkpoint 失敗: {exc}") from exc
 
-    def load_checkpoint(self, playbook_id: str) -> Optional[PlaybookCheckpoint]:
+    def load_checkpoint(self, playbook_id: str) -> PlaybookCheckpoint | None:
         """⚠️ Deprecated（SD_06 W5-T5-8）：請改用 load_latest_by_playbook。
 
         env AUTOCLAUDE_DEPRECATION_WARN=1 時 emit DeprecationWarning。
         """
-        import os, warnings  # noqa: E401
+        import os  # noqa: E401
+        import warnings
         if os.environ.get("AUTOCLAUDE_DEPRECATION_WARN") == "1":
             warnings.warn(
                 "load_checkpoint(playbook_id) is deprecated since SD_06 W5; "
@@ -68,7 +73,7 @@ class FileStateRepository:
 
     def load_latest_by_playbook(
         self, playbook_id: str,
-    ) -> Optional[PlaybookCheckpoint]:
+    ) -> PlaybookCheckpoint | None:
         """SD_06 W5-T5-7：載入指定 playbook_id 最新一筆 checkpoint。
 
         File backend 一個 playbook_id 對應一個檔案，自然就是 latest。
@@ -89,7 +94,7 @@ class FileStateRepository:
             logger.warning("檢查點載入失敗 (%s): %s，將從頭開始", p, exc)
             return None
 
-    def load_by_run_id(self, run_id: str) -> Optional[PlaybookCheckpoint]:
+    def load_by_run_id(self, run_id: str) -> PlaybookCheckpoint | None:
         """SD_06 W5-T5-7：遍歷 checkpoint 檔案找符合 run_id 的紀錄。
 
         File backend 不索引 run_id，效能 O(n)；用於 dev 環境。
@@ -134,7 +139,7 @@ class FileStateRepository:
             return 0.0
 
     def list_recent_checkpoints(
-        self, since: Optional[datetime] = None, limit: int = 50
+        self, since: datetime | None = None, limit: int = 50
     ) -> list[PlaybookCheckpoint]:
         results: list[PlaybookCheckpoint] = []
         for p in self._dir.glob(f"*{_SUFFIX}"):

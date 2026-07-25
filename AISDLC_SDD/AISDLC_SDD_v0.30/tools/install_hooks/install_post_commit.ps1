@@ -87,10 +87,25 @@ if (-not (Test-Path $HookSrcClosure)) {
 # R11（DEF-101 家族）：hook 內容補 python fallback——現代 macOS 乾淨 PATH 只有
 # python3 沒有 python，且 git hook 執行環境不繼承 venv，缺 fallback 時兩個 advisory
 # hook 會被 `|| true` 吞掉、永久靜默失效零告警（與 .sh 產生器寫出同款 hook 內容）。
+# R47（DEF-101-383）：.sh 產生器（R43 Scan-B / DEF-101-353）已把產出的 hook
+# 內容收斂為 dot-source 共用 `tools/lib/windowsapps_guard.sh` 排除 WindowsApps
+# 空殼 python 候選，本 .ps1 產生器當時漏收斂，兩者產出的 hook 內容不對稱（本檔
+# 仍是裸 `command -v python`，命中空殼會誤判為「有 python」）。比照 .sh 側同款
+# 設計：guard 檔不存在時降級回退舊行為（不阻擋安裝），故不在產生器階段
+# Test-Path 擋門檻，交給下面 heredoc 內容自己在 hook 執行當下判斷 `[ -f ... ]`。
+$GuardSrcBash = Join-Path $MainCheckoutRoot "tools\lib\windowsapps_guard.sh"
 $HookContent = @"
 #!/usr/bin/env bash
 # PostCommit advisory hooks - never block commit
-PY="`$(command -v python || command -v python3 || true)"
+PY=""
+if [ -f "$GuardSrcBash" ]; then
+  . "$GuardSrcBash"
+  if is_real_python_candidate python; then PY=python
+  elif is_real_python_candidate python3; then PY=python3
+  fi
+else
+  PY="`$(command -v python || command -v python3 || true)"
+fi
 if [ -z "`$PY" ]; then
   echo "[post-commit advisory] 找不到 python/python3 — drift/closure advisory 本次跳過（不阻擋 commit）" >&2
   exit 0
