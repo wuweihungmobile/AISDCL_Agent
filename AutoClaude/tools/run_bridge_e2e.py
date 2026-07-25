@@ -224,6 +224,13 @@ def run_autoclaude(
 @click.option("--timeout", default=1200, help="真跑 subprocess timeout 秒（預設 1200）")
 def cli(source, config, workdir, out, project_id, workflow_type, compile_only, timeout):
     """W-95-2：PRD→playbook 橋接端到端 harness。"""
+    # R46（DEF-101-380）：省略 --out 時走 stdout 印出的 YAML/JSON 含中文
+    # （allow_unicode=True／ensure_ascii=False），Windows 非 UTF-8 console 直接印會
+    # UnicodeEncodeError；比照 ab_compare_backends.py DEF-82-001 同款保護。
+    try:
+        sys.stdout.reconfigure(encoding="utf-8")  # type: ignore[union-attr]
+    except (AttributeError, OSError):
+        pass
     try:
         pb, pb_yaml = compile_plan(source, project_id=project_id, workflow_type=workflow_type)
     except Exception as exc:  # noqa: BLE001

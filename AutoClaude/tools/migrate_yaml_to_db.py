@@ -14,7 +14,8 @@
   - --apply  ：解析 + 寫入三層 + 寫 yaml_import_jobs(mode='apply')；同 sha256 已成功則跳過
 
 紅線：
-  - sub-task 巢狀深度 > 3 → 透過 ThreeTierFixture / GoalTask Pydantic model_validator reject（PM #1）
+  - sub-task 巢狀深度 > 3 → 透過 ThreeTierFixture / GoalTask Pydantic
+    model_validator reject（PM #1）
   - 並發 import 同 playbook_id → 由 advisory lock 阻擋（alembic 0012 try_acquire_import_lock）
   - yaml_import_diffs.before/after 寫入前必過 PIIFilter（PM #11）
 """
@@ -24,9 +25,9 @@ import hashlib
 import json
 import logging
 import sys
+from collections.abc import Iterable
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Iterable, Optional
 
 import click
 import yaml
@@ -37,13 +38,13 @@ _REPO_ROOT = _THIS.parent.parent
 if str(_REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(_REPO_ROOT))
 
+from autoclaude.infra.services.pii_filter import PIIFilter  # noqa: E402
 from autoclaude.models.three_tier_schema import (  # noqa: E402
     ExecutionItem,
     GoalTask,
     Project,
     ThreeTierFixture,
 )
-from autoclaude.infra.services.pii_filter import PIIFilter  # noqa: E402
 
 logger = logging.getLogger("tools.migrate_yaml_to_db")
 
@@ -157,7 +158,7 @@ class ImportReport:
     goal_tasks_count: int = 0
     execution_items_count: int = 0
     diffs: list[ImportDiff] = field(default_factory=list)
-    error: Optional[str] = None
+    error: str | None = None
 
     @property
     def success(self) -> bool:
@@ -270,13 +271,20 @@ def process_single(yaml_path: Path, pii: PIIFilter) -> ImportReport:
               help="PostgreSQL DSN（apply 模式必填）")
 @click.option("--pii-enabled/--no-pii", default=True,
               help="是否啟用 PII filter（預設 enabled）")
-def cli(source: Path, dry_run: bool, report: bool, dsn: Optional[str], pii_enabled: bool) -> None:
+def cli(source: Path, dry_run: bool, report: bool, dsn: str | None, pii_enabled: bool) -> None:
     """SD_06 W4 YAML → 三層任務模型匯入工具。
 
     範例：
         python tools/migrate_yaml_to_db.py --source scripts/ --dry-run
         python tools/migrate_yaml_to_db.py --source scripts/ --report
     """
+    # R46（DEF-101-380）：--dry-run/--report 走 stdout 印出的 JSON 含中文
+    # （ensure_ascii=False），Windows 非 UTF-8 console 直接印會 UnicodeEncodeError；
+    # 比照 ab_compare_backends.py DEF-82-001 同款保護。
+    try:
+        sys.stdout.reconfigure(encoding="utf-8")  # type: ignore[union-attr]
+    except (AttributeError, OSError):
+        pass
     logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s: %(message)s")
     pii = PIIFilter(enabled=pii_enabled)
     paths = discover_yaml_sources(source)
@@ -327,8 +335,9 @@ def cli(source: Path, dry_run: bool, report: bool, dsn: Optional[str], pii_enabl
         click.echo("ERROR: --apply 模式需 --dsn 或 AUTOCLAUDE_DB_DSN", err=True)
         sys.exit(2)
 
-    from autoclaude.infra.repositories.pg_advisory import import_lock_scope  # noqa: PLC0415
     import psycopg2  # noqa: PLC0415
+
+    from autoclaude.infra.repositories.pg_advisory import import_lock_scope  # noqa: PLC0415
 
     conn = psycopg2.connect(dsn)
     applied = 0

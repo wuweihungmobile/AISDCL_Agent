@@ -32,8 +32,8 @@ from __future__ import annotations
 
 import re
 import sys
+from collections.abc import Iterable
 from pathlib import Path
-from typing import Iterable, Optional
 
 import click
 import yaml
@@ -66,7 +66,7 @@ class CompileError(ValueError):
     """攤平 / 消毒失敗（fail-closed）。"""
 
 
-def sanitize_evaluator(cmd: Optional[str]) -> Optional[str]:
+def sanitize_evaluator(cmd: str | None) -> str | None:
     """evaluator_command 三層消毒；None/空 → None；不合法 → raise CompileError。"""
     if cmd is None:
         return None
@@ -146,7 +146,7 @@ def load_projects(yaml_text: str) -> list[Project]:
     raise CompileError("YAML 無 projects 也無 project_id（非 three_tier 格式）")
 
 
-def select_project(projects: list[Project], project_id: Optional[str]) -> Project:
+def select_project(projects: list[Project], project_id: str | None) -> Project:
     if project_id:
         for p in projects:
             if p.project_id == project_id:
@@ -161,7 +161,7 @@ def select_project(projects: list[Project], project_id: Optional[str]) -> Projec
 def compile_to_playbook(
     yaml_text: str,
     *,
-    project_id: Optional[str] = None,
+    project_id: str | None = None,
     workflow_type: str = "aisdlc_sdd",
 ) -> Playbook:
     """頂層入口：three_tier YAML → 可執行 Playbook。"""
@@ -188,8 +188,15 @@ def playbook_to_yaml(pb: Playbook) -> str:
 @click.option("--project-id", default=None, help="多 project 來源時選定哪個")
 @click.option("--workflow-type", default="aisdlc_sdd",
               help="auto | aisdlc | aisdlc_sdd（預設 aisdlc_sdd）")
-def cli(source: Path, out: Optional[Path], project_id: Optional[str], workflow_type: str) -> None:
+def cli(source: Path, out: Path | None, project_id: str | None, workflow_type: str) -> None:
     """SD_improving_94 W-94-2：three_tier → 可執行 Playbook 攤平工具。"""
+    # R46（DEF-101-380）：省略 --out 時走 stdout 印出的 YAML 含中文（allow_unicode=True），
+    # Windows 非 UTF-8 console 直接印會 UnicodeEncodeError；比照 ab_compare_backends.py
+    # DEF-82-001 同款保護（best-effort，非 TextIOWrapper / 不支援時靜默略過）。
+    try:
+        sys.stdout.reconfigure(encoding="utf-8")  # type: ignore[union-attr]
+    except (AttributeError, OSError):
+        pass
     yaml_text = Path(source).read_text(encoding="utf-8")
     try:
         pb = compile_to_playbook(yaml_text, project_id=project_id, workflow_type=workflow_type)

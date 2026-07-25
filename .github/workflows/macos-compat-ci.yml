@@ -128,6 +128,8 @@ on:
       - "tools/lib/bash_probe_spec.py"
       - "tools/bootstrap_core.py"
       - "AutoClaude/tools/run_act_core.py"
+      - "AutoClaude/tools/git-hooks/pre-commit"
+      - "AutoClaude/tools/git-hooks/pre-push"
       # R19 修復包 D：tools/tests/test_install_windows_nightly.py（同活在本
       # workflow 執行的 tools/tests/ 樹內）以字串引用這三支 .ps1 根層消費檔，
       # windows-compat-ci.yml 側已被既有 **/*.ps1 覆蓋，本檔無 .ps1 兜底 glob，
@@ -214,6 +216,8 @@ on:
       - "tools/lib/bash_probe_spec.py"
       - "tools/bootstrap_core.py"
       - "AutoClaude/tools/run_act_core.py"
+      - "AutoClaude/tools/git-hooks/pre-commit"
+      - "AutoClaude/tools/git-hooks/pre-push"
       # R19 修復包 D：同上 push 區塊說明
       - "AutoClaude/tools/fix_nightly_catchup.ps1"
       - "AutoClaude/tools/run_local_nightly.ps1"

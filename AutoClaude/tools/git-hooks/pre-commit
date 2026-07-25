@@ -26,6 +26,21 @@ cd "$ROOT" || exit 1
 if [ -n "${GIT_DIR:-}" ] && [ -n "${TOPLEVEL:-}" ]; then
   export GIT_WORK_TREE="$TOPLEVEL"
 fi
+
+# WindowsApps 空殼 python 排除 guard（R46：本檔先前完全裸呼叫 python，未 source
+# 任何 SSOT，全新未裝真 Python 的 Windows 11 機器上會直接撞見 Store 空殼卡住
+# commit；比照 tools/git-hooks/pre-push 根層 dispatcher 同款用法）。
+# shellcheck disable=SC1091
+. "$ROOT/../tools/lib/windowsapps_guard.sh"
+if is_real_python_candidate python; then
+  PY=python
+elif is_real_python_candidate python3; then
+  PY=python3
+else
+  echo "[pre-commit] ❌ 找不到可用的 python（PATH 上只有 WindowsApps 空殼或完全缺席）— 請先啟用 venv" >&2
+  exit 1
+fi
+
 export PYTHONUTF8=1
 fail=0
 
@@ -40,13 +55,13 @@ if [ "${#staged_py[@]}" -gt 0 ]; then
   if command -v ruff >/dev/null 2>&1; then
     ruff check "${staged_py[@]}" || fail=1
   else
-    python -m ruff check "${staged_py[@]}" || fail=1
+    "$PY" -m ruff check "${staged_py[@]}" || fail=1
   fi
 fi
 
 # 2. LOC 預算（靜態掃描，快）— 對齊 CI test/claude-md-budget job
 echo "[pre-commit] 2/4 LOC 預算（tools/check_loc_budget.py）"
-python tools/check_loc_budget.py || fail=1
+"$PY" tools/check_loc_budget.py || fail=1
 
 # 3. CLAUDE.md <= 400 行（ADR-SD08-001 / CI hard gate）
 echo "[pre-commit] 3/4 CLAUDE.md <= 400 行"

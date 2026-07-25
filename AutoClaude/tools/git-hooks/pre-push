@@ -30,6 +30,21 @@ cd "$ROOT" || exit 1
 if [ -n "${GIT_DIR:-}" ] && [ -n "${TOPLEVEL:-}" ]; then
   export GIT_WORK_TREE="$TOPLEVEL"
 fi
+
+# WindowsApps 空殼 python 排除 guard（R46：本檔先前完全裸呼叫 python，未 source
+# 任何 SSOT，全新未裝真 Python 的 Windows 11 機器上會直接撞見 Store 空殼卡住
+# push；比照 tools/git-hooks/pre-push 根層 dispatcher 同款用法）。
+# shellcheck disable=SC1091
+. "$ROOT/../tools/lib/windowsapps_guard.sh"
+if is_real_python_candidate python; then
+  PY=python
+elif is_real_python_candidate python3; then
+  PY=python3
+else
+  echo "[pre-push] ❌ 找不到可用的 python（PATH 上只有 WindowsApps 空殼或完全缺席）— 請先啟用 venv" >&2
+  exit 1
+fi
+
 export PYTHONUTF8=1
 fail=0
 
@@ -37,7 +52,7 @@ echo "[pre-push] === 本機 CI 閘門（鏡像 autoclaude-ci.yml push jobs）===
 
 # 1. LOC 預算（CI: test / claude-md-budget）
 echo "[pre-push] 1/5 LOC 預算"
-python tools/check_loc_budget.py || fail=1
+"$PY" tools/check_loc_budget.py || fail=1
 
 # 2. CLAUDE.md <= 400 行（CI: claude-md-budget hard gate）
 echo "[pre-push] 2/5 CLAUDE.md <= 400 行"
@@ -51,7 +66,7 @@ fi
 
 # 3. Architecture Snapshot 可重現（CI: claude-md-budget 的 snapshot_sync --check）
 echo "[pre-push] 3/5 snapshot_sync.py --check"
-python tools/snapshot_sync.py --check || fail=1
+"$PY" tools/snapshot_sync.py --check || fail=1
 
 # 4. import-linter 架構約束（CI: test 的 lint-imports）
 #    未安裝即 fail（與 local_ci_gate.sh gate_importlinter 同語意；R9 複審：原本軟跳過
@@ -75,7 +90,7 @@ fi
 echo "[pre-push] 5/5 pytest（CI test+equivalence 鏡像）"
 PYTEST_ARGS="${AUTOCLAUDE_PUSH_PYTEST_ARGS:-tests/ -q --tb=short}"
 # shellcheck disable=SC2086
-env -u GIT_DIR -u GIT_WORK_TREE python -m pytest $PYTEST_ARGS || fail=1
+env -u GIT_DIR -u GIT_WORK_TREE "$PY" -m pytest $PYTEST_ARGS || fail=1
 
 # 6. ADR-SD09-011：token_guard 源碼變動偵測（on-change mutation 觸發，opt-in 非阻塞）
 #    鎖定累積改由「源碼變動」驅動（取代每日 nightly 計時）；本地 opt-in 因 Windows 原生

@@ -19,6 +19,34 @@ Microsoft Store 安裝提示，對 `pre-push` 這類阻斷式 hook 而言即為�
      `is_real_python_candidate`，不得殘留繞過共用函式的裸 `command -v python`／
      `command -v python3` 判斷。
 
+`_has_ssot_guard`（判斷一段 `.sh` 內文是否已正確接上共用 guard）沿革：R46 一審
+只判斷「兩關鍵字是否曾出現在文字中」，QA 二審 bug-injection 揪出可被「no-op
+前綴＋尾隨註解」／「一般尾隨註解」／「純文字提及」三種手法繞過，改為
+`_strip_bash_comment`（剝離不在引號內的 `#` 註解）+ `_SOURCE`/`_CALL` 陳述式位置
+錨定正則（`_has_real_source_statement`／`_has_real_call_statement`）；Architect
+三審再揪出兩者排除純訊息輸出指令行（`_PRINT_COMMAND_RE`）的保護不對稱並補齊；
+`TestHasSsotGuardBypassResistance` 對這三種繞過手法各自構造專屬回歸測試。
+
+方法論邊界（誠實記載，非本檔涵蓋範圍——R46 QA 三審 bug-injection 揪出，比照
+`AISDLC_SDD/scripts/component_sanitizer_callsite_scan.py` 同款 Rule 2 比例原則
+不強修的先例）：`_has_ssot_guard` 是逐行文字掃描 + 位置錨定正則，不是真正的
+bash 語法解析，因此對下列兩種刻意構造的偽裝手法無鑑別力：
+  - heredoc（`cat <<'EOF' ... EOF`）內把兩個關鍵字包成「使用範例」說明文字，
+    真正選 `PY` 的邏輯改用裸 `command -v python`——逐行掃描看不出 heredoc
+    邊界，會把說明文字誤判為真陳述式。
+  - 把 `is_real_python_candidate` 包進一個語法正確、但整檔從未被呼叫的死
+    函式裡（source 行是真的）——本檔不做可達性分析，無法分辨「定義了」與
+    「真的被呼叫到」。
+  這兩種繞過會讓 `_has_ssot_guard` 誤判為已收斂，但風險有界：對 11 支已知
+  白名單呼叫端（`_CALLER_FILES`），`test_no_raw_unguarded_python_check_remains`
+  是另一支**不依賴** `_has_ssot_guard` 的獨立安全網（直接對這些檔案做裸
+  `command -v python >/dev/null` 字面值 regex 比對），不受此限制影響；只有
+  repo-wide 防增生掃描（`test_repo_wide_scan_finds_no_unmigrated_sh_scripts`／
+  `test_repo_wide_scan_finds_no_zero_guard_python_calls`，鎖定「未知的新檔案」）
+  對這兩種刻意構造的偽裝手法會失明。徹底解決需要真正的 bash 語法解析（含
+  heredoc 邊界追蹤與基本可達性分析），複雜度遠超本檔工具定位，留待出現真實
+  呼叫點再評估。
+
 執行：python -m pytest tools/tests/test_windowsapps_guard_bash_parity.py -v
 """
 from __future__ import annotations
@@ -44,6 +72,11 @@ _CALLER_FILES = [
     _REPO_ROOT / "AutoClaude" / "tools" / "run_act.sh",
     _REPO_ROOT / "AutoClaude" / "tools" / "sd06_w3_staging_dryrun.sh",
     _REPO_ROOT / "AISDLC_SDD" / "scripts" / "ci-gate.sh",
+    # R46 新增：AutoClaude 專屬 git hooks——先前完全繞過本 SSOT（DEF-101-381），
+    # 因無副檔名而連 repo-wide `*.sh` 掃描本身都看不到，見
+    # `_tracked_extensionless_hook_files()` 對此方法論盲區的補強。
+    _REPO_ROOT / "AutoClaude" / "tools" / "git-hooks" / "pre-commit",
+    _REPO_ROOT / "AutoClaude" / "tools" / "git-hooks" / "pre-push",
 ]
 
 # 裸 `command -v python`／`command -v python3` 可用性判斷殘留偵測——只認本 repo
@@ -89,8 +122,10 @@ def _has_unmigrated_raw_check(text: str) -> bool:
     `windowsapps_guard.sh`（source）與 `is_real_python_candidate`（實際呼叫）；
     只有 source 行、沒有任何呼叫（如被局部退化改回裸判斷）不算已收斂
     （R43 三審 QA bug-injection 揪出，訂正二審初版「只要有 source 行就整檔
-    豁免」的鑑別力缺口）。"""
-    if "windowsapps_guard.sh" in text and "is_real_python_candidate" in text:
+    豁免」的鑑別力缺口）。R46 QA 一審修正：改呼叫 `_has_ssot_guard`（要求兩個
+    關鍵字皆出現在非註解行），消滅原本此處內嵌的純子字串比對重複邏輯，同時
+    修掉「guard 區塊被整段 `#` 注釋掉但文字仍在」會被誤判為已收斂的漏洞。"""
+    if _has_ssot_guard(text):
         return False
     for line in text.splitlines():
         stripped = line.strip()
@@ -116,6 +151,33 @@ def _tracked_sh_files() -> list[str]:
             "——掃描邊界不得靜默縮小"
         )
     return [line for line in proc.stdout.splitlines() if line]
+
+
+def _tracked_extensionless_hook_files() -> list[str]:
+    """git tracked 的無副檔名 git-hook 檔案（`pre-commit`/`pre-push`/`post-commit`
+    等）——依 git hook 慣例沒有副檔名，`_tracked_sh_files()`（`git ls-files --
+    "*.sh"`）天生掃不到，是既有 repo-wide `*.sh` 掃描的方法論盲區（R46 新發現：
+    `AutoClaude/tools/git-hooks/pre-commit`/`pre-push` 因此完全繞過 R43~R45 建立
+    的 repo-wide 防增生掃描，見 DEF-101-381）。本 repo 目前僅 3 個 git-hooks 目錄
+    （根層 `tools/git-hooks/`、`AutoClaude/tools/git-hooks/`、
+    `AISDLC_SDD/.githooks/`），用固定路徑樣式補齊涵蓋範圍；排除 `.md`/`.ps1`
+    （非 bash 腳本，各有自己的文件/PowerShell 側 parity 測試）。"""
+    proc = subprocess.run(
+        ["git", "-C", str(_REPO_ROOT), "-c", "core.quotePath=false",
+         "ls-files", "--",
+         "tools/git-hooks/*", "AutoClaude/tools/git-hooks/*",
+         "AISDLC_SDD/.githooks/*"],
+        capture_output=True, text=True, encoding="utf-8", errors="replace",
+    )
+    if proc.returncode != 0:
+        raise AssertionError(
+            f"git ls-files 失敗（rc={proc.returncode}；stderr={proc.stderr.strip()!r}）"
+            "——掃描邊界不得靜默縮小"
+        )
+    return [
+        line for line in proc.stdout.splitlines()
+        if line and not line.endswith((".md", ".ps1"))
+    ]
 
 
 _FROZEN_SDD_VERSION_RE = re.compile(r"^AISDLC_SDD/(AISDLC_SDD_v\d+\.\d+)/")
@@ -154,10 +216,85 @@ def _exclude_frozen_sdd_versions(paths: list[str], latest_name: str) -> list[str
     return kept
 
 
+def _strip_bash_comment(line: str) -> str:
+    """去除該行的 bash 註解部分（第一個「不在引號內」的 `#` 之後全部視為註解）。
+    R46 QA 二審 bug-injection 揪出：R46 一審版只判斷「整行是否以 `#` 開頭」，
+    抓不到 `: # 真代碼` 這種 no-op 前綴＋尾隨註解，或 `真代碼  # 提及關鍵字`
+    這種一般尾隨註解——這兩種寫法整行都不是以 `#` 開頭，卻讓關鍵字實際上只活在
+    註解裡。逐字元掃描並追蹤單／雙引號狀態，只在引號外才承認 `#` 起始註解。"""
+    in_single = in_double = False
+    for i, ch in enumerate(line):
+        if ch == "'" and not in_double:
+            in_single = not in_single
+        elif ch == '"' and not in_single:
+            in_double = not in_double
+        elif ch == "#" and not in_single and not in_double:
+            return line[:i]
+    return line
+
+
+# 排除純訊息輸出指令（echo/printf/print）——`windowsapps_guard.sh` 若只出現在
+# 這類指令的字串引數裡，是「印出來的文字」而非「真正的 source 目標」（R46 QA
+# 二審 bug-injection 揪出：`echo "reminder: source windowsapps_guard.sh ..."`
+# 這種純文字提及）。不要求 dot-source 與檔名字面值在同一行——本 repo 存在
+# 「先賦值到變數、稍後才 dot-source 該變數」的合法間接寫法（如
+# `install_post_commit.sh` 的降級回退設計：`GUARD_SRC="...windowsapps_guard.sh"`
+# 接著 `. "$GUARD_SRC"`），且複雜的 command-substitution 路徑（如
+# `sd06_w3_staging_dryrun.sh` 用 `$(cd "$(dirname ...)" && pwd)/.../
+# windowsapps_guard.sh`）本身就含空白字元，無法用單一行的緊鄰 token 比對。
+_PRINT_COMMAND_RE = re.compile(r"^\s*(?:echo|printf|print)\b")
+
+# 要求 is_real_python_candidate 出現在陳述式起始位置：行首、`;`、`&&`、`||` 之後，
+# 可選 `if`/`elif` 與可選 `!` 否定——涵蓋本 repo 全部既有真實呼叫語法（含
+# `if ! is_real_python_candidate ...`／`is_real_python_candidate ... || {...}`／
+# `elif is_real_python_candidate ...`），但排除任意包含該子字串的位置（如 echo
+# 字串內的純文字提及，R46 QA 二審 bug-injection 揪出）。
+_CALL_STATEMENT_RE = re.compile(
+    r"(?:^\s*|;\s*|&&\s*|\|\|\s*)(?:if\s+|elif\s+)?!?\s*is_real_python_candidate\b"
+)
+
+
+def _has_real_source_statement(text: str) -> bool:
+    """檔案內是否有一個非註解、非純訊息輸出的行提及 `windowsapps_guard.sh`
+    （涵蓋直接 dot-source 與先賦值到變數的間接寫法，見上方常數註解），排除
+    「純粹印出訊息文字剛好含這個檔名」這種偽裝。"""
+    for raw_line in text.splitlines():
+        line = _strip_bash_comment(raw_line)
+        if _PRINT_COMMAND_RE.match(line):
+            continue
+        if "windowsapps_guard.sh" in line:
+            return True
+    return False
+
+
+def _has_real_call_statement(text: str) -> bool:
+    """檔案內是否有一行「真正」呼叫 is_real_python_candidate（非純文字提及/
+    註解），要求該識別字出現在陳述式起始位置而非任意包含該子字串的位置。
+
+    R46 Architect 三審揪出的不對稱修正：本函式原本沒有比照孿生函式
+    `_has_real_source_statement` 排除純訊息輸出指令行（`echo`/`printf`），導致
+    `echo "usage: run this; if is_real_python_candidate python; then use it"`
+    這類說明文字裡的分號會被 `_CALL_STATEMENT_RE` 的 `;` 錨點誤判為陳述式邊界
+    （regex 不理解字串引號語意）。改為整行是 echo/printf 時直接跳過，不管其
+    引數內容是否恰好含符合位置錨定樣式的文字。"""
+    for raw_line in text.splitlines():
+        line = _strip_bash_comment(raw_line)
+        if _PRINT_COMMAND_RE.match(line):
+            continue
+        if _CALL_STATEMENT_RE.search(line):
+            return True
+    return False
+
+
 def _has_ssot_guard(text: str) -> bool:
     """R44 抽出：與 `_has_unmigrated_raw_check` 開頭判斷同義，供
-    `_has_zero_guard_python_call` 共用。"""
-    return "windowsapps_guard.sh" in text and "is_real_python_candidate" in text
+    `_has_zero_guard_python_call` 共用。R46 一審修正：兩個關鍵字皆須出現在
+    非整行註解行；R46 二審再修正（QA bug-injection 揪出一審版仍可被「no-op
+    前綴＋尾隨註解」「一般尾隨註解」「純文字提及」三種手法繞過）：改用
+    `_has_real_source_statement`／`_has_real_call_statement`，要求陳述式出現在
+    正確的語法位置（見兩者 docstring），並正確剝離不在引號內的 `#` 註解
+    （`_strip_bash_comment`），而非只判斷整行是否以 `#` 開頭。"""
+    return _has_real_source_statement(text) and _has_real_call_statement(text)
 
 
 def _has_any_raw_availability_check(text: str) -> bool:
@@ -356,6 +493,75 @@ class TestHasZeroGuardPythonCall(unittest.TestCase):
         self.assertFalse(_has_zero_guard_python_call(text))
 
 
+class TestHasSsotGuardBypassResistance(unittest.TestCase):
+    """R46 Architect 三審要求：直接針對 `_has_ssot_guard`/`_strip_bash_comment`
+    構造 R46 QA 二審揪出的三種繞過手法之專屬回歸測試，鎖住這幾個函式本身的
+    鑑別力（不能只靠既有整合性測試如 `test_all_known_callers_source_shared_guard`
+    間接覆蓋——那類測試對「這幾個新函式被局部退化」是否有鑑別力並不直接）。"""
+
+    _REAL_GUARD = (
+        '. "$ROOT/../tools/lib/windowsapps_guard.sh"\n'
+        'if is_real_python_candidate python; then PY=python; fi\n'
+    )
+
+    def test_real_guard_is_recognized(self) -> None:
+        """正向對照組：真正生效的 guard 必須判定為已收斂。"""
+        self.assertTrue(_has_ssot_guard(self._REAL_GUARD))
+
+    def test_noop_prefix_with_trailing_comment_is_not_recognized(self) -> None:
+        """R46 QA 二審繞過①：`: #` no-op 前綴＋尾隨註解，整行不以 `#` 開頭
+        （`strip().startswith("#")` 判斷會誤放行），但兩行實際上完全是註解。"""
+        text = (
+            ': # . "$ROOT/../tools/lib/windowsapps_guard.sh"\n'
+            ': # if is_real_python_candidate python; then\n'
+        )
+        self.assertFalse(_has_ssot_guard(text))
+
+    def test_trailing_comment_after_real_code_is_not_recognized(self) -> None:
+        """R46 QA 二審繞過②：一般尾隨註解——真正執行的程式碼是裸
+        `command -v python`（未收斂），關鍵字只出現在該行的尾隨註解裡。"""
+        text = 'command -v python >/dev/null 2>&1  # windowsapps_guard.sh is_real_python_candidate (disabled)\n'
+        self.assertFalse(_has_ssot_guard(text))
+
+    def test_echo_pure_mention_is_not_recognized(self) -> None:
+        """R46 QA 二審繞過③：純文字提及——整行是 `echo` 訊息輸出，關鍵字只是
+        被印出的說明文字，不是真正的 source/呼叫陳述式。"""
+        text = (
+            'echo "reminder: source windowsapps_guard.sh and call '
+            'is_real_python_candidate before use"\n'
+        )
+        self.assertFalse(_has_ssot_guard(text))
+
+    def test_echo_mention_inside_call_statement_position_is_not_recognized(self) -> None:
+        """R46 Architect 三審揪出的不對稱繞過：echo 說明文字裡剛好含分號，讓
+        `_CALL_STATEMENT_RE` 的 `;` 錨點在字串內部誤判為陳述式邊界。"""
+        text = 'echo "usage: run this; if is_real_python_candidate python; then use it"\n'
+        self.assertFalse(_has_ssot_guard(text))
+
+    def test_indirect_variable_assignment_is_still_recognized(self) -> None:
+        """正向對照組（防止修復矯枉過正）：先賦值到變數、稍後才 dot-source 該
+        變數的合法降級回退寫法（`install_post_commit.sh` 既有設計）仍須判定為
+        已收斂。"""
+        text = (
+            'GUARD_SRC="$MAIN_CHECKOUT_ROOT/tools/lib/windowsapps_guard.sh"\n'
+            'if [ -f "$GUARD_SRC" ]; then\n'
+            '  . "$GUARD_SRC"\n'
+            '  is_real_python_candidate python && PY=python\n'
+            'fi\n'
+        )
+        self.assertTrue(_has_ssot_guard(text))
+
+    def test_complex_command_substitution_path_is_still_recognized(self) -> None:
+        """正向對照組：複雜 command-substitution 路徑（含空白字元，
+        `sd06_w3_staging_dryrun.sh` 既有寫法）仍須判定為已收斂。"""
+        text = (
+            '. "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)'
+            '/../../tools/lib/windowsapps_guard.sh"\n'
+            'is_real_python_candidate python || { echo err; exit 1; }\n'
+        )
+        self.assertTrue(_has_ssot_guard(text))
+
+
 class TestBashCallersEnrollment(unittest.TestCase):
     """所有已知呼叫端須改用共用函式，且不得殘留繞過它的裸 command -v 判斷。"""
 
@@ -369,17 +575,18 @@ class TestBashCallersEnrollment(unittest.TestCase):
         self.assertIn("WindowsApps", text)
 
     def test_all_known_callers_source_shared_guard(self) -> None:
+        """R46 QA 一審 bug-injection 揪出：原本用兩個獨立 `assertIn` 純子字串比對，
+        把整段 guard 區塊（source 行 + 呼叫行）逐行加 `#` 注釋掉後兩個子字串仍在
+        檔案文字中，測試完全不會轉紅（看似鎖住存在性、實際只鎖到「字串曾經出現
+        過」）。改用 `_has_ssot_guard`（要求兩關鍵字皆出現在非註解行）。"""
         for f in _CALLER_FILES:
             with self.subTest(file=str(f.relative_to(_REPO_ROOT))):
                 self.assertTrue(f.is_file(), f"{f} 不存在")
                 text = f.read_text(encoding="utf-8")
-                self.assertIn(
-                    "windowsapps_guard.sh", text,
-                    f"{f} 未 dot-source 共用 guard 檔案",
-                )
-                self.assertIn(
-                    "is_real_python_candidate", text,
-                    f"{f} 未改用 is_real_python_candidate 判斷 python 可用性",
+                self.assertTrue(
+                    _has_ssot_guard(text),
+                    f"{f} 未在非註解行同時 dot-source 共用 guard 檔案並呼叫 "
+                    "is_real_python_candidate 判斷 python 可用性（或該區塊已被注釋掉）",
                 )
 
     def test_no_raw_unguarded_python_check_remains(self) -> None:
@@ -410,7 +617,8 @@ class TestBashCallersEnrollment(unittest.TestCase):
         不呼叫（或呼叫被整段刪掉、只留 source 行）不再豁免。"""
         known_relpaths = {str(f.relative_to(_REPO_ROOT)).replace("\\", "/") for f in _CALLER_FILES}
         unmigrated: list[str] = []
-        for rel in _tracked_sh_files():
+        scanned = _tracked_sh_files() + _tracked_extensionless_hook_files()
+        for rel in scanned:
             if rel in known_relpaths or rel in _EXEMPT_SH_FILES:
                 continue
             path = _REPO_ROOT / rel
@@ -445,7 +653,9 @@ class TestBashCallersEnrollment(unittest.TestCase):
         """
         latest_name = _latest_sdd_version_name()
         known_relpaths = {str(f.relative_to(_REPO_ROOT)).replace("\\", "/") for f in _CALLER_FILES}
-        scoped = _exclude_frozen_sdd_versions(_tracked_sh_files(), latest_name)
+        scoped = _exclude_frozen_sdd_versions(
+            _tracked_sh_files() + _tracked_extensionless_hook_files(), latest_name
+        )
 
         unmigrated: list[str] = []
         for rel in scoped:

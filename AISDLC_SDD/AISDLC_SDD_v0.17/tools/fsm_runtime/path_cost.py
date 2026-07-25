@@ -22,6 +22,7 @@ from typing import Dict, List, Optional, Tuple
 import yaml
 
 from .file_lock import file_lock
+from .state_loader import _sanitize_component
 
 ROLLING_WINDOW = 30
 MIN_SAMPLES = 10
@@ -223,7 +224,7 @@ def _write_milestone(
     out_dir = repo_root / "build" / "reports" / "orchestrator"
     out_dir.mkdir(parents=True, exist_ok=True)
     date = datetime.now(timezone.utc).strftime("%Y-%m-%d")
-    p = out_dir / f"CALIBRATION-MILESTONE-{subagent}-{classification}-{date}.yaml"
+    p = out_dir / f"CALIBRATION-MILESTONE-{_sanitize_component(subagent)}-{_sanitize_component(classification)}-{date}.yaml"
     avg = statistics.mean(samples)
     stddev = statistics.stdev(samples) if len(samples) > 1 else 0.0
     body = {
