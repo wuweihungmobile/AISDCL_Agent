@@ -1,0 +1,72 @@
+"""跨 AISDLC_SDD 版本共用的檔名片段淨化 SSOT（R45 架構最佳化，DEF-101-358）。
+
+背景：`_sanitize_component()` 曾在每個 Copy-on-Evolve 版本目錄（
+`AISDLC_SDD_v0.01`~LATEST）下各自維護一份複本。R38 為 LATEST 強化了 Windows
+禁用字元（`< > : " | ? *`）、保留裝置名（CON/PRN/AUX/NUL/COM1-9/LPT1-9）、控制
+字元、超長字串四項防護，但凍結版本（v0.01~v0.29）依 Copy-on-Evolve 鐵律不可
+原地修改，於是留著早期只擋路徑分隔符 `/`、`\\` 的弱化版（R44 DEF-101-358 記載此
+落差）。只要淨化邏輯仍分散在 30 份複本，下一次再發現新的淨化盲點，就得重複打
+30 次補丁。
+
+本模組是這個 SSOT 的移出實作：不含任何版本特有狀態，是零業務語意的平台/安全
+相容工具函式，比照既有 `AISDLC_SDD/scripts/`（`copy_on_evolve.sh`／
+`sdd_version.py`／`cross_version_guard.py` 等）「共享 CI infra，免
+Copy-on-Evolve」的既有先例（`EVOLUTION_LOG.md::DEF-15-001`）。每個版本目錄下的
+`tools/fsm_runtime/state_loader.py` 改為透過 importlib 依絕對路徑載入本模組
+（不透過 sys.path 插入，避免跨版本 import 汙染同一行程的模組快取），薄委派呼叫
+`sanitize_component()`。往後同類淨化強化只需改這一處、30 個版本立即同步生效，
+不必再逐版走例外補丁流程。
+
+覆蓋強度比照 AutoClaude 側 `autoclaude/utils/logger.py::_sanitize_log_filename()`
+（交叉一致性見 `AISDLC_SDD_v0.30/tools/fsm_runtime/tests/
+test_state_component_sanitizer_parity.py`：比較「危險輸入是否被同等程度擋下」，
+不要求輸出完全一致）。AISDLC_SDD 與 AutoClaude 是兩個獨立可發布子專案（各自
+`releases/` 打包發布機制），依既有先例（`bootstrap_core.py::
+_is_windows_apps_stub()` 語言邊界獨立實作）不可跨子專案 import，故本模組獨立
+實作、不與 logger.py 共用同一顆函式物件。
+"""
+from __future__ import annotations
+
+import re
+
+_WIN_FORBIDDEN_CHARS = frozenset('<>:"|?*\\')
+_WIN_RESERVED_NAME_RE = re.compile(r"^(CON|PRN|AUX|NUL|COM[0-9]|LPT[0-9])$", re.IGNORECASE)
+_MAX_COMPONENT_LEN = 80  # 遠低於 NTFS 單檔名 255 上限，為前後綴（FSM-STATE-/-{track}.yaml）留餘裕
+
+
+def sanitize_component(name: str) -> str:
+    """消毒檔名片段，防止誤傳整段路徑當 project/track_id/ac_id/rule_id 等。
+
+    根因防護（arch_fitness FF-3）：曾有呼叫端把整段相對路徑
+    （build/reports/fsm/FSM-STATE-AISDLC_SDD.yaml）當 project 傳入，使
+    _default_state_path 產生巢狀 FSM-STATE-build/reports/fsm/...yaml.yaml，
+    其 .tmp 殘留無法被 save_state 的 reap 回收。剝除路徑分隔符後，
+    任何誤用都退化為單層平坦檔名，不再洩漏孤兒。
+
+    R38 深化：本函式亦是 spec_patch_proposer.py 組 SPEC-PATCH-{ac_id}-{date}.md
+    的共用消毒點（同目錄下同一缺陷類別的姊妹位置，收斂成單一函式，不各自另寫
+    一份，避免重蹈 DEF-101-219/DEF-101-295 反覆復發的根因）。
+
+    R38 四方複審 SD 發現（padding-bypass）：原本「淨化禁用字元 → 保留裝置名
+    檢查 → 截斷 → 第二次獨立 rstrip」的順序，在「截斷前 rstrip 因結尾非空白
+    不觸發、保留名檢查因此誤判放行」與「截斷後才把露出的空白 rstrip 掉、卻
+    不重跑保留名檢查」之間存在順序缺口：輸入「保留名 + 大量空格 + 一個不會被
+    rstrip 剝除的字元」且總長超過 `_MAX_COMPONENT_LEN` 時會讓保留名裸露輸出。
+    修復：把「淨化禁用字元 → 截斷 → 最終 rstrip → 保留裝置名檢查」收斂成
+    單一輪、只做一次，不再先查一次保留名又截斷後不重查。
+    """
+    s = str(name).strip()
+    sanitized = "".join(
+        "_" if ch in _WIN_FORBIDDEN_CHARS or ch == "/" or ord(ch) < 0x20 or ord(ch) == 0x7F else ch
+        for ch in s
+    )
+    if len(sanitized) > _MAX_COMPONENT_LEN:
+        sanitized = sanitized[:_MAX_COMPONENT_LEN]
+    # 路徑穿越防禦：`/` `\` 已於上一步淨化；純句點片段（".."／"." 穿越 token）
+    # 無其他字元可留，rstrip(" .") 會將其整段吃光，回退為安全的 "untitled"
+    # （不會殘留 ".."／"." 這種在未來任何直接當路徑片段使用的呼叫端具穿越意義的字面值）。
+    sanitized = sanitized.rstrip(" .") or "untitled"
+    stem = sanitized.split(".", 1)[0]
+    if _WIN_RESERVED_NAME_RE.match(stem):
+        sanitized = f"_{sanitized}"
+    return sanitized

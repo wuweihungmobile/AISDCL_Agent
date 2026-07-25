@@ -19,6 +19,21 @@
 | **殘留落差** | 29 版的 `_sanitize_component()` 本身仍是較弱版本（未比照 v0.30 做 Windows 保留裝置名／控制字元／長度上限強化）——足以阻斷本次驗證之路徑穿越攻擊面，但防護縱深不及 v0.30；是否 backport 強化版留待下輪評估（見 DEF-101-358，open/watch）。 |
 | **回退指引** | 若日後需要回退（例如發現本次修法本身有誤），逐版還原 203 處呼叫點為修復前原始碼即可；**不建議回退**——回退會重新打開已證實可利用的任意檔案讀取漏洞。回退不影響任何版本的 API/FSM 狀態/`*.tla`（純字串淨化呼叫，無其他變更）。 |
 
+## 凍結基線例外：v0.01～v0.29 `_sanitize_component()` 共享層抽取（R45，2026-07-25）
+
+> **注意**：本節同 R44 章節，是對既有 29 個**凍結基線版本原地打補丁**的例外記錄（非正常 Copy-on-Evolve 演化）。這是繼 R44（P0 路徑穿越回補）之後，43+ 輪帳本史上**第二次**對凍結基線做例外回補；本次經使用者於架構層級明確核准（見下方 signoff 欄），且範圍是 R44 遺留的 DEF-101-358 殘留落差。完整逐版驗證細節見根層 `docs/06_quality/AutoSDD_Defect_Log.md` DEF-101-358（本節為其權威索引，不重複散文敘述）。
+
+| 欄位 | 內容 |
+|------|------|
+| **範圍** | `AISDLC_SDD_v0.01/` ～ `AISDLC_SDD_v0.29/`（29 個凍結基線版本）+ LATEST（v0.30）共 30 個版本的 `tools/fsm_runtime/state_loader.py`；新增共用模組 `AISDLC_SDD/scripts/component_sanitizer.py`（不屬任何版本，比照既有 `copy_on_evolve.sh`／`sdd_version.py` 共享 CI infra 免 Copy-on-Evolve 先例） |
+| **日期／signoff** | 2026-07-25（R45 跨平台相容性複審，架構師建議＋使用者裁決）；🔴 人工 signoff：主控以 `AskUserQuestion` 列出「抽共享層／手動逐版 backport／維持現狀」三案，使用者明確選擇「抽成共享層(架構最佳化)」 |
+| **打破 Copy-on-Evolve 的理由** | R44 記載的 DEF-101-358 殘留落差：29 個凍結版本的 `_sanitize_component()` 只擋路徑分隔符（弱化版），未比照 v0.30 做 Windows 保留裝置名／禁用字元／控制字元／長度上限強化。Architect 架構複審指出：若繼續維持「30 份各自複本」的架構，未來每次發現新的淨化盲點都要重複走一次「打破凍結基線例外」流程（R43 WindowsApps guard、R44 路徑穿越已是連續兩次同構事故）。抽共享層一次性解決「同一函式 N 份拷貝」的結構性根因，往後同類強化只需改一處。 |
+| **修法** | 新增 `AISDLC_SDD/scripts/component_sanitizer.py`（含 v0.30 既有強化版 `sanitize_component()` 實作，零版本特有狀態、零業務語意的平台/安全工具函式）；30 個版本的 `state_loader.py` 皆改為以 `importlib.util.spec_from_file_location` 依絕對路徑載入該共用模組（不透過 `sys.path` 插入，避免跨版本模組快取汙染），`_sanitize_component` 成為指向共用函式的薄委派；v0.30 原本內嵌的獨立實作一併移除，改與 29 個凍結版本共用同一份原始碼實作（同一支 `component_sanitizer.py` 檔案；因 `_load_shared_component_sanitizer()` 刻意不寫入 `sys.modules`（避免跨版本模組快取汙染），30 個版本各自對這份原始碼獨立 `exec_module()` 一次，故精確而言是「30 個各自獨立的函式物件執行同一份共用程式碼」，非跨版本共用同一顆記憶體物件）。**不升版、不新增版本目錄**，僅原地補丁既有 29 個凍結版本 + 修改 LATEST。 |
+| **TLC 證據** | N/A——本次改動限於 `_sanitize_component()` 的取得方式（從「內嵌定義」改為「委派共用模組」），純函式的輸入輸出行為對 v0.30 而言不變，未觸碰任一版本的 `_HAPPY_PATH` 或任何 `*.tla`/`.cfg`，各版既有五軌 TLC 證明維持有效。 |
+| **驗證** | 新增 `tools/tests/test_component_sanitizer_shared_layer_lock.py`（4 case，behavioral 驗證 30 個版本皆委派同一份共用原始碼（同一支模組檔案）、且對已知危險輸入〔保留裝置名／禁用字元／控制字元／超長字串〕行為一致，subprocess 隔離避免同名模組跨版本快取誤判）；R44 既有回歸鎖 `tools/tests/test_sanitize_component_frozen_sdd_versions_lock.py`（6 case）與 v0.30 `test_state_component_sanitizer_parity.py`／`test_sanitize_component_call_site_lock.py` 皆重跑確認零回歸。全套驗證：`AISDLC_SDD_v0.30` 1721 passed／8 skipped；`ci-gate.sh` 全綠（含 v0.01 凍結基線 1478 passed）；`AutoClaude` 3668 passed；根層 `tools/tests` 467 passed（1 個既有已知失敗 DEF-101-351，非本輪回歸）。R45 四方複審（Architect/SA/SD/QA）一審獨立發現並訂正：(a) 本節與缺陷帳本／新測試 docstring 原皆誤寫「共用同一顆函式物件」，已訂正為上述精確描述；(b) 缺陷帳本歸檔 `archive_21.md` 初版誤含 3 筆實為 open 狀態的條目（DEF-01-007／DEF-101-242／DEF-101-243），已移回主帳本。 |
+| **殘留落差** | DEF-101-358 本輪透過本次架構變更 fixed@R45（見缺陷帳本該筆記載），但這個修法本身引入一個新的架構取捨，誠實記載：**29 個凍結版本「`_sanitize_component()` 的行為」從此不再完全由各版本自己凍結的原始碼決定，而是委派給 `AISDLC_SDD/scripts/component_sanitizer.py`——一支明確不受 Copy-on-Evolve 保護、可被自由修改的共用檔案**。往後任何人修改 `component_sanitizer.py`，29 個凍結基線對這一項行為會立即、同步、無痕地跟著變動，不需要碰它們自己的原始碼樹。這正是本次重構「改一處、全版本立即生效」的設計目的，但代價是：對此函式而言，「凍結」僅止於原始碼層級（各版 `state_loader.py` 檔案本身逐位元組不變），不再涵蓋行為層級（實際執行結果可隨共用模組演進而變）。此取捨經使用者於架構決策時知情核准，非本輪新增的未揭露風險，僅在此明確記載供未來查詢「凍結基線的『凍結』確切涵蓋什麼」時參考。另，Architect 建議之「修復 LATEST 端 AST 掃描器兩個已知盲區並擴大唯讀掃描至全部凍結版本」（可偵測未來新增的未淨化呼叫點，非本次共享層要解決的問題）留待下一輪評估，見 DEF-101-378。 |
+| **回退指引** | 若日後需要回退（例如共用模組載入機制本身出問題），30 個版本的 `state_loader.py` 皆可獨立還原各自原本的內嵌定義（29 版還原弱化版、v0.30 還原強化版），刪除 `AISDLC_SDD/scripts/component_sanitizer.py` 即可；**不建議回退**——回退會使 29 個凍結版本重新失去 Windows 保留裝置名等防護縱深。回退不影響任何版本的 API/FSM 狀態/`*.tla`（純函式取得方式變更，行為輸出對外呼叫端不變）。 |
+
 ## v0.29 → v0.30
 
 | 欄位 | 內容 |

@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import copy
 import datetime as _dt
+import importlib.util as _importlib_util
 import os
 import shutil
 import uuid
@@ -29,16 +30,32 @@ def _now() -> str:
     return _dt.datetime.now(_dt.timezone.utc).isoformat(timespec="seconds")
 
 
-def _sanitize_component(name: str) -> str:
-    """消毒檔名片段，防止誤傳整段路徑當 project/track_id。
+# R45 架構最佳化（DEF-101-358）：本函式改為薄委派 AISDLC_SDD/scripts/
+# component_sanitizer.py 這個跨版本共用 SSOT（importlib 依絕對路徑載入，不
+# 污染 sys.path），不再各版各自維護一份淨化邏輯複本。原本此處只擋路徑分隔符
+# 的弱化版已被共用實作取代——後者額外擋下 Windows 禁用字元／保留裝置名／
+# 控制字元／超長字串，往後同類淨化強化只需改共用模組一處、全版本立即生效，
+# 不必再逐版例外補丁（沿革見 component_sanitizer.py 模組 docstring 與
+# docs/06_quality/AutoSDD_Defect_Log.md::DEF-101-358）。
+_SHARED_COMPONENT_SANITIZER_PATH = (
+    Path(__file__).resolve().parents[3] / "scripts" / "component_sanitizer.py"
+)
 
-    根因防護（arch_fitness FF-3）：曾有呼叫端把整段相對路徑
-    （build/reports/fsm/FSM-STATE-AISDLC_SDD.yaml）當 project 傳入，使
-    _default_state_path 產生巢狀 FSM-STATE-build/reports/fsm/...yaml.yaml，
-    其 .tmp 殘留無法被 save_state 的 reap 回收。剝除路徑分隔符後，
-    任何誤用都退化為單層平坦檔名，不再洩漏孤兒。
-    """
-    return str(name).replace("/", "_").replace("\\", "_").strip()
+
+def _load_shared_component_sanitizer():
+    spec = _importlib_util.spec_from_file_location(
+        "_aisdlc_sdd_shared_component_sanitizer", _SHARED_COMPONENT_SANITIZER_PATH
+    )
+    if spec is None or spec.loader is None:
+        raise ImportError(f"無法載入共用淨化模組：{_SHARED_COMPONENT_SANITIZER_PATH}")
+    module = _importlib_util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+_shared_component_sanitizer = _load_shared_component_sanitizer()
+_sanitize_component = _shared_component_sanitizer.sanitize_component
+_MAX_COMPONENT_LEN = _shared_component_sanitizer._MAX_COMPONENT_LEN
 
 
 def _default_state_path(project: str) -> Path:
