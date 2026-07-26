@@ -46,6 +46,26 @@ check_defect_log_crossref.py／check_wrapper_thinness.py／_stdio_utf8.py 四支
 `os.path.join`/`REPO_ROOT /` 正則並行執行、聯集後再套用磁碟存在性過濾器，兩種偵測
 機制互不排斥。
 
+R50（第 50 輪 Mac/Windows 相容性四方複審）：`tools/tests/test_windowsapps_guard_cross_consistency.py`
+用 `_tracked_files(pattern)`（`git ls-files -- pattern`）對整個 repo 做 glob 動態掃描
+（例：`_tracked_files("*.ps1")` 取得「當下全部 git 追蹤的 .ps1 檔」），而非引用某個
+固定路徑字面值或 import 陳述式——這是與盲區 A（`_scan_dir_for_root_paths()`／
+`_scan_import_consumed_paths()` 解析器猜測範圍不夠）、盲區 B（`_KNOWN_SUBPROCESS_ONLY_CONSUMERS`
+登記的執行期子行程消費）並列的第三種消費形態（盲區 C），且先前無任何機械訊號涵蓋
+——連盲區 B 那種手動登記清單兜底都沒有，四方複審實測 10/10 全綠卻未攔下該檔案
+新增 6 支 .ps1 消費檔（呼叫 python 未經 WindowsApps guard SSOT）未被
+macos-compat-ci.yml paths 覆蓋的缺口。比照盲區 B 手法：新增 `_KNOWN_GLOB_SCAN_CONSUMERS`
+顯式登記「哪個測試檔＋掃描哪個 glob pattern」，斷言該 pattern 字面值仍存在於來源碼中
+（防登記腐化），再對其*動態即時*執行 `git ls-files -- pattern` 取得的真實結果
+（非寫死清單，隨檔案新增/刪除自動同步，不會像盲區 B 清單一樣需要人工同步維護內容）
+逐一機械斷言被對應 workflow 的 push/pull_request paths 覆蓋。刻意不比照盲區 A
+擴充成通用正則掃描器：該檔另一處 `_tracked_files("*.py")` 語意上會匹配整個
+`AutoClaude/`（500+ 檔）等大範圍前綴，若也納入通用掃描器會逼 CI paths 逐一列舉
+數百檔或改用會讓每次原始碼異動都觸發本 workflow 的過寬萬用字元，這既不實際也偏離
+本輪複審實測揪出的具體缺口（.ps1 6 支檔案）；`_KNOWN_GLOB_SCAN_CONSUMERS` 僅登記
+已被實測證實有真實覆蓋缺口的 `*.ps1` 一項，`*.py` 的更廣語意留待未來若有實測缺口
+再議（同盲區 B 手動登記僅涵蓋已知具體案例的既有慣例）。
+
 S12（第七輪複審 DEF-101-068(a) 續）：四份 workflow 中 root-infra-ci.yml 是唯一
 「刻意不設 paths 過濾」者（見該檔頭註解：NTFS 敵意檔名閘需對任何路徑生效，
 paths 白名單必留盲區）——硬套上方「消費檔 ⊆ paths」同一套正則毫無意義（沒有
@@ -353,6 +373,57 @@ def test_known_subprocess_only_consumers_covered_by_ci_paths():
                 assert any(fnmatch.fnmatch(rel_path, pat) for pat in paths), (
                     f"{rel_path}（執行期子行程消費，靜態 import-BFS 結構上看不到）"
                     f"未被 {workflow_filename} 的 {label} paths 覆蓋"
+                )
+
+
+# --- git ls-files glob 動態掃描消費（盲區 C，R50）---------------------------------
+# tools/tests/test_windowsapps_guard_cross_consistency.py 用 `_tracked_files(pattern)`
+# （`git ls-files -- pattern`）動態掃描全部 git 追蹤檔案，而非靜態字面路徑引用或
+# import 陳述式——上方 `_scan_dir_for_root_paths()`／`_scan_import_consumed_paths()`
+# 兩種偵測機制對此結構性零訊號（見檔頭 R50 說明），連盲區 B 的手動登記清單都沒有。
+# 比照盲區 B（`_KNOWN_SUBPROCESS_ONLY_CONSUMERS`）手法：顯式登記「哪個測試檔＋
+# 掃描哪個 glob pattern」，再對其*動態即時*執行 `git ls-files -- pattern` 取得的
+# 真實結果（非寫死清單，隨檔案新增/刪除自動同步）逐一機械斷言被對應 workflow 的
+# push+pull_request paths 覆蓋。與盲區 B 不同：盲區 B 登記的是固定檔名，本清單登記
+# 的是「測試檔＋pattern」，覆蓋範圍隨 git 追蹤狀態自動變動，不需要每次新增/刪除
+# 符合 pattern 的檔案時手動同步清單內容（只有 pattern 本身或消費它的測試檔改名時
+# 才需要同步）。
+_KNOWN_GLOB_SCAN_CONSUMERS: dict[str, tuple[str, tuple[str, ...]]] = {
+    "tools/tests/test_windowsapps_guard_cross_consistency.py": (
+        "*.ps1",
+        ("macos-compat-ci.yml", "windows-compat-ci.yml"),
+    ),
+}
+
+
+def test_known_glob_scan_consumers_covered_by_ci_paths():
+    """盲區 C 機械鎖：見上方 _KNOWN_GLOB_SCAN_CONSUMERS 說明。"""
+    for rel_test_path, (pattern, workflow_filenames) in _KNOWN_GLOB_SCAN_CONSUMERS.items():
+        abs_test_path = os.path.join(_monorepo_root(), rel_test_path)
+        assert os.path.isfile(abs_test_path), (
+            f"{rel_test_path} 不存在（已改名/搬移？）— _KNOWN_GLOB_SCAN_CONSUMERS "
+            "顯式清單須同步更新，否則本鎖名不符實"
+        )
+        with open(abs_test_path, encoding="utf-8") as f:
+            src = f.read()
+        assert f'"{pattern}"' in src or f"'{pattern}'" in src, (
+            f"{rel_test_path} 原始碼已不含 glob pattern {pattern!r}（改名/改寫？）"
+            "——_KNOWN_GLOB_SCAN_CONSUMERS 顯式清單須同步更新，否則本鎖名不符實"
+        )
+        # 排除 AISDLC_SDD/ 前綴：與 test_all_root_consumers_covered_by_ci_paths()
+        # 同一政策（見檔頭說明），該前綴由各 workflow 既有的 "AISDLC_SDD/**" 系列
+        # pattern 天然覆蓋，不需本鎖重複驗證。
+        matched = [rel for rel in _git_ls_files(pattern) if not rel.startswith("AISDLC_SDD/")]
+        for workflow_filename in workflow_filenames:
+            push, pr = _workflow_paths(workflow_filename)
+            for label, paths in (("push", push), ("pull_request", pr)):
+                uncovered = [
+                    rel for rel in matched if not any(fnmatch.fnmatch(rel, pat) for pat in paths)
+                ]
+                assert not uncovered, (
+                    f"{rel_test_path} 以 `_tracked_files({pattern!r})`（git ls-files "
+                    "glob 動態掃描，靜態 import-BFS／路徑字面正則結構上看不到，盲區 C）"
+                    f"消費的檔案未被 {workflow_filename} 的 {label} paths 覆蓋：{uncovered}"
                 )
 
 

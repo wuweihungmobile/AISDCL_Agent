@@ -13,29 +13,27 @@ Gap-021 ~ Gap-028 整合驗證測試。
 """
 from __future__ import annotations
 
-import json
 from pathlib import Path
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 
 import pytest
 import yaml
 
-from autoclaude.models.step_mutation import StepMutation, StepMutationType
-from autoclaude.models.playbook import Playbook, PlaybookTask, EvolutionMetadata
-from autoclaude.utils.config import AppConfig
-from autoclaude.execution.playbook_runner import PlaybookRunner
-from autoclaude.decision.minimax_client import MinimaxClient
+from autoclaude.core.services.auto_resume import load_playbook
+from autoclaude.core.services.mutation.service import MutationApplyService
 from autoclaude.decision.prompt_builder import (
     build_evolution_message,
     build_goal_validation_message,
 )
-from autoclaude.evolution.playbook_evolver import PlaybookEvolver, PlaybookEvolutionProposal
+from autoclaude.evolution import _evaluator_derivation
 from autoclaude.evolution.minimax_evolver import MinimaxEvolver
+from autoclaude.evolution.playbook_evolver import PlaybookEvolver
+from autoclaude.execution.playbook_runner import PlaybookRunner
 from autoclaude.models.escalation import EscalationDump
-from autoclaude.core.services.auto_resume import load_playbook
-from autoclaude.core.services.mutation.service import MutationApplyService
+from autoclaude.models.playbook import EvolutionMetadata, Playbook, PlaybookTask
+from autoclaude.models.step_mutation import StepMutation, StepMutationType
+from autoclaude.utils.config import AppConfig
 from tests.helpers.kernel_fixtures import make_service
-
 
 # ──────────────────────────────────────────────
 # 共用輔助函式
@@ -145,11 +143,13 @@ class TestGap021ConditionalMutation:
         step_log: list[str] = []
         mut_log: list[str] = []
 
-        result = runner._apply_single_mutation(
+        runner._apply_single_mutation(
             cond_m, playbook, pb_path, task, 0,
             step_log, mut_log, 1,
             {}, {}, {},
-            __import__("autoclaude.execution.workflow_detector", fromlist=["WorkflowType"]).WorkflowType.UNKNOWN,
+            __import__(
+                "autoclaude.execution.workflow_detector", fromlist=["WorkflowType"]
+            ).WorkflowType.UNKNOWN,
             1, MagicMock(), "",
         )
         # true_mutation 被套用 → REVISE_CURRENT 更新了 task.prompt
@@ -189,7 +189,9 @@ class TestGap021ConditionalMutation:
             cond_m, playbook, pb_path, task, 0,
             step_log, mut_log, 1,
             {}, {}, {},
-            __import__("autoclaude.execution.workflow_detector", fromlist=["WorkflowType"]).WorkflowType.UNKNOWN,
+            __import__(
+                "autoclaude.execution.workflow_detector", fromlist=["WorkflowType"]
+            ).WorkflowType.UNKNOWN,
             1, MagicMock(), "",
         )
         assert task.prompt == "false-branch-applied"
@@ -221,7 +223,9 @@ class TestGap021ConditionalMutation:
             cond_m, playbook, pb_path, task, 0,
             [], [], 1,
             {}, {}, {},
-            __import__("autoclaude.execution.workflow_detector", fromlist=["WorkflowType"]).WorkflowType.UNKNOWN,
+            __import__(
+                "autoclaude.execution.workflow_detector", fromlist=["WorkflowType"]
+            ).WorkflowType.UNKNOWN,
             1, MagicMock(), "",
         )
         # prompt 不應變更
@@ -264,7 +268,8 @@ class TestGap022EvolutionGoalAlignment:
         assert "失敗步驟" in msg
 
     def test_minimax_evolver_passes_global_goal(self, tmp_path):
-        """MinimaxEvolver.propose_evolution_via_ai() 將 playbook.global_goal 傳遞至 propose_evolution。"""
+        """MinimaxEvolver.propose_evolution_via_ai() 將 playbook.global_goal 傳遞至
+        propose_evolution。"""
         mock_minimax = MagicMock()
         mock_minimax.propose_evolution.return_value = __import__(
             "autoclaude.models.decision", fromlist=["EvolutionDecision"]
@@ -390,7 +395,9 @@ class TestGap024EvolutionContextContinuity:
 
         pb_path = str(tmp_path / "test.yaml")
         mutation_log = ["[attempt 1] REVISE_CURRENT: T01", "[attempt 2] INJECT_AFTER: T01_FIX"]
-        evolved_path = evolver.apply_evolution(playbook, proposal, pb_path, mutation_log=mutation_log)
+        evolved_path = evolver.apply_evolution(
+            playbook, proposal, pb_path, mutation_log=mutation_log
+        )
 
         assert evolved_path != pb_path
         evolved_data = yaml.safe_load(Path(evolved_path).read_text(encoding="utf-8"))
@@ -535,11 +542,31 @@ class TestGap026SplitStepEvaluator:
         assert result is None
 
     def test_derive_part_a_evaluator_other_cmd(self):
-        """非 pytest 指令 → 加上 || true 確保 exit 0。"""
-        result = PlaybookEvolver._derive_part_a_evaluator("npm test")
+        """非 pytest 指令 → 無論原指令是否失敗都應 exit 0（Part A 只涵蓋一半任務）。
+
+        DEF-101（R50）：舊實作用 POSIX-only `{ cmd; } || true`，在 Windows cmd.exe 下
+        （不支援 `{ }` 分組、無內建 true）恆常誤判失敗。本測試親跑 subprocess 驗證
+        真實行為，而非只比對字面 token（舊測試對此毫無鑑別力）。
+        """
+        import subprocess
+
+        # 原指令會失敗（exit 1），Part A evaluator 仍須回報成功
+        result = PlaybookEvolver._derive_part_a_evaluator("python -c \"import sys; sys.exit(1)\"")
         assert result is not None
-        # 應確保不因 exit code 失敗
-        assert "true" in result or "||" in result
+        proc = subprocess.run(
+            result, shell=True, capture_output=True, text=True,
+            encoding="utf-8", errors="replace", timeout=10,
+        )
+        assert proc.returncode == 0, f"Part A evaluator 應無條件 exit 0，實際: {proc.returncode}"
+        # 不得含 POSIX-only 分組語法（cmd.exe 不支援）
+        assert "{ " not in result and "; }" not in result
+
+    def test_derive_part_a_evaluator_other_cmd_no_posix_only_syntax(self):
+        """非 pytest 指令生成結果不得含 Windows cmd.exe 不支援的 POSIX 專屬語法。"""
+        result = PlaybookEvolver._derive_part_a_evaluator("some-cmd --flag")
+        assert result is not None
+        assert not result.startswith("{")
+        assert "|| true" not in result
 
     def test_split_step_part_a_has_evaluator(self):
         """PlaybookEvolver.propose_evolution() SPLIT_STEP — Part A 應有 evaluator_command。"""
@@ -573,6 +600,93 @@ class TestGap026SplitStepEvaluator:
         part_a = proposal.split_steps[0]
         assert part_a.evaluator_command is not None
         assert "--collect-only" in part_a.evaluator_command
+
+
+class TestGap026BMinimaxEvolverSplitStepEvaluator:
+    """Gap-026-B：MinimaxEvolver 有獨立一份 _derive_part_a_evaluator 實作，需同等驗證
+    （R50 四方審查發現：與 PlaybookEvolver 版本重複同一 POSIX-only bug，各自要有回歸測試）。
+    """
+
+    def test_derive_part_a_evaluator_pytest(self):
+        result = MinimaxEvolver._derive_part_a_evaluator("pytest tests/test_auth.py -v")
+        assert result is not None
+        assert "--collect-only" in result
+
+    def test_derive_part_a_evaluator_no_evaluator(self):
+        assert MinimaxEvolver._derive_part_a_evaluator(None) is None
+
+    def test_derive_part_a_evaluator_other_cmd_executes_and_always_succeeds(self):
+        """非 pytest 指令：即使原指令失敗，Part A evaluator 仍須以 exit 0 收場，
+        且產生的指令不得含 Windows cmd.exe 無法解讀的 POSIX 專屬語法。
+        """
+        import subprocess
+
+        result = MinimaxEvolver._derive_part_a_evaluator(
+            "python -c \"import sys; sys.exit(1)\""
+        )
+        assert result is not None
+        assert "{ " not in result and "; }" not in result
+        assert "|| true" not in result
+        proc = subprocess.run(
+            result, shell=True, capture_output=True, text=True,
+            encoding="utf-8", errors="replace", timeout=10,
+        )
+        assert proc.returncode == 0, f"Part A evaluator 應無條件 exit 0，實際: {proc.returncode}"
+
+
+# ──────────────────────────────────────────────
+# R50-P2: PlaybookEvolver / MinimaxEvolver 的 _derive_part_a_evaluator
+# 由各自獨立實作收斂為共用函式（SSOT），防止同一 bug 需分別修復兩次。
+# ──────────────────────────────────────────────
+
+class TestGap026CSharedEvaluatorDerivationSSOT:
+    """R50 四方審查 P2：PlaybookEvolver 與 MinimaxEvolver 的
+    `_derive_part_a_evaluator` 100% 重複實作（SSOT 違反）。本測試證明修復後
+    兩者皆委派至共用函式 `_evaluator_derivation.derive_part_a_evaluator`，
+    往後同類 bug 只需修一處即可同時修好兩邊。
+    """
+
+    def test_both_evolvers_delegate_to_shared_function(self, monkeypatch):
+        """兩個 Evolver 的 staticmethod 實際呼叫同一個共用函式（非各自重複邏輯）。
+
+        以 monkeypatch 替換共用函式為哨兵回傳值：若 PlaybookEvolver 或
+        MinimaxEvolver 仍保有自己的獨立實作（未真正委派），下方 assert 會失敗
+        （因為各自舊實作不會回傳這個哨兵值），能在未來有人「復原」重複實作時
+        立即被本測試抓到（red）。
+        """
+        sentinel = "__SENTINEL_SHARED_IMPL__"
+        monkeypatch.setattr(
+            _evaluator_derivation, "derive_part_a_evaluator", lambda full_evaluator: sentinel
+        )
+        # PlaybookEvolver / MinimaxEvolver 模組各自匯入函式名稱綁定，
+        # patch 來源模組的屬性後，經由 import 別名呼叫的結果應同步反映哨兵值。
+        import autoclaude.evolution.minimax_evolver as me_mod
+        import autoclaude.evolution.playbook_evolver as pe_mod
+        monkeypatch.setattr(pe_mod, "derive_part_a_evaluator", lambda full_evaluator: sentinel)
+        monkeypatch.setattr(me_mod, "derive_part_a_evaluator", lambda full_evaluator: sentinel)
+
+        assert PlaybookEvolver._derive_part_a_evaluator("pytest tests/test_x.py -v") == sentinel
+        assert MinimaxEvolver._derive_part_a_evaluator("pytest tests/test_x.py -v") == sentinel
+
+    @pytest.mark.parametrize(
+        "raw_cmd",
+        [
+            None,
+            "",
+            "pytest tests/test_auth.py -v",
+            "pytest tests/test_auth.py -k foo --tb=short",
+            "python -c \"import sys; sys.exit(1)\"",
+            "some-cmd --flag",
+        ],
+    )
+    def test_playbook_and_minimax_produce_identical_output(self, raw_cmd):
+        """對相同輸入，PlaybookEvolver 與 MinimaxEvolver 的推導結果必須逐字相同
+        （證明兩者已收斂至同一份邏輯，不會再各自漂移）。
+        """
+        assert (
+            PlaybookEvolver._derive_part_a_evaluator(raw_cmd)
+            == MinimaxEvolver._derive_part_a_evaluator(raw_cmd)
+        )
 
 
 # ──────────────────────────────────────────────

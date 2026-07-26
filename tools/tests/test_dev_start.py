@@ -3074,6 +3074,118 @@ class TestCrossSiteLiteralLocks(unittest.TestCase):
                          "兩站點心跳門檻漂移——--status 與 dev_start 判定分歧")
 
 
+@unittest.skipUnless(
+    sys.platform == "darwin",
+    "install_mac_nightly.sh 的 report_heartbeat() 依賴 BSD `stat -f %m`（見該檔"
+    "頭『非 macOS fail-loud』guard，非 Darwin 上執行本身即為無意義假訊號，GNU "
+    "stat 的 -f 語意也完全不同）——本鎖只在 macOS runner（macos-compat-ci.yml）"
+    "上有意義，非 Darwin 平台跳過而非假綠",
+)
+class TestNightlyHeartbeatCrossSiteBehavioralEquivalence(unittest.TestCase):
+    """R50 四方複審發現：dev_start.py `_check_nightly_heartbeat()` 與
+    install_mac_nightly.sh `report_heartbeat()` 是各自獨立實作的心跳三態判斷
+    （未偵測／過期／新鮮）。既有 `TestCrossSiteLiteralLocks` 只用 regex 從兩側
+    原始碼抽『字面常數』（門檻天數、label）斷言相等，從未拿同一組 mtime 輸入
+    實際執行兩側邏輯、比對『分類結果』是否一致——若任一側未來改變比較運算子
+    或取整方式，字面值鎖完全不會有訊號。
+
+    本測試直接從 install_mac_nightly.sh 原始碼**動態擷取** `report_heartbeat()`
+    函式本體（非另外複製一份到測試檔——避免測試與生產程式碼各自漂移），在獨立
+    bash 子行程中對同一顆心跳檔執行，並與 python 側 `_check_nightly_heartbeat()`
+    在同一顆心跳檔上的回傳值比對三態分類是否一致。
+    """
+
+    _REPO = Path(dev_start.__file__).resolve().parents[1]
+    _INSTALLER = _REPO / "tools" / "install_mac_nightly.sh"
+
+    def _bash_report_heartbeat_stdout(self, heartbeat_path: Path) -> str:
+        """動態擷取 report_heartbeat() 函式本體，於獨立 bash 子行程執行（只餵它
+        依賴的兩個變數 HEARTBEAT／HEARTBEAT_MAX_AGE_DAYS，不觸碰真實 launchd/
+        plist 副作用、不 source 整支腳本以免誤觸其 case 分派或 Darwin guard 之外
+        的其他邏輯），回傳其 stdout。"""
+        extract = subprocess.run(
+            ["sed", "-n", "/^report_heartbeat() {/,/^}/p", str(self._INSTALLER)],
+            capture_output=True, text=True, check=True,
+            encoding="utf-8", errors="replace",
+        )
+        func_src = extract.stdout
+        self.assertTrue(
+            func_src.strip(),
+            "report_heartbeat() 函式擷取失敗（sed 找不到 report_heartbeat() { ... } "
+            "區塊）——install_mac_nightly.sh 結構是否已變動？本測試的擷取正則須同步更新",
+        )
+        wrapper = (
+            f'HEARTBEAT="{heartbeat_path}"\n'
+            'HEARTBEAT_MAX_AGE_DAYS=8\n'
+            f'{func_src}\n'
+            'report_heartbeat\n'
+        )
+        proc = subprocess.run(
+            ["bash", "-c", wrapper], capture_output=True, text=True,
+            encoding="utf-8", errors="replace",
+        )
+        self.assertEqual(
+            proc.returncode, 0,
+            f"report_heartbeat() 於獨立 bash 子行程執行失敗（rc={proc.returncode}）："
+            f"{proc.stderr}",
+        )
+        return proc.stdout
+
+    def _classify(self, text: str) -> str:
+        if "過期" in text:
+            return "過期"
+        if "新鮮" in text:
+            return "新鮮"
+        if "未偵測" in text:
+            return "未偵測"
+        self.fail(f"無法從輸出判斷心跳三態分類：{text!r}")
+
+    def _python_classify(self, root: Path) -> str:
+        with mock.patch.object(dev_start, "ROOT", root), \
+             mock.patch.object(dev_start, "_launchd_nightly_loaded",
+                               return_value=None), \
+             mock.patch("builtins.print"):
+            note = dev_start._check_nightly_heartbeat("mac")
+        return self._classify(note)
+
+    def _make_heartbeat(self, root: Path, age_days: float) -> Path:
+        logs = root / "AutoClaude" / "logs"
+        logs.mkdir(parents=True, exist_ok=True)
+        hb = logs / "nightly_mac_latest.log"
+        hb.write_text("heartbeat\n", encoding="utf-8")
+        mtime = time.time() - age_days * 86400
+        os.utime(hb, (mtime, mtime))
+        return hb
+
+    def test_fresh_boundary_and_far_stale_ages_classify_identically(self) -> None:
+        """跨四個代表性年齡（極新鮮／剛好未過期／剛好過期／遠期過期），兩側分類
+        須完全一致。邊界值刻意避開精確 8.0 天：BSD `stat -f %m` 截斷成整數秒，
+        python `os.stat().st_mtime` 保留次秒精度，兩者在恰好 8.0 天處可能因截斷
+        差 1 秒而不穩定——刻意取 7.9／8.1 天，差距（0.1 天＝8640 秒）遠大於次秒
+        截斷誤差，真正驗證的是『三態分支邏輯』本身是否等價，而非鞭打次秒精度差異。
+        """
+        cases = {
+            "極新鮮（0.01 天）": 0.01,
+            "剛好未過期（7.9 天 < 8 天門檻）": 7.9,
+            "剛好過期（8.1 天 > 8 天門檻）": 8.1,
+            "遠期過期（30 天）": 30.0,
+        }
+        for label, age_days in cases.items():
+            with self.subTest(label=label), tempfile.TemporaryDirectory() as td:
+                root = Path(td)
+                hb = self._make_heartbeat(root, age_days)
+                py_result = self._python_classify(root)
+                bash_stdout = self._bash_report_heartbeat_stdout(hb)
+                bash_result = self._classify(bash_stdout)
+                self.assertEqual(
+                    py_result, bash_result,
+                    f"{label}：dev_start.py 分類={py_result!r}，但 "
+                    f"install_mac_nightly.sh report_heartbeat() 分類={bash_result!r}"
+                    f"（bash stdout={bash_stdout!r}）——兩份獨立實作的三態判斷分歧"
+                    "（DEF-101-042 同類『字面值鎖住、行為未鎖住』盲區）",
+                )
+
+
 class TestCopyFunctionalInterpreterDllCopy(unittest.TestCase):
     """QA 要求的環境無關自證測試（R21 四方一審，DEF-101-256）：直接驗證
     `_copy_functional_interpreter()`（`tools/tests/_platform_helpers.py`）新增

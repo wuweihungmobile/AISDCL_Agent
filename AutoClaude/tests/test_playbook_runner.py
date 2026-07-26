@@ -16,11 +16,10 @@ from unittest.mock import MagicMock, patch
 import pytest
 import yaml
 
-from autoclaude.models.playbook import PlaybookTask
 from autoclaude.execution.playbook_runner import PlaybookResult, PlaybookRunner
+from autoclaude.models.playbook import PlaybookTask
 from autoclaude.utils.config import AppConfig
 from tests.helpers.kernel_fixtures import make_service
-
 
 # ──────────────────────────────────────────────
 # 測試輔助函式
@@ -63,7 +62,9 @@ class TestPlaybookRunnerEvaluate:
 
     def test_evaluate_fails_when_no_keyword(self):
         runner = _make_runner(dry_run=True)
-        reason, *_ = runner._evaluate(self._task(r"\[INIT_DONE\]"), "some random output without keyword")
+        reason, *_ = runner._evaluate(
+            self._task(r"\[INIT_DONE\]"), "some random output without keyword"
+        )
         assert reason is not None
         assert "INIT_DONE" in reason
 
@@ -247,7 +248,8 @@ def test_escalation_on_diverging(mock_pty_cls, tmp_path):
     assert result.success is False
     assert "T01" in result.reason
     # alert_ladder 預設 on（2026-06-13 SCG-6 人工 waiver）後，diverging 收斂信號改走階梯：
-    #   attempt2 出 WARNING(1/3) → attempt3 由 F-B2 no_improve_streak=2 提前升級（bypass 剩餘階梯）。
+    #   attempt2 出 WARNING(1/3) → attempt3 由 F-B2 no_improve_streak=2
+    #   提前升級（bypass 剩餘階梯）。
     # 仍為有界提前 ESCALATION（未耗完 max_retries=3 的全部 4 次嘗試），僅被 WARNING 階延後一手。
     # （設 alert_ladder.enabled=False 可還原為 call_count==2 的直接升級時序。）
     assert call_count[0] == 3
@@ -300,7 +302,11 @@ class TestContextNegotiationRunner:
             tmp_path,
             tasks=[{"step_id": "T01", "name": "n", "prompt": "step1",
                     "expected_output_regex": r"\[INIT_DONE\]"}],
-            extra={"context_negotiation": {"prompt": "start", "expected_keyword": "DummyCLI v1.0 ready"}},
+            extra={
+                "context_negotiation": {
+                    "prompt": "start", "expected_keyword": "DummyCLI v1.0 ready"
+                }
+            },
         )
         runner = _make_runner(dry_run=False)
         with patch("autoclaude.execution.playbook_runner.notify"):
@@ -320,7 +326,9 @@ class TestContextNegotiationRunner:
         pb_path = _write_playbook(
             tmp_path,
             tasks=[{"step_id": "T01", "name": "n", "prompt": "step1"}],
-            extra={"context_negotiation": {"prompt": "start", "expected_keyword": "MISSING_KEYWORD"}},
+            extra={
+                "context_negotiation": {"prompt": "start", "expected_keyword": "MISSING_KEYWORD"}
+            },
         )
         runner = _make_runner(dry_run=False)
         with patch("autoclaude.execution.playbook_runner.notify"):
@@ -459,7 +467,8 @@ def test_global_goal_passed_to_minimax_decide_correction(mock_pty_cls, tmp_path)
 # ──────────────────────────────────────────────
 
 def test_get_correction_returns_four_tuple_with_step_mutation():
-    """_get_correction 應回傳 (correction_prompt, reasoning, goal_summary, step_mutation) 四元組。"""
+    """_get_correction 應回傳 (correction_prompt, reasoning, goal_summary, step_mutation)
+    四元組。"""
     from autoclaude.models.decision import CorrectionDecision
     from autoclaude.models.step_mutation import StepMutation, StepMutationType
 
@@ -647,8 +656,6 @@ def test_gap036_inject_before_uses_evaluator_command_from_mutation(tmp_path):
             return "fail", "ImportError: No module named fastapi at line 1", 1
         return None, "", 0
 
-    injected_tasks = []
-
     with patch("autoclaude.execution.playbook_runner.notify"), \
          patch.object(runner, "_evaluate", side_effect=mock_eval), \
          patch.object(runner, "_execute_prompt", return_value=MagicMock(
@@ -663,8 +670,8 @@ def test_gap036_inject_before_uses_evaluator_command_from_mutation(tmp_path):
 
 def test_gap036_inject_after_uses_git_diff_fallback_when_no_evaluator(tmp_path):
     """Gap-036：INJECT_AFTER 無 evaluator_command 時使用 git-diff 兜底。"""
+    from autoclaude.models.playbook import GlobalInvariants, Playbook, PlaybookTask
     from autoclaude.models.step_mutation import StepMutation, StepMutationType
-    from autoclaude.models.playbook import PlaybookTask, Playbook, GlobalInvariants
     runner = _make_runner(dry_run=True)
     pb = Playbook(
         project="test",
@@ -680,7 +687,7 @@ def test_gap036_inject_after_uses_git_diff_fallback_when_no_evaluator(tmp_path):
         reasoning="補充驗證",
     )
     with patch.object(runner, "_persist_mutated_playbook"):
-        result = runner._apply_single_mutation(
+        runner._apply_single_mutation(
             mutation, pb, "pb.yaml",
             pb.tasks[0], 0,
             [], [], 0, {}, {}, {}, MagicMock(), 0, MagicMock(), "",
@@ -696,8 +703,8 @@ def test_gap036_inject_after_uses_git_diff_fallback_when_no_evaluator(tmp_path):
 
 def test_gap036_inject_before_has_evaluator_on_injected_task(tmp_path):
     """Gap-036：INJECT_BEFORE 注入的 PlaybookTask 確實帶有 evaluator_command。"""
+    from autoclaude.models.playbook import GlobalInvariants, Playbook, PlaybookTask
     from autoclaude.models.step_mutation import StepMutation, StepMutationType
-    from autoclaude.models.playbook import PlaybookTask, Playbook, GlobalInvariants
     runner = _make_runner(dry_run=True)
     pb = Playbook(
         project="test",
@@ -843,7 +850,7 @@ def test_gap030_goal_synthesis_uses_suggested_evaluator(tmp_path):
          patch.object(runner, "_execute_prompt", return_value=MagicMock(
              text="目標達成 DONE", peak_token_pct=0.0,
              triggered_compact=False, triggered_halt=False)):
-        result = runner.run(pb_path)
+        runner.run(pb_path)
 
     assert len(synth_tasks) > 0
     # GOAL_SYNTHESIS 步驟應有 evaluator_command
@@ -856,8 +863,8 @@ def test_gap030_goal_synthesis_uses_suggested_evaluator(tmp_path):
 
 def test_gap034_revise_current_sets_clear_goal_summary():
     """Gap-034：REVISE_CURRENT 突變回傳 _MutationResult.clear_goal_summary=True。"""
+    from autoclaude.models.playbook import GlobalInvariants, Playbook, PlaybookTask
     from autoclaude.models.step_mutation import StepMutation, StepMutationType
-    from autoclaude.models.playbook import PlaybookTask, Playbook, GlobalInvariants
     runner = _make_runner(dry_run=True)
     pb = Playbook(
         project="test",
@@ -885,8 +892,8 @@ def test_gap034_revise_current_sets_clear_goal_summary():
 
 def test_gap037_inject_before_allows_up_to_5_times():
     """Gap-037：INJECT_BEFORE 在第 4、5 次時不被拒絕（上限從 3 提升至 5）。"""
+    from autoclaude.models.playbook import GlobalInvariants, Playbook, PlaybookTask
     from autoclaude.models.step_mutation import StepMutation, StepMutationType
-    from autoclaude.models.playbook import PlaybookTask, Playbook, GlobalInvariants
     runner = _make_runner(dry_run=True)
     pb = Playbook(
         project="test",
@@ -912,8 +919,8 @@ def test_gap037_inject_before_allows_up_to_5_times():
 
 def test_gap037_inject_before_rejected_at_6th_time():
     """Gap-037：INJECT_BEFORE 第 6 次被拒絕（_cnt > 5）。"""
+    from autoclaude.models.playbook import GlobalInvariants, Playbook, PlaybookTask
     from autoclaude.models.step_mutation import StepMutation, StepMutationType
-    from autoclaude.models.playbook import PlaybookTask, Playbook, GlobalInvariants
     runner = _make_runner(dry_run=True)
     pb = Playbook(
         project="test",
@@ -941,9 +948,10 @@ def test_gap037_inject_before_rejected_at_6th_time():
 # ──────────────────────────────────────────────
 
 def test_gap038_conditional_uses_config_timeout(tmp_path):
-    """Gap-038：CONDITIONAL evaluator 使用 config.playbook.conditional_evaluator_timeout_seconds。"""
+    """Gap-038：CONDITIONAL evaluator 使用
+    config.playbook.conditional_evaluator_timeout_seconds。"""
+    from autoclaude.models.playbook import GlobalInvariants, Playbook, PlaybookTask
     from autoclaude.models.step_mutation import StepMutation, StepMutationType
-    from autoclaude.models.playbook import PlaybookTask, Playbook, GlobalInvariants
     from autoclaude.utils.config import AppConfig, PlaybookConfig
     cfg = AppConfig()
     cfg.playbook = PlaybookConfig(conditional_evaluator_timeout_seconds=10)
@@ -965,7 +973,6 @@ def test_gap038_conditional_uses_config_timeout(tmp_path):
         ),
         reasoning="條件判斷",
     )
-    import subprocess
     with patch("subprocess.run") as mock_run, \
          patch.object(runner, "_persist_mutated_playbook"):
         mock_run.return_value.returncode = 0
@@ -987,7 +994,7 @@ def test_gap033_evolver_cross_step_import_triggers_global_init():
     """Gap-033：2+ 步驟均因 import 錯誤 ESCALATE 時，Evolver 注入 ENV_INIT_GLOBAL。"""
     from autoclaude.evolution.playbook_evolver import PlaybookEvolver
     from autoclaude.models.escalation import EscalationDump
-    from autoclaude.models.playbook import Playbook, PlaybookTask, GlobalInvariants
+    from autoclaude.models.playbook import GlobalInvariants, Playbook, PlaybookTask
 
     evolver = PlaybookEvolver()
     pb = Playbook(
@@ -1020,12 +1027,36 @@ def test_gap033_evolver_cross_step_import_triggers_global_init():
     assert proposal.new_step.step_id == "ENV_INIT_GLOBAL"
     assert proposal.inject_before_idx == 0
 
+    # DEF-101（R50）：ENV_INIT_GLOBAL 的 evaluator_command 曾用單引號字串
+    # （python -c 'import fastapi' && echo 'OK'），cmd.exe 不把單引號視為字串
+    # 分隔符會拆成多個引數。改用雙引號後，親跑 subprocess 驗證真實成敗語意
+    # （而非只比對字面字串），確保仍能正確辨別 import 成功/失敗。
+    evaluator_command = proposal.new_step.evaluator_command
+    assert evaluator_command is not None
+    assert "'" not in evaluator_command, "evaluator_command 不應含單引號（cmd.exe 不安全）"
+
+    import subprocess
+
+    ok_proc = subprocess.run(
+        evaluator_command.replace("fastapi", "os"),
+        shell=True, capture_output=True, text=True,
+        encoding="utf-8", errors="replace", timeout=10,
+    )
+    assert ok_proc.returncode == 0, f"可 import 的模組應通過: {ok_proc.stdout}{ok_proc.stderr}"
+
+    fail_proc = subprocess.run(
+        evaluator_command.replace("fastapi", "__module_does_not_exist__"),
+        shell=True, capture_output=True, text=True,
+        encoding="utf-8", errors="replace", timeout=10,
+    )
+    assert fail_proc.returncode != 0, "不存在的模組應讓 evaluator 回報失敗"
+
 
 def test_gap033_evolver_single_escalation_no_cross_step():
     """Gap-033：只有 1 個 escalation 歷史時，不觸發跨步驟全域注入。"""
     from autoclaude.evolution.playbook_evolver import PlaybookEvolver
     from autoclaude.models.escalation import EscalationDump
-    from autoclaude.models.playbook import Playbook, PlaybookTask, GlobalInvariants
+    from autoclaude.models.playbook import GlobalInvariants, Playbook, PlaybookTask
 
     evolver = PlaybookEvolver()
     pb = Playbook(

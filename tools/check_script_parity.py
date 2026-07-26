@@ -278,6 +278,51 @@ def _check_pytest_pin() -> bool:
     return ok
 
 
+# git longpaths 旗標內容鎖（R50 四方複審發現）：macos_smoke_local.sh 與
+# windows_smoke_local.ps1 各自獨立內嵌 git clone `-c core.longpaths=true` 字面旗標
+# （見兩檔各自 fake repo clone 段落）。上方 `_SINGLE_SIDED_EXEMPT`（見下）只登記
+# 兩檔互為異名對等品的「存在性」，不解析內容——若其中一側未來意外遺漏或改動此
+# 旗標，parity 檢查不會有任何機械訊號。本鎖直接讀檔搜尋此字面字串，兩側缺一即
+# 紅，是本檔 docstring 自承「只比對標籤序列、不比對實作內容」邊界之外，針對此
+# 一具體旗標另立的窄範圍內容防腐檢查（非全面解除該邊界）。
+_GIT_LONGPATHS_FLAG = "-c core.longpaths=true"
+
+
+def _check_git_longpaths_flag_parity() -> bool:
+    macos_sh = _REPO_ROOT / "tools" / "macos_smoke_local.sh"
+    windows_ps1 = _REPO_ROOT / "tools" / "windows_smoke_local.ps1"
+    for path in (macos_sh, windows_ps1):
+        if not path.is_file():
+            print(f"❌ git longpaths 旗標鎖：{path} 不存在——請同步更新本檢查",
+                  file=sys.stderr)
+            return False
+    # 剝除註解行後再數（沿用既有 _strip_comments）：只有註解裡提及旗標、
+    # 實際 git clone 指令已把旗標拿掉，不得被註解殘留誤判為仍存在（bug-injection
+    # 實測重現：只刪指令上的旗標、留下說明性註解，若直接對全文做 substring
+    # count 仍會誤判綠燈）。
+    macos_hits = _strip_comments(
+        macos_sh.read_text(encoding="utf-8"), is_ps1=False
+    ).count(_GIT_LONGPATHS_FLAG)
+    windows_hits = _strip_comments(
+        windows_ps1.read_text(encoding="utf-8"), is_ps1=True
+    ).count(_GIT_LONGPATHS_FLAG)
+    ok = True
+    if macos_hits == 0:
+        print(f"❌ git longpaths 旗標鎖：tools/macos_smoke_local.sh 未見 "
+              f"'{_GIT_LONGPATHS_FLAG}'——與 windows_smoke_local.ps1（{windows_hits} 處）"
+              "不對等", file=sys.stderr)
+        ok = False
+    if windows_hits == 0:
+        print(f"❌ git longpaths 旗標鎖：tools/windows_smoke_local.ps1 未見 "
+              f"'{_GIT_LONGPATHS_FLAG}'——與 macos_smoke_local.sh（{macos_hits} 處）"
+              "不對等", file=sys.stderr)
+        ok = False
+    if ok:
+        print(f"✅ git longpaths 旗標鎖：兩側皆含 '{_GIT_LONGPATHS_FLAG}'"
+              f"（macos {macos_hits} 處／windows {windows_hits} 處）")
+    return ok
+
+
 # ── 成對/單邊腳本註冊完整性（enrollment 發現鎖）— R10 拍板案(a)，DEF-101-134；
 #    R11 架構改善 C2 擴充至單邊 ─────────────────────────────────────────────────
 # 過去「新增一對同名 .sh/.ps1 而不掛任何守門」零機械訊號（marker_pairs 與 thinness
@@ -562,6 +607,7 @@ def main() -> int:
         ok = _check_run_tlc_tracks(latest_tools) and ok
 
     ok = _check_pytest_pin() and ok
+    ok = _check_git_longpaths_flag_parity() and ok
     ok = _check_thinness_cross_lock() and ok
     ok = _check_pair_enrollment(latest_tools) and ok
 
@@ -570,7 +616,8 @@ def main() -> int:
               file=sys.stderr)
         return 1
     print(f"\n✅ 雙平台腳本對等檢查通過（{len(_MARKER_PAIRS)} 對標籤腳本 + LATEST run_tlc 軌鎖 + "
-          "pytest 釘選 + 成對/單邊註冊完整性；薄殼對子另由 check_wrapper_thinness 釘選）")
+          "pytest 釘選 + git longpaths 旗標內容鎖 + 成對/單邊註冊完整性；"
+          "薄殼對子另由 check_wrapper_thinness 釘選）")
     return 0
 
 

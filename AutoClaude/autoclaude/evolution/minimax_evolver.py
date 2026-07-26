@@ -8,15 +8,16 @@ MinimaxEvolver — Level 5 AI 驅動 Playbook 演化引擎（Gap-016-A）。
 from __future__ import annotations
 
 import logging
-from typing import TYPE_CHECKING, Optional
+from typing import TYPE_CHECKING
 
 from ..models.decision import EvolutionDecision
-from ..models.playbook import Playbook, PlaybookTask
 from ..models.escalation import EscalationDump
+from ..models.playbook import Playbook, PlaybookTask
+from ._evaluator_derivation import derive_part_a_evaluator
 from .playbook_evolver import PlaybookEvolutionProposal
 
 if TYPE_CHECKING:
-    from ..decision.minimax_client import MinimaxClient, MinimaxError
+    from ..decision.minimax_client import MinimaxClient
 
 logger = logging.getLogger("autoclaude.evolution.minimax_evolver")
 
@@ -33,8 +34,8 @@ class MinimaxEvolver:
         playbook: Playbook,
         failed_step_idx: int,
         escalation_dump: EscalationDump,
-        minimax_client: "MinimaxClient",
-    ) -> Optional[PlaybookEvolutionProposal]:
+        minimax_client: MinimaxClient,
+    ) -> PlaybookEvolutionProposal | None:
         """
         諮詢 Minimax 分析失敗根因並提議演化策略。
         回傳 PlaybookEvolutionProposal，或 None（API 失敗時讓規則引擎接管）。
@@ -73,7 +74,7 @@ class MinimaxEvolver:
         failed_step_idx: int,
         failed_task: PlaybookTask,
         playbook: Playbook,
-    ) -> Optional[PlaybookEvolutionProposal]:
+    ) -> PlaybookEvolutionProposal | None:
         """將 EvolutionDecision 轉換為 PlaybookEvolutionProposal。"""
         _global_max = playbook.global_invariants.max_retries_per_step
         _inject_max_retries = max(2, min(_global_max, 3))
@@ -164,22 +165,12 @@ class MinimaxEvolver:
         return None
 
     @staticmethod
-    def _derive_part_a_evaluator(full_evaluator: Optional[str]) -> Optional[str]:
+    def _derive_part_a_evaluator(full_evaluator: str | None) -> str | None:
         """
         Gap-026-B：從完整 evaluator_command 推導 Part A 輕量評估指令。
-        策略：
-        - pytest 指令 → 改為 --collect-only（僅確認測試可被收集）
-        - 其他指令 → 去掉輸出驗證 flag（如 -v），加上 echo 成功提示
-        - 無 evaluator → 回傳 None
+        實作已收斂至共用函式 `_evaluator_derivation.derive_part_a_evaluator`
+        （R50 P2：與 PlaybookEvolver 的 Gap-026-A 版本 100% 重複實作，SSOT 違反，
+        改為共用單一實作，兩者僅為委派 wrapper，保留原 staticmethod 呼叫介面
+        供既有測試/呼叫端沿用）。
         """
-        if not full_evaluator:
-            return None
-        import re
-        cmd = full_evaluator.strip()
-        if re.search(r'\bpytest\b', cmd):
-            # pytest → 只做 collect-only 確認語法正確
-            base = re.sub(r'\s+-[kxvsq]\S*', '', cmd)
-            base = re.sub(r'\s+--tb=\S+', '', base)
-            return base.split()[0] + " --collect-only"
-        # 非 pytest：傳回原指令但加上 true（確保 exit 0）
-        return f"{{ {cmd}; }} || true"
+        return derive_part_a_evaluator(full_evaluator)

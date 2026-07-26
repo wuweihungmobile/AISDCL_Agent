@@ -149,6 +149,18 @@ on:
       # **/*.ps1 覆蓋，本檔無 .ps1 兜底 glob，需顯式列舉（DEF-101-042 同構，
       # test_ci_paths_cover_root_consumers.py 實測揪出）
       - "AutoClaude/tools/g0_gate_check.ps1"
+      # R50：四方複審發現 tools/tests/test_windowsapps_guard_cross_consistency.py 的
+      # `_tracked_files("*.ps1")` 是 repo-wide `git ls-files` 掃描（非單檔字面引用），
+      # 會讀取全部 tracked .ps1（含以下 6 支）驗證其 WindowsApps guard 呼叫是否走
+      # SSOT；windows-compat-ci.yml 側已有 "**/*.ps1" 萬用字元天然覆蓋，本檔沿用
+      # R27/R34/R37/R44 既有「逐檔顯式列舉」慣例（而非改上兜底萬用字元，避免任何
+      # .ps1 異動都觸發 macOS runner），補齊此前遺漏的 6 支（DEF-101-042 同構）。
+      - "AutoClaude/tools/reschedule_g0_gatecheck.ps1"
+      - "AutoClaude/tools/local_ci_gate.ps1"
+      - "AutoClaude/tools/run_act.ps1"
+      - "tools/integration_gate.ps1"
+      - "tools/lib/GitHooksInstallCommon.ps1"
+      - "AutoClaude/tools/install_git_hooks.ps1"
       - "**/*.sh"
       - "tools/git-hooks/**"
       - ".claude/**"
@@ -234,6 +246,14 @@ on:
       # **/*.ps1 覆蓋，本檔無 .ps1 兜底 glob，需顯式列舉（DEF-101-042 同構，
       # test_ci_paths_cover_root_consumers.py 實測揪出）
       - "AutoClaude/tools/g0_gate_check.ps1"
+      # R50：同上 push 區塊說明（DEF-101-042 同構，四方複審發現本 6 支被
+      # test_windowsapps_guard_cross_consistency.py repo-wide *.ps1 掃描消費卻漏列）
+      - "AutoClaude/tools/reschedule_g0_gatecheck.ps1"
+      - "AutoClaude/tools/local_ci_gate.ps1"
+      - "AutoClaude/tools/run_act.ps1"
+      - "tools/integration_gate.ps1"
+      - "tools/lib/GitHooksInstallCommon.ps1"
+      - "AutoClaude/tools/install_git_hooks.ps1"
       - "**/*.sh"
       - "tools/git-hooks/**"
       - ".claude/**"

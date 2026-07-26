@@ -18,15 +18,14 @@ PlaybookEvolver — Level 5 Playbook 自演化引擎（Gap-010-E）。
 from __future__ import annotations
 
 import logging
-import re
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Optional
 
 import yaml
 
-from ..models.playbook import Playbook, PlaybookTask, EvolutionMetadata
 from ..models.escalation import EscalationDump
+from ..models.playbook import EvolutionMetadata, Playbook, PlaybookTask
+from ._evaluator_derivation import derive_part_a_evaluator
 
 logger = logging.getLogger("autoclaude.evolution.evolver")
 
@@ -37,9 +36,9 @@ class PlaybookEvolutionProposal:
     evolution_type: str           # "INJECT_STEP" | "SPLIT_STEP" | "REVISE_EVALUATOR"
     inject_before_idx: int        # 插入位置（步驟索引）
     reasoning: str                # 演化原因說明
-    new_step: Optional[PlaybookTask] = None        # INJECT_STEP 使用
-    split_steps: Optional[list[PlaybookTask]] = None  # SPLIT_STEP 使用
-    revised_evaluator: Optional[str] = None       # REVISE_EVALUATOR 使用
+    new_step: PlaybookTask | None = None        # INJECT_STEP 使用
+    split_steps: list[PlaybookTask] | None = None  # SPLIT_STEP 使用
+    revised_evaluator: str | None = None       # REVISE_EVALUATOR 使用
 
 
 class PlaybookEvolver:
@@ -53,8 +52,8 @@ class PlaybookEvolver:
         playbook: Playbook,
         failed_step_idx: int,
         escalation_dump: EscalationDump,
-        escalation_history: Optional[list[EscalationDump]] = None,
-    ) -> Optional[PlaybookEvolutionProposal]:
+        escalation_history: list[EscalationDump] | None = None,
+    ) -> PlaybookEvolutionProposal | None:
         """
         分析失敗模式，提議 Playbook 演化方案。
         回傳 None 表示無法自動演化（需人工介入）。
@@ -99,7 +98,10 @@ class PlaybookEvolver:
                                 "4. 輸出「環境初始化完成」"
                             ),
                             expected_output_regex="環境初始化完成",
-                            evaluator_command="python -c 'import fastapi' && echo 'OK'",
+                            # 跨平台注意：shell=True 在 Windows 走 cmd.exe（非 bash），
+                            # cmd.exe 不把單引號視為字串分隔符，故一律用雙引號包 python -c
+                            # 參數、python 字串內用單引號（沿用 evaluator.py docstring 慣例）。
+                            evaluator_command="python -c \"import fastapi\" && echo OK",
                             max_retries=_inject_max_retries,
                         ),
                     )
@@ -135,8 +137,8 @@ class PlaybookEvolver:
                 evolution_type="INJECT_STEP",
                 inject_before_idx=failed_step_idx,
                 reasoning=(
-                    f"步驟 {dump.step_id} 的 AssertionError 在 {dump.total_attempts} 次後仍無法收斂，"
-                    f"疑似測試期望值本身寫錯，注入前置確認步驟"
+                    f"步驟 {dump.step_id} 的 AssertionError 在 {dump.total_attempts} "
+                    f"次後仍無法收斂，疑似測試期望值本身寫錯，注入前置確認步驟"
                 ),
                 new_step=PlaybookTask(
                     step_id=pre_step_id,
@@ -173,7 +175,8 @@ class PlaybookEvolver:
             context_bridge = (
                 f"[前置步驟 {sub1_id} 已完成的工作]\n"
                 f"前一個子步驟（{sub1_id}）已完成 {failed_task.name} 的第一部分指令。\n"
-                f"請確認 {sub1_id} 的輸出結果，然後繼續完成以下剩餘任務（不要重複第一部分的工作）：\n\n"
+                f"請確認 {sub1_id} 的輸出結果，然後繼續完成以下剩餘任務"
+                f"（不要重複第一部分的工作）：\n\n"
             )
             # Gap-026-A：為 Part A 推導輕量 evaluator（防假陽性通過）
             part_a_evaluator = self._derive_part_a_evaluator(failed_task.evaluator_command)
@@ -208,29 +211,22 @@ class PlaybookEvolver:
         return None
 
     @staticmethod
-    def _derive_part_a_evaluator(full_evaluator: Optional[str]) -> Optional[str]:
+    def _derive_part_a_evaluator(full_evaluator: str | None) -> str | None:
         """
         Gap-026-A：從完整 evaluator_command 推導 Part A 輕量評估指令。
-        策略：
-        - pytest 指令 → 改為 --collect-only（僅確認測試可被收集）
-        - 其他指令 → 加 || true 確保不因部分缺失而誤報失敗
-        - 無 evaluator → 回傳 None
+        實作已收斂至共用函式 `_evaluator_derivation.derive_part_a_evaluator`
+        （R50 P2：與 MinimaxEvolver 的 Gap-026-B 版本 100% 重複實作，SSOT 違反，
+        改為共用單一實作，兩者僅為委派 wrapper，保留原 staticmethod 呼叫介面
+        供既有測試/呼叫端沿用）。
         """
-        if not full_evaluator:
-            return None
-        cmd = full_evaluator.strip()
-        if re.search(r'\bpytest\b', cmd):
-            base = re.sub(r'\s+-[kxvsq]\S*', '', cmd)
-            base = re.sub(r'\s+--tb=\S+', '', base)
-            return base.split()[0] + " --collect-only"
-        return f"{{ {cmd}; }} || true"
+        return derive_part_a_evaluator(full_evaluator)
 
     def apply_evolution(
         self,
         playbook: Playbook,
         proposal: PlaybookEvolutionProposal,
         playbook_path: str,
-        mutation_log: Optional[list[str]] = None,  # Gap-024-B：傳入 mutation_log 供序列化
+        mutation_log: list[str] | None = None,  # Gap-024-B：傳入 mutation_log 供序列化
     ) -> str:
         """
         將演化提議應用到 Playbook，寫入 evolved_{原檔名}.yaml。
@@ -272,9 +268,15 @@ class PlaybookEvolver:
 
         # Gap-024-B：建立 evolution_metadata 供重載後恢復 mutation_log
         _prev_gen = playbook.evolution_metadata.generation if playbook.evolution_metadata else 0
-        _prev_log = list(playbook.evolution_metadata.mutation_log) if playbook.evolution_metadata else []
+        _prev_log = (
+            list(playbook.evolution_metadata.mutation_log)
+            if playbook.evolution_metadata else []
+        )
         _new_log = _prev_log + (mutation_log or [])
-        _escalated_ids = list(playbook.evolution_metadata.escalated_step_ids) if playbook.evolution_metadata else []
+        _escalated_ids = (
+            list(playbook.evolution_metadata.escalated_step_ids)
+            if playbook.evolution_metadata else []
+        )
 
         evolved_playbook = Playbook(
             version=playbook.version,

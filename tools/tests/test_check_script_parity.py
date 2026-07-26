@@ -419,5 +419,62 @@ class TestThinnessCrossLock(unittest.TestCase):
         self.assertIn("rogue_wrapper.sh", printed)
 
 
+class TestGitLongpathsFlagParity(unittest.TestCase):
+    """R50 四方複審發現：macos_smoke_local.sh／windows_smoke_local.ps1 各自獨立
+    內嵌 `-c core.longpaths=true` git flag；_SINGLE_SIDED_EXEMPT 過去只登記兩檔
+    互為異名對等品的存在性，未比對旗標內容——若任一側遺漏或改動，parity 工具
+    先前不會有任何機械訊號。本測試證明新增的 `_check_git_longpaths_flag_parity()`
+    確實能攔下這個此前的零訊號窗（red→green 對照）。"""
+
+    def _make_repo(self, macos_body: str, windows_body: str) -> Path:
+        root = _TMP_DIR / f"longpaths_repo_{_tmp_counter[0]}"
+        _tmp_counter[0] += 1
+        (root / "tools").mkdir(parents=True, exist_ok=True)
+        (root / "tools" / "macos_smoke_local.sh").write_text(macos_body, encoding="utf-8")
+        (root / "tools" / "windows_smoke_local.ps1").write_text(windows_body, encoding="utf-8")
+        return root
+
+    def test_current_repo_files_have_flag_on_both_sides_green(self) -> None:
+        """現況（真實 repo 檔案）：兩側皆含旗標，應綠燈——先確認未誤傷現況。"""
+        with mock.patch("builtins.print"):
+            self.assertTrue(m._check_git_longpaths_flag_parity())
+
+    def test_both_sides_present_is_green(self) -> None:
+        root = self._make_repo(
+            'git clone --quiet -c core.longpaths=true "$X" "$Y"\n',
+            "git clone --quiet -c core.longpaths=true $X $Y\n",
+        )
+        with mock.patch.object(m, "_REPO_ROOT", root), mock.patch("builtins.print"):
+            self.assertTrue(m._check_git_longpaths_flag_parity())
+
+    def test_macos_side_missing_flag_is_red(self) -> None:
+        """回歸重現：mac 側意外遺漏旗標（如維護時複製貼上漏帶），先前 parity
+        工具對此零訊號——本測試證明新鎖能攔下。"""
+        root = self._make_repo(
+            'git clone --quiet "$X" "$Y"\n',
+            "git clone --quiet -c core.longpaths=true $X $Y\n",
+        )
+        with mock.patch.object(m, "_REPO_ROOT", root), \
+             mock.patch("builtins.print") as fake_print:
+            self.assertFalse(m._check_git_longpaths_flag_parity())
+        printed = " ".join(
+            str(arg) for call in fake_print.call_args_list for arg in call.args
+        )
+        self.assertIn("macos_smoke_local.sh", printed)
+
+    def test_windows_side_missing_flag_is_red(self) -> None:
+        root = self._make_repo(
+            'git clone --quiet -c core.longpaths=true "$X" "$Y"\n',
+            "git clone --quiet $X $Y\n",
+        )
+        with mock.patch.object(m, "_REPO_ROOT", root), \
+             mock.patch("builtins.print") as fake_print:
+            self.assertFalse(m._check_git_longpaths_flag_parity())
+        printed = " ".join(
+            str(arg) for call in fake_print.call_args_list for arg in call.args
+        )
+        self.assertIn("windows_smoke_local.ps1", printed)
+
+
 if __name__ == "__main__":
     unittest.main()
