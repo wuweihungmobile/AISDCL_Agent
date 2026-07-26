@@ -3,7 +3,7 @@
 對應 AutoSDD_improving_01.md §3（W3）。實作 core/ports/spec_source.ISpecSource。
 
 安全設計（§1.3 三點截斷鏈式攻擊）：
-  1. 模板白名單：evaluator_command 僅得由 _EVALUATOR_TEMPLATES 內插生成
+  1. 模板白名單：evaluator_command 僅得由 _EVALUATOR_TEMPLATE 內插生成
   2. 參數消毒：黑名單字元集（⊇ CONDITIONAL 黑名單）+ 白名單 regex
   3. 末端複驗：生成 playbook 執行時仍經 pre_run_validator 整體驗證
 
@@ -34,18 +34,17 @@ _DENY = set("!`><~$&;")
 # 白名單 regex：路徑片段僅允許 word / . / / / -（消毒第二層）
 _SAFE_FRAGMENT = re.compile(r"^[\w./\\-]+$")
 
-# §1.3 截斷點 1：唯二合法 evaluator 模板（任何自由字串一律拒絕）
-# R52 修正：模板 [0]（_build_evaluator_cmd 實際使用的唯一模板）原硬編裸字面值
-# "python -m pytest"，在 macOS /usr/bin 與多數現代 Linux distro 的乾淨 PATH（無 venv/
-# 別名）上只有 python3、沒有裸 python，經 subprocess.run(shell=True) 執行恆 rc=127。
-# 不可比照 evolution 模組改用 sys.executable 絕對路徑——sdd_compile.py 為「編譯期產出
-# YAML、執行期可能是完全不同行程/環境/機器」的兩段式設計，編譯時解析的直譯器路徑在
-# 執行時未必存在。改為不含 python 前綴的 `pytest ...` 形式，改而假設 pytest 本身（console
-# script）在 PATH 上——與 execution/evaluator.py 模組 docstring 明載的可攜指令建議一致。
-_EVALUATOR_TEMPLATES = (
-    'pytest {path} -k "{at}" -q',
-    "python -m tools.{module} {args}",
-)
+# §1.3 截斷點 1：唯一合法 evaluator 模板（任何自由字串一律拒絕）
+# R52 修正：原硬編裸字面值 "python -m pytest"，在 macOS /usr/bin 與多數現代 Linux
+# distro 的乾淨 PATH（無 venv/別名）上只有 python3、無裸 python，經
+# subprocess.run(shell=True) 執行恆 rc=127；不可比照 evolution 模組改用
+# sys.executable——sdd_compile.py 為「編譯期產出 YAML、執行期可能是完全不同行程/
+# 環境/機器」兩段式設計，編譯時路徑執行時未必存在。改為不含 python 前綴、假設
+# pytest console script 在 PATH 的形式（同 execution/evaluator.py 既有建議）。
+# R53：移除原第二模板 'python -m tools.{module} {args}'（死碼：_build_evaluator_cmd()
+# 自始只用上一模板，全倉零呼叫點/零測試涵蓋；'tools.{module}' 為 repo 相對模組路徑非
+# console script，R52 兩種解法均不適用，需要專屬設計，故移除而非疊加第三種修法）。
+_EVALUATOR_TEMPLATE = 'pytest {path} -k "{at}" -q'
 
 # happy path 上 SPEC_FROZEN 及其後繼狀態（transition_rules._HAPPY_PATH 實況）
 _POST_FROZEN_STATES = frozenset({
@@ -389,4 +388,4 @@ class SddToPlaybookAdapter:
     def _build_evaluator_cmd(self, at_id: str) -> str:
         # pytest -k 表達式不接受連字號 → at_id 消毒為底線形式
         at_sanitized = self._sanitize(at_id).replace("-", "_")
-        return _EVALUATOR_TEMPLATES[0].format(path=self._test_path, at=at_sanitized)
+        return _EVALUATOR_TEMPLATE.format(path=self._test_path, at=at_sanitized)

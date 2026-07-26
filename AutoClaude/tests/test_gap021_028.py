@@ -575,6 +575,43 @@ class TestGap026SplitStepEvaluator:
             f"(--collect-only)，實際 rc={proc.returncode}, stderr={proc.stderr!r}"
         )
 
+    @pytest.mark.parametrize(
+        "cmd",
+        [
+            "python3 -m tools.run_pytest_suite tests/pytest/test_foo.py -q",
+            "python -m mypkg.pytest tests/ -q",
+        ],
+    )
+    def test_derive_part_a_evaluator_pytest_substring_not_misdetected(self, cmd):
+        """R53 迴歸鎖：'pytest' 僅以子字串形式出現在複合 token（路徑片段
+        'tests/pytest/...' 或點分模組路徑 'pkg.pytest'）而非獨立 token 時，
+        不得被誤判為『pytest 指令』。
+
+        根因：R52 判斷「是否為 pytest 指令」用 `re.search(r'\\bpytest\\b', cmd)`
+        （子字串式邊界比對，'/'、'.' 兩側也算邊界），但取可執行檔前綴用
+        `tokens.index("pytest")`（要求精確相等 token）——本例前者命中、後者
+        ValueError 落回 `tokens[0]`，產出語法不存在的 'python(3) --collect-only'
+        （rc=2 unknown option），與本函式「非 pytest 指令才無條件回傳成功」的
+        設計意圖直接相反。修復後偵測與擷取共用同一 token-based 判準，本例應
+        被正確判為「非 pytest 指令」（因未真正呼叫 pytest 本身）。
+        """
+        import subprocess
+
+        result = PlaybookEvolver._derive_part_a_evaluator(cmd)
+        assert result is not None
+        assert "--collect-only" not in result, (
+            f"'{cmd}' 並非真正呼叫 pytest（僅子字串命中），不應被推導成 "
+            f"'--collect-only' 形態；實際: {result!r}"
+        )
+        proc = subprocess.run(
+            result, shell=True, capture_output=True, text=True,
+            encoding="utf-8", errors="replace", timeout=30,
+        )
+        assert proc.returncode == 0, (
+            f"'{cmd}' 推導出的 Part A evaluator '{result}' 應無條件回傳成功 "
+            f"（非真正 pytest 指令），實際 rc={proc.returncode}, stderr={proc.stderr!r}"
+        )
+
     def test_derive_part_a_evaluator_other_cmd(self):
         """非 pytest 指令 → 無論原指令是否失敗都應 exit 0（Part A 只涵蓋一半任務）。
 

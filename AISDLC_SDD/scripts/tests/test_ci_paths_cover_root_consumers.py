@@ -92,6 +92,27 @@ R52（第 52 輪 Mac/Windows 相容性四方複審 Architect/SA/SD 交叉發現�
 `AutoClaude/tools/run_local_nightly.sh` 逃過本鎖（11 passed 未攔截）。第四種
 消費形態（盲區 D），比照盲區 B／C 手法新增 `_KNOWN_LITERAL_PATH_CONSUMERS`
 顯式登記「檔案＋消費它的來源檔」並機械斷言覆蓋 workflow paths。
+
+R53（第 53 輪 Mac/Windows 相容性四方複審 Architect/SA/SD/QA 交叉發現）：兩處
+獨立缺陷同輪修復——
+(1) 盲區 D 登記表 R52 只補了 `test_dev_start.py` 用 `self._REPO` 消費
+    `run_local_nightly.sh` 這一筆，但同一支消費檔內用完全相同手法（`self._REPO`
+    ／class 屬性 `_REPO`）另外讀取了 `run_local_nightly.ps1`（僅 1 處）與
+    `install_mac_nightly.sh`（3 處呼叫點、橫跨 3 個測試類）卻未登記——現行雖因
+    `windows-compat-ci.yml` 的 `**/*.ps1` 萬用字元＋明列 `install_mac_nightly.sh`、
+    `macos-compat-ci.yml` 的 `**/*.sh` 萬用字元＋明列 `run_local_nightly.ps1`
+    意外雙重覆蓋而無假綠，但登記表本身名不符實、零機械保護，補齊這 2 筆
+    （`tools/install_mac_nightly.sh`／`AutoClaude/tools/run_local_nightly.ps1`）。
+(2) `_JOIN_RE`（`os.path.join(REPO_ROOT, ...)` 慣用法掃描器）只認得無底線字面
+    token `REPO_ROOT`，對 `tools/tests/` 下 21/24 個測試檔慣用的底線前綴
+    `_REPO_ROOT` 變數命名結構性零命中；而並用的 `_SLASH_RE`（`REPO_ROOT / "a"`
+    慣用法）先前因**無錨定的純子字串匹配**才「巧合」命中 `_REPO_ROOT`——這反而
+    是另一種未防護的假陽性風險（子字串匹配對 `FOO_REPO_ROOT` 這類非本意識別字
+    同樣會誤命中，見下方測試）。改用共用 token `_REPO_ROOT_TOKEN`（顯式收斂
+    `_REPO_ROOT`／`REPO_ROOT`／`_monorepo_root()` 三種寫法皆為完整識別字，非
+    子字串）＋前置負向 lookbehind 防止嵌在更長識別字中誤判，`_JOIN_RE`／
+    `_SLASH_RE` 兩者行為對稱一致；並新增獨立單元測試直接驗證兩個正則物件本身
+    的涵蓋面（回應「安全網自身缺乏測試」的測試設計缺口）。
 """
 from __future__ import annotations
 
@@ -129,11 +150,21 @@ def _workflow_paths(workflow_filename: str) -> tuple[list[str], list[str]]:
     return on["push"]["paths"], on["pull_request"]["paths"]
 
 
-# _monorepo_root()（AISDLC_SDD/scripts/tests/ 慣用法）與 REPO_ROOT（tools/tests/
-# 慣用法，該目錄下巧合等於 monorepo 根）皆可能出現在被掃描目錄中；兩者統一辨識，
-# 誤配對到的候選路徑會被下方「磁碟上存在」過濾器自然濾除（安全網）。
-_JOIN_RE = re.compile(r"os\.path\.join\(\s*(?:_monorepo_root\(\)|REPO_ROOT)\s*,([^)]*)\)")
-_SLASH_RE = re.compile(r'(?:_monorepo_root\(\)|REPO_ROOT)((?:\s*/\s*"[^"]+")+)')
+# _monorepo_root()（AISDLC_SDD/scripts/tests/ 慣用法）與 REPO_ROOT／_REPO_ROOT
+# （tools/tests/ 慣用法，該目錄下巧合等於 monorepo 根；21/24 個測試檔實際採用
+# 底線前綴 `_REPO_ROOT` 命名慣例，僅 3 個無底線）皆可能出現在被掃描目錄中；
+# 三者統一辨識為完整識別字（前置負向 lookbehind 防止嵌在更長識別字中誤判，如
+# `FOO_REPO_ROOT`），誤配對到的候選路徑會被下方「磁碟上存在」過濾器自然濾除
+# （安全網）。R53：修復 `_JOIN_RE` 先前只認無底線 `REPO_ROOT`、與 `_SLASH_RE`
+# （先前靠無錨定子字串匹配才「巧合」吃到底線前綴）行為不對稱的正則死角。
+_REPO_ROOT_TOKEN = r"(?:_monorepo_root\(\)|_REPO_ROOT|REPO_ROOT)"
+_NOT_WORD_BEFORE = r"(?<![A-Za-z0-9_])"
+_JOIN_RE = re.compile(
+    rf"os\.path\.join\(\s*{_NOT_WORD_BEFORE}{_REPO_ROOT_TOKEN}\s*,([^)]*)\)"
+)
+_SLASH_RE = re.compile(
+    rf'{_NOT_WORD_BEFORE}{_REPO_ROOT_TOKEN}((?:\s*/\s*"[^"]+")+)'
+)
 _STR_RE = re.compile(r'"([^"]+)"')
 
 # S26：`import <module>` / `import <module> as <alias>` 頂層陳述式（tools/tests/ 三支
@@ -250,6 +281,46 @@ def _consumed_root_paths(directory: str) -> set[str]:
     found = _scan_dir_for_root_paths(directory) | _scan_import_consumed_paths(directory)
     # 只留「磁碟上存在的檔案」——join 到目錄／動態片段者非本鎖標的
     return {p for p in found if os.path.isfile(os.path.join(_monorepo_root(), p))}
+
+
+@pytest.mark.parametrize(
+    "src,expect_join,expect_slash",
+    [
+        # 無底線 REPO_ROOT／_monorepo_root()：既有慣用法，修復前後皆須命中。
+        ('os.path.join(REPO_ROOT, "a", "b")', True, None),
+        ('REPO_ROOT / "a" / "b"', None, True),
+        ('os.path.join(_monorepo_root(), "a", "b")', True, None),
+        ('_monorepo_root() / "a" / "b"', None, True),
+        # R53：底線前綴 _REPO_ROOT（tools/tests/ 21/24 檔實際命名慣例）——修復前
+        # _JOIN_RE 結構性零命中，_SLASH_RE 靠無錨定子字串「巧合」命中；修復後
+        # 兩者須對稱皆命中。
+        ('os.path.join(_REPO_ROOT, "a", "b")', True, None),
+        ('_REPO_ROOT / "a" / "b"', None, True),
+    ],
+)
+def test_join_re_and_slash_re_symmetric_for_underscore_prefix(src, expect_join, expect_slash):
+    """R53 QA/Architect/SA/SD 四方交叉發現：`_JOIN_RE`／`_SLASH_RE` 這兩個「防
+    假綠安全網」正則自身先前無任何獨立單元測試驗證涵蓋面，導致 `_JOIN_RE` 對
+    底線前綴 `_REPO_ROOT`（主流命名慣例）結構性零命中的死角長期無訊號。本測試
+    直接對正則物件斷言，鎖住修復後的對稱行為，防止未來再退化。
+    """
+    if expect_join is not None:
+        assert bool(_JOIN_RE.search(src)) is expect_join, f"_JOIN_RE 對 {src!r} 命中應為 {expect_join}"
+    if expect_slash is not None:
+        assert bool(_SLASH_RE.search(src)) is expect_slash, (
+            f"_SLASH_RE 對 {src!r} 命中應為 {expect_slash}"
+        )
+
+
+def test_slash_re_does_not_match_longer_embedding_identifier():
+    """R53 附帶防呆：`_SLASH_RE` 修復底線前綴死角時新增的前置負向 lookbehind，
+    須確認未反過來對「REPO_ROOT 只是更長識別字尾碼」的情況（如
+    `FOO_REPO_ROOT`）誤判為本鎖標的變數——修復前的純子字串匹配對此會誤命中
+    （見 R53 檔頭說明），修復後應正確排除。
+    """
+    assert not _SLASH_RE.search('FOO_REPO_ROOT / "a" / "b"'), (
+        "_SLASH_RE 不應把 FOO_REPO_ROOT 這類更長識別字尾碼誤判為 REPO_ROOT 本尊"
+    )
 
 
 @pytest.mark.parametrize("workflow_filename", sorted(_WORKFLOW_TEST_DIRS))
@@ -448,10 +519,32 @@ def test_known_glob_scan_consumers_covered_by_ci_paths():
 # 相同（掃描器方法論邊界，非解析器猜測範圍不夠），比照同一手法：顯式登記
 # 「檔案 + 消費它的來源檔」+ 機械斷言消費關係仍存在（防登記腐化）＋覆蓋
 # workflow paths。
+#
+# R53（Architect/SA/SD/QA 交叉發現）：同一支消費檔 `test_dev_start.py` 內用完全
+# 相同手法（`self._REPO` 或其 class 屬性 `_REPO`）另外讀取了
+# `run_local_nightly.ps1`（`TestNightlyHeartbeatFilenameContract
+# .test_windows_reader_filename_matches_ps1_writer`）與 `install_mac_nightly.sh`
+# （`TestNightlyHeartbeatFilenameContract.test_installer_third_site_filename_
+# and_threshold`／`TestCrossSiteLiteralLocks._installer_text`／
+# `TestNightlyHeartbeatCrossSiteBehavioralEquivalence._INSTALLER`，橫跨 3 個
+# 測試類）卻未登記，R52 只補了 `run_local_nightly.sh` 一筆。`tools/tests/` 同時
+# 被 windows-compat-ci.yml／macos-compat-ci.yml 兩份 workflow 執行（見
+# `_WORKFLOW_TEST_DIRS`），故兩檔皆須登記兩份 workflow：`run_local_nightly.ps1`
+# 現行由 windows 側 `**/*.ps1` 萬用字元＋macos 側明列覆蓋，`install_mac_nightly.sh`
+# 現行由 macos 側 `**/*.sh` 萬用字元＋windows 側明列覆蓋——雙重覆蓋非巧合免驗證
+# 的理由，仍須機械鎖住，否則任一側覆蓋機制被移除即靜默失效。
 _KNOWN_LITERAL_PATH_CONSUMERS: dict[str, tuple[str, tuple[str, ...]]] = {
     "AutoClaude/tools/run_local_nightly.sh": (
         "tools/tests/test_dev_start.py",
         ("windows-compat-ci.yml",),
+    ),
+    "AutoClaude/tools/run_local_nightly.ps1": (
+        "tools/tests/test_dev_start.py",
+        ("windows-compat-ci.yml", "macos-compat-ci.yml"),
+    ),
+    "tools/install_mac_nightly.sh": (
+        "tools/tests/test_dev_start.py",
+        ("windows-compat-ci.yml", "macos-compat-ci.yml"),
     ),
 }
 
