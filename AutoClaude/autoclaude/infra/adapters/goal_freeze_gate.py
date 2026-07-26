@@ -3,8 +3,7 @@
 improving_57 A 軌：在「比 GoalDecomposer 三道硬閘更嚴格」的有界子集上自動 signoff——
   (1) 步驟數 1 ≤ n ≤ max_auto_steps（預設 12 = 硬上限 24 之半，config 可下調不可上調）：
       小規模拆解才自動信任，大規模一律回退人工 review。
-  (2) 無步驟 prompt 含注入嫌疑字元（黑名單 ⊇ SddToPlaybookAdapter._DENY / CONDITIONAL，
-      防自動放行夾帶鏈式攻擊向量——深度防禦，與末端 pre_run_validator 互補）。
+  (2) 無步驟 prompt 含注入嫌疑字元（黑名單見 utils/shell_deny_chars.py SSOT，深度防禦）。
   (3) goal_hash 具備（審計可追溯）。
 任一條件不成立 → auto_approved=False + 具體理由（fail-closed 回退 🔴 人工 signoff）。
 全程不呼叫 Brain、無外部 I/O；裁決與條件清單回傳供審計與 XAI 拓樸審查。
@@ -12,11 +11,12 @@ improving_57 A 軌：在「比 GoalDecomposer 三道硬閘更嚴格」的有界�
 from __future__ import annotations
 
 from ...core.ports.goal_freeze_gate import FreezeVerdict
+from ...utils.shell_deny_chars import BASE_DENY_CHARS
 
 # 自動放行硬上限（config 可下調不可上調，鏡像 GoalDecomposer.MAX_DECOMPOSITION_STEPS 紀律）
 DEFAULT_MAX_AUTO_STEPS = 12
-# 注入嫌疑字元集（⊇ SddToPlaybookAdapter._DENY {!,`,>,<,~,$,&,;}，再加管線 |）
-_DENY = set("!`><~$&;|")
+# 注入嫌疑字元集（SSOT：autoclaude/utils/shell_deny_chars.py，再加管線 |；DEF-101-238 收斂）
+_DENY = BASE_DENY_CHARS | {"|"}
 
 
 class BoundedGoalFreezeGate:
@@ -32,9 +32,7 @@ class BoundedGoalFreezeGate:
     ) -> FreezeVerdict:
         # 條件 1：步驟數有界（空拆解或超上限皆回退人工）
         if step_count <= 0:
-            return FreezeVerdict(
-                False, "拆解步驟為空，拒絕自動放行", ("step_count>0",)
-            )
+            return FreezeVerdict(False, "拆解步驟為空，拒絕自動放行", ("step_count>0",))
         if step_count > self._max_auto_steps:
             return FreezeVerdict(
                 False,

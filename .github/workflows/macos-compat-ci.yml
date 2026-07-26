@@ -104,6 +104,9 @@ on:
       - "tools/check_defect_log_crossref.py"
       - "tools/check_wrapper_thinness.py"
       - "tools/check_pytest_baseline_sites.py"
+      # R55：tools/tests/test_check_gha_action_versions.py import 消費此根層檔
+      # （DEF-101-042 同構，test_ci_paths_cover_root_consumers 實測揪出）
+      - "tools/check_gha_action_versions.py"
       - "tools/git_hooks_install_common.py"
       - "tools/_stdio_utf8.py"
       # R17：tools/tests/ 內含直接讀取/比對這兩支根層消費檔的回歸鎖
@@ -207,6 +210,9 @@ on:
       - "tools/check_defect_log_crossref.py"
       - "tools/check_wrapper_thinness.py"
       - "tools/check_pytest_baseline_sites.py"
+      # R55：tools/tests/test_check_gha_action_versions.py import 消費此根層檔
+      # （DEF-101-042 同構，test_ci_paths_cover_root_consumers 實測揪出）
+      - "tools/check_gha_action_versions.py"
       - "tools/git_hooks_install_common.py"
       - "tools/_stdio_utf8.py"
       # R17：tools/tests/ 內含直接讀取/比對這兩支根層消費檔的回歸鎖

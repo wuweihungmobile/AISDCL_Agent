@@ -9,7 +9,7 @@
 #     - push 範圍變更含 AISDLC_SDD/ → 執行 AISDLC_SDD/.githooks/pre-push
 #     - push 範圍變更含「根層檔」（不在上述兩子專案底下的任何路徑，如 tools/、
 #       docs/、.github/workflows/）→ 執行 root-infra leg（py_compile + tools/tests
-#       unittest（含數量下限釘選，R10 QA-2）+ 五支守門工具），對齊 root-infra-ci.yml
+#       unittest（含數量下限釘選，R10 QA-2）+ 六支守門工具），對齊 root-infra-ci.yml
 #       的本地接線（R9 複審：原本純根層變更 push 一個閘門都不跑，CI 停擺期間零防護）
 #     - push 範圍命中「根層消費檔」（aisdlc-sdd-ci.yml paths 承認的非 AISDLC_SDD/
 #       條目，如 tools/check_ntfs_paths.py、.claude/hooks/sdd_hook_router.py）且
@@ -208,11 +208,13 @@ if [ "$run_rootinfra" -eq 1 ]; then
         echo "[pre-push dispatcher] ❌ root-infra：tools/tests unittest 失敗" >&2
         leg_rc=1
       fi
-      # ③ 五支守門工具（逐支跑完累積，不因單支失敗提早退出；R13 增
-      #    check_pytest_baseline_sites.py——pytest 基線數字站點鎖，對齊 CI 第 11 道）
+      # ③ 六支守門工具（逐支跑完累積，不因單支失敗提早退出；R13 增
+      #    check_pytest_baseline_sites.py——pytest 基線數字站點鎖，對齊 CI 第 11 道；
+      #    R55 增 check_gha_action_versions.py——GitHub Actions 版本一致性鎖，
+      #    對齊 CI 第 12 道）
       for guard in tools/check_script_parity.py tools/check_ntfs_paths.py \
                    tools/check_defect_log_crossref.py tools/check_wrapper_thinness.py \
-                   tools/check_pytest_baseline_sites.py; do
+                   tools/check_pytest_baseline_sites.py tools/check_gha_action_versions.py; do
         if ! python "$guard"; then
           echo "[pre-push dispatcher] ❌ root-infra：$guard 失敗" >&2
           leg_rc=1

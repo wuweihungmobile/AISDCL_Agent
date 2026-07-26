@@ -51,9 +51,11 @@ from autoclaude.models.three_tier_schema import (  # noqa: E402
     Project,
     ThreeTierFixture,
 )
+from autoclaude.utils.shell_deny_chars import BASE_DENY_CHARS  # noqa: E402
 
-# evaluator 消毒：黑名單字元集 ⊇ CONDITIONAL（對齊 sdd_to_playbook_adapter._DENY）+ 換行
-_DENY = set("!`><~$&;\n\r")
+# evaluator 消毒：黑名單字元集（SSOT：autoclaude/utils/shell_deny_chars.py，DEF-101-238
+# 收斂）+ 換行
+_DENY = BASE_DENY_CHARS | {"\n", "\r"}
 # 白名單：evaluator 首 token 僅允許 pytest / python / python3（SDD evaluator 既有形態
 # ＋macOS／多數現代 Linux distro 無裸 python 別名時的可攜寫法）/ autoclaude-artifact-check
 # （R52 P1 修復：doc/spec 產檔步 artifact-existence evaluator 專用 console script，

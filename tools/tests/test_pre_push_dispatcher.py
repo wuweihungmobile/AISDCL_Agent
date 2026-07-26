@@ -262,8 +262,9 @@ class TestPrePushDispatcher(unittest.TestCase):
         os.chmod(self.repo / "AISDLC_SDD" / ".githooks" / "pre-push", 0o755)
 
         # 最小 root-infra 面：py_compile 目標（tools/ + .claude/hooks/，驗 R10
-        # 範圍擴充不炸）、run_root_unittests 替身（寫 marker）、五支守門 stub
-        # （R13 增 check_pytest_baseline_sites，隨 pre-push leg ③ 清單同步）。
+        # 範圍擴充不炸）、run_root_unittests 替身（寫 marker）、六支守門 stub
+        # （R13 增 check_pytest_baseline_sites；R55 增 check_gha_action_versions，
+        # 隨 pre-push leg ③ 清單同步）。
         self._write("tools/ok.py", "OK = True\n")
         self._write("tools/run_root_unittests.py", _py_marker_stub(self.marker_rootinfra))
         for guard in (
@@ -272,6 +273,7 @@ class TestPrePushDispatcher(unittest.TestCase):
             "check_defect_log_crossref",
             "check_wrapper_thinness",
             "check_pytest_baseline_sites",
+            "check_gha_action_versions",
         ):
             self._write(f"tools/{guard}.py", "raise SystemExit(0)\n")
         self._write(".claude/hooks/trivial_hook.py", "OK = True\n")

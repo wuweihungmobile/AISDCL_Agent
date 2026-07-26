@@ -1,7 +1,7 @@
 # 根層基建 CI（四方複審 B4，2026-07-10；防禦縱深補洞 2026-07-11）：workflows / hooks /
 # 工具腳本上移 monorepo 根層後，根層 tools/（bootstrap / integration_gate / git-hooks
 # dispatcher）與 .gitattributes、.editorconfig、dependabot 等基建原本零 CI 覆蓋——壞掉
-# 只會在開發者本機爆。本 workflow 做十一道輕量守門（僅 actions/checkout，不引其他外部
+# 只會在開發者本機爆。本 workflow 做十二道輕量守門（僅 actions/checkout，不引其他外部
 # action，避免供應鏈風險）：
 #   1. bash -n       — 根層 tools/git-hooks/ 與 tools/*.sh（遞迴涵蓋子目錄）語法檢查
 #   2. pwsh parse    — active .ps1（根層 tools/ + AutoClaude/tools/ + AISDLC_SDD/scripts/
@@ -54,6 +54,12 @@
 #                      命中即紅；SSOT 自身零命中亦紅（anchor 自檢）。歷史紀錄性數字
 #                      以行內 `baseline-ok:` 豁免並逐次列印稽核（DEF-101-045／
 #                      ARCH-R12-7／R13 README 漂移三度實證，R13 ARCH-R13-1 落地）
+#   12. GitHub Actions 版本一致性鎖 — tools/check_gha_action_versions.py：
+#                      actions/checkout／setup-python／upload-artifact／github-script
+#                      四個常用 action 在全部 workflow 內版本必須唯一，不一致即紅
+#                      （R54 round 1/2〔DEF-101-420/424〕連續兩輪靠人工 grep 逐檔比對
+#                      才發現版本落差、且人工「已是穩定版」的自我宣稱本身失準，
+#                      R55 落地機械鎖收斂此缺口）
 #
 # 注：上列編號為清單序，與 job 內實際執行順序無關（如第 7 道 py_compile 實體 step
 # 緊接第 1 道 bash -n 之後執行）——R11 文件掃描[關注-3]澄清。
@@ -80,7 +86,7 @@ permissions:
 
 jobs:
   root-infra:
-    name: root infra guard (bash -n + pwsh parse/BOM + EOL(.sh) + EOL(.ps1) + NTFS + parity + py_compile + unittest + defect-log-crossref + wrapper-thinness + pytest-baseline-sites)
+    name: root infra guard (bash -n + pwsh parse/BOM + EOL(.sh) + EOL(.ps1) + NTFS + parity + py_compile + unittest + defect-log-crossref + wrapper-thinness + pytest-baseline-sites + gha-action-versions)
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
@@ -213,3 +219,6 @@ jobs:
 
       - name: wrapper 薄殼守門（tools/check_wrapper_thinness.py：dev_start＋local_ci_gate）
         run: python3 tools/check_wrapper_thinness.py
+
+      - name: GitHub Actions 版本一致性（tools/check_gha_action_versions.py：checkout/setup-python/upload-artifact/github-script 跨 workflow 同版）
+        run: python3 tools/check_gha_action_versions.py

@@ -48,9 +48,19 @@ REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 SYS_BASH="/bin/bash"
 [ -x "$SYS_BASH" ] || SYS_BASH="bash"
 
+# R55：WindowsApps 空殼排除 guard（純函式定義，無副作用）。雖然本腳本是
+# macOS 專屬本地驗證聚合腳本，但第 [3][4] 步會在 fake repo 內以系統 bash 直呼
+# tools/git-hooks/* 與 install_git_hooks.sh／install_post_commit.sh 等已知呼叫端
+# 相同的 Windows Git Bash 執行情境（見上方檔頭「相容性」與 [2b] 段落註解、
+# ONBOARDING.md「已於 Windows Git Bash 實跑全綠」實跑紀錄）——此前置守門本身
+# 亦沿用同一慣例，改用共用 SSOT 而非裸判斷，避免在 Windows 11 + WindowsApps
+# 空殼 python 情境下誤判「找到 python」。
+# shellcheck disable=SC1091
+. "$SCRIPT_DIR/lib/windowsapps_guard.sh"
+
 # 前置守門：install 共用層（tools/lib/git_hooks_install_common.sh）與守門工具
 # 都需要 python —— 缺席時 fail-fast（與該共用層同款訊息），勝過中段連環爆。
-if ! command -v python >/dev/null 2>&1; then
+if ! is_real_python_candidate python; then
   echo "❌ 找不到 python — 請先 source .venv/bin/activate（見 ONBOARDING.md §3）" >&2
   exit 1
 fi

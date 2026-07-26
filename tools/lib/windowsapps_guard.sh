@@ -4,7 +4,7 @@
 #
 # 背景：R37/R40 已把 PowerShell 側（tools/lib/WindowsAppsGuard.ps1::Test-IsRealPython）
 # 與 Python 側（bootstrap_core.py::_is_windows_apps_stub）各自收斂為單一真相源，但兩者
-# 皆只掃描 .ps1/.py，repo 內另有 9 支 tracked bash 腳本（含 tools/git-hooks/pre-push
+# 皆只掃描 .ps1/.py，repo 內另有 12 支 tracked bash 腳本（含 tools/git-hooks/pre-push
 # 這個每次 push 都會實際執行的 dispatcher）各自用裸 `command -v python`/`command -v
 # python3` 判斷可用性，從未排除 Windows Store App Execution Alias 空殼——全新未裝真
 # Python 的 Windows 11 機器上，Git Bash 繼承 Windows PATH 同樣會命中

@@ -3,7 +3,7 @@
 
 背景：`tools/lib/WindowsAppsGuard.ps1::Test-IsRealPython`（R37 抽出）與
 `bootstrap_core.py::_is_windows_apps_stub`（Python 側）皆只涵蓋各自語言的
-呼叫端，repo 內另有 9 支 tracked bash 腳本（含 `tools/git-hooks/pre-push` 這個
+呼叫端，repo 內另有 12 支 tracked bash 腳本（含 `tools/git-hooks/pre-push` 這個
 每次 push 都會實際執行的 dispatcher 本體）各自用裸 `command -v python`／
 `command -v python3` 判斷可用性，從未排除 Windows Store App Execution Alias
 空殼——Git Bash on Windows 會繼承 Windows PATH，同樣會命中
@@ -37,7 +37,7 @@ bash 語法解析，因此對下列兩種刻意構造的偽裝手法無鑑別力
   - 把 `is_real_python_candidate` 包進一個語法正確、但整檔從未被呼叫的死
     函式裡（source 行是真的）——本檔不做可達性分析，無法分辨「定義了」與
     「真的被呼叫到」。
-  這兩種繞過會讓 `_has_ssot_guard` 誤判為已收斂，但風險有界：對 11 支已知
+  這兩種繞過會讓 `_has_ssot_guard` 誤判為已收斂，但風險有界：對 12 支已知
   白名單呼叫端（`_CALLER_FILES`），`test_no_raw_unguarded_python_check_remains`
   是另一支**不依賴** `_has_ssot_guard` 的獨立安全網（直接對這些檔案做裸
   `command -v python >/dev/null` 字面值 regex 比對），不受此限制影響；只有
@@ -77,6 +77,12 @@ _CALLER_FILES = [
     # `_tracked_extensionless_hook_files()` 對此方法論盲區的補強。
     _REPO_ROOT / "AutoClaude" / "tools" / "git-hooks" / "pre-commit",
     _REPO_ROOT / "AutoClaude" / "tools" / "git-hooks" / "pre-push",
+    # R55 新增：原登記於 _EXEMPT_SH_FILES，豁免理由「WindowsApps 資料夾不可能
+    # 出現在 macOS PATH 上」論證方向錯誤——真正風險是本腳本是否會被跑在
+    # Windows 上，而腳本自身檔頭（[2b] 段落註解、`-c core.longpaths=true`
+    # 註解）與根層 ONBOARDING.md 皆記載過 Windows Git Bash 實跑情境，已改用
+    # 共用 guard。
+    _REPO_ROOT / "tools" / "macos_smoke_local.sh",
 ]
 
 # 裸 `command -v python`／`command -v python3` 可用性判斷殘留偵測——只認本 repo
@@ -97,10 +103,6 @@ _LOOSE_RAW_CHECK_RE = re.compile(r"command\s+-v\s+python3?\b")
 # git-tracked 全部 `*.sh` 做前瞻掃描；下列為明確判斷「WindowsApps 空殼排除
 # guard 不適用」而豁免的檔案，皆附理由，供未來覆核：
 _EXEMPT_SH_FILES = {
-    # macOS 專屬本地驗證聚合腳本（docstring 明文「嚴格 bash 3.2（macOS /bin/bash）」
-    # + 只由 macos-compat-ci.yml 呼叫）；WindowsApps 是 Windows Store 專屬機制，
-    # 該資料夾不可能出現在 macOS PATH 上，guard 在此為無意義的防禦性死碼。
-    "tools/macos_smoke_local.sh",
     # macOS 專屬 nightly 薄聚合器（docstring 明文「bash 3.2（macOS /bin/bash）」+
     # Windows 對等品是完全獨立的 run_local_nightly.ps1），同上理由豁免。
     "AutoClaude/tools/run_local_nightly.sh",

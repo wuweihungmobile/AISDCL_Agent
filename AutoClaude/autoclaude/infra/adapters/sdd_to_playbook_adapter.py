@@ -28,9 +28,9 @@ from ...core.ports.spec_source import (
     SpecTaintedError,
 )
 from ...models.playbook import PlaybookTask
+from ...utils.shell_deny_chars import BASE_DENY_CHARS as _DENY
 
-# §1.3 截斷點 2：黑名單字元集 ⊇ CONDITIONAL 黑名單 {!,`,>,<,~,$}，再加 &;
-_DENY = set("!`><~$&;")
+# §1.3 截斷點 2：黑名單字元集（SSOT：autoclaude/utils/shell_deny_chars.py，DEF-101-238 收斂）
 # 白名單 regex：路徑片段僅允許 word / . / / / -（消毒第二層）
 _SAFE_FRAGMENT = re.compile(r"^[\w./\\-]+$")
 
