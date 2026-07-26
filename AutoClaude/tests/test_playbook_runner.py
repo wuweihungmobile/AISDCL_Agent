@@ -1035,6 +1035,18 @@ def test_gap033_evolver_cross_step_import_triggers_global_init():
     assert evaluator_command is not None
     assert "'" not in evaluator_command, "evaluator_command 不應含單引號（cmd.exe 不安全）"
 
+    # R51 迴歸鎖：evaluator_command 必須含 sys.executable 絕對路徑，不得退化為
+    # 裸字面值 "python"（macOS/多數現代 Linux distro 的 /usr/bin 下無 python
+    # 別名，裸字面值會以 rc=127 command not found 收場）。既有的 ok_proc/
+    # fail_proc 兩段 subprocess 驗證皆繼承呼叫端 .venv 的 PATH（恆含 python
+    # 別名），對「PATH 上無裸 python」這個環境維度零鑑別力；本段補上 token 級
+    # 直接斷言 + 受限 PATH 親跑，若日後改回裸字面值 "python" 會在任何機器上變紅。
+    import sys
+
+    assert f'"{sys.executable}"' in evaluator_command, (
+        f"evaluator_command 應含 sys.executable 絕對路徑，實際: {evaluator_command}"
+    )
+
     import subprocess
 
     ok_proc = subprocess.run(
@@ -1050,6 +1062,24 @@ def test_gap033_evolver_cross_step_import_triggers_global_init():
         encoding="utf-8", errors="replace", timeout=10,
     )
     assert fail_proc.returncode != 0, "不存在的模組應讓 evaluator 回報失敗"
+
+    # 受限環境親跑：複製目前環境變數但清空 PATH，模擬 PATH 上無任何 python
+    # 可被裸字面值找到的情境，證明本 evaluator_command 靠絕對路徑而非 PATH
+    # 查找，即使受限環境下仍能正確辨別 import 成功/失敗語意。
+    import os
+
+    restricted_env = dict(os.environ)
+    restricted_env["PATH"] = ""
+    ok_restricted = subprocess.run(
+        evaluator_command.replace("fastapi", "os"),
+        shell=True, capture_output=True, text=True,
+        encoding="utf-8", errors="replace", timeout=10, env=restricted_env,
+    )
+    assert ok_restricted.returncode == 0, (
+        "受限 PATH 下可 import 的模組仍應通過（絕對路徑不靠 PATH 查找），"
+        f"實際 rc={ok_restricted.returncode}, stdout={ok_restricted.stdout!r}, "
+        f"stderr={ok_restricted.stderr!r}"
+    )
 
 
 def test_gap033_evolver_single_escalation_no_cross_step():

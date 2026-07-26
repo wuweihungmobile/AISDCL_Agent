@@ -568,6 +568,47 @@ class TestGap026SplitStepEvaluator:
         assert not result.startswith("{")
         assert "|| true" not in result
 
+    def test_derive_part_a_evaluator_uses_sys_executable_not_bare_python(self):
+        """R51 迴歸鎖：包裝殼必須用 `sys.executable` 絕對路徑，不得退化為裸字面值
+        `python`（macOS /usr/bin 與多數現代 Linux distro 預設 PATH 上無 `python`
+        別名，裸字面值會以 rc=127 command not found 收場，打破本函式『非 pytest
+        指令必須無條件回傳成功』的契約 — R51 修復前的真實缺陷）。
+
+        既有測試（如 test_derive_part_a_evaluator_other_cmd）皆在繼承呼叫端
+        .venv PATH（恆含 python 別名）下執行 subprocess，對『PATH 上無裸 python』
+        這個環境維度零鑑別力：即使有人把 sys.executable 改回裸字面值 'python'，
+        那些測試仍會通過。本測試改用「複製目前環境變數、僅清空 PATH」的受限
+        環境親跑 subprocess，直接重現此環境缺口 —— 若退化為裸字面值，本測試
+        會在任何機器上以 rc!=0 變紅，不再依賴開發機 PATH 是否恰好有 python 別名。
+        """
+        import os
+        import subprocess
+        import sys
+
+        result = PlaybookEvolver._derive_part_a_evaluator(
+            'python -c "import sys; sys.exit(1)"'
+        )
+        assert result is not None
+        # token 級直接斷言：產出指令必須含本行程實際直譯器的絕對路徑（雙引號包住）
+        assert f'"{sys.executable}"' in result, (
+            f"evaluator_command 應含 sys.executable 絕對路徑，實際: {result}"
+        )
+
+        # 受限環境親跑：複製目前環境變數但清空 PATH，模擬 PATH 上無任何
+        # python/python3 可被裸字面值找到的情境（其餘變數如 SystemRoot/HOME
+        # 保留，避免殼本身因缺變數而異常，僅單獨隔離 PATH 這個維度）。
+        restricted_env = dict(os.environ)
+        restricted_env["PATH"] = ""
+        proc = subprocess.run(
+            result, shell=True, capture_output=True, text=True,
+            encoding="utf-8", errors="replace", timeout=10, env=restricted_env,
+        )
+        assert proc.returncode == 0, (
+            "受限 PATH（無裸 python 可被找到）下 Part A evaluator 仍應無條件 "
+            f"exit 0（因用絕對路徑不靠 PATH 查找），實際 rc={proc.returncode}, "
+            f"stdout={proc.stdout!r}, stderr={proc.stderr!r}"
+        )
+
     def test_split_step_part_a_has_evaluator(self):
         """PlaybookEvolver.propose_evolution() SPLIT_STEP — Part A 應有 evaluator_command。"""
         from autoclaude.models.playbook import GlobalInvariants
@@ -632,6 +673,36 @@ class TestGap026BMinimaxEvolverSplitStepEvaluator:
             encoding="utf-8", errors="replace", timeout=10,
         )
         assert proc.returncode == 0, f"Part A evaluator 應無條件 exit 0，實際: {proc.returncode}"
+
+    def test_derive_part_a_evaluator_uses_sys_executable_not_bare_python(self):
+        """R51 迴歸鎖（MinimaxEvolver 側，鏡射 TestGap026SplitStepEvaluator 同名測試）：
+        包裝殼必須用 `sys.executable` 絕對路徑，不得退化為裸字面值 `python`。
+        以「複製目前環境變數、僅清空 PATH」的受限環境親跑 subprocess，直接
+        重現『PATH 上無裸 python 可被找到』的環境缺口，非只比對字面 token。
+        """
+        import os
+        import subprocess
+        import sys
+
+        result = MinimaxEvolver._derive_part_a_evaluator(
+            'python -c "import sys; sys.exit(1)"'
+        )
+        assert result is not None
+        assert f'"{sys.executable}"' in result, (
+            f"evaluator_command 應含 sys.executable 絕對路徑，實際: {result}"
+        )
+
+        restricted_env = dict(os.environ)
+        restricted_env["PATH"] = ""
+        proc = subprocess.run(
+            result, shell=True, capture_output=True, text=True,
+            encoding="utf-8", errors="replace", timeout=10, env=restricted_env,
+        )
+        assert proc.returncode == 0, (
+            "受限 PATH（無裸 python 可被找到）下 Part A evaluator 仍應無條件 "
+            f"exit 0，實際 rc={proc.returncode}, stdout={proc.stdout!r}, "
+            f"stderr={proc.stderr!r}"
+        )
 
 
 # ──────────────────────────────────────────────

@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import base64
 import re
+import sys
 
 
 def derive_part_a_evaluator(full_evaluator: str | None) -> str | None:
@@ -26,6 +27,12 @@ def derive_part_a_evaluator(full_evaluator: str | None) -> str | None:
     cmd.exe 不支援（`{` 會被當成不存在的命令）。改以 `python -c` 包裝：以 base64 編碼
     原指令避開任何引號/特殊字元造成的殼層轉義問題，內部仍以 subprocess.run(shell=True)
     交給平台原生殼執行 cmd 本身（保留原指令可用任意殼語法的彈性），並無條件 sys.exit(0)。
+
+    R51 修正：包裝殼一律用 `sys.executable`（本行程實際執行的 Python 直譯器絕對路徑）
+    而非裸字面值 `python`。macOS /usr/bin 與多數現代 Linux distro 預設 PATH 上並無
+    `python` 別名（僅有 `python3`），裸字面值在該類環境會以 shell rc=127
+    「command not found」收場，打破本函式「非 pytest 指令必須無條件回傳成功」的契約。
+    以雙引號包住路徑以相容路徑含空白（如 Windows "Program Files"）。
     """
     if not full_evaluator:
         return None
@@ -36,8 +43,9 @@ def derive_part_a_evaluator(full_evaluator: str | None) -> str | None:
         base = re.sub(r'\s+--tb=\S+', '', base)
         return base.split()[0] + " --collect-only"
     payload = base64.b64encode(cmd.encode("utf-8")).decode("ascii")
+    python_bin = sys.executable or "python3"
     return (
-        'python -c "import subprocess, base64, sys; '
+        f'"{python_bin}" -c "import subprocess, base64, sys; '
         f"subprocess.run(base64.b64decode('{payload}').decode('utf-8'), shell=True); "
         'sys.exit(0)"'
     )

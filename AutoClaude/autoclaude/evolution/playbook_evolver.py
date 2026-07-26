@@ -18,6 +18,7 @@ PlaybookEvolver — Level 5 Playbook 自演化引擎（Gap-010-E）。
 from __future__ import annotations
 
 import logging
+import sys
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -101,7 +102,11 @@ class PlaybookEvolver:
                             # 跨平台注意：shell=True 在 Windows 走 cmd.exe（非 bash），
                             # cmd.exe 不把單引號視為字串分隔符，故一律用雙引號包 python -c
                             # 參數、python 字串內用單引號（沿用 evaluator.py docstring 慣例）。
-                            evaluator_command="python -c \"import fastapi\" && echo OK",
+                            # R51 修正：一律用 sys.executable 絕對路徑而非裸字面值 "python"
+                            # ——macOS/多數現代 Linux distro 的 /usr/bin 下無 python 別名
+                            # （僅 python3），裸字面值會以 rc=127 command not found 收場，
+                            # 給出誤導性失敗原因而非真正的 ModuleNotFoundError 判斷。
+                            evaluator_command=f'"{sys.executable}" -c "import fastapi" && echo OK',
                             max_retries=_inject_max_retries,
                         ),
                     )
