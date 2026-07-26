@@ -113,6 +113,17 @@ R53（第 53 輪 Mac/Windows 相容性四方複審 Architect/SA/SD/QA 交叉發�
     子字串）＋前置負向 lookbehind 防止嵌在更長識別字中誤判，`_JOIN_RE`／
     `_SLASH_RE` 兩者行為對稱一致；並新增獨立單元測試直接驗證兩個正則物件本身
     的涵蓋面（回應「安全網自身缺乏測試」的測試設計缺口）。
+
+R54（第 54 輪複審 SA/SD 交叉觀察，純架構前瞻 watch item，非現行缺陷，19 passed
+無違規）：本鎖的三份手寫登記字典——`_KNOWN_SUBPROCESS_ONLY_CONSUMERS`（盲區 B，
+R19）／`_KNOWN_GLOB_SCAN_CONSUMERS`（盲區 C，R50）／`_KNOWN_LITERAL_PATH_CONSUMERS`
+（盲區 D，R52，且 R53 才發現盲區 D 內部登記本身漏補）——已與 WindowsApps guard
+家族（DEF-101-400）同構演化出「正則/登記表軍備競賽」模式，但後者已有 Architect
+明訂的收斂門檻（「若出現第 6 個繞過手法，優先評估 AST-based 掃描」），本鎖側從未
+被賦予對等門檻。比照 DEF-101-400 措辭訂立決策準則供未來輪參考：**若再出現第 4
+個盲區，或單一盲區內部第 2 次漏登記，優先評估收斂為程式化反向驗證（如對
+`_KNOWN_*` 字典本身跑一次「有無遺漏子路徑」的通用掃描），而非再疊一份手寫登記
+字典**。本節純記錄門檻，不阻擋、不改動任何測試邏輯。
 """
 from __future__ import annotations
 
