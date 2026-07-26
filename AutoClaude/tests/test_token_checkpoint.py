@@ -8,18 +8,18 @@ Token Guard 與 Checkpoint 機制的單元測試。
   - PlaybookRunner：compact 觸發、halt 觸發、checkpoint 儲存、checkpoint 恢復
 """
 from __future__ import annotations
+
 from datetime import datetime, timedelta
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import yaml
 
-from autoclaude.utils.token_tracker import extract_context_pct, TokenUsageLogger, build_patterns
+from autoclaude.execution.failure_tracker import FailureTracker
+from autoclaude.execution.playbook_runner import PlaybookRunner
 from autoclaude.utils.checkpoint_manager import CheckpointManager, PlaybookCheckpoint
 from autoclaude.utils.config import AppConfig, TokenGuardConfig
-from autoclaude.execution.playbook_runner import PlaybookRunner
-from autoclaude.execution.failure_tracker import FailureTracker
-
+from autoclaude.utils.token_tracker import TokenUsageLogger, build_patterns, extract_context_pct
 
 # ══════════════════════════════════════════════
 # extract_context_pct
@@ -206,6 +206,40 @@ class TestCheckpointManager:
         mgr = CheckpointManager(str(tmp_path))
         p = mgr.checkpoint_path("scripts/my_playbook.yaml")
         assert p.name == "my_playbook.checkpoint.json"
+
+    def test_checkpoint_path_matches_actual_saved_filename_for_reserved_device_name(
+        self, tmp_path
+    ):
+        """R48（DEF-101-390）回歸鎖：checkpoint_path()/exists() 曾繞過檔名淨化，
+        與 save()/load()/clear()（委派 FileStateRepository._path() 走
+        _sanitize_log_filename SSOT）不一致——playbook_path 帶 Windows 保留裝置名
+        （如 "con.yaml"）時，checkpoint_path() 回傳未淨化檔名而 save() 實際寫入
+        淨化後檔名，兩者不一致；exists() 因此對錯檔名判斷、恆回報 False（即使
+        剛存過 checkpoint）。修復後兩者委派同一 SSOT，永遠一致。
+        """
+        mgr = CheckpointManager(str(tmp_path))
+        mgr.save(self._make_cp(), "con.yaml")
+        saved_files = list(tmp_path.glob("*.checkpoint.json"))
+        assert len(saved_files) == 1, f"預期恰好一個 checkpoint 檔案，實際：{saved_files}"
+        assert mgr.checkpoint_path("con.yaml") == saved_files[0], (
+            "checkpoint_path() 回傳的路徑必須與 save() 實際寫入磁碟的檔名一致"
+        )
+        assert mgr.exists("con.yaml") is True
+
+    def test_checkpoint_path_matches_actual_saved_filename_for_forbidden_char_stem(
+        self, tmp_path
+    ):
+        """同上回歸鎖，換一種淨化情境：stem 本身含 NTFS 禁用字元（非保留裝置
+        名）。`../evil` 這類路徑穿越字元經 `Path.stem` 取值後已不含 `..`（stem
+        只取最後一段去除副檔名），故本測試改以 stem 本身即含禁用字元的檔名
+        （`weird<name>.yaml`）驗證 checkpoint_path()/save() 一致性。
+        """
+        mgr = CheckpointManager(str(tmp_path))
+        mgr.save(self._make_cp(), "weird<name>.yaml")
+        saved_files = list(tmp_path.glob("*.checkpoint.json"))
+        assert len(saved_files) == 1, f"預期恰好一個 checkpoint 檔案，實際：{saved_files}"
+        assert mgr.checkpoint_path("weird<name>.yaml") == saved_files[0]
+        assert mgr.exists("weird<name>.yaml") is True
 
     def test_corrupt_file_returns_none(self, tmp_path):
         mgr = CheckpointManager(str(tmp_path))
@@ -831,12 +865,18 @@ def test_build_history_summary_empty():
 def test_suspect_assertion_baseline_mismatch_triggers():
     """全部 assertion + 失敗數未減少 + 特徵碼變化 >= 2 → True。"""
     tracker = FailureTracker("T01")
-    tracker.record(0, "fail", "FAILED test_foo.py - AssertionError: assert 100 == 42\n1 failed", 1, "",
-                   error_class="assertion")
-    tracker.record(1, "fail", "FAILED test_foo.py - AssertionError: assert 100 == 42\n1 failed", 1, "",
-                   error_class="assertion")
-    tracker.record(2, "fail", "FAILED test_bar.py - AssertionError: assert 50 == 42\n2 failed", 1, "",
-                   error_class="assertion")
+    tracker.record(
+        0, "fail", "FAILED test_foo.py - AssertionError: assert 100 == 42\n1 failed", 1, "",
+        error_class="assertion",
+    )
+    tracker.record(
+        1, "fail", "FAILED test_foo.py - AssertionError: assert 100 == 42\n1 failed", 1, "",
+        error_class="assertion",
+    )
+    tracker.record(
+        2, "fail", "FAILED test_bar.py - AssertionError: assert 50 == 42\n2 failed", 1, "",
+        error_class="assertion",
+    )
     # 手動設不同特徵碼
     tracker.history[0].error_signature = "sig_A"
     tracker.history[1].error_signature = "sig_B"
@@ -906,7 +946,8 @@ def test_consecutive_compact_failures_trigger_halt(mock_pty_cls, tmp_path):
     ])
     runner = _make_runner(tmp_path)
     # 預設計數器為 1，讓第一次 compact 失敗就達到 >= 2
-    # SD_07 W4-T4-2：plugin SSOT 直接設置（原 _consecutive_compact_failures property/setter 已物理拔除）
+    # SD_07 W4-T4-2：plugin SSOT 直接設置
+    # （原 _consecutive_compact_failures property/setter 已物理拔除）
     runner._token_guard_plugin._compact_failure_count = 1
 
     with patch("autoclaude.execution.playbook_runner.notify"):

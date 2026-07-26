@@ -94,6 +94,9 @@ if (-not (Test-Path $HookSrcClosure)) {
 # 設計：guard 檔不存在時降級回退舊行為（不阻擋安裝），故不在產生器階段
 # Test-Path 擋門檻，交給下面 heredoc 內容自己在 hook 執行當下判斷 `[ -f ... ]`。
 $GuardSrcBash = Join-Path $MainCheckoutRoot "tools\lib\windowsapps_guard.sh"
+# 本行內容由 bash 自己 [ -f ]／source（非傳給 python.exe 當 argv），原生 Windows
+# PowerShell 5.1 的 Join-Path 不會正規化反斜線，需正規化為正斜線供 bash 解析。
+$GuardSrcBash = $GuardSrcBash -replace "\\", "/"
 $HookContent = @"
 #!/usr/bin/env bash
 # PostCommit advisory hooks - never block commit

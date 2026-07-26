@@ -121,6 +121,7 @@ on:
       - "AutoClaude/pyproject.toml"
       - "AutoClaude/tests/**"
       - "AutoClaude/tools/install_git_hooks.ps1"
+      - "AutoClaude/tools/install_git_hooks.sh"
       - "AutoClaude/.claude/**"
       - "AISDLC_SDD/scripts/**"
       # R9 Fix-C：windows-smoke 實際安裝 v0.01 requirements-ci.txt（見下方「安裝
@@ -201,6 +202,7 @@ on:
       - "AutoClaude/pyproject.toml"
       - "AutoClaude/tests/**"
       - "AutoClaude/tools/install_git_hooks.ps1"
+      - "AutoClaude/tools/install_git_hooks.sh"
       - "AutoClaude/.claude/**"
       - "AISDLC_SDD/scripts/**"
       # R9 Fix-C：同上（push 段說明），pull_request 段同步補齊
@@ -730,6 +732,58 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw "dev_start.ps1（Windows PowerShell 5.1）核心邏輯（tools/dev_start.py）回報失敗，exit=$LASTEXITCODE" }
           Write-Host "dev_start.ps1（Windows PowerShell 5.1）執行成功"
           Remove-Item -Recurse -Force .venv
+
+      - name: Windows PowerShell 5.1（非 pwsh）驗證 install_post_commit.ps1（R48 Architect 複審發現：DEF-101-389 反斜線修復從未被原生 PS5.1 實際驗證過）
+        # R48 四方複審 Architect REJECT 理由：DEF-101-389（install_post_commit.ps1 的
+        # `$GuardSrcBash -replace "\\", "/"`）修復本身正確，且已有 pytest 單元測試
+        # 鎖住此不變量，但本 workflow 全部步驟（windows-smoke／windows-nightly-full）
+        # 一律 shell: pwsh，從未用原生 Windows PowerShell 5.1（shell: powershell）
+        # 實際執行過 install_post_commit.ps1 一次——本專案文件教使用者實際會用的
+        # 正是 Windows 內建 powershell.exe（PS5.1），而 pwsh 的 Join-Path 會自動
+        # 正規化反斜線、PS5.1 不會，這正是本次 bug 的根因，故「用 pwsh 驗證過」不
+        # 等於「用文件教的那個引擎驗證過」。比照上一 step（bootstrap.ps1/dev_start.ps1）
+        # 同款先例延伸：本機 python 由前面 actions/setup-python 安裝於系統 PATH（非
+        # 上一 step 建立、已於上一行移除的 .venv），install_post_commit.ps1 自己
+        # dot-source tools/lib/WindowsAppsGuard.ps1 判斷 python 是否可用，兩者皆不
+        # 依賴已移除的 .venv。
+        #
+        # 斷言兩件事（呼應 Architect 複審意見）：(1) 安裝器本身以原生 PS5.1 執行
+        # 成功（$LASTEXITCODE -eq 0）；(2) 產出的 hook 內嵌的 windowsapps_guard.sh
+        # 來源路徑字串不含反斜線——這正是 DEF-101-389 要守住的核心不變量：原生
+        # PS5.1 的 Join-Path 不會自動正規化反斜線，若這裡殘留反斜線代表回歸。
+        #
+        # ⚠️ 誠實限制：本 step 依賴原生 Windows PowerShell 5.1，在本機 macOS（無
+        # powershell.exe）上無法實際執行驗證，只能在真 Windows GitHub Runner 上跑
+        # ——這是上一個既有 step（bootstrap.ps1/dev_start.ps1）從一開始就有的相同
+        # 限制，非本次新增的額外問題。
+        if: ${{ !cancelled() }}
+        shell: powershell
+        run: |
+          # R11 DEF-101-133：LATEST 解析委派 scripts/sdd_version.py 單一真相源，
+          # 不寫死版本號（同上方 R2 Architect 複審修正、下方 fsm_runtime pytest
+          # step 同款慣例）。
+          $latestName = (& python AISDLC_SDD/scripts/sdd_version.py --sdd-root AISDLC_SDD | Out-String).Trim()
+          if (-not $latestName) { throw "找不到任何 AISDLC_SDD_v* 版本目錄（sdd_version.py SSOT 解析失敗）" }
+          $installer = "./AISDLC_SDD/$latestName/tools/install_hooks/install_post_commit.ps1"
+          if (-not (Test-Path $installer)) { throw "找不到安裝器：$installer" }
+
+          & $installer
+          if ($LASTEXITCODE -ne 0) { throw "install_post_commit.ps1（Windows PowerShell 5.1）執行失敗，exit=$LASTEXITCODE" }
+          Write-Host "install_post_commit.ps1（Windows PowerShell 5.1）執行成功（LATEST=$latestName）"
+
+          $commonDir = (git rev-parse --path-format=absolute --git-common-dir).Trim()
+          $hookTarget = Join-Path $commonDir "hooks/post-commit"
+          if (-not (Test-Path $hookTarget)) { throw "install_post_commit.ps1 執行成功但未產出 hook 檔：$hookTarget" }
+          $content = Get-Content -Raw $hookTarget
+          if ($content -match '"([^"]*windowsapps_guard\.sh)"') {
+            $guardPath = $Matches[1]
+          } else {
+            throw "hook 內容未找到 guard 來源路徑字串（windowsapps_guard.sh）——DEF-101-383/389 修復內容疑似遺失"
+          }
+          if ($guardPath -match '\\') {
+            throw "guard 來源路徑內嵌反斜線，原生 Windows PowerShell 5.1 下 bash [ -f ]／source 可能吃不到此路徑（DEF-101-389 回歸）：$guardPath"
+          }
+          Write-Host "install_post_commit.ps1（Windows PowerShell 5.1）hook 內嵌 guard 路徑不含反斜線驗證通過：$guardPath"
 
       - name: 安裝 AutoClaude 開發 + lint 依賴（供 local_ci_gate.ps1 使用）
         # 2026-07-16 四方複審 QA 發現：見上一 step 註解——job 層級 continue-on-error

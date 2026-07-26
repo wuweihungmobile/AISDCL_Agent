@@ -47,6 +47,7 @@ monorepo checkout 裡」的前提上。故改為 dot-source 共用函式
 from __future__ import annotations
 
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -285,6 +286,96 @@ def test_installer_writes_hook_referencing_shared_bash_guard(tmp_path) -> None:
     text = hook.read_text(encoding="utf-8")
     assert "windowsapps_guard.sh" in text, f"產出的 hook 未 source 共用 guard：\n{text}"
     assert "is_real_python_candidate" in text, f"產出的 hook 未改用共用函式判斷：\n{text}"
+
+
+def test_guard_src_bash_path_embedded_in_hook_has_no_backslash(tmp_path) -> None:
+    """R48（DEF-101-389）回歸鎖：`$GuardSrcBash` 是 hook 內容裡由 **bash 自己**
+    `[ -f ... ]`／`. ...`（source）解析的路徑（非傳給 `python.exe` 當 argv 的
+    `$HookSrcDrift`/`$HookSrcClosure`），若其中混入反斜線，原生 Windows
+    PowerShell 5.1 的 `Join-Path`（不同於 pwsh 跨平台版，不會正規化反斜線）
+    會讓 bash 在 Windows 上把反斜線當跳脫字元解析，導致 `[ -f ]`／source 找不到
+    guard 檔，靜默落回裸 `command -v python`（R47 DEF-101-383 才修掉的同一個
+    P1 情境復發）。修復方式：`$GuardSrcBash` 產生後立即 `-replace "\\", "/"`。
+
+    ⚠️ 誠實限制：本環境只有跨平台 pwsh 可用，其 `Join-Path` 在 macOS 上執行時
+    本就會把反斜線正規化成正斜線，故本測試在修復前後於本機皆會通過（無法在
+    此環境動態重現「原生 Windows PowerShell 5.1 的 Join-Path 保留反斜線」這個
+    真正觸發修復必要性的場景）。本測試鎖的是「產出的 hook 內嵌路徑不含反斜線」
+    這個不變量本身（靜態不變量鎖），不是動態重現原始 bug；未來若有人改用字串
+    串接方式不慎引入新的反斜線片段，本測試能第一時間攔下。
+    """
+    installer = _latest_installer()
+    assert installer.is_file(), f"安裝器缺席：{installer}"
+    repo = _make_fake_monorepo(tmp_path)
+
+    proc = subprocess.run(
+        [_PWSH, "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", str(installer)],
+        cwd=str(repo),
+        capture_output=True, text=True, encoding="utf-8", errors="replace",
+        timeout=60,
+    )
+    assert proc.returncode == 0, f"安裝器非零退出：{proc.stdout!r} {proc.stderr!r}"
+    hook = repo / ".git" / "hooks" / "post-commit"
+    assert hook.is_file(), f"hook 未產出：{proc.stdout!r} {proc.stderr!r}"
+    text = hook.read_text(encoding="utf-8")
+    matches = re.findall(r'"([^"]*windowsapps_guard\.sh)"', text)
+    assert matches, f"hook 內容未找到 guard 來源路徑字串：\n{text}"
+    for path_str in matches:
+        assert "\\" not in path_str, (
+            f"guard 來源路徑內嵌反斜線，Windows 原生 PowerShell 5.1 下 bash "
+            f"[ -f ]／source 可能吃不到此路徑：{path_str!r}\n{text}"
+        )
+
+
+def test_guard_src_bash_replace_expression_normalizes_backslash_independent_of_join_path() -> None:
+    """R48（DEF-101-389）補強回歸鎖：上一條測試（
+    `test_guard_src_bash_path_embedded_in_hook_has_no_backslash`）誠實揭露在
+    本機 pwsh（跨平台版）環境下，`Join-Path` 本身就會把反斜線正規化成正斜線，
+    故該測試在修復前後皆會通過，對移除 `-replace "\\", "/"` 這行毫無鑑別力。
+
+    本測試改為**直接從安裝器原始碼萃取 `$GuardSrcBash = $GuardSrcBash -replace
+    ...` 這一整行陳述式**（不手抄一份副本，避免測試與production 脫鉤），
+    在獨立 pwsh 子行程中：先用**字串串接**（非 `Join-Path`，不受本機 pwsh
+    跨平台正規化影響）手工組出一個模擬「原生 Windows PowerShell 5.1 的
+    `Join-Path` 保留反斜線」的字串，再對其套用萃取出的陳述式，斷言結果不含
+    反斜線。若此行被整行移除（bug-injection 場景），本測試會在萃取階段就
+    找不到陳述式而直接 fail-loud；若陳述式存在但邏輯被改錯（例如換成
+    replace 別的字元），套用後仍會殘留反斜線而斷言失敗。兩種情況本測試皆
+    在**此環境**具備真實鑑別力，補上前一條測試的環境限制缺口。
+    """
+    installer = _latest_installer()
+    assert installer.is_file(), f"安裝器缺席：{installer}"
+    source = installer.read_text(encoding="utf-8")
+
+    m = re.search(
+        r'\$GuardSrcBash\s*=\s*\$GuardSrcBash\s*-replace\s*"[^"]*"\s*,\s*"[^"]*"',
+        source,
+    )
+    assert m, (
+        "安裝器原始碼找不到 `$GuardSrcBash = $GuardSrcBash -replace ...` 正規化陳述式"
+        "（DEF-101-389 修復內容疑似被移除）"
+    )
+    replace_stmt = m.group(0)
+
+    script = (
+        '$GuardSrcBash = "C:" + "\\" + "fake-checkout" + "\\" + "tools" + "\\" '
+        '+ "lib" + "\\" + "windowsapps_guard.sh"\n'
+        f"{replace_stmt}\n"
+        "Write-Output $GuardSrcBash"
+    )
+    proc = subprocess.run(
+        [_PWSH, "-NoProfile", "-Command", script],
+        capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=30,
+    )
+    assert proc.returncode == 0, f"pwsh 執行萃取陳述式失敗：{proc.stdout!r} {proc.stderr!r}"
+    result = proc.stdout.strip()
+    assert "\\" not in result, (
+        f"萃取出的正規化陳述式套用在模擬原生 Windows Join-Path 輸出（含反斜線）"
+        f"後仍殘留反斜線，DEF-101-389 修復失效：{result!r}"
+    )
+    assert result == "C:/fake-checkout/tools/lib/windowsapps_guard.sh", (
+        f"正規化結果與預期不符：{result!r}"
+    )
 
 
 @pytest.mark.skipif(_BASH is None, reason="需要 bash（Windows 上可由 Git-Bash 提供）")

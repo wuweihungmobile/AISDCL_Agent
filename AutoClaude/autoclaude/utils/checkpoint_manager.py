@@ -18,6 +18,8 @@ from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from pathlib import Path
 
+from .logger import _sanitize_log_filename
+
 logger = logging.getLogger("autoclaude.utils.checkpoint")
 
 _CHECKPOINT_SUFFIX = ".checkpoint.json"
@@ -125,7 +127,11 @@ class CheckpointManager:
         return self._id_resolver(playbook_path)
 
     def checkpoint_path(self, playbook_path: str) -> Path:
-        return self._dir / f"{self._to_id(playbook_path)}{_CHECKPOINT_SUFFIX}"
+        # DEF-101-390（R48）：與 save()/load()/clear() 委派的 FileStateRepository._path()
+        # 同款淨化（SSOT _sanitize_log_filename），避免 checkpoint_path()/exists() 算出的
+        # 檔名與實際寫入磁碟的檔名不一致（保留裝置名/路徑穿越字元場景會分歧）。
+        sanitized_id = _sanitize_log_filename(self._to_id(playbook_path))
+        return self._dir / f"{sanitized_id}{_CHECKPOINT_SUFFIX}"
 
     def exists(self, playbook_path: str) -> bool:
         return self.checkpoint_path(playbook_path).exists()
