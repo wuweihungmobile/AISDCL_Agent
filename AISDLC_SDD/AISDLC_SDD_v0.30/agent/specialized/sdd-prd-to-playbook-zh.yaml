@@ -38,13 +38,16 @@ agent:
     - "規格先行硬紀律：任務排序必須遵守 SCG-0→1→2→3→4→5→6，後關不得早於前關（Spec-First Gate）。"
     - "三層有界：sub_tasks 巢狀深度 ≤ 3（three_tier_schema MAX_GOAL_TASK_DEPTH，model 既有強制）；
        目標數與任務數應對齊 PRD 功能範圍，不無界膨脹。"
-    - "evaluator 白名單自律：execution_item.evaluator_command 僅得以 `pytest` 或 `python` 開頭
-       （攤平器 sanitize_evaluator 白名單），嚴禁 shell 串接/重導/命令替換等元字元（fail-closed）。"
-    - "evaluator backend-robust 化（improving_96 / DEF-95-002）：每步把關**不靠 LLM 回顯關鍵字**
-       （pty `--output-format json` 擷取脆弱會吞掉 keyword 致誤判失敗）。兩類步分別給客觀 evaluator：
-       ①可跑測試的實作步→`pytest …`；②doc/spec 產檔步（PRD/FRD/SRD/SPEC/ADR 等寫文件）→
-       artifact-existence：`python -m autoclaude.artifact_check <相對產出檔> --min-bytes N` 檢查檔案
-       真的產生（後端無關）。兩類皆把 `expected_output_regex` 留空（不以 keyword 把關）。"
+    - "evaluator 白名單自律：execution_item.evaluator_command 僅得以 `pytest`／`python`／`python3`／
+       `autoclaude-artifact-check` 開頭（攤平器 sanitize_evaluator 白名單），嚴禁 shell 串接/重導/
+       命令替換等元字元（fail-closed）。"
+    - "evaluator backend-robust 化（improving_96 / DEF-95-002；R52 修正裸 python 跨平台缺陷）：
+       每步把關**不靠 LLM 回顯關鍵字**（pty `--output-format json` 擷取脆弱會吞掉 keyword 致誤判
+       失敗）。兩類步分別給客觀 evaluator：①可跑測試的實作步→`pytest …`；②doc/spec 產檔步
+       （PRD/FRD/SRD/SPEC/ADR 等寫文件）→artifact-existence：`autoclaude-artifact-check <相對產出檔>
+       --min-bytes N` 檢查檔案真的產生（後端無關；console script，避免裸 `python -m ...` 在 macOS
+       /usr/bin 與多數現代 Linux distro 的乾淨 PATH 上 rc=127 command not found）。兩類皆把
+       `expected_output_regex` 留空（不以 keyword 把關）。"
     - "🔴 人工確認點不可跳過：PRD 凍結、Contract 凍結等 SCG 🔴 確認點須在對應任務 prompt 內明示
        『等待人工 signoff』，不可自動略過（Rule 8 / Rule 9.22）。"
 
@@ -67,9 +70,10 @@ agent:
           產檔步的 prompt 不需要求輸出完成關鍵字（把關交 evaluator_command）
         - expected_output_regex：原則留空（null）。improving_96/DEF-95-002：不靠 keyword 回顯把關，
           因 pty `--output-format json` 擷取脆弱會吞掉 keyword 致檔案明明寫對卻誤判失敗
-        - evaluator_command：白名單（pytest/python）客觀檢查閘門產物——
-          ①實作步（可跑測試）→`pytest …`；②doc/spec 產檔步→artifact-existence：
-          `python -m autoclaude.artifact_check <相對產出檔> --min-bytes N`（檢查檔案真的產生，後端無關）
+        - evaluator_command：白名單（pytest/python/python3/autoclaude-artifact-check）客觀檢查
+          閘門產物——①實作步（可跑測試）→`pytest …`；②doc/spec 產檔步→artifact-existence：
+          `autoclaude-artifact-check <相對產出檔> --min-bytes N`（console script，檢查檔案真的
+          產生、後端無關；R52 修正：避免裸 `python -m ...` 在缺裸 python 別名的 PATH 上 rc=127）
     runnable_playbook:
       via: "tools/three_tier_to_playbook.py --source <plan.yaml> --out <playbook.yaml>"
       note: "攤平後 playbook.yaml 交 `python -m autoclaude <playbook.yaml>` 執行；每 task 帶 goal_task_id 供跨 run 進度彙總（GoalProgressLedger）"
@@ -102,7 +106,8 @@ agent:
   boundaries:
     - "不得手寫扁平 playbook（tasks[] 直出）規避 three_tier→compiler 橋接（破壞職責分工與分組可追溯性）。"
     - "不得產出 depth > 3 的 sub_tasks（攤平/載入會被 three_tier_schema model_validator 拒絕）。"
-    - "不得在 evaluator_command 放非 pytest/python 開頭或含 shell 元字元的指令（攤平器 fail-closed 會拒絕）。"
+    - "不得在 evaluator_command 放非 pytest/python/python3/autoclaude-artifact-check 開頭或含
+       shell 元字元的指令（攤平器 fail-closed 會拒絕）。"
     - "不得跳過或顛倒 SCG 閘門順序（Spec-First）。"
 
   quality_standards:

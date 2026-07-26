@@ -541,6 +541,40 @@ class TestGap026SplitStepEvaluator:
         result = PlaybookEvolver._derive_part_a_evaluator(None)
         assert result is None
 
+    @pytest.mark.parametrize(
+        "cmd",
+        [
+            "python -m pytest tests/foo.py -k xyz -q",
+            "python3 -m pytest tests/foo.py -k xyz -q",
+        ],
+    )
+    def test_derive_part_a_evaluator_python_m_pytest_form_is_valid_command(self, cmd):
+        """R52 迴歸鎖：'python(3) -m pytest ...' 形態不得被推導成語法上不存在的
+        'python --collect-only'（rc=2 unknown option）。
+
+        根因：舊實作用 `\\bpytest\\b` 偵測是否為 pytest 指令（此形態命中，因字串
+        含 'pytest'），但取可執行檔名時用 `base.split()[0]`，對此形態拿到的是
+        'python'/'python3'，不是 'pytest'，產出的指令本身恆定失敗 —— 與本函式
+        docstring 明文的「非 pytest 指令才無條件回傳成功、pytest 指令僅做
+        collect-only 確認語法正確」設計意圖直接相反。三層架構
+        （tools/three_tier_to_playbook.py `_EVAL_ALLOWED_HEAD`）明文允許此形態，
+        故必須產出可實際執行成功的指令。
+        """
+        import subprocess
+
+        result = PlaybookEvolver._derive_part_a_evaluator(cmd)
+        assert result is not None
+        assert "--collect-only" in result
+        assert "pytest" in result
+        proc = subprocess.run(
+            result, shell=True, capture_output=True, text=True,
+            encoding="utf-8", errors="replace", timeout=30,
+        )
+        assert proc.returncode == 0, (
+            f"'{cmd}' 推導出的 Part A evaluator '{result}' 應可成功執行 "
+            f"(--collect-only)，實際 rc={proc.returncode}, stderr={proc.stderr!r}"
+        )
+
     def test_derive_part_a_evaluator_other_cmd(self):
         """非 pytest 指令 → 無論原指令是否失敗都應 exit 0（Part A 只涵蓋一半任務）。
 
@@ -656,6 +690,33 @@ class TestGap026BMinimaxEvolverSplitStepEvaluator:
     def test_derive_part_a_evaluator_no_evaluator(self):
         assert MinimaxEvolver._derive_part_a_evaluator(None) is None
 
+    @pytest.mark.parametrize(
+        "cmd",
+        [
+            "python -m pytest tests/foo.py -k xyz -q",
+            "python3 -m pytest tests/foo.py -k xyz -q",
+        ],
+    )
+    def test_derive_part_a_evaluator_python_m_pytest_form_is_valid_command(self, cmd):
+        """R52 迴歸鎖（MinimaxEvolver 側，鏡射 TestGap026SplitStepEvaluator 同名測試）：
+        'python(3) -m pytest ...' 形態必須產出可實際執行成功的 --collect-only 指令，
+        不得退化為語法上不存在的 'python --collect-only'（rc=2 unknown option）。
+        """
+        import subprocess
+
+        result = MinimaxEvolver._derive_part_a_evaluator(cmd)
+        assert result is not None
+        assert "--collect-only" in result
+        assert "pytest" in result
+        proc = subprocess.run(
+            result, shell=True, capture_output=True, text=True,
+            encoding="utf-8", errors="replace", timeout=30,
+        )
+        assert proc.returncode == 0, (
+            f"'{cmd}' 推導出的 Part A evaluator '{result}' 應可成功執行 "
+            f"(--collect-only)，實際 rc={proc.returncode}, stderr={proc.stderr!r}"
+        )
+
     def test_derive_part_a_evaluator_other_cmd_executes_and_always_succeeds(self):
         """非 pytest 指令：即使原指令失敗，Part A evaluator 仍須以 exit 0 收場，
         且產生的指令不得含 Windows cmd.exe 無法解讀的 POSIX 專屬語法。
@@ -746,6 +807,8 @@ class TestGap026CSharedEvaluatorDerivationSSOT:
             "",
             "pytest tests/test_auth.py -v",
             "pytest tests/test_auth.py -k foo --tb=short",
+            "python -m pytest tests/foo.py -k xyz -q",
+            "python3 -m pytest tests/foo.py -k xyz -q",
             "python -c \"import sys; sys.exit(1)\"",
             "some-cmd --flag",
         ],

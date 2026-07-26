@@ -38,13 +38,14 @@ def test_compile_strutils_plan_flattens_5_tasks_with_goal_grouping():
     assert by_goal["GT-IMPL"] == ["E-IMPL-1", "E-IMPL-2", "E-IMPL-3", "E-IMPL-4"]
     # improving_96 DEF-95-002 修復：全 5 步皆 backend-robust 客觀 evaluator、無 keyword regex。
     # 兩類：①可跑測試的「實作至綠」步（E-IMPL-2/4）→ pytest；②產/改檔步（E-SPEC-1 寫 SPEC.md、
-    # E-IMPL-1/3 寫改 test_strutils.py）→ artifact-existence（python -m autoclaude.artifact_check）。
+    # E-IMPL-1/3 寫改 test_strutils.py）→ artifact-existence（autoclaude-artifact-check
+    # console script；R52 修正原 `python -m autoclaude.artifact_check` 裸 python 跨平台缺陷）。
     evals = {t.step_id: t.evaluator_command for t in pb.tasks if t.evaluator_command}
     assert set(evals) == {"E-SPEC-1", "E-IMPL-1", "E-IMPL-2", "E-IMPL-3", "E-IMPL-4"}
     assert evals["E-IMPL-2"].startswith("pytest ")
     assert evals["E-IMPL-4"].startswith("pytest ")
     for sid in ("E-SPEC-1", "E-IMPL-1", "E-IMPL-3"):
-        assert evals[sid].startswith("python -m autoclaude.artifact_check ")
+        assert evals[sid].startswith("autoclaude-artifact-check ")
     # backend-robust 核心斷言：無任一步以 keyword 回顯（expected_output_regex）把關
     assert all(t.expected_output_regex is None for t in pb.tasks)
     assert "tasks:" in yaml_text  # 可序列化
@@ -52,8 +53,9 @@ def test_compile_strutils_plan_flattens_5_tasks_with_goal_grouping():
 
 def test_compile_strutils_plan_loadable_back_as_playbook():
     """RTM-95-1：攤平產物可被 Playbook.model_validate 重新載入（合法 playbook）。"""
-    from autoclaude.models.playbook import Playbook
     import yaml as _yaml
+
+    from autoclaude.models.playbook import Playbook
     _pb, yaml_text = rbe.compile_plan(_STRUTILS_PLAN)
     reloaded = Playbook.model_validate(_yaml.safe_load(yaml_text))
     assert len(reloaded.tasks) == 5
@@ -85,8 +87,21 @@ def test_bridge_e2e_evaluator_sanitize_chain_rejects_injection(tmp_path):
 def test_artifact_check_evaluator_passes_sanitizer():
     """RTM-96-2：artifact-existence evaluator 形態通過白名單消毒（improving_96 DEF-95-002）。
 
-    回歸鎖：doc/spec 步用的 `python -m autoclaude.artifact_check <path> --min-bytes N`
-    必須永遠通過 sanitize_evaluator（首 token python、-m 形態非 -c、無 shell 元字元）。
+    回歸鎖：doc/spec 步用的 `autoclaude-artifact-check <path> --min-bytes N`（R52 修正後
+    的推薦形態，console script、免猜 python/python3）必須永遠通過 sanitize_evaluator
+    （首 token autoclaude-artifact-check、無 shell 元字元）。
+    """
+    from three_tier_to_playbook import sanitize_evaluator  # noqa: E402
+
+    cmd = "autoclaude-artifact-check SPEC.md --min-bytes 200"
+    assert sanitize_evaluator(cmd) == cmd
+
+
+def test_artifact_check_evaluator_legacy_python_form_still_passes_sanitizer():
+    """向下相容回歸鎖：R52 修正前既有 playbook 可能已落盤 `python -m
+    autoclaude.artifact_check <path> --min-bytes N` 形態（首 token python、-m 形態非
+    -c、無 shell 元字元），sanitize_evaluator 不得因新增 autoclaude-artifact-check
+    白名單而破壞既有向下相容。
     """
     from three_tier_to_playbook import sanitize_evaluator  # noqa: E402
 
@@ -104,7 +119,8 @@ _CANNED_LOG = (
     "2026-06-29 10:02:00 [INFO] === STEP_TOKEN_PEAK | step=E-IMPL-2 pct=8.4500 ===\n"
     "2026-06-29 10:05:00 [INFO] autoclaude: Playbook 結束 | KernelResult(success=True, "
     "completed_steps=5, total_steps=5, reason='success', step_log=["
-    "'[E-SPEC-1] 需求/設計凍結（SCG-0~1）：slugify/tru… ✓ (attempt 1)', '[E-IMPL-1] 測試骨架 ✓ (attempt 1)', "
+    "'[E-SPEC-1] 需求/設計凍結（SCG-0~1）：slugify/tru… ✓ (attempt 1)', "
+    "'[E-IMPL-1] 測試骨架 ✓ (attempt 1)', "
     "'[E-IMPL-2] 實作 slugify ✓ (attempt 2)', '[E-IMPL-3] 加測試 ✓ (attempt 1)', "
     "'[E-IMPL-4] 實作 truncate ✓ (attempt 1)'], "
     "completed_step_ids=['E-SPEC-1', 'E-IMPL-1', 'E-IMPL-2', 'E-IMPL-3', 'E-IMPL-4'], "

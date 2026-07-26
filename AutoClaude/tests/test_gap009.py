@@ -11,14 +11,14 @@ Gap-009 實作驗證測試（Gap-009-A~F）。
 """
 from __future__ import annotations
 
+from pathlib import PureWindowsPath
 from unittest.mock import MagicMock, patch
 
 from autoclaude.execution.playbook_runner import PlaybookRunner, _StepOutput
 from autoclaude.execution.pre_run_validator import PreRunValidator
 from autoclaude.models.playbook import GlobalInvariants, Playbook, PlaybookTask
 from autoclaude.utils.config import AppConfig
-from autoclaude.utils.knowledge_base import FailureKnowledgeBase, _MAX_ENTRIES
-
+from autoclaude.utils.knowledge_base import _MAX_ENTRIES, FailureKnowledgeBase
 
 # ──────────────────────────────────────────────
 # 共用輔助
@@ -145,6 +145,62 @@ class TestPreRunValidator:
         cmd_issues = [i for i in issues if i.category == "evaluator_missing"]
         assert cmd_issues == []
 
+    @patch(
+        "autoclaude.execution.pre_run_validator.shutil.which",
+        return_value=str(
+            PureWindowsPath("C:/Users/me/AppData/Local/Microsoft/WindowsApps/python.exe")
+        ),
+    )
+    def test_windows_apps_stub_binary_returns_block_issue(self, _):
+        """Mac/Windows 相容性 R52 回歸鎖：evaluator_command 主命令為 'python'，
+        shutil.which 解析到 WindowsApps App Execution Alias 空殼路徑時，
+        即使 shutil.which 回傳非 None（『找得到』），仍須視為假陰性並回報
+        severity=block，而不是誤判為命令可用（4 方複審 P2 發現的根因）。"""
+        issues = PreRunValidator().validate_step(
+            "python -m pytest tests/foo.py -k bar -q", "任意 prompt"
+        )
+        cmd_issues = [i for i in issues if i.category == "evaluator_missing"]
+        assert len(cmd_issues) == 1
+        assert cmd_issues[0].severity == "block"
+        assert "WindowsApps" in cmd_issues[0].message
+
+    @patch(
+        "autoclaude.execution.pre_run_validator.shutil.which",
+        return_value=str(
+            PureWindowsPath("C:/Users/me/AppData/Local/Microsoft/WindowsApps/python3.exe")
+        ),
+    )
+    def test_windows_apps_stub_python3_returns_block_issue(self, _):
+        """同上，python3 候選名稱亦須被排除。"""
+        issues = PreRunValidator().validate_step("python3 -m pytest tests/", "任意 prompt")
+        cmd_issues = [i for i in issues if i.category == "evaluator_missing"]
+        assert len(cmd_issues) == 1
+        assert cmd_issues[0].severity == "block"
+
+    @patch(
+        "autoclaude.execution.pre_run_validator.shutil.which",
+        return_value=str(PureWindowsPath("C:/Python311/python.exe")),
+    )
+    def test_real_python_outside_windowsapps_passes_command_check(self, _):
+        """真正安裝的 Python（路徑不在 WindowsApps 下）不應被誤判為空殼。"""
+        issues = PreRunValidator().validate_step("python -m pytest tests/", "任意 prompt")
+        cmd_issues = [i for i in issues if i.category == "evaluator_missing"]
+        assert cmd_issues == []
+
+    @patch(
+        "autoclaude.execution.pre_run_validator.shutil.which",
+        return_value=str(
+            PureWindowsPath("C:/Users/me/AppData/Local/Microsoft/WindowsApps/pytest.exe")
+        ),
+    )
+    def test_non_python_binary_in_windowsapps_dir_not_flagged(self, _):
+        """WindowsApps guard 僅限 'python'/'python3' 候選名稱（比照
+        tools/bootstrap_core.py::pick_python 既有 scope），避免對其他合法安裝於
+        WindowsApps 下的命令（如 Store 版工具）造成過度誤判。"""
+        issues = PreRunValidator().validate_step("pytest tests/", "任意 prompt")
+        cmd_issues = [i for i in issues if i.category == "evaluator_missing"]
+        assert cmd_issues == []
+
     @patch("autoclaude.execution.pre_run_validator.shutil.which", return_value="/usr/bin/pytest")
     @patch("subprocess.run")
     def test_test_file_syntax_error_returns_block(self, mock_run, _):
@@ -258,7 +314,42 @@ class TestValidateEvaluatorCommands:
         runner = _make_runner()
         playbook = self._make_playbook("pytest tests/")
         with caplog.at_level(logging.WARNING):
-            with patch("autoclaude.execution.playbook_runner.shutil.which", return_value="/usr/bin/pytest"):
+            with patch(
+                "autoclaude.execution.playbook_runner.shutil.which",
+                return_value="/usr/bin/pytest",
+            ):
+                runner._validate_evaluator_commands(playbook)
+        gap_warnings = [r for r in caplog.records if "Gap-009-D" in r.message]
+        assert gap_warnings == []
+
+    def test_windows_apps_stub_binary_logs_gap009d_warning(self, caplog):
+        """Mac/Windows 相容性 R52 回歸鎖：boot_helper.validate_evaluator_commands_impl
+        比照 PreRunValidator，對 WindowsApps App Execution Alias 空殼路徑（『找得到
+        但實際不能執行』）亦須記錄 Gap-009-D warning，而不是因 shutil.which 回傳
+        非 None 就靜默放行。"""
+        import logging
+        runner = _make_runner()
+        playbook = self._make_playbook("python -m pytest tests/")
+        stub_path = str(
+            PureWindowsPath("C:/Users/me/AppData/Local/Microsoft/WindowsApps/python.exe")
+        )
+        with caplog.at_level(logging.WARNING):
+            with patch("autoclaude.execution.playbook_runner.shutil.which", return_value=stub_path):
+                runner._validate_evaluator_commands(playbook)
+        gap_warnings = [r for r in caplog.records if "Gap-009-D" in r.message]
+        assert len(gap_warnings) == 1
+        assert "WindowsApps" in gap_warnings[0].message
+
+    def test_real_python_outside_windowsapps_no_warning(self, caplog):
+        """真正安裝的 Python（路徑不在 WindowsApps 下）不應觸發 warning。"""
+        import logging
+        runner = _make_runner()
+        playbook = self._make_playbook("python -m pytest tests/")
+        with caplog.at_level(logging.WARNING):
+            with patch(
+                "autoclaude.execution.playbook_runner.shutil.which",
+                return_value=str(PureWindowsPath("C:/Python311/python.exe")),
+            ):
                 runner._validate_evaluator_commands(playbook)
         gap_warnings = [r for r in caplog.records if "Gap-009-D" in r.message]
         assert gap_warnings == []

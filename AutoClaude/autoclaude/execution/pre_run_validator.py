@@ -14,10 +14,27 @@ import shutil
 import subprocess
 import sys
 from dataclasses import dataclass
-from pathlib import Path
-from typing import Optional
+from pathlib import Path, PureWindowsPath
 
 from ..utils.trace_context import propagate_to_subprocess_env
+
+# Gap-009-B 假陰性修復（Mac/Windows 相容性 R52）：evaluator_command 的主命令若
+# 為 "python"/"python3"，且 shutil.which() 解析到的路徑落在 WindowsApps 目錄下，
+# 該路徑多半是 Windows 系統自動註冊的 App Execution Alias 空殼——`shutil.which()`
+# 找得到、但實際執行只會跳出 Microsoft Store 安裝提示，不會執行任何 Python 碼。
+# 權威定義見 tools/bootstrap_core.py::_is_windows_apps_stub()（monorepo 根層
+# bootstrap 階段既有 guard，pick_python() 已用其排除同款空殼）；`autoclaude` 為
+# 可獨立 pip 安裝的套件，不可依賴 monorepo 根層 tools/*.py（同一理由記載於
+# autoclaude/utils/logger.py 頂部 `_sanitize_log_filename` 註解），故本檔獨立
+# 維護一份判斷邏輯（與 boot_helper.py 共用本函式，非各自重寫）。
+_WINDOWS_APPS_STUB_BINARIES = frozenset({"python", "python3"})
+
+
+def _is_windows_apps_alias_stub(resolved_path: str) -> bool:
+    """resolved_path（shutil.which() 回傳值）是否落在 WindowsApps 目錄下。"""
+    return any(
+        part.lower() == "windowsapps" for part in PureWindowsPath(resolved_path).parts
+    )
 
 
 @dataclass
@@ -38,7 +55,7 @@ class PreRunValidator:
 
     def validate_step(
         self,
-        evaluator_command: Optional[str],
+        evaluator_command: str | None,
         task_prompt: str,  # 預留：未來驗證邏輯可引用 prompt 內容
     ) -> list[PreRunIssue]:
         issues: list[PreRunIssue] = []
@@ -49,12 +66,15 @@ class PreRunValidator:
         return issues
 
     def _check_evaluator_command(self, command: str) -> list[PreRunIssue]:
-        """驗證 evaluator_command 的主命令是否存在（shutil.which）。"""
+        """驗證 evaluator_command 的主命令是否存在（shutil.which），並排除
+        Windows WindowsApps App Execution Alias 空殼（假陰性修復，見上方
+        `_is_windows_apps_alias_stub` 註解）。"""
         cmd_parts = command.strip().split()
         if not cmd_parts:
             return []
         binary = cmd_parts[0]
-        if shutil.which(binary) is None:
+        resolved = shutil.which(binary)
+        if resolved is None:
             return [PreRunIssue(
                 severity="block",
                 category="evaluator_missing",
@@ -67,6 +87,22 @@ class PreRunValidator:
                     f"中的命令 '{binary}' 不在 PATH 中。\n"
                     f"請先確認命令名稱是否正確（如 'pytest' 而非 'pytset'），"
                     f"或安裝所需工具後再執行任務。"
+                ),
+            )]
+        if binary.lower() in _WINDOWS_APPS_STUB_BINARIES and _is_windows_apps_alias_stub(resolved):
+            return [PreRunIssue(
+                severity="block",
+                category="evaluator_missing",
+                message=(
+                    f"evaluator_command 的命令 '{binary}' 解析到 Windows "
+                    f"WindowsApps App Execution Alias 空殼（{resolved}），"
+                    f"並非真正安裝的直譯器。"
+                ),
+                strategy_hint=(
+                    f"⚠️ Playbook 配置問題：evaluator_command '{command}' 中的命令 "
+                    f"'{binary}' 解析到 Windows Store App Execution Alias 空殼\n"
+                    f"（{resolved}），實際執行只會跳出 Store 安裝提示，不會真正執行。\n"
+                    f"請安裝真正的 Python（或改用 venv 內的直譯器路徑）後再執行任務。"
                 ),
             )]
         return []

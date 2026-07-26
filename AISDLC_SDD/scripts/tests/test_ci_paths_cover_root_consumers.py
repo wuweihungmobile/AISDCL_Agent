@@ -82,6 +82,16 @@ root-infra-ci.yml 的機械鎖（見檔案下方）：
      .claude/（皆各自已有獨立 CI／既有 paths 鎖覆蓋）之外、也不在 tools/
      之內的「無主根層腳本」為空集——一旦出現即代表有新目錄逃過 root-infra-ci
      的語法守門。
+
+R52（第 52 輪 Mac/Windows 相容性四方複審 Architect/SA/SD 交叉發現）：
+`tools/tests/test_dev_start.py` 的 `TestNightlyHeartbeatFilenameContract` 用
+`self._REPO / "AutoClaude" / "tools" / "run_local_nightly.sh"`（class 屬性
+`self._REPO`，非字面 token `REPO_ROOT`／`_monorepo_root()`）讀取原始碼——與
+盲區 B／C 同屬「掃描器方法論邊界」而非「解析器猜測範圍不夠」，`_JOIN_RE`／
+`_SLASH_RE` 對此結構上零訊號，導致 windows-compat-ci.yml 漏列
+`AutoClaude/tools/run_local_nightly.sh` 逃過本鎖（11 passed 未攔截）。第四種
+消費形態（盲區 D），比照盲區 B／C 手法新增 `_KNOWN_LITERAL_PATH_CONSUMERS`
+顯式登記「檔案＋消費它的來源檔」並機械斷言覆蓋 workflow paths。
 """
 from __future__ import annotations
 
@@ -424,6 +434,55 @@ def test_known_glob_scan_consumers_covered_by_ci_paths():
                     f"{rel_test_path} 以 `_tracked_files({pattern!r})`（git ls-files "
                     "glob 動態掃描，靜態 import-BFS／路徑字面正則結構上看不到，盲區 C）"
                     f"消費的檔案未被 {workflow_filename} 的 {label} paths 覆蓋：{uncovered}"
+                )
+
+
+# --- self._REPO 字面路徑消費（盲區 D，R52）---------------------------------------
+# tools/tests/test_dev_start.py 的 TestNightlyHeartbeatFilenameContract 用
+# `self._REPO / "AutoClaude" / "tools" / "run_local_nightly.sh"`（class 屬性
+# `_REPO = Path(dev_start.__file__).resolve().parents[1]`，非字面 token
+# `REPO_ROOT`／`_monorepo_root()`）讀取原始碼做心跳契約錨點斷言——上方
+# `_JOIN_RE`／`_SLASH_RE` 只認得字面 token `REPO_ROOT`／`_monorepo_root()`，對
+# 這種 class 屬性間接消費慣用法結構上零訊號（R52 四方複審實測揪出：
+# windows-compat-ci.yml 漏列此檔案、本鎖 11 passed 未攔截）。與盲區 B／C 性質
+# 相同（掃描器方法論邊界，非解析器猜測範圍不夠），比照同一手法：顯式登記
+# 「檔案 + 消費它的來源檔」+ 機械斷言消費關係仍存在（防登記腐化）＋覆蓋
+# workflow paths。
+_KNOWN_LITERAL_PATH_CONSUMERS: dict[str, tuple[str, tuple[str, ...]]] = {
+    "AutoClaude/tools/run_local_nightly.sh": (
+        "tools/tests/test_dev_start.py",
+        ("windows-compat-ci.yml",),
+    ),
+}
+
+
+def test_known_literal_path_consumers_covered_by_ci_paths():
+    """盲區 D 機械鎖：見上方 _KNOWN_LITERAL_PATH_CONSUMERS 說明。"""
+    for rel_path, (consumer_rel_path, workflow_filenames) in _KNOWN_LITERAL_PATH_CONSUMERS.items():
+        abs_path = os.path.join(_monorepo_root(), rel_path)
+        assert os.path.isfile(abs_path), (
+            f"{rel_path} 不存在（已改名/搬移？）— _KNOWN_LITERAL_PATH_CONSUMERS "
+            "顯式清單須同步更新，否則本鎖名不符實"
+        )
+        abs_consumer_path = os.path.join(_monorepo_root(), consumer_rel_path)
+        assert os.path.isfile(abs_consumer_path), (
+            f"{consumer_rel_path} 不存在（已改名/搬移？）— _KNOWN_LITERAL_PATH_CONSUMERS "
+            "顯式清單須同步更新，否則本鎖名不符實"
+        )
+        with open(abs_consumer_path, encoding="utf-8") as f:
+            consumer_src = f.read()
+        basename = rel_path.rsplit("/", 1)[-1]
+        assert basename in consumer_src, (
+            f"{consumer_rel_path} 原始碼已不含 {basename!r}（改名/改寫？）"
+            "——_KNOWN_LITERAL_PATH_CONSUMERS 顯式清單須同步更新，否則本鎖名不符實"
+        )
+        for workflow_filename in workflow_filenames:
+            push, pr = _workflow_paths(workflow_filename)
+            for label, paths in (("push", push), ("pull_request", pr)):
+                assert any(fnmatch.fnmatch(rel_path, pat) for pat in paths), (
+                    f"{rel_path}（`self._REPO` 等非字面 REPO_ROOT/_monorepo_root() "
+                    f"token 間接消費，靜態正則看不到，盲區 D）未被 {workflow_filename} "
+                    f"的 {label} paths 覆蓋"
                 )
 
 

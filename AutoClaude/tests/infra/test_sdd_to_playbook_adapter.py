@@ -139,9 +139,66 @@ class TestParsing:
     def test_evaluator_cmd_whitelist_template_only(self, spec):
         for c in spec.contracts:
             assert re.fullmatch(
-                r'python -m pytest [\w./\\-]+ -k "[A-Za-z0-9_]+" -q',
+                r'pytest [\w./\\-]+ -k "[A-Za-z0-9_]+" -q',
                 c.evaluator_cmd,
             ), c.evaluator_cmd
+
+    def test_evaluator_cmd_no_bare_python_prefix(self, spec):
+        """R52：evaluator_cmd 不得以裸字面值 `python -m` 開頭。
+
+        macOS /usr/bin 與多數現代 Linux distro 的乾淨 PATH 上只有 `python3`、沒有裸
+        `python`，經 subprocess.run(shell=True) 執行 `python -m pytest ...` 恆 rc=127
+        （/bin/sh: python: command not found）。回歸鎖：確保白名單模板不再復發此缺陷。
+        """
+        for c in spec.contracts:
+            assert not c.evaluator_cmd.startswith("python "), c.evaluator_cmd
+
+    def test_evaluator_cmd_actually_runnable_without_bare_python(self, spec, tmp_path):
+        """R52：evaluator_cmd 在「PATH 上完全沒有裸 python（只有 pytest 本身）」的環境下
+        必須可真實執行到 pytest（不得因 shell 找不到指令而 rc=127）。
+
+        直接重現原缺陷的實測條件：`env -i PATH=/usr/bin:/bin /bin/sh -c 'python -m
+        pytest ...'` → rc=127 `/bin/sh: python: command not found`（macOS /usr/bin、
+        多數現代 Linux distro 乾淨 PATH 上只有 python3、沒有裸 python）。此處以隔離目錄
+        僅放 `pytest` 一個符號連結（PATH 上刻意不含任何 python* 名稱），對齊
+        execution/evaluator.py 的 subprocess.run(shell=True) 真實執行方式，驗證修復後
+        的指令不再依賴裸 `python` 存在於 PATH。
+        """
+        import shutil
+        import subprocess
+
+        pytest_path = shutil.which("pytest")
+        assert pytest_path, "本機測試環境需有 pytest 可用（CI 基本假設）"
+        isolated_bin = tmp_path / "isolated_bin"
+        isolated_bin.mkdir()
+        # 比照 tools/tests/_platform_helpers.py 的 create_symlink_or_skip()
+        # 邏輯（見 conftest.py「跨平台測試 fixture 撰寫紀律（四方複審 S21）」，
+        # DEF-101-064／DEF-101-069）：Windows 非管理者/未開發者模式建立 symlink
+        # 會拋 OSError（WinError 1314），此為測試 fixture 前置條件本身做不到，
+        # skip 而非算失敗。
+        try:
+            (isolated_bin / "pytest").symlink_to(pytest_path)
+        except OSError as e:
+            pytest.skip(f"本機無建立 symlink 權限（{e}），略過 symlink 情境")
+
+        c = spec.contracts[0]
+        result = subprocess.run(
+            c.evaluator_cmd,
+            shell=True,
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            env={"PATH": str(isolated_bin)},
+        )
+        stderr_lower = result.stderr.lower()
+        assert "command not found" not in stderr_lower, (
+            f"evaluator_cmd={c.evaluator_cmd!r} rc={result.returncode} "
+            f"stderr={result.stderr!r}"
+        )
+        assert result.returncode != 127, (
+            f"evaluator_cmd={c.evaluator_cmd!r} 疑似指令未找到: {result.stderr!r}"
+        )
 
     def test_satisfies_ispec_source_protocol(self):
         adapter: ISpecSource = SddToPlaybookAdapter()

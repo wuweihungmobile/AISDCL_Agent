@@ -54,8 +54,14 @@ from autoclaude.models.three_tier_schema import (  # noqa: E402
 
 # evaluator 消毒：黑名單字元集 ⊇ CONDITIONAL（對齊 sdd_to_playbook_adapter._DENY）+ 換行
 _DENY = set("!`><~$&;\n\r")
-# 白名單：evaluator 首 token 僅允許 pytest / python（SDD evaluator 既有形態），自由字串拒絕
-_EVAL_ALLOWED_HEAD = ("pytest", "python")
+# 白名單：evaluator 首 token 僅允許 pytest / python / python3（SDD evaluator 既有形態
+# ＋macOS／多數現代 Linux distro 無裸 python 別名時的可攜寫法）/ autoclaude-artifact-check
+# （R52 P1 修復：doc/spec 產檔步 artifact-existence evaluator 專用 console script，
+# 取代裸 `python -m autoclaude.artifact_check` 教學形態，見 autoclaude/artifact_check.py
+# 頂部 docstring），自由字串拒絕
+_EVAL_ALLOWED_HEAD = ("pytest", "python", "python3", "autoclaude-artifact-check")
+# python 系直譯器別名（供 `-c` 任意碼執行防護共用，避免 python3 -c 繞過 python -c 的禁令）
+_PY_HEADS = ("python", "python3")
 # 安全字集（第二層）：word / 半形空白 / . / / / \\ / - / = / : / 引號（容 pytest -k "expr"）
 # 🔴 只允許「半形空格」（非 \s）——\s 含 tab/換頁，會讓 `python\t-c\t...` 繞過首 token 白名單
 # 後仍能塞任意旗標（improving_94 Architect P2 加固）。
@@ -86,11 +92,12 @@ def sanitize_evaluator(cmd: str | None) -> str | None:
         raise CompileError(
             f"evaluator_command 首 token {head!r} 不在白名單 {_EVAL_ALLOWED_HEAD}；自由字串拒絕"
         )
-    # 🔴 python 開頭時禁 `-c`（任意碼執行）——只放行 `python -m ...` 形態
-    # （improving_94 Architect P2 加固：堵 `python -c "import os; ..."` 任意碼路徑）
-    if head == "python" and "-c" in tokens:
+    # 🔴 python/python3 開頭時禁 `-c`（任意碼執行）——只放行 `python(3) -m ...` 形態
+    # （improving_94 Architect P2 加固：堵 `python -c "import os; ..."` 任意碼路徑；
+    #  R52 新增 python3 白名單時一併擴大此防護，避免 `python3 -c ...` 繞過）
+    if head in _PY_HEADS and "-c" in tokens:
         raise CompileError(
-            f"evaluator_command 禁用 `python -c`（任意碼執行）；請改 `python -m ...`: {cmd!r}"
+            f"evaluator_command 禁用 `{head} -c`（任意碼執行）；請改 `{head} -m ...`: {cmd!r}"
         )
     return c
 

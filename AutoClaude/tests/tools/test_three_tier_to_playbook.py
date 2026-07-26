@@ -69,6 +69,9 @@ def test_execution_item_new_fields_default_none_backward_compat():
     'pytest test_x.py -k "add_basic" -q',
     "python -m pytest tests/ -q",
     "python check_scg.py --gate 0",
+    "python3 -m pytest tests/ -q",
+    "python3 check_scg.py --gate 0",
+    "autoclaude-artifact-check SPEC.md --min-bytes 200",
 ])
 def test_sanitize_evaluator_allows_whitelist(cmd):
     assert sanitize_evaluator(cmd) == cmd.strip()
@@ -92,9 +95,11 @@ def test_sanitize_evaluator_none_and_empty():
     "python\t-c\timport os",          # tab 繞過（improving_94 Architect P2）
     'python -c "import os"',           # python -c 任意碼（improving_94 Architect P2）
     "python -c print(1)",             # python -c 任意碼（無引號形態）
+    'python3 -c "import os"',          # R52：python3 -c 任意碼（比照 python -c 同款防護）
+    "python3 -c print(1)",            # R52：python3 -c 任意碼（無引號形態）
 ])
 def test_sanitize_evaluator_rejects_injection(cmd):
-    """RTM-94-4：黑名單字元 / 非白名單首 token / tab / python -c → fail-closed raise。"""
+    """RTM-94-4：黑名單字元 / 非白名單首 token / tab / python(3) -c → fail-closed raise。"""
     with pytest.raises(CompileError):
         sanitize_evaluator(cmd)
 
@@ -102,6 +107,29 @@ def test_sanitize_evaluator_rejects_injection(cmd):
 def test_sanitize_evaluator_allows_python_m_form():
     """python -m pytest 形態（非 -c）仍放行，不誤殺合法 evaluator。"""
     assert sanitize_evaluator("python -m pytest tests/ -q") == "python -m pytest tests/ -q"
+
+
+def test_sanitize_evaluator_allows_python3_m_form():
+    """R52（P3 x3：Architect/SA/QA 同源發現）：python3 -m pytest 形態放行。
+
+    根因：_EVAL_ALLOWED_HEAD 原僅含 pytest/python，macOS 與多數現代 Linux distro
+    無裸 python 別名（僅 python3），與 R51 修復 evolution 模組硬編裸字面值 python
+    的教訓同源——若上游 PRD 生成流程或人工作者為求跨平台正確性寫 python3 開頭的
+    evaluator_command，會被白名單拒絕編譯，只能被迫改用可能不存在的裸 python。
+    """
+    assert sanitize_evaluator("python3 -m pytest tests/ -q") == "python3 -m pytest tests/ -q"
+
+
+def test_sanitize_evaluator_allows_autoclaude_artifact_check_console_script():
+    """R52 P1 修復：doc/spec 產檔步 artifact-existence evaluator 改教
+    `autoclaude-artifact-check <path> --min-bytes N` console script 形態（見
+    autoclaude/artifact_check.py 頂部 docstring + pyproject.toml [project.scripts]），
+    不再依賴 `python -m autoclaude.artifact_check`（裸 python 在 macOS /usr/bin 與多數
+    現代 Linux distro 的乾淨 PATH 上不存在，執行恆 rc=127 command not found；根因與
+    R51 evolution 模組、R52 本輪 sdd_to_playbook_adapter.py 硬編裸 python 缺陷同源）。
+    """
+    cmd = "autoclaude-artifact-check test_strutils.py --min-bytes 80"
+    assert sanitize_evaluator(cmd) == cmd
 
 
 # ---------------------------------------------------------------------------

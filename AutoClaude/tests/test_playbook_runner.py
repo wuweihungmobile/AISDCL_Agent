@@ -10,6 +10,8 @@ PlaybookRunner 狀態機完整測試（dry_run + 真實 mock + ESCALATION + Cont
 """
 from __future__ import annotations
 
+import subprocess
+import sys
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
@@ -669,7 +671,15 @@ def test_gap036_inject_before_uses_evaluator_command_from_mutation(tmp_path):
 
 
 def test_gap036_inject_after_uses_git_diff_fallback_when_no_evaluator(tmp_path):
-    """Gap-036：INJECT_AFTER 無 evaluator_command 時使用 git-diff 兜底。"""
+    """Gap-036/R52：INJECT_AFTER 無 evaluator_command 時使用可攜 git-diff 兜底。
+
+    R52 P2 修復：兜底指令原字面值 `git diff --stat HEAD | grep -c .` 依賴
+    POSIX-only grep，在一般 Windows 11（無 Git for Windows Unix 工具）上 cmd.exe
+    找不到 grep 恆失敗。改用 base64 包裝的 python -c 一行式後，此處只驗證
+    「不再依賴 grep / 改用當前直譯器」；實際跨平台可執行性由
+    test_gap036_default_fallback_evaluator_runs_without_posix_tools 以真正
+    subprocess 執行驗證（比照生產路徑 _impl.py:120，非 dry_run 字串包含檢查）。
+    """
     from autoclaude.models.playbook import GlobalInvariants, Playbook, PlaybookTask
     from autoclaude.models.step_mutation import StepMutation, StepMutationType
     runner = _make_runner(dry_run=True)
@@ -683,7 +693,7 @@ def test_gap036_inject_after_uses_git_diff_fallback_when_no_evaluator(tmp_path):
         new_step_id="T01_POST",
         new_step_name="後置步驟",
         new_step_prompt="verify output",
-        # 未提供 new_step_evaluator_command → 應使用 git-diff 兜底
+        # 未提供 new_step_evaluator_command → 應使用可攜兜底
         reasoning="補充驗證",
     )
     with patch.object(runner, "_persist_mutated_playbook"):
@@ -696,9 +706,156 @@ def test_gap036_inject_after_uses_git_diff_fallback_when_no_evaluator(tmp_path):
     assert len(pb.tasks) == 2
     injected = pb.tasks[1]
     assert injected.step_id == "T01_POST"
-    # 未提供 evaluator → 使用 git-diff 兜底
+    # 未提供 evaluator → 使用可攜兜底（不得依賴 POSIX-only grep）
     assert injected.evaluator_command is not None
-    assert "git diff" in injected.evaluator_command
+    assert "grep" not in injected.evaluator_command
+    assert sys.executable in injected.evaluator_command
+
+
+def test_gap036_inject_before_uses_git_diff_fallback_when_no_evaluator(tmp_path):
+    """Gap-036/R52：INJECT_BEFORE 無 evaluator_command 時亦使用同一可攜兜底（SSOT）。"""
+    from autoclaude.models.playbook import GlobalInvariants, Playbook, PlaybookTask
+    from autoclaude.models.step_mutation import StepMutation, StepMutationType
+    runner = _make_runner(dry_run=True)
+    pb = Playbook(
+        project="test",
+        global_invariants=GlobalInvariants(),
+        tasks=[PlaybookTask(step_id="T01", name="build", prompt="build")],
+    )
+    mutation = StepMutation(
+        mutation_type=StepMutationType.INJECT_BEFORE,
+        new_step_id="T00_PRE",
+        new_step_name="前置步驟",
+        new_step_prompt="install deps",
+        # 未提供 new_step_evaluator_command → 應使用可攜兜底
+        reasoning="補充驗證",
+    )
+    with patch.object(runner, "_persist_mutated_playbook"):
+        runner._apply_single_mutation(
+            mutation, pb, "pb.yaml",
+            pb.tasks[0], 0,
+            [], [], 0, {}, {}, {}, MagicMock(), 0, MagicMock(), "",
+        )
+    injected = pb.tasks[0]
+    assert injected.step_id == "T00_PRE"
+    assert injected.evaluator_command is not None
+    assert "grep" not in injected.evaluator_command
+    assert sys.executable in injected.evaluator_command
+
+
+def test_gap036_default_fallback_evaluator_runs_without_posix_tools(tmp_path, monkeypatch):
+    """R52 P2 修復回歸測試：預設兜底 evaluator_command 需真正經
+    ``subprocess.run(shell=True)`` 執行驗證（比照生產真正呼叫路徑
+    ``steps_orchestrator/_impl.py:120``），而非僅在 dry_run 下做字串包含檢查
+    ——舊測試從未真正執行過此指令，故 POSIX-only grep 的跨平台缺陷不會被攔下。
+
+    驗證重點：
+    1. 兜底指令不含 grep（不依賴一般 Windows 11 未必存在的 GNU 工具）。
+    2. 語意與原 `git diff --stat HEAD | grep -c .` 一致——HEAD 有非空 diff
+       才判定成功，無變更則判定失敗。
+    """
+    from autoclaude.execution.evaluator import Evaluator
+    from autoclaude.execution.mutation_applier._complex_mutations import (
+        _default_fallback_evaluator_command as cmd_from_complex,
+    )
+    from autoclaude.execution.mutation_applier._simple_mutations import (
+        _default_fallback_evaluator_command as cmd_from_simple,
+    )
+
+    cmd = cmd_from_simple()
+    assert cmd == cmd_from_complex(), "INJECT_AFTER / INJECT_BEFORE 須共用同一 SSOT 兜底指令"
+    assert "grep" not in cmd
+
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    subprocess.run(["git", "init", "-q"], cwd=repo, check=True)
+    subprocess.run(["git", "config", "user.email", "a@b.c"], cwd=repo, check=True)
+    subprocess.run(["git", "config", "user.name", "tester"], cwd=repo, check=True)
+    (repo / "f.txt").write_text("v1", encoding="utf-8")
+    subprocess.run(["git", "add", "."], cwd=repo, check=True)
+    subprocess.run(["git", "commit", "-q", "-m", "init"], cwd=repo, check=True)
+
+    monkeypatch.chdir(repo)
+    evaluator = Evaluator(timeout=30)
+
+    # 無未提交變更 → HEAD 無 diff → 兜底應判定失敗
+    result_no_diff = evaluator.run(cmd)
+    assert result_no_diff.success is False
+
+    # 製造未提交變更 → HEAD 有 diff → 兜底應判定成功
+    (repo / "f.txt").write_text("v2", encoding="utf-8")
+    result_with_diff = evaluator.run(cmd)
+    assert result_with_diff.success is True
+
+
+def test_r52_fallback_evaluator_src_subprocess_has_encoding():
+    """R52 round 2 P2 修復回歸測試（結構面）：_FALLBACK_EVALUATOR_SRC 內嵌的
+    subprocess.run 需顯式帶 encoding。
+
+    背景：_FALLBACK_EVALUATOR_SRC 是一段以字串字面值撰寫、供子行程以
+    `exec(base64.b64decode(...))` 於執行期動態組譯執行的 Python 原始碼；
+    tools/tests/test_subprocess_encoding_hygiene.py 的全庫 AST 掃描器對它
+    結構性看不到（它在 _simple_mutations.py 自身的 AST 裡只是一個字串常數，
+    不是真正的 ast.Call 節點）。本測試把這段字面值當成一棵獨立原始碼樹重新
+    ast.parse，直接對其內部真正的 subprocess.run 呼叫做結構化驗證，補上全庫
+    掃描器結構性看不到的這個角落，防止未來編修時再次悄悄漏掉 encoding。
+    """
+    import ast
+
+    from autoclaude.execution.mutation_applier._simple_mutations import (
+        _FALLBACK_EVALUATOR_SRC,
+    )
+
+    tree = ast.parse(_FALLBACK_EVALUATOR_SRC)
+    run_calls = [
+        node for node in ast.walk(tree)
+        if isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Attribute)
+        and node.func.attr == "run"
+    ]
+    assert len(run_calls) == 1, "預期此兜底原始碼恰有一個 subprocess.run 呼叫"
+    kwargs = {kw.arg for kw in run_calls[0].keywords if kw.arg is not None}
+    assert "text" in kwargs, "此呼叫應維持 text=True 語意（本測試前提）"
+    assert "encoding" in kwargs, (
+        "subprocess.run(..., text=True) 缺 encoding：Windows locale 非 UTF-8 時"
+        "（如 zh-TW cp950）讀取含非 ASCII 檔名的 git 輸出會 UnicodeDecodeError，"
+        "讓此兜底評估指令自己以未捕捉例外崩潰"
+    )
+
+
+def test_r52_fallback_evaluator_src_handles_non_ascii_filename(tmp_path):
+    """R52 round 2 P2 修復回歸測試（行為面）：_FALLBACK_EVALUATOR_SRC 對含中文
+    檔名的 git diff 輸出需能正常解碼，不得以 UnicodeDecodeError 崩潰。
+
+    本機（開發機／CI，UTF-8 locale）無法重現 Windows cp950 下的解碼失敗本身
+    （此為既有 P2 finding 已載明的環境限制），但可驗證：加了
+    encoding="utf-8", errors="replace" 後，含非 ASCII 檔名時仍正確判定
+    「HEAD 有 diff → exit 0」，語意未被破壞。
+    """
+    from autoclaude.execution.mutation_applier._simple_mutations import (
+        _FALLBACK_EVALUATOR_SRC,
+    )
+
+    repo = tmp_path / "repo_unicode"
+    repo.mkdir()
+    subprocess.run(["git", "init", "-q"], cwd=repo, check=True)
+    subprocess.run(["git", "config", "user.email", "a@b.c"], cwd=repo, check=True)
+    subprocess.run(["git", "config", "user.name", "tester"], cwd=repo, check=True)
+    # core.quotepath=false：讓非 ASCII 檔名以原始 UTF-8 位元組輸出（預設會
+    # 以八進位跳脫全轉成 ASCII，無法重現此處要驗證的非 ASCII 解碼風險）。
+    subprocess.run(["git", "config", "core.quotepath", "false"], cwd=repo, check=True)
+    cn_file = repo / "測試檔案.txt"
+    cn_file.write_text("v1", encoding="utf-8")
+    subprocess.run(["git", "add", "."], cwd=repo, check=True)
+    subprocess.run(["git", "commit", "-q", "-m", "init"], cwd=repo, check=True)
+
+    cn_file.write_text("v2", encoding="utf-8")
+    proc = subprocess.run(
+        [sys.executable, "-c", _FALLBACK_EVALUATOR_SRC],
+        cwd=repo, capture_output=True, text=True, encoding="utf-8", errors="replace",
+    )
+    assert proc.returncode == 0, proc.stderr
+    assert "UnicodeDecodeError" not in proc.stderr
 
 
 def test_gap036_inject_before_has_evaluator_on_injected_task(tmp_path):

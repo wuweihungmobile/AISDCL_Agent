@@ -14,7 +14,7 @@ from __future__ import annotations
 
 import logging
 from pathlib import Path
-from typing import TYPE_CHECKING, Optional
+from typing import TYPE_CHECKING
 
 import yaml
 
@@ -29,8 +29,8 @@ logger = logging.getLogger("autoclaude.execution.playbook")
 
 
 def resolve_start_impl(
-    runner: "PlaybookRunner", playbook_path: str, fresh: bool, playbook: Playbook,
-) -> tuple[int, list[str], bool, Optional[PlaybookCheckpoint]]:
+    runner: PlaybookRunner, playbook_path: str, fresh: bool, playbook: Playbook,
+) -> tuple[int, list[str], bool, PlaybookCheckpoint | None]:
     """SD_06 W2：_resolve_start 下沉。"""
     if fresh:
         return 0, [], True, None
@@ -60,7 +60,7 @@ def resolve_start_impl(
 
 
 def wait_for_scheduled_resume_impl(
-    runner: "PlaybookRunner", playbook_path: str, resume_count: int,
+    runner: PlaybookRunner, playbook_path: str, resume_count: int,
 ) -> float:
     """SD_06 W2：_wait_for_scheduled_resume 下沉。"""
     cp = runner._checkpoint_mgr.load(playbook_path)
@@ -86,7 +86,7 @@ def load_playbook_impl(path: str) -> Playbook:
 
 
 def detect_workflow_impl(
-    runner: "PlaybookRunner", playbook: Playbook,
+    runner: PlaybookRunner, playbook: Playbook,
 ) -> WorkflowType:
     """SD_06 W2：_detect_workflow 下沉。"""
     if playbook.workflow_type != "auto":
@@ -108,15 +108,32 @@ def detect_workflow_impl(
 
 
 def validate_evaluator_commands_impl(playbook: Playbook) -> None:
-    """SD_06 W2：_validate_evaluator_commands 下沉（純函式，但需 shutil patch path）。"""
+    """SD_06 W2：_validate_evaluator_commands 下沉（純函式，但需 shutil patch path）。
+
+    Mac/Windows 相容性 R52：比照 pre_run_validator.py 同步排除 WindowsApps
+    App Execution Alias 空殼（假陰性修復，見 pre_run_validator._is_windows_apps_alias_stub
+    註解），避免裸 shutil.which 對空殼可執行檔誤判為「命令存在」。
+    """
     from .playbook_runner import _pr
+    from .pre_run_validator import _WINDOWS_APPS_STUB_BINARIES, _is_windows_apps_alias_stub
     for task in playbook.tasks:
         if not task.evaluator_command:
             continue
         binary = task.evaluator_command.strip().split()[0]
-        if not _pr().shutil.which(binary):
+        resolved = _pr().shutil.which(binary)
+        if not resolved:
             logger.warning(
                 "=== Gap-009-D | [%s] evaluator_command '%s' 不在 PATH 中，"
                 "step 執行時可能立即 ESCALATION。===",
                 task.step_id, binary,
+            )
+        elif (
+            binary.lower() in _WINDOWS_APPS_STUB_BINARIES
+            and _is_windows_apps_alias_stub(resolved)
+        ):
+            logger.warning(
+                "=== Gap-009-D | [%s] evaluator_command '%s' 解析到 Windows "
+                "WindowsApps App Execution Alias 空殼（%s），並非真正安裝的直譯器，"
+                "step 執行時可能立即 ESCALATION。===",
+                task.step_id, binary, resolved,
             )

@@ -195,6 +195,13 @@ on:
       # 做跨平台能力對照（DEF-101-233/259）——只改該檔時本 workflow 須重跑該鎖
       #（DEF-101-042 同構，test_ci_paths_cover_root_consumers 實測揪出）
       - "tools/install_mac_nightly.sh"
+      # R52 四方複審 Architect/SA/SD 交叉發現：tools/tests/test_dev_start.py 的
+      # TestNightlyHeartbeatFilenameContract.test_mac_writer_reader_filename_and_call_position
+      # 直接 .read_text() 此檔原始碼，斷言 nightly_mac_latest.log 心跳檔名錨點與
+      # write_heartbeat 呼叫位置——只改此檔時本 workflow 先前不會被觸發，該回歸鎖
+      # 延遲至每週一次 windows-nightly-full 非阻斷 job 才跑（DEF-101-042 同構；
+      # .sh 本檔無 **/*.sh 兜底 glob，需顯式列舉）。
+      - "AutoClaude/tools/run_local_nightly.sh"
   pull_request:
     paths:
       - "AutoClaude/autoclaude/perception/**"
@@ -273,6 +280,8 @@ on:
       - ".github/workflows/windows-compat-ci.yml"
       # R22：同上（push 段說明），pull_request 段同步補齊
       - "tools/install_mac_nightly.sh"
+      # R52：同上（push 段說明），pull_request 段同步補齊
+      - "AutoClaude/tools/run_local_nightly.sh"
   schedule:
     # R11 額度治理：每日 → 每週一（CI 額度緊張、Windows 側已有 schtasks 本地 nightly
     # run_local_nightly.ps1 承接每日訊號）；需要時可 workflow_dispatch 手動觸發。

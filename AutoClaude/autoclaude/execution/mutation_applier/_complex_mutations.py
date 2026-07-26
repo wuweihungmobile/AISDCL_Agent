@@ -5,10 +5,11 @@
 from __future__ import annotations
 
 import logging
-from typing import TYPE_CHECKING, Optional
+from typing import TYPE_CHECKING
 
 from ...models.playbook import PlaybookTask
 from ..types import PlaybookResult
+from ._simple_mutations import _default_fallback_evaluator_command
 
 if TYPE_CHECKING:
     from ...models.step_mutation import StepMutation
@@ -18,7 +19,7 @@ if TYPE_CHECKING:
 logger = logging.getLogger("autoclaude.execution.playbook")
 
 
-def handle_inject_before(ctx: "MutationCtx", mutation: "StepMutation", result: "_MutationResult") -> None:
+def handle_inject_before(ctx: MutationCtx, mutation: StepMutation, result: _MutationResult) -> None:
     cnt = ctx.inject_before_counter.get(ctx.task.step_id, 0) + 1
     if cnt > 5:
         logger.warning(
@@ -46,7 +47,7 @@ def handle_inject_before(ctx: "MutationCtx", mutation: "StepMutation", result: "
         prompt=mutation.new_step_prompt,
         expected_output_regex=mutation.new_step_expected_regex,
         evaluator_command=(
-            mutation.new_step_evaluator_command or "git diff --stat HEAD | grep -c ."
+            mutation.new_step_evaluator_command or _default_fallback_evaluator_command()
         ),
         max_retries=mutation.new_step_max_retries,
     )
@@ -59,13 +60,14 @@ def handle_inject_before(ctx: "MutationCtx", mutation: "StepMutation", result: "
         pre_task.evaluator_command[:60] if pre_task.evaluator_command else "None",
     )
     ctx.mutation_log.append(
-        f"[attempt {ctx.attempt}] INJECT_BEFORE: 插入前置步驟 {pre_task.step_id} 於 {ctx.task.step_id} 前"
+        f"[attempt {ctx.attempt}] INJECT_BEFORE: 插入前置步驟 {pre_task.step_id} "
+        f"於 {ctx.task.step_id} 前"
     )
     ctx.runner._persist_mutated_playbook(ctx.playbook, ctx.playbook_path)
     result.should_break = True
 
 
-def handle_goto_step(ctx: "MutationCtx", mutation: "StepMutation", result: "_MutationResult") -> None:
+def handle_goto_step(ctx: MutationCtx, mutation: StepMutation, result: _MutationResult) -> None:
     target_id = mutation.goto_step_id
     target_idx = next(
         (i for i, t in enumerate(ctx.playbook.tasks) if t.step_id == target_id), None,
@@ -93,7 +95,7 @@ def handle_goto_step(ctx: "MutationCtx", mutation: "StepMutation", result: "_Mut
 
 
 def _trigger_goto_escalation(
-    ctx: "MutationCtx", target_id: str, gc: int, result: "_MutationResult",
+    ctx: MutationCtx, target_id: str, gc: int, result: _MutationResult,
 ) -> None:
     """GOTO 上限觸發：dump escalation + 嘗試演化 + 設定 early_return。"""
     logger.error(
@@ -107,7 +109,7 @@ def _trigger_goto_escalation(
     proposal = ctx.runner._evolver.propose_evolution(
         ctx.playbook, ctx.step_idx, goto_dump, ctx.runner._escalation_history,
     )
-    evolved_path: Optional[str] = None
+    evolved_path: str | None = None
     if proposal:
         evolved_path = ctx.runner._evolver.apply_evolution(
             ctx.playbook, proposal, ctx.playbook_path, mutation_log=ctx.mutation_log,

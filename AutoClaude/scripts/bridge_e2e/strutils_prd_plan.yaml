@@ -43,7 +43,7 @@ goal_tasks:
         # 檢查 SPEC.md 真的產生（後端無關），不靠 keyword 回顯（pty --output-format json 擷取
         # 脆弱會吞掉 keyword 致誤判）。expected_output_regex 留空，把關交 evaluator_command。
         expected_output_regex: null
-        evaluator_command: "python -m autoclaude.artifact_check SPEC.md --min-bytes 200"
+        evaluator_command: "autoclaude-artifact-check SPEC.md --min-bytes 200"
     sub_tasks: []
   - goal_task_id: "GT-IMPL"
     title: "實作至綠（SCG-4）：TDD 先測後實作 slugify 與 truncate"
@@ -69,7 +69,7 @@ goal_tasks:
         # 以 artifact-existence 把關 test_strutils.py 真的產生；不靠 keyword 回顯。下一步 E-IMPL-2
         # 的 pytest 會 import 此檔，形成 backstop（檔沒寫對下一步必失敗）。
         expected_output_regex: null
-        evaluator_command: "python -m autoclaude.artifact_check test_strutils.py --min-bytes 80"
+        evaluator_command: "autoclaude-artifact-check test_strutils.py --min-bytes 80"
       - exec_id: "E-IMPL-2"
         action: "在當前工作目錄建立 strutils.py 實作 slugify，使 test_strutils.py 中 slugify 測試全綠"
         prompt: |
@@ -111,7 +111,7 @@ goal_tasks:
         # 以 artifact-existence + 較高 min-bytes 把關 test_strutils.py 已成長（追加了 truncate 測試）；
         # 不靠 keyword 回顯。下一步 E-IMPL-4 的全套 pytest 為最終客觀 backstop。
         expected_output_regex: null
-        evaluator_command: "python -m autoclaude.artifact_check test_strutils.py --min-bytes 160"
+        evaluator_command: "autoclaude-artifact-check test_strutils.py --min-bytes 160"
       - exec_id: "E-IMPL-4"
         action: "在 strutils.py 實作 truncate，使 test_strutils.py 全部測試（slugify + truncate）全綠"
         prompt: |

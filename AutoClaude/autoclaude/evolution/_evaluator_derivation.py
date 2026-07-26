@@ -41,7 +41,21 @@ def derive_part_a_evaluator(full_evaluator: str | None) -> str | None:
         # pytest → 只做 collect-only 確認語法正確
         base = re.sub(r'\s+-[kxvsq]\S*', '', cmd)
         base = re.sub(r'\s+--tb=\S+', '', base)
-        return base.split()[0] + " --collect-only"
+        tokens = base.split()
+        # R52 修正：舊實作直接取 tokens[0] 當可執行檔名。對 'python -m pytest ...'
+        # / 'python3 -m pytest ...' 這類三層架構白名單允許的形態（見
+        # tools/three_tier_to_playbook.py _EVAL_ALLOWED_HEAD），tokens[0] 是
+        # 'python'/'python3' 而非 'pytest'，導致產出語法上不存在的
+        # 'python --collect-only'（rc=2 unknown option），與本函式「非 pytest
+        # 指令才無條件回傳成功」的設計意圖直接相反。改為定位 'pytest' 這個
+        # token 本身，保留其前綴（如 'python -m'）一併帶入。
+        try:
+            pytest_idx = tokens.index("pytest")
+            head = " ".join(tokens[: pytest_idx + 1])
+        except ValueError:
+            # 理論上不會發生（外層已用 \bpytest\b 命中），保留舊行為兜底
+            head = tokens[0]
+        return head + " --collect-only"
     payload = base64.b64encode(cmd.encode("utf-8")).decode("ascii")
     python_bin = sys.executable or "python3"
     return (

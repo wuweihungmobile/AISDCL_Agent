@@ -35,8 +35,15 @@ _DENY = set("!`><~$&;")
 _SAFE_FRAGMENT = re.compile(r"^[\w./\\-]+$")
 
 # §1.3 截斷點 1：唯二合法 evaluator 模板（任何自由字串一律拒絕）
+# R52 修正：模板 [0]（_build_evaluator_cmd 實際使用的唯一模板）原硬編裸字面值
+# "python -m pytest"，在 macOS /usr/bin 與多數現代 Linux distro 的乾淨 PATH（無 venv/
+# 別名）上只有 python3、沒有裸 python，經 subprocess.run(shell=True) 執行恆 rc=127。
+# 不可比照 evolution 模組改用 sys.executable 絕對路徑——sdd_compile.py 為「編譯期產出
+# YAML、執行期可能是完全不同行程/環境/機器」的兩段式設計，編譯時解析的直譯器路徑在
+# 執行時未必存在。改為不含 python 前綴的 `pytest ...` 形式，改而假設 pytest 本身（console
+# script）在 PATH 上——與 execution/evaluator.py 模組 docstring 明載的可攜指令建議一致。
 _EVALUATOR_TEMPLATES = (
-    'python -m pytest {path} -k "{at}" -q',
+    'pytest {path} -k "{at}" -q',
     "python -m tools.{module} {args}",
 )
 
@@ -333,7 +340,8 @@ class SddToPlaybookAdapter:
             else:
                 pos_status.append(code + ("|" + phrase if phrase else ""))
         if neg_status:
-            # 含負向：正向 (?=.*(?:碼|片語)) 要求出現 + 負向 (?!.*片段) 要求不出現（同引號路徑 259）。
+            # 含負向：正向 (?=.*(?:碼|片語)) 要求出現 +
+            # 負向 (?!.*片段) 要求不出現（同引號路徑 259）。
             # 含字母片語 → 全域 (?i) 與正向 case 一致（W-40-1）；單負向無片語逐位元維持
             # (?s)\A(?!.*碼)、含片語維持 (?is)\A(?!.*碼)(?!.*片語)（哨兵鎖定，零退化）。
             flags = "(?is)" if has_phrase else "(?s)"
@@ -341,7 +349,8 @@ class SddToPlaybookAdapter:
             return flags + "\\A" + "".join(parts), False
         if pos_status:
             # 純正向：維持既有 alternation 格式 (?i)(碼|片語) 取首條（哨兵鎖定，零行為變化）。
-            # 多正向狀態碼語意罕見且歧義，沿用既有「首條 wins」設計，不臆測聚合（對齊 quoted-wins）。
+            # 多正向狀態碼語意罕見且歧義，沿用既有「首條 wins」設計，
+            # 不臆測聚合（對齊 quoted-wins）。
             return "(?i)(" + pos_status[0] + ")", False
         return _FALLBACK_REGEX, True
 

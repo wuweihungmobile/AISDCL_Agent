@@ -12,12 +12,21 @@
   pip editable-install，**任何 cwd 皆可解析**，且 <path> 相對工作目錄正確（與
   `pytest test_strutils.py` 能在同目錄跑成功同理）。
 
+Mac/Windows 相容性 R52 修復：新增 `autoclaude-artifact-check` console script
+（見 pyproject.toml `[project.scripts]`），取代裸 `python -m
+autoclaude.artifact_check` 形態——裸 `python` 在 macOS/多數現代 Linux 的乾淨
+PATH 上不存在（僅 `python3`），經 `shell=True` 執行恆 `rc=127`；`python -m ...`
+用法仍保留供除錯，新產出的 evaluator_command 一律用 console script 形態。
+
 白名單相容（tools/three_tier_to_playbook.py sanitize_evaluator）：
-  `python -m autoclaude.artifact_check <path> --min-bytes N` 首 token=python、`-m`
-  形態（非 `-c`）、無 shell 元字元 → 通過三層消毒。
+  `autoclaude-artifact-check <path> --min-bytes N` 首 token=`autoclaude-artifact-check`、
+  無 shell 元字元 → 通過三層消毒；舊有 `python -m autoclaude.artifact_check <path>
+  --min-bytes N` 形態（首 token=python、`-m` 非 `-c`）亦仍通過消毒，向下相容既有
+  playbook。
 
 CLI：
-  python -m autoclaude.artifact_check SPEC.md --min-bytes 200
+  autoclaude-artifact-check SPEC.md --min-bytes 200
+  python -m autoclaude.artifact_check SPEC.md --min-bytes 200   # 等效，開發除錯用
   exit 0＝檔案存在且 size >= min-bytes；exit 1＝不存在 / 太小（stderr 說明）。
 """
 from __future__ import annotations
@@ -42,7 +51,7 @@ def check_artifact(path: str, min_bytes: int) -> tuple[bool, str]:
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
-        prog="python -m autoclaude.artifact_check",
+        prog="autoclaude-artifact-check",
         description="檢查 artifact 檔案存在且達 min-bytes（doc/spec 步 backend-robust 把關）。",
     )
     parser.add_argument("path", help="要檢查的 artifact 相對/絕對路徑")
