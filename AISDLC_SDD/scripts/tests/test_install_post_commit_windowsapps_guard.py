@@ -373,7 +373,7 @@ def test_guard_src_bash_replace_expression_normalizes_backslash_independent_of_j
         f"萃取出的正規化陳述式套用在模擬原生 Windows Join-Path 輸出（含反斜線）"
         f"後仍殘留反斜線，DEF-101-389 修復失效：{result!r}"
     )
-    assert result == "C:/fake-checkout/tools/lib/windowsapps_guard.sh", (
+    assert result == "C:/fake-checkout/tools/lib/windowsapps_guard.sh", (  # platform-ok: 純字串斷言模擬原生 Windows Join-Path 輸出，不觸碰檔案系統
         f"正規化結果與預期不符：{result!r}"
     )
 
