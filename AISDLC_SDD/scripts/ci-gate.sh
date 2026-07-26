@@ -34,7 +34,7 @@ export PYTHONUTF8=1
 MIN_TESTS_FROZEN=1400   # R47 實測 AISDLC_SDD_v0.01=1478（留 ~78 餘裕）
 MIN_TESTS_LATEST=1650   # R47 二審修復後實測 LATEST=1729（留 ~79 餘裕；此數字會隨後續各輪
                         # 新增測試自然漂移，門檻本身不逐輪重新對齊，留有餘裕即可）
-MIN_TESTS_SHARED=190    # R47 三審複核後實測 scripts/tests=224（留 ~34 餘裕；同上，預期漂移）
+MIN_TESTS_SHARED=190    # R49 複核後實測 scripts/tests=226（留 ~36 餘裕；同上，預期漂移）
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
