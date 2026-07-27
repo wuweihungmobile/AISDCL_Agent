@@ -64,7 +64,7 @@
    b. 再確認此刻沒有 nightly 正在跑（**不可跳過**）：
         .venv\Scripts\python.exe tools/dev_start.py --check-nightly
       印出 idle（rc=0）才往下做；印出 NIGHTLY-RUNNING（rc=1）就停下來等它跑完（通常數分鐘，可看 AutoClaude/logs/ 最新 nightly log 的尾巴是否還在長）再同步，**期間也不要跑任何測試**。
-      為何必要：本機 nightly 走 schtasks 補跑（WakeToRun／StartWhenAvailable），機器一喚醒就補跑——正好是你開工的同一分鐘。2026-07-27 實測：git merge 於 18:41:26 抽換 113 個檔案，落在 nightly 那輪 pytest 的執行區間（18:41:10～18:42:50）正中間 → 5 支測試假紅（事後單獨重跑 10 passed 全綠）；更糟的是假紅會寫進 nightly_latest.log，讓**之後每天早上**的 dev_start 心跳哨兵都報「上一輪 nightly 有失敗」，把人導去追一個不存在的迴歸。
+      為何必要：本機 nightly 走 schtasks 補跑（WakeToRun／StartWhenAvailable），機器一喚醒就補跑——正好是你開工的同一分鐘。2026-07-27 實測：git merge 於 18:41:26 抽換 113 個檔案，落在 nightly 那輪 pytest 的執行區間（18:41:10～18:42:50）正中間 → 5 支測試假紅（事後把那 5 支單獨重跑，全數通過）；更糟的是假紅會寫進 nightly_latest.log，讓**之後每天早上**的 dev_start 心跳哨兵都報「上一輪 nightly 有失敗」，把人導去追一個不存在的迴歸。
       （首次 clone、.venv 還沒建好時可略過此步——沒有 .venv 就不會有 nightly 排程；舊 checkout 若回報 unrecognized arguments，代表這支旗標要同步後才有，本次略過即可。）
    c. git fetch origin
       若 fetch 失敗（離線／網路問題）：不要卡住重試，明確告訴我「本次離線、跳過同步」，並在第 2 步的 dev_start 指令後面加上 --no-sync 繼續本機整備。
@@ -96,7 +96,7 @@
    - 若 ❌ 原因是「另一個 dev_start 正在整備 venv／無法取得互斥鎖」：先確認真的沒有另一個 dev_start 在跑（含前次被中斷遺留的行程），把狀況回報給我；殘留的陳舊鎖在相關行程結束後、下次執行時會自動清除，不要急著手動刪 .dev_start.lock。
    - 若只有 ⚠️ 警告（尤其是「工作樹不乾淨」「與 origin 分叉」「領先 origin 未 push」這類），簡短列給我看，讓我自己決定要不要處理，不要自動 commit/stash/push 幫我決定。
    - 若警告是「偵測不到 Git Bash（bash.exe）」：這在標準 Git for Windows 安裝下很常見（安裝程式預設只把 `Git\cmd` 加進 PATH，`Git\bin\bash.exe` 本來就不在 PATH，是官方建議設定，不代表沒裝 Git Bash）。先用 `git --version` 確認有裝 Git for Windows 就好，不必為此改 PATH；只有之後真的 commit/push 卡住才需要進一步處理。
-   - 若警告是「nightly 最近一輪有失敗」：**先判斷那輪紅是不是被同步撞出來的假紅**，再決定要不要追。作法＝比對 nightly log 裡失敗 stage 的起訖時間與 `git reflog --date=iso` 最近一次 merge/pull 的時間，時間區間重疊就高度可疑；接著把失敗的測試單獨重跑一次，全綠即為假紅（2026-07-27 實測就是這樣：5 支假紅、單獨重跑 10 passed）。假紅要跟我說一聲，別默默當成迴歸去修。
+   - 若警告是「nightly 最近一輪有失敗」：**先判斷那輪紅是不是被同步撞出來的假紅**，再決定要不要追。作法＝比對 nightly log 裡失敗 stage 的起訖時間與 `git reflog --date=iso` 最近一次 merge/pull 的時間，時間區間重疊就高度可疑；接著把失敗的測試單獨重跑一次，全綠即為假紅（2026-07-27 實測就是這樣：5 支假紅、單獨重跑全數通過）。假紅要跟我說一聲，別默默當成迴歸去修。
    - **沒看到「工作樹不乾淨」警告不等於工作樹是乾淨的**：dev_start 只在「同時落後 origin、真的要 pull」時才會提這件事（不需要 pull 就沒有擋的必要）。要確認請自己跑 git status。
 
 4. 之後所有 Python 相關指令（pytest、ruff、pip 等）請直接使用 `.venv\Scripts\python.exe`（Git Bash 載具下寫 `.venv/Scripts/python.exe`），不要誤用系統 Python。
