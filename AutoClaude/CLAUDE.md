@@ -257,7 +257,7 @@ tasks:
 
 ## 🔴 Nightly / CI 取證紀律（SD_09 W0 教訓 — 防止再犯）
 
-**完整版**：[docs/06_quality/Nightly_Forensic_Discipline.md](docs/06_quality/Nightly_Forensic_Discipline.md) v1.10（19 條）。SD_09 W0~W3 40 輪 audit 累積；違反任一條 → P0 audit。**任何紀律新增 / 修訂必須先改完整版，再同步本摘要**。
+**完整版**：[docs/06_quality/Nightly_Forensic_Discipline.md](docs/06_quality/Nightly_Forensic_Discipline.md) v1.11（19 條，#14 增列 1b）。SD_09 W0~W3 40 輪 audit 累積；違反任一條 → P0 audit。**任何紀律新增 / 修訂必須先改完整版，再同步本摘要**。
 
 1. **stage rc 必須區分「真實失敗」vs「工具標準回報」** — bitmask 工具不可單純 `rc != 0` 判 fail（mutmut：`rc & 1 != 0`）
 2. **log 必須含完整統計** — 不信任預設 dump（如 `mutmut results` 缺 Killed → kill_rate=0% 假象）；直查 raw store（sqlite Mutant 表）
@@ -272,7 +272,7 @@ tasks:
 11. **latest log pointer 完整 run** — 末段 `Copy-Item` 自當次完整 $Log 寫入，禁 partial buffer；Windows file lock 用 `FileShare.ReadWrite` + retry
 12. **mutation history 必含 source_sha256** — tail 7 unique sha ≥ 7，防同 commit 重跑 7 次騙鎖；舊紀錄缺欄位寬鬆通過
 13. **觀察期 jsonl 進度可見** — 末段印 `END observation progress: ... (delta=N; stage=R)`；R19 強化 delta 取證明示「未進帳因 stage crash」；R10：mutation 軌分子改 unique-sha（ADR-SD09-011，原始列數會虛報）
-14. **schtasks vs 互動 PATH 等價 + StrictMode $null.Property 保護** — ps1 開頭自動補 pyenv-win Scripts；禁 `(Get-Command X -EA SilentlyContinue).<Prop>` 鏈式；改兩步式（R19 P0-AUDIT-R18-1 修復）
+14. **schtasks vs 互動 PATH 等價 + StrictMode $null.Property 保護** — ps1 開頭自動補 pyenv-win Scripts；禁 `(Get-Command X -EA SilentlyContinue).<Prop>` 鏈式；改兩步式（R19 P0-AUDIT-R18-1）。**1b 直譯器等價+可取證**：偵測 `$env:VIRTUAL_ENV` 即自本行程 PATH 移除其 Scripts（無其他 python 則還原並警告）；log 必印解析後絕對路徑+版本+venv 狀態，只印字面 token 等同沒印（DEF-101-506）
 15. **呼叫端工具路徑分隔符相容性（Bash 反斜線吞噬根治）** — Bash 工具呼叫 `tools\run_local_nightly.ps1` 時反斜線被 escape 吞噬 → `toolsrun_local_nightly.ps1` 找不到檔案 → exit 127。CLAUDE.md / SOP 範例**一律用正斜線** `tools/run_local_nightly.ps1`；schtasks 用絕對 Windows 路徑；以 PowerShell 工具呼叫亦可（R40 P2-R40-2 修復）
 16. **pytest 數字 SSOT 必須註記隨機性與 fixture 前提** — 引用 pytest 數字（如 2,716 passed）時加註「pytest-randomly 未啟用，順序由 collection 確定」<!-- baseline-ok: 紀律敘例之歷史數字，非現行基線站點 -->；pyproject.toml 不安裝 pytest-randomly；引入前需先補測試隔離（R40 P1-R40-1 偽陽性預防）
 17. **zero-trust 須雙向：agent audit 結論本身亦須複核** — subagent 聲稱「某檔案不存在」須以 `find`/`rg -l`/`ls` 獨立複核（嚴禁單憑 `fd`，未安裝時靜默回空 → 誤判不存在）；可機械驗證之 finding（檔案存在 / 數字驗算 / 行號）落入 backlog 前主 agent 須親跑複核，誤報與真缺陷同樣留證（R57 SD agent `fd` 誤報 `test_pg_memory_store_security.py:14` 不存在實則存在）

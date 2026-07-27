@@ -149,6 +149,10 @@ if [ -z "$PY" ]; then
   echo "❌ 找不到 python/python3 — 請先跑 tools/dev_start 建置 .venv（ONBOARDING.md §3）" >&2
   exit 1
 fi
+# DEF-101-506：本檔的直譯器**已**釘成絕對路徑（不靠 PATH 現場解析，故無 Windows
+# 側「誰啟動就用誰的 python」問題），但先前同樣沒把它印進 log——事後無從指認。
+# 補印解析結果，與 .ps1 側取證對稱（紀律 #14 延伸）。
+printf 'python 直譯器：%s [v%s]\n' "$PY" "$("$PY" -c 'import sys; print(sys.version.split()[0])' 2>/dev/null)"
 
 PASS=0; FAIL=0; FAIL_NAMES=""
 

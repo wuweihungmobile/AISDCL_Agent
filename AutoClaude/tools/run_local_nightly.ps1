@@ -68,6 +68,40 @@ $env:PYTHONUTF8 = '1'
 #   → 後續 .Source 取屬性失敗。
 # 修復：偵測 pyenv-win 存在但 Scripts/ 不在 PATH 時自動補入；確保 alembic.exe /
 #   asyncpg / 等 Python entry-point exe 在 schtasks / 互動模式下行為一致。
+# DEF-101-506（紀律 #14 延伸，2026-07-27 真機事故）：上面那段只讓「entry-point
+# exe」在兩種啟動方式下等價，**直譯器本身仍是誰啟動就用誰的**。互動 shell 若已啟用
+# monorepo .venv，PATH 前段就是 .venv\Scripts → 同一支 nightly 在 schtasks 下跑
+# pyenv python.exe、在已啟用 venv 的終端機/agent 下跑 .venv python.exe，兩者
+# **依賴集不同**（.venv 未裝 [postgres,pgvector] 選配 → pg-e2e 假紅）、
+# **shim 語意也不同**（pyenv 是 python.bat，會做 batch 百分號展開；.venv 是真
+# .exe，不會）→ 同一份 nightly_latest.log 的紅綠無法互相比較，且會污染觀察期帳本。
+# 真實後果：本輪先以 .venv 跑出 pg-e2e/perf 兩個假紅，且讓 DEF-101-503（% 被
+# batch shim 吃掉）的修復「綠得沒有鑑別力」——真 .exe 本來就不會觸發該 bug。
+# 對策＝把「排程等價」提升為腳本自身不變量：偵測到已啟用 venv 就把它的 Scripts
+# 目錄自本行程 PATH 移除（僅本行程，不動使用者 shell），使解析結果與 schtasks 一致；
+# 但**移除後必須仍找得到真 python**，否則還原並改為警告——載具正規化不該讓整晚
+# 驗證開天窗（同 Mutex 鎖的降級哲學）。mac 側無此問題：run_local_nightly.sh 一開始
+# 就把直譯器釘成絕對路徑 $ROOT/.venv/bin/python，不靠 PATH 現場解析。
+# WindowsAppsGuard SSOT 必須在此提前載入（原本在下方 PyExe 解析處才 dot-source）：
+# 下方正規化區塊要判斷「移除 venv Scripts 後是否仍有可用 python」，該判斷必須用
+# Test-IsRealPython 而非裸 Get-Command——否則當 PATH 上只剩 WindowsApps 空殼時會
+# 誤判為「還有 python」而不還原。同時滿足 test_windowsapps_guard_cross_consistency
+# 的呼叫點層級判準（檔內不得有裸字面值 python 呼叫）。
+. "$PSScriptRoot/../../tools/lib/WindowsAppsGuard.ps1"
+
+if ($env:VIRTUAL_ENV) {
+  $venvScripts = Join-Path $env:VIRTUAL_ENV 'Scripts'
+  $pathBefore = $env:PATH
+  $kept = @($env:PATH -split ';' | Where-Object { $_ -and ($_.TrimEnd('\') -ne $venvScripts.TrimEnd('\')) })
+  $env:PATH = ($kept -join ';')
+  if (Test-IsRealPython -CandidateName 'python') {
+    Write-Host "[bootstrap] 偵測到已啟用 venv（$env:VIRTUAL_ENV）— 已自本行程 PATH 移除 $venvScripts，使直譯器解析與 schtasks 排程等價（DEF-101-506）"
+  } else {
+    $env:PATH = $pathBefore
+    Write-Host "[bootstrap] WARN 已啟用 venv（$env:VIRTUAL_ENV），但移除其 Scripts 後 PATH 上已無其他 python — 已還原並沿用 venv 直譯器；本輪結果與 schtasks 排程不完全等價（DEF-101-506）"
+  }
+}
+
 try {
   $pyenvRoot = $env:PYENV
   if (-not $pyenvRoot -and $env:USERPROFILE) {
@@ -285,13 +319,23 @@ function Format-Rc {
 # 失敗（沿用既有機制，無需額外程式碼）；唯一不在 Invoke-Stage 保護範圍內的呼叫點
 # （Stage 4 drift Docker-不可用分支，見下方該處）另補顯式判斷，避免未捕捉例外
 # 中止整支腳本、波及 Stage 5/6/Cleanup/summary。
-. "$PSScriptRoot/../../tools/lib/WindowsAppsGuard.ps1"
 $script:PyExe = $null
 if (Test-IsRealPython -CandidateName 'python') { $script:PyExe = 'python' }
 if (-not $script:PyExe) {
   Log 'python 命令在 PATH 上找不到，或為 WindowsApps 空殼別名（schtasks 排程情境下執行帳號的 PATH 可能未含已啟用 venv 的 Scripts/）— 本檔幾乎所有相依 host-side python 的 stage 將被標記為失敗' 'ERROR'
 } else {
-  Log "python 可用性驗證通過（非 WindowsApps 空殼）：$script:PyExe"
+  # DEF-101-506：舊版只印 `$script:PyExe`＝字面 token「python」，等於沒印——
+  # 事後從 log 完全無法得知是哪一顆直譯器跑的，兩種啟動方式的 log 長得一模一樣。
+  # 取證的最低要求是「解析後的絕對路徑 + 版本」，故此處固定印出（紀律 #3 精神：
+  # 取證要能指認唯一真相，不接受概括表述）。取得失敗不阻斷（純取證強化）。
+  # 兩步式取屬性（紀律 #14 後半：StrictMode 3.0 下 $null.Source 會拋
+  # PropertyNotFoundException；本檔的 test_run_local_nightly_static.py 有機械鎖，
+  # 本輪初稿正是寫成鏈式而被它當場攔下）。
+  $pyCmd = Get-Command $script:PyExe -ErrorAction SilentlyContinue
+  $pyResolved = if ($pyCmd) { $pyCmd.Source } else { '(路徑未解析)' }
+  $pyVer = (& $script:PyExe -c "import sys; print(sys.version.split()[0])" 2>$null)
+  $venvNote = if ($env:VIRTUAL_ENV) { "（VIRTUAL_ENV=$env:VIRTUAL_ENV）" } else { '（無啟用中 venv，與 schtasks 排程等價）' }
+  Log "python 可用性驗證通過（非 WindowsApps 空殼）：$pyResolved [v$pyVer] $venvNote"
 }
 
 # SD_09 W2 nightly audit P0-1 修復（紀律 #1）：
