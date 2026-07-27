@@ -48,12 +48,21 @@ gci=4）＝all-green 逃逸，`GCI`／`Dir`／`Get-Item` 同樣逃逸。故三�
 `re.IGNORECASE`；加 flag 後在真實 step 上實測仍為 trees=3／stmt=4／gci=4（別名
 `gci`／`dir`／`ls` 在該 step 的中英文註解與程式碼中 0 次命中，此數字為量測值而非推算）。
 
-已實測涵蓋（`test_ci_scan_anchors._FORM_EVASIONS` 逐條釘住）：`Get-ChildItem`／
-`get-childitem`／`GET-CHILDITEM` 任一大小寫、`gci`／`GCI`／`Dir`／`ls` 別名、
-具名/位置/引號/`Join-Path` 計算式路徑、`-Filter`／`-Recurse`／`-File` 任意順序與
-任意大小寫、`-Include` 取代 `-Filter`。
-已實測**不**涵蓋（三條錨皆抓不到，屬已知殘餘風險）：`[System.IO.Directory]::GetFiles()`、
-`Get-Item`（含 wildcard 形態）、`Resolve-Path` 這三種非 Get-ChildItem 系列的列舉途徑。
+已實測涵蓋（`test_ci_scan_anchors._FORM_EVASIONS` 逐條釘住；下列反引號內的 cmdlet
+拼法與參數名由 `test_ci_scan_anchors.TestDocstringClaimsMatchAnchorTables` 與該樣本表
+**雙向**核對——樣本引入新拼法／新參數名而此處沒跟、或此處多列一種而無對應樣本，
+兩個方向都會翻紅）：`Get-ChildItem`／`get-childitem`／`GET-CHILDITEM` 任一大小寫、
+`gci`／`GCI`／`Dir`／`ls` 別名、具名（`-Path`）／位置／引號／`Join-Path` 計算式路徑、
+`-Recurse`／`-Filter`／`-File` 任意順序與任意大小寫、`-Include` 取代 `-Filter`。
+已實測**不**涵蓋（三條錨皆抓不到，屬已知殘餘風險）——逐項列於下方標記行，與
+`test_ci_scan_anchors._KNOWN_UNCOVERED` 由同一測試類**雙向**鎖成等長等內容；
+項數刻意不寫成中文數字，因為 R57 round 4 ARCH-R57R4-02 揪出上一版鎖是**單向**的
+（只在「錨變強」方向翻紅，對「常數表變長」方向無感），於是 `EnumerateFiles` 補進
+常數表後這裡仍寫「這三種」卻零訊號，害下一輪審查者以為殘餘逃逸面只有三種：
+  [UNCOVERED] `[System.IO.Directory]::GetFiles(...)` — .NET 靜態方法直接列舉
+  [UNCOVERED] `Get-Item`（含 wildcard 形態）
+  [UNCOVERED] `Resolve-Path`（含 wildcard 形態）
+  [UNCOVERED] `[IO.Directory]::EnumerateFiles(...)` — 上面 GetFiles 的 lazy 同族
 未窮舉：PowerShell 列舉檔案的途徑不只上述，本清單只列已實機量測過的形態，不做
 「唯一殘餘風險是 X」這類未窮舉的絕對宣稱（R57 round 1／round 2 各因此翻車一次）。
 

@@ -15,11 +15,54 @@
 
 🔴 判準邊界（誠實劃界，比照 check_defect_log_crossref.py docstring 風格）：
   命中＝同一行**同時**滿足兩件事：
-    1. 含子字串 `passed` 或 `skipped`（不分大小寫；注意 substring 比對，
-       `bypassed`/`surpassed` 也會算——寧可誤殺由豁免放行，不可漏放）；
-    2. 含「千分位數字」（如 3,566）或「≥4 位連續整數」（如 3567；badge 的
-       URL-encoded 形態 `tests-3567%20passed` 亦天然命中；年份 2026 等 4 位數
-       與 passed 同行時同樣命中，屬刻意保守）。
+    1. 含 pytest／unittest 基線用語（不分大小寫）：`passed`、`skipped`、
+       `tests OK`、`Ran <N> tests`、`<N> 個測試`。注意 substring 比對，
+       `bypassed`/`surpassed` 也會算——寧可誤殺由豁免放行，不可漏放。
+       **R58 擴充（R58 五維掃描發現 #16；正式 DEF 編號於收輪時統一登記缺陷帳本，
+       此處刻意不預先寫死免對不上）**：原本只認 `passed|skipped`，於是根層
+       `tools/run_root_unittests.py` 的實際輸出用語（`✅ ... 發現 N 個測試`／
+       unittest 自身的 `Ran N tests` + `OK`）整組逃逸——文件裡寫「根層
+       `646 tests OK`」不含 passed/skipped，守門全綠。`subtests passed`
+       不需另列（已含 `passed` 子字串）。
+    2. 含「千分位數字」（如 3,566）或「≥2 位連續整數」（如 646、245、3567；
+       badge 的 URL-encoded 形態 `tests-3567%20passed` 亦天然命中；年份 2026
+       等 4 位數與 passed 同行時同樣命中，屬刻意保守）。
+       **R58 放寬（同一發現 #16，與上條同源）**：原下限是「≥4 位」，於是
+       本 repo 當時兩組**三位數**基線完全逃逸——根層 `NNN tests OK/skipped=NN`
+       與 AISDLC_SDD `scripts/tests` 的 `NNN passed / N skipped` 這兩種形狀，
+       任何人寫進非 SSOT 檔一律綠燈放行 → 第二個家成立、開始漂移，正是本工具
+       要根除的形狀。下限改「≥2 位」而非「≥3 位」，理由是本工具 docstring 自訂
+       的偏誤方向就是「寧可誤殺由豁免放行，不可漏放」：三位數雖是當時所有真實
+       基線的下界，但把線畫在恰好貼齊現況＝下一個更小的套件出現時又開一道逃逸
+       口。放寬代價已實測（見下「涵蓋面」）。
+       🔴 **本 docstring 刻意只寫形狀、不寫具體數字**（R58 round 5 SA-R58R5 P3 (a)；
+       round 6 QA-P4-1 補完殘留處，並修好 round 5 那次插入把上一句切斷的排版）：
+       原文以現在式引述兩組三位數基線當「本 repo 現行基線」，而它們一為 ONBOARDING
+       §7 明文「已作廢」的輪次中途值、一為動工前基線——**本檔又不在自己的
+       `_SCAN_FILES` 內** ⇒ 成了一個無人守門的第二個家，正是本工具存在要根除的
+       形狀在它自己身上復發。具體數字一律去 §7 查（唯一 SSOT）；本檔下方「已實測
+       涵蓋」列出的兩串是**當時的測試向量**（取自回歸測試的合成輸入），已標註為
+       歷史實例而非現行基線。
+  🔴 涵蓋面（三段式，R58 實測）：
+    - **已實測涵蓋**：三位數基線形狀在非 SSOT 掃描檔出現即紅（回歸測試 + 對真實
+      `AutoClaude/CLAUDE.md` 的 bug-injection 雙證）。當時用的測試向量是
+      `646 tests OK/skipped=11` 與 `245 passed / 1 skipped / 23 subtests passed`
+      ——**兩者皆為歷史實例、非現行基線**（前者已作廢、後者是動工前值），
+      此處保留僅為說明鑑別力是對什麼字串量到的；現行基線一律查 ONBOARDING §7。
+    - **已實測不涵蓋**：不在 `_SCAN_FILES` 內的檔案（例如
+      `docs/06_quality/CrossPlatform_Scan_Dimensions.md`）——那是**掃描面**
+      缺口，非本次判準缺口，放寬正則對它無效；要納管須加進 `_SCAN_FILES`
+      並同步 tools/tests/ 的清單釘選測試。
+    - **未窮舉**：其他自然語言基線措辭（如「全套綠」「N/N 通過」）未列入
+      `_KEYWORD_RE`；判準本質是關鍵詞白名單，無法宣稱窮盡所有寫法。
+  🔴 放寬的實測代價（R58，動工前先量再改）：對現行 5 份掃描檔逐一比對
+  「舊判準 vs 放寬後判準」的命中集合，**非 SSOT 檔零新增命中**（4 筆
+  `AutoClaude/CLAUDE.md` + 3 筆 `AutoClaude/README.md` 皆為早已帶
+  `baseline-ok:` 的歷史快照行，放寬前後同一批）；SSOT（ONBOARDING.md）命中
+  數 12 → 16（SSOT 本就准許載數字，不構成違規）。故本次放寬**未新增任何
+  豁免標記**——「放寬必然多命中歷史快照類檔案」的預期在本 repo 現況下未發生，
+  因為歷史快照類檔案（缺陷帳本／sprint_history／improving 系列）本來就不在
+  `_SCAN_FILES` 掃描面內。
   規則：
     - 非 SSOT 掃描檔命中 → 紅（列 檔:行）。
     - SSOT 檔命中數 <1 → 紅（anchor 自檢：防 SSOT 自己被刪成零訊號後，
@@ -66,9 +109,20 @@ _SSOT_FILE = "ONBOARDING.md"
 
 _EXEMPT_MARK = "baseline-ok:"
 
-_KEYWORD_RE = re.compile(r"passed|skipped", re.IGNORECASE)
-# 千分位（1,234 / 12,345,678）或 ≥4 位連續整數（3567、20260713…）
-_NUMBER_RE = re.compile(r"\d{1,3}(?:,\d{3})+|\d{4,}")
+# 基線用語白名單。R58 擴充：原僅 `passed|skipped`，漏掉根層 runner 的實際用語
+# （`tools/run_root_unittests.py` 印「發現 N 個測試」、unittest 自身印
+# `Ran N tests` + `OK`），致「646 tests OK」這類宣稱整組逃逸。`subtests passed`
+# 已被 `passed` 涵蓋，不另列。`個測試` 前的 `\s*` 容忍「646個測試」無空格寫法。
+_KEYWORD_RE = re.compile(
+    r"passed|skipped|tests\s+OK|Ran\s+\d+\s+tests?|\d+\s*個測試", re.IGNORECASE
+)
+# 千分位（1,234 / 12,345,678）或 ≥2 位連續整數（646、245、3567、20260713…）。
+# R58 放寬：原下限「≥4 位」讓當時兩組三位數基線的**形狀**完全逃逸；放寬到 2 位而非
+# 貼齊現況的 3 位，理由與實測代價見模組 docstring。
+# 🔴 本檔一律不寫具體基線數字（round 6 QA-P4-1：本註原以現在式舉兩組已作廢的數字為
+# 現行基線，而本檔不在自己的 `_SCAN_FILES` 內＝無人守門的第二個家）。現行值查
+# ONBOARDING §7（唯一 SSOT）。
+_NUMBER_RE = re.compile(r"\d{1,3}(?:,\d{3})+|\d{2,}")
 
 
 def _line_is_claim(line: str) -> bool:

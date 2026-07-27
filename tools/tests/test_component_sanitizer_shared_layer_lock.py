@@ -43,17 +43,19 @@ state_loader`），一次沒清乾淨就會讓後面的版本悄悄沿用前一�
 from __future__ import annotations
 
 import json
-import re
 import subprocess
 import sys
 import unittest
 from pathlib import Path
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+# R58 發現 #8／#20：版本目錄正則原本在本檔與另三支測試各有一份（觀測同一對象），
+# 已收斂到 `_sdd_versions`；接線由 `test_sdd_versions.py` 的呼叫端鎖機械守住。
+from _sdd_versions import is_frozen_version_dir_name  # noqa: E402
+
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 _SDD_ROOT = _REPO_ROOT / "AISDLC_SDD"
 _SHARED_MODULE_PATH = _SDD_ROOT / "scripts" / "component_sanitizer.py"
-
-_FROZEN_VERSION_DIR_RE = re.compile(r"^AISDLC_SDD_v\d+\.\d+$")
 
 # 已知需達到的版本下限（29 凍結 + 1 LATEST = 30；R45 建檔時的實際數量）。若未來
 # 新增版本，此下限只會被超過、不會被打破；若數字倒退，代表掃描邊界被靜默縮小。
@@ -100,7 +102,7 @@ def _all_version_dirs() -> list[Path]:
     latest_name = _latest_sdd_version_name()
     dirs = [
         p for p in _SDD_ROOT.iterdir()
-        if p.is_dir() and (_FROZEN_VERSION_DIR_RE.match(p.name) or p.name == latest_name)
+        if p.is_dir() and (is_frozen_version_dir_name(p.name) or p.name == latest_name)
     ]
     return sorted(dirs, key=lambda p: p.name)
 

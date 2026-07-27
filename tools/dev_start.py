@@ -17,7 +17,9 @@ tools/dev_start.ps1 —— 皆為薄殼，邏輯集中本檔，無 .sh/.ps1 雙�
                       快取存在則秒級換回）；缺 .venv 或依賴檔 hash 變 → 自動跑
                       tools/bootstrap.{sh,ps1}（重用既有腳本，不重複其邏輯）
   [5/7] git hooks   — core.hooksPath 缺失/漂移 → 重跑 install_git_hooks 安裝腳本
-  [6/7] 平台健檢    — Windows：自動設 core.longpaths=true（MAX_PATH 護欄）
+  [6/7] 平台健檢    — Windows：自動設 core.longpaths=true（MAX_PATH 護欄）；
+                      nightly 心跳／CI 活性哨兵；**對方平台證據落後 advisory**
+                      （讀 tools/platform_native_verified.json，只提醒不擋）
   [7/7] 狀態寫回    — Developing=Now + per-platform 依賴 hash + 摘要
 
 設計取捨（fail loud，絕不靜默硬做）：
@@ -79,6 +81,11 @@ SUMMARY: dict[str, str] = {}
 import _stdio_utf8  # noqa: E402,F401
 # step_hooks() 與 tools/check_hooks_liveness.py 共用同一份判定邏輯（S22，見該函式註解）。
 import check_hooks_liveness  # noqa: E402
+# [6/7] 的「對方平台證據落後」advisory 讀的是 run_root_unittests 寫的平台對稱帳本。
+# 直接 import 而非另抄一份格式解析／sha 演算法：帳本格式的權威擁有者是寫入端，兩邊
+# 各抄一份 LF 正規化 sha 是本 repo 已付過學費的漂移形態（R45 抽 component_sanitizer
+# 共享層的同一個理由）。手法對齊上面兩支 tools/ 同層 import。
+import run_root_unittests  # noqa: E402
 
 # platform_utils 位於 tools/lib/ 子目錄（非本檔同層），需顯式插入 sys.path 才能
 # import——手法對齊本輪其他核心檔案（AutoClaude/tools/scaffold_sprint_section.py 等）
@@ -1715,6 +1722,168 @@ def _check_ci_liveness(is_repo: bool) -> str | None:
         return None
 
 
+# ---------------------------------------------------------------------------
+# 對方平台證據落後 advisory（[6/7]）
+#
+# 使用者核心質疑：「為什麼切回 Windows 就一堆問題？日後還會發生嗎？」
+# 問題的形狀不是「弄壞了東西」，而是**把積欠的存貨一次領出來**：R1~R57 全在 macOS 上
+# 模擬 Windows，Windows 側每輪真驗次數≈0（DEF-101-348 明文記載的 known-gap），存貨多寡
+# ＝那個平台多久沒被真的跑過。真正缺的東西是「不對稱沒有被顯示出來」——在 macOS 上工作
+# 時沒有任何地方會告訴你「Windows 那邊的證據已落後 N 個 commit」，於是只會在開機到
+# Windows 的那一刻才發現積了一堆。
+#
+# 本段就是把那個不對稱在**每天開工的第一個指令**裡印出來。三個刻意的設計決定：
+#   ① **落後量綁 commit 數與變動測試數，不綁日曆天數**（ADR-SD09-011 已付過代價：把
+#      「源碼演進證據」綁死成日曆會讓每天重測同一份源碼被當成進度，實際零增益、空轉
+#      數週）。commit 數答的是「對方平台沒看過幾個 commit」，M 答的是「其中有幾支平台
+#      專屬測試的源碼真的動了」——兩者都是硬事實，不隨時間自己長大。
+#   ② **advisory：只多印一行，不擋、不改 exit code、不進 WARNINGS**（使用者裁定的取捨）。
+#      刻意不用 `_warn()`：這條訊息在跨平台開發下會**長期常亮**，塞進警告計數只會讓
+#      「⚠️ 警告 N 件」永久 +1，反而稀釋真警告的訊號值（本 repo 已在 MIN_TESTS 連續
+#      11 輪沒人重釘上實證過常亮訊號會退化成背景噪音）。同 `_check_ci_liveness` 的
+#      「CI 活性未知」路徑：印一行、進 summary、不入 WARNINGS。
+#   ③ **查無紀錄印「尚無紀錄」而非落後 0**：前者是誠實的未知，後者是假綠。
+# ---------------------------------------------------------------------------
+# 顯示名（給人看）與帳本鍵（sys.platform，給機器用）刻意分離：鍵要穩定到 OS 升版也不變，
+# 文案要一眼看得懂是哪台機器。
+_PLATFORM_DISPLAY = {"win32": "Windows", "darwin": "macOS", "linux": "Linux"}
+
+
+def _ledger_path() -> Path:
+    """平台對稱帳本的路徑。檔名取自其擁有者模組（run_root_unittests）而非在此再寫死
+    一份字串：改名時不會留下第二處要記得同步的硬編碼。用 ROOT 而非該模組的 __file__
+    所在目錄，是為了讓測試能以 mock ROOT 指向 tmp 帳本。"""
+    return ROOT / "tools" / run_root_unittests.NATIVE_LEDGER.name
+
+
+def evidence_lag(
+    ledger: dict,
+    key: str,
+    commit_distance: Callable[[str], int | None],
+    current_source_sha: Callable[[str], str | None],
+) -> dict:
+    """純函式（無 I/O 副作用）：算出某平台的「證據落後量」。
+
+    git 查詢與讀檔一律由呼叫端以 `commit_distance` / `current_source_sha` 注入——本函式
+    自己不碰磁碟也不呼叫 git，故可在測試裡用假 callable 完整驅動每條分支（比照同檔
+    `windows_native_skips`／`report_windows_native_skips` 的純函式／列印分離慣例，
+    R43 二審 SA 與 R57 round 4 SA 兩度要求過）。
+
+    回傳欄位：
+      * `known`          ：帳本裡到底有沒有這個平台的區塊。False ⇒ 其餘數字**一律不可
+                           當成 0 解讀**（「不知道」與「沒落後」是兩件事）。
+      * `commits_behind` ：對方平台沒看過的 commit 數；None＝算不出來（原因見
+                           `commits_note`：帳本無 HEAD／非 repo／該 sha 不在當前歷史）。
+      * `stale_tests`    ：該平台紀錄的平台閘門測試中，其所在檔源碼已變動的支數。
+      * `gated_tests`    ：該平台紀錄的平台閘門測試總數（給 M/總數 的分母）。
+    """
+    block = run_root_unittests.platform_block(ledger, key)
+    if block is None:
+        return {"key": key, "known": False, "head": None, "commits_behind": None,
+                "commits_note": "帳本無此平台紀錄", "stale_tests": 0, "gated_tests": 0,
+                "stale_ids": []}
+    head = block.get("head")
+    head = head if isinstance(head, str) and head else None
+    if head is None:
+        commits, note = None, "帳本無 HEAD 紀錄"
+    else:
+        commits = commit_distance(head)
+        note = "" if commits is not None else "帳本 HEAD 不在當前 git 歷史中（或此處非 git repo）"
+    entries = run_root_unittests.platform_entries(ledger, key)
+    stale = [
+        tid
+        for tid in sorted(entries)
+        # 讀不到檔（None）也算落後：檔案被改名/刪掉時舊證據同樣不再對應現行源碼，
+        # 靜默當成「沒變動」會是假綠。
+        if current_source_sha(str(entries[tid].get("file", "")))
+        != entries[tid].get("source_sha256")
+    ]
+    return {"key": key, "known": True, "head": head, "commits_behind": commits,
+            "commits_note": note, "stale_tests": len(stale), "gated_tests": len(entries),
+            "stale_ids": stale}
+
+
+def evidence_lag_message(lag: dict) -> str:
+    """純函式（無 I/O）：把 `evidence_lag()` 的結果轉成要印的那一行。永不回 None——
+    「尚無紀錄」也必須說出來（沉默會被讀成沒問題）。"""
+    name = _PLATFORM_DISPLAY.get(lag["key"], lag["key"])
+    if not lag["known"]:
+        return (f"❔ {name} 平台證據：尚無紀錄——無法判斷落後多少（**不等於落後 0**）；"
+                f"請在該平台跑一次 python tools/run_root_unittests.py 建立第一筆")
+    commits = lag["commits_behind"]
+    behind = f"{commits} 個 commit" if commits is not None else f"commit 數未知（{lag['commits_note']}）"
+    head = lag["head"]
+    in_sync = commits == 0 and lag["stale_tests"] == 0
+    return (f"{'✅' if in_sync else '⚠️'} {name} 平台證據"
+            f"{'同步' if in_sync else '落後'}：{behind}、{lag['stale_tests']}/{lag['gated_tests']} "
+            f"支平台專屬測試的源碼已變動；最後一次原生驗證＝commit "
+            f"{head[:7] if head else '未記錄'}（僅提醒，不影響本次整備）")
+
+
+def evidence_lag_brief(lag: dict) -> str:
+    """純函式（無 I/O）：summary 欄用的極短版（summary 是單行，塞不下完整文案）。"""
+    name = _PLATFORM_DISPLAY.get(lag["key"], lag["key"])
+    if not lag["known"]:
+        return f"{name} 證據尚無紀錄"
+    commits = lag["commits_behind"]
+    n = f"{commits} commit" if commits is not None else "commit 數未知"
+    return f"{name} 證據落後 {n}／{lag['stale_tests']} 支測試源碼已變"
+
+
+def _report_peer_platform_evidence(is_repo: bool) -> str | None:
+    """讀帳本 → 為每個「對方平台」印一行落後 advisory；回傳 summary 片段（None＝跳過）。
+
+    降級哲學（同本檔 Mutex 鎖與 `_check_ci_liveness`）：帳本不存在／JSON 壞掉／git 不
+    可用／任何未預期例外，一律只印一行提示後回 None——診斷輔助**不得**反過來成為
+    dev_start 的新失敗來源。全程不呼叫 `_warn()`、不改 exit code（見上方設計決定②）。
+    """
+    try:
+        path = _ledger_path()
+        if not path.is_file():
+            print(f"    平台證據帳本不存在（{path.name}）——無法判斷對方平台落後多少"
+                  f"（不等於落後 0；在兩平台各跑一次 python tools/run_root_unittests.py 即建立）")
+            return "平台證據帳本不存在"
+        try:
+            loaded = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, ValueError) as exc:
+            print(f"    平台證據帳本讀取失敗（{exc}）——僅略過本項，不影響整備")
+            return "平台證據帳本讀取失敗"
+        ledger = loaded if isinstance(loaded, dict) else {}
+
+        def commit_distance(head: str) -> int | None:
+            if not is_repo:
+                return None
+            r = _git("rev-list", "--count", f"{head}..HEAD")
+            if r.returncode != 0:
+                return None
+            try:
+                return int(r.stdout.strip())
+            except ValueError:
+                return None
+
+        def current_source_sha(rel: str) -> str | None:
+            if not rel:
+                return None
+            try:
+                return run_root_unittests.source_fingerprint(
+                    (ROOT / rel).read_text(encoding="utf-8")
+                )
+            except (OSError, UnicodeDecodeError):
+                return None
+
+        notes = []
+        for key in run_root_unittests.peer_platform_keys(
+            run_root_unittests.platform_key(), (ledger.get("platforms") or {}).keys()
+        ):
+            lag = evidence_lag(ledger, key, commit_distance, current_source_sha)
+            print(f"    {evidence_lag_message(lag)}")
+            notes.append(evidence_lag_brief(lag))
+        return "；".join(notes) if notes else None
+    except Exception:
+        # 兜底：advisory 絕不可改變 dev_start 的 exit code 或流程
+        return None
+
+
 def step_platform(now: str, is_repo: bool) -> None:
     _hr(6, "平台專屬健檢")
     notes = []
@@ -1735,6 +1904,10 @@ def step_platform(now: str, is_repo: bool) -> None:
     ci_note = _check_ci_liveness(is_repo)
     if ci_note is not None:
         parts.append(ci_note)
+    # 「對方平台證據落後」advisory（見上方區塊註解）：純提醒，None＝靜默跳過不入 summary。
+    lag_note = _report_peer_platform_evidence(is_repo)
+    if lag_note is not None:
+        parts.append(lag_note)
     SUMMARY["platform"] = "；".join(parts)
 
 

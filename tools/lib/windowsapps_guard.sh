@@ -23,6 +23,31 @@
 #
 # 純函式定義檔，無副作用（不 set -e／不 exit）：可安全被 dev_start.sh 這類
 # source 語意腳本間接載入而不影響呼叫端 shell 狀態。
+#
+# ── 覆蓋邊界（R58 真 Windows 11 實機量測，三段式；勿改寫成「保證候選可用」）──
+# 本函式是**純路徑字串比對**，不執行候選直譯器。這是刻意的：bootstrap 悖論下它
+# 必須零成本、無副作用（pre-push 這類阻斷式 hook 每次 push 都會走到），執行一個
+# 來歷不明的 python 本身就是要避免的成本。
+#
+# 已實測涵蓋：`command -v` 命中 `%LOCALAPPDATA%/Microsoft/WindowsApps` 底下的
+#   Windows Store App Execution Alias 空殼（含 `WINDOWSAPPS`／`WinDowsApps` 等
+#   大小寫變體；比對定錨在完整路徑片段，`MyWindowsAppsBackup/python` 不誤判）。
+# 已實測不涵蓋：pyenv-win shim 這類「PATH 上有、`command -v` 判定存在、實際執行
+#   卻不是可用直譯器」的第二種形狀。R58 以固定 fixture 實測（PATH 只留 fixture
+#   目錄）：對「印訊息到 stderr 後非零退出」（模擬 pyenv `No global/local python
+#   version has been set`）與「零退出但不執行任何 Python」兩種假 shim，本函式
+#   **皆回傳 ACCEPTED**，隨後呼叫端真的執行它時才失敗（rc=1／rc=0 但什麼都沒做）。
+#   同款 fixture 下 PowerShell 側 `Test-IsRealPython` 亦回傳 `True`，兩份 guard
+#   對稱地看不到這一類。macOS／Linux 沒有 pyenv-win shim，故只有真 Windows 上
+#   看得見。Python 側 `tools/bootstrap_core.py::pick_python()` 在同款路徑比對
+#   **之後**另有 `_probe_ok()` 執行探測層（實測：對非零退出的假 shim 判 False、
+#   對零退出空殼判 True），bash／ps1 兩側則沒有對應層。
+# 未窮舉：其他「存在但不可用」形狀（權限不足、DLL 缺失、asdf/conda 之類其他
+#   version manager 的 shim）皆未逐一量測。
+#
+# 為什麼不在此補探測：修法應落在**呼叫端已確定要用該直譯器之後**加一道極輕探測，
+# 而不是把成本壓進這支被 pre-push 每次載入的純函式。呼叫端一覽見
+# `tools/tests/test_windowsapps_guard_bash_parity.py::_CALLER_FILES`（機械維護）。
 
 # R43 二審 Architect/SD 各自獨立 bug-injection 揪出（訂正一審初版）：初版
 # `case "$resolved" in *WindowsApps*)` 有兩個真實缺口，與另兩份 SSOT

@@ -82,6 +82,11 @@ import sys
 import unittest
 from pathlib import Path
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+# R58 發現 #8／#20：版本目錄正則原本在本檔與另三支測試各有一份（觀測同一對象），
+# 已收斂到 `_sdd_versions`；接線由 `test_sdd_versions.py` 的呼叫端鎖機械守住。
+from _sdd_versions import is_frozen_version_dir_name  # noqa: E402
+
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 _SDD_ROOT = _REPO_ROOT / "AISDLC_SDD"
 
@@ -119,7 +124,8 @@ _EXPECTED_SANITIZE_CALLS: dict[str, tuple[str, ...]] = {
 # 發明一個同名但無關的本地函式來滿足上面的文字比對）。
 _IMPORT_LINE_RE = re.compile(r"from\s+\.state_loader\s+import\s+.*_sanitize_component")
 
-_FROZEN_VERSION_DIR_RE = re.compile(r"^AISDLC_SDD_v\d+\.\d+$")
+# 版本目錄名判準已於 R58 收斂到 `_sdd_versions.is_frozen_version_dir_name`
+# （見檔頭 import）。
 
 # 已知需要達到的凍結版本下限（29；R44 建檔時的實際數量）。若未來新增版本，
 # 此下限只會被超過、不會被打破；若數字倒退，代表掃描邊界被靜默縮小，須查明。
@@ -159,7 +165,7 @@ def _frozen_version_dirs(latest_name: str) -> list[Path]:
     """全部凍結版本目錄（`AISDLC_SDD_v*`，排除 LATEST），依版本名稱排序。"""
     dirs = [
         p for p in _SDD_ROOT.iterdir()
-        if p.is_dir() and _FROZEN_VERSION_DIR_RE.match(p.name) and p.name != latest_name
+        if p.is_dir() and is_frozen_version_dir_name(p.name) and p.name != latest_name
     ]
     return sorted(dirs, key=lambda p: p.name)
 

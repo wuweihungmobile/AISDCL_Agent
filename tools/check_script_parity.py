@@ -615,7 +615,16 @@ def main() -> int:
         print("\n❌ 雙平台腳本對等檢查未通過 — .sh/.ps1 必須同步修改（見上列 diff）",
               file=sys.stderr)
         return 1
-    print(f"\n✅ 雙平台腳本對等檢查通過（{len(_MARKER_PAIRS)} 對標籤腳本 + LATEST run_tlc 軌鎖 + "
+    # R58：`_MARKER_PAIRS` 目前刻意為空（R12 薄殼物理消滅後標籤比對退場，見檔頭 docstring），
+    # 但原訊息只印「0 對標籤腳本」，讀起來像「這道對等檢查什麼都沒驗」——每一輪的複審者都會
+    # 因此重新調查一次再論證掉，正是 docs/06_quality/CrossPlatform_Scan_Dimensions.md 要消滅的
+    # 重複勞動。故在訊息裡就地標明「已退場」並指路，空清單時不再需要有人回頭翻檔頭。
+    pairs_note = (
+        f"{len(_MARKER_PAIRS)} 對標籤腳本"
+        if _MARKER_PAIRS
+        else "標籤腳本比對已退場〔R12 薄殼物理消滅，見本檔 docstring〕"
+    )
+    print(f"\n✅ 雙平台腳本對等檢查通過（{pairs_note} + LATEST run_tlc 軌鎖 + "
           "pytest 釘選 + git longpaths 旗標內容鎖 + 成對/單邊註冊完整性；"
           "薄殼對子另由 check_wrapper_thinness 釘選）")
     return 0

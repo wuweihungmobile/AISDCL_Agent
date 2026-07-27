@@ -67,8 +67,25 @@ def setup_logger(log_dir: str = "logs", level: int = logging.DEBUG) -> logging.L
 # DEF-101（Mac/Windows 相容性 R16）：raw log 檔名由 playbook 作者自訂的
 # task.step_id 組成（見 pty_executor.py / prompt_dispatcher.py），在 macOS/Linux
 # 上檔名規則寬鬆（僅 / 與 NUL 不合法）完全合法；同一字串若含 Windows 禁用字元
-# （< > : " | ? * \）、以空白/句點結尾、或恰為保留裝置名（CON/PRN/...），Windows
-# 上 open() 會拋出未捕捉的 OSError，導致該 step 每次重試都對同一個壞檔名再炸一次。
+# （< > : " | ? * \）、以空白/句點結尾、或恰為保留裝置名（CON/PRN/...），在 Windows
+# 上會出問題，故一律淨化。
+#
+# R58 訂正（DEF-101-B13）：本段原文寫「Windows 上 open() 會拋出未捕捉的 OSError，
+# 導致該 step 每次重試都對同一個壞檔名再炸一次」——這個機制敘述**已被實測部分證偽**，
+# 三種輸入的真實下場不同（原生 Windows 11 + git 2.51.0.windows.1 以 raw Win32
+# ctypes CreateFileW + GetFileType 實測；完整量測與覆核指令見
+# tools/check_ntfs_paths.py 檔頭〈實測機制〉）：
+#   ① 保留裝置名帶目錄前綴（log 檔一律帶 log_dir 前綴，即本函式的實際使用情境）：
+#      Win32 **建成普通檔案**（`<dir>\CON`、`<dir>\CONIN$`、`<dir>\CON .txt` 實測皆
+#      FILE_TYPE_DISK），open() **不會**拋 OSError。真正的危害是 git：`git add` 對
+#      這些路徑實測 rc=128（`open(...): No such file or directory` + `unable to index
+#      file`），log 產物在 Windows 上永久無法提交／無法被以 git 為載具的 CI 取證。
+#      唯一仍是裝置的是 `NUL`（帶目錄前綴仍 FILE_TYPE_CHAR）——寫進去的內容會整份
+#      靜默消失，比拋錯更難診斷。
+#   ② 尾隨空白／句點：Win32 **靜默剝除改名**（`'x '` 落地成 `x`），不拋錯；後續要讀
+#      回原檔名的呼叫端就找不到檔案。
+#   ③ 禁用字元 `< > : " | ? * \` 與控制字元：這一類 open() 才真的拋 OSError。
+# 淨化行為完全不變（三種下場都是真實危害），只訂正理由。
 #
 # 本檔與 tools/check_ntfs_paths.py（及 tools/git-hooks/pre-commit 的
 # _ntfs_seg_bad()）三處各自獨立維護同一份禁用字元/保留裝置名判準（R33
@@ -84,7 +101,15 @@ def setup_logger(log_dir: str = "logs", level: int = logging.DEBUG) -> logging.L
 # `_sanitize_log_filename`，理由同上——同一規則被多處獨立實作正是本缺陷類別
 # （DEF-101-219／DEF-101-295）反覆復發的根因。
 _WIN_FORBIDDEN_CHARS = frozenset('<>:"|?*\\')
-_WIN_RESERVED_NAME_RE = re.compile(r"^(CON|PRN|AUX|NUL|COM[0-9]|LPT[0-9])$", re.IGNORECASE)
+# R58 修正（DEF-101-B3，四處同修）：補 `CONIN$`／`CONOUT$`。原清單照「Win32 裝置名
+# 解析」推導，漏掉這兩個真正會讓 git 失效的名字——實測 `_sanitize_log_filename('CONIN$')`
+# 原樣回傳、未加 `_` 前綴，該 log 檔能在 NTFS 建立但 `git add` rc=128。
+# 刻意不收 `CONERR$`（掃描員原提案含它，經實測證偽：裸名為 FILE_TYPE_DISK 普通檔案、
+# `git add` rc=0 成功入 index）。`$` 需轉義成 `\$`；`CON` 分支不會搶先匹配 `CONIN$`
+# ——pattern 以 `$` 錨定結尾，短分支匹配後錨定失敗會回溯（已實測）。
+_WIN_RESERVED_NAME_RE = re.compile(
+    r"^(CON|PRN|AUX|NUL|COM[0-9]|LPT[0-9]|CONIN\$|CONOUT\$)$", re.IGNORECASE
+)
 
 
 def _sanitize_log_filename(name: str) -> str:
@@ -105,9 +130,13 @@ def _sanitize_log_filename(name: str) -> str:
     sanitized = sanitized.rstrip(" .") or "untitled"
     # R57 修正（DEF-101-B1 第 ④ 處，與 AISDLC_SDD/scripts/component_sanitizer.py 同修）：
     # 上一行 rstrip(" .") 作用於整串，對 "NUL .log" 不觸發（結尾是 g），stem 遂為帶
-    # 尾隨空白的 "NUL " 而不匹配 ^NUL$ → 保留裝置名整組逃逸。Win32 解析裝置名會忽略
-    # 基底名後的尾隨空白，故此類檔名在 Windows 上仍撞裝置。只 rstrip(" ") 不含 "."，
-    # 否則純句點片段的 stem 會被吃空、破壞既有路徑穿越退化為 "untitled" 的防禦。
+    # 尾隨空白的 "NUL " 而不匹配 ^NUL$ → 保留裝置名整組逃逸。
+    # R58 訂正（DEF-101-B13）：本處原寫「Win32 解析裝置名會忽略基底名後的尾隨空白，故
+    # 此類檔名在 Windows 上仍撞裝置」——實測證偽（`<dir>\NUL .log` 是 FILE_TYPE_DISK
+    # 普通檔案，沒撞到裝置）。忽略尾隨空白的是 **Git for Windows** 的
+    # `is_valid_win32_path()`：`git add "<dir>/CON .txt"` 實測 rc=128。攔截行為不變。
+    # 只 rstrip(" ") 不含 "."，否則純句點片段的 stem 會被吃空、破壞既有路徑穿越退化為
+    # "untitled" 的防禦。
     stem = sanitized.split(".", 1)[0].rstrip(" ")
     if _WIN_RESERVED_NAME_RE.match(stem):
         sanitized = f"_{sanitized}"

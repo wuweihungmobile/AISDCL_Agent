@@ -26,6 +26,8 @@ from unittest import mock
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import dev_start  # noqa: E402
+# 帳本檔名／格式的權威擁有者是寫入端；本檔的 advisory 測試一律向它取，不寫死第二份。
+import run_root_unittests  # noqa: E402
 from _platform_helpers import (  # noqa: E402
     copy_functional_interpreter as _copy_functional_interpreter,
 )
@@ -3447,6 +3449,175 @@ class TestCopyFunctionalInterpreterDllCopy(unittest.TestCase):
                 sorted(p.name for p in dest_dir.iterdir()), ["python"],
                 "無 DLL 來源時不應多出任何檔案",
             )
+
+
+class TestPeerPlatformEvidenceAdvisory(DevStartTestCase):
+    """[6/7] 的「對方平台證據落後」advisory（本輪新增）。
+
+    WHY（測意圖非僅行為）：使用者核心質疑是「為什麼切回 Windows 就一堆問題？日後還會
+    發生嗎？」。問題的形狀不是「弄壞了東西」，而是 R1~R57 全在 macOS 上模擬 Windows、
+    Windows 側每輪真驗次數≈0（DEF-101-348 known-gap），切平台當天把積欠存貨一次領出。
+    真正缺的是**不對稱沒有被顯示出來**：在 macOS 上工作時沒有任何地方會說「Windows 的
+    證據已落後 N 個 commit」。本 class 鎖住這道可見度的四條存亡條件：
+      (1) 落後量算得對，且**綁 commit 數與變動測試數、不綁日曆天數**（ADR-SD09-011：
+          綁日曆會讓每天重測同一份源碼被當成進度，實際零增益、空轉數週）；
+      (2) 查無紀錄時說「尚無紀錄」，**不得回傳 0**（誠實的未知 vs 假綠）；
+      (3) 它是 advisory：落後再多都不得改變 dev_start 的 exit code（反向鎖）；
+      (4) 純函式真的不做 I/O、帳本壞掉時降級不拋（診斷輔助不得反過來成為新失敗來源）。
+    """
+
+    @staticmethod
+    def _ledger(key: str, head, entries) -> dict:
+        return {"schema": 2, "platforms": {key: {
+            "head": head, "last_run_on": f"{key} / x", "verified": entries}}}
+
+    @staticmethod
+    def _entry(tid: str, rel: str, sha: str) -> dict:
+        return {"id": tid, "file": rel, "source_sha256": sha, "verified_on": "x"}
+
+    def test_lag_counts_commits_and_changed_tests(self):
+        """給定帳本 + 注入的 commit 距離／現行源碼 sha，N 與 M 都要算對。
+        M 只數「源碼真的變了」的支數——同一份源碼隔多久都不算落後（綁 sha 不綁日曆）。"""
+        ledger = self._ledger("darwin", "c0", [
+            self._entry("m.C.same", "a.py", "sha-a"),
+            self._entry("m.C.moved", "b.py", "sha-old"),
+        ])
+        shas = {"a.py": "sha-a", "b.py": "sha-new"}
+        lag = dev_start.evidence_lag(ledger, "darwin", lambda h: 42, shas.get)
+        self.assertTrue(lag["known"])
+        self.assertEqual(lag["commits_behind"], 42)
+        self.assertEqual((lag["stale_tests"], lag["gated_tests"]), (1, 2))
+        self.assertEqual(lag["stale_ids"], ["m.C.moved"])
+        msg = dev_start.evidence_lag_message(lag)
+        self.assertIn("42 個 commit", msg)
+        self.assertIn("1/2", msg)
+        self.assertIn("c0", msg, "訊息要指名最後一次原生驗證的 commit 才可行動")
+
+    def test_missing_source_file_counts_as_stale_not_as_unchanged(self):
+        """檔案被改名/刪掉 ⇒ 讀不到 sha。靜默當成「沒變動」會是假綠：舊證據同樣
+        不再對應現行源碼。"""
+        ledger = self._ledger("darwin", "c0", [self._entry("m.C.t", "gone.py", "sha")])
+        lag = dev_start.evidence_lag(ledger, "darwin", lambda h: 0, lambda rel: None)
+        self.assertEqual(lag["stale_tests"], 1)
+
+    def test_unknown_platform_is_reported_as_unknown_never_as_zero(self):
+        """帳本無對方平台紀錄時：known=False、commits_behind 為 **None 而非 0**，
+        文案必須說「尚無紀錄」且明講不等於落後 0。假綠比沒有訊號更糟。"""
+        lag = dev_start.evidence_lag({"schema": 2, "platforms": {}}, "darwin",
+                                     lambda h: 0, lambda rel: "x")
+        self.assertFalse(lag["known"])
+        self.assertIsNone(lag["commits_behind"], "未知不得退化成 0（假綠）")
+        msg = dev_start.evidence_lag_message(lag)
+        self.assertIn("尚無紀錄", msg)
+        self.assertIn("不等於落後 0", msg)
+        self.assertIn("尚無紀錄", dev_start.evidence_lag_brief(lag))
+
+    def test_missing_head_reports_unknown_commit_count(self):
+        """schema 1 遺留／非 git repo ⇒ head 缺席。commit 數必須是 None 並說出原因，
+        不得當成 0（同上的假綠理由）；M 仍照源碼 sha 正常計算。"""
+        ledger = self._ledger("darwin", None, [self._entry("m.C.t", "a.py", "old")])
+        lag = dev_start.evidence_lag(ledger, "darwin", lambda h: 0, lambda rel: "new")
+        self.assertTrue(lag["known"])
+        self.assertIsNone(lag["commits_behind"])
+        self.assertIn("HEAD", lag["commits_note"])
+        self.assertEqual(lag["stale_tests"], 1)
+        self.assertIn("commit 數未知", dev_start.evidence_lag_message(lag))
+
+    def test_unresolvable_head_reports_unknown_not_zero(self):
+        """帳本 head 不在當前 git 歷史中（rebase/force-push/shallow clone）：
+        `commit_distance` 回 None ⇒ 一樣是未知，不得因為算不出來就報 0。"""
+        ledger = self._ledger("darwin", "deadbeef", [])
+        lag = dev_start.evidence_lag(ledger, "darwin", lambda h: None, lambda rel: "x")
+        self.assertIsNone(lag["commits_behind"])
+        self.assertIn("git 歷史", lag["commits_note"])
+
+    def test_in_sync_state_says_sync_not_lag(self):
+        """對照組（防「恆為落後」的假陽性 mutant）：0 commit + 0 支變動 ⇒ 同步。"""
+        ledger = self._ledger("darwin", "c0", [self._entry("m.C.t", "a.py", "same")])
+        lag = dev_start.evidence_lag(ledger, "darwin", lambda h: 0, lambda rel: "same")
+        msg = dev_start.evidence_lag_message(lag)
+        self.assertIn("同步", msg)
+        self.assertNotIn("⚠️", msg)
+
+    def test_pure_function_does_no_io_of_its_own(self):
+        """`evidence_lag` 必須是純函式：git 查詢與讀檔一律由呼叫端注入（同檔
+        `windows_native_skips`／`report_windows_native_skips` 的純函式／列印分離慣例，
+        R43 二審 SA 與 R57 round 4 SA 兩度要求過）。
+
+        機械證明而非人工審讀：把 `Path.read_text`、`dev_start._git`、`subprocess.run`
+        全部改成一碰就炸——若函式自己偷做 I/O 就會拋，本測試即翻紅。"""
+        ledger = self._ledger("darwin", "c0", [self._entry("m.C.t", "a.py", "old")])
+        boom = mock.Mock(side_effect=AssertionError("純函式不得自行做 I/O"))
+        with mock.patch.object(dev_start.Path, "read_text", boom), \
+             mock.patch.object(dev_start, "_git", boom), \
+             mock.patch.object(dev_start.subprocess, "run", boom):
+            lag = dev_start.evidence_lag(ledger, "darwin", lambda h: 7, lambda rel: "new")
+            dev_start.evidence_lag_message(lag)
+            dev_start.evidence_lag_brief(lag)
+        self.assertEqual((lag["commits_behind"], lag["stale_tests"]), (7, 1))
+
+    def test_ledger_path_tracks_the_owner_module(self):
+        """帳本檔名的權威擁有者是寫入端（run_root_unittests），dev_start 不得再寫死
+        第二份字串——否則改名時留下靜默對不上的第二處硬編碼（讀到不存在的檔案只會
+        印「尚無紀錄」，是不會紅的假綠）。真樹斷言：兩邊指向同一個檔案且真的存在。"""
+        self.assertEqual(dev_start._ledger_path(), run_root_unittests.NATIVE_LEDGER)
+        self.assertTrue(dev_start._ledger_path().is_file(),
+                        "平台對稱帳本是 tracked 檔（跨輪／跨平台累積事實），被刪或被 "
+                        "gitignore 都等於整個可見度機制消失")
+
+    def test_missing_ledger_degrades_to_a_note_without_raising(self):
+        """帳本不存在（乾淨 checkout 首跑）：印一行提示、回 summary 片段，不拋不擋。"""
+        with tempfile.TemporaryDirectory() as td:
+            with mock.patch.object(dev_start, "ROOT", Path(td)), \
+                 mock.patch("builtins.print"):
+                note = dev_start._report_peer_platform_evidence(is_repo=False)
+        self.assertIn("不存在", str(note))
+        self.assertEqual(dev_start.WARNINGS, [], "advisory 不得進 WARNINGS（常亮會稀釋真警告）")
+
+    def test_corrupt_ledger_degrades_without_raising(self):
+        """帳本 JSON 壞掉：只印警告不拋——診斷輔助不得反過來成為 dev_start 的新失敗
+        來源（同本檔 Mutex 鎖降級哲學）。"""
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            (root / "tools").mkdir()
+            (root / "tools" / run_root_unittests.NATIVE_LEDGER.name).write_text(
+                "{壞掉的 JSON", encoding="utf-8")
+            with mock.patch.object(dev_start, "ROOT", root), \
+                 mock.patch("builtins.print"):
+                note = dev_start._report_peer_platform_evidence(is_repo=False)
+        self.assertIn("讀取失敗", str(note))
+        self.assertEqual(dev_start.WARNINGS, [])
+
+    def test_advisory_never_changes_exit_code_however_far_behind(self):
+        """反向鎖（使用者裁定「advisory 提醒、不做硬閘」）：對方平台落後再多，
+        `main()` 的 rc 都不得變 1、也不得多出一件 WARNINGS。
+
+        用真的 `step_platform`（不 mock）跑完整路徑，帳本刻意造成「head 算不出來 + 全部
+        測試源碼都變了」的最壞情況。若哪天有人把這條 advisory 升級成硬閘，本測試翻紅。"""
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            (root / "tools").mkdir()
+            (root / "tools" / run_root_unittests.NATIVE_LEDGER.name).write_text(
+                json.dumps(self._ledger("darwin", "deadbeef", [
+                    self._entry("m.C.a", "nope_a.py", "x"),
+                    self._entry("m.C.b", "nope_b.py", "y"),
+                ])), encoding="utf-8")
+            with mock.patch.object(dev_start, "ROOT", root), \
+                 mock.patch.object(dev_start, "STATE_FILE", root / ".dev_env_state.json"), \
+                 mock.patch.object(dev_start, "step_sync"), \
+                 mock.patch.object(dev_start, "step_switch"), \
+                 mock.patch.object(dev_start, "step_venv", return_value=True), \
+                 mock.patch.object(dev_start, "step_hooks"), \
+                 mock.patch.object(dev_start, "step_finalize"), \
+                 mock.patch.object(dev_start, "_check_ci_liveness", return_value=None), \
+                 mock.patch.object(dev_start, "_launchd_nightly_loaded", return_value=None), \
+                 mock.patch("builtins.print"):
+                rc = dev_start.main([])
+        self.assertEqual(rc, 0, "advisory 不得改變 exit code（使用者明確裁定不做硬閘）")
+        self.assertEqual(dev_start.WARNINGS, [],
+                         f"advisory 不得進 WARNINGS，實際={dev_start.WARNINGS}")
+        self.assertIn("證據落後", dev_start.SUMMARY.get("platform", ""),
+                      "advisory 必須真的出現在 summary——否則本測試會退化成空轉的綠燈")
 
 
 if __name__ == "__main__":

@@ -1,0 +1,54 @@
+{
+  "schema": 2,
+  "_why": "機器自動維護，勿手改：平台對稱驗證帳本。platforms.<sys.platform> 各一區塊，記該平台最後一次真的跑到平台閘門測試時的 HEAD commit（head）、平台指紋（last_run_on）、以及那次真的跑到的測試 id 與其所在檔的源碼 sha256（CRLF 已正規化為 LF）。由 tools/run_root_unittests.py::record_native_verification 寫入、tools/tests/test_run_root_unittests.py::WindowsNativeVerificationLedgerTest 查核、tools/dev_start.py [6/7] 讀取後印出「對方平台證據落後多少」advisory。sha 與現況不符＝上次的原生驗證是對舊源碼做的（DEF-101-348 方向①）。合併衝突解法：取兩邊 platforms 區塊的聯集（各平台只寫自己那塊）。",
+  "platforms": {
+    "win32": {
+      "head": "308c18f55e6e5854a1483dfb6ed754e893b0631b",
+      "last_run_on": "win32 / 10.0.26200",
+      "verified": [
+        {
+          "id": "test_bootstrap_ps1.TestBootstrapWindowsAppsGuard.test_real_python_outside_windowsapps_is_used_even_when_windowsapps_stub_present_first",
+          "file": "tools/tests/test_bootstrap_ps1.py",
+          "source_sha256": "5cb2755df2a12800cc3ce57bdcb183a67ef27f8c84fad80bd260232644455846",
+          "verified_on": "win32 / 10.0.26200"
+        },
+        {
+          "id": "test_bootstrap_ps1.TestBootstrapWindowsAppsGuard.test_windowsapps_python_and_python3_stubs_both_skipped_and_reports_not_found",
+          "file": "tools/tests/test_bootstrap_ps1.py",
+          "source_sha256": "5cb2755df2a12800cc3ce57bdcb183a67ef27f8c84fad80bd260232644455846",
+          "verified_on": "win32 / 10.0.26200"
+        },
+        {
+          "id": "test_install_windows_nightly.TestInstallWindowsNightlySettingsConstruction.test_settings_construction_snippet_executes_with_expected_property_values",
+          "file": "tools/tests/test_install_windows_nightly.py",
+          "source_sha256": "fe421e3537c5cc35eaf5760f0809e7bb938ed986f35156dce4eb69881cc5dad5",
+          "verified_on": "win32 / 10.0.26200"
+        },
+        {
+          "id": "test_install_windows_nightly.TestStatusEndToEndExitCodeContract.test_status_exit_code_and_output_are_machine_independent_invariants",
+          "file": "tools/tests/test_install_windows_nightly.py",
+          "source_sha256": "fe421e3537c5cc35eaf5760f0809e7bb938ed986f35156dce4eb69881cc5dad5",
+          "verified_on": "win32 / 10.0.26200"
+        },
+        {
+          "id": "test_install_windows_nightly.TestStatusPowerSettingsFunctionBehaviour.test_returns_clean_boolean_true_when_all_settings_correct",
+          "file": "tools/tests/test_install_windows_nightly.py",
+          "source_sha256": "465148afb93b88b7529b6f56edf3b1aec8ee3a065277532aa849fdb5aab9e545",
+          "verified_on": "win32 / 10.0.26200"
+        },
+        {
+          "id": "test_install_windows_nightly.TestStatusPowerSettingsFunctionBehaviour.test_returns_false_when_any_single_setting_drifts",
+          "file": "tools/tests/test_install_windows_nightly.py",
+          "source_sha256": "465148afb93b88b7529b6f56edf3b1aec8ee3a065277532aa849fdb5aab9e545",
+          "verified_on": "win32 / 10.0.26200"
+        },
+        {
+          "id": "test_windowsapps_guard_cross_consistency.TestDevStartPs1WindowsAppsGuard.test_windowsapps_stub_present_first_is_rejected_not_silently_bypassed",
+          "file": "tools/tests/test_windowsapps_guard_cross_consistency.py",
+          "source_sha256": "c71c46e348ed131b1672780a3fbb35f26e8a9826035fb6a756a87a1ae458e8e4",
+          "verified_on": "win32 / 10.0.26200"
+        }
+      ]
+    }
+  }
+}

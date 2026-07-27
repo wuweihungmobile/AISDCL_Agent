@@ -43,7 +43,14 @@ import platform_utils  # noqa: E402
 IS_WINDOWS = platform_utils.is_windows()
 
 _VERSION_CHECK_CODE = "import sys; sys.exit(0 if sys.version_info[:2] >= (3,11) else 1)"
-_VERSION_PRINT_CODE = "import sys; print('%d.%d' % sys.version_info[:2])"
+# 刻意用 .format() 而非 %-formatting（DEF-101-503 同源事故，載體換成 .py）：
+# `pick_python()` 挑到的直譯器可能是 .bat/.cmd shim（pyenv-win 的 python3.bat
+# 即為一例），subprocess 對 .bat 目標一律經 cmd.exe，batch 會先做百分號展開把
+# `%d` 吃掉 —— 本機真 Windows 11 對真實 pyenv-win shim 實測：`%` 版得到
+# `print('d' 2])` → SyntaxError rc=1（版本偵測靜默失效），`.format()` 版正確
+# 印出版本。`tools/tests/test_python_c_percent_shim.py` 只掃 .ps1（該 bug 當時
+# 的載體），掃不到本檔，故以此註解記錄理由防退化。
+_VERSION_PRINT_CODE = "import sys; print('{}.{}'.format(*sys.version_info[:2]))"
 
 
 def _out(msg: str = "") -> None:
@@ -95,11 +102,17 @@ def _probe_version_mm(argv_prefix: list[str]) -> str:
     return proc.stdout.strip() if proc.returncode == 0 else ""
 
 
-def _probe_version_display(exe: str) -> str:
-    """對齊 .sh 的 `"$BASE_PY" --version 2>&1`（顯示用；windows 側不需要）。"""
+def _probe_version_display(argv_prefix: list[str]) -> str:
+    """對齊 .sh 的 `"$BASE_PY" --version 2>&1`（顯示用；windows 側不需要）。
+
+    收 argv list 而非單一 exe 字串：`pick_python()` 回傳的絕對路徑可能含空白
+    （如 `C:\\Program Files\\Python311\\python.exe`），且 `py -3.11` 這類候選本身
+    就是多元素 argv——與 `_probe_ok()`／`_probe_version_mm()` 統一介面，呼叫端
+    不需要（也不可以）用 `.split()` 把 argv 還原。
+    """
     try:
         proc = subprocess.run(
-            [exe, "--version"], capture_output=True, encoding="utf-8", errors="replace",
+            [*argv_prefix, "--version"], capture_output=True, encoding="utf-8", errors="replace",
         )
     except OSError:
         return ""
@@ -114,12 +127,57 @@ def _is_windows_apps_stub(resolved_path: str) -> bool:
     guard（`_probe_ok()` 用執行結果判斷在此情境不可靠，正是 `.ps1` 改用靜態
     路徑比對而非執行探測的原因）；本函式對稱補齊 Python 核心 `pick_python()`
     （R31 Scan-B 掃描實證：兩邊此前不對稱，只有 `.ps1` 有 guard）。
+
+    覆蓋邊界（R58 真 Windows 11 實機量測，三段式；勿改寫成「保證候選可用」）：
+      已實測涵蓋：路徑片段中出現 `windowsapps`（逐片段小寫精確比對）的 App
+        Execution Alias 空殼。
+      已實測不涵蓋：pyenv-win shim 這類「`shutil.which()` 找得到、實際執行卻不是
+        可用直譯器」的第二種形狀——本函式只看路徑字串，對它零鑑別力（與 bash／
+        ps1 兩份姊妹 guard 對稱）。**但 Python 側與那兩側的差別在於本函式不是最後
+        一道**：`pick_python()` 在本函式之後還有 `_probe_ok()` 執行探測，實測對
+        「非零退出的假 shim」判 False（＝該候選會被跳過）、對「零退出但不執行任何
+        Python 的假 shim」判 True（＝仍會被選中，這是 `_probe_ok` 只看 returncode
+        的既有邊界）。bash／ps1 兩側沒有對應的探測層。R58 起該探測與本函式**保證
+        看同一個檔案**（`pick_python()` 改傳已解析的絕對路徑；此前探測用裸名，
+        Windows 上可能解析到另一個檔案而讓本 guard 整條失效，見 `pick_python()`）。
+      未窮舉：其他「存在但不可用」形狀（權限不足、DLL 缺失、其他 version manager
+        的 shim）皆未逐一量測。
     """
     return any(part.lower() == "windowsapps" for part in PureWindowsPath(resolved_path).parts)
 
 
-def pick_python(py_target: str) -> str | None:
-    """挑一個 >= 3.11 的直譯器；回傳可直接 .split() 餵給 subprocess 的字串。"""
+def pick_python(py_target: str) -> list[str] | None:
+    """挑一個 >= 3.11 的直譯器；回傳 argv 前綴（元素 0 為已解析的**絕對路徑**）。
+
+    WHY 回傳絕對路徑而非裸名（R58 真 Windows 11 實機取證）：Windows 上
+    `shutil.which()` 與 subprocess 的裸名解析是**兩套不同規則**——which() 會套
+    PATHEXT（.COM/.EXE/.BAT/.CMD…），subprocess 走 CreateProcess 只補 `.exe`、
+    完全不看 PATHEXT。於是「guard 檢查的檔案」與「實際執行的檔案」可以不是同一
+    個檔案，`_is_windows_apps_stub()` 空殼 guard 被整條繞過（fail-open）：
+      · fixture 實測（PATH=前段目錄只放 xpy.bat；後段目錄名 WindowsApps 只放
+        xpy.exe）：`shutil.which("xpy")` → 前段的 xpy.BAT（不含 windowsapps 片段
+        → guard 放行），但 `subprocess.run(["xpy"])` 實際執行的是
+        `WindowsApps\\xpy.exe`（＝ guard 本要排除的那一支）。
+      · 本機真實 PATH 實測（非 fixture）：`shutil.which("python3")` 指向
+        `pyenv-win\\shims\\python3.BAT`，裸名執行 `python3 -c "print(sys.executable)"`
+        回報的卻是 `pyenv-win\\versions\\<ver>\\python3.exe`；`python` 亦同樣分歧。
+    修法＝解析一次，guard／`_probe_ok()`／後續 `-m venv` 全部用同一個絕對路徑，
+    「守門看 A、實際跑 B」在結構上不再可能發生。
+
+    刻意接受的行為改變（非疏漏）：PATH 上第一個同名檔若是壞掉的 shim，不再靠
+    「CreateProcess 看不見 .bat」自動跳到後面目錄的 python.exe，而是判該候選名
+    不可用、換下一個候選名；全部候選皆不可用才 fail-loud。舊行為等於「靜默使用
+    與 `which python` 不同的直譯器」，正是 DEF-101-506（同一支 nightly 因啟動
+    方式不同用到不同直譯器）的同款根因，不宜保留。
+
+    覆蓋邊界（三段式，勿改寫成「保證選到最佳直譯器」）：
+      已實測涵蓋：.bat／.cmd／無副檔名／.exe 四種形態下 which() 與 subprocess 的
+        解析分歧（含上述 fail-open 組合），以及本機真實 PATH 的 python／python3。
+      已實測不涵蓋：`bootstrap.ps1`／`bootstrap.sh` 兩支姊妹薄殼不需對稱修改——
+        PowerShell 的 `Get-Command` 與 `&` 呼叫用同一套解析（實測兩者皆命中同一
+        個 .bat），bash 的 `command -v` 與直接執行亦然，兩側本無此分歧。
+      未窮舉：CreateProcess 在 PATH 之前另會搜尋系統目錄等其他順序差異未逐一量測。
+    """
     if IS_WINDOWS:
         is_ci = os.environ.get("GITHUB_ACTIONS") == "true" or os.environ.get("CI") == "true"
         candidates = (
@@ -140,8 +198,11 @@ def pick_python(py_target: str) -> str | None:
         # 註解）；只有裸名 "python"/"python3" 候選會命中空殼別名。
         if IS_WINDOWS and parts[0] in ("python", "python3") and _is_windows_apps_stub(resolved):
             continue
-        if _probe_ok(parts):
-            return candidate
+        # 關鍵：guard 看的 `resolved` 與這裡要執行的必須是同一個檔案，故 argv[0]
+        # 用 resolved 而非 parts[0]（裸名）——見本函式 docstring 的實測取證。
+        argv = [resolved, *parts[1:]]
+        if _probe_ok(argv):
+            return argv
     return None
 
 
@@ -215,17 +276,21 @@ def ensure_venv(py_target: str, use_uv: bool) -> int:
         _reused_venv_ok_message()
         return 0
 
-    base_py: str | None = None
+    base_py: list[str] | None = None
     if not use_uv:
         base_py = pick_python(py_target)
         if base_py is None:
             _no_interpreter_error(py_target)
             return 1
+        # 顯示用標籤：`" ".join()` 僅供印訊息，**不可**再用 `.split()` 還原成 argv
+        # ——pick_python() 現在回傳的絕對路徑可能含空白（如
+        # `C:\Program Files\Python311\python.exe`），split 會把它切碎成不存在的路徑。
+        base_py_label = " ".join(base_py)
         if IS_WINDOWS:
-            _out(f"使用直譯器：{base_py}")
+            _out(f"使用直譯器：{base_py_label}")
         else:
-            _out(f"使用直譯器：{base_py}（{_probe_version_display(base_py)}）")
-        actual_mm = _probe_version_mm(base_py.split())
+            _out(f"使用直譯器：{base_py_label}（{_probe_version_display(base_py)}）")
+        actual_mm = _probe_version_mm(base_py)
         if actual_mm and actual_mm != py_target:
             if IS_WINDOWS:
                 _out(f"⚠️ 選定直譯器為 {actual_mm}，與 .python-version 目標 {py_target} 不一致（仍 >= 3.11 可用）")
@@ -237,8 +302,9 @@ def ensure_venv(py_target: str, use_uv: bool) -> int:
         used_interp_label = f"uv --python {py_target}"
         rc = _run_stream(["uv", "venv", "--python", py_target, str(VENV_DIR)])
     else:
-        used_interp_label = base_py or ""
-        rc = _run_stream([*used_interp_label.split(), "-m", "venv", str(VENV_DIR)])
+        base_argv = base_py or []
+        used_interp_label = " ".join(base_argv)
+        rc = _run_stream([*base_argv, "-m", "venv", str(VENV_DIR)])
 
     if rc != 0:
         _err(f"❌ 建立 .venv 失敗（rc={rc}）")

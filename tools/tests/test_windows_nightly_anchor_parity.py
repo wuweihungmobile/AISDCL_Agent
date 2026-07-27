@@ -28,12 +28,20 @@ RunAtLoad 補跑靜態錨點（R15，唯讀 grep 工作樹）」，以五個功�
 
 錨點只認**功能碼**（剝除 `<# … #>` 區塊註解、整行 `#` 註解與**尾隨行內註解**），
 比照 macOS 側 QA-R15-REV-1 訂正：註解裡留著舊字樣會讓錨點假陽性。剝除範圍與
-已知邊界以 `tools/tests/_platform_helpers.strip_ps_comments` 的 docstring 為準
+已知邊界以 `tools/tests/_ps_source.strip_ps_comments` 的 docstring 為準
 （R57 QA-R57-03：初版漏剝尾隨行內註解，真刪 `-WakeToRun` 只要在註解留字樣即可讓
 6 支全綠）。該函式與其鑑別力測試已於 R57 round 2（SA-R57R2-03）從本檔與
-`test_find_git_bash_parity.py` 的兩份逐字複本收斂進 `_platform_helpers.py`，
-一致性由 `test_find_git_bash_parity.py::TestPsCommentStripperSsotCallsiteLock`
+`test_find_git_bash_parity.py` 的兩份逐字複本收斂成 SSOT，R58 再依收納契約拆至專屬的
+`_ps_source.py`（ARCH-R57R3-02）；一致性由
+`test_find_git_bash_parity.py::TestPsCommentStripperSsotCallsiteLock`
 機械守護（本檔不得再自帶同名定義）。
+
+🔴 **本檔錨點的殘餘 fail-open 與 R58 落地的補強**：該剝除器是近似法，對 expression-mode
+的尾隨註解（如 `$note = $x#  -WakeToRun`）漏剝 ⇒ 有人刪掉功能碼、只在註解留字樣，本檔
+6 支錨點仍會全綠（R57 SD 已實證此繞過可行）。R58 未改近似法（R57 已定案禁止 whack-a-mole
+補字元），而是新增 `tools/tests/test_ps_comment_golden.py`——以真 PowerShell parser 對全語料
+凍結 Comment token 做離線差分，使該形態一旦真的出現在任何 `.ps1` 就立刻翻紅。故本檔的錨點
+與那支差分測試是**一組**：本檔驗「錨點在不在」，差分測試驗「本檔看到的功能碼是不是真的功能碼」。
 
 執行：python3 tools/run_root_unittests.py
 """
@@ -42,7 +50,7 @@ from __future__ import annotations
 import unittest
 from pathlib import Path
 
-from _platform_helpers import strip_ps_comments
+from _ps_source import normalize_ps_source, strip_ps_comments
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 _NIGHTLY_PS1 = _REPO_ROOT / "AutoClaude" / "tools" / "run_local_nightly.ps1"
@@ -50,7 +58,13 @@ _WIN_INSTALLER = _REPO_ROOT / "tools" / "install_windows_nightly.ps1"
 
 
 def _code_only(path: Path) -> str:
-    return strip_ps_comments(path.read_text(encoding="utf-8-sig", errors="replace"))
+    """讀檔並剝註解。R58 改走 `normalize_ps_source()`（原為 `read_text(utf-8-sig,
+    errors="replace")`）：與 golden 差分測試共用同一份正規化契約（跳 BOM + CRLF→LF），
+    否則兩者對「同一支檔案的內容」會有不同看法，差分的結論就無法套用到本檔的錨點。
+    另刻意去掉 `errors="replace"`——本 repo 的 `.ps1` 全數以 UTF-8 解碼成功（R58 產生
+    golden 時對全 137 支實測），靜默替換無效位元組只會把編碼問題藏起來（fail loud 優先）。
+    """
+    return strip_ps_comments(normalize_ps_source(path.read_bytes()))
 
 
 class TestWindowsNightlyRunIdLog(unittest.TestCase):

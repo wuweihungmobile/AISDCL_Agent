@@ -6,8 +6,16 @@
 #   2. 找不到 Git Bash → 退回下方 fallback 3-stage（僅「v0.01 凍結基線」單軌：
 #      pytest not-chaos + arch_fitness --strict + 選跑 TLC），並明確警告
 #      覆蓋範圍小於 ci-gate.sh。
-# 用法：  pwsh scripts/ci-gate.ps1 [ci-gate.sh 參數，如 --full-tlc]  # 有 Git Bash → 完整閘門
-#         $env:SDD_RUN_TLC=1; pwsh scripts/ci-gate.ps1               # fallback 時另跑五軌 TLC
+# 用法（R58 DEF-101-508 訂正：原本唯一示範寫成 `pwsh scripts/ci-gate.ps1`，但 Windows 11
+#   出廠只有 Windows PowerShell 5.1、**不含 pwsh 7**〔R58 於真 Windows 11 Pro 實測 pwsh
+#   NOT FOUND〕，使用者照抄本檔第一行自稱的「Windows PowerShell 版」腳本卻拿到「找不到
+#   pwsh」——與 SDD 閘門完全無關的怪錯，還會誤以為要先裝 PowerShell 7。本檔語法已由
+#   tools/tests/test_ps51_compat.py 機械保證 5.1 可解析，powershell 直接跑得動）：
+#         powershell -NoProfile -ExecutionPolicy Bypass -File scripts\ci-gate.ps1 [--full-tlc]
+#         # 有 Git Bash → 完整閘門；與 tools/windows_smoke_local.ps1、ONBOARDING.md、根 CLAUDE.md 同一慣例
+#         $env:SDD_RUN_TLC=1; powershell -NoProfile -ExecutionPolicy Bypass -File scripts\ci-gate.ps1
+#         # fallback 時另跑五軌 TLC
+#   裝有 PowerShell 7 者用 `pwsh` 亦可（本檔不使用 7 專屬語法）。
 $ErrorActionPreference = "Stop"
 # 強制 Python 子程序統一 UTF-8（對齊 AutoClaude tools/local_ci_gate.ps1 同名設定）：
 # zh-TW Windows 預設 cp950，fsm_runtime subprocess 輸出含中文時會 UnicodeDecodeError。

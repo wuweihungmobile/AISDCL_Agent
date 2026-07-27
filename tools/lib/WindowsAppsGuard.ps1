@@ -31,6 +31,29 @@ Windows Store 的 App Execution Alias 只自動註冊 `python.exe`／`python3.ex
 Python 側對稱實作見 `tools/bootstrap_core.py::_is_windows_apps_stub()`（不同
 語言的獨立實作，語言邊界問題不在本次收斂範圍內，維持不動）。
 
+.NOTES
+覆蓋邊界（R58 真 Windows 11 實機量測，三段式；勿改寫成「保證候選可用」）：
+本函式是**純路徑字串比對**（`Get-Command` 取 `.Source` 後比對路徑片段），刻意
+不執行候選直譯器——bootstrap 悖論下它必須零成本、無副作用。
+
+已實測涵蓋：`Get-Command` 命中 `…\WindowsApps\…` 底下的 Windows Store App
+  Execution Alias 空殼（`-notlike` 本身大小寫不敏感）。
+已實測不涵蓋：pyenv-win shim 這類「PATH 上有、`Get-Command` 找得到、實際執行
+  卻不是可用直譯器」的第二種形狀。R58 以固定 fixture 實測（`$env:PATH` 只留
+  fixture 目錄）：對「印訊息到 stderr 後非零退出」（模擬 pyenv `No global/local
+  python version has been set`）與「零退出但不執行任何 Python」兩種假 shim，
+  `Get-Command` 皆命中該 `python3.bat`、本函式**皆回傳 `$true`**，隨後真的執行
+  它時才失敗（`$LASTEXITCODE` 分別為 1 與 0）。bash 側
+  `tools/lib/windowsapps_guard.sh::is_real_python_candidate` 在同款 fixture 下
+  同樣回傳 ACCEPTED，兩份 guard 對稱地看不到這一類；Python 側
+  `tools/bootstrap_core.py::pick_python()` 則在路徑比對之後另有 `_probe_ok()`
+  執行探測層（bash／ps1 兩側沒有對應層）。
+未窮舉：其他「存在但不可用」形狀（權限不足、DLL 缺失、其他 version manager 的
+  shim）皆未逐一量測。
+
+為什麼不在此補探測：修法應落在呼叫端已確定要用該直譯器之後加一道極輕探測，
+而不是把成本壓進這支被多個閘門載入的純函式。
+
 .PARAMETER CandidateName
 `Get-Command` 要查詢的候選命令字面名稱（如 `'python'`／`'python3'`）。
 
