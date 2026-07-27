@@ -67,7 +67,7 @@ INIT → CONTEXT_NEGOTIATION → EXECUTE(step N) → EVALUATE
 ```bash
 git clone https://github.com/wuweihungmobile/AutoClaude.git
 cd AutoClaude
-pip install -e .[dev,notifications]
+pip install -e '.[dev,notifications]'
 ```
 
 ### 3.2 設定環境變數

@@ -66,7 +66,23 @@ def sanitize_component(name: str) -> str:
     # 無其他字元可留，rstrip(" .") 會將其整段吃光，回退為安全的 "untitled"
     # （不會殘留 ".."／"." 這種在未來任何直接當路徑片段使用的呼叫端具穿越意義的字面值）。
     sanitized = sanitized.rstrip(" .") or "untitled"
-    stem = sanitized.split(".", 1)[0]
+    # R57 修正（DEF-101-B1 第 ③ 處）：stem 取出後必須再剝一次尾隨空白。上一行的
+    # rstrip(" .") 作用於**整串**，對 "CON .txt" 不觸發（結尾是 t），使 stem 成為
+    # 帶尾隨空白的 "CON " 而不匹配 ^CON$ → 保留裝置名整組逃逸（實測 'CON .txt'／
+    # 'NUL .log'／'LPT1 .yaml' 原本皆原樣輸出、未加 "_" 前綴）。Win32 解析裝置名時
+    # 會忽略基底名後的尾隨空白，故這類檔名在 Windows 上仍會撞到裝置。
+    # 刻意只 rstrip(" ") 不含 "."：改成 rstrip(" .") 會讓純句點片段（".."／"."）的
+    # stem 被吃空成 ""，破壞上方已收斂的路徑穿越退化為 "untitled" 的防禦。
+    stem = sanitized.split(".", 1)[0].rstrip(" ")
     if _WIN_RESERVED_NAME_RE.match(stem):
         sanitized = f"_{sanitized}"
+        # R57 round 2 QA（DEF-101-478 追加）：`_` 前綴是在**截斷之後**才加的，故加完可能
+        # 達 `_MAX_COMPONENT_LEN + 1`（實測 `sanitize_component('CON' + ' '*3 + '.' + 'x'*100)`
+        # 回傳 81 字元）。此為既有缺陷（`'CON.' + 'z'*100` 在 R57 之前就已 81 字元），R57 的
+        # `.rstrip(" ")` 只是把「保留名 + 尾隨空白」也納入會觸發的輸入集合而擴大了暴露面。
+        # 重新截斷後不會退回保留名——前綴 `_` 使 stem 成為 `_CON` 之類，不匹配 `^CON$`；
+        # 尾端再 rstrip(" .") 是為了避免截斷剛好切在空白/句點上而違反 NTFS「不得以空白或
+        # 句點結尾」的規則（開頭有 `_` 故不可能被剝成空字串）。
+        if len(sanitized) > _MAX_COMPONENT_LEN:
+            sanitized = sanitized[:_MAX_COMPONENT_LEN].rstrip(" .")
     return sanitized

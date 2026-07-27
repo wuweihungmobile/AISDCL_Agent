@@ -54,23 +54,45 @@ def test_at_least_one_version_directory_found() -> None:
     assert versions, f"找不到任何 AISDLC_SDD_v*.* 版本目錄於 {SDD_ROOT}"
 
 
+# R57 修正（B2 掃描面缺口）：本鎖原本每個版本只掃 `tools/fsm_runtime/`，
+# 同版本內另外兩處也會寫檔的生產程式碼目錄從未被這支前瞻鎖看過——
+# `.claude/hooks/`（session_start／context_ledger_pre/post／post_commit_drift／
+# closure_evidence_verify，30 版共 139 個 .py，且 hook 本就會落地 ledger/證據檔）
+# 與 `tools/arch_fitness/`（30 版共 30 個 .py）。實測擴面後 30 版全數 0 offender，
+# 故本次擴面不改變現況判定，價值全在「前瞻」：未來若有人在 hook 或 arch_fitness
+# 裡用 rule_id／ac_id 等風險識別字組檔名而忘記淨化，本鎖現在會抓到，先前不會。
+_SCAN_SUBDIRS = ("tools/fsm_runtime", ".claude/hooks", "tools/arch_fitness")
+# 掃描面下限：30 版 × 3 目錄（新增版本只會使其變大，縮小＝掃描邊界被靜默切掉）
+_MIN_SCANNED_DIRS = 90
+
+
 def test_all_versions_have_no_unsanitized_callsite_offenders() -> None:
     versions = _all_version_dirs()
     all_offenders: list[str] = []
     scanned_versions: list[str] = []
+    scanned_dirs: list[str] = []
 
     for version in versions:
         fsm_dir = SDD_ROOT / version / "tools" / "fsm_runtime"
         if not fsm_dir.is_dir():
             continue  # 防呆跳過（理論上每個版本皆有 fsm_runtime，同構目錄結構）
         scanned_versions.append(version)
-        files = iter_module_files(fsm_dir)
-        offenders = find_offenders(files)
-        all_offenders.extend(f"[{version}] {o}" for o in offenders)
+        for subdir in _SCAN_SUBDIRS:
+            scan_dir = SDD_ROOT / version / Path(subdir)
+            if not scan_dir.is_dir():
+                continue  # 防呆跳過（同構目錄結構下三者皆應存在）
+            scanned_dirs.append(f"{version}/{subdir}")
+            files = iter_module_files(scan_dir)
+            offenders = find_offenders(files)
+            all_offenders.extend(f"[{version}/{subdir}] {o}" for o in offenders)
 
     assert len(scanned_versions) >= 30, (
         f"實際掃到的版本數異常偏少（{len(scanned_versions)}／{versions}），"
         "掃描邊界可能被靜默縮小，須先查明原因再放行"
+    )
+    assert len(scanned_dirs) >= _MIN_SCANNED_DIRS, (
+        f"實際掃到的目錄數異常偏少（{len(scanned_dirs)} < {_MIN_SCANNED_DIRS}），"
+        f"掃描面可能被靜默縮小（應為版本數 × {len(_SCAN_SUBDIRS)} 個子目錄）"
     )
     assert all_offenders == [], (
         "跨版本唯讀掃描發現未淨化的組檔名呼叫點（DEF-101-378 掃描範圍擴大後的"

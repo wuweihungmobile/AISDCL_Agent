@@ -10,8 +10,11 @@ repo 對「多站點宣稱同類問題」一律建機械鎖的既有慣例（pyt
 `check_pytest_baseline_sites.py`、CI paths 覆蓋有
 `test_ci_paths_cover_root_consumers.py`）不對稱。
 
-判準：同一 action 名稱（`actions/checkout` 等）在全部 `.github/workflows/*.yml`
-與 `*.yaml` 內的 `uses:` 版本字串必須唯一；出現兩種以上版本即 fail-loud 列出每個
+判準：同一 action 名稱（`actions/checkout` 等）在 **repo 根層** `.github/workflows/`
+單層（非遞迴）的 `*.yml` 與 `*.yaml` 內的 `uses:` 版本字串必須唯一（R57 SA-R57-05
+訂正：原文寫「全部 `.github/workflows/*.yml`」，措辭誇大於實際掃描面，見下方
+〈掃描面邊界〉區塊的明文裁定與 `_audit_scan_surface()` 的機械守門）；出現兩種以上
+版本即 fail-loud 列出每個
 `file:line` 對應版本，不嘗試判斷「哪個版本才是對的」（那是人工升版決策，不是
 機械鎖的職責——機械鎖只保證「未來任一輪只改單一 workflow 檔的版本、或新增
 第 N+1 支 workflow 沿用舊版本」時會立刻發紅，不會重演連兩輪靠人工才發現落差
@@ -21,12 +24,26 @@ repo 對「多站點宣稱同類問題」一律建機械鎖的既有慣例（pyt
 原本的 `_TRACKED_ACTIONS` 四名白名單是 fail-open 設計，實測打錯一個字即靜默
 少守 13 處宣告卻仍印綠燈）。
 
+人工升版決策紀錄（**不是**機械鎖的一部分，寫在此處是因為本檔是唯一會列舉全部
+`uses:` 版本的地方；本工具只斷言唯一性、不判斷「哪版才對」）：
+  - R57 C4 覆核（2026-07-27，WebSearch 查證）：`actions/upload-artifact@v5` 的
+    `action.yml` 宣告 `runs.using: node20`（v5 對 Node24 只是「預備支援」、預設仍跑
+    Node20），v6.0.0 才把預設改為 `node24`（並要求 runner ≥ 2.327.1，GitHub-hosted
+    runner 早已滿足）。GitHub 官方時程經查證仍如帳本 DEF-101-434 所載：2026-06-16
+    起 runner 預設改用 Node24、**2026-09-16 自 runner 移除 Node20**。故本輪把根層
+    13 處 `upload-artifact@v5` 一次升至 `@v6`（本工具斷言同名唯一，13 處必須同動）。
+    刻意不升 v7：v7 的變更是 ESM 化 + 新增 `archive:` 直傳單檔功能（預設 `true`
+    向後相容），與本次要解的 Node20 問題無關；且本 repo 因 DEF-101-081 帳單問題
+    連 GitHub Actions 都跑不起來、無法實測驗證，故取「剛好解決問題、行為變動最小」
+    的 v6。若日後帳單恢復且需要 v7 的直傳功能再議。
+
 使用：
   python3 tools/check_gha_action_versions.py   # 於 repo 內任意 cwd；不一致印清單並 exit 1
 """
 from __future__ import annotations
 
 import re
+import subprocess
 import sys
 from collections import defaultdict
 from pathlib import Path
@@ -36,6 +53,30 @@ import _stdio_utf8  # noqa: E402,F401  # Windows 非 UTF-8 終端 print(✅/❌)
 
 _REPO_ROOT = Path(__file__).resolve().parents[1]
 _WORKFLOWS_DIR = _REPO_ROOT / ".github" / "workflows"
+
+# ─── 掃描面邊界（R57 SA-R57-05：整類盲區的明文裁定 + 機械守門）───────────────
+# 掃描面＝**根層** `.github/workflows/` 單層。GitHub Actions 只會執行 repo 根層
+# `.github/workflows/` 下的 workflow，巢狀目錄內的同名檔案永遠不會被觸發。
+# 但「不會被執行」≠「已經想過要不要管」——實查本 repo 另有 30 份 git-tracked 的
+# `AISDLC_SDD/AISDLC_SDD_v0.NN/.github/workflows/hub-push.yml`（30 份 md5 相同，是框架
+# 各版目錄的隨版複製品，隨框架散佈給下游後才會成為對方的根層 workflow），此前從未被
+# 任何掃描維度覆蓋。裁定：**不納入**本工具的跨 workflow 版本唯一性斷言，理由三點：
+#   ① 它們在本 repo 內是惰性資產，本 repo 的 CI 行為完全不受其影響；
+#   ② v0.01~v0.29 是凍結版快照（框架政策禁止回頭改），併入唯一性斷言會讓「根層升版」
+#      與「凍結版不可改」兩條政策直接互斥、本工具將永久紅燈且無合法解法；
+#   ③ LATEST（v0.30）的 action 版本屬「散佈給下游的模板品質」命題，與本工具要守的
+#      「本 repo 各 workflow 版本不得互相漂移」是不同命題，混在一起會兩邊都守不好。
+# ⚠️ 誠實揭露的到期風險（已知未關閉，非本工具職責）：那 30 份實測全為 Node20 世代
+#   （`checkout@v4`／`setup-python@v5`／`upload-artifact@v4`），GitHub 於 2026-09-16
+#   自 runner 移除 Node20，下游使用者複製 LATEST 後會踩到；LATEST 是否應隨根層升版，
+#   需由框架版本治理側（AISDLC_SDD 凍結/LATEST 政策的擁有者）決定並記入缺陷帳本。
+# 為避免上述「排除」日後退化回「沒人想過」：`_audit_scan_surface()` 實查 git-tracked
+# 檔案，凡掃描面外、又不符下列已登記排除樣式的 workflow 檔一律 fail-loud（新冒出的
+# 巢狀 `.github/workflows/`——例如 AutoClaude 側日後自建一份——不會再靜默漏掉）。
+_EXCLUDED_NESTED_WORKFLOW_RE = re.compile(
+    r"^AISDLC_SDD/AISDLC_SDD_v0\.\d+/\.github/workflows/[^/]+\.ya?ml$"
+)
+_ANY_WORKFLOW_FILE_RE = re.compile(r"(?:^|/)\.github/workflows/[^/]+\.ya?ml$")
 
 # R56 修正（三名獨立審查員各自以 bug-injection／fixture 實測揪出的三個靜默繞過）：
 # 原式為 `uses:\s*actions/(checkout|setup-python|upload-artifact|github-script)@(v\S+)`，
@@ -128,7 +169,51 @@ def scan(workflows_dir: Path) -> dict[str, dict[str, list[str]]]:
     return findings
 
 
+def _audit_scan_surface() -> list[str]:
+    """回傳「掃描面外、且未登記於明文排除樣式」的 git-tracked workflow 檔清單
+    （相對 repo 根的 POSIX 路徑，已排序）。git 不可用時 raise RuntimeError——本工具
+    是 CI 閘門，寧可 fail-loud 也不靜默跳過這道結構性守門。"""
+    try:
+        out = subprocess.run(
+            ["git", "-c", "core.quotepath=false", "ls-files", "-z"],
+            cwd=_REPO_ROOT, check=True, capture_output=True,
+            text=True, encoding="utf-8", errors="replace",
+        ).stdout
+    # R57 round 3：本分支已由 tools/tests/test_gha_action_versions.py
+    # ::TestAuditScanSurface::test_git_unavailable_is_fail_loud_not_silent_skip
+    # 覆蓋（原標 `pragma: no cover - 環境層`，已不再是無法覆蓋的環境層分支）。
+    except (OSError, subprocess.CalledProcessError) as exc:
+        raise RuntimeError(f"無法以 `git ls-files` 實查掃描面邊界：{exc}") from exc
+    unregistered = [
+        rel
+        for rel in out.split("\0")
+        if rel
+        and _ANY_WORKFLOW_FILE_RE.search(rel)
+        and not rel.startswith(".github/workflows/")
+        and not _EXCLUDED_NESTED_WORKFLOW_RE.match(rel)
+    ]
+    return sorted(unregistered)
+
+
 def main() -> int:
+    # 只有掃描真實根層目錄時才做結構性邊界稽核；單元測試以 fixture 目錄注入
+    # `_WORKFLOWS_DIR` 時跳過（那時談「repo 掃描面」沒有意義）。
+    if _WORKFLOWS_DIR == _REPO_ROOT / ".github" / "workflows":
+        try:
+            unregistered = _audit_scan_surface()
+        except RuntimeError as exc:
+            print(f"❌ {exc}", file=sys.stderr)
+            return 1
+        if unregistered:
+            print(
+                "❌ 發現掃描面外、未登記於排除樣式的 workflow 檔 — 請先做出納管與否的"
+                "明文裁定（見本檔〈掃描面邊界〉區塊），不可讓它退回「沒人想過」狀態：",
+                file=sys.stderr,
+            )
+            for rel in unregistered:
+                print(f"    - {rel}", file=sys.stderr)
+            return 1
+
     if not _WORKFLOWS_DIR.is_dir():
         print(f"❌ 找不到 workflows 目錄：{_WORKFLOWS_DIR}", file=sys.stderr)
         return 1

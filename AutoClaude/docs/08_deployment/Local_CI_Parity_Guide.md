@@ -13,7 +13,7 @@
 |---------|------------|---------------------|------------------------------|
 | OS | Windows 11 | ubuntu-latest（Linux） | `.sh` CRLF → bash `$'\r'`（紀律 #8） |
 | PG 鏡像 | docker-compose `pg18` | service `pgvector:pg17` | extension/alembic 行為差（R56 P0-1d/1e） |
-| 依賴 | 平台相依（wexpect win32） | `pip install -e .[dev,postgres]` | 缺 psycopg2 → alembic 掛（R56 P0-1c） |
+| 依賴 | 平台相依（wexpect win32） | `pip install -e '.[dev,postgres]'` | 缺 psycopg2 → alembic 掛（R56 P0-1c） |
 | 觸發 job | 只手動跑 pytest | test/equivalence/claude-md/pg-contract | push gate job 從未本地跑過 |
 
 **結論**：唯有「在 Linux 容器內、用 CI 同款鏡像、跑 CI 同一份 workflow」才能在本機重現並修復。

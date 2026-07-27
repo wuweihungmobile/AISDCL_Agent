@@ -75,7 +75,7 @@ echo "[pre-push] 4/5 import-linter（架構約束）"
 if command -v lint-imports >/dev/null 2>&1; then
   lint-imports || fail=1
 else
-  echo "[pre-push]   ❌ lint-imports 未安裝（uv pip install -e .[lint]）— 架構約束閘門無法執行" >&2
+  echo "[pre-push]   ❌ lint-imports 未安裝（uv pip install -e '.[lint]'）— 架構約束閘門無法執行" >&2
   fail=1
 fi
 

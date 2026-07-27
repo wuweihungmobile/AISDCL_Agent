@@ -110,8 +110,11 @@ _KNOWN_EXEMPTIONS: dict[tuple[str, str], str] = {
 
 
 def iter_module_files(root_dir: Path) -> list[Path]:
-    """遞迴列舉 `root_dir`（某版本的 `tools/fsm_runtime/`）全部生產程式碼 .py
-    檔案（排除 tests/、__pycache__、__init__.py）。"""
+    """遞迴列舉 `root_dir`（呼叫端傳入的任一版本子目錄——R57 DEF-101-489 起為
+    `tools/fsm_runtime/`／`.claude/hooks/`／`tools/arch_fitness/` 三處，見
+    `scripts/tests/test_sanitize_component_callsite_frozen_versions.py` 的
+    `_SCAN_SUBDIRS`）全部生產程式碼 .py 檔案（排除 tests/、__pycache__、
+    __init__.py）。"""
     return sorted(
         p for p in root_dir.rglob("*.py")
         if p.name != "__init__.py"

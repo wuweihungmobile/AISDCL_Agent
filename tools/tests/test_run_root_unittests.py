@@ -7,13 +7,80 @@ WHY（測意圖非僅行為）：`python -m unittest discover` 對 0 個測試�
 """
 from __future__ import annotations
 
+import inspect
 import sys
+import tempfile
 import textwrap
 import unittest
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import run_root_unittests  # noqa: E402
+
+
+class RatchetDriftWarningTest(unittest.TestCase):
+    """R57 新增：下限 ratchet 過期提醒（`ratchet_drift_message`）。
+
+    WHY（測意圖）：R15 把 MIN_TESTS 釘在 290 後**連續 11 輪沒人重釘**，到 R57 時
+    實況已 530——下限只擋得住「蒸發 240 支以上」，鑑別力失效 45%，而整段期間
+    閘門完全沒吭過聲。人工 ratchet 沒有自我提醒就必然腐化，本測試鎖住那道提醒
+    真的會在漂移超過門檻時出現、且不會在正常範圍內吵人（吵人的警告會被無視，
+    等於沒有）。
+    """
+
+    def test_no_warning_within_ratio(self) -> None:
+        self.assertIsNone(run_root_unittests.ratchet_drift_message(100, 100))
+        self.assertIsNone(run_root_unittests.ratchet_drift_message(110, 100))
+
+    def test_warns_beyond_ratio_and_names_the_new_value(self) -> None:
+        msg = run_root_unittests.ratchet_drift_message(111, 100)
+        self.assertIsNotNone(msg)
+        assert msg is not None
+        self.assertIn("111", msg, "提醒必須直接給出該重釘的數字，否則還要人自己算")
+        self.assertIn("MIN_TESTS", msg)
+
+    def test_warn_layer_fires_before_stale_layer_blocks(self) -> None:
+        """兩層門檻必須真的不同（R57 round 1 ARCH-06）：若 WARN 與紅線同值，
+        「只 WARN 不 fail」就是假的——WARN 一響閘門同時已紅，緩衝區為空。
+        本測試鎖住 [WARN, STALE] 之間存在非空區間，且該區間內只提醒不阻擋。"""
+        self.assertLess(
+            run_root_unittests.RATCHET_WARN_RATIO,
+            run_root_unittests.RATCHET_STALE_RATIO,
+            "WARN 倍數必須嚴格小於紅線倍數，否則 WARN 層無存在意義",
+        )
+        between = int(100 * run_root_unittests.RATCHET_WARN_RATIO) + 1
+        self.assertIsNotNone(
+            run_root_unittests.ratchet_drift_message(between, 100),
+            "緩衝區下緣應已提醒",
+        )
+        self.assertIsNone(
+            run_root_unittests.ratchet_drift_message(
+                between, 100, run_root_unittests.RATCHET_STALE_RATIO
+            ),
+            "緩衝區內不得讓閘門變紅——那就退化成單一門檻",
+        )
+
+    def test_current_pin_is_not_already_stale(self) -> None:
+        """本 repo 當下的 MIN_TESTS 不得已過期到**紅線**（`RATCHET_STALE_RATIO`）
+        ——純 WARN 會被當背景噪音無視（正是 R15 起連續 11 輪沒人重釘的心理機制），
+        必須有一道會紅的線。刻意用紅線倍數而非 WARN 倍數：在 [WARN, STALE] 這段
+        緩衝區內只該被提醒、不該被擋（見 run_root_unittests 的兩層設計註解）。
+
+        鑑別力邊界（不做「保鮮」的絕對宣稱）：本斷言的通過區間是
+        MIN_TESTS ∈ [count / RATCHET_STALE_RATIO, count]，以 count=560 為例即
+        [448, 560]——它擋得住 R15 那種釘 290 的極端腐化，**擋不住**「釘在 450」
+        這種中度失準的新 pin（QA-R57-07 實測）。中度失準由 WARN 層先吭聲。
+        """
+        count = run_root_unittests.discover_suite(
+            run_root_unittests._TESTS_DIR
+        ).countTestCases()
+        self.assertIsNone(
+            run_root_unittests.ratchet_drift_message(
+                count, run_root_unittests.MIN_TESTS, run_root_unittests.RATCHET_STALE_RATIO
+            ),
+            f"MIN_TESTS={run_root_unittests.MIN_TESTS} 相對實況 {count} 已過期到紅線，"
+            "請重釘（R57 起本斷言即為 ratchet 的機械保鮮期）",
+        )
 
 
 class RunRootUnittestsTest(unittest.TestCase):
@@ -97,6 +164,63 @@ class ReportWindowsNativeSkipsTest(unittest.TestCase):
         result = self._run_fixture(tagged_condition=True, plain_condition=True)
         tagged_ids = run_root_unittests.windows_native_skips(result)
         self.assertEqual(tagged_ids, [])
+
+
+
+class DumpFailureDetailTest(unittest.TestCase):
+    """R57 round 3 ARCH-R57R3-03：非決定性翻紅（1/14）當時無失敗明細可查，落檔補上。"""
+
+    def _result_with(self, failures=(), errors=()):
+        class _T:
+            def __init__(self, tid): self._tid = tid
+            def id(self): return self._tid
+        r = unittest.TestResult()
+        r.failures = [(_T(t), tb) for t, tb in failures]
+        r.errors = [(_T(t), tb) for t, tb in errors]
+        return r
+
+    def test_unexpected_successes_are_named(self) -> None:
+        """R57 round 4 SA-R57R4-01：`wasSuccessful()` 對 unexpectedSuccesses 亦回
+        False，若明細不含它們就會出現「rc=1 但明細不指名任何測試」的空落檔。"""
+        class _T:
+            def id(self): return "m.C.test_unexpected"
+        r = unittest.TestResult()
+        r.unexpectedSuccesses = [_T()]
+        self.assertFalse(r.wasSuccessful(), "前提失效：unexpectedSuccesses 應使執行判為失敗")
+        with tempfile.TemporaryDirectory() as td:
+            target = Path(td) / "f.log"
+            run_root_unittests.dump_failure_detail(r, target)
+            text = target.read_text(encoding="utf-8")
+        self.assertIn("m.C.test_unexpected", text, "unexpectedSuccesses 未被指名＝空明細")
+        self.assertIn("1 unexpected successes", text, "標頭未計入 unexpectedSuccesses")
+
+    def test_writes_test_ids_and_tracebacks(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            target = Path(td) / "f.log"
+            run_root_unittests.dump_failure_detail(
+                self._result_with(
+                    failures=[("m.C.test_a", "AssertionError: boom")],
+                    errors=[("m.C.test_b", "RuntimeError: kaboom")],
+                ),
+                target,
+            )
+            text = target.read_text(encoding="utf-8")
+        for expected in ("m.C.test_a", "AssertionError: boom", "m.C.test_b", "RuntimeError: kaboom"):
+            self.assertIn(expected, text, f"失敗明細未含 {expected!r}——落檔對診斷無用")
+
+    def test_write_failure_does_not_raise(self) -> None:
+        """診斷輔助不得反過來變成新的失敗來源（寫檔失敗只印警告、不拋）。"""
+        unwritable = Path(tempfile.gettempdir()) / "r57_no_such_dir" / "sub" / "f.log"
+        run_root_unittests.dump_failure_detail(self._result_with(failures=[("m.C.t", "tb")]), unwritable)
+
+    def test_only_called_when_run_is_unsuccessful(self) -> None:
+        """全綠時不得落檔（否則每次成功執行都留下誤導性的 .last_failure.log）。"""
+        src = inspect.getsource(run_root_unittests.run_with_floor)
+        self.assertIn("if not result.wasSuccessful():", src)
+        self.assertIn("dump_failure_detail(result)", src)
+        guard_at = src.index("if not result.wasSuccessful():")
+        self.assertLess(guard_at, src.index("dump_failure_detail(result)"),
+                        "落檔呼叫必須在 wasSuccessful 守衛之內")
 
 
 if __name__ == "__main__":

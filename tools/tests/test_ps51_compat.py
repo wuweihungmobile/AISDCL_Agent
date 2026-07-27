@@ -9,8 +9,14 @@ WHY：Windows 11 內建的是 **Windows PowerShell 5.1**（Desktop edition，隨
 
   - `root-infra-ci.yml` 第 2 道的 `Parser::ParseFile` 跑在 `runs-on: ubuntu-latest`
     ＝PowerShell 7 Core 的 parser，結構上驗的是 7 的文法，不是 5.1 的。
-  - `windows-compat-ci.yml` 全部 step 一律 `shell: pwsh`（＝7），只有
-    windows-nightly-full 有一支 `shell: powershell` 步驟實跑 bootstrap/dev_start 兩支。
+  - `windows-compat-ci.yml` 在 windows-latest 上的**預設**引擎是 `shell: pwsh`
+    （＝PowerShell 7 Core），少數刻意例外：windows-smoke 有走 `shell: bash` 的
+    dispatcher hooks 步驟，windows-nightly-full 有走 `shell: powershell`（＝原生
+    5.1）的步驟實跑 bootstrap.ps1／dev_start.ps1／install_post_commit.ps1。
+    （R57 QA-R57-04 訂正：本段原文「全部 step 一律 `shell: pwsh`（＝7），只有
+    windows-nightly-full 有**一支** `shell: powershell` 步驟」與 workflow 實況
+    不符——bash 例外未提、5.1 步驟已不只一支。此處刻意不寫死各引擎的步驟支數，
+    以免再次靜默過期；逐 job 的 shell 分佈以 workflow 檔本身為準。）
   - 其餘只有 `windows-compat-ci.yml` 檔頭 R5 段落的**人工宣稱**（當時列名七支
     「均未見 PS7-only 語法」），該宣稱立於 2026-07-14、13+ 輪未複驗，實測 active
     `.ps1` 已 21 支＝涵蓋率 7/21，且會隨新增檔案靜默過期。
@@ -62,7 +68,7 @@ negative lookbehind 收斂）。
     已知殘餘缺口（**假陰性**方向。R56 round 5 SA 補列，round 6 Architect／SD／SA
     三方各自獨立以 pwsh 7.6.3 `Parser::ParseInput` + `FindAll(TernaryExpressionAst)`
     複驗、主控再親跑一次後訂正——原列的四例中有一例其實不成立，見下）：
-    本判準 `(?<!\|)\s\?\s.*?\s:\s` 要求「`?` 後有空白**且**冒號兩側皆有空白」，
+    本判準 `(?<!\\|)\\s\\?\\s.*?\\s:\\s` 要求「`?` 後有空白**且**冒號兩側皆有空白」，
     但 PS7 語法不要求冒號兩側有空白——故下列**六例**皆為合法 `TernaryExpressionAst`
     （在 PS 5.1 必 parse error＝正是本鎖守備目標）卻**不命中**（兩項都實測過：
     pwsh AST errs=0／ternary=1，且本檔 `scan_source()` hits=0）：
@@ -287,7 +293,17 @@ def scan_source(source: str, rel: str) -> tuple[list[str], list[str]]:
 
 # R56 round 6（QA B-1）：CI 第 2 道掃描樹抽取式。字元類必須容納 `.`／`-`，
 # 否則 `.github/scripts` 這類路徑被插進 CI 時本鎖靜默失效（實測 11 支全綠）。
-_CI_TREE_RE = r"Get-ChildItem -Path ([A-Za-z0-9_.\-/]+) -Recurse"
+# R57 修正（A2）：抽取式與計數錨原本在本檔／test_ps1_bom／test_smoke_ci_sync 三份
+# 逐字複製且皆硬綁 `-Path` 具名參數，位置參數形態（`-Path` 省略）可完全繞過；
+# 已收斂進 `_ci_scan_anchors` SSOT（WHY 見該模組 docstring）。
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from _ci_scan_anchors import (  # noqa: E402
+    EXPECTED_CI_GCI_CALLS,
+    EXPECTED_CI_SCAN_STATEMENTS,
+    ci_fixed_trees,
+    ci_gci_call_count,
+    ci_scan_statement_count,
+)
 
 class TestPs51Compat(unittest.TestCase):
     def test_active_ps1_trees_have_no_ps7_only_usage(self) -> None:
@@ -452,7 +468,7 @@ class TestPs51ScanConfigPinning(unittest.TestCase):
         self.assertIsNotNone(step, "root-infra-ci.yml 找不到 pwsh 語法解析 step——結構已變動")
         # R56 round 6 修正（QA B-1）：字元類擴充納入 `.`／`-`，堵住「含點路徑的第 5
         # 棵樹插進 CI 卻完全隱形」的 fail-open（下方等值斷言即為數量下限）。
-        paths = set(re.findall(_CI_TREE_RE, step.group(0)))
+        paths = ci_fixed_trees(step.group(0))
         self.assertEqual(
             paths, {"tools", "AutoClaude/tools", "AISDLC_SDD/scripts"},
             f"root-infra-ci.yml 第 2 道的固定掃描樹已變動：{sorted(paths)}——"
@@ -462,12 +478,27 @@ class TestPs51ScanConfigPinning(unittest.TestCase):
         # 等值斷言只對「_CI_TREE_RE 抽得到的樹」有效，對「抽不到的形態」天生零訊號
         # ——實測 `-Path "docs/scripts"`（引號界定）與 `-Path (Join-Path ".github"
         # "scripts")`（計算式，該 step 第 4 棵樹就是這種寫法、照抄最自然）插入第 5 棵
-        # 樹時三支鎖全綠。故補一條**與字元類完全無關**的出現次數斷言：不論路徑長什麼
-        # 樣，多一棵樹必紅。（round 6 宣稱「補抽取數量下限堵 fail-open」不精確——
-        # QA 實證那條下限被既有 set-equality 涵蓋、是冗餘的，真正生效的只有字元類擴充。）
+        # 樹時三支鎖全綠。故補一條**與字元類完全無關**的出現次數斷言。（round 6 宣稱
+        # 「補抽取數量下限堵 fail-open」不精確——QA 實證那條下限被既有 set-equality
+        # 涵蓋、是冗餘的，真正生效的只有字元類擴充。）
+        # R57 訂正（A2）：round 7 原文宣稱「不論路徑長什麼樣，多一棵樹必紅」是**假
+        # 宣稱**——舊錨硬綁 `-Path` 具名參數，而它是 PowerShell 位置參數可省略；實測
+        # 插入 `Get-ChildItem docs/scripts -Recurse -Filter *.ps1 -File` 時三份共 20 支
+        # 測試仍全綠。改錨 `-Recurse -Filter *.ps1 -File`：因尾巴不含路徑，故涵蓋
+        # 具名/位置/引號/Join-Path 計算式任一種路徑寫法；但 filter 自身加引號、改用
+        # -Include、三參數順序對調則抓不到（由下方 cmdlet 計數錨兜底）。
         self.assertEqual(
-            len(re.findall(r"Get-ChildItem\s+-Path", step.group(0))), 4,
-            "root-infra-ci.yml 第 2 道的 `Get-ChildItem -Path` 出現次數已變動（預期 4＝三棵固定樹＋LATEST 計算式樹）——任何形態的掃描樹增刪都會命中此斷言，請同步四處樹清單站點",
+            ci_scan_statement_count(step.group(0)), EXPECTED_CI_SCAN_STATEMENTS,
+            "root-infra-ci.yml 第 2 道的 `.ps1` 遞迴掃描語句數已變動（預期 4＝三棵固定樹＋LATEST 計算式樹）——本斷言涵蓋具名/位置/引號/Join-Path 任一種路徑寫法，請同步四處樹清單站點",
+        )
+        # R57 四方複審 ARCH-01 訂正：上一版在此寫「任何參數形態的掃描樹增刪都會命中」
+        # 是假宣稱——實測 `-Filter "*.ps1"`／`-Include *.ps1`／`gci` 別名／`-Filter`
+        # 寫在 `-Recurse` 前，四種形態全部逃逸，其中三種還是 R56 舊錨抓得到的＝淨退化。
+        # R57 round 2 ARCH-01 再訂正：三條錨原本大小寫敏感，`get-childitem …
+        # -recurse -filter *.ps1 -file` 全小寫實測全綠逃逸；SSOT 已加 re.IGNORECASE。
+        self.assertEqual(
+            ci_gci_call_count(step.group(0)), EXPECTED_CI_GCI_CALLS,
+            "root-infra-ci.yml 第 2 道的 Get-ChildItem（含 gci/dir/ls 別名，皆不分大小寫）出現次數已變動（預期 4）——本斷言不解析參數，已實測涵蓋：引號 filter／-Include／參數重排／Join-Path 計算式路徑／全小寫或全大寫寫法；已實測不涵蓋（未窮舉）：[System.IO.Directory]::GetFiles、Get-Item、Resolve-Path 這三種非 Get-ChildItem 列舉途徑；整行 # 註解由 SSOT 統一剝除故不計入",
         )
         self.assertIn(
             'Join-Path "AISDLC_SDD" $latestName', step.group(0),

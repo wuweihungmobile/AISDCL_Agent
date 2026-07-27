@@ -80,8 +80,8 @@ source .venv/bin/activate        # macOS / Linux
 #    pip 模組（python -m pip 會報 No module named pip，實機驗證重現），一律改用
 #    uv pip install（uv 已安裝時對任何已啟用 venv 皆可用）；只有走傳統
 #    python -m venv 回退路徑（未裝 uv）才會有 pip 模組可直接用 pip install。
-uv pip install -e .[postgres]            # SQLAlchemy + asyncpg + psycopg2 + alembic + tenacity + cachetools
-uv pip install -e .[postgres,pgvector]   # 再加 pgvector 向量查詢
+uv pip install -e '.[postgres]'            # SQLAlchemy + asyncpg + psycopg2 + alembic + tenacity + cachetools
+uv pip install -e '.[postgres,pgvector]'   # 再加 pgvector 向量查詢
 ```
 
 > ⚠️ `alembic` 走同步連線，需 `psycopg2-binary`（已含於 `[postgres]` extra）；缺少時 `alembic upgrade head` 會報 `ModuleNotFoundError`。
@@ -392,12 +392,12 @@ deactivate                          # 退出虛擬環境（若用 venv）
 |------|---------|------|
 | 啟動即報 `claude` 找不到 | 未安裝 Claude Code CLI 或不在 PATH | 安裝 Claude Code 並確認 `claude --version` 可執行 |
 | Minimax 回 `status_code=2049 invalid api key` | API key 與 endpoint 區域不匹配 | 對齊 `.env` 的 `MINIMAX_API_KEY` 與 `MINIMAX_BASE_URL` 區域（國際版 vs 中國版） |
-| `alembic upgrade head` 報 `ModuleNotFoundError` | 缺 `psycopg2` | `uv pip install -e .[postgres]`（含 psycopg2-binary；venv 若無 pip 模組見上方 1.2 節說明） |
+| `alembic upgrade head` 報 `ModuleNotFoundError` | 缺 `psycopg2` | `uv pip install -e '.[postgres]'`（含 psycopg2-binary；venv 若無 pip 模組見上方 1.2 節說明） |
 | PG 連線被拒 / TLS 錯誤 | DSN 缺 `?sslmode=require` | 生產加 `?sslmode=require`；本機 dev 可設 `AUTOCLAUDE_ALLOW_INSECURE_DB=1` |
 | 回覆語言變成韓/日/簡體 | 長對話語言漂移 | 本專案 Stop hook `check_lang.py` 會 warn；請維持繁體中文 |
 | `.sh` 在 bash 噴 `$'\r'` | Windows autocrlf 把行尾轉成 CRLF | `.gitattributes` 已設 `*.sh text eol=lf`；確認檔案為 LF 行尾 |
 | Bash 工具呼叫 `tools\xxx.ps1` exit 127 | 反斜線被 escape 吞噬 | 路徑一律用正斜線 `tools/xxx.ps1` |
-| 測試/lint 失敗 | 環境未裝齊 | 確認 `uv pip install -e .[dev,notifications,lint]` 並用 Python 3.11+ |
+| 測試/lint 失敗 | 環境未裝齊 | 確認 `uv pip install -e '.[dev,notifications,lint]'` 並用 Python 3.11+ |
 | `python -m pip` 報 `No module named pip` | 根層 `.venv` 是 bootstrap 用 uv 建的，內部本來就沒有 pip 模組 | 改用 `uv pip install ...`（見 1.2 節） |
 
 ---

@@ -71,3 +71,6 @@ desktop.ini
 /checkpoints/
 /logs/
 /perf_results.json
+
+# R57 ARCH-R57R3-03：run_root_unittests 失敗明細落檔（診斷用，不入庫）
+tools/.last_failure.log

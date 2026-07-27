@@ -157,7 +157,7 @@ autoclaude/
 ```bash
 git clone https://github.com/wuweihungmobile/AutoClaude.git
 cd AutoClaude
-pip install -e .[dev,notifications]
+pip install -e '.[dev,notifications]'
 ```
 
 選配相依群組（`pyproject.toml [project.optional-dependencies]`）：

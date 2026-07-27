@@ -71,8 +71,10 @@
 #     兩條 + windows-smoke 新增兩個實際執行步驟（比照 macos-compat-ci.yml 寫法）。
 #
 # R5 複審修正（2026-07-14，S8 發現）：
-#   - 本 workflow 全部步驟一律 `shell: pwsh`（PowerShell 7 / Core），但官方文件
-#     （CLAUDE.md 安裝段落／docs/AISDLC_Agent_UserGuide.md）教使用者用的是
+#   - 執行引擎落差（本段的風險本體）：本 workflow 在 windows-latest 上以 `shell: pwsh`
+#     （PowerShell 7 / Core）為主要引擎——實際分佈與三類刻意例外見下方「R57 訂正」段落
+#     的逐 job 稽核，切勿讀成「全部步驟」／「一律」——
+#     但官方文件（CLAUDE.md 安裝段落／docs/AISDLC_Agent_UserGuide.md）教使用者用的是
 #     `powershell -ExecutionPolicy Bypass -File ...`（Windows 內建 PowerShell 5.1）
 #     ——CI 驗證的執行引擎與文件教使用者實際會用的執行引擎不同，此前從未被機械
 #     驗證過。當時（R5）以人工掃描七支 .ps1 未見 PS7-only 語法而判為非緊急阻斷項。
@@ -116,6 +118,62 @@
 #     GitHub Actions run 的 annotation 是否為同款帳單訊息，而非誤判為程式碼回歸；
 #     完整揭露與後續處理步驟見 docs/06_quality/AutoSDD_Defect_Log.md 的 DEF-101-081
 #     （P0 open，需人工處理，非本輪程式碼可解）。
+#
+# R57 訂正（2026-07-27，Scan C1；同輪四方複審 ARCH-03 再訂正一次）：上方 R5 段落原文寫
+# 「本 workflow **全部步驟**一律 `shell: pwsh`」，該宣稱失實且無任何機械保證——而它正是
+# 整段「CI 驗證引擎（pwsh 7）≠ 文件教使用者的引擎（Windows PowerShell 5.1）」風險分析的
+# 立論基礎。本輪 round 1 一度只把它改寫為「於 windows-latest 的步驟一律 `shell: pwsh`」，
+# Architect 以 pyyaml 逐 job 稽核證明**訂正後仍是假宣稱**：windows-latest 上還有 2 個
+# `shell: powershell`（＝Windows PowerShell 5.1）步驟，而那兩步正是本段風險論述的直接
+# 反例，只列 bash 例外等於自我矛盾。故本段不再做任何「一律／全部」式宣稱，改以可重新
+# 導出的實測分佈為準：
+#
+#   $ python3 -c "import yaml,collections; d=yaml.safe_load(open('.github/workflows/windows-compat-ci.yml')); [print(n, j.get('runs-on'), dict(collections.Counter(s.get('shell','<implicit>') for s in j['steps'] if 'run' in s))) for n, j in d['jobs'].items()]"
+#   （以下為 2026-07-27 原樣輸出，僅為對齊欄位補了空白，其餘逐字未改）
+#   windows-smoke         windows-latest {'pwsh': 19, 'bash': 1}
+#   windows-nightly-full  windows-latest {'powershell': 2, 'pwsh': 3}
+#   windows-nightly-alert ubuntu-latest  {'<implicit>': 3}
+#   （全檔無 workflow 層／job 層 `defaults:` 區塊，故上表即實際生效的引擎分佈；
+#     `<implicit>` 在 ubuntu runner 上為 bash。）
+#
+#   三類非 pwsh 步驟各自的理由（皆為刻意選擇，不是遺漏）：
+#   ① windows-nightly-alert 整個 job 跑 ubuntu-latest：內容是 GitHub API 開單／留言／
+#      關單邏輯，無任何 Windows 相依，3 步皆沿用 runner 隱含預設。
+#   ② windows-smoke 的「根層 dispatcher hooks」1 步顯式 `shell: bash`：要驗的就是 Git
+#      for Windows bash 下 core.hooksPath dispatcher 的路徑，改成 pwsh 即失去驗證意義。
+#   ③ windows-nightly-full 的 2 步顯式 `shell: powershell`（＝Windows PowerShell 5.1）：
+#      這兩步恰恰是為了**收斂本段所述的風險**而補的——R5/S8 補第一步（bootstrap.ps1 +
+#      dev_start.ps1，見該 step 內註解）、R48 補第二步（install_post_commit.ps1，
+#      DEF-101-389 的反斜線修復從未經原生 PS5.1 實際執行過）。因此本段風險應讀作
+#      「文件教學引擎已由這兩步在 nightly（非 PR 閘門）層級**部分**覆蓋」，而非完全
+#      未覆蓋；PR 閘門層級的 PS 5.1 保護則由 tools/tests/test_ps51_compat.py 的行級
+#      靜態機械鎖承擔（見上方 R56 訂正）。
+#
+#   同輪另一項訂正（Scan C1 原案，保留）：實測有 4 個 windows-latest 步驟（Install
+#   AutoClaude deps／pty_wrapper 平台解析單元測試／安裝 AISDLC_SDD pinned deps／安裝
+#   AutoClaude 開發 + lint 依賴）根本沒宣告 `shell:`，靠 GitHub runner 的隱含預設頂替
+#   → 本輪為這 4 步補上顯式 `shell: pwsh`。Windows runner 的隱含預設本就是 pwsh（見
+#   「Install AutoClaude deps」步驟既有 R15 SCAN-C-10 註解），故**執行結果不變**，本次
+#   改的是「宣稱有據」而非行為。不採 workflow 層 `defaults: run: shell: pwsh` 的理由：
+#   本檔含 ubuntu-latest 的 windows-nightly-alert job，workflow 層 defaults 會一併套上去
+#   而必須再逐步驟覆寫，反而更繞；逐步驟顯式宣告與同檔其餘二十餘步既有寫法一致。
+#
+#   🔒 上表已有機械鎖看守（R57 round 3 落地，補上 DEF-101-486 原本自陳未關閉的缺口；
+#   ARCH-03 原建議）：`tools/tests/test_gha_action_versions.py::TestWindowsCiHeaderSnapshotLock`
+#   以鏡子自證方式從**本註解表本身**抽出期望值，再從 YAML 實況重算三個 job 的 `runs-on`
+#   與 run-step shell 分佈並斷言相等，同時斷言全檔無 `defaults:` 區塊（該表成立的前提）。
+#   任一側漂移即紅燈，快照不會再靜默過期。改動本檔步驟後請重跑上列 pyyaml 指令同步更新
+#   上表，並以 `python3 -m unittest tools.tests.test_gha_action_versions -v` 覆核。
+#   （同款「全部 step 一律 shell: pwsh」的過期宣稱原亦存在於 tools/tests/test_ps51_compat.py
+#   檔頭，已於 R57 一併訂正——見該檔內以「R57 QA-R57-04 訂正」為錨的註記；此處刻意
+#   **不寫死行號**，行號必漂移，這是本 repo 反覆的教訓，round 2 抓到的正是此處寫死的
+#   `L12` 已失實。上述鎖亦斷言該錨點字串於兩側同時存在，任一側被刪即紅燈。）
+#   對照組 macos-compat-ci.yml 已一併複核：該檔檔頭**沒有**同款「全部步驟一律 shell: X」
+#   宣稱（只針對 `/bin/bash <script>`／zsh 兩個特定步驟做明確說明），故無失實可訂正；該檔
+#   全部步驟都不宣告 `shell:`（沿用 macOS runner 預設 bash），且**刻意不補**顯式
+#   `shell: bash`——GitHub 對「未宣告」用 `bash -e {0}`、對顯式 `shell: bash` 用
+#   `bash --noprofile --norc -eo pipefail {0}`，補宣告會連帶開啟 pipefail 而改變既有 22 步
+#   的失敗語意，不屬本輪「訂正失實宣稱」範圍。
 
 name: windows-compat-ci
 
@@ -332,7 +390,17 @@ jobs:
     name: Windows smoke（實際執行關鍵腳本，非僅語法解析）
     if: github.event_name != 'schedule'
     runs-on: windows-latest
-    timeout-minutes: 25
+    # R57 修正（Scan C2）：原 25 分鐘。本 job 與 macos-compat-ci.yml 的 macos-smoke 是
+    # 刻意鏡射的一對（同為 22 步、同一批被驗腳本、同款 concurrency），該對的另兩個 job
+    # （nightly-full 60／nightly-alert 10）兩平台數字皆相同，唯獨 smoke 25 vs 35 不對稱，
+    # 且較緊的那個 cap 落在較慢的平台：ONBOARDING.md §5 疑難排解自己就記載「Windows 上
+    # 首次 pip install／pytest 異常緩慢——Windows Defender 即時掃描大量小型 Python 檔案
+    # （.venv、__pycache__）」，而本 job 正是連跑 bootstrap.ps1 建 .venv ×2 + 三組
+    # pip install + ci-gate.ps1 雙軌 pytest。方向與實際速度差相反的 cap 會讓阻斷式 push
+    # 閘門偶發性 timeout 誤紅 → 對齊為 35（timeout 是上限不是預約，未逾時不多花額度；
+    # DEF-101-081 帳務停擺期間本 workflow 從未真正跑起來過，無實測時長可佐證，故取
+    # 「與鏡射對象一致」這個不需臆測的判準）。
+    timeout-minutes: 35
     concurrency:
       group: windows-compat-ci-smoke-${{ github.ref }}
       cancel-in-progress: true
@@ -488,6 +556,7 @@ jobs:
         # 包裝只回傳「最後一條」native 指令的 exit code（$ErrorActionPreference 不攔
         # native）——pip 升級失敗會被最後一條成功吞沒。對非最後一條 native 指令逐條
         # 斷言（鏡射本檔既有 $LASTEXITCODE throw 慣例）。
+        shell: pwsh
         run: |
           python -m pip install --upgrade pip
           if ($LASTEXITCODE -ne 0) { throw "python -m pip 升級失敗（rc=$LASTEXITCODE）" }
@@ -495,6 +564,7 @@ jobs:
 
       - name: pty_wrapper / hotkey_handler 平台解析單元測試
         working-directory: AutoClaude
+        shell: pwsh
         run: python -m pytest tests/test_perception.py -q --tb=short
 
       - name: 執行 tools/integration_gate.ps1 -SkipFull（實際執行，非僅語法解析；P1 Architect 發現修正）
@@ -521,6 +591,7 @@ jobs:
         # R18 全面掃描：鏡射本檔「Install AutoClaude deps」步驟既有修復（R15
         # SCAN-C-10）——pwsh 只回傳「最後一條」native 指令的 exit code，pip 升級
         # 失敗會被 pip install -r 的成功吞沒，對非最後一條 native 指令逐條斷言。
+        shell: pwsh
         run: |
           python -m pip install --upgrade pip
           if ($LASTEXITCODE -ne 0) { throw "python -m pip 升級失敗（rc=$LASTEXITCODE）" }
@@ -902,6 +973,7 @@ jobs:
         # 失敗會被之後成功的 pip install 吞沒）當時漏改，本輪補齊。
         if: ${{ !cancelled() }}
         working-directory: AutoClaude
+        shell: pwsh
         run: |
           python -m pip install --upgrade pip
           if ($LASTEXITCODE -ne 0) { throw "python -m pip 升級失敗（rc=$LASTEXITCODE）" }

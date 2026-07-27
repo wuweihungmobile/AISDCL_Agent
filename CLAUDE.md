@@ -65,10 +65,12 @@ monorepo 根目錄（`AISDCL_Agent/`，各機器 checkout 路徑不同）底下�
 
 > 🔴 `tools/bootstrap.*` 偵測到 `uv` 時一律用 `uv venv` + `uv pip install` 建置 `.venv`（`dev_start` 預設路徑），這種 venv **內部沒有 `pip` 模組**（`python -m pip` 會報 `No module named pip`，Mac/Windows 四方複審實機驗證重現），故下列指令一律用 `uv pip install`（uv 已安裝時對任何已啟用的 venv皆可用，不論該 venv 是否由 uv 建立）；只有走 `bootstrap` 的傳統 `python -m venv` 回退路徑（未裝 uv）時，才會有 `pip` 模組可直接用 `pip install`。
 
+> 🔴 **R57 修正：extras 一律加單引號 `'.[...]'`**——macOS 預設 shell 是 zsh，未加引號時 zsh 會對 `.[dev,notifications]` 做 filename generation、repo 內無匹配即以 `zsh: no matches found: .[dev,notifications]` **中止整條指令**（uv／pip 根本沒被執行，使用者看到與套件無關的怪錯）；bash 與 PowerShell 下不加引號雖可跑，加引號則三種 shell 皆正確，故統一加。雷區對照見 [ONBOARDING.md](ONBOARDING.md) §5。
+
 ```bash
-uv pip install -e .[dev,notifications]   # 開發環境（pytest, ruff, hypothesis…）
-uv pip install -e .[lint]                # import-linter（架構約束檢查）
-uv pip install -e .[postgres,pgvector]   # PostgreSQL + 向量查詢後端（選配）
+uv pip install -e '.[dev,notifications]'   # 開發環境（pytest, ruff, hypothesis…）
+uv pip install -e '.[lint]'                # import-linter（架構約束檢查）
+uv pip install -e '.[postgres,pgvector]'   # PostgreSQL + 向量查詢後端（選配）
 
 python -m autoclaude <playbook.yaml> [--config config.yaml] [--fresh]
 autoclaude <playbook.yaml> --config config.local.yaml   # 安裝後 entrypoint

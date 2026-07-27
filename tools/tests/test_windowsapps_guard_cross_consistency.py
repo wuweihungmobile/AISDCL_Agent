@@ -1191,6 +1191,40 @@ class TestNoOrphanWindowsAppsImplementation(unittest.TestCase):
             f"（檔案移除或兩錨皆不再命中），請同步清單",
         )
 
+    def test_scan_loop_goes_through_matches_stub_anchor(self) -> None:
+        """R57 新增（A4）：**掃描端本身**必須走 `_matches_stub_anchor()`。
+
+        WHY：R56 round 6 把「兩錨聯集」抽成純函式並補了兩支單錨樣本測試，鎖住的
+        只是 helper 內部語意（`or` 不得收緊為 `and`）。掃描迴圈**呼叫誰**這件事
+        沒有任何鎖——把上一支測試裡的 `if _matches_stub_anchor(text):` 換回內聯
+        `if _STUB_NAME_RE.search(text) and _STUB_PREDICATE_RE.search(text):`
+        （繞過 helper ＋ 翻運算子的複合動作），helper 的兩支單錨測試依然全綠，
+        變體 L 完整逃逸——等於 round 6 的修復被整個繞過。本斷言直接讀掃描測試的
+        原始碼，要求它呼叫 helper、且不得內聯任一裸錨。
+        """
+        import inspect
+
+        # 剝除 docstring：上一支測試的 docstring 詳述了兩個裸錨的沿革（會讓下方
+        # `assertNotIn` 假紅），本斷言只針對可執行碼。
+        src = re.sub(
+            r'"""(?:.|\n)*?"""',
+            "",
+            inspect.getsource(
+                type(self).test_windows_apps_predicate_impls_are_all_registered
+            ),
+        )
+        self.assertIn(
+            "_matches_stub_anchor(", src,
+            "repo-wide 掃描迴圈未呼叫 `_matches_stub_anchor()`——兩錨聯集語意的"
+            "唯一真相源被繞過，helper 的單錨測試對此零訊號",
+        )
+        for raw_anchor in ("_STUB_NAME_RE", "_STUB_PREDICATE_RE"):
+            self.assertNotIn(
+                raw_anchor, src,
+                f"掃描迴圈直接內聯裸錨 `{raw_anchor}`——請一律經 "
+                "`_matches_stub_anchor()`，否則聯集/交集語意可被就地改寫而無訊號",
+            )
+
 
 if __name__ == "__main__":
     unittest.main()

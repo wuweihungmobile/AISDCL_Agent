@@ -103,7 +103,12 @@ def _sanitize_log_filename(name: str) -> str:
         for ch in name
     )
     sanitized = sanitized.rstrip(" .") or "untitled"
-    stem = sanitized.split(".", 1)[0]
+    # R57 修正（DEF-101-B1 第 ④ 處，與 AISDLC_SDD/scripts/component_sanitizer.py 同修）：
+    # 上一行 rstrip(" .") 作用於整串，對 "NUL .log" 不觸發（結尾是 g），stem 遂為帶
+    # 尾隨空白的 "NUL " 而不匹配 ^NUL$ → 保留裝置名整組逃逸。Win32 解析裝置名會忽略
+    # 基底名後的尾隨空白，故此類檔名在 Windows 上仍撞裝置。只 rstrip(" ") 不含 "."，
+    # 否則純句點片段的 stem 會被吃空、破壞既有路徑穿越退化為 "untitled" 的防禦。
+    stem = sanitized.split(".", 1)[0].rstrip(" ")
     if _WIN_RESERVED_NAME_RE.match(stem):
         sanitized = f"_{sanitized}"
     return sanitized

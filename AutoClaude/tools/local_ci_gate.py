@@ -183,7 +183,7 @@ def gate_importlinter() -> int:
     """4. import-linter（未安裝時同收斂前語意：印指引並判 FAIL）。"""
     exe = shutil.which("lint-imports")
     if exe is None:
-        print("lint-imports 未安裝（pip install -e .[lint]）")
+        print("lint-imports 未安裝（pip install -e '.[lint]'）")
         return 1
     return _stream([exe])
 

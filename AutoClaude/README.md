@@ -72,14 +72,14 @@
 ```bash
 git clone https://github.com/wuweihungmobile/AISDCL_Agent.git
 cd AISDCL_Agent/AutoClaude
-uv pip install -e .[dev,notifications]
+uv pip install -e '.[dev,notifications]'
 
 # 架構約束檢查（import-linter）
-uv pip install -e .[lint]
+uv pip install -e '.[lint]'
 
 # PostgreSQL 後端（選配，Phase 6）
-uv pip install -e .[postgres]            # SQLAlchemy + asyncpg + psycopg2 + alembic + tenacity + cachetools
-uv pip install -e .[postgres,pgvector]   # 加 pgvector 向量查詢
+uv pip install -e '.[postgres]'            # SQLAlchemy + asyncpg + psycopg2 + alembic + tenacity + cachetools
+uv pip install -e '.[postgres,pgvector]'   # 加 pgvector 向量查詢
 ```
 
 > ⚠️ **venv 若是 uv 建立的，內部沒有 `pip` 模組**：monorepo 根層 `tools/bootstrap.ps1`/`.sh` 偵測到 `uv` 時一律用 `uv venv` 建置 `.venv`，此類 venv 內 `python -m pip` 會報 `No module named pip`（實機驗證重現），一律改用 `uv pip install`（uv 已安裝時對任何已啟用 venv 皆可用）；只有走傳統 `python -m venv` 回退路徑（未裝 uv）才會有 `pip` 模組可直接用 `pip install`。
@@ -437,7 +437,7 @@ powershell -ExecutionPolicy Bypass -File tools/run_local_nightly.ps1
 
 ```bash
 # 1. 安裝依賴（venv 若是 uv 建的無 pip 模組，見上方「快速開始」警語）
-uv pip install -e .[postgres]
+uv pip install -e '.[postgres]'
 
 # 2. 設定環境變數
 export AUTOCLAUDE_DB_DSN="postgresql+asyncpg://koala:koala5@192.168.1.133/aisdlc?sslmode=require"
@@ -502,10 +502,10 @@ storage:
 | `pgvector>=0.3` | 向量查詢（需 pgvector extension） | `pgvector` |
 
 ```bash
-uv pip install -e .[dev,notifications]           # 開發環境
-uv pip install -e .[lint]                        # 架構約束檢查
-uv pip install -e .[postgres]                    # 加 PostgreSQL 後端
-uv pip install -e .[postgres,pgvector]           # 加向量查詢
+uv pip install -e '.[dev,notifications]'           # 開發環境
+uv pip install -e '.[lint]'                        # 架構約束檢查
+uv pip install -e '.[postgres]'                    # 加 PostgreSQL 後端
+uv pip install -e '.[postgres,pgvector]'           # 加向量查詢
 ```
 
 > ⚠️ 上述 `uv pip install` 前提是已啟用 uv 建的 venv（見「快速開始」警語）；若走傳統 `python -m venv` 回退路徑，直接用 `pip install -e ...` 即可。

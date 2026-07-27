@@ -16,6 +16,7 @@
 from __future__ import annotations
 
 import re
+import subprocess
 import sys
 import unittest
 from pathlib import Path
@@ -52,6 +53,58 @@ _EXTRA_DEF_RES = {
     name: re.compile(rf"^\s*def\s+{re.escape(name)}\s*\(")
     for name in ("is_windows", "os_label", "venv_python_path")
 }
+
+
+def _scan_repo_py_for(pattern: re.Pattern[str]) -> list[str]:
+    """全 repo（git 追蹤的 `.py`）機械掃描，回傳命中檔案的 repo 相對路徑清單。
+
+    R57 修正（A5）：兩支掃描測試的 docstring 都自稱「全 repo 機械掃描」，實際
+    掃描面卻只有 `AutoClaude/` 與根層 `tools/` 兩棵樹——`AISDLC_SDD/`（含
+    `scripts/`、`conftest.py`、各版 `tools/fsm_runtime/`）與 `.claude/hooks/`
+    下的 `.py` 全部在外，第 9 份複製貼上落在那些位置時本鎖零訊號。名實不符的
+    掃描面本身就是誤導：複審者讀 docstring 會以為已全域覆蓋而不再追查。
+
+    改用 `git ls-files` 而非 `rglob`：`AISDLC_SDD/` 底下有數千個 venv/快取 `.py`
+    （實測 4,829 支），rglob 全掃既慢又得維護排除清單；追蹤檔天然排除這些，且與
+    同 repo 姊妹鎖（`test_windowsapps_guard_cross_consistency.py` 的 repo-wide
+    掃描）採同一政策。R57 實測：擴面後三個函式名的命中集合皆不變（仍只有
+    `tools/lib/platform_utils.py`），新增偽陽性 0，故擴面在**命中集合**上零代價
+    （R57 round 1 QA-R57-06 訂正：健壯性與耗時上並非零代價——實測 5,427 支
+    tracked `.py`、單次模組耗時約 2.7s，且 `git ls-files` 會列出「index 有、工作樹
+    沒有」的檔案）。
+
+    讀不到的檔案一律**紅燈**（SD-R57-04／QA-R57-06）：git 追蹤卻讀不到 ⇒ 本鎖
+    宣稱的「全 repo 掃描面」已縮小，而縮小掉的內容無從得知（sparse checkout 下
+    缺席的檔案在 repo 裡是有內容的，靜默跳過＝真 fail-open）。故收齊全部讀不到
+    的路徑後以 AssertionError 給出可診斷訊息，而非裸 FileNotFoundError traceback
+    （原行為），也不是 `except OSError: continue` 的靜默跳過。
+    """
+    out = subprocess.run(
+        ["git", "ls-files", "*.py"],
+        cwd=_REPO_ROOT, capture_output=True, text=True,
+        encoding="utf-8", errors="replace", check=True,  # 非 UTF-8 終端下的 mojibake 防護
+    ).stdout
+    offenders: list[str] = []
+    unreadable: list[str] = []
+    for rel in sorted(ln for ln in out.splitlines() if ln.strip()):
+        try:
+            text = (_REPO_ROOT / rel).read_text(encoding="utf-8", errors="replace")
+        except OSError as exc:
+            unreadable.append(f"{rel}（{type(exc).__name__}）")
+            continue
+        for line in text.splitlines():
+            if pattern.match(line):
+                offenders.append(rel)
+                break
+    if unreadable:
+        raise AssertionError(
+            f"git 追蹤的 .py 有 {len(unreadable)} 支讀不到，掃描面已縮小、本鎖無法"
+            f"宣稱「全 repo 已掃」：{unreadable[:10]}"
+            f"{' …' if len(unreadable) > 10 else ''}；常見成因：git mv 進行中／"
+            "已 rm 未 stage（先完成或 `git checkout --`）、sparse checkout（本鎖需"
+            "完整 checkout 才成立）、檔案權限"
+        )
+    return offenders
 
 
 class TestPlatformUtilsApi(unittest.TestCase):
@@ -136,19 +189,9 @@ class TestNoDuplicateDefinitions(unittest.TestCase):
 
     def test_definition_exists_only_in_platform_utils(self) -> None:
         """全 repo 機械掃描：`def init_utf8_streams(` 只應出現在唯一真相源一處
-        （tools/lib/platform_utils.py）。掃描 AutoClaude/ 與根層 tools/，排除
-        .venv/__pycache__ 等非原始碼目錄。只釘選「命中檔案清單」而非行號——
+        （tools/lib/platform_utils.py）。只釘選「命中檔案清單」而非行號——
         行號會隨模組內部改寫漂移，非本測試守護的契約。"""
-        offenders: list[str] = []
-        for base in (_REPO_ROOT / "AutoClaude", _REPO_ROOT / "tools"):
-            for py in base.rglob("*.py"):
-                parts = py.parts
-                if any(p in {".venv", "__pycache__", "node_modules"} for p in parts):
-                    continue
-                for line in py.read_text(encoding="utf-8", errors="replace").splitlines():
-                    if _DEF_RE.match(line):
-                        offenders.append(py.relative_to(_REPO_ROOT).as_posix())
-                        break
+        offenders = _scan_repo_py_for(_DEF_RE)
         self.assertEqual(
             offenders,
             ["tools/lib/platform_utils.py"],
@@ -164,16 +207,7 @@ class TestNoDuplicateDefinitions(unittest.TestCase):
         第二份。掃描手法與 test_definition_exists_only_in_platform_utils 相同
         （機械掃描 `def <name>(` 出現的檔案清單，非行號釘選）。"""
         for name, pattern in _EXTRA_DEF_RES.items():
-            offenders: list[str] = []
-            for base in (_REPO_ROOT / "AutoClaude", _REPO_ROOT / "tools"):
-                for py in base.rglob("*.py"):
-                    parts = py.parts
-                    if any(p in {".venv", "__pycache__", "node_modules"} for p in parts):
-                        continue
-                    for line in py.read_text(encoding="utf-8", errors="replace").splitlines():
-                        if pattern.match(line):
-                            offenders.append(py.relative_to(_REPO_ROOT).as_posix())
-                            break
+            offenders = _scan_repo_py_for(pattern)
             self.assertEqual(
                 offenders,
                 ["tools/lib/platform_utils.py"],

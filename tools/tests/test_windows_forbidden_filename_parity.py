@@ -1,10 +1,26 @@
-"""交叉一致性鎖：Windows 禁用檔名邏輯三處獨立實作
-（`tools/git-hooks/pre-commit` 的 `_ntfs_seg_bad()`、`tools/check_ntfs_paths.py`、
-`AutoClaude/autoclaude/utils/logger.py`）目前內容一致，但沒有任何機械測試鎖住
-這個一致性——R33 Architect 架構深度評估發現的缺口（DEF-101-295）。三處保持獨立
-實作是刻意決策（bash 版無法 import Python 模組；logger.py 屬獨立可 pip 安裝的
-`autoclaude` 套件，不可依賴 monorepo 根層 `tools/lib/*.py`，見 logger.py 內註解），
-本檔只負責「漂移即知」，不合併三者。
+"""交叉一致性鎖：Windows 禁用檔名邏輯的**四處**獨立實作，內容一致但無機械保證。
+
+四處（R57 全 repo `git grep -n -E "PRN|AUX|LPT[0-9]"` 實測，確認恰四處生產實作，
+其餘命中皆為測試樣本或委派）：
+1. `tools/git-hooks/pre-commit` 的 `_ntfs_seg_bad()`（bash）
+2. `tools/check_ntfs_paths.py` 的 `_ntfs_seg_bad()`（Python，CI 全量掃描版）
+3. `AutoClaude/autoclaude/utils/logger.py` 的 `_sanitize_log_filename()`
+4. `AISDLC_SDD/scripts/component_sanitizer.py` 的 `sanitize_component()`
+
+原始缺口為 R33 Architect 架構深度評估發現（DEF-101-295）。四處保持獨立實作是
+**刻意決策**：bash 版無法 import Python 模組（語言邊界）；`logger.py` 屬獨立可 pip
+安裝的 `autoclaude` 套件、`component_sanitizer.py` 屬獨立可 checkout 的 AISDLC_SDD
+子專案，兩者都不可依賴 monorepo 根層 `tools/lib/*.py`（子專案邊界，見各自檔內註解）。
+本檔只負責「漂移即知」，**不合併四者**。
+
+**R57 訂正（DEF-101-478／round 2 SA-R57R2-04）**：本段原文寫「三處」並只列前三處，
+而同一輪的 R57 修復已把第 4 處（`component_sanitizer.py`）納入同一缺陷的修復範圍、
+且在本檔新增了 `TestCrossSubprojectSampleParity` 跨子專案樣本鎖——**檔頭與檔身當場
+矛盾**。這與本輪判為 P2 的 `windows-compat-ci.yml` 檔頭失實（DEF-101-486）是同一
+缺陷類別（「宣稱與實況不符」），由 round 2 SA 抓出，一併訂正。第 4 處的行為鎖因
+子專案邊界不可跨界 import 而置於
+`AISDLC_SDD/scripts/tests/test_component_sanitizer_reserved_trailing_space.py`；
+本檔只以 AST 讀檔比對其**樣本清單**（實作可以四份，樣本沒有理由分歧）。
 
 DEF-101（後續修復）：`AutoClaude/autoclaude/models/escalation.py`
 （EscalationDump.save）與 `AutoClaude/autoclaude/plugins/checkpoint/_escalation.py`
@@ -16,6 +32,7 @@ DEF-101（後續修復）：`AutoClaude/autoclaude/models/escalation.py`
 在這兩處又內嵌一份新的淨化邏輯」。
 """
 
+import ast
 import re
 import shutil
 import subprocess
@@ -192,6 +209,115 @@ class TestMultiExtensionReservedNameCrossConsistency(unittest.TestCase):
                 sanitized.startswith("_"),
                 f"logger.py 未攔下多重副檔名保留名 {name!r}：{sanitized!r}",
             )
+
+
+# R57 修正（DEF-101-B1）：「保留名 + 尾隨空白 + 副檔名」形態四處實作一致漏判。
+# 四處都是先取 base（切到第一個點）再比對保留名，而 `CON .txt` 的 base 是 `"CON "`
+# ——帶尾隨空白故不匹配 `^CON$`；「整段以空白/句點結尾」那條又只看整段（結尾是 `t`）
+# 也不成立，兩道判準之間漏出一個縫。Win32 解析裝置名會忽略基底名後的尾隨空白，
+# 故此形態在 Windows checkout 上仍會撞到裝置。
+# 兩份清單定義於本檔＝SSOT：`test_ntfs_trailing_space_device_name.py`（鎖 Python CI
+# 版與 bash hook 版的行為對等）反向 import 本檔取用，避免出現第五份複製；方向刻意
+# 單向（本檔不 import 該檔）以免循環 import。第四處 `AISDLC_SDD/scripts/
+# component_sanitizer.py` 屬子專案邊界、不可跨界 import，其鎖另置於
+# `AISDLC_SDD/scripts/tests/test_component_sanitizer_reserved_trailing_space.py`。
+RESERVED_TRAILING_SPACE_SEGMENTS = [
+    "CON .txt",
+    "NUL .log",
+    "LPT1 .yaml",
+    "con .txt",  # 大小寫不敏感
+    "COM9   .md",  # 多個尾隨空白
+    "AUX .tar.gz",  # 多重副檔名疊加尾隨空白
+]
+
+# 剝除尾隨空白後不得誤判成保留名（防修復引入偽陽性）
+BENIGN_TRAILING_SPACE_SEGMENTS = [
+    " .txt",  # 純空白 base → 剝完是空字串，不可匹配任何保留名
+    "   .gitignore",
+    "CONSOLE .txt",  # 非保留名
+    "COM10 .txt",  # COM10 不在 COM[0-9] 內
+    "my con file.txt",  # 保留名出現在中段，非 base
+]
+
+
+class TestTrailingSpaceReservedNameCrossConsistency(unittest.TestCase):
+    """本檔既有三方鎖（check_ntfs_paths／bash／logger）的第三方——logger 側。
+
+    前兩方由 `test_ntfs_trailing_space_device_name.py` 鎖住；logger 屬 `autoclaude`
+    套件、與本檔既有 `TestMultiExtensionReservedNameCrossConsistency` 同一顆
+    import 來源，故第三方的鎖放在本檔與姊妹形態並列，維持「同一檔看得到三方」。
+    """
+
+    def test_logger_prefixes_reserved_names_with_trailing_space(self) -> None:
+        for name in RESERVED_TRAILING_SPACE_SEGMENTS:
+            with self.subTest(name=name):
+                sanitized = autoclaude_logger._sanitize_log_filename(name)
+                self.assertTrue(
+                    sanitized.startswith("_"),
+                    f"logger.py 未攔下尾隨空白保留名 {name!r}：{sanitized!r}",
+                )
+
+    def test_logger_does_not_prefix_benign_trailing_space_names(self) -> None:
+        for name in BENIGN_TRAILING_SPACE_SEGMENTS:
+            with self.subTest(name=name):
+                sanitized = autoclaude_logger._sanitize_log_filename(name)
+                self.assertFalse(
+                    sanitized.startswith("_"),
+                    f"logger.py 誤攔非保留名 {name!r}：{sanitized!r}",
+                )
+
+
+# R57 round 1 Architect（DEF-101-478）：四處 NTFS 實作屬「語言邊界 ×1 + 子專案邊界 ×2」
+# 的必要重複（依 R56 已定案分診），**但樣本資料沒有理由分歧**。第四處
+# `AISDLC_SDD/scripts/component_sanitizer.py` 的鎖住在子專案內、依既有裁定不可跨界
+# import，其樣本清單於是被抄了一份——而該檔誕生的當輪就已漂移（benign 少一筆 `" .txt"`、
+# docstring 自稱五筆實為四筆）。教訓是「明文承認代價」不等於「處理了代價」。
+# 本鎖以 **AST 讀檔**（純讀文字、不 import 該子專案的生產程式碼，故不違反邊界裁定）
+# 斷言兩份樣本逐字相同：實作可以是四份，樣本必須是一份。
+_SDD_SAMPLE_FILE = (
+    Path(__file__).resolve().parents[2]
+    / "AISDLC_SDD/scripts/tests/test_component_sanitizer_reserved_trailing_space.py"
+)
+
+
+def _literal_list_from(path: Path, name: str) -> list[str]:
+    """以 AST 取出模組層 `name = [...]` 的字串常數清單（不執行該模組）。"""
+    tree = ast.parse(path.read_text(encoding="utf-8"))
+    for node in tree.body:
+        if not isinstance(node, ast.Assign):
+            continue
+        for target in node.targets:
+            if isinstance(target, ast.Name) and target.id == name:
+                return [ast.literal_eval(e) for e in node.value.elts]
+    raise AssertionError(f"{path.name} 內找不到模組層常數 {name}——鎖已 stale，請同步更新")
+
+
+class TestCrossSubprojectSampleParity(unittest.TestCase):
+    """根層與 AISDLC_SDD 側的尾隨空白保留名樣本必須逐字相同。"""
+
+    def test_sdd_sample_file_exists(self) -> None:
+        """先鎖檔案存在——否則下面兩支會以 FileNotFoundError 而非有意義的訊號失敗。"""
+        self.assertTrue(
+            _SDD_SAMPLE_FILE.is_file(),
+            f"找不到 {_SDD_SAMPLE_FILE}——第四處實作的鎖疑似被刪除或改名，"
+            "四處樣本一致性自此無人看守",
+        )
+
+    def test_reserved_samples_identical(self) -> None:
+        self.assertEqual(
+            _literal_list_from(_SDD_SAMPLE_FILE, "RESERVED_TRAILING_SPACE"),
+            RESERVED_TRAILING_SPACE_SEGMENTS,
+            "根層與 AISDLC_SDD 側的 reserved 樣本已分歧——四處實作是必要重複，"
+            "但樣本資料沒有理由不同（R57 round 1 Architect 判例）",
+        )
+
+    def test_benign_samples_identical(self) -> None:
+        self.assertEqual(
+            _literal_list_from(_SDD_SAMPLE_FILE, "BENIGN_TRAILING_SPACE"),
+            BENIGN_TRAILING_SPACE_SEGMENTS,
+            "根層與 AISDLC_SDD 側的 benign 樣本已分歧——這正是本鎖誕生的原因"
+            "（該檔首版即漏抄 `\" .txt\"`）",
+        )
 
 
 # R33 QA 一審發現：logger.py 原本缺控制字元淨化，與 bash/check_ntfs_paths.py 不對稱

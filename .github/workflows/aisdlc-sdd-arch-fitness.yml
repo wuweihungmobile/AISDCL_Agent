@@ -92,7 +92,7 @@ jobs:
       - name: Upload findings
         if: always()
         continue-on-error: true   # observability-only；artifact 配額耗盡不得判紅
-        uses: actions/upload-artifact@v5
+        uses: actions/upload-artifact@v6
         with:
           name: arch-fitness-findings
           path: AISDLC_SDD/AISDLC_SDD_v0.01/arch-fitness.json
@@ -141,7 +141,7 @@ jobs:
       - name: Upload findings + trend (artifact — 凍結基線不回寫 git)
         if: always()
         continue-on-error: true   # observability-only；artifact 配額耗盡不得判紅
-        uses: actions/upload-artifact@v5
+        uses: actions/upload-artifact@v6
         with:
           name: arch-fitness-findings-nightly
           path: |

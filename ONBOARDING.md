@@ -114,7 +114,8 @@ source .venv/bin/activate
 | 文件裡的路徑是 `d:\CursorProject\...` | 文件在 Windows 上撰寫 | 純說明性路徑，忽略即可；實際指令請用相對路徑 |
 | GUI 發起的 git commit（如 VSCode Source Control 按鈕）被 hooks 擋下：`python: command not found`（mac）或缺 ruff 的系統 Python（Windows） | GUI App 不繼承終端機 venv PATH，hooks fail-loud 擋下 | 從已啟用 venv 的終端機啟動編輯器（如 `code .`），或改用終端機 commit |
 | Windows 上首次 `pip install`／`pytest` 異常緩慢 | Windows Defender 即時掃描大量小型 Python 檔案（`.venv`、`__pycache__`） | 非必要但建議：把 `.venv` 與本 repo 目錄加入 Defender 排除清單，可顯著加速 |
-| 手動補裝套件時 `python -m pip ...` 報 `No module named pip` | `.venv` 是 bootstrap 偵測到 `uv` 時走 `uv venv` + `uv pip install` 建的，這種 venv **內部本來就沒有 `pip` 模組**（Mac/Windows 四方複審實機驗證重現） | 改用 `uv pip install -e .[...]`（uv 已安裝時對任何已啟用的 venv 皆可用）；完整警語見 [CLAUDE.md](CLAUDE.md)「AutoClaude — 常用指令與架構」§安裝/執行 與 [docs/AISDLC_Agent_UserGuide.md](docs/AISDLC_Agent_UserGuide.md) §1.2 |
+| 手動補裝套件時 `python -m pip ...` 報 `No module named pip` | `.venv` 是 bootstrap 偵測到 `uv` 時走 `uv venv` + `uv pip install` 建的，這種 venv **內部本來就沒有 `pip` 模組**（Mac/Windows 四方複審實機驗證重現） | 改用 `uv pip install -e '.[...]'`（uv 已安裝時對任何已啟用的 venv 皆可用；**extras 的引號不可省，理由見下一列**）；完整警語見 [CLAUDE.md](CLAUDE.md)「AutoClaude — 常用指令與架構」§安裝/執行 與 [docs/AISDLC_Agent_UserGuide.md](docs/AISDLC_Agent_UserGuide.md) §1.2 |
+| macOS 上跑 `uv pip install -e .[dev,notifications]` 報 `zsh: no matches found: .[dev,notifications]`（R57 新增） | macOS 自 Catalina 起預設 shell 是 **zsh**，`.[...]` 未加引號會被當成 glob 做 filename generation；repo 內無匹配檔名時 zsh **在執行前就中止整條指令**（uv／pip 根本沒被叫到，所以錯誤訊息看起來與套件無關）。同一行在 bash 與 PowerShell 下正常，故 Windows 開發者不會遇到 | extras 一律加單引號：`uv pip install -e '.[dev,notifications]'`（三種 shell 皆正確）。權威指令站點見 [CLAUDE.md](CLAUDE.md)「AutoClaude — 常用指令與架構」§安裝/執行；本列因必須引述壞形態才說得清症狀，於 `tools/tests/test_extras_quoting_zsh_safety.py` 取得行內豁免 |<!-- zsh-glob-ok: 雷區對照表必須原樣引述未加引號的壞形態才能說明症狀，此處非教學指令 -->
 | pytest 在 Windows 上報 DLL not found／`rc=0xC0000135`（`STATUS_DLL_NOT_FOUND`） | 未啟用 `.venv` 就直接用裸系統直譯器（pyenv-win／winget／python.org 安裝器版型）跑測試，`tools/tests` 部分 fixture 會複製當前直譯器模擬健康 venv，缺同層 DLL 導致複製出的 exe 啟動失敗（DEF-101-256） | 先啟用專案 `.venv`（對照 §3）再跑 pytest |
 
 ---
@@ -171,6 +172,8 @@ source .venv/bin/activate
 
 ## 7. 常用驗證指令
 
+**macOS / Linux（bash・zsh）**
+
 ```bash
 # AutoClaude（在 AutoClaude/ 下，需已啟用 venv）
 python -m pytest tests/ -q            # 全套測試
@@ -180,7 +183,20 @@ PYTHONUTF8=1 lint-imports             # 架構約束（8 kept / 0 broken）
 bash scripts/ci-gate.sh               # 本機 CI 閘門（pytest + arch_fitness）
 ```
 
+**Windows（PowerShell）** — R57 補齊：本節原先是全份雙平台文件中唯一只給 bash 形態的指令區，其中 `PYTHONUTF8=1 lint-imports` 的 `VAR=value cmd` 前綴語法**在 PowerShell 不存在**，會報 `The term 'PYTHONUTF8=1' is not recognized`（實測 pwsh 7）；設環境變數須改用 `$env:VAR=值; <指令>`。
+
+```powershell
+# AutoClaude（在 AutoClaude\ 下，需已啟用 venv）
+python -m pytest tests/ -q            # 全套測試（與 bash 形態同）
+$env:PYTHONUTF8=1; lint-imports       # 架構約束（8 kept / 0 broken）
+
+# AISDLC_SDD（在 AISDLC_SDD\ 下）
+powershell -ExecutionPolicy Bypass -File scripts\ci-gate.ps1   # 偵測到 Git Bash 即薄委派 ci-gate.sh＝完整對等，見 §6
+```
+
 > 🔴 **本節為全 repo pytest 基線數字唯一站點**（R13 ARCH-R13-1 收斂：其他活文件〔根/AutoClaude CLAUDE.md、AutoClaude/README、useMacWin〕一律指向本節不重複數字，由 `tools/check_pytest_baseline_sites.py` 機械守門；歷史紀錄檔〔缺陷帳本、sprint_history、improving 系列等時代快照〕不在納管範圍）。
+>
+> 註：**R57 校正（2026-07-27，五維掃描 18 項候選＋四包並行修復＋四方複審）**——本輪 AutoClaude pytest 基線於**全新臨時目錄建立的乾淨 venv**（`/opt/homebrew/bin/python3.11 -m venv` + `uv pip install -e '.[dev,notifications]'`；污染檢查改用 R56 教訓所訂的「乾淨時會印出東西」寫法 `python -m pip list | grep -E "psycopg2|sqlalchemy"` → 零輸出確認乾淨）下量測，結果為 **3738 passed / 210 skipped**（77.00s，量測平台：macOS、巢狀 Claude Code session），**與 R56 相同不變**——本輪唯一動到 `autoclaude/` 的修復是 `utils/logger.py::_sanitize_log_filename` 的保留裝置名尾隨空白缺口（DEF-101-478 第 ④ 處），其回歸鎖依「三方交叉鎖同檔並列」慣例放在根層 `tools/tests/test_windows_forbidden_filename_parity.py`，不計入 AutoClaude 側數字。其餘子專案數字（不計入本節 AutoClaude pytest）：根層 `tools/run_root_unittests.py` **616 tests OK/skipped=4**（R56 為 530，本輪 **+86**，`MIN_TESTS` 同步重釘為 616）；AISDLC_SDD `bash scripts/ci-gate.sh` 全綠，逐軌 v0.01:1478／v0.30:1729／scripts/tests:**244**（R56 為 238，本輪 +6）。**逐項支數刻意不細列到個位數**——R57 三度以算式推算根層測試數（552／558／584）皆當場與實況不符（SD-R57-01／QA-R57-07 抓出兩次；四方複審共三輪、每輪修復都會再增減測試，故最終值 615 亦是收尾當下實測而非累加），`MIN_TESTS` 的重釘判準已明定為「所有並行 agent 停工後，填最終工作樹實測值、不做任何加減推算」，本節敘述同此政策；欲知逐檔增量請直接 `git diff --stat`。`AutoClaude/tools/check_loc_budget.py` total=20356／cap=20438／violations=0（不變——本輪 `logger.py` 只增註解不增邏輯行）。**本節四組數字皆為所有並行 agent 停工後、由主控在最終工作樹上一次性重測所得。**
 >
 > 註：**R56 校正（2026-07-27，四方複審 round 1~5 共 5 輪、修復 50+ 項＋主控收尾包新增測試回填）**——本輪 Workflow 五維掃描＋四方（Architect/SA/SD/QA）**連續五輪複審**（round 1/2/3/4 皆四方全數 REJECT，round 5.2 收斂為 SD/Architect APPROVE ＋ SA/QA 各餘 P4/P3 一項，由主控修畢後最終複核），詳見 `docs/06_quality/AutoSDD_Defect_Log.md` DEF-101-437 起各列。期間 round 3 的 root 領域修復包與 round 4 原班四方 agent 曾撞上 session 用量上限夭折，由主控於上限重置後另派分域修復包與四方重新複核補完。於**全新臨時目錄建立的乾淨 venv**（`/opt/homebrew/bin/python3.11 -m venv` + `pip install -e '.[dev,notifications]'`，`import psycopg2`／`import sqlalchemy` 皆 `ModuleNotFoundError` 確認乾淨）下量測，結果為 **3738 passed / 210 skipped**（78.57s，量測平台：macOS、巢狀 Claude Code session），較 R55 基線 3713 多 +25（本輪各修復包新增之回歸測試，含 round 5 為 LOC 預警帶補的 `tests/contract/test_loc_budget_tiered.py` 三支鎖），skipped 210 不變。**誠實揭露一項主控本輪自身的量測方法論失誤**：動工前的污染檢查誤用 `python3 -c "import psycopg2" 2>&1 | tail -1` 寫法——成功 import 時「零輸出」，被誤讀為「乾淨」，實際上根層共用 `.venv` 確有 psycopg2 2.9.12＋SQLAlchemy 2.0.51；該錯誤基線一度寫入四方任務書，並在收尾時於受污染 `.venv` 量得 **3829 passed / 146 skipped**（skipped 自 210 驟降 64＝PG-gated 測試由 skip 轉 pass 的典型虛高），因 skipped 異常才觸發警覺、回查證實污染並棄用該數字。此為 R13／R32 同族教訓的第三次復發（前兩次是「用錯 venv」與「既有 venv 渾然不覺被污染」，本次是「檢查手法本身無鑑別力」）；已記入缺陷帳本，往後污染檢查一律改用在乾淨環境會**印出東西**的寫法（如 `python3 -m pip list | grep -E "psycopg2|sqlalchemy"`），判準是「輸出在乾淨與污染下長得夠不夠不一樣」，而非「指令有沒有報錯」。其餘子專案數字（不計入本節 AutoClaude pytest）：根層 `tools/run_root_unittests.py` **530 tests OK/skipped=4**（R55 為 496，本輪 +34：含 `test_ps51_compat.py` 7 支〔PS 5.1 語法機械鎖，新檔；R56 round 6 SD／SA 交叉訂正——原記 6 支漏算 round 5 為三元判準新增的 `test_ternary_pattern_does_not_flag_where_object_alias`〕、`TestStubAnchorDiscriminatingPower` 7 支〔WindowsApps 雙錨鑑別力常駐鎖〕、`.ps1` 掃描面三向互鎖與 `test_ps1_bom` 第四處互鎖各 1 支、round 6 為「雙錨聯集」補的 `test_union_catches_{name,predicate}_only_reinvention` 2 支等）；AISDLC_SDD `bash scripts/ci-gate.sh` 全綠，逐軌 v0.01:1478／v0.30:1729／scripts/tests:238。**本節三組數字皆為所有並行 agent 停工後、由主控在最終工作樹上一次性重測所得**（round 5 期間曾出現 3731/518 → 3738/528 的中途快照，均已被本次量測取代）。
 >
@@ -202,7 +218,7 @@ bash scripts/ci-gate.sh               # 本機 CI 閘門（pytest + arch_fitness
 >
 > 註：**R37 校正（2026-07-24，`EscalationDump.save()` 檔名淨化修復新增測試）**——巢狀 Claude Code session（`CLAUDECODE=1`）下 full pytest 實測基線更新為 **3,653 passed / 210 skipped**（較 R33 基線 +9，即本輪 `tests/test_models.py`／`tests/plugins/test_checkpoint_plugin.py` 新增的 9 條 Windows 禁用檔名淨化＋超長 step_id fallback＋`/` 路徑穿越淨化回歸測試，skipped 數不變）。本次數字同樣於**全新臨時目錄建立的乾淨 venv**（`python3 -m venv` + `pip install -e '.[dev,notifications]'`，`import psycopg2`/`import sqlalchemy` 皆 `ModuleNotFoundError` 確認乾淨）下量測，非既有共用 `.venv`——本輪動工前已先核實根層共用 `.venv` **確實已受 psycopg2/SQLAlchemy 污染**（`import psycopg2` 成功），故未採用其數字，改建全新乾淨 venv 量測，延續 R32 教訓的既定方法論。**R42 SA 一審補記**：本則量測平台未於當時記載（原文未標註 Windows/macOS/Linux）；本輪起比照以下範例格式（如「量測平台：Windows 11、巢狀 Claude Code session」）於量測聲明中明確標註量測所在平台，後續所有量測聲明皆須標註，不可再省略。
 >
-> 舊註（**R33 校正，2026-07-24，DEF-101-289 收斂**）——巢狀 Claude Code session 下基線曾為 **3,644 passed / 210 skipped**（R27~R32 累積新增測試案例 `test_run_act_core.py`／`test_bash_probe_spec_contract.py`／`test_bootstrap_ps1.py` 平台守門等皆已反映在此）；當時數字於全新臨時目錄建立的乾淨 venv（`pip install -e '.[dev,notifications]'`，不含 postgres/pgvector 選配，`pip list` 確認乾淨）下量測，非既有共用 `.venv`——R32 曾因既有 `.venv` 意外裝有 `psycopg2`/`sqlalchemy` 選配、PG-gated 測試從 skip 轉 pass 造成數字虛高（3742/146）而擱置未更新，本次已排除此污染。**bootstrap 出廠環境**（非巢狀 session、全新乾淨 venv）數字**本輪未重新量測**——舊數字（3,566 passed / 196 skipped）維持標示為待重驗，需另起一個不在巢狀 Claude Code session 下的全新環境實測後才能校正。（根層 CLAUDE.md 與 AutoClaude 兩檔已於 R13 收斂為指向本節、不再重複數字）。**方法論澄清（R13 校正歷史，供未來重驗參照）**：本欄曾有一版誤標為 3,664/132，經 SA 複審抓出根因是量測時用了主目錄既有、已裝 `[postgres]` 選配（`psycopg2-binary`/`SQLAlchemy`）的 `.venv`，PG-gated 測試從 skip 轉 pass 造成數字虛高，不符本節自稱的「出廠環境」方法論；未來重驗數字時務必改用全新乾淨 venv〔`pip install -e AutoClaude[dev,notifications,lint]`，不含 postgres 選配〕。skipped 中屬選配依賴缺席者（PG DSN 未設／sqlalchemy 與 `[postgres]` 未裝／claude_agent_sdk 未裝）為預期，非測試退化。AISDLC_SDD `ci-gate.sh` 的逐軌 passed 計數對 **docker daemon 可用性**敏感（daemon 停用時 v0.01／v0.30 各 -3＝`test_phase_h` 的 docker 場景 SKIP），±3 屬環境因素非退化。
+> 舊註（**R33 校正，2026-07-24，DEF-101-289 收斂**）——巢狀 Claude Code session 下基線曾為 **3,644 passed / 210 skipped**（R27~R32 累積新增測試案例 `test_run_act_core.py`／`test_bash_probe_spec_contract.py`／`test_bootstrap_ps1.py` 平台守門等皆已反映在此）；當時數字於全新臨時目錄建立的乾淨 venv（`pip install -e '.[dev,notifications]'`，不含 postgres/pgvector 選配，`pip list` 確認乾淨）下量測，非既有共用 `.venv`——R32 曾因既有 `.venv` 意外裝有 `psycopg2`/`sqlalchemy` 選配、PG-gated 測試從 skip 轉 pass 造成數字虛高（3742/146）而擱置未更新，本次已排除此污染。**bootstrap 出廠環境**（非巢狀 session、全新乾淨 venv）數字**本輪未重新量測**——舊數字（3,566 passed / 196 skipped）維持標示為待重驗，需另起一個不在巢狀 Claude Code session 下的全新環境實測後才能校正。（根層 CLAUDE.md 與 AutoClaude 兩檔已於 R13 收斂為指向本節、不再重複數字）。**方法論澄清（R13 校正歷史，供未來重驗參照）**：本欄曾有一版誤標為 3,664/132，經 SA 複審抓出根因是量測時用了主目錄既有、已裝 `[postgres]` 選配（`psycopg2-binary`/`SQLAlchemy`）的 `.venv`，PG-gated 測試從 skip 轉 pass 造成數字虛高，不符本節自稱的「出廠環境」方法論；未來重驗數字時務必改用全新乾淨 venv〔`pip install -e 'AutoClaude[dev,notifications,lint]'`，不含 postgres 選配；**R57 純加引號修正、無數字變動**——zsh 下未加引號會 `no matches found` 中止，見 §5〕。skipped 中屬選配依賴缺席者（PG DSN 未設／sqlalchemy 與 `[postgres]` 未裝／claude_agent_sdk 未裝）為預期，非測試退化。AISDLC_SDD `ci-gate.sh` 的逐軌 passed 計數對 **docker daemon 可用性**敏感（daemon 停用時 v0.01／v0.30 各 -3＝`test_phase_h` 的 docker 場景 SKIP），±3 屬環境因素非退化。
 
 ---
 
