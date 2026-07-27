@@ -182,7 +182,10 @@ fi
 # root-infra leg（R9 複審接線）：純根層變更（tools/、docs/、workflows 等）原本
 # 一個閘門都不跑——root-infra-ci.yml 的守門在 CI 帳單停擺期間本地零接線。
 # 內容對齊 root-infra-ci.yml：py_compile 全 tools/*.py + tools/tests unittest +
-# 五支守門工具；失敗累積進 rc（不中斷其他 leg），python 缺席 fail-loud 不軟跳過。
+# 六支守門工具；失敗累積進 rc（不中斷其他 leg），python 缺席 fail-loud 不軟跳過。
+# （R56 訂正：R55 由五支增為六支時本行漏改，與 L12／L211 及實際迴圈不一致；
+#  三處計數宣稱現由 test_root_infra_parity.py::test_guard_count_claims_match_loop
+#  機械斷言與迴圈項數相等，不再靠人工同步。）
 if [ "$run_rootinfra" -eq 1 ]; then
   echo "[pre-push dispatcher] push 範圍含根層檔 → 執行 root-infra 閘門"
   if ! is_real_python_candidate python; then

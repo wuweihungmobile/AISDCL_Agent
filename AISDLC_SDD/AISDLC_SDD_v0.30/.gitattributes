@@ -1,0 +1,58 @@
+# AISDLC-SDD 版本子樹 — 行尾政策（內容與 ../.gitattributes 同政策；保障 Win/Linux 平價）。
+#
+# R56 修正（跨平台行尾政策，根因層）：本檔存在的唯一理由是**讓版本子樹自帶行尾政策**。
+#   `scripts/copy_on_evolve.sh` 以 `git archive "HEAD:<版本子樹>"` 建新版，而 git archive 的
+#   attribute 查找基準是**被匯出的那棵樹**——版本目錄若不自帶 .gitattributes，父層
+#   `AISDLC_SDD/.gitattributes` 的 `*.ps1 text eol=crlf` 完全不參與 → 匯出直接吐 blob 原始 LF，
+#   本 repo 的官方版本產生器每次都產出違反自家行尾政策的 LF `.ps1`（v0.30 實測 4 支：
+#   run_self_evolution / run_tlc / init_project / install_post_commit），Windows 原生
+#   PowerShell 取到的新版腳本行尾與工作樹其餘 `.ps1` 不一致；且雙端失明（本機 `git status`
+#   因 checkin 正規化 CRLF→LF blob 看不出差異，CI 是全新 checkout、smudge 已套用也看不到）。
+#   本檔隨 git archive **自我傳播**到每個新版，故此修法一次到位、永不需在建版指令加
+#   `--worktree-attributes`——後者會讓「匯出＝HEAD 的純函式」（copy_on_evolve.sh 明文設計
+#   保證 + `HEAD:$FROM_REL` 硬閘）退化為工作樹狀態的函式，實測未 commit 的工作樹
+#   .gitattributes 即可改變匯出行尾，故不採。
+#
+# ⚠️ 本檔的 `*` 規則會**遮蔽父層** AISDLC_SDD/.gitattributes（就本版本子樹內的路徑而言），
+#   故必須自行完備（同父層檔尾註記的同款理由）。修改行尾政策時兩檔須同步。
+#
+# shell 腳本 / git hook / Dockerfile 在 Linux（CI / Docker / act）必須 LF，否則
+# CRLF 會造成 `bash: $'\r': command not found` 與 Dockerfile 解析錯誤。
+
+# 預設讓 git 自行判斷文字/二進位，並全域強制 LF（對齊父層與根層 .gitattributes）
+* text=auto eol=lf
+
+# 強制 LF（Linux 執行；勿被 autocrlf 改成 CRLF）
+*.sh        text eol=lf
+*.bash      text eol=lf
+.githooks/* text eol=lf
+Dockerfile* text eol=lf
+*.yml       text eol=lf
+*.yaml      text eol=lf
+*.py        text eol=lf
+*.json      text eol=lf
+*.toml      text eol=lf
+*.md        text eol=lf
+*.txt       text eol=lf
+*.cfg       text eol=lf
+*.ini       text eol=lf
+
+# PowerShell / Windows 腳本維持 CRLF（Windows 原生）
+*.ps1       text eol=crlf
+*.psm1      text eol=crlf
+*.psd1      text eol=crlf
+*.cmd       text eol=crlf
+*.bat       text eol=crlf
+
+# 二進位（不轉換）— 對齊父層/根層 .gitattributes 清單（本檔 `*` 規則會遮蔽之，須自行完備）
+*.png       binary
+*.jpg       binary
+*.jpeg      binary
+*.gif       binary
+*.ico       binary
+*.gz        binary
+*.zip       binary
+*.tar       binary
+*.jar       binary
+*.pdf       binary
+*.gpg       binary

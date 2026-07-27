@@ -13,33 +13,40 @@ SD_Improving_07 W4（T4-9~T4-15）：`PlaybookResult` dataclass 物理拔除，�
   - `KernelResult` 新增 `halt_for_token` property alias（reflective alias of
     `halted`）作為 backward compat（測試與 main.py CLI 仍可讀取舊欄位名）；
   - `PlaybookState` / `_StepOutput` / `_MutationResult` 直接搬移（介面不變）；
-  - 純函式 `_evaluate_impl` / `_validate_batch_compatibility_impl` /
-    `_prepend_global_goal_brief` 維持簽名不變，供 PlaybookRunner shim 委派。
+  - 純函式 `_evaluate_impl` / `_validate_batch_compatibility_impl` 維持簽名不變，
+    供 PlaybookRunner shim 委派。
 
-詳見 §69-79 factory function docstring（PlaybookResult 路徑說明）。
+R56 修正（跨平台複審）：物理刪除兩支零呼叫端死碼 `_apply_single_mutation_impl` 與
+`_prepend_global_goal_brief`。前者的現行 SSOT 是 `execution/mutation_applier/`
+（`_dispatcher.py` 分派至 `_simple_mutations.py` / `_complex_mutations.py` /
+`_conditional.py`，由 `playbook_runner._apply_single_mutation_full()` 進入），後者是
+`plugins/goal_synthesis_plugin.GoalSynthesisPlugin.prepend_global_goal_brief()`
+（SD_07 W4-T4-8 已拔除 runner shim）。刪除而非僅替換字面值的理由：死碼內留有 R52 已在
+`mutation_applier/_simple_mutations.py` 修正過的 POSIX-only evaluator 兜底字面值
+（`git diff --stat HEAD | grep -c .`，Windows cmd.exe 無 grep）之第二、三份未修複本，
+留著等同保留「雙寫法／舊寫法復活」入口，與本 repo 反覆處理的 DEF-101-238 同一類別。
 """
 from __future__ import annotations
 
-import logging
 import re
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from enum import Enum
-from typing import Optional
 
 from ..core.kernel_state import KernelResult
-from ..models.playbook import Playbook, PlaybookTask
-from ..models.step_mutation import StepMutation, StepMutationType
 from ..execution.workflow_detector import WorkflowType
+from ..models.playbook import PlaybookTask
+from ..models.step_mutation import StepMutationType
 from ..perception.pty_wrapper import strip_ansi
-
-logger = logging.getLogger("autoclaude.execution.playbook")
-
 
 # ──────────────────────────────────────────────
 # 資料結構（SD_06 W6：從 _runner_compat 搬入）
 # ──────────────────────────────────────────────
 
-class PlaybookState(str, Enum):
+
+# noqa 註記：刻意 str+Enum（既有 str()／format() 輸出口徑；改 StrEnum 會把
+# "PlaybookState.INIT" 變成 "INIT"，屬行為變更，非跨平台議題）。比照
+# execution/error_classifier.py:16 ErrorClass 的同款既有慣例。
+class PlaybookState(str, Enum):  # noqa: UP042
     INIT = "INIT"
     EXECUTE = "EXECUTE"
     EVALUATE = "EVALUATE"
@@ -65,11 +72,11 @@ def PlaybookResult(  # noqa: N802 — backward-compat factory name (class look-a
     completed_steps: int,
     total_steps: int,
     reason: str,
-    workflow: "Optional[WorkflowType | str]" = None,
-    step_log: Optional[list[str]] = None,
+    workflow: WorkflowType | str | None = None,
+    step_log: list[str] | None = None,
     halt_for_token: bool = False,
-    scheduled_resume_at: Optional[str] = None,
-    evolved_playbook_path: Optional[str] = None,
+    scheduled_resume_at: str | None = None,
+    evolved_playbook_path: str | None = None,
     evolution_fresh_required: bool = False,
     **kwargs,
 ) -> KernelResult:
@@ -114,104 +121,14 @@ class _MutationResult:
     """
     should_break: bool = False
     inject_before_pending: bool = False
-    goto_target_idx: Optional[int] = None
-    early_return: Optional[KernelResult] = None
+    goto_target_idx: int | None = None
+    early_return: KernelResult | None = None
     clear_goal_summary: bool = False
 
 
 # ──────────────────────────────────────────────
-# 純函式：突變應用
+# 純函式：突變批次相容性
 # ──────────────────────────────────────────────
-
-def _apply_single_mutation_impl(
-    mutation: StepMutation,
-    playbook: Playbook,
-    playbook_path: str,
-    task: PlaybookTask,
-    step_idx: int,
-    step_log: list,
-    _mutation_log: list,
-    attempt: int,
-    _inject_before_counter: dict,
-    _goto_counter: dict,
-    _skip_to_counter: dict,
-    workflow,
-    total: int,
-    tracker,
-    eval_output: str,
-    persist_fn=None,
-) -> _MutationResult:
-    result = _MutationResult()
-
-    if mutation.mutation_type == StepMutationType.REVISE_CURRENT and mutation.revised_prompt:
-        task.prompt = mutation.revised_prompt
-        logger.info("REVISE_CURRENT step %s prompt updated", task.step_id)
-        _mutation_log.append(f"[attempt {attempt}] REVISE_CURRENT: step {task.step_id}")
-        if persist_fn:
-            persist_fn(playbook, playbook_path)
-        result.clear_goal_summary = True
-
-    elif mutation.mutation_type == StepMutationType.INJECT_AFTER and mutation.new_step_prompt:
-        new_task = PlaybookTask(
-            step_id=mutation.new_step_id or f"{task.step_id}_INJECT",
-            name=mutation.new_step_name or f"{task.name}（注入步驟）",
-            prompt=mutation.new_step_prompt,
-            expected_output_regex=mutation.new_step_expected_regex,
-            evaluator_command=(
-                mutation.new_step_evaluator_command or "git diff --stat HEAD | grep -c ."
-            ),
-            max_retries=mutation.new_step_max_retries,
-        )
-        playbook.tasks.insert(step_idx + 1, new_task)
-        logger.info("INJECT_AFTER %s after %s", new_task.step_id, task.step_id)
-        _mutation_log.append(f"[attempt {attempt}] INJECT_AFTER: step {new_task.step_id}")
-        if persist_fn:
-            persist_fn(playbook, playbook_path)
-
-    elif mutation.mutation_type == StepMutationType.DELETE_STEP and mutation.delete_step_id:
-        del_idx = next(
-            (i for i, t in enumerate(playbook.tasks) if t.step_id == mutation.delete_step_id),
-            None,
-        )
-        if del_idx is not None and del_idx > step_idx:
-            del playbook.tasks[del_idx]
-            step_log.append(f"[DELETED] {mutation.delete_step_id}")
-            if persist_fn:
-                persist_fn(playbook, playbook_path)
-
-    elif mutation.mutation_type == StepMutationType.INJECT_BEFORE and mutation.new_step_prompt:
-        cnt = _inject_before_counter.get(task.step_id, 0) + 1
-        if cnt > 5:
-            logger.warning("INJECT_BEFORE %s exceeded limit (%d)", task.step_id, cnt)
-        else:
-            _inject_before_counter[task.step_id] = cnt
-            proposed_id = mutation.new_step_id or f"{task.step_id}_PRE"
-            existing_ids = {t.step_id for t in playbook.tasks}
-            base_prefix = proposed_id.rstrip("_0123456789").rstrip("_PRE")
-            similar = [
-                sid for sid in existing_ids
-                if sid.startswith(base_prefix) and sid != task.step_id and "PRE" in sid
-            ]
-            if similar:
-                proposed_id = f"{task.step_id}_PRE_{cnt}"
-            pre_task = PlaybookTask(
-                step_id=proposed_id,
-                name=mutation.new_step_name or f"前置步驟（注入於 {task.step_id} 前）",
-                prompt=mutation.new_step_prompt,
-                expected_output_regex=mutation.new_step_expected_regex,
-                evaluator_command=(
-                    mutation.new_step_evaluator_command or "git diff --stat HEAD | grep -c ."
-                ),
-                max_retries=mutation.new_step_max_retries,
-            )
-            playbook.tasks.insert(step_idx, pre_task)
-            result.inject_before_pending = True
-            result.should_break = True
-            if persist_fn:
-                persist_fn(playbook, playbook_path)
-
-    return result
-
 
 def _validate_batch_compatibility_impl(batch: list) -> tuple[bool, str]:
     """Gap-025 / Gap-029：批次突變相容性預驗證。"""
@@ -229,22 +146,7 @@ def _validate_batch_compatibility_impl(batch: list) -> tuple[bool, str]:
     return True, ""
 
 
-# ──────────────────────────────────────────────
-# 純函式：目標相關（backward compat）
-# ──────────────────────────────────────────────
-
-def _prepend_global_goal_brief(prompt: str, global_goal: Optional[str], cfg=None) -> str:
-    """Gap-015-A：精簡版 global_goal 前置（最大 global_goal_brief_chars 字元）。"""
-    if not global_goal:
-        return prompt
-    brief_chars = 100
-    if cfg is not None:
-        brief_chars = getattr(getattr(cfg, "playbook", cfg), "global_goal_brief_chars", brief_chars)
-    brief = global_goal[:brief_chars] + ("…" if len(global_goal) > brief_chars else "")
-    return f"[總目標方向] {brief}\n\n{prompt}"
-
-
-def _evaluate_impl(task: PlaybookTask, output: str) -> tuple[Optional[str], str, int]:
+def _evaluate_impl(task: PlaybookTask, output: str) -> tuple[str | None, str, int]:
     """評估步驟輸出（ANSI strip + regex 比對）。"""
     clean = strip_ansi(output)
     if not task.expected_output_regex:

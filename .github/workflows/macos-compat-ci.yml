@@ -430,14 +430,54 @@ jobs:
           echo "install-hooks.sh worktree 拒絕驗證通過（rc=1 as expected）"
 
       - name: 根層 dispatcher hooks：安裝 + 真實 git commit 觸發 pre-commit（經 core.hooksPath）
+        # R56 修正（SA finding，鏡射 windows-compat-ci.yml 同名 step 的三道可觀測
+        # 訊號）：原探針是根層 `_ci_macos_hook_probe.txt`，對 pre-commit dispatcher
+        # 的六個分流 pattern（AutoClaude/、AISDLC_SDD/、tools/、.github/、
+        # .gitattributes、.editorconfig）全部不命中 → 三個 leg 皆 0，dispatcher 跑完
+        # NTFS 閘即 exit 0、全程零輸出；本 step 唯一的斷言是「commit 沒失敗」，
+        # 而 hooks 根本沒生效時 commit 一樣會成功——即 fail-open 死斷言，對
+        # 「core.hooksPath 真的讓 git 執行了 dispatcher」零鑑別力。
+        # 三道訊號（與 Windows 側對稱）：(1) core.hooksPath 非空；(2) probe 檔放
+        # tools/ 下使根層基建 leg 必定觸發，從 commit 輸出 grep dispatcher marker；
+        # (3) 負路徑：帶語法錯誤的 tools/*.sh 必須被 dispatcher 的 bash -n 閘擋下
+        # （Windows 側用同款負路徑；本 job 另有 CON.txt NTFS 負路徑在下一 step）。
         run: |
           bash AutoClaude/tools/install_git_hooks.sh
-          echo "ci probe" > _ci_macos_hook_probe.txt
-          git add _ci_macos_hook_probe.txt
+          hp="$(git config --get core.hooksPath || true)"
+          test -n "$hp" || { echo "::error::core.hooksPath 未設定"; exit 1; }
+
+          printf '%s\n' '#!/usr/bin/env bash' 'echo ok' > tools/_ci_macos_hook_probe.sh
+          git add tools/_ci_macos_hook_probe.sh
+          set +e
+          out="$(git -c user.email=ci@example.com -c user.name=ci -c commit.gpgsign=false \
+            commit -m "ci: macos hook probe (throwaway, not pushed)" 2>&1)"
+          rc=$?
+          set -e
+          echo "$out"
+          if [ "$rc" -ne 0 ]; then
+            echo "::error::probe commit 失敗（rc=$rc）——dispatcher 應放行乾淨變更"
+            exit 1
+          fi
+          echo "$out" | grep -F "[pre-commit dispatcher]" >/dev/null || {
+            echo "::error::commit 輸出未見 dispatcher marker——hooks 未經 core.hooksPath 實際執行"; exit 1; }
+          echo "git commit 經 core.hooksPath 成功觸發 pre-commit dispatcher（exit 0 + marker 可觀測）"
+
+          printf '%s\n' '#!/usr/bin/env bash' 'if true; then' > tools/_ci_macos_hook_probe_bad.sh
+          git add tools/_ci_macos_hook_probe_bad.sh
+          set +e
           git -c user.email=ci@example.com -c user.name=ci -c commit.gpgsign=false \
-            commit -m "ci: macos hook probe (throwaway, not pushed)" -q
-          echo "git commit 經 core.hooksPath 成功觸發 pre-commit dispatcher（exit 0）"
-          git rm -q _ci_macos_hook_probe.txt
+            commit -m "ci: macos bad probe (must be rejected)" -q
+          rc=$?
+          set -e
+          git reset -q HEAD tools/_ci_macos_hook_probe_bad.sh
+          rm -f tools/_ci_macos_hook_probe_bad.sh
+          if [ "$rc" -eq 0 ]; then
+            echo "::error::帶語法錯誤的 tools/*.sh 應被 dispatcher bash -n 閘擋下，commit 卻成功"
+            exit 1
+          fi
+          echo "dispatcher 正確擋下語法錯誤的根層 .sh（rc=$rc as expected）"
+
+          git rm -q tools/_ci_macos_hook_probe.sh
           git -c user.email=ci@example.com -c user.name=ci -c commit.gpgsign=false \
             commit -m "ci: revert macos hook probe (throwaway, not pushed)" -q
 
@@ -449,12 +489,44 @@ jobs:
         run: |
           /bin/bash --version | head -1
 
-          echo "probe" > _ci_probe_clean.txt
-          git add _ci_probe_clean.txt
-          /bin/bash tools/git-hooks/pre-commit
-          git reset -q _ci_probe_clean.txt
-          rm -f _ci_probe_clean.txt
-          echo "pre-commit dispatcher 於系統 bash 下執行成功（乾淨變更）"
+          # R56 修正（SA finding）：原探針是根層 `_ci_probe_clean.txt`，pre-commit
+          # 的六個分流 pattern（AutoClaude/、AISDLC_SDD/、tools/、.github/、
+          # .gitattributes、.editorconfig）全部不命中 → run_root_infra=0，dispatcher
+          # 跑完 NTFS 閘即 exit 0，A4 根層基建 leg（本 dispatcher 內唯一含 while
+          # read / heredoc / 巢狀 case 的區塊）從未在系統 bash 3.2 下被執行過——
+          # 本 step 自述的「真正驗證 bash 4+ 限定語法未被誤用」對該區塊完全落空
+          # （fail-open 死斷言）。改為暫存一支 tools/*.sh 使 leg 必定觸發，並機械
+          # 斷言 leg 的識別訊息真的出現（否則探針再度失效時仍是靜默綠燈）。
+          # R56 訂正（SD round 3）：擷取式 `out="$(…)"` 在本 job 預設 shell（`bash -e`）
+          # 下，dispatcher 回非零時該 assignment 本身即失敗的 simple command → shell
+          # 立刻結束，後面的 printf 永不執行、清場也不執行，於是「最需要診斷的失敗
+          # 路徑」CI log 完全空白（scratchpad 實機重現：rc=1、輸出零行）。R56 之前是
+          # 裸呼叫、stdout/stderr 直接串進 log，本輪為加 marker 斷言而改成擷取反而
+          # 退化。改為與本 step 下方 NTFS 探針（及 tools/macos_smoke_local.sh 2a）
+          # 對稱的三段式：set +e → 擷取 → 記 rc → set -e → 先印再判。
+          printf '#!/usr/bin/env bash\necho ok\n' > tools/_ci_probe_clean.sh
+          git add tools/_ci_probe_clean.sh
+          set +e
+          out="$(/bin/bash tools/git-hooks/pre-commit 2>&1)"
+          rc=$?
+          set -e
+          printf '%s\n' "$out"
+          # 清場先於 rc 判斷：失敗路徑上探針不得殘留污染後續 step。
+          git reset -q tools/_ci_probe_clean.sh
+          rm -f tools/_ci_probe_clean.sh
+          if [ "$rc" -ne 0 ]; then
+            # `${rc}` 必須帶大括號：bash 3.2 在 C.UTF-8 下把全形「）」的首位元組
+            # 0xEF 視為識別字字元，裸 `$rc）` 會被解析成變數 `rc\xEF`（未設→空字串）
+            # 並吐出殘位元組亂碼（本輪撰寫時實機重現 → 訂正）。本 repo 既有慣例即
+            # 一律帶大括號，此註解僅記錄 WHY 供未來覆核。
+            echo "::error::pre-commit dispatcher 於系統 bash 下非零退出（rc=${rc}）— 上方為其完整輸出"
+            exit 1
+          fi
+          case "$out" in
+            *"變更含根層基建"*) ;;
+            *) echo "::error::pre-commit dispatcher 未觸發根層基建 leg（A4）— 探針失效，本 step 對該區塊的 bash 3.2 覆蓋宣稱落空"; exit 1 ;;
+          esac
+          echo "pre-commit dispatcher 於系統 bash 下執行成功（乾淨變更，含 A4 根層基建 leg）"
 
           touch "CON.txt"
           git add "CON.txt"

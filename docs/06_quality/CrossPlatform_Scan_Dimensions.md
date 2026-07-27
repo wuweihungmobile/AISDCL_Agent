@@ -1,6 +1,8 @@
 # 跨平台複審 Scan-A/B/C/D/E 五維掃描慣例（正式規格）
 
-> **緣起**：Mac/Windows-11 相容性複審輪（R1 起累積至今 R47）自 ~10+ 輪前開始，習慣把每輪掃描
+> **緣起**：Mac/Windows-11 相容性複審輪（R1 起持續累積；最新輪次見 `docs/06_quality/AutoSDD_Defect_Log.md`
+> 最末列——本檔刻意不寫死輪號，R56 發現原寫「累積至今 R47」時實況已是 R55，且與同檔下方
+> 內容自相矛盾）自 ~10+ 輪前開始，習慣把每輪掃描
 > 拆成「Scan-A/B/C/D」四個維度分工，但此慣例此前只活在各輪缺陷帳本列的引用文字裡
 > （如 `docs/06_quality/AutoSDD_Defect_Log.md` 的 DEF-101-265／269／289／352／353），從未有
 > 一份獨立文件把字母對應的維度定義寫下來——新加入的審查員/agent 只能逐一翻歷史帳本引用逆向
@@ -16,7 +18,7 @@
 | **Scan-D** | 缺陷帳本／文件維度——基線數字新鮮度（如 pytest passed/skipped 是否隨新測試增長而回填）、帳本歸檔輪替（是否逼近 256KB 上限）、跨文件引用一致性（帳本 vs `ONBOARDING.md` 等 crossref 目標是否各說各話） | 基線數字落後、帳本超限未歸檔、跨文件狀態矛盾 | DEF-101-289（R32 Scan-D：`ONBOARDING.md` §7 pytest 基線落後實測 +11） |
 | **Scan-E**（＝ Architect-Design） | Architect 架構最佳化評估——針對跨平台相容性既有架構慣例（dispatcher 模式／薄殼收斂／SSOT 收斂／Copy-on-Evolve 凍結政策／CI paths 白名單／帳本基線唯一站點等）逐項複核設計合理性，非缺陷掃描 | 架構判準記錄、SSOT/收斂建議、既有慣例是否仍成立的複核結論 | DEF-101-412（R52 Architect 記錄 evaluator_command 同進程/跨進程判準，見下節）；DEF-101-413（R53 Scan-B＋Architect-Design 交叉發現） |
 
-自 R50 起（R50~R53 連續四輪）「五維掃描」已是實務穩定用詞（見缺陷帳本 DEF-101-394/396/403/412/413/414 等），本節同步將正式定義從四維補齊至五維，消除「新審查員需翻歷史帳本逆推 Scan-E／Architect-Design 字母含義」的落差。
+自 R50 起連續多輪「五維掃描」已是實務穩定用詞（見缺陷帳本 DEF-101-394/396/403/412/413/414 等），本節同步將正式定義從四維補齊至五維，消除「新審查員需翻歷史帳本逆推 Scan-E／Architect-Design 字母含義」的落差。
 
 ## 架構判準：evaluator_command 分診問題（DEF-101-412）
 
@@ -28,6 +30,23 @@ R52 Architect 複核 `evaluator_command` 相關修復慣例時記錄一項前瞻
 - **編譯期產出、執行期跨行程消費案例**：`infra/adapters/sdd_to_playbook_adapter.py` 的 `_EVALUATOR_TEMPLATE`（R53 DEF-101-413 後已由雙模板 tuple 收斂為單一字串常數，非複數）——本檔在編譯期產出 YAML 字串，執行期可能於完全不同的行程/環境/機器上被讀取執行，編譯時解析的 `sys.executable` 路徑在執行時未必存在；正確修法是去除裸 `python -m` 前綴、假設目標 PATH 含對應 console script（如 `pytest`），而非改用 `sys.executable`（見 DEF-101-403／DEF-101-413 修法與其「刻意未採用 sys.executable」的理由記載）。
 
 動工前先問「這行指令是誰在何時執行」，誤用會把原本明顯的 `rc=127` 換成更難診斷的路徑不存在 `FileNotFoundError`。
+
+## 架構判準：WindowsApps guard 三語言等價實作為何不可收斂（R56 Scan-E）
+
+WindowsApps guard（排除 Windows Store App Execution Alias 空殼 `python.exe`）目前有**三份語言別的等價實作**：`tools/lib/windowsapps_guard.sh`（bash）、`tools/lib/WindowsAppsGuard.ps1`（PowerShell）、`tools/bootstrap_core.py`（Python）。每一輪的 Architect 都會把「三份實作＝SSOT 未收斂」重新列為候選發現、再逐一論證掉（R56 Scan-E 又花掉一次）。本節把該論證定案，供未來輪直接引用，不需重辯。
+
+**(1) bootstrap 悖論——不可能以 Python 為單一 SSOT。** guard 的職責正是「在還沒有可用 Python 之前，判斷 Python 是否可用」。`tools/git-hooks/pre-push` 內的順序即為證據：先 `. "$TOPLEVEL/tools/lib/windowsapps_guard.sh"`（純函式定義、無副作用），再以 `if ! is_real_python_candidate python` 把關，**之後**才出現該檔第一個實際的 `python` 呼叫（`python -m py_compile`）——即 guard 必須在任何 Python 執行之前就能運作。（刻意以符號而非行號錨定：該檔為高頻改動檔，行號必漂移；覆核方式＝`grep -n 'windowsapps_guard\|is_real_python_candidate\|python' tools/git-hooks/pre-push` 確認三者的出現順序。R56 實測為 L46／L191／L204。）若把判斷邏輯收斂進 Python，判斷本身就需要先有可用 Python，邏輯上自我指涉。同理 `.ps1` 呼叫端（`bootstrap.ps1` 等）也必須在取得 Python 前完成判斷。故三份實作是**語言邊界造成的必要重複**，不是可收斂的實作重複。
+
+**(2) 既有折衷——資料抽 SSOT、執行邏輯刻意保留多份。** 同類問題本 repo 已有定案先例：`tools/lib/bash_probe_spec.py` 把「探測規則的**資料**」（`PROBE_CMD`、期望輸出、System32 排除段）抽成單一真相源，但驗活的**執行邏輯**刻意保留三份獨立實作，理由明文寫在該檔 docstring——「以維持三份回歸鎖彼此獨立的鑑別力（不會因為共用函式本身壞掉而三份同時失效）」。WindowsApps guard 沿用同一折衷：三份實作之間的等價性不靠「收斂成一份」，而靠機械 parity 鎖保證——`tools/tests/test_windowsapps_guard_bash_parity.py` 與 `tools/tests/test_windowsapps_guard_cross_consistency.py`（含 repo-wide 前瞻掃描 + 附理由豁免白名單 + stale 自檢）。
+
+**(3) 分診問句（動工前先問）。** 遇到「同一邏輯出現 N 份」的候選發現時，先回答：
+
+> 這個重複是**實作重複**（同一語言、同一執行時機，該收斂成一份），還是 **bootstrap／語言邊界造成的必要重複**（跨語言、或需在該語言 runtime 尚不可用時執行，不可收斂）？
+
+- 若為前者 → 收斂為 SSOT（如 R55 `BASE_DENY_CHARS`、DEF-101-238/429）。
+- 若為後者 → **不收斂**，改為「資料抽 SSOT + 機械 parity 鎖」，並確認 parity 鎖確實有前瞻性（能抓到「新增第 N+1 份」而非只驗白名單內既有幾份——R43 曾因此翻修過一次）。
+
+附帶邊界（R56 實測揭露，避免未來高估防護力）：parity 鎖屬正則/靜態掃描類防護，對「同時改名又改寫法」的再發明形狀存在既知盲區，見 `tools/tests/test_windowsapps_guard_cross_consistency.py` 內 `_STUB_NAME_RE`／`_STUB_PREDICATE_RE` 上方的變體對照表與方法論邊界說明（同 DEF-101-333 對本測試家族殘留繞過向量的四方一致裁定：三方各自構造出**不同類型**的繞過手法＝已觸及逐行正則相對於 AST 解析的結構性天花板，此時判準應從「是否可能被繞過」〔永遠是 yes〕切換為「當前投入 vs. 已知具體威脅模式是否相稱」。**R56 訂正**：本處原引 DEF-101-433，但該則前提〔`check_wrapper_thinness.py` 缺前瞻機制〕已於 R56 經 bug-injection 證偽——反向驗證實存於 `tools/check_script_parity.py` 的納管完整性掃描，故其「比例原則裁定」建立在不成立的前提上，不宜續作判例）。
 
 ## 使用方式
 

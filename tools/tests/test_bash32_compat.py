@@ -351,17 +351,32 @@ class TestScanConfigPinning(unittest.TestCase):
     """
 
     def test_scan_trees_pinned(self) -> None:
-        keys = {key for key, _files, _floor in _scan_trees()}
+        """R56 round 5 修正（SA）：與 ps1 側 QA B-3 同步，維持兩平台守門密度對稱。
+
+        原實作 `keys = {key for key, _files, _floor in _scan_trees()}` 之後只斷言
+        keys、`_floor` 從未進入斷言——與 `test_ps51_compat.TestPs51ScanConfigPinning`
+        修正前逐字同構。注入實證：把 `AutoClaude/tools` 的 floor 由 6 改成 1，本模組
+        全部 8 支測試仍 failures=0 errors=0＝「下限值本身被無聲下修」零機械訊號。
+        改為 keys 與 floors 逐值同釘（DEF-101-451：修一邊卻讓兩平台失衡，正是本輪
+        主題所要防的問題）。
+
+        既知邊界（與 ps1 側刻意不同，非疏漏）：本檔 floors ＝實掃數打八折（見
+        `_scan_trees` docstring），故掃描面本來就可先無聲縮水約 20% 才紅；ps1 側
+        floors 與實數零餘裕。本斷言只鎖住「下限值本身被改動／整樹被刪列」這兩條
+        路徑，不收斂那 20% 鬆弛。
+        """
+        keys_floors = [(key, floor) for key, _files, floor in _scan_trees()]
         self.assertEqual(
-            keys,
-            {
-                "tools",
-                "tools/git-hooks",
-                "AutoClaude/tools",
-                "AISDLC_SDD/scripts",
-                "AISDLC_SDD/.githooks",
-                "LATEST/tools",
-            },
+            keys_floors,
+            [
+                ("tools", 4),
+                ("tools/git-hooks", 2),
+                ("AutoClaude/tools", 6),
+                ("AISDLC_SDD/scripts", 4),
+                ("AISDLC_SDD/.githooks", 1),
+                ("LATEST/tools", 4),
+            ],
+            "bash 掃描樹清單或 per-tree 檔數下限被改動——刻意調整請同步改本釘選值",
         )
 
 

@@ -3,7 +3,7 @@
 
 背景：`tools/lib/WindowsAppsGuard.ps1::Test-IsRealPython`（R37 抽出）與
 `bootstrap_core.py::_is_windows_apps_stub`（Python 側）皆只涵蓋各自語言的
-呼叫端，repo 內另有 12 支 tracked bash 腳本（含 `tools/git-hooks/pre-push` 這個
+呼叫端，repo 內另有多支 tracked bash 腳本（含 `tools/git-hooks/pre-push` 這個
 每次 push 都會實際執行的 dispatcher 本體）各自用裸 `command -v python`／
 `command -v python3` 判斷可用性，從未排除 Windows Store App Execution Alias
 空殼——Git Bash on Windows 會繼承 Windows PATH，同樣會命中
@@ -37,8 +37,8 @@ bash 語法解析，因此對下列兩種刻意構造的偽裝手法無鑑別力
   - 把 `is_real_python_candidate` 包進一個語法正確、但整檔從未被呼叫的死
     函式裡（source 行是真的）——本檔不做可達性分析，無法分辨「定義了」與
     「真的被呼叫到」。
-  這兩種繞過會讓 `_has_ssot_guard` 誤判為已收斂，但風險有界：對 12 支已知
-  白名單呼叫端（`_CALLER_FILES`），`test_no_raw_unguarded_python_check_remains`
+  這兩種繞過會讓 `_has_ssot_guard` 誤判為已收斂，但風險有界：對已知白名單
+  呼叫端（`_CALLER_FILES`），`test_no_raw_unguarded_python_check_remains`
   是另一支**不依賴** `_has_ssot_guard` 的獨立安全網（直接對這些檔案做裸
   `command -v python >/dev/null` 字面值 regex 比對），不受此限制影響；只有
   repo-wide 防增生掃描（`test_repo_wide_scan_finds_no_unmigrated_sh_scripts`／
@@ -61,7 +61,38 @@ from pathlib import Path
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 _GUARD_SH = _REPO_ROOT / "tools" / "lib" / "windowsapps_guard.sh"
 
+
+def _latest_sdd_version_name() -> str:
+    """LATEST 版本名（sdd_version.py SSOT；解析失敗即 AssertionError）。比照
+    test_windowsapps_guard_cross_consistency.py::_latest_sdd_root 同款手法：
+    subprocess 呼叫 CLI（非 process 內 import），避免 sys.path 汙染。
+
+    R56：定義位置上移至 `_CALLER_FILES` 之前——該清單內的 LATEST 版呼叫端須以
+    本函式動態組出路徑（原寫死 `AISDLC_SDD_v0.30`），不得再有第二種版本解析方式。
+    """
+    sdd_root = _REPO_ROOT / "AISDLC_SDD"
+    resolver = sdd_root / "scripts" / "sdd_version.py"
+    proc = subprocess.run(
+        [sys.executable, str(resolver), "--sdd-root", str(sdd_root)],
+        capture_output=True, text=True, encoding="utf-8", errors="replace",
+    )
+    name = proc.stdout.strip()
+    if proc.returncode != 0 or not name:
+        raise AssertionError(
+            f"LATEST 解析失敗（sdd_version.py rc={proc.returncode}；stderr="
+            f"{proc.stderr.strip()!r}）——掃描邊界不得靜默縮小"
+        )
+    return name
+
+
+# LATEST 版 SDD 根目錄（模組載入期求值；解析失敗即 fail-loud，不靜默縮面）。
+_LATEST_SDD_ROOT = _REPO_ROOT / "AISDLC_SDD" / _latest_sdd_version_name()
+
 # 目前已知呼叫端（皆已改用 is_real_python_candidate；DEF-101-353 收斂範圍）。
+# 🔴 本清單不得手動維護到「以為對」為止：`test_caller_files_matches_repo_wide_scan`
+# 會以全庫掃描機械斷言本清單恰等於實況（R43 記 9 支、R55 訂為 12 支、R56 實測
+# 15 支——連續三輪人工重數皆錯，故改由機械求值，新增／移除呼叫端時該鎖會指名
+# 差集要求同步）。
 _CALLER_FILES = [
     _REPO_ROOT / "tools" / "git-hooks" / "pre-push",
     _REPO_ROOT / "tools" / "lib" / "git_hooks_install_common.sh",
@@ -83,6 +114,20 @@ _CALLER_FILES = [
     # 註解）與根層 ONBOARDING.md 皆記載過 Windows Git Bash 實跑情境，已改用
     # 共用 guard。
     _REPO_ROOT / "tools" / "macos_smoke_local.sh",
+    # R56 新增：三支「早已收斂、只是從未登記」的呼叫端（實測 grep 全庫命中 15 支、
+    # 本清單只有 12 支）。未登記的代價＝不受 `test_all_known_callers_source_shared_guard`
+    # 與 `test_no_raw_unguarded_python_check_remains` 兩道白名單斷言保護，只剩
+    # repo-wide 前瞻掃描這層（該層對「已收斂→退化為裸判斷」有鑑別力，但對本檔
+    # docstring 記載的兩種偽裝手法失明）。補登記不需改任何 shell 程式碼。
+    # 後兩筆一律以 `_LATEST_SDD_ROOT`（sdd_version.py SSOT 動態解析）組出，不可
+    # 寫死版本目錄名——R56 訂正：初版寫死 `AISDLC_SDD_v0.30`，與
+    # `test_caller_files_matches_repo_wide_scan` 實掃側的動態解析結構性不對稱，
+    # 下一次 Copy-on-Evolve 建 v0.31 時 v0.30 淪為凍結版被實掃排除 →
+    # `declared - actual` 出現這兩筆而打紅 CI，且 LATEST 新版的同名呼叫端反而
+    # 脫離三道白名單斷言保護。
+    _REPO_ROOT / "AISDLC_SDD" / "scripts" / "copy_on_evolve.sh",
+    _LATEST_SDD_ROOT / "tools" / "arch_fitness" / "run_self_evolution.sh",
+    _LATEST_SDD_ROOT / "tools" / "install_hooks" / "install_post_commit.sh",
 ]
 
 # 裸 `command -v python`／`command -v python3` 可用性判斷殘留偵測——只認本 repo
@@ -102,18 +147,32 @@ _LOOSE_RAW_CHECK_RE = re.compile(r"command\s+-v\s+python3?\b")
 # 蓋到已知案例」缺陷（R41 對 _sanitize_component 呼叫點也犯過一次）。改為對
 # git-tracked 全部 `*.sh` 做前瞻掃描；下列為明確判斷「WindowsApps 空殼排除
 # guard 不適用」而豁免的檔案，皆附理由，供未來覆核：
+# R56 修正（SA／SD 各自獨立回報同一根因）：本集合的豁免理由一律須**自足**證明
+# 「該腳本不存在 Windows 執行情境」。禁止以「同上一筆」或「某平台 PATH 上不會有
+# WindowsApps」作為唯一依據——後者已於 R55 被判定論證方向錯誤（見下方
+# `_CALLER_FILES` 內 macos_smoke_local.sh 那一筆的 R55 註解：只證明「本平台 PATH
+# 乾淨」不足以豁免，必須另證「本腳本無 Windows 執行情境」），該筆亦因此被移出本
+# 集合。此告示存在的理由：同一錯誤論證已被複製兩次。
 _EXEMPT_SH_FILES = {
     # macOS 專屬 nightly 薄聚合器（docstring 明文「bash 3.2（macOS /bin/bash）」+
-    # Windows 對等品是完全獨立的 run_local_nightly.ps1），同上理由豁免。
+    # Windows 對等品是完全獨立的 run_local_nightly.ps1）→ 結構性只在 macOS 執行，
+    # Windows Store App Execution Alias 空殼是 Windows 原生 PATH 專屬機制，不會
+    # 出現在 macOS PATH 上。（R56 訂正：原寫「同上理由豁免」，但 R55 已把被指涉
+    # 的前一筆 macos_smoke_local.sh 移出本集合，理由句成為懸空引用。）
     "AutoClaude/tools/run_local_nightly.sh",
     # R44 Architect 深度架構評估新增：本檔docstring 第 2 行明文「由
     # tools/run_local_nightly.ps1 透過 `docker run python:3.11-slim bash
     # /workspace/tools/run_mutmut_in_docker.sh` 呼叫」——結構性只在 Linux
     # container 內執行（官方 python:3.11-slim image 為 base，python3 保證存在於
     # 該映像檔），Windows Store App Execution Alias 空殼是 Windows 原生 PATH
-    # 專屬機制，Linux container 內不可能出現，guard 在此無意義（同
-    # macos_smoke_local.sh／run_local_nightly.sh 的「非 Windows 執行環境」豁免
-    # 精神，只是換成 Linux container 而非 macOS）。
+    # 專屬機制，Linux container 內不可能出現；且本腳本無任何 Windows 直接執行
+    # 情境——唯一呼叫端是 run_local_nightly.ps1 的 `docker run`，宿主端只負責啟
+    # 容器、腳本本體始終在容器內跑。
+    # （R56 訂正：原文結尾援引「同 macos_smoke_local.sh／run_local_nightly.sh 的
+    # 『非 Windows 執行環境』豁免精神」，但 macos_smoke_local.sh 已於 R55 因該論證
+    # 方向錯誤被移出本集合、成為懸空且已被否決的先例引用。改為上述自足論證：
+    # 前半證「容器內 PATH 不可能有 WindowsApps」，後半證「無 Windows 執行情境」，
+    # 後者才是本集合的真正判準。）
     "AutoClaude/tools/run_mutmut_in_docker.sh",
 }
 
@@ -184,24 +243,8 @@ def _tracked_extensionless_hook_files() -> list[str]:
 
 _FROZEN_SDD_VERSION_RE = re.compile(r"^AISDLC_SDD/(AISDLC_SDD_v\d+\.\d+)/")
 
-
-def _latest_sdd_version_name() -> str:
-    """LATEST 版本名（sdd_version.py SSOT；解析失敗即 AssertionError）。比照
-    test_windowsapps_guard_cross_consistency.py::_latest_sdd_root 同款手法：
-    subprocess 呼叫 CLI（非 process 內 import），避免 sys.path 汙染。"""
-    sdd_root = _REPO_ROOT / "AISDLC_SDD"
-    resolver = sdd_root / "scripts" / "sdd_version.py"
-    proc = subprocess.run(
-        [sys.executable, str(resolver), "--sdd-root", str(sdd_root)],
-        capture_output=True, text=True, encoding="utf-8", errors="replace",
-    )
-    name = proc.stdout.strip()
-    if proc.returncode != 0 or not name:
-        raise AssertionError(
-            f"LATEST 解析失敗（sdd_version.py rc={proc.returncode}；stderr="
-            f"{proc.stderr.strip()!r}）——掃描邊界不得靜默縮小"
-        )
-    return name
+# 注：`_latest_sdd_version_name()` 定義於本檔前段（`_CALLER_FILES` 之前），
+# 因該清單的 LATEST 版條目須在模組載入期即以其動態組出路徑（R56）。
 
 
 def _exclude_frozen_sdd_versions(paths: list[str], latest_name: str) -> list[str]:
@@ -590,6 +633,61 @@ class TestBashCallersEnrollment(unittest.TestCase):
                     f"{f} 未在非註解行同時 dot-source 共用 guard 檔案並呼叫 "
                     "is_real_python_candidate 判斷 python 可用性（或該區塊已被注釋掉）",
                 )
+
+    def test_caller_files_matches_repo_wide_scan(self) -> None:
+        """R56 新增（三名審查員各自獨立回報同一根因）：`_CALLER_FILES` 是人工
+        維護的白名單，歷輪計數 R43 記 9 支、R55 花一整項（DEF-101-428）訂為
+        12 支、R56 實測 15 支——「每輪人工重數、每輪都數錯」。單純再把 12 改成
+        15 只會讓同形狀漂移在下一輪復發，故本鎖改為機械求值：以全庫 git-tracked
+        bash 檔（排除 AISDLC_SDD 凍結版與 SSOT 自身）掃出「真正接上共用 guard」
+        （`_has_ssot_guard`）的集合，斷言其恰等於 `_CALLER_FILES`。
+
+        未登記的代價（為何這不只是文件潔癖）：落單呼叫端不受
+        `test_all_known_callers_source_shared_guard` 與
+        `test_no_raw_unguarded_python_check_remains` 兩道白名單斷言保護，只剩
+        repo-wide 前瞻掃描一層——而本檔 docstring 已明文記載該層對 heredoc 偽裝
+        與死函式兩種手法失明。
+
+        LATEST 版演進（Copy-on-Evolve 產生新版路徑）不會使本鎖翻紅——清單側的
+        LATEST 版條目與本鎖的實掃側同走 `_latest_sdd_version_name()`（R56 訂正：
+        初版清單側寫死 `AISDLC_SDD_v0.30`，兩側解析方式不對稱，建新版即打紅
+        CI）。真正會翻紅的只有「呼叫端新增／移除／退化為裸判斷而清單未同步」，
+        那是刻意的 fail-loud。此模式與 .ps1 側既有
+        `test_known_call_sites_still_exist` 同源。"""
+        latest_name = _latest_sdd_version_name()
+        ssot_rel = str(_GUARD_SH.relative_to(_REPO_ROOT)).replace("\\", "/")
+        scoped = _exclude_frozen_sdd_versions(
+            _tracked_sh_files() + _tracked_extensionless_hook_files(), latest_name
+        )
+        actual: set[str] = set()
+        for rel in scoped:
+            if rel == ssot_rel:
+                continue
+            path = _REPO_ROOT / rel
+            if not path.is_file():
+                continue
+            if _has_ssot_guard(path.read_text(encoding="utf-8", errors="replace")):
+                actual.add(rel)
+        declared = {str(f.relative_to(_REPO_ROOT)).replace("\\", "/") for f in _CALLER_FILES}
+        # R56 防復發（立即訊號，不等到下次 Copy-on-Evolve 才炸）：清單側若出現
+        # 非 LATEST 的版本目錄字面值，即代表又寫死了版本路徑——建新版當下才翻紅
+        # 的鎖等於把成本轉嫁給建版者，此處提前擋。
+        frozen_declared = sorted(
+            rel for rel in declared
+            if (m := _FROZEN_SDD_VERSION_RE.match(rel)) and m.group(1) != latest_name
+        )
+        self.assertEqual(
+            frozen_declared, [],
+            f"_CALLER_FILES 出現非 LATEST（{latest_name}）的版本目錄字面值："
+            f"{frozen_declared}——LATEST 版條目一律用 `_LATEST_SDD_ROOT` 組出，"
+            f"寫死版本名會在下一次 Copy-on-Evolve 建版時打紅本鎖",
+        )
+        self.assertEqual(
+            actual, declared,
+            f"_CALLER_FILES 與全庫實掃不符——實掃有、清單無（請補登記）："
+            f"{sorted(actual - declared)}；清單有、實掃無（已移除／改名／退化，"
+            f"或 AISDLC_SDD LATEST 版已演進需改寫路徑）：{sorted(declared - actual)}",
+        )
 
     def test_no_raw_unguarded_python_check_remains(self) -> None:
         for f in _CALLER_FILES:

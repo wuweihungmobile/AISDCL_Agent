@@ -18,10 +18,18 @@ untracked＝輸出，邊界由 git 單一事實源裁定。
   4. tracked FSM-STATE-TEMPLATE.yaml（DEF-15-001 種子模板真輸入）→ 必保留（tracked⇒kept）；
   5. 拒絕覆蓋既有目標 → exit 1；來源不存在 → exit 1；參數數不對 → exit 2；
      來源存在但未 tracked 於 HEAD → exit 1（git archive 版專屬防呆）。
+
+R56 追加三條跨平台（macOS ⇄ Windows 11）迴歸鎖（見檔尾同名區塊的完整 WHY）：
+  6. 建版產物須遵守 repo 行尾政策（`.ps1`→CRLF、`.sh`→LF），且行尾**只能是 HEAD 的函式**
+     ——修法＝版本子樹自帶 `.gitattributes`（自我傳播），非 `--worktree-attributes`；
+  7. 生產佈局下 LATEST 版目錄須自帶且已入庫該 `.gitattributes`（第 6 條的根因側鎖）；
+  8. 共用 WindowsApps guard 的相對路徑在**真實 monorepo 佈局**下必須真的指到檔案
+     （dot-source 區塊刻意 fail-open，路徑寫錯與隔離環境對腳本長得一模一樣）。
 """
 from __future__ import annotations
 
 import os
+import re
 import shutil
 import subprocess
 import tempfile
@@ -29,7 +37,7 @@ from pathlib import Path
 
 import pytest
 
-from scripts import bash_probe  # isort: skip（首方/三方分組隨 cwd 而異，跳過排序消除歧義）
+from scripts import bash_probe, sdd_version  # isort: skip（首方/三方分組隨 cwd 而異，跳過排序消除歧義）
 
 # scripts/tests/ → scripts/ → AISDLC_SDD
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -372,3 +380,143 @@ def test_auto_regens_framework_status_on_evolve_def_96_001(repo: Path):
     # idempotent 兼證：腳本輸出確有重生步驟（非靜默略過）
     assert "framework_status_snapshot" in proc.stdout or "FRAMEWORK_STATUS" in proc.stdout, \
         f"建版輸出應含 SSOT 重生步驟\n{proc.stdout}"
+
+
+# ── R56（跨平台複審 Architect）：行尾政策由「版本子樹自帶 .gitattributes」達成 ────────
+def test_archive_applies_eol_policy_head_pure(repo: Path):
+    """R56 意圖鎖：建版產物的 `.ps1` 必為 CRLF、`.sh` 必為 LF，**且行尾只能是 HEAD 的函式**。
+
+    WHY（缺陷本體）：`git archive HEAD:<subtree>` 的 attribute 查找基準是**被匯出的那棵樹**。
+    版本目錄若不自帶 `.gitattributes`，父層 `AISDLC_SDD/.gitattributes` 的
+    `*.ps1 text eol=crlf` 完全不參與 → 直接吐 blob 原始 LF：本 repo 的**官方版本產生器**
+    每次都產出違反自家政策的 LF `.ps1`（v0.30 實測 4 支），Windows 原生 PowerShell 取到的
+    新版腳本行尾與工作樹其餘 `.ps1` 不一致。雙端失明：本機 `git status` 因 checkin 正規化
+    （CRLF→LF blob）看不出差異、CI 是全新 checkout（smudge 已套用）也結構性看不到。
+
+    WHY（為何是這個修法，而非 `--worktree-attributes`）：修法＝讓版本子樹**自帶**
+    `.gitattributes`（隨 git archive 自我傳播到每個新版，永久免旗標）。`--worktree-attributes`
+    的語意正是「改以**工作樹**的 .gitattributes 查找」，會把匯出行尾變成工作樹狀態的函式，
+    與 copy_on_evolve.sh 第 15/23 行明文宣告、並由 `HEAD:$FROM_REL` 硬閘強制的核心不變式
+    「匯出＝HEAD 的純函式」直接衝突（而該腳本對 .gitattributes 是否已 commit 毫無對應的閘）。
+
+    鑑別力（兩種退化各自轉紅）：
+      * 版本子樹的 `.gitattributes` 遺失／未 commit → 匯出退回 LF → CRLF 斷言紅；
+      * `--worktree-attributes` 回歸 → 改讀下方**刻意未 commit 的敵意根層 .gitattributes**
+        （`*.ps1 eol=lf`）→ 匯出變 LF → 同一條 CRLF 斷言紅。
+    另斷言匯出含 `.gitattributes` 本體＝自我傳播鏈不斷（新版仍免旗標）。
+    """
+    src = repo / "AISDLC_SDD_vTEST"
+    (src / "tools").mkdir(parents=True)
+    # 版本子樹自帶行尾政策（＝生產修法的最小同構：AISDLC_SDD_v0.30/.gitattributes）
+    (src / ".gitattributes").write_text(
+        "* text=auto eol=lf\n*.sh        text eol=lf\n*.ps1       text eol=crlf\n",
+        encoding="utf-8",
+    )
+    # 以工作樹政策形狀寫入（.ps1 CRLF / .sh LF）；git add 會把 blob 正規化為 LF，
+    # 故「匯出後 .ps1 是否為 CRLF」純由 archive 的 attribute 查找決定。
+    (src / "tools" / "w.ps1").write_bytes(b"Write-Host 'hi'\r\n")
+    (src / "tools" / "u.sh").write_bytes(b"echo hi\n")
+    _git(repo, "add", "AISDLC_SDD_vTEST")
+    _git(repo, "commit", "-q", "-m", "eol policy source")
+    # 敵意工作樹狀態：**刻意不 commit**（HEAD 不含之）。無旗標時 archive 完全看不到它；
+    # 一旦 --worktree-attributes 回歸即會讀到並把 .ps1 改成 LF ⇒ 純函式不變式的注入探針。
+    (repo / ".gitattributes").write_text(
+        "* text=auto eol=lf\n*.ps1       text eol=lf\n", encoding="utf-8"
+    )
+
+    proc = _run(repo, "AISDLC_SDD_vTEST", "AISDLC_SDD_vNEW")
+    assert proc.returncode == 0, f"helper 非零退出：{proc.returncode}\n{proc.stderr}"
+    new = repo / "AISDLC_SDD_vNEW"
+    ps1 = (new / "tools" / "w.ps1").read_bytes()
+    sh = (new / "tools" / "u.sh").read_bytes()
+    assert b"\r\n" in ps1, (
+        "建版產物 .ps1 為 LF，違反 `*.ps1 text eol=crlf`——兩種退化之一："
+        "(a) 版本子樹的 .gitattributes 遺失/未 commit（HEAD:<subtree> 查不到政策）；"
+        "(b) git archive 被加回 --worktree-attributes（改讀未 commit 的工作樹政策，"
+        "匯出不再是 HEAD 的純函式）"
+    )
+    assert b"\r" not in sh, (
+        "建版產物 .sh 混入 CR，違反 `*.sh text eol=lf`"
+        "（Linux/Docker/act 下 CRLF 會噴 `bash: $'\\r': command not found`）"
+    )
+    assert (new / ".gitattributes").is_file(), (
+        "新版未繼承 .gitattributes ⇒ 自我傳播鏈斷裂，下一輪 Copy-on-Evolve 會退回 LF .ps1"
+    )
+
+
+def test_latest_version_carries_own_gitattributes():
+    """R56 意圖鎖（生產佈局）：LATEST 版目錄須**自帶且已入庫**的 `.gitattributes`。
+
+    WHY：上一條測試證明「子樹自帶政策 ⇒ 匯出行尾正確」，但那是在 tmp repo 內自造的；
+    真實建版的行尾正確性取決於**真實 LATEST 版目錄裡有這個檔且進得了 HEAD tree**
+    （`git archive HEAD:<subtree>` 只認 committed 內容）。缺了它，建版靜默退回 LF `.ps1`
+    而所有既有閘門全綠（雙端失明，見上一條 WHY）。此鎖即針對該根因：檔案被刪、
+    或新版目錄以別的方式（非 Copy-on-Evolve 自我傳播）建立而漏帶，立即轉紅。
+    """
+    latest = sdd_version.latest_version_name(REPO_ROOT, warn=lambda _m: None)
+    assert latest, "無法解析 LATEST 版本目錄（sdd_version SSOT）"
+    rel = f"{latest}/.gitattributes"
+    ga = REPO_ROOT / rel
+    assert ga.is_file(), (
+        f"LATEST 版目錄缺 .gitattributes：{ga}——git archive 'HEAD:<版本子樹>' 的 attribute "
+        "查找基準是該子樹，缺此檔則父層 `*.ps1 text eol=crlf` 完全不參與，建版產物的 .ps1 "
+        "靜默退回 LF（Windows 原生 PowerShell 端行尾不一致）"
+    )
+    tracked = _git(REPO_ROOT, "ls-files", "--error-unmatch", "--", rel)
+    assert tracked.returncode == 0, (
+        f"{rel} 未被 git tracked ⇒ 進不了 HEAD tree ⇒ git archive 看不到它，"
+        f"行尾政策等同不存在：\n{tracked.stderr}"
+    )
+    body = ga.read_text(encoding="utf-8")
+    assert re.search(r"^\*\.ps1\s+text\s+eol=crlf\s*$", body, re.MULTILINE), \
+        f"{rel} 缺 `*.ps1 text eol=crlf`（Windows 原生 PowerShell 行尾政策）"
+    assert re.search(r"^\*\.sh\s+text\s+eol=lf\s*$", body, re.MULTILINE), \
+        f"{rel} 缺 `*.sh text eol=lf`（Linux/Docker/act 下 CRLF 會噴 $'\\r' 錯誤）"
+
+
+# ── R56（跨平台複審 QA）：WindowsApps guard 接線在「生產形狀」下的路徑迴歸鎖 ────────
+def test_windowsapps_guard_path_resolves_in_production_layout():
+    """R56 意圖鎖：copy_on_evolve.sh 頭部算出的共用 guard 路徑，在真實 monorepo 佈局下
+    必須真的指到檔案。
+
+    WHY：該 dot-source 區塊是**刻意 fail-open** 的降級設計（隔離 harness 無完整 monorepo
+    `tools/lib/` 結構時只 warn 不中止；此設計本身正確，不在此質疑）。但代價是「路徑寫錯」
+    與「隔離環境」對腳本而言長得一模一樣——把 `../../` 誤寫成 `../../../`（scripts/ 搬家或
+    monorepo 層級調整的最寫實形狀，字面值 `windowsapps_guard.sh` 完好無損）時 guard 靜默
+    失守，腳本照常走到 `_PY="${PYTHON:-python}"`；Windows 11 上 WindowsApps 空殼排 PATH
+    前面即直接執行 Store 別名空殼，建版後三個同步 block 產物靜默毀損。
+
+    既有防護對此形狀全數失明（R56 QA bug-injection 實測五組全綠）：本檔其餘測試一律在
+    隔離 tmp repo 內跑（恆走 fail-open 分支，對真實路徑零鑑別力）；根層
+    `tools/tests/test_windowsapps_guard_bash_parity.py` 的 `_has_ssot_guard` 是**文字**掃描
+    （只認關鍵字出現在非註解行，不解析路徑是否可解析）。
+
+    本測試以**生產形狀**（真實檔案位置、如檔頭用法般以 repo 根相對路徑呼叫）跑腳本並停在
+    參數數檢查（早於任何 git 操作＝零副作用、不建任何目錄），斷言 stderr 不含 fail-open
+    降級警告。
+
+    🔴 路徑一律走 **posix 相對**形狀（＝copy_on_evolve.sh 檔頭第 5 行的官方用法，亦與本檔
+    `_run()` / ci-gate.ps1 慣例一致），**不可**改成 `str(HELPER)`：Windows 上那是反斜線絕對
+    路徑，Git Bash 的 `dirname`（純字彙比對、只認 `/`）會回 `.` → 腳本第 36 行的
+    `cd "$(dirname "${BASH_SOURCE[0]}")" && pwd` 解析成 cwd（＝AISDLC_SDD）而非 scripts/ →
+    `../../tools/lib/` 指到 monorepo 根**的上一層** → 反而觸發本測試要抓的 fail-open 警告，
+    以「看似 guard 失守」的假紅打紅 windows-smoke 閘門（R56 SA 機械取證）。
+    """
+    guard = REPO_ROOT.parent / "tools" / "lib" / "windowsapps_guard.sh"
+    assert guard.is_file(), (
+        f"共用 guard 不在預期位置：{guard}"
+        "——monorepo 佈局變動時必須同步 copy_on_evolve.sh 內的相對路徑"
+    )
+    proc = subprocess.run(
+        [_BASH_PLAIN, "scripts/copy_on_evolve.sh"],
+        cwd=str(REPO_ROOT), capture_output=True, text=True,
+        encoding="utf-8", errors="replace", timeout=60, env=_clean_git_env(),
+    )
+    assert proc.returncode == 2, (
+        f"零引數應停在參數數檢查 exit 2（確保本測試零副作用）：rc={proc.returncode}\n"
+        f"{proc.stdout}\n{proc.stderr}"
+    )
+    assert "windowsapps_guard.sh" not in proc.stderr and "略過 WindowsApps" not in proc.stderr, (
+        "copy_on_evolve.sh 在真實 monorepo 佈局下仍落入 fail-open 降級分支＝共用 WindowsApps "
+        f"guard 路徑失效（guard 靜默失守，Windows 11 上會直接執行 Store 空殼）：\n{proc.stderr}"
+    )

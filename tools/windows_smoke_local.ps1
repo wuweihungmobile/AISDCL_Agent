@@ -13,11 +13,14 @@
 # Windows PowerShell 5.1 相容（禁 &&/|| 鏈接、三元、??、?.；$LASTEXITCODE 顯式檢查）。
 #
 # 涵蓋（對照 windows-compat-ci.yml windows-smoke 各 step；預期 PASS 總數 = 12）：
-#   [1] PowerShell parse 檢查：根層 tools/（含 tools/lib/）全部 active .ps1 以
+#   [1] PowerShell parse 檢查：active .ps1 **四棵樹**（根層 tools/ + AutoClaude/tools/
+#       + AISDLC_SDD/scripts/ + AISDLC_SDD LATEST 版，皆遞迴）以
 #       [System.Management.Automation.Language.Parser]::ParseFile 驗 0 error
-#       （對本 repo 直跑、唯讀。凍結版 AISDLC_SDD/AISDLC_SDD_v0.01~v0.29 位於
-#       AISDLC_SDD/ 之下、依凍結紀律不回改，本就不在根層 tools/ 掃描範圍。
-#       鏡射 root-infra-ci.yml「pwsh 語法解析」step 的根層子集）
+#       （對本 repo 直跑、唯讀。凍結版 AISDLC_SDD/AISDLC_SDD_v0.01~v0.(N-1) 依凍結
+#       紀律不回改 → 排除；LATEST 由 scripts/sdd_version.py SSOT 解析，空值 Fail-Item。
+#       R56 起與 root-infra-ci.yml「pwsh 語法解析」step **同四棵樹**，不再只掃根層
+#       子集——原根層子集使 13 支子專案 active .ps1 在 Windows 本機零語法訊號，
+#       與同輪 macOS 側 [1/7] 擴面後方向相反的不對稱。附 per-tree 檔數下限釘選）
 #   [-] fake repo 建立（git clone -c core.longpaths=true HEAD → OS temp；記 1 點）
 #   [2] AutoClaude/tools/install_git_hooks.ps1 於 fake repo 安裝／解除往返
 #   [3] install_git_hooks.ps1 於 linked worktree 內應拒絕 exit 1（worktree add 顯式
@@ -300,10 +303,50 @@ if ($dirty) {
 }
 
 try {
-  # ── [1/9] PowerShell parse 檢查（根層 tools/ 全部 active .ps1，唯讀）──────────
+  # ── [1/9] PowerShell parse 檢查（四棵樹 active .ps1，唯讀）────────────────────
+  # R56 修正（Architect round 3）：本步驟原僅掃根層 tools/（8 支），而 R56 同輪已把
+  # macOS 對等品 tools/macos_smoke_local.sh [1/7] 由「根層 tools/」擴為與
+  # root-infra-ci.yml 第 1 道同一份清單。該擴面的立論正是「平台待遇不對稱」，結果
+  # 不對稱只是從 CI 層搬到本機層、方向恰好相反：CI 第 2 道掃四棵樹（21 支 active
+  # .ps1），Windows 本機側卻只掃根層 8 支，13 支（含 install_git_hooks.ps1／
+  # local_ci_gate.ps1 等 AutoClaude/AISDLC_SDD 側入口）在本機零語法訊號，只能燒 CI
+  # 額度才發現 parse error。故擴為與 root-infra-ci.yml 第 2 道同四棵樹、皆 -Recurse。
+  # 凍結版 AISDLC_SDD/AISDLC_SDD_v0.01~v0.(N-1) 依紀律不回改 → 排除；LATEST 一律
+  # 委派 AISDLC_SDD/scripts/sdd_version.py SSOT 解析（DEF-101-133，禁自行實作版本
+  # glob/regex），空值 Fail-Item 不靜默縮面（鏡射該 CI step 的 throw 語意）。
+  # per-tree 檔數下限釘選（防單棵樹目錄搬家/樣式改壞後靜默縮面）＝2026-07-27 實測
+  # 各樹支數，刻意刪減時同步下修（慣例對齊 tools/tests/test_bash32_compat.py）。
   Write-Host ''
-  Write-Host '--- [1/9] Parser 解析檢查（根層 tools/ 含 tools/lib/ 全部 .ps1，對本 repo 直跑）---'
-  $ps1Files = @(Get-ChildItem -Path (Join-Path $RepoRoot 'tools') -Recurse -Filter *.ps1 -File)
+  Write-Host '--- [1/9] Parser 解析檢查（active .ps1 四棵樹：tools/ + AutoClaude/tools/ + AISDLC_SDD/scripts/ + LATEST，皆遞迴；對本 repo 直跑）---'
+  $sddRoot = Join-Path $RepoRoot 'AISDLC_SDD'
+  $latestName = ''
+  $resolver = Join-Path $sddRoot 'scripts\sdd_version.py'
+  if (Test-Path -LiteralPath $resolver) {
+    $latestName = (& python $resolver --sdd-root $sddRoot | Out-String).Trim()
+  }
+  $ps1Trees = @(
+    @{ Rel = 'tools'; Floor = 8 },
+    @{ Rel = 'AutoClaude\tools'; Floor = 7 },
+    @{ Rel = 'AISDLC_SDD\scripts'; Floor = 2 }
+  )
+  if ($latestName) {
+    Write-Host "    AISDLC_SDD LATEST 版：${latestName}（其餘凍結版排除）"
+    $ps1Trees += @{ Rel = (Join-Path 'AISDLC_SDD' $latestName); Floor = 4 }
+  } else {
+    Fail-Item 'AISDLC_SDD LATEST 解析失敗（scripts/sdd_version.py 無輸出）——掃描邊界不得靜默縮小'
+  }
+  $ps1Files = @()
+  $treeBad = 0
+  foreach ($tree in $ps1Trees) {
+    $treeFull = Join-Path $RepoRoot $tree.Rel
+    $found = @(Get-ChildItem -Path $treeFull -Recurse -Filter *.ps1 -File -ErrorAction SilentlyContinue)
+    Write-Host "    $($tree.Rel)：$($found.Count) 支（下限 $($tree.Floor)）"
+    if ($found.Count -lt $tree.Floor) {
+      Fail-Item "active .ps1 掃描面異常縮小：$($tree.Rel) 僅 $($found.Count) 支（現況應 >= $($tree.Floor)）——目錄搬家或 Get-ChildItem 樣式疑似被改壞"
+      $treeBad += 1
+    }
+    $ps1Files += $found
+  }
   $parseBad = 0
   foreach ($f in $ps1Files) {
     $tokens = $null
@@ -317,10 +360,8 @@ try {
       $parseBad += 1
     }
   }
-  if ($ps1Files.Count -eq 0) {
-    Fail-Item '根層 tools/ 下找不到任何 .ps1（掃描異常，非假 PASS）'
-  } elseif ($parseBad -eq 0) {
-    Pass-Item "Parser 解析全數通過（$($ps1Files.Count) 檔）"
+  if ($parseBad -eq 0 -and $treeBad -eq 0 -and $latestName) {
+    Pass-Item "Parser 解析全數通過（$($ps1Files.Count) 檔／四棵樹）"
   }
 
   # ── 建立 fake repo（供 [2]~[6]；git clone HEAD → OS temp）─────────────────────

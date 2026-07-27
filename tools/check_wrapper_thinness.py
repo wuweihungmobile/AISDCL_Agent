@@ -21,6 +21,13 @@ dev_start.py。R12（DEF-101-070 ② 收斂案）AutoClaude/tools/local_ci_gate 
   3. 【診斷輔助】原黑名單降級為 advisory 提示——只在 hash 已紅時附加印出
      命中的樣板關鍵字，幫助定位「長出了什麼」；不再是權威判定。
 
+職責邊界（R56 補述，DEF-101-433 兩輪誤判為缺口的根因＝兩支工具的分工從未互相標註）：
+  本檔只負責「**已註冊**薄殼不退化」（_PINNED_SHA256 內的對子）。
+  「**新增**薄殼是否被註冊」由 tools/check_script_parity.py 反向驗證——它掃描全庫成對
+  腳本，未納管者即 fail-loud 並列出三條納管途徑（_MARKER_PAIRS／掛本檔 hash 釘選／
+  _EXEMPT_PAIRS 附帳本依據），另有「thinness 交叉鎖」比對雙清單鍵集合一致。
+  兩者互補，缺一即出現前瞻盲區；修改任一支的納管邏輯時請同步檢視另一支。
+
 執行：python tools/check_wrapper_thinness.py
 測試：tools/tests/test_check_wrapper_thinness.py
 """

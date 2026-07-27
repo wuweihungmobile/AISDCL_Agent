@@ -283,6 +283,91 @@ class TestEscalationDumpHandoverChecklist:
         assert "/tmp/eval.log" in joined    # is_stuck
         assert "grep" in joined             # assertion_mismatch
 
+    # ── R56 迴歸鎖（DEF-101-432）：接手清單是跨平台「顯示文字」 ──────────────
+    # generate_handover_checklist() 的輸出經 to_markdown() 包進標題明寫「可直接執行」
+    # 的 ```bash 圍欄、再由 save() 落盤成 escalation dump，人類會在自己的平台原樣複製
+    # 執行。DEF-101-432 的病灶是清單內含 POSIX-only 指令（shell glob 展開／cat|tail／
+    # grep|head），Windows cmd.exe 與 PowerShell 5.1 皆必然失敗，而該缺陷從 Gap-010-D
+    # 落地起到 R56 都沒有任何測試會紅（既有測試只斷言 "py_compile"/"grep" 出現）。
+    # 下面兩支測試鎖的是「意圖」而非字面：在清單裡新增**下方標記表命中**的 POSIX-only
+    # 寫法而未附 Windows 等效提示的改動，以及讓 playbook_path 失去引號的改動，都會立刻紅。
+    #
+    # 🔴 覆蓋範圍的誠實界定（R56 round 3 訂正）：本鎖是**具名標記表**偵測，不是「任何
+    # POSIX-only 寫法」的通用判定 —— 標記表沒列到的寫法（`test -f`、反引號、`$( )`
+    # 命令替換、` && `／` || ` 串接等）仍會靜默通過，需人工把關。刻意不把標記表擴成無
+    # 上限清單：那是正則軍備競賽（本 repo 已在 DEF-101-433 明訂要避免的方法論邊界）。
+    # 要擴大保護範圍就往 POSIX_ONLY_MARKERS 加一筆即可。
+
+    # POSIX-only 判準：cmd.exe / PowerShell 5.1 皆無此外部工具（PowerShell 有 ls／cat
+    # 別名但為物件流、非 POSIX 文字管線語意），或需要 POSIX 殼才會展開的萬用字元
+    # （Windows 兩殼都不對外部程式引數做 glob，由程式自行處理），或殼專屬重導語法。
+    POSIX_ONLY_MARKERS = (
+        "cat ", "tail ", "head ", "grep ", "sed ", "awk ", "wc ", "ls ", "2>&1", "*",
+    )
+
+    # 遞迴語意等價判準（R56 round 3 新增）：只斷言「同行有附 Windows 提示」對**錯誤的**
+    # 提示零鑑別力 —— 本輪原先落地的 `sls 'assert.*==' tests\*.py` 就通過了那道鎖，但
+    # Select-String 沒有遞迴語意（-Path 萬用字元只匹配該層），實測本 repo tests/ 下命中
+    # 'assert.*==' 的 .py 檔非遞迴只看到 36 個、遞迴為 237 個（漏 85%），使用者卻會得到
+    # 「已檢查完」的假象 —— 比沒有提示更危險。故 POSIX 側為遞迴搜尋時，Windows 提示必須
+    # 也帶遞迴標記。這只是「最低可信度」檢查，不是等效性證明（提示的其餘語意仍靠人工）。
+    RECURSIVE_POSIX_MARKERS = ("grep -r", "grep -R", "find ")
+    RECURSIVE_WINDOWS_MARKERS = ("-r", "-Recurse", "/s", "compileall")
+
+    def test_posix_only_commands_carry_windows_equivalent_hint(self):
+        """清單裡每一條命中 POSIX_ONLY_MARKERS 的**指令行**都必須在同一行附 Windows
+        等效提示，且該提示在「遞迴」這個語意維度上不得比 POSIX 側窄。
+
+        刻意逐行掃描而非比對特定字面值：這樣未來有人新增別的 `... | head -5`
+        之類（標記表命中的）寫法時，這道鎖照樣會紅；標記表未涵蓋的寫法見上方
+        「覆蓋範圍的誠實界定」註解。
+
+        R56 round 3：標記比對改在**剝掉 Windows 提示後的指令本體**上做（原本
+        `marker in line` 連提示文字一起比對，提示裡出現 `grep`／`*` 之類字樣時會
+        產生混淆判定），並新增遞迴語意等價斷言。
+        """
+        dump = _make_escalation_dump(
+            suspect_test_file=True,
+            is_stuck=True,
+            suspect_assertion_mismatch=True,
+            is_worsening=True,
+            is_oscillating=True,
+        )
+        for line in dump.generate_handover_checklist():
+            if not line.strip() or line.lstrip().startswith("#"):
+                continue  # 純說明行不是要被執行的指令
+            cmd_part, _, win_hint = line.partition("Windows")
+            if any(marker in cmd_part for marker in self.POSIX_ONLY_MARKERS):
+                assert win_hint, (
+                    f"指令行含 POSIX-only 寫法但未附 Windows 等效提示（DEF-101-432 復發）："
+                    f"{line!r}"
+                )
+            if any(marker in cmd_part for marker in self.RECURSIVE_POSIX_MARKERS):
+                assert any(m in win_hint for m in self.RECURSIVE_WINDOWS_MARKERS), (
+                    f"POSIX 側是遞迴搜尋，Windows 等效提示卻無遞迴標記 "
+                    f"{self.RECURSIVE_WINDOWS_MARKERS} —— 照著執行會漏掉子目錄卻以為"
+                    f"已檢查完（實測漏 85%）：{line!r}"
+                )
+
+    def test_resume_command_quotes_playbook_path(self):
+        """恢復執行指令必須把 playbook_path 包在雙引號內。
+
+        Windows 使用者路徑常含空白（C:\\Users\\John Smith\\...），未加引號會被殼切成
+        多個引數而執行失敗；雙引號是 POSIX sh 與 cmd.exe 唯一共通的引用字元
+        （單引號在 cmd.exe 不是引號字元，會被原樣併入路徑）。
+        """
+        # R56 修正：下一行對根層守門 test_no_windows_drive_fake_paths 走行內豁免。
+        # WHY 合法：該字面值是「使用者原樣輸入的 Windows 路徑」測試輸入，全程只做字串
+        # 比對（f'"{win_path}"' in resume[0]），不經任何 Path()/pathlib join，
+        # 故不存在 DEF-101-149 的「POSIX 上非絕對路徑 → join 語意分歧假紅」病灶。
+        win_path = r"C:\Users\John Smith\My Projects\pb.yaml"  # platform-ok: 純字串斷言
+        dump = _make_escalation_dump(playbook_path=win_path)
+        resume = [a for a in dump.generate_handover_checklist() if a.startswith("autoclaude ")]
+        assert resume, "清單應含 autoclaude 恢復執行指令"
+        assert f'"{win_path}"' in resume[0], (
+            f"playbook_path 未以雙引號包住，含空白路徑會被切成多個引數：{resume[0]!r}"
+        )
+
 
 # ──────────────────────────────────────────────
 # Gap-010-C：CrossStepStateValidator

@@ -11,8 +11,14 @@ toplevel），`cat > .../post-commit` 會因路徑中途元件（`.git`）是檔
 
 `.ps1` 版本已有 `.github/workflows/windows-compat-ci.yml` 的 git-worktree 實跑測試
 鎖住此修復；但 `.sh` 版本完全零自動化覆蓋——`root-infra-ci.yml` 對 `.sh` 只做
-`bash -n` 語法檢查（不執行邏輯），且其 `find tools -type f ...` 掃描範圍本不涵蓋
+`bash -n` 語法檢查（不執行邏輯），且**本檔建立當時**其 `find tools -type f ...`
+掃描範圍甚至不涵蓋
 `AISDLC_SDD/AISDLC_SDD_v0.30/tools/install_hooks/install_post_commit.sh` 這個路徑。
+R56 修正（本檔立論不變，僅掃描面現況需同步）：該 `bash -n` 步驟已於 R56 擴為
+`git ls-files -z -- '*.sh' …` 全庫 tracked `*.sh`（實測 n=174），本檔待測腳本現已
+落入掃描面，故上句「掃描範圍不涵蓋」僅描述歷史狀態、勿再當現況引用；但 `bash -n`
+至今仍只驗語法、不執行邏輯，攔不下路徑解析**行為**回歸，本檔的機械回歸鎖依然是
+唯一防線。
 兩位審查者（SA/QA）皆手動於 macOS 驗證過修復正確，但一致指出這只是一次性人工驗證、
 非機器化回歸防護——下次若有人改動 `.sh` 版重新引入路徑解析 bug，不會有任何自動化
 訊號攔下。本檔補上對等的機械回歸鎖。

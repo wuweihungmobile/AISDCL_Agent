@@ -7,7 +7,10 @@
 # 🔴 遮蔽語意（準確版）：子專案 .gitattributes 的 `*` 規則會「整體遮蔽」根層特定
 # pattern（git 對每個檔案只採計「最深層那份 .gitattributes 中最後一條命中規則」，
 # 子專案的 `* text=auto eol=lf` 兜底會蓋掉根層的 *.ps1/*.jar 等特定規則），
-# 故根層 / AutoClaude / AISDLC_SDD 三檔必須各自完備，不能依賴根層補漏。
+# 故根層與**各**子專案／版本子樹自帶的 `.gitattributes` 必須各自完備，不能依賴根層補漏。
+# R56 round 5 修正：原文寫死「三檔」，新增 AISDLC_SDD 版本子樹自帶政策後即過期
+# （該子樹檔頭自述同一類別卻未被列入）；改為不寫死份數的措辭，消滅這個會隨新增
+# 版本子樹而過期的計數站點。實際份數以 `find . -name .gitattributes` 現查為準。
 
 * text=auto eol=lf
 

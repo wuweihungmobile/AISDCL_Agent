@@ -11,9 +11,11 @@ check_script_parity._MIN_EXTRACT_COUNTS 慣例）。
 """
 from __future__ import annotations
 
+import importlib.util
 import re
 import unittest
 from pathlib import Path
+from types import ModuleType
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 _SH = _REPO_ROOT / "tools" / "macos_smoke_local.sh"
@@ -21,6 +23,11 @@ _PS1 = _REPO_ROOT / "tools" / "windows_smoke_local.ps1"
 _MAC_CI = _REPO_ROOT / ".github" / "workflows" / "macos-compat-ci.yml"
 _WIN_CI = _REPO_ROOT / ".github" / "workflows" / "windows-compat-ci.yml"
 _ONBOARDING = _REPO_ROOT / "ONBOARDING.md"
+_ROOT_INFRA_CI = _REPO_ROOT / ".github" / "workflows" / "root-infra-ci.yml"
+
+# `git ls-files … -- '<pathspec>' …` 區塊（至第一個 `)` 為止；兩檔皆以續行寫多樣式）。
+_LS_FILES_BLOCK_RE = re.compile(r"ls-files\s.*?\)", re.DOTALL)
+_QUOTED_TOKEN_RE = re.compile(r"'([^']+)'")
 
 # 情境分組標籤（echo/Write-Host 的字面 `--- [n/m]`；檔內框線註解用 U+2500「──」
 # 不會誤中）。抽取數量下限釘選＝2026-07-17 現況分組數，刻意刪減分組時同步下修。
@@ -30,6 +37,21 @@ _MIN_GROUPS = {"sh": 5, "ps1": 6}
 
 def _read(path: Path) -> str:
     return path.read_text(encoding="utf-8-sig")
+
+
+def _region(text: str, pattern: str, label: str) -> str:
+    """抽出指定區塊全文（抽不到即 fail-loud——區塊結構被改動時不得靜默降級成
+    整檔比對，那會讓區塊內的漂移被檔案別處的巧合字串滿足）。"""
+    m = re.search(pattern, text, re.MULTILINE | re.DOTALL)
+    if m is None:
+        raise AssertionError(f"抽不到 {label}（pattern 未命中：{pattern!r}）——結構已變動")
+    return m.group(0)
+
+
+def _code_only(text: str) -> str:
+    """剝掉整行 `#` 註解（yml 與 sh 同款）——本檔既有 `_yml_python_tools` 風格的
+    慣例：註解裡提及某字串是沿革記載/史料，不算實作，不得滿足接線斷言。"""
+    return "\n".join(ln for ln in text.splitlines() if not ln.lstrip().startswith("#"))
 
 
 def _extract_pin(text: str, pattern: str) -> int:
@@ -63,6 +85,58 @@ _PS1_PASS_ITEM_RE = re.compile(r"Pass-Item\s+['\"]([^'\"]*)['\"]")
 _PS1_MULTI_CALL_FUNCS = ("Test-InstallRoundtrip", "Test-WorktreeReject")
 
 
+# --- [1/9] pwsh parse 掃描面三向鎖（R56 round 5，round 4 三方交叉印證）-----------
+
+# windows_smoke_local.ps1 的 `@{ Rel = …; Floor = N }` 樹登記項；Rel 兩種形態：
+# 字面字串（`'AutoClaude\tools'`）與 LATEST 的動態 `(Join-Path 'AISDLC_SDD' $latestName)`。
+_PS1_TREE_ENTRY_RE = re.compile(
+    r"@\{\s*Rel\s*=\s*(?P<rel>'[^']*'|\(Join-Path\s+[^)]*\))\s*;\s*Floor\s*=\s*(?P<floor>\d+)\s*\}"
+)
+
+
+def _load_ps51_module() -> ModuleType:
+    """以檔案路徑載入 `tools/tests/test_ps51_compat.py`（不寫進 sys.modules，避免與
+    unittest discover 出來的同名模組互相干擾）。
+
+    刻意呼叫其 `scan_trees()` 取**實際回傳值**、而非用 regex 抽 `specs` 字面清單：
+    後者只鎖得住原始碼長相，`_latest_root()` 或 `_git_tracked_ps1()` 被改壞時仍綠。
+    """
+    path = _REPO_ROOT / "tools" / "tests" / "test_ps51_compat.py"
+    spec = importlib.util.spec_from_file_location("_ps51_compat_for_sync_lock", path)
+    if spec is None or spec.loader is None:
+        raise AssertionError(f"無法載入 {path}——.ps1 掃描面三向鎖失效（檔案被移除/改名？）")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def _ps1_scan_trees(region: str) -> dict[str, int]:
+    """`windows_smoke_local.ps1` [1/9] 區塊的 {樹 key: 檔數下限}。
+
+    正規化到與 `test_ps51_compat.scan_trees()` 同一鍵空間：反斜線 → `/`；
+    LATEST 的動態 Join-Path 形 → 佔位符 `LATEST`（升版不失效）。
+    """
+    trees: dict[str, int] = {}
+    for m in _PS1_TREE_ENTRY_RE.finditer(region):
+        raw = m.group("rel")
+        if raw.startswith("("):
+            if "'AISDLC_SDD'" not in raw or "$latestName" not in raw:
+                raise AssertionError(
+                    f"windows_smoke_local.ps1 [1/9] 的動態樹寫法非預期：{raw!r}——"
+                    "LATEST 必須是 `(Join-Path 'AISDLC_SDD' $latestName)`（SSOT 解析結果）"
+                )
+            key = "LATEST"
+        else:
+            key = raw.strip("'").replace("\\", "/")
+        if key in trees:
+            raise AssertionError(
+                f"windows_smoke_local.ps1 [1/9] 出現重複掃描樹 {key!r}——"
+                "同一棵樹登記兩次會讓下方集合比對誤判為一致"
+            )
+        trees[key] = int(m.group("floor"))
+    return trees
+
+
 def _extract_ps1_function_body(text: str, func_name: str) -> str:
     """抽出 `function <func_name> {` 到下一個「行首恰為 `}`」之間的函式體全文
     （本檔兩支共用函式皆以此縮排慣例撰寫：函式自身收尾 `}` 在行首列 0，內部巢狀
@@ -72,6 +146,10 @@ def _extract_ps1_function_body(text: str, func_name: str) -> str:
         raise AssertionError(f"windows_smoke_local.ps1 找不到 {func_name} 函式定義——結構已變動，需同步更新語意鎖登記表")
     return m.group(1)
 
+
+# R56 round 6（QA B-1）：CI 第 2 道掃描樹抽取式。字元類必須容納 `.`／`-`，
+# 否則 `.github/scripts` 這類路徑被插進 CI 時本鎖靜默失效（實測 11 支全綠）。
+_CI_TREE_RE = r"Get-ChildItem -Path ([A-Za-z0-9_.\-/]+) -Recurse"
 
 class TestSmokeCiSync(unittest.TestCase):
     def test_onboarding_pass_claims_match_script_pins(self) -> None:
@@ -245,6 +323,184 @@ class TestSmokeCiSync(unittest.TestCase):
                 needle, _read(path),
                 f"{path.name} 缺同步注記關鍵字「{needle}」——同步維護約定被刪除？",
             )
+
+    def test_bash_n_scan_surface_matches_root_infra_ci(self) -> None:
+        """R56 新增（Architect round 3 建議的治本鎖）：`root-infra-ci.yml` 第 1 道
+        （bash -n）與 `macos_smoke_local.sh` [1/7] 是兩份手寫實作，兩者自述「同一份
+        git ls-files 清單、同一套判準」，但此前零機械互鎖——R56 一輪之內就連續發生
+        三種漂移：CI 擴面而本地沒跟上、下限釘選值訂在被凍結版稀釋的總數上、本地
+        少了 CI 有的引號防護。凡「兩份硬編實作互稱鏡射」本 repo 一律建鎖（同
+        test_root_infra_parity 的 CI↔pre-push 守門清單鎖），故機械斷言三件事：
+          1. 兩處 `git ls-files` 的 pathspec 樣式集合逐字相同；
+          2. 兩處的兩段下限釘選值（active .sh／無副檔名 git-hooks）逐字相同；
+          3. 兩處都以 `sdd_version.py` SSOT 解析 LATEST 做凍結版排除（DEF-101-133：
+             禁止任一方內嵌第二份版本 regex，否則 Copy-on-Evolve 建新版時兩邊分歧）。
+        """
+        # 三項斷言一律只看「bash -n 那一段」，不看整檔——整檔比對會被檔案別處
+        # 剛好也提到同一字串的巧合滿足（bug-injection 實證：只改 [1/7] 段內的
+        # `sdd_version.py`，整檔 assertIn 仍綠，因該檔 [4/7] 另有一處提及）。
+        ci_text = _code_only(_region(
+            _read(_ROOT_INFRA_CI), r"^ +- name: bash -n .*?(?=^ +- name: )",
+            "root-infra-ci.yml 第 1 道 step",
+        ))
+        sh_text = _code_only(_region(
+            _read(_SH), r"\[1/7\] bash -n.*?(?=# ── 建立 fake repo)",
+            "macos_smoke_local.sh [1/7] 區塊",
+        ))
+
+        def _pathspec(text: str, label: str) -> list[str]:
+            # 兩檔都另有 `ls-files` 的其他用途（檔頭註解提及、第 3 道 `--eol | awk`），
+            # 故不取「第一個」而是取「帶 ≥4 條引號 pathspec 的那一個」，並要求唯一
+            # ——第二個同形區塊出現時 fail-loud，逼人工指定要鎖哪一個。
+            blocks = [
+                sorted(_QUOTED_TOKEN_RE.findall(m.group(0)))
+                for m in _LS_FILES_BLOCK_RE.finditer(text)
+            ]
+            candidates = [t for t in blocks if len(t) >= 4]
+            self.assertEqual(
+                len(candidates), 1,
+                f"{label} 抽出帶 ≥4 條引號 pathspec 的 `git ls-files … )` 區塊有"
+                f"{len(candidates)} 個（預期恰 1）——抽取 pattern 或實作疑似漂移"
+                f"（實測各區塊：{blocks}）",
+            )
+            return candidates[0]
+
+        self.assertEqual(
+            _pathspec(ci_text, "root-infra-ci.yml"), _pathspec(sh_text, "macos_smoke_local.sh"),
+            "root-infra-ci.yml 第 1 道與 macos_smoke_local.sh [1/7] 的 git ls-files "
+            "pathspec 不一致——兩者自述『同一份清單』，任一方擴面/縮面必須同步",
+        )
+
+        def _floor(text: str, var: str, label: str) -> int:
+            m = re.search(rf'"\${var}"\s+-lt\s+(\d+)', text)
+            self.assertIsNotNone(
+                m, f"{label} 抽不到 `\"${var}\" -lt N` 下限釘選——釘選被刪除或寫法漂移",
+            )
+            return int(m.group(1))
+
+        self.assertEqual(
+            (_floor(ci_text, "n_sh", "root-infra-ci.yml"),
+             _floor(ci_text, "n_hook", "root-infra-ci.yml")),
+            (_floor(sh_text, "syntax_sh", "macos_smoke_local.sh"),
+             _floor(sh_text, "syntax_hook", "macos_smoke_local.sh")),
+            "root-infra-ci.yml 第 1 道與 macos_smoke_local.sh [1/7] 的兩段下限釘選值"
+            "不一致——現況 active .sh ≥23、無副檔名 git-hooks ≥6，刻意調整時兩處同步",
+        )
+
+        for text, label in ((ci_text, "root-infra-ci.yml"), (sh_text, "macos_smoke_local.sh")):
+            # 認「`scripts/sdd_version.py` 呼叫路徑」而非裸檔名：bug-injection 實證
+            # 裸檔名會被同區塊的 fail 訊息字串（「sdd_version.py 無輸出」）滿足，
+            # 即實作已被拆掉仍綠燈。
+            self.assertIn(
+                "scripts/sdd_version.py", text,
+                f"{label} 的 bash -n 掃描面未實際呼叫 scripts/sdd_version.py SSOT 解析"
+                f"LATEST——凍結版排除不得內嵌第二份版本 regex（DEF-101-133）",
+            )
+
+
+    def test_ps1_parse_scan_surface_matches_root_infra_ci(self) -> None:
+        """R56 round 5 新增（round 4 三方獨立命中同一根因）：`.ps1` parse 掃描面的
+        Windows 側對稱鎖——與上一支 `test_bash_n_scan_surface_matches_root_infra_ci`
+        同構。
+
+        WHY：同一份「四棵樹 ＋ per-tree 檔數下限」硬編現存**四處**（R56 round 5 訂正：
+        原寫「三處」漏數了 `tools/tests/test_ps1_bom.py::_scan_prefixes()`，該檔同輪
+        已自行對 CI 建立互鎖並訂正此判定；本鎖負責其中三處，第四處由 test_ps1_bom
+        自身對 CI 互鎖，四處自此全數有鎖）——
+        `root-infra-ci.yml` 第 2 道（樹清單，無下限）、`test_ps51_compat.scan_trees()`
+        （樹清單＋下限）、`windows_smoke_local.ps1` [1/9] 的 `$ps1Trees`（樹清單＋
+        下限）。R56 本輪只鎖了前兩份互相對照，第三份零機械訊號：實測抽掉 `.ps1`
+        內一整棵掃描樹（`AISDLC_SDD\\scripts`）、或把 `AutoClaude\\tools` 的 Floor
+        由 7 改成 3，`python3 tools/run_root_unittests.py` 依然 `Ran 518 / OK`；
+        而 macOS 側同款注入（`macos_smoke_local.sh` 下限 23→22）立刻 RED。
+
+        該 `.ps1` 的 R56 註解**自稱**「與 root-infra-ci.yml 第 2 道同四棵樹」、
+        「per-tree 檔數下限釘選…慣例對齊 test_bash32_compat.py」——自稱鏡射、零機械
+        保證，正是上一支測試 docstring 立下的「凡兩份硬編實作互稱鏡射本 repo 一律
+        建鎖」所指的情形。本輪 DEF-101-451 修掉 CI 層的平台不對稱後，不對稱被平移
+        到「機械守門密度」這一層（該列狀態只記「實測計數與釘選值吻合」＝當下快照、
+        不是回歸鎖），本測試即補上這道鎖。
+
+        機械斷言：
+          1. `.ps1` `$ps1Trees` 的樹集合 == `scan_trees()` key 集合
+             == `root-infra-ci.yml` 第 2 道 `Get-ChildItem -Path <樹>` 集合；
+          2. `.ps1` 每棵樹的 `Floor` == `scan_trees()` 對應下限（逐值）；
+          3. `.ps1` 與 CI 兩處的 LATEST 都實際呼叫 `sdd_version.py` SSOT 解析
+             （DEF-101-133：禁止任一方內嵌第二份版本 glob/regex）。
+        """
+        # 只看 [1/9] 區塊：整檔比對會被 [5/9] 另一處 resolver 呼叫等巧合字串滿足
+        # （同上一支測試的 bug-injection 教訓）。起點錨 `[1/N]` 分母寫成 `\d+`，
+        # 未來增減情境分組不會讓本鎖以「抽不到區塊」的形式假性崩掉。
+        ps1_region = _code_only(_region(
+            _read(_PS1), r"--- \[1/\d+\] Parser.*?(?=# ── 建立 fake repo)",
+            "windows_smoke_local.ps1 [1/9] 區塊",
+        ))
+        ps1_trees = _ps1_scan_trees(ps1_region)
+        self.assertEqual(
+            len(ps1_trees), 4,
+            f"windows_smoke_local.ps1 [1/9] 只抽到 {len(ps1_trees)} 棵掃描樹（預期 4）："
+            f"{sorted(ps1_trees)}——整棵樹被刪，或 `@{{ Rel = …; Floor = N }}` 宣告樣式"
+            "漂移導致靜默 0 命中假綠",
+        )
+
+        pinned = {key: floor for key, _files, floor in _load_ps51_module().scan_trees()}
+        self.assertEqual(
+            ps1_trees, pinned,
+            f"windows_smoke_local.ps1 [1/9] 的掃描樹/下限 {ps1_trees} 與 "
+            f"test_ps51_compat.scan_trees() 的 {pinned} 不一致——Windows 本機 smoke 是"
+            "這組掃描面的第三份硬編實作，且該檔自述與另兩份同四棵樹；任一方增刪樹或"
+            "調整 per-tree 下限必須同步（下限值由 scan_trees() 與 $ps1Trees 兩處持有；樹清單另含 test_ps1_bom._scan_prefixes() 共四處）",
+        )
+
+        ci_step = _code_only(_region(
+            _read(_ROOT_INFRA_CI), r"^ +- name: pwsh 語法解析.*?(?=^ +- name: )",
+            "root-infra-ci.yml 第 2 道 step",
+        ))
+        # R56 round 6 修正（QA B-1）：字元類擴充納入 `.`／`-`（原本 `.github/scripts`
+        # 這類第 5 棵樹插進 CI 時本鎖完全看不到），並補抽取數量下限堵 fail-open。
+        ci_trees = set(re.findall(_CI_TREE_RE, ci_step))
+        self.assertEqual(
+            len(ci_trees), 3,
+            f"root-infra-ci.yml 第 2 道抽到 {len(ci_trees)} 棵固定樹（預期 3，LATEST 另以 Join-Path 表示）：{sorted(ci_trees)}",
+        )
+        # R56 round 7 修正（Architect F2 ／ QA ② 交叉發現）：上面的 `len(ci_trees)`
+        # 等值斷言只對「_CI_TREE_RE 抽得到的樹」有效，對「抽不到的形態」天生零訊號
+        # ——實測 `-Path "docs/scripts"`（引號界定）與 `-Path (Join-Path ".github"
+        # "scripts")`（計算式，該 step 第 4 棵樹就是這種寫法、照抄最自然）插入第 5 棵
+        # 樹時三支鎖全綠。故補一條**與字元類完全無關**的出現次數斷言：不論路徑長什麼
+        # 樣，多一棵樹必紅。（round 6 宣稱「補抽取數量下限堵 fail-open」不精確——
+        # QA 實證那條下限被既有 set-equality 涵蓋、是冗餘的，真正生效的只有字元類擴充。）
+        self.assertEqual(
+            len(re.findall(r"Get-ChildItem\s+-Path", ci_step)), 4,
+            "root-infra-ci.yml 第 2 道的 `Get-ChildItem -Path` 出現次數已變動（預期 4＝三棵固定樹＋LATEST 計算式樹）——任何形態的掃描樹增刪都會命中此斷言，請同步四處樹清單站點",
+        )
+        self.assertIn(
+            'Join-Path "AISDLC_SDD" $latestName', ci_step,
+            "root-infra-ci.yml 第 2 道未見 LATEST 樹（Join-Path AISDLC_SDD $latestName）"
+            "——第 4 棵樹疑似被移除",
+        )
+        ci_trees.add("LATEST")
+        self.assertEqual(
+            ci_trees, set(ps1_trees),
+            f"root-infra-ci.yml 第 2 道的掃描樹 {sorted(ci_trees)} 與 "
+            f"windows_smoke_local.ps1 [1/9] 的 {sorted(ps1_trees)} 不一致——該 .ps1 "
+            "自述「與 root-infra-ci.yml 第 2 道同四棵樹」，任一方擴面/縮面必須同步",
+        )
+
+        # LATEST 解析必須是「真的呼叫 resolver」：只認裸檔名會被同區塊的 fail 訊息
+        # 字串滿足（`.ps1` 的 Fail-Item 訊息內就寫著 `scripts/sdd_version.py 無輸出`，
+        # 實作被拆掉仍會綠——上一支測試踩過同款陷阱），故連 CLI 旗標 `--sdd-root`
+        # 一起要求：內嵌第二份版本 regex 取代 resolver 時該旗標必然消失。
+        for text, label in (
+            (ps1_region.replace("\\", "/"), "windows_smoke_local.ps1 [1/9]"),
+            (ci_step, "root-infra-ci.yml 第 2 道"),
+        ):
+            for needle in ("scripts/sdd_version.py", "--sdd-root"):
+                self.assertIn(
+                    needle, text,
+                    f"{label} 未實際呼叫 SSOT resolver（缺「{needle}」）——LATEST 版"
+                    "偵測不得內嵌第二份版本 glob/regex（DEF-101-133）",
+                )
 
 
 if __name__ == "__main__":

@@ -46,6 +46,41 @@ class EscalationDump:
         Gap-010-D：根據 ESCALATION 原因，自動生成可執行的接手行動清單。
         每個項目含可直接在終端執行的 shell 命令。
         """
+        # R56 修正（DEF-101-432）：本清單由 to_markdown() 包進「## 接手行動清單（可直接
+        # 執行）」的 bash 圍欄、再由 save() 落盤成 escalation dump，人類會原樣複製到終端，
+        # 故它是「跨平台顯示文字」而非內部字串。原內容多處 POSIX-only，在 Windows 11
+        # （cmd.exe / PowerShell 5.1）必失敗，各自的 Windows 等效寫法如下：
+        #   * python -m py_compile tests/test_*.py —— 萬用字元展開是 POSIX 殼的職責，
+        #     cmd.exe / PowerShell 都不對外部程式引數做 glob，py_compile 會收到字面字串
+        #     'tests/test_*.py' 而報 No such file or directory。
+        #     Windows 等效：python -m compileall -q tests/
+        #   * cat '<log>' | tail -50 —— cmd.exe 無 cat/tail；PowerShell 的 cat 是
+        #     Get-Content 別名但無 tail，且管線為物件流；單引號在 cmd.exe 非引號字元。
+        #     Windows 等效：Get-Content -Tail 50 '<log>'
+        #   * grep -rn 'assert.*==' tests/ | head -20 —— cmd.exe / PowerShell 皆無
+        #     grep 與 head。R56 訂正：`Select-String -Path tests\*` **沒有遞迴語意**
+        #     （-Path 萬用字元只匹配該層），而 grep -r 是遞迴 —— 本 repo 實測命中
+        #     'assert.*==' 的檔案：非遞迴 tests\*.py = 36 個、遞迴 = 237 個（漏 85%），
+        #     照著執行卻以為「已檢查完」比沒有提示更危險，故等效寫法必須自帶遞迴：
+        #     Windows 等效：Get-ChildItem -Recurse -Filter *.py tests
+        #                   | Select-String -Pattern 'assert.*==' | Select-Object -First 20
+        #     行尾提示受 ruff line-length=100 限制，改用別名縮寫 `gci -r tests|sls
+        #     assert.*==`（省略 -Filter *.py 反而更貼近 grep -r 對 tests/ 下所有檔案
+        #     遞迴搜尋的行為；沒有 -First 20，輸出較長但不會漏檔）。已於 PowerShell
+        #     7.6.3 實測：bareword pattern 解析正確、`-r` 綁定到 -Recurse 而非
+        #     -ReadOnly、管線中的目錄項目被安靜略過不報錯。原生 Windows PowerShell
+        #     5.1 未實機驗證（本輪無 Windows 機器），語意依 cmdlet 契約推定相同。
+        # 另 playbook_path 補上雙引號：Windows 使用者路徑常含空白（C:\Users\John Smith\
+        # My Projects\pb.yaml），未加引號會被切成多個引數；雙引號在 sh 與 cmd.exe 皆為
+        # 引號字元，是唯一兩平台通用的引用方式（單引號不可用）。
+        # 🔴 本輪選擇與其正規出口（勿讀成「永久修法規範」）：本檔屬 data tier 150/150
+        # 零餘裕（ADR-SD07-001），新增 if/else 分支或新清單元素都會直接破 per-file 硬閘，
+        # 故 R56 先採「同一邏輯行行尾併入 Windows 提示」的零邏輯行淨增手法完成
+        # DEF-101-432 的資訊補全（check_loc_budget.count_loc() 只跳過空行與行首 #，行尾
+        # 註解不增邏輯行、純註解行免費），完整等效指令記於本註解區塊。
+        # 未來若要改為依 sys.platform 產生平台原生指令（架構正解，可去掉人工翻譯步驟），
+        # 應走 ADR-SD07-001 §5.2/§6.2 的 per-file override 核准程序（`.loc-budget.toml`
+        # 條目 + 書面理由 + Architect/SD 雙簽），而非繼續以行尾註解規避 tier 上限。
         actions: list[str] = []
         look_back = min(self.total_attempts, 5)
 
@@ -60,7 +95,7 @@ class EscalationDump:
             actions += [
                 "",
                 "# 2. 測試檔語法驗證（suspect_test_file=True）",
-                "python -m py_compile tests/test_*.py",
+                "python -m py_compile tests/test_*.py  # Windows: python -m compileall -q tests/",
                 "pytest --collect-only  # 確認測試可被收集",
             ]
 
@@ -68,7 +103,7 @@ class EscalationDump:
             actions += [
                 "",
                 "# 3. 卡死診斷（is_stuck=True，相同錯誤反覆出現）",
-                f"cat '{self.last_log_path}' | tail -50  # 查看最後執行 log",
+                f"cat '{self.last_log_path}' | tail -50  # 看 log, Windows: Get-Content -Tail 50",
                 "# 手動執行 evaluator_command 確認根本原因",
             ]
 
@@ -76,7 +111,7 @@ class EscalationDump:
             actions += [
                 "",
                 "# 4. 測試期望值驗證（suspect_assertion_mismatch=True）",
-                r"grep -rn 'assert.*==' tests/ | head -20",
+                r"grep -rn 'assert.*==' tests/ | head -20  # Windows: gci -r tests|sls assert.*==",
                 "# 請人工確認：assert 的期望值是否符合業務邏輯",
             ]
 
@@ -99,7 +134,7 @@ class EscalationDump:
         actions += [
             "",
             "# 7. 手動修正後，恢復執行",
-            f"autoclaude {self.playbook_path}  # 從 checkpoint 繼續",
+            f'autoclaude "{self.playbook_path}"  # 從 checkpoint 繼續',
             "# 若步驟已手動完成，可直接繼續下一步",
         ]
 

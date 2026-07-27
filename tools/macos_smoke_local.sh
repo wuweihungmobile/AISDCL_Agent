@@ -10,7 +10,10 @@
 # 現代 macOS Xcode CLT 皆滿足——SD 二審 O-1 注記）。bash 3.2 相容（macOS 內建）。
 #
 # 涵蓋（對照 macos-compat-ci.yml macos-smoke 各 step）：
-#   [1] bash -n 全根層 tools/ 下 .sh + 三支 dispatcher hooks（無副檔名）
+#   [1] bash -n active git-tracked *.sh（AISDLC_SDD 凍結版排除、LATEST 納入）
+#       + 三處無副檔名 git-hooks 目錄（與 root-infra-ci.yml 第 1 道同一份
+#       git ls-files 清單、同排除式、同兩段下限釘選；R56 起由原「根層 tools/
+#       + 三支 dispatcher hooks」擴面對稱化，但以系統 bash 3.2 解析）
 #   [2] dispatcher 直呼煙霧（比照 CI「/bin/bash 系統 bash 直接執行驗證」step；
 #       fake repo 於 OS temp，絕不對本 repo 做 git config／暫存變更）
 #   [3] install_git_hooks.sh / install-hooks.sh 安裝／解除往返 + linked worktree
@@ -101,30 +104,92 @@ if [ -n "$(git -C "$REPO_ROOT" status --porcelain 2>/dev/null | head -1)" ]; the
   echo "⚠ 本 repo 有未 commit 變更——[2][3][4] 驗證的是 HEAD（clone），未含這些變更"
 fi
 
-# ── [1/7] bash -n：根層 tools/ 全部 .sh + 三支 dispatcher hooks ────────────────
+# ── [1/7] bash -n：active tracked .sh + 三處 git-hooks 目錄 ────────────────────
 echo ""
-echo "--- [1/7] bash -n 語法檢查（根層 .sh + dispatcher hooks）---"
+echo "--- [1/7] bash -n 語法檢查（active tracked .sh + 三處 git-hooks 目錄；凍結版排除）---"
 # heredoc 迴圈（非管線）：計數器在主 shell 累積——bash 3.2 無 lastpipe，
 # 管線尾端 while 的變數變更會隨 subshell 消失（同 tools/git-hooks/pre-commit 手法）。
-sh_files="$(find "$REPO_ROOT/tools" -type f -name '*.sh')"
-sh_files="${sh_files}
-$REPO_ROOT/tools/git-hooks/pre-commit
-$REPO_ROOT/tools/git-hooks/post-commit
-$REPO_ROOT/tools/git-hooks/pre-push"
+# R56 修正（Architect finding）：原範圍是 `find "$REPO_ROOT/tools"` + 三支根 hook
+# ＝10 檔，與 root-infra-ci.yml 第 1 道本輪擴面後不對稱——新納管的 16 支子專案
+# active .sh 在本地零訊號，只能燒 CI 額度才發現語法錯。改用與該 CI step 完全同一
+# 份清單（`git ls-files` 同樣式、同凍結版排除式、同兩段下限釘選值），本地版的
+# 不可取代價值仍在：以系統 bash 3.2（$SYS_BASH）解析，比 CI 的 ubuntu bash 5.x
+# 更貼近真實 macOS 執行環境（2026-07-27 實測 29 檔在 bash 3.2 下全數通過）。
+# 取捨（刻意，非疏漏）：改用 ls-files 後「完全未追蹤」的草稿 .sh 不再被掃到
+# （原 find 會掃根層 tools/ 下的未追蹤檔），換得與 CI 第 1 道同一判準、且本地
+# 暫存草稿不會造成假紅；新檔一經 `git add` 即入 index、立刻納入本檢查。
+# 掃的是**工作樹內容**（$REPO_ROOT/$f）而非 HEAD，故未 commit 的修改仍會驗到。
+# R56 二次修正（Architect/SA/SD round 3；本檔與 CI 第 1 道逐項對齊，理由詳見該
+# step 內註解）：①凍結版 .sh 排除（bash -n 判定隨 bash 版本浮動，凍結版依
+# Copy-on-Evolve 鐵律無合規改檔途徑 → 不納硬閘，政策與 CI 第 2 道 pwsh parse 一致；
+# LATEST 委派 sdd_version.py SSOT，禁內嵌第二份版本 regex）；②下限釘選由「對總數
+# 174 釘 150」（被 145 支凍結版稀釋、實測踢掉全部 6 支 git-hooks 仍綠燈）改為
+# .sh 與 git-hooks 兩段各自釘實數；③補 index-vs-工作樹存在性守衛（見下方）；
+# ④補 `-c core.quotePath=false`（非 ASCII 檔名預設輸出為引號包裹＋八進位逸出形，
+# 逐行讀時路徑帶引號會使 `[ -f ]` 與 bash -n 皆指向不存在的路徑——本 repo 已在
+# root-infra-ci.yml 第 3 道明文記載過此病灶 SD-R13-6。本檔逐行讀而非 -z：bash 3.2
+# 無法安全處理 NUL 分隔的 heredoc，quotePath=false 已足以消除該已知病灶）。
+sdd_latest="$(python "$REPO_ROOT/AISDLC_SDD/scripts/sdd_version.py" \
+  --sdd-root "$REPO_ROOT/AISDLC_SDD" 2>/dev/null || true)"
+sh_files="$(git -C "$REPO_ROOT" -c core.quotePath=false ls-files -- '*.sh' 'tools/git-hooks/*' \
+  'AutoClaude/tools/git-hooks/*' 'AISDLC_SDD/.githooks/*')"
 syntax_bad=0
-syntax_total=0
+syntax_sh=0
+syntax_hook=0
+syntax_frozen=0
+syntax_gone=0
+if [ -z "$sdd_latest" ]; then
+  fail "AISDLC_SDD LATEST 解析失敗（sdd_version.py 無輸出）——掃描邊界不得靜默縮小"
+  syntax_bad=1
+fi
 while IFS= read -r f; do
   [ -z "$f" ] && continue
-  syntax_total=$((syntax_total + 1))
-  if ! "$SYS_BASH" -n "$f"; then
+  # 凍結版排除（LATEST 保留）。$sdd_latest 為空時上方已 fail，此處不再靜默縮面。
+  case "$f" in
+    AISDLC_SDD/AISDLC_SDD_v*/*)
+      case "$f" in
+        "AISDLC_SDD/${sdd_latest}/"*) ;;
+        *) syntax_frozen=$((syntax_frozen + 1)); continue ;;
+      esac
+      ;;
+  esac
+  case "$f" in
+    *.sh) syntax_sh=$((syntax_sh + 1)) ;;
+    *) syntax_hook=$((syntax_hook + 1)) ;;
+  esac
+  # git ls-files 列的是 **index**：工作樹已 rm 但尚未 git rm 的檔案仍在清單內，
+  # 而 `bash -n <缺檔>` 回 rc=127 → 下方 `if !` 會誤報成「語法檢查失敗」，把
+  # 「檔案不存在」講成「語法錯誤」誤導重構中的開發者（R56 SA/SD 各自實機重現；
+  # R56 前的 `find` 只列磁碟實存檔，結構上免疫，是本輪擴面新引入的失效模式）。
+  # 刻意在計數**之後**才跳過：下限釘選守的是「ls-files 樣式有沒有被改壞」，
+  # 若把未 commit 的刪除也扣掉，大量刪除會把計數壓破下限而變成另一種假紅。
+  if [ ! -f "$REPO_ROOT/$f" ]; then
+    echo "  ⓘ 略過 ${f}（index 內但工作樹不存在，尚未 git rm）"
+    syntax_gone=$((syntax_gone + 1))
+    continue
+  fi
+  if ! "$SYS_BASH" -n "$REPO_ROOT/$f"; then
     fail "bash -n 語法檢查失敗：${f}"
     syntax_bad=1
   fi
 done <<EOF_SH
 $sh_files
 EOF_SH
+echo "  掃描面：active .sh ${syntax_sh} 檔 + 無副檔名 git-hooks ${syntax_hook} 檔"
+echo "  （凍結版排除 ${syntax_frozen} 檔；index 內但工作樹不存在 ${syntax_gone} 檔）"
+# 下限釘選（鏡射 CI 第 1 道同款保護，且釘選值必須與該 step 逐字相同——由
+# tools/tests/test_smoke_ci_sync.py 機械互鎖）：ls-files 樣式被改壞／目錄搬家時
+# 掃描面靜默縮小，syntax_bad=0 仍會 PASS——與本檢查存在的目的直接矛盾。
+if [ "$syntax_sh" -lt 23 ]; then
+  fail "active .sh 掃描面異常縮小（僅 ${syntax_sh} 檔，現況應 ≥23）——'*.sh' 樣式或凍結版排除式疑似被改壞"
+  syntax_bad=1
+fi
+if [ "$syntax_hook" -lt 6 ]; then
+  fail "無副檔名 git-hooks 掃描面異常縮小（僅 ${syntax_hook} 檔，現況應 ≥6）——三處 git-hooks 樣式疑似被改壞"
+  syntax_bad=1
+fi
 if [ "$syntax_bad" -eq 0 ]; then
-  pass "bash -n 全數通過（${syntax_total} 檔）"
+  pass "bash -n 全數通過（active .sh ${syntax_sh} + git-hooks ${syntax_hook} 檔）"
 fi
 
 # ── 建立 fake repo（供 [2][3][4]）───────────────────────────────────────────
@@ -149,13 +214,23 @@ echo "--- [2/7] dispatcher 直呼煙霧（$SYS_BASH 直接執行，fake repo）-
   cd "$FAKE" || exit 9
 
   # 2a. pre-commit：乾淨變更應放行
-  echo "probe" > _ci_probe_clean.txt
-  git add _ci_probe_clean.txt
-  "$SYS_BASH" tools/git-hooks/pre-commit
+  # R56 修正（與 macos-compat-ci.yml 同步）：原探針是根層 `_ci_probe_clean.txt`，
+  # pre-commit 六個分流 pattern 全部不命中 → run_root_infra=0，A4 根層基建 leg
+  # （dispatcher 內唯一含 while read / heredoc / 巢狀 case 的區塊）從未在系統
+  # bash 3.2 下執行過，本子測試對它的覆蓋宣稱落空。改用 tools/*.sh 探針使 leg
+  # 必定觸發，並斷言 leg 識別訊息真的出現。
+  printf '#!/usr/bin/env bash\necho ok\n' > tools/_ci_probe_clean.sh
+  git add tools/_ci_probe_clean.sh
+  out2a="$("$SYS_BASH" tools/git-hooks/pre-commit 2>&1)"
   rc=$?
-  git reset -q _ci_probe_clean.txt
-  rm -f _ci_probe_clean.txt
+  printf '%s\n' "$out2a"
+  git reset -q tools/_ci_probe_clean.sh
+  rm -f tools/_ci_probe_clean.sh
   [ "$rc" -eq 0 ] || exit 1
+  case "$out2a" in
+    *"變更含根層基建"*) ;;
+    *) exit 6 ;;
+  esac
 
   # 2b. pre-commit：NTFS 保留裝置名應擋下（touch + git add，鏡射 CI 同款手法；
   # macOS/APFS 可建檔且 git 預設 core.protectNTFS=false 可暫存——CI macos-latest
@@ -193,6 +268,7 @@ case "$sub_rc" in
   2) fail "pre-commit dispatcher 應擋下 NTFS 保留裝置名（CON.txt）卻放行" ;;
   3) fail "post-commit dispatcher 應恆 exit 0" ;;
   4) fail "pre-push dispatcher 刪除分支跳過路徑應 exit 0" ;;
+  6) fail "pre-commit dispatcher 未觸發 A4 根層基建 leg（探針失效——2a 的系統 bash 覆蓋宣稱落空）" ;;
   *) fail "dispatcher 直呼煙霧異常中斷（rc=${sub_rc}）" ;;
 esac
 

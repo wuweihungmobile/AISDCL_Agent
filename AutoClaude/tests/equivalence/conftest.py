@@ -1,26 +1,10 @@
 """equivalence 測試共用 fixture。
 
-QA 發現（跨平台四方複審 P3）：未 activate venv、直接以 `.venv/bin/python -m pytest`
-呼叫時，fixture yaml 的 `evaluator_command`（如 09_conditional 的 `python -c ...`）
-經 ShellEvaluator → subprocess(shell=True) 以裸 `python` 啟動子行程 →
-`/bin/sh: python: command not found`（exit 127）→ 快照比對失敗。
-
-修法：autouse fixture 將當前直譯器（sys.executable）所在目錄 prepend 到 PATH，
-確保子行程解析到的 `python` == 跑測試的 venv python；已在 PATH 首位時 no-op。
+R56（跨平台複審）：原本掛在本檔的 `_interpreter_dir_on_path` autouse fixture 已上移至
+`tests/conftest.py`（頂層），作用域改為涵蓋整個 `tests/`。理由：同一根因（macOS 與多數
+現代 Linux distro 的乾淨 PATH 上只有 `python3`、無裸 `python`）並非 equivalence 專屬，
+實測至少 6 個目錄的測試在「未 activate venv 直接以 `<repo>/.venv/bin/python -m pytest`
+呼叫」時會踩到；且保留兩份實作必然漂移（本 repo 反覆處理的 DEF-101-238 同款類別），
+故本檔不再保留副本，請一律改動頂層那一份。
 """
 from __future__ import annotations
-
-import os
-import sys
-from pathlib import Path
-
-import pytest
-
-
-@pytest.fixture(autouse=True)
-def _interpreter_dir_on_path(monkeypatch):
-    """讓 evaluator 子行程的裸 `python` 一律解析到當前直譯器（venv 未 activate 亦可）。"""
-    py_dir = str(Path(sys.executable).parent)
-    path = os.environ.get("PATH", "")
-    if path.split(os.pathsep)[:1] != [py_dir]:
-        monkeypatch.setenv("PATH", py_dir + os.pathsep + path if path else py_dir)

@@ -52,7 +52,12 @@ def save_escalation_dump_impl(
         f"playbook_{task.step_id}_attempt{last_attempt}.log"
     )
     last_log_path = str(Path(log_dir) / last_log_filename)
-    checkpoint_resume_hint = f"autoclaude {playbook_path}"
+    # R56 修正（DEF-101-432 第 5 處）：本字串經 EscalationDump.to_markdown() 渲染成
+    # 「## 繼續執行指令」+ ``` 圍欄落盤，人類會在自己的平台原樣複製執行；Windows 使用者
+    # 路徑常含空白（C:\Users\John Smith\My Projects\pb.yaml），未加引號會被殼切成多個
+    # 引數。雙引號是 POSIX sh 與 cmd.exe 唯一共通的引用字元（單引號在 cmd.exe 不是引號
+    # 字元）——與 models/escalation.py 接手清單同一政策，避免同一份 dump 出現兩種寫法。
+    checkpoint_resume_hint = f'autoclaude "{playbook_path}"'
     dump = EscalationDump(
         playbook_path=playbook_path,
         step_id=task.step_id,

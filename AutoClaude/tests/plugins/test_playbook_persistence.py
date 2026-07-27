@@ -15,8 +15,6 @@ import logging
 from pathlib import Path
 from unittest.mock import patch
 
-import pytest
-
 from autoclaude.core.hookspec import HookContext, KernelPhase, PersistenceResult
 from autoclaude.plugins.playbook_persistence_plugin import PlaybookPersistencePlugin
 from tests.plugins._template import sample_playbook, sample_task
@@ -96,6 +94,45 @@ class TestPersistMutated:
         assert out is not None
         assert nested.exists()
         assert out.exists()
+
+    # ── R56 迴歸鎖（DEF-101-442）：checkpoint_dir 檔名家族第三個 sibling ──────
+    # _mutated_path_for() 與 FileStateRepository._path()（DEF-101-384 / R47）、
+    # CheckpointManager.checkpoint_path()（DEF-101-390 / R48）同屬「以使用者提供的
+    # playbook_path 衍生檔名寫進 checkpoint_dir」家族；另兩支已收斂到 SSOT
+    # _sanitize_log_filename，本支此前裸用 Path().stem。Windows 上 NTFS 保留裝置名
+    # 與禁用字元會讓 open("w") 直接 OSError，而 persist_mutated_playbook() 的 except
+    # 只 logger.warning → 突變後 playbook 靜默遺失。下面兩支鎖「必須經 SSOT 淨化」。
+
+    def test_mutated_path_sanitizes_windows_reserved_device_name(self, tmp_path):
+        """stem 為 NTFS 保留裝置名（CON/AUX/…）時，檔名必須被 SSOT 淨化。"""
+        from autoclaude.utils.logger import _sanitize_log_filename
+
+        p = PlaybookPersistencePlugin(checkpoint_dir=str(tmp_path))
+        out = p._mutated_path_for("some/dir/CON.yaml")
+        assert out.name != "CON.mutated.yaml", (
+            "保留裝置名 CON 未淨化——Windows 上 open() 必 OSError 且被 except 吞掉"
+        )
+        assert out.name == f"{_sanitize_log_filename('CON')}.mutated.yaml", (
+            "淨化必須委派 SSOT _sanitize_log_filename（與 R47/R48 兩個 sibling 等價）"
+        )
+
+    def test_mutated_path_sanitizes_forbidden_chars_and_roundtrips(self, tmp_path):
+        """禁用字元 / 尾隨空白經淨化後，persist→load→cleanup 三路檔名仍一致。
+
+        三路都經同一支 _mutated_path_for()，故此鎖同時保證不會出現「寫入檔名 A、
+        讀取檔名 B」的分歧（正是 DEF-101-390 當年在 sibling 上修掉的病灶）。
+        """
+        from autoclaude.utils.logger import _WIN_FORBIDDEN_CHARS
+
+        p = PlaybookPersistencePlugin(checkpoint_dir=str(tmp_path))
+        raw = "some/dir/my<proj|v2 .yaml"
+        out = p.persist_mutated_playbook(sample_playbook(), raw)
+        assert out is not None and out.exists()
+        for ch in _WIN_FORBIDDEN_CHARS:
+            assert ch not in out.name, f"禁用字元 {ch!r} 洩漏進 .mutated.yaml 檔名 {out.name!r}"
+        assert p.load_mutated_if_exists(raw) == out, "load 算出的路徑必須與 persist 落地一致"
+        assert p.cleanup_mutated_for_paths([raw]) == [out], "cleanup 必須能命中同一檔案"
+        assert not out.exists()
 
     def test_persist_failure_returns_none(self, tmp_path, caplog):
         p = PlaybookPersistencePlugin(checkpoint_dir=str(tmp_path))

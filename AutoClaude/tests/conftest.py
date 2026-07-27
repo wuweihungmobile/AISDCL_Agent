@@ -41,6 +41,8 @@ from __future__ import annotations
 
 import os
 import re
+import sys
+from pathlib import Path
 
 import pytest
 
@@ -87,6 +89,34 @@ def _preserve_cwd():
                 _os.chdir(original_cwd)
             except OSError:
                 pass
+
+
+# ──────────────────────────────────────────────────────────────
+# R56（跨平台複審）：裸 `python` 解析保險 — 自 tests/equivalence/conftest.py 上移
+# ──────────────────────────────────────────────────────────────
+# 原 fixture 只掛在 tests/equivalence/，但同一根因（macOS `/usr/bin` 與多數現代
+# Linux distro 的乾淨 PATH 上只有 `python3`、沒有裸 `python`；Windows 則因 venv
+# Scripts/ 內就有 python.exe 而不會踩到）在 equivalence/ 以外還影響至少 6 個目錄的
+# 測試——未 activate venv、直接以 `<repo>/.venv/bin/python -m pytest` 呼叫時，
+# 走 `subprocess.run(shell=True)` 的 evaluator（ShellEvaluator / evaluator.py /
+# SDD adapter 推導出的 `python -m pytest ...`）會拿到 `/bin/sh: python: command
+# not found`（rc=127），macOS 實測 11 個測試硬失敗。fixture 留在子目錄等於讓
+# 「是否套用平台保險」取決於測試檔放在哪個資料夾，與被測行為無關。
+#
+# 本 fixture 只 prepend 當前直譯器所在目錄，不覆寫整個 PATH；刻意以 monkeypatch
+# 施作（function scope 自動還原），對「明確自帶 env= 的隔離子行程」完全無影響——
+# 例如 tests/infra/test_sdd_to_playbook_adapter.py::
+# test_evaluator_cmd_actually_runnable_without_bare_python 以 `env={"PATH": <只放
+# pytest symlink 的隔離目錄>}` 執行，其「PATH 上沒有裸 python」的迴歸鎖語意不受
+# 本 fixture 影響（該測試原本反而因 `shutil.which("pytest")` 找不到 pytest 而在未
+# activate venv 時直接 assert 失敗，上移後才真正跑得到它要鎖的東西）。
+@pytest.fixture(autouse=True)
+def _interpreter_dir_on_path(monkeypatch):
+    """讓子行程的裸 `python` 一律解析到當前直譯器（venv 未 activate 亦可）。"""
+    py_dir = str(Path(sys.executable).parent)
+    path = os.environ.get("PATH", "")
+    if path.split(os.pathsep)[:1] != [py_dir]:
+        monkeypatch.setenv("PATH", py_dir + os.pathsep + path if path else py_dir)
 
 
 # ──────────────────────────────────────────────────────────────

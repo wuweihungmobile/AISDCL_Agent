@@ -3,7 +3,13 @@
 # dispatcher）與 .gitattributes、.editorconfig、dependabot 等基建原本零 CI 覆蓋——壞掉
 # 只會在開發者本機爆。本 workflow 做十二道輕量守門（僅 actions/checkout，不引其他外部
 # action，避免供應鏈風險）：
-#   1. bash -n       — 根層 tools/git-hooks/ 與 tools/*.sh（遞迴涵蓋子目錄）語法檢查
+#   1. bash -n       — active *.sh（R56 起，原僅根層 tools/：AISDLC_SDD LATEST 版納入、
+#                      凍結版 v0.01~v0.(N-1) 依紀律不回改 → 排除，政策與第 2 道一致）
+#                      與三處無副檔名 git hooks 目錄（tools/git-hooks/、
+#                      AutoClaude/tools/git-hooks/、AISDLC_SDD/.githooks/）語法檢查；
+#                      掃描面以 git ls-files 取得，檔數下限依「.sh／git-hooks」兩段
+#                      分別釘選，見該 step 內註解（刻意不在本檔頭複寫檔數——第二個
+#                      計數站點即第二個會漂移的站點）
 #   2. pwsh parse    — active .ps1（根層 tools/ + AutoClaude/tools/ + AISDLC_SDD/scripts/
 #                      + AISDLC_SDD LATEST 版；凍結版 v0.01~v0.(N-1) 有已知缺陷且依紀律
 #                      不回改 → 排除）以 Parser::ParseFile 解析，parse error 即 fail；
@@ -54,9 +60,12 @@
 #                      命中即紅；SSOT 自身零命中亦紅（anchor 自檢）。歷史紀錄性數字
 #                      以行內 `baseline-ok:` 豁免並逐次列印稽核（DEF-101-045／
 #                      ARCH-R12-7／R13 README 漂移三度實證，R13 ARCH-R13-1 落地）
-#   12. GitHub Actions 版本一致性鎖 — tools/check_gha_action_versions.py：
-#                      actions/checkout／setup-python／upload-artifact／github-script
-#                      四個常用 action 在全部 workflow 內版本必須唯一，不一致即紅
+#   12. GitHub Actions 版本一致性鎖 — tools/check_gha_action_versions.py：**全部
+#                      `actions/*` 官方 action**（含子路徑 action，如 cache/restore）
+#                      在全部 workflow 內版本必須唯一，不一致即紅；不判斷哪個版本
+#                      才對。R56 起改為此通用規則——原本列舉四名 action 的白名單
+#                      本身是 fail-open（打錯一個字即靜默少守 13 處宣告仍印綠燈，
+#                      見該工具檔頭 ①），故本行**刻意不再列舉 action 名**
 #                      （R54 round 1/2〔DEF-101-420/424〕連續兩輪靠人工 grep 逐檔比對
 #                      才發現版本落差、且人工「已是穩定版」的自我宣稱本身失準，
 #                      R55 落地機械鎖收斂此缺口）
@@ -92,13 +101,85 @@ jobs:
     steps:
       - uses: actions/checkout@v5
 
-      - name: bash -n 語法檢查（tools/git-hooks/ + tools/*.sh，遞迴涵蓋子目錄）
+      - name: bash -n 語法檢查（active tracked *.sh + 三處 git-hooks 目錄；凍結版排除）
+        # R56 修正（Architect finding）：原範圍是 `find tools …`＝10 檔，只涵蓋
+        # 23 支 active `.sh` 的 7 支（外加 3 支根 hook）；AutoClaude/tools/、
+        # AISDLC_SDD/scripts/、AISDLC_SDD LATEST/tools/ 底下的 16 支 active `.sh`
+        # 零 CI 語法閘。與**同一支 workflow 下一 step** 的 pwsh Parser::ParseFile
+        # 閘（掃四棵樹皆 -Recurse＝全部 active `.ps1`）平台待遇不對稱：Windows
+        # 專屬的 `.ps1` 有完整語法閘，macOS/Linux 主場的 `.sh` 反而沒有。
+        # 委派鏈亦落空：`tools/git-hooks/pre-commit:170` 註解宣稱「子專案腳本由
+        # 各自 hook 把關」，但兩子專案 hook 皆未做 `.sh` 語法檢查。
+        # R56 二次修正①（Architect round 3）：本 step 初版擴為**全庫** 174 檔，其中
+        # 145 支（83%）是 AISDLC_SDD 凍結版 .sh——與同一支 workflow 下一 step
+        # （pwsh parse）明文「凍結版有已知缺陷且依紀律不回改 → 排除」的政策直接
+        # 相反。初版援引的「與 EOL 守門同款、全庫盤點後放寬」先例並不成立：EOL 量
+        # 的是 git attribute／位元組層事實（與工具版本無關，盤點過即永久成立），而
+        # `bash -n` 的判定取決於**執行它的 bash 版本**（本 job 為 ubuntu-latest 的
+        # bash 5.x，未來會隨 runner 映像升版）。某個未來 bash 若對凍結版任一支的寫法
+        # 收緊（如既有棄用語法轉為錯誤），本 step 即永久紅燈，而依 Copy-on-Evolve
+        # 凍結鐵律**不存在合規的改檔途徑**，只能回頭再改一次這道閘——正是第 2 道
+        # 當年已預見並規避掉的坑。故改為與第 2 道同政策：只掃 active。
+        # LATEST 一律委派 AISDLC_SDD/scripts/sdd_version.py SSOT 解析（DEF-101-133，
+        # 禁止內嵌第二份版本 regex），解析失敗 fail-loud、不得靜默縮面。
+        #
+        # R56 二次修正②（Architect round 3）：下限釘選改按「會變動的那一半」分段。
+        # 初版對總數 174 釘 150，而 150 是由 145 支不可回改的凍結版撐起的，對真正
+        # 要保護的 active 腳本近乎零鑑別力——實測把三處 git-hooks 樣式全部踢出掃描面
+        # （只留 `'*.sh'`）仍得 168 ≥ 150 而靜默綠燈，然而那 6 支無副檔名 hook 正是
+        # 全 repo 改動最頻繁、且因無副檔名而最容易在樣式重構時被遺漏的一類（本
+        # workflow 檔頭第 1 句自述的存在理由就是它們）。故 .sh 與 git-hooks 各自釘實數。
         run: |
+          latest="$(python3 AISDLC_SDD/scripts/sdd_version.py --sdd-root AISDLC_SDD)"
+          if [ -z "$latest" ]; then
+            echo "::error::AISDLC_SDD LATEST 解析失敗（sdd_version.py 無輸出）— 掃描邊界不得靜默縮小"
+            exit 1
+          fi
+          echo "AISDLC_SDD LATEST 版：${latest}（其餘凍結版排除）"
           fail=0
+          n_sh=0
+          n_hook=0
+          n_frozen=0
+          n_gone=0
           while IFS= read -r -d '' f; do
-            echo "bash -n ${f}"
+            case "$f" in
+              AISDLC_SDD/AISDLC_SDD_v*/*)
+                case "$f" in
+                  "AISDLC_SDD/${latest}/"*) ;;
+                  *) n_frozen=$((n_frozen+1)); continue ;;
+                esac
+                ;;
+            esac
+            case "$f" in
+              *.sh) n_sh=$((n_sh+1)) ;;
+              *) n_hook=$((n_hook+1)) ;;
+            esac
+            # git ls-files 列的是 **index**：工作樹已 rm 但尚未 git rm 的檔案仍在清單
+            # 內，而 `bash -n <缺檔>` 回 rc=127，會被誤報成「語法錯誤」（R56 SA/SD
+            # 各自實機重現）。CI 為全新 checkout 不會觸發，仍加同款守衛以與
+            # tools/macos_smoke_local.sh [1/7] 維持「同一份清單、同一套判準」。
+            # 刻意在計數**之後**才跳過：下限釘選守的是「ls-files 樣式有沒有被改壞」，
+            # 若把未 commit 的刪除也扣掉，大量刪除會把計數壓破下限而變成另一種假紅。
+            if [ ! -f "$f" ]; then
+              echo "  略過 ${f}（index 內但工作樹不存在）"
+              n_gone=$((n_gone+1))
+              continue
+            fi
             bash -n "$f" || { echo "::error::${f} bash 語法錯誤"; fail=1; }
-          done < <(find tools -type f \( -path 'tools/git-hooks/*' -o -name '*.sh' \) -print0)
+          done < <(git ls-files -z -- '*.sh' 'tools/git-hooks/*' \
+                     'AutoClaude/tools/git-hooks/*' 'AISDLC_SDD/.githooks/*')
+          echo "bash -n 掃描面：active .sh ${n_sh} 檔 + 無副檔名 git-hooks ${n_hook} 檔"
+          echo "（凍結版排除 ${n_frozen} 檔；index 內但工作樹不存在 ${n_gone} 檔）"
+          # 下限釘選（兩段各自釘選）：ls-files 樣式被改壞／目錄搬家時掃描面靜默縮小，
+          # `fail=0` 仍會綠燈——與本 step 存在的目的直接矛盾。
+          if [ "$n_sh" -lt 23 ]; then
+            echo "::error::active .sh 掃描面異常縮小（僅 ${n_sh} 檔，現況應 ≥23）— '*.sh' 樣式或凍結版排除式疑似被改壞"
+            fail=1
+          fi
+          if [ "$n_hook" -lt 6 ]; then
+            echo "::error::無副檔名 git-hooks 掃描面異常縮小（僅 ${n_hook} 檔，現況應 ≥6）— 三處 git-hooks 樣式疑似被改壞"
+            fail=1
+          fi
           exit "$fail"
 
       - name: py_compile 語法檢查（根層 tools/ 下所有 *.py，遞迴涵蓋子目錄）
@@ -220,5 +301,5 @@ jobs:
       - name: wrapper 薄殼守門（tools/check_wrapper_thinness.py：dev_start＋local_ci_gate）
         run: python3 tools/check_wrapper_thinness.py
 
-      - name: GitHub Actions 版本一致性（tools/check_gha_action_versions.py：checkout/setup-python/upload-artifact/github-script 跨 workflow 同版）
+      - name: GitHub Actions 版本一致性（tools/check_gha_action_versions.py：全部 actions/* 跨 workflow 同版）
         run: python3 tools/check_gha_action_versions.py

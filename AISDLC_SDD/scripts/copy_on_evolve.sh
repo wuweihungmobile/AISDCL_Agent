@@ -79,6 +79,20 @@ if ! git -C "$TOP" rev-parse --verify -q "HEAD:$FROM_REL" >/dev/null 2>&1; then
 fi
 
 mkdir -p "$TO"
+# R56 修正（跨平台行尾政策，根因層）：此處**刻意不加 `--worktree-attributes`**。
+# 缺陷本體：`HEAD:<subtree>` 的 attribute 查找基準是**被匯出的那棵樹**，版本目錄若不自帶
+# .gitattributes，父層 AISDLC_SDD/.gitattributes 的 `*.ps1 text eol=crlf` 完全不參與 → 匯出
+# 直接吐 blob 原始 LF（v0.30 實測 4 支 .ps1 全 LF），Windows 原生 PowerShell 取到的新版腳本
+# 行尾與工作樹其餘 .ps1 不一致；且雙端失明（本機 `git status` 因 checkin 正規化 CRLF→LF blob
+# 看不出差異、CI 全新 checkout smudge 已套用也看不到）。
+# 修法＝治根因：讓版本子樹**自帶** .gitattributes（見 AISDLC_SDD_v0.30/.gitattributes 檔頭
+# WHY），它隨 git archive 自我傳播到每個新版，永久免旗標。**不採 `--worktree-attributes`**：
+# 該旗標語意正是「改以工作樹的 .gitattributes 查找」，會把匯出行尾變成**工作樹狀態**的函式，
+# 與本檔第 15/23 行明文宣告、並由上方 `HEAD:$FROM_REL` 硬閘強制的核心不變式「匯出＝HEAD 的
+# 純函式」直接衝突（實測：未 commit 的工作樹 .gitattributes 即可改變匯出行尾，而本腳本對
+# .gitattributes 是否已 commit 完全沒有對應的閘）。回歸鎖見
+# scripts/tests/test_copy_on_evolve.py 的 test_archive_applies_eol_policy_head_pure（以未 commit
+# 的敵意工作樹 .gitattributes 做注入，旗標一旦回來即紅）。
 git -C "$TOP" archive "HEAD:$FROM_REL" | tar -x -C "$TO"
 
 _N="$(git -C "$TOP" ls-tree -r --name-only "HEAD:$FROM_REL" | wc -l | tr -d ' ')"

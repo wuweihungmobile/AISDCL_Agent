@@ -270,6 +270,48 @@ def test_absolute_limit_750_enforced(): ...
 **範例（SD_07 W4 已落實）**：
 - `steps_orchestrator/_impl.py` 物理 wc-l 530，邏輯行 ≤ 500（含 docstring/註解/空白約 30 行）→ `.loc-budget.toml` override 標 `tier = "service"` + 理由「物理 wc-l 530 含 docstring/註解/空白，邏輯行 ≤ 500 service tier 達標」。
 
+### 6.3 總量 baseline 重新校準程序（R56 補訂）
+
+**緣起（治理缺口）**：§6.1/§6.2 只規範 **per-file** tier budget 與其 override，
+`tools/check_loc_budget.py` 另有一道**總量 cap**（`total ≤ baseline × 1.20`，baseline 存於
+`AutoClaude/.loc_baseline`），而本 ADR 自 v1.0 起從未訂立該 baseline 的重新校準程序。
+後果在 2026-07 跨平台複審 R52~R55 具體發生：總量連續多輪貼齊 cap（R52 一度 20451 > 20438 破線、
+R53 = cap、R55 = cap−1），兩項已確認的真實缺陷（DEF-101-422／DEF-101-432）因「改了會破總量硬閘」
+而被延後不修——**護欄實質阻擋了修復，卻沒有任何正規出口可走**。
+
+**判準前提（R56 訂正宣稱與行為的矛盾）**：總量 cap 在實作上與 tier/absolute 違規**同級阻塞**
+（`check_loc_budget.py` 的 `has_violation` 含 `total_violation`，`return 1`），並非工具 docstring
+舊述的「sanity check」。本輪已同步訂正該 docstring 用詞；`--update` 旗標**刻意不接線**任何自動化
+閘門（CI／git hooks／local_ci_gate 皆零引用，經 R56 grep 實證），僅供本節核准後由人工執行，
+**後人勿誤判為漏接線**。
+
+1. **觸發條件**（滿足任一）
+   - 已破線：`total > cap`（CI 硬阻擋，必須處理）
+   - 連續 2 輪 `total ≥ cap − 10`（餘裕耗盡的預警帶）。**R56 round 5 起機械化**：
+     `check_loc_budget.py` 的 `TOTAL_WARN_MARGIN`（＝上式的 10；兩處數字的一致性由
+     `tests/contract/test_loc_budget_tiered.py::test_total_warn_margin_matches_adr_sd07_001_section_6_3`
+     自本節正文抽取比對後機械鎖定，**非人工同步**）在此區間
+     印 **非阻塞** `[WARN]`（rc 不變），`--json` 報表另出 `total_warn_band` 布林欄。
+     本條訂立當下工具尚無此訊號，R53(=cap)／R55(=cap−1) 兩次全靠審查員逐字讀輸出才發現，
+     故補上機械偵測；「連續 2 輪」的輪次判定仍屬人工（本工具無跨輪狀態）。
+2. **必要證據**（附於 PR description）
+   - `python tools/check_loc_budget.py --json` 報表（含 `total_warn_band`）
+   - **成長歸因**：增量落在哪些 tier／哪些檔案，並逐項判定是否屬死碼、重複實作、或真實新功能
+3. **順位原則（先減後調，不可跳過）**
+   - 第一順位：刪死碼／收斂重複實作。**R56 實例**：`autoclaude/execution/types.py` 移除兩支零呼叫端
+     死碼（內含 R52 已修 POSIX-only 字面值的未修複本），**刪去 81 個邏輯行**（總量 20437 → 20356），
+     使 cap（20438）之下的可用餘裕自 **1 行擴大為 82 行**，當輪即解除封鎖、無需動 baseline。
+     （R56 round 5 訂正：原文「一次釋出 82 行餘裕」易被讀成「刪了 82 行」——刪的是 81 行，
+     82 是刪後的餘裕總額，兩者差 1 正是刪除前僅存的那 1 行餘裕。）
+   - 第二順位：以零／負增行手法完成修復（如將跨平台提示併入既有邏輯行的行尾註解，見 DEF-101-432 修法）。
+   - 第三順位：確認增量為不可壓縮的真實功能後，才依本節調升 baseline。
+   - ❌ **禁止**為了騰出額度而精簡「記錄 WHY 的既有註解」——本 repo 的跨輪防回歸倚賴
+     `RNN 修正：…` 系列註解（見 R53 DEF-101-416 裁定）。
+4. **核准層級與留痕**（比照 §6.2）
+   - Architect + SD 雙簽
+   - PR description 書面理由（含上述證據與順位原則的逐項排除說明）
+   - 執行 `python tools/check_loc_budget.py --update` 後，`.loc_baseline` 的變更須與該 PR 同 commit
+
 ---
 
 ## 7. 與既有規則的取代關係

@@ -548,7 +548,7 @@ class TestGap026SplitStepEvaluator:
             "python3 -m pytest tests/foo.py -k xyz -q",
         ],
     )
-    def test_derive_part_a_evaluator_python_m_pytest_form_is_valid_command(self, cmd):
+    def test_derive_part_a_evaluator_python_m_pytest_form_is_valid_command(self, cmd, tmp_path):
         """R52 迴歸鎖：'python(3) -m pytest ...' 形態不得被推導成語法上不存在的
         'python --collect-only'（rc=2 unknown option）。
 
@@ -559,16 +559,47 @@ class TestGap026SplitStepEvaluator:
         collect-only 確認語法正確」設計意圖直接相反。三層架構
         （tools/three_tier_to_playbook.py `_EVAL_ALLOWED_HEAD`）明文允許此形態，
         故必須產出可實際執行成功的指令。
+
+        R56 修正（oracle 污染）：原本直接實跑 `result`，但推導結果的位置引數已被
+        截斷（DEF-101-422，與平台無關的既有缺陷，本輪不處理），`python -m pytest
+        --collect-only` 在 repo cwd 下實際 collect 的是整包 3,800 個測試 ——
+        rc 反映的是「全 repo 能否乾淨 collect」而非本測試宣稱要鎖的「推導出的指令
+        形狀在本平台是否合法可執行」，任何無關的 collection error 都會讓這道迴歸鎖
+        變成假紅。改以 tmp_path 下的最小測試檔為明確目標，rc==0 才只反映指令形狀
+        本身合法（'python --collect-only' 仍會如設計地以 rc=2 被抓到）。目標路徑用
+        雙引號包住：雙引號在 POSIX sh 與 Windows cmd.exe 皆為引號字元，是唯一兩平台
+        通用的引用寫法（tmp_path 在 Windows 上常落在含空白的使用者目錄下）。
+
+        R56 round 3 補強（本輪自身修復造成的偵測面流失）：頂層 tests/conftest.py 新增的
+        autouse fixture `_interpreter_dir_on_path` 會把當前直譯器目錄 prepend 到 PATH，
+        使「乾淨 PATH 上只有 python3、沒有裸 python」這個**本測試唯一要鎖的環境維度**在
+        本套件內被中和 —— fixture 在位時，即使推導結果退化成裸 `python -m pytest`，本測試
+        仍會綠。改為（a）token 級斷言（與 PATH 完全無關）；（b）以 PATH="" 的受限環境親跑
+        subprocess，直接繞過該 fixture（fixture 只改 os.environ，不影響顯式 env=）。
         """
+        import os
         import subprocess
+        import sys
 
         result = PlaybookEvolver._derive_part_a_evaluator(cmd)
         assert result is not None
         assert "--collect-only" in result
         assert "pytest" in result
+        assert not result.startswith(("python ", "python3 ")), (
+            f"Part A evaluator 不得以裸 python/python3 開頭（該類環境 PATH 上無 python "
+            f"別名 → /bin/sh rc=127 command not found）；實際: {result!r}"
+        )
+        assert f'"{sys.executable}"' in result, (
+            f"pytest 分支的 head token 應比照非 pytest 分支置換為 sys.executable "
+            f"絕對路徑（R56），實際: {result!r}"
+        )
+        probe = tmp_path / "test_r56_collect_probe.py"
+        probe.write_text("def test_ok():\n    pass\n", encoding="utf-8")
+        restricted_env = dict(os.environ)
+        restricted_env["PATH"] = ""
         proc = subprocess.run(
-            result, shell=True, capture_output=True, text=True,
-            encoding="utf-8", errors="replace", timeout=30,
+            f'{result} "{probe}"', shell=True, capture_output=True, text=True,
+            encoding="utf-8", errors="replace", timeout=30, env=restricted_env,
         )
         assert proc.returncode == 0, (
             f"'{cmd}' 推導出的 Part A evaluator '{result}' 應可成功執行 "
@@ -734,20 +765,41 @@ class TestGap026BMinimaxEvolverSplitStepEvaluator:
             "python3 -m pytest tests/foo.py -k xyz -q",
         ],
     )
-    def test_derive_part_a_evaluator_python_m_pytest_form_is_valid_command(self, cmd):
+    def test_derive_part_a_evaluator_python_m_pytest_form_is_valid_command(self, cmd, tmp_path):
         """R52 迴歸鎖（MinimaxEvolver 側，鏡射 TestGap026SplitStepEvaluator 同名測試）：
         'python(3) -m pytest ...' 形態必須產出可實際執行成功的 --collect-only 指令，
         不得退化為語法上不存在的 'python --collect-only'（rc=2 unknown option）。
+
+        R56 修正（oracle 污染，與鏡射來源同步）：原本直接實跑 `result`，因推導結果的
+        位置引數被截斷（DEF-101-422，平台無關既有缺陷），實際量到的是「整包 repo 能否
+        乾淨 collect」。改以 tmp_path 最小測試檔為明確目標，見鏡射來源同名測試的完整說明。
+
+        R56 round 3 補強（與鏡射來源同步）：token 級斷言 + PATH="" 受限環境親跑，補回被
+        頂層 conftest.py autouse PATH fixture 中和掉的偵測面（詳見鏡射來源同名測試）。
         """
+        import os
         import subprocess
+        import sys
 
         result = MinimaxEvolver._derive_part_a_evaluator(cmd)
         assert result is not None
         assert "--collect-only" in result
         assert "pytest" in result
+        assert not result.startswith(("python ", "python3 ")), (
+            f"Part A evaluator 不得以裸 python/python3 開頭（該類環境 PATH 上無 python "
+            f"別名 → /bin/sh rc=127 command not found）；實際: {result!r}"
+        )
+        assert f'"{sys.executable}"' in result, (
+            f"pytest 分支的 head token 應比照非 pytest 分支置換為 sys.executable "
+            f"絕對路徑（R56），實際: {result!r}"
+        )
+        probe = tmp_path / "test_r56_collect_probe.py"
+        probe.write_text("def test_ok():\n    pass\n", encoding="utf-8")
+        restricted_env = dict(os.environ)
+        restricted_env["PATH"] = ""
         proc = subprocess.run(
-            result, shell=True, capture_output=True, text=True,
-            encoding="utf-8", errors="replace", timeout=30,
+            f'{result} "{probe}"', shell=True, capture_output=True, text=True,
+            encoding="utf-8", errors="replace", timeout=30, env=restricted_env,
         )
         assert proc.returncode == 0, (
             f"'{cmd}' 推導出的 Part A evaluator '{result}' 應可成功執行 "

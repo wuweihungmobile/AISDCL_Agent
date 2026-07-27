@@ -372,6 +372,47 @@ class TestW3PersistenceRequestPositive:
                 f"禁用字元 {ch!r} 洩漏進顯示用 last_log_path 檔名分量 {last_log_name!r}"
             )
 
+    def test_escalation_dump_resume_hint_quotes_playbook_path(self, tmp_path):
+        """R56（DEF-101-432 第 5 處）：落盤 dump 的「## 繼續執行指令」必須引號包路徑。
+
+        本測試刻意打在 save_escalation_dump_impl → dump.save() 的**落盤 Markdown**層級，
+        而非只斷言 models/escalation.py 的清單：DEF-101-432 round 2 修了 escalation.py 的
+        接手清單卻漏了 _escalation.py 自行組的 checkpoint_resume_hint，導致同一份 .md
+        相鄰兩節一處有引號一處沒有。鎖在落盤產物上，任何組裝點漏引號都會紅。
+
+        WHY 引號重要：Windows 使用者路徑常含空白，人類原樣複製整行到 cmd.exe /
+        PowerShell 會被切成多個引數而失敗；雙引號是 sh 與 cmd.exe 唯一共通引號字元。
+        """
+        from pathlib import Path as _P
+        from pathlib import PureWindowsPath
+        from unittest.mock import MagicMock
+
+        plugin, _ = _make_plugin(tmp_path)
+        tracker = MagicMock()
+        tracker.history = []
+        tracker.to_checkpoint_records = MagicMock(return_value=[])
+        tracker.to_failure_chain = MagicMock(return_value=[])
+        for m in ("is_stuck", "is_diverging", "suspect_test_file_error",
+                  "is_oscillating", "is_worsening",
+                  "suspect_assertion_baseline_mismatch"):
+            setattr(tracker, m, MagicMock(return_value=False))
+
+        # 顯式 Windows 語意（含空白）；純字串比對，不經 pathlib join
+        spaced = str(PureWindowsPath("C:/Users/John Smith/My Projects/pb.yaml"))
+        plugin.save_escalation_dump(
+            tracker=tracker, task=PlaybookTask(step_id="T1", name="n", prompt="p"),
+            playbook_path=spaced, final_eval_output="err",
+            checkpoint_dir=str(tmp_path), log_dir=str(tmp_path),
+        )
+        md = _P(plugin._last_dump_path).read_text(encoding="utf-8")
+        assert f'autoclaude "{spaced}"' in md, (
+            "落盤 dump 的繼續執行指令未以雙引號包住 playbook_path（DEF-101-432 復發）：\n"
+            + md
+        )
+        assert f"autoclaude {spaced}" not in md.replace(f'autoclaude "{spaced}"', ""), (
+            "dump 內仍殘留未加引號的 autoclaude 指令（同一份檔案不得兩種寫法並存）"
+        )
+
 
 class TestW3EvolutionPluginNewPhases:
     """SD_05 W3 三方審查 SA-M2：驗證 EvolutionPlugin 訂閱的 NO-OP phase 回 None。"""

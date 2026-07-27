@@ -66,22 +66,33 @@ macos-compat-ci.yml paths 覆蓋的缺口。比照盲區 B 手法：新增 `_KNO
 已被實測證實有真實覆蓋缺口的 `*.ps1` 一項，`*.py` 的更廣語意留待未來若有實測缺口
 再議（同盲區 B 手動登記僅涵蓋已知具體案例的既有慣例）。
 
-S12（第七輪複審 DEF-101-068(a) 續）：四份 workflow 中 root-infra-ci.yml 是唯一
-「刻意不設 paths 過濾」者（見該檔頭註解：NTFS 敵意檔名閘需對任何路徑生效，
-paths 白名單必留盲區）——硬套上方「消費檔 ⊆ paths」同一套正則毫無意義（沒有
-paths 可比對）。root-infra-ci.yml 真正的同構風險改頭換面成另一種盲區：它的
-bash -n／py_compile 兩個步驟只用 ``find tools ...`` 掃描根層 ``tools/`` 一個
-目錄；若日後在 monorepo 根新增另一個含 .sh／.py 腳本的目錄（如 ``scripts/``、
-``bin/``），該目錄會完全逃過 root-infra-ci 的語法守門而不自知——這正是
-DEF-101-042／DEF-101-068(a) 那種「消費者存在但守門忘了看它」的同一類缺陷，
-只是發生在「掃描根目錄清單」而非「觸發 paths 清單」上。故本節另立兩道專屬
-root-infra-ci.yml 的機械鎖（見檔案下方）：
+S12（第七輪複審 DEF-101-068(a) 續；掃描面現況已由 R56 訂正，見下）：四份 workflow
+中 root-infra-ci.yml 是唯一「刻意不設 paths 過濾」者（見該檔頭註解：NTFS 敵意檔名閘
+需對任何路徑生效，paths 白名單必留盲區）——硬套上方「消費檔 ⊆ paths」同一套正則毫無
+意義（沒有 paths 可比對）。root-infra-ci.yml 真正的同構風險改頭換面成另一種盲區：
+它的 py_compile 步驟只用 ``find tools ...`` 掃描根層 ``tools/`` 一個目錄；若日後在
+monorepo 根新增另一個含 .py 腳本的目錄（如 ``scripts/``、``bin/``），該目錄會完全
+逃過 root-infra-ci 的 py_compile 守門而不自知——這正是 DEF-101-042／DEF-101-068(a)
+那種「消費者存在但守門忘了看它」的同一類缺陷，只是發生在「掃描根目錄清單」而非
+「觸發 paths 清單」上。
+**R56 修正（文字與現況同步，零邏輯變動）**：本段原文為「bash -n／py_compile 兩個
+步驟只用 ``find tools ...`` 掃描根層 ``tools/`` 一個目錄」——R56 已把 bash -n 擴為
+``git ls-files -z -- '*.sh' …`` 全庫 tracked ``*.sh``＋三處 git-hooks 目錄（見該
+workflow 第 1 道，實測 n=174），故該宣稱對 bash -n 已不成立、僅對 py_compile 仍成立
+（這種「半真」比全錯更難察覺，故顯式訂正）。
+故本節另立兩道專屬 root-infra-ci.yml 的機械鎖（見檔案下方）：
   1. 鎖死「刻意不設 paths」的設計決策本身，防止日後被誤「補全」paths 而
      重新引入假綠盲區；
   2. 掃描 git 追蹤的全部 .sh／.py 檔，斷言不在 AutoClaude/、AISDLC_SDD/、
-     .claude/（皆各自已有獨立 CI／既有 paths 鎖覆蓋）之外、也不在 tools/
-     之內的「無主根層腳本」為空集——一旦出現即代表有新目錄逃過 root-infra-ci
-     的語法守門。
+     .claude/ 之外、也不在 tools/ 之內的「無主根層腳本」為空集——一旦出現即
+     代表有新目錄逃過 root-infra-ci 的守門。**豁免依據（R56 訂正）**：``.sh``
+     已由 root-infra-ci 第 1 道全庫 bash -n 覆蓋；``.py`` 之豁免依據為 AutoClaude
+     ruff／pytest 與 AISDLC_SDD ci-gate。**勿再援引「子專案各自已有獨立 CI／hook
+     把關」作為 ``.sh`` 的豁免理由**——R56 實查證偽：``AutoClaude/tools/git-hooks/
+     pre-commit`` 只有 ruff／LOC／CLAUDE.md／EOL 四道、``AISDLC_SDD/.githooks/
+     pre-push`` 只轉呼 ci-gate.sh，兩者皆無 ``bash -n``；這正是 R56 把 bash -n
+     擴為全庫、並同步訂正 ``tools/git-hooks/pre-commit:170`` 原註解（「子專案腳本
+     由各自 hook 把關」→「委派鏈是空的」）的理由。
 
 R52（第 52 輪 Mac/Windows 相容性四方複審 Architect/SA/SD 交叉發現）：
 `tools/tests/test_dev_start.py` 的 `TestNightlyHeartbeatFilenameContract` 用
@@ -389,10 +400,15 @@ def test_all_root_consumers_covered_by_ci_paths(workflow_filename):
 
 _ROOT_INFRA_CI_PATH = os.path.join(_WORKFLOWS_DIR, "root-infra-ci.yml")
 
-# bash -n／py_compile 兩步驟只掃描根層 tools/；AutoClaude/、AISDLC_SDD/、.claude/
-# 各自已有獨立 CI 或既有 paths 鎖覆蓋其 .sh／.py（見 test_known_consumers_detected
-# 已驗證 .claude/hooks/sdd_hook_router.py 被 windows-compat-ci.yml／aisdlc-sdd-ci.yml
-# paths 覆蓋），故豁免；其餘任何根層 .sh／.py 若不在 tools/ 之下即為無主腳本。
+# py_compile 步驟只掃描根層 tools/（R56 修正：bash -n 已擴為全庫 tracked *.sh，
+# 見 root-infra-ci.yml 第 1 道；原註解「bash -n／py_compile 兩步驟只掃描根層 tools/」
+# 在 R56 擴面後已成半真）。豁免依據（R56 修正）：`.sh` 已由 root-infra-ci 第 1 道
+# 全庫 bash -n 覆蓋；`.py` 之豁免依據為 AutoClaude ruff/pytest 與 AISDLC_SDD ci-gate
+# （.claude/hooks/sdd_hook_router.py 另受 windows-compat-ci.yml／aisdlc-sdd-ci.yml
+# paths 覆蓋，見 test_known_consumers_detected 已驗證）。原註解「各自已有獨立 CI
+# ……覆蓋其 .sh」已被 R56 實查證偽（兩子專案 hook 皆不含 bash -n，委派鏈是空的），
+# 勿再援引「子專案 hook 把關」作為 .sh 的豁免理由。
+# 其餘任何根層 .sh／.py 若不在 tools/ 之下即為無主腳本。
 _ROOT_INFRA_SCAN_EXEMPT_PREFIXES = ("AutoClaude/", "AISDLC_SDD/", ".claude/", "tools/")
 
 
@@ -591,14 +607,18 @@ def test_known_literal_path_consumers_covered_by_ci_paths():
 
 
 def test_root_infra_ci_bash_and_py_scan_roots_have_no_stray_scripts():
-    """root-infra-ci.yml 的 bash -n／py_compile 步驟只掃描根層 tools/。
+    """root-infra-ci.yml 的 py_compile 步驟只掃描根層 tools/（R56 修正：bash -n
+    已於 R56 擴為全庫 tracked *.sh，見該 workflow 第 1 道；本 docstring 首行原作
+    「bash -n／py_compile 步驟只掃描根層 tools/」，擴面後已成半真故訂正）。
 
     若日後在 monorepo 根新增另一個含 .sh／.py 腳本、且不屬於 AutoClaude/、
-    AISDLC_SDD/、.claude/（各自已有獨立 CI 或既有 paths 鎖）的目錄，該目錄會
-    完全逃過 root-infra-ci 的語法守門而不自知——與 DEF-101-042／DEF-101-068(a)
-    同一類「消費者存在但守門忘了看它」缺陷，只是發生在掃描根目錄清單而非
-    觸發 paths 清單。本鎖機械斷言：git 追蹤的全部 .sh／.py 檔，扣除上述三個
-    有獨立覆蓋的子專案／目錄後，必須全部落在 tools/ 之下。
+    AISDLC_SDD/、.claude/ 的目錄，該目錄會完全逃過 root-infra-ci 的守門而不自知
+    ——與 DEF-101-042／DEF-101-068(a) 同一類「消費者存在但守門忘了看它」缺陷，
+    只是發生在掃描根目錄清單而非觸發 paths 清單。本鎖機械斷言：git 追蹤的全部
+    .sh／.py 檔，扣除上述三個有獨立覆蓋的子專案／目錄後，必須全部落在 tools/
+    之下。豁免依據見 `_ROOT_INFRA_SCAN_EXEMPT_PREFIXES` 上方註解（R56 修正：
+    `.sh` 靠第 1 道全庫 bash -n、`.py` 靠 AutoClaude ruff/pytest 與 AISDLC_SDD
+    ci-gate；「子專案 hook 把關 .sh」已被 R56 實查證偽，勿再援引）。
     """
     for ext in (".sh", ".py"):
         tracked = _git_ls_files(f"*{ext}")
@@ -609,6 +629,8 @@ def test_root_infra_ci_bash_and_py_scan_roots_have_no_stray_scripts():
         ]
         assert not stray, (
             f"發現不在 tools/ 下、也不屬於 AutoClaude/／AISDLC_SDD/／.claude/ 的根層"
-            f"{ext} 腳本，root-infra-ci.yml 的 bash -n／py_compile 掃描不到"
+            f"{ext} 腳本，root-infra-ci.yml 的語法守門盤點不到"
+            f"（.py 之 py_compile 只掃 tools/；.sh 雖已由第 1 道全庫 bash -n 覆蓋，"
+            f"仍一併鎖「無主目錄」以防新目錄逃過其餘守門）"
             f"（DEF-101-068(a) 同構盲區）：{stray}"
         )

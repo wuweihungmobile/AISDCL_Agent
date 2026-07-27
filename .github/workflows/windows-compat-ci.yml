@@ -75,10 +75,17 @@
 #     （CLAUDE.md 安裝段落／docs/AISDLC_Agent_UserGuide.md）教使用者用的是
 #     `powershell -ExecutionPolicy Bypass -File ...`（Windows 內建 PowerShell 5.1）
 #     ——CI 驗證的執行引擎與文件教使用者實際會用的執行引擎不同，此前從未被機械
-#     驗證過。掃描 bootstrap.ps1／dev_start.ps1／install_git_hooks.ps1／
-#     install-hooks.ps1／integration_gate.ps1／local_ci_gate.ps1／ci-gate.ps1 均未見
-#     PS7-only 語法（??／?.／&&|| 鏈接／-AsHashtable／ForEach-Object -Parallel），
-#     故非緊急阻斷項，但補在 windows-nightly-full（非 PR 閘門）新增一步驟，以
+#     驗證過。當時（R5）以人工掃描七支 .ps1 未見 PS7-only 語法而判為非緊急阻斷項。
+#     R56 訂正（SA／SD 各自獨立回報同一根因）：原文逐一列舉那七支檔名，讀者會誤讀
+#     為「全面涵蓋」，而實測 active .ps1 已 21 支（13+ 輪前的人工涵蓋率為 7/21），
+#     且該人工宣稱是本 workflow 判定「非緊急」的唯一依據、會隨新增 .ps1 靜默過期。
+#     故①刪去檔名列舉，改以不會過期的措辭：**掃描面以 root-infra-ci.yml 第 2 道為準**
+#     （根層 tools/ + AutoClaude/tools/ + AISDLC_SDD/scripts/ + LATEST 版，皆遞迴；
+#     凍結版排除）；②不再依賴人工宣稱——新增 tools/tests/test_ps51_compat.py 行級
+#     機械鎖（骨架鏡射 macOS 側同構風險的 tools/tests/test_bash32_compat.py，補上此前
+#     「bash 3.2 有機械鎖、PS 5.1 只有人工宣稱」的平台待遇不對稱），住在 tools/tests/
+#     故自動被 root-infra-ci 第 8 道與兩平台 smoke 帶到、零額外接線。
+#     仍保留在 windows-nightly-full（非 PR 閘門）新增一步驟，以
 #     `shell: powershell` 實際執行文件教學的第一入口 tools/bootstrap.ps1 +
 #     tools/dev_start.ps1，驗證「文件教的那條路」而非只驗證「CI 選的那條路」。
 #
@@ -388,6 +395,92 @@ jobs:
           . ./tools/dev_start.ps1 --no-sync
           if ($LASTEXITCODE -ne 0) { throw "dev_start.ps1 核心邏輯（tools/dev_start.py）回報失敗，exit=$LASTEXITCODE" }
           Write-Host "dev_start.ps1 執行成功"
+
+      - name: 觸發 tools/dev_start.py 的 .venv 形狀換手分支（posix→windows，僅 Windows runner 可測）
+        shell: pwsh
+        # R56 新增（SA／SD 各自獨立回報同一根因）：`tools/dev_start.py::_ensure_venv_shape()`
+        # 在 Windows 上 `other = "posix"`，故 `.venv-cache-posix/` 與
+        # `.venv-cache-posix.bak-<ts>/` 這兩個路徑**只會在 Windows 上被產生**；該分支
+        # 的核心動作是對「內含數千檔的 venv 目錄」連續做 `Path.rename`，正是 Windows
+        # 上最容易因 Explorer／防毒／殘留 python.exe 持有 handle 而拋
+        # `OSError: [WinError 5/32]` 的操作，與 POSIX 幾乎不會失敗的 rename 語意完全
+        # 不同——也就是「唯一需要真機驗證的那一側」此前恰好是沒有真機驗證的那一側。
+        # 既有覆蓋的誠實界定：`tools/tests/test_dev_start.py` 確有以 tmpdir 模擬
+        # flavor 走過整條路徑（含 .bak 回退），但那是在 macOS/Linux 上跑的，對 Windows
+        # 檔案鎖定語意零鑑別力；本 repo 紀律（AutoClaude/tests/conftest.py、根層
+        # ONBOARDING.md §10）明文「Windows 專屬路徑須至少於一次真實 Windows CI run
+        # 驗證過，mock sys.platform 不算數」。對稱性：macOS 側對「僅 macOS runner 可測」
+        # 的 cross_same_flavor 分支早有 macos-compat-ci.yml 專屬 step 並附同款理由註解，
+        # Windows 側沿用同一論證卻從未落地（DEF-101-348 同類別）。
+        #
+        # 成本控制（刻意設計）：先把前面步驟建好的真 .venv park 成
+        # `.venv-cache-windows`，換手發生後 dev_start 會走「自快取秒級換回」路徑，
+        # 免掉一次完整 bootstrap 重建（CI 額度紀律）；且該換回本身又是第三次目錄
+        # rename，對本 step 要驗的「Windows 目錄 rename 是否可靠」是加分不是減分。
+        # 若快取信任判斷未過（_cache_restore_trust），dev_start 會自行 fallback 到
+        # bootstrap 重建，最終斷言（.venv\Scripts\python.exe 存在）仍成立、不假紅。
+        #
+        # 斷言刻意不只看「rc=0」：dev_start 對「換手分支根本沒被觸發」也會回 0，
+        # 只驗 rc 等於 fail-open 死斷言（本輪 macOS 側 hook 探針即栽在這個形狀），
+        # 故一律機械比對 `_ensure_venv_shape()` 的兩句識別訊息與實際產出的目錄。
+        run: |
+          # 一律以 Where-Object -like 過濾而非 Get-ChildItem -Filter：-Filter 會下推到
+          # Windows 檔案系統的萬用字元引擎（含 8.3 短檔名等歷史語意），對「以 . 開頭、
+          # 中間又帶 . 的名稱」行為與 PowerShell 自身的 -like 不保證一致；本 step 的
+          # 清場與斷言都不能有這種平台細節風險。
+          Get-ChildItem -Path . -Force | Where-Object { $_.Name -like '.venv-cache-*' } |
+            Remove-Item -Recurse -Force
+          if (-not (Test-Path .venv\Scripts\python.exe)) {
+            throw "前置條件不成立：本 step 之前應已有 windows 形狀 .venv（bootstrap.ps1 步驟）"
+          }
+
+          # ── 第 1 次：目的地無內容 → 直接換手 ────────────────────────────────
+          Rename-Item -LiteralPath .venv -NewName .venv-cache-windows
+          New-Item -ItemType Directory -Force -Path .venv\bin | Out-Null
+          Set-Content -LiteralPath .venv\bin\python -Value '' -NoNewline
+          $out1 = (. ./tools/dev_start.ps1 --no-sync *>&1 | Out-String)
+          Write-Host $out1
+          if ($LASTEXITCODE -ne 0) { throw "dev_start.ps1（換手第 1 次）失敗，exit=$LASTEXITCODE" }
+          if ($out1 -notlike '*換手保留為 .venv-cache-posix*') {
+            throw "未見換手訊息——_ensure_venv_shape() 的 posix→windows 換手分支未被觸發，本 step 對該分支的真機覆蓋宣稱落空"
+          }
+          if (-not (Test-Path .venv-cache-posix\bin\python)) {
+            throw "換手後 .venv-cache-posix\bin\python 不存在——posix 形狀 .venv 未被保留"
+          }
+          if (-not (Test-Path .venv\Scripts\python.exe)) {
+            throw "換手後 .venv\Scripts\python.exe 不存在——本平台 .venv 未被換回/重建"
+          }
+          $developing = (Get-Content .dev_env_state.json -Raw | ConvertFrom-Json).developing
+          if ($developing -ne 'windows') { throw ".dev_env_state.json developing 應為 windows，實際=$developing" }
+          Write-Host "換手第 1 次通過（.venv-cache-posix/ 已產生、.venv 已為 windows 形狀）"
+
+          # ── 第 2 次：目的地已有內容 → `.venv-cache-posix.bak-<ts>/` 回退分支 ──
+          # 正常路徑上 .venv-cache-windows 已於第 1 次被「秒級換回」消耗掉；但若
+          # 快取信任判斷未過，dev_start 明文「不自動清除」而改走 bootstrap 重建，
+          # 該目錄會殘留 → 下面的 Rename-Item 會以「目的地已存在」失敗並掩蓋真正的
+          # 測試意圖。先無條件清掉，讓第 2 次的前置條件與第 1 次完全一致。
+          if (Test-Path .venv-cache-windows) { Remove-Item -Recurse -Force .venv-cache-windows }
+          Rename-Item -LiteralPath .venv -NewName .venv-cache-windows
+          New-Item -ItemType Directory -Force -Path .venv\bin | Out-Null
+          Set-Content -LiteralPath .venv\bin\python -Value '' -NoNewline
+          $out2 = (. ./tools/dev_start.ps1 --no-sync *>&1 | Out-String)
+          Write-Host $out2
+          if ($LASTEXITCODE -ne 0) { throw "dev_start.ps1（換手第 2 次）失敗，exit=$LASTEXITCODE" }
+          $baks = @(Get-ChildItem -Path . -Force -Directory |
+            Where-Object { $_.Name -like '.venv-cache-posix.bak-*' })
+          if ($baks.Count -lt 1) {
+            throw "未產生 .venv-cache-posix.bak-<ts>/ ——目的地已有內容時的改名回退分支未被觸發"
+          }
+          Write-Host "換手第 2 次通過（回退目錄：$($baks[0].Name)）"
+
+          # 清場：本 step 的探針目錄不得污染後續 step（.venv-cache-* 為 gitignored，
+          # 但殘留會讓下一次換手判斷改走不同分支，且佔 runner 磁碟）。
+          Get-ChildItem -Path . -Force | Where-Object { $_.Name -like '.venv-cache-*' } |
+            Remove-Item -Recurse -Force
+          if (-not (Test-Path .venv\Scripts\python.exe)) {
+            throw "清場後 .venv\Scripts\python.exe 不存在——後續 step 依賴的 .venv 已被破壞"
+          }
+          Write-Host ".venv 形狀換手分支（僅 Windows runner 可測）驗證通過"
 
       - name: Install AutoClaude deps
         working-directory: AutoClaude

@@ -4,13 +4,18 @@
 #
 # 背景：R37/R40 已把 PowerShell 側（tools/lib/WindowsAppsGuard.ps1::Test-IsRealPython）
 # 與 Python 側（bootstrap_core.py::_is_windows_apps_stub）各自收斂為單一真相源，但兩者
-# 皆只掃描 .ps1/.py，repo 內另有 12 支 tracked bash 腳本（含 tools/git-hooks/pre-push
+# 皆只掃描 .ps1/.py，repo 內另有多支 tracked bash 腳本（含 tools/git-hooks/pre-push
 # 這個每次 push 都會實際執行的 dispatcher）各自用裸 `command -v python`/`command -v
 # python3` 判斷可用性，從未排除 Windows Store App Execution Alias 空殼——全新未裝真
 # Python 的 Windows 11 機器上，Git Bash 繼承 Windows PATH 同樣會命中
 # %LOCALAPPDATA%\Microsoft\WindowsApps 下的空殼 python.exe/python3.exe（`command -v`
 # 判定為「存在」，實際執行只會跳出 Microsoft Store 安裝提示，對 pre-push 這類阻斷式
 # hook 而言即為掛起）。本檔為該語言邊界補上對稱實作。
+#
+# R56 修正：本段原寫死「另有 12 支」（R43 寫 9、R55 訂為 12、實測皆錯）。呼叫端
+# 實數不再寫在敘述裡——唯一真相源＝tools/tests/test_windowsapps_guard_bash_parity.py
+# 的 _CALLER_FILES，並由該檔 test_caller_files_matches_repo_wide_scan 以全庫掃描
+# 機械斷言其與實況相等（人工重數三度數錯後的治本手段）。
 #
 # 用法：
 #   . "<repo根>/tools/lib/windowsapps_guard.sh"

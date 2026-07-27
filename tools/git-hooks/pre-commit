@@ -167,7 +167,12 @@ if [ "$run_root_infra" -eq 1 ]; then
   while IFS= read -r f; do
     [ -z "$f" ] && continue
     case "$f" in
-      tools/*|.github/*) : ;;   # 只檢查根層基建路徑（子專案腳本由各自 hook 把關）
+      # 只檢查根層基建路徑。R56 訂正：本行原註解宣稱「子專案腳本由各自 hook
+      # 把關」，實測兩子專案 pre-commit 皆未做 `.sh` 語法檢查——委派鏈是空的。
+      # 兜底改由 root-infra-ci.yml 第 1 道（全庫 tracked `*.sh` 的 bash -n）承擔；
+      # 此處維持只掃根層基建，是「commit 前只驗本次動到的檔、保持 hook 輕量」的
+      # 刻意取捨，不是委派。
+      tools/*|.github/*) : ;;
       *) continue ;;
     esac
     do_check=0

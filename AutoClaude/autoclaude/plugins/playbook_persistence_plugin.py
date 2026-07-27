@@ -19,8 +19,8 @@ SD_Improving_05 W4-3：從 `_runner_internals._persist_mutated_playbook` +
 from __future__ import annotations
 
 import logging
+from collections.abc import Callable, Iterable
 from pathlib import Path
-from typing import Callable, Iterable, Optional, Union
 
 import yaml
 
@@ -30,6 +30,7 @@ from ..core.hookspec import (
     PersistenceResult,
 )
 from ..models.playbook import Playbook
+from ..utils.logger import _sanitize_log_filename
 
 logger = logging.getLogger(__name__)
 
@@ -41,7 +42,7 @@ class PlaybookPersistencePlugin:
 
     def __init__(
         self,
-        checkpoint_dir: Union[str, Callable[[], str]] = "checkpoints",
+        checkpoint_dir: str | Callable[[], str] = "checkpoints",
     ):
         """checkpoint_dir 可為 str 或 callable resolver。
 
@@ -67,7 +68,7 @@ class PlaybookPersistencePlugin:
     def subscribed_phases(self) -> list[KernelPhase]:
         return [KernelPhase.ON_EVOLUTION_APPLY]
 
-    def on_event(self, ctx: HookContext) -> Optional[PersistenceResult]:
+    def on_event(self, ctx: HookContext) -> PersistenceResult | None:
         """ON_EVOLUTION_APPLY NO-OP 過渡訂閱位（W4 過渡；W6 完整下沉）。
 
         SD_05 W4 三方審查 SA-M4 / Arch-M2 修復：為對齊 PHASE_RESULT_CONTRACT
@@ -92,12 +93,21 @@ class PlaybookPersistencePlugin:
     # ──────────────────────────────────────────────────────────────────
 
     def _mutated_path_for(self, playbook_path: str) -> Path:
-        stem = Path(playbook_path).stem
+        # R56 修正（DEF-101-442）：本方法是 checkpoint_dir 檔名家族第三個 sibling，
+        # 另兩個已收斂淨化（file_state_repository._path() DEF-101-384 / R47、
+        # checkpoint_manager.checkpoint_path() DEF-101-390 / R48），本支此前裸用
+        # Path().stem。playbook_path 是使用者提供的自由格式路徑，stem 可能是 Windows
+        # 保留裝置名（CON/AUX/NUL…，帶副檔名同樣保留）或含 <>:"|?* 禁用字元／尾隨空白
+        # 與句點 → Windows 上 open("w") 直接 OSError，而 persist_mutated_playbook() 的
+        # except 只 logger.warning 不拋，突變後 playbook 會靜默遺失（演化狀態不可復原）。
+        # 委派 SSOT `_sanitize_log_filename`，讀（load）／寫（persist）／清（cleanup）
+        # 三路皆經本方法，故單點修改即三處一致，不會產生新的讀寫檔名分歧。
+        stem = _sanitize_log_filename(Path(playbook_path).stem)
         return self._checkpoint_dir / f"{stem}.mutated.yaml"
 
     def persist_mutated_playbook(
         self, playbook: Playbook, playbook_path: str,
-    ) -> Optional[Path]:
+    ) -> Path | None:
         """寫入 ``<stem>.mutated.yaml``。回傳寫入路徑；失敗回 None。"""
         mutated_path = self._mutated_path_for(playbook_path)
         try:
@@ -115,7 +125,7 @@ class PlaybookPersistencePlugin:
 
     def load_mutated_if_exists(
         self, playbook_path: str, *, checkpoint_exists: bool = True,
-    ) -> Optional[Path]:
+    ) -> Path | None:
         """偵測 ``<stem>.mutated.yaml``；若存在且有 checkpoint，回傳路徑。
 
         若 ``checkpoint_exists`` 為 False（fresh 模式或未排程 resume），即使
@@ -130,7 +140,7 @@ class PlaybookPersistencePlugin:
         return mutated_path
 
     def cleanup_mutated_for_paths(
-        self, paths: Iterable[Optional[str]],
+        self, paths: Iterable[str | None],
     ) -> list[Path]:
         """對提供的每個 playbook_path，移除其對應 ``.mutated.yaml``（若存在）。
 
