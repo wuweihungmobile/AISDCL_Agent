@@ -77,7 +77,61 @@ def _quote_cmd_shim_argv(shim_path: str, args: list[str]) -> str:
     return subprocess.list2cmdline([shim_path] + args)
 
 
-def _build_cmd_shim_line(shim_path: str, args: list[str]) -> str:
+class CmdShimPercentExpansionError(RuntimeError):
+    """args/shim 路徑含會被 cmd.exe 展開的 `%NAME%` 時於 spawn 前拋出（見下方說明）。"""
+
+
+# cmd.exe 的百分號展開發生在引號處理**之前**，`list2cmdline` 的 MS 標準 argv 跳脫
+# 規則管不到（也無法管）`%`，`/s /c` 亦無任何關閉展開的選項。本輪在真 Windows 11
+# （原生 cmd.exe 子行程 + 真實 .cmd shim）實測三種候選跳脫，**全數無法**讓子行程
+# 收到字面 `%TEMP%`：
+#   `^%TEMP^%`  → 子行程收到 `^%TEMP^%`（引號內 `^` 不作跳脫，反倒多出脫字元）
+#   `%%TEMP%%`  → 子行程收到 `%C:\Users\...\Temp%`（中間那組仍被展開，更糟）
+#   `%TE""MP%`  → 子行程收到 `%TE""MP%`（引號原樣殘留，內容依然變質）
+# 故「維持 cmd /c 啟動 + 內容原樣抵達」在物理上不可得，只能偵測後 fail loud。
+#
+# 為何選「偵測後拒跑」而非另兩個方案（供後續輪引用，勿重複評估）：
+#  (a) 改由 stdin 餵 prompt、argv 只留旗標：`claude -p` 由 stdin 讀 prompt 需要
+#      stdin EOF 才知道輸入結束，但 stdin pipe 正是此路徑僅剩的互動提示回應通道
+#      （`_auto_respond` → `send()`；見 `start()` 說明：走 shim 時已犧牲 PTY 模擬，
+#      stdin pipe 是其補償控制）——關掉 stdin 等於廢掉最後一道自動授權機制。且
+#      `PtyWrapper` 收到的是不透明 args list，並不知道哪個 token 是 prompt，要它
+#      去嗅探 `-p` 會把 CLI 專屬知識塞進通用 wrapper，並外溢到 prompt_dispatcher /
+#      pty_executor 兩處呼叫端。
+#  (b) 解析 npm shim 指向的真實 node + JS 入口直接 Popen：改動面最大且要重寫
+#      `_resolve_command`（其現有形狀是 R1~R3 三輪複審沉澱下來的 cmd.exe 知識），
+#      而 shim 格式隨套件管理器（npm/pnpm/yarn/volta）與版本而異，逐一解析是開放
+#      式維護負債、且自身會生出新的靜默失效模式。
+# 誠實界定：本修法**不**達成兩平台「內容一致」，只把「靜默變質」轉成「明確拒跑」，
+# 使用者的 prompt 仍不能含字面 `%已定義變數%`。但被攔下的情境原本就已是壞的（內容
+# 已變質），故不存在「本來能跑、被本修法擋掉」的案例。
+_PERCENT_VAR_RE = re.compile(r"(?=%([^%\r\n]+)%)")
+
+
+def _find_expanding_percent_vars(command_line: str, env: dict[str, str]) -> list[str]:
+    """挑出會被 cmd.exe 真正展開的 `%NAME%` 名稱（去重、保留出現順序）；無則空 list。"""
+    # 判準全部以真 Windows 11 實測為準，非推論：
+    #  - 只有 NAME 在子行程 env 內**已定義**才會被展開；未定義（`%NO_SUCH_VAR%`）
+    #    cmd.exe 原樣保留 → 不算缺陷、不可誤攔，故比對 env 而非只看 pattern。
+    #  - env 變數名**大小寫不敏感**（`%tEmP%` 實測同樣被展開）→ 一律轉大寫比對。
+    #  - 變數名可含 `(` `)`（`%ProgramFiles(x86)%` 實測被展開）→ 故不限縮成
+    #    `[A-Za-z_][A-Za-z0-9_]*`，改以「兩個 % 之間任意內容」交由 env 比對裁決。
+    #  - `!NAME!` 延遲展開實測**不觸發**（`/d /s /c` 未開 `/V:ON`）→ 不納入偵測。
+    # _PERCENT_VAR_RE 以 lookahead 取**可重疊**匹配：實測 `50% off %TEMP% now` 的 TEMP
+    # 仍被展開，而非重疊掃描會被前面那個孤立 `%` 吃掉分隔符、漏抓後面的真參照。寧可
+    # 過度偵測（結果是帶明確訊息拒跑）也不可漏抓（結果是靜默送出變質 prompt）。
+    defined = {k.upper() for k in env}
+    hits: list[str] = []
+    for match in _PERCENT_VAR_RE.finditer(command_line):
+        name = match.group(1)
+        if name.upper() in defined and name not in hits:
+            hits.append(name)
+    return hits
+
+
+def _build_cmd_shim_line(
+    shim_path: str, args: list[str], env: dict[str, str] | None = None
+) -> str:
     """組出透過 `cmd /d /s /c` 呼叫 .cmd/.bat shim 的**單一完整命令列字串**，
     供 `subprocess.Popen` 以「字串」（非 list）傳遞。
 
@@ -88,7 +142,25 @@ def _build_cmd_shim_line(shim_path: str, args: list[str]) -> str:
     shell=False 時字串型 args 會原樣透傳給 CreateProcess，不會再被
     list2cmdline 二次加引號破壞這裡手動組好的命令列。
     """
-    return f'cmd /d /s /c "{_quote_cmd_shim_argv(shim_path, args)}"'
+    remainder = _quote_cmd_shim_argv(shim_path, args)
+    # 本輪 P2（真 Windows 11 實測復現）：cmd.exe 於引號處理前展開 `%NAME%`，使同一份
+    # playbook 在 Windows（.cmd shim → 經 cmd.exe）與 macOS/Linux（走 argv、內容原樣
+    # 抵達）語意不同，且原先毫無警示——prompt 只要含 `%USERPROFILE%`／`%TEMP%` 等
+    # 本機已定義變數字樣，送進 CLI 的內容就與 YAML 寫的不同。掃 remainder（同時涵蓋
+    # shim 路徑與 args，兩者都在同一條命令列上受同一套展開規則影響），命中即拒跑。
+    # `env` 須為**實際交給該子行程的** env dict（展開由 cmd.exe 用它自己收到的環境
+    # 進行，非本行程的 os.environ）；省略時退回 os.environ，僅為既有呼叫端／測試的
+    # 相容預設。
+    expanding = _find_expanding_percent_vars(remainder, os.environ if env is None else env)
+    if expanding:
+        raise CmdShimPercentExpansionError(
+            f"Windows .cmd/.bat shim 啟動路徑偵測到會被 cmd.exe 展開的環境變數參照：{expanding}。"
+            "cmd.exe 會在引號處理前把它們替換成本機環境變數值，送進子行程的內容將與呼叫端指定的"
+            "不同（macOS/Linux 走 argv 不替換，同一份 playbook 兩平台語意不一致），且已實測無任何"
+            "跳脫方式可避免。請改寫措辭避開字面 %NAME%（例如寫成「TEMP 環境變數」），或改用非 "
+            ".cmd/.bat 的 claude 可執行檔以完全繞開 cmd.exe。"
+        )
+    return f'cmd /d /s /c "{remainder}"'
 
 
 class PtyWrapper:
@@ -162,11 +234,16 @@ class PtyWrapper:
 
     def _start_subprocess(self) -> None:
         resolved = _resolve_command(self._command)
+        # 先算出實際要交給子行程的 env，供 %VAR% 展開偵測用**同一份**環境判斷
+        # （cmd.exe 依它自己收到的 env 展開；trace context 注入的鍵也在其中）。
+        popen_env = propagate_to_subprocess_env(dict(os.environ))
         if _is_cmd_shim(resolved):
             # .cmd/.bat shim：見 _build_cmd_shim_line() 說明。傳「字串」而非 list——
             # Windows 上 shell=False 時 Popen 對字串型 args 直接透傳給 CreateProcess，
             # 不會再被 list2cmdline 二次加引號破壞我們手動組好的命令列。
-            argv: list[str] | str = _build_cmd_shim_line(resolved[2], list(self._args))
+            argv: list[str] | str = _build_cmd_shim_line(
+                resolved[2], list(self._args), popen_env
+            )
         else:
             argv = resolved + self._args
         popen_kwargs: dict = {}
@@ -184,7 +261,7 @@ class PtyWrapper:
             stdin=subprocess.PIPE,
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
-            env=propagate_to_subprocess_env(dict(os.environ)),
+            env=popen_env,
             **popen_kwargs,
         )
         self._reader = NonBlockingStreamReader(self._proc.stdout)

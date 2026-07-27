@@ -85,6 +85,11 @@ on:
       - "tools/dev_start.py"
       - "tools/tests/**"
       - "tools/run_root_unittests.py"
+      # R58：golden 產生器（PowerShell 註解 ground truth）。與 run_root_unittests.py 同列的
+      # 理由：它的消費端 tools/tests/test_ps_comment_golden.py 是根層 unittest 套件的一員，
+      # 只改產生器時該套件的回歸鎖必須要跑（DEF-101-042 同構；由 AISDLC_SDD/scripts/tests/
+      # test_ci_paths_cover_root_consumers.py 機械守門，本行漏列即翻紅）。
+      - "tools/gen_ps_comment_golden.py"
       # R14：tools/tests/test_subprocess_encoding_hygiene.py 單檔掃描清單消費此檔
       #（樹外 tracked 零散 .py 納管）——只改該檔時其回歸鎖須跑（DEF-101-042 同構）
       - "AutoClaude/tmp_lint_check.py"
@@ -191,6 +196,11 @@ on:
       - "tools/dev_start.py"
       - "tools/tests/**"
       - "tools/run_root_unittests.py"
+      # R58：golden 產生器（PowerShell 註解 ground truth）。與 run_root_unittests.py 同列的
+      # 理由：它的消費端 tools/tests/test_ps_comment_golden.py 是根層 unittest 套件的一員，
+      # 只改產生器時該套件的回歸鎖必須要跑（DEF-101-042 同構；由 AISDLC_SDD/scripts/tests/
+      # test_ci_paths_cover_root_consumers.py 機械守門，本行漏列即翻紅）。
+      - "tools/gen_ps_comment_golden.py"
       # R14：tools/tests/test_subprocess_encoding_hygiene.py 單檔掃描清單消費此檔
       #（樹外 tracked 零散 .py 納管）——只改該檔時其回歸鎖須跑（DEF-101-042 同構）
       - "AutoClaude/tmp_lint_check.py"

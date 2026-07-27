@@ -5,8 +5,29 @@
 `CON .txt` 的 base 是 `"CON "`（帶尾隨空白），`^(CON|...)$` / case pattern `CON`
 皆不匹配；而「整段以空白或句點結尾」那一條只看整段（`CON .txt` 結尾是 `t`）也
 不成立 → 兩道判準之間漏出一個縫，`CON .txt`／`NUL .log`／`LPT1 .yaml` 全數放行。
-Windows 實情：Win32 解析裝置名時會忽略基底名後的尾隨空白，此形態在 Windows
-checkout 仍會撞到裝置名。
+
+**R58 訂正（DEF-101-B13）：本檔原本寫「Windows 實情：Win32 解析裝置名時會忽略基底名
+後的尾隨空白，此形態在 Windows checkout 仍會撞到裝置名」——已被實測證偽。** 量測環境
+＝原生 Windows 11 Pro + git 2.51.0.windows.1；手法＝raw Win32（ctypes `CreateFileW`
++ `GetFileType`，**`restype` 必須顯式設成 `wintypes.HANDLE`**，否則 64-bit handle 被
+ctypes 預設的 `c_int` 截斷，CreateFileW 失敗會被誤讀成 `FILE_TYPE_UNKNOWN`——本輪第一
+次量測即踩到此坑）＋ 在系統暫存目錄建一次性 git repo（刻意不在工作樹跑 git 寫指令）：
+
+  - 帶目錄前綴的 `CON`／`AUX`／`PRN`／`COM1`／`LPT1`／`CONIN$`／`CON .txt`／`NUL .log`
+    一律被 Win32 建成**普通檔案**（FILE_TYPE_DISK、listdir 看得到），**沒有**撞到裝置。
+    唯一例外是 `NUL`：帶目錄前綴仍是裝置（`<dir>\\NUL` → FILE_TYPE_CHAR、無此檔）。
+  - 尾隨空白／句點**不是「不允許」而是被靜默剝除改名**：`'trail_space '` 落地成
+    `trail_space`、`'dots...'` → `dots`（CreateFileW 皆成功）。
+  - 真正拒絕的層是 **Git for Windows**（`is_valid_win32_path()`／`mingw_open()` 的
+    DOS 裝置名黑名單）：`git add` 對上述路徑實測 rc=128
+    （`open(...): No such file or directory` + `unable to index file`）；尾隨空白路徑
+    連 `git update-index --add --cacheinfo` 都 rc=128 `error: Invalid path 'trailing '`。
+
+兩處實作的攔截行為完全不變（危害真實存在，只是層別不同），只訂正理由。誤植的機制已
+造成實害——清單照「Win32 裝置名解析」推導，於是漏掉真正會讓 git 失效的 `CONIN$`／
+`CONOUT$`（DEF-101-B3，R58 同輪修復）。完整量測（含 COM/LPT 數字全掃、`CONERR$` 證偽）、
+三段式涵蓋面宣稱與可覆核的量測指令收斂在 `tools/check_ntfs_paths.py` 檔頭
+〈實測機制〉一節（本檔不重抄，免多處漂移）。
 
 本檔只鎖 monorepo 根層兩處實作（Python CI 版 + bash hook 版）的**行為對等**。
 同一缺陷形態另存在於兩處，**R57 主控收尾時已一併修復並各自設鎖**：

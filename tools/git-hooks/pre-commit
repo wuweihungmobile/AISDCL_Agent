@@ -54,12 +54,17 @@ else
 fi
 
 # ── NTFS 敵意檔名防護閘（A3）─────────────────────────────────────────────
-# 本 repo 為 macOS ⇄ Windows 雙平台開發：macOS(APFS) 允許的檔名在 Windows(NTFS)
-# checkout 時會直接炸掉（無法建檔）或靜默碰撞（大小寫不敏感覆蓋）。凡本次 commit
-# 新增（A/C）的路徑任一命中即 fail-loud 擋下（正確性閘，CI 環境亦不跳過）：
-#   1. 路徑任一段含 < > : " | ? * 或控制字元，或以空白/句點結尾（NTFS 不允許）
+# 本 repo 為 macOS ⇄ Windows 雙平台開發：macOS(APFS) 允許的檔名在 Windows 上會讓
+# git 開不了/進不了 index（Git for Windows 的 DOS 裝置名黑名單）、被 Win32 靜默剝除
+# 尾隨空白改名、或大小寫不敏感互相覆蓋。凡本次 commit 新增（A/C）的路徑任一命中即
+# fail-loud 擋下（正確性閘，CI 環境亦不跳過）：
+#   1. 路徑任一段含 < > : " | ? * 或控制字元，或以空白/句點結尾
+#      （R58 訂正 DEF-101-B13：本處原寫「NTFS 不允許」＝機制誤植。實測 Win32 不拒絕
+#      而是靜默剝除改名，git 那側才明確拒絕入 index。CI 對等實作
+#      tools/check_ntfs_paths.py 檔頭〈實測機制〉②載有完整量測與覆核指令）
 #   2. 任一段去副檔名、再剝除尾隨空白後（不分大小寫）為 Windows 保留裝置名
-#      CON/PRN/AUX/NUL/COM1~9/LPT1~9（尾隨空白剝除＝R57 修正，見 _ntfs_seg_bad 內註解）
+#      CON/PRN/AUX/NUL/COM0~9/LPT0~9/CONIN$/CONOUT$（尾隨空白剝除＝R57 修正、
+#      CONIN$/CONOUT$＝R58 修正 DEF-101-B3，皆見 _ntfs_seg_bad 內註解）
 #   3. 大小寫碰撞：新增路徑 lowercase 後與既有 tracked 路徑重複但原字串不同
 #      （NTFS 大小寫不敏感 → checkout 時兩檔互相覆蓋）
 #   4. MAX_PATH 保守長度閘（DEF-101-039）：Windows 未開 core.longpaths 時絕對路徑上限
@@ -86,19 +91,33 @@ _ntfs_seg_bad() {  # $1=完整路徑；有問題 → stdout 印原因並回 0，
         echo "路徑段「${seg}」含 Windows 不允許字元（< > : \" | ? * \\）"
         return 0 ;;
       *' '|*'.')
-        echo "路徑段「${seg}」以空白或句點結尾（NTFS 不允許）"
+        # R58 訂正（DEF-101-B13）：原訊息寫「NTFS 不允許」＝機制誤植。實測 Win32 不拒絕，
+        # 而是靜默剝除改名（`'trail_space '` 落地成 `trail_space`）；git 那側才明確拒絕
+        # （`update-index --cacheinfo` rc=128 `Invalid path`）。判準不變，只改述理由。
+        echo "路徑段「${seg}」以空白或句點結尾（Win32 會靜默剝除改名，git 拒絕入 index）"
         return 0 ;;
     esac
-    base="${seg%%.*}"   # 去（第一個點起的）副檔名；Windows 對 CON.txt 一樣視為保留名
+    base="${seg%%.*}"   # 去（第一個點起的）副檔名；git 對 CON.txt 一樣視為保留名
     # R57 修正（DEF-101-B1）：再剝除 base 的尾隨空白。原本 `CON .txt` 的 base 是
     # 「CON 」（帶尾隨空白），case pattern CON 不匹配而放行；上方「以空白/句點結尾」
-    # 只看整段（結尾是 t）也不攔 → 完全逃逸。Win32 解析裝置名時會忽略基底名後的
-    # 尾隨空白，故此形態在 Windows 上仍撞裝置名。CI 對等實作 tools/check_ntfs_paths.py
-    # 的 `.rstrip(" ")` 同語意。bash 3.2 無 extglob 保證，以 while + ${var% } 逐字剝。
+    # 只看整段（結尾是 t）也不攔 → 完全逃逸。
+    # R58 訂正（DEF-101-B13）：本處原寫「Win32 解析裝置名時會忽略基底名後的尾隨空白，
+    # 故此形態在 Windows 上仍撞裝置名」——實測證偽（`<dir>\CON .txt` 是 FILE_TYPE_DISK
+    # 普通檔案、沒撞到任何裝置）。真正拒絕的是 Git for Windows 的 `is_valid_win32_path()`
+    # （`git add "<dir>/CON .txt"` 實測 rc=128），檔案建得起來卻永遠進不了 index。
+    # CI 對等實作 tools/check_ntfs_paths.py 的 `.rstrip(" ")` 同語意，其檔頭
+    # 〈實測機制〉載有完整量測與覆核指令。
+    # bash 3.2 無 extglob 保證，以 while + ${var% } 逐字剝。
     while [ "${base% }" != "$base" ]; do base="${base% }"; done
     up="$(printf '%s' "$base" | tr '[:lower:]' '[:upper:]')"
+    # R58 修正（DEF-101-B3）：補 'CONIN$'／'CONOUT$'——Git for Windows 的黑名單含這兩個
+    # console handle 名，實測 `git add` rc=128 而 NTFS 建得起來（檔案在、git 說不存在）。
+    # 刻意不收 'CONERR$'：裸名實測為 FILE_TYPE_DISK（不是裝置）且 git add rc=0 成功入
+    # index，收它等於誤擋無害名（掃描員原提案含它，經實測證偽）。
+    # 兩者加單引號使 `$` 在 case pattern 內成為字面值（bash 對 `$)` 雖已視為字面 `$`，
+    # 加引號可讀且不依賴該邊角規則）。
     case "$up" in
-      CON|PRN|AUX|NUL|COM[0-9]|LPT[0-9])
+      CON|PRN|AUX|NUL|COM[0-9]|LPT[0-9]|'CONIN$'|'CONOUT$')
         echo "路徑段「${seg}」為 Windows 保留裝置名（${up}）"
         return 0 ;;
     esac

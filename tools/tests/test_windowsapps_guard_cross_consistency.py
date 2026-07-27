@@ -39,6 +39,12 @@ import tempfile
 import unittest
 from pathlib import Path
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+# R58 發現 #8／#20：版本目錄正則原本在本檔與另三支測試各有一份（觀測同一對象），
+# 已收斂到 `_sdd_versions`；接線由 `test_sdd_versions.py` 的呼叫端鎖機械守住。
+from _registry_hygiene import empty_reason_keys  # noqa: E402  名冊衛生判準 SSOT
+from _sdd_versions import exclude_frozen_sdd_versions  # noqa: E402
+
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 _BOOTSTRAP_PS1 = _REPO_ROOT / "tools" / "bootstrap.ps1"
 _DEV_START_PS1 = _REPO_ROOT / "tools" / "dev_start.ps1"
@@ -412,19 +418,7 @@ def _tracked_files(pattern: str) -> list[str]:
     return [line for line in proc.stdout.splitlines() if line]
 
 
-_FROZEN_SDD_VERSION_RE = re.compile(r"^AISDLC_SDD/(AISDLC_SDD_v\d+\.\d+)/")
-
-
-def _exclude_frozen_sdd_versions(paths: list[str], latest_name: str) -> list[str]:
-    """排除 AISDLC_SDD 凍結版本（v0.01 ~ 除 LATEST 以外者）——凍結版依鐵律
-    (CLAUDE.md「Copy-on-Evolve」慣例) 不應被新規則追殺歷史快照。"""
-    kept = []
-    for rel in paths:
-        m = _FROZEN_SDD_VERSION_RE.match(rel)
-        if m and m.group(1) != latest_name:
-            continue
-        kept.append(rel)
-    return kept
+# 凍結版路徑正則與剔除函式已於 R58 收斂到 `_sdd_versions`（見檔頭 import）。
 
 
 _WINDOWSAPPS_LITERAL = "WindowsApps"
@@ -1026,7 +1020,7 @@ class TestNoOrphanWindowsAppsImplementation(unittest.TestCase):
         的逐行正則掃描；在該投入被判定值得之前，此為已知的方法論邊界。
         """
         latest_name = _latest_sdd_root().name
-        scoped_ps1 = _exclude_frozen_sdd_versions(_tracked_files("*.ps1"), latest_name)
+        scoped_ps1 = exclude_frozen_sdd_versions(_tracked_files("*.ps1"), latest_name)
 
         offenders = []
         for rel in scoped_ps1:
@@ -1081,7 +1075,7 @@ class TestNoOrphanWindowsAppsImplementation(unittest.TestCase):
         到歸類即判定未受保護（見該函式與其呼叫的 helper docstring）。
         """
         latest_name = _latest_sdd_root().name
-        scoped_ps1 = _exclude_frozen_sdd_versions(_tracked_files("*.ps1"), latest_name)
+        scoped_ps1 = exclude_frozen_sdd_versions(_tracked_files("*.ps1"), latest_name)
 
         offenders = []
         for rel in scoped_ps1:
@@ -1171,7 +1165,7 @@ class TestNoOrphanWindowsAppsImplementation(unittest.TestCase):
         ＋ `bootstrap_core.py`），新增偽陽性 0，故取消縮面零代價。
         """
         latest_name = _latest_sdd_root().name
-        all_py = _exclude_frozen_sdd_versions(_tracked_files("*.py"), latest_name)
+        all_py = exclude_frozen_sdd_versions(_tracked_files("*.py"), latest_name)
         candidate_py = [rel for rel in all_py if not _is_test_py(rel)]
 
         hits = []
@@ -1189,6 +1183,26 @@ class TestNoOrphanWindowsAppsImplementation(unittest.TestCase):
             f"出現新的 Python 側判斷實作（繞過 SSOT），若確有語言/套件邊界理由請在"
             f"`_APPROVED_SECOND_IMPLS` 附理由登記；少掉的站點代表登記已腐化"
             f"（檔案移除或兩錨皆不再命中），請同步清單",
+        )
+
+    def test_approved_second_impls_reasons_are_not_blank(self) -> None:
+        """登記項的**理由**不得空白（R58 round 7 QA-R58R7-01 落地）。
+
+        為什麼上面那條等值斷言不夠：它比對 `sorted(hits)` vs `sorted(expected)`，而
+        **`sorted(dict)` 只列 keys** ⇒ 理由字串完全不在斷言面內。R58 round 6 的收輪紀錄曾
+        宣稱這類等值斷言「比 `stale_problems` 更強、結構性在射程外」，round 7 QA **以注入
+        證偽**：把既有條目的理由改成純空白，本模組全套仍 `fail=0` 全綠，而同一輸入餵
+        `empty_reason_keys()` 立刻具名（Architect 與 SD 兩方當輪都以讀碼背書了那個錯誤宣稱，
+        只有做注入的 QA 抓到——**看碼推論輸給實測**）。
+        等值斷言在 stale（存在性）那一半確實**更強**（雙向釘鍵，連「新出現而未登記」都抓），
+        **但在理由那一半是零**，不是超集。而本鎖自己的失敗訊息就要求「附理由登記」：理由
+        空白卻永久靜默，正是 `tools/tests/_registry_hygiene.py` docstring 明文譴責的
+        「先加豁免再補理由變永久 TODO」。
+        """
+        self.assertEqual(
+            empty_reason_keys(_APPROVED_SECOND_IMPLS), [],
+            "下列 `_APPROVED_SECOND_IMPLS` 登記項的理由為空白（或純空白字元）——"
+            "本鎖的失敗訊息要求「附理由登記」，空白理由等於沒登記理由，會變成永久 TODO",
         )
 
     def test_scan_loop_goes_through_matches_stub_anchor(self) -> None:

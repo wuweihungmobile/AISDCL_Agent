@@ -78,7 +78,7 @@ def test_resolve_act_windows_falls_back_to_winget_glob(
     act_dir = tmp_path / "Microsoft" / "WinGet" / "Packages" / "nektos.act_1.2.3"
     act_dir.mkdir(parents=True)
     act_exe = act_dir / "act.exe"
-    act_exe.write_text("")
+    act_exe.write_text("", encoding="utf-8")
 
     assert m.resolve_act() == [str(act_exe)]
 
@@ -94,8 +94,8 @@ def test_resolve_act_windows_winget_glob_picks_sorted_first_match(
     newer = base / "nektos.act_2.0.0"
     older.mkdir(parents=True)
     newer.mkdir(parents=True)
-    (older / "act.exe").write_text("")
-    (newer / "act.exe").write_text("")
+    (older / "act.exe").write_text("", encoding="utf-8")
+    (newer / "act.exe").write_text("", encoding="utf-8")
 
     result = m.resolve_act()
     assert result == [str(older / "act.exe")]  # sorted() 排序後取首個（字典序 1.0.0 < 2.0.0）

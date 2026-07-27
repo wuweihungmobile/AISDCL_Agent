@@ -66,9 +66,19 @@ def execute_prompt_impl(
     should_compact = False
     should_halt = False
     deadline = time.monotonic() + timeout
-    pty.start()
 
+    # `start()` 必須在 try 之內（R58）：`__init__`（上方）已開啟 RawStreamLogger 的檔案
+    # handle，`start()` 拋例外（最常見＝claude.command 不存在，Popen FileNotFoundError）
+    # 時 try 之外沒人呼叫 `pty.close()`。後果精確兩段，勿誇大成「洩漏到行程結束」
+    # （實測：呼叫端丟棄例外後 CPython refcount 即關檔）：① 與 GC 無關＝close() 是唯一
+    # 收掉子行程樹的地方，Popen 已成功而後續行才拋錯時子行程無人終止（行程不會被 GC
+    # 回收）；② Windows 專屬＝只要還有參照指向出錯 frame（except 區塊／留存的
+    # traceback），handle 仍開著，Windows 不允許刪除／改名該檔（實測 WinError 32）、
+    # POSIX 照樣成功 → log rotation／tmpdir 清理／checkpoint 搬移單邊平台失效。
+    # close() 對半成品安全：_child/_proc/_reader 為 None 時各自跳過，只關 _raw_logger；
+    # 例外仍原樣往外拋。回歸鎖：tests/test_prompt_dispatcher.py::TestPtyStartFailureClosesLog
     try:
+        pty.start()
         while time.monotonic() < deadline:
             if runner._hotkey.triggered:
                 break

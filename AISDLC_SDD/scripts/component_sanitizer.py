@@ -30,7 +30,20 @@ from __future__ import annotations
 import re
 
 _WIN_FORBIDDEN_CHARS = frozenset('<>:"|?*\\')
-_WIN_RESERVED_NAME_RE = re.compile(r"^(CON|PRN|AUX|NUL|COM[0-9]|LPT[0-9])$", re.IGNORECASE)
+# R58 修正（DEF-101-B3，四處同修；本檔為 30 個版本目錄共用的 SSOT，改這一處即全版生效）：
+# 補 `CONIN$`／`CONOUT$`。原清單照「Win32 裝置名解析」推導，漏掉這兩個真正會讓 git
+# 失效的名字——實測（原生 Windows 11 + git 2.51.0.windows.1）`sanitize_component('CONIN$')`
+# 原樣回傳、未加 `_` 前綴，該產物能在 NTFS 建立（os.path.isfile=True）但 `git add`
+# rc=128（`open(...): No such file or directory` + `unable to index file`），於是
+# 「檔案明明在、git 說不存在」——FSM state 檔一旦命中就永遠無法提交。
+# 刻意不收 `CONERR$`（掃描員原提案把它與上兩者並列，經實測證偽：裸名 `CONERR$` 是
+# FILE_TYPE_DISK 普通檔案、根本不是裝置，且 `git add` rc=0 成功入 index）。
+# `$` 需轉義成 `\$`；`CON` 分支不會搶先匹配 `CONIN$`——pattern 以 `$` 錨定結尾，短分支
+# 匹配後錨定失敗會回溯（已實測）。完整量測與覆核指令見 tools/check_ntfs_paths.py
+# 檔頭〈實測機制〉（該檔是本函式的 monorepo 根層姊妹實作）。
+_WIN_RESERVED_NAME_RE = re.compile(
+    r"^(CON|PRN|AUX|NUL|COM[0-9]|LPT[0-9]|CONIN\$|CONOUT\$)$", re.IGNORECASE
+)
 _MAX_COMPONENT_LEN = 80  # 遠低於 NTFS 單檔名 255 上限，為前後綴（FSM-STATE-/-{track}.yaml）留餘裕
 
 
@@ -69,8 +82,12 @@ def sanitize_component(name: str) -> str:
     # R57 修正（DEF-101-B1 第 ③ 處）：stem 取出後必須再剝一次尾隨空白。上一行的
     # rstrip(" .") 作用於**整串**，對 "CON .txt" 不觸發（結尾是 t），使 stem 成為
     # 帶尾隨空白的 "CON " 而不匹配 ^CON$ → 保留裝置名整組逃逸（實測 'CON .txt'／
-    # 'NUL .log'／'LPT1 .yaml' 原本皆原樣輸出、未加 "_" 前綴）。Win32 解析裝置名時
-    # 會忽略基底名後的尾隨空白，故這類檔名在 Windows 上仍會撞到裝置。
+    # 'NUL .log'／'LPT1 .yaml' 原本皆原樣輸出、未加 "_" 前綴）。
+    # R58 訂正（DEF-101-B13）：本處原寫「Win32 解析裝置名時會忽略基底名後的尾隨空白，
+    # 故這類檔名在 Windows 上仍會撞到裝置」——實測證偽（`<dir>\CON .txt` 是
+    # FILE_TYPE_DISK 普通檔案，沒撞到任何裝置）。會忽略尾隨空白的是 **Git for Windows**
+    # 的 `is_valid_win32_path()`：`git add "<dir>/CON .txt"` 實測 rc=128，檔案建得起來
+    # 卻永遠進不了 index。攔截行為不變，只訂正理由。
     # 刻意只 rstrip(" ") 不含 "."：改成 rstrip(" .") 會讓純句點片段（".."／"."）的
     # stem 被吃空成 ""，破壞上方已收斂的路徑穿越退化為 "untitled" 的防禦。
     stem = sanitized.split(".", 1)[0].rstrip(" ")

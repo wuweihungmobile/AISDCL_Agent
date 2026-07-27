@@ -17,6 +17,7 @@ import unittest
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+import _ci_scan_anchors  # noqa: E402  # 需要模組物件本身：雙向同步鎖要讀其 __doc__
 from _ci_scan_anchors import (  # noqa: E402
     CI_GCI_CALL_RE,
     CI_SCAN_STMT_RE,
@@ -301,7 +302,11 @@ def _with_fifth_tree(line: str) -> str:
 
 
 class TestParameterFormEvasions(unittest.TestCase):
-    """ARCH-01 淨退化修復：對 R57 實測的 8 種第 5 棵樹寫法，掃描面鎖必須翻紅。"""
+    """ARCH-01 淨退化修復：對 `_FORM_EVASIONS` 逐條列出的每一種第 5 棵樹寫法，
+    掃描面鎖必須翻紅。
+
+    種類數不寫在這裡，一律由 `len(_FORM_EVASIONS)` 生成到失敗訊息內（QA-R57R4-03：
+    上一版寫死「8 種」，該表其後成長卻沒人改這行，於是 docstring 自己就是失實宣稱）。"""
 
     def test_cmdlet_count_anchor_catches_every_measured_form(self) -> None:
         for name, line in _FORM_EVASIONS.items():
@@ -324,21 +329,218 @@ class TestParameterFormEvasions(unittest.TestCase):
                     or ci_scan_statement_count(mutated) != EXPECTED_CI_SCAN_STATEMENTS
                     or ci_gci_call_count(mutated) != EXPECTED_CI_GCI_CALLS
                 )
-                self.assertTrue(red, f"「{name}」形態的第 5 棵樹可全綠逃逸三錨")
+                self.assertTrue(
+                    red,
+                    f"「{name}」形態的第 5 棵樹可全綠逃逸三錨"
+                    f"（本表共 {len(_FORM_EVASIONS)} 種形態）",
+                )
 
     def test_known_uncovered_forms_stay_documented_as_uncovered(self) -> None:
-        """已實測的殘餘風險：非 Get-ChildItem 系列的三種列舉途徑三錨皆無感。
-        此斷言不是在「保護漏洞」，而是把 docstring 的「已實測不涵蓋」清單釘住——
-        任一項未來被涵蓋時這裡翻紅，強迫同步改文件（不再有失實的涵蓋面宣稱）。"""
+        """已實測的殘餘風險：`_KNOWN_UNCOVERED` 列出的非 Get-ChildItem 系列列舉途徑，
+        三錨皆無感。此斷言不是在「保護漏洞」，而是把 docstring 的「已實測不涵蓋」清單
+        釘住——任一項未來被涵蓋時這裡翻紅，強迫同步改文件（不再有失實的涵蓋面宣稱）。
+
+        項數不寫在這裡（上一版寫「三種」，該表補進 `EnumerateFiles` 後即失實——
+        ARCH-R57R4-02），改由 `len(_KNOWN_UNCOVERED)` 生成到失敗訊息。**本方向只鎖
+        「錨變強」**；反方向（表變長／docstring 沒跟）由
+        `TestDocstringClaimsMatchAnchorTables` 補上，兩者合起來才構成雙向鎖。"""
         base_trees = ci_fixed_trees(_real_step())
         for name, line in _KNOWN_UNCOVERED.items():
             with self.subTest(form=name):
                 mutated = _with_fifth_tree(line)
-                self.assertEqual(ci_fixed_trees(mutated), base_trees)
-                self.assertEqual(
-                    ci_scan_statement_count(mutated), EXPECTED_CI_SCAN_STATEMENTS
+                msg = (
+                    f"「{name}」已被三錨之一涵蓋（_KNOWN_UNCOVERED 現有 "
+                    f"{len(_KNOWN_UNCOVERED)} 項）——請先同步 {_ci_scan_anchors.__name__} "
+                    f"docstring 的「已實測不涵蓋」清單，再把該項從本表移除"
                 )
-                self.assertEqual(ci_gci_call_count(mutated), EXPECTED_CI_GCI_CALLS)
+                self.assertEqual(ci_fixed_trees(mutated), base_trees, msg)
+                self.assertEqual(
+                    ci_scan_statement_count(mutated), EXPECTED_CI_SCAN_STATEMENTS, msg
+                )
+                self.assertEqual(ci_gci_call_count(mutated), EXPECTED_CI_GCI_CALLS, msg)
+
+
+# ---------------------------------------------------------------------------
+# docstring ↔ 樣本表 雙向同步鎖（R57 round 4 ARCH-R57R4-02 / QA-R57R4-03）
+# ---------------------------------------------------------------------------
+# WHY：上一版只有「錨變強 → 翻紅」這**一個方向**的鎖
+# （`TestParameterFormEvasions.test_known_uncovered_forms_stay_documented_as_uncovered`），
+# 對「常數表變長、docstring 沒跟」完全無感——而該方向的漂移**已經發生**：
+# `_KNOWN_UNCOVERED` 補進 `EnumerateFiles` 後，SSOT docstring 仍寫「…這三種」，
+# 下一輪審查者讀 docstring 會以為殘餘逃逸面只有三種、據此判斷已收斂到可接受，
+# 實際比宣稱多一種。這是 R57 反覆在抓的「涵蓋面假宣稱」在同一檔內第四次復發，
+# 只是方向變成「不涵蓋清單少列」（見帳本 DEF-101-501 的 R58 backlog 清單）。
+# 故本節把兩張樣本表與 docstring 的對應關係鎖成**雙向**：任一邊單獨變動即翻紅。
+#
+# 反寫死數字設計：docstring 不再出現「這三種」這類中文數字，項數改由 `[UNCOVERED]`
+# 標記行的行數表達；本節失敗訊息一律以 `len(...)` 生成，故不可能過期。
+_SSOT_DOC = _ci_scan_anchors.__doc__ or ""
+_DOC_COVERED_HEAD = "已實測涵蓋"
+_DOC_UNCOVERED_HEAD = "已實測**不**涵蓋"
+_DOC_NOT_EXHAUSTIVE_HEAD = "未窮舉："
+# 「不涵蓋」逐項行的機械標記（散文裡提到它時一律加反引號包起來，故 `startswith` 判準
+# 不會把說明文字誤當清單項；`test_uncovered_marker_ignores_prose_mention` 釘住此點）。
+_DOC_UNCOVERED_ITEM = "[UNCOVERED]"
+_BACKTICKED_RE = re.compile(r"`([^`]+)`")
+# 樣本行裡的 PowerShell 參數名。`-` 必須前接空白或行首：否則 `get-childitem` 的
+# `-childitem` 會被當成參數名（實測），把 cmdlet 名的後半污染進參數集合。
+_PARAM_IN_LINE_RE = re.compile(r"(?:(?<=\s)|^)(-[A-Za-z]+)", re.MULTILINE)
+_PARAM_TOKEN_RE = re.compile(r"-[A-Za-z]+")
+
+
+def _doc_section(head: str, next_head: str) -> str:
+    """取 SSOT docstring 中 `head` 到 `next_head` 之間的段落（含 `head` 行）。
+
+    標題缺失、不唯一，或**不在行首**時一律直接 AssertionError：docstring 被改寫時
+    本鎖必須**大聲失敗**，而不是靜默退化成「段落抽錯／抽到空字串、什麼都沒檢查」的假綠。
+
+    行首要求不是潔癖，是實測過的假綠來源：本鎖開發過程中一次編輯意外吃掉
+    `EnumerateFiles` 項與 `未窮舉：` 之間的換行，兩行黏成一行後 `index(next_head)`
+    仍能切在行中間，項數照樣算到 4、全部斷言照樣綠——docstring 已被弄壞卻零訊號。
+    加上行首判準後同一情形立刻翻紅（已實測）。
+    """
+    for marker in (head, next_head):
+        found = _SSOT_DOC.count(marker)
+        assert found == 1, (
+            f"{_ci_scan_anchors.__name__} docstring 的「{marker}」標題出現 {found} 次"
+            f"（需恰好 1 次）——docstring 結構已變動致本鎖無法定位段落，請同步修本鎖"
+        )
+        at = _SSOT_DOC.index(marker)
+        assert at == 0 or _SSOT_DOC[at - 1] == "\n", (
+            f"{_ci_scan_anchors.__name__} docstring 的「{marker}」標題不在行首"
+            f"（前一字元為 {_SSOT_DOC[at - 1]!r}）——段落邊界會切在行中間而讓本鎖假綠"
+        )
+    return _SSOT_DOC[_SSOT_DOC.index(head) : _SSOT_DOC.index(next_head)]
+
+
+def _doc_uncovered_items() -> list[str]:
+    """SSOT docstring「已實測不涵蓋」段落內的逐項標記行（去掉標記前綴）。"""
+    section = _doc_section(_DOC_UNCOVERED_HEAD, _DOC_NOT_EXHAUSTIVE_HEAD)
+    return [
+        line.strip()[len(_DOC_UNCOVERED_ITEM) :].strip()
+        for line in section.split("\n")
+        if line.strip().startswith(_DOC_UNCOVERED_ITEM)
+    ]
+
+
+def _uncovered_doc_token(key: str) -> str:
+    """由 `_KNOWN_UNCOVERED` 的 key 機械推導「docstring 必須出現的識別字樣」。
+
+    `System.IO.Directory::GetFiles` → `GetFiles`、`Get-Item wildcard` → `Get-Item`。
+    刻意用推導而非另寫一張 key→字樣對照表：對照表會是**第三份**可漂移的清單，
+    新增第 5 項卻忘記登記時就又退回單向鎖——那正是本節要修的病。
+    """
+    return key.split("::")[-1].split()[0]
+
+
+def _doc_covered_cmdlet_spellings() -> set[str]:
+    """docstring「已實測涵蓋」段落宣稱的 cmdlet／別名拼法（反引號內、逐字比對）。"""
+    section = _doc_section(_DOC_COVERED_HEAD, _DOC_UNCOVERED_HEAD)
+    return {t for t in _BACKTICKED_RE.findall(section) if CI_GCI_CALL_RE.fullmatch(t)}
+
+
+def _doc_covered_param_names() -> set[str]:
+    """docstring「已實測涵蓋」段落宣稱的參數名（正規化為小寫——PS 不分大小寫）。"""
+    section = _doc_section(_DOC_COVERED_HEAD, _DOC_UNCOVERED_HEAD)
+    return {
+        t.lower() for t in _BACKTICKED_RE.findall(section) if _PARAM_TOKEN_RE.fullmatch(t)
+    }
+
+
+def _sample_cmdlet_spellings() -> set[str]:
+    return {s for line in _FORM_EVASIONS.values() for s in CI_GCI_CALL_RE.findall(line)}
+
+
+def _sample_param_names() -> set[str]:
+    return {
+        p.lower() for line in _FORM_EVASIONS.values() for p in _PARAM_IN_LINE_RE.findall(line)
+    }
+
+
+class TestDocstringClaimsMatchAnchorTables(unittest.TestCase):
+    """SSOT docstring 的涵蓋面宣稱 ↔ 本檔兩張樣本表，**雙向**鎖住（WHY 見上方註解）。
+
+    已實測涵蓋（本鎖會翻紅的漂移）：`_KNOWN_UNCOVERED` 增／減一項而 docstring 沒跟、
+    docstring 增／減一項而該表沒跟、`_FORM_EVASIONS` 引入新的 cmdlet 拼法（含大小寫
+    變體、新別名）或新的參數名而 docstring 的涵蓋清單沒跟，以及反向的「docstring 多列
+    一種拼法／參數名卻無對應樣本」（＝未經實測的宣稱）。
+    已實測**不**涵蓋：新增樣本若只是既有拼法＋既有參數名的重新排列（例如再加一種
+    參數順序），本鎖無訊號——那類樣本不擴大 docstring 這兩個維度的宣稱面，刻意不鎖，
+    以免每加一個迴歸樣本就得改文件。
+    未窮舉：docstring 的散文描述（如「任意順序」「任一大小寫」）無法機械核對其真偽，
+    本鎖只核對「清單型」宣稱的**成員與項數**，不核對散文語意。
+    """
+
+    def test_uncovered_item_count_matches_the_table(self) -> None:
+        """項數對齊——這是上一版缺的那個方向（常數表變長、docstring 沒跟）。"""
+        items = _doc_uncovered_items()
+        self.assertEqual(
+            len(items),
+            len(_KNOWN_UNCOVERED),
+            f"{_ci_scan_anchors.__name__} docstring 的「已實測不涵蓋」列了 {len(items)} "
+            f"項，_KNOWN_UNCOVERED 有 {len(_KNOWN_UNCOVERED)} 項——"
+            f"docstring 列：{items}；表內識別字樣："
+            f"{sorted(_uncovered_doc_token(k) for k in _KNOWN_UNCOVERED)}",
+        )
+
+    def test_every_table_entry_is_named_in_the_docstring(self) -> None:
+        """表→docstring 方向：每個常駐樣本都必須在 docstring 的不涵蓋清單裡具名。"""
+        items = _doc_uncovered_items()
+        for key in _KNOWN_UNCOVERED:
+            with self.subTest(form=key):
+                token = _uncovered_doc_token(key)
+                self.assertTrue(token, f"「{key}」推導不出識別字樣，key 命名需可推導")
+                self.assertTrue(
+                    any(token in item for item in items),
+                    f"_KNOWN_UNCOVERED 的「{key}」（識別字樣 {token!r}）未出現在 "
+                    f"{_ci_scan_anchors.__name__} docstring 的「已實測不涵蓋」清單"
+                    f"{items}——殘餘逃逸面比 docstring 宣稱的多，屬涵蓋面假宣稱",
+                )
+
+    def test_every_docstring_item_is_backed_by_a_table_entry(self) -> None:
+        """docstring→表 方向：文件列了卻無常駐樣本的「不涵蓋」項＝未經實測的宣稱。"""
+        tokens = sorted(_uncovered_doc_token(k) for k in _KNOWN_UNCOVERED)
+        for item in _doc_uncovered_items():
+            with self.subTest(item=item):
+                self.assertTrue(
+                    any(t in item for t in tokens),
+                    f"docstring 宣稱不涵蓋「{item}」，但 _KNOWN_UNCOVERED 無對應樣本"
+                    f"（表內識別字樣：{tokens}）——該宣稱沒有常駐斷言撐著",
+                )
+
+    def test_covered_cmdlet_spellings_match_the_sample_table(self) -> None:
+        """涵蓋清單的 cmdlet／別名拼法與樣本表必須集合相等（雙向）。"""
+        doc, sample = _doc_covered_cmdlet_spellings(), _sample_cmdlet_spellings()
+        self.assertEqual(
+            doc,
+            sample,
+            f"docstring 涵蓋清單的 cmdlet 拼法與 _FORM_EVASIONS 樣本不一致："
+            f"樣本有而文件沒列 {sorted(sample - doc)}；文件列了而無樣本 "
+            f"{sorted(doc - sample)}（樣本表共 {len(_FORM_EVASIONS)} 種形態）",
+        )
+
+    def test_covered_parameter_names_match_the_sample_table(self) -> None:
+        """涵蓋清單的參數名與樣本表必須集合相等（大小寫正規化後，雙向）。"""
+        doc, sample = _doc_covered_param_names(), _sample_param_names()
+        self.assertEqual(
+            doc,
+            sample,
+            f"docstring 涵蓋清單的參數名與 _FORM_EVASIONS 樣本不一致："
+            f"樣本有而文件沒列 {sorted(sample - doc)}；文件列了而無樣本 "
+            f"{sorted(doc - sample)}",
+        )
+
+    def test_uncovered_marker_ignores_prose_mention(self) -> None:
+        """散文裡提到標記字樣時一律加反引號，故不會被 `startswith` 誤收成清單項——
+        否則「解釋這個鎖怎麼運作」的說明文字自己就會把項數撐大而假綠。"""
+        self.assertNotIn(
+            _DOC_UNCOVERED_ITEM,
+            _doc_uncovered_items(),
+            "有清單項的內容恰為標記字樣本身，抽取邏輯疑似把散文行也收進來了",
+        )
+        for item in _doc_uncovered_items():
+            with self.subTest(item=item):
+                self.assertTrue(item, "抽到空的清單項——標記行後面沒有內容")
 
 
 # ---------------------------------------------------------------------------

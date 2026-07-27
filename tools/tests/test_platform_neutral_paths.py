@@ -38,6 +38,9 @@ from pathlib import Path
 
 _TESTS_DIR = Path(__file__).resolve().parent
 _REPO_ROOT = _TESTS_DIR.parents[1]
+
+sys.path.insert(0, str(_TESTS_DIR))
+from _registry_hygiene import stale_problems  # noqa: E402  名冊衛生判準 SSOT
 # 任意字串字面值以「單一字母磁碟機 + 冒號 + / 或 \」開頭即命中；
 # 匹配起點為引號本身，r/f/b 等前綴與 Path( 包裹與否皆無關（裸字串同樣命中）。
 _DRIVE_STR_RE = re.compile(r"""["'][A-Za-z]:[/\\]""")
@@ -131,12 +134,20 @@ class TestPlatformNeutralPaths(unittest.TestCase):
         )
 
     def test_allowed_exemptions_not_stale(self) -> None:
-        """豁免清單防腐化：登記的檔案消失即紅（比照 parity 清單 stale 檢查）。"""
-        for rel, why in _ALLOWED.items():
-            self.assertTrue(
-                (_REPO_ROOT / rel).is_file(),
-                f"_ALLOWED 豁免 stale：{rel} 已不存在（WHY={why}）——請自清單移除",
-            )
+        """豁免清單防腐化：登記的檔案消失**或 WHY 空白**即紅（判準委派名冊衛生 SSOT）。
+
+        **R58 round 6 QA-R58R6 P3-3 收斂**：本測試原就地手寫，且**只驗存在性、不驗理由是否
+        空白**——正是 round 4 ARCH P3 ② 點名的「兩張表政策不對稱」在**第三處**復發。
+        round 5 抽出 `tools/tests/_registry_hygiene.py` 時只改了兩支呼叫端、**沒有同時普查
+        樹內其餘複本**，於是這一份存活；而本 repo 判例明文「**收斂與呼叫端鎖必須同一次
+        落地**，否則是把 N 個弱鎖換成 1 個沒有強制力的弱鎖」（見
+        `test_platform_guard_availability.RepoScanSsotCallsiteLock`）——round 5 的收斂只做了
+        一半。改為委派後本表**多獲得空白理由檢查**（先前缺的那一半）。
+        """
+        self.assertEqual(
+            stale_problems(_ALLOWED, _REPO_ROOT, "_ALLOWED"), [],
+            "`_ALLOWED` 名冊已腐化（登記的檔案不存在，或 WHY 為空白）——請自清單移除或補上理由",
+        )
 
 
 if __name__ == "__main__":

@@ -38,14 +38,20 @@ _PY_PATH = _REPO_ROOT / "tools" / "integration_gate_core.py"
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import integration_gate_core  # noqa: E402
-from _platform_helpers import cut_ps_inline_comment, strip_ps_comments  # noqa: E402
+from _ps_source import strip_ps_comments  # noqa: E402
 
 _TESTS_DIR = Path(__file__).resolve().parent
 # PowerShell 註解剝除的 SSOT 模組與符號（呼叫端鎖 `TestPsCommentStripperSsotCallsiteLock`
 # 以此為準；R57 SA-R57R2-03 收斂前這兩支函式在本檔與 nightly parity 檔各有一份複本）。
-_PS_STRIPPER_SSOT_MODULE = "_platform_helpers"
-_PS_STRIPPER_SYMBOLS = ("cut_ps_inline_comment", "strip_ps_comments")
-# 兩支函式的舊複本名（含底線私有版）——任何檔案重新自帶同名定義即視為複本復發。
+# R58：SSOT 由 `_platform_helpers` 拆至專屬的 `_ps_source`（ARCH-R57R3-02；理由見該檔
+# docstring）。此處只需改這一個常數與上面那行 import——R57 把模組名收斂成單一常數的設計
+# 讓拆分成本從「翻修呼叫端鎖」降到「改一個字串」，這正是當初收斂的價值兌現。
+_PS_STRIPPER_SSOT_MODULE = "_ps_source"
+_PS_STRIPPER_SYMBOLS = ("strip_ps_comments",)
+# 舊複本名（含底線私有版）——任何檔案重新自帶同名定義即視為複本復發。
+# `cut_ps_inline_comment`／`_cut_inline_comment` **刻意保留在禁止清單內**：R58 已刪除該
+# wrapper（SD-R57R4-02：全 repo 零生產消費端，唯一呼叫者是它自己的單元測試），保留禁止
+# 條目使它不能被悄悄復活成第二份實作。留在此處的成本是零，拿掉的代價是失去這道反向鎖。
 _PS_STRIPPER_FORBIDDEN_DEFS = frozenset(
     {"cut_ps_inline_comment", "strip_ps_comments", "_cut_inline_comment", "_strip_ps_comments"}
 )
@@ -198,11 +204,19 @@ class StripPsCommentsBoundaryTest(unittest.TestCase):
             '$s = @"\nbody\n  "@\n$y = 1',
         )
 
-    def test_cut_ps_inline_comment_single_line_contract(self) -> None:
-        self.assertEqual(cut_ps_inline_comment("$x = 1  # c"), "$x = 1  ")
-        self.assertEqual(cut_ps_inline_comment('$p = "a#b"'), '$p = "a#b"')
-        self.assertEqual(cut_ps_inline_comment("$c#d"), "$c#d")
-        self.assertEqual(cut_ps_inline_comment("Write-Host `# not a comment"),
+    def test_single_line_input_contract(self) -> None:
+        """單行輸入契約（R58 由已刪除的 `cut_ps_inline_comment` 併入，樣本逐字保留）。
+
+        該 wrapper 是 `_scan_ps_line(line, False)[0]` 的一行外殼，存在的唯一理由是給單行
+        邏輯一個獨立測試面，全 repo 零生產消費端（SD-R57R4-02 判 deferred、R58 複核仍為零
+        故刪除）。**樣本不隨函式一起刪**：它們鎖的是「單行輸入不得誤剝」這個行為，與哪支
+        函式提供無關。差異只在收尾——`strip_ps_comments` 會 rstrip 並濾除空行，故第一筆的
+        期望值由 `"$x = 1  "`（原 wrapper 不 rstrip）改為 `"$x = 1"`。
+        """
+        self.assertEqual(strip_ps_comments("$x = 1  # c"), "$x = 1")
+        self.assertEqual(strip_ps_comments('$p = "a#b"'), '$p = "a#b"')
+        self.assertEqual(strip_ps_comments("$c#d"), "$c#d")
+        self.assertEqual(strip_ps_comments("Write-Host `# not a comment"),
                          "Write-Host `# not a comment")
 
 
@@ -548,7 +562,8 @@ class TestFindGitBashCallSites(unittest.TestCase):
     def _code_only(text: str) -> str:
         """只認功能碼（比照 macos_smoke_local.sh [7/7] 的 QA-R15-REV-1 訂正：
         註解裡留著舊字樣會讓錨點假陽性）。剝除範圍／已知邊界以
-        `_platform_helpers.strip_ps_comments` 的 docstring 為準。區塊註解必須一併
+        `_ps_source.strip_ps_comments` 的 docstring 為準（R58 round 1 ARCH-R58R1-05：
+        本行原指 `_platform_helpers`，拆分後成為死指標）。區塊註解必須一併
         剝除：R57 實測 `tools/lib/WindowsAppsGuard.ps1` 的 comment-based help 裡
         引用了 `tools/lib/Find-GitBash.ps1` 當「同款模式的既有先例」，只剝行註解
         會把它誤判成第 4 個呼叫端。"""

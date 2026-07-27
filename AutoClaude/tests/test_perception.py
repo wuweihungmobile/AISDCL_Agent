@@ -5,6 +5,7 @@
   - NonBlockingStreamReader：背景 thread + Queue 非阻塞讀取
   - strip_ansi：ANSI 控制序列移除
   - PtyWrapper：subprocess 模式的 readline / send / 自動授權
+  - cmd.exe `%VAR%` 展開防護（Windows shim 路徑專屬守門）
 """
 from __future__ import annotations
 
@@ -14,9 +15,11 @@ import os
 import signal
 import subprocess
 import sys
+import tempfile
 import threading
 import time
 from io import BytesIO
+from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -24,8 +27,10 @@ import pytest
 import autoclaude.perception.hotkey_handler as hotkey_handler
 from autoclaude.perception.hotkey_handler import HotkeyHandler
 from autoclaude.perception.pty_wrapper import (
+    CmdShimPercentExpansionError,
     PtyWrapper,
     _build_cmd_shim_line,
+    _find_expanding_percent_vars,
     _is_cmd_shim,
     _quote_cmd_shim_argv,
     _resolve_command,
@@ -352,18 +357,35 @@ class TestCloseKillsCmdShimGrandchild:
     外層 cmd.exe，真正執行 CLI 的孫行程會變孤兒繼續跑（見 close() 內註解）。"""
 
     def test_close_kills_grandchild_spawned_via_cmd_shim(self, tmp_path):
-        # 意圖鎖：本 fixture 的 write_text/read_text 刻意用預設編碼——.cmd shim 由
-        # cmd.exe 以系統碼頁解讀、marker 由子行程以預設編碼寫入，內容皆 ASCII-only，
-        # 勿「好心」補 encoding="utf-8"（R13 DEF-101-121 家族審查裁定維持現狀）。
+        # 意圖鎖（R13 DEF-101-121 家族原裁定「三處一律維持預設編碼」，本輪細化為
+        # 逐處判定）：判準＝該檔的**消費者**以什麼編碼讀它，而非「內容現在剛好是
+        # ASCII」——後者會隨 tmp_path 內嵌的使用者名稱而變，不是穩定前提。
+        #   ① child_script 是 .py 原始碼，消費者為 CPython，自 PEP 3120 起一律以
+        #      UTF-8 解讀原始碼；而內容以 f-string 內嵌 tmp_path（Windows 上含使用者
+        #      名稱，可能非 ASCII）。故此處改為顯式 UTF-8：否則在非 ASCII 使用者名稱
+        #      的機器上會以系統碼頁寫出、CPython 再以 UTF-8 讀 → SyntaxError。
+        #      （這是原裁定「內容皆 ASCII-only」前提不成立的一處，故本輪推翻該處。）
+        #   ② shim 是 .cmd 批次檔，消費者為 cmd.exe，**以系統碼頁**解讀；強加 UTF-8
+        #      反而會在非 ASCII 路徑上寫出 cmd.exe 讀不懂的位元組。維持預設編碼。
+        #   ③ marker 由子行程以預設編碼寫入 str(os.getpid())＝純數字，讀端維持預設
+        #      編碼以保持寫讀對稱。
+        # ②③ 另以行尾 fileio-encoding-waiver 標記向掃描器登記豁免（見
+        # tools/tests/test_file_encoding_hygiene.py）——原本只是散文註解，機械掃描器
+        # 看不見，擋不住未來有人整批「好心」補 encoding。
+        # 註：本段刻意不寫出該標記的完整字面（含冒號），否則這幾行註解本身會被
+        # 掃描器 tokenize 成「標記」而判 stale。
         marker = tmp_path / "child_pid.txt"
         child_script = tmp_path / "child_sleep.py"
         child_script.write_text(
             "import os, time, pathlib\n"
             f"pathlib.Path(r'{marker}').write_text(str(os.getpid()))\n"
-            "time.sleep(30)\n"
+            "time.sleep(30)\n",
+            encoding="utf-8",
         )
         shim = tmp_path / "fake_claude.cmd"
-        shim.write_text(f'@echo off\r\npython "{child_script}"\r\n')
+        shim.write_text(  # fileio-encoding-waiver: .cmd 由 cmd.exe 以系統碼頁解讀
+            f'@echo off\r\npython "{child_script}"\r\n'
+        )
 
         pty = PtyWrapper(command=str(shim), args=[], auth_patterns=[], auth_response="y")
         with patch("autoclaude.perception.pty_wrapper._WEXPECT_AVAILABLE", False), \
@@ -374,7 +396,9 @@ class TestCloseKillsCmdShimGrandchild:
             while not marker.exists() and time.time() < deadline:
                 time.sleep(0.1)
             assert marker.exists(), "孫行程未在時限內啟動（測試環境問題，非本次修復範圍）"
-            child_pid = int(marker.read_text().strip())
+            child_pid = int(
+                marker.read_text().strip()  # fileio-encoding-waiver: 見上 ③ 寫讀對稱
+            )
 
             pty.close()
 
@@ -431,7 +455,9 @@ class TestCloseKillsPosixGrandchild:
             while not marker.exists() and time.time() < deadline:
                 time.sleep(0.1)
             assert marker.exists(), "孫行程未在時限內啟動（測試環境問題，非本次修復範圍）"
-            grandchild_pid = int(marker.read_text().strip())
+            grandchild_pid = int(
+                marker.read_text().strip()  # fileio-encoding-waiver: sh 寫入純數字 PID，讀端對稱
+            )
             assert _pid_alive(grandchild_pid), "孫行程應已啟動存活"
 
             pty.close()
@@ -485,6 +511,230 @@ class TestBuildCmdShimLine:
         result = _quote_cmd_shim_argv(r"C:\npm\claude.cmd", ["-p", "hi"])
         assert result == r"C:\npm\claude.cmd -p hi"
         assert "cmd /d /s /c" not in result
+
+
+# ──────────────────────────────────────────────
+# cmd.exe `%VAR%` 展開防護（純 Windows 執行期缺陷回歸）
+#
+# 缺陷本體：`_build_cmd_shim_line()` 以 `subprocess.list2cmdline()` 做 MS 標準 argv
+# 引號/跳脫，但 **cmd.exe 的 `%VAR%` 展開發生在引號處理之前**，`list2cmdline` 不會
+# （也無法）跳脫 `%`，`/s /c` 亦無關閉展開的選項。於是 Windows 上 `claude` 解析為
+# npm `.cmd` shim 時，playbook prompt 只要含 `%已定義變數%`（跨平台工作的 prompt 極
+# 可能出現 `%USERPROFILE%` / `%PATH%` / `%TEMP%` 字樣），送進 CLI 的內容就與 YAML
+# 寫的不同且毫無警示；macOS/Linux 走 argv、內容原樣抵達 → 同一份 playbook 兩平台
+# 語意不同。
+#
+# 本節鎖住的**意圖**（Rule 9：測意圖而非只測行為）：
+#   1. 會被展開的參照 → 於**啟動子行程前**拒跑（fail loud），絕不靜默送出變質內容。
+#   2. 不會被展開的情形（未定義變數、孤立 `%`、`!VAR!`）→ 一律不得誤攔，且輸出的
+#      命令列與修復前逐字元相同（確保這是純新增守門、非行為變更）。
+#   3. POSIX 走 argv 路徑，永不受此守門影響。
+#   4. 另附一支真 cmd.exe 行為錨定測試：若哪天 Windows/cmd 不再展開，該測試會紅，
+#      直接告訴後續輪「守門已可退役」——而非讓守門永久留存成為無人敢動的化石。
+#
+# 併檔沿革：本節原先另存 tests/test_pty_wrapper_cmd_shim.py，理由僅是「當輪多包並行
+# 修復，獨立檔可避免同時編輯同一檔互相覆蓋」；該理由隨並行結束即失效，且偏離本 repo
+# 「perception 相關測試集中於本檔」的慣例（Rule 11），故經使用者裁定原樣併回本檔。
+# 下方 Windows 磁碟機字面值 `# platform-ok:` 標記的完整理由（行內受 100 字寬限制只
+# 寫得下摘要）：這些字串僅作為 cmd.exe 命令列組裝的輸入與純字串斷言的期望值，不做
+# pathlib join、不觸碰檔案系統，故不適用 tools/tests/_platform_helpers.ABS_FAKE_REPO
+# 平台中立常數（守門者＝tools/tests/test_platform_neutral_paths.py）。
+# ──────────────────────────────────────────────
+
+SHIM = r"C:\Program Files\npm\claude.cmd"  # platform-ok: 純命令列字串、無 pathlib join
+# 刻意用自訂變數名而非真實的 TEMP/PATH：測試不得依賴執行機器上某變數恰好存在
+# （CI/容器環境變數集合不同），env 一律由測試自己餵。
+ENV = {
+    "MYVAR": "expanded-value",
+    "ProgramFiles(x86)": r"C:\Program Files (x86)",  # platform-ok: 純 env 值、非路徑運算
+}
+
+
+# _find_expanding_percent_vars：偵測判準（全部對應真 Windows 11 實測結論）
+
+class TestFindExpandingPercentVars:
+    def test_detects_defined_variable(self):
+        assert _find_expanding_percent_vars("read %MYVAR% now", ENV) == ["MYVAR"]
+
+    def test_ignores_undefined_variable(self):
+        """未定義變數 cmd.exe 原樣保留（實測），內容不變質 → 不得誤攔；
+        否則含 `%` 的正常 prompt 會被大量假攔。"""
+        assert _find_expanding_percent_vars("read %NO_SUCH_VAR_XYZ% now", ENV) == []
+
+    def test_detection_is_case_insensitive_both_directions(self):
+        """Windows env 變數名大小寫不敏感：`%myvar%` 實測同樣被展開，只比對原樣大小寫
+        會漏抓 → 靜默變質。**兩個方向都要測**（bug-injection 實證：只測「小寫參照 vs
+        大寫 env 鍵」時，單獨拿掉 env 鍵側的正規化仍會綠——因為參照側已被 upper()
+        後恰好等於大寫鍵）：
+          方向 1：參照小寫、env 鍵大寫（MYVAR）
+          方向 2：參照大寫、env 鍵混合大小寫（MixedCaseVar）
+        """
+        env = {"MYVAR": "v", "MixedCaseVar": "v"}
+        assert _find_expanding_percent_vars("read %myvar% now", env) == ["myvar"]
+        assert _find_expanding_percent_vars("read %MIXEDCASEVAR% now", env) == [
+            "MIXEDCASEVAR"
+        ]
+
+    def test_detects_after_lone_percent_sign(self):
+        """最關鍵的一條：實測 `50% off %MYVAR% now` 中 MYVAR **仍被展開**，但非重疊
+        掃描（如 re.findall(r"%([^%]+)%")）會把 `% off %` 當一組、吃掉分隔符而漏抓
+        後面的真參照。故偵測必須用可重疊匹配。"""
+        assert _find_expanding_percent_vars("50% off %MYVAR% now", ENV) == ["MYVAR"]
+
+    def test_detects_name_containing_parentheses(self):
+        """`%ProgramFiles(x86)%` 實測被展開 → 變數名字元集不可限縮成
+        `[A-Za-z_][A-Za-z0-9_]*`（那樣會漏抓 Windows 內建的括號變數）。"""
+        assert _find_expanding_percent_vars(
+            "path %ProgramFiles(x86)% here", ENV
+        ) == ["ProgramFiles(x86)"]
+
+    def test_bang_syntax_not_detected(self):
+        """`!VAR!` 延遲展開實測不觸發（`/d /s /c` 未開 `/V:ON`）→ 不得誤攔。"""
+        assert _find_expanding_percent_vars("read !MYVAR! now", ENV) == []
+
+    def test_deduplicates_preserving_order(self):
+        got = _find_expanding_percent_vars("%MYVAR% and %ProgramFiles(x86)% and %MYVAR%", ENV)
+        assert got == ["MYVAR", "ProgramFiles(x86)"]
+
+    def test_plain_text_and_lone_percent_are_clean(self):
+        assert _find_expanding_percent_vars("fix the bug, 100% done", ENV) == []
+
+
+# _build_cmd_shim_line：命中即拒跑，未命中則逐字元不變
+
+class TestBuildCmdShimLinePercentGuard:
+    def test_raises_on_expanding_var_in_args(self):
+        with pytest.raises(CmdShimPercentExpansionError) as exc:
+            _build_cmd_shim_line(SHIM, ["-p", "inspect %MYVAR% now"], ENV)
+        # 訊息須點名是哪個變數，使用者才知道要改哪個字
+        assert "MYVAR" in str(exc.value)
+
+    def test_raises_on_expanding_var_in_shim_path(self):
+        """shim 路徑與 args 同在一條命令列上、受同一套展開規則影響（Windows 檔名
+        允許 `%`），故偵測面涵蓋路徑而非只掃 args。"""
+        shim_with_var = r"C:\dir%MYVAR%x\claude.cmd"  # platform-ok: 純命令列字串、無 join
+        with pytest.raises(CmdShimPercentExpansionError):
+            _build_cmd_shim_line(shim_with_var, ["-p", "hi"], ENV)
+
+    def test_clean_prompt_output_is_byte_identical_to_pre_fix_format(self):
+        """反向鎖：不含可展開參照時，輸出必須與修復前完全相同（純新增守門，
+        不得順手改動命令列組法——那會回退 R1~R3 沉澱的 cmd.exe 引號結構）。"""
+        line = _build_cmd_shim_line(SHIM, ["-p", "fix the bug"], ENV)
+        assert line == (
+            'cmd /d /s /c "' + subprocess.list2cmdline([SHIM, "-p", "fix the bug"]) + '"'
+        )
+
+    def test_undefined_var_prompt_passes_through(self):
+        line = _build_cmd_shim_line(SHIM, ["-p", "use %NO_SUCH_VAR_XYZ% here"], ENV)
+        assert "%NO_SUCH_VAR_XYZ%" in line
+
+    def test_env_defaults_to_os_environ_when_omitted(self):
+        """既有呼叫端／測試以兩參數呼叫仍可用（相容預設），且預設確實是 os.environ
+        ——用一個臨時注入的真實環境變數驗證，而非只看簽章。"""
+        with patch.dict(os.environ, {"AUTOCLAUDE_PCT_PROBE": "1"}):
+            with pytest.raises(CmdShimPercentExpansionError):
+                _build_cmd_shim_line(SHIM, ["-p", "x %AUTOCLAUDE_PCT_PROBE% y"])
+
+    def test_explicit_env_overrides_os_environ(self):
+        """展開由子行程收到的 env 決定，不是本行程的 os.environ；傳入的 env 未定義
+        該名稱時就不該攔（否則會依「跑測試的機器裝了什麼」而時紅時綠）。"""
+        with patch.dict(os.environ, {"AUTOCLAUDE_PCT_PROBE": "1"}):
+            line = _build_cmd_shim_line(SHIM, ["-p", "x %AUTOCLAUDE_PCT_PROBE% y"], ENV)
+            assert "%AUTOCLAUDE_PCT_PROBE%" in line
+
+
+# _start_subprocess 端到端：必須「spawn 之前」就攔下
+# （併檔後改用本檔既有的 _make_mock_proc([])，與原獨立檔內的區域 helper 等價——
+#  本檔版本額外設 stdin.closed=False，屬相容超集，不影響下列斷言。）
+
+class TestStartRefusesBeforeSpawn:
+    def test_windows_shim_with_percent_var_never_spawns(self):
+        """攔下的時機點是意圖的一部分：若在 Popen 之後才發現，CLI 已收到變質 prompt
+        並可能已動手改檔——為時已晚。故斷言 Popen 完全沒被呼叫。"""
+        with patch("autoclaude.perception.pty_wrapper._WEXPECT_AVAILABLE", False), \
+             patch("autoclaude.perception.pty_wrapper.sys.platform", "win32"), \
+             patch("autoclaude.perception.pty_wrapper.shutil.which", return_value=SHIM), \
+             patch.dict(os.environ, {"AUTOCLAUDE_PCT_PROBE": "1"}), \
+             patch("autoclaude.perception.pty_wrapper.subprocess.Popen") as mock_popen:
+            pty = PtyWrapper(
+                command="claude", args=["-p", "read %AUTOCLAUDE_PCT_PROBE% file"],
+                auth_patterns=[], auth_response="y",
+            )
+            with pytest.raises(CmdShimPercentExpansionError):
+                pty.start()
+            mock_popen.assert_not_called()
+
+    def test_windows_shim_clean_prompt_still_starts(self):
+        """對照組：不含可展開參照時照常啟動（守門不得波及正常路徑）。"""
+        proc = _make_mock_proc([])
+        with patch("autoclaude.perception.pty_wrapper._WEXPECT_AVAILABLE", False), \
+             patch("autoclaude.perception.pty_wrapper.sys.platform", "win32"), \
+             patch("autoclaude.perception.pty_wrapper.shutil.which", return_value=SHIM), \
+             patch("autoclaude.perception.pty_wrapper.subprocess.Popen",
+                   return_value=proc) as mock_popen:
+            pty = PtyWrapper(
+                command="claude", args=["-p", "fix the bug"],
+                auth_patterns=[], auth_response="y",
+            )
+            pty.start()
+            argv = mock_popen.call_args.args[0]
+            assert argv == (
+                'cmd /d /s /c "'
+                + subprocess.list2cmdline([SHIM, "-p", "fix the bug"]) + '"'
+            )
+
+    def test_posix_percent_var_passes_through_untouched(self):
+        """平衡另一側：POSIX 走 argv list，內容原樣抵達、永不觸發守門
+        （守門是 Windows shim 路徑專屬，不可外溢成跨平台限制）。"""
+        proc = _make_mock_proc([])
+        with patch("autoclaude.perception.pty_wrapper._WEXPECT_AVAILABLE", False), \
+             patch("autoclaude.perception.pty_wrapper.sys.platform", "darwin"), \
+             patch("autoclaude.perception.pty_wrapper.subprocess.Popen",
+                   return_value=proc) as mock_popen:
+            pty = PtyWrapper(
+                command="claude", args=["-p", "read %PATH% file"],
+                auth_patterns=[], auth_response="y",
+            )
+            pty.start()
+            argv = mock_popen.call_args.args[0]
+            assert argv == ["claude", "-p", "read %PATH% file"]
+
+
+# 真 cmd.exe 行為錨定（守門存在的理由本身可被機械複驗）
+
+@pytest.mark.skipif(sys.platform != "win32", reason="需真實 cmd.exe 才能量測展開行為")
+class TestRealCmdExpansionAnchor:
+    def test_real_cmd_shim_expands_defined_var_and_keeps_undefined(self):
+        """本輪復現手法的固化版：起一支真 .cmd shim（路徑刻意含空白，複刻
+        `C:\\Program Files\\...` 實況），用 production 的 `_build_cmd_shim_line`
+        組命令列真跑，觀測子行程實收到什麼。
+
+        此測試不驗我們的修復，而是驗**缺陷前提仍然成立**：若未來 Windows/cmd 版本
+        不再展開，這裡會紅 → 明確通知後續輪「守門可退役」，避免守門變成沒人敢碰
+        的化石。已實測涵蓋：已定義變數被展開、未定義變數原樣保留。已實測不涵蓋：
+        非 win32 平台（skip）。未窮舉：各 Windows 版本／各語系 cmd.exe 差異。
+        """
+        with tempfile.TemporaryDirectory() as td:
+            shim_dir = Path(td) / "with space"
+            shim_dir.mkdir()
+            shim = shim_dir / "fake claude.cmd"
+            shim.write_text("@echo off\r\necho ARG2=[%2]\r\n", encoding="ascii")
+
+            env = dict(os.environ)
+            env["AUTOCLAUDE_PCT_ANCHOR"] = "ANCHOR-VALUE"
+            # 繞過守門直接組命令列（本測試要量測的正是守門要防的那個行為）
+            inner = subprocess.list2cmdline(
+                [str(shim), "-p", "defined %AUTOCLAUDE_PCT_ANCHOR% undefined %NO_SUCH_V_XYZ%"]
+            )
+            out = subprocess.run(
+                f'cmd /d /s /c "{inner}"',
+                stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                env=env, timeout=30,
+            ).stdout.decode("utf-8", "replace")
+
+            assert "ANCHOR-VALUE" in out, f"已定義變數未被展開（缺陷前提已變）: {out!r}"
+            assert "%AUTOCLAUDE_PCT_ANCHOR%" not in out, f"預期被展開卻原樣保留: {out!r}"
+            assert "%NO_SUCH_V_XYZ%" in out, f"未定義變數應原樣保留: {out!r}"
 
 
 # ──────────────────────────────────────────────

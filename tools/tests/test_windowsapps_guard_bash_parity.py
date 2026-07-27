@@ -58,6 +58,11 @@ import sys
 import unittest
 from pathlib import Path
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+# R58 發現 #8／#20：版本目錄正則原本在本檔與另三支測試各有一份（觀測同一對象），
+# 已收斂到 `_sdd_versions`；接線由 `test_sdd_versions.py` 的呼叫端鎖機械守住。
+from _sdd_versions import FROZEN_SDD_PATH_RE, exclude_frozen_sdd_versions  # noqa: E402
+
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 _GUARD_SH = _REPO_ROOT / "tools" / "lib" / "windowsapps_guard.sh"
 
@@ -241,24 +246,9 @@ def _tracked_extensionless_hook_files() -> list[str]:
     ]
 
 
-_FROZEN_SDD_VERSION_RE = re.compile(r"^AISDLC_SDD/(AISDLC_SDD_v\d+\.\d+)/")
-
 # 注：`_latest_sdd_version_name()` 定義於本檔前段（`_CALLER_FILES` 之前），
 # 因該清單的 LATEST 版條目須在模組載入期即以其動態組出路徑（R56）。
-
-
-def _exclude_frozen_sdd_versions(paths: list[str], latest_name: str) -> list[str]:
-    """排除 AISDLC_SDD 凍結版本（v0.01 ~ 除 LATEST 以外者）——凍結版依鐵律
-    (CLAUDE.md「Copy-on-Evolve」慣例) 不應被新規則追殺歷史快照。R44 新增：
-    `run_self_evolution.sh` 等模板檔案透過 Copy-on-Evolve 逐字複製進每個凍結
-    版本，若不排除，新掃描會把 29 份歷史快照全部誤判為新缺口。"""
-    kept = []
-    for rel in paths:
-        m = _FROZEN_SDD_VERSION_RE.match(rel)
-        if m and m.group(1) != latest_name:
-            continue
-        kept.append(rel)
-    return kept
+# 凍結版路徑正則與剔除函式已於 R58 收斂到 `_sdd_versions`（見檔頭 import）。
 
 
 def _strip_bash_comment(line: str) -> str:
@@ -656,7 +646,7 @@ class TestBashCallersEnrollment(unittest.TestCase):
         `test_known_call_sites_still_exist` 同源。"""
         latest_name = _latest_sdd_version_name()
         ssot_rel = str(_GUARD_SH.relative_to(_REPO_ROOT)).replace("\\", "/")
-        scoped = _exclude_frozen_sdd_versions(
+        scoped = exclude_frozen_sdd_versions(
             _tracked_sh_files() + _tracked_extensionless_hook_files(), latest_name
         )
         actual: set[str] = set()
@@ -674,7 +664,7 @@ class TestBashCallersEnrollment(unittest.TestCase):
         # 的鎖等於把成本轉嫁給建版者，此處提前擋。
         frozen_declared = sorted(
             rel for rel in declared
-            if (m := _FROZEN_SDD_VERSION_RE.match(rel)) and m.group(1) != latest_name
+            if (m := FROZEN_SDD_PATH_RE.match(rel)) and m.group(1) != latest_name
         )
         self.assertEqual(
             frozen_declared, [],
@@ -753,7 +743,7 @@ class TestBashCallersEnrollment(unittest.TestCase):
         """
         latest_name = _latest_sdd_version_name()
         known_relpaths = {str(f.relative_to(_REPO_ROOT)).replace("\\", "/") for f in _CALLER_FILES}
-        scoped = _exclude_frozen_sdd_versions(
+        scoped = exclude_frozen_sdd_versions(
             _tracked_sh_files() + _tracked_extensionless_hook_files(), latest_name
         )
 
