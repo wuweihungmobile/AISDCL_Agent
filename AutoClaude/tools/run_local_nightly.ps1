@@ -888,8 +888,15 @@ $rcChaos = Invoke-Stage 'sdd-fsm-chaos (鏡射 aisdlc-sdd-fsm-chaos-nightly)' {
     }
     $chaosSweepRc = $LASTEXITCODE
     # 鏡射 CI 的 bounded 摘要行（report 無效 JSON 時此步非零＝取證失敗）
+    # 🔴 禁用 %-formatting（DEF-101-503，2026-07-27 Windows 實機根因）：$script:PyExe 解析到的
+    # `python` 在 pyenv-win 下是 **python.bat** shim，batch 會先吃掉命令列裡的 `%`，
+    # `'...%s...' % (...)` 到 Python 手上已變成 `'...'(...)` → SyntaxWarning
+    # 'str' object is not callable + TypeError，parse_rc=1。chaos 測試本身 34 支
+    # 全過（pytest_rc=0 sweep_rc=0），卻讓整個 sdd-fsm-chaos stage 恆紅、進而讓
+    # 每天早上 dev_start 的心跳哨兵報「上一輪 nightly 失敗」，把真訊號淹掉。
+    # 一律改用 .format()／f-string（不含 `%`），shim 與真 python.exe 皆正確。
     Invoke-Native {
-      & $script:PyExe -c "import json; d=json.load(open('chaos-report.json', encoding='utf-8-sig')); print('chaos sweep bounded=%s/%s avg_tokens=%s max_steps=%s' % (d['bounded_rounds'], d['total_rounds'], d['avg_tokens'], d['max_steps']))"
+      & $script:PyExe -c "import json; d=json.load(open('chaos-report.json', encoding='utf-8-sig')); print('chaos sweep bounded={}/{} avg_tokens={} max_steps={}'.format(d['bounded_rounds'], d['total_rounds'], d['avg_tokens'], d['max_steps']))"
     }
     $chaosParseRc = $LASTEXITCODE
     if ($chaosPytestRc -ne 0 -or $chaosSweepRc -ne 0 -or $chaosParseRc -ne 0) {

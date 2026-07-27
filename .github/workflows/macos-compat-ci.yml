@@ -364,9 +364,12 @@ jobs:
         # R9 Fix-E：dev_start.sh 有 zsh 專屬邏輯（ZSH_EVAL_CONTEXT 判定 sourced +
         # ${(%):-%x} 解析自身路徑），檔頭教學就是 `source tools/dev_start.sh`，而 macOS
         # 使用者預設 shell 是 zsh——但本 job 其餘步驟全用 bash 跑，zsh 分支此前零實跑
-        # 覆蓋。dev_start.py 無 --check-only／dry-run 模式（僅 --no-sync／--force-bootstrap，
-        # 見 tools/dev_start.py main()），故沿用本 job bash 步驟同款的最小副作用模式
-        # --no-sync；此時 .venv 已由前面步驟建好，本步驟收斂為快路徑。
+        # 覆蓋。dev_start.py 無可用於本步驟的 dry-run 模式，故沿用本 job bash 步驟同款
+        # 的最小副作用模式 --no-sync；此時 .venv 已由前面步驟建好，本步驟收斂為快路徑。
+        # （2026-07-27 訂正：main() 的旗標已不只 --no-sync／--force-bootstrap，另有
+        # DEF-101-504 新增的 --check-nightly。但它**不適用於本步驟**——該旗標查完
+        # nightly 鎖就立刻 return，完全不進整備七步、也不會 activate .venv，下方
+        # 「VIRTUAL_ENV 已設定」的核心斷言將無從驗起。此處刻意保留 --no-sync。）
         # 斷言兩道：source 後 rc=0，且 VIRTUAL_ENV 已被 activate 設定（證明 zsh 分支
         # 的 sourced 偵測 + 自動啟用 .venv 真的走通，而非 fallback 到 bash 分支或未啟用）。
         run: |

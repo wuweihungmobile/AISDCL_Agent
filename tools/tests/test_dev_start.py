@@ -218,6 +218,53 @@ class TestDepsHashBuildSystemGap(DevStartTestCase):
             self.assertNotEqual(before, after)
 
 
+class TestDepsHashEntryPointGap(DevStartTestCase):
+    """2026-07-27 Windows 實機揪出的同 bug class 殘留缺口（見
+    TestDepsHashBuildSystemGap）：console script / entry point 只在**安裝當下**
+    產生實體 shim，但舊白名單只看 dependencies／optional-dependencies／
+    build-system，純新增 [project.scripts] 時 hash 不變 → 判「依賴新鮮」跳過重裝
+    → 既有 venv 永遠長不出那支命令（R52 的 autoclaude-artifact-check 即為此在
+    本機缺席）。三塊各自獨立驗證，避免只鎖到其中一塊。
+    """
+
+    _BASE = '[project]\nname = "x"\ndependencies = ["pyyaml"]\n'
+
+    def _hash_of(self, td: str, body: str) -> str:
+        pyproject = Path(td) / "pyproject.toml"
+        pyproject.write_text(body, encoding="utf-8")
+        with mock.patch.object(dev_start, "DEPS_FILES", (pyproject,)):
+            return dev_start._deps_hash()
+
+    def test_adding_console_script_alters_hash(self):
+        with tempfile.TemporaryDirectory() as td:
+            before = self._hash_of(td, self._BASE)
+            after = self._hash_of(
+                td, self._BASE + '\n[project.scripts]\nfoo-check = "pkg.mod:main"\n')
+            self.assertNotEqual(before, after)
+
+    def test_adding_gui_script_alters_hash(self):
+        with tempfile.TemporaryDirectory() as td:
+            before = self._hash_of(td, self._BASE)
+            after = self._hash_of(
+                td, self._BASE + '\n[project.gui-scripts]\nfoo-gui = "pkg.mod:gui"\n')
+            self.assertNotEqual(before, after)
+
+    def test_adding_entry_point_group_alters_hash(self):
+        with tempfile.TemporaryDirectory() as td:
+            before = self._hash_of(td, self._BASE)
+            after = self._hash_of(
+                td, self._BASE + '\n[project.entry-points."my.plugins"]\np = "pkg.mod:P"\n')
+            self.assertNotEqual(before, after)
+
+    def test_metadata_only_change_still_does_not_alter_hash(self):
+        """反向鎖：白名單擴大後仍不可把純中繼資料變動誤判為依賴變動（否則
+        每次改 description/version 都無謂重裝，等於退回黑名單排除法）。"""
+        with tempfile.TemporaryDirectory() as td:
+            before = self._hash_of(td, self._BASE)
+            after = self._hash_of(td, self._BASE + 'description = "改了文案"\n')
+            self.assertEqual(before, after)
+
+
 class _RaisingPath:
     """模擬 chmod 000 上層目錄：is_*()/exists() 皆拋 OSError（P1-3 兜底防護的測試替身）。"""
 
@@ -756,7 +803,8 @@ class TestStepSyncRealGitRepo(DevStartTestCase):
             # local 弄髒：修改已追蹤檔但不 commit
             (local / "f.txt").write_text("v1-dirty-local-edit\n", encoding="utf-8")
 
-            with mock.patch.object(dev_start, "ROOT", local):
+            with mock.patch.object(dev_start, "ROOT", local), \
+                    mock.patch.object(dev_start, "_nightly_running", return_value=False):
                 dev_start.step_sync(no_sync=False, is_repo=True)
 
             self.assertEqual(
@@ -772,7 +820,8 @@ class TestStepSyncRealGitRepo(DevStartTestCase):
             (origin / "f.txt").write_text("v2-origin\n", encoding="utf-8")
             self._run_git(["commit", "--quiet", "-am", "advance"], origin)
 
-            with mock.patch.object(dev_start, "ROOT", local):
+            with mock.patch.object(dev_start, "ROOT", local), \
+                    mock.patch.object(dev_start, "_nightly_running", return_value=False):
                 dev_start.step_sync(no_sync=False, is_repo=True)
 
             self.assertEqual((local / "f.txt").read_text(encoding="utf-8"), "v2-origin\n",
@@ -788,7 +837,8 @@ class TestStepSyncRealGitRepo(DevStartTestCase):
             (local / "f.txt").write_text("v2-local\n", encoding="utf-8")
             self._run_git(["commit", "--quiet", "-am", "local-advance"], local)
 
-            with mock.patch.object(dev_start, "ROOT", local):
+            with mock.patch.object(dev_start, "ROOT", local), \
+                    mock.patch.object(dev_start, "_nightly_running", return_value=False):
                 dev_start.step_sync(no_sync=False, is_repo=True)
 
             self.assertEqual((local / "f.txt").read_text(encoding="utf-8"), "v2-local\n",
@@ -802,11 +852,152 @@ class TestStepSyncRealGitRepo(DevStartTestCase):
             origin, local = self._make_pair(base)
             _rmtree_force(origin)  # 模擬離線：origin 路徑消失，fetch 必失敗
 
-            with mock.patch.object(dev_start, "ROOT", local):
+            with mock.patch.object(dev_start, "ROOT", local), \
+                    mock.patch.object(dev_start, "_nightly_running", return_value=False):
                 dev_start.step_sync(no_sync=False, is_repo=True)
 
             self.assertTrue(any("離線" in w for w in dev_start.WARNINGS))
             self.assertIn("離線", dev_start.SUMMARY.get("sync", ""))
+
+    def test_nightly_running_blocks_pull(self):
+        """2026-07-27 Windows 實機事故的回歸鎖：nightly 在跑時 pull 會把 113 個檔案
+        抽換到它的 pytest 腳下（當天實測 5 支假紅），故不自動 pull。"""
+        with tempfile.TemporaryDirectory() as td:
+            base = Path(td)
+            origin, local = self._make_pair(base)
+            (origin / "f.txt").write_text("v2-origin\n", encoding="utf-8")
+            self._run_git(["commit", "--quiet", "-am", "advance"], origin)
+
+            with mock.patch.object(dev_start, "ROOT", local), \
+                    mock.patch.object(dev_start, "_nightly_running", return_value=True):
+                dev_start.step_sync(no_sync=False, is_repo=True)
+
+            self.assertEqual(
+                (local / "f.txt").read_text(encoding="utf-8"), "v1\n",
+                "nightly 執行中時不應 pull，工作樹內容應維持原狀")
+            self.assertTrue(any("nightly 正在執行" in w for w in dev_start.WARNINGS))
+            self.assertIn("nightly 執行中", dev_start.SUMMARY.get("sync", ""))
+
+    def test_nightly_running_still_warns_when_already_up_to_date(self):
+        """已是最新時沒有 pull 可擋，但「別跑全套測試」的提醒仍必須發出——這才是
+        開工當下最常見的情境（心跳補跑與開工同時發生），漏掉等於防呆失效。"""
+        with tempfile.TemporaryDirectory() as td:
+            base = Path(td)
+            origin, local = self._make_pair(base)
+
+            with mock.patch.object(dev_start, "ROOT", local), \
+                    mock.patch.object(dev_start, "_nightly_running", return_value=True):
+                dev_start.step_sync(no_sync=False, is_repo=True)
+
+            self.assertTrue(any("nightly 正在執行" in w for w in dev_start.WARNINGS))
+            self.assertIn("已是最新", dev_start.SUMMARY.get("sync", ""))
+
+    def test_undetermined_nightly_state_does_not_block_pull(self):
+        """None＝無法判定（如 Global 具名物件權限不足）不可冒充「在跑」而擋住同步：
+        防呆機制自己失敗時，必須降級為不作為，不是把 dev_start 弄壞。"""
+        with tempfile.TemporaryDirectory() as td:
+            base = Path(td)
+            origin, local = self._make_pair(base)
+            (origin / "f.txt").write_text("v2-origin\n", encoding="utf-8")
+            self._run_git(["commit", "--quiet", "-am", "advance"], origin)
+
+            with mock.patch.object(dev_start, "ROOT", local), \
+                    mock.patch.object(dev_start, "_nightly_running", return_value=None):
+                dev_start.step_sync(no_sync=False, is_repo=True)
+
+            self.assertEqual((local / "f.txt").read_text(encoding="utf-8"), "v2-origin\n")
+            self.assertIn("已更新", dev_start.SUMMARY.get("sync", ""))
+
+
+class TestNightlyRunningDetection(DevStartTestCase):
+    """`_nightly_running()` 三態（True/False/None）判定。
+
+    Windows 分支查的是 run_local_nightly.ps1 的具名 Mutex、posix 分支查
+    run_local_nightly.sh 的鎖目錄；此處固定走 posix 分支測邏輯（Windows 分支
+    需要真的有 nightly 在跑才測得到 True，用真環境會變成 flaky）。
+    """
+
+    def _force_posix(self):
+        return mock.patch.object(dev_start.platform_utils, "is_windows", return_value=False)
+
+    def test_no_lock_dir_means_not_running(self):
+        with tempfile.TemporaryDirectory() as td, self._force_posix(), \
+                mock.patch.object(dev_start, "ROOT", Path(td)):
+            self.assertIs(dev_start._nightly_running(), False)
+
+    def test_lock_dir_with_live_pid_means_running(self):
+        with tempfile.TemporaryDirectory() as td, self._force_posix(), \
+                mock.patch.object(dev_start, "ROOT", Path(td)), \
+                mock.patch.object(dev_start, "_pid_alive", return_value=True):
+            lock = Path(td) / dev_start._NIGHTLY_POSIX_LOCK
+            lock.mkdir(parents=True)
+            (lock / "pid").write_text("12345\n", encoding="utf-8")
+            self.assertIs(dev_start._nightly_running(), True)
+
+    def test_stale_lock_dir_with_dead_pid_means_not_running(self):
+        """前次 nightly crash 留下的陳舊鎖不可讓提醒永久常亮（常亮＝背景噪音）。"""
+        with tempfile.TemporaryDirectory() as td, self._force_posix(), \
+                mock.patch.object(dev_start, "ROOT", Path(td)), \
+                mock.patch.object(dev_start, "_pid_alive", return_value=False):
+            lock = Path(td) / dev_start._NIGHTLY_POSIX_LOCK
+            lock.mkdir(parents=True)
+            (lock / "pid").write_text("12345\n", encoding="utf-8")
+            self.assertIs(dev_start._nightly_running(), False)
+
+    def test_lock_dir_without_pid_file_is_undetermined(self):
+        """.sh 先 mkdir 再寫 pid，兩者之間有競態窗口；讀不到 pid 一律回 None，
+        不可冒充 False（假「沒在跑」比不知道更危險）。"""
+        with tempfile.TemporaryDirectory() as td, self._force_posix(), \
+                mock.patch.object(dev_start, "ROOT", Path(td)):
+            (Path(td) / dev_start._NIGHTLY_POSIX_LOCK).mkdir(parents=True)
+            self.assertIsNone(dev_start._nightly_running())
+
+    def test_lock_path_matches_the_shell_script_ssot(self):
+        """字面量漂移鎖：本檔的鎖路徑／Mutex 名一旦與 nightly 腳本不一致，偵測會
+        靜默失效（永遠回「沒在跑」），沒有任何其他訊號會提醒。"""
+        sh = (Path(dev_start.ROOT) / "AutoClaude" / "tools" / "run_local_nightly.sh")
+        ps1 = (Path(dev_start.ROOT) / "AutoClaude" / "tools" / "run_local_nightly.ps1")
+        self.assertIn(dev_start._NIGHTLY_POSIX_LOCK.split("/")[-1],
+                      sh.read_text(encoding="utf-8", errors="replace"))
+        self.assertIn(dev_start._NIGHTLY_MUTEX_NAME,
+                      ps1.read_text(encoding="utf-8", errors="replace"))
+
+
+class TestCheckNightlyFlag(DevStartTestCase):
+    """`--check-nightly`：useMacWin.md 提示詞在「手動 git merge 之前」呼叫的撞車防呆
+    查詢。此處刻意連「不得順便跑整備七步」一起鎖——它若不小心走完 main() 全程，
+    等於在使用者只想查狀態時偷偷同步/裝依賴，比沒有這支旗標更糟。
+    """
+
+    def _run(self, nightly_state):
+        with mock.patch.object(dev_start, "_nightly_running", return_value=nightly_state), \
+                mock.patch.object(dev_start, "step_sync") as sync, \
+                mock.patch.object(dev_start, "step_venv") as venv, \
+                mock.patch("builtins.print") as printed:
+            rc = dev_start.main(["--check-nightly"])
+        out = " ".join(str(c.args[0]) for c in printed.call_args_list if c.args)
+        return rc, out, sync, venv
+
+    def test_running_returns_rc1_and_names_the_state(self):
+        rc, out, sync, venv = self._run(True)
+        self.assertEqual(rc, 1)
+        self.assertIn("NIGHTLY-RUNNING", out)
+        sync.assert_not_called()
+        venv.assert_not_called()
+
+    def test_idle_returns_rc0(self):
+        rc, out, sync, venv = self._run(False)
+        self.assertEqual(rc, 0)
+        self.assertIn("idle", out)
+        sync.assert_not_called()
+        venv.assert_not_called()
+
+    def test_undetermined_is_not_reported_as_running(self):
+        """無法判定時不可回 rc=1——防呆機制自己失敗就擋住開工，比不防呆更擾民。"""
+        rc, out, sync, venv = self._run(None)
+        self.assertEqual(rc, 0)
+        self.assertIn("UNDETERMINED", out)
+        sync.assert_not_called()
 
 
 class TestCacheRestoreTrustRestoredBranch(DevStartTestCase):

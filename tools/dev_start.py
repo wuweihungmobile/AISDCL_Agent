@@ -498,10 +498,21 @@ def _toml_deps_snapshot(text: str, source: Path) -> str:
     的續行內容會被當成一般內容誤納入 hash，純文案異動誤觸發重裝。tomllib 是標準庫的正確
     TOML parser，天生不受這三者影響，故直接取代手寫正則掃描。
 
-    只保留 project.dependencies／project.optional-dependencies／build-system
-    三塊與依賴安裝直接相關的內容（其餘如 name/version/description/
-    requires-python 等中繼資料、[tool.*] 等一律不納入，改用白名單精確萃取，
-    不再依賴黑名單排除法——不會漏未來新增的中繼資料 key）。
+    只保留與「裝一次才會生效」直接相關的內容：project.dependencies／
+    project.optional-dependencies／build-system，加上 project.scripts／
+    project.gui-scripts／project.entry-points（其餘如 name/version/
+    description/requires-python 等中繼資料、[tool.*] 等一律不納入，改用白名單
+    精確萃取，不再依賴黑名單排除法——不會漏未來新增的中繼資料 key）。
+
+    entry-points 三塊是 2026-07-27 Windows 實機揪出的缺口（DEF-101-502；與本函式
+    原本就修過的 build-system 同一 bug class＝「該重裝卻沒重裝的假綠」）：console script 的
+    shim 是 pip 在**安裝當下**產生的實體檔（.venv/Scripts/*.exe），純改
+    [project.scripts] 不動任何 dependency 時，舊白名單算出的 hash 不變 →
+    step_venv() 判「依賴新鮮」跳過重裝 → 既有 venv 永遠不會長出那支新命令。
+    R52 為此新增的 `autoclaude-artifact-check`（playbook evaluator_command 專用，
+    正是為了取代裸 `python` 才建的）在本機 git pull 後即為缺席狀態，直到手動重裝
+    才出現；evaluator 會以 rc=127「找不到命令」失敗，且症狀與 R52 修的原始缺陷
+    完全同形，極難歸因。
     解析失敗（語法錯誤）時退回「整檔視為相關」並警告：寧可誤觸發重裝，也
     不可像正則方案一樣悄悄漏掉真正的依賴變動（fail loud 優先於 fail silent）。
     """
@@ -522,6 +533,10 @@ def _toml_deps_snapshot(text: str, source: Path) -> str:
             "project.dependencies": project.get("dependencies"),
             "project.optional-dependencies": project.get("optional-dependencies"),
             "build-system": data.get("build-system"),
+            # 以下三塊＝安裝當下才產生實體 shim 的 entry point（console script）
+            "project.scripts": project.get("scripts"),
+            "project.gui-scripts": project.get("gui-scripts"),
+            "project.entry-points": project.get("entry-points"),
         }
         return json.dumps(extracted, sort_keys=True, ensure_ascii=False)
     except tomllib.TOMLDecodeError as e:
@@ -565,6 +580,59 @@ def _deps_hash() -> str:
                 h.update(line.encode("utf-8"))
                 h.update(b"\n")
     return h.hexdigest()
+
+
+# nightly 去重鎖的權威名稱／路徑（**非**本檔自建，是 nightly 腳本自己持有的鎖）：
+#   Windows：AutoClaude/tools/run_local_nightly.ps1 的具名 Mutex
+#   mac/posix：AutoClaude/tools/run_local_nightly.sh 的 mkdir atomic lock（內含 pid 檔）
+# 改這兩個字面量必須同步改那兩支腳本，否則偵測靜默失效（回 False＝假「沒在跑」）。
+_NIGHTLY_MUTEX_NAME = "Global\\AutoClaude_Nightly_Run"
+_NIGHTLY_POSIX_LOCK = "AutoClaude/logs/.nightly_mac.lock"
+
+
+def _nightly_running() -> bool | None:
+    """本機是否有 nightly 正在跑：True＝在跑／False＝沒在跑／None＝無法判定。
+
+    WHY（DEF-101-504，2026-07-27 Windows 實機事故）：本機 nightly 走 schtasks 補跑
+    （StartWhenAvailable／WakeToRun），機器一喚醒就補跑——而那正是使用者開工、
+    照 useMacWin.md 提示詞做 `git merge --ff-only` 的同一分鐘。當天實測：merge
+    在 18:41:26 落在 nightly local-ci-gate 的 pytest 執行區間（18:41:10~18:42:50）
+    中間，113 個檔案在測試跑到一半時被抽換 → 5 支測試假紅（事後單獨重跑 10
+    passed 全綠）。假紅還會被寫進 nightly_latest.log，讓**之後每天早上**的心跳
+    哨兵都報「上一輪 nightly 有失敗」，把人導去追不存在的迴歸。
+
+    偵測方式刻意查「nightly 腳本自己持有的去重鎖」而非猜 log mtime：鎖是
+    nightly 行程存活期間才成立的權威訊號，行程結束（含 crash）由 OS 自動回收
+    （Windows Mutex）或由 pid 存活判定排除（posix 陳舊鎖目錄）。
+
+    回 None（無法判定）時呼叫端一律當作「沒偵測到」處理——本機制是防呆提醒，
+    不該因為自己失敗就把 dev_start 弄壞或誤擋同步。
+    """
+    if platform_utils.is_windows():
+        synchronize = 0x00100000
+        try:
+            handle = ctypes.windll.kernel32.OpenMutexW(
+                synchronize, False, _NIGHTLY_MUTEX_NAME)
+        except (OSError, AttributeError):
+            return None
+        if handle:
+            ctypes.windll.kernel32.CloseHandle(handle)
+            return True
+        # ERROR_FILE_NOT_FOUND(2)＝具名物件不存在＝確定沒在跑；其餘（如
+        # ERROR_ACCESS_DENIED(5)：跨權限層級 session 開同名 Global 物件）無從
+        # 判定，回 None 而非 False，避免冒充「確定沒在跑」。
+        return False if ctypes.windll.kernel32.GetLastError() == 2 else None
+
+    lock_dir = ROOT / _NIGHTLY_POSIX_LOCK
+    try:
+        if not lock_dir.is_dir():
+            return False
+        pid = int((lock_dir / "pid").read_text(encoding="utf-8").strip())
+    except (OSError, ValueError):
+        # 鎖目錄在但 pid 檔讀不到/壞掉：可能是 .sh 剛 mkdir 完還沒寫 pid 的
+        # 競態窗口，也可能是陳舊殘留——兩者無法區分，不冒充判定。
+        return None
+    return _pid_alive(pid)
 
 
 def step_sync(no_sync: bool, is_repo: bool) -> None:
@@ -620,6 +688,18 @@ def step_sync(no_sync: bool, is_repo: bool) -> None:
         SUMMARY["sync"] = "跳過（git status 失敗）"
         return
     dirty = bool(status_r.stdout.strip())
+
+    # nightly 執行中＝此刻動工作樹（pull）或跑全套測試都會與它互踩產生假紅
+    # （見 _nightly_running() docstring 的實機時間線）。落後時**不自動 pull**，
+    # 語意比照既有「髒工作樹不硬做」——不確定安全就不動使用者的工作樹。
+    if _nightly_running() is True:
+        no_pull = f"；落後 {behind} commit 本次不自動 pull，等它跑完再執行一次 dev_start" \
+            if behind > 0 else ""
+        _warn(f"偵測到 nightly 正在執行（去重鎖被持有）— 這段期間請勿跑全套測試或改動"
+              f"工作樹，否則與它互踩會產生假紅並污染隔天心跳判讀{no_pull}")
+        if behind > 0:
+            SUMMARY["sync"] = f"未同步（nightly 執行中，落後 {behind}）"
+            return
 
     if behind == 0:
         msg = f"已是最新（origin/{branch}）"
@@ -1716,7 +1796,26 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--no-sync", action="store_true", help="跳過 GitHub 同步（離線）")
     ap.add_argument("--force-bootstrap", action="store_true",
                     help="強制重跑 bootstrap 重裝依賴")
+    ap.add_argument("--check-nightly", action="store_true",
+                    help="只查『本機是否有 nightly 正在跑』後立刻結束（不做任何整備）；"
+                         "rc=1 代表在跑，此時別 pull/merge、也別跑全套測試")
     args = ap.parse_args(argv)
+
+    if args.check_nightly:
+        # 開工前的撞車防呆專用查詢。給的是一支跨平台、免 shell 引號的指令，
+        # 供 useMacWin.md 提示詞在「手動 git merge 之前」呼叫——那個時間點
+        # dev_start 本體還沒跑，內建的同步守門幫不上忙（見 _nightly_running()）。
+        running = _nightly_running()
+        if running is True:
+            print("NIGHTLY-RUNNING：偵測到 nightly 正在執行——請勿 pull/merge 或跑全套測試，"
+                  "等它跑完（可看 AutoClaude/logs/ 最新 nightly log 尾巴）再開工")
+            return 1
+        if running is None:
+            print("UNDETERMINED：無法判定 nightly 是否在跑（權限或鎖狀態不明）——"
+                  "建議自行確認 AutoClaude/logs/ 最新 nightly log 是否仍在增長")
+            return 0
+        print("idle：沒有 nightly 在跑，可以安全同步")
+        return 0
 
     print("===== AISDCL_Agent dev_start（自動偵測啟動）=====")
     print(f"repo 根：{ROOT}")
