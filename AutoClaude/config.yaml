@@ -86,7 +86,7 @@ notification:
 
 executor:
   # improving_68：執行器後端切換。pty（預設）＝PtyExecutor，零行為變更；sdk＝Claude Agent
-  #   SDK（需 pip install autoclaude[sdk]）。
+  #   SDK（需 pip install 'autoclaude[sdk]'）。
   backend: pty
   permission_mode: default          # SDK 權限模式（spike 證實安全值；pty 後端時忽略）
   # model: ""                       # SDK 模型覆寫（留空＝SDK 預設）

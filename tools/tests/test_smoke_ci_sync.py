@@ -162,6 +162,36 @@ from _ci_scan_anchors import (  # noqa: E402
     ci_scan_statement_count,
 )
 
+class TestWindowsSmokeCarrierGuard(unittest.TestCase):
+    """QA-R59-04：`windows_smoke_local.ps1` 的 MSYSTEM 載具守門必須有回歸鎖。
+
+    WHY：DEF-101-511 的整個修法主張是「把只寫在註解的載具約束**升為機械強制**」，但守門
+    本身若沒有鎖，刪掉它全套照綠——那就與註解同級，主張自我否定。實測 `grep -rn MSYSTEM
+    tools/tests/ AutoClaude/tests/` 在本鎖之前為**零命中**。
+    """
+
+    def test_msystem_fail_fast_guard_present_and_before_any_work(self):
+        ps1 = _REPO_ROOT / "tools" / "windows_smoke_local.ps1"
+        text = ps1.read_text(encoding="utf-8-sig", errors="replace")
+        self.assertIn(
+            "if ($env:MSYSTEM)", text,
+            "缺少 MSYSTEM 載具守門——經 Git Bash 呼叫會在非 ASCII 路徑步驟產生假紅"
+            "（DEF-101-511；R59 實測 PASS=11 FAIL=2 vs 原生 PASS=12 FAIL=0）")
+        guard_at = text.index("if ($env:MSYSTEM)")
+        # 必須 fail-fast：守門區塊內要有 exit 1
+        # R59 二審 QA-R59-P2 訂正：原為 `text[guard_at:guard_at + 1200]`，而守門區塊實際只有
+        # **570 字元** → 1200 的窗口越界吃進緊接在後的 git 前置守門（該處自帶 `exit 1`），
+        # 於是「把守門降級成只印警告」這個**最可能的實際退化**照樣綠（QA 以副本注入實證：
+        # 刪守門→RED、搬位置→RED、移除 exit 1→**GREEN**）。改為切到本區塊自己的結尾。
+        guard_block = text[guard_at:text.index("\n}", guard_at)]
+        self.assertIn("exit 1", guard_block, "MSYSTEM 守門必須 exit 1 拒跑，不可只印警告")
+        # 位置：必須早於第一個實際驗證段落（[1/ 標籤）與 git/python 前置守門
+        first_step = text.index("--- [1/")
+        self.assertLess(
+            guard_at, first_step,
+            "MSYSTEM 守門必須在任何驗證段落之前——晚於任何副作用就失去 fail-fast 意義")
+
+
 class TestSmokeCiSync(unittest.TestCase):
     def test_onboarding_pass_claims_match_script_pins(self) -> None:
         """ONBOARDING.md 的 PASS=N 宣稱集合必須恰等於兩腳本釘選值集合。"""

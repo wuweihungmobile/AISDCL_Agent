@@ -5,7 +5,7 @@ storage.mode in ('both', 'db_only') 路由（factory.build_preference_store）�
 
 DB 失敗 warning 不中斷主流程（偏好為輔助功能，與 PgMemoryStore 一致）。
 
-⚠️ 須安裝：pip install autoclaude[postgres]
+⚠️ 須安裝：pip install 'autoclaude[postgres]'
 """
 from __future__ import annotations
 
@@ -33,7 +33,7 @@ class PgPreferenceStore:
         if not _SQLALCHEMY_AVAILABLE:
             raise ImportError(
                 "PgPreferenceStore 需 sqlalchemy + asyncpg；"
-                "請執行 pip install autoclaude[postgres]"
+                "請執行 pip install 'autoclaude[postgres]'"
             )
         self._engine = engine
 

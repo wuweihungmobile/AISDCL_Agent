@@ -1,20 +1,21 @@
 """PgMemoryStore — IMemoryStore 的 PostgreSQL 後端（Phase 6 選配）。
 
-⚠️ 需安裝：pip install autoclaude[postgres]
+⚠️ 需安裝：pip install 'autoclaude[postgres]'
    pgvector 向量查詢需額外：pip install pgvector
 """
 from __future__ import annotations
 
 import logging
 import math
-from typing import Any, Optional
+from typing import Any
 
 logger = logging.getLogger("autoclaude.infra.repositories.pg_memory")
 
 _SQLALCHEMY_AVAILABLE = False
 try:
-    from sqlalchemy import select, func, text
-    from ._pg_models import KnowledgeEntry, _PGVECTOR_AVAILABLE
+    from sqlalchemy import func, select, text
+
+    from ._pg_models import _PGVECTOR_AVAILABLE, KnowledgeEntry
     from .pg_async_utils import _run_async
     _SQLALCHEMY_AVAILABLE = True
 except ImportError:
@@ -26,11 +27,11 @@ except ImportError:
 class PgMemoryStore:
     """PostgreSQL backend for IMemoryStore（knowledge_entries 表）。"""
 
-    def __init__(self, engine: "Any"):
+    def __init__(self, engine: Any):
         if not _SQLALCHEMY_AVAILABLE:
             raise ImportError(
                 "PgMemoryStore 需 sqlalchemy + asyncpg；"
-                "請執行：pip install autoclaude[postgres]"
+                "請執行：pip install 'autoclaude[postgres]'"
             )
         self._engine = engine
 
@@ -38,7 +39,7 @@ class PgMemoryStore:
     # Public sync interface（相容 IMemoryStore Protocol）
     # ──────────────────────────────────────────────
 
-    def query(self, error_signature: str) -> Optional[dict]:
+    def query(self, error_signature: str) -> dict | None:
         try:
             return _run_async(self._query(error_signature))
         except Exception as exc:
@@ -75,7 +76,7 @@ class PgMemoryStore:
     def record_success(
         self, error_signature: str, strategy: str,
         step_id: str, error_class: str = "unknown",
-        embedding: Optional[list[float]] = None,
+        embedding: list[float] | None = None,
     ) -> None:
         try:
             _run_async(self._record(
@@ -107,7 +108,7 @@ class PgMemoryStore:
     # Private async implementation
     # ──────────────────────────────────────────────
 
-    async def _query(self, sig: str) -> Optional[dict]:
+    async def _query(self, sig: str) -> dict | None:
         async with self._engine.connect() as conn:
             row = (await conn.execute(
                 select(KnowledgeEntry).where(KnowledgeEntry.error_signature == sig)
@@ -187,10 +188,10 @@ class PgMemoryStore:
         return [r[0] for r in result.all() if r[0]]
 
     async def _record(
-        self, sig: str, strategy: Optional[str], step_id: str,
+        self, sig: str, strategy: str | None, step_id: str,
         error_class: str, outcome: str,
-        tried: Optional[list[str]] = None,
-        embedding: Optional[list[float]] = None,
+        tried: list[str] | None = None,
+        embedding: list[float] | None = None,
     ) -> None:
         values: dict[str, Any] = dict(
             error_class=error_class, error_signature=sig,

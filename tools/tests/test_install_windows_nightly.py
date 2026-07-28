@@ -10,8 +10,8 @@ fix_nightly_catchup.ps1 的補跑保護目標值、run_local_nightly.ps1 檔頭�
 
 `Register-ScheduledTask`/`Get-ScheduledTask` 屬 Windows ScheduledTasks 模組，非
 Windows 主機（含本專案開發常用的 macOS/Linux pwsh）無法真的執行——本測試刻意只做
-靜態文字結構驗證（＋若本機有 pwsh 則額外做語法解析，純解析不執行，跨平台安全），
-不嘗試真的呼叫排程 API。
+靜態文字結構驗證（＋若本機有 powershell/pwsh 則額外做語法解析，純解析不執行，
+跨平台安全），不嘗試真的呼叫排程 API。
 
 執行：python3 -m unittest discover -s tools/tests -p "test_*.py" -v
 """
@@ -190,14 +190,45 @@ class TestInstallWindowsNightlyStructure(unittest.TestCase):
         self.assertIn("Write-Warning", status_block, "-Status+-Uninstall 同給時未輸出警告——違反 fail-loud 慣例")
 
 
-@unittest.skipUnless(shutil.which("pwsh"), "本機無 pwsh，跳過語法解析（純結構文字驗證仍會跑）")
+# R59 DEF-101-509：本條件原為 `shutil.which("pwsh")`（**只認 PS 7**）。後果是本檔
+# 唯一真的解析語法的測試，在「一台標準 Windows 11 開發機」上必定 skip——ONBOARDING §1
+# 明列 pwsh 7 為**選用**（`winget install Microsoft.PowerShell` 才有），Windows 11 內建
+# 的是 Windows PowerShell 5.1。於是一支 **Windows 專屬**腳本的語法閘門，恰恰在它唯一
+# 能真正執行的平台上不跑，且因該 skip 未帶 `[WINDOWS-NATIVE-ONLY]` 標籤而被
+# `run_root_unittests.py` 的可見度機制漏掉（同 DEF-101-343~345／R43 的缺陷類別）。
+# 唯一還會跑到它的環境是 GitHub-hosted runner（ubuntu/windows 皆預裝 pwsh）——而 CI
+# 因帳務停擺（DEF-101-081/208）目前不啟動 runner，等於此閘門現況零活體覆蓋。
+#
+# 改用 `powershell or pwsh`（與同目錄 `test_bootstrap_ps1.py::_windows_pwsh_available`／
+# `test_dev_start_ps1_lastexitcode.py` 既有慣例逐字同構）不只是「讓它別 skip」，語意上
+# **更貼近生產**：本腳本在生產是以 `powershell -ExecutionPolicy Bypass -File` 執行（＝5.1），
+# 而 `pwsh` 解析用的是 PS 7 文法。5.1 的 parser 才是真正的目標文法，且本檔所在的
+# `tools/` 樹受 `test_ps51_compat.py` 的「PS 5.1 相容」政策約束，故以 5.1 優先解析
+# 與該政策一致（R59 實測：PS 5.1 `Parser::ParseFile` 對本腳本 errs=0）。
+def _ps_engine() -> str | None:
+    """回傳本機可用的 PowerShell 解析引擎路徑，Windows 上優先 5.1（見上方 WHY）。
+
+    抽成模組層函式而非寫在測試裡，是為了讓下方 `TestSyntaxGateEngineSelection`
+    能對「選誰」這件事本身做斷言——選擇邏輯若退回 pwsh-only，鎖才抓得到。
+    """
+    return shutil.which("powershell") or shutil.which("pwsh")
+
+
+@unittest.skipUnless(
+    _ps_engine(),
+    "本機無 powershell/pwsh，跳過語法解析（純結構文字驗證仍會跑）",
+)
 class TestInstallWindowsNightlySyntax(unittest.TestCase):
     def test_parses_with_zero_errors(self) -> None:
         """[Parser]::ParseFile 只做語法樹解析，不執行——跨平台安全（macOS/Linux pwsh
-        皆可跑），可及早攔住語法錯誤而不需要真的呼叫 Windows-only 的排程 API。"""
+        皆可跑），可及早攔住語法錯誤而不需要真的呼叫 Windows-only 的排程 API。
+
+        引擎選擇 `powershell or pwsh`（Windows 上優先 5.1）的理由見類別上方註解。
+        """
+        exe = _ps_engine()
         proc = subprocess.run(
             [
-                "pwsh", "-NoProfile", "-Command",
+                exe, "-NoProfile", "-Command",
                 "$errors = $null; $tokens = $null; "
                 f"$null = [System.Management.Automation.Language.Parser]::ParseFile("
                 f"'{_SCRIPT}', [ref]$tokens, [ref]$errors); "
@@ -209,6 +240,49 @@ class TestInstallWindowsNightlySyntax(unittest.TestCase):
         self.assertEqual(
             proc.returncode, 0,
             f"install_windows_nightly.ps1 語法解析有誤：\n{proc.stdout}\n{proc.stderr}",
+        )
+
+
+class TestSyntaxGateEngineSelection(unittest.TestCase):
+    """DEF-101-509 回歸鎖：語法解析閘門在**標準 Windows 11** 上必須真的跑。
+
+    鑑別力來源＝直接斷言 `TestInstallWindowsNightlySyntax` 的 `skipUnless` 判定結果
+    （unittest 在條件為假時於類別上設 `__unittest_skip__ = True`），而非比對條件的
+    文字。故任何「退回只認 pwsh」的改法（含改寫成別的等價寫法）在一台沒裝 pwsh 7 的
+    Windows 機器上都會讓本鎖翻紅；R59 落地當下即以此機器實測（`which('pwsh') is None`、
+    `which('powershell')` 命中內建 5.1）確認有鑑別力。
+    """
+
+    @unittest.skipUnless(
+        platform.system() == "Windows",
+        "[WINDOWS-NATIVE-ONLY] 本鎖驗的性質是「Windows 上不得 skip」，"
+        "非 Windows 平台上該 skip 本身是正確行為（R43 DEF-101-348 標籤，"
+        "供 run_root_unittests.py 彙整可見度）",
+    )
+    def test_syntax_gate_is_not_skipped_on_windows(self) -> None:
+        # Windows 一律內建 Windows PowerShell 5.1；選擇器只要仍接受它就不會是 None。
+        self.assertIsNotNone(
+            shutil.which("powershell"),
+            "Windows 上找不到內建 powershell.exe——環境異常，非本鎖要抓的迴歸",
+        )
+        self.assertFalse(
+            getattr(TestInstallWindowsNightlySyntax, "__unittest_skip__", False),
+            "TestInstallWindowsNightlySyntax 在 Windows 上被 skip 了——語法閘門對一支"
+            "Windows 專屬腳本失效（DEF-101-509 迴歸；很可能是把 _ps_engine() 改回"
+            "只認 pwsh）",
+        )
+
+    def test_engine_selection_prefers_windows_powershell(self) -> None:
+        """兩者都在時必須選 5.1：生產是以 `powershell -File` 執行本腳本，且 `tools/`
+        受 test_ps51_compat.py 的 PS 5.1 相容政策約束——用 PS 7 文法解析會漏掉
+        「5.1 解析不過、7 解析得過」的寫法（CI 的 pwsh parser 是 7，本來就驗不到）。"""
+        ps51, ps7 = shutil.which("powershell"), shutil.which("pwsh")
+        if ps51 is None and ps7 is None:
+            self.skipTest("本機無任何 PowerShell 引擎")
+        expected = ps51 or ps7
+        self.assertEqual(
+            _ps_engine(), expected,
+            "引擎選擇順序錯誤：兩者皆有時必須優先 Windows PowerShell 5.1",
         )
 
 

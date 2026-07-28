@@ -31,10 +31,15 @@ export PYTHONUTF8=1
 # 缺口（本腳本三套 pytest 過去皆無此鎖）。下方 PASSED/INFRA_PASSED 算出後即
 # 檢查；下限留有餘裕（非緊貼實測值，避免良性 collection-order/parametrization
 # 噪聲觸發假紅）。往後每輪只可把下限「往上棘輪」，往下調整僅限伴隨蓄意刪測試。
-MIN_TESTS_FROZEN=1400   # R47 實測 AISDLC_SDD_v0.01=1478（留 ~78 餘裕）
+MIN_TESTS_FROZEN=1470   # R59 重釘（R47 為 1400）。實測 v0.01=1478，留 8 餘裕吸收
+                        # docker daemon 停用的 −3（見 ONBOARDING §7 差異歸因表）
 MIN_TESTS_LATEST=1650   # R47 二審修復後實測 LATEST=1729（留 ~79 餘裕；此數字會隨後續各輪
                         # 新增測試自然漂移，門檻本身不逐輪重新對齊，留有餘裕即可）
-MIN_TESTS_SHARED=190    # R49 複核後實測 scripts/tests=226（留 ~36 餘裕；同上，預期漂移）
+MIN_TESTS_SHARED=240    # R59 重釘（R49 為 190，其註解記的 226 亦已過期——實測 248，
+                        # 比值 248/190=**1.305 已越過根層 run_root_unittests.py 自訂的
+                        # RATCHET_STALE_RATIO=1.25 紅線**，鑑別力少掉三成〔可靜默蒸發 58
+                        # 支仍全綠〕；依 Rule 7「兩套相反政策要擇一」對齊根層 ratchet 精神。
+                        # 留 8 餘裕吸收跨平台 ±1 漂移。R59 二審 ARCH-R59-NB3 指出
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
@@ -114,7 +119,11 @@ run_gate_for_version() {
   local PYTEST_LOG
   # mktemp 帶模板（R11）：repo 對 BSD mktemp 是否需模板存在兩套假設（實測現代 macOS 皆可，統一帶模板為最保守跨平台寫法）
   PYTEST_LOG="$(mktemp "${TMPDIR:-/tmp}/ci_gate_pytest.XXXXXX")"
-  python -m pytest tools/fsm_runtime/tests/ -m "not chaos" -q 2>&1 | tee "${PYTEST_LOG}"
+  # `-rs`（R59 ARCH-R59-01）：skip 理由必須可見，不得只併成一個數字。DEF-101-510 只把
+  # 這件事補在根層 unittest runner；pytest 面本來就內建 `-rs`，本 repo 卻從未開。
+  # DEF-101-515 需人工考古才解釋得出 v0.30 −4 的兩支平台硬排除，根因即此。
+  # 對計數無影響：pytest_passed_count.sh 抓 `N passed`，SKIPPED 行不含該樣式（R59 實測）。
+  python -m pytest tools/fsm_runtime/tests/ -m "not chaos" -q -rs 2>&1 | tee "${PYTEST_LOG}"
   # DEF-06-001：擷取逐軌 `N passed` 收斂計數（取證友善性，純函式 helper 單獨可測）
   local PASSED
   PASSED="$(bash "${REPO_ROOT}/scripts/pytest_passed_count.sh" < "${PYTEST_LOG}")"
@@ -180,7 +189,8 @@ echo "############## CI 閘門：共享 infra scripts/tests/ ##############"
 cd "${REPO_ROOT}"
 # mktemp 帶模板（R11）：同上，統一帶模板為最保守跨平台寫法
 INFRA_LOG="$(mktemp "${TMPDIR:-/tmp}/ci_gate_infra.XXXXXX")"
-python -m pytest scripts/tests/ -q 2>&1 | tee "${INFRA_LOG}"
+# `-rs` 理由同上（R59 ARCH-R59-01）。
+python -m pytest scripts/tests/ -q -rs 2>&1 | tee "${INFRA_LOG}"
 INFRA_PASSED="$(bash "${REPO_ROOT}/scripts/pytest_passed_count.sh" < "${INFRA_LOG}")"
 rm -f "${INFRA_LOG}"
 echo "==> 共享 infra scripts/tests/: ${INFRA_PASSED} passed"

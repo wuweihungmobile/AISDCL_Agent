@@ -424,5 +424,185 @@ class TestEscalationModulesReuseSharedSanitizer(unittest.TestCase):
         )
 
 
+# ═══════════════════════════════════════════════════════════════════════════
+# repo-wide 前瞻枚舉鎖
+#
+# WHY 前瞻性：以上斷言全是**具名枚舉**（逐一 import 已知 4 份再兩兩比對），只驗白名單內
+# 彼此一致，對「有人新增第 5 份較弱的獨立重寫」零訊號。而「新站點」正是本家族真實的復發
+# 形狀：DEF-101-219／295／343／346／349／384／390／442／478（**R59 QA 複審逐筆撈帳本原文後訂正本句原先的過度宣稱**：這 9 筆**並非全是「新增獨立重寫」**——`478` 實為**白名單內四份實作的一致行為漂移**（保留名+尾隨空白+副檔名形態四處一起逃逸），`384`／`390`／`442` 則是**新的「漏淨化呼叫點」**，那類檔案的原始碼**根本不含**保留名清單或禁用字元集合字面值，**本鎖的兩個錨結構上看不到它們**。本鎖只覆蓋「新增第 N+1 份**獨立重寫**」這一類；漏淨化呼叫點需要 AST 前瞻掃描〔`442` 原文已明講此機制〕，本輪只把 AST 掃描器當一次性前提查核用過、未機械化，見下方【已實測不涵蓋】)。此前本句原寫「共 9 筆全是新站點，無一筆是
+# 白名單內漂移。`docs/06_quality/CrossPlatform_Scan_Dimensions.md` 因此把「parity 鎖須確實
+# 有前瞻性（抓得到第 N+1 份）」列為必要重複家族的常設要求（R43 曾為此翻修一次）。本節補上
+# 該常設要求——動工時實測**零違規**，故非修現存 bug。
+#
+# WHY 等值而非下限：下限只在「多一份」時說話，對「某道淨化閘被刪掉」完全沉默，且下限自身
+# 會腐化（`run_root_unittests.MIN_TESTS` 連 11 輪沒人重釘的判例）。等值一次拿到兩個方向：
+# 多一份＝可能有未經審的第 5 份；少一份＝某道閘消失了（stale 自檢）。等值另外免費得到
+# fail-open 防護——pathspec／排除清單被改壞而掃到 0 份時 hits=[] ≠ 註冊表必然翻紅，故刻意
+# **不設** `_MIN_SCANNED` 這類額外下限測試。
+#
+# WHY 不照抄姊妹檔：`test_windowsapps_guard_cross_consistency.py` 同款掃描段 868 行、跨
+# R40→R57 翻修約 6 輪、至今掛一筆永久 open 的 P3，體積幾乎全花在「排除註解／字串內的假命中」
+# （三語言剝註解、heredoc、引號配對…），而 R46 已證明那是無底洞（繞過從整行註釋→no-op
+# 前綴→heredoc 逐層復發）。本節刻意反向取捨：錨保持**粗粒度、不剝註解**。代價是註解提到
+# 裝置名清單也會命中（過度觸發）——但過度觸發是 fail-loud（有人得看一眼並登記），漏報才是
+# fail-open。代價的**處理**方式（不只承認，見上方 R57「明文承認代價 ≠ 處理了代價」判例）＝
+# 註冊表每筆必帶「角色」註記，逼登記者當場分診「是第 5 份實作，還是只是提及」。
+#
+# 邊界宣稱（三段式，見 CrossPlatform_Scan_Dimensions.md §「邊界宣稱必須實測」）：
+#   【已實測涵蓋】① 4 份權威實作全數命中；② 第 5 份實作的三語言形態皆命中——Python
+#     `set()`／`frozenset()`／`re.compile(r"^(CON|PRN|…)$")`、bash case glob（`*'<'*|*'>'*|…`
+#     與 `CON|PRN|AUX|NUL|COM[0-9]`）、PowerShell `@('CON','PRN',…)` 與 `'<>:"|?*'`；
+#     ③ 大小寫不敏感（`('con','prn','aux','nul')` 命中）；④ 無副檔名的 `tools/git-hooks/
+#     pre-commit` 在候選面內；⑤ `git ls-files` rc≠0 → AssertionError；⑥ 掃描面塌陷為 0 份
+#     → 等值斷言翻紅。
+#   【已實測不涵蓋】① 測試檔內的第 5 份實作（`_is_ntfs_test_file` 排除全部 `/tests/` 與
+#     `test_*.py`；測試檔出現清單是「對 SSOT 做斷言」，沿用姊妹檔 `_is_test_py` 同款判準）；
+#     ② 凍結版 v0.01~v0.29（Copy-on-Evolve 不回改）——實測當前凍結版內**零**錨命中，故該
+#     分支改以等價路徑實測：把 LATEST 傳成不存在的版本號後，v0.30 整棵樹 105 份候選（含真實
+#     錨命中的生產檔 `counterfactual_replay.py`）全數掉出候選面；③ 尚未 `git add` 的新檔
+#     （ls-files 固有性質）；④ 三種副檔名與三處 hook 目錄之外的檔案（`*.md`／`*.yml` 刻意不
+#     納入：帳本與文件遍地提及——實測 tracked `*.md`/`*.yml` 中錨命中 6 份，納入只製造偽陽性）。
+#     ⑤（R59 SD-R59-02 補，實測）**跨行排版與非正典順序的第 5 份實作**：兩錨都要求
+#     字面依序出現且間隙 ≤5 字元，故 PEP8 4 空白縮排的「一名一行」寫法必逃（間隙 8>5）、
+#     字母序 `{"AUX","CON","NUL","PRN"}` 必逃、Windows 檔案總管本身的字元順序
+#     `[\/:*?"<>|]` 必逃、每項帶行內註解必逃、PowerShell 多行陣列必逃。**現實意義不低**：
+#     真的第 5 份若含 COM1~9／LPT1~9，單行會超過 ruff line-length=100，幾乎必然寫成多行。
+#     ⑥（R59 QA-R59-01 補，實測）**新的「漏淨化呼叫點」**（DEF-101-384／390／442 的形狀）：
+#     那類檔案的原始碼根本不含任何錨字面值，兩錨結構上看不到；`442` 帳本原文已明講所需
+#     機制是 AST 前瞻掃描，本輪只把 AST 掃描器當一次性前提查核用過、**未機械化**。
+#   【未窮舉】**本清單並非窮舉**，只是本輪真正跑過的項目，不代表已列出全部繞過路徑：任何
+#     「錨字面值被改寫但語意等價」的寫法（`CON` 拆成 `"C" + "ON"`、`chr()` 組出字元集合、
+#     清單搬進 JSON/YAML 資料檔後讀取…）都在偵測範圍外。本段**不主張**殘餘風險只有某幾項。
+# ═══════════════════════════════════════════════════════════════════════════
+_SCAN_PATHSPECS = ("*.py", "*.sh", "*.ps1")
+# 無副檔名的 hook 檔（`pre-commit` 是 4 份權威實作之一）：以目錄 pathspec 納入，
+# 沿用 `tools/tests/test_extras_quoting_zsh_safety.py::_HOOK_DIRS` 既有慣例。
+_NTFS_HOOK_DIRS = ("tools/git-hooks", "AutoClaude/tools/git-hooks", "AISDLC_SDD/.githooks")
+# R59 SA-R59-03／ARCH-R59-03 就地標註：本行是本家族的**第 5 份逐字複本**
+# （另四份在 test_component_sanitizer_shared_layer_lock.py／
+# test_sanitize_component_frozen_sdd_versions_lock.py／test_windowsapps_guard_bash_parity.py／
+# test_windowsapps_guard_cross_consistency.py），而該家族**已登記為缺陷**：
+# DEF-101-500 third item（ARCH-R57R3-04）指出 `\d+\.\d+` 抓不到三段版號（如 v1.0.1）時
+# 「N 份會同時靜默誤分類」。原處置寫「列 R58 backlog」，但 R58 整輪作廢＝無承接者，
+# R59 已改派為 R60 起未指派 backlog（帳本 DEF-101-521）。
+# 本輪刻意複製而非 import：tools/tests/ 無 __init__.py，`-m unittest <module>` 與
+# run_root_unittests.py 的 discover 兩種模式下模組名不同，跨檔 import 需 sys.path 手術
+# ——R59 主控實跑 `-m unittest tools.tests.test_dev_start` 即當場撞到
+# ModuleNotFoundError: No module named _platform_helpers，坐實此限制為真。
+# 收斂時五份應一併處理，勿只改本份。
+_FROZEN_SDD_VERSION_RE = re.compile(r"^AISDLC_SDD/(AISDLC_SDD_v\d+\.\d+)/")
+
+# 錨①保留裝置名清單字面值：要求 CON→PRN→AUX→NUL 依序出現，之間只隔少量引號／逗號／
+# 分隔符，故 regex 交替（`CON|PRN|...`）、Python set、PowerShell 陣列、bash case pattern
+# 四種寫法同時涵蓋。錨②Windows 禁用字元集合字面值：同理要求 `<>:"|?*` 依序出現。
+# 兩錨取**聯集**——DEF-101-343 的真實形狀是「只淨化字元、完全沒有保留名防護」，
+# 那種第 5 份實作只有錨②看得到。
+_NTFS_ANCHOR_GAP = r"""['"\s,|/()\[\]]{0,5}"""
+_RESERVED_LIST_ANCHOR = re.compile(
+    _NTFS_ANCHOR_GAP.join(("CON", "PRN", "AUX", "NUL")), re.IGNORECASE
+)
+_FORBIDDEN_CHARS_ANCHOR = re.compile(
+    r".{0,5}".join(("<", ">", ":", '"', r"\|", r"\?", r"\*")), re.IGNORECASE
+)
+
+# 註冊表：鍵＝repo 相對路徑（LATEST 版前綴正規化為 `<LATEST>`，見 `_normalize_latest`），
+# 值＝**角色**註記（登記時必須分診：是實作，還是只在註解提及）。
+_KNOWN_NTFS_ANCHOR_SITES = {
+    # ① 4 份權威實作（必要重複，理由見本檔檔頭：語言邊界 ×1 + 子專案邊界 ×2）
+    "tools/git-hooks/pre-commit": "實作：bash 版 _ntfs_seg_bad()",
+    "tools/check_ntfs_paths.py": "實作：Python CI 全量掃描版 _ntfs_seg_bad()",
+    "AutoClaude/autoclaude/utils/logger.py": "實作：_sanitize_log_filename()（autoclaude 套件邊界）",
+    "AISDLC_SDD/scripts/component_sanitizer.py": "實作：sanitize_component()（SDD 子專案邊界）",
+    # ② 只在註解／docstring 提及清單，淨化本身走委派或不在此檔——粗粒度錨的必然命中，
+    #    非第 5 份實作。這幾筆存在本身就是「錨不剝註解」這個取捨的可見成本。
+    "AutoClaude/autoclaude/infra/adapters/rtm_file_sink.py": "註解：DEF-101-343 沿革；實作已委派共用函式",
+    "AutoClaude/autoclaude/plugins/playbook_persistence_plugin.py": "註解：說明保留名／禁用字元語意",
+    "AISDLC_SDD/<LATEST>/tools/fsm_runtime/counterfactual_replay.py": "註解：提醒組檔名前須淨化",
+}
+
+
+def _latest_sdd_version_name() -> str:
+    """LATEST 版目錄名，取自 `sdd_version.py` SSOT（不自寫版本號正則）。走 CLI subprocess
+    而非 import 以免污染 sys.path——姊妹檔 `_latest_sdd_root()` 同款手法。"""
+    sdd_root = REPO_ROOT / "AISDLC_SDD"
+    proc = subprocess.run(
+        [sys.executable, str(sdd_root / "scripts" / "sdd_version.py"), "--sdd-root", str(sdd_root)],
+        capture_output=True, text=True, encoding="utf-8", errors="replace",
+    )
+    name = proc.stdout.strip()
+    if proc.returncode != 0 or not name:
+        raise AssertionError(
+            f"LATEST 解析失敗（sdd_version.py rc={proc.returncode}；"
+            f"stderr={proc.stderr.strip()!r}）——掃描邊界不得靜默縮小"
+        )
+    return name
+
+
+def _is_ntfs_test_file(rel: str) -> bool:
+    """測試檔內出現錨字面值是「對 SSOT 內容做斷言」，非生產路徑第二實作。
+    判準沿用姊妹檔 `test_windowsapps_guard_cross_consistency.py::_is_test_py()`。"""
+    return "/tests/" in rel or Path(rel).name.startswith("test_")
+
+
+def _normalize_latest(rel: str, latest_name: str) -> str:
+    """把 LATEST 版目錄名換成 `<LATEST>` 佔位。WHY：Copy-on-Evolve 每次升版都會把整棵樹
+    複製到新版號，若註冊表寫死 `AISDLC_SDD_v0.30`，與本鎖無關的升版也會讓它翻紅。"""
+    return rel.replace(f"AISDLC_SDD/{latest_name}/", "AISDLC_SDD/<LATEST>/", 1)
+
+
+def _ntfs_scan_candidates(latest_name: str) -> list[str]:
+    """候選檔＝git tracked ∩（三種副檔名 ∪ 三處 hook 目錄），扣除凍結版與測試檔。
+
+    用 `git ls-files` 而非 `rglob`（天然排除 `.git`／`.venv`／`__pycache__`）；rc≠0 一律
+    fail-loud，**不可**靜默回空——掃描邊界不得靜默縮小（姊妹檔 `_tracked_files()` 判準）。
+    """
+    proc = subprocess.run(
+        ["git", "-C", str(REPO_ROOT), "-c", "core.quotepath=false", "ls-files", "-z",
+         "--", *_SCAN_PATHSPECS, *_NTFS_HOOK_DIRS],
+        capture_output=True, text=True, encoding="utf-8", errors="replace",
+    )
+    if proc.returncode != 0:
+        raise AssertionError(
+            f"git ls-files 失敗（rc={proc.returncode}；stderr={proc.stderr.strip()!r}）"
+            "——掃描邊界不得靜默縮小"
+        )
+    kept = []
+    for rel in proc.stdout.split("\0"):
+        if not rel or _is_ntfs_test_file(rel):
+            continue
+        m = _FROZEN_SDD_VERSION_RE.match(rel)
+        if m and m.group(1) != latest_name:
+            continue  # 凍結版依 Copy-on-Evolve 鐵律不回改，不被新規則追殺歷史快照
+        kept.append(rel)
+    return kept
+
+
+class TestNtfsSanitizerSiteEnumerationIsForwardLooking(unittest.TestCase):
+    """repo-wide 掃描：含 NTFS 淨化錨的生產檔集合必須與註冊表**等值**。"""
+
+    def test_registered_sites_match_repo_scan_exactly(self) -> None:
+        latest_name = _latest_sdd_version_name()
+        candidates = _ntfs_scan_candidates(latest_name)
+        hits = sorted(
+            _normalize_latest(rel, latest_name)
+            for rel in candidates
+            if _RESERVED_LIST_ANCHOR.search(
+                text := (REPO_ROOT / rel).read_text(encoding="utf-8", errors="replace")
+            )
+            or _FORBIDDEN_CHARS_ANCHOR.search(text)
+        )
+        self.assertEqual(
+            hits,
+            sorted(_KNOWN_NTFS_ANCHOR_SITES),
+            f"NTFS 淨化錨的站點集合與註冊表不符（本次實掃候選 {len(candidates)} 份）。\n"
+            "  · **多出**檔案 → 新增了第 5 份實作（或新的提及）：先確認它與 4 份權威實作**等價**"
+            "（保留裝置名／禁用字元／控制字元／尾隨空白或句點，四維度齊全）；能 import 委派就委派"
+            "（判例見 TestEscalationModulesReuseSharedSanitizer），確定必須獨立一份時，連同"
+            "「角色」註記登記進 _KNOWN_NTFS_ANCHOR_SITES 並補上行為對等斷言。\n"
+            "  · **少掉**檔案 → 某份實作／某道淨化閘消失了：確認是刻意移除（而非重構時被順手刪掉、"
+            "或檔案改名後淨化邏輯沒跟上），確認後同步下修 _KNOWN_NTFS_ANCHOR_SITES。",
+        )
+
+
 if __name__ == "__main__":
     unittest.main()

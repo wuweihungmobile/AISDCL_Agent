@@ -60,6 +60,11 @@ _SCAN_FILES = [
     "useMacWin.md",
     "AutoClaude/CLAUDE.md",
     "AutoClaude/README.md",
+    # R59（DEF-101-514）：本檔是**使用者最先讀**的入門文件，其 §1.4 還標著「強制」驗證
+    # 步驟，卻自 R13 收斂以來一直不在掃描面內——實測其寫死的舊數字已落後數百支且從未
+    # 翻紅。加入掃描面的判準沿用本清單既有語意（「基線數字歷史上實際漂移過的高風險
+    # 文件」）：它不只是有風險，是已經漂移過的既成事實。
+    "docs/AISDLC_Agent_UserGuide.md",
 ]
 # 唯一准許載有基線數字的檔（SSOT＝ONBOARDING.md §7〈常用驗證指令〉附註）。
 _SSOT_FILE = "ONBOARDING.md"

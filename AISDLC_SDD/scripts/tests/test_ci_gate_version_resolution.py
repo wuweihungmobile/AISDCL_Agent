@@ -204,3 +204,110 @@ def test_override_with_failed_resolver_suppresses_downgrade_warning():
     assert "LATEST 解析為空" not in proc.stderr, (
         f"覆寫時不應印降軌警示（SD-R14-REV-1），實得 stderr={proc.stderr!r}"
     )
+
+
+# ── DEF-101-512（R59）：降級 fallback 不得冒充完整閘門 ─────────────────────────
+# WHY：`ci-gate.ps1` 在偵測不到 Git Bash 時走 fallback，只跑 **v0.01 凍結基線單軌**
+# 的 3 個 stage——不含 LATEST 軌、不含 `ci-gate.sh` 的 lint 硬閘、不含 `scripts/tests`
+# 共享 infra 測試。原本它的收尾訊息是完整閘門收尾行去掉括號後綴後的**前綴子字串**：
+# 兩者非逐字相同，但實務稽核取證（人工回報、歷輪帳本引用、grep）用的錨點正是那段前綴，
+# 於是「跑了完整雙軌閘門」與「只跑了凍結基線 3 stage」在取證上無法分辨。只有 Windows
+# 走得到 fallback（mac 一律有 bash）＝單邊平台的取證可信度缺口。
+#
+# 本鎖為何放在這裡：本檔已在讀 `ci-gate.sh`、且屬 `scripts/tests/` 共享 infra 套件，
+# 每輪隨 ci-gate 自己執行——等於「閘門自己鎖住自己的誠實性」。
+_CI_GATE_PS1 = REPO_ROOT / "scripts" / "ci-gate.ps1"
+
+
+def _cut_ps_inline_comment(line: str) -> str:
+    """剝掉引號外的尾隨 `#` 註解（逐字元追蹤引號狀態）。
+
+    WHY（SD-R59-05）：只剝整行註解不夠——把成功訊息寫成含糊的 `✅ 完成`、再把
+    `fallback`／`未含` 兩個關鍵字放進尾隨註解，反向鎖就會被騙過。本 repo 既有
+    `test_ps51_compat.split_code_comment`／`test_find_git_bash_parity._cut_inline_comment`
+    是同款判準（DEF-101-482 修法），此處沿用其語意的最小實作。
+    """
+    in_single = in_double = False
+    for i, ch in enumerate(line):
+        if ch == "'" and not in_double:
+            in_single = not in_single
+        elif ch == '"' and not in_single:
+            in_double = not in_double
+        elif ch == "#" and not in_single and not in_double:
+            return line[:i]
+    return line
+
+
+def _ps1_code_lines(text: str) -> list[str]:
+    """剝掉整行 `#` 註解後的功能碼行（沿用本 repo 既有 `_code_only()` 判準精神）。
+
+    必須剝註解：本輪修復的註解裡刻意保留一次完整閘門的字面值以說明缺陷本身，
+    若不剝就會自我命中（同 zsh-glob-ok／baseline-ok 兩個豁免家族處理「文件必須
+    引述壞形態」的既有做法——此處刻意不寫出那兩個標記的完整字面形式，避免本行
+    被誤讀為一筆豁免宣告）。
+    """
+    return [ln for ln in text.splitlines() if not ln.lstrip().startswith("#")]
+
+
+def test_full_gate_success_anchor_is_not_reachable_from_ps1_fallback():
+    sh_text = CI_GATE.read_text(encoding="utf-8")
+    m = re.search(r'echo\s+"(✅ [^（"]*全數通過)', sh_text)
+    assert m, "ci-gate.sh 找不到完整閘門收尾錨點——結構已變動，請同步本鎖"
+    anchor = m.group(1)
+
+    ps1_code = "\n".join(_ps1_code_lines(_CI_GATE_PS1.read_text(encoding="utf-8-sig")))
+    assert anchor not in ps1_code, (
+        f"ci-gate.ps1 的功能碼行出現完整閘門的成功錨點 {anchor!r}——降級 fallback "
+        f"只跑 v0.01 單軌 3 stage，卻會在稽核 grep 下冒充完整雙軌閘門（DEF-101-512 迴歸）。"
+        f"請讓 fallback 的收尾訊息自己說出降級事實。"
+    )
+
+
+def test_ps1_fallback_success_message_self_declares_degradation():
+    """反向鎖：光是「不含錨點」還不夠——改成一句含糊的 `✅ 完成` 同樣會讓讀者誤判。
+    故要求 fallback 的成功訊息必須自陳兩件事：這是 fallback、以及**未含**什麼。"""
+    ps1_code = "\n".join(_ps1_code_lines(_CI_GATE_PS1.read_text(encoding="utf-8-sig")))
+    success_lines = [ln for ln in ps1_code.splitlines()
+                     if "Write-Host" in ln and "✅" in ln]
+    assert success_lines, "ci-gate.ps1 功能碼行找不到任何 ✅ 成功訊息——結構已變動"
+    # R59 QA-R59-06／SD-R59-05 兩項訂正：
+    #  ① 只看**最後一行**：修法的 WHY 明寫「人讀 log 取的是最後那行結論」，但原實作把
+    #     所有 ✅ 行 join 起來找關鍵字——在 L80 之後追加一行 `Write-Host "✅ 完成"` 仍會
+    #     全綠，而人在終端看到的最後一行又變回無條件成功，DEF-101-512 的危害復原。
+    #  ② 剝尾隨行內註解：原 `_ps1_code_lines()` 只剝**整行** `#`，故
+    #     `Write-Host "✅ 完成"   # fallback 3-stage，未含 LATEST` 這種寫法會讓兩個關鍵字
+    #     從註解被讀到而通過（DEF-101-482 同型；本輪剛因這件事被抓過一次）。
+    joined = _cut_ps_inline_comment(success_lines[-1])
+    assert "fallback" in joined, "fallback 的成功訊息必須自陳它是 fallback"
+    assert "未含" in joined, (
+        "fallback 的成功訊息必須明列**未含**哪些閘門（LATEST 軌／lint 硬閘／"
+        "共享 infra 測試），否則讀者無從得知覆蓋率差距"
+    )
+
+
+def test_ci_gate_pytest_calls_carry_dash_rs():
+    """QA-R59-10：`ci-gate.sh` 的兩處 pytest 呼叫必須帶 `-rs`（印出 skip 理由）。
+
+    WHY：R59 為 unittest 面的「skip 可見度」寫了 5 支鎖，pytest 面（真正的測試量體）
+    卻 0 支——任何人覺得 log 太長把 `-rs` 拿掉即全綠，DEF-101-510 在 pytest 面復發。
+    對計數無影響已實測：`scripts/pytest_passed_count.sh` 抓 `N passed` 並 `tail -1`，
+    `-rs` 的 SHORT SUMMARY 段排在最終統計行之前，取值不受影響。
+    """
+    # R59 二審 ARCH-R59-NB2：`.ps1` 的 fallback pytest 呼叫同樣要鎖——本測試檔對 `.ps1`
+    # 的成功訊息鎖得很細（最後一行 + 剝尾隨註解），卻漏了它的 `-rs`，屬同型的
+    # 「鎖住 N 份中的 1 份」。
+    ps1_code = "\n".join(_ps1_code_lines(_CI_GATE_PS1.read_text(encoding="utf-8-sig")))
+    ps1_calls = [ln for ln in ps1_code.splitlines() if "-m pytest" in ln]
+    assert ps1_calls, "ci-gate.ps1 功能碼行找不到 pytest 呼叫——結構已變動"
+    for ln in ps1_calls:
+        assert " -rs" in ln, (
+            f"ci-gate.ps1 的 fallback pytest 呼叫缺 `-rs`（ARCH-R59-NB2）：{ln.strip()}")
+
+    sh = CI_GATE.read_text(encoding="utf-8", errors="replace")
+    calls = [ln for ln in sh.splitlines()
+             if "python -m pytest" in ln and not ln.lstrip().startswith("#")]
+    assert len(calls) >= 2, f"ci-gate.sh 的 pytest 呼叫少於 2 處——結構已變動：{calls}"
+    for ln in calls:
+        assert " -rs" in ln, (
+            f"ci-gate.sh 的 pytest 呼叫缺 `-rs`，skip 理由會被丟掉（DEF-101-510／QA-R59-10）：{ln.strip()}"
+        )

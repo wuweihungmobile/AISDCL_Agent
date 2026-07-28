@@ -1,6 +1,6 @@
 """PgPlaybookRepository — IPlaybookRepository 的 PostgreSQL 後端（Phase 6 選配）。
 
-⚠️ 需安裝：pip install autoclaude[postgres]
+⚠️ 需安裝：pip install 'autoclaude[postgres]'
 
 playbook_id 設計：
   - File backend：path stem
@@ -20,6 +20,7 @@ from ...models.playbook import Playbook
 _SQLALCHEMY_AVAILABLE = False
 try:
     from sqlalchemy import select
+
     from ._pg_models import PlaybookVersion
     from .pg_async_utils import _run_async
     _SQLALCHEMY_AVAILABLE = True
@@ -39,11 +40,11 @@ def _canonical_id(playbook: Playbook) -> str:
 class PgPlaybookRepository:
     """PostgreSQL backend for IPlaybookRepository（playbook_versions 表）。"""
 
-    def __init__(self, engine: "Any"):
+    def __init__(self, engine: Any):
         if not _SQLALCHEMY_AVAILABLE:
             raise ImportError(
                 "PgPlaybookRepository 需 sqlalchemy + asyncpg；"
-                "請執行：pip install autoclaude[postgres]"
+                "請執行：pip install 'autoclaude[postgres]'"
             )
         self._engine = engine
 
@@ -122,6 +123,7 @@ class PgPlaybookRepository:
             )
             rows = (await conn.execute(stmt)).all()
         return [
-            (gen, str(vid), ts.isoformat(timespec="seconds") if isinstance(ts, datetime) else str(ts))
+            (gen, str(vid),
+             ts.isoformat(timespec="seconds") if isinstance(ts, datetime) else str(ts))
             for gen, vid, ts in rows
         ]

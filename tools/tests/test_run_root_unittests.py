@@ -7,7 +7,9 @@ WHY（測意圖非僅行為）：`python -m unittest discover` 對 0 個測試�
 """
 from __future__ import annotations
 
+import contextlib
 import inspect
+import io
 import sys
 import tempfile
 import textwrap
@@ -164,6 +166,71 @@ class ReportWindowsNativeSkipsTest(unittest.TestCase):
         result = self._run_fixture(tagged_condition=True, plain_condition=True)
         tagged_ids = run_root_unittests.windows_native_skips(result)
         self.assertEqual(tagged_ids, [])
+
+    # ── DEF-101-510（R59）：反方向的可見度 ───────────────────────────────────
+    # 上面三支鎖的是「標籤 skip 要被獨立點名」；R59 於真 Windows 11 實機量到
+    # `skipped=11` 而 **11 支全部無標籤**，其中兩支是真正的覆蓋損失（見
+    # `run_root_unittests.report_all_skips` docstring）。故補鎖「未標籤的 skip
+    # 也必須連理由一起被印出來」——否則只印一個 `skipped=N` 等於沒印。
+
+    def test_reporters_are_actually_wired_into_run_with_floor(self):
+        """QA-R59-02：單元測了但**沒接線**是本 repo 最常見的假綠形狀。
+
+        上面 5 支鎖全部直接呼叫 `report_all_skips(result)`，沒有一支斷言 `run_with_floor`
+        真的呼叫它——刪掉 runner 裡那一行，5 支鎖照樣全綠，runner 回到只印 `skipped=N`，
+        DEF-101-510 完全復發。技法（`inspect.getsource`）R57 已為 `dump_failure_detail`
+        用過（見本檔 DumpFailureDetailTest），本輪補上並順手把既有債
+        `report_windows_native_skips` 一併鎖住。
+        """
+        src = inspect.getsource(run_root_unittests.run_with_floor)
+        for fn in ("report_windows_native_skips(result)", "report_all_skips(result)"):
+            self.assertIn(
+                fn, src,
+                f"run_with_floor 未呼叫 {fn}——reporter 存在但沒接線，"
+                f"等於沒有（DEF-101-510／QA-R59-02）",
+            )
+
+    def test_all_skips_includes_untagged_with_reason(self):
+        result = self._run_fixture(tagged_condition=False, plain_condition=False)
+        entries = run_root_unittests.all_skips(result)
+        self.assertEqual(len(entries), 2, "全部 skip 都要在清單裡（含未標籤者）")
+        by_reason = {tid: reason for tid, reason in entries}
+        plain = [t for t in by_reason if "test_plain" in t]
+        self.assertEqual(len(plain), 1, "未標籤的一般性 skip 必須被納入")
+        self.assertIn(
+            "本機缺某工具", by_reason[plain[0]],
+            "必須連 skip 理由一起回傳——只有 id 無法判斷是平台語意還是環境降級",
+        )
+
+    def test_report_all_skips_prints_untagged_entries(self):
+        result = self._run_fixture(tagged_condition=True, plain_condition=False)
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            entries = run_root_unittests.report_all_skips(result)
+        out = buf.getvalue()
+        self.assertEqual(len(entries), 1)
+        self.assertIn("test_plain", out, "未標籤 skip 的 id 必須出現在輸出裡")
+        self.assertIn("本機缺某工具", out, "未標籤 skip 的理由必須出現在輸出裡")
+        self.assertIn("[未標籤]", out, "須標示該筆未帶 WINDOWS-NATIVE-ONLY 標籤")
+
+    def test_report_all_skips_is_silent_when_nothing_skipped(self):
+        """零 skip 時不得產生噪音——常亮輸出會退化成背景雜訊（同 MIN_TESTS
+        兩層門檻設計對「常亮警告」的既有判斷）。"""
+        result = self._run_fixture(tagged_condition=True, plain_condition=True)
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            entries = run_root_unittests.report_all_skips(result)
+        self.assertEqual(entries, [])
+        self.assertEqual(buf.getvalue(), "")
+
+    def test_all_skips_is_pure_no_stdout(self):
+        """比照 `windows_native_skips` 的既有紀律（R43 二審 SA）：純函式不得有列印
+        副作用，否則本檔自測時會把 fixture 的假 id 印進真實終端混淆複審者。"""
+        result = self._run_fixture(tagged_condition=False, plain_condition=False)
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            run_root_unittests.all_skips(result)
+        self.assertEqual(buf.getvalue(), "")
 
 
 

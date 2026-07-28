@@ -6,7 +6,7 @@ storage.mode in ('both', 'db_only') 路由（factory.build_goal_progress_ledger�
 介面與 utils.goal_progress.GoalProgressLedger 對等（record / summarize），
 DB 失敗 warning 不中斷主流程。
 
-⚠️ 須安裝：pip install autoclaude[postgres]
+⚠️ 須安裝：pip install 'autoclaude[postgres]'
 """
 from __future__ import annotations
 
@@ -33,7 +33,7 @@ class PgGoalProgressLedger:
         if not _SQLALCHEMY_AVAILABLE:
             raise ImportError(
                 "PgGoalProgressLedger 需 sqlalchemy + asyncpg；"
-                "請執行 pip install autoclaude[postgres]"
+                "請執行 pip install 'autoclaude[postgres]'"
             )
         self._engine = engine
 

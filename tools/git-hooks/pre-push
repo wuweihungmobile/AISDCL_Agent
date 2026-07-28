@@ -236,7 +236,9 @@ if [ "$run_sdd_consumer" -eq 1 ]; then
   if ! is_real_python_candidate python; then
     echo "[pre-push dispatcher] ❌ 找不到 python — 消費檔回歸鎖無法執行；請先啟用 venv（見 ONBOARDING.md §3）" >&2
     rc=1
-  elif ! (cd "$TOPLEVEL/AISDLC_SDD" && python -m pytest scripts/tests -q); then
+  # `-rs`（R59 ARCH-R59-NB1）：與 AISDLC_SDD/scripts/ci-gate.sh 跑的是**同一套**
+  # scripts/tests，本輪若只補 ci-gate.sh 那一邊，就是本輪自己在抓的「N 份複本只改 1 份」。
+  elif ! (cd "$TOPLEVEL/AISDLC_SDD" && python -m pytest scripts/tests -q -rs); then
     echo "[pre-push dispatcher] ❌ 根層消費檔回歸鎖失敗（AISDLC_SDD/scripts/tests）" >&2
     rc=1
   fi

@@ -28,7 +28,8 @@ class EmbedderConfig(BaseModel):
     """improving_91 W-91-1：embedder 非機密設定的 config.yaml 權威源（對齊 minimax chat 治理）。
 
     設定來源治理（延續 improving_90 commit 6daa540）：
-      - base_url / model / dimension / timeout_seconds 為【非機密預設】，入庫共享、config.yaml 為權威源。
+      - base_url / model / dimension / timeout_seconds 為【非機密預設】，
+        入庫共享、config.yaml 為權威源。
       - api_key 為【機密】，此處定義但預設留空（呼應 MinimaxConfig.api_key 慣例），實際值
         由環境變數 MINIMAX_API_KEY 提供、**絕不入庫 config.yaml**；本欄位之存在使
         config_resolver._PROTECTED_FIELDS 的 'embedder.api_key' RBAC 保護真正生效
@@ -257,7 +258,7 @@ class ExecutorConfig(BaseModel):
 
     backend="pty"（預設）→ 既有 PtyExecutor，零行為變更；現有測試與 production
     完全不受影響。backend="sdk" 為 opt-in，啟用以 Claude Agent SDK（JSON-over-stdio）
-    驅動 Claude Code（需 `pip install autoclaude[sdk]`）。
+    驅動 Claude Code（需 `pip install 'autoclaude[sdk]'`）。
 
     permission_mode：傳給 SDK 的權限模式（spike 證實安全值為 "default"，非 acceptEdits）。
     model：SDK 模型覆寫（None＝SDK 預設）。

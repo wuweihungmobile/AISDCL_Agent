@@ -134,7 +134,9 @@ def test_all_green_yields_rc0_and_push_ok(
 def test_default_pytest_args() -> None:
     do_act, do_pg, args = m.parse_args([])
     assert (do_act, do_pg) == (False, False)
-    assert args == ["tests/", "-q", "--tb=short"]
+    # R59 ARCH-R59-01：新增 `-rs`（印 skip 理由）。本斷言是 DEFAULT_PYTEST_ARGS 的釘選鎖，
+    # 改預設值必須同步改這裡——它在本輪確實當場翻紅並逼我同步，鎖有效。
+    assert args == ["tests/", "-q", "-rs", "--tb=short"]
 
 
 def test_positional_args_replace_defaults_entirely() -> None:
@@ -151,7 +153,9 @@ def test_flags_mixed_anywhere_with_positionals() -> None:
 def test_flags_only_keep_default_pytest_args() -> None:
     do_act, do_pg, args = m.parse_args(["--act", "--pg"])
     assert (do_act, do_pg) == (True, True)
-    assert args == ["tests/", "-q", "--tb=short"]
+    # R59 ARCH-R59-01：新增 `-rs`（印 skip 理由）。本斷言是 DEFAULT_PYTEST_ARGS 的釘選鎖，
+    # 改預設值必須同步改這裡——它在本輪確實當場翻紅並逼我同步，鎖有效。
+    assert args == ["tests/", "-q", "-rs", "--tb=short"]
 
 
 def test_pytest_gate_receives_overridden_args(monkeypatch: pytest.MonkeyPatch) -> None:

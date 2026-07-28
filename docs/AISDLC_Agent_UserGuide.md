@@ -119,12 +119,35 @@ storage:
 
 依專案「開發-編譯-測試循環」紀律，安裝後**立即驗證**：
 
+**macOS / Linux（bash・zsh）**
+
 ```bash
 # 在 AutoClaude/ 目錄下
-python -m pytest tests/ -q          # 基線約 3,000+ passed / 122 skipped
+python -m pytest tests/ -q          # 全套測試（🔴 基線 passed/skipped 數字唯一出處＝根層 ONBOARDING.md §7，本檔不重複數字）
 PYTHONUTF8=1 lint-imports           # 架構約束：8 kept / 0 broken（需先裝 [lint]）
 ruff check .                        # lint（line-length=100, py311）
 ```
+
+**Windows（PowerShell）**
+
+```powershell
+# 在 AutoClaude\ 目錄下
+python -m pytest tests/ -q          # 全套測試（基線數字同上，見 ONBOARDING.md §7）
+$env:PYTHONUTF8=1; lint-imports     # 架構約束：8 kept / 0 broken（需先裝 [lint]）
+ruff check .                        # lint（line-length=100, py311）
+```
+
+> 🔴 上面兩塊的差別不是排版偏好：`VAR=value <指令>` 這種前綴語法**在 PowerShell 不存在**，
+> 照抄 bash 版會得到 `The term 'PYTHONUTF8=1' is not recognized`（設環境變數須寫
+> `$env:VAR=值; <指令>`）。R57 已為 `ONBOARDING.md` §7 補過同一件事，本檔（以及使用者
+> 最先讀到的「強制驗證」步驟）當時漏補，R59 補齊（DEF-101-513）。
+>
+> 🔴 本節**刻意不寫死** passed/skipped 數字：`ONBOARDING.md` §7 是全 repo 基線數字的唯一
+> 站點，由 `tools/check_pytest_baseline_sites.py` 機械守門。本檔原先自帶一組寫死的舊數字，
+> 而實測值早已成長到三千多 passed／兩百多 skipped——差距是數百支的量級；更關鍵的是
+> **本檔當時不在守門的掃描面內**，所以這個數字腐化了很多輪都不可能翻紅。對照組：照著
+> 「強制驗證」步驟做的新使用者，量到的數字與文件差幾百支，合理反應是判斷「安裝壞了」。
+> R59 已把本檔一併納入該守門的掃描面（DEF-101-514）。
 
 全綠代表 AutoClaude 引擎安裝成功。
 

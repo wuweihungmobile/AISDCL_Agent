@@ -7,7 +7,7 @@ tokenizer、被靜態鎖消費，既不是 fixture 也與本機環境假設無�
 內容脫節是「雜物抽屜」的早期訊號，故明列兩類。**第②類的收納判準**：被兩處以上靜態鎖消費、
 且複本化會導致「同一盲點被抄 N 遍」（見 `docs/06_quality/CrossPlatform_Scan_Dimensions.md`
 的 R57 Scan-E 判例）。更徹底的做法是把解析器拆到獨立的 `_ps_source.py`，但那需連動呼叫端鎖
-翻修，依 Rule 3 外科式原則列 R58 backlog。
+翻修，依 Rule 3 外科式原則列 backlog。**R59 改派**：原寫「列 R58 backlog」，而 R58 整輪作廢（`reset --hard 75aab89`）＝指向不存在的輪次、無承接者；改派為 R60 起未指派 backlog（帳本 DEF-101-521 立帳）。
 
 四方複審 S21（architecture-review-own-finding）落地：F2（_copy_functional_interpreter）
 與 F3（symlink 建立失敗 → skipTest）都是同一類「測試 fixture 對開發者本機環境有隱性
@@ -124,7 +124,7 @@ def create_symlink_or_skip(
 # 本身可含 `#`，與前導字元無關。同一個 `$x#c` 在 **expression 模式**下 `#` 就**是**註解
 # （pwsh 7.6.3 實測：`$c#zz` → Comment@2；`$v = $x#  -WakeToRun` → Comment@7）。
 # 換言之 `$` 不構成「保護類別」，lead-char 白名單只是對 parse-mode 的近似（見下方
-# `strip_ps_comments` docstring「已知不涵蓋」第 5 條的完整量測與 R58 修法方向）。
+# `strip_ps_comments` docstring「已知不涵蓋」第 5 條的完整量測與修法方向（**R59 改派**：原寫「R58 修法方向」，而 R58 整輪作廢＝指向不存在的輪次；改派為 R60 起未指派 backlog，見帳本 DEF-101-521））。
 # SD 並以 bug-injection 實證可繞過：把 `tools/install_windows_nightly.ps1` 的功能碼
 # `-WakeToRun` 刪除、只在 `Write-Output "note"#…-WakeToRun…` 註解裡留下字樣後，
 # `test_windows_nightly_anchor_parity.py` 6 支測試**全數 OK**（負對照：不留註解則正常翻紅）。
@@ -248,7 +248,7 @@ def strip_ps_comments(text: str) -> str:
          **方向為 fail-open**（漏剝＝註解冒充功能碼），故必須明確揭露而非淡化。
          **不在 R57 修的理由**：全語料實測洩漏數為 **0**（137 支 `.ps1`／2,847 個真
          Comment token，Architect 與 SD 各自獨立差分皆得 0），屬 latent；真正的修法
-         是換模型——**R58 建議**把 pwsh parser 對全語料的 Comment token 凍結成 golden
+         是換模型——**建議（R59 改派：原寫「R58 建議」，R58 整輪作廢故無承接者；改派為 R60 起未指派 backlog，見帳本 DEF-101-521）**把 pwsh parser 對全語料的 Comment token 凍結成 golden
          fixture 做離線差分，可在 CI 不裝 pwsh 的前提下把 ground truth 機械化，一次
          消掉整個天花板（同法亦可解 `_ci_scan_anchors.py` 判例第 (3) 條的同型天花板）。
          **切勿再往集合裡補字元**——那是 whack-a-mole，本條存在正是為了阻止它。

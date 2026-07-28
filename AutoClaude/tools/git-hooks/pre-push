@@ -88,7 +88,9 @@ fi
 #    git 會改操作「使用者真 repo」：髒工作樹時把 WIP 偷 commit 上真分支、乾淨樹時
 #    fixture 炸掉造成閘門假紅。hook 自身的 git diff（第 6 步）不清洗、行為不變。
 echo "[pre-push] 5/5 pytest（CI test+equivalence 鏡像）"
-PYTEST_ARGS="${AUTOCLAUDE_PUSH_PYTEST_ARGS:-tests/ -q --tb=short}"
+# `-rs`（R59 ARCH-R59-NB1）：與 tools/local_ci_gate.py 的 DEFAULT_PYTEST_ARGS 對齊，
+# 否則每次 push 跑的這一套仍把 skip 理由丟掉（DEF-101-510 只補了 unittest 面）。
+PYTEST_ARGS="${AUTOCLAUDE_PUSH_PYTEST_ARGS:-tests/ -q -rs --tb=short}"
 # shellcheck disable=SC2086
 env -u GIT_DIR -u GIT_WORK_TREE "$PY" -m pytest $PYTEST_ARGS || fail=1
 

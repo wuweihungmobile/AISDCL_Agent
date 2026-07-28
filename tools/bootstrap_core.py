@@ -269,7 +269,11 @@ def install_dependencies(use_uv: bool, venv_py: Path) -> int:
     autoclaude_target = f"{REPO_ROOT / 'AutoClaude'}{os.sep}.[dev,notifications,lint]"
     rc = pip_install(use_uv, venv_py, ["-e", autoclaude_target])
     if rc != 0:
-        _err(f"❌ 依賴安裝失敗（rc={rc}）：pip install -e {autoclaude_target}")
+        # WHY 單引號包住 target（DEF-101-508）：這行是安裝失敗當下印給使用者複製貼上的唯一
+        # 修復指引。macOS 預設 shell 是 zsh 且 nomatch 預設開啟，`…/.[dev,notifications,lint]`
+        # 會被當成 glob；無匹配檔名時 zsh 在呼叫 pip 之前就中止整條命令列（no matches found），
+        # 使用者等於拿到一個與套件無關的第二個錯誤。單引號在 bash/zsh/PowerShell 皆為引號字元。
+        _err(f"❌ 依賴安裝失敗（rc={rc}）：pip install -e '{autoclaude_target}'")
         return rc
 
     sdd_req = REPO_ROOT / "AISDLC_SDD" / "AISDLC_SDD_v0.01" / "requirements-ci.txt"
@@ -277,7 +281,10 @@ def install_dependencies(use_uv: bool, venv_py: Path) -> int:
         _out("[2/2] AISDLC_SDD CI 依賴（requirements-ci.txt）")
         rc = pip_install(use_uv, venv_py, ["-r", str(sdd_req)])
         if rc != 0:
-            _err(f"❌ 依賴安裝失敗（rc={rc}）：pip install -r {sdd_req}")
+            # 同 DEF-101-508：印給使用者複製貼上的插值路徑一律加單引號。此處雖無 extras
+            # 方括號，但 repo 被 checkout 到含空白或 glob 元字元的路徑（macOS 家目錄如
+            # `/Users/John Doe/`）時，裸路徑同樣會讓這行指令貼上去就壞。
+            _err(f"❌ 依賴安裝失敗（rc={rc}）：pip install -r '{sdd_req}'")
             return rc
     else:
         _out(f"[2/2] 略過：找不到 {sdd_req}")

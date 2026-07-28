@@ -50,7 +50,17 @@ MONO_ROOT = REPO_ROOT.parent                        # monorepo 根 — 定位共
 sys.path.insert(0, str(MONO_ROOT / "tools" / "lib"))
 import platform_utils  # noqa: E402
 
-DEFAULT_PYTEST_ARGS = ["tests/", "-q", "--tb=short"]
+# `-rs`（R59 ARCH-R59-01）：印出每一支 skip 的理由。
+# WHY：DEF-101-510 立的原則是「因為跑在某平台而失去的覆蓋不得只併成一個數字」，但那輪
+# 只把機制補在根層 `tools/run_root_unittests.py`（unittest 沒有 `-rs` 這種內建能力，只好
+# 自己寫）。真正的測試量體在 pytest 側（AutoClaude 3740/208），而本 repo 所有 pytest
+# 呼叫端一律 `-q` 且從未加 `-rs`——`grep -rn '\-rs\b'` 全 repo 唯一命中曾是 run_root_unittests
+# 的一句註解。也就是說「skip 可見度」只做在最小的那一面：DEF-101-515 之所以要人工考古才
+# 解釋得出 v0.30 −4（`requires_docker_success` 硬排除 win／POSIX shebang `skipif(win)`），
+# 正是因為 pytest 面把理由丟掉了。加 `-rs` 是這件事的最小修法（pytest 內建，零新程式碼）。
+# 安全性已實測：`scripts/pytest_passed_count.sh` 以 `grep -oE '[0-9]+ passed' | tail -1`
+# 取值，SKIPPED 行不含該樣式，加 `-rs` 後計數不變（R59 實測仍得正確值）。
+DEFAULT_PYTEST_ARGS = ["tests/", "-q", "-rs", "--tb=short"]
 
 _PG_DSN = "postgresql+asyncpg://autoclaude:autoclaude@localhost:5432/autoclaude"
 _PG_COMPOSE = ["docker", "compose", "-f", "docker-compose.ci.yml"]

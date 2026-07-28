@@ -471,10 +471,10 @@ python tests/fixtures/dummy_cli.py
 
 ```bash
 # PostgreSQL 核心依賴
-pip install autoclaude[postgres]   # SQLAlchemy + asyncpg + alembic + tenacity
+pip install 'autoclaude[postgres]'   # SQLAlchemy + asyncpg + alembic + tenacity
 
 # pgvector 向量查詢（選配，需 DB 端安裝 pgvector extension）
-pip install autoclaude[pgvector]   # pgvector Python 套件
+pip install 'autoclaude[pgvector]'   # pgvector Python 套件
 ```
 
 ### 14.2 支援平台說明

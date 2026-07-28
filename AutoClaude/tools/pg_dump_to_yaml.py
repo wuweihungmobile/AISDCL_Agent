@@ -154,7 +154,7 @@ def main(argv: list[str] | None = None) -> int:
         metadata["reason"] = "sqlalchemy not installed"
         _write_metadata(output_dir, metadata)
         print(
-            "[WARN] 未安裝 sqlalchemy；請執行 pip install autoclaude[postgres]。"
+            "[WARN] 未安裝 sqlalchemy；請執行 pip install 'autoclaude[postgres]'。"
             "已寫 dump_metadata.json 標 unable。graceful exit 0。",
             file=sys.stderr,
         )

@@ -578,8 +578,8 @@ DSN 解析優先級：`AUTOCLAUDE_DB_DSN` > `AUTOCLAUDE_PG_DSN`（deprecated）>
 ### 15.2 安裝套件
 
 ```bash
-pip install autoclaude[postgres]   # SQLAlchemy + asyncpg + alembic + tenacity
-pip install autoclaude[pgvector]   # pgvector Python 套件（需 DB 端安裝 extension）
+pip install 'autoclaude[postgres]'   # SQLAlchemy + asyncpg + alembic + tenacity
+pip install 'autoclaude[pgvector]'   # pgvector Python 套件（需 DB 端安裝 extension）
 ```
 
 ### 15.3 Windows 11 PostgreSQL DB 主機設定（以系統管理員 PowerShell 於 DB 主機執行）

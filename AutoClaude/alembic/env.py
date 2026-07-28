@@ -1,7 +1,7 @@
 """Alembic env.py（Phase 6 選配）。
 
 依 SD_Improving_02.md v1.1 §1.5 路線 + Phase 6 stakeholder review：
-  - 可選擇性安裝：pip install autoclaude[postgres]
+  - 可選擇性安裝：pip install 'autoclaude[postgres]'
   - 環境變數 AUTOCLAUDE_DB_DSN 設定資料庫連線（統一命名，Infra/Security review 要求）
   - 舊變數 AUTOCLAUDE_PG_DSN 保留作 deprecation alias（短期相容）
   - 缺 DSN 時 fail-loud（不再 fallback 至 alembic.ini 明文預設）
@@ -32,7 +32,7 @@ try:
     from alembic import context
 except ImportError:
     print(
-        "❌ alembic 未安裝。請先執行：pip install autoclaude[postgres]",
+        "❌ alembic 未安裝。請先執行：pip install 'autoclaude[postgres]'",
         file=sys.stderr,
     )
     sys.exit(1)

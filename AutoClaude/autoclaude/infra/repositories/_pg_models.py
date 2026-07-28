@@ -2,8 +2,8 @@
 
 對應 SD_Improving_02.md v1.1 §1.3 / alembic/versions/0001_initial.sql。
 
-⚠️ 此模組需要 sqlalchemy>=2.0：pip install autoclaude[postgres]
-   pgvector 向量查詢需額外安裝：pip install autoclaude[postgres,pgvector]
+⚠️ 此模組需要 sqlalchemy>=2.0：pip install 'autoclaude[postgres]'
+   pgvector 向量查詢需額外安裝：pip install 'autoclaude[postgres,pgvector]'
    未安裝時，import 此模組將拋 ImportError；請以 try/except 處理。
 """
 from __future__ import annotations
@@ -23,7 +23,7 @@ try:
     from sqlalchemy.sql import func
 except ImportError as exc:
     raise ImportError(
-        "PgStateRepository 需 sqlalchemy>=2.0；請執行：pip install autoclaude[postgres]"
+        "PgStateRepository 需 sqlalchemy>=2.0；請執行：pip install 'autoclaude[postgres]'"
     ) from exc
 
 # pgvector 選配：未安裝時 embedding 欄位退化為 None（欄位定義跳過）

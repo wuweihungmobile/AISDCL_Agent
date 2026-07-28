@@ -439,6 +439,27 @@ jobs:
           if (-not (Test-Path .venv)) { throw "bootstrap.ps1 執行後 .venv 未建立" }
           Write-Host "bootstrap.ps1 執行成功，.venv 已建立"
 
+      # ── R59 DEF-101-518：此處與 macOS 側的已知不對稱（本輪只記錄、刻意不改）──────
+      # macos-compat-ci.yml 在對應位置有一步「將 .venv/bin 加入 PATH（比照本機開發慣例，
+      # 供後續步驟裸呼叫 python）」→ `echo "$PWD/.venv/bin" >> "$GITHUB_PATH"`。
+      # 本 job **沒有**對等步驟，於是 bootstrap 之後所有裸 `python` 呼叫用的仍是 runner
+      # 的 setup-python，而不是剛建好、裝了 AutoClaude editable 的 `.venv`——兩平台
+      # 「smoke 實際受測的執行環境與依賴集」因此不對等，Windows 的 .venv 只被驗「存在」。
+      #
+      # **本輪刻意不照抄 macOS 那一步**，理由是實測查證後認定「照抄並非顯然安全」：
+      # 本 job 下方有一個 macOS 側**不存在**的步驟（「觸發 dev_start.py 的 .venv 形狀
+      # 換手分支」），它會 `Rename-Item -LiteralPath .venv -NewName .venv-cache-windows`
+      # 把 .venv 整個搬走、並在原處造一個假的 `.venv\bin\python`。若先把 `.venv\Scripts`
+      # 前置進 GITHUB_PATH，該步驟執行期間 PATH 上那一項會指向不存在的目錄，之後的
+      # 裸 `python` 解析結果將取決於 PATH 跳過缺失項後的回退行為——這是**行為變更**，
+      # 而 GitHub CI 目前因帳務停擺不啟動 runner（DEF-101-081/208），本輪拿不到任何
+      # 實測證據。在唯一能驗證它的管道停擺時，對 CI 做無法驗證的行為變更不划算。
+      #
+      # 解鎖條件（做這件事需同時滿足，缺一不可）：① GitHub 帳務恢復、runner 能真的跑；
+      # ② 新增的 PATH 步驟必須與下方「.venv 形狀換手」步驟決定明確的先後順序（或在換手
+      # 步驟前後自行增補/移除該 PATH 項）；③ 以一次真實 windows-latest run 觀測到
+      # 「bootstrap 之後的步驟確實用到 .venv 的 python」才算完成。
+
       - name: 重跑 tools/bootstrap.ps1（既有 .venv 沿用情境；R9 Fix-D）
         # R9 Fix-D：macos-compat-ci.yml 對 bootstrap.sh 跑兩次（全新 + 沿用），本 job
         # 先前只跑一次——tools/bootstrap.ps1 的「偵測到既有 .venv → 沿用」分支
@@ -565,7 +586,7 @@ jobs:
       - name: pty_wrapper / hotkey_handler 平台解析單元測試
         working-directory: AutoClaude
         shell: pwsh
-        run: python -m pytest tests/test_perception.py -q --tb=short
+        run: python -m pytest tests/test_perception.py -q -rs --tb=short  # -rs：R59 ARCH-R59-NB1
 
       - name: 執行 tools/integration_gate.ps1 -SkipFull（實際執行，非僅語法解析；P1 Architect 發現修正）
         # Architect 發現：root-infra-ci.yml 對 .ps1 僅做 AST 語法解析，本 workflow
@@ -1020,7 +1041,7 @@ jobs:
             if ($LASTEXITCODE -ne 0) { throw "python -m pip 升級失敗（rc=$LASTEXITCODE）" }
             pip install -r requirements-ci.txt
             if ($LASTEXITCODE -ne 0) { throw "requirements-ci.txt 安裝失敗（rc=$LASTEXITCODE）" }
-            python -m pytest tools/fsm_runtime/tests/ -m "not chaos" -q --tb=short
+            python -m pytest tools/fsm_runtime/tests/ -m "not chaos" -q -rs --tb=short  # -rs：R59 ARCH-R59-NB1
           } finally {
             Pop-Location
           }

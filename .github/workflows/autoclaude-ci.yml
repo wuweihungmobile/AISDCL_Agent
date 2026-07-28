@@ -97,7 +97,10 @@ jobs:
 
       - name: Run pytest
         run: |
-          python -m pytest tests/ -q --tb=short
+          # `-rs`：印出每支 skip 的理由（R59 ARCH-R59-NB1）。DEF-101-510 的原則是
+          # 「因平台/環境而失去的覆蓋不得只併成一個數字」，而本 job 是 3740 支那一套的
+          # push 主閘門——skip 理由只存在於 CI log，不印就永遠查不到。
+          python -m pytest tests/ -q -rs --tb=short
 
       - name: Check LOC budget
         run: |

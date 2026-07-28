@@ -46,7 +46,8 @@ $fw   = Join-Path $repo "AISDLC_SDD_v0.01"
 Set-Location $fw
 
 Write-Host "==> [1/3] pytest -m 'not chaos'（全套，含 offline reachability BFS）"
-python -m pytest tools/fsm_runtime/tests/ -m "not chaos" -q
+# `-rs`（R59 ARCH-R59-01）：與 ci-gate.sh 對稱，skip 理由必須可見。
+python -m pytest tools/fsm_runtime/tests/ -m "not chaos" -q -rs
 if ($LASTEXITCODE -ne 0) { throw "pytest 失敗" }
 
 Write-Host "==> [2/3] arch_fitness（structural fail 阻擋；advisory warn 放行）"
@@ -65,4 +66,15 @@ if ($env:SDD_RUN_TLC -eq "1") {
   Write-Host "==> [3/3] 跳過完整 TLC（offline reachability 已隨 pytest 驗證）"
 }
 
-Write-Host "✅ 本機 CI 閘門全數通過"
+# DEF-101-512（R59）：本行原本輸出的字串，是 ci-gate.sh 完整閘門收尾行
+# 「✅ 本機 CI 閘門全數通過（版本：…）」去掉括號後綴後的**前綴子字串**（非逐字相同，
+# 但 grep 該前綴會同時命中兩者）。實務上稽核取證（人工回報、歷輪帳本引用、grep）用的
+# 錨點正是那段前綴，故兩條路徑在該錨點下**無法分辨**。
+# （本註解刻意只引述完整閘門那一版字面值一次，避免自己成為 grep 稽核的雜訊來源。）
+# 而這條 fallback 只跑 v0.01 凍結基線單軌的 3 個 stage
+# （見上方 `$fw = Join-Path $repo "AISDLC_SDD_v0.01"`），**不含** LATEST 軌、不含 ci-gate.sh
+# 的 10 道 lint 硬閘、不含 scripts/tests 共享 infra 測試——覆蓋率差距是數量級的。
+# 只有 Windows 走得到這條路（mac 一律有 bash），屬單邊平台的取證可信度缺口。
+# 修法刻意選「讓字串在結構上無法冒充」而非「加更多 warning」：起頭已有一行 ⚠️ 警告，
+# 但人讀 log 取的是**最後那行結論**；讓結論自己說出降級事實，才不依賴讀者記得往上看。
+Write-Host "✅ fallback 3-stage 通過（僅 AISDLC_SDD_v0.01 凍結基線單軌；**未含** LATEST 軌、未含 ci-gate.sh 的 lint 硬閘與 scripts/tests 共享 infra 測試——非完整閘門）"

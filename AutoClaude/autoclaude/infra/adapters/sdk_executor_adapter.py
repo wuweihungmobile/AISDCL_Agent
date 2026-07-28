@@ -1,7 +1,7 @@
 """sdk_executor_adapter.py — IExecutor 實作：以 Claude Agent SDK 驅動 Claude Code。
 
 improving_68 W-68-2（C/A 軌）。與 PtyExecutor **並存**；預設後端仍 pty（executor.backend
-="pty"），本 adapter 為 opt-in（backend="sdk"，需 `pip install autoclaude[sdk]`）。SDK 以
+="pty"），本 adapter 為 opt-in（backend="sdk"，需 `pip install 'autoclaude[sdk]'`）。SDK 以
 JSON-over-stdio spawn bundled Claude Code CLI，取代 PTY 文字流解析。
 
 串流訊息映射（on_event）：
@@ -25,7 +25,8 @@ from __future__ import annotations
 import itertools
 import logging
 import threading
-from typing import Any, Callable, Optional
+from collections.abc import Callable
+from typing import Any
 
 import anyio
 
@@ -99,22 +100,23 @@ class SdkExecutorAdapter:
         self,
         cfg: Any,
         *,
-        can_use_tool: Optional[CanUseToolPredicate] = None,
-        client_factory: Optional[ClientFactory] = None,
+        can_use_tool: CanUseToolPredicate | None = None,
+        client_factory: ClientFactory | None = None,
     ) -> None:
         self._cfg = cfg
         ec = getattr(cfg, "executor", None)
         self._permission_mode: str = getattr(ec, "permission_mode", "default")
-        self._model: Optional[str] = getattr(ec, "model", None)
+        self._model: str | None = getattr(ec, "model", None)
         tg = getattr(cfg, "token_guard", None)
         self._halt_pct: float = float(getattr(tg, "halt_threshold_pct", 90.0))
         self._can_use_tool = can_use_tool
         self._client_factory: ClientFactory = client_factory or _default_client_factory
-        # interrupt：threading.Event；execute 迴圈在訊息邊界檢查（send_interrupt 由 Coordinator 呼叫）
+        # interrupt：threading.Event；execute 迴圈在訊息邊界檢查
+        # （send_interrupt 由 Coordinator 呼叫）
         self._interrupt_event = threading.Event()
         self._running = False
         # 最近一次執行期 act-first 判定（None=未判定 / True=安全 / False=不安全已 warn）
-        self._act_first_safe: Optional[bool] = None
+        self._act_first_safe: bool | None = None
 
     # ── IExecutor 契約 ──────────────────────────────────────────────
     def execute(
@@ -124,7 +126,7 @@ class SdkExecutorAdapter:
         maintain_context: bool = True,
         timeout: int = 600,
         label: str = "",
-        on_event: Optional[ExecutionEventCallback] = None,
+        on_event: ExecutionEventCallback | None = None,
     ) -> ExecutionOutput:
         self._interrupt_event.clear()
         self._running = True
@@ -156,7 +158,7 @@ class SdkExecutorAdapter:
         maintain_context: bool,
         timeout: int,
         label: str,
-        on_event: Optional[ExecutionEventCallback],
+        on_event: ExecutionEventCallback | None,
     ) -> ExecutionOutput:
         seq = itertools.count(1)
         texts: list[str] = []
@@ -197,10 +199,10 @@ class SdkExecutorAdapter:
     def _map_message(
         self,
         msg: Any,
-        on_event: Optional[ExecutionEventCallback],
-        seq: "itertools.count[int]",
+        on_event: ExecutionEventCallback | None,
+        seq: itertools.count[int],
         texts: list[str],
-    ) -> Optional[int]:
+    ) -> int | None:
         """映射單一 SDK 訊息為 on_event 事件；ResultMessage 回 exit_code，否則 None。
 
         以 type(msg).__name__ 比對（與 SDK 具體 import 解耦，利於 mock 測試）。
@@ -231,7 +233,7 @@ class SdkExecutorAdapter:
         return None
 
     async def _verify_act_first(self, client: Any) -> None:
-        """act-first（W-68-1 守門 / W-70-1 硬擋）：驗 AutoClaude halt 是否先於 SDK autocompact 觸發。
+        """act-first（W-68-1 守門／W-70-1 硬擋）：驗 AutoClaude halt 是否先於 SDK autocompact 觸發。
 
         明確判定不安全（safe=False）時 **fail-closed raise** `ActFirstOrderingError` 擋下執行
         （W-70-1：由 warn-only 升級為硬擋）；「無法判定」（取不到用量 / 非 dict / 缺
@@ -264,8 +266,8 @@ class SdkExecutorAdapter:
     async def _emit_token_pct(
         self,
         client: Any,
-        on_event: Optional[ExecutionEventCallback],
-        seq: "itertools.count[int]",
+        on_event: ExecutionEventCallback | None,
+        seq: itertools.count[int],
     ) -> None:
         if on_event is None:
             return
@@ -295,7 +297,7 @@ class SdkExecutorAdapter:
                 sorted(usage.keys()) if isinstance(usage, dict) else type(usage).__name__,
             )
 
-    def _wrap_can_use_tool(self) -> Optional[Callable]:
+    def _wrap_can_use_tool(self) -> Callable | None:
         """把注入的 sync allowlist predicate 包成 SDK 的 async can_use_tool。"""
         pred = self._can_use_tool
         if pred is None:
@@ -319,10 +321,10 @@ class SdkExecutorAdapter:
 
     @staticmethod
     def _emit(
-        on_event: Optional[ExecutionEventCallback],
+        on_event: ExecutionEventCallback | None,
         kind: str,
         payload: dict,
-        seq: "itertools.count[int]",
+        seq: itertools.count[int],
     ) -> None:
         if on_event is None:
             return

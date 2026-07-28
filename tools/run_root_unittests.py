@@ -35,7 +35,7 @@ _TESTS_DIR = Path(__file__).resolve().parent / "tests"
 # 下限釘選：低於此數＝測試大規模靜默消失（目錄/pattern/路徑壞掉），紅燈。
 # 刻意刪減測試時同步下修；新增測試在 `RATCHET_STALE_RATIO` 倍以內不需動（下限
 # 語意），超過即**必須**重釘，否則保鮮期斷言會讓閘門變紅（見下方兩層設計說明）。
-MIN_TESTS = 616  # R57 收尾重釘（動工前為 R15 釘的 290，對當時實況 530 已鑑別力失效 45%＝可靜默蒸發 240 支仍綠）。本值由主控在**所有並行修復包與四方複審 agent 全部停工後**，於最終工作樹實跑 `python3 tools/run_root_unittests.py` 取其印出的「發現 N 個測試」直接填入，不做任何加減推算——R57 過程中兩度用算式推得 552／558，兩次都當場就與實況不符（SD-R57-01／QA-R57-07 抓出），故本行的重釘判準明定為「填實測值」
+MIN_TESTS = 661  # R59 收尾重釘（R57 為 616）。R58 整輪作廢故無 R58 值。R57 收尾重釘（動工前為 R15 釘的 290，對當時實況 530 已鑑別力失效 45%＝可靜默蒸發 240 支仍綠）。本值由主控在**所有並行修復包與四方複審 agent 全部停工後**，於最終工作樹實跑 `python3 tools/run_root_unittests.py` 取其印出的「發現 N 個測試」直接填入，不做任何加減推算——R57 過程中兩度用算式推得 552／558，兩次都當場就與實況不符（SD-R57-01／QA-R57-07 抓出），故本行的重釘判準明定為「填實測值」
 
 # R57 修正：「人工 ratchet」本身就是缺陷來源——R15 釘完後連續 11 輪沒人重釘，
 # 下限與實況愈拉愈開、鑑別力單調衰減，而且**沒有任何訊號**提醒該重釘（下限語意
@@ -85,6 +85,7 @@ def run_with_floor(start_dir: Path, min_tests: int) -> int:
     warn_ratchet_drift(count, min_tests)
     result = unittest.TextTestRunner(verbosity=1).run(suite)
     report_windows_native_skips(result)
+    report_all_skips(result)
     if not result.wasSuccessful():
         dump_failure_detail(result)
     return 0 if result.wasSuccessful() else 1
@@ -185,6 +186,44 @@ def report_windows_native_skips(result: unittest.TestResult) -> list[str]:
         for test_id in tagged_ids:
             print(f"   - {test_id}")
     return tagged_ids
+
+
+def all_skips(result: unittest.TestResult) -> list[tuple[str, str]]:
+    """純函式（無 I/O 副作用，比照 `windows_native_skips` 慣例）：回傳本次全部
+    skip 的 `(test_id, reason)`，含已被 `WINDOWS_NATIVE_SKIP_TAG` 標記者。"""
+    return [(test.id(), reason) for test, reason in result.skipped]
+
+
+def report_all_skips(result: unittest.TestResult) -> list[tuple[str, str]]:
+    """印出本次**全部** skip 的 id 與理由。
+
+    WHY（DEF-101-510，R59 於真 Windows 11 實機量到）：`report_windows_native_skips`
+    只照亮**一個方向**——「這支測試只在原生 Windows 才有驗證價值，這次環境不符」。
+    反方向（**因為我們正跑在 Windows，所以失去了某些覆蓋**）完全沒有標籤、沒有摘要、
+    沒有計數，只會併進 `unittest` 預設的 `skipped=N` 一個數字裡。R59 實測：本 runner
+    在 Windows 11 上 `skipped=11`，**11 支全部無標籤**，其中兩支是真正的覆蓋損失而非
+    平台語意使然——
+      ① `test_install_windows_nightly` 的語法解析因本機無 pwsh 7 而 skip（DEF-101-509，
+         一支 Windows 專屬腳本的語法閘門恰在 Windows 上不跑），
+      ② `test_env_changed_removes_cache_dir_and_symlink` 因無 symlink 權限
+         （`[WinError 1314]`，標準未提權 Windows 11 的預設狀態）而 skip。
+    這正是 DEF-101-343~345 那條「Windows 專屬測試連續 5+ 輪全 APPROVE 卻從未真的在
+    Windows 跑過」的缺陷類別，只是方向相反；R43 只補了一半。
+
+    設計取捨（刻意選最笨的做法）：不再發明第二套標籤分類（那需要為每一支 skip 判定
+    「by-design 平台語意」vs「環境降級」，判準本身就會成為新的漂移來源），改為**全部
+    印出來**，把分類交給讀取者。成本是每輪多 N 行輸出（實測 11 行），換到的是
+    「任何 skip 都不可能再隱形」——與紀律 #2「log 必須含完整統計，不信任預設 dump」
+    同一精神，也等於把 pytest `-rs` 早就免費提供的東西補進這個 unittest runner。
+    """
+    entries = all_skips(result)
+    if entries:
+        tagged = set(windows_native_skips(result))
+        print(f"ℹ️  本次 skip 明細（共 {len(entries)} 支；DEF-101-510 要求全列不得只印計數）：")
+        for test_id, reason in entries:
+            mark = "[已標籤]" if test_id in tagged else "[未標籤]"
+            print(f"   - {mark} {test_id}\n       理由：{reason}")
+    return entries
 
 
 def main() -> int:

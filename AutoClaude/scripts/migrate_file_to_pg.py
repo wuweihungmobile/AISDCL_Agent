@@ -5,7 +5,7 @@
 P1 #9：新增 --skip-existing flag + KB 遷移迴圈 + transaction batch。
 
 使用：
-  pip install autoclaude[postgres]
+  pip install 'autoclaude[postgres]'
   export AUTOCLAUDE_DB_DSN="postgresql+asyncpg://${PG_USER}:${PG_PASS}@host:5432/autoclaude?sslmode=require"
   python scripts/migrate_file_to_pg.py --checkpoint-dir checkpoints/
   python scripts/migrate_file_to_pg.py --checkpoint-dir checkpoints/ --skip-existing
@@ -38,7 +38,7 @@ def _build_pg_repo(dsn: str):
 
         from autoclaude.infra.repositories.pg_state_repository import PgStateRepository
     except ImportError:
-        logger.error("缺少相依套件，請執行：pip install autoclaude[postgres]")
+        logger.error("缺少相依套件，請執行：pip install 'autoclaude[postgres]'")
         sys.exit(1)
     engine = create_async_engine(
         dsn, echo=False,
@@ -204,7 +204,7 @@ def main() -> int:
     try:
         from sqlalchemy.ext.asyncio import create_async_engine  # noqa
     except ImportError:
-        print("❌ sqlalchemy 未安裝。請先執行：pip install autoclaude[postgres]", file=sys.stderr)
+        print("❌ sqlalchemy 未安裝。請先執行：pip install 'autoclaude[postgres]'", file=sys.stderr)
         return 1
 
     checkpoint_dir = Path(args.checkpoint_dir)

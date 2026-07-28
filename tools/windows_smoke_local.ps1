@@ -71,6 +71,20 @@
 #     Windows Terminal）。經 Git Bash 間接呼叫 powershell.exe 時，msys→Win32
 #     引數/主控台編碼轉換會弄壞 [6] 中文路徑情境（R10 實測：Git Bash 載具
 #     PASS=7 假紅、原生 PowerShell PASS=8 全綠）——載具問題非生產缺陷。
+#     **R59 起本要求已機械強制**（DEF-101-511）：偵測到 MSYS 衍生環境即 exit 1 拒跑。
+#     WHY 要從「只寫在註解」升為「腳本自己擋」——本要求自 R10 起就寫在這裡，R59 的
+#     主控仍然照樣用 Git Bash 跑並收到 PASS=11 FAIL=2 的假紅（原生重跑 PASS=12
+#     FAIL=0）。純文件約束對「工具只有 Bash 載具可用」的呼叫者沒有攔阻力，而假紅與
+#     漏測同等有害：它會讓人去追一個不存在的生產缺陷，或反過來讓人習慣性忽略這支
+#     腳本的紅燈。刻意不做「跳過 [6] 並降低 MinPass」的降級路徑——那會產生一支
+#     「少驗一項卻仍回報成功」的閘門，正是 R59 同輪在 ci-gate.ps1 fallback 上修掉的
+#     反面示範（DEF-101-512）。
+#     偵測用 `$env:MSYSTEM`（MSYS2／Git Bash 專有；R59 實測：Git Bash 載具下為
+#     `MINGW64`、`[Console]::OutputEncoding=big5`，原生 PowerShell 下 MSYSTEM 為空、
+#     編碼為 utf-8）。**刻意不用「非 ASCII 引數 round-trip 能力探針」**——R59 實測該
+#     探針在兩種載具下都回 `equal=True`（Git Bash 下看到的亂碼只是終端顯示層，引數
+#     本身完好），零鑑別力；真正壞掉的環節在 [6] 的 `git clone` 到含中文路徑時的
+#     msys 路徑轉換，而那條路徑無法用一行探針忠實模擬，故改用身分訊號。
 #
 # 用法：powershell -NoProfile -ExecutionPolicy Bypass -File tools\windows_smoke_local.ps1
 # Exit：0＝全部 PASS；1＝任一 FAIL（結尾彙總）或前置守門失敗。
@@ -81,6 +95,16 @@
 
 $ScriptDir = $PSScriptRoot
 $RepoRoot = [System.IO.Path]::GetFullPath((Join-Path $ScriptDir '..'))
+
+# ── 前置守門：載具必須是原生 PowerShell（DEF-101-511，WHY 見檔頭「載具要求」）─────
+if ($env:MSYSTEM) {
+  Write-Host "❌ 偵測到 MSYS 衍生環境（MSYSTEM=$env:MSYSTEM）— 本腳本必須以原生 PowerShell 執行，拒絕在此載具下跑。" -ForegroundColor Red
+  Write-Host '   原因：經 Git Bash 間接呼叫時，msys→Win32 路徑/編碼轉換會弄壞 [6] 非 ASCII 路徑情境，' -ForegroundColor Red
+  Write-Host '         產生與生產無關的假紅（R10／R59 兩度實測；詳見本檔檔頭「載具要求」段）。' -ForegroundColor Red
+  Write-Host '   請改用：powershell -NoProfile -ExecutionPolicy Bypass -File tools\windows_smoke_local.ps1' -ForegroundColor Yellow
+  Write-Host '         （PowerShell 視窗／Windows Terminal／schtasks／Claude Code 的 PowerShell 工具皆可）' -ForegroundColor Yellow
+  exit 1
+}
 
 # ── 前置守門：git / python 缺席 fail-fast（比照 .sh 版與共用層訊息）─────────────
 if (-not (Get-Command git -ErrorAction SilentlyContinue)) {

@@ -373,7 +373,7 @@ export const pubsub = {
 
 **安裝依賴**:
 ```bash
-pip install redis[hiredis]
+pip install 'redis[hiredis]'
 ```
 
 ```python

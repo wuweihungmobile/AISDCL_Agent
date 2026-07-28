@@ -8,7 +8,7 @@ storage.mode in ('both', 'db_only') 路由（factory.build_kb_metric_store）。
   - 建構時讀各 counter 最新一列恢復累計值（重啟不清零）
   - 所有 DB 失敗 warning 不中斷主流程（KB 為輔助功能，與 PgMemoryStore 一致）
 
-⚠️ 須安裝：pip install autoclaude[postgres]
+⚠️ 須安裝：pip install 'autoclaude[postgres]'
 """
 from __future__ import annotations
 
@@ -52,7 +52,7 @@ class PgKbMetricStore:
         if not _SQLALCHEMY_AVAILABLE:
             raise ImportError(
                 "PgKbMetricStore 需 sqlalchemy + asyncpg；"
-                "請執行 pip install autoclaude[postgres]"
+                "請執行 pip install 'autoclaude[postgres]'"
             )
         self._engine = engine
         self._counters: dict[str, float] = {}

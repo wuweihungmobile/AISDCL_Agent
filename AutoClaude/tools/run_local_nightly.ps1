@@ -12,6 +12,27 @@
   - observability-snapshot                 — D-16 30 天取證
   - sdd-fsm-chaos                          — R10：Rule 9.9.4 本地補償（CI 停擺期間）
 
+反向去向帳目（R59 DEF-101-517 補齊 — 本檔此前只列自己有什麼，從不記自己缺什麼）：
+  mac 側 run_local_nightly.sh 的四 stage 早在 R11 就補了「七軌去向帳目」，逐軌交代
+  哪幾軌它刻意不跑、由誰承載。**反方向從來沒有對應帳目**，而 ONBOARDING.md §8 又把
+  兩平台框成「Windows 深度版完整可用／macOS 刻意非對等的薄聚合器」——在下列三項上
+  方向其實是**相反**的（R59 逐項實測確認本檔對三者皆零呼叫）：
+  1. **平台 smoke**：mac 的 [1/4] 每日自動跑 tools/macos_smoke_local.sh；Windows 對等物
+     tools/windows_smoke_local.ps1 存在（PASS=12）卻**只能手動觸發**，本檔不呼叫它。
+     這是三項中最要緊的一項——該腳本正是 DEF-101-139 為「雲端 CI 帳務停擺」而生的
+     Windows 側執行級補償控制，沒有自動觸發器就等於「補償控制自己沒有心跳」。
+  2. **根層 unittest**：mac 的 [2/4] 每日跑 tools/run_root_unittests.py；本檔不跑。
+     本檔的 local-ci-gate stage 走 AutoClaude/tools/local_ci_gate.py，範圍是
+     pytest + check_loc_budget + lint-imports（**皆 AutoClaude scope**），不含根層 tools/tests。
+  3. **SDD 完整閘門**：mac 的 [4/4] 每日跑 AISDLC_SDD/scripts/ci-gate.sh 雙軌全套；
+     本檔只有 sdd-fsm-chaos（chaos 子集），不含 v0.01/LATEST 雙軌 pytest 與 10 道 lint 硬閘。
+  **本輪刻意只補帳目、不補 stage**（明說理由，非無謂延後）：新增 stage 需同步改動
+  summary 行、summary JSON、exit-decision 清單與 Format-Rc 標籤共四處，而其中 summary
+  行被 tools/dev_start.py 的心跳哨兵以**跨檔字面正則**解析（見 DEF-101-263②／R25 的
+  跨檔字面鎖），改動 summary 契約會連帶動到那組鎖；同時本檔是 CI 停擺期間**唯一的
+  活體驗證管道**，而排程在 02:00、本輪無法觀測到真正的排程執行結果。此項列為
+  backlog（帳本 DEF-101-517），需獨立一輪並以一次真實排程執行收尾驗證。
+
 容器策略：優先沿用既有 autoclaude_pg；若不存在才新建臨時 container。
 既有 container 不在 Cleanup 中拆除。
 
@@ -68,6 +89,66 @@ $env:PYTHONUTF8 = '1'
 #   → 後續 .Source 取屬性失敗。
 # 修復：偵測 pyenv-win 存在但 Scripts/ 不在 PATH 時自動補入；確保 alembic.exe /
 #   asyncpg / 等 Python entry-point exe 在 schtasks / 互動模式下行為一致。
+# DEF-101-506（紀律 #14 延伸，2026-07-27 真機事故）：上面那段只讓「entry-point
+# exe」在兩種啟動方式下等價，**直譯器本身仍是誰啟動就用誰的**。互動 shell 若已啟用
+# monorepo .venv，PATH 前段就是 .venv\Scripts → 同一支 nightly 在 schtasks 下跑
+# pyenv python.exe、在已啟用 venv 的終端機/agent 下跑 .venv python.exe，兩者
+# **依賴集不同**（.venv 未裝 [postgres,pgvector] 選配 → pg-e2e 假紅）、
+# **shim 語意也不同**（pyenv 是 python.bat，會做 batch 百分號展開；.venv 是真
+# .exe，不會）→ 同一份 nightly_latest.log 的紅綠無法互相比較，且會污染觀察期帳本。
+# 真實後果：本輪先以 .venv 跑出 pg-e2e/perf 兩個假紅，且讓 DEF-101-503（% 被
+# batch shim 吃掉）的修復「綠得沒有鑑別力」——真 .exe 本來就不會觸發該 bug。
+# 對策＝把「排程等價」提升為腳本自身不變量：偵測到已啟用 venv 就把它的 Scripts
+# 目錄自本行程 PATH 移除（僅本行程，不動使用者 shell），使解析結果與 schtasks 一致；
+# 但**移除後必須仍找得到真 python**，否則還原並改為警告——載具正規化不該讓整晚
+# 驗證開天窗（同 Mutex 鎖的降級哲學）。mac 側無此問題：run_local_nightly.sh 一開始
+# 就把直譯器釘成絕對路徑 $ROOT/.venv/bin/python，不靠 PATH 現場解析。
+# WindowsAppsGuard SSOT 必須在此提前載入（原本在下方 PyExe 解析處才 dot-source）：
+# 下方正規化區塊要判斷「移除 venv Scripts 後是否仍有可用 python」，該判斷必須用
+# Test-IsRealPython 而非裸 Get-Command——否則當 PATH 上只剩 WindowsApps 空殼時會
+# 誤判為「還有 python」而不還原。同時滿足 test_windowsapps_guard_cross_consistency
+# 的呼叫點層級判準（檔內不得有裸字面值 python 呼叫）。
+. "$PSScriptRoot/../../tools/lib/WindowsAppsGuard.ps1"
+
+# DEF-101-522（R59 四方一審 SD-R59-01 揪出並經主控原生 PowerShell 探針證實）：
+# 本區塊初版的路徑比對**在文件主推的 Windows 開發流程上永遠不成立**，即整段是死碼，
+# 而且還會走進成功分支印出「已移除…已與 schtasks 排程等價」這句與事實相反的取證。
+# 根因＝斜線形態不一致：`.venv\Scripts\Activate.ps1` 插入 PATH 的字串是
+# `"$env:VIRTUAL_ENV/Scripts"`（**正斜線**），而 `Join-Path` 產生的是**反斜線**。
+# 主控實測（原生 PowerShell 5.1，真的 dot-source 本 repo 的 Activate.ps1）：
+#   PATH[0]   = D:\...\.venv/Scripts      ← 正斜線
+#   Join-Path = D:\...\.venv\Scripts      ← 反斜線
+#   before=31 kept=30 → 少的那一項是**空字串**，venv Scripts 仍在 PATH 上
+#   resolved python = D:\...\.venv/Scripts\python.exe   ← 仍是 venv 的
+# 為何 R58／R59 回收時都沒測出來：從 Git Bash 啟動 powershell 時，msys 會把該項轉成
+# 反斜線，比對剛好成立——**又一次「載具剛好會過」**（本輪第四次現形，見 DEF-101-520 ②）。
+# 兩處修法：
+#  ① 兩邊都正規化再比（`/`→`\` 後去尾隨 `\`；`-ne` 本身大小寫不敏感，磁碟機字母不需另處理）。
+#  ② 加後置條件：數**真的比對成功幾項**（`$removed`），為 0 就不得宣告成功。
+#     刻意不用「總項數變化」自檢——實測空字串項會被 `$_ -and` 濾掉而造成 31→30 的假象。
+if ($env:VIRTUAL_ENV) {
+  $venvScripts = Join-Path $env:VIRTUAL_ENV 'Scripts'
+  $venvNorm = $venvScripts.Replace('/', '\').TrimEnd('\')
+  $pathBefore = $env:PATH
+  $removed = @($pathBefore -split ';' | Where-Object {
+    $_ -and ($_.Replace('/', '\').TrimEnd('\') -eq $venvNorm)
+  }).Count
+  $kept = @($pathBefore -split ';' | Where-Object {
+    $_ -and ($_.Replace('/', '\').TrimEnd('\') -ne $venvNorm)
+  })
+  if ($removed -eq 0) {
+    Write-Host "[bootstrap] WARN 已啟用 venv（$env:VIRTUAL_ENV），但在 PATH 上找不到與其 Scripts 相符的項目（正規化後比對 0 命中）— 未做任何變更，本輪結果與 schtasks 排程不保證等價（DEF-101-522：不得在零命中時宣告已等價）"
+  } else {
+    $env:PATH = ($kept -join ';')
+    if (Test-IsRealPython -CandidateName 'python') {
+      Write-Host "[bootstrap] 偵測到已啟用 venv（$env:VIRTUAL_ENV）— 已自本行程 PATH 移除 $removed 個相符項（$venvScripts），使直譯器解析與 schtasks 排程等價（DEF-101-506）"
+    } else {
+      $env:PATH = $pathBefore
+      Write-Host "[bootstrap] WARN 已啟用 venv（$env:VIRTUAL_ENV），但移除其 Scripts 後 PATH 上已無其他 python — 已還原並沿用 venv 直譯器；本輪結果與 schtasks 排程不完全等價（DEF-101-506）"
+    }
+  }
+}
+
 try {
   $pyenvRoot = $env:PYENV
   if (-not $pyenvRoot -and $env:USERPROFILE) {
@@ -285,13 +366,23 @@ function Format-Rc {
 # 失敗（沿用既有機制，無需額外程式碼）；唯一不在 Invoke-Stage 保護範圍內的呼叫點
 # （Stage 4 drift Docker-不可用分支，見下方該處）另補顯式判斷，避免未捕捉例外
 # 中止整支腳本、波及 Stage 5/6/Cleanup/summary。
-. "$PSScriptRoot/../../tools/lib/WindowsAppsGuard.ps1"
 $script:PyExe = $null
 if (Test-IsRealPython -CandidateName 'python') { $script:PyExe = 'python' }
 if (-not $script:PyExe) {
   Log 'python 命令在 PATH 上找不到，或為 WindowsApps 空殼別名（schtasks 排程情境下執行帳號的 PATH 可能未含已啟用 venv 的 Scripts/）— 本檔幾乎所有相依 host-side python 的 stage 將被標記為失敗' 'ERROR'
 } else {
-  Log "python 可用性驗證通過（非 WindowsApps 空殼）：$script:PyExe"
+  # DEF-101-506：舊版只印 `$script:PyExe`＝字面 token「python」，等於沒印——
+  # 事後從 log 完全無法得知是哪一顆直譯器跑的，兩種啟動方式的 log 長得一模一樣。
+  # 取證的最低要求是「解析後的絕對路徑 + 版本」，故此處固定印出（紀律 #3 精神：
+  # 取證要能指認唯一真相，不接受概括表述）。取得失敗不阻斷（純取證強化）。
+  # 兩步式取屬性（紀律 #14 後半：StrictMode 3.0 下 $null.Source 會拋
+  # PropertyNotFoundException；本檔的 test_run_local_nightly_static.py 有機械鎖，
+  # 本輪初稿正是寫成鏈式而被它當場攔下）。
+  $pyCmd = Get-Command $script:PyExe -ErrorAction SilentlyContinue
+  $pyResolved = if ($pyCmd) { $pyCmd.Source } else { '(路徑未解析)' }
+  $pyVer = (& $script:PyExe -c "import sys; print(sys.version.split()[0])" 2>$null)
+  $venvNote = if ($env:VIRTUAL_ENV) { "（VIRTUAL_ENV=$env:VIRTUAL_ENV）" } else { '（無啟用中 venv，與 schtasks 排程等價）' }
+  Log "python 可用性驗證通過（非 WindowsApps 空殼）：$pyResolved [v$pyVer] $venvNote"
 }
 
 # SD_09 W2 nightly audit P0-1 修復（紀律 #1）：
@@ -888,8 +979,15 @@ $rcChaos = Invoke-Stage 'sdd-fsm-chaos (鏡射 aisdlc-sdd-fsm-chaos-nightly)' {
     }
     $chaosSweepRc = $LASTEXITCODE
     # 鏡射 CI 的 bounded 摘要行（report 無效 JSON 時此步非零＝取證失敗）
+    # 🔴 禁用 %-formatting（DEF-101-503，2026-07-27 Windows 實機根因）：$script:PyExe 解析到的
+    # `python` 在 pyenv-win 下是 **python.bat** shim，batch 會先吃掉命令列裡的 `%`，
+    # `'...%s...' % (...)` 到 Python 手上已變成 `'...'(...)` → SyntaxWarning
+    # 'str' object is not callable + TypeError，parse_rc=1。chaos 測試本身 34 支
+    # 全過（pytest_rc=0 sweep_rc=0），卻讓整個 sdd-fsm-chaos stage 恆紅、進而讓
+    # 每天早上 dev_start 的心跳哨兵報「上一輪 nightly 失敗」，把真訊號淹掉。
+    # 一律改用 .format()／f-string（不含 `%`），shim 與真 python.exe 皆正確。
     Invoke-Native {
-      & $script:PyExe -c "import json; d=json.load(open('chaos-report.json', encoding='utf-8-sig')); print('chaos sweep bounded=%s/%s avg_tokens=%s max_steps=%s' % (d['bounded_rounds'], d['total_rounds'], d['avg_tokens'], d['max_steps']))"
+      & $script:PyExe -c "import json; d=json.load(open('chaos-report.json', encoding='utf-8-sig')); print('chaos sweep bounded={}/{} avg_tokens={} max_steps={}'.format(d['bounded_rounds'], d['total_rounds'], d['avg_tokens'], d['max_steps']))"
     }
     $chaosParseRc = $LASTEXITCODE
     if ($chaosPytestRc -ne 0 -or $chaosSweepRc -ne 0 -or $chaosParseRc -ne 0) {

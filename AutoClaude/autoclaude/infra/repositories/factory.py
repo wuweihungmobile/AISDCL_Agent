@@ -203,7 +203,7 @@ def build_kb_metric_store(checkpoint_dir: str, storage: StorageConfig) -> Any:
         from ..adapters.pg_kb_metric_store import PgKbMetricStore  # noqa: PLC0415
     except ImportError as exc:
         raise ImportError(
-            "PostgreSQL backend 需安裝：pip install autoclaude[postgres]"
+            "PostgreSQL backend 需安裝：pip install 'autoclaude[postgres]'"
         ) from exc
     dsn, ssl_connect_args = _normalize_asyncpg_dsn(dsn)
     engine = create_async_engine(
@@ -231,7 +231,7 @@ def build_preference_store(checkpoint_dir: str, storage: StorageConfig) -> Any:
         from ..adapters.pg_preference_store import PgPreferenceStore  # noqa: PLC0415
     except ImportError as exc:
         raise ImportError(
-            "PostgreSQL backend 需安裝：pip install autoclaude[postgres]"
+            "PostgreSQL backend 需安裝：pip install 'autoclaude[postgres]'"
         ) from exc
     dsn, ssl_connect_args = _normalize_asyncpg_dsn(dsn)
     engine = create_async_engine(
@@ -259,7 +259,7 @@ def build_goal_progress_ledger(checkpoint_dir: str, storage: StorageConfig) -> A
         from ..adapters.pg_goal_progress_ledger import PgGoalProgressLedger  # noqa: PLC0415
     except ImportError as exc:
         raise ImportError(
-            "PostgreSQL backend 需安裝：pip install autoclaude[postgres]"
+            "PostgreSQL backend 需安裝：pip install 'autoclaude[postgres]'"
         ) from exc
     dsn, ssl_connect_args = _normalize_asyncpg_dsn(dsn)
     engine = create_async_engine(
@@ -284,7 +284,7 @@ def build_state_repository(checkpoint_dir: str, storage: StorageConfig) -> Any:
         from .pg_state_repository import PgStateRepository
     except ImportError as exc:
         raise ImportError(
-            "PostgreSQL backend 需安裝：pip install autoclaude[postgres]"
+            "PostgreSQL backend 需安裝：pip install 'autoclaude[postgres]'"
         ) from exc
 
     # asyncpg 不接受 sslmode= 參數；正規化為 connect_args ssl

@@ -85,6 +85,7 @@ python -m pytest tests/ -m pg_real                # 需 SD07_REAL_PG_E2E_ENABLED
 PYTHONUTF8=1 lint-imports                          # import-linter（8 kept / 0 broken）
 ruff check .                                       # lint（line-length=100, py311；含 E,F,I,UP）
 ```
+- 🔴 上列為 **bash 形態**。PowerShell **沒有** `VAR=value <指令>` 前綴語法，`PYTHONUTF8=1 lint-imports` 照抄會得到 `The term 'PYTHONUTF8=1' is not recognized`；Windows 須寫 `$env:PYTHONUTF8=1; lint-imports`（雙平台完整對照見 [ONBOARDING.md](ONBOARDING.md) §7；DEF-101-513）。
 - pytest markers：`pg_real`（真 PG e2e）、`perf`、`benchmark`。
 - `pytest-randomly` **未啟用**，順序由 collection 決定。
 

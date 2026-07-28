@@ -167,6 +167,11 @@ class TestRealRepoConfigPinning(unittest.TestCase):
                 "useMacWin.md",
                 "AutoClaude/CLAUDE.md",
                 "AutoClaude/README.md",
+                # R59（DEF-101-514）：使用者最先讀的入門文件，其 §1.4 標「強制」驗證
+                # 步驟卻自 R13 收斂以來一直在掃描面外——實測其寫死的舊數字已落後
+                # 數百支且從未翻紅。本鎖同步擴充（否則加了掃描面卻沒有 roster 鎖，
+                # 等於把新加的那一項留在「刪掉也沒訊號」的狀態）。
+                "docs/AISDLC_Agent_UserGuide.md",
             },
         )
         self.assertEqual(m._SSOT_FILE, "ONBOARDING.md")

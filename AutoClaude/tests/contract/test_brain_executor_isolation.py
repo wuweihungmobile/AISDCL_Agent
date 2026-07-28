@@ -147,7 +147,7 @@ class TestImportLinterCLI:
                 env={**dict(__import__("os").environ), "PYTHONUTF8": "1"},
             )
         except FileNotFoundError:
-            pytest.skip("lint-imports CLI 未安裝（pip install autoclaude[lint]）")
+            pytest.skip("lint-imports CLI 未安裝（pip install 'autoclaude[lint]'）")
         # 兩條 brain-executor contract 名稱必須出現在 KEPT 中
         assert "brain-executor-isolation" in result.stdout.lower() or \
                "Brain modules must not import Executor modules" in result.stdout, \

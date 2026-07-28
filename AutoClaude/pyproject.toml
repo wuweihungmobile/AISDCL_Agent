@@ -52,24 +52,24 @@ dev = [
 # Mutation testing（SD_08 W3 / ADR-SD08-002 — TokenGuardPlugin pilot）
 # 鎖 2.4.3：mutmut 3.x CLI 重寫不支援 --paths-to-mutate / --tests-dir，
 # 與 monorepo 根層 .github/workflows/autoclaude-ci.yml mutation-test-*-nightly + tools/run_mutmut_in_docker.sh 一致。
-# 安裝：pip install autoclaude[mutation]（僅在 Linux container 內安裝）
+# 安裝：pip install 'autoclaude[mutation]'（僅在 Linux container 內安裝）
 mutation = [
     "mutmut==2.4.3",
 ]
 # 架構約束檢查（Plugin 互引用 / Layered architecture，搭配 .importlinter）：
-#   pip install autoclaude[lint]
+#   pip install 'autoclaude[lint]'
 #   lint-imports
 lint = [
     "import-linter>=2.0",
 ]
 # 桌面通知後端（任選其一即可）：
-#   pip install autoclaude[notifications]
+#   pip install 'autoclaude[notifications]'
 notifications = [
     "plyer>=2.1",
     "win10toast>=0.9; sys_platform == 'win32'",
 ]
 # PostgreSQL 後端（Phase 6 選配，需 docker-compose 起 postgres:17）：
-#   pip install autoclaude[postgres]
+#   pip install 'autoclaude[postgres]'
 # 注意：runtime PgStateRepository 走 async asyncpg；但 alembic 只支援同步連線，
 # alembic/env.py:42 會 strip `+asyncpg` 改用 psycopg2 → 故 migration 工具需 psycopg2。
 # 缺 psycopg2 時 `alembic upgrade head` 報 ModuleNotFoundError（SD_09 R56 揪修：CI
@@ -84,12 +84,12 @@ postgres = [
     "cachetools>=5.3",
 ]
 # pgvector 向量查詢（需 DB 安裝 pgvector extension）：
-#   pip install autoclaude[postgres,pgvector]
+#   pip install 'autoclaude[postgres,pgvector]'
 pgvector = [
     "pgvector>=0.3",
 ]
 # Claude Agent SDK 執行器後端（improving_68 W-68-3 選配）：
-#   pip install autoclaude[sdk]
+#   pip install 'autoclaude[sdk]'
 # 啟用 config executor.backend="sdk"（SdkExecutorAdapter）以 JSON-over-stdio 驅動
 # Claude Code，取代 PtyExecutor 的 PTY 文字流。預設後端仍 pty，未裝本 extra 零影響。
 sdk = [
