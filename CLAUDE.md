@@ -57,6 +57,58 @@ monorepo 根目錄（`AISDCL_Agent/`，各機器 checkout 路徑不同）底下�
 
 ---
 
+## 🔴 Token 將耗盡時的「無害暫停 → reset 後重啟」SOP
+
+> **為何特立此節**：R59 收尾撞到 Token 99%，當時用 `CronCreate` 排 45 分鐘後續跑並向使用者宣稱「會自動繼續」——時間到完全沒觸發，因為 `CronList` 對它的標記就是 **`[session-only]`**。**承諾兌現不了比不承諾更糟**：使用者以為工作在推進，實際整段停擺，事後才發現＝事後諸葛。本節把暫停／重啟定成可執行程序，並訂一條取證規則讓「沒排到」當場就被抓到。
+
+### 三段式水位（照 AutoClaude 自己的 Token Guard 同構 — 對自己 dogfooding）
+
+| Token 水位 | 動作 |
+|-----------|------|
+| ~75% | `/compact`。此時仍可開新工作 |
+| ~90% | **停止開新戰場**，把狀態收斂到「可重啟點」（見下）並寫任務書。此後只做收斂，不做展開 |
+| 撞上限 | 記下 CLI 印出的 **reset 時間** ＋ **本 session ID**；等 reset 後 `claude -r <sessionId>` |
+
+> 對照：`autoclaude/` Kernel 的 Token Guard 是 ≥80% `/compact`、≥90% 存 checkpoint 並排程恢復（`scheduled_resume_at`）——**同一個形狀，只是這次套在自己身上**。
+
+### 「可重啟點」四條件（缺一就不算安全暫停）
+
+1. **工作樹狀態確定**：要嘛已 commit 且閘門全綠，要嘛 `git stash create` ＋ `git tag <輪次>-wip-preserved` 保全。**絕不留半套 edit 就走**（R59 靠這招保住 56 檔零損失）。
+2. **任務書落在磁碟**，不是只留在對話裡（對話會被 compact、session 會換）。正式的寫 `docs/04_planning/` 或缺陷帳本；臨時的放 scratchpad 並在回覆中給出**絕對路徑**。
+3. **任務書必含四項**：已驗證什麼（附實測數字與 rc）／還沒做什麼／下一步的**確切指令**／**禁止事項**（例：不准 `--no-verify`、不准 `AUTOCLAUDE_SKIP_HOOKS=1`）。
+4. **重啟後第一件事是重驗**，不採信任務書裡任何「已通過」宣稱（同 Nightly 取證紀律 #17 zero-trust 雙向：對自己上一段的宣稱也要 zero-trust）。
+
+### 重啟指令（`claude --help` 實查，v2.1.218）
+
+```bash
+claude -r <sessionId>   # 帶回完整 context 續跑 ← 推薦：高風險動作（commit/push）仍有人在
+claude -c               # 續接最近一次對話
+```
+- **session ID 取得**：`~/.claude/projects/<專案 slug>/<sessionId>.jsonl`，當前 session 即該目錄下**最後修改**的那支。**暫停前務必把它寫進任務書**。
+- 要**全自動**才加 OS 排程（`schtasks` 叫 `claude -p -r <sessionId> "<任務書>"`），且必須寫 log 取證、只允許低風險動作。⚠️ 此路**無法從 Claude Code session 內部試跑驗證**——巢狀 spawn 會死結（DEF-101-089，`CLAUDECODE=1`），須由人在 session 外先驗一次。
+
+### 工具選型（別再選錯）
+
+| 需求 | 工具 | 邊界 |
+|------|------|------|
+| **Token reset 後重啟** | **磁碟任務書 ＋ `claude -r`** | 唯一不依賴 session 存活的路 ← **本節主線** |
+| session 開著、人離開一下要它自己做完 | `/loop`／`ScheduleWakeup` | 同 session、**同一個 Token 池**；`ScheduleWakeup` 單次上限 1 小時，要撐過數小時 reset 得靠多次醒來且終端全程不能關 → **不是 token reset 的方案** |
+| 跨 session／機器會睡的定時工作 | `schtasks`（照 `AutoClaude/tools/install_windows_nightly.ps1` 的 `New-ScheduledTaskSettingsSet` 建法） | 四項設定缺一即漏跑：`WakeToRun=True`／`StartWhenAvailable=True`／`DisallowStartIfOnBatteries=False`／`StopIfGoingOnBatteries=False`（建構 cmdlet 的參數名與物件屬性名**不同**，見該檔檔頭 DEF-101-249） |
+| ❌ 不要用 | `CronCreate` | `CronList` 印 `[session-only]`＝session 關掉就沒了，**不是離線排程** |
+
+### 🔴 反「事後諸葛」取證規則（本節重點）
+
+**宣稱「已排程／會自動繼續」的同一則回覆裡，必須貼出排程器自己回報的下次執行時間實測輸出**；貼不出來就不准宣稱，只能說「我做不到，請你改用 X」。這與 Nightly 取證紀律 #3（PASS 聲稱必須引 log 行號）**同型——排程也是一種 PASS 聲稱**，「我下了指令」不等於「它真的排進去了」。
+
+```powershell
+Get-ScheduledTask -TaskName '<名稱>' | Get-ScheduledTaskInfo |
+  Select-Object TaskName,LastRunTime,LastTaskResult,NextRunTime   # NextRunTime 就是憑證
+```
+- 排出去的 job 必須留下**可稽核痕跡**（log 檔＋時間戳），讓「沒觸發」是**可偵測**而非靜默假設。
+- ⚠️ **查詢載具自己也會騙人**：`schtasks /query /fo CSV | grep AutoClaude` 在本機回**空**（假陰性），而 `Get-ScheduledTask` 同時查到 `AutoClaude_Nightly`／`AutoClaude_SD09_G0_GateCheck` 皆 `State=Ready`。**查排程一律用 `Get-ScheduledTask`**（同「驗證載具本身要被驗證」紀律 #4）。
+
+---
+
 ## AutoClaude — 常用指令與架構
 
 > 完整內容見 [AutoClaude/CLAUDE.md](AutoClaude/CLAUDE.md)。以下指令請在 `AutoClaude/` 目錄下執行。
