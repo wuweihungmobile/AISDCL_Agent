@@ -18,9 +18,18 @@
   兩平台框成「Windows 深度版完整可用／macOS 刻意非對等的薄聚合器」——在下列三項上
   方向其實是**相反**的（R59 逐項實測確認本檔對三者皆零呼叫）：
   1. **平台 smoke**：mac 的 [1/4] 每日自動跑 tools/macos_smoke_local.sh；Windows 對等物
-     tools/windows_smoke_local.ps1 存在（PASS=12）卻**只能手動觸發**，本檔不呼叫它。
+     tools/windows_smoke_local.ps1 存在（PASS=12），**本檔對它零呼叫**（下述刻意解耦）。
      這是三項中最要緊的一項——該腳本正是 DEF-101-139 為「雲端 CI 帳務停擺」而生的
-     Windows 側執行級補償控制，沒有自動觸發器就等於「補償控制自己沒有心跳」。
+     Windows 側執行級補償控制。
+     ⚠️ **R60 訂正（DEF-101-529）**：本段原寫「只能手動觸發／沒有自動觸發器就等於
+     『補償控制自己沒有心跳』」——該敘述自 R60 起不再成立。現由
+     tools/install_windows_nightly.ps1 註冊的**獨立 schtasks 任務**
+     AutoClaude_WindowsSmoke（每日 01:00，刻意排在本檔 nightly 02:00 之前一小時：
+     smoke 是便宜的 tripwire，nightly 是小時量級的深度回歸）觸發；心跳查詢走
+     Get-ScheduledTaskInfo，該安裝腳本的 -Status 對任務缺席回 exit 1。
+     **「本檔零呼叫」這半句仍為真且刻意保留**：兩者解耦，smoke 的心跳由它自己的
+     排程任務負責，不寄生在本檔上——理由見下方「刻意只補帳目、不補 stage」段
+     （動 stage 會連帶動到 summary 契約與 dev_start.py 的跨檔字面鎖）。
   2. **根層 unittest**：mac 的 [2/4] 每日跑 tools/run_root_unittests.py；本檔不跑。
      本檔的 local-ci-gate stage 走 AutoClaude/tools/local_ci_gate.py，範圍是
      pytest + check_loc_budget + lint-imports（**皆 AutoClaude scope**），不含根層 tools/tests。

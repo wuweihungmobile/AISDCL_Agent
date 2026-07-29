@@ -83,8 +83,21 @@ def setup_logger(log_dir: str = "logs", level: int = logging.DEBUG) -> logging.L
 # 與 plugins/checkpoint/_escalation.py（last_log_path 顯示字串）皆 import
 # `_sanitize_log_filename`，理由同上——同一規則被多處獨立實作正是本缺陷類別
 # （DEF-101-219／DEF-101-295）反覆復發的根因。
+#
+# R60：`CONIN$`／`CONOUT$` 補齊（四處同修）。判準的權威模型是 git for Windows 的
+# `core.protectNTFS`——實測 `CONIN$.log`／`CONOUT$.txt`（含大小寫、多重副檔名、尾隨空白
+# 變體）皆被判 Invalid path，含此類檔名的 repo 在 Windows 上 clone 直接 rc=128、工作樹
+# 全空；`CLOCK$` 實測 ACCEPT 故刻意不納入。前導空白（' CON.txt'）則實測 git 與 Win32 皆
+# 視為正常檔名，四處一致刻意不當成保留名逃逸處理（完整實測見 tools/check_ntfs_paths.py
+# `_RESERVED_RE` 上方註解；樣本鎖見 tools/tests/test_windows_forbidden_filename_parity.py）。
+# 🔴 交替順序有意義：四個基本裝置名（CON、PRN、AUX、NUL）必須**相鄰**，新裝置名一律加在
+# 清單**尾端**。tools/tests/test_windows_forbidden_filename_parity.py 的 repo-wide 錨①要求
+# 四者依序出現且間隙 ≤5 字元；R60 初版把 CONIN／CONOUT 插在中間，實測讓三處實作同時掉出該錨
+# 而所有測試仍全綠（靠禁用字元錨苟活）。對 `^(...)$` 全錨定的正則語意零影響。
 _WIN_FORBIDDEN_CHARS = frozenset('<>:"|?*\\')
-_WIN_RESERVED_NAME_RE = re.compile(r"^(CON|PRN|AUX|NUL|COM[0-9]|LPT[0-9])$", re.IGNORECASE)
+_WIN_RESERVED_NAME_RE = re.compile(
+    r"^(CON|PRN|AUX|NUL|COM[0-9]|LPT[0-9]|CONIN\$|CONOUT\$)$", re.IGNORECASE
+)
 
 
 def _sanitize_log_filename(name: str) -> str:

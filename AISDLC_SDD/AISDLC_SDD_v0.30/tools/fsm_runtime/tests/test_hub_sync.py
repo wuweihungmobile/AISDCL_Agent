@@ -12,8 +12,10 @@ Covers:
 """
 from __future__ import annotations
 
+import inspect
 import re
 import shutil
+import stat
 from pathlib import Path
 from typing import Dict, List
 
@@ -1021,3 +1023,69 @@ class TestHubFileSizeCap:
         res = client.promote(rule, reviewer="bob")
         assert res.to_trust == "verified"
         assert res.from_trust == "external"
+
+
+# ─────────────────────────────────────────────
+# R60 A-04 — _mirror_local() Windows resilience
+# ─────────────────────────────────────────────
+class TestMirrorLocalWindowsResilience:
+    """`_mirror_local()` used a bare `shutil.rmtree` right before `copytree`.
+
+    Measured chain on Windows 11 Pro 26200: a read-only file in the destination
+    (copytree propagates the source tree's permission bits, so any hub carrying
+    read-only rules reproduces it) makes rmtree raise PermissionError
+    [WinError 5], leaves a HALF-DELETED directory behind, and the very next
+    `copytree` then dies with FileExistsError [WinError 183] — the endpoint
+    becomes permanently un-mirrorable instead of failing once. R15 SCAN-B-2 had
+    already established the `_rmtree_windows_safe` hardening for exactly this,
+    but it lived only in `AISDLC_SDD/scripts/sync_exposed_skills.py`.
+    """
+
+    def test_second_pull_survives_readonly_file_in_cache(self, tmp_path):
+        """Production path (`pull()` → `_fetch_endpoint()` → `_mirror_local()`).
+
+        Discriminating on Windows only — POSIX unlink ignores the read-only bit,
+        so there the bare call never failed and this test is green either way.
+        The platform-neutral half of the lock is the call-site test below.
+        """
+        hub_root = _setup_local_hub(tmp_path)
+        reg = _make_registry(tmp_path, endpoints=[{
+            "id": "local-ro",
+            "url": f"file://{hub_root}",
+            "protocol": "file",
+        }])
+        client = sync_mod.HubSyncClient(reg)
+        first = client.pull("local-ro")
+        assert first.error is None
+        cached = first.cache_path / "rules" / "SLV-100.yaml"
+        assert cached.exists(), "carrier broken: first pull mirrored nothing"
+
+        cached.chmod(stat.S_IREAD)
+        try:
+            second = client.pull("local-ro", force=True)
+        finally:
+            # Always restore write permission so tmp_path cleanup cannot fail.
+            if cached.exists():
+                cached.chmod(stat.S_IWRITE)
+
+        assert second.error is None, (
+            "re-mirroring over a read-only cached rule failed "
+            f"({second.error}) — bare rmtree/copytree regression (R60 A-04)"
+        )
+        assert any("SLV-100.yaml" in f for f in second.pulled_files)
+        assert cached.exists()
+
+    def test_mirror_local_does_not_call_bare_rmtree(self):
+        """Platform-neutral call-site lock (same shape as
+        test_sanitize_component_call_site_lock): the hardening is only worth
+        anything if `_mirror_local` actually routes through it."""
+        src = inspect.getsource(sync_mod.HubSyncClient._mirror_local)
+        assert "_rmtree_windows_safe(" in src, (
+            "_mirror_local() no longer routes deletion through "
+            "_rmtree_windows_safe() — R60 A-04 hardening was reverted"
+        )
+        assert "shutil.rmtree(" not in src, (
+            "_mirror_local() calls shutil.rmtree directly again — on Windows a "
+            "read-only file leaves a half-deleted dir and the next copytree "
+            "dies with FileExistsError [WinError 183]"
+        )

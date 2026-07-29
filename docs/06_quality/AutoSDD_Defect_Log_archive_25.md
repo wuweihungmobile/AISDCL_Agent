@@ -8,7 +8,7 @@
 >
 > **被程式碼引用不阻止搬遷**：`DEF-101-461` 目前仍被 `tools/tests/test_ps51_compat.py` 引用。此依 R56 round 6 SA 舉出、主控採納的既定判例——crossref 只掃四份指定文件、不掃程式碼，故「被程式碼引用」不構成阻卻事由（先例：archive_23 內的 DEF-101-420 仍被 `tools/check_gha_action_versions.py` 等三處程式碼引用）。
 >
-> **位元組變化**：主檔 244,028 → 217,700 bytes（釋出 26,328），退出 240KB warn 帶，距 fail 硬閘回復 44,444 bytes 餘裕。立帳見主檔 R57 條目。
+> **位元組變化**：主檔 244,028 → 217,700 bytes（釋出 26,328），退出 240KB warn 帶，距 fail 硬閘回復 44,444 bytes 餘裕。立帳見 DEF-101-491（現居 archive_28）。（🔴 R60 round 1 ARCH-R60-01 ④ 訂正：原文的立帳指針只寫到「主檔 R57 條目」、不帶任何 DEF-ID，逸出 `tools/archive_defect_log.py --check` 的指針稽核。）
 >
 > **原文逐字保全、零刪除**（搬移非刪除，git 亦保歷史）。查詢某缺陷現況一律先看主檔缺陷總表，需歷史脈絡再查對應 archive。
 

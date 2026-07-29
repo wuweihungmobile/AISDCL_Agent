@@ -58,8 +58,22 @@ PRE_COMMIT_HOOK = REPO_ROOT / "tools" / "git-hooks" / "pre-commit"
 
 _FUNC_RE = re.compile(r"^_ntfs_seg_bad\(\)\s*\{.*?^\}\s*$", re.MULTILINE | re.DOTALL)
 
-RESERVED_NAMES = ["CON", "PRN", "AUX", "NUL", "COM1", "COM9", "LPT1", "LPT9"]
-NON_RESERVED_NAMES = ["CONSOLE", "PRINTER", "COM10", "LPTX", "NULLABLE", "hello"]
+# R60（Scan-B 反駁者自找 #1）：`CONIN$`／`CONOUT$` 納入四處保留名集合。判準的權威模型
+# 是 git for Windows 的 `core.protectNTFS`（Windows 預設 true）——本機實測（Win 11 Pro
+# 26200 / Git Bash 5.2.37，拋棄式 repo）`git -c core.protectNTFS=true update-index --add
+# --cacheinfo` 對 CONIN$.log／CONOUT$.txt／CONIN$／conin$.log／CONIN$.tar.gz／
+# CONIN$ .log／CONOUT$   .txt 全數回 `error: Invalid path`；實害是含此類檔名的 repo 在
+# Windows 上 `git clone` rc=128、`fatal: unable to checkout working tree`、工作樹**全空**
+# （連無關的 plain.txt 也沒有）——不是單檔失敗，是整個 clone 不可用。
+RESERVED_NAMES = [
+    "CON", "PRN", "AUX", "NUL", "COM1", "COM9", "LPT1", "LPT9", "CONIN$", "CONOUT$",
+]
+# `CLOCK$` 刻意**不**納入：同批實測 git（protectNTFS=true）對 `CLOCK$.txt`／`CLOCK$ .txt`
+# 皆 ACCEPT 且 clone rc=0 正常簽出，擋它只是偽陽性。`CONIN`（少了 `$`）同理 ACCEPT，故
+# 正則要求完整 token 而非前綴比對——兩者常駐於此以防未來把三個 `$` 裝置名綁成一組處理。
+NON_RESERVED_NAMES = [
+    "CONSOLE", "PRINTER", "COM10", "LPTX", "NULLABLE", "hello", "CLOCK$", "CONIN",
+]
 
 
 def _usable_bash() -> str | None:
@@ -228,6 +242,7 @@ RESERVED_TRAILING_SPACE_SEGMENTS = [
     "con .txt",  # 大小寫不敏感
     "COM9   .md",  # 多個尾隨空白
     "AUX .tar.gz",  # 多重副檔名疊加尾隨空白
+    "CONIN$ .log",  # R60：新納入的 CONIN$ 疊加尾隨空白（git 實測 Invalid path）
 ]
 
 # 剝除尾隨空白後不得誤判成保留名（防修復引入偽陽性）
@@ -237,6 +252,34 @@ BENIGN_TRAILING_SPACE_SEGMENTS = [
     "CONSOLE .txt",  # 非保留名
     "COM10 .txt",  # COM10 不在 COM[0-9] 內
     "my con file.txt",  # 保留名出現在中段，非 base
+    "CLOCK$ .txt",  # R60：git 實測 ACCEPT + clone rc=0，故 CONIN$/CONOUT$ 的納入不得擴散到它
+]
+
+# ── R60：「保留名 + **前導**空白」＝四處實作統一決策的樣本電池 ──────────────────
+# WHY 需要這一組：R57 修的是「保留名 + **尾隨**空白 + 副檔名」（DEF-101-478），本輪掃描
+# 把前導空白當成它的鏡像形態回報「四處實作 1 擋 3 放」。現象為真（下方逐一釘住），但
+# **方向不是「三處漏擋」而是「一處多擋」**，理由由本機實測決定，不由對稱性推論決定：
+#   ① git for Windows（core.protectNTFS=true，Windows 預設）對本清單全部形態 **ACCEPT**
+#      ——git 只在路徑段**起頭**比對保留名，前導空白使比對失配。只含前導形態的 repo
+#      實測 `git clone` rc=0、工作樹有檔、`git status --porcelain` 空、內容讀回正確。
+#      對照組（'CON .txt'／'CONIN$.log' 等 git REJECT 的形態）clone rc=128、工作樹全空。
+#   ② Win32 只吞**尾隨**空白/句點，不吞前導：本機實測 ' CON.txt'／' CON'／'CON.txt'／
+#      ' CON .txt' 四者同時共存於同一目錄（os.listdir 全部列出、各 10 bytes 可讀回）。
+# 故兩個 **validator**（check_ntfs_paths.py／pre-commit）與 **logger**（sanitizer，但不做
+# 前導正規化）一律放行＝正確；`component_sanitizer.sanitize_component()` 因 `.strip()`
+# 會剝前導空白而加 `_` 前綴＝更嚴格，對「產生檔名」的 sanitizer 無害且不改既有行為，
+# 刻意保留（該處註解載有兩層理由）。
+#
+# 本清單的作用是把這個「三放一擋」釘成**雙向**斷言而非放任：任一 validator 開始擋它會
+# 翻紅（新偽陽性），`component_sanitizer` 停止前綴也會翻紅（既有行為悄悄改變）。下輪掃描
+# 若再把前導空白當鏡像缺口回報，請先讀本段實測。
+LEADING_SPACE_RESERVED_SEGMENTS = [
+    " CON.txt",
+    "  COM1.log",  # 多個前導空白
+    " con.txt",  # 大小寫不敏感
+    " CON",  # 無副檔名
+    " NUL .log",  # 前導 + 尾隨空白疊加（git 實測仍 ACCEPT）
+    " CONIN$.log",  # R60 新納入的裝置名亦同（前導空白使 git 失配 → ACCEPT）
 ]
 
 
@@ -264,6 +307,23 @@ class TestTrailingSpaceReservedNameCrossConsistency(unittest.TestCase):
                 self.assertFalse(
                     sanitized.startswith("_"),
                     f"logger.py 誤攔非保留名 {name!r}：{sanitized!r}",
+                )
+
+    def test_logger_does_not_prefix_leading_space_reserved_names(self) -> None:
+        """R60：前導空白形態在 logger 側**必須放行**（不加 `_` 前綴）。
+
+        理由是實測而非對稱性：git（protectNTFS=true）與 Win32 皆視 ' CON.txt' 為正常
+        檔名（見 `LEADING_SPACE_RESERVED_SEGMENTS` 上方實測紀錄），logger 亦不做前導
+        正規化，故輸出原樣。本斷言鎖的是「不得為了與 `component_sanitizer` 對稱而在此
+        新增擋阻」——那會是純偽陽性；同時鎖住輸出**逐字不變**（`_` 前綴之外的悄悄改寫
+        一樣會被抓到）。
+        """
+        for name in LEADING_SPACE_RESERVED_SEGMENTS:
+            with self.subTest(name=name):
+                self.assertEqual(
+                    autoclaude_logger._sanitize_log_filename(name), name,
+                    f"logger.py 對前導空白形態 {name!r} 的輸出已改變——"
+                    "git 與 Win32 實測皆視其為正常檔名，不應被淨化",
                 )
 
 
@@ -317,6 +377,21 @@ class TestCrossSubprojectSampleParity(unittest.TestCase):
             BENIGN_TRAILING_SPACE_SEGMENTS,
             "根層與 AISDLC_SDD 側的 benign 樣本已分歧——這正是本鎖誕生的原因"
             "（該檔首版即漏抄 `\" .txt\"`）",
+        )
+
+    def test_leading_space_samples_identical(self) -> None:
+        """R60 新增的第三組樣本同受本鎖保護。
+
+        WHY 特別需要：這一組的四處**預期行為刻意不同**（validator/logger 放行、
+        `sanitize_component` 加前綴），正因如此，只要兩份清單有一份被單方面增刪，
+        就會出現「一側鎖住的形態另一側完全沒鎖」的沉默缺口——恰是 R57 建立本鎖時
+        踩到的同一形狀（SDD 側 benign 漏抄一筆）。**行為可以分歧，樣本不可以。**
+        """
+        self.assertEqual(
+            _literal_list_from(_SDD_SAMPLE_FILE, "LEADING_SPACE_RESERVED"),
+            LEADING_SPACE_RESERVED_SEGMENTS,
+            "根層與 AISDLC_SDD 側的前導空白樣本已分歧——四處實作對本形態的預期行為"
+            "不同（三放一擋，理由見樣本清單上方實測），但樣本資料必須是同一份",
         )
 
 
@@ -505,6 +580,12 @@ _FORBIDDEN_CHARS_ANCHOR = re.compile(
     r".{0,5}".join(("<", ">", ":", '"', r"\|", r"\?", r"\*")), re.IGNORECASE
 )
 
+# R60：4 份權威實作**構造形**的保留名交替——管線分隔、四個基本裝置名之間零其他字元。
+# 刻意比錨①（允許 ≤5 字元間隙的引號/逗號/斜線）更嚴，因為它要偵測的是「有人把新裝置名
+# 插進基本名之間」這個具體動作，而不是「檔案裡有沒有提到這串名字」。用途與鑑別力邊界見
+# `test_each_authoritative_impl_keeps_base_device_names_adjacent` docstring。
+_BASE_DEVICE_NAMES_ADJACENT_RE = re.compile(r"CON\|PRN\|AUX\|NUL", re.IGNORECASE)
+
 # 註冊表：鍵＝repo 相對路徑（LATEST 版前綴正規化為 `<LATEST>`，見 `_normalize_latest`），
 # 值＝**角色**註記（登記時必須分診：是實作，還是只在註解提及）。
 _KNOWN_NTFS_ANCHOR_SITES = {
@@ -602,6 +683,46 @@ class TestNtfsSanitizerSiteEnumerationIsForwardLooking(unittest.TestCase):
             "  · **少掉**檔案 → 某份實作／某道淨化閘消失了：確認是刻意移除（而非重構時被順手刪掉、"
             "或檔案改名後淨化邏輯沒跟上），確認後同步下修 _KNOWN_NTFS_ANCHOR_SITES。",
         )
+
+    def test_each_authoritative_impl_keeps_base_device_names_adjacent(self) -> None:
+        """R60 新增：4 份權威實作的保留名**交替構造**必須讓四個基本裝置名保持相鄰。
+
+        WHY（本輪真實踩到、且第一版鎖也真的沒鑑別力）：`test_registered_sites_match_repo_
+        scan_exactly` 取兩錨**聯集**，所以只要錨②（禁用字元集合 `<>:"|?*`）還命中，某份實作
+        掉出錨①也照樣全綠。R60 為納入新裝置名時把它們插進第一與第二個基本名之間，錨①要求
+        四者依序且間隙 ≤5 字元，插入後間隙變 17 → 實測 `check_ntfs_paths.py`／`pre-commit`／
+        `logger.py` **三處同時**掉出錨①（第四處只因既有 docstring 另有一份斜線分隔的同序
+        字樣而倖存），註冊表等值斷言毫無反應。後果不是立刻壞掉，而是**未來**某天錨②被改寫、
+        或新的第 5 份實作照抄這種插中間的寫法時，前瞻掃描對它靜默失明。
+
+        WHY 本鎖不直接重用 `_RESERVED_LIST_ANCHOR`：第一版就是那樣寫，實測**注入不紅**——
+        因為修法留下的那行說明註解本身含有一份管線分隔的同序字樣，剛好自我滿足了錨①
+        （粗粒度錨不剝註解的既知代價，見本檔上方「WHY 不照抄姊妹檔」段）。故本鎖改認
+        **構造形**：管線分隔、四名之間不得有任何其他字元。本 repo 的散文一律用斜線或頓號
+        分隔，故不會誤滿足。
+        **殘留 fail-open（如實揭露）**：若有人在註解裡寫出管線分隔的同序字樣，本鎖會被
+        同一手法滿足。要徹底根治需剝註解／AST 解析四種語言，而 R46 已證明那是無底洞；
+        本鎖的價值是攔下「無意識地插中間」這個真實發生過的動作，不主張攔下刻意偽裝。
+        """
+        impls = [rel for rel, role in _KNOWN_NTFS_ANCHOR_SITES.items() if role.startswith("實作")]
+        self.assertEqual(
+            len(impls), 4,
+            f"註冊表中角色為「實作」的條目應為 4 份權威實作，實得 {impls}——"
+            "本鎖的前提（檔頭所述「恰四處」）已漂移",
+        )
+        for rel in impls:
+            with self.subTest(rel=rel):
+                self.assertNotIn("<LATEST>", rel, "4 份權威實作皆不在版本化目錄下，無需正規化")
+                text = (REPO_ROOT / rel).read_text(encoding="utf-8", errors="replace")
+                # 刻意不用 assertRegex：失敗時它會把整個檔案內容 dump 進斷言訊息
+                # （logger.py 約 170 行全灌進終端），訊號被雜訊淹沒。
+                self.assertTrue(
+                    _BASE_DEVICE_NAMES_ADJACENT_RE.search(text),
+                    f"{rel} 的保留名交替構造已讓四個基本裝置名不再相鄰——最常見成因是把新"
+                    "裝置名插進前兩者之間，這會讓本檔 repo-wide 掃描的錨① 對本檔失明"
+                    "（間隙 >5 字元）。請改加在交替清單**尾端**：正則與 case 皆完全錨定，"
+                    "順序不影響比對結果。",
+                )
 
 
 if __name__ == "__main__":

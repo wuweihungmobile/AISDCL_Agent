@@ -119,6 +119,19 @@
 #     完整揭露與後續處理步驟見 docs/06_quality/AutoSDD_Defect_Log.md 的 DEF-101-081
 #     （P0 open，需人工處理，非本輪程式碼可解）。
 #
+# CLAIM-QUOTE-BEGIN（豁免區起點——僅供訂正引述，勿在此區新增現行宣稱）
+#
+# R60 DEF-101-540（Scan-C C-02）：R57 下面這段訂正只改了檔頭，**同一檔案內的 step name
+# ＋兩處 step 註解仍逐字保留被證偽的「全部／其餘步驟一律 shell: pwsh」宣稱**（原
+# L904／L907／L939-940），而現行機械鎖只比對檔頭那張快照表、對散文零訊號。本輪已據
+# pyyaml 逐 job 實測改寫那三處，並新增全檔掃描鎖 `tools/tests/test_smoke_ci_sync.py::
+# TestWindowsCiShellClaimConsistency`（同一句話至此已三度失實，沒鎖就會有第四次）。
+# 本對 sentinel 就是該鎖的豁免區界：**本區內刻意逐字引述已被證偽的舊宣稱以資訂正**，
+# 區外任何地方再出現同款絕對宣稱即紅燈（本鎖落地當下即以此逮到修復包自己寫在 step
+# 註解裡的三筆引述，逼它們改成指回本區、不各自複述一遍）。sentinel 兩端、本區行數
+# 上限、以及本區內至少一筆引述能被正則命中，三者皆由該鎖反向斷言（鏡子自證），故
+# 刪 sentinel、撐大本區、或把正則改寬鬆到零鑑別力都會紅。
+#
 # R57 訂正（2026-07-27，Scan C1；同輪四方複審 ARCH-03 再訂正一次）：上方 R5 段落原文寫
 # 「本 workflow **全部步驟**一律 `shell: pwsh`」，該宣稱失實且無任何機械保證——而它正是
 # 整段「CI 驗證引擎（pwsh 7）≠ 文件教使用者的引擎（Windows PowerShell 5.1）」風險分析的
@@ -174,6 +187,7 @@
 #   `shell: bash`——GitHub 對「未宣告」用 `bash -e {0}`、對顯式 `shell: bash` 用
 #   `bash --noprofile --norc -eo pipefail {0}`，補宣告會連帶開啟 pipefail 而改變既有 22 步
 #   的失敗語意，不屬本輪「訂正失實宣稱」範圍。
+# CLAIM-QUOTE-END（豁免區終點）
 
 name: windows-compat-ci
 
@@ -215,7 +229,16 @@ on:
       - "tools/check_hooks_liveness.py"
       - "tools/check_defect_log_crossref.py"
       - "tools/check_wrapper_thinness.py"
+      - "AutoClaude/tools/check_loc_budget.py"
+      - "tools/_script_scan_surface.py"
+      - "tools/archive_defect_log.py"
+      - "docs/06_quality/AutoSDD_Defect_Log.md"
       - "tools/check_pytest_baseline_sites.py"
+      # R60（SD-R60-09）：tools/tests/test_doc_loc_baseline_freshness_r60.py 以
+      # `sys.path.insert(0, parents[1])` + `import sync_onboarding_baselines` 消費此根層檔
+      # （ONBOARDING §7 表① live 基線格的產生器＋--check SSOT；DEF-101-042 同構，
+      # AISDLC_SDD/scripts/tests/test_ci_paths_cover_root_consumers.py 實測揪出）
+      - "tools/sync_onboarding_baselines.py"
       # R55：tools/tests/test_check_gha_action_versions.py import 消費此根層檔
       # （DEF-101-042 同構，test_ci_paths_cover_root_consumers 實測揪出）
       - "tools/check_gha_action_versions.py"
@@ -305,7 +328,16 @@ on:
       - "tools/check_hooks_liveness.py"
       - "tools/check_defect_log_crossref.py"
       - "tools/check_wrapper_thinness.py"
+      - "AutoClaude/tools/check_loc_budget.py"
+      - "tools/_script_scan_surface.py"
+      - "tools/archive_defect_log.py"
+      - "docs/06_quality/AutoSDD_Defect_Log.md"
       - "tools/check_pytest_baseline_sites.py"
+      # R60（SD-R60-09）：tools/tests/test_doc_loc_baseline_freshness_r60.py 以
+      # `sys.path.insert(0, parents[1])` + `import sync_onboarding_baselines` 消費此根層檔
+      # （ONBOARDING §7 表① live 基線格的產生器＋--check SSOT；DEF-101-042 同構，
+      # AISDLC_SDD/scripts/tests/test_ci_paths_cover_root_consumers.py 實測揪出）
+      - "tools/sync_onboarding_baselines.py"
       # R55：tools/tests/test_check_gha_action_versions.py import 消費此根層檔
       # （DEF-101-042 同構，test_ci_paths_cover_root_consumers 實測揪出）
       - "tools/check_gha_action_versions.py"
@@ -901,11 +933,16 @@ jobs:
         with:
           python-version: "3.11"
 
-      - name: Windows PowerShell 5.1（非 pwsh）驗證 bootstrap.ps1 + dev_start.ps1（R5/S8 發現：本 workflow 其餘步驟一律 shell:pwsh，與文件教使用者實際會用的引擎不同，此路徑此前從未被機械驗證過）
+      - name: Windows PowerShell 5.1（非 pwsh）驗證 bootstrap.ps1 + dev_start.ps1（R5/S8 發現：本 workflow 以 shell:pwsh 為主要引擎，與文件教使用者實際會用的引擎不同，此路徑此前從未被機械驗證過）
         # 文件（CLAUDE.md／docs/AISDLC_Agent_UserGuide.md）教使用者用
         # `powershell -ExecutionPolicy Bypass -File tools/bootstrap.ps1`（Windows 內建
-        # PowerShell 5.1 引擎），本 workflow 其餘所有步驟卻一律 `shell: pwsh`
-        # （PowerShell 7 / Core）——CI 驗證的引擎與文件教學的引擎不同。掃描
+        # PowerShell 5.1 引擎），而本 workflow 以 `shell: pwsh`（PowerShell 7 / Core）
+        # 為主要引擎——CI 驗證的引擎與文件教學的引擎不同。實際 shell 分佈與三類刻意
+        # 例外見檔頭「R57 訂正」段的逐 job 稽核表（本步驟自己就是該表 ③ 所列的例外
+        # 之一，故此處不得再做任何絕對式概括）。R60 DEF-101-540 訂正：本註解原本以
+        # 絕對式概括描述全檔 shell 分佈，與同 job 內緊接的下一步（同樣
+        # `shell: powershell`）直接矛盾，且該概括在 R57 已兩度被 pyyaml 稽核證偽；
+        # 被訂正的原措辭逐字留在檔頭 CLAIM-QUOTE 豁免區，不在此複述。掃描
         # bootstrap.ps1/dev_start.ps1 等關鍵腳本未見 PS7-only 語法，兩引擎預設輸出
         # 編碼（UTF-8 vs UTF-16LE）等差異仍從未機械驗證過「文件教的那條路」是否
         # 真的走得通。放在 windows-nightly-full（而非 windows-smoke）：這是文件路徑
@@ -934,10 +971,17 @@ jobs:
           Remove-Item -Recurse -Force .venv
 
       - name: Windows PowerShell 5.1（非 pwsh）驗證 install_post_commit.ps1（R48 Architect 複審發現：DEF-101-389 反斜線修復從未被原生 PS5.1 實際驗證過）
-        # R48 四方複審 Architect REJECT 理由：DEF-101-389（install_post_commit.ps1 的
+        # R48 四方複審 Architect REJECT 理由（**R60 DEF-101-540 訂正措辭**：原文把理由
+        # 建立在一句絕對式概括上（措辭與檔頭 CLAIM-QUOTE 豁免區所引者同款，此處不複述），
+        # 而 `git log -S "shell: powershell"` 實查證明該 workflow 早在 commit 1175555／
+        # 2026-07-15 就已有一步原生 `shell: powershell`，比 R48（0e346da／2026-07-26）
+        # 早十一天——故那句概括在寫下的當時就已失實，不是「曾為真、後過期」的合法歷史
+        # 記載；真正成立的只有下面那句窄斷言。理由的結論與本步驟的必要性不受影響）：
+        # DEF-101-389
+        # （install_post_commit.ps1 的
         # `$GuardSrcBash -replace "\\", "/"`）修復本身正確，且已有 pytest 單元測試
-        # 鎖住此不變量，但本 workflow 全部步驟（windows-smoke／windows-nightly-full）
-        # 一律 shell: pwsh，從未用原生 Windows PowerShell 5.1（shell: powershell）
+        # 鎖住此不變量，但在本步驟補上之前，本 workflow 沒有任何一步用原生
+        # Windows PowerShell 5.1（shell: powershell）
         # 實際執行過 install_post_commit.ps1 一次——本專案文件教使用者實際會用的
         # 正是 Windows 內建 powershell.exe（PS5.1），而 pwsh 的 Join-Path 會自動
         # 正規化反斜線、PS5.1 不會，這正是本次 bug 的根因，故「用 pwsh 驗證過」不

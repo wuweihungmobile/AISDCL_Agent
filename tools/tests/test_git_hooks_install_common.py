@@ -33,6 +33,9 @@ _REPO_ROOT = Path(__file__).resolve().parents[2]
 # `_usable_bash()` docstring）。
 sys.path.insert(0, str(_REPO_ROOT / "tools" / "lib"))
 import bash_probe_spec as _spec  # noqa: E402
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from _ps_engine import any_engine_available, production_engine  # noqa: E402  # R60 E-A-03
 _LIB_DIR = _REPO_ROOT / "tools" / "lib"
 _PS1_WRAPPER = _LIB_DIR / "GitHooksInstallCommon.ps1"
 _SH_WRAPPER = _LIB_DIR / "git_hooks_install_common.sh"
@@ -426,7 +429,7 @@ class TestDotSourceTrapSafety(unittest.TestCase):
             self.assertIn("STILL_ALIVE", proc.stdout)
 
     @unittest.skipIf(
-        shutil.which("powershell") is None and shutil.which("pwsh") is None,
+        not any_engine_available(),  # R60 E-A-03：語意② SSOT 述詞
         "需要 powershell/pwsh",
     )
     def test_ps1_top_level_python_missing_script_driven_terminates_process(
@@ -444,7 +447,7 @@ class TestDotSourceTrapSafety(unittest.TestCase):
         真的找不到 python，以 `-File` 呼叫端（模擬生產 dot-source 鏈路）斷言
         整個呼叫行程 exit code 非 0，且 dot-source 之後的陳述式不會被執行到。
         """
-        exe = shutil.which("powershell") or shutil.which("pwsh")
+        exe = production_engine()  # R60 E-A-03：5.1 優先（DEF-101-509 判準）
         with tempfile.TemporaryDirectory() as td:
             caller = Path(td) / "caller.ps1"
             caller.write_text(
@@ -465,11 +468,11 @@ class TestDotSourceTrapSafety(unittest.TestCase):
             self.assertNotIn("SHOULD_NOT_PRINT", proc.stdout)
 
     @unittest.skipIf(
-        shutil.which("powershell") is None and shutil.which("pwsh") is None,
+        not any_engine_available(),  # R60 E-A-03：語意② SSOT 述詞
         "需要 powershell/pwsh",
     )
     def test_ps1_script_driven_failure_still_terminates_whole_process(self) -> None:
-        exe = shutil.which("powershell") or shutil.which("pwsh")
+        exe = production_engine()  # R60 E-A-03：5.1 優先（DEF-101-509 判準）
         with tempfile.TemporaryDirectory() as td:
             non_git_dir = Path(td) / "not_a_repo"
             non_git_dir.mkdir()
@@ -488,11 +491,11 @@ class TestDotSourceTrapSafety(unittest.TestCase):
             self.assertNotIn("SHOULD_NOT_PRINT", proc.stdout)
 
     @unittest.skipIf(
-        shutil.which("powershell") is None and shutil.which("pwsh") is None,
+        not any_engine_available(),  # R60 E-A-03：語意② SSOT 述詞
         "需要 powershell/pwsh",
     )
     def test_ps1_interactive_style_failure_does_not_kill_shell(self) -> None:
-        exe = shutil.which("powershell") or shutil.which("pwsh")
+        exe = production_engine()  # R60 E-A-03：5.1 優先（DEF-101-509 判準）
         with tempfile.TemporaryDirectory() as td:
             non_git_dir = Path(td) / "not_a_repo"
             non_git_dir.mkdir()

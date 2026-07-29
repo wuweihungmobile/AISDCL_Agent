@@ -35,6 +35,11 @@ from pathlib import Path
 
 _TESTS_DIR = Path(__file__).resolve().parent
 _REPO_ROOT = _TESTS_DIR.parents[1]
+
+# R60 Scan-E E-A-01：掃描樹本體改取 SSOT（WHY 見該模組 docstring）。
+sys.path.insert(0, str(_REPO_ROOT / "tools"))
+from _script_scan_surface import SCRIPT_SCAN_ROOTS  # noqa: E402
+
 _BOM = b"\xef\xbb\xbf"
 # 下限釘選：低於此數＝掃描面疑似縮小（前綴打錯/樹改名/ls-files 異常），紅燈。
 # ＝2026-07-20 實測 19 支 active .ps1 打八折取整；刻意刪減腳本時同步下修。
@@ -62,11 +67,13 @@ def _latest_root() -> Path:
 
 
 def _scan_prefixes() -> tuple[str, ...]:
-    """掃描樹前綴（鏡射 root-infra-ci.yml 第 2 道；LATEST 為整版目錄）。"""
-    return (
-        "tools/",
-        "AutoClaude/tools/",
-        "AISDLC_SDD/scripts/",
+    """掃描樹前綴（鏡射 root-infra-ci.yml 第 2 道；LATEST 為整版目錄）。
+
+    R60 Scan-E E-A-01：三棵固定樹改由 `tools/_script_scan_surface.SCRIPT_SCAN_ROOTS`
+    SSOT 提供（原為本檔自持字面值），與 `check_script_parity.py`／
+    `test_ps51_compat.scan_trees()` 同源。
+    """
+    return tuple(f"{root}/" for root in SCRIPT_SCAN_ROOTS) + (
         f"AISDLC_SDD/{_latest_root().name}/",
     )
 

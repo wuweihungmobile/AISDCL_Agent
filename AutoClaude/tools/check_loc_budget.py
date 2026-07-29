@@ -23,6 +23,14 @@ PR description 書面理由，ADR §6.2）。
 R56 round 5 增訂：`total ≥ cap − TOTAL_WARN_MARGIN` 但尚未破線時印 **非阻塞** [WARN]
 （rc 不變、不進 has_violation），把 §6.3 觸發條件 ② 的偵測從人眼改為機械。
 
+R60 增訂（承接 DEF-101-526 明文交棒的 R60 候選）：**單檔** tier 餘裕 ≤
+`TIER_WARN_MARGIN` 時印 **非阻塞** [TIER-WARN]（rc 不變、不進 has_violation），
+把「LOC tier 滿載檔 × lint 斷行互斥」這個治理衝突從「只有踩到才會發現」改為事先告知。
+刻意用 `[TIER-WARN]` 而非沿用 `[WARN]` 標籤：後者已被
+tests/contract/test_loc_budget_tiered.py::test_warn_band_boundary_and_rc_invariant
+以 `("[WARN]" in out) is expect_warn` 精確釘選為「總量預警帶專屬訊號」，共用標籤會讓
+那道鎖在 repo 現況（3 支滿載檔）下恆真而失效。
+
 使用：
   python tools/check_loc_budget.py            # 檢查（CI gate）
   python tools/check_loc_budget.py --update   # 更新 baseline；R56 註記：刻意不接線任何
@@ -109,6 +117,27 @@ TOTAL_INCREASE_LIMIT = 1.20
 #     由同檔 test_warn_band_boundary_and_rc_invariant 釘住；JSON 兩欄由
 #     test_warn_band_json_payload_matches_text_mode 釘住。
 TOTAL_WARN_MARGIN = 10
+
+# R60（DEF-101-526 交棒的 R60 候選）：單檔 tier 餘裕預警帶。餘裕 ≤ 本值即印
+# **非阻塞** [TIER-WARN]，不改 rc、不進 has_violation——刻意不改成 fail，那會當場
+# 擋住現有 3 支合法滿載檔（pg_state_repository.py 400/400、models/escalation.py
+# 150/150、steps_orchestrator/_impl.py 500/500）。
+#
+# 為什麼是 6，而不是交棒文字裡舉例的 3（刻意上調，理由留痕）：
+#   ① DEF-101-526 原文寫「如 `check_loc_budget` 對餘裕 ≤ 3 行的檔印 warning」——
+#      「如」是舉例而非規格。
+#   ② **同一列自己的實測數字反而否證 3**：該輪在滿載的 adapter 檔上修 4 處 E501，
+#      斷行後實測 `406 > 400 (+6)`——+5 來自 4 處斷行（呼叫 +2、字典 +2、格式字串 +1）、
+#      +1 來自 ruff I001 自動修復把 `import os, warnings` 拆兩行。也就是「一次 lint
+#      修復」的實測代價是 6 行；門檻取 3 會讓餘裕 4~6 的檔照樣被咬、卻拿不到預警。
+#   ③ 偽陽性成本實測（本輪 201 支計入檔）：餘裕 ≤3 命中 3 支、≤6 命中 5 支
+#      （多出 evolution_plugin.py 245/250、core/ports/rtm_feedback.py 144/150）；
+#      代價＝多印 2 行非阻塞提示，而這 2 支正是「一次 lint 斷行就會破線」的檔。
+#   ④ 與既有 TOTAL_WARN_MARGIN=10 同形（近上限帶、只 WARN、rc 不變、JSON 亦曝露），
+#      不新增第二種機制語意。
+# 本值 ↔ 上述判準由 AutoClaude/tests/tools/test_check_loc_budget_tier_headroom_warn.py
+# 釘選（含 bug-injection 驗紅）。
+TIER_WARN_MARGIN = 6
 
 # ADR-SD08-001 §3.1：CLAUDE.md 文件治理（≤ 400 行強制）
 # SPECIAL_FILES 採 raw line count（wc -l 等價，含空行/註解，因 CLAUDE.md 為 Markdown）
@@ -280,6 +309,13 @@ def check(update_baseline: bool = False, as_json: bool = False) -> int:
     # 故此處刻意排除 total_violation 以免同一件事印兩段。
     total_warn_band = (not total_violation) and total >= cap - TOTAL_WARN_MARGIN
 
+    # R60（DEF-101-526）：單檔 tier 餘裕預警帶。排除已違規檔（由 [TIER] 阻塞段接手，
+    # 免得同一件事印兩段）；以餘裕升冪排序，最緊的排最前面。
+    tier_warn_band = sorted(
+        (r for r in reports if r.over_by == 0 and r.budget - r.loc <= TIER_WARN_MARGIN),
+        key=lambda r: (r.budget - r.loc, r.rel_path),
+    )
+
     if as_json:
         payload = {
             "total": total,
@@ -290,6 +326,12 @@ def check(update_baseline: bool = False, as_json: bool = False) -> int:
             # 否則走正規程序的人反而看不到觸發條件 ②。
             "total_warn_band": total_warn_band,
             "total_warn_margin": TOTAL_WARN_MARGIN,
+            # R60（DEF-101-526）：單檔 tier 餘裕預警帶亦須機讀——只印文字的話，
+            # 以 --json 取證的自動化（含 nightly 報表）看不到這個治理衝突訊號。
+            "tier_warn_margin": TIER_WARN_MARGIN,
+            "tier_warn_band": [
+                {**r.__dict__, "headroom": r.budget - r.loc} for r in tier_warn_band
+            ],
             "absolute_violations": [r.__dict__ for r in absolute_violations],
             "tier_violations": [r.__dict__ for r in tier_violations],
             "special_violations": [r.__dict__ for r in special_violations],
@@ -338,6 +380,24 @@ def check(update_baseline: bool = False, as_json: bool = False) -> int:
                 "\n       先減後調：①刪死碼／收斂重複實作 ②零／負增行手法 "
                 "③確認為不可壓縮的真實功能後才調 baseline（Architect + SD 雙簽）。"
                 "\n       見 docs/04_planning/ADR/ADR-SD07-001-loc-policy.md §6.3。"
+            )
+        if tier_warn_band:
+            print(
+                f"\n[TIER-WARN] {len(tier_warn_band)} 支檔案 tier 餘裕 ≤ "
+                f"{TIER_WARN_MARGIN} 行（非阻塞，rc 不變）——**動這些檔前先讀這段**："
+            )
+            for r in tier_warn_band:
+                print(
+                    f"  [{r.tier}<={r.budget}] {r.rel_path}: {r.loc} "
+                    f"（餘裕 {r.budget - r.loc} 行）"
+                )
+            print(
+                "       在這些檔上「修 lint」與「守 LOC 預算」互斥，且兩者都是硬閘"
+                "（DEF-101-526 實測：4 處 E501 斷行 → +6 行 → LOC 閘門紅）。"
+                "\n       修 E501 請用**行內 noqa**（0 行成本）而非斷行；勿加 "
+                "per-file-ignores（會讓整檔永久失去該規則保護）。"
+                "\n       說明文字請寫成 `#` 註解而非 docstring——docstring 行會被 "
+                "count_loc 計入，寫進 docstring 等於再吃掉預算。"
             )
         if special_violations:
             print("\n[SPECIAL] ADR-SD08-001 SPECIAL_FILES line-count violations:")

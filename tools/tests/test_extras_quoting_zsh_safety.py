@@ -56,7 +56,7 @@ extras 語法在文件裡是高頻複製貼上的樣板，未來任一次新增�
 
 - 裸 `.[extras]`：`uv pip install -e .[dev]`（DEF-101-479 原形態）  <!-- zsh-glob-ok: 邊界三段式必須逐項列出被涵蓋的壞形態，否則「已實測涵蓋」無從查證 -->
 - 具名套件 `<pkg>[extras]`：`pip install autoclaude[postgres]`（DEF-101-507）  <!-- zsh-glob-ok: 同上，具名形態的病例樣本 -->
-- 路徑前綴：`pip install -e /abs/AutoClaude/.[dev]`（POSIX `/` 與 Windows `\` 皆試）  <!-- zsh-glob-ok: 同上，DEF-101-508 的字面形態樣本 -->
+- 路徑前綴：`pip install -e /abs/AutoClaude/.[dev]`（POSIX `/` 與 Windows `\\` 皆試）  <!-- zsh-glob-ok: 同上，DEF-101-508 的字面形態樣本 -->
 - 未加引號的插值 target：`pip install -e {autoclaude_target}` / `${TARGET}`——這才是  <!-- zsh-glob-ok: 同上，DEF-101-508 在原始碼裡的真實形態樣本 -->
   DEF-101-508 在原始碼裡的**真實**長相（f-string 插值，靜態掃描看不到方括號本身），
   故另立此分支；否則本鎖對它所要守的那個站點恰恰零覆蓋。

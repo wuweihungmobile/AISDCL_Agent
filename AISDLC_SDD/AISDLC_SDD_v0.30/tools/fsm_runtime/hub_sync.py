@@ -44,6 +44,7 @@ import datetime as _dt
 import json
 import os
 import shutil
+import stat
 import subprocess
 import sys
 from pathlib import Path
@@ -142,6 +143,66 @@ class PromoteResult:
     from_trust: str
     to_trust: str
     reviewer: str
+
+
+def _rmtree_windows_safe(path: Path) -> None:
+    """Windows-resilient rmtree (R60 A-04; same technique as
+    ``AISDLC_SDD/scripts/sync_exposed_skills.py::_rmtree_windows_safe``, R15 SCAN-B-2).
+
+    WHY: a bare ``shutil.rmtree`` on Windows raises ``PermissionError``
+    ([WinError 5]) on a read-only file — and ``copytree`` propagates the source
+    tree's permission bits, so a hub whose ``rules/`` carries read-only files
+    (archive extraction, a read-only mirror share, a backup agent) makes every
+    subsequent mirror fail. Measured chain on Windows 11: rmtree [WinError 5] →
+    half-deleted directory left behind → the very next ``copytree`` dies with
+    ``FileExistsError`` [WinError 183], i.e. the endpoint stays permanently
+    un-mirrorable rather than failing once.
+
+    POSIX equivalence, precisely (R60 SD-R60-10 corrects an over-broad earlier
+    claim of "byte-for-byte equivalent to the bare call"): on the SUCCESS path
+    the callback never fires, so POSIX behaviour is identical to a bare
+    ``shutil.rmtree`` — POSIX ``unlink`` ignores the read-only bit, so the
+    read-only case this helper exists for simply does not arise there. On the
+    ERROR path the claim does NOT hold: the callback first runs
+    ``os.chmod(p, stat.S_IWRITE)``, which on POSIX *replaces* the whole mode
+    with ``0o200`` (dropping r/x, and for a directory its traversability) before
+    re-raising the original error. So a POSIX failure from some other cause
+    ("other cause" being the only way to get here) leaves the entry's
+    permission bits altered relative to the bare call. Accepted deliberately:
+    the shape is inherited verbatim from the R15 SCAN-B-2 precedent in
+    ``AISDLC_SDD/scripts/sync_exposed_skills.py`` (Rule 11 — conformance over
+    taste), and the path is a failure path whose caller already treats any
+    exception as a non-blocking warning.
+
+    Deliberately does NOT wrap the final failure in a new exception type
+    (unlike the sync_exposed_skills precedent, whose caller is a human-facing
+    CLI): ``pull()``'s callers already treat any exception as a non-blocking
+    warning, so changing the type would only break their ``except`` shapes.
+
+    R60 SD-R60-10: dispatches on ``onexc=`` (added 3.12) when available, because
+    ``onerror=`` is deprecated since 3.12 and REMOVED in 3.14 — passing it there
+    would make this helper a hard TypeError. The 3.11 branch is kept because CI
+    pins 3.11 (``.github/workflows/*.yml``) while ``AutoClaude/.venv`` is
+    already 3.12.11, so both interpreters really do run this code today.
+    """
+    def _handle(func, p, original):
+        try:
+            os.chmod(p, stat.S_IWRITE)
+            func(p)
+        except (OSError, TypeError):
+            # TypeError: on Python 3.11 POSIX fd-based rmtree, ``func`` can be
+            # ``os.open`` (which needs a ``flags`` argument), so the blind
+            # ``func(p)`` retry does not match — re-raise the ORIGINAL error in
+            # both cases so callers never see a bogus TypeError.
+            raise original from None
+
+    if sys.version_info >= (3, 12):
+        # onexc hands the exception INSTANCE (not a 3-tuple) to the callback.
+        shutil.rmtree(path, onexc=lambda func, p, exc: _handle(func, p, exc))
+    else:
+        shutil.rmtree(
+            path, onerror=lambda func, p, exc_info: _handle(func, p, exc_info[1])
+        )
 
 
 class HubSyncClient:
@@ -449,7 +510,7 @@ class HubSyncClient:
                 continue
             dst_sub = cache_dir / sub
             if dst_sub.exists():
-                shutil.rmtree(dst_sub)
+                _rmtree_windows_safe(dst_sub)   # R60 A-04: bare rmtree dies on read-only
             shutil.copytree(src_sub, dst_sub)
             for p in dst_sub.rglob("*"):
                 if p.is_file():

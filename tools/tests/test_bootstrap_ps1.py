@@ -8,12 +8,18 @@
 from __future__ import annotations
 
 import os
-import shutil
 import subprocess
 import sys
 import tempfile
 import unittest
 from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from _ps_engine import (  # noqa: E402  # R60 E-A-03：引擎述詞 SSOT
+    any_engine_available,
+    production_engine,
+    windows_with_engine,
+)
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 _BOOTSTRAP_PS1 = _REPO_ROOT / "tools" / "bootstrap.ps1"
@@ -22,20 +28,16 @@ _BOOTSTRAP_PS1 = _REPO_ROOT / "tools" / "bootstrap.ps1"
 def _windows_pwsh_available() -> bool:
     """回傳「目前確實在 Windows 平台上，且有可用的 powershell/pwsh」。
 
-    僅供依賴 Windows PATHEXT／`.cmd` 解析語意的測試使用（見各該測試
-    docstring）：這類測試用 `.cmd` 假直譯器讓 `Get-Command python3`／
-    `& python3` 命中它，但 `.cmd` 需要 `cmd.exe` 解譯——在裝有 pwsh 的
-    macOS/Linux 開發機上呼叫 `.cmd` 檔案會靜默無回應（無輸出、
-    `$LASTEXITCODE` 為空），使測試確定性失敗而非雜訊。單純檢查
-    `shutil.which("pwsh")` 不足以排除這類機器，必須同時檢查平台本身。
+    R60 E-A-03：判定本體已收斂進 `_ps_engine.windows_with_engine()`（語意③）——
+    原本此處是 6 個檔案／10 處行內寫法之一，WHY（`.cmd` 需 cmd.exe 解譯、裝有 pwsh
+    的 macOS/Linux 開發機會靜默無回應，故「有引擎」不足以排除、必須同查平台）
+    逐字保留在該述詞的 docstring。本函式保留為就地別名，維持既有呼叫端不動（Rule 3）。
     """
-    return sys.platform.startswith("win") and (
-        shutil.which("powershell") is not None or shutil.which("pwsh") is not None
-    )
+    return windows_with_engine()
 
 
 @unittest.skipIf(
-    shutil.which("powershell") is None and shutil.which("pwsh") is None,
+    not any_engine_available(),
     "需要 powershell/pwsh",
 )
 class TestBootstrapWindowsAppsGuard(unittest.TestCase):
@@ -43,7 +45,7 @@ class TestBootstrapWindowsAppsGuard(unittest.TestCase):
         # Windows PowerShell 5.1 的 Write-Host 預設走主控台 OEM/ANSI codepage 輸出
         # 中文，非 UTF-8；用 -Command 前置 [Console]::OutputEncoding 才能讓 Python
         # 端以 utf-8 正確解碼（同款陷阱見 windows_smoke_local.ps1 R10 註記）。
-        exe = shutil.which("powershell") or shutil.which("pwsh")
+        exe = production_engine()  # R60 E-A-03：5.1 優先（DEF-101-509 判準）
         env = dict(os.environ)
         env["PATH"] = os.pathsep.join(str(p) for p in path_dirs)
         cmd = (

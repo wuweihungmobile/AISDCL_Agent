@@ -110,7 +110,15 @@ line-length = 100
 target-version = "py311"
 
 [tool.ruff.lint]
-select = ["E", "F", "I", "UP"]
+# R60 QA-R60-05：`W` 於本輪補入。WHY＝`W605`（invalid-escape-sequence）此前結構上
+# 無人看得到：本輪在 tools/local_ci_gate.py（本機 CI 閘門唯一核心）的 docstring 引述
+# Windows 路徑 `.\local_ci_gate.ps1` 引入非法轉義 `\l`，Python 3.11 只印
+# DeprecationWarning、3.12 起升 SyntaxWarning、CPython 已宣告未來改 SyntaxError，
+# 而 `ruff check`（select 無 W）與 pre-commit ruff leg 全綠 ⇒ 只能靠人眼。
+# 加入成本實測（AutoClaude/.venv ruff，修完該檔後）：`ruff check --extend-select W
+# --statistics .` 的 W 類命中數＝0（含 W291/W293/W391 皆零），即**零存量債**，
+# 無需任何 per-file-ignores。
+select = ["E", "F", "I", "UP", "W"]
 
 [tool.ruff.lint.per-file-ignores]
 # prompt 模板長行為「資料內容」：三引號模板內斷行會改變送往 LLM 的 prompt 語意，

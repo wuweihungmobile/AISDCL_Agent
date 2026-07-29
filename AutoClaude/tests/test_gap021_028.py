@@ -76,6 +76,71 @@ def _make_escalation_dump(step_id: str = "T01", is_stuck: bool = True) -> Escala
     )
 
 
+def _assert_part_a_evaluator_collect_only_succeeds(
+    cmd: str, result: str, tmp_path: Path
+) -> None:
+    """實跑推導出的 Part A evaluator（`--collect-only`）並斷言 rc==0。
+
+    以 `PATH=""` 的受限環境親跑，繞過頂層 conftest.py 的 autouse
+    `_interpreter_dir_on_path` fixture（該 fixture 只改 `os.environ`，不影響顯式 `env=`），
+    才能真正鎖住「乾淨 PATH 上只有 python3、沒有裸 python」這個維度（R56 round 3）。
+
+    R60 ARCH-R60-04（P1）修復——本輪之前此處是**全套 pytest 在 Windows/macOS 上
+    非確定性翻紅的唯一來源**。原實作把 probe 寫進 `tmp_path`（在系統 temp 根底下），
+    再叫子 pytest `--collect-only "<probe>"`；子行程的 rootdir 落在本 repo 根，與 probe
+    不同磁碟／不同子樹，於是 collect 鏈自磁碟根逐層下探（實測印出
+    `<Dir >` → `Users` → `AppData` → `Local` → `Temp` → `tmpXXXX`），連帶 stat 系統
+    temp 根的兄弟項；而父行程整套測試同時在那裡大量建立／刪除 `tmpXXXX`，命中被刪項
+    即 `FileNotFoundError: [WinError 2]` → 子 pytest 「ERROR collecting test session」
+    rc=2 → 本測試翻紅。macOS 的 `/var/folders` 是同構暴露面。
+
+    兩道修復皆附**確定性**鑑別力斷言（移除任一道即翻紅，不依賴時序）：
+      ① `--rootdir=<probe 所在目錄>`：collect 鏈收斂到單一目錄（實測 1.47s → 0.08s），
+         斷言子行程表頭 `rootdir:` 就是 `tmp_path`。
+      ② 子行程專屬 `TMPDIR`/`TEMP`/`TMP`：父子 temp 生命週期解耦，斷言子行程真實
+         `tempfile.gettempdir()` 落在 `tmp_path` 之下。
+    （三個變數皆設才兩平台通用：POSIX 的 `tempfile` 只認 `TMPDIR`，Windows 依序認
+    `TMPDIR`/`TEMP`/`TMP`，cmd.exe 生態認 `TEMP`/`TMP`。）
+    """
+    import os
+    import subprocess
+    import sys
+
+    probe = tmp_path / "test_r56_collect_probe.py"
+    probe.write_text("def test_ok():\n    pass\n", encoding="utf-8")
+    child_tmp = tmp_path / "child_tmp"
+    child_tmp.mkdir()
+    restricted_env = dict(os.environ)
+    restricted_env["PATH"] = ""
+    for tmp_var in ("TMPDIR", "TEMP", "TMP"):
+        restricted_env[tmp_var] = str(child_tmp)
+
+    tempdir_probe = subprocess.run(
+        [sys.executable, "-c", "import tempfile; print(tempfile.gettempdir())"],
+        capture_output=True, text=True, encoding="utf-8", errors="replace",
+        timeout=30, env=restricted_env,
+    )
+    assert tempdir_probe.stdout.strip() == str(child_tmp), (
+        f"修復②迴歸：子行程必須拿到專屬 temp 目錄（與父行程的 temp 生命週期解耦），"
+        f"預期 {str(child_tmp)!r}，實際 {tempdir_probe.stdout.strip()!r}"
+    )
+
+    proc = subprocess.run(
+        f'{result} --rootdir="{tmp_path}" "{probe}"', shell=True,
+        capture_output=True, text=True,
+        encoding="utf-8", errors="replace", timeout=30, env=restricted_env,
+    )
+    assert proc.returncode == 0, (
+        f"'{cmd}' 推導出的 Part A evaluator '{result}' 應可成功執行 "
+        f"(--collect-only)，實際 rc={proc.returncode}, stderr={proc.stderr!r}"
+    )
+    assert f"rootdir: {tmp_path}" in proc.stdout, (
+        f"修復①迴歸：子 pytest 的 rootdir 必須被釘在 probe 所在目錄（{tmp_path}），"
+        f"否則 collect 鏈會自磁碟根下探到系統 temp 根、與父行程的 temp 生命週期競態；"
+        f"實際 stdout 表頭: {proc.stdout[:400]!r}"
+    )
+
+
 def _make_playbook(tasks: list[PlaybookTask], global_goal: str | None = None) -> Playbook:
     return Playbook(
         project="UnitTest",
@@ -576,9 +641,13 @@ class TestGap026SplitStepEvaluator:
         本套件內被中和 —— fixture 在位時，即使推導結果退化成裸 `python -m pytest`，本測試
         仍會綠。改為（a）token 級斷言（與 PATH 完全無關）；（b）以 PATH="" 的受限環境親跑
         subprocess，直接繞過該 fixture（fixture 只改 os.environ，不影響顯式 env=）。
+
+        R60 ARCH-R60-04（P1）：子行程實跑段抽成共用 helper
+        `_assert_part_a_evaluator_collect_only_succeeds`（原本與 MinimaxEvolver 側逐字重複），
+        並在該 helper 內修掉「子 pytest rootdir 退化 → collect 鏈下探系統 temp 根 → 與父行程
+        temp 生命週期競態 → 全套非確定性翻紅」的根因；根因、修法與鑑別力斷言詳見該 helper
+        的 docstring。
         """
-        import os
-        import subprocess
         import sys
 
         result = PlaybookEvolver._derive_part_a_evaluator(cmd)
@@ -593,18 +662,7 @@ class TestGap026SplitStepEvaluator:
             f"pytest 分支的 head token 應比照非 pytest 分支置換為 sys.executable "
             f"絕對路徑（R56），實際: {result!r}"
         )
-        probe = tmp_path / "test_r56_collect_probe.py"
-        probe.write_text("def test_ok():\n    pass\n", encoding="utf-8")
-        restricted_env = dict(os.environ)
-        restricted_env["PATH"] = ""
-        proc = subprocess.run(
-            f'{result} "{probe}"', shell=True, capture_output=True, text=True,
-            encoding="utf-8", errors="replace", timeout=30, env=restricted_env,
-        )
-        assert proc.returncode == 0, (
-            f"'{cmd}' 推導出的 Part A evaluator '{result}' 應可成功執行 "
-            f"(--collect-only)，實際 rc={proc.returncode}, stderr={proc.stderr!r}"
-        )
+        _assert_part_a_evaluator_collect_only_succeeds(cmd, result, tmp_path)
 
     @pytest.mark.parametrize(
         "cmd",
@@ -776,9 +834,10 @@ class TestGap026BMinimaxEvolverSplitStepEvaluator:
 
         R56 round 3 補強（與鏡射來源同步）：token 級斷言 + PATH="" 受限環境親跑，補回被
         頂層 conftest.py autouse PATH fixture 中和掉的偵測面（詳見鏡射來源同名測試）。
+
+        R60 ARCH-R60-04（P1，與鏡射來源同步）：子行程實跑段改呼叫共用 helper
+        `_assert_part_a_evaluator_collect_only_succeeds`，非確定性翻紅根因與修法見該 helper。
         """
-        import os
-        import subprocess
         import sys
 
         result = MinimaxEvolver._derive_part_a_evaluator(cmd)
@@ -793,18 +852,7 @@ class TestGap026BMinimaxEvolverSplitStepEvaluator:
             f"pytest 分支的 head token 應比照非 pytest 分支置換為 sys.executable "
             f"絕對路徑（R56），實際: {result!r}"
         )
-        probe = tmp_path / "test_r56_collect_probe.py"
-        probe.write_text("def test_ok():\n    pass\n", encoding="utf-8")
-        restricted_env = dict(os.environ)
-        restricted_env["PATH"] = ""
-        proc = subprocess.run(
-            f'{result} "{probe}"', shell=True, capture_output=True, text=True,
-            encoding="utf-8", errors="replace", timeout=30, env=restricted_env,
-        )
-        assert proc.returncode == 0, (
-            f"'{cmd}' 推導出的 Part A evaluator '{result}' 應可成功執行 "
-            f"(--collect-only)，實際 rc={proc.returncode}, stderr={proc.stderr!r}"
-        )
+        _assert_part_a_evaluator_collect_only_succeeds(cmd, result, tmp_path)
 
     def test_derive_part_a_evaluator_other_cmd_executes_and_always_succeeds(self):
         """非 pytest 指令：即使原指令失敗，Part A evaluator 仍須以 exit 0 收場，

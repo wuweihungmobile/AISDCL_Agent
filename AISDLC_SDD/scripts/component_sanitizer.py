@@ -30,7 +30,17 @@ from __future__ import annotations
 import re
 
 _WIN_FORBIDDEN_CHARS = frozenset('<>:"|?*\\')
-_WIN_RESERVED_NAME_RE = re.compile(r"^(CON|PRN|AUX|NUL|COM[0-9]|LPT[0-9])$", re.IGNORECASE)
+# R60：`CONIN$`／`CONOUT$` 補齊（四處同修）。判準的權威模型是 git for Windows 的
+# `core.protectNTFS`——本機實測（Win 11 Pro 26200，拋棄式 repo）`CONIN$.log`／
+# `CONOUT$.txt`／`conin$.log`／`CONIN$.tar.gz`／`CONIN$ .log` 全數 Invalid path，
+# 含此類檔名的 repo 在 Windows 上 clone rc=128 且工作樹全空；`CLOCK$.txt` 實測 ACCEPT
+# 且 clone 正常，故刻意不納入（`CONIN`／`CONIN.log` 少了 `$` 亦非裝置名，正則要求完整 token）。
+# 🔴 四個基本裝置名（CON、PRN、AUX、NUL）必須相鄰、新裝置名一律加在清單尾端——根層
+# tools/tests/test_windows_forbidden_filename_parity.py 的 repo-wide 錨①要求四者依序出現
+# 且間隙 ≤5 字元；R60 初版插在中間，實測讓另三處實作同時掉出該錨、卻因錨②仍命中而全綠。
+_WIN_RESERVED_NAME_RE = re.compile(
+    r"^(CON|PRN|AUX|NUL|COM[0-9]|LPT[0-9]|CONIN\$|CONOUT\$)$", re.IGNORECASE
+)
 _MAX_COMPONENT_LEN = 80  # 遠低於 NTFS 單檔名 255 上限，為前後綴（FSM-STATE-/-{track}.yaml）留餘裕
 
 
@@ -55,6 +65,19 @@ def sanitize_component(name: str) -> str:
     修復：把「淨化禁用字元 → 截斷 → 最終 rstrip → 保留裝置名檢查」收斂成
     單一輪、只做一次，不再先查一次保留名又截斷後不重查。
     """
+    # R60（前導空白四處統一決策的第 4 處）：本行的 `.strip()` 同時剝**前導**空白，使本
+    # 函式對「前導空白 + 保留名」（' CON.txt'）比另三處**更嚴格**——' CON.txt' 在此變成
+    # 'CON.txt' 而被加 `_` 前綴，而 tools/check_ntfs_paths.py、tools/git-hooks/pre-commit
+    # 與 autoclaude/utils/logger.py 三處一律放行。此不對稱**刻意保留**，理由分兩層：
+    #   ① 前導空白本身不是缺口：git（core.protectNTFS=true）與 Win32 實測皆視 ' CON.txt'
+    #      為正常檔名（clone rc=0、四種變體可同時共存於同一目錄），故兩個 validator
+    #      加擋它只會新增偽陽性（完整實測見 check_ntfs_paths.py `_RESERVED_RE` 上方註解）。
+    #   ② 本函式是**產生**檔名的 sanitizer 而非 validator：多正規化一步永不產生更危險的
+    #      輸出，且 `.strip()` 早於本判準存在、負責的是「呼叫端誤傳含前後空白的片段」，
+    #      為對齊而拿掉它會改變所有合法輸入的既有輸出（例：' myproject' → ' myproject'）。
+    # 此決策由 AISDLC_SDD/scripts/tests/test_component_sanitizer_reserved_trailing_space.py
+    # 的 `LEADING_SPACE_RESERVED` 樣本（斷言本處**必須**加前綴）與根層
+    # tools/tests/ 對另三處「必須放行」的斷言雙向釘住，任一側翻面即翻紅。
     s = str(name).strip()
     sanitized = "".join(
         "_" if ch in _WIN_FORBIDDEN_CHARS or ch == "/" or ord(ch) < 0x20 or ord(ch) == 0x7F else ch

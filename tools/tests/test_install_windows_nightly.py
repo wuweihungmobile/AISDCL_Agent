@@ -21,13 +21,22 @@ import platform
 import re
 import shutil
 import subprocess
+import sys
+import tempfile
 import unittest
 from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from _ps_engine import production_engine  # noqa: E402  # R60 E-A-03：引擎述詞 SSOT
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 _SCRIPT = _REPO_ROOT / "tools" / "install_windows_nightly.ps1"
 _FIX_CATCHUP = _REPO_ROOT / "AutoClaude" / "tools" / "fix_nightly_catchup.ps1"
 _NIGHTLY_PS1 = _REPO_ROOT / "AutoClaude" / "tools" / "run_local_nightly.ps1"
+# R60（DEF-101-517 backlog 收斂）：安裝器新增註冊的第二支任務所指向的載體。
+# 路徑已在兩平台 compat-CI 的 paths 覆蓋範圍內（windows 側由 `**/*.ps1` 兜底、
+# macos 側已顯式列舉），故本檔新增消費不需動 CI paths（DEF-101-042 同構檢查）。
+_SMOKE_PS1 = _REPO_ROOT / "tools" / "windows_smoke_local.ps1"
 
 
 def _read(path: Path) -> str:
@@ -56,6 +65,72 @@ class TestInstallWindowsNightlyStructure(unittest.TestCase):
         self.assertIn("Register-ScheduledTask", self.text)
         self.assertIn("Unregister-ScheduledTask", self.text)
         self.assertIn("Get-ScheduledTaskInfo", self.text)
+
+    def test_smoke_task_is_registered_alongside_nightly(self) -> None:
+        """DEF-101-517 R60 收斂（backlog 解鎖條件的路徑①）：本安裝器須同時註冊
+        `windows_smoke_local.ps1` 的獨立排程任務。
+
+        WHY：`windows_smoke_local.ps1` 是 DEF-101-139 為「雲端 CI 帳務停擺
+        （DEF-101-081）」而建的 Windows 側**執行級補償控制**，而 R59 逐項實測確認
+        `run_local_nightly.ps1` 對它零呼叫 ⇒ 補償控制自己沒有心跳，只能手動觸發
+        （也解釋了它為何腐化到讓 R59 踩到 DEF-101-511）。mac 側對照：
+        `run_local_nightly.sh` 的 [1/4] 每日自動跑 `macos_smoke_local.sh`。
+        刻意走「獨立 schtasks 任務」而非「run_local_nightly.ps1 第 8 個 stage」：後者
+        需同動 summary 行／summary JSON／exit-decision／Format-Rc 四處，而 summary 行
+        被 `tools/dev_start.py` 心跳哨兵以跨檔字面正則解析（DEF-101-263②）。
+        """
+        self.assertIn("$SmokeTaskName = 'AutoClaude_WindowsSmoke'", self.text)
+        self.assertIn(
+            "$SmokePs1 = Join-Path $RepoRoot 'tools\\windows_smoke_local.ps1'", self.text,
+            "smoke 任務的載體路徑須由 $RepoRoot 動態組出（不得寫死絕對路徑）",
+        )
+        self.assertTrue(
+            _SMOKE_PS1.is_file(),
+            f"{_SMOKE_PS1} 不存在——安裝器會註冊一個指向不存在腳本的排程任務",
+        )
+        self.assertIn(
+            '-Argument "-NoProfile -ExecutionPolicy Bypass -File `"${SmokePs1}`""', self.text,
+            "smoke 任務的 Action 須以原生 powershell.exe -File 呼叫（DEF-101-511："
+            "該腳本偵測到 $env:MSYSTEM 即拒跑，故不得經由任何 bash 包裝層觸發）",
+        )
+        # 兩支任務各自有自己的 ShouldProcess 守衛（否則 -WhatIf 只攔得住其中一支）。
+        self.assertEqual(
+            self.text.count("$PSCmdlet.ShouldProcess($TaskName, 'Register-ScheduledTask')"), 1,
+        )
+        self.assertEqual(
+            self.text.count("$PSCmdlet.ShouldProcess($SmokeTaskName, 'Register-ScheduledTask')"), 1,
+        )
+        # 解除安裝與狀態查詢都必須覆蓋整組（只做一半＝殘留孤兒任務／狀態誤報）。
+        self.assertIn("foreach ($name in @($TaskName, $SmokeTaskName))", self.text)
+        self.assertIn("Show-TaskDetail -Name $SmokeTaskName", self.text)
+
+    def test_smoke_task_shares_catchup_settings_and_runs_before_nightly(self) -> None:
+        """smoke 任務必須共用同一份補跑保護 $settings，且排在 nightly 之前。
+
+        共用 $settings 的 WHY：四項補跑保護（睡眠喚醒／關機補跑／電池不擋不砍）對
+        smoke 的必要性與 nightly 完全相同（同一個「筆電夜間睡眠」漏跑成因），另立
+        一份就是第二個會漂移的站點（DEF-101-249 的教訓正是這類重複）。
+        時間順序的 WHY：smoke 是數分鐘量級的便宜 tripwire、nightly 是含 mutation 的
+        小時量級深度回歸；機器當晚只醒著一小段時間時，先跑完便宜那支才有意義。
+        """
+        text = self.text
+        self.assertRegex(
+            text,
+            r"Register-ScheduledTask -TaskName \$SmokeTaskName[\s\S]{0,200}?-Settings \$settings",
+            "smoke 任務未套用 $settings——四項補跑保護只有 nightly 拿到，"
+            "smoke 在睡眠/關機/電池情境下會靜默漏跑",
+        )
+        m = re.search(r"\$SmokeAt = '(\d{2}:\d{2})'", text)
+        self.assertIsNotNone(m, "找不到 $SmokeAt 排程時刻宣告——結構已變動")
+        smoke_at = m.group(1)
+        self.assertIn("-Daily -At $SmokeAt", text)
+        nightly_at = re.search(r"New-ScheduledTaskTrigger -Daily -At '(\d{2}:\d{2})'", text)
+        self.assertIsNotNone(nightly_at, "找不到 nightly 排程時刻——結構已變動")
+        self.assertLess(
+            smoke_at, nightly_at.group(1),
+            f"smoke 排程時刻 {smoke_at} 必須早於 nightly {nightly_at.group(1)}"
+            "（便宜的 tripwire 先跑；WHY 見本測試 docstring）",
+        )
 
     def test_task_name_matches_existing_ecosystem(self) -> None:
         """新安裝器建立的任務名必須與既有 fix_nightly_catchup.ps1 校正的任務同名，
@@ -164,7 +239,17 @@ class TestInstallWindowsNightlyStructure(unittest.TestCase):
         """DEF-101-248（R20 Scan-A）：-Status 先前不論任務存不存在恆 exit 0，與 mac 版
         `install_mac_nightly.sh --status`（任務未載入時非零結束代碼）語意不對等，任何
         想拿結束代碼做自動化判斷（CI／監控腳本）在 Windows 上會拿到假陽性。修復後須
-        依 Show-NightlyStatus 的回傳值決定 exit 0/1，而非寫死 exit 0。"""
+        依實際存在性決定 exit 0/1，而非寫死 exit 0。
+
+        🔴 R60 DEF-101-542：本斷言原文要求 `$loaded = Show-NightlyStatus`，而該修法
+        **在 PowerShell 上根本不成立**——函式內所有 `Write-Output` 都會併入回傳值，
+        `$loaded` 實得 `Object[]`（報表字串 + 布林），`if ($loaded)` 對非空陣列恆為真
+        ⇒ `-Status` 又變回「恆 exit 0」，DEF-101-248 的修復被語意打敗且**本測試看不到**
+        （它只比對原始碼字面，從不執行）。修法：把「印報表」與「判定存在」拆成兩支
+        函式（`Show-TaskDetail`／`Test-TaskPresent`，沿用 run_root_unittests.py
+        `report_windows_native_skips`／`windows_native_skips` 的既有慣例），並由
+        `TestStatusExitCodeRuntime` 以真的執行取代字面比對來守這條不變量。
+        """
         status_block_match = re.search(
             r"if \(\$Status\) \{(.*?)\n\}", self.text, re.DOTALL,
         )
@@ -172,10 +257,24 @@ class TestInstallWindowsNightlyStructure(unittest.TestCase):
         status_block = status_block_match.group(1)
         self.assertNotIn(
             "exit 0\n", status_block,
-            "-Status 區塊不得再寫死 exit 0——須依 Show-NightlyStatus 回傳值決定結束代碼",
+            "-Status 區塊不得再寫死 exit 0——須依實際存在性決定結束代碼",
         )
-        self.assertIn("$loaded = Show-NightlyStatus", status_block)
+        self.assertIn(
+            "$loaded = (Test-TaskPresent -Name $TaskName) -and "
+            "(Test-TaskPresent -Name $SmokeTaskName)", status_block,
+            "存在性判定必須走零輸出的純查詢函式，且必須涵蓋整組任務（DEF-101-542）",
+        )
         self.assertIn("if ($loaded) { exit 0 } else { exit 1 }", status_block)
+        # 結構層反向守門：印報表的函式不得回傳值（否則 DEF-101-542 立刻復發）。
+        printer = re.search(
+            r"function Show-TaskDetail \{(.*?)\n\}", self.text, re.DOTALL,
+        )
+        self.assertIsNotNone(printer, "找不到 Show-TaskDetail 函式——結構已變動")
+        self.assertNotRegex(
+            printer.group(1), r"return\s+\$(true|false)\b",
+            "Show-TaskDetail 不得 `return $true/$false`——它同時 Write-Output，"
+            "回傳值會被輸出串污染成 Object[]（DEF-101-542 復發）",
+        )
 
     def test_status_and_uninstall_combo_warns_instead_of_silently_ignoring(self) -> None:
         """DEF-101-246⑦（R19 backlog）：-Status 排在 -Uninstall 前面且直接 return/exit，
@@ -210,8 +309,13 @@ def _ps_engine() -> str | None:
 
     抽成模組層函式而非寫在測試裡，是為了讓下方 `TestSyntaxGateEngineSelection`
     能對「選誰」這件事本身做斷言——選擇邏輯若退回 pwsh-only，鎖才抓得到。
+
+    R60 Scan-E E-A-03：判定本體收斂進 `_ps_engine.production_engine()`（同一份
+    優先序 SSOT，供全 `tools/tests` 共用）——本輪掃描實查同樹另有 5 個檔案在寫
+    同一件事、其中一處還是 **pwsh 優先**（與本檔上方 DEF-101-509 判準方向相反）。
+    本函式保留為就地別名：下方兩支鎖與其他呼叫端逐字不動（Rule 3）。
     """
-    return shutil.which("powershell") or shutil.which("pwsh")
+    return production_engine()
 
 
 @unittest.skipUnless(
@@ -275,7 +379,15 @@ class TestSyntaxGateEngineSelection(unittest.TestCase):
     def test_engine_selection_prefers_windows_powershell(self) -> None:
         """兩者都在時必須選 5.1：生產是以 `powershell -File` 執行本腳本，且 `tools/`
         受 test_ps51_compat.py 的 PS 5.1 相容政策約束——用 PS 7 文法解析會漏掉
-        「5.1 解析不過、7 解析得過」的寫法（CI 的 pwsh parser 是 7，本來就驗不到）。"""
+        「5.1 解析不過、7 解析得過」的寫法（CI 的 pwsh parser 是 7，本來就驗不到）。
+
+        R60 E-A-03：本鎖刻意**保留行內 `shutil.which`**、不改走 `_ps_engine` SSOT
+        ——它是這條判準的獨立 ground truth；若兩邊都用同一顆述詞算 expected，
+        優先序寫反時兩邊會一起寫反、斷言恆綠＝鎖失去鑑別力。`test_ps_engine_ssot.py`
+        的反增生掃描已就此列具名永久豁免（附本 WHY）。
+        另註（本機邊界）：本機無 pwsh 7，`expected` 恆等於 5.1 路徑＝走不到「兩者
+        皆有」那條分支；「兩引擎都在時選誰」的方向驗證由 `test_ps_engine_ssot.py`
+        以合成 `shutil.which` 的雙引擎情境補上。"""
         ps51, ps7 = shutil.which("powershell"), shutil.which("pwsh")
         if ps51 is None and ps7 is None:
             self.skipTest("本機無任何 PowerShell 引擎")
@@ -338,6 +450,141 @@ class TestInstallWindowsNightlySettingsConstruction(unittest.TestCase):
             f"建構出的 Settings 物件屬性值不符預期（DisallowStartIfOnBatteries/"
             f"StopIfGoingOnBatteries/StartWhenAvailable/WakeToRun 應為 "
             f"False/False/True/True）：{proc.stdout.strip()!r}",
+        )
+
+
+@unittest.skipUnless(
+    platform.system() == "Windows",
+    "[WINDOWS-NATIVE-ONLY] 本組鎖真的執行安裝器（-Status / -WhatIf），需 Windows 的 "
+    "ScheduledTasks 模組（R43 DEF-101-348 標籤，供 run_root_unittests.py 彙整可見度）",
+)
+class TestStatusExitCodeRuntime(unittest.TestCase):
+    """DEF-101-542 回歸鎖：`-Status` 的結束代碼必須**真的**反映任務存在性。
+
+    WHY 一定要用執行而不能用字面比對：原本的靜態斷言（比對 `$loaded = Show-...`）
+    在腳本行為完全壞掉（恆 exit 0）的情況下照樣全綠——R60 實測把 `$TaskName` 換成
+    一個不存在的名字後跑 `-Status`，真實結束代碼是 **0**。「字面對了但語意反了」
+    是 PowerShell 特有的陷阱（函式輸出串併入回傳值），只有跑起來才看得到。
+
+    方法：把安裝器複製到 temp、把兩個任務名改寫成保證不存在的名字後執行——
+    **不註冊、不移除任何排程任務**（純唯讀查詢；本 repo 紀律：真安裝屬使用者 ops，
+    須另行核可）。`-Status` 區塊在腳本中位於載體存在性檢查之前，故複本雖然算出錯的
+    $RepoRoot 也不影響本測試（R60 實測確認）。
+    """
+
+    _ABSENT_NIGHTLY = "AutoClaude_Nightly_R60AbsentProbe"
+    _ABSENT_SMOKE = "AutoClaude_WindowsSmoke_R60AbsentProbe"
+
+    def _script_with_absent_task_names(self, tmpdir: str) -> Path:
+        text = _read(_SCRIPT)
+        patched, n1 = re.subn(
+            r"\$TaskName = 'AutoClaude_Nightly'",
+            f"$TaskName = '{self._ABSENT_NIGHTLY}'", text,
+        )
+        patched, n2 = re.subn(
+            r"\$SmokeTaskName = 'AutoClaude_WindowsSmoke'",
+            f"$SmokeTaskName = '{self._ABSENT_SMOKE}'", patched,
+        )
+        self.assertEqual(
+            (n1, n2), (1, 1),
+            "任務名賦值的字面樣式已變動——本鎖無法改寫成「保證不存在」的名字，"
+            "請同步更新本測試的改寫式（不得靜默降級成不改寫，那會變成對真任務查詢）",
+        )
+        target = Path(tmpdir) / "install_windows_nightly_absentprobe.ps1"
+        # BOM + CRLF 比照 repo .ps1 政策（.gitattributes / DEF-101-002）；此檔在 temp、
+        # 不入庫，但保持一致可排除「編碼差異造成的行為差異」這個混淆變因。
+        target.write_bytes(b"\xef\xbb\xbf" + patched.replace("\n", "\r\n").encode("utf-8"))
+        return target
+
+    def _run(self, script: Path, *args: str) -> subprocess.CompletedProcess[str]:
+        # 🔴 主控台碼頁：`powershell.exe` 以 OEM 碼頁（本機 zh-TW＝cp950）寫 stdout，
+        # 以 utf-8 解碼中文訊息必得亂碼。故下方斷言一律只認 **ASCII 標記**（任務名、
+        # 安裝提示字串），不比對中文——不是偷懶，是不讓本鎖的成敗取決於執行者的
+        # 主控台碼頁（同 windows_smoke_local.ps1 [6] 「直讀位元組、不經主控台解碼」
+        # 的既有取證紀律）。
+        return subprocess.run(
+            ["powershell.exe", "-NoProfile", "-ExecutionPolicy", "Bypass",
+             "-File", str(script), *args],
+            capture_output=True, text=True, encoding="utf-8", errors="replace",
+        )
+
+    def _task_presence(self, names: tuple[str, ...]) -> str:
+        """回傳 `name=0/1;...` 的 ASCII 快照（0＝不存在、1＝存在），唯讀查詢。"""
+        name_list = ",".join(f"'{n}'" for n in names)
+        proc = subprocess.run(
+            ["powershell.exe", "-NoProfile", "-Command",
+             f"$o = @(); foreach ($n in @({name_list})) {{ "
+             "$t = Get-ScheduledTask -TaskName $n -ErrorAction SilentlyContinue; "
+             'if ($t) { $o += "$n=1" } else { $o += "$n=0" } }; '
+             'Write-Output ($o -join ";")'],
+            capture_output=True, text=True, encoding="utf-8", errors="replace",
+        )
+        self.assertEqual(proc.returncode, 0, f"排程存在性查詢失敗：{proc.stderr}")
+        return proc.stdout.strip()
+
+    @staticmethod
+    def _declared_task_names() -> tuple[str, ...]:
+        """從腳本原始碼抽出它實際會註冊的任務名（不在測試裡複製第二份字面清單）。"""
+        text = _read(_SCRIPT)
+        names = re.findall(r"\$(?:Smoke)?TaskName = '([^']+)'", text)
+        return tuple(names)
+
+    def test_status_exits_nonzero_when_tasks_absent(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            script = self._script_with_absent_task_names(tmpdir)
+            proc = self._run(script, "-Status")
+        self.assertEqual(
+            proc.returncode, 1,
+            "-Status 對「兩支任務都不存在」回了非 1 的結束代碼——任何拿 exit code 做"
+            "自動化判斷的 CI／監控腳本都會拿到假陽性（DEF-101-248 原始缺陷、"
+            f"DEF-101-542 復發形態）。stdout=\n{proc.stdout}\nstderr=\n{proc.stderr}",
+        )
+        # 反向確認 rc=1 真的來自存在性判定、而不是腳本在別處炸掉：缺席分支印出的
+        # 那一行必須同時含「任務名」與「安裝提示」兩個 ASCII 標記（present 分支印的
+        # 是 LastRunTime/NextRunTime，不含安裝提示，故兩者可區分）。
+        for name in (self._ABSENT_NIGHTLY, self._ABSENT_SMOKE):
+            hit = [
+                ln for ln in proc.stdout.splitlines()
+                if name in ln and r"powershell -File tools\install_windows_nightly.ps1" in ln
+            ]
+            self.assertEqual(
+                len(hit), 1,
+                f"-Status 報表沒有恰一行是 {name} 的「不存在」分支輸出——rc=1 可能"
+                f"來自無關的錯誤路徑。stdout=\n{proc.stdout}",
+            )
+
+    def test_whatif_previews_every_task_without_touching_scheduler(self) -> None:
+        """`-WhatIf` 是 DEF-101-517 解鎖條件明文點出的「不必等 02:00 就能取得驗證
+        證據」那條路——本鎖把它變成每輪自動跑的證據，而不是靠人記得手動跑一次。
+
+        刻意跑**真腳本**（非改名複本）：複本的 `$PSScriptRoot` 落在 temp，算出的
+        `$RepoRoot` 是錯的，`-WhatIf` 會在 nightly 載體存在性檢查就 exit 1（R60 實測）。
+        副作用檢查改用「執行前後的排程存在性快照必須完全相同」——這比「檢查某支任務
+        不存在」更可靠：不論本機目前裝了哪幾支，都能抓到 `-WhatIf` 真的動了系統。
+        """
+        names = self._declared_task_names()
+        self.assertGreaterEqual(
+            len(names), 2,
+            f"只抽到 {names} 個任務名——安裝器應管理 nightly ＋ Windows smoke 兩支"
+            "（DEF-101-517），抽取式或腳本結構已變動",
+        )
+        before = self._task_presence(names)
+        proc = self._run(_SCRIPT, "-WhatIf")
+        after = self._task_presence(names)
+        self.assertEqual(
+            proc.returncode, 0, f"-WhatIf 預覽失敗：\n{proc.stdout}\n{proc.stderr}",
+        )
+        for name in names:
+            self.assertIn(
+                name, proc.stdout,
+                f"-WhatIf 預覽未涵蓋 {name}——ShouldProcess 守衛可能只包住其中一支"
+                f"（沒被包住的那支會在 -WhatIf 下真的動 Task Scheduler）。"
+                f"stdout=\n{proc.stdout}",
+            )
+        self.assertEqual(
+            before, after,
+            "-WhatIf 前後的排程存在性快照不同 ⇒ -WhatIf 真的變更了 Task Scheduler"
+            f"（before={before} after={after}）",
         )
 
 

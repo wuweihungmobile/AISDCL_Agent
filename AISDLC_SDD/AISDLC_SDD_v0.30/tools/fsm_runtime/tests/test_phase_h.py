@@ -1,6 +1,7 @@
 """Phase H / ACT-045~058 — Generative-Adversarial Execution Layer tests."""
 from __future__ import annotations
 
+import os
 import sys
 from pathlib import Path
 
@@ -210,12 +211,72 @@ requires_docker = pytest.mark.skipif(not _DOCKER, reason="docker daemon 不可�
 # 執行結果不一致（1 次成功、2 次失敗），而非本框架程式碼可控的確定性 bug。這類
 # 「需要容器真的成功跑完並正確回傳輸出」的測試在此環境下無法穩定重現；只驗證
 # 「容器執行失敗」的 test_docker_backend_real_runtime_fail 不受影響（環境不穩定本身
-# 也會產生 nonzero_exit，恰好符合該測試預期，故不需要排除）。macOS/Linux 環境
-# Docker 原生穩定，此排除僅限 Windows（見 DEF-101-062）。
+# 也會產生 nonzero_exit，恰好符合該測試預期，故不需要排除）。見 DEF-101-062。
+#
+# 🔴 R60 F-02 訂正：原判準是 `sys.platform.startswith("win")`，把**全部** Windows
+# 一起掃掉，排除面遠大於證據面。DEF-101-062 的不穩定證據全部來自 GitHub-hosted
+# windows-latest 的 runner（LCOW 那一套堆疊）；本機 Windows 11 + Docker Desktop
+# WSL2（`docker info` → OSType=linux）是完全不同的堆疊，實測 docker_available()
+# 為 True、被排除的兩支測試連跑 4 次全 PASSED 零 flaky。疊上 CI 帳務停擺
+# （DEF-101-081），「容器實跑成功 → OQS pass」這條路在 Windows 上等於零活體覆蓋。
+# 改法：排除條件從「平台名稱」換成「能力偵測（docker_available，本身就是用
+# DockerBackend 的完整安全 profile 實跑一次容器）」＋僅保留「Windows CI runner」
+# 這個確有證據的窄例外。另把 reason 拆成互斥兩段——原本是一個 `or` 選言，讀者
+# 無法分辨到底哪個限語觸發（在本機恆為第二個），DEF-101-515 就是因此需要人工
+# 考古才解釋得出 v0.30 −4。
+
+
+# 🔴 R60 round 2 SD-R60-05 訂正：原實作是 `bool(os.environ.get("CI"))`，而
+# `bool("false") is True` —— 開發機若設 `CI=false`（前端工具鏈如 Vite/CRA/Jest 常見
+# 於 .env 或 shell profile 明示關閉 CI 模式）會被判成 CI runner，於是靜默回到本輪剛
+# 移除的「Windows 全平台排除」狀態，正是本輪要消滅的「靜默零活體覆蓋」。改為明確
+# 真值集合；`GITHUB_ACTIONS` 一併套用同一判準（GitHub-hosted runner 實際永遠給
+# 字面 `"true"`，故不損既有覆蓋，但可擋 `GITHUB_ACTIONS=false` 這個同構回退面）。
+_CI_TRUTHY = frozenset({"1", "true", "yes"})
+
+
+def _env_flag_true(name: str) -> bool:
+    """環境變數是否為明確真值（`1`/`true`/`yes`，大小寫與前後空白不敏感）。
+
+    刻意**不**把「非空字串」當真：`false`／`0`／`no` 這些明確否定值必須判 False。
+    """
+    return os.environ.get(name, "").strip().lower() in _CI_TRUTHY
+
+
+def _windows_ci_runner() -> bool:
+    """是否為「Windows 上的 CI runner」——DEF-101-062 不穩定證據的唯一來源環境。
+
+    GITHUB_ACTIONS 為 GitHub-hosted runner 的權威旗標（不穩定實測即在此）；另收
+    通用 CI 旗標作為保守兜底，避免任何 Windows CI 載具因本次放寬而出現不確定紅燈。
+    兩者皆須為**明確真值**（見 `_env_flag_true`／SD-R60-05）。
+    本機開發環境兩者皆無值 → 覆蓋恢復。
+    """
+    if not sys.platform.startswith("win"):
+        return False
+    return _env_flag_true("GITHUB_ACTIONS") or _env_flag_true("CI")
+
+
+# marker 於 import 時定版，故 production 條件的回歸鎖必須拿 import 當時的環境判定
+# 來比對（測試內 monkeypatch 過的 env 不能用來推論 import 時的 marker）。
+_WINDOWS_CI_AT_IMPORT = _windows_ci_runner()
+
+if not _DOCKER:
+    _DOCKER_SUCCESS_SKIP_REASON = (
+        "docker 不可用：docker_available() 為 False（CLI 不存在／daemon 不可連線／"
+        "DockerBackend 完整安全旗標組合下的探測容器跑不起來）"
+    )
+elif _WINDOWS_CI_AT_IMPORT:
+    _DOCKER_SUCCESS_SKIP_REASON = (
+        "Windows CI runner 的 Docker Linux 容器支援不穩定（DEF-101-062：連續三次"
+        "真實 CI run 1 成功/2 失敗，非本框架程式碼可控）—— docker_available() 為 "
+        "True，純環境例外；本機 Windows（非 CI）不受此排除，見 R60 F-02"
+    )
+else:
+    _DOCKER_SUCCESS_SKIP_REASON = ""
+
 requires_docker_success = pytest.mark.skipif(
-    not _DOCKER or sys.platform.startswith("win"),
-    reason="docker daemon 不可用，或 Windows runner 的 Docker Linux 容器支援不穩定"
-    "（DEF-101-062：連續三次真實 CI run 1 成功/2 失敗，非本框架程式碼可控）",
+    bool(_DOCKER_SUCCESS_SKIP_REASON),
+    reason=_DOCKER_SUCCESS_SKIP_REASON or "（不排除）",
 )
 
 
@@ -262,6 +323,105 @@ def test_docker_backend_e2e_through_fsm(tmp_path):
     res = evaluate(spec, backend="docker")
     rt.exit_execution_evaluation(res.oqs.verdict)
     assert rt.state.current == "PR_REVIEW"
+
+
+def test_docker_success_exclusion_is_ci_scoped_not_platform_blanket(monkeypatch):
+    """R60 F-02 回歸鎖：排除面必須是「Windows CI runner」而非「全部 Windows」。
+
+    原判準 `sys.platform.startswith("win")` 把本機 Windows 一起掃掉（本機 Docker
+    Desktop WSL2 實測兩支測試 4/4 PASSED、零 flaky），使「容器實跑成功 → OQS pass」
+    在 Windows 上零活體覆蓋。
+
+    🔴 R60 round 2 SD-R60-04 訂正（本測試自己是假綠）：舊版只斷言 helper
+    `_windows_ci_runner()`，**完全沒碰 production 的 marker 條件**——實測把
+    `requires_docker_success` 改回 `not _DOCKER or sys.platform.startswith("win")`
+    後本測試照樣 PASSED，即「鎖保護的東西不是它宣稱保護的東西」，而那正是最可能的
+    回退形狀（直接改運算式、helper 原封不動）。現在分兩段：
+
+      ① **production 條件**（真正的鑑別力來源）：在「docker 可用且 import 當時不是
+         Windows CI runner」的環境下，`requires_docker_success` 的 skipif 條件必須
+         為 False、skip reason 必須為空字串 —— 只要有人把 marker 改回平台硬排除，
+         本機（Windows + Docker Desktop）立刻翻紅。其餘環境（docker 不可用／
+         Windows CI）則反向斷言 reason 非空且成因與旗標一致，本測試在任何環境都
+         有實質斷言、不會靜默空轉。
+      ② helper 語意：`CI`/`GITHUB_ACTIONS` 清空 → False；`GITHUB_ACTIONS=true`
+         → 僅 Windows 為 True。此段**不涵蓋 marker 回退**，僅鎖 helper 本身。
+    """
+    # ① production marker 條件（import 時定版）
+    if _DOCKER and not _WINDOWS_CI_AT_IMPORT:
+        assert requires_docker_success.args[0] is False, (
+            "docker 可用且非 Windows CI runner，production 的 skipif 條件必須為 "
+            f"False（實際 {requires_docker_success.args[0]!r}）——條件退化成平台硬"
+            "排除（R60 F-02 的原始缺陷形狀）會讓「容器實跑成功 → OQS pass」在本機"
+            " Windows 上零活體覆蓋"
+        )
+        assert _DOCKER_SUCCESS_SKIP_REASON == "", (
+            f"不應有任何排除理由，實際: {_DOCKER_SUCCESS_SKIP_REASON!r}"
+        )
+    else:
+        assert _DOCKER_SUCCESS_SKIP_REASON != "", (
+            "docker 不可用或身處 Windows CI runner 時必須有明確排除理由（互斥兩段"
+            "之一），不得為空字串"
+        )
+        assert requires_docker_success.args[0] is True, (
+            "有排除理由時 skipif 條件必須為 True"
+        )
+        expected_marker = "docker 不可用" if not _DOCKER else "Windows CI runner"
+        assert _DOCKER_SUCCESS_SKIP_REASON.startswith(expected_marker), (
+            f"排除理由必須指出真正成因（預期以 {expected_marker!r} 起頭，"
+            f"實際 {_DOCKER_SUCCESS_SKIP_REASON!r}）——互斥兩段不得混用"
+        )
+
+    # ② helper 語意（不涵蓋 marker 回退，見上方 docstring）
+    monkeypatch.delenv("GITHUB_ACTIONS", raising=False)
+    monkeypatch.delenv("CI", raising=False)
+    assert _windows_ci_runner() is False, (
+        "非 CI 環境不得被排除——排除條件退化成平台硬排除（R60 F-02 的原始缺陷形狀）"
+    )
+    monkeypatch.setenv("GITHUB_ACTIONS", "true")
+    assert _windows_ci_runner() is sys.platform.startswith("win"), (
+        "DEF-101-062 的 Windows CI runner 窄例外必須保留（放寬不得擴及 CI）"
+    )
+
+
+@pytest.mark.parametrize(
+    "value,expect_ci",
+    [
+        ("false", False), ("FALSE", False), ("0", False), ("no", False),
+        ("", False), ("   ", False),
+        ("true", True), ("True", True), (" true ", True), ("1", True), ("yes", True),
+    ],
+)
+def test_windows_ci_runner_only_accepts_truthy_flag_values(monkeypatch, value, expect_ci):
+    """R60 SD-R60-05 回歸鎖：`CI`/`GITHUB_ACTIONS` 必須以**真值**判定，不可用
+    「非空字串」。
+
+    舊實作 `bool(os.environ.get("CI"))` 讓 `CI=false`（前端工具鏈明示關閉 CI 模式的
+    常見寫法）判成 True → Windows 開發機被靜默排除 →「容器實跑成功 → OQS pass」零
+    活體覆蓋，等於把本輪 F-02 的修復悄悄退回去。若有人改回 `bool(...)`，本測試的
+    `false`/`0`/`no`/空白 四組參數會立刻翻紅。
+
+    🔴 兩平台皆有鑑別力：`_windows_ci_runner()` 依設計在非 Windows 上恆為 False，若只
+    斷言它，本鎖在 macOS 上會退化成恆綠（本輪是 Mac/Windows 相容性輪，這種單平台鎖
+    正是要避免的形狀）。故第一段直接斷言與平台無關的 `_env_flag_true()`。
+    """
+    for flag in ("CI", "GITHUB_ACTIONS"):
+        monkeypatch.setenv(flag, value)
+        assert _env_flag_true(flag) is expect_ci, (
+            f"{flag}={value!r} 的真值判定應為 {expect_ci}（此段與平台無關，macOS 上"
+            f"同樣具鑑別力）；非空字串≠真值"
+        )
+        monkeypatch.delenv(flag, raising=False)
+
+    expected = expect_ci and sys.platform.startswith("win")
+    for flag in ("CI", "GITHUB_ACTIONS"):
+        monkeypatch.delenv("CI", raising=False)
+        monkeypatch.delenv("GITHUB_ACTIONS", raising=False)
+        monkeypatch.setenv(flag, value)
+        assert _windows_ci_runner() is expected, (
+            f"{flag}={value!r} 應判定 CI runner={expected}（平台 {sys.platform}）；"
+            f"非空字串≠真值，`false`/`0`/`no` 必須為 False"
+        )
 
 
 # ---------- M4: Observability Query ----------

@@ -355,6 +355,21 @@ python -m pytest tests/tools/ -v                   # hooks / nightly 驗證鏡�
 PYTHONUTF8=1 lint-imports                          # 8 kept / 0 broken
 ```
 
+**Windows（PowerShell）** — 上面那塊是 **bash 形態**，只有這一行不能照抄：
+
+```powershell
+python -m pytest tests/ -q                         # 與 bash 形態同
+$env:PYTHONUTF8=1; lint-imports                    # 架構約束（8 kept / 0 broken）
+```
+
+> 🔴 **差別不是排版偏好**：`VAR=value <指令>` 這種前綴語法**在 PowerShell 不存在**，
+> 照抄 bash 版會得到 `The term 'PYTHONUTF8=1' is not recognized`（本機 Windows PowerShell
+> 5.1 實測），設環境變數須寫 `$env:VAR=值; <指令>`。R57 為 `ONBOARDING.md` §7、R59 為
+> 根 `CLAUDE.md` 與 `docs/AISDLC_Agent_UserGuide.md` 各補過同一件事，本檔是同家族
+> 第 4 個站點、第三次復發（DEF-101-513）；R60 起改由
+> `tools/tests/test_doc_env_prefix_platform_parity_r60.py` 機械掃描全部活文件，
+> 缺 PowerShell 對照即紅，不再靠人工記得補。
+
 > **隨機性註記**：`pytest-randomly` 未啟用，測試順序由 collection 確定（紀律 #16）。
 
 ---

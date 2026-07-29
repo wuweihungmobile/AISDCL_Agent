@@ -1,5 +1,13 @@
 #!/usr/bin/env python3
-"""local_ci_gate.py — 本機 CI 閘門單一核心（macOS / Linux / Windows 共用）。
+# 🔴 本檔 docstring 必須維持 raw（`r"""`）：內文引述 Windows 路徑形態
+# （`.\local_ci_gate.ps1`），非 raw 時 `\l` 是**非法轉義序列**——Python 3.11 印
+# DeprecationWarning、3.12 起升為 SyntaxWarning、CPython 已宣告未來版本改為
+# SyntaxError（屆時本檔＝本機 CI 閘門唯一核心將無法 import）。R60 QA-R60-05 實測：
+# 本輪新增該行時 `pytest tests/ -q` 尾行就印出 `invalid escape sequence '\l'`，
+# 而專案 ruff `select` 當時不含 `W` ⇒ 閘門結構上看不到（已同輪把 `W` 補進 select，
+# 見 pyproject.toml）。改回非 raw 會讓 `ruff check --select W605` 與
+# `python -W error::SyntaxWarning` 兩道都紅。
+r"""local_ci_gate.py — 本機 CI 閘門單一核心（macOS / Linux / Windows 共用）。
 
 DEF-101-070 ② 收斂案（R12 ARCH-R12-1）：原 tools/local_ci_gate.{sh,ps1} 為雙實作
 （bash / PowerShell 各長一份業務邏輯，靠 tools/check_script_parity.py 事後比對防漂移），
@@ -11,6 +19,17 @@ DEF-101-070 ② 收斂案（R12 ARCH-R12-1）：原 tools/local_ci_gate.{sh,ps1}
 （空字串）現落回核心預設參數——舊版此邊角行為 host 相依（PS5.1 丟空元素、
 pwsh 7.3+ 傳 '' 使 pytest 報錯），新行為為兩者之良性收斂；`-PytestArgs '--act'`
 會被核心解析為 gate 旗標而非 pytest 參數（舊版傳給 pytest 報錯），正常用法不受影響。
+
+R60 訂正（F-refuter-1）：上段「`-PytestArgs ''` 落回核心預設」曾是需要特別揭露的
+**邊角**，因為 .ps1 的 `$PytestArgs` 預設值寫死著一份 `'tests/ -q --tb=short'`——
+R59 在下方 DEFAULT_PYTEST_ARGS 加 `-rs` 時那份複本沒跟上，於是 Windows 側（含
+nightly Stage L）**無參數呼叫**就被薄殼整批取代掉核心預設、`-rs` 靜默消失。現已把
+.ps1 預設改為 `''`，「無參數」與「`-PytestArgs ''`」兩條路完全等價、都落回本檔的
+單一真相源，上段揭露因此降為歷史註記。另訂正該段自身的一處不可達：以本檔
+`.EXAMPLE` 示範的 `-File` 呼叫傳 `-PytestArgs ''`，PS 5.1 直接報
+`Missing an argument for parameter 'PytestArgs'` 而中止（要走呼叫運算子
+`& …\local_ci_gate.ps1 -PytestArgs ''` 才到得了該邊角）——即該邊角在文件自己示範的
+載具上根本觸發不到。跨檔語意鎖：tests/tools/test_local_ci_gate_shell_arg_parity.py。
 
 依序（全綠才建議 push；鏡像 monorepo 根層 .github/workflows/autoclaude-ci.yml push gating jobs）：
   0. editable 哨兵       （autoclaude 指向本 monorepo；in-process 動態比對，取證紀律 #19）

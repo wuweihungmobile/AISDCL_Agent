@@ -162,6 +162,110 @@ from _ci_scan_anchors import (  # noqa: E402
     ci_scan_statement_count,
 )
 
+# --- windows-compat-ci.yml「shell 絕對宣稱」全檔掃描鎖（R60 DEF-101-540）-----------
+
+_CLAIM_QUOTE_BEGIN = "CLAIM-QUOTE-BEGIN"
+_CLAIM_QUOTE_END = "CLAIM-QUOTE-END"
+
+# 四段式：(全部|其餘|所有) → (步驟|step) → 一律 → pwsh，中間允許跨行、跨註解符。
+# 為何**不能**逐行比對：R60 實測的三個殘留站點裡，最後一個正是拆成兩行寫的
+# （「…本 workflow 全部步驟（windows-smoke／windows-nightly-full）」＋「一律 shell:
+# pwsh，從未用原生 Windows PowerShell 5.1」），逐行掃描對它天生零訊號——那恰好是
+# 這句話能在 R57 訂正之後仍存活的原因之一。故先把註解符與換行攤平再掃。
+_ABSOLUTE_SHELL_CLAIM_RE = re.compile(
+    r"(?:全部|其餘|所有)[\s\S]{0,25}?(?:步驟|step)[\s\S]{0,80}?一律[\s\S]{0,40}?pwsh"
+)
+
+# 豁免區行數上限：防「把 sentinel 拉大到蓋住全檔」這種最省事的繞過方式。
+# R60 落地時實測該區 68 行（自寫探針實量，非估算），留約 1.3 倍緩衝。
+_MAX_CLAIM_QUOTE_LINES = 90
+
+
+def _flatten_prose(text: str) -> str:
+    """攤平換行與行首註解符，讓跨行的中文句子重新接成連續字串。"""
+    return re.sub(r"\n[ \t]*#?[ \t]*", "", text)
+
+
+class TestWindowsCiShellClaimConsistency(unittest.TestCase):
+    """`windows-compat-ci.yml` 全檔不得再出現「全部／其餘步驟一律 shell: pwsh」式的
+    絕對宣稱（訂正引述區除外）。
+
+    WHY（DEF-101-540，R60 Scan-C C-02）：同一句宣稱已**三度失實**——R5 原文寫死、
+    R57 round 1 改寫成「windows-latest 的步驟一律」仍被 pyyaml 稽核證偽、R57 收輪只改
+    了檔頭而 step name 與兩處 step 註解逐字存活到 R60。實測分佈：windows-smoke
+    ＝pwsh 19／bash 1，windows-nightly-full＝powershell 2／pwsh 3（其中 2 步原生
+    PS 5.1 正是該宣稱的直接反例，且其中一步的 name 自己就掛著那句宣稱）。
+    現行機械鎖 `test_gha_action_versions.py::TestWindowsCiHeaderSnapshotLock` 只比對
+    **檔頭那張快照表** vs YAML 實況，對散文（step name／註解）零訊號。
+
+    為何鎖住「措辭」而不是「數字」：R57 已立政策——不得寫死支數（寫死＝下一輪必再
+    過期）。本鎖因此不驗任何計數，只禁止「一律／全部」這種不依賴實測就成立不了的
+    絕對詞出現在宣稱句裡；要陳述分佈就去看檔頭那張由姊妹鎖看守的實測表。
+
+    為何住在本檔：本檔 docstring 立的正是「四份手寫實作互相宣稱同步維護、零機械
+    互鎖」這條軸，且本檔已在 `test_sync_maintenance_comments_present` 讀取
+    `_WIN_CI` 做散文斷言——同一條軸、同一份輸入。姊妹鎖（檔頭快照表 vs YAML 實況）
+    在 `tools/tests/test_gha_action_versions.py::TestWindowsCiHeaderSnapshotLock`，
+    兩者互補：那支管「表要對」，本支管「別在表以外再自己講一遍」。
+
+    鑑別力（鏡子自證，不靠改壞檔案）：豁免區內**必須**至少命中一次——那裡刻意逐字
+    引述舊宣稱以資訂正。若有人把 `_ABSOLUTE_SHELL_CLAIM_RE` 改寬鬆到抓不到東西，
+    正控會先紅；sentinel 兩端缺一、或豁免區被撐大到超過上限，也都會紅。
+    """
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        cls.text = _read(_WIN_CI)
+
+    def _split_regions(self) -> tuple[str, str]:
+        """回傳 (豁免區, 其餘全檔)。sentinel 缺失/重複/順序錯即 fail-loud。"""
+        for marker in (_CLAIM_QUOTE_BEGIN, _CLAIM_QUOTE_END):
+            self.assertEqual(
+                self.text.count(marker), 1,
+                f"{_WIN_CI.name} 的 {marker} sentinel 出現 {self.text.count(marker)} 次"
+                f"（預期恰 1）——豁免區界被刪除或重複，本鎖的豁免判定失效",
+            )
+        begin = self.text.index(_CLAIM_QUOTE_BEGIN)
+        end = self.text.index(_CLAIM_QUOTE_END)
+        self.assertLess(begin, end, f"{_WIN_CI.name} 的 CLAIM-QUOTE sentinel 順序顛倒")
+        return self.text[begin:end], self.text[:begin] + self.text[end:]
+
+    def test_quote_exemption_region_is_bounded(self) -> None:
+        """豁免區不得被撐大到蓋住全檔（最省事的繞過方式）。"""
+        quoted, _rest = self._split_regions()
+        lines = quoted.count("\n")
+        self.assertLessEqual(
+            lines, _MAX_CLAIM_QUOTE_LINES,
+            f"{_WIN_CI.name} 的 CLAIM-QUOTE 豁免區已達 {lines} 行 > 上限 "
+            f"{_MAX_CLAIM_QUOTE_LINES}——豁免區只該容納訂正引述，不該吞掉整份檔案；"
+            "若確有正當需要請連同 _MAX_CLAIM_QUOTE_LINES 一併調整並說明 WHY",
+        )
+
+    def test_claim_regex_still_matches_the_known_false_claim(self) -> None:
+        """正控（鏡子自證）：豁免區內至少一筆舊宣稱引述必須被本鎖的正則命中。"""
+        quoted, _rest = self._split_regions()
+        hits = _ABSOLUTE_SHELL_CLAIM_RE.findall(_flatten_prose(quoted))
+        self.assertGreaterEqual(
+            len(hits), 1,
+            "CLAIM-QUOTE 豁免區內找不到任何「全部/其餘步驟一律 pwsh」式引述——"
+            "正則可能已被改寬鬆到零鑑別力，或引述被刪除（引述被刪＝訂正的依據消失）",
+        )
+
+    def test_no_absolute_shell_claim_outside_quote_region(self) -> None:
+        """本體斷言：豁免區以外（含 step name 與所有 step 註解）零命中。"""
+        _quoted, rest = self._split_regions()
+        flat = _flatten_prose(rest)
+        hits = [m.group(0) for m in _ABSOLUTE_SHELL_CLAIM_RE.finditer(flat)]
+        self.assertEqual(
+            hits, [],
+            f"{_WIN_CI.name} 在 CLAIM-QUOTE 豁免區之外仍出現「全部/其餘步驟一律 "
+            f"shell: pwsh」式絕對宣稱（同一句已三度失實，DEF-101-486／529）：{hits}。"
+            "實測分佈：windows-smoke=pwsh 19/bash 1、windows-nightly-full="
+            "powershell 2/pwsh 3——請改用不依賴計數的措辭（例：「以 shell: pwsh 為"
+            "主要引擎，實際分佈見檔頭逐 job 稽核表」），勿寫死支數",
+        )
+
+
 class TestWindowsSmokeCarrierGuard(unittest.TestCase):
     """QA-R59-04：`windows_smoke_local.ps1` 的 MSYSTEM 載具守門必須有回歸鎖。
 

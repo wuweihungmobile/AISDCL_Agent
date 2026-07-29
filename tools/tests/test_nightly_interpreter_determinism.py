@@ -15,7 +15,7 @@ WHY（2026-07-27 真機事故）：`run_local_nightly.ps1` 把直譯器存成字
 
 🔴 **R59 補述（DEF-101-522 教訓）**：本檔原本 A/B/C 三項**全是行級靜態檢查**，
 於是當 PATH 正規化區塊的比對「形狀齊備但語意永遠不成立」時（`Activate.ps1` 插入的是
-`.venv/Scripts` 正斜線、`Join-Path` 產生 `.venv\Scripts` 反斜線 → 比對必不等），本檔
+`.venv/Scripts` 正斜線、`Join-Path` 產生 `.venv\\Scripts` 反斜線 → 比對必不等），本檔
 當時的斷言全綠（**R59 二審 QA 訂正**：本處原寫「20 支」、下方 A 項註解原寫「7 支斷言」，QA 副本注入實測為 **4 支測試／8 條斷言**全綠；數字改為不寫死以免再過期）。**形狀鎖對「比對永遠不成立」這類缺陷結構上零鑑別力**，故 R59 新增第
 D 項＝**行為級鎖**（真的把該區塊的比對式抽出來在 PowerShell 子行程裡跑一次）。
 
@@ -36,13 +36,18 @@ pyenv，是各自既有且各自綠的政策；本缺陷要根治的是「**同�
 """
 from __future__ import annotations
 
-import platform
 import re
-import shutil
 import subprocess
+import sys
 import tempfile
 import unittest
 from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from _ps_engine import (  # noqa: E402  # R60 E-A-03：引擎述詞 SSOT（語意④）
+    native_ps51,
+    windows_with_native_ps51,
+)
 
 _ROOT = Path(__file__).resolve().parents[2]
 _PS1 = _ROOT / "AutoClaude" / "tools" / "run_local_nightly.ps1"
@@ -197,7 +202,7 @@ class TestPathNormalisationBehaviour(unittest.TestCase):
     """
 
     @unittest.skipUnless(
-        platform.system() == "Windows" and shutil.which("powershell"),
+        windows_with_native_ps51(),  # R60 E-A-03：語意④ SSOT 述詞（只認原生 5.1）
         "[WINDOWS-NATIVE-ONLY] 本鎖要在真 PowerShell 上執行抽出的比對式；"
         "PATH 分隔符與斜線語意僅 Windows 成立（R43 DEF-101-348 標籤，"
         "供 run_root_unittests.py 彙整可見度）",
@@ -230,7 +235,7 @@ class TestPathNormalisationBehaviour(unittest.TestCase):
             ])
             expected_kept = other_dir
             proc = subprocess.run(
-                [shutil.which("powershell"), "-NoProfile", "-Command", script],
+                [native_ps51(), "-NoProfile", "-Command", script],
                 capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=60,
             )
         out = proc.stdout

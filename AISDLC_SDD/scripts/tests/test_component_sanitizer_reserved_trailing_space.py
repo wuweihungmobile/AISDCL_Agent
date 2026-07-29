@@ -40,6 +40,14 @@ import」的既有裁定）斷言兩份 reserved/benign 清單逐字相同。實
 修復刻意只 `rstrip(" ")` 不含 `"."`：改成 `rstrip(" .")` 會讓純句點片段（`".."`／
 `"."`）的 stem 被吃空成 `""`，破壞既有「路徑穿越退化為 untitled」的防禦——本檔
 `test_path_traversal_defence_not_broken` 即為此設鎖。
+
+**R60 兩項延伸**（同四處、同判準）：
+1. 保留名集合補上 `CONIN$`／`CONOUT$`——git for Windows 的 `core.protectNTFS` 視其為
+   Invalid path，含此類檔名的 repo 在 Windows 上 clone 直接 rc=128、工作樹全空。
+   `CLOCK$` 實測 ACCEPT 故刻意不納入（benign 側常駐一筆釘住）。
+2. 新增 `LEADING_SPACE_RESERVED` 樣本組，把「前導空白形態四處三放一擋」從『疑似漏修』
+   正式定案為『刻意不對稱』並雙向設鎖——前導空白經實測不是缺口（git 與 Win32 皆視為
+   正常檔名），本函式因 `.strip()` 而更嚴格則無害。詳見該清單上方註解。
 """
 from __future__ import annotations
 
@@ -61,6 +69,7 @@ RESERVED_TRAILING_SPACE = [
     "con .txt",  # 大小寫不敏感
     "COM9   .md",  # 多個尾隨空白
     "AUX .tar.gz",  # 多重副檔名疊加尾隨空白
+    "CONIN$ .log",  # R60：新納入的 CONIN$ 疊加尾隨空白（git 實測 Invalid path）
 ]
 
 # 剝除尾隨空白後不得誤判成保留名（防修復引入偽陽性）
@@ -72,6 +81,26 @@ BENIGN_TRAILING_SPACE = [
     "CONSOLE .txt",  # 非保留名
     "COM10 .txt",  # COM10 不在 COM[0-9] 內
     "my con file.txt",  # 保留名出現在中段，非 base
+    "CLOCK$ .txt",  # R60：git 實測 ACCEPT + clone rc=0，故 CONIN$/CONOUT$ 的納入不得擴散到它
+]
+
+# R60：「保留名 + **前導**空白」——本函式（sanitizer）**必須**加 `_` 前綴，而另三處
+# （tools/check_ntfs_paths.py／tools/git-hooks/pre-commit／autoclaude/utils/logger.py）
+# 一律**放行**。此三放一擋是刻意決策而非漏修：git for Windows（core.protectNTFS=true）
+# 與 Win32 實測皆視 ' CON.txt' 為正常檔名（clone rc=0、四種變體可同時共存於同一目錄），
+# 故 validator 加擋只生偽陽性；本函式因 `sanitize_component()` 首行的 `.strip()` 會剝
+# 前導空白而更嚴格——對「產生檔名」的 sanitizer 無害，且拿掉 `.strip()` 會改變所有含
+# 前後空白的合法輸入的既有輸出。完整實測紀錄見根層
+# `tools/tests/test_windows_forbidden_filename_parity.py::LEADING_SPACE_RESERVED_SEGMENTS`
+# 上方註解；本清單與該處**逐字相同**並由 `TestCrossSubprojectSampleParity` 機械鎖住
+# （行為可以分歧，樣本不可以）。
+LEADING_SPACE_RESERVED = [
+    " CON.txt",
+    "  COM1.log",  # 多個前導空白
+    " con.txt",  # 大小寫不敏感
+    " CON",  # 無副檔名
+    " NUL .log",  # 前導 + 尾隨空白疊加（git 實測仍 ACCEPT）
+    " CONIN$.log",  # R60 新納入的裝置名亦同（前導空白使 git 失配 → ACCEPT）
 ]
 
 
@@ -92,6 +121,21 @@ class TestReservedNameWithTrailingSpace(unittest.TestCase):
                 self.assertFalse(
                     out.startswith("_"),
                     f"誤攔非保留裝置名 {name!r}：{out!r}",
+                )
+
+    def test_flags_leading_space_reserved_names(self) -> None:
+        """R60：本處（唯一會剝前導空白的實作）對前導空白形態**必須**加前綴。
+
+        這條斷言的價值不在「擋住危險檔名」（前導空白本身無害，見清單上方實測），而在
+        **釘住四處之間那個刻意的不對稱**：另三處放行、本處加前綴。任何一側被單方面
+        「補齊對稱性」時，兩側的斷言會分別翻紅並指向正確的一方。
+        """
+        for name in LEADING_SPACE_RESERVED:
+            with self.subTest(name=name):
+                out = sanitize_component(name)
+                self.assertTrue(
+                    out.startswith("_"),
+                    f"`.strip()` 剝除前導空白後應暴露保留裝置名並加前綴 {name!r}：{out!r}",
                 )
 
     def test_existing_reserved_forms_unchanged(self) -> None:

@@ -23,10 +23,12 @@ SD_09 W3 Round 19 audit P0-AUDIT-R18-2 修復（紀律 #4「驗證鏡子自身�
 """
 from __future__ import annotations
 
+import os
 import platform
 import re
 import subprocess
 import time
+import uuid
 from pathlib import Path
 
 import pytest
@@ -175,14 +177,58 @@ def test_concurrency_guard_mutex_present(ps1_content: str) -> None:
     )
 
 
-_TEST_MUTEX_NAME = "Global\\AutoClaude_Nightly_Run_TestOnly"
+# 🔴 測試專用鎖名必須「每個 pytest 行程獨一」（QA2-R60-04）。
+#
+# 原本這裡是固定字面 `Global\AutoClaude_Nightly_Run_TestOnly`。`Global\` 是**機器級**
+# 命名空間，於是任兩個同時進行的 pytest 行程會共用同一顆核心物件：A 的
+# `test_guard_blocks_…` 會讓 holder 子行程持有該鎖 6 秒，這段期間 B 跑到
+# `test_guard_proceeds_when_mutex_is_free` 就必然被擋 → 假紅（訊息長得跟真回歸一樣：
+# 「另一個 nightly 行程持有去重鎖（…）——本輪跳過」）。R60 複審協定要求四方各自重跑
+# 全套，與固定機器級鎖名**結構性衝突**，每一輪都會自造假紅並被誤報成回歸。
+#
+# 為何加後綴不會削弱 `test_guard_blocks_…` 的鑑別力：該測試驗的是「**另一個行程**持有
+# 同一顆具名核心物件時，守門會跳過」。holder 與被測 snippet 兩邊都取用本常數，改名後
+# 仍是同一個名稱、同樣的 `Global\` 命名空間、同樣兩個各自獨立的 powershell.exe 子行程
+# ——唯一變的是名稱字面，跨行程互斥語意一字未動（落地後實測仍會因 holder 持鎖而擋下，
+# 且把 snippet 的守門分支拿掉後該測試立刻轉紅，見 R60 Pkg-P3 鑑別力證明）。
+_TEST_MUTEX_NAME = (
+    f"Global\\AutoClaude_Nightly_Run_TestOnly_{os.getpid()}_{uuid.uuid4().hex[:8]}"
+)
+
+
+def test_test_mutex_name_is_process_scoped() -> None:
+    """QA2-R60-04 回歸鎖：測試專用鎖名不得退回固定字面（否則並行必假紅）。
+
+    刻意**不**加 Windows-only skipif：這是純字串不變量，在 mac/Linux 上也該守住，
+    以免「Windows 才跑的鎖」在別的平台被無聲改壞。
+    """
+    assert _TEST_MUTEX_NAME.startswith("Global\\AutoClaude_Nightly_Run_TestOnly_"), (
+        "鎖名必須保留 Global\\ 命名空間與 _TestOnly 前綴（前者是被驗證的跨行程語意，"
+        f"後者確保不撞真實排程用的正式鎖）——實際為 {_TEST_MUTEX_NAME!r}"
+    )
+    assert _TEST_MUTEX_NAME != "Global\\AutoClaude_Nightly_Run_TestOnly", (
+        "鎖名退回固定字面 —— 兩個同時進行的 pytest 行程會共用同一顆機器級核心物件，"
+        "`test_guard_proceeds_when_mutex_is_free` 必然假紅（QA2-R60-04）"
+    )
+    assert str(os.getpid()) in _TEST_MUTEX_NAME, (
+        "鎖名必須含本行程 pid（行程唯一性的來源）—— 缺 pid 則不同 pytest 行程仍會互撞"
+    )
+    assert re.fullmatch(
+        r"Global\\AutoClaude_Nightly_Run_TestOnly_\d+_[0-9a-f]{8}", _TEST_MUTEX_NAME
+    ), (
+        "鎖名後綴形態必須為 _<pid>_<uuid 前 8 碼 hex>（pid 擋同時存在的行程、uuid 擋 pid "
+        f"回收後的殘留鎖）——實際為 {_TEST_MUTEX_NAME!r}"
+    )
 
 
 def _extract_mutex_guard_snippet(ps1_content: str) -> str:
     """抽出 DEF-101-228 去重鎖判斷片段（`try { ... } catch [...] { ... }` +
     `if (-not $NightlyMutexAcquired) { ... }`），並把正式鎖名代換成測試專用名稱
     ——避免測試執行時撞上真實排程 nightly 使用的正式鎖（`Global\\AutoClaude_Nightly_Run`），
-    以免互相干擾或造成測試對真實 nightly run 產生副作用。"""
+    以免互相干擾或造成測試對真實 nightly run 產生副作用。
+
+    該測試專用名稱**每個 pytest 行程獨一**（QA2-R60-04；理由見 `_TEST_MUTEX_NAME` 上方
+    註解——固定字面會讓並行的兩個 pytest 行程共用機器級核心物件而互撞成假紅）。"""
     m = re.search(
         r"try \{\s*\n\s*\$NightlyMutex = New-Object System\.Threading\.Mutex.*?"
         r"\nif \(-not \$NightlyMutexAcquired\) \{.*?\n\}",

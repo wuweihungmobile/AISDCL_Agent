@@ -59,7 +59,8 @@ fi
 # 新增（A/C）的路徑任一命中即 fail-loud 擋下（正確性閘，CI 環境亦不跳過）：
 #   1. 路徑任一段含 < > : " | ? * 或控制字元，或以空白/句點結尾（NTFS 不允許）
 #   2. 任一段去副檔名、再剝除尾隨空白後（不分大小寫）為 Windows 保留裝置名
-#      CON/PRN/AUX/NUL/COM1~9/LPT1~9（尾隨空白剝除＝R57 修正，見 _ntfs_seg_bad 內註解）
+#      CON/PRN/AUX/NUL/COM0~9/LPT0~9/CONIN$/CONOUT$（尾隨空白剝除＝R57 修正、
+#      CONIN$/CONOUT$＝R60 補齊，兩者理由見 _ntfs_seg_bad 內註解）
 #   3. 大小寫碰撞：新增路徑 lowercase 後與既有 tracked 路徑重複但原字串不同
 #      （NTFS 大小寫不敏感 → checkout 時兩檔互相覆蓋）
 #   4. MAX_PATH 保守長度閘（DEF-101-039）：Windows 未開 core.longpaths 時絕對路徑上限
@@ -97,8 +98,20 @@ _ntfs_seg_bad() {  # $1=完整路徑；有問題 → stdout 印原因並回 0，
     # 的 `.rstrip(" ")` 同語意。bash 3.2 無 extglob 保證，以 while + ${var% } 逐字剝。
     while [ "${base% }" != "$base" ]; do base="${base% }"; done
     up="$(printf '%s' "$base" | tr '[:lower:]' '[:upper:]')"
+    # R60 補齊 CONIN$／CONOUT$：git for Windows 的 core.protectNTFS 視其為 Invalid path，
+    # 一旦入庫（mac/Linux 側 protectNTFS 預設不啟用），每一台 Windows clone 的 checkout
+    # 會**整體**失敗（本機實測 rc=128、工作樹全空），比單檔失敗嚴重。CLOCK$ 實測 git
+    # ACCEPT 且 clone 正常，故刻意不納入。CI 對等實作 tools/check_ntfs_paths.py 的
+    # `_RESERVED_RE` 有完整實測紀錄。bash 3.2 相容：`$` 在 case glob 內以單引號界定成
+    # 字面值（裸寫 `CONIN$|…` 的 `$|` 依賴「$ 後接非展開字元視為字面」的邊角行為，不寫）。
+    # 前導空白（' CON.txt'）刻意不處理——git 與 Win32 皆視為正常檔名，加擋只生偽陽性，
+    # 實測與樣本鎖見 check_ntfs_paths.py `_RESERVED_RE` 上方註解。
+    # 🔴 四個基本裝置名（CON、PRN、AUX、NUL）必須相鄰、新名一律加在尾端：
+    # test_windows_forbidden_filename_parity.py 的 repo-wide 錨①要求四者依序出現且間隙
+    # ≤5 字元（R60 初版插在中間，實測讓三處實作同時掉出該錨而無任何訊號）。
+    # case 交替順序不影響比對結果。
     case "$up" in
-      CON|PRN|AUX|NUL|COM[0-9]|LPT[0-9])
+      CON|PRN|AUX|NUL|COM[0-9]|LPT[0-9]|'CONIN$'|'CONOUT$')
         echo "路徑段「${seg}」為 Windows 保留裝置名（${up}）"
         return 0 ;;
     esac

@@ -1,7 +1,7 @@
 # 根層基建 CI（四方複審 B4，2026-07-10；防禦縱深補洞 2026-07-11）：workflows / hooks /
 # 工具腳本上移 monorepo 根層後，根層 tools/（bootstrap / integration_gate / git-hooks
 # dispatcher）與 .gitattributes、.editorconfig、dependabot 等基建原本零 CI 覆蓋——壞掉
-# 只會在開發者本機爆。本 workflow 做十二道輕量守門（僅 actions/checkout，不引其他外部
+# 只會在開發者本機爆。本 workflow 做十四道輕量守門（僅 actions/checkout，不引其他外部
 # action，避免供應鏈風險）：
 #   1. bash -n       — active *.sh（R56 起，原僅根層 tools/：AISDLC_SDD LATEST 版納入、
 #                      凍結版 v0.01~v0.(N-1) 依紀律不回改 → 排除，政策與第 2 道一致）
@@ -69,6 +69,29 @@
 #                      （R54 round 1/2〔DEF-101-420/424〕連續兩輪靠人工 grep 逐檔比對
 #                      才發現版本落差、且人工「已是穩定版」的自我宣稱本身失準，
 #                      R55 落地機械鎖收斂此缺口）
+#   13. 缺陷帳本保全稽核 — tools/archive_defect_log.py --check：帳本家族（主檔 ＋ 全部
+#                      archive）的四項事後保全 — 行尾全 LF／同檔內 ID 無重複列／同 ID
+#                      跨檔狀態分類不矛盾／全部「立帳見」指針帶可解析 DEF-ID 且居所
+#                      宣稱與實況一致。與第 9 道（帳本**體積**硬閘＋跨文件狀態一致）
+#                      互補：第 9 道守的是帳本與姊妹文件間的宣稱，本道守的是帳本家族
+#                      **內部**因歸檔搬遷而腐化的指針與重複列。R60 立此道的直接理由是
+#                      ARCH-R60-02／QA-R60-01：該工具本輪新增時「四道閘門零直接接線、
+#                      唯一間接接線是一條恆真斷言」，稽核回報 5 筆問題而所有閘門仍全綠
+#                      ——「可重跑但沒有任何閘門看它的 rc」與「不可重跑」等價
+#   14. ONBOARDING §7 表② presumed-stale 觸發器 — tools/sync_onboarding_baselines.py
+#                      --check-snapshot：比對四套測試樹（v0.01／v0.30 fsm_runtime tests、
+#                      AISDLC_SDD/scripts/tests、AutoClaude/tests）的內容指紋與 §7 表②
+#                      記載值，指紋一變即判該表 presumed stale。判準是**因果的**——
+#                      表② 的四個計數只可能因測試樹變動而變，故指紋比對（毫秒級）可以
+#                      取代重跑整套（分鐘級）。R60 round 3 立此道的直接理由是四方複審
+#                      round 2 **全數獨立命中**同一根因（ARCH-R60R2-02／SA-R60R2-02／
+#                      SD-R60-R2-02／QA2-R60-01）：round 1 填了 v0.30 當時值、round 2
+#                      動了該測試樹使實測改變而沒人回填，而表頭同時宣稱「四格皆經
+#                      獨立覆核」⇒ 假宣稱。同表的表① 兩格早有 live 鎖，本道補的是
+#                      「機器算不出現場值、但算得出『該重測了』」這個中間帶。
+#                      ⚠️ 誠實劃界：指紋只覆蓋測試樹 `*.py` 內容，生產碼改變
+#                      `parametrize` 來源／docker daemon 可用性／平台差異都能改變計數
+#                      而指紋不動 ⇒ 充分觸發器、非必要條件（會漏、不會冤）。
 #
 # 注：上列編號為清單序，與 job 內實際執行順序無關（如第 7 道 py_compile 實體 step
 # 緊接第 1 道 bash -n 之後執行）——R11 文件掃描[關注-3]澄清。
@@ -95,7 +118,7 @@ permissions:
 
 jobs:
   root-infra:
-    name: root infra guard (bash -n + pwsh parse/BOM + EOL(.sh) + EOL(.ps1) + NTFS + parity + py_compile + unittest + defect-log-crossref + wrapper-thinness + pytest-baseline-sites + gha-action-versions)
+    name: root infra guard (bash -n + pwsh parse/BOM + EOL(.sh) + EOL(.ps1) + NTFS + parity + py_compile + unittest + defect-log-crossref + wrapper-thinness + pytest-baseline-sites + gha-action-versions + defect-log-preservation + onboarding-snapshot-fingerprint)
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
@@ -303,3 +326,8 @@ jobs:
 
       - name: GitHub Actions 版本一致性（tools/check_gha_action_versions.py：全部 actions/* 跨 workflow 同版）
         run: python3 tools/check_gha_action_versions.py
+
+      - name: 缺陷帳本保全稽核（tools/archive_defect_log.py --check：立帳指針居所／同檔重複列／行尾／跨檔狀態）
+        run: python3 tools/archive_defect_log.py --check
+      - name: ONBOARDING §7 表② presumed-stale 觸發器（tools/sync_onboarding_baselines.py --check-snapshot：測試樹指紋）
+        run: python3 tools/sync_onboarding_baselines.py --check-snapshot

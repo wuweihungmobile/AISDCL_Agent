@@ -11,8 +11,17 @@
 行為：discover 後先斷言 countTestCases() >= MIN_TESTS 再執行；低於下限 exit 1
 （測試根本不跑——數量崩塌本身就是失敗）。刻意刪減測試時須同步下修 MIN_TESTS
 （比照 check_script_parity._MIN_EXTRACT_COUNTS 的紅燈指路慣例）。
-discovery import 失敗由 unittest 轉成 _FailedTest（計入數量且執行必紅），不會
-被本工具的計數守門漏掉。
+
+R60 Pkg-P8 補三層——因為「下限」語意只擋得住「掉太多」，擋不住「悄悄少幾支而總數
+仍在下限之上」（實測當時 916 支 vs 下限 845 ⇒ 可靜默蒸發 71 支仍印 ✅）：
+  ① `inventory_fingerprint`：把「這個數字是哪一份磁碟狀態產生的」一起印出來，
+     讓兩次數字不同時能當場分辨「樹變了」還是「同一棵樹量到不同數字」。
+  ② `collection_gaps`：斷言磁碟上每支 test_*.py 都至少貢獻一支測試（集合比對，
+     不是總數比大小），並把 discovery 佔位測試（`_FailedTest`／`ModuleSkipped`）
+     點名成硬失敗——後者原本 rc 仍為 0，是真的 fail-open。
+  ③ `report_execution_gap`：比較**收集數**與**實際執行數**。`setUpClass` 拋
+     SkipTest 會讓整個類別一支都不跑而 `countTestCases()` 完全不變，下限守門
+     結構性看不到（實測：收集 11／執行 2／rc=0）。
 
 呼叫端（取代裸 `python -m unittest discover -s tools/tests`）：
   tools/git-hooks/pre-push（root-infra leg ②）、.github/workflows/root-infra-ci.yml
@@ -23,6 +32,7 @@ discovery import 失敗由 unittest 轉成 _FailedTest（計入數量且執行�
 """
 from __future__ import annotations
 
+import hashlib
 import sys
 import unittest
 from pathlib import Path
@@ -35,7 +45,7 @@ _TESTS_DIR = Path(__file__).resolve().parent / "tests"
 # 下限釘選：低於此數＝測試大規模靜默消失（目錄/pattern/路徑壞掉），紅燈。
 # 刻意刪減測試時同步下修；新增測試在 `RATCHET_STALE_RATIO` 倍以內不需動（下限
 # 語意），超過即**必須**重釘，否則保鮮期斷言會讓閘門變紅（見下方兩層設計說明）。
-MIN_TESTS = 661  # R59 收尾重釘（R57 為 616）。R58 整輪作廢故無 R58 值。R57 收尾重釘（動工前為 R15 釘的 290，對當時實況 530 已鑑別力失效 45%＝可靜默蒸發 240 支仍綠）。本值由主控在**所有並行修復包與四方複審 agent 全部停工後**，於最終工作樹實跑 `python3 tools/run_root_unittests.py` 取其印出的「發現 N 個測試」直接填入，不做任何加減推算——R57 過程中兩度用算式推得 552／558，兩次都當場就與實況不符（SD-R57-01／QA-R57-07 抓出），故本行的重釘判準明定為「填實測值」
+MIN_TESTS = 994  # R60 round 3 收尾重釘（R59 為 661、R57 為 616；R60 中途曾釘 756、845）。R58 整輪作廢故無 R58 值。R57 收尾重釘（動工前為 R15 釘的 290，對當時實況 530 已鑑別力失效 45%＝可靜默蒸發 240 支仍綠）。本值由主控在**所有並行修復包與四方複審 agent 全部停工後**，於最終工作樹實跑 `python3 tools/run_root_unittests.py` 取其印出的「發現 N 個測試」直接填入，不做任何加減推算——R57 過程中兩度用算式推得 552／558，兩次都當場就與實況不符（SD-R57-01／QA-R57-07 抓出），故本行的重釘判準明定為「填實測值」
 
 # R57 修正：「人工 ratchet」本身就是缺陷來源——R15 釘完後連續 11 輪沒人重釘，
 # 下限與實況愈拉愈開、鑑別力單調衰減，而且**沒有任何訊號**提醒該重釘（下限語意
@@ -63,14 +73,208 @@ RATCHET_STALE_RATIO = 1.25
 WINDOWS_NATIVE_SKIP_TAG = "[WINDOWS-NATIVE-ONLY]"
 
 
+_PATTERN = "test_*.py"
+
+# discovery 佔位測試（`_FailedTest`／`ModuleSkipped`）都是在 `unittest.loader`
+# 裡動態造出來的類別，用 `__module__` 即可與真實測試模組區分。
+_PLACEHOLDER_MODULE = "unittest.loader"
+
+# 具名例外：磁碟上符合 `_PATTERN` 但**合法**不貢獻任何測試的檔案。
+# 現況為空集合（R60 實測 53 支 `test_*.py` 每支都至少貢獻 1 支測試）。刻意保留這個
+# 空常數而非省略：例外必須**逐檔具名並附理由**，不接受「整批略過」的通用開關——
+# 那等於把缺口洗掉。註：helper 檔（`_ci_scan_anchors.py`／`_platform_helpers.py`／
+# `_ps_engine.py`）不符 `test_*.py`，本來就不在收集面內，無需列名。
+_COLLECTION_EXEMPT: frozenset[str] = frozenset()
+
+
 def discover_suite(start_dir: Path) -> unittest.TestSuite:
     # 每次新建 TestLoader：defaultTestLoader 有狀態（_top_level_dir 殘留），
     # 同進程第二次對不同目錄 discover 會炸 "Start directory is not importable"。
-    return unittest.TestLoader().discover(str(start_dir), pattern="test_*.py")
+    return unittest.TestLoader().discover(str(start_dir), pattern=_PATTERN)
+
+
+def inventory_fingerprint(start_dir: Path, pattern: str = _PATTERN) -> tuple[int, str]:
+    """回傳 `(檔數, 指紋)`；指紋＝`(檔名, 位元組大小)` 排序後 sha256 前 12 碼。
+
+    WHY（R60 Pkg-P8 主修，對症的是**真正**的根因）：本 runner 印出的「發現 N 個
+    測試」過去是**不可跨次比較**的裸數字——它沒有記錄「這個 N 是由哪一份磁碟狀態
+    產生的」。R60 並行修復期間三次量測分別得到 894／906／916，被當成「並行負載下
+    收集數不決定性」立案追查；實際上三者是 865 ＋ {29, 41, 51}——865 是另外 52 支
+    檔的固定貢獻，{29, 41, 51} 則是**同一支** `test_check_defect_log_crossref.py`
+    被另一個並行包從 29 支逐步擴充到 51 支的三個時間切片（29 支＝該檔
+    `git show HEAD:` 版本實測值）。沒有任何一次是 race，缺的 12 支從來不存在。
+    印出指紋後，兩次數字不同時可**當場**分辨「樹變了」與「同一棵樹量到不同數字」
+    ——只有後者才是真的非決定性、才值得追。成本＝一行輸出。
+    """
+    rows = sorted((p.name, p.stat().st_size) for p in start_dir.glob(pattern))
+    blob = "\n".join(f"{name}:{size}" for name, size in rows)
+    return len(rows), hashlib.sha256(blob.encode("utf-8")).hexdigest()[:12]
+
+
+def _flatten(suite: unittest.TestSuite) -> list[unittest.TestCase]:
+    out: list[unittest.TestCase] = []
+    for item in suite:
+        if isinstance(item, unittest.TestSuite):
+            out.extend(_flatten(item))
+        else:
+            out.append(item)
+    return out
+
+
+def _module_of(test: unittest.TestCase) -> str:
+    cls = type(test)
+    if cls.__module__ == _PLACEHOLDER_MODULE:
+        # 佔位測試把「原本該被載入的模組名」放在方法名上（`_FailedTest(name, …)`）。
+        return str(getattr(test, "_testMethodName", ""))
+    return str(cls.__module__)
+
+
+def suite_modules(suite: unittest.TestSuite) -> dict[str, int]:
+    """純函式（無 I/O 副作用）：回傳 `模組名 -> 該模組被收集到的測試數`。"""
+    counts: dict[str, int] = {}
+    for test in _flatten(suite):
+        name = _module_of(test)
+        counts[name] = counts.get(name, 0) + 1
+    return counts
+
+
+def collection_gaps(
+    suite: unittest.TestSuite,
+    start_dir: Path,
+    pattern: str = _PATTERN,
+    exempt: frozenset[str] = _COLLECTION_EXEMPT,
+) -> list[str]:
+    """純函式：磁碟上符合 `pattern` 卻**一支測試都沒被收集到**的檔名（去 exempt）。
+
+    WHY：`MIN_TESTS` 是**下限**語意，只擋「掉太多」，擋不住「悄悄少收幾支而總數
+    仍在下限之上」——R60 當下實況 916 支 vs 下限 845 ⇒ **可靜默蒸發 71 支仍印 ✅**，
+    且沒被收集的測試不會出現在 `skipped=N`、不會出現在 `report_all_skips` 明細、
+    不會出現在任何一行輸出裡（它從來沒被 loader 交給 runner）。
+
+    而 `unittest` discovery 確實有一條**完全靜默**的丟檔路徑（Python 3.11.9 實查
+    `unittest/loader.py::TestLoader._find_test_path`）：`os.path.isfile()` 與
+    `os.path.isdir()` 皆為 False 時走結尾的 `else: return None, False`——不拋例外、
+    不進 `loader.errors`、不印任何東西。而 `os.path.isfile()` 內部
+    `except (OSError, ValueError): return False` 會把 stat 失敗吞成「不是檔案」；
+    `_find_tests()` 又只在開頭做一次 `sorted(os.listdir())` 之後才逐檔 import，
+    故「listdir 已看到、輪到它時檔案不在了」的窗口 ≈ 整段 discovery 時長。
+    （本包實測**排除**兩個曾被懷疑的觸發條件：另一行程持 exclusive handle
+    `dwShareMode=0`、以及 delete-pending `FILE_FLAG_DELETE_ON_CLOSE`，兩者
+    `os.path.isfile()` 皆仍回 True——Windows 對 `FILE_READ_ATTRIBUTES` 永不衝突。
+    只有「該瞬間檔案真的不在」才會觸發。）
+
+    故本層改成**集合比對**「磁碟每支 test_*.py 是否都至少貢獻一支測試」，抓的是
+    「有檔沒被收到」而非「總數掉太多」，鑑別力與 `MIN_TESTS` 正交。
+    """
+    on_disk = {p.stem for p in start_dir.glob(pattern)}
+    return sorted(on_disk - set(suite_modules(suite)) - exempt)
+
+
+def discovery_placeholders(suite: unittest.TestSuite) -> list[tuple[str, str]]:
+    """純函式：回傳 `(模組名, 佔位類別名)`——被 discovery 換成佔位測試的模組。
+
+    兩種佔位都會讓「一支檔的 N 支測試塌成 1 支」，計數靜默 -(N-1)：
+      `_FailedTest`（import 失敗）——執行時必紅，但**計數**的塌陷無聲；
+      `ModuleSkipped`（模組層 `raise SkipTest`）——**rc 仍為 0**，該模組整份覆蓋
+      無聲消失，是真正的 fail-open。
+    兩者都不該混在總數裡看不見，故一律點名並讓 rc 為 1。
+    """
+    out = [
+        (_module_of(t), type(t).__name__)
+        for t in _flatten(suite)
+        if type(t).__module__ == _PLACEHOLDER_MODULE
+    ]
+    return sorted(out)
+
+
+def fixture_level_entries(result: unittest.TestResult) -> list[str]:
+    """純函式：回傳 class／module 層 fixture（`setUpClass`／`setUpModule`）產生的條目。
+
+    `unittest` 用 `_ErrorHolder` 承載這類條目，而它**不是** `TestCase` 子類，故以
+    `isinstance(..., unittest.TestCase)` 為 False 即可辨識，無需 import 私有名稱。
+    """
+    out: list[str] = []
+    for bucket in (result.skipped, result.errors, result.failures):
+        for entry in bucket:
+            test = entry[0]
+            if not isinstance(test, unittest.TestCase):
+                out.append(str(getattr(test, "description", test)))
+    return sorted(out)
+
+
+def report_execution_gap(collected: int, result: unittest.TestResult) -> int:
+    """印出「收集到」與「真正執行」的差額；回傳差額（為 0 時完全靜音）。
+
+    WHY（R60 Pkg-P8，本包最重的發現）：`MIN_TESTS`／ratchet 守的是
+    `countTestCases()`＝**收集數**，但真正跑了幾支是 `result.testsRun`，而
+    **這兩個數字可以差很多，且原本沒有任何一處比較它們**。
+
+    機制（Python 3.11.9 實查 `unittest/suite.py::TestSuite.run`）：`setUpClass`／
+    `setUpModule` 失敗或 `raise SkipTest` 時，`_handleClassSetUp` 設下
+    `_classSetupFailed`／`_moduleSetUpFailed`，接著 `run` 對該類別每一支測試走
+    `continue`——`test(result)` **根本沒被呼叫**，故 `testsRun` 完全不增加，而
+    `countTestCases()` 早在 discovery 時就把它們算進去了。
+
+    實測（沙箱，9 支方法 + setUpClass 拋 SkipTest）：收集 11／執行 2／未執行 9，
+    `result.skipped` 只多**一筆** `setUpClass (…)`，`wasSuccessful()` 仍為 True
+    ⇒ **rc=0**。也就是說整個類別的覆蓋可以無聲消失，而下限守門結構性看不到
+    （它守的數字沒變），`skipped=N` 也只多 1、完全不提「這一筆吃掉了 9 支」。
+    對照：方法層 skip（`@skipUnless`）**會**計入 `testsRun`（`TestCase.run` 先
+    `startTest()` 才判 skip），所以只有 fixture 層會造成這個差額。
+    本 repo 現正使用該模式（`test_macos_smoke_skip_honesty.TestSummaryTailRealRun.
+    setUpClass` 在找不到 bash 時 `raise SkipTest`），故這不是理論風險。
+
+    設計取捨：**不**把差額一律判紅——上述環境條件式整類 skip 是本 repo 刻意採用的
+    合法模式，一律判紅會在缺工具的機器上製造假紅。改為「差額必須被點名、且必須有
+    fixture 層條目可歸因」，把判斷交給讀者；無法歸因的差額（例如 `result.stop()`
+    中途中止）才判紅。這與 DEF-101-510「不得只印計數」同一精神，只是把它從 skip
+    維度延伸到**執行**維度。
+    """
+    gap = collected - result.testsRun
+    if gap > 0:
+        print(
+            f"⚠️  收集 {collected} 支、實際執行 {result.testsRun} 支——有 {gap} 支"
+            f"**從未被執行**（下限守門看的是收集數，結構性抓不到這件事）。"
+            f"可歸因的 class／module 層 fixture 條目："
+        )
+        for description in fixture_level_entries(result) or ["（無——差額無法歸因）"]:
+            print(f"   - {description}")
+    return gap
+
+
+def report_collection_gaps(gaps: list[str], start_dir: Path) -> None:
+    if gaps:
+        print(
+            f"❌ 收集面完整性失敗：{start_dir} 底下有 {len(gaps)} 支 {_PATTERN} "
+            f"檔案一支測試都沒被收集到——這類「有檔沒被收到」不會出現在總數下限、"
+            f"不會出現在 skipped 明細、不會出現在任何輸出裡（見 collection_gaps "
+            f"docstring 的 stdlib 靜默丟檔路徑）：",
+            file=sys.stderr,
+        )
+        for name in gaps:
+            print(f"   - {name}.py", file=sys.stderr)
+        print(
+            "   若某支檔案確實刻意不含任何測試，請把它**具名**加入 "
+            "run_root_unittests._COLLECTION_EXEMPT 並註明理由。",
+            file=sys.stderr,
+        )
+
+
+def report_discovery_placeholders(suite: unittest.TestSuite) -> list[tuple[str, str]]:
+    placeholders = discovery_placeholders(suite)
+    if placeholders:
+        print(
+            f"❌ discovery 佔位測試 {len(placeholders)} 筆：下列模組的測試**沒有**"
+            f"被真正載入，整份覆蓋塌成一支佔位測試（計數靜默減少）：",
+            file=sys.stderr,
+        )
+        for module, kind in placeholders:
+            print(f"   - {module}（{kind}）", file=sys.stderr)
+    return placeholders
 
 
 def run_with_floor(start_dir: Path, min_tests: int) -> int:
-    """discover → 數量下限守門 → 執行；回傳 exit code。"""
+    """discover → 數量下限守門 → 收集面完整性守門 → 執行；回傳 exit code。"""
     suite = discover_suite(start_dir)
     count = suite.countTestCases()
     if count < min_tests:
@@ -82,13 +286,29 @@ def run_with_floor(start_dir: Path, min_tests: int) -> int:
         )
         return 1
     print(f"✅ unittest 數量下限釘選通過：發現 {count} 個測試（下限 {min_tests}）")
+    nfiles, fingerprint = inventory_fingerprint(start_dir)
+    print(
+        f"🧾 收集面盤存：{nfiles} 支 {_PATTERN} 檔／指紋 {fingerprint}"
+        f"（跨次數字可比較用，見 inventory_fingerprint docstring）"
+    )
+    gaps = collection_gaps(suite, start_dir)
+    if gaps:
+        report_collection_gaps(gaps, start_dir)
+        return 1  # 量測本身已不可信，fail-closed：不放行、也不假裝跑完
+    placeholders = report_discovery_placeholders(suite)
     warn_ratchet_drift(count, min_tests)
     result = unittest.TextTestRunner(verbosity=1).run(suite)
     report_windows_native_skips(result)
     report_all_skips(result)
+    # 無法歸因的「收集了卻沒執行」＝量測不完整（例如 result.stop() 中途中止）。
+    # 可歸因者（fixture 層 skip／error）只點名不判紅，理由見 report_execution_gap。
+    unexplained_gap = report_execution_gap(count, result) > 0 and not fixture_level_entries(result)
     if not result.wasSuccessful():
         dump_failure_detail(result)
-    return 0 if result.wasSuccessful() else 1
+    # 佔位測試刻意**不**提早 return：讓 suite 照跑，`_FailedTest` 才會把真正的
+    # ImportError traceback 交給 `dump_failure_detail` 落檔（提早 return 會丟掉
+    # 唯一的診斷資訊）；rc 則在此與 `wasSuccessful()` 一起收斂。
+    return 0 if (result.wasSuccessful() and not placeholders and not unexplained_gap) else 1
 
 
 def ratchet_drift_message(

@@ -94,7 +94,7 @@ negative lookbehind 收斂）。
         恰恰就是那段所警告的 `$var:NAME` 形狀（自我矛盾）。
     故真正的判準不是「冒號兩側有無空白」，而是**冒號左側是否為變數**
     （`$c ? 1:$b` 成立、`$c ? $a:1` 不成立）。
-    刻意不放寬冒號空白條件：實測放寬為 `\s\?\s*.*?\s*:\s*` 雖對現行 21 支 active
+    刻意不放寬冒號空白條件：實測放寬為 `\\s\\?\\s*.*?\\s*:\\s*` 雖對現行 21 支 active
     `.ps1` 仍零命中，但會讓 `… | ? { $_ -ne $env:TEMP }` 這類「Where-Object 別名
     ＋ `$env:X`」的同行寫法變成偽陽性，收緊代價高於收益。
     **因此檔頭「A 語法/運算子組」所列的 `? :` 僅涵蓋全空白形態**，非該禁令的完整
@@ -122,6 +122,13 @@ from pathlib import Path
 _TESTS_DIR = Path(__file__).resolve().parent
 _REPO_ROOT = _TESTS_DIR.parents[1]
 _OK_MARKER = "ps7-ok:"
+
+# R60 Scan-E E-A-01：掃描樹本體改取 SSOT（WHY 見該模組 docstring）。
+sys.path.insert(0, str(_REPO_ROOT / "tools"))
+from _script_scan_surface import (  # noqa: E402
+    LATEST_TREE_KEY,
+    SCRIPT_SCAN_ROOTS,
+)
 
 # （regex, 說明）；掃描對象為剝掉註解/字串後的 code 段
 _PATTERNS: list[tuple[re.Pattern[str], str]] = [
@@ -196,16 +203,31 @@ def _git_tracked_ps1(rel_prefix: str) -> list[str]:
     return sorted(line for line in proc.stdout.splitlines() if line)
 
 
+# per-tree 檔數下限＝2026-07-27 實掃數，刻意留在本檔（各鎖自己的靈敏度參數，非共用
+# 掃描面定義——見 `tools/_script_scan_surface.py` docstring「不收錄什麼」）。三棵固定樹
+# 的**樹名本體**自 R60 Scan-E E-A-01 起取自 SSOT；SSOT 新增一棵樹而本表未同步時
+# `_TREE_FLOORS[root]` 直接 KeyError＝fail-loud，不會靜默把新樹當 floor 0 放過。
+_TREE_FLOORS = {
+    "tools": 8,
+    "AutoClaude/tools": 7,
+    "AISDLC_SDD/scripts": 2,
+    LATEST_TREE_KEY: 4,
+}
+
+
 def scan_trees() -> list[tuple[str, list[str], int]]:
     """（樹 key, `.ps1` 相對路徑清單, 檔數下限）。LATEST key 正規化為 `LATEST`，
-    升版（Copy-on-Evolve 建 v0.(N+1)）不失效。"""
+    升版（Copy-on-Evolve 建 v0.(N+1)）不失效。
+
+    R60 Scan-E E-A-01：三棵固定樹改由 `tools/_script_scan_surface.SCRIPT_SCAN_ROOTS`
+    SSOT 提供（原為本檔自持字面值），與 `tools/check_script_parity.py` 的 enrollment
+    掃描面同源；形狀一致性另由 `test_script_scan_surface_ssot.py` 機械斷言。
+    """
     latest = _latest_root()
-    specs = [
-        ("tools", "tools", 8),
-        ("AutoClaude/tools", "AutoClaude/tools", 7),
-        ("AISDLC_SDD/scripts", "AISDLC_SDD/scripts", 2),
-        ("LATEST", f"AISDLC_SDD/{latest.name}", 4),
-    ]
+    specs = [(root, root, _TREE_FLOORS[root]) for root in SCRIPT_SCAN_ROOTS]
+    specs.append(
+        (LATEST_TREE_KEY, f"AISDLC_SDD/{latest.name}", _TREE_FLOORS[LATEST_TREE_KEY])
+    )
     return [(key, _git_tracked_ps1(prefix), floor) for key, prefix, floor in specs]
 
 
@@ -469,10 +491,17 @@ class TestPs51ScanConfigPinning(unittest.TestCase):
         # R56 round 6 修正（QA B-1）：字元類擴充納入 `.`／`-`，堵住「含點路徑的第 5
         # 棵樹插進 CI 卻完全隱形」的 fail-open（下方等值斷言即為數量下限）。
         paths = ci_fixed_trees(step.group(0))
+        # R60 Scan-E E-A-01：期望值改引 `_script_scan_surface.SCRIPT_SCAN_ROOTS` SSOT
+        # （原為本檔第三份硬編字面集合）。這一行同時是 E-A-01 要求的**形狀一致性鎖**
+        # ——`tools/check_script_parity.py` 的 enrollment 掃描面自此與 CI 第 2 道共用
+        # 同一份名冊，任一方增刪樹即在此翻紅。本鎖刻意放在本檔而非另立新檔：本檔已是
+        # `_ci_scan_anchors` 的登記呼叫端（`test_ci_scan_anchors._SSOT_CALLERS`）且已
+        # 接滿三條抽取錨，另立第 4 份呼叫端只會複製同一組錨、重演 R56 的三複本盲點。
         self.assertEqual(
-            paths, {"tools", "AutoClaude/tools", "AISDLC_SDD/scripts"},
-            f"root-infra-ci.yml 第 2 道的固定掃描樹已變動：{sorted(paths)}——"
-            f"本鎖與該 step 自述同掃描面，任一方增刪必須同步",
+            paths, set(SCRIPT_SCAN_ROOTS),
+            f"root-infra-ci.yml 第 2 道的固定掃描樹已變動：{sorted(paths)}"
+            f"（SSOT 名冊＝{sorted(SCRIPT_SCAN_ROOTS)}）——本鎖與該 step 自述同掃描面，"
+            f"且 check_script_parity 的 enrollment 面同源，任一方增刪必須同步",
         )
         # R56 round 7 修正（Architect F2 ／ QA ② 交叉發現）：上面的 `len(ci_trees)`
         # 等值斷言只對「_CI_TREE_RE 抽得到的樹」有效，對「抽不到的形態」天生零訊號

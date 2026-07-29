@@ -147,7 +147,19 @@ def _write_rule(rule: Rule) -> None:
     lock = rule._path.with_suffix(rule._path.suffix + ".lock")
     with file_lock(lock):
         tmp = rule._path.with_suffix(rule._path.suffix + ".tmp")
-        tmp.write_text(yaml.safe_dump(payload, allow_unicode=True, sort_keys=False), encoding="utf-8")
+        # newline="" 為必要（R60；同 DEF-101-524 的缺陷類別）：text 模式預設
+        # newline=None 會在 Windows 上把每個 "\n" 寫成 "\r\n"，而 governance/rules/
+        # 的 R-*.yaml 是 tracked 檔、`.gitattributes` 明文宣告 `*.yaml text eol=lf`。
+        # fire 遙測 production 出貨為 ON、`record_state_fires()` 在**每次 transition**
+        # 都經此路徑寫回，故 Windows 上跑一次 FSM 就實測讓 15 支規則檔整檔轉 CRLF
+        # （git 對每檔警告 "CRLF will be replaced by LF"）——工作樹憑空出現「已修改」
+        # 檔案，掩蓋真正的變更並觸發 smoke 的「未 commit 變更」告警；同一段程式在
+        # macOS/Linux 上只會產生 fire_count 的數字 diff，即兩平台 diff 體積不對稱。
+        tmp.write_text(
+            yaml.safe_dump(payload, allow_unicode=True, sort_keys=False),
+            encoding="utf-8",
+            newline="",
+        )
         tmp.replace(rule._path)
 
 

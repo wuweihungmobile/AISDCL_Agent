@@ -2,11 +2,15 @@
 """雙平台腳本對等機械守護 — .sh / .ps1 三對腳本的 step 標籤一致性 + pytest 釘選一致性
 + 掃描目錄內全部 .sh/.ps1（成對與單邊）的納管完整性（R11 架構改善 C2）。
 
-納管語意（R11 起；R12 ARCH-R12-3 擴面；R13 ARCH-R13-4 增列 tools/lib）：tools/、
-tools/lib/、AutoClaude/tools/、AISDLC_SDD/scripts/
-四目錄（非遞迴），加上 AISDLC_SDD **LATEST 演化版** `<LATEST>/tools/`（**遞迴**；LATEST
-以 scripts/sdd_version.py SSOT 動態解析，解析失敗 fail-loud——parity 只在 repo 內跑，
-git 必在；凍結版 v0.01~v0.2X 依鐵律不掃）下的每支 .sh/.ps1 必屬五類之一，否則
+納管語意（R11 起；R12 ARCH-R12-3 擴面；R13 ARCH-R13-4 增列 tools/lib；**R60 Scan-E
+E-A-01 收斂為 SSOT 名冊＋遞迴**）：掃描根一律取自 `tools/_script_scan_surface.py`
+的 `SCRIPT_SCAN_ROOTS`＝tools/、AutoClaude/tools/、AISDLC_SDD/scripts/ **三棵樹（遞迴）**
+——與 root-infra-ci.yml 第 2 道（pwsh parse ＋ BOM 守門）的 `-Recurse` 掃描面**同形狀**
+（R60 前本檔為「非遞迴 4 目錄」自有名冊，新開子目錄放腳本時 CI 掃得到、本檔看不到，
+且名冊本身無完整性鎖；WHY 與實測見該 SSOT 模組 docstring）；`tools/lib/` 因遞迴自動
+涵蓋，不再單獨列名。再加上 AISDLC_SDD **LATEST 演化版** `<LATEST>/tools/`（**遞迴**；
+LATEST 以 scripts/sdd_version.py SSOT 動態解析，解析失敗 fail-loud——parity 只在 repo
+內跑，git 必在；凍結版 v0.01~v0.2X 依鐵律不掃）下的每支 .sh/.ps1 必屬五類之一，否則
 fail-loud 列出未納管檔名：
   (1) 成對納管（_MARKER_PAIRS 標籤比對）；(2) 薄殼 hash 釘選（_THINNESS_ENROLLED）；
   (3) run_tlc FSM 軌錨點集合鎖（_TLC_TRACK_ENROLLED，R12）；(4) 成對豁免（_EXEMPT_PAIRS，
@@ -75,6 +79,10 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _stdio_utf8  # noqa: E402,F401  # Windows 非 UTF-8 終端 print(✅/❌/⚠) 防崩潰保護
+from _script_scan_surface import (  # noqa: E402
+    SCRIPT_SCAN_ROOTS,
+    iter_tree_scripts,
+)
 
 _REPO_ROOT = Path(__file__).resolve().parents[1]
 
@@ -326,14 +334,19 @@ def _check_git_longpaths_flag_parity() -> bool:
 # ── 成對/單邊腳本註冊完整性（enrollment 發現鎖）— R10 拍板案(a)，DEF-101-134；
 #    R11 架構改善 C2 擴充至單邊 ─────────────────────────────────────────────────
 # 過去「新增一對同名 .sh/.ps1 而不掛任何守門」零機械訊號（marker_pairs 與 thinness
-# 釘選對象皆硬編碼清單，磁碟上長出新對子沒人發現）。此檢查掃描宣告目錄（非遞迴）
+# 釘選對象皆硬編碼清單，磁碟上長出新對子沒人發現）。此檢查掃描 SSOT 名冊三棵樹
+# （**遞迴**，R60 Scan-E E-A-01 起與 CI 第 2 道同形狀）
 # 下的**所有** .sh/.ps1，斷言每支必屬四類之一：{成對 parity 標籤比對, 薄殼 thinness
 # hash 釘選, 成對明文豁免（附決策依據）, 單邊明文豁免（附決策依據）}，否則
 # fail-loud 列出未納管檔名（R11 前單邊腳本零訊號）；並反向檢查各註冊清單無 stale
 # 條目（防清單腐化）——單邊豁免的 stale 含兩種：檔案已消失、或對邊已出現（不再
 # 是單邊，須改登記為成對類）。
 _MARKER_PAIRS: list[tuple[str, str, str]] = []
-_PAIR_SCAN_DIRS = ("tools", "tools/lib", "AutoClaude/tools", "AISDLC_SDD/scripts")
+# R60 Scan-E E-A-01：掃描根不再由本檔自持名冊，一律取 SSOT
+# （`tools/_script_scan_surface.py`）——與 root-infra-ci.yml 第 2 道的 `-Recurse`
+# 掃描面同形狀（三棵樹、遞迴）。名稱保留 `_PAIR_SCAN_DIRS` 以免既有訊息／測試錨點
+# 大面積改名（Rule 3）；`tools/lib` 由遞迴涵蓋，不再單獨列名。
+_PAIR_SCAN_DIRS = SCRIPT_SCAN_ROOTS
 # LATEST 納管 key 前綴（R12 ARCH-R12-3）：登記用「相對 LATEST 的路徑」，版本升版
 # （copy-on-evolve）時登記不失效；實體路徑由 _resolve_latest_tools() 動態解析。
 _LATEST_PREFIX = "LATEST/tools/"
@@ -479,18 +492,21 @@ def _registered_path(rel: str, latest_tools: Path | None) -> Path | None:
 
 
 def _discover_scripts(latest_tools: Path | None) -> tuple[list[str], list[str]]:
-    """掃描宣告目錄（非遞迴）＋ LATEST tools（遞迴，R12）→（成對 stem, 單邊相對路徑）。"""
+    """掃描 SSOT 三棵樹（**遞迴**）＋ LATEST tools（遞迴，R12）→（成對 stem, 單邊相對路徑）。
+
+    R60 Scan-E E-A-01：三棵樹的列舉委派 `_script_scan_surface.iter_tree_scripts()`
+    單一實作（遞迴性只寫在那一處），成對判定改以「repo 相對路徑去副檔名」為 key
+    ——與舊的「同目錄內 stem 相同」語意等價（key 本來就含目錄），故既有納管登記
+    （含 `tools/lib/…` 這類子目錄 key）逐字不變；差別只在新開子目錄不再逸出掃描面。
+    """
     pairs: list[str] = []
     singles: list[str] = []
-    for rel_dir in _PAIR_SCAN_DIRS:
-        d = _REPO_ROOT / rel_dir
-        if not d.is_dir():
-            continue
-        sh_stems = {p.stem for p in d.glob("*.sh")}
-        ps1_stems = {p.stem for p in d.glob("*.ps1")}
-        pairs.extend(f"{rel_dir}/{stem}" for stem in sorted(sh_stems & ps1_stems))
-        singles.extend(f"{rel_dir}/{stem}.sh" for stem in sorted(sh_stems - ps1_stems))
-        singles.extend(f"{rel_dir}/{stem}.ps1" for stem in sorted(ps1_stems - sh_stems))
+    rels = iter_tree_scripts(_REPO_ROOT)
+    sh_stems = {r[: -len(".sh")] for r in rels if r.endswith(".sh")}
+    ps1_stems = {r[: -len(".ps1")] for r in rels if r.endswith(".ps1")}
+    pairs.extend(sorted(sh_stems & ps1_stems))
+    singles.extend(f"{stem}.sh" for stem in sorted(sh_stems - ps1_stems))
+    singles.extend(f"{stem}.ps1" for stem in sorted(ps1_stems - sh_stems))
     if latest_tools is not None and latest_tools.is_dir():
         # 遞迴：v0.30 實測四對散在 tools/ 根層與 install_hooks/、fsm_runtime/formal/、
         # arch_fitness/ 子目錄，非遞迴會整片漏掃（R12 病灶本體）。
@@ -575,7 +591,7 @@ def _check_pair_enrollment(latest_tools: Path | None = None) -> bool:
         ok = False
     if ok:
         print(f"✅ 腳本註冊完整性：{len(pairs)} 對 + {len(singles)} 支單邊皆已納管"
-              f"（掃描 {len(_PAIR_SCAN_DIRS)} 目錄 + LATEST tools 遞迴）")
+              f"（遞迴掃描 {len(_PAIR_SCAN_DIRS)} 棵 SSOT 樹 + LATEST tools）")
     return ok
 
 

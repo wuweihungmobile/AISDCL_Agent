@@ -16,23 +16,26 @@ dot-source 與 `$LASTEXITCODE` 的語言層行為一致，故不比照
 """
 from __future__ import annotations
 
-import shutil
 import subprocess
+import sys
 import tempfile
 import unittest
 from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from _ps_engine import any_engine_available, production_engine  # noqa: E402  # R60 E-A-03
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 _DEV_START_PS1 = _REPO_ROOT / "tools" / "dev_start.ps1"
 
 
 @unittest.skipIf(
-    shutil.which("powershell") is None and shutil.which("pwsh") is None,
+    not any_engine_available(),  # R60 E-A-03：語意② SSOT 述詞
     "需要 powershell/pwsh",
 )
 class TestDevStartPs1DotSourceLastExitCode(unittest.TestCase):
     def _run(self) -> subprocess.CompletedProcess:
-        exe = shutil.which("powershell") or shutil.which("pwsh")
+        exe = production_engine()  # R60 E-A-03：5.1 優先（DEF-101-509 判準）
         # R42 修復（DEF-101-350）：本機真實 Windows 11 開發機已有真實 `.venv`，
         # dev_start.ps1 的 `$VenvPy = Join-Path $Root '.venv\Scripts\python.exe'`
         # 用 Test-Path 短路判斷排在 PATH 查詢之前——原本只清空 PATH 的手法在「本

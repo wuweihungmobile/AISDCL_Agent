@@ -9,7 +9,7 @@
 #     - push 範圍變更含 AISDLC_SDD/ → 執行 AISDLC_SDD/.githooks/pre-push
 #     - push 範圍變更含「根層檔」（不在上述兩子專案底下的任何路徑，如 tools/、
 #       docs/、.github/workflows/）→ 執行 root-infra leg（py_compile + tools/tests
-#       unittest（含數量下限釘選，R10 QA-2）+ 六支守門工具），對齊 root-infra-ci.yml
+#       unittest（含數量下限釘選，R10 QA-2）+ 八支守門工具），對齊 root-infra-ci.yml
 #       的本地接線（R9 複審：原本純根層變更 push 一個閘門都不跑，CI 停擺期間零防護）
 #     - push 範圍命中「根層消費檔」（aisdlc-sdd-ci.yml paths 承認的非 AISDLC_SDD/
 #       條目，如 tools/check_ntfs_paths.py、.claude/hooks/sdd_hook_router.py）且
@@ -182,7 +182,7 @@ fi
 # root-infra leg（R9 複審接線）：純根層變更（tools/、docs/、workflows 等）原本
 # 一個閘門都不跑——root-infra-ci.yml 的守門在 CI 帳單停擺期間本地零接線。
 # 內容對齊 root-infra-ci.yml：py_compile 全 tools/*.py + tools/tests unittest +
-# 六支守門工具；失敗累積進 rc（不中斷其他 leg），python 缺席 fail-loud 不軟跳過。
+# 八支守門工具；失敗累積進 rc（不中斷其他 leg），python 缺席 fail-loud 不軟跳過。
 # （R56 訂正：R55 由五支增為六支時本行漏改，與 L12／L211 及實際迴圈不一致；
 #  三處計數宣稱現由 test_root_infra_parity.py::test_guard_count_claims_match_loop
 #  機械斷言與迴圈項數相等，不再靠人工同步。）
@@ -211,14 +211,22 @@ if [ "$run_rootinfra" -eq 1 ]; then
         echo "[pre-push dispatcher] ❌ root-infra：tools/tests unittest 失敗" >&2
         leg_rc=1
       fi
-      # ③ 六支守門工具（逐支跑完累積，不因單支失敗提早退出；R13 增
+      # ③ 八支守門工具（逐支跑完累積，不因單支失敗提早退出；R13 增
       #    check_pytest_baseline_sites.py——pytest 基線數字站點鎖，對齊 CI 第 11 道；
       #    R55 增 check_gha_action_versions.py——GitHub Actions 版本一致性鎖，
-      #    對齊 CI 第 12 道）
-      for guard in tools/check_script_parity.py tools/check_ntfs_paths.py \
-                   tools/check_defect_log_crossref.py tools/check_wrapper_thinness.py \
-                   tools/check_pytest_baseline_sites.py tools/check_gha_action_versions.py; do
-        if ! python "$guard"; then
+      #    對齊 CI 第 12 道；R60 增 archive_defect_log.py --check——帳本保全稽核，
+      #    對齊 CI 第 13 道。R60 round 1 四方複審 ARCH-R60-02／QA-R60-01 實證：帳本
+      #    **體積**硬閘（check_defect_log_crossref.py）本來就在這個迴圈裡，而同一份
+      #    帳本的**保全**稽核卻零接線——「可重跑但沒有任何閘門看它的 rc」與「不可
+      #    重跑」是同一個病的兩種形狀，故本輪把 rc 真正接上。）
+      #    迴圈項改為「指令字串」（可帶子指令參數），故 python 後刻意不加引號以分詞。
+      for guard in "tools/check_script_parity.py" "tools/check_ntfs_paths.py" \
+                   "tools/check_defect_log_crossref.py" "tools/check_wrapper_thinness.py" \
+                   "tools/check_pytest_baseline_sites.py" "tools/check_gha_action_versions.py" \
+                   "tools/archive_defect_log.py --check" \
+                   "tools/sync_onboarding_baselines.py --check-snapshot"; do
+        # shellcheck disable=SC2086  # 刻意分詞：項目可帶子指令（archive_defect_log --check）
+        if ! python $guard; then
           echo "[pre-push dispatcher] ❌ root-infra：$guard 失敗" >&2
           leg_rc=1
         fi

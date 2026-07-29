@@ -12,8 +12,13 @@
   1. 路徑含控制字元（C locale [:cntrl:]＝0x00-0x1F + 0x7F），或任一路徑段含
      Windows 不允許字元 < > : " | ? * \\，或以空白/句點結尾（NTFS 不允許）
   2. 任一段去（第一個點起的）副檔名、再剝除尾隨空白後（不分大小寫）為 Windows 保留裝置名
-     CON / PRN / AUX / NUL / COM0~9 / LPT0~9（COM0/LPT0 非 Microsoft 官方保留名，
-     但比照 sindresorhus/filename-reserved-regex 等業界防禦性實作採保守納入）
+     CON / PRN / AUX / NUL / COM0~9 / LPT0~9 / CONIN$ / CONOUT$
+     （R60 訂正：本行原稱「COM0/LPT0 非 Microsoft 官方保留名，但比照
+     sindresorhus/filename-reserved-regex 等業界防禦性實作採保守納入」——實測 git
+     for Windows 對兩者的裁決並不相同：`git -c core.protectNTFS=true update-index
+     --add --cacheinfo` 對 `LPT0` 回 `error: Invalid path`、對 `COM0` 則 ACCEPT。
+     即 LPT0 是**必須**擋（否則 Windows checkout 整棵樹開不出來），只有 COM0 才是
+     純保守納入。CONIN$／CONOUT$ 見 `_RESERVED_RE` 上方註解）
   3. 大小寫碰撞：兩 tracked 路徑 lowercase 後相同但原字串不同
      （NTFS 大小寫不敏感 → checkout 時互相覆蓋）
   4. MAX_PATH 保守長度閘（DEF-101-039）：Windows 未開 core.longpaths 時絕對路徑上限
@@ -48,7 +53,42 @@ import _stdio_utf8  # noqa: E402,F401  # Windows 非 UTF-8 終端 print(✅/❌/
 _REPO_ROOT = Path(__file__).resolve().parents[1]
 
 _FORBIDDEN_CHARS = set('<>:"|?*\\')
-_RESERVED_RE = re.compile(r"^(CON|PRN|AUX|NUL|COM[0-9]|LPT[0-9])$")
+# R60（DEF-101-B-refuter-1）：補上 `CONIN$`／`CONOUT$`。權威模型＝git for Windows 的
+# `core.protectNTFS`（Windows 預設 true），因為真正炸掉的環節不是 Win32 建檔而是 git
+# 簽出。本機實測（Win 11 Pro 26200 / Git Bash 5.2.37，拋棄式 repo、不碰本 repo）：
+#   git -c core.protectNTFS=true update-index --add --cacheinfo …
+#     REJECT: CONIN$.log / CONOUT$.txt / CONIN$ / conin$.log / CONIN$.tar.gz /
+#             CONIN$ .log / CONOUT$   .txt（大小寫、多重副檔名、尾隨空白皆不影響）
+#     ACCEPT: CLOCK$.txt / CLOCK$ .txt（故**刻意不納入** CLOCK$，見下方 benign 樣本）
+#             CONIN.log / CONIN（少了 `$` 就不是裝置名，故正則要求完整 token）
+#   實害：以 protectNTFS=false 把 'CONIN$.log' 提交後，用預設設定 clone →
+#         `error: invalid path 'CONIN$.log'` + `fatal: unable to checkout working tree`、
+#         rc=128、工作樹**全空**（連無關的 plain.txt 也沒有）。與 R57 已修的
+#         「保留名 + 尾隨空白」（DEF-101-478）破壞同級：不是單檔失敗，是整個 clone 不可用。
+#   繞過管道＝本檔檔頭已列的三條（--no-verify／GitHub web／未裝 hooks），加上
+#   `core.protectNTFS` 在非 Windows 平台預設不啟用 → mac/Linux 側可入庫。
+#
+# **前導空白刻意不處理**（R60，四處實作統一決策）：「保留名 + **前導**空白」（' CON.txt'／
+# '  COM1.log'／' NUL .log'／' CON .txt'）看似 R57 尾隨空白形態的鏡像，實測**不是**缺口：
+#   · git（protectNTFS=true）對上述全部形態 ACCEPT——git 只在路徑段**起頭**比對保留名，
+#     前導空白使比對失配；含前導形態的 repo clone 實測 rc=0、工作樹有檔、
+#     `git status --porcelain` 空、內容讀回正確 payload。
+#   · Win32 只吞**尾隨**空白/句點，不吞前導：本機實測 ' CON.txt'／' CON'／'CON.txt'／
+#     ' CON .txt' 四者可同時共存於同一目錄（os.listdir 全部列出、各 10 bytes 可讀回）。
+#   故在本檔（validator）加擋前導空白＝**純新增偽陽性**（擋下 git 與 Windows 都接受的
+#   檔名），零實害可擋。此決策由 tools/tests/test_windows_forbidden_filename_parity.py
+#   的 `LEADING_SPACE_RESERVED_SEGMENTS` 樣本電池機械釘住（validator 側必須放行），
+#   下輪掃描者若再把它當鏡像缺口回報，請先讀該樣本清單與本段實測。
+#
+# 🔴 交替分支順序有意義，勿「整理」：四個基本裝置名（CON、PRN、AUX、NUL）必須**相鄰**，
+# 新裝置名一律加在清單**尾端**。
+# `tools/tests/test_windows_forbidden_filename_parity.py::_RESERVED_LIST_ANCHOR` 這道
+# repo-wide 前瞻掃描鎖（抓「新增第 5 份獨立重寫」）要求四者依序出現且間隙 ≤5 字元。
+# R60 初版把 CONIN／CONOUT 兩支插在 CON 與 PRN 之間，實測使本檔、pre-commit、logger.py
+# 三處**同時**掉出錨①（間隙 17 字元），只靠錨②（禁用字元集合）苟活——註冊表等值斷言
+# 照樣全綠，degradation 完全無訊號。改置於清單尾端後三處回歸命中。
+# 對正則語意零影響（`^(...)$` 完全錨定，交替順序不改變匹配集合）。
+_RESERVED_RE = re.compile(r"^(CON|PRN|AUX|NUL|COM[0-9]|LPT[0-9]|CONIN\$|CONOUT\$)$")
 
 # MAX_PATH 保守長度閘（DEF-101-039）：
 # 可用 259（260 含 NUL）− 59（clone 前綴預留）＝ 200 fail；180 warn

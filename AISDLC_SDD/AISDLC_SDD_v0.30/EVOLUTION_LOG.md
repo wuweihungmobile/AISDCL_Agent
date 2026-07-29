@@ -34,6 +34,23 @@
 | **殘留落差** | DEF-101-358 本輪透過本次架構變更 fixed@R45（見缺陷帳本該筆記載），但這個修法本身引入一個新的架構取捨，誠實記載：**29 個凍結版本「`_sanitize_component()` 的行為」從此不再完全由各版本自己凍結的原始碼決定，而是委派給 `AISDLC_SDD/scripts/component_sanitizer.py`——一支明確不受 Copy-on-Evolve 保護、可被自由修改的共用檔案**。往後任何人修改 `component_sanitizer.py`，29 個凍結基線對這一項行為會立即、同步、無痕地跟著變動，不需要碰它們自己的原始碼樹。這正是本次重構「改一處、全版本立即生效」的設計目的，但代價是：對此函式而言，「凍結」僅止於原始碼層級（各版 `state_loader.py` 檔案本身逐位元組不變），不再涵蓋行為層級（實際執行結果可隨共用模組演進而變）。此取捨經使用者於架構決策時知情核准，非本輪新增的未揭露風險，僅在此明確記載供未來查詢「凍結基線的『凍結』確切涵蓋什麼」時參考。另，Architect 建議之「修復 LATEST 端 AST 掃描器兩個已知盲區並擴大唯讀掃描至全部凍結版本」（可偵測未來新增的未淨化呼叫點，非本次共享層要解決的問題）留待下一輪評估，見 DEF-101-378。 |
 | **回退指引** | 若日後需要回退（例如共用模組載入機制本身出問題），30 個版本的 `state_loader.py` 皆可獨立還原各自原本的內嵌定義（29 版還原弱化版、v0.30 還原強化版），刪除 `AISDLC_SDD/scripts/component_sanitizer.py` 即可；**不建議回退**——回退會使 29 個凍結版本重新失去 Windows 保留裝置名等防護縱深。回退不影響任何版本的 API/FSM 狀態/`*.tla`（純函式取得方式變更，行為輸出對外呼叫端不變）。 |
 
+## 凍結基線例外：v0.01～v0.29 `path_cost.py` 檔名淨化回補（R46，2026-07-26）
+
+> **注意**：本節同 R44／R45 兩節，是對既有 29 個**凍結基線版本原地打補丁**的例外記錄（非正常 Copy-on-Evolve 演化）。這是繼 R44（P0 路徑穿越回補）、R45（`_sanitize_component()` 共享層抽取）之後，帳本史上**第三次**對凍結基線做例外回補。完整逐版驗證細節見根層 `docs/06_quality/AutoSDD_Defect_Log_archive_22.md` 的 `DEF-101-379`（與同輪 `DEF-101-378` 掃描器擴面互為因果；本節為其權威索引，不重複散文敘述）。
+>
+> 🔴 **本節為 R60 補記，不是 R46 當時寫的**：R46 落地時漏補本節，於是照 `DEF-101-370` 指定的路徑（本檔＝「Copy-on-Evolve 是否曾被打破」的權威索引）查「例外發生過幾次」只會查到 2 次——這正是 `DEF-101-392`／`DEF-101-401` 把次數寫成「兩度」的一條來源（見 `DEF-101-549`／`DEF-101-550`，以及 `docs/04_planning/ADR/ADR-XPLAT-001-copy-on-evolve-frozen-baseline-backport.md` §3.3／§7）。次數本體以 git 獨立覆核（R60 實跑，判準寫明以免下一位重算不出同一個數）：`git log --since=2026-07-25 -- 'AISDLC_SDD/AISDLC_SDD_v0.0[1-9]/**' '…v0.1*/**' '…v0.2[0-9]/**'` 只回 **3 支**——`68c159d`（R44）／`6b24eb7`（R45）／`aa5c075`（R46），故 R46 之後（R47~R60）零第四次。⚠️ 不要改用「凍結版樹的全部歷史」當判準：那會一併撈到 `f40f5c7`（R40，修 bot 回寫 v0.01 的治理缺口）與各版建版／bot commit，那些**不是**經核准的破例回補。本次回補逐檔實查＝29 支 `path_cost.py`（`v0.01`~`v0.29`，**不含 v0.30**）。另註：R45 章節寫「這是繼 R44 之後…第二次」，該敘述在當時為真、不需訂正。
+
+| 欄位 | 內容 |
+|------|------|
+| **範圍** | `AISDLC_SDD_v0.01/`～`AISDLC_SDD_v0.29/`（29 個凍結基線版本）× `tools/fsm_runtime/path_cost.py::_write_milestone()`，每版兩個組檔名成分（`subagent`／`classification`）；不含 v0.30（LATEST 早在 R39 commit `d4c7d8d` 即已修好）。破例 commit＝`aa5c075`。 |
+| **日期／signoff** | 2026-07-26（R46 跨平台相容性複審）；🔴 人工 signoff：使用者明確核准第三次打破 Copy-on-Evolve。**但核准依據事後被證偽**——核准當下引用的「P1／PoC 實測確認寫出樹外／`oqs_calibration.py` 與 `value_planner.py` 兩支 production 模組皆呼叫 `record_sample()` 觸達」諸項宣稱，經 R46 四方一審 SA 要求、由主控以 `git show HEAD:…/path_cost.py` 取修復前原始碼逐字重現＋全域 grep 複核後，證實**皆為誤植**（詳見「殘留落差」欄）。 |
+| **打破 Copy-on-Evolve 的理由** | R44（`DEF-101-357`）回補同批次時只列了 3 個檔（`production_to_fpl.py`／`sandbox_runner.py`／`hub_merge.py`），**漏了 `path_cost.py` 這第 4 個**，故 29 份凍結副本從未回補、也從未被任何掃描器發現過。核准判準逐字：「機械套用與 v0.30 相同的一行改法（**比照 R44 判例**）……即使目前無可觸達路徑，仍是防禦縱深與跨版本一致性的正確修法」，並同時作為 `DEF-101-378` 掃描器擴面後的首個驗證標的。 |
+| **修法** | 逐版加 `from .state_loader import _sanitize_component`（確認 29 版 `state_loader.py` 皆已匯出），組檔名行的兩個成分各包一層 `_sanitize_component()`；修復後 `diff v0.29 v0.30 path_cost.py` 零差異。**不升版、不新增版本目錄**，僅原地補丁既有 29 個凍結版本。 |
+| **TLC 證據** | N/A——改動限於 `_write_milestone()` 的字串淨化呼叫點，未觸碰任一版本的 `_HAPPY_PATH` 或任何 `*.tla`/`.cfg`，各版既有五軌 TLC 證明維持有效。 |
+| **驗證** | 主控親手在 `v0.15/path_cost.py` **注入回歸**（拿掉 `_sanitize_component()` 包裝）證實同輪新落地的跨版本掃描鎖 `AISDLC_SDD/scripts/tests/test_sanitize_component_callsite_frozen_versions.py` 會真的轉紅，驗證後即還原；修復後全 30 版掃描零 offender。同輪 `AISDLC_SDD/scripts/tests/test_component_sanitizer_callsite_scan.py` 共 27 case（21 基礎 ＋ QA 一審 2 ＋ SD 一審 2 ＋ SD 二審 2）以獨立構造的 fixture 驗新 AST 邏輯（`BoolOp`／`IfExp` 遞迴拆解、有界別名追蹤 5-hop 邊界值、逐作用域隔離含 `ClassDef`）的鑑別力，而非只靠「掃現有程式碼零 offender」這種對新邏輯零鑑別力的整合測試。 |
+| **殘留落差** | 🔴 **本次的真正教訓＝核准依據事後被證偽，但修復未回退**（理由：修法本身無害且是正確工程實務），只訂正帳本敘事：實際攻擊效果是 `FileNotFoundError`（DoS 類）而非可逃出樹外的路徑穿越——字面前綴 `CALIBRATION-MILESTONE-` 與 `{subagent}` 之間沒有分隔符，第一個路徑分段永遠是 `CALIBRATION-MILESTONE-..`，且 `_write_milestone()` 只對固定的 `out_dir` 呼叫 `mkdir`、從未對 `p.parent` 呼叫；且 `PathCostEstimator.record_sample()` 在全部 30 版的 `tools/fsm_runtime/` 生產碼**零消費者**（`oqs_calibration.py`／`value_planner.py` 僅在註解/docstring 提及「path_cost」字樣，未 import 或呼叫），嚴重度由 P1 下修為 **P3**。這代表**破例判準曾以錯誤前提被滿足過一次**——`ADR-XPLAT-001` §4 因此把「可觸達性／可利用性必須先取證」抬成破例的**前置**條件而非事後補說明（§3.3 判例）。另 `build_alias_map` 的「模組層級別名被函式引用」「巢狀函式 closure 引用外層別名」兩個更深的跨作用域案例，經 SD／Architect 三審皆確認接受「不修、誠實記載為已知限制」的收尾（見該模組 docstring 方法論邊界段落；比例原則，全 repo 現況零真實呼叫點）。 |
+| **回退指引** | 若日後需要回退（例如發現本次修法本身有誤），逐版還原 29 支 `path_cost.py` 的 import 與兩處包裝即可；**不建議回退**——即使目前無可觸達路徑，回退會讓凍結版與 LATEST 再度分歧，並使 `DEF-101-378` 的跨版本掃描鎖轉紅。回退不影響任何版本的 API/FSM 狀態/`*.tla`（純字串淨化呼叫，無其他變更）。 |
+
 ## v0.29 → v0.30
 
 | 欄位 | 內容 |

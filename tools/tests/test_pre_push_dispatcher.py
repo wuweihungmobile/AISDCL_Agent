@@ -262,9 +262,9 @@ class TestPrePushDispatcher(unittest.TestCase):
         os.chmod(self.repo / "AISDLC_SDD" / ".githooks" / "pre-push", 0o755)
 
         # 最小 root-infra 面：py_compile 目標（tools/ + .claude/hooks/，驗 R10
-        # 範圍擴充不炸）、run_root_unittests 替身（寫 marker）、六支守門 stub
-        # （R13 增 check_pytest_baseline_sites；R55 增 check_gha_action_versions，
-        # 隨 pre-push leg ③ 清單同步）。
+        # 範圍擴充不炸）、run_root_unittests 替身（寫 marker）、七支守門 stub
+        # （R13 增 check_pytest_baseline_sites；R55 增 check_gha_action_versions；
+        # R60 增 archive_defect_log --check，隨 pre-push leg ③ 清單同步）。
         self._write("tools/ok.py", "OK = True\n")
         self._write("tools/run_root_unittests.py", _py_marker_stub(self.marker_rootinfra))
         for guard in (
@@ -276,6 +276,24 @@ class TestPrePushDispatcher(unittest.TestCase):
             "check_gha_action_versions",
         ):
             self._write(f"tools/{guard}.py", "raise SystemExit(0)\n")
+        # R60：leg ③ 的守門迴圈項自此可帶子指令（`archive_defect_log.py --check`），
+        # 實作靠「`python $guard` 不加引號以分詞」。本 stub 刻意**檢查 argv**：少了
+        # `--check` 就回非零 → 這支 fake-repo 測試同時成為那個分詞機制的端到端驗證，
+        # 而不只是讓迴圈有檔可跑（不檢查 argv 的 stub 會讓「參數被吃掉」靜默通過）。
+        self._write(
+            "tools/archive_defect_log.py",
+            "import sys\n"
+            'raise SystemExit(0 if "--check" in sys.argv else 3)\n',
+        )
+        # R60 round 3：leg ③ 第 8 支＝`sync_onboarding_baselines.py --check-snapshot`
+        # （ONBOARDING §7 表② 的測試樹指紋觸發器，DEF-101-563）。同上以 argv 檢查
+        # 當 stub，讓「子指令被吃掉」不可能靜默通過——這一支的子指令與前一支不同字樣，
+        # 故兩支併看即證明分詞機制對「多個各帶不同子指令的項目」都成立。
+        self._write(
+            "tools/sync_onboarding_baselines.py",
+            "import sys\n"
+            'raise SystemExit(0 if "--check-snapshot" in sys.argv else 4)\n',
+        )
         self._write(".claude/hooks/trivial_hook.py", "OK = True\n")
 
         # 消費檔清單來源 + 消費檔 leg 的 pytest 目標（conftest 寫 marker＝執行鐵證）。

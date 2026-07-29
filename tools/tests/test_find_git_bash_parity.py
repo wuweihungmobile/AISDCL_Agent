@@ -14,11 +14,24 @@
      （較寬鬆，可能誤傷路徑含 "system32" 子字串但非該目錄段的候選）。Python 版
      已改為 `_has_system32_segment()` 依 `PureWindowsPath` 路徑段逐一比對對齊。
 
-本測試**不**在 macOS 上真的執行 PowerShell 版本比對回傳值（環境跑不了 pwsh 也
-沒有真實候選路徑可測），改用**靜態文字結構比對**：用正則從兩份原始碼各自抽出
-「候選路徑清單的 (環境變數名, 相對路徑片段) 序列」與「System32 排除比對的目標
-片語」，斷言兩邊抽出結果相等——抽取式比對手法比照 tools/check_script_parity.py
-既有機制（不修改該檔案，本測試獨立成新檔）。
+  3. **R60 P10-2（真 parity 缺陷，兩側對同一輸入相反裁決）**：上述第 2 點的靜態鎖
+     只比對「兩邊拿哪個**字面詞**去比」，對「用什麼**手法**比」全然盲目。實測
+     `C:/Windows/System32/bash.exe`（正斜線寫法；Windows 上與反斜線寫法指向同一個
+     檔案）PS 側行內 regex `-notmatch '\\System32\\'` 判**放行**、Python 側
+     `PureWindowsPath` 逐段比對判**排除**；且可觸達——`(Get-Command bash).Source` 由
+     「PATH 條目 + 檔名」拼成，PATH 條目寫正斜線時 Source 就帶正斜線，修前
+     `Find-GitBash` 實測回傳了 WSL 的 bash。PS 側已改為 `Test-HasSystem32Segment`
+     逐段比對（Python 側為正解、不動），並新增下方 `TestSystem32VerdictParity`
+     **行為表 parity 鎖**。
+
+比對手法（兩層，缺一都有實證盲區）：
+  - **靜態文字結構比對**：用正則從兩份原始碼各自抽出「候選路徑清單的 (環境變數名,
+    相對路徑片段) 序列」與「System32 排除比對的目標片語」，斷言兩邊抽出結果相等
+    ——抽取式比對手法比照 tools/check_script_parity.py 既有機制（不修改該檔案）。
+  - **行為表 parity 鎖（R60 P10-2 新增）**：`TestSystem32VerdictParity` 真的起
+    PowerShell dot-source `Find-GitBash.ps1` 執行判定，與 Python 側逐筆比對同一組
+    輸入。無 PowerShell 引擎的機器（macOS/Linux）誠實 skip；引擎挑選走
+    `tools/tests/_ps_engine.py` SSOT（5.1 優先，DEF-101-509 判準）。
 
 執行：python3 -m unittest discover -s tools/tests -p "test_*.py" -v
 """
@@ -39,6 +52,7 @@ _PY_PATH = _REPO_ROOT / "tools" / "integration_gate_core.py"
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import integration_gate_core  # noqa: E402
 from _platform_helpers import cut_ps_inline_comment, strip_ps_comments  # noqa: E402
+from _ps_engine import any_engine_available, production_engine  # noqa: E402
 
 _TESTS_DIR = Path(__file__).resolve().parent
 # PowerShell 註解剝除的 SSOT 模組與符號（呼叫端鎖 `TestPsCommentStripperSsotCallsiteLock`
@@ -347,11 +361,79 @@ def _extract_py_system32_word(text: str) -> str:
 
 
 def _extract_ps1_system32_word(text: str) -> str:
-    m = re.search(r"-notmatch\s+'([^']*)'", text)
-    assert m, "Find-GitBash.ps1 找不到 System32 排除 regex"
+    """R60 P10-2：PS1 側排除判定由行內 regex `-notmatch '\\\\System32\\\\'` 改為
+    `Test-HasSystem32Segment` 的逐段比對，故字面值抽取改錨在段比對那一行
+    （`$segment.ToLowerInvariant() -eq '…'`）。錨點刻意含 `ToLowerInvariant()`：
+    檔內另有 `$envVarName -eq 'LocalAppData'`，只錨 `-eq '…'` 會抽錯詞。"""
+    m = re.search(r"ToLowerInvariant\(\)\s*-eq\s+'([^']*)'", text)
+    assert m, (
+        "Find-GitBash.ps1 找不到 System32 排除段比對（`…ToLowerInvariant() -eq '…'`）"
+        "——結構已變動；若又退回行內 regex 子字串比對，那正是 P10-2 的迴歸"
+    )
     words = re.findall(r"[A-Za-z0-9]+", m.group(1))
-    assert words, "Find-GitBash.ps1 的 System32 排除 regex 抽不出任何字面詞"
+    assert words, "Find-GitBash.ps1 的 System32 排除段抽不出任何字面詞"
     return words[0]
+
+
+# ── 兩側判定行為表（R60 P10-2）─────────────────────────────────────────────────
+# 同一組輸入餵 Python 側與 PowerShell 側，逐筆斷言同判。第二欄是**判準**（不是
+# 「現況快照」）：目的是避開 WSL 啟動器 System32 下的 bash.exe，而 Windows 的 `/`
+# 與 `\` 等價（實測 Test-Path -LiteralPath 對正斜線寫法亦為 True、指向同一個檔案）
+# ⇒ 正斜線／混用寫法都必須排除。
+#
+# 🔴 為何本表逐列掛 `platform-ok` 而**不**改用 `_platform_helpers.ABS_FAKE_REPO`
+# （R60 P10-2；`test_platform_neutral_paths` 的三條指路裡刻意選第三條）：
+#   (a) 該常數**依平台分歧**（win32 取 D:/repo 磁碟機形態、其他平台取 /repo）。本表
+#       的受測函式（`_has_system32_segment` / `Test-HasSystem32Segment`）語意是
+#       「一律以 **Windows** 路徑語意切段」（前者 docstring 明載：即使在非 Windows
+#       主機被直接呼叫也要依分隔符正確切段），餵一個在 POSIX 會變成 `/repo` 的常數
+#       等於把受測語意換掉。
+#   (b) 本表的鑑別力**就長在字面形態上**：`System32` 這個目錄段名、以及 `/`／`\`／
+#       混用三種分隔符寫法。`ABS_FAKE_REPO` 既沒有 `System32` 段，在 POSIX 分支也
+#       沒有分隔符歧義（三列會塌成同一種形態）⇒ 改用它＝行為表全體失去鑑別力。
+#   (c) 這些字面值**不做任何 pathlib join**（純字串餵判定函式後比對 bool），故不觸
+#       及 DEF-101-149「D:/repo 在 POSIX 非絕對路徑 → join 語意分歧假紅」那個病灶；
+#       同理，`_platform_helpers.py` 自己也是以「win32 分支本來就該寫磁碟機路徑」
+#       登記在該鎖的整檔豁免 `_ALLOWED` 內。
+#   ⇒ 復核條件（下一輪據此判斷豁免是否仍成立）：若哪天受測函式改成吃 `Path` 物件、
+#      或改為依宿主 OS 語意切段，本豁免即失效，必須連同本表一起重新設計。
+_SEGMENT_CASES: tuple[tuple[str, bool, str], ...] = (
+    # 病灶本體：舊 PS regex 要求 System32 前後皆反斜線 → 判放行；Python 判排除。
+    (
+        r"C:/Windows/System32/bash.exe",  # platform-ok: 正斜線分隔符即病灶本體
+        True, "全正斜線",
+    ),
+    # `(Get-Command bash).Source` 實測形狀：PATH 條目正斜線 + 拼上的檔名反斜線。
+    (
+        r"C:/Windows/System32\bash.exe",  # platform-ok: 混用分隔符＝實測 Source 形狀
+        True, "混用分隔符",
+    ),
+    (
+        r"C:\Windows\System32\bash.exe",  # platform-ok: 反斜線基準列，舊實作唯一抓到者
+        True, "全反斜線",
+    ),
+    (
+        r"C:\WINDOWS\system32\bash.exe",  # platform-ok: 大小寫變體需真實 Windows 目錄名
+        True, "大小寫",
+    ),
+    # 誘餌：含 system32 子字串但非完整段（DEF-101-236 修的偽陽性），不得誤排除。
+    (
+        r"C:\MySystem32Tools\bash.exe",  # platform-ok: 誘餌需含 system32 子字串但非整段
+        False, "誘餌",
+    ),
+    (
+        r"C:\Program Files\Git\bin\bash.exe",  # platform-ok: 陰性對照＝真實 Git 安裝路徑
+        False, "真 Git Bash",
+    ),
+    # 判準邊界（Find-GitBash.ps1 comment-based help 亦記載）：Sysnative 是 32-bit
+    # 行程看到的 64-bit System32 別名、其實同一支 WSL bash，兩側一致**不**排除。
+    # 本列鎖住「這是已知殘餘盲區」而非「已驗證安全」——哪天要收掉它，本列必須
+    # 連同兩側實作一起改，不會有人靜默單邊處理。
+    (
+        r"C:\Windows\Sysnative\bash.exe",  # platform-ok: Sysnative 別名字面不可替代
+        False, "Sysnative 盲區",
+    ),
+)
 
 
 def _normalize_pairs(pairs: list[tuple[str, str]]) -> list[tuple[str, str]]:
@@ -518,6 +600,137 @@ class TestFindGitBashBehavior(unittest.TestCase):
             result, local_appdata_cand,
             "ProgramFiles 候選不存在時應繼續檢查下一候選（LocalAppData），"
             "不得提前 return None（Git for Windows per-user 安裝落在 LocalAppData 的常見情境）",
+        )
+
+
+@unittest.skipUnless(
+    any_engine_available(),
+    "本機無任何 PowerShell 引擎——無法真的執行 PS 側判定（非 Windows 開發機的誠實 skip）",
+)
+class TestSystem32VerdictParity(unittest.TestCase):
+    """🔴 R60 P10-2 行為表 parity 鎖：兩側對同一組輸入必須逐筆同判。
+
+    WHY 靜態鎖不夠（本檔既有 `test_system32_exclusion_targets_same_segment_name` 的
+    盲區）：它只比對「兩邊拿哪個**字面詞**去比」，對「用什麼**手法**比」完全盲目。
+    P10-2 實測：兩側字面詞都是 `System32`（該靜態鎖全綠），但 PS 側行內 regex
+    `-notmatch '\\\\System32\\\\'` 要求前後皆為反斜線，於是
+
+        輸入 `C:/Windows/System32/bash.exe`
+          PS 側 accepts=True（放行）  ／  Python 側 excluded=True（排除）
+
+    ——同一組輸入、相反裁決。而且**可觸達**：`(Get-Command bash).Source` 是「PATH 條目
+    + 檔名」拼出來的，PATH 條目以正斜線書寫時 Source 就帶正斜線。實測（PS 5.1，
+    `$env:PATH` 設為 `C:/Windows/System32`）得 Source=`C:/Windows/System32\\bash.exe`，
+    修前 `Find-GitBash` **回傳了 WSL 的 bash**。
+
+    本類別真的起 PowerShell 執行 `Test-HasSystem32Segment`，不是比對原始碼字面——
+    任一側被改壞（如 PS 側退回 `-notmatch`、Python 側退回子字串命中）都必紅。
+    """
+
+    _CASE_TABLE_PATH = _PS1_PATH
+
+    def _ps_verdicts(self, cases: tuple[str, ...]) -> dict[str, bool]:
+        """起 PowerShell dot-source 真實 helper，回傳 `{輸入: 是否排除}`。"""
+        import subprocess
+        import tempfile
+
+        for case in cases:
+            self.assertNotIn(
+                "'", case, "行為表輸入不得含單引號——會破壞下方 PS 單引號字面值產生"
+            )
+        lines = [f". '{self._CASE_TABLE_PATH.as_posix()}'"]
+        for case in cases:
+            lines.append(
+                f"Write-Output ('V|{case}|' + (Test-HasSystem32Segment '{case}'))"
+            )
+        with tempfile.TemporaryDirectory() as td:
+            script = Path(td) / "verdicts.ps1"
+            script.write_text("\n".join(lines) + "\n", encoding="utf-8")
+            proc = subprocess.run(
+                [
+                    production_engine(), "-NoProfile", "-ExecutionPolicy", "Bypass",
+                    "-File", str(script),
+                ],
+                capture_output=True, text=True, encoding="utf-8",
+                errors="replace", timeout=120,
+            )
+        self.assertEqual(
+            proc.returncode, 0,
+            f"PowerShell 執行失敗（rc={proc.returncode}）：{proc.stdout}\n{proc.stderr}",
+        )
+        out: dict[str, bool] = {}
+        for line in proc.stdout.splitlines():
+            parts = line.split("|")
+            if len(parts) != 3 or parts[0] != "V":
+                continue
+            out[parts[1]] = parts[2].strip() == "True"
+        self.assertEqual(
+            set(out), set(cases),
+            f"PS 側回報的輸入集合與送進去的不符：{sorted(out)}（stdout={proc.stdout!r}）",
+        )
+        return out
+
+    def test_both_sides_agree_with_the_criterion(self) -> None:
+        """逐筆：Python 判定 == PS 判定 == 判準（`expected_excluded`）。"""
+        cases = tuple(case for case, _exp, _why in _SEGMENT_CASES)
+        ps_verdicts = self._ps_verdicts(cases)
+        for case, expected, why in _SEGMENT_CASES:
+            with self.subTest(case=case, why=why):
+                py = integration_gate_core._has_system32_segment(case)
+                self.assertEqual(
+                    py, expected,
+                    f"Python 側判定與判準不符（{why}）：excluded={py}，應為 {expected}",
+                )
+                self.assertEqual(
+                    ps_verdicts[case], expected,
+                    f"PS 側判定與判準不符（{why}）：excluded={ps_verdicts[case]}，"
+                    f"應為 {expected}——兩側對同一輸入相反裁決即 P10-2 迴歸",
+                )
+
+    def test_find_git_bash_rejects_forward_slash_system32_end_to_end(self) -> None:
+        """端到端（不依賴本機真有 WSL）：沙箱造一個 `<tmp>/System32/bash.exe` 假檔，
+        PATH 以**正斜線**指向該目錄、並清空三個環境變數候選 ⇒ `Find-GitBash` 必須
+        回傳空（找不到），不得回傳那支 System32 bash。
+
+        修前實測形狀：`Find-GitBash` 回傳 `C:/…/System32\\bash.exe`（guard 整條失效）。
+        用沙箱假檔而非本機真 WSL bash，是為了讓這條在任何 Windows 機器上都確定性成立。
+        """
+        import subprocess
+        import tempfile
+
+        with tempfile.TemporaryDirectory() as td:
+            sysdir = Path(td) / "System32"
+            sysdir.mkdir()
+            (sysdir / "bash.exe").write_bytes(b"MZ fake, never executed")
+            fwd = sysdir.as_posix()  # 正斜線寫法（病灶形狀）
+            script = Path(td) / "e2e.ps1"
+            script.write_text(
+                f". '{self._CASE_TABLE_PATH.as_posix()}'\n"
+                f"$env:PATH = '{fwd}'\n"
+                "$env:ProgramFiles = ''\n"
+                "${env:ProgramFiles(x86)} = ''\n"
+                "$env:LocalAppData = ''\n"
+                "$r = Find-GitBash\n"
+                "if ($r) { Write-Output ('R|' + $r) } else { Write-Output 'R|(none)' }\n",
+                encoding="utf-8",
+            )
+            proc = subprocess.run(
+                [
+                    production_engine(), "-NoProfile", "-ExecutionPolicy", "Bypass",
+                    "-File", str(script),
+                ],
+                capture_output=True, text=True, encoding="utf-8",
+                errors="replace", timeout=120,
+            )
+        self.assertEqual(proc.returncode, 0, f"{proc.stdout}\n{proc.stderr}")
+        result = next(
+            (ln[2:] for ln in proc.stdout.splitlines() if ln.startswith("R|")), None
+        )
+        self.assertIsNotNone(result, f"PS 未回報結果：{proc.stdout!r}")
+        self.assertEqual(
+            result, "(none)",
+            "Find-GitBash 回傳了正斜線寫法的 System32 bash（WSL 啟動器）"
+            f"：{result!r}——P10-2 迴歸",
         )
 
 

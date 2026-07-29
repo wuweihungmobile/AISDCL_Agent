@@ -103,7 +103,16 @@ on:
       - "tools/check_hooks_liveness.py"
       - "tools/check_defect_log_crossref.py"
       - "tools/check_wrapper_thinness.py"
+      - "AutoClaude/tools/check_loc_budget.py"
+      - "tools/_script_scan_surface.py"
+      - "tools/archive_defect_log.py"
+      - "docs/06_quality/AutoSDD_Defect_Log.md"
       - "tools/check_pytest_baseline_sites.py"
+      # R60（SD-R60-09）：tools/tests/test_doc_loc_baseline_freshness_r60.py 以
+      # `sys.path.insert(0, parents[1])` + `import sync_onboarding_baselines` 消費此根層檔
+      # （ONBOARDING §7 表① live 基線格的產生器＋--check SSOT；DEF-101-042 同構，
+      # AISDLC_SDD/scripts/tests/test_ci_paths_cover_root_consumers.py 實測揪出）
+      - "tools/sync_onboarding_baselines.py"
       # R55：tools/tests/test_check_gha_action_versions.py import 消費此根層檔
       # （DEF-101-042 同構，test_ci_paths_cover_root_consumers 實測揪出）
       - "tools/check_gha_action_versions.py"
@@ -209,7 +218,16 @@ on:
       - "tools/check_hooks_liveness.py"
       - "tools/check_defect_log_crossref.py"
       - "tools/check_wrapper_thinness.py"
+      - "AutoClaude/tools/check_loc_budget.py"
+      - "tools/_script_scan_surface.py"
+      - "tools/archive_defect_log.py"
+      - "docs/06_quality/AutoSDD_Defect_Log.md"
       - "tools/check_pytest_baseline_sites.py"
+      # R60（SD-R60-09）：tools/tests/test_doc_loc_baseline_freshness_r60.py 以
+      # `sys.path.insert(0, parents[1])` + `import sync_onboarding_baselines` 消費此根層檔
+      # （ONBOARDING §7 表① live 基線格的產生器＋--check SSOT；DEF-101-042 同構，
+      # AISDLC_SDD/scripts/tests/test_ci_paths_cover_root_consumers.py 實測揪出）
+      - "tools/sync_onboarding_baselines.py"
       # R55：tools/tests/test_check_gha_action_versions.py import 消費此根層檔
       # （DEF-101-042 同構，test_ci_paths_cover_root_consumers 實測揪出）
       - "tools/check_gha_action_versions.py"

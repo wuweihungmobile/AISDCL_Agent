@@ -30,14 +30,17 @@ R37 抽出 `tools/lib/WindowsAppsGuard.ps1::Test-IsRealPython` 共用函式（�
 """
 from __future__ import annotations
 
+import ast
 import os
 import re
-import shutil
 import subprocess
 import sys
 import tempfile
 import unittest
 from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from _ps_engine import production_engine  # noqa: E402  # R60 DEF-101-548：引擎述詞 SSOT
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 _BOOTSTRAP_PS1 = _REPO_ROOT / "tools" / "bootstrap.ps1"
@@ -54,7 +57,16 @@ _INLINE_NOTLIKE_RE = re.compile(r"-notlike\s+'\*\\WindowsApps\\\*'")
 
 
 def _pwsh_exe() -> str | None:
-    return shutil.which("pwsh") or shutil.which("powershell")
+    """委派 `_ps_engine.production_engine()`（R60 收斂，DEF-101-548）。
+
+    原實作是 `shutil.which("pwsh") or shutil.which("powershell")`＝**pwsh 7 優先**，
+    與 R59 DEF-101-509 拍板的「生產引擎（Windows PowerShell 5.1）優先、pwsh 只作
+    本機無 5.1 時的兜底」**方向相反**——本檔驗的正是受 `tools/` 5.1 政策約束的
+    `bootstrap.ps1`／`dev_start.ps1`／`WindowsAppsGuard.ps1`，用 pwsh 7 去驗會讓
+    「只在 5.1 上壞掉」的語法/語意差異整批漏放。函式名保留不改（呼叫點 4 處、
+    語意不變＝「拿一個引擎來真跑」），只把引擎選擇交給唯一具名述詞。
+    """
+    return production_engine()
 
 
 # ---------------------------------------------------------------------------
@@ -511,10 +523,15 @@ _SSOT_REL_PATH = "tools/lib/WindowsAppsGuard.ps1"
 # R56 訂正：本處原引 DEF-101-433，但該則的前提〔薄殼守門缺前瞻機制〕已於 R56 經
 # bug-injection 證偽〔反向驗證實存於 check_script_parity.py〕，其「比例原則裁定」建立在
 # 不成立的前提上，不宜作為判例；真正的判例是 DEF-101-333），
-# 非本鎖可解。放大因素（R56 SD 指出，如實記載）：本鎖已是 Python 側的 repo-wide
-# 前瞻掃描，但**只有這一層**——bash 側另有白名單斷言（`test_all_known_callers_source_
-# shared_guard`／`test_no_raw_unguarded_python_check_remains`）與 repo-wide 掃描兩層
-# 互相補位，Python 側破了本鎖即零訊號。
+# 非本鎖可解。放大因素（R56 SD 指出）：本鎖是 Python 側「實作站點／等價軸」的 repo-wide
+# 前瞻掃描——bash 側另有白名單斷言（`test_all_known_callers_source_shared_guard`／
+# `test_no_raw_unguarded_python_check_remains`）與 repo-wide 掃描兩層互相補位。
+# **R60 訂正**：本段原句寫「Python 側**只有這一層**，破了本鎖即零訊號」——該宣稱自本檔
+# 末段新增 `TestZeroGuardBarePythonSitesAreEnrolled`（B-01，零 guard 裸 python 名稱的
+# repo-wide AST 掃描）起已失實，兩層現互為補位：本鎖漏掉的「改名 ＋ 字面值拆開」若仍以裸
+# `python` 名稱交給 OS，會被那一層抓到；反之那一層豁免的檔案若哪天內嵌一份判斷式，會被
+# 本鎖抓到。**仍不宣稱兩層合併後涵蓋全類別**：兩者同時避開者（改名 ＋ 字面值拆開 ＋ 完全
+# 不出現裸名首 token，例如 `os.environ["PY"]`）依舊逃得掉，屬靜態掃描天花板。
 # R56 round 5 修正：兩錨皆補 `re.I`（名錨須寫成 `re.MULTILINE | re.I`，勿覆蓋掉
 # 原有的 MULTILINE）。理由與零偽陽性實測見上方註解。
 _STUB_NAME_RE = re.compile(r"^\s*def\s+\w*windows_?apps\w*", re.MULTILINE | re.I)
@@ -1224,6 +1241,288 @@ class TestNoOrphanWindowsAppsImplementation(unittest.TestCase):
                 f"掃描迴圈直接內聯裸錨 `{raw_anchor}`——請一律經 "
                 "`_matches_stub_anchor()`，否則聯集/交集語意可被就地改寫而無訊號",
             )
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# Python 側「零 guard 裸 python 名稱」repo-wide 前瞻掃描（R60，B-01）
+#
+# WHY 這一層原本缺席：同一個 guard 家族在另兩種語言各有**兩條**前瞻掃描軸——
+#   .sh ：`test_repo_wide_scan_finds_no_unmigrated_sh_scripts`（有裸 `command -v` 判斷
+#         但沒接 SSOT）＋ `test_repo_wide_scan_finds_no_zero_guard_python_calls`
+#         （整支檔案零可用性判斷、直接裸呼叫）
+#   .ps1：`test_ps1_mentions_of_windowsapps_all_go_through_ssot`（有提及但沒走 SSOT）
+#         ＋ `test_python_calls_in_ps1_all_go_through_ssot`（有呼叫但沒 guard）
+# Python 側只有 `test_windows_apps_predicate_impls_are_all_registered` 一條，而它的兩個
+# 錨（函式名 `def *windows*apps*` ∪ 引號界定 `"windowsapps"` 字面值）都長在「**判斷式
+# 實作**」上。對於一支**從頭到尾不提 WindowsApps、只是把裸 `python` 名稱交給 OS 解析**
+# 的新檔案，兩錨結構上完全看不到它——正是 `_has_zero_guard_python_call` 在 .sh 側處理的
+# 那個形狀（R44 曾在該側掰出真實命中）。實測本檔既有 helper 對此形狀正反皆零訊號：
+#   bare subprocess / which() 無 guard → `_matches_stub_anchor` 皆 False；
+#   對照組（第二份 predicate 實作）→ True ⇒ 鎖沒壞，是掃描面缺這個形狀。
+#
+# 軸別澄清（R60 反駁者訂正 (1)，勿再混指）：本節補的是**呼叫端納管（enrollment）**，
+# 不是 `CrossPlatform_Scan_Dimensions.md` §(2) 講的「三份實作之間的行為等價」。等價軸在
+# Python 側**已有**機械鎖（同檔 `test_bootstrap_core_py_has_symmetric_stub_detector`
+# ＋ `tools/tests/test_bootstrap_core.py` 五支行為測試，含「拔掉 guard 就會挑到空殼」的
+# bug-injection）。把兩條軸說成同一條會導出錯誤的修法。
+#
+# 暴露面比另兩種語言**窄**（R60 反駁者訂正 (2)，本節不宣稱相反）：bootstrap 悖論的內容是
+# 「guard 必須在 Python 可用之前就能運作」，故 Python 側這份本質上只在真直譯器已存在時才
+# 跑（`sys.executable` 必然可用）。本節因此是**前瞻性**防護（動工時 repo 內 live 違規＝0，
+# 由本輪獨立 AST 全掃確認），而不是「Python 側是最後也最容易被繞過的一環」。
+#
+# WHY 判準刻意寬鬆（字面值而非呼叫語法）：窄判準（只認 `which("python")`／subprocess
+# argv[0] 字面值／`or "python3"` 兜底）對本 repo 自己的**正典形狀盲**——`tools/
+# bootstrap_core.py` 是把候選名放進 list literal（`["python", "python3", …]`）再以
+# `shutil.which(parts[0])` 解析，變數化之後窄判準看不到任何裸名。實測窄判準只命中 2 支、
+# 且**不含** bootstrap_core.py 自己；再發明者最可能照抄的就是這個正典形狀。故比照 .sh 側
+# `_invokes_python_bare`（刻意用寬鬆全字比對，理由同款：R44 目標形狀就含變數預設值間接
+# 呼叫）改採字面值判準。過度觸發是 fail-loud（有人得看一眼並登記角色），漏報才是 fail-open。
+#
+# 相對 .sh/.ps1 的一個結構性優勢（可正面主張）：本節走 **AST**，註解與 docstring 由語法
+# 結構天然排除，不需要 `_strip_bash_comment` 那類逐字元剝註解——而 R46 已證明那條路是無底洞
+# （繞過從整行註釋 → no-op 前綴 → heredoc 逐層復發）。
+#
+# 邊界宣稱（三段式，見 CrossPlatform_Scan_Dimensions.md §「邊界宣稱必須實測」）：
+#   【已實測涵蓋】① `subprocess.run(["python", "x.py"])`；② `shutil.which("python3")`；
+#     ③ 正典多候選 list literal ＋ `which(變數)`（窄判準對此盲）；④ shell 字串形態
+#     `subprocess.run("python -m foo", shell=True)`；⑤ `sys.executable or "python3"` 兜底；
+#     ⑥ 帶 guard 的檔案（`_matches_stub_anchor`）不重複計入本軸；⑦ 掃描面塌陷為 0 份 →
+#     等值斷言翻紅；⑧ 無法 parse 的候選 `.py` → AssertionError（不靜默略過）。
+#   【已實測不涵蓋】① 註解／docstring 內的提及（AST 結構性排除，**刻意**如此，見上）；
+#     ② 測試檔（`_is_test_py`，同姊妹掃描判準）；③ 凍結版 v0.01~v0.29（Copy-on-Evolve）；
+#     ④ 尚未 `git add` 的新檔（`git ls-files` 固有性質）；⑤ 字面值被拆開或間接組出
+#     （`"pyth" + "on"`、f-string、`os.environ["PY"]`）——與 `_matches_stub_anchor` 的
+#     K／O 既知邊界同源，屬靜態掃描天花板；⑥ 首 token 非裸名者（`"py -3.11"`／
+#     `"python3.11"`／`"python:3.11-slim"`）——前者是 Windows py launcher（不經 PATH 撞
+#     WindowsApps，`bootstrap_core.py:141` 註解已論證），後兩者是版本化名稱/docker tag。
+#   【未窮舉】本清單只是本輪真正跑過的項目，不主張已列出全部繞過路徑。
+# ═══════════════════════════════════════════════════════════════════════════
+# 首個空白分隔 token 恰為裸 `python`／`python3`（`$` 錨定尾端或空白）——即「會被交給 OS／
+# shell 當指令首 token 的裸直譯器名稱」。`python3.11`／`python:3.11-slim`／`py -3.11`
+# 皆不匹配（後接 `.`／`:`／不同字首）。
+_BARE_PY_COMMAND_RE = re.compile(r"^python3?(?:\s|$)")
+
+
+def _docstring_constant_ids(tree: ast.AST) -> set[int]:
+    """module／class／def 的 docstring 常數節點 id 集合——供掃描時排除。
+
+    docstring 在 AST 裡與一般字串常數同型（`ast.Constant`），不排除的話本家族每一支
+    帶說明文字的檔案都會命中（本檔自己的 docstring 就提了好幾次 `python`）。
+    """
+    ids: set[int] = set()
+    for node in ast.walk(tree):
+        if not isinstance(node, (ast.Module, ast.ClassDef, ast.FunctionDef, ast.AsyncFunctionDef)):
+            continue
+        body = getattr(node, "body", [])
+        if body and isinstance(body[0], ast.Expr) and isinstance(body[0].value, ast.Constant):
+            ids.add(id(body[0].value))
+    return ids
+
+
+def _bare_python_command_literals(text: str, rel: str = "<memory>") -> list[str]:
+    """回傳「首 token 為裸 python/python3 的字串常數」站點描述（`L<行號>:<值>`）。
+
+    parse 失敗一律 fail-loud（AssertionError），不得靜默回空——掃描邊界不得靜默縮小
+    （同 `_tracked_files()`／`_latest_sdd_root()` 判準）。
+    """
+    try:
+        tree = ast.parse(text)
+    except SyntaxError as exc:  # pragma: no cover - repo 內生產 .py 應恆可 parse
+        raise AssertionError(
+            f"{rel} 無法以 ast.parse 解析（{exc}）——掃描邊界不得靜默縮小；"
+            "若確為刻意的語法示例檔，請登記豁免而非讓掃描沉默"
+        ) from exc
+    skip = _docstring_constant_ids(tree)
+    hits = []
+    for node in ast.walk(tree):
+        if (
+            isinstance(node, ast.Constant)
+            and isinstance(node.value, str)
+            and id(node) not in skip
+            and _BARE_PY_COMMAND_RE.match(node.value)
+        ):
+            hits.append(f"L{node.lineno}:{node.value!r}")
+    return hits
+
+
+def _has_zero_guard_bare_python(text: str, rel: str = "<memory>") -> bool:
+    """檔案含裸 python 指令首 token 字面值、且**自身不帶**任何 WindowsApps 可用性判斷。
+
+    帶 guard 者（`_matches_stub_anchor`）由 `test_windows_apps_predicate_impls_are_all_
+    registered` 那條「等價／實作站點」軸負責，本軸不重複計——兩條軸各自維護註冊表，
+    同一支檔案不會同時出現在兩邊，避免登記漂移時互相掩護。
+    """
+    if not _bare_python_command_literals(text, rel):
+        return False
+    return not _matches_stub_anchor(text)
+
+
+# 註冊表：鍵＝repo 相對路徑（LATEST 版前綴正規化為 `<LATEST>`），值＝**角色**註記。
+# 登記時必須當場分診「是真的把裸名交給 OS，還是只是資料/樣式/訊息字串」——比照
+# `_KNOWN_NTFS_ANCHOR_SITES`（tools/tests/test_windows_forbidden_filename_parity.py）
+# 與 `_EXEMPT_PS1_FILES`／bash 側 `_EXEMPT_SH_FILES` 的附理由登記慣例。
+_ZERO_GUARD_BARE_PY_SITES = {
+    # ── 真的以裸名兜底（暴露面存在，但結構性極窄）────────────────────────────
+    "AutoClaude/autoclaude/evolution/_evaluator_derivation.py": (
+        "真兜底：`_QUOTED_PY = '\"%s\"' % (sys.executable or \"python3\")`——僅在 "
+        "sys.executable 為空（嵌入式/凍結直譯器）時才落到裸名。AutoClaude 的入口是 "
+        "`python -m autoclaude`／console script，該情境下 sys.executable 恆為 venv 內"
+        "絕對路徑（本輪實測本機 .venv 與 AutoClaude/.venv 皆非空）；且該行是**模組載入期**"
+        "求值，若真為空則整個套件早已無法運作。不改生產碼，改在此登記並保留訊號。"
+    ),
+    "AutoClaude/autoclaude/execution/mutation_applier/_simple_mutations.py": (
+        "真兜底：`python_bin = sys.executable or \"python3\"`，理由同上一筆。該函式的 "
+        "docstring 自陳「W6 已拔除、目前無非測試呼叫點，暫不可觸發」，暴露面更窄。"
+    ),
+    # ── 非呼叫：資料/樣式/訊息字串（粗粒度字面值判準的可見成本）────────────────
+    "AISDLC_SDD/<LATEST>/tools/fsm_runtime/sandbox_runner.py": (
+        "非呼叫：docker image tag 白名單元素（`\"busybox\", \"alpine\", \"python\", "
+        "\"python:3.11-slim\"…`）——交給 `docker run` 當 image 名，不經 PATH 解析"
+    ),
+    "AutoClaude/autoclaude/models/escalation.py": (
+        "非呼叫：ESCALATION 報告內給人看的建議修復指令字串（`python -m py_compile …`），"
+        "本行程不 spawn 它"
+    ),
+    "AutoClaude/autoclaude/tools/sdd_compile.py": (
+        "非呼叫：`argparse.ArgumentParser(prog=\"python -m autoclaude.tools.sdd_compile\")`"
+        "——只用於 usage/help 輸出"
+    ),
+    "AutoClaude/tools/three_tier_to_playbook.py": (
+        "非呼叫：`_EVAL_ALLOWED_HEAD`／`_PY_HEADS` 是 evaluator 指令**首 token 白名單**"
+        "（驗證用途，本檔不 spawn）。註：被放行的 evaluator 字串日後由 ShellEvaluator "
+        "以 shell 執行，那條路的 guard 屬 evaluator/載具領域，不在本軸"
+    ),
+    "tools/check_wrapper_thinness.py": (
+        "非呼叫：薄殼守門工具的**禁用子字串樣式**字面值（`\"python -c\"`／"
+        "`\"python3 -c\"`，用來偵測厚殼），是比對資料而非指令"
+    ),
+    "tools/lib/platform_utils.py": (
+        "非呼叫：`venv_dir / \"bin\" / \"python\"` 的**路徑片段**（組出 venv 內絕對路徑），"
+        "不經 PATH 解析。粗粒度判準看不出「字面值當路徑片段」與「當指令首 token」的差別，"
+        "此筆即該取捨的成本"
+    ),
+}
+
+
+def _normalize_latest_rel(rel: str, latest_name: str) -> str:
+    """LATEST 版目錄名換成 `<LATEST>` 佔位——否則與本鎖無關的 Copy-on-Evolve 升版
+    （建 v0.31）也會讓註冊表翻紅。手法同 `test_windows_forbidden_filename_parity.py::
+    _normalize_latest`（tools/tests 無 `__init__.py`，跨檔 import 需 sys.path 手術，
+    沿用本目錄「共用資料規格才抽檔、執行邏輯各自獨立」的既有慣例）。"""
+    return rel.replace(f"AISDLC_SDD/{latest_name}/", "AISDLC_SDD/<LATEST>/", 1)
+
+
+class TestZeroGuardBarePythonSitesAreEnrolled(unittest.TestCase):
+    """repo-wide：含裸 python 指令首 token 字面值、且自身無 guard 的生產 `.py` 必須
+    與註冊表**等值**。
+
+    WHY 等值而非下限（沿用姊妹鎖判例）：等值一次拿到兩個方向——多一份＝出現未經分診的
+    新站點；少一份＝登記腐化或某支檔案的字面值被改寫（例如兜底被改掉了卻沒人更新註記）。
+    等值另外免費得到 fail-open 防護：pathspec／排除清單被改壞而掃到 0 份時，`hits=[]`
+    ≠ 註冊表必然翻紅，故刻意**不**另設下限。
+    """
+
+    def test_zero_guard_bare_python_sites_match_registry_exactly(self) -> None:
+        latest_name = _latest_sdd_root().name
+        all_py = _exclude_frozen_sdd_versions(_tracked_files("*.py"), latest_name)
+        candidates = [rel for rel in all_py if not _is_test_py(rel)]
+        self.assertGreater(
+            len(candidates), 0,
+            "候選 `.py` 為 0——掃描面塌陷（pathspec 或排除清單被改壞）",
+        )
+
+        hits = {}
+        for rel in candidates:
+            text = (_REPO_ROOT / rel).read_text(encoding="utf-8", errors="replace")
+            if _has_zero_guard_bare_python(text, rel):
+                hits[_normalize_latest_rel(rel, latest_name)] = _bare_python_command_literals(
+                    text, rel
+                )
+
+        self.assertEqual(
+            sorted(hits), sorted(_ZERO_GUARD_BARE_PY_SITES),
+            f"零 guard 裸 python 名稱的站點集合與註冊表不符（本次實掃候選 "
+            f"{len(candidates)} 份）。實掃命中明細：{hits}\n"
+            "  · **多出**檔案 → 出現新的裸 python 名稱站點：先分診它是「真的把裸名交給 "
+            "OS 解析」還是「只是資料/樣式/訊息字串」。前者請改走 guard（Python 側 SSOT ＝ "
+            "`tools/bootstrap_core.py::_is_windows_apps_stub`，或已核准的 "
+            "`_APPROVED_SECOND_IMPLS`），後者連同**角色註記**登記進 "
+            "`_ZERO_GUARD_BARE_PY_SITES`。\n"
+            "  · **少掉**檔案 → 該站點的字面值消失或該檔已帶 guard：確認是刻意收斂"
+            "（而非重構時被順手改成間接組字串而逃出掃描面），確認後同步下修註冊表。",
+        )
+
+
+class TestZeroGuardBarePythonDetectorDiscriminatingPower(unittest.TestCase):
+    """對**自建假內容**驗證 helper 正反皆判對（不改任何生產碼）。
+
+    WHY 常駐而非一次性 bug-injection：R56 round 6 的判例——`_matches_stub_anchor` 的
+    「∪」語意當時是核心交付物卻完全無鎖，把 `or` 改成 `and`（3 個字元）全檔測試照樣全綠。
+    判準函式的鑑別力必須自己有鎖，不能靠下一輪再做一次注入才發現被改弱。
+    """
+
+    _GUARD_SRC = (
+        'def _is_windows_apps_stub(p):\n'
+        '    return any(part.lower() == "windowsapps" for part in p.split("/"))\n'
+    )
+
+    def test_subprocess_bare_argv0_is_flagged(self) -> None:
+        text = 'import subprocess\nsubprocess.run(["python", "x.py"], check=True)\n'
+        self.assertTrue(_has_zero_guard_bare_python(text))
+
+    def test_shutil_which_bare_name_is_flagged(self) -> None:
+        text = 'import shutil\nexe = shutil.which("python3")\n'
+        self.assertTrue(_has_zero_guard_bare_python(text))
+
+    def test_canonical_list_literal_with_variable_which_is_flagged(self) -> None:
+        """本 repo 正典形狀（`bootstrap_core.py` 的寫法）——窄判準對此盲，是本節
+        刻意採寬鬆字面值判準的理由，故必須有一支斷言釘住它會被抓到。"""
+        text = (
+            'import shutil\n'
+            'candidates = ["python", "python3"]\n'
+            'for cand in candidates:\n'
+            '    resolved = shutil.which(cand)\n'
+        )
+        self.assertTrue(_has_zero_guard_bare_python(text))
+
+    def test_shell_string_command_is_flagged(self) -> None:
+        text = 'import subprocess\nsubprocess.run("python -m foo", shell=True)\n'
+        self.assertTrue(_has_zero_guard_bare_python(text))
+
+    def test_sys_executable_or_bare_fallback_is_flagged(self) -> None:
+        text = 'import sys\npy = sys.executable or "python3"\n'
+        self.assertTrue(_has_zero_guard_bare_python(text))
+
+    def test_file_carrying_a_guard_is_not_flagged_by_this_axis(self) -> None:
+        """帶 guard 者歸「實作站點」那條軸，本軸不重複計（否則兩張註冊表互相掩護）。"""
+        text = 'import shutil\n' + self._GUARD_SRC + 'exe = shutil.which("python")\n'
+        self.assertTrue(_matches_stub_anchor(text), "前置條件：本樣本應被視為帶 guard")
+        self.assertFalse(_has_zero_guard_bare_python(text))
+
+    def test_comment_only_mention_is_not_flagged(self) -> None:
+        text = '# 這裡以前是 python foo.py，現已改走 sys.executable\nimport sys\n'
+        self.assertFalse(_has_zero_guard_bare_python(text))
+
+    def test_docstring_only_mention_is_not_flagged(self) -> None:
+        text = '"""用法：python -m tool ..."""\n\n\ndef f():\n    """python3 也可以。"""\n'
+        self.assertFalse(_has_zero_guard_bare_python(text))
+
+    def test_versioned_and_docker_tag_names_are_not_flagged(self) -> None:
+        """首 token 非裸名者不算：py launcher 不經 PATH、版本化名稱與 docker tag 亦然。"""
+        for value in ("py -3.11", "python3.11", "python:3.11-slim", "python.exe", "pythonic"):
+            with self.subTest(value=value):
+                self.assertFalse(
+                    _has_zero_guard_bare_python(f'x = {value!r}\n'),
+                    f"{value!r} 不應被判為裸直譯器名稱",
+                )
+
+    def test_absence_of_any_python_literal_is_not_flagged(self) -> None:
+        self.assertFalse(_has_zero_guard_bare_python('import sys\nprint(sys.executable)\n'))
+
+    def test_unparseable_file_fails_loud(self) -> None:
+        with self.assertRaises(AssertionError):
+            _bare_python_command_literals("def (:\n", "fake.py")
 
 
 if __name__ == "__main__":

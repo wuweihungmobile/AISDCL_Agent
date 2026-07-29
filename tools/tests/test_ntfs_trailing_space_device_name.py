@@ -31,6 +31,7 @@ check_ntfs_paths = _parity.check_ntfs_paths
 # 改為 import 取用。方向單向（parity 檔不 import 本檔）以免循環 import。
 RESERVED_TRAILING_SPACE_SEGMENTS = _parity.RESERVED_TRAILING_SPACE_SEGMENTS
 BENIGN_TRAILING_SPACE_SEGMENTS = _parity.BENIGN_TRAILING_SPACE_SEGMENTS
+LEADING_SPACE_RESERVED_SEGMENTS = _parity.LEADING_SPACE_RESERVED_SEGMENTS
 
 
 class TestPythonCiChecker(unittest.TestCase):
@@ -48,6 +49,23 @@ class TestPythonCiChecker(unittest.TestCase):
             with self.subTest(seg=seg):
                 reason = check_ntfs_paths._ntfs_seg_bad(f"docs/{seg}")
                 self.assertIsNone(reason, f"誤判良性路徑段 {seg!r}：{reason}")
+
+    def test_does_not_flag_leading_space_reserved_segments(self) -> None:
+        """R60：validator 側對「保留名 + **前導**空白」必須放行。
+
+        鑑別力方向刻意是**反向**的（斷言「不得攔」而非「必須攔」）：git for Windows 的
+        `core.protectNTFS`（＝決定 Windows checkout 會不會整棵樹開不出來的權威模型）
+        對本清單全部形態 ACCEPT、clone rc=0，Win32 亦視為普通檔案，故在此攔下＝純偽陽性。
+        本斷言存在的理由是這道決策**每輪都會被重新質疑**（前導空白看起來就是 R57 尾隨
+        空白形態的鏡像），沒有鎖就會有人「補齊對稱性」而引入偽陽性。
+        """
+        for seg in LEADING_SPACE_RESERVED_SEGMENTS:
+            with self.subTest(seg=seg):
+                reason = check_ntfs_paths._ntfs_seg_bad(f"docs/{seg}")
+                self.assertIsNone(
+                    reason,
+                    f"validator 攔下了 git 與 Win32 都接受的前導空白形態 {seg!r}：{reason}",
+                )
 
 
 @unittest.skipIf(_parity._BASH is None, _parity._SKIP_REASON)
@@ -67,6 +85,20 @@ class TestBashHookChecker(unittest.TestCase):
             with self.subTest(seg=seg):
                 rc, out = _parity._run_bash_seg_check(f"docs/{seg}")
                 self.assertEqual(rc, 1, f"bash 版誤判良性路徑段 {seg!r}：{out.strip()}")
+
+    def test_does_not_flag_leading_space_reserved_segments(self) -> None:
+        """R60：bash hook 側與 Python CI 側對前導空白形態必須**同時**放行。
+
+        兩側同步是本檔的存在理由——只有一側改變就會出現「本機 commit 過得去、CI 擋下」
+        （或反之）的分裂，而這種分裂比單側偽陽性更難診斷。
+        """
+        for seg in LEADING_SPACE_RESERVED_SEGMENTS:
+            with self.subTest(seg=seg):
+                rc, out = _parity._run_bash_seg_check(f"docs/{seg}")
+                self.assertEqual(
+                    rc, 1,
+                    f"bash 版攔下了 git 與 Win32 都接受的前導空白形態 {seg!r}：{out.strip()}",
+                )
 
 
 if __name__ == "__main__":

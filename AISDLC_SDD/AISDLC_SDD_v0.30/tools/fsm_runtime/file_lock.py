@@ -43,6 +43,30 @@ def _write_sentinel(path: Path) -> None:
         os.close(fd)
 
 
+def _try_unlink(path: Path) -> bool:
+    """Best-effort sentinel removal. Returns True when the file is gone.
+
+    R60 A-02 (Windows): both removal sites used to catch only
+    ``FileNotFoundError``. On Windows ``unlink`` raises ``PermissionError``
+    ([WinError 32]) whenever a third party holds the sentinel open — an AV
+    scanner, the search indexer, a backup agent, or the very "post-mortem
+    reader" this module's docstring invites. That escaped the context manager
+    (an undocumented exception type for callers) *and* leaked the sentinel, so
+    the next writer was blocked until the 30s stale threshold. Swallowing it
+    here keeps the advisory protocol's own recovery path (``_is_stale``) in
+    charge, mirroring ``tools/dev_start.py::_release_bootstrap_lock``'s
+    ``except OSError: pass`` precedent for the same "releasing a lock must not
+    fail the caller" situation.
+    """
+    try:
+        path.unlink()
+    except FileNotFoundError:
+        return True   # already gone (another writer reclaimed it) — same as success
+    except OSError:
+        return False  # still held open by a third party; caller must not spin
+    return True
+
+
 def _is_stale(path: Path) -> bool:
     """Return True if the sentinel is older than _STALE_AFTER_SEC.
 
@@ -74,13 +98,15 @@ def file_lock(lock_path: Path, timeout: float = 5.0) -> Iterator[Path]:
             _write_sentinel(lock_path)
             break  # acquired
         except FileExistsError:
-            if _is_stale(lock_path):
-                # Forcefully remove a stale sentinel — safe because > 30s with
-                # no updater implies the holder is dead.
-                try:
-                    lock_path.unlink()
-                except FileNotFoundError:
-                    pass
+            # Forcefully remove a stale sentinel — safe because > 30s with
+            # no updater implies the holder is dead. If the removal itself
+            # fails (Windows: sentinel held open elsewhere) we must NOT retry
+            # immediately: `continue` skips the deadline check and the sleep
+            # below, so an unremovable stale sentinel would spin at 100% CPU
+            # forever. Falling through instead keeps `timeout` authoritative —
+            # callers already handle TimeoutError (both CONTEXT-LEDGER hooks
+            # have an append-only sidecar fallback for it).
+            if _is_stale(lock_path) and _try_unlink(lock_path):
                 continue
             if time.time() >= deadline:
                 raise TimeoutError(
@@ -90,10 +116,7 @@ def file_lock(lock_path: Path, timeout: float = 5.0) -> Iterator[Path]:
     try:
         yield lock_path
     finally:
-        try:
-            lock_path.unlink()
-        except FileNotFoundError:
-            pass
+        _try_unlink(lock_path)
 
 
 __all__ = ["file_lock"]

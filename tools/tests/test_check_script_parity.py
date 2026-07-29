@@ -212,9 +212,33 @@ class TestR13LibAndInstallerEnrollment(unittest.TestCase):
         "tools/install_mac_nightly.sh",
     )
 
-    def test_tools_lib_in_scan_dirs(self) -> None:
-        """掃描邊界必含 tools/lib（回退即紅——邊界縮面零訊號的防護本體）。"""
-        self.assertIn("tools/lib", m._PAIR_SCAN_DIRS)
+    def test_tools_lib_covered_by_scan_surface(self) -> None:
+        """掃描邊界必**涵蓋** tools/lib（回退即紅——邊界縮面零訊號的防護本體）。
+
+        R60 Scan-E E-A-01 訂正：掃描根自此收斂為 SSOT `SCRIPT_SCAN_ROOTS` 三棵樹且
+        **遞迴**，`tools/lib` 由 `tools` 樹自動涵蓋、不再單獨列名，故原斷言
+        `assertIn("tools/lib", _PAIR_SCAN_DIRS)` 對新形狀已無意義（它會在「掃描面
+        其實變大了」的情況下翻紅，激勵方向相反）。改鎖語意本體兩層：① `tools/lib`
+        必須落在某個掃描根底下；② 真磁碟上該目錄的腳本必須**真的被列舉到**——
+        後者才是「非遞迴回退」會踩到的斷言（遞迴性本體另由
+        `tools/tests/test_script_scan_surface_ssot.py` 以合成假樹守，不依賴 repo 現況）。
+        """
+        covered = [
+            root for root in m._PAIR_SCAN_DIRS
+            if root == "tools/lib" or "tools/lib".startswith(f"{root}/")
+        ]
+        self.assertTrue(
+            covered,
+            f"tools/lib 不在任何掃描根底下（名冊={m._PAIR_SCAN_DIRS}）——邊界縮面",
+        )
+        listed = [
+            rel for rel in m.iter_tree_scripts(m._REPO_ROOT)
+            if rel.startswith("tools/lib/")
+        ]
+        self.assertTrue(
+            listed,
+            "tools/lib 底下一支腳本都沒被列舉到——掃描面疑似退回非遞迴（R60 E-A-01 迴歸）",
+        )
 
     def test_r13_singles_exempted_with_rationale(self) -> None:
         """四支 R13 納管腳本必在單邊豁免表且附非空決策依據。"""

@@ -40,7 +40,10 @@
 # timeout、xargs -r、find -printf）。相容手法參照 tools/git-hooks/pre-commit。
 #
 # 用法：bash tools/macos_smoke_local.sh
-# Exit：0＝全部 PASS；1＝任一 FAIL（結尾彙總）。
+# Exit：0＝無 FAIL；1＝任一 FAIL（結尾彙總）。
+# 🔴 rc=0 有兩種、收尾字樣互斥可分辨（R60 F-01）：真 macOS 為「✅ 全部通過（SKIP=0…）」；
+#    非 Darwin 為「⚠️ 部分通過（本平台 … 非 Darwin）」＋ SKIP=N —— 彙總行亦帶 SKIP=N。
+#    勿把非 Darwin 的 rc=0 當成 macOS 全驗完成的取證。
 set -u
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -71,6 +74,15 @@ fi
 PASS=0
 FAIL=0
 FAIL_LIST=""
+# R60 F-01：SKIP-計-PASS 的獨立計數器。兩處「非 macOS 平台無法驗證」的子測試刻意
+# 計為 PASS（保住 MIN_PASS 的靜默縮面偵測力，語意不動），但**必須**在收尾另外報出
+# 來——否則「Windows Git Bash 實跑」與「真 macOS 全驗」在 PASS/FAIL 計數、收尾字樣
+# 與 rc 三個訊號上逐字相同，事後稽核完全無從分辨（DEF-101-511/512 立的「讓結論自己
+# 說出降級事實」原則，該輪未回頭套用到本檔）。刻意不併入 pass()／不新增 helper：
+# tools/tests/test_smoke_ci_sync.py 的 MIN_PASS 語意鎖以「pass 加雙引號訊息」的字面
+# 呼叫點計數（本行刻意不寫出那個字面樣式——寫了就會被它算成第 14 個步驟，R60 落地
+# 時當場被該鎖抓到），包一層 helper 會多算一次而讓該鎖失準。
+SKIPPED_AS_PASS=0
 
 pass() {
   PASS=$((PASS + 1))
@@ -203,7 +215,7 @@ if git clone --quiet -c core.longpaths=true "$REPO_ROOT" "$FAKE"; then
 else
   fail "git clone 建立 fake repo 失敗——[2][3][4] 無法執行"
   echo ""
-  echo "===== 彙總：PASS=$PASS FAIL=$FAIL =====$FAIL_LIST"
+  echo "===== 彙總：PASS=$PASS FAIL=$FAIL SKIP=$SKIPPED_AS_PASS =====$FAIL_LIST"
   exit 1
 fi
 
@@ -263,7 +275,8 @@ echo "--- [2/7] dispatcher 直呼煙霧（$SYS_BASH 直接執行，fake repo）-
 sub_rc=$?
 case "$sub_rc" in
   0) pass "dispatcher 直呼煙霧（pre-commit 放行/擋 NTFS 保留名、post-commit、pre-push 刪除跳過）" ;;
-  5) pass "dispatcher 直呼煙霧（pre-commit 放行、post-commit、pre-push 刪除跳過；NTFS 保留名子測試 SKIP——非 macOS 平台先擋）" ;;
+  5) SKIPPED_AS_PASS=$((SKIPPED_AS_PASS + 1))
+     pass "dispatcher 直呼煙霧（pre-commit 放行、post-commit、pre-push 刪除跳過；NTFS 保留名子測試 SKIP——非 macOS 平台先擋）" ;;
   1) fail "pre-commit dispatcher 對乾淨變更應 exit 0" ;;
   2) fail "pre-commit dispatcher 應擋下 NTFS 保留裝置名（CON.txt）卻放行" ;;
   3) fail "post-commit dispatcher 應恆 exit 0" ;;
@@ -427,6 +440,7 @@ if [ "$(uname)" = "Darwin" ]; then
   fi
 else
   echo "  （SKIP）非 macOS 無 launchd/plutil——plist render 驗證待真 macOS 實跑"
+  SKIPPED_AS_PASS=$((SKIPPED_AS_PASS + 1))
   pass "install_mac_nightly.sh --render-only（SKIP-計-PASS：非 macOS）"
 fi
 
@@ -474,10 +488,21 @@ if [ "$PASS" -lt "$MIN_PASS" ]; then
   fail "PASS 總數 ${PASS} 低於下限 ${MIN_PASS}——驗證段落疑似被刪減（靜默縮面）"
 fi
 echo ""
-echo "===== 彙總：PASS=$PASS FAIL=$FAIL ====="
+echo "===== 彙總：PASS=$PASS FAIL=$FAIL SKIP=$SKIPPED_AS_PASS ====="
 if [ "$FAIL" -gt 0 ]; then
   echo "失敗項目：$FAIL_LIST" >&2
   exit 1
 fi
-echo "全部通過 ✅（真 macOS 上請以系統 /bin/bash 3.2 執行本腳本）"
+# R60 F-01：收尾結論必須讓「本平台無法驗證的項目數」外顯。改法刻意只動輸出面
+# （不動 PASS 計數、不動 MIN_PASS 語意），使兩種綠燈在字樣上互斥可分辨：
+#   非 Darwin：⚠️ 部分通過（本平台跳過 N 項）…  ← 不再出現「全部通過 ✅」
+#   真 macOS ：✅ 全部通過（SKIP=0，本平台已實際驗證全部 N 項）
+# 鎖：tools/tests/test_macos_smoke_skip_honesty.py。
+if [ "$SKIPPED_AS_PASS" -gt 0 ]; then
+  echo "⚠️ 部分通過（本平台 $(uname) 非 Darwin）：FAIL=0，但其中 ${SKIPPED_AS_PASS} 項"
+  echo "   本平台無法驗證、以 SKIP-計-PASS 計入 PASS ——【本結果不等於 macOS 全驗完成】；"
+  echo "   真 macOS 上請以系統 /bin/bash 3.2 重跑本腳本取得 SKIP=0 的完整取證。"
+  exit 0
+fi
+echo "✅ 全部通過（SKIP=0，本平台已實際驗證全部 ${PASS} 項；真 macOS 上請以系統 /bin/bash 3.2 執行本腳本）"
 exit 0
