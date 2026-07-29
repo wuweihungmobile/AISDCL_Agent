@@ -6,8 +6,11 @@
   1. 在掃描目標文件中找出「一個或多個 `DEF-\\d+-\\d+` 緊接著一個括號」的樣式
      （括號可為全形｀（）｀或半形｀()｀；ID 前後允許 markdown 粗體 `**`）。
   2. 從該括號內文字裡找出**最早出現**的已知狀態關鍵字
-     （`open` / `routed` / `fixed` / `wontfix` / `closed-by-decision`，
-     對應帳本《格式定義》§ 狀態欄的合法值），視為該文件對這個/這些 DEF ID 的「狀態宣稱」。
+     （`open` / `routed` / `fixed` / `wontfix` / `closed-by-decision`；另有兩個歸類詞
+     `workaround` 與 `partial` 一併歸入 `open`，見 `_STATUS_KEYWORDS`），
+     視為該文件對這個/這些 DEF ID 的「狀態宣稱」。合法首詞集合的權威在帳本
+     《格式定義》散文，且**每一個合法首詞都必須能被 `_classify()` 分類**
+     （硬斷言，見 `unclassifiable_first_word_problems()`）。
   3. 與 `docs/06_quality/AutoSDD_Defect_Log.md` 表格中該 ID 「狀態」欄的最新紀錄
      （同樣取表格該欄文字中最早出現的關鍵字）比對，不一致即回報。
 
@@ -51,13 +54,23 @@
     ⇒ `status_first_word_problems()` 回 `[]` ⇒ **上面兩道檢查同時完全放行、零訊號**。
 即「抓跨文件假綠」的工具自己長了一個同型假綠面。修法選 (乙)＝表頭定位而非位置依賴：
 `[-1]` 這種位置依賴本身就是脆弱來源，且保留空欄後 `[-1]` 會變成 markdown 表格尾端的
-空片段，非改不可。實查帳本家族 32 檔的表頭**欄數全部同形**（9 個切片＝首尾空片段 ＋
-7 個資料欄，狀態欄恆為最後一個資料欄；只有第 4 欄欄名有兩種寫法，不影響定位），
-故表頭定位對本 repo 既有表格形態安全。
+空片段，非改不可。
+
+🔴 **表頭同形性的正確說法（R60 round 3 SA-R60R3-02 訂正）**：本段原寫「實查帳本家族
+32 檔的表頭欄數全部同形」，兩層都錯——(i) 家族檔數當時實查已是 33（且每跑一次
+`--apply` 就再變一次），(ii) **「有表頭」這個性質根本不對整個家族成立**：家族內有一批
+純散文 archive 完全沒有表格。把只對「具表格表頭的那些檔」成立的性質宣稱到整個家族上，
+比數字過期更重一層。正確的斷言是：**家族內「具表格表頭」的那些檔，其表頭切片數全部
+同形**（首尾空片段 ＋ 資料欄，狀態欄恆為最後一個資料欄；只有其中一個資料欄的欄名有兩
+種寫法，不影響定位）。檔數與切片數一律**現查**——家族檔數見
+`archive_defect_log._family_files()`、切片數見 `_table_layout()`，本 docstring 不寫死
+任何一個（Scan-H 必跑項 #3：鎖的散文不得寫死可由程式現查的數字）。
+機械守門＝`tools/tests/test_check_defect_log_crossref.py::TestFamilyHeaderUniformity`。
 
 ⚠️ arity 檢查的作用範圍**僅主檔**（`_DEFECT_LOG`）——本檔對 archive 只 `stat()` 量大小、
-從不解析其表格列，故 `DEF-101-560` 具名不修的 archive 側 14 列（含未轉義字面豎線、
-被切成 10~11 欄）不會被本檢查誤紅；那 14 列今日零活體後果且已在帳本具名記載。
+從不解析其表格列，故 `DEF-101-560` 具名不修的 archive 側既有壞列（含未轉義字面豎線、
+被多切出欄位）不會被本檢查誤紅；那些列今日零活體後果且已在帳本具名記載，筆數由
+`archive_defect_log._ARITY_BASELINE` 逐檔登記並帶 stale 自檢，本檔不複寫該數字。
 這**不是**對整個檔的靜默豁免：那些列本來就不在本檔的解析面內，一旦被搬進主檔就會當場紅。
 
 使用：
@@ -101,7 +114,10 @@ _CLAIM_RE = re.compile(
 # ---------------------------------------------------------------- 表格欄位切分 + 表頭定位（Pkg-P6）
 # 只把「未被反斜線前導」的豎線當分隔符（欄內字面豎線須寫成 `\|`，見 DEF-101-560）。
 _CELL_SPLIT_RE = re.compile(r"(?<!\\)\|")
-# 表頭列＝第一個資料欄為 `ID`。帳本家族 32 檔實查皆為此形態（欄數全數同形）。
+# 表頭列＝第一個資料欄為 `ID`。帳本家族內**具表格表頭的**檔皆為此形態、切片數同形
+# （SA-R60R3-02 訂正：原寫「家族 32 檔皆為此形態」，家族檔數現查非 32，且家族內另有一批
+# 純散文 archive 根本沒有表格 ⇒ 該性質只對「具表頭的檔」成立。檔數／切片數一律現查，
+# 見模組 docstring「表頭同形性的正確說法」段）。
 _HEADER_RE = re.compile(r"^\|\s*ID\s*\|")
 _ID_HEADER = "ID"
 _STATUS_HEADER = "狀態"
@@ -208,7 +224,19 @@ _STATUS_KEYWORDS: dict[str, re.Pattern[str]] = {
     "fixed": re.compile(r"(?<![A-Za-z0-9])fixed(?![A-Za-z0-9])"),
     # `workaround`（帳本實例：DEF-101-089 workaround-applied）＝以流程繞過、
     # 程式碼缺陷本身仍在 → 歸類 open（workaround 非程式修復）。
-    "open": re.compile(r"(?<![A-Za-z0-9])open(?![A-Za-z0-9])|workaround"),
+    # `partial`＝只修了一部分，缺陷本身仍在 → 同樣歸類 open（R60 round 3 SA-R60R3-07）。
+    # 🔴 為何非補不可：`partial` 是《格式定義》宣告的**合法**首詞，卻沒有任何分類器對應
+    # ⇒ `_classify('partial（只修了一半）')` 回 None ⇒ 該列落進 `main()` 的「狀態含糊」桶，
+    # 而含糊桶**只印 warning、永不 fail**。DEF-101-556 要消滅的「只修一半被當成已修」
+    # 於是並未消失，只是從「靜默算 fixed」搬到「靜默算含糊」——同一個軟出口換個門牌。
+    # 歸 `open` 而非另立一類，是照本表既有的 `workaround` 判例（缺陷本體仍在＝未結案），
+    # 也讓「文件寫 open、帳本寫 partial」不會變成一筆假矛盾。
+    # ⚠️ 邊界：`partially-fixed` **不會**命中此樣式（`partial` 後接 `l` 使 lookahead 不成立），
+    # 它仍由 `status_first_word_problems()` 判為非法首詞而硬紅——那道鎖才是它的歸屬。
+    "open": re.compile(
+        r"(?<![A-Za-z0-9])open(?![A-Za-z0-9])|workaround"
+        r"|(?<![A-Za-z0-9])partial(?![A-Za-z0-9])"
+    ),
 }
 
 
@@ -220,7 +248,12 @@ _STATUS_KEYWORDS: dict[str, re.Pattern[str]] = {
 #
 # 刻意**不含** `workaround`：依本檔 `_STATUS_KEYWORDS` 自己的判例，`workaround` 歸類為
 # `open`（以流程繞過、程式碼缺陷本身仍在），故正規寫法是 `open（workaround-applied …）`
-# 而不是把 `workaround-applied` 當首詞。落地時實查主檔 94 列零命中此形態，不影響存量。
+# 而不是把 `workaround-applied` 當首詞。落地時實查主檔零命中此形態，不影響存量。
+#
+# 🔴 本集合另受一道硬斷言管：**每一個合法首詞都必須能被 `_classify()` 分類**
+# （`unclassifiable_first_word_problems()`）。少了它，「加一個合法首詞卻忘了加分類器」
+# 這整個類別就會靜默落進 `main()` 的 warning-only 含糊桶——`partial` 正是這樣混進來的
+# （SA-R60R3-07）。兩份常數互綁的手法比照本檔既有的「散文 ↔ `_STATUS_FIRST_WORDS`」綁定。
 _STATUS_FIRST_WORDS = frozenset({
     "open", "routed", "fixed", "wontfix",
     "closed-by-decision", "no_action_needed", "partial",
@@ -334,6 +367,40 @@ def _classify(text: str) -> str | None:
     return best_label
 
 
+def unclassifiable_first_word_problems() -> list[str]:
+    """硬斷言：`_STATUS_FIRST_WORDS` 的**每一個**合法首詞都必須能被 `_classify()` 分類。
+
+    🔴 原始缺陷（R60 round 3 SA-R60R3-07）：`partial` 是《格式定義》宣告的合法首詞，
+    卻沒有任何 `_STATUS_KEYWORDS` 條目對應 ⇒ `_classify('partial（…）')` 回 `None`
+    ⇒ 該列被 `_load_ledger_status()` 記成「狀態不明」，而 `main()` 對含糊列**只印
+    warning、永不 fail**。於是 `DEF-101-556` 要消滅的「只修一半被當成已修」並沒有消失，
+    只是從「靜默算 fixed」搬到「靜默算含糊」——換個門牌的同一個軟出口。
+
+    🔴 為何要立**這道通用鎖**而不是只補 `partial` 一個分類器（主控與本包的一致判斷）：
+    只補分類器修的是**這一個實例**，鎖的是「未來再加一個合法首詞卻忘了加分類器」的
+    **整個類別**。兩者不是二擇一——分類器是修復、本鎖是防復發，本包兩件都做：沒有分類器
+    修復，本鎖上線當場紅；沒有本鎖，下一個新首詞會用完全一樣的路徑再溜進含糊桶一次。
+
+    手法比照本檔既有的「散文 ↔ `_STATUS_FIRST_WORDS` 雙向綁定」：把兩份程式常數互綁，
+    任一邊被改而另一邊沒跟就 fail-loud 並逐字指出是哪一個詞。判定對象刻意是**程式常數**
+    而非散文抽出的集合——散文那一側已由 `status_first_word_problems()` 綁住，兩道鎖串起來
+    即為「散文 → 程式常數 → 分類器」的完整鏈；任一環斷掉都有一道鎖會說話。
+
+    回傳問題清單（空＝全部可分類）。純函式、零參數：判定只依賴本檔兩份模組常數。
+    """
+    orphans = sorted(w for w in _STATUS_FIRST_WORDS if _classify(w) is None)
+    if not orphans:
+        return []
+    return [
+        f"合法首詞 {orphans} 沒有任何 _STATUS_KEYWORDS 分類器對應 —— "
+        f"`_classify()` 對它們回 None，於是這些列會落進 main() 的「狀態含糊」桶，"
+        f"而含糊**只印 warning、永不 fail**（＝一個靜默軟出口，SA-R60R3-07）。"
+        f"請在 _STATUS_KEYWORDS 補上對應樣式並寫明歸類理由"
+        f"（既有判例：`workaround`／`partial` 皆歸 `open`，因為缺陷本體仍在），"
+        f"或把該詞從《格式定義》散文與 _STATUS_FIRST_WORDS 一併移除"
+    ]
+
+
 def _load_ledger_status() -> dict[str, str | None]:
     """解析缺陷帳本表格列，回傳 {DEF-ID: 狀態分類}。同 ID 重複出現時，以最後一列為準——
 
@@ -416,11 +483,79 @@ _LEDGER_FAIL_BYTES = 256 * 1024
 # 新增治理文件時在此加一筆，並在該檔內寫明它為何屬於這一類。
 # 🔴 路徑刻意**不**由 `_DEFECT_LOG.parent` 推導，而是各自獨立解析：治理文件在哪，
 # 與帳本主檔在哪是兩件事。前者一旦綁上後者，測試把 `_DEFECT_LOG` mock 到暫存目錄時，
-# 這些檔會跟著「搬去」一個不存在的位置而被判為缺席 ⇒ 7 支既有測試假紅（落地時實際踩到）。
+# 這些檔會跟著「搬去」一個不存在的位置而被判為缺席 ⇒ 一批既有測試假紅（落地時實際踩到）。
+#
+# ============================================================================
+# 🔴 R60 round 3 SA-R60R3-01（BLOCKING）：本常數是**全 repo 唯一**的具名治理文件清單
+# ============================================================================
+# 原始缺陷：`archive_defect_log.py` 當時也叫 `_GOVERNANCE_DOCS`，**同名而成員不同**——
+# 本檔一份 = (Evidence.md, Evidence_r3.md)（體積守門），archive 那份 =
+# (Evidence.md, Scan_Dimensions.md)（指針稽核），**各缺對方一支**。後果是本輪新生的
+# `CrossPlatform_R60_Fix_Evidence_r3.md` 進了體積閘門卻**完全不在指針稽核面**，其中
+# 十餘處指針方言零檢查；對稱地，`CrossPlatform_Scan_Dimensions.md` 進了指針稽核面卻
+# 完全不在體積守門的涵蓋面內。這正是 `DEF-101-587` 講的「把資料搬到另一支檔就繞過
+# 守門」，只是這次繞過的是**指針鎖**——而且同名常數各寫一份，本身就是本輪反覆立帳要
+# 消滅的**複本型缺陷**在守門程式自己身上復發。
+#
+# 🔴 為何是**一個集合**而不是「體積用一張、指針用另一張」（本包的設計判斷）：
+# 兩項義務綁的是**同一個資格**——「這份檔承擔了帳本級的可讀性與可稽核義務」。
+#   · 體積守門的 WHY：複審者要逐條重驗就得讀完它 ⇒ 不得超過 Read 單次上限。
+#   · 指針稽核的 WHY：它會寫出「某 DEF-ID 現居某檔」的宣稱 ⇒ 歸檔動作會讓它失實。
+# 一份治理文件必然同時具備這兩種身分（它就是拿來寫證據與指針的），故任何「只該進其中
+# 一張」的成員都不存在。實測坐實：把兩張清單併成一張之後，`--check` 與體積閘門**雙雙
+# rc=0**、零誤紅（見交件報告 B1 的紅綠實測）。若未來真出現只該受其中一項管的檔，
+# 那時才拆成 `_SIZE_GUARDED_DOCS`／`_POINTER_AUDITED_DOCS` 兩個**不同名字**的常數並各
+# 寫 WHY——**絕不可**讓兩個同名常數有不同成員，那正是本筆缺陷的形狀。
+#
+# 消費端（本檔 `oversize_problems()`、`archive_defect_log._pointer_audit_files()`）
+# 綁的是**同一個 tuple 物件**：archive 那側寫成 `_GOVERNANCE_DOCS = gate._GOVERNANCE_DOCS`
+# 再匯出，並由 `TestGovernanceDocsAreOneSharedSsotObject` 以 `assertIs` 鎖住，形狀沿用
+# 本 repo 既有的 `_CELL_SPLIT_RE` 再匯出先例。
+#
+# 另一道機械鎖（`unregistered_governance_docs()`）：磁碟上凡符合姊妹檔命名慣例
+# （`_GOVERNANCE_DOC_GLOB`）而未登記於本常數者一律 rc=1 —— 「新增姊妹治理文件卻忘了
+# 登記」正是 r3 那次的真實路徑，不能只靠人記得。
 _GOVERNANCE_DOCS = (
     _REPO_ROOT / "docs" / "06_quality" / "CrossPlatform_R60_Fix_Evidence.md",
     _REPO_ROOT / "docs" / "06_quality" / "CrossPlatform_R60_Fix_Evidence_r3.md",
+    _REPO_ROOT / "docs" / "06_quality" / "CrossPlatform_Scan_Dimensions.md",
 )
+
+# 姊妹治理文件的命名慣例：`docs/06_quality/CrossPlatform_*.md`。這**不是**把具名常數
+# 換成 glob（那個方向的反對理由見上方），而是拿 glob 當**發現面**去反查登記面：
+# 具名常數仍是權威，glob 只負責在「有人建了一份長得像治理文件的檔卻沒登記」時吵起來。
+_GOVERNANCE_DOC_GLOB = "CrossPlatform_*.md"
+_GOVERNANCE_DOC_DIR = _REPO_ROOT / "docs" / "06_quality"
+
+
+def unregistered_governance_docs() -> list[str]:
+    """磁碟上符合姊妹檔命名慣例、卻未登記進 `_GOVERNANCE_DOCS` 的檔（空＝全部已登記）。
+
+    🔴 為何需要（SA-R60R3-01 的根因級那一半）：把兩張清單併成一張，消掉的是「同一份檔
+    只進了其中一張」；**沒有**消掉「新建一份檔、兩張都沒進」。r3 的真實路徑正是後者——
+    有人在本輪把證據檔拆成姊妹檔，體積清單記得加、指針清單忘了加，而**沒有任何機械訊號**。
+    合併之後這條路徑只剩一種形狀（整份檔沒登記），本函式就守這一種。
+
+    誠實劃界：判定面＝檔名前綴慣例，**不是**語意判斷。有人把治理文件取名成別的前綴
+    （或放到別的目錄）一樣抓不到——那需要理解「這份檔承擔什麼義務」，本鎖不假裝有。
+    它擋的是「照慣例命名、卻漏登記」這條**已實際發生過**的復發路徑。
+    """
+    registered = {p.resolve() for p in _GOVERNANCE_DOCS}
+    missing = sorted(
+        p.name for p in _GOVERNANCE_DOC_DIR.glob(_GOVERNANCE_DOC_GLOB)
+        if p.resolve() not in registered
+    )
+    if not missing:
+        return []
+    return [
+        f"{name}：符合具名治理文件的命名慣例（{_GOVERNANCE_DOC_GLOB}）卻未登記進 "
+        f"{Path(__file__).name} 的 _GOVERNANCE_DOCS —— 未登記＝該檔同時逸出**體積守門**"
+        f"與 archive_defect_log 的**指針稽核**（SA-R60R3-01 的原始路徑：本輪新生的姊妹"
+        f"證據檔只進了其中一張清單）。請在該常數補上一筆，並在該檔內寫明它為何屬於這一類；"
+        f"若它確實不該受治理文件義務管，請改名成不符合該慣例的檔名，讓「不管」也是"
+        f"一個看得見的決定"
+        for name in missing
+    ]
 
 
 def oversize_problems(paths: list[Path]) -> tuple[list[str], list[str]]:
@@ -483,6 +618,14 @@ def main() -> int:
         if arch_bytes >= _LEDGER_WARN_BYTES:
             print(f"⚠️  帳本歸檔 {arch.name} {arch_bytes} bytes 已逼近上限 "
                   f"{_LEDGER_FAIL_BYTES}（DEF-99-001 政策），請規劃拆分", file=sys.stderr)
+    # 具名治理文件涵蓋面的登記完整性（SA-R60R3-01）——擺在體積檢查**之前**：一份未登記
+    # 的檔在體積面與指針面同時是零檢查，先講「涵蓋面對不對」再講「涵蓋面內的檔多大」。
+    unregistered = unregistered_governance_docs()
+    if unregistered:
+        print(f"❌ 具名治理文件涵蓋面與磁碟脫節（{len(unregistered)} 筆）：", file=sys.stderr)
+        for u in unregistered:
+            print(f"  - {u}", file=sys.stderr)
+        return 1
     # 具名治理文件的體積（DEF-101-587）——與帳本同一條物理界線，見 `oversize_problems()`。
     gov_fails, gov_warns = oversize_problems(list(_GOVERNANCE_DOCS))
     for w in gov_warns:
@@ -512,6 +655,16 @@ def main() -> int:
     # 狀態欄首詞合法值硬斷言（SA-R60R2-06）——擺在跨文件比對**之前**：帳本自身的狀態欄
     # 若寫得不合法，跨文件一致性的結論就建立在含糊的基礎上（round 1 已證 `partially-fixed`
     # 會靜默命中 `fixed`，而本檔對非法首詞原本一句話都不說）。
+    # 合法首詞 → 分類器的硬綁定（SA-R60R3-07）——擺在逐列首詞檢查**之前**：若有一個合法
+    # 首詞根本沒有分類器，逐列檢查會全部放行、而那些列在下游靜默落進 warning-only 的
+    # 「狀態含糊」桶。先確定詞彙表本身自洽，再談每一列合不合詞彙表。
+    orphan_problems = unclassifiable_first_word_problems()
+    if orphan_problems:
+        print(f"❌ 合法首詞缺分類器對應（{len(orphan_problems)} 筆）：", file=sys.stderr)
+        for p in orphan_problems:
+            print(f"  - {p}", file=sys.stderr)
+        return 1
+
     first_word_problems = status_first_word_problems(ledger_text)
     if first_word_problems:
         print(f"❌ 帳本狀態欄首詞不合法（{len(first_word_problems)} 筆）：", file=sys.stderr)
@@ -544,8 +697,10 @@ def main() -> int:
     print(f"✅ 缺陷帳本跨文件狀態一致：帳本 {len(ledger) - len(vague_ids)} 筆有效狀態紀錄"
           f"{vague_note}、{len(_CROSSREF_TARGETS)} 份掃描目標皆無矛盾；"
           f"另全部表格列的狀態欄首詞皆落在《格式定義》宣告的 {len(_STATUS_FIRST_WORDS)} 個"
-          "合法值內（散文與程式常數雙向綁定）；"
-          "全部表格列的欄數皆等於表頭欄數、狀態欄由表頭定位（非 cells[-1] 位置猜測）")
+          "合法值內（散文與程式常數雙向綁定，且每個合法值都有分類器對應）；"
+          "全部表格列的欄數皆等於表頭欄數、狀態欄由表頭定位（非 cells[-1] 位置猜測）；"
+          f"具名治理文件 {len(_GOVERNANCE_DOCS)} 份皆已登記且未逾體積上限"
+          f"（登記面對 {_GOVERNANCE_DOC_GLOB} 發現面雙向核對）")
     return 0
 
 

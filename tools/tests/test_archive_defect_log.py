@@ -1955,6 +1955,343 @@ class TestCriterion6SharesTheAuditSurfaceWithCriterion4(unittest.TestCase):
                       "判準(6) 為何不設 (丁) 必須寫在 docstring，否則下一輪會誤加")
 
 
+def _an_archived_id() -> tuple[str, str]:
+    """回傳一個「只在 archive、不在主檔」的 `(DEF-ID, 檔名)`——真實已歸檔標的。
+
+    與 `TestCriterion6SharesTheAuditSurfaceWithCriterion4._archived_id()` 同語意，抽成模組
+    層函式供 round 3 新增的裸「現居」測試共用；刻意**不**去改那支既有方法（本包只擴充、
+    不重構鄰近既有測試）。
+    """
+    main_text = ADL._LEDGER.read_text(encoding="utf-8-sig")
+    main_layout = ADL.gate._table_layout(main_text)
+    main_ids = {ADL._row_id(r, main_layout) for r in ADL.load_rows(main_text)}
+    for p in ADL._family_files():
+        if p == ADL._LEDGER:
+            continue
+        text = p.read_text(encoding="utf-8-sig")
+        layout = ADL.gate._table_layout(text)
+        if layout is None:
+            continue
+        for row in ADL.load_rows(text):
+            def_id = ADL._row_id(row, layout)
+            if def_id not in main_ids:
+                return def_id, p.name
+    raise AssertionError("找不到任何「只在 archive、不在主檔」的 ID ⇒ 本測試前提失效")
+
+
+class TestGovernanceDocsAreOneSharedSsotObject(unittest.TestCase):
+    """B1 / SA-R60R3-01（BLOCKING）：具名治理文件清單全 repo 只准有一份。
+
+    🔴 原始缺陷（主控親自複驗 CONFIRMED）：兩支工具**同名而成員不同**——
+      · `check_defect_log_crossref._GOVERNANCE_DOCS` = (Evidence.md, Evidence_r3.md)  ← 體積守門
+      · `archive_defect_log._GOVERNANCE_DOCS`       = (Evidence.md, Scan_Dimensions.md) ← 指針稽核
+    各缺對方一支。實測 `r3 in _pointer_audit_files()` 為 **False** ⇒ 本輪新生的姊妹證據檔
+    進了體積閘門卻**完全不在指針稽核面**，其中十餘處指針方言零檢查。
+    這是 `DEF-101-587`「搬到另一支檔就繞過守門」的同型復發，只是繞過的是指針鎖；
+    而「同名常數各寫一份」本身，就是本輪反覆立帳要消滅的複本型缺陷長在守門程式自己身上。
+
+    修法＝單一 SSOT：閘門那側定義，本工具**再匯出同一個物件**（`= gate._GOVERNANCE_DOCS`），
+    形狀沿用既有的 `_CELL_SPLIT_RE` 先例。本類別鎖住「它真的是同一個物件」＋「稽核面真的
+    收得進去」＋「複本不得復活」三件事。
+    """
+
+    def test_the_two_tools_share_the_very_same_tuple_object(self):
+        """`assertIs` 而非 `assertEqual`：兩份內容相同的 tuple 各寫一份也會讓 == 通過，
+        而本筆缺陷的下一個形狀正是「先抄成一樣，再各自漂移」。"""
+        self.assertIs(
+            ADL._GOVERNANCE_DOCS, ADL.gate._GOVERNANCE_DOCS,
+            "`_GOVERNANCE_DOCS` 不再是閘門那個物件 —— 它只准是再匯出"
+            "（`= gate._GOVERNANCE_DOCS`）。一旦本工具自己列一份 Path tuple，"
+            "SA-R60R3-01 的「同名而成員不同」就會原地復活",
+        )
+
+    def test_the_tool_source_does_not_build_its_own_governance_tuple(self):
+        """AST 層：本工具對 `_GOVERNANCE_DOCS` 的唯一賦值必須是 `gate.<同名>`。
+
+        名稱契約（`_GATE_SSOT_CONTRACT`）擋的是「用同一個名字再定義一次」；本鎖擋的是
+        「用同一個名字賦一個**自己組出來的值**」——後者才是缺陷當時的實際形狀
+        （右邊是一串 `_REPO_ROOT / ... ` 的 Path 字面）。
+        """
+        tree = ast.parse(_TOOL_PATH.read_text(encoding="utf-8"))
+        assigns = [
+            n for n in ast.walk(tree)
+            if isinstance(n, ast.Assign)
+            and any(isinstance(t, ast.Name) and t.id == "_GOVERNANCE_DOCS"
+                    for t in n.targets)
+        ]
+        self.assertEqual(len(assigns), 1,
+                         f"本工具對 `_GOVERNANCE_DOCS` 賦值 {len(assigns)} 次，只准一次（再匯出）")
+        value = assigns[0].value
+        self.assertTrue(
+            isinstance(value, ast.Attribute) and value.attr == "_GOVERNANCE_DOCS"
+            and isinstance(value.value, ast.Name) and value.value.id == "gate",
+            f"tools/archive_defect_log.py:{assigns[0].lineno} 的 `_GOVERNANCE_DOCS` 不是"
+            "從 `gate` 再匯出 —— 自己組一份清單就是 SA-R60R3-01 的原始形狀",
+        )
+
+    def test_the_sibling_evidence_file_is_now_in_both_surfaces(self):
+        """回歸鎖：本輪新生的姊妹證據檔必須**同時**在體積守門與指針稽核面內。
+
+        缺陷當時 `r3 in _pointer_audit_files()` 為 False（主控實測），
+        而 `Scan_Dimensions.md` 則反向缺席於體積守門的涵蓋面。兩個方向各鎖一次。
+        """
+        audit = {p.name for p in ADL._pointer_audit_files()}
+        sized = {p.name for p in ADL.gate._GOVERNANCE_DOCS}
+        for name in ("CrossPlatform_R60_Fix_Evidence_r3.md",
+                     "CrossPlatform_Scan_Dimensions.md"):
+            with self.subTest(doc=name):
+                self.assertIn(name, audit, f"{name} 不在指針稽核面 ⇒ 其中的指針方言零檢查")
+                self.assertIn(name, sized, f"{name} 不在體積守門涵蓋面 ⇒ 可無聲長過 Read 上限")
+
+    def test_an_unregistered_sibling_escapes_the_pointer_audit_entirely(self):
+        """🔴 紅綠實測：把稽核面縮回「漏收姊妹檔」的形狀 → 失實宣稱零訊號；收進來 → 轉紅。
+
+        這一支同時是**缺陷重現**與**修復驗收**：注入的內容一字不改，只切換稽核面。
+        全程在沙箱複本上進行，不動任何 tracked 治理文件。
+        """
+        with _ledger_sandbox() as quality:
+            def_id, home = _an_archived_id()
+            registered = quality / "SandboxGovernance.md"
+            registered.write_bytes("# 已登記的治理文件\n\n（無指針）\n".encode("utf-8"))
+            sibling = quality / "SandboxGovernance_r3.md"
+            sibling.write_bytes(
+                f"# 姊妹治理文件\n\n本段宣稱 見主檔 {def_id} 於主檔。\n".encode("utf-8")
+            )
+            pristine = ADL._GOVERNANCE_DOCS
+            try:
+                # 控制組＝缺陷當時的形狀：姊妹檔沒被收進稽核面。
+                ADL._GOVERNANCE_DOCS = (registered,)
+                rc_before, problems_before, _ = _run_check()
+                # 修復後的形狀：單一 SSOT 把姊妹檔一起收進來。
+                ADL._GOVERNANCE_DOCS = (registered, sibling)
+                rc_after, problems_after, _ = _run_check()
+            finally:
+                ADL._GOVERNANCE_DOCS = pristine
+        self.assertIs(ADL._GOVERNANCE_DOCS, pristine, "monkeypatch 未復原")
+        self.assertEqual(
+            rc_before, 0,
+            f"控制組（姊妹檔未收進稽核面）竟已轉紅 ⇒ 紅的來源不是注入本身，"
+            f"本測試無鑑別力。problems={problems_before[:3]}",
+        )
+        self.assertEqual(
+            rc_after, 1,
+            f"姊妹檔收進稽核面後仍未擋下失實宣稱（標的 {def_id} 實居 {home}）⇒ "
+            f"擴面沒有生效。problems={problems_after[:3]}",
+        )
+        new = [p for p in problems_after if p not in problems_before]
+        self.assertTrue(
+            any(sibling.name in p and f"見主檔 {def_id}" in p for p in new),
+            f"轉紅了，但沒有逐字指出是姊妹檔裡的那一句 ⇒ 訊息不可行動。新增 problem={new!r}",
+        )
+
+
+class TestBareResidenceTokenHasAHardRequirement(unittest.TestCase):
+    """B3 / SA-R60R3-05：裸「現居 archive_NN」的第三種方言必須有對等硬要求。
+
+    🔴 結構論證（SA 完整方言普查）：`立帳見` 有 `POINTER_VERB` 硬要求（動詞在、後面沒跟
+    可解析 ID 即紅），但**真正承載居所語意的 token 是「現居」，而它先前沒有對等硬要求**。
+    不帶 `見` 動詞的裸 `現居 archive_NN` 於是兩道正則皆不命中 ⇒ 注入失實宣稱時 rc=0、零訊號。
+    磁碟現況此形態零命中（latent，非已發生），但結構上一直開著——這正是「還沒出事」與
+    「不會出事」的差別，本 repo 對前者的處置一律是補鎖而不是記一筆觀察。
+    """
+
+    def test_the_gap_was_real_neither_existing_regex_matched(self):
+        """控制組（缺陷前提）：兩道既有正則對裸形態確實零命中，否則本鎖無標的。"""
+        # ID 用 `DEF-999-999`（本檔既有的「刻意不存在」慣例，見
+        # `test_stale_pointer_to_unknown_id_is_caught`）：`DEF-101-NNN` 形態受
+        # `test_defect_id_reference_integrity` 管，寫一個空號會讓那道鎖紅——實測踩到一次。
+        line = "本列的完整記錄 DEF-999-999 現居 archive_99。"
+        self.assertEqual(ADL.POINTER_RE.findall(line), [],
+                         "POINTER_RE 竟命中裸形態 ⇒ SA-R60R3-05 的前提不成立")
+        self.assertEqual(
+            [m.group(0) for m in ADL.NONVERB_RESIDENCE_RE.finditer(line)], [],
+            "NONVERB_RESIDENCE_RE 竟命中裸形態 ⇒ 該缺口本來就不存在，本鎖是裝飾",
+        )
+        self.assertTrue(ADL.BARE_RESIDENCE_RE.search(line),
+                        "新樣式對裸形態不命中 ⇒ 補的鎖沒有接到真正的缺口")
+
+    def test_a_false_bare_residence_claim_is_caught(self):
+        def inject():
+            layout = _layout_of(ADL._LEDGER)
+            row = ADL.load_rows(ADL._LEDGER.read_text(encoding="utf-8-sig"))[0]
+            def_id = ADL._row_id(row, layout)
+            _append_to(ADL._LEDGER, f"\n> {def_id} 的完整記錄現居 archive_99。\n")
+        TestCheckModeBugInjection._assert_injection_adds_problem(
+            self, inject, "居所註記「現居 archive_99」失實")
+
+    def test_a_bare_residence_claim_without_any_id_is_caught(self):
+        """對等於 `POINTER_VERB` 的硬要求：宣稱了居所卻無物可稽核＝失實時零訊號。"""
+        def inject():
+            _append_to(ADL._LEDGER, "\n> 本輪已結的那一批現居 archive_99。\n")
+        TestCheckModeBugInjection._assert_injection_adds_problem(
+            self, inject, "前方同一行")
+
+    def test_a_truthful_bare_residence_claim_stays_green(self):
+        """控制組：沒有這一條，上面兩支可以被「凡出現『現居』就報錯」滿足。"""
+        with _ledger_sandbox():
+            def_id, home = _an_archived_id()
+            tag = home.replace("AutoSDD_Defect_Log_", "").replace(".md", "")
+            base_rc, base_problems, _ = _run_check()
+            _append_to(ADL._LEDGER, f"\n> {def_id} 的完整記錄現居 {tag}。\n")
+            rc, problems, _ = _run_check()
+        self.assertEqual(base_rc, 0, f"沙箱基線就是紅的 ⇒ 控制組無意義：{base_problems[:2]}")
+        self.assertEqual(
+            rc, 0,
+            f"屬實的裸居所註記被誤紅（{def_id} 確實在 {home}）⇒ 硬要求下得太寬："
+            f"{[p for p in problems if p not in base_problems]!r}",
+        )
+
+    def test_a_complete_form_is_not_reported_twice(self):
+        """`立帳見 DEF-x（現居 archive_NN）` 由判準④ 全權管，裸形態掃描不得重複報同一處。
+
+        少了這道「已涵蓋即跳過」，每一處合法的完整形態都會被算兩次、錯的也報兩筆 —— 那會
+        讓訊息可信度下降，也讓既有的 `test_wrong_residence_annotation_is_caught` 從「恰好
+        一筆」變成「兩筆」而語意漂移。
+        """
+        with _ledger_sandbox():
+            layout = _layout_of(ADL._LEDGER)
+            row = ADL.load_rows(ADL._LEDGER.read_text(encoding="utf-8-sig"))[0]
+            def_id = ADL._row_id(row, layout)
+            base_rc, base_problems, _ = _run_check()
+            _append_to(ADL._LEDGER, f"\n> 立帳見 {def_id}（現居 archive_99）。\n")
+            _rc, problems, _ = _run_check()
+            new = [p for p in problems if p not in base_problems]
+        self.assertEqual(base_rc, 0, "沙箱基線就是紅的 ⇒ 差集不可解讀")
+        self.assertEqual(
+            len(new), 1,
+            f"同一處完整形態被報了 {len(new)} 筆 ⇒ 裸形態掃描沒有跳過判準④ 已涵蓋的區間："
+            f"{new!r}",
+        )
+
+    def test_the_bare_form_is_latent_on_disk_not_already_present(self):
+        """誠實劃界的機械化：磁碟現況此形態應為零命中。
+
+        若哪天不再是零，代表有人真的用了這種寫法——那時本鎖會逐處驗它，而不是靜默放行。
+        本測試只是把「latent」這個宣稱釘成可驗證的事實，避免它變成一句沒人核對的散文。
+        """
+        hits = []
+        for p in ADL._pointer_audit_files():
+            text = p.read_text(encoding="utf-8-sig")
+            for lineno, line in enumerate(text.splitlines(), 1):
+                covered = [(mm.start(), mm.end()) for mm in
+                           list(ADL.POINTER_RE.finditer(line))
+                           + list(ADL.NONVERB_RESIDENCE_RE.finditer(line))]
+                for mm in ADL.BARE_RESIDENCE_RE.finditer(line):
+                    if not any(s <= mm.start() < e for s, e in covered):
+                        hits.append(f"{p.name}:{lineno} {mm.group(0)!r}")
+        self.assertEqual(
+            hits, [],
+            "稽核面上出現了未被完整形態涵蓋的裸「現居」——本鎖會逐處驗它，"
+            "請確認那幾處都跟得上可解析 DEF-ID 且居所屬實：\n  " + "\n  ".join(hits),
+        )
+
+
+class TestDingExceptionRequiresCornerQuotes(unittest.TestCase):
+    """B4 / SA-R60R3-06：例外 (丁) 收窄為「必須落在同一行的「」或『』內」。
+
+    🔴 **三方判斷不一致，主控裁決採納收窄**（勿改寫成「四方一致認為」）：
+      · Architect：撤回「(丁) 重開了 ARCH-R60-01③」的疑慮。
+      · SD：以四發注入判定 **(丁) 沒有重開** ARCH-R60-01③——它只豁免「無 ID 因而無物可
+        稽核」的提及（家族內同句仍 RED、治理文件內帶真實 ID 的失實指針仍 RED）。
+      · SA：判定**重開**，理由是例外開得比需要寬、形態級模糊仍在。
+    **事實三方一致**（治理文件內未加引號的無 ID 散句 → rc=0），分歧純在價值判斷。
+    主控裁決理由：代價僅一行判準，而現存唯一 (丁) 用例本就落在「」內 ⇒ 零誤紅。
+    """
+
+    def _run_with_governance(self, body: str) -> tuple[int, str]:
+        out, err = io.StringIO(), io.StringIO()
+        with _ledger_sandbox() as quality:
+            gov = quality / "SandboxGovernance.md"
+            gov.write_bytes(body.encode("utf-8"))
+            pristine = ADL._GOVERNANCE_DOCS
+            ADL._GOVERNANCE_DOCS = (gov,)
+            try:
+                with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+                    rc = ADL.check()
+            finally:
+                ADL._GOVERNANCE_DOCS = pristine
+        return rc, out.getvalue() + err.getvalue()
+
+    #: 未加引號、非 code span、非圍籬的無 ID 散句 —— SA 注入用的正是這個形狀。
+    _BARE_MENTION = "本輪的訂正把舊寫法 立帳見主檔 R57 條目 改成帶 ID 的形態。"
+
+    def test_an_unquoted_bare_mention_in_a_governance_doc_is_now_caught(self):
+        rc, output = self._run_with_governance(f"# 沙箱治理文件\n\n{self._BARE_MENTION}\n")
+        self.assertEqual(
+            rc, 1,
+            f"未加引號的無 ID 散句仍被 (丁) 放行 ⇒ 收窄沒有落地（SA-R60R3-06）：{output[-600:]}",
+        )
+        self.assertIn("後未跟可解析的 DEF-ID", output)
+        self.assertIn("「」或『』", output, "訊息必須告訴人怎麼改，不能只說『不行』")
+
+    def test_the_same_mention_inside_corner_quotes_stays_exempt(self):
+        """控制組：加上引號即回到 (丁)，且**每次執行都被列印**（豁免看得見）。"""
+        quoted = "本輪的訂正把舊寫法「立帳見主檔 R57 條目」改成帶 ID 的形態。"
+        rc, output = self._run_with_governance(f"# 沙箱治理文件\n\n{quoted}\n")
+        self.assertEqual(rc, 0, f"落在「」內的提及被誤紅 ⇒ 收窄下手過重：{output[-600:]}")
+        self.assertIn("(丁) 治理文件內非宣稱提及", output)
+        self.assertIn("落在「」／『』內", output,
+                      "(丁) 的列印必須標明是憑「引號」被豁免，而不只是『沒跟 ID』")
+
+    def test_single_corner_quotes_are_accepted_too(self):
+        """『』與「」同級：本 repo 的巢狀引號習慣（(乙) 例外當初補 `』` 是同一個理由）。"""
+        rc, _ = self._run_with_governance(
+            "# 沙箱治理文件\n\n巢狀引述：『立帳見主檔 R57 條目』只是舉例。\n")
+        self.assertEqual(rc, 0, "『』未被 (丁) 接受 ⇒ 與 (乙) 例外的處理不對稱")
+
+    def test_the_family_still_hard_fails_regardless_of_quotes(self):
+        """🔴 收窄不得順手放寬另一邊：家族內的無 ID 散句**即使加了引號**仍是硬錯誤。
+
+        ARCH-R60-01③ 的原始缺陷就在家族內；(丁) 從來不適用於家族，加引號也不行。
+        """
+        def inject():
+            _append_to(ADL._LEDGER, "\n> 舊寫法「立帳見本表 R99 條目」已作廢。\n")
+        TestCheckModeBugInjection._assert_injection_adds_problem(
+            self, inject, "後未跟可解析的 DEF-ID")
+
+    def test_the_sole_real_usage_is_still_exempt_zero_false_red(self):
+        """主控裁決的成立前提：現存唯一 (丁) 用例本就落在「」內 ⇒ 收窄零誤紅。
+
+        直接對**真實** repo 跑一次 `--check`：rc 必須為 0，且 (丁) 仍有客戶（否則這條
+        例外就該刪掉而不是留著）。
+        """
+        rc, problems, quoted = _run_check()
+        self.assertEqual(
+            rc, 0,
+            f"真實 repo 的 --check 因收窄而轉紅 ⇒ 裁決前提「零誤紅」不成立：{problems[:3]}",
+        )
+        self.assertTrue(
+            any("(丁)" in q for q in quoted),
+            "(丁) 在真實語料上已無客戶 ⇒ 這個例外應該刪掉，而不是留著當未來的豁免口",
+        )
+
+    def test_the_narrowing_records_the_dissenting_verdicts(self):
+        """誠實紀律：程式註解必須留下 ARCH／SD 的相反判斷與主控裁決理由。
+
+        本 repo 反覆踩到的是「把裁決寫成共識」——下一輪讀者會以為沒有人反對過，
+        於是失去重新檢視的線索。這道鎖把那段紀錄釘在原始碼裡。
+        """
+        lines = _TOOL_PATH.read_text(encoding="utf-8").splitlines()
+        source = "\n".join(lines)
+        for needle in ("SA-R60R3-06", "主控裁決", "SD：", "Architect："):
+            with self.subTest(needle=needle):
+                self.assertIn(needle, source,
+                              f"(丁) 收窄處未記載 {needle!r} —— 三方判斷不一致的事實必須留痕")
+        # 🔴 逐行判定 ＋ 為「明文禁止該寫法」的那一行留出口，**不是** `assertNotIn(整份檔)`：
+        # 後者會在本檔合法地談論這個禁令時假紅（Pkg-P12 的事故形狀，且
+        # `TestNoAssertionSamplesALiveDocumentWholesale` 會當場攔下——實測它真的攔了一次）。
+        offenders = [
+            f"{i}: {line.strip()}"
+            for i, line in enumerate(lines, 1)
+            if "四方一致" in line and "不得" not in line
+        ]
+        self.assertEqual(
+            offenders, [],
+            "以下行把主控裁決寫成四方一致 —— ARCH／SD 對本筆的判定與 SA 相反：\n  - "
+            + "\n  - ".join(offenders),
+        )
+
+
 class TestCheckIsWiredIntoGates(unittest.TestCase):
     """`--check` 的 rc 必須真的被閘門看（ARCH-R60-02 ②／QA-R60-01 (a)）。
 

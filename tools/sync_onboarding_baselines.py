@@ -24,8 +24,25 @@ R60 round 3 補的兩件事（四方複審 round 2 全數 REJECT 的兩個根因
      地方（DEF-101-562）。兩道判準（見 `prose_problems()`）：
        (1) **受管值不得在受鎖行出現第二次**（≥3 位數才判，見該函式的位數門檻 WHY）：
            散文裡複製一份當輪值，下一次變動時它就是新的 stale 站點。
-       (2) **`R<輪號>=<數字>` 形態的同量宣稱**：值 ≠ live 者必須登記進 `Spec.historical`
-           並附 WHY，否則紅。歷史值放行、當輪值一律不得寫進散文。
+       (2) **同量宣稱**：值 ≠ live 者必須登記進 `Spec.historical` 並附 WHY，否則紅。
+           歷史值放行、當輪值一律不得寫進散文。
+
+R60 round 3 **四方複審之後**回補的三筆（四方獨立命中，非本檔自查）：
+  C. **`Spec.historical` 補上 stale 自檢**（QA-R60R3-02／ARCH-R60R3-01 附帶／
+     SA-R60R3-04／SD-R60R3-02，**四方全數獨立命中同一筆**）：判準(2) 在 round 2 新增了
+     這張豁免表卻沒給它任何反向檢查——注入一筆文件裡從未出現的死登記，`--check` 照樣
+     rc=0。而**同一個函式的判準(1)** 錯誤訊息自己就寫著「本鎖刻意不設個別豁免——豁免表
+     本身就是下一個 stale 站點」，判準(2) 卻正好設了一張。見 `historical_problems()`。
+  D. **判準(2) 不再綁死 `=` 標點**（ARCH-R60R3-01／SD-R60R3-01 二方命中）：原形只認
+     `R<輪號>=<數字>` 字面，中文同義散文整類逸出，而受鎖行上當時就躺著未登記的舊值。
+     改為「主詞 × 連接」兩段式，並補一道**無輪號主詞**的量測宣稱判準。落地當下即在兩條
+     受鎖行各抓到一筆未登記歷史值（其一正是 ARCH 指認的活體證據），皆改以登記收編。
+  E. **指紋觸發器四棵 glob 對齊為遞迴**（SD-R60R3-03）：見 `_FINGERPRINT_TREES` 的 WHY。
+  F. **指紋改為行尾無關**（DEF-101-613）：原版 hash 原始 bytes，而本機 Windows 工作樹
+     有 48／72／92 檔是 CRLF、索引卻因 `.gitattributes` 的 `* text=auto eol=lf` 一律 LF
+     ⇒ **fresh clone／CI runner／macOS 上四格必然全部對不上，`--check-snapshot` 開箱即紅**。
+     修法＝hash 前先在 bytes 層折行尾，見 `_normalize_eol`。本輪主題正是跨平台相容性，
+     故不交棒。
   B. **表②（dated snapshot）從「靠人記得」升為「一條指令 ＋ 因果式 stale 觸發器」**
      （ARCH-R60R2-02③／SA-R60R2-02②）：round 1 填了 v0.30=1736，round 2 動了 v0.30
      測試樹使實測變 1747，**沒人記得回填**，而表頭同時宣稱「四格皆經獨立覆核」⇒ 假宣稱。
@@ -46,9 +63,10 @@ R60 round 3 補的兩件事（四方複審 round 2 全數 REJECT 的兩個根因
   - **只管帶錨點的那一行**。§7／§9 其他地方的數字是有標日期的歷史快照（如 R57 註的
     `total=20356`），依本 repo「時代快照不納管」慣例（見
     `tools/check_pytest_baseline_sites.py` docstring）刻意不回填、也刻意不鎖。
-  - **指紋只覆蓋測試樹**（`*.py` 內容）。生產碼變動改變 `parametrize` 來源、docker daemon
-    可用性、平台差異都能改變計數而指紋不動 ⇒ 它是 stale 的**充分觸發器、非必要條件**
-    （會漏、不會冤）。要它變成必要條件就得付整套重測的代價，那正是表②沒有 live 鎖的原因。
+  - **指紋只覆蓋測試樹**（四棵皆遞迴 `**/*.py` 的**行尾正規化後**內容）。生產碼變動改變 `parametrize`
+    來源、docker daemon 可用性、平台差異都能改變計數而指紋不動 ⇒ 它是 stale 的
+    **充分觸發器、非必要條件**（會漏、不會冤）。要它變成必要條件就得付整套重測的代價，
+    那正是表② 沒有 live 鎖的原因。
   - 每個欄位的正則在受鎖行上必須**恰好命中一次**：0 次＝敘述被改寫成抽不到的形態、
     ≥2 次＝抽錯欄（例如同一列 macOS 欄與 Windows 欄都寫了 `total=`），兩者皆
     fail-loud。這一條是 R60 SA-R60-01 的直接教訓：原鎖用 `search()` 取第一個命中，
@@ -75,7 +93,7 @@ import json
 import re
 import subprocess
 import sys
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
@@ -114,8 +132,31 @@ class Spec:
 # 受「不得把可機械算出的數字寫進散文」那條紀律管）。
 _PROSE_DUP_MIN_DIGITS = 3
 
-# 散文裡的「R<輪號>=<數字>」同量宣稱形態（`**` 是 markdown 強調包裝）。
-_PROSE_ROUND_CLAIM_RE = re.compile(r"R(\d+)\s*=\s*\*{0,2}(\d+)")
+# 散文裡的「同量宣稱」形態。刻意拆成**主詞 × 連接**兩段（而非一條長正則）：要收一種新
+# 方言＝往集合裡加一個字，判準結構不必動。
+#
+# 🔴 R60 round 3（ARCH-R60R3-01／SD-R60R3-01 二方獨立命中）：round 2 版本寫死
+# `R(\d+)\s*=\s*(\d+)`，**把判準綁死在 `=` 這一個標點上**，於是同義的中文散文全數逸出
+# （`R60 收尾實測 756`／`R60：756`／`R60 — 756 tests OK`／`R60 為 756` 一律放行），
+# 而受鎖行上**當時就真的躺著一個未登記的舊值**（ARCH 的活體證據）。這正是本輪反覆在治
+# 的「鎖比對表面形式、不比對語意」反模式：判準只認一種字面，換個標點就繞過去。
+_CLAIM_SUBJECT = r"(?:R|[Rr]ound\s+)(\d+)"
+# 連接：等號家族／全形冒號／破折號／中文繫詞。
+# 🔴 **刻意不收 ASCII 連字號 `-`**：本 repo 的 finding id 一律長成 `SA-R60-01`／
+# `SD-R60-R2-03`／`DEF-101-562`，即 `R<輪號>-<數字>` ⇒ 收了 `-` 會把每一個 id 都判成
+# 同量宣稱（實測：收 `-` 後 `SA-R60-01` 產出假紅「R60=1」）。破折號只收全形 `—`／`–`
+# 且要求兩側空白，同一理由。
+_CLAIM_LINK = r"(?:\s*[=＝:：]\s*|\s+[—–]\s+|\s+(?:收尾)?(?:實測|重釘|為|是)\s*)"
+_PROSE_ROUND_CLAIM_RE = re.compile(_CLAIM_SUBJECT + _CLAIM_LINK + r"\*{0,2}(\d+)")
+
+# 無輪號主詞的量測宣稱：`MIN_TESTS 已重釘 <值>`／`實測：主控動工量 <值>` 這類句子沒有
+# `R<輪號>` 可鉤，但「量測動詞 ＋ 具體數字」本身就是對受管量的宣稱 ⇒ 同樣要受管。
+# 間隔上限刻意**有界且不得跨數字**：緊鄰版（`\s*`）抓不到中間插了敘述的那一種，
+# 無界版則會把整行的數字全部吸進來。位數門檻沿用 `_PROSE_DUP_MIN_DIGITS`（同一個理由：
+# 1~2 位數的巧合同值極多），不另立第二個魔數。
+_PROSE_MEASURE_CLAIM_RE = re.compile(
+    rf"(?:已)?(?:收尾)?(?:實測|重釘)[^\d\n]{{0,10}}?\*{{0,2}}(\d{{{_PROSE_DUP_MIN_DIGITS},}})"
+)
 
 
 _SPECS: tuple[Spec, ...] = (
@@ -127,6 +168,16 @@ _SPECS: tuple[Spec, ...] = (
             Field("violations", re.compile(r"violations=(\d+)"), "violations={v}"),
         ),
         source="AutoClaude/tools/check_loc_budget.py --json",
+        historical=(
+            (
+                "60",
+                20359,
+                "R60 主控動工當下的 LOC 量測值。受鎖行以它舉例說明「為何只在收輪的最終"
+                "工作樹填一次」（同輪另一包改 utils/logger.py 後該值即變動）。"
+                "R60 round 3 放寬判準(2)（ARCH-R60R3-01）後才第一次被抓出來——在那之前"
+                "它是受鎖行上未經登記的散文歷史值，與 ARCH 指認的那一筆是同一species",
+            ),
+        ),
     ),
     Spec(
         anchor="rootunit-baseline-live:",
@@ -135,6 +186,15 @@ _SPECS: tuple[Spec, ...] = (
         historical=(
             ("57", 616, "R57 macOS 實機量測（ONBOARDING §7 表① macOS 欄同值）"),
             ("59", 661, "R59 收尾實測，見 DEF-101-519"),
+            (
+                "60",
+                756,
+                "R60 round 1 的 MIN_TESTS 值。受鎖行引用 SA-R60-01／ARCH-R60-03 的原始"
+                "發現逐字語料（『本格寫 661 而 MIN_TESTS 已重釘 <此值>』）以保住該發現的"
+                "具體性。🔴 **這一筆就是 ARCH-R60R3-01 指認的活體證據**：判準(2) 綁死 `=` "
+                "標點時它是受鎖行上唯一未登記的散文歷史值，放寬後轉紅、於此登記；"
+                "刪掉散文而非登記會毀掉該發現的可讀性，登記才是本機制設計的出口",
+            ),
         ),
     ),
 )
@@ -205,20 +265,91 @@ def prose_problems(line: str, spec: Spec, live: dict[str, int]) -> list[str]:
                 f"豁免表本身就是下一個 stale 站點）"
             )
 
-    allowed = {(rnd, val) for rnd, val, _why in spec.historical}
+    allowed_pairs = {(rnd, val) for rnd, val, _why in spec.historical}
+    allowed_values = {val for _rnd, val, _why in spec.historical}
     live_values = set(live.values())
-    for rnd, raw in _PROSE_ROUND_CLAIM_RE.findall(line):
-        val = int(raw)
-        if val in live_values or (rnd, val) in allowed:
+
+    reported: set[int] = set()
+    for match in _PROSE_ROUND_CLAIM_RE.finditer(line):
+        rnd, val = match.group(1), int(match.group(2))
+        if val in live_values or (rnd, val) in allowed_pairs:
             continue
+        reported.add(val)
+        # 訊息刻意引**逐字命中的原文**而非重組成 `R<n>=<v>`：判準已不再只認一種字面，
+        # 重組會讓讀者在文件裡搜不到那一段（round 2 版本就是這樣寫的）。
         problems.append(
-            f"受鎖行散文有同量宣稱「R{rnd}={val}」，但它既不等於任何 live 值"
+            f"受鎖行散文有同量宣稱「{match.group(0).strip()}」，但它既不等於任何 live 值"
             f" {sorted(live_values)}、也不在 Spec.historical 白名單內。\n"
             f"    這正是 R60 round 2 四方全數命中的形態：受鎖 token 已回填為當輪實測，"
             f"而散文仍留著同輪的較舊宣稱（DEF-101-562）。\n"
             f"    處置：歷史值 → 在 `_SPECS` 的 `historical` 登記 (輪號, 值, WHY)；"
             f"當輪值 → **不要寫進散文**，改寫成「見本格 live 值」"
         )
+
+    for match in _PROSE_MEASURE_CLAIM_RE.finditer(line):
+        val = int(match.group(1))
+        if val in live_values or val in allowed_values or val in reported:
+            continue
+        problems.append(
+            f"受鎖行散文有**無輪號主詞**的量測宣稱「{match.group(0).strip()}」，"
+            f"而它既不等於任何 live 值 {sorted(live_values)}、也不在 Spec.historical "
+            f"白名單內。\n"
+            f"    ⚠️ 這一道是 R60 round 3 補的（ARCH-R60R3-01）：判準綁死 `=` 標點時，"
+            f"『某某已重釘 <值>』『實測：某某 <值>』整類句子全部逸出，而受鎖行上當時就"
+            f"躺著這樣一個未登記的舊值。\n"
+            f"    處置：歷史值 → 在 `_SPECS` 的 `historical` 登記 (輪號, 值, WHY)"
+            f"（無輪號主詞者，輪號寫進 WHY 即可）；當輪值 → 改寫成「見本格 live 值」"
+        )
+    return problems
+
+
+def historical_problems(line: str, spec: Spec, live: dict[str, int]) -> list[str]:
+    """`Spec.historical` 白名單的 **stale 自檢**（反向檢查）。純函式。
+
+    🔴 WHY（R60 round 3，**四方全數獨立命中**：QA-R60R3-02／ARCH-R60R3-01 附帶／
+    SA-R60R3-04／SD-R60R3-02）：round 2 為判準(2) 新增了 `Spec.historical` 這張豁免表，
+    **卻沒有給它任何 stale 自檢**——注入一筆「文件從未出現過」的死登記，`--check` 照樣
+    rc=0、零訊號。諷刺的是**同一個函式的判準(1)** 錯誤訊息裡自己就寫著「本鎖刻意不設個別
+    豁免——豁免表本身就是下一個 stale 站點」，而判準(2) 就設了一張，且沒補上那句話所預言
+    的防護。同 repo 的兩張姊妹豁免表都有自檢（`_BASELINE_WAIVERS` 的
+    `test_baseline_waivers_are_not_stale`、`archive_defect_log._ARITY_BASELINE` 的
+    「實測 < 登記即紅」），本表是唯一的例外 ⇒ 同輪內標準不一致。
+
+    判準＝**leave-one-out**：把一筆登記拿掉後，受鎖行若**不會多出任何一條問題**，代表它
+    現在沒有遮蔽任何東西 ⇒ stale。刻意不另寫第二套「這筆登記對應到哪段散文」的比對邏輯
+    ——那會變成同一個語意兩個算法（本檔一直在治的病），而且判準(2) 一放寬就會失準。
+
+    邊界（誠實劃界）：同一個**值**登記兩筆時，leave-one-out 會互相遮蔽而失去鑑別力
+    （拿掉任一筆，另一筆仍放行）⇒ 該情形另以顯式的重複登記判準擋在前面。
+    """
+    problems: list[str] = []
+
+    seen: dict[int, str] = {}
+    for rnd, val, _why in spec.historical:
+        if val in seen:
+            problems.append(
+                f"`historical` 把同一個值 {val} 登記了兩筆（輪號 {seen[val]} 與 {rnd}）"
+                f"——兩筆會互相遮蔽，使下方的 leave-one-out stale 自檢對這個值失去鑑別力。\n"
+                f"    處置：只留一筆，把另一個輪號併進該筆的 WHY"
+            )
+        seen[val] = rnd
+
+    baseline = set(prose_problems(line, spec, live))
+    for idx, (rnd, val, why) in enumerate(spec.historical):
+        reduced = replace(
+            spec, historical=spec.historical[:idx] + spec.historical[idx + 1 :]
+        )
+        if set(prose_problems(line, reduced, live)) <= baseline:
+            problems.append(
+                f"`historical` 的登記 (輪號 {rnd}, 值 {val}) 已 **stale**：把這一筆拿掉之後，"
+                f"受鎖行不會多出任何一條問題 ⇒ 它現在沒有遮蔽任何東西"
+                f"（散文已被改寫或該宣稱已被刪除）。\n"
+                f"    **這是好消息，紅燈只是要你回收登記**——豁免只准因為「散文裡還留著那個"
+                f"歷史值」而存在，不准因為「沒人記得回收」而存在。\n"
+                f"    處置：編輯 tools/sync_onboarding_baselines.py 的 `_SPECS`，把錨點"
+                f" `{spec.anchor}` 那筆 Spec 的 `historical` 中**這一筆整個刪掉**。\n"
+                f"    該筆登記的 WHY 原文：{why}"
+            )
     return problems
 
 
@@ -307,10 +438,18 @@ _FINGERPRINT_ANCHOR = "snapshot-fingerprints:"
 _FP_LEN = 12  # sha256 前 12 hex；碰撞機率對「偵測有人改了測試樹」這個用途遠足夠
 
 # 指紋覆蓋的測試樹：鍵＝文件裡的欄位名，值＝(相對路徑, glob)。
+#
+# 🔴 **四棵一律用遞迴 `**/*.py`**（R60 round 3 SD-R60R3-03）：round 2 版本三棵 SDD 樹用
+# 非遞迴 `*.py`、只有 AutoClaude 用 `**/*.py`，四棵不對稱且無 WHY。而表② 那四格的計數
+# 全部來自 **pytest，pytest 收集測試是遞迴的** ⇒ 在任一棵的子目錄新增測試會改變計數、
+# 指紋卻不動＝觸發器漏（注入實測：改 top-level 檔轉紅、新增 top-level 檔轉紅、
+# **新增子目錄檔不轉紅**）。修法刻意選「把三棵對齊成遞迴」而非「補一條 WHY 說明會漏」：
+# 這是**消除不對稱**，不是加機制。三棵現況子目錄有 `fixtures/` 但 `.py` 數為零，
+# 故改用遞迴 glob 後四格指紋逐格 byte-identical、文件無需回填（已實測比對）。
 _FINGERPRINT_TREES: tuple[tuple[str, str, str], ...] = (
-    ("v001", "AISDLC_SDD/AISDLC_SDD_v0.01/tools/fsm_runtime/tests", "*.py"),
-    ("v030", "AISDLC_SDD/AISDLC_SDD_v0.30/tools/fsm_runtime/tests", "*.py"),
-    ("scripts", "AISDLC_SDD/scripts/tests", "*.py"),
+    ("v001", "AISDLC_SDD/AISDLC_SDD_v0.01/tools/fsm_runtime/tests", "**/*.py"),
+    ("v030", "AISDLC_SDD/AISDLC_SDD_v0.30/tools/fsm_runtime/tests", "**/*.py"),
+    ("scripts", "AISDLC_SDD/scripts/tests", "**/*.py"),
     ("autoclaude", "AutoClaude/tests", "**/*.py"),
 )
 
@@ -360,12 +499,35 @@ _SLOW_SPECS: tuple[SlowSpec, ...] = (
 )
 
 
+def _normalize_eol(raw: bytes) -> bytes:
+    """行尾正規化：CRLF 與孤立 CR（老 Mac 行尾）一律折成 LF。純 bytes 層。
+
+    🔴 WHY（DEF-101-613，R60 round 3）：**指紋要回答的問題是「測試樹的內容變了沒」，
+    而行尾是 checkout 產物、不是內容。** 不正規化就等於讓**同一個 commit 在不同平台
+    得到不同指紋**。
+
+    這不是假想風險，是本機實查的活體狀態：`.gitattributes` 宣告 `* text=auto eol=lf`
+    ⇒ 索引一律 LF，但 Windows 工作樹大量檔案是 CRLF（`git ls-files --eol <樹>` 數
+    `i/lf w/crlf`：v0.01 樹 48／v0.30 樹 72／AutoClaude 樹 92）。原版直接 hash
+    `read_bytes()` ⇒ 任何 fresh clone／CI runner／macOS 機器 checkout 出來都是 LF，
+    四格指紋必然全部對不上，`--check-snapshot` **開箱即紅**。今日零後果純粹因為只有
+    這一台 Windows 機器在跑——那是巧合，不是設計正確。
+
+    刻意**在 bytes 層做、不 decode 成文字**：測試樹裡可能有非 UTF-8 或含 BOM 的檔，
+    decode 會引進一整類與行尾無關的新失敗模式；而且 `str.splitlines()` 連 U+2028／
+    U+0085 也當行尾，會把正規化範圍偷偷擴大到「內容差異」上，反而縮掉鑑別力。
+    """
+    return raw.replace(b"\r\n", b"\n").replace(b"\r", b"\n")
+
+
 def tree_fingerprint(rel_dir: str, pattern: str) -> str:
-    """測試樹內容指紋：sha256(排序後的 相對路徑 + 檔案 bytes)。
+    """測試樹內容指紋：sha256(排序後的 相對路徑 + **行尾正規化後**的檔案 bytes)。
 
     刻意**不用 git**：`git rev-parse HEAD:<path>` 只看 HEAD，untracked／未 commit 的新測試
     檔不算進去 ⇒ 一輪內新增測試會漏觸發（本 repo 已有「worktree 隔離看不到未 commit 修改」
     這條踩過的教訓）。純檔案內容雜湊對 tracked／untracked 一視同仁。
+
+    正規化的 WHY 見 `_normalize_eol`（DEF-101-613：不做就是平台相依指紋）。
     """
     root = _REPO_ROOT / rel_dir
     if not root.is_dir():
@@ -379,7 +541,7 @@ def tree_fingerprint(rel_dir: str, pattern: str) -> str:
             continue
         digest.update(path.relative_to(root).as_posix().encode("utf-8"))
         digest.update(b"\0")
-        digest.update(path.read_bytes())
+        digest.update(_normalize_eol(path.read_bytes()))
         digest.update(b"\0")
     return digest.hexdigest()[:_FP_LEN]
 
@@ -577,6 +739,9 @@ def check(text: str, measured: dict[str, dict[str, int]]) -> list[str]:
         documented = parse_documented(line, spec)
         live = measured[spec.anchor]
         problems.extend(f"[{spec.anchor}] {p}" for p in prose_problems(line, spec, live))
+        problems.extend(
+            f"[{spec.anchor}] {p}" for p in historical_problems(line, spec, live)
+        )
         if documented != live:
             note = ""
             if live.get("violations", 0) > 0:

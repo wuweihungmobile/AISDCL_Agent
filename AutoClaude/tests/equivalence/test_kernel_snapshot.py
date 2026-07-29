@@ -16,11 +16,9 @@ Semantic-level 比對規則（SD_03 §2.4）：
 from __future__ import annotations
 
 import json
-import os
 import re
 from pathlib import Path
 from typing import Any
-from unittest.mock import MagicMock
 
 import pytest
 import yaml
@@ -119,7 +117,14 @@ def test_kernel_snapshot(playbook_file: str, request):
     update = request.config.getoption("--snapshot-update", default=False)
 
     if update or not snapshot_path.exists():
-        SNAPSHOTS_DIR.mkdir(parents=True, exist_ok=True)
+        # `SNAPSHOTS_DIR` 是**刻意入庫的 golden 產物目錄**，不是暫存區：快照要能被 diff、
+        # 被 review、隨 commit 一起演進，換成 mkdtemp 就失去全部意義。並行安全的理由與
+        # `_tmp_rules` 那類站點不同——① 平常兩個分支都不寫（檔案已存在即走比對路徑）；
+        # ② 真的寫時內容是同一份決定性快照，兩行程寫出的位元組相同；③ 任何一側都不刪除
+        # 對方的檔案（無 rmdir／清空迴圈），故不存在「互刪 → 假紅」的形態。
+        # 對應機械鎖：tools/tests/test_platform_neutral_paths.py::TestNoInTreeWritableTmpDir
+        # （該鎖附 stale 自檢：本行哪天不再有違規，標記會被指名要求刪除）。
+        SNAPSHOTS_DIR.mkdir(parents=True, exist_ok=True)  # tmpdir-ok: 入庫 golden 快照，非暫存區
         with open(snapshot_path, "w", encoding="utf-8") as f:
             json.dump(actual, f, ensure_ascii=False, sort_keys=True, indent=2)
         return

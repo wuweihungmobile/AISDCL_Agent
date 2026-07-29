@@ -49,8 +49,10 @@
 
 處置**不是禁用該語法**（那個方向已被實測駁回，理由記在此處以免復辟）：
   (a) 禁用會製造大量誤紅——`CrossPlatform_R60_Fix_Evidence.md` 本身就是「討論指針修復」
-      的證據檔，實測全檔 14 處「立帳見」字樣中只有 1 處是活體指針，其餘全是 code fence／
-      表格 backtick 內的**逐字引述**（稽核輸出貼上、修復對照表）。
+      的證據檔，實測全檔「立帳見」字樣**絕大多數不是活體指針**，而是 code fence／表格
+      backtick 內的**逐字引述**（稽核輸出貼上、修復對照表）。各類命中的實數不寫在此處：
+      `--check` 每次執行都會印出「指針數／引述數」與逐處清單（Scan-H #3：鎖的散文不得
+      寫死可由程式現查的數字）。
   (b) **更關鍵：禁用會把偵測面一起丟掉。** `CrossPlatform_Scan_Dimensions.md` 指向的
       `DEF-101-555` 是判準④ 攔下、留在主檔待 R61 承接的**活列**；一旦 R61 把它搬進
       archive_32，那句就靜默變成失實指針——與 `archive_26`／`27` 的 `DEF-101-493`
@@ -91,8 +93,10 @@
 就不再是一條靜默路徑。R60 收輪前那次 `archive_31` 走的是人工歸檔、漏了登記，
 而 `--check` 當時的四項判準完全不看索引段，照印 rc=0（四方 round 2 全數命中）。
 
-`--check` 是 root-infra 閘門的一員（`tools/git-hooks/pre-push` 守門迴圈第 7 支 ＋
-`.github/workflows/root-infra-ci.yml` 第 13 道），與 `check_defect_log_crossref.py`
+`--check` 是 root-infra 閘門的一員（`tools/git-hooks/pre-push` 的守門迴圈 ＋
+`.github/workflows/root-infra-ci.yml` 的一道 step；**接線位置以那兩支檔現查為準，此處不寫
+序號**——序號會隨其他守門增刪而 stale，且由
+`TestCheckIsWiredIntoGates` 驗「有沒有接上」而非「接在第幾位」），與 `check_defect_log_crossref.py`
 同級——R60 round 1 ARCH-R60-02／QA-R60-01 實證「可重跑但沒有任何閘門看它的 rc」
 與「不可重跑」是同一個病的兩種形狀，故本輪把 rc 真正接上閘門。
 """
@@ -122,7 +126,8 @@ CLOSED_CLASSES = frozenset({"fixed", "wontfix", "closed-by-decision"})
 # `ADL._CELL_SPLIT_RE`，而該檔的 `row_cells()` docstring 逐字寫著「刻意不直接用
 # `ADL._cells()`：那支會用 `if c.strip()` 丟掉空格子——中間任一欄留空就整排錯位」
 # ——它**早就獨立踩到並繞開了本輪 Pkg-P7 修的同一個 bug**，只是繞法是自己再切一次。
-# 該檔不在本包所有權內，直接移除本名稱會讓根層 946 支測試紅 9 支（實測），故本輪以
+# 該檔不在本包所有權內，直接移除本名稱會讓根層測試套件紅一批（實測；筆數不寫死，套件
+# 規模每輪都在變），故本輪以
 # 再匯出維持相容，並把「該檔應改用 `gate._row_cells(line)[1:-1]`」列為跨包請求。
 _CELL_SPLIT_RE = gate._CELL_SPLIT_RE
 
@@ -161,7 +166,9 @@ CHECK_CRITERIA: tuple[tuple[str, str], ...] = (
     ("跨檔矛盾", "同一 ID 同時存在主檔與 archive 時，兩邊狀態分類不得各說各話"),
     ("立帳指針", "稽核面每一處「立帳見」都要跟得上可解析 DEF-ID，且居所宣稱與實況一致"),
     ("歸檔索引涵蓋性", "磁碟上每支 archive 都要在主檔索引段有一條以它為主體的 bullet（雙向）"),
-    ("非「立帳見」方言的居所宣稱", "`見主檔 DEF-x`／`見 DEF-x（現居 archive_NN）` 同樣驗居所"),
+    ("非「立帳見」方言的居所宣稱",
+     "`見主檔 DEF-x`／`見 DEF-x（現居 archive_NN）` 同樣驗居所；"
+     "裸「現居 archive_NN」（無「見」動詞）另受對等硬要求，須跟得上可解析 DEF-ID"),
     ("表格列欄數", "每列切出的欄數等於該檔表頭欄數；archive 側既有列具名基線、主檔零豁免"),
 )
 
@@ -177,15 +184,16 @@ MOVE_CRITERIA: tuple[str, ...] = (
 _CIRCLED = "①②③④⑤⑥⑦⑧⑨⑩"
 
 # ---------------------------------------------------- 判準(7) 的既有列具名基線（Pkg-P7 P7-2）
-# 🔴 帳本家族 archive 側實查有 14 列欄內含**未轉義的字面豎線**（須寫成 `\|`），被切成
-# 10~11 欄而非表頭的 9 欄。`DEF-101-560` 已逐筆具名**不修**（史料檔逐字保全、今日零活體
+# 🔴 帳本家族 archive 側實查有一批列的欄內含**未轉義的字面豎線**（須寫成 `\|`），因而被
+# 多切出欄位。**逐檔筆數就是下方這張表本身**（本表即該數字的唯一真相源，散文不複寫一份，
+# 否則就是 Scan-H #3 講的第二個 stale 站點）。`DEF-101-560` 已逐筆具名**不修**（史料檔逐字保全、今日零活體
 # 後果），而 `check_defect_log_crossref.py` 之所以不誤紅是因為它**從不解析 archive 的表格
 # 列**（只 `stat()` 量大小）——本檔的 `check()` 會解析家族每一份檔，故必須明確處置。
 #
 # 處置＝方案(丙) 具名基線，**不是** (甲) 只警告不阻擋、也**不是** (乙) 去改史料檔：
 #   · (甲) 被否決：「archive 側只警告」等於把整個 archive 面的欄數腐化永久降級成雜訊，
 #     而下一輪把一列壞列搬進 archive_32 時它同樣只是警告 ⇒ 硬擋面等於沒有。
-#   · (乙) 被否決：那 14 列在 archive 檔內、`DEF-101-560` 已具名不修，且那些檔不在本包的
+#   · (乙) 被否決：那些列都在 archive 檔內、`DEF-101-560` 已具名不修，且那些檔不在本包的
 #     所有權內；改史料檔要另行核准，本包無權推翻該決定。
 #   · (丙) 採用：形狀比照 `tools/tests/test_adr_xplat001_c1c2_lock.py::_BASELINE_WAIVERS`
 #     ——具名、逐檔、帶 stale 自檢（實測少於登記數即紅並要求把數字改小／刪掉），且每次
@@ -256,13 +264,27 @@ POINTER_VERB = "立帳見"
 #       圍籬跨行、必須用行狀態機才判得出（見 `_fenced_line_numbers()`）。實測
 #       `CrossPlatform_R60_Fix_Evidence.md:830~836` 就是把 `--check` 的實測輸出與舊的
 #       失實寫法逐字貼上當證據——那是證據，不是宣稱。
-#  (丁) **僅限具名治理文件**（`_GOVERNANCE_DOCS`）：動詞後未跟可解析 DEF-ID 的提及。
+#  (丁) **僅限具名治理文件**（`_GOVERNANCE_DOCS`）：動詞後未跟可解析 DEF-ID、**且該處
+#       落在同一行的「」或『』引號內**的提及。
 #       ⚠️ 這條**刻意不適用於帳本家族**——家族內的無 ID 散句正是 ARCH-R60-01 ③ 的
 #       原始缺陷（樹上當時真有三處），那裡它必須是硬錯誤。治理文件的角色不同：它們
-#       在**討論這個語法本身**，`CrossPlatform_R60_Fix_Evidence.md:843` 甚至逐字記著
-#       「訂正註若把舊的失實形態逐字重寫…指針稽核會把那段引用當成一個新的失實指針
+#       在**討論這個語法本身**，`CrossPlatform_R60_Fix_Evidence.md` 的訂正註段甚至逐字
+#       記著「訂正註若把舊的失實形態逐字重寫…指針稽核會把那段引用當成一個新的失實指針
 #       而報紅——我第一版就這樣自己觸發了一次」。對這種散文硬要求 ID，等於逼人改寫
 #       **正確的**紀錄。它也無法夾帶宣稱：沒有 ID 就沒有居所可宣稱。
+#
+#       🔴 **round 3 收窄為「必須落在「」或『』內」（SA-R60R3-06；三方判斷不一致，主控裁決）**
+#       —— 三方對**事實**一致：治理文件內一句未加引號、非 code span、非圍籬的散句
+#       `立帳見主檔 <非 ID 字樣>` 會被 (丁) 放行（rc=0）。分歧純在**價值判斷**：
+#         · Architect：撤回「(丁) 重開了 ARCH-R60-01③」的疑慮（實測只命中一處且不適用家族）。
+#         · SD：以四發注入判定 **(丁) 沒有重開** ARCH-R60-01③（家族內同句仍 RED、治理文件
+#           內帶真實 ID 的正確指針 GREEN、帶失實 ID 的 RED），只豁免「無 ID 因而無物可稽核」。
+#         · SA：判定**重開**——例外開得比需要寬，形態級模糊仍在。
+#       **主控裁決：採納 SA 的收窄**。理由：代價僅一行判準，而現存唯一 (丁) 用例本就落在
+#       「」內 ⇒ **零誤紅**（落地實測 `--check` rc=0、既有引述清單筆數不變），收窄能消掉
+#       一個形態級模糊。ARCH／SD 的相反判斷同時記錄在案，**不得**改寫成「四方一致認為」。
+#       收窄後的邊界更清楚：引號與 (甲) 反引號、(丙) 圍籬同屬**看得見的刻意標記**，
+#       「這是在提及一個語法」於是有了三種一致的表達方式，而不是「沒跟 ID 就算」。
 #
 # 🔴 為何這四條不是新的豁免口：(a) 前三條都是**看得見的刻意標記**（反引號渲染成等寬
 # code、`」` 是閉合引號、圍籬區塊在渲染後自成一塊），第四條的邊界是「沒有 ID」＝結構上
@@ -272,17 +294,34 @@ POINTER_VERB = "立帳見"
 # 所以拿反引號夾帶一個真指針來規避，會在每一次閘門輸出裡現形，不可能靜默。
 _CODE_SPAN_RE = re.compile(r"`[^`]*`")
 _TERM_MENTION_SUFFIXES = ("」", "』")
+# 例外 (丁) 收窄用（SA-R60R3-06）：同一行的成對轉角引號。與 `_CODE_SPAN_RE` 同形狀——
+# 兩者都是「看得見的刻意標記」，故用同一種判定方式（掃出成對區間、看該處落不落在區間內）。
+_CORNER_QUOTE_RE = re.compile(r"「[^「」]*」|『[^『』]*』")
 
 # 判準④ 的稽核面第二半：具名治理文件集合（ARCH-R60R2-05 方案甲）。
 # 這些檔不是帳本，**不參與**居所判定的來源（居所一律由帳本家族的表格列決定），只是
 # 「會寫出指針宣稱」的地方，故納入指針稽核而不納入 (1)(2)(3)(5) 那幾項帳本結構判準。
-# 路徑刻意以 `_REPO_ROOT` 為基準而**不是** `_QUALITY_DIR`：測試沙箱會 monkeypatch
-# `_QUALITY_DIR`／`_LEDGER` 把家族搬到 tmp，若這兩支跟著搬走就會在沙箱裡「查無此檔」，
-# 把一道真鎖變成沙箱內的假訊號。要在測試裡替換它請直接 monkeypatch 本常數。
-_GOVERNANCE_DOCS = (
-    _REPO_ROOT / "docs" / "06_quality" / "CrossPlatform_R60_Fix_Evidence.md",
-    _REPO_ROOT / "docs" / "06_quality" / "CrossPlatform_Scan_Dimensions.md",
-)
+#
+# 🔴 **再匯出（re-export），不是複本**（R60 round 3 SA-R60R3-01，BLOCKING）：
+# `= gate._GOVERNANCE_DOCS` 綁的是**同一個 tuple 物件**，由
+# `tools/tests/test_archive_defect_log.py::TestGovernanceDocsAreOneSharedSsotObject`
+# 以 `assertIs` 鎖住，所以它永遠不可能漂移成第二份清單。形狀沿用本檔既有的
+# `_CELL_SPLIT_RE = gate._CELL_SPLIT_RE` 先例（「N 份 → 1 份 SSOT」）。
+#
+# 原始缺陷：本行**曾經**自己寫一份 `(Evidence.md, Scan_Dimensions.md)`，與閘門那份
+# `(Evidence.md, Evidence_r3.md)` **同名而成員不同、各缺對方一支**。後果：本輪新生的
+# 姊妹證據檔 `CrossPlatform_R60_Fix_Evidence_r3.md` 進了體積閘門卻**完全不在本檔的指針
+# 稽核面**（主控實測 `r3 in _pointer_audit_files()` 為 False），其中十餘處指針方言零檢查；
+# 對稱地 `CrossPlatform_Scan_Dimensions.md` 進了指針稽核卻不在體積守門內。
+# 沙箱注入證明**鎖本身有完整牙齒**，缺的純粹是稽核面沒收進去——正是 `DEF-101-587`
+# 講的「搬到另一支檔就繞過守門」，這次繞過的是指針鎖。
+# 兩項義務為何是同一個集合（而非兩個不同名字的常數），逐條 WHY 寫在閘門那一側的定義處。
+#
+# 路徑仍以 `_REPO_ROOT` 為基準而**不是** `_QUALITY_DIR`（閘門那側同樣如此）：測試沙箱會
+# monkeypatch `_QUALITY_DIR`／`_LEDGER` 把家族搬到 tmp，若這幾支跟著搬走就會在沙箱裡
+# 「查無此檔」，把一道真鎖變成沙箱內的假訊號。要在測試裡替換它請直接 monkeypatch 本常數
+# （rebind 本模組的名字即可，不會動到閘門那一側）。
+_GOVERNANCE_DOCS = gate._GOVERNANCE_DOCS
 
 # 判準⑤ — 歸檔索引 bullet：主檔「已歸檔內容」段裡**以某支 archive 檔名為主體**的那一條。
 # 樣式刻意只認「`> - ` ＋（可帶粗體的）反引號檔名」開頭：索引段的 bullet 一律長這樣，
@@ -311,6 +350,34 @@ NONVERB_RESIDENCE_RE = re.compile(
     r"(?:（現居\s*[`*]{0,2}(?P<archive>archive_\d+)[`*]{0,2}）)?"
 )
 
+# ------------------------------------------- 判準⑥ 第三種方言：**裸**「現居」（SA-R60R3-05）
+# 🔴 結構論證（SA 完整方言普查的結論，值得逐字留著）：`立帳見` 有 `POINTER_VERB` 這道
+# 硬要求（動詞在、後面沒跟可解析 ID 即紅，正是 ARCH-R60-01③ 的修法），但**真正承載
+# 「居所」語意的 token 其實是「現居」，而它沒有對等的硬要求**。於是不帶 `見` 動詞的裸
+# `現居 archive_NN`（例如「本列 …，現居 archive_27」）兩道正則皆不命中 ⇒ 注入失實宣稱
+# `--check` 回 rc=0、零訊號。磁碟現況此形態**零命中**（實查全部 `現居 archive_NN` 都長在
+# `見`／`立帳見` 構句內）⇒ 是 **latent 缺口**，但結構上一直開著。
+#
+# 為何對「現居」下硬要求是安全的，而對「見」不是（判準⑥ docstring 原本的反對理由）：
+# `見` 是中文常用單字，對它下硬要求會把整個 repo 的散文變成錯誤；`現居` 不是——實查
+# 稽核面內它**只**出現在居所敘述裡。故本項對它比照 `POINTER_VERB` 立硬要求。
+RESIDENCE_TOKEN = "現居"
+BARE_RESIDENCE_RE = re.compile(
+    r"現居\s*[`*]{0,2}(?P<archive>archive_\d+)[`*]{0,2}"
+)
+# 「鄰近」＝同一行、該註記**之前**最靠近的可解析 DEF-ID，且中間相隔不超過視窗字數。
+_NEARBY_ID_RE = re.compile(r"[`*]{0,2}(?P<id>DEF-\d+-\d+)[`*]{0,2}")
+_BARE_RESIDENCE_ID_WINDOW = 40
+#
+# ⚠️ **誠實劃界（勿誤讀為「現居 全類別已閉合」）**：本樣式只認 `現居` 緊接
+# `archive_<數字>` 的形態。刻意**不**擴及兩種相近寫法，各有理由：
+#   · `現居 [`AutoSDD_Defect_Log_archive_NN.md`](連結)`（完整檔名 ＋ markdown 連結）——
+#     主檔現有一處，它是對「本輪**一批**已結條目」的集合式指路，**沒有**單一 DEF-ID 可
+#     供比對；硬要求會當場製造誤紅，而那句話本身並非對某個 ID 的居所宣稱。
+#   · `現居 archive_NN`（字面 `NN`，非數字）——那是**引述本判準語法本身**的寫法，
+#     家族與治理文件內多處在講判準時這樣寫，不是宣稱。
+# 這兩種若哪天真的被拿來夾帶失實宣稱，本項抓不到；記在這裡以免下一輪誤以為已覆蓋。
+
 
 
 def criteria_sentence() -> str:
@@ -334,7 +401,7 @@ def _no_layout_problem(name: str, n_rows: int) -> str:
 
     刻意**不**退回 `cells[-1]`／`cells[0]` 位置猜測：那正是「狀態欄空白時靜默位移到分流
     去向欄」的成因（見模組 docstring 的 Pkg-P7 段）。零缺陷列的檔不走這條路——家族內實查
-    有 12 支純散文 archive（零表格列），對它們要求表頭就是自製誤紅。
+    有一批純散文 archive（零表格列，實數以 `_family_files()` 現查為準），對它們要求表頭就是自製誤紅。
     """
     return (
         f"{name}：檔內有 {n_rows} 筆缺陷列卻查無合格表頭（需 `| ID | … | 狀態 | …` 形態）"
@@ -411,7 +478,7 @@ def classify_row(line: str, claimed: set[str], layout: tuple[int, int, int]) -> 
 def load_rows(text: str) -> list[str]:
     """該份帳本檔的缺陷表格列。ID 欄由**表頭**定位；查無合格表頭一律回空清單（不猜位置）。
 
-    回空而非拋例外，是因為家族內實查有 12 支**零表格列**的純散文 archive；「有列卻沒表頭」
+    回空而非拋例外，是因為家族內實查有一批**零表格列**的純散文 archive（實數現查，不寫死）；「有列卻沒表頭」
     這個真異常由判準(7) 與 `plan()` 各自 fail-loud（見 `_no_layout_problem()`）。
     """
     layout = gate._table_layout(text)
@@ -513,6 +580,16 @@ def _quotation_kind(line: str, idx: int, in_fence: bool = False,
     return None
 
 
+def _in_corner_quotes(line: str, idx: int) -> bool:
+    """該處是否落在同一行的成對「」／『』內 —— 例外 (丁) 收窄後的必要條件（SA-R60R3-06）。
+
+    刻意與 `_quotation_kind()` 的 (甲) code span 用同一種判定形狀（掃出成對區間、看位置
+    落不落在區間內）：兩者守的是同一個直覺——「這是在提及一個語法」必須有**看得見的
+    刻意標記**，而不是靠「後面剛好沒跟 ID」這種缺席條件。
+    """
+    return any(m.start() <= idx < m.end() for m in _CORNER_QUOTE_RE.finditer(line))
+
+
 def _fenced_line_numbers(text: str) -> set[int]:
     """回傳落在 ``` 圍籬區塊內的行號（1-based；圍籬行自身也算）。
 
@@ -568,6 +645,40 @@ def _pointer_problems(src: Path, m: re.Match, where: dict[str, list[str]],
     ]
 
 
+def _bare_residence_problems(src: Path, m: re.Match, line: str,
+                             where: dict[str, list[str]], lineno: int) -> list[str]:
+    """驗一處**裸**「現居 archive_NN」（前方無 `見`／`立帳見` 動詞）；判準⑥ 的硬要求那半。
+
+    與 `_pointer_problems()` 分開寫，是因為兩者拿 ID 的方式不同：那支的 ID 由正則自己
+    的 `id` 群組給（形態完整），本支必須**回頭找**同一行前方最靠近的可解析 DEF-ID
+    ——找不到就是「宣稱了居所卻無物可稽核」，比照 `POINTER_VERB` 的硬要求判為錯誤。
+    """
+    archive = m.group("archive")
+    expected = f"AutoSDD_Defect_Log_{archive}.md"
+    near = [
+        im for im in _NEARBY_ID_RE.finditer(line)
+        if im.end() <= m.start() and m.start() - im.end() <= _BARE_RESIDENCE_ID_WINDOW
+    ]
+    if not near:
+        return [
+            f"{src.name}:{lineno}：「{RESIDENCE_TOKEN}」居所註記「{m.group(0)}」前方同一行 "
+            f"{_BARE_RESIDENCE_ID_WINDOW} 字內找不到可解析的 DEF-ID（原文片段 "
+            f"{line[max(0, m.start() - 30):m.start() + 24]!r}）。宣稱了居所卻無物可稽核"
+            "＝失實時零訊號，與「立帳見」後不跟 ID 是同一個形狀。請改寫為"
+            "「見 DEF-xxx-xxx（現居 archive_NN）」這種本稽核驗得動的形態"
+        ]
+    target = near[-1].group("id")
+    actual = where.get(target) or []
+    if expected in actual:
+        return []
+    hint = f"實居 {actual}" if actual else "全帳本家族查無此 ID"
+    return [
+        f"{src.name}:{lineno}：居所註記「{m.group(0)}」失實 — 依「{RESIDENCE_TOKEN}」註記，"
+        f"其前方最鄰近的 {target} 應在 {expected}，{hint}。"
+        "此形態不帶「見」動詞，判準④／⑥ 的完整形態正則皆不命中，故由本硬要求接手"
+    ]
+
+
 def check() -> int:
     """事後保全稽核。逐項定義如下，**每一項都是實作**。
 
@@ -584,8 +695,10 @@ def check() -> int:
           DEF-ID（硬要求），且該 ID 的實際居所必須與指針宣稱一致。例外共四種
           （(甲) 動詞落在 inline code span 內＝引述語法；(乙) 動詞後緊接 `」`＝術語提及；
           (丙) 落在 ``` 圍籬區塊內＝逐字重現的原文／工具輸出；(丁) **僅限治理文件**內
-          未跟可解析 DEF-ID 的提及＝談論這個語法本身），且例外**每次執行都逐處列印**，
-          不得靜默——見 `_CODE_SPAN_RE` 上方說明
+          未跟可解析 DEF-ID **且落在同一行「」／『』內**的提及＝談論這個語法本身），
+          且例外**每次執行都逐處列印**，不得靜默——見 `_CODE_SPAN_RE` 上方說明。
+          (丁) 的引號要求為 round 3 收窄（SA-R60R3-06；ARCH／SD 判定「未重開缺陷」、
+          SA 判定「重開」，主控裁決採 SA 的收窄，三方判斷逐字記在該處）
       (5) 歸檔索引涵蓋性 — 磁碟上每一支 archive 都必須在主檔「已歸檔內容」段有一條
           以它為主體的 bullet，且 bullet 數 == 實查 archive 檔數（雙向：多出的
           bullet 也是失實）。**份數刻意不與中文數詞比對**：主檔那句「N 檔」在這份
@@ -600,13 +713,19 @@ def check() -> int:
           `見主檔 DEF-101-481`（該 ID 實居 archive_27）⇒ `NONVERB_RESIDENCE_RE` 命中、
           而 `check()` 仍回 rc=0、零訊號。例外沿用判準(4) 的 (甲) code span ＋ (丙) 圍籬
           （同一個 WHY：圍籬與 code span 內是逐字重現的工具輸出／原文，是證據不是宣稱；
-          實測現行兩份治理文件的 5 處命中全數落在這兩種例外內 ⇒ 擴面後零誤紅）。
+          實測現行治理文件的命中全數落在這兩種例外內 ⇒ 擴面後零誤紅）。
           **刻意不設 (丁) 對等例外**：(丁) 是為了「動詞在、卻沒跟 ID」這種硬要求誤報而開，
           而本項的 `NONVERB_RESIDENCE_RE` 沒有 ID 就根本不命中（`見` 是常用單字，對它下
-          硬要求會把整個 repo 的中文散文都變成錯誤），故該例外在本項無對應物可開
+          硬要求會把整個 repo 的中文散文都變成錯誤），故該例外在本項無對應物可開。
+          🔴 **第三種方言的硬要求（round 3，SA-R60R3-05）**：不帶「見」動詞的裸
+          `現居 archive_NN` 兩道正則皆不命中 ⇒ 注入失實宣稱時 rc=0、零訊號。真正承載
+          居所語意的 token 是「現居」，故對它比照 `POINTER_VERB` 立**對等硬要求**：凡出現
+          該字樣，同一行前方視窗內必須跟得上可解析 DEF-ID 且居所一致，例外沿用 (甲)(丙)。
+          對「現居」下硬要求安全、對「見」不安全的差別在於它不是中文常用單字（實查稽核面
+          內只出現在居所敘述裡）。未涵蓋的兩種相近寫法逐條記在 `BARE_RESIDENCE_RE` 上方
       (7) 表格列欄數 — 每一列切出的欄數必須等於**該檔表頭**欄數（`gate.row_arity_problems()`，
           檢查本體在閘門，本檔不寫第二份）。這是 (2)(3) 與搬遷判準的**前提**：欄數對不上時
-          表頭索引會指到別欄，而修復前一句話都不會說。archive 側 14 列既有異常由
+          表頭索引會指到別欄，而修復前一句話都不會說。archive 側既有異常列由
           `_ARITY_BASELINE` 具名基線處置（逐檔列印、只准往下改、stale 即紅），
           **主檔與新建 archive 零豁免**
     判準④ 的稽核面自 round 2（ARCH-R60R2-05）起＝`_pointer_audit_files()`＝帳本家族
@@ -681,7 +800,7 @@ def check() -> int:
             continue
         layouts[p.name] = layout = gate._table_layout(texts[p.name])
         if layout is None:
-            continue  # 零表格列的純散文 archive（實查 12 支）；有列卻沒表頭由 (7) fail-loud
+            continue  # 零表格列的純散文 archive（家族內實查有一批）；有列卻沒表頭由 (7) fail-loud
         for ln in load_rows(texts[p.name]):
             def_id = _row_id(ln, layout)
             where.setdefault(def_id, []).append(p.name)
@@ -759,19 +878,27 @@ def check() -> int:
                 elif m is not None:
                     pointer_count += 1
                     problems.extend(_pointer_problems(p, m, where, lineno))
-                elif is_governance:
-                    # 例外 (丁)：治理文件裡「立帳見」後未跟可解析 DEF-ID ＝在**談論**這個
-                    # 語法（本 repo 的治理文件本來就要談它），不是做出宣稱。放行但逐處列印。
-                    # 家族內同一形態維持硬錯誤（下方 else）——ARCH-R60-01 ③ 的原始缺陷型。
+                elif is_governance and _in_corner_quotes(line, idx):
+                    # 例外 (丁)：治理文件裡「立帳見」後未跟可解析 DEF-ID、**且落在同一行的
+                    # 「」／『』內** ＝在**談論**這個語法（本 repo 的治理文件本來就要談它），
+                    # 不是做出宣稱。放行但逐處列印。家族內同一形態維持硬錯誤（下方 else）
+                    # ——ARCH-R60-01 ③ 的原始缺陷型。引號要求為 round 3 收窄（SA-R60R3-06，
+                    # 主控裁決；ARCH／SD 判定相反，理由記在 `_CODE_SPAN_RE` 上方 (丁) 條）。
                     quoted.append(f"{p.name}:{lineno}  [(丁) 治理文件內非宣稱提及"
-                                  f"（未跟 DEF-ID）] {line[idx:idx + 30]!r}")
+                                  f"（未跟 DEF-ID，落在「」／『』內）] {line[idx:idx + 30]!r}")
                 else:
+                    hint = (
+                        "；本檔屬具名治理文件，若這裡是在**提及**這個語法而非做出宣稱，"
+                        "請把整段提及放進同一行的「」或『』內（例外 (丁) 自 round 3 起"
+                        "要求引號——未加引號的散句與真宣稱長得一模一樣）"
+                        if is_governance else ""
+                    )
                     problems.append(
                         f"{p.name}:{lineno}：「{POINTER_VERB}」後未跟可解析的 DEF-ID"
                         f"（原文片段 {line[idx:idx + 24]!r}）。無 ID 散句會讓本稽核對該指針"
                         "完全失效，請補上具體 ID：「立帳見主檔 DEF-xxx-xxx」／"
                         "「立帳見 DEF-xxx-xxx（現居 archive_NN）」；若這裡是**引述判準語法**"
-                        "而非做出指針宣稱，請用 markdown inline code（反引號）包住整段引文"
+                        f"而非做出指針宣稱，請用 markdown inline code（反引號）包住整段引文{hint}"
                     )
                 idx = line.find(POINTER_VERB, idx + 1)
 
@@ -807,17 +934,26 @@ def check() -> int:
     #     同一份 SSOT。原本兩者不對稱＝治理文件裡的同一形態**零檢查**（沙箱實測：治理文件寫
     #     一句非 code span、非圍籬的失實 `見主檔 DEF-101-481` ⇒ 正則命中、check() 仍 rc=0）。
     #     例外沿用判準(4) 的 (甲) code span ＋ (丙) 圍籬：同一個 WHY（兩者內都是逐字重現的
-    #     工具輸出／原文＝證據，不是宣稱），實測現行兩份治理文件的 5 處命中全落在這兩種例外
-    #     內、家族側 6 處命中則零處落在圍籬 ⇒ 補上 (丙) 對家族既有稽核面零削弱。
+    #     工具輸出／原文＝證據，不是宣稱），實測現行治理文件的命中全落在這兩種例外內、
+    #     家族側的命中則零處落在圍籬 ⇒ 補上 (丙) 對家族既有稽核面零削弱（各面實數現查，
+    #     `--check` 的引述清單每次執行都逐處列印）。
     #     刻意不設 (丁) 對等例外（WHY 見 docstring (6)：沒有 ID 就根本不命中，無物可豁免）。
+    #     🔴 SA-R60R3-05（本輪新增的第三種方言）：不帶 `見` 動詞的**裸**「現居 archive_NN」
+    #     兩道正則皆不命中 ⇒ 注入失實宣稱零訊號。真正承載居所語意的 token 是「現居」，
+    #     而它先前沒有 `立帳見` 那樣的硬要求。故本項第二段對它立對等硬要求：凡出現該字樣，
+    #     鄰近必須跟得上可解析 DEF-ID 且居所一致；例外沿用 (甲) code span ＋ (丙) 圍籬。
+    #     已被上方完整形態（判準④／⑥ 的正則）涵蓋到的那一處一律跳過，避免同一處報兩次。
     nonverb_count = 0
+    bare_residence_count = 0
     for p in _pointer_audit_files():
         if p.name not in texts:
             continue
         fenced = fences.get(p.name) or _fenced_line_numbers(texts[p.name])
         for lineno, line in enumerate(texts[p.name].splitlines(), 1):
             spans = [(sp.start(), sp.end()) for sp in _CODE_SPAN_RE.finditer(line)]
+            covered: list[tuple[int, int]] = []
             for m in NONVERB_RESIDENCE_RE.finditer(line):
+                covered.append((m.start(), m.end()))
                 if not (m.group("scope") or m.group("archive")):
                     continue  # 「見 DEF-x」＝單純引用，未做居所宣稱（誠實劃界，不強判）
                 if lineno in fenced:
@@ -830,10 +966,24 @@ def check() -> int:
                     continue
                 nonverb_count += 1
                 problems.extend(_pointer_problems(p, m, where, lineno))
+            covered.extend((m.start(), m.end()) for m in POINTER_RE.finditer(line))
+            for m in BARE_RESIDENCE_RE.finditer(line):
+                if any(s <= m.start() < e for s, e in covered):
+                    continue  # 已由判準④／⑥ 的完整形態管，不重複報同一處
+                if lineno in fenced:
+                    quoted.append(f"{p.name}:{lineno}  [``` 圍籬區塊內（裸「"
+                                  f"{RESIDENCE_TOKEN}」形態）] {m.group(0)!r}")
+                    continue
+                if any(s <= m.start() < e for s, e in spans):
+                    quoted.append(f"{p.name}:{lineno}  [code span 引述（裸「"
+                                  f"{RESIDENCE_TOKEN}」形態）] {m.group(0)!r}")
+                    continue
+                bare_residence_count += 1
+                problems.extend(_bare_residence_problems(p, m, line, where, lineno))
 
     # (7) 表格列欄數 == 該檔表頭欄數。檢查本體一律用閘門的純函式 `gate.row_arity_problems()`
     #     ——本檔**不寫第二份**（Pkg-P7 的整個立意就是切欄／欄位定位只准有一份實作）。
-    #     archive 側 14 列既有異常走 `_ARITY_BASELINE` 具名基線（處置理由與「歷史列不追溯、
+    #     archive 側既有異常列走 `_ARITY_BASELINE` 具名基線（筆數以該表為唯一真相源；處置理由與「歷史列不追溯、
     #     新列硬擋」為何結構上成立，見該常數上方）。
     waived_arity: list[str] = []
     for p in files:
@@ -898,6 +1048,7 @@ def check() -> int:
         return 1
     print(f"✅ 帳本保全稽核通過（{len(files)} 檔／{len(where)} 個 ID／"
           f"{pointer_count} 個「立帳見」指針＋{nonverb_count} 個「見主檔／現居」居所指針"
+          f"＋{bare_residence_count} 個裸「{RESIDENCE_TOKEN}」居所註記"
           f"＋{len(quoted)} 處引述；歸檔索引 {len(bullets)} 條 bullet 對 "
           f"{len(archives)} 支 archive）：{criteria_sentence()}；"
           f"判準(4)(6) 稽核面含 {len(_GOVERNANCE_DOCS)} 份具名治理文件（scope `缺陷帳本`）")

@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import datetime as _dt
+import shutil
 import sys
+import tempfile
 import unittest
 from pathlib import Path
 
@@ -30,6 +32,28 @@ from tools.fsm_runtime.slv_generator import (  # noqa: E402
     propose_slv_from_fpl,
     write_rule_candidate,
 )
+
+
+def _isolated_rules_dir(prefix: str) -> Path:
+    """建立**行程獨立**的暫存規則目錄——絕不可退回樹內固定路徑。
+
+    WHY（這不是風格偏好，是修一個會讓閘門說謊的真缺陷）：
+      本檔各測試類原本把暫存規則目錄寫死成
+      `Path(__file__).resolve().parent / "_tmp_*"`——那是 **tracked 樹內的共用固定路徑**，
+      而 `setUp` 會清空它、`tearDown` 會 `rmdir` 它。於是同一支測試被兩個行程同時執行
+      （並行四方複審、並行閘門、CI 與地端同時跑）時兩邊互刪對方的檔案，產生與被測邏輯
+      **完全無關**的假紅，實測形態：
+        · `FileNotFoundError: ..._tmp_rules\\SLV-900.yaml.lock`（file_lock.py:39）
+        · `PermissionError: [WinError 32] ..._tmp_rules\\SLV-900.yaml`
+        · `FileNotFoundError: [WinError 2] ..._tmp_imm_rules\\SLV-910.yaml.tmp`
+      隔離重跑必綠 ⇒ 看起來像 flaky，實際是測試隔離缺陷。
+
+    為何用 `mkdtemp` 而不是只加 `unlink(missing_ok=True)`：
+      `missing_ok` 只讓競態**不拋例外**，兩行程仍共用同一個目錄、資料仍互相污染
+      （A 寫的 SLV-900 被 B 的 setUp 清掉，A 的斷言讀到空）。`mkdtemp` 才是根治：
+      兩行程拿到不同目錄，共用狀態從根本消失。
+    """
+    return Path(tempfile.mkdtemp(prefix=prefix))
 
 
 class FPLLoadingTests(unittest.TestCase):
@@ -80,17 +104,12 @@ class TrustLevelProtectionTests(unittest.TestCase):
     """驗證 proposed/verified trust level 的寫入保護。"""
 
     def setUp(self) -> None:
-        self.tmp = Path(__file__).resolve().parent / "_tmp_rules"
-        self.tmp.mkdir(parents=True, exist_ok=True)
-        # Clean between runs
-        for p in self.tmp.glob("*.yaml"):
-            p.unlink()
+        # mkdtemp 已保證目錄存在且為空 ⇒ 原本的「清空殘留 *.yaml」迴圈連同 rmdir
+        # 一併移除（見 _isolated_rules_dir 的 WHY：那正是互刪的來源）。
+        self.tmp = _isolated_rules_dir("slv_rules_")
 
     def tearDown(self) -> None:
-        for p in self.tmp.glob("*.yaml*"):
-            p.unlink()
-        if self.tmp.exists():
-            self.tmp.rmdir()
+        shutil.rmtree(self.tmp, ignore_errors=True)
 
     def _make_cand(self, slv_id: str = "SLV-900") -> SLVRuleCandidate:
         return SLVRuleCandidate(
@@ -149,16 +168,10 @@ class FplDedupGateTests(unittest.TestCase):
     """
 
     def setUp(self) -> None:
-        self.tmp = Path(__file__).resolve().parent / "_tmp_dedup_rules"
-        self.tmp.mkdir(parents=True, exist_ok=True)
-        for p in self.tmp.glob("*.yaml*"):
-            p.unlink()
+        self.tmp = _isolated_rules_dir("slv_dedup_rules_")
 
     def tearDown(self) -> None:
-        for p in self.tmp.glob("*.yaml*"):
-            p.unlink()
-        if self.tmp.exists():
-            self.tmp.rmdir()
+        shutil.rmtree(self.tmp, ignore_errors=True)
 
     def _cand(self, slv_id: str, fpl_id: str, trust: str = "proposed") -> SLVRuleCandidate:
         return SLVRuleCandidate(
@@ -481,22 +494,13 @@ class ImmutabilityTests(unittest.TestCase):
     """P0-4：source_fpl / source 是審計鏈錨點，overwrite 不得改寫。"""
 
     def setUp(self) -> None:
-        self.tmp = Path(__file__).resolve().parent / "_tmp_imm_rules"
-        self.tmp.mkdir(parents=True, exist_ok=True)
-        for p in list(self.tmp.glob("*")):
-            try:
-                p.unlink()
-            except IsADirectoryError:
-                pass
+        # 原寫法的 `glob()`→`unlink()` 之間還有 TOCTOU（無 missing_ok）：另一行程在兩個
+        # 呼叫之間刪掉同一個檔就炸 `FileNotFoundError [WinError 2] …SLV-910.yaml.tmp`。
+        # 改用行程獨立目錄後，該競態的前提（共用目錄）本身消失。
+        self.tmp = _isolated_rules_dir("slv_imm_rules_")
 
     def tearDown(self) -> None:
-        for p in list(self.tmp.glob("*")):
-            try:
-                p.unlink()
-            except IsADirectoryError:
-                pass
-        if self.tmp.exists():
-            self.tmp.rmdir()
+        shutil.rmtree(self.tmp, ignore_errors=True)
 
     def _cand(self, slv_id: str, *, source_fpl: str, source: str) -> SLVRuleCandidate:
         return SLVRuleCandidate(
@@ -554,17 +558,10 @@ class SchemaValidationTests(unittest.TestCase):
     """P1-3：load_rule 對 verified 強制 reviewed_by / reviewed_at。"""
 
     def setUp(self) -> None:
-        self.tmp = Path(__file__).resolve().parent / "_tmp_schema_rules"
-        self.tmp.mkdir(parents=True, exist_ok=True)
+        self.tmp = _isolated_rules_dir("slv_schema_rules_")
 
     def tearDown(self) -> None:
-        for p in list(self.tmp.glob("*")):
-            try:
-                p.unlink()
-            except IsADirectoryError:
-                pass
-        if self.tmp.exists():
-            self.tmp.rmdir()
+        shutil.rmtree(self.tmp, ignore_errors=True)
 
     def _write(self, doc: dict, name: str = "SLV-920.yaml") -> Path:
         import yaml as _yaml

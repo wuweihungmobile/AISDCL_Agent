@@ -143,7 +143,35 @@ AISDLC_SDD/scripts/install-hooks.ps1:   raw=42 normalized=24 MAX_LINES=100 over=
 語意上它們早已是「Python 契約（`tools/git_hooks_install_common.py` 四子指令）+ 2 語言 adapter + 4 產品文案殼」，
 只是治理類別掛在 `_EXEMPT_PAIRS`（決策豁免）＝**沒有任何機制阻止它們日後長回業務邏輯**。
 
-### 2.4 🔴 `Find-GitBash.ps1` 的 System32 排除在斜線路徑下失效（活缺陷，我雙語言實測）
+### 2.4 ~~🔴~~ `Find-GitBash.ps1` 的 System32 排除在斜線路徑下失效（**已於 R60 修復；本節降為史料**）
+
+> 🔴 **狀態訂正（R60 round 3，Pkg-E）**：本節原文寫「活缺陷」，那是相對於 HEAD `e3a5c53`（R59）
+> 的敘述。本 ADR 落地後、同輪 R60 的 P10-2 已修復並隨 `796c7a6` 入庫：`Find-GitBash.ps1` 的行內
+> `-notmatch '\\System32\\'` 已改為 `Test-HasSystem32Segment` 逐段比對（與 Python 側
+> `PureWindowsPath` 同語意），並新增 `test_find_git_bash_parity.py::TestSystem32VerdictParity`
+> **行為表 parity 鎖**（真的起 PowerShell 執行、非比對原始碼字面）。
+> **依 HEAD `796c7a6` 讀本節時，下列輸出全部是修前史料，不是現況。**
+>
+> Pkg-E 於 HEAD `796c7a6` 以原生 PS 5.1 重驗（真實 WSL bash 在位：
+> `C:\Windows\System32\bash.exe` 確實存在於本機，故本次量測具鑑別力而非空跑）：
+>
+> ```
+> PATH_FORM=[C:/Windows/System32] GetCommand_Source=[C:/Windows/System32\bash.exe] FindGitBash=[(none)]
+> PATH_FORM=[C:\Windows\System32] GetCommand_Source=[C:\Windows\System32\bash.exe] FindGitBash=[(none)]
+> PATH_FORM=[C:/Windows\System32] GetCommand_Source=[C:/Windows\System32\bash.exe] FindGitBash=[(none)]
+> ```
+>
+> 三種分隔符形態（含病灶本體的全正斜線、與 `Get-Command` 實際產出的混用形態）皆正確回 `(none)`。
+>
+> **殘餘盲區的精確狀態（措辭刻意講清楚，避免被讀成已收斂）**：`C:\Windows\Sysnative\bash.exe`
+> **兩側實作都不排除**——盲區本身存在於 PS 與 Python **兩份**實作中，不是「只剩一份」；
+> 因 1-D 判定 NO-GO、生產側仍是兩份實作，這個狀態在 R61 不會改變。
+> **一份的是「記載」**：兩側共用同一條判準邊界敘述，登記在 `Find-GitBash.ps1` 的 comment-based help
+> 與 `test_find_git_bash_parity.py::_SEGMENT_CASES` 最後一列（`expected_excluded=False`，
+> 逐字標「已知殘餘盲區、非已驗證安全」），且該列由行為表鎖強制**兩側同判**
+> ⇒ 任何一側想單邊收掉它都會轉紅，不會有人靜默處理。
+> **未驗事項（誠實劃界，沿用 SD round 3 的保留）**：Sysnative 在 32-bit 行程下是否真可觸達，
+> 本輪仍未實測；記載僅主張「兩側一致不排除」，不主張「安全」。
 
 PowerShell 側（原生 5.1，以檔案載具執行避免 quoting 失真）：
 
@@ -444,7 +472,42 @@ ls tools/tests/*.py | wc -l                                    # 檔數（含 _ 
 python -c "import pathlib;t=list(pathlib.Path('tools/tests').glob('*.py'));print(sum(len(p.read_text(encoding='utf-8',errors='replace').splitlines()) for p in t))"
 ```
 
-基線：**56 支／25,092 行**（2026-07-29T00:55:37Z）。
+基線：**見上列指令的現查值，本節刻意不寫死行數**。
+
+🔴 **原基線「56 支／25,092 行（2026-07-29T00:55:37Z）」已作廢，且是依本節自己的規則作廢的**
+（R60 round 3 Architect `ARCH-R60R3-03` 命中，Pkg-E 複驗成立）：
+
+- 該數取自 §1.1 在 HEAD `e3a5c53`、`git status --porcelain | wc -l` = **81**（兩包並行修復進行中）
+  的量測。依本節下方「唯一規則」，**跨時點量測無效** ⇒ 它從寫下的那一刻起就不是合格基線。
+- 同一個「56 支」在三處被寫成三個不同行數：`DEF-101-565` 寫 23,329、本節原寫 25,092、
+  Architect 與 Pkg-E 各自在 HEAD `796c7a6` 實測 **26,286**。**集合相同而行數不同**，正是
+  §1.1 已經診斷過的那個現象——而它發生在宣告該病的文件自己身上。
+- Pkg-E 實測（HEAD `796c7a6`，上列兩道逐字指令，同一秒連量兩次皆同值）：
+
+  ```
+  $ git status --porcelain -- tools/tests/          # 量測面乾淨性取證：空輸出
+  $ ls tools/tests/*.py | wc -l
+  56
+  $ python -c "import pathlib;t=list(pathlib.Path('tools/tests').glob('*.py'));print(sum(len(p.read_text(encoding='utf-8',errors='replace').splitlines()) for p in t))"
+  26286        # REAL_RC=0；緊接著重跑一次仍為 26286
+  ```
+
+- 🔴 **同一個 session 內，本規則又被實地驗證了一次**：Pkg-E 完成上列量測後繼續作業約數十分鐘，
+  期間並行包寫入 `tools/tests/`（`test_adr_xplat001_c1c2_lock.py`／`test_doc_loc_baseline_freshness_r60.py`／
+  `test_platform_neutral_paths.py` 轉為未提交變更）。**同一個 HEAD `796c7a6`、同一台機器**重量：
+
+  ```
+  $ git status --porcelain -- tools/tests/          # 3 支檔已髒 ⇒ 依本節規則，此次量測不得作為基線
+  $ python -c "…同一道指令…"
+  56 files 27369 lines                              # 檔數仍 56，行數 26,286 → 27,369（+1,083）
+  ```
+
+  **檔數 56 三次量測完全不動、行數三度不同。** 這正是 §1.1 的現象在 round 3 的重演，
+  也是「GLC 只能同 commit 前後配對比較、且量測面必須乾淨」這條規則的最新實據。
+
+**⇒ 本節此後不再登載任何行數常數。** 要引用 GLC 一律跑上列指令現查；要比較就照下方唯一規則
+在同一個 commit 上前後各量一次。任何文件（含帳本）若要寫下 GLC 數字，必須同時寫下
+「HEAD sha ＋ 量測時點 ＋ 當時 `tools/tests/` 是否乾淨」三者，否則該數字不可被引用為基線。
 
 **本 ADR 刻意不對 GLC 設任何上限**，並明文否決兩種上限：
 - A 案的 `TOTAL_INCREASE_LIMIT=1.20` ⇒ §2.6/§3.0 實測 6,541 行免費額度＝好幾輪內收不到代價；
@@ -452,6 +515,14 @@ python -c "import pathlib;t=list(pathlib.Path('tools/tests').glob('*.py'));print
   那類跨平台加固，而「只准往下調」封死了唯一出路。
 
 **唯一規則**：GLC 必須在**同一個 commit** 上前後各量一次，跨時點／跨並行包比較無效（§1.1 實測依據）。
+
+> **R60 round 3 訂正（Pkg-E）——「乾淨」指的是量測面，不是整棵樹**：原規則搭配 §2 的
+> `git status --porcelain | wc -l` 記法，實務上被讀成「整個工作樹必須乾淨」。那個門檻在本 repo
+> 幾乎永遠達不到（並行包、`.perf_baseline.toml` 這類自動寫回的檔），結果是規則被繞過而非被遵守。
+> **正確判準：量測面 `tools/tests/*.py` 內零未提交變更即可**——GLC 只讀這 56 支檔，樹上其他檔
+> 髒不髒對這個數字沒有因果影響。Pkg-E 本次即在 `git status --porcelain` = 4 但
+> `git status --porcelain -- tools/tests/` = **0** 的條件下取得 26,286，並連量兩次同值。
+> 取證指令：`git status --porcelain -- tools/tests/`（**空輸出**＝該次 GLC 可作為基線）。
 真正的預算設計列 Phase 2-E，並在該處寫明具名要求（含 `AutoClaude/tests` 57,351 行為何不納管的劃界）。
 
 ### 4.4 若要把 UEP 閘門化：照哪一支抄
@@ -459,6 +530,39 @@ python -c "import pathlib;t=list(pathlib.Path('tools/tests').glob('*.py'));print
 R61 Phase 1-C 若要把 UEP 釘成上限，**必須照 `tools/tests/test_adr_xplat001_c1c2_lock.py::TestShrinkOnlyRatchet`
 的形狀**（`git show HEAD:<鎖檔>` 取上一版常數機械比對，調升即紅），**不要照 `check_loc_budget.py`**（§2.6：那不是棘輪）。
 且該棘輪自己已記載一個既知空轉窗口（鎖檔首個 commit 上 HEAD 還沒有它可比 ⇒ `skipTest` 並印理由），照抄時一併照抄。
+
+### 4.5 SDS（語意分歧面）—— 補 UEP 量不到的那一類（R60 round 3 新增）
+
+> **為何新增**：round 3 Architect 的批評成立且必須入帳——本 ADR 把跨平台面上**唯一一個已被實證
+> 「兩份生產實作可對同一輸入給出相反裁決」**的站點（`Find-GitBash`）歸類為 Phase 1-A「修缺陷、
+> 不得計入收斂成果」，然後把收斂額度全押在 `_EXEMPT_PAIRS` 的登記表搬移（1-B）。
+> 那個批評的實質是：**UEP 這把尺量的是「有沒有守門」，量不到「有幾份實作可以分歧」。**
+> 一個站點可以 UEP 記 0（有鎖看著）卻仍持有兩份會分歧的生產碼；R60 的 P10-2 就是活證據
+> ——舊鎖全綠、兩側裁決相反。故補本判準，**不動 §4.1～§4.4 任何定義**。
+
+**定義**：SDS ＝「同一語意、有 ≥2 份**生產**實作（非測試），且分歧時的後果是**使用者拿到錯誤行為
+而不是紅燈**」的站點數。測試側的獨立重寫**不計入**——那是刻意保留的鑑別力
+（`bash_probe_spec.py` docstring 的主張在「測試 vs 生產」這一層成立，本 ADR 採納）。
+
+| 站點 | 兩份實作 | 現況 | 計分 |
+|---|---|---|---|
+| Git Bash 偵測的 System32 排除判定 | `tools/lib/Find-GitBash.ps1::Test-HasSystem32Segment`（PS）／`tools/integration_gate_core.py::_has_system32_segment`（Py） | R60 後兩側同語意，由行為表 parity 鎖逐筆守住；**實作仍是兩份** | SDS **記 1**（未歸零） |
+
+**當前 SDS ＝ 1**（本 ADR 盤點面內；R61 開輪時應重新盤點，不得沿用本數字）。
+
+**計分規則（與 §4.2 三條並存，不取代）**：
+
+1. 一個標的使 **ΔSDS < 0**（某站點的生產實作由 N 份真正變 1 份）即**可計入收斂成果**，
+   即使 ΔUEP = 0。這正是 Architect 要的「不要用 UEP 這把量不到它的尺去否定它」。
+2. 但 **ΔSDS < 0 不是免費通行證**：仍須通過 §4.2 rule 2 的反位移檢查——
+   若消掉一份 in-process 實作卻引入一個**行程邊界**（subprocess／新 CLI 進入點／新失敗模式），
+   須逐條列出新增的失敗模式並論證淨值為正。**1-D 正是卡在這一條而非只卡在 python 可用性**。
+3. SDS 歸零**不是無條件目標**。Tier-3（OS 原語）與 Tier-4（明文禁止收斂）底下的多份實作
+   依 §3.3／§3.4 本來就不該收斂，**不列入 SDS 盤點面**。
+
+**與 GLC 的搭配**：ΔSDS < 0 的標的允許以「GLC 下降 ＋ SDS 下降」雙記分；
+若 GLC 上升而 SDS 下降，須在同一 commit 內具名說明上升的行數買到了什麼
+（照 §4.2 rule 2 的同型舉證責任）。
 
 ---
 
@@ -474,7 +578,79 @@ R61 Phase 1-C 若要把 UEP 釘成上限，**必須照 `tools/tests/test_adr_xpl
 
 | 步 | 動作 | 本輪可安全執行 | 等價性證明（跑哪個閘門、看什麼數字） |
 |---|------|--------------|--------------------------------|
-| **1-A** | 修 `tools/lib/Find-GitBash.ps1`：`-notmatch '\\System32\\'` → 分隔符不敏感形態（如 `'[\\/]System32[\\/]'`）；`tools/lib/bash_probe_spec.py` 增列判定規則常數（分隔符集合 `('\\','/')` ＋「完整路徑段、不分大小寫、分隔符不敏感」的規範敘述）；同步檢視 `WindowsAppsGuard.ps1` 的 `-notlike '*\WindowsApps\*'` | **需 R61** | ① §2.4 的五筆路徑表，修前／修後兩次逐字輸出（修前 `C:/Windows/System32/bash.exe` accepts=True、修後 False，`MySystem32Tools` 兩次皆 True 不誤殺）；② 同五筆餵 Python 側，兩側裁決逐筆相同；③ 回歸：`powershell -ExecutionPolicy Bypass -File AISDLC_SDD/scripts/ci-gate.ps1` 須仍走**完整委派**路徑（印「偵測到 Git Bash」）而非 fallback，rc 與 `bash AISDLC_SDD/scripts/ci-gate.sh` 一致；④ UEP／AC 不變（這是修缺陷，不是收斂——**不得計入收斂成果**） |
+| ~~**1-A**~~ | ~~修 `tools/lib/Find-GitBash.ps1`：`-notmatch '\\System32\\'` → 分隔符不敏感形態~~ 🔴 **已於 R60 落地，本步從 Phase 1 移除**（見 §2.4 狀態訂正）。R60 實作**不同於本步原本開的藥方**且更強：不是換一個分隔符不敏感的 regex（`'[\\/]System32[\\/]'` 對「System32 為結尾段、無尾隨分隔符」仍會漏），而是 `Test-HasSystem32Segment` 以 `-split '[\\/]+'` **逐段比對**，與 Python 側 `PureWindowsPath(path).parts` 同語意。`bash_probe_spec.py` 未增列判定規則常數——改以行為表 parity 鎖直接鎖「兩側對同一輸入同判」，比鎖常數更貼近真正會分歧的東西 | **已完成（R60）** | R60 已交付：① 行為表 7 筆逐筆兩側同判（`TestSystem32VerdictParity`，真起 PowerShell）；② 端到端沙箱假檔 + Pkg-E 於 HEAD `796c7a6` 以**真實在位的 WSL bash** 重驗三種分隔符形態皆 `(none)`；③ UEP／AC 不變（確為修缺陷，未計入收斂成果） |
+| **1-D**（R60 round 3 新增，取代原 1-A 的位置） | 🔴 **`Find-GitBash` 的「判定」單源化——本輪評估後判定 NO-GO，不排入 R61 執行，改列為「已具名封存的設計選項」**。標的：PS 側只枚舉候選路徑，accept/reject 決策委派 Python（`python tools/lib/bash_probe.py --accept <path>`），一次消掉整個 PS↔Python 判定分歧平面 | 🔴 **阻塞中（見下方阻塞條件）** | 見下方〈1-D 決策紀錄〉 |
+
+#### 1-D 決策紀錄（R60 round 3，Pkg-E 實測後裁決：**NO-GO**）
+
+**提案來源**：R60 round 3 Architect 架構評估段。其論證的前提是
+「`ci-gate.ps1` 第 34-38 行已經在跑 `python -m ...` ⇒ Python 在該時點必然可用」。
+
+**🔴 該前提經實查為偽（兩重）**：
+
+1. `ci-gate.ps1` 第 34-38 行**全部是註解行**（逐行首字元為 `#`），它們只是在散文裡*提到*
+   `python -m pytest`。真正的 `python` 呼叫在第 **50／55／62** 行。
+2. 那三行全都在 `Find-GitBash`（第 **22** 行）**之後**，且全在「找不到 Git Bash」才會走的
+   fallback 分支內。該分支起頭第 40-43 行還有一道 `Test-IsRealPython` 前置守門，
+   python 不存在時逐字印「❌ 找不到 python…」並 `exit 1`——**該腳本的設計本身就明文預期
+   python 可能不存在**（第 36-37 行註解逐字：「全新 Windows 11 機器未裝真 Python…」）。
+
+**三個呼叫端的 python 可用性實查（Pkg-E，原生 PS 5.1，HEAD `796c7a6`）**：
+
+| 呼叫端 | Find-GitBash 呼叫行 | 該行之前是否保證 python | 證據 |
+|---|---|---|---|
+| `AISDLC_SDD/scripts/install-hooks.ps1` | 35 | ✅ **保證** | 第 13 行 dot-source `GitHooksInstallCommon.ps1`，該檔**頂層**（非函式內）第 52-58 行 `Test-IsRealPython` 失敗即 `[Environment]::Exit(1)` |
+| `AutoClaude/tools/install_git_hooks.ps1` | 58 | ✅ **保證** | 同上，dot-source 在第 27 行 |
+| `AISDLC_SDD/scripts/ci-gate.ps1` | 22 | ❌ **不保證** | 第 22 行前只有 4 行功能碼（`$ErrorActionPreference` / `$env:PYTHONUTF8` / `$repo` / dot-source `Find-GitBash.ps1`），**無任何 python 守門**；`WindowsAppsGuard` 遲至第 39 行才載入 |
+
+兩側皆以**注入實測**取證，非讀碼推論：
+
+```
+# (a) 兩支安裝腳本：PATH 抽掉 python 後 dot-source 共用檔 —— 硬中止，走不到 Find-GitBash
+python_resolves_to=
+BEFORE_DOTSOURCE
+❌ 找不到 python — 請先啟用 venv：…
+INNER_RC=1                      # REACHED_AFTER_DOTSOURCE 未印出
+# 控制組（PATH 正常）：python_resolves_to=…\.venv\Scripts\python.exe → REACHED_AFTER_DOTSOURCE 印出
+
+# (b) ci-gate.ps1 前導段逐行複刻，PATH 抽掉 python —— Find-GitBash 照跑且成功
+python_resolves_to=[]
+FindGitBash_RAN_WITHOUT_PYTHON=[C:\Program Files\Git\bin\bash.exe]
+```
+
+**⇒ 三個呼叫端中有一個（`ci-gate.ps1`）在 Find-GitBash 執行時點不保證 python 可用，
+且該路徑今天在 python 完全缺席下運作正常。** 依「任一呼叫端不保證即不出此變更」的決策規則，
+判定 **NO-GO**。
+
+**除了阻塞條件之外，Pkg-E 另有三條獨立的架構理由反對此案**（即使阻塞條件被解除亦成立，
+R61+ 若要重啟必須逐條回應）：
+
+1. **失敗模式反轉**。`Find-GitBash` 在兩支安裝腳本裡的職責是「**偵測前置條件缺失並警告**」。
+   讓這個偵測器自己依賴另一個前置條件，等於在最需要它的那類機器（配置最不完整者）上，
+   偵測器本身成為第一個壞掉的東西。在 `ci-gate.ps1` 上更糟：python 缺席時 Find-GitBash 若回 null，
+   使用者看到的是「找不到 Git Bash」→ 落入 fallback → 才被告知「找不到 python」，
+   **兩段式誤導**（第一段訊息與真因無關）。
+2. **淨平面是增加而非減少**。今天 PS 側的「判定」總共是 `Test-HasSystem32Segment` 的
+   **6 行函式本體**（純字串切段，無 I/O、無外部行程）。單源化要把這 6 行換成：跨行程呼叫 ＋
+   python 可用性守門 ＋ 退出碼判讀 ＋ 輸出解析 ＋ 編碼處理 ＋ 一支新的 Python CLI 進入點，
+   而契約測試**仍然必須起 PowerShell**（否則就退化成比字串，正是本輪在修的病）。
+   以一個 6 行的純函式分歧面，換一個多模式的行程邊界失敗面（python 找不到／找到錯的
+   python／WindowsApps 空殼／編碼／逾時），**GLC 與 UEP 兩把尺上都不會下降**。
+3. **殘餘風險已接近零**。這 6 行現由 7 筆行為表逐筆兩側同判 ＋ 端到端真 WSL bash 三形態
+   實測守著。Architect 批評「逐案補不是消除平面」在通則上正確，但套到這個站點時，
+   被消除的平面小於被引入的平面——**這是本 ADR §4.2 rule 2「換個地方複雜」要擋的形狀**，
+   只是這次換的地方是行程邊界而不是登記表。
+
+**阻塞條件（具名，解除後才可重議）**：
+`AISDLC_SDD/scripts/ci-gate.ps1` 第 22 行的 Find-GitBash 呼叫必須落在一道 python 可用性守門**之後**。
+唯一乾淨的解除路徑是 **Phase 2-B**（刪除 fallback 3-stage，改「找不到 Git Bash → fail-loud exit 1」）
+——它需要 🔴 使用者／PM signoff，且 2-B 自己的低風險依據目前仍是讀碼推論（需一台無 Git Bash 的
+乾淨 Windows 機器）。**2-B 落地前，1-D 不具備可行性前提。**
+
+**明文否決的折衷設計（避免 R61 重新發明）**：「安裝腳本走內嵌 PS fallback ＋ 契約鎖，
+`ci-gate` 走 Python 單源」的混合案 **更差**——它會造出**兩條** PS 判定路徑（內嵌一條、委派一條），
+語意分歧面從 1 變 2，與本案初衷相反。反向的混合（只在保證 python 的兩支安裝腳本單源化）同樣
+留下兩份實作，一樣不得分。**1-D 要嘛三個呼叫端一起做，要嘛不做。**
 | **1-B** | `AutoClaude/tools/install_git_hooks` 與 `AISDLC_SDD/scripts/install-hooks` 由 `_EXEMPT_PAIRS` 移入 `_THINNESS_ENROLLED` ＋ `_PINNED_SHA256` 補 4 支 hash。**零程式邏輯變更** | **需 R61** | ① 納編前先跑 `wc -l` 四支確認 raw ≤ 100（§2.3 已實測 50/65/40/42，仍須在乾淨樹重量）；② `python tools/check_wrapper_thinness.py` rc=0；③ `python tools/check_script_parity.py` 的交叉鎖行由「5 對／10 支」變「**7 對／14 支**」；④ **UEP 8 → 6**；⑤ bug-injection：在 `install-hooks.ps1` 加一行實質判定邏輯，thinness hash 須紅（證明遷移後真的有守門，不是換個字典）；⑥ 兩平台 smoke 的 install/uninstall 往返 + linked-worktree 拒絕三情境須全綠（Windows 側須以**原生 PowerShell** 啟動，DEF-101-511） |
 | **1-C** | `tools/check_script_parity.py` 內（a）4 組「異名對等品」由 reason 散文升為 4 筆字典 + stale 自檢；（b）`_EXEMPT_PAIRS`／`_SINGLE_SIDED_EXEMPT` 的值由純理由字串升為 `(tier, reason)`，`tier ∈ {tier1_contract, tier1_adapter, tier2_spec, tier3_os_primitive, tier4_forbidden, unpinned}`；（c）新增 `--print-collapse` 印 UEP／AC／各對 tier 與 reason；（d）斷言「tier3/tier4 的 reason 必須非空且含硬理由關鍵詞」。**擴充既有檔、零新檔**；測試加進**既有的** `tools/tests/test_check_script_parity.py` | **需 R61**，且 🔴 **必須與 1-B 同一 commit** | ① `python tools/check_script_parity.py` rc=0 且新增行印出 `UEP=6 / AC=46`；② `python tools/run_root_unittests.py` 發現數 = 乾淨樹重取的基線 + 新增斷言數（**逐筆列名，不得只報總數**）；③ GLC 檔數不變（零新檔）；④ 🔴 **1-C 不得單獨落地**——沒有 1-B 的話它就是孤兒儀表，正是 Architect 批評的那個病 |
 
@@ -570,6 +746,13 @@ R61 Phase 1-C 若要把 UEP 釘成上限，**必須照 `tools/tests/test_adr_xpl
    要求該號必須在帳本家族某列第一欄存在——而帳本（`docs/06_quality/AutoSDD_Defect_Log.md`）
    是本輪硬規則明訂的**禁碰檔**。不標號則缺陷與修復在兩個權威站點都無紀錄，違反取證慣例。
    ⇒ 這一步的正確落點是 R61，不是「趕在收輪前塞進去」。
+   > 🔴 **本條已被事件推翻（R60 round 3 訂正，Pkg-E）**：R60 另一個修復包（P10-2）已在**本輪**
+   > 完成此修並隨 `796c7a6` 入庫（`git log -- tools/lib/Find-GitBash.ps1` → `796c7a6`；
+   > `git show HEAD:tools/lib/Find-GitBash.ps1` 含 `Test-HasSystem32Segment`、行內 `-notmatch`
+   > 僅殘留於 comment-based help 的史料敘述）。上述治理互鎖**實際上並未成為阻礙**。
+   > 本條逐字保留不改寫——它是本 ADR 撰寫當下的判斷快照，改寫會抹掉「同輪內其他包的進度
+   > 使本 ADR 的前提失效」這個教訓本身；訂正以本標記就地指路。
+   > **連帶**：§5 Phase 1-A 已標記為「已於 R60 落地、從 Phase 1 移除」，§2.4 已由「活缺陷」降為史料。
 4. **本輪三案的安全子集，逐案檢查後都不成立**：A 案的 S1/S2 依賴錯的基線（894）與被攻破的判準（GFC）；
    B 案的 Step 1~3 交出的成果是「一份對重點盲目的收據」（§2.5）；C 案的步驟 0 若不與步驟 1/2 同輪
    落地就是孤兒儀表（該案自己也這麼寫）。
@@ -584,8 +767,8 @@ R61 Phase 1-C 若要把 UEP 釘成上限，**必須照 `tools/tests/test_adr_xpl
 
 | # | 未解決項 | 依據 | 承接者（具名） | 完成判準（可機械查） |
 |---|---------|------|--------------|--------------------|
-| 1 | **`Find-GitBash.ps1` 分隔符不敏感缺陷未修**（活缺陷，判定語意分歧已實測、可觸達性為條件式） | §2.4 | **R61**（Phase 1-A） | §2.4 五筆路徑表兩語言裁決逐筆相同；bug-injection 改回舊 regex 須紅 |
-| 2 | **字面 parity 鎖仍被當成機械釘選**（`test_find_git_bash_parity.py` 全綠而底下有活分歧） | §2.4／§3.2 | **R61**（Phase 1-A） | 該鎖的 System32 段改為行為表驅動；Sysnative 進「已實測不涵蓋」常駐表 |
+| ~~1~~ | ~~**`Find-GitBash.ps1` 分隔符不敏感缺陷未修**~~ ✅ **已於 R60 結案**（`796c7a6`，P10-2）。改為逐段比對 `Test-HasSystem32Segment`，非本表原開的 regex 藥方 | §2.4（已降為史料） | ~~R61~~ **R60 已交付** | 已達成：Pkg-E 於 HEAD `796c7a6` 原生 PS 5.1 重驗，三種分隔符形態 ＋ 真實在位的 WSL bash 皆回 `(none)`；SD round 3 另以「把舊行內 regex 注回沙箱複本」證明該鎖會精準轉紅 |
+| ~~2~~ | ~~**字面 parity 鎖仍被當成機械釘選**~~ ✅ **已於 R60 結案**。`TestSystem32VerdictParity` 行為表 parity 鎖已落地（真起 PowerShell 執行，非比對原始碼字面） | §2.4／§3.2 | ~~R61~~ **R60 已交付** | 已達成：System32 段改為行為表驅動（7 筆逐筆兩側同判）；Sysnative 已進 `_SEGMENT_CASES` 常駐表並明文標「已知殘餘盲區、非已驗證安全」 |
 | 3 | **`install_git_hooks`／`install-hooks` 兩對零守門**（掛在決策豁免，無機制阻止長回業務邏輯） | §2.3 | **R61**（Phase 1-B） | UEP 8 → 6；交叉鎖行變「7 對／14 支」 |
 | 4 | **UEP／AC 尚未印出、未閘門化**（本 ADR 的判準目前只能手跑一支 scratchpad 腳本） | §4 | **R61**（Phase 1-C，須與 1-B 同 commit） | `python tools/check_script_parity.py` 輸出含 `UEP=` 與 `AC=`；棘輪照 `TestShrinkOnlyRatchet` 形狀 |
 | 5 | **`check_wrapper_thinness._normalize` 的 BOM 缺陷**（宣稱剝整行註解，對每支 `.ps1` 的第 1 行失效；而該文字就是 hash 釘選的輸入） | §2.5 | **R62**（Phase 2-E，單獨 commit） | `utf-8-sig` ＋ 10 支 hash 重釘 ＋「BOM 不影響正規化」回歸；`integration_gate.ps1` 正規化由 14 行變 13 行 |
@@ -594,6 +777,7 @@ R61 Phase 1-C 若要把 UEP 釘成上限，**必須照 `tools/tests/test_adr_xpl
 | 8 | **`ci-gate.ps1` fallback 刪除的政策未拍板**，且「刪它低風險」目前仍是讀碼推論（本機有 Git Bash，造不出鑑別力） | Phase 2-B | **R62+**，需**使用者／PM signoff** | signoff 記錄 ＋ `ONBOARDING.md` §6 那格 fallback 散文同步刪除 ＋ DEF-101-512 補丁退場 |
 | 9 | **CI workflow 層 1,974 行、27.6% 重複、alert job 100% 重複，完全在本 ADR 射程外** | §6 邊界 6 | **未指派**（需新機制：pyyaml workflow parity；且 DEF-101-081 帳單停擺期間無 CI 回饋通道，改完無法實跑驗證） | 若要納管：新增 workflow parity 斷言並讓 UEP／AC 涵蓋 workflow 對 |
 | 10 | **Copy-on-Evolve 1/30 對跨語言對子無解**（R45 的共享層手法只適用同語言同 runtime） | §6 邊界 9 | **未指派**（政策層，掛 `DEF-101-392`／`DEF-101-401`，本 ADR 不取代那筆決策） | 依 `ADR-XPLAT-001` §5 的核准層級處理 |
+| 11 | **`Find-GitBash` 判定單源化（SDS 1 → 0）評估後 NO-GO，阻塞於 `ci-gate.ps1` 的 python 可用性** —— 生產側仍是兩份實作（PS 一份、Python 一份），現由行為表 parity 鎖看著而非物理消滅 | Phase 1-D／§4.5 | **封存中**；解除前置＝ **Phase 2-B**（🔴 使用者／PM signoff） | 解除判準（三者全成立才可重議）：① `ci-gate.ps1` 第 22 行的 Find-GitBash 呼叫落在 python 守門之後（即 2-B 已落地）；② 逐條回應 Phase 1-D 決策紀錄列的三條架構反對理由；③ 依 §4.5 rule 2 列出新增的行程邊界失敗模式並論證淨值為正 |
 
 ---
 

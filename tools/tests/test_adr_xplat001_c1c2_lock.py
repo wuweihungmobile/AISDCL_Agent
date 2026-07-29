@@ -35,7 +35,7 @@ WHY（為何非得有這道鎖）：
   所以：舊列以**具名清單**登記（每筆必附「為何當時沒滿足」與「承接者」），新列一律硬擋。
   （筆數不寫在散文裡——`_BASELINE_WAIVERS` 自己就是唯一真相源，寫死數字只會多一個 stale
   站點，那正是同輪 SD-R60-08 抓到的病。本檔對這條規則的遵守由
-  `TestThisLockObeysItsOwnNoHardcodedCountRule` 機械自檢——round 2 版本在宣告這條紀律的
+  `TestThisLockObeysItsOwnNoHardcodedCountRule` 機械自檢——round 2 的版本在宣告這條紀律的
   幾十行後自己就寫死了豁免筆數與帳本列數兩處，被 ARCH-R60R2-04／SD-R60-R2-06 逐字抓出。）
 
   ⚠️ 但「具名豁免」本身就是 R60 被四方拆穿的病灶（`test_ps_engine_ssot.py` 的
@@ -52,8 +52,11 @@ WHY（為何非得有這道鎖）：
         （帳本 ID），同 `ADR-SD09-011` 把「源碼演進證據」從「日曆天數」解綁的先例。
     (c) **shrink-only 棘輪**：`_MAX_BASELINE_ENTRIES` 與 `_BASELINE_ID_CEILING` 皆只准往下改，
         由 `TestShrinkOnlyRatchet` 以 `git show HEAD:<本檔>` 取上一版常數機械比對。
-        🔴 round 2 版本這一條只是**人審慣例冒充機制**：它只斷言「筆數 ≤ 上限」，SD 實測把
+        🔴 round 2 的版本這一條只是**人審慣例冒充機制**：它只斷言「筆數 ≤ 上限」，SD 實測把
         上限改大**不會紅**（改小才紅）。現版才是真棘輪。
+    (d) **護欄層檔數棘輪**（`TestGuardFileCountShrinkOnlyRatchet`，round 3 ARCH-R60R3-04）：
+        `DEF-101-561③` 裁定「R61 開輪即禁止新增鎖檔、只准合併／刪除」，而該裁決原本零機械
+        強制。同 (c) 的形狀：對 HEAD 現查、只准往下、無常數可維護。
 
 射程（scope，round 3 新增；SA-R60R2-04）：
   · **ADR 落地後的新列（ID > `_BASELINE_ID_CEILING`）＝家族全檔硬擋，且不接受任何豁免登記。**
@@ -79,9 +82,19 @@ WHY（為何非得有這道鎖）：
      列當天或更早，仍可繞過（鎖另以上界列自身的發現日期作輔助判準，只擋「舊號碼＋晚日期」
      這半）。要繞過得同時偽造帳本主鍵與日期，那在 diff 與 `check_defect_log_crossref.py`
      面前不是靜默動作。
-  ❌ **shrink-only 棘輪在本檔的首個 commit 上是空轉的**（HEAD 還沒有本檔可比），該情形會
-     `skipTest` 並印出理由（`run_root_unittests.py` 會逐處列印全部 skip）；鑑別力另以合成
-     上一版永久釘住。
+     🔴 **這個繞道的可觸達性不是理論**（round 3 SD-R60R3-06 以生產物件實算）：
+     **上界以下的未使用號碼現查即有**一批空號可用，不需要任何運氣——SD 逐一驗過三種構造：
+     (i) 只回填空號＝綠（設計上放行）；(ii) 空號＋不晚於上界列的日期＝**綠，雙欄位造假成立**；
+     (iii) 空號＋誠實日期＝紅（輔助判準擋掉單欄位造假那一半）。
+     擋住它的是**可見度**不是稀缺性：光加一筆豁免登記還不夠（`test_baseline_waivers_are_not_stale`
+     會把找不到對應 §4.3.1 標的的登記判為多餘而紅），必須連帶在帳本偽造一列，那是刻意動作、
+     diff 上看得見。空號的**數量與號碼由 `unused_ids_below_ceiling()` 現算**，刻意不寫進這段
+     散文——寫了就是下一個 stale 站點（帳本開新號就會少一個），而且會立刻被本檔自己的
+     `TestThisLockObeysItsOwnNoHardcodedCountRule` 判為犯規；這段措辭與現況是否同步由
+     `TestIdCeilingBypassReachabilityIsLive` 雙向機械綁定。
+  ❌ **兩道 shrink-only 棘輪在其比較對象的首個 commit 上都是空轉的**：常數棘輪是 HEAD 還沒有
+     本檔可比、檔數棘輪是 HEAD 還沒有 `tools/tests/` 可比。兩者都 `skipTest` 並印出理由
+     （`run_root_unittests.py` 會逐處列印全部 skip），鑑別力另以合成上一版永久釘住。
   ⚠️ **不要因為這道鎖是綠的就以為 §4.3 已被完全保證。**
 
 執行：python tools/run_root_unittests.py
@@ -90,6 +103,7 @@ WHY（為何非得有這道鎖）：
 from __future__ import annotations
 
 import ast
+import fnmatch
 import inspect
 import re
 import subprocess
@@ -246,7 +260,10 @@ _BASELINE_WAIVERS: dict[str, Waiver] = {
     "DEF-101-324": Waiver(
         frozenset({"C1"}),
         "R60 前的舊列（2026-07-24）且**形態與 §4.3 不同**：本列是檔名淨化「多對一碰撞」的"
-        " backlog，範圍是全 30 版（含 LATEST v0.30）一致存在，不是「LATEST 已修、凍結版殘留」"
+        " backlog，範圍是**全部凍結版連同 LATEST 一致存在**（版本數以"
+        " `AISDLC_SDD/FRAMEWORK_STATUS.md` 現查為準，那裡是版本計數的唯一真相源；"
+        "此處刻意不引數字——round 3 SD-R60R3-05 抓到的就是這一句寫死了當時的版本數）"
+        "，不是「LATEST 已修、凍結版殘留」"
         "——放進 §9〈凍結版豁免與平台限制〉表會是一列**假的**凍結版缺口。它之所以落入"
         " §4.3.1，是因為狀態欄引用了 DEF-101-358 的 wontfix 判例字樣。C2 本列自己已滿足"
         "（狀態欄逐字「本輪重新評估後確認此範圍擴大不改變既有 wontfix/backlog 定性」）。",
@@ -457,6 +474,34 @@ def baseline_admission_problems(
     return problems
 
 
+# 檔頭邊界①（「ID 上界擋不住雙欄位造假」）對**可觸達性**的揭露錨點。
+# `TestIdCeilingBypassReachabilityIsLive` 以雙條件把這句話與 `unused_ids_below_ceiling()`
+# 的現查結果綁在一起：空號還在就必須留著這句、空號用光就必須改寫它。
+_REACHABILITY_DISCLOSURE = "上界以下的未使用號碼現查即有"
+
+
+def unused_ids_below_ceiling(index: dict[str, tuple[str, Row]], ceiling: str) -> list[str]:
+    """`ceiling` 同一輪次底下、帳本家族**從未使用過**的流水號（由小到大）。
+
+    兩個用途：
+      ① 注入測試需要「一個保證不撞到真實列的上界內號碼」時現查取號——寫死號碼會被長大的
+         帳本用掉（`test_baseline_admission_also_rejects_a_back_numbered_late_row` 初版就
+         撞上過真實列）。
+      ② 讓檔頭邊界①「ID 上界擋不住兩個欄位同時造假」那句話的**可觸達性是活的**：空號有
+         幾個、是哪幾個，由本函式現算，一律不寫進散文（round 3 SD-R60R3-06）。
+
+    號碼字串一律交給 `_synthetic_id()` 組（它就是本檔的 ID 格式器）。此處組出來的號碼
+    依定義是帳本家族查無的空號，所以仍然不構成對任何真實缺陷的引用——
+    `test_defect_id_reference_integrity.py` 的全庫 DEF-ID 稽核不會被它踩到。
+    """
+    round_no, ceiling_seq = _id_key(ceiling)
+    return [
+        sid
+        for sid in (_synthetic_id(round_no, n) for n in range(1, ceiling_seq))
+        if sid not in index
+    ]
+
+
 def _slice_section(text: str, head: str, end: str, what: str) -> str:
     """抓 `head` 起、`end` 止的區段；抓不到就丟例外（不得靜默回空字串或全檔）。"""
     lines = text.splitlines()
@@ -537,6 +582,74 @@ def ratchet_problems(previous_source: str, current_max: int, current_ceiling: st
             "等於為 ADR 落地後的新列開門"
         )
     return problems
+
+
+# ---------------------------------------------------------------- 護欄層檔數棘輪（DEF-101-561③）
+_GUARD_DIR_REL = "tools/tests"
+# 計數面＝根層閘門的 discovery pattern。這裡的字面值由
+# `TestGuardFileCountShrinkOnlyRatchet::test_the_counted_surface_is_the_root_gate_pattern`
+# 與 `run_root_unittests._PATTERN` 雙向綁定（那支才是 SSOT，本常數只是不想在 import 期
+# 付 `_stdio_utf8` 的副作用代價而做的鏡像；兩邊漂移即紅）。
+_GUARD_FILE_PATTERN = "test_*.py"
+# 列舉時要跳過的快取目錄：它們不進版控，算進工作樹側會讓兩邊基準不同。
+_CACHE_DIR_NAMES = frozenset({"__pycache__", ".pytest_cache", ".mypy_cache", ".ruff_cache"})
+
+
+def guard_files_in_worktree() -> frozenset[str]:
+    """工作樹現況的鎖檔集合（相對 repo 根的 posix 路徑）。
+
+    兩個刻意的選擇：
+      · **含未追蹤檔**：新鎖一落到磁碟上就該被算進去，不必等 commit——否則「先加檔、
+        收輪時才一起 commit」可以整輪繞過本棘輪。
+      · **遞迴列舉**：非遞迴 glob 對「新增子目錄裡的鎖檔」是漏的，同輪 SD-R60R3-03 在
+        `sync_onboarding_baselines._FINGERPRINT_TREES` 上實測過這種漏法（改 top-level
+        檔→紅、新增 top-level 檔→紅、**新增子目錄檔→綠**）。那一筆的修法是「把不對稱
+        消掉」，本檔新加的東西沒有理由再引進同一個形狀。
+    """
+    root = _REPO / _GUARD_DIR_REL
+    return frozenset(
+        p.relative_to(_REPO).as_posix()
+        for p in root.rglob(_GUARD_FILE_PATTERN)
+        if not _CACHE_DIR_NAMES & set(p.parts)
+    )
+
+
+def read_head_guard_files() -> frozenset[str] | None:
+    """HEAD 版的鎖檔集合；HEAD 尚無 `tools/tests/` 時回 `None`（首個 commit 空轉窗口）。
+
+    用 `git ls-tree -r` 而不是 `git show HEAD:<目錄>`：後者只列 top-level 條目
+    （子目錄印成 `name/`），與工作樹側的遞迴列舉不對稱——那正是上面 WHY 講的同一個坑。
+    """
+    proc = subprocess.run(
+        ["git", "-C", str(_REPO), "ls-tree", "-r", "--name-only", "HEAD", "--",
+         f"{_GUARD_DIR_REL}/"],
+        capture_output=True, text=True, encoding="utf-8", errors="replace",
+    )
+    if proc.returncode != 0:
+        return None
+    names = frozenset(
+        ln.strip() for ln in proc.stdout.splitlines()
+        if ln.strip() and fnmatch.fnmatch(Path(ln.strip()).name, _GUARD_FILE_PATTERN)
+    )
+    return names or None
+
+
+def guard_count_problems(previous: frozenset[str], current: frozenset[str]) -> list[str]:
+    """護欄層檔數棘輪：現版鎖檔數不得高於上一版。回傳違規說明（空＝未調升）。
+
+    比的是**數量**而非集合：改名（一增一減）、以及「合併成一支再刪掉舊的」都是零淨增，
+    照綠；只增不減才紅。這是 `DEF-101-561③` 逐字要的語意（「禁止新增鎖檔、只准合併／
+    刪除」），不是「檔名不准動」。
+    """
+    if len(current) <= len(previous):
+        return []
+    added = sorted(current - previous)
+    detail = ("新增：" + "、".join(added)) if added else "（新增檔名與上一版重疊，請查改名）"
+    return [
+        f"{_GUARD_DIR_REL} 鎖檔數由 {len(previous)} 調升為 {len(current)}——"
+        f"DEF-101-561③ 已裁定「R61 開輪即禁止新增鎖檔、只准合併／刪除」。{detail}。"
+        "合法作法：把新判準**擴充進既有鎖檔**，或先合併／刪除等量的舊鎖檔再加。"
+    ]
 
 
 def _fmt(items: dict[str, Finding]) -> str:
@@ -1246,14 +1359,12 @@ class TestBaselineWaiverHygiene(unittest.TestCase):
     def test_baseline_admission_also_rejects_a_back_numbered_late_row(self) -> None:
         """輔助判準的鑑別力：ID 回填成上界內的未用號碼，但發現日期晚於上界列 ⇒ 仍紅。"""
         ceiling_row = self.index[_BASELINE_ID_CEILING][1]
-        ceiling_seq = _id_key(_BASELINE_ID_CEILING)[1]
         # 現查一個「上界內但尚未被用掉」的流水號——刻意不寫死號碼：帳本會繼續長，
         # 寫死的空號隨時可能被真的用掉（本測試初版就撞上真實列）。
-        sid = next(
-            (s for s in (_synthetic_id(101, n) for n in range(1, ceiling_seq))
-             if s not in self.index),
-            None,
-        )
+        # round 3 起共用 `unused_ids_below_ceiling()`：同一段「找空號」邏輯本檔原本有兩份
+        # （這裡一份、可觸達性揭露一份），收成一支＝本輪「只准合併」的同一條紀律。
+        free = unused_ids_below_ceiling(self.index, _BASELINE_ID_CEILING)
+        sid = free[0] if free else None
         self.assertIsNotNone(sid, "上界內找不到任何未用號碼——本測試的前提不成立")
         assert sid is not None
         index = dict(self.index)
@@ -1328,6 +1439,74 @@ class TestBaselineWaiverHygiene(unittest.TestCase):
         )
 
 
+class TestIdCeilingBypassReachabilityIsLive(unittest.TestCase):
+    """檔頭邊界①「ID 上界擋不住雙欄位造假」的**可觸達性**必須是現算的，不是散文估計。
+
+    WHY（round 3 SD-R60R3-06）：SD 以生產物件實算，逐一驗過三種構造——
+    (i) 只回填一個未用過的號碼 ⇒ 綠（設計上放行，那是舊列）；
+    (ii) 空號 ＋ 回填一個不晚於上界列的發現日期 ⇒ **綠**（雙欄位造假成立）；
+    (iii) 空號 ＋ 誠實日期 ⇒ 紅（輔助判準擋掉單欄位造假那一半）。
+    原檔頭只寫「擋不住雙欄位造假」，讀者容易把它讀成「那需要運氣」；事實是**現查就有一批
+    空號可用**，門一直是開的。擋住它的是可見度（必須連帶偽造帳本列，diff 上看得見），
+    不是稀缺性。這一段落差不改變風險等級（SD 判 P4），改變的是讀者對它的認知。
+
+    為何做成測試而不是在檔頭補一個數字：空號數量會隨帳本開新號而變動（用掉一個就少一個），
+    寫進散文就是又一個 stale 站點——而且會立刻被本檔自己的
+    `TestThisLockObeysItsOwnNoHardcodedCountRule` 判為犯規（量詞「個」本來就在集合裡）。
+    所以：數字現算、散文只留「以現查為準」的措辭，兩者由本類雙向綁定。
+    """
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        cls.index = family_row_index(read_family())
+
+    def test_the_enumerator_agrees_with_the_real_ledger(self) -> None:
+        """正控（真實資料）：現查出來的每個空號都真的不在家族索引內、且都在上界之下。"""
+        ceiling_key = _id_key(_BASELINE_ID_CEILING)
+        for sid in unused_ids_below_ceiling(self.index, _BASELINE_ID_CEILING):
+            with self.subTest(sid=sid):
+                self.assertNotIn(sid, self.index, "被報成空號的號碼其實有對應列")
+                self.assertLess(_id_key(sid), ceiling_key, "空號不得越過上界")
+
+    def test_the_enumerator_has_teeth_on_a_synthetic_index(self) -> None:
+        """注入：合成一個「號碼連續無洞」的索引 ⇒ 空清單；挖掉一個 ⇒ 恰好報那一個。
+
+        這支才是鑑別力來源：真實資料只能證明「現在有空號」，證不了「沒有空號時會回空」。
+        """
+        ceiling = _synthetic_id(1, 5)
+        full = {
+            _synthetic_id(1, n): (MAIN_LEDGER_NAME,
+                                  Row(def_id=_synthetic_id(1, n), date="2026-01-01",
+                                      triage="x", status="y", lineno=n))
+            for n in range(1, _id_key(ceiling)[1])
+        }
+        self.assertEqual(unused_ids_below_ceiling(full, ceiling), [])
+        hole = _synthetic_id(1, 3)
+        punched = {k: v for k, v in full.items() if k != hole}
+        self.assertEqual(unused_ids_below_ceiling(punched, ceiling), [hole])
+
+    def test_the_header_discloses_the_bypass_while_free_numbers_remain(self) -> None:
+        """雙向綁定：還有空號 ⟺ 檔頭必須寫著那句可觸達性揭露。
+
+        · 空號還在卻把揭露刪掉／改寫 ⇒ 紅（讀者會回到「需要運氣」的誤讀）。
+        · 空號真的用光了卻還留著「現查即有」⇒ 紅（那句話變成不實陳述）。
+        刻意寫成雙條件而不是 `if free: assert ...`——後者在空號用光後就退化成恆綠空測試，
+        正是本檔 `test_baseline_disclosure_in_adr_section_7_is_biconditional` 已經處理過的
+        同一種假綠形態。
+        """
+        free = unused_ids_below_ceiling(self.index, _BASELINE_ID_CEILING)
+        disclosed = _REACHABILITY_DISCLOSURE in (__doc__ or "")
+        self.assertEqual(
+            bool(free), disclosed,
+            f"檔頭邊界①的可觸達性揭露與現況不一致：現查空號存在={bool(free)}、"
+            f"檔頭有揭露={disclosed}。空號還在就必須留著「{_REACHABILITY_DISCLOSURE}」"
+            "那句；空號用光了就必須改寫它（並在此說明是哪一輪把它填滿的）。"
+            "🔴 訂正時**不要**在散文裡補上數量——現查值是 "
+            f"{len(free)}，寫進去就是下一個 stale 站點，且會被本檔的"
+            " TestThisLockObeysItsOwnNoHardcodedCountRule 當場判為犯規。",
+        )
+
+
 class TestShrinkOnlyRatchet(unittest.TestCase):
     """(c) shrink-only 棘輪：兩個門檻常數只准往下改，對 HEAD 版本機械比對。
 
@@ -1399,23 +1578,145 @@ class TestShrinkOnlyRatchet(unittest.TestCase):
         )
 
 
-# 本檔自己也受「散文不得寫死可機械算出的計數」這條紀律管（P2-6）。量詞白名單刻意窄：
-# 這幾個字就是 round 2 實際犯規處用的量詞（一處寫死豁免筆數、一處寫死帳本列數、
-# 一處寫死「一次紅 N 個」）。`(?<![§\d])` 用來排除節號引用（例：§9 後面接「列」字）。
-_BARE_COUNT_RE = re.compile(r"(?<![§\d])\d+\s*[筆列個支處]")
+class TestGuardFileCountShrinkOnlyRatchet(unittest.TestCase):
+    """(d) 護欄層檔數棘輪：`tools/tests/` 的鎖檔數只准往下走（`DEF-101-561③`）。
+
+    WHY（ARCH-R60R3-04）：`DEF-101-561③` 在 R60 round 3 被訂正為「**現在即判定已觸發**：
+    R61 開輪即進入禁止新增鎖檔、只准合併／刪除」。Architect 全 repo 實查該裁決的落地狀況，
+    結果是它只活在帳本一格散文與一行註解裡——**零機械強制**。而本檔檔頭自己立的標準是
+    「把 §4.3 的兩條件做成機械鎖才叫落地——沒有這道鎖，§4.3 就只是散文，本輪已經自證」。
+    同一把尺量回這條裁決，結論一樣：沒有鎖，它就只是散文。本類就是那道鎖，形狀直接沿用
+    上面的 `TestShrinkOnlyRatchet`（ADR §4.4 指定的照抄對象）。
+
+    🔴 語意與生效時點（動它之前先搞清楚基準點）：
+      · 比的是**工作樹 vs HEAD**，不是「vs 某個寫死的基線數」。所以沒有常數要維護，也就
+        沒有第二個 stale 站點；合併掉一支之後上限自動跟著降（棘輪自緊）。這一點與 (c) 的
+        兩個常數棘輪刻意不同——那兩個常數有獨立語意必須留在源碼裡，檔數沒有。
+      · 因此它**在 R60 收輪前對 HEAD 是綠的**：本輪其餘包不新增 `tools/tests/*.py`，
+        工作樹＝HEAD。R60 收輪 commit 一落地，HEAD 就是本輪收輪狀態，**R61 再新增一支
+        即紅**——那正是 `DEF-101-561③` 要的效果。綠不等於空轉：鑑別力由本類的合成注入
+        永久釘住，且工作樹側列舉的非空由自錨斷言保證。
+      · 計數面＝根層閘門的 discovery pattern ⇒ 「閘門真的會跑的那批鎖檔」。
+        `_*.py` 這種**共享零件刻意不算**：`DEF-101-561①` 指定的 R61 合併動作本身就是
+        「把四支 AST helper 抽成一支共享剝除層」，把零件算進來會讓那個**被裁決指定的
+        合併動作自己翻紅**（獎勵把重複貼回各鎖檔、懲罰抽共用層），與裁決意圖相反。
+    """
+
+    def test_the_worktree_enumerator_is_not_vacuous(self) -> None:
+        """正控：列舉器必須至少找得到**本檔自己**，且自比自為零違規。
+
+        自錨（用本檔的相對路徑）而不是釘一個數字：數字是 stale 站點，而「本檔存在」是
+        這支測試正在執行這件事的必然推論 ⇒ 永不過期，卻仍能抓到 pattern／路徑寫壞
+        （寫壞就列不到自己，紅）。
+        """
+        current = guard_files_in_worktree()
+        self.assertIn(
+            _SELF_REL, current,
+            f"工作樹列舉器找不到本檔（{_SELF_REL}）——pattern／路徑寫壞了？"
+            "列舉器一旦回空集合，棘輪比較會恆真通過＝靜默失效",
+        )
+        self.assertEqual(guard_count_problems(current, current), [])
+
+    def test_the_counted_surface_is_the_root_gate_pattern(self) -> None:
+        """SSOT 綁定：計數面必須等於根層閘門 discover 用的 pattern，兩邊漂移即紅。
+
+        WHY：本棘輪的正當性完全建立在「數的就是閘門會跑的那批鎖檔」上。閘門改 pattern
+        而這裡沒跟，數的就是另一個集合，裁決的射程會靜默偏掉。
+        延後 import：`run_root_unittests` 於 import 期會做 stdio 手術（`_stdio_utf8`），
+        不進本檔的 import 期路徑；同 `test_doc_loc_baseline_freshness_r60.py` 的既有作法。
+        """
+        import run_root_unittests  # noqa: PLC0415
+
+        self.assertEqual(
+            _GUARD_FILE_PATTERN, run_root_unittests._PATTERN,
+            "本檔的計數 pattern 與 run_root_unittests._PATTERN 已漂移——"
+            "後者是 SSOT，請改本檔這一側",
+        )
+
+    def test_adding_a_guard_file_is_detected(self) -> None:
+        """注入：上一版是現況、現版多一支鎖檔 ⇒ 必須紅並逐字指名新增的那一支與裁決編號。"""
+        current = guard_files_in_worktree()
+        newcomer = f"{_GUARD_DIR_REL}/{_GUARD_FILE_PATTERN.replace('*', 'synthetic_new_lock')}"
+        self.assertNotIn(newcomer, current, "合成檔名撞到真實檔，換一個名字")
+        problems = guard_count_problems(current, current | {newcomer})
+        self.assertEqual(len(problems), 1, f"預期恰一處違規，實得：{problems}")
+        self.assertIn(newcomer, problems[0])
+        self.assertIn("561", problems[0], "訊息必須指回裁決本體，否則讀者不知道為何被擋")
+
+    def test_merging_or_deleting_guard_files_is_accepted(self) -> None:
+        """對照組：合併／刪除（淨減）與完全不動 ⇒ 零違規。棘輪只擋調升。"""
+        current = guard_files_in_worktree()
+        self.assertEqual(guard_count_problems(current, current), [])
+        merged = current - {_SELF_REL}
+        self.assertEqual(guard_count_problems(current, merged), [])
+
+    def test_renaming_a_guard_file_is_not_flagged(self) -> None:
+        """對照組：改名＝一增一減、淨增為零 ⇒ 綠。
+
+        測意圖：裁決擋的是「護欄層繼續長大」，不是「檔名不准動」。若這裡誤紅，下一個人
+        會為了改名而把整道鎖關掉——那是本檔檔頭反覆講的那種賠掉全部價值的失敗模式。
+        """
+        current = guard_files_in_worktree()
+        renamed = (current - {_SELF_REL}) | {
+            f"{_GUARD_DIR_REL}/{_GUARD_FILE_PATTERN.replace('*', 'renamed_lock')}"
+        }
+        self.assertEqual(len(renamed), len(current), "改名構造必須是等量替換")
+        self.assertEqual(guard_count_problems(current, renamed), [])
+
+    def test_guard_file_count_never_rises_versus_head(self) -> None:
+        """真棘輪：工作樹鎖檔數與 HEAD 比對，只准往下。
+
+        HEAD 尚無 `tools/tests/`（首個 commit）時 `skipTest`——**不是靜默 return**，理由
+        與 `TestShrinkOnlyRatchet::test_constants_never_increase_versus_head` 同：
+        `run_root_unittests.py::report_all_skips` 會逐處印出 skip 的 id 與理由。
+        本 repo 的 `tools/tests/` 早已在 HEAD，故實務上這條分支不會被走到。
+        """
+        previous = read_head_guard_files()
+        if previous is None:
+            self.skipTest(
+                f"HEAD 尚無 {_GUARD_DIR_REL}/ 下的鎖檔 ⇒ 無上一版可比，檔數棘輪本輪空轉；"
+                "鑑別力見 test_adding_a_guard_file_is_detected"
+            )
+        problems = guard_count_problems(previous, guard_files_in_worktree())
+        self.assertEqual(
+            problems, [],
+            "護欄層檔數棘輪被違反（工作樹 vs HEAD）：\n  " + "\n  ".join(problems)
+            + "\n這道棘輪是 DEF-101-561③／DEF-101-565 那條架構級裁決的機械載體："
+            "護欄層已比它所護的生產碼還大，且連續數輪的新發現零筆落在生產碼上。"
+            "要新增鎖檔請先合併掉等量的舊鎖檔——這不是流程刁難，是該裁決的字面要求。",
+        )
+
+
+# 本檔自己也受「散文不得寫死可機械算出的計數」這條紀律管（P2-6）。量詞集合的來源有二：
+#   ① round 2 實際犯規處用過的量詞（一處寫死豁免筆數、一處寫死帳本列數、一處寫死
+#      「一次紅 N 個」）——即 `筆列個支處`。
+#   ② round 3 SD-R60R3-05 用加寬集合對本檔全掃，抓到的**檔內現存實例**：`DEF-101-324`
+#      的登記散文寫死了 AISDLC_SDD 的凍結版版本數，而量詞「版」不在集合裡 ⇒ 本鎖對它
+#      不會說話，AISDLC_SDD 每加一版那句就 stale 一次。這使「換個量詞就逸出」從理論邊界
+#      變成已發生事實，故把 `版檔份道項次` 一併納入（這幾個字是本 repo 治理散文最常用的
+#      量詞：檔數／份數／第 N 道閘門／第 N 項／第 N 次）。
+# `(?<![§\d])` 用來排除節號引用（例：§9 後面接「列」字）。
+_BARE_COUNT_RE = re.compile(r"(?<![§\d])\d+\s*[筆列個支處版檔份道項次]")
 
 
 class TestThisLockObeysItsOwnNoHardcodedCountRule(unittest.TestCase):
-    """本檔檔頭訂了「筆數不寫在散文裡」，round 2 版本自己在幾十行後違反了它。
+    """本檔檔頭訂了「筆數不寫在散文裡」，round 2 的版本自己在幾十行後違反了它。
 
     ARCH-R60R2-04／SD-R60-R2-06 逐字抓到三處：寫死豁免筆數（實況已與之不符）、寫死帳本
     列數（實況已與之不符）、以及「一次紅 N 個」。訂正方式不是「把數字改成新的正確值」
     ——那只是把過期時點往後挪一輪——而是改成不引數字的寫法。本類把這條紀律機械化。
 
-    邊界（誠實劃界）：只擋「阿拉伯數字＋筆／列／個／支／處」這幾種量詞的寫法，**不是**
-    通用的「散文寫死數字」偵測器。換量詞、寫成中文數字、或把計數藏進變數名都抓不到；
-    真正通用的判準需要語意理解，本鎖不假裝有。門檻常數自己（例如上限與掃描面下限）不受
-    此限——它們是該數字的唯一真相源，不是散文複本。
+    邊界（誠實劃界）：只擋「阿拉伯數字＋`_BARE_COUNT_RE` 列舉的那組量詞」的寫法，**不是**
+    通用的「散文寫死數字」偵測器。寫成中文數字、或把計數藏進變數名仍抓不到；真正通用的
+    判準需要語意理解，本鎖不假裝有。門檻常數自己（例如上限與掃描面下限）不受此限——它們
+    是該數字的唯一真相源，不是散文複本。
+
+    🔴 round 3 收緊（SD-R60R3-05）：「換個量詞就逸出」原本只是上面這段誠實劃界裡的理論
+    邊界，SD 用加寬集合實掃後證明它**已經在本檔內發生**（`DEF-101-324` 登記散文寫死凍結版
+    版本數）。性質不同 ⇒ 量詞集合擴充、那句散文同步改成不引數字的寫法。訂正方向仍是
+    「改成不引數字」而不是「把舊數字換成新數字」——後者只是把過期時點往後挪一輪，本輪已
+    為同型問題裁決過一次。收緊後全檔零命中（`test_no_bare_count_with_a_measure_word_anywhere_in_this_file`
+    就是那個零命中的機械證明）。
     """
 
     def test_no_bare_count_with_a_measure_word_anywhere_in_this_file(self) -> None:
@@ -1441,9 +1742,48 @@ class TestThisLockObeysItsOwnNoHardcodedCountRule(unittest.TestCase):
             with self.subTest(sample=sample):
                 self.assertTrue(_BARE_COUNT_RE.search(sample), "偵測器對真實犯規形態失效")
 
+    def test_the_detector_catches_the_round3_widened_measure_words(self) -> None:
+        """注入（SD-R60R3-05）：加寬進來的量詞必須真的有牙。
+
+        第一筆就是 `DEF-101-324` 登記散文修掉之前的**逐字原形**——它在 round 2 的偵測器下
+        是綠的，躺在本檔裡等著 AISDLC_SDD 下一次加版就過期。其餘四筆是本 repo 治理散文
+        會用到的同型量詞，一併釘住，避免「只補了踩到的那一個」。
+        """
+        for sample in (
+            "範圍是全 " + str(30) + " 版（含 LATEST）一致存在",
+            "護欄層現為 " + str(56) + " 檔",
+            "帳本家族 " + str(33) + " 份",
+            "接 root-infra-ci 第 " + str(14) + " 道",
+            "必跑項第 " + str(4) + " 項",
+            "已重演 " + str(3) + " 次",
+        ):
+            with self.subTest(sample=sample):
+                self.assertTrue(
+                    _BARE_COUNT_RE.search(sample),
+                    "加寬後的量詞集合對真實犯規形態仍失效",
+                )
+
     def test_the_detector_does_not_flag_section_references(self) -> None:
         """對照組：`§9 列`／`§10 列` 這類節號引用不得誤報（本檔散文大量使用）。"""
         for sample in ("補一列進 §9 列表", "見 §10 列的敘述"):
+            with self.subTest(sample=sample):
+                self.assertIsNone(_BARE_COUNT_RE.search(sample))
+
+    def test_the_widened_detector_does_not_flag_narrative_round_references(self) -> None:
+        """對照組（round 3 收緊的誤紅面）：`round 2 的版本` 這類**敘事引用**不是計數。
+
+        加寬前本檔有三處「round＋輪次號」緊接「版本」二字的寫法，加寬後會被判為
+        「數字＋版」而誤紅——那是把「第幾輪的版本」誤讀成「幾個版本」。
+        修法選**改寫散文**（在輪次號與「版本」之間插一個「的」）而不是在
+        偵測器裡開豁免：豁免表本身就是下一個 stale 站點（本檔判準(1) 的錯誤訊息就是這麼
+        寫的，round 3 四方複審又在判準(2) 的 `Spec.historical` 上重演了一次）。
+        本支釘住「改寫後的寫法確實不再命中」，改回去就會紅。
+        """
+        for sample in (
+            "round 2 的版本這一條只是人審慣例冒充機制",
+            "見 round 3 的版本說明",
+            "ADR §4.3 的兩條件",
+        ):
             with self.subTest(sample=sample):
                 self.assertIsNone(_BARE_COUNT_RE.search(sample))
 

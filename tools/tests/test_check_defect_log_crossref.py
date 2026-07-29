@@ -609,19 +609,22 @@ class TestMain(unittest.TestCase):
              mock.patch("builtins.print"):
             self.assertEqual(m.main(), 0)
 
-    def test_main_separates_vague_rows_from_valid_count_and_does_not_fail(self) -> None:
-        """R9 跨平台複審：狀態含糊列（_classify 回 None）不可被計入「有效狀態紀錄」，
-        須以 warning 列出 ID 分開呈現；含糊本身是帳本品質提示，不 fail（exit 0）。
+    def test_a_legal_first_word_can_no_longer_land_in_the_vague_soft_exit(self) -> None:
+        """🔴 B5 / SA-R60R3-07：`partial` 這條軟出口已關閉（本測試是舊測試的**繼承者**）。
 
-        🔴 R60：含糊 fixture 由 `pending-reassessment（…）` 換成 `partial@R60（…）`。
-        「含糊」（`_classify` 回 None）與「首詞非法」（不在《格式定義》合法集合內）是
-        **兩個獨立概念**，舊 fixture 剛好同時命中兩者，於是兩道鎖對同一份輸入各自要求
-        rc=0 與 rc=1，測試無論綠或紅都無法解讀（分野三例見
-        `TestStatusFirstWordProblems` class docstring）。要驗的既然是「含糊不 fail」，
-        fixture 就必須是「含糊**但首詞合法**」——`partial@R60` 正是這種形態（首詞
-        `partial` 在合法集合內，而 `_classify` 認不出 `partial` 故仍為含糊）。
-        ⚠️ 反過來把 `check_defect_log_crossref.py` 的首詞鎖放寬來讓本測試變綠是錯的：
-        那是為了測試好看而拆掉本輪剛加的守門。
+        舊測試 `test_main_separates_vague_rows_from_valid_count_and_does_not_fail` 拿
+        `partial@R60（降級出口）` 當「含糊但首詞合法」的 fixture —— 而**那個 fixture 本身
+        就是缺陷**：`partial` 是《格式定義》宣告的合法首詞，卻沒有任何分類器對應，於是
+        `_classify` 回 None、該列落進 `main()` 的「狀態含糊」桶，而含糊**只印 warning、
+        永不 fail**。DEF-101-556 要消滅的「只修一半被當成已修」並沒有消失，只是從
+        「靜默算 fixed」搬到「靜默算含糊」。
+
+        修復後 `partial` 歸類為 `open`（照 `workaround` 判例：缺陷本體仍在＝未結案），
+        於是同一份 fixture 的斷言**方向相反**：不再期待 warning，而是期待它被算成一筆
+        有效狀態紀錄。連帶的結構後果值得寫下來：合法首詞全部可分類 ＋ 每列首詞必須合法
+        ⇒ `main()` 的含糊桶**在結構上不可能被填**。含糊分支保留為第二層防線
+        （`_load_ledger_status()` 對欄數不符的列仍記 None），其計數行為由
+        `TestVagueBucketCountingStillWorksWhenReached` 以停用新鎖的方式驗。
         """
         ledger_text = _ledger_text(
             "| DEF-01-001 | 2026-06-12 | 情境 | 現象 | P2 | 去向 | wontfix+凍結版紀律 |\n"
@@ -635,9 +638,14 @@ class TestMain(unittest.TestCase):
         printed = " ".join(
             str(arg) for call in fake_print.call_args_list for arg in call.args
         )
-        self.assertIn("狀態含糊", printed)
-        self.assertIn("DEF-01-002", printed)          # 含糊列 ID 有被列出
-        self.assertIn("1 筆有效狀態紀錄", printed)     # 有效數＝總數 2 − 含糊 1
+        self.assertNotIn(
+            "狀態含糊", printed,
+            "`partial` 仍落進 warning-only 的含糊桶 ⇒ SA-R60R3-07 的軟出口沒關上",
+        )
+        self.assertIn("2 筆有效狀態紀錄", printed,
+                      "`partial` 列未被算成有效狀態紀錄 ⇒ 分類器沒有真的接上")
+        self.assertEqual(m._classify("partial@R60（降級出口）"), "open",
+                         "`partial` 應歸類 open（缺陷本體仍在），照 `workaround` 既有判例")
 
     def test_main_returns_1_when_status_first_word_illegal(self) -> None:
         """wiring 鎖：純函式有牙不代表 `main()` 真的呼叫了它。本 fixture 刻意讓**跨文件
@@ -835,6 +843,277 @@ class TestGovernanceDocOversizeGuard(unittest.TestCase):
     def test_real_governance_docs_are_within_limit(self):
         fails, _ = m.oversize_problems(list(m._GOVERNANCE_DOCS))
         self.assertEqual(fails, [])
+
+
+class TestEveryLegalFirstWordIsClassifiable(unittest.TestCase):
+    """B5 / SA-R60R3-07：`_STATUS_FIRST_WORDS` 與 `_STATUS_KEYWORDS` 兩份常數硬綁定。
+
+    原始缺陷：`partial` 是合法首詞卻無分類器對應 ⇒ `_classify` 回 None ⇒ 該列落進
+    `main()` 的「狀態含糊」桶，而含糊**只印 warning、永不 fail**。零白名單的宣稱字面
+    成立（逐條盤點確實沒有任何白名單），但**軟出口**還在，只是換了門牌。
+
+    🔴 為何要立通用鎖而不是只補一個分類器（主控傾向 (b)，本包採「(a)+(b) 都做」）：
+      · 只補分類器 ⇒ 修的是這一個實例，下一個新增的合法首詞會走完全一樣的路徑再溜一次；
+      · 只加硬斷言 ⇒ 上線當場紅（因為 `partial` 真的沒有分類器），根本無法落地。
+    兩者不是二擇一：分類器是**修復**，硬斷言是**防復發**。手法比照本檔既有的
+    「散文 ↔ `_STATUS_FIRST_WORDS` 雙向綁定」，串起來即「散文 → 程式常數 → 分類器」全鏈。
+    """
+
+    def test_every_legal_first_word_has_a_classifier(self) -> None:
+        orphans = sorted(w for w in m._STATUS_FIRST_WORDS if m._classify(w) is None)
+        self.assertEqual(
+            orphans, [],
+            f"合法首詞 {orphans} 沒有分類器對應 —— 這些列會靜默落進 warning-only 的"
+            "「狀態含糊」桶（SA-R60R3-07 的形狀）。請補 _STATUS_KEYWORDS 或移除該詞",
+        )
+        self.assertEqual(m.unclassifiable_first_word_problems(), [],
+                         "生產判準函式與上面的獨立算法不一致 ⇒ 其中一邊寫錯了")
+
+    def test_the_lock_fires_on_a_newly_added_word_without_a_classifier(self) -> None:
+        """🔴 鑑別力：模擬「未來加了一個合法首詞卻忘了加分類器」——必須當場紅並指名它。
+
+        注入走 runtime monkeypatch（不改 tracked 檔）。刻意用一個**新造**的詞而不是把
+        `partial` 拿掉：本鎖要防的是整個類別，不是那一個已修好的實例。
+        """
+        invented = "half" + "done"
+        with mock.patch.object(
+            m, "_STATUS_FIRST_WORDS", m._STATUS_FIRST_WORDS | {invented}
+        ):
+            problems = m.unclassifiable_first_word_problems()
+        self.assertEqual(len(problems), 1, f"注入後未報一筆問題：{problems!r}")
+        self.assertIn(invented, problems[0], "訊息未逐字指出是哪一個詞 ⇒ 不可行動")
+        self.assertIn("永不 fail", problems[0], "訊息必須說明危害（軟出口），不能只說『缺』")
+        self.assertEqual(m.unclassifiable_first_word_problems(), [],
+                         "monkeypatch 未復原 ⇒ 後續測試會被污染")
+
+    def test_main_returns_1_when_a_legal_first_word_has_no_classifier(self) -> None:
+        """wiring 鎖：純函式有牙不代表 `main()` 真的呼叫了它。"""
+        ledger_text = _ledger_text(_row("DEF-01-001", "fixed@R60"))
+        target_text = "文件敘述 DEF-01-001（fixed，已修）。\n"
+        with mock.patch.object(
+                m, "_STATUS_FIRST_WORDS", m._STATUS_FIRST_WORDS | {"halfdone"}), \
+             mock.patch.object(m, "_DEFECT_LOG", _write_tmp(ledger_text)), \
+             mock.patch.object(m, "_CROSSREF_TARGETS", [_write_tmp(target_text)]), \
+             mock.patch("builtins.print") as fake_print:
+            self.assertEqual(m.main(), 1)
+        printed = " ".join(
+            str(arg) for call in fake_print.call_args_list for arg in call.args
+        )
+        self.assertIn("合法首詞缺分類器對應", printed)
+
+    def test_partially_fixed_is_still_caught_by_the_first_word_lock_not_the_classifier(
+            self) -> None:
+        """邊界：補了 `partial` 分類器**不得**順手讓 `partially-fixed` 蒙混過關。
+
+        `partial` 後接 `l` 使 ASCII 邊界 lookahead 不成立 ⇒ `partially-fixed` 不命中新樣式，
+        仍由 `_classify` 讀成 `fixed`，而它的歸屬是首詞鎖（整體不在合法集合內 ⇒ 硬紅）。
+        兩道鎖分工不變，這正是「補分類器沒有削弱既有守門」的證明。
+        """
+        self.assertEqual(m._classify("partially-fixed@R60"), "fixed")
+        problems = m.status_first_word_problems(
+            _ledger_text(_row("DEF-01-001", "partially-fixed@R60")))
+        self.assertEqual(len(problems), 1, f"`partially-fixed` 未被首詞鎖擋下：{problems!r}")
+        self.assertIn("不是合法值", problems[0])
+
+
+class TestVagueBucketCountingStillWorksWhenReached(unittest.TestCase):
+    """R9 的「含糊列不計入有效狀態紀錄」行為 —— 在**新鎖被停用**的情況下仍須成立。
+
+    🔴 為何要這樣測：B5 落地後「合法首詞 ⇒ 必可分類」，於是 `main()` 的含糊桶在結構上
+    不可能被真實帳本填到（首詞非法的列早在前一道硬閘就 rc=1）。若直接刪掉 R9 那支測試，
+    等於把一個仍存在的分支變成零覆蓋；若硬造 fixture，又會造出一個現實中不存在的形態。
+    折衷＝**把新鎖停用一次**：這同時是 R9 行為的回歸測試，也是 B5 的**反向控制組**
+    ——它逐字證明「站在帳本與那個軟出口之間的，就是本輪新加的那道鎖」。
+    """
+
+    _LEDGER_TEXT = _ledger_text(
+        "| DEF-01-001 | 2026-06-12 | 情境 | 現象 | P2 | 去向 | wontfix+凍結版紀律 |\n"
+        "| DEF-01-002 | 2026-06-13 | 情境 | 現象 | P3 | 去向 | partial@R60（降級出口） |\n"
+    )
+    _TARGET_TEXT = "文件敘述 DEF-01-001（wontfix，記事存證）。\n"
+
+    def _run_main_without_the_partial_classifier(
+            self, with_new_lock: bool) -> tuple[int, str]:
+        """把 `partial` 從分類器移除（＝缺陷當時的狀態），可選是否保留本輪新加的硬斷言。
+
+        兩組唯一的差別就是 `with_new_lock` 這一個布林值 —— 差異單一，紅綠才歸因得了。
+        """
+        crippled = dict(m._STATUS_KEYWORDS)
+        crippled["open"] = re.compile(
+            r"(?<![A-Za-z0-9])open(?![A-Za-z0-9])|workaround")
+        lock = (m.unclassifiable_first_word_problems if with_new_lock
+                else (lambda: []))
+        with mock.patch.object(m, "_STATUS_KEYWORDS", crippled), \
+             mock.patch.object(m, "unclassifiable_first_word_problems", lock), \
+             mock.patch.object(m, "_DEFECT_LOG", _write_tmp(self._LEDGER_TEXT)), \
+             mock.patch.object(m, "_CROSSREF_TARGETS", [_write_tmp(self._TARGET_TEXT)]), \
+             mock.patch("builtins.print") as fake_print:
+            rc = m.main()
+            printed = " ".join(
+                str(arg) for call in fake_print.call_args_list for arg in call.args
+            )
+        return rc, printed
+
+    def test_without_the_new_lock_the_soft_exit_reappears_and_counts_are_separated(
+            self) -> None:
+        rc, printed = self._run_main_without_the_partial_classifier(with_new_lock=False)
+        self.assertEqual(rc, 0, "缺陷重現組應回 rc=0（軟出口＝只 warning 不 fail）")
+        self.assertIn("狀態含糊", printed)
+        self.assertIn("DEF-01-002", printed)       # 含糊列 ID 有被列出（R9 要求）
+        self.assertIn("1 筆有效狀態紀錄", printed)  # 有效數＝總數 2 − 含糊 1（R9 要求）
+
+    def test_with_the_new_lock_the_same_input_hard_fails(self) -> None:
+        """紅向：同一份輸入、同一個殘廢分類器，只把新鎖裝回去 ⇒ rc=1。"""
+        rc, _ = self._run_main_without_the_partial_classifier(with_new_lock=True)
+        self.assertEqual(
+            rc, 1,
+            "把新鎖裝回去之後，缺分類器的合法首詞竟仍能靜默通過 ⇒ 本輪的修復沒有牙",
+        )
+
+
+class TestGovernanceDocRegistrationIsComplete(unittest.TestCase):
+    """B1 / SA-R60R3-01 的第二半：磁碟上的姊妹治理文件必須全部登記。
+
+    合併兩張清單消掉的是「同一份檔只進了其中一張」；**沒有**消掉「新建一份檔、兩張都沒進」
+    ——而 r3 的真實路徑正是後者（有人把證據檔拆成姊妹檔，體積清單記得加、指針清單忘了加）。
+    合併之後這條路徑只剩一種形狀（整份檔沒登記），本鎖就守這一種。
+    """
+
+    def test_every_sibling_on_disk_is_registered(self) -> None:
+        self.assertEqual(
+            m.unregistered_governance_docs(), [],
+            "磁碟上有符合命名慣例卻未登記的治理文件 —— 未登記＝體積守門與指針稽核同時零覆蓋",
+        )
+
+    def test_the_three_named_docs_are_exactly_what_the_glob_finds(self) -> None:
+        """雙向：登記面 == 發現面。單向只驗一邊時，多登記一支不存在的檔不會被抓到。"""
+        on_disk = {p.name for p in m._GOVERNANCE_DOC_DIR.glob(m._GOVERNANCE_DOC_GLOB)}
+        registered = {p.name for p in m._GOVERNANCE_DOCS}
+        self.assertEqual(registered, on_disk,
+                         "登記面與發現面不一致（登記了不存在的檔，或漏登記磁碟上的檔）")
+
+    def test_an_unregistered_sibling_is_caught_and_named(self) -> None:
+        """🔴 鑑別力：從登記面拿掉一支（＝忘了登記），必須當場紅並指名那支檔。"""
+        dropped = m._GOVERNANCE_DOCS[-1]
+        with mock.patch.object(m, "_GOVERNANCE_DOCS", m._GOVERNANCE_DOCS[:-1]):
+            problems = m.unregistered_governance_docs()
+        self.assertEqual(len(problems), 1, f"漏登記一支卻未報一筆：{problems!r}")
+        self.assertIn(dropped.name, problems[0], "訊息未指名是哪一支檔 ⇒ 不可行動")
+        self.assertIn("指針稽核", problems[0],
+                      "訊息必須說明未登記同時逸出**兩種**義務，否則讀者只會補其中一張")
+        self.assertEqual(m.unregistered_governance_docs(), [], "monkeypatch 未復原")
+
+    def test_main_returns_1_on_an_unregistered_sibling(self) -> None:
+        """wiring 鎖：純函式有牙不代表 `main()` 真的呼叫了它。"""
+        with mock.patch.object(m, "_GOVERNANCE_DOCS", m._GOVERNANCE_DOCS[:-1]), \
+             mock.patch("builtins.print") as fake_print:
+            self.assertEqual(m.main(), 1)
+        printed = " ".join(
+            str(arg) for call in fake_print.call_args_list for arg in call.args
+        )
+        self.assertIn("具名治理文件涵蓋面與磁碟脫節", printed)
+
+
+class TestFamilyHeaderUniformity(unittest.TestCase):
+    """B2 / SA-R60R3-02：表頭同形性的斷言對象必須是「具表頭的檔」，且檔數不寫死。
+
+    🔴 兩層錯（主控親自複驗 CONFIRMED）：
+      (i)  訂正前本檔散文寫死「帳本家族 32 檔」，而實查家族更多，且每跑一次 `--apply` 就再變；
+      (ii) 更重的一層——該句斷言的「表頭欄數全部同形」**只對其中具表格表頭的那些檔成立**，
+           家族內另有一批純散文 archive 根本沒有表格。把只對子集成立的性質宣稱到全集上，
+           比數字過期更重：讀者會以為「家族每一份檔都有表頭」而據此推論。
+    違反的是本輪自己落地的 Scan-H 必跑項 #3（鎖的散文不得寫死可由程式現查的數字）。
+    """
+
+    @staticmethod
+    def _family_files():
+        import archive_defect_log as ADL  # noqa: PLC0415 — 只有本類別需要，避免全檔耦合
+        return ADL._family_files()
+
+    def test_files_with_a_header_all_share_the_same_slice_count(self) -> None:
+        """正面斷言（現查，不寫死）：具表頭的檔，其表頭切片數全部相同。"""
+        counts = {}
+        for p in self._family_files():
+            layout = m._table_layout(p.read_text(encoding="utf-8-sig"))
+            if layout is not None:
+                counts.setdefault(layout[0], []).append(p.name)
+        self.assertTrue(counts, "家族內一支具表頭的檔都找不到 ⇒ 解析已壞，本鎖無標的")
+        self.assertEqual(
+            len(counts), 1,
+            f"具表頭的檔出現多種切片數 ⇒ 表頭定位對其中一批不安全：{counts}",
+        )
+
+    def test_the_property_does_not_hold_for_the_whole_family(self) -> None:
+        """🔴 反面斷言：具表頭的檔是家族的**真子集** —— 這正是舊散文說錯的那一層。
+
+        若哪天家族每一份檔都有表頭，本測試會紅；那時該做的是把散文改成「全家族」，
+        而不是刪掉這條——它是「當年為什麼要收窄」的活體證據。
+        """
+        family = self._family_files()
+        with_header = [
+            p for p in family
+            if m._table_layout(p.read_text(encoding="utf-8-sig")) is not None
+        ]
+        self.assertLess(
+            len(with_header), len(family),
+            "家族內每一份檔都有表頭了 ⇒ 舊散文那句「家族 N 檔皆為此形態」變成真的，"
+            "請把本檔與 check_defect_log_crossref.py 的措辭一併更新（並保留訂正紀錄）",
+        )
+        self.assertGreater(len(with_header), 0, "零檔具表頭 ⇒ 上一條斷言變成廉價恆真")
+
+
+#: 「散文寫死家族檔數」的偵測樣式。刻意窄：只認 `家族` 與 `N 檔` 相鄰的那種寫法
+#: ——那就是 SA-R60R3-02 實際犯規的形狀。通用的「散文寫死數字」偵測需要語意理解，本鎖不假裝有。
+_FAMILY_COUNT_RE = re.compile(r"家族\s*\d+\s*檔")
+
+#: 受本紀律管的原始碼（本包所有權內的四支）。
+_SCANNED_SOURCES = (
+    Path(__file__).resolve().parents[1] / "check_defect_log_crossref.py",
+    Path(__file__).resolve().parents[1] / "archive_defect_log.py",
+    Path(__file__).resolve(),
+    Path(__file__).resolve().parent / "test_archive_defect_log.py",
+)
+
+
+class TestNoHardcodedFamilyCountInProse(unittest.TestCase):
+    """Scan-H 必跑項 #3 的機械化：鎖的散文不得寫死家族檔數（SA-R60R3-02）。
+
+    例外只有一種：**訂正紀錄**。帳本紀律是「原文逐字保全」，訂正註必須能引述當年寫錯的
+    那句話；故判準是「該行若同時帶『訂正』字樣即放行」——與
+    `TestCriteriaListIsASingleSsot::test_no_stale_criterion_seven_reference_remains_in_the_tool`
+    的處理方式一致（同一條紀律，不另創第二種寫法）。
+    """
+
+    def test_no_source_hardcodes_the_family_file_count(self) -> None:
+        offenders = []
+        for src in _SCANNED_SOURCES:
+            for lineno, line in enumerate(src.read_text(encoding="utf-8").splitlines(), 1):
+                if "訂正" in line:
+                    continue
+                for hit in _FAMILY_COUNT_RE.finditer(line):
+                    offenders.append(f"{src.name}:{lineno}：{hit.group(0)!r} ← {line.strip()}")
+        self.assertEqual(
+            offenders, [],
+            "以下散文寫死了家族檔數（可由 `_family_files()` 現查，且每次 `--apply` 就變）：\n  "
+            + "\n  ".join(offenders)
+            + "\n改法：改成不引數字的寫法（例：「家族檔數以 `_family_files()` 現查為準」），"
+              "**不要**把舊數字改成新數字——那只是把過期時點往後挪一輪。"
+              "確為訂正紀錄者請在同一行寫上「訂正」。",
+        )
+
+    def test_the_detector_fires_on_the_exact_wording_that_was_wrong(self) -> None:
+        """注入：把 SA-R60R3-02 逐字抓到的那句餵進偵測器，必須命中。"""
+        sample = "# 實查帳本家族 " + str(32) + " 檔的表頭欄數全部同形"
+        self.assertTrue(_FAMILY_COUNT_RE.search(sample), "偵測器對真實犯規形態失效")
+
+    def test_the_detector_does_not_flag_the_fixed_wording(self) -> None:
+        """對照組：修好之後的寫法不得誤報，否則這道鎖一上線就永紅。"""
+        for sample in (
+            "# 家族檔數以 `_family_files()` 現查為準",
+            "# 帳本家族內具表格表頭的那些檔，其表頭切片數全部同形",
+        ):
+            with self.subTest(sample=sample):
+                self.assertIsNone(_FAMILY_COUNT_RE.search(sample))
 
 
 class TestEvidenceFamilyPointersResolve(unittest.TestCase):
