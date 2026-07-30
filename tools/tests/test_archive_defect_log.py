@@ -61,6 +61,7 @@ import archive_defect_log as ADL  # noqa: E402
 _QUALITY = _REPO / "docs" / "06_quality"
 _MAIN_LEDGER = _QUALITY / "AutoSDD_Defect_Log.md"
 _ARCHIVE_30 = _QUALITY / "AutoSDD_Defect_Log_archive_30.md"
+_ARCHIVE_35 = _QUALITY / "AutoSDD_Defect_Log_archive_35.md"
 _TOOL_PATH = _REPO / "tools" / "archive_defect_log.py"
 _PRE_PUSH = _REPO / "tools" / "git-hooks" / "pre-push"
 _CI_YML = _REPO / ".github" / "workflows" / "root-infra-ci.yml"
@@ -421,6 +422,63 @@ class TestHandoffProseDetectionCatchesTheRowsR60MisArchived(unittest.TestCase):
                 status_cell = _status_cell(row, layout)
                 self.assertIn(ADL.gate._classify(status_cell), ADL.CLOSED_CLASSES)
                 self.assertIsNone(ADL.ACTIVE_STATUS_RE.search(status_cell))
+
+
+class TestHandoffProseDetectionCoversAlternatePhrasing(unittest.TestCase):
+    """判準④ 對「留待／承接者／改派」三種同語意但不同措辭的交棒用詞必須命中（SA-R63-01）。
+
+    正樣本取自 `archive_35` 的 `DEF-101-614`（「…留待 R62」）與 `DEF-101-615`
+    （「…承接者改派 R63」）——這兩列在 R63 動工前用**舊版** `HANDOFF_PROSE_RE`
+    （只認「下一輪／下輪」「R\\d+候選」「解鎖條件」「deferred」「backlog」）跑
+    `--apply` 時實際被放行歸檔（見 `archive_35.md` 標頭「判準④ 攔下、刻意未加
+    `--ack-handoff` 而留在主檔者：（無）」——若舊正則曾攔下這兩列之一，該欄不會是空）。
+    SA 複審人工覆核確認兩列本身標的皆已完成、不算誤歸檔，但正則本身確有此盲區。
+
+    這不是自己編一個一定會過的字串：兩列是舊判準實際放行、新判準必須攔下的真實案例，
+    所以本測試如果哪天判準又退化，會轉紅（同型鑑別力設計見模組 docstring 開頭一段）。
+    """
+
+    _EXPECTED_PROSE = {
+        "DEF-101-614": "留待 R62",
+        "DEF-101-615": "承接者改派 R63",
+    }
+
+    def test_def_614_and_615_are_flagged_as_handoff(self):
+        layout = _layout_of(_ARCHIVE_35)
+        for def_id, prose in self._EXPECTED_PROSE.items():
+            with self.subTest(def_id=def_id):
+                row = _row_from(_ARCHIVE_35, def_id)
+                self.assertIn(prose, row,
+                              f"{def_id} 應含該交棒語句；找不到代表 archive_35 內容已變，"
+                              "本測試的正樣本前提失效，需重新挑選案例")
+                verdict = ADL.classify_row(row, set(), layout)
+                self.assertEqual(verdict["blockers"], [],
+                                 f"{def_id} 應該通過判準①②③（狀態欄已結、未被 crossref 宣告）——"
+                                 "若這裡紅了代表前三判準行為改變，本測試的前提失效")
+                self.assertIsNotNone(
+                    verdict["handoff_marker"],
+                    f"{def_id} 散文帶「留待/承接者/改派」交棒字樣，判準④ 必須命中；"
+                    "退回只認「下一輪/R候選/解鎖條件/deferred/backlog」五種舊詞面時本條轉紅",
+                )
+                self.assertIn(verdict["handoff_marker"], row)
+
+    def test_old_keyword_set_would_have_missed_both(self):
+        """反向坐實：R63 修復前的舊版 `HANDOFF_PROSE_RE`（五種詞面）確實會漏放這兩列。"""
+        legacy_re = re.compile(
+            r"R\d+\s*候選"
+            r"|下一?輪"
+            r"|解鎖條件"
+            r"|(?<![A-Za-z0-9])deferred(?![A-Za-z0-9])"
+            r"|(?<![A-Za-z0-9])backlog(?![A-Za-z0-9])"
+        )
+        for def_id in self._EXPECTED_PROSE:
+            with self.subTest(def_id=def_id):
+                row = _row_from(_ARCHIVE_35, def_id)
+                self.assertIsNone(
+                    legacy_re.search(row),
+                    f"{def_id} 若被舊詞面集合命中，代表本測試選錯了正樣本（該列必須是"
+                    "「新詞面獨有命中、舊詞面零命中」的案例）",
+                )
 
 
 class TestPlanNeverProposesActiveRows(unittest.TestCase):

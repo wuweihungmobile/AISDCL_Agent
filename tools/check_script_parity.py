@@ -14,9 +14,16 @@ LATEST 以 scripts/sdd_version.py SSOT 動態解析，解析失敗 fail-loud—�
 fail-loud 列出未納管檔名：
   (1) 成對納管（_MARKER_PAIRS 標籤比對）；(2) 薄殼 hash 釘選（_THINNESS_ENROLLED）；
   (3) run_tlc FSM 軌錨點集合鎖（_TLC_TRACK_ENROLLED，R12）；(4) 成對豁免（_EXEMPT_PAIRS，
-  附決策依據）；(5) 單邊豁免（_SINGLE_SIDED_EXEMPT，附決策依據）。LATEST 下的納管
+  附 (tier, reason)）；(5) 單邊豁免（_SINGLE_SIDED_EXEMPT，附 (tier, reason)）。LATEST 下的納管
   登記一律用「LATEST/tools/…」相對 key（版本升版 copy-on-evolve 時登記不失效）。
   各清單另有 stale 反向檢查（防清單腐化），詳見 _check_pair_enrollment 區塊註解。
+
+  🔴 R63（ADR-XPLAT-002 §5 Phase 1-C (b)(d)）：(4)(5) 的值由純理由字串升級為
+  `(tier, reason)` 二元組，`tier` 取自 §3.1~3.4 定義的六類集合（`_VALID_TIERS`）；
+  `tier3_os_primitive`／`tier4_forbidden` 的 reason 另須含硬理由關鍵詞
+  （`_HARD_REASON_KEYWORDS`，見 `_check_tier_classification`）。另補 4 組「異名
+  對等品」（stem 刻意不同但語意對等的單邊登記對）字典化 + stale 自檢
+  （`_EQUIVALENCE_GROUPS` / `_check_equivalence_groups_fresh`，Phase 1-C (a)）。
 
 🔴 本工具的邊界（務必先讀）：本工具只機械比對「標籤序列」（數量、順序、字面文字），
 **不比對、也無能力比對**各 step 背後的實作內容是否語意對等。**本工具通過（exit 0）
@@ -80,7 +87,9 @@ AutoClaude/tools/install_git_hooks.{sh,ps1}、AISDLC_SDD/scripts/install-hooks.{
   python3 tools/check_script_parity.py --print-collapse
       # R61 ADR-XPLAT-002 §4.1/§4.2：印出 UEP／AC 現查值（不跑其餘檢查、恆 rc=0，
       # 純報表；棘輪化時比照 tools/tests/test_adr_xplat001_c1c2_lock.py 的
-      # shrink-only 形狀另立鎖，見該 ADR §4.4）
+      # shrink-only 形狀另立鎖，見該 ADR §4.4）。R63 擴充：逐對印出
+      # _EXEMPT_PAIRS／_SINGLE_SIDED_EXEMPT 的 tier 與 reason，以及 4 組異名對等品
+      # 清單（§5 Phase 1-C (a)(b)(c)）
 """
 from __future__ import annotations
 
@@ -353,6 +362,67 @@ def _check_git_longpaths_flag_parity() -> bool:
 # fail-loud 列出未納管檔名（R11 前單邊腳本零訊號）；並反向檢查各註冊清單無 stale
 # 條目（防清單腐化）——單邊豁免的 stale 含兩種：檔案已消失、或對邊已出現（不再
 # 是單邊，須改登記為成對類）。
+# ── Tier 分類（R63，ADR-XPLAT-002 §3.1~§3.4 Phase 1-C (b)）─────────────────────
+# 6 類合法 tier：tier1_contract／tier1_adapter＝CLI port 契約與其薄殼 adapter（§3.1，
+# 本檔登記的是 adapter 端）；tier2_spec＝spec port，資料＋判定規則須跨語言各一份
+# 實作、由行為表 parity 鎖守（§3.2）；tier3_os_primitive＝明文封頂的 OS 原語（§3.3
+# 六類，禁止未來輪重辯）；tier4_forbidden＝明文禁止收斂（§3.4 三成員）；unpinned＝
+# 尚未歸類、或評估後判定不落入上述四類的例外項（如 ci-gate 因 §2.2 實測不符
+# Tier-1 納編前置條件〔raw 行數 ≤ MAX_LINES〕、或 LATEST 版產生器僅有「輸出逐位元
+# 一致」證據而無 Tier-1/2/3/4 定義可套用者）。
+_TIER1_CONTRACT = "tier1_contract"
+_TIER1_ADAPTER = "tier1_adapter"
+_TIER2_SPEC = "tier2_spec"
+_TIER3_OS_PRIMITIVE = "tier3_os_primitive"
+_TIER4_FORBIDDEN = "tier4_forbidden"
+_UNPINNED = "unpinned"
+_VALID_TIERS = frozenset({
+    _TIER1_CONTRACT, _TIER1_ADAPTER, _TIER2_SPEC,
+    _TIER3_OS_PRIMITIVE, _TIER4_FORBIDDEN, _UNPINNED,
+})
+
+# tier3_os_primitive／tier4_forbidden 的 reason 必須額外含至少一個硬理由關鍵詞
+# （R63 Phase 1-C (d)）。關鍵字比對即可、不做語意驗證——同 ADR-XPLAT-001 §4.3.4
+# 對 C1/C2 已劃的同型邊界（防呆，非語意驗證；見 §6 邊界 4）。清單取自 ADR §3.3/§3.4
+# 現有六類/三成員的實際措辭，OR 邏輯（含其一即通過）。
+_HARD_REASON_KEYWORDS = (
+    "launchd",
+    "schtasks",
+    "container",
+    "GNU",
+    "Copy-on-Evolve",
+    "驗證載具",
+    "心跳檔",
+    "R12 QA-2",
+    "明文禁止收斂",
+    "無共同 API",
+)
+
+# ── 異名對等品（R63 Phase 1-C (a)）────────────────────────────────────────────
+# 4 組「stem 刻意不同但語意對等」的單邊登記對（過去只在各自 _SINGLE_SIDED_EXEMPT
+# 的 reason 散文互相提及對方，無機械可查的結構）。字典化後可被 stale 自檢：
+# 磁碟存在性／仍登記於 _SINGLE_SIDED_EXEMPT／stem 確實不同，三者缺一即紅
+# （見 _check_equivalence_groups_fresh）。
+_EQUIVALENCE_GROUPS: dict[str, tuple[str, str]] = {
+    "smoke_local": (
+        "tools/macos_smoke_local.sh",
+        "tools/windows_smoke_local.ps1",
+    ),
+    "git_hooks_install_common": (
+        "tools/lib/git_hooks_install_common.sh",
+        "tools/lib/GitHooksInstallCommon.ps1",
+    ),
+    "windowsapps_guard": (
+        "tools/lib/windowsapps_guard.sh",
+        "tools/lib/WindowsAppsGuard.ps1",
+    ),
+    "nightly_installer": (
+        "tools/install_mac_nightly.sh",
+        "tools/install_windows_nightly.ps1",
+    ),
+}
+
+
 _MARKER_PAIRS: list[tuple[str, str, str]] = []
 # R60 Scan-E E-A-01：掃描根不再由本檔自持名冊，一律取 SSOT
 # （`tools/_script_scan_surface.py`）——與 root-infra-ci.yml 第 2 道的 `-Recurse`
@@ -381,69 +451,106 @@ _THINNESS_ENROLLED = {
 }
 # run_tlc FSM 軌錨點集合鎖（R12；見 _check_run_tlc_tracks 區塊註解）
 _TLC_TRACK_ENROLLED = {"LATEST/tools/fsm_runtime/formal/run_tlc"}
-_EXEMPT_PAIRS = {
+_EXEMPT_PAIRS: dict[str, tuple[str, str]] = {
     "AISDLC_SDD/scripts/ci-gate": (
-        "ci-gate.ps1 為薄委派殼（Find-GitBash → bash ci-gate.sh 單一真相源），非第二實作"
+        _UNPINNED,
+        "ci-gate.ps1 為薄委派殼（Find-GitBash → bash ci-gate.sh 單一真相源），非第二實作；"
+        "ADR-XPLAT-002 §2.2 實測訂正：ci-gate.sh 是 281 行的閘門本體而非薄殼，raw 行數"
+        "超過 MAX_LINES=100，不符 Tier-1 納編前置條件，故不歸為 tier1_adapter；"
+        "Phase 2-B（刪 fallback，需 signoff）落地前維持決策豁免"
     ),
     "AutoClaude/tools/run_local_nightly": (
+        _TIER4_FORBIDDEN,
         ".ps1=Windows 深度 7-stage nightly、.sh=mac 薄聚合器串接既有腳本，"
-        "語意刻意不同、不做標籤對等比對；R11 Architect D1 拍板"
+        "語意刻意不同、不做標籤對等比對；R11 Architect D1 拍板；"
+        "ADR-XPLAT-002 §3.4：心跳檔前兩行為三站點契約，明文禁止收斂"
     ),
     # ── LATEST 版 tools（R12 ARCH-R12-3 親讀定類；run_tlc 走 _TLC_TRACK_ENROLLED 機械鎖）──
     "LATEST/tools/init_project": (
+        _TIER3_OS_PRIMITIVE,
         "legacy v3.x 初始化精靈雙原生實作，無 [n/m]/gate 宣告錨點可機械抽取；"
-        "R12 親讀定類豁免（互動流程差異屬平台原生呈現層）"
+        "R12 親讀定類豁免（互動流程差異屬平台原生呈現層）；"
+        "ADR-XPLAT-002 §3.3 #6 訂正：真正硬理由為與上游分歧＋Copy-on-Evolve 只覆蓋 "
+        "1/30，非原評估的「遠端 one-liner 自足性」"
     ),
     "LATEST/tools/install_hooks/install_post_commit": (
+        _UNPINNED,
         "R11 D1：兩產生器輸出逐位元一致取證＋LATEST 解析委派 scripts/sdd_version.py "
-        "SSOT（DEF-101-133），殼層無標籤錨點"
+        "SSOT（DEF-101-133），殼層無標籤錨點；不符 Tier-1/2/3/4 任一定義，暫列未歸類"
     ),
     "LATEST/tools/arch_fitness/run_self_evolution": (
+        _UNPINNED,
         "FSE 有界驅動器雙原生實作，無標籤錨點（.sh echo FSE_* vs .ps1 函式化）；"
-        "dry-run 安全預設兩側一致，R12 親讀定類豁免"
+        "dry-run 安全預設兩側一致，R12 親讀定類豁免；不符 Tier-1/2/3/4 任一定義，"
+        "暫列未歸類"
     ),
 }
 # 單邊豁免清單（R11 架構改善 C2）：掃描目錄內只有 .sh 或只有 .ps1 單邊存在的腳本，
 # 必須在此附決策依據登記，否則 fail-loud（過去單邊腳本零訊號）。
-_SINGLE_SIDED_EXEMPT = {
+_SINGLE_SIDED_EXEMPT: dict[str, tuple[str, str]] = {
     # 兩平台 smoke 聚合器互為對等品但 stem 刻意不同（macos_smoke_local ↔
     # windows_smoke_local），非同名對；行為層由 macos/windows-compat-ci.yml 覆蓋
-    "tools/macos_smoke_local.sh": "對等品=windows_smoke_local.ps1（stem 刻意不同）",
-    "tools/windows_smoke_local.ps1": "對等品=macos_smoke_local.sh（stem 刻意不同）",
+    "tools/macos_smoke_local.sh": (
+        _TIER4_FORBIDDEN,
+        "對等品=windows_smoke_local.ps1（stem 刻意不同）；ADR-XPLAT-002 §3.4：本身"
+        "即為驗證載具，判定合流至單一核心會與 R12 QA-2『兩訊號合流即單點化』衝突，"
+        "明文禁止收斂"
+    ),
+    "tools/windows_smoke_local.ps1": (
+        _TIER4_FORBIDDEN,
+        "對等品=macos_smoke_local.sh（stem 刻意不同）；ADR-XPLAT-002 §3.4：本身即為"
+        "驗證載具，判定合流至單一核心會與 R12 QA-2『兩訊號合流即單點化』衝突，"
+        "明文禁止收斂"
+    ),
     # ── tools/lib（R13 ARCH-R13-4 增列掃描）─────────────────────────────────
     # install 共用層兩支互為「異名對等品」——stem 刻意不同（POSIX snake_case vs
     # PowerShell PascalCase 各依平台慣例），非同名對、_discover_scripts 只認同名
     # 故各以單邊登記（比照 macos/windows smoke 先例）；行為對等另有
     # tools/tests/test_git_hooks_install_common.py 行數守門。
     "tools/lib/git_hooks_install_common.sh": (
+        _TIER1_ADAPTER,
         "對等品=GitHooksInstallCommon.ps1（異名對等，stem 刻意不同；"
-        "test_git_hooks_install_common.py 守門）"
+        "test_git_hooks_install_common.py 守門）；ADR-XPLAT-002 §3.1 活體先例：契約＝"
+        "tools/git_hooks_install_common.py，本檔為其薄殼 adapter"
     ),
     "tools/lib/GitHooksInstallCommon.ps1": (
+        _TIER1_ADAPTER,
         "對等品=git_hooks_install_common.sh（異名對等，stem 刻意不同；"
-        "test_git_hooks_install_common.py 守門）"
+        "test_git_hooks_install_common.py 守門）；ADR-XPLAT-002 §3.1 活體先例：契約＝"
+        "tools/git_hooks_install_common.py，本檔為其薄殼 adapter"
     ),
     "tools/lib/Find-GitBash.ps1": (
-        "PowerShell 專屬 Git Bash 探測 helper——POSIX 側本來就在 bash 內，無需對等"
+        _TIER2_SPEC,
+        "PowerShell 專屬 Git Bash 探測 helper——POSIX 側本來就在 bash 內，無需對等；"
+        "ADR-XPLAT-002 §3.2 git_bash_locator 家族（3 份：本檔／"
+        "integration_gate_core.py::find_git_bash／AISDLC_SDD/scripts/bash_probe.py），"
+        "由行為表 parity 鎖（test_find_git_bash_parity.py）守住判定語意一致"
     ),
     "tools/lib/WindowsAppsGuard.ps1": (
+        _TIER2_SPEC,
         "對等品=windowsapps_guard.sh（異名對等，stem 依平台語言慣例刻意不同；"
         "R37 PowerShell 側抽出，R43 Scan-B 訂正原「POSIX 側無 WindowsApps 概念」"
         "誤判——Git Bash on Windows 會繼承 Windows PATH，同樣命中 WindowsApps 空殼，"
-        "DEF-101-353 補上 POSIX 側對等實作）"
+        "DEF-101-353 補上 POSIX 側對等實作）；ADR-XPLAT-002 §3.2 real_python_candidate "
+        "家族（4 份），bootstrap 悖論定案不收斂，見 CrossPlatform_Scan_Dimensions.md"
     ),
     "tools/lib/windowsapps_guard.sh": (
+        _TIER2_SPEC,
         "對等品=WindowsAppsGuard.ps1（異名對等，stem 依平台語言慣例刻意不同；"
         "R43 Scan-B 系統性缺口收斂，DEF-101-353——Git Bash on Windows 繼承 Windows "
         "PATH 同樣會命中 WindowsApps 空殼，原 PowerShell-only guard 留下 9 個 bash "
-        "呼叫點缺口，本檔為 POSIX 側對等實作，供 pre-push 等腳本 dot-source）"
+        "呼叫點缺口，本檔為 POSIX 側對等實作，供 pre-push 等腳本 dot-source）；"
+        "ADR-XPLAT-002 §3.2 real_python_candidate 家族（4 份），bootstrap 悖論定案"
+        "不收斂"
     ),
     # mac nightly launchd 安裝器（R13 ARCH-R13-3）：launchd 為 macOS 專屬機制，
     # Windows 對等＝schtasks 排程家族（tools/install_windows_nightly.ps1，R19 新增
     # 一鍵建立；設定事後校正另見 fix_nightly_catchup.ps1，見 ONBOARDING §8）
     "tools/install_mac_nightly.sh": (
+        _TIER3_OS_PRIMITIVE,
         "launchd 專屬安裝器（macOS-only）；Windows 對等=schtasks 一鍵安裝器 "
-        "install_windows_nightly.ps1（stem 刻意不同，ONBOARDING §8）"
+        "install_windows_nightly.ps1（stem 刻意不同，ONBOARDING §8）；"
+        "ADR-XPLAT-002 §3.3 #1：launchd／schtasks 兩排程機制無共同 API"
     ),
     # Windows nightly 排程一鍵安裝器（R19 修復包 D）：對等品=install_mac_nightly.sh，
     # stem 刻意不同（install_mac_nightly ↔ install_windows_nightly，同上 macos/windows
@@ -456,26 +563,63 @@ _SINGLE_SIDED_EXEMPT = {
     # 旗標字串集合——mac `--render-only` 與 windows `-WhatIf` 語意對等但字面不同）。
     # 措辭刻意不含「schtasks」/「§8」字面——本項屬 macOS/Windows stem 相異對等品，
     # 不屬 test_onboarding_parity_interlock.py 鎖住的「§8 ops 排程家族（無 .sh 對等
-    # 的純 Windows-only 三支）」清單語意，避免誤觸該互鎖交叉比對。
+    # 的純 Windows-only 三支）」清單語意，避免誤觸該互鎖交叉比對。R63 補 tier3 硬理由
+    # 關鍵詞時延續這條刻意排除（用「launchd」而非「schtasks」，見下方 reason）。
     "tools/install_windows_nightly.ps1": (
+        _TIER3_OS_PRIMITIVE,
         "對等品=install_mac_nightly.sh（stem 刻意不同，如 macos/windows_smoke_local 先例）；"
-        "能力對照由 test_schedule_capability_parity.py 守門"
+        "能力對照由 test_schedule_capability_parity.py 守門；ADR-XPLAT-002 §3.3 #1："
+        "對等 mac 側走 launchd，兩排程原語無共同 API"
     ),
     # Windows schtasks 排程家族三支（ONBOARDING.md §8 明文 Windows-only、無 .sh 對等；
     # run_local_nightly 於 R11 已成對——mac .sh 薄聚合器落地——移登記至 _EXEMPT_PAIRS）
-    "AutoClaude/tools/fix_nightly_catchup.ps1": "schtasks 排程家族（ONBOARDING §8）",
-    "AutoClaude/tools/g0_gate_check.ps1": "schtasks 排程家族（ONBOARDING §8）",
-    "AutoClaude/tools/reschedule_g0_gatecheck.ps1": "schtasks 排程家族（ONBOARDING §8）",
+    "AutoClaude/tools/fix_nightly_catchup.ps1": (
+        _TIER3_OS_PRIMITIVE, "schtasks 排程家族（ONBOARDING §8）"
+    ),
+    "AutoClaude/tools/g0_gate_check.ps1": (
+        _TIER3_OS_PRIMITIVE, "schtasks 排程家族（ONBOARDING §8）"
+    ),
+    "AutoClaude/tools/reschedule_g0_gatecheck.ps1": (
+        _TIER3_OS_PRIMITIVE, "schtasks 排程家族（ONBOARDING §8）"
+    ),
     # bash-only 工具（ONBOARDING.md §6 明文無 .ps1 對等，Windows 以 Git Bash 執行）
-    "AutoClaude/tools/run_mutmut_in_docker.sh": "bash-only 工具（ONBOARDING §6）",
-    "AutoClaude/tools/sd06_w3_staging_dryrun.sh": "bash-only 工具（ONBOARDING §6）",
-    "AISDLC_SDD/scripts/act-ci.sh": "bash-only 工具（ONBOARDING §6）",
-    "AISDLC_SDD/scripts/copy_on_evolve.sh": "bash-only 工具（ONBOARDING §6）",
-    "AISDLC_SDD/scripts/pytest_passed_count.sh": "bash-only 工具（ONBOARDING §6）",
+    "AutoClaude/tools/run_mutmut_in_docker.sh": (
+        _TIER3_OS_PRIMITIVE,
+        "bash-only 工具（ONBOARDING §6）；ADR-XPLAT-002 §3.3 #5：由 "
+        "`docker run python:3.11-slim bash …` 送進 Linux container 內執行，"
+        "container 內不會有 PowerShell"
+    ),
+    "AutoClaude/tools/sd06_w3_staging_dryrun.sh": (
+        _UNPINNED,
+        "bash-only 工具（ONBOARDING §6）；本檔 docstring 自陳為 Linux staging DBA "
+        "工具（需 psql/pg_dump/alembic），計時採 GNU coreutils date %N 奈秒擴充——"
+        "Linux／現代 macOS BSD date／Windows Git Bash 內建 MSYS2 移植 GNU coreutils "
+        "date（DEF-101-340 R40 實測確認支援 %N）三個目標平台皆支援，未證實硬技術"
+        "障礙，純屬尚未撰寫 .ps1 對等殼，非 Tier-3 OS 原語"
+    ),
+    "AISDLC_SDD/scripts/act-ci.sh": (
+        _UNPINNED,
+        "bash-only 工具（ONBOARDING §6）；未證實硬技術障礙——act 本身可 winget/choco/"
+        "scoop 裝於 Windows（腳本自身錯誤訊息即列出），純屬尚未撰寫 .ps1 對等殼，"
+        "非 Tier-3 OS 原語"
+    ),
+    "AISDLC_SDD/scripts/copy_on_evolve.sh": (
+        _UNPINNED,
+        "bash-only 工具（ONBOARDING §6）；核心邏輯是 `git archive`（跨平台原生指令），"
+        "未證實硬技術障礙，純屬 repo 慣例（755 入庫僅限 tools/git-hooks/，其餘 .sh 一律 "
+        "bash 呼叫）尚未撰寫 .ps1 對等殼"
+    ),
+    "AISDLC_SDD/scripts/pytest_passed_count.sh": (
+        _UNPINNED,
+        "bash-only 工具（ONBOARDING §6）；純 grep/tail 管線純函式，理論上可等價移植 "
+        "PowerShell，未證實硬技術障礙，純屬尚未撰寫 .ps1 對等殼"
+    ),
     # LATEST 版 tools（R12 ARCH-R12-3）
     "LATEST/tools/verify_traceability.sh": (
+        _UNPINNED,
         "bash-only legacy 追溯鏈驗證工具（v1.1-SDD），歷來無 .ps1 對等；"
-        "Windows 以 Git Bash 執行"
+        "Windows 以 Git Bash 執行；未證實硬技術障礙（Git Bash 上可正常執行），"
+        "純屬歷史遺留未移植，非 Tier-3 OS 原語"
     ),
 }
 # R11 P4 清單互斥自檢：同一 stem 不得同時掛成對豁免與單邊豁免——對邊落地轉成對
@@ -608,8 +752,91 @@ def _check_pair_enrollment(latest_tools: Path | None = None) -> bool:
     return ok
 
 
+def _check_equivalence_groups_fresh(repo_root: Path | None = None) -> bool:
+    """4 組異名對等品 stale 自檢（R63，ADR-XPLAT-002 §5 Phase 1-C (a)）。
+
+    每組宣稱「兩支 stem 不同但語意對等」——stale 情境有三種，皆須捕捉：
+      1. 其中一支檔案已從磁碟消失（改名/刪除未同步本表）；
+      2. 其中一支不再登記於 _SINGLE_SIDED_EXEMPT（已改列其他納管類別卻忘刪本組）；
+      3. 兩支 stem 其實相同（不再是「異名」，該走成對納管，不該留在本表）。
+    三者皆非磁碟成對掃描（_discover_scripts）能發現的漂移面——那支只管「有沒有納管」，
+    不管「兩個手動配對的登記鍵彼此是否仍然對得上」。
+    """
+    root = repo_root if repo_root is not None else _REPO_ROOT
+    ok = True
+    for name, (a, b) in _EQUIVALENCE_GROUPS.items():
+        for rel in (a, b):
+            if not (root / rel).is_file():
+                print(f"❌ 異名對等品 stale：{name} 的成員 {rel} 已不存在於磁碟——"
+                      f"請同步更新 _EQUIVALENCE_GROUPS 或確認檔案是否被改名/刪除",
+                      file=sys.stderr)
+                ok = False
+            if rel not in _SINGLE_SIDED_EXEMPT:
+                print(f"❌ 異名對等品 stale：{name} 的成員 {rel} 已不在 "
+                      f"_SINGLE_SIDED_EXEMPT 登記——已改納管類別或被移除卻未同步本組",
+                      file=sys.stderr)
+                ok = False
+        stem_a, stem_b = Path(a).stem, Path(b).stem
+        if stem_a == stem_b:
+            print(f"❌ 異名對等品 stale：{name} 兩成員 stem 相同（{stem_a}）——"
+                  f"已不是『異名』對等品，應改走成對納管（_THINNESS_ENROLLED 或 "
+                  f"_MARKER_PAIRS），不該留在 _EQUIVALENCE_GROUPS", file=sys.stderr)
+            ok = False
+    if ok:
+        print(f"✅ 異名對等品 stale 自檢：{len(_EQUIVALENCE_GROUPS)} 組皆新鮮"
+              f"（磁碟存在 + 仍登記於 _SINGLE_SIDED_EXEMPT + stem 確實不同）")
+    return ok
+
+
+def _check_tier_classification() -> bool:
+    """(b)(d) tier 分類完整性與 tier3/4 硬理由關鍵詞斷言（R63，ADR-XPLAT-002 §5 Phase 1-C）。
+
+    R63 前 `_EXEMPT_PAIRS`／`_SINGLE_SIDED_EXEMPT` 的值是純理由字串——本檢查驗證升級後
+    的 `(tier, reason)` tuple：① 值須為二元組；② tier 必須落在 §3.1~3.4 定義的合法集合
+    `_VALID_TIERS`；③ reason 非空；④ `tier3_os_primitive`／`tier4_forbidden` 的 reason
+    必須額外含至少一個 `_HARD_REASON_KEYWORDS` 關鍵詞（關鍵字比對，同 ADR-XPLAT-001
+    §4.3.4 對 C1/C2 已劃的同型邊界——這是防呆，不是語意驗證，見 ADR-XPLAT-002 §6 邊界 4）。
+    """
+    ok = True
+    tables: tuple[tuple[str, dict[str, tuple[str, str]]], ...] = (
+        ("_EXEMPT_PAIRS", _EXEMPT_PAIRS),
+        ("_SINGLE_SIDED_EXEMPT", _SINGLE_SIDED_EXEMPT),
+    )
+    for table_name, table in tables:
+        for key, entry in table.items():
+            if not (isinstance(entry, tuple) and len(entry) == 2):
+                print(f"❌ tier 分類：{table_name}[{key!r}] 值須為 (tier, reason) 二元組，"
+                      f"實得 {entry!r}", file=sys.stderr)
+                ok = False
+                continue
+            tier, reason = entry
+            entry_ok = True
+            if tier not in _VALID_TIERS:
+                print(f"❌ tier 分類：{table_name}[{key!r}] 的 tier {tier!r} 不在合法集合 "
+                      f"{sorted(_VALID_TIERS)}", file=sys.stderr)
+                ok = False
+                entry_ok = False
+            if not reason.strip():
+                print(f"❌ tier 分類：{table_name}[{key!r}] 的 reason 為空", file=sys.stderr)
+                ok = False
+                entry_ok = False
+            if entry_ok and tier in (_TIER3_OS_PRIMITIVE, _TIER4_FORBIDDEN):
+                if not any(kw in reason for kw in _HARD_REASON_KEYWORDS):
+                    print(f"❌ tier 分類：{table_name}[{key!r}]（tier={tier}）的 reason "
+                          f"未含任何硬理由關鍵詞 {_HARD_REASON_KEYWORDS}——{tier} 需明確"
+                          f"的不可收斂技術理由，非泛泛決策豁免散文", file=sys.stderr)
+                    ok = False
+    if ok:
+        n = len(_EXEMPT_PAIRS) + len(_SINGLE_SIDED_EXEMPT)
+        print(f"✅ tier 分類完整性：{n} 筆（_EXEMPT_PAIRS {len(_EXEMPT_PAIRS)} + "
+              f"_SINGLE_SIDED_EXEMPT {len(_SINGLE_SIDED_EXEMPT)}）tier 合法、reason 非空、"
+              f"tier3/4 硬理由關鍵詞齊備")
+    return ok
+
+
 def _print_collapse() -> int:
-    """UEP／AC 現查（ADR-XPLAT-002 §4.1/§4.2 R61 Phase 1-C 最小可行切片）。
+    """UEP／AC 現查（ADR-XPLAT-002 §4.1/§4.2 R61 Phase 1-C 最小可行切片；R63 擴充逐對
+    tier/reason 與異名對等品清單，見 §5 Phase 1-C (a)(b)(c)）。
 
     在本 ADR 之前，這兩個判準只能靠手跑一支 scratchpad 腳本現查（§2.1）——本函式
     把它變成本工具的第一等公民輸出，供未來棘輪化沿用同一份計算，不必再各自重寫。
@@ -633,6 +860,19 @@ def _print_collapse() -> int:
     print(f"SINGLE_SIDED_EXEMPT={len(_SINGLE_SIDED_EXEMPT)}")
     print(f"TLC_TRACK_ENROLLED={len(_TLC_TRACK_ENROLLED)}")
     print(f"MIN_EXTRACT_COUNTS={len(_MIN_EXTRACT_COUNTS)}")
+    print(f"EQUIVALENCE_GROUPS={len(_EQUIVALENCE_GROUPS)}")
+    print("--- _EXEMPT_PAIRS（key -> tier / reason）---")
+    for key in sorted(_EXEMPT_PAIRS):
+        tier, reason = _EXEMPT_PAIRS[key]
+        print(f"{key}\ttier={tier}\treason={reason}")
+    print("--- _SINGLE_SIDED_EXEMPT（key -> tier / reason）---")
+    for key in sorted(_SINGLE_SIDED_EXEMPT):
+        tier, reason = _SINGLE_SIDED_EXEMPT[key]
+        print(f"{key}\ttier={tier}\treason={reason}")
+    print("--- _EQUIVALENCE_GROUPS（name -> 兩成員）---")
+    for name in sorted(_EQUIVALENCE_GROUPS):
+        a, b = _EQUIVALENCE_GROUPS[name]
+        print(f"{name}\t{a} <-> {b}")
     return 0
 
 
@@ -671,6 +911,8 @@ def main(argv: list[str] | None = None) -> int:
     ok = _check_git_longpaths_flag_parity() and ok
     ok = _check_thinness_cross_lock() and ok
     ok = _check_pair_enrollment(latest_tools) and ok
+    ok = _check_tier_classification() and ok
+    ok = _check_equivalence_groups_fresh() and ok
 
     if not ok:
         print("\n❌ 雙平台腳本對等檢查未通過 — .sh/.ps1 必須同步修改（見上列 diff）",

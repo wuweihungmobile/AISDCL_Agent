@@ -99,11 +99,14 @@ def extract_sched_ps1_names(text: str) -> set[str]:
 
 
 def parity_bash_only_keys() -> set[str]:
-    """機械側①：_SINGLE_SIDED_EXEMPT 中 rationale 含「bash-only」的鍵集合。"""
+    """機械側①：_SINGLE_SIDED_EXEMPT 中 rationale 含「bash-only」的鍵集合。
+
+    R63（ADR-XPLAT-002 Phase 1-C (b)）：值由純字串升級為 `(tier, reason)` 二元組，
+    取 `why[1]`（reason）做字串比對——語意與升級前不變。"""
     return {
         key
         for key, why in _parity._SINGLE_SIDED_EXEMPT.items()
-        if "bash-only" in why
+        if "bash-only" in why[1]
     }
 
 
@@ -112,7 +115,7 @@ def parity_sched_ps1_names() -> set[str]:
     return {
         key.rsplit("/", 1)[-1]
         for key, why in _parity._SINGLE_SIDED_EXEMPT.items()
-        if key.endswith(".ps1") and ("schtasks" in why or "§8" in why)
+        if key.endswith(".ps1") and ("schtasks" in why[1] or "§8" in why[1])
     }
 
 

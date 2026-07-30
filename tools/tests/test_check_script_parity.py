@@ -241,11 +241,14 @@ class TestR13LibAndInstallerEnrollment(unittest.TestCase):
         )
 
     def test_r13_singles_exempted_with_rationale(self) -> None:
-        """四支 R13 納管腳本必在單邊豁免表且附非空決策依據。"""
+        """四支 R13 納管腳本必在單邊豁免表且附非空決策依據。
+
+        R63（ADR-XPLAT-002 Phase 1-C (b)）：值由純字串升級為 `(tier, reason)`
+        二元組，取 `[1]`（reason）驗證非空——語意與 R13 原始斷言不變。"""
         for rel in self._R13_SINGLES:
             self.assertIn(rel, m._SINGLE_SIDED_EXEMPT,
                           f"{rel} 未登記 _SINGLE_SIDED_EXEMPT——R13 納管回退")
-            self.assertTrue(m._SINGLE_SIDED_EXEMPT[rel].strip(),
+            self.assertTrue(m._SINGLE_SIDED_EXEMPT[rel][1].strip(),
                             f"{rel} 的豁免依據為空——豁免必須附 WHY")
 
     def test_real_tree_r13_singles_discovered(self) -> None:
@@ -568,6 +571,156 @@ class TestPrintCollapseFlag(unittest.TestCase):
              mock.patch("builtins.print"):
             rc = m.main()
         self.assertEqual(rc, 0)
+
+
+class TestR63TierClassification(unittest.TestCase):
+    """R63（ADR-XPLAT-002 §5 Phase 1-C (b)(d)）：`_EXEMPT_PAIRS`／`_SINGLE_SIDED_EXEMPT`
+    值由純理由字串升級為 `(tier, reason)` 二元組 + tier3/4 硬理由關鍵詞斷言。
+
+    Scan-H 紀律 #1（每一支新增／修改的鎖必附 bug-injection 紅綠實測）：本類別逐一
+    構造每種違規形態並證明轉紅，另證明真 repo 現況本身是綠的。"""
+
+    def test_real_tables_pass_tier_classification(self) -> None:
+        with mock.patch("builtins.print"):
+            self.assertTrue(m._check_tier_classification())
+
+    def test_legacy_string_value_is_red(self) -> None:
+        """R62 及之前的純字串值形態現在必須被判為不合法——證明型別升級是強制的，
+        不是靜默相容（若靜默相容，日後有人漏轉型別也不會被抓到）。"""
+        with mock.patch.object(m, "_EXEMPT_PAIRS", {"x/y": "純字串舊格式"}), \
+             mock.patch.object(m, "_SINGLE_SIDED_EXEMPT", {}), \
+             mock.patch("builtins.print") as fake_print:
+            ok = m._check_tier_classification()
+        self.assertFalse(ok)
+        printed = " ".join(
+            str(arg) for call in fake_print.call_args_list for arg in call.args
+        )
+        self.assertIn("二元組", printed)
+
+    def test_invalid_tier_value_is_red(self) -> None:
+        with mock.patch.object(
+            m, "_EXEMPT_PAIRS", {"x/y": ("not_a_real_tier", "某理由")}
+        ), mock.patch.object(m, "_SINGLE_SIDED_EXEMPT", {}), \
+             mock.patch("builtins.print") as fake_print:
+            ok = m._check_tier_classification()
+        self.assertFalse(ok)
+        printed = " ".join(
+            str(arg) for call in fake_print.call_args_list for arg in call.args
+        )
+        self.assertIn("not_a_real_tier", printed)
+
+    def test_empty_reason_is_red(self) -> None:
+        with mock.patch.object(m, "_EXEMPT_PAIRS", {"x/y": (m._UNPINNED, "   ")}), \
+             mock.patch.object(m, "_SINGLE_SIDED_EXEMPT", {}), \
+             mock.patch("builtins.print") as fake_print:
+            ok = m._check_tier_classification()
+        self.assertFalse(ok)
+        printed = " ".join(
+            str(arg) for call in fake_print.call_args_list for arg in call.args
+        )
+        self.assertIn("reason 為空", printed)
+
+    def test_tier3_without_hard_keyword_is_red(self) -> None:
+        with mock.patch.object(
+            m, "_EXEMPT_PAIRS", {"x/y": (m._TIER3_OS_PRIMITIVE, "泛泛豁免、無硬理由")}
+        ), mock.patch.object(m, "_SINGLE_SIDED_EXEMPT", {}), \
+             mock.patch("builtins.print") as fake_print:
+            ok = m._check_tier_classification()
+        self.assertFalse(ok)
+        printed = " ".join(
+            str(arg) for call in fake_print.call_args_list for arg in call.args
+        )
+        self.assertIn("硬理由關鍵詞", printed)
+
+    def test_tier4_without_hard_keyword_is_red(self) -> None:
+        with mock.patch.object(
+            m, "_SINGLE_SIDED_EXEMPT", {"x/y.ps1": (m._TIER4_FORBIDDEN, "泛泛理由")}
+        ), mock.patch.object(m, "_EXEMPT_PAIRS", {}), \
+             mock.patch("builtins.print") as fake_print:
+            ok = m._check_tier_classification()
+        self.assertFalse(ok)
+        printed = " ".join(
+            str(arg) for call in fake_print.call_args_list for arg in call.args
+        )
+        self.assertIn("硬理由關鍵詞", printed)
+
+    def test_tier4_with_hard_keyword_is_green(self) -> None:
+        with mock.patch.object(
+            m, "_EXEMPT_PAIRS", {"x/y": (m._TIER4_FORBIDDEN, "本身即為驗證載具")}
+        ), mock.patch.object(m, "_SINGLE_SIDED_EXEMPT", {}), \
+             mock.patch("builtins.print"):
+            ok = m._check_tier_classification()
+        self.assertTrue(ok)
+
+    def test_unpinned_tier_does_not_require_hard_keyword(self) -> None:
+        """unpinned／tier1_*／tier2_spec 不受硬理由關鍵詞斷言約束——只有 tier3/4
+        （§3.3／§3.4 明文封頂類別）需要，見 (d) 的範圍（ADR §6 邊界 4）。"""
+        with mock.patch.object(
+            m, "_EXEMPT_PAIRS", {"x/y": (m._UNPINNED, "泛泛理由，不含任何硬關鍵詞")}
+        ), mock.patch.object(m, "_SINGLE_SIDED_EXEMPT", {}), \
+             mock.patch("builtins.print"):
+            ok = m._check_tier_classification()
+        self.assertTrue(ok)
+
+
+class TestR63EquivalenceGroupsFreshness(unittest.TestCase):
+    """R63（ADR-XPLAT-002 §5 Phase 1-C (a)）：4 組異名對等品字典化 + stale 自檢。
+
+    Scan-H 紀律 #1：逐一構造三種 stale 情境（檔案消失／不再登記單邊豁免／stem 其實
+    相同）並證明轉紅，另證明真 repo 現況本身是綠的。"""
+
+    def test_real_groups_pass(self) -> None:
+        with mock.patch("builtins.print"):
+            self.assertTrue(m._check_equivalence_groups_fresh())
+
+    def test_missing_file_on_disk_is_red(self) -> None:
+        empty_root = _TMP_DIR / "equiv_missing_root"
+        empty_root.mkdir(parents=True, exist_ok=True)
+        with mock.patch("builtins.print") as fake_print:
+            ok = m._check_equivalence_groups_fresh(repo_root=empty_root)
+        self.assertFalse(ok)
+        printed = " ".join(
+            str(arg) for call in fake_print.call_args_list for arg in call.args
+        )
+        self.assertIn("已不存在於磁碟", printed)
+
+    def test_unregistered_member_is_red(self) -> None:
+        fake_root = _TMP_DIR / "equiv_unregistered"
+        (fake_root / "tools").mkdir(parents=True, exist_ok=True)
+        (fake_root / "tools" / "a.sh").write_text("#!/bin/sh\n", encoding="utf-8")
+        (fake_root / "tools" / "b.ps1").write_text("# x\n", encoding="utf-8")
+        groups = {"synthetic": ("tools/a.sh", "tools/b.ps1")}
+        with mock.patch.object(m, "_EQUIVALENCE_GROUPS", groups), \
+             mock.patch.object(
+                 m, "_SINGLE_SIDED_EXEMPT", {"tools/a.sh": (m._UNPINNED, "x")}
+             ), mock.patch("builtins.print") as fake_print:
+            ok = m._check_equivalence_groups_fresh(repo_root=fake_root)
+        self.assertFalse(ok)
+        printed = " ".join(
+            str(arg) for call in fake_print.call_args_list for arg in call.args
+        )
+        self.assertIn("tools/b.ps1", printed)
+        self.assertIn("不在 _SINGLE_SIDED_EXEMPT", printed)
+
+    def test_same_stem_is_red(self) -> None:
+        fake_root = _TMP_DIR / "equiv_same_stem"
+        (fake_root / "tools").mkdir(parents=True, exist_ok=True)
+        (fake_root / "tools" / "same.sh").write_text("#!/bin/sh\n", encoding="utf-8")
+        (fake_root / "tools" / "same.ps1").write_text("# x\n", encoding="utf-8")
+        groups = {"synthetic": ("tools/same.sh", "tools/same.ps1")}
+        exempt = {
+            "tools/same.sh": (m._UNPINNED, "x"),
+            "tools/same.ps1": (m._UNPINNED, "y"),
+        }
+        with mock.patch.object(m, "_EQUIVALENCE_GROUPS", groups), \
+             mock.patch.object(m, "_SINGLE_SIDED_EXEMPT", exempt), \
+             mock.patch("builtins.print") as fake_print:
+            ok = m._check_equivalence_groups_fresh(repo_root=fake_root)
+        self.assertFalse(ok)
+        printed = " ".join(
+            str(arg) for call in fake_print.call_args_list for arg in call.args
+        )
+        self.assertIn("stem 相同", printed)
 
 
 if __name__ == "__main__":
