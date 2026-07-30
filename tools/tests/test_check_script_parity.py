@@ -723,5 +723,196 @@ class TestR63EquivalenceGroupsFreshness(unittest.TestCase):
         self.assertIn("stem 相同", printed)
 
 
+class TestR64TierShrinkOnlyRatchet(unittest.TestCase):
+    """R64（ADR-XPLAT-002 §8 item 12）：`_EXEMPT_PAIRS`／`_SINGLE_SIDED_EXEMPT` 的
+    tier 值只准往「更嚴格或不變」的方向改，對 HEAD 版本機械比對，形狀比照
+    `tools/tests/test_adr_xplat001_c1c2_lock.py::TestShrinkOnlyRatchet`（ADR 指定的
+    照抄對象）：(a) 正控（自比自為零違規）、(b) 合成注入兩個降級方向、(c) 對照組
+    （升級/不變/整筆移出登記表皆合法）、(d) 字典改名不得靜默放行、(e) 真棘輪
+    （對 HEAD 現查）。
+
+    本類刻意加進本檔而非新開檔案：`TestGuardFileCountShrinkOnlyRatchet`
+    （`test_adr_xplat001_c1c2_lock.py`）已把 `tools/tests/*.py` 的檔數棘輪化
+    （DEF-101-561③，R61 起禁止新增鎖檔、只准合併）——新開一支 `test_*.py` 會讓
+    那道鎖翻紅，故比照該裁決的既有慣例（`TestGuardFileCountShrinkOnlyRatchet`
+    自己也是主題不同卻擴進既有檔的先例），把本鎖擴進本檔（`check_script_parity`
+    既有測試檔）。
+    """
+
+    @staticmethod
+    def _synth_source(tier_const_name: str, key: str = "x/y",
+                       extra_single_sided: str = "") -> str:
+        """組一份「合成上一版」原始碼：六個 tier 常數字面賦值 + 一筆 _EXEMPT_PAIRS
+        登記（tier 用常數參照寫成，同本檔真實寫法），供降級/合法情境注入。"""
+        return (
+            '_TIER1_CONTRACT = "tier1_contract"\n'
+            '_TIER1_ADAPTER = "tier1_adapter"\n'
+            '_TIER2_SPEC = "tier2_spec"\n'
+            '_TIER3_OS_PRIMITIVE = "tier3_os_primitive"\n'
+            '_TIER4_FORBIDDEN = "tier4_forbidden"\n'
+            '_UNPINNED = "unpinned"\n'
+            '_EXEMPT_PAIRS: dict = {\n'
+            f'    "{key}": ({tier_const_name}, "reason"),\n'
+            '}\n'
+            f'_SINGLE_SIDED_EXEMPT: dict = {{{extra_single_sided}}}\n'
+        )
+
+    def test_extraction_is_not_vacuous_on_the_current_source(self) -> None:
+        """正控：抽取器對本檔現行原始碼必須抽得到兩張表的全部登記，且自比自為零違規。
+
+        作用同 `TestShrinkOnlyRatchet.test_extraction_is_not_vacuous_on_the_current_source`：
+        防「AST 抽取器被改壞（如漏認 AnnAssign 形態）⇒ 抽不到 ⇒ 棘輪永遠沉默」——
+        R64 落地時本檔真的先踩到這個坑（`_EXEMPT_PAIRS: dict[...] = {...}` 是
+        `ast.AnnAssign`，一開始的抽取器只認 `ast.Assign` 而靜默回 None）。
+        """
+        current_source = Path(m.__file__).read_text(encoding="utf-8")
+        exempt = m._extract_tier_map_from_source(current_source, "_EXEMPT_PAIRS")
+        single = m._extract_tier_map_from_source(current_source, "_SINGLE_SIDED_EXEMPT")
+        self.assertIsNotNone(exempt, "抽取器對現行 _EXEMPT_PAIRS 回傳 None——抽取失效")
+        self.assertIsNotNone(single, "抽取器對現行 _SINGLE_SIDED_EXEMPT 回傳 None——抽取失效")
+        self.assertEqual(len(exempt), len(m._EXEMPT_PAIRS))
+        self.assertEqual(len(single), len(m._SINGLE_SIDED_EXEMPT))
+        self.assertEqual(m.tier_ratchet_problems(current_source), [])
+
+    def test_downgrading_tier3_or_tier4_is_detected(self) -> None:
+        """注入：上一版 tier3/4，現版降為其他 tier（含 unpinned）⇒ 必須被指名。"""
+        for prev_tier, cur_tier in (
+            ("_TIER3_OS_PRIMITIVE", m._UNPINNED),
+            ("_TIER4_FORBIDDEN", m._TIER1_ADAPTER),
+        ):
+            with self.subTest(prev_tier=prev_tier, cur_tier=cur_tier):
+                previous = self._synth_source(prev_tier)
+                problems = m.tier_ratchet_problems(
+                    previous,
+                    current_exempt_pairs={"x/y": (cur_tier, "reason")},
+                    current_single_sided={},
+                )
+                self.assertEqual(len(problems), 1, f"預期恰一處違規，實得：{problems}")
+                self.assertIn("x/y", problems[0])
+                self.assertIn("明文封頂類別", problems[0])
+
+    def test_downgrading_tier1_or_tier2_to_unpinned_is_detected(self) -> None:
+        """注入：上一版 tier1/tier2，現版打回 unpinned ⇒ 必須被指名。"""
+        for prev_tier in ("_TIER1_CONTRACT", "_TIER1_ADAPTER", "_TIER2_SPEC"):
+            with self.subTest(prev_tier=prev_tier):
+                previous = self._synth_source(prev_tier)
+                problems = m.tier_ratchet_problems(
+                    previous,
+                    current_exempt_pairs={"x/y": (m._UNPINNED, "reason")},
+                    current_single_sided={},
+                )
+                self.assertEqual(len(problems), 1, f"預期恰一處違規，實得：{problems}")
+                self.assertIn("x/y", problems[0])
+
+    def test_upgrading_or_keeping_tier_is_accepted(self) -> None:
+        """對照組：unpinned → tier3（升級）與 tier3 → tier3（不變）皆零違規。"""
+        previous_unpinned = self._synth_source("_UNPINNED")
+        problems = m.tier_ratchet_problems(
+            previous_unpinned,
+            current_exempt_pairs={"x/y": (m._TIER3_OS_PRIMITIVE, "reason")},
+            current_single_sided={},
+        )
+        self.assertEqual(problems, [])
+
+        previous_tier3 = self._synth_source("_TIER3_OS_PRIMITIVE")
+        problems = m.tier_ratchet_problems(
+            previous_tier3,
+            current_exempt_pairs={"x/y": (m._TIER3_OS_PRIMITIVE, "reason")},
+            current_single_sided={},
+        )
+        self.assertEqual(problems, [])
+
+    def test_lateral_move_between_tier1_and_tier2_is_accepted(self) -> None:
+        """對照組：tier1_contract／tier1_adapter／tier2_spec 彼此互換（同屬
+        `_TIER1_2` 集合、非退回 unpinned）不算降級，應零違規——棘輪只鎖「退回
+        unpinned」這個方向，同屬已歸類等級之間的橫向改分類合法，不應被誤判。"""
+        lateral_pairs = (
+            ("_TIER1_CONTRACT", m._TIER2_SPEC),
+            ("_TIER2_SPEC", m._TIER1_CONTRACT),
+            ("_TIER1_ADAPTER", m._TIER2_SPEC),
+        )
+        for prev_tier, cur_tier in lateral_pairs:
+            with self.subTest(prev_tier=prev_tier, cur_tier=cur_tier):
+                previous = self._synth_source(prev_tier)
+                problems = m.tier_ratchet_problems(
+                    previous,
+                    current_exempt_pairs={"x/y": (cur_tier, "reason")},
+                    current_single_sided={},
+                )
+                self.assertEqual(problems, [], f"預期零違規，實得：{problems}")
+
+    def test_upgrading_unpinned_to_tier1_or_tier2_is_accepted(self) -> None:
+        """對照組：上一版 unpinned，現版升級為 tier1_contract／tier2_spec（首次
+        歸類）⇒ 零違規——現有測試只驗過 unpinned→tier3，這裡補齊往 tier1/2
+        方向升級的組合，避免棘輪誤攔正常的初次歸類。"""
+        for cur_tier in (m._TIER1_CONTRACT, m._TIER2_SPEC):
+            with self.subTest(cur_tier=cur_tier):
+                previous = self._synth_source("_UNPINNED")
+                problems = m.tier_ratchet_problems(
+                    previous,
+                    current_exempt_pairs={"x/y": (cur_tier, "reason")},
+                    current_single_sided={},
+                )
+                self.assertEqual(problems, [], f"預期零違規，實得：{problems}")
+
+    def test_removing_the_key_entirely_is_accepted_as_convergence(self) -> None:
+        """對照組：上一版 tier3/4，現版兩張表都不再登記該 key（整筆收斂移除）⇒ 零違規。
+
+        這是 ADR §8 item 12 明文的合法出口：「除非該筆同時被移出登記表，代表已徹底
+        收斂」——硬擋這種情況會懲罰真正把缺口收斂掉的人，方向與棘輪的目的相反。
+        """
+        previous = self._synth_source("_TIER4_FORBIDDEN")
+        problems = m.tier_ratchet_problems(
+            previous, current_exempt_pairs={}, current_single_sided={},
+        )
+        self.assertEqual(problems, [])
+
+    def test_renaming_the_registry_dict_is_reported_not_silently_skipped(self) -> None:
+        """改名／改寫 `_EXEMPT_PAIRS` 這個字典本身（而非其中某筆 key）不得讓棘輪
+        靜默失效——抽不到字典就是紅，訊息須點名『改名／改寫』。"""
+        previous = (
+            '_TIER3_OS_PRIMITIVE = "tier3_os_primitive"\n'
+            '_EXEMPT_PAIRS_RENAMED: dict = {\n'
+            '    "x/y": (_TIER3_OS_PRIMITIVE, "reason"),\n'
+            '}\n'
+            '_SINGLE_SIDED_EXEMPT: dict = {}\n'
+        )
+        problems = m.tier_ratchet_problems(
+            previous,
+            current_exempt_pairs={"x/y": (m._UNPINNED, "reason")},
+            current_single_sided={},
+        )
+        self.assertEqual(len(problems), 1, f"預期恰一處違規，實得：{problems}")
+        self.assertIn("_EXEMPT_PAIRS", problems[0])
+        self.assertIn("改名／改寫", problems[0])
+
+    def test_tier_never_downgrades_versus_head(self) -> None:
+        """真棘輪：與 HEAD 版本比對（production 呼叫路徑 `_check_tier_ratchet()`
+        走的同一份計算）。HEAD 尚無本檔時 `skipTest`——理由同
+        `TestShrinkOnlyRatchet.test_constants_never_increase_versus_head`：
+        `run_root_unittests.py::report_all_skips` 會逐處印出全部 skip，鑑別力
+        另由上面的合成注入測試永久釘住。
+        """
+        previous = m._read_previous_self_source()
+        if previous is None:
+            self.skipTest(
+                f"HEAD 尚無 {m._SELF_REL}（本檔為未提交的新增檔）⇒ 無上一版可比，"
+                "棘輪本輪空轉；commit 後即永久生效"
+            )
+        problems = m.tier_ratchet_problems(previous)
+        self.assertEqual(
+            problems, [],
+            "tier shrink-only 棘輪被違反（與 HEAD 版本比對）：\n  "
+            + "\n  ".join(problems),
+        )
+
+    def test_production_check_wired_into_main(self) -> None:
+        """`_check_tier_ratchet()` 已隨 `main()` 執行（無參數呼叫路徑），非孤兒函式。"""
+        with mock.patch.object(sys, "argv", ["check_script_parity.py"]), \
+             mock.patch("builtins.print"):
+            rc = m.main()
+        self.assertEqual(rc, 0, "真 repo 現況應為零降級，main() 應 rc=0")
+
+
 if __name__ == "__main__":
     unittest.main()

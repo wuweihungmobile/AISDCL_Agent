@@ -17,13 +17,68 @@ import subprocess
 import sys
 import tempfile
 import unittest
-from pathlib import Path
+from pathlib import Path, PureWindowsPath
 from unittest import mock
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "lib"))
 import bash_probe_spec as _spec  # noqa: E402
 
-_BASH = shutil.which("bash")
+
+def _probe_a_real_usable_bash_for_fixture() -> str | None:
+    """獨立重寫版：探測本機一個「真正可用」的 bash 路徑，供本檔案的 `_BASH` fixture 使用。
+
+    WHY（R64／DEF-101-617）：舊版 `_BASH = shutil.which("bash")` 在「PATH 上
+    `bash` 解析到 WSL System32 佔位版、真正的 Git Bash 未直接掛在 PATH、只能
+    透過 `git.exe` 相對路徑找到」這種真實可重現的 Windows 開發機設定下，會把
+    該被排除的佔位版錯當成可用 bash——`_BASH` 本身就是錯的，且
+    `usable_bash_with_probe_spy()` 對 `shutil.which` 的 mock 讓生產端
+    `usable_bash()` 的 git.exe 相對路徑候選完全失效，本檔在這種機器上會有
+    6/8 測試確定性失敗（與本輪 ADR-XPLAT-002 §8 item 12 UEP 棘輪化工作無關的
+    既有缺陷）。
+
+    比照生產端 `AISDLC_SDD/scripts/bash_probe.py::usable_bash()`（第 48~63 行）
+    的候選蒐集邏輯**獨立重新實作**（不 import 生產程式碼），維持本檔案頭
+    docstring 宣告的「三份消費者各自獨立重寫」架構慣例——若讓本檔直接呼叫
+    生產端函式，測試會因為共用生產端邏輯而失去對生產端共同盲點的鑑別力。
+    對每個候選實際跑一次 `PROBE_CMD` 驗活，第一個驗活成功的候選才接受為
+    `_BASH`；全部候選都驗活失敗（或根本沒有候選）才回傳 `None`（維持既有
+    `@unittest.skipUnless(_BASH, ...)` 語意：找不到就跳過，不是失敗）。
+    """
+    candidates: list[str] = []
+    git = shutil.which("git")
+    if git:
+        git_path = Path(git).resolve()
+        for up in list(git_path.parents)[:4]:
+            for sub in ("usr/bin/bash.exe", "bin/bash.exe"):
+                cand = up / sub
+                if cand.exists():
+                    candidates.append(str(cand))
+    bare = shutil.which("bash")
+    if bare and not any(
+        part.lower() == _spec.SYSTEM32_SEGMENT for part in PureWindowsPath(bare).parts
+    ):
+        candidates.append(bare)
+    for cand in candidates:
+        try:
+            result = subprocess.run(
+                [cand, "-c", _spec.PROBE_CMD],
+                capture_output=True, text=True, encoding="utf-8",
+                errors="replace", timeout=15,
+            )
+        except Exception:
+            continue
+        lines = result.stdout.splitlines()
+        if (
+            result.returncode == 0
+            and len(lines) >= 2
+            and lines[0].strip() == _spec.PROBE_EXPECT_ECHO
+            and lines[1].strip() == _spec.PROBE_EXPECT_DIRNAME
+        ):
+            return cand
+    return None
+
+
+_BASH = _probe_a_real_usable_bash_for_fixture()
 
 
 def usable_bash_with_probe_spy(

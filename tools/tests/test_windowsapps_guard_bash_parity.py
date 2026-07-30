@@ -51,15 +51,25 @@ bash 語法解析，因此對下列兩種刻意構造的偽裝手法無鑑別力
 """
 from __future__ import annotations
 
+import functools
 import re
 import shutil
 import subprocess
 import sys
 import unittest
-from pathlib import Path
+from pathlib import Path, PureWindowsPath
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 _GUARD_SH = _REPO_ROOT / "tools" / "lib" / "windowsapps_guard.sh"
+
+# 驗活探測「參數」（指令/期望輸出/System32 排除段）共用 tools/lib/bash_probe_spec.py
+# （R32 Architect 架構最佳化的單一真相源）；本檔的 subprocess 執行邏輯（見下方
+# `_bash_exe()`）仍獨立寫死，不共用函式，比照既有消費者
+# `tools/tests/test_git_hooks_install_common.py::_usable_bash()`／
+# `tools/tests/test_bash_probe_spec_contract.py::_probe_a_real_usable_bash_for_fixture()`
+# 同款「各消費者獨立重寫」架構慣例（R64／DEF-101-618 (b)）。
+sys.path.insert(0, str(_REPO_ROOT / "tools" / "lib"))
+import bash_probe_spec as _spec  # noqa: E402
 
 
 def _latest_sdd_version_name() -> str:
@@ -390,8 +400,59 @@ def _has_zero_guard_python_call(text: str) -> bool:
     return _invokes_python_bare(text)
 
 
+@functools.lru_cache(maxsize=1)
 def _bash_exe() -> str | None:
-    return shutil.which("bash")
+    """探測本機一個「真正可用」的 bash 路徑，供本檔案的 shell 行為驗證使用。
+
+    WHY（R64／DEF-101-618 (b)）：舊版 `shutil.which("bash")` 在「PATH 上 `bash`
+    解析到 WSL System32 佔位版、真正的 Git Bash 未直接掛在 PATH、只能透過
+    `git.exe` 相對路徑找到」這種真實可重現的 Windows 開發機設定下，會把該被
+    排除的佔位版錯當成可用 bash——與 `test_bash_probe_spec_contract.py`（同輪
+    DEF-101-617）完全同一形狀的缺陷。比照該檔
+    `_probe_a_real_usable_bash_for_fixture()` 的候選蒐集與驗活邏輯**獨立重寫**
+    （不 import 該測試檔或生產端 `AISDLC_SDD/scripts/bash_probe.py`，只共用
+    `tools/lib/bash_probe_spec.py` 的資料規格常數，維持本檔頭常數區註解所述
+    「各消費者獨立重寫執行邏輯」架構慣例）：先蒐集候選（git.exe 往上最多 4 層
+    parent 找 `usr/bin/bash.exe`／`bin/bash.exe`，以及非 System32 路徑段的
+    `shutil.which("bash")`），再對每個候選實際跑一次 `_spec.PROBE_CMD` 驗活，
+    第一個驗活成功的候選才接受；全部候選都失敗（或無候選）才回傳 `None`
+    （維持既有 `@unittest.skipUnless(_bash_exe(), ...)` 語意）。以
+    `functools.lru_cache` 快取結果：本函式在同一個 process 內會被類別層級
+    `skipUnless` 裝飾器與每個測試方法各呼叫一次，環境在單次測試執行期間不會
+    變動，快取避免重複探測開銷，呼叫端簽名／回傳型別與呼叫慣例不變。
+    """
+    candidates: list[str] = []
+    git = shutil.which("git")
+    if git:
+        git_path = Path(git).resolve()
+        for up in list(git_path.parents)[:4]:
+            for sub in ("usr/bin/bash.exe", "bin/bash.exe"):
+                cand = up / sub
+                if cand.exists():
+                    candidates.append(str(cand))
+    bare = shutil.which("bash")
+    if bare and not any(
+        part.lower() == _spec.SYSTEM32_SEGMENT for part in PureWindowsPath(bare).parts
+    ):
+        candidates.append(bare)
+    for cand in candidates:
+        try:
+            result = subprocess.run(
+                [cand, "-c", _spec.PROBE_CMD],
+                capture_output=True, text=True, encoding="utf-8",
+                errors="replace", timeout=15,
+            )
+        except Exception:
+            continue
+        lines = result.stdout.splitlines()
+        if (
+            result.returncode == 0
+            and len(lines) >= 2
+            and lines[0].strip() == _spec.PROBE_EXPECT_ECHO
+            and lines[1].strip() == _spec.PROBE_EXPECT_DIRNAME
+        ):
+            return cand
+    return None
 
 
 @unittest.skipUnless(_bash_exe(), "本機找不到 bash，略過 shell 行為驗證")

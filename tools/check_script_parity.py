@@ -25,6 +25,13 @@ fail-loud 列出未納管檔名：
   對等品」（stem 刻意不同但語意對等的單邊登記對）字典化 + stale 自檢
   （`_EQUIVALENCE_GROUPS` / `_check_equivalence_groups_fresh`，Phase 1-C (a)）。
 
+  🔴 R64（ADR-XPLAT-002 §8 item 12）：R63 只驗證「現況合法」，沒有機制擋「未來把
+  某筆 tier3/4 悄悄改回 unpinned、或把 tier1/2 打回 unpinned」。`_check_tier_ratchet()`
+  比照 `tools/tests/test_adr_xplat001_c1c2_lock.py::TestShrinkOnlyRatchet` 的形狀，
+  以 `git show HEAD:<本檔>` 取上一版 `_EXEMPT_PAIRS`／`_SINGLE_SIDED_EXEMPT` 的 tier
+  值做 AST 解析後機械比對，只鎖 ADR 逐字指定的兩個降級方向（見 `tier_ratchet_problems`
+  上方的 `_TIER3_4`／`_TIER1_2` 常數），已隨 `main()` 自動執行、非另立 CLI 旗標。
+
 🔴 本工具的邊界（務必先讀）：本工具只機械比對「標籤序列」（數量、順序、字面文字），
 **不比對、也無能力比對**各 step 背後的實作內容是否語意對等。**本工具通過（exit 0）
 不代表兩份腳本（.sh/.ps1）行為完全一致——只代表兩邊宣告的 step 名字對得上**；
@@ -93,6 +100,7 @@ AutoClaude/tools/install_git_hooks.{sh,ps1}、AISDLC_SDD/scripts/install-hooks.{
 """
 from __future__ import annotations
 
+import ast
 import re
 import subprocess
 import sys
@@ -834,6 +842,173 @@ def _check_tier_classification() -> bool:
     return ok
 
 
+# ── UEP tier 棘輪（R64，ADR-XPLAT-002 §8 item 12）───────────────────────────
+# WHY：R63 的 `_check_tier_classification()` 只驗證「現況合法」（tier 落在合法集合、
+# reason 非空、tier3/4 附硬理由關鍵詞）——它不阻止未來把某筆已核定的 tier3/4 悄悄
+# 改回 unpinned，或把已歸類的 tier1/2 打回 unpinned：那樣改一樣通得過
+# `_check_tier_classification`（新 tier 本身合法），只是**退步**。本節比照
+# `tools/tests/test_adr_xplat001_c1c2_lock.py::TestShrinkOnlyRatchet`
+# 的形狀（ADR §8 item 12 指定的照抄對象）：對 `git show HEAD:<本檔>` 的上一版原始碼
+# 機械比對，不是人審慣例。
+#
+# 降級判準只鎖 ADR §8 item 12 逐字指定的兩個方向：
+#   (A) tier3_os_primitive／tier4_forbidden → 非 tier3/4（明文封頂類別被悄悄鬆綁）
+#   (B) tier1_contract／tier1_adapter／tier2_spec → unpinned（已歸類的契約/spec 被打回未歸類）
+# 反方向（維持、升級、或整筆自兩張登記表移除＝已徹底收斂）皆視為合法，不報告——
+# 移除是 ADR 明文承認的合法出口，硬擋它會懲罰真正把缺口收斂掉的人。
+_TIER3_4 = frozenset({_TIER3_OS_PRIMITIVE, _TIER4_FORBIDDEN})
+_TIER1_2 = frozenset({_TIER1_CONTRACT, _TIER1_ADAPTER, _TIER2_SPEC})
+_SELF_REL = "tools/check_script_parity.py"  # git 路徑一律 posix，不用 os.sep
+
+
+def _extract_tier_map_from_source(source: str, dict_name: str) -> dict[str, str] | None:
+    """AST 解析原始碼字串裡名為 `dict_name` 的模組層 dict 常數，回傳 {key: tier}。
+
+    tier 值在本檔慣例上以模組常數參照寫成（如 `_UNPINNED`），故先在同一份原始碼裡
+    掃過所有模組層 `NAME = "字面字串"` 賦值建一張回代表，再解析目標 dict 每筆的
+    tier 元素（tuple 第一項）——可以是字面字串，也可以是能在回代表查到的名稱參照。
+
+    回傳 `None`（而非空字典）代表**抽取失敗**：字典不存在、或其中任一筆值形態
+    無法解析（非二元組／key 非字面字串／tier 元素解不出字面字串）。呼叫端必須把
+    `None` 當成「棘輪抽取失敗」處理並拒絕靜默通過——同 `ratchet_problems()`
+    對常數改名/改寫的既有處理，不能因為抽不到就當作「這張表現在是空的」。
+    """
+    try:
+        tree = ast.parse(source)
+    except SyntaxError:
+        return None
+
+    name_table: dict[str, str] = {}
+    target_dict: ast.Dict | None = None
+    for node in tree.body:
+        # 本檔的 _EXEMPT_PAIRS／_SINGLE_SIDED_EXEMPT 用型別註記賦值
+        # （`_EXEMPT_PAIRS: dict[...] = {...}` ⇒ ast.AnnAssign，非 ast.Assign）；
+        # tier 常數（_UNPINNED 等）用普通賦值（ast.Assign）——兩種都要認得，
+        # 否則對本檔自己的原始碼會靜默抽空（R64 落地時實測踩到這個坑）。
+        if isinstance(node, ast.Assign) and len(node.targets) == 1 \
+                and isinstance(node.targets[0], ast.Name):
+            target_name = node.targets[0].id
+            value = node.value
+        elif isinstance(node, ast.AnnAssign) and isinstance(node.target, ast.Name) \
+                and node.value is not None:
+            target_name = node.target.id
+            value = node.value
+        else:
+            continue
+        if isinstance(value, ast.Constant) and isinstance(value.value, str):
+            name_table[target_name] = value.value
+        elif target_name == dict_name and isinstance(value, ast.Dict):
+            target_dict = value
+
+    if target_dict is None:
+        return None
+
+    result: dict[str, str] = {}
+    for key_node, value_node in zip(target_dict.keys, target_dict.values):
+        if not (isinstance(key_node, ast.Constant) and isinstance(key_node.value, str)):
+            return None
+        if not (isinstance(value_node, ast.Tuple) and len(value_node.elts) == 2):
+            return None
+        tier_node = value_node.elts[0]
+        if isinstance(tier_node, ast.Constant) and isinstance(tier_node.value, str):
+            tier = tier_node.value
+        elif isinstance(tier_node, ast.Name) and tier_node.id in name_table:
+            tier = name_table[tier_node.id]
+        else:
+            return None
+        result[key_node.value] = tier
+    return result
+
+
+def _read_previous_self_source() -> str | None:
+    """本檔在 HEAD 的內容；HEAD 沒有本檔（未提交／新增檔）時回 `None`。"""
+    proc = subprocess.run(
+        ["git", "-C", str(_REPO_ROOT), "show", f"HEAD:{_SELF_REL}"],
+        capture_output=True, text=True, encoding="utf-8", errors="replace",
+    )
+    return proc.stdout if proc.returncode == 0 else None
+
+
+def tier_ratchet_problems(
+    previous_source: str,
+    current_exempt_pairs: dict[str, tuple[str, str]] | None = None,
+    current_single_sided: dict[str, tuple[str, str]] | None = None,
+) -> list[str]:
+    """比對上一版與現版 `_EXEMPT_PAIRS`／`_SINGLE_SIDED_EXEMPT` 的 tier，回傳降級
+    說明（空清單＝零降級；含「整筆移出登記表」視為合法收斂的情況）。
+
+    `current_exempt_pairs`／`current_single_sided` 預設吃本模組現行的活體登記表
+    （production 呼叫路徑），測試可傳入合成表以隔離真 repo 現況。
+    """
+    if current_exempt_pairs is None:
+        current_exempt_pairs = _EXEMPT_PAIRS
+    if current_single_sided is None:
+        current_single_sided = _SINGLE_SIDED_EXEMPT
+
+    problems: list[str] = []
+
+    prev_exempt = _extract_tier_map_from_source(previous_source, "_EXEMPT_PAIRS")
+    prev_single = _extract_tier_map_from_source(previous_source, "_SINGLE_SIDED_EXEMPT")
+    if prev_exempt is None:
+        problems.append(
+            "上一版抽不到 _EXEMPT_PAIRS 字典（或其中至少一筆 tier 值形態無法解析）—— "
+            "字典被改名／改寫？棘輪等於失效，拒絕靜默通過"
+        )
+        prev_exempt = {}
+    if prev_single is None:
+        problems.append(
+            "上一版抽不到 _SINGLE_SIDED_EXEMPT 字典（或其中至少一筆 tier 值形態無法解析）—— "
+            "字典被改名／改寫？棘輪等於失效，拒絕靜默通過"
+        )
+        prev_single = {}
+
+    previous_map = {**prev_exempt, **prev_single}
+    current_map = {
+        **{k: v[0] for k, v in current_exempt_pairs.items()},
+        **{k: v[0] for k, v in current_single_sided.items()},
+    }
+
+    for key, prev_tier in sorted(previous_map.items()):
+        if key not in current_map:
+            continue  # 整筆自兩張登記表移除 = 已徹底收斂，非降級
+        cur_tier = current_map[key]
+        if prev_tier in _TIER3_4 and cur_tier not in _TIER3_4:
+            problems.append(
+                f"{key}：tier 由 {prev_tier!r}（明文封頂類別）降為 {cur_tier!r} —— "
+                "tier3_os_primitive／tier4_forbidden 一經核定不得悄悄鬆綁（除非整筆"
+                "移出登記表，代表已徹底收斂）"
+            )
+        elif prev_tier in _TIER1_2 and cur_tier == _UNPINNED:
+            problems.append(
+                f"{key}：tier 由 {prev_tier!r} 降為 {cur_tier!r} —— "
+                "已歸類的契約/spec 不得退回未歸類"
+            )
+    return problems
+
+
+def _check_tier_ratchet() -> bool:
+    """production 呼叫端：對 HEAD 版本現查，零降級才綠（ADR-XPLAT-002 §8 item 12）。
+
+    HEAD 尚無本檔（新增／未提交檔）時視為「無上一版可比」，本輪空轉並印出理由，
+    不當作失敗——同 `TestShrinkOnlyRatchet::test_constants_never_increase_versus_head`
+    對「首版」的既有處理；一旦本檔進入 HEAD，棘輪即永久生效。
+    """
+    previous = _read_previous_self_source()
+    if previous is None:
+        print(f"⚠️ tier 棘輪：HEAD 尚無 {_SELF_REL}（本檔為未提交的新增檔）⇒ "
+              "無上一版可比，本輪空轉；commit 後即永久生效")
+        return True
+    problems = tier_ratchet_problems(previous)
+    if problems:
+        print("❌ tier 棘輪違反（與 HEAD 版本比對，ADR-XPLAT-002 §8 item 12）：",
+              file=sys.stderr)
+        for p in problems:
+            print(f"  · {p}", file=sys.stderr)
+        return False
+    print("✅ tier 棘輪：與 HEAD 版本比對，零降級（含已收斂移出登記表視為合法）")
+    return True
+
+
 def _print_collapse() -> int:
     """UEP／AC 現查（ADR-XPLAT-002 §4.1/§4.2 R61 Phase 1-C 最小可行切片；R63 擴充逐對
     tier/reason 與異名對等品清單，見 §5 Phase 1-C (a)(b)(c)）。
@@ -913,6 +1088,7 @@ def main(argv: list[str] | None = None) -> int:
     ok = _check_pair_enrollment(latest_tools) and ok
     ok = _check_tier_classification() and ok
     ok = _check_equivalence_groups_fresh() and ok
+    ok = _check_tier_ratchet() and ok
 
     if not ok:
         print("\n❌ 雙平台腳本對等檢查未通過 — .sh/.ps1 必須同步修改（見上列 diff）",
