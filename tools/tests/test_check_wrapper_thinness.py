@@ -46,6 +46,12 @@ class TestCheckWrapperThinness(unittest.TestCase):
                 "tools/dev_start.ps1",
                 "AutoClaude/tools/local_ci_gate.sh",
                 "AutoClaude/tools/local_ci_gate.ps1",
+                # R61 ADR-XPLAT-002 Phase 1-B：DEF-101-088 由 _EXEMPT_PAIRS 零守門
+                # 決策豁免升級為 hash 釘選（UEP 8→6）。
+                "AutoClaude/tools/install_git_hooks.sh",
+                "AutoClaude/tools/install_git_hooks.ps1",
+                "AISDLC_SDD/scripts/install-hooks.sh",
+                "AISDLC_SDD/scripts/install-hooks.ps1",
             },
         )
 

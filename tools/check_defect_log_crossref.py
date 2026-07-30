@@ -519,6 +519,11 @@ _GOVERNANCE_DOCS = (
     _REPO_ROOT / "docs" / "06_quality" / "CrossPlatform_R60_Fix_Evidence.md",
     _REPO_ROOT / "docs" / "06_quality" / "CrossPlatform_R60_Fix_Evidence_r3.md",
     _REPO_ROOT / "docs" / "06_quality" / "CrossPlatform_Scan_Dimensions.md",
+    # R61 Architect 收輪證據（本輪新增，同符合姊妹檔命名慣例，登記面即刻補上避免
+    # 重演 SA-R60R3-01 的「新建證據檔兩張清單都沒進」路徑）。
+    _REPO_ROOT / "docs" / "06_quality" / "CrossPlatform_R61_Architect_Evidence.md",
+    # R61 SA/QA 收輪證據（同理即刻登記）。
+    _REPO_ROOT / "docs" / "06_quality" / "CrossPlatform_R61_SAQA_Evidence.md",
 )
 
 # 姊妹治理文件的命名慣例：`docs/06_quality/CrossPlatform_*.md`。這**不是**把具名常數

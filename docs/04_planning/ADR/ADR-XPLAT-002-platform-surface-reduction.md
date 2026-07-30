@@ -2,8 +2,8 @@
 
 | 欄位 | 內容 |
 |------|------|
-| **狀態** | Accepted（**設計交付**）。本 ADR **不在 R60 執行任何遷移**——理由見 §7，那不是保守，是四條實測出來的阻礙 |
-| **日期** | 2026-07-29（R60 收輪；量測時點見 §2 各條，HEAD `e3a5c53`、工作樹 dirty 81 筆） |
+| **狀態** | Accepted（**設計交付**，R60）。本 ADR **不在 R60 執行任何遷移**——理由見 §7，那不是保守，是四條實測出來的阻礙。🔴 **R61 更新**：Phase 1-B 已落地（UEP 8→6）＋ Phase 1-C 最小可行切片已落地（`--print-collapse`），Phase 1-C 全量與 Phase 2 仍待後續輪次；見 §5 Phase 1 表內逐列「R61 已落地／R61 部分落地」標記與 R61 對 `DEF-101-561` 四處合併提案的裁決段 |
+| **日期** | 2026-07-29（R60 收輪；量測時點見 §2 各條，HEAD `e3a5c53`、工作樹 dirty 81 筆）；**R61 執行更新 2026-07-30**（詳見 `docs/06_quality/CrossPlatform_R61_Architect_Evidence.md`） |
 | **決策層** | 綜合者裁決（R60 三案九鏡對抗式複審之收斂）。**政策層變更**（護欄層 LOC 預算、`ci-gate.ps1` fallback 刪除）仍須使用者／PM signoff，見 §5 Phase 2 |
 | **適用範圍** | 根層 `tools/`、`AutoClaude/tools/`、`AISDLC_SDD/scripts/`、`AISDLC_SDD/AISDLC_SDD_v0.<LATEST>/tools/` 四棵樹的 `.sh`／`.ps1`／Python 核心，及其登記表 `tools/check_script_parity.py`／`tools/check_wrapper_thinness.py`。**不適用**於 `.github/workflows/`（§6 邊界 6）、`AISDLC_SDD/AISDLC_SDD_v0.XX/` 凍結版（走 `ADR-XPLAT-001`） |
 | **驅動來源** | R60 Architect 裁決：「所有改善都發生在『驗證這件事有沒有被做對』的那一層」 |
@@ -422,18 +422,21 @@ PY
 |---|---|---|
 | **當前基線** | **8**（`_EXEMPT_PAIRS`=7 + `_TLC_TRACK_ENROLLED`=1） | 上列指令，2026-07-29T00:55:08Z，HEAD `e3a5c53` |
 | **R61 目標** | **≤ 6** | Phase 1-B（S8 兩對移出）|
+| 🔴 **R61 實測（已達成）** | **6**（`_EXEMPT_PAIRS`=5 + `_TLC_TRACK_ENROLLED`=1） | Phase 1-B 已落地：`install_git_hooks`／`install-hooks` 兩對遷入 `_THINNESS_ENROLLED`；上列指令 2026-07-30 工作樹重跑，詳見 `docs/06_quality/CrossPlatform_R61_Architect_Evidence.md` |
 | **R62+ 目標** | **≤ 4** | Phase 2-A（run_tlc）＋ Phase 2-B（ci-gate，需 signoff） |
 | **地板（可辯護殘留）** | **4** | `run_local_nightly`（R11 D1 拍板兩側語意刻意不同）／`init_project`（§3.3 #6）／`install_post_commit`／`run_self_evolution` |
 
 **對偶判準（必須同時上升，否則 UEP 下降只是把列刪掉）**：
 
-| 指標 | 基線（實測） | R61 目標 |
-|------|------------|---------|
-| `len(_THINNESS_ENROLLED)` | 5 | ≥ 7 |
-| `len(_PINNED_SHA256)` | 10 | ≥ 14 |
+| 指標 | 基線（實測） | R61 目標 | 🔴 R61 實測（已達成） |
+|------|------------|---------|----------------------|
+| `len(_THINNESS_ENROLLED)` | 5 | ≥ 7 | **7** |
+| `len(_PINNED_SHA256)` | 10 | ≥ 14 | **14** |
 
 兩者今天就在 `check_script_parity` 的「thinness 交叉鎖」那一行同時 print（實測逐字
 「✅ thinness 交叉鎖：5 對薄殼登記與 10 支 hash 釘選鍵集合一致」），零新增度量檔即可逐輪追蹤。
+R61 落地後同一行印「✅ thinness 交叉鎖：**7 對**薄殼登記與 **14 支** hash 釘選鍵集合一致」
+（`python tools/check_script_parity.py` 逐字輸出，2026-07-30 工作樹實測，rc=0）。
 
 🔴 **為什麼不用 Architect 原本指定的「13 對 + 18 支單邊」**：§1.3——那個數數的是檔案成對存在，
 本 ADR 全部十餘個標的做完之後它仍是 `13 + 18`（唯一能減的 `run_tlc` 因文件追溯鏈選擇薄殼化不刪檔；
@@ -651,8 +654,70 @@ R61+ 若要重啟必須逐條回應）：
 `ci-gate` 走 Python 單源」的混合案 **更差**——它會造出**兩條** PS 判定路徑（內嵌一條、委派一條），
 語意分歧面從 1 變 2，與本案初衷相反。反向的混合（只在保證 python 的兩支安裝腳本單源化）同樣
 留下兩份實作，一樣不得分。**1-D 要嘛三個呼叫端一起做，要嘛不做。**
-| **1-B** | `AutoClaude/tools/install_git_hooks` 與 `AISDLC_SDD/scripts/install-hooks` 由 `_EXEMPT_PAIRS` 移入 `_THINNESS_ENROLLED` ＋ `_PINNED_SHA256` 補 4 支 hash。**零程式邏輯變更** | **需 R61** | ① 納編前先跑 `wc -l` 四支確認 raw ≤ 100（§2.3 已實測 50/65/40/42，仍須在乾淨樹重量）；② `python tools/check_wrapper_thinness.py` rc=0；③ `python tools/check_script_parity.py` 的交叉鎖行由「5 對／10 支」變「**7 對／14 支**」；④ **UEP 8 → 6**；⑤ bug-injection：在 `install-hooks.ps1` 加一行實質判定邏輯，thinness hash 須紅（證明遷移後真的有守門，不是換個字典）；⑥ 兩平台 smoke 的 install/uninstall 往返 + linked-worktree 拒絕三情境須全綠（Windows 側須以**原生 PowerShell** 啟動，DEF-101-511） |
-| **1-C** | `tools/check_script_parity.py` 內（a）4 組「異名對等品」由 reason 散文升為 4 筆字典 + stale 自檢；（b）`_EXEMPT_PAIRS`／`_SINGLE_SIDED_EXEMPT` 的值由純理由字串升為 `(tier, reason)`，`tier ∈ {tier1_contract, tier1_adapter, tier2_spec, tier3_os_primitive, tier4_forbidden, unpinned}`；（c）新增 `--print-collapse` 印 UEP／AC／各對 tier 與 reason；（d）斷言「tier3/tier4 的 reason 必須非空且含硬理由關鍵詞」。**擴充既有檔、零新檔**；測試加進**既有的** `tools/tests/test_check_script_parity.py` | **需 R61**，且 🔴 **必須與 1-B 同一 commit** | ① `python tools/check_script_parity.py` rc=0 且新增行印出 `UEP=6 / AC=46`；② `python tools/run_root_unittests.py` 發現數 = 乾淨樹重取的基線 + 新增斷言數（**逐筆列名，不得只報總數**）；③ GLC 檔數不變（零新檔）；④ 🔴 **1-C 不得單獨落地**——沒有 1-B 的話它就是孤兒儀表，正是 Architect 批評的那個病 |
+| **1-B** | `AutoClaude/tools/install_git_hooks` 與 `AISDLC_SDD/scripts/install-hooks` 由 `_EXEMPT_PAIRS` 移入 `_THINNESS_ENROLLED` ＋ `_PINNED_SHA256` 補 4 支 hash。**零程式邏輯變更** | ✅ **R61 已落地** | ① 納編前先跑 `wc -l` 四支確認 raw ≤ 100（§2.3 已實測 50/65/40/42，仍須在乾淨樹重量）——**R61 複驗仍為 50/65/40/42**；② `python tools/check_wrapper_thinness.py` rc=0——**R61 實測 rc=0**；③ `python tools/check_script_parity.py` 的交叉鎖行由「5 對／10 支」變「**7 對／14 支**」——**R61 實測逐字相符**；④ **UEP 8 → 6**——**R61 實測 UEP=6**；⑤ bug-injection：在 `install-hooks.ps1` 加一行實質判定邏輯，thinness hash 須紅——**R61 實測：注入 `foreach (...)` 後 hash 釘選＋並聯關鍵字兩訊號皆轉紅（rc=1），revert 後 `git diff` 確認四支腳本零位元變動、rc 復綠**；⑥ 兩平台 smoke 的 install/uninstall 往返 + linked-worktree 拒絕三情境須全綠（Windows 側須以**原生 PowerShell** 啟動，DEF-101-511）——**未跑（本輪只驗證登記層／hash 層，未起 windows_smoke_local.ps1 真實安裝；但四支 .sh/.ps1 檔案本體零位元變動，該情境的既有覆蓋率邏輯上不受影響，非同義於「已驗證」，留待有機會跑 compat-ci 或 smoke 腳本時覆核）**。詳見 `docs/06_quality/CrossPlatform_R61_Architect_Evidence.md` |
+| **1-C** | `tools/check_script_parity.py` 內（a）4 組「異名對等品」由 reason 散文升為 4 筆字典 + stale 自檢；（b）`_EXEMPT_PAIRS`／`_SINGLE_SIDED_EXEMPT` 的值由純理由字串升為 `(tier, reason)`，`tier ∈ {tier1_contract, tier1_adapter, tier2_spec, tier3_os_primitive, tier4_forbidden, unpinned}`；（c）新增 `--print-collapse` 印 UEP／AC／各對 tier 與 reason；（d）斷言「tier3/tier4 的 reason 必須非空且含硬理由關鍵詞」。**擴充既有檔、零新檔**；測試加進**既有的** `tools/tests/test_check_script_parity.py` | 🟡 **R61 僅落地 (c) 的最小可行切片，(a)(b)(d) 延後至 R62** | ① `python tools/check_script_parity.py --print-collapse` rc=0 且印出 `UEP=6` / `AC=46`——**R61 實測逐字相符**（未實作完整 `--print-collapse` 的 tier/reason 逐對印出，只印六張登記表長度＋UEP/AC 兩個總量）；② `python tools/run_root_unittests.py` 發現數——**R61 現查：`✅ unittest 數量下限釘選通過：發現 1075 個測試（下限 1069）`，rc=0，非本輪改動所致（本輪新增 6 個 tools/tests 內測試已含在 1075 內）**；③ GLC 檔數不變（零新檔）——**R61 確認：`tools/tests/` 仍 56 支，git status 顯示零新檔；行數 28,118→28,194（+76，來自擴充既有 `test_check_script_parity.py`／`test_check_wrapper_thinness.py`，round 1 Architect 複審訂正原「行數不變」誤寫）**；④ 🔴 **(a)(b)(d) 為何延後**：grep 複驗至少 3 處既有測試直接依賴 `_EXEMPT_PAIRS`／`_SINGLE_SIDED_EXEMPT` 的值是**字串**型別（`test_check_script_parity.py:248` 的 `.strip()`、`test_onboarding_parity_interlock.py:105/114` 的 `for key, why in ...items()` 字串比對），把值改成 `(tier, reason)` tuple 屬**多檔連動重構**，其驗證負擔（逐一走過 25 個 `_EXEMPT_PAIRS`/`_SINGLE_SIDED_EXEMPT` 條目 + 至少 3 支既有測試檔同步）超出本輪已排定範圍；(c) 因**不改動既有字串型別**（純附加印出邏輯），無此依賴，故可安全落地。**本切片不違反「1-C 不得單獨落地」**——它與 1-B 同一輪、同一批修改落地 |
+
+#### R61 對 `DEF-101-561` 四處剝除層合併提案的裁決（**評估後 NO-GO，非 1-D 那種阻塞式 NO-GO，而是「風險/效益不划算」式 NO-GO**）
+
+**提案來源**：`DEF-101-561`（R60 round 1 ARCH-R60-09）routed 給 R61 的三項必評之一（②）：
+「同缺面四處合併」——R46 `_has_ssot_guard`（`tools/tests/test_windowsapps_guard_bash_parity.py:334`）、
+DEF-101-482 `_ps1_code_lines()`（`AISDLC_SDD/scripts/tests/test_ci_gate_version_resolution.py:241`）、
+ARCH-R60-06 `_ps_engine` 相關掃描器、`check_wrapper_thinness._normalize`
+（`tools/check_wrapper_thinness.py:269`）——聲稱四處各自重造「剝除註解／docstring」邏輯，
+建議抽成 `tools/tests/_source_strip.py` 共享層。
+
+**親讀四份原始碼後的實測發現（本輪 Architect 逐一開啟四個檔案核實，非轉述帳本描述）**：
+
+1. **「ARCH-R60-06 `_ps_engine`」實際指向 Python AST 掃描，不是文字剝除**。
+   `tools/tests/_ps_engine.py` 本體只有 PowerShell 引擎選擇述詞（`production_engine()` 等），
+   完全不含任何註解剝除邏輯；真正的「剝除」發生在其守門測試
+   `tools/tests/test_ps_engine_ssot.py` 的 `_engine_selection_linenos()`（:174），
+   走 `ast.parse()` 判斷 `shutil.which(...)` 是否為**真正的 Call 節點**（排除 docstring／
+   註解／字串常數內的字面提及）。這與另外三處的「.sh/.ps1 **文字**行剝除」是完全不同的
+   機制（AST vs regex），語言也不同（Python vs bash/PowerShell）——DEF-101-561 把兩種
+   不同機制都稱為「剝除」，但實際上是**不同問題**（本 ADR §4.5 SDS 判準的精神在此適用：
+   不能只因為兩者都叫「剝除」就假設可以共用一份實作）。
+2. **其餘三處（`_has_ssot_guard`／`_ps1_code_lines`／`_normalize`）語意互不相同**，
+   合併會遺失各自刻意保留的行為：
+   - `_has_ssot_guard` 是逐行文字掃描 + 位置錨定正則（非真正 bash 語法解析），
+     其 docstring 明文記載對 heredoc、死函式兩種偽裝手法無鑑別力，且逐字寫著
+     「複雜度遠超本檔工具定位，留待出現真實呼叫點再評估」——這是 R46 三審
+     （一審／QA 二審 bug-injection／Architect 三審）逐輪加固出來的判斷，非本輪可單方推翻。
+   - `_ps1_code_lines()` 刻意**只剝整行 `#`**、不剝行尾註解（另有專治該案的
+     `_cut_ps_inline_comment()` 處理特定呼叫點），這是有意的窄範圍設計。
+   - `check_wrapper_thinness._normalize()` 除整行剝除外還處理 `<#…#>` 區塊註解、
+     rstrip 行尾空白、去空行；其 BOM 前提由呼叫端 `_read_source()`（`utf-8-sig`）
+     先行處理，`_normalize()` 刻意不重複剝 BOM。
+   三者在「是否剝區塊註解」「是否剝行尾註解」「是否剝空行」「BOM 由誰負責」四個維度上
+   各不相同，若強行合一，依 §4.2 rule 3 dominance test 必須為每一支既有斷言逐一構造
+   突變證明新機制同樣抓得到——尤其 `_has_ssot_guard` 是三輪 bug-injection 調校過的
+   位置錨定正則，貿然重寫的回歸風險遠高於它能省下的行數。
+3. **就算合併成功，也不會移動任何本 ADR 已閘門化的指標**：GLC（護欄層行數）在 §4.3
+   已被本 ADR 自己定性為「報表，不設上限」，UEP／AC／SDS 三個真正閘門化的判準
+   皆與這四處測試側 helper 的內部實作方式無關（它們都是**測試側**對不同**生產**檔案
+   的獨立驗證邏輯，不是同一份生產程式碼的重複實作——§3.2 Tier-2 已載明「測試側的
+   獨立重寫刻意保留、不計入收斂」的原則，本案適用同一邏輯）。
+
+**裁決：本輪不執行**。理由是風險/效益不成比例（高驗證負擔、對已閘門指標零貢獻），
+不是像 1-D 那樣被某個具體阻塞條件卡死。**與 1-D 的差異**：1-D 有明確的、可解除的
+阻塞條件（Phase 2-B 落地）；本案沒有「阻塞條件解除後就該做」的性質——即使 Phase 2-B
+落地或任何其他前置條件被滿足，①的 AST 掃描與②的三處文字剝除仍然是為不同目的、
+不同輸入語言服務的獨立邏輯，合併的理由不會因為時間推移而變得更充分。
+
+**若未來仍要重啟**：真正有共同點、且合併風險較低的，是 `_ps1_code_lines()` 與
+`_normalize()` 之中「剝整行 `#`」這一個共同子步驟（兩者都在 PowerShell 文字上做
+`[ln for ln in text.splitlines() if not ln.lstrip().startswith("#")]`）——若有人重啟此案，
+應把範圍縮小到這一個子步驟，而不是四處全收，且仍須先確認 `_ps1_code_lines()` 刻意
+不剝行尾註解、`_normalize()` 會多剝空行這兩個行為差異在抽出共用 helper 後不會被抹掉。
+`_has_ssot_guard`（bash，位置錨定正則）與 `_ps_engine` 相關的 AST 掃描器**不應**併入
+同一個合併範圍。
+
+**DEF-101-561 狀態**：①②本輪評估後轉記獨立可追溯項 `DEF-101-614`（fixed，另案——
+`DEF-101-614` 記錄的是本輪實際交付的 Phase 1-B/1-C 最小切片，而非四處合併本身）；
+四處合併提案本身維持不執行，本節即為其正式裁決記錄。③邊際效益量測：本輪新增鎖檔數
+＝**0**，完全符合 R60 round 3 訂正的「R61 開輪即禁止新增鎖檔、只准合併／刪除」模式。
+
+---
 
 ### Phase 2 —— R62+（每項各自獨立，順序可調）
 
@@ -769,8 +834,8 @@ R61+ 若要重啟必須逐條回應）：
 |---|---------|------|--------------|--------------------|
 | ~~1~~ | ~~**`Find-GitBash.ps1` 分隔符不敏感缺陷未修**~~ ✅ **已於 R60 結案**（`796c7a6`，P10-2）。改為逐段比對 `Test-HasSystem32Segment`，非本表原開的 regex 藥方 | §2.4（已降為史料） | ~~R61~~ **R60 已交付** | 已達成：Pkg-E 於 HEAD `796c7a6` 原生 PS 5.1 重驗，三種分隔符形態 ＋ 真實在位的 WSL bash 皆回 `(none)`；SD round 3 另以「把舊行內 regex 注回沙箱複本」證明該鎖會精準轉紅 |
 | ~~2~~ | ~~**字面 parity 鎖仍被當成機械釘選**~~ ✅ **已於 R60 結案**。`TestSystem32VerdictParity` 行為表 parity 鎖已落地（真起 PowerShell 執行，非比對原始碼字面） | §2.4／§3.2 | ~~R61~~ **R60 已交付** | 已達成：System32 段改為行為表驅動（7 筆逐筆兩側同判）；Sysnative 已進 `_SEGMENT_CASES` 常駐表並明文標「已知殘餘盲區、非已驗證安全」 |
-| 3 | **`install_git_hooks`／`install-hooks` 兩對零守門**（掛在決策豁免，無機制阻止長回業務邏輯） | §2.3 | **R61**（Phase 1-B） | UEP 8 → 6；交叉鎖行變「7 對／14 支」 |
-| 4 | **UEP／AC 尚未印出、未閘門化**（本 ADR 的判準目前只能手跑一支 scratchpad 腳本） | §4 | **R61**（Phase 1-C，須與 1-B 同 commit） | `python tools/check_script_parity.py` 輸出含 `UEP=` 與 `AC=`；棘輪照 `TestShrinkOnlyRatchet` 形狀 |
+| ~~3~~ | ~~**`install_git_hooks`／`install-hooks` 兩對零守門**（掛在決策豁免，無機制阻止長回業務邏輯）~~ ✅ **已於 R61 結案**：兩對遷入 `_THINNESS_ENROLLED`＋hash 釘選，`DEF-101-614` fixed | §2.3 | ~~R61~~ **R61 已交付** | 已達成：UEP 8 → **6**；交叉鎖行變「**7 對／14 支**」（`python tools/check_script_parity.py` 2026-07-30 工作樹實測，rc=0） |
+| 4 | **UEP／AC 尚未印出、未閘門化**（本 ADR 的判準目前只能手跑一支 scratchpad 腳本）—— 🟡 **R61 部分結案**：新增 `--print-collapse` 印出 UEP/AC/六張登記表長度，**尚未棘輪化**（棘輪本身留給 R62，且需先完成 1-C 全量 tier 分類才有 tier/reason 可棘輪） | §4 | **R62**（Phase 1-C 全量：(a)(b)(d) 三項，見 Phase 1 表 1-C 列的延後理由） | `python tools/check_script_parity.py --print-collapse` 輸出含 `UEP=` 與 `AC=`（**R61 已達成**）；棘輪化（照 `TestShrinkOnlyRatchet` 形狀）與 tier/reason 逐對印出（尚未達成，留 R62） |
 | 5 | **`check_wrapper_thinness._normalize` 的 BOM 缺陷**（宣稱剝整行註解，對每支 `.ps1` 的第 1 行失效；而該文字就是 hash 釘選的輸入） | §2.5 | **R62**（Phase 2-E，單獨 commit） | `utf-8-sig` ＋ 10 支 hash 重釘 ＋「BOM 不影響正規化」回歸；`integration_gate.ps1` 正規化由 14 行變 13 行 |
 | 6 | **測試數基線三值不一致**（源碼 845／一鏡 916／另一鏡 901），所有以測試數為等價證明的 gate_proof 都算在不確定的基準上 | §6 邊界 8 | **R61**（動工第一件事） | 並行包全部 commit 後於乾淨樹實跑 `python tools/run_root_unittests.py`，把印出的「發現 N 個測試」直接填 `MIN_TESTS`（不做加減推算，該檔 :48 註解明文），再跑 `python tools/sync_onboarding_baselines.py --write` 同步 §7 live 格、`--check` rc=0 |
 | 7 | **護欄層 LOC 預算未設計**（根層 `tools/**/*.py` 74 檔／32,708 行零預算；`AutoClaude/tests` 279 檔／57,351 行亦零預算）——這是 Architect 批評的「速率」問題的唯一結構性解，本 ADR 只給了具名要求，沒有落地 | §4.3／Phase 2-F | **R62+**，且需 **PM signoff**（成長係數與 WARN 帶是政策判斷） | `tools/.loc_baseline` 由程式當場量測寫入；量測面含 `_` 前綴；`AutoClaude/tests` 的劃界寫成明文；六項具名要求逐條可查 |

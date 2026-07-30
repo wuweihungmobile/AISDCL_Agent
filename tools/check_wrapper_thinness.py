@@ -140,6 +140,21 @@ _PINNED_SHA256: dict[str, str] = {
     "AutoClaude/tools/run_act.ps1": (
         "a2caf019457ef4c5f32fddfb7babbd01004a1d02625cba0eb51036740c76725b"
     ),
+    # R61（ADR-XPLAT-002 Phase 1-B，DEF-101-088 由零守門的 _EXEMPT_PAIRS 決策豁免升級
+    # 為 hash 釘選）：業務邏輯本已下沉 tools/git_hooks_install_common.py 單一真相源，
+    # 兩份呼叫端僅剩各自平台原生薄殼呈現層；raw 行數 50/65/40/42 皆 ≤ MAX_LINES=100。
+    "AutoClaude/tools/install_git_hooks.sh": (
+        "750c582119c7e8cd6d7c75478d638de910b515d409fbf5376c542768c651ba07"
+    ),
+    "AutoClaude/tools/install_git_hooks.ps1": (
+        "8133a5d7cd65e0c75a90e92fe3c3cbebdeccab3e73ec69ac08e1cb46cc8b0ce7"
+    ),
+    "AISDLC_SDD/scripts/install-hooks.sh": (
+        "cbd0a558f36a95ece780c5fc3c6b5b3e5b3be74b721891cb508f3d30c382876c"
+    ),
+    "AISDLC_SDD/scripts/install-hooks.ps1": (
+        "42b01cc883e29b79405abc0f0db5f2a9bf16e7e0b04ac399c0ddc47b16d03403"
+    ),
 }
 
 # 業務邏輯樣板關鍵字（診斷輔助；權威判定為上方 hash 釘選）。歷史上三輪被繞的
@@ -232,6 +247,45 @@ _FORBIDDEN: dict[str, tuple[str, ...]] = {
         "python3 -c",
     ),
     "AutoClaude/tools/run_act.ps1": (
+        "ConvertFrom-Json",
+        "ConvertTo-Json",
+        "[System.Text.Json",
+        "foreach (",
+        "foreach(",
+        "while (",
+        "for (",
+        "ForEach-Object",
+        ".ForEach(",
+    ),
+    # R61（ADR-XPLAT-002 Phase 1-B）：沿用既有薄殼同款診斷關鍵字（複製非新增判準）。
+    "AutoClaude/tools/install_git_hooks.sh": (
+        "while ",
+        "for ",
+        "for(",
+        "jq ",
+        "python -c",
+        "python3 -c",
+    ),
+    "AutoClaude/tools/install_git_hooks.ps1": (
+        "ConvertFrom-Json",
+        "ConvertTo-Json",
+        "[System.Text.Json",
+        "foreach (",
+        "foreach(",
+        "while (",
+        "for (",
+        "ForEach-Object",
+        ".ForEach(",
+    ),
+    "AISDLC_SDD/scripts/install-hooks.sh": (
+        "while ",
+        "for ",
+        "for(",
+        "jq ",
+        "python -c",
+        "python3 -c",
+    ),
+    "AISDLC_SDD/scripts/install-hooks.ps1": (
         "ConvertFrom-Json",
         "ConvertTo-Json",
         "[System.Text.Json",

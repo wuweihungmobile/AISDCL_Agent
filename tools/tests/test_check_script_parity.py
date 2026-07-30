@@ -500,5 +500,75 @@ class TestGitLongpathsFlagParity(unittest.TestCase):
         self.assertIn("windows_smoke_local.ps1", printed)
 
 
+class TestR61Phase1BMigration(unittest.TestCase):
+    """ADR-XPLAT-002 Phase 1-B（R61）：`install_git_hooks`／`install-hooks` 兩對由
+    `_EXEMPT_PAIRS`（零守門決策豁免）遷移至 `_THINNESS_ENROLLED`（hash 釘選），
+    UEP 應由 8 降為 6。本測試鎖住遷移後的狀態，防止有人日後誤加回 `_EXEMPT_PAIRS`
+    （殭屍豁免自檢只擋「同時掛兩邊」，不擋「加回其中一邊」）。"""
+
+    def test_migrated_pairs_not_in_exempt_pairs(self) -> None:
+        self.assertNotIn("AutoClaude/tools/install_git_hooks", m._EXEMPT_PAIRS)
+        self.assertNotIn("AISDLC_SDD/scripts/install-hooks", m._EXEMPT_PAIRS)
+
+    def test_migrated_pairs_in_thinness_enrolled(self) -> None:
+        self.assertIn("AutoClaude/tools/install_git_hooks", m._THINNESS_ENROLLED)
+        self.assertIn("AISDLC_SDD/scripts/install-hooks", m._THINNESS_ENROLLED)
+
+    def test_uep_is_six_after_migration(self) -> None:
+        """UEP＝`_EXEMPT_PAIRS` + `_TLC_TRACK_ENROLLED`（ADR-XPLAT-002 §4.1）。
+        R60 基線為 8；本輪 Phase 1-B 遷移兩對後應為 6，這是本輪 Architect 交付的
+        唯一一個受 ADR 明文追蹤的下降判準，須有回歸鎖防止被靜默改回。"""
+        uep = len(m._EXEMPT_PAIRS) + len(m._TLC_TRACK_ENROLLED)
+        self.assertEqual(uep, 6)
+
+
+class TestPrintCollapseFlag(unittest.TestCase):
+    """R61 Phase 1-C 最小可行切片：`--print-collapse` 把 UEP／AC 從「手跑 scratchpad
+    腳本才查得到」升級為本工具的第一等公民輸出（ADR-XPLAT-002 §8 未解決項 #4 的
+    一部分；完整的 tier 分類重構列 R62，見 ADR 本輪裁決段）。"""
+
+    def test_print_collapse_returns_zero_and_reports_uep_ac(self) -> None:
+        import io
+        from contextlib import redirect_stdout
+
+        buf = io.StringIO()
+        with redirect_stdout(buf):
+            rc = m.main(["--print-collapse"])
+        self.assertEqual(rc, 0)
+        out = buf.getvalue()
+        expected_uep = len(m._EXEMPT_PAIRS) + len(m._TLC_TRACK_ENROLLED)
+        self.assertIn(f"UEP={expected_uep}", out)
+        self.assertIn("AC=", out)
+
+    def test_ac_matches_sum_of_six_registries(self) -> None:
+        """AC 定義（§4.2）＝六張登記表長度總和；本測試獨立重算，防止 `_print_collapse()`
+        內部算式與 ADR 定義漂移卻無人發現（既有六張表各自已有其他鎖守著不被誤刪）。"""
+        import io
+        from contextlib import redirect_stdout
+
+        import check_wrapper_thinness as _thinness
+
+        expected_ac = (
+            len(_thinness._PINNED_SHA256)
+            + len(m._THINNESS_ENROLLED)
+            + len(m._EXEMPT_PAIRS)
+            + len(m._SINGLE_SIDED_EXEMPT)
+            + len(m._TLC_TRACK_ENROLLED)
+            + len(m._MIN_EXTRACT_COUNTS)
+        )
+        buf = io.StringIO()
+        with redirect_stdout(buf):
+            m.main(["--print-collapse"])
+        self.assertIn(f"AC={expected_ac}", buf.getvalue())
+
+    def test_no_arg_invocation_unaffected(self) -> None:
+        """`--print-collapse` 是新增分支，不得影響既有無參數呼叫路徑（main() 現在
+        接受可選 argv，預設仍讀 sys.argv——呼叫端零改動）。"""
+        with mock.patch.object(sys, "argv", ["check_script_parity.py"]), \
+             mock.patch("builtins.print"):
+            rc = m.main()
+        self.assertEqual(rc, 0)
+
+
 if __name__ == "__main__":
     unittest.main()

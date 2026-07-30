@@ -57,18 +57,30 @@ AISDLC_SDD/AISDLC_SDD_v0.01/requirements-ci.txt（凍結基線）與 AISDLC_SDD 
 LATEST 版 fsm_runtime 測試時沿用同一共用 venv 的 pytest，從未依 LATEST 自己的
 requirements-ci.txt 重新安裝——LATEST 宣告的版本號若漂移即為從未生效的假象）。
 
-已評估但暫緩納入的候選（R4 複審 QA P3）：AutoClaude/tools/install_git_hooks.{sh,ps1}、
-AISDLC_SDD/scripts/install-hooks.{sh,ps1} 四支腳本。評估結論：這四支腳本本質是「單一
-動作、無多階段」的線性流程（assert worktree → 取 hooks dir → 驗證存在 → git config →
-驗證安裝結果），並非像 run_act 那樣有六個語意獨立的段落；真正曾經重複的判定邏輯已於
-DEF-101-082 抽出至 `tools/git_hooks_install_common.py` 單一真相源，兩份呼叫端現僅剩
-各自平台原生的薄殼呈現層（見 DEF-101-070/080/082），對這四支腳本加 `[n/m]` 標籤會是
-為了湊格式而做的形式主義。行為層已由 windows/macos-compat-ci.yml 的安裝/解除/worktree
-拒絕三情境實測覆蓋（QA 判定風險低）。決策記事見缺陷帳本 DEF-101-088（closed-by-decision，
-本輪暫緩，不排入 marker_pairs）。
+🔴 R61 訂正（ADR-XPLAT-002 Phase 1-B）：下段原記載 `AutoClaude/tools/install_git_hooks`／
+`AISDLC_SDD/scripts/install-hooks` 兩對「暫緩納入、留在 `_EXEMPT_PAIRS`」——該狀態已於
+R61 結束：兩對已改掛 `_THINNESS_ENROLLED`（hash 釘選，見 `check_wrapper_thinness.py`
+`_PINNED_SHA256`），不再是零守門的決策豁免。原評估文字逐字保留於下，作為「為何選
+hash 釘選、不選 `[n/m]` 標籤」這個判斷的史料依據（該判斷本身未變，只是治理類別從
+「豁免」升級為「釘選」）：
+
+已評估但暫緩納入 `_MARKER_PAIRS` 標籤比對的候選（R4 複審 QA P3）：
+AutoClaude/tools/install_git_hooks.{sh,ps1}、AISDLC_SDD/scripts/install-hooks.{sh,ps1}
+四支腳本。評估結論：這四支腳本本質是「單一動作、無多階段」的線性流程（assert worktree
+→ 取 hooks dir → 驗證存在 → git config → 驗證安裝結果），並非像 run_act 那樣有六個語意
+獨立的段落；真正曾經重複的判定邏輯已於 DEF-101-082 抽出至
+`tools/git_hooks_install_common.py` 單一真相源，兩份呼叫端現僅剩各自平台原生的薄殼
+呈現層（見 DEF-101-070/080/082），對這四支腳本加 `[n/m]` 標籤會是為了湊格式而做的
+形式主義。行為層已由 windows/macos-compat-ci.yml 的安裝/解除/worktree 拒絕三情境實測
+覆蓋（QA 判定風險低）。決策記事見缺陷帳本 DEF-101-088（closed-by-decision：不排入
+`_MARKER_PAIRS`；R61 起改掛 hash 釘選，見上）。
 
 使用：
   python3 tools/check_script_parity.py   # 於 repo 內任意 cwd；不一致印 diff 並 exit 1
+  python3 tools/check_script_parity.py --print-collapse
+      # R61 ADR-XPLAT-002 §4.1/§4.2：印出 UEP／AC 現查值（不跑其餘檢查、恆 rc=0，
+      # 純報表；棘輪化時比照 tools/tests/test_adr_xplat001_c1c2_lock.py 的
+      # shrink-only 形狀另立鎖，見該 ADR §4.4）
 """
 from __future__ import annotations
 
@@ -360,15 +372,16 @@ _THINNESS_ENROLLED = {
     "tools/bootstrap",
     "tools/integration_gate",
     "AutoClaude/tools/run_act",
+    # R61 ADR-XPLAT-002 Phase 1-B（DEF-101-088 由零守門的決策豁免升級為 hash 釘選）：
+    # 四支殼 raw 行數（50/65/40/42）皆 ≤ check_wrapper_thinness.MAX_LINES=100，符合
+    # §3.1 納編前置條件；業務邏輯仍下沉 tools/git_hooks_install_common.py 單一真相源
+    # 不變，本次只是把「無守門」升級為「hash 釘選＋行數上限＋業務樣板關鍵字並聯」。
+    "AutoClaude/tools/install_git_hooks",
+    "AISDLC_SDD/scripts/install-hooks",
 }
 # run_tlc FSM 軌錨點集合鎖（R12；見 _check_run_tlc_tracks 區塊註解）
 _TLC_TRACK_ENROLLED = {"LATEST/tools/fsm_runtime/formal/run_tlc"}
 _EXEMPT_PAIRS = {
-    "AutoClaude/tools/install_git_hooks": (
-        "DEF-101-088 closed-by-decision：判定邏輯已下沉 tools/git_hooks_install_common.py "
-        "單一真相源，殼層無標籤錨點"
-    ),
-    "AISDLC_SDD/scripts/install-hooks": "DEF-101-088 closed-by-decision：同 install_git_hooks",
     "AISDLC_SDD/scripts/ci-gate": (
         "ci-gate.ps1 為薄委派殼（Find-GitBash → bash ci-gate.sh 單一真相源），非第二實作"
     ),
@@ -595,7 +608,39 @@ def _check_pair_enrollment(latest_tools: Path | None = None) -> bool:
     return ok
 
 
-def main() -> int:
+def _print_collapse() -> int:
+    """UEP／AC 現查（ADR-XPLAT-002 §4.1/§4.2 R61 Phase 1-C 最小可行切片）。
+
+    在本 ADR 之前，這兩個判準只能靠手跑一支 scratchpad 腳本現查（§2.1）——本函式
+    把它變成本工具的第一等公民輸出，供未來棘輪化沿用同一份計算，不必再各自重寫。
+    """
+    import check_wrapper_thinness as _thinness  # 同目錄，頂部已 sys.path 注入
+
+    uep = len(_EXEMPT_PAIRS) + len(_TLC_TRACK_ENROLLED)
+    ac = (
+        len(_thinness._PINNED_SHA256)
+        + len(_THINNESS_ENROLLED)
+        + len(_EXEMPT_PAIRS)
+        + len(_SINGLE_SIDED_EXEMPT)
+        + len(_TLC_TRACK_ENROLLED)
+        + len(_MIN_EXTRACT_COUNTS)
+    )
+    print(f"UEP={uep}")
+    print(f"AC={ac}")
+    print(f"THINNESS_ENROLLED={len(_THINNESS_ENROLLED)}")
+    print(f"PINNED_SHA256={len(_thinness._PINNED_SHA256)}")
+    print(f"EXEMPT_PAIRS={len(_EXEMPT_PAIRS)}")
+    print(f"SINGLE_SIDED_EXEMPT={len(_SINGLE_SIDED_EXEMPT)}")
+    print(f"TLC_TRACK_ENROLLED={len(_TLC_TRACK_ENROLLED)}")
+    print(f"MIN_EXTRACT_COUNTS={len(_MIN_EXTRACT_COUNTS)}")
+    return 0
+
+
+def main(argv: list[str] | None = None) -> int:
+    args = sys.argv[1:] if argv is None else argv
+    if args == ["--print-collapse"]:
+        return _print_collapse()
+
     ok = True
 
     for label, sh_rel, ps1_rel in _MARKER_PAIRS:
