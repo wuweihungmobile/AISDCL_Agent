@@ -524,6 +524,9 @@ _GOVERNANCE_DOCS = (
     _REPO_ROOT / "docs" / "06_quality" / "CrossPlatform_R61_Architect_Evidence.md",
     # R61 SA/QA 收輪證據（同理即刻登記）。
     _REPO_ROOT / "docs" / "06_quality" / "CrossPlatform_R61_SAQA_Evidence.md",
+    # R62 Architect 收輪證據（本輪新增，同理即刻登記，避免重演 R61「插曲二」——
+    # 新建證據檔忘了登記進本清單而致 test_check_defect_log_crossref.py 轉紅）。
+    _REPO_ROOT / "docs" / "06_quality" / "CrossPlatform_R62_Architect_Evidence.md",
 )
 
 # 姊妹治理文件的命名慣例：`docs/06_quality/CrossPlatform_*.md`。這**不是**把具名常數
