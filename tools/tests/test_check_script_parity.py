@@ -132,7 +132,7 @@ class TestSingleSidedEnrollment(unittest.TestCase):
             mock.patch.object(m, "_THINNESS_ENROLLED", set()),
             mock.patch.object(m, "_EXEMPT_PAIRS", {}),
             mock.patch.object(m, "_SINGLE_SIDED_EXEMPT", single_exempt),
-            mock.patch.object(m, "_TLC_TRACK_ENROLLED", set()),
+            mock.patch.object(m, "_LATEST_THINNESS_ENROLLED", set()),
             mock.patch.object(m, "_resolve_latest_tools", lambda: latest_tools),
         )
 
@@ -282,7 +282,7 @@ class TestLatestToolsEnrollment(unittest.TestCase):
              mock.patch.object(m, "_THINNESS_ENROLLED", set()), \
              mock.patch.object(m, "_EXEMPT_PAIRS", {}), \
              mock.patch.object(m, "_SINGLE_SIDED_EXEMPT", {}), \
-             mock.patch.object(m, "_TLC_TRACK_ENROLLED", set()), \
+             mock.patch.object(m, "_LATEST_THINNESS_ENROLLED", set()), \
              mock.patch("builtins.print") as fake_print:
             ok = m._check_pair_enrollment(latest_tools)
         printed = " ".join(
@@ -321,19 +321,23 @@ class TestLatestToolsEnrollment(unittest.TestCase):
                           f"LATEST 單邊腳本 {s} 未附決策依據登記")
 
 
-class TestRunTlcTrackLock(unittest.TestCase):
-    """R12 ARCH-R12-3：run_tlc FSM 軌錨點集合鎖紅/綠自證（fixture 注入變異）。
-
-    WHY：DEF-101-100——run_tlc.ps1 曾缺整條 FLEET_FSM 軌而 .sh 有，零機械訊號。
-    軌 token（*_FSM*.tla/.cfg）集合比對恰好攔此型漂移。
+class TestRunTlcInvocationParityLock(unittest.TestCase):
+    """R65（ADR-XPLAT-002 §5 Phase 2-A）：取代退場的 run_tlc FSM 軌錨點集合鎖
+    （原 `_check_run_tlc_tracks`）。run_tlc.{sh,ps1} 薄殼化後兩側已不再內嵌
+    `.tla`/`.cfg` 檔名字面（舊鎖的抽取對象消失），但「兩側委派引數仍可能分歧」
+    （DEF-101-100 攔的正是這型漂移：.ps1 曾缺整條 FLEET_FSM 軌而 .sh 有）這個
+    風險本身沒有消失——依 ADR §4.2 rule 3 dominance test，此斷言沒有現成接手者，
+    改抽兩側委派 `tools.fsm_runtime.tlc_runner` 時傳的 `--module`/`--cfg` 引數
+    token 做同型 multiset 比對，延續同一個保護意圖，只是換一個新形態下仍存在
+    的錨點（fixture 注入變異，同 R12 原測試手法）。
     """
 
     _SH_FULL = (
         "#!/usr/bin/env bash\n"
-        "# 註解裡的 GHOST_FSM.tla 不得入抽取\n"
-        "java -cp x tlc2.TLC -config SDD_FSM.cfg SDD_FSM.tla\n"
-        "java -cp x tlc2.TLC -config FLEET_FSM.cfg FLEET_FSM.tla\n"
-        "java -cp x tlc2.TLC -config FLEET_FSM_LIVENESS.cfg FLEET_FSM.tla\n"
+        "# 註解裡的 --module GHOST_FSM 不得入抽取\n"
+        "python -m tools.fsm_runtime.tlc_runner --module SDD_FSM --depth 50\n"
+        "python -m tools.fsm_runtime.tlc_runner --module FLEET_FSM\n"
+        "python -m tools.fsm_runtime.tlc_runner --module FLEET_FSM --cfg FLEET_FSM_LIVENESS.cfg\n"
     )
 
     def _make_pair(self, name: str, sh_body: str, ps1_body: str) -> Path:
@@ -344,71 +348,155 @@ class TestRunTlcTrackLock(unittest.TestCase):
         (formal / "run_tlc.ps1").write_text(ps1_body, encoding="utf-8")
         return latest_tools
 
-    def test_matching_tracks_green(self) -> None:
-        ps1 = self._SH_FULL.replace("java -cp", "& java -cp")  # 形態不同、token 相同
-        latest_tools = self._make_pair("tlc_green", self._SH_FULL, ps1)
+    def test_matching_invocations_green(self) -> None:
+        ps1 = self._SH_FULL.replace(
+            "python -m tools.fsm_runtime.tlc_runner",
+            "& python -m tools.fsm_runtime.tlc_runner",
+        )  # 形態不同、token 相同
+        latest_tools = self._make_pair("inv_green", self._SH_FULL, ps1)
         with mock.patch("builtins.print"):
-            self.assertTrue(m._check_run_tlc_tracks(latest_tools))
+            self.assertTrue(m._check_run_tlc_invocation_parity(latest_tools))
 
-    def test_missing_fleet_track_on_ps1_is_red(self) -> None:
-        """變異自證：.ps1 刪整條 FLEET 軌（DEF-101-100 原型）→ 必紅。"""
+    def test_missing_fleet_invocation_on_ps1_is_red(self) -> None:
+        """變異自證：.ps1 刪整條 FLEET 委派（DEF-101-100 原型換新錨點）→ 必紅。"""
         ps1_lines = [ln for ln in self._SH_FULL.splitlines() if "FLEET" not in ln]
         latest_tools = self._make_pair(
-            "tlc_red", self._SH_FULL, "\n".join(ps1_lines) + "\n")
+            "inv_red", self._SH_FULL, "\n".join(ps1_lines) + "\n")
         with mock.patch("builtins.print") as fake_print:
-            ok = m._check_run_tlc_tracks(latest_tools)
+            ok = m._check_run_tlc_invocation_parity(latest_tools)
         printed = " ".join(
             str(arg) for call in fake_print.call_args_list for arg in call.args
         )
         self.assertFalse(ok)
         self.assertIn("FLEET_FSM", printed)
 
-    def test_comment_only_tracks_not_extracted(self) -> None:
-        """註解行的軌字樣不入抽取（GHOST_FSM.tla 只出現在 # 註解）。"""
-        latest_tools = self._make_pair("tlc_comment", self._SH_FULL, self._SH_FULL)
-        tracks = m._extract_tlc_tracks(
+    def test_comment_only_invocations_not_extracted(self) -> None:
+        """註解行的引數字樣不入抽取（--module GHOST_FSM 只出現在 # 註解）。"""
+        latest_tools = self._make_pair("inv_comment", self._SH_FULL, self._SH_FULL)
+        args = m._extract_tlc_runner_invocations(
             latest_tools / "fsm_runtime" / "formal" / "run_tlc.sh")
-        self.assertNotIn("GHOST_FSM.tla", tracks)
-        # multiset 語意（SD-2）：FLEET_FSM.tla 兩處引用各自入列 → 6 個 token
-        self.assertEqual(len(tracks), 6, f"軌 multiset 應恰為 6，實得 {tracks}")
+        self.assertNotIn("--module GHOST_FSM", args)
+        # multiset 語意：--module FLEET_FSM 兩處引用各自入列 → 4 個 token
+        self.assertEqual(len(args), 4, f"引數 multiset 應恰為 4，實得 {args}")
 
-    def test_floor_pins_five_tracks(self) -> None:
-        """釘選：兩側同步刪到 4 軌（floor=5 以下）也必紅——防同步改寫假綠。"""
-        four = "\n".join(
+    def test_floor_pins_four_invocations(self) -> None:
+        """釘選：兩側同步刪到 3 個引數（floor=4 以下）也必紅——防同步改寫假綠。"""
+        three = "\n".join(
             ln for ln in self._SH_FULL.splitlines() if "LIVENESS" not in ln) + "\n"
-        latest_tools = self._make_pair("tlc_floor", four, four)
+        latest_tools = self._make_pair("inv_floor", three, three)
         with mock.patch("builtins.print"):
-            self.assertFalse(m._check_run_tlc_tracks(latest_tools))
+            self.assertFalse(m._check_run_tlc_invocation_parity(latest_tools))
 
-    def test_renamed_track_same_count_is_red_via_compare(self) -> None:
+    def test_renamed_invocation_same_count_is_red_via_compare(self) -> None:
         """兩側皆 ≥floor 但集合不同（單側改名）必紅——_compare 專屬路徑回歸鎖。
 
-        WHY（R12 QA 二審 EXP4 轉正）：其餘紅案例的 token 數同時低於 floor，
-        floor 與 _compare 雙訊號並發；_compare 被突變恆 True 時它們仍紅、
-        改名型漂移卻會漏。本案例兩側各 6 token（等量）僅名字不同——只有
-        _compare 能攔，補上 meta 級防護。"""
+        WHY（同 R12 原測試手法）：其餘紅案例的 token 數同時低於 floor，floor 與
+        _compare 雙訊號並發；_compare 被突變恆 True 時它們仍紅、改名型漂移卻會漏。
+        本案例兩側各 4 token（等量）僅名字不同——只有 _compare 能攔。"""
         renamed = self._SH_FULL.replace("SDD_FSM", "SDX_FSM")
-        latest_tools = self._make_pair("tlc_rename", self._SH_FULL, renamed)
+        latest_tools = self._make_pair("inv_rename", self._SH_FULL, renamed)
         with mock.patch("builtins.print") as fake_print:
-            self.assertFalse(m._check_run_tlc_tracks(latest_tools))
+            self.assertFalse(m._check_run_tlc_invocation_parity(latest_tools))
         printed = " ".join(
             str(arg) for call in fake_print.call_args_list for arg in call.args
         )
         self.assertIn("SDX_FSM", printed, "diff 須點名改名後的 token")
 
     def test_missing_script_is_red(self) -> None:
-        """run_tlc 檔案消失 → 紅（指路更新 _TLC_TRACK_ENROLLED）。"""
-        empty = _TMP_DIR / "tlc_missing" / "tools"
+        """run_tlc 檔案消失 → 紅（指路更新 _LATEST_THINNESS_ENROLLED）。"""
+        empty = _TMP_DIR / "inv_missing" / "tools"
         empty.mkdir(parents=True, exist_ok=True)
         with mock.patch("builtins.print"):
-            self.assertFalse(m._check_run_tlc_tracks(empty))
+            self.assertFalse(m._check_run_tlc_invocation_parity(empty))
 
     def test_real_tree_run_tlc_green(self) -> None:
-        """真磁碟整合：LATEST run_tlc 兩側軌集合一致（DEF-101-100 已修狀態）。"""
+        """真磁碟整合：LATEST run_tlc 兩側委派引數集合一致（R65 薄殼化後狀態）。"""
         latest_tools = m._resolve_latest_tools()
         self.assertIsNotNone(latest_tools)
         with mock.patch("builtins.print"):
-            self.assertTrue(m._check_run_tlc_tracks(latest_tools))
+            self.assertTrue(m._check_run_tlc_invocation_parity(latest_tools))
+
+
+class TestLatestThinnessPin(unittest.TestCase):
+    """R65（ADR-XPLAT-002 §5 Phase 2-A）：LATEST 版薄殼 hash 釘選
+    （`_check_latest_thinness`）紅/綠自證——接手退場的 `_TLC_TRACK_ENROLLED` 的
+    「run_tlc.{sh,ps1} 兩側檔案存在、內容未偏離已核准樣子」這條斷言，且比舊鎖更
+    嚴格（舊鎖只比對抽取到的軌 token 集合，本鎖鎖住整份正規化內容——任何實質
+    修改，不論是否影響 --module/--cfg 引數，都會先在這裡紅燈）。
+    """
+
+    def _make_shell_tree(self, name: str, sh_body: str, ps1_body: str) -> Path:
+        latest_tools = _TMP_DIR / name / "tools"
+        formal = latest_tools / "fsm_runtime" / "formal"
+        formal.mkdir(parents=True, exist_ok=True)
+        (formal / "run_tlc.sh").write_text(sh_body, encoding="utf-8")
+        (formal / "run_tlc.ps1").write_text(ps1_body, encoding="utf-8")
+        return latest_tools
+
+    def test_real_tree_pins_green(self) -> None:
+        latest_tools = m._resolve_latest_tools()
+        self.assertIsNotNone(latest_tools)
+        with mock.patch("builtins.print"):
+            self.assertTrue(m._check_latest_thinness(latest_tools))
+
+    def test_tampered_content_is_red(self) -> None:
+        """正規化內容偏離釘選 → 紅（hash 釘選是權威判定，不是抽取式比對）。"""
+        latest_tools = self._make_shell_tree(
+            "thin_tamper", "#!/usr/bin/env bash\necho tampered\n", "echo tampered\n")
+        fake_pins = {
+            "LATEST/tools/fsm_runtime/formal/run_tlc.sh": "0" * 64,
+            "LATEST/tools/fsm_runtime/formal/run_tlc.ps1": "0" * 64,
+        }
+        with mock.patch.object(m, "_LATEST_PINNED_SHA256", fake_pins), \
+             mock.patch("builtins.print") as fake_print:
+            ok = m._check_latest_thinness(latest_tools)
+        printed = " ".join(
+            str(arg) for call in fake_print.call_args_list for arg in call.args
+        )
+        self.assertFalse(ok)
+        self.assertIn("hash 與釘選不符", printed)
+
+    def test_missing_file_is_red(self) -> None:
+        empty = _TMP_DIR / "thin_missing" / "tools"
+        empty.mkdir(parents=True, exist_ok=True)
+        fake_pins = {"LATEST/tools/fsm_runtime/formal/run_tlc.sh": "0" * 64}
+        with mock.patch.object(m, "_LATEST_PINNED_SHA256", fake_pins), \
+             mock.patch("builtins.print") as fake_print:
+            ok = m._check_latest_thinness(empty)
+        printed = " ".join(
+            str(arg) for call in fake_print.call_args_list for arg in call.args
+        )
+        self.assertFalse(ok)
+        self.assertIn("檔案不存在", printed)
+
+    def test_latest_resolution_failure_is_red(self) -> None:
+        fake_pins = {"LATEST/tools/fsm_runtime/formal/run_tlc.sh": "0" * 64}
+        with mock.patch.object(m, "_LATEST_PINNED_SHA256", fake_pins), \
+             mock.patch("builtins.print") as fake_print:
+            ok = m._check_latest_thinness(None)
+        printed = " ".join(
+            str(arg) for call in fake_print.call_args_list for arg in call.args
+        )
+        self.assertFalse(ok)
+        self.assertIn("LATEST 解析失敗", printed)
+
+    def test_line_count_over_max_lines_is_red(self) -> None:
+        import check_wrapper_thinness as _thinness
+
+        body = "#!/usr/bin/env bash\n" + "echo x\n" * (_thinness.MAX_LINES + 5)
+        latest_tools = self._make_shell_tree("thin_toolong", body, "echo x\n")
+        fake_pins = {
+            "LATEST/tools/fsm_runtime/formal/run_tlc.sh": _thinness.normalized_sha256(
+                latest_tools / "fsm_runtime" / "formal" / "run_tlc.sh"),
+        }
+        with mock.patch.object(m, "_LATEST_PINNED_SHA256", fake_pins), \
+             mock.patch("builtins.print") as fake_print:
+            ok = m._check_latest_thinness(latest_tools)
+        printed = " ".join(
+            str(arg) for call in fake_print.call_args_list for arg in call.args
+        )
+        self.assertFalse(ok)
+        self.assertIn("超過薄殼上限", printed)
 
 
 class TestThinnessCrossLock(unittest.TestCase):
@@ -517,12 +605,18 @@ class TestR61Phase1BMigration(unittest.TestCase):
         self.assertIn("AutoClaude/tools/install_git_hooks", m._THINNESS_ENROLLED)
         self.assertIn("AISDLC_SDD/scripts/install-hooks", m._THINNESS_ENROLLED)
 
-    def test_uep_is_six_after_migration(self) -> None:
-        """UEP＝`_EXEMPT_PAIRS` + `_TLC_TRACK_ENROLLED`（ADR-XPLAT-002 §4.1）。
-        R60 基線為 8；本輪 Phase 1-B 遷移兩對後應為 6，這是本輪 Architect 交付的
-        唯一一個受 ADR 明文追蹤的下降判準，須有回歸鎖防止被靜默改回。"""
-        uep = len(m._EXEMPT_PAIRS) + len(m._TLC_TRACK_ENROLLED)
-        self.assertEqual(uep, 6)
+    def test_uep_is_five_after_r65_migration(self) -> None:
+        """UEP＝`_EXEMPT_PAIRS`（ADR-XPLAT-002 §4.1，R65 更新）。
+
+        歷史：R60 基線 8 → R61 Phase 1-B 遷移兩對至 `_THINNESS_ENROLLED` 後為 6
+        （公式當時是 `_EXEMPT_PAIRS` + `_TLC_TRACK_ENROLLED`）→ R65 Phase 2-A 把
+        run_tlc 那唯一一筆 `_TLC_TRACK_ENROLLED` 條目也升級為 hash 釘選
+        （`_LATEST_THINNESS_ENROLLED`，不計入 UEP）後，`_TLC_TRACK_ENROLLED` 本身
+        退場、公式不再有該項，UEP 應為 5。本測試名稱雖冠 R61，但斷言的是「當前
+        UEP 公式與數值」的活體回歸鎖（非凍結歷史快照），故隨本輪同步更新，防止
+        被靜默改回。"""
+        uep = len(m._EXEMPT_PAIRS)
+        self.assertEqual(uep, 5)
 
 
 class TestPrintCollapseFlag(unittest.TestCase):
@@ -539,13 +633,16 @@ class TestPrintCollapseFlag(unittest.TestCase):
             rc = m.main(["--print-collapse"])
         self.assertEqual(rc, 0)
         out = buf.getvalue()
-        expected_uep = len(m._EXEMPT_PAIRS) + len(m._TLC_TRACK_ENROLLED)
+        expected_uep = len(m._EXEMPT_PAIRS)
         self.assertIn(f"UEP={expected_uep}", out)
         self.assertIn("AC=", out)
 
-    def test_ac_matches_sum_of_six_registries(self) -> None:
-        """AC 定義（§4.2）＝六張登記表長度總和；本測試獨立重算，防止 `_print_collapse()`
-        內部算式與 ADR 定義漂移卻無人發現（既有六張表各自已有其他鎖守著不被誤刪）。"""
+    def test_ac_matches_sum_of_seven_registries(self) -> None:
+        """AC 定義（§4.2）＝描述性常數登記表長度總和；本測試獨立重算，防止
+        `_print_collapse()` 內部算式與 ADR 定義漂移卻無人發現（既有各表各自已有
+        其他鎖守著不被誤刪）。R65：原「六張表」的 `_TLC_TRACK_ENROLLED` 已退場，
+        改由 `_LATEST_PINNED_SHA256`／`_LATEST_THINNESS_ENROLLED` 兩張新表接手其
+        「描述性常數登記」角色，故現為七張表。"""
         import io
         from contextlib import redirect_stdout
 
@@ -556,7 +653,8 @@ class TestPrintCollapseFlag(unittest.TestCase):
             + len(m._THINNESS_ENROLLED)
             + len(m._EXEMPT_PAIRS)
             + len(m._SINGLE_SIDED_EXEMPT)
-            + len(m._TLC_TRACK_ENROLLED)
+            + len(m._LATEST_PINNED_SHA256)
+            + len(m._LATEST_THINNESS_ENROLLED)
             + len(m._MIN_EXTRACT_COUNTS)
         )
         buf = io.StringIO()

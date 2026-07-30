@@ -1,149 +1,95 @@
 ﻿# Phase G M5 / ACT-042 / B5.6 — TLC runner (Windows / PowerShell)
 #
-# ⚠️ LEGACY 兩軌快驗（v0.02 / DEF-01-002 註記；R9 Fix-A 鏡射 run_tlc.sh 補齊）：
-#    本腳本僅實裝 SDD_FSM + FLEET_FSM 兩軌。五軌完整驗證
-#    （SDD/META/COMPOSITION/OPTIMIZATION/FLEET_FSM）請走 Python 真相源：
-#    python -m tools.fsm_runtime.tlc_runner --module <五軌各一>
-#    （scripts/ci-gate.sh --full-tlc 即以迴圈呼叫五軌）。
+# 🔴 R65（ADR-XPLAT-002 §5 Phase 2-A）：本檔改為薄殼，實際 TLC 呼叫／摘要解析／
+#    jar 下載邏輯全數委派 Python 真相源 tools.fsm_runtime.tlc_runner；本檔只負責
+#    (1) 找可用 python (2) 解析既有命令列慣例並原樣轉傳 (3) 依既有三軌流程
+#    （SDD_FSM 完整 + FLEET_FSM safety + FLEET_FSM liveness）依序呼叫、任一階段
+#    rc 非 0 立即中止並原樣回傳。原「需 pwsh 7+」限制（PS 5.1 對 native stderr 的
+#    ErrorRecord 包裝在 `java ... *>&1 | Out-File` 這種重定向下會中斷）隨薄殼化
+#    解除——本檔不再自行對 java 做重定向，觸發條件已不存在：Python subprocess
+#    自行內部捕捉 stdout/stderr，PowerShell 端僅原樣呼叫一支外部命令並讀
+#    $LASTEXITCODE。五軌完整驗證另可直接：
+#      python -m tools.fsm_runtime.tlc_runner --module <五軌各一>
+#
+# 🔴 R65 修復（四方複審 MAJOR）：裸執行（非 -InstallOnly）三軌呼叫恆帶 --download，
+#    還原薄殼化前「lib/tla2tools.jar 不存在時自動下載」的既有使用者體驗；不需額外
+#    記住旗標。
 #
 # 用途：本機開發者在 Windows 跑 TLC 對 SDD_FSM.tla 做形式化驗證。
 # 對應規則：CLAUDE.md Rule 9.18.1~9.18.4
 #
-# 使用：
-#   pwsh run_tlc.ps1                    # 跑完整驗證
+# 使用（既有呼叫慣例不變）：
+#   pwsh run_tlc.ps1                    # 跑完整驗證（SDD_FSM + FLEET_FSM safety/liveness；
+#                                        #   jar 缺失時自動下載 DEFAULT_TLA_VERSION）
 #   pwsh run_tlc.ps1 -InstallOnly       # 僅下載 tla2tools.jar
-#   pwsh run_tlc.ps1 -Depth 100         # 自訂探索深度上限
+#   pwsh run_tlc.ps1 -Depth 100         # 自訂 SDD_FSM 探索深度上限
+#   pwsh run_tlc.ps1 -InstallOnly -TlaVersion v1.8.1  # 覆寫下載版本（R65 item4 恢復）
 #
 # Exit codes：
 #   0 — 全部通過
 #   1 — TLC 偵測 invariant / liveness violation / deadlock
-#   2 — 環境錯誤
+#   2 — 環境錯誤（Java 缺失 / jar 下載失敗 / python 缺失）
 
 [CmdletBinding()]
 param(
     [switch]$InstallOnly,
     [int]$Depth = 50,
-    [string]$TlaVersion = "v1.8.0"
+    [string]$TlaVersion = ""
 )
 
-# R9 SD 二審 D-1（DEF-101-124）：本腳本的 native stderr 重定向模式（java -version 2>&1、
-# TLC *>&1 | Out-File——R14 前為 Tee-Object，DEF-101-190 改寫，5.1 限制不變）在
-# Windows PowerShell 5.1 + $ErrorActionPreference=Stop 下會把
-# stderr 行包成 ErrorRecord 拋 NativeCommandError（於下方 Java 版本行即中斷，永遠跑不到
-# TLC）——此為既有限制，pwsh 7+ 無此行為。與其讓使用者撞難解錯誤，這裡明確 fail-loud 導流。
-if ($PSVersionTable.PSVersion.Major -lt 6) {
-    Write-Host "ERROR: 本腳本需 pwsh 7+（PowerShell 5.1 對 native stderr 的 ErrorRecord 包裝會在 Java 檢查行中斷）。" -ForegroundColor Red
-    Write-Host "  替代：bash tools/fsm_runtime/formal/run_tlc.sh，或五軌權威路徑 python -m tools.fsm_runtime.tlc_runner" -ForegroundColor Yellow
-    exit 2
-}
-
-$ErrorActionPreference = "Stop"
 $ScriptDir = $PSScriptRoot
-$LibDir = Join-Path $ScriptDir "lib"
-$JarPath = Join-Path $LibDir "tla2tools.jar"
-$JarUrl = "https://github.com/tlaplus/tlaplus/releases/download/$TlaVersion/tla2tools.jar"
+# formal/ 的祖父層即 <SDD 版本根>/，`python -m tools.fsm_runtime.tlc_runner` 須以此為 cwd
+$ToolsParent = (Resolve-Path (Join-Path $ScriptDir "..\..\..")).Path
 
-# Step 1 — 環境檢查
-$javaCmd = Get-Command java -ErrorAction SilentlyContinue
-if (-not $javaCmd) {
-    Write-Host "ERROR: java not found. Install JDK 11+ first." -ForegroundColor Red
+# python 探測須經共用 WindowsAppsGuard.ps1::Test-IsRealPython SSOT 排除空殼
+# （DEF-101-273/279/300/303 復發模式；同 install_hooks/install_post_commit.ps1
+# 慣例，非本檔獨立重寫裸 Get-Command 判斷）。
+$GitCommonDir = (git rev-parse --path-format=absolute --git-common-dir 2>$null)
+if ($LASTEXITCODE -ne 0 -or -not $GitCommonDir) {
+    Write-Host "ERROR: 找不到 git repository（git rev-parse --git-common-dir 失敗）— 請在 monorepo checkout 內執行本腳本" -ForegroundColor Red
     exit 2
 }
-Write-Host "[run_tlc] Java: $((& java -version 2>&1) | Select-Object -First 1)"
-
-# Step 2 — 下載 tla2tools.jar
-if (-not (Test-Path $LibDir)) { New-Item -ItemType Directory -Path $LibDir | Out-Null }
-if (-not (Test-Path $JarPath)) {
-    Write-Host "[run_tlc] tla2tools.jar 不存在，從 $JarUrl 下載..."
-    try {
-        Invoke-WebRequest -Uri $JarUrl -OutFile $JarPath -UseBasicParsing
-    } catch {
-        Write-Host "ERROR: 下載失敗：$_" -ForegroundColor Red
-        exit 2
-    }
-    $size = (Get-Item $JarPath).Length
-    Write-Host "[run_tlc] 下載完成：$([math]::Round($size/1MB, 2)) MB"
+$MainCheckoutRoot = Split-Path -Parent $GitCommonDir.Trim()
+$WindowsAppsGuardPath = Join-Path $MainCheckoutRoot "tools\lib\WindowsAppsGuard.ps1"
+if (-not (Test-Path $WindowsAppsGuardPath)) {
+    Write-Host "ERROR: 找不到共用函式 $WindowsAppsGuardPath — 請在完整 monorepo checkout 內執行本腳本" -ForegroundColor Red
+    exit 2
+}
+. $WindowsAppsGuardPath
+# R65 item3：探測順序統一為 python3 優先（同 run_tlc.sh 的 for _cand in python3 python，
+# 本專案 Unix 慣例；兩側原不一致，此後兩支皆 python3 → python）。
+$PythonBin = $null
+foreach ($cand in @("python3", "python")) {
+    if (Test-IsRealPython -CandidateName $cand) { $PythonBin = $cand; break }
+}
+if (-not $PythonBin) {
+    Write-Host "ERROR: 找不到 python/python3（或僅偵測到 WindowsApps 空殼），請安裝 Python 3.11+。" -ForegroundColor Red
+    exit 2
 }
 
-if ($InstallOnly) {
-    Write-Host "[run_tlc] -InstallOnly：完成。"
-    exit 0
-}
+# R65 item4：-TlaVersion 若設值才轉傳 --tla-version（薄殼化前舊行為的等價恢復——
+# 沒設值就不傳、tlc_runner.py 沿用其 DEFAULT_TLA_VERSION 常數，行為不變）。
+$TlaVersionArgs = @()
+if ($TlaVersion) { $TlaVersionArgs = @("--tla-version", $TlaVersion) }
 
-# Step 3 — 跑 TLC
-Push-Location $ScriptDir
+Push-Location $ToolsParent
 try {
-    $LogFile = Join-Path $ScriptDir "tlc_run.log"
-    Write-Host "[run_tlc] Running TLC with depth=$Depth..."
-
-    & java "-XX:+UseParallelGC" -cp $JarPath tlc2.TLC `
-        -config SDD_FSM.cfg `
-        -workers auto `
-        -depth $Depth `
-        SDD_FSM.tla *>&1 | Out-File -FilePath $LogFile -Encoding utf8
-    $TlcExit = $LASTEXITCODE
-
-    # Step 4 — 解析結果
-    Write-Host "[run_tlc] TLC 退出碼: $TlcExit"
-    Write-Host "[run_tlc] 完整 log: $LogFile"
-
-    # QA 修 1：non-anchored regex（TLC 輸出 "2853 states generated, 583 distinct states found, ..."
-    # 與 "The depth of the complete state graph search is 29." — 數字非行首）
-    $logContent = Get-Content $LogFile -Raw
-    $distinct = if ($logContent -match '(\d+)\s+distinct\s+states\s+found') { $matches[1] } else { "0" }
-    $generated = if ($logContent -match '(\d+)\s+states\s+generated') { $matches[1] } else { "0" }
-    $depth = if ($logContent -match 'depth of the complete state graph search is\s+(\d+)') { $matches[1] } else { "0" }
-
-    Write-Host "[run_tlc] distinct states: $distinct"
-    Write-Host "[run_tlc] generated states: $generated"
-    Write-Host "[run_tlc] depth: $depth"
-
-    # Machine-readable summary（CI assertion 直接 grep）
-    Write-Host "TLC_DISTINCT=$distinct"
-    Write-Host "TLC_GENERATED=$generated"
-    Write-Host "TLC_DEPTH=$depth"
-
-    if ($TlcExit -ne 0) {
-        Write-Host "[run_tlc] FAIL SDD_FSM TLC 驗證失敗（見 log 上方錯誤訊息）" -ForegroundColor Red
-        Get-Content $LogFile -Tail 30
-        exit 1
+    if ($InstallOnly) {
+        & $PythonBin -m tools.fsm_runtime.tlc_runner --install-only @TlaVersionArgs
+        exit $LASTEXITCODE
     }
-    Write-Host "[run_tlc] OK SDD_FSM TLC 驗證通過（safety + EventuallyTerminal + ObservationsTransient）" -ForegroundColor Green
 
-    # Step 5 — Phase I M5 / ACT-072：parametric FLEET_FSM（艦隊並行 no-deadlock + bounded join）
-    # （R9 Fix-A 鏡射 run_tlc.sh Step 5a/5b 補齊——先前 .ps1 相對 .sh 漂移，缺整條 FLEET_FSM 軌）
-    # 5a：safety（含 SYMMETRY 縮減狀態空間）；5b：liveness（無 SYMMETRY，健全前提）
-    # 為何分兩跑：TLC 在 SYMMETRY 下檢查 liveness 屬 unsound（可能漏掉違規），故 AllEventuallyDone
-    # 必在無 symmetry 的 FLEET_FSM_LIVENESS.cfg 窮舉驗證。
-    $FleetLog = Join-Path $ScriptDir "fleet_tlc.log"
-    $FleetLiveLog = Join-Path $ScriptDir "fleet_tlc_liveness.log"
-    Write-Host "[run_tlc] Running FLEET_FSM TLC 5a (safety + symmetry: LockMutex/NoPartialHold)..."
-    & java "-XX:+UseParallelGC" -cp $JarPath tlc2.TLC `
-        -config FLEET_FSM.cfg `
-        -workers auto `
-        FLEET_FSM.tla *>&1 | Out-File -FilePath $FleetLog -Encoding utf8
-    $FleetExit = $LASTEXITCODE
-    if ($FleetExit -ne 0) {
-        Write-Host "[run_tlc] FAIL FLEET_FSM safety 驗證失敗（見 $FleetLog）" -ForegroundColor Red
-        Get-Content $FleetLog -Tail 30
-        exit 1
-    }
-    Write-Host "[run_tlc] OK FLEET_FSM safety 通過（LockMutex + NoPartialHold）" -ForegroundColor Green
+    Write-Host "[run_tlc] 委派 tools.fsm_runtime.tlc_runner 跑 SDD_FSM（depth=$Depth）..."
+    & $PythonBin -m tools.fsm_runtime.tlc_runner --module SDD_FSM --depth $Depth --download @TlaVersionArgs
+    if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
-    Write-Host "[run_tlc] Running FLEET_FSM TLC 5b (liveness, NO symmetry: AllEventuallyDone)..."
-    & java "-XX:+UseParallelGC" -cp $JarPath tlc2.TLC `
-        -config FLEET_FSM_LIVENESS.cfg `
-        -workers auto `
-        FLEET_FSM.tla *>&1 | Out-File -FilePath $FleetLiveLog -Encoding utf8
-    $FleetLiveExit = $LASTEXITCODE
-    if ($FleetLiveExit -eq 0) {
-        Write-Host "[run_tlc] OK FLEET_FSM liveness 通過（AllEventuallyDone，無 symmetry 健全驗證）" -ForegroundColor Green
-        exit 0
-    } else {
-        Write-Host "[run_tlc] FAIL FLEET_FSM liveness 驗證失敗（見 $FleetLiveLog）" -ForegroundColor Red
-        Get-Content $FleetLiveLog -Tail 30
-        exit 1
-    }
+    Write-Host "[run_tlc] 委派 tools.fsm_runtime.tlc_runner 跑 FLEET_FSM 5a（safety + symmetry）..."
+    & $PythonBin -m tools.fsm_runtime.tlc_runner --module FLEET_FSM --download @TlaVersionArgs
+    if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+    Write-Host "[run_tlc] 委派 tools.fsm_runtime.tlc_runner 跑 FLEET_FSM 5b（liveness, NO symmetry）..."
+    & $PythonBin -m tools.fsm_runtime.tlc_runner --module FLEET_FSM --cfg FLEET_FSM_LIVENESS.cfg --download @TlaVersionArgs
+    exit $LASTEXITCODE
 } finally {
     Pop-Location
 }

@@ -437,7 +437,7 @@ CI 在 TLC 之前先跑 `tools/fsm_runtime/tests/test_tla_python_sync.py`：
 **相關規格**：
 - 規格：[`tools/fsm_runtime/formal/SDD_FSM.tla`](../tools/fsm_runtime/formal/SDD_FSM.tla)
 - 配置：[`tools/fsm_runtime/formal/SDD_FSM.cfg`](../tools/fsm_runtime/formal/SDD_FSM.cfg)
-- 執行入口：[`run_tlc.sh`](../tools/fsm_runtime/formal/run_tlc.sh)（CI/Linux）／🆕 [`tlc_runner.py`](../tools/fsm_runtime/tlc_runner.py)（**跨平台，Windows PowerShell 5.1 亦可**：`python -m tools.fsm_runtime.tlc_runner --download`；opt-in pytest `SDD_RUN_TLC=1 pytest -m tlc`）／`run_tlc.ps1`（需 PowerShell Core / pwsh）
+- 執行入口：[`run_tlc.sh`](../tools/fsm_runtime/formal/run_tlc.sh)（CI/Linux）／[`tlc_runner.py`](../tools/fsm_runtime/tlc_runner.py)（**跨平台，Windows PowerShell 5.1 亦可**：`python -m tools.fsm_runtime.tlc_runner --download`；opt-in pytest `SDD_RUN_TLC=1 pytest -m tlc`）／`run_tlc.ps1`（🔴 R65：已改寫為委派 `tlc_runner.py` 的薄殼，原「需 PowerShell Core / pwsh」限制隨之解除——薄殼本身不再對 java 做 native stderr 重定向，PS 5.1 對此的 ErrorRecord 包裝問題已不成立，原生 Windows PowerShell 5.1 可直接執行，2026-07-31 實測）
 - 雙源一致性測試：[`tools/fsm_runtime/tests/test_tla_python_sync.py`](../tools/fsm_runtime/tests/test_tla_python_sync.py)
 - 規則出處：CLAUDE.md Rule 9.18.1 ~ 9.18.4
 - 報告範本：`build/reports/formal/TLC-COVERAGE-{date}.md`

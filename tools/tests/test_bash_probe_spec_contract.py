@@ -81,8 +81,72 @@ def _probe_a_real_usable_bash_for_fixture() -> str | None:
 _BASH = _probe_a_real_usable_bash_for_fixture()
 
 
+def _find_real_git_bash_install_root() -> Path | None:
+    """回傳本機真實 Git for Windows 安裝根目錄（同時含 `bin/bash.exe` 與
+    `usr/bin/bash.exe` 兩支二進位的目錄），供下方手法 A／B 兩個新輔助函式共用
+    （DEF-101-618(a)）。找不到（例如非 Windows 平台、或找不到 git）回傳 `None`。
+    """
+    git = shutil.which("git")
+    if not git:
+        return None
+    git_path = Path(git).resolve()
+    for up in list(git_path.parents)[:4]:
+        if (up / "bin" / "bash.exe").exists() and (up / "usr" / "bin" / "bash.exe").exists():
+            return up
+    return None
+
+
+_install_root_for_bin_bash = _find_real_git_bash_install_root()
+_REAL_BIN_BASH: str | None = (
+    str(_install_root_for_bin_bash / "bin" / "bash.exe") if _install_root_for_bin_bash else None
+)
+
+
+def _build_coreutils_less_bash_clone(tmp_root: Path) -> Path | None:
+    """在 `tmp_root` 下建構一份「刻意缺 coreutils 的 `Git\\bin\\bash.exe` 複製品」
+    （手法 B，DEF-101-618(a)）。
+
+    WHY：`export PATH=` 限縮外部傳入 PATH 這招對真實 `Git\\bin\\bash.exe`
+    完全無效——該啟動器啟動時會**無條件**把 `/mingw64/bin:/usr/bin`（相對自身
+    安裝根目錄）注入到自己內部 PATH 最前面，不受外部傳入 PATH 內容影響（實測：
+    `env={"PATH": <單一空目錄>}` 呼叫後，bash 內部 `echo $PATH` 仍印出
+    `/mingw64/bin:/usr/bin:...`）。要讓這款啟動器對 `dirname` 確定性失敗，須讓
+    它自我注入的目標目錄本身缺 coreutils，而非限縮外部 PATH（那是手法 A，只對
+    `usr/bin/bash.exe` 這類不自我注入的解譯器有效，見 `TestProbeCmdRealSubprocessBehavior`）。
+
+    複製品結構（皆複製自本機真實 Git 安裝，路徑相對 `tmp_root`）：
+      bin/bash.exe          <- 啟動器本體（真實 `<install_root>/bin/bash.exe`）
+      usr/bin/bash.exe      <- 真解譯器（真實 `<install_root>/usr/bin/bash.exe`）
+      usr/bin/msys-2.0.dll  <- 解譯器執行期依賴（缺了會啟動失敗，非本測試要模擬
+                                的「找不到 dirname」情境，兩者性質不同）
+      etc/                  <- 空目錄（MSYS root 偵測標記）
+      mingw64/bin/          <- 空目錄（自我注入目標之一，刻意不放 coreutils）
+
+    找不到本機真實 Git 安裝（例如非 Windows 平台）回傳 `None`，呼叫端應
+    `skipTest`。
+    """
+    install_root = _find_real_git_bash_install_root()
+    if install_root is None:
+        return None
+    real_bin_bash = install_root / "bin" / "bash.exe"
+    real_usr_bin_bash = install_root / "usr" / "bin" / "bash.exe"
+    real_msys_dll = install_root / "usr" / "bin" / "msys-2.0.dll"
+    if not real_msys_dll.exists():
+        return None
+    clone_bin = tmp_root / "bin"
+    clone_usr_bin = tmp_root / "usr" / "bin"
+    clone_etc = tmp_root / "etc"
+    clone_mingw64_bin = tmp_root / "mingw64" / "bin"
+    for d in (clone_bin, clone_usr_bin, clone_etc, clone_mingw64_bin):
+        d.mkdir(parents=True, exist_ok=True)
+    shutil.copy2(real_bin_bash, clone_bin / "bash.exe")
+    shutil.copy2(real_usr_bin_bash, clone_usr_bin / "bash.exe")
+    shutil.copy2(real_msys_dll, clone_usr_bin / "msys-2.0.dll")
+    return clone_bin / "bash.exe"
+
+
 def usable_bash_with_probe_spy(
-    bash_probe_module, path_env: str
+    bash_probe_module, path_env: str, candidate_bash: str | None = None
 ) -> tuple[str | None, list[tuple[int, str]], list[OSError]]:
     """真跑生產端 `usable_bash()`，同時記錄它對 `subprocess.run` 的每一次呼叫結果。
 
@@ -97,8 +161,13 @@ def usable_bash_with_probe_spy(
     回傳 `(result, completed, spawn_errors)`：
       `completed`    = `[(returncode, stdout), ...]`（子行程起來並跑完）
       `spawn_errors` = `[OSError, ...]`（`CreateProcess`／`execve` 失敗，載具壞掉）
+
+    `candidate_bash`（DEF-101-618(a) 新增，選用）：指定要驗的候選 bash 路徑；
+    省略時沿用既有預設值 `_BASH`，對既有呼叫端零行為變化。用於讓
+    `TestUsableBashRejectsCoreutilsLessBinBashClone` 可以指定手法 B 建構出的
+    「缺 coreutils 複製品」作為候選，而非本檔 fixture 探測到的真實可用 bash。
     """
-    real_bash = _BASH
+    real_bash = candidate_bash if candidate_bash is not None else _BASH
     completed: list[tuple[int, str]] = []
     spawn_errors: list[OSError] = []
     real_run = subprocess.run
@@ -166,6 +235,130 @@ class TestProbeCmdRealSubprocessBehavior(unittest.TestCase):
         self.assertGreaterEqual(len(lines), 2)
         self.assertEqual(lines[0].strip(), _spec.PROBE_EXPECT_ECHO)
         self.assertEqual(lines[1].strip(), _spec.PROBE_EXPECT_DIRNAME)
+
+
+@unittest.skipUnless(
+    _REAL_BIN_BASH, "需要本機真實 Git\\bin\\bash.exe 驗證自我注入 PATH 現象"
+)
+class TestBinBashLauncherSelfInjectsPathContract(unittest.TestCase):
+    """行為層防線（DEF-101-618(a)）：直接鎖住「限縮外部 PATH（手法 A 的原始形態）
+    對 `bin/bash.exe` 這類會自我注入 PATH 的啟動器無效，但讓 bash **自己**在
+    啟動器完成自我注入之後、於自身行程內部執行 `export PATH=` 則可讓它確定性
+    失敗」這個現象本身，證明 R64 殘留發現（`TestProbeCmdRealSubprocessBehavior`
+    的兩支「拒絕」測試在 pwsh 下選到 `bin/bash.exe` 時失去鑑別力）的前提是真的，
+    也證明手法 A 的解法（"export PATH= ; " 前綴）對它真的有效。
+
+    此類與 `TestProbeCmdRealSubprocessBehavior`（驗證 `usr/bin/bash.exe` 這類
+    不自我注入的解譯器）互補、不重複：兩者驗證的是兩款不同二進位對同一種模擬
+    手法的不同反應，各自對不同候選類型維持鑑別力。
+    """
+
+    def test_restricted_external_path_alone_is_ineffective(self) -> None:
+        # 純限縮外部 PATH（單一空目錄）：對 bin/bash.exe 這類自我注入啟動器
+        # 無效——它仍會找到 dirname（因為 /mingw64/bin:/usr/bin 已被注入內部
+        # PATH 最前面），rc 仍是 0。這正是既有兩支「拒絕」測試在 pwsh 下選到
+        # 這款啟動器時失去鑑別力的根因（DEF-101-618(a)）。
+        with tempfile.TemporaryDirectory(prefix="probe_no_coreutils_") as empty_dir:
+            result = subprocess.run(
+                [_REAL_BIN_BASH, "-c", _spec.PROBE_CMD],
+                capture_output=True, text=True, encoding="utf-8",
+                errors="replace", timeout=15, env={"PATH": empty_dir},
+            )
+        self.assertEqual(
+            result.returncode, 0,
+            "現象前提不成立：外部限縮 PATH 竟讓 bin/bash.exe 也找不到 dirname"
+            f"（rc={result.returncode}, stdout={result.stdout!r}）——若本斷言失敗，"
+            "代表 DEF-101-618(a) 描述的自我注入現象在本機已不成立，需重新調查",
+        )
+
+    def test_export_path_empty_makes_probe_fail(self) -> None:
+        # 手法 A：讓 bash 自己在內部執行 `export PATH=`，覆寫掉啟動器已完成的
+        # 自我注入，此時 dirname 才真的找不到（確定性 rc != 0）。
+        with tempfile.TemporaryDirectory(prefix="probe_no_coreutils_") as empty_dir:
+            result = subprocess.run(
+                [_REAL_BIN_BASH, "-c", "export PATH= ; " + _spec.PROBE_CMD],
+                capture_output=True, text=True, encoding="utf-8",
+                errors="replace", timeout=15, env={"PATH": empty_dir},
+            )
+        self.assertNotEqual(
+            result.returncode, 0,
+            "手法 A（bash 內部 export PATH= 清空自我注入後的 PATH）應讓 dirname "
+            f"確定性失敗，實際 rc=0，stdout={result.stdout!r}",
+        )
+
+
+class TestUsableBashRejectsCoreutilsLessBinBashClone(unittest.TestCase):
+    """Wiring 層防線（DEF-101-618(a)）：手法 B——複製一份「刻意缺 coreutils 的
+    `bin/bash.exe` 複製品」，驗證 (i) 直接呼叫該複製品跑 PROBE_CMD 確定性失敗、
+    (ii) 透過生產端 `usable_bash()` 完整 wiring 對這個候選正確拒絕（回傳 None）。
+
+    此手法對 `bin/bash.exe` 這類自我注入啟動器仍有鑑別力——手法 A（限縮外部
+    PATH）對它無效（見 `TestBinBashLauncherSelfInjectsPathContract`），因為
+    生產端把候選當外部黑盒子呼叫（`[cand, "-c", _spec.PROBE_CMD]` 寫死），測試
+    側無法從外部插入 `export PATH= ; ` 前綴；手法 B 改讓候選**本身**自我注入的
+    目標目錄缺 coreutils，不依賴外部如何呼叫它，故仍可驗證生產端 wiring。
+    """
+
+    def setUp(self) -> None:
+        self._tmp = tempfile.TemporaryDirectory(prefix="broken_git_bash_clone_")
+        self.addCleanup(self._tmp.cleanup)
+        clone = _build_coreutils_less_bash_clone(Path(self._tmp.name))
+        if clone is None:
+            self.skipTest(
+                "找不到本機真實 Git for Windows 安裝（含 bin/bash.exe、"
+                "usr/bin/bash.exe、usr/bin/msys-2.0.dll），無法建構手法 B 的"
+                "複製品——本測試僅在該類機器設定下有意義（DEF-101-618(a)）"
+            )
+        self.broken_bash = str(clone)
+        repo_root = Path(__file__).resolve().parents[2]
+        sys.path.insert(0, str(repo_root / "AISDLC_SDD" / "scripts"))
+        import bash_probe  # noqa: PLC0415
+        self.bash_probe = bash_probe
+
+    def test_direct_subprocess_call_fails(self) -> None:
+        # 必須明確限縮外部 PATH（單一空目錄）：若不傳 `env=`、讓子行程原樣繼承
+        # 呼叫端目前這個真實系統 PATH（其中仍含本機真正的 coreutils 目錄），
+        # 自我注入的空目錄找不到 dirname 後，解析仍會落到繼承 PATH 尾端的真實
+        # coreutils 目錄而意外成功（本機實測 rc=0）——那驗的是「繼承 PATH 有無
+        # coreutils」，不是本測試要驗的「複製品自我注入的目標目錄本身缺
+        # coreutils」。限縮成單一空目錄後，整條 PATH 都沒有真實 coreutils 可
+        # 落回，才能確定性重現 rc=127。
+        with tempfile.TemporaryDirectory(prefix="probe_no_coreutils_") as empty_dir:
+            result = subprocess.run(
+                [self.broken_bash, "-c", _spec.PROBE_CMD],
+                capture_output=True, text=True, encoding="utf-8",
+                errors="replace", timeout=15, env={"PATH": empty_dir},
+            )
+        self.assertNotEqual(
+            result.returncode, 0,
+            "缺 coreutils 的 bin/bash.exe 複製品應無法執行 dirname，實際 rc=0，"
+            f"stdout={result.stdout!r}——複製品未如預期缺 coreutils",
+        )
+
+    def test_usable_bash_rejects_this_candidate(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="probe_no_coreutils_") as empty_dir:
+            result, completed, spawn_errors = usable_bash_with_probe_spy(
+                self.bash_probe, empty_dir, candidate_bash=self.broken_bash
+            )
+        self.assertFalse(
+            spawn_errors,
+            "載具故障（非生產端結論）：usable_bash() 的探測子行程根本沒起來"
+            f"（{[f'{type(e).__name__}: {e}' for e in spawn_errors]}）",
+        )
+        self.assertTrue(
+            completed,
+            "生產端 usable_bash() 一次 subprocess 都沒呼叫——候選蒐集或 which 替身壞了",
+        )
+        self.assertNotEqual(
+            completed[-1][0], 0,
+            f"缺 coreutils 的複製品應以非 0 收場（實際 rc=0，stdout="
+            f"{completed[-1][1]!r}）——複製品已失去鑑別力",
+        )
+        self.assertIsNone(
+            result,
+            "usable_bash() 應拒絕缺 coreutils 的 bin/bash.exe 複製品並回傳 None，"
+            "實際卻回傳可用路徑",
+        )
 
 
 @unittest.skipUnless(_BASH, "需要本機可用的 bash 驗證生產端到端 wiring")

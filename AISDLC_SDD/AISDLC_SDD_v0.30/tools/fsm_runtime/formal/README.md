@@ -26,7 +26,10 @@ formal/
 
 ### 自動安裝（推薦）
 
-`run_tlc.sh` / `run_tlc.ps1` 會在 `lib/tla2tools.jar` 不存在時自動下載：
+`run_tlc.sh` / `run_tlc.ps1` 會在 `lib/tla2tools.jar` 不存在時自動下載（🔴 R65：兩者已改寫為
+委派 `tools/fsm_runtime/tlc_runner.py` 的薄殼，下載/呼叫/摘要解析邏輯以其為唯一真相源；
+`run_tlc.ps1` 原「需 PowerShell Core / pwsh」限制隨之解除，下方範例的 `pwsh` 可替換為
+Windows 內建 `powershell`〔PS 5.1〕）：
 
 ```bash
 # Linux/macOS (CI)
@@ -49,7 +52,7 @@ SHA256：腳本驗證；不符合即 abort。
 # Linux/macOS
 bash tools/fsm_runtime/formal/run_tlc.sh
 
-# Windows
+# Windows（同上「安裝 TLC」小節訂正：pwsh 可替換為 Windows 內建 powershell〔PS 5.1〕）
 pwsh tools/fsm_runtime/formal/run_tlc.ps1
 ```
 

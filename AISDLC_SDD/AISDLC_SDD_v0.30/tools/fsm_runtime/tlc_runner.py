@@ -2,15 +2,20 @@
 
 取代僅 pwsh 可用的 formal/run_tlc.ps1（在 Windows PowerShell 5.1 會 parse 失敗）。
 純 Python + subprocess，任何有 `java` 與 `tla2tools.jar` 的環境皆可跑（Windows PS 5.1 /
-PowerShell Core / Linux / macOS / CI）。與 formal/run_tlc.sh 等價。
+PowerShell Core / Linux / macOS / CI）。R65（ADR-XPLAT-002 §5 Phase 2-A）起，
+formal/run_tlc.sh／run_tlc.ps1 已改寫為委派本模組的薄殼（不再自行實作 TLC 呼叫/
+摘要解析/jar 下載），本模組是唯一真相源。
 
 搭配 `tests/test_tla_python_sync.py` 的離線可達性不變量（reachable=N/N，零 Java 依賴、
 每次 pytest 強制）：本地常駐守門用 BFS；完整時序+計數器窮舉用本執行器（有 java 時）。
 
 用法：
-    python -m tools.fsm_runtime.tlc_runner            # 跑驗證（jar 需已在 formal/lib/）
-    python -m tools.fsm_runtime.tlc_runner --download  # 缺 jar 時先下載
+    python -m tools.fsm_runtime.tlc_runner                       # 跑驗證（jar 需已在 formal/lib/）
+    python -m tools.fsm_runtime.tlc_runner --download             # 缺 jar 時先下載
+    python -m tools.fsm_runtime.tlc_runner --install-only         # 僅下載 jar 後退出，不跑 TLC
     python -m tools.fsm_runtime.tlc_runner --depth 50
+    python -m tools.fsm_runtime.tlc_runner --module FLEET_FSM --cfg FLEET_FSM_LIVENESS.cfg
+    python -m tools.fsm_runtime.tlc_runner --download --tla-version v1.8.1  # 下載指定版本 jar
 退出碼：0 通過 / 1 invariant|liveness|deadlock 違反 / 2 環境錯誤（無 java/jar）
 """
 from __future__ import annotations
@@ -119,18 +124,42 @@ def main(argv: list[str]) -> int:
     ap = argparse.ArgumentParser(description="跨平台 TLC 執行器（SDD_FSM / META_FSM 窮舉驗證）")
     ap.add_argument("--depth", type=int, default=50)
     ap.add_argument("--download", action="store_true", help="缺 jar 時先下載 tla2tools.jar")
+    ap.add_argument("--install-only", action="store_true",
+                    help="僅下載 tla2tools.jar（若不存在）後退出，不執行 TLC（R65 ADR-XPLAT-002 "
+                         "§5 Phase 2-A：run_tlc.{sh,ps1} 薄殼委派用，取代兩份各自的 curl/wget/"
+                         "Invoke-WebRequest 下載邏輯）")
     ap.add_argument("--module", default="SDD_FSM",
                     help="要驗證的模組（SDD_FSM | META_FSM | FLEET_FSM | COMPOSITION_FSM | OPTIMIZATION_FSM；預設 SDD_FSM）")
+    ap.add_argument("--cfg", default=None,
+                    help="覆寫由 --module 推導的 .cfg 檔名（預設 None 時沿用 <module>.cfg；"
+                         "例：--module FLEET_FSM --cfg FLEET_FSM_LIVENESS.cfg 跑無 SYMMETRY 的"
+                         "liveness 窮舉，R65 新增，供 run_tlc.{sh,ps1} 薄殼的 5b 步委派）")
+    ap.add_argument("--tla-version", default=None,
+                    help="覆寫下載 tla2tools.jar 的版本（預設 None 時沿用 DEFAULT_TLA_VERSION "
+                         f"常數＝{DEFAULT_TLA_VERSION!r}；例：--tla-version v1.8.1。R65 item4 恢復"
+                         "薄殼化前 TLA_VERSION 環境變數／-TlaVersion 參數的等價覆寫能力，僅在"
+                         "使用者顯式帶值時才影響 download_jar()，沒帶值行為不變）")
     args = ap.parse_args(argv[1:])
     tla = f"{args.module}.tla"
-    cfg = f"{args.module}.cfg"
+    cfg = args.cfg if args.cfg else f"{args.module}.cfg"
 
     if find_java() is None:
         print("ERROR: java 不存在，請安裝 JDK 11+。", file=sys.stderr)
         return 2
+
+    tla_version = args.tla_version or DEFAULT_TLA_VERSION
+
+    if args.install_only:
+        if jar_path().exists():
+            print(f"[tlc_runner] jar 已存在：{jar_path()}")
+        else:
+            download_jar(tla_version)
+        print("[tlc_runner] --install-only：完成。")
+        return 0
+
     if not jar_path().exists():
         if args.download:
-            download_jar()
+            download_jar(tla_version)
         else:
             print(f"ERROR: 缺 {jar_path()}；加 --download 或先放置 jar。", file=sys.stderr)
             return 2

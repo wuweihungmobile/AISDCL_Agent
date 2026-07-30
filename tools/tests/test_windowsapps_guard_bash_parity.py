@@ -138,6 +138,10 @@ _CALLER_FILES = [
     _REPO_ROOT / "AISDLC_SDD" / "scripts" / "copy_on_evolve.sh",
     _LATEST_SDD_ROOT / "tools" / "arch_fitness" / "run_self_evolution.sh",
     _LATEST_SDD_ROOT / "tools" / "install_hooks" / "install_post_commit.sh",
+    # R65（ADR-XPLAT-002 §5 Phase 2-A）：run_tlc.sh 由委派 java/TLC 呼叫的實作
+    # 改寫為委派 tools.fsm_runtime.tlc_runner 的薄殼，新增裸 python 探測，已改用
+    # 共用 guard（`is_real_python_candidate`）而非獨立重寫。
+    _LATEST_SDD_ROOT / "tools" / "fsm_runtime" / "formal" / "run_tlc.sh",
 ]
 
 # 裸 `command -v python`／`command -v python3` 可用性判斷殘留偵測——只認本 repo

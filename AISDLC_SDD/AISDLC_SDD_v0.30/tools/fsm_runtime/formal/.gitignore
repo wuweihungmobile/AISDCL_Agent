@@ -1,6 +1,5 @@
 # TLC working artifacts (do not commit)
 states/
-tlc_run.log
 tlc_coverage.log
 tlc_dump.log
 *.dot
@@ -15,8 +14,6 @@ lib/*.jar
 # Phase I M5 / liveness run artifacts
 sdd_tlc.out
 tlc_full.out
-fleet_tlc.log
-fleet_tlc_liveness.log
 *.log
 FLEET_FSM_TTrace_*.tla
 FLEET_FSM_TTrace_*.bin

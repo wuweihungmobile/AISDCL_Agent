@@ -313,9 +313,10 @@ def _read_source(path: Path) -> str:
     全毀，root-infra-ci 有 BOM 守門），故修法是**讀取端正確剝除**，不是拿掉 BOM。
 
     採 `utf-8-sig` 而非在 bytes 層自剝：`tools/check_script_parity.py::_extract_markers`／
-    `_extract_tlc_tracks`（同樣先剝 `<# … #>` 再逐行判定，與本檔 `_normalize()` 幾乎同形）
-    早就用 `utf-8-sig`。兩支工具對**同一批** `.ps1` 各用一種讀法＝同一個量兩個答案；
-    統一到 repo 既有的多數慣例才把這個分歧面消滅，而不是再多一種自製剝法。
+    `_extract_tlc_runner_invocations`（R65 起接手已退場的 `_extract_tlc_tracks`，同樣先剝
+    `<# … #>` 再逐行判定，與本檔 `_normalize()` 幾乎同形）早就用 `utf-8-sig`。兩支工具對
+    **同一批** `.ps1` 各用一種讀法＝同一個量兩個答案；統一到 repo 既有的多數慣例才把這個
+    分歧面消滅，而不是再多一種自製剝法。
     """
     return path.read_text(encoding="utf-8-sig", errors="replace")
 

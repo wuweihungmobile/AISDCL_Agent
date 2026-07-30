@@ -13,7 +13,12 @@ LATEST 以 scripts/sdd_version.py SSOT 動態解析，解析失敗 fail-loud—�
 內跑，git 必在；凍結版 v0.01~v0.2X 依鐵律不掃）下的每支 .sh/.ps1 必屬五類之一，否則
 fail-loud 列出未納管檔名：
   (1) 成對納管（_MARKER_PAIRS 標籤比對）；(2) 薄殼 hash 釘選（_THINNESS_ENROLLED）；
-  (3) run_tlc FSM 軌錨點集合鎖（_TLC_TRACK_ENROLLED，R12）；(4) 成對豁免（_EXEMPT_PAIRS，
+  (3) LATEST 版薄殼 hash 釘選（_LATEST_THINNESS_ENROLLED，R65；🔴 前身是 R12 的
+  run_tlc FSM 軌錨點集合鎖 _TLC_TRACK_ENROLLED——ADR-XPLAT-002 §5 Phase 2-A 將
+  run_tlc.{sh,ps1} 薄殼化為委派 tools.fsm_runtime.tlc_runner 後，兩側腳本已不再
+  內嵌 .tla/.cfg 檔名字面，原鎖失去可抽取對象，退場並升級為 hash 釘選——語意同
+  _THINNESS_ENROLLED，但鍵是 LATEST-relative、需動態解析，故不與其共表，見
+  _check_latest_thinness 區塊註解）；(4) 成對豁免（_EXEMPT_PAIRS，
   附 (tier, reason)）；(5) 單邊豁免（_SINGLE_SIDED_EXEMPT，附 (tier, reason)）。LATEST 下的納管
   登記一律用「LATEST/tools/…」相對 key（版本升版 copy-on-evolve 時登記不失效）。
   各清單另有 stale 反向檢查（防清單腐化），詳見 _check_pair_enrollment 區塊註解。
@@ -141,10 +146,13 @@ def _extract_markers(path: Path) -> list[str]:
 # local_ci_gate 先例，見 _THINNESS_ENROLLED）。刻意刪減 step 時須同步更新
 # 本表（工具會在訊息中指路）。
 _MIN_EXTRACT_COUNTS = {
-    # R12 ARCH-R12-3：LATEST run_tlc FSM 軌錨點 token multiset（SDD_FSM.cfg/.tla +
-    # FLEET_FSM.cfg/.tla×2 + FLEET_FSM_LIVENESS.cfg = 6，2026-07-18 實跑輸出釘選；
-    # SD 一審 SD-2 改 multiset 語意後含重複次數）
-    "run_tlc_tracks": 6,
+    # R65（ADR-XPLAT-002 §5 Phase 2-A）：接替退場的 'run_tlc_tracks'（R12 ARCH-R12-3，
+    # 抽 .tla/.cfg 檔名字面——run_tlc.{sh,ps1} 薄殼化後已無此字面，鎖失去可抽取對象）。
+    # 新錨點＝薄殼委派 tools.fsm_runtime.tlc_runner 時傳的 --module/--cfg 引數 token
+    # multiset：--module SDD_FSM、--module FLEET_FSM（5a 預設 cfg）、--module FLEET_FSM
+    # （5b，與 --cfg FLEET_FSM_LIVENESS.cfg 同一行）、--cfg FLEET_FSM_LIVENESS.cfg，
+    # 2026-07-31 實跑輸出釘選＝4（見 _check_run_tlc_invocation_parity 區塊註解）。
+    "run_tlc_invocations": 4,
 }
 
 
@@ -210,42 +218,112 @@ def _resolve_latest_tools() -> Path | None:
     return latest / "tools"
 
 
-# ── run_tlc FSM 軌錨點集合鎖（R12 ARCH-R12-3）───────────────────────────────
-# WHY：LATEST tools 下四對 .sh/.ps1 過去完全在掃描邊界外，其中 fsm_runtime/formal/
-# run_tlc 是唯一有實證漂移前科的對（DEF-101-100：.ps1 曾缺整條 FLEET_FSM 軌），
-# 修後零機械鎖。兩側腳本無 [n/m] 標籤，但引用的 FSM 軌檔名（*_FSM*.tla/.cfg）
-# 是天然錨點——抽取非註解行的軌 token 做「multiset」比對（排序後含重複次數；
-# R12 SD 一審 SD-2：原「排序去重」集合語意對「同 token 多次引用、單側刪其一」
-# 不敏感，改保留重複次數即一併攔截），恰好攔「單側缺整條軌」型漂移。
-# floor 釘選見 _MIN_EXTRACT_COUNTS['run_tlc_tracks']。
-_TLC_TRACK_RE = re.compile(r"\b\w*_FSM\w*\.(?:tla|cfg)\b")
+# ── run_tlc 委派引數集合鎖（R65，取代 R12 ARCH-R12-3 的 FSM 軌錨點集合鎖）─────────
+# 背景：ADR-XPLAT-002 §5 Phase 2-A 把 run_tlc.{sh,ps1} 改寫為委派
+# `python -m tools.fsm_runtime.tlc_runner` 的薄殼，舊鎖（_TLC_TRACK_RE／
+# _extract_tlc_tracks／_check_run_tlc_tracks）抽取的是兩側腳本內嵌的 *_FSM*.tla/.cfg
+# 檔名字面（`-config SDD_FSM.cfg ... SDD_FSM.tla` 這種 java 呼叫寫法）——薄殼化後
+# 兩側都只剩 `--module <NAME>` 這種不含檔名字面的引數，舊鎖的抽取對象已不存在，
+# 依 ADR §4.2 rule 3 dominance test：
+#   (a) 「兩側 run_tlc.sh/.ps1 必須存在」——有接手者：下方 _check_latest_thinness
+#       的 hash 釘選同樣要求兩側檔案存在，且更嚴格（連內容都鎖）。
+#   (b) 「抽取到的軌清單非空」——無直接接手者需要，但薄殼委派的引數本身即是新錨點
+#       （見下）。
+#   (c) 「兩側軌 multiset 必須相等」（DEF-101-100 攔的正是這條：.ps1 曾缺整條
+#       FLEET_FSM 軌而 .sh 有，字面 hash 釘選對此**不設防**——hash 只鎖「這份檔案
+#       是否等於上次核准的樣子」，兩側各自更新各自的 pin 即可雙雙綠燈，不會互相
+#       比較。此斷言沒有接手者，須保留對應驗證）——改抽兩側薄殼呼叫
+#       tools.fsm_runtime.tlc_runner 時傳的 `--module`/`--cfg` 引數 token 做
+#       multiset 比對，語意與舊鎖相同（攔「單側少一次委派呼叫＝少一條軌」），
+#       只是錨點換成新形態下仍存在的字面（引數字串，非檔名）。
+_TLC_RUNNER_ARG_RE = re.compile(r"--(?:module|cfg)[ \t=]+\S+")
 
 
-def _extract_tlc_tracks(path: Path) -> list[str]:
-    """抽取 FSM 軌錨點：非註解行引用的 *_FSM*.tla/.cfg 檔名 token（排序、含重複）。"""
+def _extract_tlc_runner_invocations(path: Path) -> list[str]:
+    """抽取薄殼內委派 tlc_runner 的 --module/--cfg 引數 token（排序、含重複）。"""
     text = _strip_comments(
         path.read_text(encoding="utf-8-sig"), is_ps1=path.suffix == ".ps1"
     )
-    return sorted(_TLC_TRACK_RE.findall(text))
+    return sorted(_TLC_RUNNER_ARG_RE.findall(text))
 
 
-def _check_run_tlc_tracks(latest_tools: Path) -> bool:
-    label = "run_tlc_tracks"
+def _check_run_tlc_invocation_parity(latest_tools: Path) -> bool:
+    label = "run_tlc_invocations"
     sh = latest_tools / "fsm_runtime" / "formal" / "run_tlc.sh"
     ps1 = latest_tools / "fsm_runtime" / "formal" / "run_tlc.ps1"
     if not sh.is_file() or not ps1.is_file():
         print(f"❌ {label}：LATEST run_tlc 腳本缺失（{sh} / {ps1}）— 該對若已移除，"
-              f"請同步更新 _TLC_TRACK_ENROLLED 與本檢查", file=sys.stderr)
+              f"請同步更新 _LATEST_THINNESS_ENROLLED 與本檢查", file=sys.stderr)
         return False
-    sh_tracks = _extract_tlc_tracks(sh)
-    ps1_tracks = _extract_tlc_tracks(ps1)
-    if not sh_tracks or not ps1_tracks:
-        print(f"❌ {label}：抽取到空軌清單（.sh {len(sh_tracks)} / .ps1 "
-              f"{len(ps1_tracks)}）— 宣告 pattern 可能已改，請同步本腳本",
+    sh_args = _extract_tlc_runner_invocations(sh)
+    ps1_args = _extract_tlc_runner_invocations(ps1)
+    if not sh_args or not ps1_args:
+        print(f"❌ {label}：抽取到空引數清單（.sh {len(sh_args)} / .ps1 "
+              f"{len(ps1_args)}）— 宣告 pattern 可能已改，請同步本腳本",
               file=sys.stderr)
         return False
-    ok = _check_extract_floor(label, sh_tracks, ps1_tracks)
-    return _compare(f"{label}（LATEST FSM 軌錨點集合）", sh_tracks, ps1_tracks) and ok
+    ok = _check_extract_floor(label, sh_args, ps1_args)
+    return _compare(f"{label}（LATEST tlc_runner 委派引數集合）", sh_args, ps1_args) and ok
+
+
+# ── LATEST 版薄殼 hash 釘選（R65，ADR-XPLAT-002 §5 Phase 2-A）─────────────────
+# WHY 不併入 check_wrapper_thinness._PINNED_SHA256：該表的鍵是「固定 repo-root
+# 相對路徑」設計（其自身 tools/tests/test_check_wrapper_thinness.py::
+# TestNoHardcodedLineCounts.test_print_lines_reports_real_counts 直接以
+# `m.ROOT / rel` 驗證磁碟存在性，是刻意的設計不變量，非疏漏）；LATEST 演化版路徑
+# 隨 Copy-on-Evolve 逐版變動，需要動態解析——本檔既有的 _resolve_latest_tools()／
+# _registered_path() 已具備這個能力（_EXEMPT_PAIRS／_SINGLE_SIDED_EXEMPT／已退場的
+# _TLC_TRACK_ENROLLED 皆走這條路）。故 run_tlc 薄殼化後的 hash 釘選改在本檔自建
+# 一份小型登記表，**重用**（非重寫）check_wrapper_thinness 的正規化/hash 純函式
+# （normalized_sha256／MAX_LINES），不強行把 LATEST 語意塞進其固定路徑設計、
+# 也不動它既有的 10 支釘選與既有測試。
+_LATEST_THINNESS_ENROLLED = {"LATEST/tools/fsm_runtime/formal/run_tlc"}
+_LATEST_PINNED_SHA256: dict[str, str] = {
+    # 2026-07-31 實測（`python -c "import check_wrapper_thinness as t; print(t.normalized_sha256(...))"`）。
+    # R65 四方複審 7 項修復落地後的最終內容：(1) 裸執行三軌呼叫恆帶 --download 恢復
+    # jar 自動下載、(3) .ps1 python 候選探測順序改 python3 優先（同 .sh）、(4) 新增
+    # --tla-version 轉傳（.sh 讀 TLA_VERSION 環境變數／.ps1 讀 -TlaVersion 參數，
+    # 皆只在使用者顯式帶值時才轉傳）。
+    "LATEST/tools/fsm_runtime/formal/run_tlc.sh": (
+        "0af98b1aecf6293bd12d7bc1936b797c201f48ead1cfffaaf3a773fd7f4d1886"
+    ),
+    "LATEST/tools/fsm_runtime/formal/run_tlc.ps1": (
+        "f6bb3be45c92fdbaddfac34735e465474c7f32b40c06bb9d6ef50ec1cf775909"
+    ),
+}
+
+
+def _check_latest_thinness(latest_tools: Path | None) -> bool:
+    """LATEST 版薄殼 hash 釘選守門（同 check_wrapper_thinness.check_wrapper_thinness()
+    邏輯，重用其正規化/hash 純函式，範圍限定 _LATEST_PINNED_SHA256 這組
+    LATEST-relative 對子）。"""
+    import check_wrapper_thinness as _thinness
+
+    ok = True
+    for rel in sorted(_LATEST_PINNED_SHA256):
+        pinned = _LATEST_PINNED_SHA256[rel]
+        path = _registered_path(rel, latest_tools)
+        if path is None or not path.is_file():
+            print(f"❌ LATEST 薄殼釘選：{rel} 檔案不存在或 LATEST 解析失敗",
+                  file=sys.stderr)
+            ok = False
+            continue
+        line_count = len(path.read_text(encoding="utf-8-sig").splitlines())
+        if line_count > _thinness.MAX_LINES:
+            print(f"❌ LATEST 薄殼釘選：{rel} {line_count} 行超過薄殼上限 "
+                  f"{_thinness.MAX_LINES} 行", file=sys.stderr)
+            ok = False
+        actual = _thinness.normalized_sha256(path)
+        if actual != pinned:
+            print(f"❌ LATEST 薄殼釘選：{rel} 正規化內容 hash 與釘選不符（釘選 "
+                  f"{pinned[:12]}… / 實際 {actual[:12]}…）—— wrapper 實質內容變動；"
+                  f"若變更仍屬薄殼職責，請以 check_wrapper_thinness.normalized_sha256() "
+                  f"取新值同步更新 _LATEST_PINNED_SHA256", file=sys.stderr)
+            ok = False
+    if ok:
+        print(f"✅ LATEST 薄殼釘選：{len(_LATEST_PINNED_SHA256)} 支 hash 釘選皆正常"
+              f"（{len(_LATEST_THINNESS_ENROLLED)} 對）")
+    return ok
 
 
 def _check_thinness_cross_lock() -> bool:
@@ -457,8 +535,6 @@ _THINNESS_ENROLLED = {
     "AutoClaude/tools/install_git_hooks",
     "AISDLC_SDD/scripts/install-hooks",
 }
-# run_tlc FSM 軌錨點集合鎖（R12；見 _check_run_tlc_tracks 區塊註解）
-_TLC_TRACK_ENROLLED = {"LATEST/tools/fsm_runtime/formal/run_tlc"}
 _EXEMPT_PAIRS: dict[str, tuple[str, str]] = {
     "AISDLC_SDD/scripts/ci-gate": (
         _UNPINNED,
@@ -473,7 +549,8 @@ _EXEMPT_PAIRS: dict[str, tuple[str, str]] = {
         "語意刻意不同、不做標籤對等比對；R11 Architect D1 拍板；"
         "ADR-XPLAT-002 §3.4：心跳檔前兩行為三站點契約，明文禁止收斂"
     ),
-    # ── LATEST 版 tools（R12 ARCH-R12-3 親讀定類；run_tlc 走 _TLC_TRACK_ENROLLED 機械鎖）──
+    # ── LATEST 版 tools（R12 ARCH-R12-3 親讀定類；run_tlc 已於 R65 薄殼化並走
+    #    _LATEST_THINNESS_ENROLLED hash 釘選，見上方區塊）──
     "LATEST/tools/init_project": (
         _TIER3_OS_PRIMITIVE,
         "legacy v3.x 初始化精靈雙原生實作，無 [n/m]/gate 宣告錨點可機械抽取；"
@@ -643,7 +720,7 @@ if _zombie_exempt:
 
 def _enrolled_pairs() -> set[str]:
     parity = {sh_rel[: -len(".sh")] for _label, sh_rel, _ps1 in _MARKER_PAIRS}
-    return (parity | _THINNESS_ENROLLED | _TLC_TRACK_ENROLLED
+    return (parity | _THINNESS_ENROLLED | _LATEST_THINNESS_ENROLLED
             | set(_EXEMPT_PAIRS))
 
 
@@ -1018,13 +1095,17 @@ def _print_collapse() -> int:
     """
     import check_wrapper_thinness as _thinness  # 同目錄，頂部已 sys.path 注入
 
-    uep = len(_EXEMPT_PAIRS) + len(_TLC_TRACK_ENROLLED)
+    # R65：_TLC_TRACK_ENROLLED 已退場（見檔頭 R65 說明）——UEP 不再含該項；
+    # AC 改含 _LATEST_PINNED_SHA256／_LATEST_THINNESS_ENROLLED 兩張新表接手其
+    # 「描述性常數登記」角色（§4.2）。
+    uep = len(_EXEMPT_PAIRS)
     ac = (
         len(_thinness._PINNED_SHA256)
         + len(_THINNESS_ENROLLED)
         + len(_EXEMPT_PAIRS)
         + len(_SINGLE_SIDED_EXEMPT)
-        + len(_TLC_TRACK_ENROLLED)
+        + len(_LATEST_PINNED_SHA256)
+        + len(_LATEST_THINNESS_ENROLLED)
         + len(_MIN_EXTRACT_COUNTS)
     )
     print(f"UEP={uep}")
@@ -1033,7 +1114,8 @@ def _print_collapse() -> int:
     print(f"PINNED_SHA256={len(_thinness._PINNED_SHA256)}")
     print(f"EXEMPT_PAIRS={len(_EXEMPT_PAIRS)}")
     print(f"SINGLE_SIDED_EXEMPT={len(_SINGLE_SIDED_EXEMPT)}")
-    print(f"TLC_TRACK_ENROLLED={len(_TLC_TRACK_ENROLLED)}")
+    print(f"LATEST_THINNESS_ENROLLED={len(_LATEST_THINNESS_ENROLLED)}")
+    print(f"LATEST_PINNED_SHA256={len(_LATEST_PINNED_SHA256)}")
     print(f"MIN_EXTRACT_COUNTS={len(_MIN_EXTRACT_COUNTS)}")
     print(f"EQUIVALENCE_GROUPS={len(_EQUIVALENCE_GROUPS)}")
     print("--- _EXEMPT_PAIRS（key -> tier / reason）---")
@@ -1073,14 +1155,16 @@ def main(argv: list[str] | None = None) -> int:
     # local_ci_gate 的 gate-call 抽取比對已於 R12 退場（薄殼化收斂，見檔頭）——
     # 該對現由 _THINNESS_ENROLLED 登記、check_wrapper_thinness.py hash 釘選守門。
 
-    # R12 ARCH-R12-3：LATEST 只解析一次，run_tlc 軌鎖與納管完整性共用結果
+    # R12 ARCH-R12-3：LATEST 只解析一次，run_tlc 委派引數鎖／LATEST 薄殼釘選與
+    # 納管完整性共用結果（R65：原 run_tlc 軌鎖已退場，見上方區塊說明）
     latest_tools = _resolve_latest_tools()
     if latest_tools is None:
-        print("❌ run_tlc_tracks：LATEST 解析失敗 — 無法比對 LATEST run_tlc FSM 軌"
+        print("❌ LATEST 解析失敗 — 無法比對 LATEST run_tlc 委派引數與薄殼 hash 釘選"
               "（詳見下方納管完整性紅燈）", file=sys.stderr)
         ok = False
     else:
-        ok = _check_run_tlc_tracks(latest_tools) and ok
+        ok = _check_run_tlc_invocation_parity(latest_tools) and ok
+        ok = _check_latest_thinness(latest_tools) and ok
 
     ok = _check_pytest_pin() and ok
     ok = _check_git_longpaths_flag_parity() and ok
@@ -1094,8 +1178,8 @@ def main(argv: list[str] | None = None) -> int:
         print("\n❌ 雙平台腳本對等檢查未通過 — .sh/.ps1 必須同步修改（見上列 diff）",
               file=sys.stderr)
         return 1
-    print(f"\n✅ 雙平台腳本對等檢查通過（{len(_MARKER_PAIRS)} 對標籤腳本 + LATEST run_tlc 軌鎖 + "
-          "pytest 釘選 + git longpaths 旗標內容鎖 + 成對/單邊註冊完整性；"
+    print(f"\n✅ 雙平台腳本對等檢查通過（{len(_MARKER_PAIRS)} 對標籤腳本 + LATEST run_tlc 委派引數鎖 + "
+          "LATEST 薄殼釘選 + pytest 釘選 + git longpaths 旗標內容鎖 + 成對/單邊註冊完整性；"
           "薄殼對子另由 check_wrapper_thinness 釘選）")
     return 0
 
