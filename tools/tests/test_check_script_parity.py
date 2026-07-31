@@ -534,6 +534,57 @@ class TestThinnessCrossLock(unittest.TestCase):
         self.assertIn("rogue_wrapper.sh", printed)
 
 
+class TestLatestThinnessCrossLock(unittest.TestCase):
+    """LATEST 版 parity↔thinness 鍵集合交叉鎖（R66 DEF-101-622，同 R12 QA-1 教訓
+    套用於 R65 新表 _LATEST_THINNESS_ENROLLED／_LATEST_PINNED_SHA256）。
+
+    WHY：兩份獨立字面清單同一 commit 各自腐化（清空 pin 表但不動 enrollment 集合）
+    若無交叉鎖，`_check_latest_thinness()` 的迴圈只走 `_LATEST_PINNED_SHA256`，
+    清空後迴圈次數為零、恆回傳 True，且會印出自相矛盾的「0 支 hash 釘選皆正常」
+    訊息——本鎖必須攔下這個情境。"""
+
+    def test_current_tables_consistent_green(self) -> None:
+        with mock.patch("builtins.print"):
+            self.assertTrue(m._check_latest_thinness_cross_lock())
+
+    def test_bug_injection_cleared_pins_still_enrolled_is_red(self) -> None:
+        """紅：清空 _LATEST_PINNED_SHA256、不動 _LATEST_THINNESS_ENROLLED——這正是
+        缺陷描述裡實測過的自相矛盾情境（_check_latest_thinness 本身會誤判綠燈，
+        本鎖須攔下）。"""
+        with mock.patch.object(m, "_LATEST_PINNED_SHA256", {}), \
+             mock.patch("builtins.print") as fake_print:
+            self.assertFalse(m._check_latest_thinness_cross_lock())
+        printed = " ".join(
+            str(arg) for call in fake_print.call_args_list for arg in call.args
+        )
+        self.assertIn("run_tlc.sh", printed)
+        self.assertIn("run_tlc.ps1", printed)
+
+    def test_missing_pin_key_is_red(self) -> None:
+        pins = {
+            k: v for k, v in m._LATEST_PINNED_SHA256.items()
+            if k != "LATEST/tools/fsm_runtime/formal/run_tlc.ps1"
+        }
+        with mock.patch.object(m, "_LATEST_PINNED_SHA256", pins), \
+             mock.patch("builtins.print") as fake_print:
+            self.assertFalse(m._check_latest_thinness_cross_lock())
+        printed = " ".join(
+            str(arg) for call in fake_print.call_args_list for arg in call.args
+        )
+        self.assertIn("run_tlc.ps1", printed)
+
+    def test_extra_pin_without_enrollment_is_red(self) -> None:
+        pins = dict(m._LATEST_PINNED_SHA256)
+        pins["LATEST/tools/rogue_wrapper.sh"] = "0" * 64
+        with mock.patch.object(m, "_LATEST_PINNED_SHA256", pins), \
+             mock.patch("builtins.print") as fake_print:
+            self.assertFalse(m._check_latest_thinness_cross_lock())
+        printed = " ".join(
+            str(arg) for call in fake_print.call_args_list for arg in call.args
+        )
+        self.assertIn("rogue_wrapper.sh", printed)
+
+
 class TestGitLongpathsFlagParity(unittest.TestCase):
     """R50 四方複審發現：macos_smoke_local.sh／windows_smoke_local.ps1 各自獨立
     內嵌 `-c core.longpaths=true` git flag；_SINGLE_SIDED_EXEMPT 過去只登記兩檔

@@ -505,6 +505,100 @@ class TestPlanNeverProposesActiveRows(unittest.TestCase):
         self.assertGreater(len(ADL._status_claimed_ids()), 0)
 
 
+class TestPlanRejectsRowsWithExternalResidencePointers(unittest.TestCase):
+    """判準⑥（指針反向依賴，DEF-101-612）：`plan()` 不得把「有外部居所指針宣稱本列現居
+    主檔」的列判為可搬。
+
+    🔴 這是 DEF-101-612 的直接修復：R60 收尾包執行 `--apply` 搬走 `DEF-101-529`／
+    `555`／`558` 後，家族與治理文件內共 **11 處**居所指針同時失實——判準①②③④⑤只看
+    該列自身狀態，完全不看「有沒有別的檔指著這一列」，`--apply` 當時毫無鑑別力，
+    要等下一次 `--check`（事後稽核）才抓得到。本類別逐項注入真實會撞到的三種形態
+    （立帳見主檔／見主檔／已在某 archive），並反向坐實「正確的排除範圍」不會誤傷。
+
+    正樣本一律用構造的合成 ID（`DEF-999-99x`），不用真實帳本現存列——現行帳本上暫無
+    外部居所指針指向任何可搬候選（R66 Triage 評估的既有現況：`DEF-101-617`／`618` 查無
+    此類指針），拿真實列當正樣本會隨帳本演化而失去代表性。
+    """
+
+    _NEW_ROW = ("| DEF-999-994 | 2026-07-31 | 構造輸入（DEF-101-612 回歸測試） | "
+                "現象 | P3 | 已於上游 fixed 故不另修 | fixed |")
+
+    def _seed_movable_row(self) -> None:
+        """把合成列加進沙箱主檔（此刻不含任何外部指針，應可搬——後續測試各自疊加）。"""
+        _append_to(ADL._LEDGER, "\n" + self._NEW_ROW + "\n")
+
+    def test_control_row_is_movable_without_any_external_pointer(self):
+        """控制組：合成列本身狀態已結、未交棒、未被 crossref 宣稱，理應可搬。
+
+        沒有這一條，後面的「轉不可搬」斷言無法歸因於判準⑥——如果合成列本來就不可搬
+        （例如格式構造錯誤），後面看到「不在 movable 裡」只是重複同一件事，零鑑別力。
+        """
+        with _ledger_sandbox():
+            self._seed_movable_row()
+            p = ADL.plan()
+            self.assertIn("DEF-999-994", [v["id"] for v in p["movable"]],
+                          "控制組本身就不可搬 ⇒ 後續注入測試的『轉紅』無法被正確歸因")
+
+    def test_a_pointer_verb_form_claiming_main_ledger_residence_blocks_the_move(self):
+        """注入『立帳見主檔』宣稱 → 該列必須從可搬轉為不可搬，且理由具名指出判準⑥。"""
+        with _ledger_sandbox():
+            self._seed_movable_row()
+            _append_to(ADL._LEDGER, "\n> 立帳見主檔 `DEF-999-994`。\n")
+            p = ADL.plan()
+            self.assertNotIn(
+                "DEF-999-994", [v["id"] for v in p["movable"]],
+                "有『立帳見主檔』指針宣稱本列現居主檔，plan() 仍判為可搬 —— 判準⑥無牙，"
+                "會重演 R60 的 11 處指針失實事故",
+            )
+            hit = next(v for v in p["blocked"] if v["id"] == "DEF-999-994")
+            self.assertTrue(
+                any("外部居所指針" in b and "DEF-101-612" in b for b in hit["blockers"]),
+                f"blockers 未具名指出判準⑥／DEF-101-612：{hit['blockers']!r}",
+            )
+
+    def test_the_nonverb_scoped_form_also_blocks_the_move(self):
+        """『見主檔』方言（非「立帳見」動詞）同樣要被判準⑥ 攔下（SA-R60R2-03 的居所方言）。"""
+        with _ledger_sandbox():
+            self._seed_movable_row()
+            _append_to(ADL._LEDGER, "\n> 見主檔 `DEF-999-994`（尚待後續處理）。\n")
+            p = ADL.plan()
+            self.assertNotIn("DEF-999-994", [v["id"] for v in p["movable"]],
+                             "『見主檔』方言的居所宣稱未被判準⑥ 攔下")
+
+    def test_a_pointer_that_already_claims_an_archive_does_not_block(self):
+        """反向坐實範圍窄度：宣稱已現居某 archive（非主檔）的指針與本次搬遷無關，不擋。
+
+        沒有這一條，判準⑥ 可能被寫成「只要提到這個 ID 就攔下」的過寬版本，那會讓帳本
+        永遠搬不動任何列（幾乎每一列都會被別處提到）。
+        """
+        with _ledger_sandbox():
+            self._seed_movable_row()
+            _append_to(ADL._LEDGER, "\n> 立帳見 `DEF-999-994`（現居 archive_01）。\n")
+            p = ADL.plan()
+            self.assertIn(
+                "DEF-999-994", [v["id"] for v in p["movable"]],
+                "宣稱已現居某 archive 的指針與『現居主檔』無關，不該被判準⑥ 攔下"
+                "（範圍已被放寬到與 R60 事故無關的形態）",
+            )
+
+    def test_a_quoted_mention_inside_a_code_span_does_not_block(self):
+        """反向坐實例外沿用 check() 既有的 (甲) code span 引述——逐字引述判準語法不算宣稱。
+
+        取 `check()` 判準(4) 真實驗證過的同一種豁免形狀（見 `TestCheckModeBugInjection`
+        的 `test_the_two_quotation_exceptions_are_exempt_but_always_printed`）：如果判準⑥
+        自己另寫一套豁免邏輯而不是共用同一組基元，這裡就會先出現落差。
+        """
+        with _ledger_sandbox():
+            self._seed_movable_row()
+            _append_to(ADL._LEDGER, "\n> 範例語法：`立帳見主檔 DEF-999-994`（僅供說明）。\n")
+            p = ADL.plan()
+            self.assertIn(
+                "DEF-999-994", [v["id"] for v in p["movable"]],
+                "code span 內逐字引述判準語法被判準⑥ 誤判為真實宣稱 —— 未共用 check() 的"
+                "豁免基元（`_quotation_kind`）",
+            )
+
+
 class TestGateSsotCouplingContract(unittest.TestCase):
     """判準來自閘門 SSOT（`check_defect_log_crossref`），不得在本工具內另寫第二份。
 

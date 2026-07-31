@@ -31,7 +31,11 @@ HERE = os.path.dirname(__file__)
 SDD_ROOT = Path(os.path.abspath(os.path.join(HERE, "..", "..")))  # AISDLC_SDD/
 sys.path.insert(0, os.path.join(str(SDD_ROOT), "scripts"))
 
-from component_sanitizer_callsite_scan import find_offenders, iter_module_files  # noqa: E402
+from component_sanitizer_callsite_scan import (  # noqa: E402
+    _SCAN_SUBDIRS,
+    find_offenders,
+    iter_module_files,
+)
 from sdd_version import VERSION_DIR_RE, disk_version_dirs, tracked_version_dirs  # noqa: E402
 
 
@@ -56,12 +60,14 @@ def test_at_least_one_version_directory_found() -> None:
 
 # R57 修正（B2 掃描面缺口）：本鎖原本每個版本只掃 `tools/fsm_runtime/`，
 # 同版本內另外兩處也會寫檔的生產程式碼目錄從未被這支前瞻鎖看過——
-# `.claude/hooks/`（session_start／context_ledger_pre/post／post_commit_drift／
+# `.claude/hooks/`（session_start／context_ledger_pre/post/post_commit_drift／
 # closure_evidence_verify，30 版共 139 個 .py，且 hook 本就會落地 ledger/證據檔）
 # 與 `tools/arch_fitness/`（30 版共 30 個 .py）。實測擴面後 30 版全數 0 offender，
 # 故本次擴面不改變現況判定，價值全在「前瞻」：未來若有人在 hook 或 arch_fitness
 # 裡用 rule_id／ac_id 等風險識別字組檔名而忘記淨化，本鎖現在會抓到，先前不會。
-_SCAN_SUBDIRS = ("tools/fsm_runtime", ".claude/hooks", "tools/arch_fitness")
+# R66（DEF-101-623）：`_SCAN_SUBDIRS` 本身已抽到 `component_sanitizer_callsite_
+# scan.py` 當單一真相源（見該模組方法論⑦），本檔改為 import，不再自行定義，
+# 避免子目錄清單在兩處各自維護、逐漸漂移。
 # 掃描面下限：30 版 × 3 目錄（新增版本只會使其變大，縮小＝掃描邊界被靜默切掉）
 _MIN_SCANNED_DIRS = 90
 

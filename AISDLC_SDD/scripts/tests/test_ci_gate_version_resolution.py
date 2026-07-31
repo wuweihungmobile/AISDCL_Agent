@@ -15,6 +15,7 @@ WHY（測意圖非僅行為，Rule 9）：
 """
 from __future__ import annotations
 
+import os
 import re
 import subprocess
 from pathlib import Path
@@ -38,6 +39,24 @@ _GUARD_SH = _MONOREPO_ROOT / "tools" / "lib" / "windowsapps_guard.sh"
 # WSL 佔位 bash（System32）吃不下 Windows 路徑引數 → 紅燈而非 skip（第五輪 DEF-101 P3）
 _BASH = bash_probe.usable_bash()
 
+
+def _env_without_fw_version() -> dict[str, str]:
+    """複製當前行程環境並移除 SDD_FW_VERSION（DEF-101-621）。
+
+    WHY：`ci-gate.sh` 檔頭第 11 行明文記載的官方單版 debug 用法
+    `SDD_FW_VERSION=X bash scripts/ci-gate.sh` 只在呼叫當下的 shell 行程樹內設定該
+    變數；若本檔呼叫 ci-gate.sh 的 subprocess.run 未帶 `env=` 而原樣繼承呼叫者（例如
+    pytest 本身）環境，一旦外層曾以該用法啟動整條 pytest（如 ci-gate.sh 自身
+    「共享 infra scripts/tests/」階段），此處巢狀組出的 dry-run 呼叫就會被那個外溢的
+    SDD_FW_VERSION 覆寫成單版，使原本要驗證雙軌/降軌情境的斷言失真而假紅——即使
+    ci-gate.sh 已於版本迴圈後 `unset` 該變數，此處仍需獨立防禦（測試不該預設信任
+    呼叫鏈上游已清乾淨環境）。四個直接呼叫 ci-gate.sh 的 subprocess.run 呼叫點皆用此。
+    """
+    env = dict(os.environ)
+    env.pop("SDD_FW_VERSION", None)
+    return env
+
+
 pytestmark = pytest.mark.skipif(
     _BASH is None, reason="ci-gate.sh 為 bash 腳本，需可用 bash（非 WSL 佔位）"
 )
@@ -60,6 +79,7 @@ def _dry_run(overrides: dict[str, str] | None = None) -> list[str]:
         encoding="utf-8",
         errors="replace",
         timeout=60,
+        env=_env_without_fw_version(),
     )
     assert proc.returncode == 0, f"dry-run 非零退出：{proc.returncode}\n{proc.stderr}"
     m = re.search(r"^SDD_GATE_VERSIONS=(.*)$", proc.stdout, re.MULTILINE)
@@ -126,6 +146,7 @@ def test_missing_python_fails_loud_not_silent_downgrade():
         [_BASH, "-c", "PATH=/usr/bin:/bin SDD_GATE_DRY_RUN=1 bash scripts/ci-gate.sh"],
         cwd=str(REPO_ROOT),
         capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=60,
+        env=_env_without_fw_version(),
     )
     assert proc.returncode == 1, (
         f"python 缺席應 rc=1 fail-loud，實得 rc={proc.returncode}（假綠復發？）\n"
@@ -163,6 +184,7 @@ def test_resolver_failure_downgrades_with_stderr_warning():
             [_BASH, "-c", "SDD_GATE_DRY_RUN=1 bash scripts/ci-gate.sh"],
             cwd=str(sandbox),
             capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=60,
+            env=_env_without_fw_version(),
         )
     assert proc.returncode == 0, f"降軌屬容忍情境應 rc=0：{proc.stderr}"
     m = re.search(r"^SDD_GATE_VERSIONS=(.*)$", proc.stdout, re.MULTILINE)
@@ -197,6 +219,7 @@ def test_override_with_failed_resolver_suppresses_downgrade_warning():
              "SDD_GATE_DRY_RUN=1 SDD_FW_VERSION=AISDLC_SDD_v0.04 bash scripts/ci-gate.sh"],
             cwd=str(sandbox),
             capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=60,
+            env=_env_without_fw_version(),
         )
     assert proc.returncode == 0
     m = re.search(r"^SDD_GATE_VERSIONS=(.*)$", proc.stdout, re.MULTILINE)

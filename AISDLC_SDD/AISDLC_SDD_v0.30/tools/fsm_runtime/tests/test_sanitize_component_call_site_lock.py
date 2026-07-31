@@ -1,5 +1,7 @@
 """fsm_runtime 模組內「已知外部風險 ID」全站淨化涵蓋率鎖 — R41 Architect 架構最佳化，
-R46 抽為共用層（DEF-101-378，見 `AISDLC_SDD/scripts/component_sanitizer_callsite_scan.py`）。
+R46 抽為共用層（DEF-101-378，見 `AISDLC_SDD/scripts/component_sanitizer_callsite_scan.py`）；
+R66（DEF-101-623）將本檔「凍結風險名單新鮮度檢查」的掃描範圍擴大至與 offender 掃描
+一致（詳見 `test_live_bootstrap_is_subset_of_frozen_list` docstring）。
 
 背景（架構層系統性缺陷偵測，非逐行找 bug）：R37 為 WindowsApps guard 建了
 repo-wide 前瞻防增生鎖，把「同一缺陷類別在不同呼叫點反覆復發、只能逐一補洞」的
@@ -35,6 +37,8 @@ import unittest
 from pathlib import Path
 
 _FSM_RUNTIME_DIR = Path(__file__).resolve().parent.parent
+# 本檔 → tests → fsm_runtime → tools → AISDLC_SDD_v0.30（LATEST 版本根目錄）
+_VERSION_ROOT = _FSM_RUNTIME_DIR.parent.parent
 # 本檔 → tests → fsm_runtime → tools → AISDLC_SDD_v0.30 → AISDLC_SDD（同 state_loader.py
 # 委派 component_sanitizer.py 的路徑深度慣例，唯獨本檔多一層 tests/）
 _SHARED_SCAN_PATH = (
@@ -57,13 +61,38 @@ def _load_shared_scan_module():
 _scan = _load_shared_scan_module()
 
 
+def _iter_scan_subdir_files() -> list[Path]:
+    """列舉 LATEST 版本內 `_scan._SCAN_SUBDIRS`（`tools/fsm_runtime`／
+    `.claude/hooks`／`tools/arch_fitness`）三個子目錄下的全部生產程式碼檔案——
+    R66（DEF-101-623）新增，供 `test_live_bootstrap_is_subset_of_frozen_list`
+    使用，讓「凍結清單新鮮度檢查」的掃描範圍與 offender 掃描一致（不再只看
+    `tools/fsm_runtime`）。"""
+    files: list[Path] = []
+    for subdir in _scan._SCAN_SUBDIRS:
+        scan_dir = _VERSION_ROOT / Path(subdir)
+        if scan_dir.is_dir():
+            files.extend(_scan.iter_module_files(scan_dir))
+    return files
+
+
 class TestSanitizeComponentCallSiteCoverage(unittest.TestCase):
     """repo-wide 前瞻防增生鎖——任何新增（或既有漏網）的組檔名呼叫點，只要用了
     模組內已知需淨化的識別字名稱卻未經 `_sanitize_component()`，就逃不過本測試
     （手法對稱套用 `TestNoOrphanWindowsAppsImplementation` 的「repo-wide 掃描 +
-    凍結/例外清單」模式到 `_sanitize_component()` 這個不同的 SSOT）。本檔只掃
-    LATEST（`_FSM_RUNTIME_DIR`）；跨全部 30 版的唯讀掃描見
-    `AISDLC_SDD/scripts/tests/test_sanitize_component_callsite_frozen_versions.py`。"""
+    凍結/例外清單」模式到 `_sanitize_component()` 這個不同的 SSOT）。
+
+    `test_all_filename_fstrings_sanitize_known_risky_identifiers`（offender 本體
+    鎖）只掃 LATEST 的 `tools/fsm_runtime`（`_FSM_RUNTIME_DIR`）；LATEST 內另外
+    兩個子目錄（`.claude/hooks`／`tools/arch_fitness`）的 offender 檢查由
+    `AISDLC_SDD/scripts/tests/test_sanitize_component_callsite_frozen_versions.py`
+    涵蓋（該檔對全部 30 個版本＋3 個子目錄逐一掃描，LATEST 亦是其中一個版本）。
+
+    `test_live_bootstrap_is_subset_of_frozen_list`（凍結清單新鮮度檢查）R66
+    起改用 `_iter_scan_subdir_files()` 掃描與 offender 掃描相同的 3 個子目錄
+    （DEF-101-623）：若只看 `tools/fsm_runtime`，`.claude/hooks`／`tools/
+    arch_fitness` 風格檔案首次呼叫 `_sanitize_component()` 引入的全新識別字會
+    被新鮮度檢查漏看，永遠不會提示人工回填進 `_FROZEN_RISKY_NAMES`，之後任何
+    子目錄對同一識別字的裸用即可逃過 offender 掃描。"""
 
     def test_all_filename_fstrings_sanitize_known_risky_identifiers(self) -> None:
         files = _scan.iter_module_files(_FSM_RUNTIME_DIR)
@@ -84,8 +113,10 @@ class TestSanitizeComponentCallSiteCoverage(unittest.TestCase):
         """凍結清單新鮮度檢查（R41 QA 一審發現後新增，非阻擋機制本體）：若目前
         程式碼冒出全新識別字名稱呼叫 `_sanitize_component()`（凍結清單裡沒有），
         提醒人工核實後手動登記進 `_FROZEN_RISKY_NAMES`——防止凍結清單本身腐化、
-        跟不上新呼叫點引入的新風險名稱。"""
-        files = _scan.iter_module_files(_FSM_RUNTIME_DIR)
+        跟不上新呼叫點引入的新風險名稱。R66（DEF-101-623）起改掃 3 個子目錄
+        （`_iter_scan_subdir_files()`），與 offender 掃描範圍一致，見類別
+        docstring。"""
+        files = _iter_scan_subdir_files()
         trees = _scan.parse_all(files)
         live_names = _scan.live_bootstrapped_names(trees)
         unknown = live_names - _scan._FROZEN_RISKY_NAMES - _scan._ADDITIONAL_RISKY_NAMES

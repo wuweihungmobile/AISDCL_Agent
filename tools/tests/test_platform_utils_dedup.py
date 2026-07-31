@@ -11,6 +11,15 @@
   1. `platform_utils` 模組本身提供的 API 存在且行為正確（兩平台皆包裝 / 三態標籤）。
   2. 8 個已知呼叫點不再各自定義 `_init_utf8_streams()`（防未來復發第 9 份複製貼上）。
 
+R66 追加（ADR-XPLAT-002 §5 Phase 2-C 驗收判準③ 補齊，DEF-101-629）：Phase 2-C／
+2-D 把 10 份消費者各自的 LATEST 版本解析／凍結版本 regex 樣板收斂進
+`tools/lib/sdd_latest.py`（`DEF-101-624`）之後，ADR 原始驗收判準③「任一消費者
+改回自帶 `_latest_root` ⇒ dedup 鎖須紅」指定的手法正是「擴充本檔既有的
+`_scan_repo_py_for(pattern)` 機制」，但落地當下未真正補上（僅補了 `DEF-101-627`
+的模組自身行為回歸鎖，未補「消費者不得復發自帶定義」這道鎖）。本輪比照既有
+`_EXTRA_DEF_RES` 做法，補上 `resolve_latest_name`／`resolve_latest_root`／
+`exclude_frozen_sdd_versions` 三個函式的 repo-wide 唯一定義鎖。
+
 執行：python3 -m unittest discover -s tools/tests -p "test_*.py" -v
 """
 from __future__ import annotations
@@ -52,6 +61,15 @@ _DEF_RE = re.compile(r"^\s*def\s+_?init_utf8_streams\s*\(")
 _EXTRA_DEF_RES = {
     name: re.compile(rf"^\s*def\s+{re.escape(name)}\s*\(")
     for name in ("is_windows", "os_label", "venv_python_path")
+}
+
+# R66 DEF-101-629：ADR-XPLAT-002 §5 Phase 2-C 驗收判準③ 的機械化——
+# `tools/lib/sdd_latest.py`（Phase 2-C／2-D，`DEF-101-624`）收斂了 10 份消費者
+# 各自的 LATEST 版本解析／凍結版本 regex 樣板，此三個函式同樣只應定義一處；
+# 任一消費者若復發自帶定義（即便邏輯不同），本鎖須紅。
+_SDD_LATEST_DEF_RES = {
+    name: re.compile(rf"^\s*def\s+{re.escape(name)}\s*\(")
+    for name in ("resolve_latest_name", "resolve_latest_root", "exclude_frozen_sdd_versions")
 }
 
 
@@ -212,6 +230,24 @@ class TestNoDuplicateDefinitions(unittest.TestCase):
                 offenders,
                 ["tools/lib/platform_utils.py"],
                 f"{name} 的定義只應出現在 tools/lib/platform_utils.py 一處；"
+                f"實際命中：{offenders}",
+            )
+
+    def test_sdd_latest_helpers_defined_only_in_sdd_latest(self) -> None:
+        """R66 DEF-101-629（ADR-XPLAT-002 §5 Phase 2-C 驗收判準③ 補齊）：
+        `resolve_latest_name`／`resolve_latest_root`／`exclude_frozen_sdd_versions`
+        （Phase 2-C／2-D 收斂目標，`DEF-101-624`）同樣只應在
+        `tools/lib/sdd_latest.py` 定義一處；10 個消費者
+        （`tools/tests/test_bash32_compat.py` 等）若復發自行定義同名函式
+        （即便邏輯改寫，只要函式名相同即視為違反「呼叫端改 import、不留第二份
+        定義」的收斂契約），本鎖須紅——即 ADR 原始驗收判準③「任一消費者改回
+        自帶 `_latest_root`」的機械化版本。"""
+        for name, pattern in _SDD_LATEST_DEF_RES.items():
+            offenders = _scan_repo_py_for(pattern)
+            self.assertEqual(
+                offenders,
+                ["tools/lib/sdd_latest.py"],
+                f"{name} 的定義只應出現在 tools/lib/sdd_latest.py 一處；"
                 f"實際命中：{offenders}",
             )
 

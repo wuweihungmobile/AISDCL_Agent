@@ -23,6 +23,11 @@ fail-loud 列出未納管檔名：
   登記一律用「LATEST/tools/…」相對 key（版本升版 copy-on-evolve 時登記不失效）。
   各清單另有 stale 反向檢查（防清單腐化），詳見 _check_pair_enrollment 區塊註解。
 
+  🔴 R66（DEF-101-622）：(3) 的兩張表（_LATEST_THINNESS_ENROLLED／
+  _LATEST_PINNED_SHA256）與 (2) 的姊妹表同型（R12 QA-1 病灶：兩份獨立字面清單
+  同時腐化即雙工具全綠），但直到 R66 前一直沒有比照 _check_thinness_cross_lock
+  建立交叉鎖。已補 _check_latest_thinness_cross_lock()，見該函式區塊註解。
+
   🔴 R63（ADR-XPLAT-002 §5 Phase 1-C (b)(d)）：(4)(5) 的值由純理由字串升級為
   `(tier, reason)` 二元組，`tier` 取自 §3.1~3.4 定義的六類集合（`_VALID_TIERS`）；
   `tier3_os_primitive`／`tier4_forbidden` 的 reason 另須含硬理由關鍵詞
@@ -351,6 +356,40 @@ def _check_thinness_cross_lock() -> bool:
         ok = False
     if ok:
         print(f"✅ thinness 交叉鎖：{len(_THINNESS_ENROLLED)} 對薄殼登記與 "
+              f"{len(pinned)} 支 hash 釘選鍵集合一致")
+    return ok
+
+
+def _check_latest_thinness_cross_lock() -> bool:
+    """LATEST 版 parity↔thinness 兩份登記清單交叉鎖（R66 DEF-101-622，同 R12 QA-1
+    教訓套用於 R65 新表）。
+
+    WHY：`_LATEST_THINNESS_ENROLLED`（stem 登記）與 `_LATEST_PINNED_SHA256`（hash 釘選）
+    是兩份獨立字面清單，與 `_THINNESS_ENROLLED`／`check_wrapper_thinness._PINNED_SHA256`
+    同型——`_check_latest_thinness()` 的迴圈只走 `_LATEST_PINNED_SHA256`，若把
+    `_LATEST_PINNED_SHA256` 清空但不動 `_LATEST_THINNESS_ENROLLED`，該函式的迴圈
+    次數為零、`ok` 從未被設為 False，會印出「0 支 hash 釘選皆正常（1 對）」這種
+    自相矛盾的假綠訊息，且 exit code 仍是 0——兩份清單各自腐化即雙訊號雙盲。
+    此鎖斷言每個 `_LATEST_THINNESS_ENROLLED` 登記 stem 的 `.sh` 與 `.ps1` 都在
+    pin 表，反向多餘 pin（表內出現未登記 stem）亦紅，鍵集合形狀與
+    `_check_thinness_cross_lock` 相同，只是鍵改為 LATEST-relative。"""
+    pinned = set(_LATEST_PINNED_SHA256)
+    expected = {
+        f"{stem}{ext}" for stem in _LATEST_THINNESS_ENROLLED for ext in (".sh", ".ps1")
+    }
+    missing = sorted(expected - pinned)
+    extra = sorted(pinned - expected)
+    ok = True
+    for rel in missing:
+        print(f"❌ LATEST thinness 交叉鎖：{rel} 已登記 _LATEST_THINNESS_ENROLLED 但不在 "
+              f"_LATEST_PINNED_SHA256 — 薄殼宣稱無 hash 釘選守門", file=sys.stderr)
+        ok = False
+    for rel in extra:
+        print(f"❌ LATEST thinness 交叉鎖：{rel} 在 _LATEST_PINNED_SHA256 但其 stem 未登記 "
+              f"_LATEST_THINNESS_ENROLLED — 兩清單腐化（請同步）", file=sys.stderr)
+        ok = False
+    if ok:
+        print(f"✅ LATEST thinness 交叉鎖：{len(_LATEST_THINNESS_ENROLLED)} 對薄殼登記與 "
               f"{len(pinned)} 支 hash 釘選鍵集合一致")
     return ok
 
@@ -1169,6 +1208,7 @@ def main(argv: list[str] | None = None) -> int:
     ok = _check_pytest_pin() and ok
     ok = _check_git_longpaths_flag_parity() and ok
     ok = _check_thinness_cross_lock() and ok
+    ok = _check_latest_thinness_cross_lock() and ok
     ok = _check_pair_enrollment(latest_tools) and ok
     ok = _check_tier_classification() and ok
     ok = _check_equivalence_groups_fresh() and ok
@@ -1179,8 +1219,8 @@ def main(argv: list[str] | None = None) -> int:
               file=sys.stderr)
         return 1
     print(f"\n✅ 雙平台腳本對等檢查通過（{len(_MARKER_PAIRS)} 對標籤腳本 + LATEST run_tlc 委派引數鎖 + "
-          "LATEST 薄殼釘選 + pytest 釘選 + git longpaths 旗標內容鎖 + 成對/單邊註冊完整性；"
-          "薄殼對子另由 check_wrapper_thinness 釘選）")
+          "LATEST 薄殼釘選 + LATEST 薄殼交叉鎖 + pytest 釘選 + git longpaths 旗標內容鎖 + "
+          "成對/單邊註冊完整性；薄殼對子另由 check_wrapper_thinness 釘選）")
     return 0
 
 

@@ -40,6 +40,9 @@ _REPO_ROOT = _TESTS_DIR.parents[1]
 sys.path.insert(0, str(_REPO_ROOT / "tools"))
 from _script_scan_surface import SCRIPT_SCAN_ROOTS  # noqa: E402
 
+sys.path.insert(0, str(_REPO_ROOT / "tools" / "lib"))
+import sdd_latest  # noqa: E402
+
 _BOM = b"\xef\xbb\xbf"
 # 下限釘選：低於此數＝掃描面疑似縮小（前綴打錯/樹改名/ls-files 異常），紅燈。
 # ＝2026-07-20 實測 19 支 active .ps1 打八折取整；刻意刪減腳本時同步下修。
@@ -47,23 +50,9 @@ _MIN_FILES = 15
 
 
 def _latest_root() -> Path:
-    """LATEST 版根目錄（sdd_version.py SSOT；解析失敗即 AssertionError）。"""
-    sdd_root = _REPO_ROOT / "AISDLC_SDD"
-    resolver = sdd_root / "scripts" / "sdd_version.py"
-    proc = subprocess.run(
-        [sys.executable, str(resolver), "--sdd-root", str(sdd_root)],
-        capture_output=True,
-        text=True,
-        encoding="utf-8",
-        errors="replace",
-    )
-    name = proc.stdout.strip()
-    if proc.returncode != 0 or not name:
-        raise AssertionError(
-            f"LATEST 解析失敗（sdd_version.py rc={proc.returncode}；stderr="
-            f"{proc.stderr.strip()!r}）——掃描邊界不得靜默縮小"
-        )
-    return sdd_root / name
+    """LATEST 版根目錄（sdd_version.py SSOT；解析失敗即 AssertionError）。委派
+    tools/lib/sdd_latest.py 單一真相源（ADR-XPLAT-002 Phase 2-C，R66 收斂）。"""
+    return sdd_latest.resolve_latest_root(_REPO_ROOT / "AISDLC_SDD")
 
 
 def _scan_prefixes() -> tuple[str, ...]:

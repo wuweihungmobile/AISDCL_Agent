@@ -33,7 +33,6 @@ from __future__ import annotations
 import ast
 import io
 import re
-import subprocess
 import sys
 import tempfile
 import tokenize
@@ -42,6 +41,10 @@ from pathlib import Path
 
 _TESTS_DIR = Path(__file__).resolve().parent
 _REPO_ROOT = _TESTS_DIR.parents[1]
+
+sys.path.insert(0, str(_REPO_ROOT / "tools" / "lib"))
+import sdd_latest  # noqa: E402
+
 # 任意字串字面值以「單一字母磁碟機 + 冒號 + / 或 \」開頭即命中；
 # 匹配起點為引號本身，r/f/b 等前綴與 Path( 包裹與否皆無關（裸字串同樣命中）。
 _DRIVE_STR_RE = re.compile(r"""["'][A-Za-z]:[/\\]""")
@@ -60,23 +63,10 @@ _EXPLICIT_PLATFORM = ("PureWindowsPath(", "PurePosixPath(")
 
 
 def _latest_fsm_tests_dir() -> Path:
-    """LATEST 版 fsm_runtime/tests（sdd_version.py SSOT；解析失敗即 AssertionError）。"""
-    sdd_root = _REPO_ROOT / "AISDLC_SDD"
-    resolver = sdd_root / "scripts" / "sdd_version.py"
-    proc = subprocess.run(
-        [sys.executable, str(resolver), "--sdd-root", str(sdd_root)],
-        capture_output=True,
-        text=True,
-        encoding="utf-8",
-        errors="replace",
-    )
-    name = proc.stdout.strip()
-    if proc.returncode != 0 or not name:
-        raise AssertionError(
-            f"LATEST 解析失敗（sdd_version.py rc={proc.returncode}；stderr="
-            f"{proc.stderr.strip()!r}）——掃描邊界不得靜默縮小"
-        )
-    return sdd_root / name / "tools" / "fsm_runtime" / "tests"
+    """LATEST 版 fsm_runtime/tests（sdd_version.py SSOT；解析失敗即 AssertionError）。
+    委派 tools/lib/sdd_latest.py 單一真相源（ADR-XPLAT-002 Phase 2-C，R66 收斂）。"""
+    latest_root = sdd_latest.resolve_latest_root(_REPO_ROOT / "AISDLC_SDD")
+    return latest_root / "tools" / "fsm_runtime" / "tests"
 
 
 def _scan_roots() -> list[tuple[Path, bool, int]]:

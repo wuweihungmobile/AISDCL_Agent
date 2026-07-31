@@ -135,11 +135,6 @@ if ($Status) {
   if ($loaded) { exit 0 } else { exit 1 }
 }
 
-if (-not (Test-Path -LiteralPath $NightlyPs1)) {
-  Write-Error "找不到 nightly 載體：${NightlyPs1}"
-  exit 1
-}
-
 if ($Uninstall) {
   if (-not (Test-IsAdmin) -and -not $WhatIfPreference) {
     Write-Warning "需要系統管理員權限——請以「以系統管理員身分執行」重新開啟 PowerShell 後再跑本腳本。"
@@ -166,9 +161,17 @@ if (-not (Test-IsAdmin) -and -not $WhatIfPreference) {
   exit 1
 }
 
-# smoke 載體的存在性檢查刻意放在 install 分支內、而非與 $NightlyPs1 同放在
-# 上方共用位置：上方那道守門同時擋住 -Uninstall（既有行為），把第二個必要檔案
-# 加進去會讓「載體被刪掉就再也無法解除安裝」的既有脆弱面擴大一倍。
+# 兩支載體（nightly／smoke）的存在性檢查都收斂在 install 分支內部，刻意不與
+# -Uninstall 共用：DEF-101-619（R66 實機重現）——修復前 $NightlyPs1 的存在性檢查
+# 放在 $Uninstall 判斷「之前」，對 install／-Uninstall 兩路共用，使「nightly 載體
+# 被刪掉」連帶讓 -Uninstall 也無法執行（scratchpad 隔離重現：REAL_EXITCODE=1），
+# 與 mac 側 install_mac_nightly.sh 的 cmd_uninstall()（不檢查底層腳本是否存在）
+# 行為不對稱、且違反解除安裝理應比安裝更寬容的直覺。-Uninstall 分支（上方）
+# 現在完全不觸碰 Test-Path，只操作 Task Scheduler 本身。
+if (-not (Test-Path -LiteralPath $NightlyPs1)) {
+  Write-Error "找不到 nightly 載體：${NightlyPs1}"
+  exit 1
+}
 if (-not (Test-Path -LiteralPath $SmokePs1)) {
   Write-Error "找不到 Windows smoke 載體：${SmokePs1}"
   exit 1

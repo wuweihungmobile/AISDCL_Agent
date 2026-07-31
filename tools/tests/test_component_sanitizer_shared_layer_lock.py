@@ -38,14 +38,25 @@ state_loader`），一次沒清乾淨就會讓後面的版本悄悄沿用前一�
 預期的共用模組檔案 + 已知危險輸入是否被擋下」，非窮舉所有可能的繞過手法；若
 未來需要更細緻的資料流分析，屬另一個層次的驗證，非本檔涵蓋範圍。
 
+R66 追加（Review round 1 QA 發現，DEF-101-627）：`tools/lib/sdd_latest.py`
+（R66 新增，DEF-101-624）當時只做手動 bug-injection 驗證、未落成任何測試檔的
+永久斷言。本應為它新增專屬 `tools/tests/test_sdd_latest.py`，但 `DEF-101-561③`
+棘輪（`TestGuardFileCountShrinkOnlyRatchet`）自 R61 起禁止 `tools/tests/` 新增
+鎖檔、只准擴充既有檔或先合併／刪除等量舊檔——故改把 `FROZEN_VERSION_DIR_RE`
+的 `.fullmatch()` 回歸鎖、`resolve_latest_name`/`resolve_latest_root` 的
+success/fail-loud 覆蓋，併入本檔（本檔是原始兩個肇事呼叫端之一，且已 import
+`sdd_latest`）；`exclude_frozen_sdd_versions` 的過濾語意併入姊妹檔
+`test_sanitize_component_frozen_sdd_versions_lock.py`（見該檔同款追加段）。
+
 執行：python -m pytest tools/tests/test_component_sanitizer_shared_layer_lock.py -v
 """
 from __future__ import annotations
 
+import inspect
 import json
-import re
 import subprocess
 import sys
+import tempfile
 import unittest
 from pathlib import Path
 
@@ -53,7 +64,8 @@ _REPO_ROOT = Path(__file__).resolve().parents[2]
 _SDD_ROOT = _REPO_ROOT / "AISDLC_SDD"
 _SHARED_MODULE_PATH = _SDD_ROOT / "scripts" / "component_sanitizer.py"
 
-_FROZEN_VERSION_DIR_RE = re.compile(r"^AISDLC_SDD_v\d+\.\d+$")
+sys.path.insert(0, str(_REPO_ROOT / "tools" / "lib"))
+import sdd_latest  # noqa: E402
 
 # 已知需達到的版本下限（29 凍結 + 1 LATEST = 30；R45 建檔時的實際數量）。若未來
 # 新增版本，此下限只會被超過、不會被打破；若數字倒退，代表掃描邊界被靜默縮小。
@@ -78,21 +90,9 @@ print(json.dumps(result))
 
 
 def _latest_sdd_version_name() -> str:
-    """LATEST 版本名（sdd_version.py SSOT）。手法同
-    tools/tests/test_windowsapps_guard_bash_parity.py::_latest_sdd_version_name
-    ——subprocess 呼叫 CLI，避免 sys.path 汙染；解析失敗即 fail-loud。"""
-    resolver = _SDD_ROOT / "scripts" / "sdd_version.py"
-    proc = subprocess.run(
-        [sys.executable, str(resolver), "--sdd-root", str(_SDD_ROOT)],
-        capture_output=True, text=True, encoding="utf-8", errors="replace",
-    )
-    name = proc.stdout.strip()
-    if proc.returncode != 0 or not name:
-        raise AssertionError(
-            f"LATEST 解析失敗（sdd_version.py rc={proc.returncode}；stderr="
-            f"{proc.stderr.strip()!r}）——掃描邊界不得靜默縮小"
-        )
-    return name
+    """LATEST 版本名（sdd_version.py SSOT；解析失敗即 fail-loud）。委派
+    tools/lib/sdd_latest.py 單一真相源（ADR-XPLAT-002 Phase 2-C，R66 收斂）。"""
+    return sdd_latest.resolve_latest_name(_SDD_ROOT)
 
 
 def _all_version_dirs() -> list[Path]:
@@ -100,7 +100,8 @@ def _all_version_dirs() -> list[Path]:
     latest_name = _latest_sdd_version_name()
     dirs = [
         p for p in _SDD_ROOT.iterdir()
-        if p.is_dir() and (_FROZEN_VERSION_DIR_RE.match(p.name) or p.name == latest_name)
+        if p.is_dir()
+        and (sdd_latest.FROZEN_VERSION_DIR_RE.fullmatch(p.name) or p.name == latest_name)
     ]
     return sorted(dirs, key=lambda p: p.name)
 
@@ -188,6 +189,103 @@ class TestEveryVersionDelegatesToSharedSanitizer(unittest.TestCase):
             offenders, [],
             f"以下版本未正確委派到唯一的共用淨化模組：{offenders}",
         )
+
+
+class TestFrozenVersionDirRegexFullmatchLock(unittest.TestCase):
+    """R66 追加（DEF-101-627）：`sdd_latest.FROZEN_VERSION_DIR_RE` 的 `.fullmatch()`
+    正確性永久回歸鎖（DEF-101-624 修的正是這個邊界）。
+
+    WHY：`$` 錨在非 MULTILINE 模式下對「字串結尾前恰有一個換行字元」的位置也
+    視為滿足，而 `.match()` 不要求吃光整段輸入，兩者相乘會讓帶尾隨換行字元的
+    偽造目錄名被誤判為合法版本目錄名；`.fullmatch()` 要求輸入從頭到尾整段對齊
+    pattern，同一輸入下正確地不命中。本鎖鎖住這個行為差異本身，而非只鎖某一次
+    手動驗證當下印出的文字。"""
+
+    def test_fullmatch_rejects_trailing_newline(self) -> None:
+        self.assertIsNone(
+            sdd_latest.FROZEN_VERSION_DIR_RE.fullmatch("AISDLC_SDD_v0.30\n"),
+            ".fullmatch() 對帶尾隨換行字元的偽造目錄名應回傳 None"
+            "——DEF-101-624 修復的邊界情境倒退",
+        )
+
+    def test_match_would_have_wrongly_accepted_trailing_newline(self) -> None:
+        """WHY 佐證（非驗證 production 行為）：重現 DEF-101-624 修復前若誤用
+        `.match()` 會得到的錯誤命中，說明為何本模組的呼叫慣例硬性要求
+        `.fullmatch()`——若本斷言本身失敗，代表 Python regex `$` 錨語意已變，
+        需重新評估本模組的 fullmatch 慣例是否仍必要。"""
+        self.assertIsNotNone(sdd_latest.FROZEN_VERSION_DIR_RE.match("AISDLC_SDD_v0.30\n"))
+
+    def test_fullmatch_accepts_real_version_dir_names(self) -> None:
+        self.assertIsNotNone(sdd_latest.FROZEN_VERSION_DIR_RE.fullmatch("AISDLC_SDD_v0.30"))
+        self.assertIsNotNone(sdd_latest.FROZEN_VERSION_DIR_RE.fullmatch("AISDLC_SDD_v0.01"))
+
+    def test_fullmatch_rejects_non_version_strings(self) -> None:
+        for bad in (
+            "AISDLC_SDD_v0.30/extra",
+            "AISDLC_SDD_v0.30 ",
+            " AISDLC_SDD_v0.30",
+            "AISDLC_SDD_v0.30\r\n",
+            "not_a_version_dir",
+        ):
+            with self.subTest(bad=bad):
+                self.assertIsNone(sdd_latest.FROZEN_VERSION_DIR_RE.fullmatch(bad))
+
+
+class TestOwnCallSiteStaysOnFullmatch(unittest.TestCase):
+    """R66 追加（DEF-101-627）：本檔自己的 `_all_version_dirs()` call-site 鎖——
+    只鎖 `FROZEN_VERSION_DIR_RE` 本身的行為（上一個測試類別）不足以擋住「呼叫端
+    自己把 `.fullmatch(` 又改回 `.match(`」這種退步，regex 定義正確、呼叫端
+    方法用錯一樣重現原缺陷。手法同 `test_dev_start.py::
+    TestVenvSelfHealCallSitesUseSafeRmtree`（`inspect.getsource` +
+    `assertIn`/`assertNotIn` 原始碼字面檢查）。"""
+
+    def test_all_version_dirs_uses_fullmatch(self) -> None:
+        src = inspect.getsource(_all_version_dirs)
+        self.assertIn(
+            "FROZEN_VERSION_DIR_RE.fullmatch(", src,
+            "_all_version_dirs() 不再呼叫 .fullmatch( — DEF-101-624 修復被還原")
+        self.assertNotIn(
+            "FROZEN_VERSION_DIR_RE.match(", src,
+            "_all_version_dirs() 又改回裸 .match( — 帶尾隨換行字元的偽造目錄名"
+            "會被誤判為合法版本目錄（DEF-101-624 迴歸）")
+
+
+class TestResolveLatestAgainstRealRepo(unittest.TestCase):
+    """R66 追加（DEF-101-627）：`resolve_latest_name`/`resolve_latest_root` 正常
+    路徑（對真實 AISDLC_SDD 根目錄，非 mock——這正是消費者實際使用的方式）。"""
+
+    def test_resolve_latest_name_matches_expected_pattern_and_exists(self) -> None:
+        name = sdd_latest.resolve_latest_name(_SDD_ROOT)
+        self.assertRegex(name, r"^AISDLC_SDD_v\d+\.\d+$")
+        self.assertTrue((_SDD_ROOT / name).is_dir())
+
+    def test_resolve_latest_root_equals_sdd_root_join_name(self) -> None:
+        name = sdd_latest.resolve_latest_name(_SDD_ROOT)
+        root = sdd_latest.resolve_latest_root(_SDD_ROOT)
+        self.assertEqual(root, _SDD_ROOT / name)
+        self.assertTrue(root.is_dir())
+
+
+class TestResolveLatestFailLoud(unittest.TestCase):
+    """R66 追加（DEF-101-627）：`resolve_latest_name`/`resolve_latest_root` 的
+    fail-loud 路徑——`sdd_root/scripts/sdd_version.py` 不存在時，subprocess
+    執行一支不存在的腳本檔必然 rc!=0、stdout 為空，兩個入口皆須 raise
+    AssertionError，不得靜默回傳空字串或 None（掃描邊界不得靜默縮小，見
+    `tools/lib/sdd_latest.py` 模組 docstring）。"""
+
+    def test_resolve_latest_name_raises_when_resolver_missing(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            fake_root = Path(td)  # 刻意不建立 scripts/sdd_version.py
+            with self.assertRaises(AssertionError) as ctx:
+                sdd_latest.resolve_latest_name(fake_root)
+            self.assertIn("LATEST 解析失敗", str(ctx.exception))
+
+    def test_resolve_latest_root_raises_when_resolver_missing(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            fake_root = Path(td)
+            with self.assertRaises(AssertionError) as ctx:
+                sdd_latest.resolve_latest_root(fake_root)
+            self.assertIn("LATEST 解析失敗", str(ctx.exception))
 
 
 if __name__ == "__main__":

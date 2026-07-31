@@ -70,29 +70,17 @@ _GUARD_SH = _REPO_ROOT / "tools" / "lib" / "windowsapps_guard.sh"
 # 同款「各消費者獨立重寫」架構慣例（R64／DEF-101-618 (b)）。
 sys.path.insert(0, str(_REPO_ROOT / "tools" / "lib"))
 import bash_probe_spec as _spec  # noqa: E402
+import sdd_latest  # noqa: E402
 
 
 def _latest_sdd_version_name() -> str:
-    """LATEST 版本名（sdd_version.py SSOT；解析失敗即 AssertionError）。比照
-    test_windowsapps_guard_cross_consistency.py::_latest_sdd_root 同款手法：
-    subprocess 呼叫 CLI（非 process 內 import），避免 sys.path 汙染。
+    """LATEST 版本名（sdd_version.py SSOT；解析失敗即 AssertionError）。委派
+    tools/lib/sdd_latest.py 單一真相源（ADR-XPLAT-002 Phase 2-C，R66 收斂）。
 
     R56：定義位置上移至 `_CALLER_FILES` 之前——該清單內的 LATEST 版呼叫端須以
     本函式動態組出路徑（原寫死 `AISDLC_SDD_v0.30`），不得再有第二種版本解析方式。
     """
-    sdd_root = _REPO_ROOT / "AISDLC_SDD"
-    resolver = sdd_root / "scripts" / "sdd_version.py"
-    proc = subprocess.run(
-        [sys.executable, str(resolver), "--sdd-root", str(sdd_root)],
-        capture_output=True, text=True, encoding="utf-8", errors="replace",
-    )
-    name = proc.stdout.strip()
-    if proc.returncode != 0 or not name:
-        raise AssertionError(
-            f"LATEST 解析失敗（sdd_version.py rc={proc.returncode}；stderr="
-            f"{proc.stderr.strip()!r}）——掃描邊界不得靜默縮小"
-        )
-    return name
+    return sdd_latest.resolve_latest_name(_REPO_ROOT / "AISDLC_SDD")
 
 
 # LATEST 版 SDD 根目錄（模組載入期求值；解析失敗即 fail-loud，不靜默縮面）。
@@ -255,10 +243,12 @@ def _tracked_extensionless_hook_files() -> list[str]:
     ]
 
 
-_FROZEN_SDD_VERSION_RE = re.compile(r"^AISDLC_SDD/(AISDLC_SDD_v\d+\.\d+)/")
-
 # 注：`_latest_sdd_version_name()` 定義於本檔前段（`_CALLER_FILES` 之前），
 # 因該清單的 LATEST 版條目須在模組載入期即以其動態組出路徑（R56）。
+#
+# R66 ADR-XPLAT-002 Phase 2-D 收斂（DEF-101-624）：`_FROZEN_SDD_VERSION_RE` 與
+# 本函式本體改委派 tools/lib/sdd_latest.py 單一真相源（同批收斂另四份複本，見
+# tools/tests/test_windows_forbidden_filename_parity.py 檔內 R59/R66 沿革註解）。
 
 
 def _exclude_frozen_sdd_versions(paths: list[str], latest_name: str) -> list[str]:
@@ -266,13 +256,7 @@ def _exclude_frozen_sdd_versions(paths: list[str], latest_name: str) -> list[str
     (CLAUDE.md「Copy-on-Evolve」慣例) 不應被新規則追殺歷史快照。R44 新增：
     `run_self_evolution.sh` 等模板檔案透過 Copy-on-Evolve 逐字複製進每個凍結
     版本，若不排除，新掃描會把 29 份歷史快照全部誤判為新缺口。"""
-    kept = []
-    for rel in paths:
-        m = _FROZEN_SDD_VERSION_RE.match(rel)
-        if m and m.group(1) != latest_name:
-            continue
-        kept.append(rel)
-    return kept
+    return sdd_latest.exclude_frozen_sdd_versions(paths, latest_name)
 
 
 def _strip_bash_comment(line: str) -> str:
@@ -739,7 +723,7 @@ class TestBashCallersEnrollment(unittest.TestCase):
         # 的鎖等於把成本轉嫁給建版者，此處提前擋。
         frozen_declared = sorted(
             rel for rel in declared
-            if (m := _FROZEN_SDD_VERSION_RE.match(rel)) and m.group(1) != latest_name
+            if (m := sdd_latest.FROZEN_SDD_PATH_PREFIX_RE.match(rel)) and m.group(1) != latest_name
         )
         self.assertEqual(
             frozen_declared, [],

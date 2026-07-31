@@ -48,6 +48,7 @@ import check_ntfs_paths  # noqa: E402
 
 sys.path.insert(0, str(_TOOLS_DIR / "lib"))
 import bash_probe_spec as _spec  # noqa: E402
+import sdd_latest  # noqa: E402
 
 _AUTOCLAUDE_DIR = REPO_ROOT / "AutoClaude"
 if str(_AUTOCLAUDE_DIR) not in sys.path:
@@ -553,19 +554,26 @@ _SCAN_PATHSPECS = ("*.py", "*.sh", "*.ps1")
 # 無副檔名的 hook 檔（`pre-commit` 是 4 份權威實作之一）：以目錄 pathspec 納入，
 # 沿用 `tools/tests/test_extras_quoting_zsh_safety.py::_HOOK_DIRS` 既有慣例。
 _NTFS_HOOK_DIRS = ("tools/git-hooks", "AutoClaude/tools/git-hooks", "AISDLC_SDD/.githooks")
-# R59 SA-R59-03／ARCH-R59-03 就地標註：本行是本家族的**第 5 份逐字複本**
-# （另四份在 test_component_sanitizer_shared_layer_lock.py／
+# R66 ADR-XPLAT-002 Phase 2-D 收斂（DEF-101-624）：本行原是本家族的第 5 份逐字
+# 複本（另四份原在 test_component_sanitizer_shared_layer_lock.py／
 # test_sanitize_component_frozen_sdd_versions_lock.py／test_windowsapps_guard_bash_parity.py／
-# test_windowsapps_guard_cross_consistency.py），而該家族**已登記為缺陷**：
-# DEF-101-500 third item（ARCH-R57R3-04）指出 `\d+\.\d+` 抓不到三段版號（如 v1.0.1）時
-# 「N 份會同時靜默誤分類」。原處置寫「列 R58 backlog」，但 R58 整輪作廢＝無承接者，
-# R59 已改派為 R60 起未指派 backlog（帳本 DEF-101-521）。
-# 本輪刻意複製而非 import：tools/tests/ 無 __init__.py，`-m unittest <module>` 與
-# run_root_unittests.py 的 discover 兩種模式下模組名不同，跨檔 import 需 sys.path 手術
-# ——R59 主控實跑 `-m unittest tools.tests.test_dev_start` 即當場撞到
-# ModuleNotFoundError: No module named _platform_helpers，坐實此限制為真。
-# 收斂時五份應一併處理，勿只改本份。
-_FROZEN_SDD_VERSION_RE = re.compile(r"^AISDLC_SDD/(AISDLC_SDD_v\d+\.\d+)/")
+# test_windowsapps_guard_cross_consistency.py）。R59 SA-R59-03／ARCH-R59-03 就地標註
+# 「收斂時五份應一併處理，勿只改本份」——本次即為該收斂：5 份改為共同 import
+# `tools/lib/sdd_latest.py::FROZEN_SDD_PATH_PREFIX_RE`（單一定義，見下方
+# `_ntfs_scan_candidates` 改用 `sdd_latest.exclude_frozen_sdd_versions`）。
+#
+# R59 當時「刻意複製而非 import」的理由——tools/tests/ 無 __init__.py，`-m unittest
+# <module>` 與 run_root_unittests.py 的 discover 兩種模式下模組名不同，**跨測試檔**
+# import 需 sys.path 手術（R59 主控實跑 `-m unittest tools.tests.test_dev_start` 撞
+# ModuleNotFoundError: No module named _platform_helpers 坐實此限制）——不適用於本次
+# 收斂：本次是各測試檔改為 import `tools/lib/` 底下的一個共用模組（同
+# `bash_probe_spec`／`platform_utils` 既有慣例，走
+# `sys.path.insert(0, tools/lib)` 後 `import <module>`），不是測試檔互相 import，
+# 故不觸及該限制（R66 Architect 確認）。
+#
+# 🔴 DEF-101-500 third item（ARCH-R57R3-04）指出 `\d+\.\d+` 抓不到三段版號（如
+# v1.0.1）時「N 份會同時靜默誤分類」——這個既知缺口**未隨本次收斂修復**，只是換
+# 成「1 份會誤分類」（帳本 DEF-101-521，仍 open，非本輪範圍）。
 
 # 錨①保留裝置名清單字面值：要求 CON→PRN→AUX→NUL 依序出現，之間只隔少量引號／逗號／
 # 分隔符，故 regex 交替（`CON|PRN|...`）、Python set、PowerShell 陣列、bash case pattern
@@ -603,20 +611,9 @@ _KNOWN_NTFS_ANCHOR_SITES = {
 
 
 def _latest_sdd_version_name() -> str:
-    """LATEST 版目錄名，取自 `sdd_version.py` SSOT（不自寫版本號正則）。走 CLI subprocess
-    而非 import 以免污染 sys.path——姊妹檔 `_latest_sdd_root()` 同款手法。"""
-    sdd_root = REPO_ROOT / "AISDLC_SDD"
-    proc = subprocess.run(
-        [sys.executable, str(sdd_root / "scripts" / "sdd_version.py"), "--sdd-root", str(sdd_root)],
-        capture_output=True, text=True, encoding="utf-8", errors="replace",
-    )
-    name = proc.stdout.strip()
-    if proc.returncode != 0 or not name:
-        raise AssertionError(
-            f"LATEST 解析失敗（sdd_version.py rc={proc.returncode}；"
-            f"stderr={proc.stderr.strip()!r}）——掃描邊界不得靜默縮小"
-        )
-    return name
+    """LATEST 版目錄名，取自 `sdd_version.py` SSOT（不自寫版本號正則）。委派
+    tools/lib/sdd_latest.py 單一真相源（ADR-XPLAT-002 Phase 2-C，R66 收斂）。"""
+    return sdd_latest.resolve_latest_name(REPO_ROOT / "AISDLC_SDD")
 
 
 def _is_ntfs_test_file(rel: str) -> bool:
@@ -647,15 +644,11 @@ def _ntfs_scan_candidates(latest_name: str) -> list[str]:
             f"git ls-files 失敗（rc={proc.returncode}；stderr={proc.stderr.strip()!r}）"
             "——掃描邊界不得靜默縮小"
         )
-    kept = []
-    for rel in proc.stdout.split("\0"):
-        if not rel or _is_ntfs_test_file(rel):
-            continue
-        m = _FROZEN_SDD_VERSION_RE.match(rel)
-        if m and m.group(1) != latest_name:
-            continue  # 凍結版依 Copy-on-Evolve 鐵律不回改，不被新規則追殺歷史快照
-        kept.append(rel)
-    return kept
+    non_test = [
+        rel for rel in proc.stdout.split("\0") if rel and not _is_ntfs_test_file(rel)
+    ]
+    # 凍結版依 Copy-on-Evolve 鐵律不回改，不被新規則追殺歷史快照。
+    return sdd_latest.exclude_frozen_sdd_versions(non_test, latest_name)
 
 
 class TestNtfsSanitizerSiteEnumerationIsForwardLooking(unittest.TestCase):

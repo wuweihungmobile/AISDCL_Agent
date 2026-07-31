@@ -38,6 +38,11 @@
      必須由操作者以 `--ack-handoff <ID,...>` 逐筆具名承認才會搬。
      這一條刻意設計成「需具名承認」而非「硬擋」：硬擋會讓帳本永遠搬不動
      （歷史已結列的散文常提到 backlog），而完全不管就是 R60 踩到的靜默埋葬。
+  ⑤ 該列切出的欄數等於表頭欄數（欄位定位失效者一律不判讀狀態、一律不可搬）
+  ⑥ 帳本家族與具名治理文件內**沒有**任何指針宣稱該 ID 現居主檔（DEF-101-612，
+     「指針反向依賴」）；命中者**硬擋、不接受 `--ack` 繞過**——這條與④相反：
+     交棒是主觀判斷才需要人承認，指針居所是可驗證的事實陳述，允許承認後照搬
+     等於讓操作者親手重演 R60 撞到的「搬走 3 筆列、11 處指針同時失實」事故
 
 ## 🔴 第三種「立帳見」方言：擴稽核面，**不**禁用（R60 round 2 ARCH-R60R2-05，方案甲）
 
@@ -179,13 +184,30 @@ CHECK_CRITERIA: tuple[tuple[str, str], ...] = (
     ("表格列欄數", "每列切出的欄數等於該檔表頭欄數；archive 側既有列具名基線、主檔零豁免"),
 )
 
-# 搬遷判準（`classify_row()` ①②③⑤ ＋ `plan()` ④）。同樣由本常數生成 archive 標頭散文。
+# 搬遷判準（`classify_row()` ①②③⑤ ＋ `plan()` ④⑥）。同樣由本常數生成 archive 標頭散文。
+#
+# 🔴 第⑥項（DEF-101-612，「指針反向依賴」）：R60 收尾包執行 `--apply` 時實際撞到
+# ——判準①②③④⑤ 只看該列**自身**狀態，完全不看「有沒有別的檔指著這一列」。搬走
+# `DEF-101-529`／`555`／`558` 後，家族與治理文件內共 11 處「立帳見主檔」／「見主檔」
+# 指針當場失實，而**當時**這件事只有 `--check`（事後稽核）才抓得到——`plan()`／`apply()`
+# 本身對此毫無鑑別力，等於先製造缺陷、再靠下一次事後稽核去發現它。
+# 本項把同一組掃描搬到搬遷**之前**：`_external_residence_claims_for()` 共用 `check()`
+# 判準(4)(6) 已在用的同一批基元（`POINTER_RE`／`NONVERB_RESIDENCE_RE`／`_quotation_kind`／
+# `_fenced_line_numbers`／`_CODE_SPAN_RE`），而不是另寫一份掃描規則——否則帳本／治理文件
+# 內逐字引用判準語法的段落（例如 `CrossPlatform_R60_Fix_Evidence.md` 圍籬區塊內逐字重現
+# 的舊指針清單）會被誤判為對某 ID 的真實居所宣稱，重演 Pkg-P12「載具自己假紅」的形狀。
+# 刻意設計成**硬擋、不提供 `--ack` 繞過**（與判準④ 的交棒偵測不同）：交棒是主觀判斷，
+# 需要人具名承認「已有承接者」；但指針居所是可驗證的事實陳述，允許「承認後照搬」等於
+# 讓操作者親手重演本項要消滅的事故。正確路徑是先把外部指針改成正確居所（或改寫成
+# 「現居 archive_NN」指向即將建立的目的檔），該列才會回到可搬狀態。
 MOVE_CRITERIA: tuple[str, ...] = (
     "狀態欄分類已結（fixed／wontfix／closed-by-decision）",
     "狀態欄無活躍字樣（open／routed／deferred／watch／workaround，ASCII 邊界非子字串）",
     "未被 crossref 掃描目標做過可辨識狀態宣稱",
     "散文帶交棒字樣者需 `--ack-handoff` 具名承認",
     "該列切出的欄數等於表頭欄數（欄位定位失效者一律不判讀狀態、一律不可搬）",
+    "無外部居所指針宣稱本列現居主檔（指針反向依賴，DEF-101-612；有則硬擋，"
+    "須先訂正該指針，不接受 --ack 繞過）",
 )
 
 _CIRCLED = "①②③④⑤⑥⑦⑧⑨⑩"
@@ -513,14 +535,32 @@ def plan(ack: frozenset[str] = frozenset()) -> dict:
         raise RuntimeError(_no_layout_problem(
             _LEDGER.name, sum(1 for ln in text.splitlines() if gate._ROW_RE.match(ln))))
     verdicts = [classify_row(ln, claimed, layout) for ln in load_rows(text)]
+    # 判準⑥（DEF-101-612，指針反向依賴）：只讀一次全部稽核面全文，供下面逐列查詢
+    # 「有沒有別的檔宣稱這個 ID 現居主檔」——這正是判準①②③⑤ 完全看不到的那一面
+    # （它們只看該列自身狀態），也是 R60 `--apply` 搬走 529／555／558 後 11 處指針
+    # 同時失實的根本成因（見 `MOVE_CRITERIA` 上方 WHY）。
+    pointer_texts = _read_pointer_audit_texts()
     movable, needs_ack, blocked = [], [], []
     for v in verdicts:
         if v["blockers"]:
             blocked.append(v)
-        elif v["handoff_marker"] and v["id"] not in ack:
+            continue
+        if v["handoff_marker"] and v["id"] not in ack:
             needs_ack.append(v)
-        else:
-            movable.append(v)
+            continue
+        claims = _external_residence_claims_for(v["id"], pointer_texts)
+        if claims:
+            # 硬擋、不接受 `--ack` 繞過（WHY 見 `MOVE_CRITERIA` 上方註解）：這與判準④
+            # 的交棒偵測不同——交棒是主觀判斷，指針居所是可驗證的事實陳述。
+            v["blockers"] = [
+                "⑥有外部居所指針宣稱本列現居主檔，搬遷會使其立即失實（指針反向依賴，"
+                "DEF-101-612）：" + "；".join(claims)
+                + "。請先把該指針訂正為正確居所（或改寫成「現居 archive_NN」指向即將"
+                "建立的目的檔），此列才會回到可搬狀態"
+            ]
+            blocked.append(v)
+            continue
+        movable.append(v)
     movable.sort(key=lambda v: -v["bytes"])
     return {
         "claimed_count": len(claimed),
@@ -537,7 +577,7 @@ def _print_plan(p: dict) -> None:
           f"｜judge 線 warn={gate._LEDGER_WARN_BYTES} fail={gate._LEDGER_FAIL_BYTES}")
     print(f"判準③ 實算：{p['claimed_count']} 個 ID 被掃描目標做過可辨識狀態宣稱")
     total = sum(v["bytes"] for v in p["movable"])
-    print(f"\n可搬（四判準全過）：{len(p['movable'])} 筆／{total} bytes"
+    print(f"\n可搬（①②③⑤⑥ 判準全過）：{len(p['movable'])} 筆／{total} bytes"
           f" → 搬後主檔約 {p['ledger_bytes'] - total} bytes")
     for v in p["movable"]:
         print(f"  {v['id']:<14} {v['bytes']:>6} B  cls={v['cls']}")
@@ -684,6 +724,70 @@ def _bare_residence_problems(src: Path, m: re.Match, line: str,
         f"其前方最鄰近的 {target} 應在 {expected}，{hint}。"
         "此形態不帶「見」動詞，判準④／⑥ 的完整形態正則皆不命中，故由本硬要求接手"
     ]
+
+
+def _read_pointer_audit_texts() -> dict[str, str]:
+    """讀出 `_pointer_audit_files()`（帳本家族 ∪ 具名治理文件）全部檔案的全文。
+
+    `plan()` 判準⑥（指針反向依賴，DEF-101-612）的讀檔入口。缺檔一律 fail-loud
+    （比照 `_status_claimed_ids()` 的既有防呆姿態）：稽核面若與磁碟脫節卻靜默略過，
+    等同悄悄拔掉一份檔的指針反向依賴檢查——那正是本項要消滅的病的另一種形狀。
+    """
+    missing = [str(p) for p in _pointer_audit_files() if not p.exists()]
+    if missing:
+        raise FileNotFoundError(
+            f"指針反向依賴檢查的稽核面缺檔，拒絕繼續（避免悄悄漏面）：{missing}"
+        )
+    return {p.name: p.read_text(encoding="utf-8-sig") for p in _pointer_audit_files()}
+
+
+def _external_residence_claims_for(def_id: str, texts: dict[str, str]) -> list[str]:
+    """回傳 `texts`（`_pointer_audit_files()` 讀出的 `{檔名: 全文}`）中，現況宣稱
+    `def_id` 目前居所為**主檔**的指針描述清單（`file:line：原文`）；空清單＝目前無人
+    做出這類宣稱，搬走它不會讓任何既有指針當場失實。
+
+    判準⑥（`plan()`，DEF-101-612「指針反向依賴」）：`check()` 只能在搬遷**之後**抓到
+    「某指針宣稱的居所與實況不符」；本函式把同一組掃描基元搬到搬遷**之前**——`plan()`
+    據此把這種列直接判為不可搬，而不是任由 `--apply` 先搬、留給下一次 `--check` 事後
+    才報紅（R60 實際發生：`--apply` 搬走 `DEF-101-529`／`555`／`558` 後 11 處居所指針
+    同時失實，詳見 `MOVE_CRITERIA` 上方的 WHY）。
+
+    **刻意不重寫掃描規則**：呼叫的是 `check()` 判準(4)(6) 已在用的同一批基元
+    （`POINTER_RE`／`NONVERB_RESIDENCE_RE`／`_quotation_kind`／`_fenced_line_numbers`／
+    `_CODE_SPAN_RE`），否則帳本／治理文件內逐字引用判準語法的段落會被本函式誤判為對
+    某 ID 的真實居所宣稱，重演 Pkg-P12「載具自己假紅」的形狀。
+
+    只回傳「宣稱居所 == 主檔」的出現處（裸『現居 archive_NN』恆為 archive 宣稱，
+    與主檔居所無關，不掃；`_pointer_problems()` 已印證這點——它的 `expected` 只要見到
+    `archive` 群組就直接採信）：
+      · `立帳見`（`POINTER_RE`）：`archive` 群組為空，且 scope ∈ {None, 主檔, 缺陷帳本}，
+        或 scope == 本表 且該行所在檔本身就是主檔（`_pointer_problems()` 的同一條規則）。
+      · `見主檔`（`NONVERB_RESIDENCE_RE`）：`archive` 群組為空且 `scope == 主檔`
+        （`見 DEF-x` 無 scope／archive 者是單純引用、非宣稱，同 `check()` 既有的
+        誠實劃界，見該正則上方 docstring）。
+    """
+    hits: list[str] = []
+    for fname, text in texts.items():
+        fenced = _fenced_line_numbers(text)
+        for lineno, line in enumerate(text.splitlines(), 1):
+            if POINTER_VERB in line:
+                for m in POINTER_RE.finditer(line):
+                    if m.group("id") != def_id or m.group("archive"):
+                        continue
+                    if _quotation_kind(line, m.start(), in_fence=lineno in fenced) is not None:
+                        continue  # (甲)(乙)(丙) 引述／術語提及／圍籬，非宣稱
+                    if m.group("scope") == "本表" and fname != _LEDGER.name:
+                        continue  # 宣稱「這份文件裡」，而這份文件不是主檔
+                    hits.append(f"{fname}:{lineno}：「{m.group(0)}」（立帳見・宣稱現居主檔）")
+            for m in NONVERB_RESIDENCE_RE.finditer(line):
+                if (m.group("id") != def_id or m.group("archive")
+                        or m.group("scope") != "主檔" or lineno in fenced):
+                    continue
+                spans = [(sp.start(), sp.end()) for sp in _CODE_SPAN_RE.finditer(line)]
+                if any(s <= m.start() < e for s, e in spans):
+                    continue  # code span 引述，非宣稱
+                hits.append(f"{fname}:{lineno}：「{m.group(0)}」（見主檔・宣稱現居主檔）")
+    return hits
 
 
 def check() -> int:

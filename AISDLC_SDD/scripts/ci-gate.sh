@@ -179,6 +179,15 @@ for VER in "${FW_VERSIONS[@]}"; do
   run_gate_for_version "${VER}"
 done
 
+# DEF-101-621（R66）：SDD_FW_VERSION 是版本迴圈的 debug-only 單版覆寫（檔頭第 11 行
+# 明文記載用法），語意上只該影響上面的雙軌/單軌版本解析與 run_gate_for_version 迴圈。
+# 若不在此收斂，該變數會原樣外溢進下方「共享 infra scripts/tests/」pytest 子行程；
+# 而該套件內 test_ci_gate_version_resolution.py 又會用 subprocess.run 原樣繼承外層
+# 環境變數去組出巢狀 dry-run 呼叫，殼層設的 SDD_FW_VERSION 因而滲透進那些巢狀呼叫、
+# 把測試期待的雙軌/降軌情境覆寫成單版，造成假紅——即便官方文件記載的單版 debug 呼叫
+# `SDD_FW_VERSION=X bash scripts/ci-gate.sh` 本身完全合法。
+unset SDD_FW_VERSION
+
 # ── 共享 CI infra 自身回歸鎖（DEF-12-001 修復）────────────────────────────
 # scripts/tests/（versioned 目錄外＝共享 CI infra：ci-gate 版本解析 / pytest 計數
 # helper / 跨版 guard / Copy-on-Evolve helper 的意圖鎖）過去未被 ci-gate.sh 或

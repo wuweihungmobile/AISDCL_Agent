@@ -43,6 +43,9 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from _ps_engine import production_engine  # noqa: E402  # R60 DEF-101-548：引擎述詞 SSOT
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
+
+sys.path.insert(0, str(_REPO_ROOT / "tools" / "lib"))
+import sdd_latest  # noqa: E402
 _BOOTSTRAP_PS1 = _REPO_ROOT / "tools" / "bootstrap.ps1"
 _DEV_START_PS1 = _REPO_ROOT / "tools" / "dev_start.ps1"
 _BOOTSTRAP_CORE_PY = _REPO_ROOT / "tools" / "bootstrap_core.py"
@@ -384,24 +387,9 @@ class TestDevStartPs1WindowsAppsGuard(unittest.TestCase):
 # 放在哪裡。
 # ---------------------------------------------------------------------------
 def _latest_sdd_root() -> Path:
-    """LATEST 版根目錄（sdd_version.py SSOT；解析失敗即 AssertionError）。
-
-    手法與 tools/tests/test_ps1_bom.py 等既有測試一致：subprocess 呼叫
-    scripts/sdd_version.py CLI（而非 process 內 import），避免 sys.path 汙染。
-    """
-    sdd_root = _REPO_ROOT / "AISDLC_SDD"
-    resolver = sdd_root / "scripts" / "sdd_version.py"
-    proc = subprocess.run(
-        [sys.executable, str(resolver), "--sdd-root", str(sdd_root)],
-        capture_output=True, text=True, encoding="utf-8", errors="replace",
-    )
-    name = proc.stdout.strip()
-    if proc.returncode != 0 or not name:
-        raise AssertionError(
-            f"LATEST 解析失敗（sdd_version.py rc={proc.returncode}；stderr="
-            f"{proc.stderr.strip()!r}）——掃描邊界不得靜默縮小"
-        )
-    return sdd_root / name
+    """LATEST 版根目錄（sdd_version.py SSOT；解析失敗即 AssertionError）。委派
+    tools/lib/sdd_latest.py 單一真相源（ADR-XPLAT-002 Phase 2-C，R66 收斂）。"""
+    return sdd_latest.resolve_latest_root(_REPO_ROOT / "AISDLC_SDD")
 
 
 def _tracked_files(pattern: str) -> list[str]:
@@ -424,19 +412,15 @@ def _tracked_files(pattern: str) -> list[str]:
     return [line for line in proc.stdout.splitlines() if line]
 
 
-_FROZEN_SDD_VERSION_RE = re.compile(r"^AISDLC_SDD/(AISDLC_SDD_v\d+\.\d+)/")
+# R66 ADR-XPLAT-002 Phase 2-D 收斂（DEF-101-624）：`_FROZEN_SDD_VERSION_RE` 與
+# 本函式本體改委派 tools/lib/sdd_latest.py 單一真相源（同批收斂另四份複本，見
+# tools/tests/test_windows_forbidden_filename_parity.py 檔內 R59/R66 沿革註解）。
 
 
 def _exclude_frozen_sdd_versions(paths: list[str], latest_name: str) -> list[str]:
     """排除 AISDLC_SDD 凍結版本（v0.01 ~ 除 LATEST 以外者）——凍結版依鐵律
     (CLAUDE.md「Copy-on-Evolve」慣例) 不應被新規則追殺歷史快照。"""
-    kept = []
-    for rel in paths:
-        m = _FROZEN_SDD_VERSION_RE.match(rel)
-        if m and m.group(1) != latest_name:
-            continue
-        kept.append(rel)
-    return kept
+    return sdd_latest.exclude_frozen_sdd_versions(paths, latest_name)
 
 
 _WINDOWSAPPS_LITERAL = "WindowsApps"

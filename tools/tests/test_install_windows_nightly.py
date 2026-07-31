@@ -288,6 +288,60 @@ class TestInstallWindowsNightlyStructure(unittest.TestCase):
         self.assertIn("if ($Uninstall)", status_block, "-Status 區塊未檢查 $Uninstall 是否同時給出")
         self.assertIn("Write-Warning", status_block, "-Status+-Uninstall 同給時未輸出警告——違反 fail-loud 慣例")
 
+    def test_uninstall_branch_does_not_depend_on_carrier_script_existence(self) -> None:
+        """DEF-101-619（R66 真機重現）：修復前 `$NightlyPs1` 的 `Test-Path` 存在性檢查
+        放在 `if ($Uninstall)` 判斷「之前」，對 install／-Uninstall 兩路共用——nightly
+        載體被刪掉（或腳本尚未 checkout 完整）時，連 `-Uninstall`（單純操作 Task
+        Scheduler、理論上不需要讀取任何載體檔案）都會被擋下（scratchpad 隔離重現：
+        REAL_EXITCODE=1），與 mac 側 `install_mac_nightly.sh` 的 `cmd_uninstall()`
+        （完全不檢查底層腳本是否存在）行為不對稱。
+
+        本測試鎖住結構層不變量：真正的 `-Uninstall` 處理區塊——以行首（無縮排）的
+        `if ($Uninstall) {` 為起點錨點（真正區塊頂格書寫；`-Status` 區塊內那個只印
+        警告、同名但不同語意的巢狀 `if ($Uninstall)` 有縮排，`^` + `re.MULTILINE`
+        會跳過它），以其內含的 `foreach ($name in @($TaskName, $SmokeTaskName))`
+        迴圈為終點錨點——本體不得包含任何 `Test-Path -LiteralPath $NightlyPs1` /
+        `$SmokePs1` 呼叫，且兩個存在性檢查必須出現在該區塊**之後**（即收斂進
+        install-only 段落）。
+
+        錨點修訂記錄：原始版本起點無 `^`／`re.MULTILINE`，`re.search` 實際抓到的是
+        `-Status` 區塊內那個縮排的巢狀 `if ($Uninstall)`（第一個出現的匹配），而非
+        本文件宣稱排除的對象；因兩者在原始碼中相鄰、捕獲範圍恰好完整涵蓋真正區塊，
+        對 DEF-101-619 這個特定回歸仍有鑑別力，但與文件描述的機制不符（Review round
+        1 發現）。加 `^` 錨點後才是文件宣稱的行為。
+        """
+        uninstall_block_match = re.search(
+            r"^if \(\$Uninstall\) \{"
+            r"(.*?foreach \(\$name in @\(\$TaskName, \$SmokeTaskName\)\).*?)"
+            r"\n\}",
+            self.text, re.DOTALL | re.MULTILINE,
+        )
+        self.assertIsNotNone(
+            uninstall_block_match,
+            "找不到含 foreach 迴圈的真正 -Uninstall 處理區塊——結構已變動",
+        )
+        uninstall_block = uninstall_block_match.group(1)
+        self.assertNotIn(
+            "Test-Path -LiteralPath $NightlyPs1", uninstall_block,
+            "-Uninstall 區塊不得依賴 $NightlyPs1 是否存在——解除安裝理應比安裝更寬容"
+            "（DEF-101-619：載體被刪掉時 -Uninstall 也會被誤擋）",
+        )
+        self.assertNotIn(
+            "Test-Path -LiteralPath $SmokePs1", uninstall_block,
+            "-Uninstall 區塊不得依賴 $SmokePs1 是否存在——同 DEF-101-619 理由",
+        )
+        nightly_check_pos = self.text.find("Test-Path -LiteralPath $NightlyPs1")
+        smoke_check_pos = self.text.find("Test-Path -LiteralPath $SmokePs1")
+        self.assertGreater(
+            nightly_check_pos, uninstall_block_match.end(),
+            "$NightlyPs1 存在性檢查必須排在 -Uninstall 區塊之後（收斂進 install-only "
+            "段落），而非排在其前面（那會使兩路共用同一道守門，回歸 DEF-101-619）",
+        )
+        self.assertGreater(
+            smoke_check_pos, uninstall_block_match.end(),
+            "$SmokePs1 存在性檢查必須排在 -Uninstall 區塊之後（同上理由）",
+        )
+
 
 # R59 DEF-101-509：本條件原為 `shutil.which("pwsh")`（**只認 PS 7**）。後果是本檔
 # 唯一真的解析語法的測試，在「一台標準 Windows 11 開發機」上必定 skip——ONBOARDING §1
@@ -551,6 +605,34 @@ class TestStatusExitCodeRuntime(unittest.TestCase):
                 len(hit), 1,
                 f"-Status 報表沒有恰一行是 {name} 的「不存在」分支輸出——rc=1 可能"
                 f"來自無關的錯誤路徑。stdout=\n{proc.stdout}",
+            )
+
+    def test_uninstall_whatif_succeeds_when_carrier_scripts_are_unreachable(self) -> None:
+        """DEF-101-619 回歸鎖：`-Uninstall` 不得依賴 nightly／smoke 載體腳本存在。
+
+        刻意沿用 `_script_with_absent_task_names` 產生的**改名複本**（複本落在
+        temp，其 `$RepoRoot` 算出來的 `$NightlyPs1`／`$SmokePs1` 絕對路徑在該複本
+        所在目錄下必然不存在——`test_whatif_previews_every_task_without_touching_scheduler`
+        docstring 已記載這個既有事實：install 模式的 `-WhatIf` 在這種複本下會在
+        載體存在性檢查就 `exit 1`，R60 實測）。修復前若同一道 `Test-Path` 守門
+        也擋 `-Uninstall`，本測試會在修復前以 rc=1 重現 DEF-101-619；修復後
+        `-Uninstall -WhatIf` 完全不觸碰 `Test-Path`，應正常預覽並以 rc=0 結束——
+        不需要、也不應該要求兩支載體真的存在（解除安裝理應比安裝更寬容）。
+        """
+        with tempfile.TemporaryDirectory() as tmpdir:
+            script = self._script_with_absent_task_names(tmpdir)
+            proc = self._run(script, "-Uninstall", "-WhatIf")
+        self.assertEqual(
+            proc.returncode, 0,
+            "-Uninstall -WhatIf 在複本目錄下（nightly/smoke 載體路徑必然不存在）"
+            "未能成功預覽——DEF-101-619 回歸：-Uninstall 又被載體存在性檢查誤擋。"
+            f"stdout=\n{proc.stdout}\nstderr=\n{proc.stderr}",
+        )
+        for name in (self._ABSENT_NIGHTLY, self._ABSENT_SMOKE):
+            self.assertIn(
+                f'"{name}"', proc.stdout,
+                f"-Uninstall -WhatIf 預覽輸出未涵蓋 {name}——ShouldProcess 守衛可能"
+                f"未包住其中一支任務。stdout=\n{proc.stdout}",
             )
 
     def test_whatif_previews_every_task_without_touching_scheduler(self) -> None:

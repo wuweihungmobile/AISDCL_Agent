@@ -72,10 +72,22 @@ LATEST），且既有 repo-wide 掃描（`tools/tests/test_windowsapps_guard_*.p
     〔泛用 AST 掃描 + `_ADDITIONAL_RISKY_NAMES` 委派 wrapper 名單〕獨立守護，
     兩者分工互補，不重複亦不遺漏）。
 
+R66 追加（Review round 1 QA 發現，DEF-101-627）：`tools/lib/sdd_latest.py`
+（R66 新增，DEF-101-624）當時只做手動 bug-injection 驗證、未落成任何測試檔的
+永久斷言。本應為它新增專屬 `tools/tests/test_sdd_latest.py`，但 `DEF-101-561③`
+棘輪（`test_adr_xplat001_c1c2_lock.py::TestGuardFileCountShrinkOnlyRatchet`）
+自 R61 起禁止 `tools/tests/` 新增鎖檔、只准擴充既有檔或先合併／刪除等量舊檔
+——故把本檔自己呼叫端（`_frozen_version_dirs`）的 `.fullmatch()` call-site 鎖
+＋ `exclude_frozen_sdd_versions` 的過濾語意併入本檔（本檔是原始兩個肇事呼叫端
+之一，且已 import `sdd_latest`）；`FROZEN_VERSION_DIR_RE` 本身的 `.fullmatch()`
+行為回歸鎖與 `resolve_latest_name`/`resolve_latest_root` 覆蓋併入姊妹檔
+`test_component_sanitizer_shared_layer_lock.py`（見該檔同款追加段）。
+
 執行：python -m pytest tools/tests/test_sanitize_component_frozen_sdd_versions_lock.py -v
 """
 from __future__ import annotations
 
+import inspect
 import re
 import subprocess
 import sys
@@ -84,6 +96,9 @@ from pathlib import Path
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 _SDD_ROOT = _REPO_ROOT / "AISDLC_SDD"
+
+sys.path.insert(0, str(_REPO_ROOT / "tools" / "lib"))
+import sdd_latest  # noqa: E402
 
 # 本輪 DEF-101-357 修復涵蓋的 7 支檔案（相對 <version>/tools/fsm_runtime/）。
 _TARGET_FILES = (
@@ -119,8 +134,6 @@ _EXPECTED_SANITIZE_CALLS: dict[str, tuple[str, ...]] = {
 # 發明一個同名但無關的本地函式來滿足上面的文字比對）。
 _IMPORT_LINE_RE = re.compile(r"from\s+\.state_loader\s+import\s+.*_sanitize_component")
 
-_FROZEN_VERSION_DIR_RE = re.compile(r"^AISDLC_SDD_v\d+\.\d+$")
-
 # 已知需要達到的凍結版本下限（29；R44 建檔時的實際數量）。若未來新增版本，
 # 此下限只會被超過、不會被打破；若數字倒退，代表掃描邊界被靜默縮小，須查明。
 _MIN_EXPECTED_FROZEN_VERSIONS = 29
@@ -138,28 +151,18 @@ _PRE_FIX_BASELINE_SHA = "5ccccb065a8209e430eaba25c6e8e4ba1727e4e6"
 
 
 def _latest_sdd_version_name() -> str:
-    """LATEST 版本名（sdd_version.py SSOT）。手法同
-    tools/tests/test_windowsapps_guard_bash_parity.py::_latest_sdd_version_name
-    ——subprocess 呼叫 CLI，避免 sys.path 汙染；解析失敗即 fail-loud。"""
-    resolver = _SDD_ROOT / "scripts" / "sdd_version.py"
-    proc = subprocess.run(
-        [sys.executable, str(resolver), "--sdd-root", str(_SDD_ROOT)],
-        capture_output=True, text=True, encoding="utf-8", errors="replace",
-    )
-    name = proc.stdout.strip()
-    if proc.returncode != 0 or not name:
-        raise AssertionError(
-            f"LATEST 解析失敗（sdd_version.py rc={proc.returncode}；stderr="
-            f"{proc.stderr.strip()!r}）——掃描邊界不得靜默縮小"
-        )
-    return name
+    """LATEST 版本名（sdd_version.py SSOT；解析失敗即 fail-loud）。委派
+    tools/lib/sdd_latest.py 單一真相源（ADR-XPLAT-002 Phase 2-C，R66 收斂）。"""
+    return sdd_latest.resolve_latest_name(_SDD_ROOT)
 
 
 def _frozen_version_dirs(latest_name: str) -> list[Path]:
     """全部凍結版本目錄（`AISDLC_SDD_v*`，排除 LATEST），依版本名稱排序。"""
     dirs = [
         p for p in _SDD_ROOT.iterdir()
-        if p.is_dir() and _FROZEN_VERSION_DIR_RE.match(p.name) and p.name != latest_name
+        if p.is_dir()
+        and sdd_latest.FROZEN_VERSION_DIR_RE.fullmatch(p.name)
+        and p.name != latest_name
     ]
     return sorted(dirs, key=lambda p: p.name)
 
@@ -309,6 +312,61 @@ class TestExpectedSanitizeCallDiscriminatesRealHistoricalRegression(unittest.Tes
                     missing, [],
                     f"{fname} 目前工作樹內容未通過本鎖：{missing}",
                 )
+
+
+class TestOwnCallSiteStaysOnFullmatch(unittest.TestCase):
+    """R66 追加（DEF-101-627）：本檔自己的 `_frozen_version_dirs()` call-site
+    鎖——只鎖 `FROZEN_VERSION_DIR_RE` 本身的行為不足以擋住「呼叫端自己把
+    `.fullmatch(` 又改回 `.match(`」這種退步，regex 定義正確、呼叫端方法用錯
+    一樣重現原缺陷（DEF-101-624）。手法同 `test_dev_start.py::
+    TestVenvSelfHealCallSitesUseSafeRmtree`（`inspect.getsource` +
+    `assertIn`/`assertNotIn` 原始碼字面檢查）。"""
+
+    def test_frozen_version_dirs_uses_fullmatch(self) -> None:
+        src = inspect.getsource(_frozen_version_dirs)
+        self.assertIn(
+            "FROZEN_VERSION_DIR_RE.fullmatch(", src,
+            "_frozen_version_dirs() 不再呼叫 .fullmatch( — DEF-101-624 修復被還原")
+        self.assertNotIn(
+            "FROZEN_VERSION_DIR_RE.match(", src,
+            "_frozen_version_dirs() 又改回裸 .match( — 帶尾隨換行字元的偽造目錄名"
+            "會被誤判為合法版本目錄（DEF-101-624 迴歸）")
+
+
+class TestExcludeFrozenSddVersions(unittest.TestCase):
+    """R66 追加（DEF-101-627）：`sdd_latest.exclude_frozen_sdd_versions` 的過濾
+    語意——凍結版本路徑剔除、LATEST 路徑保留、非 `AISDLC_SDD/` 前綴路徑不受
+    影響、空輸入邊界。此函式收斂了 3 支消費者檔（`test_windows_forbidden_
+    filename_parity.py`／`test_windowsapps_guard_bash_parity.py`／
+    `test_windowsapps_guard_cross_consistency.py`）原本各自的複本，但收斂當下
+    同樣沒有落成任何專屬測試——原因與影響範圍同本檔頂部 R66 追加段。"""
+
+    _LATEST = "AISDLC_SDD_v0.30"
+
+    def test_drops_frozen_version_paths(self) -> None:
+        paths = ["AISDLC_SDD/AISDLC_SDD_v0.01/foo.py"]
+        self.assertEqual(sdd_latest.exclude_frozen_sdd_versions(paths, self._LATEST), [])
+
+    def test_keeps_latest_version_paths(self) -> None:
+        paths = ["AISDLC_SDD/AISDLC_SDD_v0.30/foo.py"]
+        self.assertEqual(sdd_latest.exclude_frozen_sdd_versions(paths, self._LATEST), paths)
+
+    def test_keeps_paths_outside_aisdlc_sdd_prefix(self) -> None:
+        paths = ["tools/foo.py", "AutoClaude/bar.py"]
+        self.assertEqual(sdd_latest.exclude_frozen_sdd_versions(paths, self._LATEST), paths)
+
+    def test_mixed_list_keeps_only_non_frozen(self) -> None:
+        paths = [
+            "AISDLC_SDD/AISDLC_SDD_v0.01/a.py",
+            "AISDLC_SDD/AISDLC_SDD_v0.30/b.py",
+            "tools/c.py",
+            "AISDLC_SDD/AISDLC_SDD_v0.29/d.py",
+        ]
+        expected = ["AISDLC_SDD/AISDLC_SDD_v0.30/b.py", "tools/c.py"]
+        self.assertEqual(sdd_latest.exclude_frozen_sdd_versions(paths, self._LATEST), expected)
+
+    def test_empty_input_returns_empty(self) -> None:
+        self.assertEqual(sdd_latest.exclude_frozen_sdd_versions([], self._LATEST), [])
 
 
 if __name__ == "__main__":

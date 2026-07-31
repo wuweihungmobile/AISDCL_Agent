@@ -10,11 +10,13 @@
 from __future__ import annotations
 
 import ctypes
+import inspect
 import json
 import os
 import re
 import shutil
 import signal
+import stat
 import subprocess
 import sys
 import tempfile
@@ -3543,6 +3545,98 @@ class TestCopyFunctionalInterpreterDllCopy(unittest.TestCase):
                 sorted(p.name for p in dest_dir.iterdir()), ["python"],
                 "無 DLL 來源時不應多出任何檔案",
             )
+
+
+class TestRmtreeWindowsSafe(DevStartTestCase):
+    """R66 P2（DEF-101-620）：`_ensure_venv_shape()`/`step_venv()` 三處自我修復
+    路徑（換手保留失敗殘留的 `.venv-cache-<other>/`、兩平台直譯器皆缺的壞損
+    `.venv/`、跨 OS 同 flavor 切換要清掉的舊 `.venv/`）過去用裸
+    `shutil.rmtree()`。技巧同款移植自
+    `AISDLC_SDD/AISDLC_SDD_v0.30/tools/fsm_runtime/hub_sync.py::_rmtree_windows_safe`
+    （R15 SCAN-B-2 首次建立、R60 A-04 沿用）。
+
+    Bug-injection 紅綠實測（本機 Windows 11 Pro 26200 真機驗證，非模擬）：
+      RED（修復前，對同一份含唯讀檔 fixture 呼叫裸 `shutil.rmtree`）：
+        `RAISED PermissionError: [WinError 5] 存取被拒。: '...\\.venv\\bin\\python'`
+        且事後 `venv.exists()` 仍為 True（半殘目錄未被清除）。
+      GREEN（修復後，改呼叫 `_rmtree_windows_safe`）：
+        無例外拋出，且 `venv.exists()` 為 False（目錄確實整個被移除）。
+    """
+
+    def _make_readonly_fixture(self, root: Path) -> tuple[Path, Path]:
+        venv = root / ".venv"
+        (venv / "bin").mkdir(parents=True)
+        f = venv / "bin" / "python"
+        f.write_text("fake-binary", encoding="utf-8")
+        os.chmod(f, stat.S_IREAD)
+        return venv, f
+
+    def test_removes_directory_with_readonly_file(self):
+        """對照組（green）：修復後的 helper 能吃掉含唯讀檔的目錄並整個移除。
+
+        Discriminating on Windows only —— POSIX 的 unlink 不看唯讀位元，該
+        平台裸呼叫本就不失敗（誠實對齊 hub_sync.py 對應測試的用詞：POSIX 上
+        green either way，鑑別力來自下面的 Windows-only 對照測試）。
+        """
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            venv, f = self._make_readonly_fixture(root)
+            try:
+                dev_start._rmtree_windows_safe(venv)
+            finally:
+                # 保底：斷言失敗時也別讓 TemporaryDirectory 清理被唯讀位元卡死。
+                if f.exists():
+                    os.chmod(f, stat.S_IWRITE)
+            self.assertFalse(
+                venv.exists(), "含唯讀檔的 .venv 應已被完整移除，而非留下半殘目錄")
+
+    def test_bare_rmtree_would_have_raised_permission_error(self):
+        """對照組（red）：證明本測試用的 fixture 真的會踩到雷——沒有這個對照，
+        上面那個 green 測試無法排除「只是 fixture 沒踩到問題」的可能。
+        Windows-only：POSIX 上裸呼叫本就不失敗（見上），略過此對照。
+        """
+        if os.name != "nt":
+            self.skipTest("裸 rmtree 遇唯讀檔的 PermissionError 只在 Windows 重現")
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            venv, f = self._make_readonly_fixture(root)
+            try:
+                with self.assertRaises(PermissionError):
+                    shutil.rmtree(venv)
+                self.assertTrue(venv.exists(), "PermissionError 後應留下半殘目錄（未整個刪除）")
+            finally:
+                os.chmod(f, stat.S_IWRITE)
+                if venv.exists():
+                    shutil.rmtree(venv)
+
+
+class TestVenvSelfHealCallSitesUseSafeRmtree(DevStartTestCase):
+    """平台中立 call-site 鎖（同
+    `AISDLC_SDD/AISDLC_SDD_v0.30/tools/fsm_runtime/tests/test_hub_sync.py::
+    TestMirrorLocalWindowsResilience::test_mirror_local_does_not_call_bare_rmtree`
+    的鎖法）：`_rmtree_windows_safe` 硬化只有在呼叫端真的走過去才有意義，防止
+    未來有人「順手」改回裸 `shutil.rmtree()` 而沒人發現。
+    """
+
+    def test_ensure_venv_shape_routes_through_safe_rmtree(self):
+        src = inspect.getsource(dev_start._ensure_venv_shape)
+        self.assertIn(
+            "_rmtree_windows_safe(", src,
+            "_ensure_venv_shape() 不再透過 _rmtree_windows_safe() 刪除 — R66 P2 硬化被還原")
+        self.assertNotIn(
+            "shutil.rmtree(", src,
+            "_ensure_venv_shape() 又直接呼叫 shutil.rmtree — Windows 唯讀檔會 "
+            "PermissionError 且留下半殘目錄（R66 P2 迴歸）")
+
+    def test_step_venv_routes_through_safe_rmtree(self):
+        src = inspect.getsource(dev_start.step_venv)
+        self.assertIn(
+            "_rmtree_windows_safe(", src,
+            "step_venv() 的跨 OS 清理不再透過 _rmtree_windows_safe() — R66 P2 硬化被還原")
+        self.assertNotIn(
+            "shutil.rmtree(", src,
+            "step_venv() 又直接呼叫 shutil.rmtree — Windows 唯讀檔會 "
+            "PermissionError 且留下半殘目錄（R66 P2 迴歸）")
 
 
 if __name__ == "__main__":

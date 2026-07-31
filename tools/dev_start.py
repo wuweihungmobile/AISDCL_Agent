@@ -43,6 +43,7 @@ import platform as _platform
 import re
 import shutil
 import signal
+import stat
 import subprocess
 import sys
 import threading
@@ -290,6 +291,41 @@ def _safe_is_symlink(p: Path) -> bool:
     except OSError as e:
         _warn(f"無法讀取 {p}（{e}）— 視為不是符號連結")
         return False
+
+
+def _rmtree_windows_safe(path: Path) -> None:
+    """Windows 韌性 rmtree（R66 P2；同款技巧見
+    ``AISDLC_SDD/AISDLC_SDD_v0.30/tools/fsm_runtime/hub_sync.py::_rmtree_windows_safe``
+    與 ``AISDLC_SDD/scripts/sync_exposed_skills.py::_rmtree_windows_safe``，R15
+    SCAN-B-2 首次建立此模式）。
+
+    WHY：裸 ``shutil.rmtree`` 在 Windows 上遇到唯讀檔會拋 `PermissionError`
+    （[WinError 5]），且只刪到一半就中止、留下半殘目錄——本工具三處自我修復
+    路徑（換手保留失敗殘留的 `.venv-cache-<other>/`、兩平台直譯器皆缺的壞損
+    `.venv/`、跨 OS 同 flavor 切換要清掉的舊 `.venv/`）都可能含唯讀檔（外接
+    碟／同步工具／備份代理搬過的內容常見），導致這支自稱「自動修復」的工具
+    在這些情境下靜默降級為要求人工手動介入。
+
+    POSIX 上 `unlink` 不看唯讀位元，故正常路徑與裸呼叫行為一致；只有在錯誤
+    路徑才會先 `chmod` 再重試（與既有兩份範本同構，Rule 11 conformance over
+    taste）。
+    """
+    def _handle(func, p, original):
+        try:
+            os.chmod(p, stat.S_IWRITE)
+            func(p)
+        except (OSError, TypeError):
+            # TypeError：3.11 POSIX fd-based rmtree 下 func 可能是 os.open
+            # （需要 flags 參數），盲目 func(p) 重試對不上簽章——兩種情況都
+            # 重拋「原始」錯誤，呼叫端才不會看到偽造的 TypeError。
+            raise original from None
+
+    if sys.version_info >= (3, 12):
+        shutil.rmtree(path, onexc=lambda func, p, exc: _handle(func, p, exc))
+    else:
+        shutil.rmtree(
+            path, onerror=lambda func, p, exc_info: _handle(func, p, exc_info[1])
+        )
 
 
 _VENV_ORIGIN_MARKER = ".dev_venv_origin"
@@ -805,7 +841,7 @@ def _ensure_venv_shape(now: str) -> str:
                         _warn(f"{cache_other.name}/ 已有內容 — 換手保留前已改名為 {backup.name}/"
                               f"（未覆蓋；確認不需要可自行刪除該備份目錄）")
                     else:
-                        shutil.rmtree(cache_other)
+                        _rmtree_windows_safe(cache_other)
             except OSError as e:
                 # 卡住的資源是 cache_other，不是 .venv——訊息須指名真正病灶（Architect 審查 P2）
                 _warn(f"清除既有 {cache_other.name}/ 失敗（{e}）— 請先手動處理該目錄後重跑")
@@ -822,7 +858,7 @@ def _ensure_venv_shape(now: str) -> str:
                 if _safe_is_symlink(venv):
                     venv.unlink()
                 else:
-                    shutil.rmtree(venv)
+                    _rmtree_windows_safe(venv)
                 print("    偵測到壞損 .venv（兩平台直譯器皆缺）→ 已移除，將重建")
             except OSError as e:
                 _warn(f"壞損 .venv 移除失敗（{e}）— 請手動刪除 .venv 後重跑")
@@ -1269,7 +1305,7 @@ def step_venv(now: str, state: dict, force: bool, cross_same_flavor: bool = Fals
                     if venv.is_symlink():
                         venv.unlink()
                     else:
-                        shutil.rmtree(venv)
+                        _rmtree_windows_safe(venv)
                     print("    跨 OS 同 flavor：既有 .venv 已移除（避免 bootstrap 沿用跨 OS 二進位）")
                 except OSError as e:
                     _warn(f"移除跨 OS .venv 失敗（{e}）— bootstrap 可能沿用後失敗，屆時請手動刪除 .venv 重跑")

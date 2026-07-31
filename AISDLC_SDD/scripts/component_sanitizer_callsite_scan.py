@@ -35,7 +35,19 @@ Copy-on-Evolve 邊界說明：鐵律禁止的是「原地修改凍結版本的�
   6. 【R41 QA 一審修正】`_FROZEN_RISKY_NAMES` 凍結為固定快照、不隨目前程式碼
      即時變動；新呼叫點若引入全新識別字名稱，由
      `test_live_bootstrap_is_subset_of_frozen_list` 偵測。
-  7. 【R46 新增，DEF-101-378】`_raw_risky_reference` 遞迴拆解 `ast.BoolOp`
+  7. 【R66 新增，DEF-101-623】`_SCAN_SUBDIRS`（掃描子目錄清單：`tools/fsm_runtime`／
+     `.claude/hooks`／`tools/arch_fitness`）自 `test_sanitize_component_callsite_
+     frozen_versions.py` 抽到本模組當單一真相源。緣由：LATEST 版「凍結風險名單
+     新鮮度檢查」（`test_sanitize_component_call_site_lock.py::
+     test_live_bootstrap_is_subset_of_frozen_list`）過去只掃 `tools/fsm_runtime`，
+     與姊妹的 offender 掃描（本檔 `find_offenders`，經由 frozen_versions 測試對
+     3 個子目錄全部呼叫）涵蓋範圍不一致——若 `.claude/hooks` 或 `tools/arch_
+     fitness` 風格檔案首次呼叫 `_sanitize_component()` 引入全新識別字，新鮮度
+     檢查看不到、永遠不會提示人工回填進 `_FROZEN_RISKY_NAMES`，之後任何子目錄對
+     同一識別字的裸用即可逃過 `find_offenders()`。R66 起新鮮度檢查改掃與 offender
+     掃描一致的 3 個子目錄，`_SCAN_SUBDIRS` 單一真相源化以避免子目錄清單出現
+     第三份可能漂移的複本。
+  8. 【R46 新增，DEF-101-378】`_raw_risky_reference` 遞迴拆解 `ast.BoolOp`
      （`a or b` 型退回預設值寫法）與 `ast.IfExp`（`a if a else "default"` 同款
      姊妹寫法），並支援有界別名追蹤（`build_alias_map`：同一**作用域**內
      `Name = Name` / `Name = Attribute` 零轉換直接賦值鏈，最多解 5 層＋環偵測，
@@ -108,13 +120,23 @@ _KNOWN_EXEMPTIONS: dict[tuple[str, str], str] = {
     ),
 }
 
+# 版本根目錄下需掃描的子目錄清單——單一真相源（R66，DEF-101-623，見方法論⑦）。
+# R57（DEF-101-489）由「僅 tools/fsm_runtime」擴大為現行 3 處：這三處皆會落地
+# 以外部風險 ID 組檔名的生產程式碼（fsm_runtime 本體／`.claude/hooks` 的 session_
+# start 等 hook／`tools/arch_fitness` 的架構適能檢查）。offender 掃描
+# （`find_offenders`，經由 `scripts/tests/test_sanitize_component_callsite_
+# frozen_versions.py` 對 30 個版本各自呼叫）與凍結清單新鮮度檢查
+# （`tools/fsm_runtime/tests/test_sanitize_component_call_site_lock.py::
+# test_live_bootstrap_is_subset_of_frozen_list`，R66 起改用本常數）皆消費同一份
+# 清單，避免掃描範圍在兩處各自維護、逐漸漂移。
+_SCAN_SUBDIRS: tuple[str, ...] = ("tools/fsm_runtime", ".claude/hooks", "tools/arch_fitness")
+
 
 def iter_module_files(root_dir: Path) -> list[Path]:
     """遞迴列舉 `root_dir`（呼叫端傳入的任一版本子目錄——R57 DEF-101-489 起為
-    `tools/fsm_runtime/`／`.claude/hooks/`／`tools/arch_fitness/` 三處，見
-    `scripts/tests/test_sanitize_component_callsite_frozen_versions.py` 的
-    `_SCAN_SUBDIRS`）全部生產程式碼 .py 檔案（排除 tests/、__pycache__、
-    __init__.py）。"""
+    `tools/fsm_runtime/`／`.claude/hooks/`／`tools/arch_fitness/` 三處，見本模組
+    `_SCAN_SUBDIRS`，R66 起單一真相源化）全部生產程式碼 .py 檔案（排除 tests/、
+    __pycache__、__init__.py）。"""
     return sorted(
         p for p in root_dir.rglob("*.py")
         if p.name != "__init__.py"
