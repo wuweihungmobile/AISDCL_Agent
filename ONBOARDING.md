@@ -254,7 +254,7 @@ powershell -ExecutionPolicy Bypass -File scripts\ci-gate.ps1   # 偵測到 Git B
 >   `AISDLC_SDD/scripts/tests/`、`AutoClaude/tests/`）的 `*.py` 內容。理論上「生產碼變動改變
 >   `parametrize` 來源」也能改變計數，該面**不在指紋內**；docker daemon 可用性、平台差異亦然
 >   （見下方容差訂正段）。故它是 stale 的**充分觸發器、非必要條件**——會漏、不會冤。
-> <!-- snapshot-fingerprints: v001=8ffe3c3dabbd v030=91a0615dec58 scripts=7c780156f168 autoclaude=301742da6a8b ／ 由 `python tools/sync_onboarding_baselines.py --write --with-slow` 維護，勿手改；刪除本標記會讓 --check-snapshot fail-loud -->
+> <!-- snapshot-fingerprints: v001=8ffe3c3dabbd v030=60a98ecc1a49 scripts=4e4fc9b149fc autoclaude=301742da6a8b ／ 由 `python tools/sync_onboarding_baselines.py --write --with-slow` 維護，勿手改；刪除本標記會讓 --check-snapshot fail-loud -->
 >
 > | 量測項 | macOS（見下方 R57／R33 註） | **Windows 11（R60 收尾實測）** | 差異歸因（實測，非推算） |
 > |---|---|---|---|
