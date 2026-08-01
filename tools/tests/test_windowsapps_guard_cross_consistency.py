@@ -1710,9 +1710,19 @@ def _write_verdict_samples(td: str) -> Path:
     刻意不用命令列參數傳樣本：反斜線／`$`／UNC 前導 `\\\\` 在兩種 shell 的引號語意
     下各有轉義陷阱，一旦轉義歪掉，測試會因為「餵進去的字串已經不是表上那個」而
     假綠。走檔案則兩側都是逐行原文讀取，沒有轉義層。
+
+    🔴 一律走 bytes 層寫入、行尾**硬編碼 LF**（R68 windows-compat-ci 首度在真 Windows
+    執行 `tools/tests/` 時炸出的病灶，3 筆紅）：原本的 `write_text(..., encoding="ascii")`
+    其 `newline` 預設為 `None` ＝「翻成平台行尾」，在 Windows 上寫出的是 **CRLF**。
+    bash 側驅動器 `while IFS= read -r line` 只以 LF 斷行，`$line` 於是尾帶一個 `\\r`，
+    那個 CR 跟著被 `printf` 印進判定行——**送進生產函式的字串已經不是表上那個**，正是
+    本 docstring 上一段要防的假綠，只是改由行尾而非轉義層造成。PS 側走 `Get-Content`
+    會吃掉行終止符故免疫，這也是 CI 上只有 bash 那三筆紅、PS 三筆全綠的原因。
+    同型先例：`test_doc_loc_baseline_freshness_r60.py::_fingerprint_of` 的
+    「🔴 bytes 層：write_text 會在 Windows 自行加 CR」。
     """
     path = Path(td) / "verdict_cases.txt"
-    path.write_text("\n".join(_case_inputs()) + "\n", encoding="ascii")
+    path.write_bytes(("\n".join(_case_inputs()) + "\n").encode("ascii"))
     return path
 
 
@@ -1759,10 +1769,47 @@ def _bash_exe() -> str | None:
     return None
 
 
+def _run_verdict_driver(argv: list[str], timeout: int) -> subprocess.CompletedProcess[str]:
+    """跑判定驅動器，取回**換行未被改寫**的 stdout／stderr。
+
+    🔴 刻意不傳 `text=True`（R68）：那會把管線包進 universal-newlines 的
+    `TextIOWrapper`，把孤立的 `\\r` **就地翻成 `\\n`**。CR 汙染於是偽裝成一個憑空多出來
+    的換行，解析層看到的是兩截殘行（`V|<輸入>` 與 `|STUB`，兩者都不是 3 欄故雙雙被
+    跳過）而非一行帶 CR 的完整記錄，只能報「樣本被吃掉」，指不出真兇。
+    windows-compat-ci 上的實際形狀正是如此：11 筆樣本全數「不見」，而失敗訊息裡的
+    stdout repr 只看得到 `V|…python.exe\\n|STUB`——**CR 早在解析前就被 Python 抹掉了，
+    所以在解析層 strip `\\r` 根本救不回來**。改取 bytes 自行解碼，CR 才留得到
+    `_parse_verdicts` 裡被具名指認。
+    """
+    proc = subprocess.run(argv, capture_output=True, timeout=timeout)
+    return subprocess.CompletedProcess(
+        proc.args,
+        proc.returncode,
+        proc.stdout.decode("utf-8", errors="replace"),
+        proc.stderr.decode("utf-8", errors="replace"),
+    )
+
+
 def _parse_verdicts(stdout: str, expected_inputs: tuple[str, ...]) -> dict[str, bool]:
-    """解析 `V|<輸入>|STUB|REAL` 行；輸入集合必須與送進去的完全相同。"""
+    """解析 `V|<輸入>|STUB|REAL` 行；輸入集合必須與送進去的完全相同。
+
+    行終止符一律自行處理（呼叫端走 `_run_verdict_driver`，stdout 未經 universal
+    newlines 改寫）：只以 LF 斷行；行**尾**的 CR 視為 CRLF 的另一半而剝除——PowerShell
+    的 `Write-Output` 在 Windows 上輸出的就是 CRLF，那是合法行終止符。CR 出現在行的
+    **中間**則代表欄位內容被行尾汙染，就地 fail loud 並指名 CR：既不得默默剝掉當沒事
+    （判定不是對表上那個字串做的，剝掉即假綠），也不得放它流到下方的集合比對（那會
+    誤報成「驅動器把樣本吃掉了」，把查案方向指往錯的地方——R68 就是這樣被誤導的）。
+    """
     out: dict[str, bool] = {}
-    for line in stdout.splitlines():
+    for raw_line in stdout.split("\n"):
+        line = raw_line[:-1] if raw_line.endswith("\r") else raw_line
+        if "\r" in line:
+            raise AssertionError(
+                f"判定行的欄位內含 CR（{line!r}）——樣本在送進生產函式的路上被行尾"
+                "汙染（典型成因：樣本檔被寫成 CRLF，而 bash `read -r` 只斷 LF、"
+                "把 CR 留在 $line 裡），此時的判定不是對樣本表上那個字串做的，"
+                f"「全數同判」同樣是假綠。stdout={stdout!r}"
+            )
         parts = line.split("|")
         if len(parts) != 3 or parts[0] != "V":
             continue
@@ -1838,12 +1885,64 @@ class TestVerdictSourcesExist(unittest.TestCase):
                 case.encode("ascii")  # 非 ASCII 直接拋 UnicodeEncodeError
                 self.assertNotIn("|", case, "樣本不得含 `|`（驅動器輸出的欄位分隔符）")
                 self.assertNotIn("\n", case)
+                # R68：CR 同樣是行終止符的一半。樣本表本身不得含 CR，`_parse_verdicts`
+                # 才能把「判定行裡出現 CR」無歧義地判成行尾汙染而非樣本內容。
+                self.assertNotIn("\r", case)
 
     def test_case_table_has_both_verdicts(self) -> None:
         """表本身必須雙向有樣本——全 True（或全 False）的表對「永遠回同一個值」的
         壞實作零鑑別力。"""
         verdicts = {exp for _c, exp, _w in _VERDICT_CASES}
         self.assertEqual(verdicts, {True, False}, "樣本表必須同時含排除與不排除兩類")
+
+
+class TestVerdictParsingIsNewlineTransparent(unittest.TestCase):
+    """🔴 R68 迴歸鎖：判定行的解析不得被行尾形態左右。
+
+    病灶（windows-compat-ci 首度在真 Windows 跑 `tools/tests/` 時炸出的 3 筆紅）：
+    樣本檔在 Windows 被 `write_text` 的預設 `newline` 翻成 CRLF ⇒ bash `read -r` 只斷
+    LF、把 `\\r` 留在 `$line` ⇒ 判定行變成 `V|<輸入>\\r|STUB` ⇒ `subprocess(text=True)`
+    的 universal newlines 又把那個孤立 CR 翻成 `\\n`、一行裂成兩截殘行 ⇒ 11 筆樣本
+    「全數消失」，而失敗訊息只能說「樣本被吃掉」，完全指不出 CR。
+
+    本 class 對 `_parse_verdicts` 純函式釘死三條性質（不需要 bash／PowerShell，
+    任何平台都跑）。三條缺一即代表解析層又對換行敏感了。
+    """
+
+    # 刻意含一筆帶反斜線的樣本：真實表上的樣本幾乎都是 Windows 路徑。
+    _CASES = ("A/x", "B\\y")
+
+    def test_crlf_terminated_lines_parse_identically_to_lf(self) -> None:
+        """CRLF 是**合法行終止符**（PowerShell 在 Windows 上的 `Write-Output` 就輸出
+        CRLF），必須與 LF 版本解析出完全相同的結果；否則 PS 側會整批誤判為樣本被
+        吃掉——那正是「只把 text=True 拿掉、卻沒處理行尾 CR」會踩到的反向坑。"""
+        lf = "".join(f"V|{c}|STUB\n" for c in self._CASES)
+        crlf = lf.replace("\n", "\r\n")
+        self.assertEqual(
+            _parse_verdicts(crlf, self._CASES),
+            _parse_verdicts(lf, self._CASES),
+        )
+
+    def test_cr_inside_a_field_fails_loud_and_names_cr(self) -> None:
+        """CR 卡在欄位中間＝樣本在送進生產函式的路上被行尾汙染，判定不是對表上那個
+        字串做的。必須 fail loud 並**指名 CR**：默默剝掉是假綠，報「樣本被吃掉」則是
+        把查案方向指往錯的地方。"""
+        polluted = "".join(f"V|{c}\r|STUB\n" for c in self._CASES)
+        with self.assertRaises(AssertionError) as ctx:
+            _parse_verdicts(polluted, self._CASES)
+        self.assertIn("CR", str(ctx.exception))
+
+    def test_genuinely_eaten_sample_still_reports_eaten(self) -> None:
+        """🔴 不得讓原訊息退化：真的少報一筆樣本（與 CR 無關）時，仍必須是原本那句
+        「驅動器把某些樣本吃掉了…假綠」，並指名缺的是哪一筆。新增的 CR 檢查是**加在
+        前面的更精準診斷**，不是取代這道有牙的自檢。"""
+        partial = f"V|{self._CASES[0]}|STUB\n"
+        with self.assertRaises(AssertionError) as ctx:
+            _parse_verdicts(partial, self._CASES)
+        message = str(ctx.exception)
+        self.assertIn("吃掉", message)
+        self.assertIn("假綠", message)
+        self.assertIn(repr(self._CASES[1]), message)
 
 
 class TestPythonSideVerdicts(unittest.TestCase):
@@ -1884,13 +1983,12 @@ class TestPowerShellSideVerdicts(unittest.TestCase):
                 ),
                 encoding="utf-8",
             )
-            proc = subprocess.run(
+            proc = _run_verdict_driver(
                 [
                     _pwsh_exe(), "-NoProfile", "-ExecutionPolicy", "Bypass",
                     "-File", str(script),
                 ],
-                capture_output=True, text=True, encoding="utf-8",
-                errors="replace", timeout=120,
+                timeout=120,
             )
         self.assertEqual(
             proc.returncode, 0,
@@ -1931,13 +2029,12 @@ class TestBashSideVerdicts(unittest.TestCase):
     def _bash_verdicts(self) -> dict[str, bool]:
         with tempfile.TemporaryDirectory() as td:
             samples = _write_verdict_samples(td)
-            proc = subprocess.run(
+            proc = _run_verdict_driver(
                 [
                     _bash_exe(), "-c", _BASH_VERDICT_DRIVER,
                     "bash", str(_GUARD_SH), str(samples),
                 ],
-                capture_output=True, text=True, encoding="utf-8",
-                errors="replace", timeout=60,
+                timeout=60,
             )
         self.assertEqual(
             proc.returncode, 0,
@@ -1967,6 +2064,56 @@ class TestBashSideVerdicts(unittest.TestCase):
                     verdicts[case], _autoclaude_is_stub(case),
                     f"bash 與 pre_run_validator 對同一輸入相反裁決（{why}）",
                 )
+
+
+@unittest.skipUnless(_bash_exe(), "本機找不到可用 bash，略過行尾紀律端到端驗證")
+class TestBashDriverEndToEndNewlineDiscipline(unittest.TestCase):
+    """🔴 R68 迴歸鎖（端到端，且**任何平台都跑得動**）：把 Windows 上的病灶鏈在本機
+    原樣重放——樣本檔寫成 CRLF，其餘全走真實 bash 驅動器與真實解析層。
+
+    為何本機就足以證明：CRLF 樣本檔是整條鏈**唯一**的平台變因（Windows 的
+    `write_text` 行尾翻譯造成），其後每一段——bash `read -r` 只斷 LF、`printf` 原樣
+    輸出、Python 側解碼——在 macOS／Linux 上行為相同。故把那個變因手動注入，本機
+    重現出的失敗形態即與 windows-compat-ci 上實測到的一致。
+    """
+
+    def _drive(self, samples_bytes: bytes) -> str:
+        with tempfile.TemporaryDirectory() as td:
+            samples = Path(td) / "verdict_cases.txt"
+            samples.write_bytes(samples_bytes)
+            proc = _run_verdict_driver(
+                [
+                    _bash_exe(), "-c", _BASH_VERDICT_DRIVER,
+                    "bash", str(_GUARD_SH), str(samples),
+                ],
+                timeout=60,
+            )
+        self.assertEqual(
+            proc.returncode, 0,
+            f"bash 執行失敗（rc={proc.returncode}）：{proc.stdout}\n{proc.stderr}",
+        )
+        return proc.stdout
+
+    def test_crlf_samples_are_diagnosed_as_cr_not_as_eaten_samples(self) -> None:
+        """CRLF 樣本檔 ⇒ 解析層必須指名 CR。若哪天有人把 `text=True` 加回
+        `_run_verdict_driver`，universal newlines 會把 CR 翻成換行、訊息退回含糊的
+        「樣本被吃掉」，本條即紅。"""
+        stdout = self._drive(("\r\n".join(_case_inputs()) + "\r\n").encode("ascii"))
+        with self.assertRaises(AssertionError) as ctx:
+            _parse_verdicts(stdout, _case_inputs())
+        self.assertIn("CR", str(ctx.exception))
+
+    def test_written_samples_are_lf_only_and_round_trip_verbatim(self) -> None:
+        """正向對照，鎖住寫入側的修法：`_write_verdict_samples` 實際寫出的位元組不得
+        含 CR，且每一筆樣本都要逐字原樣回得來。若有人把 `write_bytes` 改回
+        `write_text(...)`（`newline` 預設＝平台行尾），本條在 Windows 上直接紅。"""
+        with tempfile.TemporaryDirectory() as td:
+            written = _write_verdict_samples(td).read_bytes()
+        self.assertNotIn(b"\r", written, "樣本檔不得含 CR——行尾必須硬編碼 LF")
+        self.assertEqual(
+            set(_parse_verdicts(self._drive(written), _case_inputs())),
+            set(_case_inputs()),
+        )
 
 
 @unittest.skipUnless(
