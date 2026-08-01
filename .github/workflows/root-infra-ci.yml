@@ -1,8 +1,16 @@
 # 根層基建 CI（四方複審 B4，2026-07-10；防禦縱深補洞 2026-07-11）：workflows / hooks /
 # 工具腳本上移 monorepo 根層後，根層 tools/（bootstrap / integration_gate / git-hooks
 # dispatcher）與 .gitattributes、.editorconfig、dependabot 等基建原本零 CI 覆蓋——壞掉
-# 只會在開發者本機爆。本 workflow 做十四道輕量守門（僅 actions/checkout，不引其他外部
-# action，避免供應鏈風險）：
+# 只會在開發者本機爆。本 workflow 做十四道輕量守門（只用 GitHub 第一方 actions，不引
+# 任何第三方 action，避免供應鏈風險）：
+# 🔴 R68 訂正（本段原文寫「僅 actions/checkout，不引其他外部 action」，且第 8 道原文
+# 寫「純 stdlib unittest，零依賴安裝」）：這兩句自 2026-07-14 起就是**假宣稱**，而代價
+# 是本 workflow 連續多輪全紅無人察覺。實況是 tools/tests/ 有三支 Windows 交叉一致性
+# 測試 import `autoclaude.*`，連帶拉進 yaml→pydantic→httpx；零安裝環境下它們 import
+# 失敗、被 unittest 收集成佔位測試，122 支迴歸鎖一支都沒跑。故本 job 現在改為
+# setup-python + 一次 pip install（清單 SSOT＝tools/run_root_unittests.py 的
+# `_THIRD_PARTY_PREREQS`，並由 tools/tests/ 的 CI 安裝步驟鎖機械綁定本檔）。
+# 其餘十三道仍是純 stdlib、零安裝——「輕量」原則只在第 8 道讓步，且是為了讓它真的跑。
 #   1. bash -n       — active *.sh（R56 起，原僅根層 tools/：AISDLC_SDD LATEST 版納入、
 #                      凍結版 v0.01~v0.(N-1) 依紀律不回改 → 排除，政策與第 2 道一致）
 #                      與三處無副檔名 git hooks 目錄（tools/git-hooks/、
@@ -38,7 +46,7 @@
 #                      （dev_start 四方審查 P2，2026-07-12；子目錄遞迴盲區修復
 #                      2026-07-13）
 #   8. unittest      — tools/tests/ 下 dev_start.py 純邏輯函式與已修復迴歸點的單元測試
-#                      （純 stdlib unittest，零依賴安裝，維持本 job 輕量原則；四方複審
+#                      （R68 起本道**需要**第三方相依，見上方訂正段；四方複審
 #                      2026-07-13 REJECT 原因之一即「核心邏輯複雜度已超過 py_compile
 #                      能守住的範圍」，本道步驟收斂該落差。R10 QA-2：改走
 #                      tools/run_root_unittests.py——裸 discover 對 0 個測試回 rc=0，
@@ -97,8 +105,11 @@
 # 緊接第 1 道 bash -n 之後執行）——R11 文件掃描[關注-3]澄清。
 #
 # 觸發不設 paths 過濾（2026-07-11 起）：NTFS 檔名閘守的是「任何路徑」新增的
-# 敵意檔名（一旦入庫所有 Windows checkout 直接壞），paths 白名單必留盲區；本 job 全部
-# 步驟輕量（< 1 分鐘、零依賴安裝），全變更觸發成本可忽略。
+# 敵意檔名（一旦入庫所有 Windows checkout 直接壞），paths 白名單必留盲區；本 job 十三道
+# 步驟輕量，全變更觸發成本可忽略。
+# 🔴 R68 訂正：原文寫「全部步驟輕量（< 1 分鐘、零依賴安裝）」——第 8 道 unittest 既非
+# 零安裝（見檔頭訂正段）也非秒級（本機 macOS 實測全套 1371 支約 110 秒，CI runner 更慢），
+# 故 timeout 由 10 分鐘放寬為 20 分鐘。該道之外的十三道仍維持原本的輕量零安裝性質。
 
 name: root-infra-ci
 
@@ -120,7 +131,7 @@ jobs:
   root-infra:
     name: root infra guard (bash -n + pwsh parse/BOM + EOL(.sh) + EOL(.ps1) + NTFS + parity + py_compile + unittest + defect-log-crossref + wrapper-thinness + pytest-baseline-sites + gha-action-versions + defect-log-preservation + onboarding-snapshot-fingerprint)
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 20   # R68：第 8 道 unittest 現在會真的跑完全套（見檔頭訂正段）
     steps:
       - uses: actions/checkout@v5
 
@@ -311,6 +322,22 @@ jobs:
 
       - name: 雙平台腳本對等 + pytest 釘選一致（成對 .sh/.ps1 標籤清單＋LATEST 納管）
         run: python3 tools/check_script_parity.py
+
+      # R68：本 job 原本刻意不裝任何東西，而 tools/tests/ 早已（自 R33/R34/R57）有測試
+      # import `autoclaude.*`。缺相依時 unittest discovery 不會報錯、只會把該模組整份
+      # 覆蓋塌成一支佔位測試 ⇒ 122 支 Windows 迴歸鎖靜默不跑。改用 setup-python 而非對
+      # 系統 python3 直接 pip install：後者在 externally-managed（PEP 668）的 runner 映像
+      # 上會被擋，而 setup-python@v6 已是本 repo 其餘 workflow 的既有用法（同為 GitHub
+      # 第一方 action，版本由 tools/check_gha_action_versions.py 跨 workflow 釘死）。
+      # 副作用（明說）：本 step 之後的守門改用 3.11 而非 runner 預設版——3.11 正是本 repo
+      # 各處宣告的目標版，且該批守門已在 3.11 實測全數 rc=0。
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.11"
+
+      - name: tools/tests 第三方相依（清單 SSOT＝tools/run_root_unittests.py 的 _THIRD_PARTY_PREREQS；漏裝時該 runner 會 fail-fast 指路）
+        run: python3 -m pip install --quiet --disable-pip-version-check pyyaml pydantic httpx
 
       - name: unittest（tools/tests/：dev_start.py 純邏輯函式 + 已修復迴歸點；含數量下限釘選）
         run: python3 tools/run_root_unittests.py

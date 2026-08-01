@@ -376,6 +376,12 @@ jobs:
         with:
           python-version: "3.11"
 
+      - name: tools/tests 第三方相依（清單 SSOT＝tools/run_root_unittests.py 的 _THIRD_PARTY_PREREQS；漏裝時該 runner 會 fail-fast 指路）
+        # R68：tools/tests/ 有三支測試 import `autoclaude.*`，連帶拉進 yaml→pydantic→httpx。
+        # 缺相依時 discovery 把它們整份覆蓋塌成佔位測試，122 支迴歸鎖靜默不跑而本 step 紅
+        # 在一句「測試疑似大規模靜默消失」上——三平台實測同一數字，是環境維度不是平台維度。
+        run: python3 -m pip install --quiet --disable-pip-version-check pyyaml pydantic httpx
+
       - name: tools/tests/（SIGPIPE 回歸鎖 + dev_start.py 平台邏輯；R3 QA 發現：paths 雖已涵蓋 tools/tests/**，但先前從未有任何 step 真的執行過，只在 root-infra-ci.yml 的 ubuntu-latest 上以 mock 跑過）
         # R10 QA-2（DEF-101-127）：裸 discover 對「發現 0 個測試」回 rc=0——改走
         # tools/run_root_unittests.py（數量下限釘選，低於下限紅燈不執行）。

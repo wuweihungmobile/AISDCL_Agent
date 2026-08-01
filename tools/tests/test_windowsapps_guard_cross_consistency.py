@@ -1431,6 +1431,11 @@ _ZERO_GUARD_BARE_PY_SITES = {
         "非呼叫：薄殼守門工具的**禁用子字串樣式**字面值（`\"python -c\"`／"
         "`\"python3 -c\"`，用來偵測厚殼），是比對資料而非指令"
     ),
+    "tools/run_root_unittests.py": (
+        "非呼叫：`install_hint()` 組給**人**複製貼上的安裝指令字串"
+        "（`\"python -m pip install \" + …`）——本行程只 print 它、不 spawn。"
+        "R68 新增：缺第三方相依時 runner fail-fast 並印出這行修法"
+    ),
     "tools/lib/platform_utils.py": (
         "非呼叫：`venv_dir / \"bin\" / \"python\"` 的**路徑片段**（組出 venv 內絕對路徑），"
         "不經 PATH 解析。粗粒度判準看不出「字面值當路徑片段」與「當指令首 token」的差別，"

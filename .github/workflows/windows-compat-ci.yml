@@ -142,8 +142,9 @@
 # 導出的實測分佈為準：
 #
 #   $ python3 -c "import yaml,collections; d=yaml.safe_load(open('.github/workflows/windows-compat-ci.yml')); [print(n, j.get('runs-on'), dict(collections.Counter(s.get('shell','<implicit>') for s in j['steps'] if 'run' in s))) for n, j in d['jobs'].items()]"
-#   （以下為 2026-07-27 原樣輸出，僅為對齊欄位補了空白，其餘逐字未改）
-#   windows-smoke         windows-latest {'pwsh': 19, 'bash': 1}
+#   （以下為 2026-08-01 原樣輸出，僅為對齊欄位補了空白，其餘逐字未改；R68 新增
+#     「tools/tests 第三方相依」pwsh step 後由 19 → 20，本表隨之更新）
+#   windows-smoke         windows-latest {'pwsh': 20, 'bash': 1}
 #   windows-nightly-full  windows-latest {'powershell': 2, 'pwsh': 3}
 #   windows-nightly-alert ubuntu-latest  {'<implicit>': 3}
 #   （全檔無 workflow 層／job 層 `defaults:` 區塊，故上表即實際生效的引擎分佈；
@@ -500,6 +501,13 @@ jobs:
         uses: actions/setup-python@v6
         with:
           python-version: "3.11"
+
+      - name: tools/tests 第三方相依（清單 SSOT＝tools/run_root_unittests.py 的 _THIRD_PARTY_PREREQS；漏裝時該 runner 會 fail-fast 指路）
+        shell: pwsh
+        # R68：tools/tests/ 有三支測試 import `autoclaude.*`，連帶拉進 yaml→pydantic→httpx。
+        # 缺相依時 discovery 把它們整份覆蓋塌成佔位測試，122 支迴歸鎖靜默不跑而本 step 紅
+        # 在一句「測試疑似大規模靜默消失」上——三平台實測同一數字，是環境維度不是平台維度。
+        run: python -m pip install --quiet --disable-pip-version-check pyyaml pydantic httpx
 
       - name: tools/tests/（SIGPIPE 回歸鎖 + dev_start.py 平台邏輯；R3 QA 發現：先前只在 root-infra-ci.yml 的 ubuntu-latest 上以 mock 跑過，從未在真實 Windows 執行過）
         shell: pwsh

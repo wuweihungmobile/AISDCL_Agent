@@ -10,7 +10,10 @@ from __future__ import annotations
 import contextlib
 import inspect
 import io
+import json
+import re
 import shutil
+import subprocess
 import sys
 import tempfile
 import textwrap
@@ -789,6 +792,234 @@ class ExecutionGapTest(unittest.TestCase):
             gap > 0 and bool(run_root_unittests.fixture_level_entries(attributable)),
             "此情境為『有差額但可歸因』⇒ 依設計只點名不判紅",
         )
+
+
+# ── R68：零相依環境（＝CI 實況）的鑑別力鎖 ────────────────────────────────────
+#
+# 缺陷（三支 CI 自 2026-07-14 起連續全紅，無人察覺）：`tools/tests/` 有三支測試
+# import `autoclaude.*`，連帶拉進 yaml→pydantic→httpx；而 CI 三個 job 都不裝任何
+# 第三方套件。缺相依時 `unittest` discovery **不報錯**，只把該模組整份覆蓋塌成一支
+# `_FailedTest` 佔位測試——122 支 Windows 迴歸鎖靜默不跑，而閘門紅在一句「測試疑似
+# 大規模靜默消失（目錄改名/pattern 不符/路徑錯）」上，三條指路全錯。
+#
+# 本組鎖的**模擬手法**：往 `sys.meta_path` 插一個對指定 top-level 模組拋
+# `ModuleNotFoundError` 的 finder，即可在**任何**環境裡重現零相依環境，不需要真的
+# 建一個乾淨 venv。落地時實測：此法對真實 `tools/tests/` 樹產生的收集數與佔位模組
+# 集合，與 stdlib-only venv 實跑、以及三個 CI 平台回報的數字**三方完全一致**。
+# 因為要隔離 `sys.meta_path` 與 `sys.modules` 的污染，一律在子行程裡跑。
+_ZERO_DEP_PROBE = '''\
+import json, sys
+_blocked = set(json.loads(sys.argv[1]))
+
+
+class _Blocker:
+    def find_spec(self, fullname, path=None, target=None):
+        if fullname.partition(".")[0] in _blocked:
+            raise ModuleNotFoundError("No module named %r" % fullname, name=fullname)
+        return None
+
+
+sys.meta_path.insert(0, _Blocker())
+sys.path.insert(0, sys.argv[3])
+import run_root_unittests as R
+
+if sys.argv[2] == "main":
+    sys.exit(R.main())
+# "floor"：刻意繞過 main() 的 fail-fast，直接叩下限守門本身——證明**即使**前置
+# 檢查被拿掉，下限層在零相依環境下仍然判紅（鑑別力不靠 fail-fast 撐著）。
+sys.exit(R.run_with_floor(R._TESTS_DIR, R.MIN_TESTS))
+'''
+
+
+def _run_zero_dep_probe(mode: str, blocked: list[str]) -> subprocess.CompletedProcess[str]:
+    tools_dir = str(Path(run_root_unittests.__file__).resolve().parent)
+    with tempfile.TemporaryDirectory() as tmp:
+        probe = Path(tmp) / "zero_dep_probe.py"
+        probe.write_text(_ZERO_DEP_PROBE, encoding="utf-8")
+        return subprocess.run(
+            [sys.executable, str(probe), json.dumps(blocked), mode, tools_dir],
+            capture_output=True, text=True, encoding="utf-8", errors="replace",
+            cwd=tools_dir, timeout=300,
+        )
+
+
+class ThirdPartyPrereqDeclarationTest(unittest.TestCase):
+    """`_THIRD_PARTY_PREREQS` 是「`MIN_TESTS` 得以成立的前提」的宣告（R68）。
+
+    WHY（測意圖）：`MIN_TESTS` 是**單一值**——相依齊備環境下的實測值。本輪曾被提議
+    改成「環境感知的雙下限」（完整相依用高值、零相依用低值），該設計會把一個**壞掉
+    的環境升格成合法的第二種環境**，讓 CI 在 122 支迴歸鎖一支都沒跑的狀態下印綠燈。
+    本組鎖住的正是相反的語意：零相依環境**必須**判紅，而且要說清楚紅在哪裡。
+    """
+
+    def test_declared_prereqs_are_present_in_this_environment(self) -> None:
+        """宣告面的**真實性**：清單裡的每一個都必須真的裝得到。
+
+        本測試能執行本身就蘊含相依齊備（否則 `main()` 早已 fail-fast），故它擋的是
+        「宣告了一個根本沒人裝的模組」——那會讓 runner 在所有環境永久 fail-fast。
+        """
+        self.assertEqual(
+            run_root_unittests.missing_third_party_prereqs(), [],
+            "宣告的第三方相依在本環境找不到——清單可能寫錯 import 名",
+        )
+
+    def test_missing_detection_reports_pip_name_for_install(self) -> None:
+        """偵測到缺漏時必須連 **pip 名**一起回報：import 名與 pip 名不一定同字
+        （`yaml` 的 pip 名是 `pyyaml`），只印 import 名等於讓人自己猜安裝指令。"""
+        fake = (("definitely_not_installed_xyz", "some-pip-name"),)
+        missing = run_root_unittests.missing_third_party_prereqs(fake)
+        self.assertEqual(missing, [("definitely_not_installed_xyz", "some-pip-name")])
+
+        buf = io.StringIO()
+        with contextlib.redirect_stderr(buf):
+            run_root_unittests.report_missing_third_party_prereqs(missing)
+        msg = buf.getvalue()
+        self.assertIn("some-pip-name", msg, "訊息必須給得出可直接複製的安裝指令")
+        self.assertIn("不是「測試消失」", msg, "必須當場否定掉那個錯誤診斷")
+
+
+class FloorFailureAttributionTest(unittest.TestCase):
+    """下限失敗訊息必須**分辨**「環境不完整」與「測試真的消失」（R68）。
+
+    WHY（測意圖非僅行為）：舊訊息只有一種說法，把讀者指往「目錄改名／pattern 不符／
+    路徑錯」三條路；三個 CI 平台實際撞上的卻是第四種原因。訊息本身就是這道閘門的
+    產品——它錯了，閘門即使正確判紅也沒有價值（實證：連續多輪沒人循著它找到根因）。
+    """
+
+    def _message(self, placeholders, missing) -> str:
+        buf = io.StringIO()
+        with contextlib.redirect_stderr(buf):
+            run_root_unittests.report_floor_failure(
+                Path("/fake/tests"), 1240, 1362, placeholders, missing,
+            )
+        return buf.getvalue()
+
+    def test_placeholders_present_blames_environment_and_names_modules(self) -> None:
+        msg = self._message([("mod_a", "_FailedTest")], [("yaml", "pyyaml")])
+        self.assertIn("mod_a", msg, "必須點名是哪個模組沒載入，否則無從查起")
+        self.assertIn("環境問題", msg)
+        self.assertIn("pyyaml", msg, "既然知道缺什麼，就必須直接給安裝指令")
+        self.assertNotIn(
+            "真的大規模消失", msg,
+            "有佔位測試時仍宣稱『測試消失』＝把讀者指往錯的方向，正是本輪缺陷本體",
+        )
+
+    def test_no_placeholders_still_blames_real_disappearance(self) -> None:
+        """反方向：**沒有**佔位測試時，原本那個診斷仍然要講——鑑別力不可只往一邊倒。
+        修完之後「測試真的大量消失」必須照樣被抓到並被正確歸因。"""
+        msg = self._message([], [])
+        self.assertIn("真的大規模消失", msg)
+        self.assertIn("MIN_TESTS", msg, "刻意刪減時仍須指路到下修下限")
+
+    def test_placeholders_but_all_prereqs_present_points_at_new_dependency(self) -> None:
+        """第三種情形（未來的復發形態）：有模組載入失敗、但宣告清單全都在 ⇒ 多半是
+        **新增**了一個沒登記的第三方相依。訊息必須指向「把它加進清單並同步 CI」，
+        否則下一個人只會看到一份無從解釋的佔位測試清單。"""
+        msg = self._message([("mod_b", "_FailedTest")], [])
+        self.assertIn("mod_b", msg)
+        self.assertIn("_THIRD_PARTY_PREREQS", msg)
+
+
+class ZeroDepEnvironmentDiscriminationTest(unittest.TestCase):
+    """零相依環境（＝三支 CI 的等價環境）下的鑑別力鎖（R68）。
+
+    🔴 鑑別力邊界（誠實劃界）：本組證明的是「宣告清單裡那幾個相依被拿掉時，閘門會
+    判紅且會正確歸因」。它**不**證明清單是完備的——若未來有人加進第四個相依而沒
+    登記，本組抓不到（那半邊由 `CiPrereqInstallLockTest` 的 SSOT 綁定與 runner 的
+    「相依都在卻仍有佔位測試」分支承接）。
+    """
+
+    def test_blocked_prereqs_reproduce_collection_collapse(self) -> None:
+        """模擬手法的**保真度**自檢：擋掉宣告的相依後，真實樹的收集數必須真的掉到
+        下限以下且產生佔位測試。若哪天這條不成立，代表本組其餘測試在測空氣。"""
+        blocked = [imp for imp, _ in run_root_unittests._THIRD_PARTY_PREREQS]
+        proc = _run_zero_dep_probe("floor", blocked)
+        self.assertEqual(
+            proc.returncode, 1,
+            f"零相依環境下 run_with_floor 必須判紅（stdout={proc.stdout[-500:]!r}）",
+        )
+
+    def test_zero_dep_message_says_environment_not_disappearance(self) -> None:
+        """本輪缺陷的**直接**回歸鎖：在 CI 的等價環境下，閘門印的必須是「環境不完整」
+        而不是「測試疑似大規模靜默消失」。"""
+        blocked = [imp for imp, _ in run_root_unittests._THIRD_PARTY_PREREQS]
+        proc = _run_zero_dep_probe("floor", blocked)
+        self.assertIn("環境問題", proc.stderr)
+        self.assertNotIn("真的大規模消失", proc.stderr)
+        for import_name, _pip in run_root_unittests._THIRD_PARTY_PREREQS:
+            self.assertIn(import_name, proc.stderr, "必須點名缺哪一個相依")
+
+    def test_main_fails_fast_with_actionable_message(self) -> None:
+        """`main()` 必須在跑滿整套之前就 fail-fast——把一次 110 秒的誤診縮成一則
+        0.5 秒的正確指路。同時證明零相依環境**不會**被放行（無 fail-open）。"""
+        blocked = [imp for imp, _ in run_root_unittests._THIRD_PARTY_PREREQS]
+        proc = _run_zero_dep_probe("main", blocked)
+        self.assertEqual(proc.returncode, 1, "零相依環境必須判紅")
+        self.assertIn("pip install", proc.stderr, "必須給得出可直接複製的修法")
+        self.assertNotIn(
+            "unittest 數量下限釘選通過", proc.stdout,
+            "fail-fast 必須發生在下限守門之前，否則等於又跑了一輪才誤診",
+        )
+
+
+class CiPrereqInstallLockTest(unittest.TestCase):
+    """CI 安裝步驟鎖：跑本 runner 的每個 CI job 都必須先裝齊宣告的相依（R68）。
+
+    WHY（本組最重要的一道；測意圖非僅行為）：前面幾道鎖只讓失敗**可讀**，攔不住
+    「下次再多一個相依、CI 又沒裝」的復發——本輪的缺陷正是這個形狀，而且它躲過了
+    連續多輪的四方複審。本鎖把「`_THIRD_PARTY_PREREQS` 這份宣告」與「CI 實際安裝
+    的東西」機械綁在一起：往常數加一個相依而忘了改 workflow，這裡立刻紅。
+
+    🔴 判準邊界（誠實劃界）：以純文字掃描認「同一個 job 內、該 step 之前出現的
+    `pip install` 行」，刻意不引 YAML parser（本檔須能在最小環境下自我檢查）。
+    因此它**不涵蓋**：把安裝寫進 composite action／reusable workflow／外部腳本、
+    或以 `requirements.txt` 間接安裝——那些形態它一律看不到，仍是人審責任。
+    """
+
+    _WORKFLOWS = Path(run_root_unittests.__file__).resolve().parents[1] / ".github" / "workflows"
+    # job key＝2 空格縮排的映射鍵。`on:` 底下的 `push:` 等也符合此形，但它們一律
+    # 出現在 `jobs:` 之前，故「往回找最近一個」對 job 內的 step 永遠命中真正的 job。
+    _JOB_KEY_RE = re.compile(r"^  ([A-Za-z0-9_-]+):\s*$")
+    _RUNNER_RE = re.compile(r"run:.*run_root_unittests\.py")
+    _PIP_INSTALL_RE = re.compile(r"pip install\b(.*)$")
+
+    def _runner_call_sites(self) -> list[tuple[Path, int, list[str]]]:
+        """回傳 `(workflow 檔, 呼叫行號, 該 job 內此行之前的所有行)`。"""
+        sites: list[tuple[Path, int, list[str]]] = []
+        for path in sorted(self._WORKFLOWS.glob("*.yml")):
+            lines = path.read_text(encoding="utf-8").splitlines()
+            job_start = 0
+            for idx, line in enumerate(lines):
+                if self._JOB_KEY_RE.match(line):
+                    job_start = idx
+                elif self._RUNNER_RE.search(line):
+                    sites.append((path, idx + 1, lines[job_start:idx]))
+        return sites
+
+    def test_every_ci_job_running_the_runner_installs_all_prereqs(self) -> None:
+        sites = self._runner_call_sites()
+        # 下限釘選（比照本 repo 既有慣例）：抽不到任何呼叫點時本鎖會**空轉全綠**，
+        # 那正是它要防的失效模式的極端形——workflow 改名或 step 改寫都會走到這裡。
+        self.assertGreaterEqual(
+            len(sites), 3,
+            f"抽不到足夠的 run_root_unittests.py CI 呼叫點（找到 {len(sites)} 個）——"
+            f"抽取 pattern 或 workflow 結構疑似漂移",
+        )
+        required = {pip for _imp, pip in run_root_unittests._THIRD_PARTY_PREREQS}
+        for path, lineno, before in sites:
+            installed: set[str] = set()
+            for line in before:
+                m = self._PIP_INSTALL_RE.search(line)
+                if m:
+                    installed.update(m.group(1).split())
+            self.assertEqual(
+                required - installed, set(),
+                f"{path.name}:{lineno} 在同 job 內跑 run_root_unittests.py，但該 step 之前"
+                f"沒有安裝 {sorted(required - installed)}——零相依環境下這些相依所屬的測試"
+                f"模組會 import 失敗、整份覆蓋塌成佔位測試而**靜默不跑**（R68：三支 CI 因此"
+                f"連續多輪全紅）。請在該 step 前補 pip install，清單 SSOT＝"
+                f"run_root_unittests._THIRD_PARTY_PREREQS",
+            )
 
 
 if __name__ == "__main__":

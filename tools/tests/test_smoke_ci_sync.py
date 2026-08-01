@@ -724,6 +724,11 @@ _CI_STEP_LOCAL_CARRIER: dict[str, dict[str, str]] = {
         "uses:actions/checkout": f"{_INFRA}: 取原始碼",
         "Set up Python 3.11": f"{_INFRA}: 準備直譯器",
         "將 .venv/bin 加入 PATH（比照本機開發慣例，供後續步驟裸呼叫 python）": f"{_INFRA}: 環境設定，非驗證步",
+        "tools/tests 第三方相依（清單 SSOT＝tools/run_root_unittests.py 的 _THIRD_PARTY_PREREQS；漏裝時該 runner 會 fail-fast 指路）": (
+            f"{_INFRA}: 環境設定，非驗證步——本機開發 .venv 早已具備這些相依，"
+            "故無需對應載具；「CI 有沒有裝」這件事本身由 "
+            "tools/tests/test_run_root_unittests.py::CiPrereqInstallLockTest 機械看守"
+        ),
         "tools/tests/（SIGPIPE 回歸鎖 + dev_start.py 平台邏輯；R3 QA 發現：paths 雖已涵蓋 tools/tests/**，但先前從未有任何 step 真的執行過，只在 root-infra-ci.yml 的 ubuntu-latest 上以 mock 跑過）": "nightly stage 2 root_unittests（tools/run_root_unittests.py）＋ pre-push root-infra leg",
         "install_mac_nightly.sh --render-only（plist 產出＋plutil -lint；鏡射本機 smoke [6]，QA-R13-3 補齊四向互鎖缺角）": "macos_smoke_local.sh [6/7]",
         "執行 tools/bootstrap.sh（全新 .venv 建立情境）": (
@@ -768,6 +773,11 @@ _CI_STEP_LOCAL_CARRIER: dict[str, dict[str, str]] = {
         "Set up Python 3.11": f"{_INFRA}: 準備直譯器",
         "Install AutoClaude deps": f"{_INFRA}: 裝依賴，非驗證步",
         "安裝 AISDLC_SDD pinned deps": f"{_INFRA}: 裝依賴，非驗證步",
+        "tools/tests 第三方相依（清單 SSOT＝tools/run_root_unittests.py 的 _THIRD_PARTY_PREREQS；漏裝時該 runner 會 fail-fast 指路）": (
+            f"{_INFRA}: 裝依賴，非驗證步——本機開發環境早已具備這些相依；"
+            "「CI 有沒有裝」由 tools/tests/test_run_root_unittests.py::"
+            "CiPrereqInstallLockTest 機械看守"
+        ),
         "tools/tests/（SIGPIPE 回歸鎖 + dev_start.py 平台邏輯；R3 QA 發現：先前只在 root-infra-ci.yml 的 ubuntu-latest 上以 mock 跑過，從未在真實 Windows 執行過）": "nightly root_unittests（AutoClaude/tools/run_local_nightly.ps1）＋ pre-push root-infra leg",
         "install_windows_nightly.ps1 -WhatIf 預覽（R26 Scan-C 發現：從未在真實 CI 執行過；鏡射 macos-compat-ci.yml install_mac_nightly.sh --render-only 步驟，DEF-101-269）": "windows_smoke_local.ps1 [9/9]",
         "執行 tools/bootstrap.ps1（R1 SA 發現：Windows 新人上手入口從未被實測）": f"{_NO_CARRIER}: 同 macOS 側——需乾淨 checkout 建全新 .venv，破壞性且分鐘級",

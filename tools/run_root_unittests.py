@@ -23,6 +23,11 @@ R60 Pkg-P8 補三層——因為「下限」語意只擋得住「掉太多」，
      SkipTest 會讓整個類別一支都不跑而 `countTestCases()` 完全不變，下限守門
      結構性看不到（實測：收集 11／執行 2／rc=0）。
 
+R68 補第四層 `_THIRD_PARTY_PREREQS`——前三層都預設「環境是完整的」，而三個 CI 平台
+上的實況正是環境**不**完整：缺第三方相依 ⇒ 模組 import 失敗 ⇒ 整份覆蓋塌成一支
+`_FailedTest` 佔位測試 ⇒ 收集數低於下限，而下限失敗訊息卻只會說「測試疑似大規模
+靜默消失（目錄改名/pattern 不符/路徑錯）」，把讀者指往三條全錯的路。詳見該常數。
+
 呼叫端（取代裸 `python -m unittest discover -s tools/tests`）：
   tools/git-hooks/pre-push（root-infra leg ②）、.github/workflows/root-infra-ci.yml
   step 8、windows-compat-ci.yml、macos-compat-ci.yml 對應 step。
@@ -33,6 +38,7 @@ R60 Pkg-P8 補三層——因為「下限」語意只擋得住「掉太多」，
 from __future__ import annotations
 
 import hashlib
+import importlib.util
 import os
 import re
 import sys
@@ -66,6 +72,40 @@ MIN_TESTS = 1362  # R67 round 3 **最終收尾包重釘（本輪第三次；動�
 # 承受的維護負擔，換到的是下限不會再腐化 11 輪。
 RATCHET_WARN_RATIO = 1.10
 RATCHET_STALE_RATIO = 1.25
+
+# `tools/tests/` 的第三方相依宣告（SSOT）——`(import 名, pip 名)`。
+#
+# WHY（R68；本 repo 三支 CI 自 2026-07-14 起連續全紅、無人察覺的根因）：本目錄名義上
+# 是「純 stdlib、零安裝」的根層基建測試（`root-infra-ci.yml` 檔頭與其 unittest step
+# 的註解皆如此自陳），但其中三支 Windows 交叉一致性測試必須 import `autoclaude.*` 的
+# **真實函式物件**，與 bash／PowerShell 側的平行實作逐輸入比對裁決是否一致——那正是
+# 它們的全部價值，不能改寫成字面比對。而 `autoclaude/utils/__init__.py` 與
+# `autoclaude/execution/__init__.py` 是 eager import：只要碰其中任一支子模組，整棵
+# AutoClaude runtime 相依樹（yaml → pydantic → httpx）就被一併拉進來。
+#
+# 於是「零安裝」的自陳與實況矛盾，而代價**不是**測試變慢、是測試**消失**：缺相依時
+# `unittest` discovery 把該模組整份覆蓋塌成一支 `_FailedTest` 佔位測試，收集數靜默
+# 少掉 N-1 支。三個 CI 平台（ubuntu／macOS／Windows runner）實測收集數完全一致，
+# 且與本機「stdlib-only venv」實測值一致——那是環境維度差異，不是平台維度差異。
+#
+# 🔴 判準：**`MIN_TESTS` 只有一個值**，即相依齊備環境下的實測值。刻意**不**做成
+# 「環境感知的雙下限」——那等於把一個壞掉的環境升格成合法的第二種環境，並讓 CI 在
+# 122 支 Windows 迴歸鎖一支都沒跑的狀態下印綠燈，正是本檔其餘四層都在治的
+# fail-open。本清單因此是「`MIN_TESTS` 得以成立的前提」，由三道機械物看守：
+#   ① `main()` 開場 fail-fast，訊息直接指路（0.5 秒，不必等 110 秒跑完才誤診）；
+#   ② `run_with_floor` 的下限失敗訊息會歸因到 import 失敗的模組（見
+#      `report_floor_failure`）——把「環境不完整」與「測試真的消失」分開講；
+#   ③ `tools/tests/test_run_root_unittests.py::CiPrereqInstallLockTest`：凡在 CI
+#      裡跑本 runner 的 job，都必須在同一個 job 內、該 step **之前**安裝本清單的
+#      每一個 pip 名，否則紅。這道才是防「下次再加一個相依就重演」的那道。
+#
+# 維護契約：新增任何會拉進第三方相依的測試時，把該相依加進本清單並同步 CI 安裝
+# 步驟；漏加時 ③ 會紅，漏裝時 ①② 會紅並點名。
+_THIRD_PARTY_PREREQS: tuple[tuple[str, str], ...] = (
+    ("yaml", "pyyaml"),
+    ("pydantic", "pydantic"),
+    ("httpx", "httpx"),
+)
 
 # R43 Architect P1（DEF-101-348 方向①）：DEF-101-343~345 揪出 5 支 Windows 專屬
 # 回歸測試連續 5+ 輪「全 APPROVE」卻從未在原生 Windows 上真正跑過——`unittest`
@@ -295,16 +335,117 @@ def report_discovery_placeholders(suite: unittest.TestSuite) -> list[tuple[str, 
     return placeholders
 
 
+def missing_third_party_prereqs(
+    prereqs: tuple[tuple[str, str], ...] = _THIRD_PARTY_PREREQS,
+) -> list[tuple[str, str]]:
+    """純函式（無 I/O 副作用，比照本檔 `windows_native_skips` 慣例）：回傳當前環境
+    **找不到**的宣告相依 `(import 名, pip 名)`。
+
+    刻意用 `importlib.util.find_spec` 而非 `try: import`：只問「找不找得到」，不執行
+    模組頂層副作用，也不把模組留在 `sys.modules` 影響隨後的 discovery。找不到時
+    stdlib 會拋 `ModuleNotFoundError`（`ImportError` 子類），一併接住。
+    """
+    out: list[tuple[str, str]] = []
+    for import_name, pip_name in prereqs:
+        try:
+            found = importlib.util.find_spec(import_name) is not None
+        except (ImportError, ValueError):
+            found = False
+        if not found:
+            out.append((import_name, pip_name))
+    return out
+
+
+def install_hint(missing: list[tuple[str, str]]) -> str:
+    """組出可直接複製貼上的安裝指令。
+
+    每個套件名**各自**加單引號：本 repo 對 macOS zsh 的既定紀律（DEF-101-479／507／
+    508，機械守門見 `tools/tests/test_extras_quoting_zsh_safety.py`）。此處的名字雖
+    都不含 `[extras]`、當下不會觸發 zsh 的 filename generation，仍照同一形態寫——
+    紀律的價值在於不必每次重新判斷「這個 target 到底會不會被 glob」。
+    """
+    return "python -m pip install " + " ".join(f"'{pip}'" for _, pip in missing)
+
+
+def report_missing_third_party_prereqs(
+    missing: list[tuple[str, str]] | None = None,
+) -> list[tuple[str, str]]:
+    """印出缺漏的前置相依並回傳清單（非空 ⇒ 呼叫端須讓 rc 為 1，見 `main`）。"""
+    if missing is None:
+        missing = missing_third_party_prereqs()
+    if missing:
+        print(
+            f"❌ 環境缺少 {len(missing)} 個 tools/tests 的第三方相依："
+            f"{'、'.join(imp for imp, _ in missing)}。\n"
+            f"   🔴 這不是「測試消失」，是「環境不完整」——缺相依時 unittest discovery "
+            f"會把 import 失敗的模組整份覆蓋塌成一支佔位測試，收集數因而低於 MIN_TESTS。"
+            f"MIN_TESTS 只有一個值（相依齊備環境下的實測值），不是「環境感知的雙下限」。\n"
+            f"   修法：{install_hint(missing)}\n"
+            f"   若在 CI 撞到：跑本 runner 的 job 少了相依安裝 step——該綁定由 "
+            f"tools/tests/test_run_root_unittests.py::CiPrereqInstallLockTest 機械看守，"
+            f"請一併檢查它為何沒紅。",
+            file=sys.stderr,
+        )
+    return missing
+
+
+def report_floor_failure(
+    start_dir: Path,
+    count: int,
+    min_tests: int,
+    placeholders: list[tuple[str, str]],
+    missing: list[tuple[str, str]],
+) -> None:
+    """下限失敗時的**歸因**輸出：把「環境不完整」與「測試真的消失」分開講。
+
+    WHY（R68）：原訊息只有一種說法——「測試疑似大規模靜默消失（目錄改名/pattern
+    不符/路徑錯）」。但三個 CI 平台實際撞上的是第四種原因（環境缺第三方相依），
+    於是那行紅字把每一位讀者都指往三條全錯的路；而唯一正確的線索（`_FailedTest`
+    佔位測試清單）在原流程裡要等下限守門**放行後**才印得出來——下限沒放行，線索
+    就永遠印不出來。故本函式在判決的同一則訊息裡就把歸因給完。
+    """
+    print(
+        f"❌ unittest 數量下限釘選失敗：{start_dir} 只發現 {count} 個測試 < 下限 {min_tests}",
+        file=sys.stderr,
+    )
+    if not placeholders:
+        print(
+            "   歸因：本次**沒有**任何模組載入失敗 ⇒ 這是真的大規模消失"
+            "（目錄改名／pattern 不符／路徑錯）；若為刻意刪減請同步下修 MIN_TESTS。",
+            file=sys.stderr,
+        )
+        return
+    print(
+        f"   歸因：本次有 {len(placeholders)} 個模組**沒有被真正載入**，每個都塌成一支"
+        f"佔位測試 ⇒ 收集數已被污染、與下限不可比。這是**環境問題**，不是測試消失：",
+        file=sys.stderr,
+    )
+    for module, kind in placeholders:
+        print(f"   - {module}（{kind}）", file=sys.stderr)
+    if missing:
+        print(
+            f"   直接原因：宣告的第三方相依缺 "
+            f"{'、'.join(imp for imp, _ in missing)}。修法：{install_hint(missing)}",
+            file=sys.stderr,
+        )
+    else:
+        print(
+            "   宣告的第三方相依（run_root_unittests._THIRD_PARTY_PREREQS）都在，"
+            "故失敗另有原因：若是**新增**的第三方相依，請把它加入該清單並同步 CI "
+            "安裝步驟；否則請看上列模組的 import traceback。",
+            file=sys.stderr,
+        )
+
+
 def run_with_floor(start_dir: Path, min_tests: int) -> int:
     """discover → 數量下限守門 → 收集面完整性守門 → 執行；回傳 exit code。"""
     suite = discover_suite(start_dir)
     count = suite.countTestCases()
     if count < min_tests:
-        print(
-            f"❌ unittest 數量下限釘選失敗：{start_dir} 只發現 {count} 個測試 "
-            f"< 下限 {min_tests}——測試疑似大規模靜默消失（目錄改名/pattern 不符/"
-            f"路徑錯）；若為刻意刪減請同步下修 MIN_TESTS",
-            file=sys.stderr,
+        # 歸因線索（佔位測試／缺漏相依）必須與判決**同時**印出，見 report_floor_failure。
+        report_floor_failure(
+            start_dir, count, min_tests,
+            discovery_placeholders(suite), missing_third_party_prereqs(),
         )
         return 1
     print(f"✅ unittest 數量下限釘選通過：發現 {count} 個測試（下限 {min_tests}）")
@@ -601,6 +742,10 @@ def main() -> int:
     # 先於 110 秒的全套執行做這道自檢：釘選值的**取證敘述**若已失實，後面印出的
     # ✅ 只會替一個假前提背書；fail-fast 也讓注入實測不必等一整輪。
     if report_min_tests_note_stale_tokens():
+        return 1
+    # 同理先於全套執行：相依不齊時收集數必然低於下限，讓它照跑只是把一個**環境
+    # 問題**包裝成一則看起來像「測試消失」的紅字（R68：三支 CI 連續多輪的實況）。
+    if report_missing_third_party_prereqs():
         return 1
     return run_with_floor(_TESTS_DIR, MIN_TESTS)
 
