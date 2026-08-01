@@ -22,9 +22,16 @@ AISDLC_SDD/scripts/tests/ 一個目錄，對 windows-compat-ci.yml／macos-compa
 （AISDLC_SDD/scripts/tests/ 慣用法）與
   ``os.path.join(REPO_ROOT, "a", "b")`` / ``REPO_ROOT / "a" / "b"``
 （tools/tests/ 慣用法，該目錄下 ``REPO_ROOT = Path(__file__).resolve().parents[2]``
-剛好等於 monorepo 根）——重組 repo 相對路徑；凡指向磁碟上存在且不在 AISDLC_SDD/
-下（該前綴由 "AISDLC_SDD/**" 天然覆蓋）的檔案，斷言被對應 workflow 的
-push＋pull_request paths 覆蓋（fnmatch glob 語意）。另附兩道防呆：push/PR
+剛好等於 monorepo 根）——重組 repo 相對路徑；凡指向磁碟上存在的檔案，一律斷言被
+對應 workflow 的 push＋pull_request paths 覆蓋（fnmatch glob 語意）。
+**R67 round 2 訂正**：本段原文為「凡指向磁碟上存在**且不在 AISDLC_SDD/ 下**（該前綴由
+``AISDLC_SDD/**`` 天然覆蓋）的檔案」，那句豁免的前提**只對 aisdlc-sdd-ci.yml 成立**
+（實查：它的 paths 確有 ``AISDLC_SDD/**`` 一條），對 macos／windows-compat-ci.yml
+**不成立**——那兩支的 AISDLC_SDD 白名單只有 ``scripts/**``／``v*/tools/**``／
+``v*/.claude/**``／``v0.01/requirements-ci.txt`` 四條。於是「AISDLC_SDD/ 下、但不在這四條
+之內」的消費檔會被本鎖**主動
+丟棄**而永遠測不到，`AISDLC_SDD/conftest.py` 正是活體案例（掃描器**看得見**它、卻在最後
+一步被前綴過濾器扔掉）。豁免已拆除，改為逐 workflow 用它自己的 paths 判定。另附兩道防呆：push/PR
 清單對稱鎖（防單側漏補，三份 workflow 皆驗）、已知消費檔必被掃出（防正則退化
 令本鎖形同虛設）。
 
@@ -135,9 +142,59 @@ R19）／`_KNOWN_GLOB_SCAN_CONSUMERS`（盲區 C，R50）／`_KNOWN_LITERAL_PATH
 個盲區，或單一盲區內部第 2 次漏登記，優先評估收斂為程式化反向驗證（如對
 `_KNOWN_*` 字典本身跑一次「有無遺漏子路徑」的通用掃描），而非再疊一份手寫登記
 字典**。本節純記錄門檻，不阻擋、不改動任何測試邏輯。
+
+R67（第 67 輪 Mac/Windows 相容性複審；R54 門檻首次被觸發並兌現）：R66 收斂出的
+SSOT `tools/lib/sdd_latest.py` 被 `tools/tests/` 下 10 支測試檔 `import sdd_latest`
+消費，卻在 macos-compat-ci.yml／windows-compat-ci.yml 雙邊 paths 皆未列名，而本鎖
+19 passed 全綠零訊號（DEF-101-042 同構假綠）。根因是 `_SYSPATH_PARENTS_RE`（第五個
+盲區，盲區 E）要求 `Path(__file__).resolve().parents[N]` **逐字內嵌**在
+`sys.path.insert(...)` 引數裡；而該 10 支消費者用的全是「先把基底綁進具名變數、再用
+該變數組路徑」的寫法（`_REPO_ROOT = _TESTS_DIR.parents[1]` +
+`sys.path.insert(0, str(_REPO_ROOT / "tools" / "lib"))`），對逐字正則結構性零命中。
+判別條件竟是**寫法變體**而非語意——同一句 `sys.path.insert` 換個等價寫法就從「看得見」
+變成「看不見」。
+
+依檔頭 R54 訂立的收斂門檻（「若再出現第 4 個盲區……優先評估收斂為程式化反向驗證，
+而非再疊一份手寫登記字典」），本輪**不再疊第 6 條正則、也不新增第 4 份登記字典**，
+改為 **AST 解析 + 常數傳播**（本 repo 先例：`tools/check_script_parity.py::
+_extract_tier_map_from_source`）：以 `ast.parse` 找出全部 `sys.path.insert` 呼叫，
+對其第 2 引數做符號求值（`Path(__file__)`／`__file__`／`.resolve()`／`.parent`／
+`.parents[N]`／`/ "seg"`／`.joinpath()`／`str()`／`os.path.join`／`os.path.dirname`
+／`os.path.abspath`），並解析同檔內的名稱綁定，使 inline 形態與變數形態在語意上等價
+地解析到同一個目錄——寫法變體不再是判別條件（見
+`test_sys_path_insert_forms_resolve_equivalently`，直接對解析器斷言四種等價寫法必須
+給出同一目錄）。另配 fail-loud（`test_no_unresolvable_sys_path_inserts`）：解析不出
+的 `sys.path.insert` 會被列名讓本鎖紅，而非像舊正則那樣靜默略過——**靜默略過正是本輪
+缺陷得以存活的機制**（Rule 12）。實測：改用 AST 後掃描結果相對舊正則
+NEW=+1（`tools/lib/sdd_latest.py`）、LOST=0、無法解析者 0。
+
+R67 round 2（SA-R67-01 ＋ SD-R67-02 兩方交叉發現，**同輪原地復發**）：上一段 R67 才
+修完「新增的承重檔不在 compat-CI paths、且本鎖對它結構性失明」，**同一輪新增的**
+`AISDLC_SDD/AISDLC_SDD_v0.30/conftest.py` 又完全命中同一件事（雙 workflow paths
+命中 0 次、本鎖 24 passed 零訊號）。根因有**兩層**，兩層都修：
+
+  1. **盲區 F ── pytest 隱式載入的 rootdir conftest**。`conftest.py` 是 pytest 依
+     rootdir 自動載入的，**結構上不會出現在任何 step 的命令列、也不被任何測試
+     import**：`_scan_dir_for_root_paths()`（路徑字面）與 `_scan_import_consumed_paths()`
+     （import BFS）兩套偵測機制對它同時零訊號。這與盲區 B／C／D 同屬「掃描器方法論
+     邊界」，但**不再疊第 4 份手寫登記字典**（R54 收斂門檻已於上一段兌現一次）：改用
+     **程式化反向驗證**——直接向 git 要「repo 內全部 conftest.py（tracked ＋ 未被
+     .gitignore 排除的 untracked）」，逐一斷言被兩支 compat-CI 的 paths 覆蓋（見
+     `test_pytest_rootdir_conftests_covered_by_ci_paths`）。**刻意連 untracked 也要**：
+     本輪的缺陷檔在被 commit 之前就該紅，只認 tracked 等於把訊號延後到 commit 之後。
+     判準取「repo 內全部 conftest.py」這個**誠實的超集**——精確集合（哪些 rootdir 真被
+     CI 的 pytest 用到）要解析 `run:` 區塊裡的 shell，脆弱且會變成另一個會腐化的推論；
+     而超集在現況下的額外成本是 0（其餘 conftest 早已被既有萬用字元覆蓋）。
+  2. **`AISDLC_SDD/` 前綴豁免的前提是錯的**（見上方檔頭訂正段）。這一層才解釋「為何
+     上一輪升級成 AST 之後仍漏」：對 `AISDLC_SDD/conftest.py` 而言掃描器**根本沒瞎**
+     （`tools/tests/test_subprocess_encoding_hygiene.py` 以 `_REPO_ROOT / "AISDLC_SDD"
+     / "conftest.py"` 消費它，`_SLASH_RE` 命中），是最後那道 `not p.startswith(
+     "AISDLC_SDD/")` 把它扔了。單修第 1 層而不拆這個豁免，本鎖仍會對整個
+     `AISDLC_SDD/` 子樹（compat-CI 四條白名單之外的部分）繼續失明。
 """
 from __future__ import annotations
 
+import ast
 import fnmatch
 import os
 import re
@@ -209,29 +266,176 @@ _FROM_IMPORT_RE = re.compile(
 # 或其後接 `/ "seg1" / "seg2" ...` 路徑片段（如 tools/tests/test_platform_utils_dedup.py
 # 的 `parents[1] / "lib"`，把 tools/lib/ 塞進 sys.path 才能 `import platform_utils`）。
 # 舊版 candidate_base_dirs 只猜「own_dir / parent(own_dir)」兩層寫死候選，platform_utils.py
-# 實際多一層 lib/ 子目錄，兩個候選都撲空。本正則動態抓出原始碼裡實際出現的
-# sys.path.insert 陳述式所指向的路徑，相對於來源檔自身位置解析 parents[N]，
-# 取代猜測。
-_SYSPATH_PARENTS_RE = re.compile(
-    r"sys\.path\.insert\(\s*0\s*,\s*str\(\s*Path\(__file__\)\.resolve\(\)\.parents\[(\d+)\]"
-    r"((?:\s*/\s*\"[^\"]+\")*)\s*\)\s*\)"
-)
+# 實際多一層 lib/ 子目錄，兩個候選都撲空。原以正則動態抓出原始碼裡實際出現的
+# sys.path.insert 陳述式所指向的路徑，相對於來源檔自身位置解析 parents[N]，取代猜測。
+#
+# R67 盲區 E：該正則要求整串 `Path(__file__).resolve().parents[N]` **逐字內嵌**在
+# `sys.path.insert(...)` 引數裡，對「基底先綁進具名變數再組路徑」的等價寫法結構性
+# 零命中（詳見檔頭 R67）。依 R54 收斂門檻改用 AST 解析 + 常數傳播取代該正則，讓
+# 判別條件回歸語意而非寫法變體。以下為 AST 實作。
+
+# `A = B / "x"` 與 `B = A` 這類互相參照的名稱綁定會讓符號求值無限遞迴，設遞迴深度
+# 上限硬停（解析不出即回 None → 由 fail-loud 測試列名，不會靜默略過）。
+_MAX_PATH_EXPR_DEPTH = 40
+
+# 可被符號求值的 os.path 函式：join（首引數為路徑、其餘為字串片段）與
+# 一元的 dirname／abspath／realpath／normpath。
+_OS_PATH_UNARY = ("os.path.abspath", "os.path.realpath", "os.path.normpath")
+
+
+def _dotted_name(node: ast.AST) -> str | None:
+    """把 `os.path.join` / `Path` 這類「純名稱點鏈」還原成字串；非純點鏈回傳 None。"""
+    parts: list[str] = []
+    while isinstance(node, ast.Attribute):
+        parts.append(node.attr)
+        node = node.value
+    if not isinstance(node, ast.Name):
+        return None
+    parts.append(node.id)
+    return ".".join(reversed(parts))
+
+
+def _eval_path_expr(
+    node: ast.AST,
+    source_file: str,
+    bindings: dict[str, ast.expr],
+    _depth: int = 0,
+) -> str | None:
+    """符號求值一個「路徑運算式」AST 節點 → 絕對路徑字串；無法靜態解析則回傳 None。
+
+    支援本 repo `sys.path.insert` 實際出現的全部慣用法（見檔頭 R67 清單）。關鍵在於
+    `ast.Name` 分支會透過 `bindings` 追進同檔內的名稱綁定，故 inline 形態
+    （`Path(__file__).resolve().parents[1] / "lib"`）與變數形態
+    （`_REPO_ROOT = _TESTS_DIR.parents[1]` 後 `_REPO_ROOT / "tools" / "lib"`）
+    會解析到同一個目錄——這正是舊正則做不到、導致 R67 假綠的那件事。
+    """
+    if _depth > _MAX_PATH_EXPR_DEPTH:
+        return None
+    nxt = _depth + 1
+
+    if isinstance(node, ast.Name):
+        if node.id == "__file__":
+            return os.path.abspath(source_file)
+        bound = bindings.get(node.id)
+        return None if bound is None else _eval_path_expr(bound, source_file, bindings, nxt)
+
+    if isinstance(node, ast.Call):
+        dotted = _dotted_name(node.func)
+        if dotted in ("Path", "PurePath", "str", "os.fspath") and len(node.args) == 1:
+            return _eval_path_expr(node.args[0], source_file, bindings, nxt)
+        if dotted == "os.path.dirname" and len(node.args) == 1:
+            base = _eval_path_expr(node.args[0], source_file, bindings, nxt)
+            return None if base is None else os.path.dirname(base)
+        if dotted in _OS_PATH_UNARY and len(node.args) == 1:
+            return _eval_path_expr(node.args[0], source_file, bindings, nxt)
+        if dotted == "os.path.join" and node.args:
+            base = _eval_path_expr(node.args[0], source_file, bindings, nxt)
+            segs = _literal_str_args(node.args[1:])
+            return None if base is None or segs is None else os.path.join(base, *segs)
+        # 方法呼叫（接收者本身是路徑運算式）：X.resolve() / X.absolute() / X.joinpath(...)
+        if isinstance(node.func, ast.Attribute):
+            if node.func.attr in ("resolve", "absolute", "expanduser"):
+                return _eval_path_expr(node.func.value, source_file, bindings, nxt)
+            if node.func.attr == "joinpath":
+                base = _eval_path_expr(node.func.value, source_file, bindings, nxt)
+                segs = _literal_str_args(node.args)
+                return None if base is None or segs is None else os.path.join(base, *segs)
+        return None
+
+    if isinstance(node, ast.Attribute) and node.attr == "parent":
+        base = _eval_path_expr(node.value, source_file, bindings, nxt)
+        return None if base is None else os.path.dirname(base)
+
+    # X.parents[N]
+    if (
+        isinstance(node, ast.Subscript)
+        and isinstance(node.value, ast.Attribute)
+        and node.value.attr == "parents"
+        and isinstance(node.slice, ast.Constant)
+        and isinstance(node.slice.value, int)
+    ):
+        base = _eval_path_expr(node.value.value, source_file, bindings, nxt)
+        if base is None:
+            return None
+        for _ in range(node.slice.value + 1):
+            base = os.path.dirname(base)
+        return base
+
+    # X / "seg"（pathlib 慣用法；鏈式 X / "a" / "b" 由遞迴自然展開）
+    if (
+        isinstance(node, ast.BinOp)
+        and isinstance(node.op, ast.Div)
+        and isinstance(node.right, ast.Constant)
+        and isinstance(node.right.value, str)
+    ):
+        base = _eval_path_expr(node.left, source_file, bindings, nxt)
+        return None if base is None else os.path.join(base, node.right.value)
+
+    return None
+
+
+def _literal_str_args(args: list[ast.expr]) -> list[str] | None:
+    """全部引數皆為字串字面值時回傳其值清單；只要有一個不是就回傳 None（不猜）。"""
+    out: list[str] = []
+    for a in args:
+        if not (isinstance(a, ast.Constant) and isinstance(a.value, str)):
+            return None
+        out.append(a.value)
+    return out
+
+
+def _is_sys_path_insert(node: ast.AST) -> bool:
+    return (
+        isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Attribute)
+        and node.func.attr == "insert"
+        and _dotted_name(node.func.value) == "sys.path"
+    )
+
+
+def _parse_sys_path_inserts(src: str, source_file: str) -> tuple[list[str], list[str]]:
+    """解析 `source_file` 原始碼中全部 `sys.path.insert` 陳述式。
+
+    回傳 ``(可靜態解析出的絕對目錄清單, 無法解析者的「檔案:行號: 原式」描述清單)``。
+    第二個回傳值讓「掃描器看不懂某句 sys.path.insert」這件事**可被觀測**（見
+    `test_no_unresolvable_sys_path_inserts`）；舊正則對看不懂的形態一律靜默略過，
+    R67 缺陷正是靠這個靜默存活的。
+    """
+    try:
+        tree = ast.parse(src)
+    except SyntaxError:  # 語法壞掉的檔案由其他閘門（py_compile）負責，本鎖不重複報
+        return [], []
+
+    # 名稱綁定表：同名以「先出現者」為準（模組層 Assign 在 ast.walk 的 BFS 順序中
+    # 早於函式/類別內的同名指派）。誤配到的候選目錄會被下游「磁碟上存在」過濾器
+    # 自然濾除（與既有正則路徑同一道安全網）。
+    bindings: dict[str, ast.expr] = {}
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Assign) and len(node.targets) == 1:
+            target = node.targets[0]
+            if isinstance(target, ast.Name):
+                bindings.setdefault(target.id, node.value)
+        elif isinstance(node, ast.AnnAssign) and isinstance(node.target, ast.Name) and node.value:
+            bindings.setdefault(node.target.id, node.value)
+
+    dirs: list[str] = []
+    unresolved: list[str] = []
+    for node in ast.walk(tree):
+        if not (_is_sys_path_insert(node) and isinstance(node, ast.Call)):
+            continue
+        if len(node.args) < 2:
+            continue
+        resolved = _eval_path_expr(node.args[1], source_file, bindings)
+        if resolved is None:
+            unresolved.append(f"{source_file}:{node.lineno}: {ast.unparse(node)}")
+        else:
+            dirs.append(os.path.normpath(resolved))
+    return dirs, unresolved
 
 
 def _resolve_sys_path_insert_dirs(src: str, source_file: str) -> list[str]:
-    """動態解析 `source_file` 原始碼中 `sys.path.insert(0, str(Path(__file__)
-    .resolve().parents[N] / "seg" ...))` 陳述式實際指向的絕對目錄（見上方 R19 說明），
-    取代「own_dir / parent(own_dir)」兩層寫死猜測（盲區 A）。
-    """
-    dirs: list[str] = []
-    for m in _SYSPATH_PARENTS_RE.finditer(src):
-        n = int(m.group(1))
-        base = source_file
-        for _ in range(n + 1):
-            base = os.path.dirname(base)
-        segs = _STR_RE.findall(m.group(2))
-        dirs.append(os.path.join(base, *segs) if segs else base)
-    return dirs
+    """`_parse_sys_path_inserts` 的目錄投影（僅取可解析者），供 BFS 掃描器使用。"""
+    return _parse_sys_path_inserts(src, source_file)[0]
 
 
 def _scan_dir_for_root_paths(directory: str) -> set[str]:
@@ -254,7 +458,9 @@ def _scan_dir_for_root_paths(directory: str) -> set[str]:
     return found
 
 
-def _scan_import_consumed_paths(directory: str) -> set[str]:
+def _scan_import_consumed_paths(
+    directory: str, unresolved_out: list[str] | None = None
+) -> set[str]:
     """BFS 掃描 `directory` 內 test_*.py 的頂層 `import <module>`，將 module 解析為
     「來源檔自身所在目錄」或「其父目錄」下的 `<module>.py`（本 repo 兩種並存慣例：
     tools/*.py 用 `sys.path.insert(0, ...parent)`＝自身目錄；tools/tests/test_*.py
@@ -262,6 +468,10 @@ def _scan_import_consumed_paths(directory: str) -> set[str]:
     故兩層候選皆試、以磁碟上實際存在者為準），並對新發現的根層 .py 檔遞迴重複同一
     掃描（fixed point），關閉「測試只 import A、A 內部又 import B」的第二層盲區
     （見檔頭 S26）。
+
+    R67：`unresolved_out` 若給定，會收集 BFS 走訪範圍內**無法靜態解析**的
+    `sys.path.insert` 陳述式描述（見 `_parse_sys_path_inserts`），供
+    `test_no_unresolvable_sys_path_inserts` fail-loud；不給則行為與先前完全相同。
     """
     if not os.path.isdir(directory):
         return set()
@@ -281,10 +491,13 @@ def _scan_import_consumed_paths(directory: str) -> set[str]:
         with open(f, encoding="utf-8") as fh:
             src = fh.read()
         own_dir = os.path.dirname(f)
+        insert_dirs, unresolved = _parse_sys_path_inserts(src, f)
+        if unresolved_out is not None:
+            unresolved_out.extend(unresolved)
         candidate_base_dirs = [
             own_dir,
             os.path.dirname(own_dir),
-            *_resolve_sys_path_insert_dirs(src, f),
+            *insert_dirs,
         ]
         module_names = [m.group(1) for m in _IMPORT_RE.finditer(src)]
         module_names += [m.group(1) for m in _FROM_IMPORT_RE.finditer(src)]
@@ -345,6 +558,75 @@ def test_slash_re_does_not_match_longer_embedding_identifier():
     )
 
 
+# R67 盲區 E：`sys.path.insert` 解析器的四種等價寫法。全部意在把 `<repo>/tools/lib`
+# 塞進 sys.path，僅寫法不同；來源檔一律假定位於 `<repo>/tools/tests/test_fake.py`。
+# 舊 `_SYSPATH_PARENTS_RE` 只認第 1 種（inline），對第 2~4 種（具名變數基底）結構性
+# 零命中——而 R66 SSOT `tools/lib/sdd_latest.py` 的 10 支真實消費者用的全是第 2/3 種。
+_SYS_PATH_INSERT_EQUIVALENT_FORMS: dict[str, str] = {
+    # 1. inline：舊正則唯一認得的形態（tools/tests/test_platform_utils_dedup.py）
+    "inline-parents": 'sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "lib"))\n',
+    # 2. 具名 _REPO_ROOT 基底（tools/tests/test_platform_neutral_paths.py 等 8 支實際寫法）
+    "named-repo-root": (
+        "_TESTS_DIR = Path(__file__).resolve().parent\n"
+        "_REPO_ROOT = _TESTS_DIR.parents[1]\n"
+        'sys.path.insert(0, str(_REPO_ROOT / "tools" / "lib"))\n'
+    ),
+    # 3. 具名 _TOOLS_DIR 中繼基底（tools/tests/test_windows_forbidden_filename_parity.py）
+    "named-tools-dir": (
+        "REPO_ROOT = Path(__file__).resolve().parents[2]\n"
+        '_TOOLS_DIR = REPO_ROOT / "tools"\n'
+        'sys.path.insert(0, str(_TOOLS_DIR / "lib"))\n'
+    ),
+    # 4. os.path 家族（AISDLC_SDD/scripts/tests/ 慣用法，含 ".." 相對片段）
+    "os-path-join": (
+        "HERE = os.path.dirname(os.path.abspath(__file__))\n"
+        'sys.path.insert(0, os.path.join(HERE, "..", "lib"))\n'
+    ),
+}
+
+
+@pytest.mark.parametrize("form_name", sorted(_SYS_PATH_INSERT_EQUIVALENT_FORMS))
+def test_sys_path_insert_forms_resolve_equivalently(form_name):
+    """R67 盲區 E 回歸鎖：解析器的判別條件必須是**語意**，不是**寫法變體**。
+
+    WHY（Rule 9 — 測試驗意圖）：`_resolve_sys_path_insert_dirs()` 存在的唯一理由是
+    「知道測試檔把哪個目錄塞進 sys.path，才能把 `import X` 解析成真實根層檔」。這件
+    事只取決於該陳述式指向哪個目錄，與作者選擇 inline 還是先綁變數**在語意上毫無關
+    係**。R67 之前它卻只認 inline 一種寫法，於是 R66 的 SSOT
+    `tools/lib/sdd_latest.py`（10 支消費者全用具名變數形態）對本鎖完全隱形，雙
+    compat-CI 漏列它卻 19 passed 全綠。本測試把「四種等價寫法必須解析到同一個目錄」
+    釘成契約：任何讓解析器退回「只認某種特定字面排列」的改動（含改回正則）即刻轉紅。
+    """
+    fake_source = os.path.join(os.sep, "repo", "tools", "tests", "test_fake.py")
+    expected = os.path.join(os.sep, "repo", "tools", "lib")
+    src = _SYS_PATH_INSERT_EQUIVALENT_FORMS[form_name]
+    resolved = _resolve_sys_path_insert_dirs(src, fake_source)
+    assert resolved == [expected], (
+        f"sys.path.insert 寫法 {form_name!r} 應解析為 {expected!r}（與其餘等價寫法同），"
+        f"實得 {resolved!r}——解析器又退化成認寫法而非認語意（R67 盲區 E 同構）"
+    )
+
+
+def test_no_unresolvable_sys_path_inserts():
+    """R67 fail-loud（Rule 12）：掃描器看不懂的 `sys.path.insert` 必須當場列名。
+
+    WHY：R67 缺陷之所以能存活，不是因為掃描器「判斷錯」，而是因為它對看不懂的形態
+    **靜默略過**——沒有任何訊號告訴任何人「這裡有一句我沒讀懂、因此下游 import 解析
+    是不完整的」。本鎖把「解析失敗」從靜默降級升成顯式失敗：新增一句本解析器不支援
+    的 sys.path.insert 寫法時，作者當場看到它，必須擴充 `_eval_path_expr()`（或改寫
+    成可靜態解析的形態），而不是在幾輪之後才由某次四方複審實測撞出假綠。
+    """
+    unresolved: list[str] = []
+    for directory in _WORKFLOW_TEST_DIRS.values():
+        _scan_import_consumed_paths(directory, unresolved_out=unresolved)
+    assert not unresolved, (
+        "以下 sys.path.insert 陳述式無法被 _eval_path_expr() 靜態解析，其指向的目錄"
+        "不會納入 import 解析候選，該路徑下的根層消費檔將對本鎖隱形（R67 盲區 E 同構"
+        "假綠）。請擴充 _eval_path_expr() 支援該寫法，或把該陳述式改寫成可靜態解析的"
+        "形態：\n  " + "\n  ".join(sorted(set(unresolved)))
+    )
+
+
 @pytest.mark.parametrize("workflow_filename", sorted(_WORKFLOW_TEST_DIRS))
 def test_push_and_pr_paths_symmetric(workflow_filename):
     push, pr = _workflow_paths(workflow_filename)
@@ -372,6 +654,18 @@ def test_known_consumers_detected():
         # R19 修復包 A 盲區 A：test_platform_utils_dedup.py 的
         # `sys.path.insert(0, ...parents[1] / "lib")` 動態解析偵得
         "tools/lib/platform_utils.py",
+        # R67 round 2：`AISDLC_SDD/conftest.py`——掃描器**一直看得見**它
+        # （test_subprocess_encoding_hygiene.py 以 `_REPO_ROOT / "AISDLC_SDD" /
+        # "conftest.py"` 消費，`_SLASH_RE` 命中），卻被 `test_all_root_consumers_
+        # covered_by_ci_paths()` 舊有的 `AISDLC_SDD/` 前綴豁免在最後一步扔掉。
+        # 釘進本表＝鎖住「掃描面看得見它」這半邊，與豁免拆除那半邊互補。
+        "AISDLC_SDD/conftest.py",
+        # R67 盲區 E（本鎖失明的那一支）：R66 SSOT `tools/lib/sdd_latest.py`，其 10 支
+        # 消費者一律用變數形態 `sys.path.insert(0, str(_REPO_ROOT / "tools" / "lib"))`
+        # ——舊 `_SYSPATH_PARENTS_RE` 逐字正則零命中、此表亦未登記，兩道防線同時無訊號
+        # 才讓雙 compat-CI paths 缺列假綠存活。改 AST 解析後偵得；同步釘進本表，
+        # 使「解析器再退化回只認 inline 形態」當場紅（見檔頭 R67）。
+        "tools/lib/sdd_latest.py",
     }
     missing = expected - consumed
     assert not missing, f"掃描器漏抓已知消費檔（正則退化）：{missing}"
@@ -379,13 +673,22 @@ def test_known_consumers_detected():
 
 @pytest.mark.parametrize("workflow_filename", sorted(_WORKFLOW_TEST_DIRS))
 def test_all_root_consumers_covered_by_ci_paths(workflow_filename):
+    """消費檔 ⊆ 該 workflow 自己的 paths。
+
+    R67 round 2：拆掉此處原有的 `not p.startswith("AISDLC_SDD/")` 前綴豁免。該豁免的
+    理由（「由 `AISDLC_SDD/**` 天然覆蓋」）**只對 aisdlc-sdd-ci.yml 成立**；
+    macos／windows-compat-ci.yml 的 AISDLC_SDD 白名單只有四條子路徑，於是落在那四條
+    之外的消費檔會被本鎖**主動丟棄**——`AISDLC_SDD/conftest.py` 就是這樣在掃描器看得見
+    的情況下逃掉的（詳見檔頭 R67 round 2）。判準改為「一律拿該 workflow 自己的 paths
+    比對」：對 aisdlc-sdd-ci.yml 而言 `AISDLC_SDD/**` 照樣一條命中，行為不變；對兩支
+    compat-CI 而言不再有免驗的整片子樹。
+    """
     push, _ = _workflow_paths(workflow_filename)
     tests_dir = _WORKFLOW_TEST_DIRS[workflow_filename]
     uncovered = [
         p
         for p in sorted(_consumed_root_paths(tests_dir))
-        if not p.startswith("AISDLC_SDD/")
-        and not any(fnmatch.fnmatch(p, pat) for pat in push)
+        if not any(fnmatch.fnmatch(p, pat) for pat in push)
     ]
     assert not uncovered, (
         f"根層消費檔未列入 {workflow_filename} paths"
@@ -518,10 +821,12 @@ def test_known_glob_scan_consumers_covered_by_ci_paths():
             f"{rel_test_path} 原始碼已不含 glob pattern {pattern!r}（改名/改寫？）"
             "——_KNOWN_GLOB_SCAN_CONSUMERS 顯式清單須同步更新，否則本鎖名不符實"
         )
-        # 排除 AISDLC_SDD/ 前綴：與 test_all_root_consumers_covered_by_ci_paths()
-        # 同一政策（見檔頭說明），該前綴由各 workflow 既有的 "AISDLC_SDD/**" 系列
-        # pattern 天然覆蓋，不需本鎖重複驗證。
-        matched = [rel for rel in _git_ls_files(pattern) if not rel.startswith("AISDLC_SDD/")]
+        # R67 round 2：此處原同樣排除 `AISDLC_SDD/` 前綴（理由與
+        # test_all_root_consumers_covered_by_ci_paths() 同源，同樣是錯的——見檔頭
+        # 訂正段）。一併拆除；實測拆除後 `*.ps1` 在 AISDLC_SDD/ 下的 122 支全部命中
+        # 兩支 compat-CI 既有 pattern（`AISDLC_SDD/scripts/**`／`v*/tools/**`／
+        # windows 側 `**/*.ps1`），本鎖仍綠——但從此**是驗過才綠**，不是被扔掉才綠。
+        matched = _git_ls_files(pattern)
         for workflow_filename in workflow_filenames:
             push, pr = _workflow_paths(workflow_filename)
             for label, paths in (("push", push), ("pull_request", pr)):
@@ -604,6 +909,124 @@ def test_known_literal_path_consumers_covered_by_ci_paths():
                     f"token 間接消費，靜態正則看不到，盲區 D）未被 {workflow_filename} "
                     f"的 {label} paths 覆蓋"
                 )
+
+
+# --- pytest 隱式載入的 rootdir conftest（盲區 F，R67 round 2）---------------------
+# `conftest.py` 由 pytest 依 rootdir **自動載入**，結構上不會出現在任何 CI step 的
+# 命令列、也不被任何測試 import ⇒ 上方兩套掃描器同時零訊號（見檔頭 R67 round 2）。
+# 依 R54 收斂門檻**不再新增第 4 份手寫登記字典**，改用程式化反向驗證：直接向 git 要
+# 「repo 內全部 conftest.py」，逐一斷言被兩支 compat-CI 的 paths 覆蓋。
+#
+# 為何是這兩支 workflow：`tools/tests/` 由它們執行（見 `_WORKFLOW_TEST_DIRS`），且兩者
+# 各自都會實跑 AutoClaude pytest ＋ `AISDLC_SDD/scripts/ci-gate.sh`（v0.01／LATEST 雙軌
+# ＋ scripts/tests）＋ LATEST `tools/fsm_runtime/tests` ⇒ repo 內任何一支 conftest 的
+# 改動都可能改變它們的收集/回報結果。aisdlc-sdd-ci.yml 不納入本鎖：它已有 `AISDLC_SDD/**`
+# 一條全覆蓋，而 `AutoClaude/**` 下的 conftest 不在它的執行面內（納入只會逼出一條假需求）。
+_FAMILY_COVERAGE_WORKFLOWS: tuple[str, ...] = ("macos-compat-ci.yml", "windows-compat-ci.yml")
+
+# 家族鍵 → (git pathspec, 成員數下限, 必須被列舉到的活體代表, WHY)。
+#
+# 這兩個家族的共通點，也是它們同時逃過上方全部掃描器的原因：**成員身分不是靠某個
+# 檔案「提到」它建立的**——conftest 由 pytest 依 rootdir 隱式載入、歸檔帳本由
+# `tools/check_defect_log_crossref.py` 在執行期 `glob()` 掃進來——於是無論解析器多聰明，
+# 掃「命令列字面」或「import 陳述式」都不可能看見它們。故一律改由 git **即時列舉**：
+# 成員隨檔案新增/刪除自動同步，不需要有人記得維護清單（與盲區 C 的
+# `_KNOWN_GLOB_SCAN_CONSUMERS` 同一理念，但連「登記哪個測試檔」都不需要）。
+_GIT_ENUMERATED_FAMILIES: dict[str, tuple[str, int, tuple[str, ...], str]] = {
+    "pytest-rootdir-conftest": (
+        "*conftest.py",
+        5,
+        ("AISDLC_SDD/conftest.py", "AISDLC_SDD/AISDLC_SDD_v0.30/conftest.py"),
+        "pytest 依 rootdir 隱式載入；能改變整套測試的收集與回報（collect_ignore／fixture／"
+        "pytest_terminal_summary）。兩支 compat-CI 各自都實跑 AutoClaude pytest ＋ "
+        "AISDLC_SDD/scripts/ci-gate.sh（v0.01／LATEST 雙軌＋scripts/tests）＋ LATEST "
+        "fsm_runtime pytest ⇒ 任一支 conftest 的改動都可能改變它們的結果。",
+    ),
+    "defect-log-archive": (
+        "docs/06_quality/AutoSDD_Defect_Log_archive_*.md",
+        2,
+        ("docs/06_quality/AutoSDD_Defect_Log_archive_02.md",),
+        "tools/check_defect_log_crossref.py::main() 以 "
+        "`_DEFECT_LOG.parent.glob(\"AutoSDD_Defect_Log_archive_*.md\")` 執行期掃描全部歸檔"
+        "（量大小上限、驗歸檔索引 bullet），而 tools/tests/test_check_defect_log_crossref.py::"
+        "TestMain::test_main_against_real_repo_is_clean 就是拿**真實 repo** 跑那支 main()；"
+        "tools/tests/test_ntfs_trailing_space_device_name.py 另以迴圈變數 `REPO_ROOT / rel` "
+        "讀 archive_02（`_SLASH_RE` 只認字面字串，對迴圈變數零命中）。主檔 "
+        "`docs/06_quality/AutoSDD_Defect_Log.md` 早已列入 paths，歸檔卻沒有——同一支鎖的"
+        "輸入被切成「有觸發的一半」與「沒觸發的一半」。",
+    ),
+}
+
+
+def _git_enumerate(pathspec: str) -> list[str]:
+    """依 git pathspec 列舉：tracked ＋ **未被 .gitignore 排除的 untracked**。
+
+    🔴 untracked 那半邊不是可選項：本輪出事的三支新檔（`AISDLC_SDD_v0.30/conftest.py`、
+    `AutoSDD_Defect_Log_archive_38.md`／`_39.md`）在四方複審當下全部是 untracked。只認
+    `git ls-files` 等於把訊號延後到 commit 之後，而 pre-commit 正是在 commit **之前**跑
+    ——那時本鎖看不到它，就等於整輪都不會紅（本輪原地復發的機制之一）。
+    """
+    tracked = _git_ls_files(pathspec)
+    result = subprocess.run(
+        ["git", "ls-files", "--others", "--exclude-standard", "--", pathspec],
+        cwd=_monorepo_root(),
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        check=True,
+    )
+    untracked = [line for line in result.stdout.splitlines() if line]
+    return sorted(set(tracked) | set(untracked))
+
+
+@pytest.mark.parametrize("family", sorted(_GIT_ENUMERATED_FAMILIES))
+def test_git_enumerated_families_have_discriminating_power(family):
+    """列舉器自證：抓不到東西的列舉器會讓下方覆蓋斷言**恆真**（同 `_MIN_*` 下限釘選慣例）。
+
+    另釘住「必須被列舉到的活體代表」：conftest 家族的兩支代表一支 tracked、一支（本輪）
+    untracked，正好各驗一條取得路徑——`--others` 那半邊被拆掉時本測試當場紅。
+    """
+    pathspec, floor, required, _why = _GIT_ENUMERATED_FAMILIES[family]
+    found = _git_enumerate(pathspec)
+    assert len(found) >= floor, (
+        f"[{family}] pathspec {pathspec!r} 只列舉到 {len(found)} 個成員 < 下限 {floor}"
+        f"——疑似 pathspec 漂移（0 命中會讓覆蓋斷言恆成立而靜默假綠）：{found}"
+    )
+    for rel in required:
+        assert rel in found, (
+            f"[{family}] 列舉器抓不到活體代表 {rel}——tracked／untracked 兩條取得路徑之一"
+            f"失效，下方覆蓋斷言會對它恆真（實得 {len(found)} 個成員）"
+        )
+
+
+@pytest.mark.parametrize("workflow_filename", _FAMILY_COVERAGE_WORKFLOWS)
+@pytest.mark.parametrize("family", sorted(_GIT_ENUMERATED_FAMILIES))
+def test_git_enumerated_families_covered_by_ci_paths(family, workflow_filename):
+    """盲區 F 機械鎖：家族每一名成員都必須被兩支 compat-CI 的 push＋PR paths 覆蓋。
+
+    WHY（Rule 9 — 測意圖）：這兩個家族的成員是**承重檔**（一個決定「測試到底收集了什麼、
+    印了什麼」，一個是跨參照鎖的真實輸入），卻都不會出現在任何 step 的命令列或 import
+    陳述式裡。只改它們時 compat-CI 不被觸發 ⇒ 守著它們的鎖恰好不跑（DEF-101-042 同構）。
+    R67 的 `AISDLC_SDD/AISDLC_SDD_v0.30/conftest.py` 是活體案例：它是 R67-F27
+    「[WINDOWS-NATIVE-ONLY] skip 可見度」在官方閘門實際走的那條路徑上的**唯一**載具，
+    拆掉它兩支 compat-CI 都不會被觸發、該機制靜默消失。
+
+    aisdlc-sdd-ci.yml 刻意不納入：它已有 `AISDLC_SDD/**` 一條全覆蓋，而 `AutoClaude/` 與
+    `docs/` 下的成員不在它的執行面內，納入只會逼出一條假需求。
+    """
+    pathspec, _floor, _required, why = _GIT_ENUMERATED_FAMILIES[family]
+    members = _git_enumerate(pathspec)
+    push, pr = _workflow_paths(workflow_filename)
+    for label, paths in (("push", push), ("pull_request", pr)):
+        uncovered = [rel for rel in members if not any(fnmatch.fnmatch(rel, pat) for pat in paths)]
+        assert not uncovered, (
+            f"[{family}] 成員未被 {workflow_filename} 的 {label} paths 覆蓋：{uncovered}\n"
+            f"  這一族為何是承重檔：{why}\n"
+            f"  處置：在該 workflow 的 push ＋ pull_request 兩個 paths 區塊各補一條；"
+            f"版本樹複本請用 `AISDLC_SDD/AISDLC_SDD_v*/conftest.py` 這類萬用字元，讓 "
+            f"Copy-on-Evolve 傳播出的下一版自動涵蓋，別留給下一輪再漏一次"
+        )
 
 
 def test_root_infra_ci_bash_and_py_scan_roots_have_no_stray_scripts():

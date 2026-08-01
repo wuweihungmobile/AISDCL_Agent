@@ -233,6 +233,16 @@ on:
       - "tools/_script_scan_surface.py"
       - "tools/archive_defect_log.py"
       - "docs/06_quality/AutoSDD_Defect_Log.md"
+      # 🔴 R67 round 2（SA-R67-01 第 4 項「自己再掃一次全 repo」的產物）：歸檔帳本
+      # 是**執行期 glob 掃進來的**承重輸入——`tools/check_defect_log_crossref.py::main()`
+      # 以 `_DEFECT_LOG.parent.glob("AutoSDD_Defect_Log_archive_*.md")` 量每份歸檔的
+      # 大小上限並驗歸檔索引 bullet，而 `tools/tests/test_check_defect_log_crossref.py::
+      # TestMain::test_main_against_real_repo_is_clean` 拿的就是**真實 repo** 跑那支
+      # main()。主檔上一行早已列入 paths，歸檔卻沒有 ⇒ 同一支鎖的輸入被切成「有觸發的
+      # 一半」與「沒觸發的一半」；只改歸檔（例如本輪新增的 _38／_39）時該鎖不會跑。
+      # 用 `_*` 萬用字元＝隨輪替自動涵蓋新歸檔，不必每次輪替再補一條（DEF-101-042 同構；
+      # 機械鎖見 test_ci_paths_cover_root_consumers.py 的 `_GIT_ENUMERATED_FAMILIES`）。
+      - "docs/06_quality/AutoSDD_Defect_Log_archive_*.md"
       - "tools/check_pytest_baseline_sites.py"
       # R60（SD-R60-09）：tools/tests/test_doc_loc_baseline_freshness_r60.py 以
       # `sys.path.insert(0, parents[1])` + `import sync_onboarding_baselines` 消費此根層檔
@@ -254,6 +264,14 @@ on:
       # 檔案未被機械鎖偵測為「消費檔」——手動補列對稱涵蓋（DEF-101-042 同款假綠盲區）。
       - "tools/lib/platform_utils.py"
       - "tools/lib/bash_probe_spec.py"
+      # R67：R66 收斂出的第三支 tools/lib/ SSOT（AISDLC_SDD LATEST 版本解析，
+      # ADR-XPLAT-002 Phase 2-C/2-D），被 tools/tests/ 下 10 支測試檔 import 消費，
+      # 卻是 tools/lib/ 八支檔案中唯一雙邊 paths 皆未列名者——因其全部消費者採用
+      # `_REPO_ROOT = ...` + `sys.path.insert(0, str(_REPO_ROOT / "tools" / "lib"))`
+      # 變數形態，被 test_ci_paths_cover_root_consumers.py 舊有逐字正則
+      # `_SYSPATH_PARENTS_RE` 結構性漏抓，連機械鎖都零訊號（盲區 E；該鎖已於同輪
+      # 改用 AST 解析修復，此後同類遺漏會當場轉紅）。DEF-101-042 同構。
+      - "tools/lib/sdd_latest.py"
       # R43：tools/tests/test_windowsapps_guard_bash_parity.py 消費此根層檔（bash 側
       # WindowsApps guard SSOT，DEF-101-353）與其全部已知呼叫端——只改任一檔時本
       # workflow 須重跑該鎖（DEF-101-042 同構；.sh 本檔無 **/*.sh 兜底 glob〔對稱
@@ -275,6 +293,21 @@ on:
       - ".claude/**"
       - "AISDLC_SDD/AISDLC_SDD_v*/tools/**"
       - "AISDLC_SDD/AISDLC_SDD_v*/.claude/**"
+      # 🔴 R67 round 2（SA-R67-01 ＋ SD-R67-02 兩方交叉發現，**同輪原地復發**）：
+      # pytest **隱式載入**的 rootdir `conftest.py`。這類檔結構上不會出現在任何 step
+      # 的命令列、也不被任何測試 import ⇒ `AISDLC_SDD/scripts/tests/
+      # test_ci_paths_cover_root_consumers.py` 的兩套掃描器（路徑字面正則／import BFS）
+      # 對它一律零訊號（**盲區 F**）。而本檔的 AISDLC_SDD 白名單只有 `scripts/**`／
+      # `v*/tools/**`／`v*/.claude/**`／`v0.01/requirements-ci.txt` 四條，版本樹根與
+      # 共用層根都落在其外。
+      # `AISDLC_SDD/AISDLC_SDD_v*/conftest.py` 正是 R67-F27「[WINDOWS-NATIVE-ONLY] skip
+      # 可見度」機制在**官方閘門實際走的那條路徑**（`cd vX && pytest`）上的唯一載具，
+      # 只改它時兩支 compat-CI 都不會被觸發、該機制可被靜默拆掉。用 `v*` 萬用字元一併
+      # 涵蓋 Copy-on-Evolve（ADR-XPLAT-001）傳播出的下一版複本，避免下一版又漏一次。
+      # DEF-101-042 同構；同輪已把該鎖的 `AISDLC_SDD/` 前綴豁免拆掉（其「由
+      # AISDLC_SDD/** 天然覆蓋」的理由只對 aisdlc-sdd-ci.yml 成立，對本檔不成立）。
+      - "AISDLC_SDD/conftest.py"
+      - "AISDLC_SDD/AISDLC_SDD_v*/conftest.py"
       # R11：tools/tests/test_smoke_ci_sync.py 互鎖兩平台 smoke 釘選值、ONBOARDING §8
       # PASS 數字與雙 workflow 同步注記——其消費檔改動時本 workflow 須重跑該鎖
       #（DEF-101-042 同構；.ps1 已由 **/*.ps1 覆蓋，此處補 .sh 側與文件）
@@ -293,6 +326,14 @@ on:
       # 延遲至每週一次 windows-nightly-full 非阻斷 job 才跑（DEF-101-042 同構；
       # .sh 本檔無 **/*.sh 兜底 glob，需顯式列舉）。
       - "AutoClaude/tools/run_local_nightly.sh"
+      # R67：tools/tests/test_check_defect_log_crossref.py 以
+      # `_SPEC_DOC = m._REPO_ROOT / "docs" / "06_quality" / "CrossPlatform_Scan_Dimensions.md"`
+      # 消費此根層規格檔（該檔〈使用方式〉硬規則② 是 crossref 鎖的規格權威）——只改
+      # 該 .md 時本 workflow 先前不會被觸發，其回歸鎖靜默不跑（DEF-101-042 同構）。
+      # 本輪 test_ci_paths_cover_root_consumers.py 掃描器由正則升級為 AST 解析
+      # （修 R67-H36：正則認不出 `m._REPO_ROOT` 這種「跨模組屬性存取」根路徑慣用法）
+      # 後才揭露此一直存在的漏列。
+      - "docs/06_quality/CrossPlatform_Scan_Dimensions.md"
   pull_request:
     paths:
       - "AutoClaude/autoclaude/perception/**"
@@ -332,6 +373,8 @@ on:
       - "tools/_script_scan_surface.py"
       - "tools/archive_defect_log.py"
       - "docs/06_quality/AutoSDD_Defect_Log.md"
+      # R67 round 2：同上（push 段說明），pull_request 段同步補齊
+      - "docs/06_quality/AutoSDD_Defect_Log_archive_*.md"
       - "tools/check_pytest_baseline_sites.py"
       # R60（SD-R60-09）：tools/tests/test_doc_loc_baseline_freshness_r60.py 以
       # `sys.path.insert(0, parents[1])` + `import sync_onboarding_baselines` 消費此根層檔
@@ -353,6 +396,14 @@ on:
       # 檔案未被機械鎖偵測為「消費檔」——手動補列對稱涵蓋（DEF-101-042 同款假綠盲區）。
       - "tools/lib/platform_utils.py"
       - "tools/lib/bash_probe_spec.py"
+      # R67：R66 收斂出的第三支 tools/lib/ SSOT（AISDLC_SDD LATEST 版本解析，
+      # ADR-XPLAT-002 Phase 2-C/2-D），被 tools/tests/ 下 10 支測試檔 import 消費，
+      # 卻是 tools/lib/ 八支檔案中唯一雙邊 paths 皆未列名者——因其全部消費者採用
+      # `_REPO_ROOT = ...` + `sys.path.insert(0, str(_REPO_ROOT / "tools" / "lib"))`
+      # 變數形態，被 test_ci_paths_cover_root_consumers.py 舊有逐字正則
+      # `_SYSPATH_PARENTS_RE` 結構性漏抓，連機械鎖都零訊號（盲區 E；該鎖已於同輪
+      # 改用 AST 解析修復，此後同類遺漏會當場轉紅）。DEF-101-042 同構。
+      - "tools/lib/sdd_latest.py"
       # R43：tools/tests/test_windowsapps_guard_bash_parity.py 消費此根層檔（bash 側
       # WindowsApps guard SSOT，DEF-101-353）與其全部已知呼叫端——只改任一檔時本
       # workflow 須重跑該鎖（DEF-101-042 同構；.sh 本檔無 **/*.sh 兜底 glob〔對稱
@@ -374,6 +425,9 @@ on:
       - ".claude/**"
       - "AISDLC_SDD/AISDLC_SDD_v*/tools/**"
       - "AISDLC_SDD/AISDLC_SDD_v*/.claude/**"
+      # R67 round 2：同上（push 段說明），pull_request 段同步補齊（盲區 F）
+      - "AISDLC_SDD/conftest.py"
+      - "AISDLC_SDD/AISDLC_SDD_v*/conftest.py"
       # R11：tools/tests/test_smoke_ci_sync.py 互鎖兩平台 smoke 釘選值、ONBOARDING §8
       # PASS 數字與雙 workflow 同步注記——其消費檔改動時本 workflow 須重跑該鎖
       #（DEF-101-042 同構；.ps1 已由 **/*.ps1 覆蓋，此處補 .sh 側與文件）
@@ -385,6 +439,8 @@ on:
       - "tools/install_mac_nightly.sh"
       # R52：同上（push 段說明），pull_request 段同步補齊
       - "AutoClaude/tools/run_local_nightly.sh"
+      # R67：同上（push 段說明），pull_request 段同步補齊
+      - "docs/06_quality/CrossPlatform_Scan_Dimensions.md"
   schedule:
     # R11 額度治理：每日 → 每週一（CI 額度緊張、Windows 側已有 schtasks 本地 nightly
     # run_local_nightly.ps1 承接每日訊號）；需要時可 workflow_dispatch 手動觸發。

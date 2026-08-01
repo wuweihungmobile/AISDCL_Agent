@@ -608,5 +608,102 @@ class TestNoHardcodedLineCounts(unittest.TestCase):
         self.assertTrue(all(v is None for v in counts.values()), counts)
 
 
+class TestR67ShebangIsNotAComment(unittest.TestCase):
+    """R67（Scan-H R67-H35）回歸鎖：首行 shebang 必須進入 hash 輸入。
+
+    WHY（測意圖非僅行為，Rule 9）：薄殼的三項職責第一項就是「選直譯器」，而
+    `_normalize()` 原本以 `not line.lstrip().startswith("#")` 一律剝除註解行，
+    連 `#!/usr/bin/env bash` 一起吃掉——8 支釘選 `.sh` 的 shebang 可被改成
+    `#!/bin/sh` 而 hash 紋風不動（實測 `check_wrapper_thinness.py` rc=0、
+    `check_script_parity.py` rc=0、`tools/tests` 全綠）。`tools/dev_start.sh`
+    實際用了 `${BASH_SOURCE[0]}` 與 `local`，在 dash（Ubuntu runner 的 /bin/sh）
+    下會直接語法/展開失敗。守門對象的頭號職責整條不在覆蓋面內＝這道 hash 鎖對
+    「殼被改成用錯直譯器」天生零訊號。
+
+    邊界：本鎖只保證「shebang 變動一律紅」，不保證 shebang 內容本身正確
+    （`#!/usr/bin/env python3` 掛在 .sh 上照樣通過釘選——那是另一個判準）。
+    """
+
+    def _fake_root(self, tmp_dir: Path, sh_text: str) -> Path:
+        tools_dir = tmp_dir / "tools"
+        tools_dir.mkdir(parents=True, exist_ok=True)
+        (tools_dir / "dev_start.sh").write_text(sh_text, encoding="utf-8")
+        return tmp_dir
+
+    def _dev_start_sh_pin_only(self) -> dict[str, str]:
+        return {
+            k: v for k, v in m._PINNED_SHA256.items() if k == "tools/dev_start.sh"
+        }
+
+    def test_normalize_keeps_leading_shebang(self) -> None:
+        """單元層：shebang 留在正規化文字第一行，其餘註解照舊剝除。"""
+        norm = m._normalize("#!/usr/bin/env bash\n# 註解\n\nreal=1\n", is_ps1=False)
+        self.assertEqual(norm, "#!/usr/bin/env bash\nreal=1")
+
+    def test_normalize_strips_non_leading_hashbang_like_comment(self) -> None:
+        """對照組：非首行的 `#!` 仍是註解（shebang 只有首行才是宣告）。"""
+        norm = m._normalize("real=1\n#!/bin/sh\n", is_ps1=False)
+        self.assertEqual(norm, "real=1")
+
+    def test_shebang_change_trips_hash(self) -> None:
+        """缺陷注入（本鎖的核心）：只把 `#!/usr/bin/env bash` 換成 `#!/bin/sh`、
+        其餘一個字元不動 ⇒ 必須紅燈。修前此情境 rc=0 全綠。"""
+        import tempfile
+
+        real_sh = (m.ROOT / "tools/dev_start.sh").read_text(encoding="utf-8")
+        self.assertTrue(real_sh.startswith("#!/usr/bin/env bash"), "前提：真檔首行是 shebang")
+        tampered = real_sh.replace("#!/usr/bin/env bash", "#!/bin/sh", 1)
+        with tempfile.TemporaryDirectory() as td:
+            fake_root = self._fake_root(Path(td), tampered)
+            with mock.patch.object(m, "ROOT", fake_root), \
+                 mock.patch.object(m, "_PINNED_SHA256", self._dev_start_sh_pin_only()):
+                problems = m.check_wrapper_thinness()
+        hash_problems = [p for p in problems if "hash 與釘選不符" in p]
+        self.assertEqual(len(hash_problems), 1, f"shebang 換直譯器必須紅燈，實得：{problems}")
+
+    def test_untouched_shebang_is_green(self) -> None:
+        """正控（雙向驗證的綠燈側）：同一 fixture 不動 shebang ⇒ 零問題。
+        沒有這一支，上一支的紅燈可能只是 fixture 本身壞掉。"""
+        import tempfile
+
+        real_sh = (m.ROOT / "tools/dev_start.sh").read_text(encoding="utf-8")
+        with tempfile.TemporaryDirectory() as td:
+            fake_root = self._fake_root(Path(td), real_sh)
+            with mock.patch.object(m, "ROOT", fake_root), \
+                 mock.patch.object(m, "_PINNED_SHA256", self._dev_start_sh_pin_only()):
+                problems = m.check_wrapper_thinness()
+        self.assertEqual(problems, [])
+
+    def test_comment_only_change_still_green_alongside_shebang_lock(self) -> None:
+        """界線宣告：本鎖不得把「僅增註解」也一起攔下——shebang 是宣告、註解仍是註解。
+        （與既有 `test_comment_only_change_does_not_trip_hash` 並存，這支專證兩者可共存。）"""
+        import tempfile
+
+        real_sh = (m.ROOT / "tools/dev_start.sh").read_text(encoding="utf-8")
+        with tempfile.TemporaryDirectory() as td:
+            fake_root = self._fake_root(Path(td), real_sh + "\n# 事後補的說明註解\n")
+            with mock.patch.object(m, "ROOT", fake_root), \
+                 mock.patch.object(m, "_PINNED_SHA256", self._dev_start_sh_pin_only()):
+                problems = m.check_wrapper_thinness()
+        self.assertEqual(problems, [])
+
+    def test_every_pinned_sh_carries_its_shebang_into_the_hash(self) -> None:
+        """全面性：釘選面內每一支 `.sh` 的正規化首行都必須是它自己的 shebang——
+        防「只有 dev_start 被修好、其餘 6 支仍在覆蓋面外」。"""
+        checked = 0
+        for rel in m._PINNED_SHA256:
+            path = m.ROOT / rel
+            if path.suffix != ".sh" or not path.is_file():
+                continue
+            first_line = m._read_source(path).splitlines()[0]
+            self.assertTrue(first_line.startswith("#!"), f"{rel} 首行非 shebang：{first_line!r}")
+            self.assertEqual(
+                m.normalized_content(path).splitlines()[0], first_line,
+                f"{rel} 的 shebang 未進入 hash 輸入",
+            )
+            checked += 1
+        self.assertGreaterEqual(checked, 7, "釘選面內 .sh 支數低於預期，鎖可能已空轉")
+
+
 if __name__ == "__main__":
     unittest.main()

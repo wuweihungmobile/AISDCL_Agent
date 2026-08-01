@@ -20,15 +20,34 @@
 #（R14 ARCH-GAP-3：原導 /tmp 會被 macOS 週期清理＋重開機清空，深夜失敗數日後排查 log 已散失；
 # 改與心跳檔同目錄（gitignored）集中取證，install 時 mkdir -p 保證目錄存在）。
 #
-# --status 心跳三態語意對齊 tools/dev_start.py _check_nightly_heartbeat（R12
-# ARCH-R12-2）：缺席→提示（排程可能未啟用）；mtime > 8 天→過期警告；否則新鮮。
+# --status 心跳語意對齊 tools/dev_start.py _check_nightly_heartbeat（R12 ARCH-R12-2、
+# R67-E21）。對齊維度以下列機讀清單為準（DIMENSIONS: 三態, FAIL 計數）——
+# tools/tests/test_dev_start.py 的跨站行為等價鎖會解析本清單並斷言「宣稱的維度數
+# ＝鎖實際比對的維度數」，防 R67-E21 重演（該次是 dev_start 於 R15 新增 FAIL 維度、
+# 本檔沒跟上，而等價鎖被寫死在 R12 的「三態」語意上，契約破裂零訊號）：
+#   三態      — 缺席→提示（排程可能未啟用）；mtime > 8 天→過期警告；否則新鮮
+#   FAIL 計數 — 心跳檔前 3 行的 `FAIL=N`，N>0 多印一行 ⚠️（語意對齊 dev_start
+#               _heartbeat_fail_count／ARCH-R15-1：mtime 只證明「在跑」不證明「在綠」）
+#
+# --status 另有兩段 mac 專屬報表（皆 advisory）：
+#   ① 補跑保護能力表（R67-M37）：逐項印「已安裝 plist 的實際值 (expected 期望值)」，
+#      對齊 install_windows_nightly.ps1 Show-TaskDetail 的四項 (expected X) 體例。
+#      查的是**磁碟上已安裝的 plist**，不是本檔 heredoc——R15 之前安裝過的機器其
+#      plist 至今無 RunAtLoad，而 --status 過去只做 [ -f ] 存在性判斷，恆報綠。
+#   ② 覆蓋連續性（R67-F29）：心跳只看「最後一次距今幾天」，看不見中間漏跑，且任何
+#      補跑會把空窗蓋掉；改掃 RunId log 檔名時間戳列出近 N 天的缺口。這同時是 mac
+#      側對 Windows `NextRunTime` 前瞻憑證的替代——launchd 不提供 next-run。
 #
 # Exit codes：0＝成功（--status 時＝launchd 已載入）；1＝失敗（--status 時＝未載入
-# 或 plist 缺席）。心跳三態屬 advisory，不影響 --status exit code（對齊 dev_start
-# 「皆不阻擋」語意——排程「有沒有載入」才是本工具的機械判準）。
+# 或 plist 缺席）。心跳三態／FAIL 計數／上述兩段報表**皆屬 advisory**，不影響
+# --status exit code（對齊 dev_start「皆不阻擋」語意——排程「有沒有載入」才是本
+# 工具的機械判準）。
 #
 # 測試縫（fake 環境驗證用；正常安裝不需理會）：IMN_LAUNCHCTL 可指向 stub 以驗證
-# launchctl 呼叫序列而不真載入（本 repo 紀律：真安裝屬使用者 ops，須另行核可）。
+# launchctl 呼叫序列而不真載入（本 repo 紀律：真安裝屬使用者 ops，須另行核可）；
+# IMN_NOW 可凍結 report_heartbeat 的「現在」為指定 epoch 秒，供跨站等價鎖在 8.0 天
+# 整秒邊界做**確定性**比對（兩份實作各自呼叫 date/time.time 會落在不同秒，該邊界
+# 上會 flaky——R67-M40）。IMN_NOW 只影響心跳年齡，不影響覆蓋連續性的日期換算。
 #
 # 相容性：bash 3.2（macOS /bin/bash；禁 declare -A / mapfile / ${var,,}）+ BSD
 # 工具（stat -f、date +%s）。全程 ${var} 大括號展開（DEF-101-163 紀律）。
@@ -55,6 +74,10 @@ PLIST_PATH="${PLIST_DIR}/${LABEL}.plist"
 LAUNCHCTL="${IMN_LAUNCHCTL:-launchctl}"
 # 心跳過期門檻（天）：與 tools/dev_start.py _HEARTBEAT_MAX_AGE_DAYS 同值同語意。
 HEARTBEAT_MAX_AGE_DAYS=8
+# 覆蓋連續性回看天數（R67-F29）。刻意短於載體的 14 天 RunId log 輪替窗口
+# （run_local_nightly.sh `find -mtime +14 -delete`），否則「缺席」會混入「被輪替
+# 刪掉」的假訊號。
+NIGHTLY_COVERAGE_DAYS=7
 
 usage() {
   echo "用法：bash tools/install_mac_nightly.sh [--uninstall | --status | --render-only <path>]" >&2
@@ -94,21 +117,143 @@ EOF_PLIST
   echo "✅ plist 已產出並通過 plutil -lint：${_target}（含 RunAtLoad 開機/載入補跑，載體當日去重）"
 }
 
-# 心跳三態（advisory；語意鏡射 tools/dev_start.py _check_nightly_heartbeat）。
+# 心跳三態＋FAIL 計數（advisory；語意鏡射 tools/dev_start.py _check_nightly_heartbeat，
+# 對齊維度＝檔頭 DIMENSIONS 清單）。
 report_heartbeat() {
   if [ ! -f "${HEARTBEAT}" ]; then
     echo "  心跳：未偵測（AutoClaude/logs/nightly_mac_latest.log 不存在）——排程可能未啟用或尚未跑過第一輪（設定見 ONBOARDING §8）"
     return 0
   fi
+  # FAIL 維度（R67-E21）：心跳 mtime 只證明「排程在跑」，不證明「驗證全綠」——
+  # nightly 連續全紅時本工具過去隻字未提，而同一顆心跳檔在 dev_start 會出 ⚠️。
+  # 讀前 3 行即涵蓋兩態（第 2 行恆為 `===== nightly 彙總：PASS=n FAIL=n =====`，
+  # 第 3 行僅 FAIL>0 才存在），與 dev_start._heartbeat_fail_count 同契約。
+  # 無命中時 grep 回 rc=1、head -1 提前關管線會讓上游收 SIGPIPE——本段全屬
+  # advisory，以 `|| true` 收斂，絕不可讓 set -e 中斷 --status。
+  _fail_n="$(head -3 "${HEARTBEAT}" 2>/dev/null | grep -oE 'FAIL=[0-9]+' | head -1 | cut -d= -f2 || true)"
+  if [ -n "${_fail_n}" ] && [ "${_fail_n}" -gt 0 ]; then
+    echo "  ⚠️ 最近一輪 FAIL=${_fail_n}——排程在跑但驗證未全綠，請查 AutoClaude/logs/ 最新 nightly_mac log（ARCH-R15-1）"
+  fi
   _mtime="$(stat -f %m "${HEARTBEAT}")"
-  _now="$(date +%s)"
-  _age_days=$(( (_now - _mtime) / 86400 ))
-  # 過期判定以「秒」比較（與 dev_start.py 浮點天數 > 8 精確等價）：shell 整數除法
-  # 會把 8.5 天截斷成 8 天而誤判「新鮮」，(8,9) 天窗口與 dev_start 背離（SD-R13-1）。
-  if [ $(( _now - _mtime )) -gt $(( HEARTBEAT_MAX_AGE_DAYS * 86400 )) ]; then
-    echo "  ⚠️ 心跳：過期（距今 ${_age_days} 天 > ${HEARTBEAT_MAX_AGE_DAYS} 天）——排程可能已斷載，請檢查 launchctl（ONBOARDING §8）"
+  _now="${IMN_NOW:-$(date +%s)}"
+  _age_s=$(( _now - _mtime ))
+  # 時鐘倒退／mtime 在未來：夾到 0，否則下方合成小數會產出 "-0.-5" 這種壞字串。
+  if [ "${_age_s}" -lt 0 ]; then _age_s=0; fi
+  # 顯示精度與判定精度一致（R67-M39）：判定自 SD-R13-1 起以秒比較，顯示卻仍是
+  # 整數天除法截斷，(8,9) 天整整 24 小時窗口會印出「距今 8 天 > 8 天」這種數學上
+  # 為偽的文案。bash 3.2 無浮點運算，以「先乘 10 再整除」合成一位小數，與
+  # dev_start.py 的 {age_days:.1f} 同格式；訊息一併改為不含不等式的敘述句，
+  # 避免「8.0 天 > 8 天」在整秒邊界再現同型矛盾。
+  _age_tenths=$(( _age_s * 10 / 86400 ))
+  _age_days="$(( _age_tenths / 10 )).$(( _age_tenths % 10 ))"
+  # 過期判定以「秒」比較（與 dev_start.py 整數秒年齡 > 8 天精確等價）：shell 整數
+  # 除法會把 8.5 天截斷成 8 天而誤判「新鮮」，(8,9) 天窗口與 dev_start 背離
+  # （SD-R13-1）。dev_start 側自 R67-M40 起亦先把 mtime／now 截成整數秒，兩份實作
+  # 在同一秒內對同一顆心跳檔的裁決自此完全一致（BSD `stat -f %m` 本就只給整數秒）。
+  if [ "${_age_s}" -gt $(( HEARTBEAT_MAX_AGE_DAYS * 86400 )) ]; then
+    echo "  ⚠️ 心跳：過期（距今 ${_age_days} 天，已超過 ${HEARTBEAT_MAX_AGE_DAYS} 天門檻）——排程可能已斷載，請檢查 launchctl（ONBOARDING §8）"
   else
     echo "  ✅ 心跳：新鮮（距今 ${_age_days} 天）"
+  fi
+}
+
+# 近 N 天 nightly 覆蓋連續性（advisory；R67-F29）。
+#
+# WHY：心跳哨兵只看「最後一次距今幾天」——本機 07-28/29/30 三天零 nightly（整段
+# 關機），--status 仍印「✅ 心跳：新鮮（距今 0 天）」，因為 07-31 開機後 RunAtLoad
+# 補跑了一輪把計數歸零。空窗在唯一的每日回饋通道上結構性不可見。改掃 RunId log
+# （run_local_nightly.sh 每輪產一份 nightly_mac_<時間戳>.log）的檔名日期。
+#
+# 只回看「昨天起」往前 N 天：今日 02:00 排程在當日凌晨前尚未觸發，把今天算進去會
+# 讓每天 00:00~02:00 之間必然多報一天假缺口。
+report_coverage() {
+  if ! ls "${LOG_DIR}"/nightly_mac_2*.log >/dev/null 2>&1; then
+    echo "  覆蓋連續性：無任何 RunId log（${LOG_DIR}/nightly_mac_2*.log 不存在）——排程可能未啟用或尚未跑過第一輪"
+    return 0
+  fi
+  _missing=""
+  _missing_n=0
+  _i=1
+  while [ "${_i}" -le "${NIGHTLY_COVERAGE_DAYS}" ]; do
+    _day="$(date -v-"${_i}"d +%Y%m%d)"
+    if ! ls "${LOG_DIR}"/nightly_mac_"${_day}"_*.log >/dev/null 2>&1; then
+      _missing="${_missing}${_missing:+, }${_day}"
+      _missing_n=$(( _missing_n + 1 ))
+    fi
+    _i=$(( _i + 1 ))
+  done
+  if [ "${_missing_n}" -eq 0 ]; then
+    echo "  ✅ 覆蓋連續性：近 ${NIGHTLY_COVERAGE_DAYS} 天每日皆有 nightly 紀錄"
+  else
+    echo "  ⚠️ 覆蓋連續性：近 ${NIGHTLY_COVERAGE_DAYS} 天有 ${_missing_n} 天無 nightly 紀錄（${_missing}）——心跳「新鮮」只證明最後一次有跑，補跑會把先前空窗蓋掉（ONBOARDING §8）"
+  fi
+}
+
+# 已安裝 plist 的補跑保護能力表（advisory；R67-M37）。
+#
+# WHY：cmd_status 過去只做 `[ -f "${PLIST_PATH}" ]`，從不讀內容——一份指向不存在
+# 載體、且缺 RunAtLoad 的死排程三行全綠 rc=0。護欄側（macos_smoke_local.sh）鎖的
+# 也只是**本檔 heredoc 原始碼**，不是**機器上實際安裝的產物**。Windows 側
+# Show-TaskDetail 逐項印 4 個補跑保護設定的 `(expected X)` 供人比對，mac 側零對等物。
+_cap_bad=0
+
+# $1=plutil key path；鍵缺席／plist 壞損一律回字面 "(缺席)"（fail-soft：本段是報表）
+_plist_raw() {
+  plutil -extract "$1" raw -o - "${PLIST_PATH}" 2>/dev/null || echo "(缺席)"
+}
+
+# $1=能力名 $2=實際值 $3=期望值 $4=補充說明（可省略）。不符即累計 _cap_bad。
+# `${4:-}` 而非 `$4`：本檔 set -u，省略第四參數時裸 $4 會直接 unbound 中止 --status。
+_cap_line() {
+  if [ "$2" = "$3" ]; then
+    echo "  ✅ $1 = $2   (expected $3)${4:-}"
+  else
+    echo "  ⚠️ $1 = $2   (expected $3)${4:-}"
+    _cap_bad=$(( _cap_bad + 1 ))
+  fi
+}
+
+report_plist_capabilities() {
+  _cap_bad=0
+  echo "  ── 補跑保護能力（查已安裝 plist 內容；對齊 install_windows_nightly.ps1 -Status 四項）──"
+  _cap_line "RunAtLoad" "$(_plist_raw RunAtLoad)" "true" \
+    "；≙ Windows StartWhenAvailable：開機/載入補跑錯過的一輪（R15 前安裝的 plist 無此鍵）"
+  _cap_line "StartCalendarInterval Hour:Minute" \
+    "$(_plist_raw StartCalendarInterval.Hour):$(_plist_raw StartCalendarInterval.Minute)" \
+    "2:0" "；＝每日 02:00 觸發"
+  _prog="$(_plist_raw ProgramArguments.1)"
+  if [ -r "${_prog}" ]; then _prog_ok="是"; else _prog_ok="否"; fi
+  _cap_line "ProgramArguments 載體可讀" "${_prog_ok}" "是" "；路徑 ${_prog}"
+  _out="$(_plist_raw StandardOutPath)"
+  case "${_out}" in
+    "${LOG_DIR}"/*) _out_ok="是" ;;
+    *) _out_ok="否" ;;
+  esac
+  _cap_line "StandardOutPath 位於 AutoClaude/logs" "${_out_ok}" "是" \
+    "；路徑 ${_out}（R14 ARCH-GAP-3：導 /tmp 會被 macOS 週期清理）"
+  # 以下三項 Windows 有、launchd 結構上沒有對應鍵——誠實列出「無從檢查」而不是
+  # 靜默略過，讓兩側能力表能逐列對照（不列＝讀者無從得知這裡是缺口還是遺漏）。
+  echo "  －  WakeToRun 對等：launchd 原生（睡眠期間錯過的觸發於喚醒時合併補跑，man launchd.plist），無對應 plist 鍵可查"
+  echo "  －  電池策略對等：LaunchAgent 無 DisallowStartIfOnBatteries／StopIfGoingOnBatteries 對應鍵（不受電池阻擋）"
+  echo "  －  NextRunTime 對等：launchd 不提供 next-run 憑證——改以上方「覆蓋連續性」回填此缺口"
+  # 逐鍵檢查只認得「我們想得到的鍵」；整檔比對才抓得到其餘任何漂移（多餘鍵、
+  # 路徑指向舊 checkout、Label 改名…）。renderer 產不出來時如實說跳過。
+  _tmp_render="$(mktemp "${TMPDIR:-/tmp}/imn_status.XXXXXX")"
+  if render_plist "${_tmp_render}" >/dev/null 2>&1; then
+    if diff -q "${PLIST_PATH}" "${_tmp_render}" >/dev/null 2>&1; then
+      echo "  ✅ plist 內容與現行安裝器產出逐位元組一致（無漂移）"
+    else
+      echo "  ⚠️ plist 內容已與現行安裝器產出漂移——重裝：bash tools/install_mac_nightly.sh"
+      diff "${PLIST_PATH}" "${_tmp_render}" | sed 's/^/      /' || true
+      _cap_bad=$(( _cap_bad + 1 ))
+    fi
+  else
+    echo "  ⚠️ plist 漂移檢查跳過：renderer 無法產出（載體 ${NIGHTLY_SH} 缺失？）"
+    _cap_bad=$(( _cap_bad + 1 ))
+  fi
+  rm -f "${_tmp_render}"
+  if [ "${_cap_bad}" -gt 0 ]; then
+    echo "  ⚠️ 上列 ${_cap_bad} 項與期望不符——重裝：bash tools/install_mac_nightly.sh（advisory，不改 exit code）"
   fi
 }
 
@@ -155,10 +300,14 @@ cmd_status() {
   fi
   if [ -f "${PLIST_PATH}" ]; then
     echo "  plist：存在（${PLIST_PATH}）"
+    # 存在性 ≠ 健康（R67-M37）：R15 之前安裝的 plist 無 RunAtLoad、R14 之前導 /tmp，
+    # 兩者都會讓排程實際上不補跑/log 散失，而舊版 --status 只做 [ -f ] 恆報綠。
+    report_plist_capabilities
   else
     echo "  plist：不存在（${PLIST_PATH}）"
   fi
   report_heartbeat
+  report_coverage
   [ "${_loaded}" -eq 1 ]
 }
 

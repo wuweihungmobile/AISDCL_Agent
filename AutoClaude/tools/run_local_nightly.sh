@@ -44,15 +44,63 @@ if [ -d "$ROOT/.venv/bin" ]; then
   PATH="$ROOT/.venv/bin:$PATH"; export PATH
 fi
 
+# launchd job Label（R67-F26）：必須與 tools/install_mac_nightly.sh 的 LABEL 同值
+# ——它是下面觸發來源判定的比對基準，兩邊漂移會讓真排程觸發被誤標成「手動」。
+# 跨檔字面一致性由 AutoClaude/tests/tools/test_run_local_nightly_sh_static.py 鎖住。
+NIGHTLY_LAUNCHD_LABEL="com.autoclaude.nightly"
+
+# 參數解析（R67-F10）：**必須在任何副作用之前**——`--help` 要真的什麼都不做。
+# WHY：修復前全檔只對 $1 做兩處 `= "--force"` 二元比對，於是 `--help` 在無心跳的
+# 樹上會直接開跑整套 4-stage（實測落下 nightly_mac_*.log 並跑進 macos_smoke 的
+# 7 個子步驟），有心跳時則 rc=0 印「今日已有心跳…跳過本輪」——一個查說明的動作
+# 被記成一次成功的 nightly 去重，事後從 log 看不出使用者其實輸錯了旗標。
+# `--forse`／`-f`／`--Force` 等 typo 同樣全被吞掉（實測七種變體 rc 皆為 0）。
+print_usage() {
+  cat <<EOF
+用法：bash AutoClaude/tools/run_local_nightly.sh [--force | -h | --help]
+
+  （無參數）   排程/去重模式：當日已有心跳即跳過（RunAtLoad 補跑去重），否則跑完整 ${STAGE_TOTAL} stage
+  --force      手動重跑：繞過當日去重
+  -h, --help   印本說明後結束，不執行任何 stage
+
+stage：[1/${STAGE_TOTAL}] macos_smoke ／ [2/${STAGE_TOTAL}] root_unittests ／ [3/${STAGE_TOTAL}] autoclaude_gate ／ [4/${STAGE_TOTAL}] sdd_ci_gate
+log：AutoClaude/logs/nightly_mac_<時間戳>.log（保留 14 天）
+心跳：AutoClaude/logs/nightly_mac_latest.log
+EOF
+}
+if [ "$#" -gt 1 ]; then
+  echo "❌ 參數過多（本腳本最多接受一個旗標）：$*" >&2
+  print_usage >&2
+  exit 2
+fi
+case "${1:-}" in
+  "") : ;;
+  --force) : ;;
+  -h|--help) print_usage; exit 0 ;;
+  *)
+    echo "❌ 未知參數：$1" >&2
+    print_usage >&2
+    exit 2
+    ;;
+esac
+
 # 觸發來源判定（R16 SCAN-C-3）：BEGIN 行需可歸因本輪是 launchd 排程觸發還是
 # 手動/--force 呼叫，未來再遇到「同日兩輪 PASS」才能機械判讀是合理的手動重跑
 # 還是真正的去重漏洞（R16 掃描時，2026-07-21 同日兩輪完整 PASS=4 因缺這行
-# 無法單靠 log 本身歸因）。XPC_SERVICE_NAME 是 launchd 對其管理 job 行程注入的
-# 慣例環境變數，手動終端呼叫不具備；--force 與互動終端（[ -t 1 ]）進一步區分
-# 手動重跑樣態。
+# 無法單靠 log 本身歸因）。--force 與互動終端（[ -t 1 ]）進一步區分手動重跑樣態。
+#
+# 🔴 R67-F26 訂正：本段原註解宣稱「XPC_SERVICE_NAME 是 launchd 注入其管理 job 的
+# 慣例環境變數，**手動終端呼叫不具備**」，判定式因此只用 `[ -n ... ]` 測存在性。
+# 真機實測（Darwin 25.5.0）證偽：macOS 對一般使用者行程注入的值就是字串 `0`
+# （`/bin/bash -c 'echo ${XPC_SERVICE_NAME}'` → `0`），於是任何手動/agent/CI 呼叫
+# 都被標成 `launchd(...)`，而 manual-interactive／non-interactive-unknown 兩態成為
+# 死碼——正好在這個欄位唯一被設計來服務的取證情境（同日兩輪 PASS 的歸因）給出
+# 反向結論：去重漏洞會被記成「排程觸發」，指向無辜的 launchd。
+# 真 launchd 注入的值是 **job Label**（本機 7 份真排程 log 逐份為
+# `XPC_SERVICE_NAME=com.autoclaude.nightly`），故改為值比對而非存在性比對。
 if [ "${1:-}" = "--force" ]; then
   TRIGGER_SRC="manual-force"
-elif [ -n "${XPC_SERVICE_NAME:-}" ]; then
+elif [ "${XPC_SERVICE_NAME:-}" = "${NIGHTLY_LAUNCHD_LABEL}" ]; then
   TRIGGER_SRC="launchd(XPC_SERVICE_NAME=${XPC_SERVICE_NAME})"
 elif [ -t 1 ]; then
   TRIGGER_SRC="manual-interactive"

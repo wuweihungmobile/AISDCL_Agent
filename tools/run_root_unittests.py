@@ -33,6 +33,8 @@ R60 Pkg-P8 補三層——因為「下限」語意只擋得住「掉太多」，
 from __future__ import annotations
 
 import hashlib
+import os
+import re
 import sys
 import unittest
 from pathlib import Path
@@ -45,7 +47,7 @@ _TESTS_DIR = Path(__file__).resolve().parent / "tests"
 # 下限釘選：低於此數＝測試大規模靜默消失（目錄/pattern/路徑壞掉），紅燈。
 # 刻意刪減測試時同步下修；新增測試在 `RATCHET_STALE_RATIO` 倍以內不需動（下限
 # 語意），超過即**必須**重釘，否則保鮮期斷言會讓閘門變紅（見下方兩層設計說明）。
-MIN_TESTS = 1069  # R60 round 3 **主控收輪重釘**（R59 為 661、R57 為 616；R60 中途曾釘 756、845、994、1063——994 是 round 3 修復波開跑前的值，1063 是 Pkg-F 交件時的值而 Pkg-H 之後又淨增 6 支，兩者都在「還有包在跑」的時點量測，故皆非最終值）。R58 整輪作廢故無 R58 值。R57 收尾重釘（動工前為 R15 釘的 290，對當時實況 530 已鑑別力失效 45%＝可靜默蒸發 240 支仍綠）。本值由主控在**所有並行修復包與四方複審 agent 全部停工後**，於最終工作樹實跑 `python3 tools/run_root_unittests.py` 取其印出的「發現 N 個測試」直接填入，不做任何加減推算——R57 過程中兩度用算式推得 552／558，兩次都當場就與實況不符（SD-R57-01／QA-R57-07 抓出），故本行的重釘判準明定為「填實測值」
+MIN_TESTS = 1362  # R67 round 3 **最終收尾包重釘（本輪第三次；動工前為 R60 round 3 釘的 1069）**。🔴 **「一輪三釘」本身是本 repo 的結構性缺陷，逐字記錄比修好它更要緊（`DEF-101-701`）**：本輪序列＝1069 → round 1 釘 1318 → round 2 釘 1343 → round 3 本次。1318 那次的取證被四方三向交叉命中為不實（SA-R67-02／SD-R67-01／QA-R67-01：註記寫死的收集面指紋與兩處計數，在最終工作樹一個都複現不出來；同一 commit 內 DEF-101-677 自己記的又是第三個數字，正是 R60 SA-R60-01／ARCH-R60-03 判過的「同一份 repo 對同一個數字兩種說法」原型復發）。1343 那次同樣逐字宣稱「全部修復包停工後」，其後 SC 鎖包（`DEF-101-699`）又淨增測試 ⇒ 同一句話**再度**在一天內轉假。**根因不是粗心，是兩條規則的結構衝突**：重釘判準要「取當下實測」，而本 repo 的收輪是**多波次**（修復包 → 四方複審 → 再一波修復包 → 收尾包），任何一包寫下「已停工」時都只對**當下**為真；round 2 為此加訂的 (a) 仍靠**人自己判斷自己是不是最後一個**，零機械物看守 ⇒ 同型復發已可列舉：R60 留下 756／845／994／1063 四個中途值，R67 留下 1318／1343。**故 R67 round 2 加訂、round 3 沿用並補一小步**：(a) 重釘必須發生在**最後一波**修復收斂之後、由當輪唯一仍在工作的包執行，且該包必須先實查工作樹已停止變動——round 3 的實查手法＝**重釘量測前後各取一次工作樹內容指紋並確認相同**，指紋須**含內容**——`{ git status --porcelain; git diff HEAD; git ls-files -o --exclude-standard -z | xargs -0 shasum; } | shasum`；🔴 **只雜湊 `git status --porcelain` 是不夠的**（本包第一版就是這樣寫的，當場自查抓到）：該輸出只有狀態字母與路徑、**不含內容**，於是「對一支已在清單內的檔再改一次」對它完全不可見，正是本檔多處在治的 fail-open。這是唯一被機械化的一小步；「誰是最後一個工作者」本身仍無判準，未修的那一半見 `DEF-101-701`；(b) 🔴 **本註記內一律不得寫死「當場即可現查」的量測 token**（收集面指紋、`Ran <數字> tests`、`發現 <數字> 個測試`）——本 runner 每次執行都會把當下的值印在終端，寫進註記等於憑空製造一個沒有任何機械物看守的 stale 站點（同 `ADR-XPLAT-002` §8 表頭規則 3「完成判準欄禁止寫死量測常數」）。(b) 已由 `min_tests_note_stale_tokens()` 機械強制：違反即 rc=1，訊息直接指路。本值＝在 R67 round 3 全部修復包與四方複審 agent 停工後、由本輪**最後一個工作者**於最終工作樹實跑 `.venv/bin/python tools/run_root_unittests.py`，取其印出的計數直接填入，未做任何加減推算。歷史值序列：R15 為 290、R57 為 616、R59 為 661、R60 round 3 為 1069、R67 round 1 為 1318、R67 round 2 為 1343（後兩者皆中途值，見上）；R60 中途曾釘 756、845、994、1063——994 是 round 3 修復波開跑前的值，1063 是 Pkg-F 交件時的值而 Pkg-H 之後又淨增 6 支，兩者都在「還有包在跑」的時點量測，故皆非最終值。R58 整輪作廢故無 R58 值；R57 收尾重釘時，動工前的 R15 值 290 對當時實況 530 已鑑別力失效 45%＝可靜默蒸發 240 支仍綠——與本輪同款腐化，故重釘節奏訂為「每輪收尾必做」。**重釘判準（R57 訂立，R67 round 2 補上 (a)(b)，round 3 補上工作樹指紋實查）**：本值一律由收尾者在**所有並行修復包與四方複審 agent 全部停工後**，於最終工作樹實跑 `python tools/run_root_unittests.py`，取其印出的計數直接填入，不做任何加減推算——R57 過程中兩度用算式推得 552／558，兩次都當場就與實況不符（SD-R57-01／QA-R57-07 抓出），故本行的重釘判準明定為「填實測值」
 
 # R57 修正：「人工 ratchet」本身就是缺陷來源——R15 釘完後連續 11 輪沒人重釘，
 # 下限與實況愈拉愈開、鑑別力單調衰減，而且**沒有任何訊號**提醒該重釘（下限語意
@@ -71,6 +73,26 @@ RATCHET_STALE_RATIO = 1.25
 # Windows 上成立、這次環境不符沒跑」，是造成該漏洞連續多輪未被發現的根因之一。
 # 凡 skip 理由帶此標籤的測試，於摘要末另印一段醒目清單，供複審者一眼辨識。
 WINDOWS_NATIVE_SKIP_TAG = "[WINDOWS-NATIVE-ONLY]"
+
+# R67-F11：標籤**完整性**前瞻鎖的關鍵詞面。
+#
+# WHY（為何光有上面那個標籤還不夠）：`report_windows_native_skips` 只看得到「已經
+# 帶標籤」的 skip，對「該帶而沒帶」結構性盲目——它就是那個低報的來源本身。R67
+# 動工時實測：macOS 上 15 支 skip **全數**為 Windows 專屬，標題卻只印 10，低報 33%；
+# 其中 4 支由 R65（`01fd8c3`）、1 支由 R66（`8654975`）落地時漏標。R59 已在
+# `tools/tests/test_install_windows_nightly.py` 逐字記過同一形態（「因該 skip 未帶
+# `[WINDOWS-NATIVE-ONLY]` 標籤而被 run_root_unittests.py 的可見度機制漏掉」），
+# 兩輪後原地復發 ⇒ 這是持續性漏洞，不是一次性疏失，**必須有機械物**。
+#
+# 判準邊界（誠實劃界）：關鍵詞掃描是啟發式，抓的是「reason 講的明明是 Windows 語意
+# 卻沒帶標籤」。它抓不到「reason 完全沒提任何 Windows 字眼的 Windows-only skip」
+# （例：只寫「需要具名核心物件」）——那半邊仍是人審責任。
+_WINDOWS_LIKE_SKIP_HINTS = ("windows", "win32", "pathext", "bash.exe", "mutex", "ntfs")
+
+# 具名豁免：reason 命中關鍵詞但**確實不是** Windows 專屬的 skip（鍵＝test id，
+# 值＝理由）。現況為空集合。刻意保留這個空常數而非省略——例外必須逐支具名並附
+# 理由，不接受「整批略過」的通用開關（同 `_COLLECTION_EXEMPT` 既有慣例）。
+_WINDOWS_SKIP_TAG_EXEMPT: dict[str, str] = {}
 
 
 _PATTERN = "test_*.py"
@@ -300,6 +322,9 @@ def run_with_floor(start_dir: Path, min_tests: int) -> int:
     result = unittest.TextTestRunner(verbosity=1).run(suite)
     report_windows_native_skips(result)
     report_all_skips(result)
+    # R67-F11：標籤漏標＝上面那行標題低報 ⇒ fail-closed。與收集面缺口（見
+    # `report_collection_gaps`）同一精神：量測本身已不可信時不放行。
+    untagged = report_untagged_windows_like_skips(result)
     # 無法歸因的「收集了卻沒執行」＝量測不完整（例如 result.stop() 中途中止）。
     # 可歸因者（fixture 層 skip／error）只點名不判紅，理由見 report_execution_gap。
     unexplained_gap = report_execution_gap(count, result) > 0 and not fixture_level_entries(result)
@@ -308,7 +333,11 @@ def run_with_floor(start_dir: Path, min_tests: int) -> int:
     # 佔位測試刻意**不**提早 return：讓 suite 照跑，`_FailedTest` 才會把真正的
     # ImportError traceback 交給 `dump_failure_detail` 落檔（提早 return 會丟掉
     # 唯一的診斷資訊）；rc 則在此與 `wasSuccessful()` 一起收斂。
-    return 0 if (result.wasSuccessful() and not placeholders and not unexplained_gap) else 1
+    return (
+        0
+        if (result.wasSuccessful() and not placeholders and not unexplained_gap and not untagged)
+        else 1
+    )
 
 
 def ratchet_drift_message(
@@ -408,6 +437,58 @@ def report_windows_native_skips(result: unittest.TestResult) -> list[str]:
     return tagged_ids
 
 
+def untagged_windows_like_skips(
+    result: unittest.TestResult, *, on_windows: bool | None = None
+) -> list[tuple[str, str, str]]:
+    """純函式（無 I/O 副作用）：reason 講的是 Windows 語意、卻沒帶標籤的 skip。
+
+    回傳 `(test_id, 命中的關鍵詞, reason)`。
+
+    **只在非 Windows 平台上說話**（`on_windows` 預設取 `os.name == "nt"`，參數化僅
+    供測試注入）。理由不是「Windows 上不想管」，而是標籤語意在那裡不適用：
+    `[WINDOWS-NATIVE-ONLY]` 說的是「這支測試只在原生 Windows 才有驗證價值，**這次
+    環境不符所以沒跑**」——在 Windows 上這類測試根本不會 skip。反過來，Windows 上
+    真正會 skip 的是 POSIX-only 測試，而它們的 reason 十之八九也會提到 "Windows"
+    （例如「Windows 無 symlink 權限」），照掃必然假紅。反方向的可見度由
+    `report_all_skips`（DEF-101-510，全列不分類）承接，不在本鎖射程內。
+    """
+    if on_windows is None:
+        on_windows = os.name == "nt"
+    if on_windows:
+        return []
+    out: list[tuple[str, str, str]] = []
+    for test_id, reason in all_skips(result):
+        if WINDOWS_NATIVE_SKIP_TAG in reason or test_id in _WINDOWS_SKIP_TAG_EXEMPT:
+            continue
+        lowered = reason.lower()
+        hit = next((kw for kw in _WINDOWS_LIKE_SKIP_HINTS if kw in lowered), None)
+        if hit is not None:
+            out.append((test_id, hit, reason))
+    return sorted(out)
+
+
+def report_untagged_windows_like_skips(result: unittest.TestResult) -> list[tuple[str, str, str]]:
+    """印出漏標籤者並回傳清單（非空 ⇒ 呼叫端須讓 rc 為 1，見 `run_with_floor`）。"""
+    offenders = untagged_windows_like_skips(result)
+    if offenders:
+        print(
+            f"❌ {len(offenders)} 支 skip 的理由講的是 Windows 專屬語意，卻沒帶 "
+            f"{WINDOWS_NATIVE_SKIP_TAG} 標籤——上面那行「N 個 Windows 專屬測試未在原生 "
+            f"Windows 環境驗證」會因此**低報**，複審者會低估本輪未被驗證的 Windows 面"
+            f"（R67-F11：實測曾低報 33%）：",
+            file=sys.stderr,
+        )
+        for test_id, hit, reason in offenders:
+            print(f"   - {test_id}（命中關鍵詞 {hit!r}）\n       理由：{reason}", file=sys.stderr)
+        print(
+            f"   修法：把 {WINDOWS_NATIVE_SKIP_TAG} 加在該 skip reason 的最前面。若它"
+            "**確實不是** Windows 專屬，請把 test id 具名加入 "
+            "run_root_unittests._WINDOWS_SKIP_TAG_EXEMPT 並註明理由。",
+            file=sys.stderr,
+        )
+    return offenders
+
+
 def all_skips(result: unittest.TestResult) -> list[tuple[str, str]]:
     """純函式（無 I/O 副作用，比照 `windows_native_skips` 慣例）：回傳本次全部
     skip 的 `(test_id, reason)`，含已被 `WINDOWS_NATIVE_SKIP_TAG` 標記者。"""
@@ -446,9 +527,80 @@ def report_all_skips(result: unittest.TestResult) -> list[tuple[str, str]]:
     return entries
 
 
+# R67 round 2（SA-R67-02／SD-R67-01／QA-R67-01 三方交叉命中）：`MIN_TESTS` 的 WHY
+# 註記裡不得寫死「當場即可現查」的量測 token。三種形態各對應一次已發生的事故：
+#   `指紋 <12 碼 hex>`   ——每輪必變，寫下的那一刻起就無人能複現（本輪實際發生）；
+#   `Ran <數字> tests`   ——同上，且它是「跑完的結論」，寫在常數註記裡等於假造結論；
+#   `發現 <數字> 個測試` ——runner 每次執行都會印當下值，重複寫一份只是多一個 stale 站點。
+# 判準邊界（誠實劃界）：本鎖只看 `MIN_TESTS = ` 那一行的註記，抓的是**形態**不是
+# 語意——換個寫法（「一三四三支」「fingerprint abc…」）一樣抓不到，那半邊仍是人審
+# 責任。它擋的是本輪真正發生過的那一種復發，不宣稱涵蓋全部。
+_LIVE_MEASUREMENT_TOKENS: tuple[tuple[str, re.Pattern[str]], ...] = (
+    ("收集面指紋", re.compile(r"指紋\s*[0-9a-f]{12}")),
+    ("Ran <數字> tests", re.compile(r"Ran\s+\d+\s+tests")),
+    ("發現 <數字> 個測試", re.compile(r"發現\s*\d+\s*個測試")),
+)
+
+
+def min_tests_note_stale_tokens(source: str | None = None) -> list[tuple[str, str]]:
+    """純函式（無 I/O 副作用，比照本檔 `windows_native_skips` 慣例）：回傳
+    `MIN_TESTS` 註記內違規的 `(形態名, 逐字命中)`；全乾淨時回空 list。
+
+    `source` 參數化僅供注入測試；預設讀本檔自身。刻意**只**取
+    `MIN_TESTS = ` 那一行的 `#` 之後——射程精確到「被守護的那段散文」，
+    不會誤傷本檔其他地方合法出現的量測字樣（例如 `run_with_floor` 的
+    f-string、以及本註記自己列舉的三種形態說明）。
+
+    兩條 fail-open 已封（本鎖自己也是量測載具，載具必須被驗證）：
+    找不到 `MIN_TESTS = ` 行、或該行沒有註記，都當成違規回報——否則
+    「把註記整段刪掉」會讓本鎖靜默通過，那正是它要防的失效模式的極端形。
+    """
+    if source is None:
+        source = Path(__file__).resolve().read_text(encoding="utf-8")
+    for line in source.splitlines():
+        if line.startswith("MIN_TESTS = "):
+            note = line.split("#", 1)[1] if "#" in line else ""
+            break
+    else:
+        return [("取值面消失", "找不到 `MIN_TESTS = ` 起始的那一行——本自檢無從取值")]
+    if not note.strip():
+        return [("註記消失", "`MIN_TESTS` 那一行沒有 WHY 註記——重釘沿革與判準是本鎖的守護標的")]
+    return sorted(
+        (label, match.group(0))
+        for label, pattern in _LIVE_MEASUREMENT_TOKENS
+        for match in pattern.finditer(note)
+    )
+
+
+def report_min_tests_note_stale_tokens() -> list[tuple[str, str]]:
+    """印出違規並回傳清單（非空 ⇒ 呼叫端須讓 rc 為 1，見 `main`）。"""
+    offenders = min_tests_note_stale_tokens()
+    if offenders:
+        print(
+            f"❌ MIN_TESTS 的 WHY 註記寫死了 {len(offenders)} 個「當場即可現查」的量測 "
+            f"token——它們每輪必變、寫下後無人能複現，而本 runner 每次執行都會把當下值"
+            f"印在終端（R67 實際事故：註記宣稱的指紋與計數在最終工作樹上全部複現不出來，"
+            f"SA-R67-02／SD-R67-01／QA-R67-01）：",
+            file=sys.stderr,
+        )
+        for label, hit in offenders:
+            print(f"   - {label}：{hit!r}", file=sys.stderr)
+        print(
+            "   修法：把該 token 從註記中刪除，改寫成「見本 runner 當場輸出」；"
+            "確實要留沿革時只寫**釘選值**（那個值本身受 tools/sync_onboarding_baselines.py "
+            "的 rootunit-baseline-live 鎖與本檔保鮮期斷言雙重看守），不要抄一份量測結論。",
+            file=sys.stderr,
+        )
+    return offenders
+
+
 def main() -> int:
     if not _TESTS_DIR.is_dir():
         print(f"❌ 測試目錄不存在：{_TESTS_DIR}", file=sys.stderr)
+        return 1
+    # 先於 110 秒的全套執行做這道自檢：釘選值的**取證敘述**若已失實，後面印出的
+    # ✅ 只會替一個假前提背書；fail-fast 也讓注入實測不必等一整輪。
+    if report_min_tests_note_stale_tokens():
         return 1
     return run_with_floor(_TESTS_DIR, MIN_TESTS)
 

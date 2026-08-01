@@ -69,6 +69,15 @@ fi
 #      >180 字元預警。長度＝code point 數：以「刪去 UTF-8 連續位元組（0x80-0xBF）後
 #      的位元組數」計，locale 無關（第五輪 DEF-101 修正：${#f} 在 C locale——GUI git
 #      client 常見——退化為位元組數，CJK 路徑 67 字元即誤擋，且與 CI 版 len() 分歧）。
+#   5. 目錄段層級碰撞（R67-A2）：新增路徑的**每一層目錄前綴**與既有 tracked 目錄前綴
+#      比對，僅大小寫不同即擋下。第 3 項拿整行比對，對「目錄段拼法不同、basename
+#      完全不重複」結構上失明——本 repo 曾因此靜默長出兩對 Archive/archive 目錄達 6 週。
+#      實作與 rationale 見下方該段內註解。
+# 範圍差異（R67-B16，刻意不對稱）：CI 版 tools/check_ntfs_paths.py 另有第 6 項
+# 「index 路徑須為 NFC」，**本 hook 刻意不鏡射**——mac 側 git add 恆 precompose、
+# Windows/NTFS 本身即 NFC，NFD 只能由 Linux/GitHub web/plumbing 進來而那三條路都不經過
+# pre-commit，鏡射進來是零收益死碼。此決策由 tools/tests/
+# test_ntfs_trailing_space_device_name.py::TestNfcAxisScopeIsCiOnlyByDesign 機械釘住。
 # 另註：merge/rebase/cherry-pick 不經 pre-commit（git 無此 hook 觸發點），本閘 1~4 項
 # 皆由 root-infra-ci（全變更觸發）之 check_ntfs_paths.py 雲端兜底。
 # bash 3.2 相容：無 assoc array / ${var,,}，以 case pattern + tr + grep -iFx 實作。
@@ -126,7 +135,9 @@ _ntfs_seg_bad() {  # $1=完整路徑；有問題 → stdout 印原因並回 0，
 # 只在有新增檔時才做（--diff-filter=AC；--no-renames 使 rename 的新路徑以 A 現身受檢）
 if added="$(git -c core.quotepath=false diff --cached --name-only --no-renames --diff-filter=AC)"; then
   if [ -n "$added" ]; then
-    tracked=""   # 全 repo tracked 清單只取一次（大小寫碰撞比對用）
+    tracked=""        # 全 repo tracked 清單只取一次（大小寫碰撞比對用）
+    tracked_dirs=""   # 由 tracked 導出的「每一層目錄前綴」清單（A3 第 5 項用），同樣只算一次
+    seen_dirs=""      # 已回報過的目錄前綴，避免同一次 commit 新增 N 檔就噴 N 次同一則
     while IFS= read -r f; do
       [ -z "$f" ] && continue
       # MAX_PATH 保守長度閘（A3 第 4 項，DEF-101-039）：獨立於檔名字元檢查，先行必跑。
@@ -168,6 +179,41 @@ if added="$(git -c core.quotepath=false diff --cached --name-only --no-renames -
       done <<EOF2
 $collisions
 EOF2
+      # 目錄段層級碰撞（A3 第 5 項，R67-A2）：上一段的 grep -iFx 拿**整行**比對，對
+      # 「目錄段拼法不同、basename 完全不重複」的形態結構上失明。本 repo 就是這樣長出
+      # docs/04_planning/{Archive,archive}/ 與 docs/06_quality/{Archive,archive}/ 兩對
+      # index 目錄並靜默共存 6 週：f81ad94 用大寫收 01–31、22782fe 改小寫收 32–50，
+      # 而 mac/Windows 上兩者塌縮成同一個磁碟目錄、`git status` 全綠＝本機零訊號，
+      # Linux CI／act 容器／github.com 上卻是兩個獨立目錄（真・case-sensitive APFS 卷實測）。
+      # 立即危害不是覆蓋（basename 不重疊時不會），而是同一份程式碼兩平台掃到不同檔案集合、
+      # 交叉引用在 Linux/github.com 變死連結。
+      # bash 3.2 相容：無 assoc array／無 ${var,,}；前綴切分用 awk、折疊比對沿用 grep -iFx。
+      if [ -z "$tracked_dirs" ]; then
+        tracked_dirs="$(printf '%s\n' "$tracked" \
+          | awk -F/ '{p="";for(i=1;i<NF;i++){p=(i==1?$i:p"/"$i);print p}}' | sort -u)"
+      fi
+      prefixes="$(printf '%s\n' "$f" \
+        | awk -F/ '{p="";for(i=1;i<NF;i++){p=(i==1?$i:p"/"$i);print p}}')"
+      while IFS= read -r d; do
+        [ -z "$d" ] && continue
+        # 已回報過就跳過（同時省下重複 grep）。case pattern 內的 "$d" 加引號＝字面比對。
+        case $'\n'"$seen_dirs" in *$'\n'"$d"$'\n'*) continue ;; esac
+        dir_collisions="$(printf '%s\n' "$tracked_dirs" | grep -iFx -e "$d" || true)"
+        while IFS= read -r dm; do
+          [ -z "$dm" ] && continue
+          if [ "$dm" != "$d" ]; then
+            # ${d}/${dm} 帶大括號：bash 3.2 對「變數後緊接全形字元」有 multibyte 變數名邊界 bug
+            echo "[pre-commit dispatcher] ❌ NTFS 目錄段大小寫碰撞：新增路徑的目錄「${d}」與既有目錄「${dm}」僅大小寫不同" >&2
+            echo "                        兩者在 mac/Windows 上是同一個目錄、在 Linux/github.com 上是兩個 — 修法：沿用既有拼法" >&2
+            rc=1
+            seen_dirs="$seen_dirs$d"$'\n'
+          fi
+        done <<EOF2B
+$dir_collisions
+EOF2B
+      done <<EOF2A
+$prefixes
+EOF2A
     done <<EOF1
 $added
 EOF1

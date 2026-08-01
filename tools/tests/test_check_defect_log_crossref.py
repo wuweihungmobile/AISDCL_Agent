@@ -1173,5 +1173,452 @@ class TestEvidenceFamilyPointersResolve(unittest.TestCase):
         self.assertEqual(dupes, {}, "同一個 DEF-ID 的證據節出現在多份檔 ⇒ 拆分時複製而非搬移")
 
 
+_SPEC_DOC = m._REPO_ROOT / "docs" / "06_quality" / "CrossPlatform_Scan_Dimensions.md"
+
+
+def _row4(def_id: str, ctx: str, routing: str, status: str) -> str:
+    """組一列帳本表格列，四個**有語意**的欄位都可指定（硬規則② 的判定同時吃這四欄）。
+
+    既有的 `_row()` 把「發現情境」「分流去向」寫死成佔位字串，對本節測試不夠用：
+    當前輪由「發現情境」欄推得、承接者可寫在「分流去向」或「狀態」欄。
+    """
+    return f"| {def_id} | 2026-07-31 | {ctx} | 現象 | P2 | {routing} | {status} |\n"
+
+
+class TestCurrentRoundIsReadofFromTheLedgerNotHardcoded(unittest.TestCase):
+    """當前輪次的取值必須是**現查**——寫死常數下一輪就 stale，那正是本鎖要治的病。"""
+
+    def test_current_round_is_the_max_round_in_the_discovery_context_column(self) -> None:
+        text = _ledger_text(
+            _row4("DEF-01-001", "R7 Scan-A", "去向", "fixed")
+            + _row4("DEF-01-002", "R12 Scan-D", "去向", "fixed")
+            + _row4("DEF-01-003", "改良會議", "去向", "fixed")
+        )
+        self.assertEqual(m.current_round(text), 12)
+
+    def test_editing_the_context_column_moves_the_current_round(self) -> None:
+        """行為級證明「不是常數」：只改資料、不改程式，判定基準就跟著動。"""
+        before = _ledger_text(_row4("DEF-01-001", "R7 Scan-A", "去向", "fixed"))
+        after = _ledger_text(_row4("DEF-01-001", "R90 Scan-A", "去向", "fixed"))
+        self.assertEqual(m.current_round(before), 7)
+        self.assertEqual(m.current_round(after), 90)
+
+    def test_only_the_context_column_counts_not_the_whole_row(self) -> None:
+        """「現象」「分流去向」「狀態」欄裡的輪號是佐證/承接語境，不是當前輪。"""
+        text = _ledger_text(_row4("DEF-01-001", "R7 Scan-A", "列 R55 backlog", "open（R80 實測）"))
+        self.assertEqual(m.current_round(text), 7)
+
+    def test_no_round_anywhere_returns_none_instead_of_guessing(self) -> None:
+        self.assertIsNone(m.current_round(_ledger_text(_row("DEF-01-001", "open"))))
+
+    def test_real_ledger_current_round_is_two_digit_and_not_the_planning_dir_max(self) -> None:
+        """🔴 明文否決掃描員建議的取值來源（`docs/04_planning/AutoSDD_improving_NN` 最大號）。
+
+        兩套編號**不是同一個東西**：整合迭代輪（`AutoSDD_improving_NN`）與跨平台複審輪
+        （`R\\d+`）各自獨立累積。若拿前者當「當前輪」，帳本裡每一列的承接輪號都會遠小於
+        它 ⇒ 整本帳本瞬間全紅。本測試就地實查兩者並斷言**不相等**，讓「哪天有人改回去」
+        當場翻紅（數字一律現查，不寫死）。
+        """
+        cur = m.current_round(m._DEFECT_LOG.read_text(encoding="utf-8-sig"))
+        self.assertIsNotNone(cur, "真實帳本推不出當前輪 ⇒ 硬規則② 失去比較基準")
+        planning = m._REPO_ROOT / "docs" / "04_planning"
+        improving = [
+            int(mm.group(1))
+            for p in planning.glob("AutoSDD_improving_*.md")
+            if (mm := re.fullmatch(r"AutoSDD_improving_(\d+)\.md", p.name))
+        ]
+        self.assertTrue(improving, "docs/04_planning/ 找不到任何 AutoSDD_improving_NN.md")
+        self.assertNotEqual(
+            cur, max(improving),
+            "跨平台複審輪號與整合迭代輪號被當成同一個編號了——見 current_round() docstring",
+        )
+
+
+class TestOrphanBacklogProblems(unittest.TestCase):
+    """硬規則②（孤兒承接輪次）的機械鎖，R67 落地。
+
+    規格權威＝`docs/06_quality/CrossPlatform_Scan_Dimensions.md`〈使用方式〉硬規則②。
+    本類的每一支都用**構造輸入**，不依賴真實帳本現況（真實帳本另有 live 斷言在下方）。
+    """
+
+    # 掃描員在沙箱注入、而舊閘門照樣 rc=0 全綠的那一列，逐字沿用其形狀。
+    # ⚠️ ID 序列刻意改成 `DEF-01-*`，而非原樣本用的 101 序列空號：
+    # `tools/tests/test_defect_id_reference_integrity.py` 會把 repo 內每一個 101 序列的
+    # 引用回帳本家族查主鍵，拿一個不存在的 101 號當 fixture 會讓那道鎖紅（落地時實際踩到，
+    # 連本註解自己寫出那個號碼都會被抓，故此處刻意不寫出來）。
+    _INJECTED_ORPHAN = _row4(
+        "DEF-01-999", "R60 r3 Pkg-X",
+        "交棒給不存在的容器「幻想帳本」",
+        "open（承接輪次：**R2**，明文指派，R2 早已結束且從未接手）",
+    )
+    _CONTEXT = _row4("DEF-01-998", "R66 Review round 2", "去向", "fixed")
+
+    def test_the_injected_orphan_that_used_to_pass_silently_is_now_flagged(self) -> None:
+        problems = m.orphan_backlog_problems(_ledger_text(self._CONTEXT + self._INJECTED_ORPHAN))
+        self.assertEqual(len(problems), 1, problems)
+        self.assertIn("DEF-01-999", problems[0])
+        self.assertIn("R2", problems[0])
+        self.assertIn("R66", problems[0], "訊息必須同時指出當前輪，否則讀者無從判斷差多遠")
+
+    def test_a_row_handing_to_the_current_round_is_legitimate(self) -> None:
+        row = self._INJECTED_ORPHAN.replace("**R2**", "**R66**").replace("R2 早已", "R66 尚未")
+        self.assertEqual(m.orphan_backlog_problems(_ledger_text(self._CONTEXT + row)), [])
+
+    def test_a_row_handing_to_a_future_round_is_legitimate(self) -> None:
+        row = self._INJECTED_ORPHAN.replace("**R2**", "**R99**").replace("R2 早已", "R99 尚未")
+        self.assertEqual(m.orphan_backlog_problems(_ledger_text(self._CONTEXT + row)), [])
+
+    def test_a_reassignment_note_on_the_same_row_clears_it(self) -> None:
+        """出口①：就地附記改派（DEF-101-333／336／338 的體例），不改寫歷史原文。"""
+        row = self._INJECTED_ORPHAN.rstrip("\n|\r ")
+        row = row + " 🔴 R67 **改派為：未指派 backlog**（解鎖條件：…） |\n"
+        self.assertEqual(m.orphan_backlog_problems(_ledger_text(self._CONTEXT + row)), [])
+
+    def test_a_newer_row_naming_the_id_with_a_reassignment_clears_it(self) -> None:
+        """出口②：`DEF-101-521` 對 `DEF-101-500` 的改派形狀——新條目、不動舊列。"""
+        newer = _row4(
+            "DEF-01-1000", "R67 Scan-G", "根層治理",
+            "fixed（本列**改派** DEF-01-999：原承接者 R2 已不存在，轉未指派 backlog）",
+        )
+        self.assertEqual(
+            m.orphan_backlog_problems(_ledger_text(self._CONTEXT + self._INJECTED_ORPHAN + newer)),
+            [],
+        )
+
+    def test_an_older_row_carrying_the_reassignment_does_not_count(self) -> None:
+        """方向性：規則寫的是「**更新的** DEF 條目」。放在孤兒**之前**的列不算數，
+        否則帳本裡任何一句舊的「改派」都會變成後續所有列的通用赦免。"""
+        older = _row4(
+            "DEF-01-100", "R10 Scan-G", "根層治理",
+            "fixed（本列**改派** DEF-01-999：…）",
+        )
+        problems = m.orphan_backlog_problems(
+            _ledger_text(self._CONTEXT + older + self._INJECTED_ORPHAN)
+        )
+        self.assertEqual(len(problems), 1, problems)
+
+    def test_closed_rows_are_never_judged_so_the_gate_cannot_go_permanently_red(self) -> None:
+        """🔴 R59 二審 ARCH-R59-NB4 點名的坑：帳本是逐字保全的歷史檔。
+
+        `DEF-101-500` 那列會永遠留著「列 R58 backlog」字樣。規則若寫成「不得提及不存在
+        的輪次」，閘門就**永紅**。本測試把四種已結案首詞各跑一次，確認一律不判。
+        """
+        for closed in ("fixed@R57 round 3", "wontfix（…）", "closed-by-decision", "no_action_needed"):
+            with self.subTest(closed=closed):
+                row = _row4("DEF-101-500", "R57 Scan-E", "①②④⑥ 本輪修復；③⑤ 列 R58 backlog", closed)
+                self.assertEqual(m.orphan_backlog_problems(_ledger_text(self._CONTEXT + row)), [])
+
+    def test_discovery_and_evidence_round_mentions_are_not_handovers(self) -> None:
+        """🔴 掃描員 proposed_fix 的取值方式（列內任一 `R\\d+`）在此被明文否決。
+
+        實測那個寫法會把真實帳本 70 列未結列中的 60 列判成孤兒——因為「R25 Scan-A 複核」
+        「R60 實測」是**發現／佐證**輪次，不是承接者。一道大量假紅的閘門會被整個關掉，
+        比沒有鎖更糟。
+        """
+        row = _row4(
+            "DEF-101-268", "R25 Scan-A", "本輪修復",
+            "open（R25 Scan-A 複核；R60 實測仍成立；R30 曾回讀一次）",
+        )
+        self.assertEqual(m.orphan_backlog_problems(_ledger_text(self._CONTEXT + row)), [])
+
+    def test_status_at_round_is_a_timestamp_not_an_assignee(self) -> None:
+        """`deferred@R59`＝在 R59 這一輪被 defer（同族 `fixed@R57`），不是被指派給 R59。
+
+        真實實例 `DEF-101-518`：狀態寫 `**routed（deferred@R59，附解鎖條件）**`，解鎖條件
+        三項就寫在同列。把時點當承接者會製造假紅。
+        """
+        row = _row4(
+            "DEF-101-518", "R59 Scan-C", "本輪只就地記錄不對稱與解鎖條件",
+            "**routed（deferred@R59，附解鎖條件）**：解鎖條件三項…",
+        )
+        self.assertEqual(m.orphan_backlog_problems(_ledger_text(self._CONTEXT + row)), [])
+
+    def test_quoting_an_old_snapshot_with_本列_is_not_a_handover(self) -> None:
+        """真實實例 `DEF-101-068`：「本列 R14 快照所稱…」是引述舊快照。
+
+        `列` 的否定回顧若漏掉，這一列會假紅——落地前的初版正是這樣被抓到的。
+        """
+        row = _row4(
+            "DEF-101-068", "S11", "記事存證",
+            "open（其餘子項 **R14 補記**：本列 R14 快照所稱「仍雙原生實作」已不成立）",
+        )
+        self.assertEqual(m.orphan_backlog_problems(_ledger_text(self._CONTEXT + row)), [])
+
+    def test_known_uncovered_negated_reassignment_still_escapes(self) -> None:
+        """🔴 **已實測不涵蓋**，釘成常駐斷言（R57 判例第 (4) 條三段式的中段）。
+
+        本鎖只做關鍵字比對、**不做否定語意分析**：一句「無回執」照樣被當成「已載明回執」
+        而放行。真實實例＝`DEF-101-561`（它實質上不是孤兒——同列已載明「R61 Architect
+        評估結論：本輪逐項回覆①②③」＝真有回執——所以結論湊巧正確、機制不精確）。
+        本斷言的用途是：哪天有人把否定語意收掉，這裡會翻紅，強迫同步更新
+        `orphan_backlog_problems()` docstring 與規格文件的「已實測不涵蓋」清單。
+        """
+        row = self._INJECTED_ORPHAN.rstrip("\n|\r ") + " 交棒給一個輪內已消滅的實體、無輪次無回執 |\n"
+        self.assertEqual(
+            m.orphan_backlog_problems(_ledger_text(self._CONTEXT + row)), [],
+            "否定語意已被收掉 ⇒ 請同步更新兩處『已實測不涵蓋』清單後再改本斷言",
+        )
+
+    def test_a_row_without_any_handover_round_is_not_judged(self) -> None:
+        """散文式指派（「留給下一輪某人」）不含 `R\\d+` ⇒ 無從比較，不判。"""
+        row = _row4("DEF-01-777", "R66 Scan-G", "留給下一輪某人", "open（未指派 backlog）")
+        self.assertEqual(m.orphan_backlog_problems(_ledger_text(self._CONTEXT + row)), [])
+
+    def test_handover_without_a_derivable_current_round_fails_loud(self) -> None:
+        """推不出當前輪 ＋ 有承接者 ⇒ 明說失去比較基準，**不**靜默放行。"""
+        problems = m.orphan_backlog_problems(_ledger_text(self._INJECTED_ORPHAN.replace(
+            "R60 r3 Pkg-X", "四方複審")))
+        self.assertEqual(len(problems), 1, problems)
+        self.assertIn("無法從", problems[0])
+
+    def test_all_five_handover_phrasings_are_covered(self) -> None:
+        """**已實測涵蓋**：帳本實際用過的五種承接語境各驗一次。"""
+        cases = {
+            "承接輪次": "open（承接輪次：**R2**）",
+            "承接者＝": "open（承接者＝**R2 主控**）",
+            "R…+ 承接": "open（仍待 R2+ 承接者處理）",
+            "列 R… backlog": "open（依 Rule 3 外科式原則列 R2 backlog）",
+            "backlog R…": "open（backlog R2，本輪未處理）",
+        }
+        for name, status in cases.items():
+            with self.subTest(phrasing=name):
+                row = _row4("DEF-01-999", "R60 r3", "去向", status)
+                problems = m.orphan_backlog_problems(_ledger_text(self._CONTEXT + row))
+                self.assertEqual(len(problems), 1, f"{name} 未被認出為承接語境：{problems}")
+        with self.subTest(phrasing="交棒給 R…"):
+            row = _row4("DEF-01-999", "R60 r3", "交棒給 R2 處理", "open（見分流去向）")
+            self.assertEqual(len(m.orphan_backlog_problems(_ledger_text(self._CONTEXT + row))), 1)
+
+    def test_missing_header_fails_loud(self) -> None:
+        problems = m.orphan_backlog_problems("| 編號 | 狀態 |\n|---|---|\n")
+        self.assertEqual(len(problems), 1)
+        self.assertIn("找不到合格表頭", problems[0])
+
+
+class TestOrphanBacklogAgainstTheRealLedger(unittest.TestCase):
+    """對真實帳本的 live 斷言——構造輸入證明「有牙」，這裡證明「不亂咬」。"""
+
+    def setUp(self) -> None:
+        self.text = m._DEFECT_LOG.read_text(encoding="utf-8-sig")
+        layout = m._table_layout(self.text)
+        assert layout is not None
+        self.ncols, self.id_idx, self.status_idx = layout
+        self.rows = []
+        for lineno, line in enumerate(self.text.splitlines(), 1):
+            if not m._ROW_RE.match(line):
+                continue
+            cells = m._row_cells(line)
+            if len(cells) != self.ncols or not m._ID_RE.fullmatch(cells[self.id_idx]):
+                continue
+            self.rows.append((lineno, cells, line))
+
+    def test_rows_that_carry_a_reassignment_record_are_never_flagged(self) -> None:
+        """🔴 本鎖不得誤殺歷史檔——由**實際帳本內容**現查出「已改派的舊列」再驗。
+
+        取值全程 live（不寫死任何 DEF-ID）：凡「未結案 ＋ 指名了早於當前輪的承接者 ＋
+        該列載明改派／回執」的列，都必須通過。這正是規格文件拿 `DEF-101-500`（因 `521`
+        改派而合法）舉例的那一類。
+        """
+        cur = m.current_round(self.text)
+        self.assertIsNotNone(cur)
+        legal = []
+        for _lineno, cells, line in self.rows:
+            if m._classify(cells[self.status_idx]) not in m._UNRESOLVED_CLASSES:
+                continue
+            handovers = m._handover_rounds(line)
+            if not handovers or max(n for _, n, _ in handovers) >= cur:
+                continue
+            if m._REASSIGN_RE.search(line):
+                legal.append(cells[self.id_idx])
+        self.assertTrue(
+            legal,
+            "帳本內找不到任何「舊承接輪次 ＋ 已改派」的列 ⇒ 本測試會空過（vacuous pass）。"
+            "若真的一列都不剩，請改以構造輸入驗證出口①，不要讓斷言變成恆真",
+        )
+        # 🔴 刻意解析出「被判的那一列的 ID」而非對整段訊息做子字串比對：問題訊息裡帶有
+        # 「體例比照 DEF-101-333／336／338」這類**建議用的** ID，子字串比對會把它們誤判
+        # 成被點名者（落地時實際踩到，本註解即該次的留痕）。
+        flagged = {
+            mm.group(1)
+            for p in m.orphan_backlog_problems(self.text)
+            if (mm := re.search(r"帳本 :\d+ (DEF-\d+-\d+)：", p))
+        }
+        for def_id in legal:
+            self.assertNotIn(
+                def_id, flagged,
+                f"{def_id} 已載明改派卻仍被判孤兒 ⇒ 閘門正在誤殺逐字保全的歷史列",
+            )
+
+    def test_the_naive_whole_row_rule_would_have_burned_most_of_the_ledger(self) -> None:
+        """量化「為何只認承接語境」：把掃描員建議的『列內任一 R\\d+』跑一次做對照組。
+
+        數字一律現查、不寫死（Scan-H 必跑項 #3）。斷言採比例而非絕對值：narrow 規則命中
+        的列必須遠少於 naive 規則，否則就表示 narrow 化沒有實際收斂效果、設計理由不成立。
+        """
+        cur = m.current_round(self.text)
+        naive, narrow = 0, 0
+        for _lineno, cells, line in self.rows:
+            if m._classify(cells[self.status_idx]) not in m._UNRESOLVED_CLASSES:
+                continue
+            rounds = [int(x) for x in m._ROUND_RE.findall(line)]
+            if rounds and max(rounds) < cur:
+                naive += 1
+            handovers = m._handover_rounds(line)
+            if handovers and max(n for _, n, _ in handovers) < cur:
+                narrow += 1
+        self.assertGreater(naive, 0, "對照組零命中 ⇒ 本測試失去對照意義")
+        self.assertLess(
+            narrow * 5, naive,
+            f"承接語境窄化沒有收斂效果（naive={naive}／narrow={narrow}）——"
+            "請重新檢視 _HANDOVER_ROUND_RES 是否又退回『列內任一 R\\d+』",
+        )
+
+    def test_real_ledger_has_zero_orphan_backlog_rows(self) -> None:
+        """真實帳本不得有孤兒承接輪次（硬規則②）。
+
+        🔴 這一支與 `TestMain::test_main_against_real_repo_is_clean` 同屬 live 斷言：
+        紅了就是**帳本內容**該修（就地附記改派／回執），不是把鎖放寬。修法逐字寫在
+        失敗訊息裡。
+        """
+        self.assertEqual(m.orphan_backlog_problems(self.text), [])
+
+
+class TestHardRule2IsBoundToItsSpecProse(unittest.TestCase):
+    """散文 ↔ 程式雙向綁定（手法比照本檔既有的「《格式定義》↔ `_STATUS_FIRST_WORDS`」）。
+
+    🔴 為何非綁不可：規格段落自 R59 起寫著「本規則目前純靠紀律，尚無機械鎖」，R67 落鎖後
+    那句就成了**假話**，而沒有任何機械物會發現。這正是本 repo 反覆在治的「改了程式沒改散文」。
+    """
+
+    def setUp(self) -> None:
+        self.text = _SPEC_DOC.read_text(encoding="utf-8-sig")
+        rule2 = re.search(
+            r"\n  2\. \*\*任何 `deferred`.*?(?=\n  3\. )", self.text, re.S
+        )
+        self.assertIsNotNone(rule2, "規格文件抓不到硬規則② 那一段 — 段落結構已被改寫")
+        self.rule2 = rule2.group(0)
+
+    def test_the_spec_names_the_landed_function_and_its_host(self) -> None:
+        self.assertIn("orphan_backlog_problems", self.rule2)
+        self.assertIn("tools/check_defect_log_crossref.py", self.rule2)
+
+    def test_the_named_function_actually_exists_and_is_a_hard_gate(self) -> None:
+        self.assertTrue(callable(getattr(m, "orphan_backlog_problems", None)))
+        self.assertTrue(callable(getattr(m, "current_round", None)))
+        src = Path(m.__file__).read_text(encoding="utf-8")
+        main_src = src[src.index("def main()"):]
+        self.assertIn("orphan_backlog_problems(ledger_text)", main_src,
+                      "main() 沒有消費本檢查 ⇒ 又是一支「可重跑但沒有閘門看它 rc」的稽核工具")
+
+    def test_the_spec_no_longer_claims_rule_2_has_no_mechanical_lock(self) -> None:
+        self.assertNotIn("尚無機械鎖", self.rule2,
+                         "硬規則② 已落鎖，散文仍宣稱「尚無機械鎖」＝ 假話")
+
+    def test_the_spec_still_carries_the_permanent_red_pitfall_warning(self) -> None:
+        """坑的警告是本鎖的設計前提，刪掉它下一個人就會把規則寫成「永紅」的形態。"""
+        self.assertIn("逐字保全", self.rule2)
+        self.assertIn("永紅", self.rule2)
+        self.assertIn("≥ 當前輪", self.rule2)
+        self.assertIn("改派", self.rule2)
+
+    def test_the_spec_records_the_known_uncovered_forms(self) -> None:
+        for token in ("否定語意", "deferred@R59"):
+            self.assertIn(token, self.rule2,
+                          f"規格段落漏記已實測不涵蓋形態：{token}")
+
+    def test_rule_3_no_longer_claims_parity_with_rule_2(self) -> None:
+        """硬規則③ 原寫「同硬規則②，本條目前純靠紀律」——② 落鎖後這句話就錯了。"""
+        rule3 = self.text[self.text.index("\n  3. **跨軌交棒"):]
+        self.assertIn("尚無機械鎖", rule3, "③ 若已落鎖請同步改寫本測試與規格散文")
+        self.assertNotIn("同硬規則②，本條目前", rule3)
+
+
+# `docs/06_quality/CrossPlatform_Scan_Dimensions.md` 是**規範性規格**：它的示範指令是寫給
+# 未來每一輪的稽核員照抄重跑的，所以必須在本 repo 的三種 shell（zsh／bash 3.2／PowerShell）
+# 下都能跑。刻意**不**把同族的證據檔（`CrossPlatform_R60_Fix_Evidence*.md`）與 ADR 納入本鎖：
+# 那些檔記錄的是「當年實際跑了什麼」，逐字保全的史料不該為了通過閘門而被改寫——與硬規則②
+# 「歷史檔逐字保全」是同一條判準。要納入新檔就在下方 tuple 加一筆。
+_ZSH_SAFE_COMMAND_DOCS = (_SPEC_DOC,)
+# 反引號內含 `grep` 呼叫者才算「可執行示範指令」；只是**引述**壞形態的散文（本規格自己就有
+# 一段在解釋 `--include=*.md` 為何危險）不在判定面內——判定面是指令，不是提到指令的句子。
+_INLINE_CODE_RE = re.compile(r"`([^`\n]+)`")
+
+
+def _unquoted_glob_commands(text: str) -> list[str]:
+    """回傳「含 grep 且有未被引號包住的 `*`」的反引號指令（空＝全部 zsh-safe）。"""
+    bad = []
+    for span in _INLINE_CODE_RE.findall(text):
+        if "grep" not in span:
+            continue
+        quote = None
+        for ch in span:
+            if quote is None and ch in "'\"":
+                quote = ch
+            elif quote is not None and ch == quote:
+                quote = None
+            elif quote is None and ch == "*":
+                bad.append(span)
+                break
+    return bad
+
+
+class TestSpecDocShellCommandsAreZshSafe(unittest.TestCase):
+    """R67：規格文件自己的示範指令在 macOS 預設 zsh 下必須真的跑得起來。
+
+    🔴 原始缺陷：硬規則③ 用來示範判準的兩條指令寫成 `grep -rn "…" --include=*.md .`，
+    在 zsh 下 `nomatch` 會在 **grep 被執行之前**中止整條命令列（實測 `zsh:1: no matches
+    found: --include=*.md`、rc=1、連 `2>` 重導向都沒被建立）。而該規則正是以「零命中」
+    推論「容器不存在」——於是**判準的示範指令在 mac 上恆答『不存在』**。
+    未加引號時的零輸出**不是**零命中，是指令根本沒跑。
+    """
+
+    def test_no_registered_spec_doc_has_an_unquoted_glob_in_a_grep_command(self) -> None:
+        for doc in _ZSH_SAFE_COMMAND_DOCS:
+            with self.subTest(doc=doc.name):
+                bad = _unquoted_glob_commands(doc.read_text(encoding="utf-8-sig"))
+                self.assertEqual(
+                    bad, [],
+                    f"{doc.name} 的示範指令含未加引號的 glob——macOS 預設 zsh 會在 grep "
+                    f"執行前 abort（nomatch），把「指令沒跑」偽裝成「零命中」。"
+                    f"請寫成 --include='*.md'（三種 shell 皆正確）",
+                )
+
+    def test_the_lock_fires_on_the_pre_fix_form(self) -> None:
+        """缺陷注入：把修好的形態改回壞的，鎖必須翻紅。"""
+        broken = "R60 實測 `grep -rn \"一般 CI 維護\" --include=*.md .` 全庫只命中兩列"
+        self.assertEqual(len(_unquoted_glob_commands(broken)), 1)
+
+    def test_prose_that_merely_quotes_the_broken_flag_is_not_flagged(self) -> None:
+        """判定面是**指令**不是句子：規格自己那段解釋 `--include=*.md` 為何危險必須放行，
+        否則「說明這個坑」本身會被閘門擋下，沒有人能把邊界寫進文件。"""
+        prose = "原文寫成未加引號的 `--include=*.md`，在 zsh 下會 abort"
+        self.assertEqual(_unquoted_glob_commands(prose), [])
+
+    def test_quoted_form_passes_and_double_quotes_count_too(self) -> None:
+        for good in (
+            "`grep -rn 'DEF-101-422' --include='*.md' . | grep -v AutoSDD_Defect_Log`",
+            '`grep -rn "x" --include="*.md" .`',
+        ):
+            with self.subTest(good=good):
+                self.assertEqual(_unquoted_glob_commands(good), [])
+
+    def test_the_two_rule_3_example_commands_are_still_present_and_quoted(self) -> None:
+        """防「靠刪掉指令通過閘門」：兩條示範指令必須仍在，且是加引號的形態。"""
+        text = _SPEC_DOC.read_text(encoding="utf-8-sig")
+        for needle in (
+            "grep -rn \"一般 CI 維護\" --include='*.md' .",
+            "grep -rn 'DEF-101-422' --include='*.md' . | grep -v AutoSDD_Defect_Log",
+        ):
+            self.assertIn(needle, text, "硬規則③ 的示範指令被刪或被改形，判準失去可執行示範")
+
+    def test_the_scoped_docs_are_all_registered_governance_docs(self) -> None:
+        """涵蓋面不得指向一個沒人管的檔：本鎖的標的必須同時在 `_GOVERNANCE_DOCS` 內
+        （那張清單另有『磁碟有而清單沒有』的反查鎖），避免改名後兩邊一起失聯。"""
+        registered = {p.resolve() for p in m._GOVERNANCE_DOCS}
+        for doc in _ZSH_SAFE_COMMAND_DOCS:
+            self.assertIn(doc.resolve(), registered)
+            self.assertTrue(doc.exists())
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -19,7 +19,7 @@
      --add --cacheinfo` 對 `LPT0` 回 `error: Invalid path`、對 `COM0` 則 ACCEPT。
      即 LPT0 是**必須**擋（否則 Windows checkout 整棵樹開不出來），只有 COM0 才是
      純保守納入。CONIN$／CONOUT$ 見 `_RESERVED_RE` 上方註解）
-  3. 大小寫碰撞：兩 tracked 路徑 lowercase 後相同但原字串不同
+  3. 大小寫碰撞：兩 tracked 路徑正規化鍵（NFC → lowercase）相同但原字串不同
      （NTFS 大小寫不敏感 → checkout 時互相覆蓋）
   4. MAX_PATH 保守長度閘（DEF-101-039）：Windows 未開 core.longpaths 時絕對路徑上限
      MAX_PATH=260 UTF-16 單位（含結尾 NUL，可用 259）；預留 clone 前綴 59 字元＋NUL
@@ -27,6 +27,33 @@
      >180 字元 warn（不影響退出碼）。長度＝Unicode code point 數（len()；BMP 字元＝
      1 UTF-16 單位；hook 版以「刪 UTF-8 連續位元組計數」達成同語意且 locale 無關；
      astral 字元低估 1 單位屬可忽略邊角）。
+  5. 目錄段層級碰撞（R67-A2）：把每條 tracked 路徑的**每一層目錄前綴**收集後以同一組
+     正規化鍵分群，同鍵而拼法不同即違規。第 3 項只比「整條路徑」，對「目錄段拼法不同、
+     basename 完全不重複」結構上失明——本 repo 曾因此長出 `docs/04_planning/Archive/`
+     與 `docs/04_planning/archive/` 兩個 index 目錄（f81ad94 收 01–31 用大寫、22782fe
+     收 32–50 改小寫），在 macOS/Windows 上塌縮成一個目錄、`git status` 全綠，整整 6 週
+     零訊號；同一 commit 在 Linux CI／github.com 上卻是兩個目錄（真・case-sensitive
+     APFS 卷實測坐實）。危害不是立即覆蓋（basename 不重疊時不會），而是**同一份程式碼
+     在兩平台掃到不同的檔案集合**，以及交叉引用在 Linux/github.com 變死連結（R67-A15）。
+  6. Unicode 正規化（R67-B16）：index 路徑必須是 NFC。macOS(APFS/HFS+) 對檔名做 NFD、
+     Windows(NTFS) 用 NFC，git 以 core.precomposeunicode 在 macOS readdir 端轉回 NFC；
+     一旦 index 內存的是 NFD 位元組（只能由非 macOS/非 Windows 端提交或 plumbing 產生
+     ——mac 側 `git add` 無論走 argv 或目錄走訪都會 precompose，實測見下），macOS clone
+     後該檔即永久呈現「index 一份 NFD、工作樹一份 NFC 未追蹤」的雙重身影：`git status`
+     恆不乾淨，且 `git clean -fd` 清掉 phantom 會直接變成 tracked 檔遺失（兩種不乾淨狀態
+     互斥，無常規手段回到乾淨）。第 3/5 項的分群鍵亦先做 NFC 再 lowercase，使「僅正規化
+     形式不同」與「僅大小寫不同」歸為同一類碰撞（macOS 與 NTFS 兩側皆會互相覆蓋）。
+
+範圍決策（R67-B16，刻意不對稱，勿「補齊對稱性」）：第 6 項**只在本 CI 版實作，不鏡射
+進 hook 版**。理由是實測而非省事——pre-commit 只看「本機開發者這次新增的路徑」，而本 repo
+的兩個開發平台都不可能在該路徑上產生 NFD index 項：macOS 端 `git add` 走 argv 有
+precompose_argv、走目錄走訪有 readdir precompose（實測：磁碟 NFD 檔名 `63616665cc812e6d64`
+經 `git add .` 後 index 記為 NFC `636166c3a92e6d64`），Windows/NTFS 本身即 NFC。NFD 只能
+由 Linux 貢獻者／GitHub web／plumbing 進來，那三條路**都不經過 pre-commit**，鏡射進 hook
+純屬零收益的死碼；而它們全都會被本 CI 版的全量 tracked 掃描網住。此決策由
+`tools/tests/test_ntfs_trailing_space_device_name.py::TestNfcAxisScopeIsCiOnlyByDesign`
+機械釘住。第 5 項（目錄段碰撞）則**有**鏡射進 hook（bash 3.2 相容實作），因為那條路徑
+開發者在 mac/Win 上按 tab 補全就會踩到。
 
 已知侷限：大小寫折疊用 str.lower()（hook 的 grep -iFx 在 UTF-8 locale 亦
 fold 非 ASCII 字母，方向一致）。檔名內嵌換行/控制字元非缺口：git 對含控制字元
@@ -45,6 +72,7 @@ from __future__ import annotations
 import re
 import subprocess
 import sys
+import unicodedata
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
@@ -129,6 +157,99 @@ def _ntfs_seg_bad(path: str) -> str | None:
     return None
 
 
+def _collision_key(path: str) -> str:
+    """碰撞分組鍵：先 NFC 正規化、再 lowercase（R67-A2/B16）。
+
+    兩個軸合成同一把鍵，是因為它們在 checkout 端造成的後果**完全相同**——
+    NTFS 大小寫不敏感使 `README.MD` 與 `README.md` 互相覆蓋；macOS 的
+    precomposeunicode 使 NFD 與 NFC 兩形態指向同一個磁碟項目、同樣互相覆蓋。
+    分成兩把鍵會讓「大寫 + NFD」對上「小寫 + NFC」這種混合形態從兩邊漏出去。
+    """
+    return unicodedata.normalize("NFC", path).lower()
+
+
+def _dir_prefixes(path: str) -> list[str]:
+    """回傳 path 的所有目錄前綴（由淺至深，**不含 path 自身**）。
+
+    `a/b/c.md` → `["a", "a/b"]`；無目錄的 `x.md` → `[]`。
+    刻意排除 path 自身：整條路徑的碰撞由第 3 項負責，此處只管目錄段，
+    兩邊訊息不同（一個是檔案互相覆蓋、一個是目錄拓撲跨平台分歧）。
+    """
+    segs = path.split("/")
+    return ["/".join(segs[:i]) for i in range(1, len(segs))]
+
+
+def _non_nfc_reason(path: str) -> str | None:
+    """index 路徑非 NFC → 回傳原因字串；是 NFC（含全 ASCII、CJK）→ None。
+
+    零偽陽性：`is_normalized("NFC", s)` 對純 ASCII 與 CJK（本身無正規化分解）恆真，
+    只有真的帶可組合序列（拉丁變音、諺文、含濁音假名…）的分解形態才會回 False。
+    """
+    if unicodedata.is_normalized("NFC", path):
+        return None
+    return (
+        "索引路徑非 NFC 正規化形式（含可組合序列）— macOS 簽出會產生 phantom："
+        "core.precomposeunicode 使 readdir 回 NFC，index 內的 NFD 項與工作樹的 NFC 檔"
+        "成為兩個身份，git status 永遠不乾淨且無常規手段回復"
+    )
+
+
+def _scan_violations(files: list[str]) -> tuple[list[str], list[str]]:
+    """對一組（已解碼的）tracked 路徑跑完六項檢查 → (violations, warnings)。
+
+    與 `main()` 分離是為了讓六項檢查能以純路徑清單單元測試——不必造 git repo
+    就能對每一項做缺陷注入紅綠實測（回歸鎖見
+    `tools/tests/test_ntfs_trailing_space_device_name.py`）。
+    """
+    violations: list[str] = []
+    warnings: list[str] = []
+
+    for f in files:
+        reason = _ntfs_seg_bad(f)
+        if reason:
+            violations.append(f"NTFS 不相容檔名：{f} — {reason}")
+        nfc_reason = _non_nfc_reason(f)
+        if nfc_reason:
+            violations.append(f"Unicode 正規化違規：{f} — {nfc_reason}")
+        level = _length_level(f)
+        if level == "fail":
+            violations.append(
+                f"路徑過長：{f}（{len(f)} > {_LEN_FAIL} 字元；"
+                f"Windows MAX_PATH=260 扣除 clone 前綴預留後超限）"
+            )
+        elif level == "warn":
+            warnings.append(f"路徑偏長：{f}（{len(f)} > {_LEN_WARN} 字元，>{_LEN_FAIL} 將擋下）")
+
+    # 第 3 項 — 整路徑碰撞：全量 tracked 路徑依正規化鍵分群，同鍵而拼法 >1 即互撞。
+    # 用 set 收集拼法（而非 list）：merge conflict 期間 `git ls-files` 會把同一路徑
+    # 依 stage 印多次，用 list 會把「同一條路徑」誤報成自己跟自己碰撞。
+    by_key: dict[str, set[str]] = {}
+    for f in files:
+        by_key.setdefault(_collision_key(f), set()).add(f)
+    for key in sorted(by_key):
+        group = by_key[key]
+        if len(group) > 1:
+            joined = "」「".join(sorted(group))
+            violations.append(f"NTFS 大小寫碰撞：「{joined}」僅大小寫不同（checkout 互相覆蓋）")
+
+    # 第 5 項 — 目錄段層級碰撞：收集每條路徑的每一層目錄前綴，同鍵而拼法 >1 即違規。
+    dirs_by_key: dict[str, set[str]] = {}
+    for f in files:
+        for d in _dir_prefixes(f):
+            dirs_by_key.setdefault(_collision_key(d), set()).add(d)
+    for key in sorted(dirs_by_key):
+        group = dirs_by_key[key]
+        if len(group) > 1:
+            joined = "」「".join(sorted(group))
+            violations.append(
+                f"目錄段大小寫/正規化碰撞：「{joined}」僅大小寫或正規化形式不同"
+                "（case-insensitive FS 上塌縮成一個目錄、case-sensitive FS 上是兩個，"
+                "同一 commit 兩平台拓撲不同）"
+            )
+
+    return violations, warnings
+
+
 def _tracked_files() -> list[str]:
     out = subprocess.run(
         ["git", "-c", "core.quotepath=false", "ls-files", "-z"],
@@ -144,30 +265,7 @@ def _tracked_files() -> list[str]:
 
 def main() -> int:
     files = _tracked_files()
-    violations: list[str] = []
-    warnings: list[str] = []
-
-    for f in files:
-        reason = _ntfs_seg_bad(f)
-        if reason:
-            violations.append(f"NTFS 不相容檔名：{f} — {reason}")
-        level = _length_level(f)
-        if level == "fail":
-            violations.append(
-                f"路徑過長：{f}（{len(f)} > {_LEN_FAIL} 字元；"
-                f"Windows MAX_PATH=260 扣除 clone 前綴預留後超限）"
-            )
-        elif level == "warn":
-            warnings.append(f"路徑偏長：{f}（{len(f)} > {_LEN_WARN} 字元，>{_LEN_FAIL} 將擋下）")
-
-    # 大小寫碰撞：全量 tracked 路徑 lowercase 分組，同組 >1 即互撞
-    by_lower: dict[str, list[str]] = {}
-    for f in files:
-        by_lower.setdefault(f.lower(), []).append(f)
-    for group in by_lower.values():
-        if len(group) > 1:
-            joined = "」「".join(sorted(group))
-            violations.append(f"NTFS 大小寫碰撞：「{joined}」僅大小寫不同（checkout 互相覆蓋）")
+    violations, warnings = _scan_violations(files)
 
     for w in warnings:
         print(f"⚠ {w}", file=sys.stderr)

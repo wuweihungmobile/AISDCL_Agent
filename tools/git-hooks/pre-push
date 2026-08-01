@@ -15,6 +15,9 @@
 #       條目，如 tools/check_ntfs_paths.py、.claude/hooks/sdd_hook_router.py）且
 #       SDD leg 未觸發 → 補跑 AISDLC_SDD/scripts/tests 回歸鎖（R10 ARCH-1：這些檔
 #       的回歸鎖住在 SDD suite，純根層 push 原本永遠不執行它們）
+#     - push 範圍命中「整合層閘門本體」（tools/integration_gate.* 三支）→ 實跑
+#       tools/integration_gate.sh --skip-full（R67-C18：該閘門在整個自動化層零呼叫端，
+#       唯二執行者是兩支已隨 CI 帳務停擺而多輪未跑的 compat-CI ⇒ 實質已死）
 #   分流條件（逐行解析 git 傳入 stdin 的 <local_ref> <local_sha> <remote_ref> <remote_sha>）：
 #     - remote_sha 全零（新分支）→ 用 git merge-base origin/main <local_sha> 回退為比較基準
 #     - local_sha 全零（刪除遠端分支）→ 該行跳過（無需驗證）
@@ -51,6 +54,7 @@ STDIN="$(cat)"
 run_autoclaude=0
 run_sdd=0
 run_rootinfra=0
+run_integration_gate=0
 undeterminable=0
 parsed=0
 ALL_FILES=""
@@ -111,10 +115,11 @@ EOF
 # 空 stdin 正是 pre-commit 框架等工具吃掉 stdin 的危險情境，一律 fail-safe 而非靜默放行）
 # → 視為兩子專案都有變更（跑全部閘門），寧可多跑不可漏跑
 if [ "$undeterminable" -eq 1 ] || [ "$parsed" -eq 0 ]; then
-  echo "[pre-push dispatcher] ⚠ 無法判定 push 範圍變更 → fail-safe：三 leg 閘門全跑（兩子專案 + root-infra）"
+  echo "[pre-push dispatcher] ⚠ 無法判定 push 範圍變更 → fail-safe：四 leg 閘門全跑（兩子專案 + root-infra + 整合閘門）"
   run_autoclaude=1
   run_sdd=1
   run_rootinfra=1
+  run_integration_gate=1
 fi
 
 # 根層消費檔偵測（R10 ARCH-1 / DEF-101-125）：aisdlc-sdd-ci.yml paths 承認的
@@ -155,6 +160,44 @@ CONSUMER_EOF
 $ALL_FILES
 ALLFILES_EOF
   fi
+fi
+
+# 整合閘門偵測（R67-C18）：tools/integration_gate.{sh,ps1,_core.py} 是 monorepo
+# 「整合層」閘門本體（5 stage：兩子專案 gate + SDD bridge 煙霧 + 回退驗證 + cc-switch
+# A/B）。R67 全庫普查實測：它在整個自動化層**零呼叫端**，唯二執行者是
+# .github/workflows/{macos,windows}-compat-ci.yml 各一行，而兩支 compat-CI 因 CI 帳務
+# 停擺（DEF-101-081）多輪未真正執行 ⇒「雲端是唯一執行者的東西＝實質已死」。
+#
+# 取捨（為何是「路徑範圍觸發」而非無條件跑）：--skip-full 本機實測 2.79s，相對本 leg
+# 既有的 root-infra unittest（同機實測 111.89s）只佔 2.5%；但對「完全沒碰整合閘門」的
+# 日常 push 那是純粹白付，而本 repo 的既有共識是 pre-push 一旦變慢，開發者會改用
+# --no-verify 繞過、整條防線一起蒸發（見 L413 附近 dispatcher 測試 WHY 的同款論證）。
+# 故比照上方消費檔 leg 的路徑範圍觸發慣例：只在 push 真的動到閘門本體時實跑，日常
+# push 零成本。全套（含 [1/5][2/5] 兩子專案完整 CI 閘門，分鐘級）刻意不放 pre-push。
+#
+# 路徑觸發抓不到的另兩種腐爛（閘門沒被改、但它指向的東西壞了；編排語意被改成吞掉
+# 失敗）改由 tools/tests/test_find_git_bash_parity.py 的 TestIntegrationGateStageTargets
+# （stage 目標實際存在）與 TestIntegrationGateOrchestration（編排語意／失敗傳播）在
+# **每次**根層 push 隨上方 leg ② 的 run_root_unittests 執行時守——兩者互補，缺一不可。
+# 🔴 R67 round 2（QA-R67-03）訂正：本段原指名一支名為 test_integration_gate_local_carrier.py
+# 的鎖檔（此處刻意不寫成路徑形態，見下方掃描器）——那支檔案**從未存在**（`ls` rc=1、全庫
+# find 零命中）。真正的守門依 DEF-101-561③ 併進了
+# integration_gate_core 既有的姊妹鎖檔（不另開新檔），故改為指名該檔與其類別。死信形態見
+# CrossPlatform_Scan_Dimensions.md 硬規則③ 第一點；現由 test_pre_push_dispatcher.py 的
+# TestNamedCarrierFilesActuallyExist 機械守住（指名不存在的鎖檔即紅）。
+#
+# 比對用 glob 前綴而非逐一列舉字面路徑：tools/tests/test_root_infra_parity.py 對
+# pre-push 非註解行出現的 `tools/*.py` 字面值有「必須在 root-infra-ci.yml 有對等守門」
+# 的雙向集合斷言，逐字寫出 _core.py 會誤入該集合。
+if [ -n "$ALL_FILES" ]; then
+  while IFS= read -r f; do
+    [ -z "${f:-}" ] && continue
+    case "$f" in
+      tools/integration_gate*) run_integration_gate=1 ;;
+    esac
+  done <<IGFILES_EOF
+$ALL_FILES
+IGFILES_EOF
 fi
 
 if [ "$run_autoclaude" -eq 1 ]; then
@@ -248,6 +291,24 @@ if [ "$run_sdd_consumer" -eq 1 ]; then
   # scripts/tests，本輪若只補 ci-gate.sh 那一邊，就是本輪自己在抓的「N 份複本只改 1 份」。
   elif ! (cd "$TOPLEVEL/AISDLC_SDD" && python -m pytest scripts/tests -q -rs); then
     echo "[pre-push dispatcher] ❌ 根層消費檔回歸鎖失敗（AISDLC_SDD/scripts/tests）" >&2
+    rc=1
+  fi
+fi
+
+# 整合閘門 leg（R67-C18）：於「push 動到整合層閘門本體」時實跑該閘門的快速迴圈模式。
+# 用 --skip-full（[3/5]+[4/5]+[5/5]）而非全套：[1/5]/[2/5] 是兩子專案各自的完整 CI
+# 閘門，push 若同時涉及那兩個子專案，上方對應 leg 已經跑過它們；在這裡再跑一次是
+# 分鐘級的純重複。閘門檔應存在卻缺失＝閘門體系損壞 → fail-loud（同子 hook 缺失語意）。
+if [ "$run_integration_gate" -eq 1 ]; then
+  echo "[pre-push dispatcher] push 涉整合層閘門本體 → 實跑整合閘門（--skip-full）"
+  if [ ! -f "$TOPLEVEL/tools/integration_gate.sh" ]; then
+    echo "[pre-push dispatcher] ❌ 整合閘門缺失：$TOPLEVEL/tools/integration_gate.sh（閘門體系損壞）" >&2
+    rc=1
+  elif ! is_real_python_candidate python; then
+    echo "[pre-push dispatcher] ❌ 找不到 python — 整合閘門無法執行；請先啟用 venv（見 ONBOARDING.md §3）" >&2
+    rc=1
+  elif ! (cd "$TOPLEVEL" && bash tools/integration_gate.sh --skip-full); then
+    echo "[pre-push dispatcher] ❌ 整合閘門未通過（tools/integration_gate.sh --skip-full）" >&2
     rc=1
   fi
 fi

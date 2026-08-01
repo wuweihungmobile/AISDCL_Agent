@@ -59,14 +59,68 @@ R60 round 3 **四方複審之後**回補的三筆（四方獨立命中，非本�
      「零機制」的欄位收進既有機制** ⇒ 未受檢面淨減少。這是對「禁止新增鎖、只准合併」
      的遵守，不是規避。
 
+R67 補的兩件事（本輪 R67-D1〔P1〕／R67-D6／R67-D20；WHY 見各自區塊）：
+  G. **平台維度升為一等公民**（R67-D1，本輪唯一 P1）：本檔在 R67 之前**全檔零平台偵測**
+     （`grep -E "platform|sys.platform|os.name|darwin|win32"` 零命中），而表② 四格的
+     欄位正則一律以 `**…**` 粗體錨定「Windows 11」那一欄（原註解自陳「以 `**` 包裝限定
+     在 Windows 欄」）。⇒ **在 macOS 上執行文件與 `--check-snapshot` 紅燈訊息都指路的
+     `--write --with-slow`，會把 macOS 實測值靜默寫進標示「Windows 11 實測」的格子**，
+     摧毀該表存在的唯一理由（讓開發者分辨「平台差異」與「退化」）並產生一句假 provenance。
+     修法**不是**「照平台換一組正則」（那是同一語意兩份實作，本檔一直在治的病），而是
+     **改以 markdown 欄位座標定位**：`_PLATFORM_COLUMN_LABELS` 只記「平台鍵 → 表頭識別字」，
+     真正的欄號由 `platform_cell_index()` **當場從表頭推導**（欄號寫死才會在表格增欄時
+     靜默抽錯欄——正是 SA-R60-01 的形態）；讀寫一律先 `_split_row()` 切格、只在自己那
+     一格內做 `findall`／`sub`（見 `slow_documented`／`render_slow`）⇒ **寫到別欄在結構
+     上不可能發生**，且兩欄共用同一組 Field 正則（少一份會漂移的東西）。回填路徑另加
+     兩道守門：(a) 無對應欄的平台（例：Linux CI runner）**fail-loud rc=2**，絕不猜一欄
+     來寫；(b) `--platform` 只准用於唯讀稽核，**不得**與 `--write` 併用——跨平台代填
+     產生的正是一句假 provenance，那就是 R67-D1 本體。
+  H. **指紋記帳改為 per-platform**（R67-D6）：原版只有一條全域 `snapshot-fingerprints`
+     錨，語意是「上一次回填時的測試樹」；但回填只寫得到一欄 ⇒ **另一欄的 stale 在結構上
+     永遠測不到**（實測：macOS 欄三格灌成 9999，`--check-snapshot` 照樣印 ✅ rc=0）。
+     改為每平台一條 `snapshot-fingerprints-<平台鍵>:` 錨，各自記「**該欄的數字是在哪一棵
+     測試樹上量的**」＋ `measured-at`／`host`／`docker`／`pgextras` provenance（何時、哪台
+     機器、docker daemon 狀態、venv 有無 PG extras——後兩者各自都會改變計數：docker 停用
+     時 v0.01／v0.30 各 −3〔§7 既有容差段〕、PG extras 存在時 AutoClaude 的 PG-gated 測試
+     由 skip 轉 pass 使 passed 虛高，兩者不入帳就是下一個「把環境差異誤判為退化」）。
+     判準：**當前平台欄的記錄指紋 ≠ live 指紋 ⇒ 該欄 presumed stale（紅）**；
+     其他欄只做 ⚠️ 告知不影響 rc（別台機器的欄不是本機修得動的東西，硬紅只會養成忽略
+     紅燈的習慣）。無對應欄的平台（Linux CI runner）判準**退化為舊語意**：
+     「沒有任何一欄是新鮮的」才紅——嚴格弱於逐欄判準，如實劃界寫在 `check_snapshot()`。
+  I. **`main()` argparse 化 ＋ 未知旗標 fail-loud**（R67-D20）：原版用 `"--flag" in argv`
+     手搓解析，未知旗標一律靜默掉進 default 分支並 rc=0。實測後果：`--check-snapsho`
+     （少一字）在「表② 確實過期」的工作樹上回 **rc=0 假綠**，而正確拼法 rc=1；
+     文件到處引用的 `--check` 根本不是實存旗標，只是恰好掉進 default 才「看起來對」。
+     修法＝argparse（未知旗標 rc=2、`--help` 印用法）＋**把 `--check` 實作為顯式旗標**
+     （選它而非改文件：`--check` 已被 ONBOARDING §7、`CrossPlatform_Scan_Dimensions.md`、
+     `ADR-XPLAT-002` 三份文件引用，且「產生器 ＋ `--check`」正是本 repo 既有慣例
+     〔`snapshot_sync.py`〕——讓字面成真比讓三份文件改口更小、更對）。
+  J. **指紋夾住慢量測窗口**（DEF-101-677，R67 收尾 Scan-H）：原本是「先跑分鐘級的
+     `measure_slow()`、**跑完之後**才 `measure_fingerprints()`」⇒ 樹若在那段窗口內被改動
+     （並行的修復包還在寫測試檔），錨記下**改動後**的樹、四格計數卻留在**改動前**的樹，
+     事後 `--check-snapshot` 指紋相符判 ✅ rc=0 而計數已 stale。**回填路徑親手把觸發器
+     拆掉**：樹確實變動了（那正是本觸發器唯一認得的事件），卻被寫成基準。修法＝
+     `measure_slow_on_stable_tree()` 前後各取一次指紋，不同即 fail-loud 且**一個字都不寫**
+     （見該函式的完整 WHY／代價／劃界）。同型收斂：`--check-snapshot` 與 `--json` 原本在
+     單次呼叫內把 live 指紋量 2～3 次 ⇒ 判決與取證可能來自不同時點；改為一次量、注入共用。
+
 🔴 判準邊界（誠實劃界）：
   - **只管帶錨點的那一行**。§7／§9 其他地方的數字是有標日期的歷史快照（如 R57 註的
     `total=20356`），依本 repo「時代快照不納管」慣例（見
     `tools/check_pytest_baseline_sites.py` docstring）刻意不回填、也刻意不鎖。
+  - **表① 尚未平台化**（如實揭露）：`_SPECS` 兩格的 live 值本身無平台差異（LOC 是純靜態
+    分析；`MIN_TESTS` 是兩平台共用的收集數下限），受鎖 token 仍只住 Windows 欄，
+    macOS 欄是 dated snapshot 散文、不受 live 鎖管轄。R67 的處置是**把該格改寫成指向
+    live 值**（而非再寫死一個會過期的數字），並在格內明說它不受鎖管轄——該措辭由
+    `test_table1_macos_cell_declares_it_is_not_lock_covered` 釘住。表②（有真平台差）
+    才是本輪平台化的標的。
   - **指紋只覆蓋測試樹**（四棵皆遞迴 `**/*.py` 的**行尾正規化後**內容）。生產碼變動改變 `parametrize`
     來源、docker daemon 可用性、平台差異都能改變計數而指紋不動 ⇒ 它是 stale 的
     **充分觸發器、非必要條件**（會漏、不會冤）。要它變成必要條件就得付整套重測的代價，
     那正是表② 沒有 live 鎖的原因。
+  - **窗口夾住的是「淨變動」**（J 的劃界）：`measure_slow_on_stable_tree()` 只比對慢量測
+    前後兩點的指紋 ⇒ 在窗口內改動、又在窗口結束前還原（暫存檔一寫一刪）仍偵測不到。
+    這仍屬「會漏、不會冤」那一側；被根治的是**回填路徑自己製造出來的漏**，不是全部的漏。
   - 每個欄位的正則在受鎖行上必須**恰好命中一次**：0 次＝敘述被改寫成抽不到的形態、
     ≥2 次＝抽錯欄（例如同一列 macOS 欄與 Windows 欄都寫了 `total=`），兩者皆
     fail-loud。這一條是 R60 SA-R60-01 的直接教訓：原鎖用 `search()` 取第一個命中，
@@ -78,18 +132,25 @@ R60 round 3 **四方複審之後**回補的三筆（四方獨立命中，非本�
     但**仍會印出完整 JSON**，本檔照樣解析並比對，且當 `violations > 0` 時訊息會明說
     「這是 LOC 閘門自己紅、不是文件 stale」，避免錯誤定位（SD-R60-09 附帶項）。
 
-用法：
-  python tools/sync_onboarding_baselines.py                  # --check（預設，表①）；stale 即 exit 1
+用法（argparse；未知旗標一律 rc=2 fail-loud，`--help` 印完整用法）：
+  python tools/sync_onboarding_baselines.py                  # 稽核模式（＝ --check，表①）；stale 即 exit 1
+  python tools/sync_onboarding_baselines.py --check          # 同上的顯式寫法（文件與閘門引用的那條路）
   python tools/sync_onboarding_baselines.py --write          # 一鍵回填表①（bytes 層 LF 寫入）
   python tools/sync_onboarding_baselines.py --check-snapshot # 表② 指紋比對（毫秒級，pre-push 消費）
-  python tools/sync_onboarding_baselines.py --write --with-slow  # 表①＋表②＋指紋全回填（分鐘級）
-  python tools/sync_onboarding_baselines.py --json           # 機讀報表（含表② 與指紋）
+  python tools/sync_onboarding_baselines.py --write --with-slow  # 表①＋**本平台那一欄**＋指紋全回填（分鐘級）
+  python tools/sync_onboarding_baselines.py --json           # 機讀報表（含表② 與逐平台指紋）
+  python tools/sync_onboarding_baselines.py --check-snapshot --platform win32
+                                                             # 在 mac 上稽核 Windows 欄（唯讀；不得用於 --write）
 測試：tools/tests/test_doc_loc_baseline_freshness_r60.py
 """
 from __future__ import annotations
 
+import argparse
+import datetime
 import hashlib
+import importlib.util
 import json
+import platform as platform_mod
 import re
 import subprocess
 import sys
@@ -202,6 +263,91 @@ _SPECS: tuple[Spec, ...] = (
 
 class BaselineToolError(AssertionError):
     """取值來源本身壞掉（非「文件 stale」）——必須與 stale 分開回報。"""
+
+
+# ─────────────────────── 平台維度（R67-D1／D6，檔頭 G） ───────────────────────
+# 平台鍵 → §7 表② 表頭裡那一欄的識別字。**刻意只存識別字、不存欄號**：欄號寫死會在
+# 表格增欄／換欄序時靜默抽錯欄（SA-R60-01 的原始形態），識別字則讓欄位由表頭當場推導，
+# 表頭一改或該欄被刪即 fail-loud。
+_PLATFORM_COLUMN_LABELS: dict[str, str] = {"darwin": "macOS", "win32": "Windows"}
+
+# `--platform` 未指定時的哨兵：解析為「本機平台」。刻意不用 None——None 有語意
+# （「本平台在表② 沒有欄」，例如 Linux CI runner），兩者混用會讓退化判準無聲失準。
+_AUTO_PLATFORM = "auto"
+
+# markdown 表格分隔列（`|---|---|`；本節表格在引言塊內，故容許行首 `> `）。
+_SEPARATOR_ROW_RE = re.compile(r"^\s*>?\s*\|(?:\s*:?-{2,}:?\s*\|)+\s*$")
+
+
+def current_platform_key(raw: str | None = None) -> str | None:
+    """`sys.platform` → 受管平台鍵；無對應欄者回 `None`（**不猜一欄**）。
+
+    Linux 刻意沒有欄：表② 只有兩台實機在維護，給 Linux 一欄就是承諾一份沒人量的數字。
+    """
+    value = sys.platform if raw is None else raw
+    for key in _PLATFORM_COLUMN_LABELS:
+        if value.startswith(key):
+            return key
+    return None
+
+
+def resolve_platform(requested: str | None) -> str | None:
+    """把 CLI／呼叫端給的平台參數解析成平台鍵（`_AUTO_PLATFORM` → 本機平台）。"""
+    if requested == _AUTO_PLATFORM:
+        return current_platform_key()
+    return requested
+
+
+def _split_row(line: str) -> list[str]:
+    """markdown 表格列 → 原樣格片段（**不 strip**，以便 `"|".join()` 原地重組）。"""
+    return line.split("|")
+
+
+def _anchored_index(lines: list[str], anchor: str) -> int:
+    """帶錨點那一行的索引；0 行或多行皆 fail-loud（同 `anchored_line` 的判準）。"""
+    hits = [i for i, line in enumerate(lines) if anchor in line]
+    if len(hits) != 1:
+        raise AssertionError(
+            f"ONBOARDING.md 的基線錨點「{anchor}」命中 {len(hits)} 行（預期恰 1）"
+            f"——錨點被刪除或被複製都會讓本鎖失去鑑別力，故此處 fail-loud"
+        )
+    return hits[0]
+
+
+def platform_cell_index(lines: list[str], row_idx: int, platform_key: str) -> int:
+    """`lines[row_idx]` 這一列中，屬於 `platform_key` 的格在 `_split_row()` 裡的索引。
+
+    由**表頭**推導（往上找最近的分隔列 `|---|`，其上一行即表頭），不寫死欄號。
+    表頭中含該平台識別字的格必須恰 1 個、且該列格數必須與表頭一致——兩者任一不成立
+    都代表表格結構被改動，此時**寧可 fail-loud 也不准猜**：猜錯的代價正是把某平台的
+    實測值寫進另一平台的欄位（R67-D1）。
+    """
+    label = _PLATFORM_COLUMN_LABELS[platform_key]
+    header_idx = next(
+        (i - 1 for i in range(row_idx - 1, -1, -1) if _SEPARATOR_ROW_RE.match(lines[i])),
+        None,
+    )
+    if header_idx is None or header_idx < 0:
+        raise AssertionError(
+            f"第 {row_idx + 1} 行所屬表格找不到表頭（往上無 `|---|` 分隔列）"
+            f"——表格結構已變動，平台欄位無法推導。\n  行文：{lines[row_idx].strip()[:200]}"
+        )
+    header_cells = _split_row(lines[header_idx])
+    hits = [i for i, cell in enumerate(header_cells) if label in cell]
+    if len(hits) != 1:
+        raise AssertionError(
+            f"表頭（第 {header_idx + 1} 行）中含平台識別字「{label}」的格有 {len(hits)} 個"
+            f"（預期恰 1）——該平台欄被刪除、被複製或表頭措辭改到抽不到；"
+            f"此時不得猜欄。\n  表頭：{lines[header_idx].strip()[:240]}"
+        )
+    row_cells = _split_row(lines[row_idx])
+    if len(row_cells) != len(header_cells):
+        raise AssertionError(
+            f"第 {row_idx + 1} 行的格數 {len(row_cells)} ≠ 表頭格數 {len(header_cells)}"
+            f"——欄位對不齊時依表頭推導出的欄號會指到別的格。\n"
+            f"  行文：{lines[row_idx].strip()[:200]}"
+        )
+    return hits[0]
 
 
 # ─────────────────────────── 文件側（純函式） ───────────────────────────
@@ -434,8 +580,26 @@ def measure_all() -> dict[str, dict[str, int]]:
 # WHY 分成 _SLOW_SPECS 而非塞進 _SPECS：這四格要實跑整套測試（分鐘級），不能進根層
 # unittest 閘門的預設路徑。詳見檔頭 B。
 
-_FINGERPRINT_ANCHOR = "snapshot-fingerprints:"
+# 🔴 R67-D6：**每平台一條錨**（原版是全域單一 `snapshot-fingerprints:`）。單錨的語意是
+# 「上一次回填時的測試樹」，但回填在結構上只寫得到一欄 ⇒ 另一欄的 stale 永遠測不到
+# （實測：macOS 欄三格灌成 9999，`--check-snapshot` 照樣 ✅ rc=0）。逐平台記帳之後，
+# 每一欄各自回答「**這一欄的數字是在哪一棵測試樹上量的**」。
+_FINGERPRINT_ANCHOR_PREFIX = "snapshot-fingerprints-"
 _FP_LEN = 12  # sha256 前 12 hex；碰撞機率對「偵測有人改了測試樹」這個用途遠足夠
+
+# 逐平台 provenance 欄位（缺任一欄即 fail-loud）。**provenance 是這張表能被信任的全部
+# 理由**，讓它「可以沒有」等於讓它消失；且 docker／pgextras 兩項各自都會改變計數
+# （docker 停用 → v0.01／v0.30 各 −3；PG extras 存在 → AutoClaude PG-gated 測試由 skip
+# 轉 pass 使 passed 虛高），不入帳就是下一位驗證者把環境差異誤判為退化。
+_PROVENANCE_FIELDS: tuple[str, ...] = ("measured-at", "host", "docker", "pgextras")
+
+# 「該欄的量測樹已不可考」的合法佔位值：**刻意讓它與任何 live 指紋都不相等**，於是該欄
+# 恆判 presumed stale。這比填一個猜的指紋誠實——猜的指紋會讓一欄假裝新鮮。
+_UNRECORDED = "unrecorded"
+
+
+def fingerprint_anchor(platform_key: str) -> str:
+    return f"{_FINGERPRINT_ANCHOR_PREFIX}{platform_key}:"
 
 # 指紋覆蓋的測試樹：鍵＝文件裡的欄位名，值＝(相對路徑, glob)。
 #
@@ -453,6 +617,31 @@ _FINGERPRINT_TREES: tuple[tuple[str, str, str], ...] = (
     ("autoclaude", "AutoClaude/tests", "**/*.py"),
 )
 
+# 🔴 **rootdir conftest 也是該格計數的輸入**（R67 round 2，SD-R67-02）。
+#
+# WHY：上面那段（R60 SD-R60R3-03）修的是「樹**內**子目錄漏掉」；本輪出的是同一類缺口的
+# 另一個入口——**樹外**、但同樣決定那次 pytest 收集結果的 rootdir `conftest.py`。pytest
+# 依 rootdir 隱式載入它，一句 `collect_ignore_glob` 就能改變計數，而它不在任何一棵 glob
+# 的覆蓋面內。實測（沙箱，內容＝本輪工作樹）：在 `AISDLC_SDD_v0.30/conftest.py` 末尾加
+# 一行 `collect_ignore_glob = [...]`，v0.30 實測計數確實改變，四格指紋卻**逐字不變**、
+# `--check-snapshot` 照樣 ✅ rc=0 ⇒ 觸發器對這一軸全盲（SD-R67-02 的原始形態）。
+#
+# 對應關係取決於**該次 pytest 的 rootdir**（不是目錄包含關係）：
+#   v001／v030 ← `cd vX && pytest tools/fsm_runtime/tests`（ci-gate.sh 的呼叫形態）
+#                ⇒ rootdir=vX，載入 `vX/conftest.py`；共用層在 confcutdir 之上**不載入**
+#   scripts    ← `cd AISDLC_SDD && pytest scripts/tests/` ⇒ 載入 `AISDLC_SDD/conftest.py`
+#   autoclaude ← `cd AutoClaude && pytest` ⇒ 會載入 `AutoClaude/conftest.py`（現不存在）
+#
+# 檔案**不存在**時不貢獻任何 bytes（見 `tree_fingerprint`）：v0.01 依 ADR-XPLAT-001 不得
+# 原地修改故無此檔、AutoClaude 目前也沒有——兩者今日指紋逐字不變，但**一旦被建立，指紋
+# 立刻改變**。這正是要的語意：「該格是在哪一棵樹＋哪一份 conftest 上量的」。
+_FINGERPRINT_ROOTDIR_CONFTESTS: tuple[tuple[str, str], ...] = (
+    ("v001", "AISDLC_SDD/AISDLC_SDD_v0.01/conftest.py"),
+    ("v030", "AISDLC_SDD/AISDLC_SDD_v0.30/conftest.py"),
+    ("scripts", "AISDLC_SDD/conftest.py"),
+    ("autoclaude", "AutoClaude/conftest.py"),
+)
+
 
 @dataclass(frozen=True)
 class SlowSpec:
@@ -464,35 +653,44 @@ class SlowSpec:
     source: str
 
 
+# 三格 ci-gate 共用同一個 Field（frozen dataclass，可安全共享）。
+# 🔴 R67-D1：正則由 `\*\*(\d+)\*\*` 改為裸 `(\d+)`——粗體不再是「哪一欄」的判準（欄由
+# `platform_cell_index()` 決定），`**` 只是排版；只替換數字本身即可原地保留粗體。
+# 代價（明說）：該格內**只准出現一個數字**，`1729（R59 記載）` 這種把 provenance 塞進
+# 格子的寫法會命中 2 次而 fail-loud ⇒ provenance 一律住 `snapshot-fingerprints-*` 錨。
+_CIGATE_PASSED = Field("passed", re.compile(r"(\d+)"), "{v}")
+
 _SLOW_SPECS: tuple[SlowSpec, ...] = (
     SlowSpec(
         anchor="autoclaude-pytest-snapshot:",
         fields=(
-            # 以 `**` 包裝限定在 Windows 欄；macOS 欄同形但不加粗（實測恰一次命中）。
-            # 🔴 兩個欄位在同一段字上，故一律用**零寬斷言**框定上下文、只替換數字本身：
-            # 若把 `**` 或 ` passed / N skipped**` 納入 match，第一次 sub 就會吃掉第二個
-            # 欄位所需的上下文 ⇒ 第二次 sub 命中 0 次而 fail-loud（本檔的斷言當場抓到過）。
-            Field("passed", re.compile(r"(?<=\*\*)(\d+)(?= passed / \d+ skipped\*\*)"), "{v}"),
-            Field("skipped", re.compile(r"(?<= passed / )(\d+)(?= skipped\*\*)"), "{v}"),
+            # 🔴 R67-D1：正則**不再靠 `**` 粗體區分平台欄**（那正是「回填只寫得到
+            # Windows 欄」的成因）。欄位由 `platform_cell_index()` 切格決定，正則只在
+            # 那一格內作用 ⇒ 兩平台共用同一組式子，少一份會漂移的東西。
+            # 仍用**零寬斷言只替換數字本身**：把 ` passed / N skipped` 納入 match 會讓
+            # 第一次 sub 吃掉第二個欄位所需的上下文（本檔的斷言當場抓到過），且能原地
+            # 保留該格既有的 `**` 粗體與其他排版。
+            Field("passed", re.compile(r"(\d+)(?= passed)"), "{v}"),
+            Field("skipped", re.compile(r"(\d+)(?= skipped)"), "{v}"),
         ),
         measurer="autoclaude_pytest",
         source="cd AutoClaude && python -m pytest tests/ -q（plain 形態）",
     ),
     SlowSpec(
         anchor="cigate-v001-snapshot:",
-        fields=(Field("passed", re.compile(r"\*\*(\d+)\*\*"), "**{v}**"),),
+        fields=(_CIGATE_PASSED,),
         measurer="cigate_v001",
         source="bash AISDLC_SDD/scripts/ci-gate.sh 的『逐軌計數』自證行",
     ),
     SlowSpec(
         anchor="cigate-v030-snapshot:",
-        fields=(Field("passed", re.compile(r"\*\*(\d+)\*\*"), "**{v}**"),),
+        fields=(_CIGATE_PASSED,),
         measurer="cigate_v030",
         source="bash AISDLC_SDD/scripts/ci-gate.sh 的『逐軌計數』自證行",
     ),
     SlowSpec(
         anchor="cigate-scripts-snapshot:",
-        fields=(Field("passed", re.compile(r"\*\*(\d+)\*\*"), "**{v}**"),),
+        fields=(_CIGATE_PASSED,),
         measurer="cigate_scripts",
         source="bash AISDLC_SDD/scripts/ci-gate.sh 的『逐軌計數』自證行",
     ),
@@ -520,8 +718,15 @@ def _normalize_eol(raw: bytes) -> bytes:
     return raw.replace(b"\r\n", b"\n").replace(b"\r", b"\n")
 
 
-def tree_fingerprint(rel_dir: str, pattern: str) -> str:
+def tree_fingerprint(rel_dir: str, pattern: str, extra_files: tuple[str, ...] = ()) -> str:
     """測試樹內容指紋：sha256(排序後的 相對路徑 + **行尾正規化後**的檔案 bytes)。
+
+    `extra_files`（R67 round 2，SD-R67-02）＝**樹外**但同樣決定該次 pytest 收集結果的
+    檔案，目前唯一用途是 rootdir `conftest.py`（見 `_FINGERPRINT_ROOTDIR_CONFTESTS`）。
+    刻意用 **repo 相對路徑**當 digest 的鍵（樹內檔用的是樹相對路徑）：這些檔住在樹外，
+    沒有「相對於樹根」這回事，硬換算只會產生一個看不懂的鍵。**不存在即不貢獻**（不是
+    fail-loud）——v0.01 凍結版依 ADR-XPLAT-001 不得原地修改故無此檔，AutoClaude 目前
+    也沒有；此時指紋逐字不變，而一旦有人建立該檔，指紋立刻改變（正是要的鑑別力）。
 
     刻意**不用 git**：`git rev-parse HEAD:<path>` 只看 HEAD，untracked／未 commit 的新測試
     檔不算進去 ⇒ 一輪內新增測試會漏觸發（本 repo 已有「worktree 隔離看不到未 commit 修改」
@@ -543,16 +748,33 @@ def tree_fingerprint(rel_dir: str, pattern: str) -> str:
         digest.update(b"\0")
         digest.update(_normalize_eol(path.read_bytes()))
         digest.update(b"\0")
+    for rel_file in extra_files:
+        extra = _REPO_ROOT / rel_file
+        if not extra.is_file():
+            continue
+        digest.update(rel_file.encode("utf-8"))
+        digest.update(b"\0")
+        digest.update(_normalize_eol(extra.read_bytes()))
+        digest.update(b"\0")
     return digest.hexdigest()[:_FP_LEN]
 
 
+def rootdir_conftests_for(name: str) -> tuple[str, ...]:
+    """該指紋欄對應的 rootdir conftest（排序固定，讓 digest 與宣告順序無關）。"""
+    return tuple(sorted(rel for tree, rel in _FINGERPRINT_ROOTDIR_CONFTESTS if tree == name))
+
+
 def measure_fingerprints() -> dict[str, str]:
-    return {name: tree_fingerprint(rel, pat) for name, rel, pat in _FINGERPRINT_TREES}
+    return {
+        name: tree_fingerprint(rel, pat, rootdir_conftests_for(name))
+        for name, rel, pat in _FINGERPRINT_TREES
+    }
 
 
-def parse_fingerprints(text: str) -> dict[str, str]:
-    """從錨點行抽出文件記載的指紋；欄位缺席即 fail-loud。"""
-    line = anchored_line(text, _FINGERPRINT_ANCHOR)
+def parse_fingerprints(text: str, platform_key: str) -> dict[str, str]:
+    """從該平台的錨點行抽出文件記載的指紋；欄位缺席即 fail-loud。"""
+    anchor = fingerprint_anchor(platform_key)
+    line = anchored_line(text, anchor)
     values: dict[str, str] = {}
     missing: list[str] = []
     for name, _rel, _pat in _FINGERPRINT_TREES:
@@ -563,39 +785,210 @@ def parse_fingerprints(text: str) -> dict[str, str]:
             values[name] = found[0]
     if missing:
         raise AssertionError(
-            f"`{_FINGERPRINT_ANCHOR}` 行的指紋欄位抽取失敗：{missing}\n"
-            f"  一鍵回填：python tools/sync_onboarding_baselines.py --write --with-slow\n"
+            f"`{anchor}` 行的指紋欄位抽取失敗：{missing}\n"
+            f"  一鍵回填（只寫本機平台那一欄）："
+            f"python tools/sync_onboarding_baselines.py --write --with-slow\n"
             f"  行文：{line.strip()[:240]}"
         )
     return values
 
 
-def check_snapshot(text: str) -> list[str]:
-    """表② 的 presumed-stale 判準：測試樹指紋一變即紅。純函式（讀磁碟算指紋）。"""
-    documented = parse_fingerprints(text)
-    live = measure_fingerprints()
-    problems: list[str] = []
-    for name, _rel, _pat in _FINGERPRINT_TREES:
-        if documented[name] != live[name]:
-            problems.append(
-                f"[{name}] 測試樹指紋 {documented[name]} → {live[name]}"
-                f"（測試樹已變動）⇒ ONBOARDING.md §7 表② 該格判定 **presumed stale**。\n"
-                f"    這是因果判準：測試計數只可能因測試樹變動而變。"
-                f"R60 round 1 填了 v0.30 的當時值、round 2 動了該測試樹使實測改變而沒人回填，"
-                f"就是本觸發器要擋的形態（DEF-101-563；具體數字見帳本該列，此處刻意不寫死）。\n"
-                f"    回填：python tools/sync_onboarding_baselines.py --write --with-slow"
-            )
+def parse_provenance(text: str, platform_key: str) -> dict[str, str]:
+    """從該平台的錨點行抽出 provenance（何時／哪台機器／docker／pgextras）。
+
+    缺任一欄即 fail-loud：**provenance 是這張表能被信任的全部理由**，容許它缺席
+    等於容許「這欄數字誰在什麼環境量的沒人知道」這種狀態靜默存在（R67-D1／F28）。
+    """
+    anchor = fingerprint_anchor(platform_key)
+    line = anchored_line(text, anchor)
+    values: dict[str, str] = {}
+    missing: list[str] = []
+    for key in _PROVENANCE_FIELDS:
+        found = re.findall(rf"{re.escape(key)}=(\S+)", line)
+        if len(found) != 1:
+            missing.append(f"{key}（命中 {len(found)} 次，預期恰 1）")
+        else:
+            values[key] = found[0]
+    if missing:
+        raise AssertionError(
+            f"`{anchor}` 行的 provenance 欄位抽取失敗：{missing}\n"
+            f"  必備欄位：{list(_PROVENANCE_FIELDS)}——缺席即代表該欄數字的量測環境不可考，"
+            f"下一位驗證者會把環境差異（docker 停用／venv 帶 PG extras）誤判為退化。\n"
+            f"  行文：{line.strip()[:240]}"
+        )
+    return values
+
+
+def _stale_messages(text: str, platform_key: str, names: list[str], live: dict[str, str]) -> list[str]:
+    documented = parse_fingerprints(text, platform_key)
+    prov = parse_provenance(text, platform_key)
+    label = _PLATFORM_COLUMN_LABELS[platform_key]
+    return [
+        f"[{label} 欄／{name}] 測試樹指紋 {documented[name]} → {live[name]}"
+        f"（測試樹已變動）⇒ ONBOARDING.md §7 表② 該欄該格判定 **presumed stale**。\n"
+        f"    該欄 provenance：{prov}\n"
+        f"    這是因果判準：測試計數只可能因測試樹變動而變。"
+        f"R60 round 1 填了 v0.30 的當時值、round 2 動了該測試樹使實測改變而沒人回填，"
+        f"就是本觸發器要擋的形態（DEF-101-563；具體數字見帳本該列，此處刻意不寫死）。\n"
+        f"    回填（只會寫本機平台那一欄）："
+        f"python tools/sync_onboarding_baselines.py --write --with-slow"
+        for name in names
+    ]
+
+
+def _measurement_age_days(measured_at: str) -> int | None:
+    """`measured-at` 距今天數；`unrecorded` 或無法解析（人手寫壞）時回 None，不猜。"""
+    try:
+        return (datetime.date.today() - datetime.date.fromisoformat(measured_at)).days
+    except ValueError:
+        return None
+
+
+def _stale_summary(text: str, platform_key: str, names: list[str], live: dict[str, str]) -> str:
+    """別平台欄的**單行**狀態列（不計入 rc，且**刻意不是警告**）。
+
+    🔴 R67 round 2（QA-R67-05）——這一則為何從 ⚠️ 降級為 ℹ️：
+    別平台欄的 stale 在**單機交替工作流**（R66 在 Windows、R67 在 macOS、下一輪再換回去）
+    下是**結構性恆真**的：任一輪都會動到四棵樹之一，於是另一平台上一輪填的指紋必然對不上；
+    即使那台機器剛回填過，本機一動樹它立刻又過期。也就是說，這是一則**在系統完全正常運作
+    時也永遠亮著、且本機無論如何都清不掉**的訊號。而本 repo 已在
+    `tools/run_root_unittests.py` 明文論證過這種常亮訊號的後果：「純 WARN 擋不住『11 輪
+    沒人重釘』的心理機制（**常亮的警告＝背景噪音**）」——一旦讀者學會略過這個區塊，同一段
+    輸出裡真正有牙的「**本機平台欄** presumed stale 並紅」也會被一起略過，那是這套機制唯一
+    會咬人的部分。
+
+    處置刻意**不是**「消音」：消音之後，真正該換平台補量測的那一天，沒有任何地方會告訴那個
+    人「另一欄已經 N 天沒量了」。改為三件事——
+      (a) 移出警告頻道（`main()` 改印 `ℹ️` 到 **stdout**，與 ✅ 同一列語氣），
+      (b) 把「距上次量測幾天」這個**唯一隨時間變化、也唯一可行動**的量放進來取代四棵樹的
+          指紋 diff（那串 diff 每輪都不一樣但資訊量為零：它只是在說「樹動過了」），
+      (c) 訊息自己說明它在此工作流下是結構性常態、並把讀者的注意力指回本機平台欄。
+    「從未回填過」（provenance 全為 `unrecorded`）另走一條措辭：那不是「已變動」而是
+    「還沒有基線」，用 `→` 畫成漂移會把「沒人量過」誤讀成「量過但過期」。
+    """
+    documented = parse_fingerprints(text, platform_key)
+    prov = parse_provenance(text, platform_key)
+    label = _PLATFORM_COLUMN_LABELS[platform_key]
+    tail = (
+        "——**不計入本機 rc**（本機修不動：回填必須在該平台上實跑）。"
+        "真正有牙的是**本機平台欄**，見同段的 ✅／❌ 那一行"
+    )
+    if all(prov[f] == _UNRECORDED for f in _PROVENANCE_FIELDS):
+        return (
+            f"{label} 欄**尚未建立基線**（provenance 四項全為 {_UNRECORDED}）"
+            f"{tail}；建立首份基線：在該平台執行 "
+            f"`python tools/sync_onboarding_baselines.py --write --with-slow`"
+        )
+    age = _measurement_age_days(prov["measured-at"])
+    age_text = f"距今 {age} 天" if age is not None else f"measured-at={prov['measured-at']!r} 無法解析"
+    drift = ", ".join(f"{n}:{documented[n]}→{live[n]}" for n in names)
+    return (
+        f"{label} 欄上次量測 {prov['measured-at']}（{age_text}），此後 "
+        f"{len(names)}/{len(_FINGERPRINT_TREES)} 棵樹已變動（{drift}）"
+        f"——單機交替工作流下這是**結構性常態**、不是新問題{tail}"
+    )
+
+
+def snapshot_report(
+    text: str, platform_key: str | None, live: dict[str, str] | None = None
+) -> tuple[list[str], list[str]]:
+    """表② 的 presumed-stale 判準，**逐平台欄**。回傳 (rc 級問題, 僅告知的提醒)。
+
+    判準（R67-D6，檔頭 H）：
+      - `platform_key` 有對應欄 → **只有該欄的 stale 算問題**；其他欄的 stale 只做
+        ⚠️ 告知。WHY：別台機器的欄不是本機修得動的東西（回填要在那台機器上實跑），
+        硬紅只會養成忽略紅燈的習慣——那比沒有鎖更糟（同 §7 表② 為何不接根層閘門）。
+      - `platform_key` 為 None（Linux CI runner 等無欄平台）→ 判準**退化**為舊語意：
+        「**沒有任何一欄是新鮮的**」才紅。誠實劃界：這**嚴格弱於**逐欄判準（只要有
+        一欄新鮮就綠），但無欄平台本來就無從判斷「該看哪一欄」，寧可弱而不冤。
+
+    `live` 可由呼叫端注入**同一份**已量指紋（R67 Scan-H 同型收斂）：同一次 CLI 呼叫裡
+    重複量同一個量，會讓「判決所依據的指紋」與「印給人看／寫進 JSON 的指紋」變成兩次
+    不同時點的量測 ⇒ 取證載具自己就可能與判決不一致。一次量、到處用。
+    """
+    if live is None:
+        live = measure_fingerprints()
+    stale: dict[str, list[str]] = {}
+    for key in _PLATFORM_COLUMN_LABELS:
+        documented = parse_fingerprints(text, key)
+        stale[key] = [n for n, _r, _p in _FINGERPRINT_TREES if documented[n] != live[n]]
+    if platform_key is not None:
+        problems = _stale_messages(text, platform_key, stale[platform_key], live)
+        notices = [
+            _stale_summary(text, key, stale[key], live)
+            for key in _PLATFORM_COLUMN_LABELS
+            if key != platform_key and stale[key]
+        ]
+        return problems, notices
+
+    every_column_stale = all(stale[key] for key in _PLATFORM_COLUMN_LABELS)
+    messages = [
+        m for key in _PLATFORM_COLUMN_LABELS for m in _stale_messages(text, key, stale[key], live)
+    ]
+    if every_column_stale:
+        return messages, []
+    return [], [
+        f"（本平台在表② 無對應欄，判準退化為「全部欄皆 stale 才紅」）"
+        f"{_stale_summary(text, key, stale[key], live)}"
+        for key in _PLATFORM_COLUMN_LABELS
+        if stale[key]
+    ]
+
+
+def check_snapshot(
+    text: str, platform_key: str | None = _AUTO_PLATFORM, live: dict[str, str] | None = None
+) -> list[str]:
+    """`snapshot_report()` 的 rc 級問題那一半（保留舊呼叫端形狀）。"""
+    problems, _notices = snapshot_report(text, resolve_platform(platform_key), live)
     return problems
 
 
-def render_fingerprints(text: str, live: dict[str, str]) -> str:
-    line = anchored_line(text, _FINGERPRINT_ANCHOR)
+def render_fingerprints(
+    text: str, live: dict[str, str], platform_key: str, provenance: dict[str, str]
+) -> str:
+    """只改**該平台**那一條錨——別的平台欄由那台機器自己維護（R67-D1）。"""
+    line = anchored_line(text, fingerprint_anchor(platform_key))
     new_line = line
     for name, _rel, _pat in _FINGERPRINT_TREES:
         new_line = re.sub(
             rf"{re.escape(name)}=[0-9a-zA-Z]+", f"{name}={live[name]}", new_line, count=1
         )
+    for key in _PROVENANCE_FIELDS:
+        new_line = re.sub(
+            rf"{re.escape(key)}=\S+", f"{key}={provenance[key]}", new_line, count=1
+        )
     return text.replace(line, new_line, 1)
+
+
+def _docker_state() -> str:
+    """docker daemon 狀態（provenance 用）。停用時 v0.01／v0.30 各 −3，見 §7 容差段。"""
+    try:
+        proc = subprocess.run(["docker", "info"], capture_output=True, timeout=60)
+    except FileNotFoundError:
+        return "absent"
+    except (OSError, subprocess.TimeoutExpired):
+        return "unknown"
+    return "up" if proc.returncode == 0 else "down"
+
+
+def pg_extras_state() -> str:
+    """本直譯器有無 PG extras（provenance 用；`present` 會讓 AutoClaude 計數虛高）。
+
+    刻意在**本行程內**探測而非另開子行程：`_run_autoclaude_pytest()` 用的就是
+    `sys.executable`，兩者必須是同一個 venv 才叫同一件事。
+    """
+    present = [m for m in ("psycopg2", "sqlalchemy") if importlib.util.find_spec(m) is not None]
+    return "present" if present else "absent"
+
+
+def measure_provenance() -> dict[str, str]:
+    """量測當下的 provenance（誰、何時、哪台機器、什麼環境）。值一律無空白 token。"""
+    return {
+        "measured-at": datetime.date.today().isoformat(),
+        "host": f"{platform_mod.system()}-{platform_mod.release()}-{platform_mod.machine()}",
+        "docker": _docker_state(),
+        "pgextras": pg_extras_state(),
+    }
 
 
 def _run_cigate() -> dict[str, int]:
@@ -689,42 +1082,109 @@ def measure_slow() -> dict[str, dict[str, int]]:
     return {spec.anchor: by_measurer[spec.measurer] for spec in _SLOW_SPECS}
 
 
-def render_slow(text: str, measured: dict[str, dict[str, int]]) -> str:
-    """把表② 四格的數字就地換成實測值（與 render() 同形，共用 Field 樣板機制）。"""
+def measure_slow_on_stable_tree() -> tuple[dict[str, dict[str, int]], dict[str, str]]:
+    """慢量測 ＋ **前後各取一次指紋**把量測窗口夾住；窗口內樹變動即 fail-loud。
+
+    回傳 `(四格計數, 這些計數所依據的那棵樹的指紋)`。
+
+    🔴 WHY（DEF-101-677，R67 收尾 Scan-H）：原本的順序是「先 `measure_slow()`（分鐘級）、
+    **跑完之後**才 `measure_fingerprints()`」。於是若測試樹在那段分鐘級窗口內被改動
+    （並行的修復包還在寫測試檔／編輯器自動存檔／另一個 agent 同時作業），錨會記下
+    **改動後**那棵樹的指紋，而四格計數留在**改動前**的樹上 ⇒ 事後 `--check-snapshot`
+    量到的 live 指紋與錨相符、判 ✅ rc=0，**而計數其實已 stale**。
+
+    這比「指紋沒動、計數已變」那類漏更嚴重，因為它是**回填路徑親手把觸發器拆掉**：
+    樹確實變動了（那正是本觸發器唯一認得的事件），卻被寫進錨當成基準。錨的字面語意
+    是「**該欄的數字是在哪一棵測試樹上量的**」（見 `_FINGERPRINT_ANCHOR_PREFIX` 區塊），
+    而事後取指紋記下的是一棵**從未被量測過**的樹 ⇒ 語意與實作不是同一件事。
+    （反向也會咬：若那筆改動事後被還原，錨反而與 live 對不上而**誤紅**。）
+
+    修法**不是**放寬判準，而是讓回填路徑遵守它自己宣告的判準：既有契約已經是
+    「指紋一變即判 presumed stale」，唯獨回填路徑替自己免除了這一條。夾住窗口之後，
+    「量測期間樹變動」與「量測後樹變動」得到同一種處置——前者當場擋、後者下次
+    `--check-snapshot` 擋。**嚴格度沒有提高**，只是不再有豁免。
+
+    代價：正常單人作業零影響——多的那一次 `measure_fingerprints()` 是毫秒級
+    （本機四棵樹實測約 25 ms，對比慢量測的分鐘級可忽略），且指紋相符時行為與原版
+    逐字相同。只有「窗口內真的有人動了測試樹」才付代價，而那筆量測本來就是廢的。
+
+    誠實劃界：夾住的是**淨變動**——在窗口內改動又在窗口結束前還原（例如量測中途
+    暫存檔一寫一刪）仍偵測不到。要根治得對每一支子量測各自夾一次，那是更大的機制；
+    本函式處理的是實際咬到人的形態（並行寫入後**留在樹上**）。
+    """
+    before = measure_fingerprints()
+    slow = measure_slow()
+    after = measure_fingerprints()
+    drifted = [n for n, _r, _p in _FINGERPRINT_TREES if before[n] != after[n]]
+    if drifted:
+        raise BaselineToolError(
+            "❌ 量測期間測試樹被改動 ⇒ 本次量測作廢，**未寫入任何檔案**。\n"
+            f"  窗口內變動的樹：{', '.join(f'{n}: {before[n]} → {after[n]}' for n in drifted)}\n"
+            "  為何不寫：四格計數是在**改動前**的樹上量的，而量完才取的指紋屬於**改動後**"
+            "的樹。兩者一起寫進去，`--check-snapshot` 會量到相符的指紋而判 ✅ rc=0——"
+            "那是一句『這些數字是新鮮的』的假保證，比沒有指紋更危險"
+            "（`snapshot-fingerprints-*` 錨的語意是「**該欄的數字是在哪一棵樹上量的**」）。\n"
+            "  怎麼辦：先讓測試樹靜下來（停掉並行的修復包／agent／編輯器自動存檔，"
+            "`git status` 確認不再變動），**再重跑同一條指令**："
+            "python tools/sync_onboarding_baselines.py --write --with-slow\n"
+            "  若那筆改動是你自己刻意做的：這次的分鐘級量測就是廢的（跨了兩棵樹），"
+            "重跑一次是唯一誠實的處置，不要為了省時間而回頭手改文件。"
+        )
+    # 刻意回傳 `before`（≡ `after`）：要記的是「**計數所依據的那棵樹**」，不是「量完之後
+    # 剛好長怎樣的樹」。兩者在此已證明相等，選 `before` 是把意圖寫進程式碼。
+    return slow, before
+
+
+def _slow_cell_fields(cell: str, spec: SlowSpec, platform_key: str) -> list[tuple[Field, str]]:
+    """在**單一格**內抽出每個受管欄位（恰一次命中，否則 fail-loud）。"""
+    out: list[tuple[Field, str]] = []
+    for field in spec.fields:
+        found = field.pattern.findall(cell)
+        if len(found) != 1:
+            raise AssertionError(
+                f"表② 受管欄位 {spec.anchor}/{field.name} 在 "
+                f"{_PLATFORM_COLUMN_LABELS[platform_key]} 欄命中 {len(found)} 次（預期恰 1）"
+                f"——0 次＝該格被改成抽不到的形態；≥2 次＝格內混進了第二個數字"
+                f"（例如把 `（R59 記載）` 這類 provenance 塞進格子；provenance 一律住 "
+                f"`{fingerprint_anchor(platform_key)}` 錨）。\n  格文：{cell.strip()[:200]}"
+            )
+        out.append((field, found[0]))
+    return out
+
+
+def render_slow(text: str, measured: dict[str, dict[str, int]], platform_key: str) -> str:
+    """把表② 四格**該平台那一欄**的數字就地換成實測值（其餘欄逐字不動）。
+
+    🔴 R67-D1 的核心：欄位由 `platform_cell_index()` 從表頭推導、`sub` 只在那一格的
+    字串上作用 ⇒ **寫到別的平台欄在結構上不可能發生**（原版靠 `**` 粗體錨定，在 macOS
+    上跑同一條回填指令會把 macOS 數字寫進標示「Windows 11 實測」的格子）。
+    """
     lines = text.split("\n")
     for spec in _SLOW_SPECS:
         values = measured[spec.anchor]
-        anchored_line(text, spec.anchor)  # 錨點唯一性斷言（0 或 ≥2 行皆 fail-loud）
-        idx = next(i for i, line in enumerate(lines) if spec.anchor in line)
-        new_line = lines[idx]
-        for field in spec.fields:
-            found = field.pattern.findall(new_line)
-            if len(found) != 1:
-                raise AssertionError(
-                    f"表② 受管欄位 {spec.anchor}/{field.name} 在該行命中 {len(found)} 次"
-                    f"（預期恰 1）——0 次＝敘述改成抽不到的形態；≥2 次＝會抽錯欄"
-                    f"（例如歸因散文也寫了一份加粗數字）。\n  行文：{new_line.strip()[:240]}"
-                )
-            new_line = field.pattern.sub(
-                field.template.format(v=values[field.name]), new_line, count=1
+        idx = _anchored_index(lines, spec.anchor)
+        col = platform_cell_index(lines, idx, platform_key)
+        cells = _split_row(lines[idx])
+        cell = cells[col]
+        for field, _found in _slow_cell_fields(cell, spec, platform_key):
+            cell = field.pattern.sub(
+                field.template.format(v=values[field.name]), cell, count=1
             )
-        lines[idx] = new_line
+        cells[col] = cell
+        lines[idx] = "|".join(cells)
     return "\n".join(lines)
 
 
-def slow_documented(text: str) -> dict[str, dict[str, int]]:
+def slow_documented(text: str, platform_key: str) -> dict[str, dict[str, int]]:
+    """讀出表② 四格**該平台那一欄**的文件字面值。"""
+    lines = text.split("\n")
     out: dict[str, dict[str, int]] = {}
     for spec in _SLOW_SPECS:
-        line = anchored_line(text, spec.anchor)
-        values: dict[str, int] = {}
-        for field in spec.fields:
-            found = field.pattern.findall(line)
-            if len(found) != 1:
-                raise AssertionError(
-                    f"表② 受管欄位 {spec.anchor}/{field.name} 命中 {len(found)} 次（預期恰 1）"
-                )
-            values[field.name] = int(found[0])
-        out[spec.anchor] = values
+        idx = _anchored_index(lines, spec.anchor)
+        cell = _split_row(lines[idx])[platform_cell_index(lines, idx, platform_key)]
+        out[spec.anchor] = {
+            field.name: int(raw) for field, raw in _slow_cell_fields(cell, spec, platform_key)
+        }
     return out
 
 
@@ -769,45 +1229,158 @@ def _write_onboarding(new_text: str) -> int:
     return 0
 
 
+# 模式旗標（互斥；一個都沒給時預設 `--check`）。集中成一張表而非散在 `if` 裡：
+# 「文件引用的旗標是否真的存在」由 `tools/tests/test_doc_loc_baseline_freshness_r60.py`
+# 直接對 parser 反查（R67-D20 的另一半——文件不得引用不存在的旗標）。
+_MODE_FLAGS: tuple[str, ...] = ("--check", "--write", "--check-snapshot", "--json")
+
+
+def build_parser() -> argparse.ArgumentParser:
+    """CLI 定義（R67-D20）。
+
+    🔴 `allow_abbrev=False`：argparse 預設接受**唯一前綴縮寫**，於是 `--check-snapsho`
+    這種打錯字會被「好心地」解讀成 `--check-snapshot`。本檔的整個修法主張是「拼錯就要
+    當場知道」，容許縮寫等於保留一條「看起來對、其實靠運氣」的路，與主張自相矛盾。
+    關掉之後：未知旗標 / 打錯字 / 縮寫一律 rc=2，`--help` 印完整用法。
+    """
+    parser = argparse.ArgumentParser(
+        prog="python tools/sync_onboarding_baselines.py",
+        description="ONBOARDING.md §7 基線格產生器 ＋ 新鮮度稽核（表① live 格／表② dated snapshot）",
+        allow_abbrev=False,
+    )
+    parser.add_argument(
+        "--check", action="store_true",
+        help="稽核表① live 格（不給任何模式旗標時的預設）；stale 即 rc=1",
+    )
+    parser.add_argument("--write", action="store_true", help="回填表① live 格（bytes 層 LF 寫入）")
+    parser.add_argument(
+        "--with-slow", action="store_true",
+        help="與 --write 併用：另回填表②「本機平台那一欄」＋該平台指紋/provenance（分鐘級實跑）",
+    )
+    parser.add_argument(
+        "--check-snapshot", action="store_true",
+        help="表② presumed-stale 觸發器（毫秒級；pre-push 與 root-infra-ci 消費的就是這條）",
+    )
+    parser.add_argument("--json", action="store_true", help="機讀報表（含表② 與逐平台指紋/provenance）")
+    parser.add_argument(
+        "--platform", choices=sorted(_PLATFORM_COLUMN_LABELS),
+        help="唯讀模式下指定稽核哪一個平台欄（預設＝本機平台）；**不得**與 --write 併用",
+    )
+    parser.add_argument(
+        "--allow-pg-extras", action="store_true",
+        help="允許在可 import psycopg2/sqlalchemy 的 venv 上回填表②（該環境會使 AutoClaude "
+             "passed 虛高；預設拒絕，provenance 會記 pgextras=present）",
+    )
+    return parser
+
+
 def main(argv: list[str] | None = None) -> int:
-    argv = list(sys.argv[1:] if argv is None else argv)
+    parser = build_parser()
+    try:
+        args = parser.parse_args(list(sys.argv[1:] if argv is None else argv))
+    except SystemExit as exc:  # argparse：未知旗標 rc=2、`--help` rc=0
+        return int(exc.code or 0)
+
+    selected = [name for name in _MODE_FLAGS if getattr(args, name[2:].replace("-", "_"))]
+    if len(selected) > 1:
+        print(f"❌ 模式旗標互斥，實得 {selected}——請一次只給一個", file=sys.stderr)
+        return 2
+    mode = selected[0] if selected else "--check"
+
+    if args.with_slow and mode != "--write":
+        print("❌ --with-slow 只在 --write 下有意義（它是回填模式）", file=sys.stderr)
+        return 2
+    if args.platform and mode == "--write":
+        print(
+            "❌ --platform 不得與 --write 併用：回填一律只寫**本機平台**那一欄。"
+            "跨平台代填等於替另一台機器捏造 provenance，那正是 R67-D1 本體",
+            file=sys.stderr,
+        )
+        return 2
+
     text = _ONBOARDING.read_text(encoding="utf-8-sig")
+    audit_platform = resolve_platform(args.platform or _AUTO_PLATFORM)
 
     # `--check-snapshot`：只算指紋（毫秒級），不碰 live 格的量測器。pre-push 消費的就是這條。
-    if "--check-snapshot" in argv:
-        problems = check_snapshot(text)
+    if mode == "--check-snapshot":
+        # 一次量、判決與取證共用同一份（R67 Scan-H 同型收斂：原版判決後又重量一次，
+        # 印出來的「證據」與判決所依據的可能不是同一時點的樹）。
+        live = measure_fingerprints()
+        problems, notices = snapshot_report(text, audit_platform, live)
+        # 🔴 R67 round 2（QA-R67-05）：別平台欄的提醒改印 `ℹ️` 到 **stdout**，不再是
+        # stderr 的 `⚠️`。理由見 `_stale_summary` 的 docstring——它在單機交替工作流下
+        # **結構上恆亮**，掛在警告頻道只會訓練讀者略過這一段，連帶略過同段真正會紅的
+        # 本機平台欄（本 repo「常亮的警告＝背景噪音」既定紀律，tools/run_root_unittests.py）。
+        for n in notices:
+            print(f"ℹ️ {n}")
         if problems:
             print("❌ ONBOARDING.md §7 表② presumed stale：", file=sys.stderr)
             for p in problems:
                 print(f"  - {p}", file=sys.stderr)
             return 1
-        live = measure_fingerprints()
-        print(f"✅ §7 表② 指紋相符（{', '.join(f'{k}={v}' for k, v in live.items())}）")
-        for spec in _SLOW_SPECS:
-            print(f"   [{spec.anchor}] {slow_documented(text)[spec.anchor]}")
+        scope = (
+            f"{_PLATFORM_COLUMN_LABELS[audit_platform]} 欄"
+            if audit_platform
+            else f"（本平台 sys.platform={sys.platform} 無對應欄，退化判準：全欄皆 stale 才紅）"
+        )
+        print(f"✅ §7 表② 指紋相符 {scope}（{', '.join(f'{k}={v}' for k, v in live.items())}）")
+        for key in _PLATFORM_COLUMN_LABELS:
+            documented = slow_documented(text, key)
+            print(f"   [{_PLATFORM_COLUMN_LABELS[key]} 欄] provenance={parse_provenance(text, key)}")
+            for spec in _SLOW_SPECS:
+                print(f"     [{spec.anchor}] {documented[spec.anchor]}")
         return 0
 
     measured = measure_all()
 
-    if "--with-slow" in argv:
-        if "--write" not in argv:
-            print("❌ --with-slow 只在 --write 下有意義（它是回填模式）", file=sys.stderr)
+    if mode == "--write" and args.with_slow:
+        write_platform = current_platform_key()
+        if write_platform is None:
+            print(
+                f"❌ 本平台（sys.platform={sys.platform}）在 §7 表② 沒有對應欄 ⇒ 拒絕回填。\n"
+                f"   受管平台欄：{sorted(_PLATFORM_COLUMN_LABELS)}。"
+                f"**不猜一欄來寫**——猜錯就是把本平台數字寫進別平台的格子（R67-D1）；"
+                f"要納管新平台請在 `_PLATFORM_COLUMN_LABELS` 加一筆並為 §7 表② 增一欄。",
+                file=sys.stderr,
+            )
+            return 2
+        pg_state = pg_extras_state()
+        if pg_state == "present" and not args.allow_pg_extras:
+            print(
+                "❌ 本直譯器可 import psycopg2／sqlalchemy ⇒ AutoClaude 的 PG-gated 測試會由"
+                " skip 轉 pass、passed 數虛高，與 §7 表② 宣告的出廠環境不是同一件事。\n"
+                "   處置：改用只裝 `.[dev,notifications]` 的乾淨 venv 執行本指令；"
+                "確實要以此環境入帳請加 --allow-pg-extras（provenance 會記 pgextras=present）。",
+                file=sys.stderr,
+            )
             return 2
         print("⏳ 實跑 ci-gate ＋ AutoClaude pytest（分鐘級）…", file=sys.stderr)
-        slow = measure_slow()
-        measured_fp = measure_fingerprints()
-        new_text = render_fingerprints(render_slow(render(text, measured), slow), measured_fp)
+        # 指紋**夾住**慢量測窗口（R67 Scan-H）：窗口內樹變動即 fail-loud、一個字都不寫。
+        slow, measured_fp = measure_slow_on_stable_tree()
+        provenance = measure_provenance()
+        new_text = render_fingerprints(
+            render_slow(render(text, measured), slow, write_platform),
+            measured_fp,
+            write_platform,
+            provenance,
+        )
         rc = _write_onboarding(new_text)
         if rc:
             return rc
         for spec in _SPECS:
             print(f"✅ 已回填 [{spec.anchor}] → {measured[spec.anchor]}")
+        label = _PLATFORM_COLUMN_LABELS[write_platform]
         for spec in _SLOW_SPECS:
-            print(f"✅ 已回填 [{spec.anchor}] → {slow[spec.anchor]}（來源：{spec.source}）")
-        print(f"✅ 已回填 [{_FINGERPRINT_ANCHOR}] → {measured_fp}")
+            print(f"✅ 已回填 [{spec.anchor}]（{label} 欄）→ {slow[spec.anchor]}（來源：{spec.source}）")
+        print(f"✅ 已回填 [{fingerprint_anchor(write_platform)}] → {measured_fp} ＋ {provenance}")
         return 0
 
-    if "--json" in argv:
+    if mode == "--json":
+        # 同上：每個量只算一次，報表印的與 rc 依據的必定是同一份（原版 live 指紋量 3 次、
+        # `check()` 算 2 次 ⇒ JSON 可能印 `snapshot_problems: []` 卻回 rc=1）。
+        live_fp = measure_fingerprints()
+        problems = check(text, measured)
+        snapshot_problems = check_snapshot(text, audit_platform, live_fp)
         print(
             json.dumps(
                 {
@@ -816,19 +1389,27 @@ def main(argv: list[str] | None = None) -> int:
                         s.anchor: parse_documented(anchored_line(text, s.anchor), s)
                         for s in _SPECS
                     },
-                    "problems": check(text, measured),
-                    "snapshot_documented": slow_documented(text),
-                    "snapshot_fingerprints_documented": parse_fingerprints(text),
-                    "snapshot_fingerprints_live": measure_fingerprints(),
-                    "snapshot_problems": check_snapshot(text),
+                    "problems": problems,
+                    "audit_platform": audit_platform,
+                    "snapshot_documented": {
+                        key: slow_documented(text, key) for key in _PLATFORM_COLUMN_LABELS
+                    },
+                    "snapshot_fingerprints_documented": {
+                        key: parse_fingerprints(text, key) for key in _PLATFORM_COLUMN_LABELS
+                    },
+                    "snapshot_provenance": {
+                        key: parse_provenance(text, key) for key in _PLATFORM_COLUMN_LABELS
+                    },
+                    "snapshot_fingerprints_live": live_fp,
+                    "snapshot_problems": snapshot_problems,
                 },
                 indent=2,
                 ensure_ascii=False,
             )
         )
-        return 1 if check(text, measured) or check_snapshot(text) else 0
+        return 1 if problems or snapshot_problems else 0
 
-    if "--write" in argv:
+    if mode == "--write":
         new_text = render(text, measured)
         if new_text == text:
             print("✅ ONBOARDING.md §7 live 基線格已是最新，未變更")

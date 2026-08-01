@@ -51,12 +51,24 @@ WHY（為何非得有這道鎖）：
         新列在結構上不可能被塞進基線」對本輪自己的產出根本不成立。改用與日曆脫鉤的單調量
         （帳本 ID），同 `ADR-SD09-011` 把「源碼演進證據」從「日曆天數」解綁的先例。
     (c) **shrink-only 棘輪**：`_MAX_BASELINE_ENTRIES` 與 `_BASELINE_ID_CEILING` 皆只准往下改，
-        由 `TestShrinkOnlyRatchet` 以 `git show HEAD:<本檔>` 取上一版常數機械比對。
+        由 `TestShrinkOnlyRatchet` 對**簽入本檔的凍結基準**機械比對。
         🔴 round 2 的版本這一條只是**人審慣例冒充機制**：它只斷言「筆數 ≤ 上限」，SD 實測把
-        上限改大**不會紅**（改小才紅）。現版才是真棘輪。
+        上限改大**不會紅**（改小才紅）。
+        🔴🔴 R67 round 2（SA-R67-08）**再次訂正比對基準**：改真棘輪時照抄的是
+        `git show HEAD:<本檔>` 形狀，而該形狀在**真正消費它的時點**（pre-push 必然發生在
+        commit 之後、CI 更是乾淨 checkout）HEAD 逐字等於工作樹 ⇒ 比較退化、恆真。SA 沙箱
+        實證：`_MAX_BASELINE_ENTRIES` 由現值改成放大十餘倍後 commit，本類全綠零訊號。
+        這與同輪 R67-H14 在 `tools/check_script_parity.py` 修掉的是同一個病（那一支是照抄
+        本檔而來的），本輪把本體也修了：基準改為簽入本檔的凍結常數，整條 git 依賴移除。
     (d) **護欄層檔數棘輪**（`TestGuardFileCountShrinkOnlyRatchet`，round 3 ARCH-R60R3-04）：
         `DEF-101-561③` 裁定「R61 開輪即禁止新增鎖檔、只准合併／刪除」，而該裁決原本零機械
-        強制。同 (c) 的形狀：對 HEAD 現查、只准往下、無常數可維護。
+        強制。同 (c) 的形狀，且同 (c) 於 R67 round 2 一併脫離 git 狀態（原本走
+        `git ls-tree -r HEAD`，恆真理由與 (c) 逐字相同）。
+
+另加一組**標的是 `ADR-XPLAT-002` §9.1 與 `CrossPlatform_Scan_Dimensions.md`〈常設自檢〉**的
+常設不變式（`TestSection91*` 三類，R67 round 2 SA-R67-03 的落地）：那兩處把跨平台三項頭號
+架構異動的防回流判準寫成 grep 指令，卻**零可執行消費者**（注入違規形態後全 repo 綠燈）。
+本檔是 §9.1 末段**具名指派**的承接容器。細節見檔內「ADR §9.1／掃描維度 常設自檢（SC-*）」段。
 
 射程（scope，round 3 新增；SA-R60R2-04）：
   · **ADR 落地後的新列（ID > `_BASELINE_ID_CEILING`）＝家族全檔硬擋，且不接受任何豁免登記。**
@@ -103,14 +115,14 @@ WHY（為何非得有這道鎖）：
 from __future__ import annotations
 
 import ast
-import fnmatch
 import inspect
 import re
-import subprocess
 import sys
 import unittest
+from collections.abc import Callable
 from pathlib import Path
 from types import ModuleType
+from unittest import mock
 from typing import NamedTuple
 
 _HERE = Path(__file__).resolve()
@@ -540,48 +552,103 @@ def read_adr() -> str:
     return _ADR.read_text(encoding="utf-8-sig")
 
 
-# ---------------------------------------------------------------- shrink-only 棘輪（對 HEAD 比對）
+# ---------------------------------------------------------------- shrink-only 棘輪（對凍結基準比對）
 _SELF_REL = f"tools/tests/{_HERE.name}"  # git 路徑一律 posix，不用 os.sep
 _RATCHET_MAX_RE = re.compile(r"^_MAX_BASELINE_ENTRIES\s*=\s*(\d+)", re.M)
 _RATCHET_CEILING_RE = re.compile(r"^_BASELINE_ID_CEILING\s*=\s*\"(DEF-\d+-\d+)\"", re.M)
 
+# 🔴🔴 R67 round 2（SA-R67-08）凍結基準：兩個 shrink-only 常數的「上一版」不再由 git 導出。
+#
+# 病灶（SA 沙箱實證，非推論）：舊實作以 `git show HEAD:<本檔>` 取上一版。未 commit 時它確實
+# 有牙（改大即紅），但**每一個真正消費本鎖 rc 的閘門都跑在 commit 之後**——`tools/git-hooks/
+# pre-push` 的 root-infra leg 走 `run_root_unittests.py`，而 push 必然發生在 commit 之後；CI
+# 更是乾淨 checkout。commit 一落地，HEAD 就等於工作樹 ⇒ previous == current ⇒ 恆真。SA 實測
+# 把 `_MAX_BASELINE_ENTRIES` 放大十餘倍後 commit，本類全綠、鎖檔內容與門檻的對照零訊號。
+#
+# 為什麼凍結常數不會重蹈恆真覆轍：git 導出的基準會被「commit」這個動作自己同步過去，而
+# 每個閘門都在那之後才跑；簽入原始碼的字面常數則 commit 不動它、checkout 不動它、CI 乾淨樹
+# 也不動它——只有人手改那一行才會變。於是「門檻」與「基準」是兩個獨立可變的量，比較在任何
+# 時點、任何消費者（髒樹／pre-commit／pre-push／CI）都非退化。整條 git 依賴一併消失，
+# 連帶消滅舊實作的另一面 fail-open：`previous is None`（git 取不到）時整支 skip。
+# 論證與形狀逐字同 `tools/check_script_parity.py` 的 `_TIER_BASELINE`（R67-H14），
+# 該處是照抄本檔而來的下游——本輪把上游本體也修了。
+#
+# 殘餘面（誠實揭露，與 R67-H14 同一句）：同一個 commit 內**同時**改門檻與本組凍結基準仍可
+# 通過——這是所有釘選式棘輪共有的邊界，與「零成本、隱形、自動」的舊行為是不同量級；且本組
+# 是純量，調升在 diff 上就是一個變大的數字，方向一望即知（不像 tier 名稱那樣需要對照表）。
+# 本性質有機械鎖：`TestShrinkOnlyRatchet::test_ratchet_is_independent_of_git_state`
+# （禁用 subprocess 仍須完整運作），舊實作在該鎖下會直接紅。
+# 另有一道獨立張力：`_BASELINE_ID_CEILING` 同時被 `TestCriterionIsBoundToAdrProse` 綁在
+# ADR §4.3.4 的宣告句上 ⇒ 調升它還得動 ADR，那是本檔之外的第三個站點。
+_FROZEN_MAX_BASELINE_ENTRIES = 8
+_FROZEN_BASELINE_ID_CEILING = "DEF-101-526"
 
-def read_previous_self_source() -> str | None:
-    """本檔在 HEAD 的內容；HEAD 沒有本檔（新增檔／首版）時回 `None`。"""
-    proc = subprocess.run(
-        ["git", "-C", str(_REPO), "show", f"HEAD:{_SELF_REL}"],
-        capture_output=True, text=True, encoding="utf-8", errors="replace",
-    )
-    return proc.stdout if proc.returncode == 0 else None
 
+def _shrink_only_problems(
+    previous_max: int | None, previous_ceiling: str | None,
+    current_max: int, current_ceiling: str,
+) -> list[str]:
+    """判準核心（唯一實作）：比對「上一版」與現版的兩個 shrink-only 常數。
 
-def ratchet_problems(previous_source: str, current_max: int, current_ceiling: str) -> list[str]:
-    """比對上一版與現版的兩個 shrink-only 常數；回傳違規說明（空＝只降不升）。
+    `previous_*` 為 `None` 代表**抽取失敗**（常數被改名／改寫），一律當違規報出來，
+    不得靜默略過——那是最需要被看見的失敗模式（同型教訓＝`_PENDING_MIGRATION_SITES`
+    靠「不加自檢」變成永久豁免）。
 
-    抽不到常數時**紅而不是略過**：常數被改名／改寫就等於棘輪失效，那是最需要被看見的
-    失敗模式（同型教訓＝`_PENDING_MIGRATION_SITES` 靠「不加自檢」變成永久豁免）。
+    `ratchet_problems()`（合成上一版原始碼，鑑別力載具）與 `frozen_ratchet_problems()`
+    （凍結基準，production 路徑）共用本函式——判準只有一份，不會出現「測試驗的那條路和
+    production 走的那條路判準不同」。
     """
     problems: list[str] = []
-    m = _RATCHET_MAX_RE.search(previous_source)
-    if m is None:
+    if previous_max is None:
         problems.append(
             "上一版抽不到 _MAX_BASELINE_ENTRIES —— 常數被改名／改寫？棘輪等於失效，拒絕靜默通過"
         )
-    elif current_max > int(m.group(1)):
+    elif current_max > previous_max:
         problems.append(
-            f"_MAX_BASELINE_ENTRIES 由 {m.group(1)} 調升為 {current_max} —— 本常數只准往下改"
+            f"_MAX_BASELINE_ENTRIES 由 {previous_max} 調升為 {current_max} —— 本常數只准往下改"
         )
-    m = _RATCHET_CEILING_RE.search(previous_source)
-    if m is None:
+    if previous_ceiling is None:
         problems.append(
             "上一版抽不到 _BASELINE_ID_CEILING —— 常數被改名／改寫？棘輪等於失效，拒絕靜默通過"
         )
-    elif _id_key(current_ceiling) > _id_key(m.group(1)):
+    elif _id_key(current_ceiling) > _id_key(previous_ceiling):
         problems.append(
-            f"_BASELINE_ID_CEILING 由 {m.group(1)} 調升為 {current_ceiling} —— 調升上界"
+            f"_BASELINE_ID_CEILING 由 {previous_ceiling} 調升為 {current_ceiling} —— 調升上界"
             "等於為 ADR 落地後的新列開門"
         )
     return problems
+
+
+def ratchet_problems(previous_source: str, current_max: int, current_ceiling: str) -> list[str]:
+    """**鑑別力載具**：比對任意一份「上一版原始碼」與現版常數；空清單＝只降不升。
+
+    🔴 R67 round 2：production **不再**把 `git show HEAD:<本檔>` 餵進來（見上方凍結基準
+    區塊的恆真論證）。本函式保留的職責是「抽取器 + 判準」的鑑別力載具：測試以合成的
+    上一版原始碼逐一注入調升／下修／改名形態，證明會紅／不會誤紅；而判準核心
+    `_shrink_only_problems()` 與 production 的 `frozen_ratchet_problems()` 是同一份實作。
+    """
+    m = _RATCHET_MAX_RE.search(previous_source)
+    previous_max = int(m.group(1)) if m else None
+    m = _RATCHET_CEILING_RE.search(previous_source)
+    previous_ceiling = m.group(1) if m else None
+    return _shrink_only_problems(previous_max, previous_ceiling, current_max, current_ceiling)
+
+
+def frozen_ratchet_problems(
+    current_max: int | None = None, current_ceiling: str | None = None,
+    frozen_max: int | None = None, frozen_ceiling: str | None = None,
+) -> list[str]:
+    """**production 棘輪**：現行門檻 vs 簽入本檔的凍結基準（R67 round 2 SA-R67-08）。
+
+    刻意**不呼叫 git**：基準是簽入的字面常數，故本函式在髒樹／乾淨樹／CI checkout 行為
+    完全相同。`test_ratchet_is_independent_of_git_state` 以「禁用 subprocess」機械守住。
+    """
+    return _shrink_only_problems(
+        _FROZEN_MAX_BASELINE_ENTRIES if frozen_max is None else frozen_max,
+        _FROZEN_BASELINE_ID_CEILING if frozen_ceiling is None else frozen_ceiling,
+        _MAX_BASELINE_ENTRIES if current_max is None else current_max,
+        _BASELINE_ID_CEILING if current_ceiling is None else current_ceiling,
+    )
 
 
 # ---------------------------------------------------------------- 護欄層檔數棘輪（DEF-101-561③）
@@ -614,40 +681,34 @@ def guard_files_in_worktree() -> frozenset[str]:
     )
 
 
-def read_head_guard_files() -> frozenset[str] | None:
-    """HEAD 版的鎖檔集合；HEAD 尚無 `tools/tests/` 時回 `None`（首個 commit 空轉窗口）。
-
-    用 `git ls-tree -r` 而不是 `git show HEAD:<目錄>`：後者只列 top-level 條目
-    （子目錄印成 `name/`），與工作樹側的遞迴列舉不對稱——那正是上面 WHY 講的同一個坑。
-    """
-    proc = subprocess.run(
-        ["git", "-C", str(_REPO), "ls-tree", "-r", "--name-only", "HEAD", "--",
-         f"{_GUARD_DIR_REL}/"],
-        capture_output=True, text=True, encoding="utf-8", errors="replace",
-    )
-    if proc.returncode != 0:
-        return None
-    names = frozenset(
-        ln.strip() for ln in proc.stdout.splitlines()
-        if ln.strip() and fnmatch.fnmatch(Path(ln.strip()).name, _GUARD_FILE_PATTERN)
-    )
-    return names or None
+# 🔴🔴 R67 round 2（SA-R67-08）：本棘輪的比對基準同 (c) 一併脫離 git 狀態。
+# 原實作走 `git ls-tree -r HEAD -- tools/tests/`，恆真理由與 (c) 逐字相同（pre-push／CI 都
+# 在 commit 之後跑 ⇒ HEAD == 工作樹 ⇒ 比較退化）。原 docstring 把「無常數要維護、沒有第二個
+# stale 站點」寫成優點——實測顯示那個優點的代價是「這道鎖在它唯一被消費的時點沒有作用」，
+# 兩者無法兼得時，寧可付一個 stale 站點的維護成本。
+#
+# 凍結的是**數量**而不是檔名集合：`DEF-101-561③` 要的語意是「禁止新增、只准合併／刪除」，
+# 改名（一增一減、淨增為零）是合法的，既有對照組 `test_renaming_a_guard_file_is_not_flagged`
+# 就在守這件事；凍結檔名集合會讓每次改名都翻紅＝把裁決超譯成「檔名不准動」。
+# 代價（誠實揭露）：訊息無法再逐字指名「新增的是哪一支」，改為附現查指令；合併／刪除後
+# 上限不再自動跟著降，須連同本行下修——由 `test_frozen_guard_count_matches_the_worktree`
+# 強制（現況與凍結值必須逐字相等，多退少補都會紅）。
+_FROZEN_GUARD_FILE_COUNT = 53
 
 
-def guard_count_problems(previous: frozenset[str], current: frozenset[str]) -> list[str]:
-    """護欄層檔數棘輪：現版鎖檔數不得高於上一版。回傳違規說明（空＝未調升）。
+def guard_count_problems(previous_count: int, current: frozenset[str]) -> list[str]:
+    """護欄層檔數棘輪：現版鎖檔數不得高於凍結基準。回傳違規說明（空＝未調升）。
 
     比的是**數量**而非集合：改名（一增一減）、以及「合併成一支再刪掉舊的」都是零淨增，
     照綠；只增不減才紅。這是 `DEF-101-561③` 逐字要的語意（「禁止新增鎖檔、只准合併／
     刪除」），不是「檔名不准動」。
     """
-    if len(current) <= len(previous):
+    if len(current) <= previous_count:
         return []
-    added = sorted(current - previous)
-    detail = ("新增：" + "、".join(added)) if added else "（新增檔名與上一版重疊，請查改名）"
     return [
-        f"{_GUARD_DIR_REL} 鎖檔數由 {len(previous)} 調升為 {len(current)}——"
-        f"DEF-101-561③ 已裁定「R61 開輪即禁止新增鎖檔、只准合併／刪除」。{detail}。"
+        f"{_GUARD_DIR_REL} 鎖檔數由 {previous_count} 調升為 {len(current)}——"
+        "DEF-101-561③ 已裁定「R61 開輪即禁止新增鎖檔、只准合併／刪除」。"
+        "現查是哪一支新增：`git status --porcelain tools/tests/`＋`git diff --stat`。"
         "合法作法：把新判準**擴充進既有鎖檔**，或先合併／刪除等量的舊鎖檔再加。"
     ]
 
@@ -1555,27 +1616,69 @@ class TestShrinkOnlyRatchet(unittest.TestCase):
         for problem in problems:
             self.assertIn("棘輪等於失效", problem)
 
-    def test_constants_never_increase_versus_head(self) -> None:
-        """真棘輪：與 HEAD 版本比對。
+    def test_constants_never_increase_versus_frozen_baseline(self) -> None:
+        """真棘輪（R67 round 2 起）：與**簽入本檔的凍結基準**比對，與 git 狀態無關。
 
-        HEAD 尚無本檔（新增檔／首版）時 `skipTest`——**不是靜默 return**：
-        `run_root_unittests.py::report_all_skips` 會逐處印出全部 skip 的 id 與理由，
-        所以這個 fallback 在每一次閘門輸出裡都看得見。它也不是永久逃生口：本檔一旦進入
-        HEAD，棘輪即永久生效，要再回到此分支必須在 diff 裡把本檔從版控刪掉（藏不住）。
-        鑑別力另由本類的合成上一版測試永久釘住，不依賴 git 狀態。
+        取代原本的 `test_constants_never_increase_versus_head`：那一支在它唯一被消費的
+        時點（pre-push／CI，皆在 commit 之後）恆真，SA 沙箱實證門檻可被單方面放大十餘倍
+        而全綠。現版在髒樹／乾淨樹／CI checkout 行為完全相同，也不再有「取不到基準 ⇒
+        skip」的 fail-open 分支可走。
         """
-        previous = read_previous_self_source()
-        if previous is None:
-            self.skipTest(
-                f"HEAD 尚無 {_SELF_REL}（本檔為未提交的新增檔）⇒ 無上一版可比，棘輪本輪空轉；"
-                "commit 後即永久生效。鑑別力見 test_raising_either_constant_is_detected"
-            )
-        problems = ratchet_problems(previous, _MAX_BASELINE_ENTRIES, _BASELINE_ID_CEILING)
+        problems = frozen_ratchet_problems()
         self.assertEqual(
             problems, [],
-            "shrink-only 棘輪被違反（與 HEAD 版本比對）：\n  " + "\n  ".join(problems)
+            "shrink-only 棘輪被違反（與凍結基準比對）：\n  " + "\n  ".join(problems)
             + "\n這兩個常數是「哪些列算舊列」與「能登記幾筆」的唯一開關，調升等於為新列開門。",
         )
+
+    def test_ratchet_is_independent_of_git_state(self) -> None:
+        """🔴 核心結構鎖（SA-R67-08）：棘輪全程不得呼叫外部行程（git）。
+
+        舊實作在此鎖下必紅（它跑 `git show HEAD:<本檔>`）。這一條同時封死兩件事：
+        (1) 基準被 commit 自我對齊的恆真陷阱；(2)「git 取不到基準 ⇒ 整支 skip」的
+        fail-open。只鎖某幾個常數值是不夠的——那樣任何人把基準改回 git 導出量都沒有訊號。
+        """
+        def _boom(*_a, **_kw):  # pragma: no cover - 只為證明沒被呼叫
+            raise AssertionError(
+                "棘輪呼叫了外部行程——基準又變回 git 導出量了（SA-R67-08 回歸）"
+            )
+
+        with mock.patch("subprocess.run", _boom), \
+             mock.patch("subprocess.check_output", _boom), \
+             mock.patch("subprocess.Popen", _boom):
+            self.assertEqual(frozen_ratchet_problems(), [])
+            self.assertEqual(
+                guard_count_problems(_FROZEN_GUARD_FILE_COUNT, guard_files_in_worktree()), []
+            )
+
+    def test_raising_a_constant_is_red_even_when_the_worktree_is_clean(self) -> None:
+        """缺陷注入（本次修法存在的理由）：只改門檻、基準不動 ⇒ 必紅。
+
+        這正是舊實作在 commit 之後會放行的情境（SA 沙箱：改大→commit→全綠）。現在與 git
+        狀態無關，恆紅。兩個常數各注入一次，證明不是只有其中一個掛著鎖。
+        """
+        raised = frozen_ratchet_problems(current_max=_FROZEN_MAX_BASELINE_ENTRIES + 1)
+        self.assertTrue(
+            any("_MAX_BASELINE_ENTRIES" in p for p in raised),
+            f"調升 _MAX_BASELINE_ENTRIES 未被偵測，實得：{raised}",
+        )
+        moved = frozen_ratchet_problems(
+            current_ceiling=_synthetic_id(999, 1),
+        )
+        self.assertTrue(
+            any("_BASELINE_ID_CEILING" in p for p in moved),
+            f"調升 _BASELINE_ID_CEILING 未被偵測，實得：{moved}",
+        )
+
+    def test_frozen_baseline_matches_the_live_thresholds(self) -> None:
+        """基準新鮮度：凍結基準必須與現行門檻逐字相等。
+
+        WHY（維持張力，同 `_TIER_BASELINE` 的新鮮度鎖）：門檻合法下修後若不同步下修基準，
+        基準就會停在舊高點，之後可以無聲地把門檻「調回」那個高點——棘輪的餘裕就是它的破口。
+        要求相等 ⇒ 任何門檻異動都必須動到基準那一行，方向在 diff 上一望即知。
+        """
+        self.assertEqual(_MAX_BASELINE_ENTRIES, _FROZEN_MAX_BASELINE_ENTRIES)
+        self.assertEqual(_BASELINE_ID_CEILING, _FROZEN_BASELINE_ID_CEILING)
 
 
 class TestGuardFileCountShrinkOnlyRatchet(unittest.TestCase):
@@ -1589,13 +1692,16 @@ class TestGuardFileCountShrinkOnlyRatchet(unittest.TestCase):
     上面的 `TestShrinkOnlyRatchet`（ADR §4.4 指定的照抄對象）。
 
     🔴 語意與生效時點（動它之前先搞清楚基準點）：
-      · 比的是**工作樹 vs HEAD**，不是「vs 某個寫死的基線數」。所以沒有常數要維護，也就
-        沒有第二個 stale 站點；合併掉一支之後上限自動跟著降（棘輪自緊）。這一點與 (c) 的
-        兩個常數棘輪刻意不同——那兩個常數有獨立語意必須留在源碼裡，檔數沒有。
-      · 因此它**在 R60 收輪前對 HEAD 是綠的**：本輪其餘包不新增 `tools/tests/*.py`，
-        工作樹＝HEAD。R60 收輪 commit 一落地，HEAD 就是本輪收輪狀態，**R61 再新增一支
-        即紅**——那正是 `DEF-101-561③` 要的效果。綠不等於空轉：鑑別力由本類的合成注入
-        永久釘住，且工作樹側列舉的非空由自錨斷言保證。
+      · 🔴🔴 **R67 round 2 訂正（SA-R67-08）**：原本比的是「工作樹 vs HEAD」，理由寫著
+        「沒有常數要維護、沒有第二個 stale 站點、合併後上限自動跟著降（棘輪自緊）」。
+        那些優點是真的，但代價是**這道鎖在它唯一被消費的時點沒有作用**：pre-push 的
+        root-infra leg 與三支 CI 都在 commit 之後跑，HEAD 逐字等於工作樹 ⇒ 比較退化。
+        現改為與簽入本檔的 `_FROZEN_GUARD_FILE_COUNT` 比對；自緊性質改由
+        `test_frozen_guard_count_matches_the_worktree` 以「凍結值必須等於現況」人工維持
+        （多退少補都紅），代價是多一個 stale 站點——與「鎖形同虛設」相比，這個代價值得付。
+      · 因此它現在**任何時點都有牙**：新增一支 `tools/tests/test_*.py`（不論 commit 與否）
+        即紅。綠不等於空轉：鑑別力由本類的合成注入永久釘住，且工作樹側列舉的非空由自錨
+        斷言保證。
       · 計數面＝根層閘門的 discovery pattern ⇒ 「閘門真的會跑的那批鎖檔」。
         `_*.py` 這種**共享零件刻意不算**：`DEF-101-561①` 指定的 R61 合併動作本身就是
         「把四支 AST helper 抽成一支共享剝除層」，把零件算進來會讓那個**被裁決指定的
@@ -1615,7 +1721,7 @@ class TestGuardFileCountShrinkOnlyRatchet(unittest.TestCase):
             f"工作樹列舉器找不到本檔（{_SELF_REL}）——pattern／路徑寫壞了？"
             "列舉器一旦回空集合，棘輪比較會恆真通過＝靜默失效",
         )
-        self.assertEqual(guard_count_problems(current, current), [])
+        self.assertEqual(guard_count_problems(len(current), current), [])
 
     def test_the_counted_surface_is_the_root_gate_pattern(self) -> None:
         """SSOT 綁定：計數面必須等於根層閘門 discover 用的 pattern，兩邊漂移即紅。
@@ -1634,21 +1740,25 @@ class TestGuardFileCountShrinkOnlyRatchet(unittest.TestCase):
         )
 
     def test_adding_a_guard_file_is_detected(self) -> None:
-        """注入：上一版是現況、現版多一支鎖檔 ⇒ 必須紅並逐字指名新增的那一支與裁決編號。"""
+        """注入：現版比凍結基準多一支鎖檔 ⇒ 必須紅、指回裁決編號並附現查指令。
+
+        （R67 round 2 起訊息不再逐字指名新增檔——基準是純量而非檔名集合，理由見
+        `_FROZEN_GUARD_FILE_COUNT` 上方：凍結檔名集合會讓合法的改名也翻紅。）
+        """
         current = guard_files_in_worktree()
         newcomer = f"{_GUARD_DIR_REL}/{_GUARD_FILE_PATTERN.replace('*', 'synthetic_new_lock')}"
         self.assertNotIn(newcomer, current, "合成檔名撞到真實檔，換一個名字")
-        problems = guard_count_problems(current, current | {newcomer})
+        problems = guard_count_problems(len(current), current | {newcomer})
         self.assertEqual(len(problems), 1, f"預期恰一處違規，實得：{problems}")
-        self.assertIn(newcomer, problems[0])
         self.assertIn("561", problems[0], "訊息必須指回裁決本體，否則讀者不知道為何被擋")
+        self.assertIn("git status", problems[0], "訊息必須附現查指令取代原本的逐字指名")
 
     def test_merging_or_deleting_guard_files_is_accepted(self) -> None:
         """對照組：合併／刪除（淨減）與完全不動 ⇒ 零違規。棘輪只擋調升。"""
         current = guard_files_in_worktree()
-        self.assertEqual(guard_count_problems(current, current), [])
+        self.assertEqual(guard_count_problems(len(current), current), [])
         merged = current - {_SELF_REL}
-        self.assertEqual(guard_count_problems(current, merged), [])
+        self.assertEqual(guard_count_problems(len(current), merged), [])
 
     def test_renaming_a_guard_file_is_not_flagged(self) -> None:
         """對照組：改名＝一增一減、淨增為零 ⇒ 綠。
@@ -1661,30 +1771,849 @@ class TestGuardFileCountShrinkOnlyRatchet(unittest.TestCase):
             f"{_GUARD_DIR_REL}/{_GUARD_FILE_PATTERN.replace('*', 'renamed_lock')}"
         }
         self.assertEqual(len(renamed), len(current), "改名構造必須是等量替換")
-        self.assertEqual(guard_count_problems(current, renamed), [])
+        self.assertEqual(guard_count_problems(len(current), renamed), [])
 
-    def test_guard_file_count_never_rises_versus_head(self) -> None:
-        """真棘輪：工作樹鎖檔數與 HEAD 比對，只准往下。
+    def test_guard_file_count_never_rises_versus_frozen_baseline(self) -> None:
+        """真棘輪（R67 round 2 起）：工作樹鎖檔數 vs 凍結基準，只准往下。
 
-        HEAD 尚無 `tools/tests/`（首個 commit）時 `skipTest`——**不是靜默 return**，理由
-        與 `TestShrinkOnlyRatchet::test_constants_never_increase_versus_head` 同：
-        `run_root_unittests.py::report_all_skips` 會逐處印出 skip 的 id 與理由。
-        本 repo 的 `tools/tests/` 早已在 HEAD，故實務上這條分支不會被走到。
+        取代原本的 `..._versus_head`：那一支在 pre-push／CI 這些唯一消費它的時點恆真
+        （HEAD == 工作樹），且帶著「git 取不到 ⇒ skip」的 fail-open 分支。現版無 git 依賴。
         """
-        previous = read_head_guard_files()
-        if previous is None:
-            self.skipTest(
-                f"HEAD 尚無 {_GUARD_DIR_REL}/ 下的鎖檔 ⇒ 無上一版可比，檔數棘輪本輪空轉；"
-                "鑑別力見 test_adding_a_guard_file_is_detected"
-            )
-        problems = guard_count_problems(previous, guard_files_in_worktree())
+        problems = guard_count_problems(
+            _FROZEN_GUARD_FILE_COUNT, guard_files_in_worktree()
+        )
         self.assertEqual(
             problems, [],
-            "護欄層檔數棘輪被違反（工作樹 vs HEAD）：\n  " + "\n  ".join(problems)
+            "護欄層檔數棘輪被違反（工作樹 vs 凍結基準）：\n  " + "\n  ".join(problems)
             + "\n這道棘輪是 DEF-101-561③／DEF-101-565 那條架構級裁決的機械載體："
             "護欄層已比它所護的生產碼還大，且連續數輪的新發現零筆落在生產碼上。"
             "要新增鎖檔請先合併掉等量的舊鎖檔——這不是流程刁難，是該裁決的字面要求。",
         )
+
+    def test_frozen_guard_count_matches_the_worktree(self) -> None:
+        """基準新鮮度：凍結值必須與工作樹現況逐字相等（多退少補都紅）。
+
+        WHY：本棘輪原本的「自緊」性質（合併掉之後上限自動跟著降）來自對 HEAD 現查，脫離
+        git 後就沒了；若凍結值停在舊高點，之後可以無聲地把鎖檔數「加回」那個高點——餘裕
+        就是破口。本鎖把自緊改成人工但強制：合併／刪除後不同步下修即紅。
+        """
+        current = len(guard_files_in_worktree())
+        self.assertEqual(
+            current, _FROZEN_GUARD_FILE_COUNT,
+            "工作樹鎖檔數與 _FROZEN_GUARD_FILE_COUNT 已漂移——"
+            "合併／刪除後請同步下修該常數以維持棘輪張力；"
+            "若是新增，請先讀 DEF-101-561③（本檔上方 (d) 段）",
+        )
+
+
+# ================================================================ ADR §9.1／掃描維度 常設自檢（SC-*）
+# 🔴 本段落地的是 **SA-R67-03**：`ADR-XPLAT-002` §9.1 與 `CrossPlatform_Scan_Dimensions.md`
+# 〈常設自檢〉把本輪三項頭號架構異動（Phase 3 解封／平台前提中立化／§8 交棒表機制化）的
+# **唯一防回流機制**寫成了幾條 grep 指令，而那些指令在全 repo **沒有任何可執行消費者**——
+# 複審員注入違規形態後，根層測試與根層工具全數綠燈。依 `CrossPlatform_Scan_Dimensions.md`
+# Scan-H 判準⑤「可重跑但沒有任何閘門看它的 rc ＝ 不可重跑」，它們嚴格說是「規格 ＋ 已驗證
+# 的實作」，**不是活體守門**。本段把它們接上閘門的 rc（本檔在 `run_root_unittests.py` 的
+# discover 收集面內 ⇒ 自動被 pre-push root-infra leg 與三支 CI 消費）。
+#
+# 宿主選擇（§9.1 末段已具名指派，本段沿用）：**擴充本檔而非新增鎖檔**——
+# `TestGuardFileCountShrinkOnlyRatchet` 的護欄層檔數棘輪對 `tools/tests/test_*.py` 只准降不准升
+# （DEF-101-561③），且 `ADR-XPLAT-002` §4.2 rule 1 明文「不要一個 finding 一支鎖」。
+#
+# 🔴 從 shell 規格搬進 Python 時**刻意改掉的語意**（照抄原形態會得到假鎖）：
+#   (1) SC-7 的規格形態尾巴掛著 `| grep .`，因為 `comm` **無論有無差集都 exit 0**，直接讀它的
+#       rc 會恆綠（規格自己已逐字警告這一點）。本檔改用 **Python 集合差集**，不依賴 shell 方言
+#       （規格末段也建議這麼搬），rc 語意由「回傳的違規清單是否為空」決定。
+#   (2) 其餘各條的規格形態是 `grep`（rc=1 且零輸出＝通過）。本檔一律回傳「違規說明字串的
+#       list」，空 list ＝通過——測試失敗訊息因此能逐條印出違規行，比一個 rc 更能指路。
+#   (3) 各條的**掃描面崩塌**（章節標題被改寫、帳本家族枚舉壞掉、維度表表頭形態被改）一律
+#       回報成違規而非靜默零命中：`grep`／`awk` 對「找不到區段」回的是空輸出＝在原語意下
+#       等同通過，那正是本 repo 已多次踩到的 fail-open。
+# 一處**刻意不改**：SC-2／SC-3／SC-5 的區段界線逐字複刻 `awk` 的 range pattern 語意
+# （含兩端界線列、且區段結束後可再次觸發），見 `awk_range()`——判準搬家不得順手改語意。
+_ADR2 = (_REPO / "docs" / "04_planning" / "ADR"
+         / "ADR-XPLAT-002-platform-surface-reduction.md")
+_SCAN_DIMS = _REPO / "docs" / "06_quality" / "CrossPlatform_Scan_Dimensions.md"
+
+# 規格出處標籤。ADR 側宣告的 `# SC-N` 集合必須與本檔實作的集合**逐字相等**（雙向），
+# 由 `TestSection91SpecIsBoundToTheseLocks` 機械綁定；條數一律現查，本檔不得寫死
+# ——SC-6 管的正是「把 §9.1 的條數寫死」這件事，本段自己先遵守。
+_SPEC_ADR2 = "ADR-XPLAT-002 §9.1"
+_SPEC_SCAN = "CrossPlatform_Scan_Dimensions.md〈常設自檢〉"
+
+# §8 的區段界線。SC-2／SC-3／SC-5 **一律**只掃「交棒表本體」（`## 8.` 起至 `### 8.1` 止）：
+# §8 表頭規則 1／3 的標的逐字就是表內的「承接者欄」與「完成判準欄」，規則 2 的容器是 §8.1。
+#
+# 🔴 R67 round 4（SA2-R67-01）把 SC-2／SC-3 的下界由 `_SEC8_END_ALL` 收窄到此。原版掃 §8 全區，
+# 於是 §8.3——本 repo 自己指定的「逐字保全散文區」——也落在射程內，而這三條**都沒有同行豁免**
+# （只有 SC-1／SC-4 走 `_line_hits_with_waiver`）。後果可列舉：下一次照本輪體例把一句含
+# `**R62+**` 或千分位常數的 §8 原文保全進 §8.3，該鎖即**永紅**，而唯二出路都是本 repo 已判過
+# 更糟的——改寫保全原文（違反逐字保全紀律），或臨時加豁免（「誤報的鎖最後一定被加豁免繞過，
+# 比沒有鎖更糟」，見本檔多處與 `DEF-101-700` 的拒收理由）。
+# ⇒ 豁免路徑刻意**不是**新加一枚標記，而是沿用 §9.1 邊界 (b) 已裁決的既有出口：**把逐字原句
+#   移進 §8.3 散文區**。界線對齊後，「§8.3 是這幾條共同的保全區」才從口號變成一句真話。
+# `_SEC8_END_ALL` 保留給 `test_the_scan_surface_did_not_collapse`——它以「全區嚴格長於本體」
+# 反證 `### 8.1` 界線還活著（界線一旦失效，這幾條會一起退化回掃全區，正是本次修掉的形態）。
+_SEC8_START = r"^## 8\."
+_SEC8_END_ALL = r"^## 9\."
+_SEC8_END_TABLE = r"^### 8\.1"
+
+# ADR §9.1 的區段界線與 SC 條目宣告樣式（`# SC-1  標的：…`）。
+_ADR2_SEC91_HEAD = "### 9.1 "
+_ADR2_SEC91_END = "## 10."
+_SC_DECL_RE = re.compile(r"^# (SC-\d+)\b", re.M)
+# 掃描維度檔〈常設自檢〉的區段界線。
+_SCAN_SELFCHECK_HEAD = "## 常設自檢"
+_SCAN_SELFCHECK_END = "## 邊界"
+
+
+class Corpus(NamedTuple):
+    """SC-* 各條的掃描面。注入測試一律以 `_replace()` 換掉其中一份，**不碰磁碟**。"""
+
+    adr2: str
+    adr1: str
+    scan: str
+    family: tuple[tuple[str, str], ...]
+
+
+def read_corpus() -> Corpus:
+    """現查掃描面。帳本家族枚舉仍走 `read_family()`（＝`ADL._family_files()` 家族 SSOT）。"""
+    return Corpus(
+        adr2=_ADR2.read_text(encoding="utf-8-sig"),
+        adr1=_ADR.read_text(encoding="utf-8-sig"),
+        scan=_SCAN_DIMS.read_text(encoding="utf-8-sig"),
+        family=tuple(read_family()),
+    )
+
+
+def awk_range(text: str, start: str, end: str) -> list[tuple[int, str]]:
+    """複刻 `awk '/start/,/end/'` 的逐行選取語意，回傳 `(原始行號, 行內容)`（行號自 1 起）。
+
+    為何不用既有的 `_slice_section()`：後者以 `startswith` 取**單一**區段，而 awk 的 range
+    pattern 在區段結束後**可再次觸發**，且「同一列同時符合兩端」時只選該列。SC-2／SC-3／SC-5
+    的規格逐字寫的是 awk 形態，判準搬家不得順手改語意（改了就不再是「照抄即可」的規格）。
+    抓不到區段時回空 list——**呼叫端必須把空 list 當成掃描面崩塌回報**，見 `_section8_hits()`。
+    """
+    start_re, end_re = re.compile(start), re.compile(end)
+    out: list[tuple[int, str]] = []
+    inside = False
+    for lineno, line in enumerate(text.splitlines(), 1):
+        if not inside:
+            if start_re.search(line):
+                out.append((lineno, line))
+                inside = not end_re.search(line)
+            continue
+        out.append((lineno, line))
+        if end_re.search(line):
+            inside = False
+    return out
+
+
+def _section8_hits(
+    adr2: str, end: str, pattern: re.Pattern[str], sc: str, what: str
+) -> list[str]:
+    """§8 某種切法內的樣式命中；**區段抽不到就回報違規**，不得靜默零命中假綠。"""
+    rows = awk_range(adr2, _SEC8_START, end)
+    if not rows:
+        return [
+            f"{sc}：ADR-XPLAT-002 抓不到 {_SEC8_START!r}…{end!r} 這段區間 — 掃描面已崩塌"
+            "（章節標題被改寫？），本判準拒絕靜默通過；請同步本檔的 _SEC8_* 界線常數"
+        ]
+    return [
+        f"{sc} ADR-XPLAT-002:{lineno}：{what} ← {line.strip()}"
+        for lineno, line in rows
+        if pattern.search(line)
+    ]
+
+
+def _line_hits_with_waiver(
+    docs: tuple[tuple[str, str], ...], pattern: str | re.Pattern[str],
+    waiver: str, sc: str, what: str,
+) -> list[str]:
+    """逐行掃 `docs`，命中 `pattern` 且**同一行**沒有 `waiver` 標記者即違規。
+
+    🔴 豁免必須**逐行**判定：這兩份 ADR 內有**單行巨欄**（表格狀態欄一格上千字、在檔案裡
+    就是一行），若容許跨行豁免，一個標記會把整格放行。落地本段的前一包第一版即踩過這個坑，
+    改成「逐字原句移到散文區、不掛豁免」才修掉。
+
+    🔴 已掛豁免者另要求**標記後面必須有理由**（規格逐字：「掛豁免**並寫理由**」「理由必須
+    寫在標記後面」）——`grep` 形態表達不了這一條，搬進 Python 才做得到。射程刻意只到
+    「**同時**含違規 token 與標記」的行：規格自己的 grep 指令與說明散文也會出現標記字串，
+    把它們一起判進來就是自製誤報，而誤報的鎖最後一定被加豁免繞過（比沒有鎖更糟）。
+    """
+    def hit(line: str) -> bool:
+        if isinstance(pattern, re.Pattern):
+            return pattern.search(line) is not None
+        return pattern in line
+
+    problems = []
+    for label, text in docs:
+        for lineno, line in enumerate(text.splitlines(), 1):
+            if not hit(line):
+                continue
+            if waiver not in line:
+                problems.append(f"{sc} {label}:{lineno}：{what} ← {line.strip()}")
+                continue
+            reason = line.split(waiver, 1)[1].strip().removesuffix("-->").strip()
+            if not reason:
+                problems.append(
+                    f"{sc} {label}:{lineno}：豁免標記 `{waiver}` 後面沒有理由 — "
+                    f"無理由的豁免就是後門，不是豁免 ← {line.strip()}"
+                )
+    return problems
+
+
+def _adr_pair(c: Corpus) -> tuple[tuple[str, str], ...]:
+    return (("ADR-XPLAT-002", c.adr2), ("ADR-XPLAT-001", c.adr1))
+
+
+# ---- SC-1：兩份 ADR 不得殘留未加引號的 `--include=<glob>` --------------------------------
+_SC1_BAD_TOKEN = "--include=*"
+_SC1_WAIVER = "zsh-glob-ok:"
+
+
+def sc1_no_unquoted_include_glob(c: Corpus) -> list[str]:
+    """WHY：zsh 預設 `nomatch`，未加引號的 glob 在 **grep 被呼叫之前**就讓整條指令 abort
+    （DEF-101-479／507／508 同族）。ADR 是寫給未來每一輪照抄重跑的，抄到壞形態的人看到的
+    是與判準本身無關的怪錯。豁免標記沿用 `test_extras_quoting_zsh_safety.py` 的語言中立慣例。
+    """
+    return _line_hits_with_waiver(
+        _adr_pair(c), _SC1_BAD_TOKEN, _SC1_WAIVER, "SC-1",
+        f"未加引號的 {_SC1_BAD_TOKEN}（zsh nomatch）；要逐字引述壞形態請在**同一行**"
+        f"掛 `{_SC1_WAIVER} <理由>`",
+    )
+
+
+# ---- SC-2：§8 全區不得出現 `**R<數字>+**` 形態的承接者 -----------------------------------
+_SC2_RE = re.compile(r"\*\*R[0-9]+\+\*\*")
+
+
+def sc2_no_open_ended_owner_in_section_8(c: Corpus) -> list[str]:
+    """WHY：`**R<n>+**` 是**永不到期的開放下界**，任何一輪都「還沒到」⇒ 交棒列永遠不會逾期
+    （§8 表頭規則 1）。射程＝§8 **交棒表本體**，因為規則 1 管的就是表內的承接者欄。
+
+    🔴 射程自述訂正（SA2-R67-01 以注入實測**證偽**原文）：原 docstring 逐字寫「刻意只抓粗體
+    形態：歷史列的刪除線與內文引述屬史料，不在射程內」。實測**只有前半為真**——`~~R64+~~`
+    （純刪除線、未加粗）確實逃逸，但 `~~**R62+**~~`（刪除線包住粗體）仍被 `_SC2_RE` 命中，
+    因為判準看的是內層那對星號。⇒ **刪除線不是豁免**。要逐字保全一句含粗體開放下界的原文，
+    出口是把它移進 §8.3 散文區（本條止於 `### 8.1`），不是包一層刪除線了事。
+    """
+    return _section8_hits(
+        c.adr2, _SEC8_END_TABLE, _SC2_RE, "SC-2",
+        "§8 交棒表本體出現永不到期的開放下界承接者"
+        "（規則 1 要求寫存在的輪次或明標「未指派」；逐字保全的原句請移入 §8.3 散文區）",
+    )
+
+
+# ---- SC-3：§8 全區不得寫死千分位量測常數 -------------------------------------------------
+_SC3_RE = re.compile(r"[0-9]{1,3},[0-9]{3}")
+
+
+def sc3_no_thousand_separated_constant_in_section_8(c: Corpus) -> list[str]:
+    """WHY：§8 表頭規則 3 明文「完成判準欄禁止寫死量測常數」——寫死的數字必過期，取值一律
+    走 §8.2 的 M-1~M-3 現查指令。同 `run_root_unittests.py::MIN_TESTS` 註記的 (b) 條紀律。
+
+    射程＝§8 **交棒表本體**（規則 3 管的就是表內的完成判準欄）；`### 8.1` 之後的子節刻意排除，
+    理由與 SC-2 同——§8.2 本來就在登載現查指令，§8.3 是逐字保全散文區（SA2-R67-01）。
+    ⚠️ 誠實劃界：本條只掃 §8 交棒表本體，**§4.3／§4.3.1 兩節裡的量測數字沒有機械承接者**
+    （ARCH-R67R2-01 即在該處抓到一個當輪就過期的成長率常數）。那是**已劃界的殘餘**、不是
+    隱形缺口，§9.1 邊界 (d) 已同步登記。
+    """
+    return _section8_hits(
+        c.adr2, _SEC8_END_TABLE, _SC3_RE, "SC-3",
+        "§8 交棒表本體寫死了千分位量測常數（規則 3 要求改寫成 §8.2 的現查指令）",
+    )
+
+
+# ---- SC-4：兩份 ADR 不得出現活的平台前提 -------------------------------------------------
+_SC4_RE = re.compile(r"本機(?:是|有|沒有|沒|為|只有|上有)")
+_SC4_WAIVER = "stale-premise-ok:"
+
+
+def sc4_no_live_platform_premise(c: Corpus) -> list[str]:
+    """WHY：把「當下這台機器是什麼平台」寫成 ADR 的常數，正是 §6 邊界 1 那句硬編前提能存活
+    七輪的病灶本身（平台缺席是**輪次屬性**，不是文件常數）。訂正段必須逐字引述被推翻的原句
+    才能讓讀者辨認版本，故提供同行豁免；動詞列舉的窄射程是規格已明載的邊界（ARCH-R67-02
+    即因原版少列一個動詞而讓一句活的前提整輪存活）。
+    """
+    return _line_hits_with_waiver(
+        _adr_pair(c), _SC4_RE, _SC4_WAIVER, "SC-4",
+        f"疑似活的平台前提；訂正段的逐字引述請在**同一行**掛 `{_SC4_WAIVER} <理由>`",
+    )
+
+
+# ---- SC-5：§8 交棒表本體不得出現外部環境當時狀態 -----------------------------------------
+_SC5_RE = re.compile(r"停擺|帳單|帳務|額度")
+
+
+def sc5_no_environment_state_in_the_handoff_table(c: Corpus) -> list[str]:
+    """WHY（ARCH-R67-04）：交棒表寫的是「誰接、接什麼」，而外部環境當時狀態（服務中斷、
+    計費、配額…）是會過期的**輪次資料**；混進交棒表就會讓一列因為環境敘述過期而整列失實。
+    環境狀態一律登記在 §6 邊界 1 的逐輪覆蓋表，逐字保全的歷史原句移入 §8.3 散文區。
+    射程刻意只到 `### 8.1`：8.1~8.3 是子節，不是交棒表本體。R67 round 4 起 SC-2／SC-3 也
+    對齊到同一條界線（SA2-R67-01），§8.3 因此是這幾條共同的保全出口，而非只對本條有效。
+    """
+    return _section8_hits(
+        c.adr2, _SEC8_END_TABLE, _SC5_RE, "SC-5",
+        "§8 交棒表本體出現外部環境當時狀態字樣（請移入 §8.3 散文區或 §6 邊界 1 覆蓋表）",
+    )
+
+
+# ---- SC-6：ADR 全檔不得寫死 §9.1 的條數 --------------------------------------------------
+_SC6_RE = re.compile(
+    r"(?:三|四|五|六)條.{0,12}(?:不變式|可轉紅)|(?:不變式|可轉紅).{0,12}(?:三|四|五|六)條"
+)
+
+
+def sc6_no_hardcoded_invariant_count(c: Corpus) -> list[str]:
+    """WHY（QA-R67-02）：一份自稱「搬進測試時逐字照抄即可」的規格若把自己的條目數寫錯，
+    照著標題辦事的人會**少搬一條，而少搬哪一條無從判定**。理由與 §8 表頭規則 3 同源：
+    寫死的數字必過期，而條數正是可現查的量（本檔的 `_SECTION_91_CHECKS` 與 `_SC_DECL_RE`
+    兩側都用現查，不寫死）。
+    """
+    return [
+        f"SC-6 ADR-XPLAT-002:{lineno}：寫死了 §9.1 的條數（條數請現查，勿寫進散文） ← "
+        f"{line.strip()}"
+        for lineno, line in enumerate(c.adr2.splitlines(), 1)
+        if _SC6_RE.search(line)
+    ]
+
+
+# ---- SC-7：帳本用過的每個單字母 Scan-<X> 代號都必須在維度表有定義列 ----------------------
+# `Scan-[A-Z][a-zA-Z]*` 先貪婪吃完整個代號，再只留「恰好單字母」者——這一步等價於規格裡的
+# `grep -xE 'Scan-[A-Z]'`，**不可省**：少了它，`Scan-Shell`／`Scan-Python` 這類 R14 期的
+# 臨時長名會被截斷成單字母而誤報（規格自陳實測踩過一次）。
+_SCAN_CODE_RE = re.compile(r"Scan-[A-Z][a-zA-Z]*")
+_SCAN_DEFINED_RE = re.compile(r"^\| \*\*(Scan-[A-Z])\*\*")
+_SCAN_CODE_LEN = len("Scan-") + 1
+
+
+def scan_codes_used(family: tuple[tuple[str, str], ...]) -> set[str]:
+    """缺陷帳本家族用過的單字母維度代號。"""
+    return {
+        m.group(0)
+        for _name, text in family
+        for m in _SCAN_CODE_RE.finditer(text)
+        if len(m.group(0)) == _SCAN_CODE_LEN
+    }
+
+
+def scan_codes_defined(scan_text: str) -> set[str]:
+    """`CrossPlatform_Scan_Dimensions.md` 維度表已定義的單字母代號。"""
+    return {
+        m.group(1)
+        for line in scan_text.splitlines()
+        if (m := _SCAN_DEFINED_RE.match(line))
+    }
+
+
+def sc7_every_used_scan_code_is_defined(c: Corpus) -> list[str]:
+    """WHY（SA-R67-04）：Scan-M 產出四筆缺陷卻在維度表零定義，唯一痕跡是同輪即被歸檔的
+    帳本檔——維度定義只活在某一輪的歸檔帳本裡＝把它綁死在該輪，下一輪掃描員讀維度表根本
+    看不到它。
+
+    🔴 **本條與規格形態的唯一差異就在 rc 語意**：規格寫成 `comm -23 <(…) <(…) | grep .`，
+    末尾那個 `| grep .` 不是裝飾——`comm` 無論有無差集都 exit 0，拿掉即成假驗證（恆綠）。
+    搬進 Python 後改用集合差集，「回傳空 list ＝通過」，不再有任何 rc 陷阱，也不依賴
+    `<(...)` 這個非 POSIX 的 process substitution。
+    """
+    used, defined = scan_codes_used(c.family), scan_codes_defined(c.scan)
+    if not used:
+        return [
+            "SC-7：帳本家族內找不到任何單字母 Scan-<X> 代號 — 掃描面已崩塌"
+            "（家族枚舉 SSOT 或代號樣式壞了？），本判準拒絕靜默通過"
+        ]
+    if not defined:
+        return [
+            "SC-7：維度表抽不到任何 `| **Scan-<X>**` 定義列 — 表格形態被改寫？"
+            "本判準拒絕靜默通過；請同步本檔的 _SCAN_DEFINED_RE"
+        ]
+    missing = sorted(used - defined)
+    if not missing:
+        return []
+    return [
+        f"SC-7：帳本用過但維度表未定義的代號 {missing} — 維度定義不得只活在某一輪的帳本裡，"
+        f"請補進 {_SCAN_DIMS.name} 的維度表"
+    ]
+
+
+# ---- SC-8：兩份 ADR 不得掛出無人消費的豁免標記 -------------------------------------------
+# 只認 HTML 註解形態——散文以反引號提到標記名稱者不算，否則規格說明段自己會被判成死信
+# （自製誤報，而誤報的鎖最後一定被加豁免繞過，比沒有鎖更糟）。
+_OK_MARKER_RE = re.compile(r"<!--\s*([a-z][a-z-]*-ok:)")
+
+
+def sc8_no_dead_letter_waiver_marker(c: Corpus) -> list[str]:
+    """WHY（SA2-R67-02）：`env-transient-ok:` 曾以豁免姿態寫在 §8.3，**全庫零程式消費者**，
+    而它宣稱對應的 SC-5 走 `_section8_hits()`、簽章裡根本沒有 waiver 參數 ⇒ 與 `DEF-101-688`
+    （pre-push 指名一支從未存在的測試檔）同型的死信，只是死的不是檔名而是豁免標記。
+    危害具體：下一個編輯者看到旁邊兩枚都有牙，會合理推定它也有，於是寫下違規句再掛上它，
+    換來一次**無豁免可用**的硬紅；那時人多半會回頭把鎖關掉。
+
+    ⚠️ 誠實劃界（一向不對稱，刻意的）：本條只驗「**文件端不得多**」。反向（本檔有 waiver
+    常數而文件端零使用）**不驗**——那是「未使用」而非「死信」，判它紅會逼人刪掉仍被豁免
+    紅綠測試依賴的常數。另：本條只認 HTML 註解形態的標記，換別種寫法（例如寫在表格欄位裡
+    的裸標記）抓不到，屬 §9.1 邊界 (d) 已載明的列舉式窄射程。
+    """
+    consumed = {_SC1_WAIVER, _SC4_WAIVER}
+    found: list[tuple[str, str]] = [
+        (label, m)
+        for label, text in _adr_pair(c)
+        for m in _OK_MARKER_RE.findall(text)
+    ]
+    if not found:
+        return [
+            "SC-8：兩份 ADR 內找不到任何 `<!-- <名稱>-ok: -->` 標記 — 標記形態被改寫？"
+            "本判準拒絕靜默通過；請同步本檔的 _OK_MARKER_RE"
+        ]
+    return [
+        f"SC-8 {label}：豁免標記 `{marker}` 無任何程式消費者（本檔實際消費的是 "
+        f"{sorted(consumed)}）— 讀者會誤以為它有牙。修法二擇一：刪標記改以散文說明"
+        f"「這裡為何不需要豁免」，或把對應判準接上 waiver 參數讓它真的有牙"
+        for label, marker in sorted(set(found))
+        if marker not in consumed
+    ]
+
+
+class Check(NamedTuple):
+    """一條常設不變式：`sc` 代號、規格出處、判準本體（回空 list ＝通過）。"""
+
+    sc: str
+    spec: str
+    fn: Callable[[Corpus], list[str]]
+
+
+_SECTION_91_CHECKS: tuple[Check, ...] = (
+    Check("SC-1", _SPEC_ADR2, sc1_no_unquoted_include_glob),
+    Check("SC-2", _SPEC_ADR2, sc2_no_open_ended_owner_in_section_8),
+    Check("SC-3", _SPEC_ADR2, sc3_no_thousand_separated_constant_in_section_8),
+    Check("SC-4", _SPEC_ADR2, sc4_no_live_platform_premise),
+    Check("SC-5", _SPEC_ADR2, sc5_no_environment_state_in_the_handoff_table),
+    Check("SC-6", _SPEC_ADR2, sc6_no_hardcoded_invariant_count),
+    Check("SC-7", _SPEC_SCAN, sc7_every_used_scan_code_is_defined),
+    Check("SC-8", _SPEC_ADR2, sc8_no_dead_letter_waiver_marker),
+)
+
+
+def check_by_id(sc: str) -> Check:
+    return next(c for c in _SECTION_91_CHECKS if c.sc == sc)
+
+
+def adr2_section_91(adr2: str) -> str:
+    return _slice_section(adr2, _ADR2_SEC91_HEAD, _ADR2_SEC91_END, "ADR-XPLAT-002 §9.1 常設自檢")
+
+
+def scan_selfcheck_section(scan_text: str) -> str:
+    return _slice_section(
+        scan_text, _SCAN_SELFCHECK_HEAD, _SCAN_SELFCHECK_END,
+        f"{_SCAN_DIMS.name}〈常設自檢〉",
+    )
+
+
+# ---------------------------------------------------------------- 單點注入（每條各一，驗零串音）
+# 各注入形態一律取自**規格自己記載的修復前實況**，不是憑空捏的樣本：規格已逐條留下
+# 「修復前命中幾行、修復後零輸出」的紀錄，本表把那些形態永久釘成回歸測試。
+_SC1_INJECT = "$ grep -rln 'SC-1' --include=*.py ."
+_SC2_INJECT = "| item | 完成判準 | 承接輪次 **R64+** |"
+_SC3_INJECT = "| item | 護欄層行數降到 4,096 以下 | 未指派 |"
+_SC4_INJECT = "本機是 macOS，故 Windows 側標的本輪整批不驗。"
+_SC5_INJECT = "| item | 待 CI 額度恢復後再議；期間排程停擺 | 未指派 |"
+_SC6_INJECT = "本節共四條可轉紅不變式，逐條照抄即可。"
+# 未定義的代號：刻意選一個維度表不會有的字母，注入後 SC-7 必須指名它。
+_SC7_INJECT_CODE = "Scan-Z"
+# 對照組：規格明文排除的 R14 期臨時長名，**不得**被截斷成單字母而誤報。
+_SC7_LONG_FORM_CODE = "Scan-Shell"
+# §8.3（逐字保全散文區）用的對照載荷，同時含 SC-2／SC-3／SC-5 三種違規形態。它驗的是
+# **位置**而非內容：同一段字放進交棒表本體必須全紅，放進 §8.3 必須全綠（R67 round 4）。
+_SEC83_PRESERVED = (
+    "> 逐字保全原句（史料，不得改寫）：「| 9 | 判準 | 承接輪次 **R62+**；"
+    "額度停擺期間護欄層行數壓到 1,024 以下 |」"
+)
+# SC-8 的注入形態＝R67r2 真的寫過的那一枚死信（同其餘各條：注入取自規格記載的修復前實況）。
+_SC8_INJECT = "> 原句保全  <!-- env-transient-ok: 訂正段必須逐字引述被移出的原句 -->"
+
+
+def _append_to_adr2(c: Corpus, payload: str) -> Corpus:
+    """附加在檔尾——刻意落在 §8／§9.1 兩個區段之外，讓「整檔逐行」與「區段內」兩種判準
+    的射程差異在注入時就看得見（SC-1／SC-4／SC-6 是整檔逐行，附加即應命中）。"""
+    return c._replace(adr2=c.adr2 + "\n" + payload + "\n")
+
+
+def _insert_into_section_8(c: Corpus, payload: str) -> Corpus:
+    """插在 `## 8.` 標題的下一行——同時落在「§8 全區」與「交棒表本體」兩種切法內。"""
+    lines = c.adr2.splitlines()
+    start_re = re.compile(_SEC8_START)
+    idx = next((i for i, ln in enumerate(lines) if start_re.search(ln)), None)
+    if idx is None:
+        raise RuntimeError(
+            "注入器找不到 ADR-XPLAT-002 的 §8 標題 — 注入基底已失效，"
+            "拒絕做一次「注入了什麼都不知道」的無效注入"
+        )
+    lines.insert(idx + 1, payload)
+    return c._replace(adr2="\n".join(lines))
+
+
+_SEC83_START = r"^### 8\.3"
+
+
+def _insert_into_section_8_3(c: Corpus, payload: str) -> Corpus:
+    """插在 `### 8.3` 標題的下一行——刻意落在「交棒表本體之外、§8 全區之內」。
+
+    這個位置就是 SC-2／SC-3／SC-5 的豁免出口本身：本 repo 的訂正體例是逐字保全被推翻的原句，
+    而保全區被指定在 §8.3。抓不到該標題即 `raise`，不做一次「注入了什麼都不知道」的無效注入。
+    """
+    lines = c.adr2.splitlines()
+    start_re = re.compile(_SEC83_START)
+    idx = next((i for i, ln in enumerate(lines) if start_re.search(ln)), None)
+    if idx is None:
+        raise RuntimeError(
+            "注入器找不到 ADR-XPLAT-002 的 §8.3 逐字保全散文區 — 該小節已不存在或改名，"
+            "而 SC-2／SC-3／SC-5 的豁免出口就是它；請同步本檔的 _SEC83_START"
+        )
+    lines.insert(idx + 1, payload)
+    return c._replace(adr2="\n".join(lines))
+
+
+def _inject_scan_code(c: Corpus, code: str) -> Corpus:
+    """在帳本家族尾端追加一列用到 `code` 的合成列（不含任何 DEF-ID 字面——
+    `test_defect_id_reference_integrity.py` 會全庫 grep DEF-ID 並要求每個都有對應主鍵列）。"""
+    row = f"| 合成注入列 | 發現情境：R00 {code} | 本列只為驗證 SC-7 的鑑別力 |"
+    return c._replace(family=c.family + (("<注入>合成帳本檔", row),))
+
+
+class Injection(NamedTuple):
+    sc: str
+    why: str
+    mutate: Callable[[Corpus], Corpus]
+
+
+_SECTION_91_INJECTIONS: tuple[Injection, ...] = (
+    Injection("SC-1", "規格記載的修復前實況：兩份 ADR 各有未加引號的 glob",
+              lambda c: _append_to_adr2(c, _SC1_INJECT)),
+    Injection("SC-2", "規格記載的修復前實況：§8 兩列以開放下界當承接者",
+              lambda c: _insert_into_section_8(c, _SC2_INJECT)),
+    Injection("SC-3", "規格記載的修復前實況：§8 兩列在完成判準欄寫死量測常數",
+              lambda c: _insert_into_section_8(c, _SC3_INJECT)),
+    Injection("SC-4", "規格記載的修復前實況：§6 邊界 1 把平台寫成文件常數",
+              lambda c: _append_to_adr2(c, _SC4_INJECT)),
+    Injection("SC-5", "規格記載的修復前實況：§8 交棒表混入外部環境當時狀態",
+              lambda c: _insert_into_section_8(c, _SC5_INJECT)),
+    Injection("SC-6", "規格記載的修復前實況：標題寫死條數而與實際交付數不符",
+              lambda c: _append_to_adr2(c, _SC6_INJECT)),
+    Injection("SC-7", "規格記載的修復前實況：Scan-M 產出缺陷卻在維度表零定義",
+              lambda c: _inject_scan_code(c, _SC7_INJECT_CODE)),
+    Injection("SC-8", "規格記載的修復前實況：§8.3 掛著一枚全庫零消費者的豁免標記",
+              lambda c: _append_to_adr2(c, _SC8_INJECT)),
+)
+
+
+class TestSection91InvariantsAreLive(unittest.TestCase):
+    """各條在**真實文件**上現跑（這一步就是 SA-R67-03 缺的那個「可執行消費者」）。"""
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        cls.live = read_corpus()
+
+    def test_every_declared_invariant_holds_on_the_real_documents(self) -> None:
+        for chk in _SECTION_91_CHECKS:
+            with self.subTest(sc=chk.sc):
+                self.assertEqual(
+                    chk.fn(self.live), [],
+                    f"{chk.sc}（規格出處：{chk.spec}）在現行文件上違規；"
+                    f"判準與修法見本檔 {chk.fn.__name__} 的 docstring",
+                )
+
+    def test_the_scan_surface_did_not_collapse(self) -> None:
+        """反空轉：掃描面一旦崩塌，上一支測試會**全部靜默通過**，故另立此支 fail-loud。
+
+        三份文件與帳本家族都必須非空；`§8 全區` 與 `交棒表本體` 都必須抽得到，且本體必須
+        **嚴格短於**全區——兩者相等即代表 `### 8.1` 界線失效、SC-5 已退化成掃 §8 全區
+        （那會讓 §8.3 刻意保全的歷史原句誤紅，而誤紅的鎖最後一定被加豁免繞過）。
+        """
+        for what, text in (("ADR-XPLAT-002", self.live.adr2), ("ADR-XPLAT-001", self.live.adr1),
+                           (_SCAN_DIMS.name, self.live.scan)):
+            self.assertTrue(text.strip(), f"{what} 讀進來是空的 — 掃描面崩塌")
+        self.assertTrue(self.live.family, "帳本家族枚舉為空 — SC-7 的掃描面崩塌")
+        whole = awk_range(self.live.adr2, _SEC8_START, _SEC8_END_ALL)
+        body = awk_range(self.live.adr2, _SEC8_START, _SEC8_END_TABLE)
+        self.assertTrue(whole, "§8 全區抽不到")
+        self.assertTrue(body, "§8 交棒表本體抽不到")
+        self.assertLess(
+            len(body), len(whole),
+            "§8 交棒表本體未嚴格短於 §8 全區 ⇒ `### 8.1` 子節界線已失效，"
+            "SC-5 會退化成掃全區並對 §8.3 的逐字保全原句誤紅",
+        )
+
+
+class TestSection91InvariantsHaveTeeth(unittest.TestCase):
+    """單點注入紅綠自證 ＋ **零串音**：注入 SC-N 的違規形態時只有 SC-N 轉紅。
+
+    🔴 為何每一條都非注入不可：本段承接的前一包交付過一版「看起來會擋」的鎖——它把某條
+    設計成「含關鍵字的行必須同時含某字樣」，注入後**不轉紅**，因為注入點落在一個已含該
+    字樣的單行巨欄內、整行被放行。改成計數／差集形態後才真的有牙。⇒ 沒有注入證明的鎖
+    一律視為 `NOT-PROVEN`（`CrossPlatform_Scan_Dimensions.md` Scan-H 判準①）。
+    """
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        cls.live = read_corpus()
+
+    def test_every_check_has_a_named_injection(self) -> None:
+        """雙向：少一條注入＝那條鎖沒有鑑別力證明；多一條＝指向已不存在的判準。"""
+        self.assertEqual(
+            {i.sc for i in _SECTION_91_INJECTIONS}, {c.sc for c in _SECTION_91_CHECKS},
+            "注入表與判準表不對稱 — 每一條判準都必須有自己的單點注入",
+        )
+
+    def test_each_injection_turns_exactly_its_own_check_red(self) -> None:
+        """本類的主體：紅（有牙）＋ 零串音（紅燈能指出是哪一種違規）一次驗完。"""
+        for inj in _SECTION_91_INJECTIONS:
+            with self.subTest(sc=inj.sc, why=inj.why):
+                mutated = inj.mutate(self.live)
+                reds = {c.sc for c in _SECTION_91_CHECKS if c.fn(mutated)}
+                self.assertEqual(
+                    reds, {inj.sc},
+                    f"注入 {inj.sc} 的違規形態後轉紅的判準是 {sorted(reds)}；"
+                    f"應恰為 {{'{inj.sc}'}}——空集合＝該鎖無牙，多出來的＝判準間有串音",
+                )
+
+    def test_every_check_has_a_real_exemption_path(self) -> None:
+        """豁免機制必須真的能放行，否則逐字引述壞形態的訂正段會被判**永紅**。
+
+        本檔有兩種豁免形態，兩種都要驗：
+        · **同行標記**（SC-1／SC-4，走 `_line_hits_with_waiver`）。
+        · **區段位置**（SC-2／SC-3／SC-5：射程止於 `### 8.1`，逐字原句移進 §8.3 即出射程）。
+          🔴 R67 round 4 之前 SC-2／SC-3 掃 §8 全區且無任何豁免路徑，SA2-R67-01 以注入實測
+          證明「照本輪體例保全一句 §8 原文即永紅」。本段的正控／反控刻意成對：綠必須來自
+          **位置**，而不是判準對那段字失明 ⇒ 同一段載荷放進交棒表本體必須全紅。
+        「文件端掛出無人消費的豁免標記」這件事本身另立為 **SC-8**（SA2-R67-02），走與其餘
+        各條同一條路（宣告集合綁定 ＋ 單點注入 ＋ 零串音），不在本支內另開一套判準——
+        新不變式若只藏在某支測試裡而不進宣告集合，正是同輪 SD-R67R2-04 抓到的形態。
+        """
+        for sc, payload, waiver in (
+            ("SC-1", _SC1_INJECT, _SC1_WAIVER),
+            ("SC-4", _SC4_INJECT, _SC4_WAIVER),
+        ):
+            with self.subTest(sc=sc, path="同行標記"):
+                waived = _append_to_adr2(
+                    self.live, f"{payload}  <!-- {waiver} 逐字引述壞形態以說明缺陷本身 -->"
+                )
+                self.assertEqual(check_by_id(sc).fn(waived), [], f"{sc} 的同行豁免失效")
+
+        preserved = _insert_into_section_8_3(self.live, _SEC83_PRESERVED)
+        control = _insert_into_section_8(self.live, _SEC83_PRESERVED)
+        for sc in ("SC-2", "SC-3", "SC-5"):
+            with self.subTest(sc=sc, path="§8.3 區段豁免"):
+                self.assertEqual(
+                    check_by_id(sc).fn(preserved), [],
+                    f"{sc} 對 §8.3 逐字保全散文區裡的原句轉紅 ⇒ 保全體例與本鎖互斥，"
+                    f"下一次保全一句 §8 原文即永紅（射程應止於 `### 8.1`）",
+                )
+                self.assertTrue(
+                    check_by_id(sc).fn(control),
+                    f"{sc} 對放進交棒表本體的**同一段**載荷不轉紅 ⇒ 上一句的綠是判準失明，"
+                    f"不是區段豁免；本鎖拒絕以假綠冒充豁免",
+                )
+
+        # 自綁：ADR §9.1 邊界 (d-1) 具名指向本支當機械承接者。具名而指不到就是死信
+        # ——正是本支自己在治的形態，故本支不得自己犯（改名時請同步該處散文）。
+        me = self._testMethodName
+        self.assertTrue(
+            [label for label, text in _adr_pair(self.live) if me in text],
+            f"兩份 ADR 都沒提到 {me} — 該處的具名承接已失聯",
+        )
+
+    def test_a_waiver_on_a_neighbouring_line_does_not_shield(self) -> None:
+        """🔴 單行巨欄陷阱：豁免只准放行**同一行**。
+
+        這兩份 ADR 的表格狀態欄一格上千字、在檔案裡就是一行；若容許跨行豁免，一個標記會
+        把整格放行。本支把「鄰行的標記不算數」永久釘住。
+        """
+        for sc, payload, waiver in (
+            ("SC-1", _SC1_INJECT, _SC1_WAIVER),
+            ("SC-4", _SC4_INJECT, _SC4_WAIVER),
+        ):
+            with self.subTest(sc=sc):
+                neighbour = _append_to_adr2(
+                    self.live, f"<!-- {waiver} 上一行的理由，不該及於下一行 -->\n{payload}"
+                )
+                self.assertTrue(
+                    check_by_id(sc).fn(neighbour),
+                    f"{sc} 被鄰行的豁免標記放行 ⇒ 單行巨欄裡一個標記就能放行整格",
+                )
+
+    def test_a_waiver_without_a_reason_is_rejected(self) -> None:
+        """規格逐字要求「掛豁免**並寫理由**」——無理由的豁免是後門，不是豁免。
+
+        `grep` 形態表達不了這一條（它只看得到標記在不在），所以這是搬進 Python 才補上的
+        判準。同時驗**反面**：規格自己的說明散文與 grep 指令裡也有標記字串，那些行不含
+        違規 token，不得因此被判為「無理由的豁免」（那會是自製誤報）。
+        """
+        for sc, payload, waiver in (
+            ("SC-1", _SC1_INJECT, _SC1_WAIVER),
+            ("SC-4", _SC4_INJECT, _SC4_WAIVER),
+        ):
+            with self.subTest(sc=sc):
+                bare = _append_to_adr2(self.live, f"{payload}  <!-- {waiver} -->")
+                problems = check_by_id(sc).fn(bare)
+                self.assertTrue(problems, f"{sc} 放行了沒有理由的豁免")
+                self.assertIn("沒有理由", problems[0])
+                # 反面：只提到標記字串、不含違規 token 的散文行不得被判違規
+                mention = _append_to_adr2(self.live, f"要豁免請在同一行掛 `{waiver} <理由>`。")
+                self.assertEqual(
+                    check_by_id(sc).fn(mention), [],
+                    f"{sc} 對「只是提到標記名稱」的散文行誤報 — 誤報的鎖會被加豁免繞過",
+                )
+
+    def test_losing_the_section_anchor_is_reported_not_silently_green(self) -> None:
+        """區段界線失效時，`awk`／`grep` 的原語意是「零輸出＝通過」＝ fail-open。
+
+        本段刻意把它改成違規回報（`_section8_hits`）。這一支證明改的有效：把 §8 標題改名後
+        SC-2／SC-3／SC-5 全部轉紅並指名掃描面崩塌，而非靜默全綠。
+        （這是**共用錨點**的預期連動，與上面的零串音不衝突——那支驗的是內容形態的注入。）
+        """
+        broken = self.live._replace(adr2=self.live.adr2.replace("\n## 8. ", "\n## 8x_renamed "))
+        self.assertNotEqual(broken.adr2, self.live.adr2, "注入基底失效：ADR 內找不到 §8 標題")
+        for sc in ("SC-2", "SC-3", "SC-5"):
+            with self.subTest(sc=sc):
+                problems = check_by_id(sc).fn(broken)
+                self.assertTrue(problems, f"{sc} 在區段抽不到時靜默通過 ⇒ fail-open")
+                self.assertIn("掃描面已崩塌", problems[0])
+
+    def test_sc7_reports_a_collapsed_scan_surface_on_either_side(self) -> None:
+        """SC-7 是「差集為空＝通過」，故**任一側掃描面歸零都會讓它恆綠**——兩側各驗一次。"""
+        for what, corpus in (
+            ("帳本家族", self.live._replace(family=())),
+            ("維度表", self.live._replace(scan="")),
+        ):
+            with self.subTest(side=what):
+                problems = check_by_id("SC-7").fn(corpus)
+                self.assertTrue(problems, f"{what} 歸零時 SC-7 靜默通過 ⇒ fail-open")
+                self.assertIn("拒絕靜默通過", problems[0])
+
+    def test_sc7_names_the_undefined_code_it_found(self) -> None:
+        """紅燈必須指路：訊息要逐字說出是哪個代號沒定義，而不是只說「有差集」。"""
+        problems = check_by_id("SC-7").fn(_inject_scan_code(self.live, _SC7_INJECT_CODE))
+        self.assertTrue(problems)
+        self.assertIn(_SC7_INJECT_CODE, problems[0])
+
+    def test_sc7_does_not_flag_the_documented_long_form_codes(self) -> None:
+        """對照組（規格明載的邊界）：R14 期的臨時長名不得被截斷成單字母而誤報。
+
+        少了 `grep -xE 'Scan-[A-Z]'` 那一步（本檔的 `_SCAN_CODE_LEN` 過濾），`Scan-Shell`
+        會被讀成 `Scan-S` 而製造假紅。誤報的鎖最後一定被加豁免繞過，比沒有鎖更糟。
+        """
+        self.assertEqual(
+            check_by_id("SC-7").fn(_inject_scan_code(self.live, _SC7_LONG_FORM_CODE)), [],
+            f"{_SC7_LONG_FORM_CODE} 被截斷成單字母而誤報 — 長名排除那一步失效",
+        )
+
+
+def section91_consumer_classes() -> tuple[str, ...]:
+    """現查本檔定義的 `TestSection91*` 消費者類別名。名單與數量一律不寫死（同 SC-6 紀律）。"""
+    return tuple(sorted(
+        name for name, obj in globals().items()
+        if name.startswith("TestSection91") and isinstance(obj, type)
+    ))
+
+
+class TestSection91SpecIsBoundToTheseLocks(unittest.TestCase):
+    """規格散文 ↔ 本檔實作雙向綁定（手法照抄 `TestCriterionIsBoundToAdrProse`）。
+
+    🔴 為何非綁不可：本段的判準**一條也不是本檔自己編的**，全部逐字取自 §9.1／〈常設自檢〉。
+    規格改字而程式沒跟（或反之）就會退化成「散文與程式各走各的」——那正是本 repo 反覆在治的病。
+    """
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        cls.live = read_corpus()
+
+    def test_the_adr_declares_exactly_the_invariants_implemented_here(self) -> None:
+        """雙向且**條數現查**：ADR 新增一條 `# SC-N` 而沒人實作 → 紅；本檔刪一條 → 紅。
+
+        這同時是 SC-6 的正面版本：本鎖對「§9.1 有幾條」一律現查，不在任何一側寫死。
+
+        🔴 R67 round 4 拿掉 `c.spec == _SPEC_ADR2` 過濾（SD-R67R2-04）。原版只把規格住在 ADR
+        的那些條目納入比對，於是 SC-7（規格本體住在 `CrossPlatform_Scan_Dimensions.md`
+        〈常設自檢〉）**結構上被排除**：SD 用突變實測證明「把 SC-7 連同它的專屬測試一起刪掉，
+        全套測試零訊號」——七條不變式裡最新的一條保護等級最低，而它守的正是缺陷帳本與維度表
+        之間的 SSOT 對應。同時 Scan_Dimensions 那句「本不變式即該 ADR §9.1 所列的 SC-7」是
+        死信（ADR 全檔零次提及 SC-7）。⇒ 改為全集比對，並要求 §9.1 為每個規格住在他處的條目
+        指名其規格出處檔——跨檔的宣告集合也要綁得住，否則「宣告集合雙向綁定」只是半句真話。
+        """
+        section = adr2_section_91(self.live.adr2)
+        declared = set(_SC_DECL_RE.findall(section))
+        implemented = {c.sc for c in _SECTION_91_CHECKS}
+        self.assertEqual(
+            declared, implemented,
+            "ADR §9.1 宣告的 SC 條目與本檔實作的判準集合不一致 — "
+            "規格新增條目時必須同步落成機械鎖，否則它又會是一條零消費者的死信；"
+            "反之刪掉實作而 §9.1 仍宣告，也是同一種失聯",
+        )
+        for chk in _SECTION_91_CHECKS:
+            if chk.spec == _SPEC_ADR2:
+                continue
+            host = chk.spec.split("〈", 1)[0]
+            with self.subTest(sc=chk.sc, spec=chk.spec):
+                self.assertIn(
+                    host, section,
+                    f"{chk.sc} 的規格本體住在 {host}，而 ADR §9.1 沒指名它 — "
+                    f"讀者無從知道該去哪裡看判準，交叉引用即成死信",
+                )
+
+    def test_the_adr_still_names_this_file_as_the_host(self) -> None:
+        """§9.1 末段具名指派本檔為承接容器；本檔改名／§9.1 改指他處都必須被發現。"""
+        self.assertIn(
+            _HERE.name, adr2_section_91(self.live.adr2),
+            f"ADR §9.1 未指名 {_HERE.name} 為承接容器 — 具名交棒失聯",
+        )
+
+    def test_the_adr_names_the_live_consumers_it_now_claims_to_have(self) -> None:
+        """🔴 R67 round 3：§9.1 散文已從「零可執行消費者」改寫為「已是活體守門」，本支把
+        **那句新宣稱**綁回它指名的東西上——散文換了說法，就得有東西看著新說法。
+
+        為何做成**正面綁定**，而不是「散文不得再出現『零消費者』字樣」的黑名單：
+        · 本 repo 的訂正體例是**逐字保全被推翻的原句**（§8.3、以及 §9.1／〈常設自檢〉這兩處
+          訂正段本身都是這樣寫的）。黑名單會對這些刻意保全的史料永遠說紅——〈常設自檢〉
+          自己就警告過「歷史檔逐字保全 ⇒ 舊列永遠留著死信字樣 ⇒ 閘門永紅」，而本檔多處已
+          載明：誤報的鎖最後一定被加豁免繞過，比沒有鎖更糟。
+        · 字樣黑名單換個措辭（「尚未接線」「無人消費」）就逸出，正是 §9.1 邊界 (d) 已明載的
+          列舉式窄射程。
+        正面綁定沒有這兩個毛病：把消費者從散文刪掉、或在本檔改名／新增而散文沒跟，都會紅，
+        且對保全下來的原句完全無感。
+        """
+        consumers = section91_consumer_classes()
+        self.assertTrue(
+            consumers,
+            "本檔已找不到任何 `TestSection91*` 消費者類別 — 枚舉面崩塌，本鎖拒絕空轉通過",
+        )
+        section = adr2_section_91(self.live.adr2)
+        for name in consumers:
+            with self.subTest(consumer=name):
+                self.assertIn(
+                    name, section,
+                    f"ADR §9.1 未指名消費者 {name} — 該節現在自稱「已是活體守門」，"
+                    f"這句宣稱就必須逐一指得出消費者；新增／改名消費者類別時請同步該節散文",
+                )
+
+    def test_the_scan_selfcheck_keeps_the_pieces_this_lock_depends_on(self) -> None:
+        """〈常設自檢〉裡有三樣東西是本檔 SC-7 實作的前提，刪掉任一樣都會讓下一個人改壞它。
+
+        · `comm`／恆綠：規格逐字警告「`comm` 無論有無差集都 exit 0」，本檔正因此改用集合差集；
+          警告消失後，下一個人很可能「簡化」回 comm 形態而得到一個恆綠的假鎖。
+        · `Scan-[A-Z]` 的逐字比對範圍：本檔 `_SCAN_CODE_LEN` 過濾就是它的 Python 版。
+        · `Scan-Shell`：規格明載的長名排除案例，本檔的誤報對照組直接依賴它。
+        · 規格住在本檔以外的那些 SC 代號（現查，不寫死）：〈常設自檢〉自稱「本不變式即該 ADR
+          §9.1 所列的 SC-N」，這句交叉引用要成立，該節就得逐字說得出是哪一個代號。R67 round 4
+          之前 ADR 側零次提及 SC-7，那句話是死信（SD-R67R2-04）；本支釘住另一半。
+        """
+        section = scan_selfcheck_section(self.live.scan)
+        scan_specced = tuple(c.sc for c in _SECTION_91_CHECKS if c.spec == _SPEC_SCAN)
+        for token in ("comm", "恆綠", "Scan-[A-Z]", _SC7_LONG_FORM_CODE, *scan_specced):
+            with self.subTest(token=token):
+                self.assertIn(
+                    token, section,
+                    f"〈常設自檢〉已不再載明 {token!r} — 本檔 SC-7 的實作前提失去散文依據",
+                )
 
 
 # 本檔自己也受「散文不得寫死可機械算出的計數」這條紀律管（P2-6）。量詞集合的來源有二：

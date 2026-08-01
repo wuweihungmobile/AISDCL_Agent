@@ -18,13 +18,20 @@ lock／trigger 歸因欄位）的偵測靈敏度，與本 repo「驗證鏡子自
 from __future__ import annotations
 
 import fnmatch
+import os
 import re
+import shutil
+import subprocess
+import sys
 from pathlib import Path
 
 import pytest
 
 _REPO_ROOT = Path(__file__).resolve().parent.parent.parent
 _NIGHTLY_SH = _REPO_ROOT / "tools" / "run_local_nightly.sh"
+# monorepo 根（AutoClaude/ 的上一層）——跨檔字面一致性鎖要讀根層安裝器。
+_MONOREPO_ROOT = _REPO_ROOT.parent
+_MAC_INSTALLER = _MONOREPO_ROOT / "tools" / "install_mac_nightly.sh"
 
 
 @pytest.fixture(scope="module")
@@ -164,6 +171,206 @@ def test_heartbeat_three_site_contract_lines(sh_content: str) -> None:
     code = _code_only(sh_content)
     assert "nightly_mac heartbeat（UTC）" in code, "心跳檔第一行格式（三站點契約）不得變動"
     assert "nightly 彙總：PASS=" in code, "心跳檔彙總行格式不得變動"
+
+
+# --- R67-F10：CLI 契約（--help 不得開跑整套 nightly；未知旗標 fail-loud）--------
+#
+# WHY：修復前全檔對 `$1` 只有兩處 `= "--force"` 二元比對——無 usage 分支、無未知
+# 旗標拒絕。實測兩種失敗形態：(a) 剛 clone／logs 已被輪替掉的樹上，`--help` 直接
+# 啟動 macos_smoke → root_unittests → autoclaude_gate → sdd_ci_gate（沙箱實測落下
+# nightly_mac_*.log 並跑進 smoke 的 7 個子步驟，被 kill 才停）；(b) 當日已有心跳時
+# `--help` rc=0 並印「今日已有心跳…跳過本輪」——查說明的動作被記成一次成功的
+# nightly 去重，事後從 log 看不出使用者輸錯了旗標。`--forse`／`-f`／`--Force`／
+# `--FORCE`／裸位置參數七種變體實測 rc 全為 0，無一被拒。
+
+_POSIX_ONLY = pytest.mark.skipif(
+    sys.platform == "win32" or shutil.which("bash") is None,
+    reason="需要 POSIX bash 實跑本 .sh（Windows 側對等品為 run_local_nightly.ps1，"
+           "其 CLI 契約缺口另案處理）",
+)
+
+
+def _sandbox_nightly(tmp_path: Path) -> Path:
+    """把真的 run_local_nightly.sh 放進臨時樹（ROOT 由 BASH_SOURCE/../.. 推得）。
+
+    在沙箱而非真 repo 執行：本組要斷言的正是「有沒有產生 nightly log／有沒有開跑
+    stage」，在真 repo 上跑會污染真心跳與 RunId log；沙箱裡 `$ROOT/tools/*.sh`
+    全不存在，萬一契約退化也會在第一個 stage 立刻失敗而非真的跑完整套 gate。
+    """
+    dest = tmp_path / "AutoClaude" / "tools"
+    dest.mkdir(parents=True)
+    shutil.copy2(_NIGHTLY_SH, dest / "run_local_nightly.sh")
+    return dest / "run_local_nightly.sh"
+
+
+def _run_sh(
+    script: Path, *args: str, env: dict[str, str] | None = None
+) -> subprocess.CompletedProcess:
+    full_env = dict(os.environ)
+    if env is not None:
+        full_env.update(env)
+    return subprocess.run(
+        ["bash", str(script), *args],
+        capture_output=True, text=True, encoding="utf-8", errors="replace",
+        timeout=120, env=full_env,
+    )
+
+
+@_POSIX_ONLY
+def test_help_prints_usage_rc_zero_and_starts_no_stage(tmp_path: Path) -> None:
+    script = _sandbox_nightly(tmp_path)
+    proc = _run_sh(script, "--help")
+    assert proc.returncode == 0, f"`--help` 必須 rc=0，實得 {proc.returncode}：{proc.stderr}"
+    assert "用法：" in proc.stdout, f"`--help` 必須印出用法，實得 stdout={proc.stdout!r}"
+    for token in ("--force", "macos_smoke", "nightly_mac_latest.log"):
+        assert token in proc.stdout, f"usage 應說明 {token}（旗標語意／stage 名／log 落點）"
+    logs = tmp_path / "AutoClaude" / "logs"
+    assert not logs.exists() or not list(logs.glob("nightly_mac_*.log")), (
+        "`--help` 絕不得產生 RunId log／心跳——那代表它其實開跑了 nightly"
+    )
+
+
+@_POSIX_ONLY
+@pytest.mark.parametrize("bad", ["--forse", "-f", "--Force", "--FORCE", "bogus-positional"])
+def test_unknown_flag_fails_loud_and_starts_no_stage(tmp_path: Path, bad: str) -> None:
+    """typo 一律 rc=2 且指名該字——修復前這七種變體全部 rc=0 靜默走去重路徑。"""
+    script = _sandbox_nightly(tmp_path)
+    proc = _run_sh(script, bad)
+    assert proc.returncode == 2, f"未知參數 {bad!r} 必須 rc=2，實得 {proc.returncode}"
+    assert bad in proc.stderr, f"錯誤訊息必須逐字指名 {bad!r}，實得 {proc.stderr!r}"
+    logs = tmp_path / "AutoClaude" / "logs"
+    assert not logs.exists() or not list(logs.glob("nightly_mac_*.log")), (
+        f"{bad!r} 被拒後不得留下任何 nightly log"
+    )
+
+
+@_POSIX_ONLY
+def test_extra_arguments_fail_loud(tmp_path: Path) -> None:
+    proc = _run_sh(_sandbox_nightly(tmp_path), "--force", "--bogus")
+    assert proc.returncode == 2, "多個參數必須 fail-loud（本腳本最多接受一個旗標）"
+
+
+@_POSIX_ONLY
+def test_no_args_is_not_rejected(tmp_path: Path) -> None:
+    """鑑別力對照組：無參數＝排程路徑，**不得**被新的參數檢查誤擋。
+
+    少了這條，把腳本改成「一律 exit 2」也能讓上面全綠——那會讓 launchd 每天空跑。
+    無參數時沙箱裡的 stage 腳本不存在故必然失敗（rc=1），關鍵是它**確實走進了
+    stage 執行**（印得出 BEGIN／stage 標題），而不是在參數關卡就被擋掉。
+    """
+    script = _sandbox_nightly(tmp_path)
+    proc = _run_sh(script)
+    assert proc.returncode != 2, f"無參數不得被當成參數錯誤，實得 rc=2：{proc.stderr!r}"
+    logs = list((tmp_path / "AutoClaude" / "logs").glob("nightly_mac_2*.log"))
+    assert logs, "無參數時應照舊產生 RunId log（證明真的進入了排程執行路徑）"
+    assert "BEGIN nightly_mac" in logs[0].read_text(encoding="utf-8", errors="replace")
+
+
+# --- R67-F26：觸發來源歸因（XPC_SERVICE_NAME 值比對，而非存在性）---------------
+#
+# WHY：`XPC_SERVICE_NAME=0` 是 macOS 對**一般使用者行程**注入的常態值（Darwin
+# 25.5.0 實測 `/bin/bash -c 'echo ${XPC_SERVICE_NAME}'` → `0`），舊判定用
+# `[ -n ... ]` 測存在性，於是任何手動／agent／CI 呼叫都被標成 `launchd(...)`，
+# 而 manual-interactive／non-interactive-unknown 兩態成為死碼。此欄位存在的唯一
+# 目的就是「同日兩輪 PASS 時能機械判讀是手動重跑還是去重漏洞」——舊判定正好在
+# 那個情境給出反向結論（把去重漏洞歸因給無辜的排程器）。
+
+
+def _extract_trigger_block(code: str) -> str:
+    """抽出「label 常數 ＋ 觸發來源判定」兩段真實碼，供實跑對照（非字串比對）。"""
+    label = re.search(r'^NIGHTLY_LAUNCHD_LABEL=.*$', code, re.M)
+    block = re.search(
+        r'^if \[ "\$\{1:-\}" = "--force" \]; then$.*?^fi$', code, re.M | re.DOTALL
+    )
+    assert label and block, "找不到 label 常數或觸發來源判定區塊——抽取正則已與實作漂移"
+    return f"{label.group(0)}\n{block.group(0)}\n"
+
+
+def _trigger_for(tmp_path: Path, code: str, *, xpc: str | None, args: tuple[str, ...] = ()) -> str:
+    probe = tmp_path / "trigger_probe.sh"
+    probe.write_text(
+        "set -u\n" + _extract_trigger_block(code) + 'printf "%s" "${TRIGGER_SRC}"\n',
+        encoding="utf-8",
+    )
+    env = dict(os.environ)
+    env.pop("XPC_SERVICE_NAME", None)
+    if xpc is not None:
+        env["XPC_SERVICE_NAME"] = xpc
+    return subprocess.run(
+        ["bash", str(probe), *args],
+        capture_output=True, text=True, encoding="utf-8", errors="replace",
+        timeout=30, env=env,
+    ).stdout
+
+
+@_POSIX_ONLY
+def test_sentinel_xpc_value_is_not_attributed_to_launchd(tmp_path: Path, sh_content: str) -> None:
+    """真機常態值 `XPC_SERVICE_NAME=0`（非 launchd job）不得被標成 launchd。"""
+    got = _trigger_for(tmp_path, sh_content, xpc="0")
+    assert "launchd" not in got, (
+        f"XPC_SERVICE_NAME=0 是一般使用者行程的常態值，不得歸因為 launchd，實得 {got!r}"
+    )
+    assert got == "non-interactive-unknown", (
+        f"非互動且非排程應為 non-interactive-unknown，實得 {got!r}"
+    )
+
+
+@_POSIX_ONLY
+def test_real_launchd_label_is_attributed_to_launchd(tmp_path: Path, sh_content: str) -> None:
+    """對照組：真 launchd 注入的值是 job Label，必須仍被正確歸因。
+
+    沒有這條，把判定改成「永不回 launchd」也能讓上一條綠——那會把歸因能力整個
+    拆掉（本機 7 份真排程 log 皆為 XPC_SERVICE_NAME=com.autoclaude.nightly）。
+    """
+    label = re.search(r'^LABEL="([^"]+)"', _MAC_INSTALLER.read_text(encoding="utf-8"), re.M)
+    assert label, "install_mac_nightly.sh 找不到 LABEL 常數"
+    got = _trigger_for(tmp_path, sh_content, xpc=label.group(1))
+    assert got == f"launchd(XPC_SERVICE_NAME={label.group(1)})", (
+        f"真 launchd Label 必須歸因為 launchd，實得 {got!r}"
+    )
+
+
+@_POSIX_ONLY
+def test_force_flag_wins_over_environment(tmp_path: Path, sh_content: str) -> None:
+    got = _trigger_for(tmp_path, sh_content, xpc="0", args=("--force",))
+    assert got == "manual-force", f"--force 應優先於環境判定，實得 {got!r}"
+
+
+@_POSIX_ONLY
+def test_unset_xpc_is_non_interactive_unknown(tmp_path: Path, sh_content: str) -> None:
+    got = _trigger_for(tmp_path, sh_content, xpc=None)
+    assert got == "non-interactive-unknown", (
+        f"未設定 XPC 時應為 non-interactive-unknown，實得 {got!r}"
+    )
+
+
+def test_launchd_label_matches_the_installer_verbatim(sh_content: str) -> None:
+    """跨檔字面一致性：歸因基準值必須與 tools/install_mac_nightly.sh 的 LABEL 同字。
+
+    測意圖：兩邊一旦漂移，真排程觸發會被靜默降級成 non-interactive-unknown——
+    沒有任何錯誤訊息，只是取證欄位開始說謊（正是 R67-F26 的失敗形態）。
+    """
+    ours = re.search(r'^NIGHTLY_LAUNCHD_LABEL="([^"]+)"', _code_only(sh_content), re.M)
+    theirs = re.search(r'^LABEL="([^"]+)"', _MAC_INSTALLER.read_text(encoding="utf-8"), re.M)
+    assert ours and theirs, "兩側 label 常數至少一支抽不到——正則已與實作漂移"
+    assert ours.group(1) == theirs.group(1), (
+        f"run_local_nightly.sh 的 launchd label {ours.group(1)!r} 與安裝器的 "
+        f"{theirs.group(1)!r} 不一致——真排程觸發會被誤標為手動"
+    )
+
+
+def test_trigger_uses_value_comparison_not_mere_presence(sh_content: str) -> None:
+    """靜態面補刀：判定式不得退回 `[ -n "${XPC_SERVICE_NAME:-}" ]` 存在性寫法。
+
+    與上面的實跑對照組互補——實跑證明「當前行為對」，本條把「用什麼判準」釘住，
+    讓退化在 code review／grep 層面也留下痕跡。
+    """
+    block = _extract_trigger_block(_code_only(sh_content))
+    assert '[ -n "${XPC_SERVICE_NAME:-}" ]' not in block, (
+        "存在性判定會把 XPC_SERVICE_NAME=0（macOS 對一般行程注入的常態值）"
+        "誤判為 launchd 觸發——必須與 job Label 做值比對"
+    )
+    assert "${NIGHTLY_LAUNCHD_LABEL}" in block, "判定式必須以 label 常數為比對基準"
 
 
 # --- 對抗式（負向）case：真突變（mutate）真實 sh_content 後重跑正向斷言邏輯 -----

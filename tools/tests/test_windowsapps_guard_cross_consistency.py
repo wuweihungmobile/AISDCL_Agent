@@ -31,13 +31,15 @@ R37 抽出 `tools/lib/WindowsAppsGuard.ps1::Test-IsRealPython` 共用函式（�
 from __future__ import annotations
 
 import ast
+import functools
 import os
 import re
+import shutil
 import subprocess
 import sys
 import tempfile
 import unittest
-from pathlib import Path
+from pathlib import Path, PureWindowsPath
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from _ps_engine import production_engine  # noqa: E402  # R60 DEF-101-548：引擎述詞 SSOT
@@ -45,11 +47,13 @@ from _ps_engine import production_engine  # noqa: E402  # R60 DEF-101-548：引�
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 
 sys.path.insert(0, str(_REPO_ROOT / "tools" / "lib"))
+import bash_probe_spec as _spec  # noqa: E402  # R32 驗活探測「參數」SSOT
 import sdd_latest  # noqa: E402
 _BOOTSTRAP_PS1 = _REPO_ROOT / "tools" / "bootstrap.ps1"
 _DEV_START_PS1 = _REPO_ROOT / "tools" / "dev_start.ps1"
 _BOOTSTRAP_CORE_PY = _REPO_ROOT / "tools" / "bootstrap_core.py"
 _GUARD_PS1 = _REPO_ROOT / "tools" / "lib" / "WindowsAppsGuard.ps1"
+_GUARD_SH = _REPO_ROOT / "tools" / "lib" / "windowsapps_guard.sh"
 
 # 共用函式的 dot-source 相對路徑（兩份呼叫端皆直接位於 tools/ 下，故皆為
 # "lib/WindowsAppsGuard.ps1"；一併鎖住路徑片段本身，防呼叫端誤用其他相對路徑）
@@ -57,6 +61,31 @@ _DOT_SOURCE_RE = re.compile(
     r'\.\s+"\$PSScriptRoot/lib/WindowsAppsGuard\.ps1"'
 )
 _INLINE_NOTLIKE_RE = re.compile(r"-notlike\s+'\*\\WindowsApps\\\*'")
+
+# R67 B3 修法後的 guard 邏輯本體形狀：以 `[\\/]` 切段 + 對段做小寫精確比對
+# （比照姊妹 capability `tools/lib/Find-GitBash.ps1::Test-HasSystem32Segment`）。
+_SEGMENT_SPLIT_RE = re.compile(r"-split\s+'\[\\\\/\]\+'")
+_SEGMENT_EQ_RE = re.compile(r"ToLowerInvariant\(\)\s+-eq\s+'windowsapps'")
+
+_PS_BLOCK_COMMENT_RE = re.compile(r"<#.*?#>", re.DOTALL)
+
+
+def _ps_code_only(text: str) -> str:
+    """剝掉 PowerShell 註解（`<# … #>` 區塊註解與 `#` 行尾註解），只留程式碼。
+
+    🔴 R67 B3 才發現的假綠通道：`test_shared_guard_file_exists_and_defines_the_function`
+    對整檔文字 `assertRegex(_INLINE_NOTLIKE_RE)`，而 R67 修法把舊寫法
+    `-notlike '*\\WindowsApps\\*'` **原文引述**寫進了 `<# … #>` 檔頭沿革說明——
+    邏輯本體已改成逐段比對，該斷言卻仍靠註解裡的字面值維持全綠（一個「宣稱鎖住
+    邏輯本體、實際只鎖住字串曾出現過」的鎖，與本檔 R46 在 bash 側修過的
+    `_has_ssot_guard` 是同一個病）。故靜態斷言一律先過本函式。
+
+    侷限（誠實記載）：`#` 判定不追蹤字串內文，`"abc#def"` 這種行會被截斷。
+    `WindowsAppsGuard.ps1` 現無此形狀；真正的行為鑑別力由下方 ④ 行為表 parity
+    負責，本函式只是不讓靜態鎖被註解餵成假綠。
+    """
+    body = _PS_BLOCK_COMMENT_RE.sub("", text)
+    return "\n".join(line.split("#", 1)[0] for line in body.splitlines())
 
 
 def _pwsh_exe() -> str | None:
@@ -82,15 +111,34 @@ class TestWindowsAppsGuardEnrollment(unittest.TestCase):
         self.guard_text = _GUARD_PS1.read_text(encoding="utf-8")
 
     def test_shared_guard_file_exists_and_defines_the_function(self) -> None:
+        """guard 邏輯本體必須在（且是 R67 修法後的逐段比對形狀）。
+
+        🔴 R67 B3：本測試原本 `assertRegex(self.guard_text, _INLINE_NOTLIKE_RE)`
+        ——比對**整檔文字**，而修法把舊寫法原文引述進了 `<# … #>` 沿革說明，於是
+        邏輯本體換掉了、斷言仍靠註解裡的字面值全綠。改為 (a) 只看非註解程式碼、
+        (b) 斷言**新形狀在**且**舊形狀不在**（舊形狀回歸＝B3 復發）。
+        """
         self.assertTrue(_GUARD_PS1.is_file(), f"{_GUARD_PS1} 不存在")
+        code = _ps_code_only(self.guard_text)
         self.assertIn(
-            "function Test-IsRealPython", self.guard_text,
+            "function Test-IsRealPython", code,
             "tools/lib/WindowsAppsGuard.ps1 未定義 Test-IsRealPython 共用函式",
         )
         self.assertRegex(
-            self.guard_text, _INLINE_NOTLIKE_RE,
-            "共用函式內找不到 WindowsApps -notlike 排除 pattern——guard 邏輯本體"
-            "是否被改寫或移除？",
+            code, _SEGMENT_SPLIT_RE,
+            "共用函式內找不到 `-split '[\\\\/]+'` 分隔符正規化——R67 B3 修法本體"
+            "（`/` 與 `\\` 同視為路徑分隔符）是否被改寫或移除？",
+        )
+        self.assertRegex(
+            code, _SEGMENT_EQ_RE,
+            "共用函式內找不到 `ToLowerInvariant() -eq 'windowsapps'` 逐段精確比對"
+            "——退化成子字串比對會誤傷 `MyWindowsAppsBackup`（bash 側 R43 二審修過"
+            "的同一個偽陽性）",
+        )
+        self.assertNotRegex(
+            code, _INLINE_NOTLIKE_RE,
+            "共用函式又出現分隔符敏感的 `-notlike '*\\WindowsApps\\*'`——R67 B3 迴歸"
+            "（正斜線／混用分隔符的 WindowsApps 空殼會被判為真 Python）",
         )
 
     def test_bootstrap_ps1_dot_sources_shared_guard(self) -> None:
@@ -172,7 +220,8 @@ class TestWindowsAppsGuardSharedFunctionBehavior(unittest.TestCase):
     （PowerShell 的命令解析對函式與 cmdlet 同名時，函式優先於內建 cmdlet），
     讓 `Test-IsRealPython` 呼叫到的 `Get-Command` 回傳我們指定的假 `.Source`
     字串——藉此在任何平台（含本開發機的 macOS pwsh）上都能正確驗證
-    `-notlike '*\\WindowsApps\\*'` 排除邏輯本身，不受各平台 `Get-Command`
+    WindowsApps 段排除邏輯本身（R67 B3 前為 `-notlike '*\\WindowsApps\\*'`，
+    現為 `Test-HasWindowsAppsSegment` 逐段比對），不受各平台 `Get-Command`
     對裸名候選的路徑解析語意差異影響（真實 Windows 路徑用反斜線，macOS/Linux
     上 `Get-Command` 找到的可執行檔路徑用斜線，若改用真實 PATH 佈局測試會
     因平台差異而失去鑑別力，此為既有測試套件記載的已知侷限——見本檔其他
@@ -220,9 +269,10 @@ class TestWindowsAppsGuardSharedFunctionBehavior(unittest.TestCase):
         self.assertEqual(out, "False", out)
 
     def test_windowsapps_segment_match_is_case_insensitive(self) -> None:
-        """`-notlike` 預設不分大小寫；即使路徑中的 WindowsApps 區段大小寫不同
-        （如系統本地化或大小寫不敏感檔案系統回傳的不同大小寫），仍須被排除。
-        防未來有人改成 `-cnotlike`（大小寫敏感版本）而悄悄弱化 guard。"""
+        """路徑中的 WindowsApps 區段大小寫不同（系統本地化／大小寫不敏感檔案系統
+        回傳的不同大小寫）仍須被排除。R67 B3 前這靠 `-notlike` 天生不分大小寫，
+        現靠 `Test-HasWindowsAppsSegment` 的 `ToLowerInvariant()`——本測試防的是
+        「改寫比對方式時把大小寫不敏感這條性質弄丟」（如 `-ceq`／`-cnotlike`）。"""
         body = (
             'return [PSCustomObject]@{ '
             'Source = "C:\\Users\\me\\AppData\\Local\\Microsoft\\windowsapps\\python.exe" }'  # platform-ok: 純字面值餵給 PowerShell 腳本文字，非 Python Path join
@@ -1386,6 +1436,12 @@ _ZERO_GUARD_BARE_PY_SITES = {
         "不經 PATH 解析。粗粒度判準看不出「字面值當路徑片段」與「當指令首 token」的差別，"
         "此筆即該取捨的成本"
     ),
+    "tools/sync_onboarding_baselines.py": (
+        "非呼叫：`argparse.ArgumentParser(prog=\"python tools/sync_onboarding_baselines.py\")`"
+        "——只用於 usage/help 輸出，與上面 `AutoClaude/autoclaude/tools/sdd_compile.py` 同型。"
+        "R67 該檔 argparse 化（R67-D20：原本 `\"--flag\" in argv` 手搓解析，未知旗標靜默 "
+        "rc=0）時新增，非新暴露面"
+    ),
 }
 
 
@@ -1507,6 +1563,438 @@ class TestZeroGuardBarePythonDetectorDiscriminatingPower(unittest.TestCase):
     def test_unparseable_file_fails_loud(self) -> None:
         with self.assertRaises(AssertionError):
             _bare_python_command_literals("def (:\n", "fake.py")
+
+
+# ---------------------------------------------------------------------------
+# ④ 四份實作的**行為表 parity**（R67 B3）
+#
+# WHY 這一節必須存在（不是「再加一層保險」，是既有鎖的結構性盲區）：
+# `real_python_candidate` 家族有四份獨立實作（ADR-XPLAT-002 §3.2 明列，bootstrap
+# 悖論定案不收斂）——
+#
+#   ① `tools/lib/WindowsAppsGuard.ps1::Test-IsRealPython`（PowerShell）
+#   ② `tools/lib/windowsapps_guard.sh::is_real_python_candidate`（bash）
+#   ③ `tools/bootstrap_core.py::_is_windows_apps_stub`（Python，根層）
+#   ④ `AutoClaude/autoclaude/execution/pre_run_validator.py::
+#      _is_windows_apps_alias_stub`（Python，子專案；刻意不 import 根層 tools/*.py）
+#
+# R67 之前，四份之間**沒有任何一支測試餵同一組輸入、比對四方裁決**：本檔上面的
+# ② 節驗 ① 自身行為（但 4 個樣本全是反斜線）、`test_windowsapps_guard_bash_parity.py`
+# 驗 ②、`test_bootstrap_core.py` 驗 ③。三處各自全綠，卻對「四份對同一條路徑給相反
+# 答案」完全零訊號——R67 B3 實測就落在這個縫裡：
+#
+#     輸入 `C:/Users/me/AppData/Local/Microsoft/WindowsApps\python.exe`
+#       ①（PS）判「真 Python」  ／  ②③④ 判「Store 空殼」
+#
+# ——1 對 3 相反裁決，且**可觸達**：`(Get-Command python).Source` 是「PATH 條目 +
+# 檔名」拼出來的，PATH 條目以正斜線書寫時 Source 就帶正斜線（同一機制在姊妹
+# capability 已有真 Windows 實測，見 `tools/lib/Find-GitBash.ps1` 檔頭 R60 P10-2
+# 段）。姊妹缺陷（System32／`Find-GitBash.ps1`）R60 P10-2 修好時**一併補了同款行為表
+# parity 鎖**（`test_find_git_bash_parity.py::TestSystem32VerdictParity`），WindowsApps
+# 這半漏修 7 輪（R60→R66）——**因為那半有行為表鎖、這半沒有**。
+#
+# ADR-XPLAT-002 §3.2 明令：「強制機制改為行為表 parity（餵同一組輸入給各語言實作、
+# 比對裁決），取代現行的字面 parity……字面比對型 parity 鎖自本 ADR 起不計為機械
+# 釘選」。本節即該裁決在 `real_python_candidate` 家族的落地。
+#
+# 手法（與姊妹鎖同款）：**真的起 PowerShell／bash 去執行生產實作**，不比對原始碼
+# 字面；四份吃同一張 `_VERDICT_CASES`（同一個暫存樣本檔同時餵 PS 與 bash，連「兩邊
+# 樣本抄歪了」都沒有空間）。
+#
+# 落點說明：本節原本寫成獨立檔 `tools/tests/test_windowsapps_verdict_parity.py`，
+# 被 `test_adr_xplat001_c1c2_lock.py` 的護欄層檔數棘輪擋下（DEF-101-561③：R61 起
+# `tools/tests/` 只准合併／刪除，新判準一律**擴充進既有鎖檔**），故併入本檔——本檔
+# 正是 WindowsApps guard 家族的傘狀鎖，且 ② 節那張 4 列全反斜線的行為電池正是 B3
+# 得以潛伏 7 輪的缺口所在。
+# ---------------------------------------------------------------------------
+sys.path.insert(0, str(_REPO_ROOT / "tools"))
+import bootstrap_core  # noqa: E402
+
+_AUTOCLAUDE_DIR = _REPO_ROOT / "AutoClaude"
+if str(_AUTOCLAUDE_DIR) not in sys.path:
+    sys.path.insert(0, str(_AUTOCLAUDE_DIR))
+# 第 4 份實作住在子專案裡且刻意不 import 根層 tools/*.py（見該檔的套件邊界論證）。
+# 直接 import 該函式物件比對其行為，是本 repo 既有慣例——
+# `tools/tests/test_windows_forbidden_filename_parity.py` 對
+# `autoclaude.utils.logger._sanitize_log_filename` 走的就是同一條路。
+from autoclaude.execution.pre_run_validator import (  # noqa: E402
+    _is_windows_apps_alias_stub as _autoclaude_is_stub,
+)
+
+# 共用樣本表 — 四份實作吃同一張表。`expected_stub=True` 代表「該排除（Store 空殼）」。
+#
+# 判準（四份實作共同的**意圖**，非某一份的現行行為）：路徑中存在名為 `windowsapps`
+# 的**完整路徑段**即為 Store 空殼；`/` 與 `\` 皆為路徑分隔符；比對不分大小寫。
+# 三條性質各自都有專屬樣本列，任一份實作單邊弱化任一條性質都會在此翻紅。
+_VERDICT_CASES: tuple[tuple[str, bool, str], ...] = (
+    # 反斜線基準列：R67 修復前唯一被 PS 側 `-notlike` 抓到的形狀（控制組——
+    # 若連這列都翻，代表是驅動器壞了而不是分隔符缺陷）。
+    (
+        r"C:\Users\me\AppData\Local\Microsoft\WindowsApps\python.exe",  # platform-ok: 純字面值餵給四份實作，非 Path join
+        True, "全反斜線（修復前唯一命中）",
+    ),
+    # 病灶本體①：PATH 條目整條以正斜線書寫。
+    (
+        r"C:/Users/me/AppData/Local/Microsoft/WindowsApps/python.exe",  # platform-ok: 同上
+        True, "全正斜線",
+    ),
+    # 病灶本體②：`(Get-Command python).Source` 的實測形狀——PATH 條目正斜線，
+    # PowerShell 補上的分隔符是反斜線（Find-GitBash.ps1 檔頭 R60 P10-2 段的
+    # 真 Windows 實測即此形狀，只是那次的目標段是 System32）。
+    (
+        r"C:/Users/me/AppData/Local/Microsoft/WindowsApps\python.exe",  # platform-ok: 同上
+        True, "混用分隔符（Get-Command Source 實測形狀）",
+    ),
+    # 病灶本體③④：分隔符混用出現在 WindowsApps 段的前／後。
+    (
+        r"C:\Users\me\AppData\Local\Microsoft/WindowsApps\python.exe",  # platform-ok: 同上
+        True, "混用分隔符（前緣正斜線）",
+    ),
+    (
+        r"C:\Users\me\AppData\Local\Microsoft\WindowsApps/python.exe",  # platform-ok: 同上
+        True, "混用分隔符（後緣正斜線）",
+    ),
+    # 病灶本體⑤：Git Bash（MSYS）風格掛載路徑——`command -v python` 在 Git Bash
+    # 上回的就是這個形狀，是 bash 側呼叫端的真實輸入。
+    (
+        "/c/Users/me/AppData/Local/Microsoft/WindowsApps/python",
+        True, "Git Bash MSYS 掛載路徑",
+    ),
+    # 大小寫：四份都必須不分大小寫（bash 側 R43 二審修過大小寫敏感缺陷；PS 側
+    # R67 前靠 `-notlike` 天生不分大小寫，改逐段比對後靠 `ToLowerInvariant()`）。
+    (
+        r"C:\Users\me\AppData\Local\Microsoft\WINDOWSAPPS\python.exe",  # platform-ok: 同上
+        True, "大小寫變體",
+    ),
+    # UNC 路徑：分隔符正規化不得把 `\\server\share` 的前導雙反斜線吃掉判準。
+    (
+        r"\\wsl$\Ubuntu\home\me\WindowsApps\python",  # platform-ok: 同上
+        True, "UNC 路徑",
+    ),
+    # 誘餌（偽陽性防線）：含 WindowsApps 子字串但**不是**完整路徑段。bash 側 R43
+    # 二審修的就是這個偽陽性；PS 側 R67 改逐段比對時必須一併守住，不得退化成
+    # `-like '*windowsapps*'` 這種「順手把大小寫與分隔符一起解決」的寫法。
+    (
+        r"C:\Users\me\MyWindowsAppsBackup\python.exe",  # platform-ok: 同上
+        False, "誘餌：子字串非完整段",
+    ),
+    # 陰性對照：真直譯器安裝路徑。
+    (
+        r"C:\Python311\python.exe",  # platform-ok: 同上
+        False, "真直譯器路徑",
+    ),
+    # 判準邊界（如實記載為「已知殘餘盲區」，非「已驗證安全」）：Windows 檔案系統
+    # 會忽略目錄名的尾隨點，故 `WindowsApps.` 實際指向同一個目錄，但四份實作
+    # **一致**不排除它。本列鎖住「四方一致」這件事——哪天要收掉這個盲區，四份必須
+    # 一起改，不會有人靜默單邊處理（同 test_find_git_bash_parity.py 的 Sysnative
+    # 盲區那列的用意）。
+    (
+        r"C:\Users\me\AppData\Local\Microsoft\WindowsApps.\python.exe",  # platform-ok: 同上
+        False, "尾隨點盲區（四方一致不排除）",
+    ),
+)
+
+
+def _case_inputs() -> tuple[str, ...]:
+    return tuple(case for case, _exp, _why in _VERDICT_CASES)
+
+
+def _write_verdict_samples(td: str) -> Path:
+    """把樣本表寫成一個 ASCII 檔案，PS 與 bash 兩側**讀同一個檔**。
+
+    刻意不用命令列參數傳樣本：反斜線／`$`／UNC 前導 `\\\\` 在兩種 shell 的引號語意
+    下各有轉義陷阱，一旦轉義歪掉，測試會因為「餵進去的字串已經不是表上那個」而
+    假綠。走檔案則兩側都是逐行原文讀取，沒有轉義層。
+    """
+    path = Path(td) / "verdict_cases.txt"
+    path.write_text("\n".join(_case_inputs()) + "\n", encoding="ascii")
+    return path
+
+
+@functools.lru_cache(maxsize=1)
+def _bash_exe() -> str | None:
+    """本機一個「真正可用」的 bash（無則 None ⇒ bash 側誠實 skip）。
+
+    候選蒐集與驗活邏輯比照 `tools/tests/test_windowsapps_guard_bash_parity.py::
+    _bash_exe()` **獨立重寫**（`tools/lib/bash_probe_spec.py` 檔頭載明的架構慣例：
+    各消費者只共用資料規格常數、執行邏輯各自獨立寫，以免共用函式壞掉時所有回歸鎖
+    同時失效；R64／DEF-101-618 (b)）。必須排除 System32 佔位版：那是 WSL 啟動器，
+    不是 Git Bash。
+    """
+    candidates: list[str] = []
+    git = shutil.which("git")
+    if git:
+        for up in list(Path(git).resolve().parents)[:4]:
+            for sub in ("usr/bin/bash.exe", "bin/bash.exe"):
+                cand = up / sub
+                if cand.exists():
+                    candidates.append(str(cand))
+    bare = shutil.which("bash")
+    if bare and not any(
+        part.lower() == _spec.SYSTEM32_SEGMENT for part in PureWindowsPath(bare).parts
+    ):
+        candidates.append(bare)
+    for cand in candidates:
+        try:
+            result = subprocess.run(
+                [cand, "-c", _spec.PROBE_CMD],
+                capture_output=True, text=True, encoding="utf-8",
+                errors="replace", timeout=15,
+            )
+        except OSError:
+            continue
+        lines = result.stdout.splitlines()
+        if (
+            result.returncode == 0
+            and len(lines) >= 2
+            and lines[0].strip() == _spec.PROBE_EXPECT_ECHO
+            and lines[1].strip() == _spec.PROBE_EXPECT_DIRNAME
+        ):
+            return cand
+    return None
+
+
+def _parse_verdicts(stdout: str, expected_inputs: tuple[str, ...]) -> dict[str, bool]:
+    """解析 `V|<輸入>|STUB|REAL` 行；輸入集合必須與送進去的完全相同。"""
+    out: dict[str, bool] = {}
+    for line in stdout.splitlines():
+        parts = line.split("|")
+        if len(parts) != 3 or parts[0] != "V":
+            continue
+        out[parts[1]] = parts[2].strip() == "STUB"
+    if set(out) != set(expected_inputs):
+        missing = sorted(set(expected_inputs) - set(out))
+        raise AssertionError(
+            f"回報的輸入集合與送進去的不符（缺 {missing}）——驅動器把某些樣本吃掉了，"
+            f"這種情況下的「全數同判」是假綠。stdout={stdout!r}"
+        )
+    return out
+
+
+# `Test-IsRealPython` 回 $true ＝「真 Python」＝ 非空殼，故此處反相為 STUB/REAL。
+# shadow `Get-Command` 手法同本檔 ② 節（見該節 class docstring）。
+_PS_VERDICT_DRIVER = """\
+$ErrorActionPreference = 'Stop'
+$script:FakeSource = ''
+function Get-Command {{
+  param(
+    [Parameter(Position=0)][string]$Name,
+    [Parameter(ValueFromRemainingArguments=$true)] $Rest
+  )
+  return [PSCustomObject]@{{ Source = $script:FakeSource }}
+}}
+. '{guard}'
+foreach ($line in (Get-Content -LiteralPath '{samples}')) {{
+  if ([string]::IsNullOrEmpty($line)) {{ continue }}
+  $script:FakeSource = $line
+  if (Test-IsRealPython -CandidateName 'python') {{
+    Write-Output ('V|' + $line + '|REAL')
+  }} else {{
+    Write-Output ('V|' + $line + '|STUB')
+  }}
+}}
+"""
+
+# shadow `command` builtin：bash 側的對稱手法。`is_real_python_candidate` 內部唯一
+# 的外部依賴就是 `command -v "$name"`，覆寫它即可把任意 resolved path 餵進生產函式。
+#
+# 🔴 路徑刻意用**位置參數**（`bash -c <script> bash <guard> <samples>`）注入，不像
+# `_PS_VERDICT_DRIVER` 那樣走 `str.format`：bash 函式定義本身帶 `{ }`，用 `.format`
+# 就得把每個大括號寫成 `{{`／`}}`，漏一個即 `KeyError`（R67 本節初稿正是這樣寫、
+# 且沒跑過就交出去，三支 bash／四方測試全爆）。位置參數沒有這層轉義，也順帶免掉
+# 「路徑含空白／引號」的注入面。
+_BASH_VERDICT_DRIVER = r"""
+. "$1"
+while IFS= read -r line; do
+  [ -z "$line" ] && continue
+  command() { printf '%s\n' "$line"; }
+  if is_real_python_candidate python; then
+    printf 'V|%s|REAL\n' "$line"
+  else
+    printf 'V|%s|STUB\n' "$line"
+  fi
+done < "$2"
+"""
+
+
+class TestVerdictSourcesExist(unittest.TestCase):
+    """四份實作的載體不得腐化（檔案消失／函式改名須 fail-loud，不得靜默少驗一份）。"""
+
+    def test_all_four_implementations_are_present(self) -> None:
+        self.assertTrue(_GUARD_PS1.is_file(), f"{_GUARD_PS1} 不存在")
+        self.assertTrue(_GUARD_SH.is_file(), f"{_GUARD_SH} 不存在")
+        self.assertTrue(callable(bootstrap_core._is_windows_apps_stub))
+        self.assertTrue(callable(_autoclaude_is_stub))
+
+    def test_case_table_is_ascii_and_delimiter_safe(self) -> None:
+        """樣本必須是 ASCII 且不含 `|`——否則檔案往返／輸出解析會靜默吃掉樣本。"""
+        for case, _exp, why in _VERDICT_CASES:
+            with self.subTest(case=case, why=why):
+                case.encode("ascii")  # 非 ASCII 直接拋 UnicodeEncodeError
+                self.assertNotIn("|", case, "樣本不得含 `|`（驅動器輸出的欄位分隔符）")
+                self.assertNotIn("\n", case)
+
+    def test_case_table_has_both_verdicts(self) -> None:
+        """表本身必須雙向有樣本——全 True（或全 False）的表對「永遠回同一個值」的
+        壞實作零鑑別力。"""
+        verdicts = {exp for _c, exp, _w in _VERDICT_CASES}
+        self.assertEqual(verdicts, {True, False}, "樣本表必須同時含排除與不排除兩類")
+
+
+class TestPythonSideVerdicts(unittest.TestCase):
+    """兩份 Python 實作（無外部相依，任何平台都實跑）逐筆符合判準。"""
+
+    def test_bootstrap_core_matches_criterion(self) -> None:
+        for case, expected, why in _VERDICT_CASES:
+            with self.subTest(case=case, why=why):
+                self.assertEqual(
+                    bootstrap_core._is_windows_apps_stub(case), expected,
+                    f"tools/bootstrap_core.py::_is_windows_apps_stub 判定與判準不符（{why}）",
+                )
+
+    def test_autoclaude_pre_run_validator_matches_criterion(self) -> None:
+        for case, expected, why in _VERDICT_CASES:
+            with self.subTest(case=case, why=why):
+                self.assertEqual(
+                    _autoclaude_is_stub(case), expected,
+                    "AutoClaude/autoclaude/execution/pre_run_validator.py::"
+                    f"_is_windows_apps_alias_stub 判定與判準不符（{why}）",
+                )
+
+
+@unittest.skipIf(_pwsh_exe() is None, "需要 powershell/pwsh")
+class TestPowerShellSideVerdicts(unittest.TestCase):
+    """🔴 R67 B3 迴歸鎖：真的起 PowerShell 執行 `Test-IsRealPython`。
+
+    退回 `-notlike '*\\WindowsApps\\*'`（或任何要求分隔符為反斜線的寫法）即紅。
+    """
+
+    def _ps_verdicts(self) -> dict[str, bool]:
+        with tempfile.TemporaryDirectory() as td:
+            samples = _write_verdict_samples(td)
+            script = Path(td) / "verdicts.ps1"
+            script.write_text(
+                _PS_VERDICT_DRIVER.format(
+                    guard=_GUARD_PS1.as_posix(), samples=samples.as_posix()
+                ),
+                encoding="utf-8",
+            )
+            proc = subprocess.run(
+                [
+                    _pwsh_exe(), "-NoProfile", "-ExecutionPolicy", "Bypass",
+                    "-File", str(script),
+                ],
+                capture_output=True, text=True, encoding="utf-8",
+                errors="replace", timeout=120,
+            )
+        self.assertEqual(
+            proc.returncode, 0,
+            f"PowerShell 執行失敗（rc={proc.returncode}）：{proc.stdout}\n{proc.stderr}",
+        )
+        return _parse_verdicts(proc.stdout, _case_inputs())
+
+    def test_powershell_matches_criterion(self) -> None:
+        verdicts = self._ps_verdicts()
+        for case, expected, why in _VERDICT_CASES:
+            with self.subTest(case=case, why=why):
+                self.assertEqual(
+                    verdicts[case], expected,
+                    f"tools/lib/WindowsAppsGuard.ps1::Test-IsRealPython 判定與判準不符"
+                    f"（{why}）：is_stub={verdicts[case]}，應為 {expected}——"
+                    "與另三份實作相反裁決即 R67 B3 迴歸",
+                )
+
+    def test_powershell_agrees_with_both_python_impls(self) -> None:
+        """四方等值的 PS↔Python 那兩條邊（不經判準常數，直接比對兩份實作的輸出）。"""
+        verdicts = self._ps_verdicts()
+        for case, _expected, why in _VERDICT_CASES:
+            with self.subTest(case=case, why=why):
+                self.assertEqual(
+                    verdicts[case], bootstrap_core._is_windows_apps_stub(case),
+                    f"PS 與 bootstrap_core 對同一輸入相反裁決（{why}）",
+                )
+                self.assertEqual(
+                    verdicts[case], _autoclaude_is_stub(case),
+                    f"PS 與 pre_run_validator 對同一輸入相反裁決（{why}）",
+                )
+
+
+@unittest.skipUnless(_bash_exe(), "本機找不到可用 bash，略過 bash 側判定")
+class TestBashSideVerdicts(unittest.TestCase):
+    """真的起 bash 執行 `is_real_python_candidate`（shadow `command` builtin）。"""
+
+    def _bash_verdicts(self) -> dict[str, bool]:
+        with tempfile.TemporaryDirectory() as td:
+            samples = _write_verdict_samples(td)
+            proc = subprocess.run(
+                [
+                    _bash_exe(), "-c", _BASH_VERDICT_DRIVER,
+                    "bash", str(_GUARD_SH), str(samples),
+                ],
+                capture_output=True, text=True, encoding="utf-8",
+                errors="replace", timeout=60,
+            )
+        self.assertEqual(
+            proc.returncode, 0,
+            f"bash 執行失敗（rc={proc.returncode}）：{proc.stdout}\n{proc.stderr}",
+        )
+        return _parse_verdicts(proc.stdout, _case_inputs())
+
+    def test_bash_matches_criterion(self) -> None:
+        verdicts = self._bash_verdicts()
+        for case, expected, why in _VERDICT_CASES:
+            with self.subTest(case=case, why=why):
+                self.assertEqual(
+                    verdicts[case], expected,
+                    "tools/lib/windowsapps_guard.sh::is_real_python_candidate 判定與"
+                    f"判準不符（{why}）：is_stub={verdicts[case]}，應為 {expected}",
+                )
+
+    def test_bash_agrees_with_both_python_impls(self) -> None:
+        verdicts = self._bash_verdicts()
+        for case, _expected, why in _VERDICT_CASES:
+            with self.subTest(case=case, why=why):
+                self.assertEqual(
+                    verdicts[case], bootstrap_core._is_windows_apps_stub(case),
+                    f"bash 與 bootstrap_core 對同一輸入相反裁決（{why}）",
+                )
+                self.assertEqual(
+                    verdicts[case], _autoclaude_is_stub(case),
+                    f"bash 與 pre_run_validator 對同一輸入相反裁決（{why}）",
+                )
+
+
+@unittest.skipUnless(
+    _pwsh_exe() is not None and _bash_exe(),
+    "需要同時有 PowerShell 引擎與可用 bash 才能一次比齊四方",
+)
+class TestFourWayVerdictParity(unittest.TestCase):
+    """四方一次比齊：任兩份實作對同一輸入給出不同裁決即紅（含判準本身）。
+
+    上面各 class 逐份對「判準常數」比對；本 class 直接兩兩比對**實作彼此**——判準
+    常數若哪天被人跟著壞掉的實作一起改（「改測試讓它綠」的典型手法），逐份比對會
+    一起變綠，而本 class 仍會抓到四方之間的分歧。
+    """
+
+    def test_all_four_implementations_agree_on_every_case(self) -> None:
+        ps = TestPowerShellSideVerdicts()._ps_verdicts()
+        sh = TestBashSideVerdicts()._bash_verdicts()
+        for case, expected, why in _VERDICT_CASES:
+            with self.subTest(case=case, why=why):
+                verdicts = {
+                    "WindowsAppsGuard.ps1": ps[case],
+                    "windowsapps_guard.sh": sh[case],
+                    "bootstrap_core.py": bootstrap_core._is_windows_apps_stub(case),
+                    "pre_run_validator.py": _autoclaude_is_stub(case),
+                }
+                self.assertEqual(
+                    len(set(verdicts.values())), 1,
+                    f"四份實作對同一輸入裁決分歧（{why}）：{verdicts}",
+                )
+                self.assertEqual(
+                    set(verdicts.values()), {expected},
+                    f"四方雖一致但與判準不符（{why}）：{verdicts}，判準={expected}",
+                )
 
 
 if __name__ == "__main__":

@@ -38,8 +38,13 @@
 from __future__ import annotations
 
 import ast
+import json
+import os
 import re
+import shutil
+import subprocess
 import sys
+import tempfile
 import unittest
 import warnings
 from pathlib import Path
@@ -53,6 +58,13 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import integration_gate_core  # noqa: E402
 from _platform_helpers import cut_ps_inline_comment, strip_ps_comments  # noqa: E402
 from _ps_engine import any_engine_available, production_engine  # noqa: E402
+
+# bash 驗活探測：刻意 import test_pre_push_dispatcher 既有的 `_usable_bash()`，不在本檔
+# 再寫一份副本——該函式 docstring 已載明它是 AISDLC_SDD/scripts/bash_probe.py 的鏡射，
+# 再抄一份就是把同一個盲點多抄一遍（R57 Scan-E 判例）。
+from test_pre_push_dispatcher import _usable_bash  # noqa: E402
+
+_BASH = _usable_bash()
 
 _TESTS_DIR = Path(__file__).resolve().parent
 # PowerShell 註解剝除的 SSOT 模組與符號（呼叫端鎖 `TestPsCommentStripperSsotCallsiteLock`
@@ -832,6 +844,377 @@ class TestFindGitBashCallSites(unittest.TestCase):
                         f"{rel} 功能碼行出現 `{needle}`——疑似內聯重寫 Git Bash 偵測，"
                         "請改為 dot-source tools/lib/Find-GitBash.ps1 呼叫 Find-GitBash",
                     )
+
+
+# ===========================================================================
+# R67-C18：tools/integration_gate.{sh,ps1,_core.py} 的本機活體載具
+# ===========================================================================
+#
+# 為何住在本檔（收納契約，非雜物抽屜）：本檔已是 `tools/integration_gate_core.py` 的
+# 既有鎖檔（上方 `find_git_bash` 家族即該模組的函式），import 與 `_PY_PATH` 都指著它。
+# `DEF-101-561③`（由 `test_adr_xplat001_c1c2_lock.py::TestGuardFileCountShrinkOnlyRatchet`
+# 機械強制）明文禁止在 `tools/tests/` 新增鎖檔、只准「把新判準擴充進既有鎖檔」，
+# 本節即依該裁決把新判準併進同一模組的既有鎖檔，而不是再開一支。
+#
+# WHY 這組鎖必須存在（Rule 9 — 鎖意圖而不只鎖行為）：
+# 整合層閘門的存在理由是「兩子專案各自綠燈不代表整合綠燈」（[3/5] SDD bridge 整合煙霧、
+# [4/5] 回退驗證、[5/5] cc-switch A/B）。但 R67 全庫普查實測：它在整個自動化層**零呼叫端**
+# ——唯二執行者是 .github/workflows/macos-compat-ci.yml 與 windows-compat-ci.yml 各一行
+# （`bash tools/integration_gate.sh --skip-full` / `./tools/integration_gate.ps1 -SkipFull`），
+# 而兩支 compat-CI 因 CI 帳務停擺（DEF-101-081）已多輪未真正執行。
+# **雲端是唯一執行者的東西＝實質已死**：閘門本體被改壞在本機任何流程都不會紅。
+#
+# 三條各自獨立、彼此補不到的缺口：
+#   A. 編排語意（`main` / `run_section` / `--skip-full` / 例外處理）——R67 動工前實測
+#      `grep -rn "integration_gate_core\.\(main\|sec_\|run_section\|_run_cc\)" tools/tests/
+#      AutoClaude/tests/` 為**空輸出**，全庫零測試觸及。這一層的故障模式是「閘門不會變紅」，
+#      **實跑健康的 repo 抓不到**（真跑只會全綠，看不出它其實已經不會紅）——R67 注入實測：
+#      把 `run_section` 的 `if rc != 0` 改成恆偽後，真閘門 `--skip-full` 仍 rc=0。
+#   B. stage 目標存在性——閘門從不執行 ⇒ 它指向的目標被搬走／改名時零訊號。本節刻意
+#      **不抄第二份路徑清單**（那正是本 repo 反覆抓到的「N 份複本只改 1 份」），而是攔截
+#      `subprocess.run` 取出各 `sec_*` **實際會下的指令**再驗磁碟。Windows 分支
+#      （local_ci_gate.ps1）一併攔一次：兩支 compat-CI 一起死了，兩邊都沒人看。
+#   C. 薄殼→核心委派**實跑**——兩支薄殼由 tools/check_wrapper_thinness.py 以 sha256 釘選，
+#      但 hash 只認「內容有沒有變」，對「內容變了但語意壞掉」（參數沒傳過去、exit code
+#      被吞成 0）盲目——注入實測時 hash 鎖確實會紅，但它給的訊息是「請重釘新值」，
+#      照做就會把壞掉的語意連同新 hash 一起釘進去。
+#
+# 與 pre-push 整合閘門 leg 的分工（兩者缺一不可）：
+#   · `tools/git-hooks/pre-push` 的整合閘門 leg 只在 push **動到閘門本體**時實跑真閘門
+#     （路徑範圍觸發，日常 push 零成本；實測偵測迴圈 0.01s、命中時 +2.24s）。
+#   · 本節在**每次根層 push** 隨 `tools/run_root_unittests.py` 執行——抓的是「閘門沒被改，
+#     但它指向的東西腐爛了」與「編排語意被改成吞掉失敗」。那兩者路徑觸發永遠看不到。
+
+# stub 核心：把「薄殼到底把什麼交給核心」寫成 JSON 證物，並以環境變數決定 exit code。
+_IG_STUB_CORE = """\
+import json, os, sys
+from pathlib import Path
+Path(os.environ["IG_STUB_MARKER"]).write_text(
+    json.dumps({"argv": sys.argv[1:], "pythonutf8": os.environ.get("PYTHONUTF8")}),
+    encoding="utf-8",
+)
+raise SystemExit(int(os.environ.get("IG_STUB_RC", "0")))
+"""
+
+
+def _ig_python_shim_dir(tmp: Path) -> str:
+    """回傳含名為 `python` 之可執行檔的目錄（薄殼以 `command -v python` 探測）。
+
+    手法對齊 tools/tests/test_pre_push_dispatcher.py::_python_dir——venv 內天然有
+    python(.exe)；只有 python3 別名的系統直譯器以 symlink shim 補上，建不了再退回複製。
+    """
+    exe_dir = Path(sys.executable).parent
+    name = "python.exe" if os.name == "nt" else "python"
+    if (exe_dir / name).exists():
+        return str(exe_dir)
+    shim = tmp / "pyshim"
+    shim.mkdir(exist_ok=True)
+    link = shim / name
+    if not link.exists():
+        try:
+            link.symlink_to(Path(sys.executable))
+        except OSError:
+            shutil.copy2(sys.executable, link)
+    return str(shim)
+
+
+class _IgRunRecorder:
+    """`subprocess.run` 替身：記下 (cmd, cwd) 並回 rc=0，不真的執行任何 stage。"""
+
+    def __init__(self) -> None:
+        self.calls: list[list[str]] = []
+        self.cwds: list[object] = []
+
+    def __call__(self, cmd, **kwargs):  # noqa: ANN001, ANN204
+        self.calls.append([str(a) for a in cmd])
+        self.cwds.append(kwargs.get("cwd"))
+        return subprocess.CompletedProcess(cmd, 0)
+
+
+class TestIntegrationGateOrchestration(unittest.TestCase):
+    """缺口 A：`main()` 編排語意（全庫先前零覆蓋）。
+
+    WHY：這一層的故障模式是「閘門不會變紅」。實跑一次健康的 repo **證明不了**它壞沒壞
+    ——真跑只會全綠。唯一能鑑別的手法就是注入一個失敗 stage，看閘門是否照實轉紅。
+    """
+
+    def setUp(self) -> None:
+        # main() 會寫 os.environ["PYTHONUTF8"]，用 patch.dict 保證測試不汙染行程環境。
+        env_patch = mock.patch.dict(os.environ, {}, clear=False)
+        env_patch.start()
+        self.addCleanup(env_patch.stop)
+        # hooks liveness 是 advisory（會 spawn 子行程），與編排語意無關 → 停用求決定性。
+        adv = mock.patch.object(integration_gate_core, "_hooks_liveness_advisory", lambda: None)
+        adv.start()
+        self.addCleanup(adv.stop)
+
+    def _run_main(self, argv: list[str], rcs: dict[str, int]) -> tuple[int, list[str]]:
+        """以指定 rc 替換四個 sec_*，回傳 (main 的 rc, 實際被呼叫的 stage 名順序)。"""
+        called: list[str] = []
+
+        def _make(name: str):
+            def _fn() -> int:
+                called.append(name)
+                return rcs.get(name, 0)
+            return _fn
+
+        with mock.patch.object(integration_gate_core, "sec_autoclaude", _make("autoclaude")), \
+                mock.patch.object(integration_gate_core, "sec_sdd", _make("sdd")), \
+                mock.patch.object(integration_gate_core, "sec_bridge", _make("bridge")), \
+                mock.patch.object(integration_gate_core, "sec_rollback", _make("rollback")):
+            rc = integration_gate_core.main(argv)
+        return rc, called
+
+    def test_healthy_full_run_executes_all_four_sections_in_order(self) -> None:
+        """完整模式：四個 stage 依 [1]→[2]→[3]→[4] 順序全跑、rc=0。
+
+        WHY：順序不是美觀問題——[1]/[2] 是兩子專案各自的完整閘門，先跑它們才能讓
+        [3]/[4] 的整合失敗被歸因為「整合層」而非「子專案本身壞了」。
+        """
+        rc, called = self._run_main([], {})
+        self.assertEqual(rc, 0)
+        self.assertEqual(called, ["autoclaude", "sdd", "bridge", "rollback"])
+
+    def test_skip_full_runs_only_stage_3_and_4(self) -> None:
+        """`--skip-full` 必須恰好略過 [1]/[2]，且**不得**順手略過 [3]/[4]。
+
+        WHY：`--skip-full` 正是兩支 compat-CI 與新接的 pre-push leg 實際使用的模式；
+        它若退化成「什麼都不跑」，閘門會以 0 PASS 印出 ✅（下方
+        test_all_sections_skipped_is_not_silently_green 一併堵住該形狀）。
+        """
+        rc, called = self._run_main(["--skip-full"], {})
+        self.assertEqual(rc, 0)
+        self.assertEqual(called, ["bridge", "rollback"])
+
+    def test_failing_stage_turns_gate_red(self) -> None:
+        """任一 stage 非零 → 閘門 rc=1。**本組最核心的一條**。
+
+        WHY：這是「閘門是閘門」的定義。`run_section` 若被改成吞掉 rc，整合層從此永遠
+        綠燈，而且因為它本來就沒有本機呼叫端，沒有任何人會發現。
+        """
+        for broken in ("autoclaude", "sdd", "bridge", "rollback"):
+            with self.subTest(stage=broken):
+                rc, called = self._run_main([], {broken: 1})
+                self.assertEqual(
+                    rc, 1,
+                    f"stage {broken} 回 rc=1，整合閘門卻回 {rc}——閘門吞掉失敗",
+                )
+                self.assertIn(broken, called)
+
+    def test_failure_does_not_short_circuit_remaining_sections(self) -> None:
+        """前面的 stage 失敗後，後面的 stage 仍必須跑完（逐項收集不中斷）。
+
+        WHY：核心 docstring 與 `run_section` 的註解都明文承諾「逐項收集不中斷，對齊
+        收斂前 run_section/Invoke-Section」。若改成 fail-fast，開發者每修一項就得重跑
+        整輪（[1]/[2] 是分鐘級），實務上會直接放棄使用這道閘門。
+        """
+        rc, called = self._run_main([], {"autoclaude": 1})
+        self.assertEqual(rc, 1)
+        self.assertEqual(called, ["autoclaude", "sdd", "bridge", "rollback"])
+
+    def test_section_exception_counts_as_failure_not_crash(self) -> None:
+        """stage 拋例外 → 判 FAIL（rc=1）而非讓整支閘門炸掉。
+
+        WHY：對齊 .ps1 的 Continue 語意（核心 docstring 明載）。例外若直接往外拋，
+        呼叫端（pre-push leg / CI step）看到的是 traceback 而非「哪一段失敗」，
+        且後續 stage 全部不跑。
+        """
+        def _boom() -> int:
+            raise RuntimeError("stage 內部炸掉")
+
+        with mock.patch.object(integration_gate_core, "sec_autoclaude", _boom), \
+                mock.patch.object(integration_gate_core, "sec_sdd", lambda: 0), \
+                mock.patch.object(integration_gate_core, "sec_bridge", lambda: 0), \
+                mock.patch.object(integration_gate_core, "sec_rollback", lambda: 0):
+            rc = integration_gate_core.main([])
+        self.assertEqual(rc, 1, "stage 例外必須被判 FAIL，不得靜默視為通過")
+
+    def test_all_sections_skipped_is_not_silently_green(self) -> None:
+        """負面斷言：閘門的 PASS 計數必須真的來自跑過的 stage。
+
+        WHY：`--skip-full` 的存在讓「少跑」變成合法狀態，而合法狀態最容易被進一步
+        放寬成「什麼都不跑也算通過」。這裡以 PASS 段數把「跑了幾段」釘進行為：
+        skip-full 模式必須嚴格少於完整模式，且兩者都不得為 0。
+        """
+        full_counters = {"pass": 0, "skip": 0}
+        skip_counters = {"pass": 0, "skip": 0}
+        real_run_section = integration_gate_core.run_section
+
+        def _count(counters):
+            def _wrapped(label, fn, failures, _c):
+                return real_run_section(label, fn, failures, counters)
+            return _wrapped
+
+        with mock.patch.object(integration_gate_core, "sec_autoclaude", lambda: 0), \
+                mock.patch.object(integration_gate_core, "sec_sdd", lambda: 0), \
+                mock.patch.object(integration_gate_core, "sec_bridge", lambda: 0), \
+                mock.patch.object(integration_gate_core, "sec_rollback", lambda: 0):
+            with mock.patch.object(integration_gate_core, "run_section", _count(full_counters)):
+                self.assertEqual(integration_gate_core.main([]), 0)
+            with mock.patch.object(integration_gate_core, "run_section", _count(skip_counters)):
+                self.assertEqual(integration_gate_core.main(["--skip-full"]), 0)
+
+        self.assertEqual(full_counters["pass"], 4, "完整模式必須有 4 段 PASS")
+        self.assertEqual(skip_counters["pass"], 2, "--skip-full 必須仍有 2 段 PASS")
+        self.assertGreater(
+            full_counters["pass"], skip_counters["pass"],
+            "--skip-full 若與完整模式跑一樣多段，代表旗標語意已失效",
+        )
+
+
+class TestIntegrationGateStageTargets(unittest.TestCase):
+    """缺口 B：stage 指向的目標必須真的存在於磁碟（雙平台分支都驗）。
+
+    WHY：閘門零呼叫端 ⇒ 目標被搬走／改名時**沒有任何人會執行到那個 FileNotFoundError**。
+    本鎖不抄第二份路徑清單，而是攔 `subprocess.run` 取出 sec_* 真正會下的指令再驗磁碟，
+    故它跟著實作走：改對了就綠、打錯字就紅，不會有「鎖自己過期」的第三份真相源。
+    """
+
+    def _capture(self, fn, *, windows: bool) -> list[tuple[list[str], Path]]:
+        rec = _IgRunRecorder()
+        with mock.patch.object(
+                integration_gate_core.platform_utils, "is_windows", lambda: windows), \
+                mock.patch.object(integration_gate_core, "find_git_bash", lambda: "bash"), \
+                mock.patch("subprocess.run", rec):
+            fn()
+        return [(cmd, Path(cwd)) for cmd, cwd in zip(rec.calls, rec.cwds, strict=True)]
+
+    @staticmethod
+    def _path_like(arg: str) -> list[str]:
+        """挑出「看起來是相對路徑引數」的 token（排除旗標與直譯器本身）。"""
+        if arg.startswith("-") or arg == sys.executable:
+            return []
+        if "/" in arg or arg.endswith((".sh", ".ps1", ".py")):
+            return [arg]
+        return []
+
+    def test_all_stage_targets_exist_on_disk(self) -> None:
+        targets: set[str] = set()
+        sections = (
+            integration_gate_core.sec_autoclaude,
+            integration_gate_core.sec_sdd,
+            integration_gate_core.sec_bridge,
+            integration_gate_core.sec_rollback,
+        )
+        for windows in (False, True):
+            for fn in sections:
+                for cmd, cwd in self._capture(fn, windows=windows):
+                    for arg in cmd:
+                        for rel in self._path_like(arg):
+                            resolved = cwd / rel
+                            targets.add(str(resolved.relative_to(_REPO_ROOT)))
+                            self.assertTrue(
+                                resolved.exists(),
+                                f"integration_gate stage 目標不存在：{resolved}"
+                                f"（來自指令 {cmd}，cwd={cwd}，windows={windows}）"
+                                f"——整合閘門零本機呼叫端，此類腐爛先前零訊號",
+                            )
+        # 下限釘選：抽取管線被改壞的症狀是「空集合 → 迴圈零圈 → 恆綠」。
+        self.assertGreaterEqual(
+            len(targets), 5,
+            f"只抽到 {len(targets)} 個 stage 目標 {sorted(targets)}——"
+            f"抽取管線疑似失效（現況 5：兩子專案 gate 各一 + ps1 + bridge 目錄 + rollback 檔）",
+        )
+
+    def test_windows_branch_targets_the_ps1_gate(self) -> None:
+        """Windows 分支必須指向 .ps1（而非在兩平台都跑 .sh）。
+
+        WHY：windows-compat-ci 與 macos-compat-ci 同時死亡 ⇒ 兩個平台分支都沒人跑。
+        分支若在某次收斂中被壓成單一路徑，Windows 端會去執行 bash 腳本而當場失敗，
+        但沒有任何載具會看到。
+        """
+        cmds = [cmd for cmd, _cwd in self._capture(
+            integration_gate_core.sec_autoclaude, windows=True)]
+        self.assertTrue(
+            any(any(a.endswith("local_ci_gate.ps1") for a in cmd) for cmd in cmds),
+            f"Windows 分支未指向 local_ci_gate.ps1：{cmds}",
+        )
+        posix_cmds = [cmd for cmd, _cwd in self._capture(
+            integration_gate_core.sec_autoclaude, windows=False)]
+        self.assertTrue(
+            any(any(a.endswith("local_ci_gate.sh") for a in cmd) for cmd in posix_cmds),
+            f"POSIX 分支未指向 local_ci_gate.sh：{posix_cmds}",
+        )
+
+
+@unittest.skipIf(_BASH is None, "整合閘門薄殼為 bash 腳本，需可用 bash（非 WSL 佔位）")
+class TestIntegrationGateShellDelegation(unittest.TestCase):
+    """缺口 C：`tools/integration_gate.sh` → 核心的委派**實跑**。
+
+    WHY：薄殼由 check_wrapper_thinness.py 以 sha256 釘選，但 hash 對「內容變了而語意壞掉」
+    盲目——它只會要求「請以 --print-hash 取新值同步更新」，照做就把壞語意連同新 hash
+    一起釘進去。本鎖在 tmp fake repo 內用真 bash 跑真薄殼＋stub 核心，把薄殼**唯一**該做
+    的三件事（傳參數、設 PYTHONUTF8、傳 rc）逐項釘住。
+    """
+
+    def setUp(self) -> None:
+        self.tmp = Path(tempfile.mkdtemp(prefix="ig_shell_"))
+        self.addCleanup(shutil.rmtree, self.tmp, ignore_errors=True)
+        tools = self.tmp / "tools"
+        (tools / "lib").mkdir(parents=True)
+        shutil.copy(_REPO_ROOT / "tools" / "integration_gate.sh", tools / "integration_gate.sh")
+        shutil.copy(
+            _REPO_ROOT / "tools" / "lib" / "windowsapps_guard.sh",
+            tools / "lib" / "windowsapps_guard.sh",
+        )
+        (tools / "integration_gate_core.py").write_text(
+            _IG_STUB_CORE, encoding="utf-8", newline="\n"
+        )
+        self.marker = self.tmp / "stub_marker.json"
+
+    def _run(self, args: list[str], stub_rc: int = 0) -> tuple[int, str, str]:
+        env = dict(os.environ)
+        env["PATH"] = os.pathsep.join(
+            [_ig_python_shim_dir(self.tmp), str(Path(_BASH).parent), env.get("PATH", "")]
+        )
+        env["IG_STUB_MARKER"] = str(self.marker)
+        env["IG_STUB_RC"] = str(stub_rc)
+        env.pop("PYTHONUTF8", None)  # 必須由薄殼自己設，不能靠繼承而假綠
+        proc = subprocess.run(
+            [_BASH, "tools/integration_gate.sh", *args],
+            cwd=str(self.tmp), capture_output=True, env=env, timeout=120,
+        )
+        return (
+            proc.returncode,
+            proc.stdout.decode("utf-8", errors="replace"),
+            proc.stderr.decode("utf-8", errors="replace"),
+        )
+
+    def _marker(self) -> dict:
+        self.assertTrue(
+            self.marker.exists(),
+            "stub 核心未被執行——薄殼沒有把工作轉交給 integration_gate_core.py",
+        )
+        return json.loads(self.marker.read_text(encoding="utf-8"))
+
+    def test_shell_delegates_to_core_with_skip_full_passthrough(self) -> None:
+        rc, out, err = self._run(["--skip-full"])
+        self.assertEqual(rc, 0, f"stdout={out}\nstderr={err}")
+        self.assertEqual(
+            self._marker()["argv"], ["--skip-full"],
+            "薄殼未把 --skip-full 透傳給核心——兩支 compat-CI 與 pre-push leg 用的正是這個模式",
+        )
+
+    def test_shell_sets_pythonutf8(self) -> None:
+        """WHY：核心會 print ✅/❌/⚠️ 等非 ASCII；Windows 非 UTF-8 終端下沒有這個
+        環境變數就會在輸出階段炸掉，而那是在所有 stage 都跑完之後才發生的失敗。"""
+        rc, out, err = self._run([])
+        self.assertEqual(rc, 0, f"stdout={out}\nstderr={err}")
+        self.assertEqual(self._marker()["pythonutf8"], "1")
+
+    def test_shell_propagates_core_failure_exit_code(self) -> None:
+        """核心非零 → 薄殼必須原樣傳出去（不得吞成 0）。
+
+        WHY：呼叫端（pre-push leg、CI step）判斷閘門過沒過**只看 exit code**。薄殼
+        若吞掉 rc，整道閘門就變成「印紅字但放行」——最惡劣的假綠形態。
+        """
+        rc, out, err = self._run(["--skip-full"], stub_rc=7)
+        self.assertEqual(rc, 7, f"薄殼吞掉核心 rc：\nstdout={out}\nstderr={err}")
+
+    def test_shell_runs_without_args(self) -> None:
+        rc, out, err = self._run([])
+        self.assertEqual(rc, 0, f"stdout={out}\nstderr={err}")
+        self.assertEqual(self._marker()["argv"], [])
 
 
 if __name__ == "__main__":

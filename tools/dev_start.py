@@ -1662,7 +1662,14 @@ def _check_nightly_heartbeat(now: str) -> str:
               f"或已安裝但尚未跑過第一輪（查證：{verify_cmd}），設定見 ONBOARDING §8；"
               f"CI 停擺期間本地 nightly 為唯一每日兜底")
         return "nightly 心跳未偵測（排程未啟用？或尚未首跑？見 ONBOARDING §8）"
-    age_days = (time.time() - mtime) / 86400.0
+    # R67-M40：年齡先收斂為「整數秒差」再換算天數，與 install_mac_nightly.sh
+    # report_heartbeat() 的秒級語意精確對齊。WHY：BSD `stat -f %m` 與 `date +%s`
+    # 都只給整數秒，而 `os.stat().st_mtime` 保留次秒精度——當心跳檔 mtime 恰為整秒、
+    # 年齡恰落在 [8 天, 8 天+1 秒) 時，bash 側算出 691200（`-gt 691200` 為偽→新鮮）
+    # 而 python 側算出 691200.0x（`> 8` 為真→過期），同一台機器同一顆心跳檔兩個
+    # 官方工具給出相反結論，且實測 10/10 必然重現（不是 flaky，是確定性分歧）。
+    # 兩端同樣先截成整數秒即結構性消除該邊界，無須為 1 秒窗口新增任何跨檔耦合。
+    age_days = (int(time.time()) - int(mtime)) / 86400.0
     # ARCH-R15-1：mtime 只證明「在跑」不證明「在綠」——CI 停擺期間 nightly 是唯一
     # 每日活體，連續全紅時晨間 dev_start 仍 ✅ 是盲區。心跳存在（新鮮或過期皆檢查）
     # 時依平台分讀：mac 是固定前 3 行心跳契約（_heartbeat_fail_count）；Windows
@@ -1684,9 +1691,13 @@ def _check_nightly_heartbeat(now: str) -> str:
                   f"（ARCH-R15-1）")
             fail_note = f"；{win_fail}（見警告）"
     if age_days > _HEARTBEAT_MAX_AGE_DAYS:
-        _warn(f"nightly 心跳過期（AutoClaude/logs/{name} 距今 {age_days:.1f} 天 > "
-              f"{_HEARTBEAT_MAX_AGE_DAYS} 天）— 排程可能已停擺，請檢查 launchd/schtasks"
-              f"（ONBOARDING §8）")
+        # R67-M39：文案不再內嵌不等式。`{age_days:.1f}` 只有一位小數，判定卻是秒級，
+        # 年齡落在 [8.0, 8.05) 天時舊文案會印出「8.0 天 > 8 天」這種數學上為偽的句子
+        # （install_mac_nightly.sh 同型窗口更寬達 24 小時）。改為敘述句後，顯示精度
+        # 與判定精度不一致就不會再讓文案自相矛盾。兩站點同步改，維持語意對齊。
+        _warn(f"nightly 心跳過期（AutoClaude/logs/{name} 距今 {age_days:.1f} 天，"
+              f"已超過 {_HEARTBEAT_MAX_AGE_DAYS} 天門檻）— 排程可能已停擺，"
+              f"請檢查 launchd/schtasks（ONBOARDING §8）")
         return f"nightly 心跳過期（{age_days:.1f} 天，見警告）{fail_note}"
     print(f"    ✅ nightly 心跳新鮮（AutoClaude/logs/{name}，距今 {age_days:.1f} 天）")
     return f"nightly 心跳新鮮{fail_note}"

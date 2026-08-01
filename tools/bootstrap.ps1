@@ -6,12 +6,21 @@ monorepo 一鍵開發環境整備薄殼（Windows）。macOS/Linux 對等腳本�
   邏輯全部集中在 tools/bootstrap_core.py（跨平台單一事實源；第 16 輪架構最佳化
   Architect 建議 B，模式對齊 AutoClaude/tools/local_ci_gate.{py,sh,ps1} 既有先例）。
   本檔只做：找一個可用的 python 直譯器（.venv 尚未存在，不可假設已啟用）→
-  轉呼叫核心 → 傳遞 exit code。刻意不用 [CmdletBinding()]／具名參數（核心目前
-  無任何旗標）：讓未被繫結的參數落入 $args 自動變數而非拋錯，維持與收斂前
-  `param()`（零參數）相容之餘仍可原樣透傳。
+  轉呼叫核心 → 傳遞 exit code。刻意不用 [CmdletBinding()]／具名參數：所有旗標
+  一律原樣落入 $args 並透傳給核心，由核心的 argparse 單一處裁決（`--help` 印用法
+  rc=0 且不做任何事；未知旗標 rc=2 fail-loud）——CLI 契約只有一份，不在兩支薄殼
+  各長一套。
+  🔴 R67-F9 訂正：本段原本寫「核心目前無任何旗標 → 讓未被繫結的參數落入 $args
+  而非拋錯」，把「靜默吞掉所有參數」正當化。實測 `pwsh -File tools/bootstrap.ps1
+  --help` 因此 rc=0 並跑完整套 bootstrap（建 venv ＋重裝兩專案 editable），任何
+  typo 亦同——透傳本身沒錯，錯在當時的核心根本不讀 argv。核心補上參數解析後，
+  透傳才真的等於「交給單一真相源裁決」。
 
 .EXAMPLE
   powershell -ExecutionPolicy Bypass -File tools/bootstrap.ps1
+
+.EXAMPLE
+  powershell -ExecutionPolicy Bypass -File tools/bootstrap.ps1 --help
 #>
 
 # WindowsApps 空殼排除 guard 共用實作（R37 抽出，DEF-101-273/279/300/303 反覆

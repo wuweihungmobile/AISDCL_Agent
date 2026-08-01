@@ -25,6 +25,7 @@ code」的薄殼——模式對齊本 repo 已驗證過的 AutoClaude/tools/loca
 """
 from __future__ import annotations
 
+import argparse
 import os
 import shutil
 import subprocess
@@ -333,7 +334,46 @@ git hooks（選用）：安裝根層 dispatcher hooks — 兩子專案閘門同�
     （或 bash AISDLC_SDD/scripts/install-hooks.sh，效果相同）""")
 
 
-def main() -> int:
+_WRAPPER_NAME = "tools/bootstrap.ps1" if IS_WINDOWS else "tools/bootstrap.sh"
+
+_USAGE_EPILOG = f"""\
+本腳本**不接受任何旗標**（`--help` 除外）。指定未知旗標一律 fail-loud（rc=2），
+不會退回預設行為——R67-F9：兩支薄殼原樣透傳 `$@`／`@args` 到一個完全不讀 argv
+的核心，導致 `{_WRAPPER_NAME} --help` 靜默跑完整套 bootstrap（無 .venv 的新機器
+上等於憑空建 venv ＋下載整套依賴），而任何 typo（例如把 `--force-bootstrap`
+打成 `--forse-bootstrap`）同樣 rc=0 走預設路徑，使用者誤以為已強制重建、實際
+只是沿用舊 .venv。
+
+預設行為（無參數）：
+  1. `.venv` 已存在 → 沿用（形狀不符本平台則 fail-fast，不自動刪除）
+  2. 否則挑一個 >= 3.11 的直譯器（偵測到 uv 則用 `uv venv --python`）建立 `.venv`
+  3. 安裝 AutoClaude（editable, [dev,notifications,lint]）＋ AISDLC_SDD CI 依賴
+  4. 印出啟用指引與 git-hooks 安裝選項（不自動改 core.hooksPath）
+
+.venv 位置：{VENV_DIR}
+重建 .venv：{"Remove-Item -Recurse -Force .venv" if IS_WINDOWS else "rm -rf .venv"} 後再跑本腳本一次
+相關旗標的正確歸屬：`--force-bootstrap`／`--no-sync`／`--check-nightly` 屬
+`tools/dev_start.py`（`{"powershell -ExecutionPolicy Bypass -File tools/dev_start.ps1" if IS_WINDOWS else "bash tools/dev_start.sh"} --help`），不是本腳本。
+"""
+
+
+def build_parser() -> argparse.ArgumentParser:
+    """本核心的 CLI 契約：零旗標 ＋ `-h/--help`；未知參數由 argparse 以 rc=2 拒絕。
+
+    刻意用 `argparse` 而非手寫 argv 比對：同目錄 `tools/dev_start.py`／
+    `integration_gate_core.py`／`run_act_core.py` 皆走 argparse，未知旗標 fail-loud
+    與 usage 文字格式一併沿用同一套語意（Rule 11 conformance）。`prog` 依平台指向
+    使用者實際會敲的薄殼名，而非核心檔名——使用者從沒直接呼叫過 bootstrap_core.py。
+    """
+    return argparse.ArgumentParser(
+        prog=_WRAPPER_NAME,
+        description="AISDCL_Agent monorepo 一鍵開發環境整備（建立 .venv ＋安裝兩子專案依賴）。",
+        epilog=_USAGE_EPILOG,
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
+
+
+def main(argv: list[str] | None = None) -> int:
     # 自身 stdout/stderr best-effort 行緩衝 + UTF-8 編碼：非 TTY（管線/log 擷取）下
     # Python 預設對 stdout 做 full buffering，會讓本檔狀態訊息與子行程（uv/pip）
     # 即時輸出交錯錯亂（對齊 tools/local_ci_gate.py／AutoClaude/tools/run_act_core.py
@@ -347,6 +387,15 @@ def main() -> int:
             stream.reconfigure(encoding="utf-8", errors="replace", line_buffering=True)
         except (AttributeError, OSError, ValueError):
             pass
+
+    # 🔴 參數解析必須在**任何副作用之前**（R67-F9）：`--help` 要真的什麼都不做，
+    # 未知旗標要在 chdir／建 venv／裝依賴之前就擋下。argparse 於 `--help` 與
+    # 參數錯誤時皆以 `SystemExit` 收場，此處收攏成 return code，讓 main() 維持
+    # 「回傳 int」的既有契約（呼叫端 `sys.exit(main())` 與單元測試皆不需改）。
+    try:
+        build_parser().parse_args(sys.argv[1:] if argv is None else argv)
+    except SystemExit as exc:
+        return 0 if exc.code is None else int(exc.code)
 
     os.chdir(REPO_ROOT)
 

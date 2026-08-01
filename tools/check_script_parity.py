@@ -36,11 +36,26 @@ fail-loud 列出未納管檔名：
   （`_EQUIVALENCE_GROUPS` / `_check_equivalence_groups_fresh`，Phase 1-C (a)）。
 
   🔴 R64（ADR-XPLAT-002 §8 item 12）：R63 只驗證「現況合法」，沒有機制擋「未來把
-  某筆 tier3/4 悄悄改回 unpinned、或把 tier1/2 打回 unpinned」。`_check_tier_ratchet()`
-  比照 `tools/tests/test_adr_xplat001_c1c2_lock.py::TestShrinkOnlyRatchet` 的形狀，
-  以 `git show HEAD:<本檔>` 取上一版 `_EXEMPT_PAIRS`／`_SINGLE_SIDED_EXEMPT` 的 tier
-  值做 AST 解析後機械比對，只鎖 ADR 逐字指定的兩個降級方向（見 `tier_ratchet_problems`
-  上方的 `_TIER3_4`／`_TIER1_2` 常數），已隨 `main()` 自動執行、非另立 CLI 旗標。
+  某筆 tier3/4 悄悄改回 unpinned、或把 tier1/2 打回 unpinned」，故加 `_check_tier_ratchet()`
+  棘輪，只鎖 ADR 逐字指定的兩個降級方向（見 `_TIER_BASELINE` 上方的 `_TIER3_4`／
+  `_TIER1_2` 常數），已隨 `main()` 自動執行、非另立 CLI 旗標。
+
+  🔴🔴 R67-H14（**訂正 R64 的比對基準**）：R64 照抄 `TestShrinkOnlyRatchet` 的
+  `git show HEAD:<本檔>` 形狀，但該形狀在**所有真正消費本工具 rc 的閘門**裡結構性
+  恆真——pre-push 與三支 CI workflow 都跑在 commit 之後（CI 更是乾淨 checkout），
+  HEAD 逐字等於工作樹 ⇒ 永遠零違規（沙箱實測：tier4→unpinned 降級 commit 後 rc=0、
+  真 pre-push hook 端到端 rc=0）。R67 起基準改為**簽入本檔的凍結常數
+  `_TIER_BASELINE`**：commit／checkout 都不會動它，比較在任何時點皆非退化；整條 git
+  依賴一併移除（連帶消滅「基準取不到 ⇒ 綠燈空轉」的 fail-open 面）。完整論證與殘餘
+  邊界見 `_TIER_BASELINE` 上方區塊註解。R67 另加兩條同族規則：活體登記項未涵蓋於
+  基準即紅（擋「刪基準條目迴避棘輪」）、`unpinned` 筆數天花板 `_UNPINNED_CEILING`
+  只准下修（R67-E24）。
+
+  🔴 R67 round 2（ARCH-R67-03）：上述逐 key 降級規則對「活體與基準**成對編輯**」無效
+  （複審沙箱實測：把 `LATEST/tools/init_project` 於兩處同步由 tier3 改為 tier1，全套
+  全綠），而「成對編輯」正是新鮮度鎖強制出來的常規工作流 ⇒ 降級與升級在 diff 上同形。
+  故加第三條同族規則：tier3/4 筆數地板 `_TIER34_FLOOR` 只准上修（總量維度，與
+  `_UNPINNED_CEILING` 互為鏡像；成對編輯不影響它）。
 
 🔴 本工具的邊界（務必先讀）：本工具只機械比對「標籤序列」（數量、順序、字面文字），
 **不比對、也無能力比對**各 step 背後的實作內容是否語意對等。**本工具通過（exit 0）
@@ -289,8 +304,11 @@ _LATEST_PINNED_SHA256: dict[str, str] = {
     # jar 自動下載、(3) .ps1 python 候選探測順序改 python3 優先（同 .sh）、(4) 新增
     # --tla-version 轉傳（.sh 讀 TLA_VERSION 環境變數／.ps1 讀 -TlaVersion 參數，
     # 皆只在使用者顯式帶值時才轉傳）。
+    # 🔴 R67（R67-H35）：`check_wrapper_thinness._normalize()` 改為保留首行 shebang
+    # ⇒ `.sh` 側重釘（`.ps1` 側首行非 shebang，hash 逐字不變）。內容未竄改的三段
+    # 取證見 check_wrapper_thinness.py `_PINNED_SHA256` 上方 R67 註解。
     "LATEST/tools/fsm_runtime/formal/run_tlc.sh": (
-        "0af98b1aecf6293bd12d7bc1936b797c201f48ead1cfffaaf3a773fd7f4d1886"
+        "0828a851486283a37631d6ca1245c1438fb7c81deb51d414b4e24b410ebeb492"
     ),
     "LATEST/tools/fsm_runtime/formal/run_tlc.ps1": (
         "f6bb3be45c92fdbaddfac34735e465474c7f32b40c06bb9d6ef50ec1cf775909"
@@ -510,6 +528,27 @@ _VALID_TIERS = frozenset({
 # （R63 Phase 1-C (d)）。關鍵字比對即可、不做語意驗證——同 ADR-XPLAT-001 §4.3.4
 # 對 C1/C2 已劃的同型邊界（防呆，非語意驗證；見 §6 邊界 4）。清單取自 ADR §3.3/§3.4
 # 現有六類/三成員的實際措辭，OR 邏輯（含其一即通過）。
+#
+# 🔴 R67（Scan-H R67-E24）unpinned 退場義務：`unpinned` 的原始門檻只有「reason 非空」
+# （實測 `reason="x"` 照樣綠），於是它成為 Tier-1~4 之外「不需要任何理由品質、也沒有
+# 退場義務」的永久豁免類別。本輪加一條**最小語意門檻**：unpinned 的 reason 必須以
+# `退場：未指派` 或 `退場：R<輪號>…` 結尾形態出現（見 `_UNPINNED_EXIT_RE`），把「這筆
+# 有沒有人接」由散文語感升級為可 grep 的機械欄位。
+# 邊界（誠實揭露，同 §6 邊界 4 的同型自限）：本鎖**不驗證輪號是否仍在未來**——那需要
+# 耦合缺陷帳本的「當前輪號」，而 `CrossPlatform_Scan_Dimensions.md` §191 已明文警告
+# 該做法會製造永紅（帳本推進後舊列全紅）。本鎖只保證「每筆 unpinned 都明說了承接
+# 對象」，不保證那個承接是真的。數量面的退步由 `_UNPINNED_CEILING` 棘輪另行擋住。
+#
+# 🔴 R67 round 2（SD-R67-03／ARCH-R67-01 交叉發現）：初版正則寫 `R\d+`，對 `R68+` 這種
+# **開放下界**形態是放行的（`re.search` 匹到 `R68` 前綴即成立，尾巴的 `+` 完全不影響
+# 判定）——而同輪 ADR-XPLAT-002 §8 表頭規則 1 才剛把 `R<N>+` 明文定為病灶並禁用
+# （理由：永遠有一個「之後」可以指，於是從不到期；item 7／8 六輪零異動即為實例）。
+# 兩件事在同一輪同時發生 ⇒ 新鎖一出生就把當輪判定為不可接受的寫法制度化了。故收緊為
+# 「`R` 後面的數字串結束後不得再接 `+`／`＋`」：半形與全形加號都擋（本 repo 散文中文
+# 全形符號常見，只擋半形等於留一條同義逃生口）。承接對象只有兩種合法寫法：**具名輪次**
+# （`R68`）或**未指派**——與 §8 表頭規則 1 逐字同源，規則不再只存在於散文裡。
+_UNPINNED_EXIT_RE = re.compile(r"退場：(未指派|R\d+(?![\d+＋]))")
+
 _HARD_REASON_KEYWORDS = (
     "launchd",
     "schtasks",
@@ -580,7 +619,13 @@ _EXEMPT_PAIRS: dict[str, tuple[str, str]] = {
         "ci-gate.ps1 為薄委派殼（Find-GitBash → bash ci-gate.sh 單一真相源），非第二實作；"
         "ADR-XPLAT-002 §2.2 實測訂正：ci-gate.sh 是 281 行的閘門本體而非薄殼，raw 行數"
         "超過 MAX_LINES=100，不符 Tier-1 納編前置條件，故不歸為 tier1_adapter；"
-        "Phase 2-B（刪 fallback，需 signoff）落地前維持決策豁免"
+        "Phase 2-B（刪 fallback，需 signoff）落地前維持決策豁免；"
+        # R67 round 2（SD-R67-03）：原寫 `退場：R68+`，但 ADR §8 item 11 的承接者欄
+        # 逐字是「**封存中**；解除前置＝Phase 2-B（使用者／PM signoff）」——沒有任何
+        # 具名輪次，寫 R68 是本檔自己編的；且 `R<N>+` 已被同輪 §8 表頭規則 1 禁用。
+        # 依 §8 item 7／8 的同款處置（六輪零回執 ⇒ 一律改列未指派）改寫如下。
+        "退場：未指派（ADR-XPLAT-002 §8 item 11：封存中，解除前置＝Phase 2-B signoff，"
+        "回執容器＝§8.1；該列另有三條解除判準）"
     ),
     "AutoClaude/tools/run_local_nightly": (
         _TIER4_FORBIDDEN,
@@ -600,13 +645,14 @@ _EXEMPT_PAIRS: dict[str, tuple[str, str]] = {
     "LATEST/tools/install_hooks/install_post_commit": (
         _UNPINNED,
         "R11 D1：兩產生器輸出逐位元一致取證＋LATEST 解析委派 scripts/sdd_version.py "
-        "SSOT（DEF-101-133），殼層無標籤錨點；不符 Tier-1/2/3/4 任一定義，暫列未歸類"
+        "SSOT（DEF-101-133），殼層無標籤錨點；不符 Tier-1/2/3/4 任一定義，暫列未歸類；"
+        "退場：未指派"
     ),
     "LATEST/tools/arch_fitness/run_self_evolution": (
         _UNPINNED,
         "FSE 有界驅動器雙原生實作，無標籤錨點（.sh echo FSE_* vs .ps1 函式化）；"
         "dry-run 安全預設兩側一致，R12 親讀定類豁免；不符 Tier-1/2/3/4 任一定義，"
-        "暫列未歸類"
+        "暫列未歸類；退場：未指派"
     ),
 }
 # 單邊豁免清單（R11 架構改善 C2）：掃描目錄內只有 .sh 或只有 .ps1 單邊存在的腳本，
@@ -719,31 +765,31 @@ _SINGLE_SIDED_EXEMPT: dict[str, tuple[str, str]] = {
         "工具（需 psql/pg_dump/alembic），計時採 GNU coreutils date %N 奈秒擴充——"
         "Linux／現代 macOS BSD date／Windows Git Bash 內建 MSYS2 移植 GNU coreutils "
         "date（DEF-101-340 R40 實測確認支援 %N）三個目標平台皆支援，未證實硬技術"
-        "障礙，純屬尚未撰寫 .ps1 對等殼，非 Tier-3 OS 原語"
+        "障礙，純屬尚未撰寫 .ps1 對等殼，非 Tier-3 OS 原語；退場：未指派"
     ),
     "AISDLC_SDD/scripts/act-ci.sh": (
         _UNPINNED,
         "bash-only 工具（ONBOARDING §6）；未證實硬技術障礙——act 本身可 winget/choco/"
         "scoop 裝於 Windows（腳本自身錯誤訊息即列出），純屬尚未撰寫 .ps1 對等殼，"
-        "非 Tier-3 OS 原語"
+        "非 Tier-3 OS 原語；退場：未指派"
     ),
     "AISDLC_SDD/scripts/copy_on_evolve.sh": (
         _UNPINNED,
         "bash-only 工具（ONBOARDING §6）；核心邏輯是 `git archive`（跨平台原生指令），"
         "未證實硬技術障礙，純屬 repo 慣例（755 入庫僅限 tools/git-hooks/，其餘 .sh 一律 "
-        "bash 呼叫）尚未撰寫 .ps1 對等殼"
+        "bash 呼叫）尚未撰寫 .ps1 對等殼；退場：未指派"
     ),
     "AISDLC_SDD/scripts/pytest_passed_count.sh": (
         _UNPINNED,
         "bash-only 工具（ONBOARDING §6）；純 grep/tail 管線純函式，理論上可等價移植 "
-        "PowerShell，未證實硬技術障礙，純屬尚未撰寫 .ps1 對等殼"
+        "PowerShell，未證實硬技術障礙，純屬尚未撰寫 .ps1 對等殼；退場：未指派"
     ),
     # LATEST 版 tools（R12 ARCH-R12-3）
     "LATEST/tools/verify_traceability.sh": (
         _UNPINNED,
         "bash-only legacy 追溯鏈驗證工具（v1.1-SDD），歷來無 .ps1 對等；"
         "Windows 以 Git Bash 執行；未證實硬技術障礙（Git Bash 上可正常執行），"
-        "純屬歷史遺留未移植，非 Tier-3 OS 原語"
+        "純屬歷史遺留未移植，非 Tier-3 OS 原語；退場：未指派"
     ),
 }
 # R11 P4 清單互斥自檢：同一 stem 不得同時掛成對豁免與單邊豁免——對邊落地轉成對
@@ -950,31 +996,127 @@ def _check_tier_classification() -> bool:
                           f"未含任何硬理由關鍵詞 {_HARD_REASON_KEYWORDS}——{tier} 需明確"
                           f"的不可收斂技術理由，非泛泛決策豁免散文", file=sys.stderr)
                     ok = False
+            if entry_ok and tier == _UNPINNED and not _UNPINNED_EXIT_RE.search(reason):
+                print(f"❌ tier 分類：{table_name}[{key!r}]（tier=unpinned）的 reason "
+                      f"未含退場錨點——unpinned＝『不符任一 Tier 定義』，是分類法的"
+                      f"『以上皆非』桶，必須明說誰來接：請在 reason 內寫 "
+                      f"`退場：未指派` 或 `退場：R<輪號>…`（R67-E24）", file=sys.stderr)
+                ok = False
     if ok:
         n = len(_EXEMPT_PAIRS) + len(_SINGLE_SIDED_EXEMPT)
         print(f"✅ tier 分類完整性：{n} 筆（_EXEMPT_PAIRS {len(_EXEMPT_PAIRS)} + "
               f"_SINGLE_SIDED_EXEMPT {len(_SINGLE_SIDED_EXEMPT)}）tier 合法、reason 非空、"
-              f"tier3/4 硬理由關鍵詞齊備")
+              f"tier3/4 硬理由關鍵詞齊備、unpinned 退場錨點齊備")
     return ok
 
 
-# ── UEP tier 棘輪（R64，ADR-XPLAT-002 §8 item 12）───────────────────────────
+# ── UEP tier 棘輪（R64，ADR-XPLAT-002 §8 item 12；R67-H14 改基準）─────────────
 # WHY：R63 的 `_check_tier_classification()` 只驗證「現況合法」（tier 落在合法集合、
 # reason 非空、tier3/4 附硬理由關鍵詞）——它不阻止未來把某筆已核定的 tier3/4 悄悄
 # 改回 unpinned，或把已歸類的 tier1/2 打回 unpinned：那樣改一樣通得過
-# `_check_tier_classification`（新 tier 本身合法），只是**退步**。本節比照
-# `tools/tests/test_adr_xplat001_c1c2_lock.py::TestShrinkOnlyRatchet`
-# 的形狀（ADR §8 item 12 指定的照抄對象）：對 `git show HEAD:<本檔>` 的上一版原始碼
-# 機械比對，不是人審慣例。
+# `_check_tier_classification`（新 tier 本身合法），只是**退步**。
 #
 # 降級判準只鎖 ADR §8 item 12 逐字指定的兩個方向：
 #   (A) tier3_os_primitive／tier4_forbidden → 非 tier3/4（明文封頂類別被悄悄鬆綁）
 #   (B) tier1_contract／tier1_adapter／tier2_spec → unpinned（已歸類的契約/spec 被打回未歸類）
 # 反方向（維持、升級、或整筆自兩張登記表移除＝已徹底收斂）皆視為合法，不報告——
 # 移除是 ADR 明文承認的合法出口，硬擋它會懲罰真正把缺口收斂掉的人。
+#
+# 🔴🔴 R67-H14：比對基準由 `git show HEAD:<本檔>` 改為**凍結在本檔內的 `_TIER_BASELINE`**。
+# R64 落地時照抄 `TestShrinkOnlyRatchet` 的 HEAD 比對形狀，但該形狀在**所有真正消費
+# 本檔 rc 的閘門**裡結構性恆真：`tools/git-hooks/pre-push` 與三支 CI workflow 執行時
+# 異動**都已經 commit**（CI 更是 checkout 出乾淨樹），HEAD 逐字等於工作樹 ⇒
+# previous_map == current_map ⇒ 永遠零違規。實測（沙箱、R67 掃描）：把
+# `run_local_nightly` 由 tier4 降為 unpinned 後 **commit**，`check_script_parity.py`
+# rc=0、真 pre-push hook 端到端 rc=0、`tools/tests` 1124 passed 與控制組逐字相同——
+# 棘輪從來沒擋過任何東西，而 docstring 卻寫著「一旦本檔進入 HEAD，棘輪即永久生效」。
+# 另一面 fail-open：`previous is None`（HEAD 無本檔）走綠燈空轉。
+#
+# 為什麼換成 `_TIER_BASELINE` 不會重蹈恆真覆轍（這是本修法的核心論證）：
+#   舊基準是**由 git 狀態導出**的量，而「commit」這個動作本身就會把它同步成當前值；
+#   偏偏每一個閘門都跑在 commit 之後 ⇒ 基準與被檢查值在被比較前必定已經相等，
+#   比較是退化的（degenerate），與檢查器寫得多嚴格無關。
+#   新基準是**簽入原始碼裡的字面常數**：commit 不會動它、checkout 不會動它、CI 乾淨
+#   樹也不會動它——只有人手改那幾行才會變。因此「活體登記表」與「基準」是兩個
+#   獨立可變的量，比較在任何時點、任何消費者（髒樹／pre-commit／pre-push／CI）
+#   都是非退化的。同時整條 git 依賴消失 ⇒ 上述 fail-open 面一併消滅。
+#   （形狀＝本 repo 既有的 `_PINNED_SHA256`／`_MIN_EXTRACT_COUNTS` 釘選慣例：要放寬
+#    就得在 diff 上顯式改那一行，被複審看見；不是「commit 一下就自動對齊」。）
+#   殘餘面（誠實揭露）：同一個 commit 內**同時**改活體 tier 與 `_TIER_BASELINE` 仍可
+#   通過——這是所有釘選式棘輪共有的邊界，與「零成本、隱形、自動」的舊行為是不同量級。
+#   本性質有機械鎖：`test_ratchet_is_independent_of_git_state`（禁用 subprocess 仍須
+#   完整運作），舊實作在該鎖下會直接紅。
 _TIER3_4 = frozenset({_TIER3_OS_PRIMITIVE, _TIER4_FORBIDDEN})
 _TIER1_2 = frozenset({_TIER1_CONTRACT, _TIER1_ADAPTER, _TIER2_SPEC})
 _SELF_REL = "tools/check_script_parity.py"  # git 路徑一律 posix，不用 os.sep
+
+# 凍結基準（R67-H14）：{登記 key: 核定 tier}。維護規則——
+#   · 新增登記項 ⇒ 必須同步在此補一筆（否則 `_check_tier_ratchet()` 紅：未涵蓋）。
+#     這一步是刻意的：讓每一筆新豁免都在 diff 上現形，而不是靜悄悄多一筆。
+#   · 已收斂移出兩張活體登記表的 key **刻意保留**在本表：日後同名項回鍋且 tier 更低，
+#     棘輪仍會紅（＝永久記憶，不是垃圾）。
+#   · 要把某筆的核定 tier 往下改（＝放寬），必須在同一 commit 顯式改本表該行並在
+#     ADR／缺陷帳本具名理由——這是唯一合法出口。
+_TIER_BASELINE: dict[str, str] = {
+    # ── _EXEMPT_PAIRS（R67 凍結）──
+    "AISDLC_SDD/scripts/ci-gate": _UNPINNED,
+    "AutoClaude/tools/run_local_nightly": _TIER4_FORBIDDEN,
+    "LATEST/tools/init_project": _TIER3_OS_PRIMITIVE,
+    "LATEST/tools/install_hooks/install_post_commit": _UNPINNED,
+    "LATEST/tools/arch_fitness/run_self_evolution": _UNPINNED,
+    # ── _SINGLE_SIDED_EXEMPT（R67 凍結）──
+    "tools/macos_smoke_local.sh": _TIER4_FORBIDDEN,
+    "tools/windows_smoke_local.ps1": _TIER4_FORBIDDEN,
+    "tools/lib/git_hooks_install_common.sh": _TIER1_ADAPTER,
+    "tools/lib/GitHooksInstallCommon.ps1": _TIER1_ADAPTER,
+    "tools/lib/Find-GitBash.ps1": _TIER2_SPEC,
+    "tools/lib/WindowsAppsGuard.ps1": _TIER2_SPEC,
+    "tools/lib/windowsapps_guard.sh": _TIER2_SPEC,
+    "tools/install_mac_nightly.sh": _TIER3_OS_PRIMITIVE,
+    "tools/install_windows_nightly.ps1": _TIER3_OS_PRIMITIVE,
+    "AutoClaude/tools/fix_nightly_catchup.ps1": _TIER3_OS_PRIMITIVE,
+    "AutoClaude/tools/g0_gate_check.ps1": _TIER3_OS_PRIMITIVE,
+    "AutoClaude/tools/reschedule_g0_gatecheck.ps1": _TIER3_OS_PRIMITIVE,
+    "AutoClaude/tools/run_mutmut_in_docker.sh": _TIER3_OS_PRIMITIVE,
+    "AutoClaude/tools/sd06_w3_staging_dryrun.sh": _UNPINNED,
+    "AISDLC_SDD/scripts/act-ci.sh": _UNPINNED,
+    "AISDLC_SDD/scripts/copy_on_evolve.sh": _UNPINNED,
+    "AISDLC_SDD/scripts/pytest_passed_count.sh": _UNPINNED,
+    "LATEST/tools/verify_traceability.sh": _UNPINNED,
+}
+
+# unpinned 筆數天花板（R67-E24，只准下修）：unpinned＝「不符任一 Tier 定義」的
+# 「以上皆非」桶，R67 現值 8/23＝34.8%。`_TIER_BASELINE` 的涵蓋規則擋得住「悄悄
+# 多一筆」，但擋不住「多一筆並同步補進 baseline」——本天花板把**總量**也釘住：
+# 要新增 unpinned 就得顯式上修這個數字，讓「以上皆非」桶的成長在 diff 上現形。
+# 刻意不由 `_TIER_BASELINE` 自動導出（那會隨 baseline 一起長高＝自我對齊，就是
+# R67-H14 的恆真陷阱形狀）。收斂掉一筆時請同步下修，維持棘輪張力。
+_UNPINNED_CEILING = 8
+
+# tier3/4 筆數地板（R67 round 2，ARCH-R67-03；只准上修）。
+# WHY：`_TIER_BASELINE` 的降級規則 (A)(B) 是**逐 key 比對**，而
+# `test_baseline_covers_every_live_entry_and_agrees_on_tier` 又要求活體與基準逐字相等
+# ⇒「合法 tier 異動必須同時改活體與基準」是常規工作流。於是降級只要**成對**進行就通得過：
+# Architect 沙箱實測（INJ-1c）把 `LATEST/tools/init_project` 於兩處同步由
+# tier3_os_primitive 改為 tier1_contract，`check_script_parity.py` rc=0、
+# `tools/tests/test_check_script_parity.py` 全綠——明文封頂（ADR §3.3「禁止未來輪重辯」）
+# 的項目被降級且零訊號，還順帶卸掉 `_HARD_REASON_KEYWORDS` 對 tier3/4 的硬理由義務。
+# 修法＝`_UNPINNED_CEILING` 已示範過的那一招的鏡像：一個**不由基準導出**的獨立總量常數。
+# 它把兩種編輯在 diff 上分成不同形狀——升級不必動本行，降級則**必須顯式下修本行**。
+# 同樣刻意不寫成 `sum(1 for t in _TIER_BASELINE.values() if t in _TIER3_4)`：那會隨基準
+# 自我對齊，正是 R67-H14 的恆真陷阱（機械鎖＝`test_tier34_floor_is_not_derived_from_the_baseline`）。
+#
+# 🔴 被數的量＝**tier3/4 課責數**，不是「活體 tier3/4 筆數」：
+#     課責數 = 活體仍為 tier3/4 的 key ∪ 基準記為 tier3/4 而**已整筆移出活體表**的 key
+# WHY 要多這一項：ADR §8 item 12 明文承認「整筆移出兩張登記表＝已徹底收斂」是合法出口，
+# 且既有對照組 `test_converged_entry_removed_from_live_tables_stays_green` 就是在守這件事。
+# 若地板只數活體，收斂掉一筆就會逼人下修地板——「硬擋它會懲罰真正把缺口收斂掉的人」
+# 正是那條 ADR 出口在防的東西。把已收斂的 key 仍計入課責數，兩種情形就分得開：
+#   · 收斂（key 消失、基準保留該筆 tier3/4 記憶）⇒ 課責數不變 ⇒ 綠，零維護。
+#   · 降級（key 還在、tier 被改成別的，不論基準有沒有同步改）⇒ 課責數 -1 ⇒ 紅。
+# 唯一會合法讓課責數下降的動作是「連基準那一筆也刪掉」，而基準的維護規則本來就寫著
+# 已收斂的 key **刻意保留**（永久記憶）；真要刪就得連同下修本行，在 diff 上現形。
+_TIER34_FLOOR = 10
 
 
 def _extract_tier_map_from_source(source: str, dict_name: str) -> dict[str, str] | None:
@@ -1036,54 +1178,16 @@ def _extract_tier_map_from_source(source: str, dict_name: str) -> dict[str, str]
     return result
 
 
-def _read_previous_self_source() -> str | None:
-    """本檔在 HEAD 的內容；HEAD 沒有本檔（未提交／新增檔）時回 `None`。"""
-    proc = subprocess.run(
-        ["git", "-C", str(_REPO_ROOT), "show", f"HEAD:{_SELF_REL}"],
-        capture_output=True, text=True, encoding="utf-8", errors="replace",
-    )
-    return proc.stdout if proc.returncode == 0 else None
-
-
-def tier_ratchet_problems(
-    previous_source: str,
-    current_exempt_pairs: dict[str, tuple[str, str]] | None = None,
-    current_single_sided: dict[str, tuple[str, str]] | None = None,
+def _tier_downgrade_problems(
+    previous_map: dict[str, str], current_map: dict[str, str]
 ) -> list[str]:
-    """比對上一版與現版 `_EXEMPT_PAIRS`／`_SINGLE_SIDED_EXEMPT` 的 tier，回傳降級
-    說明（空清單＝零降級；含「整筆移出登記表」視為合法收斂的情況）。
+    """降級判準核心（唯一實作）：比對兩張 `{key: tier}`，回傳降級說明。
 
-    `current_exempt_pairs`／`current_single_sided` 預設吃本模組現行的活體登記表
-    （production 呼叫路徑），測試可傳入合成表以隔離真 repo 現況。
+    `tier_ratchet_problems()`（合成上一版原始碼，測試用鑑別力載具）與
+    `baseline_ratchet_problems()`（凍結基準，production 路徑）共用本函式——判準只有
+    一份，不會出現「測試驗的那條路和 production 走的那條路判準不同」。
     """
-    if current_exempt_pairs is None:
-        current_exempt_pairs = _EXEMPT_PAIRS
-    if current_single_sided is None:
-        current_single_sided = _SINGLE_SIDED_EXEMPT
-
     problems: list[str] = []
-
-    prev_exempt = _extract_tier_map_from_source(previous_source, "_EXEMPT_PAIRS")
-    prev_single = _extract_tier_map_from_source(previous_source, "_SINGLE_SIDED_EXEMPT")
-    if prev_exempt is None:
-        problems.append(
-            "上一版抽不到 _EXEMPT_PAIRS 字典（或其中至少一筆 tier 值形態無法解析）—— "
-            "字典被改名／改寫？棘輪等於失效，拒絕靜默通過"
-        )
-        prev_exempt = {}
-    if prev_single is None:
-        problems.append(
-            "上一版抽不到 _SINGLE_SIDED_EXEMPT 字典（或其中至少一筆 tier 值形態無法解析）—— "
-            "字典被改名／改寫？棘輪等於失效，拒絕靜默通過"
-        )
-        prev_single = {}
-
-    previous_map = {**prev_exempt, **prev_single}
-    current_map = {
-        **{k: v[0] for k, v in current_exempt_pairs.items()},
-        **{k: v[0] for k, v in current_single_sided.items()},
-    }
-
     for key, prev_tier in sorted(previous_map.items()):
         if key not in current_map:
             continue  # 整筆自兩張登記表移除 = 已徹底收斂，非降級
@@ -1102,27 +1206,215 @@ def tier_ratchet_problems(
     return problems
 
 
-def _check_tier_ratchet() -> bool:
-    """production 呼叫端：對 HEAD 版本現查，零降級才綠（ADR-XPLAT-002 §8 item 12）。
+def _live_tier_map(
+    current_exempt_pairs: dict[str, tuple[str, str]] | None,
+    current_single_sided: dict[str, tuple[str, str]] | None,
+) -> dict[str, str]:
+    """兩張活體登記表 → `{key: tier}`（`None` 代表取本模組現行活體表）。"""
+    if current_exempt_pairs is None:
+        current_exempt_pairs = _EXEMPT_PAIRS
+    if current_single_sided is None:
+        current_single_sided = _SINGLE_SIDED_EXEMPT
+    return {
+        **{k: v[0] for k, v in current_exempt_pairs.items()},
+        **{k: v[0] for k, v in current_single_sided.items()},
+    }
 
-    HEAD 尚無本檔（新增／未提交檔）時視為「無上一版可比」，本輪空轉並印出理由，
-    不當作失敗——同 `TestShrinkOnlyRatchet::test_constants_never_increase_versus_head`
-    對「首版」的既有處理；一旦本檔進入 HEAD，棘輪即永久生效。
+
+def _tier34_accounted(
+    baseline: dict[str, str], current_map: dict[str, str]
+) -> list[str]:
+    """tier3/4 課責項（唯一實作，R67 round 2 ARCH-R67-03）。
+
+    ＝ 活體仍為 tier3/4 的 key **∪** 基準記為 tier3/4 而已整筆移出活體表的 key。
+    後者讓「徹底收斂」（ADR §8 item 12 明文出口）不被地板懲罰——詳細論證見
+    `_TIER34_FLOOR` 上方區塊註解。
     """
-    previous = _read_previous_self_source()
-    if previous is None:
-        print(f"⚠️ tier 棘輪：HEAD 尚無 {_SELF_REL}（本檔為未提交的新增檔）⇒ "
-              "無上一版可比，本輪空轉；commit 後即永久生效")
-        return True
-    problems = tier_ratchet_problems(previous)
+    live34 = {k for k, t in current_map.items() if t in _TIER3_4}
+    converged34 = {
+        k for k, t in baseline.items() if t in _TIER3_4 and k not in current_map
+    }
+    return sorted(live34 | converged34)
+
+
+def baseline_ratchet_problems(
+    current_exempt_pairs: dict[str, tuple[str, str]] | None = None,
+    current_single_sided: dict[str, tuple[str, str]] | None = None,
+    baseline: dict[str, str] | None = None,
+    unpinned_ceiling: int | None = None,
+    tier34_floor: int | None = None,
+) -> list[str]:
+    """**production 棘輪**：活體登記表 vs 凍結基準 `_TIER_BASELINE`（R67-H14）。
+
+    四條規則：
+      (A)(B) 降級偵測（委派 `_tier_downgrade_problems()`，判準與 ADR §8 item 12 同）；
+      (C) 涵蓋：任何活體 key 未登記於基準 ⇒ 紅。這條同時擋住「刪掉基準那一筆來
+          迴避棘輪」——key 還活著而基準沒有它，就是紅；
+      (D) unpinned 總量不得超過 `_UNPINNED_CEILING`（R67-E24）；
+      (E) tier3/4 總量不得低於 `_TIER34_FLOOR`（R67 round 2 ARCH-R67-03）——(A) 是逐
+          key 比對，成對編輯（活體＋基準一起改）即可繞過，實測有效；本條走**總量**
+          維度，與 (D) 互為鏡像，成對編輯不影響它。
+
+    刻意**不呼叫 git**：基準是簽入的字面常數，故本函式在髒樹／乾淨樹／CI checkout
+    行為完全相同（見上方 R67-H14 論證）。`test_ratchet_is_independent_of_git_state`
+    以「禁用 subprocess」機械守住這個性質。
+    """
+    if baseline is None:
+        baseline = _TIER_BASELINE
+    if unpinned_ceiling is None:
+        unpinned_ceiling = _UNPINNED_CEILING
+    if tier34_floor is None:
+        tier34_floor = _TIER34_FLOOR
+
+    current_map = _live_tier_map(current_exempt_pairs, current_single_sided)
+    problems = _tier_downgrade_problems(baseline, current_map)
+
+    for key in sorted(current_map):
+        if key not in baseline:
+            problems.append(
+                f"{key}：活體登記表有此筆，凍結基準 _TIER_BASELINE 卻沒有 —— "
+                "新增登記項必須同步補進 _TIER_BASELINE（填當前 tier）；若是把既有"
+                "基準條目刪掉來迴避棘輪，請還原"
+            )
+
+    live_unpinned = sorted(k for k, t in current_map.items() if t == _UNPINNED)
+    if len(live_unpinned) > unpinned_ceiling:
+        problems.append(
+            f"unpinned 筆數 {len(live_unpinned)} 超過天花板 {unpinned_ceiling}"
+            f"（R67-E24 只准下修）——unpinned 是分類法的『以上皆非』桶，新增等於"
+            f"擴大未歸類面；要放寬請顯式上修 _UNPINNED_CEILING 並具名理由。"
+            f"現行 unpinned：{live_unpinned}"
+        )
+
+    accounted = _tier34_accounted(baseline, current_map)
+    if len(accounted) < tier34_floor:
+        problems.append(
+            f"tier3/4 課責數 {len(accounted)} 低於地板 {tier34_floor}"
+            f"（ARCH-R67-03 只准上修）——tier3_os_primitive／tier4_forbidden 是 ADR "
+            f"§3.3／§3.4 明文封頂、禁止未來輪重辯的類別。課責數＝活體仍為 tier3/4 者 "
+            f"＋ 基準記為 tier3/4 而已整筆移出活體表者（收斂是合法出口，不扣分）；"
+            f"會讓它下降的只有『把某筆改成別的 tier』或『連基準那一筆也刪掉』。"
+            f"要放寬請顯式下修 _TIER34_FLOOR 並具名理由。現行課責項：{accounted}"
+        )
+    return problems
+
+
+def tier_ratchet_problems(
+    previous_source: str,
+    current_exempt_pairs: dict[str, tuple[str, str]] | None = None,
+    current_single_sided: dict[str, tuple[str, str]] | None = None,
+) -> list[str]:
+    """比對**任意一份「上一版原始碼」**與現版兩張登記表的 tier，回傳降級說明
+    （空清單＝零降級；含「整筆移出登記表」視為合法收斂的情況）。
+
+    🔴 R67-H14：production **不再**以 `git show HEAD:<本檔>` 餵本函式——那是恆真陷阱
+    （見上方 `_TIER_BASELINE` 區塊論證）。本函式保留的職責是「降級判準本身的鑑別力
+    載具」：測試以合成的上一版原始碼逐一注入每種降級／合法形態，證明判準會紅／不會
+    誤紅；而判準核心 `_tier_downgrade_problems()` 與 production 的
+    `baseline_ratchet_problems()` 是**同一份實作**，故這些注入測試守的就是 production
+    走的那條路。AST 抽取器（`_extract_tier_map_from_source`）亦由本函式維繫其
+    「抽不到就紅、不得靜默視為空表」的 fail-loud 語意。
+
+    `current_exempt_pairs`／`current_single_sided` 預設吃本模組現行的活體登記表，
+    測試可傳入合成表以隔離真 repo 現況。
+    """
+    problems: list[str] = []
+
+    prev_exempt = _extract_tier_map_from_source(previous_source, "_EXEMPT_PAIRS")
+    prev_single = _extract_tier_map_from_source(previous_source, "_SINGLE_SIDED_EXEMPT")
+    if prev_exempt is None:
+        problems.append(
+            "上一版抽不到 _EXEMPT_PAIRS 字典（或其中至少一筆 tier 值形態無法解析）—— "
+            "字典被改名／改寫？棘輪等於失效，拒絕靜默通過"
+        )
+        prev_exempt = {}
+    if prev_single is None:
+        problems.append(
+            "上一版抽不到 _SINGLE_SIDED_EXEMPT 字典（或其中至少一筆 tier 值形態無法解析）—— "
+            "字典被改名／改寫？棘輪等於失效，拒絕靜默通過"
+        )
+        prev_single = {}
+
+    previous_map = {**prev_exempt, **prev_single}
+    current_map = _live_tier_map(current_exempt_pairs, current_single_sided)
+    problems.extend(_tier_downgrade_problems(previous_map, current_map))
+    return problems
+
+
+def _check_tier_ratchet() -> bool:
+    """production 呼叫端：活體登記表 vs 凍結基準 `_TIER_BASELINE`，零違規才綠
+    （ADR-XPLAT-002 §8 item 12；比對基準 R67-H14 由 HEAD 改為凍結常數）。
+
+    本函式**不呼叫 git**，因此沒有「基準取不到 ⇒ 綠燈空轉」這個 fail-open 面：
+    基準永遠在（它就是本檔的一部分），行為在髒樹／pre-commit／pre-push／CI 乾淨
+    checkout 完全一致。
+    """
+    problems = baseline_ratchet_problems()
     if problems:
-        print("❌ tier 棘輪違反（與 HEAD 版本比對，ADR-XPLAT-002 §8 item 12）：",
-              file=sys.stderr)
+        print("❌ tier 棘輪違反（與凍結基準 _TIER_BASELINE 比對，"
+              "ADR-XPLAT-002 §8 item 12 / R67-H14）：", file=sys.stderr)
         for p in problems:
             print(f"  · {p}", file=sys.stderr)
         return False
-    print("✅ tier 棘輪：與 HEAD 版本比對，零降級（含已收斂移出登記表視為合法）")
+    live = _live_tier_map(None, None)
+    print(f"✅ tier 棘輪：與凍結基準 _TIER_BASELINE（{len(_TIER_BASELINE)} 筆）比對，"
+          f"零降級、零未涵蓋、unpinned {sum(1 for t in live.values() if t == _UNPINNED)}"
+          f"/{_UNPINNED_CEILING}、tier3/4 課責 {len(_tier34_accounted(_TIER_BASELINE, live))}"
+          f"/{_TIER34_FLOOR}（含已收斂移出登記表視為合法）")
     return True
+
+
+# ── AC（Anti-displacement Criterion）涵蓋面宣告（R67-H34）────────────────────
+# WHY：§4.2 的 AC＝「描述性常數登記項的誠實全集」，用途是擋「換個地方複雜」。R67 前
+# 這個「全集」只存在於 `_print_collapse()` 內一條寫死的七項加總算式裡——實測：新增第
+# 8 張模組層登記表（3 筆）後 `AC` 紋風不動、全套 `tools/tests` 零紅，整張表可從判準
+# 逃逸；而號稱「獨立重算」的測試逐字複製同一條算式，對這種逃逸天生無訊號。
+#
+# 修法：把「AC 涵蓋哪些表」變成**資料**（下列兩張清單），`_print_collapse()` 對它求值，
+# 測試側則以 AST 掃描兩支工具的模組層登記表、比對「掃到的全集 == 納入 ∪ 具名排除」。
+# 掃描是與 production 完全不同的實作路徑（AST vs 名稱清單），故那支測試不再恆真：
+# 新增任何一張登記表，若既不納入 AC 也不具名排除，即紅。
+_AC_MODULES = ("parity", "thinness")
+# 納入 AC 的登記表（模組別名, 常數名）——與 §4.2「描述性常數登記項」定義對應。
+_AC_REGISTRY_NAMES: tuple[tuple[str, str], ...] = (
+    ("thinness", "_PINNED_SHA256"),
+    ("parity", "_THINNESS_ENROLLED"),
+    ("parity", "_EXEMPT_PAIRS"),
+    ("parity", "_SINGLE_SIDED_EXEMPT"),
+    ("parity", "_LATEST_PINNED_SHA256"),
+    ("parity", "_LATEST_THINNESS_ENROLLED"),
+    ("parity", "_MIN_EXTRACT_COUNTS"),
+)
+# 具名排除（不計入 AC）＋逐筆理由。排除是決策，必須寫下來被複審看見；漏排即紅。
+_AC_EXCLUDED_REGISTRIES: dict[tuple[str, str], str] = {
+    ("parity", "_EQUIVALENCE_GROUPS"):
+        "不是新增的描述性常數登記，而是既有 _SINGLE_SIDED_EXEMPT 條目之間的『配對關係』"
+        "索引（成員本身已計入 _SINGLE_SIDED_EXEMPT）；計入即同一筆重複計數兩次",
+    ("parity", "_TIER_BASELINE"):
+        "棘輪的凍結基準（R67-H14），是 _EXEMPT_PAIRS/_SINGLE_SIDED_EXEMPT 的影子副本"
+        "而非獨立豁免面；計入即把同一批登記重複計數",
+    ("parity", "_VALID_TIERS"):
+        "Tier 模型的合法值列舉（§3.1~3.4 的類別名），不是登記項",
+    ("parity", "_TIER3_4"): "Tier 類別分組常數，不是登記項",
+    ("parity", "_TIER1_2"): "Tier 類別分組常數，不是登記項",
+    ("parity", "_AC_EXCLUDED_REGISTRIES"):
+        "本表自身（AC 涵蓋面的排除清單）＝判準的後設資料，不是被判準管轄的登記面；"
+        "計入即自我指涉。（掃描器確實掃到了它並要求表態——這一筆就是表態）",
+    ("thinness", "_FORBIDDEN"):
+        "業務邏輯樣板關鍵字黑名單（並聯診斷訊號），登記的是『禁止出現的字串』"
+        "而非『被豁免／被釘選的腳本』，不屬 §4.2 的描述性常數登記面",
+}
+
+
+def ac_registries() -> dict[tuple[str, str], object]:
+    """`{(模組別名, 常數名): 該登記表物件}`——AC 的**唯一**涵蓋面來源。
+
+    `_print_collapse()` 對本函式求值產生 AC；測試以 AST 掃描交叉比對涵蓋面完整性。
+    """
+    import check_wrapper_thinness as _thinness  # 同目錄，頂部已 sys.path 注入
+
+    mods = {"parity": sys.modules[__name__], "thinness": _thinness}
+    return {(mod, name): getattr(mods[mod], name) for mod, name in _AC_REGISTRY_NAMES}
 
 
 def _print_collapse() -> int:
@@ -1137,16 +1429,12 @@ def _print_collapse() -> int:
     # R65：_TLC_TRACK_ENROLLED 已退場（見檔頭 R65 說明）——UEP 不再含該項；
     # AC 改含 _LATEST_PINNED_SHA256／_LATEST_THINNESS_ENROLLED 兩張新表接手其
     # 「描述性常數登記」角色（§4.2）。
+    # R67-H34：AC 不再由寫死的 `len(A)+len(B)+…` 算式產生，改為對具名清單
+    # `_AC_REGISTRY_NAMES` 動態求值——如此「AC 涵蓋哪些登記表」成為可被
+    # `tools/tests/test_check_script_parity.py` 以 AST 掃描交叉比對的資料，
+    # 而不是埋在算式裡、只能靠人記得同步的東西。
     uep = len(_EXEMPT_PAIRS)
-    ac = (
-        len(_thinness._PINNED_SHA256)
-        + len(_THINNESS_ENROLLED)
-        + len(_EXEMPT_PAIRS)
-        + len(_SINGLE_SIDED_EXEMPT)
-        + len(_LATEST_PINNED_SHA256)
-        + len(_LATEST_THINNESS_ENROLLED)
-        + len(_MIN_EXTRACT_COUNTS)
-    )
+    ac = sum(len(reg) for reg in ac_registries().values())
     print(f"UEP={uep}")
     print(f"AC={ac}")
     print(f"THINNESS_ENROLLED={len(_THINNESS_ENROLLED)}")

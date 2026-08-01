@@ -10,6 +10,7 @@
 from __future__ import annotations
 
 import ctypes
+import datetime
 import inspect
 import json
 import os
@@ -3372,26 +3373,63 @@ class TestCrossSiteLiteralLocks(unittest.TestCase):
 )
 class TestNightlyHeartbeatCrossSiteBehavioralEquivalence(unittest.TestCase):
     """R50 四方複審發現：dev_start.py `_check_nightly_heartbeat()` 與
-    install_mac_nightly.sh `report_heartbeat()` 是各自獨立實作的心跳三態判斷
-    （未偵測／過期／新鮮）。既有 `TestCrossSiteLiteralLocks` 只用 regex 從兩側
-    原始碼抽『字面常數』（門檻天數、label）斷言相等，從未拿同一組 mtime 輸入
-    實際執行兩側邏輯、比對『分類結果』是否一致——若任一側未來改變比較運算子
-    或取整方式，字面值鎖完全不會有訊號。
+    install_mac_nightly.sh `report_heartbeat()` 是各自獨立實作的心跳判斷。既有
+    `TestCrossSiteLiteralLocks` 只用 regex 從兩側原始碼抽『字面常數』（門檻天數、
+    label）斷言相等，從未拿同一組心跳檔輸入實際執行兩側邏輯、比對『判定結果』是否
+    一致——若任一側未來改變比較運算子或取整方式，字面值鎖完全不會有訊號。
 
     本測試直接從 install_mac_nightly.sh 原始碼**動態擷取** `report_heartbeat()`
     函式本體（非另外複製一份到測試檔——避免測試與生產程式碼各自漂移），在獨立
     bash 子行程中對同一顆心跳檔執行，並與 python 側 `_check_nightly_heartbeat()`
-    在同一顆心跳檔上的回傳值比對三態分類是否一致。
+    在同一顆心跳檔上的輸出逐維度比對。
+
+    🔴 R67-E21：比對「哪些維度」不再由本檔自行決定——`_classify()` 回傳的 dict
+    鍵集合就是實際比對面，而 `test_lock_covers_every_dimension_claimed_by_installer`
+    強制它等於安裝器檔頭 `DIMENSIONS:` 機讀清單。WHY：R15 於 dev_start 新增第 4 個
+    維度（FAIL 計數）時安裝器沒跟上，而本鎖被寫死在 R12 的「三態」語意上，於是
+    「--status 對 nightly 全紅假綠」這件事在兩層守門下都零訊號。散文契約若沒有
+    機械出口，就只是一句沒人會發現它過期的話。
+
+    🔴 R67-M40：`now` 由測試凍結後**同時**餵給兩側（bash 走 IMN_NOW 測試縫、python
+    走 time.time patch），年齡以整數秒指定。舊版讓兩側各自呼叫 date/time.time，在
+    8.0 天整秒邊界上必然分歧且無法穩定斷言，只好刻意取 7.9／8.1 天避開——避開的
+    那一點正是唯一會出事的點。
     """
 
     _REPO = Path(dev_start.__file__).resolve().parents[1]
     _INSTALLER = _REPO / "tools" / "install_mac_nightly.sh"
 
-    def _bash_report_heartbeat_stdout(self, heartbeat_path: Path) -> str:
+    # 安裝器檔頭「與 dev_start 對齊的維度」機讀清單錨點（R67-E21）。
+    _DIMENSIONS_RE = re.compile(r"DIMENSIONS:\s*([^)）]+)[)）]")
+
+    # 兩側觀測「同一瞬間」時的精度差（R67-M40）：bash 的 `date +%s` 把該瞬間截斷成
+    # 整數秒 N，python 的 `time.time()` 看到的是 N + 次秒。測試給 bash `IMN_NOW=N`、
+    # 給 python `N + _SUBSECOND_SKEW`，模擬的就是這件事——若改成兩側都拿整數 N，
+    # 恰好 8.0 天的邊界會因為次秒被抹掉而永遠一致，等於把要驗的東西驗掉了。
+    _SUBSECOND_SKEW = 0.5
+
+    def _installer_claimed_dimensions(self) -> list[str]:
+        m = self._DIMENSIONS_RE.search(self._INSTALLER.read_text(encoding="utf-8"))
+        self.assertIsNotNone(
+            m,
+            "install_mac_nightly.sh 檔頭的 `DIMENSIONS: ...` 機讀清單錨點消失——"
+            "該清單是「--status 心跳語意與 dev_start 對齊」這句散文契約的唯一機械"
+            "出口，移除它等於讓契約回到 R67-E21 之前的零訊號狀態",
+        )
+        return [d.strip() for d in m.group(1).split(",") if d.strip()]
+
+    def _bash_report_heartbeat_stdout(self, heartbeat_path: Path, now: int) -> str:
         """動態擷取 report_heartbeat() 函式本體，於獨立 bash 子行程執行（只餵它
-        依賴的兩個變數 HEARTBEAT／HEARTBEAT_MAX_AGE_DAYS，不觸碰真實 launchd/
-        plist 副作用、不 source 整支腳本以免誤觸其 case 分派或 Darwin guard 之外
-        的其他邏輯），回傳其 stdout。"""
+        依賴的三個變數 HEARTBEAT／HEARTBEAT_MAX_AGE_DAYS／IMN_NOW，不觸碰真實
+        launchd/plist 副作用、不 source 整支腳本以免誤觸其 case 分派或 Darwin
+        guard 之外的其他邏輯），回傳其 stdout。
+
+        R67-M38：門檻取自 `dev_start._HEARTBEAT_MAX_AGE_DAYS`，**不得硬編**。舊版
+        寫死 `HEARTBEAT_MAX_AGE_DAYS=8`，是全 repo 第 4 份門檻字面值且不受任何跨檔
+        鎖保護——兩生產站點合法同步演進（8→10）時字面鎖 `test_heartbeat_threshold_
+        matches_installer` 仍綠，只有本鎖假紅，且失敗訊息指控生產程式碼「兩份實作
+        分歧」，把維護者導向一個不存在的問題。
+        """
         extract = subprocess.run(
             ["sed", "-n", "/^report_heartbeat() {/,/^}/p", str(self._INSTALLER)],
             capture_output=True, text=True, check=True,
@@ -3405,7 +3443,8 @@ class TestNightlyHeartbeatCrossSiteBehavioralEquivalence(unittest.TestCase):
         )
         wrapper = (
             f'HEARTBEAT="{heartbeat_path}"\n'
-            'HEARTBEAT_MAX_AGE_DAYS=8\n'
+            f'HEARTBEAT_MAX_AGE_DAYS={dev_start._HEARTBEAT_MAX_AGE_DAYS}\n'
+            f'IMN_NOW={now}\n'
             f'{func_src}\n'
             'report_heartbeat\n'
         )
@@ -3420,59 +3459,505 @@ class TestNightlyHeartbeatCrossSiteBehavioralEquivalence(unittest.TestCase):
         )
         return proc.stdout
 
-    def _classify(self, text: str) -> str:
-        if "過期" in text:
-            return "過期"
-        if "新鮮" in text:
-            return "新鮮"
-        if "未偵測" in text:
-            return "未偵測"
-        self.fail(f"無法從輸出判斷心跳三態分類：{text!r}")
+    def _classify(self, text: str) -> dict[str, object]:
+        """把一側的輸出化約成「逐維度判定」。
 
-    def _python_classify(self, root: Path) -> str:
+        dict 的鍵集合＝本鎖實際比對面，並由 `_installer_claimed_dimensions()`
+        機械繫結到安裝器檔頭宣告，新增維度時漏改任一邊都會紅。
+        """
+        if "過期" in text:
+            state = "過期"
+        elif "新鮮" in text:
+            state = "新鮮"
+        elif "未偵測" in text:
+            state = "未偵測"
+        else:
+            self.fail(f"無法從輸出判斷心跳三態分類：{text!r}")
+        # FAIL 維度：兩側都只在 N>0 時才吐 `FAIL=N`，故「無命中」本身即為對稱語意。
+        m = re.search(r"FAIL=(\d+)", text)
+        return {"三態": state, "FAIL 計數": int(m.group(1)) if m else None}
+
+    def _python_classify(self, root: Path, now: int) -> dict[str, object]:
         with mock.patch.object(dev_start, "ROOT", root), \
+             mock.patch.object(dev_start, "WARNINGS", []), \
              mock.patch.object(dev_start, "_launchd_nightly_loaded",
                                return_value=None), \
+             mock.patch("time.time",
+                        return_value=float(now) + self._SUBSECOND_SKEW), \
              mock.patch("builtins.print"):
             note = dev_start._check_nightly_heartbeat("mac")
         return self._classify(note)
 
-    def _make_heartbeat(self, root: Path, age_days: float) -> Path:
+    def _make_heartbeat(self, root: Path, age_s: int, now: int,
+                        fail_n: int = 0) -> Path:
+        """寫出**真實的心跳檔契約**（AutoClaude/tools/run_local_nightly.sh
+        write_heartbeat 的前 3 行格式），非佔位字串。
+
+        R67-E21：舊版寫的是 `"heartbeat\\n"`——永遠沒有 `FAIL=` 行，於是不論兩側
+        對 FAIL 維度的處置差多遠，這道鎖結構上都不可能看見。fixture 不長成生產
+        形狀，鎖住的就只是 fixture 自己。
+        """
         logs = root / "AutoClaude" / "logs"
         logs.mkdir(parents=True, exist_ok=True)
         hb = logs / "nightly_mac_latest.log"
-        hb.write_text("heartbeat\n", encoding="utf-8")
-        mtime = time.time() - age_days * 86400
-        os.utime(hb, (mtime, mtime))
+        lines = [
+            "nightly_mac heartbeat（UTC）：2026-08-01T02:00:00Z",
+            f"===== nightly 彙總：PASS={7 - fail_n} FAIL={fail_n} =====",
+        ]
+        if fail_n > 0:
+            lines.append("失敗 stage： macos_smoke root_unittests")
+        lines.append(f"log={logs / 'nightly_mac_20260801_020001.log'}")
+        hb.write_text("\n".join(lines) + "\n", encoding="utf-8")
+        # 整數秒 mtime：BSD `stat -f %m` 只給整數秒，讓 fixture 也落在整數秒上，
+        # 兩側才是在比較「同一個年齡」而不是在比較各自的取整誤差（R67-M40）。
+        os.utime(hb, (now - age_s, now - age_s))
         return hb
 
-    def test_fresh_boundary_and_far_stale_ages_classify_identically(self) -> None:
-        """跨四個代表性年齡（極新鮮／剛好未過期／剛好過期／遠期過期），兩側分類
-        須完全一致。邊界值刻意避開精確 8.0 天：BSD `stat -f %m` 截斷成整數秒，
-        python `os.stat().st_mtime` 保留次秒精度，兩者在恰好 8.0 天處可能因截斷
-        差 1 秒而不穩定——刻意取 7.9／8.1 天，差距（0.1 天＝8640 秒）遠大於次秒
-        截斷誤差，真正驗證的是『三態分支邏輯』本身是否等價，而非鞭打次秒精度差異。
+    def _assert_sides_agree(self, label: str, age_s: int, fail_n: int) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            now = int(time.time())
+            hb = self._make_heartbeat(root, age_s, now, fail_n=fail_n)
+            py_result = self._python_classify(root, now)
+            bash_stdout = self._bash_report_heartbeat_stdout(hb, now)
+            bash_result = self._classify(bash_stdout)
+            self.assertEqual(
+                py_result, bash_result,
+                f"{label}：dev_start.py 逐維度判定={py_result!r}，但 "
+                f"install_mac_nightly.sh report_heartbeat() 判定={bash_result!r}"
+                f"（bash stdout={bash_stdout!r}）——兩份獨立實作分歧"
+                "（DEF-101-042 同類『字面值鎖住、行為未鎖住』盲區）。"
+                "若兩側門檻常數剛變更，先確認本測試 wrapper 注入的是 "
+                "dev_start._HEARTBEAT_MAX_AGE_DAYS 而非硬編值（R67-M38）",
+            )
+
+    def test_lock_covers_every_dimension_claimed_by_installer(self) -> None:
+        """R67-E21：安裝器檔頭宣告的對齊維度，必須恰好等於本鎖實際比對的維度。
+
+        兩個方向都要紅：安裝器新宣告一個維度而本鎖沒比對（宣稱大於實作）→ 紅；
+        本鎖比對了一個安裝器沒宣告的維度（散文沒跟上）→ 也紅。這正是 R67-E21
+        的根因形狀——契約寫在散文、鎖只驗子集，兩者之間沒有互鎖。
         """
+        claimed = self._installer_claimed_dimensions()
+        sample = self._classify("  ✅ 心跳：新鮮（距今 0.0 天）")
+        self.assertEqual(
+            sorted(claimed), sorted(sample.keys()),
+            f"install_mac_nightly.sh 檔頭宣告對齊維度 {claimed}，但本鎖實際比對的是 "
+            f"{sorted(sample.keys())}——兩者必須逐字相等。新增維度時三處要同時改："
+            "① dev_start._check_nightly_heartbeat()／② install_mac_nightly.sh "
+            "report_heartbeat()／③ 本檔 _classify() 與安裝器檔頭 DIMENSIONS 清單",
+        )
+
+    def test_fresh_boundary_and_far_stale_ages_classify_identically(self) -> None:
+        """跨代表性年齡（極新鮮／剛好未過期／**恰好 8.0 天整**／逾期 1 秒／遠期），
+        兩側判定須完全一致。
+
+        R67-M40：`恰好 8.0 天整` 是舊版刻意避開的那一點——BSD `stat -f %m` 與
+        `date +%s` 都只給整數秒，`os.stat().st_mtime` 卻保留次秒，於是 bash 算
+        691200（`-gt` 為偽→新鮮）、python 算 691200.0x（`> 8` 為真→過期），實測
+        10/10 必然分歧。修法是讓 python 側也先截成整數秒（dev_start.py
+        `int(time.time()) - int(mtime)`），分歧被結構性消除而不是被測試繞開。
+        `-gt` 為嚴格大於，故 8 天整＝新鮮、8 天又 1 秒＝過期。
+        """
+        day = 86400
         cases = {
-            "極新鮮（0.01 天）": 0.01,
-            "剛好未過期（7.9 天 < 8 天門檻）": 7.9,
-            "剛好過期（8.1 天 > 8 天門檻）": 8.1,
-            "遠期過期（30 天）": 30.0,
+            "極新鮮（0.01 天）": 864,
+            "剛好未過期（7.9 天 < 8 天門檻）": 682560,
+            "恰好 8.0 天整（R67-M40 邊界；嚴格大於故仍為新鮮）":
+                dev_start._HEARTBEAT_MAX_AGE_DAYS * day,
+            "逾期 1 秒（8 天 + 1 秒）":
+                dev_start._HEARTBEAT_MAX_AGE_DAYS * day + 1,
+            "剛好過期（8.1 天）": 699840,
+            "遠期過期（30 天）": 30 * day,
         }
-        for label, age_days in cases.items():
-            with self.subTest(label=label), tempfile.TemporaryDirectory() as td:
-                root = Path(td)
-                hb = self._make_heartbeat(root, age_days)
-                py_result = self._python_classify(root)
-                bash_stdout = self._bash_report_heartbeat_stdout(hb)
-                bash_result = self._classify(bash_stdout)
-                self.assertEqual(
-                    py_result, bash_result,
-                    f"{label}：dev_start.py 分類={py_result!r}，但 "
-                    f"install_mac_nightly.sh report_heartbeat() 分類={bash_result!r}"
-                    f"（bash stdout={bash_stdout!r}）——兩份獨立實作的三態判斷分歧"
-                    "（DEF-101-042 同類『字面值鎖住、行為未鎖住』盲區）",
-                )
+        for label, age_s in cases.items():
+            with self.subTest(label=label):
+                self._assert_sides_agree(label, age_s, fail_n=0)
+
+    def test_fail_count_is_reported_identically(self) -> None:
+        """R67-E21：FAIL 維度兩側須一致——mtime 只證明「排程在跑」，不證明「跑成綠」。
+
+        真實情境：CI 因帳務停擺（DEF-101-081）時本地 nightly 是唯一每日兜底層，
+        nightly 連續全紅時 mac 使用者照 ONBOARDING §8 跑 `--status` 會拿到 rc=0 ＋
+        「✅ 心跳：新鮮」的全綠報告，而同一顆心跳檔在 dev_start 會出 ⚠️ 警告。
+        新鮮／過期兩態都要驗：FAIL 偵測若被塞進「新鮮」分支內，過期路徑就會漏報。
+        """
+        day = 86400
+        cases = {
+            "全綠且新鮮（FAIL=0）": (day, 0),
+            "全紅但新鮮（FAIL=3）——本缺陷的原始情境": (day, 3),
+            "全紅且過期（FAIL=2）": (30 * day, 2),
+        }
+        for label, (age_s, fail_n) in cases.items():
+            with self.subTest(label=label):
+                self._assert_sides_agree(label, age_s, fail_n)
+
+    def test_bash_wrapper_threshold_follows_dev_start_constant(self) -> None:
+        """R67-M38：wrapper 注入的門檻必須跟著 `dev_start._HEARTBEAT_MAX_AGE_DAYS`。
+
+        以 sentinel 門檻 10 天 ＋ 9 天心跳驗證：門檻為 10 時 bash 側必須判「新鮮」。
+        若 wrapper 退回硬編 8，同一顆心跳會被判「過期」而紅——即「兩生產站點合法
+        同步演進 8→10 會讓本 class 假紅」的最小可執行複現。
+        """
+        sentinel = 10
+        with mock.patch.object(dev_start, "_HEARTBEAT_MAX_AGE_DAYS", sentinel), \
+                tempfile.TemporaryDirectory() as td:
+            now = int(time.time())
+            hb = self._make_heartbeat(Path(td), 9 * 86400, now)
+            stdout = self._bash_report_heartbeat_stdout(hb, now)
+        self.assertEqual(
+            self._classify(stdout)["三態"], "新鮮",
+            f"門檻為 {sentinel} 天時 9 天心跳應判「新鮮」，實得 {stdout!r}——"
+            "wrapper 疑似硬編門檻字面值而未取自 dev_start._HEARTBEAT_MAX_AGE_DAYS",
+        )
+
+    def test_stale_message_carries_no_false_inequality(self) -> None:
+        """R67-M39：過期文案不得內嵌「N 天 > M 天」不等式。
+
+        顯示精度（一位小數）與判定精度（秒）不同，(8,9) 天窗口內舊 bash 文案會印
+        「距今 8 天 > 8 天」——數學上為偽，讀者會合理推斷工具算錯而忽略真實告警。
+        取窗口正中央 8.5 天為代表：顯示須為 `8.5`，且整句不得出現不等式。
+        """
+        with tempfile.TemporaryDirectory() as td:
+            now = int(time.time())
+            hb = self._make_heartbeat(Path(td), 8 * 86400 + 43200, now)
+            stdout = self._bash_report_heartbeat_stdout(hb, now)
+        self.assertIn("距今 8.5 天", stdout,
+                      f"過期文案的天數顯示須與秒級判定同精度（一位小數）：{stdout!r}")
+        self.assertNotRegex(
+            stdout, r"距今\s*[\d.]+\s*天\s*>",
+            f"過期文案內嵌不等式，(8,9) 天窗口會印出數學上為偽的句子：{stdout!r}",
+        )
+
+
+# ── install_mac_nightly.sh `--status` 報表契約（R67-M37 ／ R67-F29）──────────────
+#
+# 為何長在 test_dev_start.py 而不是自成一支 test_install_mac_nightly.py：
+# `DEF-101-561③`／`DEF-101-565` 已裁定「R61 開輪起 tools/tests 禁止新增鎖檔、只准
+# 合併／刪除」，並由 test_adr_xplat001_c1c2_lock.TestGuardFileCountShrinkOnlyRatchet
+# 對 HEAD 逐檔比對強制（本輪實測：新開一支檔案即 `鎖檔數由 53 調升為 55` 翻紅）。
+# 本檔本來就是 install_mac_nightly.sh 三道跨站鎖的所在地（`test_installer_third_
+# site_filename_and_threshold`／`TestCrossSiteLiteralLocks`／上方的行為等價鎖），
+# 新判準擴充進來與既有同源鎖相鄰，正是該裁定指定的「合法作法」。
+#
+# 退化 plist：逐字重現「R15 之前安裝、且 repo 已搬過家」的機器實況——無 RunAtLoad、
+# ProgramArguments 指向不存在的舊 checkout、StandardOutPath 導 /tmp（R14 ARCH-GAP-3
+# 遷出前的落點，會被 macOS 週期清理）。三個缺陷都真實發生過，非杜撰。
+_MACNIGHTLY_DEGENERATE_PLIST = """<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" \
+"http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key><string>com.autoclaude.nightly</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>/bin/bash</string>
+    <string>/nonexistent/OLD_PATH/run_local_nightly.sh</string>
+  </array>
+  <key>StartCalendarInterval</key>
+  <dict><key>Hour</key><integer>2</integer><key>Minute</key><integer>0</integer></dict>
+  <key>StandardOutPath</key><string>/tmp/nightly_mac_launchd.log</string>
+  <key>StandardErrorPath</key><string>/tmp/nightly_mac_launchd.err</string>
+</dict>
+</plist>
+"""
+
+
+@unittest.skipUnless(
+    sys.platform == "darwin",
+    "install_mac_nightly.sh 對非 Darwin 直接 fail-loud（該檔 `uname != Darwin` "
+    "guard），且本組依賴 plutil／BSD `date -v`／launchd plist 語意——非 macOS 上"
+    "執行本身即為無意義假訊號，跳過而非假綠",
+)
+class MacNightlyStatusTestCase(unittest.TestCase):
+    """`--status` 報表契約共用夾具。
+
+    背景：`--status` 過去是「三行全綠」——launchctl 有沒有列出 label、plist 檔案存
+    不存在、心跳 mtime 幾天前。三個判準沒有一個會去看**已安裝產物的內容**，也沒有
+    一個看得見**中間漏跑**：
+
+      R67-M37  一份指向 `/nonexistent/OLD_PATH` 載體、且缺 `RunAtLoad` 的死排程
+               （R15 之前安裝過的機器至今就是這個樣子）回報全綠 rc=0。護欄側
+               `tools/macos_smoke_local.sh:474` 鎖的是**安裝器 heredoc 原始碼**含
+               RunAtLoad，不是**機器上實際安裝的產物**——來源正確不蘊含產物正確。
+               Windows 側 Show-TaskDetail 逐項印 4 個補跑保護設定的 `(expected X)`
+               供人比對，mac 側零對等物。
+      R67-F29  本機 07-28/29/30 三天零 nightly（整段關機），`--status` 仍印「✅ 心跳：
+               新鮮（距今 0 天）」——因為 07-31 開機後 RunAtLoad 補跑一輪把計數歸零。
+               心跳語意是「最後一次何時跑」，結構上看不見連續性缺口，而任何一次補跑
+               都會把先前整段空窗永久蓋掉。CI 停擺（DEF-101-081）期間本地 nightly 是
+               唯一每日兜底層，這正是判斷該兜底層死活的工具。
+
+    夾具在暫存目錄搭一棵最小 repo 樹 + fake HOME + stub launchctl，跑**真實的**
+    `install_mac_nightly.sh --status`（複製自真檔，非另抄一份邏輯）。絕不觸碰真實
+    `~/Library/LaunchAgents` 或真實 launchctl——`--status` 雖是純讀取路徑，但 fake
+    HOME 才能讓「已安裝 plist 的內容」成為測試可控的自變數。
+    """
+
+    _REPO = Path(dev_start.__file__).resolve().parents[1]
+    _INSTALLER = _REPO / "tools" / "install_mac_nightly.sh"
+    _WIN_INSTALLER = _REPO / "tools" / "install_windows_nightly.ps1"
+    _LABEL = "com.autoclaude.nightly"
+
+    def installer_source(self) -> str:
+        return self._INSTALLER.read_text(encoding="utf-8")
+
+    def coverage_lookback_days(self) -> int:
+        """回看天數取自安裝器本體，不在測試裡另立第 2 份字面值（R67-M38 同型教訓：
+        測試自帶的「第 N 份常數副本」是最容易在合法演進時假紅的那一份）。"""
+        m = re.search(r"^NIGHTLY_COVERAGE_DAYS=(\d+)", self.installer_source(),
+                      re.MULTILINE)
+        self.assertIsNotNone(
+            m, "install_mac_nightly.sh 的 NIGHTLY_COVERAGE_DAYS 錨點消失")
+        return int(m.group(1))
+
+    def setUp(self) -> None:
+        self._td = tempfile.TemporaryDirectory()
+        self.root = Path(self._td.name)
+        self.addCleanup(self._td.cleanup)
+
+        # 最小 repo 樹：安裝器 + nightly 載體 + logs 目錄
+        (self.root / "tools").mkdir(parents=True)
+        shutil.copy2(self._INSTALLER, self.root / "tools" / "install_mac_nightly.sh")
+        (self.root / "AutoClaude" / "tools").mkdir(parents=True)
+        self.nightly_sh = self.root / "AutoClaude" / "tools" / "run_local_nightly.sh"
+        self.nightly_sh.write_text("#!/bin/bash\nexit 0\n", encoding="utf-8")
+        self.logs = self.root / "AutoClaude" / "logs"
+        self.logs.mkdir(parents=True)
+
+        # fake HOME（安裝器的 PLIST_DIR="${HOME}/Library/LaunchAgents"）
+        self.home = self.root / "fakehome"
+        self.plist_dir = self.home / "Library" / "LaunchAgents"
+        self.plist_dir.mkdir(parents=True)
+        self.plist_path = self.plist_dir / f"{self._LABEL}.plist"
+
+        # stub launchctl：預設回報「已載入」，讓 exit code 維持 0，好讓 advisory
+        # 維度的訊號不被「launchd 未載入」這件事掩蓋。
+        self.launchctl = self.root / "stub_launchctl.sh"
+        self.launchctl.write_text(
+            "#!/bin/bash\n"
+            f'if [ "$1" = "list" ]; then printf -- "-\\t0\\t{self._LABEL}\\n"; fi\n'
+            "exit 0\n",
+            encoding="utf-8",
+        )
+        os.chmod(self.launchctl, 0o755)
+
+    def run_status(self) -> subprocess.CompletedProcess:
+        return subprocess.run(
+            ["bash", str(self.root / "tools" / "install_mac_nightly.sh"), "--status"],
+            capture_output=True, text=True, encoding="utf-8", errors="replace",
+            env={**os.environ, "HOME": str(self.home),
+                 "IMN_LAUNCHCTL": str(self.launchctl)},
+        )
+
+    def install_healthy_plist(self) -> None:
+        """用安裝器自己的 `--render-only` 產出 plist 再放進 fake HOME——手抄一份
+        期望 plist 會製造第 2 個真相源，renderer 一改測試就假紅。"""
+        rendered = self.root / "rendered.plist"
+        proc = subprocess.run(
+            ["bash", str(self.root / "tools" / "install_mac_nightly.sh"),
+             "--render-only", str(rendered)],
+            capture_output=True, text=True, encoding="utf-8", errors="replace",
+            env={**os.environ, "HOME": str(self.home)},
+        )
+        self.assertEqual(proc.returncode, 0,
+                         f"--render-only 產出失敗：{proc.stdout}{proc.stderr}")
+        shutil.copy2(rendered, self.plist_path)
+
+    def install_degenerate_plist(self) -> None:
+        self.plist_path.write_text(_MACNIGHTLY_DEGENERATE_PLIST, encoding="utf-8")
+
+    def write_heartbeat(self, fail_n: int = 0) -> None:
+        (self.logs / "nightly_mac_latest.log").write_text(
+            "nightly_mac heartbeat（UTC）：2026-08-01T02:00:00Z\n"
+            f"===== nightly 彙總：PASS={7 - fail_n} FAIL={fail_n} =====\n",
+            encoding="utf-8",
+        )
+
+    def write_runid_logs(self, days_ago: list[int]) -> None:
+        """為指定的「幾天前」各造一份 RunId log（run_local_nightly.sh 每輪產一份）。"""
+        today = datetime.date.today()
+        for n in days_ago:
+            stamp = (today - datetime.timedelta(days=n)).strftime("%Y%m%d")
+            (self.logs / f"nightly_mac_{stamp}_020001.log").write_text(
+                "run\n", encoding="utf-8")
+
+
+class TestMacNightlyPlistCapabilityTable(MacNightlyStatusTestCase):
+    """R67-M37：`--status` 必須檢查**已安裝 plist 的內容**，不只檢查它存在。"""
+
+    def test_healthy_plist_passes_every_capability_row(self) -> None:
+        """控制組：安裝器自己產的 plist 必須每列皆 ✅、且無「與期望不符」彙總行。
+
+        沒有這一組，「退化 plist 會噴 ⚠️」只證明載具會叫，不證明它會分辨。
+        """
+        self.install_healthy_plist()
+        self.write_heartbeat()
+        proc = self.run_status()
+        self.assertEqual(proc.returncode, 0, proc.stdout + proc.stderr)
+        self.assertIn("補跑保護能力", proc.stdout, "能力表整段缺席")
+        self.assertIn("✅ RunAtLoad = true   (expected true)", proc.stdout)
+        self.assertIn("✅ plist 內容與現行安裝器產出逐位元組一致（無漂移）", proc.stdout)
+        self.assertNotIn("項與期望不符", proc.stdout,
+                         f"健康 plist 不該有任何能力列告警：{proc.stdout!r}")
+
+    def test_degenerate_plist_flags_every_broken_capability(self) -> None:
+        """缺陷本體：R15 之前安裝、且 repo 搬過家的 plist——三個能力列都要 ⚠️。
+
+        逐列斷言而非只看「有沒有出現 ⚠️」：三個缺陷各自獨立（缺鍵／載體不存在／
+        log 落點錯），只驗總數會讓其中兩項悄悄失去守護。
+        """
+        self.install_degenerate_plist()
+        self.write_heartbeat()
+        out = self.run_status().stdout
+        self.assertIn("⚠️ RunAtLoad = (缺席)   (expected true)", out,
+                      f"缺 RunAtLoad（開機/載入補跑窗口）未被標記：{out!r}")
+        self.assertIn("⚠️ ProgramArguments 載體可讀 = 否", out,
+                      f"載體路徑指向不存在的檔案未被標記：{out!r}")
+        self.assertIn("⚠️ StandardOutPath 位於 AutoClaude/logs = 否", out,
+                      f"log 落點導 /tmp（會被 macOS 週期清理）未被標記：{out!r}")
+        self.assertIn("⚠️ plist 內容已與現行安裝器產出漂移", out,
+                      f"整檔漂移未被標記：{out!r}")
+        self.assertRegex(
+            out, r"⚠️ 上列 \d+ 項與期望不符",
+            f"缺少「共 N 項不符」彙總行——逐列 ⚠️ 容易被大量輸出淹沒：{out!r}",
+        )
+
+    def test_missing_plist_skips_capability_table_without_crashing(self) -> None:
+        """plist 不存在時不得對空檔跑 plutil（`set -euo pipefail` 下會炸掉整支
+        --status，把 advisory 缺口升級成工具本身不可用）。"""
+        self.write_heartbeat()
+        proc = self.run_status()
+        self.assertIn("plist：不存在", proc.stdout)
+        self.assertNotIn("補跑保護能力", proc.stdout,
+                         "plist 缺席時不該印能力表（無產物可查）")
+        self.assertEqual(proc.stderr, "", f"不得有 stderr 噪音：{proc.stderr!r}")
+
+    def test_capability_row_count_reaches_windows_side_parity(self) -> None:
+        """跨平台對稱鎖：mac 能力表的 `(expected X)` 列數 ≥ Windows 側的列數。
+
+        缺陷的量化形態就是這個比值——修前 `grep -c expected` mac=1（且那 1 筆在
+        註解裡）／windows=4。用「≥ Windows 實際列數」而非硬編 4，Windows 側日後
+        新增保護設定時本鎖會自動要求 mac 跟上，不會靜默停在舊基準。
+        """
+        win_rows = len(re.findall(
+            r"\(expected \w+\)",
+            self._WIN_INSTALLER.read_text(encoding="utf-8-sig")))
+        self.assertGreaterEqual(win_rows, 4, "Windows 側 (expected X) 列數抽取失準")
+        self.install_healthy_plist()
+        self.write_heartbeat()
+        out = self.run_status().stdout
+        mac_rows = len(re.findall(r"\(expected .+?\)", out))
+        self.assertGreaterEqual(
+            mac_rows, win_rows,
+            f"mac --status 只印 {mac_rows} 個 (expected …) 能力列，Windows -Status 有 "
+            f"{win_rows} 個——兩側 status 深度不對稱（R67-M37）。若某項 launchd 結構上"
+            f"無對應鍵，仍須以「－ …對等：…無對應鍵可查」列出，讓讀者能逐列對照：{out!r}",
+        )
+
+
+class TestMacNightlyCoverageContinuity(MacNightlyStatusTestCase):
+    """R67-F29：`--status` 必須看得見「中間漏跑」，不只看得見「最後一次多久前」。"""
+
+    def test_gap_days_are_listed_by_date(self) -> None:
+        """缺陷本體：心跳今天剛更新（補跑）＋前幾天整段空窗 → 必須逐日列出缺口。
+
+        這就是本機 07-28/29/30 的實況：`✅ 心跳：新鮮（距今 0 天）` 與「三天沒跑」
+        同時為真，而修前只看得到前者。
+        """
+        lookback = self.coverage_lookback_days()
+        present = [1, lookback]                      # 只有最新與最舊兩天有跑
+        missing = [n for n in range(1, lookback + 1) if n not in present]
+        self.write_runid_logs(present)
+        self.write_heartbeat()
+        self.install_healthy_plist()
+        out = self.run_status().stdout
+        self.assertIn(
+            f"⚠️ 覆蓋連續性：近 {lookback} 天有 {len(missing)} 天無 nightly 紀錄",
+            out, f"連續性缺口未被偵測：{out!r}")
+        self.assertIn("✅ 心跳：新鮮", out,
+                      "本鎖的前提是「心跳新鮮」與「有缺口」同時成立——前提沒成立"
+                      f"就不是在驗這個缺陷：{out!r}")
+        today = datetime.date.today()
+        for n in missing:
+            stamp = (today - datetime.timedelta(days=n)).strftime("%Y%m%d")
+            self.assertIn(stamp, out,
+                          f"缺口日期 {stamp} 未列出（只給數量無法排查）：{out!r}")
+
+    def test_continuous_coverage_reports_green(self) -> None:
+        """控制組：近 N 天每日皆有 log → 綠，且不得誤報任何日期。
+
+        含「今天不算缺口」這條語意：02:00 排程在當日凌晨前尚未觸發，把今天算進去
+        會讓每天 00:00~02:00 之間必然多報一天假缺口。
+        """
+        lookback = self.coverage_lookback_days()
+        self.write_runid_logs(list(range(1, lookback + 1)))
+        self.write_heartbeat()
+        self.install_healthy_plist()
+        out = self.run_status().stdout
+        self.assertIn(f"✅ 覆蓋連續性：近 {lookback} 天每日皆有 nightly 紀錄", out,
+                      f"無缺口卻報告缺口（假陽性會讓整段報表被忽略）：{out!r}")
+        self.assertNotIn("無 nightly 紀錄", out)
+
+    def test_no_runid_logs_at_all_is_reported_distinctly(self) -> None:
+        """一份 RunId log 都沒有時，語意是「排程尚未跑過第一輪」而非「近 N 天全缺」
+        ——剛裝完的人不該收到一則像是排程壞掉的告警。"""
+        self.write_heartbeat()
+        self.install_healthy_plist()
+        out = self.run_status().stdout
+        self.assertIn("覆蓋連續性：無任何 RunId log", out, f"{out!r}")
+        self.assertNotIn("天無 nightly 紀錄", out)
+
+
+class TestMacNightlyStatusWiring(MacNightlyStatusTestCase):
+    """接線鎖：兩段報表必須真的被 `cmd_status()` 呼叫，且 advisory 語意不變。
+
+    WHY 單獨立一類：R67 上一輪半套修改的失敗形態就是「函式寫好了、沒接線」——
+    `bash -n` 與所有既有測試全綠，`--status` 行為卻與修前一模一樣。行為鎖（上面
+    兩類）其實已涵蓋，但靜態鎖給的是**可直接讀懂的失敗訊息**，不必從「輸出少了
+    一段」反推是哪一步漏了。
+    """
+
+    def test_cmd_status_invokes_both_reports(self) -> None:
+        m = re.search(r"^cmd_status\(\) \{(.*?)^\}", self.installer_source(),
+                      re.MULTILINE | re.DOTALL)
+        self.assertIsNotNone(m, "install_mac_nightly.sh 的 cmd_status() 錨點消失")
+        body = m.group(1)
+        for fn in ("report_heartbeat", "report_plist_capabilities", "report_coverage"):
+            self.assertIn(
+                fn, body,
+                f"cmd_status() 沒有呼叫 {fn}()——該函式定義得再完整，--status 也不會"
+                f"執行到它（R67 上一輪半套修改的實際失敗形態）。cmd_status body="
+                f"{body!r}",
+            )
+
+    def test_advisory_findings_never_change_exit_code(self) -> None:
+        """退化 plist ＋ 覆蓋缺口 ＋ FAIL>0 三者齊發，rc 仍須為 0。
+
+        `--status` 的機械判準是「launchd 有沒有載入」（該檔檔頭明文），三段報表
+        皆屬 advisory。把它們升級成硬閘會讓既有呼叫端（ONBOARDING §8 SOP、任何
+        `&&` 串接）行為回歸——要改語意得先改檔頭契約與呼叫端，不能從報表偷渡。
+        """
+        self.install_degenerate_plist()
+        self.write_heartbeat(fail_n=3)
+        proc = self.run_status()
+        self.assertIn("⚠️", proc.stdout, "前提不成立：本案應同時觸發多個 advisory 告警")
+        self.assertEqual(
+            proc.returncode, 0,
+            f"advisory 報表不得改變 --status exit code（實得 rc={proc.returncode}）："
+            f"{proc.stdout}",
+        )
+
+    def test_exit_code_still_tracks_launchd_loaded_state(self) -> None:
+        """反向：launchd 未載入時仍須 rc=1——新增報表不得把唯一的硬判準沖淡。"""
+        self.launchctl.write_text("#!/bin/bash\nexit 0\n", encoding="utf-8")
+        os.chmod(self.launchctl, 0o755)
+        self.install_healthy_plist()
+        self.write_heartbeat()
+        proc = self.run_status()
+        self.assertIn("❌ launchd 未載入", proc.stdout)
+        self.assertEqual(proc.returncode, 1,
+                         f"launchd 未載入時 --status 必須 rc=1：{proc.stdout!r}")
 
 
 class TestCopyFunctionalInterpreterDllCopy(unittest.TestCase):
@@ -3596,7 +4081,10 @@ class TestRmtreeWindowsSafe(DevStartTestCase):
         Windows-only：POSIX 上裸呼叫本就不失敗（見上），略過此對照。
         """
         if os.name != "nt":
-            self.skipTest("裸 rmtree 遇唯讀檔的 PermissionError 只在 Windows 重現")
+            self.skipTest(
+                "[WINDOWS-NATIVE-ONLY] 裸 rmtree 遇唯讀檔的 PermissionError 只在 Windows "
+                "重現（R67-F11 補標籤，供 run_root_unittests.py 彙整可見度）"
+            )
         with tempfile.TemporaryDirectory() as td:
             root = Path(td)
             venv, f = self._make_readonly_fixture(root)

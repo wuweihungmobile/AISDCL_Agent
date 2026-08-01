@@ -238,7 +238,9 @@ class TestProbeCmdRealSubprocessBehavior(unittest.TestCase):
 
 
 @unittest.skipUnless(
-    _REAL_BIN_BASH, "需要本機真實 Git\\bin\\bash.exe 驗證自我注入 PATH 現象"
+    _REAL_BIN_BASH,
+    "[WINDOWS-NATIVE-ONLY] 需要本機真實 Git\\bin\\bash.exe 驗證自我注入 PATH 現象"
+    "（Git for Windows 只存在於 Windows；R67-F11 補標籤，供 run_root_unittests.py 彙整可見度）",
 )
 class TestBinBashLauncherSelfInjectsPathContract(unittest.TestCase):
     """行為層防線（DEF-101-618(a)）：直接鎖住「限縮外部 PATH（手法 A 的原始形態）
@@ -305,9 +307,10 @@ class TestUsableBashRejectsCoreutilsLessBinBashClone(unittest.TestCase):
         clone = _build_coreutils_less_bash_clone(Path(self._tmp.name))
         if clone is None:
             self.skipTest(
-                "找不到本機真實 Git for Windows 安裝（含 bin/bash.exe、"
+                "[WINDOWS-NATIVE-ONLY] 找不到本機真實 Git for Windows 安裝（含 bin/bash.exe、"
                 "usr/bin/bash.exe、usr/bin/msys-2.0.dll），無法建構手法 B 的"
-                "複製品——本測試僅在該類機器設定下有意義（DEF-101-618(a)）"
+                "複製品——本測試僅在該類機器設定下有意義（DEF-101-618(a)；"
+                "R67-F11 補標籤，供 run_root_unittests.py 彙整可見度）"
             )
         self.broken_bash = str(clone)
         repo_root = Path(__file__).resolve().parents[2]

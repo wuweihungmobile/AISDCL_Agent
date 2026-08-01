@@ -57,7 +57,7 @@ import shutil
 import subprocess
 import sys
 import unittest
-from pathlib import Path, PureWindowsPath
+from pathlib import Path, PurePosixPath, PureWindowsPath
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 _GUARD_SH = _REPO_ROOT / "tools" / "lib" / "windowsapps_guard.sh"
@@ -216,20 +216,29 @@ def _tracked_sh_files() -> list[str]:
     return [line for line in proc.stdout.splitlines() if line]
 
 
-def _tracked_extensionless_hook_files() -> list[str]:
-    """git tracked 的無副檔名 git-hook 檔案（`pre-commit`/`pre-push`/`post-commit`
-    等）——依 git hook 慣例沒有副檔名，`_tracked_sh_files()`（`git ls-files --
-    "*.sh"`）天生掃不到，是既有 repo-wide `*.sh` 掃描的方法論盲區（R46 新發現：
-    `AutoClaude/tools/git-hooks/pre-commit`/`pre-push` 因此完全繞過 R43~R45 建立
-    的 repo-wide 防增生掃描，見 DEF-101-381）。本 repo 目前僅 3 個 git-hooks 目錄
-    （根層 `tools/git-hooks/`、`AutoClaude/tools/git-hooks/`、
-    `AISDLC_SDD/.githooks/`），用固定路徑樣式補齊涵蓋範圍；排除 `.md`/`.ps1`
-    （非 bash 腳本，各有自己的文件/PowerShell 側 parity 測試）。"""
+# 檔頭 shebang 是否指向某種 shell（`#!/usr/bin/env bash`／`#!/bin/sh`／`#!/bin/zsh`
+# …）。判定方式比照 `tools/tests/test_bash32_compat.py::_iter_scripts` 的既有慣例
+# （git hook 依慣例無副檔名，只能看檔頭），但**掃描面**不同：那支仍是固定樹名冊，
+# 本檔改為全庫推導（見 `_tracked_non_sh_shell_scripts`）。
+_SHELL_SHEBANG_RE = re.compile(r"^#!.*\b(?:ba|z|da|k)?sh\b")
+
+# 🔴 R67 B4：已知的 hooks 目錄「快照」——**不是掃描面來源**（掃描面已改為全庫推導，
+# 見下方兩個函式），而是給 `test_hook_dir_roster_matches_repo_state` 當完整性自檢的
+# 對照基準：repo 長出第 4 個 hooks 目錄時要有人**當場知道**（新目錄的 hook 是否已
+# 接進根層 dispatcher 的扇出段？是否走了 Copy-on-Evolve 該排除？），而不是靜默被
+# 涵蓋。順序無意義，比對走 set。
+_KNOWN_HOOK_DIRS: frozenset[str] = frozenset({
+    "tools/git-hooks",
+    "AutoClaude/tools/git-hooks",
+    "AISDLC_SDD/.githooks",
+})
+
+
+@functools.lru_cache(maxsize=1)
+def _tracked_files() -> tuple[str, ...]:
+    """git tracked 的**全部**檔案（repo-relative）。快取一次供全庫推導使用。"""
     proc = subprocess.run(
-        ["git", "-C", str(_REPO_ROOT), "-c", "core.quotePath=false",
-         "ls-files", "--",
-         "tools/git-hooks/*", "AutoClaude/tools/git-hooks/*",
-         "AISDLC_SDD/.githooks/*"],
+        ["git", "-C", str(_REPO_ROOT), "-c", "core.quotePath=false", "ls-files"],
         capture_output=True, text=True, encoding="utf-8", errors="replace",
     )
     if proc.returncode != 0:
@@ -237,10 +246,50 @@ def _tracked_extensionless_hook_files() -> list[str]:
             f"git ls-files 失敗（rc={proc.returncode}；stderr={proc.stderr.strip()!r}）"
             "——掃描邊界不得靜默縮小"
         )
-    return [
-        line for line in proc.stdout.splitlines()
-        if line and not line.endswith((".md", ".ps1"))
-    ]
+    return tuple(line for line in proc.stdout.splitlines() if line)
+
+
+@functools.lru_cache(maxsize=1)
+def _tracked_non_sh_shell_scripts() -> tuple[str, ...]:
+    """git tracked、**非 `*.sh` 但檔頭 shebang 指向 shell** 的檔案（repo-relative）。
+
+    🔴 R67 B4（本函式的存在理由，取代原本的硬編目錄名冊）：git hook 依慣例沒有
+    副檔名，`_tracked_sh_files()`（`git ls-files -- "*.sh"`）天生掃不到——那是
+    DEF-101-381 的根因。R46 補的第一版用 `git ls-files -- tools/git-hooks/*
+    AutoClaude/tools/git-hooks/* AISDLC_SDD/.githooks/*` 三個**寫死的目錄**補洞，
+    於是掃描面本身變成一份人工名冊：本 monorepo 的 hooks 目錄數已從 1 長到 3，
+    第 4 個（新子專案／`.husky/`／Copy-on-Evolve 新版樹自帶 hooks）是可預期的
+    演進，而屆時在該目錄放一支裸 `command -v python` 的 hook，**全部 29 支測試
+    仍全綠、零訊號**（R67 實測：連根層 1139 支 unittest 也全數逃過）——正是
+    R60 對 `tools/_script_scan_surface.py` 治過的「名冊沒有完整性鎖」同一個病，
+    只是換了一條腿。
+
+    改法：不再問「有哪些 hooks 目錄」，改問「repo 裡有哪些 shell 腳本」——以
+    `git ls-files` 全庫逐檔讀檔頭 shebang 推導。名冊消失，掃描面即與 repo 實況
+    同步，第 4 個目錄自動落入掃描。只讀前 128 bytes（二進位檔不會被整檔載入）。
+
+    涵蓋面不縮：R67 實測本函式在乾淨樹回傳的 6 支與舊名冊版逐字相同（三個 hooks
+    目錄下的 tracked 檔案恰好全是 bash hook，無 `.md`/`.ps1` 需要排除）。
+    """
+    hits: list[str] = []
+    for rel in _tracked_files():
+        if rel.endswith(".sh"):
+            continue  # 已由 `_tracked_sh_files()` 涵蓋
+        try:
+            with (_REPO_ROOT / rel).open("rb") as fh:
+                head = fh.read(128)
+        except OSError:
+            continue
+        first_line = head.split(b"\n", 1)[0].decode("utf-8", errors="replace")
+        if _SHELL_SHEBANG_RE.match(first_line):
+            hits.append(rel)
+    return tuple(hits)
+
+
+def _tracked_extensionless_hook_files() -> list[str]:
+    """既有三個呼叫端的相容外殼——內容自 R67 起改由 `_tracked_non_sh_shell_scripts()`
+    全庫推導（見該函式的 R67 B4 說明），不再有硬編目錄名冊。"""
+    return list(_tracked_non_sh_shell_scripts())
 
 
 # 注：`_latest_sdd_version_name()` 定義於本檔前段（`_CALLER_FILES` 之前），
@@ -654,6 +703,67 @@ class TestHasSsotGuardBypassResistance(unittest.TestCase):
             'is_real_python_candidate python || { echo err; exit 1; }\n'
         )
         self.assertTrue(_has_ssot_guard(text))
+
+
+class TestHookDirRosterIntegrity(unittest.TestCase):
+    """🔴 R67 B4：無副檔名那條腿的**完整性自檢**（掃描面自己也要被掃）。
+
+    WHY（這不是文件潔癖，是 R60 治過的同一個病）：`_tracked_extensionless_hook_files()`
+    在 R46~R66 是硬編 3 個目錄名冊，於是「防增生鎖」本身有一塊只有人工記憶守著的
+    邊界——第 4 個 hooks 目錄一出現，該目錄下的裸 `command -v python` 就完全在掃描
+    面之外，29 支測試全綠、零訊號（R67 沙箱實測連根層 1139 支 unittest 也全逃過）。
+    R67 已把掃描面改為全庫 shebang 推導（名冊不再參與掃描），本類別補的是另一半：
+    **repo 長出名冊外的 shell 腳本／hooks 目錄時要當場 fail-loud**，讓人去確認
+
+      ① 該目錄的 hook 是否已接進根層 dispatcher 的扇出段（`tools/git-hooks/pre-push`
+         對子專案 hook 是逐一 `if [ -f ... ]` 明列扇出，新目錄不接就根本不會被執行）；
+      ② 是否屬於 Copy-on-Evolve 凍結版樹（該類路徑另有 `_exclude_frozen_sdd_versions`
+         的排除語意，不可與 active hooks 混為一談）。
+
+    自檢一旦翻紅，正解是「看懂新目錄再更新 `_KNOWN_HOOK_DIRS`」，不是把斷言放寬。
+    """
+
+    def test_derived_scan_surface_is_not_silently_empty(self) -> None:
+        """推導結果不得為空——空集合會讓整條無副檔名腿靜默失效（假綠），
+        且與 DEF-101-381 的原始形狀完全相同（掃不到 ⇒ 永遠沒有發現）。"""
+        derived = _tracked_non_sh_shell_scripts()
+        self.assertGreater(
+            len(derived), 0,
+            "全庫推導不到任何『非 *.sh 但檔頭是 shell shebang』的 tracked 檔案——"
+            "推導器壞了（git ls-files 空／shebang 正則失效），此時整條無副檔名"
+            "掃描腿靜默失效，等同 DEF-101-381 未修",
+        )
+
+    def test_hook_dir_roster_matches_repo_state(self) -> None:
+        """名冊 vs 實況：出現名冊外的 hooks 目錄（或名冊內目錄消失）即 fail-loud。"""
+        derived_dirs = {
+            str(PurePosixPath(rel).parent) for rel in _tracked_non_sh_shell_scripts()
+        }
+        unknown = sorted(derived_dirs - _KNOWN_HOOK_DIRS)
+        vanished = sorted(_KNOWN_HOOK_DIRS - derived_dirs)
+        self.assertEqual(
+            unknown, [],
+            f"發現 `_KNOWN_HOOK_DIRS` 名冊外的 shell 腳本目錄：{unknown}——"
+            "掃描面已自動涵蓋（不必補掃描），但請人工確認：(a) 若是新的 git-hooks "
+            "目錄，其 hook 是否已接進 tools/git-hooks/* dispatcher 的扇出段？"
+            "(b) 該目錄下的腳本是否已改用 is_real_python_candidate？"
+            "確認後把目錄補進 `_KNOWN_HOOK_DIRS`",
+        )
+        self.assertEqual(
+            vanished, [],
+            f"`_KNOWN_HOOK_DIRS` 內的目錄已推導不到任何 shell 腳本：{vanished}——"
+            "可能是目錄被移除／改名（請同步名冊），也可能是該目錄下的 hook 檔頭 "
+            "shebang 被改掉而**靜默退出掃描面**（那才是要修的東西）",
+        )
+
+    def test_known_hook_dirs_exist_on_disk(self) -> None:
+        """名冊條目必須是真實存在的目錄——寫錯字的條目會讓上面的比對永遠有一筆
+        `vanished` 或永遠對不上，是另一種靜默腐化。"""
+        for rel in sorted(_KNOWN_HOOK_DIRS):
+            with self.subTest(hook_dir=rel):
+                self.assertTrue(
+                    (_REPO_ROOT / rel).is_dir(), f"`_KNOWN_HOOK_DIRS` 條目不存在：{rel}"
+                )
 
 
 class TestBashCallersEnrollment(unittest.TestCase):

@@ -17,6 +17,10 @@ dev_start.py。R12（DEF-101-070 ② 收斂案）AutoClaude/tools/local_ci_gate 
      （.ps1 另剝 `<# … #>` 區塊）、行尾空白、空行後取 hash——任何實質內容
      變動（不論用什麼語法）一律紅燈，指路「確認變更仍屬薄殼職責後同步更新
      釘選值」。註解／說明文字調整不觸發（正規化吸收）。
+     **例外——首行 shebang 納入 hash 輸入**（R67-H35）：`#!/usr/bin/env bash` 是
+     直譯器宣告、不是註解，改成 `#!/bin/sh` 在 dash 下會直接壞掉薄殼三職責的第一項
+     （選直譯器），故不得被「剝除註解」吸收。已實測涵蓋：shebang 改動一律紅燈
+     （`TestR67ShebangIsNotAComment`）。
   2. 【第二訊號】行數上限（MAX_LINES）：hash 更新後的長期膨脹警戒線。
   3. 【並聯第三訊號】原黑名單不再是權威判定，但**與 hash 釘選並聯**（不論 hash
      是否相符一律執行），命中即列為問題並指路。
@@ -87,11 +91,22 @@ _PS1_BLOCK_COMMENT_RE = re.compile(r"<#.*?#>", re.DOTALL)
 # 十支舊 pin 在舊讀法下皆可重現，且「新正規化文字 ≡ 舊正規化文字刪掉該假行」十支皆
 # True；`.sh` 側五支無 BOM、hash 逐字不變——差異面恰好落在 BOM 檔上，證明是量對了
 # 而非正規化演算法被改壞。
+#
+# 🔴 R67（R67-H35）重釘（本表 `.sh` 側七支 ＋ check_script_parity._LATEST_PINNED_SHA256
+# 的 LATEST run_tlc.sh 一支，共八支）：`_normalize()` 改為保留首行 shebang 後，帶
+# shebang 的檔正規化文字多了那一行 ⇒ 這八支 hash 全變。**逐支確認內容未被竄改**
+# （真工作樹實跑，2026-08-01；釘選面合計 16 支＝本表 14 + LATEST 表 2）：
+# ① 以「舊演算法」（剝掉所有 `#` 開頭行，含 shebang）重算 16 支現行檔案 ⇒ 全部逐字
+# 重現舊 pin（`不符者: []`）⇒ 檔案內容一個位元組都沒動，變的只有正規化規則；
+# ② `新正規化文字 ≡ 首行 shebang + "\n" + 舊正規化文字`（無 shebang 者 ≡ 舊正規化
+# 文字）16 支皆 True；③ hash 變動的恰為有 shebang 的 8 支，未變的恰為無 shebang 的
+# 8 支（`.ps1` 首行是 `<#` 區塊註解或一般註解）——差異面與 shebang 有無完全重合，
+# 證明是量對了而非演算法被改壞。
 _PINNED_SHA256: dict[str, str] = {
     # R43：WindowsApps 空殼排除 guard 收斂為 dot-source tools/lib/windowsapps_guard.sh
     # 共用函式（Scan-B 系統性缺口收斂，DEF-101-353；bash 側對稱 .ps1 側 R37 先例）
     "tools/dev_start.sh": (
-        "97ccccbcee98781352eb46162fd066f6f2978d05612d4f6f9d30a0c3a6b230e0"
+        "21de65d51053555ff0df5693ffaa241540238dd1096f2f400626d530c308afcc"
     ),
     # R37：WindowsApps 空殼排除 guard 收斂為 dot-source tools/lib/WindowsAppsGuard.ps1
     # 共用函式（DEF-101-273/279/300/303 反覆復發後的架構收斂）
@@ -101,7 +116,7 @@ _PINNED_SHA256: dict[str, str] = {
     # R12（DEF-101-070 ②）：local_ci_gate 收斂為薄殼＋Python 核心後納入釘選；
     # R43：補上 WindowsApps guard dot-source（同上 DEF-101-353）
     "AutoClaude/tools/local_ci_gate.sh": (
-        "551e36b7158e3d1ee8808e92c0dddb21ffe4abace055cc6cdb8526855742b484"
+        "8d381f7c83714755b1a320a1af3d98abda64be15620a250db508f6e88f64eff0"
     ),
     # R44：python 前置檢查改走 tools/lib/WindowsAppsGuard.ps1::Test-IsRealPython SSOT
     # R60（F-refuter-1）：$PytestArgs 預設值由寫死的 'tests/ -q --tb=short' 改為 ''
@@ -117,7 +132,7 @@ _PINNED_SHA256: dict[str, str] = {
     # 遷移至此 hash 釘選（同 R12 local_ci_gate 先例；gate-call 抽取比對隨之退場）
     # R43：補上 WindowsApps guard dot-source（同上 DEF-101-353）
     "tools/bootstrap.sh": (
-        "666b6062bd3071a36b2485b055b693aca7e71f155fe43cf770a7dee985c16a20"
+        "5d73047f1f81e81ed0b47a8147dbe69801640ee77f727ecc953c51d9eb865857"
     ),
     # R37：WindowsApps 空殼排除 guard 收斂為 dot-source tools/lib/WindowsAppsGuard.ps1
     # 共用函式（DEF-101-273/279/300/303 反覆復發後的架構收斂）
@@ -126,7 +141,7 @@ _PINNED_SHA256: dict[str, str] = {
     ),
     # R43：補上 WindowsApps guard dot-source（同上 DEF-101-353）
     "tools/integration_gate.sh": (
-        "0f9d2b674f821f37e543d15b7e8a87c6b9f92f82c6ab3ba957f55e692219ed89"
+        "3a155b915f7bc42c32c752885a97a38eb9a60a3b411d85c532a8421e4cacfc75"
     ),
     # R44：python 前置檢查改走 tools/lib/WindowsAppsGuard.ps1::Test-IsRealPython SSOT
     "tools/integration_gate.ps1": (
@@ -134,7 +149,7 @@ _PINNED_SHA256: dict[str, str] = {
     ),
     # R43：補上 WindowsApps guard dot-source（同上 DEF-101-353）
     "AutoClaude/tools/run_act.sh": (
-        "5dbe64e0c72312b1172968b396456c6a22f523e11d9de5b855d4949dd224115a"
+        "422af63e6e74ef0b88ba4dbc3ca63e893a08470b451118d8f6d388d366fd848b"
     ),
     # R44：python 前置檢查改走 tools/lib/WindowsAppsGuard.ps1::Test-IsRealPython SSOT
     "AutoClaude/tools/run_act.ps1": (
@@ -144,13 +159,13 @@ _PINNED_SHA256: dict[str, str] = {
     # 為 hash 釘選）：業務邏輯本已下沉 tools/git_hooks_install_common.py 單一真相源，
     # 兩份呼叫端僅剩各自平台原生薄殼呈現層；raw 行數 50/65/40/42 皆 ≤ MAX_LINES=100。
     "AutoClaude/tools/install_git_hooks.sh": (
-        "750c582119c7e8cd6d7c75478d638de910b515d409fbf5376c542768c651ba07"
+        "b8f4aeb6cdd9b3a3cc1f93fc7ba0415cf8d8c7846e54ce397be59984a3deef18"
     ),
     "AutoClaude/tools/install_git_hooks.ps1": (
         "8133a5d7cd65e0c75a90e92fe3c3cbebdeccab3e73ec69ac08e1cb46cc8b0ce7"
     ),
     "AISDLC_SDD/scripts/install-hooks.sh": (
-        "cbd0a558f36a95ece780c5fc3c6b5b3e5b3be74b721891cb508f3d30c382876c"
+        "1fd0254e28a13c143d32d44985373e52f26b065529e7c9efc40332eb3bd6833a"
     ),
     "AISDLC_SDD/scripts/install-hooks.ps1": (
         "42b01cc883e29b79405abc0f0db5f2a9bf16e7e0b04ac399c0ddc47b16d03403"
@@ -322,16 +337,30 @@ def _read_source(path: Path) -> str:
 
 
 def _normalize(text: str, is_ps1: bool) -> str:
-    """剝除註解／空行／行尾空白——hash 只反映實質內容。
+    """剝除註解／空行／行尾空白——hash 只反映實質內容。**首行 shebang 除外**。
 
     前提：`text` 來自 `_read_source()`（BOM 已剝）。本函式刻意**不**自己處理 BOM——
     否則就變成第二個「BOM 該由誰負責」的答案（見 `_read_source()` docstring）。
+
+    🔴 R67（Scan-H R67-H35）：首行 `#!…` **不是註解，是直譯器宣告**——它決定這支殼
+    由誰執行，正是「選直譯器／轉呼叫核心／啟用 venv」三項薄殼職責的第一項。原實作
+    以 `not line.lstrip().startswith("#")` 一律剝除，於是 8 支釘選 `.sh` 的
+    `#!/usr/bin/env bash` 可被改成 `#!/bin/sh` 而 hash 紋風不動（實測 rc=0、
+    `tools/tests` 零紅）。`tools/dev_start.sh` 用了 `${BASH_SOURCE[0]}` 與 `local`，
+    在 dash（Ubuntu runner 的 /bin/sh）下直接壞掉——守門對象的頭號職責整條在覆蓋面外。
+    修法：首行若以 `#!` 起頭則無條件保留、進入 hash 輸入；其餘註解行照舊剝除
+    （`test_comment_only_change_does_not_trip_hash` 的自由度不變）。`.ps1` 首行不是
+    shebang（帶 BOM，且開頭常為 `<# … #>` 區塊註解），不受影響。
     """
     if is_ps1:
         text = _PS1_BLOCK_COMMENT_RE.sub("", text)
     lines = [line.rstrip() for line in text.splitlines()]
+    shebang: list[str] = []
+    if lines and lines[0].startswith("#!"):
+        shebang = [lines[0]]
+        lines = lines[1:]
     kept = [line for line in lines if line.strip() and not line.lstrip().startswith("#")]
-    return "\n".join(kept)
+    return "\n".join(shebang + kept)
 
 
 def normalized_content(path: Path) -> str:

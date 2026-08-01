@@ -666,5 +666,381 @@ class TestSmokeCiSync(unittest.TestCase):
                 )
 
 
+# --- R67-C19：compat-CI step ↔ 本地載具「覆蓋差集」登記表 ------------------------
+#
+# WHY 這張表必須存在（測意圖非僅行為，Rule 9）：ONBOARDING §6.1 對兩支 smoke 腳本的
+# 措辭是「**本地補償對等**＝…」。R67 Scan-C 逐步比對後實測：macos-smoke 22 step 扣掉
+# checkout／setup-python／PATH 三個非驗證步後為 19 個實質驗證，其中 **5 步在本地零承載**
+# （bootstrap 全新建立／bootstrap 重跑／dev_start 實跑／zsh source dev_start／
+# integration_gate 實跑），另有 1 步只有部分承載（真實 git commit 經 core.hooksPath 觸發
+# dispatcher——本地 smoke [2/7] 只做 dispatcher 直呼，`grep -n "git commit"
+# tools/macos_smoke_local.sh` 空輸出）。「對等」二字讓讀者以為本地綠燈 ≈ CI 綠燈，而
+# compat-CI 已因帳務停擺多輪未真正執行 ⇒ 這是一句**會讓人停止追問**的話。
+#
+# 而更關鍵的是**零機械訊號**：Scan-C 在乾淨 clone 注入一個全新、本地零對等的 CI step 後，
+# 8 支根層守門全部 rc=0、`run_root_unittests.py` `Ran 1139 / OK`——包含本檔在內。本檔
+# docstring 自述的職責是「抽取 PASS 下限釘選值與 `--- [n/m]` 分組標籤交叉斷言」，本來就
+# 不是覆蓋差集鎖。故本節補的正是那條缺口：**CI 多一步而本地沒跟上，必須當場紅**。
+#
+# 為何登記表住在本檔而非新開掃描器：本檔已同時讀四份檔案（兩 smoke ＋ 兩 compat-CI），
+# 是同一條軸、同一份輸入；DEF-101-519 定下的折中是「不新建掃描器檔案，併進既有鎖」。
+#
+# 為何 ONBOARDING 不再重抄一份對照表：44 列 markdown 表格＝保證下一輪就 stale 的站點
+# （正是本輪在治的病）。文件改為**指向本表**這個 live 來源，數字/名單一律不寫進散文。
+#
+# 值的四種形態（前三種是「有載具」，`NO-LOCAL-CARRIER`／`PARTIAL` 必須附非空理由）：
+#   INFRA:            非驗證步（checkout／setup-python／PATH／裝依賴），無需本地對等
+#   <載具描述>        本地確有等價執行者（smoke 組號／nightly stage／根層 unittest 檔）
+#   PARTIAL:          有部分承載，但缺一段關鍵路徑——必須寫明缺什麼
+#   NO-LOCAL-CARRIER: 本地零承載——必須寫明為何無法本地化
+#
+# 🔴🔴 **這張表的取證邊界（R67 round 2 / QA-R67-04 補上；在此之前 repo 內零揭露）**
+#
+# 這是一張**兩邊等寬、但取證強度不對稱**的表。R67 是零 Windows 實機的一輪，而下一位讀者
+# 看到 22 + 22 兩排整齊的登記，不會知道只有一半是量出來的——那正是本 repo 一路在治的
+# 「讀起來像實測結果的推論」。三段式劃界（比照本輪 `snapshot-fingerprints-win32` 整欄
+# `unrecorded`、ADR-XPLAT-002 §6 逐輪覆蓋表、DEF-101-659「GNU grep 側標為推論」的既有體例）：
+#
+#   (a) **已實測涵蓋**＝`macos-compat-ci.yml::macos-smoke` 那半邊。每一句承載宣稱都在
+#       R67 macOS 真機上實查過，且佐證就寫在該列旁（例：下方「真實 git commit」那列的
+#       `grep -n "git commit" tools/macos_smoke_local.sh` 空輸出）。
+#   (b) **已實測不涵蓋**＝`windows-compat-ci.yml::windows-smoke` 那半邊。它是**讀**
+#       `tools/windows_smoke_local.ps1`（9 組情境）與 `AutoClaude/tools/run_local_nightly.ps1`
+#       **推得**的，R67 全輪無 Windows 機器可實跑核對。**別把它讀成實測結果**；待下一個
+#       Windows 輪在原生 Windows 上逐列覆核一次（該交棒項另記於帳本 DEF-101-640）。
+#   (c) **本節全部機械鎖的天花板**：下方四支鎖驗的是「**每一步都被歸屬**、`NO-LOCAL-CARRIER`／
+#       `PARTIAL` 附了理由、指名的載具**檔案真的存在**、指名的 smoke **組號真的存在於該
+#       腳本內**」。它們**都不驗「那個載具真的做了那一步做的事」**——語意等價要嘛靠實跑
+#       （兩支 smoke 皆具破壞性且分鐘級，跑在開發者機器上會覆蓋 .venv／依賴基準，正是下表
+#       多筆 `NO-LOCAL-CARRIER` 的成因），要嘛靠比對散文語意（那是另一種推論，不是取證）。
+#       故此處**誠實劃界而不假裝**：本節買到的是「沒人想過這一步」與「想過、決定不做，理由
+#       如下」的區別，以及「登記指向的東西還在」；買不到的是語意等價。
+_NO_CARRIER = "NO-LOCAL-CARRIER"
+_PARTIAL = "PARTIAL"
+_INFRA = "INFRA"
+
+_CI_STEP_LOCAL_CARRIER: dict[str, dict[str, str]] = {
+    "macos-compat-ci.yml::macos-smoke": {
+        "uses:actions/checkout": f"{_INFRA}: 取原始碼",
+        "Set up Python 3.11": f"{_INFRA}: 準備直譯器",
+        "將 .venv/bin 加入 PATH（比照本機開發慣例，供後續步驟裸呼叫 python）": f"{_INFRA}: 環境設定，非驗證步",
+        "tools/tests/（SIGPIPE 回歸鎖 + dev_start.py 平台邏輯；R3 QA 發現：paths 雖已涵蓋 tools/tests/**，但先前從未有任何 step 真的執行過，只在 root-infra-ci.yml 的 ubuntu-latest 上以 mock 跑過）": "nightly stage 2 root_unittests（tools/run_root_unittests.py）＋ pre-push root-infra leg",
+        "install_mac_nightly.sh --render-only（plist 產出＋plutil -lint；鏡射本機 smoke [6]，QA-R13-3 補齊四向互鎖缺角）": "macos_smoke_local.sh [6/7]",
+        "執行 tools/bootstrap.sh（全新 .venv 建立情境）": (
+            f"{_NO_CARRIER}: 需在乾淨 checkout 上建立**全新** .venv；在開發者機器上跑會覆蓋"
+            "現用 .venv 並重裝全部依賴（分鐘級且破壞性），本地 smoke 刻意不做"
+        ),
+        "重跑 tools/bootstrap.sh（既有 .venv 沿用情境）": (
+            f"{_NO_CARRIER}: 同上，且此步的驗證對象是「既有 .venv 沿用」路徑，"
+            "必須緊接在前一步的乾淨建立之後才有意義"
+        ),
+        "執行 tools/dev_start.sh（一般 checkout 情境，首次記錄依賴基準）": (
+            f"{_NO_CARRIER}: 會改寫本機依賴基準狀態檔與 .venv；平台分支邏輯本身由 "
+            "tools/tests/test_dev_start.py 單元測試覆蓋，但「殼實跑」這一段無本地載具"
+        ),
+        "觸發 tools/dev_start.py 的 cross_same_flavor 分支（linux→mac，僅 macOS runner 可測）": "tools/tests/test_dev_start.py（step_venv cross_same_flavor 分支）",
+        "zsh source tools/dev_start.sh（macOS 預設 shell 的 source 路徑；R9 Fix-E）": (
+            f"{_NO_CARRIER}: 需以 macOS 預設 shell zsh source 該殼並觀察其副作用，"
+            "與上一步同樣具破壞性（R9 Fix-E）"
+        ),
+        "AutoClaude/tools/install_git_hooks.sh 安裝／解除往返驗證（一般 checkout）": "macos_smoke_local.sh [3/7]",
+        "AutoClaude/tools/install_git_hooks.sh 於 linked worktree 下應正確拒絕（fail-loud）": "macos_smoke_local.sh [3/7]",
+        "AISDLC_SDD/scripts/install-hooks.sh 安裝／解除往返驗證（一般 checkout）": "macos_smoke_local.sh [3/7]",
+        "AISDLC_SDD/scripts/install-hooks.sh 於 linked worktree 下應正確拒絕（fail-loud）": "macos_smoke_local.sh [3/7]",
+        "根層 dispatcher hooks：安裝 + 真實 git commit 觸發 pre-commit（經 core.hooksPath）": (
+            f"{_PARTIAL}: macos_smoke_local.sh [2/7] 只做 dispatcher **直呼**；"
+            "「經 core.hooksPath 由真實 git commit 觸發」這一段本地零覆蓋"
+            "（`grep -n \"git commit\" tools/macos_smoke_local.sh` 空輸出）"
+        ),
+        "根層 dispatcher hooks：/bin/bash（系統 bash 3.2，非 Homebrew 新版）直接執行驗證": "macos_smoke_local.sh [2/7]",
+        "AISDLC_SDD LATEST/tools/install_hooks/install_post_commit.sh 於 worktree 執行，驗證寫入共用 .git/hooks/post-commit": "macos_smoke_local.sh [4/7]",
+        "pty_wrapper / hotkey_handler 平台解析單元測試（AutoClaude tests/test_perception.py）": "nightly stage 3 autoclaude_gate（AutoClaude 全套 pytest 含 AutoClaude/tests/test_perception.py）",
+        "執行 tools/integration_gate.sh --skip-full（實際執行，非僅語法解析；R34 Scan-C 發現修正）": (
+            f"{_NO_CARRIER}: 全 repo 零自動呼叫端（R67-C19 實查：所有命中皆為文件／parity "
+            "登記／薄殼守門，無任何本地流程執行它）"
+        ),
+        "執行（非僅解析）AISDLC_SDD/scripts/ci-gate.sh（凍結基線 v0.01 + LATEST 雙軌）": "nightly stage 4 sdd_ci_gate（AutoClaude/tools/run_local_nightly.sh:176 sdd_gate）",
+        "tools/check_script_parity.py（雙平台腳本對等 + pytest 釘選一致）": "macos_smoke_local.sh [5/7]",
+        "tools/check_ntfs_paths.py（NTFS 敵意檔名，全量 tracked 路徑）": "macos_smoke_local.sh [5/7]",
+    },
+    "windows-compat-ci.yml::windows-smoke": {
+        "uses:actions/checkout": f"{_INFRA}: 取原始碼",
+        "Set up Python 3.11": f"{_INFRA}: 準備直譯器",
+        "Install AutoClaude deps": f"{_INFRA}: 裝依賴，非驗證步",
+        "安裝 AISDLC_SDD pinned deps": f"{_INFRA}: 裝依賴，非驗證步",
+        "tools/tests/（SIGPIPE 回歸鎖 + dev_start.py 平台邏輯；R3 QA 發現：先前只在 root-infra-ci.yml 的 ubuntu-latest 上以 mock 跑過，從未在真實 Windows 執行過）": "nightly root_unittests（AutoClaude/tools/run_local_nightly.ps1）＋ pre-push root-infra leg",
+        "install_windows_nightly.ps1 -WhatIf 預覽（R26 Scan-C 發現：從未在真實 CI 執行過；鏡射 macos-compat-ci.yml install_mac_nightly.sh --render-only 步驟，DEF-101-269）": "windows_smoke_local.ps1 [9/9]",
+        "執行 tools/bootstrap.ps1（R1 SA 發現：Windows 新人上手入口從未被實測）": f"{_NO_CARRIER}: 同 macOS 側——需乾淨 checkout 建全新 .venv，破壞性且分鐘級",
+        "重跑 tools/bootstrap.ps1（既有 .venv 沿用情境；R9 Fix-D）": f"{_NO_CARRIER}: 同上，驗證對象是「既有 .venv 沿用」路徑",
+        "dot-source tools/dev_start.ps1（同上，日常開工入口）": f"{_NO_CARRIER}: 會改寫本機依賴基準狀態與 .venv（同 macOS 側 dev_start 實跑）",
+        "觸發 tools/dev_start.py 的 .venv 形狀換手分支（posix→windows，僅 Windows runner 可測）": "tools/tests/test_dev_start.py（posix→windows 形狀換手分支）",
+        "pty_wrapper / hotkey_handler 平台解析單元測試": "nightly autoclaude gate（AutoClaude 全套 pytest）",
+        "執行 tools/integration_gate.ps1 -SkipFull（實際執行，非僅語法解析；P1 Architect 發現修正）": f"{_NO_CARRIER}: 同 macOS 側——integration_gate 全 repo 零自動呼叫端",
+        "執行（非僅解析）ci-gate.ps1（凍結基線 + LATEST 雙軌）": "nightly sdd ci-gate stage",
+        "install_git_hooks.ps1 安裝／解除往返驗證": "windows_smoke_local.ps1 [2/9]",
+        "GitHooksInstallCommon.ps1 Assert-NotLinkedWorktree 於 linked worktree 下應正確拒絕（fail-loud；獨立複審發現：macOS 側已測、Windows 側零覆蓋 P0）": "windows_smoke_local.ps1 [3/9]＋[7/9]",
+        "AISDLC_SDD/scripts/install-hooks.ps1 驗證（R1 SA 發現：第二入口從未被測到）": "windows_smoke_local.ps1 [4/9]",
+        "AISDLC_SDD/scripts/install-hooks.ps1 於 linked worktree 下應正確拒絕（fail-loud；同上，第二入口同樣零覆蓋）": "windows_smoke_local.ps1 [4/9]",
+        "根層 dispatcher hooks：安裝 + 真實 git commit 經 core.hooksPath 觸發 dispatcher（R9 ARCH-F3）": (
+            f"{_NO_CARRIER}: windows_smoke_local.ps1 九組情境內**沒有** dispatcher 組"
+            "（macOS 側至少有 [2/7] 的直呼，Windows 側連直呼都沒有）⇒ 本地零覆蓋"
+        ),
+        "install_post_commit.ps1 執行 + 非 ASCII 路徑編碼損毀斷言（P1 回歸鎖，R1 SD 發現修正；R2 SD/Architect 發現再修正；2026-07-16 R8 SD 發現 linked-worktree 路徑解析 bug 修復後再修正）": "windows_smoke_local.ps1 [5/9]＋[6/9]",
+        "install_post_commit.ps1 於 linked worktree 移除後仍應解析出有效路徑（P1 回歸鎖，2026-07-16 四方複審 SD 發現）": "windows_smoke_local.ps1 [5/9]",
+        "tools/check_script_parity.py（雙平台腳本對等 + pytest 釘選一致；R4 複審發現：先前僅 macOS 側涵蓋）": "windows_smoke_local.ps1 [8/9]",
+        "tools/check_ntfs_paths.py（NTFS 敵意檔名，全量 tracked 路徑；R4 複審發現：本工具本質為 Windows/NTFS 相容性檢查，先前卻只在 macOS/Linux 上被驗證過，從未在真正的目標平台 Windows 上跑過）": "windows_smoke_local.ps1 [8/9]",
+    },
+}
+
+# 抽取數量下限釘選（比照 `_MIN_GROUPS`／`check_script_parity._MIN_EXTRACT_COUNTS` 慣例）：
+# 防「step 抽取式漂移導致 0 命中，於是包含關係恆成立而靜默假綠」。
+_MIN_CI_STEPS = 20
+
+# 一個 step 起始行：`      - name: …` / `      - uses: …`（steps 清單縮排 6 空格）。
+_CI_STEP_START_RE = re.compile(r"^      - (\w+): (.*)$", re.MULTILINE)
+
+
+def _ci_step_key(kind: str, value: str) -> str:
+    """step 起始行 → 登記表鍵。
+
+    `name:` 取**整串名稱**（僅正規化連續空白）。刻意**不**截到第一個括號之前：實測那樣
+    做會把「執行（非僅解析）AISDLC_SDD/scripts/ci-gate.sh…」壓成無資訊的 `執行`，而
+    Windows 側另有一步也壓成 `執行` ⇒ 鍵撞在一起、登記表無法逐一對應。代價明說：**純
+    改寫 step name 的括號註記也會讓本鎖紅**——這與本檔既有的 `_SH_EXCLUSIVE_PASS_GROUPS`
+    採逐字訊息登記是同一慣例，且「name 變了就重新確認它的本地承載」本來就該是人工動作。
+    `uses:` 去掉 `@版本`：版本釘選由 `check_gha_action_versions.py` 另行守門，不重複；
+    版本升級是常態，讓它連帶紅這張表沒有意義。
+    """
+    if kind == "uses":
+        return "uses:" + value.strip().split("@")[0]
+    return " ".join(value.split())
+
+
+def _ci_smoke_steps(path: Path, job: str) -> dict[str, str]:
+    """compat-CI 某 job 的 {step 鍵: step 起始行原文}；重複鍵即 fail-loud。"""
+    text = _read(path)
+    m = re.search(rf"^  {re.escape(job)}:\s*$(.*?)(?=^  \S|\Z)", text, re.MULTILINE | re.DOTALL)
+    if m is None:
+        raise AssertionError(f"{path.name} 找不到 job `{job}`——job 改名或結構變動")
+    steps: dict[str, str] = {}
+    for kind, value in _CI_STEP_START_RE.findall(m.group(1)):
+        key = _ci_step_key(kind, value)
+        if key in steps:
+            raise AssertionError(
+                f"{path.name}::{job} 出現重複 step 鍵 {key!r}——兩個 step 的主詞相同會讓"
+                "覆蓋差集登記表無法逐一對應，請讓 step name 的主詞可區分"
+            )
+        steps[key] = f"{kind}: {value}"
+    return steps
+
+
+class TestCiStepLocalCarrierCoverage(unittest.TestCase):
+    """R67-C19：compat-CI 的每一個 smoke step 都必須在登記表裡有明確的本地承載歸屬。
+
+    這道鎖要擋的**具體失敗**：有人在 compat-CI 加一個新驗證步（例如新平台守門），本地
+    smoke／nightly 完全沒跟上，而 compat-CI 因帳務停擺不會執行 ⇒ 那一步實際上**從未在
+    任何地方跑過**，卻讓 §6.1 的「本地補償」措辭看起來仍成立。Scan-C 已實測注入證明此
+    情境下 56 支護欄測試（含本檔）全綠、零訊號。
+
+    刻意**不**斷言「零本地承載的步數必須是 N」：寫死支數＝下一輪必過期（R57 已立政策）。
+    本鎖只要求「每一步都被明確歸屬，且無承載者必須寫明為何」——把「沒人想過這一步」與
+    「想過、決定不做，理由如下」區分開來，是這張表唯一要買的東西。
+    """
+
+    def test_every_ci_step_is_registered(self) -> None:
+        """新增 CI step 而未登記本地承載 ⇒ 紅（本鎖的正職，Scan-C 注入 D 的直接對策）。"""
+        for spec, registry in _CI_STEP_LOCAL_CARRIER.items():
+            filename, job = spec.split("::")
+            steps = _ci_smoke_steps(_REPO_ROOT / ".github" / "workflows" / filename, job)
+            self.assertGreaterEqual(
+                len(steps), _MIN_CI_STEPS,
+                f"{spec} 只抽到 {len(steps)} 個 step < 下限 {_MIN_CI_STEPS}——step 抽取式"
+                f"疑似漂移（0 命中會讓下方包含關係恆成立而靜默假綠）",
+            )
+            missing = sorted(set(steps) - set(registry))
+            self.assertEqual(
+                missing, [],
+                f"{spec} 有 CI step 未登記本地承載：{missing}\n"
+                f"  處置：在 tools/tests/test_smoke_ci_sync.py 的 `_CI_STEP_LOCAL_CARRIER` "
+                f"為每一步補上載具；本地確實無法承載者寫 `{_NO_CARRIER}: <為何無法本地化>`。\n"
+                f"  這一步不是形式——ONBOARDING §6.1 對外宣稱本地 smoke 是 compat-CI 的"
+                f"「本地補償」，而 compat-CI 因帳務停擺多輪未真正執行；沒登記＝沒人想過"
+                f"這一步在本地由誰跑。\n  原文：{[steps[k] for k in missing]}",
+            )
+
+    def test_registry_has_no_stale_entries(self) -> None:
+        """登記表反向自檢：登記了 CI 裡已不存在的 step ⇒ 紅（豁免表自己也會 stale）。"""
+        for spec, registry in _CI_STEP_LOCAL_CARRIER.items():
+            filename, job = spec.split("::")
+            steps = _ci_smoke_steps(_REPO_ROOT / ".github" / "workflows" / filename, job)
+            dead = sorted(set(registry) - set(steps))
+            self.assertEqual(
+                dead, [],
+                f"{spec} 的登記表有 CI 裡已不存在的 step：{dead}——step 被刪除或改名後"
+                f"沒人回收登記，這張表就開始說謊（同 `Spec.historical` 的 stale 自檢紀律）",
+            )
+
+    def test_no_carrier_and_partial_entries_carry_a_reason(self) -> None:
+        """`NO-LOCAL-CARRIER`／`PARTIAL` 必須附非空理由——否則只是把「不知道」寫得像結論。"""
+        for spec, registry in _CI_STEP_LOCAL_CARRIER.items():
+            for step, carrier in registry.items():
+                self.assertTrue(carrier.strip(), f"{spec}::{step} 載具欄為空")
+                for marker in (_NO_CARRIER, _PARTIAL, _INFRA):
+                    if carrier.startswith(marker):
+                        reason = carrier[len(marker):].lstrip(": ：").strip()
+                        self.assertTrue(
+                            reason,
+                            f"{spec}::{step} 標了 {marker} 卻沒寫理由——"
+                            f"「想過、決定不做，理由如下」與「沒人想過」的差別就在這一句",
+                        )
+
+    def test_registry_discloses_its_evidentiary_boundary(self) -> None:
+        """三段式取證邊界必須留在 repo 內（R67 round 2 / QA-R67-04）。
+
+        WHY 這也要上鎖：R67 之前，「windows-smoke 那半張表是零 Windows 實機的讀碼推論」
+        與「這些鎖只驗載具存在、不驗它真的做了那件事」兩項限制**只存在於當輪的修復回報
+        JSON 裡**，repo 內 `grep` 零命中。下一輪的讀者只看得到一張兩邊等寬的表，會把推論
+        讀成實測——而本輪各處（`snapshot-fingerprints-win32` 整欄 `unrecorded`、
+        ADR-XPLAT-002 §6 逐輪覆蓋表、DEF-101-659）都已逐項標示推論／實測，體例是存在的，
+        只有這裡漏了。註解被刪掉就會退回零揭露，故機械守住它還在。
+
+        🔴 **判定範圍刻意只取登記表之前那段註解**，不是整檔 `in src`：本測試自己的 marker
+        清單就寫著那幾個詞，整檔比對會被**自己**滿足而恆真——那正是本輪三度踩到的「換上的
+        驗證自己也是假驗證」。實測佐證：整檔版在「把註解裡的字樣改掉」的注入下仍 rc=0
+        （自我滿足），改成本段切片後同一注入 rc=1。**第二次踩到同一形態**：改成「登記表
+        之前的全部原始碼」仍 rc=0——本檔第 638 行另一支測試的失敗訊息裡剛好也寫著「已實測
+        涵蓋／已實測不涵蓋」（那是 Get-ChildItem 列舉途徑的邊界說明，與本表無關）。故切片
+        **兩端都要錨**：只取取證邊界那一段註解本身。
+        """
+        src = Path(__file__).read_text(encoding="utf-8")
+        head = "這張表的取證邊界"
+        self.assertIn(head, src, "取證邊界註解區段的起始錨已不存在（整段被刪？）")
+        start, end = src.index(head), src.index('_NO_CARRIER = "NO-LOCAL-CARRIER"')
+        # 整段被刪時 `.index` 會退而命中本測試自己這行字面 ⇒ start > end，於是這條紅
+        # （不是靜默取到一段空/錯的區間；同「載具自身也要被驗證」紀律）。
+        self.assertLess(start, end, "取證邊界註解不在登記表之前——整段疑似已被刪除")
+        boundary_section = src[start:end]
+        self.assertGreater(
+            len(boundary_section), 500,
+            "取證邊界註解區段幾乎為空——切片錨點失效時本鎖會退化為恆真",
+        )
+        for marker in ("已實測涵蓋", "已實測不涵蓋", "天花板", "無 Windows 機器可實跑核對"):
+            self.assertIn(
+                marker, boundary_section,
+                f"`_CI_STEP_LOCAL_CARRIER` 的取證邊界段落缺「{marker}」——"
+                f"這張表會退回「兩邊等寬、取證強度不對稱卻零揭露」的狀態（QA-R67-04）",
+            )
+
+    def test_registered_smoke_groups_exist_in_that_script(self) -> None:
+        """比「檔案存在」強一階：登記成 `<smoke 腳本> [n/m]` 者，該組號必須真的在那支腳本裡。
+
+        WHY（R67 round 2 / QA-R67-04）：`test_named_local_carriers_actually_exist` 只驗
+        「檔名存在」——smoke 腳本本身幾乎不可能被刪，所以那條鎖在實務上**接近恆真**；而真正
+        會發生的腐化是「情境分組被重新編號／被刪掉一組」，此時檔案還在、登記卻已指向不存在
+        的組號，這張表就開始說謊而無人知曉。本鎖把判準往前推到組號層級（`[3/7]` 這種標籤
+        本來就是腳本自己 echo 出來的字面，`_GROUP_RE` 已在本檔他處消費同一來源）。
+
+        **仍未買到的**（誠實劃界，見上方 `_CI_STEP_LOCAL_CARRIER` 邊界 (c)）：本鎖不驗
+        「[3/7] 那一組做的事＝該 CI step 做的事」。語意等價要嘛實跑（破壞性、分鐘級），
+        要嘛比對散文（另一種推論）——兩者都不是本鎖能誠實宣稱的東西。
+        """
+        # 歸屬**不靠文字鄰近**（實測會歸錯：windows 側某筆 NO-LOCAL-CARRIER 理由句在提到
+        # `windows_smoke_local.ps1` 之後又引用 macOS 的 `[2/7]` 作對照），改由**分母**判定
+        # ——每支腳本的分組總數就是它自己的身分證（sh=7、ps1=9），且這份對照表是**當場從
+        # 腳本重算**的，不是寫死：任何一支重新編組（7→8）會讓全部舊引用的分母查無此腳本而
+        # 當場紅，正是本鎖要抓的腐化。
+        script_groups = {
+            name: set(_GROUP_RE.findall(_read(path)))
+            for name, path in (("macos_smoke_local.sh", _SH), ("windows_smoke_local.ps1", _PS1))
+        }
+        by_total: dict[str, str] = {}
+        for name, groups in script_groups.items():
+            totals = {total for _n, total in groups}
+            self.assertEqual(
+                len(totals), 1, f"{name} 的 `--- [n/m]` 分母不一致：{sorted(totals)}——分組宣告已壞"
+            )
+            total = totals.pop()
+            self.assertNotIn(
+                total, by_total,
+                f"{name} 與 {by_total.get(total)} 的分組總數同為 {total} ⇒ 組號引用無法歸屬"
+                f"到唯一腳本；請改回不同分組數，或改寫本鎖的歸屬判準",
+            )
+            by_total[total] = name
+        carrier_group_re = re.compile(r"\[(\d+)/(\d+)\]")
+        checked = 0
+        for spec, registry in _CI_STEP_LOCAL_CARRIER.items():
+            for step, carrier in registry.items():
+                for group in carrier_group_re.findall(carrier):
+                    n, total = group
+                    checked += 1
+                    self.assertIn(
+                        total, by_total,
+                        f"{spec}::{step} 引用的分組 [{n}/{total}] 分母不屬於任何 smoke 腳本"
+                        f"（現有：{ {k: v for k, v in by_total.items()} }）——腳本重新編組後"
+                        f"登記未同步，這張表已開始說謊",
+                    )
+                    script = by_total[total]
+                    self.assertIn(
+                        group, script_groups[script],
+                        f"{spec}::{step} 引用的 {script} [{n}/{total}] 在該腳本內不存在"
+                        f"（該腳本現有分組：{sorted(script_groups[script])}）",
+                    )
+        self.assertGreaterEqual(
+            checked, 15,
+            f"只驗到 {checked} 筆組號引用——登記表寫法或抽取式疑似漂移（0 命中會讓本鎖恆真）",
+        )
+
+    def test_named_local_carriers_actually_exist(self) -> None:
+        """指名的本地載具檔案必須真的存在——指向已刪除的腳本＝紙上承載。
+
+        ⚠️ **本鎖的天花板**（R67 round 2 / QA-R67-04；在此之前只寫在修復回報 JSON 裡、
+        repo 內零揭露）：它只保證「被指名的檔案還在」，**不保證那個檔案真的執行了那一步**。
+        組號層級的較強判準見上一支 `test_registered_smoke_groups_exist_in_that_script`；
+        語意等價則刻意不宣稱，理由見 `_CI_STEP_LOCAL_CARRIER` 上方的邊界 (c)。
+        """
+        carriers = {
+            carrier
+            for registry in _CI_STEP_LOCAL_CARRIER.values()
+            for carrier in registry.values()
+            if not carrier.startswith((_NO_CARRIER, _PARTIAL, _INFRA))
+        }
+        referenced = {
+            path
+            for carrier in carriers
+            for path in re.findall(r"[\w./\\-]+\.(?:sh|ps1|py)", carrier)
+        }
+        self.assertGreaterEqual(len(referenced), 4, f"抽到的載具檔案過少：{sorted(referenced)}")
+        for rel in sorted(referenced):
+            candidates = [_REPO_ROOT / rel, _REPO_ROOT / "tools" / rel]
+            self.assertTrue(
+                any(p.exists() for p in candidates),
+                f"登記表指名的本地載具 {rel} 不存在——載具被刪除/改名後登記未同步",
+            )
+
+    def test_onboarding_does_not_claim_full_equivalence(self) -> None:
+        """§6.1 不得再宣稱兩支 smoke 與 compat-CI「對等」。
+
+        WHY 鎖措辭而非數字：Scan-C 量到的差集是 5/19 零承載 ＋ 1 部分承載，但**寫死支數
+        ＝下一輪必過期**（R57 政策）。真正會誤導讀者的是「對等」這個絕對詞——它讓人以為
+        本地綠燈 ≈ CI 綠燈，於是停止追問差集。措辭改掉、差集指向本檔登記表這個 live 來源。
+        """
+        text = _read(_ONBOARDING)
+        for smoke in ("windows_smoke_local.ps1", "macos_smoke_local.sh"):
+            lines = [ln for ln in text.split("\n") if smoke in ln and "compat-ci" in ln.lower()]
+            self.assertTrue(lines, f"ONBOARDING §6.1 找不到 {smoke} 的 compat-CI 對照列")
+            for line in lines:
+                self.assertNotIn(
+                    "本地補償對等", line,
+                    f"ONBOARDING §6.1 仍宣稱 {smoke} 與 compat-CI「本地補償對等」——"
+                    f"實測有步驟在本地零承載（見 `_CI_STEP_LOCAL_CARRIER` 內標 "
+                    f"{_NO_CARRIER} 者），「對等」會讓讀者停止追問差集",
+                )
+        self.assertIn(
+            "_CI_STEP_LOCAL_CARRIER", text,
+            "ONBOARDING 未指向覆蓋差集的 live 來源——若只改措辭而不給出差集在哪，"
+            "讀者只會得到一句更模糊的話",
+        )
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -12,10 +12,14 @@ SIGPIPE 回歸鎖）。分流邏輯一旦被重構改壞——case 前綴比對�
 本檔以 tmp fake repo「真跑」dispatcher（非 mock），逐情境鎖住：
   1. 純根層變更 → 只跑 root-infra leg（R9 P1 的存在理由）
   2. 僅 AutoClaude/ 變更 → 只分流 AutoClaude 子 hook（不多跑）
-  3. 空 stdin → fail-safe 三 leg 全跑（寧可多跑不可漏跑）
+  3. 空 stdin → fail-safe 全部 leg 都跑（寧可多跑不可漏跑）
   4. 根層消費檔變更 → 補跑 AISDLC_SDD/scripts/tests 回歸鎖（R10 ARCH-1）
   5. 刪除遠端分支（local_sha 全零）→ 明確跳過、不觸發 fail-safe
   6. 子 hook 缺失 → fail-loud rc=1（hooks 體系損壞不得靜默放行）
+  7. 整合層閘門本體變更 → 實跑 tools/integration_gate.sh --skip-full（R67-C18：該閘門
+     在整個自動化層零呼叫端，唯二執行者是已停擺的兩支 compat-CI ⇒ 實質已死）
+  8. 整合閘門實跑失敗 → rc=1 擋 push（接線不等於閘門：rc 沒接上就只是裝飾）
+  9. 整合閘門檔缺失 → fail-loud rc=1（閘門蒸發不得以全綠偽裝正常）
 
 執行：python -m unittest tools.tests.test_pre_push_dispatcher -v
 （亦由 tools/run_root_unittests.py discover 納入 pre-push root-infra leg 與
@@ -25,6 +29,7 @@ from __future__ import annotations
 
 import importlib.util
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -252,6 +257,7 @@ class TestPrePushDispatcher(unittest.TestCase):
         self.marker_sdd = self.tmp / "MARKER_SDD_SUBHOOK"
         self.marker_rootinfra = self.tmp / "MARKER_ROOTINFRA_UNITTESTS"
         self.marker_consumer = self.tmp / "MARKER_SDD_SCRIPTS_TESTS_PYTEST"
+        self.marker_integration_gate = self.tmp / "MARKER_INTEGRATION_GATE"
 
         # 兩個子 hook stub。
         self._write(
@@ -295,6 +301,23 @@ class TestPrePushDispatcher(unittest.TestCase):
             'raise SystemExit(0 if "--check-snapshot" in sys.argv else 4)\n',
         )
         self._write(".claude/hooks/trivial_hook.py", "OK = True\n")
+
+        # R67-C18：整合閘門 leg 的受測面。真薄殼→核心委派由
+        # tools/tests/test_find_git_bash_parity.py 的 TestIntegrationGateShellDelegation
+        # 實跑覆蓋（R67 round 2 QA-R67-03 訂正：原指名一支名為
+        # test_integration_gate_local_carrier.py 的鎖檔，該檔從未存在）；本檔只驗
+        # 「dispatcher 有沒有在對的 push 範圍下把它叫起來」，故用 marker stub。
+        # `--skip-full` 的透傳一併以 argv 檢查（不檢查 argv 的 stub 會讓「參數被吃掉」
+        # 靜默通過，同 leg ③ 兩支帶子指令守門 stub 的手法）。
+        self._write(
+            "tools/integration_gate.sh",
+            "#!/usr/bin/env bash\n"
+            'case " $* " in *" --skip-full "*) ;; *) exit 9 ;; esac\n'
+            f': > "{self.marker_integration_gate.as_posix()}"\n'
+            "exit 0\n",
+        )
+        os.chmod(self.repo / "tools" / "integration_gate.sh", 0o755)
+        self._write("tools/integration_gate_core.py", "OK = True\n")
 
         # 消費檔清單來源 + 消費檔 leg 的 pytest 目標（conftest 寫 marker＝執行鐵證）。
         self._write(".github/workflows/aisdlc-sdd-ci.yml", _FAKE_SDD_CI_YML)
@@ -405,6 +428,10 @@ class TestPrePushDispatcher(unittest.TestCase):
         self.assertFalse(self.marker_sdd.exists(), "純根層變更不應觸發 AISDLC_SDD 子 hook")
         self.assertFalse(self.marker_consumer.exists(), "docs/ 非消費檔，不應觸發消費檔 leg")
         self.assertNotIn("根層消費檔", out)
+        self.assertFalse(
+            self.marker_integration_gate.exists(),
+            "docs/ 未動到整合閘門本體，不應付整合閘門的執行成本（R67-C18 路徑範圍觸發）",
+        )
 
     def test_autoclaude_only_change_routes_to_autoclaude_only(self) -> None:
         """情境 2：僅 AutoClaude/ 變更 → 只分流 AutoClaude 子 hook，root-infra 不多跑。
@@ -424,10 +451,17 @@ class TestPrePushDispatcher(unittest.TestCase):
         self.assertFalse(self.marker_sdd.exists(), "未涉 AISDLC_SDD/ 不應觸發 SDD 子 hook")
         self.assertFalse(self.marker_rootinfra.exists(), "未涉根層檔不應觸發 root-infra leg")
         self.assertFalse(self.marker_consumer.exists(), "未涉消費檔不應觸發消費檔 leg")
+        self.assertFalse(
+            self.marker_integration_gate.exists(),
+            "僅 AutoClaude/ 變更不應觸發整合閘門 leg——那正是「pre-push 變慢到沒人用」的路",
+        )
         self.assertNotIn("root-infra", out)
 
-    def test_empty_stdin_failsafe_runs_all_three_legs(self) -> None:
-        """情境 3：空 stdin → fail-safe 三 leg 全跑（寧可多跑不可漏跑）。
+    def test_empty_stdin_failsafe_runs_all_legs(self) -> None:
+        """情境 3：空 stdin → fail-safe 全部 leg 都跑（寧可多跑不可漏跑）。
+
+        R67-C18 起「全部」＝四 leg（兩子專案 + root-infra + 整合閘門）；測試名刻意不寫
+        死數字，避免下一次增減 leg 時名稱與內容漂移（本 repo 已多次踩到計數敘述漂移）。
 
         WHY：pre-commit 框架等外層工具可能吃掉 hook 的 stdin；無法判定 push
         範圍時唯一安全語意是全跑。fail-safe 若被「優化」成靜默放行（rc=0、
@@ -441,6 +475,11 @@ class TestPrePushDispatcher(unittest.TestCase):
         self.assertTrue(self.marker_rootinfra.exists(), "fail-safe 應執行 root-infra leg")
         # SDD leg 已含 scripts/tests（ci-gate.sh 內），消費檔 leg 依設計免重複跑。
         self.assertFalse(self.marker_consumer.exists(), "SDD leg 已觸發時消費檔 leg 不應重複跑")
+        self.assertTrue(
+            self.marker_integration_gate.exists(),
+            "fail-safe 應執行整合閘門 leg——無法判定範圍時該 push 可能正好動到閘門本體，"
+            "「寧可多跑不可漏跑」對這一 leg 同樣適用（R67-C18）",
+        )
 
     def test_consumer_file_change_runs_sdd_regression_and_rootinfra(self) -> None:
         """情境 4：根層消費檔變更（tools/check_ntfs_paths.py、不碰 AISDLC_SDD/）
@@ -487,6 +526,9 @@ class TestPrePushDispatcher(unittest.TestCase):
         self.assertFalse(self.marker_sdd.exists(), "刪分支不應觸發 AISDLC_SDD 子 hook")
         self.assertFalse(self.marker_rootinfra.exists(), "刪分支不應觸發 root-infra leg")
         self.assertFalse(self.marker_consumer.exists(), "刪分支不應觸發消費檔 leg")
+        self.assertFalse(
+            self.marker_integration_gate.exists(), "刪分支不應觸發整合閘門 leg"
+        )
 
     def test_missing_subhook_fails_loud(self) -> None:
         """情境 6：分流命中 AutoClaude 但子 hook 檔缺失 → rc=1 fail-loud。
@@ -502,6 +544,164 @@ class TestPrePushDispatcher(unittest.TestCase):
         self.assertEqual(rc, 1, f"子 hook 缺失必須 rc=1 拒絕放行：\nstdout={out}\nstderr={err}")
         self.assertIn("子 hook 缺失", out + err)
         self.assertFalse(self.marker_autoclaude.exists(), "子 hook 已缺失不可能留下 marker")
+
+    def test_integration_gate_change_runs_the_gate(self) -> None:
+        """情境 7：變更整合閘門本體（tools/integration_gate_core.py）→ 實跑該閘門。
+
+        WHY（R67-C18）：tools/integration_gate.{sh,ps1,_core.py} 是 monorepo 整合層
+        閘門，但它在整個自動化層零呼叫端——唯二執行者是兩支已隨 CI 帳務停擺
+        （DEF-101-081）而多輪未跑的 compat-CI。「雲端是唯一執行者的東西＝實質已死」：
+        改壞閘門本體後，本機沒有任何流程會發現。本 leg 是它在本機的第一個活體執行者。
+        刻意用 `_core.py`（而非 `.sh`）當觸發檔，鎖住 dispatcher 的 glob 前綴比對
+        `tools/integration_gate*` 真的涵蓋三支，而不只認到薄殼那一支。
+        """
+        self._write("tools/integration_gate_core.py", "OK = True  # changed by test\n")
+        sha = self._commit_all("integration gate core change")
+        rc, out, err = self._run_dispatcher(self._push_line(sha, self.base_sha))
+        self.assertEqual(rc, 0, f"stdout={out}\nstderr={err}")
+        self.assertIn("push 涉整合層閘門本體", out)
+        self.assertTrue(
+            self.marker_integration_gate.exists(),
+            "整合閘門未被實跑（marker 不存在）——閘門本體被改動時仍零活體驗證"
+            "（R67-C18 回歸）",
+        )
+        self.assertFalse(self.marker_autoclaude.exists(), "未涉 AutoClaude/ 不應觸發其子 hook")
+
+    def test_integration_gate_failure_blocks_push(self) -> None:
+        """情境 8：整合閘門實跑失敗 → rc=1 擋 push。
+
+        WHY：這一條才是「leg 是閘門」而非「leg 是裝飾」的定義。接線只保證它「被叫到」，
+        rc 沒接上的症狀是閘門紅字照印、push 照樣放行——本 repo 已在 R60 對帳本保全
+        稽核踩過同一形狀（「可重跑但沒有任何閘門看它的 rc」）。
+        """
+        self._write("tools/integration_gate.sh", "#!/usr/bin/env bash\nexit 1\n")
+        os.chmod(self.repo / "tools" / "integration_gate.sh", 0o755)
+        sha = self._commit_all("integration gate turns red")
+        rc, out, err = self._run_dispatcher(self._push_line(sha, self.base_sha))
+        self.assertEqual(
+            rc, 1, f"整合閘門失敗必須擋 push：\nstdout={out}\nstderr={err}"
+        )
+        self.assertIn("整合閘門未通過", out + err)
+
+    def test_missing_integration_gate_fails_loud(self) -> None:
+        """情境 9：閘門檔應存在卻缺失 → rc=1 fail-loud（同子 hook 缺失語意）。
+
+        WHY：閘門被刪掉／搬走時若軟跳過，「閘門蒸發」會以全綠偽裝正常——正是本輪
+        在治的病（整合閘門已經因為載具死亡而實質蒸發多輪沒人發現）。
+        """
+        self._write("tools/integration_gate_core.py", "OK = True  # changed by test\n")
+        sha = self._commit_all("integration gate core change with gate removed")
+        (self.repo / "tools" / "integration_gate.sh").unlink()
+        rc, out, err = self._run_dispatcher(self._push_line(sha, self.base_sha))
+        self.assertEqual(rc, 1, f"閘門缺失必須 rc=1：\nstdout={out}\nstderr={err}")
+        self.assertIn("整合閘門缺失", out + err)
+
+
+# ── 指名鎖檔必須存在（R67 round 2，QA-R67-03）──────────────────────────────────
+# WHY：本檔 setUp 與 `tools/git-hooks/pre-push` 的註解同時把
+# `test_integration_gate_local_carrier.py` 指名為「路徑觸發抓不到的另兩種腐爛」的
+# 守門者，而那支檔案**從未存在**（`ls` rc=1、全庫 `find` 零命中；真正的守門依
+# `DEF-101-561③` 併進了 `test_find_git_bash_parity.py` 的既有姊妹鎖）。
+# 實害是治理面：那段註解正是 DEF-101-639 修法正當性的核心論證，指向不存在的容器＝讀者
+# 現查時無法驗證；更糟的是下一輪若有人執行「檔案不存在 ⇒ 這層守門沒落地」的推論，會誤判
+# 本輪修復不完整並重做一次。本 repo 對「指名不存在的容器」已有明文硬規則
+# （`docs/06_quality/CrossPlatform_Scan_Dimensions.md` 硬規則③ 第一點：禁止寫「記入某某
+# 帳本」而該帳本不是真實檔案路徑），本筆是同一形態發生在程式碼註解上。
+#
+# 掃描面（為何不只掃本檔與 pre-push）：同一形態在 `tools/tests/` 其他鎖檔一樣會發生，
+# 而成本只是一次 rglob；掃描面取兩者聯集。
+_CARRIER_REF_RE = re.compile(r"tools/tests/(test_[A-Za-z0-9_]+\.py)")
+
+# 具名登記：**刻意指向不存在檔名**的引用（＝反事實敘述，不是死信）。
+# 兩筆的共同形狀：作者明說「本應為它新增一支專屬鎖檔，但 DEF-101-561③ 棘輪禁止新增鎖檔，
+# 故改擴充進既有檔」——那個檔名是**被否決的方案名**，不是承諾存在的容器，讀者不會照著去
+# 找（也因此它們寫成路徑形態並不算錯，只是需要在此表態）。登記本身帶 stale 自檢：
+# 一旦這些檔案真的被建出來，本表就過期 ⇒
+# 下面的相等斷言會紅並要求刪掉該筆登記（豁免不能因為「沒人記得回收」而永久存在）。
+_COUNTERFACTUAL_CARRIER_REFS: dict[str, str] = {
+    "test_sdd_latest.py":
+        "tools/lib/sdd_latest.py 的專屬鎖檔——被 DEF-101-561③ 檔數棘輪否決，判準改擴充進 "
+        "test_component_sanitizer_shared_layer_lock.py／"
+        "test_sanitize_component_frozen_sdd_versions_lock.py，兩處引用皆明說『本應…但…』",
+    "test_windowsapps_verdict_parity.py":
+        "WindowsApps guard 行為表 parity 的專屬鎖檔——同被 DEF-101-561③ 否決，判準併入 "
+        "test_windowsapps_guard_cross_consistency.py，該處引用亦明說『原本寫成獨立檔…被擋下』",
+}
+
+
+class TestNamedCarrierFilesActuallyExist(unittest.TestCase):
+    """`tools/git-hooks/*` 與 `tools/tests/*.py` 內形如 `tools/tests/test_*.py` 的引用
+    必須指向真實存在的檔案，否則就是死信。
+
+    Rule 9（測意圖）：本鎖要的不是「檔名拼對」，而是「被當成守門依據引用的容器真的在」
+    ——論證的可驗證性。刻意的反事實引用（明說『本應新增但被棘輪擋下』）走具名登記，
+    且登記本身有 stale 自檢。
+    """
+
+    @staticmethod
+    def _scan() -> dict[str, list[str]]:
+        surface = sorted(
+            p for p in list((REPO_ROOT / "tools" / "git-hooks").glob("*"))
+            + list((REPO_ROOT / "tools" / "tests").glob("*.py"))
+            if p.is_file()
+        )
+        dangling: dict[str, list[str]] = {}
+        for path in surface:
+            text = path.read_text(encoding="utf-8", errors="replace")
+            for lineno, line in enumerate(text.splitlines(), 1):
+                for name in _CARRIER_REF_RE.findall(line):
+                    if not (REPO_ROOT / "tools" / "tests" / name).exists():
+                        dangling.setdefault(name, []).append(
+                            f"{path.relative_to(REPO_ROOT).as_posix()}:{lineno}"
+                        )
+        return dangling
+
+    def test_no_unregistered_dangling_carrier_reference(self) -> None:
+        """雙向斷言：掃到的死信集合必須**逐字等於**具名登記。
+
+        · 多出來（新的死信、或本輪修好的那兩處退化回去）⇒ 紅。
+        · 少了（某筆登記的檔案真的被建出來）⇒ 也紅，並要求刪掉該筆登記——豁免只能因為
+          「條件還沒補」存在，不能因為「沒人記得回收」存在（`_PENDING_MIGRATION_SITES`
+          的同型教訓）。
+        """
+        dangling = self._scan()
+        unregistered = {
+            k: v for k, v in dangling.items() if k not in _COUNTERFACTUAL_CARRIER_REFS
+        }
+        self.assertEqual(
+            unregistered, {},
+            "有引用指向不存在的鎖檔（死信）：\n  "
+            + "\n  ".join(f"{k} ← {v}" for k, v in sorted(unregistered.items()))
+            + "\n改法：指向真正的守門檔（必要時附類別名）；若是刻意的反事實敘述，"
+              "請登記進 _COUNTERFACTUAL_CARRIER_REFS 並寫明理由。",
+        )
+        stale = sorted(k for k in _COUNTERFACTUAL_CARRIER_REFS if k not in dangling)
+        self.assertEqual(
+            stale, [],
+            f"下列登記已過期（檔案已存在，或引用已被刪除）：{stale}——請刪掉該筆登記",
+        )
+
+    def test_the_scanner_is_not_vacuous(self) -> None:
+        """正控：掃描面必須真的掃到東西，且對合成死信會說話。
+
+        列舉器一旦寫壞（回空集合／正則失效），上面那支會恆真通過＝靜默失效。這裡以
+        「本檔自己被引用到」與「合成不存在檔名必被判為 dangling」雙向釘住。
+        """
+        text = DISPATCHER.read_text(encoding="utf-8")
+        self.assertIn(
+            "tools/tests/test_find_git_bash_parity.py", text,
+            "pre-push 註解不再指名整合閘門的守門鎖檔——QA-R67-03 訂正被回退？",
+        )
+        self.assertTrue(
+            _CARRIER_REF_RE.findall(text), "正則對 pre-push 抽不到任何鎖檔引用"
+        )
+        # 合成檔名以字串拼接寫出：整支路徑形態不得以字面值出現在本檔源碼裡，否則本檔
+        # 自己就成了掃描面上的一筆死信（實測：初版直接寫字面值，上面那支當場紅——
+        # 這也順帶證明了掃描器對「新出現的死信」是會說話的）。
+        ghost_name = "test_this_file_never_existed.py"
+        ghost = "tools/tests/" + ghost_name
+        self.assertEqual(_CARRIER_REF_RE.findall(ghost), [ghost_name])
+        self.assertFalse((REPO_ROOT / "tools" / "tests" / ghost_name).exists())
 
 
 if __name__ == "__main__":

@@ -16,6 +16,7 @@ import tempfile
 import textwrap
 import unittest
 from pathlib import Path
+from unittest import mock
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import run_root_unittests  # noqa: E402
@@ -233,6 +234,171 @@ class ReportWindowsNativeSkipsTest(unittest.TestCase):
             run_root_unittests.all_skips(result)
         self.assertEqual(buf.getvalue(), "")
 
+
+
+class UntaggedWindowsLikeSkipsTest(unittest.TestCase):
+    """R67-F11：`[WINDOWS-NATIVE-ONLY]` **標籤完整性**前瞻鎖。
+
+    WHY（為何上面那組鎖不夠）：`ReportWindowsNativeSkipsTest` 全組都只驗「已經帶
+    標籤的 skip 會被點名」——對「該帶而沒帶」結構性盲目，而那正是低報的來源。
+    R67 動工實測：macOS 上 15 支 skip 全為 Windows 專屬，標題只印 10（低報 33%），
+    其中 4 支是 R65（`01fd8c3`）、1 支是 R66（`8654975`）落地時漏標；R59 已在
+    `tools/tests/test_install_windows_nightly.py:344-350` 逐字記過同一形態，兩輪後
+    原地復發。掃描員動工前另做過反證：把一支帶滿 Windows 關鍵詞、**未標籤**的
+    skip 附加進既有鎖檔，全套 1140 支測試**無一支轉紅**（rc=0）——前瞻鎖確實不存在。
+
+    本組鎖的是那個新判準本身，含四個方向：命中要抓、標籤要放行、不相關的 skip
+    不得誤殺、以及「在 Windows 上必須整組閉嘴」（否則 POSIX-only skip 的理由幾乎
+    都會提到 Windows，會在真 Windows 機器上製造整片假紅）。
+    """
+
+    def _result_with_skips(self, *skips: tuple[str, str]) -> unittest.TestResult:
+        """用 `_ErrorHolder` 之外的最小假物件組出 `result.skipped`（不跑真測試）。"""
+        class _T:
+            def __init__(self, tid: str) -> None:
+                self._tid = tid
+
+            def id(self) -> str:
+                return self._tid
+
+        result = unittest.TestResult()
+        result.skipped = [(_T(tid), reason) for tid, reason in skips]
+        return result
+
+    def test_untagged_windows_reason_is_flagged_with_the_matched_keyword(self) -> None:
+        result = self._result_with_skips(
+            ("m.C.test_x", "PATHEXT 解析語意與 Git for Windows bin\\bash.exe 僅在 Windows 重現"),
+        )
+        offenders = run_root_unittests.untagged_windows_like_skips(result, on_windows=False)
+        self.assertEqual(len(offenders), 1, f"應抓到 1 筆漏標，實得：{offenders}")
+        test_id, hit, reason = offenders[0]
+        self.assertEqual(test_id, "m.C.test_x")
+        self.assertIn(hit, run_root_unittests._WINDOWS_LIKE_SKIP_HINTS)
+        self.assertIn("PATHEXT", reason, "必須連理由一起回報，否則讀者無從判斷該不該補標籤")
+
+    def test_tagged_reason_is_not_flagged(self) -> None:
+        """對照組：帶標籤者必須放行——否則補完標籤仍然紅，這道鎖就無法被滿足。"""
+        result = self._result_with_skips(
+            ("m.C.test_x", f"{run_root_unittests.WINDOWS_NATIVE_SKIP_TAG} 具名 Mutex 是 Windows 語意"),
+        )
+        self.assertEqual(
+            run_root_unittests.untagged_windows_like_skips(result, on_windows=False), []
+        )
+
+    def test_unrelated_skip_is_not_flagged(self) -> None:
+        """不得誤殺：與平台無關的一般性 skip 不能被要求補 Windows 標籤。"""
+        result = self._result_with_skips(("m.C.test_x", "本機缺 docker daemon，一般性 skip"))
+        self.assertEqual(
+            run_root_unittests.untagged_windows_like_skips(result, on_windows=False), []
+        )
+
+    def test_on_windows_the_check_is_silent(self) -> None:
+        """在原生 Windows 上必須整組閉嘴。
+
+        測意圖：標籤語意是「這支只在原生 Windows 有價值，**這次環境不符沒跑**」，
+        在 Windows 上這類測試根本不會 skip；Windows 上會 skip 的是 POSIX-only 測試，
+        而它們的理由幾乎必然提到 Windows（例：「Windows 無 symlink 權限」）。若少了
+        這個平台閘，整片 POSIX-only skip 會在 Windows 上被誤判成漏標＝假紅。
+        """
+        result = self._result_with_skips(
+            ("m.C.test_posix_only", "Windows 無 symlink 權限（WinError 1314），此測試僅 POSIX 有意義"),
+        )
+        self.assertEqual(
+            run_root_unittests.untagged_windows_like_skips(result, on_windows=True), [],
+            "Windows 平台上本檢查必須回空集合（反方向可見度由 report_all_skips 承接）",
+        )
+        self.assertEqual(
+            len(run_root_unittests.untagged_windows_like_skips(result, on_windows=False)), 1,
+            "同一份輸入在非 Windows 上必須被抓到——否則上一條斷言只是恆真",
+        )
+
+    def test_named_exemption_suppresses_a_false_positive(self) -> None:
+        """逃生門：確實不是 Windows 專屬者可具名豁免（不接受整批略過的通用開關）。"""
+        result = self._result_with_skips(("m.C.test_x", "需要 Windows 主開發機才有的 docker"))
+        with mock.patch.dict(
+            run_root_unittests._WINDOWS_SKIP_TAG_EXEMPT,
+            {"m.C.test_x": "測試用：本機 docker 供給問題，非平台語意"},
+            clear=False,
+        ):
+            self.assertEqual(
+                run_root_unittests.untagged_windows_like_skips(result, on_windows=False), []
+            )
+
+    def test_detector_is_pure_no_stdout(self) -> None:
+        """比照 `windows_native_skips`／`all_skips` 既有紀律：純函式不得有列印副作用。"""
+        result = self._result_with_skips(("m.C.test_x", "僅在 Windows 重現"))
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf), contextlib.redirect_stderr(buf):
+            run_root_unittests.untagged_windows_like_skips(result, on_windows=False)
+        self.assertEqual(buf.getvalue(), "")
+
+    def test_reporter_prints_offender_and_the_fix_instruction(self) -> None:
+        result = self._result_with_skips(("m.C.test_x", "PATHEXT 語意僅在 Windows 成立"))
+        buf = io.StringIO()
+        with mock.patch.object(run_root_unittests.os, "name", "posix"):
+            with contextlib.redirect_stderr(buf):
+                offenders = run_root_unittests.report_untagged_windows_like_skips(result)
+        out = buf.getvalue()
+        self.assertEqual(len(offenders), 1)
+        self.assertIn("m.C.test_x", out, "必須逐支點名，否則讀者不知道要改哪一支")
+        self.assertIn(run_root_unittests.WINDOWS_NATIVE_SKIP_TAG, out, "訊息須指出要補哪個標籤")
+        self.assertIn("_WINDOWS_SKIP_TAG_EXEMPT", out, "訊息須指路逃生門，否則誤判時無路可走")
+
+    def test_check_is_wired_into_run_with_floor_and_reds_the_run(self) -> None:
+        """接線鎖 ＋ rc 鎖：單元測了但沒接線、或接線了但不改 rc，都是假綠。
+
+        WHY 兩者都要驗：只 grep 原始碼（比照上面 `test_reporters_are_actually_wired_
+        into_run_with_floor` 的既有手法）擋不住「有呼叫但回傳值被丟掉」；只驗 rc
+        又無法指出是哪一段沒接。故兩條並列。
+        """
+        src = inspect.getsource(run_root_unittests.run_with_floor)
+        self.assertIn(
+            "report_untagged_windows_like_skips(result)", src,
+            "run_with_floor 未呼叫漏標檢查——reporter 存在但沒接線，等於沒有",
+        )
+        self.assertIn(
+            "not untagged", src,
+            "漏標檢查的結果必須真的參與 rc 收斂，否則印了紅字卻照樣 rc=0（fail-open）",
+        )
+
+    def test_real_run_with_floor_reds_on_an_untagged_windows_skip(self) -> None:
+        """端到端：合成一棵樹、內含一支未標籤的 Windows-only skip ⇒ `run_with_floor`
+        必須 rc=1；補上標籤後同一棵樹 rc=0。**這就是常駐的缺陷注入對照組**。"""
+        base = Path(tempfile.mkdtemp(prefix="rru_untagged_"))
+        self.addCleanup(lambda: shutil.rmtree(base, ignore_errors=True))
+        mod = "test_fixture_untagged_win_skip"
+        self.addCleanup(lambda: sys.modules.pop(mod, None))
+        template = textwrap.dedent(
+            """\
+            import unittest
+
+
+            class Dummy(unittest.TestCase):
+                def test_skipped(self):
+                    self.skipTest("__REASON__")
+
+                def test_ok(self):
+                    self.assertTrue(True)
+            """
+        )
+        untagged = "PATHEXT 解析語意僅在 Windows 重現"
+        (base / f"{mod}.py").write_text(
+            template.replace("__REASON__", untagged), encoding="utf-8"
+        )
+        with mock.patch.object(run_root_unittests.os, "name", "posix"):
+            with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
+                rc_untagged = run_root_unittests.run_with_floor(base, min_tests=2)
+            sys.modules.pop(mod, None)
+            (base / f"{mod}.py").write_text(
+                template.replace(
+                    "__REASON__", f"{run_root_unittests.WINDOWS_NATIVE_SKIP_TAG} {untagged}"
+                ),
+                encoding="utf-8",
+            )
+            with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
+                rc_tagged = run_root_unittests.run_with_floor(base, min_tests=2)
+        self.assertEqual(rc_untagged, 1, "未標籤的 Windows-only skip 必須讓整輪 rc=1")
+        self.assertEqual(rc_tagged, 0, "補上標籤後同一棵樹必須轉綠——否則本鎖無法被滿足")
 
 
 class DumpFailureDetailTest(unittest.TestCase):

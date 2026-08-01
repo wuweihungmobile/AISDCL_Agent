@@ -803,9 +803,14 @@ class TestR63TierClassification(unittest.TestCase):
 
     def test_unpinned_tier_does_not_require_hard_keyword(self) -> None:
         """unpinned／tier1_*／tier2_spec 不受硬理由關鍵詞斷言約束——只有 tier3/4
-        （§3.3／§3.4 明文封頂類別）需要，見 (d) 的範圍（ADR §6 邊界 4）。"""
+        （§3.3／§3.4 明文封頂類別）需要，見 (d) 的範圍（ADR §6 邊界 4）。
+
+        R67-E24：unpinned 另受**退場錨點**約束（`TestR67UnpinnedExitObligation`），
+        故本 fixture 補上錨點——本測試斷言的是「硬理由關鍵詞不適用於 unpinned」，
+        不是「unpinned 完全無門檻」，語意不變。"""
         with mock.patch.object(
-            m, "_EXEMPT_PAIRS", {"x/y": (m._UNPINNED, "泛泛理由，不含任何硬關鍵詞")}
+            m, "_EXEMPT_PAIRS",
+            {"x/y": (m._UNPINNED, "泛泛理由，不含任何硬關鍵詞；退場：未指派")}
         ), mock.patch.object(m, "_SINGLE_SIDED_EXEMPT", {}), \
              mock.patch("builtins.print"):
             ok = m._check_tier_classification()
@@ -1035,32 +1040,489 @@ class TestR64TierShrinkOnlyRatchet(unittest.TestCase):
         self.assertIn("_EXEMPT_PAIRS", problems[0])
         self.assertIn("改名／改寫", problems[0])
 
-    def test_tier_never_downgrades_versus_head(self) -> None:
-        """真棘輪：與 HEAD 版本比對（production 呼叫路徑 `_check_tier_ratchet()`
-        走的同一份計算）。HEAD 尚無本檔時 `skipTest`——理由同
-        `TestShrinkOnlyRatchet.test_constants_never_increase_versus_head`：
-        `run_root_unittests.py::report_all_skips` 會逐處印出全部 skip，鑑別力
-        另由上面的合成注入測試永久釘住。
-        """
-        previous = m._read_previous_self_source()
-        if previous is None:
-            self.skipTest(
-                f"HEAD 尚無 {m._SELF_REL}（本檔為未提交的新增檔）⇒ 無上一版可比，"
-                "棘輪本輪空轉；commit 後即永久生效"
-            )
-        problems = m.tier_ratchet_problems(previous)
-        self.assertEqual(
-            problems, [],
-            "tier shrink-only 棘輪被違反（與 HEAD 版本比對）：\n  "
-            + "\n  ".join(problems),
-        )
-
     def test_production_check_wired_into_main(self) -> None:
         """`_check_tier_ratchet()` 已隨 `main()` 執行（無參數呼叫路徑），非孤兒函式。"""
         with mock.patch.object(sys, "argv", ["check_script_parity.py"]), \
              mock.patch("builtins.print"):
             rc = m.main()
         self.assertEqual(rc, 0, "真 repo 現況應為零降級，main() 應 rc=0")
+
+
+class TestR67BaselineRatchet(unittest.TestCase):
+    """R67-H14 回歸鎖：棘輪的比對基準必須是**凍結常數**，不得是 git 導出的量。
+
+    WHY（Rule 9：測意圖不只測行為）——R64 的棘輪拿 `git show HEAD:<本檔>` 當基準，
+    形式上完全正確，實質上在**每一個真正消費它 rc 的閘門**裡都是恆真的：pre-push 與
+    三支 CI workflow 都跑在 commit 之後（CI 更是乾淨 checkout），HEAD 逐字等於工作樹
+    ⇒ 基準與被檢查值在被比較前就已相等，比較退化。實測（R67 掃描，沙箱）：把
+    `run_local_nightly` 由 tier4 降為 unpinned 並 commit ⇒ `check_script_parity.py`
+    rc=0、真 pre-push hook 端到端 rc=0、`tools/tests` 與控制組逐字相同。
+
+    根因不是「判準寫得不夠嚴」，而是「基準會自己對齊」。故本類鎖的是**那個結構性質**
+    本身（下面第一支測試：禁用 subprocess 仍須完整運作），而不只是鎖某幾筆 tier 值——
+    只鎖值的話，任何人把基準改回 git 導出量都不會有訊號。
+    """
+
+    def test_ratchet_is_independent_of_git_state(self) -> None:
+        """🔴 核心結構鎖：棘輪全程不得呼叫外部行程（git）。
+
+        舊實作在此鎖下必紅（它呼叫 `git show HEAD:…`）。這一條同時封死兩件事：
+        (1) 基準自我對齊的恆真陷阱；(2)「git 取不到基準 ⇒ 綠燈空轉」的 fail-open。
+        """
+        def _boom(*_a, **_kw):  # pragma: no cover - 只為證明沒被呼叫
+            raise AssertionError(
+                "棘輪呼叫了外部行程——基準又變回 git 導出量了（R67-H14 回歸）"
+            )
+
+        with mock.patch("subprocess.run", _boom), \
+             mock.patch("subprocess.check_output", _boom), \
+             mock.patch("subprocess.Popen", _boom):
+            self.assertEqual(m.baseline_ratchet_problems(), [])
+            with mock.patch("builtins.print"):
+                self.assertTrue(m._check_tier_ratchet())
+
+    def test_real_tables_match_frozen_baseline(self) -> None:
+        """正控：真 repo 現況對凍結基準零違規（否則本輪就該同步基準或修 tier）。"""
+        self.assertEqual(m.baseline_ratchet_problems(), [])
+
+    def test_downgrade_versus_baseline_is_red_without_any_commit(self) -> None:
+        """缺陷注入（本鎖存在的理由）：只改活體 tier、基準不動 ⇒ 必紅。
+
+        這正是舊實作 commit 之後會放行的情境——現在與 git 狀態無關，恆紅。
+        """
+        tampered = dict(m._EXEMPT_PAIRS)
+        tampered["AutoClaude/tools/run_local_nightly"] = (
+            m._UNPINNED, "注入：把明文封頂的 tier4 悄悄鬆綁；退場：未指派"
+        )
+        problems = m.baseline_ratchet_problems(current_exempt_pairs=tampered)
+        self.assertTrue(
+            any("run_local_nightly" in p and "明文封頂類別" in p for p in problems),
+            f"tier4→unpinned 降級未被偵測，實得：{problems}",
+        )
+
+    def test_live_entry_missing_from_baseline_is_red(self) -> None:
+        """涵蓋規則：活體登記表有、基準沒有 ⇒ 紅。
+
+        雙重用途：(a) 新增豁免必須顯式進基準（在 diff 上現形）；(b) 擋「刪掉基準那一
+        筆來迴避棘輪」——key 還活著而基準沒有它就是紅，刪不掉。
+        """
+        tampered = dict(m._SINGLE_SIDED_EXEMPT)
+        tampered["tools/ghost_new_exemption.sh"] = (m._UNPINNED, "注入；退場：未指派")
+        problems = m.baseline_ratchet_problems(current_single_sided=tampered)
+        self.assertTrue(
+            any("ghost_new_exemption" in p and "_TIER_BASELINE" in p for p in problems),
+            f"未涵蓋於基準的新登記未被偵測，實得：{problems}",
+        )
+
+    def test_deleting_a_baseline_entry_does_not_dodge_the_ratchet(self) -> None:
+        """迴避路徑封堵：把某筆自基準刪掉（想讓降級無從比對）⇒ 仍紅（走涵蓋規則）。"""
+        shrunk = {
+            k: v for k, v in m._TIER_BASELINE.items()
+            if k != "AutoClaude/tools/run_local_nightly"
+        }
+        tampered = dict(m._EXEMPT_PAIRS)
+        tampered["AutoClaude/tools/run_local_nightly"] = (
+            m._UNPINNED, "注入；退場：未指派"
+        )
+        problems = m.baseline_ratchet_problems(
+            current_exempt_pairs=tampered, baseline=shrunk,
+        )
+        self.assertTrue(
+            any("run_local_nightly" in p for p in problems),
+            f"刪基準條目後降級被放行＝迴避成功，實得：{problems}",
+        )
+
+    def test_converged_entry_removed_from_live_tables_stays_green(self) -> None:
+        """對照組：整筆自活體表移除（＝真的收斂掉）⇒ 零違規，基準保留該筆不誤紅。
+
+        棘輪的目的是擋退步，不是懲罰把缺口收掉的人（ADR §8 item 12 明文出口）。
+        """
+        shrunk_pairs = {
+            k: v for k, v in m._EXEMPT_PAIRS.items()
+            if k != "AutoClaude/tools/run_local_nightly"
+        }
+        self.assertEqual(
+            m.baseline_ratchet_problems(current_exempt_pairs=shrunk_pairs), []
+        )
+
+    def test_baseline_covers_every_live_entry_and_agrees_on_tier(self) -> None:
+        """基準新鮮度：真 repo 兩張活體表的每一筆都在基準內，且 tier 逐字一致。
+
+        （降級規則只鎖兩個方向，橫向/升級改動不會紅——若同時忘了同步基準，基準就會
+        慢慢變成一份沒人維護的化石。本鎖要求基準與活體逐字對齊，強制同步。）
+        """
+        live = m._live_tier_map(None, None)
+        missing = sorted(k for k in live if k not in m._TIER_BASELINE)
+        self.assertEqual(missing, [], f"活體登記項未進基準：{missing}")
+        mismatched = sorted(
+            f"{k}: 活體={live[k]} / 基準={m._TIER_BASELINE[k]}"
+            for k in live if m._TIER_BASELINE[k] != live[k]
+        )
+        self.assertEqual(
+            mismatched, [],
+            "活體 tier 與凍結基準不一致——升級/橫向改動請同步 _TIER_BASELINE；"
+            f"降級請走 ADR 具名理由：{mismatched}",
+        )
+
+    def test_unpinned_ceiling_is_not_derived_from_the_baseline(self) -> None:
+        """R67-E24：天花板必須是獨立常數，不得由基準自動導出。
+
+        若寫成 `sum(1 for t in _TIER_BASELINE.values() if t == _UNPINNED)`，新增一筆
+        unpinned（連同基準）會讓天花板自己長高＝又一個自我對齊的恆真陷阱。本鎖以
+        「基準多一筆 unpinned 時天花板不變」直接證明它沒有這種耦合。
+        """
+        inflated = dict(m._TIER_BASELINE)
+        inflated["tools/ghost_unpinned.sh"] = m._UNPINNED
+        tampered_live = dict(m._SINGLE_SIDED_EXEMPT)
+        tampered_live["tools/ghost_unpinned.sh"] = (m._UNPINNED, "注入；退場：未指派")
+        problems = m.baseline_ratchet_problems(
+            current_single_sided=tampered_live, baseline=inflated,
+        )
+        self.assertTrue(
+            any("超過天花板" in p for p in problems),
+            f"unpinned 天花板隨基準一起長高＝棘輪無張力，實得：{problems}",
+        )
+
+    def test_unpinned_shrink_is_green(self) -> None:
+        """對照組：收斂掉一筆 unpinned（總量下降）⇒ 天花板規則不誤紅。"""
+        shrunk = {
+            k: v for k, v in m._SINGLE_SIDED_EXEMPT.items()
+            if k != "AISDLC_SDD/scripts/act-ci.sh"
+        }
+        problems = m.baseline_ratchet_problems(current_single_sided=shrunk)
+        self.assertEqual([p for p in problems if "天花板" in p], [])
+
+    # ── R67 round 2（ARCH-R67-03）：tier3/4 課責地板 ───────────────────────────
+    # WHY 這一組必須存在：上面的降級規則 (A)(B) 是**逐 key** 比對基準，而
+    # `test_baseline_covers_every_live_entry_and_agrees_on_tier` 又要求活體與基準逐字
+    # 相等 ⇒「兩處一起改」是合法異動的常規工作流，降級因此可以偽裝成常規成對編輯。
+    # Architect 沙箱實測（INJ-1c）：把 `LATEST/tools/init_project` 在活體與基準兩處同步
+    # 由 tier3_os_primitive 改為 tier1_contract ⇒ `check_script_parity.py` rc=0、本檔
+    # 全綠——明文封頂（ADR §3.3「禁止未來輪重辯」）的項目被降級且零訊號，還順帶卸掉
+    # `_HARD_REASON_KEYWORDS` 對 tier3/4 的硬理由義務（reason 散文原封不動仍寫著
+    # launchd/schtasks 字樣）。地板走總量維度，對成對編輯免疫。
+
+    def test_paired_edit_downgrade_of_a_capped_entry_is_caught_by_the_floor(self) -> None:
+        """🔴 缺陷注入（本地板存在的理由）：INJ-1c 逐字重現 ⇒ 必紅。
+
+        同時改活體與基準（＝逐 key 規則完全看不見的那條路），地板仍須轉紅。
+        """
+        key = "LATEST/tools/init_project"
+        self.assertEqual(
+            m._TIER_BASELINE[key], m._TIER3_OS_PRIMITIVE,
+            "注入前提已變（該筆不再是 tier3）——請改挑另一筆明文封頂項重寫本注入",
+        )
+        tampered_live = dict(m._EXEMPT_PAIRS)
+        tampered_live[key] = (m._TIER1_CONTRACT, m._EXEMPT_PAIRS[key][1])
+        tampered_baseline = dict(m._TIER_BASELINE)
+        tampered_baseline[key] = m._TIER1_CONTRACT
+        problems = m.baseline_ratchet_problems(
+            current_exempt_pairs=tampered_live, baseline=tampered_baseline,
+        )
+        self.assertTrue(
+            any("課責數" in p and "地板" in p for p in problems),
+            f"成對編輯降級明文封頂項未被地板攔下＝棘輪對常規工作流無張力，實得：{problems}",
+        )
+
+    def test_tier34_floor_is_not_derived_from_the_baseline(self) -> None:
+        """R67 round 2：地板必須是**簽入的字面常數**，不得由基準／活體表算出來。
+
+        比照 `test_unpinned_ceiling_is_not_derived_from_the_baseline` 的意圖：若寫成
+        `sum(1 for t in _TIER_BASELINE.values() if t in _TIER3_4)`，上面那支注入就會
+        自我對齊（基準降一筆、地板跟著降一筆）⇒ 又一個 R67-H14 形狀的恆真陷阱。
+        以 AST 直接斷言賦值右側是 int 字面，而不是任何運算式。
+        """
+        import ast
+
+        tree = ast.parse(Path(m.__file__).read_text(encoding="utf-8"))
+        assigned = [
+            node.value for node in tree.body
+            if isinstance(node, ast.Assign) and len(node.targets) == 1
+            and isinstance(node.targets[0], ast.Name)
+            and node.targets[0].id == "_TIER34_FLOOR"
+        ]
+        self.assertEqual(len(assigned), 1, "_TIER34_FLOOR 必須恰有一處模組層賦值")
+        self.assertIsInstance(
+            assigned[0], ast.Constant,
+            "_TIER34_FLOOR 被寫成運算式——若它由 _TIER_BASELINE／活體表導出，"
+            "成對編輯會讓地板自己跟著降＝棘輪無張力（R67-H14 恆真陷阱形狀）",
+        )
+        self.assertIsInstance(assigned[0].value, int)
+
+    def test_converged_removal_of_a_capped_entry_does_not_trip_the_floor(self) -> None:
+        """對照組（雙向）：整筆移出活體表＝ADR §8 item 12 明文出口 ⇒ 地板不誤紅。
+
+        測意圖：地板要擋的是「留在表內但被改成別的 tier」，不是懲罰真的把缺口收掉的人。
+        課責數把「基準記為 tier3/4 而已移出活體表」的 key 一併計入，兩種情形才分得開；
+        若這裡誤紅，下一個人收斂完會被逼著下修地板，等於獎勵「留著不收」。
+        """
+        shrunk_pairs = {
+            k: v for k, v in m._EXEMPT_PAIRS.items()
+            if k != "AutoClaude/tools/run_local_nightly"
+        }
+        problems = m.baseline_ratchet_problems(current_exempt_pairs=shrunk_pairs)
+        self.assertEqual([p for p in problems if "課責數" in p], [])
+
+    def test_deleting_the_baselines_memory_of_a_capped_entry_is_red(self) -> None:
+        """迴避路徑封堵：連基準那一筆 tier3/4 記憶也刪掉 ⇒ 課責數下降 ⇒ 紅。
+
+        這是唯一能讓課責數合法下降的動作，而基準的維護規則寫著「已收斂的 key 刻意保留
+        （永久記憶）」——所以它本來就不該發生，發生就要在 diff 上現形。
+        """
+        key = "AutoClaude/tools/run_local_nightly"
+        shrunk_pairs = {k: v for k, v in m._EXEMPT_PAIRS.items() if k != key}
+        forgetful = {k: v for k, v in m._TIER_BASELINE.items() if k != key}
+        problems = m.baseline_ratchet_problems(
+            current_exempt_pairs=shrunk_pairs, baseline=forgetful,
+        )
+        self.assertTrue(
+            any("課責數" in p for p in problems),
+            f"刪掉基準的 tier3/4 記憶後地板放行＝永久記憶可被抹除，實得：{problems}",
+        )
+
+
+class TestR67UnpinnedExitObligation(unittest.TestCase):
+    """R67-E24 回歸鎖：`unpinned` 的 reason 必須帶退場錨點。
+
+    WHY：`unpinned`＝「不符 Tier-1~4 任一定義」，佔比 8/23＝34.8%。R67 前它唯一的門檻
+    是「reason 非空」——實測 `reason="x"` 照樣綠——於是它成為 Tier 模型之外一個不需要
+    任何理由品質、也沒有退場義務的永久豁免桶。本鎖要求每筆明說誰來接
+    （`退場：未指派` 或 `退場：R<輪號>…`），把「沒人接」由散文語感升級為可 grep 的欄位。
+
+    邊界（誠實）：不驗證輪號是否仍在未來——那要耦合帳本當前輪號，`CrossPlatform_Scan_
+    Dimensions.md` §191 已明文警告會造成永紅。數量面的退步由 `_UNPINNED_CEILING` 擋。
+    """
+
+    def test_real_tables_all_unpinned_carry_exit_anchor(self) -> None:
+        missing = sorted(
+            key for table in (m._EXEMPT_PAIRS, m._SINGLE_SIDED_EXEMPT)
+            for key, (tier, reason) in table.items()
+            if tier == m._UNPINNED and not m._UNPINNED_EXIT_RE.search(reason)
+        )
+        self.assertEqual(missing, [], f"unpinned 缺退場錨點：{missing}")
+
+    def test_placeholder_reason_is_red(self) -> None:
+        """缺陷注入：R67 前 `reason="x"` 實測為綠（門檻只有『非空』）；現在必紅。"""
+        with mock.patch.object(m, "_EXEMPT_PAIRS", {"x/y": (m._UNPINNED, "x")}), \
+             mock.patch.object(m, "_SINGLE_SIDED_EXEMPT", {}), \
+             mock.patch("builtins.print") as fake_print:
+            ok = m._check_tier_classification()
+        self.assertFalse(ok)
+        printed = " ".join(
+            str(a) for call in fake_print.call_args_list for a in call.args
+        )
+        self.assertIn("退場錨點", printed)
+
+    def test_reason_with_exit_anchor_is_green(self) -> None:
+        """對照組（雙向）：帶錨點即通過——證明紅燈來自缺錨點，不是 fixture 本身壞掉。"""
+        for anchor in ("退場：未指派", "退場：R99（某具名解鎖條件）"):
+            with self.subTest(anchor=anchor):
+                with mock.patch.object(
+                    m, "_EXEMPT_PAIRS", {"x/y": (m._UNPINNED, f"某理由；{anchor}")}
+                ), mock.patch.object(m, "_SINGLE_SIDED_EXEMPT", {}), \
+                     mock.patch("builtins.print"):
+                    self.assertTrue(m._check_tier_classification())
+
+    # ── R67 round 2（SD-R67-03／ARCH-R67-01 交叉發現）：開放下界形態 ──────────
+    # R67 round 1 的正則寫 `R\d+`，對 `退場：R68+` 是**放行**的（search 匹到 `R68` 前綴
+    # 即成立）。而同輪 DOCRULE 包才剛依 ADR-XPLAT-002 §8 表頭規則 1 把 `R<N>+` 定為病灶
+    # 並禁用（開放下界永不到期；item 7／8 六輪零異動即實例），本包同輪卻在
+    # `_EXEMPT_PAIRS['AISDLC_SDD/scripts/ci-gate']` 寫下 `退場：R68+` —— 新機制一出生就
+    # 把當輪判定為不可接受的寫法制度化。下面兩支把「規則只存在於散文裡」變成機械擋。
+
+    def test_open_ended_round_form_is_rejected(self) -> None:
+        """🔴 缺陷注入：`退場：R68+`（含全形加號）必紅——這是 §8 表頭規則 1 的病灶形態。"""
+        for anchor in ("退場：R68+（三條解除判準）", "退場：R68＋（三條解除判準）"):
+            with self.subTest(anchor=anchor):
+                with mock.patch.object(
+                    m, "_EXEMPT_PAIRS", {"x/y": (m._UNPINNED, f"某理由；{anchor}")}
+                ), mock.patch.object(m, "_SINGLE_SIDED_EXEMPT", {}), \
+                     mock.patch("builtins.print") as fake_print:
+                    ok = m._check_tier_classification()
+                self.assertFalse(
+                    ok,
+                    f"{anchor!r} 被放行——`R<N>+` 是開放下界，永遠有一個「之後」可以指，"
+                    "與『未指派』等價卻讀起來像有承接對象（ADR §8 表頭規則 1）",
+                )
+                printed = " ".join(
+                    str(a) for call in fake_print.call_args_list for a in call.args
+                )
+                self.assertIn("退場錨點", printed)
+
+    def test_real_tables_carry_no_open_ended_exit_anchor(self) -> None:
+        """真表現況：兩張活體登記表不得留下任何 `退場：R<N>+` 形態。
+
+        與上一支互補：上一支證明判準會紅，這一支證明**現況已經沒有**這種寫法
+        （R67 round 1 落地時 `ci-gate` 那筆就是 `退場：R68+`，靠人眼交叉比對才發現）。
+        """
+        import re
+
+        open_ended = re.compile(r"退場：R\d+[+＋]")
+        offenders = sorted(
+            key for table in (m._EXEMPT_PAIRS, m._SINGLE_SIDED_EXEMPT)
+            for key, (_tier, reason) in table.items()
+            if open_ended.search(reason)
+        )
+        self.assertEqual(
+            offenders, [],
+            "reason 內出現開放下界承接（`退場：R<N>+`）——只准具名輪次或未指派："
+            f"{offenders}",
+        )
+
+    def test_non_unpinned_tiers_are_not_required_to_carry_the_anchor(self) -> None:
+        """邊界：退場義務只加在 unpinned；tier3/4 是明文封頂類別，本來就不該退場。"""
+        with mock.patch.object(
+            m, "_EXEMPT_PAIRS", {"x/y": (m._TIER4_FORBIDDEN, "本身即為驗證載具")}
+        ), mock.patch.object(m, "_SINGLE_SIDED_EXEMPT", {}), \
+             mock.patch("builtins.print"):
+            self.assertTrue(m._check_tier_classification())
+
+
+class TestR67AcCoverage(unittest.TestCase):
+    """R67-H34 回歸鎖：AC 的涵蓋面不得再被「新增一張登記表」整張逃逸。
+
+    WHY：AC（§4.2 反位移判準）是「描述性常數登記項的誠實全集」，用途是擋「換個地方
+    複雜」。R67 前這個全集只存在於 `_print_collapse()` 一條寫死的七項加總算式裡，而
+    號稱「獨立重算」的 `test_ac_matches_sum_of_seven_registries` 逐字複製同一條算式
+    ⇒ 對「多了一張沒被算進去的表」天生零訊號（實測：注入第 8 張表 3 筆，AC 不動、
+    全套 tools/tests 零紅）。
+
+    本鎖改用**真正不同的實作路徑**：以 `ast` 掃描兩支工具原始碼的模組層登記表，
+    比對「掃到的全集 == AC 納入 ∪ 具名排除」。新增任何一張表若兩邊都沒登記即紅。
+    """
+
+    _MIN_DISCOVERED = 9  # 2026-08-01 實測 13 張；下限防「掃描器被改壞 ⇒ 掃到 0 ⇒ 恆綠」
+
+    @staticmethod
+    def _discover(path: Path) -> set[str]:
+        """AST 掃出模組層「值為非空 dict/set 字面」的私有登記表名稱。"""
+        import ast
+
+        tree = ast.parse(path.read_text(encoding="utf-8"))
+        found: set[str] = set()
+        for node in tree.body:
+            if isinstance(node, ast.Assign) and len(node.targets) == 1 \
+                    and isinstance(node.targets[0], ast.Name):
+                name, value = node.targets[0].id, node.value
+            elif isinstance(node, ast.AnnAssign) and isinstance(node.target, ast.Name) \
+                    and node.value is not None:
+                name, value = node.target.id, node.value
+            else:
+                continue
+            if not name.startswith("_"):
+                continue
+            if isinstance(value, ast.Call) and isinstance(value.func, ast.Name) \
+                    and value.func.id == "frozenset" and value.args:
+                value = value.args[0]
+            if isinstance(value, ast.Dict) and value.keys:
+                found.add(name)
+            elif isinstance(value, ast.Set) and value.elts:
+                found.add(name)
+        return found
+
+    def _discovered_pairs(self) -> set[tuple[str, str]]:
+        import check_wrapper_thinness as _thinness
+
+        pairs = {("parity", n) for n in self._discover(Path(m.__file__))}
+        pairs |= {("thinness", n) for n in self._discover(Path(_thinness.__file__))}
+        return pairs
+
+    def test_scanner_is_not_vacuous(self) -> None:
+        """正控：掃描器對現行原始碼必須掃得到足量登記表——掃到 0 就會恆綠。"""
+        pairs = self._discovered_pairs()
+        self.assertGreaterEqual(
+            len(pairs), self._MIN_DISCOVERED,
+            f"AST 掃描僅得 {len(pairs)} 張登記表 < 下限 {self._MIN_DISCOVERED}"
+            f"——掃描器疑似被改壞（靜默縮面）；刻意精簡請同步下修下限",
+        )
+        self.assertIn(("parity", "_EXEMPT_PAIRS"), pairs)
+        self.assertIn(("thinness", "_PINNED_SHA256"), pairs)
+
+    def test_every_registry_is_either_counted_or_named_excluded(self) -> None:
+        """🔴 核心：掃到的每一張表，非納入 AC 即具名排除；漏一張即紅。"""
+        declared = set(m._AC_REGISTRY_NAMES) | set(m._AC_EXCLUDED_REGISTRIES)
+        undeclared = sorted(self._discovered_pairs() - declared)
+        self.assertEqual(
+            undeclared, [],
+            "下列模組層登記表既未計入 AC、也未具名排除——§4.2 的『誠實全集』出現缺口："
+            f"{undeclared}；請納入 _AC_REGISTRY_NAMES 或加進 _AC_EXCLUDED_REGISTRIES "
+            "並寫下理由",
+        )
+
+    def test_declared_names_all_exist(self) -> None:
+        """反向 stale：宣告（納入/排除）的名字若已不存在於原始碼 ⇒ 紅，防清單腐化。"""
+        discovered = self._discovered_pairs()
+        stale = sorted(
+            (set(m._AC_REGISTRY_NAMES) | set(m._AC_EXCLUDED_REGISTRIES)) - discovered
+        )
+        self.assertEqual(stale, [], f"AC 宣告清單指向已不存在的登記表：{stale}")
+
+    def test_ghost_registry_is_detected(self) -> None:
+        """缺陷注入：模擬「新增第 8 張登記表卻沒登記」——R67 前此情境全綠。"""
+        real = self._discovered_pairs()
+        with mock.patch.object(
+            TestR67AcCoverage, "_discovered_pairs",
+            lambda _self: real | {("parity", "_GHOST_REGISTRY")},
+        ):
+            with self.assertRaises(AssertionError) as ctx:
+                self.test_every_registry_is_either_counted_or_named_excluded()
+        self.assertIn("_GHOST_REGISTRY", str(ctx.exception))
+
+    def test_ac_value_is_pinned(self) -> None:
+        """AC 活體值釘選（比照 UEP 的 `test_uep_is_five_after_r65_migration`）。
+
+        §4.2 判定規則 2：AC 每一筆上升必須在同一 commit 內具名對應一筆 UEP 下降。
+        R67 前 AC 完全無值鎖（實測 AC 48→49 全綠）；現在上升即紅、下降亦紅（提醒
+        同步下修以維持張力）。R67 現值 48 = 14+7+5+18+2+1+1。
+        """
+        ac = sum(len(reg) for reg in m.ac_registries().values())
+        self.assertEqual(
+            ac, 48,
+            f"AC 由 48 變為 {ac} —— 上升請依 ADR-XPLAT-002 §4.2 規則 2 具名對應一筆 "
+            f"UEP 下降後同步本釘選值；下降請一併下修本值",
+        )
+
+    def test_ac_registries_is_the_only_source_for_print_collapse(self) -> None:
+        """`--print-collapse` 的 AC 必須來自 `ac_registries()`（不得另有第二條算式）。"""
+        import io
+        from contextlib import redirect_stdout
+
+        expected = sum(len(reg) for reg in m.ac_registries().values())
+        buf = io.StringIO()
+        with redirect_stdout(buf):
+            m.main(["--print-collapse"])
+        self.assertIn(f"AC={expected}", buf.getvalue())
+
+
+class TestR67LatestPinnedShebangCoverage(unittest.TestCase):
+    """R67-H35 回歸鎖（LATEST 側）：`_LATEST_PINNED_SHA256` 的 `.sh` 也須把 shebang
+    納入 hash 輸入。
+
+    WHY：`_check_latest_thinness()` 重用 `check_wrapper_thinness` 的同一組純函式，
+    LATEST run_tlc.sh 同樣是 `#!/usr/bin/env bash`。`tools/tests/
+    test_check_wrapper_thinness.py` 那支全面性測試只走 `_PINNED_SHA256`，LATEST 這
+    一支不在它的迴圈裡——不補這條就會出現「主表修好、LATEST 仍在覆蓋面外」。
+    """
+
+    def test_latest_pinned_sh_shebang_enters_hash(self) -> None:
+        import check_wrapper_thinness as _thinness
+
+        latest_tools = m._resolve_latest_tools()
+        self.assertIsNotNone(latest_tools, "真 repo 內 LATEST 解析不得失敗")
+        checked = 0
+        for rel in m._LATEST_PINNED_SHA256:
+            path = latest_tools / rel[len(m._LATEST_PREFIX):]
+            if path.suffix != ".sh":
+                continue
+            self.assertTrue(path.is_file(), f"{rel} 不存在於磁碟")
+            first = _thinness._read_source(path).splitlines()[0]
+            self.assertTrue(first.startswith("#!"), f"{rel} 首行非 shebang：{first!r}")
+            self.assertEqual(
+                _thinness.normalized_content(path).splitlines()[0], first,
+                f"{rel} 的 shebang 未進入 hash 輸入（R67-H35 回歸）",
+            )
+            checked += 1
+        self.assertGreaterEqual(checked, 1, "LATEST 釘選面內無 .sh，本鎖已空轉")
 
 
 if __name__ == "__main__":

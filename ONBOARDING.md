@@ -164,8 +164,8 @@ source .venv/bin/activate
 | `aisdlc-sdd-drift-daily.yml` | `AISDLC_SDD/.github/workflows/drift-daily.yml` |
 | `aisdlc-sdd-fsm-chaos-nightly.yml` | `AISDLC_SDD/.github/workflows/fsm-chaos-nightly.yml` |
 | `root-infra-ci.yml` | ⚠️ **本 workflow 現因 CI 帳務停擺（`DEF-101-081`）在數秒內失敗，下列各道實際上從未在雲端執行**——本文件他處凡寫「接 root-infra-ci 第 N 道」者一律以此為準，那是**接線完整性**的宣稱，不是「已在雲端跑過」的宣稱（R60 round 3 補注，`QA-R60R3-04`）。（四方複審第三輪新增，非遷移）根層基建守門：**全變更觸發**（NTFS 檔名閘須守任意路徑，paths 白名單必留盲區），現行**十二道**輕量檢查（詳細內容以 workflow 檔頭註解為準，避免每次擴充都要同步改動兩處）——1. `bash -n`（**R56 擴面**：全庫 tracked active `*.sh`＋三處無副檔名 git hooks 目錄〔`tools/git-hooks/`、`AutoClaude/tools/git-hooks/`、`AISDLC_SDD/.githooks/`〕；AISDLC_SDD 凍結版 `v0.01~v0.(N-1)` 依紀律不回改故排除、LATEST 版納入，政策與第 2 道一致。檔數下限分「`.sh`／git-hooks」兩段釘選，數字刻意只住 step 內註解——第二個計數站點即第二個會漂移的站點）；2. pwsh parse＋UTF-8 BOM（active `.ps1`：根層 `tools/`＋`AutoClaude/tools/`＋`AISDLC_SDD/scripts/`＋LATEST 版，凍結版排除）；3. EOL 守門（`.sh`，須為 LF）；4. EOL 守門（`.ps1`，反方向須為 CRLF，2026-07-13 補洞）；5. NTFS 檔名閘（`tools/check_ntfs_paths.py`，pre-commit NTFS 閘的 CI 對等）；6. 腳本對等閘（`tools/check_script_parity.py`：成對 `.sh`/`.ps1` step 標籤清單＋LATEST tools 納管＋pytest 釘選三處同版）；7. `py_compile`（根層 `tools/` 下所有 `*.py` 語法檢查，dev_start 四方審查 P2）；8. `unittest`（`tools/tests/`，R10 起經 `tools/run_root_unittests.py` 執行、含測試數量下限釘選——裸 discover 對 0 個測試回 rc=0 的 fail-open 已堵；收斂 py_compile 守不到的邏輯回歸落差）；9. 缺陷帳本跨文件狀態一致（`tools/check_defect_log_crossref.py`）；10. wrapper 薄殼守門（`tools/check_wrapper_thinness.py`）；11. pytest 基線站點鎖（`tools/check_pytest_baseline_sites.py`，R13 ARCH-R13-1——基線數字唯一站點＝本檔 §7，其餘活文件禁載數字）；12. GitHub Actions 版本一致性鎖（`tools/check_gha_action_versions.py`，R55 增、**R56 通用化**——斷言**全部 `actions/*` 官方 action**〔含子路徑 action 如 `cache/restore`〕跨全部 workflow 版本唯一，不判斷哪個版本才對，只擋「同一 action 出現兩種版本」。R56 起刻意**不再列舉 action 名**：原本的四名白名單本身即 fail-open〔打錯一個字就靜默少守該 action 的所有宣告卻仍印綠燈〕，且 workflow 檔頭側再出現列舉會被 `tools/tests/test_root_infra_parity.py` 擋下）（DEF-101-012、四方複審第四／五輪＋R8／R13 擴充＋R55 擴充） |
-| `windows-compat-ci.yml` | （Mac/Windows 相容性輪新增，非遷移）Windows 側執行級驗證：windows-smoke（bootstrap/dev_start/install 腳本/dispatcher 真實 commit 觸發；step 以 pwsh 為主，僅 dispatcher 觸發 step 刻意用 Git Bash 載具）＋ windows-nightly-full（深度回歸，**含 PS 5.1 引擎專測**——R5/S8 拍板置於 nightly 非 PR 閘門，R12 訂正本列歸屬誤植）；本地補償對等＝`tools/windows_smoke_local.ps1`（R10） |
-| `macos-compat-ci.yml` | （Mac/Windows 相容性輪新增，非遷移）macOS 側執行級驗證：macos-smoke（bash 3.2 直呼/安裝腳本/worktree/ci-gate 雙軌）＋ macos-nightly-full；本地補償對等＝`tools/macos_smoke_local.sh`（R9）。詳見 §8/§10 |
+| `windows-compat-ci.yml` | （Mac/Windows 相容性輪新增，非遷移）Windows 側執行級驗證：windows-smoke（bootstrap/dev_start/install 腳本/dispatcher 真實 commit 觸發；step 以 pwsh 為主，僅 dispatcher 觸發 step 刻意用 Git Bash 載具）＋ windows-nightly-full（深度回歸，**含 PS 5.1 引擎專測**——R5/S8 拍板置於 nightly 非 PR 閘門，R12 訂正本列歸屬誤植）；**本地補償（非全等）**＝`tools/windows_smoke_local.ps1`（R10）＋ nightly stage ＋ pre-push leg，逐 step 的承載歸屬與**零本地承載差集**見 `tools/tests/test_smoke_ci_sync.py::_CI_STEP_LOCAL_CARRIER`（機械鎖：CI 新增 step 未登記即紅） |
+| `macos-compat-ci.yml` | （Mac/Windows 相容性輪新增，非遷移）macOS 側執行級驗證：macos-smoke（bash 3.2 直呼/安裝腳本/worktree/ci-gate 雙軌）＋ macos-nightly-full；**本地補償（非全等）**＝`tools/macos_smoke_local.sh`（R9）＋ nightly stage ＋ pre-push leg，逐 step 的承載歸屬與**零本地承載差集**見 `tools/tests/test_smoke_ci_sync.py::_CI_STEP_LOCAL_CARRIER`（機械鎖：CI 新增 step 未登記即紅）。🔴 **R67-C19 訂正**：本列與上列原寫「本地補償**對等**」，而實測有數個 compat-CI step 在本地零承載（bootstrap／dev_start 實跑、`integration_gate` 實跑、真實 git commit 觸發 dispatcher 等），且該覆蓋差集**當時無任何機械鎖**（注入一個全新 CI step 後根層 1139 支測試全綠）；「對等」二字會讓讀者以為本地綠燈 ≈ CI 綠燈而停止追問——尤其 compat-CI 因帳務停擺多輪未真正執行。差集清單刻意**不在此重抄一份**（那是保證會 stale 的第二站點），一律指向上述登記表。詳見 §8/§10 |
 
 `.actrc` 亦已上移根層；`run_act`（AutoClaude 側）與 `act-ci.sh`（AISDLC_SDD 側）現於 **monorepo 根**執行、讀根層 `.actrc`。（Dependabot 已於 2026-07-12 完全停用並移除根層 `dependabot.yml`——單人 main-only 工作流不採自動相依 PR；GitHub 端 security updates／vulnerability alerts 亦為停用。相依更新改為日後手動盯版或重新啟用。）
 
@@ -211,9 +211,18 @@ powershell -ExecutionPolicy Bypass -File scripts\ci-gate.ps1   # 偵測到 Git B
 > 產生器 ＋ `--check` 的形狀對齊 repo 既有慣例＝`AutoClaude/CLAUDE.md` 的 `[Architecture Snapshot]`
 > ↔ `AutoClaude/tools/snapshot_sync.py`）。
 >
-> | 量測項 | macOS | **Windows 11（R60 收尾實測）** | 差異歸因（實測，非推算）＋ 鎖與取值來源 |
+> 🔴 **R67 訂正（R67-D20）**：`tools/sync_onboarding_baselines.py` 的 `--check` 在 R67 之前
+> **並不是實存旗標**——該工具以 `"--flag" in argv` 手搓解析、未知旗標一律靜默掉進 default 分支並
+> rc=0，所以 `--check` 只是「恰好看起來對」；同一個洞也讓 `--check-snapshot` 少打一個字母時，在
+> 表② 確實過期的工作樹上回 rc=0 假綠（正確拼法同時 rc=1）。現已改 argparse：`--check` 成為實存
+> 旗標、**未知旗標／打錯字／前綴縮寫一律 rc=2 fail-loud**、`--help` 印完整用法（另有 `--json`、
+> `--platform`、`--allow-pg-extras`）。**凡在提及 `sync_onboarding_baselines` 的行上以反引號寫出的
+> 旗標**，都由 `tools/tests/test_doc_loc_baseline_freshness_r60.py` 對該工具的 argparse parser 反查
+> 機械釘住——文件不得引用不存在的旗標。
+>
+> | 量測項 | macOS | **Windows 11 欄**（🔴 R67 round 2 訂正：欄頭不再代言量測時點與平台——本欄的「受鎖 token」是**平台中立值**、取值來源逐格標示於歸因欄；只有 `skipped=N`／LOC 三數字這類「非受鎖」附註才是 Windows 實機量測。原欄頭寫「Windows 11（R60 收尾實測）」，而該格裝的其實是 R67 在 Darwin 真機上量得的 `MIN_TESTS`——SA-R67-07） | 差異歸因（實測，非推算）＋ 鎖與取值來源 |
 > |---|---|---|---|
-> | 根層 `tools/run_root_unittests.py` | 616（`skipped=4`；R57 macOS 量測，本輪未在 macOS 重測） | **1069 tests OK**（`skipped=10`） | 收集總數沿革 R57=616 → R59=661 → **R60 見本格 live 值**（每輪新增回歸鎖，含四方複審條件補的鎖），兩平台收集總數相同、差異只在 skip。Windows 的 10 支全為 POSIX-only 或 macOS-only 語意：8 支 pgid/killpg/SIGINT（`test_dev_start.py`）、1 支 `install_mac_nightly.sh` BSD `stat -f` 心跳等價鎖、1 支無 symlink 權限（`[WinError 1314]`）。**R59 動工時為 11 支**——其中 1 支是 DEF-101-509（語法閘門因無 pwsh 7 而 skip），R59 修掉後轉為實跑 🔴 **本格測試數自 R60 起有機械鎖**：取值來源＝`tools/run_root_unittests.py` 的 `MIN_TESTS`（該值本身即「收輪時填實測值、不做加減推算」的釘選，見該檔第 38 行）。**同一份 repo 對同一個數字只准有一種說法**——R60 SA-R60-01／ARCH-R60-03 抓到的正是「本格寫 661 而 `MIN_TESTS` 已重釘 756」。維護契約：**重釘 `MIN_TESTS` 時必須同步本格**（`python tools/sync_onboarding_baselines.py --write` 一鍵回填），否則根層 unittest 閘門紅——它不是假警報。**`skipped=N` 刻意不在鎖內**（無現場取值來源，屬 dated snapshot 語意）。🔴 **鎖的邊界（R60 round 2 四方全數命中，ARCH-R60R2-03／SA-R60R2-02／SD-R60-R2-03／QA2-R60-02）**：本行**只有 `N tests OK` 這個 token 受鎖**，其餘數字都是散文。round 1 落地產生器後，同一行的鎖住值已回填為當輪實測，而散文仍留著一個較舊的當輪值宣稱——**產生器 ＋ `--check` 只保證「被抽取的那個 token」新鮮，完全不保證同一行的散文新鮮**，這是本 repo 對「機械鎖已落地」的認定門檻必須修正的地方（DEF-101-562）。根治＝`_SPECS` 的 `prose_claims` 判準：受鎖行上任何 `R<輪號>=<數字>` 形態的同量宣稱，只要值 ≠ live 值就必須登記進產生器的 `historical` 白名單（附 WHY），否則紅。故當輪值**一律不寫進散文**、只寫「見本格 live 值」。<!-- rootunit-baseline-live: R60 錨點，勿刪；刪除本標記會讓該測試 fail-loud --> |
+> | 根層 `tools/run_root_unittests.py` | 收集總數與 Windows 欄同一個數（兩平台收集總數相同，見本列歸因欄）⇒ **本欄不另寫一份數字**，一律看 Windows 欄那個受鎖 token。⚠️ 該 token 是 `MIN_TESTS` **下限釘選**、不是當下實收數（實收會高於它直到下次重釘）。macOS 側與 Windows 的差異只在 skip：R67 於 Darwin-25.5.0-arm64 實測 `skipped=15`。🔴 **本欄是 dated snapshot、不受 live 鎖管轄**——`rootunit-baseline-live` 鎖只抽右欄那個 `N tests OK` token（R67-F28：原本此處寫死 `616（skipped=4；R57 量測）`，落後實況約九輪而任何機械物都抓不到，因為它根本不在鎖的取值範圍內；故改寫成**指向 live 來源**而非再寫死一個會過期的數字） | **1362 tests OK**（`skipped=10`） | 收集總數沿革 R57=616 → R59=661 → **R60 見本格 live 值**（每輪新增回歸鎖，含四方複審條件補的鎖），兩平台收集總數相同、差異只在 skip。Windows 的 10 支全為 POSIX-only 或 macOS-only 語意：8 支 pgid/killpg/SIGINT（`test_dev_start.py`）、1 支 `install_mac_nightly.sh` BSD `stat -f` 心跳等價鎖、1 支無 symlink 權限（`[WinError 1314]`）。**R59 動工時為 11 支**——其中 1 支是 DEF-101-509（語法閘門因無 pwsh 7 而 skip），R59 修掉後轉為實跑 🔴 **本格測試數自 R60 起有機械鎖**：取值來源＝`tools/run_root_unittests.py` 的 `MIN_TESTS`（該值本身即「收輪時填實測值、不做加減推算」的釘選，見該檔第 38 行）。**同一份 repo 對同一個數字只准有一種說法**——R60 SA-R60-01／ARCH-R60-03 抓到的正是「本格寫 661 而 `MIN_TESTS` 已重釘 756」。維護契約：**重釘 `MIN_TESTS` 時必須同步本格**（`python tools/sync_onboarding_baselines.py --write` 一鍵回填），否則根層 unittest 閘門紅——它不是假警報。**`skipped=N` 刻意不在鎖內**（無現場取值來源，屬 dated snapshot 語意）。🔴 **鎖的邊界（R60 round 2 四方全數命中，ARCH-R60R2-03／SA-R60R2-02／SD-R60-R2-03／QA2-R60-02）**：本行**只有 `N tests OK` 這個 token 受鎖**，其餘數字都是散文。round 1 落地產生器後，同一行的鎖住值已回填為當輪實測，而散文仍留著一個較舊的當輪值宣稱——**產生器 ＋ `--check` 只保證「被抽取的那個 token」新鮮，完全不保證同一行的散文新鮮**，這是本 repo 對「機械鎖已落地」的認定門檻必須修正的地方（DEF-101-562）。根治＝`_SPECS` 的 `prose_claims` 判準：受鎖行上任何 `R<輪號>=<數字>` 形態的同量宣稱，只要值 ≠ live 值就必須登記進產生器的 `historical` 白名單（附 WHY），否則紅。故當輪值**一律不寫進散文**、只寫「見本格 live 值」。<!-- rootunit-baseline-live: R60 錨點，勿刪；刪除本標記會讓該測試 fail-loud --> |
 > | `check_loc_budget` / `lint-imports` | 同值（純靜態分析，無平台差異；數值見右欄，來源標示同右欄） | total=20361 cap=20438 violations=0 ／ 8 kept 0 broken | 純靜態分析，無平台差異。🔴 **來源標示（R60 SA-R60-07③）**：本列三數字為 **Windows 11 實機量測**；因 LOC 只數行、不執行程式，兩平台必然同值，故 macOS 欄標「同值」而非另填一份——**不要誤讀為 macOS 實測**。🔴 **本格 LOC 三數字自 R60 起有機械鎖**：`tools/tests/test_doc_loc_baseline_freshness_r60.py` 每次跑根層 unittest 閘門時，經 `tools/sync_onboarding_baselines.py` 當場實跑 `AutoClaude/tools/check_loc_budget.py --json`，與本格字面值逐項比對，不符即紅並印出應填的值。**填值時點比照 `MIN_TESTS` 重釘紀律**——「所有並行 agent 停工後，填最終工作樹實測值、不做任何加減推算」：`autoclaude/` 是多包並行修復的共同標的，本格在收輪前必然數次變動（R60 實測：主控動工量 20359，同輪另一包改 `utils/logger.py` 後即變動為**左欄值**——當輪值刻意不在此重複一次，見下方「受管值不得在受鎖行出現第二次」判準），故只在收輪最終工作樹上填一次。**維護契約（R60 SD-R60-09）**：判準是**精確相等**（非 `MIN_TESTS` 的下限語意），即此後任何動到 `autoclaude/` 行數的變更都必須同步本格——這是刻意承受的維護負擔，成本已由產生器攤平：`python tools/sync_onboarding_baselines.py --write` 一鍵回填。`8 kept / 0 broken`（lint-imports）**不在鎖內**（需另跑 import-linter，屬另一筆缺口，如實揭露）。<!-- loc-baseline-live: R60 錨點，勿刪；刪除本標記會讓該測試 fail-loud --> |
 >
 > **表② — dated snapshot（機器無法在根層閘門現場算出 ⇒ 無機械鎖，只能靠收輪紀律回填）**
@@ -225,11 +234,20 @@ powershell -ExecutionPolicy Bypass -File scripts\ci-gate.ps1   # 偵測到 Git B
 > ⇒ 該句在寫下時即為假。**一個宣稱「四格皆經獨立覆核」而其中一格與現場實測差 11 的表，
 > 比沒有 provenance 宣稱更糟**（ARCH 原話）。故 provenance 改為**逐格標註**、不再由本段代言：
 >
-> | 格 | 量測時點 | 誰實測過（round 2 獨立重跑） |
+> 🔴 **下表是 R60 世代的史料，不是現行 provenance（R67 round 2 訂正，SA-R67-07）**：它描述的是
+> 當時 **Windows 欄**四格的量測與覆核，寫下時為真；此後 R65（`58a829f`）**只**把 v0.30 一格回填
+> 為 1750、其餘三格未動，四格自此**混世代** ⇒ 這正是 R67 把 Windows 欄 provenance 一律記
+> `unrecorded` 的原因（見下方「Windows 欄為何整欄記 `unrecorded`」）。**現行 provenance 的唯一
+> 來源＝各平台的 `snapshot-fingerprints-<平台鍵>` 錨**；下表只保留「當時誰量過什麼」的史料價值，
+> **不得**再被讀成對現況的覆核宣稱——同一節裡留著兩套結論相反的 provenance 而不標世代，讀者會
+> 採信先看到的那一套（本節 R60 的教訓原話：一個宣稱「四格皆經獨立覆核」而其中一格與現場實測
+> 對不上的表，比沒有 provenance 宣稱更糟）。
+>
+> | 格（R60 世代史料） | 當時填的量測時點 | 當時誰實測過（R60 round 2 獨立重跑） |
 > |---|---|---|
 > | AutoClaude pytest | R60 收尾工作樹 | 主控 ＋ Architect（連 4 次）＋ SD ＋ QA（第 2 跑；第 1 跑的 1 failed 已證為 QA2-R60-04 並行假紅） |
 > | ci-gate v0.01 | R60 收尾工作樹 | 主控 ＋ Architect ＋ SD ＋ QA（皆 1478） |
-> | ci-gate v0.30 | **round 3 訂正為 1747** | round 1 填 1736；round 2 Architect／SD／QA **三方獨立**皆測得 1747 ⇒ 本輪訂正 |
+> | ci-gate v0.30 | **R60 round 3 訂正為 1747** | round 1 填 1736；round 2 Architect／SD／QA **三方獨立**皆測得 1747 ⇒ 該輪訂正。⚠️ **該值已於 R65（`58a829f`）被 1750 取代**，本列自 R65 起即為史料——R67 round 2 之前它仍以現行 provenance 的姿態與下方表② 的 1750 並存（SA-R67-07 命中） |
 > | ci-gate scripts/tests | R60 收尾工作樹 | 主控 ＋ Architect ＋ SD ＋ QA（皆 249） |
 >
 > **為何這四格沒有 live 鎖（逐項說明，不是懶）**：AutoClaude 全套 pytest 單次約 78 秒、且對執行
@@ -244,24 +262,52 @@ powershell -ExecutionPolicy Bypass -File scripts\ci-gate.ps1   # 偵測到 Git B
 >
 > - **回填（一條指令）**：`python tools/sync_onboarding_baselines.py --write --with-slow`
 >   ——實跑 `bash AISDLC_SDD/scripts/ci-gate.sh`（解析它自己的 `逐軌計數：vX:N` 自證行）
->   ＋ `python -m pytest tests/ -q`（plain 形態，與本表宣告一致），四格一次填完。
-> - **stale 觸發器（毫秒級，不必重測）**：下方 `snapshot-fingerprints` 記錄四套測試樹的
->   內容指紋；`--check-snapshot` 重算並比對，**指紋一變就判定本表 presumed stale 並紅**。
->   判準是**因果的**：測試計數只可能因測試樹變動而變（同 `ADR-SD09-011` 把「證據」從
->   「日曆」解綁改綁「源碼變動」的先例）。已接進 pre-push（收輪＝push 時點付這個代價才合理，
->   刻意**不**接根層 unittest 閘門——那支每輪跑數十次，會逼人養成忽略紅燈的習慣）。
+>   ＋ `python -m pytest tests/ -q`（plain 形態，與本表宣告一致），**本機平台那一欄**的四格一次
+>   填完（R67 起；跨平台代填即假 provenance，故無對應欄的平台一律 rc=2 拒絕回填）。
+>   ⚠️ 該指令在**可 import psycopg2／sqlalchemy 的 venv 上會 rc=2 拒跑**——那種環境會讓
+>   AutoClaude 的 PG-gated 測試由 skip 轉 pass、`passed` 虛高，與本表宣告的出廠環境不是同一件事；
+>   請改用只裝 `.[dev,notifications]` 的乾淨 venv，或明確加 `--allow-pg-extras` 讓 provenance
+>   記下 `pgextras=present`。
+> - **stale 觸發器（毫秒級，不必重測）**：下方**每個平台各一條** `snapshot-fingerprints-<平台鍵>`
+>   錨，記錄「**該欄的數字是在哪一棵測試樹上量的**」＋ provenance（`measured-at` 何時／`host`
+>   哪台機器／`docker` daemon 狀態／`pgextras` venv 有無 PG extras）；`--check-snapshot` 重算並
+>   比對，**本機平台那一欄的指紋一變就判 presumed stale 並紅**（其他平台欄自 R67 round 2 起改印
+>   `ℹ️` 到 **stdout**、不再是 stderr 的 `⚠️`，且不影響 rc——別台機器的欄不是本機修得動的東西，
+>   硬紅只會養成忽略紅燈的習慣）。🔴 **看到那則 `ℹ️` 不代表有新問題（QA-R67-05）**：在單機交替
+>   的工作流下，非本機平台欄**結構上恆為 presumed stale**，該提醒因此是常態而非事件；它的內容
+>   已由「四棵樹指紋 diff」（單機交替下必然變動、資訊量為零）改成「上次量測日期＋距今 N 天」，
+>   `unrecorded` 另走「尚未建立基線」措辭（不得以漂移箭頭把「沒量過」寫成「過期」）。**真正有牙
+>   的是本機平台欄那一行的 ✅／❌**——取捨論證逐字寫在 `tools/sync_onboarding_baselines.py` 的
+>   `_stale_summary` docstring。判準是**因果的**：測試
+>   計數只可能因測試樹變動而變（同 `ADR-SD09-011` 把「證據」從「日曆」解綁改綁「源碼變動」的
+>   先例）。已接進 pre-push（收輪＝push 時點付這個代價才合理，刻意**不**接根層 unittest 閘門
+>   ——那支每輪跑數十次，會逼人養成忽略紅燈的習慣）。**無對應欄的平台**（Linux CI runner）判準
+>   退化為「**沒有任何一欄是新鮮的**」才紅——嚴格弱於逐欄判準，如實劃界。
+> - 🔴 **R67 起本表逐欄記帳（R67-D1／D6）**：在 R67 之前，`--write --with-slow` 的欄位正則以
+>   `**` 粗體硬綁 Windows 欄、全檔零平台偵測 ⇒ **在 macOS 上照本節指令回填，會把 macOS 實測值
+>   靜默寫進標示「Windows 11 實測」的格子**；且指紋只有一條全域錨，另一欄的 stale 在結構上永遠
+>   測不到（實測：macOS 欄灌成 9999 仍 ✅ rc=0）。現行實作以**表頭推導欄號 ＋ 只在該格內替換**，
+>   寫到別欄在結構上不可能發生；`--platform` 只准用於唯讀稽核，與 `--write` 併用即 rc=2。
 > - **誠實劃界（指紋抓不到什麼）**：指紋只覆蓋**測試樹**（`AISDLC_SDD_v0.01|v0.30/tools/fsm_runtime/tests/`、
 >   `AISDLC_SDD/scripts/tests/`、`AutoClaude/tests/`）的 `*.py` 內容。理論上「生產碼變動改變
 >   `parametrize` 來源」也能改變計數，該面**不在指紋內**；docker daemon 可用性、平台差異亦然
 >   （見下方容差訂正段）。故它是 stale 的**充分觸發器、非必要條件**——會漏、不會冤。
-> <!-- snapshot-fingerprints: v001=8ffe3c3dabbd v030=60a98ecc1a49 scripts=4e4fc9b149fc autoclaude=301742da6a8b ／ 由 `python tools/sync_onboarding_baselines.py --write --with-slow` 維護，勿手改；刪除本標記會讓 --check-snapshot fail-loud -->
+> <!-- snapshot-fingerprints-darwin: v001=8ffe3c3dabbd v030=1d450104f612 scripts=d1e965e81e0e autoclaude=da90570f996d measured-at=2026-08-01 host=Darwin-25.5.0-arm64 docker=up pgextras=absent ／ 由 `python tools/sync_onboarding_baselines.py --write --with-slow` 在 macOS 上維護，勿手改；刪除本標記會讓 --check-snapshot fail-loud -->
+> <!-- snapshot-fingerprints-win32: v001=unrecorded v030=unrecorded scripts=unrecorded autoclaude=unrecorded measured-at=unrecorded host=unrecorded docker=unrecorded pgextras=unrecorded ／ 同上，由 Windows 側維護 -->
 >
-> | 量測項 | macOS（見下方 R57／R33 註） | **Windows 11（R60 收尾實測）** | 差異歸因（實測，非推算） |
+> 🔴 **Windows 欄為何整欄記 `unrecorded`（R67 誠實化，不是漏填）**：R67 建立逐平台記帳時實查
+> git 沿革，Windows 欄的四格是**混世代**——`v0.30` 那格於 R65（`58a829f`）回填 1747→1750，其餘
+> 三格更早（R60 世代），而 R66（`1cbe9fd`）又只把全域指紋洗綠、**計數一格未動**。四格既然不是
+> 在同一棵測試樹上量的，就沒有任何單一指紋能誠實代表它 ⇒ 一律記 `unrecorded`，效果是**該欄恆判
+> presumed stale**，直到有人在一台 Windows 上**一次量完四格**（`--write --with-slow`）。填一個
+> 猜的指紋會讓這欄假裝新鮮，那正是本節在治的病。
+>
+> | 量測項 | macOS（provenance 見 snapshot-fingerprints-darwin 錨） | **Windows 11（provenance 見 snapshot-fingerprints-win32 錨）** | 差異歸因（實測，非推算） |
 > |---|---|---|---|
-> | AutoClaude `pytest tests/ -q` | 3738 passed / 210 skipped | **3767 passed / 208 skipped** | 兩平台的 **passed+skipped 結果總數相同**（3948）〔**二審 SA 訂正用詞**：`--collect-only` 實測為 **3945**，差額來自兩個模組級 `pytest.importorskip("sqlalchemy")`——本機 sqlalchemy ABSENT 故整檔跳過、collect 少算但跑起來各記 1 skip。原寫「收集總數」會讓照本節驗證的人跑出 3945 而誤以為少了 3 支〕。Windows 上 `[WINDOWS-NATIVE-ONLY]` 標籤的 3 支（`test_perception.py::TestCloseKillsCmdShimGrandchild` 1 支、`test_run_local_nightly_static.py::TestConcurrencyGuardBehavior` 2 支）由 skip 轉 pass；反向新增 2 支 Windows 專屬 skip（`test_perception.py` POSIX process-group、`test_sdd_to_playbook_adapter.py` 無 symlink 權限 `[WinError 1314]`）。**殘差 ±1 未歸因**——需一台 macOS 同時量測才能對帳，本節依既定紀律**不做加減推算**、只填實測值 🔴 **量測旗標會改變結果（R60 ARCH-R60-04）**：本格值以 plain `python -m pytest tests/ -q` 量得；R60 四方複審在**同一棵工作樹**加 `PYTHONDONTWRITEBYTECODE=1 … -p no:cacheprovider` 後實測 rc=1（2~3 failed，失敗集中在 `tests/test_gap021_028.py` 的 `--collect-only` 子行程，其 rootdir 退化到磁碟根、掃到 system temp 兄弟項而撞 `WinError 2`），plain 兩次皆 rc=0。照本表驗證時請用 plain 形態；該非確定性已於 R60 立案（macOS 的 `/var/folders` 是同構暴露面）。<!-- autoclaude-pytest-snapshot: R60 round 3 錨點，勿刪；刪除本標記會讓 --check-snapshot fail-loud --> |
-> | AISDLC_SDD `ci-gate` v0.01 | 1478 | **1478** | 兩平台相同。v0.01 的 3 支 docker 測試無 Windows 排除；本機 docker 執行中故全跑<!-- cigate-v001-snapshot: R60 round 3 錨點，勿刪；刪除本標記會讓 --check-snapshot fail-loud --> |
-> | AISDLC_SDD `ci-gate` v0.30 | 1729（R59 記載） | **1750** | −4 ＝ 2 支 `test_phase_h.py` `requires_docker_success`（**`sys.platform.startswith("win")` 硬排除，與 docker 是否可用無關**，見 DEF-101-062）＋ 2 支 `test_post_commit_drift_worktree.py`（POSIX shebang hook chain，`skipif(win)`） 🔴 **R60 訂正：兩欄已不可直接相減**——上述 −4 是 R59 時的平台差（當時 Windows 1725 ／ macOS 1729）；R60 Windows 由 1725 增至**左欄實測值**（本輪 v0.30 側新增回歸鎖；round 1 時點為 1736、round 2 四方三方獨立測得 1747 ⇒ round 3 訂正，過程見上方 provenance 表），而 macOS 欄仍是 R59 記載、本輪未重測。平台差要重新對帳需一次 macOS 實測，本節依既定紀律**不做加減推算**。🔴 **當輪值刻意不寫進歸因散文**（Cluster B 教訓：受管值在同一行出現第二次就是下一個 stale 站點）。<!-- cigate-v030-snapshot: R60 round 3 錨點，勿刪；刪除本標記會讓 --check-snapshot fail-loud --> |
-> | AISDLC_SDD `ci-gate` scripts/tests | 244（R57 記載） | **249** | R59 動工時實測 245（比 R57 記載 +1，未追查是平台差異或 R57 收尾後的回填落差）；收尾為 248＝再 +3，即 DEF-101-512 的兩道降級 fallback 鎖 + QA-R59-10 的 `-rs` 鎖；**R60 收尾見左欄**＝再 +1（本輪 `AISDLC_SDD/scripts/tests/` 側之鎖；`--collect-only` 實測較 passed 數多 1 collected＝多出的那支為 skip，與 passed 數相符）。**未逐支追認該 +1 的來源**，依紀律只填實測值、不做歸因推算。🔴 **當輪值刻意不寫進歸因散文**（同上，Cluster B 教訓）。<!-- cigate-scripts-snapshot: R60 round 3 錨點，勿刪；刪除本標記會讓 --check-snapshot fail-loud --> |
+> | AutoClaude `pytest tests/ -q` | **3779 passed / 210 skipped** | **3767 passed / 208 skipped** | 🔴 **R67 訂正一句已失實的宣稱（R67-F28 併同處理）**：本欄原寫「兩平台的 **passed+skipped 結果總數相同**（3948）」，而 R67 逐欄回填後 macOS 側 passed+skipped 與 Windows 側**都不等於 3948**——該總數是更早世代的值，兩欄本來就在不同時點、不同測試樹上量的（見各自 `snapshot-fingerprints-<平台>` 錨的 `measured-at`），**跨世代的兩欄本就不該相加比對**。故此處**不再寫死任何總數**：要比對兩平台，先確認兩欄的 `measured-at` 指向同一棵樹，否則差額只是時代差。〔**保留的二審 SA 訂正用詞**：`--collect-only` 的計數會**低於** passed+skipped，差額來自兩個模組級 `pytest.importorskip("sqlalchemy")`——sqlalchemy ABSENT 時整檔跳過、collect 少算但跑起來各記 1 skip。原寫「收集總數」會讓照本節驗證的人以為少了 3 支。〕Windows 上 `[WINDOWS-NATIVE-ONLY]` 標籤的 3 支（`test_perception.py::TestCloseKillsCmdShimGrandchild` 1 支、`test_run_local_nightly_static.py::TestConcurrencyGuardBehavior` 2 支）由 skip 轉 pass；反向新增 2 支 Windows 專屬 skip（`test_perception.py` POSIX process-group、`test_sdd_to_playbook_adapter.py` 無 symlink 權限 `[WinError 1314]`）。**殘差 ±1 未歸因**——需一台 macOS 同時量測才能對帳，本節依既定紀律**不做加減推算**、只填實測值 🔴 **量測旗標會改變結果（R60 ARCH-R60-04）**：本格值以 plain `python -m pytest tests/ -q` 量得；R60 四方複審在**同一棵工作樹**加 `PYTHONDONTWRITEBYTECODE=1 … -p no:cacheprovider` 後實測 rc=1（2~3 failed，失敗集中在 `tests/test_gap021_028.py` 的 `--collect-only` 子行程，其 rootdir 退化到磁碟根、掃到 system temp 兄弟項而撞 `WinError 2`），plain 兩次皆 rc=0。照本表驗證時請用 plain 形態；該非確定性已於 R60 立案（macOS 的 `/var/folders` 是同構暴露面）。<!-- autoclaude-pytest-snapshot: R60 round 3 錨點，勿刪；刪除本標記會讓 --check-snapshot fail-loud --> |
+> | AISDLC_SDD `ci-gate` v0.01 | **1478** | **1478** | v0.01 的 3 支 docker 測試無 Windows 排除 ⇒ **本列的兩欄差額完全由 docker daemon 狀態解釋，不是平台差、更不是退化**（daemon 停用時該 3 支跳過＝ −3，方向與是否成立一律看兩欄各自的 provenance）。🔴 **R67 round 2 訂正（SA-R67-07 同類，本輪回填時自查發現）**：原句進一步寫死了「Windows 欄量測時 daemon 執行中／macOS 欄量測時 daemon 停用」這個**當時的組合**，而 R67 round 2 於 macOS 側回填時 daemon 為 `up`，該句當場失實（兩欄現為同值、差額 0）。**故此處不再寫死任何一欄的 daemon 狀態與差額方向**，一律現查：`grep -n 'snapshot-fingerprints-' ONBOARDING.md`（實跑 rc=0，兩條錨各印一行含 `docker=`）。🔴 **兩欄的 docker 狀態一律以各自 `snapshot-fingerprints-<平台>` 錨的 `docker=` provenance 為準**（R67 起機械記錄）——原句寫「本機 docker 執行中故全跑」而沒說「本機」是哪一台，正是 DEF-101-515「容差宣稱漏掉一個維度比沒有容差宣稱更糟」的同型。<!-- cigate-v001-snapshot: R60 round 3 錨點，勿刪；刪除本標記會讓 --check-snapshot fail-loud --> |
+> | AISDLC_SDD `ci-gate` v0.30 | **1751** | **1750** | −4 ＝ 2 支 `test_phase_h.py` `requires_docker_success`（**`sys.platform.startswith("win")` 硬排除，與 docker 是否可用無關**，見 DEF-101-062）＋ 2 支 `test_post_commit_drift_worktree.py`（POSIX shebang hook chain，`skipif(win)`） 🔴 **R60 訂正：兩欄已不可直接相減**——上述 −4 是 R59 時的平台差（當時 Windows 1725 ／ macOS 1729）；R60 Windows 由 1725 增至**Windows 欄實測值**（本輪 v0.30 側新增回歸鎖；round 1 時點為 1736、round 2 四方三方獨立測得 1747 ⇒ round 3 訂正，過程見上方 provenance 表）。🔴 **R67 訂正**：此處原寫「而 macOS 欄仍是 R59 記載、本輪未重測」——R67 已在 macOS 真機一次量完四格並逐欄回填（provenance 見 `snapshot-fingerprints-darwin` 錨），該句已成假話故改寫；**兩欄現在也仍不可直接相減**，因為兩欄的 `measured-at`／`docker`／`pgextras` 不同（Windows 欄整欄 `unrecorded`，見上方說明），本節依既定紀律**不做加減推算**。🔴 **當輪值刻意不寫進歸因散文**（Cluster B 教訓：受管值在同一行出現第二次就是下一個 stale 站點）。<!-- cigate-v030-snapshot: R60 round 3 錨點，勿刪；刪除本標記會讓 --check-snapshot fail-loud --> |
+> | AISDLC_SDD `ci-gate` scripts/tests | **265** | **249** | R59 動工時實測 245（比 R57 記載的 244 +1，未追查是平台差異或 R57 收尾後的回填落差）；收尾為 248＝再 +3，即 DEF-101-512 的兩道降級 fallback 鎖 + QA-R59-10 的 `-rs` 鎖；**R60 收尾見 Windows 欄**＝再 +1（本輪 `AISDLC_SDD/scripts/tests/` 側之鎖；`--collect-only` 實測較 passed 數多 1 collected＝多出的那支為 skip，與 passed 數相符）。**未逐支追認該 +1 的來源**，依紀律只填實測值、不做歸因推算。🔴 **當輪值刻意不寫進歸因散文**（同上，Cluster B 教訓）。<!-- cigate-scripts-snapshot: R60 round 3 錨點，勿刪；刪除本標記會讓 --check-snapshot fail-loud --> |
 >
 > **訂正一項已被證偽的容差宣稱（DEF-101-515 併同處理）**：本節下方 R33 註尾原寫「`ci-gate.sh`
 > 的逐軌 passed 計數對 **docker daemon 可用性**敏感（daemon 停用時 v0.01／v0.30 各 -3），

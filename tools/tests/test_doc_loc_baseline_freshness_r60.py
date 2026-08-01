@@ -53,13 +53,17 @@ WHY（為何非得有這道鎖）：
 """
 from __future__ import annotations
 
+import contextlib
+import datetime
 import hashlib
+import io
 import re
 import sys
+import tempfile
 import unittest
 from contextlib import contextmanager
 from dataclasses import replace
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 
 _TESTS_DIR = Path(__file__).resolve().parent
 _REPO_ROOT = _TESTS_DIR.parents[1]
@@ -85,6 +89,74 @@ def _specs_without_historical():
         yield
     finally:
         SYNC._SPECS = original
+
+
+# ---------------------------------------------------------------- SA-R67-07：欄頭／史料標記判準
+# 判準本體寫成**純函式**（吃 text、回違規說明 list、空＝通過），才做得到「注入一次就看得出
+# 紅綠」；直接在 test 內讀磁碟的寫法無法注入，那正是本 repo 判過的 `NOT-PROVEN`。
+_LOCKED_ANCHOR = "rootunit-baseline-live:"
+# 受鎖欄的欄頭必須自陳的兩件事：①受鎖 token 是平台中立值；②欄頭不代言量測時點與平台。
+# 兩者都是**正面斷言**——反面寫法（禁止出現「收尾實測」）會與「訂正段須逐字引述被推翻
+# 的原句」直接衝突，而這一格是單行巨欄，同行豁免會放行整格（ADR-XPLAT-002 §9.1 SC-4 的坑）。
+_HEADER_NEUTRALITY_TOKEN = "平台中立"
+_HEADER_NON_PROXY_TOKEN = "不再代言量測時點與平台"
+# R60 世代 provenance 表：錨在**語意欄名**而非整句散文，措辭改寫不會誤紅。
+_PROVENANCE_COLUMN_TOKEN = "誰實測過"
+_HISTORICAL_TOKEN = "史料"
+
+
+def _locked_header_coordinates(lines: list[str]) -> tuple[int, int]:
+    """受鎖列所屬表格的 `(表頭行號, 受鎖欄的格索引)`。
+
+    欄索引一律走 `SYNC.platform_cell_index()`（表頭推導的 SSOT，結構異動時自己 fail-loud）；
+    表頭行號另需往上找分隔列，樣式沿用 `SYNC._SEPARATOR_ROW_RE`，**不自寫第二份樣式**。
+    """
+    row_idx = SYNC._anchored_index(lines, _LOCKED_ANCHOR)
+    col = SYNC.platform_cell_index(lines, row_idx, "win32")
+    sep = next(
+        (i for i in range(row_idx - 1, -1, -1) if SYNC._SEPARATOR_ROW_RE.match(lines[i])),
+        None,
+    )
+    if sep is None or sep - 1 < 0:
+        raise AssertionError(
+            f"受鎖列（第 {row_idx + 1} 行）所屬表格找不到表頭 — 表格結構已變動，拒絕猜測"
+        )
+    return sep - 1, col
+
+
+def locked_column_header_problems(text: str) -> list[str]:
+    """表① 受鎖欄的欄頭必須自陳「受鎖 token 平台中立、欄頭不代言量測時點與平台」。"""
+    lines = text.split("\n")
+    header_idx, col = _locked_header_coordinates(lines)
+    cell = SYNC._split_row(lines[header_idx])[col]
+    return [
+        f"表① 受鎖欄欄頭（第 {header_idx + 1} 行）缺「{token}」的自陳 — "
+        f"該欄的受鎖 token 取自 run_root_unittests.MIN_TESTS（平台中立、誰重釘都寫同一格），"
+        f"欄頭一旦代言某平台某輪的實測，下一次跨平台重釘就會靜默造出假 provenance"
+        f"（SA-R67-07）。改寫措辭時請同步本鎖的 token 常數。\n  欄頭：{cell.strip()[:200]}"
+        for token in (_HEADER_NEUTRALITY_TOKEN, _HEADER_NON_PROXY_TOKEN)
+        if token not in cell
+    ]
+
+
+def historical_provenance_marking_problems(text: str) -> list[str]:
+    """R60 世代的 provenance 表頭必須帶世代標記；命中數不為一即 fail-loud。"""
+    hits = [
+        (i, ln) for i, ln in enumerate(text.split("\n"), 1) if _PROVENANCE_COLUMN_TOKEN in ln
+    ]
+    if len(hits) != 1:
+        return [
+            f"ONBOARDING.md 內含「{_PROVENANCE_COLUMN_TOKEN}」的表頭列命中 {len(hits)} 行"
+            f"（預期恰一行）— 被刪除或被複製都會讓本鎖失去鑑別力，故 fail-loud"
+        ]
+    lineno, line = hits[0]
+    if _HISTORICAL_TOKEN in line:
+        return []
+    return [
+        f"第 {lineno} 行的 provenance 表頭未標明是「{_HISTORICAL_TOKEN}」 — 它描述的是 R60 世代"
+        f"的量測與覆核，R65 之後四格已混世代；不標世代就會與表② 的現行 provenance 並存，"
+        f"讀者採信先看到的那一套（SA-R67-07）。\n  行文：{line.strip()[:200]}"
+    ]
 
 
 class TestOnboardingLiveBaselineFreshness(unittest.TestCase):
@@ -469,35 +541,150 @@ class TestSnapshotFingerprintTripwire(unittest.TestCase):
         self.assertNotEqual(after_edit, after_add, "新增測試檔而指紋不變 ⇒ 觸發器無牙")
 
     def test_check_snapshot_reds_on_documented_drift(self) -> None:
-        """文件記載值與現查不符即紅，且訊息帶可執行的回填指令。"""
+        """文件記載值與現查不符即紅，且訊息帶可執行的回填指令。
+
+        R67：指紋改為逐平台記帳，故此處以**本機平台那一欄**驅動——這正是
+        `--check-snapshot` 在本機的判準（別平台欄只做 ⚠️，見 TestR67PerPlatformFingerprints）。
+        """
         text = _ONBOARDING.read_text(encoding="utf-8-sig")
-        tampered = SYNC.render_fingerprints(text, {
-            name: "0" * SYNC._FP_LEN for name, _r, _p in SYNC._FINGERPRINT_TREES
-        })
-        problems = SYNC.check_snapshot(tampered)
+        key = SYNC.current_platform_key()
+        self.assertIsNotNone(key, "本機平台在 §7 表② 沒有對應欄——本測試需在受管平台上跑")
+        tampered = SYNC.render_fingerprints(
+            text,
+            {name: "0" * SYNC._FP_LEN for name, _r, _p in SYNC._FINGERPRINT_TREES},
+            key,
+            SYNC.parse_provenance(text, key),
+        )
+        problems = SYNC.check_snapshot(tampered, key)
         self.assertEqual(len(problems), len(SYNC._FINGERPRINT_TREES))
         self.assertTrue(all("--with-slow" in p for p in problems), problems)
         self.assertTrue(all("presumed stale" in p for p in problems), problems)
 
     def test_fingerprint_anchor_exists_exactly_once_and_round_trips(self) -> None:
+        """每個受管平台各有一條錨，且指紋 ＋ provenance 都能來回無損。"""
         text = _ONBOARDING.read_text(encoding="utf-8-sig")
-        SYNC.anchored_line(text, SYNC._FINGERPRINT_ANCHOR)  # 0/≥2 皆 fail-loud
-        synthetic = {
-            name: f"{i}" * SYNC._FP_LEN
-            for i, (name, _r, _p) in enumerate(SYNC._FINGERPRINT_TREES)
-        }
-        self.assertEqual(
-            SYNC.parse_fingerprints(SYNC.render_fingerprints(text, synthetic)), synthetic
-        )
+        for key in SYNC._PLATFORM_COLUMN_LABELS:
+            SYNC.anchored_line(text, SYNC.fingerprint_anchor(key))  # 0/≥2 皆 fail-loud
+            synthetic = {
+                name: f"{i}" * SYNC._FP_LEN
+                for i, (name, _r, _p) in enumerate(SYNC._FINGERPRINT_TREES)
+            }
+            prov = {f: f"probe-{f}" for f in SYNC._PROVENANCE_FIELDS}
+            rendered = SYNC.render_fingerprints(text, synthetic, key, prov)
+            self.assertEqual(SYNC.parse_fingerprints(rendered, key), synthetic)
+            self.assertEqual(SYNC.parse_provenance(rendered, key), prov)
 
     def test_missing_fingerprint_field_fails_loud(self) -> None:
         text = _ONBOARDING.read_text(encoding="utf-8-sig")
-        line = SYNC.anchored_line(text, SYNC._FINGERPRINT_ANCHOR)
-        first = SYNC._FINGERPRINT_TREES[0][0]
-        broken = text.replace(line, line.replace(f"{first}=", f"{first}_renamed="), 1)
-        with self.assertRaises(AssertionError) as ctx:
-            SYNC.parse_fingerprints(broken)
-        self.assertIn("--with-slow", str(ctx.exception))
+        for key in SYNC._PLATFORM_COLUMN_LABELS:
+            line = SYNC.anchored_line(text, SYNC.fingerprint_anchor(key))
+            first = SYNC._FINGERPRINT_TREES[0][0]
+            broken = text.replace(line, line.replace(f"{first}=", f"{first}_renamed="), 1)
+            with self.assertRaises(AssertionError) as ctx:
+                SYNC.parse_fingerprints(broken, key)
+            self.assertIn("--with-slow", str(ctx.exception))
+
+
+class TestR67R2RootdirConftestIsFingerprintInput(unittest.TestCase):
+    """R67 round 2（SD-R67-02）：決定收集結果的 rootdir `conftest.py` 也必須是指紋輸入。
+
+    WHY（Rule 9 — 測意圖非僅行為）：指紋錨的字面語意是「**該欄的數字是在哪一棵測試樹上
+    量的**」，它存在的唯一理由是「計數只可能因測試樹變動而變」這條因果判準。而 pytest
+    依 rootdir 隱式載入的 `conftest.py` **同樣決定那次執行收集到什麼**（一句
+    `collect_ignore_glob` 就能讓計數改變），卻住在四棵 glob 的覆蓋面之外 ⇒ 判準的「因」
+    漏了一半。SD-R67-02 已實測：在 `AISDLC_SDD_v0.30/conftest.py` 末尾加一行
+    `collect_ignore_glob`，實測計數改變、四格指紋**逐字不變**、`--check-snapshot` ✅ rc=0。
+
+    這與 R60 SD-R60R3-03 修的是**同一類缺口的另一個入口**（那次是樹**內**子目錄、這次是
+    樹**外** rootdir），故一併鎖住，而不是只把當下這一支檔補進去。
+    """
+
+    def test_every_tree_declares_a_rootdir_conftest_and_it_sits_at_the_rootdir(self) -> None:
+        """四棵樹各自都要登記 rootdir conftest，且該檔必須真的住在那棵樹的 rootdir 上。
+
+        位置判準是結構性的：rootdir 必須是測試樹的**祖先目錄**。登記到別處（例如把
+        `AutoClaude/conftest.py` 掛到 v030）會讓指紋回答錯的問題，而值仍然「有變化」
+        ⇒ 光看指紋會變不足以證明對應關係正確。
+        """
+        for name, rel, _pat in SYNC._FINGERPRINT_TREES:
+            extras = SYNC.rootdir_conftests_for(name)
+            self.assertTrue(
+                extras,
+                f"[{name}] 未登記任何 rootdir conftest——該欄的收集結果可被一支樹外 "
+                f"conftest 改變而指紋不動（SD-R67-02 原始形態）",
+            )
+            tree = PurePosixPath(rel)
+            for conftest in extras:
+                rootdir = PurePosixPath(conftest).parent
+                self.assertTrue(
+                    tree == rootdir or rootdir in tree.parents,
+                    f"[{name}] 登記的 {conftest} 不在測試樹 {rel} 的祖先目錄上"
+                    f"——pytest 不會在該樹的執行中載入它，這條登記是錯的對應關係",
+                )
+
+    def test_existing_rootdir_conftest_actually_changes_that_column(self) -> None:
+        """唯讀鑑別力：對**確實存在**的 rootdir conftest，帶它與不帶它的指紋必須不同。
+
+        另斷言 `measure_fingerprints()` 交出來的就是「帶 extras」那一份——只改
+        `_FINGERPRINT_ROOTDIR_CONFTESTS` 而忘了讓量測器吃它，本條當場紅。
+        """
+        live = SYNC.measure_fingerprints()
+        checked = 0
+        for name, rel, pat in SYNC._FINGERPRINT_TREES:
+            extras = SYNC.rootdir_conftests_for(name)
+            present = tuple(e for e in extras if (SYNC._REPO_ROOT / e).is_file())
+            self.assertEqual(
+                live[name], SYNC.tree_fingerprint(rel, pat, extras),
+                f"[{name}] measure_fingerprints() 未把 rootdir conftest 納入指紋輸入",
+            )
+            if not present:
+                continue  # v0.01（ADR-XPLAT-001 凍結，無此檔）／AutoClaude（尚未建立）
+            checked += 1
+            self.assertNotEqual(
+                SYNC.tree_fingerprint(rel, pat), live[name],
+                f"[{name}] 存在的 rootdir conftest {present} 對指紋零貢獻 ⇒ 改它不會觸發",
+            )
+        self.assertGreaterEqual(
+            checked, 1,
+            "沒有任何一棵樹的 rootdir conftest 存在於磁碟上 ⇒ 本鎖退化為恆真"
+            "（載具鑑別力自證，同 _MIN_* 下限釘選慣例）",
+        )
+
+    def test_creating_or_editing_a_rootdir_conftest_moves_the_fingerprint(self) -> None:
+        """沙箱行為鎖：conftest **新建**與**改內容**都必須讓該欄指紋改變。
+
+        新建那一半專門守 v0.01／AutoClaude 這種「今天還不存在」的格：若實作寫成「檔案
+        不存在就整條登記跳過」而非「不貢獻 bytes」，那兩格會永遠對新增 conftest 免疫——
+        而「有人為凍結版或 AutoClaude 加一支 rootdir conftest」正是最需要被看到的異動。
+        """
+        with tempfile.TemporaryDirectory() as tmp:
+            sandbox = Path(tmp)
+            tree = sandbox / "vX" / "tools" / "tests"
+            tree.mkdir(parents=True)
+            (tree / "test_a.py").write_bytes(b"def test_a():\n    assert True\n")
+            conftest_rel = "vX/conftest.py"
+            conftest = sandbox / conftest_rel
+            original_root = SYNC._REPO_ROOT
+            try:
+                SYNC._REPO_ROOT = sandbox
+                args = ("vX/tools/tests", "**/*.py", (conftest_rel,))
+                before = SYNC.tree_fingerprint(*args)
+                self.assertEqual(
+                    before, SYNC.tree_fingerprint("vX/tools/tests", "**/*.py"),
+                    "conftest 尚不存在時不得貢獻任何 bytes（否則等於憑空造出差異）",
+                )
+                conftest.write_bytes(b"# rootdir conftest\n")
+                after_create = SYNC.tree_fingerprint(*args)
+                conftest.write_bytes(b'# rootdir conftest\ncollect_ignore_glob = ["test_a.py"]\n')
+                after_edit = SYNC.tree_fingerprint(*args)
+            finally:
+                SYNC._REPO_ROOT = original_root
+        self.assertNotEqual(before, after_create, "新建 rootdir conftest 而指紋不動 ⇒ 觸發器漏")
+        self.assertNotEqual(
+            after_create, after_edit,
+            "改 rootdir conftest 內容（此處正是會改變收集結果的 collect_ignore_glob）"
+            "而指紋不動 ⇒ SD-R67-02 原始形態原封不動",
+        )
 
 
 class TestSlowSnapshotCellsRoundTrip(unittest.TestCase):
@@ -508,13 +695,27 @@ class TestSlowSnapshotCellsRoundTrip(unittest.TestCase):
         for spec in SYNC._SLOW_SPECS:
             SYNC.anchored_line(text, spec.anchor)  # 0/≥2 皆 fail-loud
 
-    def test_slow_documented_extracts_windows_column_not_macos(self) -> None:
-        """macOS 欄與 Windows 欄同形，抽錯欄是 SA-R60-01 的原始成因 ⇒ 明確斷言。"""
+    def test_slow_documented_reads_the_requested_platform_column(self) -> None:
+        """兩欄同形，抽錯欄是 SA-R60-01 的原始成因 ⇒ 逐平台明確斷言抽到的字面就在該欄格內。
+
+        R67 改形：判準不再是「有沒有 `**` 粗體」（那是 R67-D1 的成因——粗體被當成「哪一
+        欄」的判準，於是回填在結構上只寫得到 Windows 欄），而是「抽到的值必須逐字出現在
+        **該平台那一格**、且**不等於**另一欄的值時另一欄不得被誤讀成它」。
+        """
         text = _ONBOARDING.read_text(encoding="utf-8-sig")
-        doc = SYNC.slow_documented(text)
-        line = SYNC.anchored_line(text, "autoclaude-pytest-snapshot:")
-        windows = doc["autoclaude-pytest-snapshot:"]
-        self.assertIn(f"**{windows['passed']} passed / {windows['skipped']} skipped**", line)
+        lines = text.split("\n")
+        for key in SYNC._PLATFORM_COLUMN_LABELS:
+            doc = SYNC.slow_documented(text, key)
+            for spec in SYNC._SLOW_SPECS:
+                idx = SYNC._anchored_index(lines, spec.anchor)
+                cell = SYNC._split_row(lines[idx])[
+                    SYNC.platform_cell_index(lines, idx, key)
+                ]
+                for name, value in doc[spec.anchor].items():
+                    self.assertIn(
+                        str(value), cell,
+                        f"{key}/{spec.anchor}/{name} 抽到的值不在該平台那一格內 ⇒ 抽錯欄",
+                    )
 
     def test_render_slow_round_trips_all_four_cells(self) -> None:
         """回填後重讀必須逐格等於餵進去的值（否則 `--write --with-slow` 寫錯格）。"""
@@ -525,12 +726,13 @@ class TestSlowSnapshotCellsRoundTrip(unittest.TestCase):
             "cigate-v030-snapshot:": {"passed": 2222},
             "cigate-scripts-snapshot:": {"passed": 3333},
         }
-        rendered = SYNC.render_slow(text, synthetic)
-        self.assertEqual(SYNC.slow_documented(rendered), synthetic)
-        changed = sum(
-            1 for a, b in zip(text.split("\n"), rendered.split("\n"), strict=True) if a != b
-        )
-        self.assertEqual(changed, len(SYNC._SLOW_SPECS), "回填動到的行數 ≠ 受管格數")
+        for key in SYNC._PLATFORM_COLUMN_LABELS:
+            rendered = SYNC.render_slow(text, synthetic, key)
+            self.assertEqual(SYNC.slow_documented(rendered, key), synthetic)
+            changed = sum(
+                1 for a, b in zip(text.split("\n"), rendered.split("\n"), strict=True) if a != b
+            )
+            self.assertEqual(changed, len(SYNC._SLOW_SPECS), "回填動到的行數 ≠ 受管格數")
 
     def test_render_slow_is_not_order_dependent(self) -> None:
         """兩個欄位共處一段字時，第一次替換不得吃掉第二個欄位的上下文。
@@ -540,17 +742,18 @@ class TestSlowSnapshotCellsRoundTrip(unittest.TestCase):
         以「只改 passed 不改 skipped」的構造把該退化直接測到。
         """
         text = _ONBOARDING.read_text(encoding="utf-8-sig")
-        doc = SYNC.slow_documented(text)
-        only_passed = dict(doc)
-        only_passed["autoclaude-pytest-snapshot:"] = {
-            "passed": 4242, "skipped": doc["autoclaude-pytest-snapshot:"]["skipped"],
-        }
-        again = SYNC.slow_documented(SYNC.render_slow(text, only_passed))
-        self.assertEqual(again["autoclaude-pytest-snapshot:"]["passed"], 4242)
-        self.assertEqual(
-            again["autoclaude-pytest-snapshot:"]["skipped"],
-            doc["autoclaude-pytest-snapshot:"]["skipped"],
-        )
+        for key in SYNC._PLATFORM_COLUMN_LABELS:
+            doc = SYNC.slow_documented(text, key)
+            only_passed = dict(doc)
+            only_passed["autoclaude-pytest-snapshot:"] = {
+                "passed": 4242, "skipped": doc["autoclaude-pytest-snapshot:"]["skipped"],
+            }
+            again = SYNC.slow_documented(SYNC.render_slow(text, only_passed, key), key)
+            self.assertEqual(again["autoclaude-pytest-snapshot:"]["passed"], 4242)
+            self.assertEqual(
+                again["autoclaude-pytest-snapshot:"]["skipped"],
+                doc["autoclaude-pytest-snapshot:"]["skipped"],
+            )
 
     def test_slow_measurer_keys_are_all_implemented(self) -> None:
         """`_SLOW_SPECS` 的 measurer 名必須都被 `measure_slow()` 供給——擴充時漏接即 KeyError。
@@ -1019,6 +1222,762 @@ class TestFingerprintIsLineEndingAgnostic(unittest.TestCase):
                 digest_lf.hexdigest()[: SYNC._FP_LEN], digest_crlf.hexdigest()[: SYNC._FP_LEN],
                 f"[{name}] 真實測試樹在 CRLF checkout 下指紋改變 ⇒ 該格在 macOS 上會紅",
             )
+
+
+class TestR67PlatformColumnIsFirstClass(unittest.TestCase):
+    """R67-D1（本輪唯一 P1）：回填必須**只寫本機平台那一欄**，寫到別欄要在結構上不可能。
+
+    WHY（測意圖非僅行為，Rule 9）：§7 表② 存在的**唯一**理由是「讓開發者分辨『平台差異』
+    與『退化』」。R67 之前 `render_slow()` 的四組正則一律以 `**…**` 粗體錨定 Windows 欄
+    （原註解自陳「以 `**` 包裝限定在 Windows 欄」），而 `measure_slow()` 量的是本機——於是
+    在 macOS 上執行文件與 `--check-snapshot` 紅燈訊息**都指路**的那條回填指令，會把 macOS
+    實測值靜默寫進標示「Windows 11 實測」的格子：表格還是滿的、指令還是 rc=0，但它從此
+    在說謊。這比空著更糟——空著至少看得出來沒人量。
+
+    故本類別鎖的不是「render_slow 會改字」，而是**「另一個平台欄逐字不動」**這條不變量：
+    這是「平台差異可讀」這個目的在程式碼裡唯一能被機械檢查的形式。
+
+    邊界（誠實劃界）：本鎖保證「不會寫到別欄」，**不保證**寫進來的數字本身是在對的環境
+    量的（那由 `snapshot-fingerprints-<平台>` 錨的 provenance ＋ `--write --with-slow` 的
+    pgextras 守門負責，見 TestR67PerPlatformFingerprints／TestR67CliFailsLoud）。
+    """
+
+    def setUp(self) -> None:
+        self.text = _ONBOARDING.read_text(encoding="utf-8-sig")
+        self.synthetic = {
+            "autoclaude-pytest-snapshot:": {"passed": 8881, "skipped": 777},
+            "cigate-v001-snapshot:": {"passed": 8882},
+            "cigate-v030-snapshot:": {"passed": 8883},
+            "cigate-scripts-snapshot:": {"passed": 8884},
+        }
+
+    def _cells(self, text: str, platform_key: str) -> dict[str, str]:
+        lines = text.split("\n")
+        return {
+            spec.anchor: SYNC._split_row(lines[SYNC._anchored_index(lines, spec.anchor)])[
+                SYNC.platform_cell_index(lines, SYNC._anchored_index(lines, spec.anchor), platform_key)
+            ]
+            for spec in SYNC._SLOW_SPECS
+        }
+
+    def test_writing_one_platform_leaves_every_other_column_byte_identical(self) -> None:
+        """核心不變量：寫 A 平台欄時，B 平台欄**逐字不變**（R67-D1 的直接反例形態）。"""
+        for target in SYNC._PLATFORM_COLUMN_LABELS:
+            rendered = SYNC.render_slow(self.text, self.synthetic, target)
+            self.assertEqual(
+                SYNC.slow_documented(rendered, target), self.synthetic,
+                f"{target} 欄沒被寫進去 ⇒ 回填無效",
+            )
+            for other in SYNC._PLATFORM_COLUMN_LABELS:
+                if other == target:
+                    continue
+                self.assertEqual(
+                    self._cells(rendered, other), self._cells(self.text, other),
+                    f"寫 {target} 欄時動到了 {other} 欄——這正是 R67-D1：在 macOS 跑回填"
+                    f"會把 macOS 數字寫進標示「Windows 11 實測」的格子，並產生一句假 provenance",
+                )
+                self.assertEqual(
+                    SYNC.slow_documented(rendered, other), SYNC.slow_documented(self.text, other),
+                )
+
+    def test_column_index_is_derived_from_the_header_not_hardcoded(self) -> None:
+        """欄號必須由表頭推導：在平台欄之前插一欄，抽取結果不得改變。
+
+        鑑別力來源：寫死欄號（或靠 `**` 粗體錨定）在這個構造下會抽到新插入的那一欄。
+        """
+        lines = self.text.split("\n")
+        anchor = SYNC._SLOW_SPECS[0].anchor
+        idx = SYNC._anchored_index(lines, anchor)
+        header_idx = next(
+            i - 1 for i in range(idx - 1, -1, -1) if SYNC._SEPARATOR_ROW_RE.match(lines[i])
+        )
+        sep_idx = header_idx + 1
+        widened = list(lines)
+        widened[header_idx] = _insert_cell(lines[header_idx], 1, " R67 探針欄 ")
+        widened[sep_idx] = _insert_cell(lines[sep_idx], 1, "---")
+        for spec in SYNC._SLOW_SPECS:
+            row = SYNC._anchored_index(lines, spec.anchor)
+            widened[row] = _insert_cell(lines[row], 1, " 探針 ")
+        widened_text = "\n".join(widened)
+        for key in SYNC._PLATFORM_COLUMN_LABELS:
+            self.assertEqual(
+                SYNC.slow_documented(widened_text, key), SYNC.slow_documented(self.text, key),
+                f"插入一欄後 {key} 欄抽到的值改變 ⇒ 欄號被寫死（或靠粗體猜欄）",
+            )
+
+    def test_broken_table_structure_fails_loud_instead_of_guessing(self) -> None:
+        """表頭抽不到該平台識別字時必須 fail-loud——猜欄就是把數字寫錯格。"""
+        lines = self.text.split("\n")
+        idx = SYNC._anchored_index(lines, SYNC._SLOW_SPECS[0].anchor)
+        header_idx = next(
+            i - 1 for i in range(idx - 1, -1, -1) if SYNC._SEPARATOR_ROW_RE.match(lines[i])
+        )
+        broken = list(lines)
+        broken[header_idx] = lines[header_idx].replace("macOS", "MAC-OS")
+        with self.assertRaises(AssertionError) as ctx:
+            SYNC.slow_documented("\n".join(broken), "darwin")
+        self.assertIn("平台識別字", str(ctx.exception))
+
+    def test_unmanaged_platform_gets_no_column_instead_of_a_guessed_one(self) -> None:
+        """Linux（CI runner）沒有欄 ⇒ 回 None，不得硬塞一欄。"""
+        self.assertIsNone(SYNC.current_platform_key("linux"))
+        self.assertEqual(SYNC.current_platform_key("darwin"), "darwin")
+        self.assertEqual(SYNC.current_platform_key("win32"), "win32")
+
+    def test_provenance_inside_a_managed_cell_fails_loud(self) -> None:
+        """格內混進第二個數字（例如 `1729（R59 記載）`）必須 fail-loud、且訊息指路 provenance 該住哪。
+
+        WHY：R67 前 macOS 欄就是這樣寫的，於是那一格永遠抽不出乾淨的值、也永遠沒人回填。
+        """
+        lines = self.text.split("\n")
+        idx = SYNC._anchored_index(lines, "cigate-v030-snapshot:")
+        col = SYNC.platform_cell_index(lines, idx, "darwin")
+        cells = SYNC._split_row(lines[idx])
+        cells[col] = cells[col].rstrip() + "（R59 記載） "
+        polluted = list(lines)
+        polluted[idx] = "|".join(cells)
+        with self.assertRaises(AssertionError) as ctx:
+            SYNC.slow_documented("\n".join(polluted), "darwin")
+        self.assertIn("snapshot-fingerprints-darwin:", str(ctx.exception))
+
+
+def _insert_cell(line: str, position: int, cell: str) -> str:
+    parts = SYNC._split_row(line)
+    parts.insert(position, cell)
+    return "|".join(parts)
+
+
+class TestR67PerPlatformFingerprints(unittest.TestCase):
+    """R67-D6：指紋/provenance 逐平台記帳——另一欄的 stale 不得在結構上永遠測不到。
+
+    WHY：原版只有一條全域 `snapshot-fingerprints:` 錨，語意是「上一次回填時的測試樹」；
+    但回填在結構上只寫得到一欄（見 R67-D1）⇒ 另一欄的 stale **永遠不可能被偵測**。
+    實測（Scan-D）：把 macOS 欄三格灌成 9999，`--check-snapshot` 照樣印 ✅ rc=0。
+    一個「該紅時結構上不可能紅」的守門比沒有守門更糟：它會讓人以為那一欄被看著。
+
+    本類別一律以**合成的「兩欄皆新鮮」文本**驅動（把 live 指紋寫進兩欄），刻意不依賴
+    真實文件當下是否新鮮——否則本鎖會在任何一輪動到測試樹時連帶假紅，而回填要付分鐘級
+    代價（同 TestSnapshotFingerprintTripwire 的既定紀律）。
+    """
+
+    def setUp(self) -> None:
+        text = _ONBOARDING.read_text(encoding="utf-8-sig")
+        live = SYNC.measure_fingerprints()
+        for key in SYNC._PLATFORM_COLUMN_LABELS:
+            text = SYNC.render_fingerprints(text, live, key, SYNC.parse_provenance(text, key))
+        self.fresh = text
+        self.live = live
+
+    def _tamper(self, key: str) -> str:
+        return SYNC.render_fingerprints(
+            self.fresh,
+            {name: "f" * SYNC._FP_LEN for name, _r, _p in SYNC._FINGERPRINT_TREES},
+            key,
+            SYNC.parse_provenance(self.fresh, key),
+        )
+
+    def test_control_group_both_columns_fresh_is_green_everywhere(self) -> None:
+        """鑑別力自證：合成的新鮮文本在每個平台視角下都不得有問題（非恆紅載具）。"""
+        for key in (*SYNC._PLATFORM_COLUMN_LABELS, None):
+            problems, notices = SYNC.snapshot_report(self.fresh, key)
+            self.assertEqual(problems, [], f"平台 {key} 視角下合成新鮮文本仍紅")
+            self.assertEqual(notices, [], f"平台 {key} 視角下合成新鮮文本仍有提醒")
+
+    def test_each_platform_column_staleness_is_detectable_from_that_platform(self) -> None:
+        """**本鎖的核心**：任一欄 stale，都能從該平台的視角被測到（R67-D6 反例）。"""
+        for key in SYNC._PLATFORM_COLUMN_LABELS:
+            problems = SYNC.check_snapshot(self._tamper(key), key)
+            self.assertEqual(
+                len(problems), len(SYNC._FINGERPRINT_TREES),
+                f"{key} 欄整欄 stale 卻測不到 ⇒ 該欄在結構上不受監看（R67-D6 原始形態）",
+            )
+            self.assertTrue(
+                all(SYNC._PLATFORM_COLUMN_LABELS[key] in p for p in problems), problems
+            )
+
+    def test_other_platform_staleness_is_a_notice_not_an_rc_failure(self) -> None:
+        """別台機器的欄只做 ⚠️：本機修不動的東西硬紅只會養成忽略紅燈的習慣。
+
+        另鎖「⚠️ 必須是**單行**摘要」：這條訊息每次 pre-push 都會印，逐格長文會洗版到
+        讓人自動略過——那時真正該看的紅燈也一起被略過（本 repo 對「養成忽略紅燈」的
+        既定紀律，同表② 刻意不接根層閘門的理由）。
+        """
+        for key in SYNC._PLATFORM_COLUMN_LABELS:
+            for other in SYNC._PLATFORM_COLUMN_LABELS:
+                if other == key:
+                    continue
+                problems, notices = SYNC.snapshot_report(self._tamper(other), key)
+                self.assertEqual(problems, [], f"{other} 欄 stale 卻讓 {key} 視角 rc 紅")
+                self.assertEqual(len(notices), 1, notices)
+                self.assertNotIn("\n", notices[0], "別平台欄的 ⚠️ 必須壓成單行")
+                self.assertIn(SYNC._PLATFORM_COLUMN_LABELS[other], notices[0])
+
+    def test_unmanaged_platform_degrades_to_all_columns_stale(self) -> None:
+        """Linux CI runner：判準退化為「沒有任何一欄新鮮才紅」（弱，但不冤）。"""
+        one_stale = self._tamper(next(iter(SYNC._PLATFORM_COLUMN_LABELS)))
+        problems, notices = SYNC.snapshot_report(one_stale, None)
+        self.assertEqual(problems, [], "只有一欄 stale 就讓無欄平台紅 ⇒ 判準比宣告的強，文件失實")
+        self.assertTrue(notices)
+
+        all_stale = one_stale
+        for key in SYNC._PLATFORM_COLUMN_LABELS:
+            all_stale = SYNC.render_fingerprints(
+                all_stale,
+                {name: "e" * SYNC._FP_LEN for name, _r, _p in SYNC._FINGERPRINT_TREES},
+                key,
+                SYNC.parse_provenance(all_stale, key),
+            )
+        self.assertTrue(
+            SYNC.snapshot_report(all_stale, None)[0],
+            "全部欄皆 stale 而無欄平台仍綠 ⇒ 退化判準也失效（root-infra-ci 跑的就是這條）",
+        )
+
+    def test_every_platform_anchor_carries_full_provenance(self) -> None:
+        """provenance 四欄缺一即 fail-loud——它是這張表能被信任的全部理由。"""
+        text = _ONBOARDING.read_text(encoding="utf-8-sig")
+        for key in SYNC._PLATFORM_COLUMN_LABELS:
+            prov = SYNC.parse_provenance(text, key)
+            self.assertEqual(sorted(prov), sorted(SYNC._PROVENANCE_FIELDS))
+            for field, value in prov.items():
+                self.assertTrue(value.strip(), f"{key}/{field} 為空")
+            line = SYNC.anchored_line(text, SYNC.fingerprint_anchor(key))
+            for field in SYNC._PROVENANCE_FIELDS:
+                broken = text.replace(line, line.replace(f"{field}=", f"{field}_gone="), 1)
+                with self.assertRaises(AssertionError) as ctx:
+                    SYNC.parse_provenance(broken, key)
+                self.assertIn(field, str(ctx.exception))
+
+    def test_table1_macos_cell_declares_it_is_not_lock_covered(self) -> None:
+        """R67-F28：表① 的 macOS 欄必須自陳「不受 live 鎖管轄」，且不得再寫死收集總數。
+
+        WHY：`rootunit-baseline-live` 鎖只抽**右欄**那個 `N tests OK` token，macOS 欄是純
+        散文。原本該格寫死 `616（skipped=4；R57 量測）`，落後實況約九輪而**任何機械物都
+        抓不到**——它根本不在鎖的取值範圍內；而該格與受鎖格同處一張標榜「live 格（有機械
+        鎖）」的表內，讀者會誤以為「有鎖所以可信」（R60 ARCH-R60-03 的原始成因）。
+        故判準有兩條：(a) 該格必須自陳不受鎖管轄；(b) 不得再寫死收集總數（改指向 live 值）。
+        """
+        lines = _ONBOARDING.read_text(encoding="utf-8-sig").split("\n")
+        idx = SYNC._anchored_index(lines, "rootunit-baseline-live:")
+        # 表① 表頭同樣有 macOS／Windows 兩欄 ⇒ 直接複用同一套「由表頭推導欄號」機制，
+        # 不另寫第二份定位邏輯（本檔一直在治的「同一語意兩份實作」）。
+        macos_cell = SYNC._split_row(lines[idx])[
+            SYNC.platform_cell_index(lines, idx, "darwin")
+        ]
+        self.assertIn(
+            "不受 live 鎖管轄", macos_cell,
+            "表① macOS 欄未自陳不受 live 鎖管轄——它與受鎖格同處一張標榜「有機械鎖」的表，"
+            "不寫明就會被讀成「有鎖所以可信」",
+        )
+        live_tests = SYNC.measure_rootunit()["tests"]
+        self.assertNotIn(
+            str(live_tests), macos_cell,
+            "表① macOS 欄又寫死了收集總數——該格無鎖，寫死即下一個 stale 站點；"
+            "正確形態是指向右欄 live 值",
+        )
+
+    def test_table1_locked_column_header_does_not_speak_for_a_provenance(self) -> None:
+        """SA-R67-07 的回歸鎖：表① **受鎖欄的欄頭**不得代言量測平台／時點。
+
+        WHY（成因是結構性的，不是筆誤）：`rootunit-baseline-live` 抽的 token 取自
+        `run_root_unittests.MIN_TESTS`，那是一個**平台中立**的下限釘選——誰在哪台機器重釘
+        都寫進同一格。而該格所在欄的欄頭長年寫著「Windows 11（R60 收尾實測）」，於是
+        R67 在 Darwin 真機重釘後，一個 macOS 量得的數字就靜靜掛在標示「Windows 11 實測」
+        的欄頭底下。**產生器把 token 洗新鮮了，欄頭卻沒有任何機械物在看**——與 DEF-101-562
+        （「只保證被抽取的 token 新鮮，不保證同一行的散文新鮮」）是同一個病灶的欄頭版。
+
+        判準刻意寫成**正面斷言**（欄頭必須自陳中立），不寫成「不得出現『收尾實測』」：
+        訂正段必須逐字引述被推翻的原句才能讓讀者辨認版本，而這一格是**單行巨欄**
+        （整格就是檔案裡的一行），任何同行豁免都會把整格放行——那正是
+        `ADR-XPLAT-002` §9.1 SC-4 已記載的坑。
+        """
+        text = _ONBOARDING.read_text(encoding="utf-8-sig")
+        self.assertEqual(
+            locked_column_header_problems(text), [],
+            "表① 受鎖欄的欄頭又開始代言量測平台／時點：\n  "
+            + "\n  ".join(locked_column_header_problems(text)),
+        )
+
+    def test_the_locked_column_header_lock_has_teeth(self) -> None:
+        """注入：把欄頭還原成 SA-R67-07 命中的那個形態，必須轉紅並指名缺哪一句。"""
+        text = _ONBOARDING.read_text(encoding="utf-8-sig")
+        lines = text.split("\n")
+        header_idx, col = _locked_header_coordinates(lines)
+        cells = SYNC._split_row(lines[header_idx])
+        cells[col] = " **Windows 11（R60 收尾實測）** "
+        lines[header_idx] = "|".join(cells)
+        reverted = "\n".join(lines)
+        self.assertNotEqual(reverted, text, "注入基底失效：欄頭沒有被改到")
+        problems = locked_column_header_problems(reverted)
+        self.assertTrue(problems, "還原成被推翻的欄頭形態仍綠 ⇒ 本鎖無牙")
+        self.assertIn(_HEADER_NEUTRALITY_TOKEN, problems[0])
+
+    def test_the_r60_generation_provenance_table_is_marked_as_historical(self) -> None:
+        """SA-R67-07 的另一半：R60 世代的 provenance 表必須自標世代，否則會被讀成現況。
+
+        WHY：R65 只回填四格中的一格，該表自此**混世代**；它卻仍以現行 provenance 的姿態
+        與表② 並存 ⇒ 同一節裡兩套結論相反的 provenance，讀者採信先看到的那一套。
+        判準錨在**語意欄名**（`誰實測過`）而不是整句散文，且 0 個或多個命中皆 fail-loud
+        （防「刪掉表頭＝靜默縮面」）。
+        """
+        text = _ONBOARDING.read_text(encoding="utf-8-sig")
+        self.assertEqual(
+            historical_provenance_marking_problems(text), [],
+            "\n  ".join(historical_provenance_marking_problems(text)),
+        )
+
+    def test_the_historical_provenance_lock_has_teeth(self) -> None:
+        """注入兩種退化：拿掉世代標記（紅）、以及整列消失／複製（fail-loud 紅）。"""
+        text = _ONBOARDING.read_text(encoding="utf-8-sig")
+        header = next(ln for ln in text.split("\n") if _PROVENANCE_COLUMN_TOKEN in ln)
+        for what, mutated in (
+            ("拿掉世代標記", text.replace(header, header.replace(_HISTORICAL_TOKEN, "現行"))),
+            ("整列消失", text.replace(header, "")),
+            ("表頭被複製", text.replace(header, header + "\n" + header)),
+        ):
+            with self.subTest(injection=what):
+                self.assertNotEqual(mutated, text, f"注入基底失效：{what}")
+                self.assertTrue(
+                    historical_provenance_marking_problems(mutated),
+                    f"{what} 後仍綠 ⇒ 本鎖無牙",
+                )
+
+    def test_unrecorded_fingerprint_never_matches_a_live_tree(self) -> None:
+        """`unrecorded` 佔位值必須恆判 stale——否則「不可考」會被誤讀成「新鮮」。"""
+        self.assertNotIn(SYNC._UNRECORDED, set(SYNC.measure_fingerprints().values()))
+        self.assertFalse(
+            re.fullmatch(r"[0-9a-f]{%d}" % SYNC._FP_LEN, SYNC._UNRECORDED),
+            "佔位值長得像真指紋 ⇒ 有機率與 live 值相等而假裝新鮮",
+        )
+
+
+class TestR67R2OtherPlatformNoticeIsNotAStandingWarning(unittest.TestCase):
+    """R67 round 2（QA-R67-05）：別平台欄那一則**結構上恆亮**，故不得掛在警告頻道。
+
+    WHY（Rule 9 — 測意圖）：單機交替工作流（R66 在 Windows、R67 在 macOS、下一輪再換）下，
+    任一輪都會動到四棵樹之一 ⇒ 另一平台欄的指紋必然對不上，且**本機無論如何都清不掉**
+    （回填必須在那台機器上實跑）。於是它是一則「系統完全正常時也永遠亮著」的訊號。本 repo
+    已明文論證過後果（`tools/run_root_unittests.py`：「常亮的警告＝背景噪音」）——讀者學會
+    略過這一段，就會連同段真正有牙的「本機平台欄轉紅」一起略過。
+
+    本類別鎖的三條不變量：訊息**在 stdout 的資訊頻道**（不是 stderr 的 ⚠️）、**從未回填過**
+    與**回填過但過期**兩種狀態措辭可區分、且後者帶「距上次量測幾天」這個唯一可行動的量。
+    """
+
+    def setUp(self) -> None:
+        self.local = SYNC.current_platform_key()
+        self.assertIsNotNone(self.local, "本測試需在 §7 表② 有對應欄的平台上跑")
+        others = [k for k in SYNC._PLATFORM_COLUMN_LABELS if k != self.local]
+        self.assertTrue(others, "表② 只有一欄 ⇒ 本鎖無標的（新增平台欄時請同步檢視）")
+        self.other = others[0]
+        text = _ONBOARDING.read_text(encoding="utf-8-sig")
+        live = SYNC.measure_fingerprints()
+        # 本機欄填成新鮮（不讓真實文件當下是否過期干擾本鎖），別平台欄由各測試自行擺弄。
+        self.text = SYNC.render_fingerprints(
+            text, live, self.local, SYNC.parse_provenance(text, self.local)
+        )
+        self.stale_fp = {name: "0" * SYNC._FP_LEN for name, _r, _p in SYNC._FINGERPRINT_TREES}
+
+    def _notice(self, provenance: dict[str, str]) -> str:
+        tampered = SYNC.render_fingerprints(self.text, self.stale_fp, self.other, provenance)
+        problems, notices = SYNC.snapshot_report(tampered, self.local)
+        self.assertEqual(problems, [], "別平台欄 stale 不得計入本機 rc")
+        self.assertEqual(len(notices), 1, notices)
+        self.assertNotIn("\n", notices[0], "別平台欄的提醒必須壓成單行")
+        self.assertIn(SYNC._PLATFORM_COLUMN_LABELS[self.other], notices[0])
+        return notices[0]
+
+    def test_never_baselined_column_says_so_instead_of_faking_a_drift(self) -> None:
+        """provenance 全 `unrecorded` ＝ 從未量過，不是「量過但過期」。
+
+        原措辭把它畫成 `v001:unrecorded→8ffe3c3dabbd` 這種漂移箭頭，讀起來像「有人量過、
+        後來樹變了」——實際上那一欄從來沒有任何人量過。同一個符號代表兩種完全不同的狀態，
+        就是把「不知道」寫得像結論（同 `NO-LOCAL-CARRIER` 必須附理由的紀律）。
+        """
+        notice = self._notice({f: SYNC._UNRECORDED for f in SYNC._PROVENANCE_FIELDS})
+        self.assertIn("尚未建立基線", notice)
+        self.assertNotIn("→", notice, "從未回填過的欄不得以漂移箭頭呈現（把『沒量過』寫成『過期』）")
+
+    def test_recorded_but_drifted_column_reports_measurement_age(self) -> None:
+        """回填過的欄要給「距今幾天」——那是這一則裡唯一隨時間變化、也唯一可行動的量。
+
+        四棵樹的指紋 diff 每輪都不同但資訊量為零（它只是在說「樹動過了」，而在單機交替下
+        那是必然）；真正決定「該不該換台機器補量」的是**上次量測有多久了**。
+        """
+        past = datetime.date.today() - datetime.timedelta(days=37)
+        notice = self._notice({
+            "measured-at": past.isoformat(),
+            "host": "probe-host",
+            "docker": "up",
+            "pgextras": "absent",
+        })
+        self.assertIn("距今 37 天", notice)
+        self.assertIn("結構性常態", notice, "未說明它在單機交替下恆亮 ⇒ 讀者會當成新問題追")
+        self.assertIn("本機平台欄", notice, "未把注意力指回有牙的那一半")
+
+    def test_notice_goes_to_stdout_information_channel_not_the_warning_channel(self) -> None:
+        """頻道不變量：提醒印在 stdout 且不帶 ⚠️；警告頻道只留給本機修得動的東西。
+
+        以替身 `snapshot_report` 驅動，讓本鎖與「真實文件當下是否過期」解耦——否則某一輪
+        剛好兩欄都新鮮時，本鎖會退化成恆真而沒人發現。
+        """
+        probe = "PROBE-NOTICE-R67R2"
+        original = SYNC.snapshot_report
+        out, err = io.StringIO(), io.StringIO()
+        try:
+            SYNC.snapshot_report = lambda *a, **k: ([], [probe])
+            with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+                rc = SYNC.main(["--check-snapshot"])
+        finally:
+            SYNC.snapshot_report = original
+        self.assertEqual(rc, 0, "無 rc 級問題時不得因提醒而回非零")
+        self.assertIn(probe, out.getvalue(), "別平台欄提醒未進 stdout 資訊頻道")
+        self.assertNotIn(probe, err.getvalue(), "提醒仍印在 stderr ⇒ 仍在警告頻道")
+        self.assertNotIn("⚠️", out.getvalue() + err.getvalue(), "恆亮訊息不得掛 ⚠️ 標記")
+
+
+class TestR67CliFailsLoud(unittest.TestCase):
+    """R67-D20：CLI 改 argparse——未知旗標／打錯字一律 rc=2，文件不得引用不存在的旗標。
+
+    WHY：原版 `"--flag" in argv` 手搓解析，未知旗標一律靜默掉進 default 分支並 rc=0。
+    實測後果（Scan-D 於乾淨 clone 注入真實過期後）：正確拼法 rc=1，少打一個字母 rc=0
+    **假綠**——同一棵工作樹、同一時刻，該紅的守門回綠燈。而 `--check` 這個被 ONBOARDING
+    §7、`CrossPlatform_Scan_Dimensions.md`、`ADR-XPLAT-002` 三份文件引用的旗標，在 R67
+    之前**根本不存在**，只是恰好掉進 default 分支才「看起來對」。
+
+    修法選「把 `--check` 實作為真旗標」而非「改三份文件」：那三份文件有兩份不在本包授權
+    範圍內，且「產生器 ＋ `--check`」本就是本 repo 既有慣例（`snapshot_sync.py`）——讓字面
+    成真比讓三份文件改口更小、也更對。
+    """
+
+    def test_unknown_flag_is_rejected_with_rc2(self) -> None:
+        for bogus in ("--totally-bogus-flag", "--wtih-slow", "--checks"):
+            self.assertEqual(
+                SYNC.main([bogus]), 2,
+                f"未知旗標 {bogus} 未 fail-loud——靜默放行就是 rc=0 假綠的來源",
+            )
+
+    def test_prefix_abbreviation_is_rejected(self) -> None:
+        """`allow_abbrev=False`：打錯字不得被「好心地」補全成正確旗標。
+
+        WHY 這條要單獨測：argparse **預設**接受唯一前綴縮寫，於是少打一個字母會被解讀成
+        原旗標——看似無害，實則保留了一條「靠運氣正確」的路，與本檔「拼錯就要當場知道」
+        的主張自相矛盾。
+        """
+        self.assertEqual(SYNC.main(["--check-snapsho"]), 2)
+        self.assertEqual(SYNC.main(["--check-snap"]), 2)
+
+    def test_help_prints_usage_and_returns_zero(self) -> None:
+        import contextlib
+        import io
+
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            rc = SYNC.main(["--help"])
+        self.assertEqual(rc, 0)
+        self.assertIn("--check-snapshot", buf.getvalue())
+        self.assertIn("--platform", buf.getvalue())
+
+    def test_mode_flags_are_mutually_exclusive(self) -> None:
+        self.assertEqual(SYNC.main(["--check", "--json"]), 2)
+        self.assertEqual(SYNC.main(["--write", "--check-snapshot"]), 2)
+
+    def test_with_slow_requires_write(self) -> None:
+        self.assertEqual(SYNC.main(["--with-slow"]), 2)
+        self.assertEqual(SYNC.main(["--check", "--with-slow"]), 2)
+
+    def test_platform_may_not_be_combined_with_write(self) -> None:
+        """跨平台代填＝替另一台機器捏造 provenance，正是 R67-D1 本體 ⇒ rc=2。"""
+        self.assertEqual(SYNC.main(["--write", "--platform", "win32"]), 2)
+        self.assertEqual(SYNC.main(["--write", "--with-slow", "--platform", "darwin"]), 2)
+
+    def test_platform_choices_cover_exactly_the_managed_columns(self) -> None:
+        action = next(
+            a for a in SYNC.build_parser()._actions if "--platform" in a.option_strings
+        )
+        self.assertEqual(sorted(action.choices), sorted(SYNC._PLATFORM_COLUMN_LABELS))
+
+    def test_documented_flags_all_exist_in_the_parser(self) -> None:
+        """**文件不得引用不存在的旗標**（R67-D20 的另一半）。
+
+        掃描面（誠實劃界）：**提及 `sync_onboarding_baselines` 的那些行**上的每一個
+        `--flag`（反引號與否皆算）——來源＝ONBOARDING.md 全檔 ＋ 本工具 docstring 的
+        「用法」區塊（該區塊每一行都是本工具的呼叫式，正是最容易寫出假旗標的地方）。
+        刻意不掃全節：§7 內另有 pytest 的 `--collect-only` 等他人旗標，全節掃描會大量假紅。
+        未覆蓋面（如實揭露）：散落在**不提工具名**之行上的旗標，例如
+        `CrossPlatform_Scan_Dimensions.md`／`ADR-XPLAT-002` 的引用——那兩份不在本包授權
+        範圍內，本輪改以「把 `--check` 實作成真旗標」讓它們的字面成真，而非改它們的字。
+        """
+        known = {
+            opt
+            for action in SYNC.build_parser()._actions
+            for opt in action.option_strings
+        }
+        flag_re = re.compile(r"(--[a-z][a-z0-9-]*)")
+        module_doc = SYNC.__doc__ or ""
+        blobs = [
+            (f"ONBOARDING.md:{i + 1}", line)
+            for i, line in enumerate(_ONBOARDING.read_text(encoding="utf-8-sig").split("\n"))
+        ] + [
+            (f"sync_onboarding_baselines.__doc__ 用法區塊 L{i + 1}", line)
+            for i, line in enumerate(module_doc[module_doc.index("用法"):].split("\n"))
+        ]
+        seen: set[str] = set()
+        for where, line in blobs:
+            if "sync_onboarding_baselines" not in line:
+                continue
+            for flag in flag_re.findall(line):
+                seen.add(flag)
+                self.assertIn(
+                    flag, known,
+                    f"{where} 引用了不存在的旗標 {flag}——這正是 R67-D20：`--check` 曾被三份"
+                    f"文件引用而它根本不是實存旗標，只是恰好掉進 default 分支。"
+                    f"現存旗標：{sorted(known)}",
+                )
+        self.assertGreaterEqual(
+            len(seen), 5,
+            f"只從文件抽到 {sorted(seen)}——抽取式疑似漂移導致靜默 0 命中假綠",
+        )
+        self.assertIn("--check", seen, "`--check` 是 R67-D20 的原始標的，必須在掃描面內")
+
+    def test_audit_mode_is_the_default_and_check_flag_is_real(self) -> None:
+        """`--check` 與「不給旗標」必須是同一條路（文件宣稱的就是這件事）。"""
+        parser = SYNC.build_parser()
+        self.assertTrue(parser.parse_args(["--check"]).check)
+        self.assertFalse(parser.parse_args([]).check)
+        text = _ONBOARDING.read_text(encoding="utf-8-sig")
+        measured = SYNC.measure_all()
+        expected = 1 if SYNC.check(text, measured) else 0
+        self.assertEqual(SYNC.main(["--check"]), expected)
+
+
+@contextmanager
+def _slow_window_sandbox(mutate_during_window: bool):
+    """把 `--write --with-slow` 整條路徑搬進 tmp 沙箱，並可選擇在**量測窗口內**改動測試樹。
+
+    為何要沙箱：這條路徑會**寫 ONBOARDING.md** 並實跑分鐘級量測。以 tmp 目錄替換
+    `_REPO_ROOT`／`_ONBOARDING`、以確定性 stub 替換兩支慢量測器之後，同一條生產程式碼
+    可以在毫秒內被完整驅動，且真實 repo 的檔案全程唯讀。
+
+    stub 的計數刻意**定義為「該棵樹當下的 `.py` 檔數」**：於是「樹變了 ⇒ 計數變了」在
+    測試裡是**可驗證的因果**，而不是靠測試自己宣告。`mutate_during_window=True` 時，
+    在 ci-gate 量完之後、AutoClaude pytest 量測期間新增一支測試檔——這正是本缺陷的
+    活體形態（並行的修復包在分鐘級窗口內寫測試檔）。
+
+    yield 出 `(sandbox_path, trees, state)`；`state["mutated"]` 供測試反查注入是否真的
+    發生（避免 fixture 空轉造成「測試永遠綠」）。
+    """
+    import shutil
+    import tempfile
+
+    saved = {
+        name: getattr(SYNC, name)
+        for name in (
+            "_REPO_ROOT", "_ONBOARDING", "_run_cigate", "_run_autoclaude_pytest",
+            "measure_all", "_docker_state", "pg_extras_state",
+        )
+    }
+    with tempfile.TemporaryDirectory() as tmp:
+        sandbox = Path(tmp)
+        trees = {}
+        for name, rel, _pat in SYNC._FINGERPRINT_TREES:
+            d = sandbox / rel
+            d.mkdir(parents=True)
+            for i in range(3):
+                (d / f"test_{name}_{i}.py").write_bytes(b"def test_x():\n    pass\n")
+            trees[name] = d
+        shutil.copyfile(_ONBOARDING, sandbox / "ONBOARDING.md")
+        text0 = (sandbox / "ONBOARDING.md").read_text(encoding="utf-8-sig")
+        state: dict[str, object] = {"mutated": False}
+
+        def _count(name: str) -> int:
+            return len(list(trees[name].glob("**/*.py")))
+
+        def fake_cigate() -> dict[str, int]:
+            return {f"cigate_{k}": _count(k) for k in ("v001", "v030", "scripts")}
+
+        def fake_pytest() -> dict[str, int]:
+            if mutate_during_window:
+                (trees["scripts"] / "test_injected_by_parallel_package.py").write_bytes(
+                    b"def test_new():\n    pass\n"
+                )
+                state["mutated"] = True
+            return {"passed": _count("autoclaude"), "skipped": 0}
+
+        try:
+            SYNC._REPO_ROOT = sandbox
+            SYNC._ONBOARDING = sandbox / "ONBOARDING.md"
+            SYNC._run_cigate = fake_cigate
+            SYNC._run_autoclaude_pytest = fake_pytest
+            SYNC.measure_all = lambda: {
+                s.anchor: SYNC.parse_documented(SYNC.anchored_line(text0, s.anchor), s)
+                for s in SYNC._SPECS
+            }
+            SYNC._docker_state = lambda: "down"
+            SYNC.pg_extras_state = lambda: "absent"
+            yield sandbox, trees, state
+        finally:
+            for name, value in saved.items():
+                setattr(SYNC, name, value)
+
+
+class TestR67SlowMeasurementWindowIsFingerprintBracketed(unittest.TestCase):
+    """R67 收尾 Scan-H（DEF-101-677）：`--write --with-slow` 的量測窗口 TOCTOU。
+
+    WHY 這道鎖必須存在（Rule 9：測 intent 不只測 behavior）：
+      表② 之所以敢在沒有 live 鎖的情況下被信任，**全部理由**就是
+      `snapshot-fingerprints-<平台>` 錨那一句「這一欄的數字是在**哪一棵測試樹**上量的」。
+      而回填路徑原本是「先跑分鐘級慢量測、**跑完之後**才取指紋」⇒ 樹若在窗口內被改動，
+      錨記下的是一棵**從未被量測過**的樹，四格計數卻留在改動前的樹上。
+      事後 `--check-snapshot` 量到的 live 指紋與錨相符 ⇒ ✅ rc=0，而計數已 stale。
+
+      這不是「指紋這種觸發器本來就會漏」那一類（那是已揭露的邊界：docker 狀態、
+      生產碼改 parametrize 都能改變計數而指紋不動）。這一類是**回填路徑親手把觸發器
+      拆掉**：樹確實變動了——那正是本觸發器唯一認得的事件——卻被寫進錨當成基準。
+      既有契約已是「指紋一變即判 presumed stale」，唯獨回填路徑替自己免除了這一條；
+      修法是取消那個豁免，**不是**提高嚴格度。
+
+    活體證據（R67 收尾 Scan-H）：BASELINE 包寫入的 macOS `scripts/tests` 格是 253、
+    收尾包在同一棵樹量到 259，而 `snapshot-fingerprints-darwin` 的 `scripts=` 前後
+    **完全相同** ⇒ 那條錨當時正在為一組對不上的計數背書。
+    """
+
+    def test_mutation_inside_window_fails_loud_and_writes_nothing(self) -> None:
+        """窗口內樹變動 ⇒ 拋 `BaselineToolError`，且 ONBOARDING **一個 byte 都沒被改**。
+
+        「未寫入」與「有拋例外」要一起斷言：只擋不寫、卻靜默 rc=0，等於把「這次量測作廢」
+        這件事藏起來；只拋例外卻已寫了半份文件，則留下一份跨兩棵樹的紀錄。
+        """
+        with _slow_window_sandbox(mutate_during_window=True) as (sandbox, _trees, state):
+            doc = sandbox / "ONBOARDING.md"
+            before_bytes = doc.read_bytes()
+            with self.assertRaises(SYNC.BaselineToolError) as ctx:
+                SYNC.main(["--write", "--with-slow"])
+            self.assertTrue(state["mutated"], "注入未實際發生 ⇒ 本測試空轉，不具鑑別力")
+            message = str(ctx.exception)
+            self.assertIn("量測期間測試樹被改動", message)
+            self.assertIn("scripts", message, "訊息未指出是哪一棵樹變動 ⇒ 使用者無從下手")
+            self.assertIn("--write --with-slow", message, "訊息缺少『該怎麼辦』的確切指令")
+            self.assertEqual(
+                doc.read_bytes(), before_bytes,
+                "量測作廢卻仍寫了檔 ⇒ 留下一份跨兩棵樹的紀錄，正是本鎖要擋的東西",
+            )
+
+    def test_guard_refuses_to_produce_the_false_green_artifact(self) -> None:
+        """先證明「假綠」確實可構造（fixture 有牙），再證明生產路徑拒絕產出它。
+
+        兩半缺一不可：只斷言「生產路徑會拋例外」的話，若哪天 fixture 漂移成「窗口內
+        其實沒改到樹」，測試會靜默轉成永遠綠——那正是本輪一直在治的病。
+        """
+        with _slow_window_sandbox(mutate_during_window=True) as (sandbox, trees, _state):
+            text = (sandbox / "ONBOARDING.md").read_text(encoding="utf-8-sig")
+            # ── 前半：手工複製「壞形態」的產物（計數取自改動前的樹、指紋取自改動後的樹）──
+            counts_before = len(list(trees["scripts"].glob("**/*.py")))
+            (trees["scripts"] / "test_injected.py").write_bytes(b"def test_n():\n    pass\n")
+            fp_after = SYNC.measure_fingerprints()
+            bad = SYNC.render_fingerprints(
+                SYNC.render_slow(
+                    text,
+                    {
+                        "autoclaude-pytest-snapshot:": {"passed": 1, "skipped": 0},
+                        "cigate-v001-snapshot:": {"passed": 1},
+                        "cigate-v030-snapshot:": {"passed": 1},
+                        "cigate-scripts-snapshot:": {"passed": counts_before},
+                    },
+                    "darwin",
+                ),
+                fp_after,
+                "darwin",
+                SYNC.measure_provenance(),
+            )
+            documented = SYNC.slow_documented(bad, "darwin")["cigate-scripts-snapshot:"]["passed"]
+            self.assertNotEqual(
+                documented, len(list(trees["scripts"].glob("**/*.py"))),
+                "計數並未 stale ⇒ 本測試的假綠構造失效",
+            )
+            self.assertEqual(
+                SYNC.check_snapshot(bad, "darwin"), [],
+                "假綠構造未成立（指紋沒對上）⇒ 後半的斷言不具意義",
+            )
+            # ── 後半：生產路徑**不得**產出上面那份東西 ──
+            with self.assertRaises(SYNC.BaselineToolError):
+                SYNC.measure_slow_on_stable_tree()
+
+    def test_stable_window_records_the_tree_the_counts_were_measured_on(self) -> None:
+        """正常單人作業零影響：樹沒變 ⇒ 照常回填，且錨記的就是計數所依據的那棵樹。
+
+        這一半同樣不可省——修法若把正常情境也擋掉（例如誤把每次都判成變動），本鎖
+        就從「防假綠」變成「誰都回填不了」，那比缺陷本身更糟。
+        """
+        with _slow_window_sandbox(mutate_during_window=False) as (sandbox, trees, _state):
+            fp_expected = SYNC.measure_fingerprints()
+            slow, fp = SYNC.measure_slow_on_stable_tree()
+            self.assertEqual(fp, fp_expected, "回傳的指紋不是計數所依據的那棵樹")
+            self.assertEqual(
+                slow["cigate-scripts-snapshot:"]["passed"],
+                len(list(trees["scripts"].glob("**/*.py"))),
+            )
+            self.assertEqual(SYNC.main(["--write", "--with-slow"]), 0)
+            written = (sandbox / "ONBOARDING.md").read_text(encoding="utf-8-sig")
+            self.assertEqual(SYNC.parse_fingerprints(written, "darwin"), fp_expected)
+            self.assertEqual(SYNC.main(["--check-snapshot"]), 0, "回填完當場就紅 ⇒ 修法過嚴")
+
+    def test_bracketing_cost_is_one_extra_fingerprint_not_one_extra_measurement(self) -> None:
+        """代價劃界：夾住窗口只多**一次毫秒級指紋**，不得多跑一次分鐘級量測。
+
+        WHY 要釘住：本鎖能被接受的前提就是「正常情境不平白多付分鐘級開銷」。若哪天有人
+        把它改成「量兩次再比對計數」，這條會轉紅。
+        """
+        with _slow_window_sandbox(mutate_during_window=False) as (_sandbox, _trees, _state):
+            calls = {"slow": 0, "fp": 0}
+            real_slow, real_fp = SYNC.measure_slow, SYNC.measure_fingerprints
+
+            def counting_slow():
+                calls["slow"] += 1
+                return real_slow()
+
+            def counting_fp():
+                calls["fp"] += 1
+                return real_fp()
+
+            SYNC.measure_slow, SYNC.measure_fingerprints = counting_slow, counting_fp
+            try:
+                SYNC.measure_slow_on_stable_tree()
+            finally:
+                SYNC.measure_slow, SYNC.measure_fingerprints = real_slow, real_fp
+        self.assertEqual(calls["slow"], 1, "慢量測被跑了不只一次 ⇒ 代價超出設計")
+        self.assertEqual(calls["fp"], 2, "夾住窗口需且僅需前後各一次指紋")
+
+    def test_read_only_paths_measure_live_fingerprints_exactly_once(self) -> None:
+        """同型收斂：單次 CLI 呼叫內，live 指紋只准量一次（判決與取證同一份）。
+
+        原版 `--check-snapshot` 判決後又重量一次才印 ✅ 那一行、`--json` 更量了 3 次 ⇒
+        「印出來的證據」與「判決所依據的」可能是不同時點的樹。這與主缺陷同型（同一個量
+        在不同時點被量兩次），且違反 Nightly 取證紀律「取證載具必須就是判決依據」。
+        """
+        with _slow_window_sandbox(mutate_during_window=False) as (_sandbox, _trees, _state):
+            self.assertEqual(SYNC.main(["--write", "--with-slow"]), 0)
+            real_fp = SYNC.measure_fingerprints
+            for mode, expected_rc in (("--check-snapshot", 0), ("--json", 0)):
+                calls = {"n": 0}
+
+                def counting_fp(_c=calls):
+                    _c["n"] += 1
+                    return real_fp()
+
+                SYNC.measure_fingerprints = counting_fp
+                try:
+                    import contextlib
+                    import io
+
+                    with contextlib.redirect_stdout(io.StringIO()):
+                        rc = SYNC.main([mode])
+                finally:
+                    SYNC.measure_fingerprints = real_fp
+                self.assertEqual(rc, expected_rc, f"{mode} rc 非預期，計數斷言失去意義")
+                self.assertEqual(
+                    calls["n"], 1,
+                    f"{mode} 在單次呼叫內量了 {calls['n']} 次 live 指紋（預期 1）",
+                )
 
 
 if __name__ == "__main__":

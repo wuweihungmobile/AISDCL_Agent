@@ -121,6 +121,7 @@ _CELL_SPLIT_RE = re.compile(r"(?<!\\)\|")
 _HEADER_RE = re.compile(r"^\|\s*ID\s*\|")
 _ID_HEADER = "ID"
 _STATUS_HEADER = "狀態"
+_CONTEXT_HEADER = "發現情境"
 
 
 def _row_cells(line: str) -> list[str]:
@@ -135,19 +136,33 @@ def _row_cells(line: str) -> list[str]:
     return [c.strip() for c in _CELL_SPLIT_RE.split(line)]
 
 
-def _table_layout(ledger_text: str) -> tuple[int, int, int] | None:
-    """回傳帳本表頭的 `(切片數, ID 欄索引, 狀態欄索引)`；找不到合格表頭回 `None`。
+def _header_cells(ledger_text: str) -> list[str] | None:
+    """回傳帳本**第一個**合格表頭的全部切片；找不到回 `None`。
 
-    取**第一個**合格表頭：主檔實查只有一個（`:34`）。刻意用欄名（`ID`／`狀態`）定位而
-    非寫死索引，欄序若被調動也能跟上；欄名被改寫則回 `None` → 呼叫端 fail-loud。
+    抽成獨立函式是為了讓「用欄名定位」這件事有唯一實作：`_table_layout()` 取
+    `ID`／`狀態` 三元組，`current_round()` 另需 `發現情境` 欄，兩者若各自重寫一次
+    表頭掃描，就是本 repo 反覆在治的複本型缺陷（見 R57「靜態掃描錨為何從三份複本
+    收斂為 SSOT」判例：觀測同一對象的複本不產生鑑別力）。
     """
     for line in ledger_text.splitlines():
         if not _HEADER_RE.match(line):
             continue
         cells = _row_cells(line)
         if _ID_HEADER in cells and _STATUS_HEADER in cells:
-            return len(cells), cells.index(_ID_HEADER), cells.index(_STATUS_HEADER)
+            return cells
     return None
+
+
+def _table_layout(ledger_text: str) -> tuple[int, int, int] | None:
+    """回傳帳本表頭的 `(切片數, ID 欄索引, 狀態欄索引)`；找不到合格表頭回 `None`。
+
+    取**第一個**合格表頭：主檔實查只有一個（`:34`）。刻意用欄名（`ID`／`狀態`）定位而
+    非寫死索引，欄序若被調動也能跟上；欄名被改寫則回 `None` → 呼叫端 fail-loud。
+    """
+    cells = _header_cells(ledger_text)
+    if cells is None:
+        return None
+    return len(cells), cells.index(_ID_HEADER), cells.index(_STATUS_HEADER)
 
 
 def _no_header_problem() -> str:
@@ -399,6 +414,168 @@ def unclassifiable_first_word_problems() -> list[str]:
         f"（既有判例：`workaround`／`partial` 皆歸 `open`，因為缺陷本體仍在），"
         f"或把該詞從《格式定義》散文與 _STATUS_FIRST_WORDS 一併移除"
     ]
+
+
+# ------------------------------------------------ 硬規則②：孤兒承接輪次（R67 落地）
+# 規格權威＝`docs/06_quality/CrossPlatform_Scan_Dimensions.md`〈使用方式〉硬規則②那一段，
+# 逐字判準：「狀態仍為 `open`／`deferred` 的列若提及一個 `R\d+` **承接者**，該輪號必須
+# ≥ 當前輪，或該列／有一筆更新的 DEF 條目載明『改派』」。該段同時**指名本檔為宿主**。
+# 兩邊由 `tools/tests/test_check_defect_log_crossref.py::TestHardRule2IsBoundToSpecProse`
+# 雙向綁定：散文改寫或本函式改名而另一邊沒跟 → 紅。
+#
+# 🔴 這道鎖非踩不可的坑（R59 二審 ARCH-R59-NB4 明文警告，規格段落亦轉述）：缺陷帳本是
+# **逐字保全的歷史檔**，`DEF-101-500` 那列會永遠留著「列 R58 backlog」字樣。所以判準
+# **不能**寫成「不得提及不存在的輪次」——那會讓閘門**永紅**。合法出口有二：
+#   (a) 該列狀態已非 open／routed（歷史列多半如此，本檔直接排除）；
+#   (b) 該列或**更後面**（append-only ⇒ 更新）的任一列載明「改派」／「回執」。
+#
+# 🔴 第二個坑（R67 落地前實測，掃描員的 proposed_fix 正是踩在這裡）：**不可以拿整列的
+# 任一個 `R\d+` 當承接者**。實測把「列內最大 `R\d+`」當承接輪次套回主檔，70 列未結列中
+# **60 列**會被判孤兒——因為「發現情境」「R60 實測」「R25 Scan-A 複核」這些是**發現/佐證
+# 輪次**，不是承接者。故本檔只認**承接語境**的樣式（下表），寧可漏抓也不製造假紅：一道
+# 永紅或大量假紅的閘門會被整個關掉，那比沒有鎖更糟。
+_ROUND_RE = re.compile(r"(?<![A-Za-z0-9])R(\d+)(?![0-9])")
+# 承接語境與輪號之間允許的裝飾（markdown 粗體／反引號／空白）。
+_HANDOVER_DECOR = r"[*＊`\s]{0,4}"
+# 🔴 `列` 的否定回顧刻意排除「本列／該列／此列／上列／前列／系列」：實測 `DEF-101-068`
+# 的「本列 R14 快照所稱…」是**引述舊快照**，不是交棒；漏掉這個回顧即產生假紅。
+_HANDOVER_ROUND_RES: tuple[tuple[str, re.Pattern[str]], ...] = (
+    ("承接輪次／承接者", re.compile(r"承接(?:輪次|者)?[：:＝=為]?" + _HANDOVER_DECOR + r"R(\d+)")),
+    ("R… 承接", re.compile(r"R(\d+)\+?" + _HANDOVER_DECOR + r"(?:起)?" + _HANDOVER_DECOR + r"承接")),
+    ("列 R…（backlog 指派）", re.compile(r"(?<![本該此上前系])列" + _HANDOVER_DECOR + r"R(\d+)")),
+    ("backlog R…", re.compile(r"backlog[\s*＊`]{0,4}R(\d+)")),
+    ("交棒／移交／交由 R…", re.compile(r"(?:交棒|移交|交由)(?:給|至|到|由)?" + _HANDOVER_DECOR + r"R(\d+)")),
+)
+# 🔴 刻意**不**把 `routed@R61`／`deferred@R59` 當承接者：實測 `DEF-101-518` 寫
+# `**routed（deferred@R59，附解鎖條件）**`，那個 `@R59` 是「在 R59 這一輪被 defer」的
+# **時點**，不是被指派的對象（同族寫法 `fixed@R57` 更明顯）。把時點當承接者會製造假紅。
+_REASSIGN_RE = re.compile(r"改派|回執")
+# 未結案＝仍需要有人接手。`routed` 涵蓋帳本慣用的 `routed（deferred@Rnn）` 寫法；
+# `None`（狀態欄辨識不出關鍵字）一併納入——「看不出結案」不等於「已結案」。
+_UNRESOLVED_CLASSES: frozenset[str | None] = frozenset({"open", "routed", None})
+
+
+def current_round(ledger_text: str) -> int | None:
+    """從帳本「發現情境」欄推得**當前輪次**；推不出回 `None`。
+
+    🔴 為何是這個取值方式（三個候選都試過，這是唯一不會 stale 也不會取錯的）：
+      · **不寫死常數**——下一輪就過期，正是本 repo 反覆在治的病（`Scan_Dimensions.md`
+        開頭那句「本檔刻意不寫死輪號」即為同一個教訓）。
+      · **不用 `docs/04_planning/` 現存最大號 `AutoSDD_improving_NN`**（掃描員的建議）：
+        兩套編號**不是同一個東西**——實查該目錄最大號已達三位數，而跨平台複審輪號還在
+        兩位數。拿它當「當前輪」會讓每一列的承接輪號都遠小於它 ⇒ 整本帳本瞬間全紅。
+      · **用「發現情境」欄的最大 `R\\d+`**：`Scan_Dimensions.md` 開頭已明文宣告
+        「最新輪次見 `AutoSDD_Defect_Log.md` 最末列」，本函式即該宣告的機械化；取
+        **最大值**而非「最末列」是因為 append 順序不保證輪號單調，取最大值只會讓判準
+        **更寬**（承接輪號更容易 ≥ 當前輪），只會漏抓、不會假紅。
+      · 邊界：帳本輪替（已結列搬 archive）若把最新一輪的列全搬走，本值會**變小**⇒ 判準
+        變寬。這是刻意選的失效方向（漏抓而非假紅），且活躍列依政策一律留主檔。
+    """
+    cells = _header_cells(ledger_text)
+    if cells is None or _CONTEXT_HEADER not in cells:
+        return None
+    ncols, ctx_idx = len(cells), cells.index(_CONTEXT_HEADER)
+    best: int | None = None
+    for line in ledger_text.splitlines():
+        if not _ROW_RE.match(line):
+            continue
+        row = _row_cells(line)
+        if len(row) != ncols:
+            continue
+        for m in _ROUND_RE.finditer(row[ctx_idx]):
+            n = int(m.group(1))
+            if best is None or n > best:
+                best = n
+    return best
+
+
+def _handover_rounds(line: str) -> list[tuple[str, int, str]]:
+    """抽出一列中所有**承接語境**的輪號 `(樣式名, 輪號, 原文片段)`。"""
+    found: list[tuple[str, int, str]] = []
+    for label, pat in _HANDOVER_ROUND_RES:
+        for m in pat.finditer(line):
+            snippet = line[max(0, m.start() - 22): m.end() + 14]
+            found.append((label, int(m.group(1)), snippet))
+    return found
+
+
+def orphan_backlog_problems(ledger_text: str) -> list[str]:
+    """硬規則②的機械化：未結案列指名的承接輪次不得早於當前輪（純函式）。
+
+    回傳問題清單（空＝無孤兒）。純函式化的理由同 `status_first_word_problems()`：
+    可直接以構造輸入證明它有牙，不必真的弄壞一份帳本。
+
+    **已實測涵蓋**（每一項都以構造輸入跑過，見 `TestOrphanBacklogProblems`）：
+      · `open（承接輪次：**R2**…）`／`承接者＝R2`／`仍待 R2+ 承接者處理`
+      · `列 R2 backlog`／`open（backlog R2…）`／`交棒給 R2`
+      · 未結案（`open`／`routed`／狀態含糊）才判；已 `fixed`／`wontfix`／
+        `closed-by-decision` 的歷史列一律不判（歷史檔逐字保全，見上方第一個坑）。
+      · 該列或**更後面**任一列載明「改派」／「回執」即放行。
+
+    **已實測不涵蓋**（逐項跑過，並釘成常駐斷言）：
+      · **否定語意**——本鎖只做關鍵字比對，`無回執`／`零改派` 這類**否定**敘述同樣會被
+        當成「已載明」而放行。真實實例：`DEF-101-561` 目前正是靠狀態欄一句「無輪次無
+        回執」（描述的還是另一個子項）通過本鎖；它**實質上不是孤兒**（同列已載明
+        「R61 Architect 評估結論：本輪逐項回覆①②③」＝真有回執），故結論湊巧正確、
+        機制不精確。要收掉這個縫需要否定語意分析，超出逐行正則的能力天花板
+        （同 DEF-101-333 對 parity 鎖家族的比例原則裁定）。
+      · **`status@Rnn` 形態**（`deferred@R59`）刻意不當承接者，理由見 `_REASSIGN_RE`
+        上方註解。若未來有人真的用 `@Rnn` 表示指派對象，本鎖抓不到。
+      · **散文式指派**（「留給下一輪某人」「排入未來輪」）不含 `R\\d+` ⇒ 本鎖無從比較；
+        那一類由硬規則②散文的「明確標為未指派」條款以人工紀律處理。
+
+    **未窮舉**：本清單非窮舉，不做「唯一殘餘風險是 X」這類宣稱（R57 判例第 (4) 條）。
+    """
+    layout = _table_layout(ledger_text)
+    if layout is None:
+        return [_no_header_problem()]
+    ncols, id_idx, status_idx = layout
+    rows: list[tuple[int, list[str], str]] = []
+    for lineno, line in enumerate(ledger_text.splitlines(), 1):
+        if not _ROW_RE.match(line):
+            continue
+        cells = _row_cells(line)
+        if len(cells) != ncols or not _ID_RE.fullmatch(cells[id_idx]):
+            continue
+        rows.append((lineno, cells, line))
+
+    cur = current_round(ledger_text)
+    problems: list[str] = []
+    for i, (lineno, cells, line) in enumerate(rows):
+        if _classify(cells[status_idx]) not in _UNRESOLVED_CLASSES:
+            continue
+        handovers = _handover_rounds(line)
+        if not handovers:
+            continue
+        if _REASSIGN_RE.search(line):
+            continue
+        def_id = cells[id_idx]
+        if any(def_id in later and _REASSIGN_RE.search(later) for _, _, later in rows[i + 1:]):
+            continue
+        if cur is None:
+            problems.append(
+                f"帳本 :{lineno} {def_id}：本列指名了承接輪次"
+                f"（{'；'.join(f'[{lb}] R{n}' for lb, n, _ in handovers)}），"
+                f"但無法從「{_CONTEXT_HEADER}」欄推得當前輪次 ⇒ 硬規則②「該輪號必須 ≥ "
+                f"當前輪」失去比較基準。請確認主檔表頭含「{_CONTEXT_HEADER}」欄、"
+                f"且至少一列的該欄寫有 `R<數字>`（權威宣告見 "
+                f"CrossPlatform_Scan_Dimensions.md 開頭「最新輪次見帳本最末列」）"
+            )
+            continue
+        newest = max(n for _, n, _ in handovers)
+        if newest >= cur:
+            continue
+        detail = "；".join(f"[{lb}] R{n}：{sn!r}" for lb, n, sn in handovers)
+        problems.append(
+            f"帳本 :{lineno} {def_id}：狀態仍未結案，卻把承接者指向 **R{newest}**，"
+            f"早於當前輪 R{cur} ⇒ 孤兒 backlog（硬規則②，見 "
+            f"CrossPlatform_Scan_Dimensions.md〈使用方式〉）。命中片段＝{detail}。"
+            f"兩條合法出口（擇一，**不要改寫歷史原文**）："
+            f"① 就地於狀態欄追加一筆載明「改派」的附記（體例比照 DEF-101-333／336／338 "
+            f"的『改派為：未指派 backlog』＋解鎖條件）；"
+            f"② 若該輪已交出成果，就地追加「回執」並把狀態改為已結案的首詞"
+        )
+    return problems
 
 
 def _load_ledger_status() -> dict[str, str | None]:
@@ -680,6 +857,18 @@ def main() -> int:
             print(f"  - {p}", file=sys.stderr)
         return 1
 
+    # 孤兒承接輪次硬閘（硬規則②，R67 落地）——擺在跨文件比對**之前**、首詞檢查**之後**：
+    # 首詞合法是本檢查的前提（要先能可靠判斷「這列結案了沒」），而本檢查與跨文件一致性
+    # 相互獨立。為何非硬閘不可：規則自 R59 訂立後八輪純靠紀律，實測注入「open 且交棒給
+    # 一個早已結束的輪次」的合成列，本閘門照樣 rc=0 全綠、還把它算成一筆有效狀態紀錄
+    # （Scan-H 必跑項 #5：稽核工具必須有閘門看它的 rc）。
+    orphan_problems = orphan_backlog_problems(ledger_text)
+    if orphan_problems:
+        print(f"❌ 孤兒承接輪次（硬規則②，{len(orphan_problems)} 筆）：", file=sys.stderr)
+        for p in orphan_problems:
+            print(f"  - {p}", file=sys.stderr)
+        return 1
+
     # 「有效」與「含糊」分開呈現（R9 跨平台複審：舊版把 _classify 回 None 的列
     # 也一併計入「有效狀態紀錄」總數，帳本自身品質問題被靜默吞掉）。
     # 含糊 >0 只印 warning 不 fail：這是帳本品質提示，非跨文件矛盾。
@@ -708,7 +897,9 @@ def main() -> int:
           "合法值內（散文與程式常數雙向綁定，且每個合法值都有分類器對應）；"
           "全部表格列的欄數皆等於表頭欄數、狀態欄由表頭定位（非 cells[-1] 位置猜測）；"
           f"具名治理文件 {len(_GOVERNANCE_DOCS)} 份皆已登記且未逾體積上限"
-          f"（登記面對 {_GOVERNANCE_DOC_GLOB} 發現面雙向核對）")
+          f"（登記面對 {_GOVERNANCE_DOC_GLOB} 發現面雙向核對）；"
+          f"全部未結案列的承接輪次皆 ≥ 當前輪 R{current_round(ledger_text)} 或已載明改派"
+          "（硬規則②；已實測不涵蓋的形態見 orphan_backlog_problems docstring）")
     return 0
 
 

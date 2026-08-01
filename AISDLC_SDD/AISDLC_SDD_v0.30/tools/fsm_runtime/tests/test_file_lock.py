@@ -126,8 +126,11 @@ class UnremovableSentinelTests(unittest.TestCase):
         )
         lock_path.unlink()
 
-    @unittest.skipUnless(sys.platform == "win32",
-                         "真 handle 佔用語意只在 Windows 成立（POSIX unlink 允許刪除已開啟檔案）")
+    @unittest.skipUnless(
+        sys.platform == "win32",
+        "[WINDOWS-NATIVE-ONLY] 真 handle 佔用語意只在 Windows 成立（POSIX unlink 允許刪除"
+        "已開啟檔案）——R67-F27 補標籤，供版本樹 conftest 的 terminal summary 彙整可見度",
+    )
     def test_release_survives_real_open_handle_on_windows(self) -> None:
         """原生 Windows 載具：不注入例外，用真的 open handle 觸發 [WinError 32]。"""
         lock_path = self.root / "held.lock"
