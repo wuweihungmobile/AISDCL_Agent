@@ -103,17 +103,34 @@ class TestDevStartPs1DotSourceLastExitCode(unittest.TestCase):
             (tmp_lib / "WindowsAppsGuard.ps1").write_text(
                 guard_src.read_text(encoding="utf-8"), encoding="utf-8"
             )
-            # PATH 只留最基本目錄，排除任何 py/python 候選，穩定觸發
-            # 「找不到 Python 直譯器」這條 dot-source 失敗分支。
+            # 🔴 R67 round 3（DEF-101-70x）：PATH 指向一個**空目錄**，不是 `/usr/bin:/bin`。
+            #
+            # 原寫法自稱「PATH 只留最基本目錄，排除任何 py/python 候選」——那句話在
+            # macOS（12.3 起 `/usr/bin/python` 已移除，只剩 `python3`）與 Windows
+            # （沒有 `/usr/bin`）上恰好為真，在 **Linux 上為假**：ubuntu runner 的
+            # `/usr/bin/python` 是實存可執行檔 ⇒ `Test-IsRealPython` 命中、
+            # 「找不到 Python 直譯器」那條**受測分支從頭到尾沒被執行**，腳本改去執行
+            # 不存在的 `tools/dev_start.py`，測試看到的是 python 自己的
+            # `can't open file` 與 `RC_AFTER=2`。CI 首次在 Linux 跑本鎖即紅
+            # （root-infra-ci run 30697855439），紅的不是受測物，是測試的前提。
+            # 空目錄讓「PATH 內沒有任何 Python 候選」這句話在**每個**平台上都literally 為真。
+            #
+            # `PYPROBE_*` 是本測試的**前提自證**（見 test 內的斷言）：把「前提悄悄不成立」
+            # 從「斷言訊息看不懂」變成「當場點名 PATH 淨化失效」。
+            #
             # [Console]::OutputEncoding 設 UTF-8（R42 修復，DEF-101-350）：本機
             # 為繁體中文 Windows（Big5/950 codepage），dev_start.ps1 的中文錯誤
             # 訊息若不明確指定輸出編碼會被以錯誤 codepage 解讀成亂碼，斷言
             # 因而誤判失敗——同一根因/同一修法比照本輪稍早
             # test_install_post_commit_windowsapps_guard.py::_run_with_shadowed_python()
             # 的既有修復。
+            empty_bin = Path(td) / "empty_bin"
+            empty_bin.mkdir()
             cmd = (
                 '[Console]::OutputEncoding=[System.Text.Encoding]::UTF8; '
-                '$env:PATH = "/usr/bin:/bin"; '
+                f"$env:PATH = '{empty_bin}'; "
+                'Write-Output "PYPROBE_python=$([bool](Get-Command python -ErrorAction SilentlyContinue))"; '
+                'Write-Output "PYPROBE_py=$([bool](Get-Command py -ErrorAction SilentlyContinue))"; '
                 f". '{tmp_ps1}'; "
                 'Write-Output "RC_AFTER=$LASTEXITCODE"'
             )
@@ -127,9 +144,22 @@ class TestDevStartPs1DotSourceLastExitCode(unittest.TestCase):
         """dot-source 情境下「找不到 Python」必須讓 $LASTEXITCODE 為非零值，
         修復前該分支只 `return`、$LASTEXITCODE 停留在呼叫前殘值（本測試以
         乾淨 pwsh 子行程執行，殘值恆為空字串，等同「看似成功」的誤判）。
+
+        🔴 前提自證先行（R67 round 3）：本測試要驗的分支只在「PATH 內找不到任何 Python
+        候選」時才會執行。這個前提以前是**默認**的（PATH 寫死 `/usr/bin:/bin`，只在
+        macOS/Windows 上恰好成立），Linux 上不成立卻沒有任何訊號 ⇒ 測試在跑一條它
+        以為自己在跑的路徑之外的東西。故改由子行程自己回報 `PYPROBE_*` 並先斷言，
+        前提一旦失效就當場點名，而不是留下一句看不懂的「'找不到' not found」。
         """
         proc = self._run()
         output = proc.stdout + proc.stderr
+        for probe in ("PYPROBE_python=False", "PYPROBE_py=False"):
+            self.assertIn(
+                probe, output,
+                f"PATH 淨化失效：{probe.split('=')[0]} 在淨化後的 PATH 上仍解析得到候選 ⇒ "
+                f"「找不到 Python 直譯器」這條**受測分支根本不會執行**，本測試等於在驗"
+                f"另一條路徑（R67 round 3 於 Linux 實測到的形態）。完整輸出：\n{output}",
+            )
         self.assertIn("找不到", output, output)
         self.assertIn("RC_AFTER=1", output, output)
         self.assertNotIn("RC_AFTER=\n", output, output)

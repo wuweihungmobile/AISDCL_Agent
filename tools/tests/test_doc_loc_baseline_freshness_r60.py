@@ -541,24 +541,30 @@ class TestSnapshotFingerprintTripwire(unittest.TestCase):
         self.assertNotEqual(after_edit, after_add, "新增測試檔而指紋不變 ⇒ 觸發器無牙")
 
     def test_check_snapshot_reds_on_documented_drift(self) -> None:
-        """文件記載值與現查不符即紅，且訊息帶可執行的回填指令。
+        """文件記載值與現查不符即紅，且訊息帶可執行的回填指令——**逐受管平台欄**驗。
 
-        R67：指紋改為逐平台記帳，故此處以**本機平台那一欄**驅動——這正是
-        `--check-snapshot` 在本機的判準（別平台欄只做 ⚠️，見 TestR67PerPlatformFingerprints）。
+        🔴 R67 round 3（root-infra-ci 首次在 ubuntu runner 上真的執行本鎖時紅）：
+        原版取 `current_platform_key()`＝**本機**欄並斷言「它不得為 None」。但本鎖驗的是
+        `check_snapshot()` 這個判準本身，那是一個吃「哪一欄」當參數的純函式，與「這次跑在
+        哪台機器」無關。綁本機平台等於替本鎖加了一條**未言明的前提**——「本機必須是受管
+        平台」——於是無欄平台（Linux，見 `current_platform_key` docstring：刻意沒有欄）
+        一跑就紅，而那個紅燈說的不是「判準壞了」，是「前提不成立」。一個只在特定 host 上
+        才成立的鎖，在別的 host 上不是弱，是**冤**。
+
+        改為逐欄驅動之後：本鎖在任何平台上跑的都是同一件事，且覆蓋面由一欄變成全部欄。
         """
         text = _ONBOARDING.read_text(encoding="utf-8-sig")
-        key = SYNC.current_platform_key()
-        self.assertIsNotNone(key, "本機平台在 §7 表② 沒有對應欄——本測試需在受管平台上跑")
-        tampered = SYNC.render_fingerprints(
-            text,
-            {name: "0" * SYNC._FP_LEN for name, _r, _p in SYNC._FINGERPRINT_TREES},
-            key,
-            SYNC.parse_provenance(text, key),
-        )
-        problems = SYNC.check_snapshot(tampered, key)
-        self.assertEqual(len(problems), len(SYNC._FINGERPRINT_TREES))
-        self.assertTrue(all("--with-slow" in p for p in problems), problems)
-        self.assertTrue(all("presumed stale" in p for p in problems), problems)
+        for key in SYNC._PLATFORM_COLUMN_LABELS:
+            tampered = SYNC.render_fingerprints(
+                text,
+                {name: "0" * SYNC._FP_LEN for name, _r, _p in SYNC._FINGERPRINT_TREES},
+                key,
+                SYNC.parse_provenance(text, key),
+            )
+            problems = SYNC.check_snapshot(tampered, key)
+            self.assertEqual(len(problems), len(SYNC._FINGERPRINT_TREES), f"{key} 欄")
+            self.assertTrue(all("--with-slow" in p for p in problems), problems)
+            self.assertTrue(all("presumed stale" in p for p in problems), problems)
 
     def test_fingerprint_anchor_exists_exactly_once_and_round_trips(self) -> None:
         """每個受管平台各有一條錨，且指紋 ＋ provenance 都能來回無損。"""
@@ -1561,26 +1567,33 @@ class TestR67R2OtherPlatformNoticeIsNotAStandingWarning(unittest.TestCase):
 
     本類別鎖的三條不變量：訊息**在 stdout 的資訊頻道**（不是 stderr 的 ⚠️）、**從未回填過**
     與**回填過但過期**兩種狀態措辭可區分、且後者帶「距上次量測幾天」這個唯一可行動的量。
+
+    🔴 R67 round 3：視角欄由「本機平台欄」改為**固定挑一對受管欄**。原版 `setUp` 斷言
+    `current_platform_key()` 不得為 None，於是整類三支在無欄平台（Linux CI runner）上
+    全紅——但本類別驗的是 `snapshot_report()` 的「別欄提醒」機制，它吃「以哪一欄為視角」
+    當參數，跟本機是哪個平台無關。詳見 `TestSnapshotFingerprintTripwire.
+    test_check_snapshot_reds_on_documented_drift` 的同款論證。
     """
 
     def setUp(self) -> None:
-        self.local = SYNC.current_platform_key()
-        self.assertIsNotNone(self.local, "本測試需在 §7 表② 有對應欄的平台上跑")
-        others = [k for k in SYNC._PLATFORM_COLUMN_LABELS if k != self.local]
-        self.assertTrue(others, "表② 只有一欄 ⇒ 本鎖無標的（新增平台欄時請同步檢視）")
-        self.other = others[0]
+        keys = sorted(SYNC._PLATFORM_COLUMN_LABELS)
+        self.assertGreaterEqual(
+            len(keys), 2, "表② 少於兩欄 ⇒ 本鎖無標的（增／減平台欄時請同步檢視）"
+        )
+        # 固定的 (視角欄, 別欄)：與 host 無關才能在每個平台上跑同一件事。
+        self.viewpoint, self.other = keys[0], keys[1]
         text = _ONBOARDING.read_text(encoding="utf-8-sig")
         live = SYNC.measure_fingerprints()
-        # 本機欄填成新鮮（不讓真實文件當下是否過期干擾本鎖），別平台欄由各測試自行擺弄。
+        # 視角欄填成新鮮（不讓真實文件當下是否過期干擾本鎖），別平台欄由各測試自行擺弄。
         self.text = SYNC.render_fingerprints(
-            text, live, self.local, SYNC.parse_provenance(text, self.local)
+            text, live, self.viewpoint, SYNC.parse_provenance(text, self.viewpoint)
         )
         self.stale_fp = {name: "0" * SYNC._FP_LEN for name, _r, _p in SYNC._FINGERPRINT_TREES}
 
     def _notice(self, provenance: dict[str, str]) -> str:
         tampered = SYNC.render_fingerprints(self.text, self.stale_fp, self.other, provenance)
-        problems, notices = SYNC.snapshot_report(tampered, self.local)
-        self.assertEqual(problems, [], "別平台欄 stale 不得計入本機 rc")
+        problems, notices = SYNC.snapshot_report(tampered, self.viewpoint)
+        self.assertEqual(problems, [], "別平台欄 stale 不得計入視角欄的 rc")
         self.assertEqual(len(notices), 1, notices)
         self.assertNotIn("\n", notices[0], "別平台欄的提醒必須壓成單行")
         self.assertIn(SYNC._PLATFORM_COLUMN_LABELS[self.other], notices[0])
@@ -1750,6 +1763,15 @@ class TestR67CliFailsLoud(unittest.TestCase):
         self.assertEqual(SYNC.main(["--check"]), expected)
 
 
+# 沙箱**釘死**的受管平台欄。回填路徑在設計上只寫「本機平台那一欄」，而本檔的窗口鎖
+# 驗的是量測窗口的 TOCTOU，與「本機是哪個平台」無關。R67 round 3 之前沙箱不釘平台，
+# 於是同一組鎖在三個 host 上是三種行為：macOS 綠、Linux（無欄）rc=2 全紅、Windows 則
+# 會寫進 win32 欄而讓寫死 `"darwin"` 的斷言假紅。釘死之後三個 host 跑的是同一件事。
+# 「無欄平台會怎樣」不因此失去覆蓋——由
+# `test_unmanaged_platform_refuses_to_backfill_instead_of_guessing_a_column` 單獨看守。
+_SANDBOX_PLATFORM = "darwin"
+
+
 @contextmanager
 def _slow_window_sandbox(mutate_during_window: bool):
     """把 `--write --with-slow` 整條路徑搬進 tmp 沙箱，並可選擇在**量測窗口內**改動測試樹。
@@ -1763,6 +1785,10 @@ def _slow_window_sandbox(mutate_during_window: bool):
     在 ci-gate 量完之後、AutoClaude pytest 量測期間新增一支測試檔——這正是本缺陷的
     活體形態（並行的修復包在分鐘級窗口內寫測試檔）。
 
+    平台亦是沙箱的一部分（R67 round 3）：`current_platform_key()` 被釘成
+    `_SANDBOX_PLATFORM`，理由見該常數上方。帶參數呼叫仍走真實實作，才不會連帶蓋掉
+    `current_platform_key("linux")` 這種顯式查詢的語意。
+
     yield 出 `(sandbox_path, trees, state)`；`state["mutated"]` 供測試反查注入是否真的
     發生（避免 fixture 空轉造成「測試永遠綠」）。
     """
@@ -1773,7 +1799,7 @@ def _slow_window_sandbox(mutate_during_window: bool):
         name: getattr(SYNC, name)
         for name in (
             "_REPO_ROOT", "_ONBOARDING", "_run_cigate", "_run_autoclaude_pytest",
-            "measure_all", "_docker_state", "pg_extras_state",
+            "measure_all", "_docker_state", "pg_extras_state", "current_platform_key",
         )
     }
     with tempfile.TemporaryDirectory() as tmp:
@@ -1814,6 +1840,11 @@ def _slow_window_sandbox(mutate_during_window: bool):
             }
             SYNC._docker_state = lambda: "down"
             SYNC.pg_extras_state = lambda: "absent"
+            SYNC.current_platform_key = (
+                lambda raw=None: _SANDBOX_PLATFORM
+                if raw is None
+                else saved["current_platform_key"](raw)
+            )
             yield sandbox, trees, state
         finally:
             for name, value in saved.items():
@@ -1883,19 +1914,21 @@ class TestR67SlowMeasurementWindowIsFingerprintBracketed(unittest.TestCase):
                         "cigate-v030-snapshot:": {"passed": 1},
                         "cigate-scripts-snapshot:": {"passed": counts_before},
                     },
-                    "darwin",
+                    _SANDBOX_PLATFORM,
                 ),
                 fp_after,
-                "darwin",
+                _SANDBOX_PLATFORM,
                 SYNC.measure_provenance(),
             )
-            documented = SYNC.slow_documented(bad, "darwin")["cigate-scripts-snapshot:"]["passed"]
+            documented = SYNC.slow_documented(bad, _SANDBOX_PLATFORM)[
+                "cigate-scripts-snapshot:"
+            ]["passed"]
             self.assertNotEqual(
                 documented, len(list(trees["scripts"].glob("**/*.py"))),
                 "計數並未 stale ⇒ 本測試的假綠構造失效",
             )
             self.assertEqual(
-                SYNC.check_snapshot(bad, "darwin"), [],
+                SYNC.check_snapshot(bad, _SANDBOX_PLATFORM), [],
                 "假綠構造未成立（指紋沒對上）⇒ 後半的斷言不具意義",
             )
             # ── 後半：生產路徑**不得**產出上面那份東西 ──
@@ -1918,8 +1951,39 @@ class TestR67SlowMeasurementWindowIsFingerprintBracketed(unittest.TestCase):
             )
             self.assertEqual(SYNC.main(["--write", "--with-slow"]), 0)
             written = (sandbox / "ONBOARDING.md").read_text(encoding="utf-8-sig")
-            self.assertEqual(SYNC.parse_fingerprints(written, "darwin"), fp_expected)
+            self.assertEqual(SYNC.parse_fingerprints(written, _SANDBOX_PLATFORM), fp_expected)
             self.assertEqual(SYNC.main(["--check-snapshot"]), 0, "回填完當場就紅 ⇒ 修法過嚴")
+
+    def test_unmanaged_platform_refuses_to_backfill_instead_of_guessing_a_column(self) -> None:
+        """無欄平台（Linux CI runner）跑回填 ⇒ rc=2、點名受管欄、且**一個 byte 都不寫**。
+
+        WHY 這支要單獨存在（R67 round 3）：同輪把沙箱的平台**釘死**在受管欄上，才能讓
+        窗口鎖在三個 host 上跑同一件事；那個釘死同時把「無欄平台會怎樣」擋在射程外。
+        而那條分支正是 R67-D1 的最後一道——`current_platform_key()` 回 None 時若「猜一欄
+        來寫」，本機數字就會被寫進標示別平台實測的格子，表格還是滿的、rc 還是 0，但它
+        從此在說謊。故把沙箱移除的那半邊當場補回來，而不是讓它變成沒人看守的分支。
+        """
+        with _slow_window_sandbox(mutate_during_window=False) as (sandbox, _trees, _state):
+            doc = sandbox / "ONBOARDING.md"
+            before_bytes = doc.read_bytes()
+            SYNC.current_platform_key = lambda raw=None: None  # ← 沙箱結束時由 fixture 還原
+            out, err = io.StringIO(), io.StringIO()
+            with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+                rc = SYNC.main(["--write", "--with-slow"])
+            self.assertEqual(rc, 2, f"無欄平台仍回填（rc={rc}）⇒ 數字會被寫進別平台的格子")
+            self.assertIn("沒有對應欄", err.getvalue(), err.getvalue())
+            for key in SYNC._PLATFORM_COLUMN_LABELS:
+                self.assertIn(
+                    key, err.getvalue(),
+                    "訊息未列出受管平台欄 ⇒ 使用者無從得知『那該在哪台機器上跑』",
+                )
+            self.assertIn(
+                "_PLATFORM_COLUMN_LABELS", err.getvalue(),
+                "訊息未指路『要納管新平台該改哪裡』",
+            )
+            self.assertEqual(
+                doc.read_bytes(), before_bytes, "拒絕回填卻仍動了 ONBOARDING.md",
+            )
 
     def test_bracketing_cost_is_one_extra_fingerprint_not_one_extra_measurement(self) -> None:
         """代價劃界：夾住窗口只多**一次毫秒級指紋**，不得多跑一次分鐘級量測。
@@ -1978,6 +2042,90 @@ class TestR67SlowMeasurementWindowIsFingerprintBracketed(unittest.TestCase):
                     calls["n"], 1,
                     f"{mode} 在單次呼叫內量了 {calls['n']} 次 live 指紋（預期 1）",
                 )
+
+
+# 本檔所有鎖都必須在這些 `sys.platform` 值下有**相同**結果。刻意含 `linux`（無對應欄
+# ＝ root-infra-ci 的 ubuntu runner）與兩個受管欄，且**不含**「本機是哪個」這個資訊。
+_NEUTRALITY_PLATFORMS: tuple[str, ...] = ("darwin", "linux", "win32")
+
+
+def _flatten_suite(suite: unittest.TestSuite) -> list[unittest.TestCase]:
+    out: list[unittest.TestCase] = []
+    for item in suite:
+        if isinstance(item, unittest.TestSuite):
+            out.extend(_flatten_suite(item))
+        else:
+            out.append(item)
+    return out
+
+
+class TestR67R3ThisFileMakesNoUnstatedPlatformAssumption(unittest.TestCase):
+    """🔴 R67 round 3 回歸鎖：本檔的每一支鎖，在**任何**平台上都必須得出同一個結果。
+
+    WHY（缺陷類別，不是單一缺陷）：R67 把 `sync_onboarding_baselines.py` 平台化之後，
+    本檔多支鎖改用 `current_platform_key()`／`main(["--write", "--with-slow"])` 驅動，
+    等於各自悄悄加上一條**未言明的前提**——「本機必須是 §7 表② 有對應欄的平台」。
+    在作者的 macOS 上三個月都是綠的；直到 root-infra-ci 的相依缺口被補、這些鎖第一次
+    真的在 ubuntu runner 上執行，7 支同時紅。而那 7 個紅燈說的都不是「受測物壞了」，
+    是「測試自己的前提在這台機器上不成立」——**假紅比假綠更快讓人學會忽略紅燈**。
+
+    這一類不可能靠人審抓：它的症狀只在「沒人跑過的平台」上出現，而「沒人跑過」正是它
+    能活下來的原因（同 DEF-101-343~345「Windows 專屬測試連續 5+ 輪全 APPROVE 卻從未在
+    Windows 跑過」的形態，只是方向換成 Linux）。故本鎖把「換平台」變成**本機當場可跑**
+    的事：以模擬的 `sys.platform` 重跑本檔全部鎖，任一平台下的失敗即當場點名。
+
+    邊界（誠實劃界）：
+      - 只注入 `sys.platform`。`os.name`、真實檔案系統、路徑分隔符、是否有 pwsh 等
+        **不在**模擬範圍內 ⇒ 本鎖綠**不等於**「本檔在真 Linux/Windows 上必綠」，只等於
+        「本檔不因 `sys.platform` 而異」。對受測物而言這已是全部——
+        `sync_onboarding_baselines.py` 的平台輸入只有 `sys.platform`
+        （`platform_mod.*` 僅供 provenance 的 host 字串，不進任何判準）。
+      - 代價＝本檔跑 `len(_NEUTRALITY_PLATFORMS)` 倍。可接受的理由：本檔是純字串/雜湊
+        運算，實測全檔僅數秒；而它換回來的是「跨平台缺陷在**動工的那台機器上**就會紅」。
+    """
+
+    def _sibling_suite(self) -> unittest.TestSuite:
+        """本模組除本類別以外的全部測試（排除自己＝防無限遞迴）。"""
+        loaded = unittest.TestLoader().loadTestsFromModule(sys.modules[__name__])
+        suite = unittest.TestSuite()
+        for test in _flatten_suite(loaded):
+            if not isinstance(test, TestR67R3ThisFileMakesNoUnstatedPlatformAssumption):
+                suite.addTest(test)
+        return suite
+
+    def test_every_lock_in_this_file_holds_under_every_simulated_platform(self) -> None:
+        probe = self._sibling_suite()
+        self.assertGreater(
+            probe.countTestCases(), 50,
+            "子套件幾乎是空的 ⇒ 本鎖空轉（loadTestsFromModule 漂移），不具鑑別力",
+        )
+        original = sys.platform
+        failures: dict[str, list[str]] = {}
+        try:
+            for fake in _NEUTRALITY_PLATFORMS:
+                sys.platform = fake
+                sink = io.StringIO()
+                with contextlib.redirect_stdout(sink), contextlib.redirect_stderr(sink):
+                    result = unittest.TextTestRunner(stream=sink, verbosity=0).run(
+                        self._sibling_suite()
+                    )
+                bad = [
+                    f"{kind} {test.id()} :: {trace.strip().splitlines()[-1]}"
+                    for kind, bucket in (
+                        ("FAIL", result.failures), ("ERROR", result.errors)
+                    )
+                    for test, trace in bucket
+                ]
+                if bad:
+                    failures[fake] = bad
+        finally:
+            sys.platform = original
+        self.assertEqual(
+            failures, {},
+            "本檔有鎖的結果隨 sys.platform 改變 ⇒ 它對『本機是哪個平台』做了未言明的"
+            "前提假設。修法不是加 skip（那等於讓該平台永遠沒有覆蓋），而是把該鎖改成"
+            "**吃平台當參數**——它驗的判準本來就是逐欄的純函式。",
+        )
 
 
 if __name__ == "__main__":
