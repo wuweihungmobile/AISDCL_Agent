@@ -196,6 +196,7 @@ from __future__ import annotations
 
 import ast
 import fnmatch
+import ntpath
 import os
 import re
 import subprocess
@@ -584,6 +585,32 @@ _SYS_PATH_INSERT_EQUIVALENT_FORMS: dict[str, str] = {
     ),
 }
 
+# 🔴 R68（windows-compat-ci 首度真跑到本套件才顯形）：假「絕對」路徑的**錨點**必須與
+# 受測解析器所用的錨點一致，否則測試對「本機是哪個平台」做了未言明的前提假設。
+#
+# 原寫法 `os.path.join(os.sep, "repo", ...)` 在 POSIX 上得 `/repo/...`（真絕對），在
+# Windows 上卻得 `\repo\...`——那是 **drive-relative**（缺磁碟機代號）而非絕對路徑。
+# 而 `_eval_path_expr()` 解析 `__file__` 時走的是 `os.path.abspath(source_file)`，
+# Win32 `GetFullPathNameW` 會補上「目前工作磁碟機」⇒ 實得 `D:\repo\tools\lib`、期望值
+# 仍是 `\repo\tools\lib`，兩者分屬不同 anchor ⇒ 4 支參數化案例在 Windows 上全紅
+# （CI run 30701321963 逐字：`assert ['D:\\repo\\tools\\lib'] == ['\\repo\\tools\\lib']`）。
+#
+# 修法是讓期望值與受測物**走同一條正規化路徑**（`os.path.abspath`），而不是各自組字串：
+# POSIX 上 abspath 對 `/repo/...` 是 no-op、行為不變；Windows 上兩側同樣被補上目前磁碟機
+# 而相等。同型判例見 `tools/tests/_platform_helpers.py::ABS_FAKE_REPO`（該處是 pathlib
+# join 語意的同一個坑）。
+_FAKE_REPO = "repo"
+
+
+def _fake_abs(*segments: str) -> str:
+    """組出在**當前平台語意下真正絕對**的假路徑（Windows 上含磁碟機代號）。
+
+    刻意透過 module-global `os` 取用（而非 import 期綁定 `os.path.abspath`），使
+    `TestWindowsPathSemantics` 得以換上 Windows 語意 shim 後在 macOS/Linux 當場重跑
+    本函式與受測解析器——「換平台」因此是本機可驗的事，不必等 Windows runner。
+    """
+    return os.path.abspath(os.path.join(os.sep, *segments))
+
 
 @pytest.mark.parametrize("form_name", sorted(_SYS_PATH_INSERT_EQUIVALENT_FORMS))
 def test_sys_path_insert_forms_resolve_equivalently(form_name):
@@ -597,14 +624,85 @@ def test_sys_path_insert_forms_resolve_equivalently(form_name):
     compat-CI 漏列它卻 19 passed 全綠。本測試把「四種等價寫法必須解析到同一個目錄」
     釘成契約：任何讓解析器退回「只認某種特定字面排列」的改動（含改回正則）即刻轉紅。
     """
-    fake_source = os.path.join(os.sep, "repo", "tools", "tests", "test_fake.py")
-    expected = os.path.join(os.sep, "repo", "tools", "lib")
+    fake_source = _fake_abs(_FAKE_REPO, "tools", "tests", "test_fake.py")
+    expected = _fake_abs(_FAKE_REPO, "tools", "lib")
     src = _SYS_PATH_INSERT_EQUIVALENT_FORMS[form_name]
     resolved = _resolve_sys_path_insert_dirs(src, fake_source)
     assert resolved == [expected], (
         f"sys.path.insert 寫法 {form_name!r} 應解析為 {expected!r}（與其餘等價寫法同），"
         f"實得 {resolved!r}——解析器又退化成認寫法而非認語意（R67 盲區 E 同構）"
     )
+
+
+# ──────────────────────────────────────────────────────────────
+# R68 回歸鎖：上一條在 Windows 路徑語意下也必須成立（本機可驗，不必等 runner）
+# ──────────────────────────────────────────────────────────────
+# 下一行的磁碟機字面值是**模擬 Windows 用的輸入資料本身**（要模擬「Win32 abspath 會補上
+# 目前工作磁碟機」就非得有一個磁碟機代號不可），不是被當成本機真實路徑去 join／resolve
+# 的假 repo 根——與 `_platform_helpers.ABS_FAKE_REPO`（該檔的 win32 分支同樣寫死磁碟機、
+# 且同樣列在該掃描器的 _ALLOWED 豁免）是同一個性質。故用該掃描器提供的行尾豁免標記。
+_SIMULATED_WINDOWS_CWD = "D:\\a\\AISDCL_Agent\\AISDCL_Agent"  # platform-ok: 模擬器輸入資料，非本機路徑
+
+
+class _WindowsPathShim:
+    """`os.path` 的 Windows 語意替身：ntpath ＋ 忠實模擬 Win32 `GetFullPathNameW`。
+
+    為何不能直接把 `os.path` 換成 `ntpath` 了事：非 Windows 上 `ntpath.abspath` 走
+    `_abspath_fallback`，而 `ntpath.isabs("\\\\repo\\\\x")` 回 True（ntpath 把「單一
+    前導分隔符」也算絕對）⇒ 原樣返回、**不補磁碟機代號**。但真 Windows 的
+    `ntpath.abspath` 走 `nt._getfullpathname`，會補上目前工作磁碟機——「補磁碟機」正是
+    本缺陷的關鍵一步。直接用 ntpath 的鎖會恆綠＝零鑑別力（本機實測確認：未補此步時
+    4 支案例全 OK，補上後 4 支全 FAIL、與 CI 逐字相符）。
+    """
+
+    def __getattr__(self, name):
+        return getattr(ntpath, name)
+
+    def abspath(self, path: str) -> str:
+        drive, rest = ntpath.splitdrive(path)
+        if drive:
+            return ntpath.normpath(path)
+        if rest.startswith("\\"):                       # drive-relative：補目前磁碟機
+            return ntpath.splitdrive(_SIMULATED_WINDOWS_CWD)[0] + ntpath.normpath(rest)
+        return ntpath.normpath(ntpath.join(_SIMULATED_WINDOWS_CWD, path))
+
+
+class _WindowsOsShim:
+    """`os` 的 Windows 語意替身（只覆寫 `sep`／`path`，其餘一律轉發真 `os`）。"""
+
+    sep = "\\"
+    path = _WindowsPathShim()
+
+    def __getattr__(self, name):
+        return getattr(os, name)
+
+
+@pytest.mark.parametrize("form_name", sorted(_SYS_PATH_INSERT_EQUIVALENT_FORMS))
+def test_sys_path_insert_forms_resolve_equivalently_under_windows_semantics(
+    form_name, monkeypatch
+):
+    """🔴 R68：上一條鎖不得對「本機是哪個平台」做未言明的前提假設。
+
+    WHY（Rule 9 — 測意圖）：上一條鎖驗的是「解析器認語意、不認寫法」。這個意圖與作業
+    系統毫無關係，所以它**在每個平台上都必須得出同一個結果**。實際上它曾經借用
+    `os.sep` 組假絕對路徑，於是在 Windows 上期望值退化成 drive-relative、與受測物
+    `abspath` 出來的 `D:\\...` 恆不相等——4 支案例在 windows-compat-ci 首度真跑時全紅
+    （run 30701321963）。那 4 個紅燈說的不是「解析器壞了」，是「測試自己的前提在這台
+    機器上不成立」——**假紅比假綠更快讓人學會忽略紅燈**（同
+    `tools/tests/test_doc_loc_baseline_freshness_r60.py::
+    TestR67R3ThisFileMakesNoUnstatedPlatformAssumption` 判例，方向換成 Windows）。
+
+    手法：把本模組的 module-global `os` 換成 Windows 語意 shim 後**重跑上一條鎖本身**
+    （不是複製一份等價邏輯——複製品會與被鎖對象各自漂移）。
+
+    邊界（誠實劃界）：只模擬 `os.sep` 與 `os.path`（ntpath ＋ GetFullPathNameW 的補磁碟機
+    行為）。真實檔案系統、大小寫不敏感、UNC、`\\\\?\\` 長路徑前綴、`os.name` 皆**不在**
+    模擬範圍 ⇒ 本鎖綠**不等於**「本檔在真 Windows 上必綠」，只等於「上一條鎖不因路徑
+    分隔符/anchor 語意而異」。對受測物而言這已是全部：`_eval_path_expr()` 的平台輸入
+    只有 `os.path`／`os.sep`，不讀 `os.name`、不碰磁碟。
+    """
+    monkeypatch.setitem(globals(), "os", _WindowsOsShim())
+    test_sys_path_insert_forms_resolve_equivalently(form_name)
 
 
 def test_no_unresolvable_sys_path_inserts():

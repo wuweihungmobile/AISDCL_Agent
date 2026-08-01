@@ -116,6 +116,30 @@ def test_no_skips_prints_nothing(pytester):
 # 的 docstring 說明為何不改 ci-gate.sh、也不補進凍結基線）。
 
 
+# 🔴 R68（windows-compat-ci 首度真跑才顯形）：探針的 skip 條件必須與**執行平台無關**。
+#
+# 原寫法是 `@pytest.mark.skipif(sys.platform != "win32", ...)`——借用真實平台判斷。
+# 在 macOS/Linux 上它恆成立、探針被 skip、下面兩條鎖全綠；但在**原生 Windows** 上
+# `sys.platform == "win32"`，條件為 False ⇒ 探針**執行並 pass 而非 skip** ⇒ 兩條鎖
+# 的前提整個消失（實測輸出退化成 `1 passed`，見 CI run 30701321963）。
+#
+# 這裡要的是「一個必然被 skip、且 reason 帶得動彙整標籤的測試」——**被 skip 才是探針
+# 的規格**，至於真實平台是什麼與本機制完全無關。故條件寫死 `True`，與本檔上半部
+# `_make_sandbox()` 既有慣例（`skipif({tagged_skip!r}, ...)`，代入的同樣是字面 True）
+# 一致。標籤仍留在 reason 最前面：彙整機制是靠 `_skip_reason()` 取
+# `longrepr[2]`（形如 `"Skipped: <reason>"`）再比對 `WINDOWS_NATIVE_SKIP_TAG` 子字串
+# 來認人的（見 `AISDLC_SDD/conftest.py::windows_native_skips`），與 skip 條件怎麼寫
+# 無關——所以改成無條件 skip 不會讓探針從彙整清單裡消失。
+_PROBE_SOURCE = (
+    'import pytest\n'
+    '\n'
+    '\n'
+    '@pytest.mark.skipif(True, reason="[WINDOWS-NATIVE-ONLY] R67-F27 探針")\n'
+    'def test_win_only():\n'
+    '    assert True\n'
+)
+
+
 def _version_tree_sandbox(tmp_path: Path, *, with_version_conftest: bool) -> Path:
     """複刻生產佈局：`<sdd>/conftest.py` ＋ `<sdd>/<vX>/{conftest.py,pytest.ini,tests}`。
 
@@ -137,22 +161,47 @@ def _version_tree_sandbox(tmp_path: Path, *, with_version_conftest: bool) -> Pat
             (_SDD_ROOT / str(_LATEST) / "conftest.py").read_text(encoding="utf-8"),
             encoding="utf-8",
         )
-    (tests / "test_probe.py").write_text(
-        'import sys\n'
-        'import pytest\n'
-        '\n'
-        '\n'
-        '@pytest.mark.skipif(sys.platform != "win32",\n'
-        '                    reason="[WINDOWS-NATIVE-ONLY] R67-F27 探針")\n'
-        'def test_win_only():\n'
-        '    assert True\n',
-        encoding="utf-8",
-    )
+    (tests / "test_probe.py").write_text(_PROBE_SOURCE, encoding="utf-8")
     return version
 
 
-def _run_official_gate_form(version_dir: Path) -> str:
-    """以 `scripts/ci-gate.sh` 逐字同款的呼叫形態跑（cwd=版本樹、相對 testpaths）。"""
+# 只在 collection 期改 `sys.platform` 的沙箱 conftest（R68 回歸鎖用）。
+# 為何不全域改：整個 session 都掛著假 platform 會讓 sysconfig 去找
+# `_sysconfigdata__win32_darwin` 而直譯器當場炸掉（本機實測，非推測）。而
+# `@pytest.mark.skipif(<非字串條件>)` 的條件正是在**測試模組 import＝collect 當下**
+# 求值，故把假 platform 收斂在 `pytest_make_collect_report` 這個 wrapper 內即已足夠，
+# 且副作用面最小。
+_FAKE_PLATFORM_CONFTEST = '''\
+import sys
+
+import pytest
+
+_ORIGINAL = sys.platform
+
+
+@pytest.hookimpl(hookwrapper=True)
+def pytest_make_collect_report(collector):
+    sys.platform = "__FAKE_PLATFORM__"
+    try:
+        yield
+    finally:
+        sys.platform = _ORIGINAL
+'''
+
+
+def _run_official_gate_form(version_dir: Path, *, simulate_platform: str | None = None) -> str:
+    """以 `scripts/ci-gate.sh` 逐字同款的呼叫形態跑（cwd=版本樹、相對 testpaths）。
+
+    `simulate_platform` 不為 None 時，往沙箱 tests/ 丟一支 conftest，在 collection 期
+    把子行程的 `sys.platform` 換成指定值——使「這支鎖在別的平台上會怎樣」成為**本機
+    當場可跑**的事，而不是要等某個 runner 第一次跑到才知道。
+    """
+    if simulate_platform is not None:
+        tests_dir = version_dir / "tools" / "fsm_runtime" / "tests"
+        (tests_dir / "conftest.py").write_text(
+            _FAKE_PLATFORM_CONFTEST.replace("__FAKE_PLATFORM__", simulate_platform),
+            encoding="utf-8",
+        )
     proc = subprocess.run(
         [sys.executable, "-m", "pytest", "tools/fsm_runtime/tests/", "-q", "-rs"],
         cwd=str(version_dir), capture_output=True, text=True,
@@ -179,6 +228,69 @@ def test_without_the_version_conftest_the_section_is_structurally_absent(tmp_pat
     version = _version_tree_sandbox(tmp_path, with_version_conftest=False)
     out = _run_official_gate_form(version)
     assert "1 skipped" in out, f"探針本身必須確實 skip（前提檢查），實得：\n{out}"
+    assert "WINDOWS-NATIVE-ONLY SKIPS" not in out, (
+        "沒有版本樹 conftest 時本來就印不出區塊——若這裡竟然印得出來，"
+        "代表上一條測的不是這支 conftest"
+    )
+
+
+def test_probe_source_carries_no_platform_predicate() -> None:
+    """🔴 R68 靜態後盾：探針原始碼裡不得出現任何平台判斷。
+
+    WHY 兩條鎖並存（不是重複）：下一條是動態鎖（真跑三個模擬平台），鑑別力最強，但它
+    本身依賴「collection 期換掉 `sys.platform` 不會弄壞子行程」這個前提——該前提在本機
+    macOS 實測成立，在原生 Windows 上**尚未被驗證過**（誠實揭露）。本條是零風險的純字串
+    斷言：即使動態鎖哪天在某平台上失效/被 skip，探針一旦被改回借用真實平台判斷，這裡仍
+    會當場轉紅。探針的規格是「必然被 skip」，達成方式與作業系統無關。
+    """
+    offenders = [
+        token
+        for token in ("sys.platform", "os.name", "platform.system", "platform.machine")
+        if token in _PROBE_SOURCE
+    ]
+    assert offenders == [], (
+        f"探針原始碼含平台判斷 {offenders}——借用真實平台判斷等於把「探針必然被 skip」"
+        f"這個前提綁死在特定平台上（原生 Windows 上 `sys.platform != 'win32'` 為 False，"
+        f"探針會 pass 而非 skip，兩條版本樹鎖的前提整個消失）。請改用無條件 skip：\n"
+        f"{_PROBE_SOURCE}"
+    )
+
+
+@pytest.mark.parametrize("fake_platform", ["win32", "linux", "darwin"])
+def test_version_tree_locks_hold_under_every_simulated_platform(
+    tmp_path: Path, fake_platform: str
+) -> None:
+    """🔴 R68：上面兩條版本樹鎖不得對「本機是哪個平台」做未言明的前提假設。
+
+    WHY（Rule 9 — 測意圖）：那兩條驗的是「彙整機制在官方閘門形態下印不印得出來」，
+    這件事與作業系統無關，故**每個平台上都必須得出同一個結果**。實際上探針原本借用
+    `sys.platform != "win32"` 當 skip 條件，在原生 Windows 上條件為 False ⇒ 探針
+    **執行並 pass 而非 skip** ⇒ 兩條鎖的前提整個蒸發（windows-compat-ci run
+    30701321963 逐字：`1 passed in 0.19s`，期望的區塊與 `1 skipped` 皆不見）。
+    借用真實平台判斷造探針＝把測試綁死在特定平台上——本鎖就是那個機械物。
+
+    含 `linux`／`darwin` 而非只測 `win32`：三個平台**同時**綠才證明「與平台無關」；
+    只測 win32 的話，一個寫成 `sys.platform == "win32"` 的反向錯誤仍會漏網。
+
+    邊界（誠實劃界）：只注入 `sys.platform`。`os.name`、真實檔案系統、路徑分隔符、
+    終端編碼皆**不在**模擬範圍 ⇒ 本鎖綠**不等於**「這兩條鎖在真 Windows 上必綠」，
+    只等於「它們不因 `sys.platform` 而異」。對受測物而言這已是全部：探針的 skip 與否
+    是唯一的平台相依輸入，而彙整機制本身只讀 skip reason 字串。
+    """
+    positive = _version_tree_sandbox(tmp_path / "pos", with_version_conftest=True)
+    out = _run_official_gate_form(positive, simulate_platform=fake_platform)
+    assert "WINDOWS-NATIVE-ONLY SKIPS" in out, (
+        f"模擬 sys.platform={fake_platform!r} 下彙整區塊消失——探針的 skip 條件"
+        f"（或彙整機制）對執行平台有未言明假設，實得：\n{out}"
+    )
+    assert "test_win_only" in out, "區塊必須點名該支測試的 nodeid"
+
+    control = _version_tree_sandbox(tmp_path / "ctl", with_version_conftest=False)
+    out = _run_official_gate_form(control, simulate_platform=fake_platform)
+    assert "1 skipped" in out, (
+        f"模擬 sys.platform={fake_platform!r} 下探針未被 skip ⇒ 對照組前提不成立，"
+        f"實得：\n{out}"
+    )
     assert "WINDOWS-NATIVE-ONLY SKIPS" not in out, (
         "沒有版本樹 conftest 時本來就印不出區塊——若這裡竟然印得出來，"
         "代表上一條測的不是這支 conftest"
