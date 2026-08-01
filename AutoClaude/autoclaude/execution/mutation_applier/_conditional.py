@@ -11,6 +11,7 @@ import subprocess
 from typing import TYPE_CHECKING
 
 from ...utils.trace_context import propagate_to_subprocess_env
+from ..evaluator import _NEW_SESSION_KWARGS, kill_process_tree
 
 if TYPE_CHECKING:
     from ...models.step_mutation import StepMutation
@@ -42,12 +43,26 @@ def handle_conditional(ctx: MutationCtx, mutation: StepMutation, result: _Mutati
         )
         return
     try:
-        cond_proc = subprocess.run(
+        # R68：與 Evaluator.run 同一缺陷類別（shell=True + timeout 逾時只殺直接
+        # 子行程、孫行程變孤兒續跑）。共用 evaluator.kill_process_tree 收殺路徑，
+        # 不各寫一份。
+        cond_proc = subprocess.Popen(
             mutation.condition_evaluator,
-            shell=True, capture_output=True,
-            timeout=ctx.runner._cfg.playbook.conditional_evaluator_timeout_seconds,
+            shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
             env=propagate_to_subprocess_env(dict(os.environ)),
+            **_NEW_SESSION_KWARGS,
         )
+        try:
+            cond_proc.communicate(
+                timeout=ctx.runner._cfg.playbook.conditional_evaluator_timeout_seconds
+            )
+        except subprocess.TimeoutExpired:
+            kill_process_tree(cond_proc)
+            try:
+                cond_proc.communicate(timeout=5)
+            except Exception:
+                pass
+            raise
         cond_exit = cond_proc.returncode
     except Exception as exc:
         logger.warning("=== Gap-021 | CONDITIONAL evaluator 執行失敗: %s，視為 false ===", exc)

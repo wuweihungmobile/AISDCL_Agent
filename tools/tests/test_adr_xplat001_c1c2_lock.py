@@ -260,15 +260,9 @@ _OLD_ROW_C2_OWNER = (
 # R60＝落地本 ADR 的那一輪）。它同時寫在 ADR §4.3.4 並由本檔雙向比對，改一邊即紅。
 # 兩個常數都只准往下改，由 `TestShrinkOnlyRatchet` 對 HEAD 版本機械比對（不是人審慣例）。
 _BASELINE_ID_CEILING = "DEF-101-526"
-_MAX_BASELINE_ENTRIES = 8
+_MAX_BASELINE_ENTRIES = 2
 
 _BASELINE_WAIVERS: dict[str, Waiver] = {
-    "DEF-101-003": Waiver(frozenset({"C2"}), _OLD_ROW_C2_RETRO, _OLD_ROW_C2_OWNER),
-    "DEF-101-004": Waiver(frozenset({"C2"}), _OLD_ROW_C2_RETRO, _OLD_ROW_C2_OWNER),
-    "DEF-101-019": Waiver(frozenset({"C2"}), _OLD_ROW_C2_RETRO, _OLD_ROW_C2_OWNER),
-    "DEF-101-020": Waiver(frozenset({"C2"}), _OLD_ROW_C2_RETRO, _OLD_ROW_C2_OWNER),
-    "DEF-101-040": Waiver(frozenset({"C2"}), _OLD_ROW_C2_RETRO, _OLD_ROW_C2_OWNER),
-    "DEF-101-359": Waiver(frozenset({"C2"}), _OLD_ROW_C2_RETRO, _OLD_ROW_C2_OWNER),
     "DEF-101-324": Waiver(
         frozenset({"C1"}),
         "R60 前的舊列（2026-07-24）且**形態與 §4.3 不同**：本列是檔名淨化「多對一碰撞」的"
@@ -580,7 +574,7 @@ _RATCHET_CEILING_RE = re.compile(r"^_BASELINE_ID_CEILING\s*=\s*\"(DEF-\d+-\d+)\"
 # （禁用 subprocess 仍須完整運作），舊實作在該鎖下會直接紅。
 # 另有一道獨立張力：`_BASELINE_ID_CEILING` 同時被 `TestCriterionIsBoundToAdrProse` 綁在
 # ADR §4.3.4 的宣告句上 ⇒ 調升它還得動 ADR，那是本檔之外的第三個站點。
-_FROZEN_MAX_BASELINE_ENTRIES = 8
+_FROZEN_MAX_BASELINE_ENTRIES = 2
 _FROZEN_BASELINE_ID_CEILING = "DEF-101-526"
 
 

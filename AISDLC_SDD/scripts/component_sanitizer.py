@@ -28,6 +28,7 @@ _is_windows_apps_stub()` 語言邊界獨立實作）不可跨子專案 import，
 from __future__ import annotations
 
 import re
+import unicodedata
 
 _WIN_FORBIDDEN_CHARS = frozenset('<>:"|?*\\')
 # R60：`CONIN$`／`CONOUT$` 補齊（四處同修）。判準的權威模型是 git for Windows 的
@@ -38,10 +39,27 @@ _WIN_FORBIDDEN_CHARS = frozenset('<>:"|?*\\')
 # 🔴 四個基本裝置名（CON、PRN、AUX、NUL）必須相鄰、新裝置名一律加在清單尾端——根層
 # tools/tests/test_windows_forbidden_filename_parity.py 的 repo-wide 錨①要求四者依序出現
 # 且間隙 ≤5 字元；R60 初版插在中間，實測讓另三處實作同時掉出該錨、卻因錨②仍命中而全綠。
+# R68（四處同修）：追加 Microsoft《Naming Files, Paths, and Namespaces》保留名清單明列的
+# 上標變體 `COM¹ COM² COM³ LPT¹ LPT² LPT³`（該文件與 ASCII 數字版並列，成因是 Windows
+# 裝置名解析把上標數字視同數字；本機實測 `unicodedata.normalize("NFKC","COM¹")=="COM1"`
+# 佐證兩者在相容性分解下同值）。🔴 **證據等級＝官方文件＋靜態分析，非 Windows 真機實測**
+# ——本輪無 Windows 真機，未跑 `core.protectNTFS` / Win32 `CreateFile` 對照（CONIN$／CLOCK$
+# 當初是實測後才分別納入／排除）。取捨方向刻意選「擋」：若 Windows 實際 ACCEPT，代價僅是
+# 對一個沒人會用的檔名多加一個 `_` 前綴；若實際 REJECT 而不擋，代價是整個 clone 壞掉。
+# 未來若在真機實測到 ACCEPT，四處一併移除並比照 CLOCK$ 於此註記「已實測不納入」。
 _WIN_RESERVED_NAME_RE = re.compile(
-    r"^(CON|PRN|AUX|NUL|COM[0-9]|LPT[0-9]|CONIN\$|CONOUT\$)$", re.IGNORECASE
+    r"^(CON|PRN|AUX|NUL|COM[0-9]|LPT[0-9]|CONIN\$|CONOUT\$|COM[¹²³]|LPT[¹²³])$", re.IGNORECASE
 )
-_MAX_COMPONENT_LEN = 80  # 遠低於 NTFS 單檔名 255 上限，為前後綴（FSM-STATE-/-{track}.yaml）留餘裕
+# 🔴 R68 三站點長度政策（本處是其中一站，三者治理**不同域**、刻意不相等）：
+#   · 本處 80        ← FSM state 檔名**單一 component**（前後綴 FSM-STATE-/-{track}.yaml 留餘裕）
+#   · logger.py      ← runtime log 檔名，**刻意不截斷**（見該檔 `write_text_with_fallback`
+#                       docstring：淨化字元即可，超長交由 OSError fallback 寫入暫存目錄）
+#   · check_ntfs_paths.py 200 fail／180 warn ← tracked git **整條相對路徑**（MAX_PATH 260 減
+#                       clone 前綴 59）
+# 三者不是「同一政策的三份真相」，把 80 抄進 logger 只會改變既有輸出且無收益。此對照由
+# AISDLC_SDD/scripts/tests/test_ntfs_length_gate.py::test_length_policy_three_sites_registry
+# 機械釘住（任一數字或「不截斷」設計被單方面改動即紅）。
+_MAX_COMPONENT_LEN = 80
 
 
 def sanitize_component(name: str) -> str:
@@ -78,7 +96,14 @@ def sanitize_component(name: str) -> str:
     # 此決策由 AISDLC_SDD/scripts/tests/test_component_sanitizer_reserved_trailing_space.py
     # 的 `LEADING_SPACE_RESERVED` 樣本（斷言本處**必須**加前綴）與根層
     # tools/tests/ 對另三處「必須放行」的斷言雙向釘住，任一側翻面即翻紅。
-    s = str(name).strip()
+    # R68：先 NFC 正規化再淨化。WHY：本函式是**生成器**，其產物（FSM-STATE-*.yaml／
+    # SPEC-PATCH-*.md 等，實查 69 筆已入庫）會被提交，而同 repo 的 tools/check_ntfs_paths.py
+    # `_non_nfc_reason()` 對 index 內非 NFC 路徑 fail-closed。Linux／CI runner 上 git 無
+    # `core.precomposeunicode`（該設定僅 macOS 生效），NFD 輸入會原樣入 index → 撞自家 NFC 閘。
+    # macOS 側因 precomposeunicode 預設 true 而不顯形（實測 `git add` 後 index 恆 NFC），
+    # 故此為 **Linux/CI 側**顯形的缺口，不是 macOS 側。對純 ASCII／CJK 零行為變更
+    # （`is_normalized("NFC", s)` 對兩者恆真）。
+    s = unicodedata.normalize("NFC", str(name)).strip()
     sanitized = "".join(
         "_" if ch in _WIN_FORBIDDEN_CHARS or ch == "/" or ord(ch) < 0x20 or ord(ch) == 0x7F else ch
         for ch in s

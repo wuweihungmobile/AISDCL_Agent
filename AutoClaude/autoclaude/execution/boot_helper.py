@@ -113,9 +113,13 @@ def validate_evaluator_commands_impl(playbook: Playbook) -> None:
     Mac/Windows 相容性 R52：比照 pre_run_validator.py 同步排除 WindowsApps
     App Execution Alias 空殼（假陰性修復，見 pre_run_validator._is_windows_apps_alias_stub
     註解），避免裸 shutil.which 對空殼可執行檔誤判為「命令存在」。
+
+    R68：改用 `_is_stub_candidate_binary`（stem 比對）取代原本的
+    `binary.lower() in _WINDOWS_APPS_STUB_BINARIES` 精確字串比對——後者漏掉
+    Windows 慣用的 `python.exe`／`python3.exe` 拼法，guard 整條被跳過。
     """
     from .playbook_runner import _pr
-    from .pre_run_validator import _WINDOWS_APPS_STUB_BINARIES, _is_windows_apps_alias_stub
+    from .pre_run_validator import _is_stub_candidate_binary, _is_windows_apps_alias_stub
     for task in playbook.tasks:
         if not task.evaluator_command:
             continue
@@ -127,10 +131,7 @@ def validate_evaluator_commands_impl(playbook: Playbook) -> None:
                 "step 執行時可能立即 ESCALATION。===",
                 task.step_id, binary,
             )
-        elif (
-            binary.lower() in _WINDOWS_APPS_STUB_BINARIES
-            and _is_windows_apps_alias_stub(resolved)
-        ):
+        elif _is_stub_candidate_binary(binary) and _is_windows_apps_alias_stub(resolved):
             logger.warning(
                 "=== Gap-009-D | [%s] evaluator_command '%s' 解析到 Windows "
                 "WindowsApps App Execution Alias 空殼（%s），並非真正安裝的直譯器，"

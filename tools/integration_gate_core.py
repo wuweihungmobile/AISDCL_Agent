@@ -40,10 +40,24 @@ _CC_CLI_NAMES = ("cc-switch", "cc-switch-cli", "ccs")
 
 
 def parse_args(argv: list[str]) -> bool:
-    """回傳 skip_full（介面對等收斂前 `--skip-full` / `-SkipFull`）。"""
-    parser = argparse.ArgumentParser(add_help=False)
-    parser.add_argument("--skip-full", action="store_true", dest="skip_full")
-    ns, _unknown = parser.parse_known_args(argv)
+    """回傳 skip_full（介面對等收斂前 `--skip-full` / `-SkipFull`）。
+
+    🔴 R68 fail-loud 訂正：原本是 `add_help=False` + `parse_known_args()`，於是
+    `--help`／`-h`／任何打錯的旗標都被**靜默丟棄**，閘門照跑完整套（實測 `bash
+    tools/integration_gate.sh --help` 直接進 `[1/5] AutoClaude local_ci_gate`）。
+    `tools/bootstrap_core.py` 的 docstring 還明文宣稱本檔已 argparse fail-loud
+    ——那句在 R68 前為假。改為標準 argparse：`--help` → usage + SystemExit(0)、
+    未知旗標 → usage + SystemExit(2)，由 `main()` 轉成 return code（模式對齊
+    `bootstrap_core.main()` 的 `except SystemExit → return code`）。
+    """
+    parser = argparse.ArgumentParser(
+        prog="integration_gate",
+        description="AISDCL_Agent 整合層薄聚合閘門（1:AutoClaude 2:AISDLC_SDD "
+                    "3:bridge 4:rollback 5:cc-switch）",
+    )
+    parser.add_argument("--skip-full", action="store_true", dest="skip_full",
+                        help="僅跑 [3]+[4]+[5]（快速迴圈）；PowerShell 側對等旗標 -SkipFull")
+    ns = parser.parse_args(argv)
     return ns.skip_full
 
 
@@ -238,7 +252,12 @@ def main(argv: list[str] | None = None) -> int:
             pass
     os.environ["PYTHONUTF8"] = "1"
 
-    skip_full = parse_args(sys.argv[1:] if argv is None else argv)
+    # R68：旗標解析必須先於任何副作用（含 _hooks_liveness_advisory 與五段落），
+    # 且 --help／未知旗標一律 fail-loud，不得靜默跑完整套。
+    try:
+        skip_full = parse_args(sys.argv[1:] if argv is None else argv)
+    except SystemExit as e:
+        return int(e.code or 0)
     _hooks_liveness_advisory()
 
     failures: list[str] = []

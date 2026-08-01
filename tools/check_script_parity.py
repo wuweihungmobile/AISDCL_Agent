@@ -307,8 +307,13 @@ _LATEST_PINNED_SHA256: dict[str, str] = {
     # 🔴 R67（R67-H35）：`check_wrapper_thinness._normalize()` 改為保留首行 shebang
     # ⇒ `.sh` 側重釘（`.ps1` 側首行非 shebang，hash 逐字不變）。內容未竄改的三段
     # 取證見 check_wrapper_thinness.py `_PINNED_SHA256` 上方 R67 註解。
+    # 🔴 R68（Scan-A2）：`.sh` 側重釘——LATEST run_tlc.sh 在 macOS 系統 bash 3.2 下每一條
+    # 執行路徑都必死於 `set -u` 空陣列展開（`${arr[@]}` 對空陣列在 bash 3.2 視為 unbound），
+    # 且該死法回 rc=1，恰好撞上本檔自訂的「1＝TLC 偵測到 invariant violation」語意 ⇒ 把
+    # 環境問題誤報成形式化驗證失敗。修法為 bash 3.2 安全展開 + 環境失敗改用獨立 rc。
+    # 變更仍屬薄殼職責（只改展開語法與 rc 分派，未新增業務邏輯），故重釘而非降級豁免。
     "LATEST/tools/fsm_runtime/formal/run_tlc.sh": (
-        "0828a851486283a37631d6ca1245c1438fb7c81deb51d414b4e24b410ebeb492"
+        "76207165469914976ee49b536c9c81e89fee079daa4756b0a57c752e144983fe"
     ),
     "LATEST/tools/fsm_runtime/formal/run_tlc.ps1": (
         "f6bb3be45c92fdbaddfac34735e465474c7f32b40c06bb9d6ef50ec1cf775909"

@@ -146,6 +146,23 @@ SPECIAL_FILES: dict[str, int] = {
     # SD_09 Pre-W0 audit P0-06：補長文件預算（Migration SOP / Sprint history）
     "docs/08_deployment/Production_Migration_SOP.md": 800,
     "docs/05_development/sprint_history.md": 2000,
+    # 🔴 R68：DEF-101-271／274 訂了「monorepo 根 tools/dev_start.py > 2000 行即升級為
+    # 該輪必修」，但**從來沒有量測者**——實測該檔已自帳本三度記載的 1772 行漂到 1918
+    # 行、距門檻僅 82 行且無人察覺（帳本同時還在寫「零成長／餘裕 228 行」）。本列即該
+    # 門檻的機械量測者：路徑刻意以 `../` 越出 AutoClaude（唯一的 dev_start.py 在
+    # monorepo 根 tools/，SCAN_ROOT="autoclaude" 掃不到它）。**棘輪：只准往下改**，
+    # 要往上調必須在缺陷帳本具名理由（同 _FROZEN_GUARD_FILE_COUNT 慣例）。
+    # 現值不寫死在此（會過期）：`python tools/check_loc_budget.py --json` 現查。
+    "../tools/dev_start.py": 2000,
+}
+
+# SPECIAL_FILES 逐列的違規理由（未列者沿用 ADR-SD08-001 文件治理）。
+_SPECIAL_REASONS: dict[str, str] = {
+    "../tools/dev_start.py": (
+        "DEF-101-271／274：>2000 行即升級為該輪必修——先刪死碼／抽共用模組"
+        "（先例：R68 把 CI 逐軌活性偵測抽到 tools/lib/ci_liveness.py），"
+        "確認為不可壓縮的真實功能後才在缺陷帳本具名調高本棘輪"
+    ),
 }
 
 
@@ -197,7 +214,8 @@ def check_special_files() -> list[FileReport]:
                     tier="special",
                     budget=max_lines,
                     over_by=actual - max_lines,
-                    override_reason="ADR-SD08-001 CLAUDE.md 文件治理",
+                    override_reason=_SPECIAL_REASONS.get(
+                        file_path, "ADR-SD08-001 CLAUDE.md 文件治理"),
                 )
             )
     return violations

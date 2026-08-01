@@ -1,7 +1,7 @@
 # 根層基建 CI（四方複審 B4，2026-07-10；防禦縱深補洞 2026-07-11）：workflows / hooks /
 # 工具腳本上移 monorepo 根層後，根層 tools/（bootstrap / integration_gate / git-hooks
 # dispatcher）與 .gitattributes、.editorconfig、dependabot 等基建原本零 CI 覆蓋——壞掉
-# 只會在開發者本機爆。本 workflow 做十四道輕量守門（只用 GitHub 第一方 actions，不引
+# 只會在開發者本機爆。本 workflow 做十五道輕量守門（只用 GitHub 第一方 actions，不引
 # 任何第三方 action，避免供應鏈風險）：
 # 🔴 R68 訂正（本段原文寫「僅 actions/checkout，不引其他外部 action」，且第 8 道原文
 # 寫「純 stdlib unittest，零依賴安裝」）：這兩句自 2026-07-14 起就是**假宣稱**，而代價
@@ -100,6 +100,36 @@
 #                      ⚠️ 誠實劃界：指紋只覆蓋測試樹 `*.py` 內容，生產碼改變
 #                      `parametrize` 來源／docker daemon 可用性／平台差異都能改變計數
 #                      而指紋不動 ⇒ 充分觸發器、非必要條件（會漏、不會冤）。
+#   15. nightly-full 排程陳舊度哨兵 — 唯讀 `gh run list --event schedule --status success`
+#                      查 windows-compat-ci.yml／macos-compat-ci.yml 兩支 `*-nightly-full`
+#                      最近一次**排程成功**的時間，超過 `MAX_AGE_DAYS` 即紅。
+#                      R68 立此道的直接理由（本輪最嚴重的一筆，P1）：兩支 nightly-full
+#                      是**唯一**會在真 Windows／真 macOS 上跑完整 AutoClaude 測試樹的
+#                      通道，而它們自 2026-07-14 起連續 5 次排程全紅、零成功達 18 天，
+#                      橫跨 R48~R67（含 R67 一輪 40 筆修復）完全沒有人察覺；同期
+#                      「四支 CI 全綠」的宣稱成立，因為那只是 **push 事件**的綠。
+#                      三道既有哨兵在結構上都偵測不到：(a) `*-nightly-alert` 與被監控者
+#                      同屬 GitHub Actions 計費平面（實查兩者 annotation 逐字相同：
+#                      'The job was not started because recent account payments have
+#                      failed…'）；(b) 根層 `dev_start.py::_check_ci_liveness` 只取
+#                      `--limit 1`、不分事件類型；(c) `_check_nightly_heartbeat` 只讀
+#                      本機 log mtime。
+#                      ⚠️ 誠實劃界（不可讀成「這道補上了平面外偵測」）：本道與被偵測者
+#                      **同屬 GitHub Actions 計費平面**——帳務停擺時本 workflow 自己也
+#                      不會被配置 runner，故它抓不到停擺當下，只抓得到「cron 靜默沒觸發
+#                      ／job 被停用／停擺恢復後沒人補跑」這一類非帳務型陳舊（2026-07-15～
+#                      08-01 的實況正是第三種：帳務已於 08-01 恢復、push run 正常跑滿
+#                      21 個 step，而 nightly 沒有任何人補跑）。真正平面外的偵測只能長在
+#                      本機 `dev_start.py`（純唯讀 gh API、零 Actions 額度），該項
+#                      🔴 本段兩處刻意寫成不帶 `tools/` 前綴的 `dev_start.py`：帶前綴的
+#                      字面是 test_root_infra_parity 的抽取標的（檔頭條目提及＝該道守門
+#                      所用的工具），而此處只是**敘述性提及**別道的偵測缺口，不是本道用
+#                      到的工具——同 ONBOARDING.md §9「文件散文不該長出第二個受抽取站點」。
+#                      不在本檔可及範圍，見 DEF-101-081 與 R68 Pkg-4 的跨包訴求。
+#                      本道刻意做成**阻斷**而非 warning：非阻斷正是 nightly-full 自己
+#                      （continue-on-error: true）被忽略 18 天的機制，再加一層非阻斷等於
+#                      複製病因。門檻取 10 天＝週頻 cron（週一 06:12／07:18 UTC）正常最長
+#                      間隔 7 天 ＋ 3 天餘裕。
 #
 # 注：上列編號為清單序，與 job 內實際執行順序無關（如第 7 道 py_compile 實體 step
 # 緊接第 1 道 bash -n 之後執行）——R11 文件掃描[關注-3]澄清。
@@ -124,12 +154,15 @@ concurrency:
   cancel-in-progress: true
 
 # 純驗證、不寫回 repo → 最小權限唯讀。
+# R68：第 15 道（nightly-full 排程陳舊度哨兵）需讀 Actions run 歷史，補 `actions: read`
+# ——仍是唯讀，且不含 `issues: write`（本 workflow 不開單，開單留在 *-nightly-alert）。
 permissions:
   contents: read
+  actions: read
 
 jobs:
   root-infra:
-    name: root infra guard (bash -n + pwsh parse/BOM + EOL(.sh) + EOL(.ps1) + NTFS + parity + py_compile + unittest + defect-log-crossref + wrapper-thinness + pytest-baseline-sites + gha-action-versions + defect-log-preservation + onboarding-snapshot-fingerprint)
+    name: root infra guard (bash -n + pwsh parse/BOM + EOL(.sh) + EOL(.ps1) + NTFS + parity + py_compile + unittest + defect-log-crossref + wrapper-thinness + pytest-baseline-sites + gha-action-versions + defect-log-preservation + onboarding-snapshot-fingerprint + nightly-schedule-staleness)
     runs-on: ubuntu-latest
     timeout-minutes: 20   # R68：第 8 道 unittest 現在會真的跑完全套（見檔頭訂正段）
     steps:
@@ -358,3 +391,46 @@ jobs:
         run: python3 tools/archive_defect_log.py --check
       - name: ONBOARDING §7 表② presumed-stale 觸發器（tools/sync_onboarding_baselines.py --check-snapshot：測試樹指紋）
         run: python3 tools/sync_onboarding_baselines.py --check-snapshot
+
+      - name: nightly-full 排程陳舊度哨兵（唯讀 gh API；設計理由與誠實劃界見檔頭第 15 道）
+        # 本 step 只做唯讀 `gh run list` 查詢（不觸發、不重跑任何 workflow），
+        # 對 Actions 額度的消耗為零——與本 repo「節省 GitHub CI 額度」紀律相容。
+        env:
+          GH_TOKEN: ${{ github.token }}
+          # 週頻 cron（週一 06:12／07:18 UTC）正常最長間隔 7 天，取 10 天＝3 天餘裕。
+          MAX_AGE_DAYS: "10"
+        run: |
+          set -euo pipefail
+          now=$(date -u +%s)
+          fail=0
+          for wf in windows-compat-ci.yml macos-compat-ci.yml; do
+            echo "── ${wf}"
+            latest=$(gh run list --repo "${GITHUB_REPOSITORY}" --workflow "$wf" \
+                       --event schedule --limit 1 --json conclusion,createdAt,url \
+                       --jq '.[0] // {} | "\(.conclusion // "(無)")  \(.createdAt // "-")  \(.url // "-")"' \
+                     || echo "(gh API 查詢失敗)")
+            echo "   最近一次 schedule run：${latest}"
+            last=$(gh run list --repo "${GITHUB_REPOSITORY}" --workflow "$wf" \
+                     --event schedule --status success --limit 1 \
+                     --json createdAt --jq '.[0].createdAt // empty' \
+                   || echo "")
+            if [ -z "$last" ]; then
+              echo "::error::${wf} 查無任何**成功**的 schedule run（或 gh API 查詢失敗）——該 workflow 的 *-nightly-full 是唯一會在真 Windows／真 macOS 上跑完整測試樹的通道，查不到成功紀錄等同該通道從未被證實可用"
+              fail=1
+              continue
+            fi
+            age=$(( (now - $(date -u -d "$last" +%s)) / 86400 ))
+            echo "   最近一次 schedule 成功：${last}（${age} 天前）"
+            if [ "$age" -gt "$MAX_AGE_DAYS" ]; then
+              echo "::error::${wf} 的 *-nightly-full 已 ${age} 天沒有成功的排程執行（門檻 ${MAX_AGE_DAYS} 天）——真機深度回歸通道處於死亡狀態，此期間任何「CI 全綠」宣稱都只涵蓋 push 事件"
+              fail=1
+            fi
+          done
+          if [ "$fail" -ne 0 ]; then
+            echo "處置：先看上面印出的『最近一次 schedule run』結論——"
+            echo "  · 結論為 failure 且該 run 的 job steps 長度為 0 ⇒ 帳務／額度停擺（DEF-101-081），須先恢復帳務；"
+            echo "  · 帳務正常但仍陳舊 ⇒ 對 HEAD 各補跑一次：gh workflow run windows-compat-ci.yml / gh workflow run macos-compat-ci.yml"
+            echo "🔴 本道刻意阻斷（非 warning）：nightly-full 自己就是非阻斷 job，再加一層非阻斷等於複製病因。"
+            exit 1
+          fi
+          echo "✅ 兩支 *-nightly-full 的最近一次排程成功皆在 ${MAX_AGE_DAYS} 天內"

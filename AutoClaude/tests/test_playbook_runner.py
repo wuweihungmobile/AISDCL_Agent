@@ -1130,17 +1130,22 @@ def test_gap038_conditional_uses_config_timeout(tmp_path):
         ),
         reasoning="條件判斷",
     )
-    with patch("subprocess.run") as mock_run, \
+    # R68：CONDITIONAL evaluator 由 `subprocess.run(timeout=)` 改為
+    # `Popen` + `communicate(timeout=)`——因為 run() 逾時只 kill 直接子行程、
+    # 孫行程變孤兒續跑，而回收孫行程需要拿得到 Popen 物件（見 _conditional.py
+    # 與 evaluator.kill_process_tree）。本測試驗的意圖不變：**逾時值取自 config**，
+    # 只是斷言的落點從 run 的 kwarg 移到 communicate 的 kwarg。
+    with patch("subprocess.Popen") as mock_popen, \
          patch.object(runner, "_persist_mutated_playbook"):
-        mock_run.return_value.returncode = 0
+        mock_popen.return_value.communicate.return_value = (b"", b"")
+        mock_popen.return_value.returncode = 0
         runner._apply_single_mutation(
             mutation, pb, "pb.yaml",
             pb.tasks[0], 0,
             [], [], 0, {}, {}, {}, MagicMock(), 0, MagicMock(), "",
         )
-    mock_run.assert_called_once()
-    call_kwargs = mock_run.call_args
-    assert call_kwargs[1].get("timeout") == 10
+    mock_popen.assert_called_once()
+    assert mock_popen.return_value.communicate.call_args[1].get("timeout") == 10
 
 
 # ──────────────────────────────────────────────

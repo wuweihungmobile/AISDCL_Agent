@@ -87,6 +87,9 @@ import _stdio_utf8  # noqa: E402,F401  # Windows 非 UTF-8 終端 print(✅/❌)
 
 _REPO_ROOT = Path(__file__).resolve().parents[1]
 _DEFECT_LOG = _REPO_ROOT / "docs" / "06_quality" / "AutoSDD_Defect_Log.md"
+# 不可變的預設值副本：`_DEFECT_LOG` 會被測試以 mock 換成合成 fixture，而「存量豁免
+# 名單是否已 stale」只在餵真實主檔時才有意義（見 main() 內該道的綁定說明）。
+_DEFAULT_DEFECT_LOG = _DEFECT_LOG
 _CROSSREF_TARGETS = [
     _REPO_ROOT / "ONBOARDING.md",
     _REPO_ROOT / ".github" / "workflows" / "windows-compat-ci.yml",
@@ -578,6 +581,364 @@ def orphan_backlog_problems(ledger_text: str) -> list[str]:
     return problems
 
 
+# -------------------------------- 硬規則② 的**另一半**：二擇一（R68，DEF-101-708）
+# 🔴 為何非補不可（R68 沙箱普查實測，HEAD 版工具 × HEAD 版帳本）：硬規則② 的散文是
+# 「任何 `deferred`／`backlog` 必須指向一個存在的輪次**或明確標為「未指派」**」，而
+# `orphan_backlog_problems()` 只落地了前半句（輪號比大小）。後半句在程式裡的形態是
+# `if not handovers: continue` ——**一個短路出口**：整列找不到承接語境輪號就直接放行。
+# 實測後果：77 筆未結列中，只有 6 筆帶承接輪號而真的走到比較（8%），15 筆寫了「未指派」，
+# 其餘 **61 筆兩者皆無**、全部從短路出口走掉；其中 43 筆帶「排入下一輪」「擇機」
+# 「留待下輪」這類**散文式延後**——規則想擋的正是它們。
+#
+# 🔴 為何要 grandfather 白名單而不是直接硬擋（ARCH-R59-NB4 的永紅警告仍然適用）：
+# 那 61 筆是**存量歷史列**，一次全紅等於閘門上線即永紅，而永紅的閘門會被整個關掉，
+# 比沒有鎖更糟。所以照 R59 判例採「釘現況 ＋ 只硬擋新增列」：白名單是**棘輪**，
+# 只准變小（`_UNPINNED_HANDOVER_CEILING`），且列在裡面卻**已經不需要**豁免的 ID 一律
+# fail-loud 要求刪除（見 `stale_grandfather_problems()`）——沒有這一條，白名單會變成
+# 一張只進不出的死名單，那正是本 repo 反覆在治的腐化形態。
+#
+# 判準沿用 repo 內**既有形態**而非新造：`tools/check_script_parity.py:550` 的
+# `_UNPINNED_EXIT_RE = re.compile(r"退場：(未指派|R\d+(?![\d+＋]))")` 就是同一個
+# 「二擇一」判準的先例，本檔平移其形狀（可解析的承接輪號 ／ 字面「未指派」）。
+_UNASSIGNED_LITERAL = "未指派"
+
+#: R68 上線時**釘死現況**的存量未結列（既無承接輪號、也無「未指派」）。
+#: 🔴 這張表只准變小。新增未結列一律不得進入本表——那是硬擋的對象。
+_UNPINNED_HANDOVER_GRANDFATHERED = frozenset({
+    "DEF-01-007", "DEF-01-009", "DEF-17-001", "DEF-19-001",
+    "DEF-42-001", "DEF-53-001", "DEF-100-002", "DEF-101-018",
+    "DEF-101-021", "DEF-101-022", "DEF-101-025", "DEF-101-055",
+    "DEF-101-060", "DEF-101-068", "DEF-101-200", "DEF-101-206",
+    "DEF-101-214", "DEF-101-217", "DEF-101-233", "DEF-101-234",
+    "DEF-101-235", "DEF-101-238", "DEF-101-242", "DEF-101-243",
+    "DEF-101-263", "DEF-101-268", "DEF-101-271", "DEF-101-274",
+    "DEF-101-278", "DEF-101-296", "DEF-101-297", "DEF-101-308",
+    "DEF-101-309", "DEF-101-313", "DEF-101-324", "DEF-101-335",
+    "DEF-101-348", "DEF-101-351", "DEF-101-358", "DEF-101-377",
+    "DEF-101-388", "DEF-101-392", "DEF-101-393", "DEF-101-398",
+    "DEF-101-399", "DEF-101-400", "DEF-101-401", "DEF-101-402",
+    "DEF-101-412", "DEF-101-416", "DEF-101-417", "DEF-101-418",
+    "DEF-101-432", "DEF-101-628", "DEF-101-643", "DEF-101-646",
+    "DEF-101-674",
+})
+#: shrink-only 棘輪上限（形狀比照 `tools/tests/` 的檔數棘輪）。只能往小改。
+_UNPINNED_HANDOVER_CEILING = 57
+
+
+def unpinned_handover_problems(ledger_text: str) -> list[str]:
+    """硬規則② 後半句的機械化：未結案列必須**二擇一**（純函式）。
+
+    二擇一＝(a) 帶可解析的承接語境輪號（`_handover_rounds()`，其輪號另由
+    `orphan_backlog_problems()` 判早晚），或 (b) 該列字面寫有「未指派」。
+    兩者皆無 ⇒ 這一列的延後**沒有承接者也沒有承認沒有承接者**，正是散文式延後。
+
+    存量豁免見 `_UNPINNED_HANDOVER_GRANDFATHERED`；豁免只對**當時已存在**的 ID 成立，
+    新列一律硬擋。回傳問題清單（空＝全部合規）。
+    """
+    layout = _table_layout(ledger_text)
+    if layout is None:
+        return [_no_header_problem()]
+    ncols, id_idx, status_idx = layout
+    problems: list[str] = []
+    for lineno, line in enumerate(ledger_text.splitlines(), 1):
+        if not _ROW_RE.match(line):
+            continue
+        cells = _row_cells(line)
+        if len(cells) != ncols or not _ID_RE.fullmatch(cells[id_idx]):
+            continue
+        if _classify(cells[status_idx]) not in _UNRESOLVED_CLASSES:
+            continue
+        if _handover_rounds(line) or _UNASSIGNED_LITERAL in line:
+            continue
+        def_id = cells[id_idx]
+        if def_id in _UNPINNED_HANDOVER_GRANDFATHERED:
+            continue
+        problems.append(
+            f"帳本 :{lineno} {def_id}：狀態仍未結案，卻**既沒有可解析的承接輪號、"
+            f"也沒有字面「{_UNASSIGNED_LITERAL}」** ⇒ 散文式延後（硬規則② 後半句，見 "
+            f"CrossPlatform_Scan_Dimensions.md〈使用方式〉）。「排入下一輪」「擇機」"
+            f"「留待下輪」都不算指派——它們既不能被機械比較輪號，也沒有承認無人承接。"
+            f"兩條合法出口（擇一）：① 寫明承接輪次（體例：`承接輪次：**R{'{n}'}**`）；"
+            f"② 誠實寫「承接輪次：**{_UNASSIGNED_LITERAL}**」並附**可直接執行**的解鎖條件。"
+            f"⚠️ 不要把本列加進 _UNPINNED_HANDOVER_GRANDFATHERED——那張表是 R68 上線時的"
+            f"存量快照、只准變小"
+        )
+    return problems
+
+
+def stale_grandfather_problems(ledger_text: str) -> list[str]:
+    """棘輪的另一半：白名單裡**已不需要豁免**的 ID 必須刪除（純函式）。
+
+    🔴 沒有這一條，`_UNPINNED_HANDOVER_GRANDFATHERED` 就是一張只進不出的死名單：
+    存量列被補標「未指派」或結案之後，它仍靜靜留在表裡，於是「還有幾筆存量沒清」這個
+    數字永遠不會下降，棘輪也就永遠不會轉。判定條件三選一即算「不再需要豁免」：
+    該 ID 已不在主檔（歸檔或刪除）／已結案／已滿足二擇一。
+    """
+    layout = _table_layout(ledger_text)
+    if layout is None:
+        return [_no_header_problem()]
+    ncols, id_idx, status_idx = layout
+    still_needed: set[str] = set()
+    for line in ledger_text.splitlines():
+        if not _ROW_RE.match(line):
+            continue
+        cells = _row_cells(line)
+        if len(cells) != ncols or not _ID_RE.fullmatch(cells[id_idx]):
+            continue
+        if _classify(cells[status_idx]) not in _UNRESOLVED_CLASSES:
+            continue
+        if _handover_rounds(line) or _UNASSIGNED_LITERAL in line:
+            continue
+        still_needed.add(cells[id_idx])
+    stale = sorted(_UNPINNED_HANDOVER_GRANDFATHERED - still_needed)
+    if not stale:
+        return []
+    return [
+        f"存量豁免名單有 {len(stale)} 筆已不需要豁免（已結案／已補標／已不在主檔），"
+        f"請從 {Path(__file__).name} 的 _UNPINNED_HANDOVER_GRANDFATHERED **刪除**它們，"
+        f"並把 _UNPINNED_HANDOVER_CEILING 下修為 {len(still_needed)}：{stale}。"
+        f"（棘輪只准往小走；不刪＝這張表變成只進不出的死名單，"
+        f"「還剩幾筆存量」這個數字就永遠不會下降）"
+    ]
+
+
+def lagging_clock_notes(ledger_text: str) -> list[str]:
+    """`current_round()` 的 fail-open 窗口——把它印出來，而不是留在 docstring 裡。
+
+    🔴 缺陷（R68 Scan-G）：`current_round()` 取自帳本自身「發現情境」欄，所以在新一輪
+    **寫入第一列之前**，這個時鐘仍停在**上一輪**。於是「交棒給剛結束的那一輪」在整個
+    新輪工作期都合法通過 `newest >= cur`。
+    🔴 為何不引入第二個輪次時鐘：那會新造一個 stale 站點（成本高於收益，且第二個時鐘
+    同樣要有人記得更新）。取而代之的最小處置是**讓失效方向對讀者可見**：凡未結列把承接
+    者指向「恰等於推得值」的那一輪，逐列印出提醒——這正是窗口被利用時會出現的形狀。
+    刻意回 note（warning）而非 problem：真交棒給當前輪是**合法**的，硬擋會製造假紅。
+    """
+    layout = _table_layout(ledger_text)
+    if layout is None:
+        return []
+    ncols, id_idx, status_idx = layout
+    cur = current_round(ledger_text)
+    if cur is None:
+        return []
+    notes: list[str] = []
+    for lineno, line in enumerate(ledger_text.splitlines(), 1):
+        if not _ROW_RE.match(line):
+            continue
+        cells = _row_cells(line)
+        if len(cells) != ncols or not _ID_RE.fullmatch(cells[id_idx]):
+            continue
+        if _classify(cells[status_idx]) not in _UNRESOLVED_CLASSES:
+            continue
+        rounds = [n for _, n, _ in _handover_rounds(line)]
+        if rounds and max(rounds) == cur and not _REASSIGN_RE.search(line):
+            notes.append(
+                f"帳本 :{lineno} {cells[id_idx]}：承接輪次 R{cur} **恰等於**由「"
+                f"{_CONTEXT_HEADER}」欄推得的當前輪 —— 若本輪尚未寫入任何帳本列，"
+                f"這個推得值仍停在上一輪，本列實為「交棒給剛結束的那一輪」而硬規則② "
+                f"抓不到（fail-open 窗口，於本輪第一列落地時自動關閉）。請確認該輪真的"
+                f"還沒結束，或就地追加「回執」／「改派」"
+            )
+    return notes
+
+
+# ------------------------ 已結列殘留待辦 ＋ 狀態訂正 token（R68，DEF-101-709／710）
+# 🔴 (一) 已結列的殘留待辦：`_UNRESOLVED_CLASSES` 明確排除 `fixed`，所以一列只要首詞是
+# `fixed`，它狀態／分流欄裡寫的「承接輪次：未指派」「留待下一輪」就**在結構上永遠進不了
+# 承接稽核**。R68 實測主檔 17 筆已結列帶這類殘留字樣。`archive_defect_log.py --plan` 的
+# needs_ack 區塊確實會列出其中一部分，但那張清單**只在有人要歸檔時才被看到**；本函式把
+# 它接進每次都跑的閘門輸出（warning，不 fail——已結列的殘留待辦是提示，不是矛盾）。
+_RESIDUAL_TODO_RE = re.compile(
+    r"未指派|改派|擇機|留待|下一輪|下輪|尚未|待辦|backlog|承接"
+)
+# 🔴 (二) 狀態訂正 token：`_classify()` 取**最早出現**的關鍵字，於是
+# `open watch（R55）→ **closed-by-verification@R56**` 這種「先寫舊狀態、箭頭後寫訂正」
+# 的寫法會被判成 `open`——一筆已結列被長期計入未結存量（DEF-101-433 實例）。而
+# `closed-by-verification` 又**不在**合法首詞集合內，卻因為首詞是 `open` 而躲過首詞鎖。
+# 本檔對這一類立兩道：
+#   · 硬擋「合法首詞的**連字號／底線變體**」（`closed-by-verification`／`partially-fixed`）
+#     ——這種帶連字號的 token 在本帳本方言裡必然是狀態宣稱，不會是普通英文字。
+#     刻意**不**把裸 `closed`／`open` 納入：它們在散文裡是普通英文詞（實測 `DEF-19-001`
+#     的 `closed@improving_40` 屬另一套里程碑編號），硬擋會製造假紅。
+#   · warning 提示「首詞判未結、但狀態欄後段有 `→ 已結token@Rnn` 訂正」的列
+#     （實測 `DEF-101-432` 正是這個形狀，其 `fixed` 是合法詞故不會被上面那道硬擋抓到）。
+_STATUS_VARIANT_RE = re.compile(
+    r"(?<![A-Za-z0-9])((?:closed|fixed|routed|partial|partially|wontfix)"
+    r"(?:[-_][A-Za-z]+)+)(?![A-Za-z0-9-])"
+)
+#: markdown 行內 code span。反引號內是**逐字引述**（例如 `DEF-101-541` 逐字引用它自己
+#: 被訂正掉的舊寫法 `partially-fixed`），不算新的狀態宣稱。與
+#: `archive_defect_log._CODE_SPAN_RE` 是**同一個物件**（該檔 `= gate._CODE_SPAN_RE`
+#: 再匯出，形狀沿用既有的 `_CELL_SPLIT_RE` 先例）——同一個判準只有一份實作。
+_CODE_SPAN_RE = re.compile(r"`[^`]*`")
+_SUPERSEDE_RE = re.compile(
+    r"[→⇒]\s*[*＊`\s]{0,4}(fixed|closed-by-decision|no_action_needed|wontfix)"
+    r"(?![A-Za-z0-9-])"
+)
+
+
+def residual_todo_notes(ledger_text: str) -> list[str]:
+    """已結案卻仍載有實質待辦字樣的列（純函式；回 warning 用的說明字串）。"""
+    layout = _table_layout(ledger_text)
+    if layout is None:
+        return []
+    ncols, id_idx, status_idx = layout
+    notes: list[str] = []
+    for lineno, line in enumerate(ledger_text.splitlines(), 1):
+        if not _ROW_RE.match(line):
+            continue
+        cells = _row_cells(line)
+        if len(cells) != ncols or not _ID_RE.fullmatch(cells[id_idx]):
+            continue
+        cls = _classify(cells[status_idx])
+        if cls in _UNRESOLVED_CLASSES:
+            continue
+        markers = sorted(set(_RESIDUAL_TODO_RE.findall(line)))
+        if markers:
+            notes.append(f":{lineno} {cells[id_idx]}({cls})={'/'.join(markers)}")
+    return notes
+
+
+def status_variant_problems(ledger_text: str) -> list[str]:
+    """狀態欄不得出現合法首詞的**連字號／底線變體**（純函式；硬擋）。
+
+    命中即 rc=1：`closed-by-verification`／`partially-fixed` 這類 token 在本帳本方言裡
+    必然是狀態宣稱，而它們**不在**合法首詞集合內，卻因為不在首位而躲過
+    `status_first_word_problems()`（那道鎖只看首詞）。反引號內的逐字引述不算。
+    """
+    layout = _table_layout(ledger_text)
+    if layout is None:
+        return [_no_header_problem()]
+    ncols, id_idx, status_idx = layout
+    problems: list[str] = []
+    for lineno, line in enumerate(ledger_text.splitlines(), 1):
+        if not _ROW_RE.match(line):
+            continue
+        cells = _row_cells(line)
+        if len(cells) != ncols or not _ID_RE.fullmatch(cells[id_idx]):
+            continue
+        bare = _CODE_SPAN_RE.sub("", cells[status_idx])
+        for tok in dict.fromkeys(_STATUS_VARIANT_RE.findall(bare)):
+            if tok in _STATUS_FIRST_WORDS:
+                continue
+            problems.append(
+                f"帳本 :{lineno} {cells[id_idx]}：狀態欄出現非法狀態 token {tok!r}"
+                f"（合法首詞的連字號／底線變體）。合法值＝{sorted(_STATUS_FIRST_WORDS)}"
+                f"（權威＝主檔《格式定義》）。這一類不在首位、躲得過首詞鎖，卻會讓讀者"
+                f"與 `_classify()` 對本列狀態各說各話（DEF-101-433 判例：一筆已結列因此"
+                f"被長期計入未結存量）。請改寫為合法 token；若只是逐字引述舊寫法，"
+                f"請用反引號包住"
+            )
+    return problems
+
+
+def supersession_notes(ledger_text: str) -> list[str]:
+    """首詞判未結、但狀態欄後段有「→ 已結 token」訂正的列（純函式；warning）。
+
+    `_classify()` 取最早出現的關鍵字，這類列於是被記成未結。刻意不硬擋：訂正段落是
+    帳本體例（歷史原文逐字保全＋箭頭追記），要改的是**首詞**而不是禁止追記；由本提示
+    點名，讓「該把首詞更新了」這件事每輪都被看見。
+    """
+    layout = _table_layout(ledger_text)
+    if layout is None:
+        return []
+    ncols, id_idx, status_idx = layout
+    notes: list[str] = []
+    for lineno, line in enumerate(ledger_text.splitlines(), 1):
+        if not _ROW_RE.match(line):
+            continue
+        cells = _row_cells(line)
+        if len(cells) != ncols or not _ID_RE.fullmatch(cells[id_idx]):
+            continue
+        if _classify(cells[status_idx]) not in _UNRESOLVED_CLASSES:
+            continue
+        bare = _CODE_SPAN_RE.sub("", cells[status_idx])
+        hits = dict.fromkeys(_SUPERSEDE_RE.findall(bare))
+        if hits:
+            notes.append(
+                f"帳本 :{lineno} {cells[id_idx]}：首詞判為未結，狀態欄後段卻有"
+                f"「→ {'／'.join(hits)}」訂正 —— `_classify()` 取最早關鍵字，本列因此被"
+                f"計入未結存量。若訂正才是現況，請把**首詞**改為該已結 token"
+                f"（體例見 DEF-101-433：原文以反引號逐字保留於後）"
+            )
+    return notes
+
+
+# ------------------------------ 修復包自報 status ↔ 帳本狀態欄機械對帳（DEF-101-689）
+def reconcile_problems(reported: dict[str, str], ledger: dict[str, str | None],
+                       archive: dict[str, str | None] | None = None) -> list[str]:
+    """把「修復包交件時自報的 status」與帳本家族實況做集合差（純函式）。
+
+    🔴 為何需要（DEF-101-689，R67 提出、R68 落地）：每輪由 N 個並行修復包交件，各自在
+    回報裡自陳「這筆我修了／跳過」，主控再據此入帳。**兩邊從來沒有任何機械物對過帳**——
+    自報 fixed 而帳本仍 open、或帳本入了帳而沒有任何包自報，兩種漂移都只能靠人眼比對。
+    該建議本身還被寫在一列狀態已 `fixed` 的散文裡，於是連承接稽核都進不去。
+
+    `reported` ＝ `{DEF-ID: 自報狀態字串}`；自報字串一律走 `_classify()` 正規化，所以
+    `fixed@R68`／`open（待下輪）` 這類真實寫法都能比。查找面＝主檔優先、archive 次之
+    （與 `_scan_target()` 同一套規則，避免「歸檔即假紅」——見 `_load_archive_status()`）。
+
+    回傳問題清單（空＝逐筆一致）。刻意**不**檢查「帳本有而報表沒有」：一輪只修一部分
+    缺陷是常態，那個方向的差集是雜訊而非訊號。
+    """
+    problems: list[str] = []
+    for def_id in sorted(reported):
+        claimed_raw = reported[def_id]
+        claimed = _classify(str(claimed_raw))
+        if claimed is None:
+            problems.append(
+                f"{def_id}：自報狀態 {claimed_raw!r} 辨識不出任何已知狀態關鍵字 —— "
+                f"請用《格式定義》的合法首詞（{sorted(_STATUS_FIRST_WORDS)}）書寫"
+            )
+            continue
+        if def_id in ledger:
+            actual, where = ledger[def_id], "缺陷帳本主檔"
+        elif archive is not None and def_id in archive:
+            actual, where = archive[def_id], "帳本 archive"
+        else:
+            problems.append(
+                f"{def_id}：修復包自報「{claimed}」，但帳本家族（主檔 ∪ archive）"
+                f"查無此 ID —— 修了卻沒入帳，或 ID 打錯"
+            )
+            continue
+        if actual is None:
+            problems.append(
+                f"{def_id}：修復包自報「{claimed}」，但{where}該列狀態欄辨識不出"
+                f"已知關鍵字（帳本自身狀態含糊）"
+            )
+        elif actual != claimed:
+            problems.append(
+                f"{def_id}：修復包自報「{claimed}」，{where}實際為「{actual}」 —— "
+                f"自報與入帳不一致，請確認是漏入帳還是自報過樂觀"
+            )
+    return problems
+
+
+def _run_reconcile(report_path: Path) -> int:
+    """`--reconcile <報表.json>` 的入口：JSON ＝ `{DEF-ID: 自報狀態}`。"""
+    import json
+    if not report_path.exists():
+        print(f"❌ 找不到修復包自報報表：{report_path}", file=sys.stderr)
+        return 1
+    try:
+        data = json.loads(report_path.read_text(encoding="utf-8-sig"))
+    except json.JSONDecodeError as exc:
+        print(f"❌ 報表不是合法 JSON：{report_path}（{exc}）", file=sys.stderr)
+        return 1
+    if not isinstance(data, dict) or not all(isinstance(v, str) for v in data.values()):
+        print("❌ 報表格式須為 {\"DEF-101-001\": \"fixed@R68\", …} 的物件"
+              "（值一律字串）", file=sys.stderr)
+        return 1
+    problems = reconcile_problems(data, _load_ledger_status(), _load_archive_status())
+    if problems:
+        print(f"❌ 修復包自報 status ↔ 帳本狀態不一致（{len(problems)} 筆）：",
+              file=sys.stderr)
+        for p in problems:
+            print(f"  - {p}", file=sys.stderr)
+        return 1
+    print(f"✅ 修復包自報 status 與帳本家族逐筆一致：{len(data)} 筆")
+    return 0
+
+
 def _load_ledger_status() -> dict[str, str | None]:
     """解析缺陷帳本表格列，回傳 {DEF-ID: 狀態分類}。同 ID 重複出現時，以最後一列為準——
 
@@ -609,7 +970,61 @@ def _load_ledger_status() -> dict[str, str | None]:
     return status
 
 
-def _scan_target(path: Path, ledger: dict[str, str | None]) -> list[str]:
+_ARCHIVE_GLOB = "AutoSDD_Defect_Log_archive_*.md"
+
+
+def archive_files() -> list[Path]:
+    """磁碟上的 archive 檔（排序穩定）。帳本家族的 archive 半邊，SSOT 勿在別處重列 glob。"""
+    return sorted(_DEFECT_LOG.parent.glob(_ARCHIVE_GLOB))
+
+
+def _load_archive_status() -> dict[str, str | None]:
+    """解析**全部 archive 檔**的表格列，回傳 {DEF-ID: 狀態分類}（DEF-101-676，R68）。
+
+    🔴 為何需要這一支 —— 帳本 SSOT 的正確定義是「主檔 ∪ archive 家族」，不是「主檔」：
+    `_load_ledger_status()` 只讀主檔，於是任何被掃描目標做過狀態宣稱的列**一旦歸檔就
+    立刻讓 `_scan_target()` 報「帳本查無此 ID」**。歷輪為了迴避這個假紅，在
+    `archive_defect_log.py` 立了搬遷判準③「被 crossref 掃描目標做過狀態宣稱 ⇒ 硬擋」，
+    等於用「不准搬」去繞過「搬了會假紅」。後果是帳本的不可搬核心單調成長（R68 動工前
+    實測：109 列中 11 列**只**被判準③ 擋著、合計 16217 bytes 永久卡在主檔），主檔逼近
+    256KB 硬線後整輪無法收輪（DEF-101-676 死結）。
+
+    正解是把解析面補齊到家族全體，而**不是**放寬一致性要求：歸檔列的狀態宣稱照樣要
+    與該列在 archive 內的實際狀態逐筆比對，只是查找範圍從「主檔」擴為「主檔 ∪ archive」。
+    真正不存在的 ID（打錯字、從未立帳）仍然報「帳本家族查無此 ID」——鑑別力不減。
+
+    🔴 每份 archive 各自用**自己的表頭**定位狀態欄（`_table_layout(該檔全文)`），不沿用
+    主檔 layout：archive 是零刪除史料檔，歷輪表頭欄數不保證與今日主檔相同，沿用主檔
+    layout 會讓狀態欄整批位移到別欄（這正是 Pkg-P6 在主檔踩過的同一種錯，不在此重演）。
+    抽不到表頭的 archive 一律跳過（不猜位置），其列視為未收錄 ⇒ 退回「查無此 ID」硬報。
+    """
+    status: dict[str, str | None] = {}
+    for arch in archive_files():
+        text = arch.read_text(encoding="utf-8-sig")
+        layout = _table_layout(text)
+        if layout is None:
+            continue
+        ncols, id_idx, status_idx = layout
+        for line in text.splitlines():
+            if not _ROW_RE.match(line):
+                continue
+            cells = _row_cells(line)
+            if id_idx >= len(cells) or not _ID_RE.fullmatch(cells[id_idx]):
+                continue
+            status[cells[id_idx]] = (
+                _classify(cells[status_idx]) if len(cells) == ncols else None
+            )
+    return status
+
+
+def _scan_target(path: Path, ledger: dict[str, str | None],
+                 archive: dict[str, str | None] | None = None) -> list[str]:
+    """比對一份掃描目標內的狀態宣稱與帳本實況。
+
+    `archive` 給定時作為**次級**查找面（主檔優先）：主檔查不到才回退 archive，讓已歸檔
+    的列仍可被宣稱且仍被逐筆驗證（見 `_load_archive_status()` 的 WHY）。預設 `None`
+    ＝不啟用回退，保留「只看主檔」的原語意供既有測試與單檔情境使用。
+    """
     problems: list[str] = []
     text = path.read_text(encoding="utf-8-sig")
     for m in _CLAIM_RE.finditer(text):
@@ -618,23 +1033,31 @@ def _scan_target(path: Path, ledger: dict[str, str | None]) -> list[str]:
         if not claimed:
             continue
         for def_id in _ID_RE.findall(ids_blob):
-            if def_id not in ledger:
+            # 主檔優先；主檔查無才看 archive（同 ID 兩邊都有時以主檔為準，兩邊矛盾
+            # 另由 `archive_defect_log.py --check` 判準(3)「跨檔矛盾」硬擋）。
+            if def_id in ledger:
+                actual = ledger[def_id]
+                where = "缺陷帳本"
+            elif archive is not None and def_id in archive:
+                actual = archive[def_id]
+                where = "帳本 archive"
+            else:
+                scope = "帳本家族（主檔 ∪ archive）" if archive is not None else "缺陷帳本"
                 problems.append(
-                    f"{path.name}：{def_id} 宣稱狀態「{claimed}」，但缺陷帳本查無此 ID"
+                    f"{path.name}：{def_id} 宣稱狀態「{claimed}」，但{scope}查無此 ID"
                     f"（claim 片段：{claim_text[:60]!r}）"
                 )
                 continue
-            actual = ledger[def_id]
             if actual is None:
                 problems.append(
-                    f"{path.name}：{def_id} 宣稱狀態「{claimed}」，但缺陷帳本裡該 ID 最後"
+                    f"{path.name}：{def_id} 宣稱狀態「{claimed}」，但{where}裡該 ID 最後"
                     f"一列的狀態欄文字無法辨識任何已知關鍵字，帳本自身狀態含糊"
                     f"（claim 片段：{claim_text[:60]!r}）"
                 )
             elif actual != claimed:
                 problems.append(
-                    f"{path.name}：{def_id} 宣稱狀態「{claimed}」，帳本實際狀態為「{actual}」"
-                    f"（claim 片段：{claim_text[:60]!r}）"
+                    f"{path.name}：{def_id} 宣稱狀態「{claimed}」，{where}實際狀態為"
+                    f"「{actual}」（claim 片段：{claim_text[:60]!r}）"
                 )
     return problems
 
@@ -643,8 +1066,23 @@ def _scan_target(path: Path, ledger: dict[str, str | None]) -> list[str]:
 # R9 發現主檔已默默長到 272KB 超線，政策沒有任何機械守門）。
 # 逼近（>= _LEDGER_WARN_BYTES）印 warning；超線（>= _LEDGER_FAIL_BYTES）直接 fail，
 # 強制執行既定輪替程序（已結列搬遷 archive_NN）。
+#
+# 🔴 R68（DEF-101-676 方向③ 評估結論：**駁回調高硬線**）——這條線不是政策自由度，是
+# **當下實測的工具事實**。2026-08-01 於 macOS 26.5.2 真機對 Read 工具實跑探針：
+#     2097152 bytes 檔 → `File content (2MB) exceeds maximum allowed size (256KB).`
+#      307200 bytes 檔 → `File content (300KB) exceeds maximum allowed size (256KB).`
+# 兩發皆在「還沒讀到內容」就被工具本身拒絕，且錯誤訊息逐字載明上限 256KB。故 R67 帳本
+# 內「現值 262144 綁的是 Read 工具單次讀取上限」之認知**於 R68 仍成立、未過期**，調高
+# `_LEDGER_FAIL_BYTES` 等同砸溫度計：閘門會轉綠，而主檔會變成任何 agent 都讀不完整的
+# 檔——「讀不完整的 SSOT」比「撞閘門」壞得多（讀者只讀到前半段還以為讀完了，是靜默
+# 失效）。容量問題的正解是提高輪替**吞吐**（見 `archive_defect_log.py` 判準②③ 的 R68
+# 修訂），不是提高上限。
+# 對應機械鎖：`tools/tests/test_defect_log_capacity_policy_r68.py::TestHardLineIsToolFact`
 _LEDGER_WARN_BYTES = 240 * 1024
 _LEDGER_FAIL_BYTES = 256 * 1024
+#: Read 工具實測單次讀取上限（見上方探針取證）。硬線必須恰等於它——不得「留一點餘裕」
+#: 地調低（那會讓政策與工具事實脫鉤、下一輪讀者無從判斷哪個數字才是真的），更不得調高。
+_READ_TOOL_MAX_BYTES = 256 * 1024
 
 # 🔴 R60 round 3（DEF-101-587）：體積守門的涵蓋面由「帳本家族」擴到**具名治理文件**。
 #
@@ -704,6 +1142,10 @@ _GOVERNANCE_DOCS = (
     # R62 Architect 收輪證據（本輪新增，同理即刻登記，避免重演 R61「插曲二」——
     # 新建證據檔忘了登記進本清單而致 test_check_defect_log_crossref.py 轉紅）。
     _REPO_ROOT / "docs" / "06_quality" / "CrossPlatform_R62_Architect_Evidence.md",
+    # R68 十二維掃描的 69 筆存活缺陷清單（帳本 DEF-101-702 的詳情面）。它承擔的正是
+    # 本清單所定義的那個資格：複審者要逐條重驗就得讀完它（⇒ 受體積守門），且它會寫出
+    # 「某缺陷現居何處／座標為何」的宣稱（⇒ 受指針稽核）。即刻登記，不等下一輪。
+    _REPO_ROOT / "docs" / "06_quality" / "CrossPlatform_R68_Scan_Findings.md",
 )
 
 # 姊妹治理文件的命名慣例：`docs/06_quality/CrossPlatform_*.md`。這**不是**把具名常數
@@ -774,6 +1216,26 @@ def oversize_problems(paths: list[Path]) -> tuple[list[str], list[str]]:
                 f"append 前務必先 `wc -c`"
             )
     return fails, warns
+
+
+_USAGE = (
+    "用法：\n"
+    "  python3 tools/check_defect_log_crossref.py                 # 全套閘門\n"
+    "  python3 tools/check_defect_log_crossref.py --reconcile F.json  # 修復包自報對帳"
+)
+
+
+def cli(argv: list[str]) -> int:
+    """參數分派。刻意**不**寫進 `main()`：既有大批測試直接呼叫 `main()`，若在那裡讀
+    `sys.argv`，unittest 自己的參數會被當成本工具的旗標（落地時實測 16 支測試因此
+    rc=2 假紅）。也刻意不引 argparse——只有一個旗標，一個 if 就夠。
+    """
+    if len(argv) == 2 and argv[0] == "--reconcile":
+        return _run_reconcile(Path(argv[1]))
+    if argv:
+        print(f"❌ 無法辨識的參數：{argv}\n{_USAGE}", file=sys.stderr)
+        return 2
+    return main()
 
 
 def main() -> int:
@@ -869,6 +1331,52 @@ def main() -> int:
             print(f"  - {p}", file=sys.stderr)
         return 1
 
+    # 硬規則② 後半句（二擇一，R68）——緊接在輪號比大小之後：兩者是**同一條規則的兩半**，
+    # 前半判「指向的輪次夠不夠新」，後半判「到底有沒有指向任何東西」。少了後半，
+    # 未結列只要不寫任何 `R\d+` 就從 `if not handovers: continue` 短路出去（實測 61 筆）。
+    # 🔴 本道（含其 stale 自檢）只對**真實主檔**成立：它與 `_UNPINNED_HANDOVER_
+    # GRANDFATHERED` 是一體的，而該名單列的是相對於 `docs/06_quality/
+    # AutoSDD_Defect_Log.md` 的存量 ID。餵任何其他帳本（測試以 mock 換掉
+    # `_DEFECT_LOG` 的合成 fixture）時，名單對該帳本全不匹配 ⇒ 兩個方向同時假紅：
+    # fixture 的未結列一律被判「缺承接指派」、名單每一筆一律被判「已 stale」——
+    # 兩者都與規則想抓的東西無關。綁定預設路徑而非「有沒有被 mock」，是因為生產
+    # 路徑上 `_DEFECT_LOG` 恆為預設值 ⇒ 真 repo 一定跑得到這道，鑑別力不減。
+    # 規則本體的鑑別力由 `TestUnpinnedHandoverAndStaleGrandfather` 以純函式直接驗
+    # （雙向注入），不經 `main()`——正因為經 `main()` 就得餵合成帳本。
+    unpinned_problems: list[str] = []
+    if _DEFECT_LOG == _DEFAULT_DEFECT_LOG:
+        unpinned_problems = unpinned_handover_problems(ledger_text)
+        unpinned_problems += stale_grandfather_problems(ledger_text)
+    if unpinned_problems:
+        print(f"❌ 未結列缺承接指派（硬規則② 後半句，{len(unpinned_problems)} 筆）：",
+              file=sys.stderr)
+        for p in unpinned_problems:
+            print(f"  - {p}", file=sys.stderr)
+        return 1
+
+    # 狀態 token 變體硬閘（R68）——放在首詞鎖之後：首詞鎖只看第一個詞，
+    # `open watch（R55）→ closed-by-verification@R56` 這種訂正 token 躲在後面。
+    variant_problems = status_variant_problems(ledger_text)
+    if variant_problems:
+        print(f"❌ 狀態欄非法狀態 token（{len(variant_problems)} 筆）：", file=sys.stderr)
+        for p in variant_problems:
+            print(f"  - {p}", file=sys.stderr)
+        return 1
+
+    # 以下三組是 warning（不 fail）——它們指的都是**帳本品質提示**而非跨文件矛盾，
+    # 硬擋會製造假紅。但必須每次都印：它們原本全部只活在 docstring 或 `--plan` 裡，
+    # 而「只在有人主動去看時才被看到」的清單等於沒有（DEF-101-709 立案理由）。
+    for note in lagging_clock_notes(ledger_text):
+        print(f"⚠️  當前輪時鐘 fail-open 窗口：{note}", file=sys.stderr)
+    for note in supersession_notes(ledger_text):
+        print(f"⚠️  狀態首詞待更新：{note}", file=sys.stderr)
+    residual = residual_todo_notes(ledger_text)
+    if residual:
+        # 刻意壓成**一行**：18 筆各印一段會把閘門輸出淹掉，而被淹掉的 warning 等於沒印。
+        print(f"⚠️  已結列殘留待辦 {len(residual)} 筆（已結分類使它們結構上進不了承接"
+              f"稽核；真待辦請拆出獨立 DEF 列承接，敘事引述可忽略）："
+              f"{'、'.join(residual)}", file=sys.stderr)
+
     # 「有效」與「含糊」分開呈現（R9 跨平台複審：舊版把 _classify 回 None 的列
     # 也一併計入「有效狀態紀錄」總數，帳本自身品質問題被靜默吞掉）。
     # 含糊 >0 只印 warning 不 fail：這是帳本品質提示，非跨文件矛盾。
@@ -877,12 +1385,16 @@ def main() -> int:
         print(f"⚠️  帳本狀態含糊 {len(vague_ids)} 筆（狀態欄辨識不出已知關鍵字）："
               f"{'、'.join(vague_ids)}", file=sys.stderr)
 
+    # 帳本家族的 archive 半邊（DEF-101-676，R68）——主檔查不到的 ID 回退到這裡再驗一次，
+    # 讓「被宣稱過的列」不再因為歸檔就假紅。**不是**放寬一致性：回退後照樣逐筆比對狀態。
+    archive_status = _load_archive_status()
+
     all_problems: list[str] = []
     for target in _CROSSREF_TARGETS:
         if not target.exists():
             print(f"❌ 找不到掃描目標：{target}", file=sys.stderr)
             return 1
-        all_problems.extend(_scan_target(target, ledger))
+        all_problems.extend(_scan_target(target, ledger, archive_status))
 
     if all_problems:
         print(f"❌ 缺陷帳本跨文件狀態不一致（{len(all_problems)} 筆）：", file=sys.stderr)
@@ -899,9 +1411,17 @@ def main() -> int:
           f"具名治理文件 {len(_GOVERNANCE_DOCS)} 份皆已登記且未逾體積上限"
           f"（登記面對 {_GOVERNANCE_DOC_GLOB} 發現面雙向核對）；"
           f"全部未結案列的承接輪次皆 ≥ 當前輪 R{current_round(ledger_text)} 或已載明改派"
-          "（硬規則②；已實測不涵蓋的形態見 orphan_backlog_problems docstring）")
+          "（硬規則②；已實測不涵蓋的形態見 orphan_backlog_problems docstring）；"
+          f"未結列皆二擇一（承接輪號／字面「{_UNASSIGNED_LITERAL}」，存量豁免 "
+          f"{len(_UNPINNED_HANDOVER_GRANDFATHERED)} 筆／棘輪上限 "
+          f"{_UNPINNED_HANDOVER_CEILING}，只准變小）"
+          f"{f'；另 {len(residual)} 筆已結列殘留待辦，見 warning' if residual else ''}。"
+          f"\n🔴 當前輪 R{current_round(ledger_text)} 係由帳本「{_CONTEXT_HEADER}」欄"
+          "**現查**推得（不寫死）——本輪若尚未寫入任何帳本列，此值仍停在上一輪，"
+          "屆時「交棒給剛結束的那一輪」會合法通過（刻意選的 fail-open 方向：漏抓而非"
+          "假紅，窗口於本輪第一列落地時自動關閉，見 lagging_clock_notes()）")
     return 0
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    sys.exit(cli(sys.argv[1:]))

@@ -51,16 +51,21 @@ if [[ -n "${TLA_VERSION:-}" ]]; then
     TLA_VERSION_ARGS=(--tla-version "${TLA_VERSION}")
 fi
 
-# python 探測須經共用 windowsapps_guard.sh SSOT 排除 WindowsApps 空殼
-# （DEF-101-353 系統性缺口收斂；同 AISDLC_SDD/scripts/ci-gate.sh 慣例，非本檔
-# 獨立重寫裸 `command -v` 判斷）。
+# python 探測須經共用 windowsapps_guard.sh SSOT 排除 WindowsApps 空殼（DEF-101-353；
+# 同 ci-gate.sh 慣例）。R68：guard 只存在於 monorepo 根，框架單獨 clone／經
+# init_project.sh 部署後不存在，故存在才 source、缺席降級回退（同 install_post_commit.sh）。
 REPO_ROOT="$(cd "${TOOLS_PARENT}/../.." && pwd)"
-# shellcheck disable=SC1091
-. "${REPO_ROOT}/tools/lib/windowsapps_guard.sh"
+GUARD_SRC="${REPO_ROOT}/tools/lib/windowsapps_guard.sh"
 PYTHON_BIN=""
-for _cand in python3 python; do
-    if is_real_python_candidate "${_cand}"; then PYTHON_BIN="${_cand}"; break; fi
-done
+if [[ -f "${GUARD_SRC}" ]]; then
+    # shellcheck disable=SC1091
+    . "${GUARD_SRC}"
+    for _cand in python3 python; do
+        if is_real_python_candidate "${_cand}"; then PYTHON_BIN="${_cand}"; break; fi
+    done
+else
+    PYTHON_BIN="$(command -v python3 || command -v python || true)"
+fi
 if [[ -z "${PYTHON_BIN}" ]]; then
     echo "ERROR: 找不到 python3/python（或僅偵測到 WindowsApps 空殼），請安裝 Python 3.11+。" >&2
     exit 2
@@ -69,27 +74,27 @@ fi
 cd "${TOOLS_PARENT}"
 
 if [[ "${INSTALL_ONLY}" -eq 1 ]]; then
-    "${PYTHON_BIN}" -m tools.fsm_runtime.tlc_runner --install-only "${TLA_VERSION_ARGS[@]}"
+    "${PYTHON_BIN}" -m tools.fsm_runtime.tlc_runner --install-only ${TLA_VERSION_ARGS[@]+"${TLA_VERSION_ARGS[@]}"}
     exit $?
 fi
 
 echo "[run_tlc] 委派 tools.fsm_runtime.tlc_runner 跑 SDD_FSM（depth=${DEPTH}）..."
 set +e
-"${PYTHON_BIN}" -m tools.fsm_runtime.tlc_runner --module SDD_FSM --depth "${DEPTH}" --download "${TLA_VERSION_ARGS[@]}"
+"${PYTHON_BIN}" -m tools.fsm_runtime.tlc_runner --module SDD_FSM --depth "${DEPTH}" --download ${TLA_VERSION_ARGS[@]+"${TLA_VERSION_ARGS[@]}"}
 RC=$?
 set -e
 [[ "${RC}" -ne 0 ]] && exit "${RC}"
 
 echo "[run_tlc] 委派 tools.fsm_runtime.tlc_runner 跑 FLEET_FSM 5a（safety + symmetry）..."
 set +e
-"${PYTHON_BIN}" -m tools.fsm_runtime.tlc_runner --module FLEET_FSM --download "${TLA_VERSION_ARGS[@]}"
+"${PYTHON_BIN}" -m tools.fsm_runtime.tlc_runner --module FLEET_FSM --download ${TLA_VERSION_ARGS[@]+"${TLA_VERSION_ARGS[@]}"}
 RC=$?
 set -e
 [[ "${RC}" -ne 0 ]] && exit "${RC}"
 
 echo "[run_tlc] 委派 tools.fsm_runtime.tlc_runner 跑 FLEET_FSM 5b（liveness, NO symmetry）..."
 set +e
-"${PYTHON_BIN}" -m tools.fsm_runtime.tlc_runner --module FLEET_FSM --cfg FLEET_FSM_LIVENESS.cfg --download "${TLA_VERSION_ARGS[@]}"
+"${PYTHON_BIN}" -m tools.fsm_runtime.tlc_runner --module FLEET_FSM --cfg FLEET_FSM_LIVENESS.cfg --download ${TLA_VERSION_ARGS[@]+"${TLA_VERSION_ARGS[@]}"}
 RC=$?
 set -e
 exit "${RC}"

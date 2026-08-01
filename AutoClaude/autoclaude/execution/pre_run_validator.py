@@ -37,6 +37,19 @@ def _is_windows_apps_alias_stub(resolved_path: str) -> bool:
     )
 
 
+# R68 修復：原本是 `binary.lower() in _WINDOWS_APPS_STUB_BINARIES` 的精確字串比對，對
+# Windows 慣用的 `python.exe`／`python3.exe`／`Python.EXE` 拼法全部漏判 → guard 整條被
+# 跳過（實測：同一個 WindowsApps 空殼路徑，`python` 回 block、`python.exe` 回零 issue）。
+# 改比對 `PureWindowsPath(binary).stem`，同時涵蓋副檔名與大小寫變體，並額外涵蓋 playbook
+# 直接寫完整路徑（`C:\...\WindowsApps\python.exe -m pytest`）的情形。**scope 不放寬**：
+# `pytest.exe` 的 stem 是 `pytest`、不在集合內，tests/test_gap009.py::
+# test_non_python_binary_in_windowsapps_dir_not_flagged 的偽陽性鎖仍綠。用 PureWindowsPath
+# 而非 Path 是為了讓 mac/Linux 上跑的單元測試也能正確拆解反斜線路徑（同上方 stub 判斷）。
+def _is_stub_candidate_binary(binary: str) -> bool:
+    """playbook 寫的 binary 名（自由文字）是否為 WindowsApps 空殼候選名稱。"""
+    return PureWindowsPath(binary).stem.lower() in _WINDOWS_APPS_STUB_BINARIES
+
+
 @dataclass
 class PreRunIssue:
     severity: str       # "block" | "warn"
@@ -89,7 +102,7 @@ class PreRunValidator:
                     f"或安裝所需工具後再執行任務。"
                 ),
             )]
-        if binary.lower() in _WINDOWS_APPS_STUB_BINARIES and _is_windows_apps_alias_stub(resolved):
+        if _is_stub_candidate_binary(binary) and _is_windows_apps_alias_stub(resolved):
             return [PreRunIssue(
                 severity="block",
                 category="evaluator_missing",

@@ -201,6 +201,57 @@ class TestPreRunValidator:
         cmd_issues = [i for i in issues if i.category == "evaluator_missing"]
         assert cmd_issues == []
 
+    def test_windows_apps_guard_binary_name_spelling_matrix(self):
+        """R68 回歸鎖：guard 的候選名稱比對必須涵蓋 Windows 慣用的 `.exe` 拼法。
+
+        WHY（Rule 9 — 鎖住意圖）：`evaluator_command` 是 playbook 裡**唯一的自由文字
+        輸入**，使用者在 Windows 上寫 `python.exe -m pytest` 完全合法。原實作用
+        `binary.lower() in _WINDOWS_APPS_STUB_BINARIES` 精確字串比對，對同一個
+        WindowsApps 空殼路徑：`python` → block、`python.exe` → **零 issue**（實測），
+        guard 整條被跳過 ⇒ 「提前 block」這道優化對最常見的 Windows 拼法完全失效。
+
+        WHY 需要本鎖而非沿用四方 parity 鎖：
+        `tools/tests/test_windowsapps_guard_cross_consistency.py` 的 `_VERDICT_CASES`
+        全是**路徑**字串、直接餵 `_is_windows_apps_alias_stub()`，結構上繞過本處的
+        binary-name dispatch 閘 ⇒ 那支鎖永遠碰不到本缺口。故在此補「binary 名 ×
+        resolved 路徑」二維矩陣。第 2 維（scope 不放寬）由 pytest.exe 一列把守。
+        """
+        stub = str(
+            PureWindowsPath("C:/Users/me/AppData/Local/Microsoft/WindowsApps/python.exe")
+        )
+        real = str(PureWindowsPath("C:/Python311/python.exe"))
+        # (evaluator_command, resolved 路徑, 是否應 block)
+        cases = [
+            ("python -m pytest", stub, True),
+            ("python3 -m pytest", stub, True),
+            ("python.exe -m pytest", stub, True),      # R68 修復前：漏判
+            ("python3.exe -m pytest", stub, True),     # R68 修復前：漏判
+            ("PYTHON3.EXE -m pytest", stub, True),     # R68 修復前：漏判（大小寫變體）
+            # 下一行的磁碟機字面值是 WindowsApps guard 要辨識的 Windows 專屬安裝位置，
+            # 為純字串比對測資（不進 pathlib join），改成平台中立常數即失去測意。
+            (r"C:\Users\me\AppData\Local\Microsoft\WindowsApps"  # platform-ok: 純字串測資
+             r"\python.exe -m pytest",
+             stub, True),                              # playbook 直接寫完整路徑
+            ("pytest tests/", stub, False),            # scope 不放寬（stem=pytest）
+            ("pytest.exe tests/", stub, False),        # 同上，.exe 拼法亦不得誤擋
+            ("python -m pytest", real, False),         # 真 Python 不在 WindowsApps 下
+            ("python.exe -m pytest", real, False),
+        ]
+        for command, resolved, should_block in cases:
+            with patch(
+                "autoclaude.execution.pre_run_validator.shutil.which",
+                return_value=resolved,
+            ):
+                issues = PreRunValidator().validate_step(command, "任意 prompt")
+            blocked = [
+                i for i in issues
+                if i.category == "evaluator_missing" and "WindowsApps" in i.message
+            ]
+            assert bool(blocked) is should_block, (
+                f"{command!r} 對 resolved={resolved!r} 的判定與預期不符"
+                f"（實得 {[i.message for i in issues]}）"
+            )
+
     @patch("autoclaude.execution.pre_run_validator.shutil.which", return_value="/usr/bin/pytest")
     @patch("subprocess.run")
     def test_test_file_syntax_error_returns_block(self, mock_run, _):
@@ -339,6 +390,29 @@ class TestValidateEvaluatorCommands:
         gap_warnings = [r for r in caplog.records if "Gap-009-D" in r.message]
         assert len(gap_warnings) == 1
         assert "WindowsApps" in gap_warnings[0].message
+
+    def test_windows_apps_stub_exe_spelling_logs_gap009d_warning(self, caplog):
+        """R68 回歸鎖（boot_helper 側，與 PreRunValidator 側同修）：`python.exe`／
+        `python3.exe` 拼法亦須觸發 Gap-009-D warning。兩處共用
+        `pre_run_validator._is_stub_candidate_binary`，本鎖確認 boot_helper 的
+        dispatch 分支真的走了新判準，而不是只有 PreRunValidator 被修好。"""
+        import logging
+        stub_path = str(
+            PureWindowsPath("C:/Users/me/AppData/Local/Microsoft/WindowsApps/python.exe")
+        )
+        for cmd in ("python.exe -m pytest tests/", "PYTHON3.EXE -m pytest tests/"):
+            caplog.clear()
+            runner = _make_runner()
+            playbook = self._make_playbook(cmd)
+            with caplog.at_level(logging.WARNING):
+                with patch(
+                    "autoclaude.execution.playbook_runner.shutil.which",
+                    return_value=stub_path,
+                ):
+                    runner._validate_evaluator_commands(playbook)
+            gap_warnings = [r for r in caplog.records if "Gap-009-D" in r.message]
+            assert len(gap_warnings) == 1, f"{cmd!r} 未觸發 Gap-009-D warning"
+            assert "WindowsApps" in gap_warnings[0].message
 
     def test_real_python_outside_windowsapps_no_warning(self, caplog):
         """真正安裝的 Python（路徑不在 WindowsApps 下）不應觸發 warning。"""

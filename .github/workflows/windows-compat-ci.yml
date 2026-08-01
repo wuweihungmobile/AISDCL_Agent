@@ -273,6 +273,11 @@ on:
       # `_SYSPATH_PARENTS_RE` 結構性漏抓，連機械鎖都零訊號（盲區 E；該鎖已於同輪
       # 改用 AST 解析修復，此後同類遺漏會當場轉紅）。DEF-101-042 同構。
       - "tools/lib/sdd_latest.py"
+      # R68：本輪新增的第四支 tools/lib/ SSOT（GitHub 排程軌逐軌活性偵測），
+      # 由 tools/dev_start.py 與 tools/tests/test_dev_start.py 消費。立案理由＝
+      # DEF-101-703：兩支 *-nightly-full 18 天零成功而三道既有哨兵結構上都偵測不到。
+      # 由 test_ci_paths_cover_root_consumers.py 當場攔下並要求雙邊補列（該鎖有效）。
+      - "tools/lib/ci_liveness.py"
       # R43：tools/tests/test_windowsapps_guard_bash_parity.py 消費此根層檔（bash 側
       # WindowsApps guard SSOT，DEF-101-353）與其全部已知呼叫端——只改任一檔時本
       # workflow 須重跑該鎖（DEF-101-042 同構；.sh 本檔無 **/*.sh 兜底 glob〔對稱
@@ -285,6 +290,15 @@ on:
       - "AutoClaude/tools/local_ci_gate.sh"
       - "AutoClaude/tools/run_act.sh"
       - "AutoClaude/tools/sd06_w3_staging_dryrun.sh"
+      # 🔴 R68 SCAN-E（DOWNGRADED→P3 架構缺陷修復）：本檔 .sh 側逐一列舉、macos 側
+      # 用 `**/*.sh` 兜底，兩邊觸發面因此不對稱。以 GitHub filter-pattern 語意對
+      # `git ls-files` 全量重算，全 repo 305 支 .sh/.ps1 中恰有 1 支只觸發 macOS 側
+      # 而不觸發本檔：`AutoClaude/tools/run_mutmut_in_docker.sh`。補上這一條後兩側
+      # 觸發面**完全對稱、零例外**，使 tools/tests/test_workflow_permission_concurrency_lock.py
+      # 的 `TestCompatCiScriptTriggerSymmetry` 得以用「零豁免清單」的形態立鎖
+      # ——豁免清單本身就是 fail-open 面（本 repo 已有 `_TRACKED_ACTIONS` 白名單
+      # 打錯一個字即靜默少守 13 處的前例，見 tools/check_gha_action_versions.py）。
+      - "AutoClaude/tools/run_mutmut_in_docker.sh"
       - "AutoClaude/tools/git-hooks/pre-commit"
       - "AutoClaude/tools/git-hooks/pre-push"
       - "tools/bootstrap_core.py"
@@ -405,6 +419,11 @@ on:
       # `_SYSPATH_PARENTS_RE` 結構性漏抓，連機械鎖都零訊號（盲區 E；該鎖已於同輪
       # 改用 AST 解析修復，此後同類遺漏會當場轉紅）。DEF-101-042 同構。
       - "tools/lib/sdd_latest.py"
+      # R68：本輪新增的第四支 tools/lib/ SSOT（GitHub 排程軌逐軌活性偵測），
+      # 由 tools/dev_start.py 與 tools/tests/test_dev_start.py 消費。立案理由＝
+      # DEF-101-703：兩支 *-nightly-full 18 天零成功而三道既有哨兵結構上都偵測不到。
+      # 由 test_ci_paths_cover_root_consumers.py 當場攔下並要求雙邊補列（該鎖有效）。
+      - "tools/lib/ci_liveness.py"
       # R43：tools/tests/test_windowsapps_guard_bash_parity.py 消費此根層檔（bash 側
       # WindowsApps guard SSOT，DEF-101-353）與其全部已知呼叫端——只改任一檔時本
       # workflow 須重跑該鎖（DEF-101-042 同構；.sh 本檔無 **/*.sh 兜底 glob〔對稱
@@ -417,6 +436,15 @@ on:
       - "AutoClaude/tools/local_ci_gate.sh"
       - "AutoClaude/tools/run_act.sh"
       - "AutoClaude/tools/sd06_w3_staging_dryrun.sh"
+      # 🔴 R68 SCAN-E（DOWNGRADED→P3 架構缺陷修復）：本檔 .sh 側逐一列舉、macos 側
+      # 用 `**/*.sh` 兜底，兩邊觸發面因此不對稱。以 GitHub filter-pattern 語意對
+      # `git ls-files` 全量重算，全 repo 305 支 .sh/.ps1 中恰有 1 支只觸發 macOS 側
+      # 而不觸發本檔：`AutoClaude/tools/run_mutmut_in_docker.sh`。補上這一條後兩側
+      # 觸發面**完全對稱、零例外**，使 tools/tests/test_workflow_permission_concurrency_lock.py
+      # 的 `TestCompatCiScriptTriggerSymmetry` 得以用「零豁免清單」的形態立鎖
+      # ——豁免清單本身就是 fail-open 面（本 repo 已有 `_TRACKED_ACTIONS` 白名單
+      # 打錯一個字即靜默少守 13 處的前例，見 tools/check_gha_action_versions.py）。
+      - "AutoClaude/tools/run_mutmut_in_docker.sh"
       - "AutoClaude/tools/git-hooks/pre-commit"
       - "AutoClaude/tools/git-hooks/pre-push"
       - "tools/bootstrap_core.py"
@@ -1191,6 +1219,26 @@ jobs:
         # 從未於真實環境執行過一次（nightly-full 至今從未真的失敗過）。補
         # simulate_nightly_failure 手動輸入，可在不需要真的搞壞 nightly-full 的前提下，
         # 一次性驗證開單/留言/自動關單三條分支邏輯是否正確。
+        #
+        # 🔴 R68 SCAN-C（P2，兩平台同款）：本判讀原為**黑名單 fail-open**——
+        # 「只有 conclusion 等於字面 failure 才算紅」，其餘一律當綠（該判讀式的
+        # 逐字形態刻意不寫在這裡：本檔受 test_workflow_permission_concurrency_lock
+        # 的黑名單極性鎖全文掃描，散文引述舊式會被判為極性回歸）。沙箱以本
+        # step 逐字複製的 jq 與判讀式餵合成 payload 實跑，六種情境中五種 fail-open：
+        # cancelled／timed_out／skipped／conclusion 為 null（→ "unknown"）／job 顯示名
+        # 被加前綴（startswith 落空 → "unknown"）全部得 failed=false，於是走下方
+        # 「綠燈時自動關閉既有失敗 issue」分支、對一張仍然有效的 P1 單留言
+        # 「已恢復綠燈」並關掉它——**告警器主動抹除紅燈證據**，比單純漏報更糟。
+        # 觸發面不是理論的：本 repo 有「節省 CI 額度」紀律，人工取消一支 60 分鐘的
+        # 深度回歸即得 cancelled；job 顯示名加輪次前綴也是本 repo 慣例。
+        # 改為**白名單 fail-closed**：只有字面 "success" 才算綠，其餘（含 gh api
+        # 自身失敗的 "api-error"）一律走開單／留言路徑，並把實際結論字串一併輸出，
+        # 讓 issue body 能區分「真的跑完但失敗」與「根本沒跑起來」（2026-07-15～
+        # 07-27 五次排程全紅的實況正是後者：三個 job 的 steps 長度皆為 0、
+        # annotation 逐字為 'The job was not started because recent account payments
+        # have failed…'，DEF-101-081 帳務停擺）。
+        # `startswith("Windows nightly full")` ↔ nightly-full 的 `name:` 前綴由
+        # tools/tests/test_workflow_permission_concurrency_lock.py 機械互鎖，改名即紅。
         id: check
         env:
           GH_TOKEN: ${{ github.token }}
@@ -1200,15 +1248,23 @@ jobs:
           set -euo pipefail
           if [ "${SIMULATE:-false}" = "true" ]; then
             echo "⚠️ simulate_nightly_failure=true，強制視為失敗（供驗證 alert 紅色路徑用，不代表 nightly-full 真的失敗）"
+            echo "conclusion=simulated-failure" >> "$GITHUB_OUTPUT"
             echo "failed=true" >> "$GITHUB_OUTPUT"
           else
+            # gh api 自身失敗（rate limit／權限／API 5xx）時不得讓整個 step 死掉：
+            # step 死掉會使 outputs.failed 為空字串，下方兩個分支的 == 'true' /
+            # == 'false' 皆不成立 ⇒ 告警靜默蒸發。改為降級成 "api-error" 並由
+            # 白名單判讀當作「非綠」處理（fail-closed）。
             conclusion=$(gh api "/repos/${REPO}/actions/runs/${{ github.run_id }}/jobs" \
-              --jq '[.jobs[] | select(.name | startswith("Windows nightly full"))][0].conclusion // "unknown"')
+              --jq '[.jobs[] | select(.name | startswith("Windows nightly full"))][0].conclusion // "unknown"' \
+              || echo "api-error")
+            [ -n "$conclusion" ] || conclusion="unknown"
             echo "windows-nightly-full 本次結論：${conclusion}"
-            if [ "$conclusion" = "failure" ]; then
-              echo "failed=true" >> "$GITHUB_OUTPUT"
-            else
+            echo "conclusion=${conclusion}" >> "$GITHUB_OUTPUT"
+            if [ "$conclusion" = "success" ]; then
               echo "failed=false" >> "$GITHUB_OUTPUT"
+            else
+              echo "failed=true" >> "$GITHUB_OUTPUT"
             fi
           fi
 
@@ -1219,26 +1275,32 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           REPO: ${{ github.repository }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          CONCLUSION: ${{ steps.check.outputs.conclusion }}
         run: |
           set -euo pipefail
           TITLE="[P1] windows-nightly-full 深度回歸失敗"
           existing=$(gh issue list --repo "${REPO}" --state open --search "\"${TITLE}\" in:title" --json number --jq '.[0].number // empty')
           if [ -n "$existing" ]; then
-            gh issue comment "$existing" --repo "${REPO}" --body "再次失敗：${RUN_URL}"
+            gh issue comment "$existing" --repo "${REPO}" --body "再次失敗（實際結論：\`${CONCLUSION}\`）：${RUN_URL}"
           else
-            gh issue create --repo "${REPO}" --title "${TITLE}" --label "p1,windows,nightly" --body "windows-nightly-full（continue-on-error 非阻斷 job，不會擋 push/PR）失敗，需人工排查，請勿長期忽略。首次偵測到失敗的執行：${RUN_URL}。修復並綠燈後本 job 會自動關閉本 issue。"
+            gh issue create --repo "${REPO}" --title "${TITLE}" --label "p1,windows,nightly" --body "windows-nightly-full（continue-on-error 非阻斷 job，不會擋 push/PR）非綠燈，需人工排查，請勿長期忽略。本次實際結論：\`${CONCLUSION}\`（\`success\` 以外一律開單；\`unknown\`／\`api-error\` 代表**根本沒跑起來或查不到**，例如帳務停擺讓 job 完全未配置 runner，見 DEF-101-081）。首次偵測到的執行：${RUN_URL}。恢復 \`success\` 後本 job 會自動關閉本 issue。"
           fi
 
-      - name: 綠燈時若有既有失敗 issue 則自動關閉
+      - name: 綠燈時若有既有失敗 issue 則自動關閉（白名單：僅 conclusion == success）
+        # 🔴 R68：本分支的守衛 `failed == 'false'` 現在等價於「上游判定 conclusion
+        # 恰為 success」（白名單），修復前它等價於「conclusion 不是字面 failure」
+        # （黑名單）——後者會在 cancelled／timed_out／job 改名／API 失敗時關掉一張
+        # 仍然有效的 P1 單並留言「已恢復綠燈」。留言一併帶上實際結論字串以便稽核。
         if: steps.check.outputs.failed == 'false'
         continue-on-error: true
         env:
           GH_TOKEN: ${{ github.token }}
           REPO: ${{ github.repository }}
+          CONCLUSION: ${{ steps.check.outputs.conclusion }}
         run: |
           set -euo pipefail
           TITLE="[P1] windows-nightly-full 深度回歸失敗"
           existing=$(gh issue list --repo "${REPO}" --state open --search "\"${TITLE}\" in:title" --json number --jq '.[0].number // empty')
           if [ -n "$existing" ]; then
-            gh issue close "$existing" --repo "${REPO}" --comment "windows-nightly-full 已恢復綠燈：${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+            gh issue close "$existing" --repo "${REPO}" --comment "windows-nightly-full 已恢復綠燈（實際結論：\`${CONCLUSION}\`）：${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
           fi

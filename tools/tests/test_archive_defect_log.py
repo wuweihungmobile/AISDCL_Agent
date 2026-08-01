@@ -484,23 +484,80 @@ class TestHandoffProseDetectionCoversAlternatePhrasing(unittest.TestCase):
 class TestPlanNeverProposesActiveRows(unittest.TestCase):
     """--plan 不得把任何 open/routed/deferred 列列為可搬（R45 曾誤搬 3 筆 open 列）。"""
 
-    def test_movable_rows_are_all_closed_and_unclaimed(self):
+    def test_movable_rows_are_all_closed_and_have_no_handoff(self):
         p = ADL.plan()
         self.assertGreater(p["total_rows"], 0, "主檔零表格列 ⇒ 本測試的前提已失效")
-        claimed = ADL._status_claimed_ids()
         for v in p["movable"]:
             with self.subTest(def_id=v["id"]):
                 self.assertIn(v["cls"], ADL.CLOSED_CLASSES)
-                self.assertNotIn(v["id"], claimed)
                 self.assertIsNone(v["handoff_marker"])
         self.assertEqual(p["total_rows"],
                          len(p["movable"]) + len(p["needs_ack"]) + len(p["blocked"]),
                          "三分類必須是主檔全部表格列的一個劃分（不重不漏）")
 
+    def test_claimed_rows_may_be_movable_but_must_stay_resolvable(self):
+        """判準③ 的 R68 改寫（DEF-101-676）：「被宣稱過」不再是 blocker，取而代之的義務是
+        「搬走後那句宣稱仍解析得到」。
+
+        🔴 本條取代舊的 `assertNotIn(v["id"], claimed)`。**為何舊斷言必須退場而不是放寬**：
+        它把「有人在 ONBOARDING／CI workflow 裡提過這一列」當成永久不可搬，而那從來不是
+        危害本身——危害是「搬走之後 `_scan_target()` 找不到它、報『帳本查無此 ID』」。
+        R68 之前這兩件事被綁在一起，只因為 `gate._load_ledger_status()` **只讀主檔**；
+        補上 `gate._load_archive_status()` 之後，帳本 SSOT 才真的是它一直宣稱的
+        「主檔 ∪ archive 家族」，於是「被宣稱過」與「不可搬」解耦。
+        實測代價：R68 動工前 11 筆已結列（16217 bytes）**只**因舊斷言而永久卡在主檔。
+
+        本條的鑑別力＝正向驗證那個新義務真的成立，而不是刪掉檢查了事：對每一筆
+        「被宣稱過 ＆ 被列為可搬」的列，斷言它在帳本家族內解析得到且狀態與宣稱一致。
+        真正的端到端證明另由 `--check` 判準(8) 每次執行實跑（見
+        `TestCriterion8VerifiesClaimsResolveAcrossFamily`）。
+        """
+        p = ADL.plan()
+        claimed = ADL._status_claimed_ids()
+        main = ADL.gate._load_ledger_status()
+        arch = ADL.gate._load_archive_status()
+        family = dict(arch)
+        family.update(main)  # 主檔優先
+
+        # (i) 核心不變量：**每一個**被宣稱過的 ID 都必須在帳本家族內解析得到。這是判準③
+        #     由 blocker 改寫為事後條件之後，那個事後條件的單元層形態（端到端形態＝
+        #     `--check` 判準(8)）。它不依賴「本輪剛好有沒有可搬的列」，故不會自我豁免。
+        for def_id in sorted(claimed):
+            with self.subTest(def_id=def_id):
+                self.assertIn(
+                    def_id, family,
+                    f"{def_id} 被掃描目標宣稱過，卻在帳本家族（主檔 ∪ archive）解析不到 ⇒ "
+                    "crossref 會報「查無此 ID」。判準③ 改寫的前提已破",
+                )
+
+        # (ii) 鑑別力前提：fallback 必須是**載重的**——至少有一個被宣稱過的 ID 只存在於
+        #      archive。若全部被宣稱的 ID 都還在主檔，(i) 不靠 fallback 也會通過，這條會
+        #      轉紅提醒讀者本測試當下沒有在驗 fallback（R68 落地後實測有 11 個這種 ID）。
+        archived_claimed = sorted(d for d in claimed if d not in main and d in arch)
+        self.assertTrue(
+            archived_claimed,
+            "沒有任何『被宣稱過且已歸檔』的 ID ⇒ 上面那條不需要 archive fallback 就會通過，"
+            "本測試當下對 fallback 零鑑別力。若這是因為判準③ 又退回硬擋，那才是真問題",
+        )
+
+        # (iii) 若本輪確有「被宣稱過且可搬」的列，逐筆驗它搬走後仍解析得到且狀態一致。
+        #       刻意寫成條件式而非前提斷言：可搬清單會隨每次 `--apply` 清空，寫成前提
+        #       會讓這條測試在歸檔後自己轉紅（落地時實際踩到）。
+        movable_claimed = [v for v in p["movable"] if v["id"] in claimed]
+        self.assertEqual(p["movable_claimed"], len(movable_claimed),
+                         "`plan()` 自報的 movable_claimed 與獨立重算不一致")
+        for v in movable_claimed:
+            with self.subTest(def_id=v["id"]):
+                self.assertEqual(
+                    family[v["id"]], v["cls"],
+                    f"{v['id']} 在帳本家族解析出的狀態與 classify_row 判定不一致",
+                )
+
     def test_status_claimed_ids_is_nonempty(self):
         """判準③ 的集合為空代表比對邏輯失效——工具必須拋例外而非靜默回空集合。
 
-        靜默回空會讓所有列都通過判準③（R59 主控第一版查詢即因漏接條件而誤列候選）。
+        R68 起該集合不再驅動 blocker，但仍是 `--plan` 報告與上面那條解析性測試的取樣依據，
+        靜默回空會讓上面那條測試的 `movable_claimed` 變空而自我豁免（fail-open）。
         """
         self.assertGreater(len(ADL._status_claimed_ids()), 0)
 
@@ -2665,6 +2722,376 @@ class TestNoAssertionSamplesALiveDocumentWholesale(unittest.TestCase):
         """前提坐實：本檔自己必須在掃描面內（否則上面兩條對本檔零效力）。"""
         self.assertIn(_HERE, self._scan_targets(),
                       f"{_HERE.name} 不在掃描面內 —— 命名慣例或 _SCAN_DIR 已偏移")
+
+
+# ============================================================================
+# R68 帳本容量政策（DEF-101-676）機械鎖 —— 併入本檔而非另開檔
+# ============================================================================
+# 🔴 為何併進來：`DEF-101-561③` 對 `tools/tests` 的鎖檔數立了 **shrink-only 棘輪**
+# （`test_adr_xplat001_c1c2_lock.TestGuardFileCountShrinkOnlyRatchet`），只准合併／刪除、
+# 不准新增。落地時實測撞到（53→54 當場轉紅），故改為併入判準最相關的本檔。
+#
+# R68 帳本容量政策（DEF-101-676）的機械鎖 — 新政策必須自己可被驗證。
+#
+# 背景（R68 動工前實測）：主檔 260747 bytes、硬線 262144，餘裕 1397 bytes；
+# `--plan` 印「可搬 0 筆／0 bytes」、不可搬 106 筆 ⇒ **往帳本加任何一列缺陷就撞 rc=1
+# 硬閘，整輪無法收輪**。DEF-101-676 列內載三條候選方向，至 R67 收輪皆未評估。
+#
+# R68 的裁決與落地（逐條）：
+#   ① 判準③「被 crossref 掃描目標做過狀態宣稱」——**採納並改寫成根因解**。真正的缺口在
+#      `check_defect_log_crossref._load_ledger_status()` 只讀主檔，故歸檔一筆被宣稱過的
+#      列就會讓 `_scan_target()` 報「查無此 ID」；歷輪用「不准搬」去繞「搬了會假紅」。
+#      R68 補 `_load_archive_status()`，帳本 SSOT 成為它一直宣稱的「主檔 ∪ archive」，
+#      判準③ 遂由 blocker 改寫為事後條件並由 `--check` 判準(8) 實跑驗證。
+#      實測釋放：11 筆／16217 bytes（原本**只**被判準③ 擋著）。
+#   ② open-backlog 專用 archive——**駁回**。見 `TestOpenBacklogArchiveIsRejected`。
+#   ③ 檢討硬線本身——**駁回**。見 `TestHardLineIsToolFact`（附 R68 當日實測探針）。
+#   ④（不在原三條內，R68 現查新增）判準② 是全欄裸子字串掃描，把 Python 內建函式
+#      `open(` 與「本列自己被推翻的舊狀態引述」都當成活躍訊號，16 筆已結列／39705 bytes
+#      因此永久卡住。收窄為「排除程式碼片段與角引號引述後仍命中」，釋放 6 筆／18637 bytes。
+#
+# 本檔的每一條都刻意帶**反向鑑別力**（把修復拿掉就會轉紅），而不是只斷言現況為真。
+# ============================================================================
+
+def _tmpdir():
+    return tempfile.TemporaryDirectory()
+
+
+class TestHardLineIsToolFact(unittest.TestCase):
+    """方向③（調高硬線）駁回鎖：262144 綁的是 Read 工具事實，不是政策自由度。
+
+    🔴 **為何這不是「把溫度計砸掉」的相反面 —— 為何連「調高一點點」都不行**：
+    2026-08-01 於 macOS 26.5.2 arm64 真機對 Read 工具實跑探針（R67 的認知不被採信、
+    當場重驗），兩發皆在**還沒讀到任何內容**時就被工具本身拒絕：
+
+        Read(probe_2m.txt   / 2097152 bytes)
+          → File content (2MB) exceeds maximum allowed size (256KB).
+        Read(probe_300k.txt /  307200 bytes)
+          → File content (300KB) exceeds maximum allowed size (256KB).
+
+    錯誤訊息逐字載明上限 256KB ⇒ R67 帳本內「現值 262144 綁的是 Read 工具單次讀取上限」
+    於 R68 仍成立、未過期。把 `_LEDGER_FAIL_BYTES` 調高的後果不是「閘門變寬鬆」而是
+    **主檔變成任何 agent 都讀不完整的檔**：Read 會直接拒絕，被迫改用 offset/limit 分段
+    讀，而分段讀的讀者不會知道自己漏了哪些列——「讀不完整的 SSOT」比「撞閘門」壞得多，
+    因為前者是靜默失效。容量問題的正解是提高輪替**吞吐**，不是提高上限。
+    """
+
+    def test_fail_line_equals_measured_read_tool_limit(self):
+        self.assertEqual(
+            ADL.gate._LEDGER_FAIL_BYTES, ADL.gate._READ_TOOL_MAX_BYTES,
+            "帳本硬線必須恰等於 Read 工具實測上限。調高＝主檔將無法被單次完整讀取"
+            "（靜默失效）；調低＝政策與工具事實脫鉤，下一輪讀者無從判斷哪個數字為真。"
+            "若確認工具上限已改變，請連同本測試 docstring 的探針取證一起更新",
+        )
+
+    def test_measured_limit_is_the_documented_256kb(self):
+        self.assertEqual(ADL.gate._READ_TOOL_MAX_BYTES, 256 * 1024,
+                         "R68 探針實測值為 256KB；改動此常數必須附新的實跑取證")
+
+    def test_warn_line_is_below_fail_line(self):
+        """warn 必須嚴格早於 fail，否則預警等於沒有（撞線當下才第一次出聲）。"""
+        self.assertLess(ADL.gate._LEDGER_WARN_BYTES, ADL.gate._LEDGER_FAIL_BYTES)
+
+
+class TestArchiveFallbackResolvesClaims(unittest.TestCase):
+    """方向① 的落地鎖：帳本 SSOT ＝ 主檔 ∪ archive 家族。
+
+    正向：已歸檔的 ID 必須解析得到（否則判準③ 的改寫前提不成立）。
+    反向：真正不存在的 ID 仍須報錯（否則這就不是補齊解析面，而是把一致性檢查放水）。
+    """
+
+    @classmethod
+    def setUpClass(cls):
+        cls.main_status = ADL.gate._load_ledger_status()
+        cls.arch_status = ADL.gate._load_archive_status()
+
+    def test_archive_status_map_is_substantial(self):
+        """空 map 會讓 fallback 靜默無效、而 `_scan_target` 行為看起來完全正常。"""
+        self.assertGreater(
+            len(self.arch_status), 100,
+            "archive 解析面近乎為空 ⇒ glob 或表頭解析已失效，fallback 名存實亡",
+        )
+
+    def test_archive_ids_are_disjoint_from_or_consistent_with_main(self):
+        """同 ID 兩邊都有時，狀態分類不得矛盾（主檔優先只是查找序，不是掩蓋矛盾的藉口）。"""
+        for def_id, arch_cls in self.arch_status.items():
+            if def_id in self.main_status:
+                with self.subTest(def_id=def_id):
+                    self.assertEqual(
+                        self.main_status[def_id], arch_cls,
+                        f"{def_id} 在主檔與 archive 的狀態分類不一致（--check 判準(3) 同守）",
+                    )
+
+    def test_claim_about_archived_id_resolves_instead_of_erroring(self):
+        """正向鑑別力：構造一句對「已歸檔且不在主檔」的 ID 的宣稱。
+
+        不給 archive map（＝R68 之前的行為）必須報「查無此 ID」；給了才放行。
+        兩者對照才證明 fallback 真的是它讓這句話通過的。
+        """
+        archived_only = {k: v for k, v in self.arch_status.items()
+                         if k not in self.main_status and v is not None}
+        self.assertTrue(archived_only, "找不到「只存在於 archive」的 ID ⇒ 前提失效")
+        def_id, cls = sorted(archived_only.items())[0]
+        target = Path(self.enterContext(_tmpdir())) / "claim.md"
+        target.write_text(f"**{def_id}**（{cls}）\n", encoding="utf-8")
+
+        without = ADL.gate._scan_target(target, self.main_status)
+        self.assertTrue(
+            without and "查無此 ID" in without[0],
+            f"控制組：不啟用 fallback 時 {def_id} 本應報「查無此 ID」，實得 {without!r}"
+            "——若這裡是空的，本測試的對照組不成立",
+        )
+        with_fb = ADL.gate._scan_target(target, self.main_status, self.arch_status)
+        self.assertEqual(with_fb, [],
+                         f"啟用 fallback 後 {def_id} 仍有問題：{with_fb!r}")
+
+    def test_unknown_id_is_still_rejected_with_fallback_enabled(self):
+        """反向鑑別力：fallback 不得退化成「什麼都放行」。"""
+        target = Path(self.enterContext(_tmpdir())) / "claim.md"
+        target.write_text("**DEF-999-99999**（fixed）\n", encoding="utf-8")
+        problems = ADL.gate._scan_target(target, self.main_status, self.arch_status)
+        self.assertTrue(problems, "從未立帳的 ID 仍必須報錯，否則一致性檢查已被掏空")
+        self.assertIn("查無此 ID", problems[0])
+        self.assertIn("主檔 ∪ archive", problems[0],
+                      "訊息須載明實際查找範圍，否則讀者無從判斷它查了哪裡")
+
+    def test_wrong_status_claim_about_archived_id_is_still_caught(self):
+        """反向鑑別力：回退到 archive 之後，**狀態仍要逐筆比對**，不是查到就算過。"""
+        archived_only = {k: v for k, v in self.arch_status.items()
+                         if k not in self.main_status and v == "fixed"}
+        self.assertTrue(archived_only, "找不到 archive 內 cls=fixed 的樣本 ⇒ 前提失效")
+        def_id = sorted(archived_only)[0]
+        target = Path(self.enterContext(_tmpdir())) / "claim.md"
+        target.write_text(f"**{def_id}**（wontfix）\n", encoding="utf-8")
+        problems = ADL.gate._scan_target(target, self.main_status, self.arch_status)
+        self.assertTrue(problems,
+                        f"{def_id} 實為 fixed，宣稱 wontfix 卻未被抓到 ⇒ fallback 放水")
+        self.assertIn("實際狀態為", problems[0])
+
+
+class TestCriterion2Narrowing(unittest.TestCase):
+    """判準② 收窄鎖（R68）：排除誤報面，但三道鑑別力不得流失。
+
+    收窄的**動機是實測**而非美觀：R68 動工前 16 筆已結列（39705 bytes）只被判準② 擋著，
+    逐筆檢視命中的字元後，全部落在「Python `open(` 呼叫」「引述本列自己被推翻的舊狀態」
+    「在講別的 DEF-ID」三類。這與判準② 當初為了消滅 `OpenMutexW` 誤報而加 ASCII 邊界
+    完全同型，只是逸出面從「英文字母相鄰」換成「反引號／角引號內」。
+    """
+
+    def test_python_open_call_in_code_span_is_not_flagged(self):
+        """DEF-101-391 的真實形態（逐字取自主檔）。"""
+        cell = ('fixed@R48：`python3 -c "import yaml; '
+                'yaml.safe_load(open(\'.github/workflows/windows-compat-ci.yml\'))"` 語法合法')
+        self.assertIsNotNone(
+            ADL.ACTIVE_STATUS_RE.search(cell),
+            "前提：裸正則本來就會命中這個 `open`（否則本條沒在驗任何東西）",
+        )
+        self.assertIsNone(
+            ADL.active_status_hit(cell),
+            "程式碼片段內的 Python 內建函式 `open` 不得被判為活躍狀態",
+        )
+
+    def test_quoted_superseded_status_is_not_flagged(self):
+        """DEF-101-554／581 的真實形態：引述的目的正是宣告它**已不成立**。"""
+        for cell in (
+            'fixed@R60（污染已還原）：本欄原文為「`open`（待主控還原）」，現已無需動作',
+            'fixed@R60 r3（Pkg-P11 訂正：原記狀態 `open（未指派）`、修法記為改引用）',
+        ):
+            with self.subTest(cell=cell[:30]):
+                self.assertIsNotNone(ADL.ACTIVE_STATUS_RE.search(cell), "前提")
+                self.assertIsNone(ADL.active_status_hit(cell))
+
+    def test_bare_prose_active_word_is_still_flagged(self):
+        """🔴 鑑別力保留 (a)：沒有反引號／角引號包起來的活躍字樣照樣命中。
+
+        收窄若不慎變成「只要出現過反引號就整欄放行」，這一條會轉紅。
+        """
+        for cell in (
+            "fixed@R60（① 已修）；② 殘項 open，尚未處理",
+            "fixed@R60，但 `check_loc_budget` 那半邊 routed 給別人做",
+            "wontfix；此項 deferred 至有需求時再議",
+        ):
+            with self.subTest(cell=cell[:30]):
+                self.assertIsNotNone(
+                    ADL.active_status_hit(cell),
+                    "裸散文裡的活躍字樣必須照樣命中 —— 收窄不得擴大成整欄豁免",
+                )
+
+    def test_masking_preserves_offsets(self):
+        """遮罩必須等長置換：報告會引用命中位置，長度一變位置就對不上。"""
+        cell = "fixed@R60（`open(x)`）；殘項 open 未處理"
+        hit = ADL.active_status_hit(cell)
+        self.assertIsNotNone(hit)
+        self.assertEqual(cell[hit.start():hit.end()], "open",
+                         "命中 offset 必須仍能在**原字串**上取回同一個詞")
+
+    def test_ascii_boundary_semantics_survive_the_narrowing(self):
+        """🔴 鑑別力保留 (b)：R60 G-refuter-4 的 `OpenMutexW` 不得因收窄而復發或改變結論。"""
+        for benign in ("OpenMutexW", "CreateFileW/OpenProcess", "reopened", "openssl"):
+            with self.subTest(benign=benign):
+                self.assertIsNone(ADL.active_status_hit(f"fixed@R60：{benign} 已處理"))
+
+    def test_handoff_net_is_untouched_by_the_narrowing(self):
+        """🔴 鑑別力保留 (c)：判準④ 掃**整列**、且不套遮罩，真交棒仍會被攔下要求具名承認。
+
+        實測坐實：本次因收窄而通過判準② 的 6 筆中，521／524／554 三筆隨即落在判準④
+        手上（`--plan` 把它們列在「需具名承認」而非「可搬」）。
+        """
+        p = ADL.plan()
+        needs_ack_ids = {v["id"] for v in p["needs_ack"]}
+        movable_ids = {v["id"] for v in p["movable"]}
+        for def_id in ("DEF-101-521", "DEF-101-524", "DEF-101-554"):
+            with self.subTest(def_id=def_id):
+                if def_id not in needs_ack_ids and def_id not in movable_ids:
+                    self.skipTest(f"{def_id} 已離開主檔（已歸檔），本樣本前提失效")
+                self.assertIn(
+                    def_id, needs_ack_ids,
+                    f"{def_id} 散文帶交棒字樣，判準② 收窄後必須由判準④ 接手攔下；"
+                    "它若直接落進可搬清單，代表安全網真的破了",
+                )
+
+
+class TestCriterion8VerifiesClaimsResolveAcrossFamily(unittest.TestCase):
+    """判準(8) 端到端鎖：`--check` 必須真的實跑跨檔宣稱解析，而不是宣稱它跑了。
+
+    本工具立帳要消滅的病就是「宣稱一道機械檢查存在而它不存在」（見 `CHECK_CRITERIA`
+    上方 P7-4 的 WHY）。判準③ 改寫成事後條件之後，那個事後條件若只是散文，就正好是
+    同一種病在同一支工具身上復發。
+    """
+
+    def test_criterion_8_is_registered_in_the_ssot(self):
+        labels = [label for label, _ in ADL.CHECK_CRITERIA]
+        self.assertIn("跨檔宣稱可解析", labels)
+
+    def test_check_actually_runs_criterion_8_and_reports_counts(self):
+        r = subprocess.run(
+            [sys.executable, str(_REPO / "tools" / "archive_defect_log.py"), "--check"],
+            capture_output=True, text=True, encoding="utf-8", cwd=str(_REPO),
+        )
+        self.assertEqual(r.returncode, 0, f"--check 應 rc=0\nstderr:\n{r.stderr[-3000:]}")
+        self.assertIn("判準(8) 實算：", r.stdout,
+                      "判準(8) 必須每次執行都印出實算結果 —— 講不出數字就不算跑過")
+        self.assertIn("帳本家族解析面", r.stdout)
+        self.assertIn("(8)跨檔宣稱可解析", r.stdout,
+                      "成功訊息須由 CHECK_CRITERIA 生成並含第(8)項")
+
+
+class TestUnlockConditionIsMechanicallyChecked(unittest.TestCase):
+    """DEF-101-676 的解鎖判準（R67 round 4 訂）必須每跑一次 `--plan` 就當場現算。
+
+    原始解鎖條件「`--plan` 的可搬筆數 > 0」是 **fail-open**：它量的是「有沒有可搬的列」
+    而不是「輪替還買不買得到餘裕」，當輪多寫一列已結列就自己變 True。R67 改為
+    「`--plan` 印出的『搬後主檔約 N bytes』距 fail 線 ≥ 10240」。本條把那句判準綁進程式，
+    讓它不是靠人記得去翻帳本對數字。
+    """
+
+    def test_plan_prints_headroom_and_the_verdict(self):
+        r = subprocess.run(
+            [sys.executable, str(_REPO / "tools" / "archive_defect_log.py"), "--plan"],
+            capture_output=True, text=True, encoding="utf-8", cwd=str(_REPO),
+        )
+        self.assertEqual(r.returncode, 0, r.stderr[-2000:])
+        self.assertIn("距 fail 線", r.stdout)
+        self.assertIn("DEF-101-676 解鎖判準", r.stdout)
+
+    def test_unlock_threshold_constant_matches_the_ledger_wording(self):
+        self.assertEqual(ADL._UNLOCK_HEADROOM_BYTES, 10240,
+                         "門檻改動必須同步 DEF-101-676 列的解鎖條件散文")
+
+    @staticmethod
+    def _def676_status_cell() -> str:
+        """DEF-101-676 在主檔的狀態欄原文（找不到即空字串）。"""
+        text = ADL._LEDGER.read_text(encoding="utf-8")
+        for line in text.splitlines():
+            if line.startswith("| DEF-101-676 |"):
+                cells = [c.strip() for c in line.strip().strip("|").split("|")]
+                return cells[-1] if cells else ""
+        return ""
+
+    def test_headroom_matches_what_def676_claims(self):
+        """解鎖判準本體，但問的是**宣稱與現況是否一致**，不是「餘裕必須永遠健康」。
+
+        🔴 R68 訂正（本鎖原形態會逼出它自己要防的行為）：原斷言是「餘裕恆 ≥ 門檻」。
+        它在 R68 當場失效——本輪十二維掃描 9 列入帳後，兩次合法輪替仍只買回約 8000
+        bytes 餘裕。此時原鎖給的**唯一**轉綠路徑是「再具名承認幾列去湊過線」，而那
+        正是 DEF-101-676 立這條判準要防的事（R67 round 4 已因「量測快照當判準」被四方
+        交叉命中過一次）。一個只能靠做壞事才能轉綠的鎖，不是護欄。
+
+        改為對帳型斷言（形狀取自 DEF-101-689「修復包自報 status ↔ 帳本狀態欄」）：
+          · DEF-101-676 宣稱**已結** ⇒ 判準必須當場成立（抓的是假宣稱，這才是重點）；
+          · 宣稱**未結** ⇒ 餘裕不足是誠實揭露、不轉紅，但仍強制它帶承接指派
+            （硬規則② 後半句），不得變成沒人接的永久停車位。
+        兩個方向都留了牙：把狀態改回 `fixed` 卻不解決容量 → 紅；改成未結卻不寫承接
+        → 紅。唯一的綠燈路徑是「要嘛真的解決、要嘛誠實掛帳並指名承接」。
+        """
+        p = ADL.plan()
+        after = p["ledger_bytes"] - sum(v["bytes"] for v in p["movable"])
+        headroom = ADL.gate._LEDGER_FAIL_BYTES - after
+        status = self._def676_status_cell()
+        self.assertTrue(status, "DEF-101-676 不在主檔 ⇒ 本鎖失去掃描標的")
+        claims_resolved = ADL.gate._classify(status) not in ADL.gate._UNRESOLVED_CLASSES
+        if claims_resolved:
+            self.assertGreaterEqual(
+                headroom, ADL._UNLOCK_HEADROOM_BYTES,
+                f"DEF-101-676 狀態欄宣稱已結（首詞判為已結），但搬後主檔約 {after} "
+                f"bytes、距 fail 線僅 {headroom} < {ADL._UNLOCK_HEADROOM_BYTES} ⇒ "
+                "宣稱與現況不符。請勿調高硬線（見 TestHardLineIsToolFact），也勿為了"
+                "湊過線而具名承認未經逐字複核的列；正解是提高輪替吞吐，或據實下修狀態",
+            )
+        else:
+            self.assertTrue(
+                ADL.gate._UNASSIGNED_LITERAL in status
+                or ADL.gate._handover_rounds(status),
+                "DEF-101-676 未結卻既無承接輪號也無字面「未指派」⇒ 硬規則② 後半句："
+                "容量問題不得變成沒人接的永久停車位",
+            )
+
+
+class TestOpenBacklogArchiveIsRejected(unittest.TestCase):
+    """方向②（讓長期未結的 known-gap 列搬進 open-backlog archive、主檔只留指針）駁回鎖。
+
+    🔴 **駁回理由不是「工作量大」，是它會讓兩條既有硬規則同時瞎掉**：
+
+      (甲) `check_defect_log_crossref.orphan_backlog_problems()`（硬規則②，R67 才落地）
+           的輸入是 `ledger_text` ＝ **主檔全文**。它逐列檢查「未結案列指名的承接輪次不得
+           早於當前輪」。未結列一旦搬出主檔，這道閘門對它們就是零檢查——而未結列正是
+           唯一需要孤兒偵測的那一群。等於為了容量，把 R67 剛補上的孤兒偵測整個關掉。
+      (乙) `current_round()` 由主檔「發現情境」欄推得當前輪次。主檔只剩指針之後，
+           輪次推導的樣本面同步縮小。
+      (丙) 「帳本是 SSOT」在讀者面失效：未結項才是每輪開工必讀的那一半，把它搬走
+           只留指針，等於要求每個讀者多讀一支檔才知道現在有哪些活；而容量問題的成因
+           恰恰是「一次讀不完」——把必讀內容搬到第二支檔並沒有解決它，只是換個地方。
+
+    量化對照（R68 動工前實測）：方向② 的標的是 78 筆 open/routed 列共 155615 bytes，
+    看似最大宗；但實際採納的 ①＋判準② 收窄合計釋放 19486 bytes 已使餘裕達標，且**不
+    破壞任何不變量**。以「破壞兩條硬規則」換取暫時更大的數字不划算。
+
+    本測試鎖的是：孤兒偵測的輸入面**必須**仍是主檔全文，且主檔**必須**仍實際承載未結列。
+    哪天有人把未結列搬走，這裡會轉紅。
+    """
+
+    def test_orphan_detection_input_is_the_main_ledger_text(self):
+        import inspect
+        sig = inspect.signature(ADL.gate.orphan_backlog_problems)
+        self.assertIn("ledger_text", sig.parameters,
+                      "孤兒偵測必須吃主檔全文；改吃別的來源前請先讀本測試 docstring")
+
+    def test_main_ledger_still_carries_the_unclosed_rows(self):
+        text = ADL.gate._DEFECT_LOG.read_text(encoding="utf-8-sig")
+        layout = ADL.gate._table_layout(text)
+        self.assertIsNotNone(layout)
+        rows = ADL.load_rows(text)
+        claimed = ADL._status_claimed_ids()
+        unclosed = [r for r in rows
+                    if ADL.classify_row(r, claimed, layout)["cls"] not in ADL.CLOSED_CLASSES]
+        self.assertGreater(
+            len(unclosed), 0,
+            "主檔已無任何未結列 ⇒ 未結列很可能被搬進 open-backlog archive。"
+            "那會讓硬規則②（孤兒承接輪次）對它們零檢查，見本類 docstring (甲)",
+        )
+        # 孤兒偵測確實看得到它們（不是只是「檔案裡有」而閘門讀不到）
+        self.assertEqual(ADL.gate.orphan_backlog_problems(text), [],
+                         "主檔未結列存在孤兒承接輪次問題")
 
 
 if __name__ == "__main__":

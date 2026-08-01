@@ -3,6 +3,7 @@ import logging
 import re
 import sys
 import tempfile
+import unicodedata
 from logging.handlers import RotatingFileHandler
 from pathlib import Path
 
@@ -94,9 +95,16 @@ def setup_logger(log_dir: str = "logs", level: int = logging.DEBUG) -> logging.L
 # 清單**尾端**。tools/tests/test_windows_forbidden_filename_parity.py 的 repo-wide 錨①要求
 # 四者依序出現且間隙 ≤5 字元；R60 初版把 CONIN／CONOUT 插在中間，實測讓三處實作同時掉出該錨
 # 而所有測試仍全綠（靠禁用字元錨苟活）。對 `^(...)$` 全錨定的正則語意零影響。
+#
+# R68（四處同修）：追加 Microsoft《Naming Files, Paths, and Namespaces》保留名清單明列的
+# 上標變體 `COM¹ COM² COM³ LPT¹ LPT² LPT³`（與 ASCII 數字版並列；`unicodedata.normalize
+# ("NFKC","COM¹")=="COM1"` 佐證兩者在相容性分解下同值）。🔴 **證據等級＝官方文件＋靜態
+# 分析，非 Windows 真機實測**——本輪無 Windows 真機，未跑 core.protectNTFS／Win32 對照
+# （CONIN$／CLOCK$ 當初是實測後才分別納入／排除）。取捨刻意選「擋」：誤擋只多一個 `_`
+# 前綴，漏擋則整個 clone 壞掉。未來真機實測到 ACCEPT 時四處一併移除並註記「已實測不納入」。
 _WIN_FORBIDDEN_CHARS = frozenset('<>:"|?*\\')
 _WIN_RESERVED_NAME_RE = re.compile(
-    r"^(CON|PRN|AUX|NUL|COM[0-9]|LPT[0-9]|CONIN\$|CONOUT\$)$", re.IGNORECASE
+    r"^(CON|PRN|AUX|NUL|COM[0-9]|LPT[0-9]|CONIN\$|CONOUT\$|COM[¹²³]|LPT[¹²³])$", re.IGNORECASE
 )
 
 
@@ -111,9 +119,14 @@ def _sanitize_log_filename(name: str) -> str:
     `step_id="../../x"` 類輸入造成路徑穿越（R37 QA 一審實測 `PermissionError`）。
     故獨立於 `_WIN_FORBIDDEN_CHARS` 之外，於此額外淨化 `/`，不影響上述三方
     parity 鎖（該鎖比較的是常數本身，不比較本函式的實際淨化行為）。"""
+    # R68：入口先 `unicodedata.normalize("NFC", …)`。本函式是**生成器**，其產物可能被
+    # 提交，而同 repo 的 `tools/check_ntfs_paths.py::_non_nfc_reason()` 對 index 內非 NFC
+    # 路徑 fail-closed；`core.precomposeunicode` 僅在 macOS 生效，故 Linux/CI 側的 NFD
+    # 輸入會原樣入 index 撞自家 NFC 閘（顯形於 Linux/Windows，非 macOS）。對純 ASCII／
+    # CJK 零行為變更。與 `AISDLC_SDD/scripts/component_sanitizer.py` 同修。
     sanitized = "".join(
         "_" if ch in _WIN_FORBIDDEN_CHARS or ch == "/" or ord(ch) < 0x20 or ord(ch) == 0x7F else ch
-        for ch in name
+        for ch in unicodedata.normalize("NFC", name)
     )
     sanitized = sanitized.rstrip(" .") or "untitled"
     # R57 修正（DEF-101-B1 第 ④ 處，與 AISDLC_SDD/scripts/component_sanitizer.py 同修）：
@@ -127,6 +140,11 @@ def _sanitize_log_filename(name: str) -> str:
     return sanitized
 
 
+# 🔴 R68 三站點長度政策的第 2 站——本站**刻意無上限**，超長由 `write_text_with_fallback`
+# 與 `RawStreamLogger` 的 OSError fallback 承接；另兩站是 component_sanitizer 的 80
+# （FSM state 單一 component）與 check_ntfs_paths 的 200 fail/180 warn（tracked 整條
+# 路徑）。三者治理不同域、不得互抄；對照鎖見 AISDLC_SDD/scripts/tests/
+# test_ntfs_length_gate.py::test_length_policy_three_sites_registry。
 def write_text_with_fallback(path: Path, content: str, fallback_prefix: str) -> Path:
     """原子寫入文字檔（tmp + replace）；`_sanitize_log_filename()` 只淨化禁用字元、
     不截斷長度，超長檔名等非字元因素仍可能讓 `open()` 拋出 OSError——失敗時改寫入

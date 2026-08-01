@@ -77,6 +77,15 @@ def _quote_cmd_shim_argv(shim_path: str, args: list[str]) -> str:
     return subprocess.list2cmdline([shim_path] + args)
 
 
+# Windows cmd.exe 單行命令列硬上限為 8191 字元（CreateProcess 本身是 32767，
+# 但 .cmd/.bat shim 這層走的是 cmd.exe 解析器，適用較嚴的 8191）。超限時 cmd.exe
+# 只回 "The input line is too long."，完全看不出跟 prompt 長度有關；POSIX 側走
+# argv（本機 ARG_MAX 實測 1048576）無此界線，兩平台容量語意不對稱。取 7800 作
+# 保守上限，留出引號/跳脫膨脹餘裕，在超限**之前**就 fail-loud。
+# 證據等級：靜態分析（本輪無 Windows 真機；8191 為文件層知識，未取得機器證據）。
+_CMD_LINE_MAX_CHARS = 7800
+
+
 def _build_cmd_shim_line(shim_path: str, args: list[str]) -> str:
     """組出透過 `cmd /d /s /c` 呼叫 .cmd/.bat shim 的**單一完整命令列字串**，
     供 `subprocess.Popen` 以「字串」（非 list）傳遞。
@@ -87,8 +96,18 @@ def _build_cmd_shim_line(shim_path: str, args: list[str]) -> str:
     必須把回傳字串直接當「單一字串」（非 list）傳給 Popen——Windows 上
     shell=False 時字串型 args 會原樣透傳給 CreateProcess，不會再被
     list2cmdline 二次加引號破壞這裡手動組好的命令列。
+
+    R68：組完後量長度，超過 `_CMD_LINE_MAX_CHARS` 即 fail-loud 拒絕，取代
+    cmd.exe 難以歸因的 "The input line is too long."（見該常數說明）。
     """
-    return f'cmd /d /s /c "{_quote_cmd_shim_argv(shim_path, args)}"'
+    line = f'cmd /d /s /c "{_quote_cmd_shim_argv(shim_path, args)}"'
+    if len(line) > _CMD_LINE_MAX_CHARS:
+        raise RuntimeError(
+            f"cmd.exe 命令列長度 {len(line)} 字元超過保守上限 {_CMD_LINE_MAX_CHARS}"
+            "（硬上限 8191）：.cmd/.bat shim 無法傳遞這麼長的 prompt。"
+            "請縮短 prompt，或改以檔案／stdin 傳遞內容。"
+        )
+    return line
 
 
 class PtyWrapper:

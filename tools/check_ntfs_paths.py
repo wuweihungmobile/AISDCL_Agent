@@ -116,10 +116,31 @@ _FORBIDDEN_CHARS = set('<>:"|?*\\')
 # 三處**同時**掉出錨①（間隙 17 字元），只靠錨②（禁用字元集合）苟活——註冊表等值斷言
 # 照樣全綠，degradation 完全無訊號。改置於清單尾端後三處回歸命中。
 # 對正則語意零影響（`^(...)$` 完全錨定，交替順序不改變匹配集合）。
-_RESERVED_RE = re.compile(r"^(CON|PRN|AUX|NUL|COM[0-9]|LPT[0-9]|CONIN\$|CONOUT\$)$")
+#
+# R68（四處同修）：追加 Microsoft《Naming Files, Paths, and Namespaces》保留名清單明列的
+# 上標變體 `COM¹ COM² COM³ LPT¹ LPT² LPT³`（該文件與 ASCII 數字版並列；本機實測
+# `unicodedata.normalize("NFKC","COM¹") == "COM1"` 佐證兩者在相容性分解下同值）。
+# 🔴 **證據等級＝官方文件＋靜態分析，非 Windows 真機實測**——本輪無 Windows 真機，未跑
+# `core.protectNTFS` update-index／clone 對照（CONIN$ 納入、CLOCK$ 排除當初都是實測後才定）。
+# 取捨刻意選「擋」：本檔是 validator，誤擋的代價是一個沒人會用的檔名進不了庫（可用
+# --no-verify 或改名繞過）；漏擋的代價是每一台 Windows clone 的 checkout 整體失敗。
+# 未來若在真機實測到 git/Win32 皆 ACCEPT，四處一併移除並比照 CLOCK$ 註記「已實測不納入」。
+_RESERVED_RE = re.compile(
+    r"^(CON|PRN|AUX|NUL|COM[0-9]|LPT[0-9]|CONIN\$|CONOUT\$|COM[¹²³]|LPT[¹²³])$"
+)
 
 # MAX_PATH 保守長度閘（DEF-101-039）：
 # 可用 259（260 含 NUL）− 59（clone 前綴預留）＝ 200 fail；180 warn
+# 🔴 R68 三站點長度政策（本處是第 3 站，治理 tracked git **整條相對路徑**）：另兩站是
+# `AISDLC_SDD/scripts/component_sanitizer.py::_MAX_COMPONENT_LEN=80`（FSM state 檔名的
+# **單一 component**，為前後綴留餘裕）與 `AutoClaude/autoclaude/utils/logger.py`（runtime
+# log 檔名，**刻意無上限**，超長交 OSError fallback）。三者治理不同域、刻意不相等，不是
+# 「同一政策的三份真相」——下一輪掃描者請勿再把它當四處不一致重新回報。已知未覆蓋的
+# 跨平台窄帶：單一 component ~200–254 字元在 mac/Linux 合法、Windows 未開 longPaths 時
+# 總路徑可能破 260（≥255 是兩平台共同 ENAMETOOLONG，非跨平台落差；本輪 APFS 實測
+# 200/250 OK、255/256/300 FAIL errno 63）。該窄帶須先有 Windows 真機實證再設鎖，否則
+# 等於再加一道從未紅過的鎖。對照鎖：AISDLC_SDD/scripts/tests/test_ntfs_length_gate.py
+# ::test_length_policy_three_sites_registry。
 _LEN_FAIL = 200
 _LEN_WARN = 180
 

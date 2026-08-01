@@ -29,6 +29,10 @@ from unittest import mock
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import dev_start  # noqa: E402
+
+# R68：`tools/lib/` 由 dev_start 自己 insert 進 sys.path，故此處經它取得同一個模組
+# 物件（不重新 import，避免測試 patch 到與生產路徑不同的副本）。
+ci_liveness = dev_start.ci_liveness
 from _platform_helpers import (  # noqa: E402
     copy_functional_interpreter as _copy_functional_interpreter,
 )
@@ -2915,8 +2919,17 @@ class TestLaunchdNightlyLoaded(DevStartTestCase):
 
     _DECOY = "123\t0\tcom.autoclaude.nightly2"  # 前綴干擾列：精確等值不得誤中
 
-    def _heartbeat_with_launchctl(self, stdout: str, rc: int = 0):
-        """在空 ROOT（心跳必缺席）+ 假 darwin + 假 launchctl 下跑心跳哨兵。"""
+    def _heartbeat_with_launchctl(self, stdout: str, rc: int = 0,
+                                  plist_target: str | None = "__mine__"):
+        """在空 ROOT（心跳必缺席）+ 假 darwin + 假 launchctl 下跑心跳哨兵。
+
+        🔴 R68：`_launchd_nightly_loaded()` 命中 label 後還會讀
+        `~/Library/LaunchAgents/<label>.plist` 來鑑別「指向的是不是本 checkout」。
+        那是**真機檔案**，不 mock 就會讓本類別的結果取決於跑測試的機器裝了什麼排程
+        （R68 實測：本機真有該 plist，於是 True 態被判成「指向另一份 checkout」而假紅）。
+        `plist_target`：`"__mine__"`＝指向被 mock 的 ROOT（True 態）／字串＝別份
+        checkout（str 態）／None＝讀不到（None 態，無鑑別力）。
+        """
         fake = subprocess.CompletedProcess(args=["launchctl", "list"],
                                            returncode=rc, stdout=stdout, stderr="")
         with tempfile.TemporaryDirectory() as td, \
@@ -2924,9 +2937,33 @@ class TestLaunchdNightlyLoaded(DevStartTestCase):
              mock.patch.object(sys, "platform", "darwin"), \
              mock.patch.object(dev_start.subprocess, "run", return_value=fake), \
              mock.patch("builtins.print") as fake_print:
-            note = dev_start._check_nightly_heartbeat("mac")
+            target = (Path(td) / "AutoClaude" / "tools" / "run_local_nightly.sh"
+                      if plist_target == "__mine__" else
+                      (Path(plist_target) if plist_target else None))
+            with mock.patch.object(dev_start, "_launchd_plist_target",
+                                   return_value=target):
+                note = dev_start._check_nightly_heartbeat("mac")
         printed = " ".join(str(c) for c in fake_print.call_args_list)
         return note, printed
+
+    def test_loaded_but_pointing_at_another_checkout_is_not_reported_as_normal(self):
+        """R68 新四態的 str 態：label 全機唯一，第二個 clone／搬過家的 repo 會「命中
+        label 但排程其實指向別份 checkout」。此時**不得**沿用 True 態的「已載入、
+        尚未跑過第一輪」正常措辭——那會讓使用者以為本 repo 有 nightly 兜底，實際沒有。
+        """
+        out = f"{self._DECOY}\n-\t0\tcom.autoclaude.nightly\n"
+        note, printed = self._heartbeat_with_launchctl(
+            out, plist_target="/elsewhere/AutoClaude/tools/run_local_nightly.sh")
+        self.assertNotIn("launchd 已載入、尚未跑過第一輪", printed,
+                         "指向別份 checkout 卻用 True 態措辭 ⇒ 誤報本 repo 有兜底")
+        self.assertIn("/elsewhere", printed, "須指出實際指向的路徑，否則無從排查")
+
+    def test_unreadable_plist_falls_back_to_none_not_a_false_normal(self):
+        """plist 讀不到 ⇒ 無鑑別力，必須退回 None 態的雙可能文案，不得謊報正常。"""
+        out = f"{self._DECOY}\n-\t0\tcom.autoclaude.nightly\n"
+        note, printed = self._heartbeat_with_launchctl(out, plist_target=None)
+        self.assertNotIn("launchd 已載入、尚未跑過第一輪", printed)
+        self.assertIn("排程可能未啟用", printed)
 
     def test_loaded_true_despite_decoy_gives_normal_wording(self):
         # 干擾列在前、真 label 在後（PID 欄為 `-`＝未在跑，launchctl 真實輸出形態）
@@ -3246,6 +3283,19 @@ class TestCiLiveness(DevStartTestCase):
     advisory：None＝不入 summary；「未知」不入 WARNINGS；僅非 success _warn。
     """
 
+    def setUp(self):
+        super().setUp()
+        # 🔴 R68：`_check_ci_liveness()` 現在還會先做**逐軌陳舊度**查詢
+        # （`ci_liveness.stale_schedule_tracks`），那是與本類別要驗的「最新一筆 run
+        # 的四態輸出」正交的另一種粒度。不隔離掉它，本類別的單一 gh mock payload 會
+        # 被它一起讀走——payload 裡的 `updatedAt` 只要距今超過該軌 cron 週期就被判陳舊
+        # 並多出一筆 WARNING，紅因與被驗行為完全無關（R68 實測即如此假紅）。
+        # 逐軌邏輯自身的鑑別力由 `TestStaleScheduleTracks` 專門驗，不是就此無覆蓋。
+        p = mock.patch.object(dev_start.ci_liveness, "stale_schedule_tracks",
+                              return_value=[])
+        p.start()
+        self.addCleanup(p.stop)
+
     @staticmethod
     def _gh_result(payload: str, rc: int = 0) -> subprocess.CompletedProcess:
         return subprocess.CompletedProcess(args=["gh"], returncode=rc,
@@ -3475,18 +3525,35 @@ class TestNightlyHeartbeatCrossSiteBehavioralEquivalence(unittest.TestCase):
             self.fail(f"無法從輸出判斷心跳三態分類：{text!r}")
         # FAIL 維度：兩側都只在 N>0 時才吐 `FAIL=N`，故「無命中」本身即為對稱語意。
         m = re.search(r"FAIL=(\d+)", text)
-        return {"三態": state, "FAIL 計數": int(m.group(1)) if m else None}
+        # 年齡顯示維度（R68-M32）：判定早已對齊到秒（R67-M40），但「距今 N.N 天」
+        # 這個**顯示值**兩側是各自合成的——bash 走整數十分位截斷、python 走
+        # `{age_days:.1f}`，在 age_s=74304 分別印 0.8／0.9。上一輪的 8.5 天取樣點
+        # 恰好落在兩側一致處，於是這個確定性分歧在既有鎖下完全靜默：宣告面與比對
+        # 面雖已互鎖，兩者同時漏掉同一個維度時互鎖仍舊全綠。
+        m_age = re.search(r"距今 ([\d.]+) 天", text)
+        return {
+            "三態": state,
+            "FAIL 計數": int(m.group(1)) if m else None,
+            "年齡顯示": m_age.group(1) if m_age else None,
+        }
 
     def _python_classify(self, root: Path, now: int) -> dict[str, object]:
+        printed: list[str] = []
         with mock.patch.object(dev_start, "ROOT", root), \
              mock.patch.object(dev_start, "WARNINGS", []), \
              mock.patch.object(dev_start, "_launchd_nightly_loaded",
                                return_value=None), \
              mock.patch("time.time",
                         return_value=float(now) + self._SUBSECOND_SKEW), \
-             mock.patch("builtins.print"):
+             mock.patch("builtins.print",
+                        side_effect=lambda *a, **k: printed.append(
+                            " ".join(str(x) for x in a))):
             note = dev_start._check_nightly_heartbeat("mac")
-        return self._classify(note)
+        # R68-M32：年齡顯示只存在於「印出來的那一行」（新鮮走 print、過期走 _warn，
+        # 後者內部亦是 print），回傳的 summary note 不含它。若仍只把 note 餵進
+        # `_classify()`，新增的維度在 python 側恆為 None——鎖看起來多守了一維，
+        # 實際上兩側同時是 None，等於白守（本輪修鎖時差點踩進去的坑）。
+        return self._classify(note + "\n" + "\n".join(printed))
 
     def _make_heartbeat(self, root: Path, age_s: int, now: int,
                         fail_n: int = 0) -> Path:
@@ -3591,6 +3658,25 @@ class TestNightlyHeartbeatCrossSiteBehavioralEquivalence(unittest.TestCase):
         for label, (age_s, fail_n) in cases.items():
             with self.subTest(label=label):
                 self._assert_sides_agree(label, age_s, fail_n)
+
+    def test_age_display_matches_dev_start_at_rounding_divergence_points(self) -> None:
+        """R68-M32：「距今 N.N 天」的顯示值兩側須逐字相同。
+
+        取樣點刻意選**修前確定分歧**的秒數，而不是再取一個好看的整點：
+          74304 秒 → 修前 bash 印 0.8、dev_start 印 0.9（十分位截斷 vs 正確捨入）
+          4320 秒  → 修前 bash 印 0.0、dev_start 印 0.1
+          12960 秒 → 反向對照：把 bash 改成 round-half-up 的那種「假修」會在此點
+                     新造分歧（0.2 vs 0.1），本點通過才能證明分歧是被消除、不是
+                     被平移。R67-M39 的既有斷言取 8.5 天，那恰是兩側一致處，且只
+                     驗 bash 單側——同一個顯示值上有鎖，卻鎖不到跨站分歧。
+        """
+        for label, age_s in {
+            "74304 秒（修前 bash 0.8 ／ dev_start 0.9）": 74304,
+            "4320 秒（修前 bash 0.0 ／ dev_start 0.1）": 4320,
+            "12960 秒（round-half-up 假修會在此點新造分歧）": 12960,
+        }.items():
+            with self.subTest(label=label):
+                self._assert_sides_agree(label, age_s, fail_n=0)
 
     def test_bash_wrapper_threshold_follows_dev_start_constant(self) -> None:
         """R67-M38：wrapper 注入的門檻必須跟著 `dev_start._HEARTBEAT_MAX_AGE_DAYS`。
@@ -3742,13 +3828,37 @@ class MacNightlyStatusTestCase(unittest.TestCase):
         )
         os.chmod(self.launchctl, 0o755)
 
-    def run_status(self) -> subprocess.CompletedProcess:
+    def run_installer(self, *args: str) -> subprocess.CompletedProcess:
+        """跑沙箱裡那份**真實的**安裝器（任意模式）。
+
+        R68-M64：以前只有 `run_status()`，於是 install／--uninstall 兩條會真的
+        改動機器狀態的路徑在測試側零行為覆蓋——「load 失敗仍宣稱成功」這種缺陷
+        結構上不可能被任何既有鎖看到。fake HOME ＋ `IMN_LAUNCHCTL` stub 讓這兩條
+        路徑可以在不觸碰真實 `~/Library/LaunchAgents`／真實 launchd 的前提下驗行為。
+        """
         return subprocess.run(
-            ["bash", str(self.root / "tools" / "install_mac_nightly.sh"), "--status"],
+            ["bash", str(self.root / "tools" / "install_mac_nightly.sh"), *args],
             capture_output=True, text=True, encoding="utf-8", errors="replace",
             env={**os.environ, "HOME": str(self.home),
                  "IMN_LAUNCHCTL": str(self.launchctl)},
         )
+
+    def run_status(self) -> subprocess.CompletedProcess:
+        return self.run_installer("--status")
+
+    def set_launchctl(self, body: str) -> None:
+        """換掉 stub launchctl 的行為（body 為 shebang 之後的腳本本體）。"""
+        self.launchctl.write_text("#!/bin/bash\n" + body, encoding="utf-8")
+        os.chmod(self.launchctl, 0o755)
+
+    def stub_list_reports(self, last_exit: str) -> str:
+        """stub 本體：`list` 回報本 label 已載入、第 2 欄（last exit status）為指定值。
+
+        `launchctl list` 的三欄是 PID／Status／Label，PID 對非執行中的 job 為 `-`。
+        """
+        return (f'if [ "$1" = "list" ]; then '
+                f'printf -- "-\\t{last_exit}\\t{self._LABEL}\\n"; fi\n'
+                "exit 0\n")
 
     def install_healthy_plist(self) -> None:
         """用安裝器自己的 `--render-only` 產出 plist 再放進 fake HOME——手抄一份
@@ -3949,7 +4059,14 @@ class TestMacNightlyStatusWiring(MacNightlyStatusTestCase):
         )
 
     def test_exit_code_still_tracks_launchd_loaded_state(self) -> None:
-        """反向：launchd 未載入時仍須 rc=1——新增報表不得把唯一的硬判準沖淡。"""
+        """反向：launchd 未載入時仍須 rc=1——新增報表不得把唯一的硬判準沖淡。
+
+        R68-M31 註記：硬判準自本輪起是「已載入 **且** plist 仍在磁碟上」兩項合取
+        （見安裝器檔頭 Exit codes，該句自 R13 就這樣寫、實作到 R68 才兌現）。本測試
+        鎖的是其中「已載入」那一項，plist 那一項由
+        `TestMacNightlyStatusPersistenceGate` 鎖——兩者是同一條合取式的兩個 conjunct，
+        不是重複。
+        """
         self.launchctl.write_text("#!/bin/bash\nexit 0\n", encoding="utf-8")
         os.chmod(self.launchctl, 0o755)
         self.install_healthy_plist()
@@ -3958,6 +4075,174 @@ class TestMacNightlyStatusWiring(MacNightlyStatusTestCase):
         self.assertIn("❌ launchd 未載入", proc.stdout)
         self.assertEqual(proc.returncode, 1,
                          f"launchd 未載入時 --status 必須 rc=1：{proc.stdout!r}")
+
+
+class TestMacNightlyStatusPersistenceGate(MacNightlyStatusTestCase):
+    """R68-M31：「launchd 已載入、但磁碟上的 plist 已不存在」是 macOS 專屬的
+    「載入 ≠ 已持久化」狀態——載入只活在當前 login session 的記憶體裡，磁碟沒有
+    plist 就不會在下次登入/重開機時被重新載入。修前 `--status` 對這個註定死掉的
+    排程回報 rc=0 全綠、並且整段跳過能力表（唯一的機讀判準說它健康）。
+
+    這不是「沒人想到的交集狀態」，而是**實作違反自家已寫下的契約**：安裝器檔頭
+    自 R13 起逐字承諾「1＝失敗（--status 時＝未載入或 plist 缺席）」，實作卻只看
+    launchctl。上游可達性也成立：`launchctl unload` 失敗時仍 exit 0，修前的
+    `cmd_uninstall` 在 `|| true` 之後無條件 `rm -f` plist，自己就會製造這個孤兒
+    狀態（該路徑由 `TestMacNightlyLoadSelfVerification` 一併封住）。
+    """
+
+    def test_loaded_but_plist_absent_from_disk_is_a_hard_failure(self) -> None:
+        # 預設 stub 已回報「已載入」；刻意不安裝 plist＝重現孤兒狀態。
+        self.write_heartbeat()
+        proc = self.run_status()
+        self.assertIn("✅ launchd 已載入", proc.stdout,
+                      f"前提不成立：本案必須是「已載入」才在驗孤兒狀態：{proc.stdout!r}")
+        self.assertIn("plist：不存在", proc.stdout)
+        self.assertEqual(
+            proc.returncode, 1,
+            "已載入但磁碟無 plist＝下次登入即失效的死排程，rc 必須為 1"
+            f"（安裝器檔頭 Exit codes 逐字承諾「或 plist 缺席」）：{proc.stdout!r}",
+        )
+        self.assertIn(
+            "下次登入/重開機不會再載入", proc.stdout,
+            "只印一行「plist：不存在」會讓讀者以為只是少了份備份檔——必須說明"
+            f"這個載入狀態不會存活：{proc.stdout!r}",
+        )
+
+    def test_header_contract_still_promises_plist_absence_is_failure(self) -> None:
+        """散文契約 ↔ 實作互鎖：上一條 rc 判準的來源就是檔頭那句話。
+
+        沒有這道鎖，日後若有人為了讓某個情境變綠而把檔頭那半句刪掉，實作跟著放寬
+        也不會有任何訊號——契約與實作會再一次悄悄脫鉤（這正是本缺陷存活到 R68 的
+        機制：散文寫了 5 輪，沒有任何機械出口在讀它）。
+        """
+        # 錨在 Exit codes 那一句本身，而不是裸 `assertIn("或 plist 缺席")`——後者
+        # 會被檔頭別處**解釋這條契約的註解**餵飽（本輪雙向注入實測：把契約句改掉、
+        # 註解裡的引述還在，裸 assertIn 照綠 rc=0），那就是一道無牙的鎖。
+        self.assertRegex(
+            self.installer_source(),
+            r"Exit codes：[^\n]*1＝失敗（--status 時＝未載入\n#\s*或 plist 缺席）",
+            "安裝器檔頭 Exit codes 契約不得移除「未載入或 plist 缺席」——"
+            "它是 --status 硬判準第 2 個 conjunct 的唯一散文來源",
+        )
+
+
+class TestMacNightlyLastExitStatusColumn(MacNightlyStatusTestCase):
+    """R68-M30：`launchctl list` 第 2 欄（last exit status）必須被解讀，而不是原樣
+    印出就算數。
+
+    缺陷形狀：載體每晚照跑、每晚在寫出心跳之前就非零退出 ⇒ 心跳檔與 RunId log
+    **從第一天起就永遠不存在** ⇒ 兩段報表齊聲宣告「排程可能未啟用或尚未跑過第一輪」
+    且 rc=0。那句因果確定為假，而且因為心跳檔永遠不生成，8 天過期哨兵永遠不會啟動
+    ——這個假宣稱是無上界的，不是一個 8 天窗口。第 2 欄的值當時就印在螢幕上
+    （`-\\t3\\tcom.autoclaude.nightly`），只是沒有任何一行程式碼去讀它。
+    """
+
+    def test_nonzero_last_exit_replaces_the_false_first_run_claim(self) -> None:
+        self.set_launchctl(self.stub_list_reports("3"))
+        self.install_healthy_plist()
+        # 刻意不寫心跳、不寫 RunId log——那正是「每晚跑、每晚在寫心跳前就掛」的形狀。
+        out = self.run_status().stdout
+        self.assertIn(
+            "⚠️ 上次退出碼 = 3   (expected 0)", out,
+            "last exit status 必須逐項印出並標記（對齊 Windows Show-TaskDetail 的 "
+            f"LastTaskResult 列，體例沿用 `(expected X)`）：{out!r}",
+        )
+        self.assertNotIn(
+            "尚未跑過第一輪", out,
+            "第 2 欄為非零＝排程已經跑過而且失敗了，「尚未跑過第一輪」是確定為假的"
+            f"因果，必須整段被取代而不是加註後保留：{out!r}",
+        )
+        self.assertIn(
+            "exit 3", out,
+            f"缺席文案須指出真正的成因（載體以 exit 3 結束）：{out!r}")
+
+    def test_zero_last_exit_keeps_the_first_run_wording(self) -> None:
+        """控制組：第 2 欄為 0 時原本的「尚未跑過第一輪」是正確的，不得被誤殺。
+
+        沒有這一組，「非零時不准說尚未首跑」可以靠把那句話整個刪掉來作弊。
+        """
+        self.set_launchctl(self.stub_list_reports("0"))
+        self.install_healthy_plist()
+        out = self.run_status().stdout
+        self.assertIn("✅ 上次退出碼 = 0   (expected 0)", out, f"{out!r}")
+        self.assertIn(
+            "尚未跑過第一輪", out,
+            f"剛裝完、尚未到 02:00 的機器不該被告知載體失敗過：{out!r}")
+
+
+class TestMacNightlyLoadSelfVerification(MacNightlyStatusTestCase):
+    """R68-M64：`launchctl load/unload` 失敗時**仍 exit 0**（本機實測
+    `Load failed: 5: Input/output error` 配 rc=0），`set -e` 結構上攔不到，於是修前
+    的 `cmd_install` 會在排程根本沒載入的情況下印「✅ 已安裝並載入」並 rc=0——
+    它就是 R67 一路在防的「死排程」的上游製造機。修法是不相信 rc，改用
+    `cmd_status` 從 R13 起就有的那道現成查核式（`launchctl list` 第 3 欄精確等值）
+    自證，✅ 只能印在自證通過之後。
+
+    修前這兩條路徑在測試側是**零行為覆蓋**：`test_schedule_capability_parity.py`
+    對 install 只做原始碼字串比對，`macos_smoke_local.sh` 只跑 `--render-only`。
+    """
+
+    _LOAD_FAILS_SILENTLY = (
+        'if [ "$1" = "load" ]; then echo "Load failed: 5: Input/output error" >&2; fi\n'
+        "exit 0\n"
+    )
+
+    def test_install_fails_loud_when_load_silently_fails(self) -> None:
+        self.set_launchctl(self._LOAD_FAILS_SILENTLY)
+        proc = self.run_installer()
+        self.assertNotEqual(
+            proc.returncode, 0,
+            "launchctl load 未生效時 install 必須非零退出——把 rc 當判準的自動化"
+            f"會據此認定排程已就緒：{proc.stdout}{proc.stderr}",
+        )
+        self.assertNotIn(
+            "已安裝並載入", proc.stdout,
+            f"排程根本沒載入卻宣稱「已安裝並載入」：{proc.stdout!r}")
+        self.assertIn("不在 launchctl list", proc.stderr,
+                      f"失敗訊息須說明是「list 自證未通過」：{proc.stderr!r}")
+
+    def test_install_declares_success_only_after_list_confirms(self) -> None:
+        """控制組：list 自證通過時仍須正常成功——修法不得把 install 一律變成失敗。"""
+        self.set_launchctl(self.stub_list_reports("0"))
+        proc = self.run_installer()
+        self.assertEqual(proc.returncode, 0, proc.stdout + proc.stderr)
+        self.assertIn("✅ 已安裝並載入", proc.stdout)
+        self.assertTrue(self.plist_path.exists(), "plist 應已寫入 fake HOME")
+
+    def test_install_points_at_launchctl_enable_when_label_is_disabled(self) -> None:
+        """最易觸發的成因要給到復原指令：`launchctl unload -w` 是網路教學常見的
+        「暫時停用」寫法，之後任何 load 都會靜默失敗直到 `launchctl enable`。"""
+        self.set_launchctl(
+            f"""if [ "$1" = "print-disabled" ]; then echo '"{self._LABEL}" => disabled'; fi
+exit 0
+""")
+        proc = self.run_installer()
+        self.assertNotEqual(proc.returncode, 0, proc.stdout + proc.stderr)
+        self.assertIn(
+            f"launchctl enable gui/{os.getuid()}/{self._LABEL}", proc.stderr,
+            f"命中 disabled 時須直接給出解除指令：{proc.stderr!r}")
+
+    def test_uninstall_keeps_plist_when_unload_did_not_take_effect(self) -> None:
+        """unload 亦恆 exit 0；若不自證就 `rm -f` plist，本工具會親手製造 R68-M31
+        的孤兒狀態（仍載入、磁碟已無 plist ⇒ 之後連本工具都卸不掉它）。"""
+        self.install_healthy_plist()
+        self.set_launchctl(self.stub_list_reports("0"))
+        proc = self.run_installer("--uninstall")
+        self.assertNotEqual(proc.returncode, 0, proc.stdout + proc.stderr)
+        self.assertTrue(
+            self.plist_path.exists(),
+            "unload 未生效時不得刪除 plist——刪了就是孤兒排程（R68-M31）")
+        self.assertNotIn("已解除安裝", proc.stdout,
+                         f"仍在 launchctl list 卻宣稱已解除安裝：{proc.stdout!r}")
+
+    def test_uninstall_removes_plist_once_list_confirms_gone(self) -> None:
+        """控制組：確實卸載後才刪 plist 並宣告成功。"""
+        self.install_healthy_plist()
+        self.set_launchctl("exit 0\n")
+        proc = self.run_installer("--uninstall")
+        self.assertEqual(proc.returncode, 0, proc.stdout + proc.stderr)
+        self.assertIn("✅ 已解除安裝", proc.stdout)
+        self.assertFalse(self.plist_path.exists())
 
 
 class TestCopyFunctionalInterpreterDllCopy(unittest.TestCase):
@@ -4125,6 +4410,91 @@ class TestVenvSelfHealCallSitesUseSafeRmtree(DevStartTestCase):
             "shutil.rmtree(", src,
             "step_venv() 又直接呼叫 shutil.rmtree — Windows 唯讀檔會 "
             "PermissionError 且留下半殘目錄（R66 P2 迴歸）")
+
+
+class TestStaleScheduleTracks(unittest.TestCase):
+    """`tools/lib/ci_liveness.py`（R68 新增）的鑑別力鎖。
+
+    🔴 為何非有不可：R68 Scan-C／Scan-N 判定的最嚴重一筆（P1）是「兩支 *-nightly-full
+    自 2026-07-14 起 18 天零成功、而三道既有哨兵在結構上都偵測不到」——本模組就是補
+    那個盲區的東西。它落地時**零測試**（`grep` 全 `tools/tests/` 零命中），也就是說
+    「用來偵測哨兵已死的哨兵」自己沒有任何東西保證它還活著，正是它要消滅的那個形狀。
+
+    本類別以純函式雙向驗：陳舊必報（正向注入）、新鮮不報（還原）、無訊號不報
+    （查不到 ≠ 壞掉），並釘住「dormant（被註解掉的 cron）不得算進期望軌」。
+    """
+
+    def _root_with_cron(self, cron_lines: str) -> Path:
+        root = Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, root, True)
+        wf = root / ".github" / "workflows"
+        wf.mkdir(parents=True)
+        (wf / "demo.yml").write_text(
+            "on:\n  schedule:\n" + cron_lines, encoding="utf-8")
+        return root
+
+    def test_daily_track_with_no_success_for_weeks_is_reported(self) -> None:
+        """正向注入：日頻軌最近成功在 13 天前（> 1 天 × factor 2）⇒ 必須報陳舊。"""
+        root = self._root_with_cron('    - cron: "12 6 * * *"\n')
+        now = datetime.datetime(2026, 8, 2, tzinfo=datetime.timezone.utc)
+        with mock.patch.object(ci_liveness, "_latest_success_schedule",
+                               return_value="2026-07-20T01:00:00Z"):
+            stale = ci_liveness.stale_schedule_tracks(root, time.monotonic() + 25, now=now)
+        self.assertEqual(len(stale), 1, f"日頻軌 13 天沒成功卻零訊號：{stale}")
+        self.assertIn("demo.yml", stale[0])
+
+    def test_fresh_track_is_not_reported(self) -> None:
+        """還原：同一軌昨天才成功 ⇒ 不得報（否則哨兵會天天狼來了而被忽略）。"""
+        root = self._root_with_cron('    - cron: "12 6 * * *"\n')
+        now = datetime.datetime(2026, 8, 2, tzinfo=datetime.timezone.utc)
+        with mock.patch.object(ci_liveness, "_latest_success_schedule",
+                               return_value="2026-08-01T01:00:00Z"):
+            self.assertEqual(
+                ci_liveness.stale_schedule_tracks(root, time.monotonic() + 25, now=now), [])
+
+    def test_weekly_track_tolerates_one_skip(self) -> None:
+        """週頻軌 13 天前成功仍在容忍內（7 × 2 = 14）——STALE_PERIOD_FACTOR 的存在理由。"""
+        root = self._root_with_cron('    - cron: "12 6 * * 1"\n')
+        now = datetime.datetime(2026, 8, 2, tzinfo=datetime.timezone.utc)
+        with mock.patch.object(ci_liveness, "_latest_success_schedule",
+                               return_value="2026-07-20T01:00:00Z"):
+            self.assertEqual(
+                ci_liveness.stale_schedule_tracks(root, time.monotonic() + 25, now=now), [])
+
+    def test_no_signal_is_not_reported_as_stale(self) -> None:
+        """查不到（gh 失敗／逾時）一律跳過：無訊號 ≠ 壞訊號，否則離線就整排假紅。"""
+        root = self._root_with_cron('    - cron: "12 6 * * *"\n')
+        with mock.patch.object(ci_liveness, "_latest_success_schedule", return_value=None):
+            self.assertEqual(
+                ci_liveness.stale_schedule_tracks(root, time.monotonic() + 25), [])
+
+    def test_never_succeeded_is_reported(self) -> None:
+        """查得到但一次都沒成功過（空字串）⇒ 必須報——這正是 nightly-full 的實況。"""
+        root = self._root_with_cron('    - cron: "12 6 * * *"\n')
+        with mock.patch.object(ci_liveness, "_latest_success_schedule", return_value=""):
+            stale = ci_liveness.stale_schedule_tracks(root, time.monotonic() + 25)
+        self.assertEqual(len(stale), 1)
+        self.assertIn("查無任何成功", stale[0])
+
+    def test_commented_out_cron_is_not_an_expected_track(self) -> None:
+        """dormant 軌（整行被註解）不得被列為期望軌——否則刻意停用會變成永久假紅。"""
+        root = self._root_with_cron('    # - cron: "12 6 * * *"\n')
+        self.assertEqual(ci_liveness.scheduled_workflow_periods(root), {})
+
+    def test_deadline_stops_the_scan(self) -> None:
+        """預算耗盡即中止：advisory 哨兵寧可少報，不可拖住開工流程。"""
+        root = self._root_with_cron('    - cron: "12 6 * * *"\n')
+        with mock.patch.object(ci_liveness, "_latest_success_schedule",
+                               return_value="") as probe:
+            self.assertEqual(
+                ci_liveness.stale_schedule_tracks(root, time.monotonic() - 1), [])
+        probe.assert_not_called()
+
+    def test_multiple_crons_take_the_strictest(self) -> None:
+        """同檔多條 cron 取最短週期（最嚴），否則週頻那條會稀釋掉日頻的判準。"""
+        root = self._root_with_cron(
+            '    - cron: "12 6 * * 1"\n    - cron: "12 7 * * *"\n')
+        self.assertEqual(ci_liveness.scheduled_workflow_periods(root), {"demo.yml": 1.0})
 
 
 if __name__ == "__main__":

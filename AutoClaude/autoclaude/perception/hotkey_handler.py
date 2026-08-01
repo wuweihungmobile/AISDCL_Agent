@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import logging
 import threading
+import time
 
 logger = logging.getLogger("autoclaude.perception")
 
@@ -26,18 +27,19 @@ def _install_listener_excepthook() -> None:
     四方複審 R1 Architect 發現（實測 keyboard==0.13.5 原始碼＋本機重現）：
     `keyboard.add_hotkey()` 經 `GenericListener.start_if_necessary()`
     （keyboard/_generic.py）把 `listen()` 丟進 daemon thread 背景執行、立即返回；
-    macOS 缺 Accessibility 授權時的真實失敗（`_darwinkeyboard.listen()` 的
-    `os.geteuid()` 檢查）發生在該背景執行緒內，**不會同步傳回** `add_hotkey()`
+    macOS 上的真實失敗發生在該背景執行緒內，**不會同步傳回** `add_hotkey()`
     呼叫端——包住呼叫本身的 try/except 攔不到。Python 執行緒未捕捉例外預設只會
     印 traceback 到 stderr、不會讓主程序崩潰（故不存在「炸穿主流程」風險），
     但會留下難懂的原始 traceback。改裝 `threading.excepthook`：只在例外確實
     來自 keyboard 監聽執行緒（用 Thread 物件身分比對，非字串/名稱猜測）時
     轉為 warning log；其餘執行緒例外照舊鏈給前一個 hook，不吞掉不相關的錯誤。
-
-    殘留限制（誠實揭露，非完全解決）：`self._registered` 在 `register()` 內
-    仍於 `add_hotkey()` 同步返回後就設 True（存在 race：背景執行緒可能稍後
-    才失敗），此為 `keyboard` 套件本身非同步啟動設計的固有限制。
     """
+    # R68 真機取證訂正（macOS 26.5.2 / keyboard 0.13.5，非 root、id -u=501）：
+    # 上述失敗的判準**不是** TCC「輔助使用」授權，而是 `_darwinkeyboard.listen()`
+    # 首行 `if not os.geteuid() == 0: raise OSError("Error 13 - Must be run as
+    # administrator")`。授權輔助使用對這條路徑完全無效；非 sudo 執行是 10/10
+    # 確定性失敗，不是 race。`register()` 因此改以「背景監聽執行緒是否存活」
+    # 為可驗證判準（見 HotkeyHandler._listener_alive），不再無條件宣稱已註冊。
     global _excepthook_installed
     if _excepthook_installed:
         return
@@ -78,8 +80,34 @@ class HotkeyHandler:
             # 轉為乾淨 warning log（見其說明）。
             logger.warning("全域中斷熱鍵註冊失敗（%s），ESC+F12 中斷將無法使用", self.HOTKEY)
             return
+        if not self._listener_alive():
+            # 誠實性修復（R68）：背景監聽執行緒已死卻回報「已註冊」＝靜默失效。
+            logger.warning(
+                "全域中斷熱鍵背景監聽執行緒未存活，%s 在本平台不可用"
+                "（macOS 的 keyboard 套件要求 euid==0，非 sudo 執行必定失敗；"
+                "與『輔助使用』授權無關）",
+                self.HOTKEY,
+            )
+            return
         self._registered = True
         logger.info("全域中斷熱鍵已註冊：%s", self.HOTKEY)
+
+    @staticmethod
+    def _listener_alive(grace: float = 0.5) -> bool:
+        # add_hotkey() 把 listen() 丟進背景 daemon thread 後立即返回，失敗在那個
+        # 執行緒內非同步發生。輪詢 keyboard._listener.listening_thread 的存活狀態
+        # 是目前唯一可機械驗證「真的註冊上了嗎」的判準（真機實測：macOS 非 root
+        # 時該 thread 於 add_hotkey() 返回後短時間內即 stopped）。觀察到明確死亡
+        # 才回 False；grace 內看不到死亡（含測試以 MagicMock 替身）則視為存活。
+        deadline = time.monotonic() + grace
+        while True:
+            listener = getattr(keyboard, "_listener", None)
+            thread = getattr(listener, "listening_thread", None)
+            if thread is not None and not thread.is_alive():
+                return False
+            if time.monotonic() >= deadline:
+                return True
+            time.sleep(0.02)
 
     def _on_trigger(self) -> None:
         logger.warning("偵測到 %s，正在觸發緊急中斷...", self.HOTKEY)

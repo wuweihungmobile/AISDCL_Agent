@@ -44,6 +44,11 @@ on:
       - ".claude/settings.json"
       - ".claude/hooks/sdd_hook_router.py"
       - "AutoClaude/.claude/settings.json"
+      # R68：AISDLC_SDD/scripts/tests/test_ntfs_length_gate.py 的「三站點長度政策」
+      # 鎖跨樹 import 本檔並對它做行為斷言（站點②：logger 刻意不截斷）⇒ 只改本檔時
+      # 該鎖必須跟著跑，否則 DEF-101-042 同構假綠。由
+      # test_ci_paths_cover_root_consumers.py 當場攔下並要求補列。
+      - "AutoClaude/autoclaude/utils/logger.py"
   pull_request:
     paths:
       - "AISDLC_SDD/**"
@@ -56,6 +61,11 @@ on:
       - ".claude/settings.json"
       - ".claude/hooks/sdd_hook_router.py"
       - "AutoClaude/.claude/settings.json"
+      # R68：AISDLC_SDD/scripts/tests/test_ntfs_length_gate.py 的「三站點長度政策」
+      # 鎖跨樹 import 本檔並對它做行為斷言（站點②：logger 刻意不截斷）⇒ 只改本檔時
+      # 該鎖必須跟著跑，否則 DEF-101-042 同構假綠。由
+      # test_ci_paths_cover_root_consumers.py 當場攔下並要求補列。
+      - "AutoClaude/autoclaude/utils/logger.py"
   workflow_dispatch:
 
 concurrency:

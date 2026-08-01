@@ -41,13 +41,26 @@ MIN_TESTS_SHARED=240    # R59 重釘（R49 為 190，其註解記的 226 亦已�
                         # 支仍全綠〕；依 Rule 7「兩套相反政策要擇一」對齊根層 ratchet 精神。
                         # 留 8 餘裕吸收跨平台 ±1 漂移。R59 二審 ARCH-R59-NB3 指出
 
+# 🔴 R68：載具守門。macOS 預設 shell 是 zsh，`zsh scripts/ci-gate.sh` 下
+# ${BASH_SOURCE[0]} 未定義（zsh: parameter not set）→ REPO_ROOT/dot-source 全解錯，
+# 使用者拿到的是與事實相反的診斷訊息。fail-loud 一行勝過整串錯誤級聯。
+[ -n "${BASH_VERSION:-}" ] || {
+  echo "❌ 本腳本需以 bash 執行：bash scripts/ci-gate.sh（macOS 預設 zsh 不支援 BASH_SOURCE）" >&2
+  exit 2
+}
+
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
 # R43 Scan-B（DEF-101-353）：WindowsApps 空殼排除 guard（純函式定義，無副作用）；
 # 比照既有 scripts/install-hooks.sh 同款跨子專案 dot-source monorepo 根層
 # tools/lib/*.sh 慣例（該檔第 17 行 source git_hooks_install_common.sh）。
+# 🔴 R68：source 失敗改為硬錯——guard 檔被改名/移位時，原本「. 失敗仍照跑」會讓
+# WindowsApps 空殼防護靜默消失（fail-open），無人知曉。
 # shellcheck disable=SC1091
-. "$(dirname "${BASH_SOURCE[0]}")/../../tools/lib/windowsapps_guard.sh"
+. "$(dirname "${BASH_SOURCE[0]}")/../../tools/lib/windowsapps_guard.sh" || {
+  echo "❌ 無法載入 tools/lib/windowsapps_guard.sh（WindowsApps 空殼防護缺席）" >&2
+  exit 2
+}
 
 # python 缺席 fail-loud（R14 SCAN-SH-1）：現代 macOS 乾淨 PATH 只有 python3 沒有
 # python，未啟 venv 直跑時下方 LATEST 解析的 `|| true` 會把 127（command not found）
@@ -93,8 +106,28 @@ if [[ "${SDD_GATE_DRY_RUN:-0}" == "1" ]]; then
   exit 0
 fi
 
+# 🔴 R68 argv fail-loud：原本只做 `[[ "${1:-}" == "--full-tlc" ]]` 精確等值，全檔對
+# 其餘 argv 零驗證——`--fulltlac` 這種 typo 會**靜默降級成「不跑 TLC」卻仍印
+# 「✅ 本機 CI 閘門全數通過」rc=0**（實測重現）。宣稱跑了五軌 TLA+/TLC 而其實沒跑，
+# 是最壞的一種假綠。未知旗標一律 usage + exit 2。
+_usage() {
+  cat >&2 <<'USAGE'
+用法：bash scripts/ci-gate.sh [--full-tlc]
+  --full-tlc   另跑五軌 TLA+/TLC 形式化驗證（需 Java + tla2tools.jar）
+  -h, --help   顯示本說明
+環境變數：SDD_RUN_TLC=1（等同 --full-tlc）、SDD_FW_VERSION=<版本目錄>（只測單一版本）、
+          SDD_GATE_DRY_RUN=1（僅印將測版本清單即離開）
+USAGE
+}
 FULL_TLC=0
-if [[ "${1:-}" == "--full-tlc" || "${SDD_RUN_TLC:-0}" == "1" ]]; then
+for _arg in "$@"; do
+  case "${_arg}" in
+    --full-tlc) FULL_TLC=1 ;;
+    -h|--help)  _usage; exit 0 ;;
+    *)          echo "❌ 未知旗標：${_arg}" >&2; _usage; exit 2 ;;
+  esac
+done
+if [[ "${SDD_RUN_TLC:-0}" == "1" ]]; then
   FULL_TLC=1
 fi
 

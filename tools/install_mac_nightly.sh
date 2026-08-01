@@ -21,13 +21,17 @@
 # 改與心跳檔同目錄（gitignored）集中取證，install 時 mkdir -p 保證目錄存在）。
 #
 # --status 心跳語意對齊 tools/dev_start.py _check_nightly_heartbeat（R12 ARCH-R12-2、
-# R67-E21）。對齊維度以下列機讀清單為準（DIMENSIONS: 三態, FAIL 計數）——
+# R67-E21）。對齊維度以下列機讀清單為準（DIMENSIONS: 三態, FAIL 計數, 年齡顯示）——
 # tools/tests/test_dev_start.py 的跨站行為等價鎖會解析本清單並斷言「宣稱的維度數
 # ＝鎖實際比對的維度數」，防 R67-E21 重演（該次是 dev_start 於 R15 新增 FAIL 維度、
 # 本檔沒跟上，而等價鎖被寫死在 R12 的「三態」語意上，契約破裂零訊號）：
 #   三態      — 缺席→提示（排程可能未啟用）；mtime > 8 天→過期警告；否則新鮮
 #   FAIL 計數 — 心跳檔前 3 行的 `FAIL=N`，N>0 多印一行 ⚠️（語意對齊 dev_start
 #               _heartbeat_fail_count／ARCH-R15-1：mtime 只證明「在跑」不證明「在綠」）
+#   年齡顯示  — 「距今 N.N 天」這個**顯示值**本身（R68-M32）。判定早已對齊到秒
+#               （R67-M40），顯示卻沿用整數十分位截斷，與 dev_start 的
+#               `{age_days:.1f}` 在 age_s=74304 秒分別印 0.8／0.9——同一台機器
+#               同一顆心跳檔、兩支官方工具給出不同天數。修法見 report_heartbeat
 #
 # --status 另有兩段 mac 專屬報表（皆 advisory）：
 #   ① 補跑保護能力表（R67-M37）：逐項印「已安裝 plist 的實際值 (expected 期望值)」，
@@ -42,9 +46,15 @@
 # 或 plist 缺席）。心跳三態／FAIL 計數／上述兩段報表**皆屬 advisory**，不影響
 # --status exit code（對齊 dev_start「皆不阻擋」語意——排程「有沒有載入」才是本
 # 工具的機械判準）。
+# 🔴 R68-M31：「或 plist 缺席」這半句自 R13 起就寫在這裡，實作卻只看 launchctl
+# 是否列出 label——「已載入但磁碟上 plist 已被刪」時 rc=0 全綠且整段跳過能力表。
+# 那是 macOS 專屬的「載入 ≠ 已持久化」狀態：launchd 的載入只活在當前 login
+# session 的記憶體裡，磁碟沒有 plist 就不會在下次登入/重開機時被重新載入，是一個
+# 註定死掉的排程。故 plist 存在性是硬判準（本行契約的兌現），不是 advisory。
 #
 # 測試縫（fake 環境驗證用；正常安裝不需理會）：IMN_LAUNCHCTL 可指向 stub 以驗證
-# launchctl 呼叫序列而不真載入（本 repo 紀律：真安裝屬使用者 ops，須另行核可）；
+# launchctl 呼叫序列而不真載入（本 repo 紀律：真安裝屬使用者 ops，須另行核可；
+# install／--uninstall 路徑自 R68-M64 起亦以此縫受行為鎖覆蓋，不再只有 --status）；
 # IMN_NOW 可凍結 report_heartbeat 的「現在」為指定 epoch 秒，供跨站等價鎖在 8.0 天
 # 整秒邊界做**確定性**比對（兩份實作各自呼叫 date/time.time 會落在不同秒，該邊界
 # 上會 flaky——R67-M40）。IMN_NOW 只影響心跳年齡，不影響覆蓋連續性的日期換算。
@@ -121,7 +131,11 @@ EOF_PLIST
 # 對齊維度＝檔頭 DIMENSIONS 清單）。
 report_heartbeat() {
   if [ ! -f "${HEARTBEAT}" ]; then
-    echo "  心跳：未偵測（AutoClaude/logs/nightly_mac_latest.log 不存在）——排程可能未啟用或尚未跑過第一輪（設定見 ONBOARDING §8）"
+    # 成因提示由 cmd_status 依 launchctl 第 2 欄（last exit status）決定（R68-M30）；
+    # 本函式被跨站等價鎖單獨擷取執行時 ABSENT_HINT 未設定，退回原本的「未啟用／
+    # 尚未首跑」措辭。絕不可把該措辭寫死在這裡——那正是缺陷本體：排程每晚照跑、
+    # 載體每晚在寫心跳前就非零退出時，這句「尚未跑過第一輪」是**確定為假**的因果。
+    echo "  心跳：未偵測（AutoClaude/logs/nightly_mac_latest.log 不存在）${ABSENT_HINT:-——排程可能未啟用或尚未跑過第一輪（設定見 ONBOARDING §8）}"
     return 0
   fi
   # FAIL 維度（R67-E21）：心跳 mtime 只證明「排程在跑」，不證明「驗證全綠」——
@@ -141,11 +155,17 @@ report_heartbeat() {
   if [ "${_age_s}" -lt 0 ]; then _age_s=0; fi
   # 顯示精度與判定精度一致（R67-M39）：判定自 SD-R13-1 起以秒比較，顯示卻仍是
   # 整數天除法截斷，(8,9) 天整整 24 小時窗口會印出「距今 8 天 > 8 天」這種數學上
-  # 為偽的文案。bash 3.2 無浮點運算，以「先乘 10 再整除」合成一位小數，與
-  # dev_start.py 的 {age_days:.1f} 同格式；訊息一併改為不含不等式的敘述句，
-  # 避免「8.0 天 > 8 天」在整秒邊界再現同型矛盾。
-  _age_tenths=$(( _age_s * 10 / 86400 ))
-  _age_days="$(( _age_tenths / 10 )).$(( _age_tenths % 10 ))"
+  # 為偽的文案。訊息一併改為不含不等式的敘述句，避免「8.0 天 > 8 天」在整秒邊界
+  # 再現同型矛盾。
+  # R68-M32：合成一位小數的手法由「先乘 10 再整除」（＝十分位**截斷**）改為 awk
+  # 的 `%.1f`。WHY：dev_start.py 印的是 `{age_days:.1f}`＝IEEE double 的正確捨入，
+  # 截斷在 age_s=74304 印 0.8 而 dev_start 印 0.9，是確定性分歧而非邊界抖動。
+  # 不改成 round-half-up（`(_age_s * 10 + 43200) / 86400`）：那只是把分歧點從
+  # 74304 平移到 12960（該點 double 落在 0.15 之下，python 印 0.1、half-up 印
+  # 0.2），沒有消除分歧。awk 與 python 讀同一個 double、套同一條捨入規則，分歧
+  # 被結構性消除（本輪 3400 組隨機＋邊界取樣 0 筆不一致）。bash 3.2 無浮點運算，
+  # awk 是 POSIX 必備工具，不引入新相依。
+  _age_days="$(awk -v a="${_age_s}" 'BEGIN{printf "%.1f", a/86400}')"
   # 過期判定以「秒」比較（與 dev_start.py 整數秒年齡 > 8 天精確等價）：shell 整數
   # 除法會把 8.5 天截斷成 8 天而誤判「新鮮」，(8,9) 天窗口與 dev_start 背離
   # （SD-R13-1）。dev_start 側自 R67-M40 起亦先把 mtime／now 截成整數秒，兩份實作
@@ -168,7 +188,9 @@ report_heartbeat() {
 # 讓每天 00:00~02:00 之間必然多報一天假缺口。
 report_coverage() {
   if ! ls "${LOG_DIR}"/nightly_mac_2*.log >/dev/null 2>&1; then
-    echo "  覆蓋連續性：無任何 RunId log（${LOG_DIR}/nightly_mac_2*.log 不存在）——排程可能未啟用或尚未跑過第一輪"
+    # 成因提示同 report_heartbeat（R68-M30）：非零 last exit status 時「尚未跑過
+    # 第一輪」為假，由 cmd_status 覆寫 ABSENT_HINT。
+    echo "  覆蓋連續性：無任何 RunId log（${LOG_DIR}/nightly_mac_2*.log 不存在）${ABSENT_HINT:-——排程可能未啟用或尚未跑過第一輪（設定見 ONBOARDING §8）}"
     return 0
   fi
   _missing=""
@@ -257,6 +279,20 @@ report_plist_capabilities() {
   fi
 }
 
+# launchd 是否真的載入 LABEL：回傳 `launchctl list` 中第 3 欄精確等值 LABEL 的整列
+# （空＝未載入）。第 3 欄精確等值而非 grep -F 子字串——後者會把 com.autoclaude.
+# nightly2 之類前綴 label 誤判為已載入（SD-R13-4）；launchctl 失敗以 || true 收斂。
+#
+# 🔴 R68-M64：為何 install／uninstall 也必須走這裡，而不是相信 launchctl 的 rc——
+# 本機實測 `launchctl load /不存在.plist` 印 `Load failed: 5: Input/output error`
+# 卻仍 **exit 0**，`unload` 同型。也就是說 `set -e` 在這條路上結構上攔不到任何
+# 失敗：安裝器會在排程根本沒載入的情況下印「✅ 已安裝並載入」並 rc=0，把「死排程」
+# 製造出來還宣稱成功。載入與否只能查 list 自證（cmd_status 從 R13 起就是這樣查的，
+# install 路徑卻一直沒用上這道現成的查核式）。
+_launchctl_row() {
+  "${LAUNCHCTL}" list 2>/dev/null | awk -v l="${LABEL}" '$3 == l' || true
+}
+
 cmd_install() {
   mkdir -p "${PLIST_DIR}"
   # launchd 不會自動建 StandardOutPath 的目錄，缺目錄時 log 靜默丟失（R14 ARCH-GAP-3）
@@ -271,7 +307,20 @@ cmd_install() {
   mv "${_tmp_plist}" "${PLIST_PATH}"
   # 冪等：舊檔已載入時先 unload（未載入的 unload 失敗屬預期，不擋）。
   "${LAUNCHCTL}" unload "${PLIST_PATH}" 2>/dev/null || true
-  "${LAUNCHCTL}" load "${PLIST_PATH}"
+  # `|| true`：load 的 rc 不具鑑別力（見 _launchctl_row 檔頭說明），真正的判準是
+  # 下面那道自證；讓 set -e 在此中斷只會讓失敗訊息更難懂。
+  "${LAUNCHCTL}" load "${PLIST_PATH}" || true
+  if [ -z "$(_launchctl_row)" ]; then
+    echo "❌ launchctl load 未生效：${LABEL} 不在 launchctl list（plist 已寫入 ${PLIST_PATH}）" >&2
+    if "${LAUNCHCTL}" print-disabled "gui/$(id -u)" 2>/dev/null \
+        | grep -q "\"${LABEL}\" => disabled"; then
+      echo "   成因：該 label 被標記為 disabled（launchctl print-disabled gui/$(id -u) 可覆核）——" >&2
+      echo "   解除後重跑本腳本：launchctl enable gui/$(id -u)/${LABEL}" >&2
+    else
+      echo "   請看上方 launchctl 自身印出的錯誤（它載入失敗時仍 exit 0，故本腳本改以 list 自證）" >&2
+    fi
+    return 1
+  fi
   echo "✅ 已安裝並載入 launchd 排程：${LABEL}（每日 02:00 → ${NIGHTLY_SH}）"
   echo "   另含 RunAtLoad：開機/載入時補跑當日錯過的一輪（載體自帶當日去重，不重複跑）"
   echo "   驗證：bash tools/install_mac_nightly.sh --status"
@@ -279,6 +328,15 @@ cmd_install() {
 
 cmd_uninstall() {
   "${LAUNCHCTL}" unload "${PLIST_PATH}" 2>/dev/null || true
+  # unload 自證（R68-M64 同型；unload 失敗亦恆 exit 0）。若不自證就逕行刪 plist，
+  # 機器上會留下「仍載入、但磁碟已無 plist」的孤兒狀態——正是 R68-M31 那個下次
+  # 登入必死、而舊 --status 報全綠的狀態。本工具不得自己製造它。
+  if [ -n "$(_launchctl_row)" ]; then
+    echo "❌ launchctl unload 未生效：${LABEL} 仍在 launchctl list——plist 保留未刪" >&2
+    echo "   （逕行刪除會留下「已載入但無 plist」的孤兒排程，無法再以本工具卸載）" >&2
+    echo "   手動排除後重跑：launchctl bootout gui/$(id -u)/${LABEL}" >&2
+    return 1
+  fi
   if [ -f "${PLIST_PATH}" ]; then
     rm -f "${PLIST_PATH}"
     echo "✅ 已解除安裝：unload 並刪除 ${PLIST_PATH}"
@@ -289,12 +347,34 @@ cmd_uninstall() {
 
 cmd_status() {
   _loaded=0
-  # label 全字比對（第 3 欄精確等值）——grep -F 子字串會把 com.autoclaude.nightly2
-  # 之類前綴 label 誤判為已載入（SD-R13-4）；launchctl 失敗以 || true 收斂後判空。
-  _row="$("${LAUNCHCTL}" list 2>/dev/null | awk -v l="${LABEL}" '$3 == l' || true)"
+  # 心跳／覆蓋連續性「缺席」時要附加的成因提示。預設是「未啟用或尚未跑過第一輪」，
+  # 但下方讀到非零 last exit status 時會被覆寫（R68-M30）。
+  ABSENT_HINT=""
+  _row="$(_launchctl_row)"
   if [ -n "${_row}" ]; then
     _loaded=1
     echo "✅ launchd 已載入：${_row}"
+    # 第 2 欄＝last exit status（launchctl list 三欄：PID／Status／Label）。
+    # R68-M30：這一欄以前原樣印在螢幕上卻**不被解讀**——載體每晚照跑、每晚在寫出
+    # 心跳前就非零退出時，心跳與 RunId log 都永遠不生成，於是兩段報表齊聲宣告
+    # 「尚未跑過第一輪（正常）」且 rc=0。那句因果確定為假，且因為心跳檔從第一天起
+    # 就不存在，8 天過期哨兵永遠不會啟動——假宣稱是無上界的。對齊
+    # install_windows_nightly.ps1 Show-TaskDetail 的 LastTaskResult 列。
+    _last_exit="$(printf '%s\n' "${_row}" | awk '{print $2}')"
+    case "${_last_exit}" in
+      0)
+        echo "  ✅ 上次退出碼 = 0   (expected 0)；≙ Windows LastTaskResult"
+        ;;
+      ''|-)
+        echo "  －  上次退出碼 = ${_last_exit:-(缺席)}   (expected 0)；launchctl 未提供數值（尚未跑過或正在執行中）"
+        ;;
+      *)
+        echo "  ⚠️ 上次退出碼 = ${_last_exit}   (expected 0)；≙ Windows LastTaskResult——排程有觸發但載體非零退出，查 ${LOG_DIR}/nightly_mac_launchd.err"
+        # 覆寫後「尚未跑過第一輪」這句**整段消失**（不是加註但保留）——保留它等於讓
+        # 讀者在兩個互相矛盾的因果之間自行挑一個，而錯的那個才是好消息。
+        ABSENT_HINT="——排程已觸發但載體以 exit ${_last_exit} 結束、未寫出心跳（查 AutoClaude/logs/nightly_mac_launchd.err）"
+        ;;
+    esac
   else
     echo "❌ launchd 未載入 ${LABEL}——安裝：bash tools/install_mac_nightly.sh"
   fi
@@ -305,10 +385,17 @@ cmd_status() {
     report_plist_capabilities
   else
     echo "  plist：不存在（${PLIST_PATH}）"
+    if [ "${_loaded}" -eq 1 ]; then
+      # R68-M31：這是 macOS 專屬的「載入 ≠ 已持久化」狀態，只印一行「不存在」就走
+      # 會讓讀者以為那只是少了份備份檔。
+      echo "  ⚠️ 目前的載入狀態只活在本次登入 session——磁碟上沒有 plist，下次登入/重開機不會再載入。重裝：bash tools/install_mac_nightly.sh"
+    fi
   fi
   report_heartbeat
   report_coverage
-  [ "${_loaded}" -eq 1 ]
+  # 硬判準（見檔頭 Exit codes）：已載入 **且** plist 仍在磁碟上。後者才是「下次
+  # 登入還會在」的必要條件；只看前者等於把註定死掉的排程判成健康（R68-M31）。
+  [ "${_loaded}" -eq 1 ] && [ -f "${PLIST_PATH}" ]
 }
 
 MODE="${1:-install}"

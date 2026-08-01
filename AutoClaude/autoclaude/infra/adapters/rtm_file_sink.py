@@ -32,7 +32,10 @@ class FileRtmSink:
         safe_name = _sanitize_name(report_name)
         self._base.mkdir(parents=True, exist_ok=True)
         target = self._base / f"{safe_name}{ext}"
-        target.write_text(content, encoding="utf-8")
+        # newline="" 為必要（R68；同 DEF-101-524/534 缺陷類別）：text 模式預設
+        # newline=None 會在 Windows 上把每個 "\n" 寫成 "\r\n"，使同一份報告在
+        # 兩平台產出不同位元組（跨平台共用工作目錄時 diff/雜湊全部對不上）。
+        target.write_text(content, encoding="utf-8", newline="")
         path = str(target.resolve())
         self._obs.record_event(
             "rtm_report_written", {"path": path, "fmt": fmt, "bytes": len(content)}
@@ -48,7 +51,10 @@ class FileRtmSink:
         safe_name = _sanitize_name(report_name)
         self._base.mkdir(parents=True, exist_ok=True)
         target = self._base / f"{safe_name}.jsonl"
-        with target.open("a", encoding="utf-8") as f:
+        # newline=""：上方 docstring 的「強制 LF 收尾」在 Windows 上原本是假的
+        # ——text 模式預設 newline=None 會把 "\n" 轉成 "\r\n"，寫出 CRLF 的
+        # .jsonl。指定 newline="" 停用寫入端行尾轉換，讓承諾與實作一致（R68）。
+        with target.open("a", encoding="utf-8", newline="") as f:
             f.write(line.rstrip("\n") + "\n")
         path = str(target.resolve())
         self._obs.record_event(

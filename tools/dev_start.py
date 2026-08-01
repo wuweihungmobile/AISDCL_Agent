@@ -40,6 +40,7 @@ import hashlib
 import json
 import os
 import platform as _platform
+import plistlib
 import re
 import shutil
 import signal
@@ -48,7 +49,6 @@ import subprocess
 import sys
 import threading
 import time
-import tomllib
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Callable
@@ -78,6 +78,21 @@ SUMMARY: dict[str, str] = {}
 # 邏輯等價。R4 複審 S7 發現：此保護抽成 tools/_stdio_utf8.py 共用 helper（避免
 # check_ntfs_paths.py / check_script_parity.py 各自複製貼上第三份同款程式碼）。
 import _stdio_utf8  # noqa: E402,F401
+
+# 🔴 R68：Python 版本前置閘（macOS 真機重現的 P1）。薄殼 dev_start.sh 在 .venv 尚未
+# 存在時退回系統 python3，而 macOS 系統 python3 是 3.9 —— 舊版本檔頭直接
+# `import tomllib`（3.11+ 才有），全新 Mac 照 ONBOARDING §1/§2.1 走必得裸
+# ModuleNotFoundError traceback、零指引。改為：tomllib 延後到 _toml_deps_snapshot()
+# 內 import（本檔其餘語法 3.9 可載入，py_compile 實證），並在此給出可行動訊息。
+# 不用 argparse/例外：此刻連 main() 都還沒定義，而且要先於任何 3.11 依賴。
+_MIN_PY = (3, 11)
+if sys.version_info[:2] < _MIN_PY:
+    print(f"❌ dev_start 需要 Python >= {_MIN_PY[0]}.{_MIN_PY[1]}，"
+          f"當前為 {'.'.join(map(str, sys.version_info[:3]))}（{sys.executable}）。\n"
+          f"   macOS：brew install python@3.11 後改用 `python3.11 tools/dev_start.py`；\n"
+          f"   或先跑 `bash tools/bootstrap.sh`（其核心 3.9 可載入、會自動挑 3.11 建 .venv），\n"
+          f"   建好 .venv 後 tools/dev_start.sh 會自動改用 .venv/bin/python。", file=sys.stderr)
+    raise SystemExit(2)
 # step_hooks() 與 tools/check_hooks_liveness.py 共用同一份判定邏輯（S22，見該函式註解）。
 import check_hooks_liveness  # noqa: E402
 
@@ -86,6 +101,7 @@ import check_hooks_liveness  # noqa: E402
 # 既有慣例（R17 DEF-101-231 觀察點 1+2：收斂 is_windows/os_label/venv_python_path
 # 平台判斷邏輯的第二次重複）。
 sys.path.insert(0, str(ROOT / "tools" / "lib"))
+import ci_liveness  # noqa: E402  # R68：GitHub 排程軌逐軌活性偵測（見該檔檔頭 WHY）
 import platform_utils  # noqa: E402
 
 
@@ -116,7 +132,7 @@ def _git(*args: str, timeout: int = 60) -> subprocess.CompletedProcess:
 
 
 def _stream(cmd: list[str], on_start: Callable[[int], None] | None = None,
-            new_process_group: bool = False) -> int:
+            new_process_group: bool = False, env: dict[str, str] | None = None) -> int:
     """即時輸出地執行外部指令（bootstrap / pull / hooks 安裝）。
 
     flush：stdout 為 pipe（CI log）時 Python 端有緩衝，不 flush 會讓子行程
@@ -147,6 +163,8 @@ def _stream(cmd: list[str], on_start: Callable[[int], None] | None = None,
     """
     print(f"    $ {' '.join(cmd)}", flush=True)
     popen_kwargs: dict = {"cwd": str(ROOT)}
+    if env is not None:
+        popen_kwargs["env"] = env
     if new_process_group and not platform_utils.is_windows():
         popen_kwargs["start_new_session"] = True
     try:
@@ -562,6 +580,7 @@ def _toml_deps_snapshot(text: str, source: Path) -> str:
     # AttributeError。故把 tomllib.loads() 到 json.dumps() 全部收攏進同一個
     # try 區塊，任何解析/結構/序列化錯誤都同樣退回 <invalid-toml> 並警告
     # （fail loud 優先於 fail silent，與既有 TOMLDecodeError 分支一致）。
+    import tomllib  # R68：3.11+ 專屬，延後 import 讓 3.9 也能載入本檔並印出版本閘訊息
     try:
         data = tomllib.loads(text)
         project = data.get("project", {})
@@ -1504,7 +1523,20 @@ def step_hooks(now: str, is_repo: bool) -> None:
                str(ROOT / "AutoClaude" / "tools" / "install_git_hooks.ps1")]
     else:
         cmd = ["bash", str(ROOT / "AutoClaude" / "tools" / "install_git_hooks.sh")]
-    if _stream(cmd) == 0:
+    # 🔴 R68：安裝腳本（經 tools/lib/git_hooks_install_common.sh）只認**裸 `python`**，
+    # 而 macOS 沒有裸 python、子行程又不繼承「呼叫端 shell 有沒有 activate」——實測
+    # 在 macOS 預設情境（未 source .venv）100% 失敗，即「hooks 靜默全滅」的補救機制
+    # 自己全滅。dev_start 對「自己跑在哪支直譯器上」是權威來源，故把該直譯器所在目錄
+    # 前置進子行程 PATH（不改本行程環境、兩平台同款）。
+    # 優先用本 repo .venv（第 [4/7] 步剛整備好、且**必有裸 `python`**）；venv 尚不可用
+    # 時退回 sys.executable 所在目錄（至少涵蓋「以 .venv/bin/python 直呼本檔」情形）。
+    _vpy = platform_utils.venv_python_path(ROOT / ".venv")
+    # 走 `_safe_is_file()` 而非裸 `.is_file()`：本檔既有慣例（P1-3），OSError 須降級成
+    # 「視為不存在」＋warning，不得讓開工流程裸崩潰（既有鎖 TestStepHooksIsFileOSError）。
+    _bin = _vpy.parent if _safe_is_file(_vpy) else Path(sys.executable).parent
+    _env = dict(os.environ)
+    _env["PATH"] = str(_bin) + os.pathsep + _env.get("PATH", "")
+    if _stream(cmd, env=_env) == 0:
         SUMMARY["hooks"] = "已自動重設"
     else:
         # 設計決策：hooks 失敗不改整體 rc（venv 已可用、四支閘門腳本另有 liveness
@@ -1523,12 +1555,33 @@ _HEARTBEAT_MAX_AGE_DAYS = 8
 _NIGHTLY_LAUNCHD_LABEL = "com.autoclaude.nightly"
 
 
-def _launchd_nightly_loaded() -> bool | None:
+def _launchd_plist_target(label: str) -> Path | None:
+    """自 ~/Library/LaunchAgents/<label>.plist 取 ProgramArguments 內的 nightly 腳本路徑。
+
+    R68：label 全機唯一，第二個 clone／搬過家的 repo 會「命中 label 但排程其實指向
+    別份 checkout」。取值語意與 tools/install_mac_nightly.sh 的 `_plist_raw
+    ProgramArguments.1` 相同，此處用標準庫 plistlib 直讀（不 spawn PlistBuddy）。
+    """
+    p = Path.home() / "Library" / "LaunchAgents" / f"{label}.plist"
+    try:
+        with p.open("rb") as f:
+            args = plistlib.load(f).get("ProgramArguments") or []
+    except (OSError, ValueError, AttributeError, plistlib.InvalidFileException):
+        return None
+    for a in args:
+        if isinstance(a, str) and a.endswith("run_local_nightly.sh"):
+            return Path(a)
+    return None
+
+
+def _launchd_nightly_loaded() -> bool | str | None:
     """launchctl 精確查核 nightly 排程是否已載入（DEF-101-203②，純 advisory）。
 
-    三態：True＝已載入；False＝未載入；None＝查不到（非 darwin／launchctl 失敗
-    或逾時）。launchctl list 輸出格式為「PID Status Label」三欄（PID 可為 `-`），
-    第 3 欄用精確等值比對——防前綴誤中（如 com.autoclaude.nightly2）。
+    四態（R68 由三態擴充）：True＝已載入且指向本 checkout；**str＝已載入但指向
+    另一份 checkout（值為該路徑）**；False＝未載入；None＝查不到（非 darwin／
+    launchctl 失敗或逾時，或 plist 讀不到而無法鑑別）。launchctl list 輸出格式為
+    「PID Status Label」三欄（PID 可為 `-`），第 3 欄用精確等值比對——防前綴誤中
+    （如 com.autoclaude.nightly2）。
     """
     if not platform_utils.is_macos():
         return None
@@ -1542,7 +1595,11 @@ def _launchd_nightly_loaded() -> bool | None:
     for line in (r.stdout or "").splitlines():
         cols = line.split()
         if len(cols) >= 3 and cols[2] == _NIGHTLY_LAUNCHD_LABEL:
-            return True
+            target = _launchd_plist_target(_NIGHTLY_LAUNCHD_LABEL)
+            if target is None:
+                return None  # 讀不到 plist ⇒ 無鑑別力，不得謊報「正常」
+            mine = ROOT / "AutoClaude" / "tools" / "run_local_nightly.sh"
+            return True if target.resolve() == mine.resolve() else str(target)
     return False
 
 
@@ -1639,6 +1696,11 @@ def _check_nightly_heartbeat(now: str) -> str:
         # （schtasks 精確查核路由 DEF-101-200 Windows 輪）。
         if _flavor(now) != "windows":
             loaded = _launchd_nightly_loaded()
+            if isinstance(loaded, str):  # R68 四態之四：label 命中但指向另一份 checkout
+                print(f"    nightly 心跳未偵測（AutoClaude/logs/{name} 不存在）— "
+                      f"launchd 已載入，但指向另一份 checkout（{loaded}）— 本 repo 無 "
+                      f"nightly，請跑 bash tools/install_mac_nightly.sh")
+                return "nightly 心跳未偵測（launchd 指向另一份 checkout，見上）"
             if loaded is True:
                 print(f"    nightly 心跳未偵測（AutoClaude/logs/{name} 不存在）— "
                       f"launchd 已載入、尚未跑過第一輪（正常；首輪 02:00 後產生心跳，"
@@ -1725,6 +1787,12 @@ def _check_ci_liveness(is_repo: bool) -> str | None:
             return None
         if not is_repo:
             return None
+        # R68：逐軌陳舊度先查（與下方「最新一筆 run」是兩種粒度，缺一即有盲區——
+        # 見 tools/lib/ci_liveness.py 檔頭的 18 天實測）。
+        stale = ci_liveness.stale_schedule_tracks(ROOT, time.monotonic() + 25)
+        if stale:
+            _warn("GitHub 排程軌長期未成功：" + "；".join(stale)
+                  + " — 週/日頻兜底軌已死（最新一次 push 的綠燈遮蔽不了它）")
         try:
             r = subprocess.run(
                 ["gh", "run", "list", "--limit", "1",

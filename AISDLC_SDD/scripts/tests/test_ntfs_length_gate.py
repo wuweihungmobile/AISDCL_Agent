@@ -32,6 +32,7 @@ import os
 import shutil
 import subprocess
 import sys
+from pathlib import Path
 
 import pytest
 
@@ -309,3 +310,151 @@ def test_no_existing_tracked_path_exceeds_fail_threshold():
     ).stdout
     offenders = [p for p in out.split("\0") if p and len(p) > mod._LEN_FAIL]
     assert not offenders, f"存量 tracked 路徑超過 fail 門檻 {mod._LEN_FAIL}：{offenders}"
+
+
+# ── R68 防線 8：上標保留裝置名三站點 parity 鎖 ─────────────────────────────
+
+# Microsoft《Naming Files, Paths, and Namespaces》的保留名清單把上標變體與 ASCII
+# 數字版**並列**（成因：Windows 裝置名解析把上標數字視同數字；`unicodedata.normalize
+# ("NFKC","COM¹") == "COM1"` 可佐證兩者在相容性分解下同值）。四處實作共用的
+# `COM[0-9]|LPT[0-9]` 是 ASCII-only ⇒ 修復前實測 'COM¹'／'com².log'／'LPT¹' 在四處
+# **全部原樣輸出、零攔截**，而既有四方等值鎖比的是「四處彼此一致」，四處同時缺同一組
+# 字元即恆綠——本鎖補的正是這個結構性盲區（樣本表從未含上標）。
+#
+# 🔴 證據等級誠實揭露：**官方文件 ＋ 靜態分析／本機 NFKC 實測**，**非 Windows 真機
+# 實測**（R68 無 Windows 真機，未跑 `core.protectNTFS` update-index／clone 與 Win32
+# CreateFile 對照——CONIN$ 納入、CLOCK$ 排除當初都是真機實測後才定案）。取捨刻意選
+# 「擋」：誤擋的代價是一個沒人會用的檔名多一個 `_` 前綴／進不了庫；漏擋的代價是每一台
+# Windows clone 的 checkout 整體失敗（rc=128、工作樹全空，CONIN$ 已實證此形態）。
+# 未來若在 Windows 真機實測到 git 與 Win32 皆 ACCEPT，四處一併移除並比照 CLOCK$ 在
+# 各處註記「已實測不納入」，本鎖同步改為 benign 斷言。
+SUPERSCRIPT_DEVICE_SEGMENTS = [
+    "COM¹.txt", "COM².log", "COM³.yaml", "LPT¹.txt", "LPT².log", "LPT³.md",
+    "com¹.tar.gz",   # 大小寫不敏感 ＋ 多重副檔名
+    "LPT³ .txt",     # 疊加 R57 的尾隨空白形態
+]
+# 修復不得擴大攔截面（雙向鎖的另一半）：這些**不是**保留名，四處皆須放行
+SUPERSCRIPT_BENIGN_SEGMENTS = ["COM10.txt", "COMx.txt", "LPT.txt", "CONSOLE¹.md", "¹.txt"]
+
+
+def test_superscript_device_names_flagged_by_ci_scanner():
+    """站點 1／3：`tools/check_ntfs_paths.py::_ntfs_seg_bad`。"""
+    mod = _load_ntfs_module()
+    for seg in SUPERSCRIPT_DEVICE_SEGMENTS:
+        assert mod._ntfs_seg_bad(seg) is not None, f"CI 掃描器未攔下上標裝置名：{seg}"
+    for seg in SUPERSCRIPT_BENIGN_SEGMENTS:
+        assert mod._ntfs_seg_bad(seg) is None, f"CI 掃描器誤攔良性片段：{seg}"
+
+
+def test_superscript_device_names_prefixed_by_component_sanitizer():
+    """站點 2／3：`AISDLC_SDD/scripts/component_sanitizer.py::sanitize_component`
+    （生成器側——它產生的檔名會被提交，必須先於 validator 就不生出裝置名）。"""
+    from component_sanitizer import sanitize_component
+    for seg in SUPERSCRIPT_DEVICE_SEGMENTS:
+        out = sanitize_component(seg)
+        assert out.startswith("_"), f"sanitizer 未對上標裝置名加前綴：{seg} → {out}"
+    for seg in SUPERSCRIPT_BENIGN_SEGMENTS:
+        assert not sanitize_component(seg).startswith("_"), f"sanitizer 誤加前綴：{seg}"
+
+
+@pytestmark_bash
+def test_superscript_device_names_flagged_by_pre_commit_hook(tmp_path):
+    """站點 3／3：根層 `tools/git-hooks/pre-commit::_ntfs_seg_bad`（bash 實跑）。
+
+    WHY 必須實跑而非靜態比對字面值：bash 3.2 的 glob bracket 在 C locale 下是
+    **逐位元組**比對，`COM[¹²³]` 這種寫法（UTF-8 共 6 bytes）會退化成單位元組集合而
+    永不匹配 3 bytes 的 `COM¹`——靜態看得到字樣、實跑卻不攔，正是本鎖要防的假綠。
+    """
+    proc = _run_hook_with_staged_paths(tmp_path, ["COM¹.txt"])
+    assert proc.returncode != 0, f"hook 未攔下上標裝置名\nstdout={proc.stdout}\nstderr={proc.stderr}"
+    assert "保留裝置名" in proc.stderr
+
+
+@pytestmark_bash
+def test_superscript_fix_does_not_block_benign_paths_in_hook(tmp_path):
+    """hook 側的偽陽性鎖：良性片段（COM10 等）不得因本次修復被擋。"""
+    proc = _run_hook_with_staged_paths(tmp_path, SUPERSCRIPT_BENIGN_SEGMENTS)
+    assert "保留裝置名" not in proc.stderr, f"hook 誤判良性片段\nstderr={proc.stderr}"
+
+
+# ── R68 防線 9：sanitizer 產物必須通過自家 NFC 閘 ──────────────────────────
+
+def test_component_sanitizer_output_passes_ci_nfc_gate():
+    """生成器 ↔ validator 判準對齊鎖。
+
+    WHY（Rule 9 — 鎖住意圖）：`sanitize_component()` 產生的檔名（FSM-STATE-*.yaml／
+    SPEC-PATCH-*.md 等，實查 69 筆已入庫）會被提交，而同 repo 的
+    `check_ntfs_paths.py::_non_nfc_reason()` 對 index 內非 NFC 路徑 **fail-closed**。
+    修復前 sanitizer 零 Unicode 正規化 ⇒ NFD 輸入原樣輸出 ⇒ **自家生成器產出的檔名
+    被自家閘門擋下**。macOS 側因 `core.precomposeunicode` 預設 true（`git add` 會
+    precompose，index 恆 NFC）而不顯形，故此缺口顯形於 **Linux/CI runner 側**，
+    不是 macOS 側——這點與原始回報相反，以實跑 git 端到端對撞確認後據實記載。
+    """
+    import unicodedata
+
+    from component_sanitizer import sanitize_component
+    mod = _load_ntfs_module()
+    nfd_inputs = [
+        unicodedata.normalize("NFD", s) for s in ("AC-Café-001", "état-1", "한글-track")
+    ]
+    for nfd in nfd_inputs:
+        assert not unicodedata.is_normalized("NFC", nfd), f"樣本非 NFD，本鎖恆綠：{nfd!r}"
+        out = sanitize_component(nfd)
+        assert unicodedata.is_normalized("NFC", out), f"sanitizer 輸出仍為 NFD：{out!r}"
+        assert mod._non_nfc_reason(f"build/reports/fsm/FSM-STATE-{out}.yaml") is None, (
+            "sanitizer 產物過不了自家 CI 的 NFC 閘"
+        )
+    # 對純 ASCII／CJK 零行為變更（否則本修復會改動所有既有輸出）
+    for benign in ("my-project", "AC-001", "中文專案", "a b/c:d"):
+        assert sanitize_component(benign) == sanitize_component(
+            unicodedata.normalize("NFC", benign)
+        )
+
+
+# ── R68 防線 10：三站點長度政策對照登記表 ─────────────────────────────────
+
+def test_length_policy_three_sites_registry():
+    """把「三站點長度政策各自的域與理由」機械釘住（R68 idx-46）。
+
+    WHY 這是鎖而不是文件：檔名長度政策在三處有三種數字（80／無上限／200 fail +
+    180 warn），已被連續數輪掃描重新回報為「同一政策四份真相」。實查後的結論是
+    **刻意不相等**（三者治理不同域），但這個結論此前只存在於審查紀錄裡，沒有任何
+    機械物承載 ⇒ 下一輪必然再被當成缺陷重新發現一次。本鎖同時看守兩件事：
+      ① 三個數字／「不截斷」設計未被單方面改動（改了就得回來改本鎖與三處註解）；
+      ② 三處都留有 `三站點長度政策` 對照註記（註記被刪＝理由消失＝重新發現的前置）。
+
+    誠實劃界：本鎖**不**主張三者數字正確，也**不**覆蓋已知未修的跨平台窄帶——單一
+    component ~200–254 字元在 mac/Linux 合法、Windows 未開 longPaths 時總路徑可能破
+    260（≥255 為兩平台共同 ENAMETOOLONG，非跨平台落差；本輪 APFS 實測 200/250 OK、
+    255/256/300 FAIL errno 63）。該窄帶須先有 Windows 真機實證再設鎖，否則等於再加
+    一道從未紅過的鎖。
+    """
+    import component_sanitizer as cs
+    mod = _load_ntfs_module()
+    logger_src = os.path.join(
+        _monorepo_root(), "AutoClaude", "autoclaude", "utils", "logger.py"
+    )
+
+    assert cs._MAX_COMPONENT_LEN == 80, "站點①（FSM state 單一 component）政策已變動"
+    assert (mod._LEN_FAIL, mod._LEN_WARN) == (200, 180), "站點③（tracked 整條路徑）政策已變動"
+
+    # 站點②：logger 刻意**不截斷**——以行為斷言，避免只鎖註解而鎖不到實作
+    # 🔴 寫成 `Path(__file__).resolve().parents[N] / ...` 而非 `os.path.join(_monorepo_root(), …)`：
+    # 後者把基底藏在函式呼叫裡，`test_ci_paths_cover_root_consumers._eval_path_expr()` 無法靜態
+    # 解析 ⇒ 該路徑下的根層消費檔會對「CI paths 白名單涵蓋率」那道鎖隱形（R67 盲區 E 同構假綠）。
+    # 對齊本 repo `sys.path.insert(0, str(Path(...).parents[N]))` 既有慣例。
+    sys.path.insert(0, str(Path(__file__).resolve().parents[3] / "AutoClaude"))
+    from autoclaude.utils.logger import _sanitize_log_filename
+    long_name = "a" * 300 + ".log"
+    assert _sanitize_log_filename(long_name) == long_name, (
+        "站點②（runtime log 檔名）原本刻意不截斷（超長交由 OSError fallback 承接）；"
+        "若確要改為截斷，必須同步更新三處註解與本鎖"
+    )
+
+    marker = "三站點長度政策"
+    for path in (cs.__file__, _ntfs_tool_path(), logger_src):
+        with open(path, encoding="utf-8") as fh:
+            assert marker in fh.read(), (
+                f"{path} 缺少「{marker}」對照註記——理由一旦消失，下一輪掃描會把"
+                "「三處三種數字」當成新缺陷重新回報（本鎖存在的唯一理由）"
+            )

@@ -23,6 +23,19 @@
 .EXAMPLE
     pwsh tools/arch_fitness/run_self_evolution.ps1
     pwsh tools/arch_fitness/run_self_evolution.ps1 -Apply -MaxIterations 2
+
+.NOTES
+    🔴 退出碼契約（R68；.sh／.ps1 兩側逐碼同語意，規格側見
+    workflow/sdd-self-evolution/SDD_SELF_EVOLUTION.md「退出碼契約」節。
+    修改任一側前先讀該節——兩側原本各自在註解裡枚舉「已占用」而未看對面，
+    導致同一失敗條件〔PATH 上無可用 python〕bash 回 5、pwsh 回 7）：
+      0=收斂／乾淨收工　1=dry-run advisory 訊號（僅 warn）
+      2=dry-run structural fail 訊號　3=缺 claude CLI
+      4=ESCALATION（retry budget 用盡）　5=無可用 python 直譯器
+      6=平台前置不足（PowerShell < 7；bash 側不適用，保留不重用）
+      7=git 操作失敗（git switch -c）　64=未知參數（usage，僅 bash 側）
+      8=SSOT WindowsAppsGuard.ps1 缺席（僅 .ps1 側；bash 側因 POSIX 無 WindowsApps
+        空殼陷阱而採降級回退，兩側於此刻意不對等，理由見下方 guard 區段註解）
 #>
 [CmdletBinding()]
 param(
@@ -39,7 +52,7 @@ param(
 if ($PSVersionTable.PSVersion.Major -lt 6) {
     Write-Host "ERROR: 本腳本需 pwsh 7+（PowerShell 5.1 對 native stderr 的 ErrorRecord 包裝會在 git 清理行中斷）。" -ForegroundColor Red
     Write-Host "  請改用：pwsh tools/arch_fitness/run_self_evolution.ps1" -ForegroundColor Yellow
-    exit 5  # 獨立退出碼：1/2=dry-run 訊號、3=缺 claude、4=ESCALATION 皆已占用
+    exit 6  # R68 退出碼契約：6=平台前置不足（原為 5，與 bash 側「無可用 python」碰撞）
 }
 
 $ErrorActionPreference = "Stop"
@@ -64,16 +77,26 @@ New-Item -ItemType Directory -Force -Path $ReportDir | Out-Null
 # 執行只跳出 Microsoft Store 安裝提示）。dot-source 共用 guard（比照
 # tools/bootstrap.ps1／tools/dev_start.ps1／LATEST install_post_commit.ps1 三個
 # 已收斂呼叫點），在首次呼叫 python 前 fail-loud。
+# 🔴 R68 誠實劃界（本輪**刻意不做**「缺席即降級」）：guard 位於 monorepo 根（框架版本根
+# 之外兩層），框架被單獨 clone／經同版 tools/init_project.sh 部署到使用者專案後該路徑不
+# 存在，故本檔在非 monorepo 佈局下確實跑不起來——這是**已知且未修**的缺口（R68 Scan-A2）。
+# 曾嘗試比照 bash 側改為「缺席則降級為 Get-Command python」，經
+# tools/tests/test_windowsapps_guard_cross_consistency.py::
+# test_python_calls_in_ps1_all_go_through_ssot 攔下並判定為真陽性：降級路徑會讓
+# $PythonUsable 在**未經 Test-IsRealPython** 的情況下為真，而 WindowsApps 空殼陷阱恰恰
+# 只在 Windows 成立 ⇒ 降級等於在唯一有此陷阱的平台上關掉唯一的防線（bash 側可以降級，
+# 正因為 POSIX 根本沒有這個陷阱——兩側「不對等」在此是正確的，不是缺陷）。
+# 正解是讓 SSOT 可攜（部署時一併帶出 guard），成本超出本輪授權面，留待後輪。
 $RepoRoot = Split-Path -Parent (Split-Path -Parent $FrameworkRoot)
 $WindowsAppsGuardPath = Join-Path $RepoRoot "tools/lib/WindowsAppsGuard.ps1"
 if (-not (Test-Path $WindowsAppsGuardPath)) {
     Write-Host "ERROR: 找不到共用函式 $WindowsAppsGuardPath（tools/lib/WindowsAppsGuard.ps1）— 請在完整 monorepo checkout 內執行本腳本" -ForegroundColor Red
-    exit 7  # 獨立退出碼：1/2=dry-run 訊號、3=缺 claude、4=ESCALATION、5=PS 版本過舊、6=git switch -c 失敗皆已占用
+    exit 8  # R68 退出碼契約：8=SSOT guard 缺席（monorepo 佈局前提不成立；.ps1 側限定）
 }
 . $WindowsAppsGuardPath
 if (-not (Test-IsRealPython -CandidateName 'python')) {
     Write-Host "ERROR: 找不到可用的 python 直譯器（PATH 上找不到，或僅命中 WindowsApps 空殼）" -ForegroundColor Red
-    exit 7
+    exit 5  # R68 退出碼契約：5=無可用 python（原為 7，與 bash 側 5 不對等）
 }
 
 function Invoke-Fitness {
@@ -158,7 +181,7 @@ for ($iter = 1; $iter -le $MaxIterations; $iter++) {
         # 這只在 pwsh 7.3+ 且 $PSNativeCommandUseErrorActionPreference 維持預設 $true 時成立，
         # 本腳本僅要求 PSVersion.Major -ge 6，故顯式檢查 $LASTEXITCODE 才是跨版本一致的作法。
         Write-Host "FSE_FATAL：git switch -c 失敗（exit $LASTEXITCODE），中止（鏡像 .sh 側 set -e 語意）。" -ForegroundColor Red
-        exit 6  # 獨立退出碼：1/2=dry-run 訊號、3=缺 claude、4=ESCALATION、5=PS 版本過舊皆已占用
+        exit 7  # R68 退出碼契約：7=git 操作失敗（原為 6，該碼已改配給「平台前置不足」）
     }
     $applied = $false
     for ($r = 1; $r -le $RetryBudget; $r++) {

@@ -339,7 +339,15 @@ show_completion_message() {
     echo -e "   │   ├── 01_requirements/"
     echo -e "   │   ├── 02_architecture/"
     echo -e "   │   └── ..."
-    echo -e "   ├── .claude/skills/         # Claude Code Skills (33個)"
+    # R68（Scan-H 判準③：不得在使用者面輸出寫死可由程式現查的數字）：原本寫死
+    # 「(33個)」，實測部署後為 42（權威源 AISDLC_SDD/FRAMEWORK_STATUS.md 的
+    # `.claude/skills` 列），且 .ps1 對應物不印計數＝單邊 stale。改為對已部署目錄
+    # 現算。只數子目錄（一個 skill＝一個含 SKILL.md 的目錄）——不可用 `ls | wc -l`，
+    # 該目錄另含 README.md 等非 skill 檔（正是原缺陷報告誤算成 45 的來源）。
+    # `| tr -d ' '` 吸收 BSD wc 的前導空白（同本樹 verify_traceability.sh:77 手法）。
+    local skill_count
+    skill_count="$(find "${target_dir}/.claude/skills" -mindepth 1 -maxdepth 1 -type d 2>/dev/null | wc -l | tr -d ' ')"
+    echo -e "   ├── .claude/skills/         # Claude Code Skills (${skill_count}個)"
     echo -e "   └── CLAUDE.md               # Claude Code 設定"
     echo ""
 }

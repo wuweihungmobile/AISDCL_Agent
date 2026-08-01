@@ -1620,5 +1620,120 @@ class TestSpecDocShellCommandsAreZshSafe(unittest.TestCase):
             self.assertTrue(doc.exists())
 
 
+class TestUnpinnedHandoverAndStaleGrandfather(unittest.TestCase):
+    """硬規則② 後半句（R68）與其存量豁免 stale 自檢的鑑別力鎖。
+
+    🔴 為何必須以**純函式**驗、不經 `main()`：這兩道與 `_UNPINNED_HANDOVER_
+    GRANDFATHERED` 是一體的，而該名單列的是相對於真實主檔的存量 ID。經 `main()`
+    就得餵合成帳本，名單對它全不匹配 ⇒ 兩個方向同時假紅（fixture 的未結列一律被判
+    「缺承接指派」、名單每一筆一律被判「已 stale」），紅因與被驗行為無關。主檔因此
+    把這兩道綁在 `_DEFECT_LOG == _DEFAULT_DEFECT_LOG`；**代價是 `main()` 路徑上
+    這兩道對合成帳本沒有覆蓋**，本類別就是補上那塊覆蓋的地方——少了它，綁定就從
+    「隔離假紅」變成「靜默關掉一條規則」。
+
+    R68 補立的直接原因：這兩道在被加進主檔時**零測試**（`grep` 全 `tools/tests/`
+    零命中），等於新規則自己不符合本 repo 對「鎖已落地」的認定門檻（Scan-H）。
+    """
+
+    _ROW_UNRESOLVED_NO_HANDOVER = (
+        "| DEF-01-777 | 2026-08-02 | 情境 | 現象 | P2 | 去向 | open |\n"
+    )
+    _ROW_UNRESOLVED_UNASSIGNED = (
+        "| DEF-01-777 | 2026-08-02 | 情境 | 現象 | P2 | 去向 | open（未指派） |\n"
+    )
+    _ROW_UNRESOLVED_WITH_ROUND = (
+        "| DEF-01-777 | 2026-08-02 | 情境 | 現象 | P2 | 去向 | open（承接輪次：R99） |\n"
+    )
+    _ROW_CLOSED = (
+        "| DEF-01-777 | 2026-08-02 | 情境 | 現象 | P2 | 去向 | fixed@R68 |\n"
+    )
+
+    def _no_grandfather(self):
+        """把存量豁免清空——本類別驗的是規則本體，不是那 57 筆歷史存量。"""
+        return mock.patch.object(m, "_UNPINNED_HANDOVER_GRANDFATHERED", frozenset())
+
+    def test_unresolved_row_without_any_handover_is_caught(self) -> None:
+        """缺陷注入（正向）：未結列既無輪號也無「未指派」字面 ⇒ 必須被抓。"""
+        with self._no_grandfather():
+            problems = m.unpinned_handover_problems(
+                _ledger_text(self._ROW_UNRESOLVED_NO_HANDOVER))
+        self.assertTrue(problems, "未結列缺承接指派卻零訊號 ⇒ 硬規則② 後半句無牙")
+        self.assertIn("DEF-01-777", " ".join(problems))
+
+    def test_literal_unassigned_satisfies_the_rule(self) -> None:
+        """還原（反向之一）：補上字面「未指派」即為合法出口，不得再紅。"""
+        with self._no_grandfather():
+            self.assertEqual(
+                m.unpinned_handover_problems(
+                    _ledger_text(self._ROW_UNRESOLVED_UNASSIGNED)), [])
+
+    def test_explicit_round_satisfies_the_rule(self) -> None:
+        """還原（反向之二）：指名承接輪號同樣是合法出口。"""
+        with self._no_grandfather():
+            self.assertEqual(
+                m.unpinned_handover_problems(
+                    _ledger_text(self._ROW_UNRESOLVED_WITH_ROUND)), [])
+
+    def test_closed_row_is_out_of_scope(self) -> None:
+        """已結列不在本規則射程（`_UNRESOLVED_CLASSES` 之外）——防過度攔截。"""
+        with self._no_grandfather():
+            self.assertEqual(
+                m.unpinned_handover_problems(_ledger_text(self._ROW_CLOSED)), [])
+
+    def test_grandfathered_id_is_not_reported_as_a_problem(self) -> None:
+        """存量豁免確實生效：同一列進了名單就不該再被判「缺承接指派」。"""
+        with mock.patch.object(
+            m, "_UNPINNED_HANDOVER_GRANDFATHERED", frozenset({"DEF-01-777"})
+        ):
+            self.assertEqual(
+                m.unpinned_handover_problems(
+                    _ledger_text(self._ROW_UNRESOLVED_NO_HANDOVER)), [])
+
+    def test_stale_grandfather_is_caught_when_the_row_got_closed(self) -> None:
+        """缺陷注入（stale 自檢正向）：豁免對象已結案 ⇒ 名單必須被要求刪除該筆。
+
+        這正是棘輪「只准往小走」的驅動力；沒有這一條，名單只進不出。
+        """
+        with mock.patch.object(
+            m, "_UNPINNED_HANDOVER_GRANDFATHERED", frozenset({"DEF-01-777"})
+        ):
+            problems = m.stale_grandfather_problems(_ledger_text(self._ROW_CLOSED))
+        self.assertTrue(problems, "豁免對象已結案卻不要求刪除 ⇒ 名單變成死名單")
+        self.assertIn("DEF-01-777", " ".join(problems))
+
+    def test_stale_grandfather_is_silent_while_the_waiver_is_still_needed(self) -> None:
+        """還原（stale 自檢反向）：對象仍是「未結且無指派」時，豁免仍需要，不得誤報。"""
+        with mock.patch.object(
+            m, "_UNPINNED_HANDOVER_GRANDFATHERED", frozenset({"DEF-01-777"})
+        ):
+            self.assertEqual(
+                m.stale_grandfather_problems(
+                    _ledger_text(self._ROW_UNRESOLVED_NO_HANDOVER)), [])
+
+    def test_main_still_runs_both_gates_against_the_real_ledger(self) -> None:
+        """綁定不得退化成「靜默關掉」：真實主檔路徑上兩道必須仍被 `main()` 執行。
+
+        以原始碼結構斷言（兩道的呼叫確實在 `_DEFAULT_DEFECT_LOG` 的守衛區塊內，
+        且該常數就是預設主檔），而非重跑一次 `main()`——後者在真 repo 綠燈時
+        對「有沒有跑到」是恆真的，抓不到有人把守衛條件改成永遠為假。
+        """
+        self.assertEqual(m._DEFAULT_DEFECT_LOG, m._REPO_ROOT / "docs" /
+                         "06_quality" / "AutoSDD_Defect_Log.md")
+        src = Path(m.__file__).read_text(encoding="utf-8")
+        guard = "if _DEFECT_LOG == _DEFAULT_DEFECT_LOG:"
+        self.assertIn(guard, src, "守衛消失 ⇒ 兩道可能被無條件跑或無條件跳過")
+        after = src.split(guard, 1)[1]
+        # 守衛區塊 = 緊接其後、縮排更深的那幾行；兩道呼叫都必須落在裡面。
+        block = []
+        for line in after.splitlines()[:12]:
+            if line.strip() and not line.startswith(" " * 8):
+                break
+            block.append(line)
+        block_text = "\n".join(block)
+        for fn in ("unpinned_handover_problems(", "stale_grandfather_problems("):
+            self.assertIn(fn, block_text,
+                          f"`{fn}` 不在真實主檔守衛區塊內 ⇒ 綁定已退化")
+
+
 if __name__ == "__main__":
     unittest.main()

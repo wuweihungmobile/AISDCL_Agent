@@ -57,6 +57,11 @@ _ALLOWED: dict[str, str] = {
         "Windows 專屬 perception/cmd-shim 的 mock 回傳值與純字串斷言，"
         "無 pathlib join 語意（R12 親讀 20 筆命中逐一核可，非 DEF-101-149 病灶）"
     ),
+    "AutoClaude/tests/test_perception_platform_honesty.py": (
+        "上一列 test_perception.py 的姊妹檔（R68 新增，測 cmd.exe 8191 字元硬上限守門）："
+        "三筆命中皆為 _build_cmd_shim_line() 的輸入字串字面值，直接進字串長度計算、"
+        "不進 pathlib join；且 cmd shim 本來就只在 Windows 成立，改平台中立常數即失去測意"
+    ),
 }
 _OK_MARKER = "platform-ok:"
 _EXPLICIT_PLATFORM = ("PureWindowsPath(", "PurePosixPath(")

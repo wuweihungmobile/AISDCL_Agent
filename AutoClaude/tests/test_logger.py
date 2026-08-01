@@ -6,6 +6,7 @@
 """
 import io
 import logging
+import unicodedata
 from unittest import mock
 
 import pytest
@@ -187,6 +188,44 @@ def test_sanitize_log_filename_guards_windows_reserved_device_names(reserved):
     result = _sanitize_log_filename(reserved)
     assert result != reserved
     assert result == f"_{reserved}"
+
+
+@pytest.mark.parametrize(
+    "raw", ["COM¹", "COM²", "COM³", "LPT¹", "LPT²", "LPT³", "com¹.log", "lpt².tar.gz"]
+)
+def test_sanitize_log_filename_guards_superscript_device_names(raw):
+    """R68 回歸鎖：MS《Naming Files, Paths, and Namespaces》保留名清單與 ASCII 數字版
+    **並列**列出上標變體 COM¹/COM²/COM³/LPT¹/LPT²/LPT³，而四處實作共用的
+    `COM[0-9]|LPT[0-9]` 是 ASCII-only ⇒ 上標形態全部原樣輸出、零前綴（修復前實測）。
+
+    WHY 這件事會壞（Rule 9 — 鎖住意圖）：`_sanitize_log_filename` 的職責是「輸出的
+    檔名在 Windows 上 open() 得到檔案而不是裝置」。上標數字在 Windows 裝置名解析下
+    等同數字（NFKC('COM¹')=='COM1'），漏擋等於這個職責對一整類輸入失效。
+    🔴 證據等級＝官方文件＋靜態分析（本輪無 Windows 真機），取捨見 logger.py 常數註解。
+    """
+    result = _sanitize_log_filename(raw)
+    assert result == f"_{raw}", f"上標裝置名未被加前綴：{raw!r} → {result!r}"
+
+
+@pytest.mark.parametrize("benign", ["COM10", "CONSOLE", "CLOCK$", "COMx", "LPT"])
+def test_sanitize_log_filename_superscript_fix_adds_no_false_positive(benign):
+    """上標修復不得擴大攔截面（雙向鎖的另一半）。"""
+    assert _sanitize_log_filename(benign) == benign
+
+
+def test_sanitize_log_filename_normalizes_to_nfc():
+    """R68 回歸鎖：輸出必須是 NFC。
+
+    WHY（Rule 9）：本函式是**生成器**，其產物會被提交，而同 repo 的
+    `tools/check_ntfs_paths.py::_non_nfc_reason()` 對 index 內非 NFC 路徑 fail-closed
+    ⇒ 生成器與 validator 判準相反時，sanitizer 產生的檔名一提交就被自家閘門擋下。
+    macOS 側因 `core.precomposeunicode` 預設 true 而不顯形，顯形於 Linux/CI 側。
+    """
+    nfd = unicodedata.normalize("NFD", "playbook_Café-Ω.log")
+    assert not unicodedata.is_normalized("NFC", nfd), "樣本本身必須是 NFD，否則本鎖恆綠"
+    out = _sanitize_log_filename(nfd)
+    assert unicodedata.is_normalized("NFC", out), f"輸出仍非 NFC：{out!r}"
+    assert out == unicodedata.normalize("NFC", nfd), "除正規化外不得改動合法字元"
 
 
 def test_raw_stream_logger_survives_windows_forbidden_step_id(tmp_path):

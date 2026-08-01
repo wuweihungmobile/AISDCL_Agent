@@ -182,6 +182,16 @@ CHECK_CRITERIA: tuple[tuple[str, str], ...] = (
      "`見主檔 DEF-x`／`見 DEF-x（現居 archive_NN）` 同樣驗居所；"
      "裸「現居 archive_NN」（無「見」動詞）另受對等硬要求，須跟得上可解析 DEF-ID"),
     ("表格列欄數", "每列切出的欄數等於該檔表頭欄數；archive 側既有列具名基線、主檔零豁免"),
+    # 🔴 (8) R68 新增（DEF-101-676）：搬遷判準③ 由「被宣稱過就硬擋」改寫為「搬後宣稱仍
+    # 解析得到」之後，那個「仍解析得到」不能只是**斷言**——本工具立帳要消滅的病就是
+    # 「宣稱一道機械檢查存在而它不存在」（見 CHECK_CRITERIA 上方 P7-4 的 WHY）。本項就是
+    # 那道檢查本體：對四份掃描目標的每一句可辨識狀態宣稱，實跑帳本家族解析，任何一句
+    # 解析不到（或解析到的狀態與宣稱不符）即 rc=1。它同時是判準③ 改寫的**安全網**：
+    # 一旦 archive fallback 哪天失效（glob 改壞、archive 表頭改版），本項當場轉紅，
+    # 而不是等到某個讀者只讀主檔而誤判某缺陷「查無此 ID」。
+    ("跨檔宣稱可解析",
+     "掃描目標的每一句狀態宣稱都要能在帳本家族（主檔 ∪ archive）解析到，且狀態一致"
+     "（判準③ 改寫後的事後條件，R68）"),
 )
 
 # 搬遷判準（`classify_row()` ①②③⑤ ＋ `plan()` ④⑥）。同樣由本常數生成 archive 標頭散文。
@@ -200,10 +210,25 @@ CHECK_CRITERIA: tuple[tuple[str, str], ...] = (
 # 需要人具名承認「已有承接者」；但指針居所是可驗證的事實陳述，允許「承認後照搬」等於
 # 讓操作者親手重演本項要消滅的事故。正確路徑是先把外部指針改成正確居所（或改寫成
 # 「現居 archive_NN」指向即將建立的目的檔），該列才會回到可搬狀態。
+#
+# 🔴 R68 修訂第②③ 兩項（DEF-101-676 容量政策解）——兩項原文都把「疑似」當「成立」，
+# 合計把 55922 bytes 的**已結**列永久釘在主檔，使輪替吞吐趨近零：
+#   ② 原文「狀態欄無活躍字樣」是對整欄裸掃描，實測 16 筆已結列命中的是 `open(` 這個
+#      Python 內建函式、或本列自己被推翻的舊狀態引述（詳見 `active_status_hit()`）。
+#      改為「排除程式碼片段與角引號引述之後仍無活躍字樣」——收窄的是**誤報面**，
+#      裸散文與判準④ 兩道鑑別力原封不動。
+#   ③ 原文「未被 crossref 掃描目標做過可辨識狀態宣稱」把「有人提過這一列」當成不可搬，
+#      但真正的危害從來不是「被提過」，而是「搬走後那句話解析不到」。該缺口的根因在
+#      `check_defect_log_crossref._load_ledger_status()` **只讀主檔**；R68 補上
+#      `_load_archive_status()` 後帳本 SSOT 才是它一直宣稱的「主檔 ∪ archive 家族」，
+#      本項於是改寫成「搬走後宣稱仍解析得到」這個**可驗證的事後條件**，並由 `--check`
+#      判準(8) 逐筆實跑驗證（不是把檢查刪掉——刪掉才是本工具立帳要消滅的那種病）。
 MOVE_CRITERIA: tuple[str, ...] = (
     "狀態欄分類已結（fixed／wontfix／closed-by-decision）",
-    "狀態欄無活躍字樣（open／routed／deferred／watch／workaround，ASCII 邊界非子字串）",
-    "未被 crossref 掃描目標做過可辨識狀態宣稱",
+    "狀態欄無活躍字樣（open／routed／deferred／watch／workaround，ASCII 邊界非子字串；"
+    "程式碼片段與角引號引述內的字樣不算，R68 收窄）",
+    "被 crossref 掃描目標宣稱過狀態者可搬，但搬後該宣稱必須仍解析得到"
+    "（帳本家族＝主檔 ∪ archive；由 --check 判準(8) 實跑驗證，R68 改寫）",
     "散文帶交棒字樣者需 `--ack-handoff` 具名承認",
     "該列切出的欄數等於表頭欄數（欄位定位失效者一律不判讀狀態、一律不可搬）",
     "無外部居所指針宣稱本列現居主檔（指針反向依賴，DEF-101-612；有則硬擋，"
@@ -211,6 +236,13 @@ MOVE_CRITERIA: tuple[str, ...] = (
 )
 
 _CIRCLED = "①②③④⑤⑥⑦⑧⑨⑩"
+
+#: DEF-101-676 的解鎖判準門檻（R67 round 4 訂）：`--plan` 印出的「搬後主檔約 N bytes」
+#: 距 `gate._LEDGER_FAIL_BYTES` 必須 ≥ 本值。**這是判準門檻本身、不是量測快照**——原始
+#: 解鎖條件寫的是「可搬筆數 > 0」，那是 fail-open（當輪多寫一列已結列就自己變 True，
+#: 量的是「有沒有可搬的列」而不是「輪替還買不買得到餘裕」）。放在程式常數而非散文裡，
+#: 是為了讓「解鎖了沒」每跑一次 `--plan` 就當場現算，不必有人記得去翻帳本對數字。
+_UNLOCK_HEADROOM_BYTES = 10240
 
 # ---------------------------------------------------- 判準(7) 的既有列具名基線（Pkg-P7 P7-2）
 # 🔴 帳本家族 archive 側實查有一批列的欄內含**未轉義的字面豎線**（須寫成 `\|`），因而被
@@ -321,7 +353,12 @@ POINTER_VERB = "立帳見"
 # (b) `check()` **每一次執行都會逐處列印**被視為例外的位置、原文與**憑哪一條**（比照
 # `check_pytest_baseline_sites.py` 的 `baseline-ok:` 豁免逐次列印稽核慣例），
 # 所以拿反引號夾帶一個真指針來規避，會在每一次閘門輸出裡現形，不可能靜默。
-_CODE_SPAN_RE = re.compile(r"`[^`]*`")
+# 🔴 **再匯出（re-export），不是複本**（R68）：`= gate._CODE_SPAN_RE` 綁的是**同一個
+# 物件**，形狀沿用本檔既有的 `_CELL_SPLIT_RE = gate._CELL_SPLIT_RE` 先例。R68 在
+# `check_defect_log_crossref.status_variant_problems()` 也需要「反引號內是逐字引述、
+# 不算宣稱」這條判準；同一個判準寫兩份正是本 repo 反覆在治的複本型缺陷，故收斂為
+# 一份 SSOT（方向必然是 gate → 本檔：本檔 import gate，反向會是循環 import）。
+_CODE_SPAN_RE = gate._CODE_SPAN_RE
 _TERM_MENTION_SUFFIXES = ("」", "』")
 # 例外 (丁) 收窄用（SA-R60R3-06）：同一行的成對轉角引號。與 `_CODE_SPAN_RE` 同形狀——
 # 兩者都是「看得見的刻意標記」，故用同一種判定方式（掃出成對區間、看該處落不落在區間內）。
@@ -462,8 +499,51 @@ def _status_claimed_ids() -> set[str]:
     return claimed
 
 
+def active_status_hit(status_cell: str) -> re.Match[str] | None:
+    """判準② 的實際判讀入口：**排除程式碼片段與角引號引述之後**再找活躍字樣（R68）。
+
+    🔴 為何非收窄不可（DEF-101-676 實測，2026-08-01 於主檔 109 列現查）——判準② 原本是
+    對整個狀態欄做裸掃描，於是把以下三類**與本列現況無關**的字元一律當成「本列還活著」：
+
+      · **程式碼片段裡的 Python 內建函式 `open`**。實例 `DEF-101-391`：狀態欄寫
+        `` fixed@R48：`python3 -c "import yaml; yaml.safe_load(open('...yml'))"` ``——
+        命中的 `open` 是 `open()` 呼叫。`DEF-101-524` 同型（`open(..., newline="")`）。
+        這與本判準 ASCII 邊界那一版要消滅的 `OpenMutexW` 誤報**完全同型**，只是逸出面
+        從「英文字母相鄰」換成「反引號內」。
+      · **引述本列自己被推翻的舊狀態**。實例 `DEF-101-554`：`` 本欄原文為「`open`（待
+        主控還原）」…（污染已還原，後續輪不需再執行任何動作） ``；`DEF-101-581`：
+        `` 原記狀態 `open（未指派）` ``。這些字面出現的用途正是**宣告它已不成立**，
+        判準② 卻把它讀成「還成立」——語意剛好相反。
+      · **在講別的 DEF-ID**。實例 `DEF-101-541`／`564`／`565`：`routed` 指的是被拆出去
+        的另一列（`DEF-101-559` 等），不是本列。
+
+    後果不是「多攔幾筆」而是**結構性死結**：這 16 筆全是 `_classify` 已判已結（fixed／
+    closed-by-decision）、只被判準② 一項擋住的列，合計 **39705 bytes** 永久卡在主檔，
+    使輪替吞吐趨近零、主檔單調逼近 256KB 硬線（DEF-101-676）。
+
+    收窄手法刻意**復用本工具既有基元**（`_CODE_SPAN_RE`／`_CORNER_QUOTE_RE`，判準④⑥
+    已在用），不另寫一套規則——否則就是製造第二份說法，重演 P7-4「兩份清單」病。
+
+    🔴 **鑑別力不得因此流失**，三道保留：
+      (a) 裸散文裡的活躍字樣照樣命中（未加反引號、未加角引號者一律算數）；
+      (b) 判準① 仍先要求狀態欄首詞分類為已結，本判準只是第二層；
+      (c) 判準④（`HANDOFF_PROSE_RE`：下輪／留待／解鎖條件／承接者／改派／backlog／
+          deferred）完全不受本次收窄影響，且它掃的是**整列**而非狀態欄——真正的活交棒
+          仍會被攔下要求 `--ack-handoff` 具名承認。實測本次放行的 6 筆中，`DEF-101-521`
+          （backlog）／`524`（解鎖條件）／`554`（backlog）三筆仍落在判準④ 手上。
+    對應機械鎖：`tools/tests/test_defect_log_capacity_policy_r68.py::TestCriterion2Narrowing`
+    """
+    masked = list(status_cell)
+    for pattern in (_CODE_SPAN_RE, _CORNER_QUOTE_RE):
+        for m in pattern.finditer(status_cell):
+            # 以空白覆蓋（等長置換，保住 offset 與長度，便於報告引用原字串位置）
+            for i in range(m.start(), m.end()):
+                masked[i] = " "
+    return ACTIVE_STATUS_RE.search("".join(masked))
+
+
 def classify_row(line: str, claimed: set[str], layout: tuple[int, int, int]) -> dict:
-    """對單一表格列套用搬遷判準 ①②③⑤，回傳結構化裁決（④ 由 `plan()` 依 ack 判）。
+    """對單一表格列套用搬遷判準 ①②⑤，回傳結構化裁決（④ 由 `plan()` 依 ack 判）。
 
     `layout` ＝ `gate._table_layout()` 回傳的 `(表頭欄數, ID 欄索引, 狀態欄索引)`。
     🔴 **必須由呼叫端傳入而不是在此猜**：狀態欄一律由**表頭欄名**定位，不再取 `cells[-1]`
@@ -485,15 +565,18 @@ def classify_row(line: str, claimed: set[str], layout: tuple[int, int, int]) -> 
         }
     status_cell = cells[status_idx]
     cls = gate._classify(status_cell)
-    active = ACTIVE_STATUS_RE.search(status_cell)
+    active = active_status_hit(status_cell)
     handoff = HANDOFF_PROSE_RE.search(line)
     blockers: list[str] = []
     if cls not in CLOSED_CLASSES:
         blockers.append(f"①狀態分類非已結（cls={cls}）")
     if active:
-        blockers.append(f"②狀態欄含活躍字樣 {active.group(0)!r}")
-    if def_id in claimed:
-        blockers.append("③被 crossref 掃描目標做過狀態宣稱")
+        blockers.append(f"②狀態欄含活躍字樣 {active.group(0)!r}"
+                        "（已排除程式碼片段與角引號引述後仍命中）")
+    # 🔴 判準③ 自 R68 起**不再是 blocker**（DEF-101-676）：`def_id in claimed` 只保留為
+    # `--plan` 的資訊欄位，不進 `blockers`。WHY 見 MOVE_CRITERIA 第③項；一句話版本＝
+    # 「被宣稱過」從來就不是不該搬的理由，真正的理由是「搬走後宣稱會解析不到」，而那個
+    # 缺口已在 `check_defect_log_crossref._load_archive_status()` 補上（主檔 ∪ archive）。
     return {
         "id": def_id,
         "line": line,
@@ -501,6 +584,9 @@ def classify_row(line: str, claimed: set[str], layout: tuple[int, int, int]) -> 
         "cls": cls,
         "blockers": blockers,
         "handoff_marker": handoff.group(0) if handoff else None,
+        # 判準③ 的資訊欄位（非 blocker，R68）：搬走這一列時，掃描目標內對它的狀態宣稱
+        # 會改由 archive fallback 解析——`--check` 判準(8) 逐筆驗這件事真的成立。
+        "claimed": def_id in claimed,
     }
 
 
@@ -564,6 +650,7 @@ def plan(ack: frozenset[str] = frozenset()) -> dict:
     movable.sort(key=lambda v: -v["bytes"])
     return {
         "claimed_count": len(claimed),
+        "movable_claimed": sum(1 for v in movable if v["claimed"]),
         "total_rows": len(verdicts),
         "movable": movable,
         "needs_ack": needs_ack,
@@ -575,10 +662,18 @@ def plan(ack: frozenset[str] = frozenset()) -> dict:
 def _print_plan(p: dict) -> None:
     print(f"帳本主檔 {p['ledger_bytes']} bytes｜表格列 {p['total_rows']} 筆"
           f"｜judge 線 warn={gate._LEDGER_WARN_BYTES} fail={gate._LEDGER_FAIL_BYTES}")
-    print(f"判準③ 實算：{p['claimed_count']} 個 ID 被掃描目標做過可辨識狀態宣稱")
+    print(f"判準③ 實算：{p['claimed_count']} 個 ID 被掃描目標做過可辨識狀態宣稱"
+          f"（R68 起**不再是 blocker**；其中 {p['movable_claimed']} 個落在本次可搬清單，"
+          "搬後由帳本家族 archive fallback 解析，`--check` 判準(8) 逐筆驗證）")
     total = sum(v["bytes"] for v in p["movable"])
+    after = p["ledger_bytes"] - total
+    headroom = gate._LEDGER_FAIL_BYTES - after
     print(f"\n可搬（①②③⑤⑥ 判準全過）：{len(p['movable'])} 筆／{total} bytes"
-          f" → 搬後主檔約 {p['ledger_bytes'] - total} bytes")
+          f" → 搬後主檔約 {after} bytes")
+    # DEF-101-676 的解鎖判準（R67 round 4 訂為可機械查）：搬後主檔距 fail 線 ≥ 10240。
+    print(f"   距 fail 線 {headroom} bytes"
+          f"｜DEF-101-676 解鎖判準（≥ {_UNLOCK_HEADROOM_BYTES}）："
+          f"{'✅ 成立' if headroom >= _UNLOCK_HEADROOM_BYTES else '❌ 不成立'}")
     for v in p["movable"]:
         print(f"  {v['id']:<14} {v['bytes']:>6} B  cls={v['cls']}")
     print(f"\n⚠️  需具名承認（判準④ 散文帶交棒字樣）：{len(p['needs_ack'])} 筆")
@@ -839,6 +934,14 @@ def check() -> int:
           表頭索引會指到別欄，而修復前一句話都不會說。archive 側既有異常列由
           `_ARITY_BASELINE` 具名基線處置（逐檔列印、只准往下改、stale 即紅），
           **主檔與新建 archive 零豁免**
+      (8) 跨檔宣稱可解析 — 四份 crossref 掃描目標內的**每一句**可辨識狀態宣稱，都必須能
+          在帳本家族（主檔 ∪ archive）解析到該 ID，且解析出的狀態分類與宣稱一致
+          （R68，DEF-101-676）。這是搬遷判準③ 由「被宣稱過就硬擋」改寫為「搬後仍解析
+          得到」之後，那個事後條件的**實作本體**——沒有它，判準③ 的改寫就只是一句斷言。
+          解析面由 `gate._load_ledger_status()`（主檔）＋ `gate._load_archive_status()`
+          （全部 archive，各自用自己的表頭定位）組成，比對本體直接呼叫 `gate._scan_target()`
+          （**不寫第二份宣稱解析**，理由同 (7) 的欄數檢查）。掃描目標不齊時一律報問題，
+          不以「沒跑」冒充「通過」
     判準④ 的稽核面自 round 2（ARCH-R60R2-05）起＝`_pointer_audit_files()`＝帳本家族
     ∪ 具名治理文件（`_GOVERNANCE_DOCS`）。**不是**「禁止家族外使用該語法」——那個
     方案（主控初裁）會讓治理文件裡的指針完全失去居所稽核，等於把偵測面一起丟掉；
@@ -1135,6 +1238,26 @@ def check() -> int:
                 f"_ARITY_BASELINE 登記了 {name}，但帳本家族查無此檔 — 登記與磁碟脫節"
                 "（改名／刪檔？）。stale 登記會讓下一支同名檔一落地就自帶豁免"
             )
+
+    # (8) 跨檔宣稱可解析（R68，DEF-101-676）——搬遷判準③ 改寫後的事後條件本體。
+    #     刻意**直接呼叫閘門的 `_scan_target()`**（而非另寫一份宣稱解析）：判準③ 當初就是
+    #     用 `gate._CLAIM_RE`／`gate._classify` 算出「被宣稱過」的，事後條件若改用第二份
+    #     實作，兩邊對「什麼算一句宣稱」的認定一旦分歧，這道網就會在自己看不見的地方破洞。
+    claim_problems: list[str] = []
+    if all(t.exists() for t in gate._CROSSREF_TARGETS):
+        main_status = gate._load_ledger_status()
+        arch_status = gate._load_archive_status()
+        for target in gate._CROSSREF_TARGETS:
+            claim_problems.extend(gate._scan_target(target, main_status, arch_status))
+        problems.extend(f"跨檔宣稱：{c}" for c in claim_problems)
+        print(f"ℹ️  判準(8) 實算：主檔 {len(main_status)} 列 ＋ archive "
+              f"{len(arch_status)} 列＝帳本家族解析面；四份掃描目標的狀態宣稱"
+              f"{'全部可解析且一致' if not claim_problems else f'有 {len(claim_problems)} 筆問題'}")
+    else:
+        problems.append(
+            "判準(8) 無法執行：crossref 掃描目標不齊 —— 拒絕以「沒跑」冒充「通過」"
+            f"（缺：{[str(t) for t in gate._CROSSREF_TARGETS if not t.exists()]}）"
+        )
 
     # 判準(7) 的具名基線逐檔列印（每次執行都印）——同下方引述清單的理由：豁免看得見。
     if waived_arity:

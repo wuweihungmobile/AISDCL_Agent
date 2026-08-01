@@ -119,8 +119,13 @@ _ntfs_seg_bad() {  # $1=完整路徑；有問題 → stdout 印原因並回 0，
     # test_windows_forbidden_filename_parity.py 的 repo-wide 錨①要求四者依序出現且間隙
     # ≤5 字元（R60 初版插在中間，實測讓三處實作同時掉出該錨而無任何訊號）。
     # case 交替順序不影響比對結果。
+    # R68：追加 MS 官方保留名清單明列的上標變體。刻意逐個列出而非寫 `COM[¹²³]`——
+    # bash 3.2 的 glob bracket 在 C locale 下是**逐位元組**比對，`[¹²³]`（UTF-8 共 6 bytes）
+    # 會退化成單位元組集合而永不匹配 3 bytes 的 `COM¹`（本機實測）。上標不受
+    # `tr '[:lower:]' '[:upper:]'` 影響，故 `com¹` 亦命中。🔴 證據等級＝官方文件＋靜態
+    # 分析，非 Windows 真機實測（本輪無真機），完整取捨見 check_ntfs_paths.py `_RESERVED_RE`。
     case "$up" in
-      CON|PRN|AUX|NUL|COM[0-9]|LPT[0-9]|'CONIN$'|'CONOUT$')
+      CON|PRN|AUX|NUL|COM[0-9]|LPT[0-9]|'CONIN$'|'CONOUT$'|'COM¹'|'COM²'|'COM³'|'LPT¹'|'LPT²'|'LPT³')
         echo "路徑段「${seg}」為 Windows 保留裝置名（${up}）"
         return 0 ;;
     esac
