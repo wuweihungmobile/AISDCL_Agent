@@ -33,6 +33,7 @@ DEF-101（後續修復）：`AutoClaude/autoclaude/models/escalation.py`
 """
 
 import ast
+import importlib.util
 import re
 import shutil
 import subprocess
@@ -716,6 +717,172 @@ class TestNtfsSanitizerSiteEnumerationIsForwardLooking(unittest.TestCase):
                     "（間隙 >5 字元）。請改加在交替清單**尾端**：正則與 case 皆完全錨定，"
                     "順序不影響比對結果。",
                 )
+
+
+# ──────────────────────────────────────────────────────────────────────────
+# R69：兩筆「AISDLC_SDD 側跨樹 import autoclaude」的收容處
+# ──────────────────────────────────────────────────────────────────────────
+# 背景（DEF-101-6xx，`aisdlc-sdd-ci` run 30720156045 由綠轉紅）：R68 在
+# `AISDLC_SDD/scripts/tests/test_ntfs_length_gate.py` 與
+# `AISDLC_SDD/AISDLC_SDD_v0.30/tools/fsm_runtime/tests/
+#  test_state_component_sanitizer_parity.py` 兩處直接 `from autoclaude...` import
+# AutoClaude 生產套件。AISDLC_SDD 的 CI 相依只鎖 `AISDLC_SDD_v0.01/
+# requirements-ci.txt`（pyyaml + pytest），而 `autoclaude.utils.__init__` 會連帶
+# 拉進 pydantic ⇒ 前者在 CI 上硬 fail、後者以 `try/except ImportError` 收掉而**8 支
+# 測試在 CI 上永遠 skip**（乾淨 venv 實測 `8 skipped`——正是 R68 抓過的「靜默不跑」
+# 病，本機因裝了 AutoClaude 而兩者都測不出來）。
+#
+# 為何收容在**本檔**而非各自原地修：本檔就是本 repo 既定的「跨子專案一致性鎖歸屬根層
+# 整合層」載體（見檔頭四處實作說明與 TestCrossSubprojectSampleParity），且本檔已合法
+# `from autoclaude.utils import logger`——根層 root-infra-ci 依
+# `tools/run_root_unittests.py::_THIRD_PARTY_PREREQS` 安裝第三方相依，pydantic 恆在。
+# 搬過來之後：斷言一條沒少、且從「CI 上永遠 skip」變成「CI 上真的跑」。
+# 復發防護＝`AISDLC_SDD/scripts/tests/test_cross_subproject_import_isolation.py`
+# 的靜態掃描（禁止兩子專案互相 import）。
+
+_SDD_COMPONENT_SANITIZER = REPO_ROOT / "AISDLC_SDD" / "scripts" / "component_sanitizer.py"
+_AUTOCLAUDE_LOGGER_SRC = REPO_ROOT / "AutoClaude" / "autoclaude" / "utils" / "logger.py"
+
+
+def _load_sdd_sanitize_component():
+    """載入 AISDLC_SDD 共享層 `sanitize_component`（各版 `state_loader` 委派的同一份
+    程式碼，見 `AISDLC_SDD_v0.30/tools/fsm_runtime/state_loader.py:58-70`）。
+
+    以 `spec_from_file_location` 依絕對路徑載入、不寫 `sys.modules`，沿用該 repo 既有
+    慣例，避免污染 import 路徑。
+    """
+    spec = importlib.util.spec_from_file_location(
+        "_root_parity_component_sanitizer", _SDD_COMPONENT_SANITIZER
+    )
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+
+
+class TestLengthPolicySiteTwoLoggerNoTruncation(unittest.TestCase):
+    """三站點長度政策的**站點②**（AutoClaude runtime log 檔名）行為鎖。
+
+    站點①（`component_sanitizer._MAX_COMPONENT_LEN == 80`）與站點③
+    （`check_ntfs_paths._LEN_FAIL/_LEN_WARN == 200/180`）留在
+    `AISDLC_SDD/scripts/tests/test_ntfs_length_gate.py::
+    test_length_policy_three_sites_registry`（那是 AISDLC_SDD 與根層 tools 自己的域，
+    零跨樹相依）；只有站點② 需要 import AutoClaude 生產套件，故收容於此。
+    兩處 docstring 互相指名，避免下一輪掃描把「三處三種數字」當新缺陷重新回報。
+    """
+
+    def test_logger_deliberately_does_not_truncate(self) -> None:
+        long_name = "a" * 300 + ".log"
+        self.assertEqual(
+            autoclaude_logger._sanitize_log_filename(long_name), long_name,
+            "站點②（runtime log 檔名）原本刻意不截斷（超長交由 OSError fallback 承接）；"
+            "若確要改為截斷，必須同步更新三處註解與本鎖",
+        )
+
+    def test_all_three_sites_keep_policy_cross_reference_marker(self) -> None:
+        """三站點都必須留有「三站點長度政策」對照註記——註記被刪＝理由消失。
+
+        站點①③ 的註記在 AISDLC_SDD 側鎖也查一次（重複是刻意的）：本檔查得到三處全部，
+        是唯一能一次看見三站點的位置；AISDLC_SDD 側鎖在 AutoClaude 缺席的獨立
+        release 情境下仍能守住自己的兩處。
+        """
+        marker = "三站點長度政策"
+        sdd_gate = REPO_ROOT / "AISDLC_SDD" / "scripts" / "tests" / "test_ntfs_length_gate.py"
+        for path in (
+            _SDD_COMPONENT_SANITIZER,
+            REPO_ROOT / "tools" / "check_ntfs_paths.py",
+            _AUTOCLAUDE_LOGGER_SRC,
+            sdd_gate,
+        ):
+            with self.subTest(path=path.name):
+                self.assertIn(
+                    marker, path.read_text(encoding="utf-8"),
+                    f"{path} 缺少「{marker}」對照註記——理由一旦消失，下一輪掃描會把"
+                    "「三處三種數字」當成新缺陷重新回報（本鎖存在的唯一理由）",
+                )
+
+
+_SDD_RESERVED_NAMES = ["CON", "PRN", "AUX", "NUL", "COM1", "COM9", "LPT1", "LPT9"]
+_SDD_NON_RESERVED_NAMES = ["CONSOLE", "PRINTER", "COM10", "LPTX", "hello"]
+_SDD_FORBIDDEN_CHARS = '<>:"|?*\\'
+
+
+class TestSddSanitizeComponentVsLoggerSecurityParity(unittest.TestCase):
+    """`component_sanitizer.sanitize_component` ↔ `_sanitize_log_filename` 等強度鎖。
+
+    自 `AISDLC_SDD_v0.30/tools/fsm_runtime/tests/
+    test_state_component_sanitizer_parity.py` 原地搬遷（R69）。原檔比對的是
+    `state_loader._sanitize_component`，而該符號自 R45 抽共享層後就是
+    `component_sanitizer.sanitize_component` 本身（`state_loader.py:70`
+    `_sanitize_component = _shared_component_sanitizer.sanitize_component`），故本檔
+    直接比對共享層＝**行為完全等價**，且不再需要進到版本目錄。
+
+    兩側刻意**不共用同一顆函式物件**——AISDLC_SDD 與 AutoClaude 是兩個獨立可發布子專案
+    （各自 releases/ 打包），依既有先例不可跨子專案 import 生產程式碼。本鎖只驗證「安全
+    性質對齊」：同一組危險輸入兩邊都必須擋下，**不要求輸出逐字元相同**。長度截斷是
+    AISDLC_SDD 側獨有的額外防線（見上方 TestLengthPolicySiteTwoLoggerNoTruncation），
+    故不在 parity 比較範圍內。
+    """
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        # staticmethod 包裹是必要的：把裸函式指派成 class 屬性後，`self.ours(x)` 會走
+        # descriptor 協定變成 bound method、把 self 當第一個參數傳進去（實測全數 SUBFAIL）。
+        cls.ours = staticmethod(_load_sdd_sanitize_component().sanitize_component)
+        cls.theirs = staticmethod(autoclaude_logger._sanitize_log_filename)
+
+    def test_both_strip_every_forbidden_char(self) -> None:
+        for ch in _SDD_FORBIDDEN_CHARS:
+            with self.subTest(ch=ch):
+                ours = self.ours(f"proj{ch}name")
+                theirs = self.theirs(f"proj{ch}name")
+                self.assertNotIn(ch, ours, f"AISDLC_SDD 側未擋下 {ch!r}：{ours!r}")
+                self.assertNotIn(ch, theirs, f"AutoClaude 側未擋下 {ch!r}：{theirs!r}")
+
+    def test_both_leave_safe_chars_untouched(self) -> None:
+        for ch in "!#$%&'()+,-.0123456789ABCabc_~":
+            with self.subTest(ch=ch):
+                ours = self.ours(f"proj{ch}name")
+                theirs = self.theirs(f"proj{ch}name")
+                self.assertIn(ch, ours, f"AISDLC_SDD 側誤擋了安全字元 {ch!r}：{ours!r}")
+                self.assertIn(ch, theirs, f"AutoClaude 側誤擋了安全字元 {ch!r}：{theirs!r}")
+
+    def test_both_flag_every_reserved_name(self) -> None:
+        for name in _SDD_RESERVED_NAMES:
+            with self.subTest(name=name):
+                ours = self.ours(name)
+                theirs = self.theirs(name)
+                self.assertTrue(ours.startswith("_"), f"AISDLC_SDD 側未擋下保留名 {name!r}：{ours!r}")
+                self.assertTrue(theirs.startswith("_"), f"AutoClaude 側未擋下保留名 {name!r}：{theirs!r}")
+
+    def test_both_leave_non_reserved_names_untouched(self) -> None:
+        for name in _SDD_NON_RESERVED_NAMES:
+            with self.subTest(name=name):
+                self.assertEqual(self.ours(name), name)
+                self.assertEqual(self.theirs(name), name)
+
+    def test_both_strip_every_control_char(self) -> None:
+        for ch in CONTROL_CHARS:
+            with self.subTest(cp=hex(ord(ch))):
+                ours = self.ours(f"proj{ch}name")
+                theirs = self.theirs(f"proj{ch}name")
+                self.assertNotIn(ch, ours, f"AISDLC_SDD 側未淨化控制字元 {ord(ch):#x}：{ours!r}")
+                self.assertNotIn(ch, theirs, f"AutoClaude 側未淨化控制字元 {ord(ch):#x}：{theirs!r}")
+
+    def test_both_strip_path_separators(self) -> None:
+        hostile = "../../etc/passwd"
+        self.assertNotIn("/", self.ours(hostile))
+        self.assertNotIn("/", self.theirs(hostile))
+
+    def test_both_strip_backslash_separators(self) -> None:
+        hostile = "..\\..\\windows\\system32"
+        self.assertNotIn("\\", self.ours(hostile))
+        self.assertNotIn("\\", self.theirs(hostile))
+
+    def test_both_pass_through_ordinary_identifiers(self) -> None:
+        for name in ("AISDLC_SDD", "feature-track-01", "AC-005"):
+            with self.subTest(name=name):
+                self.assertEqual(self.ours(name), name)
+                self.assertEqual(self.theirs(name), name)
 
 
 if __name__ == "__main__":

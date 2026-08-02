@@ -23,7 +23,7 @@ from ...core.ports.executor import (
     ExecutionEventKind,
     ExecutionOutput,
 )
-from ...perception.pty_wrapper import PtyWrapper
+from ...perception.pty_wrapper import CmdLineTooLongError, PtyWrapper
 from ...utils.config import ClaudeConfig, LoopConfig
 from ...utils.logger import _sanitize_log_filename
 from ...utils.token_tracker import context_pct_from_claude_json
@@ -98,7 +98,13 @@ class PtyExecutor:
         self._interrupt_requested = False
         self._interrupt_reason = ""
         event_seq = 0
-        pty.start()
+        # R69：啟動期長度守門（Windows .cmd shim 超長 prompt）降級為「單步失敗」訊號
+        # ——completed=False + 非零 exit_code，交由上游 CORRECTION／ESCALATION 承接；
+        # 讓例外原樣往上炸＝整場 run 崩潰、其餘步驟全不執行（R68 落地時的實況）。
+        try:
+            pty.start()
+        except CmdLineTooLongError as exc:
+            return ExecutionOutput(f"[EXEC_START_FAILED] {exc}", exit_code=1, completed=False)
         try:
             while time.monotonic() < deadline:
                 if self._interrupt_requested:

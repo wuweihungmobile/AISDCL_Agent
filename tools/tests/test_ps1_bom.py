@@ -137,6 +137,7 @@ from _ci_scan_anchors import (  # noqa: E402
     ci_scan_statement_count,
 )
 
+
 class TestPs1Bom(unittest.TestCase):
     def test_active_ps1_bom_policy(self) -> None:
         files = _active_ps1_files()
@@ -172,7 +173,7 @@ class TestPs1Bom(unittest.TestCase):
 
     def test_non_ascii_without_bom_is_detected(self) -> None:
         """假違規 fixture 必紅：非 ASCII bytes（中文註解）且無 BOM。"""
-        offenders = self._scan_fixture("# 中文註解\nWrite-Host 'ok'\n".encode("utf-8"))
+        offenders = self._scan_fixture("# 中文註解\nWrite-Host 'ok'\n".encode())
         self.assertEqual(len(offenders), 1, offenders)
         self.assertIn("無 UTF-8 BOM", offenders[0])
 
@@ -185,7 +186,7 @@ class TestPs1Bom(unittest.TestCase):
     def test_compliant_files_are_green(self) -> None:
         """合規兩形態＝綠：BOM＋非 ASCII、純 ASCII 無 BOM（BOM＋純 ASCII 亦合法）。"""
         self.assertEqual(
-            self._scan_fixture(_BOM + "# 中文註解\nWrite-Host 'ok'\n".encode("utf-8")),
+            self._scan_fixture(_BOM + "# 中文註解\nWrite-Host 'ok'\n".encode()),
             [],
         )
         self.assertEqual(self._scan_fixture(b"Write-Host 'ascii only'\n"), [])

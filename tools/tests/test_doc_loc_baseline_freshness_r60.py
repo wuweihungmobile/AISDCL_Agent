@@ -57,7 +57,9 @@ import contextlib
 import datetime
 import hashlib
 import io
+import json
 import re
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -1551,7 +1553,7 @@ class TestR67PerPlatformFingerprints(unittest.TestCase):
         """`unrecorded` 佔位值必須恆判 stale——否則「不可考」會被誤讀成「新鮮」。"""
         self.assertNotIn(SYNC._UNRECORDED, set(SYNC.measure_fingerprints().values()))
         self.assertFalse(
-            re.fullmatch(r"[0-9a-f]{%d}" % SYNC._FP_LEN, SYNC._UNRECORDED),
+            re.fullmatch(rf"[0-9a-f]{{{SYNC._FP_LEN}}}", SYNC._UNRECORDED),
             "佔位值長得像真指紋 ⇒ 有機率與 live 值相等而假裝新鮮",
         )
 
@@ -2042,6 +2044,250 @@ class TestR67SlowMeasurementWindowIsFingerprintBracketed(unittest.TestCase):
                     calls["n"], 1,
                     f"{mode} 在單次呼叫內量了 {calls['n']} 次 live 指紋（預期 1）",
                 )
+
+
+# ---------------------------------------------------------------- R69：ADR 內量測 token ↔ 現查
+# 🔴 為何非得有這一條（R69 Architect 實測命中，同型第三次復發）：
+#   R68 把「閘門全綠」寫進 commit message，事後複現不出來；R69 的 `ADR-XPLAT-003` 把同一個
+#   毛病**搬進了 ADR**——該 ADR 表頭自陳「記錄的是已合入工作樹並實測綠的異動」、§3 又逐字
+#   引述 `ADR-XPLAT-002` §1.1「以行數下降為成果的宣稱必須前後各量一次」並宣稱「本節照辦」，
+#   而它寫下的 `total=20415`／`3923 passed` 在交付樹上一個都複現不出來（實測 20436／3929）。
+#   受害者不是潔癖：ADR 是**寫給未來每一輪照抄重跑**的文件，數字錯了，照它驗證的人會把
+#   正常狀態讀成退化，或反過來把凍結讀成已解除（本例正是後者：「餘裕 23 行」讓讀者以為
+#   生產碼可以再寫，實際餘裕 2 行、凍結完全沒解除）。
+#   同族前科：DEF-101-289／DEF-101-515（ONBOARDING §7）、`ADR-XPLAT-002` §4.3.1 的成長率
+#   常數（R67 round 4 拔除）、`run_root_unittests.MIN_TESTS` 一輪三釘。**共同形態＝
+#   「文件寫死機器當場可以算出來的數字」**，故本鎖與本檔正職同源、同檔、共用取值來源。
+#
+# 判準（誠實劃界）：
+#   ① `total=／baseline=／cap=` ⇒ 必須**逐字等於**現查值。取值來源＝本檔正職已在用的
+#      `SYNC.measure_loc()`（`check_loc_budget.py --json`）＋ `AutoClaude/.loc_baseline`
+#      （`baseline=` 的 SSOT）。同 repo 對同一數字只准一種說法。
+#      🔴 **`violations=` 刻意不納管（誠實劃界，非疏漏）**：那三個欄位是 ADR 主體本身的
+#      量（`autoclaude/` 的行數與上限），而 `violations` 是**整棵樹當下的裁決**，由最後一個
+#      動到任何受管檔的人決定——把它納管，等於任何一支無關檔案破自己的預算就讓全部 ADR 變紅
+#      （R69 實測即命中：`tools/dev_start.py` 破 special 2000 上限，與這兩份 ADR 毫無關係）。
+#      故 ADR 一律**不登載**這個欄位，引用工具輸出時只引與自己射程相關的三欄。
+#   ② `<3 位數以上> passed` ⇒ **一律違規**。理由不是它會 stale，是根層閘門**取不到**現場值
+#      （跑一次 AutoClaude 全套要 80 秒以上，放進根層 unittest 是拿假鎖換慢），而本 repo 早已
+#      為它指定唯一的家：`ONBOARDING.md §7`＋`tools/check_pytest_baseline_sites.py`。ADR 要引
+#      這個數字，就指向 SSOT，不要在 ADR 裡再開一個家。三位數起跳＝刻意放行 `1 passed`／
+#      `9 passed` 這類「注入後重跑單檔」的紅綠自證輸出，那是證據不是基線。
+#   ③ 豁免＝同一行寫 `adr-measurement-historical: <理由>`（**理由必填**，空理由不具豁免力，
+#      比照本 repo `baseline-ok` 與 `encoding-ok` 兩族豁免的紀律）。射程只到「有輪次歸屬的
+#      時代快照」——ADR 的歷史訂正段落逐字保全是本 repo 明文紀律，不得因本鎖而被改寫。
+#   ④ **本鎖自己也是量測載具，載具必須被驗證**，三條 fail-open 全部封死：
+#      (a) ADR 目錄不存在／零 `ADR-*.md` ⇒ 違規（掃描面崩塌，不得靜默零命中假綠）；
+#      (b) 取值來源給不出 total／baseline／cap 三個整數 ⇒ 違規（工具壞掉 ≠ ADR stale，分開回報）；
+#      (c) 全掃描面**零筆**受管 LOC token ⇒ 違規。這一條治的是「把數字整段刪掉本鎖就空轉」，
+#          與 `check_pytest_baseline_sites.py` 的 SSOT anchor 自檢同形。⚠️ 改為「指向 live
+#          來源而不寫死數字」本身是**更好**的作法，但它會讓本鎖失去唯一的活體比對——真要
+#          那樣改，請在同一個 commit 內把本條錨點自檢改指新的活體站點，別讓它空轉。
+_ADR_DIR = _REPO_ROOT / "docs" / "04_planning" / "ADR"
+_ADR_WAIVER = "adr-measurement-historical:"
+_ADR_LOC_TOKEN_RE = re.compile(r"\b(total|baseline|cap|violations)=(\d+)")
+# 三位數起跳；容許 markdown 粗體與全形空白夾在數字與 `passed` 之間（ADR 內實際寫法）。
+_ADR_PYTEST_TOKEN_RE = re.compile(r"(?<![\d,.])(\d{1,3}(?:,\d{3})+|\d{3,})[\s*　]*passed", re.I)
+
+
+def read_adr_docs(adr_dir: Path = _ADR_DIR) -> list[tuple[str, str]]:
+    """ADR 掃描面 `(檔名, 內容)`；目錄缺席或零檔一律 fail-loud（判準 ④(a)）。"""
+    if not adr_dir.is_dir():
+        raise AssertionError(
+            f"ADR 目錄不存在：{adr_dir} — 掃描面崩塌（搬家／改名？），本鎖拒絕靜默通過"
+        )
+    docs = sorted(adr_dir.glob("ADR-*.md"))
+    if not docs:
+        raise AssertionError(
+            f"{adr_dir} 底下零個 `ADR-*.md` — 掃描面崩塌，本鎖拒絕靜默通過"
+        )
+    return [(p.name, p.read_text(encoding="utf-8-sig")) for p in docs]
+
+
+def measure_adr_loc_live() -> dict[str, int]:
+    """ADR 受管 LOC token 的現查值：`total／baseline／cap`。
+
+    取值來源刻意與本檔正職同一支工具（`SYNC._LOC_TOOL` ＝ `check_loc_budget.py --json`），
+    **不另外去讀 `AutoClaude/.loc_baseline`**——那會讓根層測試多消費一個 repo 檔，得同步
+    兩支 compat CI 的 `paths:`（`AISDLC_SDD/scripts/tests/test_ci_paths_cover_root_consumers.py`
+    落地當場即紅並點名）；而 `--json` 本來就把 `baseline` 一起印出來，多開一個消費面零收益。
+    工具印不出可解析 JSON ⇒ 拋 `BaselineToolError`，與「ADR stale」分開回報（判準 ④(b)）。
+    """
+    proc = subprocess.run(
+        [sys.executable, str(SYNC._LOC_TOOL), "--json"],
+        capture_output=True, text=True, encoding="utf-8", errors="replace",
+        cwd=str(_REPO_ROOT),
+    )
+    try:
+        payload = json.loads(proc.stdout)
+    except json.JSONDecodeError as exc:
+        raise SYNC.BaselineToolError(
+            f"{SYNC._LOC_TOOL} --json 印不出可解析 JSON（rc={proc.returncode}）— "
+            f"這是**取值來源壞掉**，不是 ADR stale\nstdout: {proc.stdout[-400:]}"
+        ) from exc
+    missing = [k for k in ("total", "baseline", "cap") if k not in payload]
+    if missing:
+        raise SYNC.BaselineToolError(f"取值來源缺 key {missing} — 本鎖無從比對")
+    return {k: int(payload[k]) for k in ("total", "baseline", "cap")}
+
+
+def _adr_waiver_problem(label: str, lineno: int, line: str) -> str | None:
+    """已掛豁免者仍要求標記後面有理由；無理由的豁免就是後門（判準 ③）。"""
+    if _ADR_WAIVER not in line:
+        return None
+    reason = line.split(_ADR_WAIVER, 1)[1].strip().removesuffix("-->").strip()
+    if reason:
+        return ""
+    return (
+        f"{label}:{lineno}：豁免標記 `{_ADR_WAIVER}` 後面沒有理由 — "
+        f"無理由的豁免就是後門，不是豁免"
+    )
+
+
+def adr_measurement_problems(
+    docs: list[tuple[str, str]], live: dict[str, int]
+) -> list[str]:
+    """純函式：ADR 內量測 token 的違規清單（空＝通過）。判準見上方段落。"""
+    problems: list[str] = []
+    governed_hits = 0
+    for label, text in docs:
+        for lineno, line in enumerate(text.splitlines(), 1):
+            loc_hits = _ADR_LOC_TOKEN_RE.findall(line)
+            py_hits = _ADR_PYTEST_TOKEN_RE.findall(line)
+            if not loc_hits and not py_hits:
+                continue
+            waived = _adr_waiver_problem(label, lineno, line)
+            if waived:  # 有標記但沒理由
+                problems.append(waived)
+                continue
+            if waived == "":  # 有標記且有理由 ⇒ 時代快照，放行
+                continue
+            for key, value in loc_hits:
+                if key == "violations":
+                    problems.append(
+                        f"{label}:{lineno}：`violations={value}` — ADR 不得登載這個欄位。"
+                        f"它是**整棵樹當下的裁決**、由最後一個動到任何受管檔的人決定，"
+                        f"與本 ADR 的射程無關（登載即等於把無關檔案的預算破線變成 ADR 的紅燈）。"
+                        f"引用工具輸出時只引 total／baseline／cap 三欄；"
+                        f"若這是有輪次歸屬的時代快照，改掛 `{_ADR_WAIVER} <理由>`。"
+                        f"\n  行文：{line.strip()[:160]}"
+                    )
+                    continue
+                governed_hits += 1
+                if int(value) != live[key]:
+                    problems.append(
+                        f"{label}:{lineno}：`{key}={value}` 與現查值 {live[key]} 不符 — "
+                        f"ADR 是寫給未來照抄重跑的文件，數字錯了會讓讀者把凍結讀成已解除。"
+                        f"重跑 `python AutoClaude/tools/check_loc_budget.py` 取當下值填回；"
+                        f"若這是有輪次歸屬的時代快照，改掛 `{_ADR_WAIVER} <理由>`。"
+                        f"\n  行文：{line.strip()[:160]}"
+                    )
+            for value in py_hits:
+                problems.append(
+                    f"{label}:{lineno}：`{value} passed` — ADR 不得自建 pytest 基線的第二個家。"
+                    f"唯一 SSOT ＝ `ONBOARDING.md §7`（守門者＝tools/check_pytest_baseline_sites.py）；"
+                    f"根層閘門取不到 AutoClaude 全套的現場值，寫死即無人看守。請改為指向 SSOT，"
+                    f"或若這是有輪次歸屬的時代快照，改掛 `{_ADR_WAIVER} <理由>`。"
+                    f"\n  行文：{line.strip()[:160]}"
+                )
+    if governed_hits == 0:
+        problems.append(
+            f"整個 ADR 掃描面（{len(docs)} 份）零筆受管 LOC token — 本鎖已無活體比對對象而空轉。"
+            f"若這是刻意「改為指向 live 來源」，請在同一個 commit 內把本條錨點自檢改指新站點。"
+        )
+    return problems
+
+
+class TestR69AdrMeasurementTokensAreLive(unittest.TestCase):
+    """真實 ADR × 真實取值來源的現查一致性（判準見上方段落）。"""
+
+    def test_real_adrs_carry_no_unreproducible_measurement_token(self) -> None:
+        problems = adr_measurement_problems(read_adr_docs(), measure_adr_loc_live())
+        self.assertEqual(
+            problems,
+            [],
+            "docs/04_planning/ADR/ 內有複現不出來的量測 token：\n"
+            + "\n".join(f"  - {p}" for p in problems),
+        )
+
+    def test_scan_surface_did_not_collapse(self) -> None:
+        """掃描面自檢：目錄在、檔案讀得到、且確實掃到 ADR-XPLAT-003（本次事故的原點）。"""
+        names = {label for label, _ in read_adr_docs()}
+        self.assertIn(
+            "ADR-XPLAT-003-autoclaude-platform-capability-layer.md", names,
+            f"掃描面裡沒有 ADR-XPLAT-003（現有：{sorted(names)}）— 檔案改名時請同步本鎖",
+        )
+
+    def test_live_source_is_sane(self) -> None:
+        """取值來源自檢（判準 ④(b)）：三個 key 都拿得到且為正整數；`violations` 不得混入。"""
+        live = measure_adr_loc_live()
+        for key in ("total", "baseline", "cap"):
+            self.assertGreater(live[key], 0, f"現查值 {key}={live[key]} 不合理 — 取值來源壞掉")
+        self.assertNotIn(
+            "violations", live,
+            "`violations` 是整棵樹的裁決、不是本 ADR 的量 — 混進取值來源即等於把無關檔案的"
+            "預算破線變成 ADR 的紅燈（判準 ① 的劃界）",
+        )
+
+    # ── 以下以合成文本自證判準紅綠（不落 repo 樹內、不碰真實 ADR）──
+    _LIVE = {"total": 20436, "baseline": 17032, "cap": 20438}
+
+    def _run(self, body: str, live: dict[str, int] | None = None) -> list[str]:
+        return adr_measurement_problems([("FAKE.md", body)], live or self._LIVE)
+
+    def test_matching_loc_token_passes(self) -> None:
+        self.assertEqual(self._run("`total=20436 baseline=17032 cap=20438`\n"), [])
+
+    def test_stale_loc_token_is_caught(self) -> None:
+        problems = self._run("total=20415 baseline=17032 cap=20438\n")
+        self.assertEqual(len(problems), 1, problems)
+        self.assertIn("total=20415", problems[0])
+        self.assertIn("20436", problems[0])
+
+    def test_violations_field_is_refused_even_when_it_matches(self) -> None:
+        """`violations=` 逐字等於現查也照樣紅 — 它根本不該住在 ADR 裡（判準 ① 劃界）。"""
+        problems = self._run("total=20436 violations=0\n")
+        self.assertEqual(len(problems), 1, problems)
+        self.assertIn("不得登載", problems[0])
+
+    def test_hardcoded_pytest_baseline_is_caught(self) -> None:
+        problems = self._run("total=20436\n3923 passed, 146 skipped\n")
+        self.assertEqual(len(problems), 1, problems)
+        self.assertIn("3923 passed", problems[0])
+
+    def test_single_digit_pytest_evidence_is_not_flagged(self) -> None:
+        """`1 passed`／`9 passed` 是注入後重跑單檔的紅綠自證，不是基線，刻意放行。"""
+        self.assertEqual(self._run("total=20436；還原後 `1 passed`（GREEN）、`9 passed`\n"), [])
+
+    def test_waiver_with_reason_passes_and_without_reason_fails(self) -> None:
+        ok = self._run("total=20436\n| total=20361 <!-- adr-measurement-historical: R60 快照 -->\n")
+        self.assertEqual(ok, [])
+        bad = self._run("total=20436\n| total=20361 <!-- adr-measurement-historical: -->\n")
+        self.assertEqual(len(bad), 1, bad)
+        self.assertIn("沒有理由", bad[0])
+
+    def test_waiver_is_line_scoped_not_file_scoped(self) -> None:
+        """豁免逐行判定：上一行掛了標記，不得放行下一行（單行巨欄的教訓，§9.1 邊界 (b)）。"""
+        problems = self._run(
+            "| total=20361 <!-- adr-measurement-historical: R60 快照 -->\n"
+            "改後 total=20415\n"
+        )
+        self.assertEqual(len(problems), 1, problems)
+        self.assertIn("total=20415", problems[0])
+
+    def test_empty_corpus_is_a_violation_not_a_pass(self) -> None:
+        """判準 ④(c)：零受管 token ⇒ 本鎖空轉，必須紅。"""
+        problems = self._run("本節不再登載量測常數，一律現查。\n")
+        self.assertEqual(len(problems), 1, problems)
+        self.assertIn("空轉", problems[0])
+
+    def test_missing_adr_dir_fails_loud(self) -> None:
+        """判準 ④(a)：掃描面崩塌不得靜默通過。"""
+        with tempfile.TemporaryDirectory() as tmp:
+            with self.assertRaises(AssertionError):
+                read_adr_docs(Path(tmp) / "nope")
+            with self.assertRaises(AssertionError):
+                read_adr_docs(Path(tmp))
 
 
 # 本檔所有鎖都必須在這些 `sys.platform` 值下有**相同**結果。刻意含 `linux`（無對應欄

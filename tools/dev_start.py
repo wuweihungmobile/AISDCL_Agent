@@ -49,9 +49,8 @@ import subprocess
 import sys
 import threading
 import time
-from datetime import datetime, timezone
+from collections.abc import Callable
 from pathlib import Path
-from typing import Callable
 
 ROOT = Path(__file__).resolve().parents[1]
 STATE_FILE = ROOT / ".dev_env_state.json"
@@ -85,6 +84,10 @@ import _stdio_utf8  # noqa: E402,F401
 # ModuleNotFoundError traceback、零指引。改為：tomllib 延後到 _toml_deps_snapshot()
 # 內 import（本檔其餘語法 3.9 可載入，py_compile 實證），並在此給出可行動訊息。
 # 不用 argparse/例外：此刻連 main() 都還沒定義，而且要先於任何 3.11 依賴。
+# 🔴 結構性約束（R69 P1 復發點）：**本閘之前的 prelude 必須在 < _MIN_PY 的直譯器上
+# 可載入**（macOS 系統 python3＝3.9.6），否則這道訊息會被 ImportError traceback 取代。
+# 3.11+ 專屬的東西（datetime.UTC／tomllib／typing.Self…）一律放閘後或延後到函式內；
+# 機械守門見 tools/tests/test_dev_start.py 檔尾兩個 Py39 prelude 類別。
 _MIN_PY = (3, 11)
 if sys.version_info[:2] < _MIN_PY:
     print(f"❌ dev_start 需要 Python >= {_MIN_PY[0]}.{_MIN_PY[1]}，"
@@ -93,6 +96,9 @@ if sys.version_info[:2] < _MIN_PY:
           f"   或先跑 `bash tools/bootstrap.sh`（其核心 3.9 可載入、會自動挑 3.11 建 .venv），\n"
           f"   建好 .venv 後 tools/dev_start.sh 會自動改用 .venv/bin/python。", file=sys.stderr)
     raise SystemExit(2)
+
+from datetime import UTC, datetime  # noqa: E402  # UTC 是 3.11 才有的別名 ⇒ 必須在閘後
+
 # step_hooks() 與 tools/check_hooks_liveness.py 共用同一份判定邏輯（S22，見該函式註解）。
 import check_hooks_liveness  # noqa: E402
 
@@ -739,7 +745,8 @@ def step_sync(no_sync: bool, is_repo: bool) -> None:
     status_r = _git("status", "--porcelain", "--untracked-files=no")
     if status_r.returncode != 0:
         # 空 stdout 不可等同「乾淨」——returncode 非零時無法判定，不冒險 pull
-        _warn("git status 失敗 — 無法判定工作樹是否乾淨，跳過 pull（可稍後手動 git pull --ff-only）")
+        _warn("git status 失敗 — 無法判定工作樹是否乾淨，跳過 pull"
+              "（可稍後手動 git pull --ff-only）")
         SUMMARY["sync"] = "跳過（git status 失敗）"
         return
     dirty = bool(status_r.stdout.strip())
@@ -854,7 +861,7 @@ def _ensure_venv_shape(now: str) -> str:
                         # QA 審查指出：先前訊息宣稱「請先手動備份」卻在同一次呼叫立即
                         # rmtree，使用者讀到警告時已來不及——改為改名為時間戳記備份，
                         # 讓「不可逆」的宣稱名副其實（非阻塞覆蓋，事後仍可自行檢視/刪除）
-                        ts = datetime.now(timezone.utc).strftime("%Y%m%d%H%M%S")
+                        ts = datetime.now(UTC).strftime("%Y%m%d%H%M%S")
                         backup = ROOT / f".venv-cache-{other}.bak-{ts}"
                         cache_other.rename(backup)
                         _warn(f"{cache_other.name}/ 已有內容 — 換手保留前已改名為 {backup.name}/"
@@ -870,7 +877,8 @@ def _ensure_venv_shape(now: str) -> str:
                     venv.rename(cache_other)
                     print(f"    偵測到另一平台形狀的 .venv → 換手保留為 {cache_other.name}/")
                 except OSError as e:
-                    _warn(f".venv 換手失敗（改名為 {cache_other.name}/ 時發生 {e}）— 請手動刪除 .venv 後重跑")
+                    _warn(f".venv 換手失敗（改名為 {cache_other.name}/ 時發生 {e}）"
+                          "— 請手動刪除 .venv 後重跑")
         else:
             # 兩平台直譯器皆缺＝壞損 venv（如 symlink 斷裂）→ 移除重建，不動任何快取
             try:
@@ -899,7 +907,8 @@ def _ensure_venv_shape(now: str) -> str:
             else:
                 # 不得靜默 return "missing" 放著壞快取佔磁碟不聲不響（Architect 審查 P1-1 / P2）
                 _warn(f"偵測到 {cache_mine.name}/ 內容無效（{reason}）— 已略過（不會自動清除，"
-                      f"避免誤刪使用者手動放的東西；可手動檢視/清除該目錄），將視為 missing 重新整備")
+                      "避免誤刪使用者手動放的東西；可手動檢視/清除該目錄），"
+                      "將視為 missing 重新整備")
     return "ok" if _safe_exists(_venv_python(flavor)) else "missing"
 
 
@@ -1325,9 +1334,11 @@ def step_venv(now: str, state: dict, force: bool, cross_same_flavor: bool = Fals
                         venv.unlink()
                     else:
                         _rmtree_windows_safe(venv)
-                    print("    跨 OS 同 flavor：既有 .venv 已移除（避免 bootstrap 沿用跨 OS 二進位）")
+                    print("    跨 OS 同 flavor：既有 .venv 已移除"
+                          "（避免 bootstrap 沿用跨 OS 二進位）")
                 except OSError as e:
-                    _warn(f"移除跨 OS .venv 失敗（{e}）— bootstrap 可能沿用後失敗，屆時請手動刪除 .venv 重跑")
+                    _warn(f"移除跨 OS .venv 失敗（{e}）— bootstrap 可能沿用後失敗，"
+                          "屆時請手動刪除 .venv 重跑")
 
         reason: str | None = None
         ok = True
@@ -1837,7 +1848,8 @@ def step_platform(now: str, is_repo: bool) -> None:
         lp = _git("config", "--get", "core.longpaths").stdout.strip().lower()
         if lp != "true":
             if _git("config", "core.longpaths", "true").returncode == 0:
-                notes.append("已設 core.longpaths=true（MAX_PATH=260 護欄，本 repo 路徑警戒 180/200）")
+                notes.append("已設 core.longpaths=true"
+                             "（MAX_PATH=260 護欄，本 repo 路徑警戒 180/200）")
             else:
                 _warn("設定 core.longpaths 失敗 — 請手動：git config core.longpaths true")
     for n in notes:
@@ -1862,7 +1874,7 @@ def step_finalize(now: str, state: dict, is_repo: bool) -> None:
         head = _git("rev-parse", "--short", "HEAD")
         if head.returncode == 0:
             state["head"] = head.stdout.strip()
-    state["updated_at"] = datetime.now(timezone.utc).isoformat(timespec="seconds")
+    state["updated_at"] = datetime.now(UTC).isoformat(timespec="seconds")
     payload = json.dumps(state, ensure_ascii=False, indent=2) + "\n"
     # temp+replace（原子寫入，per-pid 檔名避免併發 dev_start 互踩）：
     # ①SA 審查 P1——先前直接 write_text 無防護，唯讀外接碟（本功能明文旗艦情境）
@@ -1898,7 +1910,8 @@ def _print_summary(ok: bool) -> None:
             print(f"    - {w}")
     if ok:
         note = f"（含 {len(WARNINGS)} 件警告，見上）" if WARNINGS else ""
-        print(f"\n✅ 啟動整備完成{note}。下一步：於「已啟用 .venv」的終端機、在 monorepo 根啟動 claude")
+        print(f"\n✅ 啟動整備完成{note}。"
+              "下一步：於「已啟用 .venv」的終端機、在 monorepo 根啟動 claude")
         print("   （source tools/dev_start.sh 或 . tools\\dev_start.ps1 會自動啟用 .venv）")
     else:
         print("\n❌ 啟動整備未完成（見上方錯誤）", file=sys.stderr)

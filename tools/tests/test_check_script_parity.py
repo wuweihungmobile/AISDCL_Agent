@@ -12,6 +12,7 @@
 from __future__ import annotations
 
 import atexit
+import re
 import shutil
 import sys
 import tempfile
@@ -415,6 +416,170 @@ class TestRunTlcInvocationParityLock(unittest.TestCase):
         self.assertIsNotNone(latest_tools)
         with mock.patch("builtins.print"):
             self.assertTrue(m._check_run_tlc_invocation_parity(latest_tools))
+
+
+class TestR69ExitCodeContract(unittest.TestCase):
+    """R69：`run_self_evolution.{sh,ps1}` 退出碼契約三方鎖（SSOT ↔ .sh ↔ .ps1）。
+
+    WHY（測意圖非僅行為，Rule 9）：R68 統一了兩側碼值、並在兩側檔頭寫「規格側見
+    SDD_SELF_EVOLUTION.md『退出碼契約』節」——**該節當時不存在**（grep 零命中），
+    而該腳本對在 `_EXEMPT_PAIRS` 屬 `unpinned`、零機械 parity ⇒ 契約落地即孤兒：
+    任一側改碼零訊號、兩側一起漂離規格也零訊號（同型漂移 DEF-101-264 已復發過）。
+    本鎖用 fixture 注入變異自證鑑別力：**單側改壞必紅**（兩個方向各一），
+    **實作新增未登記碼必紅**（第一道只讀註解，看不到實作），**抽不到即紅**
+    （空集合逐筆相等會恆真＝靜默失守）。
+    """
+
+    _SPEC = (
+        "# doc\n\n"
+        "<!-- exit-code-contract:begin -->\n\n"
+        "| rc | 代號 | 適用側 | 語意 |\n"
+        "|----|------|--------|------|\n"
+        "| 0 | CONVERGED | 兩側 | 收斂 |\n"
+        "| 1 | DRYRUN_ADVISORY | 兩側 | advisory |\n"
+        "| 5 | NO_PYTHON | 兩側 | 無 python |\n"
+        "| 64 | USAGE | .sh | 未知參數 |\n\n"
+        "<!-- exit-code-contract:end -->\n"
+    )
+    _SH = (
+        "#!/usr/bin/env bash\n"
+        "#   rc=0  CONVERGED        收斂\n"
+        "#   rc=1  DRYRUN_ADVISORY  advisory\n"
+        "#   rc=5  NO_PYTHON        無 python\n"
+        "#   rc=64 USAGE            未知參數\n"
+        "command -v python || { echo x; exit 5; }\n"
+        "exit 0\n"
+    )
+    _PS1 = (
+        "<#\n"
+        "    rc=0  CONVERGED        收斂\n"
+        "    rc=1  DRYRUN_ADVISORY  advisory\n"
+        "    rc=5  NO_PYTHON        無 python\n"
+        "    rc=64 USAGE            未知參數\n"
+        "#>\n"
+        "if (-not $py) { exit 5 }\n"
+        "Write-Host \"done (exit $LASTEXITCODE)\"\n"
+        "exit 0\n"
+    )
+
+    def _make(self, name: str, spec: str, sh: str, ps1: str) -> Path:
+        latest_tools = _TMP_DIR / name / "tools"
+        (latest_tools / "arch_fitness").mkdir(parents=True, exist_ok=True)
+        spec_path = latest_tools.parent / m._EXIT_CONTRACT_SPEC_REL
+        spec_path.parent.mkdir(parents=True, exist_ok=True)
+        spec_path.write_text(spec, encoding="utf-8")
+        (latest_tools / "arch_fitness" / "run_self_evolution.sh").write_text(
+            sh, encoding="utf-8")
+        (latest_tools / "arch_fitness" / "run_self_evolution.ps1").write_text(
+            ps1, encoding="utf-8")
+        return latest_tools
+
+    def _run(self, latest_tools: Path) -> tuple[bool, str]:
+        with mock.patch("builtins.print") as fake_print:
+            ok = m._check_exit_code_contract(latest_tools)
+        printed = " ".join(
+            str(arg) for call in fake_print.call_args_list for arg in call.args
+        )
+        return ok, printed
+
+    def test_three_way_match_is_green(self) -> None:
+        latest_tools = self._make("ecc_green", self._SPEC, self._SH, self._PS1)
+        with mock.patch.object(m, "_EXIT_CONTRACT_FLOOR", 4):
+            ok, printed = self._run(latest_tools)
+        self.assertTrue(ok, printed)
+
+    def test_sh_side_enum_drift_is_red(self) -> None:
+        """方向 ①：.sh 側把 5 改成 7（碼值漂移）→ 必紅並點名。"""
+        broken = self._SH.replace("rc=5  NO_PYTHON", "rc=7  NO_PYTHON")
+        latest_tools = self._make("ecc_sh", self._SPEC, broken, self._PS1)
+        with mock.patch.object(m, "_EXIT_CONTRACT_FLOOR", 4):
+            ok, printed = self._run(latest_tools)
+        self.assertFalse(ok, "單側碼值漂移必須紅——這正是 R68 前的真實病灶")
+        self.assertIn(".sh", printed)
+        self.assertIn("NO_PYTHON", printed)
+
+    def test_ps1_side_enum_drift_is_red(self) -> None:
+        """方向 ②：.ps1 側刪掉一整筆枚舉 → 必紅並點名。"""
+        broken = "\n".join(
+            ln for ln in self._PS1.splitlines() if "USAGE" not in ln) + "\n"
+        latest_tools = self._make("ecc_ps1", self._SPEC, self._SH, broken)
+        with mock.patch.object(m, "_EXIT_CONTRACT_FLOOR", 4):
+            ok, printed = self._run(latest_tools)
+        self.assertFalse(ok, "單側漏一筆枚舉必須紅")
+        self.assertIn(".ps1", printed)
+        self.assertIn("USAGE", printed)
+
+    def test_unlisted_exit_literal_in_implementation_is_red(self) -> None:
+        """第二道：實作新增未登記的 `exit 9`（註解仍與 SSOT 一致）→ 必紅。
+
+        只比對註解枚舉時這種形態全綠——「碼在實作裡長出來、沒人登記」正是碼值
+        碰撞的來源，故第一道之外必須有覆蓋面那一道。
+        """
+        sh = self._SH.replace("exit 0\n", "exit 9\nexit 0\n")
+        latest_tools = self._make("ecc_literal", self._SPEC, sh, self._PS1)
+        with mock.patch.object(m, "_EXIT_CONTRACT_FLOOR", 4):
+            ok, printed = self._run(latest_tools)
+        self.assertFalse(ok)
+        self.assertIn("未登記", printed)
+        self.assertIn("9", printed)
+
+    def test_comment_only_exit_literal_does_not_trigger(self) -> None:
+        """反向防呆：只出現在**註解**裡的 `exit 42` 不算實作（避免誤紅）。"""
+        sh = self._SH.replace("exit 0\n", "# 舊版曾用 exit 42，已退役\nexit 0\n")
+        latest_tools = self._make("ecc_comment", self._SPEC, sh, self._PS1)
+        with mock.patch.object(m, "_EXIT_CONTRACT_FLOOR", 4):
+            ok, printed = self._run(latest_tools)
+        self.assertTrue(ok, printed)
+
+    def test_missing_ssot_section_is_red(self) -> None:
+        """SSOT 章節被刪／改名 → 必紅（R68 的原始病灶＝指向不存在的章節）。"""
+        latest_tools = self._make(
+            "ecc_nossot", "# doc without the anchors\n", self._SH, self._PS1)
+        ok, printed = self._run(latest_tools)
+        self.assertFalse(ok)
+        self.assertIn("exit-code-contract:begin", printed)
+
+    def test_floor_blocks_synchronised_emptying(self) -> None:
+        """三處**同步**被改到抽不到 → 逐筆相等會恆真，故以下限釘選堵住。"""
+        latest_tools = self._make(
+            "ecc_floor",
+            "<!-- exit-code-contract:begin -->\n\n<!-- exit-code-contract:end -->\n",
+            "#!/usr/bin/env bash\nexit 0\n",
+            "<#\n#>\nexit 0\n",
+        )
+        ok, printed = self._run(latest_tools)
+        self.assertFalse(ok)
+        self.assertIn("_EXIT_CONTRACT_FLOOR", printed)
+
+    def test_real_tree_exit_contract_green(self) -> None:
+        """真磁碟整合：LATEST 的 SSOT 章節與兩側檔頭現況三方一致。"""
+        latest_tools = m._resolve_latest_tools()
+        self.assertIsNotNone(latest_tools)
+        ok, printed = self._run(latest_tools)
+        self.assertTrue(ok, printed)
+
+    def test_real_tree_sh_help_range_covers_the_enumeration(self) -> None:
+        """`--help` 的 `sed -n 'A,Bp'` 範圍必須真的涵蓋整段退出碼枚舉。
+
+        WHY：R68 為 bash 側補了 `--help`（對齊 .ps1 comment-based help），但它是
+        寫死的行號範圍——本輪把檔頭加長後若忘了同步，`--help` 會把契約攔腰截斷，
+        且無任何訊號（rc 仍為 0）。
+        """
+        latest_tools = m._resolve_latest_tools()
+        sh = latest_tools / "arch_fitness" / "run_self_evolution.sh"
+        lines = sh.read_text(encoding="utf-8").splitlines()
+        rng = re.search(r"sed -n '(\d+),(\d+)p' \"\$0\"", "\n".join(lines))
+        self.assertIsNotNone(rng, "找不到 --help 的 sed 行號範圍——結構被改動")
+        start, end = int(rng.group(1)), int(rng.group(2))
+        shown = "\n".join(lines[start - 1:end])
+        declared = m._exit_contract_from_script(sh)
+        missing = sorted(
+            (code for code in declared if f"rc={code}" not in shown), key=int)
+        self.assertEqual(
+            missing, [],
+            f"--help 印出的範圍（{start},{end}）漏掉退出碼 {missing}——"
+            f"檔頭長度變動時必須同步該 sed 範圍",
+        )
 
 
 class TestLatestThinnessPin(unittest.TestCase):

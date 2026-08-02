@@ -49,6 +49,7 @@ WHY（測意圖非僅行為，Rule 9）：`tools/tests/` 曾有 **6 檔／10 處
 from __future__ import annotations
 
 import ast
+import re
 import sys
 import unittest
 from pathlib import Path
@@ -490,6 +491,52 @@ SAMPLE = 'shutil.which("powershell")'   # 字串常數內的樣本
             any("shutil.which" in b for b in bodies),
             "誘餌情境下沒有回傳第二個定義＝鎖只看第一個，可被繞過",
         )
+
+
+class TestNoStaleLocalEngineClaims(unittest.TestCase):
+    """R69（DEF-101-702／R68-16）：本模組不得把「這台機器有沒有某個引擎」寫成常數。
+
+    WHY：`_ps_engine.py` 的 docstring 兩處逐字寫著「本機無 pwsh 7」，那是撰寫當輪那台
+    Windows 機器的屬性；R69 在 macOS 真機上 `shutil.which("pwsh")` 命中 ⇒ 該前提為假，
+    而它正是「⑤ 這條為什麼測不出差別」的**唯一理由**——理由失效後，讀者會以為那個風險
+    在本機不存在，實際上正在發生。同 ADR-XPLAT-002 §6 邊界 1 已裁定的原則：平台／環境
+    可用性是**輪次屬性**，治理文件與護欄程式一律指向現查來源，不寫死斷言。
+
+    判準刻意窄：只抓「本機 + 無/沒有/不存在 + 引擎名」這種**斷言句**，不碰
+    「合成情境」「本機根本沒有 5.1（macOS/Linux）」這類條件式敘述——後者說的是通則
+    而非這台機器。
+    """
+
+    _STALE_RE = re.compile(
+        r"本機[^。\n]{0,8}?(?:無|沒有|不存在)[^。\n]{0,4}?(pwsh|powershell|PS\s*[57])"
+    )
+
+    def test_module_has_no_hardcoded_local_engine_absence(self) -> None:
+        text = Path(_ps_engine.__file__).read_text(encoding="utf-8")
+        hits = [
+            f"{lineno}: {line.strip()}"
+            for lineno, line in enumerate(text.splitlines(), 1)
+            if self._STALE_RE.search(line) and "R69 訂正" not in line
+        ]
+        self.assertEqual(
+            hits, [],
+            "本檔把「這台機器有沒有某引擎」寫成了常數：\n" + "\n".join(hits) +
+            "\n改法：改指向現查（`available_engines()`／`shutil.which`），"
+            "或改寫成不依賴特定機器的通則敘述。",
+        )
+
+    def test_detector_catches_the_pre_fix_sentence(self) -> None:
+        """鑑別力：R69 修掉的逐字原句必須被命中。"""
+        self.assertIsNotNone(self._STALE_RE.search("⑤ 在**本機**（無 pwsh 7）會靜默 fallback"))
+
+    def test_detector_does_not_flag_conditional_prose(self) -> None:
+        """對照組：說通則而非說這台機器的句子不得誤報。"""
+        for sample in (
+            "pwsh 7 只作「本機根本沒有 5.1」（macOS/Linux）時的兜底",
+            "合成情境：讓判準在任何機器上都測得到方向",
+        ):
+            with self.subTest(sample=sample):
+                self.assertIsNone(self._STALE_RE.search(sample))
 
 
 if __name__ == "__main__":

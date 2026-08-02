@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
-"""integration_gate_core.py — AISDCL_Agent 整合層薄聚合閘門單一核心（macOS / Linux / Windows 共用）。
+"""integration_gate_core.py — AISDCL_Agent 整合層薄聚合閘門單一核心
+（macOS / Linux / Windows 共用）。
 
 DEF-101-068(b) 收斂案（R16 架構最佳化建議 B）：原 tools/integration_gate.{sh,ps1} 為雙實作
 （bash / PowerShell 各長一份業務邏輯），本檔將全部段落語意收斂為單一 Python 核心，兩支同名

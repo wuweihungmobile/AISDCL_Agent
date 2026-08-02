@@ -286,6 +286,94 @@ def _check_run_tlc_invocation_parity(latest_tools: Path) -> bool:
     return _compare(f"{label}（LATEST tlc_runner 委派引數集合）", sh_args, ps1_args) and ok
 
 
+# ── run_self_evolution 退出碼契約三方鎖（R69；DEF-101-264 同型漂移的第三次復發）──
+# 病灶：`run_self_evolution.{sh,ps1}` 兩側檔頭各自枚舉退出碼，並雙雙宣稱「規格側見
+# SDD_SELF_EVOLUTION.md『退出碼契約』節」——**該節 grep 零命中**（R68 落地時只寫了指路、
+# 沒建目的地）。同時該腳本對在 `_EXEMPT_PAIRS` 屬 `unpinned`、零機械 parity ⇒ 契約寫下來
+# 的當天就是孤兒：任一側改碼、或兩側同時漂離規格，全樹沒有任何訊號。
+#
+# 修法（三處逐筆比對，而非「兩側互比」）：SSOT ＝ md 的 `<!-- exit-code-contract:begin/end -->`
+# 表格；兩側檔頭各自的 `rc=<碼> <代號>` 枚舉必須與該表**逐筆相等**。刻意做成三方而非
+# 兩方：兩方互比只能保證「兩份註解一樣」，仍可一起漂離規格（R68 的實際形態就是兩側都寫了
+# 同一句指向不存在章節的話）。
+#
+# 另加第二道（覆蓋面而非一致性）：兩側腳本**非註解行**裡每個字面 `exit <碼>` 都必須在表內
+# 有登記——否則新增一個沒人登記的碼仍然零訊號（第一道只看註解，看不到實作）。
+# 邊界（誠實揭露，同本檔 docstring 對 `[n/m]` 的自限）：只比對「碼 ↔ 代號」的字面對應與
+# 覆蓋面，**不驗證**兩側對同一碼的實際觸發條件是否語意相同——那需要跨語言的行為驗證，
+# 不在本工具能力範圍內；語意等價仍靠 md 表的「語意」欄與人工審查。
+_EXIT_CONTRACT_BEGIN = "<!-- exit-code-contract:begin -->"
+_EXIT_CONTRACT_END = "<!-- exit-code-contract:end -->"
+_EXIT_CONTRACT_ROW_RE = re.compile(r"^\|\s*(\d+)\s*\|\s*([A-Z][A-Z0-9_]*)\s*\|", re.MULTILINE)
+_EXIT_CONTRACT_DECL_RE = re.compile(r"rc=(\d+)\s+([A-Z][A-Z0-9_]*)")
+# 字面 `exit <碼>`：bash 側多寫成 `{ …; exit 5; }`（不在行首），故不錨行首；改以「前面不是
+# 識別字元/`$`」排除 `$LASTEXITCODE`、`FSE_EXIT` 這類 token 的尾綴誤命中。
+_EXIT_LITERAL_RE = re.compile(r"(?<![\w$])exit\s+(\d+)")
+# 抽取數量下限（同 `_MIN_EXTRACT_COUNTS` 精神）：三處任一被改成抽不到東西時，逐筆相等會
+# 因「空集合 == 空集合」而恆真＝靜默失守。現況 10 碼，刻意刪碼時須同步下修本值。
+_EXIT_CONTRACT_FLOOR = 10
+_EXIT_CONTRACT_SPEC_REL = "workflow/sdd-self-evolution/SDD_SELF_EVOLUTION.md"
+
+
+def _exit_contract_from_spec(spec: Path) -> dict[str, str] | None:
+    text = spec.read_text(encoding="utf-8")
+    start = text.find(_EXIT_CONTRACT_BEGIN)
+    end = text.find(_EXIT_CONTRACT_END)
+    if start < 0 or end < 0 or end < start:
+        return None
+    return dict(_EXIT_CONTRACT_ROW_RE.findall(text[start:end]))
+
+
+def _exit_contract_from_script(path: Path) -> dict[str, str]:
+    return dict(_EXIT_CONTRACT_DECL_RE.findall(path.read_text(encoding="utf-8-sig")))
+
+
+def _check_exit_code_contract(latest_tools: Path) -> bool:
+    label = "run_self_evolution 退出碼契約"
+    spec = latest_tools.parent / _EXIT_CONTRACT_SPEC_REL
+    sh = latest_tools / "arch_fitness" / "run_self_evolution.sh"
+    ps1 = latest_tools / "arch_fitness" / "run_self_evolution.ps1"
+    for path in (spec, sh, ps1):
+        if not path.is_file():
+            print(f"❌ {label}：{path} 不存在——契約的三處來源缺一即無法比對",
+                  file=sys.stderr)
+            return False
+    declared = _exit_contract_from_spec(spec)
+    if declared is None:
+        print(f"❌ {label}：{spec} 找不到 {_EXIT_CONTRACT_BEGIN} … {_EXIT_CONTRACT_END} "
+              f"標記區段——SSOT 章節被刪或改名（R68 的原始病灶就是『指向不存在的章節』）",
+              file=sys.stderr)
+        return False
+    ok = True
+    if len(declared) < _EXIT_CONTRACT_FLOOR:
+        print(f"❌ {label}：SSOT 表只抽到 {len(declared)} 筆（下限 {_EXIT_CONTRACT_FLOOR}）"
+              f"——表格結構或抽取 pattern 疑似漂移；刻意刪碼請同步下修 "
+              f"_EXIT_CONTRACT_FLOOR", file=sys.stderr)
+        ok = False
+    for side, path in (("sh", sh), ("ps1", ps1)):
+        found = _exit_contract_from_script(path)
+        if found != declared:
+            only_spec = {k: v for k, v in declared.items() if found.get(k) != v}
+            only_side = {k: v for k, v in found.items() if declared.get(k) != v}
+            print(f"❌ {label}：.{side} 檔頭枚舉與 SSOT（{_EXIT_CONTRACT_SPEC_REL} §6.1）"
+                  f"不一致——SSOT 有而檔頭不符：{only_spec}；檔頭有而 SSOT 不符：{only_side}。"
+                  f"先改 SSOT 表，再同步兩側檔頭的 rc= 枚舉行", file=sys.stderr)
+            ok = False
+        literals = set(_EXIT_LITERAL_RE.findall(
+            _strip_comments(path.read_text(encoding="utf-8-sig"), is_ps1=(side == "ps1"))
+        ))
+        unlisted = sorted(literals - set(declared), key=int)
+        if unlisted:
+            print(f"❌ {label}：.{side} 實作有未登記的 exit 碼 {unlisted}——"
+                  f"新增退出碼必須先寫進 SSOT 表（否則兩側可各自長出碰撞碼，"
+                  f"正是 R68 修過的那個病）", file=sys.stderr)
+            ok = False
+    if ok:
+        print(f"✅ {label}：SSOT／.sh／.ps1 三處 {len(declared)} 筆逐筆一致，"
+              f"且兩側實作無未登記 exit 碼")
+    return ok
+
+
 # ── LATEST 版薄殼 hash 釘選（R65，ADR-XPLAT-002 §5 Phase 2-A）─────────────────
 # WHY 不併入 check_wrapper_thinness._PINNED_SHA256：該表的鍵是「固定 repo-root
 # 相對路徑」設計（其自身 tools/tests/test_check_wrapper_thinness.py::
@@ -299,7 +387,8 @@ def _check_run_tlc_invocation_parity(latest_tools: Path) -> bool:
 # 也不動它既有的 10 支釘選與既有測試。
 _LATEST_THINNESS_ENROLLED = {"LATEST/tools/fsm_runtime/formal/run_tlc"}
 _LATEST_PINNED_SHA256: dict[str, str] = {
-    # 2026-07-31 實測（`python -c "import check_wrapper_thinness as t; print(t.normalized_sha256(...))"`）。
+    # 2026-07-31 實測
+    # （`python -c "import check_wrapper_thinness as t; print(t.normalized_sha256(...))"`）。
     # R65 四方複審 7 項修復落地後的最終內容：(1) 裸執行三軌呼叫恆帶 --download 恢復
     # jar 自動下載、(3) .ps1 python 候選探測順序改 python3 優先（同 .sh）、(4) 新增
     # --tla-version 轉傳（.sh 讀 TLA_VERSION 環境變數／.ps1 讀 -TlaVersion 參數，
@@ -657,7 +746,11 @@ _EXEMPT_PAIRS: dict[str, tuple[str, str]] = {
         _UNPINNED,
         "FSE 有界驅動器雙原生實作，無標籤錨點（.sh echo FSE_* vs .ps1 函式化）；"
         "dry-run 安全預設兩側一致，R12 親讀定類豁免；不符 Tier-1/2/3/4 任一定義，"
-        "暫列未歸類；退場：未指派"
+        "暫列未歸類。🔴 R69 起**不再是零機械 parity**：退出碼契約已由 "
+        "_check_exit_code_contract() 三方鎖守門（SSOT ＝ SDD_SELF_EVOLUTION.md §6.1 "
+        "↔ 兩側檔頭 rc= 枚舉，另加實作 exit 字面覆蓋面）；tier 維持 unpinned 是因為 "
+        "`[n/m]` 標籤對等仍不適用（雙原生、無共同錨點），非因無人守；"
+        "退場：未指派"
     ),
 }
 # 單邊豁免清單（R11 架構改善 C2）：掃描目錄內只有 .sh 或只有 .ps1 單邊存在的腳本，
@@ -1109,7 +1202,8 @@ _UNPINNED_CEILING = 8
 # 修法＝`_UNPINNED_CEILING` 已示範過的那一招的鏡像：一個**不由基準導出**的獨立總量常數。
 # 它把兩種編輯在 diff 上分成不同形狀——升級不必動本行，降級則**必須顯式下修本行**。
 # 同樣刻意不寫成 `sum(1 for t in _TIER_BASELINE.values() if t in _TIER3_4)`：那會隨基準
-# 自我對齊，正是 R67-H14 的恆真陷阱（機械鎖＝`test_tier34_floor_is_not_derived_from_the_baseline`）。
+# 自我對齊，正是 R67-H14 的恆真陷阱
+# （機械鎖＝`test_tier34_floor_is_not_derived_from_the_baseline`）。
 #
 # 🔴 被數的量＝**tier3/4 課責數**，不是「活體 tier3/4 筆數」：
 #     課責數 = 活體仍為 tier3/4 的 key ∪ 基準記為 tier3/4 而**已整筆移出活體表**的 key
@@ -1497,6 +1591,7 @@ def main(argv: list[str] | None = None) -> int:
     else:
         ok = _check_run_tlc_invocation_parity(latest_tools) and ok
         ok = _check_latest_thinness(latest_tools) and ok
+        ok = _check_exit_code_contract(latest_tools) and ok
 
     ok = _check_pytest_pin() and ok
     ok = _check_git_longpaths_flag_parity() and ok
@@ -1511,8 +1606,10 @@ def main(argv: list[str] | None = None) -> int:
         print("\n❌ 雙平台腳本對等檢查未通過 — .sh/.ps1 必須同步修改（見上列 diff）",
               file=sys.stderr)
         return 1
-    print(f"\n✅ 雙平台腳本對等檢查通過（{len(_MARKER_PAIRS)} 對標籤腳本 + LATEST run_tlc 委派引數鎖 + "
-          "LATEST 薄殼釘選 + LATEST 薄殼交叉鎖 + pytest 釘選 + git longpaths 旗標內容鎖 + "
+    print(f"\n✅ 雙平台腳本對等檢查通過（{len(_MARKER_PAIRS)} 對標籤腳本 + "
+          "LATEST run_tlc 委派引數鎖 + "
+          "LATEST 薄殼釘選 + LATEST 薄殼交叉鎖 + run_self_evolution 退出碼契約三方鎖 + "
+          "pytest 釘選 + git longpaths 旗標內容鎖 + "
           "成對/單邊註冊完整性；薄殼對子另由 check_wrapper_thinness 釘選）")
     return 0
 

@@ -93,7 +93,8 @@
   python tools/archive_defect_log.py --apply --archive-num 31 [--ack-handoff DEF-101-517,...]
   python tools/archive_defect_log.py --check      # 事後保全稽核（項數＝ `CHECK_CRITERIA`）
 
-`--apply` 除了搬列，**還會自己把該次歸檔的索引 bullet 寫進主檔「已歸檔內容」段**
+`--apply` 除了搬列，**還會自己把該次歸檔的索引 bullet 寫進歸檔索引檔**
+（`AutoSDD_Defect_Log_archive_INDEX.md`；R69 DEF-101-734 前寫在主檔內）
 （判準⑤ 的根因級修法）：建立 archive 的那支程式同時負責註冊，「歸檔完忘記更新索引」
 就不再是一條靜默路徑。R60 收輪前那次 `archive_31` 走的是人工歸檔、漏了登記，
 而 `--check` 當時的四項判準完全不看索引段，照印 rc=0（四方 round 2 全數命中）。
@@ -116,11 +117,27 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _stdio_utf8  # noqa: E402,F401  # Windows 非 UTF-8 終端 print(✅/❌) 防崩潰保護
 import check_defect_log_crossref as gate  # noqa: E402  # 判準 SSOT：不自己另寫一份正則
+from lib import defect_ledger_index as _ledger_index  # noqa: E402
 
 _REPO_ROOT = Path(__file__).resolve().parents[1]
 _QUALITY_DIR = _REPO_ROOT / "docs" / "06_quality"
 _LEDGER = _QUALITY_DIR / "AutoSDD_Defect_Log.md"
 _ARCHIVE_GLOB = "AutoSDD_Defect_Log_archive_*.md"
+
+# 歸檔索引檔（R69 `DEF-101-734`）——常數／解析／插入基元一律再匯出自 `tools/lib`，
+# 本檔不另寫一份（WHY 與外移理由見該模組 docstring；兩支工具共用同一個物件）。
+_ARCHIVE_INDEX_NAME = _ledger_index.ARCHIVE_INDEX_NAME
+ARCHIVE_INDEX_BULLET_RE = _ledger_index.ARCHIVE_INDEX_BULLET_RE
+index_bullet_lines = _ledger_index.index_bullet_lines
+insert_index_bullet = _ledger_index.insert_index_bullet
+
+
+def ARCHIVE_INDEX_DOC() -> Path:
+    """歸檔索引檔路徑。刻意是**函式**：測試沙箱 monkeypatch 的是 `_QUALITY_DIR`，
+    模組常數會在 import 時就綁死 repo 內的真檔，注入測試會寫穿 tracked 檔。
+    """
+    return _ledger_index.archive_index_doc(_QUALITY_DIR)
+
 
 CLOSED_CLASSES = frozenset({"fixed", "wontfix", "closed-by-decision"})
 
@@ -177,7 +194,8 @@ CHECK_CRITERIA: tuple[tuple[str, str], ...] = (
     ("重複列", "同一 ID 在同一份檔內不得出現兩列"),
     ("跨檔矛盾", "同一 ID 同時存在主檔與 archive 時，兩邊狀態分類不得各說各話"),
     ("立帳指針", "稽核面每一處「立帳見」都要跟得上可解析 DEF-ID，且居所宣稱與實況一致"),
-    ("歸檔索引涵蓋性", "磁碟上每支 archive 都要在主檔索引段有一條以它為主體的 bullet（雙向）"),
+    ("歸檔索引涵蓋性",
+     "磁碟上每支 archive 都要在歸檔索引檔有一條以它為主體的 bullet（雙向）"),
     ("非「立帳見」方言的居所宣稱",
      "`見主檔 DEF-x`／`見 DEF-x（現居 archive_NN）` 同樣驗居所；"
      "裸「現居 archive_NN」（無「見」動詞）另受對等硬要求，須跟得上可解析 DEF-ID"),
@@ -247,7 +265,8 @@ _UNLOCK_HEADROOM_BYTES = 10240
 # ---------------------------------------------------- 判準(7) 的既有列具名基線（Pkg-P7 P7-2）
 # 🔴 帳本家族 archive 側實查有一批列的欄內含**未轉義的字面豎線**（須寫成 `\|`），因而被
 # 多切出欄位。**逐檔筆數就是下方這張表本身**（本表即該數字的唯一真相源，散文不複寫一份，
-# 否則就是 Scan-H #3 講的第二個 stale 站點）。`DEF-101-560` 已逐筆具名**不修**（史料檔逐字保全、今日零活體
+# 否則就是 Scan-H #3 講的第二個 stale 站點）。`DEF-101-560` 已逐筆具名**不修**
+# （史料檔逐字保全、今日零活體
 # 後果），而 `check_defect_log_crossref.py` 之所以不誤紅是因為它**從不解析 archive 的表格
 # 列**（只 `stat()` 量大小）——本檔的 `check()` 會解析家族每一份檔，故必須明確處置。
 #
@@ -389,13 +408,6 @@ _CORNER_QUOTE_RE = re.compile(r"「[^「」]*」|『[^『』]*』")
 # （rebind 本模組的名字即可，不會動到閘門那一側）。
 _GOVERNANCE_DOCS = gate._GOVERNANCE_DOCS
 
-# 判準⑤ — 歸檔索引 bullet：主檔「已歸檔內容」段裡**以某支 archive 檔名為主體**的那一條。
-# 樣式刻意只認「`> - ` ＋（可帶粗體的）反引號檔名」開頭：索引段的 bullet 一律長這樣，
-# 而散文中順帶提到 `archive_NN` 的句子（例如「比照 archive_23 先例」）不會被誤收。
-ARCHIVE_INDEX_BULLET_RE = re.compile(
-    r"^>\s*-\s*\*{0,2}`(?P<file>AutoSDD_Defect_Log_archive_\d+\.md)`\*{0,2}"
-)
-
 # 判準⑥ — **非**「立帳見」方言的居所宣稱。SA-R60R2-03 實證的逸出面：`archive_26` 寫
 # 「見主檔 `DEF-101-481`」（實居 archive_27），比 `立帳見` 少兩個字就完全逃過判準④，
 # 於是 `--check` 印「19/19 皆…居所宣稱與實況一致」——在它自己界定的範圍內為真，
@@ -467,7 +479,8 @@ def _no_layout_problem(name: str, n_rows: int) -> str:
 
     刻意**不**退回 `cells[-1]`／`cells[0]` 位置猜測：那正是「狀態欄空白時靜默位移到分流
     去向欄」的成因（見模組 docstring 的 Pkg-P7 段）。零缺陷列的檔不走這條路——家族內實查
-    有一批純散文 archive（零表格列，實數以 `_family_files()` 現查為準），對它們要求表頭就是自製誤紅。
+    有一批純散文 archive（零表格列，實數以 `_family_files()` 現查為準），
+    對它們要求表頭就是自製誤紅。
     """
     return (
         f"{name}：檔內有 {n_rows} 筆缺陷列卻查無合格表頭（需 `| ID | … | 狀態 | …` 形態）"
@@ -593,7 +606,8 @@ def classify_row(line: str, claimed: set[str], layout: tuple[int, int, int]) -> 
 def load_rows(text: str) -> list[str]:
     """該份帳本檔的缺陷表格列。ID 欄由**表頭**定位；查無合格表頭一律回空清單（不猜位置）。
 
-    回空而非拋例外，是因為家族內實查有一批**零表格列**的純散文 archive（實數現查，不寫死）；「有列卻沒表頭」
+    回空而非拋例外，是因為家族內實查有一批**零表格列**的純散文 archive
+    （實數現查，不寫死）；「有列卻沒表頭」
     這個真異常由判準(7) 與 `plan()` 各自 fail-loud（見 `_no_layout_problem()`）。
     """
     layout = gate._table_layout(text)
@@ -754,18 +768,6 @@ def _fenced_line_numbers(text: str) -> set[int]:
     return out
 
 
-def index_bullet_lines(main_text: str) -> list[tuple[int, str]]:
-    """回傳主檔歸檔索引段的 `(0-based 行索引, archive 檔名)`，順序即檔內順序。
-
-    判準⑤／`apply()` 自動註冊共用的唯一解析點（勿在別處重寫一份樣式）。
-    """
-    return [
-        (i, m.group("file"))
-        for i, line in enumerate(main_text.split("\n"))
-        if (m := ARCHIVE_INDEX_BULLET_RE.match(line))
-    ]
-
-
 def _pointer_problems(src: Path, m: re.Match, where: dict[str, list[str]],
                       lineno: int) -> list[str]:
     """驗一處居所指針（判準④ 的「立帳見…」或判準⑥ 的「見主檔…」）宣稱與實況是否一致。"""
@@ -905,7 +907,7 @@ def check() -> int:
           且例外**每次執行都逐處列印**，不得靜默——見 `_CODE_SPAN_RE` 上方說明。
           (丁) 的引號要求為 round 3 收窄（SA-R60R3-06；ARCH／SD 判定「未重開缺陷」、
           SA 判定「重開」，主控裁決採 SA 的收窄，三方判斷逐字記在該處）
-      (5) 歸檔索引涵蓋性 — 磁碟上每一支 archive 都必須在主檔「已歸檔內容」段有一條
+      (5) 歸檔索引涵蓋性 — 磁碟上每一支 archive 都必須在歸檔索引檔（R69 前為主檔）有一條
           以它為主體的 bullet，且 bullet 數 == 實查 archive 檔數（雙向：多出的
           bullet 也是失實）。**份數刻意不與中文數詞比對**：主檔那句「N 檔」在這份
           檔案已 stale 過三次（R56 註自己就記著「原寫二十一檔在 HEAD 時點即已
@@ -1117,18 +1119,27 @@ def check() -> int:
                 idx = line.find(POINTER_VERB, idx + 1)
 
     # (5) 歸檔索引涵蓋性 —— 掃描面沿用 `_family_files()`（不新增掃描面），比對的是
-    #     「磁碟上有哪些 archive」對「主檔索引段登記了哪些」。R60 收輪前人工建了
+    #     「磁碟上有哪些 archive」對「索引檔登記了哪些」。R60 收輪前人工建了
     #     `archive_31` 卻沒登記，而當時的四項判準完全不看索引段，`--check` 照印 rc=0；
     #     主檔標題還寫死「**三十檔**」。份數一律現場核算，不與中文數詞比對（見 docstring (5)）。
-    archives = [p.name for p in files if p != _LEDGER]
-    bullets = index_bullet_lines(texts[_LEDGER.name])
+    #     🔴 R69 `DEF-101-734`：索引段已外移，bullet 解析對象改為索引檔；該檔本身以**檔名
+    #     常數**（非「零表格列」這種會吞掉真事故的模糊判準）自 archive 清單排除——它是目錄
+    #     不是史料檔，要求它替自己登記 bullet 是自我指涉的假需求。
+    archives = [p.name for p in files if p.name not in (_LEDGER.name, _ARCHIVE_INDEX_NAME)]
+    if _ARCHIVE_INDEX_NAME not in texts:
+        problems.append(
+            f"{_ARCHIVE_INDEX_NAME} 不存在 — 歸檔索引段自 R69（DEF-101-734）起外移至該檔，"
+            "缺檔＝判準⑤ 失去比對對象。拒絕靜默退化成「零 bullet 也算通過」"
+            "（上方稽核面缺檔硬閘應已先報一次；本句是判準⑤ 自己的第二道防線）"
+        )
+    bullets = index_bullet_lines(texts.get(_ARCHIVE_INDEX_NAME, ""))
     listed = [name for _, name in bullets]
     for name in archives:
         if name not in listed:
             problems.append(
-                f"{name}：磁碟上存在，但主檔「已歸檔內容」索引段查無以它為主體的 bullet"
-                f"（樣式 `> - **`{name}`**（…）：…`）。歸檔而不登記＝該批史料在"
-                "主檔的目錄上不存在，讀者只看主檔會以為它沒發生；`--apply` 現在會自動"
+                f"{name}：磁碟上存在，但 {_ARCHIVE_INDEX_NAME} 索引段查無以它為主體的 "
+                f"bullet（樣式 `> - **`{name}`**（…）：…`）。歸檔而不登記＝該批史料在"
+                "帳本的目錄上不存在，讀者只看主檔會以為它沒發生；`--apply` 現在會自動"
                 "註冊，人工歸檔請補上這一條"
             )
     for name in listed:
@@ -1197,7 +1208,8 @@ def check() -> int:
 
     # (7) 表格列欄數 == 該檔表頭欄數。檢查本體一律用閘門的純函式 `gate.row_arity_problems()`
     #     ——本檔**不寫第二份**（Pkg-P7 的整個立意就是切欄／欄位定位只准有一份實作）。
-    #     archive 側既有異常列走 `_ARITY_BASELINE` 具名基線（筆數以該表為唯一真相源；處置理由與「歷史列不追溯、
+    #     archive 側既有異常列走 `_ARITY_BASELINE` 具名基線（筆數以該表為唯一真相源；
+    #     處置理由與「歷史列不追溯、
     #     新列硬擋」為何結構上成立，見該常數上方）。
     waived_arity: list[str] = []
     for p in files:
@@ -1336,7 +1348,7 @@ def conservation_problems(orig_text: str, new_main: str, move_lines: list[str],
 
 def _index_bullet(dest: Path, move_ids: list[str], orig_bytes: int, released: int,
                   archive_bytes: int, needs_ack: list[dict], note: str) -> str:
-    """組出該次歸檔在主檔「已歸檔內容」段的索引 bullet（體例照 archive_30 那條）。
+    """組出該次歸檔的索引 bullet（體例照 archive_30 那條；R69 起寫進歸檔索引檔）。
 
     載明：建立時點／筆數／ID 清單／bytes 變化／判準④ 攔下哪幾筆／操作備註。
 
@@ -1357,25 +1369,6 @@ def _index_bullet(dest: Path, move_ids: list[str], orig_bytes: int, released: in
         f"**判準④ 攔下、刻意未加 `--ack-handoff` 而留在主檔者**：{held}。"
         f"**本次操作備註**：{note}"
     )
-
-
-def insert_index_bullet(main_text: str, bullet: str) -> tuple[str, str | None]:
-    """把 bullet 插在主檔索引段**最後一條 bullet 之後**；回傳 `(新文字, 錯誤說明或 None)`。
-
-    抓不到任何既有 bullet 就回錯誤而**不是**自己找地方塞：索引段的位置只能由既有
-    bullet 認定（標題文字歷輪改過），猜錯地方會把一條索引寫進別的段落，讀者看不到、
-    判準⑤ 卻因為「有這條 bullet」而放行 —— 那比不寫更糟。
-    """
-    bullets = index_bullet_lines(main_text)
-    if not bullets:
-        return main_text, (
-            "主檔查無任何歸檔索引 bullet（樣式 `> - **`AutoSDD_Defect_Log_archive_NN.md`**…`）"
-            "——無法判定索引段位置，拒絕猜測插入點（猜錯會寫出一條讀者看不到、判準⑤ 卻放行"
-            "的假索引）。請確認主檔「已歸檔內容」段是否被改寫，並同步 ARCHIVE_INDEX_BULLET_RE"
-        )
-    lines = main_text.split("\n")
-    lines.insert(bullets[-1][0] + 1, bullet)
-    return "\n".join(lines), None
 
 
 def apply(archive_num: int, ack: frozenset[str], header_note: str) -> int:
@@ -1432,22 +1425,30 @@ def apply(archive_num: int, ack: frozenset[str], header_note: str) -> int:
     )
     archive_body = (header + "\n".join(move_lines) + "\n").encode("utf-8")
 
-    # 判準⑤ 的根因級修法：建立 archive 的同一支程式負責把索引 bullet 寫進主檔，
+    # 判準⑤ 的根因級修法：建立 archive 的同一支程式負責把索引 bullet 寫進索引檔，
     # 「歸檔完忘記更新索引」不再是一條靜默路徑。插入點＝索引段最後一條 bullet 之後。
+    # 🔴 R69 DEF-101-734：bullet 的落點由主檔改為索引檔，故本次歸檔對主檔而言**只減不增**
+    # （守恆式的 `added` 回到 0）。索引檔仍在家族體積守門內，差別在於它與缺陷總表**不再共用
+    # 同一份餘裕**，而缺陷總表的餘裕才是「還能不能記下一筆缺陷」的那一個。
+    new_main = rows_removed
+    index_doc = ARCHIVE_INDEX_DOC()
+    index_orig_bytes = index_doc.stat().st_size if index_doc.exists() else 0
     bullet = _index_bullet(dest, move_ids, len(orig), released, len(archive_body),
                            p["needs_ack"], header_note)
-    new_main, index_problem = insert_index_bullet(rows_removed, bullet)
-    if index_problem:
-        print(f"❌ 無法把歸檔索引 bullet 寫進主檔，**未寫入任何檔案**：{index_problem}",
-              file=sys.stderr)
+    bullet_bytes = len(bullet.encode("utf-8")) + 1
+    new_index, index_problem = _ledger_index.prepare_index_insert(index_doc, bullet)
+    if index_problem or new_index is None:
+        print(f"❌ {index_problem}，**未寫入任何檔案**", file=sys.stderr)
         return 1
 
     # 保全不變量（顯式檢查 + return 1，**不是 assert** —— 見 conservation_problems 檔頭：
     # assert 在 python -O 下整組消失，而下一步就是就地覆寫帳本主檔）。
-    # `added` 把上面那條 bullet 的位元組顯式列進守恆算式（WHY 見該函式 docstring）。
+    # 🔴 `added=0`（R69 DEF-101-734）：bullet 已改寫進索引檔，主檔不再被 `apply()` 主動
+    # 加東西，故守恆式回到最嚴的「新主檔 + 釋出 == 舊主檔」——主檔只要被多改一個字就紅。
+    # bullet 那一側的守恆由上面索引檔的顯式檢查接手（兩邊都被管著，沒有無人看守的縫）。
     guard_problems = conservation_problems(
         text, new_main, move_lines, p["total_rows"] - len(move_ids), released,
-        added=len(bullet.encode("utf-8")) + 1,
+        added=0,
     )
     if guard_problems:
         print(f"❌ 落地前保全不變量不成立（{len(guard_problems)} 筆），**未寫入任何檔案**：",
@@ -1459,17 +1460,20 @@ def apply(archive_num: int, ack: frozenset[str], header_note: str) -> int:
     # bytes 層寫入：不經 os.linesep 翻譯（Windows 上 write_text 會把 LF 變 CRLF）
     dest.write_bytes(archive_body)
     _LEDGER.write_bytes(new_main.encode("utf-8"))
-    for p2 in (dest, _LEDGER):
+    index_doc.write_bytes(new_index.encode("utf-8"))
+    for p2 in (dest, _LEDGER, index_doc):
         if b"\r" in p2.read_bytes():
-            print(f"❌ {p2.name} 落地後含 CR — 寫入路徑被 os.linesep 翻譯，兩份檔已受污染；"
+            print(f"❌ {p2.name} 落地後含 CR — 寫入路徑被 os.linesep 翻譯，落地檔已受污染；"
                   "請立即 git 還原後排查（同樣不用 assert：-O 下會整條消失）",
                   file=sys.stderr)
             return 1
 
     print(f"✅ {dest.name}：{len(move_ids)} 筆、{dest.stat().st_size} bytes")
-    print(f"✅ 主檔 {len(orig)} → {_LEDGER.stat().st_size} bytes"
-          f"（釋出 {released}、索引 bullet 新增 {len(bullet.encode('utf-8')) + 1}）")
-    print(f"✅ 已自動在主檔「已歸檔內容」段登記索引 bullet（判準⑤）：{bullet[:60]}…")
+    print(f"✅ 主檔 {len(orig)} → {_LEDGER.stat().st_size} bytes（釋出 {released}，"
+          f"自 R69 起 bullet 不再寫進主檔故淨變動 == -{released}）")
+    print(f"✅ {index_doc.name} {index_orig_bytes} → {index_doc.stat().st_size} bytes"
+          f"（索引 bullet 新增 {bullet_bytes}）")
+    print(f"✅ 已自動在 {index_doc.name} 登記索引 bullet（判準⑤）：{bullet[:60]}…")
     if p["needs_ack"]:
         print(f"ℹ️  {len(p['needs_ack'])} 筆因散文帶交棒字樣未搬："
               f"{', '.join(v['id'] for v in p['needs_ack'])}")

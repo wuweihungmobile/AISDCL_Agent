@@ -13,10 +13,15 @@ per-tree 下限）。
 判準（行級 regex；先剝註解再掃，heuristic 邊界如下，均為刻意取捨）：
   A 執行期必炸組（bash 4+ 語法）：declare -A、mapfile、readarray、
     ${var,,}/${var^^}/${var@Q…}、|&、&>>、coproc、local -n、wait -n
-  B BSD 工具紀律組（GNU-only 選項）：grep -P、readlink -f、sed -i
-    （SA-R15-REV-4 揭露：ONBOARDING §8 靜態自查清單另列第 4 項「BRE 交替」
-    屬語意級判準——grep 是否用 ERE `|` 交替需理解上下文，非行級 regex 能可靠
-    判定，刻意不納入本守門、仍靠人工紀律；本組僅機械化前 3 項）
+  B BSD 工具紀律組（GNU-only 選項）：grep -P、readlink -f、sed -i、stat -c、
+    date -d、timeout、xargs -r、find -printf
+    （SA-R15-REV-4 揭露：ONBOARDING §8 靜態自查清單另列「BRE 交替」屬語意級判準
+    ——grep 是否用 ERE `|` 交替需理解上下文，非行級 regex 能可靠判定，刻意不納入
+    本守門、仍靠人工紀律。🔴 R69：本段原寫「本組僅機械化前 3 項」，而
+    `tools/macos_smoke_local.sh` 檔頭同時逐字宣告 8 項禁令 ⇒ 5 項只活在散文裡、
+    注入後全套根層測試仍 rc=0。已補齊，並由 TestProseBanListIsFullyMechanised
+    把兩側雙向綁定，防再長出「列了但沒守」的差集。A 組同輪補 local -A／
+    typeset -A／shopt -s globstar／declare -g 四項）
   - 註解剝除：整行 `#` 與行內 `#`（僅剝「引號外、且位於字首或空白/;&|( 之後」
     的 #——單/雙引號逐字元追蹤，字串內的 # 不誤剝；$'…'/反引號等罕見形不追，
     屬 heuristic 邊界）；
@@ -69,11 +74,50 @@ _PATTERNS: list[tuple[re.Pattern[str], str]] = [
     (re.compile(r"\bcoproc\b"), "coproc（bash 4.0+）"),
     (re.compile(r"\blocal\s+-n\b"), "local -n nameref（bash 4.3+）"),
     (re.compile(r"\bwait\s+-n\b"), "wait -n（bash 4.3+）"),
+    # R69（DEF-101-702／R68-03）：A 組原漏 `local -A`／`typeset -A`（`declare -A` 的兩個
+    # 等價寫法，bash 3.2 同樣必炸）、`shopt -s globstar`（4.0+，3.2 下 `**` 靜默退化成 `*`
+    # ⇒ 掃描面無聲縮小，比報錯更危險）、`declare -g`（4.2+，3.2 直接 `invalid option`）。
+    (re.compile(r"\b(?:local|typeset)\s+-[a-zA-Z]*A\b"),
+     "local -A / typeset -A 關聯陣列（bash 4.0+；同 declare -A）"),
+    (re.compile(r"\bshopt\s+-s\s+globstar\b"),
+     "shopt -s globstar（bash 4.0+；3.2 下 ** 靜默退化為 *，掃描面無聲縮小）"),
+    (re.compile(r"\bdeclare\s+-[a-zA-Z]*g\b"), "declare -g（bash 4.2+）"),
     # ── B BSD 工具紀律組（GNU-only 選項，macOS BSD 工具不支援）──────────────
     (re.compile(r"\bgrep\s+-[a-zA-Z]*P\b"), "grep -P（BSD grep 無 PCRE；請改 -E）"),
     (re.compile(r"\breadlink\s+-f\b"), "readlink -f（BSD readlink 不支援；請用 cd+pwd -P）"),
     (re.compile(r"\bsed\s+-i\b"), "sed -i（GNU/BSD 引數語意分歧；請改寫中間檔）"),
+    # R69（DEF-101-702／R68-03）：B 組原只機械化 3 項，而本 repo 自己在
+    # `tools/macos_smoke_local.sh` 檔頭「相容性」段逐字宣告了 8 項禁令——**宣告的比守的多**，
+    # 剩下 5 項在沙箱注入後全套根層測試仍 rc=0。以下補齊，判準與該段散文由
+    # `TestProseBanListIsFullyMechanised` 雙向綁定，避免再長出「列了但沒守」的差集。
+    (re.compile(r"\bstat\s+(?:-[a-zA-Z]+\s+)*-c\b"), "stat -c（GNU；BSD stat 用 -f）"),
+    (re.compile(r"\bdate\s+(?:-[a-zA-Z]+\s+)*-d\b"), "date -d（GNU；BSD date 用 -v/-j -f）"),
+    (re.compile(r"(?<![\w./-])timeout\s+[0-9]"),
+     "timeout（GNU coreutils；macOS 預設不存在，命令直接 not found）"),
+    (re.compile(r"\bxargs\s+(?:-[a-zA-Z]+\s+)*-r\b"), "xargs -r（GNU；BSD xargs 無此旗標）"),
+    (re.compile(r"\bfind\b[^\n|;]*\s-printf\b"), "find -printf（GNU；BSD find 無此述詞）"),
 ]
+
+# 散文側禁令 token ↔ 上表判準的綁定用樣本：每個 token 配一段**應被判違規**的最小 bash。
+# 兩側由 `TestProseBanListIsFullyMechanised` 雙向比對：散文列了而這裡沒有 → 紅；
+# 這裡有而樣本打不中對應 pattern → 紅（即「登記了卻是空殼」）。
+_BAN_TOKEN_SAMPLES: dict[str, str] = {
+    "declare -A": "declare -A map",
+    "mapfile": "mapfile -t arr < f",
+    "${var,,}": 'echo "${v,,}"',
+    "local -A": "local -A m",
+    "typeset -A": "typeset -A m",
+    "shopt -s globstar": "shopt -s globstar",
+    "declare -g": "declare -g X=1",
+    "grep -P": "grep -P 'x' f",
+    "readlink -f": "readlink -f x",
+    "sed -i": "sed -i 's/a/b/' f",
+    "stat -c": "stat -c %Y f",
+    "date -d": "date -d @123",
+    "timeout": "timeout 5 cmd",
+    "xargs -r": "xargs -r rm",
+    "find -printf": "find . -printf '%p'",
+}
 
 
 def _latest_root() -> Path:
@@ -368,6 +412,197 @@ class TestScanConfigPinning(unittest.TestCase):
             ],
             "bash 掃描樹清單或 per-tree 檔數下限被改動——刻意調整請同步改本釘選值",
         )
+
+
+class TestProseBanListIsFullyMechanised(unittest.TestCase):
+    """R69（DEF-101-702／R68-03）：**宣告的禁令不得多於守得住的判準**。
+
+    WHY：本 repo 在三個地方各寫了一份「bash 3.2 / BSD 禁用清單」，長度分別是 8、4、3 項，
+    而 `_PATTERNS` 修前只機械化其中 3 項 BSD 禁令 —— 沙箱把 5 項散文列了但沒守的形態注入
+    腳本後，全套根層測試仍 rc=0。「文件宣告」與「機械判準」的差集就是**假合規面**：讀者
+    照檔頭寫程式時以為有人在守，實際沒有。本鎖把差集本身變成紅燈。
+
+    兩個方向都要（單向會留下另一種漂移）：
+      ① 散文列的每一項都必須有能真的打中它的 pattern（否則是空頭宣告）；
+      ② `_BAN_TOKEN_SAMPLES` 登記的每一項都必須真的被某條 pattern 命中（否則是空殼登記，
+         看起來有守、其實 pattern 寫壞了也沒人知道）。
+    """
+
+    _PROSE_SH = _REPO_ROOT / "tools" / "macos_smoke_local.sh"
+
+    def _prose_tokens(self) -> set[str]:
+        """自 macos_smoke_local.sh 檔頭「相容性」段抽出禁令 token（該段即散文 SSOT）。"""
+        text = self._PROSE_SH.read_text(encoding="utf-8")
+        start = text.find("# 相容性：嚴格 bash 3.2")
+        self.assertNotEqual(start, -1, "macos_smoke_local.sh 檔頭「相容性」段消失——抽取面崩塌")
+        block = text[start:text.find("相容手法參照", start)]
+        return {tok for tok in _BAN_TOKEN_SAMPLES if tok in block}
+
+    def test_every_prose_ban_has_a_pattern_that_fires(self) -> None:
+        tokens = self._prose_tokens()
+        self.assertGreaterEqual(
+            len(tokens), 8, f"檔頭禁令 token 只抽到 {sorted(tokens)}——抽取樣式或散文漂移"
+        )
+        uncovered = sorted(
+            tok for tok in tokens
+            if not any(pat.search(_BAN_TOKEN_SAMPLES[tok]) for pat, _desc in _PATTERNS)
+        )
+        self.assertEqual(
+            uncovered, [],
+            f"這些禁令只活在散文裡、`_PATTERNS` 打不中：{uncovered}——"
+            f"補上判準，或（若刻意不守）把它從檔頭清單移除並寫明理由",
+        )
+
+    def test_every_registered_sample_is_actually_caught(self) -> None:
+        """反空殼：登記表本身的每一筆都必須真的觸發某條 pattern。"""
+        dead = sorted(
+            tok for tok, sample in _BAN_TOKEN_SAMPLES.items()
+            if not any(pat.search(sample) for pat, _desc in _PATTERNS)
+        )
+        self.assertEqual(dead, [], f"_BAN_TOKEN_SAMPLES 有登記卻打不中的空殼條目：{dead}")
+
+    def test_the_real_trees_stay_green_after_widening(self) -> None:
+        """反誤紅：新增判準後，六棵真實掃描樹不得冒出任何新違規。"""
+        rels: list[str] = []
+        for _key, files, _floor in _scan_trees():
+            rels.extend(files)
+        offenders, stale, read_failures = scan_files(rels)
+        self.assertEqual(read_failures, [])
+        self.assertEqual(offenders, [], "擴充判準後真實腳本樹出現違規（請逐筆修，勿縮判準）")
+        self.assertEqual(stale, [])
+
+
+# ---- R69（DEF-101-702／R68-43）：set -u ＋ 空陣列展開（bash 3.2 執行期必炸）----------
+_SET_U_RE = re.compile(r"set\s+-[a-zA-Z]*u")
+_EMPTY_ARRAY_DECL_RE = re.compile(r"^\s*([A-Za-z_][A-Za-z0-9_]*)=\(\s*\)", re.M)
+
+
+def unset_safe_array_problems(code: str, rel: str) -> list[str]:
+    """回傳「`set -u` 檔內、以 `"${NAME[@]}"` 裸展開可能為空之陣列」的違規清單。
+
+    WHY（本判準為何存在）：`AISDLC_SDD_v0.30/tools/fsm_runtime/formal/run_tlc.sh` 同時有
+    `set -euo pipefail` 與 `TLA_VERSION_ARGS=()`，於是在 macOS 系統 bash 3.2 下**每一條**
+    執行路徑都死在 `"${TLA_VERSION_ARGS[@]}"`（3.2 對空陣列的 `[@]` 展開視為 unbound），
+    而該檔自訂 rc=1＝「TLC 偵測到 invariant violation」⇒ **環境錯誤被偽裝成形式化驗證失敗**。
+    `bash -n` 攔不到（語法合法），CI 的 bash 5.x 也攔不到（5.x 不視為 unbound）。
+
+    安全形態＝`${NAME[@]+"${NAME[@]}"}`（3.2/5.x 皆正確）。
+
+    啟發式邊界（刻意寫明，勿當成完備分析）：若檔內任何地方以 `${#NAME[@]}` 做過非空守衛
+    （如 `if [ "${#a[@]}" -gt 0 ]`），視該陣列為已守；`${#…}` 對空陣列本來就安全，這是本
+    repo 既有的正確寫法（`AutoClaude/tools/git-hooks/pre-commit`）。代價是「守衛在別的分支、
+    展開不在其內」這種形態會漏抓——行級掃描器換不到控制流分析，如實揭露。
+    """
+    if not _SET_U_RE.search(code):
+        return []
+    problems: list[str] = []
+    for name in sorted(set(_EMPTY_ARRAY_DECL_RE.findall(code))):
+        if f"${{#{name}[@]}}" in code:
+            continue
+        for match in re.finditer(rf'"\$\{{{name}\[@\]\}}"', code):
+            line_start = code.rfind("\n", 0, match.start()) + 1
+            segment = code[line_start:match.end()]
+            if f"${{{name}[@]+" in segment:
+                continue
+            lineno = code.count("\n", 0, match.start()) + 1
+            problems.append(
+                f"{rel}:{lineno}: `set -u` 檔內對可能為空的陣列 {name} 裸展開 "
+                f'"${{{name}[@]}}" —— bash 3.2 判為 unbound、執行期必炸；'
+                f'請改 ${{{name}[@]+"${{{name}[@]}}"}}'
+            )
+    return problems
+
+
+#: `$NAME` 後**緊接非 ASCII 字元**（全形括號／中文標點等）。bash 3.2 會把該字元的位元組
+#: 併進變數名，5.x 不會 —— 故這是 3.2 專屬陷阱，正是本檔的守備範圍。
+_FULLWIDTH_GLUED_VAR_RE = re.compile(r"\$([A-Za-z_][A-Za-z0-9_]*)([^\x00-\x7f])")
+
+
+def fullwidth_glued_var_problems(code: str, rel: str) -> list[str]:
+    """回傳「`$VAR` 緊接非 ASCII 字元」的違規清單（純函式，可構造輸入測鑑別力）。
+
+    WHY（R69 終審 P3，`DEF-101-742`）：`tools/git-hooks/pre-push` 的
+    `echo "…找不到 $SDD_CI_YML（根層消費檔清單來源…"` 在 macOS 系統 bash 3.2.57
+    （`/bin/bash`）＋ `set -u` 下，全形左括號的位元組被併進變數名 ⇒
+    `SDD_CI_YML<亂碼>: unbound variable`，**整支 hook 當場中止**（實測：該行之後的所有
+    leg 都不再執行、rc=1）。CI 的 bash 5.x 與 `bash -n` 皆攔不到（語法合法、5.x 名稱
+    解析不同），`macos-compat-ci` 雖有「以 /bin/bash 3.2 直接執行 dispatcher」步驟，
+    但走不到這個分支（要 `aisdlc-sdd-ci.yml` 缺席才觸發）⇒ 這條路徑上零機械訊號。
+
+    安全形態＝`${VAR}（`。判準刻意**不限於 `set -u` 檔**：即使沒有 `set -u`，該寫法也會
+    靜默展開成空字串、訊息內容當場失真——只是不會炸而已，一樣是缺陷。
+    """
+    problems: list[str] = []
+    for match in _FULLWIDTH_GLUED_VAR_RE.finditer(code):
+        lineno = code.count("\n", 0, match.start()) + 1
+        name, glued = match.group(1), match.group(2)
+        problems.append(
+            f"{rel}:{lineno}: `${name}` 緊接非 ASCII 字元 {glued!r} —— macOS 系統 bash "
+            f"3.2 會把它併進變數名，`set -u` 下即 unbound variable 並中止整支腳本"
+            f"（bash 5.x 與 `bash -n` 都攔不到）。請改寫成 ${{{name}}}{glued}"
+        )
+    return problems
+
+
+class TestFullwidthGluedVariableName(unittest.TestCase):
+    """R69 `DEF-101-742`：`$VAR` 緊接全形標點 —— bash 3.2 專屬的整支中止陷阱。"""
+
+    def test_real_trees_have_no_fullwidth_glued_variable(self) -> None:
+        problems: list[str] = []
+        for _key, files, _floor in _scan_trees():
+            for rel in files:
+                source = (_REPO_ROOT / rel).read_text(encoding="utf-8")
+                code = "\n".join(_split_code_comment(line)[0] for line in source.splitlines())
+                problems.extend(fullwidth_glued_var_problems(code, rel))
+        self.assertEqual(problems, [], "\n".join(problems))
+
+    def test_detector_catches_the_pre_push_pre_fix_shape(self) -> None:
+        """注入 pre-push:152 修前的逐字形態，必須命中並指名變數。"""
+        code = 'echo "找不到 $SDD_CI_YML（根層消費檔清單來源）" >&2\n'
+        hits = fullwidth_glued_var_problems(code, "pre-push")
+        self.assertTrue(hits, "修前形態未被命中 —— 本道無牙")
+        self.assertIn("SDD_CI_YML", hits[0])
+
+    def test_detector_accepts_the_braced_form_and_ascii_neighbours(self) -> None:
+        """修後形態與一般 ASCII 相鄰字元不得誤紅（否則全 repo 每個 `$VAR` 都會紅）。"""
+        self.assertEqual(
+            fullwidth_glued_var_problems(
+                'echo "找不到 ${SDD_CI_YML}（來源）"\n', "pre-push"), [])
+        self.assertEqual(
+            fullwidth_glued_var_problems('echo "$A/$B-$C.txt $D"\n', "x.sh"), [])
+
+
+class TestUnsetSafeArrayExpansion(unittest.TestCase):
+    """R69（DEF-101-702／R68-43）：`set -u` ＋ 空陣列展開的行級守門與其鑑別力。"""
+
+    def test_real_trees_have_no_unguarded_empty_array_expansion(self) -> None:
+        problems: list[str] = []
+        for _key, files, _floor in _scan_trees():
+            for rel in files:
+                source = (_REPO_ROOT / rel).read_text(encoding="utf-8")
+                code = "\n".join(_split_code_comment(line)[0] for line in source.splitlines())
+                problems.extend(unset_safe_array_problems(code, rel))
+        self.assertEqual(problems, [], "\n".join(problems))
+
+    def test_detector_catches_the_run_tlc_pre_fix_shape(self) -> None:
+        """注入 run_tlc.sh 修前的逐字形態，必須命中。"""
+        code = 'set -euo pipefail\nARGS=()\nrun --module X "${ARGS[@]}"\n'
+        self.assertTrue(unset_safe_array_problems(code, "x.sh"))
+
+    def test_detector_accepts_the_fixed_form(self) -> None:
+        code = 'set -euo pipefail\nARGS=()\nrun --module X ${ARGS[@]+"${ARGS[@]}"}\n'
+        self.assertEqual(unset_safe_array_problems(code, "x.sh"), [])
+
+    def test_detector_accepts_the_length_guarded_form(self) -> None:
+        """本 repo 既有的正確寫法（pre-commit 的 `[ "${#a[@]}" -gt 0 ]`）不得誤紅。"""
+        code = ('set -eu\nA=()\nA+=("x")\n'
+                'if [ "${#A[@]}" -gt 0 ]; then ruff check "${A[@]}"; fi\n')
+        self.assertEqual(unset_safe_array_problems(code, "x.sh"), [])
+
+    def test_detector_is_inert_without_set_u(self) -> None:
+        """沒有 `set -u` 就沒有這個缺陷類別——不得對一般腳本製造噪音。"""
+        code = 'A=()\nrun "${A[@]}"\n'
+        self.assertEqual(unset_safe_array_problems(code, "x.sh"), [])
 
 
 if __name__ == "__main__":

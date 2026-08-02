@@ -7,7 +7,7 @@
 #
 # 邏輯全部集中在 tools/dev_start.py（跨平台單一事實源；本對 .sh/.ps1 為薄殼，
 # 業務邏輯零漂移面；薄殼樣板本身無機械比對，改動須人工同步 .ps1）。本檔只做三件事：
-#   選直譯器（.venv 形狀正確優先，否則系統 python3）→ 轉呼叫核心 → 視需要啟用 venv。
+#   選直譯器（.venv 形狀正確優先，否則 SSOT 候選鏈挑 >= 3.11）→ 轉呼叫核心 → 視需要啟用 venv。
 # 刻意不用 set -e / 頂層 exit：被 source 時會殺掉使用者 shell，一律以 return code 傳遞。
 #
 # 限制（bash/zsh 專用）：
@@ -39,15 +39,17 @@ _ds_main() {
   # shellcheck disable=SC1091
   . "$root/tools/lib/windowsapps_guard.sh"
 
+  # R69 P2：候選鏈由 SSOT `pick_python_ge_min` 提供（>= 3.11 才算數）。原本只試
+  # `python3`/`python`，在 macOS 上恆撿到系統 3.9 → 核心版本閘 rc=2（見該 SSOT
+  # 函式上方的 WHY 區塊）。`.venv` 仍最優先：換平台/重建由核心自己處理。
   if [ -x "$root/.venv/bin/python" ]; then
     py="$root/.venv/bin/python"
-  elif is_real_python_candidate python3; then
-    py="python3"
-  elif is_real_python_candidate python; then
-    py="python"
   else
-    echo "❌ 找不到 Python 直譯器（dev_start 核心需 Python 3）。" >&2
-    echo "   macOS 安裝建議：brew install python@3.11（或 uv：curl -LsSf https://astral.sh/uv/install.sh | sh）" >&2
+    py="$(pick_python_ge_min)"
+  fi
+
+  if [ -z "$py" ]; then
+    python_ge_min_remediation
     return 1
   fi
 

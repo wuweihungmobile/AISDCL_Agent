@@ -172,8 +172,10 @@ def _run_quiet_stdout(cmd: list[str]) -> int:
 def _reused_venv_error() -> None:
     _err("")
     if IS_WINDOWS:
-        _err("❌ 既有 .venv 缺 Scripts\\python.exe（多半是 macOS/Linux 上建立的 .venv）— 本平台無法沿用。")
-        _err("   請刪除後重建：Remove-Item -Recurse -Force .venv；再跑 powershell -ExecutionPolicy Bypass -File tools/bootstrap.ps1")
+        _err("❌ 既有 .venv 缺 Scripts\\python.exe（多半是 macOS/Linux 上建立的 .venv）"
+             "— 本平台無法沿用。")
+        _err("   請刪除後重建：Remove-Item -Recurse -Force .venv；再跑 "
+             "powershell -ExecutionPolicy Bypass -File tools/bootstrap.ps1")
     else:
         _err("❌ 既有 .venv 缺 bin/python（多半是 Windows 上建立的 .venv）— 本平台無法沿用。")
         _err("   請刪除後重建：rm -rf .venv && bash tools/bootstrap.sh")
@@ -200,10 +202,13 @@ def _no_interpreter_error(py_target: str) -> None:
 def _venv_shape_mismatch_error(used_interp_label: str) -> None:
     _err("")
     if IS_WINDOWS:
-        _err(f"❌ .venv 建立指令回報成功（rc=0）但 Scripts\\python.exe 不存在（直譯器：{used_interp_label}）。")
-        _err("   請刪除後重試：Remove-Item -Recurse -Force .venv；再跑 powershell -ExecutionPolicy Bypass -File tools/bootstrap.ps1")
+        _err(f"❌ .venv 建立指令回報成功（rc=0）但 Scripts\\python.exe 不存在"
+             f"（直譯器：{used_interp_label}）。")
+        _err("   請刪除後重試：Remove-Item -Recurse -Force .venv；再跑 "
+             "powershell -ExecutionPolicy Bypass -File tools/bootstrap.ps1")
     else:
-        _err(f"❌ .venv 建立指令回報成功（rc=0）但 bin/python 不存在（直譯器：{used_interp_label}）。")
+        _err("❌ .venv 建立指令回報成功（rc=0）但 bin/python 不存在"
+             f"（直譯器：{used_interp_label}）。")
         _err("   請刪除後重試：rm -rf .venv && bash tools/bootstrap.sh")
 
 
@@ -229,9 +234,11 @@ def ensure_venv(py_target: str, use_uv: bool) -> int:
         actual_mm = _probe_version_mm(base_py.split())
         if actual_mm and actual_mm != py_target:
             if IS_WINDOWS:
-                _out(f"⚠️ 選定直譯器為 {actual_mm}，與 .python-version 目標 {py_target} 不一致（仍 >= 3.11 可用）")
+                _out(f"⚠️ 選定直譯器為 {actual_mm}，與 .python-version 目標 {py_target} "
+                     "不一致（仍 >= 3.11 可用）")
             else:
-                _out(f"⚠️  選定直譯器為 {actual_mm}，與 .python-version 目標 {py_target} 不一致（>=3.11 仍可用，僅提醒）")
+                _out(f"⚠️  選定直譯器為 {actual_mm}，與 .python-version 目標 {py_target} "
+                     "不一致（>=3.11 仍可用，僅提醒）")
 
     _out("建立虛擬環境：.venv")
     if use_uv:
@@ -353,7 +360,8 @@ _USAGE_EPILOG = f"""\
 .venv 位置：{VENV_DIR}
 重建 .venv：{"Remove-Item -Recurse -Force .venv" if IS_WINDOWS else "rm -rf .venv"} 後再跑本腳本一次
 相關旗標的正確歸屬：`--force-bootstrap`／`--no-sync`／`--check-nightly` 屬
-`tools/dev_start.py`（`{"powershell -ExecutionPolicy Bypass -File tools/dev_start.ps1" if IS_WINDOWS else "bash tools/dev_start.sh"} --help`），不是本腳本。
+`tools/dev_start.py`（`{"powershell -ExecutionPolicy Bypass -File tools/dev_start.ps1"
+  if IS_WINDOWS else "bash tools/dev_start.sh"} --help`），不是本腳本。
 """
 
 

@@ -122,8 +122,8 @@ import unittest
 from collections.abc import Callable
 from pathlib import Path
 from types import ModuleType
-from unittest import mock
 from typing import NamedTuple
+from unittest import mock
 
 _HERE = Path(__file__).resolve()
 _REPO = _HERE.parents[2]
@@ -1867,15 +1867,40 @@ class Corpus(NamedTuple):
     adr1: str
     scan: str
     family: tuple[tuple[str, str], ...]
+    governance: tuple[tuple[str, str], ...]
+
+
+def read_governance() -> list[tuple[str, str]]:
+    """具名治理文件的 `(檔名, 內容)`，**排除維度表本身**。
+
+    🔴 為何 SC-7 的使用面非擴到這裡不可（R69 P3；修前實況）：R68 把整輪掃描發現以
+    「主檔留指針、詳情外置」寫進 `CrossPlatform_R68_Scan_Findings.md`，帳本主檔只剩一列
+    指針。SC-7 當時的使用面**只有帳本家族**，於是「某輪用了一個維度表沒定義的代號」這個
+    病只要換一種放法（放進詳情外置檔）就整個逸出——與它原本要治的 `Scan-M` 是同一個病、
+    只是換皮。擴的是**既有 SSOT**（`ADL._GOVERNANCE_DOCS`，也就是 `--check` 判準④⑥ 與
+    體積守門共用的那一份清單），不是本檔自生的第二條 glob；新的詳情外置檔一旦建立，
+    `unregistered_governance_docs()` 會逼它登記進那份清單，於是**自動**進入本掃描面。
+
+    ⚠️ 刻意排除維度表自己：它是**定義側**，把它算進使用側會把定義變成自我循環，且它的
+    散文為了說明長名截斷邊界而逐字寫著 `Scan-S`／`Scan-P`（實測：納入即誤紅這兩個）——
+    誤報的鎖最後一定被加豁免繞過，比沒有鎖更糟。
+    """
+    return [
+        (p.name, p.read_text(encoding="utf-8-sig"))
+        for p in ADL._GOVERNANCE_DOCS
+        if p.name != _SCAN_DIMS.name
+    ]
 
 
 def read_corpus() -> Corpus:
-    """現查掃描面。帳本家族枚舉仍走 `read_family()`（＝`ADL._family_files()` 家族 SSOT）。"""
+    """現查掃描面。帳本家族枚舉仍走 `read_family()`（＝`ADL._family_files()` 家族 SSOT）；
+    治理文件枚舉走 `ADL._GOVERNANCE_DOCS`（同一份具名清單 SSOT）。"""
     return Corpus(
         adr2=_ADR2.read_text(encoding="utf-8-sig"),
         adr1=_ADR.read_text(encoding="utf-8-sig"),
         scan=_SCAN_DIMS.read_text(encoding="utf-8-sig"),
         family=tuple(read_family()),
+        governance=tuple(read_governance()),
     )
 
 
@@ -2053,8 +2078,13 @@ def sc5_no_environment_state_in_the_handoff_table(c: Corpus) -> list[str]:
 
 
 # ---- SC-6：ADR 全檔不得寫死 §9.1 的條數 --------------------------------------------------
+# 🔴 R69（DEF-101-702／R68-27）：原樣式是**列舉式** `(?:三|四|五|六)條`，而 §9.1 的條數
+# 早已成長到 8 ⇒ 今天唯一寫得出來的違規形態（「七條」「八條」「8 條」）全部漏抓，鎖對它
+# 自己要守的那個數字失去鑑別力。改為**不依賴列舉**：任何 CJK 數字或阿拉伯數字（含中間的
+# 半形／全形空白）緊鄰「不變式／可轉紅」即命中。實測對現行 ADR 全檔零誤報。
 _SC6_RE = re.compile(
-    r"(?:三|四|五|六)條.{0,12}(?:不變式|可轉紅)|(?:不變式|可轉紅).{0,12}(?:三|四|五|六)條"
+    r"[〇零一二三四五六七八九十百\d]+[\s ]*條.{0,12}(?:不變式|可轉紅)"
+    r"|(?:不變式|可轉紅).{0,12}[〇零一二三四五六七八九十百\d]+[\s ]*條"
 )
 
 
@@ -2081,21 +2111,48 @@ _SCAN_DEFINED_RE = re.compile(r"^\| \*\*(Scan-[A-Z])\*\*")
 _SCAN_CODE_LEN = len("Scan-") + 1
 
 
-def scan_codes_used(family: tuple[tuple[str, str], ...]) -> set[str]:
-    """缺陷帳本家族用過的單字母維度代號。"""
+def scan_codes_used(surface: tuple[tuple[str, str], ...]) -> set[str]:
+    """`surface` 內用過的單字母維度代號（`surface` ＝ `(檔名, 內容)` 序列）。"""
     return {
         m.group(0)
-        for _name, text in family
+        for _name, text in surface
         for m in _SCAN_CODE_RE.finditer(text)
         if len(m.group(0)) == _SCAN_CODE_LEN
     }
+
+
+def scan_table_lines(scan_text: str) -> list[str]:
+    """維度表**同一段連續 markdown 表格**的行（自表頭列起、遇第一個非 `|` 開頭行止）。
+
+    🔴 為何不是「整檔逐行 regex」（R69 P3；修前實況）：R68 新增 `Scan-N`／`Scan-T` 兩列時
+    在 `Scan-M` 之後多打了一個空行，於是那兩列在 GitHub 上**脫出表格**、渲染成兩段裸文字，
+    而當時的 `scan_codes_defined()` 是整檔逐行比對 ⇒ **鎖對這件事完全不說話**：程式讀得到、
+    人讀到的卻是壞掉的表。這與本檔反覆在治的「規格與實作各說各話」同型，只是這次不一致的
+    兩造是「解析器」與「渲染器」。改以連續區塊界定定義面之後，任何一列被空行截出表格，
+    它就不再算「已定義」⇒ SC-7 當場紅並指名該代號（修前實測：`['Scan-N', 'Scan-T']`）。
+
+    抓不到表頭一律回空 list——呼叫端把空 list 當掃描面崩塌回報（同 `_section8_hits()` 紀律）。
+    """
+    lines = scan_text.splitlines()
+    start = next(
+        (i for i, ln in enumerate(lines) if ln.startswith("| 維度 |")),
+        None,
+    )
+    if start is None:
+        return []
+    out: list[str] = []
+    for ln in lines[start:]:
+        if not ln.startswith("|"):
+            break
+        out.append(ln)
+    return out
 
 
 def scan_codes_defined(scan_text: str) -> set[str]:
     """`CrossPlatform_Scan_Dimensions.md` 維度表已定義的單字母代號。"""
     return {
         m.group(1)
-        for line in scan_text.splitlines()
+        for line in scan_table_lines(scan_text)
         if (m := _SCAN_DEFINED_RE.match(line))
     }
 
@@ -2110,23 +2167,26 @@ def sc7_every_used_scan_code_is_defined(c: Corpus) -> list[str]:
     搬進 Python 後改用集合差集，「回傳空 list ＝通過」，不再有任何 rc 陷阱，也不依賴
     `<(...)` 這個非 POSIX 的 process substitution。
     """
-    used, defined = scan_codes_used(c.family), scan_codes_defined(c.scan)
+    used = scan_codes_used(c.family + c.governance)
+    defined = scan_codes_defined(c.scan)
     if not used:
         return [
-            "SC-7：帳本家族內找不到任何單字母 Scan-<X> 代號 — 掃描面已崩塌"
-            "（家族枚舉 SSOT 或代號樣式壞了？），本判準拒絕靜默通過"
+            "SC-7：帳本家族 ∪ 具名治理文件內找不到任何單字母 Scan-<X> 代號 — 掃描面已崩塌"
+            "（家族／治理文件枚舉 SSOT 或代號樣式壞了？），本判準拒絕靜默通過"
         ]
     if not defined:
         return [
-            "SC-7：維度表抽不到任何 `| **Scan-<X>**` 定義列 — 表格形態被改寫？"
-            "本判準拒絕靜默通過；請同步本檔的 _SCAN_DEFINED_RE"
+            "SC-7：維度表抽不到任何**位於連續表格區塊內**的 `| **Scan-<X>**` 定義列 — "
+            "表頭被改寫，或整張表被空行截斷？本判準拒絕靜默通過；"
+            "請同步本檔的 _SCAN_DEFINED_RE／scan_table_lines()"
         ]
     missing = sorted(used - defined)
     if not missing:
         return []
     return [
-        f"SC-7：帳本用過但維度表未定義的代號 {missing} — 維度定義不得只活在某一輪的帳本裡，"
-        f"請補進 {_SCAN_DIMS.name} 的維度表"
+        f"SC-7：已使用但維度表未定義的代號 {missing} — 維度定義不得只活在某一輪的帳本／"
+        f"某一輪的詳情外置檔裡，請補進 {_SCAN_DIMS.name} 的維度表"
+        f"（若該列已在檔內、卻仍被指名，先確認它沒有被空行截出 markdown 表格）"
     ]
 
 
@@ -2211,7 +2271,17 @@ _SC2_INJECT = "| item | 完成判準 | 承接輪次 **R64+** |"
 _SC3_INJECT = "| item | 護欄層行數降到 4,096 以下 | 未指派 |"
 _SC4_INJECT = "本機是 macOS，故 Windows 側標的本輪整批不驗。"
 _SC5_INJECT = "| item | 待 CI 額度恢復後再議；期間排程停擺 | 未指派 |"
-_SC6_INJECT = "本節共四條可轉紅不變式，逐條照抄即可。"
+# 🔴 R69（DEF-101-702／R68-27）：原為固定字串「本節共**四**條…」＝凍在歷史值上的樣本。
+# §9.1 條數成長後，那個樣本驗的是「四年前有人可能寫的錯值」，不是「今天最可能被寫下的
+# 那個值」。改為**以現查條數合成**，使注入樣本永遠等於今天的高風險形態。
+_SC6_CJK_DIGITS = "〇一二三四五六七八九十"
+
+
+def _sc6_inject(corpus: Corpus) -> str:
+    """以 §9.1 現查條數合成 SC-6 注入樣本（寫死任何數字都是違規，寫對的也是）。"""
+    n = len(_SC_DECL_RE.findall(adr2_section_91(corpus.adr2)))
+    token = _SC6_CJK_DIGITS[n] if 0 <= n < len(_SC6_CJK_DIGITS) else str(n)
+    return f"本節共{token}條可轉紅不變式，逐條照抄即可。"
 # 未定義的代號：刻意選一個維度表不會有的字母，注入後 SC-7 必須指名它。
 _SC7_INJECT_CODE = "Scan-Z"
 # 對照組：規格明文排除的 R14 期臨時長名，**不得**被截斷成單字母而誤報。
@@ -2267,11 +2337,39 @@ def _insert_into_section_8_3(c: Corpus, payload: str) -> Corpus:
     return c._replace(adr2="\n".join(lines))
 
 
+def _synthetic_scan_row(code: str) -> str:
+    """用到 `code` 的合成列（不含任何 DEF-ID 字面——`test_defect_id_reference_integrity.py`
+    會全庫 grep DEF-ID 並要求每個都有對應主鍵列）。"""
+    return f"| 合成注入列 | 發現情境：R00 {code} | 本列只為驗證 SC-7 的鑑別力 |"
+
+
 def _inject_scan_code(c: Corpus, code: str) -> Corpus:
-    """在帳本家族尾端追加一列用到 `code` 的合成列（不含任何 DEF-ID 字面——
-    `test_defect_id_reference_integrity.py` 會全庫 grep DEF-ID 並要求每個都有對應主鍵列）。"""
-    row = f"| 合成注入列 | 發現情境：R00 {code} | 本列只為驗證 SC-7 的鑑別力 |"
-    return c._replace(family=c.family + (("<注入>合成帳本檔", row),))
+    """把合成列追加在**帳本家族**尾端。"""
+    return c._replace(family=c.family + (("<注入>合成帳本檔", _synthetic_scan_row(code)),))
+
+
+def _inject_scan_code_into_governance(c: Corpus, code: str) -> Corpus:
+    """把同一列追加在**具名治理文件**（詳情外置檔）那一側——R69 P3 新增的掃描面。"""
+    return c._replace(
+        governance=c.governance + (("<注入>合成詳情外置檔", _synthetic_scan_row(code)),)
+    )
+
+
+def _break_scan_table_before(scan_text: str, code: str) -> str:
+    """在 `code` 定義列**之前**插一個空行 — 逐字重演 R68 `Scan-N`／`Scan-T` 的修復前實況
+    （markdown 表格被空行截斷，該列在 GitHub 上不再渲染成表格列）。"""
+    lines = scan_text.splitlines()
+    idx = next(
+        (i for i, ln in enumerate(lines) if ln.startswith(f"| **{code}**")),
+        None,
+    )
+    if idx is None:
+        raise RuntimeError(
+            f"注入器在維度表找不到 {code} 的定義列 — 注入基底已失效，"
+            "拒絕做一次「注入了什麼都不知道」的無效注入"
+        )
+    lines.insert(idx, "")
+    return "\n".join(lines)
 
 
 class Injection(NamedTuple):
@@ -2292,7 +2390,7 @@ _SECTION_91_INJECTIONS: tuple[Injection, ...] = (
     Injection("SC-5", "規格記載的修復前實況：§8 交棒表混入外部環境當時狀態",
               lambda c: _insert_into_section_8(c, _SC5_INJECT)),
     Injection("SC-6", "規格記載的修復前實況：標題寫死條數而與實際交付數不符",
-              lambda c: _append_to_adr2(c, _SC6_INJECT)),
+              lambda c: _append_to_adr2(c, _sc6_inject(c))),
     Injection("SC-7", "規格記載的修復前實況：Scan-M 產出缺陷卻在維度表零定義",
               lambda c: _inject_scan_code(c, _SC7_INJECT_CODE)),
     Injection("SC-8", "規格記載的修復前實況：§8.3 掛著一枚全庫零消費者的豁免標記",
@@ -2327,6 +2425,15 @@ class TestSection91InvariantsAreLive(unittest.TestCase):
                            (_SCAN_DIMS.name, self.live.scan)):
             self.assertTrue(text.strip(), f"{what} 讀進來是空的 — 掃描面崩塌")
         self.assertTrue(self.live.family, "帳本家族枚舉為空 — SC-7 的掃描面崩塌")
+        self.assertTrue(
+            self.live.governance,
+            "具名治理文件枚舉為空 — SC-7 的『詳情外置』掃描面崩塌"
+            "（`ADL._GOVERNANCE_DOCS` 只剩維度表自己？）",
+        )
+        self.assertTrue(
+            scan_table_lines(self.live.scan),
+            f"{_SCAN_DIMS.name} 抽不到連續的維度表區塊 — 表頭 `| 維度 |` 已改名？",
+        )
         whole = awk_range(self.live.adr2, _SEC8_START, _SEC8_END_ALL)
         body = awk_range(self.live.adr2, _SEC8_START, _SEC8_END_TABLE)
         self.assertTrue(whole, "§8 全區抽不到")
@@ -2474,9 +2581,13 @@ class TestSection91InvariantsHaveTeeth(unittest.TestCase):
                 self.assertIn("掃描面已崩塌", problems[0])
 
     def test_sc7_reports_a_collapsed_scan_surface_on_either_side(self) -> None:
-        """SC-7 是「差集為空＝通過」，故**任一側掃描面歸零都會讓它恆綠**——兩側各驗一次。"""
+        """SC-7 是「差集為空＝通過」，故**任一側掃描面歸零都會讓它恆綠**——兩側各驗一次。
+
+        使用側自 R69 P3 起是「帳本家族 ∪ 具名治理文件」，故歸零要兩者同時清空才算掃描面
+        崩塌（只清其一仍有代號可比對，不該報崩塌，那會是自製誤報）。
+        """
         for what, corpus in (
-            ("帳本家族", self.live._replace(family=())),
+            ("使用面（帳本家族＋治理文件）", self.live._replace(family=(), governance=())),
             ("維度表", self.live._replace(scan="")),
         ):
             with self.subTest(side=what):
@@ -2485,10 +2596,40 @@ class TestSection91InvariantsHaveTeeth(unittest.TestCase):
                 self.assertIn("拒絕靜默通過", problems[0])
 
     def test_sc7_names_the_undefined_code_it_found(self) -> None:
-        """紅燈必須指路：訊息要逐字說出是哪個代號沒定義，而不是只說「有差集」。"""
-        problems = check_by_id("SC-7").fn(_inject_scan_code(self.live, _SC7_INJECT_CODE))
-        self.assertTrue(problems)
-        self.assertIn(_SC7_INJECT_CODE, problems[0])
+        """紅燈必須指路：訊息要逐字說出是哪個代號沒定義，而不是只說「有差集」。
+
+        🔴 R69 P3：**兩側各注一次**。治理文件那一側就是 R68 造出來的逸出路徑——帳本主檔
+        只留一列指針、逐筆詳情全在 `CrossPlatform_R68_Scan_Findings.md`，於是「用了未定義
+        代號」只要寫在詳情外置檔就整個逸出 SC-7（同一個病換皮即復發）。
+        """
+        for side, mutate in (
+            ("帳本家族", _inject_scan_code),
+            ("具名治理文件（詳情外置檔）", _inject_scan_code_into_governance),
+        ):
+            with self.subTest(side=side):
+                problems = check_by_id("SC-7").fn(mutate(self.live, _SC7_INJECT_CODE))
+                self.assertTrue(problems, f"{side} 側注入未定義代號後 SC-7 仍靜默通過")
+                self.assertIn(_SC7_INJECT_CODE, problems[0])
+
+    def test_sc7_reds_when_a_definition_row_is_broken_out_of_the_markdown_table(self) -> None:
+        """🔴 R69 P3：定義列被空行截出 markdown 表格 ⇒ 它就不算「已定義」。
+
+        修前實況（本鎖落地前）：`scan_codes_defined()` 是整檔逐行 regex，於是 R68 在
+        `Scan-M` 之後多打的那個空行讓 `Scan-N`／`Scan-T` 在 GitHub 上渲染成兩段裸文字，
+        而任何鎖都不會說話——程式讀得到、人讀到的是壞掉的表。本支對每一個現行定義列逐一
+        注入該形態，確保這件事在任何一列上都轉紅（不是只對當初那兩列有效）。
+        """
+        defined = sorted(scan_codes_defined(self.live.scan))
+        self.assertTrue(defined, "維度表抽不到任何定義列 — 注入基底已失效")
+        for code in defined:
+            with self.subTest(code=code):
+                broken = self.live._replace(
+                    scan=_break_scan_table_before(self.live.scan, code)
+                )
+                problems = check_by_id("SC-7").fn(broken)
+                self.assertTrue(
+                    problems, f"{code} 被空行截出表格後 SC-7 仍靜默通過 ⇒ 渲染面與解析面各說各話"
+                )
 
     def test_sc7_does_not_flag_the_documented_long_form_codes(self) -> None:
         """對照組（規格明載的邊界）：R14 期的臨時長名不得被截斷成單字母而誤報。
@@ -2709,6 +2850,45 @@ class TestThisLockObeysItsOwnNoHardcodedCountRule(unittest.TestCase):
         ):
             with self.subTest(sample=sample):
                 self.assertIsNone(_BARE_COUNT_RE.search(sample))
+
+
+class TestSc6PatternIsNotEnumerationBound(unittest.TestCase):
+    """R69（DEF-101-702／R68-27）：SC-6 的樣式不得再退回「列舉幾個數字」的寫法。
+
+    WHY（為何這支測試存在，而不只是改個 regex 就算了）：SC-6 要守的**就是「條數」這個
+    會成長的量**，而它自己的偵測樣式卻把數字寫死成 `三|四|五|六`——於是 §9.1 長到 8 條
+    之後，今天唯一寫得出來的違規形態（七／八／阿拉伯數字）全部從鎖底下走掉，鎖只對
+    「已經不可能發生的歷史錯值」有效。這是 Scan-H 判準②「鎖自己也會 stale」的樣本：
+    一支鎖若對它所守護對象的**當前值**沒有鑑別力，綠燈不代表合規。
+    """
+
+    def test_forms_writable_today_are_all_detected(self) -> None:
+        """今天最可能被寫下的六種形態必須全部命中（修前：後五種全部漏抓）。"""
+        for sample in (
+            "本節共四條可轉紅不變式，逐條照抄即可。",   # 歷史錯值（修前唯一抓得到的）
+            "本節共七條可轉紅不變式。",
+            "本節共八條可轉紅不變式。",
+            "本節共十條可轉紅不變式。",
+            "本節共 8 條可轉紅不變式。",
+            "§9.1 的可轉紅不變式共 12 條。",
+        ):
+            with self.subTest(sample=sample):
+                self.assertIsNotNone(
+                    _SC6_RE.search(sample),
+                    "SC-6 樣式漏抓一個今天寫得出來的條數宣稱 —— 樣式又被寫成列舉了？",
+                )
+
+    def test_the_real_adr_stays_green(self) -> None:
+        """反誤紅：泛化後對真實 ADR 全檔不得有任何命中（命中數現查，本處刻意不寫）。"""
+        self.assertEqual(sc6_no_hardcoded_invariant_count(read_corpus()), [])
+
+    def test_inject_sample_tracks_the_live_count(self) -> None:
+        """注入樣本必須跟著 §9.1 現查條數走，不得凍在某個歷史值上。"""
+        corpus = read_corpus()
+        live_n = len(_SC_DECL_RE.findall(adr2_section_91(corpus.adr2)))
+        self.assertGreater(live_n, 0, "§9.1 抽不到任何 `# SC-N` 宣告 —— 掃描面崩塌")
+        token = _SC6_CJK_DIGITS[live_n] if live_n < len(_SC6_CJK_DIGITS) else str(live_n)
+        self.assertIn(f"共{token}條", _sc6_inject(corpus))
 
 
 if __name__ == "__main__":  # pragma: no cover

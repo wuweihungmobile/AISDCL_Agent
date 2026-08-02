@@ -14,10 +14,13 @@ R60 實查有 **6 個檔案／10 處行內寫法／5 種語意**，無具名 SSO
 ⑤ 與 R59 **DEF-101-509 拍板的判準方向相反**。該判準原文（`test_install_windows_nightly.py`
 的 WHY 區塊）：「生產是以 `powershell -ExecutionPolicy Bypass -File` 執行＝5.1，而 `pwsh`
 解析用的是 PS 7 文法…本檔所在的 `tools/` 樹受 `test_ps51_compat.py` 的『PS 5.1 相容』
-政策約束，故以 5.1 優先解析與該政策一致」。⑤ 在**本機**（無 pwsh 7）會靜默 fallback
-到 5.1、測不出差別；但 GitHub-hosted runner 與任何 `winget install Microsoft.PowerShell`
-過的開發機兩者皆有，就會用 **PS 7** 去驗一支受 5.1 政策約束的檔案——與 DEF-101-509
-修掉的是同一類判準錯誤、只是方向相反。本檔因此把「生產引擎＝5.1 優先」寫成唯一的
+政策約束，故以 5.1 優先解析與該政策一致」。⑤ 會靜默 fallback 到另一個引擎、測不出差別；GitHub-hosted
+runner、任何 `winget install Microsoft.PowerShell` 過的開發機、以及 `brew install
+powershell` 過的 macOS 開發機都同時有兩者（🔴 **R69 訂正**：本段原寫「在**本機**（無
+pwsh 7）」——那是把撰寫當下那台機器寫成本檔的常數，在 R69 的 macOS 真機上實測為假
+〔`which pwsh` 命中〕。引擎可用性是**機器屬性**，一律現查 `available_engines()`），
+於是會用 **PS 7** 去驗一支受 5.1 政策約束的檔案——與 DEF-101-509 修掉的是同一類判準
+錯誤、只是方向相反。本檔因此把「生產引擎＝5.1 優先」寫成唯一的
 具名述詞（`production_engine()`），讓「選誰」這件事只有一處可改、且有鎖看著。
 
 **為何另立一支模組、不塞進 `_platform_helpers.py`**：該檔 docstring 自己已明列收納
@@ -26,7 +29,8 @@ R60 實查有 **6 個檔案／10 處行內寫法／5 種語意**，無具名 SSO
 故比照同目錄 `_ci_scan_anchors.py` 的先例，單一關注點獨立成檔。
 
 守門：`tools/tests/test_ps_engine_ssot.py`
-  - 優先序（含「兩引擎都在」的合成情境——本機無 pwsh 7，不合成就驗不到方向）
+  - 優先序（含「兩引擎都在」的合成情境——合成是為了讓判準在**任何**機器上都測得到
+    方向，不依賴該機器剛好裝了哪些引擎；R69 訂正：原註記寫死「本機無 pwsh 7」）
   - `native_ps51()` 不得 fallback
   - repo-wide 反增生掃描：`tools/tests/*.py` 不得再出現行內引擎挑選（附具名豁免＋stale
     自檢）。**判定走 `ast`**（R60 round-2 訂正）：只認真正的 `shutil.which("powershell"

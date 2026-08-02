@@ -38,9 +38,14 @@ from __future__ import annotations
 
 import ast
 import io
+import re
+import shutil
+import subprocess
 import sys
 import tempfile
 import tokenize
+import tomllib
+import unicodedata
 import unittest
 from pathlib import Path
 
@@ -338,6 +343,140 @@ class TestScanRootsConfigPinning(unittest.TestCase):
                 "AutoClaude/tmp_lint_check.py",
                 "AISDLC_SDD/LATEST/tools/__init__.py",
             },
+        )
+
+
+# ---------------------------------------------------------------- 根層 lint 政策（R69 P3）
+_RUFF_TOML = _REPO_ROOT / "tools" / "ruff.toml"
+_AUTOCLAUDE_PYPROJECT = _REPO_ROOT / "AutoClaude" / "pyproject.toml"
+
+#: `tools/tests/` 的 E501 存量債上限（**shrink-only 棘輪**，只准往下改）。
+#:
+#: 值＝R69 P3 落地當下的實測筆數，量法見 `_overlong_line_count()`。**刻意不是 ruff 的
+#: 精確複本**：ruff 對「超限段落拆不開」的行（長 URL／單一 token）另有豁免，本量法沒有，
+#: 因此本值是 ruff E501 筆數的**超集**（實測 ruff 側較小）。債務天花板取超集是安全方向
+#: ——它只會把「多寫一行過長的行」更早攔下，不會放行。
+_E501_DEBT_CEILING = 139
+
+
+def _overlong_line_count(root: Path) -> int:
+    """`root` 底下所有 `.py` 中「顯示寬度 > line-length」的行數。
+
+    寬度依 East Asian Width 計（W/F 佔 2 欄），與 ruff 的 E501 同一種量法——本 repo 的
+    註解與斷言訊息幾乎全是中文，用 `len()` 量會低估近一半（實測 141 vs 89）。
+    """
+    limit = _ruff_config()["line-length"]
+    total = 0
+    for path in sorted(root.rglob("*.py")):
+        for line in path.read_text(encoding="utf-8").splitlines():
+            if sum(2 if unicodedata.east_asian_width(c) in "WF" else 1 for c in line) > limit:
+                total += 1
+    return total
+
+
+def _ruff_config() -> dict:
+    return tomllib.loads(_RUFF_TOML.read_text(encoding="utf-8"))
+
+
+class TestRootToolsLintPolicy(unittest.TestCase):
+    """根層護欄層的 ruff 設定必須存在、與 AutoClaude 側同步，且它的豁免不得靜默長大。
+
+    WHY（R68-38）：本 repo 此前**全 monorepo 只有一份 ruff 設定**（`AutoClaude/pyproject.toml`），
+    而 ruff 是「由每個檔往上找最近的設定檔」——根層 `tools/` 上方一路到 repo 根都沒有任何
+    ruff 設定，於是 `ruff check tools/` 套的是 ruff 出廠預設，印出的 `All checks passed!`
+    是**假綠**：換上本 repo 自己宣告的規則集當場 199 筆。本類把那份設定釘成有消費者的東西。
+    """
+
+    def test_root_tools_has_its_own_ruff_config(self) -> None:
+        self.assertTrue(
+            _RUFF_TOML.is_file(),
+            f"{_RUFF_TOML.name} 不存在 ⇒ 根層護欄層又回到「套 ruff 出廠預設」的假綠狀態",
+        )
+
+    def test_rule_set_is_identical_to_the_autoclaude_side(self) -> None:
+        """規則集**逐字**對齊 AutoClaude；兩邊各走各的門檻就是下一次漂移。"""
+        root = _ruff_config()
+        ac = tomllib.loads(_AUTOCLAUDE_PYPROJECT.read_text(encoding="utf-8"))["tool"]["ruff"]
+        self.assertEqual(
+            root["lint"]["select"], ac["lint"]["select"],
+            "根層 tools/ruff.toml 的 select 與 AutoClaude/pyproject.toml 不同步 —— "
+            "同一批人、同一種程式碼不該被兩套規則管；要改請兩邊一起改",
+        )
+        self.assertEqual(root["line-length"], ac["line-length"])
+        self.assertEqual(root["target-version"], ac["target-version"])
+
+    def test_e501_debt_only_shrinks(self) -> None:
+        """存量債棘輪：`tools/tests/` 的過長行數只准往下改。
+
+        為何非有這道不可：`[lint.per-file-ignores]` 一旦掛上，ruff 對該類違規就完全閉嘴
+        ——沒有棘輪的豁免會靜默長大，最後變成「整包 noqa」的另一種寫法。
+        """
+        actual = _overlong_line_count(_TESTS_DIR)
+        self.assertLessEqual(
+            actual, _E501_DEBT_CEILING,
+            f"tools/tests/ 的過長行由 {_E501_DEBT_CEILING} 增至 {actual} —— "
+            f"本棘輪只准往下改。新寫的行請自行折行（既有債另有到期日，見 tools/ruff.toml）",
+        )
+
+    def test_the_e501_waiver_carries_an_expiry_date(self) -> None:
+        """帶到期日的豁免才不會腐化成永久豁免（同 `ci_liveness` 的 `WAIVER_UNTIL` 體例）。"""
+        text = _RUFF_TOML.read_text(encoding="utf-8")
+        self.assertRegex(
+            text, r"到期日：\d{4}-\d{2}-\d{2}",
+            "tools/ruff.toml 的 E501 存量債豁免已不帶到期日 —— 無到期日的豁免＝永久豁免",
+        )
+
+    def test_the_config_actually_covers_the_root_tools_tree(self) -> None:
+        """反空轉：設定檔必須真的**罩得住**根層 tools/ 樹（不是放在某個沒人走到的角落）。
+
+        以 ruff 自己的解析結果為準——`ruff check --show-settings <本樹任一支檔>` 印出的
+        `Settings path` 必須就是 `tools/ruff.toml`、`linter.rules.enabled` 必須含 E501、
+        `linter.line_length` 必須等於本檔宣告值。**不能**靠讀 toml 自我確認：這一整類缺陷
+        的形狀就是「檔案內容正確、但 ruff 的向上尋找根本走不到它」，讀 toml 對此恆真。
+
+        R69 訂正（SA 實測）：本測試原本的斷言是 `_overlong_line_count(...) >= 0` ——
+        一個**恆真**式子，而 docstring 卻宣稱「以 `ruff check --show-settings` 驗證」。
+        宣稱與實作不符的鎖比沒有鎖更糟：它讓人以為這條路已經被守住了。
+        """
+        ruff = shutil.which("ruff")
+        if ruff is None:
+            self.skipTest(
+                "[TOOL-MISSING] ruff 不在 PATH——本道要驗的是 ruff **自己**的設定解析結果，"
+                "沒有 ruff 就無從驗起。刻意 skip 而非靜默通過：假綠正是本道要治的病"
+            )
+        probe = Path(__file__).resolve()  # tools/tests/ 底下任一支檔＝本檔自己
+        proc = subprocess.run(
+            [ruff, "check", "--show-settings", str(probe)],
+            capture_output=True, text=True, encoding="utf-8", errors="replace",
+            cwd=str(_REPO_ROOT), check=False,
+        )
+        self.assertEqual(
+            proc.returncode, 0,
+            f"`ruff check --show-settings` 非零退出（rc={proc.returncode}）：\n{proc.stderr}",
+        )
+        out = proc.stdout
+        m = re.search(r'^Settings path: "(.+)"$', out, re.MULTILINE)
+        self.assertIsNotNone(
+            m, "`--show-settings` 輸出沒有 `Settings path:` 行——ruff 對本樹**找不到任何**"
+               "設定檔（＝退回出廠預設，正是本道要抓的假綠；R69 實測：把 tools/ruff.toml "
+               "移走即重現此訊息），或 ruff 輸出格式改變。兩種都不得以寬鬆比對繞過")
+        self.assertEqual(
+            Path(m.group(1)).resolve(), _RUFF_TOML.resolve(),
+            f"ruff 對 {probe} 解析到的設定檔是 {m.group(1)}，不是 {_RUFF_TOML} ⇒ 本樹套的是"
+            f"別人的設定或出廠預設，`tools/ruff.toml` 是一份沒有射程的擺設",
+        )
+        enabled = re.search(r"^linter\.rules\.enabled = \[\n(.*?)^\]$", out,
+                            re.MULTILINE | re.DOTALL)
+        self.assertIsNotNone(enabled, "`--show-settings` 輸出沒有 `linter.rules.enabled` 區塊")
+        self.assertIn(
+            "line-too-long (E501)", enabled.group(1),
+            "ruff 實際啟用的規則集不含 E501 —— 出廠預設 select 就不含它，"
+            "這正是「`All checks passed!` 是假綠」的成因",
+        )
+        self.assertRegex(
+            out, rf"(?m)^linter\.line_length = {_ruff_config()['line-length']}$",
+            f"ruff 實際採用的 line_length 不是 tools/ruff.toml 宣告的 "
+            f"{_ruff_config()['line-length']}",
         )
 
 

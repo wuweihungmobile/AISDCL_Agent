@@ -12,11 +12,11 @@ from pathlib import Path
 from unittest import mock
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-import check_hooks_liveness as m  # noqa: E402
-
 # 平台中立的假「絕對」repo 根（WHY 見 _platform_helpers 常數旁註解；R11 真 Mac
 # 首跑實證：寫死 "D:/repo" 在 POSIX 非絕對路徑 → join/resolve 語意分歧假紅）。
 from _platform_helpers import ABS_FAKE_REPO  # noqa: E402
+
+import check_hooks_liveness as m  # noqa: E402
 
 
 class TestCheckHooksLiveness(unittest.TestCase):

@@ -98,3 +98,68 @@ function Test-IsRealPython {
   $cmd = Get-Command $CandidateName -ErrorAction SilentlyContinue
   return [bool]($cmd -and -not (Test-HasWindowsAppsSegment $cmd.Source))
 }
+
+# ─────────────────────────────────────────────────────────────────────────────
+# R69 P2：「挑一個 >= 3.11 直譯器」候選鏈（PowerShell 側）。
+# 與 tools/lib/windowsapps_guard.sh 的 `pick_python_ge_min` 同構（同一套候選鏈
+# 語意、同一段探測碼、同形狀的 fail-loud 補救訊息）——雙平台落差本身就是 R69
+# 要消滅的東西，故 mac 側修好、Windows 側不修 == 沒修完。
+# WHY 併入本檔而非另開 lib：見 .sh 對稱實作上方的同名 WHY 區塊。
+# 版本下限 SSOT＝tools/dev_start.py::_MIN_PY，由 tools/tests/test_dev_start.py::
+# test_min_python_version_is_consistent_across_dev_start_ssots 機械鎖住三處同步。
+$script:PythonGeMinMM = '3.11'
+# 順序＝優先序，形狀對齊 tools/bootstrap_core.py::pick_python() 的 Windows 分支：
+# `py` launcher 指定版最優先（官方多版本入口），再裸 python/python3。
+$script:PythonGeMinCandidates = @(
+  'py -3.11', 'py -3.12', 'py -3.13',
+  'python3.11', 'python3.12', 'python3.13',
+  'python', 'python3'
+)
+# 探測碼與 .sh 側 `PYTHON_GE_MIN_PROBE` 逐字相同：版本達標印直譯器絕對路徑，
+# 否則印空字串。
+$script:PythonGeMinProbe = 'import sys;print(sys.executable if sys.version_info[:2] >= (3, 11) else "")'
+
+function Get-PythonGeMin {
+  # 回傳第一個可用且 >= 3.11 的直譯器**絕對路徑**；一個都沒有回 $null。
+  [CmdletBinding()]
+  [OutputType([string])]
+  param()
+
+  foreach ($cand in $script:PythonGeMinCandidates) {
+    $parts = $cand -split '\s+'
+    $exe = $parts[0]
+    # `py` launcher 不會被 Store 註冊成空殼（見檔頭），只需存在性檢查；
+    # 裸 python/python3 候選才走 WindowsApps 空殼 guard。
+    if ($exe -eq 'py') {
+      if (-not (Get-Command 'py' -ErrorAction SilentlyContinue)) { continue }
+    } elseif (-not (Test-IsRealPython -CandidateName $exe)) {
+      continue
+    }
+    $rest = @()
+    if ($parts.Count -gt 1) { $rest = $parts[1..($parts.Count - 1)] }
+    $out = $null
+    try {
+      $out = & $exe @rest -c $script:PythonGeMinProbe 2>$null
+    } catch {
+      continue
+    }
+    if ($LASTEXITCODE -ne 0) { continue }
+    $first = @($out)[0]
+    if ($first) { return ([string]$first).Trim() }
+  }
+  return $null
+}
+
+function Write-PythonGeMinRemediation {
+  # fail-loud 補救指引——只印**逐字可執行**的指令（與 .sh 側
+  # `python_ge_min_remediation` 同形狀）。
+  [CmdletBinding()]
+  param()
+
+  Write-Host "❌ 找不到 Python >= $($script:PythonGeMinMM) 直譯器（dev_start 核心需 $($script:PythonGeMinMM)+）。" -ForegroundColor Red
+  Write-Host "   已依序嘗試：$($script:PythonGeMinCandidates -join ' ')" -ForegroundColor Yellow
+  Write-Host "   Windows 補救（擇一，逐字可執行）：" -ForegroundColor Yellow
+  Write-Host "     winget install -e --id Python.Python.3.11" -ForegroundColor Yellow
+  Write-Host "     winget install -e --id astral-sh.uv ; uv python install 3.11" -ForegroundColor Yellow
+  Write-Host "   裝完請重開終端機（PATH 需重新載入）後再執行：. tools\dev_start.ps1" -ForegroundColor Yellow
+}

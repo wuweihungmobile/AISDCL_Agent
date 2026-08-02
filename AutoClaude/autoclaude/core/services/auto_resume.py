@@ -19,10 +19,11 @@
 from __future__ import annotations
 
 import logging
+import os
 import time
 from datetime import datetime
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Optional
+from typing import TYPE_CHECKING, Any
 
 import yaml
 
@@ -40,15 +41,33 @@ logger = logging.getLogger("autoclaude.core.services.auto_resume")
 __all__ = ["AutoResumeService", "AutoResumeMetrics", "load_playbook", "seconds_until_resume"]
 
 
+# 🔴 R69（DEF-101-702／R68-01）：checkpoint 是否真的屬於 `playbook_path`。
+# WHY：checkpoint 檔名來自 `Path(p).stem`，於是 ① 大小寫不敏感檔案系統（macOS APFS／
+# Windows NTFS）上 `Foo.yaml` 與 `foo.yaml` 共用同一個檔案；② 不同目錄下的同名 playbook
+# 也共用（平台無關）。兩種情形修前都會**靜默**從別支 playbook 的 step_idx 續跑。
+# 判定順序：① checkpoint 沒記路徑（舊檔／PG 後端缺欄）→ 無從判定即放行，不製造回歸；
+# ② `os.path.samefile` 為準（唯一能正確處理大小寫不敏感 APFS 的判準）；③ 檔案不存在
+# （演化版產物已清掉等）退回 `normcase(realpath())` 字面正規化比對。
+def _checkpoint_matches_playbook(ck: Any, playbook_path: str) -> bool:
+    recorded = getattr(ck, "playbook_path", None)
+    if not recorded:
+        return True
+    try:
+        return os.path.samefile(recorded, playbook_path)
+    except OSError:
+        return (os.path.normcase(os.path.realpath(recorded))
+                == os.path.normcase(os.path.realpath(playbook_path)))
+
+
 class AutoResumeService:
     """外層自動恢復協調器（Layer 2，Kernel 之上）。"""
 
     def __init__(
         self,
-        kernel: "PlaybookKernel",
-        config: "AppConfig",
+        kernel: PlaybookKernel,
+        config: AppConfig,
         *,
-        state_repository: Optional[Any] = None,
+        state_repository: Any | None = None,
     ):
         """初始化 AutoResumeService。
 
@@ -81,7 +100,7 @@ class AutoResumeService:
 
     def _emit_auto_resume_wake(
         self,
-        scheduled_at: Optional[str],
+        scheduled_at: str | None,
         kind: str,
         wait_secs: float,
     ) -> None:
@@ -97,13 +116,13 @@ class AutoResumeService:
         )
 
     @property
-    def kernel(self) -> "PlaybookKernel":
+    def kernel(self) -> PlaybookKernel:
         """供 PlaybookRunner M1 shim 存取底層 Kernel。"""
         return self._kernel
 
     def _resolve_start(
         self, playbook_path: str, fresh: bool
-    ) -> tuple[int, list[str], bool, Optional[str]]:
+    ) -> tuple[int, list[str], bool, str | None]:
         """從 checkpoint 解析下次執行起點。
 
         Args:
@@ -141,6 +160,18 @@ class AutoResumeService:
             )
             return 0, [], False, None
         if ck is None:
+            return 0, [], False, None
+        if not _checkpoint_matches_playbook(ck, playbook_path):
+            # 🔴 R69（DEF-101-702／R68-01）：checkpoint 檔名來自 `Path(p).stem`，於是
+            # ① 大小寫不敏感檔案系統（macOS APFS／Windows NTFS）上 `Foo.yaml` 與
+            # `foo.yaml` 共用同一個檔案；② 不同目錄下的同名 playbook 也共用（平台無關）。
+            # 兩種情形修前都會**靜默**載入別支 playbook 的執行狀態，從別人的 step_idx
+            # 續跑——零校驗、零訊號。checkpoint 自己記著 `playbook_path`，比對它即可把
+            # 靜默錯配變成可見降級：視為無 checkpoint 從頭跑（安全方向），並 warn 出兩邊
+            # 路徑。刻意不拋例外——「從頭跑一次」比「中止使用者的執行」代價低得多。
+            logger.warning("AutoResumeService | checkpoint 屬於別支 playbook（id 撞名），"
+                           "視為無 checkpoint 從頭：ck=%r，本次=%r",
+                           ck.playbook_path, playbook_path)
             return 0, [], False, None
         return (
             ck.step_idx,
@@ -289,7 +320,7 @@ def load_playbook(path: str) -> Playbook:
     return Playbook(**data)
 
 
-def seconds_until_resume(scheduled_resume_at: "str | None") -> float:
+def seconds_until_resume(scheduled_resume_at: str | None) -> float:
     """回傳距排程恢復的剩餘秒數；未設定或已過期則回傳 0.0。
 
     例外處理：

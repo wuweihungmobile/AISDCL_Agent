@@ -1,0 +1,59 @@
+# monorepo **根層護欄層**（`tools/` 與 `tools/tests/`）的 ruff 設定。
+#
+# 🔴 為何需要這支檔（R68-38，R69 P3 落地）：本 repo 此前**全 monorepo 只有一份 ruff 設定**
+# ——`AutoClaude/pyproject.toml` 的 `[tool.ruff]`。ruff 是「由每個檔往上找最近的設定檔」，
+# 而根層 `tools/` 的上方一路到 repo 根都沒有任何 ruff 設定，於是它套用的是 ruff 的
+# **出廠預設**（只 `E4,E7,E9,F`、line-length 88 但預設 select 不含 E501）。後果：
+# 對根層跑 `ruff check tools/` 得到的 `All checks passed!` 是**假綠**——換上本 repo 自己
+# 宣告的規則集（`E,F,I,UP,W` + line-length 100）當場 199 筆。這與 `DEF-99-001`／
+# `DEF-101-123` 同型：**政策有宣告、卻沒有任何機械物在根層執行它**。
+#
+# 🔴 規則集刻意**逐字對齊** `AutoClaude/pyproject.toml` 的 `[tool.ruff]`，不自創第二套標準：
+# 兩處各走各的門檻，就會出現「同一個人在兩棵樹裡被兩套規則管」的漂移，而本 repo 的護欄層
+# 與 AutoClaude 的 `tools/` 是同一批人、同一種程式碼。對齊性依「不新增測試檔」棘輪，
+# 鎖在既有的 `tools/tests/test_subprocess_encoding_hygiene.py::TestRootToolsLintPolicy`
+# （見該類 docstring）。R69 訂正：本行原本指向 `test_check_defect_log_crossref.py`，
+# 那支檔內**沒有**該類別——錯的指路比沒有指路更糟，它讓下一個人以為查過了。
+#
+# 🔴 本檔的執行者（缺一即回到「政策有宣告、無機械物執行」的原病，R69 補）：
+#   · CI：`.github/workflows/root-infra-ci.yml` 第 16 道 `ruff check tools/`；
+#   · 本地：`tools/git-hooks/pre-push` root-infra **快層**第 ④ 段（任何 push 皆跑）。
+#   兩處都刻意**不帶** `--config`：帶 `--config` 時 ruff 的 project root 變成 cwd，
+#   下方 `[lint.per-file-ignores]` 的相對 pattern 與 isort src 判定全部錯位（同機實測
+#   帶 `--config` 140 errors、不帶 0）。要改成 `--config` 前請先重跑這組對照。
+#
+# 為何不放在 repo 根而放在 `tools/`：放根層會讓 `AISDLC_SDD/`（今日零 ruff 設定、零 ruff
+# 閘門）一夜之間被納管並產生大批既有債紅燈，那是另一個授權面的決定。本檔的射程刻意
+# 只到根層護欄層本身。
+line-length = 100
+target-version = "py311"
+
+[lint]
+# 與 AutoClaude/pyproject.toml `[tool.ruff.lint] select` 同一份清單（勿單邊修改）。
+select = ["E", "F", "I", "UP", "W"]
+
+# 🔴 逐條有理由的豁免——**不是**整包 noqa，兩條各自的射程與到期日都寫在這裡。
+# 落地當下的存量分佈（`ruff check tools/ --statistics`）：`F` 系列（會造成執行期錯誤的
+# 那一類）**本來就是 0**，`I`／`UP`／`W`／`E7xx` 全數就地修畢（不留豁免），剩下的一律是
+# `E501`。以下兩條就是 `E501` 的全部去處。
+[lint.per-file-ignores]
+# ── 條 1：`run_root_unittests.py` 的 `MIN_TESTS` 註記（射程＝整支檔，但實際只有那一行）
+# 該行是 `MIN_TESTS = <n>  # <長篇註記>`，而 `min_tests_note_stale_tokens()` 的實作**逐字
+# 只取那一行 `#` 之後的字串**當守備射程（見該函式 docstring：「射程精確到被守護的那段
+# 散文」）。把註記換行拆開，鎖看得到的就只剩第一段——它的兩條 fail-open 自檢（找不到
+# `MIN_TESTS = ` 行／該行沒有註記）都不會響，於是守備面**靜默縮小**，正是這支鎖自己在
+# 治的失效模式。⇒ 這一條是**永久**豁免（結構性、非債務），移除它之前必須先改掉
+# `min_tests_note_stale_tokens()` 的取值方式。
+"run_root_unittests.py" = ["E501"]
+
+# ── 條 2：`tools/tests/` 的 E501 存量債（**有到期日、且只准變小**）
+# 到期日：2026-11-02（自 R69 P3 落地日起三個月）。到期時二擇一：清完並刪掉本條，或在
+# 缺陷帳本具名續期並寫下當時的實際筆數趨勢。**不得**靜默沿用。
+# 為何不是「立刻全清」：本 repo 的豁免體例要求標記與被豁免的內容**同一行**
+# （`# platform-ok:`／`# encoding-ok:`／`<!-- zsh-glob-ok: -->`），大量測試斷言訊息因此
+# 天生就長；硬拆行會把標記與內容拆散、當場讓那幾道鎖失效。本條不是「不修」，是「修法
+# 本身要一支一支評估、不能一次機械換行」。
+# 為何不會腐化成永久豁免：`tools/tests/test_subprocess_encoding_hygiene.py::
+# TestRootToolsLintPolicy` 以**shrink-only 棘輪**釘住當前筆數（`_E501_DEBT_CEILING`），
+# 只准往下改；同一支類別另驗本檔的到期日字樣還在、且規則集與 AutoClaude 側逐字同步。
+"tests/*.py" = ["E501"]

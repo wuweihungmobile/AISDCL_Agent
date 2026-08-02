@@ -1734,6 +1734,123 @@ class TestUnpinnedHandoverAndStaleGrandfather(unittest.TestCase):
             self.assertIn(fn, block_text,
                           f"`{fn}` 不在真實主檔守衛區塊內 ⇒ 綁定已退化")
 
+    # ── 棘輪本體（R69 假鎖修正，`DEF-101-731`）：R68 的 `_UNPINNED_HANDOVER_CEILING` 是假鎖 ──
+    # 自稱「只准變小」，實測全檔零比較——加一筆豁免、rc 仍是 0，工具還把
+    # 「存量豁免 58 筆／棘輪上限 57」原樣印進**成功**訊息裡。以下三道補上牙齒。
+
+    def test_grandfather_ceiling_is_actually_enforced_when_exceeded(self) -> None:
+        """缺陷注入（正向）：白名單比天花板多一筆 ⇒ 必須被抓。
+
+        這是本輪修的假鎖本體：註解宣告 shrink-only 卻沒有任何比較，
+        白名單可以每輪「順手加一筆」無聲膨脹，硬規則② 後半句被逐列贖回。
+        """
+        with mock.patch.object(
+            m, "_UNPINNED_HANDOVER_GRANDFATHERED",
+            frozenset(f"DEF-01-{i:03d}" for i in range(11))
+        ), mock.patch.object(m, "_UNPINNED_HANDOVER_CEILING", 10):
+            problems = m.grandfather_ceiling_problems()
+        self.assertTrue(problems, "白名單超過棘輪上限卻零告警 ⇒ 棘輪不存在")
+        joined = " ".join(problems)
+        self.assertIn("11", joined)
+        self.assertIn("10", joined)
+
+    def test_grandfather_ceiling_is_silent_at_or_below_the_ceiling(self) -> None:
+        """還原（反向）：等於／小於天花板都是合法的（棘輪允許往小走，不得誤報）。"""
+        for size in (10, 9, 0):
+            with mock.patch.object(
+                m, "_UNPINNED_HANDOVER_GRANDFATHERED",
+                frozenset(f"DEF-01-{i:03d}" for i in range(size))
+            ), mock.patch.object(m, "_UNPINNED_HANDOVER_CEILING", 10):
+                self.assertEqual(m.grandfather_ceiling_problems(), [],
+                                 f"{size} 筆 ≤ 上限 10 卻誤報 ⇒ 棘輪擋住了合法的收縮")
+
+    def test_shipped_ceiling_matches_the_shipped_whitelist(self) -> None:
+        """出廠常數自身必須貼齊：天花板 == 白名單實際筆數。
+
+        大於實際值＝預留了「可以再加幾筆」的無聲額度（棘輪一上線就先鬆一格）；
+        小於實際值＝閘門出廠即紅。兩邊都不可接受，故釘死相等。
+        """
+        self.assertEqual(
+            m._UNPINNED_HANDOVER_CEILING, len(m._UNPINNED_HANDOVER_GRANDFATHERED),
+            "天花板未貼齊白名單實際筆數 —— 大於＝預留無聲膨脹額度，小於＝出廠即紅")
+
+    def test_ceiling_gate_runs_unconditionally_in_main(self) -> None:
+        """棘輪不得被塞進真實主檔守衛內：那樣「換一本帳本」就能繞過它。
+
+        以原始碼結構斷言（呼叫點必須在 `main()` 內、且**不在**
+        `_DEFECT_LOG == _DEFAULT_DEFECT_LOG` 的守衛區塊內），理由同上一道：
+        真 repo 綠燈時重跑 `main()` 對「有沒有跑到」是恆真的。
+        """
+        src = Path(m.__file__).read_text(encoding="utf-8")
+        call = "grandfather_ceiling_problems()"
+        self.assertIn(f"    ceiling_problems = {call}", src,
+                      "main() 未呼叫棘輪 ⇒ 又變回只有常數沒有比較的假鎖")
+        guard = "if _DEFECT_LOG == _DEFAULT_DEFECT_LOG:"
+        block = []
+        for line in src.split(guard, 1)[1].splitlines()[:12]:
+            if line.strip() and not line.startswith(" " * 8):
+                break
+            block.append(line)
+        self.assertNotIn(call, "\n".join(block),
+                         "棘輪被塞進真實主檔守衛內 ⇒ 換一本帳本即可繞過")
+
+
+class TestAdrClosureClaimsAreMechanicallyChecked(unittest.TestCase):
+    """R69 `DEF-101-735` — ADR 的散文式結案宣稱 vs 帳本狀態。
+
+    **原始缺陷**：`ADR-XPLAT-002` §1 與 `ADR-XPLAT-003` 表頭各自寫「`DEF-101-706`
+    隨之結案」，而同輪帳本該列狀態欄是 `partial`（明寫「解鎖條件①未達標故不結案」）
+    ——兩份活文件對同一個 ID 各說各話。當時 ADR 目錄**不在** `_CROSSREF_TARGETS` 內，
+    機械上完全盲。
+
+    **本鎖守的是兩件事，缺一都還原不了缺陷**：
+      (甲) ADR 目錄在掃描面內（且是 glob 自動註冊——具名清單必漏掉下一支新 ADR，
+           而漏掉零訊號，正是本缺陷的形狀）。
+      (乙) 掃描面內**看得見散文宣稱**。`_scan_target()` 的 `_CLAIM_RE` 只認
+           「DEF-ID 緊接括號」，ADR 那句是純散文 ⇒ 只做 (甲) 不做 (乙)，閘門仍然全綠。
+           這一條是本鎖的重點：**納入掃描面不等於看得見**。
+    """
+
+    def test_adr_directory_is_in_the_crossref_scan_surface(self):
+        """(甲) 根層 ADR 目錄下每一支 `ADR-*.md` 都在掃描目標內。"""
+        on_disk = sorted(p.name for p in m._ADR_DIR.glob(m._ADR_GLOB))
+        self.assertTrue(on_disk, f"{m._ADR_DIR} 下查無 ADR ⇒ 本鎖的前提已失效")
+        targets = {p.name for p in m._CROSSREF_TARGETS}
+        self.assertEqual(
+            [n for n in on_disk if n not in targets], [],
+            "有 ADR 不在 _CROSSREF_TARGETS 內 —— 它對缺陷狀態的宣稱將零檢查",
+        )
+
+    def test_prose_closure_claim_contradicting_the_ledger_is_caught(self):
+        """(乙) 注入散文式結案宣稱 → 必紅並指名 ID；帳本判已結時放行。"""
+        unclosed = m.closure_claim_problems(
+            "fake-adr.md", "本項由 DEF-101-706 隨之結案）。", {"DEF-101-706": "open"})
+        self.assertEqual(len(unclosed), 1, "散文式結案宣稱未被抓到 —— 本道無牙")
+        self.assertIn("DEF-101-706", unclosed[0])
+        self.assertEqual(
+            m.closure_claim_problems(
+                "fake-adr.md", "本項由 DEF-101-706 隨之結案）。",
+                {"DEF-101-706": "fixed"}),
+            [], "帳本判已結時仍報紅 ⇒ 假紅，會逼人把正確的句子改掉",
+        )
+
+    def test_negated_and_far_away_forms_are_not_false_positives(self):
+        """誠實劃界：否定形態與距離過遠的形態刻意不報（否則活文件會被誤紅淹沒）。
+
+        沒有這一條，上一條無法證明本道是「有鑑別力」而不是「見到結案就紅」。
+        """
+        self.assertEqual(
+            m.closure_claim_problems(
+                "fake-adr.md", "`DEF-101-706` 的收斂標的已落地，但該筆**不結案**。",
+                {"DEF-101-706": "open"}),
+            [], "否定形態被誤報 ⇒ 訂正過的句子反而紅，鎖會逼人寫回錯的說法",
+        )
+        far = "DEF-101-706 " + "。" * (m._CLOSURE_CLAIM_WINDOW + 5) + "本項結案"
+        self.assertEqual(
+            m.closure_claim_problems("fake-adr.md", far, {"DEF-101-706": "open"}),
+            [], "距離超出視窗仍綁定 ⇒ ADR 的數千字長列會把不相干的 ID 綁進來",
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

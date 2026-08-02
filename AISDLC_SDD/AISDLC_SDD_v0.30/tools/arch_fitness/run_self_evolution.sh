@@ -5,12 +5,20 @@
 #           + 同指紋復現偵測 + claude -p --max-turns。
 # 預設 dry-run（只量測、不改檔、不需 claude）；--apply 才進入完整閉環。
 #
-# 🔴 退出碼契約（R68；.sh／.ps1 兩側逐碼同語意，規格側見
-#    workflow/sdd-self-evolution/SDD_SELF_EVOLUTION.md「退出碼契約」節）：
-#    0=收斂／乾淨收工　1=dry-run advisory 訊號（僅 warn）　2=dry-run structural fail 訊號
-#    3=缺 claude CLI　4=ESCALATION（retry budget 用盡）　5=無可用 python 直譯器
-#    6=平台前置不足（PowerShell < 7；bash 側不適用，保留不重用）
-#    7=git 操作失敗（git switch -c）　64=未知參數（usage）
+# 🔴 退出碼契約（R68 統一碼值；R69 建立 SSOT）。單一真相源＝
+#    workflow/sdd-self-evolution/SDD_SELF_EVOLUTION.md §6.1「退出碼契約（SSOT）」。
+#    改任一碼前先讀該節；下列枚舉與該表、與 .ps1 側檔頭三處由
+#    tools/check_script_parity.py::_check_exit_code_contract() 機械比對，任一漂移即紅。
+#      rc=0  CONVERGED           收斂／乾淨收工（含 --help）
+#      rc=1  DRYRUN_ADVISORY     dry-run advisory 訊號（僅 warn）
+#      rc=2  DRYRUN_STRUCTURAL   dry-run structural fail 訊號
+#      rc=3  NO_CLAUDE_CLI       缺 claude CLI（--apply 需要）
+#      rc=4  ESCALATION          retry budget 用盡
+#      rc=5  NO_PYTHON           PATH 上無可用 python 直譯器
+#      rc=6  PLATFORM_PREREQ     平台前置不足（PowerShell < 7）；bash 側不適用，保留不重用
+#      rc=7  GIT_FAILED          git 操作失敗（git switch -c）
+#      rc=8  SSOT_GUARD_MISSING  WindowsAppsGuard.ps1 缺席（.ps1 側限定；bash 側刻意不對等）
+#      rc=64 USAGE               未知參數（usage；.sh 側限定）
 set -euo pipefail
 
 # Windows/MSYS 上 python 的 open() 預設用 cp950 讀檔，會在 UTF-8 JSON 上爆。
@@ -27,7 +35,9 @@ while [[ $# -gt 0 ]]; do
     --apply)          APPLY=1; shift ;;
     # R68：對齊 .ps1 側 comment-based help（`pwsh … -?` 可用），bash 側原本連
     # --help 都回 rc=64「未知參數」，兩側介面不對等且無法作為可啟動性 smoke。
-    --help|-h)        sed -n '2,13p' "$0"; exit 0 ;;
+    #    R69：檔頭因 SSOT 指路而變長，列數同步（2..21＝說明段＋退出碼枚舉；
+    #    範圍與檔頭實際行數由 tools/tests/test_check_script_parity.py 機械對齊）。
+    --help|-h)        sed -n '2,21p' "$0"; exit 0 ;;
     *) echo "未知參數：$1" >&2; exit 64 ;;
   esac
 done

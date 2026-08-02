@@ -361,3 +361,44 @@ def test_gate_exception_counts_as_fail(
     assert "[LOC budget] 例外：docker" in out
     assert "[LOC budget] FAIL (rc=1)" in out
     assert f"  {'LOC budget':<22} FAIL" in out
+
+
+# --- (h) R69（DEF-101-702／R68-19）：`-h/--help` 不得靜默跑完整套閘門 ---
+
+def test_help_prints_usage_and_runs_no_gate(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """WHY：修前 `--help` 會被當成「首個非旗標參數」而整批取代 pytest 預設參數 ⇒ 使用者
+    想看用法，實際得到的是 ruff/lint-imports/… 前四道閘門真的跑完。同族入口
+    （bootstrap_core／integration_gate_core）都已 fail-loud，本檔是最後一個沒跟上的。
+    本鎖同時斷言「零 gate 被執行」——只驗 rc=0 會被「跑完整套剛好全綠」蒙混過去。
+    """
+    ran: list[str] = []
+    _mock_all_gates(monkeypatch, rc=0)
+    for name in _ALL_GATE_FUNCS:
+        orig = getattr(m, name)
+        monkeypatch.setattr(m, name, lambda *a, _n=name, _o=orig: (ran.append(_n), _o(*a))[1])
+    _silence_liveness(monkeypatch)
+    for flag in ("--help", "-h"):
+        ran.clear()
+        rc = m.main([flag])
+        out = capsys.readouterr().out
+        assert rc == 0
+        assert ran == [], f"{flag} 竟然執行了 gate：{ran}"
+        assert "用法" in out and "--act" in out
+        assert "本機 CI 閘門總結" not in out
+
+
+def test_help_flag_anywhere_in_argv_is_honoured(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """`--act --help` 這種順序也必須只印用法——旗標位置無關是本檔既有的 CLI 語意。"""
+    ran: list[str] = []
+    _mock_all_gates(monkeypatch, rc=0)
+    for name in _ALL_GATE_FUNCS:
+        orig = getattr(m, name)
+        monkeypatch.setattr(m, name, lambda *a, _n=name, _o=orig: (ran.append(_n), _o(*a))[1])
+    _silence_liveness(monkeypatch)
+    assert m.main(["--act", "--help"]) == 0
+    capsys.readouterr()
+    assert ran == []

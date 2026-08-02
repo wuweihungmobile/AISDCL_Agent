@@ -25,17 +25,25 @@
     pwsh tools/arch_fitness/run_self_evolution.ps1 -Apply -MaxIterations 2
 
 .NOTES
-    🔴 退出碼契約（R68；.sh／.ps1 兩側逐碼同語意，規格側見
-    workflow/sdd-self-evolution/SDD_SELF_EVOLUTION.md「退出碼契約」節。
+    🔴 退出碼契約（R68 統一碼值；R69 建立 SSOT）。單一真相源＝
+    workflow/sdd-self-evolution/SDD_SELF_EVOLUTION.md §6.1「退出碼契約（SSOT）」。
     修改任一側前先讀該節——兩側原本各自在註解裡枚舉「已占用」而未看對面，
-    導致同一失敗條件〔PATH 上無可用 python〕bash 回 5、pwsh 回 7）：
-      0=收斂／乾淨收工　1=dry-run advisory 訊號（僅 warn）
-      2=dry-run structural fail 訊號　3=缺 claude CLI
-      4=ESCALATION（retry budget 用盡）　5=無可用 python 直譯器
-      6=平台前置不足（PowerShell < 7；bash 側不適用，保留不重用）
-      7=git 操作失敗（git switch -c）　64=未知參數（usage，僅 bash 側）
-      8=SSOT WindowsAppsGuard.ps1 缺席（僅 .ps1 側；bash 側因 POSIX 無 WindowsApps
-        空殼陷阱而採降級回退，兩側於此刻意不對等，理由見下方 guard 區段註解）
+    導致同一失敗條件〔PATH 上無可用 python〕bash 回 5、pwsh 回 7；R68 統一碼值後
+    兩側檔頭都寫「規格側見該節」，但該節當時並不存在（grep 零命中）＝契約孤兒。
+    下列枚舉與該表、與 .sh 側檔頭三處由
+    tools/check_script_parity.py::_check_exit_code_contract() 機械比對，任一漂移即紅。
+      rc=0  CONVERGED           收斂／乾淨收工（含 -?）
+      rc=1  DRYRUN_ADVISORY     dry-run advisory 訊號（僅 warn）
+      rc=2  DRYRUN_STRUCTURAL   dry-run structural fail 訊號
+      rc=3  NO_CLAUDE_CLI       缺 claude CLI（-Apply 需要）
+      rc=4  ESCALATION          retry budget 用盡
+      rc=5  NO_PYTHON           PATH 上無可用 python 直譯器（含 WindowsApps 空殼）
+      rc=6  PLATFORM_PREREQ     平台前置不足（PowerShell < 7）；bash 側不適用，保留不重用
+      rc=7  GIT_FAILED          git 操作失敗（git switch -c）
+      rc=8  SSOT_GUARD_MISSING  WindowsAppsGuard.ps1 缺席（僅 .ps1 側；bash 側因 POSIX 無
+                                WindowsApps 空殼陷阱而採降級回退，兩側於此刻意不對等，
+                                理由見下方 guard 區段註解）
+      rc=64 USAGE               未知參數（usage；僅 .sh 側）
 #>
 [CmdletBinding()]
 param(

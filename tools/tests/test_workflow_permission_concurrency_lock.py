@@ -27,9 +27,14 @@ R68 擴充（Pkg-4「CI／nightly 死亡通道」；檔名雖仍稱 permission/c
      消滅漂移面，故只能用機械鎖互鎖。
   3. `TestRootInfraNightlyStalenessSentinel` — root-infra-ci.yml 第 15 道
      （nightly-full 排程陳舊度哨兵）必須存在、必須阻斷、必須同時查兩支
-     workflow 的 `--event schedule --status success`。此道是 R68 對「兩支
-     nightly-full 自 2026-07-14 起 18 天零成功而三道既有哨兵結構上都偵測不到」
-     的直接修復（誠實劃界見該 workflow 檔頭第 15 道：本道與被偵測者同計費平面）。
+     workflow 的成功紀錄。此道是 R68 對「兩支 nightly-full 自 2026-07-14 起
+     18 天零成功而三道既有哨兵結構上都偵測不到」的直接修復（誠實劃界見該
+     workflow 檔頭第 15 道：本道與被偵測者同計費平面）。
+     **R69 訂正（DEF-101-703）**：R68 版寫死 `--event schedule`，與它自己印出的
+     處置指令（`gh workflow run` ⇒ `event=workflow_dispatch`）實證互斥、照做也
+     解不開；且無 `if:`／無豁免途徑 ⇒ 對每一次 push 都必紅＝死鎖。現行判準改為
+     「兩事件都計入」＋「帶到期日／理由／長度上限的顯式豁免」，本類別同步鎖住
+     **反 fail-open 三道保險**，確保豁免不能退化成永久假綠。
   4. `TestCompatCiScriptTriggerSymmetry` — 兩支 compat-CI 的 `paths` 白名單
      對全部 tracked `*.sh`／`*.ps1` 的觸發面必須**完全對稱、零豁免**。
      windows 側逐一列舉 `.sh`、macos 側用 `**/*.sh` 兜底（反之亦然）的不對稱
@@ -38,6 +43,7 @@ R68 擴充（Pkg-4「CI／nightly 死亡通道」；檔名雖仍稱 permission/c
 """
 from __future__ import annotations
 
+import datetime
 import re
 import subprocess
 import unittest
@@ -49,6 +55,40 @@ _AUTOCLAUDE_CI = _REPO_ROOT / ".github" / "workflows" / "autoclaude-ci.yml"
 _WINDOWS_COMPAT_CI = _REPO_ROOT / ".github" / "workflows" / "windows-compat-ci.yml"
 _MACOS_COMPAT_CI = _REPO_ROOT / ".github" / "workflows" / "macos-compat-ci.yml"
 _ROOT_INFRA_CI = _REPO_ROOT / ".github" / "workflows" / "root-infra-ci.yml"
+
+# R69：豁免到期的本機示警門檻（天）。CI 上到期即自動轉紅是**設計正確**，但那是
+# 「到期當天才在雲端炸」；本機此前只驗「不得超過 MAX_WAIVER_DAYS 上限」，過期後
+# `(until - today).days` 變負數、恆 ≤ 上限 ⇒ 過期 51 天本機仍全綠（實測）。
+_WAIVER_WARN_DAYS = 3
+
+
+def waiver_expiry_verdict(
+    until: datetime.date, today: datetime.date, warn_days: int = _WAIVER_WARN_DAYS
+) -> tuple[str, str]:
+    """純函式：回傳 (`ok` / `warn` / `expired`, 處置訊息)。
+
+    處置一律相同：先查那兩個排程窗口是否已成功；成功 ⇒ 把 `WAIVER_UNTIL` 清成空字串
+    （回到無豁免的阻斷態），而不是把日期往後推——往後推只是續買時間，缺陷還在。
+    """
+    left = (until - today).days
+    action = (
+        "處置：唯讀查 `gh run list --workflow windows-compat-ci.yml "
+        "--workflow macos-compat-ci.yml --status success`（不得 rerun／dispatch）確認"
+        f"{until} 前的排程窗口是否已成功；已成功 ⇒ 把 root-infra-ci.yml 的 "
+        'WAIVER_UNTIL 清成 ""（恢復無豁免阻斷態），仍未成功 ⇒ 回 DEF-101-703 '
+        "重新判根因後才續期，不得無腦往後推日期"
+    )
+    if left < 0:
+        return "expired", (
+            f"WAIVER_UNTIL={until} 已於 {-left} 天前到期（今天 {today}）——"
+            f"root-infra-ci 的陳舊度哨兵已自動恢復阻斷，下一次 push 必紅。{action}"
+        )
+    if left <= warn_days:
+        return "warn", (
+            f"WAIVER_UNTIL={until} 只剩 {left} 天到期（今天 {today}）——"
+            f"到期後 root-infra-ci 會自動轉紅。{action}"
+        )
+    return "ok", f"WAIVER_UNTIL={until} 尚有 {left} 天（今天 {today}）"
 
 # workflow 層 permissions（頂層、非 job 縮排下的 "permissions:" 起頭，後接
 # 兩格縮排的 "contents: read"）——用行首錨定排除 job 層縮排版本誤中。
@@ -349,22 +389,56 @@ class TestRootInfraNightlyStalenessSentinel(unittest.TestCase):
                "第 15 道被移除或改名（該道是 R68 P1 修復的唯一載體）")
         return m.group(0)
 
+    #: 查詢迴圈的**被迭代清單**（`for wf in <清單>; do`）。
+    #: 🔴 R69 終審 P1：本道原本只對整段非註解文字做 `assertIn(wf, ...)`，而該段文字裡
+    #: 除了查詢迴圈之外還有**處置指令的 echo**（`gh workflow run windows-compat-ci.yml`）
+    #: 也逐字含這兩個檔名 ⇒ 把 `windows-compat-ci.yml` 從查詢迴圈刪掉（`for wf in
+    #: macos-compat-ci.yml; do`）後本類 9 支仍**全綠**（實測），Windows 真機通道退回
+    #: 零偵測而無人察覺。字串「出現與否」不是「有沒有被查」的證據——鎖必須讀迴圈本身。
+    _QUERY_LOOP_RE = re.compile(r"^\s*for wf in (?P<items>[^;]+);\s*do\s*$", re.MULTILINE)
+
+    def _queried_workflows(self, step: str) -> list[str]:
+        exec_only = self._exec_lines(step)
+        matches = self._QUERY_LOOP_RE.findall(exec_only)
+        self.assertEqual(
+            len(matches), 1,
+            f"陳舊度哨兵的 `for wf in …; do` 查詢迴圈應恰好一個，實得 {len(matches)} 個"
+            f"（0＝迴圈被移除或改寫，本鎖失去唯一可信的判準；>1＝判準歧義）：{matches}",
+        )
+        return matches[0].split()
+
     def test_sentinel_queries_both_workflows_scheduled_success(self):
         step = self._sentinel_step()
-        exec_only = "\n".join(
-            ln for ln in step.splitlines() if not ln.lstrip().startswith("#")
-        )
+        exec_only = self._exec_lines(step)
+        queried = self._queried_workflows(step)
         for wf in ("windows-compat-ci.yml", "macos-compat-ci.yml"):
             self.assertIn(
-                wf, exec_only,
-                f"陳舊度哨兵的**非註解**行未查 {wf}——單邊查詢等於另一平台的真機"
-                f"通道回到零偵測狀態",
+                wf, queried,
+                f"陳舊度哨兵的**查詢迴圈**未列 {wf}——單邊查詢等於另一平台的真機"
+                f"通道回到零偵測狀態。實得迴圈清單：{queried}"
+                f"（⚠️ 本道刻意讀 `for wf in …` 的被迭代清單，不是整段文字：處置指令的"
+                f" echo 也含這兩個檔名，比對全文會被 echo 滿足＝假綠）",
             )
         self.assertIn(
+            "--status success", exec_only,
+            "陳舊度哨兵未以 `--status success` 查詢——不看結論就會被「有 run 但全紅」"
+            "滿足（R68 的整個缺陷就是通道連續 5 次全紅卻無人察覺）",
+        )
+        self.assertRegex(
+            exec_only, r"for ev in schedule workflow_dispatch\b",
+            "陳舊度哨兵未同時計入 `schedule` 與 `workflow_dispatch`——DEF-101-703："
+            "它印給人的處置指令 `gh workflow run <wf>.yml` 產生的是 "
+            "workflow_dispatch 的 run，只查 schedule ⇒ 照著處置做也永遠解不開，"
+            "閘門變成無法解除的死鎖（而不是可修復的訊號）",
+        )
+        self.assertNotIn(
             "--event schedule --status success", exec_only,
-            "陳舊度哨兵未以 `--event schedule --status success` 查詢——"
-            "不分事件類型就會被 push 事件的綠燈滿足（R68 的整個缺陷就是"
-            "「四支 CI 全綠」只涵蓋 push 事件）",
+            "偵測到 R68 舊的單事件查詢字面（`--event schedule --status success`）——"
+            "該寫法與處置指令實證互斥，是 DEF-101-703 死鎖的成因本身",
+        )
+        self.assertIn(
+            "gh workflow run", exec_only,
+            "陳舊度哨兵沒有印出可執行的處置指令——阻斷式閘門必須同時給出解除路徑",
         )
         self.assertIn(
             "MAX_AGE_DAYS", exec_only,
@@ -374,16 +448,169 @@ class TestRootInfraNightlyStalenessSentinel(unittest.TestCase):
 
     def test_sentinel_is_blocking_not_advisory(self):
         step = self._sentinel_step()
+        exec_only = self._exec_lines(step)
+        # 只掃**非註解**行：本 step 的誠實劃界註解會逐字提到被監控者自己的
+        # `continue-on-error: true`（那正是它要補的洞），對整份文字做 assertNotIn
+        # 會把「解釋病因」誤判成「犯病」。
         self.assertNotIn(
-            "continue-on-error", step,
+            "continue-on-error", exec_only,
             "陳舊度哨兵被改成 continue-on-error——非阻斷正是 nightly-full 自己被"
             "忽略 18 天的機制，再加一層非阻斷等於複製病因",
         )
         self.assertIn(
-            "exit 1", step,
+            "exit 1", exec_only,
             "陳舊度哨兵沒有 `exit 1`——只 echo `::error::` 不會讓 step 失敗，"
             "job 仍是綠的（GitHub 的 error annotation 不改變 exit code）",
         )
+        self.assertNotIn(
+            "|| true", exec_only,
+            "陳舊度哨兵出現 `|| true`——那是把阻斷式閘門靜默改成永遠綠的最短路徑",
+        )
+        # `(?m)` 不可省：`assertNotRegex` 走 `re.search` 且**預設不含 MULTILINE**，
+        # 而 `step` 是多行文字 ⇒ 沒有旗標時 `^` 只錨在整段的第一個字元（那裡永遠是
+        # `      - name:`），任何後續行的 `if: false` 都匹配不到、本道恆綠。
+        # R69 QA 實測：注入 `        if: false` 後本檔 23 支全綠、零人抓到。
+        self.assertNotRegex(
+            step, r"(?m)^        if:", "陳舊度哨兵被加上 step 層 `if:`——"
+            "條件化執行等於在某些事件下完全不檢查，那是消音不是修復",
+        )
+
+    # --- R69（DEF-101-703）：豁免機制的反 fail-open 保險 --------------------
+
+    _WAIVER_RE = re.compile(r'^          WAIVER_UNTIL: "([^"]*)"$', re.MULTILINE)
+
+    @staticmethod
+    def _exec_lines(step: str) -> str:
+        return "\n".join(ln for ln in step.splitlines()
+                         if not ln.lstrip().startswith("#"))
+
+    def test_waiver_is_explicit_dated_and_reasoned(self):
+        """豁免只准以「顯式到期日 + 具名理由」形式存在，且理由必須引缺陷編號。
+
+        Rule 9：豁免的**意義**是「已知根因在本 repo 之外、需要時間自證」，不是
+        「這道太吵先關掉」。沒有到期日的豁免＝永久關閉；沒有缺陷編號的理由＝
+        三個月後沒人知道它為什麼還在，於是永遠沒人敢刪。
+        """
+        step = self._sentinel_step()
+        m = self._WAIVER_RE.search(step)
+        self.assertIsNotNone(
+            m, "陳舊度哨兵找不到 `WAIVER_UNTIL:` 宣告——豁免途徑被移除的話，"
+               "本道又會退回 R68 的死鎖（根因在帳務平面時無法解除）")
+        until = m.group(1)
+        if not until:
+            return  # 空字串＝目前無豁免，行為等同 R68 原版阻斷，合法終態
+        self.assertRegex(
+            until, r"^\d{4}-\d{2}-\d{2}$",
+            f"WAIVER_UNTIL={until!r} 不是 YYYY-MM-DD——非日期字面值無法被稽核，"
+            f"且 runtime 會 fail-loud")
+        rm = re.search(r'^          WAIVER_REASON: "([^"]+)"$', step, re.MULTILINE)
+        self.assertIsNotNone(rm, "設了 WAIVER_UNTIL 卻沒有 WAIVER_REASON")
+        self.assertRegex(
+            rm.group(1), r"DEF-\d{3}-\d{3}",
+            "WAIVER_REASON 未引任何缺陷編號——豁免必須可回溯到帳本上的一列，"
+            "否則它就是一句沒有負責人的話")
+
+    def test_waiver_window_is_bounded(self):
+        """豁免視窗必須有上限，且宣告的到期日不得超出該上限。
+
+        缺這條，`WAIVER_UNTIL: "2099-01-01"` 就是一鍵把阻斷式哨兵變永久假綠——
+        比刪掉它更糟，因為表面上這道還在。
+        """
+        step = self._sentinel_step()
+        exec_only = self._exec_lines(step)
+        mm = re.search(r'^          MAX_WAIVER_DAYS: "(\d+)"$', step, re.MULTILINE)
+        self.assertIsNotNone(mm, "陳舊度哨兵缺 MAX_WAIVER_DAYS 上限宣告")
+        max_days = int(mm.group(1))
+        self.assertLessEqual(
+            max_days, 31,
+            f"MAX_WAIVER_DAYS={max_days} 超過 31 天——一次能買超過一個月的豁免，"
+            f"實務上等於沒有上限")
+        self.assertIn(
+            'if [ "$(( (waiver_deadline - now) / 86400 ))" -gt "${MAX_WAIVER_DAYS}" ]',
+            exec_only,
+            "MAX_WAIVER_DAYS 只宣告未執行——上限不被 runtime 檢查等於裝飾品")
+        um = self._WAIVER_RE.search(step)
+        if um and um.group(1):
+            until = datetime.date.fromisoformat(um.group(1))
+            today = datetime.date.today()
+            self.assertLessEqual(
+                (until - today).days, max_days,
+                f"WAIVER_UNTIL={until} 距今超過 MAX_WAIVER_DAYS={max_days} 天——"
+                f"CI 上會 fail-loud，這條鎖讓它在本機就被抓到")
+
+    def test_waiver_is_not_expired_and_warns_before_it_is(self):
+        """豁免到期／即將到期必須**在本機**就被看見（R69）。
+
+        WHY 這條與上一條不同：`test_waiver_window_is_bounded` 只驗「不得超過上限」，
+        它比的是 `(until - today).days <= MAX_WAIVER_DAYS`——過期後這個差值變**負數**，
+        恆滿足上限 ⇒ 本機恆綠。實測（修前）：假設今天 2026-09-30、豁免早在 08-10 過期
+        51 天，現行三條鎖仍全數 PASS。於是「到期」這件事只有在雲端 push 那一刻才會
+        現形，而 CI 額度紀律要求盡量本機驗完再 push ⇒ 一定是在最不方便的時刻炸。
+        本條把示警左移：≤3 天 WARN（不擋，讓人有時間處置）、已過期即紅。
+        """
+        um = self._WAIVER_RE.search(self._sentinel_step())
+        self.assertIsNotNone(um, "陳舊度哨兵找不到 WAIVER_UNTIL 宣告")
+        if not um.group(1):
+            return  # 空字串＝無豁免，無到期可言（合法終態）
+        verdict, msg = waiver_expiry_verdict(
+            datetime.date.fromisoformat(um.group(1)), datetime.date.today())
+        if verdict == "expired":
+            self.fail(msg)
+        if verdict == "warn":
+            # 不擋（還沒壞），但必須大聲——run_root_unittests 的輸出會帶出這行
+            print(f"\n⚠️  [WAIVER 即將到期] {msg}\n")
+
+    def test_waiver_expiry_verdict_red_warn_green_boundaries(self):
+        """判準自證：三態邊界必須各自成立，否則上一條可能恆綠空轉。"""
+        until = datetime.date(2026, 8, 10)
+        for today, expect in (
+            (datetime.date(2026, 8, 6), "ok"),       # 4 天 → 尚早
+            (datetime.date(2026, 8, 7), "warn"),     # 3 天 → 門檻上
+            (datetime.date(2026, 8, 10), "warn"),    # 當天 → 仍算警示不算過期
+            (datetime.date(2026, 8, 11), "expired"),  # 隔天 → 紅
+            (datetime.date(2026, 9, 30), "expired"),  # 過期 51 天 → 紅（修前恆綠的那一格）
+        ):
+            with self.subTest(today=today):
+                verdict, msg = waiver_expiry_verdict(until, today)
+                self.assertEqual(verdict, expect, msg)
+                if verdict != "ok":
+                    self.assertIn('WAIVER_UNTIL 清成 ""', msg,
+                                  "訊息未指出正確處置（查排程成功即清空，而非往後推日期）")
+                    self.assertIn("gh run list", msg, "訊息未指出查證方式")
+
+    def test_waiver_misconfiguration_fails_loud(self):
+        """豁免設定壞掉時必須當場 exit 1，不得靜默當成「沒豁免」或「永久豁免」。"""
+        exec_only = self._exec_lines(self._sentinel_step())
+        for needle, why in (
+            ('date -u -d "${WAIVER_UNTIL} 23:59:59"',
+             "未實際解析 WAIVER_UNTIL，無法判斷到期"),
+            ('if [ -z "${WAIVER_REASON}" ]',
+             "未擋下「有到期日卻無理由」的無法稽核豁免"),
+        ):
+            self.assertIn(needle, exec_only, f"反 fail-open 保險缺口：{why}")
+        # 三道保險各自都要能讓 step 失敗：豁免區塊內至少三個 exit 1。
+        waiver_block = exec_only.split('if [ "$waiver_deadline" -gt "$now" ]')[0]
+        self.assertGreaterEqual(
+            waiver_block.count("exit 1"), 3,
+            "豁免合法性先驗區塊的 `exit 1` 少於三個——"
+            "「無法解析／無理由／視窗過長」三種壞設定必須各自 fail-loud")
+
+    def test_waived_run_still_reports_the_staleness_loudly(self):
+        """豁免期內只降級為 ::warning::，**不得**跳過查詢或不印陳舊天數。
+
+        豁免的正當性完全建立在「事實照樣每次 push 被印出來」之上；一旦變成消音，
+        它就跟 R68 那個「非阻斷所以沒人看」的病因同構。
+        """
+        exec_only = self._exec_lines(self._sentinel_step())
+        self.assertIn('if [ "$waiver_deadline" -gt "$now" ]; then lvl=warning; '
+                      'else lvl=error; fi', exec_only,
+                      "豁免未以「嚴重度降級」實作——若改成 skip 查詢就是消音")
+        self.assertRegex(
+            exec_only, r'echo "::\$\{lvl\}::.*天沒有成功執行',
+            "陳舊訊息未走 ${lvl} 動態嚴重度——豁免期內仍必須印出陳舊天數")
+        self.assertIn(
+            "豁免到期後本道自動恢復阻斷", exec_only,
+            "豁免通過時未聲明「到期自動恢復阻斷」——讀 log 的人會以為它被關掉了")
 
     def test_workflow_level_permissions_include_actions_read(self):
         text = _ROOT_INFRA_CI.read_text(encoding="utf-8")

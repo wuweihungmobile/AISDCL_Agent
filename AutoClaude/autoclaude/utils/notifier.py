@@ -10,10 +10,11 @@ from __future__ import annotations
 
 import logging
 import subprocess
-import sys
 from datetime import datetime
 from pathlib import Path
 from typing import TYPE_CHECKING
+
+from .platform_caps import is_macos
 
 if TYPE_CHECKING:
     from autoclaude.utils.config import AppConfig
@@ -60,7 +61,7 @@ def notify(title: str, message: str, duration: int = 10, enabled: bool = True) -
         return
     if _try_plyer(title, message, duration):
         return
-    if sys.platform == "darwin" and _try_osascript(title, message):
+    if is_macos() and _try_osascript(title, message):
         return
     if _try_win10toast(title, message, duration):
         return

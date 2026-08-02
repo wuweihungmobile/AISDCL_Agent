@@ -13,6 +13,8 @@ from __future__ import annotations
 
 import importlib.util
 import re
+import shutil
+import subprocess
 import sys
 import unittest
 from pathlib import Path
@@ -729,6 +731,19 @@ _CI_STEP_LOCAL_CARRIER: dict[str, dict[str, str]] = {
             "故無需對應載具；「CI 有沒有裝」這件事本身由 "
             "tools/tests/test_run_root_unittests.py::CiPrereqInstallLockTest 機械看守"
         ),
+        # key 刻意折行（隱式字串串接）：本檔 `tools/tests/` 的 E501 存量債走 shrink-only
+        # 棘輪（test_subprocess_encoding_hygiene.TestRootToolsLintPolicy），新寫的行不得
+        # 加高天花板——舊 key 的過長是存量債，不是可照抄的體例。
+        (
+            "tools/tests 外部工具相依（清單 SSOT＝tools/tests/test_run_root_unittests.py 的 "
+            "_EXTERNAL_TOOL_PREREQS；runner 無此層 fail-fast，漏裝時由 "
+            "ExternalToolPrereqDeclarationTest 多紅一支點名）"
+        ): (
+            f"{_INFRA}: 環境設定，非驗證步——本機開發 .venv 早已具備 ruff（pre-push 快層"
+            "第 ④ 段本來就要求它），故無需對應載具；「CI 有沒有裝」由 "
+            "tools/tests/test_run_root_unittests.py::CiPrereqInstallLockTest::"
+            "test_every_ci_job_running_the_runner_installs_all_external_tools 機械看守"
+        ),
         "tools/tests/（SIGPIPE 回歸鎖 + dev_start.py 平台邏輯；R3 QA 發現：paths 雖已涵蓋 tools/tests/**，但先前從未有任何 step 真的執行過，只在 root-infra-ci.yml 的 ubuntu-latest 上以 mock 跑過）": "nightly stage 2 root_unittests（tools/run_root_unittests.py）＋ pre-push root-infra leg",
         "install_mac_nightly.sh --render-only（plist 產出＋plutil -lint；鏡射本機 smoke [6]，QA-R13-3 補齊四向互鎖缺角）": "macos_smoke_local.sh [6/7]",
         "執行 tools/bootstrap.sh（全新 .venv 建立情境）": (
@@ -777,6 +792,17 @@ _CI_STEP_LOCAL_CARRIER: dict[str, dict[str, str]] = {
             f"{_INFRA}: 裝依賴，非驗證步——本機開發環境早已具備這些相依；"
             "「CI 有沒有裝」由 tools/tests/test_run_root_unittests.py::"
             "CiPrereqInstallLockTest 機械看守"
+        ),
+        # key 折行理由同 macOS 側（E501 shrink-only 棘輪，新行不得加高天花板）。
+        (
+            "tools/tests 外部工具相依（清單 SSOT＝tools/tests/test_run_root_unittests.py 的 "
+            "_EXTERNAL_TOOL_PREREQS；runner 無此層 fail-fast，漏裝時由 "
+            "ExternalToolPrereqDeclarationTest 多紅一支點名）"
+        ): (
+            f"{_INFRA}: 裝依賴，非驗證步——本機開發環境早已具備 ruff（pre-push 快層"
+            "第 ④ 段本來就要求它）；「CI 有沒有裝」由 "
+            "tools/tests/test_run_root_unittests.py::CiPrereqInstallLockTest::"
+            "test_every_ci_job_running_the_runner_installs_all_external_tools 機械看守"
         ),
         "tools/tests/（SIGPIPE 回歸鎖 + dev_start.py 平台邏輯；R3 QA 發現：先前只在 root-infra-ci.yml 的 ubuntu-latest 上以 mock 跑過，從未在真實 Windows 執行過）": "nightly root_unittests（AutoClaude/tools/run_local_nightly.ps1）＋ pre-push root-infra leg",
         "install_windows_nightly.ps1 -WhatIf 預覽（R26 Scan-C 發現：從未在真實 CI 執行過；鏡射 macos-compat-ci.yml install_mac_nightly.sh --render-only 步驟，DEF-101-269）": "windows_smoke_local.ps1 [9/9]",
@@ -1054,3 +1080,64 @@ class TestCiStepLocalCarrierCoverage(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestMacSmokeCliContract(unittest.TestCase):
+    """R69（DEF-101-702／R68-19＋R68-21）：`macos_smoke_local.sh` 的兩道入口守門。
+
+    WHY 這兩件事住同一支測試：它們是同一個病灶的兩面——**這支腳本先前對「怎麼被呼叫」
+    完全沒有意見**。① 任何打錯的旗標（例如把 `--help` 敲成 `--hlep`）都被靜默丟棄、整套
+    smoke 照跑完再印綠；② 以 macOS 預設的 zsh 執行時 `${BASH_SOURCE[0]}` 未定義，腳本
+    目錄解到呼叫端 cwd，guard source 失敗後 `is_real_python_candidate` 變成 command not
+    found，於是印出**與事實相反**的「找不到 python」——使用者被指去裝一個早就裝好的東西。
+
+    兩者都以「真的把腳本跑起來」驗證，不做字面比對：字面比對驗不到 rc，也驗不到
+    「整套 smoke 有沒有真的被跳過」。
+    """
+
+    def _run(self, argv: list[str], shell: str = "bash") -> subprocess.CompletedProcess[str]:
+        return subprocess.run(
+            [shell, str(_SH), *argv], cwd=str(_REPO_ROOT),
+            capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=60,
+        )
+
+    def test_help_prints_usage_and_exits_zero(self) -> None:
+        for flag in ("-h", "--help"):
+            with self.subTest(flag=flag):
+                proc = self._run([flag])
+                self.assertEqual(proc.returncode, 0, proc.stderr)
+                self.assertIn("用法：bash tools/macos_smoke_local.sh", proc.stderr + proc.stdout)
+                self.assertNotIn("[1/", proc.stdout, "印用法時不得開始跑 smoke 步驟")
+
+    def test_unknown_flag_is_rejected_loudly(self) -> None:
+        """修前：未知旗標被丟掉、整套照跑並印綠 ⇒ 使用者以為自己下的旗標生效了。"""
+        proc = self._run(["--fulll"])
+        self.assertEqual(proc.returncode, 2, proc.stdout + proc.stderr)
+        self.assertIn("未知旗標", proc.stderr)
+        self.assertNotIn("[1/", proc.stdout)
+
+    def test_zsh_invocation_fails_loud_with_the_correct_reason(self) -> None:
+        """修前：zsh 執行會走到 guard 缺席分支，印出與事實相反的「找不到 python」。
+
+        本鎖要求：rc 非 0、訊息必須指出「請用 bash」，且**不得**出現 python 相關誤導字樣。
+        zsh 不存在時 skip（本判準是 macOS 預設 shell 專屬）。
+        """
+        if shutil.which("zsh") is None:
+            self.skipTest("本機無 zsh")
+        proc = self._run([], shell="zsh")
+        combined = proc.stdout + proc.stderr
+        self.assertNotEqual(proc.returncode, 0, combined)
+        self.assertIn("需以 bash 執行", combined)
+        # 比對的是**誤導性結論那一行**（含 `❌` 與可行動指示），不是「找不到 python」
+        # 這個詞——修好後的訊息本身就會引述該詞來解釋自己在防什麼。
+        self.assertNotIn("❌ 找不到 python", combined)
+        self.assertNotIn("source .venv/bin/activate", combined)
+
+    def test_guard_source_failure_is_fatal(self) -> None:
+        """guard 檔缺席時必須硬錯——原本 `.` 失敗只印一行就繼續，guard 靜默蒸發。"""
+        text = _read(_SH)
+        self.assertRegex(
+            _code_only(text),
+            r"\.\s+\"\$SCRIPT_DIR/lib/windowsapps_guard\.sh\"\s*\|\|",
+            "windowsapps_guard.sh 的 dot-source 未接失敗分支——載入失敗會被靜默吞掉",
+        )

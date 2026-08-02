@@ -78,8 +78,12 @@ extras 語法在文件裡是高頻複製貼上的樣板，未來任一次新增�
 - 非 `pip` / `uv pip` 字面的安裝器：`pip3 install`（`pip` 後緊接 `3`，前綴的 `[ \t]+`
   失配）、`uv add`、`poetry add`。R59 實跑確認 repo 內目前無這些形態，但**不代表本鎖
   擋得住**——真出現時會漏。
-- `.ps1` 刻意不納入（PowerShell 無此 glob 語意，納入只製造偽陽性）；未 tracked 的新檔
-  在 `git add` 前掃不到（`git ls-files` 固有性質，與 `test_platform_utils_dedup.py` 同政策）。
+- `.ps1` 刻意不納入（PowerShell 無此 glob 語意，納入只製造偽陽性）。
+  🔴 **R70 訂正**：本行原本還寫著「未 tracked 的新檔在 `git add` 前掃不到（`git ls-files`
+  固有性質，與 `test_platform_utils_dedup.py` 同政策）」——R69 證明那不是可接受的取捨而是
+  真 fail-open（`DEF-101-752`：untracked 的 `platform_caps.py` 讓一個真實違規躲過四輪四方
+  複審）。掃描面已改為 **tracked ∪ untracked-not-ignored**（見 `_scan_targets()`），
+  該項已不再是本鎖的邊界；`.gitignore` 內的檔案（venv／快取）仍在掃描面外。
 - 本鎖**不驗證 shell 實際行為**（那需要 zsh，CI 的 ubuntu runner 未必有）；它是純文字
   形態鎖。行為面的證據記在本 docstring 頂部與缺陷帳本 DEF-101-479／507／508。
 
@@ -245,29 +249,44 @@ _MAX_EXTERNAL_EXEMPTIONS = 3
 _MAX_EXEMPTIONS = _MAX_SELF_SAMPLES + _MAX_EXTERNAL_EXEMPTIONS
 
 
-def _tracked_scan_targets() -> list[Path]:
-    out = subprocess.run(
-        ["git", "-c", "core.quotepath=false", "ls-files", "-z", *_SCAN_PATHSPECS, *_HOOK_DIRS],
-        cwd=_REPO_ROOT,
-        capture_output=True,
-        text=True,
-        encoding="utf-8",
-        errors="replace",
-        check=True,
-    ).stdout
+def _scan_targets() -> list[Path]:
+    """掃描面＝**tracked ∪ untracked-not-ignored**（R70／`DEF-101-752`）。
+
+    🔴 本函式原名 `_tracked_scan_targets`、只跑 `git ls-files`，而本檔 docstring
+    「已實測不涵蓋」節逐字寫著「未 tracked 的新檔在 `git add` 前掃不到（`git ls-files`
+    固有性質，**與 `test_platform_utils_dedup.py` 同政策**）」——R69 證明那個政策是
+    真 fail-open：`AutoClaude/autoclaude/utils/platform_caps.py` 全程 untracked，
+    使它與 dedup 鎖的衝突躲過四輪四方複審與多次全套實跑，直到 `git add -A` 才顯形。
+    該檔已於 R70 改為聯集掃描面，本檔同步（否則「同政策」這句話會指向一個已經不存在
+    的政策，讀者仍會以為盲區是刻意取捨）。`-o --exclude-standard` 尊重 `.gitignore`，
+    `_EXCLUDED_SUBSTRINGS` 過濾與 `_MIN_SCANNED` 下限皆不受影響。
+    """
     paths = []
-    for rel in out.split("\0"):
-        if not rel:
-            continue
-        if any(sub in rel for sub in _EXCLUDED_SUBSTRINGS):
-            continue
-        paths.append(_REPO_ROOT / rel)
+    seen: set[str] = set()
+    for extra in ((), ("-o", "--exclude-standard")):
+        out = subprocess.run(
+            ["git", "-c", "core.quotepath=false", "ls-files", *extra, "-z",
+             *_SCAN_PATHSPECS, *_HOOK_DIRS],
+            cwd=_REPO_ROOT,
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            check=True,
+        ).stdout
+        for rel in out.split("\0"):
+            if not rel or rel in seen:
+                continue
+            if any(sub in rel for sub in _EXCLUDED_SUBSTRINGS):
+                continue
+            seen.add(rel)
+            paths.append(_REPO_ROOT / rel)
     return paths
 
 
 class TestExtrasQuotingZshSafety(unittest.TestCase):
     def setUp(self) -> None:
-        self.files = _tracked_scan_targets()
+        self.files = _scan_targets()
 
     def test_scan_surface_not_silently_shrunk(self) -> None:
         """掃描面下限：排除清單或 glob 被改壞時 fail-loud，而非掃 0 份仍綠。"""

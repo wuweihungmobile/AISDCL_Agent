@@ -77,15 +77,63 @@ def _pre_push_exec_text() -> str:
     )
 
 
+#: 字串字面值（單／雙引號成對）——`echo "…"` 的訊息文字全部落在這裡。
+_QUOTED_LITERAL_RE = re.compile(r"'[^']*'|\"[^\"]*\"")
+#: 「命令位置」的 `ruff check tools/`：行首、或緊接在 `;`／`&&`／`||`／`|`／`!`／
+#: `then`／`else`／`do`／YAML `run:` 之後。`echo` 之後**不算**命令位置。
+_RUFF_COMMAND_RE = re.compile(
+    r"(?:^|[;&|]|\brun:|\bthen\b|\belse\b|\bdo\b|!)\s*ruff\s+check\s+tools/",
+    re.MULTILINE,
+)
+
+
+def _runs_ruff_over_root_tools(text: str) -> bool:
+    """`text` 內是否有**真的執行** `ruff check tools/` 的語句（R69 終審 P2）。
+
+    WHY（測意圖非僅行為）：原本兩道執行者鎖只問「全文有沒有出現這個子字串」，而
+    `tools/git-hooks/pre-push` 的失敗處置訊息 `echo "… ruff check tools/ 失敗 …"`
+    自己就含這個子字串 ⇒ **把真正的執行行刪掉、只留錯誤訊息，鎖依然全綠**（實測：
+    刪 `if ! ruff check tools/ --no-cache …` 後 `Ran 3 tests … OK`）。這與同輪
+    `DEF-101-743`（nightly 哨兵鎖可被處置指令 echo 滿足）是**同型復發**——「宣告
+    的字串在場」從來就不等於「那件事會發生」。
+
+    判準：先把字串字面值挖空（處置訊息只活在引號內），再要求該 token 出現在
+    **命令位置**。兩層都通過才算數。判準邊界（誠實劃界）：以純文字掃描認定，
+    因此看不到「把執行包進被呼叫的外部腳本／composite action」那種形態——那仍是
+    人審責任（同 `CiPrereqInstallLockTest` 既有的劃界體例）。
+    """
+    stripped = "\n".join(
+        _QUOTED_LITERAL_RE.sub('""', line)
+        for line in text.splitlines()
+        if not line.lstrip().startswith("#")
+    )
+    return bool(_RUFF_COMMAND_RE.search(stripped))
+
+
+# 🔴 R69（DEF-101-702／R68-26）：本檔三道「數量下限」自 R55／R60 起未隨新增守門上調
+# （實測 9 vs 下限 7、15 vs 下限 12），於是**最近幾道根層守門可以被整組刪掉而本檔仍全綠**
+# ——註解自己逐字記載過上一次同型復發（「停在 5 而實數已 7」），這次是第三次。
+#
+# 為何不改成硬等值：本檔的三個量都**還會成長**（每加一道守門就 +1），硬等值會讓「新增守門」
+# 這個正常動作在無關的檔案上炸紅，實務上會被下一個人改寬。折衷＝下限貼齊現況（刪一道即紅）
+# ＋一支後設鎖釘住「餘裕」上限：餘裕一旦累積到 _FLOOR_SLACK_MAX，測試就紅並指名要重釘。
+# 這正是本檔自陳的復發形狀（下限落後實數 2 以上＝可靜默刪兩道）能被機械攔下的判準。
+_FLOOR_CI_PYTHON_TOOLS = 9
+_FLOOR_HEADER_ITEMS = 15
+_FLOOR_SDD_CONSUMERS = 9  # R69 重釘（後設鎖首跑即揪出第三處 stale：現查 9、原釘 5）
+_FLOOR_SLACK_MAX = 2
+
+
 class TestRootInfraParity(unittest.TestCase):
     def test_ci_python_guards_all_wired_in_pre_push(self) -> None:
         ci_tools = _yml_python_tools()
         self.assertGreaterEqual(
-            len(ci_tools), 7,
+            len(ci_tools), _FLOOR_CI_PYTHON_TOOLS,
             f"root-infra-ci.yml 抽取到的具名 python 守門異常地少：{sorted(ci_tools)}——"
-            f"抽取 pattern 或 yml 疑似被改壞（數量下限釘選精神；現況 7 支，"
-            f"新增守門工具時本行必須同步上調——R56 訂正：R13 增第 11 道、R55 增"
-            f"第 12 道時本下限都沒跟上，停在 5 而實數已 7，等於還能被靜默刪掉兩支）",
+            f"抽取 pattern 或 yml 疑似被改壞（數量下限釘選精神；下限＝"
+            f"{_FLOOR_CI_PYTHON_TOOLS}，新增守門工具時本行必須同步上調——R56 訂正：R13 增"
+            f"第 11 道、R55 增第 12 道時本下限都沒跟上，停在 5 而實數已 7，等於還能被靜默"
+            f"刪掉兩支；R69 再訂正一次，見 _FLOOR_SLACK_MAX 的後設鎖）",
         )
         pre_push_exec_text = _pre_push_exec_text()
         missing = sorted(t for t in ci_tools if t not in pre_push_exec_text)
@@ -171,9 +219,9 @@ class TestRootInfraParity(unittest.TestCase):
         text = _CI_YML.read_text(encoding="utf-8")
         items = _HEADER_ITEM_RE.findall(text)
         self.assertGreaterEqual(
-            len(items), 12,
-            f"檔頭守門清單只抽到 {len(items)} 筆條目（現況 12 道）——抽取 pattern 或"
-            f"檔頭結構疑似漂移（下限釘選精神；刻意刪減守門時同步下修）",
+            len(items), _FLOOR_HEADER_ITEMS,
+            f"檔頭守門清單只抽到 {len(items)} 筆條目（下限＝{_FLOOR_HEADER_ITEMS}）——抽取"
+            f"pattern 或檔頭結構疑似漂移（下限釘選精神；刻意刪減守門時同步下修）",
         )
         header_tools = {
             m for _n, body in items for m in _ANY_TOOL_PATH_RE.findall(body)
@@ -240,7 +288,7 @@ class TestRootInfraParity(unittest.TestCase):
             if not e.startswith("AISDLC_SDD/") and not e.startswith(".github/workflows/")
         )
         self.assertGreaterEqual(
-            len(consumers), 5,
+            len(consumers), _FLOOR_SDD_CONSUMERS,
             f"aisdlc-sdd-ci.yml 以雙引號形狀抽出的根層消費檔僅 {consumers}——"
             f"若刻意改寫條目引號風格，必須同步 tools/git-hooks/pre-push 的抽取管線"
             f"（否則消費檔 leg 靜默蒸發）",
@@ -263,6 +311,130 @@ class TestRootInfraParity(unittest.TestCase):
             "pre-push 必須在 push 涉 aisdlc-sdd-ci.yml 自身時觸發消費檔 leg——"
             "清單被改壞時守它的 meta 鎖住在 SDD suite，否則零機械訊號",
         )
+
+
+class TestCountFloorsDoNotDriftBehindReality(unittest.TestCase):
+    """R69（DEF-101-702／R68-26）：三道數量下限的「餘裕」不得累積。
+
+    WHY：`assertGreaterEqual(len(X), N)` 這種下限鎖只在 `len(X)` 掉到 N 以下才紅，所以每
+    新增一道守門而不上調 N，就多出一道**可以被靜默刪掉**的守門。本檔註解自己記載過這件事
+    復發兩次（下限停在 5 而實數已 7），R69 實測第三次（9 vs 7、15 vs 12）——三次都不是有人
+    寫錯，而是**這個形狀本來就沒有自我修正的機制**。本鎖把「餘裕」本身變成受監控的量。
+
+    這也是本鎖的鑑別力證明所在：刪掉 root-infra-ci.yml 的任一道守門 → 上面三支下限鎖轉紅；
+    新增守門而不重釘下限 → 餘裕累到 _FLOOR_SLACK_MAX 時本鎖轉紅並指名要重釘哪一個常數。
+    """
+
+    def _live_counts(self) -> dict[str, tuple[int, int]]:
+        """回 {常數名: (現查值, 已釘下限)}。三個量的取法與上方三支鎖逐字同源。"""
+        text = _CI_YML.read_text(encoding="utf-8")
+        entries: set[str] = set()
+        for line in _SDD_CI_YML.read_text(encoding="utf-8").splitlines():
+            m = _QUOTED_PATH_ENTRY_RE.match(line)
+            if m:
+                entries.add(m.group(1))
+        consumers = [
+            e for e in entries
+            if not e.startswith("AISDLC_SDD/") and not e.startswith(".github/workflows/")
+        ]
+        return {
+            "_FLOOR_CI_PYTHON_TOOLS": (len(_yml_python_tools()), _FLOOR_CI_PYTHON_TOOLS),
+            "_FLOOR_HEADER_ITEMS": (len(_HEADER_ITEM_RE.findall(text)), _FLOOR_HEADER_ITEMS),
+            "_FLOOR_SDD_CONSUMERS": (len(consumers), _FLOOR_SDD_CONSUMERS),
+        }
+
+    def test_no_floor_lags_reality_by_the_slack_limit(self) -> None:
+        stale = {
+            name: (live, floor)
+            for name, (live, floor) in self._live_counts().items()
+            if live - floor >= _FLOOR_SLACK_MAX
+        }
+        self.assertEqual(
+            stale, {},
+            "下限已落後實數（每一格餘裕＝可被靜默刪掉的守門道數）："
+            + "；".join(f"{n}：現查 {live}、已釘 {floor}" for n, (live, floor) in stale.items())
+            + f"。請把該常數重釘為現查值（餘裕上限 {_FLOOR_SLACK_MAX}）——"
+            "**不要**改大 _FLOOR_SLACK_MAX，那等於把本鎖關掉",
+        )
+
+    def test_every_floor_is_actually_satisfied(self) -> None:
+        """反向：下限不得高於現查值（否則是有人刪了守門卻改小不了、或釘錯方向）。"""
+        for name, (live, floor) in self._live_counts().items():
+            with self.subTest(const=name):
+                self.assertGreaterEqual(live, floor, f"{name} 釘的下限高於現查值 {live}")
+
+
+class TestRootToolsRuffHasExecutors(unittest.TestCase):
+    """R69：`tools/ruff.toml` 必須在雲端與本地各有一個**會看它 rc** 的執行者。
+
+    Rule 9（測意圖）：這份設定檔落地當下全 repo 零執行者——它自陳要治的病
+    （「政策有宣告、卻沒有任何機械物在根層執行它」）原封不動地留著，只是把假綠從
+    「ruff 套出廠預設」換成「根本沒人跑 ruff」。上方 `TestRootInfraParity` 的抽取
+    正則只認 `python3 tools/*.py` 形狀，對 `ruff check` 結構上零訊號，故另立本類。
+
+    同時鎖住「不得改成 `--config tools/ruff.toml`」：帶 `--config` 時 ruff 的
+    project root 變成 cwd 而非設定檔所在目錄，`[lint.per-file-ignores]` 的相對
+    pattern 與 isort src 判定全部錯位（同機實測：帶 `--config` 140 errors、
+    不帶 `All checks passed!`）——那是**設定被錯誤解讀**，不是變嚴格。
+    """
+
+    _RUFF_INVOCATION = "ruff check tools/"
+
+    def test_ci_runs_ruff_over_the_root_tools_tree(self) -> None:
+        self.assertTrue(
+            _runs_ruff_over_root_tools(_CI_YML.read_text(encoding="utf-8")),
+            "root-infra-ci.yml 找不到**執行** `ruff check tools/` 的語句（註解與 echo "
+            "訊息不算）——雲端側沒有任何機械物在執行 tools/ruff.toml，該設定檔即退回"
+            "零執行者狀態（R69 第 16 道）",
+        )
+
+    def test_pre_push_fast_layer_runs_ruff_too(self) -> None:
+        self.assertTrue(
+            _runs_ruff_over_root_tools(_PRE_PUSH.read_text(encoding="utf-8")),
+            "pre-push dispatcher 找不到**執行** `ruff check tools/` 的語句（註解與 echo "
+            "訊息不算）——CI 帳務停擺期間本地是唯一防線（root-infra leg 的存在理由），"
+            "單邊接線等於半個執行者",
+        )
+
+    def test_the_executor_lock_is_not_satisfied_by_an_echo(self) -> None:
+        """鎖自證（R69 終審 P2）：把執行行換成只印同一句話的 echo ⇒ 必須判紅。
+
+        WHY：這一整類「假鎖」的形狀就是「宣告的字串在場」被誤當成「那件事會發生」。
+        上面兩道換成 `_runs_ruff_over_root_tools` 之後若沒有本道，下一次有人把它改回
+        `assertIn` 也不會有任何訊號——真正防復發的是這支負向注入，不是那兩支。
+        """
+        real = _PRE_PUSH.read_text(encoding="utf-8")
+        self.assertTrue(_runs_ruff_over_root_tools(real), "正控：真檔必須判綠")
+        echo_only = "\n".join(
+            line for line in real.splitlines()
+            if "if ! ruff check tools/ --no-cache" not in line
+        )
+        self.assertNotEqual(echo_only, real, "注入無效：找不到快層第 ④ 段的執行行")
+        self.assertIn(
+            self._RUFF_INVOCATION, echo_only,
+            "注入樣本內必須仍殘留 echo 訊息裡的同一子字串，否則本注入證明不了任何事",
+        )
+        self.assertFalse(
+            _runs_ruff_over_root_tools(echo_only),
+            "刪掉唯一的執行行、只留錯誤訊息 echo 之後本鎖仍判綠 ⇒ 又退回全文子字串"
+            "比對的假鎖（同 DEF-101-743 的同型復發）",
+        )
+
+    def test_neither_executor_passes_the_config_flag(self) -> None:
+        for label, text in (
+            ("root-infra-ci.yml", _CI_YML.read_text(encoding="utf-8")),
+            ("tools/git-hooks/pre-push", _PRE_PUSH.read_text(encoding="utf-8")),
+        ):
+            with self.subTest(file=label):
+                exec_lines = "\n".join(
+                    ln for ln in text.splitlines() if not ln.lstrip().startswith("#")
+                )
+                self.assertNotIn(
+                    "--config tools/ruff.toml", exec_lines,
+                    f"{label} 以 `--config tools/ruff.toml` 呼叫 ruff——那會把 project root "
+                    f"挪到 cwd，per-file-ignores 與 isort src 判定全部錯位（同機實測 140 "
+                    f"errors vs 0）。要改判準請先重跑該組對照，別直接放寬本鎖",
+                )
 
 
 if __name__ == "__main__":

@@ -31,7 +31,6 @@ import shutil
 import subprocess
 import unittest
 from pathlib import Path
-from typing import Optional
 
 _REPO_ROOT = Path(__file__).resolve().parent.parent.parent
 _SH = _REPO_ROOT / "tools" / "macos_smoke_local.sh"
@@ -57,7 +56,7 @@ def _read() -> str:
     return _SH.read_text(encoding="utf-8")
 
 
-def _usable_bash() -> Optional[str]:
+def _usable_bash() -> str | None:
     """回傳能跑 `echo` 的 bash 路徑；找不到回 None。
 
     刻意不 import AISDLC_SDD/scripts/bash_probe.py：R60 Scan-A 實測該探針在

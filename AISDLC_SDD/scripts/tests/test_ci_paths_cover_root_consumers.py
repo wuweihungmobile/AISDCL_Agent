@@ -863,8 +863,22 @@ def test_root_infra_ci_has_no_paths_filter():
 # tools/tests/test_bootstrap_core.py 直接 import 之，不再是「執行期子行程消費」，
 # 已被上方 `_scan_import_consumed_paths()` 一般掃描器自動涵蓋，故自本清單移除；
 # 僅 run_act_core.py 仍屬此盲區（見 DEF-101-286 待補測試）。
+# R69（終審 P1，DEF-101-721 續）：`AutoClaude/.loc_baseline` 於本輪被補進兩支 compat-CI
+# 的 push+PR 共 4 個 paths 區塊，卻**沒有任何機械物看守它繼續存在**——實測把那 4 條刪光，
+# 本檔 34 支全綠、零訊號（正是 DEF-101-042 假綠的同一形態，只是這次發生在「已補上的
+# 條目會不會被後人刪掉」這一面）。
+# 它確實有根層消費者，且屬盲區 B 而非盲區 A：`tools/tests/test_doc_loc_baseline_freshness_r60.py`
+# 的 `measure_adr_loc_live()` **刻意不直接讀這支檔**（該函式 docstring 逐字寫明理由），
+# 而是以子行程跑 `AutoClaude/tools/check_loc_budget.py --json`，由該工具去讀 `.loc_baseline`
+# 並回吐 `baseline=`，再與 ADR 內的 `baseline=` token 逐字比對 ⇒ 靜態 import-BFS 與路徑
+# 字面正則對它結構上零訊號。實測（R69，macOS）：把 `.loc_baseline` 由 17032 改為 17033，
+# `TestR69AdrMeasurementTokensAreLive::test_real_adrs_carry_no_unreproducible_measurement_token`
+# 由 OK 轉 FAILED（`baseline=17032 與現查值 17033 不符`）⇒ **只改這一支檔就能讓 compat-CI
+# 內的根層測試轉紅**，故它必須在兩支 compat-CI 的 paths 內，否則該場景下閘門恰好不跑。
+# ⇒ 這也就地否決了「它是無消費端的殘留項、應改為消去消費面」那條替代解：消費面是活的。
 _KNOWN_SUBPROCESS_ONLY_CONSUMERS: dict[str, tuple[str, ...]] = {
     "AutoClaude/tools/run_act_core.py": ("macos-compat-ci.yml", "windows-compat-ci.yml"),
+    "AutoClaude/.loc_baseline": ("macos-compat-ci.yml", "windows-compat-ci.yml"),
 }
 
 

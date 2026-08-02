@@ -17,6 +17,7 @@ import time
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from ..perception.pty_wrapper import CmdLineTooLongError
 from ..utils.logger import _sanitize_log_filename
 from ..utils.token_tracker import extract_context_pct
 from .types import _StepOutput
@@ -66,7 +67,13 @@ def execute_prompt_impl(
     should_compact = False
     should_halt = False
     deadline = time.monotonic() + timeout
-    pty.start()
+    # R69：同 pty_executor.execute 的對稱修復——啟動期長度守門降級為單步失敗訊號
+    # （回傳含錯誤原文的 _StepOutput，交由 _evaluate → CORRECTION 承接），而非讓
+    # CmdLineTooLongError 穿過 steps_orchestrator 主迴圈炸掉整場 run。
+    try:
+        pty.start()
+    except CmdLineTooLongError as exc:
+        return _StepOutput(text=f"[EXEC_START_FAILED] {exc}")
 
     try:
         while time.monotonic() < deadline:

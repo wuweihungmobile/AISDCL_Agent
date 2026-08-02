@@ -319,6 +319,7 @@ from _ci_scan_anchors import (  # noqa: E402
     ci_scan_statement_count,
 )
 
+
 class TestPs51Compat(unittest.TestCase):
     def test_active_ps1_trees_have_no_ps7_only_usage(self) -> None:
         """四棵樹 active `.ps1` 不得使用 PS 6/7-only 語法（per-tree 下限釘選防縮面）。"""

@@ -55,7 +55,6 @@ _PS1_PATH = _REPO_ROOT / "tools" / "lib" / "Find-GitBash.ps1"
 _PY_PATH = _REPO_ROOT / "tools" / "integration_gate_core.py"
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-import integration_gate_core  # noqa: E402
 from _platform_helpers import cut_ps_inline_comment, strip_ps_comments  # noqa: E402
 from _ps_engine import any_engine_available, production_engine  # noqa: E402
 
@@ -63,6 +62,8 @@ from _ps_engine import any_engine_available, production_engine  # noqa: E402
 # 再寫一份副本——該函式 docstring 已載明它是 AISDLC_SDD/scripts/bash_probe.py 的鏡射，
 # 再抄一份就是把同一個盲點多抄一遍（R57 Scan-E 判例）。
 from test_pre_push_dispatcher import _usable_bash  # noqa: E402
+
+import integration_gate_core  # noqa: E402
 
 _BASH = _usable_bash()
 
@@ -1102,7 +1103,10 @@ class TestIntegrationGateStageTargets(unittest.TestCase):
                     for arg in cmd:
                         for rel in self._path_like(arg):
                             resolved = cwd / rel
-                            targets.add(str(resolved.relative_to(_REPO_ROOT)))
+                            # as_posix()：str(PurePath) 在 Windows 是反斜線形態，
+                            # 這個集合會被印進失敗訊息（且隨時可能被加上正斜線斷言）
+                            # ——鍵一律平台中立（R69 P1 同型站點）。
+                            targets.add(resolved.relative_to(_REPO_ROOT).as_posix())
                             self.assertTrue(
                                 resolved.exists(),
                                 f"integration_gate stage 目標不存在：{resolved}"

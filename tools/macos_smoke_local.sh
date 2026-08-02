@@ -46,6 +46,35 @@
 #    勿把非 Darwin 的 rc=0 當成 macOS 全驗完成的取證。
 set -u
 
+# 🔴 R69（DEF-101-702／R68-21）：以 zsh（macOS 預設 shell）執行本檔時 `${BASH_SOURCE[0]}`
+# 未定義 → SCRIPT_DIR 解到呼叫端 cwd → guard source 失敗、is_real_python_candidate 變成
+# command not found → 印出與事實相反的「❌ 找不到 python」。fail-loud 一行擋在最前面，
+# 訊息直接給正確載具。（`$BASH_VERSION` 在 zsh／sh 下皆為空。）
+if [ -z "${BASH_VERSION:-}" ]; then
+  echo "❌ 本腳本需以 bash 執行：bash tools/macos_smoke_local.sh" >&2
+  echo "   （macOS 預設 shell 是 zsh，zsh 沒有 BASH_SOURCE，直接 source/zsh 執行會把" >&2
+  echo "     腳本目錄解錯，並印出與事實相反的『找不到 python』）" >&2
+  exit 2
+fi
+
+# 🔴 R69（DEF-101-702／R68-19）：原本全檔零 argv 處理 —— `--help` 或任何打錯的旗標都被
+# 靜默丟棄、整套 smoke 照跑到底。同族入口（bootstrap_core／integration_gate_core／
+# ci-gate.sh）都已 fail-loud，本檔是最後一個沒跟上的。
+_usage() {
+  cat >&2 <<'USAGE'
+用法：bash tools/macos_smoke_local.sh
+  本腳本不接受任何旗標（涵蓋範圍固定，見檔頭「涵蓋」段）。
+  -h, --help   顯示本說明
+Exit：0＝無 FAIL；1＝任一 FAIL；2＝用法錯誤／載具錯誤。
+USAGE
+}
+for _arg in "$@"; do
+  case "$_arg" in
+    -h|--help) _usage; exit 0 ;;
+    *)         echo "❌ 未知旗標：$_arg" >&2; _usage; exit 2 ;;
+  esac
+done
+
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 
@@ -61,8 +90,13 @@ SYS_BASH="/bin/bash"
 # ONBOARDING.md「已於 Windows Git Bash 實跑全綠」實跑紀錄）——此前置守門本身
 # 亦沿用同一慣例，改用共用 SSOT 而非裸判斷，避免在 Windows 11 + WindowsApps
 # 空殼 python 情境下誤判「找到 python」。
+# 🔴 R69（DEF-101-702／R68-21(b)）：source 失敗改硬錯。原本 `.` 失敗只印一行 shell 訊息
+# 就繼續跑，於是 guard 整條消失而無人知——這正是「guard 消失卻無人知」的結構成因。
 # shellcheck disable=SC1091
-. "$SCRIPT_DIR/lib/windowsapps_guard.sh"
+. "$SCRIPT_DIR/lib/windowsapps_guard.sh" || {
+  echo "❌ 無法載入 $SCRIPT_DIR/lib/windowsapps_guard.sh（WindowsApps guard 缺席）" >&2
+  exit 2
+}
 
 # 前置守門：install 共用層（tools/lib/git_hooks_install_common.sh）與守門工具
 # 都需要 python —— 缺席時 fail-fast（與該共用層同款訊息），勝過中段連環爆。

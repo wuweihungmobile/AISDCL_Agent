@@ -5,7 +5,7 @@ dev_start wrapper（Windows）。macOS/Linux 對等：tools/dev_start.sh
 .DESCRIPTION
   邏輯全部集中在 tools/dev_start.py（跨平台單一事實源；本對 .sh/.ps1 為薄殼，
   業務邏輯零漂移面；薄殼樣板本身無機械比對，改動須人工同步 .sh）。本檔只做三件事：
-    選直譯器（.venv 形狀正確優先，否則 py launcher / python）→ 轉呼叫核心 → 視需要啟用 venv。
+    選直譯器（.venv 形狀正確優先，否則 SSOT 候選鏈挑 >= 3.11）→ 轉呼叫核心 → 視需要啟用 venv。
 
 .EXAMPLE
   . tools\dev_start.ps1        # 推薦：dot-source，核心完成後自動啟用 .venv
@@ -35,18 +35,15 @@ $VenvPy = Join-Path $Root '.venv\Scripts\python.exe'
 # 復發後收斂為單一真相源）：見 tools/lib/WindowsAppsGuard.ps1。
 . "$PSScriptRoot/lib/WindowsAppsGuard.ps1"
 
+# R69 P2：候選鏈由 SSOT `Get-PythonGeMin` 提供（>= 3.11 才算數，內含 WindowsApps
+# 空殼 guard）。原本 `py`／`python` 命中即用、不看版本，與 .sh 側同款缺陷；
+# 兩側現在共用同一套候選鏈語意與同一段版本探測碼。
 $Py = $null
 if (Test-Path $VenvPy) { $Py = $VenvPy }
-elseif (Get-Command py -ErrorAction SilentlyContinue) { $Py = 'py' }
-else {
-  # 排除 Windows Store App Execution Alias stub（未真裝 Python 時 python.exe
-  # 是開商店的假直譯器）
-  if (Test-IsRealPython -CandidateName 'python') { $Py = 'python' }
-}
+else { $Py = Get-PythonGeMin }
 
 if (-not $Py) {
-  Write-Host "❌ 找不到 Python 直譯器（dev_start 核心需 Python 3）。" -ForegroundColor Red
-  Write-Host "   Windows 安裝建議：winget install Python.Python.3.11（或 winget install astral-sh.uv）" -ForegroundColor Yellow
+  Write-PythonGeMinRemediation
   if ($DotSourced) { $global:LASTEXITCODE = 1; return }
   exit 1
 }

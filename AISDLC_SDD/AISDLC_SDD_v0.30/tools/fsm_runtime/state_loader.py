@@ -45,8 +45,11 @@ def _now() -> str:
 # docs/06_quality/AutoSDD_Defect_Log.md::DEF-101-358）。
 #
 # 覆蓋強度比照 AutoClaude 側 autoclaude/utils/logger.py::_sanitize_log_filename()
-# （交叉一致性見 test_state_component_sanitizer_parity.py：比較「危險輸入是否
-# 被同等程度擋下」，不要求輸出完全一致）。AISDLC_SDD 與 AutoClaude 是兩個獨立
+# （交叉一致性見根層 tools/tests/test_windows_forbidden_filename_parity.py::
+# TestSddSanitizeComponentVsLoggerSecurityParity：比較「危險輸入是否被同等程度
+# 擋下」，不要求輸出完全一致。R69 自本目錄的 test_state_component_sanitizer_
+# parity.py 搬遷至根層整合層——原檔在 AISDLC_SDD 側 import autoclaude，CI 相依
+# 缺 pydantic 時被 try/except 收成「8 支永遠 skip」）。AISDLC_SDD 與 AutoClaude 是兩個獨立
 # 可發布子專案（各自 releases/ 打包發布機制），依既有先例（
 # bootstrap_core.py::_is_windows_apps_stub() 語言邊界獨立實作）不可跨子專案
 # import，故本模組獨立實作、不與 logger.py 共用同一顆函式物件。

@@ -58,6 +58,7 @@ WHY（為何非得有這道鎖）：
 """
 from __future__ import annotations
 
+import re
 import unittest
 import warnings
 from collections.abc import Iterable, Mapping
@@ -229,6 +230,99 @@ class TestNoInvalidEscapeSequences(unittest.TestCase):
         self.assertEqual(
             [str(w.message) for w in caught if "invalid escape" in str(w.message)], []
         )
+
+
+# ---- R69（DEF-101-702／R68-39）：noqa 指令本體的形態 ---------------------------------
+# WHY 住在本檔：本檔守的是「ruff 看得見、但本 repo 的閘門看不見」那一類靜默自傷，noqa
+# 寫壞正是同一類——規則碼後面緊接**全形**括號（`PLC0415（避免循環 import）`）時 ruff 判
+# 整條指令非法（印 Invalid directive warning）⇒ 該行**完全沒有被豁免**，而 pre-commit 的
+# ruff leg 只看 rc、warning 全落地無人消費，於是「以為有豁免」與「其實沒有」外觀相同。
+# 這是 DEF-101-525 已記載過的同型自傷第二次復發，當輪未落任何機械鎖。
+#
+# 樣式的負向前瞻 `(?![0-9])` 不可省：少了它，`noqa: E501` 這種正常寫法會因為規則碼
+# 本身的數字而被逐字元回溯命中，製造大量假陽性（原缺陷報告給的樣式就是那個壞版本）。
+#
+# 🔴 R69 終審 P1（本節第一版自己犯了它要治的病，兩層）：
+#   ① 上面這幾行原本把「井號＋noqa」的組合逐字寫在**註解**裡當說明，而 ruff 解析註解時
+#      不管它是不是說明——冷 cache 實測本檔逐次吐三條 `warning: Invalid ... directive`
+#      （235／237／242 行）。示範壞形態的**註解**會被工具當真，這正是本檔檔頭
+#      警告過的「示範壞形態的文件會反咬自己」，只是換了一個工具。
+#      （本段連引述那句 warning 都不敢寫全，正是因為引述本身就會再製造一條 warning。）
+#      修法：散文一律不寫出該組合（改稱「noqa 指令」），要示範就用下面的 `_HASH` 拼。
+#   ② 樣本字串（`test_detector_*` 的輸入）也讓**本檔自己**被自己的掃描器命中，於是第一版
+#      加了一條「整檔自我豁免」——本鎖對最該被守的那支檔（它自己）射程為零，且該豁免還
+#      掩護了 ① 那個真的壞掉的指令。修法：樣本改用 `_HASH` 動態拼接，源碼任何一行都不再
+#      出現可被解析的指令，整檔豁免隨之刪除（同本檔既有 `chr(92)` 合成壞形態的慣例）。
+_HASH = chr(35)
+_NOQA_MALFORMED_RE = re.compile(r"#\s*noqa:\s*[A-Z]+[0-9]+(?![0-9])[^\s,]")
+
+
+def scan_malformed_noqa(repo_root: Path = _REPO_ROOT) -> list[str]:
+    """回傳 `rel:lineno: 原行` 清單——規則碼後緊接非空白、非逗號的字元即判違規。
+
+    🔴 **無任何豁免**（R69 終審）：本檔自己也在掃描面內。
+    """
+    problems: list[str] = []
+    for root in _SCAN_ROOTS:
+        base = repo_root / root
+        for path in sorted(base.rglob("*.py")):
+            rel = path.relative_to(repo_root).as_posix()
+            if "/.venv/" in f"/{rel}" or "/__pycache__/" in f"/{rel}":
+                continue
+            text = path.read_text(encoding="utf-8", errors="replace")
+            for lineno, line in enumerate(text.splitlines(), 1):
+                if _NOQA_MALFORMED_RE.search(line):
+                    problems.append(f"{rel}:{lineno}: {line.strip()}")
+    return problems
+
+
+class TestNoqaDirectivesAreWellFormed(unittest.TestCase):
+    """noqa 指令必須是 ruff 認得的形態，否則豁免是假的。"""
+
+    def test_no_malformed_noqa_in_scan_surface(self) -> None:
+        problems = scan_malformed_noqa()
+        self.assertEqual(
+            problems, [],
+            "以下 noqa 指令 ruff 判為非法（規則碼後緊接非空白字元，最常見是**全形**"
+            "括號）——該行實際上完全沒有被豁免：\n" + "\n".join(problems) +
+            "\n修法：規則碼與理由之間留空白，理由用半形括號或移到上一行。",
+        )
+
+    def test_detector_catches_the_pre_fix_form(self) -> None:
+        """鑑別力：R69 修掉的那個逐字形態必須被命中。"""
+        self.assertIsNotNone(_NOQA_MALFORMED_RE.search(
+            f"        from ..utils.config import X  {_HASH} noqa: PLC0415（避免循環 import）"
+        ))
+
+    def test_this_file_is_inside_its_own_scan_surface(self) -> None:
+        """反自我豁免（R69 終審）：本檔必須真的被自己掃到，且掃出來是乾淨的。
+
+        第一版有一條 `if rel == _SELF_REL: continue` 的整檔豁免，於是本檔留著一個
+        **真的壞掉**的 noqa 指令（ruff 每次冷 cache 都印 warning）而本鎖全綠。
+        豁免掩護的正是本鎖存在的理由，故整條拆除；本測試釘住「不得再長回來」。
+        """
+        self_rel = Path(__file__).resolve().relative_to(_REPO_ROOT).as_posix()
+        scanned = {
+            p.relative_to(_REPO_ROOT).as_posix()
+            for root in _SCAN_ROOTS
+            for p in (_REPO_ROOT / root).rglob("*.py")
+        }
+        self.assertIn(self_rel, scanned, "本檔不在自己的掃描面內——掃描面或本檔位置已改變")
+        self.assertEqual(
+            [p for p in scan_malformed_noqa() if p.startswith(self_rel + ":")], [],
+            "本檔自己含壞形態 noqa 指令——樣本一律以 `_HASH` 動態拼接，不得逐字寫在源碼行上",
+        )
+
+    def test_detector_does_not_flag_normal_forms(self) -> None:
+        """對照組：本 repo 大量使用的正常寫法不得誤報（負向前瞻若被拿掉即紅）。"""
+        for sample in (
+            f"import sdd_latest  {_HASH} noqa: E402",
+            f"x = 1  {_HASH} noqa: E501, F401",
+            f"y = 2  {_HASH} noqa: PLC0415  (避免循環 import)",
+            f"z = 3  {_HASH} noqa: E402  {_HASH} 另一段註解",
+        ):
+            with self.subTest(sample=sample):
+                self.assertIsNone(_NOQA_MALFORMED_RE.search(sample))
 
 
 if __name__ == "__main__":

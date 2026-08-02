@@ -105,13 +105,19 @@ _PS1_BLOCK_COMMENT_RE = re.compile(r"<#.*?#>", re.DOTALL)
 _PINNED_SHA256: dict[str, str] = {
     # R43：WindowsApps 空殼排除 guard 收斂為 dot-source tools/lib/windowsapps_guard.sh
     # 共用函式（Scan-B 系統性缺口收斂，DEF-101-353；bash 側對稱 .ps1 側 R37 先例）
+    # R69 P2 重釘：選直譯器改委派 SSOT 候選鏈 `pick_python_ge_min`（>= 3.11），
+    # 取代原本「`python3`/`python` 命中即用」——後者在 macOS 上恆撿到系統 3.9，
+    # 照 ONBOARDING §1 裝完 python@3.11 仍 rc=2（真機重現）。仍屬「選直譯器」
+    # 薄殼職責（候選鏈邏輯落在 tools/lib/windowsapps_guard.sh，殼內零迴圈）。
     "tools/dev_start.sh": (
-        "21de65d51053555ff0df5693ffaa241540238dd1096f2f400626d530c308afcc"
+        "b7530b3bed8f5bbb44782e88527085bad9ef9c88ed8f178f872ac8d3ad2ba9d1"
     ),
     # R37：WindowsApps 空殼排除 guard 收斂為 dot-source tools/lib/WindowsAppsGuard.ps1
     # 共用函式（DEF-101-273/279/300/303 反覆復發後的架構收斂）
+    # R69 P2 重釘：同 .sh 側，改委派 SSOT 候選鏈 `Get-PythonGeMin`（雙向對等，
+    # 兩側同一套候選鏈語意與同一段版本探測碼）。
     "tools/dev_start.ps1": (
-        "6905c4f624abb7416ad8c71e623cfb0d88cd5901976010b21724fa45c88e7eed"
+        "3217d73ac2cb2a1b136786e300ff7370855d58bb8594c961b7a136a80480fa60"
     ),
     # R12（DEF-101-070 ②）：local_ci_gate 收斂為薄殼＋Python 核心後納入釘選；
     # R43：補上 WindowsApps guard dot-source（同上 DEF-101-353）

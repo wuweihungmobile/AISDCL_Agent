@@ -114,7 +114,8 @@ R67 補的兩件事（本輪 R67-D1〔P1〕／R67-D6／R67-D20；WHY 見各自�
     live 值**（而非再寫死一個會過期的數字），並在格內明說它不受鎖管轄——該措辭由
     `test_table1_macos_cell_declares_it_is_not_lock_covered` 釘住。表②（有真平台差）
     才是本輪平台化的標的。
-  - **指紋只覆蓋測試樹**（四棵皆遞迴 `**/*.py` 的**行尾正規化後**內容）。生產碼變動改變 `parametrize`
+  - **指紋只覆蓋測試樹**（四棵皆遞迴 `**/*.py` 的**行尾正規化後**內容）。生產碼變動改變
+    `parametrize`
     來源、docker daemon 可用性、平台差異都能改變計數而指紋不動 ⇒ 它是 stale 的
     **充分觸發器、非必要條件**（會漏、不會冤）。要它變成必要條件就得付整套重測的代價，
     那正是表② 沒有 live 鎖的原因。
@@ -133,14 +134,18 @@ R67 補的兩件事（本輪 R67-D1〔P1〕／R67-D6／R67-D20；WHY 見各自�
     「這是 LOC 閘門自己紅、不是文件 stale」，避免錯誤定位（SD-R60-09 附帶項）。
 
 用法（argparse；未知旗標一律 rc=2 fail-loud，`--help` 印完整用法）：
-  python tools/sync_onboarding_baselines.py                  # 稽核模式（＝ --check，表①）；stale 即 exit 1
-  python tools/sync_onboarding_baselines.py --check          # 同上的顯式寫法（文件與閘門引用的那條路）
+  python tools/sync_onboarding_baselines.py                  # 稽核模式（＝ --check，表①）
+                                                             # stale 即 exit 1
+  python tools/sync_onboarding_baselines.py --check          # 同上的顯式寫法
+                                                             # （文件與閘門引用的那條路）
   python tools/sync_onboarding_baselines.py --write          # 一鍵回填表①（bytes 層 LF 寫入）
   python tools/sync_onboarding_baselines.py --check-snapshot # 表② 指紋比對（毫秒級，pre-push 消費）
-  python tools/sync_onboarding_baselines.py --write --with-slow  # 表①＋**本平台那一欄**＋指紋全回填（分鐘級）
+  python tools/sync_onboarding_baselines.py --write --with-slow
+                                            # 表①＋**本平台那一欄**＋指紋全回填（分鐘級）
   python tools/sync_onboarding_baselines.py --json           # 機讀報表（含表② 與逐平台指紋）
   python tools/sync_onboarding_baselines.py --check-snapshot --platform win32
-                                                             # 在 mac 上稽核 Windows 欄（唯讀；不得用於 --write）
+                                                             # 在 mac 上稽核 Windows 欄
+                                                             # （唯讀；不得用於 --write）
 測試：tools/tests/test_doc_loc_baseline_freshness_r60.py
 """
 from __future__ import annotations
@@ -819,7 +824,9 @@ def parse_provenance(text: str, platform_key: str) -> dict[str, str]:
     return values
 
 
-def _stale_messages(text: str, platform_key: str, names: list[str], live: dict[str, str]) -> list[str]:
+def _stale_messages(
+    text: str, platform_key: str, names: list[str], live: dict[str, str],
+) -> list[str]:
     documented = parse_fingerprints(text, platform_key)
     prov = parse_provenance(text, platform_key)
     label = _PLATFORM_COLUMN_LABELS[platform_key]
@@ -880,7 +887,10 @@ def _stale_summary(text: str, platform_key: str, names: list[str], live: dict[st
             f"`python tools/sync_onboarding_baselines.py --write --with-slow`"
         )
     age = _measurement_age_days(prov["measured-at"])
-    age_text = f"距今 {age} 天" if age is not None else f"measured-at={prov['measured-at']!r} 無法解析"
+    age_text = (
+        f"距今 {age} 天" if age is not None
+        else f"measured-at={prov['measured-at']!r} 無法解析"
+    )
     drift = ", ".join(f"{n}:{documented[n]}→{live[n]}" for n in names)
     return (
         f"{label} 欄上次量測 {prov['measured-at']}（{age_text}），此後 "
@@ -1245,7 +1255,9 @@ def build_parser() -> argparse.ArgumentParser:
     """
     parser = argparse.ArgumentParser(
         prog="python tools/sync_onboarding_baselines.py",
-        description="ONBOARDING.md §7 基線格產生器 ＋ 新鮮度稽核（表① live 格／表② dated snapshot）",
+        description=(
+            "ONBOARDING.md §7 基線格產生器 ＋ 新鮮度稽核（表① live 格／表② dated snapshot）"
+        ),
         allow_abbrev=False,
     )
     parser.add_argument(
@@ -1261,7 +1273,8 @@ def build_parser() -> argparse.ArgumentParser:
         "--check-snapshot", action="store_true",
         help="表② presumed-stale 觸發器（毫秒級；pre-push 與 root-infra-ci 消費的就是這條）",
     )
-    parser.add_argument("--json", action="store_true", help="機讀報表（含表② 與逐平台指紋/provenance）")
+    parser.add_argument("--json", action="store_true",
+                        help="機讀報表（含表② 與逐平台指紋/provenance）")
     parser.add_argument(
         "--platform", choices=sorted(_PLATFORM_COLUMN_LABELS),
         help="唯讀模式下指定稽核哪一個平台欄（預設＝本機平台）；**不得**與 --write 併用",
@@ -1326,7 +1339,8 @@ def main(argv: list[str] | None = None) -> int:
         print(f"✅ §7 表② 指紋相符 {scope}（{', '.join(f'{k}={v}' for k, v in live.items())}）")
         for key in _PLATFORM_COLUMN_LABELS:
             documented = slow_documented(text, key)
-            print(f"   [{_PLATFORM_COLUMN_LABELS[key]} 欄] provenance={parse_provenance(text, key)}")
+            print(f"   [{_PLATFORM_COLUMN_LABELS[key]} 欄] "
+                  f"provenance={parse_provenance(text, key)}")
             for spec in _SLOW_SPECS:
                 print(f"     [{spec.anchor}] {documented[spec.anchor]}")
         return 0
@@ -1371,7 +1385,8 @@ def main(argv: list[str] | None = None) -> int:
             print(f"✅ 已回填 [{spec.anchor}] → {measured[spec.anchor]}")
         label = _PLATFORM_COLUMN_LABELS[write_platform]
         for spec in _SLOW_SPECS:
-            print(f"✅ 已回填 [{spec.anchor}]（{label} 欄）→ {slow[spec.anchor]}（來源：{spec.source}）")
+            print(f"✅ 已回填 [{spec.anchor}]（{label} 欄）→ {slow[spec.anchor]}"
+                  f"（來源：{spec.source}）")
         print(f"✅ 已回填 [{fingerprint_anchor(write_platform)}] → {measured_fp} ＋ {provenance}")
         return 0
 

@@ -36,6 +36,7 @@ import bash_probe_spec as _spec  # noqa: E402
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from _ps_engine import any_engine_available, production_engine  # noqa: E402  # R60 E-A-03
+
 _LIB_DIR = _REPO_ROOT / "tools" / "lib"
 _PS1_WRAPPER = _LIB_DIR / "GitHooksInstallCommon.ps1"
 _SH_WRAPPER = _LIB_DIR / "git_hooks_install_common.sh"

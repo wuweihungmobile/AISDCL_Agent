@@ -23,9 +23,9 @@ from pathlib import Path
 from unittest import mock
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-import check_wrapper_thinness as m  # noqa: E402
-
 from _platform_helpers import ABS_FAKE_REPO  # noqa: E402  # 平台中立假絕對路徑（R11）
+
+import check_wrapper_thinness as m  # noqa: E402
 
 
 class TestCheckWrapperThinness(unittest.TestCase):

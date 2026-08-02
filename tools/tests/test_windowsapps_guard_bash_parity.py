@@ -341,8 +341,17 @@ _PRINT_COMMAND_RE = re.compile(r"^\s*(?:echo|printf|print)\b")
 # `if ! is_real_python_candidate ...`／`is_real_python_candidate ... || {...}`／
 # `elif is_real_python_candidate ...`），但排除任意包含該子字串的位置（如 echo
 # 字串內的純文字提及，R46 QA 二審 bug-injection 揪出）。
+#
+# 🔴 R69 P2：SSOT 的**入口函式**由一個變成兩個——`pick_python_ge_min`（挑 >= 3.11
+# 直譯器的候選鏈）同樣定義在 `tools/lib/windowsapps_guard.sh`、內部**逐個候選**
+# 呼叫 `is_real_python_candidate`，故呼叫它與直接呼叫 `is_real_python_candidate`
+# 對「有沒有繞過空殼 guard」是等價的（強度不變，不是放寬：兩個名字都只存在於
+# SSOT 一份實作裡，自行內嵌判斷式的檔案照樣抓得到）。同時補上 `$(` 前綴——候選
+# 鏈函式的回傳值走 stdout，呼叫端寫法必然是 `py="$(pick_python_ge_min)"`，
+# 舊的四種陳述式起始錨點涵蓋不到。
+_SSOT_ENTRYPOINTS = r"(?:is_real_python_candidate|pick_python_ge_min)"
 _CALL_STATEMENT_RE = re.compile(
-    r"(?:^\s*|;\s*|&&\s*|\|\|\s*)(?:if\s+|elif\s+)?!?\s*is_real_python_candidate\b"
+    r"(?:^\s*|;\s*|&&\s*|\|\|\s*|\$\(\s*)(?:if\s+|elif\s+)?!?\s*" + _SSOT_ENTRYPOINTS + r"\b"
 )
 
 
@@ -912,13 +921,20 @@ class TestBashCallersEnrollment(unittest.TestCase):
         """
         latest_name = _latest_sdd_version_name()
         known_relpaths = {str(f.relative_to(_REPO_ROOT)).replace("\\", "/") for f in _CALLER_FILES}
+        # R69 P2：SSOT 自己也要跳過（比照姊妹掃描 `test_caller_files_matches_
+        # repo_wide_scan` 早就有的 `if rel == ssot_rel: continue`）——本檔內的
+        # `pick_python_ge_min` 候選鏈含 `python3.11` 等字面值 ⇒ 會被
+        # `_invokes_python_bare` 判為「呼叫 python」，而 `_has_ssot_guard` 要求檔案
+        # 內有 source `windowsapps_guard.sh` 的陳述式，SSOT 不可能 source 自己 ⇒
+        # 結構性偽陽性。判準本身（「非 SSOT 檔案不得零 guard 呼叫 python」）不變。
+        ssot_rel = str(_GUARD_SH.relative_to(_REPO_ROOT)).replace("\\", "/")
         scoped = _exclude_frozen_sdd_versions(
             _tracked_sh_files() + _tracked_extensionless_hook_files(), latest_name
         )
 
         unmigrated: list[str] = []
         for rel in scoped:
-            if rel in known_relpaths or rel in _EXEMPT_SH_FILES:
+            if rel == ssot_rel or rel in known_relpaths or rel in _EXEMPT_SH_FILES:
                 continue
             path = _REPO_ROOT / rel
             if not path.is_file():

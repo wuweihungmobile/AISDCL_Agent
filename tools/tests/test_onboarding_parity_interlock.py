@@ -174,5 +174,58 @@ class TestOnboardingParityInterlock(unittest.TestCase):
         )
 
 
+class TestOnboardingSelfSectionRefsResolve(unittest.TestCase):
+    """R69（DEF-101-702／R68-13 同族的死指標面）：ONBOARDING 的**自我**節次引用必須解析得到。
+
+    WHY：R69 實測 §6.1 的 `root-infra-ci.yml` 列寫著「逐輪覆蓋沿革見 **§9.1 逐輪平台覆蓋表**」
+    ——而本文件從來沒有 §9.1。那句話是在同一輪把別處改寫成「指向 live 來源」時寫下的，
+    指路句本身卻指向不存在的地方；讀者按圖索驥找不到東西，只會退回猜測，比不指路更糟。
+    同型判準 `ADR-XPLAT-002` §8 item 14 (d)（內部交叉引用必須解析得到）早已寫成規格，
+    但射程只到那兩份 ADR，本文件不在內——本鎖補上這一半。
+
+    刻意只管**自我引用**：`ADR-SD07-001 §6.2`／`docs/…UserGuide.md §1.2` 這種前面緊接
+    他檔名的引用指的是別份文件的節次，本文件無從判定，納入只會製造誤紅。
+    """
+
+    _REF_RE = re.compile(r"§\s*(\d+(?:\.\d+)*)")
+    _HEADING_RE = re.compile(r"^#{2,4}\s+(\d+(?:\.\d+)*)", re.M)
+    # 引用前 90 字內若出現「他檔名」樣式（`X.md`／`ADR-…`／`DEF-…`），視為跨文件引用。
+    _FOREIGN_RE = re.compile(r"(\.md\b|ADR-[A-Za-z0-9]|DEF-\d)")
+
+    def _text(self) -> str:
+        return (_REPO_ROOT / "ONBOARDING.md").read_text(encoding="utf-8")
+
+    def _self_refs(self, text: str) -> list[tuple[int, str]]:
+        out: list[tuple[int, str]] = []
+        for lineno, line in enumerate(text.split("\n"), 1):
+            for m in self._REF_RE.finditer(line):
+                prefix = line[max(0, m.start() - 90):m.start()]
+                if not self._FOREIGN_RE.search(prefix):
+                    out.append((lineno, m.group(1)))
+        return out
+
+    def test_every_self_section_reference_has_a_heading(self) -> None:
+        text = self._text()
+        headings = set(self._HEADING_RE.findall(text))
+        self.assertTrue(headings, "ONBOARDING 抽不到任何編號標題 —— 掃描面崩塌")
+        dead = sorted({(ln, ref) for ln, ref in self._self_refs(text) if ref not in headings})
+        self.assertEqual(
+            dead, [],
+            f"ONBOARDING 有解析不到的自我節次引用（行號, §）：{dead}；"
+            f"現有編號標題：{sorted(headings)}。修法二擇一：把引用改指真實存在的節次／"
+            f"外部文件，或真的補上該節——**不要**留著指向不存在章節的指路句",
+        )
+
+    def test_the_detector_catches_the_pre_fix_form(self) -> None:
+        """鑑別力：注入 R69 修掉的那句原文形態，必須被指名。"""
+        text = self._text() + "\n| x | 逐輪覆蓋沿革見 **§9.1 逐輪平台覆蓋表**。 | y |\n"
+        headings = set(self._HEADING_RE.findall(text))
+        dead = [ref for _ln, ref in self._self_refs(text) if ref not in headings]
+        self.assertIn("9.1", dead)
+
+    def test_cross_document_refs_are_not_flagged(self) -> None:
+        """對照組：帶他檔名前綴的節次引用不得誤報（本文件大量使用）。"""
+        text = "## 1. x\n見 ADR-SD07-001 §6.2 調升程序；見 docs/UserGuide.md §1.2。\n"
+        self.assertEqual(self._self_refs(text), [])
 if __name__ == "__main__":
     unittest.main()

@@ -7,10 +7,21 @@
 #   讓兩子專案閘門同時生效：
 #     - push 範圍變更含 AutoClaude/  → 執行 AutoClaude/tools/git-hooks/pre-push
 #     - push 範圍變更含 AISDLC_SDD/ → 執行 AISDLC_SDD/.githooks/pre-push
-#     - push 範圍變更含「根層檔」（不在上述兩子專案底下的任何路徑，如 tools/、
-#       docs/、.github/workflows/）→ 執行 root-infra leg（py_compile + tools/tests
-#       unittest（含數量下限釘選，R10 QA-2）+ 八支守門工具），對齊 root-infra-ci.yml
-#       的本地接線（R9 複審：原本純根層變更 push 一個閘門都不跑，CI 停擺期間零防護）
+#     - root-infra leg（對齊 root-infra-ci.yml 的本地接線；R9 複審：原本純根層變更
+#       push 一個閘門都不跑，CI 停擺期間零防護）自 R69 起**快慢分層**：
+#         · 快層＝八支守門工具 ＋ `ruff check tools/`（R69 補：對齊 root-infra-ci.yml
+#           第 16 道；`tools/ruff.toml` 落地時全 repo 零執行者，同機實測冷 cache 0.02s／
+#           熱 cache 0.01s，比任一支守門都便宜），**任何 push 都跑**（含純子專案 push）。理由：這八支
+#           守的全是跨子專案不變式（腳本對等／NTFS 路徑／薄殼 hash／帳本互參…），
+#           掃描面本來就涵蓋 AutoClaude/tools 與 AISDLC_SDD/scripts；R69 前的觸發
+#           條件是「存在不在兩子專案底下的變更路徑」，於是最常見的純子專案 push
+#           一支根層守門都不跑（R68-63/65）。同機實測八支合計約 1.0s（逐支
+#           0.03~0.27s），與慢層的 111.89s 差兩個數量級，全跑不會逼人 --no-verify。
+#         · 慢層＝py_compile 全量 + tools/tests unittest（含數量下限釘選，R10 QA-2），
+#           維持「push 範圍變更含根層檔（不在兩子專案底下的任何路徑，如 tools/、
+#           docs/、.github/workflows/）」才跑——同機實測 111.89s，無條件跑等於每次
+#           子專案 push 都付兩分鐘，與 R67-C18 對整合閘門所做的取捨同一判準。
+#         · 「刪除遠端分支」不觸發任一層（無東西可驗證，見下方分流條件）。
 #     - push 範圍命中「根層消費檔」（aisdlc-sdd-ci.yml paths 承認的非 AISDLC_SDD/
 #       條目，如 tools/check_ntfs_paths.py、.claude/hooks/sdd_hook_router.py）且
 #       SDD leg 未觸發 → 補跑 AISDLC_SDD/scripts/tests 回歸鎖（R10 ARCH-1：這些檔
@@ -54,6 +65,9 @@ STDIN="$(cat)"
 run_autoclaude=0
 run_sdd=0
 run_rootinfra=0
+# R69 快層旗標：只要本次 push 有任何「可判定的變更內容」就設 1（刪遠端分支那種
+# 已判定的明確跳過不算），與慢層的 run_rootinfra 各自獨立。
+run_rootinfra_guards=0
 run_integration_gate=0
 undeterminable=0
 parsed=0
@@ -85,6 +99,8 @@ while read -r local_ref local_sha remote_ref remote_sha; do
     continue
   fi
   parsed=1
+  # R69：走到這裡代表本行的變更範圍已成功判定 ⇒ 快層守門必跑（不論命中哪個子專案）。
+  run_rootinfra_guards=1
 
   # 純 bash case 前綴比對（不可用 printf | grep -q —— 變更清單 >64KB 且命中在前段時
   # grep -q 提早退出令 printf 收 SIGPIPE，pipefail 判整條管線非零 → 閘門靜默漏跑）
@@ -119,6 +135,7 @@ if [ "$undeterminable" -eq 1 ] || [ "$parsed" -eq 0 ]; then
   run_autoclaude=1
   run_sdd=1
   run_rootinfra=1
+  run_rootinfra_guards=1
   run_integration_gate=1
 fi
 
@@ -132,7 +149,7 @@ run_sdd_consumer=0
 if [ "$run_sdd" -eq 0 ] && [ -n "$ALL_FILES" ]; then
   SDD_CI_YML="$TOPLEVEL/.github/workflows/aisdlc-sdd-ci.yml"
   if [ ! -f "$SDD_CI_YML" ]; then
-    echo "[pre-push dispatcher] ❌ 找不到 $SDD_CI_YML（根層消費檔清單來源；hooks 體系損壞）" >&2
+    echo "[pre-push dispatcher] ❌ 找不到 ${SDD_CI_YML}（根層消費檔清單來源；hooks 體系損壞）" >&2
     rc=1
   else
     consumer_paths="$( { grep -E '^[[:space:]]*-[[:space:]]*"' "$SDD_CI_YML" || true; } \
@@ -229,8 +246,12 @@ fi
 # （R56 訂正：R55 由五支增為六支時本行漏改，與 L12／L211 及實際迴圈不一致；
 #  三處計數宣稱現由 test_root_infra_parity.py::test_guard_count_claims_match_loop
 #  機械斷言與迴圈項數相等，不再靠人工同步。）
-if [ "$run_rootinfra" -eq 1 ]; then
-  echo "[pre-push dispatcher] push 範圍含根層檔 → 執行 root-infra 閘門"
+if [ "$run_rootinfra" -eq 1 ] || [ "$run_rootinfra_guards" -eq 1 ]; then
+  if [ "$run_rootinfra" -eq 1 ]; then
+    echo "[pre-push dispatcher] push 範圍含根層檔 → 執行 root-infra 閘門（快層守門 + 慢層 py_compile/unittest）"
+  else
+    echo "[pre-push dispatcher] root-infra 快層守門（跨子專案不變式，任何 push 皆跑）"
+  fi
   if ! is_real_python_candidate python; then
     echo "[pre-push dispatcher] ❌ 找不到 python — root-infra 閘門無法執行；請先啟用 venv（Windows: .venv/Scripts/activate；macOS/Linux: source .venv/bin/activate，見 ONBOARDING.md §3）" >&2
     rc=1
@@ -238,6 +259,8 @@ if [ "$run_rootinfra" -eq 1 ]; then
     (
       cd "$TOPLEVEL" || exit 1
       leg_rc=0
+      # ①② 為**慢層**（同機實測 111.89s）：僅在 push 真的動到根層檔時執行。
+      if [ "$run_rootinfra" -eq 1 ]; then
       # ① 根層 Python 全量 py_compile：tools/ + .claude/hooks/（R10 ARCH-1 補：
       #    sdd_hook_router.py 等根層消費檔有 CI paths 覆蓋，本地原本連語法檢查
       #    都沒有）（find -exec：免 mapfile、空白檔名安全；py_compile 對多檔
@@ -254,7 +277,8 @@ if [ "$run_rootinfra" -eq 1 ]; then
         echo "[pre-push dispatcher] ❌ root-infra：tools/tests unittest 失敗" >&2
         leg_rc=1
       fi
-      # ③ 八支守門工具（逐支跑完累積，不因單支失敗提早退出；R13 增
+      fi
+      # ③ 八支守門工具（**快層**，R69 起任何 push 皆跑，見檔頭）（逐支跑完累積，不因單支失敗提早退出；R13 增
       #    check_pytest_baseline_sites.py——pytest 基線數字站點鎖，對齊 CI 第 11 道；
       #    R55 增 check_gha_action_versions.py——GitHub Actions 版本一致性鎖，
       #    對齊 CI 第 12 道；R60 增 archive_defect_log.py --check——帳本保全稽核，
@@ -274,6 +298,41 @@ if [ "$run_rootinfra" -eq 1 ]; then
           leg_rc=1
         fi
       done
+      # ④ 根層護欄層 ruff（**快層**，R69）：對齊 root-infra-ci.yml 第 16 道。
+      #    `tools/ruff.toml` 落地當下全 repo 零執行者——設定檔正確但沒人跑它，
+      #    等於把假綠從「ruff 出廠預設」換成「根本沒人跑 ruff」，本段即該道的本地執行者。
+      #    刻意不寫 `--config tools/ruff.toml`：帶 `--config` 會把 project root 挪到 cwd，
+      #    per-file-ignores 與 isort src 判定全部錯位（同機實測 140 errors vs 0），
+      #    走 ruff 自己的「由檔往上尋找」才會解析到 tools/ruff.toml（判定見
+      #    tools/tests/test_subprocess_encoding_hygiene.py::TestRootToolsLintPolicy）。
+      #    同機實測：冷 cache 0.02s／熱 cache 0.01s——比快層任一支守門都便宜。
+      #    ruff 缺席＝fail-loud（同本 leg 對 python 的處置）：軟跳過會讓本道退回
+      #    「宣告有、執行者無」的原病，而 ruff 本來就在 ONBOARDING 的開發環境安裝清單內。
+      #    🔴 R69 終審 P1：ruff 的 `warning:` 走 **stderr 且不改變 rc**——`Invalid noqa
+      #    directive`（指令寫壞 ⇒ 該行其實完全沒被豁免）正是這樣落地無人消費，本 repo
+      #    因此真的留了一個壞豁免整輪沒人發現（tools/tests/test_no_invalid_escape_sequences.py
+      #    當時還以整檔自我豁免掩護它）。本段改為收下 stderr 並在有 `warning:` 時 fail：
+      #    「只看 rc」等於自願對工具說出口的話裝作沒聽見。
+      #    `--no-cache` 不可省（同機實測）：該 warning **只在冷 cache 時印**，第二次跑起
+      #    就靜默 ⇒ 不帶它的話本道的鑑別力取決於「這台機器剛好有沒有 cache」。冷跑 0.02s。
+      if ! command -v ruff >/dev/null 2>&1; then
+        echo "[pre-push dispatcher] ❌ root-infra：找不到 ruff — 根層護欄層 lint 無法執行；請先啟用 .venv 並安裝開發相依（cd AutoClaude && uv pip install -e '.[dev,notifications]'）" >&2
+        leg_rc=1
+      else
+        _ruff_err="$(mktemp)"
+        if ! ruff check tools/ --no-cache 2>"$_ruff_err"; then
+          cat "$_ruff_err" >&2
+          echo "[pre-push dispatcher] ❌ root-infra：ruff check tools/ 失敗（設定＝tools/ruff.toml）" >&2
+          leg_rc=1
+        elif grep -q '^warning:' "$_ruff_err"; then
+          cat "$_ruff_err" >&2
+          echo "[pre-push dispatcher] ❌ root-infra：ruff 印出 warning（rc=0 但 warning 不得靜默吞掉；最常見是壞掉的 noqa 指令＝該行根本沒被豁免）" >&2
+          leg_rc=1
+        else
+          cat "$_ruff_err" >&2
+        fi
+        rm -f "$_ruff_err"
+      fi
       exit $leg_rc
     ) || rc=1
   fi

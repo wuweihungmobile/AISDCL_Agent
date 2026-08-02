@@ -190,6 +190,38 @@ pwsh tools/arch_fitness/run_self_evolution.ps1 -MaxIterations 3
 bash tools/arch_fitness/run_self_evolution.sh --max-iterations 3
 ```
 
+### 6.1 退出碼契約（SSOT）
+
+`run_self_evolution.sh` 與 `run_self_evolution.ps1` 的退出碼**逐碼同語意**，本節為唯一真相源。
+
+**為何需要 SSOT**：R68 前兩側各自在檔頭註解裡枚舉「自己已占用」的碼、沒有人看對面，
+於是同一個失敗條件（PATH 上無可用 python）bash 回 5、pwsh 回 7，而 6 在兩側各有不同意思。
+R68 統一了碼值並在兩側檔頭寫下「規格側見本檔『退出碼契約』節」——**但該節當時並不存在**
+（grep 零命中），契約落地即孤兒。R69 補建本節，並由 `tools/check_script_parity.py::
+_check_exit_code_contract()` 機械比對「本表 ↔ .sh 檔頭 ↔ .ps1 檔頭」三處的
+`rc=<碼> <代號>` 枚舉必須逐筆相等，且兩側腳本內每個字面 `exit <碼>` 都必須在本表有登記。
+三處任一漂移即紅，不再靠人工同步。
+
+**維護規則**：新增/變更退出碼時**先改本表**，再同步兩側檔頭的 `rc=` 枚舉行（三處字面必須
+一致）。**已退役的碼不得重用**：保留在表內並標註適用側，否則會重演 R68 的碼值碰撞。
+
+<!-- exit-code-contract:begin -->
+
+| rc | 代號 | 適用側 | 語意 |
+|----|------|--------|------|
+| 0 | CONVERGED | 兩側 | 收斂／乾淨收工（含 `--help`／`-?`） |
+| 1 | DRYRUN_ADVISORY | 兩側 | dry-run advisory 訊號（僅 warn，不阻擋） |
+| 2 | DRYRUN_STRUCTURAL | 兩側 | dry-run structural fail 訊號 |
+| 3 | NO_CLAUDE_CLI | 兩側 | 缺 claude CLI（`--apply`／`-Apply` 需要） |
+| 4 | ESCALATION | 兩側 | ESCALATION（單 finding retry budget 用盡） |
+| 5 | NO_PYTHON | 兩側 | PATH 上無可用 python 直譯器（含 WindowsApps 空殼） |
+| 6 | PLATFORM_PREREQ | .ps1 | 平台前置不足（PowerShell < 7）；bash 側不適用，**保留不重用** |
+| 7 | GIT_FAILED | 兩側 | git 操作失敗（`git switch -c`） |
+| 8 | SSOT_GUARD_MISSING | .ps1 | SSOT `WindowsAppsGuard.ps1` 缺席；bash 側因 POSIX 無 WindowsApps 空殼陷阱而採降級回退，兩側於此**刻意不對等**（理由就地記於 `.ps1` guard 區段註解） |
+| 64 | USAGE | .sh | 未知參數（usage）；`.ps1` 由 PowerShell 參數繫結自行處理 |
+
+<!-- exit-code-contract:end -->
+
 ---
 
 ## 7. 路線圖（由本工作流自身消化）

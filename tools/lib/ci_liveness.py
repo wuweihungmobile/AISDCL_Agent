@@ -21,7 +21,7 @@ import json
 import re
 import subprocess
 import time
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 # 只匹配「未被註解掉」的 cron 行：行首 `#` 的 dormant 軌不會被誤列為期望軌。
@@ -53,22 +53,49 @@ def scheduled_workflow_periods(root: Path) -> dict[str, float]:
     return out
 
 
-def _latest_success_schedule(workflow: str) -> str | None:
-    """該 workflow 最近一次成功 schedule run 的 updatedAt（ISO8601）；查不到回 None。"""
-    try:
-        r = subprocess.run(
-            ["gh", "run", "list", "--workflow", workflow, "--event", "schedule",
-             "--status", "success", "--limit", "1", "--json", "updatedAt"],
-            timeout=10, capture_output=True, encoding="utf-8", errors="replace")
-    except (OSError, subprocess.TimeoutExpired):
+# 計入活性的事件：排程觸發，**加上**手動補跑。
+# 🔴 R69（DEF-101-703）：原版只查 `schedule`，與「陳舊時該怎麼辦」的唯一處置
+# （`gh workflow run <wf>.yml`，產生的是 `event=workflow_dispatch` 的 run）**實證互斥**
+# ——照著處置做，哨兵仍看不到任何成功紀錄、照樣天天喊陳舊，於是它會被當成狼來了而被
+# 忽略，正好複製它要消滅的那個病（root-infra-ci.yml 第 15 道同一處訂正）。
+# 語意上兩事件也等價：兩者都會把 `*-nightly-full` 這個 job 真的拉起來跑（該 job 的
+# `if:` 逐字就是 `schedule || workflow_dispatch`），對「這條通道還活著嗎」是等價證據。
+_LIVENESS_EVENTS = ("schedule", "workflow_dispatch")
+
+
+def _latest_success_run(workflow: str) -> str | None:
+    """該 workflow 最近一次成功 run 的 updatedAt（ISO8601）；查不到回 None。
+
+    掃 `_LIVENESS_EVENTS` 每個事件各取最近一筆成功，取其中**最新**者。ISO8601 的
+    `...Z` 字串字典序即時序，故可直接 `max()`。
+    任一事件查得到（含「查得到但零筆」＝空字串）就不算無訊號；**全部**事件都查失敗
+    才回 None（無訊號 ≠ 壞訊號，見 `stale_schedule_tracks` docstring）。
+    """
+    stamps: list[str] = []
+    saw_signal = False
+    for event in _LIVENESS_EVENTS:
+        try:
+            r = subprocess.run(
+                ["gh", "run", "list", "--workflow", workflow, "--event", event,
+                 "--status", "success", "--limit", "1", "--json", "updatedAt"],
+                timeout=10, capture_output=True, encoding="utf-8", errors="replace")
+        except (OSError, subprocess.TimeoutExpired):
+            continue
+        if r.returncode != 0:
+            continue
+        try:
+            runs = json.loads(r.stdout or "[]")
+        except ValueError:
+            continue
+        saw_signal = True
+        try:
+            if runs:
+                stamps.append(runs[0]["updatedAt"])
+        except (TypeError, KeyError, IndexError):
+            continue
+    if not saw_signal:
         return None
-    if r.returncode != 0:
-        return None
-    try:
-        runs = json.loads(r.stdout or "[]")
-        return runs[0]["updatedAt"] if runs else ""
-    except (ValueError, TypeError, KeyError, IndexError):
-        return None
+    return max(stamps) if stamps else ""
 
 
 def stale_schedule_tracks(root: Path, deadline: float,
@@ -79,12 +106,12 @@ def stale_schedule_tracks(root: Path, deadline: float,
     超時即中止掃描——本哨兵是 advisory，寧可少報也不可拖住開工流程。
     查不到（gh 失敗／逾時／回應無法解析）一律**跳過而非報陳舊**：無訊號 ≠ 壞訊號。
     """
-    ref = now or datetime.now(timezone.utc)
+    ref = now or datetime.now(UTC)
     stale: list[str] = []
     for wf, period in scheduled_workflow_periods(root).items():
         if time.monotonic() > deadline:
             break
-        ts = _latest_success_schedule(wf)
+        ts = _latest_success_run(wf)
         if ts is None:
             continue
         if ts == "":

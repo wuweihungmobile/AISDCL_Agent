@@ -320,9 +320,22 @@ def main(argv: list[str] | None = None) -> int:
         except (AttributeError, OSError, ValueError):
             pass
     os.environ["PYTHONUTF8"] = "1"
+
+    # 🔴 R69（DEF-101-702／R68-19）：`-h/--help` 原本會被 parse_args 當成「首個非旗標參數」
+    # 而整批取代 pytest 預設參數 ⇒ 使用者想看用法，實際跑掉的是 editable 哨兵／LOC／
+    # CLAUDE.md／snapshot／import-linter 整套閘門（全跑完才輪到 pytest 印 help）。同族入口
+    # bootstrap_core／integration_gate_core 都已 fail-loud，本檔是最後一個沒跟上的。
+    # 刻意**只**攔 help、不攔未知旗標：本檔的 CLI 契約逐字寫著「非 --act/--pg 參數整批
+    # 取代預設 pytest 參數」，未知旗標是合法輸入（交給 pytest 自己判），攔了會改語意。
+    # 位置在 os.chdir 之前——印用法不該有任何副作用。
+    raw_argv = sys.argv[1:] if argv is None else argv
+    if any(a in ("-h", "--help") for a in raw_argv):
+        print((__doc__ or "").strip(), flush=True)
+        return 0
+
     os.chdir(REPO_ROOT)
 
-    do_act, do_pg, pytest_args = parse_args(sys.argv[1:] if argv is None else argv)
+    do_act, do_pg, pytest_args = parse_args(raw_argv)
     _hooks_liveness_advisory()
 
     results: list[tuple[str, str]] = []

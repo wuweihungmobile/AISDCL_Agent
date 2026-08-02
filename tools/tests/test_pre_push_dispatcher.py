@@ -256,6 +256,10 @@ class TestPrePushDispatcher(unittest.TestCase):
         self.marker_autoclaude = self.tmp / "MARKER_AUTOCLAUDE_SUBHOOK"
         self.marker_sdd = self.tmp / "MARKER_SDD_SUBHOOK"
         self.marker_rootinfra = self.tmp / "MARKER_ROOTINFRA_UNITTESTS"
+        # R69：root-infra 快層（八支跨專案守門工具）的執行鐵證，與慢層
+        # （run_root_unittests／py_compile）分開量測——快慢分層的整個意義就在
+        # 「同一次 push 裡兩層可以有不同答案」，用同一個 marker 量不出來。
+        self.marker_rootinfra_guards = self.tmp / "MARKER_ROOTINFRA_GUARDS"
         self.marker_consumer = self.tmp / "MARKER_SDD_SCRIPTS_TESTS_PYTEST"
         self.marker_integration_gate = self.tmp / "MARKER_INTEGRATION_GATE"
 
@@ -273,8 +277,14 @@ class TestPrePushDispatcher(unittest.TestCase):
         # R60 增 archive_defect_log --check，隨 pre-push leg ③ 清單同步）。
         self._write("tools/ok.py", "OK = True\n")
         self._write("tools/run_root_unittests.py", _py_marker_stub(self.marker_rootinfra))
+        # check_script_parity 這支刻意改寫 marker（其餘維持純 SystemExit(0)）：
+        # 迴圈是「逐支跑完累積」，第一支就寫 marker 即足以證明整個快層有被進入。
+        self._write(
+            "tools/check_script_parity.py",
+            "from pathlib import Path\n"
+            f'Path("{self.marker_rootinfra_guards.as_posix()}").write_text("ran", encoding="utf-8")\n',
+        )
         for guard in (
-            "check_script_parity",
             "check_ntfs_paths",
             "check_defect_log_crossref",
             "check_wrapper_thinness",
@@ -449,13 +459,63 @@ class TestPrePushDispatcher(unittest.TestCase):
             "AutoClaude 子 hook 未被執行——分流靜默漏跑",
         )
         self.assertFalse(self.marker_sdd.exists(), "未涉 AISDLC_SDD/ 不應觸發 SDD 子 hook")
-        self.assertFalse(self.marker_rootinfra.exists(), "未涉根層檔不應觸發 root-infra leg")
+        self.assertFalse(
+            self.marker_rootinfra.exists(),
+            "未涉根層檔不應觸發 root-infra **慢層**（py_compile + run_root_unittests，"
+            "同機實測 111.89s）——那正是「pre-push 變慢到沒人用」的路",
+        )
         self.assertFalse(self.marker_consumer.exists(), "未涉消費檔不應觸發消費檔 leg")
         self.assertFalse(
             self.marker_integration_gate.exists(),
             "僅 AutoClaude/ 變更不應觸發整合閘門 leg——那正是「pre-push 變慢到沒人用」的路",
         )
-        self.assertNotIn("root-infra", out)
+        self.assertNotIn("push 範圍含根層檔", out)
+
+    def test_subproject_only_change_still_runs_root_guard_fast_tier(self) -> None:
+        """情境 2b（R69；R68-63/65 未修）：純子專案 push 也必須跑 root-infra **快層**。
+
+        WHY：那八支守門工具（check_script_parity／check_ntfs_paths／
+        check_wrapper_thinness／check_defect_log_crossref …）守的全是**跨子專案**
+        不變式——它們的掃描面本來就涵蓋 AutoClaude/tools 與 AISDLC_SDD/scripts。
+        R69 前的觸發條件是「存在不在兩子專案底下的變更路徑」，於是「只改
+        AutoClaude/tools/xxx.ps1」這種最常見的 push，一支根層守門都不跑，CI 帳務
+        停擺期間等同零防護（本 repo 已有 windows-compat-ci 連 15+ 次紅的前例）。
+        快慢分層即取捨：快層 8 支同機實測合計約 1.0s（逐支 0.03~0.27s），一律跑；
+        慢層（py_compile + run_root_unittests，同機實測 111.89s）維持路徑觸發。
+
+        本鎖若被改回「只有根層變更才跑守門」，症狀是子專案 push 全綠放行、
+        跨專案守門靜默不執行——與 R9 P1 當年修的是同一個病，只是換一邊。
+        """
+        self._write("AutoClaude/x.txt", "x\n")
+        sha = self._commit_all("autoclaude only change")
+        rc, out, err = self._run_dispatcher(self._push_line(sha, self.base_sha))
+        self.assertEqual(rc, 0, f"stdout={out}\nstderr={err}")
+        self.assertTrue(
+            self.marker_rootinfra_guards.exists(),
+            "純子專案 push 未跑 root-infra 快層守門——跨專案守門靜默漏跑"
+            f"（R68-63/65 的缺口）：\nstdout={out}\nstderr={err}",
+        )
+        self.assertFalse(
+            self.marker_rootinfra.exists(),
+            "快層不得順手把慢層（run_root_unittests，111.89s）一起拖進來——"
+            "那會讓每次子專案 push 都變慢，開發者改用 --no-verify 繞過即全線蒸發",
+        )
+
+    def test_root_guard_fast_tier_failure_blocks_push(self) -> None:
+        """快層守門失敗必須擋 push（rc=1）——只跑不看 rc 等於沒跑。
+
+        🔴 壞掉的守門先獨立 commit 並當作**比較基準**，讓被 push 的 diff 只含
+        AutoClaude/：否則 `tools/` 本身就是根層變更、會把慢層一起叫起來，本測試
+        就變成在驗舊路徑（實測確認過這個假綠：直接改 tools/ 再 push 時 rc=1 是
+        慢層給的，與快層是否接線無關）。
+        """
+        self._write("tools/check_ntfs_paths.py", "raise SystemExit(1)\n")
+        broken_base = self._commit_all("break a root guard (not part of pushed diff)")
+        self._write("AutoClaude/x.txt", "x\n")
+        sha = self._commit_all("autoclaude change with failing root guard")
+        rc, out, err = self._run_dispatcher(self._push_line(sha, broken_base))
+        self.assertEqual(rc, 1, f"快層守門失敗必須阻擋 push：\nstdout={out}\nstderr={err}")
+        self.assertIn("check_ntfs_paths.py 失敗", out + err)
 
     def test_empty_stdin_failsafe_runs_all_legs(self) -> None:
         """情境 3：空 stdin → fail-safe 全部 leg 都跑（寧可多跑不可漏跑）。
@@ -525,6 +585,11 @@ class TestPrePushDispatcher(unittest.TestCase):
         self.assertFalse(self.marker_autoclaude.exists(), "刪分支不應觸發 AutoClaude 子 hook")
         self.assertFalse(self.marker_sdd.exists(), "刪分支不應觸發 AISDLC_SDD 子 hook")
         self.assertFalse(self.marker_rootinfra.exists(), "刪分支不應觸發 root-infra leg")
+        self.assertFalse(
+            self.marker_rootinfra_guards.exists(),
+            "刪分支無東西可驗證，root-infra 快層守門亦不應觸發（R69 快慢分層不得擴散"
+            "到已判定的明確跳過情境）",
+        )
         self.assertFalse(self.marker_consumer.exists(), "刪分支不應觸發消費檔 leg")
         self.assertFalse(
             self.marker_integration_gate.exists(), "刪分支不應觸發整合閘門 leg"

@@ -25,7 +25,11 @@ import pytest
 
 from autoclaude.perception import hotkey_handler
 from autoclaude.perception.hotkey_handler import HotkeyHandler
-from autoclaude.perception.pty_wrapper import _CMD_LINE_MAX_CHARS, _build_cmd_shim_line
+from autoclaude.perception.pty_wrapper import (
+    _CMD_LINE_MAX_CHARS,
+    CmdLineTooLongError,
+    _build_cmd_shim_line,
+)
 
 # ──────────────────────────────────────────────
 # [A] Hotkey：背景執行緒已死 → 不得宣稱已註冊
@@ -134,3 +138,92 @@ class TestCmdShimLineLengthGuard:
         line = _build_cmd_shim_line(r"C:\npm\claude.cmd", ["-p", prompt])
         assert len(line) == _CMD_LINE_MAX_CHARS
         assert line.startswith('cmd /d /s /c "') and line.endswith('"')
+
+
+# ──────────────────────────────────────────────
+# [C] 超長 prompt 不得讓整場 run 崩潰（R69；DEF 見回報）
+# ──────────────────────────────────────────────
+# WHY：[B] 的守門是 `raise`，而全樹**零呼叫端承接**——`PtyWrapper.start()` 由
+# `PtyExecutor.execute()` 與 `execution/prompt_dispatcher.execute_prompt_impl()`
+# 直呼，兩者上游（Coordinator.run_step / steps_orchestrator 主迴圈）都沒有
+# try/except，例外會一路穿到 `__main__` ⇒ Windows 上一支超長 prompt 由「單步失敗
+# 可進 CORRECTION／ESCALATION」惡化成「整場 run 崩潰、其餘步驟全不執行」。
+# 本鎖驗的是「啟動期長度守門降級為單步失敗訊號」，不是 cmd.exe 行為（無 Windows
+# 真機；以 monkeypatch 讓 start() 拋出該例外，平台無關）。
+
+
+class _ExplodingPty:
+    """start() 必拋 CmdLineTooLongError 的假 PTY（模擬 Windows 超長 prompt）。"""
+
+    instances: list = []
+
+    def __init__(self, **kwargs):
+        self.kwargs = kwargs
+        _ExplodingPty.instances.append(self)
+        self.closed = False
+
+    def start(self):
+        raise CmdLineTooLongError(
+            "cmd.exe 命令列長度 9000 字元超過保守上限 7800（硬上限 8191）："
+            ".cmd/.bat shim 無法傳遞這麼長的 prompt。請縮短 prompt，或改以檔案／stdin 傳遞內容。"
+        )
+
+    def close(self):
+        self.closed = True
+
+    @property
+    def is_alive(self):
+        return False
+
+    def readline(self, timeout=None):
+        return None
+
+
+class TestOversizedPromptDoesNotKillTheWholeRun:
+    """兩條真實呼叫鏈各一鎖：例外不得逃出 executor／dispatcher 邊界。"""
+
+    def setup_method(self):
+        _ExplodingPty.instances = []
+
+    def test_exception_type_is_catchable_and_still_a_runtimeerror(self):
+        # 既有 [B] 鎖以 RuntimeError 斷言；專用子類別必須維持該相容性，
+        # 否則本輪修復會靜默廢掉上面那條鎖。
+        assert issubclass(CmdLineTooLongError, RuntimeError)
+        prompt = "x" * (_CMD_LINE_MAX_CHARS + 100)
+        with pytest.raises(CmdLineTooLongError):
+            _build_cmd_shim_line(r"C:\npm\claude.cmd", ["-p", prompt])
+
+    def test_pty_executor_degrades_to_a_failed_step_output(self):
+        from autoclaude.infra.adapters import pty_executor as pe
+        from autoclaude.utils.config import ClaudeConfig, LoopConfig
+
+        ex = pe.PtyExecutor(ClaudeConfig(), LoopConfig(), log_dir="logs")
+        with patch.object(pe, "PtyWrapper", _ExplodingPty):
+            out = ex.execute("x" * 99999, timeout=1, label="step_a")
+        assert out.completed is False, "啟動期失敗必須標記為未完成（可被 CORRECTION 承接）"
+        assert out.exit_code != 0, "必須以非零 exit_code 表達失敗，不得偽裝成成功"
+        assert "7800" in out.text and "prompt" in out.text, out.text
+
+    def test_prompt_dispatcher_degrades_to_a_failed_step_output(self):
+        from autoclaude.execution import playbook_runner as pr
+        from autoclaude.execution import prompt_dispatcher as pd
+
+        runner = MagicMock()
+        runner._cfg.claude.extra_args = []
+        runner._cfg.claude.continue_flag = ""
+        runner._cfg.claude.encoding = "utf-8"
+        runner._cfg.log_dir = "logs"
+        runner._cfg.loop.auth_patterns = []
+        runner._cfg.loop.auth_response = ""
+
+        # `execute_prompt_impl` 內是 late import（`from .playbook_runner import _pr`），
+        # 故 patch 點必須是 playbook_runner 模組屬性，不是 prompt_dispatcher。
+        fake_pr = MagicMock()
+        fake_pr.PtyWrapper = _ExplodingPty
+        with patch.object(pr, "_pr", lambda: fake_pr):
+            out = pd.execute_prompt_impl(
+                runner, prompt="x" * 99999, maintain_context=False,
+                timeout=1, step_label="step_a",
+            )
+        assert "7800" in out.text and "prompt" in out.text, out.text
+        assert out.triggered_halt is False and out.triggered_compact is False

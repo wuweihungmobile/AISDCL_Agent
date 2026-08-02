@@ -962,6 +962,33 @@ class ZeroDepEnvironmentDiscriminationTest(unittest.TestCase):
         )
 
 
+# `tools/tests/` 的**外部可執行檔**前置宣告（SSOT）——`(命令名, pip 名)`。
+#
+# WHY（R69 終審 SD 實測；與 `run_root_unittests._THIRD_PARTY_PREREQS` 是同一個病的
+# 第二種形狀）：那份清單守的是「import 得到嗎」，對「PATH 上有沒有這支執行檔」結構性
+# 盲目。R69 把 `ruff check tools/` 接進 `tools/git-hooks/pre-push` 快層第 ④ 段（缺 ruff
+# ＝fail-loud，刻意不軟跳過），而 `test_pre_push_dispatcher.py` 有 5 支測試在 tmp repo
+# 內**真跑**該 dispatcher 並斷言 rc==0 ⇒ 本目錄自此隱性要求 PATH 上有 ruff。當時三支跑
+# runner 的 workflow 只有 root-infra-ci.yml 裝 ruff ⇒ **同一批 tools/tests 在三個平台有
+# 兩種結果**，原本綠著的 macos-compat-ci 會被打紅（SD 單變因 A/B：PATH 上放假 ruff →
+# Ran 17 OK；唯一差別拿掉 ruff → FAILED〔failures=5〕）。
+#
+# 🔴 為何解法是「三支 workflow 都補裝」而不是「缺 ruff 就 skip」：快層那道 fail-loud 是
+# 本輪刻意訂的政策，軟跳過會讓它退回「宣告有、執行者無」的原病（見 tools/ruff.toml
+# 檔頭）。落差在**環境**不在 dispatcher。
+#
+# 🔴 為何 SSOT 放在測試檔而非 `run_root_unittests.py`（誠實劃界）：該檔受
+# `AutoClaude/tools/check_loc_budget.py` 的 SPECIAL_FILES **shrink-only 行數棘輪**管制
+# （門檻＝納管當下行數 754，只准往下改），本包實測往該檔加 69 行當場撞紅（`[special<=754]
+# 823 > 754`）。代價明說：因此**沒有** runner 開場 fail-fast 那一層，缺工具時仍會先看到
+# dispatcher 那 5 支紅字；補償是下方 `ExternalToolPrereqDeclarationTest` 會在同一次執行
+# 裡多紅一支並**點名真正的原因**。要買回 fail-fast 就得先把該檔壓到 754 行以下——那是
+# 另一個包的工作，見交件回報的帳本請求。
+_EXTERNAL_TOOL_PREREQS: tuple[tuple[str, str], ...] = (
+    ("ruff", "ruff"),
+)
+
+
 class CiPrereqInstallLockTest(unittest.TestCase):
     """CI 安裝步驟鎖：跑本 runner 的每個 CI job 都必須先裝齊宣告的相依（R68）。
 
@@ -1020,6 +1047,98 @@ class CiPrereqInstallLockTest(unittest.TestCase):
                 f"連續多輪全紅）。請在該 step 前補 pip install，清單 SSOT＝"
                 f"run_root_unittests._THIRD_PARTY_PREREQS",
             )
+
+    @staticmethod
+    def _installed_package_names(before: list[str]) -> set[str]:
+        """把 job 內出現過的 `pip install` 目標正規化成「套件名」集合（R69）。
+
+        為何需要正規化（而上面那道第三方相依鎖直接比對字面 token 就夠）：釘版與引號
+        是**外部工具**這一側的既有寫法——`root-infra-ci.yml` 寫的是
+        `pip install ... 'ruff==0.15.21'`（版本釘選是本 repo 對 lint 工具的明文紀律，
+        見 AutoClaude/pyproject.toml）。若照字面比對，一個正確裝了 ruff 的 job 會被
+        判成沒裝，本鎖就只能靠「大家別釘版」活著——那不是鎖，是巧合。
+        """
+        names: set[str] = set()
+        for line in before:
+            m = CiPrereqInstallLockTest._PIP_INSTALL_RE.search(line)
+            if not m:
+                continue
+            for token in m.group(1).split():
+                token = token.strip("'\"")
+                if token.startswith("-"):  # --quiet / --disable-pip-version-check 等旗標
+                    continue
+                names.add(re.split(r"[=<>!~\[]", token, maxsplit=1)[0].lower())
+        return names
+
+    def test_every_ci_job_running_the_runner_installs_all_external_tools(self) -> None:
+        """外部**執行檔**相依（`_EXTERNAL_TOOL_PREREQS`）也必須在每一支 workflow 裝齊。
+
+        WHY（R69 終審 SD 實測；測意圖非僅行為）：上面那道鎖只看得見 import 相依，對
+        「PATH 上要有某支執行檔」結構性盲目。R69 把 `ruff check tools/` 接進 pre-push
+        快層（缺 ruff＝fail-loud），而 `test_pre_push_dispatcher.py` 有 5 支測試在 tmp
+        repo 內真跑該 dispatcher 並斷言 rc==0 ⇒ tools/tests 自此隱性需要 ruff。當時
+        三支跑本 runner 的 workflow 只有 root-infra-ci 裝了 ruff ⇒ **同一批測試在三個
+        平台有兩種結果**，而且原本綠著的 macos-compat-ci 會被打紅（SD 單變因 A/B：
+        PATH 上放假 ruff → Ran 17 OK；唯一差別拿掉 ruff → FAILED〔failures=5〕）。
+
+        本鎖擋的不是那一次，是**下一次**：再往清單加一個外部工具而忘了同步某一支
+        workflow，這裡立刻紅並點名是哪一支。判準邊界同上面那道（純文字掃描，看不到
+        composite action／requirements.txt 間接安裝）。
+        """
+        sites = self._runner_call_sites()
+        self.assertGreaterEqual(
+            len(sites), 3,
+            f"抽不到足夠的 run_root_unittests.py CI 呼叫點（找到 {len(sites)} 個）——"
+            f"抽取 pattern 或 workflow 結構疑似漂移",
+        )
+        required = {pip.lower() for _cmd, pip in _EXTERNAL_TOOL_PREREQS}
+        self.assertNotEqual(required, set(), "_EXTERNAL_TOOL_PREREQS 為空 ⇒ 本鎖恆真空轉")
+        for path, lineno, before in sites:
+            installed = self._installed_package_names(before)
+            self.assertEqual(
+                required - installed, set(),
+                f"{path.name}:{lineno} 在同 job 內跑 run_root_unittests.py，但該 step 之前"
+                f"沒有安裝外部工具 {sorted(required - installed)}——這批工具是 tools/tests "
+                f"的隱性前置（pre-push dispatcher 真跑鎖需要 PATH 上有 ruff），少裝的平台"
+                f"會得到一批**歸因錯誤**的紅字（看起來像分流壞了，其實是環境缺工具）。"
+                f"請在該 step 前補安裝，清單 SSOT＝tools/tests/test_run_root_unittests.py "
+                f"的 _EXTERNAL_TOOL_PREREQS",
+            )
+
+
+class ExternalToolPrereqDeclarationTest(unittest.TestCase):
+    """外部工具宣告的**真實性**與缺工具時的**歸因**（R69）。
+
+    WHY（測意圖非僅行為）：這一整類缺陷的殺傷力不在紅燈本身，在**紅字把人指向哪裡**
+    ——R68 對 import 相依修的正是這點（把「環境不完整」誤報成「測試消失」）。缺 ruff
+    的環境會讓 `test_pre_push_dispatcher.py` 5 支測試以「rc 1 != 0」失敗，讀者被指往
+    「分流邏輯壞了」這條全錯的路（R69 SD 實測即如此顯形）。本類的價值＝在同一次執行
+    裡多紅一支、並在訊息裡把真正的原因與修法講清楚。
+    """
+
+    def test_declared_tools_are_present_and_name_the_real_cause_when_not(self) -> None:
+        missing = [(cmd, pip) for cmd, pip in _EXTERNAL_TOOL_PREREQS if shutil.which(cmd) is None]
+        self.assertEqual(
+            missing, [],
+            "🔴 PATH 上缺少 tools/tests 需要的外部工具："
+            f"{'、'.join(cmd for cmd, _ in missing)}。\n"
+            "這**不是** dispatcher 分流壞了：test_pre_push_dispatcher.py 會在 tmp repo 內"
+            "真跑 pre-push dispatcher，而其 root-infra 快層對缺 ruff 是 fail-loud（刻意不"
+            "軟跳過），於是那 5 支測試會以「rc 1 != 0」失敗、把你指往分流邏輯這條錯路。\n"
+            "修法："
+            + "python -m pip install " + " ".join(f"'{pip}'" for _, pip in missing) + "\n"
+            "若在 CI 撞到：跑 run_root_unittests.py 的 job 少了安裝 step——該綁定由 "
+            "CiPrereqInstallLockTest::test_every_ci_job_running_the_runner_installs_"
+            "all_external_tools 機械看守，請一併檢查它為何沒紅。",
+        )
+
+    def test_the_declaration_is_not_vacuous(self) -> None:
+        """反空轉：清單為空時上面那道與 CI 安裝鎖都會恆真全綠（本檔多處在治的形態）。"""
+        self.assertNotEqual(
+            _EXTERNAL_TOOL_PREREQS, (),
+            "_EXTERNAL_TOOL_PREREQS 為空 ⇒ 兩道鎖同時失去鑑別力；要移除最後一項前，"
+            "請先確認 tools/tests 真的不再需要任何外部執行檔（含 pre-push 快層那條路）",
+        )
 
 
 if __name__ == "__main__":

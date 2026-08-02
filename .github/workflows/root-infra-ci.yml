@@ -1,7 +1,7 @@
 # 根層基建 CI（四方複審 B4，2026-07-10；防禦縱深補洞 2026-07-11）：workflows / hooks /
 # 工具腳本上移 monorepo 根層後，根層 tools/（bootstrap / integration_gate / git-hooks
 # dispatcher）與 .gitattributes、.editorconfig、dependabot 等基建原本零 CI 覆蓋——壞掉
-# 只會在開發者本機爆。本 workflow 做十五道輕量守門（只用 GitHub 第一方 actions，不引
+# 只會在開發者本機爆。本 workflow 做十六道輕量守門（只用 GitHub 第一方 actions，不引
 # 任何第三方 action，避免供應鏈風險）：
 # 🔴 R68 訂正（本段原文寫「僅 actions/checkout，不引其他外部 action」，且第 8 道原文
 # 寫「純 stdlib unittest，零依賴安裝」）：這兩句自 2026-07-14 起就是**假宣稱**，而代價
@@ -10,7 +10,8 @@
 # 失敗、被 unittest 收集成佔位測試，122 支迴歸鎖一支都沒跑。故本 job 現在改為
 # setup-python + 一次 pip install（清單 SSOT＝tools/run_root_unittests.py 的
 # `_THIRD_PARTY_PREREQS`，並由 tools/tests/ 的 CI 安裝步驟鎖機械綁定本檔）。
-# 其餘十三道仍是純 stdlib、零安裝——「輕量」原則只在第 8 道讓步，且是為了讓它真的跑。
+# 其餘十四道仍是純 stdlib、零安裝——「輕量」原則只在第 8 道與第 16 道（R69 新增，需
+# `pip install ruff`）讓步，兩次都是為了讓那道守門真的跑得動而非 skip/假綠。
 #   1. bash -n       — active *.sh（R56 起，原僅根層 tools/：AISDLC_SDD LATEST 版納入、
 #                      凍結版 v0.01~v0.(N-1) 依紀律不回改 → 排除，政策與第 2 道一致）
 #                      與三處無副檔名 git hooks 目錄（tools/git-hooks/、
@@ -130,6 +131,15 @@
 #                      （continue-on-error: true）被忽略 18 天的機制，再加一層非阻斷等於
 #                      複製病因。門檻取 10 天＝週頻 cron（週一 06:12／07:18 UTC）正常最長
 #                      間隔 7 天 ＋ 3 天餘裕。
+#   16. 根層護欄層 ruff — `ruff check tools/`（設定＝`tools/ruff.toml`，由 ruff 自己
+#                      「從檔往上找最近設定檔」解析到）。R69 立此道的直接理由：該設定檔
+#                      是 R69 新增的，落地時**全 repo 零執行者**——於是它自陳要治的病
+#                      （「政策有宣告、卻沒有任何機械物在根層執行它」）原樣留著，只是把
+#                      假綠從「ruff 出廠預設」換成「根本沒人跑 ruff」。本道與 pre-push
+#                      dispatcher 的 root-infra **快層**互為本地/雲端兜底。
+#                      ⚠️ 誠實劃界：射程只到根層 `tools/` 樹；`AISDLC_SDD/` 今日仍是零
+#                      ruff 設定、零 ruff 閘門（納管它是另一個授權面的決定，見
+#                      tools/ruff.toml 檔頭）。
 #
 # 注：上列編號為清單序，與 job 內實際執行順序無關（如第 7 道 py_compile 實體 step
 # 緊接第 1 道 bash -n 之後執行）——R11 文件掃描[關注-3]澄清。
@@ -162,7 +172,7 @@ permissions:
 
 jobs:
   root-infra:
-    name: root infra guard (bash -n + pwsh parse/BOM + EOL(.sh) + EOL(.ps1) + NTFS + parity + py_compile + unittest + defect-log-crossref + wrapper-thinness + pytest-baseline-sites + gha-action-versions + defect-log-preservation + onboarding-snapshot-fingerprint + nightly-schedule-staleness)
+    name: root infra guard (bash -n + pwsh parse/BOM + EOL(.sh) + EOL(.ps1) + NTFS + parity + py_compile + unittest + defect-log-crossref + wrapper-thinness + pytest-baseline-sites + gha-action-versions + defect-log-preservation + onboarding-snapshot-fingerprint + nightly-schedule-staleness + ruff(tools/))
     runs-on: ubuntu-latest
     timeout-minutes: 20   # R68：第 8 道 unittest 現在會真的跑完全套（見檔頭訂正段）
     steps:
@@ -372,6 +382,40 @@ jobs:
       - name: tools/tests 第三方相依（清單 SSOT＝tools/run_root_unittests.py 的 _THIRD_PARTY_PREREQS；漏裝時該 runner 會 fail-fast 指路）
         run: python3 -m pip install --quiet --disable-pip-version-check pyyaml pydantic httpx
 
+      # 第 16 道。刻意排在 unittest **之前**：tools/tests/test_subprocess_encoding_hygiene.py
+      # 的 `test_the_config_actually_covers_the_root_tools_tree` 需要 PATH 上有 ruff 才驗得動
+      # （沒有就 `[TOOL-MISSING]` skip），先裝好本道才是「真的有在跑」而非 skip 假綠。
+      - name: 根層護欄層 ruff（tools/ruff.toml 的執行者；見檔頭第 16 道）
+        run: |
+          set -euo pipefail
+          python3 -m pip install --quiet --disable-pip-version-check 'ruff==0.15.21'
+          # 🔴 刻意**不**寫 `--config tools/ruff.toml`：帶 `--config` 時 ruff 的 project root
+          # 變成 cwd（repo 根）而非設定檔所在目錄，`[lint.per-file-ignores]` 的相對 pattern
+          # （`run_root_unittests.py`／`tests/*.py`）與 isort 的 src 判定全部錯位——同機實測
+          # 帶 `--config` 得 140 errors、不帶（走 ruff 由檔往上尋找）得 `All checks passed!`。
+          # 兩者差的不是嚴格度，是**設定被錯誤解讀**。改成 `--config` 前請先重跑這組對照。
+          # 下一行先把「ruff 到底讀了哪份設定」印進 log，讓「其實套的是出廠預設」這種假綠
+          # 在 CI log 上留下可稽核痕跡（不只靠測試斷言）。
+          ruff check --show-settings tools/run_root_unittests.py | sed -n '1,2p'
+          # 🔴 R69 終審 P1：ruff 的 `warning:` 走 **stderr 且不改變 rc**——`Invalid noqa
+          # directive`（指令寫壞 ⇒ 該行其實完全沒被豁免）就是這樣落地無人消費的，本 repo
+          # 因此真的留了一個壞豁免整輪沒人發現。本道改為把 stderr 一併收下並在有任何
+          # `warning:` 時 fail-loud：只看 rc 等於自願對 ruff 說出口的話裝作沒聽見。
+          # `--no-cache` 不可省（同機實測）：ruff 的 noqa warning **只在冷 cache 時印**，
+          # 第二次跑起就靜默 ⇒ 不帶它的話這道閘門的鑑別力取決於「這台機器剛好有沒有
+          # cache」，那是最糟的一種閘門。本樹冷跑實測 0.02s，成本可忽略。
+          set +e
+          ruff check tools/ --no-cache 2>/tmp/ruff_stderr.txt
+          rc=$?
+          set -e
+          cat /tmp/ruff_stderr.txt >&2
+          if [ "$rc" -ne 0 ]; then exit "$rc"; fi
+          if grep -q '^warning:' /tmp/ruff_stderr.txt; then
+            echo "::error::ruff 印出 warning（rc=0 但 warning 不得靜默吞掉；最常見是壞掉的 noqa 指令＝該行根本沒被豁免）："
+            grep '^warning:' /tmp/ruff_stderr.txt
+            exit 1
+          fi
+
       - name: unittest（tools/tests/：dev_start.py 純邏輯函式 + 已修復迴歸點；含數量下限釘選）
         run: python3 tools/run_root_unittests.py
 
@@ -395,14 +439,70 @@ jobs:
       - name: nightly-full 排程陳舊度哨兵（唯讀 gh API；設計理由與誠實劃界見檔頭第 15 道）
         # 本 step 只做唯讀 `gh run list` 查詢（不觸發、不重跑任何 workflow），
         # 對 Actions 額度的消耗為零——與本 repo「節省 GitHub CI 額度」紀律相容。
+        #
+        # 🔴 R69 兩處訂正（原版 R68 出生即紅，且是**無法解除的死鎖**；DEF-101-703）：
+        #   ① **處置指令與查詢條件實證互斥**：原版寫死 `--event schedule`，但它印給
+        #      使用者的處置指令 `gh workflow run <wf>.yml` 產生的是 `event=workflow_dispatch`
+        #      的 run ⇒ 照著處置做也永遠不會被查到、閘門永遠解不開。現改為
+        #      schedule 與 workflow_dispatch **兩事件都查、取較新者**：兩事件都會把
+        #      *-nightly-full 真的拉起來跑（該 job 的 `if:` 逐字就是
+        #      `github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'`），
+        #      對「那條真機通道還活著嗎」這個問句是等價證據。
+        #   ② **無任何豁免途徑**：原版無 `if:`、無 `continue-on-error`、門檻是硬編字面量，
+        #      於是「通道已死」這個**根因在 GitHub 帳務平面、本 repo 內無可修之處**的事實，
+        #      被翻譯成「所有 push 一律紅」，把主線整條鎖死。現加一個**帶到期日、帶理由、
+        #      有長度上限**的顯式豁免：豁免期內降為 ::warning::（哨兵照樣每次 push 大聲
+        #      印出陳舊天數與處置，不是消音），到期**自動**恢復阻斷、缺陷自己紅回來。
+        # 🔴 反 fail-open 三道保險（缺一就會退化成永久假綠；對應鎖見
+        #    tools/tests/test_workflow_permission_concurrency_lock.py::TestRootInfraNightlyStalenessSentinel）：
+        #   · WAIVER_UNTIL 為空字串＝無豁免，阻斷行為與 R68 原版**完全相同**；
+        #   · WAIVER_UNTIL 無法解析、或 WAIVER_REASON 為空 ⇒ **當場 exit 1**（fail-loud：
+        #     豁免設定壞掉時不得靜默當成「沒豁免」或「永久豁免」）；
+        #   · 豁免視窗距今超過 MAX_WAIVER_DAYS 天 ⇒ **當場 exit 1**，杜絕「填 2099」這種
+        #     變相永久停用；續期一次最多買三週，且必然留下 git diff 可稽核。
+        # 誠實劃界（不因本次訂正而消失）：`gh run list --status success` 讀的是 **run 層**
+        # 結論，而 *-nightly-full 是 `continue-on-error: true`、schedule 事件下 smoke job
+        # 被 `if:` 跳過 ⇒ 本哨兵能證明的是「runner 有被配置、該 job 有跑到結束」，**不**
+        # 等於「該 job 內每一步都綠」。它抓的是**通道死亡**（runner 根本沒起來——如
+        # DEF-101-081/703 的帳務阻擋：job 的 steps 長度為 0、耗時 2 秒），不是測試紅。
         env:
           GH_TOKEN: ${{ github.token }}
           # 週頻 cron（週一 06:12／07:18 UTC）正常最長間隔 7 天，取 10 天＝3 天餘裕。
           MAX_AGE_DAYS: "10"
+          # 顯式豁免（UTC，YYYY-MM-DD；**空字串＝無豁免**）。
+          # 現行豁免的唯一理由（DEF-101-703 根因已查明，非猜測）：2026-07-15～07-27 連續
+          # 5 次排程失敗的原因是 GitHub 帳務阻擋——run 30256689776 的 job annotation 逐字
+          # 為 "The job was not started because recent account payments have failed or your
+          # spending limit needs to be increased."，三個 job 全部 steps 長度 0、耗時 2 秒
+          # ⇒ **不是** workflow 定義缺陷，本 repo 內無可修之處。帳務已於 2026-08-01 恢復
+          # （push run 30695971130 的 windows-latest job steps=26＝runner 真的有跑）。
+          # 下兩個排程窗口是 2026-08-03 與 08-10 的 06:12／07:18 UTC；豁免到 08-10 恰好
+          # 蓋滿這兩次，若兩次都仍未成功，到期即自動恢復阻斷、缺陷重新現形。
+          WAIVER_UNTIL: "2026-08-10"
+          WAIVER_REASON: "DEF-101-703：根因＝GitHub 帳務阻擋（非 workflow 定義缺陷，本 repo 無可修處），帳務已於 2026-08-01 恢復，等 2026-08-03／08-10 兩個排程窗口自證"
+          MAX_WAIVER_DAYS: "21"
         run: |
           set -euo pipefail
           now=$(date -u +%s)
-          fail=0
+          # --- 豁免設定的合法性先驗（壞掉一律 fail-loud，不進入判斷主體）---------
+          waiver_deadline=0
+          if [ -n "${WAIVER_UNTIL}" ]; then
+            if ! waiver_deadline=$(date -u -d "${WAIVER_UNTIL} 23:59:59" +%s 2>/dev/null); then
+              echo "::error::WAIVER_UNTIL='${WAIVER_UNTIL}' 無法解析為 UTC 日期（YYYY-MM-DD）——豁免設定壞掉時一律 fail-loud，不得靜默當成「沒有豁免」或「永久豁免」"
+              exit 1
+            fi
+            if [ -z "${WAIVER_REASON}" ]; then
+              echo "::error::設了 WAIVER_UNTIL 卻沒有 WAIVER_REASON——無理由的豁免＝無法稽核的 fail-open"
+              exit 1
+            fi
+            if [ "$(( (waiver_deadline - now) / 86400 ))" -gt "${MAX_WAIVER_DAYS}" ]; then
+              echo "::error::WAIVER_UNTIL='${WAIVER_UNTIL}' 距今超過 ${MAX_WAIVER_DAYS} 天——豁免視窗上限存在的唯一理由就是杜絕「填一個很遠的日期」把阻斷式哨兵變成永久假綠"
+              exit 1
+            fi
+          fi
+          if [ "$waiver_deadline" -gt "$now" ]; then lvl=warning; else lvl=error; fi
+          # --- 逐 workflow 查活性（schedule 與 workflow_dispatch 兩事件都算）-------
+          stale=0
           for wf in windows-compat-ci.yml macos-compat-ci.yml; do
             echo "── ${wf}"
             latest=$(gh run list --repo "${GITHUB_REPOSITORY}" --workflow "$wf" \
@@ -410,27 +510,42 @@ jobs:
                        --jq '.[0] // {} | "\(.conclusion // "(無)")  \(.createdAt // "-")  \(.url // "-")"' \
                      || echo "(gh API 查詢失敗)")
             echo "   最近一次 schedule run：${latest}"
-            last=$(gh run list --repo "${GITHUB_REPOSITORY}" --workflow "$wf" \
-                     --event schedule --status success --limit 1 \
-                     --json createdAt --jq '.[0].createdAt // empty' \
-                   || echo "")
+            last=""
+            for ev in schedule workflow_dispatch; do
+              t=$(gh run list --repo "${GITHUB_REPOSITORY}" --workflow "$wf" \
+                    --event "$ev" --status success --limit 1 \
+                    --json createdAt --jq '.[0].createdAt // empty' \
+                  || echo "")
+              echo "   最近一次 ${ev} 成功：${t:-（無）}"
+              if [ -n "$t" ] && { [ -z "$last" ] || [[ "$t" > "$last" ]]; }; then last="$t"; fi
+            done
             if [ -z "$last" ]; then
-              echo "::error::${wf} 查無任何**成功**的 schedule run（或 gh API 查詢失敗）——該 workflow 的 *-nightly-full 是唯一會在真 Windows／真 macOS 上跑完整測試樹的通道，查不到成功紀錄等同該通道從未被證實可用"
-              fail=1
+              echo "::${lvl}::${wf} 查無任何**成功**的 schedule／workflow_dispatch run（或 gh API 查詢失敗）——該 workflow 的 *-nightly-full 是唯一會在真 Windows／真 macOS 上跑完整測試樹的通道，查不到成功紀錄等同該通道從未被證實可用"
+              stale=1
               continue
             fi
             age=$(( (now - $(date -u -d "$last" +%s)) / 86400 ))
-            echo "   最近一次 schedule 成功：${last}（${age} 天前）"
+            echo "   ⇒ 採計最近一次成功：${last}（${age} 天前）"
             if [ "$age" -gt "$MAX_AGE_DAYS" ]; then
-              echo "::error::${wf} 的 *-nightly-full 已 ${age} 天沒有成功的排程執行（門檻 ${MAX_AGE_DAYS} 天）——真機深度回歸通道處於死亡狀態，此期間任何「CI 全綠」宣稱都只涵蓋 push 事件"
-              fail=1
+              echo "::${lvl}::${wf} 的 *-nightly-full 已 ${age} 天沒有成功執行（門檻 ${MAX_AGE_DAYS} 天）——真機深度回歸通道處於死亡狀態，此期間任何「CI 全綠」宣稱都只涵蓋 push 事件"
+              stale=1
             fi
           done
-          if [ "$fail" -ne 0 ]; then
+          if [ "$stale" -ne 0 ]; then
             echo "處置：先看上面印出的『最近一次 schedule run』結論——"
-            echo "  · 結論為 failure 且該 run 的 job steps 長度為 0 ⇒ 帳務／額度停擺（DEF-101-081），須先恢復帳務；"
+            echo "  · 結論為 failure 且該 run 的 job steps 長度為 0 ⇒ 帳務／額度停擺（DEF-101-081/703），須先恢復帳務，本 repo 內改不掉；"
             echo "  · 帳務正常但仍陳舊 ⇒ 對 HEAD 各補跑一次：gh workflow run windows-compat-ci.yml / gh workflow run macos-compat-ci.yml"
+            echo "    （該指令產生 event=workflow_dispatch 的 run，本道**有**把它算進來，所以照著做真的能解除；R68 原版只查 schedule，照做也解不開）"
+            if [ "$lvl" = "warning" ]; then
+              echo "⚠️ 本次以**顯式豁免**通過：WAIVER_UNTIL=${WAIVER_UNTIL}（UTC 該日結束）／理由：${WAIVER_REASON}"
+              echo "⚠️ 豁免到期後本道自動恢復阻斷——不續期就會自己紅回來，這是刻意設計，不是漏洞。"
+              exit 0
+            fi
             echo "🔴 本道刻意阻斷（非 warning）：nightly-full 自己就是非阻斷 job，再加一層非阻斷等於複製病因。"
+            echo "🔴 若根因確定在本 repo 之外（例如帳務平面）而需要時間，請設 WAIVER_UNTIL/WAIVER_REASON（上限 ${MAX_WAIVER_DAYS} 天），不要拆掉本道。"
             exit 1
           fi
-          echo "✅ 兩支 *-nightly-full 的最近一次排程成功皆在 ${MAX_AGE_DAYS} 天內"
+          echo "✅ 兩支 *-nightly-full 的最近一次成功執行皆在 ${MAX_AGE_DAYS} 天內"
+          if [ -n "${WAIVER_UNTIL}" ]; then
+            echo "::warning::兩軌皆新鮮，WAIVER_UNTIL='${WAIVER_UNTIL}' 已無必要——請刪除該豁免，避免它變成沒人記得的常駐家具（豁免留著＝下次真的死掉時會被靜默吃掉）"
+          fi

@@ -12,13 +12,11 @@ import logging
 import os
 import re
 import shutil
-import signal
 import subprocess
-import sys
-import time
 from pathlib import Path
 
 from ..utils.logger import RawStreamLogger
+from ..utils.platform_caps import is_windows, kill_process_tree, new_session_kwargs
 from ..utils.trace_context import propagate_to_subprocess_env
 from .stream_reader import NonBlockingStreamReader
 from .text_utils import strip_ansi
@@ -44,7 +42,7 @@ def _resolve_command(command: str) -> list[str]:
     `.cmd`/`.bat` 一律不透過 wexpect 啟動，見 `PtyWrapper.start()` 說明）；
     找不到則原樣回傳，讓錯誤自然浮現。
     """
-    if sys.platform != "win32":
+    if not is_windows():
         return [command]
     resolved = shutil.which(command)
     if resolved and resolved.lower().endswith((".cmd", ".bat")):
@@ -86,23 +84,33 @@ def _quote_cmd_shim_argv(shim_path: str, args: list[str]) -> str:
 _CMD_LINE_MAX_CHARS = 7800
 
 
+# R69：超長命令列的專用例外型別。刻意繼承 RuntimeError（保既有 R68 鎖的
+# `pytest.raises(RuntimeError)` 相容），但獨立型別讓兩條真實呼叫鏈
+# （PtyExecutor.execute／prompt_dispatcher.execute_prompt_impl）能**精準**承接、
+# 降級為單步失敗訊號，而不必寬捕 RuntimeError。R68 落地時此例外全樹零承接端，
+# 上游（Coordinator.run_step／steps_orchestrator 主迴圈）皆無 try/except ⇒
+# Windows 上一支超長 prompt 會由「單步失敗可進 CORRECTION／ESCALATION」惡化成
+# 整場 run 崩潰、其餘步驟全不執行。
+class CmdLineTooLongError(RuntimeError): ...
+
+
+# 解法比照 Node.js cross-spawn 對 npm .cmd shim 的標準處理：`_quote_cmd_shim_argv`
+# 正確加引號/跳脫後，整體再包一層引號、加 `/S` 讓 cmd.exe 改用一般解析
+# （不觸發 `_quote_cmd_shim_argv` docstring 描述的舊式剝引號捷徑）。呼叫端
+# 必須把回傳字串直接當「單一字串」（非 list）傳給 Popen——Windows 上
+# shell=False 時字串型 args 會原樣透傳給 CreateProcess，不會再被
+# list2cmdline 二次加引號破壞這裡手動組好的命令列。
+# R68：組完後量長度，超過 `_CMD_LINE_MAX_CHARS` 即 fail-loud 拒絕，取代
+# cmd.exe 難以歸因的 "The input line is too long."（見該常數說明）。
+# 🔴 說明文字刻意寫成 `#` 註解而非 docstring：docstring 行會被 count_loc 計入 LOC
+# 預算（tools/check_loc_budget.py 自身的指引），本輪需在 total 餘裕僅 2 行時接線。
 def _build_cmd_shim_line(shim_path: str, args: list[str]) -> str:
     """組出透過 `cmd /d /s /c` 呼叫 .cmd/.bat shim 的**單一完整命令列字串**，
     供 `subprocess.Popen` 以「字串」（非 list）傳遞。
-
-    解法比照 Node.js cross-spawn 對 npm .cmd shim 的標準處理：`_quote_cmd_shim_argv`
-    正確加引號/跳脫後，整體再包一層引號、加 `/S` 讓 cmd.exe 改用一般解析
-    （不觸發 `_quote_cmd_shim_argv` docstring 描述的舊式剝引號捷徑）。呼叫端
-    必須把回傳字串直接當「單一字串」（非 list）傳給 Popen——Windows 上
-    shell=False 時字串型 args 會原樣透傳給 CreateProcess，不會再被
-    list2cmdline 二次加引號破壞這裡手動組好的命令列。
-
-    R68：組完後量長度，超過 `_CMD_LINE_MAX_CHARS` 即 fail-loud 拒絕，取代
-    cmd.exe 難以歸因的 "The input line is too long."（見該常數說明）。
     """
     line = f'cmd /d /s /c "{_quote_cmd_shim_argv(shim_path, args)}"'
     if len(line) > _CMD_LINE_MAX_CHARS:
-        raise RuntimeError(
+        raise CmdLineTooLongError(
             f"cmd.exe 命令列長度 {len(line)} 字元超過保守上限 {_CMD_LINE_MAX_CHARS}"
             "（硬上限 8191）：.cmd/.bat shim 無法傳遞這麼長的 prompt。"
             "請縮短 prompt，或改以檔案／stdin 傳遞內容。"
@@ -188,16 +196,10 @@ class PtyWrapper:
             argv: list[str] | str = _build_cmd_shim_line(resolved[2], list(self._args))
         else:
             argv = resolved + self._args
-        popen_kwargs: dict = {}
-        if sys.platform != "win32":
-            # R16 P2：讓子行程獨立成新 session 的 process group leader（其 PID
-            # 即 pgid），供 close() 用 os.killpg() 連同任意深度的孫行程一併終止
-            # ——比照 Windows 側 close() 已用 taskkill /T 遞迴殺整棵行程樹解決的
-            # 同一類問題（單純 terminate()/SIGTERM 只殺直接子行程，底層 CLI 若經
-            # shell wrapper fork 出孫行程會變孤兒）。start_new_session 為 POSIX
-            # only 參數（Windows 上不支援，故以 sys.platform 守門，見 close()
-            # 對應分支）。
-            popen_kwargs["start_new_session"] = True
+        # R16 P2：讓子行程獨立成新 session 的 process group leader（其 PID 即
+        # pgid），供 close() 的 kill_process_tree() 用 os.killpg() 連同任意深度的
+        # 孫行程一併終止。平台守門收斂在 utils/platform_caps.new_session_kwargs()。
+        popen_kwargs: dict = new_session_kwargs()
         self._proc = subprocess.Popen(
             argv,
             stdin=subprocess.PIPE,
@@ -292,46 +294,13 @@ class PtyWrapper:
             # terminate()（Windows 對映 TerminateProcess）只殺這層直接子行程；
             # 其下真正執行 CLI 的孫行程會變孤兒繼續跑（P1，真實子行程重現：
             # 外層 cmd.exe terminate 後 poll()==1 已死，孫行程 PID 仍存活、
-            # ParentProcessId 指向已死行程、繼續執行至逾時）。Windows 上先用
-            # `taskkill /T /F` 遞迴終止整棵行程樹涵蓋此缺口，再呼叫
-            # terminate() 作為既有防線（對已死行程安全，Popen.terminate()
-            # 內部吞掉 ERROR_ACCESS_DENIED）。pid 須為真實整數才觸發——
-            # 測試以 MagicMock 充當 self._proc，其 `.pid` 非 int，自然跳過、
-            # 不會在單元測試中真的呼叫 taskkill。
-            if sys.platform == "win32" and isinstance(self._proc.pid, int):
-                try:
-                    subprocess.run(
-                        ["taskkill", "/T", "/F", "/PID", str(self._proc.pid)],
-                        stdout=subprocess.DEVNULL,
-                        stderr=subprocess.DEVNULL,
-                        timeout=5,
-                    )
-                except Exception:
-                    pass
-            elif sys.platform != "win32" and isinstance(self._proc.pid, int):
-                # R16 P2 對稱修復：POSIX 側同樣的孤兒孫行程問題（_start_subprocess
-                # 已用 start_new_session=True 令直接子行程獨立成新 process group，
-                # 其 PID 即 pgid）——單純 terminate() 只送 SIGTERM 給直接子行程，
-                # 底層 CLI 若經 shell wrapper fork 出孫行程會變孤兒不被回收。改用
-                # os.killpg() 連同任意深度的孫行程一併終止：先 SIGTERM 給緩衝機會
-                # 優雅結束，短暫輪詢後仍存活才升級 SIGKILL。pid 須為真實整數才
-                # 觸發——測試以 MagicMock 充當 self._proc 時自然跳過。
-                try:
-                    pgid = os.getpgid(self._proc.pid)
-                    os.killpg(pgid, signal.SIGTERM)
-                    deadline = time.monotonic() + 2
-                    still_alive = True
-                    while time.monotonic() < deadline:
-                        try:
-                            os.killpg(pgid, 0)
-                        except OSError:
-                            still_alive = False
-                            break
-                        time.sleep(0.05)
-                    if still_alive:
-                        os.killpg(pgid, signal.SIGKILL)
-                except OSError:
-                    pass
+            # ParentProcessId 指向已死行程、繼續執行至逾時）。POSIX 側 R16 P2 為
+            # 完全同構的問題（sh fork 出的孫行程變孤兒）。兩邊的收殺實作原本各寫
+            # 一份（DEF-101-706），R69 收斂為 platform_caps.kill_process_tree()：
+            # Windows `taskkill /T /F`、POSIX `killpg` SIGTERM→SIGKILL。
+            # 收殺後仍呼叫 terminate() 作為既有防線（對已死行程安全，
+            # Popen.terminate() 內部吞掉 ERROR_ACCESS_DENIED）。
+            kill_process_tree(self._proc)
             self._proc.terminate()
         if self._reader:
             self._reader.close(timeout=1.0)

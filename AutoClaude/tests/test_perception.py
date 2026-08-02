@@ -217,13 +217,13 @@ class TestListenerExcepthook:
 
 class TestResolveCommand:
     def test_posix_returns_command_unchanged(self):
-        with patch("autoclaude.perception.pty_wrapper.sys.platform", "darwin"):
+        with patch("autoclaude.utils.platform_caps.sys.platform", "darwin"):
             assert _resolve_command("claude") == ["claude"]
 
     def test_windows_cmd_shim_wrapped_with_cmd_c(self):
         """npm 全域安裝在 Windows 上是 claude.cmd；CreateProcess 無法直接執行批次檔，
         須改經 cmd /c 呼叫，否則 WinError 2（DEF 回歸）。"""
-        with patch("autoclaude.perception.pty_wrapper.sys.platform", "win32"), \
+        with patch("autoclaude.utils.platform_caps.sys.platform", "win32"), \
              patch("autoclaude.perception.pty_wrapper.shutil.which",
                    return_value=r"C:\Users\x\AppData\Roaming\npm\claude.cmd"):
             assert _resolve_command("claude") == [
@@ -231,14 +231,14 @@ class TestResolveCommand:
             ]
 
     def test_windows_exe_used_directly(self):
-        with patch("autoclaude.perception.pty_wrapper.sys.platform", "win32"), \
+        with patch("autoclaude.utils.platform_caps.sys.platform", "win32"), \
              patch("autoclaude.perception.pty_wrapper.shutil.which",
                    return_value=r"C:\tools\claude.exe"):
             assert _resolve_command("claude") == [r"C:\tools\claude.exe"]
 
     def test_windows_not_found_falls_back_to_original_string(self):
         """找不到時保留原字串，讓錯誤自然浮現（不吞例外、不靜默改行為）。"""
-        with patch("autoclaude.perception.pty_wrapper.sys.platform", "win32"), \
+        with patch("autoclaude.utils.platform_caps.sys.platform", "win32"), \
              patch("autoclaude.perception.pty_wrapper.shutil.which", return_value=None):
             assert _resolve_command("claude") == ["claude"]
 
@@ -247,7 +247,7 @@ class TestResolveCommand:
         組出的單一命令列字串（非 list），見 R1 QA 發現的 cmd.exe 多引號 token 回歸。"""
         proc = _make_mock_proc([])
         with patch("autoclaude.perception.pty_wrapper._WEXPECT_AVAILABLE", False), \
-             patch("autoclaude.perception.pty_wrapper.sys.platform", "win32"), \
+             patch("autoclaude.utils.platform_caps.sys.platform", "win32"), \
              patch("autoclaude.perception.pty_wrapper.shutil.which",
                    return_value=r"C:\npm\claude.cmd"), \
              patch("autoclaude.perception.pty_wrapper.subprocess.Popen",
@@ -282,7 +282,7 @@ class TestResolveCommand:
         fake_wexpect = MagicMock()
         with patch("autoclaude.perception.pty_wrapper._WEXPECT_AVAILABLE", True), \
              patch("autoclaude.perception.pty_wrapper.wexpect", fake_wexpect, create=True), \
-             patch("autoclaude.perception.pty_wrapper.sys.platform", "win32"), \
+             patch("autoclaude.utils.platform_caps.sys.platform", "win32"), \
              patch("autoclaude.perception.pty_wrapper.shutil.which",
                    return_value=r"C:\Program Files\npm\claude.cmd"), \
              patch("autoclaude.perception.pty_wrapper.subprocess.Popen",
@@ -306,7 +306,7 @@ class TestResolveCommand:
         fake_wexpect.spawn.return_value = MagicMock()
         with patch("autoclaude.perception.pty_wrapper._WEXPECT_AVAILABLE", True), \
              patch("autoclaude.perception.pty_wrapper.wexpect", fake_wexpect, create=True), \
-             patch("autoclaude.perception.pty_wrapper.sys.platform", "win32"), \
+             patch("autoclaude.utils.platform_caps.sys.platform", "win32"), \
              patch("autoclaude.perception.pty_wrapper.shutil.which",
                    return_value=r"C:\tools\claude.exe"):
             pty = _make_pty(command="claude", args=["-p", "hi"])
@@ -327,7 +327,7 @@ class TestResolveCommand:
         shim_path = r"C:\Program Files\npm\claude.cmd"
         prompt = "fix the bug"
         with patch("autoclaude.perception.pty_wrapper._WEXPECT_AVAILABLE", False), \
-             patch("autoclaude.perception.pty_wrapper.sys.platform", "win32"), \
+             patch("autoclaude.utils.platform_caps.sys.platform", "win32"), \
              patch("autoclaude.perception.pty_wrapper.shutil.which", return_value=shim_path), \
              patch("autoclaude.perception.pty_wrapper.subprocess.Popen",
                    return_value=proc) as mock_popen:
@@ -776,7 +776,9 @@ class TestPtyWrapper:
             pty.start()
             time.sleep(0.1)
             pty.readline(timeout=1.0)
-            calls = [str(c) for c in proc.stdin.write.call_args_list]
+            # R69：取 print/write 的**實際引數**，不是 `mock.call` 物件的 repr——
+            # repr 會轉義反斜線與換行，令任何路徑／多行斷言在 Windows 假紅。
+            calls = [str(a) for c in proc.stdin.write.call_args_list for a in c.args]
             assert any("y" in c for c in calls)
             pty.close()
 
@@ -802,7 +804,9 @@ class TestPtyWrapper:
             pty.start()
             time.sleep(0.1)
             pty.readline(timeout=1.0)
-            calls = [str(c) for c in proc.stdin.write.call_args_list]
+            # R69：取 print/write 的**實際引數**，不是 `mock.call` 物件的 repr——
+            # repr 會轉義反斜線與換行，令任何路徑／多行斷言在 Windows 假紅。
+            calls = [str(a) for c in proc.stdin.write.call_args_list for a in c.args]
             assert any("y" in c for c in calls)
             pty.close()
 
@@ -844,6 +848,8 @@ class TestPtyWrapper:
             pty.start()
             time.sleep(0.1)
             pty.readline(timeout=1.0)
-            calls = [str(c) for c in proc.stdin.write.call_args_list]
+            # R69：取 print/write 的**實際引數**，不是 `mock.call` 物件的 repr——
+            # repr 會轉義反斜線與換行，令任何路徑／多行斷言在 Windows 假紅。
+            calls = [str(a) for c in proc.stdin.write.call_args_list for a in c.args]
             assert any("yes" in c for c in calls)
             pty.close()

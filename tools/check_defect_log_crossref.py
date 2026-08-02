@@ -84,6 +84,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _stdio_utf8  # noqa: E402,F401  # Windows 非 UTF-8 終端 print(✅/❌) 防崩潰保護
+from lib import defect_ledger_index as _ledger_index  # noqa: E402
 
 _REPO_ROOT = Path(__file__).resolve().parents[1]
 _DEFECT_LOG = _REPO_ROOT / "docs" / "06_quality" / "AutoSDD_Defect_Log.md"
@@ -100,6 +101,19 @@ _CROSSREF_TARGETS = [
     # 全 repo 掃描（那是架構層級更大改動，非本輪範圍）。
     _REPO_ROOT / "AutoClaude" / "docs" / "05_development" / "SD10_PG_Contract_NextAction.md",
 ]
+
+# 🔴 R69 `DEF-101-735` — ADR 目錄納入掃描面。
+#
+# 原始缺陷（終審 P2 #17）：`ADR-XPLAT-002`／`ADR-XPLAT-003` 各有一處宣稱「`DEF-101-706` 隨之
+# 結案」，而同輪帳本該列狀態欄是 `partial`（明寫「解鎖條件①未達標故不結案」）——兩份活文件
+# 對同一個 ID 各說各話，而 ADR 不在掃描面內故**機械上完全盲**（理由同 `SD10_PG_Contract_
+# NextAction.md` 當年被納入：該檔也曾同檔內自相矛盾，差別只在沒人想到 ADR 也會做狀態宣稱）。
+# **用 glob 不逐支具名**：ADR 持續新增（本輪即新增 XPLAT-003），具名清單必漏掉下一支而漏掉
+# 零訊號＝本缺陷的形狀；命名慣例 `ADR-*.md` 本身即註冊機制。**誠實劃界**：只掃根層
+# `docs/04_planning/ADR/`；子專案各自的 ADR 不在內——那要先定義「哪一本帳」，是另一個決定。
+_ADR_DIR = _REPO_ROOT / "docs" / "04_planning" / "ADR"
+_ADR_GLOB = "ADR-*.md"
+_CROSSREF_TARGETS += sorted(_ADR_DIR.glob(_ADR_GLOB))
 
 _ID_RE = re.compile(r"DEF-\d+-\d+")
 _ROW_RE = re.compile(r"^\|\s*DEF-\d+-\d+\s*\|")
@@ -444,10 +458,12 @@ _HANDOVER_DECOR = r"[*＊`\s]{0,4}"
 # 的「本列 R14 快照所稱…」是**引述舊快照**，不是交棒；漏掉這個回顧即產生假紅。
 _HANDOVER_ROUND_RES: tuple[tuple[str, re.Pattern[str]], ...] = (
     ("承接輪次／承接者", re.compile(r"承接(?:輪次|者)?[：:＝=為]?" + _HANDOVER_DECOR + r"R(\d+)")),
-    ("R… 承接", re.compile(r"R(\d+)\+?" + _HANDOVER_DECOR + r"(?:起)?" + _HANDOVER_DECOR + r"承接")),
+    ("R… 承接",
+     re.compile(r"R(\d+)\+?" + _HANDOVER_DECOR + r"(?:起)?" + _HANDOVER_DECOR + r"承接")),
     ("列 R…（backlog 指派）", re.compile(r"(?<![本該此上前系])列" + _HANDOVER_DECOR + r"R(\d+)")),
     ("backlog R…", re.compile(r"backlog[\s*＊`]{0,4}R(\d+)")),
-    ("交棒／移交／交由 R…", re.compile(r"(?:交棒|移交|交由)(?:給|至|到|由)?" + _HANDOVER_DECOR + r"R(\d+)")),
+    ("交棒／移交／交由 R…",
+     re.compile(r"(?:交棒|移交|交由)(?:給|至|到|由)?" + _HANDOVER_DECOR + r"R(\d+)")),
 )
 # 🔴 刻意**不**把 `routed@R61`／`deferred@R59` 當承接者：實測 `DEF-101-518` 寫
 # `**routed（deferred@R59，附解鎖條件）**`，那個 `@R59` 是「在 R59 這一輪被 defer」的
@@ -699,6 +715,39 @@ def stale_grandfather_problems(ledger_text: str) -> list[str]:
         f"並把 _UNPINNED_HANDOVER_CEILING 下修為 {len(still_needed)}：{stale}。"
         f"（棘輪只准往小走；不刪＝這張表變成只進不出的死名單，"
         f"「還剩幾筆存量」這個數字就永遠不會下降）"
+    ]
+
+
+def grandfather_ceiling_problems() -> list[str]:
+    """棘輪本體：白名單筆數不得超過 `_UNPINNED_HANDOVER_CEILING`（純函式）。
+
+    🔴 缺陷（R69 複審變異測試實證，`DEF-101-731`）：`_UNPINNED_HANDOVER_CEILING`
+    自 R68 上線起，註解自稱「shrink-only 棘輪、只准變小」，**但全檔零比較、零強制**
+    ——它只被讀進成功訊息裡印出來。實測（本函式落地前）：往帳本插一列散文式延後的
+    未結列、再把該 ID 加進白名單，工具印的是「存量豁免 58 筆／棘輪上限 57」而
+    `rc=0`——**天花板被超過的事實原樣印在成功訊息裡，卻不擋**。於是白名單可以隨每一輪
+    「順手加一筆」無聲膨脹，硬規則② 後半句被逐列贖回，最終退化成一張只進不出的死名單
+    ——正是 `stale_grandfather_problems()` 想防、卻只防住另外半邊的那個形態。
+
+    分工（兩者缺一都不成棘輪）：
+      * 本函式擋 **膨脹**（len > ceiling ⇒ 有人偷加豁免而沒有真的去修那一列）。
+      * `stale_grandfather_problems()` 擋 **不縮**（豁免已不需要卻仍留在表裡）。
+
+    刻意**不吃參數、不看帳本**：這是對原始碼常數本身的斷言，與餵哪一本帳本無關，
+    因此必須在 `main()` 裡**無條件**執行（不受 `_DEFECT_LOG == _DEFAULT_DEFECT_LOG`
+    守衛約束）——否則換一本帳本就能繞過棘輪，那又是一個假鎖。
+    """
+    actual = len(_UNPINNED_HANDOVER_GRANDFATHERED)
+    if actual <= _UNPINNED_HANDOVER_CEILING:
+        return []
+    return [
+        f"存量豁免名單已膨脹到 {actual} 筆，超過 shrink-only 棘輪上限 "
+        f"{_UNPINNED_HANDOVER_CEILING}（超出 {actual - _UNPINNED_HANDOVER_CEILING} 筆）。"
+        f"🔴 `_UNPINNED_HANDOVER_GRANDFATHERED` 是 R68 上線時的**存量快照**，只准變小："
+        f"新的未結列請走硬規則② 後半句的兩條合法出口（寫明承接輪次／誠實寫"
+        f"「{_UNASSIGNED_LITERAL}」＋可執行的解鎖條件），**不是**把它加進豁免名單。"
+        f"若你確實刪了名單裡的存量而只是忘了同步下修天花板，請把 "
+        f"{Path(__file__).name} 的 _UNPINNED_HANDOVER_CEILING 改成 {actual} 或更小。"
     ]
 
 
@@ -1185,37 +1234,20 @@ def unregistered_governance_docs() -> list[str]:
     ]
 
 
-def oversize_problems(paths: list[Path]) -> tuple[list[str], list[str]]:
-    """回傳 `(fail 訊息, warn 訊息)`。純函式化的理由同 `conservation_problems()`：
-    可直接以構造輸入證明它有牙，不必真的把 repo 檔案養大。
+# 散文式結案宣稱（R69 `DEF-101-735`）——判準與純函式住在 `tools/lib`（兩支工具共用、
+# 且本檔受 SPECIAL_FILES 行數棘輪管），此處再匯出同一個物件，不另寫一份。
+closure_claim_problems = _ledger_index.closure_claim_problems
+_CLOSURE_CLAIM_WINDOW = _ledger_index.CLOSURE_CLAIM_WINDOW
 
-    門檻與帳本共用 `_LEDGER_*_BYTES`——**因為上限的來源是同一個**：262,144 是
-    **Read 工具單次讀取上限**（不是 git、不是 markdown 的限制），對帳本與對證據檔
-    是同一條物理界線。共用常數即「同一個量只有一個答案」。
+
+def oversize_problems(paths: list[Path]) -> tuple[list[str], list[str]]:
+    """帳本家族／具名治理文件的體積守門（純函式本體住 `tools/lib`，門檻由本檔注入）。
+
+    門檻與帳本共用 `_LEDGER_*_BYTES`——**因為上限的來源是同一個**：262,144 是 Read 工具
+    單次讀取上限（不是 git、不是 markdown 的限制），對帳本與對證據檔是同一條物理界線。
     """
-    fails, warns = [], []
-    for p in paths:
-        if not p.exists():
-            fails.append(
-                f"具名治理文件不存在：{p.name} — 涵蓋面已與磁碟脫節，拒絕靜默跳過"
-                f"（跳過就等於這一份檔的體積守門被悄悄拿掉）"
-            )
-            continue
-        n = p.stat().st_size
-        if n >= _LEDGER_FAIL_BYTES:
-            fails.append(
-                f"{p.name} {n} bytes ≥ 上限 {_LEDGER_FAIL_BYTES}（Read 工具單次讀取上限）"
-                f"——複審者將無法一次讀完本檔。請比照 DEF-101-587 的做法拆分："
-                f"原檔留在原地當**入口**（帳本有多處指向它，改名會讓那些指針全部失實），"
-                f"新增姊妹檔承載較新的節，並在入口檔開頭維護「哪些 DEF-ID 在哪一份檔」對照表"
-            )
-        elif n >= _LEDGER_WARN_BYTES:
-            warns.append(
-                f"{p.name} {n} bytes 已逼近上限 {_LEDGER_FAIL_BYTES}"
-                f"（距 {_LEDGER_FAIL_BYTES - n} bytes），請規劃拆分——"
-                f"append 前務必先 `wc -c`"
-            )
-    return fails, warns
+    return _ledger_index.oversize_problems(
+        paths, _LEDGER_WARN_BYTES, _LEDGER_FAIL_BYTES)
 
 
 _USAGE = (
@@ -1354,6 +1386,18 @@ def main() -> int:
             print(f"  - {p}", file=sys.stderr)
         return 1
 
+    # 棘輪本體（R69 假鎖修正，`DEF-101-731`）——**無條件**跑：這是對原始碼常數的斷言，
+    # 與餵哪一本帳本
+    # 無關，放進上方 `_DEFECT_LOG == _DEFAULT_DEFECT_LOG` 守衛內就等於「換一本帳本即可
+    # 繞過棘輪」。R68 只寫了註解與常數、零比較，白名單因此可無聲膨脹（見函式 docstring
+    # 的實測復現）。
+    ceiling_problems = grandfather_ceiling_problems()
+    if ceiling_problems:
+        print(f"❌ 存量豁免棘輪被撐大（{len(ceiling_problems)} 筆）：", file=sys.stderr)
+        for p in ceiling_problems:
+            print(f"  - {p}", file=sys.stderr)
+        return 1
+
     # 狀態 token 變體硬閘（R68）——放在首詞鎖之後：首詞鎖只看第一個詞，
     # `open watch（R55）→ closed-by-verification@R56` 這種訂正 token 躲在後面。
     variant_problems = status_variant_problems(ledger_text)
@@ -1395,6 +1439,9 @@ def main() -> int:
             print(f"❌ 找不到掃描目標：{target}", file=sys.stderr)
             return 1
         all_problems.extend(_scan_target(target, ledger, archive_status))
+        # R69 DEF-101-735：`_scan_target` 只認「ID 緊接括號」，散文式「<ID> …結案」它看不見。
+        all_problems.extend(closure_claim_problems(
+            target.name, target.read_text(encoding="utf-8-sig"), {**archive_status, **ledger}))
 
     if all_problems:
         print(f"❌ 缺陷帳本跨文件狀態不一致（{len(all_problems)} 筆）：", file=sys.stderr)

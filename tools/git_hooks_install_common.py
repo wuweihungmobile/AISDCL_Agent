@@ -101,7 +101,8 @@ def cmd_assert_not_linked_worktree(prefix: str) -> int:
         return 1
     rc2, git_common_dir = _run(["git", "rev-parse", "--git-common-dir"])
     if rc2 != 0 or not git_common_dir:
-        print(f"{prefix}❌ 不在 git repo 內（git rev-parse --git-common-dir 失敗）", file=sys.stderr)
+        print(f"{prefix}❌ 不在 git repo 內（git rev-parse --git-common-dir 失敗）",
+              file=sys.stderr)
         return 1
     if is_linked_worktree(git_dir, git_common_dir):
         print(f"{prefix}❌ 偵測到 linked worktree（git-dir ≠ git-common-dir）", file=sys.stderr)

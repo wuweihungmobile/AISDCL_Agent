@@ -14,6 +14,10 @@ from autoclaude.utils import notifier
 from autoclaude.utils.notifier import _try_osascript, notify
 
 _MOD = "autoclaude.utils.notifier"
+# R69：平台判斷收斂至 utils/platform_caps.py，故平台模擬改 patch 該處
+# （`patch("<mod>.sys.platform", ...)` 本來就是在改全域 sys 模組的屬性，
+# 只是掛載點換成唯一的決策點；模擬語意不變）。
+_PLATFORM_MOD = "autoclaude.utils.platform_caps"
 
 
 class TestNotifyDisabled:
@@ -27,7 +31,7 @@ class TestDarwinOsascriptFallback:
     @patch(f"{_MOD}.subprocess.run")
     @patch(f"{_MOD}._try_win10toast")
     @patch(f"{_MOD}._try_plyer", return_value=False)
-    @patch(f"{_MOD}.sys.platform", "darwin")
+    @patch(_PLATFORM_MOD + ".sys.platform", "darwin")
     def test_plyer_fail_falls_to_osascript(self, mock_plyer, mock_toast, mock_run):
         """darwin 上 plyer 失敗（缺 pyobjus）→ osascript 承接，不再往 win10toast 走。"""
         notify("標題", "訊息")
@@ -36,7 +40,7 @@ class TestDarwinOsascriptFallback:
 
     @patch(f"{_MOD}.subprocess.run")
     @patch(f"{_MOD}._try_plyer", return_value=False)
-    @patch(f"{_MOD}.sys.platform", "darwin")
+    @patch(_PLATFORM_MOD + ".sys.platform", "darwin")
     def test_osascript_args_are_parameterized(self, mock_plyer, mock_run):
         """注入安全：title/message 以 argv 獨立參數傳入，不插值進 AppleScript 字串。"""
         evil = "x\" & do shell script \"rm -rf ~\" -- '"
@@ -53,7 +57,7 @@ class TestDarwinOsascriptFallback:
     @patch(f"{_MOD}.subprocess.run")
     @patch(f"{_MOD}._try_win10toast", return_value=False)
     @patch(f"{_MOD}._try_plyer", return_value=False)
-    @patch(f"{_MOD}.sys.platform", "linux")
+    @patch(_PLATFORM_MOD + ".sys.platform", "linux")
     def test_non_darwin_skips_osascript(self, mock_plyer, mock_toast, mock_run):
         """R4 複審主 agent 發現：先前未 mock `_try_win10toast`。`notify()` 對
         `_try_win10toast()` 的呼叫本身沒有平台守門（見 notifier.py 第 65 行），
@@ -70,7 +74,7 @@ class TestDarwinOsascriptFallback:
 class TestOsascriptFailureDowngradesToLog:
     @patch(f"{_MOD}._try_win10toast", return_value=False)
     @patch(f"{_MOD}._try_plyer", return_value=False)
-    @patch(f"{_MOD}.sys.platform", "darwin")
+    @patch(_PLATFORM_MOD + ".sys.platform", "darwin")
     def test_osascript_error_falls_to_log(self, mock_plyer, mock_toast, caplog):
         """osascript 非零退出 → 降級 log 最後手段（不拋例外、不吞掉通知內容）。"""
         err = subprocess.CalledProcessError(1, "osascript")

@@ -49,6 +49,7 @@ _REPO_ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(_REPO_ROOT / "tools" / "lib"))
 import bash_probe_spec as _spec  # noqa: E402  # R32 驗活探測「參數」SSOT
 import sdd_latest  # noqa: E402
+
 _BOOTSTRAP_PS1 = _REPO_ROOT / "tools" / "bootstrap.ps1"
 _DEV_START_PS1 = _REPO_ROOT / "tools" / "dev_start.ps1"
 _BOOTSTRAP_CORE_PY = _REPO_ROOT / "tools" / "bootstrap_core.py"
@@ -171,14 +172,47 @@ class TestWindowsAppsGuardEnrollment(unittest.TestCase):
             f"（'python' 與 'python3'），實際找到：{calls}",
         )
 
-    def test_dev_start_ps1_calls_shared_function_for_python(self) -> None:
-        calls = re.findall(
+    def test_dev_start_ps1_delegates_candidate_selection_to_ssot(self) -> None:
+        """🔴 R69 P2 改寫（鎖**遷移**，非放寬）：舊鎖要求 dev_start.ps1 內恰有一處
+        `Test-IsRealPython -CandidateName 'python'`——那正是本輪修掉的缺陷形狀：
+        「命中裸 python 即用、不看版本」。macOS 真機重現的姊妹缺陷（`python3` 恆
+        為系統 3.9，`brew install python@3.11` 不改寫它 ⇒ dev_start 核心版本閘
+        rc=2、ONBOARDING §2.1「全新機器可直接跑 dev_start」為假）迫使候選鏈上移
+        到 SSOT `Get-PythonGeMin`（>= 3.11 才算數，內部逐個裸名候選仍呼叫
+        `Test-IsRealPython`）。舊鎖若原地保留，等於要求 wrapper 永遠留著那個
+        不看版本的分支。
+
+        新鎖強度不減，且改守本輪真正要守的東西：
+          ① wrapper 必須把候選挑選**委派**給 SSOT（恰一處 `Get-PythonGeMin`）；
+          ② wrapper 內不得再出現任何自行判斷候選的 `Test-IsRealPython
+             -CandidateName '<裸名>'`（回填該分支＝缺陷復發）。
+        「SSOT 內部真的有做空殼排除」另由本檔 ②④ 節的行為表 parity 鎖看著。
+        """
+        selector_calls = re.findall(r"\bGet-PythonGeMin\b", _ps_code_only(self.dev_start_text))
+        self.assertEqual(
+            len(selector_calls), 1,
+            f"tools/dev_start.ps1 應恰有一處呼叫 SSOT 候選鏈 Get-PythonGeMin"
+            f"（tools/lib/WindowsAppsGuard.ps1），實際找到 {len(selector_calls)} 處",
+        )
+        inline_calls = re.findall(
             r"Test-IsRealPython\s+-CandidateName\s+'(python3?)'", self.dev_start_text
         )
         self.assertEqual(
-            calls, ["python"],
-            f"tools/dev_start.ps1 應恰有一處以字面值 'python' 呼叫 Test-IsRealPython，"
-            f"實際找到：{calls}",
+            inline_calls, [],
+            f"tools/dev_start.ps1 又出現自行判斷裸名候選的 Test-IsRealPython 呼叫："
+            f"{inline_calls}——候選挑選（含 >= 3.11 版本下限）一律由 SSOT "
+            f"Get-PythonGeMin 負責，wrapper 只做委派（R69 P2 迴歸鎖）",
+        )
+
+    def test_ssot_selector_applies_windowsapps_guard_to_bare_candidates(self) -> None:
+        """R69 P2：候選鏈本體必須真的把裸名候選餵給 `Test-IsRealPython`——否則
+        鎖遷移就變成把 guard 整條丟掉（`py` launcher 候選依檔頭記載刻意不套）。"""
+        code = _ps_code_only(_GUARD_PS1.read_text(encoding="utf-8"))
+        self.assertIn("function Get-PythonGeMin", code, "SSOT 未定義 Get-PythonGeMin")
+        self.assertRegex(
+            code, r"Test-IsRealPython\s+-CandidateName\s+\$exe",
+            "Get-PythonGeMin 內找不到對裸名候選呼叫 Test-IsRealPython——"
+            "候選鏈繞過空殼 guard 即 DEF-101-273/279/300/303 復發",
         )
 
     def test_bootstrap_ps1_no_longer_has_inline_notlike_guard(self) -> None:
@@ -650,6 +684,15 @@ _DOT_SOURCE_SSOT_RE = re.compile(
 _TEST_IS_REAL_PYTHON_CALL_RE = re.compile(
     r'\bTest-IsRealPython\s+-CandidateName\b'
 )
+# 🔴 R69 P2：SSOT 的**入口函式**由一個變成兩個——`Get-PythonGeMin`（挑 >= 3.11
+# 直譯器的候選鏈）同樣定義在 `tools/lib/WindowsAppsGuard.ps1`、內部**逐個裸名
+# 候選**呼叫 `Test-IsRealPython`，故呼叫它與直接呼叫 `Test-IsRealPython` 對
+# 「有沒有繞過空殼 guard」等價（強度不變，不是放寬：兩個名字都只存在於 SSOT
+# 一份實作裡，自行內嵌判斷式的 .ps1 照樣被判 offender）。bash 側對稱調整見
+# `test_windowsapps_guard_bash_parity.py::_SSOT_ENTRYPOINTS`。
+_SSOT_ENTRYPOINT_CALL_RE = re.compile(
+    r'\b(?:Test-IsRealPython\s+-CandidateName|Get-PythonGeMin)\b'
+)
 
 
 def _line_is_comment(line: str) -> bool:
@@ -747,6 +790,21 @@ def _has_real_test_is_real_python_call(text: str) -> bool:
     return False
 
 
+def _has_real_ssot_entrypoint_call(text: str) -> bool:
+    """R69 P2：同 `_has_real_test_is_real_python_call`，但認得 SSOT 的**兩個**
+    入口函式（見 `_SSOT_ENTRYPOINT_CALL_RE` 上方 WHY）。repo-wide 掃描改用本
+    述詞；`_has_real_test_is_real_python_call` 保留給「必須逐字呼叫
+    Test-IsRealPython」的既有專屬鎖（bootstrap.ps1 兩處候選）。"""
+    for raw_line in text.splitlines():
+        if _line_is_comment(raw_line):
+            continue
+        line = _strip_trailing_line_comment(raw_line)
+        for m in _SSOT_ENTRYPOINT_CALL_RE.finditer(line):
+            if not _quote_parity_open(line, m.start()):
+                return True
+    return False
+
+
 # ---------------------------------------------------------------------------
 # R44 SA 一審對抗式複審揪出：`test_python_calls_in_ps1_all_go_through_ssot` 舊版
 # 只做「檔案層級」判斷——`if _has_real_dot_source_of_ssot(text) and
@@ -811,7 +869,9 @@ def _all_python_invocations_are_ssot_protected(text: str) -> bool:
     數後檔案裡已無真正的裸字面值呼叫。任一裸呼叫點找不到歸類即回傳 False。"""
     if not _has_real_dot_source_of_ssot(text):
         return False
-    guard_lines = _real_match_line_indices(text, _TEST_IS_REAL_PYTHON_CALL_RE)
+    # R69 P2：guard 判斷可以是 `Test-IsRealPython`，也可以是同屬 SSOT 的候選鏈
+    # 入口 `Get-PythonGeMin`（內部逐個裸名候選呼叫前者）。
+    guard_lines = _real_match_line_indices(text, _SSOT_ENTRYPOINT_CALL_RE)
     if not guard_lines:
         return False
     call_lines = _real_match_line_indices(text, _CALL_SHAPED_PYTHON_RE)
@@ -1086,8 +1146,8 @@ class TestNoOrphanWindowsAppsImplementation(unittest.TestCase):
                 continue
             if rel == _SSOT_REL_PATH:
                 continue  # SSOT 本身
-            if _has_real_dot_source_of_ssot(text) and _has_real_test_is_real_python_call(text):
-                continue  # 正確經過 SSOT dot-source + 呼叫
+            if _has_real_dot_source_of_ssot(text) and _has_real_ssot_entrypoint_call(text):
+                continue  # 正確經過 SSOT dot-source + 呼叫（兩個入口函式擇一，R69 P2）
             offenders.append(rel)
 
         self.assertEqual(

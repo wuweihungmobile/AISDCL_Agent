@@ -47,3 +47,72 @@ is_real_python_candidate() {
     *) return 0 ;;
   esac
 }
+
+# ─────────────────────────────────────────────────────────────────────────────
+# R69 P2：「挑一個 >= 3.11 直譯器」候選鏈（bash 側）。
+#
+# WHY 放在本檔而不是另開一支 lib：本檔就是 repo 內「python 候選是否可用」的
+# SSOT（`is_real_python_candidate` 判「這個候選是不是真直譯器」），版本下限只是
+# 同一個問題的第二個維度（「是不是**能用的**直譯器」）；另開檔會多出一組
+# check_script_parity 納管／_CALLER_FILES 登記面，卻不會讓判斷更集中。
+#
+# 為何需要（R69 前 macOS 入門路徑實際是斷的，真機重現）：`tools/dev_start.sh`
+# 的候選清單只有 `python3` / `python`，而 macOS 的 `python3` 恆為系統 3.9.6
+# （Homebrew 的 python@3.11 是 keg-only，`brew install python@3.11` **不會**
+# 改寫 `python3`，只放 `/opt/homebrew/bin/python3.11`）。於是照 ONBOARDING §1
+# 逐字裝完 3.11 之後，dev_start 仍撿到 3.9 → `tools/dev_start.py` 版本前置閘
+# rc=2，ONBOARDING §2.1「全新機器可直接執行 dev_start」在 mac 上為假。R68 只
+# 把 traceback 換成友善訊息（DEF-101-628），沒動選擇邏輯，缺陷本體仍在。
+#
+# 版本下限 SSOT＝`tools/dev_start.py::_MIN_PY`；本檔與 `WindowsAppsGuard.ps1`
+# 的字面值由 tools/tests/test_dev_start.py::
+# test_min_python_version_is_consistent_across_dev_start_ssots 機械鎖住同步。
+PYTHON_GE_MIN_MM="3.11"
+# 順序＝優先序：先 `.python-version` 目標版（3.11）、再較新版、最後裸 python3/
+# python（Linux 上常已是 3.11+）；PATH 全失手時再試 Homebrew（arm64 /opt、
+# Intel /usr/local）與 pyenv shim 的常見絕對路徑——`brew install python@3.11`
+# 後 PATH 尚未 rehash／未把 /opt/homebrew/bin 加進 PATH 的新機器就靠這段救。
+# 形狀對齊 tools/bootstrap_core.py::pick_python() 的 candidates 清單。
+# 🔴 用**陣列**而非空白分隔字串：`source tools/dev_start.sh` 的主場是 macOS 預設
+# 的 zsh，而 zsh 對未加引號的參數展開**不做**字詞切分（SH_WORD_SPLIT 預設關閉）
+# ⇒ `for c in $LIST` 在 zsh 下整條清單會變成單一候選、一支都命中不了（實測
+# `source tools/dev_start.sh` rc=1，bash 下卻正常——正是最難察覺的那種雙 shell
+# 落差）。`"${arr[@]}"` 在 bash 3.2（macOS /bin/bash）與 zsh 皆為逐元素展開。
+PYTHON_GE_MIN_CANDIDATES=(
+  python3.11 python3.12 python3.13 python3 python
+  /opt/homebrew/opt/python@3.11/bin/python3.11 /opt/homebrew/bin/python3.11
+  /usr/local/opt/python@3.11/bin/python3.11 /usr/local/bin/python3.11
+  "${HOME:-/nonexistent}/.pyenv/shims/python3.11"
+)
+
+# 探測程式：版本達標才印出直譯器絕對路徑，否則印空字串（rc 仍為 0）。
+# 與 .ps1 側 `Get-PythonGeMin` 用**同一段**探測碼（同構，非各自發明）。
+PYTHON_GE_MIN_PROBE='import sys;print(sys.executable if sys.version_info[:2] >= (3, 11) else "")'
+
+# 回傳（stdout）第一個可用且 >= 3.11 的直譯器**絕對路徑**；一個都沒有回 rc=1。
+pick_python_ge_min() {
+  local cand resolved
+  for cand in "${PYTHON_GE_MIN_CANDIDATES[@]}"; do
+    is_real_python_candidate "$cand" || continue
+    resolved="$("$cand" -c "$PYTHON_GE_MIN_PROBE" 2>/dev/null)" || continue
+    if [ -n "$resolved" ]; then
+      printf '%s\n' "$resolved"
+      return 0
+    fi
+  done
+  return 1
+}
+
+# fail-loud 補救指引（stderr）——只印**逐字可執行**的指令，不印「請安裝 Python」
+# 這種要使用者自己翻文件的句子。
+python_ge_min_remediation() {
+  echo "❌ 找不到 Python >= ${PYTHON_GE_MIN_MM} 直譯器（dev_start 核心需 ${PYTHON_GE_MIN_MM}+）。" >&2
+  echo "   已依序嘗試：${PYTHON_GE_MIN_CANDIDATES[*]}" >&2
+  echo "   macOS 補救（擇一，逐字可執行）：" >&2
+  echo "     brew install python@3.11" >&2
+  echo "     curl -LsSf https://astral.sh/uv/install.sh | sh && uv python install 3.11" >&2
+  echo "   Linux 補救（擇一，逐字可執行）：" >&2
+  echo "     sudo apt-get update && sudo apt-get install -y python3.11" >&2
+  echo "     sudo dnf install -y python3.11" >&2
+  echo "   裝完重開終端機（PATH 需重新載入）後再執行：source tools/dev_start.sh" >&2
+}

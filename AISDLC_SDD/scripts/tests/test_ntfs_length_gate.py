@@ -32,7 +32,6 @@ import os
 import shutil
 import subprocess
 import sys
-from pathlib import Path
 
 import pytest
 
@@ -428,31 +427,29 @@ def test_length_policy_three_sites_registry():
     260（≥255 為兩平台共同 ENAMETOOLONG，非跨平台落差；本輪 APFS 實測 200/250 OK、
     255/256/300 FAIL errno 63）。該窄帶須先有 Windows 真機實證再設鎖，否則等於再加
     一道從未紅過的鎖。
+
+    🔴 R69 子專案邊界修正（本檔原 446-447 行 `sys.path.insert(.../AutoClaude)` +
+    `from autoclaude.utils.logger import ...`）：AISDLC_SDD 與 AutoClaude 是兩個獨立
+    可發布子專案，AISDLC_SDD 的 CI 相依只鎖 `AISDLC_SDD_v0.01/requirements-ci.txt`
+    （pyyaml + pytest），而 `autoclaude.utils.__init__` 會連帶拉進 pydantic ⇒
+    `aisdlc-sdd-ci` 上必然 `ModuleNotFoundError`（run 30720156045 由綠轉紅），本機因
+    裝了 AutoClaude 而永遠測不到。**站點②的行為鎖不是刪除而是搬家**：移至根層整合層
+    `tools/tests/test_windows_forbidden_filename_parity.py::
+    TestLengthPolicySiteTwoLoggerNoTruncation`——該檔本就合法 import
+    `autoclaude.utils.logger`（根層 root-infra-ci 依 `tools/run_root_unittests.py::
+    _THIRD_PARTY_PREREQS` 安裝第三方相依），是本 repo 既定的「跨子專案一致性鎖歸屬
+    根層」慣例（見該檔檔頭四處實作說明）。本函式因此只保留站點①③（AISDLC_SDD 與根層
+    tools 自己的域），站點②的兩項斷言由上述根層鎖承接，總覆蓋不減。
+    跨樹 import 復發由 `test_cross_subproject_import_isolation.py` 靜態掃描機械擋下。
     """
     import component_sanitizer as cs
     mod = _load_ntfs_module()
-    logger_src = os.path.join(
-        _monorepo_root(), "AutoClaude", "autoclaude", "utils", "logger.py"
-    )
 
     assert cs._MAX_COMPONENT_LEN == 80, "站點①（FSM state 單一 component）政策已變動"
     assert (mod._LEN_FAIL, mod._LEN_WARN) == (200, 180), "站點③（tracked 整條路徑）政策已變動"
 
-    # 站點②：logger 刻意**不截斷**——以行為斷言，避免只鎖註解而鎖不到實作
-    # 🔴 寫成 `Path(__file__).resolve().parents[N] / ...` 而非 `os.path.join(_monorepo_root(), …)`：
-    # 後者把基底藏在函式呼叫裡，`test_ci_paths_cover_root_consumers._eval_path_expr()` 無法靜態
-    # 解析 ⇒ 該路徑下的根層消費檔會對「CI paths 白名單涵蓋率」那道鎖隱形（R67 盲區 E 同構假綠）。
-    # 對齊本 repo `sys.path.insert(0, str(Path(...).parents[N]))` 既有慣例。
-    sys.path.insert(0, str(Path(__file__).resolve().parents[3] / "AutoClaude"))
-    from autoclaude.utils.logger import _sanitize_log_filename
-    long_name = "a" * 300 + ".log"
-    assert _sanitize_log_filename(long_name) == long_name, (
-        "站點②（runtime log 檔名）原本刻意不截斷（超長交由 OSError fallback 承接）；"
-        "若確要改為截斷，必須同步更新三處註解與本鎖"
-    )
-
     marker = "三站點長度政策"
-    for path in (cs.__file__, _ntfs_tool_path(), logger_src):
+    for path in (cs.__file__, _ntfs_tool_path()):
         with open(path, encoding="utf-8") as fh:
             assert marker in fh.read(), (
                 f"{path} 缺少「{marker}」對照註記——理由一旦消失，下一輪掃描會把"

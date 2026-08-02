@@ -154,7 +154,28 @@ SPECIAL_FILES: dict[str, int] = {
     # 要往上調必須在缺陷帳本具名理由（同 _FROZEN_GUARD_FILE_COUNT 慣例）。
     # 現值不寫死在此（會過期）：`python tools/check_loc_budget.py --json` 現查。
     "../tools/dev_start.py": 2000,
+    # 🔴 R69 P3：上一列（R68 落地）**只守 `dev_start.py` 一支**，而根層 `tools/` 是一整層
+    # 逾兩萬行的護欄層。同一輪（R68）就有另外兩支在無人看守下大幅膨脹——
+    # `check_defect_log_crossref.py` 漲到四位數行、`archive_defect_log.py` 亦然——證明
+    # 「只釘一支」不是取捨而是缺口：守的是**檔名**，不是**那一層的成長**。
+    # 本批把根層 tools/ 所有 700 行以上的 .py 全數納管，門檻一律取**納管當下的實際行數**
+    # （不預留餘裕：預留多少都是憑空猜測，而 shrink-only 棘輪的價值就在「下一行就會響」）。
+    # **棘輪：只准往下改。** 要往上調＝先刪死碼／抽共用模組（先例：R68 把 CI 逐軌活性偵測
+    # 抽到 `tools/lib/ci_liveness.py`），確認為不可壓縮的真實功能後才在缺陷帳本具名理由。
+    # 各檔現值不寫死在此（會過期）：`python tools/check_loc_budget.py --json` 現查。
+    "../tools/check_script_parity.py": 1618,
+    "../tools/archive_defect_log.py": 1507,
+    "../tools/check_defect_log_crossref.py": 1474,
+    "../tools/sync_onboarding_baselines.py": 1451,
+    "../tools/run_root_unittests.py": 754,
 }
+
+#: 上面那批根層 tools/ 棘輪的共同違規理由（`_SPECIAL_REASONS` 逐檔複寫一份就是複本型缺陷）。
+_ROOT_TOOLS_RATCHET_REASON = (
+    "R69 P3 根層護欄層行數棘輪：門檻＝納管當下實際行數，只准往下改——"
+    "先刪死碼／抽共用模組（先例：tools/lib/ci_liveness.py），"
+    "確認為不可壓縮的真實功能後才在缺陷帳本具名調高本棘輪"
+)
 
 # SPECIAL_FILES 逐列的違規理由（未列者沿用 ADR-SD08-001 文件治理）。
 _SPECIAL_REASONS: dict[str, str] = {
@@ -163,6 +184,11 @@ _SPECIAL_REASONS: dict[str, str] = {
         "（先例：R68 把 CI 逐軌活性偵測抽到 tools/lib/ci_liveness.py），"
         "確認為不可壓縮的真實功能後才在缺陷帳本具名調高本棘輪"
     ),
+    **{
+        rel: _ROOT_TOOLS_RATCHET_REASON
+        for rel in SPECIAL_FILES
+        if rel.startswith("../tools/") and rel != "../tools/dev_start.py"
+    },
 }
 
 

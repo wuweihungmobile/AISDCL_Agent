@@ -143,8 +143,9 @@
 #
 #   $ python3 -c "import yaml,collections; d=yaml.safe_load(open('.github/workflows/windows-compat-ci.yml')); [print(n, j.get('runs-on'), dict(collections.Counter(s.get('shell','<implicit>') for s in j['steps'] if 'run' in s))) for n, j in d['jobs'].items()]"
 #   （以下為 2026-08-01 原樣輸出，僅為對齊欄位補了空白，其餘逐字未改；R68 新增
-#     「tools/tests 第三方相依」pwsh step 後由 19 → 20，本表隨之更新）
-#   windows-smoke         windows-latest {'pwsh': 20, 'bash': 1}
+#     「tools/tests 第三方相依」pwsh step 後由 19 → 20，R69 新增「tools/tests 外部
+#     工具相依」pwsh step 後由 20 → 21，本表隨之更新）
+#   windows-smoke         windows-latest {'pwsh': 21, 'bash': 1}
 #   windows-nightly-full  windows-latest {'powershell': 2, 'pwsh': 3}
 #   windows-nightly-alert ubuntu-latest  {'<implicit>': 3}
 #   （全檔無 workflow 層／job 層 `defaults:` 區塊，故上表即實際生效的引擎分佈；
@@ -231,6 +232,7 @@ on:
       - "tools/check_defect_log_crossref.py"
       - "tools/check_wrapper_thinness.py"
       - "AutoClaude/tools/check_loc_budget.py"
+      - "AutoClaude/.loc_baseline"
       - "tools/_script_scan_surface.py"
       - "tools/archive_defect_log.py"
       - "docs/06_quality/AutoSDD_Defect_Log.md"
@@ -253,6 +255,9 @@ on:
       # R55：tools/tests/test_check_gha_action_versions.py import 消費此根層檔
       # （DEF-101-042 同構，test_ci_paths_cover_root_consumers 實測揪出）
       - "tools/check_gha_action_versions.py"
+      # R69 P3：tools/tests/test_subprocess_encoding_hygiene.py::TestRootToolsLintPolicy
+      # 讀取此檔（根層護欄層 ruff 設定 SSOT），只改它時該鎖必須跑。
+      - "tools/ruff.toml"
       - "tools/git_hooks_install_common.py"
       - "tools/_stdio_utf8.py"
       # R17：tools/tests/test_platform_utils_dedup.py 消費此根層檔——只改該檔時
@@ -385,6 +390,7 @@ on:
       - "tools/check_defect_log_crossref.py"
       - "tools/check_wrapper_thinness.py"
       - "AutoClaude/tools/check_loc_budget.py"
+      - "AutoClaude/.loc_baseline"
       - "tools/_script_scan_surface.py"
       - "tools/archive_defect_log.py"
       - "docs/06_quality/AutoSDD_Defect_Log.md"
@@ -399,6 +405,9 @@ on:
       # R55：tools/tests/test_check_gha_action_versions.py import 消費此根層檔
       # （DEF-101-042 同構，test_ci_paths_cover_root_consumers 實測揪出）
       - "tools/check_gha_action_versions.py"
+      # R69 P3：tools/tests/test_subprocess_encoding_hygiene.py::TestRootToolsLintPolicy
+      # 讀取此檔（根層護欄層 ruff 設定 SSOT），只改它時該鎖必須跑。
+      - "tools/ruff.toml"
       - "tools/git_hooks_install_common.py"
       - "tools/_stdio_utf8.py"
       # R17：tools/tests/test_platform_utils_dedup.py 消費此根層檔——只改該檔時
@@ -536,6 +545,18 @@ jobs:
         # 缺相依時 discovery 把它們整份覆蓋塌成佔位測試，122 支迴歸鎖靜默不跑而本 step 紅
         # 在一句「測試疑似大規模靜默消失」上——三平台實測同一數字，是環境維度不是平台維度。
         run: python -m pip install --quiet --disable-pip-version-check pyyaml pydantic httpx
+
+      - name: tools/tests 外部工具相依（清單 SSOT＝tools/tests/test_run_root_unittests.py 的 _EXTERNAL_TOOL_PREREQS；runner 無此層 fail-fast，漏裝時由 ExternalToolPrereqDeclarationTest 多紅一支點名）
+        shell: pwsh
+        # R69：tools/tests/test_pre_push_dispatcher.py 有 5 支測試在 tmp repo 內**真跑**根層
+        # dispatcher 並斷言 rc==0，而其 root-infra 快層第 ④ 段對缺 ruff 是 fail-loud（刻意不
+        # 軟跳過，見 tools/ruff.toml 檔頭）⇒ 本目錄自此隱性需要 PATH 上有 ruff。此前只有
+        # root-infra-ci.yml 裝 ruff，本 job 沒裝 ⇒ 同一批 tools/tests 在三平台有兩種結果
+        # （SD 單變因 A/B 實測：有 ruff → Ran 17 OK；唯一差別拿掉 ruff → failures=5）。
+        # 版本釘選對齊 root-infra-ci.yml 與 AutoClaude/pyproject.toml（勿單邊升版）。
+        # 本 job 刻意**不**跑 `ruff check tools/`（那是 root-infra-ci.yml 第 16 道的職責）：
+        # 這裡要的只是「跑 runner 的環境前置一致」，不是把 lint 閘門複製三份。
+        run: python -m pip install --quiet --disable-pip-version-check 'ruff==0.15.21'
 
       - name: tools/tests/（SIGPIPE 回歸鎖 + dev_start.py 平台邏輯；R3 QA 發現：先前只在 root-infra-ci.yml 的 ubuntu-latest 上以 mock 跑過，從未在真實 Windows 執行過）
         shell: pwsh

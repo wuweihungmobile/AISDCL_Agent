@@ -1570,7 +1570,10 @@ class TestConservationGuardsAreExplicitNotAssert(unittest.TestCase):
                     "| 合成分流 | fixed@R60（合成，僅存在於沙箱） |\n",
                 )
             before = ADL._LEDGER.read_bytes()
-            bullets_before = {name for _, name in ADL.index_bullet_lines(before.decode("utf-8"))}
+            index_before = ADL.ARCHIVE_INDEX_DOC().read_bytes()
+            bullets_before = {
+                name for _, name in ADL.index_bullet_lines(index_before.decode("utf-8"))
+            }
             plan = ADL.plan()
             movable_ids = {v["id"] for v in plan["movable"]}
             self.assertEqual(
@@ -1591,11 +1594,13 @@ class TestConservationGuardsAreExplicitNotAssert(unittest.TestCase):
             self.assertNotIn(b"\r", dest.read_bytes(), "archive 落地含 CR")
             after = ADL._LEDGER.read_bytes()
             self.assertNotIn(b"\r", after, "主檔落地含 CR")
-            after_text = after.decode("utf-8")
+            index_after = ADL.ARCHIVE_INDEX_DOC().read_bytes()
+            self.assertNotIn(b"\r", index_after, "歸檔索引檔落地含 CR")
+            index_text = index_after.decode("utf-8")
             new_bullet_lines = [
-                line for idx, name in ADL.index_bullet_lines(after_text)
+                line for idx, name in ADL.index_bullet_lines(index_text)
                 if name not in bullets_before
-                for line in [after_text.split("\n")[idx]]
+                for line in [index_text.split("\n")[idx]]
             ]
             self.assertEqual(
                 len(new_bullet_lines), 1,
@@ -1603,10 +1608,18 @@ class TestConservationGuardsAreExplicitNotAssert(unittest.TestCase):
             )
             added = len(new_bullet_lines[0].encode("utf-8")) + 1  # +1 ＝行尾 \n
             moved = sum(len(v["line"].encode("utf-8")) + 1 for v in plan["movable"])
+            # 🔴 R69 DEF-101-734：bullet 改寫進歸檔索引檔，主檔守恆式回到最嚴的
+            # 「新主檔 + 釋出 == 舊主檔」（`added` 對主檔恆為 0）；bullet 那一側改由
+            # 索引檔自己的守恆式接住。兩條式子都在，沒有無人看守的縫。
             self.assertEqual(
-                len(after) + moved, len(before) + added,
-                "主檔位元組未按「新主檔 + 釋出 == 舊主檔 + 新增」守恆"
-                "——差額若不等於那條 bullet 的長度，代表主檔還被改了別的地方",
+                len(after) + moved, len(before),
+                "主檔位元組未按「新主檔 + 釋出 == 舊主檔」守恆 —— 自 R69 起 apply() "
+                "不再往主檔寫任何東西，任何差額都代表主檔被偷改了",
+            )
+            self.assertEqual(
+                len(index_after), len(index_before) + added,
+                "歸檔索引檔位元組未按「新索引 == 舊索引 + bullet」守恆"
+                "——差額若不等於那條 bullet 的長度，代表索引檔還被改了別的地方",
             )
 
 
@@ -1633,13 +1646,14 @@ class TestArchiveIndexCoverage(unittest.TestCase):
         with _ledger_sandbox():
             base_rc, _ = self._run()
             self.assertEqual(base_rc, 0, "基線應為綠，否則本注入的因果不可歸屬")
-            text = ADL._LEDGER.read_bytes().decode("utf-8")
+            index_doc = ADL.ARCHIVE_INDEX_DOC()
+            text = index_doc.read_bytes().decode("utf-8")
             bullets = ADL.index_bullet_lines(text)
             self.assertTrue(bullets, "索引段解析不到任何 bullet ⇒ 判準⑤ 的前提已失效")
             idx, victim = bullets[-1]
             lines = text.split("\n")
             del lines[idx]
-            ADL._LEDGER.write_bytes("\n".join(lines).encode("utf-8"))
+            index_doc.write_bytes("\n".join(lines).encode("utf-8"))
             rc, output = self._run()
         self.assertEqual(rc, 1, "刪掉索引 bullet 後 check() 仍回 0 —— 判準⑤ 無牙")
         self.assertIn(victim, output, "失敗訊息必須指名是哪一支 archive 沒登記")
@@ -1659,12 +1673,13 @@ class TestArchiveIndexCoverage(unittest.TestCase):
     def test_a_bullet_for_a_nonexistent_archive_is_caught(self):
         """注入③：索引登記了磁碟上不存在的 archive → 必紅（防「刪檔沒刪索引」）。"""
         with _ledger_sandbox():
-            text = ADL._LEDGER.read_bytes().decode("utf-8")
+            index_doc = ADL.ARCHIVE_INDEX_DOC()
+            text = index_doc.read_bytes().decode("utf-8")
             bullets = ADL.index_bullet_lines(text)
             lines = text.split("\n")
             ghost = "AutoSDD_Defect_Log_archive_94.md"
             lines.insert(bullets[-1][0] + 1, f"> - **`{ghost}`**（沙箱注入的幽靈索引）：無此檔。")
-            ADL._LEDGER.write_bytes("\n".join(lines).encode("utf-8"))
+            index_doc.write_bytes("\n".join(lines).encode("utf-8"))
             rc, output = self._run()
         self.assertEqual(rc, 1, "索引指向不存在的 archive 而 check() 回 0")
         self.assertIn(ghost, output)
@@ -1683,13 +1698,13 @@ class TestArchiveIndexCoverage(unittest.TestCase):
                 "| 合成分流 | fixed@R60（合成，僅存在於沙箱） |\n",
             )
             before = {n for _, n in ADL.index_bullet_lines(
-                ADL._LEDGER.read_bytes().decode("utf-8"))}
+                ADL.ARCHIVE_INDEX_DOC().read_bytes().decode("utf-8"))}
             out, err = io.StringIO(), io.StringIO()
             with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
                 rc_apply = ADL.apply(93, frozenset(), "判準⑤ 測試")
             self.assertEqual(rc_apply, 0, err.getvalue())
             after = {n for _, n in ADL.index_bullet_lines(
-                ADL._LEDGER.read_bytes().decode("utf-8"))}
+                ADL.ARCHIVE_INDEX_DOC().read_bytes().decode("utf-8"))}
             rc_check, _ = self._run()
         self.assertEqual(
             after - before, {"AutoSDD_Defect_Log_archive_93.md"},
@@ -2261,10 +2276,10 @@ class TestGovernanceDocsAreOneSharedSsotObject(unittest.TestCase):
         with _ledger_sandbox() as quality:
             def_id, home = _an_archived_id()
             registered = quality / "SandboxGovernance.md"
-            registered.write_bytes("# 已登記的治理文件\n\n（無指針）\n".encode("utf-8"))
+            registered.write_bytes("# 已登記的治理文件\n\n（無指針）\n".encode())
             sibling = quality / "SandboxGovernance_r3.md"
             sibling.write_bytes(
-                f"# 姊妹治理文件\n\n本段宣稱 見主檔 {def_id} 於主檔。\n".encode("utf-8")
+                f"# 姊妹治理文件\n\n本段宣稱 見主檔 {def_id} 於主檔。\n".encode()
             )
             pristine = ADL._GOVERNANCE_DOCS
             try:
@@ -2931,19 +2946,42 @@ class TestCriterion2Narrowing(unittest.TestCase):
             with self.subTest(benign=benign):
                 self.assertIsNone(ADL.active_status_hit(f"fixed@R60：{benign} 已處理"))
 
+    # 判準④ 安全網的具名樣本（散文帶交棒字樣、`--plan` 應判 needs_ack）。
+    # 樣本會隨帳本歸檔逐筆離開主檔，故另設存活下限（見下方測試的 R69 段落）。
+    _HANDOFF_SAMPLE_IDS = ("DEF-101-521", "DEF-101-524", "DEF-101-554")
+    _MIN_LIVE_HANDOFF_SAMPLES = 2
+
     def test_handoff_net_is_untouched_by_the_narrowing(self):
         """🔴 鑑別力保留 (c)：判準④ 掃**整列**、且不套遮罩，真交棒仍會被攔下要求具名承認。
 
         實測坐實：本次因收窄而通過判準② 的 6 筆中，521／524／554 三筆隨即落在判準④
         手上（`--plan` 把它們列在「需具名承認」而非「可搬」）。
+
+        🔴 R69：原版對「樣本已被歸檔」的處置是 `self.skipTest(...)`，實測後果是
+        `archive_47` 搬走 DEF-101-524 之後，根層多出**第 16 支 skip、且是唯一未標籤
+        的樣本流失型 skip**（`run_root_unittests.py` 的明細印為
+        `[未標籤] …(def_id='DEF-101-524')`）。silent skip 正是本 repo 反覆付學費的形態
+        （R68「122 支迴歸鎖一支都沒跑」）：安全網樣本一支支被歸檔搬走，這條鎖會**無聲
+        地**縮到零樣本，而輸出上只是多一行 skipped。改為：對「仍在主檔」的樣本照跑，
+        並對存活樣本數設 fail-loud 下限——樣本掉到下限以下即紅，逼人補新樣本而不是
+        讓鎖靜默退化。
         """
         p = ADL.plan()
         needs_ack_ids = {v["id"] for v in p["needs_ack"]}
         movable_ids = {v["id"] for v in p["movable"]}
-        for def_id in ("DEF-101-521", "DEF-101-524", "DEF-101-554"):
+        in_main = needs_ack_ids | movable_ids
+        live = [d for d in self._HANDOFF_SAMPLE_IDS if d in in_main]
+        archived = [d for d in self._HANDOFF_SAMPLE_IDS if d not in in_main]
+        self.assertGreaterEqual(
+            len(live), self._MIN_LIVE_HANDOFF_SAMPLES,
+            f"判準④ 安全網的存活樣本只剩 {len(live)} 筆（下限 "
+            f"{self._MIN_LIVE_HANDOFF_SAMPLES}）：仍在主檔={live}／已歸檔={archived}。"
+            "樣本被歸檔搬光後本鎖就沒有驗證對象了——請從現行主檔挑一筆散文帶交棒字樣、"
+            "且 `--plan` 判為 needs_ack 的 DEF 補進 _HANDOFF_SAMPLE_IDS，"
+            "**不要**改用 skip 讓它靜默退化（R69 已為此付過一支未標籤 skip 的學費）",
+        )
+        for def_id in live:
             with self.subTest(def_id=def_id):
-                if def_id not in needs_ack_ids and def_id not in movable_ids:
-                    self.skipTest(f"{def_id} 已離開主檔（已歸檔），本樣本前提失效")
                 self.assertIn(
                     def_id, needs_ack_ids,
                     f"{def_id} 散文帶交棒字樣，判準② 收窄後必須由判準④ 接手攔下；"
@@ -3092,6 +3130,102 @@ class TestOpenBacklogArchiveIsRejected(unittest.TestCase):
         # 孤兒偵測確實看得到它們（不是只是「檔案裡有」而閘門讀不到）
         self.assertEqual(ADL.gate.orphan_backlog_problems(text), [],
                          "主檔未結列存在孤兒承接輪次問題")
+
+
+class TestArchiveIndexDocIsExternalized(unittest.TestCase):
+    """R69 `DEF-101-734` — 歸檔索引段外移的三條結構不變量。
+
+    **原始缺陷**：索引 bullet 是**單調增長且永遠無法靠歸檔回收**的一段（每次 `--apply`
+    往主檔多寫約 0.9KB，近幾輪每輪建 3~5 支 archive），卻與缺陷總表共用主檔那條
+    262,144 bytes 硬線。R69 動工時主檔距硬線只剩 250 bytes 而 `--plan` 可搬 **0 筆**
+    ——把單調增長項放進有硬上限的檔，數學上保證撞牆，而歸檔吞吐再高也救不了它。
+
+    **本鎖要守的是「搬出去之後守門沒有變弱」**，因為那才是這次外移的前提：
+      (甲) 索引檔仍屬**帳本家族** ⇒ 指針稽核（判準④⑥）、體積守門、compat-CI 的
+           `AutoSDD_Defect_Log_archive_*.md` `paths:` glob、沙箱複製面**全部零改動即涵蓋**。
+           若有人把它改名成家族 glob 外的形態（例如 `..._INDEX.md` 不帶 `archive_`），
+           這四道守門會同時、靜默地漏掉它 —— 正是 `DEF-101-587`「搬到另一支檔就繞過
+           守門」的形狀，故用測試把「它必須在家族內」釘住。
+      (乙) 索引檔**自己不需要 bullet**（它是目錄不是史料檔），判準⑤ 對它具名排除；
+           排除若寫成「零表格列就跳過」這種模糊判準，真正忘記登記的史料檔也會被吞掉。
+      (丙) 主檔內**不得再殘留**任何索引 bullet：殘留＝兩份索引並存，判準⑤ 只讀其中
+           一份，另一份腐化零訊號。
+    """
+
+    def test_index_doc_is_inside_the_ledger_family(self):
+        """(甲) 索引檔必須落在家族 glob 內，且家族＝指針稽核面的子集。"""
+        family = {p.name for p in ADL._family_files()}
+        self.assertIn(
+            ADL._ARCHIVE_INDEX_NAME, family,
+            f"{ADL._ARCHIVE_INDEX_NAME} 不在帳本家族（glob {ADL._ARCHIVE_GLOB}）內 —— "
+            "指針稽核／體積守門／compat-CI paths 會同時漏掉它",
+        )
+        self.assertIn(
+            ADL._ARCHIVE_INDEX_NAME,
+            {p.name for p in ADL._pointer_audit_files()},
+            "索引檔逸出指針稽核面 —— 它內含「立帳見 …」居所指針，逸出即零檢查",
+        )
+
+    def test_index_doc_is_excluded_from_criterion5_by_name_not_by_emptiness(self):
+        """(乙) 索引檔不替自己登記 bullet，且 `--check` 仍綠；排除是具名的。
+
+        反向證明排除**不是**靠「零表格列」：在沙箱裡給索引檔補上一列合成表格列，
+        判準⑤ 仍不得要求它有 bullet（若排除寫成「零列就跳過」，這一注入會讓它翻紅）。
+        """
+        with _ledger_sandbox():
+            index_doc = ADL.ARCHIVE_INDEX_DOC()
+            listed = {n for _, n in ADL.index_bullet_lines(
+                index_doc.read_bytes().decode("utf-8"))}
+            self.assertNotIn(ADL._ARCHIVE_INDEX_NAME, listed,
+                             "索引檔替自己登記了一條 bullet ⇒ 自我指涉的假需求")
+            _append_to(
+                index_doc,
+                "\n| ID | 發現日期 | 發現情境 | 現象與證據（file:line） | 嚴重度 "
+                "| 分流去向 | 狀態 |\n|---|---|---|---|---|---|---|\n"
+                "| DEF-999-991 | 2026-08-02 | 沙箱 | 合成 | P4 "
+                "| 合成 | fixed@R69（合成） |\n",
+            )
+            out, err = io.StringIO(), io.StringIO()
+            with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+                rc = ADL.check()
+        self.assertEqual(
+            rc, 0,
+            "索引檔帶了表格列之後判準⑤ 轉紅 ⇒ 排除是靠『零表格列』的模糊判準，"
+            f"不是具名比對 {ADL._ARCHIVE_INDEX_NAME}：{err.getvalue()}",
+        )
+
+    def test_main_ledger_carries_no_leftover_index_bullet(self):
+        """(丙) 主檔零殘留 bullet；且 `--apply` 把新 bullet 寫進索引檔而非主檔。"""
+        self.assertEqual(
+            ADL.index_bullet_lines(ADL._LEDGER.read_text(encoding="utf-8-sig")), [],
+            "主檔仍殘留歸檔索引 bullet ⇒ 兩份索引並存，判準⑤ 只讀索引檔那一份，"
+            "主檔那份腐化零訊號",
+        )
+        with _ledger_sandbox():
+            synth_id = "DEF-" + "101-" + "9" + "92"
+            _append_to(
+                ADL._LEDGER,
+                f"| {synth_id} | 2026-08-02 | 外移落點測試 | 合成 | P4 "
+                "| 合成分流 | fixed@R69（合成，僅存在於沙箱） |\n",
+            )
+            main_before = ADL._LEDGER.read_bytes()
+            out, err = io.StringIO(), io.StringIO()
+            with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+                rc = ADL.apply(92, frozenset(), "外移落點測試")
+            self.assertEqual(rc, 0, err.getvalue())
+            main_after = ADL._LEDGER.read_bytes()
+            index_names = {n for _, n in ADL.index_bullet_lines(
+                ADL.ARCHIVE_INDEX_DOC().read_bytes().decode("utf-8"))}
+        self.assertEqual(
+            ADL.index_bullet_lines(main_after.decode("utf-8")), [],
+            "apply() 把 bullet 寫回主檔了 —— 外移等於沒做，單調增長項又回到硬線內",
+        )
+        self.assertLess(
+            len(main_after), len(main_before),
+            "apply() 之後主檔沒有變小 ⇒ 主檔不再是「只減不增」",
+        )
+        self.assertIn("AutoSDD_Defect_Log_archive_92.md", index_names,
+                      "新 archive 未登記進索引檔")
 
 
 if __name__ == "__main__":

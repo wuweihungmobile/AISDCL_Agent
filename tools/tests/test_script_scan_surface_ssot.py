@@ -37,14 +37,14 @@ _REPO_ROOT = _TESTS_DIR.parents[1]
 
 sys.path.insert(0, str(_TESTS_DIR))
 sys.path.insert(0, str(_REPO_ROOT / "tools"))
+import test_ps1_bom  # noqa: E402
+import test_ps51_compat  # noqa: E402
+
 from _script_scan_surface import (  # noqa: E402
     LATEST_TREE_KEY,
     SCRIPT_SCAN_ROOTS,
     iter_tree_scripts,
 )
-
-import test_ps1_bom  # noqa: E402
-import test_ps51_compat  # noqa: E402
 
 
 def _load_parity():

@@ -9,6 +9,7 @@
 """
 from __future__ import annotations
 
+import ast
 import ctypes
 import datetime
 import inspect
@@ -2652,7 +2653,10 @@ class TestNightlyHeartbeat(DevStartTestCase):
                                    return_value=None), \
                  mock.patch("builtins.print") as fake_print:
                 dev_start._check_nightly_heartbeat(flavor)
-            printed = " ".join(str(c) for c in fake_print.call_args_list)
+            # R69（windows-compat-ci 假紅姊妹站點）：join 的必須是 print 的**實際引數**，
+            # 不是 `mock.call` 物件的 repr——repr 會把 Windows 路徑分隔符轉義（`\a` → `\\a`）
+            # 並把換行變 `\n` 字面，使任何對路徑／多行文案的 assertIn 在 Windows 必假紅。
+            printed = " ".join(str(a) for c in fake_print.call_args_list for a in c.args)
             self.assertIn("尚未跑過第一輪", printed,
                           f"{flavor}：print 消歧句消失（QA-R14-REV-5）")
             self.assertIn(expect, printed,
@@ -2943,20 +2947,32 @@ class TestLaunchdNightlyLoaded(DevStartTestCase):
             with mock.patch.object(dev_start, "_launchd_plist_target",
                                    return_value=target):
                 note = dev_start._check_nightly_heartbeat("mac")
-        printed = " ".join(str(c) for c in fake_print.call_args_list)
+        # R69（windows-compat-ci 假紅）：join 的是 print 的**實際引數**，不是 call 物件的 repr。
+        # repr 會把路徑分隔符轉義（Windows 上 `\elsewhere` → repr 成 `\\elsewhere`），
+        # 於是任何對路徑的 assertIn 都會在 Windows 假紅。行 2728 已是此寫法，此處對齊。
+        printed = " ".join(str(a) for c in fake_print.call_args_list for a in c.args)
         return note, printed
+
+    # 別份 checkout 的 nightly 腳本路徑（字串字面值；由被測路徑經 Path 正規化後才比對）
+    _ELSEWHERE = "/elsewhere/AutoClaude/tools/run_local_nightly.sh"
 
     def test_loaded_but_pointing_at_another_checkout_is_not_reported_as_normal(self):
         """R68 新四態的 str 態：label 全機唯一，第二個 clone／搬過家的 repo 會「命中
         label 但排程其實指向別份 checkout」。此時**不得**沿用 True 態的「已載入、
         尚未跑過第一輪」正常措辭——那會讓使用者以為本 repo 有 nightly 兜底，實際沒有。
+
+        🔴 R69（windows-compat-ci 假紅）：斷言不得寫死 POSIX 字面值 `"/elsewhere"`——生產碼印的是
+        `Path` 物件，其 `str()` 在 Windows 是 `\\elsewhere\\AutoClaude\\…`，字面值必然
+        落空（windows-compat-ci 實紅）。改比對 `str(Path(self._ELSEWHERE))`：兩平台各自
+        正規化後仍要求**整條目標路徑**出現在訊息裡——比原本只找 `/elsewhere` 更嚴，
+        不是把斷言改弱。
         """
         out = f"{self._DECOY}\n-\t0\tcom.autoclaude.nightly\n"
-        note, printed = self._heartbeat_with_launchctl(
-            out, plist_target="/elsewhere/AutoClaude/tools/run_local_nightly.sh")
+        note, printed = self._heartbeat_with_launchctl(out, plist_target=self._ELSEWHERE)
         self.assertNotIn("launchd 已載入、尚未跑過第一輪", printed,
                          "指向別份 checkout 卻用 True 態措辭 ⇒ 誤報本 repo 有兜底")
-        self.assertIn("/elsewhere", printed, "須指出實際指向的路徑，否則無從排查")
+        self.assertIn(str(Path(self._ELSEWHERE)), printed,
+                      "須指出實際指向的路徑，否則無從排查")
 
     def test_unreadable_plist_falls_back_to_none_not_a_false_normal(self):
         """plist 讀不到 ⇒ 無鑑別力，必須退回 None 態的雙可能文案，不得謊報正常。"""
@@ -4436,8 +4452,8 @@ class TestStaleScheduleTracks(unittest.TestCase):
     def test_daily_track_with_no_success_for_weeks_is_reported(self) -> None:
         """正向注入：日頻軌最近成功在 13 天前（> 1 天 × factor 2）⇒ 必須報陳舊。"""
         root = self._root_with_cron('    - cron: "12 6 * * *"\n')
-        now = datetime.datetime(2026, 8, 2, tzinfo=datetime.timezone.utc)
-        with mock.patch.object(ci_liveness, "_latest_success_schedule",
+        now = datetime.datetime(2026, 8, 2, tzinfo=datetime.UTC)
+        with mock.patch.object(ci_liveness, "_latest_success_run",
                                return_value="2026-07-20T01:00:00Z"):
             stale = ci_liveness.stale_schedule_tracks(root, time.monotonic() + 25, now=now)
         self.assertEqual(len(stale), 1, f"日頻軌 13 天沒成功卻零訊號：{stale}")
@@ -4446,8 +4462,8 @@ class TestStaleScheduleTracks(unittest.TestCase):
     def test_fresh_track_is_not_reported(self) -> None:
         """還原：同一軌昨天才成功 ⇒ 不得報（否則哨兵會天天狼來了而被忽略）。"""
         root = self._root_with_cron('    - cron: "12 6 * * *"\n')
-        now = datetime.datetime(2026, 8, 2, tzinfo=datetime.timezone.utc)
-        with mock.patch.object(ci_liveness, "_latest_success_schedule",
+        now = datetime.datetime(2026, 8, 2, tzinfo=datetime.UTC)
+        with mock.patch.object(ci_liveness, "_latest_success_run",
                                return_value="2026-08-01T01:00:00Z"):
             self.assertEqual(
                 ci_liveness.stale_schedule_tracks(root, time.monotonic() + 25, now=now), [])
@@ -4455,8 +4471,8 @@ class TestStaleScheduleTracks(unittest.TestCase):
     def test_weekly_track_tolerates_one_skip(self) -> None:
         """週頻軌 13 天前成功仍在容忍內（7 × 2 = 14）——STALE_PERIOD_FACTOR 的存在理由。"""
         root = self._root_with_cron('    - cron: "12 6 * * 1"\n')
-        now = datetime.datetime(2026, 8, 2, tzinfo=datetime.timezone.utc)
-        with mock.patch.object(ci_liveness, "_latest_success_schedule",
+        now = datetime.datetime(2026, 8, 2, tzinfo=datetime.UTC)
+        with mock.patch.object(ci_liveness, "_latest_success_run",
                                return_value="2026-07-20T01:00:00Z"):
             self.assertEqual(
                 ci_liveness.stale_schedule_tracks(root, time.monotonic() + 25, now=now), [])
@@ -4464,14 +4480,14 @@ class TestStaleScheduleTracks(unittest.TestCase):
     def test_no_signal_is_not_reported_as_stale(self) -> None:
         """查不到（gh 失敗／逾時）一律跳過：無訊號 ≠ 壞訊號，否則離線就整排假紅。"""
         root = self._root_with_cron('    - cron: "12 6 * * *"\n')
-        with mock.patch.object(ci_liveness, "_latest_success_schedule", return_value=None):
+        with mock.patch.object(ci_liveness, "_latest_success_run", return_value=None):
             self.assertEqual(
                 ci_liveness.stale_schedule_tracks(root, time.monotonic() + 25), [])
 
     def test_never_succeeded_is_reported(self) -> None:
         """查得到但一次都沒成功過（空字串）⇒ 必須報——這正是 nightly-full 的實況。"""
         root = self._root_with_cron('    - cron: "12 6 * * *"\n')
-        with mock.patch.object(ci_liveness, "_latest_success_schedule", return_value=""):
+        with mock.patch.object(ci_liveness, "_latest_success_run", return_value=""):
             stale = ci_liveness.stale_schedule_tracks(root, time.monotonic() + 25)
         self.assertEqual(len(stale), 1)
         self.assertIn("查無任何成功", stale[0])
@@ -4484,7 +4500,7 @@ class TestStaleScheduleTracks(unittest.TestCase):
     def test_deadline_stops_the_scan(self) -> None:
         """預算耗盡即中止：advisory 哨兵寧可少報，不可拖住開工流程。"""
         root = self._root_with_cron('    - cron: "12 6 * * *"\n')
-        with mock.patch.object(ci_liveness, "_latest_success_schedule",
+        with mock.patch.object(ci_liveness, "_latest_success_run",
                                return_value="") as probe:
             self.assertEqual(
                 ci_liveness.stale_schedule_tracks(root, time.monotonic() - 1), [])
@@ -4495,6 +4511,613 @@ class TestStaleScheduleTracks(unittest.TestCase):
         root = self._root_with_cron(
             '    - cron: "12 6 * * 1"\n    - cron: "12 7 * * *"\n')
         self.assertEqual(ci_liveness.scheduled_workflow_periods(root), {"demo.yml": 1.0})
+
+
+class TestLivenessEventFilter(unittest.TestCase):
+    """R69（DEF-101-703）：`_latest_success_run` 的事件過濾面。
+
+    🔴 為何非有不可：R68 版只查 `--event schedule`，而「陳舊了怎麼辦」的唯一處置是
+    `gh workflow run <wf>.yml`——它產生的是 `event=workflow_dispatch` 的 run。兩集合
+    實證互斥 ⇒ **照著處置做也永遠解不開**，哨兵會永遠喊陳舊、最後被當成狼來了而被
+    忽略，正好複製它要消滅的那個病。本類別鎖住「補跑算數」這個語意，以及「查詢全滅
+    ≠ 通道已死」的無訊號紀律（否則離線就整排假紅）。
+    """
+
+    @staticmethod
+    def _run(stdout: str, rc: int = 0) -> subprocess.CompletedProcess:
+        return subprocess.CompletedProcess(args=["gh"], returncode=rc,
+                                           stdout=stdout, stderr="")
+
+    def test_workflow_dispatch_success_counts_as_liveness(self) -> None:
+        """schedule 從未成功、但有人手動補跑成功 ⇒ 必須採計該 dispatch 時戳。"""
+        by_event = {"schedule": self._run("[]"),
+                    "workflow_dispatch": self._run(
+                        json.dumps([{"updatedAt": "2026-08-01T20:00:00Z"}]))}
+        with mock.patch.object(ci_liveness.subprocess, "run",
+                               side_effect=lambda a, **k: by_event[a[a.index("--event") + 1]]):
+            self.assertEqual(ci_liveness._latest_success_run("demo.yml"),
+                             "2026-08-01T20:00:00Z",
+                             "手動補跑（workflow_dispatch）的成功未被採計——"
+                             "本哨兵印給人的處置指令產生的正是這種 run，"
+                             "不採計＝處置指令與判準實證互斥、閘門永遠解不開")
+
+    def test_newest_across_events_wins(self) -> None:
+        """兩事件都有成功 ⇒ 取較新者（否則舊的那筆會把新的蓋掉、假報陳舊）。"""
+        by_event = {
+            "schedule": self._run(json.dumps([{"updatedAt": "2026-07-14T08:20:59Z"}])),
+            "workflow_dispatch": self._run(json.dumps([{"updatedAt": "2026-08-01T20:00:00Z"}])),
+        }
+        with mock.patch.object(ci_liveness.subprocess, "run",
+                               side_effect=lambda a, **k: by_event[a[a.index("--event") + 1]]):
+            self.assertEqual(ci_liveness._latest_success_run("demo.yml"),
+                             "2026-08-01T20:00:00Z")
+
+    def test_all_events_query_failure_is_no_signal_not_stale(self) -> None:
+        """每個事件都查失敗 ⇒ None（無訊號），不得回空字串被上層當成「從未成功」。"""
+        with mock.patch.object(ci_liveness.subprocess, "run",
+                               side_effect=OSError("gh 不存在")):
+            self.assertIsNone(ci_liveness._latest_success_run("demo.yml"))
+
+    def test_queried_ok_but_zero_runs_is_never_succeeded(self) -> None:
+        """查得到但兩事件皆零筆 ⇒ 空字串（＝真的從未成功），與無訊號必須可區分。"""
+        with mock.patch.object(ci_liveness.subprocess, "run",
+                               return_value=self._run("[]")):
+            self.assertEqual(ci_liveness._latest_success_run("demo.yml"), "")
+
+    def test_every_liveness_event_is_actually_queried(self) -> None:
+        """鑑別力鎖：把 `_LIVENESS_EVENTS` 縮回單一事件會讓上面兩支鎖失去意義，
+        故直接釘住「宣告的每個事件都真的被送進 gh」——防止未來有人只改常數不改迴圈。
+        """
+        seen: list[str] = []
+
+        def _spy(argv, **_kw):
+            seen.append(argv[argv.index("--event") + 1])
+            return self._run("[]")
+
+        with mock.patch.object(ci_liveness.subprocess, "run", side_effect=_spy):
+            ci_liveness._latest_success_run("demo.yml")
+        self.assertEqual(seen, list(ci_liveness._LIVENESS_EVENTS))
+        self.assertIn("workflow_dispatch", ci_liveness._LIVENESS_EVENTS,
+                      "手動補跑事件被移出 _LIVENESS_EVENTS＝死鎖復發")
+
+
+from _ps_engine import any_engine_available as _ps_any_engine  # noqa: E402
+from _ps_engine import production_engine as _ps_production_engine  # noqa: E402
+
+_GUARD_SH_PATH = Path(__file__).resolve().parents[1] / "lib" / "windowsapps_guard.sh"
+_GUARD_PS1_PATH = Path(__file__).resolve().parents[1] / "lib" / "WindowsAppsGuard.ps1"
+_DEV_START_SH_PATH = Path(__file__).resolve().parents[1] / "dev_start.sh"
+_DEV_START_PS1_PATH = Path(__file__).resolve().parents[1] / "dev_start.ps1"
+
+# 假「系統 3.9」直譯器：轉呼叫**真**直譯器，但先把 `sys.version_info` 改寫成
+# 3.9.6，其餘行為（`-c` 探測／跑 script）逐字照舊。
+# WHY 不直接用 `/usr/bin/python3`：那是 macOS 專屬路徑，Linux/Windows runner 上
+# 不一定存在「一支剛好 < 3.11 的直譯器」，測試會因環境而非因缺陷變色；本 shim
+# 讓「PATH 第一順位是 3.9」這個情境在三平台皆可構造。
+_FAKE_39_SHIM = """#!/bin/sh
+exec "{real}" -c '
+import os, sys, runpy
+sys.version_info = (3, 9, 6, "final", 0)
+args = sys.argv[1:]
+if args and args[0] == "-c":
+    code = args[1]
+    sys.argv = ["-c"] + args[2:]
+    exec(code)
+elif args:
+    sys.argv = args
+    # 對齊 CPython 跑 script 時 sys.path[0]＝script 所在目錄（runpy 不會自己補），
+    # 否則 dev_start.py 的 `import _stdio_utf8` 會因 shim 而非因缺陷失敗
+    sys.path.insert(0, os.path.dirname(os.path.abspath(args[0])))
+    runpy.run_path(args[0], run_name="__main__")
+' "$@"
+"""
+
+
+@unittest.skipIf(shutil.which("bash") is None, "需要 bash")
+class TestPickPythonGeMin(unittest.TestCase):
+    """R69 P2 迴歸鎖：`tools/dev_start.sh` 的直譯器候選鏈必須挑 >= 3.11。
+
+    為何這是缺陷而不是設定問題（macOS 真機重現）：Homebrew 的 `python@3.11` 是
+    keg-only，`brew install python@3.11` **不會**改寫 `python3`（macOS 的
+    `python3` 恆為系統 3.9.6），只放一支 `python3.11`。修復前 dev_start.sh 的
+    候選清單只有 `python3` / `python`，於是「照 ONBOARDING §1 逐字裝完 3.11」
+    之後仍撿到 3.9 → `tools/dev_start.py` 版本前置閘 rc=2 ⇒ ONBOARDING §2.1
+    宣稱的「全新機器可直接執行 dev_start」在 mac 上為假。R68（DEF-101-628）只
+    把 traceback 換成友善訊息，沒動選擇邏輯，缺陷本體原封不動。
+    """
+
+    def setUp(self) -> None:
+        self.tmp = Path(tempfile.mkdtemp())
+        self.addCleanup(_rmtree_force, self.tmp)
+        self.bin = self.tmp / "bin"
+        self.bin.mkdir()
+
+    def _write_fake_39(self, name: str) -> Path:
+        path = self.bin / name
+        path.write_text(_FAKE_39_SHIM.format(real=sys.executable), encoding="utf-8")
+        path.chmod(0o755)
+        return path
+
+    def _write_real_311(self, name: str) -> Path:
+        """把跑測試的直譯器（依模組頂端版本閘，必 >= 3.11）以指定名字曝露到 PATH。"""
+        path = self.bin / name
+        path.write_text(
+            f'#!/bin/sh\nexec "{sys.executable}" "$@"\n', encoding="utf-8"
+        )
+        path.chmod(0o755)
+        return path
+
+    def _bash(self, snippet: str, path_env: str, extra_env: dict | None = None):
+        env = {
+            "PATH": path_env,
+            "HOME": str(self.tmp / "nohome"),
+            "LC_ALL": "C.UTF-8",
+            "PYTHONIOENCODING": "utf-8",
+        }
+        env.update(extra_env or {})
+        # bash 用絕對路徑呼叫：`path_env` 刻意可以只有 fixture 目錄（構造「機器上
+        # 一支 >= 3.11 都沒有」），此時用裸名 'bash' 會連 shell 都找不到。
+        return subprocess.run(
+            [shutil.which("bash"), "-c", snippet], capture_output=True, encoding="utf-8",
+            errors="replace", env=env, timeout=120,
+        )
+
+    def test_picks_311_when_path_python3_is_39(self) -> None:
+        """PATH 上 `python3` 是 3.9、另有 `python3.11` ⇒ 必須選中 3.11。
+
+        候選順序刻意反著餵（`python3` 排第一），確保通過的理由是「版本判斷」
+        而非「剛好順序在前」——修復前的實作正是「命中即用、不看版本」。
+        """
+        self._write_fake_39("python3")
+        self._write_real_311("python3.11")
+        r = self._bash(
+            f'. "{_GUARD_SH_PATH}"\n'
+            "PYTHON_GE_MIN_CANDIDATES=(python3 python3.11)\n"
+
+            "pick_python_ge_min\n",
+            path_env=f"{self.bin}:/usr/bin:/bin",
+        )
+        self.assertEqual(r.returncode, 0, f"stderr={r.stderr}")
+        picked = r.stdout.strip()
+        self.assertTrue(picked, "pick_python_ge_min 什麼都沒印")
+        mm = subprocess.run(
+            [picked, "-c", "import sys;print('%d.%d' % sys.version_info[:2])"],
+            capture_output=True, encoding="utf-8", errors="replace", timeout=60,
+        ).stdout.strip()
+        self.assertGreaterEqual(
+            tuple(int(x) for x in mm.split(".")), (3, 11),
+            f"選中的直譯器是 {mm}（{picked}）——候選鏈仍在撿 < 3.11 的直譯器",
+        )
+
+    def test_fails_loud_with_actionable_commands_when_no_311(self) -> None:
+        """完全沒有 >= 3.11 ⇒ rc=1 且訊息含**逐字可執行**的補救指令。
+
+        「請安裝 Python 3.11」這種要使用者自己翻文件的句子不算補救——本鎖要求
+        訊息裡真的有可以複製貼上就跑的指令（mac 的 brew / Linux 的套件管理器）。
+        """
+        self._write_fake_39("python3")
+        r = self._bash(
+            f'. "{_GUARD_SH_PATH}"\n'
+            "PYTHON_GE_MIN_CANDIDATES=(python3)\n"
+
+            "pick_python_ge_min && echo PICKED\n"
+            'echo "rc=$?"\n'
+            "python_ge_min_remediation\n",
+            path_env=f"{self.bin}",
+        )
+        self.assertNotIn("PICKED", r.stdout)
+        self.assertIn("rc=1", r.stdout)
+        combined = r.stdout + r.stderr
+        self.assertIn("❌", combined)
+        for cmd in ("brew install python@3.11", "apt-get install -y python3.11"):
+            self.assertIn(cmd, combined, f"補救訊息缺少可執行指令：{cmd}")
+
+    def test_dev_start_sh_end_to_end_picks_311_over_path_python3(self) -> None:
+        """端到端（真的跑 tools/dev_start.sh）：PATH 第一順位是 3.9 仍須 rc=0。
+
+        修復前這裡必然 rc=2（`tools/dev_start.py` 版本前置閘）——這正是複審在
+        macOS 真機上重現的入門路徑斷點。`--help` 讓核心在 argparse 就結束，不
+        觸發 git/venv 等副作用，但版本閘在 import 期就會擋，鑑別力不受影響。
+        """
+        self._write_fake_39("python3")
+        self._write_fake_39("python")
+        self._write_real_311("python3.11")
+        r = self._bash(
+            f'bash "{_DEV_START_SH_PATH}" --help\n',
+            path_env=f"{self.bin}:/usr/bin:/bin",
+        )
+        self.assertEqual(
+            r.returncode, 0,
+            f"dev_start.sh rc={r.returncode}（修復前為 2）\nstdout={r.stdout}\nstderr={r.stderr}",
+        )
+        self.assertIn("usage: dev_start.py", r.stdout)
+
+    @unittest.skipIf(shutil.which("zsh") is None, "需要 zsh")
+    def test_candidate_chain_word_splits_under_zsh(self) -> None:
+        """🔴 zsh 迴歸鎖（R69 P2 自身修復過程中真的踩到）：候選鏈初版寫成空白
+        分隔字串 + `for c in $LIST`，在 bash 下正確、在 **zsh** 下整條清單被當成
+        單一候選 ⇒ 一支都命中不了。zsh 對未加引號的參數展開預設不做字詞切分
+        （SH_WORD_SPLIT off），而 `source tools/dev_start.sh` 的主場正是 macOS
+        預設 shell zsh——bash 全綠、真實入門路徑仍斷，與本輪要修的缺陷同型。
+        """
+        self._write_fake_39("python3")
+        self._write_real_311("python3.11")
+        r = subprocess.run(
+            [shutil.which("zsh"), "-c",
+             f'. "{_GUARD_SH_PATH}"\npick_python_ge_min\n'],
+            capture_output=True, encoding="utf-8", errors="replace", timeout=120,
+            env={"PATH": f"{self.bin}:/usr/bin:/bin", "HOME": str(self.tmp / "nohome")},
+        )
+        self.assertEqual(r.returncode, 0, f"zsh 下候選鏈全數落空：stderr={r.stderr}")
+        self.assertTrue(r.stdout.strip())
+
+    def test_production_candidate_chain_covers_documented_install_paths(self) -> None:
+        """生產候選鏈必須真的涵蓋 ONBOARDING §1 那條安裝路徑的落點。
+
+        上面的行為測試會覆寫候選清單（為了控制順序），故清單內容本身另立本鎖：
+        少了 Homebrew 的落點，`brew install python@3.11` 之後但 PATH 尚未含
+        `/opt/homebrew/bin` 的新機器就會回到修復前的斷點。
+        """
+        text = _GUARD_SH_PATH.read_text(encoding="utf-8")
+        m = re.search(r"PYTHON_GE_MIN_CANDIDATES=\((.*?)\)", text, re.DOTALL)
+        self.assertIsNotNone(m, "找不到 PYTHON_GE_MIN_CANDIDATES 宣告")
+        chain = " ".join(m.group(1).split())
+        for expected in (
+            "python3.11", "python3.12", "python3.13", "python3", "python",
+            "/opt/homebrew/opt/python@3.11/bin/python3.11",
+            "/usr/local/opt/python@3.11/bin/python3.11",
+            ".pyenv/shims/python3.11",
+        ):
+            self.assertIn(expected, chain, f"候選鏈缺少 {expected}")
+        self.assertLess(
+            chain.index("python3.11"), chain.index(" python3 "),
+            "版本化名稱必須排在裸 python3 之前（.python-version 目標版優先）",
+        )
+
+    def test_wrapper_delegates_and_wires_fail_loud(self) -> None:
+        """薄殼必須委派 SSOT 候選鏈，且失敗分支真的接上補救訊息 + 非零 rc。"""
+        text = _DEV_START_SH_PATH.read_text(encoding="utf-8")
+        code = "\n".join(
+            ln for ln in text.splitlines() if not ln.lstrip().startswith("#")
+        )
+        self.assertIn('py="$(pick_python_ge_min)"', code)
+        self.assertIn("python_ge_min_remediation", code)
+        self.assertNotIn(
+            'py="python3"', code,
+            "又出現「命中 python3 即用、不看版本」的舊分支＝R69 P2 缺陷復發",
+        )
+
+
+class TestMinPythonVersionSsotSync(unittest.TestCase):
+    """版本下限只有一份權威（`dev_start.py::_MIN_PY`），三處字面值須同步。
+
+    為何需要：候選鏈的版本判斷寫在 shell/PowerShell 裡（挑直譯器時 Python 還
+    沒得跑，無法讀核心常數），天生是複製過去的第二/第三份字面值——沒有機械鎖
+    的話，下一次調高下限（3.11 → 3.12）時兩支殼會靜默停在舊值，退化成「殼挑了
+    一支核心不接受的直譯器」，使用者又看到 rc=2。
+    """
+
+    def test_min_python_version_is_consistent_across_dev_start_ssots(self) -> None:
+        core_mm = "{}.{}".format(*dev_start._MIN_PY)
+        sh_text = _GUARD_SH_PATH.read_text(encoding="utf-8")
+        ps_text = _GUARD_PS1_PATH.read_text(encoding="utf-8-sig")
+
+        self.assertIn(f'PYTHON_GE_MIN_MM="{core_mm}"', sh_text)
+        self.assertIn(f"PythonGeMinMM = '{core_mm}'", ps_text)
+        probe_tuple = "({}, {})".format(*dev_start._MIN_PY)
+        for label, text in (("bash", sh_text), ("powershell", ps_text)):
+            self.assertIn(
+                f"sys.version_info[:2] >= {probe_tuple}", text,
+                f"{label} 側版本探測碼與核心 _MIN_PY={core_mm} 不同步",
+            )
+
+
+@unittest.skipUnless(_ps_any_engine(), "需要 PowerShell 引擎（pwsh/powershell）")
+class TestGetPythonGeMinPowerShell(unittest.TestCase):
+    """Windows 側同構實作的**行為**鎖（本機零 Windows，故以 pwsh 真的執行）。
+
+    ADR-XPLAT-002 §3.2 的紀律：字面比對型 parity 不算機械釘選——.ps1 的候選鏈
+    必須真的被執行過，才算「雙向對等」而不是「兩邊都寫了看起來很像的東西」。
+    """
+
+    def setUp(self) -> None:
+        self.tmp = Path(tempfile.mkdtemp())
+        self.addCleanup(_rmtree_force, self.tmp)
+        self.bin = self.tmp / "bin"
+        self.bin.mkdir()
+        self.ps = _ps_production_engine()
+
+    def _run_ps(self, snippet: str, path_env: str | None = None):
+        env = dict(os.environ)
+        if path_env:
+            env["PATH"] = path_env
+        return subprocess.run(
+            [self.ps, "-NoProfile", "-Command", snippet],
+            capture_output=True, encoding="utf-8", errors="replace",
+            env=env, timeout=180,
+        )
+
+    @unittest.skipIf(os.name == "nt", "shim 為 POSIX sh 腳本")
+    def test_skips_sub_311_candidate(self) -> None:
+        shim = self.bin / "python3"
+        shim.write_text(_FAKE_39_SHIM.format(real=sys.executable), encoding="utf-8")
+        shim.chmod(0o755)
+        real = self.bin / "python3.11"
+        real.write_text(f'#!/bin/sh\nexec "{sys.executable}" "$@"\n', encoding="utf-8")
+        real.chmod(0o755)
+
+        r = self._run_ps(
+            f'. "{_GUARD_PS1_PATH}"; '
+            "$script:PythonGeMinCandidates = @('python3'); "
+            '"only39=[" + (Get-PythonGeMin) + "]"; '
+            "$script:PythonGeMinCandidates = @('python3', 'python3.11'); "
+            '"both=[" + (Get-PythonGeMin) + "]"',
+            path_env=f"{self.bin}:/usr/bin:/bin",
+        )
+        self.assertEqual(r.returncode, 0, f"stderr={r.stderr}")
+        self.assertIn("only39=[]", r.stdout, "3.9 候選竟被 Get-PythonGeMin 接受")
+        self.assertNotIn("both=[]", r.stdout, "有 3.11 可用卻回 $null")
+
+    def test_remediation_lists_actionable_commands(self) -> None:
+        r = self._run_ps(f'. "{_GUARD_PS1_PATH}"; Write-PythonGeMinRemediation')
+        self.assertEqual(r.returncode, 0, f"stderr={r.stderr}")
+        self.assertIn("❌", r.stdout)
+        self.assertIn("winget install -e --id Python.Python.3.11", r.stdout)
+
+    def test_ps1_wrapper_delegates_and_wires_fail_loud(self) -> None:
+        code = "\n".join(
+            ln for ln in _DEV_START_PS1_PATH.read_text(encoding="utf-8-sig").splitlines()
+            if not ln.lstrip().startswith("#")
+        )
+        self.assertIn("$Py = Get-PythonGeMin", code)
+        self.assertIn("Write-PythonGeMinRemediation", code)
+        self.assertNotIn(
+            "Get-Command py -ErrorAction SilentlyContinue", code,
+            "又出現「py launcher 命中即用、不看版本」的舊分支＝R69 P2 缺陷復發",
+        )
+
+
+# ────────────────────────────────────────────────────────────────────────────
+# R69 P1：「版本閘之前的 prelude 必須在 _MIN_PY 下限**以下**的直譯器可載入」
+#
+# 缺陷本體（macOS 真機重現）：`tools/dev_start.py` 第 53 行被加上
+# `from datetime import UTC`（`datetime.UTC` 是 **3.11** 才有的別名），而該行位在
+# 版本閘（`_MIN_PY` / `SystemExit(2)`）**之前** ⇒ 用 macOS 系統 python3（3.9.6）跑
+# 本檔會在 import 期就吐 `ImportError` traceback，DEF-101-628 修好的友善最低版本
+# 訊息整個被打回原形。
+#
+# 🔴 為何舊測試抓不到、非重寫不可：既有的 `_FAKE_39_SHIM` 是「真 3.11 直譯器 +
+# 開跑後改寫 `sys.version_info`」。改寫發生在 `runpy.run_path()` **之前**沒錯，但
+# 底下跑的仍是真 3.11 直譯器——`from datetime import UTC` 在它身上永遠成功。也就是
+# 說那支 shim **結構上不可能**觀測到 import-time 的版本相依失敗，它只能驗「版本
+# 判斷分支」，驗不了「prelude 本身載不載得動」。本節因此改用**真的**次版直譯器
+# subprocess 實跑（第一道），並補一道不依賴外部直譯器的靜態掃描（第二道），
+# 兩道互為備援：真跑有鑑別力但依賴環境，靜態掃描恆跑但只看得到語法/名字。
+# ────────────────────────────────────────────────────────────────────────────
+
+_TOOLS_DIR = Path(__file__).resolve().parents[1]
+_DEV_START_PY = _TOOLS_DIR / "dev_start.py"
+
+# 掃描起點（各自的「必須在下限版可載入」射程）：
+#   dev_start.py  → 只到版本閘為止（閘之後本來就允許 3.11+ API）
+#   bootstrap_core.py → **整支**。它是 dev_start 版本閘訊息裡指名的補救路徑
+#       （「先跑 bash tools/bootstrap.sh，其核心 3.9 可載入、會自動挑 3.11 建
+#       .venv」），而 tools/bootstrap.sh 在 .venv 尚未存在時就是拿系統 python3
+#       跑它。它若也炸 traceback，那句補救指引就是假的，使用者無路可走。
+_PY39_ENTRYPOINTS = (
+    (_DEV_START_PY, "prelude"),
+    (_TOOLS_DIR / "bootstrap_core.py", "whole"),
+)
+
+# 3.9 之後才出現的 stdlib 名字（只列「寫程式時真的會順手用上、且一用就炸」的）。
+# 這不是完整表，也不需要是——第一道真跑鎖才是完整判定，本表是它缺席時的近似。
+_POST_39_MODULES = frozenset({"tomllib"})
+_POST_39_FROM_NAMES = {
+    "datetime": frozenset({"UTC"}),                                   # 3.11
+    "enum": frozenset({"StrEnum", "ReprEnum", "EnumCheck", "verify"}),  # 3.11
+    "asyncio": frozenset({"TaskGroup", "Runner", "Barrier", "timeout"}),  # 3.11
+    "contextlib": frozenset({"chdir"}),                               # 3.11
+    "hashlib": frozenset({"file_digest"}),                            # 3.11
+    "typing": frozenset({                                             # 3.10 / 3.11
+        "Self", "Never", "LiteralString", "assert_never", "assert_type",
+        "reveal_type", "dataclass_transform", "TypeVarTuple", "Unpack",
+        "ParamSpec", "Concatenate", "TypeAlias", "TypeGuard",
+    }),
+    "types": frozenset({"UnionType", "NoneType", "EllipsisType"}),     # 3.10
+}
+
+
+def _find_sub_min_interpreter() -> tuple[str | None, tuple[int, ...] | None]:
+    """找一支版本**低於** `dev_start._MIN_PY` 的真直譯器（macOS 主場：/usr/bin/python3）。"""
+    for cand in ("/usr/bin/python3", "python3.9", "python3.10", "python3.8", "python3.7"):
+        exe = cand if os.path.isabs(cand) else shutil.which(cand)
+        if not exe or not Path(exe).exists():
+            continue
+        probe = subprocess.run(
+            [exe, "-c", "import sys;print('%d.%d' % sys.version_info[:2])"],
+            capture_output=True, encoding="utf-8", errors="replace", timeout=60,
+        )
+        if probe.returncode != 0:
+            continue
+        try:
+            mm = tuple(int(x) for x in probe.stdout.strip().split("."))
+        except ValueError:
+            continue
+        if mm < dev_start._MIN_PY:
+            return exe, mm
+    return None, None
+
+
+class TestRealSubMinInterpreterPrelude(unittest.TestCase):
+    """第一道（有鑑別力的那道）：拿**真的** < `_MIN_PY` 直譯器 subprocess 實跑。
+
+    斷言三件事，缺一不可：
+      (a) 退出碼恰為版本閘定義的 2 —— 不是「非零就好」，1/70/-11 都代表走的是
+          崩潰路徑而非閘門路徑；
+      (b) stderr 含友善訊息與**逐字可執行**的補救指令；
+      (c) stderr **不含 `Traceback`** —— 這一條就是本輪缺陷的直接反面。
+    """
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        cls.py, cls.mm = _find_sub_min_interpreter()
+
+    def setUp(self) -> None:
+        if self.py is None:
+            # 🔴 fail loud，不靜默綠：這支鎖的價值全在「真的用舊直譯器跑一次」，
+            # 環境湊不出舊直譯器時必須讓 skip 訊息自己喊出來（`[TOOL-MISSING]`），
+            # 讓 CI log 上「這道鎖沒跑」是可被搜尋的事實，而不是一片綠裡的沉默。
+            self.skipTest(
+                f"[TOOL-MISSING] 找不到版本 < {dev_start._MIN_PY} 的真直譯器"
+                "（試過 /usr/bin/python3, python3.9, python3.10, python3.8, python3.7）"
+                "⇒ 本機無法真跑 prelude 相容性鎖；macOS 真機必有 /usr/bin/python3（3.9.x）"
+            )
+
+    def _run(self, argv: list[str]):
+        return subprocess.run(
+            [self.py, *argv], cwd=str(_TOOLS_DIR.parent), capture_output=True,
+            encoding="utf-8", errors="replace", timeout=120,
+            env={**os.environ, "PYTHONIOENCODING": "utf-8"},
+        )
+
+    def test_dev_start_prelude_loads_and_gate_fires_friendly(self) -> None:
+        r = self._run([str(_DEV_START_PY), "--help"])
+        combined = r.stdout + r.stderr
+        self.assertNotIn(
+            "Traceback", combined,
+            f"版本閘**之前**的 prelude 在 Python {'.'.join(map(str, self.mm))} 上炸了"
+            f"（{self.py}）——DEF-101-628 的友善訊息又被 traceback 取代。"
+            f"修法：把 3.11+ 專屬 import 移到版本閘之後或函式內。\n{combined}",
+        )
+        self.assertEqual(
+            r.returncode, 2,
+            f"rc={r.returncode}（版本閘定義為 2）\n{combined}",
+        )
+        self.assertIn("dev_start 需要 Python >=", r.stderr)
+        self.assertIn("brew install python@3.11", r.stderr,
+                      "友善訊息必須含逐字可執行的補救指令，不能只叫人去翻文件")
+
+    def test_documented_bootstrap_remediation_actually_loads(self) -> None:
+        """版本閘訊息把 `bash tools/bootstrap.sh` 當補救路徑 ⇒ 它的核心也得真的載得動。"""
+        core = _TOOLS_DIR / "bootstrap_core.py"
+        r = self._run(["-c", f"import sys;sys.path.insert(0,{str(_TOOLS_DIR)!r});"
+                             "import bootstrap_core"])
+        self.assertEqual(
+            r.returncode, 0,
+            f"{core.name} 在 Python {'.'.join(map(str, self.mm))} 上載入失敗 ⇒ 版本閘訊息"
+            f"指的補救路徑是死路（使用者無路可走）\n{r.stdout}{r.stderr}",
+        )
+
+
+class TestPy39PreludeStaticScan(unittest.TestCase):
+    """第二道（恆跑、零環境依賴）：靜態掃描「下限版可載入」射程內的所有原始碼。
+
+    射程是**推導出來的**而不是寫死清單：從 `_PY39_ENTRYPOINTS` 出發，凡是被 import
+    的 `tools/*.py` 或 `tools/lib/*.py` 一律遞迴納入整支檔。這一點是本鎖的鑑別力
+    來源——今天 `tools/lib/ci_liveness.py` 自己就有 `from datetime import UTC`，它
+    現在**合法**純粹是因為 dev_start 在版本閘**之後**才 import 它；哪天有人把那行
+    上移到 prelude，射程會自動把 ci_liveness 整支吸進來並當場報紅。
+    """
+
+    def _prelude_source(self, path: Path) -> tuple[str, ast.Module]:
+        """回傳 dev_start.py「版本閘（含）以前」的原始碼切片。"""
+        src = path.read_text(encoding="utf-8")
+        tree = ast.parse(src)
+        gate = next(
+            (n for n in tree.body
+             if isinstance(n, ast.If) and "version_info" in ast.dump(n.test)),
+            None,
+        )
+        # fail-open 自檢：閘不見了（被改寫/搬走）⇒ 本鎖的射程會靜默縮成 0，
+        # 那比缺陷本身更糟，故直接判失敗。
+        self.assertIsNotNone(gate, f"{path.name} 找不到 sys.version_info 版本閘 ⇒ 掃描射程失效")
+        lines = src.splitlines(keepends=True)
+        return "".join(lines[: gate.end_lineno]), tree
+
+    def _scoped_sources(self) -> dict[str, str]:
+        """推導完整射程：入口 + 其（遞迴）import 到的本地 tools 模組整支檔。"""
+        search = (_TOOLS_DIR, _TOOLS_DIR / "lib")
+        out: dict[str, str] = {}
+        pending: list[tuple[Path, str]] = list(_PY39_ENTRYPOINTS)
+        seen: set[Path] = set()
+        while pending:
+            path, mode = pending.pop()
+            if path in seen:
+                continue
+            seen.add(path)
+            src = (self._prelude_source(path)[0] if mode == "prelude"
+                   else path.read_text(encoding="utf-8"))
+            # 🔴 key 必須用 as_posix()：str(PurePath) 在 Windows 渲染成 `tools\dev_start.py`，
+            # 下方以 `"tools/dev_start.py"` 正斜線字面值斷言就會 Windows 假紅；更糟的是
+            # assertNotIn 那條（ci_liveness 不得入射程）在 Windows 上會恆真通過＝假鎖。
+            out[path.relative_to(_TOOLS_DIR.parent).as_posix()] = src
+            for node in ast.walk(ast.parse(src)):
+                names = []
+                if isinstance(node, ast.Import):
+                    names = [a.name.split(".")[0] for a in node.names]
+                elif isinstance(node, ast.ImportFrom) and node.level == 0 and node.module:
+                    names = [node.module.split(".")[0]]
+                for name in names:
+                    for base in search:
+                        cand = base / f"{name}.py"
+                        if cand.exists() and cand not in seen:
+                            pending.append((cand, "whole"))
+        return out
+
+    def test_scope_covers_the_known_prelude_dependencies(self) -> None:
+        """鑑別力自檢：射程推導若壞掉（只剩入口自己），下面兩支鎖就全是空轉。"""
+        scoped = self._scoped_sources()
+        self.assertIn("tools/dev_start.py", scoped)
+        self.assertIn("tools/_stdio_utf8.py", scoped,
+                      "dev_start prelude 的本地相依 _stdio_utf8 未被納入射程 ⇒ 推導壞了")
+        self.assertNotIn(
+            "tools/lib/ci_liveness.py", scoped,
+            "ci_liveness 帶有 3.11 專屬的 datetime.UTC，卻進了「下限版可載入」射程"
+            "⇒ 代表有人把它的 import 移到版本閘之前（＝R69 P1 缺陷復發）",
+        )
+
+    def test_no_post_39_stdlib_names_before_the_version_gate(self) -> None:
+        offenders: list[str] = []
+        for label, src in self._scoped_sources().items():
+            for node in ast.walk(ast.parse(src)):
+                if isinstance(node, ast.Import):
+                    for alias in node.names:
+                        if alias.name.split(".")[0] in _POST_39_MODULES:
+                            offenders.append(f"{label}:{node.lineno} import {alias.name}")
+                elif isinstance(node, ast.ImportFrom) and node.module:
+                    banned = _POST_39_FROM_NAMES.get(node.module.split(".")[0], frozenset())
+                    for alias in node.names:
+                        if alias.name in banned:
+                            offenders.append(
+                                f"{label}:{node.lineno} from {node.module} import {alias.name}"
+                            )
+        self.assertEqual(
+            offenders, [],
+            "以下 import 只有 Python >= 3.10/3.11 才有，卻位在版本閘之前（或被它相依）"
+            "⇒ 舊直譯器上會變 ImportError traceback，友善訊息失效：\n  "
+            + "\n  ".join(offenders)
+            + "\n修法：移到版本閘之後（見 dev_start.py `from datetime import UTC` 那行的註解），"
+              "或延後到函式內 import。",
+        )
+
+    def test_scope_parses_under_the_oldest_supported_grammar(self) -> None:
+        """語法面的零策展鎖：整個射程必須能被 3.9 文法解析。
+
+        `ast.parse(..., feature_version=(3, 9))` 會對 `match` 陳述式等 3.10+ 文法
+        直接丟 SyntaxError——這類東西不需要維護黑名單就抓得到，與上面的名字黑名單
+        互補（黑名單管 API、本鎖管文法）。
+        """
+        for label, src in self._scoped_sources().items():
+            with self.subTest(file=label):
+                try:
+                    ast.parse(src, feature_version=(3, 9))
+                except SyntaxError as exc:
+                    self.fail(f"{label} 用到 3.9 文法不支援的語法：{exc.msg}（line {exc.lineno}）")
+
+    def test_blocklist_still_contains_the_two_that_actually_bit_us(self) -> None:
+        """棘輪：黑名單被清空/縮水，上面那支鎖就退化成永遠綠。"""
+        self.assertIn("UTC", _POST_39_FROM_NAMES["datetime"], "R69 P1 的兇手")
+        self.assertIn("tomllib", _POST_39_MODULES, "R68 DEF-101-628 的兇手")
 
 
 if __name__ == "__main__":
