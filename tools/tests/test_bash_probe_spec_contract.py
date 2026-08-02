@@ -465,7 +465,7 @@ class TestNoneSourceIsDistinguishable(unittest.TestCase):
 #      `"bash"`／`shutil.which("bash")` 當 argv[0] 交給 subprocess。
 # ---------------------------------------------------------------------------
 
-_WSL_STUB_BODY = """\
+_WSL_STUB_POSIX = """\
 #!/bin/sh
 # 假 WSL 佔位 bash：**驗活會通過**（照 PROBE_CMD 的期望輸出回話），但它住在
 # System32 段 ⇒ 必須被路徑規則排除，而不是靠「驗活失敗」僥倖過關。
@@ -473,6 +473,43 @@ echo "{echo_out}"
 echo "{dirname_out}"
 exit 0
 """
+
+# Windows 形態必須是**批次檔**，不可沿用上面的 shebang 腳本（DEF-101-754）。
+# WHY：`CreateProcess` 不認 shebang——它只認 PE 映像，外加對 `.bat`/`.cmd`
+# 隱式代跑 `cmd.exe /c`。把 shebang 腳本命名成 `bash.exe` 交給 `subprocess.run()`
+# 的實測結果是 `OSError: [WinError 216] This version of %1 is not compatible with
+# the version of Windows you're running`（雲端 windows-compat-ci run 30742107259）。
+#
+# 內文刻意**全 ASCII**：Windows CI runner 的 console code page 不是 UTF-8，批次檔
+# 內若寫中文 `rem` 註解會被 cmd.exe 以 OEM code page 解讀。WHY 一律寫在本 Python
+# 檔（讀者看得到），不寫進被 cmd.exe 解讀的檔案裡。
+_WSL_STUB_WINDOWS = """\
+@echo off
+rem Fake WSL placeholder bash. See _WSL_STUB_POSIX above for the WHY.
+echo {echo_out}
+echo {dirname_out}
+exit /b 0
+"""
+
+# 各平台的 stub 形態：`os.name` -> (檔名, 內文模板, 換行)。
+#
+# 為何用 `os.name` 而不是 `sys.platform`：本表要分的是**行程建立語意**——POSIX 的
+# `execve` 認 shebang，Windows 的 `CreateProcess` 認 PE 映像與 PATHEXT 副檔名。
+# 那條界線正是 `os.name`（`posix` / `nt`），不是作業系統的品牌。
+#
+# 換行：`.cmd` 一律 CRLF。cmd.exe 對純 LF 批次檔的行為在部分構造下未定義，而這是
+# 一支我們無法在本機執行的檔案 ⇒ 不留任何可避免的變因。
+_STUB_FORMS: dict[str, tuple[str, str, str]] = {
+    "posix": ("bash", _WSL_STUB_POSIX, "\n"),
+    "nt": ("bash.cmd", _WSL_STUB_WINDOWS, "\r\n"),
+}
+
+# Windows 上「PATH 搜尋 + 直接啟動」都成立的副檔名（PATHEXT 預設清單的前四項，
+# 對照 `shutil._WIN_DEFAULT_PATHEXT`）。`.com`/`.exe` 是 PE 映像，`.bat`/`.cmd`
+# 由 `CreateProcess` 隱式交給 cmd.exe。全小寫：Windows 上 PATHEXT 大小寫不影響
+# 解析（NTFS 大小寫不敏感），統一小寫可讓 macOS 模擬時避開檔案系統大小寫敏感度
+# 這個與本鎖無關的變因。
+_WINDOWS_LAUNCHABLE_SUFFIXES = (".com", ".exe", ".bat", ".cmd")
 
 
 class TestWslStubIsNeverAcceptedAsRealBash(unittest.TestCase):
@@ -488,6 +525,15 @@ class TestWslStubIsNeverAcceptedAsRealBash(unittest.TestCase):
 
     可在 macOS 上跑（`PureWindowsPath` 對 POSIX 路徑同樣依段切分，見
     `bash_probe_spec.SYSTEM32_SEGMENT` 的消費端註解），不需要 Windows 真機。
+
+    🔴 **但「可在 macOS 上跑」不等於「在 Windows 上跑得起來」**（DEF-101-754）：
+    本類最初把 stub 一律寫成 shebang 腳本、Windows 上只把檔名改成 `bash.exe`，
+    於是下方正控在真 Windows 上以 `WinError 216` **error 收場**——本類自己就是
+    `improving_103` §9.5 那條新規則（「只在某平台成立的判斷，回歸鎖必須有本機可
+    重現該平台語意的路徑」）落地的第一個實例，而它違反了該規則的**對偶方向**：
+    只顧本機重現得了，沒顧目標平台跑不跑得動。stub 形態改由 `_STUB_FORMS` 依
+    `os.name` 分派，兩平台皆為真執行；形態本身由
+    `TestStubFormIsLaunchableOnItsOwnPlatform` 在**任一平台**機械看守。
     """
 
     def _make_stub(self, parent_dir_name: str) -> Path:
@@ -495,12 +541,13 @@ class TestWslStubIsNeverAcceptedAsRealBash(unittest.TestCase):
         self.addCleanup(shutil.rmtree, tmp, True)
         stub_dir = tmp / parent_dir_name
         stub_dir.mkdir()
-        stub = stub_dir / ("bash.exe" if os.name == "nt" else "bash")
+        filename, body, newline = _STUB_FORMS[os.name]
+        stub = stub_dir / filename
         stub.write_text(
-            _WSL_STUB_BODY.format(
+            body.format(
                 echo_out=_spec.PROBE_EXPECT_ECHO, dirname_out=_spec.PROBE_EXPECT_DIRNAME
             ),
-            encoding="utf-8",
+            encoding="utf-8", newline=newline,
         )
         stub.chmod(0o755)
         return stub
@@ -526,8 +573,13 @@ class TestWslStubIsNeverAcceptedAsRealBash(unittest.TestCase):
             [_spec.PROBE_EXPECT_ECHO, _spec.PROBE_EXPECT_DIRNAME],
             "stub 沒能冒充成功 ⇒ 下一支測試會失去鑑別力",
         )
+        # `normcase`：Windows 上 `usable_bash_for_fixture()` 經 `shutil.which()` 回
+        # 的是 **PATHEXT 登記的大小寫**（預設清單為大寫 ⇒ `bash.CMD`），與磁碟上的
+        # `bash.cmd` 只差大小寫；直接 `==` 會在 Windows 上假紅。POSIX 上 `normcase`
+        # 是 identity，鑑別力不受影響。
+        resolved = self._resolve_with_only(stub)
         self.assertEqual(
-            self._resolve_with_only(stub), str(stub),
+            os.path.normcase(resolved or "<未解析到任何 bash>"), os.path.normcase(str(stub)),
             "非 System32 目錄下的同一支 stub 必須被接受——證明差異只來自路徑段規則",
         )
 
@@ -539,6 +591,105 @@ class TestWslStubIsNeverAcceptedAsRealBash(unittest.TestCase):
             "住在 System32 段的 bash 被當成可用 bash——WSL 佔位版劫持防線失效"
             f"（DEF-101-753；stub={stub}）",
         )
+
+
+class TestStubFormIsLaunchableOnItsOwnPlatform(unittest.TestCase):
+    """meta 鎖：`_STUB_FORMS` 每一種形態都必須真的被**該平台**的行程建立語意啟動。
+
+    WHY（DEF-101-754，Rule 9 — 鎖的是意圖不是行為）：`improving_103` §9.5 訂立
+    「凡只在某平台才成立的判斷，回歸鎖必須有一條能在本機重現該平台語意的路徑」，
+    而 `TestWslStubIsNeverAcceptedAsRealBash` 是它落地的第一個實例——**結果它自己
+    只在 macOS 跑得動，在 Windows 上以 `WinError 216` 炸掉**。這揭露 §9.5 的規則
+    寫得不完整：只要求「本機重現得了」，沒要求「目標平台上真的執行得起來」，於是
+    規則只活在文件裡，沒有任何機械物在看它。
+
+    本類就是那個機械物：它把「某形態能不能被某平台啟動」變成**在任何平台上都可判
+    定**的斷言，因此 macOS 上的開發者不必等雲端 CI 就會知道 Windows 分支寫壞了。
+    """
+
+    def test_each_form_meets_its_platform_launch_precondition(self) -> None:
+        """逐形態驗證「該平台啟動得了」的前提。
+
+        鑑別力（缺陷注入實測）：把 `_STUB_FORMS["nt"]` 改回修復前的
+        `("bash.exe", _WSL_STUB_POSIX, "\\n")`，本測試在 **macOS 上**即紅並指名
+        shebang——這正是 §9.5 要的「本機可重現目標平台語意」。
+        """
+        self.assertEqual(
+            set(_STUB_FORMS), {"posix", "nt"},
+            "`_STUB_FORMS` 的鍵＝`os.name` 的兩種值；少一種代表某平台會 KeyError，"
+            "多一種代表有人加了本鎖沒有判準的形態",
+        )
+        for os_name, (filename, body, newline) in _STUB_FORMS.items():
+            with self.subTest(os_name=os_name):
+                if os_name == "nt":
+                    self.assertIn(
+                        Path(filename).suffix.lower(), _WINDOWS_LAUNCHABLE_SUFFIXES,
+                        f"Windows 形態 {filename!r} 的副檔名不在 PATHEXT 可啟動清單內"
+                        "——`CreateProcess` 起不來，且 `shutil.which('bash')` 也找不到它",
+                    )
+                    self.assertFalse(
+                        body.startswith("#!"),
+                        "Windows 形態不可是 shebang 腳本：`CreateProcess` 不認 shebang，"
+                        "命名成 .exe 會得到 WinError 216、命名成 .cmd 則 shebang 行會被"
+                        "cmd.exe 當指令執行（DEF-101-754 本體）",
+                    )
+                    self.assertEqual(
+                        newline, "\r\n",
+                        "批次檔一律 CRLF——cmd.exe 對純 LF 批次檔的行為在部分構造下未定義，"
+                        "而這是本機無法執行、只能靠 CI 才會顯形的檔案",
+                    )
+                    self.assertTrue(
+                        body.isascii(),
+                        "批次檔內文必須全 ASCII：Windows CI runner 的 console code page "
+                        "不是 UTF-8，非 ASCII 註解會被 cmd.exe 以 OEM code page 解讀。"
+                        "WHY 寫在 Python 檔裡，不寫進被 cmd.exe 讀的檔案",
+                    )
+                else:
+                    self.assertTrue(
+                        body.startswith("#!"),
+                        f"POSIX 形態 {filename!r} 少了 shebang——`execve` 沒有其他依據"
+                        "可判斷用哪個直譯器，會得到 ENOEXEC",
+                    )
+                    self.assertEqual(
+                        Path(filename).suffix, "",
+                        "POSIX 形態不該帶副檔名：`shutil.which('bash')` 在 POSIX 上"
+                        "只找逐字的 `bash`（無 PATHEXT 展開），帶副檔名即找不到",
+                    )
+
+    def test_windows_form_is_findable_by_the_production_helper(self) -> None:
+        """Windows 形態必須仍在 `shutil.which("bash")` 的 PATHEXT 解析範圍內。
+
+        WHY 這支獨立於上一支：上一支只看副檔名字串，看不到「生產端 helper 到底找
+        不找得到它」。若 Windows 形態改名成 `bash.sh`，`usable_bash_for_fixture()`
+        會回 `None`，於是 `test_system32_stub_is_rejected` 的 `assertIsNone` 會因為
+        **根本沒找到任何候選**而通過＝假綠，主判準（System32 段規則）一次都沒被執行。
+
+        本機 macOS 以 `sys.platform` + `PATHEXT` 驅動**真正的** `shutil.which()`
+        （不是重寫一份它的邏輯）來重現 Windows 解析語意。誠實劃界：這裡重現的是
+        「PATHEXT 展開」這一段，**不含** `CreateProcess` 真的把 `.cmd` 交給 cmd.exe
+        執行那一段——後者本機無法重現，由 Windows CI 上的
+        `test_stub_is_live_so_only_the_path_rule_can_reject_it` 真執行覆蓋。
+        """
+        filename, _, _ = _STUB_FORMS["nt"]
+        tmp = Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, tmp, True)
+        stub = tmp / filename
+        stub.write_bytes(b"@echo off\r\n")
+        stub.chmod(0o755)
+        # PATHEXT 以 host 的 `os.pathsep` 串接：`shutil.which()` 用 `os.pathsep` 切這
+        # 個字串，直接塞 Windows 原字面值（`;` 分隔）在 macOS 上整串切不開 ⇒ 恆不
+        # 命中，模擬本身失效卻看不出來（實測確認過這個陷阱）。
+        pathext = os.pathsep.join(_WINDOWS_LAUNCHABLE_SUFFIXES)
+        with mock.patch.object(sys, "platform", "win32"), mock.patch.dict(
+            os.environ, {"PATHEXT": pathext}, clear=False
+        ):
+            found = shutil.which("bash", path=str(tmp))
+        self.assertIsNotNone(
+            found,
+            f"Windows PATHEXT 語意下 `bash` 找不到 {filename!r}——"
+            "`usable_bash_for_fixture()` 會回 None，主判準測試將因『沒有候選』而假綠",
+        )
+        self.assertEqual(Path(found).name.lower(), filename.lower())
 
 
 # 允許在 argv[0] 寫裸 bash/sh 的就地豁免標記（同 `platform-ok` 慣例）：必須寫理由。

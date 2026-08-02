@@ -313,3 +313,95 @@ Windows 上 `subprocess` 以 `CreateProcess(lpApplicationName=NULL)` 解析裸�
    本輪的兩道新鎖就是照這條做的：路徑規則以假 stub 在 macOS 上驗、呼叫形態以 AST 在任何平台上驗。
 
 
+
+---
+
+## §10　收輪後（R70）：§9.5 這條新規則，第一個實例就違反了它自己（`DEF-101-754`）
+
+修 `DEF-101-753` 的 commit（`d2758b5`）押上 main 後，五支 workflow 中
+**root-infra-ci／macos-compat-ci／AutoClaude CI／aisdlc-sdd-ci 皆 success，唯 `windows-compat-ci` failure**
+（run `30742107259`，`Ran 1592 tests … FAILED (errors=1, skipped=52)`）。
+§9 那三支紅燈確認消失——修對了；但**新加的那道鎖自己炸了**。
+
+### 10.1 一句話：規則落地的第一個實例，就是該規則的反例
+
+§9.5 剛訂立的規則是：
+
+> 凡「只在某平台才成立」的判斷，其回歸鎖必須有一條能在開發者本機重現該平台語意的路徑。
+
+照這條做出來的 `TestWslStubIsNeverAcceptedAsRealBash`，**是一支只在 macOS 能跑、在 Windows 會 error 的鎖**：
+
+```
+ERROR: TestWslStubIsNeverAcceptedAsRealBash.test_stub_is_live_so_only_the_path_rule_can_reject_it
+  File "…\tools\tests\test_bash_probe_spec_contract.py", line 518, in …
+    proc = subprocess.run(
+OSError: [WinError 216] This version of %1 is not compatible with the version of Windows you're running
+```
+
+根因：stub 是 `#!/bin/sh` shebang 腳本，Windows 上只把檔名改成 `bash.exe`。
+`CreateProcess` **不認 shebang**——它只認 PE 映像與 PATHEXT 副檔名，把腳本命名成 `.exe`
+等於叫它去載入一個壞掉的 PE 映像。
+
+這不是把規則寫錯，是**規則本身漏了對偶方向**：§9.5 只說「本機要重現得了目標平台語意」，
+沒說「這道鎖在目標平台上要真的跑得起來」。兩件事都不成立時鎖是死的，而 §9.5 只看得到其中一件。
+
+### 10.2 這一輪的重點不是「又修了一支測試」
+
+修法本身很短（stub 形態依 `os.name` 分派成 shebang 腳本／`.cmd` 批次檔，兩平台皆真執行；
+不用 `skipIf(windows)` 跳掉——跳掉正是這道鎖要防的病）。真正的意涵有兩層：
+
+**(a) 教訓早就學過，只是當時沒有機械物承接它。**
+`tools/tests/test_dev_start.py:1069` 的檔內註解逐字寫著：
+
+> R3 QA 發現：shebang 腳本（`#!/bin/sh`）只在 POSIX 上可執行，Windows 上 …會撞 WinError 193（非合法 PE 格式）
+
+**R3 就學過，R70 在另一支檔上原地復發。**差別只在 193（非合法 PE）與 216（PE 版本不相容）。
+教訓當時落成的是一段**註解**——它只保護它所在的那個函式，跨不到第二支檔。
+這與 `DEF-101-701`／`DEF-101-746` 是同一型：**判準寫得清楚 ≠ 有執行者**。
+
+**(b) 規則若沒有自己的守門人，就只會活在文件裡。**
+§9.5 是寫在 `improving_103` 裡的一條散文。散文不會在 `git push` 時說話。
+於是「照規則做」與「自以為照規則做」在機械上**不可區分**——本輪就是後者，而且是規則作者本人。
+
+### 10.3 具體建議：把 §9.5 補成 9.5′，並讓它帶一個機械物
+
+**§9.5′（訂正版，取代 §9.5）**：凡「只在某平台才成立」的判斷，其回歸鎖必須同時滿足**兩個方向**——
+
+1. **本機可重現**（原 §9.5）：開發者本機要有一條路徑能判定該平台語意（stub 注入／規則層純函式／AST 靜態掃描）；
+2. **目標平台可執行**（本輪補）：這道鎖在目標平台上要**真的跑得起來**，不得以 `skipIf(<目標平台>)` 收場。
+   一道在目標平台恆 skip 的鎖，與沒有那道鎖在機械上等價——差別只是它讓人以為有。
+
+並且：**凡宣稱滿足第 1 點的鎖，其「本機重現載具」本身要有一道 meta 鎖，驗證該載具在目標平台上可執行。**
+
+本輪已照此落地 `TestStubFormIsLaunchableOnItsOwnPlatform`（`test_bash_probe_spec_contract.py`）：
+把「某形態能不能被某平台啟動」變成**任何平台都可判定**的斷言——
+
+- 逐形態驗啟動前提：`nt` 形態副檔名須在 PATHEXT 可啟動清單內、內文**不得**以 `#!` 開頭、換行須 CRLF、內文須全 ASCII；
+  `posix` 形態須有 shebang 且無副檔名；
+- 以 `mock.patch.object(sys, "platform", "win32")` ＋ `PATHEXT` 驅動**真正的** `shutil.which()`（不是重寫一份它的邏輯），
+  證明 Windows 形態仍找得到——否則 `usable_bash_for_fixture()` 回 `None`，主判準測試會因**根本沒有候選**而假綠。
+
+**macOS 本機三向缺陷注入實測**（這是本節唯一該被採信的部分）：還原修前形態 ⇒ 紅並指名 shebang；
+改名 `bash.sh` ⇒ 紅並指名「PATHEXT 找不到」；改 LF 換行 ⇒ 紅並指名 CRLF；三者還原後皆 `OK`。
+**即：修前的那個缺陷，現在在 macOS 上就會被抓到，不必再等 Windows CI。**
+
+### 10.4 為何不用更重的解法（評估過並否決）
+
+考慮過「讓 `windows-compat-ci` 在 PR 階段就跑」——那才是根治。**否決理由**：使用者已明示 GitHub CI 額度吃緊
+（見專案記憶「節省 GitHub CI 額度」），把最慢的一支 workflow 前移到每次 PR 是反方向。
+本節的 meta 鎖是**成本近零**的替代：它在本機 `python tools/run_root_unittests.py` 內就跑完，
+把「只有 Windows 才看得到」的一整類缺陷往前搬到本機——這正是 §9.5 的原意，只是這次連載具自己一起納管。
+
+### 10.5 誠實劃界（本機零 Windows 真機）
+
+本機能證明的是 Windows 形態的**形狀**與**可被 `shutil.which()` 找到**。
+**不能**證明的是「`CreateProcess` 真的把該 `.cmd` 交給 `cmd.exe` 跑起來」，以及
+「`PROBE_CMD` 裡的 `&&` 在 cmd.exe 引號解析下不被切成第二條指令」——這兩段只有 Windows CI 能驗。
+若失敗，正控的 `assertEqual(proc.returncode, 0, proc.stderr)` 會帶著 stderr **fail loud**，不會靜默假綠。
+
+### 10.6 連續四次「收輪後才顯形」
+
+`DEF-101-751`／`752`／`753`／`754`。前三件的失效機制各不相同（§9.4）；
+**第四件的機制是「修第三件的那道鎖自己不可執行」**——即**修復本身成為下一個缺陷源**。
+對流程的意涵：一輪的收尾不該只驗「原缺陷消失」，還要驗「本輪新增的守門人自己在所有目標平台上活著」。
+這正是 §9.5′ 第 2 點與 meta 鎖要求存在的理由。
