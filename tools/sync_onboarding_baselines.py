@@ -164,6 +164,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _stdio_utf8  # noqa: E402,F401  # Windows 非 UTF-8 終端 print(✅/❌) 防崩潰保護
+from lib import baseline_origin as _BO  # noqa: E402  # 基線三態＋nightly 探針（R70 抽出）
 
 _REPO_ROOT = Path(__file__).resolve().parents[1]
 _ONBOARDING = _REPO_ROOT / "ONBOARDING.md"
@@ -596,11 +597,13 @@ _FP_LEN = 12  # sha256 前 12 hex；碰撞機率對「偵測有人改了測試�
 # 理由**，讓它「可以沒有」等於讓它消失；且 docker／pgextras 兩項各自都會改變計數
 # （docker 停用 → v0.01／v0.30 各 −3；PG extras 存在 → AutoClaude PG-gated 測試由 skip
 # 轉 pass 使 passed 虛高），不入帳就是下一位驗證者把環境差異誤判為退化。
-_PROVENANCE_FIELDS: tuple[str, ...] = ("measured-at", "host", "docker", "pgextras")
-
-# 「該欄的量測樹已不可考」的合法佔位值：**刻意讓它與任何 live 指紋都不相等**，於是該欄
-# 恆判 presumed stale。這比填一個猜的指紋誠實——猜的指紋會讓一欄假裝新鮮。
-_UNRECORDED = "unrecorded"
+# 基線三態語意＋nightly 探針住 `tools/lib/baseline_origin.py`（R70 依 ADR-SD08-001 棘輪的
+# 「抽共用模組」路徑抽出；事故原文／判準論證全在該模組檔頭）。此處只做名稱再匯出。
+_ENV_PROVENANCE_FIELDS, _UNRECORDED = _BO.ENV_PROVENANCE_FIELDS, _BO.UNRECORDED
+_ORIGIN_FIELD, _ORIGIN_VALUES = _BO.ORIGIN_FIELD, _BO.ORIGIN_VALUES
+_ORIGIN_SELF, _ORIGIN_PRE_MECHANISM = _BO.ORIGIN_SELF, _BO.ORIGIN_PRE_MECHANISM
+_ORIGIN_NEVER, _PROVENANCE_FIELDS = _BO.ORIGIN_NEVER, _BO.PROVENANCE_FIELDS
+_COVERAGE_SOURCES = _BO.COVERAGE_SOURCES
 
 
 def fingerprint_anchor(platform_key: str) -> str:
@@ -824,6 +827,37 @@ def parse_provenance(text: str, platform_key: str) -> dict[str, str]:
     return values
 
 
+def column_has_measurements(text: str, platform_key: str) -> bool:
+    """表② 該欄有無實測數字＝「有沒有量過」的唯一判準（WHY 見 `_BO` 檔頭）。"""
+    lines = text.split("\n")
+    for spec in _SLOW_SPECS:
+        idx = _anchored_index(lines, spec.anchor)
+        cell = _split_row(lines[idx])[platform_cell_index(lines, idx, platform_key)]
+        if any(len(field.pattern.findall(cell)) != 1 for field in spec.fields):
+            return False
+    return True
+
+
+def baseline_state(text: str, platform_key: str) -> str:
+    """該平台欄的三態之一，並交叉驗證宣告與資料不得互相矛盾（判準與 WHY 見 `_BO`）。"""
+    return _BO.validate_state(
+        _PLATFORM_COLUMN_LABELS[platform_key],
+        parse_provenance(text, platform_key),
+        column_has_measurements(text, platform_key),
+        f"  修法：改寫 `{fingerprint_anchor(platform_key)}` 錨的 {_ORIGIN_FIELD}=，"
+        f"合法值 {list(_ORIGIN_VALUES)}；或讓表② 該欄的資料與宣告一致。",
+    )
+
+
+def baseline_status_line(text: str, platform_key: str) -> str:
+    """該欄基線狀態的**單行**人話（三態措辭彼此不可混淆，見 `_BO.status_line`）。"""
+    return _BO.status_line(
+        _PLATFORM_COLUMN_LABELS[platform_key],
+        parse_provenance(text, platform_key),
+        baseline_state(text, platform_key),
+    )
+
+
 def _stale_messages(
     text: str, platform_key: str, names: list[str], live: dict[str, str],
 ) -> list[str]:
@@ -843,12 +877,7 @@ def _stale_messages(
     ]
 
 
-def _measurement_age_days(measured_at: str) -> int | None:
-    """`measured-at` 距今天數；`unrecorded` 或無法解析（人手寫壞）時回 None，不猜。"""
-    try:
-        return (datetime.date.today() - datetime.date.fromisoformat(measured_at)).days
-    except ValueError:
-        return None
+_measurement_age_days = _BO.measurement_age_days
 
 
 def _stale_summary(text: str, platform_key: str, names: list[str], live: dict[str, str]) -> str:
@@ -870,20 +899,20 @@ def _stale_summary(text: str, platform_key: str, names: list[str], live: dict[st
       (b) 把「距上次量測幾天」這個**唯一隨時間變化、也唯一可行動**的量放進來取代四棵樹的
           指紋 diff（那串 diff 每輪都不一樣但資訊量為零：它只是在說「樹動過了」），
       (c) 訊息自己說明它在此工作流下是結構性常態、並把讀者的注意力指回本機平台欄。
-    「從未回填過」（provenance 全為 `unrecorded`）另走一條措辭：那不是「已變動」而是
-    「還沒有基線」，用 `→` 畫成漂移會把「沒人量過」誤讀成「量過但過期」。
+    🔴 R70（DEF-101-756）措辭由**兩態改三態**：原版對「provenance 全 unrecorded」印
+    「尚未建立基線」，而該句在 Windows 欄是假的（見 `_BO` 檔頭事故原文）。
     """
     documented = parse_fingerprints(text, platform_key)
     prov = parse_provenance(text, platform_key)
-    label = _PLATFORM_COLUMN_LABELS[platform_key]
+    state = baseline_state(text, platform_key)
     tail = (
         "——**不計入本機 rc**（本機修不動：回填必須在該平台上實跑）。"
         "真正有牙的是**本機平台欄**，見同段的 ✅／❌ 那一行"
     )
-    if all(prov[f] == _UNRECORDED for f in _PROVENANCE_FIELDS):
+    head = baseline_status_line(text, platform_key)
+    if state != _ORIGIN_SELF:
         return (
-            f"{label} 欄**尚未建立基線**（provenance 四項全為 {_UNRECORDED}）"
-            f"{tail}；建立首份基線：在該平台執行 "
+            f"{head}{tail}；補上 provenance 的唯一方式：在該平台執行 "
             f"`python tools/sync_onboarding_baselines.py --write --with-slow`"
         )
     age = _measurement_age_days(prov["measured-at"])
@@ -892,11 +921,17 @@ def _stale_summary(text: str, platform_key: str, names: list[str], live: dict[st
         else f"measured-at={prov['measured-at']!r} 無法解析"
     )
     drift = ", ".join(f"{n}:{documented[n]}→{live[n]}" for n in names)
+    label = _PLATFORM_COLUMN_LABELS[platform_key]
     return (
         f"{label} 欄上次量測 {prov['measured-at']}（{age_text}），此後 "
         f"{len(names)}/{len(_FINGERPRINT_TREES)} 棵樹已變動（{drift}）"
         f"——單機交替工作流下這是**結構性常態**、不是新問題{tail}"
     )
+
+
+def nightly_evidence(platform_key: str) -> str:
+    """該平台 nightly 心跳的單行現況（唯讀；WHY 見 `_BO` 的 NIGHTLY_HEARTBEATS 區塊）。"""
+    return _BO.nightly_evidence(_REPO_ROOT, platform_key)
 
 
 def snapshot_report(
@@ -920,6 +955,9 @@ def snapshot_report(
         live = measure_fingerprints()
     stale: dict[str, list[str]] = {}
     for key in _PLATFORM_COLUMN_LABELS:
+        # 每一欄都驗，不論本機是哪個平台：只驗本機那欄＝「另一欄寫著假話」結構上永遠
+        # 測不到（R67-D6 修過的形態，不得在新判準上重蹈）。DEF-101-756
+        baseline_state(text, key)
         documented = parse_fingerprints(text, key)
         stale[key] = [n for n, _r, _p in _FINGERPRINT_TREES if documented[n] != live[n]]
     if platform_key is not None:
@@ -998,6 +1036,8 @@ def measure_provenance() -> dict[str, str]:
         "host": f"{platform_mod.system()}-{platform_mod.release()}-{platform_mod.machine()}",
         "docker": _docker_state(),
         "pgextras": pg_extras_state(),
+        # 實跑量測 ⇒ 必為 self-recorded；另兩態只可能由人依史料填（機器不替歷史作證）。
+        _ORIGIN_FIELD: _ORIGIN_SELF,
     }
 
 
@@ -1339,10 +1379,18 @@ def main(argv: list[str] | None = None) -> int:
         print(f"✅ §7 表② 指紋相符 {scope}（{', '.join(f'{k}={v}' for k, v in live.items())}）")
         for key in _PLATFORM_COLUMN_LABELS:
             documented = slow_documented(text, key)
-            print(f"   [{_PLATFORM_COLUMN_LABELS[key]} 欄] "
-                  f"provenance={parse_provenance(text, key)}")
+            # 🔴 狀態人話排在原始 dict **之前**：原版只印 provenance，讀者看到四個
+            # `unrecorded` 就自行補完成「這平台沒被驗過」，而下三行印的正是該平台實機
+            # 量得的數字。先給結論、再給欄位，讓誤讀不靠讀者自律。DEF-101-756
+            print(f"   [{_PLATFORM_COLUMN_LABELS[key]} 欄] {baseline_status_line(text, key)}")
+            print(f"     provenance={parse_provenance(text, key)}")
+            print(f"     nightly 證據：{nightly_evidence(key)}")
             for spec in _SLOW_SPECS:
                 print(f"     [{spec.anchor}] {documented[spec.anchor]}")
+        print(
+            "   ℹ️ 🔴 **本工具不是平台覆蓋的權威**：它只知道「表② 這一欄的數字在什麼環境量的」。"
+            f"「哪一輪在哪個平台跑過真機」請查 {_COVERAGE_SOURCES}（DEF-101-756）"
+        )
         return 0
 
     measured = measure_all()

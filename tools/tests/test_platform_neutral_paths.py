@@ -551,7 +551,7 @@ class TestNoInTreeWritableTmpDir(unittest.TestCase):
 #   在 Windows 是 `\elsewhere\AutoClaude\…`，POSIX 字面值必然落空 →
 #   **Mac/Linux 全綠、windows-compat-ci 假紅**（R68 `375f291` 實紅，run 30720156050；
 #   同 commit 前一版 `24c5f34` 為 success，故確定是新增測試帶進來的病，不是環境）。
-#   本地零 Windows 真機 ⇒ 這種病只能靠雲端 CI 才發現，一次來回數十分鐘；本鎖把它
+#   本輪本機無 Windows 真機 ⇒ 這種病只能靠雲端 CI 才發現，一次來回數十分鐘；本鎖把它
 #   拉到 macOS 本機的 `python tools/run_root_unittests.py` 就抓到。
 #   修法慣例＝把字面值換成 `str(Path(<同一個字面值常數>))`（兩平台各自正規化後比對，
 #   斷言強度不降反升——鎖的是**整條路徑**而非片段），或改用 `PurePosixPath`／

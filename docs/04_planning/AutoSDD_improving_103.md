@@ -2,7 +2,7 @@
 
 > **本輪柱別**：**B 軌（手腳框架 AISDLC_SDD dogfooding）＋ C 軌（指揮官 AutoClaude）雙柱**——跨平台相容性同時觸及兩子專案與根層整合層。上一份：`AutoSDD_improving_102.md`（R68，**該輪自陳未收輪**）。
 > **驅動器**：`docs/04_planning/AutoSDD_Iteration_Prompt_Template.md`（整合迭代軌道①）。
-> **日期**：2026-08-02　**平台**：macOS 26.5.2 arm64 真機（Darwin 25.5.0）；**Windows 側本輪零真機**。
+> **日期**：2026-08-02　**平台**：本輪執行平台＝macOS 26.5.2 arm64 真機（Darwin 25.5.0）；**Windows 側本輪未取得真機**（⚠️ 不等於「Windows 從未驗過」——R20~R66 為 Windows 真機期，且 Windows nightly 每日 02:00 仍在跑；逐輪覆蓋見 `ADR-XPLAT-002` §6，DEF-101-756）。
 > **基準 HEAD**：`375f291`（R68 收斂 commit）。
 > **版本演化**：**無**——只動 LATEST（`AISDLC_SDD_v0.30`）與根層／AutoClaude，零碰凍結版本體，故不觸發 Copy-on-Evolve、不觸發五軌 TLC。
 > **本輪缺陷號段**：`DEF-101-711` ~ `DEF-101-748`（38 筆；第四波 `734`~`748` 為終審 R3 與第四波自檢的入帳），另訂正既有 `DEF-101-706`／`DEF-101-701`／`DEF-101-721`／`R68-38`。
@@ -32,7 +32,7 @@ R68 的 commit message 逐字寫「**收斂為閘門全綠**」。R69 開輪時�
 | `aisdlc-sdd-ci` | 子專案測試跨樹 `import autoclaude.*`（`ModuleNotFoundError: pydantic`）；同型隱蔽版以 `try/except ImportError + skipIf` 包住 ⇒ **CI 上永遠 skip** | `DEF-101-728`、`DEF-101-729` |
 | `root-infra-ci` | 新落地的 `tools/ruff.toml` 全 repo 零執行者；新增消費檔未同步 compat-CI `paths` | `DEF-101-719`、`DEF-101-721` |
 
-🔴 **這三支的「紅→綠」在本輪的取證強度（誠實標示，收尾包複核）**：**三支皆未經雲端複驗**。依「GitHub CI 只准唯讀」紀律本輪未 push，故上表三個根因的修復憑證一律是**本機實跑**（root-infra 面）或**靜態分析／沙箱模擬**（Windows 面，零真機）。**別把本文件任何一處的「已修」讀成「雲端已轉綠」**——雲端複核是 `DEF-101-727` 明載的承接條件（下次合法 push 後唯讀 `gh run list`）。
+🔴 **這三支的「紅→綠」在本輪的取證強度（誠實標示，收尾包複核）**：**三支皆未經雲端複驗**。依「GitHub CI 只准唯讀」紀律本輪未 push，故上表三個根因的修復憑證一律是**本機實跑**（root-infra 面）或**靜態分析／沙箱模擬**（Windows 面，本輪未取得真機）。**別把本文件任何一處的「已修」讀成「雲端已轉綠」**——雲端複核是 `DEF-101-727` 明載的承接條件（下次合法 push 後唯讀 `gh run list`）。
 
 **流程病本身（`DEF-101-733`）仍是 partial**：個別根因已修，但「本機綠即宣稱全綠」沒有任何機械物看守。R69 只落地了一小步——**收輪宣稱一律標明射程**（寫「本機 macOS 閘門全綠」而非「閘門全綠」）。
 
@@ -88,7 +88,7 @@ R69 開輪：唯讀 gh run list 核對 → 發現雲端三紅（§1.1）
 
 | # | 訴求 | 本輪達成度 | 誠實說明 |
 |---|------|-----------|---------|
-| 1 | Mac 與 Windows 11 雙平台相容 | **partial** | macOS 側：全部本機閘門實機全綠（§4）。**Windows 側：零真機**——所有 Windows 結論皆為靜態分析／沙箱模擬／CI 對帳。`windows-compat-ci` 的紅→綠**本輪未經雲端複驗**（依「GitHub CI 只准唯讀」紀律未 push），故 `DEF-101-727` 明載承接條件＝下次合法 push 後唯讀複核 |
+| 1 | Mac 與 Windows 11 雙平台相容 | **partial** | macOS 側：全部本機閘門實機全綠（§4）。**Windows 側：本輪未取得真機**（非 repo 常數，DEF-101-756）——所有 Windows 結論皆為靜態分析／沙箱模擬／CI 對帳。`windows-compat-ci` 的紅→綠**本輪未經雲端複驗**（依「GitHub CI 只准唯讀」紀律未 push），故 `DEF-101-727` 明載承接條件＝下次合法 push 後唯讀複核 |
 | 2 | 四方專家（Architect／SA／SD／QA）獨立複審把關 | **達成（超額）** | R68 是 0/4；R69 執行了 **R1（4/4）＋ R2（4/4）＋ R3 終審（4/4）**，共三輪。R2 的 12 筆確認缺陷中，**6 筆是複審者對本輪新造的鎖做變異測試才抓出來的**——這是四方複審在本 repo 第一次系統性地把「鎖的有效性」而非「程式的正確性」當主軸 |
 | 3 | 「Mac 開發時 Windows 不產生落差；反之亦然」 | **未達成（如實）** | 本輪把落差**抓到了**（§1.1 是最直接的證據），但**沒有建立防止它再發生的機械物**。`DEF-101-733` 仍是 partial：push 前仍無任何東西告訴你「你只驗了平台面的 1/5」。R70 的首要待辦 |
 | 4 | Developer 清除技術債 | **partial** | 清掉的：`R68-38` 的**根層 `tools/` 半邊**（`tools/ruff.toml` ＋ CI／pre-push 雙執行者，`DEF-101-719`）。**沒清掉的**：`R68-38` 原點名最大實害面 `AISDLC_SDD` 全樹（LATEST v0.30 的 F 類真錯誤 3,486 筆）仍零 ruff 設定、零執行者。**且本輪自己製造了新債**：護欄層淨增（§5.2），生產碼 Δ=0。🔴 **第四波追記**：本輪同時**清掉了一筆真正的結構債**——缺陷帳本主檔的單調增長項（歸檔索引段）外移，見 §5.1；但也**新暴露一筆**：護欄檔的 SPECIAL_FILES 行數棘輪以零餘裕納管，`DEF-101-739` |
@@ -392,7 +392,7 @@ OSError: [WinError 216] This version of %1 is not compatible with the version of
 本節的 meta 鎖是**成本近零**的替代：它在本機 `python tools/run_root_unittests.py` 內就跑完，
 把「只有 Windows 才看得到」的一整類缺陷往前搬到本機——這正是 §9.5 的原意，只是這次連載具自己一起納管。
 
-### 10.5 誠實劃界（本機零 Windows 真機）
+### 10.5 誠實劃界（本輪執行平台＝macOS 真機，Windows 側本輪未取得真機）
 
 本機能證明的是 Windows 形態的**形狀**與**可被 `shutil.which()` 找到**。
 **不能**證明的是「`CreateProcess` 真的把該 `.cmd` 交給 `cmd.exe` 跑起來」，以及
@@ -405,3 +405,84 @@ OSError: [WinError 216] This version of %1 is not compatible with the version of
 **第四件的機制是「修第三件的那道鎖自己不可執行」**——即**修復本身成為下一個缺陷源**。
 對流程的意涵：一輪的收尾不該只驗「原缺陷消失」，還要驗「本輪新增的守門人自己在所有目標平台上活著」。
 這正是 §9.5′ 第 2 點與 meta 鎖要求存在的理由。
+
+---
+
+## §11　收輪後（R70）：一句話的平台誤判，與它為何能寫進十幾個檔（`DEF-101-756`／`757`／`758`）
+
+### 11.1 事故本體：全綠的工具輸出把主控導向與事實相反的結論
+
+主控在回答「下一輪該去哪個平台」時逐字宣稱「**Windows 側從未有真機輪**」。**使用者當場駁回**： <!-- stale-premise-ok: 逐字保全被駁回的原話＝本節的事故本體 -->
+這個專案本來就是在 Windows 開發的，每次都跑相關測試，還有每日凌晨 02:00 的 nightly。使用者是對的。
+
+主控的依據是 `python tools/sync_onboarding_baselines.py --check-snapshot` 印出的
+「Windows 欄**尚未建立基線**（provenance 四項全為 unrecorded）」。**而同一份 rc=0 輸出的下三行，
+就印著 Windows 欄的 `3767 passed / 208 skipped`**——那正是 Windows 實機量得的值，該格歸因欄
+還逐字記著「`[WINDOWS-NATIVE-ONLY]` 3 支由 skip 轉 pass、反向新增 2 支 `[WinError 1314]` skip」，
+**只有在真 Windows 上跑才寫得出來**。
+
+**這是本 repo 少見的「文件缺陷直接造成決策錯誤」實例**：不是測試紅、不是 CI 紅，是一份
+**全部閘門皆綠**的輸出，用一句措辭把讀者導向相反結論。§8～§10 記的是「收輪後才顯形」，
+本節記的是**另一類**：**閘門全綠、而閘門說的話本身是錯的**。
+
+### 11.2 史料複驗（用證據，不用推論）
+
+`git log` 全史（333 commit）＋ `ADR-XPLAT-002` §6 逐輪覆蓋表交叉複驗：
+
+| 期間 | 真機平台 | 決定性證據 |
+|---|---|---|
+| 起源～R8 | **Windows** | repo 原居 `D:\CursorProject\`；PS 5.1 `MissingArrayIndexExpression`（ANSI 讀 UTF-8-no-BOM）、`schtasks` 實測 `StopIfGoingOnBatteries=True` |
+| R9~R19 | macOS | R11 逐字「真 Mac 首輪」，系統 bash 3.2.57、smoke `PASS=10→13` |
+| **R20~R66** | **Windows 11 真機** | R20 逐字「本輪首次在真實 Windows 11 機器（非 mac）上執行本 repo」；R42「在本機真實 Windows 11 上失敗」；R59「真 Windows 開機執行」；R64／R66 皆有 Windows-only 實測憑證 |
+| R67~R70 | macOS 真機 | R67 逐字「首個 macOS 真機輪」＝**第一個 macOS 真機輪，不是第一個真機輪** |
+
+⇒ **兩個平台都有真機輪**。`R67 commit 461fd3b` 標題那句「首個 macOS 真機輪」被主控讀成
+「首個真機輪」，是誤判的第二個入口。
+
+### 11.3 根因四條（權重已依實查調整）
+
+- **(F) 首要——證據每天都在產生，卻沒有任何通道流進判定。** 每日 02:00 的完整回歸跑在
+  **Windows 11 真機**（Task Scheduler `AutoClaude_Nightly` ＋ 01:00 `AutoClaude_WindowsSmoke`），
+  是本 repo **最密集的平台真機證據源**。而它對所有判定完全隱形：心跳與 log 落 `AutoClaude/logs/`、
+  被 `.gitignore` 排除、14 天輪替；`dev_start` 心跳哨兵只讀**本機平台那一支**、
+  `install_mac_nightly.sh --status` 的缺跑 glob 是 `nightly_mac_*`（連檔名都對不上 Windows 家族）、
+  `sync_onboarding_baselines.py` 全檔零 nightly 提及。**根 `CLAUDE.md` 自己還記著在 Windows 真機
+  實查到 `AutoClaude_Nightly` `State=Ready`**——主控 session 一開始就讀過那份檔。
+- **(a) 語意二義性**：工具用同一個 `unrecorded` 表達「沒量過」與「量過但機制未建立」。
+- **(b) 機制引入未回溯**：R67 建 provenance 時，既有 Windows 欄只填 `unrecorded` 了事。
+- **(e) 已知的鎖射程缺口被寫成政策**：`ADR-XPLAT-002` §9.1 邊界 (d) 與 `DEF-101-643` 狀態欄
+  **逐字寫著**「SC-4 抓不到『零真機』」，處置是**劃界**而非補鎖。⇒ 同一句錯話得以橫跨 docs 與
+  `.py` 寫下而零告警。**本輪 §8.2 那句「被寫成政策的缺陷比沒被寫下的更難發現」第三次應驗**
+  （前兩次＝`DEF-101-643`／`DEF-101-682`，都是同形態、只換平台）。
+- (c) §9 那一列 R69 改寫時把「Windows 是主要真機平台」的事實從現況欄抹掉、卻沒補「既有量測
+  仍然有效」——該列同時寫著「rc 反映的是指紋漂移、不是有沒有真機量測過，兩者別混」，**同列自我矛盾**。
+
+### 11.4 落地（每一筆都有機械守門）
+
+1. **三態語意分離**：`baseline-origin` 升為必備 provenance 欄位，三值互斥；**「有沒有量過」由
+   「表② 該欄有沒有數字」機械決定**，`baseline-origin` 只答來源並**交叉驗證** ⇒ 宣告「從未量測」
+   而表上有數字即 fail-loud。語意本體抽到 `tools/lib/baseline_origin.py`。
+2. **回溯補齊（不捏造）**：win32 錨填 `baseline-origin=pre-provenance-mechanism`，四個 env 欄位
+   **維持 `unrecorded`**——混世代、環境真的不可考，**刻意不猜一個日期讓工具閉嘴**。
+3. **SC-9**（`ADR-XPLAT-002` §9.1 新宣告）：判準核心是**輪次界定**——「本輪無 Windows 真機」合法、
+   「Windows 零真機」違規；掃描面由「兩份 ADR」擴至帳本家族＋治理文件＋improving 系列＋三樹 `*.py`。 <!-- stale-premise-ok: 判準說明必須逐字寫出要抓的形態 -->
+   **射程是實測收斂的**：寬判準 52 命中多為誤配（噪音鎖）→ 加上平台名相鄰＋輪次界定＋具名豁免後
+   9 命中零誤報；「這台機器」實測誤報居多故**明文不納入**。注入雙向皆貼過輸出，零串音。
+4. **nightly 進入判定**：`--check-snapshot` 逐欄印該平台 nightly 心跳，**兩個平台家族都讀**，
+   並逐字劃界「本機看不到只代表本機不是那台機器」。
+5. **逐輪覆蓋表補列**（R9~R19／R20~R59／R68~R70）＋ 註明**逐輪補列是收輪必做項**——
+   該表停在 R67 整整三輪，而那正是出事的三輪；**缺列不會有任何東西轉紅**，比欄位寫錯更難發現。
+
+### 11.5 入規
+
+- **對「已知的鎖射程缺口」不得只以劃界結案**：要嘛補判準，要嘛在同一處寫明「為何補不上」與承接輪次。
+- **一則會被拿去做決策的訊息，不得在只知道「後設資料沒記」時說出「事情沒發生」**。
+  缺 provenance ≠ 缺量測，兩者處置相反：前者補記錄、後者要真的去跑一輪。
+
+### 11.6 誠實劃界（本節未關的）
+
+- `DEF-101-758`（`dev_start.py` 對未追蹤檔隱形＋`behind == 0` 早退）**本輪不修**，理由與三項解鎖
+  條件逐字記在帳本該列。
+- §7 表② **macOS 欄現為 presumed stale**：本節動到 `AutoClaude/tests/` 的一支測試檔（SC-9 訂正），
+  指紋因此改變。這是**觸發器正常運作**，不是缺陷；依既定紀律須由收輪者在最終工作樹跑
+  `--write --with-slow` 回填（本包任務書明訂不得重新量測 macOS 欄，故留給收尾）。

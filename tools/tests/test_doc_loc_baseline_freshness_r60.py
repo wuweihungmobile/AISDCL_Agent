@@ -1601,16 +1601,70 @@ class TestR67R2OtherPlatformNoticeIsNotAStandingWarning(unittest.TestCase):
         self.assertIn(SYNC._PLATFORM_COLUMN_LABELS[self.other], notices[0])
         return notices[0]
 
-    def test_never_baselined_column_says_so_instead_of_faking_a_drift(self) -> None:
-        """provenance 全 `unrecorded` ＝ 從未量過，不是「量過但過期」。
+    def test_pre_mechanism_column_is_never_described_as_never_measured(self) -> None:
+        """🔴 **DEF-101-756 的直接回歸鎖**：provenance 全 `unrecorded` **不等於**沒量過。
 
-        原措辭把它畫成 `v001:unrecorded→8ffe3c3dabbd` 這種漂移箭頭，讀起來像「有人量過、
-        後來樹變了」——實際上那一欄從來沒有任何人量過。同一個符號代表兩種完全不同的狀態，
-        就是把「不知道」寫得像結論（同 `NO-LOCAL-CARRIER` 必須附理由的紀律）。
+        R67 這支測試的前身鎖的是「`unrecorded` ⇒ 訊息含『尚未建立基線』」——**而那句話對
+        Windows 欄是假的**：該欄裝著 Windows 實機量得的數字，`unrecorded` 講的只是量測環境
+        沒被記下來。主控讀到那句話，向使用者宣稱  # stale-premise-ok: 逐字保全原話
+        「Windows 側從未有真機輪」而被開發史當場  # stale-premise-ok: 本鎖的立案樣本
+        駁回（R20／R42／R59／R64／R66 皆為 Windows 真機輪，且每日 02:00 有 Windows nightly）。
+
+        本鎖驗的**意圖**（Rule 9）：一則會被拿去做平台決策的訊息，**不得**在只知道
+        「provenance 沒記」的情況下說出「沒量過」。判準是因果的——「有沒有量過」的證據是
+        表② 那一欄有沒有數字，不是 provenance 欄位。
         """
-        notice = self._notice({f: SYNC._UNRECORDED for f in SYNC._PROVENANCE_FIELDS})
-        self.assertIn("尚未建立基線", notice)
-        self.assertNotIn("→", notice, "從未回填過的欄不得以漂移箭頭呈現（把『沒量過』寫成『過期』）")
+        notice = self._notice({
+            **{f: SYNC._UNRECORDED for f in SYNC._ENV_PROVENANCE_FIELDS},
+            SYNC._ORIGIN_FIELD: SYNC._ORIGIN_PRE_MECHANISM,
+        })
+        self.assertIn("已有實機量測基線", notice)
+        self.assertIn("不是平台覆蓋缺口", notice, "未講清楚缺的是 provenance 而非量測")
+        for banned in ("尚未建立基線", "從未量測", "沒量過"):
+            self.assertNotIn(
+                banned, notice,
+                f"訊息含「{banned}」——那正是 DEF-101-756 讓主控誤判的措辭；"
+                f"該欄有實測數字時不得以任何「沒量過」形態的字眼呈現",
+            )
+        self.assertNotIn("→", notice, "不得以漂移箭頭把 unrecorded 畫成「量過但過期」")
+
+    def test_a_truly_never_measured_column_still_says_so(self) -> None:
+        """對照組：真的沒量過時**必須**說得出口——本輪修的是二義性，不是把警訊消音。
+
+        沒有這一支，上一支會退化成「永遠不准說沒量過」，那是另一個方向的假宣稱。
+        """
+        stripped = self.text
+        for spec in SYNC._SLOW_SPECS:  # 把該欄四格的數字拿掉＝真的沒有量測
+            lines = stripped.split("\n")
+            idx = SYNC._anchored_index(lines, spec.anchor)
+            cells = SYNC._split_row(lines[idx])
+            col = SYNC.platform_cell_index(lines, idx, self.other)
+            cells[col] = " （未量測） "
+            lines[idx] = "|".join(cells)
+            stripped = "\n".join(lines)
+        self.text = stripped
+        notice = self._notice({
+            **{f: SYNC._UNRECORDED for f in SYNC._ENV_PROVENANCE_FIELDS},
+            SYNC._ORIGIN_FIELD: SYNC._ORIGIN_NEVER,
+        })
+        self.assertIn("從未量測", notice)
+        self.assertIn("平台覆蓋缺口", notice)
+
+    def test_declaring_never_measured_while_the_table_shows_numbers_fails_loud(self) -> None:
+        """🔴 **(b) 根因的機械鎖**：宣告與資料矛盾時當場 fail-loud，而不是印出那句錯話。
+
+        R67 引入 provenance 機制時**沒有回溯處理既有資料**，Windows 欄整欄填 `unrecorded`
+        了事 ⇒「機制引入前就存在的量測」與「不存在的量測」變成同一個字。本鎖讓那個狀態
+        在結構上無法靜默存在：只要表② 該欄還有數字，任何「從未量測」的宣告都會炸。
+        """
+        tampered = SYNC.render_fingerprints(
+            self.text, self.stale_fp, self.other,
+            {**{f: SYNC._UNRECORDED for f in SYNC._ENV_PROVENANCE_FIELDS},
+             SYNC._ORIGIN_FIELD: SYNC._ORIGIN_NEVER},
+        )
+        with self.assertRaises(AssertionError) as ctx:
+            SYNC.snapshot_report(tampered, self.viewpoint)
+        self.assertIn("DEF-101-756", str(ctx.exception))
 
     def test_recorded_but_drifted_column_reports_measurement_age(self) -> None:
         """回填過的欄要給「距今幾天」——那是這一則裡唯一隨時間變化、也唯一可行動的量。
@@ -1624,6 +1678,7 @@ class TestR67R2OtherPlatformNoticeIsNotAStandingWarning(unittest.TestCase):
             "host": "probe-host",
             "docker": "up",
             "pgextras": "absent",
+            SYNC._ORIGIN_FIELD: SYNC._ORIGIN_SELF,
         })
         self.assertIn("距今 37 天", notice)
         self.assertIn("結構性常態", notice, "未說明它在單機交替下恆亮 ⇒ 讀者會當成新問題追")

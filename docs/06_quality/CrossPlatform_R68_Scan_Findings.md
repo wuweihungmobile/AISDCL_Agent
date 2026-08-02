@@ -19,7 +19,7 @@
 > 1 partial、4 open、1 duplicate；P3：15 fixed、3 fixed@R69、3 partial、20 open、1 duplicate）。
 > 判定一律以現查為準——本欄不是宣稱，是複核紀錄；再次複核請直接跑欄內列出的指令。
 >
-> **證據等級**：本機為 macOS 26.5.2 arm64 真機（Darwin 25.5.0）；**Windows 側本輪零真機**，
+> **證據等級**：本輪執行平台＝macOS 26.5.2 arm64 真機（Darwin 25.5.0）；**Windows 側本輪未取得真機**（不等於「Windows 從未驗過」，逐輪覆蓋見 `ADR-XPLAT-002` §6；DEF-101-756），
 > 所有標 `Windows` 的判決皆為靜態分析／沙箱模擬／CI 對帳，不得讀成「已在 Windows 驗證」。
 
 ## 判決分布

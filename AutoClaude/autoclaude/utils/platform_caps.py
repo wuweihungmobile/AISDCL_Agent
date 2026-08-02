@@ -17,8 +17,8 @@ import time
 #
 # 本模組刻意「讀 sys.platform 於呼叫時」而非模組載入時快取：測試以
 # `patch("autoclaude.utils.platform_caps.sys.platform", ...)` 模擬 Windows 分支
-# （Windows 零真機），快取會讓那些模擬失效。唯一的例外是呼叫端自行在
-# import 期算出的 `_NEW_SESSION_KWARGS` 常數（見 execution/evaluator.py）。
+# （該輪有無 Windows 真機屬輪次屬性，見 ADR-XPLAT-002 §6），快取會讓那些模擬失效。
+# 唯一的例外是呼叫端自行在 import 期算出的 `_NEW_SESSION_KWARGS` 常數（見 execution/evaluator.py）。
 
 #: POSIX 收殺節奏：先 SIGTERM 給緩衝，輪詢到期仍活才升級 SIGKILL。
 _SIGTERM_GRACE_SECONDS = 2.0

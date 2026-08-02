@@ -166,7 +166,13 @@ SPECIAL_FILES: dict[str, int] = {
     "../tools/check_script_parity.py": 1618,
     "../tools/archive_defect_log.py": 1507,
     "../tools/check_defect_log_crossref.py": 1474,
-    "../tools/sync_onboarding_baselines.py": 1451,
+    # 🔴 R70 具名調高 1451 → 1499（`DEF-101-756`／`DEF-101-757`，依本棘輪自訂的解鎖程序）：
+    # 調高**前**已先走完「抽共用模組」那一步——基線三態語意（`unrecorded` 二義性根治）與
+    # nightly 落地產物探針共約 180 行已抽到 `tools/lib/baseline_origin.py`（先例：
+    # `tools/lib/ci_liveness.py`）。留在本檔的殘餘是**不可壓縮的接線**：三態判準要吃
+    # `_SLOW_SPECS`／`platform_cell_index()` 這些只有本檔有的表格解析器，搬出去等於把
+    # 解析器一起搬（那會製造第二份表格語意＝本檔一直在治的病）。
+    "../tools/sync_onboarding_baselines.py": 1499,
     "../tools/run_root_unittests.py": 754,
 }
 

@@ -966,10 +966,30 @@ python -m pytest tools/tests/test_dev_start.py -k CrossSiteBehavioralEquivalence
    gh run list --limit 10 --json workflowName,event,conclusion,createdAt   # 雲端 CI 可用性，同為輪次屬性
    ```
 
+   🔴 **R70 補記：本表在 R68~R70 期間整整三輪沒有新列，而那三輪正是「平台之爭」出事的三輪**
+   （`DEF-101-756`）。一張**專為回答「哪一輪在哪個平台跑過」而建、卻停在 R67** 的表，等於把
+   讀者推回去用別的來源猜——主控就是這樣改用 `sync_onboarding_baselines.py --check-snapshot`
+   的 provenance 欄位反推，得出「Windows 側從未有真機輪」這個與開發史相反的結論。  <!-- stale-premise-ok: 逐字保全被駁回的原話＝本段的立案理由 -->
+   **本表逐輪補列是收輪必做項**（缺列比欄位寫錯更難發現：缺列不會有任何東西轉紅）。
+
+   🔴 **R70 補上一整條被本表漏掉的證據軌：每日 nightly。** 本表只登記「該輪收輪時人在哪台
+   機器」，而本 repo 另有**每天 02:00 自動跑的完整回歸**——Windows 11 真機上由 Task Scheduler
+   的 `AutoClaude_Nightly` 觸發（`tools/install_windows_nightly.ps1`，另有 01:00 的
+   `AutoClaude_WindowsSmoke`），macOS 上由 launchd `com.autoclaude.nightly` 觸發
+   （`tools/install_mac_nightly.sh`）。**那是本 repo 最密集的平台真機證據來源**，卻在本輪之前
+   **完全沒有進入任何平台覆蓋判定**：心跳與 log 落在 `AutoClaude/logs/`、被 `.gitignore` 排除、
+   14 天輪替、只存在於產出它的那台機器上 ⇒ 從另一台機器結構上看不到。
+   現查（**兩個平台家族都讀，不依當前平台分岔**）：`python tools/sync_onboarding_baselines.py --check-snapshot`
+   會逐欄印出該平台的 nightly 心跳現況；本機看不到某平台的心跳**只代表本機不是那台機器**，
+   `DEF-101-757` 逐字記載了這條劃界。
+
    | 輪次 | 該輪執行平台（收輪當下實測） | 該輪雲端 CI 可用性（收輪當下實測） | 該輪**未**覆蓋、一律標推論的面 |
    |---|---|---|---|
+   | R9~R19 | macOS（`真 Mac 首輪`＝R11，系統 bash 3.2.57；smoke `PASS=10→13`） | 未逐輪登記（本欄 R67r2 才建立） | PowerShell 5.1／`schtasks`／NTFS 語意的實際執行行為（該期間 Windows 訊號僅來自雲端 `windows-latest`） |
+   | R20~R59 | **Windows 11 真機**（R20 逐字：「本輪首次在真實 Windows 11 機器（非 mac）上執行本 repo」；R42／R59 另有「在本機真實 Windows 11 上失敗」的實測發現） | 未逐輪登記 | launchd／`launchctl`／BSD `stat -f`／bash 3.2／zsh 的實際執行行為 |
    | R60~R66 | Windows 11 / PowerShell 5.1（無 pwsh 7）/ Git Bash | 未逐輪登記（本欄 R67r2 才建立；R60 r3 曾就 root-infra-ci 記過一次不可用，見 `DEF-101-597`） | launchd／`plutil`／`launchctl`／BSD `stat -f`／bash 3.2／zsh／`macos_smoke_local.sh`／`run_local_nightly.sh` 的實際執行行為 |
    | R67 | macOS `Darwin 25.5.0` arm64／系統 bash **3.2.57(1)-release**／預設 shell zsh | **動工時不可用、收輪時已恢復**：07-29~07-31 三日內 push 與 schedule 全數 `failure`（job 未起，annotation 逐字為帳務拒絕）；**2026-08-01 起三支排程 workflow 全數 `success` 且有真實執行時長**（複審員與本包各自以上列指令獨立現查同結論）⇒ 該狀態在 24 小時內翻轉 | PowerShell 5.1／`schtasks`／NTFS 路徑與大小寫語意／Git Bash／`windows_smoke_local.ps1` 的實際執行行為；**Linux runner 的 case-sensitive 檔案系統**（本輪 35 個 git rename 含大小寫收斂，只在 case-INsensitive 的 APFS 上驗過） |
+   | R68~R70 | macOS `26.5.2` arm64 真機（`Darwin 25.5.0`） | 一律現查（`gh run list`）；R69／R70 的三筆 Windows 缺陷（`DEF-101-727`／`753`／`754`）皆由雲端 `windows-compat-ci` 抓到、本機 macOS 全綠 | PowerShell 5.1／`schtasks`／Git Bash／`windows_smoke_local.ps1` 的實際執行行為。⚠️ **不得**把本格讀成「Windows 從未驗過」——那是 `DEF-101-756`：Windows 真機覆蓋是 R20~R66 的既成事實，且 Windows nightly 每日仍在跑，見上方 nightly 段 |
 
    🔴 **R67r2 新增（ARCH-R67-04）：雲端 CI 可用性與平台一樣是輪次屬性，不是本 ADR 的常數。**
    R67 曾在 §8 item 9 把「雲端停擺」當成穩定前提來重寫論證（原文與訂正見該列），而該前提在
@@ -1311,6 +1331,26 @@ grep -nE '(三|四|五|六)條.{0,12}(不變式|可轉紅)|(不變式|可轉紅)
 #       ⚠️ 一向不對稱（刻意）：只驗「文件端不得多」。反向（程式端有 waiver 常數而文件端零
 #             使用）不驗——那是「未使用」而非「死信」，判它紅會逼人刪掉仍被紅綠測試依賴的常數。
 grep -nE '<!--[[:space:]]*[a-z][a-z-]*-ok:' "$ADR2" "$ADR1" | grep -vE 'zsh-glob-ok:|stale-premise-ok:'
+
+# SC-9  標的：**平台覆蓋宣稱會出現的所有活文件與源碼**（兩份 ADR ＋ ADR-XPLAT-003 ＋
+#             維度表 ＋ 具名治理文件 ＋ 缺陷帳本家族 ＋ docs/04_planning/AutoSDD_improving_*.md
+#             ＋ AutoClaude/autoclaude、AutoClaude/tests、tools 底下的 *.py；枚舉全走既有
+#             SSOT／glob，不手列檔名）
+#       判準：出現「某平台零／無／從未真機」形態的宣稱，而**同一行沒有輪次界定**
+#             （本輪／該輪／R<N>／輪次…）亦未掛 `stale-premise-ok: <理由>` 即違規。
+#             「本輪無 Windows 真機」＝合法（帶界定）；「Windows 零真機」＝違規。
+#       預期：rc=1、零輸出
+#       🔴 R70 新增（DEF-101-757）：本條是 **SC-4 已知射程缺口的補完**。下方邊界 (d) 與
+#             `DEF-101-643` 的狀態欄敘述都**逐字寫著**「同義寫法（『零真機』…）抓不到」，
+#             而處置是**劃界**而非補鎖 ⇒ R69/R70 得以把「Windows 零真機」寫進 12 個檔且
+#             零告警，主控再據以向使用者宣稱「Windows 側從未有真機輪」被當場駁回  <!-- stale-premise-ok: 逐字保全那句錯話本身，它是本條的立案理由；改寫會讓規格失去「這正是要抓的形態」的樣本 -->
+#             （`DEF-101-756`）。**此後本 repo 對「已知的鎖射程缺口」不得只以劃界結案**：
+#             要嘛補上判準，要嘛在同一處寫明「為何補不上」與承接輪次。
+#       ⚠️ 判準本體住 Python（`sc9_no_unscoped_zero_real_machine_claim`）：三段式條件
+#             （平台名相鄰視窗＋同行輪次界定＋具名豁免）grep 形態表達不了，同 SC-7／SC-8。
+#             下列 grep 只是**粗篩**，命中數會多於真判準，不得拿它的輸出當結論。
+grep -rnE '(零|無|沒有|未曾|從未|不曾)[A-Za-z0-9 有側過的]{0,12}(真機|實機)' \
+  docs/ tools/ AutoClaude/autoclaude/ AutoClaude/tests/ | grep -E 'Windows|macOS|Darwin|PowerShell'
 ```
 
 🔴 **鑑別力是實測出來的，不是設計出來的**：R67 動工前對**修復前**的本檔逐條跑過，
@@ -1330,6 +1370,14 @@ SC-3 命中 2 行（item 7／9）、SC-4 命中 §6 邊界 1 原文，皆 `rc=0`
 (d) **列舉式比對的固有窄射程**：SC-4 只認上列動詞、SC-5 只認上列四個詞，同義寫法
 （「零真機」「這台機器」「目前只有一台⋯」「配額」「服務中斷」…）**抓不到**；
 SC-2 只認粗體形態，非粗體的活躍 `R<N>+` 也抓不到。
+🔴 **R70 訂正：本項的「零真機」那一半已由 SC-9 補上，不再是劃界（`DEF-101-757`）**。
+逐字保留上一段當史料，因為**它自己就是本次事故的載體**：這條邊界（連同 `DEF-101-643`
+的結案敘述）把「SC-4 抓不到『零真機』」寫成了**已知且接受的政策**，於是 R69/R70 得以在
+12 個檔寫下同一句話而零告警，主控再據以向使用者做出錯誤的平台建議並被當場駁回
+（`DEF-101-756`）。**此後本 repo 對「已知的鎖射程缺口」不得只以劃界結案**——要嘛補上判準，
+要嘛在同一處寫明「為何補不上」與承接輪次。仍未補的殘餘（誠實劃界）：「這台機器」
+（實測誤報率 4/6，補上即成噪音鎖，理由見 SC-9 區塊註解）、「目前只有一台」「唯一一台」
+（全庫零命中，無樣本可驗鑑別力）、SC-5 的「配額／服務中斷」同義詞、SC-2 的非粗體形態。
 🔴 **R67 round 4 追加兩項劃界（SA2-R67-01／ARCH-R67R2-01）**：
 (d-1) **區段射程**：SC-2／SC-3／SC-5 一律只掃 **§8 交棒表本體**（止於 `### 8.1`）。
 SC-2／SC-3 原掃 §8 全區，而這幾條**都沒有同行豁免**（只有 SC-1／SC-4 有）⇒ 下一次照本輪

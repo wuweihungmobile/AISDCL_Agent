@@ -1868,6 +1868,7 @@ class Corpus(NamedTuple):
     scan: str
     family: tuple[tuple[str, str], ...]
     governance: tuple[tuple[str, str], ...]
+    wide: tuple[tuple[str, str], ...]
 
 
 def read_governance() -> list[tuple[str, str]]:
@@ -1892,6 +1893,34 @@ def read_governance() -> list[tuple[str, str]]:
     ]
 
 
+_ADR3 = (_REPO / "docs" / "04_planning" / "ADR"
+         / "ADR-XPLAT-003-autoclaude-platform-capability-layer.md")
+# SC-9 的掃描面：**平台覆蓋宣稱會出現的所有活文件與源碼**。
+#
+# 🔴 為何非擴到這麼寬不可（DEF-101-757）：SC-4 的掃描面只有兩份 ADR，於是同一句錯話換一個
+# 檔案就整個逸出——R69/R70 把「Windows 零真機」寫得橫跨 docs 與 `.py`（註解與 docstring 都有）
+# 而零告警。平台覆蓋宣稱不挑檔案住，鎖就不能挑檔案掃。
+_SC9_DIRS: tuple[str, ...] = ("AutoClaude/autoclaude", "AutoClaude/tests", "tools")
+
+
+def read_wide() -> list[tuple[str, str]]:
+    """SC-9 掃描面的 `(相對路徑, 內容)`。枚舉全部走既有 SSOT／glob，不手列檔名。"""
+    paths = [_ADR2, _ADR3, _ADR, _SCAN_DIMS]
+    paths += list(ADL._GOVERNANCE_DOCS) + list(ADL._family_files())
+    paths += sorted((_REPO / "docs" / "04_planning").glob("AutoSDD_improving_*.md"))
+    for rel in _SC9_DIRS:
+        paths += sorted((_REPO / rel).rglob("*.py"))
+    out: dict[str, str] = {}
+    root = _REPO.resolve()
+    for p in paths:
+        if not p.is_file():
+            continue
+        rel_path = p.resolve().relative_to(root).as_posix()
+        if rel_path not in out:
+            out[rel_path] = p.read_text(encoding="utf-8-sig")
+    return list(out.items())
+
+
 def read_corpus() -> Corpus:
     """現查掃描面。帳本家族枚舉仍走 `read_family()`（＝`ADL._family_files()` 家族 SSOT）；
     治理文件枚舉走 `ADL._GOVERNANCE_DOCS`（同一份具名清單 SSOT）。"""
@@ -1901,6 +1930,7 @@ def read_corpus() -> Corpus:
         scan=_SCAN_DIMS.read_text(encoding="utf-8-sig"),
         family=tuple(read_family()),
         governance=tuple(read_governance()),
+        wide=tuple(read_wide()),
     )
 
 
@@ -2058,6 +2088,69 @@ def sc4_no_live_platform_premise(c: Corpus) -> list[str]:
         _adr_pair(c), _SC4_RE, _SC4_WAIVER, "SC-4",
         f"疑似活的平台前提；訂正段的逐字引述請在**同一行**掛 `{_SC4_WAIVER} <理由>`",
     )
+
+
+# ---- SC-9：不得出現「某平台零真機」的**無輪次界定**宣稱 -----------------------------------
+#
+# 🔴 **本條是 SC-4 已知射程缺口的補完，不是新發明**（DEF-101-757）。§9.1 邊界 (d) 逐字寫著
+# SC-4「同義寫法（『零真機』『這台機器』…）**抓不到**」，`DEF-101-643` 的結案敘述也逐字
+# 重複一次——**缺口被寫成政策、而不是被補上**。代價已實測：R69/R70 把「Windows 零真機」
+# 寫得橫跨 docs 與 `.py` 且零告警，主控再據以向使用者宣稱  # stale-premise-ok: 逐字保全原話
+# 「Windows 側從未有真機輪」，  # stale-premise-ok: 同上，本條的立案樣本
+# 被使用者當場以開發史駁回（`DEF-101-756`）。本 repo 自己在 `improving_103` §8.2 寫過的那句
+# 在此第三次應驗：**被寫成政策的缺陷比沒被寫下的更難發現**。
+#
+# 判準的核心是**輪次界定**，不是「不准提平台」——這正是 `ADR-XPLAT-002` §6 邊界 1 的既有
+# 裁決：「平台覆蓋是**輪次屬性**，不是治理文件的常數」。故
+#   「本輪無 Windows 真機」   ＝ 合法（帶輪次界定；實測現存的這一類寫法全部屬此形）
+#   「Windows 零真機」  ＝ 違規  # stale-premise-ok: 判準說明須逐字寫出要抓的形態
+#                       （讀起來是永久屬性，而它是假的）
+#
+# 🔴 **射程是實測收斂出來的，不是想像的**（兩個方向都貼過輸出）：
+#   - 只用「否定詞＋真機」：**52 命中**，其中「檔名零改動）＋真機取證」「無法真機驗證」
+#     「有無真機量測」「無真機輪一律標 SKIP」這類**規則句與跨標點誤配**佔多數 ⇒ 噪音鎖。
+#   - 加上「平台名須相鄰」＋「同行無輪次界定」＋間隔字元限縮為 `[A-Za-z0-9 有側過的]`：
+#     **9 命中、零誤報**（全部是真違規或需具名豁免的逐字引述）。
+#   - 另**刻意不納入**「這台機器」：實測命中裡**多數是誤報**（`test_ps_engine_ssot.py`
+#     「說通則而非說這台機器」等），而 ADR 內真正該管的那一種已由 SC-4 的 `本機是/為` 覆蓋。
+#     誤報的鎖最後一定被加豁免繞過，比沒有鎖更糟——本檔多處已判過。
+#   - 同理**刻意不把 SC-4 的舊樣式擴到本條的寬掃描面**：實測那樣會多出**一整批誤報**
+#     （`dev_start.py`「本機是否有 nightly 正在跑」這類與平台前提無關的散文）。
+_SC9_CLAIM_RE = re.compile(
+    r"(?:零|無|沒有|未曾|從未|不曾|沒)[A-Za-z0-9 有側過的]{0,12}(?:真機|實機)"
+)
+_SC9_PLATFORM_RE = re.compile(r"Windows|macOS|Mac\b|Darwin|win32|darwin|PowerShell")
+_SC9_ROUND_SCOPE_RE = re.compile(
+    r"本輪|該輪|當輪|這一輪|本次|本包|R\d{1,3}|某輪|每一輪|哪一輪|輪次|各輪"
+)
+_SC9_WAIVER = "stale-premise-ok:"
+_SC9_NEAR = 18  # 平台名須落在命中詞前後這個字元窗內，才算「在講那個平台」
+
+
+def sc9_no_unscoped_zero_real_machine_claim(c: Corpus) -> list[str]:
+    """WHY 見上方區塊註解。回空 list ＝通過。
+
+    豁免沿用 SC-4 的 `stale-premise-ok:`（**具名＋同行**）：訂正段必須能逐字引述被推翻的
+    原句才讓讀者辨認版本，而整檔豁免會讓一個標記放行整份文件——本檔對單行巨欄已踩過。
+    """
+    problems: list[str] = []
+    for rel, text in c.wide:
+        for lineno, line in enumerate(text.splitlines(), 1):
+            if _SC9_ROUND_SCOPE_RE.search(line):
+                continue  # 帶輪次界定＝本 repo 明訂的正確寫法
+            for m in _SC9_CLAIM_RE.finditer(line):
+                window = line[max(0, m.start() - _SC9_NEAR):m.end() + _SC9_NEAR]
+                if not _SC9_PLATFORM_RE.search(window):
+                    continue
+                if _SC9_WAIVER in line:
+                    break
+                problems.append(
+                    f"SC-9 {rel}:{lineno}：無輪次界定的「某平台零真機」宣稱"
+                    f"（平台覆蓋是輪次屬性，不是常數）；史料逐字引述請在**同一行**掛 "
+                    f"`{_SC9_WAIVER} <理由>` ← {line.strip()[:160]}"
+                )
+                break
+    return problems
 
 
 # ---- SC-5：§8 交棒表本體不得出現外部環境當時狀態 -----------------------------------------
@@ -2245,6 +2338,7 @@ _SECTION_91_CHECKS: tuple[Check, ...] = (
     Check("SC-6", _SPEC_ADR2, sc6_no_hardcoded_invariant_count),
     Check("SC-7", _SPEC_SCAN, sc7_every_used_scan_code_is_defined),
     Check("SC-8", _SPEC_ADR2, sc8_no_dead_letter_waiver_marker),
+    Check("SC-9", _SPEC_ADR2, sc9_no_unscoped_zero_real_machine_claim),
 )
 
 
@@ -2294,6 +2388,30 @@ _SEC83_PRESERVED = (
 )
 # SC-8 的注入形態＝R67r2 真的寫過的那一枚死信（同其餘各條：注入取自規格記載的修復前實況）。
 _SC8_INJECT = "> 原句保全  <!-- env-transient-ok: 訂正段必須逐字引述被移出的原句 -->"
+
+
+# SC-9 的注入形態＝R70 真的寫過的那一句（`ADR-XPLAT-003:83` 逐字）。
+# stale-premise-ok: 下一行的注入樣本必須逐字等於修復前實況，否則驗的不是真形態
+_SC9_INJECT = (
+    "不在 import 期快取。理由：Windows 零真機，"  # stale-premise-ok: 逐字樣本
+    "模擬平台的測試會失效。"
+)
+
+
+def _append_to_wide(c: Corpus, payload: str) -> Corpus:
+    """附加到**只屬於 SC-9 掃描面**的那一份檔（ADR-XPLAT-003）。
+
+    刻意選它而不是 `adr2`：`adr2` 同時是 SC-1~SC-6／SC-8 的掃描面，注入其上會讓
+    `test_only_the_matching_check_reds` 的「零串音」判準測不出真正的串音（載體本身共用）。
+    ADR-XPLAT-003 不在其餘任一條的射程內 ⇒ 只有 SC-9 該轉紅。
+    """
+    rel = _ADR3.resolve().relative_to(_REPO.resolve()).as_posix()
+    wide = tuple(
+        (name, body + "\n" + payload + "\n") if name == rel else (name, body)
+        for name, body in c.wide
+    )
+    assert any(name == rel for name, _ in wide), f"SC-9 注入載體 {rel} 不在掃描面內"
+    return c._replace(wide=wide)
 
 
 def _append_to_adr2(c: Corpus, payload: str) -> Corpus:
@@ -2395,6 +2513,8 @@ _SECTION_91_INJECTIONS: tuple[Injection, ...] = (
               lambda c: _inject_scan_code(c, _SC7_INJECT_CODE)),
     Injection("SC-8", "規格記載的修復前實況：§8.3 掛著一枚全庫零消費者的豁免標記",
               lambda c: _append_to_adr2(c, _SC8_INJECT)),
+    Injection("SC-9", "規格記載的修復前實況：R69/R70 把「Windows 零真機」寫得橫跨 docs 與 .py",
+              lambda c: _append_to_wide(c, _SC9_INJECT)),
 )
 
 

@@ -634,11 +634,11 @@ _UNPINNED_HANDOVER_GRANDFATHERED = frozenset({
     "DEF-101-388", "DEF-101-392", "DEF-101-393", "DEF-101-398",
     "DEF-101-399", "DEF-101-400", "DEF-101-401", "DEF-101-402",
     "DEF-101-412", "DEF-101-416", "DEF-101-417", "DEF-101-418",
-    "DEF-101-432", "DEF-101-628", "DEF-101-643", "DEF-101-646",
+    "DEF-101-432", "DEF-101-628", "DEF-101-646",
     "DEF-101-674",
 })
 #: shrink-only 棘輪上限（形狀比照 `tools/tests/` 的檔數棘輪）。只能往小改。
-_UNPINNED_HANDOVER_CEILING = 57
+_UNPINNED_HANDOVER_CEILING = 56
 
 
 def unpinned_handover_problems(ledger_text: str) -> list[str]:

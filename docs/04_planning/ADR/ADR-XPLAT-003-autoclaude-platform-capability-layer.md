@@ -35,7 +35,8 @@ autoclaude/perception/pty_wrapper.py:311:        elif sys.platform != "win32" an
 1. **同一套邏輯的兩份複製**：`execution/evaluator.py::kill_process_tree()` 與
    `perception/pty_wrapper.py::close()` 各自寫了一遍「Windows `taskkill /T /F` ／ POSIX `killpg`
    SIGTERM→輪詢→SIGKILL」。兩者連常數（2 秒緩衝、0.05 秒輪詢）都相同，只是變數名不同。
-   ⇒ 修一邊忘另一邊＝單平台靜默退化，而 **Windows 零真機**的情況下沒有任何測試會抓到。
+   ⇒ 修一邊忘另一邊＝單平台靜默退化，而在**沒有 Windows 真機的輪次**裡沒有任何測試會抓到
+   （哪一輪有真機屬**輪次屬性**，見 `ADR-XPLAT-002` §6 逐輪覆蓋表；DEF-101-756）。
    此即 `DEF-101-706` 已識別但未指派的收斂標的（本 ADR 落地的是**該標的**；`DEF-101-706` 本身仍 `partial`，理由見上表〈關係〉欄與帳本該列）。
 2. **跨樹不可共用**：根層已有 `tools/lib/platform_utils.py`，但它與 `autoclaude/` 分屬不同封裝樹，
    `autoclaude/` import 它會建立 repo 級的反向相依（且 `.importlinter` 的 `root_packages = autoclaude`
@@ -80,7 +81,8 @@ autoclaude/perception/pty_wrapper.py:311:        elif sys.platform != "win32" an
 
 ### 2.2 刻意保留的設計細節
 
-- `platform_caps` 內部**於呼叫時**讀 `sys.platform`，不在 import 期快取。理由：Windows 零真機，
+- `platform_caps` 內部**於呼叫時**讀 `sys.platform`，不在 import 期快取。理由：在沒有 Windows
+  真機的輪次（本輪即是）裡，
   Windows 分支只能靠 `patch("autoclaude.utils.platform_caps.sys.platform", "win32")` 模擬，
   快取會讓那些模擬全部失效（變成恆綠的假鎖）。
 - 唯一的例外是 `execution/evaluator.py::_NEW_SESSION_KWARGS` —— 它在 import 期算一次，

@@ -484,7 +484,8 @@ def _reaping_primitive_sites() -> set[str]:
 def test_process_tree_reaping_has_exactly_one_implementation():
     """DEF-101-706：kill_process_tree() 與 pty_wrapper.close() 曾是同一套行程樹
     回收的兩份複製（POSIX killpg + Windows taskkill 各寫一遍）。兩份實作 = 修一邊
-    忘另一邊 = 單平台靜默退化，這在 Windows 零真機的情況下不會被任何測試抓到。"""
+    忘另一邊 = 單平台靜默退化，而在「該輪沒有 Windows 真機」的輪次裡不會被任何測試抓到
+    （哪一輪有真機屬輪次屬性，見 ADR-XPLAT-002 §6 逐輪覆蓋表；DEF-101-756）。"""
     offenders = _reaping_primitive_sites()
     assert not offenders, (
         f"下列模組自行實作行程樹收殺：{sorted(offenders)}；"
