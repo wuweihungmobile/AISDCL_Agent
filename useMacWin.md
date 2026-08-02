@@ -53,7 +53,7 @@
 
 6. 回覆一律使用繁體中文。
 
-7. **僅限「剛從 Windows 切換過來的第一次啟動」**（判斷依據：dev_start [1/7] 印出偵測到跨平台切換；雙機各自 clone 的拓撲永遠印「無切換」，此時以你自己知道的上次工作機器為準）：另外要做 useMacWin.md〈🔁 平台切換 SOP〉**B 段**的事，其中核心是**回填 macOS 那一欄的 ONBOARDING.md §7 表② dated snapshot**——`.venv/bin/python tools/sync_onboarding_baselines.py --write --with-slow`，只能在 macOS 本機做（跨平台代填＝假 provenance，工具會 rc=2 拒絕），且必須在**不含 postgres/pgvector 選配的出廠環境 venv** 上跑，**不准**加 `--allow-pg-extras` 繞過拒跑。動手前先把該節整段讀完，不要只照這一行做；做完把工具輸出貼給我。
+7. **僅限「剛從 Windows 切換過來的第一次啟動」**（🔴 **判斷依據是機械判準，不是記憶、也不是 dev_start [1/7] 的輸出**——`[1/7]` 讀的是本機 `.dev_env_state.json`，**雙機各自 clone 的拓撲永遠印「無切換」**，用它判斷必然漏做；而「上一輪在哪台機器」沒有任何人或 AI 能可靠記得。**改跑這一條，每次啟動都適用**：`.venv/bin/python tools/sync_onboarding_baselines.py --check-snapshot`，讀 **macOS 欄**那一段——只要它是 `presumed stale`、或其 `baseline-origin` 不是 `self-recorded`，就代表本欄需要回填，**本點就要做**；三項都新鮮才可跳過。此判準與輪號、日期、HEAD 皆無關，故不會過期）：另外要做 useMacWin.md〈🔁 平台切換 SOP〉**B 段**的事，其中核心是**回填 macOS 那一欄的 ONBOARDING.md §7 表② dated snapshot**——`.venv/bin/python tools/sync_onboarding_baselines.py --write --with-slow`，只能在 macOS 本機做（跨平台代填＝假 provenance，工具會 rc=2 拒絕），且必須在**不含 postgres/pgvector 選配的出廠環境 venv** 上跑，**不准**加 `--allow-pg-extras` 繞過拒跑。動手前先把該節整段讀完，不要只照這一行做；做完把工具輸出貼給我。
 
 完成以上準備後，跟我簡短回報目前環境狀態（是否首次執行、是否偵測到從 Windows 切換過來、GitHub 同步結果〔已同步/離線跳過/有分叉等警告〕、.venv 是否有重建、hooks 是否正常、有沒有需要我處理的警告），然後等我下達實際的開發任務，不要自己先開始做事。
 ```
@@ -112,7 +112,7 @@
 
 6. 回覆一律使用繁體中文。
 
-7. **僅限「剛從 mac 切換過來的第一次啟動」**（判斷依據：dev_start [1/7] 印出偵測到跨平台切換；雙機各自 clone 的拓撲永遠印「無切換」，此時以你自己知道的上次工作機器為準）：另外要做 useMacWin.md〈🔁 平台切換 SOP〉**B 段**的事，其中核心是**回填 Windows 那一欄的 ONBOARDING.md §7 表② dated snapshot**——`.venv\Scripts\python.exe tools/sync_onboarding_baselines.py --write --with-slow`，只能在 Windows 本機做（跨平台代填＝假 provenance，工具會 rc=2 拒絕），且必須在**不含 postgres/pgvector 選配的出廠環境 venv** 上跑，**不准**加 `--allow-pg-extras` 繞過拒跑。動手前先把該節整段讀完，不要只照這一行做；做完把工具輸出貼給我。
+7. **僅限「剛從 mac 切換過來的第一次啟動」**（🔴 **判斷依據是機械判準，不是記憶、也不是 dev_start [1/7] 的輸出**——`[1/7]` 讀的是本機 `.dev_env_state.json`，**雙機各自 clone 的拓撲永遠印「無切換」**，用它判斷必然漏做；而「上一輪在哪台機器」沒有任何人或 AI 能可靠記得。**改跑這一條，每次啟動都適用**：`.venv\Scripts\python.exe tools/sync_onboarding_baselines.py --check-snapshot`，讀 **Windows 欄**那一段——只要它是 `presumed stale`、或其 `baseline-origin` 不是 `self-recorded`，就代表本欄需要回填，**本點就要做**；三項都新鮮才可跳過。此判準與輪號、日期、HEAD 皆無關，故不會過期）：另外要做 useMacWin.md〈🔁 平台切換 SOP〉**B 段**的事，其中核心是**回填 Windows 那一欄的 ONBOARDING.md §7 表② dated snapshot**——`.venv\Scripts\python.exe tools/sync_onboarding_baselines.py --write --with-slow`，只能在 Windows 本機做（跨平台代填＝假 provenance，工具會 rc=2 拒絕），且必須在**不含 postgres/pgvector 選配的出廠環境 venv** 上跑，**不准**加 `--allow-pg-extras` 繞過拒跑。動手前先把該節整段讀完，不要只照這一行做；做完把工具輸出貼給我。
 
 完成以上準備後，跟我簡短回報目前環境狀態（是否首次執行、是否偵測到從 mac 切換過來、GitHub 同步結果〔已同步/離線跳過/有分叉等警告〕、.venv 是否有重建、hooks 是否正常、有沒有需要我處理的警告），然後等我下達實際的開發任務，不要自己先開始做事。
 ```
