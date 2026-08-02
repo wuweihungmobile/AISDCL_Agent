@@ -55,6 +55,8 @@ from pathlib import Path
 
 import pytest
 
+from scripts import bash_probe  # isort: skip（首方/三方分組隨 cwd 而異，跳過排序消除歧義）
+
 # 本檔 → scripts/tests → scripts → AISDLC_SDD（REPO_ROOT）
 REPO_ROOT = Path(__file__).resolve().parents[2]
 # AISDLC_SDD 的父目錄 = monorepo 根（R38 改 dot-source 後，安裝器需要
@@ -67,7 +69,12 @@ def _pwsh_exe() -> str | None:
 
 
 _PWSH = _pwsh_exe()
-_BASH = shutil.which("bash")
+# R69 後續（DEF-101-753）：原為 `shutil.which("bash")`。本檔的 `pytestmark` 只擋
+# `_PWSH is None`，所以在 Windows runner 上**必跑**——而 `shutil.which` 只照 PATH 順序
+# 取第一個命中，無 System32 段排除、無 coreutils 驗活，於「WSL 佔位版排在 Git Bash 之
+# 前」的機器（DEF-101-617 已記載該機型）會回 WSL 啟動器。第 381 行 skipif 的 reason
+# 逐字寫著「Windows 上可由 Git-Bash 提供」，正說明作者意圖與當時的實作不符。
+_BASH = bash_probe.usable_bash()
 
 pytestmark = pytest.mark.skipif(_PWSH is None, reason="需要 powershell/pwsh")
 

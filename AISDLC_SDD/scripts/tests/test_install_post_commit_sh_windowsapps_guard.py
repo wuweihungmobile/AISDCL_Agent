@@ -24,13 +24,20 @@ from pathlib import Path
 
 import pytest
 
+from scripts import bash_probe  # isort: skip（首方/三方分組隨 cwd 而異，跳過排序消除歧義）
+
 # scripts/tests/ → scripts/ → AISDLC_SDD（REPO_ROOT）
 REPO_ROOT = Path(__file__).resolve().parents[2]
 MONOREPO_ROOT = REPO_ROOT.parent
 _GUARD_SH = MONOREPO_ROOT / "tools" / "lib" / "windowsapps_guard.sh"
-_BASH = shutil.which("bash")
+# R69 後續（DEF-101-753）：原為 `shutil.which("bash")`——本目錄唯二未改用 SSOT 的兩支
+# 之一（其餘四支早已 `bash_probe.usable_bash()`）。`shutil.which` 只照 PATH 順序取第一
+# 個命中，無 System32 段排除、無 coreutils 驗活，於「WSL 佔位版排在 Git Bash 之前」的
+# Windows 機器（DEF-101-617 已記載該機型）會回 WSL 啟動器，下方三處 `[_BASH, …]` 於是
+# 執行到 Linux 側 shell、拿到與受測安裝器無關的 rc。
+_BASH = bash_probe.usable_bash()
 
-pytestmark = pytest.mark.skipif(_BASH is None, reason="本機找不到 bash，略過")
+pytestmark = pytest.mark.skipif(_BASH is None, reason="本機找不到可用的 bash，略過")
 
 
 def _latest_installer() -> Path:

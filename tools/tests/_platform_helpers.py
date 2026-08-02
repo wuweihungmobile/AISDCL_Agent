@@ -27,13 +27,26 @@ AST 逐字相同的複本，且無一致性鎖——同輪卻把 `_ci_scan_ancho
 R57R2-QA-01 證實：兩份複本確實同時帶著同一個 here-string 起始誤判的 fail-open。
 故一併收斂進本檔，呼叫端一致性由
 `test_find_git_bash_parity.py::TestPsCommentStripperSsotCallsiteLock` 機械守護。
+
+R69 後續（DEF-101-753）同判例第二次套用：`usable_bash_for_fixture()`（取得一支真的
+能跑 .sh 的 bash）原本在 `test_bash_probe_spec_contract.py` 與
+`test_macos_smoke_skip_honesty.py` 各存一份 fixture 用途複本、且**排除規則不一致**，
+而 `test_smoke_ci_sync.py` 乾脆兩份都沒用、直接把字面值 `"bash"` 交給 subprocess ⇒
+Windows CI 上跑到 WSL 佔位 bash 翻紅。三處收斂為本檔一份，呼叫端一致性由
+`test_bash_probe_spec_contract.py::TestNoBareBashInvocationInToolsTests` 機械守護。
 """
 from __future__ import annotations
 
 import shutil
+import subprocess
 import sys
 import unittest
-from pathlib import Path
+from pathlib import Path, PureWindowsPath
+
+# 驗活探測「參數」（PROBE_CMD／期望輸出／System32 排除段）的既有單一真相源，供
+# `usable_bash_for_fixture()` 消費（不另立第二份字面值；WHY 見該檔 docstring）。
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "lib"))
+import bash_probe_spec as _spec  # noqa: E402
 
 # 平台中立的假「絕對」repo 根（R11 真 Mac 首跑實證，抽自 test_check_hooks_liveness.py）：
 # 受測函式常依賴「repo_root / 絕對路徑 → 直接取代」的 pathlib join 語意，但 "D:/repo"
@@ -41,6 +54,88 @@ from pathlib import Path
 # → Windows 全綠、Mac/Linux 假紅。凡測試需要「絕對路徑」語意者一律用本常數，
 # 不可寫死磁碟機代號（tools/tests/test_platform_neutral_paths.py 機械掃描守護）。
 ABS_FAKE_REPO = Path("D:/repo") if sys.platform == "win32" else Path("/repo")
+
+# `usable_bash_for_fixture()` 的候選子路徑：Git for Windows 的兩個 bash.exe 佈局，
+# 外加 POSIX 佈局（macOS/Linux 上 git 相鄰目錄往上數層即命中 `/bin/bash`）。
+_BASH_SUBPATHS = ("usr/bin/bash.exe", "bin/bash.exe", "usr/bin/bash", "bin/bash")
+
+
+def usable_bash_for_fixture() -> str | None:
+    """回傳一支**真的能跑 repo bash 腳本**的 bash 路徑；一支都探不到回 `None`。
+
+    🔴 **凡測試需要「真的把某支 .sh 跑起來」，一律用本函式取得直譯器，不得直接把
+    字面值 `"bash"` 當 argv[0] 交給 `subprocess`**（`tools/tests/
+    test_bash_probe_spec_contract.py::TestNoBareBashInvocationInToolsTests` 機械掃描
+    守護）。理由**不是**「PATH 順序可能讓 WSL 排在前面」，而是更硬的一條：Windows
+    上 `subprocess` 以 `CreateProcess(lpApplicationName=NULL)` 解析裸名，其搜尋順序
+    是「應用程式目錄 → 當前目錄 → **System32** → Windows 目錄 → **PATH**」——
+    **System32 排在 PATH 之前**。於是只要 argv[0] 是裸名，`C:\\Windows\\System32\\
+    bash.exe`（WSL 啟動器）就**必定**先命中，PATH 上排多前面的 Git Bash 都救不了。
+    未安裝發行版時它以 **UTF-16LE** 印
+    `Windows Subsystem for Linux has no installed distributions.` 並 `exit 1`，
+    受測腳本一行都沒被執行，測試看到的卻是「腳本回了非預期 rc」＝**歸因完全錯誤**
+    的紅燈（DEF-101-753：R69 收輪 push 後由雲端 windows-compat-ci 抓到）。
+
+    **同一次 CI run 內就有對照組可證此機制**（run 30739865214）：
+    `test_dev_start.TestPickPythonGeMin` 用的是 `shutil.which("bash")`（只查 PATH）
+    ⇒ 拿到真 Git Bash、全數通過；`test_smoke_ci_sync` 用的是字面值 `"bash"`
+    ⇒ 拿到 WSL、三支全紅。**同一台機器、同一個 PATH，兩種解析路徑結果相反**，
+    這排除了「PATH 上沒有 Git Bash」這個解釋。推論：唯一安全的用法是 argv[0] 給
+    **絕對路徑**——這正是本函式的回傳值。`shutil.which("bash")` 雖能避開
+    CreateProcess 的 System32 優先，但它沒有 System32 段排除，在「WSL 佔位版確實排
+    在 Git Bash 之前」的開發機（DEF-101-617 已記載該機型）仍會回 WSL，故一併不用。
+
+    解析順序（與 `AISDLC_SDD/scripts/bash_probe.py::usable_bash()` 生產端同構）：
+    **git 相鄰的 bash 優先**（隨 git 安裝、必為真 Git Bash），PATH 上的裸 bash 次之
+    且須通過 System32 整段排除。每個候選以 `bash_probe_spec.PROBE_CMD` 實跑驗活
+    （`echo` + `dirname` 兩段，DEF-101-275：只驗 echo 會讓缺 coreutils 的精簡版
+    Git Bash 誤判為可用），第一個通過的才回傳。
+
+    **為何住在本檔**：本函式是第①類收納物（測試 fixture 對開發者本機環境的隱性
+    假設）。收斂前 `tools/tests/` 內有兩份 fixture 用途的複本
+    （`test_bash_probe_spec_contract._probe_a_real_usable_bash_for_fixture` 與
+    `test_macos_smoke_skip_honesty._usable_bash`），且**兩份的排除規則並不一致**
+    ——後者對裸 bash 完全沒有 System32 排除，只是恰好因為驗活會失敗才沒出事
+    （fail-closed 的僥倖，不是設計）。這正是本檔 docstring 第②類判準所描述的
+    「同一盲點被抄 N 遍」形態，故比照 R57 `strip_ps_comments` 判例收斂為一份。
+
+    **刻意不收斂的兩份**：`test_pre_push_dispatcher._usable_bash()` 與
+    `test_git_hooks_install_common._usable_bash()` 是**生產端探針的獨立重寫回歸鎖**
+    （見 `tools/lib/bash_probe_spec.py` docstring），其獨立性本身就是鑑別力來源
+    ——共用函式會讓它們與被測對象同時失效。本函式與它們的差別是**用途**：本函式
+    要的是「給我一支能跑的 bash」，它們要的是「驗證探測規則本身」。
+    """
+    candidates: list[str] = []
+    git = shutil.which("git")
+    if git:
+        for up in list(Path(git).resolve().parents)[:4]:
+            for sub in _BASH_SUBPATHS:
+                cand = up / sub
+                if cand.is_file():
+                    candidates.append(str(cand))
+    bare = shutil.which("bash")
+    if bare and not any(
+        part.lower() == _spec.SYSTEM32_SEGMENT for part in PureWindowsPath(bare).parts
+    ):
+        candidates.append(bare)
+    for cand in candidates:
+        try:
+            proc = subprocess.run(
+                [cand, "-c", _spec.PROBE_CMD],
+                capture_output=True, text=True, encoding="utf-8",
+                errors="replace", timeout=20,
+            )
+        except Exception:  # noqa: BLE001 — 任何載具問題都只代表「這個候選不可用」
+            continue
+        lines = proc.stdout.splitlines()
+        if (
+            proc.returncode == 0
+            and len(lines) >= 2
+            and lines[0].strip() == _spec.PROBE_EXPECT_ECHO
+            and lines[1].strip() == _spec.PROBE_EXPECT_DIRNAME
+        ):
+            return cand
+    return None
 
 
 def copy_functional_interpreter(dest: Path) -> None:

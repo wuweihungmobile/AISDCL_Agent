@@ -210,6 +210,8 @@ def _run_sh(
     if env is not None:
         full_env.update(env)
     return subprocess.run(
+        # bash-ok: 呼叫端全掛 _POSIX_ONLY（含 `sys.platform == "win32"` 短路），
+        # Windows 上恆 skip ⇒ 無 WSL 佔位版劫持面（DEF-101-753）。
         ["bash", str(script), *args],
         capture_output=True, text=True, encoding="utf-8", errors="replace",
         timeout=120, env=full_env,
@@ -297,6 +299,7 @@ def _trigger_for(tmp_path: Path, code: str, *, xpc: str | None, args: tuple[str,
     if xpc is not None:
         env["XPC_SERVICE_NAME"] = xpc
     return subprocess.run(
+        # bash-ok: 同上，呼叫端全掛 _POSIX_ONLY（DEF-101-753）。
         ["bash", str(probe), *args],
         capture_output=True, text=True, encoding="utf-8", errors="replace",
         timeout=30, env=env,

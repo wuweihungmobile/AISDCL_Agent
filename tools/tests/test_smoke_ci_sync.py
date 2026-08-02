@@ -20,7 +20,13 @@ import unittest
 from pathlib import Path
 from types import ModuleType
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from _platform_helpers import usable_bash_for_fixture  # noqa: E402
+
 _REPO_ROOT = Path(__file__).resolve().parents[2]
+# 真跑受測 .sh 用的直譯器（WHY 不得寫裸 `"bash"`：見 `TestMacSmokeCliContract._run`
+# 與 `_platform_helpers.usable_bash_for_fixture()` 的 docstring／DEF-101-753）。
+_BASH = usable_bash_for_fixture()
 _SH = _REPO_ROOT / "tools" / "macos_smoke_local.sh"
 _PS1 = _REPO_ROOT / "tools" / "windows_smoke_local.ps1"
 _MAC_CI = _REPO_ROOT / ".github" / "workflows" / "macos-compat-ci.yml"
@@ -1095,9 +1101,28 @@ class TestMacSmokeCliContract(unittest.TestCase):
     「整套 smoke 有沒有真的被跳過」。
     """
 
-    def _run(self, argv: list[str], shell: str = "bash") -> subprocess.CompletedProcess[str]:
+    def _run(self, argv: list[str], shell: str | None = None) -> subprocess.CompletedProcess[str]:
+        """以**真正的 bash**（`shell=None` 時）跑受測腳本。
+
+        🔴 R69 後續（DEF-101-753）：本方法原本寫死 `shell: str = "bash"`，把**裸名**
+        交給 `subprocess`。Windows 上這條路必敗——`CreateProcess` 解析裸名時把
+        `System32` 排在 PATH **之前**，於是 `C:\\Windows\\System32\\bash.exe`
+        （WSL 啟動器）必定先命中，無發行版時以 UTF-16LE 印
+        `Windows Subsystem for Linux has no installed distributions.` 並 `exit 1`。
+        受測腳本**一行都沒被執行**，本組三支卻據此斷言「腳本回了非預期 rc」——
+        雲端 windows-compat-ci 上是三筆歸因完全錯誤的紅燈（本機 macOS 全綠、
+        R69 四輪四方複審亦未發現）。改走 `_platform_helpers.usable_bash_for_fixture()`
+        單一真相源（回傳**絕對路徑**：git 相鄰優先 + System32 整段排除 + coreutils
+        驗活；完整機制與同輪對照組取證見該函式 docstring）。
+        """
+        exe = shell or _BASH
+        if exe is None:
+            self.skipTest(
+                "本機探不到可用的 bash（候選皆未通過驗活）——本組刻意真跑腳本驗 rc，"
+                "無 bash 時跳過而非降級成字面比對（字面比對驗不到 rc）"
+            )
         return subprocess.run(
-            [shell, str(_SH), *argv], cwd=str(_REPO_ROOT),
+            [exe, str(_SH), *argv], cwd=str(_REPO_ROOT),
             capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=60,
         )
 

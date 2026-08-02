@@ -11,74 +11,40 @@ bug-injection 把 `PROBE_CMD` 改回退化版（拿掉 `dirname`、只留 `echo`
 """
 from __future__ import annotations
 
+import ast
 import os
 import shutil
 import subprocess
 import sys
 import tempfile
 import unittest
-from pathlib import Path, PureWindowsPath
+from pathlib import Path
 from unittest import mock
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "lib"))
+sys.path.insert(0, str(Path(__file__).resolve().parent))
 import bash_probe_spec as _spec  # noqa: E402
+from _platform_helpers import usable_bash_for_fixture  # noqa: E402
+
+_REPO_ROOT = Path(__file__).resolve().parents[2]
 
 
-def _probe_a_real_usable_bash_for_fixture() -> str | None:
-    """獨立重寫版：探測本機一個「真正可用」的 bash 路徑，供本檔案的 `_BASH` fixture 使用。
-
-    WHY（R64／DEF-101-617）：舊版 `_BASH = shutil.which("bash")` 在「PATH 上
-    `bash` 解析到 WSL System32 佔位版、真正的 Git Bash 未直接掛在 PATH、只能
-    透過 `git.exe` 相對路徑找到」這種真實可重現的 Windows 開發機設定下，會把
-    該被排除的佔位版錯當成可用 bash——`_BASH` 本身就是錯的，且
-    `usable_bash_with_probe_spy()` 對 `shutil.which` 的 mock 讓生產端
-    `usable_bash()` 的 git.exe 相對路徑候選完全失效，本檔在這種機器上會有
-    6/8 測試確定性失敗（與本輪 ADR-XPLAT-002 §8 item 12 UEP 棘輪化工作無關的
-    既有缺陷）。
-
-    比照生產端 `AISDLC_SDD/scripts/bash_probe.py::usable_bash()`（第 48~63 行）
-    的候選蒐集邏輯**獨立重新實作**（不 import 生產程式碼），維持本檔案頭
-    docstring 宣告的「三份消費者各自獨立重寫」架構慣例——若讓本檔直接呼叫
-    生產端函式，測試會因為共用生產端邏輯而失去對生產端共同盲點的鑑別力。
-    對每個候選實際跑一次 `PROBE_CMD` 驗活，第一個驗活成功的候選才接受為
-    `_BASH`；全部候選都驗活失敗（或根本沒有候選）才回傳 `None`（維持既有
-    `@unittest.skipUnless(_BASH, ...)` 語意：找不到就跳過，不是失敗）。
-    """
-    candidates: list[str] = []
-    git = shutil.which("git")
-    if git:
-        git_path = Path(git).resolve()
-        for up in list(git_path.parents)[:4]:
-            for sub in ("usr/bin/bash.exe", "bin/bash.exe"):
-                cand = up / sub
-                if cand.exists():
-                    candidates.append(str(cand))
-    bare = shutil.which("bash")
-    if bare and not any(
-        part.lower() == _spec.SYSTEM32_SEGMENT for part in PureWindowsPath(bare).parts
-    ):
-        candidates.append(bare)
-    for cand in candidates:
-        try:
-            result = subprocess.run(
-                [cand, "-c", _spec.PROBE_CMD],
-                capture_output=True, text=True, encoding="utf-8",
-                errors="replace", timeout=15,
-            )
-        except Exception:
-            continue
-        lines = result.stdout.splitlines()
-        if (
-            result.returncode == 0
-            and len(lines) >= 2
-            and lines[0].strip() == _spec.PROBE_EXPECT_ECHO
-            and lines[1].strip() == _spec.PROBE_EXPECT_DIRNAME
-        ):
-            return cand
-    return None
-
-
-_BASH = _probe_a_real_usable_bash_for_fixture()
+# 探測本機一支「真正可用」的 bash 供本檔 `_BASH` fixture 使用。
+#
+# WHY（R64／DEF-101-617）：舊版 `_BASH = shutil.which("bash")` 在「PATH 上 `bash`
+# 解析到 WSL System32 佔位版、真正的 Git Bash 未直接掛在 PATH、只能透過 `git.exe`
+# 相對路徑找到」這種真實可重現的 Windows 設定下，會把該被排除的佔位版錯當成可用
+# bash——`_BASH` 本身就是錯的，本檔在這種機器上有 6/8 測試確定性失敗。
+#
+# R69 後續（DEF-101-753）：該修復當時以私有函式落在本檔，
+# `test_macos_smoke_skip_honesty.py` 另有一份判準不一致的複本，而
+# `test_smoke_ci_sync.py` 連探測都沒有 ⇒ 三處收斂至 `_platform_helpers.
+# usable_bash_for_fixture()`。**這不違反本檔頭 docstring 的「三份消費者各自獨立
+# 重寫」慣例**：那條慣例的射程是「驗證探測規則本身」的三份回歸鎖（本檔的
+# `usable_bash_with_probe_spy()` 仍直呼生產端 `bash_probe.usable_bash()`，鑑別力
+# 不受影響）；本行要的只是「給我一支能跑的 bash」當 fixture，用途不同。
+# 找不到就 `@unittest.skipUnless(_BASH, ...)` 跳過，不是失敗。
+_BASH = usable_bash_for_fixture()
 
 
 def _find_real_git_bash_install_root() -> Path | None:
@@ -488,6 +454,264 @@ class TestNoneSourceIsDistinguishable(unittest.TestCase):
             f"（testsRun={result.testsRun}, skipped={result.skipped}）",
         )
         self.assertIn("載具故障", problems[0][1])
+
+
+# ---------------------------------------------------------------------------
+# R69 後續（DEF-101-753）：把「WSL 佔位 bash 被當成真 bash 使用」變成**本機 macOS
+# 就抓得到**的紅燈，而不是等雲端 windows-compat-ci 才顯形。兩道互補的鎖：
+#   ① `TestWslStubIsNeverAcceptedAsRealBash`：行為面——注入一支「驗活會通過、但住
+#      在 System32 段」的假 bash，`usable_bash_for_fixture()` 必須拒絕它。
+#   ② `TestNoBareBashInvocationInToolsTests`：靜態面——沒有任何測試檔可以把裸
+#      `"bash"`／`shutil.which("bash")` 當 argv[0] 交給 subprocess。
+# ---------------------------------------------------------------------------
+
+_WSL_STUB_BODY = """\
+#!/bin/sh
+# 假 WSL 佔位 bash：**驗活會通過**（照 PROBE_CMD 的期望輸出回話），但它住在
+# System32 段 ⇒ 必須被路徑規則排除，而不是靠「驗活失敗」僥倖過關。
+echo "{echo_out}"
+echo "{dirname_out}"
+exit 0
+"""
+
+
+class TestWslStubIsNeverAcceptedAsRealBash(unittest.TestCase):
+    """`usable_bash_for_fixture()` 必須以**路徑規則**排除 System32 段的 bash。
+
+    WHY 這支測試要讓 stub「驗活成功」（Rule 9 — 鎖的是意圖不是行為）：真實世界的
+    WSL 佔位 bash 在**未安裝發行版**時會 `exit 1`（R69 雲端實測輸出即為 UTF-16LE 的
+    `Windows Subsystem for Linux has no installed distributions.`），於是任何帶驗活的
+    探針都會**碰巧**拒絕它——收斂前 `test_macos_smoke_skip_honesty._usable_bash()`
+    的裸 bash 分支根本沒有 System32 排除，卻一直是綠的，靠的正是這個僥倖。一旦機器
+    真的裝了發行版，驗活就會在 Linux 裡成功，該探針便會把 repo 的 Windows 腳本丟進
+    WSL 跑。本鎖因此刻意把僥倖拿掉：stub 驗活成功，**只剩路徑規則能救**。
+
+    可在 macOS 上跑（`PureWindowsPath` 對 POSIX 路徑同樣依段切分，見
+    `bash_probe_spec.SYSTEM32_SEGMENT` 的消費端註解），不需要 Windows 真機。
+    """
+
+    def _make_stub(self, parent_dir_name: str) -> Path:
+        tmp = Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, tmp, True)
+        stub_dir = tmp / parent_dir_name
+        stub_dir.mkdir()
+        stub = stub_dir / ("bash.exe" if os.name == "nt" else "bash")
+        stub.write_text(
+            _WSL_STUB_BODY.format(
+                echo_out=_spec.PROBE_EXPECT_ECHO, dirname_out=_spec.PROBE_EXPECT_DIRNAME
+            ),
+            encoding="utf-8",
+        )
+        stub.chmod(0o755)
+        return stub
+
+    def _resolve_with_only(self, stub: Path) -> str | None:
+        """把 PATH 收窄到只剩 stub 所在目錄後解析（`git` 亦因此不可見 ⇒ git 相鄰候選
+        不會搶答，本鎖量到的就是裸 bash 分支本身）。"""
+        with mock.patch.dict(os.environ, {"PATH": str(stub.parent)}, clear=False):
+            return usable_bash_for_fixture()
+
+    def test_stub_is_live_so_only_the_path_rule_can_reject_it(self) -> None:
+        """正控（鏡子自證）：先證明這支 stub 確實通過驗活——否則下一支測試會因為
+        「驗活順手擋掉」而假綠，鎖到的就不是 System32 規則。"""
+        stub = self._make_stub("harmless_dir")
+        proc = subprocess.run(
+            [str(stub), "-c", _spec.PROBE_CMD],
+            capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=20,
+        )
+        lines = proc.stdout.splitlines()
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        self.assertEqual(
+            [lines[0].strip(), lines[1].strip()],
+            [_spec.PROBE_EXPECT_ECHO, _spec.PROBE_EXPECT_DIRNAME],
+            "stub 沒能冒充成功 ⇒ 下一支測試會失去鑑別力",
+        )
+        self.assertEqual(
+            self._resolve_with_only(stub), str(stub),
+            "非 System32 目錄下的同一支 stub 必須被接受——證明差異只來自路徑段規則",
+        )
+
+    def test_system32_stub_is_rejected(self) -> None:
+        """本體斷言：同一支 stub 換到 System32 段就必須被拒。"""
+        stub = self._make_stub("System32")
+        self.assertIsNone(
+            self._resolve_with_only(stub),
+            "住在 System32 段的 bash 被當成可用 bash——WSL 佔位版劫持防線失效"
+            f"（DEF-101-753；stub={stub}）",
+        )
+
+
+# 允許在 argv[0] 寫裸 bash/sh 的就地豁免標記（同 `platform-ok` 慣例）：必須寫理由。
+_BASH_OK_MARKER = "# bash-ok:"
+_BASH_LITERALS = ("bash", "sh")
+_SUBPROCESS_SPAWNERS = ("run", "Popen", "call", "check_call", "check_output")
+# 掃描面：三棵測試樹。刻意**不**只掃 tools/tests——A3/A4/A5 同型站點分別住在另外
+# 兩棵樹，只守自己那棵等於留著下一次翻紅。
+_TEST_TREES = ("tools/tests", "AISDLC_SDD/scripts/tests", "AutoClaude/tests")
+_MIN_SCANNED_FILES = 120  # 0 命中假綠防線（同 check_script_parity._MIN_EXTRACT_COUNTS 慣例）
+
+
+def _is_bare_which_bash(node: ast.AST) -> bool:
+    """`shutil.which("bash")`／`which("sh")`——無 System32 排除、無驗活的探測。"""
+    return (
+        isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Attribute)
+        and node.func.attr == "which"
+        and bool(node.args)
+        and isinstance(node.args[0], ast.Constant)
+        and node.args[0].value in _BASH_LITERALS
+    )
+
+
+def _bash_taints(tree: ast.AST) -> tuple[dict[str, str], dict[str, str]]:
+    """回傳 `(執行檔變數, 整條 argv 變數)`，值為「為何算裸 bash」的說明。
+
+    WHY 需要這一層間接追蹤：實測到的三種形態沒有一種是教科書式的
+    `subprocess.run(["bash", …])`——
+      ① `def _run(self, argv, shell: str = "bash")` ＋ `run([shell, …])`
+         （DEF-101-753 本體：字面值與呼叫點隔著一個**參數預設值**）；
+      ② `_BASH = shutil.which("bash")` ＋ `run([_BASH, …])`
+         （隔著一個**模組變數**，且 `shutil.which` 本身就沒有 System32 排除）；
+      ③ `cmd = ["bash", str(_SCRIPT)]` ＋ `run(cmd, …)`
+         （隔著一個**整條 argv 變數**）。
+    只認呼叫點 list 首元素是常數的掃描器，對這三種全盲＝鎖形同虛設。
+    """
+    exe_names: dict[str, str] = {}
+    argv_names: dict[str, str] = {}
+    for node in ast.walk(tree):
+        if isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef):
+            spec = node.args
+            positional = spec.posonlyargs + spec.args
+            pairs = list(zip(positional[len(positional) - len(spec.defaults):], spec.defaults))
+            pairs += list(zip(spec.kwonlyargs, spec.kw_defaults))
+            for arg, default in pairs:
+                if isinstance(default, ast.Constant) and default.value in _BASH_LITERALS:
+                    exe_names[arg.arg] = f"參數 {arg.arg} 的預設值即字面值 {default.value!r}"
+                elif _is_bare_which_bash(default):
+                    exe_names[arg.arg] = f'參數 {arg.arg} 的預設值是 shutil.which("bash")'
+        elif isinstance(node, ast.Assign):
+            targets = [t.id for t in node.targets if isinstance(t, ast.Name)]
+            value = node.value
+            if isinstance(value, ast.Constant) and value.value in _BASH_LITERALS:
+                why = f"變數綁的是字面值 {value.value!r}"
+            elif _is_bare_which_bash(value):
+                why = '變數綁的是 shutil.which("bash")——無 System32 排除、無驗活'
+            else:
+                continue
+            exe_names.update(dict.fromkeys(targets, why))
+    # 第二輪：argv 整條變數需先知道 exe_names（`cmd = [_BASH, …]` 亦算）。
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Assign) or not isinstance(node.value, ast.List | ast.Tuple):
+            continue
+        if not node.value.elts:
+            continue
+        why = _head_verdict(node.value.elts[0], exe_names)
+        if why is not None:
+            targets = [t.id for t in node.targets if isinstance(t, ast.Name)]
+            argv_names.update(dict.fromkeys(targets, why))
+    return exe_names, argv_names
+
+
+def _head_verdict(head: ast.AST, exe_names: dict[str, str]) -> str | None:
+    """argv[0] 這個節點是不是「裸 bash」？是則回傳原因，否則 None。"""
+    if isinstance(head, ast.Constant) and head.value in _BASH_LITERALS:
+        return f"argv[0] 是字面值 {head.value!r}"
+    if isinstance(head, ast.Name) and head.id in exe_names:
+        return f"argv[0] 是變數 {head.id}——{exe_names[head.id]}"
+    if _is_bare_which_bash(head):
+        return 'argv[0] 是 shutil.which("bash")——無 System32 排除、無驗活'
+    return None
+
+
+def bare_bash_argv0_offenders(path: Path) -> list[tuple[int, str]]:
+    """純函式：回傳 `[(行號, 原因), …]`——該檔把裸 bash/sh 當 argv[0] 交給 subprocess。"""
+    text = path.read_text(encoding="utf-8")
+    tree = ast.parse(text)
+    exe_names, argv_names = _bash_taints(tree)
+    lines = text.splitlines()
+    offenders: list[tuple[int, str]] = []
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Call):
+            continue
+        func = node.func
+        fname = func.attr if isinstance(func, ast.Attribute) else getattr(func, "id", "")
+        if fname not in _SUBPROCESS_SPAWNERS or not node.args:
+            continue
+        argv = node.args[0]
+        if isinstance(argv, ast.List | ast.Tuple) and argv.elts:
+            why = _head_verdict(argv.elts[0], exe_names)
+        elif isinstance(argv, ast.Name) and argv.id in argv_names:
+            why = f"argv 變數 {argv.id}——{argv_names[argv.id]}"
+        else:
+            why = None
+        if why is None:
+            continue
+        span = lines[node.lineno - 1: (node.end_lineno or node.lineno)]
+        if any(_BASH_OK_MARKER in ln for ln in span):
+            continue
+        offenders.append((node.lineno, why))
+    return offenders
+
+
+class TestNoBareBashInvocationInToolsTests(unittest.TestCase):
+    """任何測試檔都不得把裸 `bash`／`sh` 當 argv[0] 交給 subprocess（DEF-101-753）。
+
+    WHY（Rule 9）：這條規則存在的理由不是「風格統一」，而是 **Windows 上裸名 argv[0]
+    必定解析到 WSL 佔位版**——`CreateProcess` 的搜尋順序把 `System32` 排在 PATH
+    **之前**，`C:\\Windows\\System32\\bash.exe`（WSL 啟動器）因此一定先命中，PATH 上
+    有沒有 Git Bash、排多前面都無關。受測腳本一行都沒被執行，測試卻把 WSL 的 rc 當成
+    腳本的 rc ⇒ **歸因完全錯誤的紅燈**，且本機 macOS 永遠是綠的（R69 四輪四方複審
+    全數放行、收輪 push 後才被雲端 windows-compat-ci 抓到）。同一次 CI run 內的對照
+    組取證見 `_platform_helpers.usable_bash_for_fixture()` docstring。
+
+    鑑別力（修復前實測）：本鎖對 `edd5388` 工作樹會指名
+    `tools/tests/test_smoke_ci_sync.py`（`shell: str = "bash"` → `[shell, …]`）、
+    `tools/tests/test_dev_start.py`、`AISDLC_SDD/scripts/tests/` 兩支 windowsapps
+    guard 測試與 `AutoClaude/tests/integration/fixtures/fk_staging_1m_wrapper.py`。
+
+    豁免走**就地標記** `# bash-ok: <理由>`（不用行號登記表——行號會漂移，且理由要
+    寫在它適用的那一行旁邊才不會腐化）。
+    """
+
+    def _scan(self) -> tuple[int, dict[str, list[tuple[int, str]]]]:
+        found: dict[str, list[tuple[int, str]]] = {}
+        scanned = 0
+        for tree_rel in _TEST_TREES:
+            root = _REPO_ROOT / tree_rel
+            self.assertTrue(root.is_dir(), f"掃描面 {tree_rel} 不存在——目錄已搬移，請同步本鎖")
+            for path in sorted(root.rglob("*.py")):
+                if "__pycache__" in path.parts:
+                    continue
+                scanned += 1
+                hits = bare_bash_argv0_offenders(path)
+                if hits:
+                    # `.as_posix()`：鍵會被印進失敗訊息並被其他鎖以正斜線比對，
+                    # `str()` 在 Windows 上是反斜線形態 ⇒ 斷言恆真＝假鎖。
+                    found[path.relative_to(_REPO_ROOT).as_posix()] = hits
+        return scanned, found
+
+    def test_scan_surface_is_not_silently_empty(self) -> None:
+        """下限釘選：掃描面塌成 0 命中時，本體斷言會假綠（同 _MIN_EXTRACT_COUNTS 慣例）。"""
+        scanned, _ = self._scan()
+        self.assertGreaterEqual(
+            scanned, _MIN_SCANNED_FILES,
+            f"只掃到 {scanned} 支測試檔（下限 {_MIN_SCANNED_FILES}）——掃描面已塌，本鎖失效",
+        )
+
+    def test_no_bare_bash_as_argv0(self) -> None:
+        _, found = self._scan()
+        detail = "\n".join(
+            f"  {rel}:{ln}  {why}" for rel, hits in found.items() for ln, why in hits
+        )
+        self.assertEqual(
+            found, {},
+            "以下站點把裸 bash/sh 當 argv[0]——Windows 上會執行到 WSL 佔位版而非真 "
+            f"bash（DEF-101-753）：\n{detail}\n"
+            "  修法：tools/tests 用 _platform_helpers.usable_bash_for_fixture()；"
+            "AISDLC_SDD/scripts/tests 用 bash_probe.usable_bash()；AutoClaude 樹用 "
+            "integration_gate_core.find_git_bash()。確屬安全者於該行加 "
+            f"`{_BASH_OK_MARKER} <理由>`。",
+        )
 
 
 if __name__ == "__main__":

@@ -37,7 +37,7 @@ ci_liveness = dev_start.ci_liveness
 from _platform_helpers import (  # noqa: E402
     copy_functional_interpreter as _copy_functional_interpreter,
 )
-from _platform_helpers import create_symlink_or_skip  # noqa: E402
+from _platform_helpers import create_symlink_or_skip, usable_bash_for_fixture  # noqa: E402
 
 
 def _rmtree_force(path: Path) -> None:
@@ -3515,6 +3515,8 @@ class TestNightlyHeartbeatCrossSiteBehavioralEquivalence(unittest.TestCase):
             'report_heartbeat\n'
         )
         proc = subprocess.run(
+            # bash-ok: 本組 class 掛 @skipUnless(sys.platform == "darwin")，Windows 上
+            # 恆不執行 ⇒ 無 WSL 佔位版劫持面（DEF-101-753）。
             ["bash", "-c", wrapper], capture_output=True, text=True,
             encoding="utf-8", errors="replace",
         )
@@ -3853,6 +3855,9 @@ class MacNightlyStatusTestCase(unittest.TestCase):
         路徑可以在不觸碰真實 `~/Library/LaunchAgents`／真實 launchd 的前提下驗行為。
         """
         return subprocess.run(
+            # bash-ok: MacNightlyStatusTestCase 掛 @skipUnless(sys.platform == "darwin")
+            # （受測物 install_mac_nightly.sh 對非 Darwin 自己就 fail-loud）⇒ Windows
+            # 上恆不執行，無 WSL 佔位版劫持面（DEF-101-753）。
             ["bash", str(self.root / "tools" / "install_mac_nightly.sh"), *args],
             capture_output=True, text=True, encoding="utf-8", errors="replace",
             env={**os.environ, "HOME": str(self.home),
@@ -3881,6 +3886,7 @@ class MacNightlyStatusTestCase(unittest.TestCase):
         期望 plist 會製造第 2 個真相源，renderer 一改測試就假紅。"""
         rendered = self.root / "rendered.plist"
         proc = subprocess.run(
+            # bash-ok: 同上，MacNightlyStatusTestCase 為 darwin-only（DEF-101-753）。
             ["bash", str(self.root / "tools" / "install_mac_nightly.sh"),
              "--render-only", str(rendered)],
             capture_output=True, text=True, encoding="utf-8", errors="replace",
@@ -4613,7 +4619,7 @@ elif args:
 """
 
 
-@unittest.skipIf(shutil.which("bash") is None, "需要 bash")
+@unittest.skipIf(usable_bash_for_fixture() is None, "需要可用的 bash")
 class TestPickPythonGeMin(unittest.TestCase):
     """R69 P2 迴歸鎖：`tools/dev_start.sh` 的直譯器候選鏈必須挑 >= 3.11。
 
@@ -4657,8 +4663,12 @@ class TestPickPythonGeMin(unittest.TestCase):
         env.update(extra_env or {})
         # bash 用絕對路徑呼叫：`path_env` 刻意可以只有 fixture 目錄（構造「機器上
         # 一支 >= 3.11 都沒有」），此時用裸名 'bash' 會連 shell 都找不到。
+        # R69 後續（DEF-101-753）：解析改走 `usable_bash_for_fixture()`——原本的
+        # `shutil.which("bash")` 只看 PATH 順序、無 System32 段排除，在「WSL 佔位版
+        # 排在 Git Bash 之前」的 Windows 開發機（DEF-101-617 已記載該機型）會回 WSL
+        # 啟動器，本組於是拿到與受測邏輯無關的 rc。
         return subprocess.run(
-            [shutil.which("bash"), "-c", snippet], capture_output=True, encoding="utf-8",
+            [usable_bash_for_fixture(), "-c", snippet], capture_output=True, encoding="utf-8",
             errors="replace", env=env, timeout=120,
         )
 

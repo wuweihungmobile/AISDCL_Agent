@@ -20,11 +20,22 @@ from __future__ import annotations
 import os
 import shutil
 import subprocess
+import sys
 from pathlib import Path
 from typing import Any
 
 _ROOT = Path(__file__).resolve().parents[3]
 _SCRIPT = _ROOT / "tools" / "sd06_w3_staging_dryrun.sh"
+
+# R69 後續（DEF-101-753）：bash 解析改走 monorepo 根層既有單一真相源
+# `tools/integration_gate_core.py::find_git_bash()`（port 自 tools/lib/Find-GitBash.ps1），
+# 不在本檔另寫第二份探測。原本 `shutil.which("bash")` + argv[0] 寫死字面值 `"bash"`
+# 有兩層問題：① Windows 上 `subprocess` 以 CreateProcess 解析裸名，其搜尋順序把
+# `C:\Windows\System32` 排在 PATH **之前** ⇒ 就算 PATH 上有 Git Bash 也一定命中 WSL
+# 啟動器；② `shutil.which` 無 System32 段排除，於是 `_has_pg_environment()` 會把「只有
+# WSL 佔位版」誤判為環境齊備，本 wrapper 遂回報 `failed`（而非誠實的 `skipped`）。
+sys.path.insert(0, str(_ROOT.parent / "tools"))
+import integration_gate_core as _gate  # noqa: E402
 
 
 def _resolve_dsn(explicit: str | None) -> str | None:
@@ -43,8 +54,8 @@ def _has_pg_environment(dsn: str | None) -> tuple[bool, str]:
         return False, "no_pg_env: DSN 未設定（檢查 AUTOCLAUDE_DB_DSN）"
     if not _SCRIPT.exists():
         return False, f"no_pg_env: 缺 wrapper 腳本 {_SCRIPT}"
-    if shutil.which("bash") is None:
-        return False, "no_pg_env: bash 不存在於 PATH（Windows 需 Git Bash / WSL）"
+    if _gate.find_git_bash() is None:
+        return False, "no_pg_env: 找不到可用的 bash（Windows 需 Git for Windows）"
     if shutil.which("psql") is None:
         return False, "no_pg_env: psql 不存在於 PATH"
     return True, "ok"
@@ -87,7 +98,7 @@ def fk_staging_1m_dryrun(
     env["SEED_ROWS"] = str(rows)
     env["PYTHONUTF8"] = "1"
 
-    cmd = ["bash", str(_SCRIPT)]
+    cmd = [str(_gate.find_git_bash()), str(_SCRIPT)]
     if not dry_run:
         cmd.append("--execute")
 

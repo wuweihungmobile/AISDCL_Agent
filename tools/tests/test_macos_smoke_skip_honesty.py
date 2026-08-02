@@ -27,10 +27,13 @@ macOS 滿版全驗**逐字相同、計數相同（兩平台皆恰 13——兩處
 from __future__ import annotations
 
 import re
-import shutil
 import subprocess
+import sys
 import unittest
 from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from _platform_helpers import usable_bash_for_fixture  # noqa: E402
 
 _REPO_ROOT = Path(__file__).resolve().parent.parent.parent
 _SH = _REPO_ROOT / "tools" / "macos_smoke_local.sh"
@@ -56,37 +59,14 @@ def _read() -> str:
     return _SH.read_text(encoding="utf-8")
 
 
-def _usable_bash() -> str | None:
-    """回傳能跑 `echo` 的 bash 路徑；找不到回 None。
-
-    刻意不 import AISDLC_SDD/scripts/bash_probe.py：R60 Scan-A 實測該探針在
-    unittest 載具下於本機恆回 None（CreateProcess WinError 87），會讓本檔的真跑
-    載具在官方閘門裡靜默 skip。此處只做最小驗活（不帶受限 env），並在 setUp 明確
-    skip 而非假綠。
-    """
-    candidates: list[str] = []
-    git = shutil.which("git")
-    if git:
-        for up in list(Path(git).resolve().parents)[:4]:
-            for sub in ("usr/bin/bash.exe", "bin/bash.exe", "usr/bin/bash", "bin/bash"):
-                cand = up / sub
-                if cand.exists():
-                    candidates.append(str(cand))
-    bare = shutil.which("bash")
-    if bare:
-        candidates.append(bare)
-    for cand in candidates:
-        try:
-            r = subprocess.run(
-                [cand, "-c", "echo probe-ok"],
-                capture_output=True, text=True, encoding="utf-8",
-                errors="replace", timeout=20,
-            )
-        except Exception:  # noqa: BLE001 — 任何載具問題都只是「這個候選不可用」
-            continue
-        if r.returncode == 0 and r.stdout.strip() == "probe-ok":
-            return cand
-    return None
+# R69 後續（DEF-101-753）：本檔原有一份 `_usable_bash()` 私有複本，其裸 bash 分支
+# **完全沒有 System32 排除**（只因驗活會失敗才沒把 WSL 佔位版當真 bash 用——fail-closed
+# 的僥倖，不是設計）。同輪 `test_smoke_ci_sync.py` 則連探測都沒有、直接把字面值
+# `"bash"` 交給 subprocess 而在 Windows CI 翻紅。三處收斂為 `_platform_helpers.
+# usable_bash_for_fixture()` 一份（WHY 與「哪兩份刻意不收斂」見該函式 docstring）。
+# 原註記所擔心的「import AISDLC_SDD/scripts/bash_probe.py 在本機恆回 None
+# （CreateProcess WinError 87）」不適用於 SSOT 版：它同樣不 import 生產端探針、
+# 同樣不帶受限 env，只是改用 bash_probe_spec 的驗活「參數」（DEF-101-275）。
 
 
 class TestSkipCounterEnrollment(unittest.TestCase):
@@ -198,7 +178,7 @@ class TestSummaryTailRealRun(unittest.TestCase):
 
     @classmethod
     def setUpClass(cls) -> None:
-        cls.bash = _usable_bash()
+        cls.bash = usable_bash_for_fixture()
         if cls.bash is None:
             raise unittest.SkipTest("找不到可用的 bash——收尾彙總段真跑載具無法執行")
         text = _read()

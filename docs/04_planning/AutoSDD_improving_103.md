@@ -253,4 +253,63 @@ AssertionError: Lists differ:
 4. **repo 內每一處把盲區寫成「刻意取捨」的註解，都應附「若這個取捨錯了，代價長什麼樣」**。
    `test_extras_quoting_zsh_safety.py` 那句已於 R70 就地訂正並改寫掃描面。
 
+---
+
+## §9　收輪後（R70）：雲端 `windows-compat-ci` 的第三件事（`DEF-101-753`）
+
+`edd5388` 押上 main 後，五支 workflow 中 **root-infra-ci／aisdlc-sdd-ci／AutoClaude CI／macos-compat-ci 皆 success，唯 `windows-compat-ci` failure**
+（run `30739865214`，`Windows smoke` job 第 6 步 `FAILED (failures=3, skipped=52)`）。這是 §8 之外、**同樣在收輪後才顯形**的第三件事。
+
+### 9.1 現象與根因
+
+三支紅燈全在 `tools/tests/test_smoke_ci_sync.py::TestMacSmokeCliContract`，錯誤訊息本身就是證據：
+
+```
+AssertionError: 1 != 2 : W^@i^@n^@d^@o^@w^@s^@ ^@S^@u^@b^@s^@y^@s^@t^@e^@m^@ ^@f^@o^@r^@ ^@L^@i^@n^@u^@x^@ …
+```
+
+那是 **UTF-16LE** 的 `Windows Subsystem for Linux has no installed distributions.`——受測腳本 `macos_smoke_local.sh`
+**一行都沒被執行**，測試卻把 WSL 啟動器的 rc 當成腳本的 rc 來斷言。
+
+根因不是「PATH 順序讓 WSL 勝出」（這是動工前的假設，**實查後被推翻**），而是更硬的一條：
+Windows 上 `subprocess` 以 `CreateProcess(lpApplicationName=NULL)` 解析裸名，搜尋順序是
+「應用程式目錄 → 當前目錄 → **System32** → Windows 目錄 → **PATH**」——**System32 排在 PATH 之前**。
+只要 argv[0] 是裸名 `"bash"`，`C:\Windows\System32\bash.exe` 就**必定**先命中，PATH 上排多前面的 Git Bash 都救不了。
+
+**推翻假設的是同一次 CI run 內的天然對照組**：`test_dev_start.TestPickPythonGeMin` 用 `shutil.which("bash")`（只查 PATH），
+在同一台機器上取得**真 Git Bash** 並全數通過；`test_smoke_ci_sync` 用字面值，取得 WSL 並三支全紅。
+同機器、同 PATH、兩種解析路徑、相反結果 ⇒ 「PATH 上沒有 Git Bash」這個解釋被排除。
+
+### 9.2 這一輪的主要價值不在修那三支
+
+全樹掃描（三棵測試樹 + `.ps1` + workflow）另查出 **4 處同型站點**，其中
+`AISDLC_SDD/scripts/tests/test_install_post_commit_windowsapps_guard.py` 的 `pytestmark` 只擋 `_PWSH is None`
+＝**在 Windows runner 上必跑**，而它的 skipif reason 逐字寫著「Windows 上可由 Git-Bash 提供」——
+**意圖與實作不符已寫在檔案裡好幾輪，沒有任何機械物看得到**。
+
+另有 `tools/tests/test_macos_smoke_skip_honesty.py` 的 `_usable_bash()`：五份鏡射中**唯一漏掉 System32 段排除**的一份，
+至今沒出事只因為「WSL 無發行版時驗活會 rc=1」——**fail-closed 的僥倖，不是設計**。機器一旦裝了發行版即失效。
+
+### 9.3 落地
+
+- **SSOT 收斂**：`tools/tests/` 內兩份 fixture 用途的探測複本（判準還不一致）＋ 本體檔的零探測，三處收斂為
+  `_platform_helpers.usable_bash_for_fixture()`。比照 R57 `strip_ps_comments` 判例。
+  **刻意不收斂**兩份生產端獨立重寫回歸鎖——那裡的獨立性本身就是鑑別力。
+- **新鎖（本機 macOS 即可判紅）**：`TestWslStubIsNeverAcceptedAsRealBash` 注入**驗活會成功**但住在 `System32` 段的假 bash
+  （刻意把 §9.2 那個「僥倖」拿掉，否則鎖到的不是路徑規則）；`TestNoBareBashInvocationInToolsTests` 以 AST 掃三棵測試樹，
+  並追蹤三種間接形態（參數預設值／模組變數綁 `shutil.which`／整條 argv 變數）——只認 `run(["bash", …])` 的掃描器對本案原始形態全盲。
+- **紅綠實測**：新鎖對 `edd5388` 工作樹判紅並逐一指名 11 處；全部處置後 `Ran 16 tests … OK (skipped=4)`。
+
+### 9.4 與 §8 合看：連續三次「收輪後才顯形」
+
+`DEF-101-751`／`752`／`753` 是同一輪收輪後接連冒出的三件事，且**失效機制各不相同**——
+掃描面對 untracked 隱形（752）、不變量射程訂錯（751）、**本機平台根本重現不了**（753）。
+第三件對流程的意涵最直接：`macos_smoke_local.sh` 這類腳本的 CLI 契約鎖，在 macOS 上永遠是綠的，
+**四輪四方複審全部在一個看不到該缺陷的平台上進行**。§8.3 那四條建議（untracked 盤點、複審任務書載明未 add 檔數、
+不存在性鎖要有掃描面自證、盲區註解要寫代價）對 753 全部無效——它需要的是**第五條**：
+
+5. **凡「只在某平台才成立」的判斷，其回歸鎖必須有一條能在開發者本機重現該平台語意的路徑**（stub 注入、
+   規則層純函式、AST 靜態掃描），否則該鎖的真實鑑別力等於零，且**沒有任何訊號告訴你它等於零**。
+   本輪的兩道新鎖就是照這條做的：路徑規則以假 stub 在 macOS 上驗、呼叫形態以 AST 在任何平台上驗。
+
 
