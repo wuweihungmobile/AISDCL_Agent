@@ -146,6 +146,30 @@ if ($env:MSYSTEM) {
   exit 1
 }
 
+# ── 前置守門：引擎必須是 Windows PowerShell 5.1（R73／DEF-101-776）───────────────
+# 🔴 為何 R73 才補：在 pwsh 7 裝上這台機器之前，本守門**不可能**被觸發——`powershell`
+# 就是 5.1，沒有第二個引擎可選。2026-08-04 本機裝上 PowerShell 7.6.4 後，這條路第一次
+# 變得可達，而且失效方向是**靜默且偏危險側**：
+#   · [1/9] 的 `Parser::ParseFile` 用的是**執行本腳本那個引擎**的文法。
+#   · 5.1 與 7 的 `Encoding::Default` 不同（本機 zh-TW：big5 vs utf-8），於是「UTF-8
+#     無 BOM ＋ 中文註解」的 .ps1 在 7 解析全綠、在 5.1 被 Big5 誤讀到吃掉引號而 parse 死。
+#     R73 實測全庫 137 支 .ps1：5.1 → OK=108/ERR=29，7.6.4 → OK=137/ERR=0。
+#   · 生產（schtasks 兩支 job 的 Action）跑的是 `powershell.exe`＝5.1。用 7 跑本腳本
+#     等於用寬鬆文法去驗一個受 5.1 約束的對象 ⇒ 綠燈沒有鑑別力，且不會有任何訊號。
+# 這正是 CI 早已釘住的同一件事：`.github/workflows/windows-compat-ci.yml` 的
+# `windows-smoke` job 帶 `if ($PSVersionTable.PSVersion.Major -ne 5) { throw "ENGINE-MISMATCH..." }`。
+# 本機鏡射是同一個閘門，先前卻只 `Write-Host` 印版本、不擋——CI 有牙、本機沒有。
+# 一致性優先於方便：本守門刻意不提供 `-Force` 之類的旁路（旁路一旦存在就會被習慣性使用，
+# 而它豁免掉的正是這支腳本唯一的鑑別力來源）。
+if ($PSVersionTable.PSVersion.Major -ne 5) {
+  Write-Host "❌ ENGINE-MISMATCH：本腳本必須以 Windows PowerShell 5.1 執行，實測 $($PSVersionTable.PSVersion)。" -ForegroundColor Red
+  Write-Host '   原因：[1/9] 的語法解析用的是執行本腳本那個引擎的文法，而生產（schtasks）跑的是 5.1；' -ForegroundColor Red
+  Write-Host '         用 pwsh 7 跑會讓「5.1 解析不過、7 解析得過」的寫法全部逸出（實測 29 支檔案的差異）。' -ForegroundColor Red
+  Write-Host '   請改用：powershell -NoProfile -ExecutionPolicy Bypass -File tools\windows_smoke_local.ps1' -ForegroundColor Yellow
+  Write-Host '         （注意是 powershell.exe，不是 pwsh.exe；兩支同時存在時必須指名前者）' -ForegroundColor Yellow
+  exit 1
+}
+
 # ── 前置守門：git / python 缺席 fail-fast（比照 .sh 版與共用層訊息）─────────────
 if (-not (Get-Command git -ErrorAction SilentlyContinue)) {
   Write-Host '❌ 找不到 git — 請先安裝 Git for Windows（見 ONBOARDING.md §2）' -ForegroundColor Red

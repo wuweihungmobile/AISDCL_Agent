@@ -120,16 +120,26 @@ class TestInstallWindowsNightlyStructure(unittest.TestCase):
             "smoke 任務未套用 $settings——四項補跑保護只有 nightly 拿到，"
             "smoke 在睡眠/關機/電池情境下會靜默漏跑",
         )
-        m = re.search(r"\$SmokeAt = '(\d{2}:\d{2})'", text)
-        self.assertIsNotNone(m, "找不到 $SmokeAt 排程時刻宣告——結構已變動")
-        smoke_at = m.group(1)
-        self.assertIn("-Daily -At $SmokeAt", text)
-        nightly_at = re.search(r"New-ScheduledTaskTrigger -Daily -At '(\d{2}:\d{2})'", text)
-        self.assertIsNotNone(nightly_at, "找不到 nightly 排程時刻——結構已變動")
+        # 🔴 R73（DEF-101-779）：時刻已從寫死字面值改為 param 預設值（理由見該 param
+        # 區塊 WHY——原本寫死的 02:00/01:00 與本機實況 22:30/23:30 不符，使「跑安裝器
+        # 套設定」會靜默改時間，導致 ADR-SD09-012 點名的五項設定連兩輪沒人敢套）。
+        # 本鎖守的不變量**不變**：兩個 trigger 都必須吃參數，且**預設值**仍須滿足
+        # 「smoke 早於 nightly」。改讀 param 預設值即可繼續守住順序，不必弱化斷言。
+        self.assertIn("-Daily -At $SmokeAt", text,
+                      "smoke trigger 必須吃 $SmokeAt 參數，不得寫死時間字面值")
+        self.assertIn("-Daily -At $NightlyAt", text,
+                      "nightly trigger 必須吃 $NightlyAt 參數，不得寫死時間字面值")
+        defaults = {}
+        for name in ("NightlyAt", "SmokeAt"):
+            m = re.search(rf"\[string\]\${name} = '(\d{{2}}:\d{{2}})'", text)
+            self.assertIsNotNone(m, f"找不到 ${name} 的 param 預設值——結構已變動")
+            defaults[name] = m.group(1)
         self.assertLess(
-            smoke_at, nightly_at.group(1),
-            f"smoke 排程時刻 {smoke_at} 必須早於 nightly {nightly_at.group(1)}"
-            "（便宜的 tripwire 先跑；WHY 見本測試 docstring）",
+            defaults["SmokeAt"], defaults["NightlyAt"],
+            f"smoke 預設時刻 {defaults['SmokeAt']} 必須早於 nightly "
+            f"{defaults['NightlyAt']}（便宜的 tripwire 先跑；WHY 見本測試 docstring）。"
+            "🔴 這條不變量與本機現行排程（smoke 23:30 晚於 nightly 22:30）相反——"
+            "R73 選擇讓預設值站在鎖這一邊，見 install_windows_nightly.ps1 param 區塊。",
         )
 
     def test_task_name_matches_existing_ecosystem(self) -> None:
@@ -227,7 +237,33 @@ class TestInstallWindowsNightlyStructure(unittest.TestCase):
         self.assertIn("-NoProfile -ExecutionPolicy Bypass -File", self.text)
         self.assertIn("run_local_nightly.ps1", self.text)
         self.assertIn("-Daily", self.text)
-        self.assertIn("'02:00'", self.text)
+        # 🔴 R73（DEF-101-779）：原本斷言 `"'02:00'" in text`，即把觸發時間的**字面值**
+        # 釘進鎖裡。那個字面值與本機實際排程（22:30）不符，而 install 路徑是
+        # Unregister→Register ⇒ 「跑安裝器套設定」會靜默把時間改掉，於是 ADR-SD09-012
+        # 點名的五項排程設定連兩輪沒人敢套。時間改為參數後，鎖要釘的是**結構**：
+        # 兩個 trigger 都必須吃參數（不得再回頭寫死），且參數都要有格式驗證。
+        # 刻意**不**斷言預設值等於本機現行排程——那會把「這台機器排幾點」寫成鎖的常數，
+        # 正是 DEF-101-777 同一個病（見 test_ps_engine_ssot.py::TestNoStaleLocalEngineClaims）。
+        self.assertIn("-Daily -At $NightlyAt", self.text,
+                      "nightly trigger 必須吃 $NightlyAt 參數，不得寫死時間字面值")
+        self.assertIn("-Daily -At $SmokeAt", self.text,
+                      "smoke trigger 必須吃 $SmokeAt 參數，不得寫死時間字面值")
+        # 逐個參數檢查「宣告行的前一行是 ValidatePattern」。刻意不用單一 regex 把
+        # ValidatePattern 的內容一起吃進去——那個 pattern 自己含 `(` `)`，`[^)]*`
+        # 會提早收尾而假紅（本輪第一版就是這樣寫的，實測不命中）。
+        lines = self.text.splitlines()
+        for p in ("$NightlyAt", "$SmokeAt"):
+            want = f"[string]{p}"
+            idx = next(
+                (i for i, ln in enumerate(lines) if ln.strip().startswith(want)), None
+            )
+            self.assertIsNotNone(idx, f"找不到 {p} 的 [string] 宣告行——結構已變動")
+            self.assertIn(
+                "[ValidatePattern(", lines[idx - 1],
+                f"{p} 宣告行的前一行必須是 ValidatePattern——非法時間若放行，"
+                "Register-ScheduledTask 會拋難懂的例外，或更糟："
+                "建出一個時間錯誤但看起來成功的排程",
+            )
 
     def test_admin_elevation_check_present(self) -> None:
         """install/uninstall 需要 Register/Unregister-ScheduledTask 的系統管理員權限
@@ -439,9 +475,16 @@ class TestSyntaxGateEngineSelection(unittest.TestCase):
         ——它是這條判準的獨立 ground truth；若兩邊都用同一顆述詞算 expected，
         優先序寫反時兩邊會一起寫反、斷言恆綠＝鎖失去鑑別力。`test_ps_engine_ssot.py`
         的反增生掃描已就此列具名永久豁免（附本 WHY）。
-        另註（本機邊界）：本機無 pwsh 7，`expected` 恆等於 5.1 路徑＝走不到「兩者
-        皆有」那條分支；「兩引擎都在時選誰」的方向驗證由 `test_ps_engine_ssot.py`
-        以合成 `shutil.which` 的雙引擎情境補上。"""
+        🔴 **R73 訂正（DEF-101-777）**：這裡原本斷言「這台機器缺 pwsh 7，於是 `expected`
+        恆等於 5.1 路徑、走不到『兩者皆有』那條分支」——把撰寫當時的機器屬性寫成了常數。
+        2026-08-04 實測該機器已同時具備兩個引擎（`available_engines()` 回
+        `{'powershell': …\\WindowsPowerShell\\v1.0\\powershell.EXE,
+        'pwsh': …\\WindowsApps\\Microsoft.PowerShell_7.6.4.0_x64__…\\pwsh.EXE}`，
+        兩者皆為真實執行檔、非 0 byte 佔位版），**該分支現在每次都走得到，且本斷言通過**
+        ⇒ 這條判準在此機器上首次獲得真實鑑別力。引擎可用性是**機器屬性**：這裡不再寫
+        任何「這台機器有／沒有什麼」的斷言，要知道就現查 `available_engines()`。
+        不依賴機器的方向驗證仍由 `test_ps_engine_ssot.py` 以合成 `shutil.which` 的
+        雙引擎情境保證（那才是在**任何**機器上都測得到方向的做法）。"""
         ps51, ps7 = shutil.which("powershell"), shutil.which("pwsh")
         if ps51 is None and ps7 is None:
             self.skipTest("本機無任何 PowerShell 引擎")

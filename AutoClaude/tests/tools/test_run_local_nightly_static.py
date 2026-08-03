@@ -1192,6 +1192,40 @@ def test_ac4_and_obs_gate_helpers_are_stderr_safe(ps1_content: str) -> None:
         )
 
 
+def test_gate_helpers_stop_at_first_parseable_json(ps1_content: str) -> None:
+    """🔴 R73（DEF-101-775）：四支 helper 的 JSON 擷取必須「parse 成功即停」。
+
+    意圖（Rule 9）：舊形態是「見到第一個 `{` 之後**後面全收**」，隱含假設 stderr 一律
+    排在 JSON 之前。實測不成立——`observability_ga_check.py` 的 legacy-record WARN
+    排在 JSON **之後**，`2>&1` 合流後被接到尾巴 ⇒ ConvertFrom-Json 炸 ⇒ 閘門把
+    「已達標 43/30」報成「量不出來」（假未達標，與 R71 要治的假達標同樣是假訊號）。
+
+    為何要**靜態**鎖而不只靠行為鎖：四支之中只有 Get-ObsGaPass 與 Get-DriftGaPass
+    有行為測試（能抽出函式本體真跑）；`Get-Ac4Gate` 與 `Get-MutationLockGate` 沒有，
+    只靠行為鎖會漏掉「只改兩邊」。本 case 讓四支一起被綁住。
+
+    判準取「函式本體內必須出現 break-on-success 的三個要件」，不比對整段字面——
+    字面比對會在任何無害重排下假紅（本 repo 已有 `test_bare_hh_format_regex_has_
+    discrimination` 那筆「regex 對不上檔案卻沒人發現」的前例）。
+    """
+    for fn in _GATE_HELPERS:
+        m = re.search(rf"(?ms)^function\s+{fn}\s*\{{.*?^\}}", ps1_content)
+        assert m, f"找不到函式 {fn}"
+        body = m.group(0)
+        assert "$jsonText" in body, (
+            f"{fn} 必須以 $jsonText 持有「已成功 parse 的那一段」——舊形態直接 join "
+            "$jsonLines 丟給 ConvertFrom-Json，尾隨 stderr 會讓它炸（DEF-101-775）"
+        )
+        assert re.search(r"ConvertFrom-Json\s+-ErrorAction\s+Stop", body), (
+            f"{fn} 的試 parse 必須帶 -ErrorAction Stop——函式作用域是 'Continue'，"
+            "不帶 Stop 時 ConvertFrom-Json 的錯誤不會進 catch，break 條件永遠測不到"
+        )
+        assert "break" in body, (
+            f"{fn} 必須在第一次 parse 成功時 break——不 break 就會繼續吃後面的 stderr，"
+            "等於退回 DEF-101-775 的形態"
+        )
+
+
 def test_gate_helpers_share_three_state_contract(ps1_content: str) -> None:
     """R71（G-1/G-2）：四軌閘門 helper 的三態契約以機械鎖綁在一起。
 
@@ -1290,6 +1324,22 @@ _TRACEBACK = (
 )
 _LEGACY_PASS_TEXT = "[PASS] green_streak=41 >= window=30 (total 41 records)"
 
+# 🔴 R73（DEF-101-775）：JSON **之後**才出現的 stderr。這是 production 的真實形狀——
+# `observability_ga_check.py` 的 legacy-record WARN 走 stderr，而 helper 以 `2>&1` 合流，
+# 實測 WARN 排在 JSON 之後（本輪於真檔 `.observability_history.jsonl` 上重現）。
+# 舊濾法「見到第一個 `{` 之後**後面全收**」會把這行 WARN 接到 JSON 尾巴 ⇒
+# ConvertFrom-Json 拋「Additional text encountered after finished reading JSON」⇒
+# Ok=False ⇒ 把「已達標 43/30」報成「量不出來」。整批既有 case 全綠卻抓不到，
+# 因為每一個 payload 都是「乾淨 JSON」或「完全沒有 JSON」——真實世界的第三種形狀
+# （JSON ＋ 尾隨雜訊）沒有任何 case 覆蓋。
+_WARN_AFTER = "[observability_ga_check] WARN: 1 legacy record(s) missing observability_emit_real"
+_READY_JSON_THEN_STDERR = f"{_READY_JSON}\n{_WARN_AFTER}\n"
+_OBSERVING_JSON_THEN_STDERR = f"{_OBSERVING_JSON}\n{_WARN_AFTER}\n"
+# 對照組：雜訊在 JSON **之前**（舊濾法本來就處理得了，修法不得使其退化）。
+_STDERR_THEN_READY_JSON = f"{_WARN_AFTER}\n{_READY_JSON}\n"
+# fail-closed 組：JSON 起了頭但被截斷 ⇒ 永遠 parse 不完，必須判「量不出來」而非達標。
+_TRUNCATED_JSON = '{"status": "ready", "green_streak": 43,\n'
+
 
 @pytest.mark.skipif(
     platform.system() != "Windows",
@@ -1382,6 +1432,45 @@ class TestObsGaPassBehavior:
     ) -> None:
         got = self._run(ps1_content, tmp_path, rc=1, payload=_NO_HISTORY_JSON)
         assert got["OK"] == "False", f"no_history＝沒資料可判，不是「觀察中」：{got}"
+
+    def test_stderr_after_json_does_not_break_parsing(
+        self, ps1_content: str, tmp_path: Path
+    ) -> None:
+        """🔴 R73 回歸鎖（DEF-101-775）：JSON 後面跟著 stderr，仍必須量到真值。
+
+        意圖（Rule 9）：這條鎖存在的理由不是「JSON 要能 parse」，而是**方向**——
+        舊濾法在這個 payload 下把「已達標」讀成「量不出來」，於是 nightly 印
+        `obs=unavailable`、`[G0-NOT-READY]`，而真相是 `green_streak=43/30` 早已達標。
+        假未達標和假達標一樣是假訊號：前者讓人白等，後者讓人誤按升級。R71 那包自陳
+        「存在的理由就是消滅假達標數字」，卻在同一個閘門種了假未達標——本鎖是它的解藥。
+
+        若有人把濾法改回「見到 `{` 後面全收」，本 case 立刻紅。
+        """
+        got = self._run(ps1_content, tmp_path, rc=0, payload=_READY_JSON_THEN_STDERR)
+        assert got["OK"] == "True", (
+            f"JSON 後跟 stderr 被讀成「量不出來」＝DEF-101-775 復發（真值是 ready）：{got}"
+        )
+        assert got["PASS"] == "True", f"真值為 ready 卻沒判達標：{got}"
+        assert got["STATUS"] == "ready", got
+
+    def test_stderr_after_json_preserves_observing_verdict(
+        self, ps1_content: str, tmp_path: Path
+    ) -> None:
+        """同上但真值是 observing：不可因尾隨 stderr 就從「還在觀察」退化成「量不出來」。"""
+        got = self._run(ps1_content, tmp_path, rc=1, payload=_OBSERVING_JSON_THEN_STDERR)
+        assert got["OK"] == "True" and got["PASS"] == "False", got
+        assert got["STATUS"] == "observing", got
+
+    def test_stderr_before_json_still_works(self, ps1_content: str, tmp_path: Path) -> None:
+        """對照組：雜訊在 JSON 之前是舊濾法本來就處理得了的形狀，修法不得讓它退化。"""
+        got = self._run(ps1_content, tmp_path, rc=0, payload=_STDERR_THEN_READY_JSON)
+        assert got["OK"] == "True" and got["PASS"] == "True", got
+
+    def test_truncated_json_fails_closed(self, ps1_content: str, tmp_path: Path) -> None:
+        """fail-closed：JSON 起頭卻被截斷 ⇒ 判「量不出來」，絕不可猜成達標。"""
+        got = self._run(ps1_content, tmp_path, rc=0, payload=_TRUNCATED_JSON)
+        assert got["OK"] == "False", f"被截斷的 JSON 必須判量不出來：{got}"
+        assert got["PASS"] == "False", got
 
 
 _DRIFT_READY_JSON = (

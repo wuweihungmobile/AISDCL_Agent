@@ -98,8 +98,12 @@ def report_all_skips(result: unittest.TestResult) -> list[tuple[str, str]]:
     沒有計數，只會併進 `unittest` 預設的 `skipped=N` 一個數字裡。R59 實測：本 runner
     在 Windows 11 上 `skipped=11`，**11 支全部無標籤**，其中兩支是真正的覆蓋損失而非
     平台語意使然——
-      ① `test_install_windows_nightly` 的語法解析因本機無 pwsh 7 而 skip（DEF-101-509，
-         一支 Windows 專屬腳本的語法閘門恰在 Windows 上不跑），
+      ① `test_install_windows_nightly` 的語法解析因**當時那台機器只裝了 5.1、沒有
+         pwsh 7** 而 skip（DEF-101-509，一支 Windows 專屬腳本的語法閘門恰在 Windows
+         上不跑）。🔴 **R73 訂正（DEF-101-777）**：這句原本把量測當時那台機器缺 pwsh 7
+         這件事寫成了本檔的常數。2026-08-04 該機器裝上 PowerShell 7.6.4 後此前提為假、
+         該項也不再 skip，而讀者仍會照舊句以為它還在 skip。
+         引擎可用性是**機器屬性**，一律現查 `tools/tests/_ps_engine.py::available_engines()`。
       ② `test_env_changed_removes_cache_dir_and_symlink` 因無 symlink 權限
          （`[WinError 1314]`，標準未提權 Windows 11 的預設狀態）而 skip。
     這正是 DEF-101-343~345 那條「Windows 專屬測試連續 5+ 輪全 APPROVE 卻從未真的在

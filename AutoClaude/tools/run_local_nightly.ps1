@@ -24,8 +24,15 @@
      ⚠️ **R60 訂正（DEF-101-529）**：本段原寫「只能手動觸發／沒有自動觸發器就等於
      『補償控制自己沒有心跳』」——該敘述自 R60 起不再成立。現由
      tools/install_windows_nightly.ps1 註冊的**獨立 schtasks 任務**
-     AutoClaude_WindowsSmoke（每日 01:00，刻意排在本檔 nightly 02:00 之前一小時：
-     smoke 是便宜的 tripwire，nightly 是小時量級的深度回歸）觸發；心跳查詢走
+     AutoClaude_WindowsSmoke 觸發（設計意圖：smoke 排在本檔 nightly **之前**，
+     因為 smoke 是便宜的 tripwire〔R73 實測 88 秒〕、nightly 是深度回歸〔R73 實測
+     5 分 38 秒〕；機器當晚只醒一小段時間時先跑完便宜那支才有意義）。
+     🔴 **R73 訂正（DEF-101-779）**：本段原本寫死「每日 01:00／nightly 02:00 之前
+     一小時」，兩個時刻都與實況不符（實測 smoke 23:30、nightly 22:30，順序還相反）。
+     **時刻一律現查**，不要相信任何文件裡的數字：
+       Get-ScheduledTask | Where-Object TaskName -like 'AutoClaude*' | Get-ScheduledTaskInfo
+     觸發時刻現由 install_windows_nightly.ps1 的 -NightlyAt／-SmokeAt 參數決定。
+     心跳查詢走
      Get-ScheduledTaskInfo，該安裝腳本的 -Status 對任務缺席回 exit 1。
      **「本檔零呼叫」這半句仍為真且刻意保留**：兩者解耦，smoke 的心跳由它自己的
      排程任務負責，不寄生在本檔上——理由見下方「刻意只補帳目、不補 stage」段
@@ -39,8 +46,11 @@
   summary 行、summary JSON、exit-decision 清單與 Format-Rc 標籤共四處，而其中 summary
   行被 tools/dev_start.py 的心跳哨兵以**跨檔字面正則**解析（見 DEF-101-263②／R25 的
   跨檔字面鎖），改動 summary 契約會連帶動到那組鎖；同時本檔是 CI 停擺期間**唯一的
-  活體驗證管道**，而排程在 02:00、本輪無法觀測到真正的排程執行結果。此項列為
+  活體驗證管道**，而當時無法觀測到真正的排程執行結果。此項列為
   backlog（帳本 DEF-101-517），需獨立一輪並以一次真實排程執行收尾驗證。
+  🔴 **R73 補記**：「無法觀測排程執行結果」這個前提已不成立——`Start-ScheduledTask`
+  可隨選觸發並取得排程環境下的真實結果（R73 實測 smoke 88 秒完成、rc=0）。
+  「要等到半夜才知道」不再是有效理由。
 
 容器策略：優先沿用既有 autoclaude_pg；若不存在才新建臨時 container。
 既有 container 不在 Cleanup 中拆除。
@@ -55,8 +65,11 @@
 Stage 失敗不中斷後續 stage（與 CI continue-on-error: true 一致）。
 
 .NOTES
-排程：schtasks /create /SC DAILY /ST 02:00 /TN "AutoClaude_Nightly" `
+排程：由 tools/install_windows_nightly.ps1 建立（時刻走 -NightlyAt 參數）。等價的手動形態：
+  schtasks /create /SC DAILY /ST <HH:mm> /TN "AutoClaude_Nightly" `
   /TR "powershell.exe -NoProfile -ExecutionPolicy Bypass -File <repo>\tools\run_local_nightly.ps1"
+🔴 R73（DEF-101-779）：本行原本寫死 /ST 02:00，與實況（22:30）不符。現行時刻一律現查
+  `Get-ScheduledTask -TaskName AutoClaude_Nightly | Get-ScheduledTaskInfo`，不要相信本段數字。
 🔴 排程後務必執行（elevated）：tools/fix_nightly_catchup.ps1
   schtasks.exe /create 建出的任務預設 WakeToRun=false + StartWhenAvailable=false，
   機器睡眠/休眠或關機時排程到點不喚醒、不補跑 → 觀察期 idle 漏跑（improving_102）。
@@ -510,12 +523,18 @@ function Get-MutationLockGate {
     # 必須緊接著原生呼叫取值：任何中間的 native 指令都會覆寫 $LASTEXITCODE。
     $rc = $LASTEXITCODE
     $result.Rc = $rc
+    # R73（DEF-101-775）：見 Get-ObsGaPass 內同位置的完整 WHY——「見到第一個 `{` 後
+    # 面全收」會把排在 JSON **之後**的 stderr 接到尾巴，ConvertFrom-Json 當場炸。
     $jsonLines = @()
+    $jsonText = ''
     foreach ($line in ($raw -split "`n")) {
-      if ($line.Trim().StartsWith('{') -or $jsonLines.Count -gt 0) { $jsonLines += $line }
+      if (-not ($line.Trim().StartsWith('{') -or $jsonLines.Count -gt 0)) { continue }
+      $jsonLines += $line
+      $candidate = ($jsonLines -join "`n")
+      try { $candidate | ConvertFrom-Json -ErrorAction Stop | Out-Null; $jsonText = $candidate; break } catch { }
     }
-    if ($jsonLines.Count -eq 0) {
-      $result.Error = "tool broken: no JSON in output (rc=$rc)"
+    if ($jsonText -eq '') {
+      $result.Error = "tool broken: no JSON could be parsed from output (rc=$rc)"
       return $result
     }
     if ($rc -ne 0) {
@@ -523,7 +542,7 @@ function Get-MutationLockGate {
       $result.Error = "tool broken: rc=$rc 但仍印出 JSON（探測碼契約為成功才 print）"
       return $result
     }
-    $parsed = ($jsonLines -join "`n") | ConvertFrom-Json
+    $parsed = $jsonText | ConvertFrom-Json
     $result.Locked = [bool]$parsed.locked
     $result.Baseline = if ($null -eq $parsed.baseline) { 'n/a' } else { ('{0:N4}' -f [double]$parsed.baseline) }
     $result.UniqueSha = [int]$parsed.unique_sha
@@ -564,12 +583,20 @@ function Get-Ac4Gate {
     # observability_ga_check 的 legacy record WARN 都走 stderr，是常態不是例外）。
     $ErrorActionPreference = 'Continue'
     $raw = & $script:PyExe tools/ac4_progress_check.py --history $HistoryPath --json 2>&1 | Out-String
+    # R73（DEF-101-775）：見 Get-ObsGaPass 內同位置的完整 WHY——「見到第一個 `{` 後
+    # 面全收」會把排在 JSON **之後**的 stderr 接到尾巴，ConvertFrom-Json 當場炸。
+    # 本支的 `ac4_progress_check` 已知會印 `[ac4_progress_check] WARN:` 到 stderr，
+    # 目前排在 JSON 之前故僥倖未發火——順序是工具的實作細節，不該當契約依賴。
     $jsonLines = @()
+    $jsonText = ''
     foreach ($line in ($raw -split "`n")) {
-      if ($line.Trim().StartsWith('{') -or $jsonLines.Count -gt 0) { $jsonLines += $line }
+      if (-not ($line.Trim().StartsWith('{') -or $jsonLines.Count -gt 0)) { continue }
+      $jsonLines += $line
+      $candidate = ($jsonLines -join "`n")
+      try { $candidate | ConvertFrom-Json -ErrorAction Stop | Out-Null; $jsonText = $candidate; break } catch { }
     }
-    if ($jsonLines.Count -eq 0) { $result.Error = 'no JSON in output'; return $result }
-    $parsed = ($jsonLines -join "`n") | ConvertFrom-Json
+    if ($jsonText -eq '') { $result.Error = 'no JSON could be parsed from output'; return $result }
+    $parsed = $jsonText | ConvertFrom-Json
     $result.Days = [int]$parsed.observation_days
     $result.Ready = [bool]$parsed.ready_for_labeled_pr
     $result.Ok = $true
@@ -622,15 +649,39 @@ function Get-ObsGaPass {
     # 必須緊接著原生呼叫取值：任何中間的 native 指令都會覆寫 $LASTEXITCODE。
     $rc = $LASTEXITCODE
     $result.Rc = $rc
+    # 🔴 R73（DEF-101-775，本輪唯一活體 P0）：原濾法是「見到第一個 `{` 之後**後面全收**」，
+    # 隱含假設 stderr 一律排在 JSON **之前**（上方註解也是這樣寫的）。實測不成立——
+    # `observability_ga_check.py` 的 legacy-record WARN 走 stderr 且排在 JSON **之後**，
+    # `2>&1` 合流後被接到 JSON 尾巴 ⇒ ConvertFrom-Json 拋
+    # 「Additional text encountered after finished reading JSON」⇒ 走 catch ⇒ Ok=$false。
+    #
+    # 方向性（為何算 P0）：工具的真實答案是 `status=ready, green_streak=43, window=30`
+    # ——obs GA **早已達標**——卻被自己的載具報成 `TOOL-ERROR`／`unavailable`。R71 那包
+    # 自陳「存在的理由就是消滅假達標數字」，結果在同一個閘門上種了一個**假未達標**。
+    # 回歸點：8/3 02:00 那輪 log 為 `obs_ga=True`，8/3 22:30（R71 落地後）起變 TOOL-ERROR。
+    #
+    # 修法＝「收到第一個能成功 parse 的 JSON 就停」：單行與 pretty-print 兩種形態皆成立，
+    # 其後的 stderr 一律被排除；若 JSON 起了頭卻永遠 parse 不完（輸出被截斷）則回空字串
+    # ⇒ fail-closed。六情境已在 **PS 5.1 生產引擎**實測（stderr 在後／在前／兩側夾殺／
+    # pretty-print／無 JSON／JSON 截斷）全數正確。
+    #
+    # 🔴 刻意**逐支內聯、不抽共用函式**：行為測試會用 regex 抽出單一函式本體、丟給
+    # `powershell.exe` 獨立真跑（`tests/tools/test_run_local_nightly_static.py::
+    # TestObsGaPassBehavior`），抽成共用層後那支探針會找不到函式而失去鑑別力。
+    # 四支同構複製由 `test_gate_helpers_share_three_state_contract` 綁著防「只改一邊」。
     $jsonLines = @()
+    $jsonText = ''
     foreach ($line in ($raw -split "`n")) {
-      if ($line.Trim().StartsWith('{') -or $jsonLines.Count -gt 0) { $jsonLines += $line }
+      if (-not ($line.Trim().StartsWith('{') -or $jsonLines.Count -gt 0)) { continue }
+      $jsonLines += $line
+      $candidate = ($jsonLines -join "`n")
+      try { $candidate | ConvertFrom-Json -ErrorAction Stop | Out-Null; $jsonText = $candidate; break } catch { }
     }
-    if ($jsonLines.Count -eq 0) {
-      $result.Error = "tool broken: no JSON in output (rc=$rc)"
+    if ($jsonText -eq '') {
+      $result.Error = "tool broken: no JSON could be parsed from output (rc=$rc)"
       return $result
     }
-    $parsed = ($jsonLines -join "`n") | ConvertFrom-Json
+    $parsed = $jsonText | ConvertFrom-Json
     $status = [string]$parsed.status
     $result.Status = $status
     $result.Streak = [int]$parsed.green_streak
@@ -683,15 +734,23 @@ function Get-DriftGaPass {
     # 必須緊接著原生呼叫取值：任何中間的 native 指令都會覆寫 $LASTEXITCODE。
     $rc = $LASTEXITCODE
     $result.Rc = $rc
+    # R73（DEF-101-775）：見 Get-ObsGaPass 內同位置的完整 WHY——「見到第一個 `{` 後
+    # 面全收」會把排在 JSON **之後**的 stderr 接到尾巴，ConvertFrom-Json 當場炸。
+    # 本支的工具目前不在 JSON 後印 stderr，故尚未發火；同構修掉是為了不留下一顆
+    # 「等工具哪天多印一行 WARN 就炸」的定時炸彈（四支同源，缺陷是共用的）。
     $jsonLines = @()
+    $jsonText = ''
     foreach ($line in ($raw -split "`n")) {
-      if ($line.Trim().StartsWith('{') -or $jsonLines.Count -gt 0) { $jsonLines += $line }
+      if (-not ($line.Trim().StartsWith('{') -or $jsonLines.Count -gt 0)) { continue }
+      $jsonLines += $line
+      $candidate = ($jsonLines -join "`n")
+      try { $candidate | ConvertFrom-Json -ErrorAction Stop | Out-Null; $jsonText = $candidate; break } catch { }
     }
-    if ($jsonLines.Count -eq 0) {
-      $result.Error = "tool broken: no JSON in output (rc=$rc)"
+    if ($jsonText -eq '') {
+      $result.Error = "tool broken: no JSON could be parsed from output (rc=$rc)"
       return $result
     }
-    $parsed = ($jsonLines -join "`n") | ConvertFrom-Json
+    $parsed = $jsonText | ConvertFrom-Json
     $status = [string]$parsed.status
     $result.Status = $status
     $result.Streak = [int]$parsed.green_streak
@@ -1089,19 +1148,29 @@ if ($script:DockerOK) {
       # 為 JSON array 起點 → ConvertFrom-Json 失敗走 catch → 假 F2 WARN）。
       # 現對齊 helper line 51：僅接受 `{` 為 JSON 起點；以 `[` 開頭的行進 stderr 攔截。
       # ac4_progress_check.py --json 永遠回 dict（非 list），故拒絕 `[` 不影響合法 JSON。
+      #
+      # R73（DEF-101-775）：「見到第一個 `{` 後面全收」在此處同樣成立——排在 JSON
+      # **之後**的 stderr 會被接進 $ac4JsonLines（走不到 else 分支、不會進 [F2 stderr]
+      # log），ConvertFrom-Json 炸掉後由 catch 印成「假 F2 WARN」，正是上方註解要防的
+      # 那個結果、只是觸發方向相反。改為「收到第一個能成功 parse 的 JSON 就停」，
+      # 其後的行照舊走 [F2 stderr] 記錄（此處刻意保留 else 分支，取證能力不減）。
       $ac4Raw = & $script:PyExe tools/ac4_progress_check.py --history .ac4_history.jsonl --json 2>&1 | Out-String
       $ac4Lines = $ac4Raw -split "`n"
       $ac4JsonLines = @()
+      $ac4Out = ''
       foreach ($line in $ac4Lines) {
         $trim = $line.Trim()
         if ($trim -eq '') { continue }
+        if ($ac4Out -ne '') { Log "[F2 stderr] $trim"; continue }
         if ($trim.StartsWith('{') -or $ac4JsonLines.Count -gt 0) {
           $ac4JsonLines += $line
+          $candidate = ($ac4JsonLines -join "`n")
+          try { $candidate | ConvertFrom-Json -ErrorAction Stop | Out-Null; $ac4Out = $candidate } catch { }
         } else {
           Log "[F2 stderr] $trim"
         }
       }
-      $ac4Out = ($ac4JsonLines -join "`n")
+      if ($ac4Out -eq '') { throw "AC4 輸出無可解析 JSON（rc/輸出見上方 [F2 stderr] 行）" }
       $ac4Json = $ac4Out | ConvertFrom-Json
       if ($ac4Json.ready_for_labeled_pr -eq $true) {
         Log "[F2 ALERT] AC4 觀察期 #2 已達標 ready_for_labeled_pr=true (tolerant<60ms streak=$($ac4Json.tolerant_streak)/14 observation<50ms streak=$($ac4Json.observation_streak)/14; ADR-SD09-008 v0.4 ACCEPTED) — 需 PM 確認啟用 autoclaude-pg-e2e-on-label.yml workflow 並紀錄至 docs/06_quality/SD09_AC4_Activation_Approval.md" 'WARN'

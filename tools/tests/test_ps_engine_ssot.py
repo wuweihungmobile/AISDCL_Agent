@@ -9,10 +9,11 @@ WHY（測意圖非僅行為，Rule 9）：`tools/tests/` 曾有 **6 檔／10 處
 
 本鎖守四件事：
   1. **優先序方向**：`production_engine()` 在「兩引擎都在」時必須回 5.1。
-     🔴 **本機無 pwsh 7**（實測 `which pwsh` rc=1），任何「pwsh 優先」的實作在本機
-     都會靜默 fallback 到 5.1、**測不出差別**——所以這支測試必須用合成的 `shutil.which`
-     偽造「兩者皆在」，否則它對整個 E-A-03 缺陷類別零鑑別力（同 R56 教訓：
-     「驗證合法三元」與「驗證鎖是否真的漏抓」是兩件事）。
+     🔴 **在只裝了一個引擎的機器上**，任何「pwsh 優先」的實作都會靜默 fallback 到另一個、
+     **測不出差別**——所以這支測試必須用合成的 `shutil.which` 偽造「兩者皆在」，否則它
+     對整個 E-A-03 缺陷類別零鑑別力（同 R56 教訓：「驗證合法三元」與「驗證鎖是否真的
+     漏抓」是兩件事）。合成的另一個好處是**與這台機器裝了什麼無關**：R73 訂正前這裡
+     寫死了撰寫當輪那台機器只有 5.1，而 2026-08-04 它已同時具備兩者（DEF-101-777）。
   2. **語意④不得 fallback**：`native_ps51()` 在「只有 pwsh」的機器上必須回 None。
   3. **反增生**：`tools/tests/*.py` 不得再出現行內引擎挑選，除具名豁免。
   4. **正向委派**：已遷移的消費檔必須真的 import SSOT，且其引擎述詞函式的**程式碼本體**
@@ -231,7 +232,7 @@ class TestProductionEnginePrecedence(unittest.TestCase):
         )
 
     def test_prefers_ps51_when_both_engines_present(self) -> None:
-        """🔴 核心鑑別力：合成「兩引擎都在」——本機無 pwsh 7，不合成就驗不到方向。"""
+        """🔴 核心鑑別力：合成「兩引擎都在」——在只裝一個引擎的機器上驗不到方向。"""
         with mock.patch.object(
             _ps_engine.shutil, "which",
             _fake_which({"powershell": _FAKE_PS51, "pwsh": _FAKE_PWSH}),
@@ -452,7 +453,9 @@ SAMPLE = 'shutil.which("powershell")'   # 字串常數內的樣本
         WHY（測意圖非僅行為）：import 級鎖看不到「留著 import 卻把函式本體改回
         `shutil.which("pwsh") or shutil.which("powershell")`」——而那正是
         DEF-101-548 的原始缺陷形狀（pwsh 7 去驗一支受 `tools/` 5.1 政策約束的
-        `.ps1`）。本機無 pwsh 7 ⇒ 行為面測不出差別，只能從**原始碼結構**釘死。
+        `.ps1`）。在只裝了一個引擎的機器上，行為面測不出差別（fallback 會靜默補上），
+        所以只能從**原始碼結構**釘死——這條理由與這台機器現在裝了什麼無關，
+        故 R73 把原本寫死機器屬性的措辭一併改掉（DEF-101-777）。
         斷言對象是 `ast.unparse` 後的函式本體（不含 docstring／註解），故該檔
         docstring 逐字保留舊實作當史料不會讓本鎖誤綠也不會誤紅。
         """
@@ -493,41 +496,126 @@ SAMPLE = 'shutil.which("powershell")'   # 字串常數內的樣本
         )
 
 
+def _skip_reason_linenos(text: str) -> set[int]:
+    """走 `ast` 找出「skip 機制的理由字串」佔用的行號集合。
+
+    WHY 要豁免這一類：`@unittest.skipUnless(_ps_engine(), "<缺引擎時要印的理由>")`
+    的理由字串**只在條件成立時才會被人看到**——它是對活檢查結果的描述，不是把機器屬性
+    寫成常數。若不豁免，R73 擴射程當場製造 2 筆假紅（`test_install_windows_nightly.py`
+    的 `:377` skipUnless 與 `:447` skipTest），而假紅會逼下一輪的人去「修」正確的程式碼。
+    判定走 AST 而非文字：與本檔第 3 項鎖 R60 round-2 的訂正同一個理由——文字判定會被
+    docstring／註解裡的引述誤命中（該次假綠讓 E-A-03 動機案例檔零覆蓋）。
+    """
+    exempt: set[int] = set()
+    try:
+        tree = ast.parse(text)
+    except SyntaxError:
+        return exempt
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Call):
+            continue
+        fname = ""
+        if isinstance(node.func, ast.Attribute):
+            fname = node.func.attr
+        elif isinstance(node.func, ast.Name):
+            fname = node.func.id
+        if "skip" not in fname.lower():
+            continue
+        for arg in list(node.args) + [kw.value for kw in node.keywords]:
+            if isinstance(arg, ast.Constant) and isinstance(arg.value, str):
+                for ln in range(arg.lineno, (arg.end_lineno or arg.lineno) + 1):
+                    exempt.add(ln)
+    return exempt
+
+
+# 行尾豁免標記：偵測器自己的樣本字串。沿用 repo 既有的 `# ps7-ok:` 行尾標記慣例
+# （獨立註解行無效，必須行尾），並由 `test_stale_sample_marker_stays_bounded` 界定射程。
+_STALE_SAMPLE_MARKER = "# stale-sample:"
+
+
 class TestNoStaleLocalEngineClaims(unittest.TestCase):
-    """R69（DEF-101-702／R68-16）：本模組不得把「這台機器有沒有某個引擎」寫成常數。
+    """不得把「這台機器有沒有某個引擎」寫成常數。**射程＝整個 `tools/` 樹**（R73 擴）。
 
-    WHY：`_ps_engine.py` 的 docstring 兩處逐字寫著「本機無 pwsh 7」，那是撰寫當輪那台
-    Windows 機器的屬性；R69 在 macOS 真機上 `shutil.which("pwsh")` 命中 ⇒ 該前提為假，
-    而它正是「⑤ 這條為什麼測不出差別」的**唯一理由**——理由失效後，讀者會以為那個風險
-    在本機不存在，實際上正在發生。同 ADR-XPLAT-002 §6 邊界 1 已裁定的原則：平台／環境
-    可用性是**輪次屬性**，治理文件與護欄程式一律指向現查來源，不寫死斷言。
+    WHY（R69 原案）：`_ps_engine.py` 的 docstring 有兩處把「這台機器沒有 pwsh 7」寫成
+    常數，那是撰寫當輪那台 Windows 機器的屬性；R69 在 macOS 真機上 `shutil.which("pwsh")` 命中
+    ⇒ 該前提為假，而它正是「⑤ 這條為什麼測不出差別」的**唯一理由**——理由失效後，
+    讀者會以為那個風險在本機不存在，實際上正在發生。同 ADR-XPLAT-002 §6 邊界 1 已裁定
+    的原則：平台／環境可用性是**輪次屬性**，治理文件與護欄程式一律指向現查來源。
 
-    判準刻意窄：只抓「本機 + 無/沒有/不存在 + 引擎名」這種**斷言句**，不碰
-    「合成情境」「本機根本沒有 5.1（macOS/Linux）」這類條件式敘述——後者說的是通則
-    而非這台機器。
+    🔴 **R73 擴射程的理由（DEF-101-777）——這是「劃界結案」的代價被實際收取**：
+    R69 訂正了 `_ps_engine.py` 並上了這條鎖，但鎖只圈**那一個檔**。2026-08-04 這台機器裝上
+    PowerShell 7.6.4（`shutil.which("pwsh")` 實測命中 `Program Files/WindowsApps/
+    Microsoft.PowerShell_7.6.4.0_x64__8wekyb3d8bbwe/pwsh.EXE`，size=301368、非 0 byte
+    佔位版）後，**射程外的同型句子同時變成假事實**，實查 5 處：
+      · `tools/lib/windows_skip_tags.py`（🔴 **護欄層**——拿現在為假的前提在描述豁免依據）
+      · `tools/tests/test_install_windows_nightly.py`（宣稱「走不到兩引擎皆有的分支」，
+        而該分支現在**每次都走得到**，且實測 `production_engine()` 正確回 5.1）
+      · 本檔自己 3 處（鎖的檔案犯了鎖在抓的病，而鎖看不到自己）
+    這正是 `DEF-101-757`「已知的鎖射程缺口不得只以劃界結案」的同型復發：**知道有缺口、
+    只在文件裡註明缺口，四輪後缺口自己發火**。修法必須是擴射程，不是再註明一次。
+
+    判準刻意窄（沿用 R69）：只抓「本機 + 無/沒有/不存在 + 引擎名」這種**斷言句**，不碰
+    「本機根本沒有 5.1（macOS/Linux）」這類通則敘述。另有兩類結構性豁免，各有獨立鎖：
+      · **skip 理由**（`_skip_reason_linenos`，走 AST）——見該函式 docstring。
+      · **偵測器自己的樣本**（行尾 `# stale-sample:` 標記）——由
+        `test_stale_sample_marker_stays_bounded` 防它被拿去豁免真的違規。
     """
 
     _STALE_RE = re.compile(
         r"本機[^。\n]{0,8}?(?:無|沒有|不存在)[^。\n]{0,4}?(pwsh|powershell|PS\s*[57])"
     )
+    # 射程＝`tools/` 樹全部 .py。刻意不限 `tools/tests/`：本輪命中的最嚴重一筆在
+    # `tools/lib/windows_skip_tags.py`＝護欄層生產碼，只掃測試就會漏掉它。
+    _SCAN_ROOT = Path(__file__).resolve().parents[1]
 
-    def test_module_has_no_hardcoded_local_engine_absence(self) -> None:
-        text = Path(_ps_engine.__file__).read_text(encoding="utf-8")
-        hits = [
-            f"{lineno}: {line.strip()}"
-            for lineno, line in enumerate(text.splitlines(), 1)
-            if self._STALE_RE.search(line) and "R69 訂正" not in line
-        ]
+    @classmethod
+    def _scan_files(cls) -> list[Path]:
+        return sorted(p for p in cls._SCAN_ROOT.rglob("*.py") if "__pycache__" not in p.parts)
+
+    def test_tools_tree_has_no_hardcoded_local_engine_absence(self) -> None:
+        offenders: list[str] = []
+        scanned = 0
+        for path in self._scan_files():
+            text = path.read_text(encoding="utf-8")
+            scanned += 1
+            exempt = _skip_reason_linenos(text)
+            for lineno, line in enumerate(text.splitlines(), 1):
+                if not self._STALE_RE.search(line):
+                    continue
+                if lineno in exempt or _STALE_SAMPLE_MARKER in line:
+                    continue
+                rel = path.relative_to(self._SCAN_ROOT)
+                offenders.append(f"{rel}:{lineno}: {line.strip()}")
+        self.assertGreater(scanned, 20, "射程掃到的檔案數異常少——rglob 可能沒對上樹根")
         self.assertEqual(
-            hits, [],
-            "本檔把「這台機器有沒有某引擎」寫成了常數：\n" + "\n".join(hits) +
+            offenders, [],
+            "把「這台機器有沒有某引擎」寫成了常數（共 "
+            f"{len(offenders)} 處，掃描 {scanned} 檔）：\n" + "\n".join(offenders) +
             "\n改法：改指向現查（`available_engines()`／`shutil.which`），"
-            "或改寫成不依賴特定機器的通則敘述。",
+            "或改寫成不依賴特定機器的通則敘述。若確為 skip 理由字串，"
+            "它會自動豁免；若是偵測器樣本，行尾加 `# stale-sample: <WHY>`。",
         )
 
     def test_detector_catches_the_pre_fix_sentence(self) -> None:
         """鑑別力：R69 修掉的逐字原句必須被命中。"""
-        self.assertIsNotNone(self._STALE_RE.search("⑤ 在**本機**（無 pwsh 7）會靜默 fallback"))
+        pre_fix = "⑤ 在**本機**（無 pwsh 7）會靜默 fallback"  # stale-sample: R69 原句
+        self.assertIsNotNone(self._STALE_RE.search(pre_fix))
+
+    def test_detector_catches_the_r73_sites(self) -> None:
+        """🔴 R73 鑑別力：射程擴大前逃過鎖的三種真實句型，必須逐句被命中。
+
+        意圖（Rule 9）：這三句不是我編的樣本，是 R73 實查到的**逐字原文**（分別來自
+        護欄層、測試 docstring、本檔自己）。若有人把 `_SCAN_ROOT` 縮回單一檔案，
+        `test_tools_tree_has_no_hardcoded_local_engine_absence` 會變綠而缺陷復活——
+        本 case 讓「偵測器認不認得這些句型」與「射程涵不涵蓋它們」分開受測。
+        """
+        for sample in (
+            "語法解析因本機無 pwsh 7 而 skip",  # stale-sample: 護欄層原文片段
+            "本機無 pwsh 7，`expected` 恆等於 5.1",  # stale-sample: 測試原文片段
+            "🔴 **本機無 pwsh 7**（實測 rc=1）",  # stale-sample: 本檔原文片段
+        ):
+            with self.subTest(sample=sample):
+                self.assertIsNotNone(self._STALE_RE.search(sample))
 
     def test_detector_does_not_flag_conditional_prose(self) -> None:
         """對照組：說通則而非說這台機器的句子不得誤報。"""
@@ -537,6 +625,42 @@ class TestNoStaleLocalEngineClaims(unittest.TestCase):
         ):
             with self.subTest(sample=sample):
                 self.assertIsNone(self._STALE_RE.search(sample))
+
+    def test_skip_reason_exemption_is_ast_based_and_narrow(self) -> None:
+        """豁免只認 skip 機制的理由字串，不得外溢到一般字串或註解。"""
+        src = (
+            'import unittest\n'
+            '@unittest.skipUnless(cond, "本機無 pwsh 7")\n'  # stale-sample: 正向
+            'class A(unittest.TestCase):\n'
+            '    def t(self):\n'
+            '        self.skipTest("本機無 powershell")\n'  # stale-sample: AST 豁免正向樣本
+            '        msg = "本機無 pwsh 7"\n'  # stale-sample: 一般字串對照組（不得豁免）
+            '        # 本機無 pwsh 7\n'  # stale-sample: 註解對照組（不在 AST 上）
+        )
+        exempt = _skip_reason_linenos(src)
+        self.assertIn(2, exempt, "skipUnless 的理由字串必須豁免")
+        self.assertIn(5, exempt, "skipTest 的理由字串必須豁免")
+        self.assertNotIn(6, exempt, "一般字串賦值不是 skip 理由，不得豁免")
+        self.assertNotIn(7, exempt, "註解不在 AST 上，本來就不該出現在豁免集合")
+
+    def test_stale_sample_marker_stays_bounded(self) -> None:
+        """行尾豁免標記不得擴散：只允許出現在本檔（偵測器自己的樣本）。
+
+        意圖（Rule 9）：豁免標記是鎖上的洞。本 repo 已有「豁免自陳『完成後刪除』卻永遠
+        退不了場」的實證（R60 `_PENDING_MIGRATION_SITES`）。把標記的**居所**也鎖住，
+        任何人想用它繞過真的違規，就得先讓本 case 翻紅。
+        """
+        users: list[str] = []
+        for path in self._scan_files():
+            if path.resolve() == Path(__file__).resolve():
+                continue
+            if _STALE_SAMPLE_MARKER in path.read_text(encoding="utf-8"):
+                users.append(str(path.relative_to(self._SCAN_ROOT)))
+        self.assertEqual(
+            users, [],
+            f"`{_STALE_SAMPLE_MARKER}` 只允許用在偵測器自己的樣本上，"
+            f"卻出現在：{users}。真正的機器屬性斷言請改寫成現查，不要貼標籤。",
+        )
 
 
 if __name__ == "__main__":

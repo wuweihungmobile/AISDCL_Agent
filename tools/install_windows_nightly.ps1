@@ -13,8 +13,11 @@ AutoClaude/tools/fix_nightly_catchup.ps1——假設 AutoClaude_Nightly 這個 s
 跑一次 fix_nightly_catchup.ps1（已安裝的舊機器仍可用該腳本校正）。
 
 本安裝器管理的是一**組**任務（不是單一任務），四個模式一律作用於整組：
-  ① AutoClaude_Nightly      每日 02:00 → AutoClaude/tools/run_local_nightly.ps1
-  ② AutoClaude_WindowsSmoke 每日 01:00 → tools/windows_smoke_local.ps1
+  ① AutoClaude_Nightly      每日 $NightlyAt（預設 22:30）→ AutoClaude/tools/run_local_nightly.ps1
+  ② AutoClaude_WindowsSmoke 每日 $SmokeAt（預設 23:30）→ tools/windows_smoke_local.ps1
+  🔴 R73（DEF-101-779）：時間改由參數提供、預設值＝本機現行實況；本檔原先寫死
+  02:00／01:00，與實際排程（22:30／23:30）不符，使「跑安裝器套設定」會靜默改掉時間。
+  查現況一律 `Get-ScheduledTask ... | Get-ScheduledTaskInfo`，不要相信本段文字。
 R60 新增 ②，收斂 DEF-101-517 的 backlog（該列明文交棒「下一輪先評估較便宜的兩條
 路徑」，本輪落地其中的路徑①）。WHY 必須自動觸發：`windows_smoke_local.ps1` 正是
 DEF-101-139 為「雲端 CI 帳務停擺（DEF-101-081）」而建的 Windows 側**執行級補償
@@ -58,7 +61,36 @@ LastRunTime／LastTaskResult 即為兩支任務各自的心跳（語意對應 ma
 [CmdletBinding(SupportsShouldProcess)]
 param(
   [switch]$Uninstall,
-  [switch]$Status
+  [switch]$Status,
+  # 🔴 R73（DEF-101-779）：觸發時間必須可傳入，且**預設值＝本機現行實況**。
+  #
+  # WHY 這是 P0 而非美化：本檔 install 路徑是 Unregister→Register（見下方），而時間
+  # 原本寫死 nightly='02:00'／smoke='01:00'。而本機實際排程是 nightly 22:30／
+  # smoke 23:30（R73 以 `Get-ScheduledTask | Get-ScheduledTaskInfo` 實測 NextRunTime
+  # 為 08-04 22:30 與 08-04 23:30）。於是形成一個**陷阱**：
+  #   ADR-SD09-012 早已指出本機五項排程設定沒套上（ExecutionTimeLimit=PT72H 應為 PT4H、
+  #   MultipleInstances=IgnoreNew 應為 StopExisting ×2、smoke LogonType=Interactive
+  #   應為 S4U），而要套上就得跑本安裝器——**跑下去卻會把時間靜默改回 02:00/01:00**。
+  #   「修 A 的唯一途徑會破壞 B，且 B 的破壞無聲」＝沒有人敢執行的修復指令，
+  #   這正是那五項設定經 R71、R72 兩輪仍原封不動的機械原因。
+  # 預設值的取法（R73 定案，兩個約束在此交會）：
+  #   · `$NightlyAt = '22:30'`＝**本機現行實況**，不帶參數跑不會動到 nightly。
+  #   · `$SmokeAt = '21:30'`＝**回復被鎖住的設計不變量**「smoke 早於 nightly」。
+  #     本機現行 smoke 是 23:30（晚於 nightly），與該不變量相反；而該不變量有明文機械鎖
+  #     （`tools/tests/test_install_windows_nightly.py::
+  #     test_smoke_task_shares_catchup_settings_and_runs_before_nightly`，斷言
+  #     smoke_at < nightly_at，WHY＝smoke 是 88 秒的便宜 tripwire、nightly 是 5.6 分鐘的
+  #     七軌深度回歸，機器當晚只醒一小段時間時先跑完便宜那支才有意義）。
+  #     🔴 兩者衝突時挑**被鎖住的那一邊**：鎖是經過論證並機械強制的產物，現行 23:30
+  #     則是沒有任何文件解釋的手動漂移（R73 全庫實查，找不到把 smoke 改到 nightly
+  #     之後的理由）。若要維持現況請顯式傳 `-SmokeAt 23:30`——但那會讓上述鎖與現場
+  #     再度脫節，屆時應改的是鎖與其 WHY，不是靜默放著。
+  # 之所以不把兩個預設都設成現行實況：那會讓 `-SmokeAt` 的預設值主動違反一條 active 的
+  # 鎖，等於用預設值把技術債固化進安裝器（且下一輪的人會以為那是設計）。
+  [ValidatePattern('^([01]\d|2[0-3]):[0-5]\d$')]
+  [string]$NightlyAt = '22:30',
+  [ValidatePattern('^([01]\d|2[0-3]):[0-5]\d$')]
+  [string]$SmokeAt = '21:30'
 )
 
 $ErrorActionPreference = 'Stop'
@@ -78,10 +110,15 @@ $ScriptDir = $PSScriptRoot
 $RepoRoot = [System.IO.Path]::GetFullPath((Join-Path $ScriptDir '..'))
 $NightlyPs1 = Join-Path $RepoRoot 'AutoClaude\tools\run_local_nightly.ps1'
 $SmokePs1 = Join-Path $RepoRoot 'tools\windows_smoke_local.ps1'
-# smoke 排在 nightly 之前一小時：smoke 是便宜的 tripwire（PASS=12，數分鐘量級），
-# nightly 是七軌深度回歸（含 mutation，小時量級）。若機器當晚只醒著很短的時間，
-# 先跑完便宜那支才是對的順序；兩支彼此無資料相依（smoke 全在 OS temp 內建 fake repo）。
-$SmokeAt = '01:00'
+# 排序設計意圖：smoke 是便宜的 tripwire（PASS=12，R73 隨選觸發實測 **88 秒**），
+# nightly 是七軌深度回歸（R73 由 8/3 22:30 那輪 log 實測 **5 分 38 秒**）。若機器當晚
+# 只醒著很短的時間，先跑完便宜那支才是對的順序；兩支彼此無資料相依（smoke 全在 OS
+# temp 內建 fake repo）。
+# 🔴 R73 誠實揭露（DEF-101-779）：**本機現行排程違反上述意圖**——實測 nightly 22:30、
+# smoke 23:30，smoke 落在 nightly 之**後**一小時。因此照本檔預設值安裝會把 smoke 從
+# 23:30 移到 21:30（nightly 22:30 不變），這是**刻意的**：該順序有 active 機械鎖，
+# 取捨理由見 param 區塊。要維持現行 23:30 請顯式傳 `-SmokeAt 23:30`。
+# （$NightlyAt／$SmokeAt 現由 param 區塊提供，不再於此寫死。）
 
 function Test-IsAdmin {
   ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole(
@@ -246,7 +283,7 @@ function Set-MultipleInstancesStopExisting {
 
 $action = New-ScheduledTaskAction -Execute 'powershell.exe' `
   -Argument "-NoProfile -ExecutionPolicy Bypass -File `"${NightlyPs1}`""
-$trigger = New-ScheduledTaskTrigger -Daily -At '02:00'
+$trigger = New-ScheduledTaskTrigger -Daily -At $NightlyAt
 # smoke 任務：同款原生 powershell.exe 呼叫慣例。🔴 載具必須是原生 PowerShell——
 # windows_smoke_local.ps1 自 R59（DEF-101-511）起偵測到 $env:MSYSTEM 即 exit 1 拒跑，
 # 因為經 Git Bash 呼叫會在非 ASCII 路徑情境產生假紅（實測 PASS=11 FAIL=2 vs 原生
@@ -296,7 +333,7 @@ if ($PSCmdlet.ShouldProcess($TaskName, 'Register-ScheduledTask')) {
     -Principal $principal `
     -Description 'AutoClaude nightly 本地聚合驗證（見 AutoClaude/tools/run_local_nightly.ps1）' | Out-Null
   Set-MultipleInstancesStopExisting -Name $TaskName
-  Write-Output "✅ 已安裝並註冊排程任務：${TaskName}（每日 02:00 → ${NightlyPs1}）"
+  Write-Output "✅ 已安裝並註冊排程任務：${TaskName}（每日 ${NightlyAt} → ${NightlyPs1}）"
   Write-Output "   另含 StartWhenAvailable/WakeToRun 補跑保護（關機/睡眠錯過仍可補跑）"
   Write-Output "   LogonType=S4U（使用者未登入也會跑）；ExecutionTimeLimit=PT4H（凍住的實例不會吃掉隔日觸發）"
 }

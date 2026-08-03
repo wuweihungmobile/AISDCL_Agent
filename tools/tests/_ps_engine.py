@@ -30,7 +30,10 @@ pwsh 7）」——那是把撰寫當下那台機器寫成本檔的常數，在 R
 
 守門：`tools/tests/test_ps_engine_ssot.py`
   - 優先序（含「兩引擎都在」的合成情境——合成是為了讓判準在**任何**機器上都測得到
-    方向，不依賴該機器剛好裝了哪些引擎；R69 訂正：原註記寫死「本機無 pwsh 7」）
+    方向，不依賴該機器剛好裝了哪些引擎；R69 訂正：原註記把引擎可用性寫成了本機常數。
+    🔴 R73 補記（DEF-101-777）：該註記的訂正只涵蓋本檔，射程外的同型句子四輪後同時
+    變成假事實——鎖已擴至整個 `tools/` 樹，見 `test_ps_engine_ssot.py`
+    `TestNoStaleLocalEngineClaims`）
   - `native_ps51()` 不得 fallback
   - repo-wide 反增生掃描：`tools/tests/*.py` 不得再出現行內引擎挑選（附具名豁免＋stale
     自檢）。**判定走 `ast`**（R60 round-2 訂正）：只認真正的 `shutil.which("powershell"

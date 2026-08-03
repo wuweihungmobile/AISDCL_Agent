@@ -30,8 +30,17 @@ R71（Windows 真機輪）逐筆歸因 8 筆操作失誤，**5 筆源於同時�
 繞道
 ----
 確有必要在 Windows 跑 bash（例如執行一支 .sh）時，正確作法是**在 PowerShell 工具內**
-呼叫 `bash <script>`——那是「執行一支 .sh」而非「以 Bash 為載具」，同
+解析出 Git Bash 再呼叫——那是「執行一支 .sh」而非「以 Bash 為載具」，同
 tools/git-hooks/pre-push 既有作法。本守衛只攔 Bash **工具**，攔不到也不該攔那條路。
+
+🔴 R73 訂正（DEF-101-778）：本段原本教人寫裸 `bash <script>`，那是**壞掉的指引**——
+`Get-Command bash` 在 Windows 上解析到 system32 的 WSL 佔位版（R73 於 5.1 與 7.6.4
+兩個引擎各實測一次，兩邊都命中 system32 那支），且反斜線路徑會被吃掉（實測
+`/bin/bash: D:CursorProjectAISDCL_Agenttools....sh: No such file or directory`，
+注意分隔符全部消失）。同 DEF-101-617/618 的 WSL 佔位版誤解析同源。
+**執行規則的機械物不該教壞掉的作法**——它比純文件更權威，讀者會照它做。
+正解走 repo 既有 SSOT `tools/lib/Find-GitBash.ps1`（含 system32/WSL 逐段排除），
+不要寫死任何磁碟機路徑（本檔會被 commit，寫死對其他 checkout 一律是錯的）。
 """
 
 from __future__ import annotations
@@ -47,12 +56,20 @@ _GUIDANCE = """🔴 Windows 上已禁用 Bash 工具（根 CLAUDE.md〈Windows �
     （<repo 根> 現查：$env:CLAUDE_PROJECT_DIR，或 git rev-parse --show-toplevel。
       本檔刻意不寫死任何磁碟機路徑——它會被 commit 進 repo，對其他 checkout 一律是錯的指引，
       且 tools/tests/test_platform_neutral_paths.py 會逐行掃描並判紅）
-  · 跑 .sh     → bash <script>        （在 PowerShell 內呼叫，這不算以 Bash 為載具）
+  · 跑 .sh     → . '<repo 根>/tools/lib/Find-GitBash.ps1'; & (Find-GitBash) '<正斜線腳本路徑>'
+    （🔴 **不要**寫裸 `bash <script>`：`Get-Command bash` 會解析到 system32 的 WSL
+      佔位版，且反斜線路徑的分隔符會被整批吃掉——R73 雙引擎各實測一次。
+      Find-GitBash 是 repo 既有 SSOT，內含 system32/WSL 逐段排除）
   · 讀檔／搜尋／算行數 → 用 Read／Grep 工具，不經 shell
                         （編碼邊界雙向都會給出假數字，R71 兩次實證）
   · 切目錄     → Push-Location <絕對路徑>; …; Pop-Location（同一次呼叫內成對）
 
-PowerShell 5.1 沒有 && 與 ||：用 `;` 或 `A; if ($?) { B }`。
+避免 && 與 ||：用 `;` 或 `A; if ($?) { B }`。
+（🔴 R73 訂正：本行原本寫「PowerShell 5.1 沒有 && 與 ||」，那句話在互動載具升到
+  PowerShell 7 之後對讀者為假——7.x 支援這兩個運算子，於是這條建議看起來已過期而
+  被忽略。真正的理由與互動載具是哪一版無關：**生產路徑（schtasks 兩支 job 的 Action）
+  跑的是 powershell.exe＝5.1**，在那裡 `&&` 是 parse error。判準要綁生產引擎，
+  不要綁你手上這個 session 剛好是哪一版。）
 """
 
 
