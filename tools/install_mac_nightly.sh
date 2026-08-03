@@ -35,7 +35,8 @@
 #
 # --status 另有兩段 mac 專屬報表（皆 advisory）：
 #   ① 補跑保護能力表（R67-M37）：逐項印「已安裝 plist 的實際值 (expected 期望值)」，
-#      對齊 install_windows_nightly.ps1 Show-TaskDetail 的四項 (expected X) 體例。
+#      對齊 install_windows_nightly.ps1 Show-TaskDetail 的 (expected X) 體例（項數以
+#      兩側實際輸出為準，刻意不寫死——見 report_plist_capabilities 內同理由註解）。
 #      查的是**磁碟上已安裝的 plist**，不是本檔 heredoc——R15 之前安裝過的機器其
 #      plist 至今無 RunAtLoad，而 --status 過去只做 [ -f ] 存在性判斷，恆報綠。
 #   ② 覆蓋連續性（R67-F29）：心跳只看「最後一次距今幾天」，看不見中間漏跑，且任何
@@ -237,7 +238,10 @@ _cap_line() {
 
 report_plist_capabilities() {
   _cap_bad=0
-  echo "  ── 補跑保護能力（查已安裝 plist 內容；對齊 install_windows_nightly.ps1 -Status 四項）──"
+  # 🔴 刻意不寫死項數（R72）：此處原本寫死了一個數字，Windows 側 -Status 於 R69(S-5)
+  # 增列後即成假話，而跨平台對稱鎖 test_capability_row_count_reaches_windows_side_parity
+  # 只比對列數、不看這行散文，於是它過期兩輪無人察覺。項數一律以兩側實際輸出為準。
+  echo "  ── 補跑保護能力（查已安裝 plist 內容；對齊 install_windows_nightly.ps1 -Status 能力表）──"
   _cap_line "RunAtLoad" "$(_plist_raw RunAtLoad)" "true" \
     "；≙ Windows StartWhenAvailable：開機/載入補跑錯過的一輪（R15 前安裝的 plist 無此鍵）"
   _cap_line "StartCalendarInterval Hour:Minute" \
@@ -253,11 +257,27 @@ report_plist_capabilities() {
   esac
   _cap_line "StandardOutPath 位於 AutoClaude/logs" "${_out_ok}" "是" \
     "；路徑 ${_out}（R14 ARCH-GAP-3：導 /tmp 會被 macOS 週期清理）"
+  # R72：stderr 與 stdout 是各自獨立的 plist 鍵（見 render_plist 的 StandardErrorPath），
+  # 同一個 /tmp 清理風險兩者都有，但此前只檢查了 stdout 那一半——nightly 真正的失敗
+  # 訊息多半落在 stderr，缺這道檢查等於「最需要留存的那一半」零守門。
+  _err="$(_plist_raw StandardErrorPath)"
+  case "${_err}" in
+    "${LOG_DIR}"/*) _err_ok="是" ;;
+    *) _err_ok="否" ;;
+  esac
+  _cap_line "StandardErrorPath 位於 AutoClaude/logs" "${_err_ok}" "是" \
+    "；路徑 ${_err}（同 StandardOutPath：導 /tmp 會被 macOS 週期清理，且失敗訊息優先落此）"
   # 以下三項 Windows 有、launchd 結構上沒有對應鍵——誠實列出「無從檢查」而不是
   # 靜默略過，讓兩側能力表能逐列對照（不列＝讀者無從得知這裡是缺口還是遺漏）。
   echo "  －  WakeToRun 對等：launchd 原生（睡眠期間錯過的觸發於喚醒時合併補跑，man launchd.plist），無對應 plist 鍵可查"
   echo "  －  電池策略對等：LaunchAgent 無 DisallowStartIfOnBatteries／StopIfGoingOnBatteries 對應鍵（不受電池阻擋）"
   echo "  －  NextRunTime 對等：launchd 不提供 next-run 憑證——改以上方「覆蓋連續性」回填此缺口"
+  # R72：Windows -Status 有 LogonType S4U 一列，mac 側原本連「無對應鍵」的誠實列都沒有
+  # ⇒ 兩側能力表深度差 1。**這不是湊數**：LaunchAgent 綁 GUI session，使用者未登入時
+  # 整輪不跑，與 Windows S4U 是同一個真實限制，讀者有權在 --status 就看到它。
+  # 帶 `(expected …)` 是**計數面的硬要求**——對稱鎖只認這個形態，純「－ …無對應鍵可查」
+  # 不會被計入（R72 實測：CI 錯誤訊息叫人補的正是不會轉綠的那種寫法）。
+  echo "  －  LogonType 對等 = (無對應鍵)   (expected 無對應鍵)；LaunchAgent 綁 GUI session：使用者未登入時整輪不跑（≙ Windows S4U），launchd 無對應 plist 鍵可查"
   # 逐鍵檢查只認得「我們想得到的鍵」；整檔比對才抓得到其餘任何漂移（多餘鍵、
   # 路徑指向舊 checkout、Label 改名…）。renderer 產不出來時如實說跳過。
   _tmp_render="$(mktemp "${TMPDIR:-/tmp}/imn_status.XXXXXX")"

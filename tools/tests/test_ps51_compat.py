@@ -669,8 +669,8 @@ class TestPs51BehaviouralLockCannotSilentlyVanish(unittest.TestCase):
 
     @unittest.skipUnless(
         platform.system() == "Windows",
-        "本鎖問的是「Windows 上 5.1 行為鎖有沒有被 skip 掉」，非 Windows 平台不適用"
-        "（該平台上 skip 是正確語意，不是覆蓋損失）",
+        "[WINDOWS-NATIVE-ONLY] 本鎖問的是「Windows 上 5.1 行為鎖有沒有被 skip 掉」，"
+        "非 Windows 平台不適用（該平台上 skip 是正確語意，不是覆蓋損失）",
     )
     def test_native_ps51_predicate_holds_on_windows(self) -> None:
         self.assertTrue(

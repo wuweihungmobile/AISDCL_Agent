@@ -3437,6 +3437,120 @@ class TestCrossSiteLiteralLocks(unittest.TestCase):
                          "兩站點心跳門檻漂移——--status 與 dev_start 判定分歧")
 
 
+class _NightlyHeartbeatDimensionMixin:
+    """心跳「維度契約」的共用面：**純字串／純讀檔**，一行 subprocess 都沒有。
+
+    R72 為何要把這一段拆出來：下面那個行為等價鎖整組掛著
+    `@skipUnless(sys.platform == "darwin")`（理由正當——它真的要跑 bash 並依賴
+    BSD `stat -f %m`），但 `test_lock_covers_every_dimension_claimed_by_installer`
+    只做 `read_text` ＋ regex ＋ 純字串分類，**整支在任何平台都跑得起來**，卻因為
+    住在那個類別裡而在 Windows／Linux 閘門上一律 SKIPPED。那是「搭錯車」造成的
+    覆蓋損失，不是平台語意使然——同 `test_capability_row_count_reaches_windows_
+    side_parity`（R72 已搬至 `test_schedule_capability_parity.py`）的形態。
+
+    做成 mixin 而非讓 darwin 類別繼承新類別：後者會讓那支測試被 `discover` 收兩份
+    （父類一份、darwin 子類一份，且子類那份在非 mac 平台永遠 skip），憑空製造一支
+    永遠不跑的重複測試與一行沒有意義的 skip 明細。
+    """
+
+    _REPO = Path(dev_start.__file__).resolve().parents[1]
+    _INSTALLER = _REPO / "tools" / "install_mac_nightly.sh"
+
+    # 安裝器檔頭「與 dev_start 對齊的維度」機讀清單錨點（R67-E21）。
+    _DIMENSIONS_RE = re.compile(r"DIMENSIONS:\s*([^)）]+)[)）]")
+
+    def _installer_claimed_dimensions(self) -> list[str]:
+        m = self._DIMENSIONS_RE.search(self._INSTALLER.read_text(encoding="utf-8"))
+        self.assertIsNotNone(
+            m,
+            "install_mac_nightly.sh 檔頭的 `DIMENSIONS: ...` 機讀清單錨點消失——"
+            "該清單是「--status 心跳語意與 dev_start 對齊」這句散文契約的唯一機械"
+            "出口，移除它等於讓契約回到 R67-E21 之前的零訊號狀態",
+        )
+        return [d.strip() for d in m.group(1).split(",") if d.strip()]
+
+    def _classify(self, text: str) -> dict[str, object]:
+        """把一側的輸出化約成「逐維度判定」。
+
+        dict 的鍵集合＝本鎖實際比對面，並由 `_installer_claimed_dimensions()`
+        機械繫結到安裝器檔頭宣告，新增維度時漏改任一邊都會紅。
+        """
+        if "過期" in text:
+            state = "過期"
+        elif "新鮮" in text:
+            state = "新鮮"
+        elif "未偵測" in text:
+            state = "未偵測"
+        else:
+            self.fail(f"無法從輸出判斷心跳三態分類：{text!r}")
+        # FAIL 維度：兩側都只在 N>0 時才吐 `FAIL=N`，故「無命中」本身即為對稱語意。
+        m = re.search(r"FAIL=(\d+)", text)
+        # 年齡顯示維度（R68-M32）：判定早已對齊到秒（R67-M40），但「距今 N.N 天」
+        # 這個**顯示值**兩側是各自合成的——bash 走整數十分位截斷、python 走
+        # `{age_days:.1f}`，在 age_s=74304 分別印 0.8／0.9。上一輪的 8.5 天取樣點
+        # 恰好落在兩側一致處，於是這個確定性分歧在既有鎖下完全靜默：宣告面與比對
+        # 面雖已互鎖，兩者同時漏掉同一個維度時互鎖仍舊全綠。
+        m_age = re.search(r"距今 ([\d.]+) 天", text)
+        return {
+            "三態": state,
+            "FAIL 計數": int(m.group(1)) if m else None,
+            "年齡顯示": m_age.group(1) if m_age else None,
+        }
+
+
+class TestNightlyHeartbeatDimensionContract(_NightlyHeartbeatDimensionMixin, unittest.TestCase):
+    """R67-E21 的維度互鎖契約——**無平台條件**（R72 由下方 darwin-only 類別搬出）。"""
+
+    def test_lock_covers_every_dimension_claimed_by_installer(self) -> None:
+        """R67-E21：安裝器檔頭宣告的對齊維度，必須恰好等於本鎖實際比對的維度。
+
+        兩個方向都要紅：安裝器新宣告一個維度而本鎖沒比對（宣稱大於實作）→ 紅；
+        本鎖比對了一個安裝器沒宣告的維度（散文沒跟上）→ 也紅。這正是 R67-E21
+        的根因形狀——契約寫在散文、鎖只驗子集，兩者之間沒有互鎖。
+        """
+        claimed = self._installer_claimed_dimensions()
+        sample = self._classify("  ✅ 心跳：新鮮（距今 0.0 天）")
+        self.assertEqual(
+            sorted(claimed), sorted(sample.keys()),
+            f"install_mac_nightly.sh 檔頭宣告對齊維度 {claimed}，但本鎖實際比對的是 "
+            f"{sorted(sample.keys())}——兩者必須逐字相等。新增維度時三處要同時改："
+            "① dev_start._check_nightly_heartbeat()／② install_mac_nightly.sh "
+            "report_heartbeat()／③ 本檔 _classify() 與安裝器檔頭 DIMENSIONS 清單",
+        )
+
+    def test_installer_dimension_list_is_extracted_sane(self) -> None:
+        """鏡子自證①：`_DIMENSIONS_RE` 確實從安裝器檔頭抽到**逐項**清單。
+
+        沒有這一支，regex 若退化成「抓到一整團文字當單一維度」，上面那支的
+        `sorted(claimed) == sorted(sample.keys())` 會直接紅——但讀者會被導向
+        「生產碼漏了維度」這個錯誤結論。先證明抽取器本身沒壞，失敗訊息才可信
+        （同 `test_schedule_capability_parity.py` 兩支 `_extracted_sane` 的理由）。
+        """
+        claimed = self._installer_claimed_dimensions()
+        self.assertGreaterEqual(
+            len(claimed), 3,
+            f"DIMENSIONS 清單只抽到 {claimed}——regex 疑似把整段散文吞成一項",
+        )
+        for expected in ("三態", "FAIL 計數", "年齡顯示"):
+            self.assertIn(expected, claimed, f"DIMENSIONS 抽取遺漏 {expected!r}：{claimed}")
+
+    def test_classifier_reads_real_values_not_just_placeholders(self) -> None:
+        """鏡子自證②：`_classify()` 對一份**三維度俱全**的真實形狀輸出要讀出真值。
+
+        上面那支只餵「新鮮 0.0 天」——FAIL 維度在那份輸入上恆為 None，於是「分類器
+        其實讀不到 FAIL」與「這次剛好沒有 FAIL」在它眼中完全一樣（R68-M32 逐字記過
+        同型陷阱：兩側同時是 None 等於白守）。本支把三個維度各釘一個非平凡值。
+        """
+        got = self._classify(
+            "⚠️ 心跳：過期（距今 8.5 天）\n"
+            "===== nightly 彙總：PASS=4 FAIL=3 ====="
+        )
+        self.assertEqual(
+            got, {"三態": "過期", "FAIL 計數": 3, "年齡顯示": "8.5"},
+            f"分類器未能從真實形狀的輸出讀出三個維度的真值：{got}",
+        )
+
+
 @unittest.skipUnless(
     sys.platform == "darwin",
     "install_mac_nightly.sh 的 report_heartbeat() 依賴 BSD `stat -f %m`（見該檔"
@@ -3444,7 +3558,9 @@ class TestCrossSiteLiteralLocks(unittest.TestCase):
     "stat 的 -f 語意也完全不同）——本鎖只在 macOS runner（macos-compat-ci.yml）"
     "上有意義，非 Darwin 平台跳過而非假綠",
 )
-class TestNightlyHeartbeatCrossSiteBehavioralEquivalence(unittest.TestCase):
+class TestNightlyHeartbeatCrossSiteBehavioralEquivalence(
+    _NightlyHeartbeatDimensionMixin, unittest.TestCase
+):
     """R50 四方複審發現：dev_start.py `_check_nightly_heartbeat()` 與
     install_mac_nightly.sh `report_heartbeat()` 是各自獨立實作的心跳判斷。既有
     `TestCrossSiteLiteralLocks` 只用 regex 從兩側原始碼抽『字面常數』（門檻天數、
@@ -3469,27 +3585,15 @@ class TestNightlyHeartbeatCrossSiteBehavioralEquivalence(unittest.TestCase):
     那一點正是唯一會出事的點。
     """
 
-    _REPO = Path(dev_start.__file__).resolve().parents[1]
-    _INSTALLER = _REPO / "tools" / "install_mac_nightly.sh"
-
-    # 安裝器檔頭「與 dev_start 對齊的維度」機讀清單錨點（R67-E21）。
-    _DIMENSIONS_RE = re.compile(r"DIMENSIONS:\s*([^)）]+)[)）]")
+    # 維度契約面（`_REPO`／`_INSTALLER`／`_DIMENSIONS_RE`／`_installer_claimed_
+    # dimensions()`／`_classify()`）已於 R72 移入 `_NightlyHeartbeatDimensionMixin`
+    # ——那一段不需要 Darwin，留在這裡等於讓它跟著整組被 skip。
 
     # 兩側觀測「同一瞬間」時的精度差（R67-M40）：bash 的 `date +%s` 把該瞬間截斷成
     # 整數秒 N，python 的 `time.time()` 看到的是 N + 次秒。測試給 bash `IMN_NOW=N`、
     # 給 python `N + _SUBSECOND_SKEW`，模擬的就是這件事——若改成兩側都拿整數 N，
     # 恰好 8.0 天的邊界會因為次秒被抹掉而永遠一致，等於把要驗的東西驗掉了。
     _SUBSECOND_SKEW = 0.5
-
-    def _installer_claimed_dimensions(self) -> list[str]:
-        m = self._DIMENSIONS_RE.search(self._INSTALLER.read_text(encoding="utf-8"))
-        self.assertIsNotNone(
-            m,
-            "install_mac_nightly.sh 檔頭的 `DIMENSIONS: ...` 機讀清單錨點消失——"
-            "該清單是「--status 心跳語意與 dev_start 對齊」這句散文契約的唯一機械"
-            "出口，移除它等於讓契約回到 R67-E21 之前的零訊號狀態",
-        )
-        return [d.strip() for d in m.group(1).split(",") if d.strip()]
 
     def _bash_report_heartbeat_stdout(self, heartbeat_path: Path, now: int) -> str:
         """動態擷取 report_heartbeat() 函式本體，於獨立 bash 子行程執行（只餵它
@@ -3533,34 +3637,6 @@ class TestNightlyHeartbeatCrossSiteBehavioralEquivalence(unittest.TestCase):
             f"{proc.stderr}",
         )
         return proc.stdout
-
-    def _classify(self, text: str) -> dict[str, object]:
-        """把一側的輸出化約成「逐維度判定」。
-
-        dict 的鍵集合＝本鎖實際比對面，並由 `_installer_claimed_dimensions()`
-        機械繫結到安裝器檔頭宣告，新增維度時漏改任一邊都會紅。
-        """
-        if "過期" in text:
-            state = "過期"
-        elif "新鮮" in text:
-            state = "新鮮"
-        elif "未偵測" in text:
-            state = "未偵測"
-        else:
-            self.fail(f"無法從輸出判斷心跳三態分類：{text!r}")
-        # FAIL 維度：兩側都只在 N>0 時才吐 `FAIL=N`，故「無命中」本身即為對稱語意。
-        m = re.search(r"FAIL=(\d+)", text)
-        # 年齡顯示維度（R68-M32）：判定早已對齊到秒（R67-M40），但「距今 N.N 天」
-        # 這個**顯示值**兩側是各自合成的——bash 走整數十分位截斷、python 走
-        # `{age_days:.1f}`，在 age_s=74304 分別印 0.8／0.9。上一輪的 8.5 天取樣點
-        # 恰好落在兩側一致處，於是這個確定性分歧在既有鎖下完全靜默：宣告面與比對
-        # 面雖已互鎖，兩者同時漏掉同一個維度時互鎖仍舊全綠。
-        m_age = re.search(r"距今 ([\d.]+) 天", text)
-        return {
-            "三態": state,
-            "FAIL 計數": int(m.group(1)) if m else None,
-            "年齡顯示": m_age.group(1) if m_age else None,
-        }
 
     def _python_classify(self, root: Path, now: int) -> dict[str, object]:
         printed: list[str] = []
@@ -3622,23 +3698,6 @@ class TestNightlyHeartbeatCrossSiteBehavioralEquivalence(unittest.TestCase):
                 "若兩側門檻常數剛變更，先確認本測試 wrapper 注入的是 "
                 "dev_start._HEARTBEAT_MAX_AGE_DAYS 而非硬編值（R67-M38）",
             )
-
-    def test_lock_covers_every_dimension_claimed_by_installer(self) -> None:
-        """R67-E21：安裝器檔頭宣告的對齊維度，必須恰好等於本鎖實際比對的維度。
-
-        兩個方向都要紅：安裝器新宣告一個維度而本鎖沒比對（宣稱大於實作）→ 紅；
-        本鎖比對了一個安裝器沒宣告的維度（散文沒跟上）→ 也紅。這正是 R67-E21
-        的根因形狀——契約寫在散文、鎖只驗子集，兩者之間沒有互鎖。
-        """
-        claimed = self._installer_claimed_dimensions()
-        sample = self._classify("  ✅ 心跳：新鮮（距今 0.0 天）")
-        self.assertEqual(
-            sorted(claimed), sorted(sample.keys()),
-            f"install_mac_nightly.sh 檔頭宣告對齊維度 {claimed}，但本鎖實際比對的是 "
-            f"{sorted(sample.keys())}——兩者必須逐字相等。新增維度時三處要同時改："
-            "① dev_start._check_nightly_heartbeat()／② install_mac_nightly.sh "
-            "report_heartbeat()／③ 本檔 _classify() 與安裝器檔頭 DIMENSIONS 清單",
-        )
 
     def test_fresh_boundary_and_far_stale_ages_classify_identically(self) -> None:
         """跨代表性年齡（極新鮮／剛好未過期／**恰好 8.0 天整**／逾期 1 秒／遠期），
@@ -3743,6 +3802,13 @@ class TestNightlyHeartbeatCrossSiteBehavioralEquivalence(unittest.TestCase):
 
 # ── install_mac_nightly.sh `--status` 報表契約（R67-M37 ／ R67-F29）──────────────
 #
+# R72：跨平台對稱鎖的靜態抽取器住在姊妹鎖檔（那裡本來就是「mac ↔ Windows 安裝器
+# 語意能力對照」的家、且零平台條件）。此處 import 它是為了讓下方 darwin-only 的行為
+# 驗證能拿「執行期實況」對帳「靜態預測」——量測面本身必須被驗證。跨測試模組 import
+# 是本目錄既有慣例（見 test_ntfs_trailing_space_device_name.py 的
+# `import test_windows_forbidden_filename_parity as _parity`）。
+import test_schedule_capability_parity as _cap_parity  # noqa: E402
+
 # 為何長在 test_dev_start.py 而不是自成一支 test_install_mac_nightly.py：
 # `DEF-101-561③`／`DEF-101-565` 已裁定「R61 開輪起 tools/tests 禁止新增鎖檔、只准
 # 合併／刪除」，並由 test_adr_xplat001_c1c2_lock.TestGuardFileCountShrinkOnlyRatchet
@@ -3807,7 +3873,9 @@ class MacNightlyStatusTestCase(unittest.TestCase):
 
     _REPO = Path(dev_start.__file__).resolve().parents[1]
     _INSTALLER = _REPO / "tools" / "install_mac_nightly.sh"
-    _WIN_INSTALLER = _REPO / "tools" / "install_windows_nightly.ps1"
+    # R72：`_WIN_INSTALLER` 隨跨平台對稱鎖一併移出（唯一消費者是那支測試，現落在
+    # test_schedule_capability_parity.py 的 `_WIN_SCRIPT`）——留一個沒有消費者的路徑
+    # 常數，下一位讀者會以為本類別仍在跨平台比對。
     _LABEL = "com.autoclaude.nightly"
 
     def installer_source(self) -> str:
@@ -3972,26 +4040,39 @@ class TestMacNightlyPlistCapabilityTable(MacNightlyStatusTestCase):
                          "plist 缺席時不該印能力表（無產物可查）")
         self.assertEqual(proc.stderr, "", f"不得有 stderr 噪音：{proc.stderr!r}")
 
-    def test_capability_row_count_reaches_windows_side_parity(self) -> None:
-        """跨平台對稱鎖：mac 能力表的 `(expected X)` 列數 ≥ Windows 側的列數。
+    def test_status_prints_exactly_the_rows_static_extraction_predicts(self) -> None:
+        """行為驗證（darwin-only）＋ 靜態抽取器的**現實對帳單**。
 
-        缺陷的量化形態就是這個比值——修前 `grep -c expected` mac=1（且那 1 筆在
-        註解裡）／windows=4。用「≥ Windows 實際列數」而非硬編 4，Windows 側日後
-        新增保護設定時本鎖會自動要求 mac 跟上，不會靜默停在舊基準。
+        R72：跨平台對稱斷言（mac 列數 ≥ Windows 列數）已搬到
+        `test_schedule_capability_parity.py::TestScheduleCapabilityParity::
+        test_capability_row_count_reaches_windows_side_parity`——那是一道兩側都只讀
+        原始碼的靜態鎖，不需要 Darwin，卻因為住在本 darwin-only 類別裡而在
+        Windows／Linux 三道閘門上一律 SKIPPED。
+
+        留在這裡的是**只有 macOS 才做得到的那一半**，而且刻意做成對帳而非重複斷言：
+        真跑一次 `--status`，驗 ① 能力表整段印得出來、② 每一列 `(expected …)` 都是
+        ✅（健康 plist 不該有任何告警）、③ **執行期列數逐一等於**靜態抽取器對同一支
+        安裝器的預測。③ 才是關鍵——靜態抽取器是那道跨平台鎖的量測面，而量測面本身
+        必須被驗證（若它多算/少算，跨平台鎖會在 mac 以外的所有平台默默失準，
+        而沒有任何人有辦法發現）。
         """
-        win_rows = len(re.findall(
-            r"\(expected \w+\)",
-            self._WIN_INSTALLER.read_text(encoding="utf-8-sig")))
-        self.assertGreaterEqual(win_rows, 4, "Windows 側 (expected X) 列數抽取失準")
+        static_rows = _cap_parity.mac_capability_rows(self.installer_source())
         self.install_healthy_plist()
         self.write_heartbeat()
         out = self.run_status().stdout
-        mac_rows = len(re.findall(r"\(expected .+?\)", out))
-        self.assertGreaterEqual(
-            mac_rows, win_rows,
-            f"mac --status 只印 {mac_rows} 個 (expected …) 能力列，Windows -Status 有 "
-            f"{win_rows} 個——兩側 status 深度不對稱（R67-M37）。若某項 launchd 結構上"
-            f"無對應鍵，仍須以「－ …對等：…無對應鍵可查」列出，讓讀者能逐列對照：{out!r}",
+        self.assertIn("補跑保護能力", out, "能力表整段缺席")
+        runtime_rows = re.findall(r".*\(expected .+?\).*", out)
+        self.assertEqual(
+            len(runtime_rows), len(static_rows),
+            f"--status 執行期印出 {len(runtime_rows)} 個 (expected …) 能力列，但靜態抽取器"
+            f"（test_schedule_capability_parity.mac_capability_rows，跨平台對稱鎖的量測面）"
+            f"預測 {len(static_rows)} 個——量測面已與現實脫節，那道鎖在 mac 以外的平台"
+            f"正在用一個錯的數字比對。執行期抓到：{runtime_rows}；"
+            f"靜態抓到：{[r.label[:40] for r in static_rows]}",
+        )
+        self.assertTrue(
+            all("⚠️" not in row for row in runtime_rows),
+            f"健康 plist 的每一列能力都應為 ✅，實得：{runtime_rows}",
         )
 
 
@@ -6298,7 +6379,7 @@ def _production_resolve_body() -> str:
 
 @unittest.skipUnless(
     _ps_windows_with_engine(),
-    "[WINDOWS-ONLY] 需要 Windows 平台 ＋ PowerShell 引擎（語意③）：本鎖的負控靠**真實**"
+    "[WINDOWS-NATIVE-ONLY] 需要 Windows 平台 ＋ PowerShell 引擎（語意③）：本鎖的負控靠**真實**"
     "PATHEXT 語意——在沒有 PATHEXT 的平台上，負控會因為變數缺席而綠，而不是因為過濾"
     "生效才綠，等於量不到東西。跨平台備援＝TestResolveNativeExecutableShortCircuitOrder",
 )

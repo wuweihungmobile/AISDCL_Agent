@@ -23,6 +23,7 @@ from unittest import mock
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import run_root_unittests  # noqa: E402
+from lib import windows_skip_tags  # noqa: E402  # R72：skip 標籤家族的 SSOT（見該檔頭）
 
 
 class RatchetDriftWarningTest(unittest.TestCase):
@@ -338,7 +339,10 @@ class UntaggedWindowsLikeSkipsTest(unittest.TestCase):
     def test_reporter_prints_offender_and_the_fix_instruction(self) -> None:
         result = self._result_with_skips(("m.C.test_x", "PATHEXT 語意僅在 Windows 成立"))
         buf = io.StringIO()
-        with mock.patch.object(run_root_unittests.os, "name", "posix"):
+        # R72：`untagged_windows_like_skips` 已隨 skip 標籤家族搬進
+        # `tools/lib/windows_skip_tags.py`（見該檔頭），平台閘讀的是**該模組**的
+        # `os.name`；patch 目標跟著搬，否則這道對照組會靜默失去鑑別力。
+        with mock.patch.object(windows_skip_tags.os, "name", "posix"):
             with contextlib.redirect_stderr(buf):
                 offenders = run_root_unittests.report_untagged_windows_like_skips(result)
         out = buf.getvalue()
@@ -388,7 +392,10 @@ class UntaggedWindowsLikeSkipsTest(unittest.TestCase):
         (base / f"{mod}.py").write_text(
             template.replace("__REASON__", untagged), encoding="utf-8"
         )
-        with mock.patch.object(run_root_unittests.os, "name", "posix"):
+        # R72：`untagged_windows_like_skips` 已隨 skip 標籤家族搬進
+        # `tools/lib/windows_skip_tags.py`（見該檔頭），平台閘讀的是**該模組**的
+        # `os.name`；patch 目標跟著搬，否則這道對照組會靜默失去鑑別力。
+        with mock.patch.object(windows_skip_tags.os, "name", "posix"):
             with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
                 rc_untagged = run_root_unittests.run_with_floor(base, min_tests=2)
             sys.modules.pop(mod, None)
@@ -402,6 +409,274 @@ class UntaggedWindowsLikeSkipsTest(unittest.TestCase):
                 rc_tagged = run_root_unittests.run_with_floor(base, min_tests=2)
         self.assertEqual(rc_untagged, 1, "未標籤的 Windows-only skip 必須讓整輪 rc=1")
         self.assertEqual(rc_tagged, 0, "補上標籤後同一棵樹必須轉綠——否則本鎖無法被滿足")
+
+
+class StaticWindowsSkipTagScanTest(unittest.TestCase):
+    """R72：`[WINDOWS-NATIVE-ONLY]` 標籤完整性的**靜態、跨平台**鎖。
+
+    WHY（為何上面那組 runtime 鎖不夠——而且不是它寫錯）：
+    `untagged_windows_like_skips` 在 Windows 上整組早退（`if on_windows: return []`），
+    上面 `test_on_windows_the_check_is_silent` 正是在**要求**它這麼做，理由也成立
+    （Windows 上會 skip 的是 POSIX-only 測試，其 reason 幾乎必然提到 Windows，照掃
+    必然假紅）。但代價是結構性的：三道 Windows 側閘門（本機 pytest／pre-push／
+    windows-compat-ci）從此是**同一個瞎點的三份複本**——R71 在 Windows 落地的漏標，
+    三處都看不見，只能等別的平台跑到才發現，而那正好是 R43 DEF-101-348 那條
+    「Windows 專屬測試連續 5+ 輪全 APPROVE 卻從未在 Windows 跑過」的同款延遲。
+
+    本組鎖的是那個補位判準：不看「現在跑在哪個平台」，改看 skip 條件的**方向**
+    （`skipUnless(<Windows 述詞>)` vs `skipIf(<Windows 述詞>)`）。方向資訊寫在原始碼
+    裡，三個平台讀到的是同一份，所以這道掃描在哪裡跑都會說話。
+
+    落地前的鑑別力反證（Windows 11 實測）：不含方向判準的版本對同一棵樹報 **7 筆**
+    假紅，全數是 `skipIf(os.name == "nt")` 的 POSIX-only 測試；加上方向判準後歸零。
+    也就是說「方向」不是可有可無的精緻化，它是這道鎖能不能存在的前提。
+    """
+
+    _WIN_PRED = 'os.name == "nt"'
+
+    @staticmethod
+    def _real_tree_sources() -> dict[str, str]:
+        """真實掃描面。pattern 刻意取 `run_root_unittests._PATTERN`（＝閘門的 discovery
+        pattern）而非在測試裡另寫一份字面值——第二份字面值就是下一次漂移。"""
+        return windows_skip_tags.read_test_sources(
+            run_root_unittests._TESTS_DIR, run_root_unittests._PATTERN)
+
+    def _src(self, decorator: str, condition: str, reason: str) -> dict[str, str]:
+        """合成一份**最小可解析**的測試模組原始碼（不落磁碟、不執行）。"""
+        return {
+            "test_synthetic.py": textwrap.dedent(
+                f"""\
+                import os
+                import unittest
+
+
+                class Dummy(unittest.TestCase):
+                    @unittest.{decorator}({condition}, {reason!r})
+                    def test_x(self):
+                        pass
+                """
+            )
+        }
+
+    def test_skipunless_windows_predicate_without_tag_is_flagged(self) -> None:
+        offenders = windows_skip_tags.untagged_windows_skip_decorators(
+            self._src("skipUnless", self._WIN_PRED, "PATHEXT 解析語意僅在 Windows 重現")
+        )
+        self.assertEqual(len(offenders), 1, f"應抓到 1 筆漏標，實得：{offenders}")
+        label, hit, reason = offenders[0]
+        self.assertIn("test_synthetic.py", label)
+        self.assertIn("test_x", label, "必須點名到被裝飾者，否則讀者不知道要改哪一支")
+        self.assertIn(hit, windows_skip_tags._WINDOWS_LIKE_SKIP_HINTS)
+        self.assertIn("PATHEXT", reason, "必須連理由一起回報，否則無從判斷該不該補標籤")
+
+    def test_skipif_windows_predicate_is_not_flagged(self) -> None:
+        """🔴 本鎖的核心鑑別力：方向相反者**不得**被抓。
+
+        `skipIf(<Windows 述詞>)` ＝「Windows 上才 skip」＝ POSIX-only 測試，它的
+        reason 幾乎必然提到 Windows（例：「Windows 無 symlink 權限」），而
+        `[WINDOWS-NATIVE-ONLY]`（「只在原生 Windows 才有價值、這次沒跑」）對它是
+        錯的語意。少了這一條，本掃描對真實樹會噴 7 筆假紅（落地前實測值），沒有
+        任何人會容忍它留在閘門裡——假紅比沒有鎖更糟。
+        """
+        self.assertEqual(
+            windows_skip_tags.untagged_windows_skip_decorators(
+                self._src("skipIf", self._WIN_PRED,
+                          "Windows 無 symlink 權限，此測試僅 POSIX 有意義")
+            ),
+            [],
+        )
+
+    def test_tagged_reason_is_not_flagged(self) -> None:
+        """對照組：補上標籤後必須轉綠——否則這道鎖無法被滿足。"""
+        self.assertEqual(
+            windows_skip_tags.untagged_windows_skip_decorators(
+                self._src(
+                    "skipUnless", self._WIN_PRED,
+                    f"{windows_skip_tags.WINDOWS_NATIVE_SKIP_TAG} 具名 Mutex 是 Windows 語意",
+                )
+            ),
+            [],
+        )
+
+    def test_unrelated_predicate_is_not_flagged(self) -> None:
+        """不得誤殺：條件不是 Windows 述詞時，reason 提到 Windows 也不該被要求補標籤
+        （那是「缺工具」類 skip，不是平台語意）。"""
+        self.assertEqual(
+            windows_skip_tags.untagged_windows_skip_decorators(
+                self._src("skipUnless", "shutil.which('docker')",
+                          "需要 docker daemon（作者的 Windows 開發機上才有）")
+            ),
+            [],
+        )
+
+    def test_non_literal_reason_is_skipped_not_guessed(self) -> None:
+        """reason 取不到字面值時略過而**不猜**——判準邊界要可預期，不能靠推測。"""
+        self.assertEqual(
+            windows_skip_tags.skip_decorator_sites(
+                {"test_synthetic.py": textwrap.dedent(
+                    """\
+                    import os
+                    import unittest
+
+                    REASON = "僅在 Windows 重現"
+
+
+                    class Dummy(unittest.TestCase):
+                        @unittest.skipUnless(os.name == "nt", REASON)
+                        def test_x(self):
+                            pass
+                    """
+                )},
+            ),
+            [],
+        )
+
+    def test_hints_and_tag_are_shared_with_the_runtime_lock_not_copied(self) -> None:
+        """判準面必須與 runtime 那道鎖**共用同一份常數**，不是各抄一份。
+
+        兩層驗證：
+          ① 物件同一性——`run_root_unittests` 的名字必須就是 `windows_skip_tags` 的
+             那個物件（R72 抽模組後靠再匯出維持既有呼叫端；若哪天變成各持一份副本，
+             既有的 `mock.patch.dict(run_root_unittests._WINDOWS_SKIP_TAG_EXEMPT, …)`
+             會靜默失效——patch 到的是另一個 dict）。
+          ② 行為——換掉關鍵詞面後靜態掃描的判定必須跟著變；若它抄了一份字面關鍵詞，
+             這裡會紋風不動。兩份判準各自漂移，正是 R67-F11 當初要修的形狀的再版。
+        """
+        for name in ("WINDOWS_NATIVE_SKIP_TAG", "_WINDOWS_LIKE_SKIP_HINTS",
+                     "_WINDOWS_SKIP_TAG_EXEMPT"):
+            self.assertIs(
+                getattr(run_root_unittests, name), getattr(windows_skip_tags, name),
+                f"{name} 在兩個模組是不同物件 ⇒ 再匯出退化成複製，既有 mock.patch 會靜默失效",
+            )
+        src = self._src("skipUnless", self._WIN_PRED, "此測試依賴 zzsentinel 語意")
+        self.assertEqual(windows_skip_tags.untagged_windows_skip_decorators(src), [])
+        with mock.patch.object(
+            windows_skip_tags, "_WINDOWS_LIKE_SKIP_HINTS", ("zzsentinel",)
+        ):
+            self.assertEqual(
+                len(windows_skip_tags.untagged_windows_skip_decorators(src)), 1,
+                "換掉共用關鍵詞面後判定未改變 ⇒ 靜態掃描抄了一份自己的字面關鍵詞",
+            )
+
+    def test_unregistered_windows_like_predicate_is_flagged(self) -> None:
+        """fail-open 封口：述詞沒登記 ⇒ 方向判不出來 ⇒ 該站點靜默不報。
+
+        這是本掃描唯一的靜默失效路徑，必須自己有人看守。反向對照（已登記者不得被
+        點名）同時驗，否則上一條斷言可能只是「什麼都報」。
+        """
+        unknown = windows_skip_tags.unregistered_windows_like_predicates(
+            self._src("skipUnless", "_brand_new_windows_probe()", "需要 Windows")
+        )
+        self.assertEqual(len(unknown), 1, f"未登記述詞未被點名：{unknown}")
+        self.assertIn("_brand_new_windows_probe()", unknown[0][1])
+        self.assertEqual(
+            windows_skip_tags.unregistered_windows_like_predicates(
+                self._src("skipUnless", self._WIN_PRED, "需要 Windows")
+            ),
+            [],
+            "已登記的述詞不得被點名，否則本封口只是噪音",
+        )
+
+    def test_detector_is_pure_no_stdout(self) -> None:
+        """比照 `windows_native_skips`／`all_skips` 既有紀律：純函式不得有列印副作用。"""
+        src = self._src("skipUnless", self._WIN_PRED, "僅在 Windows 重現")
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf), contextlib.redirect_stderr(buf):
+            windows_skip_tags.untagged_windows_skip_decorators(src)
+            windows_skip_tags.unregistered_windows_like_predicates(src)
+            windows_skip_tags.skip_decorator_sites(src)
+        self.assertEqual(buf.getvalue(), "")
+
+    def test_scan_surface_is_not_silently_empty(self) -> None:
+        """掃描面自檢：掃到 0 份（或明顯縮水）必須紅而非靜默通過。
+
+        同 `test_schedule_capability_parity.TestUnittestDiscoverConformance` 的既有
+        慣例——一道鎖若能因為「什麼都沒掃到」而全綠，它就是 fail-open 本身。
+        """
+        sources = self._real_tree_sources()
+        self.assertGreaterEqual(
+            len(sources), 40,
+            f"tools/tests/ 只讀到 {len(sources)} 份 test_*.py——掃描面疑似靜默縮小",
+        )
+        self.assertGreater(
+            len(windows_skip_tags.skip_decorator_sites(sources)), 20,
+            "整棵樹抽不到足量 skip decorator 站點——AST 抽取器疑似與現行寫法脫節",
+        )
+
+    def test_real_tree_is_clean_on_every_platform(self) -> None:
+        """活體鎖：本 repo 現況不得有漏標，也不得有未登記述詞。
+
+        **無平台條件**正是本測試的全部價值：Windows 上跑得到的判定，就是 macOS／
+        Linux 上跑得到的同一個判定。
+        """
+        sources = self._real_tree_sources()
+        self.assertEqual(
+            windows_skip_tags.unregistered_windows_like_predicates(sources), [],
+            "有 skip 條件看起來像 Windows 述詞卻未登記於 _WINDOWS_SKIP_PREDICATE_MARKERS"
+            "——這些站點的方向判不出來，會靜默漏掉漏標",
+        )
+        self.assertEqual(
+            windows_skip_tags.untagged_windows_skip_decorators(sources), [],
+            f"有 skipUnless(<Windows 述詞>) 的 skip 未帶 "
+            f"{windows_skip_tags.WINDOWS_NATIVE_SKIP_TAG}",
+        )
+
+    def test_check_is_wired_into_main_and_reds_the_run(self) -> None:
+        """接線鎖 ＋ rc 鎖：單元測了但沒接線、或接線了但不改 rc，都是假綠
+        （Scan-H 判準⑤：「可重跑但沒有任何閘門看它的 rc」＝不可重跑）。
+
+        兩條並列的理由同 `test_check_is_wired_into_run_with_floor_and_reds_the_run`：
+        只 grep 原始碼擋不住「有呼叫但回傳值被丟掉」，只驗 rc 又指不出哪一段沒接。
+        """
+        src = inspect.getsource(run_root_unittests.main)
+        self.assertIn(
+            "report_untagged_windows_skip_decorators(_TESTS_DIR, _PATTERN)", src,
+            "main() 未呼叫靜態標籤掃描——掃描器存在但沒接線，等於沒有",
+        )
+        self.assertRegex(
+            src,
+            r"if report_untagged_windows_skip_decorators\(_TESTS_DIR, _PATTERN\):"
+            r"\s*\n\s*return 1",
+            "掃描結果必須真的參與 rc 收斂，否則印了紅字卻照樣 rc=0（fail-open）",
+        )
+
+    def test_reporter_reds_on_a_synthetic_offending_tree(self) -> None:
+        """端到端：造一棵含漏標的合成樹 ⇒ reporter 回非空並印出指路；補上標籤後轉綠。
+        **這就是常駐的缺陷注入對照組**（同上方 runtime 版的既有慣例）。"""
+        base = Path(tempfile.mkdtemp(prefix="rru_static_tag_"))
+        self.addCleanup(lambda: shutil.rmtree(base, ignore_errors=True))
+        body = self._src("skipUnless", self._WIN_PRED, "__REASON__")["test_synthetic.py"]
+        target = base / "test_synthetic.py"
+        untagged = "PATHEXT 解析語意僅在 Windows 重現"
+        target.write_text(body.replace("__REASON__", untagged), encoding="utf-8")
+        pattern = run_root_unittests._PATTERN
+        buf = io.StringIO()
+        with contextlib.redirect_stderr(buf):
+            problems = windows_skip_tags.report_untagged_windows_skip_decorators(base, pattern)
+        self.assertEqual(len(problems), 1, f"合成漏標未被抓到：{problems}")
+        out = buf.getvalue()
+        self.assertIn("test_synthetic.py", out, "必須逐支點名，否則讀者不知道要改哪一支")
+        self.assertIn(windows_skip_tags.WINDOWS_NATIVE_SKIP_TAG, out, "訊息須指出要補哪個標籤")
+        target.write_text(
+            body.replace("__REASON__",
+                         f"{windows_skip_tags.WINDOWS_NATIVE_SKIP_TAG} {untagged}"),
+            encoding="utf-8",
+        )
+        with contextlib.redirect_stderr(io.StringIO()):
+            self.assertEqual(
+                windows_skip_tags.report_untagged_windows_skip_decorators(base, pattern), [],
+                "補上標籤後同一棵樹必須轉綠——否則本鎖無法被滿足",
+            )
+
+    def test_empty_scan_surface_is_fail_closed(self) -> None:
+        """掃描面為空時 reporter 必須回報問題，而不是「沒發現違規」的綠燈。"""
+        base = Path(tempfile.mkdtemp(prefix="rru_static_empty_"))
+        self.addCleanup(lambda: shutil.rmtree(base, ignore_errors=True))
+        with contextlib.redirect_stderr(io.StringIO()):
+            problems = windows_skip_tags.report_untagged_windows_skip_decorators(
+                base, run_root_unittests._PATTERN)
+        self.assertEqual(len(problems), 1, "空掃描面必須 fail-closed")
+        self.assertIn("掃描面為空", problems[0])
 
 
 class DumpFailureDetailTest(unittest.TestCase):

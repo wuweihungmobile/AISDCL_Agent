@@ -445,17 +445,27 @@ class TestPreCommitHookDirSegmentCollision(unittest.TestCase):
         )
 
 
+def git_tracked() -> list[str]:
+    """本 repo git index 的全部路徑（posix 拼法、byte-exact）。
+
+    抽成模組級唯一實作：本檔有三處判準都以 index 為真相源（目錄段碰撞、路徑引用
+    大小寫、歸檔轉址解析），各自複製一份 `ls-files` 呼叫正是本 repo 反覆在治的
+    複本型缺陷——觀測同一對象的複本不產生鑑別力。
+    """
+    out = subprocess.run(
+        ["git", "-c", "core.quotepath=false", "ls-files", "-z"],
+        cwd=str(REPO_ROOT), capture_output=True, text=True,
+        encoding="utf-8", errors="replace", check=True, timeout=120,
+    ).stdout
+    return [p for p in out.split("\0") if p]
+
+
 class TestRepoIndexIsConverged(unittest.TestCase):
     """R67-A2 資料層：本 repo 的 index 現況必須維持收斂。"""
 
     @staticmethod
     def _tracked() -> list[str]:
-        out = subprocess.run(
-            ["git", "-c", "core.quotepath=false", "ls-files", "-z"],
-            cwd=str(REPO_ROOT), capture_output=True, text=True,
-            encoding="utf-8", errors="replace", check=True, timeout=120,
-        ).stdout
-        return [p for p in out.split("\0") if p]
+        return git_tracked()
 
     def test_index_has_no_directory_segment_collision(self) -> None:
         hits = _dir_seg_violations(self._tracked())
@@ -519,12 +529,7 @@ class TestRootDocsPathRefsAreCaseExact(unittest.TestCase):
 
     @classmethod
     def setUpClass(cls) -> None:
-        out = subprocess.run(
-            ["git", "-c", "core.quotepath=false", "ls-files", "-z"],
-            cwd=str(REPO_ROOT), capture_output=True, text=True,
-            encoding="utf-8", errors="replace", check=True, timeout=120,
-        ).stdout
-        cls.tracked = {p for p in out.split("\0") if p}
+        cls.tracked = set(git_tracked())
         cls.lower_index: dict[str, set[str]] = {}
         for p in cls.tracked:
             cls.lower_index.setdefault(p.lower(), set()).add(p)
@@ -572,6 +577,12 @@ class TestRootDocsPathRefsAreCaseExact(unittest.TestCase):
         """點名釘住 R67-A15 的 3 處引用——它們現在靠「目錄收斂為大寫」而成立。
 
         若未來有人把目錄改回小寫卻沒動這 3 行（或反之），本條會紅。
+
+        🔴 R72 訂正：清單裡的**站點路徑**原本寫死在上層（`docs/04_planning/
+        AutoSDD_improving_54.md`），而該檔本輪依歸檔慣例搬進了 `Archive/`
+        ⇒ `read_text()` 當場 FileNotFoundError。這正是本 repo 反覆在治的
+        「會過期的站點」：鎖以為自己在守引用，其實還多守了一個檔案位置。
+        改為經 `resolve_doc_ref()` 解析——清單指名的是**文件**，不是它今天住哪。
         """
         sites = [
             "docs/04_planning/AutoSDD_improving_54.md",
@@ -582,8 +593,177 @@ class TestRootDocsPathRefsAreCaseExact(unittest.TestCase):
         self.assertIn(target, self.tracked, f"{target} 不在 index —— 3 處引用全部變死連結")
         for rel in sites:
             with self.subTest(site=rel):
+                actual = resolve_doc_ref(rel, self.tracked)
+                self.assertIsNotNone(
+                    actual, f"引用站點 {rel} 在上層與 Archive/ 皆查無此檔"
+                )
+                assert actual is not None
+                text = (REPO_ROOT / actual).read_text(encoding="utf-8")
+                self.assertIn(target, text, f"{actual} 已不再引用 {target}（引用漂移）")
+
+
+# ------------------------------------- R72／DEF-101-770：迭代四件套歸檔的轉址解析
+# 慣例（兩支 `Archive/README.md`）：整合迭代（軌道①）的計畫 `AutoSDD_improving_<N>.md`
+# 與審計 `AutoSDD_ZeroTrust_Audit_<N>.md` 結案後搬進**同層** `Archive/`，只留最新一輪。
+#
+# 🔴 為何不「搬檔同時把引用一起改掉」（R72 逐案評比後的裁決）：
+# 斷鏈引用的持有者有兩類是**明文禁止就地改寫**的，而且兩類都非空——
+#   · `docs/06_quality/AutoSDD_Defect_Log_archive_*.md`
+#     ——`DEF-101-633` 明訂歷史歸檔帳本逐字保全、不得改寫其散文；
+#   · `AISDLC_SDD/AISDLC_SDD_v0.XX/` 凍結版 ——受 Copy-on-Evolve 禁止就地改寫。
+# 兩類各只要有一處，「同步更新引用」就在規則上不可能做完；而「留轉址 stub」會憑空
+# 長出上百個必須跟著搬檔維護的新檔案（＝新的會過期站點）。
+# 規模是**會漂移的量測值，刻意不寫進註解**（初稿寫死的四個數字同輪複查即全部對不上）——
+# dated snapshot 與複查方法見 `docs/04_planning/Archive/README.md`。
+#
+# 採用的是**可推導的轉址規則**而非列舉式映射表：`<dir>/<name>` → `<dir>/Archive/<name>`。
+# 表要有人維護、會 stale；規則不用維護，且下面三支鎖讓它「成不成立」變成機械事實。
+_ARCHIVABLE_DOC_RE = re.compile(
+    r"^docs/(?P<dir>04_planning|06_quality)/(?:Archive/)?"
+    r"(?P<name>AutoSDD_improving_\d+(?:_backlog)?\.md"
+    r"|AutoSDD_ZeroTrust_Audit_\d+\.md)$"
+)
+# 從 basename 取輪號（`_backlog` 這類尾綴屬同一輪）。
+_ROUND_NO_RE = re.compile(r"_(\d+)(?:_backlog)?\.md$")
+
+
+def archive_fallback(ref: str) -> str | None:
+    """把「上層」引用改寫成同層 `Archive/` 路徑；非可歸檔形態回 `None`。
+
+    刻意**只**對迭代四件套的兩種檔名生效：對任意 `docs/**.md` 都套 Archive 回退
+    等於發明一條「找不到就往 Archive 再找一次」的萬用規則，那會把真死連結
+    洗成看似可解析，鎖就沒有鑑別力了。
+    """
+    m = _ARCHIVABLE_DOC_RE.match(ref)
+    if m is None:
+        return None
+    return f"docs/{m.group('dir')}/Archive/{m.group('name')}"
+
+
+def resolve_doc_ref(ref: str, tracked: set[str]) -> str | None:
+    """解析一個 repo 相對 .md 路徑引用；上層與 `Archive/` 皆不中回 `None`。
+
+    真相源是 **git index**，不是 `Path.exists()`——理由同 `_wrong_case_refs()`。
+    """
+    if ref in tracked:
+        return ref
+    alt = archive_fallback(ref)
+    return alt if alt is not None and alt in tracked else None
+
+
+def _round_no(path: str) -> int | None:
+    m = _ROUND_NO_RE.search(path)
+    return int(m.group(1)) if m else None
+
+
+class TestArchivedIterationDocRefsResolve(unittest.TestCase):
+    """R72 資料層：歸檔後，根層 `docs/` 對四件套的引用必須仍解析得到。
+
+    掃描面與 `TestRootDocsPathRefsAreCaseExact` 同（根層 `docs/` 的 .md），
+    但問的是**另一個問題**：那道鎖三分法裡「上層與 lowercase 索引皆不中」的那一支
+    是**刻意放行**的（避免死連結偵測變噪音來源），於是搬檔造成的斷鏈對它完全隱形。
+    本類把「四件套」這個**檔名形態明確、轉址規則明確**的子集從那個縫裡撿回來守。
+    """
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        cls.tracked = set(git_tracked())
+        cls.root_docs = sorted(
+            p for p in cls.tracked if p.startswith("docs/") and p.endswith(".md")
+        )
+        cls.refs: list[tuple[str, str]] = []
+        for rel in cls.root_docs:
+            try:
                 text = (REPO_ROOT / rel).read_text(encoding="utf-8")
-                self.assertIn(target, text, f"{rel} 已不再引用 {target}（引用漂移）")
+            except (OSError, UnicodeDecodeError):
+                continue
+            for cand in sorted(set(_MD_PATH_REF_RE.findall(text))):
+                if _ARCHIVABLE_DOC_RE.match(cand):
+                    cls.refs.append((rel, cand))
+
+    def test_scan_surface_is_non_empty(self) -> None:
+        """掃描面塌成 0 時本鎖會靜默全綠——先釘住它真的有東西可掃。"""
+        self.assertGreater(len(self.root_docs), 50, "根層 docs/ 掃描面異常縮小")
+        self.assertGreater(len(self.refs), 40, "四件套路徑引用異常縮小")
+
+    def test_the_fallback_rule_is_actually_load_bearing(self) -> None:
+        """至少一處引用**非靠**轉址規則不可解析——否則本鎖是裝飾品。
+
+        鑑別力方向刻意是反的：若哪天有人把歷史引用全部就地改寫成 Archive 路徑
+        （＝違反 DEF-101-633 逐字保全），這條會紅並要求先重讀那筆裁決。
+        """
+        needs = [(d, c) for d, c in self.refs if c not in self.tracked]
+        self.assertTrue(
+            needs,
+            "沒有任何引用需要 Archive 轉址 —— 要嘛歸檔慣例已廢止、"
+            "要嘛歷史引用被就地改寫（DEF-101-633 逐字保全被違反）",
+        )
+
+    def test_every_archivable_reference_resolves(self) -> None:
+        """零白名單上線：實查全部可解析，故不需要任何存量豁免清單。"""
+        dead = [
+            f"  {d} -> {c}" for d, c in self.refs
+            if resolve_doc_ref(c, self.tracked) is None
+        ]
+        self.assertEqual(
+            dead, [],
+            "以下四件套引用在上層與 Archive/ 皆查無此檔（真死連結）：\n"
+            + "\n".join(dead)
+            + "\n合法出口：把檔案搬回慣例位置（上層或同層 Archive/），"
+            "**不要**改寫歷史文件的引用——歷史歸檔帳本逐字保全見 DEF-101-633",
+        )
+
+    def test_resolver_has_discriminating_power(self) -> None:
+        """鑑別力自證：四種輸入各自必須得到不同結果（合成 index，不依賴現況）。"""
+        tracked = {
+            "docs/04_planning/Archive/AutoSDD_improving_39.md",
+            "docs/04_planning/AutoSDD_improving_103.md",
+            "docs/06_quality/AutoSDD_Defect_Log_archive_02.md",
+        }
+        self.assertEqual(
+            resolve_doc_ref("docs/04_planning/AutoSDD_improving_39.md", tracked),
+            "docs/04_planning/Archive/AutoSDD_improving_39.md",
+            "已歸檔的四件套引用未經轉址規則解析到",
+        )
+        self.assertEqual(
+            resolve_doc_ref("docs/04_planning/AutoSDD_improving_103.md", tracked),
+            "docs/04_planning/AutoSDD_improving_103.md",
+            "仍在上層的引用不該被改寫成 Archive 路徑",
+        )
+        self.assertIsNone(
+            resolve_doc_ref("docs/04_planning/AutoSDD_improving_9999.md", tracked),
+            "指向不存在輪號的引用竟被判為可解析 —— 轉址規則太寬",
+        )
+        self.assertIsNone(
+            archive_fallback("docs/06_quality/AutoSDD_Defect_Log_archive_02.md"),
+            "轉址規則射程外溢到帳本家族 —— 那個家族不歸檔進 Archive/",
+        )
+
+    def test_archive_and_active_round_ranges_do_not_interleave(self) -> None:
+        """歸檔一律由最舊往下搬：已歸檔輪號必須全部小於仍在上層的輪號。
+
+        WHY：本區積壓 53 輪的成因之一是「歸檔沒有可機械檢查的完成定義」，
+        於是每次都只搬一部分、號段交錯，下一個人看不出還剩哪些該搬。
+        本條把「上層只留最新」變成 index 上的可驗事實。
+        """
+        for parent in ("docs/04_planning", "docs/06_quality"):
+            active, archived = [], []
+            for p in self.tracked:
+                m = _ARCHIVABLE_DOC_RE.match(p)
+                if m is None or not p.startswith(f"{parent}/"):
+                    continue
+                n = _round_no(p)
+                if n is None:
+                    continue
+                (archived if "/Archive/" in p else active).append(n)
+            with self.subTest(parent=parent):
+                if not active or not archived:
+                    continue
+                self.assertGreater(
+                    min(active), max(archived),
+                    f"{parent}：上層仍留著第 {min(active)} 輪，"
+                    f"但第 {max(archived)} 輪已歸檔 —— 號段交錯代表歸檔只做一半",
+                )
 
 
 if __name__ == "__main__":

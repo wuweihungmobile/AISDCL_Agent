@@ -24,7 +24,7 @@ monorepo 根目錄（`AISDCL_Agent/`，各機器 checkout 路徑不同）底下�
 子專案的 CLAUDE.md 是在「以自己為根」的前提下撰寫的：
 - 它們文件內的相對路徑（如 `docs/05_development/...`、`autoclaude/core/...`）是**相對於該子專案目錄**，不是相對於本 monorepo 根。
 - AISDLC_SDD 的 CLAUDE.md 把根稱為 `d:/CursorProject/AISDLC_SDD/`，實際對應到本 repo 的 `AISDLC_SDD/` 子目錄。
-- 跑指令前先 `cd` 到正確的子專案目錄。
+- 跑指令前要讓工作目錄落在正確的子專案。🔴 **但 Windows 側禁用裸 `cd`**（見下方〈鐵律二〉：PowerShell 工具的 cwd 會跨呼叫持續，R71 單輪因此失誤 3 次）——改用絕對路徑，或 `Push-Location <絕對路徑>` … `Pop-Location` 在**同一次呼叫內**成對。本節先前逐字寫「先 `cd`」，與鐵律二直接抵觸（R72 訂正）。
 
 ---
 
@@ -127,7 +127,7 @@ Get-ScheduledTask -TaskName '<名稱>' | Get-ScheduledTaskInfo |
 | 需求 | 載具 | 理由 |
 |------|------|------|
 | **一切 shell 指令** | **PowerShell 工具** | schtasks／生產環境跑的就是 `powershell.exe`（PS 5.1），載具對齊＝驗證條件對齊 |
-| `.sh` 腳本 | **PowerShell 內**呼叫 `bash <script>` | 這是「執行一支 .sh」不是「用 Bash 當載具」，兩者別混淆。同 `tools/git-hooks/pre-push` 既有作法（`env -u GIT_DIR -u GIT_WORK_TREE bash scripts/ci-gate.sh`） |
+| `.sh` 腳本 | **PowerShell 內**呼叫 **Git Bash 絕對路徑 ＋ 正斜線腳本路徑**：`& 'C:\Program Files\Git\bin\bash.exe' -n 'D:/…/x.sh'` | 這是「執行一支 .sh」不是「用 Bash 當載具」，兩者別混淆。同 `tools/git-hooks/pre-push` 既有作法（`env -u GIT_DIR -u GIT_WORK_TREE bash scripts/ci-gate.sh`）。<br>🔴 **R72 訂正：原文只寫裸 `bash <script>`，在本機是壞的**——`Get-Command bash` 解析到 `C:\WINDOWS\system32\bash.exe`（WSL 佔位／真 WSL），且反斜線路徑會被吃掉。實測逐字：`/bin/bash: D:CursorProjectAISDCL_Agenttoolsinstall_mac_nightly.sh: No such file or directory`（rc=127，注意 `D:` 後的分隔符全部消失）。改用 Git Bash 絕對路徑 ＋ 正斜線後 rc=0（控制組 `dev_start.sh` 同樣 rc=0）。**這與 DEF-101-617/618 的 WSL 佔位版誤解析同源**，本欄先前只治了 `shutil.which("bash")` 那一側 |
 | 讀檔／搜尋／算行數 | **Read／Grep 工具**，不經 shell | 🔴 **編碼邊界雙向都會出錯**，不是只有「Bash 讀 PS 輸出」那一向。R71 同輪兩次實證：① Git Bash `grep` 讀 CP950 的 PS 輸出 → 命中 0、誤判「沒有失敗行」；② PowerShell `Get-Content` 以 CP950 讀 UTF-8 的 `CLAUDE.md` → 回報「237 行／最長 962 codepoints」，python 實際「324 行／無任何行 >800」——**兩個數字都假，且假在會讓人誤以為破閘的方向**。要在 shell 內算就必須指名 `-Encoding utf8`，但更省事的是根本不用 shell |
 | ❌ **Bash 工具** | **禁用** | R71 實測兩次事故：① `windows_smoke_local.ps1` 被 MSYS 守衛擋下（rc=1，DEF-101-511 刻意設計）；② Git Bash 去 grep CP950 編碼的 PS 輸出 → 命中 0、**誤判「沒有失敗行」** |
 
@@ -239,6 +239,8 @@ bash scripts/ci-gate.sh              # 本機 CI 閘門：pytest(not chaos, 含 
 bash scripts/ci-gate.sh --full-tlc   # 另跑五軌 TLA+/TLC（需 Java + tla2tools.jar）
 
 # 直接跑 FSM runtime 測試（pytest.ini 位於 AISDLC_SDD_v0.01/，testpaths=tools/fsm_runtime/tests）：
+# 🔴 Windows 側禁裸 cd（鐵律二）：改 `Push-Location <絕對路徑>` … `Pop-Location` 同呼叫內成對。
+#    本區塊是 bash 形態示範；下行的 cd 僅在 mac/Linux 成立。R72 訂正：原文示範自己就是裸 cd。
 cd AISDLC_SDD_v0.01
 python -m pytest tools/fsm_runtime/tests/ -m "not chaos" -q   # PR 閘門（排除 chaos）
 python -m pytest tools/fsm_runtime/tests/ -m chaos            # nightly（chaos 標記測試全套；另有 chaos_runner 100 輪 sweep，bounded_ratio==1.0）

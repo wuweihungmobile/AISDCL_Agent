@@ -35,6 +35,7 @@ import re
 import unittest
 import warnings
 from pathlib import Path
+from typing import NamedTuple
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 _MAC_SCRIPT = _REPO_ROOT / "tools" / "install_mac_nightly.sh"
@@ -69,6 +70,131 @@ def _win_switch_names(src: str) -> set[str]:
     m = re.search(r"param\s*\((.*?)\n\)", src, re.DOTALL)
     assert m is not None, "windows 腳本找不到 param( ... ) 區塊——結構已變動"
     return set(re.findall(r"\[switch\]\$(\w+)", m.group(1)))
+
+
+# ── `(expected …)` 能力列的**兩側靜態**抽取（R72，原 darwin-only 鎖搬家至此）──────
+#
+# 搬家理由：原鎖 `test_dev_start.py::TestMacNightlyPlistCapabilityTable::
+# test_capability_row_count_reaches_windows_side_parity` 是「mac 列數 ≥ Windows 列數」
+# 的**跨平台對稱**斷言，卻繼承了類別層的 `@skipUnless(sys.platform == "darwin")`
+# ⇒ Windows／Linux 上一律 SKIPPED，三道非 mac 閘門全部看不到它。而兩側取值方式本來
+# 就不對稱：Windows 側是純讀檔 regex（不需平台），mac 側走 `--status` 真跑 bash
+# （需 Darwin）。可是 mac 那幾列在 `.sh` 裡**全是字面 echo**，靜態可列舉——也就是
+# 這道對稱鎖從來不需要 Darwin，只是搭錯了車。
+#
+# 本檔是搬家的落點而非新開檔：本檔本來就是「mac ↔ Windows 安裝器語意能力對照」的
+# 靜態鎖、零平台條件、且自帶鏡子自證慣例；`DEF-101-561③` 亦禁止新增鎖檔。
+#
+# 行為驗證那一半**留在原處**（darwin-only）：`--status` 真的印得出能力表、每列皆 ✅、
+# 且執行期列數與本檔靜態抽取的預測相等——那一條才是本抽取器的現實對帳單。
+class CapabilityRow(NamedTuple):
+    """一列「執行期會印出 `(expected …)`」的能力列（靜態預測，未執行任何腳本）。"""
+
+    kind: str      # "_cap_line"（helper 呼叫）／"echo"（直接輸出）／"case-group"
+    lineno: int    # 1-based
+    label: str     # 該列的原始碼片段（供鏡子自證與失敗訊息定位）
+    branches: int  # 互斥分支數；非 case 群恆為 1
+
+
+_EXPECTED_TOKEN = "(expected "
+# mac 側 helper：`_cap_line "名稱" "實際" "期望"` 每呼叫一次印一列。
+_MAC_HELPER_NAME = "_cap_line"
+_MAC_HELPER_DEF_RE = re.compile(rf"^{_MAC_HELPER_NAME}\(\)\s*\{{")
+_MAC_HELPER_CALL_RE = re.compile(rf"^\s*{_MAC_HELPER_NAME}\s")
+# `case … in` / `esac`：同一個 case 區塊內的分支**執行期只會走一條**，故整群算一列。
+_SH_CASE_OPEN_RE = re.compile(r"^\s*case\s+.*\sin\s*$")
+_SH_CASE_CLOSE_RE = re.compile(r"^\s*esac\b")
+
+
+def mac_capability_rows(src: str) -> list[CapabilityRow]:
+    """靜態列舉 `install_mac_nightly.sh --status` 執行期會印出的 `(expected …)` 列。
+
+    三個非做不可的排除／歸併（漏任何一個，數字都會假）：
+      ① **排除 helper 定義本體**：`_cap_line()` 內有兩行模板 echo（✅／⚠️ 各一），
+         它們是**印出來的樣板**不是能力列；照數會憑空 +2。
+      ② **排除註解行**：本檔頭與 `report_plist_capabilities` 的說明文字都逐字寫著
+         `(expected 期望值)`／`(expected X)`；照數會憑空 +3。
+      ③ **`case` 互斥分支歸併**：`case "${_last_exit}" in` 的三個分支各有一行
+         `(expected 0)`，執行期只會印**其中一行**；照數會憑空 +2。
+    """
+    emitters: list[tuple[str, int, str]] = []   # (kind, lineno, 原始碼片段)
+    case_of: dict[int, int] = {}                # emitter 行號 -> 所屬 case 區塊起始行號
+    in_helper_def = False
+    helper_def_seen = False
+    case_stack: list[int] = []
+    for lineno, line in enumerate(src.splitlines(), start=1):
+        stripped = line.strip()
+        if _MAC_HELPER_DEF_RE.match(line):
+            in_helper_def, helper_def_seen = True, True
+            continue
+        if in_helper_def:
+            if line.rstrip() == "}":      # ① helper 本體結束（收在第 0 欄）
+                in_helper_def = False
+            continue
+        if stripped.startswith("#"):      # ②
+            continue
+        if _SH_CASE_OPEN_RE.match(line):
+            case_stack.append(lineno)
+            continue
+        if _SH_CASE_CLOSE_RE.match(line) and case_stack:
+            case_stack.pop()
+            continue
+        is_helper_call = bool(_MAC_HELPER_CALL_RE.match(line))
+        if not is_helper_call and _EXPECTED_TOKEN not in line:
+            continue
+        emitters.append(("_cap_line" if is_helper_call else "echo", lineno, stripped))
+        if case_stack:
+            case_of[lineno] = case_stack[-1]
+    assert helper_def_seen, (
+        f"install_mac_nightly.sh 找不到 `{_MAC_HELPER_NAME}() {{` 定義——腳本結構已變動，"
+        "本抽取器的排除①失效（模板 echo 會被誤計成能力列），須同步更新"
+    )
+    rows: list[CapabilityRow] = []
+    seen_groups: set[int] = set()
+    for kind, lineno, snippet in emitters:
+        group = case_of.get(lineno)
+        if group is None:
+            rows.append(CapabilityRow(kind, lineno, snippet, 1))
+            continue
+        if group in seen_groups:          # ③ 同一 case 群的其餘分支併入首列
+            continue
+        seen_groups.add(group)
+        rows.append(CapabilityRow(
+            "case-group", group, snippet,
+            sum(1 for g in case_of.values() if g == group),
+        ))
+    assert rows, "install_mac_nightly.sh 一列 (expected …) 能力列都抽不到——結構已變動"
+    return rows
+
+
+# 🔴 R72 主控裁決：判準由 R67-M37 原鎖的 `\(expected \w+\)` **改寬**為 `[^)]+`。
+#
+# WHY：`\w+` 數的是**格式**不是**概念**——它只因為 `(expected S4U — Interactive 在使用者
+# 未登入時整輪不跑)` 帶了破折號長句就漏掉那一列，於是 Windows 真實 7 項能力被算成 6。
+# 後果是雙向的：① mac 側少一列 LogonType 對等物卻仍「對稱」通過；② 哪天有人把該列
+# 改寫成 `(expected S4U)`，win 會無聲從 6 跳到 7 而語意根本沒變、mac 當場破閘。
+# 這正是本 repo 反覆在治的「鎖住格式而非語意」形態。
+#
+# 改寬的安全性已實測（`probe_wide_regex.py`）：`install_windows_nightly.ps1` 全檔 7 處
+# 命中**全部是 `Write-Output` 輸出行**（:124/:125/:126/:127/:132/:133/:135），零註解、
+# 零散文誤收。配套 mac 側已補 LogonType 對等列（帶 `(expected 無對應鍵)`）⇒ 兩側皆 7。
+_WIN_EXPECTED_ROW_RE = re.compile(r"\(expected [^)]+\)")
+
+
+def win_capability_rows(src: str) -> list[CapabilityRow]:
+    """靜態列舉 `install_windows_nightly.ps1 -Status` 的 `(expected X)` 能力列。
+
+    Windows 側全是無分支的 `Write-Output` 直列，故只需排除註解行（`#` 開頭）——
+    與 mac 側同一條排除紀律，不因為「目前剛好沒有註解命中」就省略：省略等於把
+    正確性寄託在一個隨時會變的巧合上。
+    """
+    rows = [
+        CapabilityRow("echo", lineno, line.strip(), 1)
+        for lineno, line in enumerate(src.splitlines(), start=1)
+        if not line.strip().startswith("#") and _WIN_EXPECTED_ROW_RE.search(line)
+    ]
+    assert rows, "install_windows_nightly.ps1 一列 (expected X) 都抽不到——結構已變動"
+    return rows
 
 
 class TestScheduleCapabilityParity(unittest.TestCase):
@@ -133,6 +259,111 @@ class TestScheduleCapabilityParity(unittest.TestCase):
             "Register-ScheduledTask", win_src,
             "windows install 分支必須實際呼叫 Register-ScheduledTask（ensure 語意，"
             "非僅文件宣稱）",
+        )
+
+    # ── `(expected …)` 能力列對稱（R72 由 test_dev_start.py 搬入，見上方區塊註解）──
+
+    def test_mac_capability_rows_extracted_sane(self) -> None:
+        """鏡子自證：靜態抽取器看得懂 `install_mac_nightly.sh` 現行的形狀。
+
+        沒有這一支，抽取器抽錯時只會**默默少算**（例如 helper 改名 ⇒ 一列都抽不到、
+        或 case 歸併失效 ⇒ 憑空多兩列），而對稱斷言 `mac ≥ win` 在多算的方向上照樣
+        全綠——鎖住的就只是抽取器自己的誤差（同本檔既有兩支 `_extracted_sane` 的理由）。
+        """
+        rows = mac_capability_rows(_mac_source())
+        labels = " | ".join(r.label for r in rows)
+        for expected in ("RunAtLoad", "StartCalendarInterval", "ProgramArguments 載體可讀",
+                         "StandardOutPath", "StandardErrorPath"):
+            self.assertIn(
+                expected, labels,
+                f"mac 能力列抽取遺漏 {expected!r}——抽取器可能已與腳本結構脫節；抽到的是：{labels}",
+            )
+        groups = [r for r in rows if r.kind == "case-group"]
+        self.assertEqual(
+            len(groups), 1,
+            f"預期恰有 1 個 case 互斥群（`case \"${{_last_exit}}\" in` 的上次退出碼列），"
+            f"實得 {len(groups)}：{groups}。若安裝器新增/移除了 case 分支能力列，"
+            "請同步更新本鏡子測試",
+        )
+        self.assertEqual(
+            groups[0].branches, 3,
+            f"上次退出碼 case 群應有 3 個互斥分支（0／空或 -／其他），實得 "
+            f"{groups[0].branches}——歸併失效會讓 mac 側列數憑空膨脹",
+        )
+        # 排除①②的反向證明：模板 echo 與註解一列都不得混進來。
+        for row in rows:
+            self.assertNotIn(
+                "$1 = $2", row.label,
+                f"`_cap_line()` 定義內的模板 echo 被誤計成能力列（排除①失效）：{row}",
+            )
+            self.assertFalse(
+                row.label.startswith("#"),
+                f"註解行被誤計成能力列（排除②失效）：{row}",
+            )
+
+    def test_mac_extractor_excludes_template_comment_and_case_noise(self) -> None:
+        """鏡子自證（合成對照）：對一份**刻意塞滿三種雜訊**的最小 shell 原始碼，
+        抽取器必須只回報真正的 2 列（1 個 helper 呼叫 ＋ 1 個 case 群）。
+
+        WHY 要合成而不只驗真檔：真檔目前恰好只有一種雜訊組合，若哪天雜訊消失，
+        上一支測試的三條排除斷言就全部退化成恆真（沒有反例可證偽）。本支把三種
+        排除各自的鑑別力**永久釘住**，與真檔內容無關。
+        """
+        synthetic = (
+            "#!/usr/bin/env bash\n"
+            '# 說明文字：逐項印 "實際值 (expected 期望值)"    <- 註解，不得計入\n'
+            "_cap_line() {\n"
+            '  echo "  ✅ $1 = $2   (expected $3)"           # <- 模板，不得計入\n'
+            '  echo "  ⚠️ $1 = $2   (expected $3)"           # <- 模板，不得計入\n'
+            "}\n"
+            "report() {\n"
+            '  _cap_line "RealRow" "$(x)" "true"\n'
+            '  case "${v}" in\n'
+            '    0) echo "  ✅ a = 0   (expected 0)" ;;\n'
+            '    1) echo "  ⚠️ a = 1   (expected 0)" ;;\n'
+            "  esac\n"
+            "}\n"
+        )
+        rows = mac_capability_rows(synthetic)
+        self.assertEqual(
+            [(r.kind, r.branches) for r in rows], [("_cap_line", 1), ("case-group", 2)],
+            f"三種雜訊（註解／helper 模板／case 互斥分支）未被正確處理，抽到：{rows}",
+        )
+
+    def test_win_capability_rows_extracted_sane(self) -> None:
+        """鏡子自證：Windows 側抽取器看得懂 `Show-TaskDetail` 現行的形狀。"""
+        labels = " | ".join(r.label for r in win_capability_rows(_win_source()))
+        for expected in ("StartWhenAvailable", "WakeToRun", "DisallowStartIfOnBatteries",
+                         "StopIfGoingOnBatteries", "ExecutionTimeLimit",
+                         "MultipleInstancesPolicy"):
+            self.assertIn(
+                expected, labels,
+                f"windows 能力列抽取遺漏 {expected!r}——抽取器可能已與腳本結構脫節；"
+                f"抽到的是：{labels}",
+            )
+
+    def test_capability_row_count_reaches_windows_side_parity(self) -> None:
+        """跨平台對稱鎖：mac 能力表的 `(expected …)` 列數 ≥ Windows 側的列數。
+
+        R72：由 `test_dev_start.py::TestMacNightlyPlistCapabilityTable` 搬入，並把
+        mac 側由「真跑 `--status` 數輸出行」換成「靜態列舉原始碼」——原鎖繼承了
+        `@skipUnless(sys.platform == "darwin")`，這道**跨平台**斷言於是只在 mac
+        閘門上跑得到；而它從來不需要 Darwin，mac 那幾列在 `.sh` 裡全是字面 echo。
+        斷言主體與訊息刻意沿用原文（形態才是缺陷，內容不是）。
+
+        缺陷的量化形態就是這個比值——修前 `grep -c expected` mac=1（且那 1 筆在
+        註解裡）／windows=4。用「≥ Windows 實際列數」而非硬編數字，Windows 側日後
+        新增保護設定時本鎖會自動要求 mac 跟上，不會靜默停在舊基準。
+        """
+        win_rows = win_capability_rows(_win_source())
+        self.assertGreaterEqual(len(win_rows), 4, "Windows 側 (expected X) 列數抽取失準")
+        mac_rows = mac_capability_rows(_mac_source())
+        self.assertGreaterEqual(
+            len(mac_rows), len(win_rows),
+            f"mac --status 只印 {len(mac_rows)} 個 (expected …) 能力列，Windows -Status 有 "
+            f"{len(win_rows)} 個——兩側 status 深度不對稱（R67-M37）。若某項 launchd 結構上"
+            f"無對應鍵，仍須以「－ …對等：…無對應鍵可查」列出，讓讀者能逐列對照。"
+            f"mac 側抽到：{[r.label[:40] for r in mac_rows]}",
         )
 
     def test_capability_render_preview_present_on_both_platforms(self) -> None:

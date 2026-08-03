@@ -39,7 +39,6 @@ from __future__ import annotations
 
 import hashlib
 import importlib.util
-import os
 import re
 import sys
 import unittest
@@ -107,33 +106,28 @@ _THIRD_PARTY_PREREQS: tuple[tuple[str, str], ...] = (
     ("httpx", "httpx"),
 )
 
-# R43 Architect P1（DEF-101-348 方向①）：DEF-101-343~345 揪出 5 支 Windows 專屬
-# 回歸測試連續 5+ 輪「全 APPROVE」卻從未在原生 Windows 上真正跑過——`unittest`
-# 預設摘要（`skipped=N`）不區分「一般性 skip」與「這支測試的驗證價值僅在原生
-# Windows 上成立、這次環境不符沒跑」，是造成該漏洞連續多輪未被發現的根因之一。
-# 凡 skip 理由帶此標籤的測試，於摘要末另印一段醒目清單，供複審者一眼辨識。
-WINDOWS_NATIVE_SKIP_TAG = "[WINDOWS-NATIVE-ONLY]"
-
-# R67-F11：標籤**完整性**前瞻鎖的關鍵詞面。
-#
-# WHY（為何光有上面那個標籤還不夠）：`report_windows_native_skips` 只看得到「已經
-# 帶標籤」的 skip，對「該帶而沒帶」結構性盲目——它就是那個低報的來源本身。R67
-# 動工時實測：macOS 上 15 支 skip **全數**為 Windows 專屬，標題卻只印 10，低報 33%；
-# 其中 4 支由 R65（`01fd8c3`）、1 支由 R66（`8654975`）落地時漏標。R59 已在
-# `tools/tests/test_install_windows_nightly.py` 逐字記過同一形態（「因該 skip 未帶
-# `[WINDOWS-NATIVE-ONLY]` 標籤而被 run_root_unittests.py 的可見度機制漏掉」），
-# 兩輪後原地復發 ⇒ 這是持續性漏洞，不是一次性疏失，**必須有機械物**。
-#
-# 判準邊界（誠實劃界）：關鍵詞掃描是啟發式，抓的是「reason 講的明明是 Windows 語意
-# 卻沒帶標籤」。它抓不到「reason 完全沒提任何 Windows 字眼的 Windows-only skip」
-# （例：只寫「需要具名核心物件」）——那半邊仍是人審責任。
-_WINDOWS_LIKE_SKIP_HINTS = ("windows", "win32", "pathext", "bash.exe", "mutex", "ntfs")
-
-# 具名豁免：reason 命中關鍵詞但**確實不是** Windows 專屬的 skip（鍵＝test id，
-# 值＝理由）。現況為空集合。刻意保留這個空常數而非省略——例外必須逐支具名並附
-# 理由，不接受「整批略過」的通用開關（同 `_COLLECTION_EXEMPT` 既有慣例）。
-_WINDOWS_SKIP_TAG_EXEMPT: dict[str, str] = {}
-
+# `[WINDOWS-NATIVE-ONLY]` skip 標籤家族（R43／R67-F11／R72）已於 R72 整組抽進
+# `tools/lib/windows_skip_tags.py`（先例＝`tools/lib/ci_liveness.py`），WHY 見該檔頭：
+# 內聚（runtime 面與靜態面共用同一份標籤／關鍵詞／述詞常數，放一起才不會各自漂移）
+# ＋ 本檔受 `AutoClaude/tools/check_loc_budget.py` SPECIAL_FILES 棘輪管制且動工前恰好
+# 卡滿，該棘輪 override_reason 逐字指示「先刪死碼／抽共用模組」。
+# 此處**再匯出**而非改所有呼叫端：`run_root_unittests.WINDOWS_NATIVE_SKIP_TAG` 這類
+# 引用散落在測試與文件裡，改名的成本遠大於收益（Rule 3）；再匯出的是**同一個物件**，
+# 故既有 `mock.patch.dict(run_root_unittests._WINDOWS_SKIP_TAG_EXEMPT, …)` 照常生效。
+# 逐名 `noqa: F401`＝**再匯出**的意思（本檔不用它們，外部靠本檔的名字取用）；不寫的話
+# `ruff check tools/`（pre-push 快層第 ④ 段 ＋ root-infra-ci 第 16 道）會判 F401 並紅。
+from lib.windows_skip_tags import (  # noqa: E402, I001
+    WINDOWS_NATIVE_SKIP_TAG,  # noqa: F401
+    _WINDOWS_LIKE_SKIP_HINTS,  # noqa: F401
+    _WINDOWS_SKIP_TAG_EXEMPT,  # noqa: F401
+    all_skips,  # noqa: F401
+    report_all_skips,
+    report_untagged_windows_like_skips,
+    report_untagged_windows_skip_decorators,
+    report_windows_native_skips,
+    untagged_windows_like_skips,  # noqa: F401
+    windows_native_skips,  # noqa: F401
+)
 
 _PATTERN = "test_*.py"
 
@@ -552,122 +546,6 @@ def _write_failure_log(target: Path, body: str) -> Path:
     return target
 
 
-def windows_native_skips(result: unittest.TestResult) -> list[str]:
-    """純函式（無 I/O 副作用）：從 `result.skipped` 篩出帶 `[WINDOWS-NATIVE-ONLY]`
-    標籤者，回傳測試 id 清單。與 `report_windows_native_skips` 分離（R43 二審 SA
-    複查揪出：原本印出副作用寫在同一函式內，導致 `test_run_root_unittests.py::
-    ReportWindowsNativeSkipsTest` 自測時直接呼叫它，會把 fixture 用的假測試 id
-    也印到 `python tools/run_root_unittests.py` 的真實終端輸出裡，混淆複審者
-    對「本次是否真有 Windows 專屬測試未驗證」的判讀——測試應只斷言回傳值，不該
-    觸發生產端的列印副作用）。"""
-    tagged = [test for test, reason in result.skipped if WINDOWS_NATIVE_SKIP_TAG in reason]
-    return [test.id() for test in tagged]
-
-
-def report_windows_native_skips(result: unittest.TestResult) -> list[str]:
-    """在一般 `skipped=N` 摘要之外，另印出「僅原生 Windows 上才具驗證價值」
-    的 skip 清單（DEF-101-348 方向①）；回傳被標記的測試 id 清單。"""
-    tagged_ids = windows_native_skips(result)
-    if tagged_ids:
-        print(
-            f"⚠️  {len(tagged_ids)} 個 Windows 專屬測試本次「未在原生 Windows 環境驗證」"
-            f"（非一般 skip，見 DEF-101-348/R43）："
-        )
-        for test_id in tagged_ids:
-            print(f"   - {test_id}")
-    return tagged_ids
-
-
-def untagged_windows_like_skips(
-    result: unittest.TestResult, *, on_windows: bool | None = None
-) -> list[tuple[str, str, str]]:
-    """純函式（無 I/O 副作用）：reason 講的是 Windows 語意、卻沒帶標籤的 skip。
-
-    回傳 `(test_id, 命中的關鍵詞, reason)`。
-
-    **只在非 Windows 平台上說話**（`on_windows` 預設取 `os.name == "nt"`，參數化僅
-    供測試注入）。理由不是「Windows 上不想管」，而是標籤語意在那裡不適用：
-    `[WINDOWS-NATIVE-ONLY]` 說的是「這支測試只在原生 Windows 才有驗證價值，**這次
-    環境不符所以沒跑**」——在 Windows 上這類測試根本不會 skip。反過來，Windows 上
-    真正會 skip 的是 POSIX-only 測試，而它們的 reason 十之八九也會提到 "Windows"
-    （例如「Windows 無 symlink 權限」），照掃必然假紅。反方向的可見度由
-    `report_all_skips`（DEF-101-510，全列不分類）承接，不在本鎖射程內。
-    """
-    if on_windows is None:
-        on_windows = os.name == "nt"
-    if on_windows:
-        return []
-    out: list[tuple[str, str, str]] = []
-    for test_id, reason in all_skips(result):
-        if WINDOWS_NATIVE_SKIP_TAG in reason or test_id in _WINDOWS_SKIP_TAG_EXEMPT:
-            continue
-        lowered = reason.lower()
-        hit = next((kw for kw in _WINDOWS_LIKE_SKIP_HINTS if kw in lowered), None)
-        if hit is not None:
-            out.append((test_id, hit, reason))
-    return sorted(out)
-
-
-def report_untagged_windows_like_skips(result: unittest.TestResult) -> list[tuple[str, str, str]]:
-    """印出漏標籤者並回傳清單（非空 ⇒ 呼叫端須讓 rc 為 1，見 `run_with_floor`）。"""
-    offenders = untagged_windows_like_skips(result)
-    if offenders:
-        print(
-            f"❌ {len(offenders)} 支 skip 的理由講的是 Windows 專屬語意，卻沒帶 "
-            f"{WINDOWS_NATIVE_SKIP_TAG} 標籤——上面那行「N 個 Windows 專屬測試未在原生 "
-            f"Windows 環境驗證」會因此**低報**，複審者會低估本輪未被驗證的 Windows 面"
-            f"（R67-F11：實測曾低報 33%）：",
-            file=sys.stderr,
-        )
-        for test_id, hit, reason in offenders:
-            print(f"   - {test_id}（命中關鍵詞 {hit!r}）\n       理由：{reason}", file=sys.stderr)
-        print(
-            f"   修法：把 {WINDOWS_NATIVE_SKIP_TAG} 加在該 skip reason 的最前面。若它"
-            "**確實不是** Windows 專屬，請把 test id 具名加入 "
-            "run_root_unittests._WINDOWS_SKIP_TAG_EXEMPT 並註明理由。",
-            file=sys.stderr,
-        )
-    return offenders
-
-
-def all_skips(result: unittest.TestResult) -> list[tuple[str, str]]:
-    """純函式（無 I/O 副作用，比照 `windows_native_skips` 慣例）：回傳本次全部
-    skip 的 `(test_id, reason)`，含已被 `WINDOWS_NATIVE_SKIP_TAG` 標記者。"""
-    return [(test.id(), reason) for test, reason in result.skipped]
-
-
-def report_all_skips(result: unittest.TestResult) -> list[tuple[str, str]]:
-    """印出本次**全部** skip 的 id 與理由。
-
-    WHY（DEF-101-510，R59 於真 Windows 11 實機量到）：`report_windows_native_skips`
-    只照亮**一個方向**——「這支測試只在原生 Windows 才有驗證價值，這次環境不符」。
-    反方向（**因為我們正跑在 Windows，所以失去了某些覆蓋**）完全沒有標籤、沒有摘要、
-    沒有計數，只會併進 `unittest` 預設的 `skipped=N` 一個數字裡。R59 實測：本 runner
-    在 Windows 11 上 `skipped=11`，**11 支全部無標籤**，其中兩支是真正的覆蓋損失而非
-    平台語意使然——
-      ① `test_install_windows_nightly` 的語法解析因本機無 pwsh 7 而 skip（DEF-101-509，
-         一支 Windows 專屬腳本的語法閘門恰在 Windows 上不跑），
-      ② `test_env_changed_removes_cache_dir_and_symlink` 因無 symlink 權限
-         （`[WinError 1314]`，標準未提權 Windows 11 的預設狀態）而 skip。
-    這正是 DEF-101-343~345 那條「Windows 專屬測試連續 5+ 輪全 APPROVE 卻從未真的在
-    Windows 跑過」的缺陷類別，只是方向相反；R43 只補了一半。
-
-    設計取捨（刻意選最笨的做法）：不再發明第二套標籤分類（那需要為每一支 skip 判定
-    「by-design 平台語意」vs「環境降級」，判準本身就會成為新的漂移來源），改為**全部
-    印出來**，把分類交給讀取者。成本是每輪多 N 行輸出（實測 11 行），換到的是
-    「任何 skip 都不可能再隱形」——與紀律 #2「log 必須含完整統計，不信任預設 dump」
-    同一精神，也等於把 pytest `-rs` 早就免費提供的東西補進這個 unittest runner。
-    """
-    entries = all_skips(result)
-    if entries:
-        tagged = set(windows_native_skips(result))
-        print(f"ℹ️  本次 skip 明細（共 {len(entries)} 支；DEF-101-510 要求全列不得只印計數）：")
-        for test_id, reason in entries:
-            mark = "[已標籤]" if test_id in tagged else "[未標籤]"
-            print(f"   - {mark} {test_id}\n       理由：{reason}")
-    return entries
-
-
 # R67 round 2（SA-R67-02／SD-R67-01／QA-R67-01 三方交叉命中）：`MIN_TESTS` 的 WHY
 # 註記裡不得寫死「當場即可現查」的量測 token。三種形態各對應一次已發生的事故：
 #   `指紋 <12 碼 hex>`   ——每輪必變，寫下的那一刻起就無人能複現（本輪實際發生）；
@@ -746,6 +624,15 @@ def main() -> int:
     # 同理先於全套執行：相依不齊時收集數必然低於下限，讓它照跑只是把一個**環境
     # 問題**包裝成一則看起來像「測試消失」的紅字（R68：三支 CI 連續多輪的實況）。
     if report_missing_third_party_prereqs():
+        return 1
+    # R72：**不分平台**的靜態標籤掃描。刻意放在這裡而非 `run_with_floor` 內：
+    #   ① `run_with_floor` 會被單元測試餵各種合成樹呼叫，把 repo 專屬的掃描綁進去
+    #      會讓那些合成樹莫名其妙地受本判準管轄；
+    #   ② 這道掃描是純靜態、~0.1 秒，fail-fast 讓漏標不必等全套跑完才看到；
+    #   ③ 🔴 rc 必須真的被消費——「可重跑但沒有任何閘門看它的 rc」與「不可重跑」是
+    #      同一個病（Scan-H 判準⑤）。本行的 return 1 即是那個消費者，經由
+    #      `python tools/run_root_unittests.py` 傳到 pre-push root-infra leg 與三支 CI。
+    if report_untagged_windows_skip_decorators(_TESTS_DIR, _PATTERN):
         return 1
     return run_with_floor(_TESTS_DIR, MIN_TESTS)
 

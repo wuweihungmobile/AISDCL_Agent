@@ -1907,7 +1907,11 @@ def read_wide() -> list[tuple[str, str]]:
     """SC-9 掃描面的 `(相對路徑, 內容)`。枚舉全部走既有 SSOT／glob，不手列檔名。"""
     paths = [_ADR2, _ADR3, _ADR, _SCAN_DIMS]
     paths += list(ADL._GOVERNANCE_DOCS) + list(ADL._family_files())
-    paths += sorted((_REPO / "docs" / "04_planning").glob("AutoSDD_improving_*.md"))
+    # 🔴 `rglob` 而非 `glob`（R72）：迭代計畫結案後會搬進 `04_planning/Archive/`，
+    # 用非遞迴 glob 等於「一歸檔就退出 SC-9 掃描面」——那正是 DEF-101-757 的形狀
+    # （同一句錯話換個位置就整個逸出），只是這次搬走它的是歸檔慣例而不是作者。
+    # 落地前實測：把 Archive/ 併入後 SC-9 problems 仍為 0，故納入不引入存量紅。
+    paths += sorted((_REPO / "docs" / "04_planning").rglob("AutoSDD_improving_*.md"))
     for rel in _SC9_DIRS:
         paths += sorted((_REPO / rel).rglob("*.py"))
     out: dict[str, str] = {}
