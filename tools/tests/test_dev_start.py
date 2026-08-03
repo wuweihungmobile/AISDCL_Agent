@@ -13,6 +13,7 @@ import ast
 import ctypes
 import datetime
 import inspect
+import io
 import json
 import os
 import re
@@ -24,6 +25,7 @@ import sys
 import tempfile
 import threading
 import time
+import tokenize
 import unittest
 from pathlib import Path
 from unittest import mock
@@ -35,9 +37,14 @@ import dev_start  # noqa: E402
 # 物件（不重新 import，避免測試 patch 到與生產路徑不同的副本）。
 ci_liveness = dev_start.ci_liveness
 from _platform_helpers import (  # noqa: E402
+    PS_UTF8_PRELUDE,
+    create_symlink_or_skip,
+    ps_utf8_command,
+    usable_bash_for_fixture,
+)
+from _platform_helpers import (  # noqa: E402
     copy_functional_interpreter as _copy_functional_interpreter,
 )
-from _platform_helpers import create_symlink_or_skip, usable_bash_for_fixture  # noqa: E402
 
 
 def _rmtree_force(path: Path) -> None:
@@ -4446,6 +4453,16 @@ class TestStaleScheduleTracks(unittest.TestCase):
     （查不到 ≠ 壞掉），並釘住「dormant（被註解掉的 cron）不得算進期望軌」。
     """
 
+    # 🔴 R71：本類別 4 支既有鎖新增 `_latest_attempt` 的 mock（`return_value=None`
+    # ＝「該軸無訊號」）。這**不是**放寬既有斷言——每一條原斷言逐字保留，加 mock 的
+    # 唯一理由是 `stale_schedule_tracks` 現在多問一個軸（D-2 最近一次嘗試），不 mock
+    # 的話這些純邏輯單元測試會真的去打 `gh`（慢、要網路、離線即漂移）。`None` 是刻意
+    # 選的值：它讓新軸完全不發言 ⇒ 原本的訊息文字與回傳形狀維持不變，原斷言的鑑別力
+    # 一分未減。新軸自己的鑑別力由本類別下方新增的雙向鎖負責。
+    #: `_latest_attempt` 的「該軸無訊號」mock 參數（`return_value=None`）。
+    #: ⚠️ 不可寫成 `dict(new=None)`——那會把函式本身換成 `None`，呼叫時 TypeError。
+    _NO_ATTEMPT = dict(return_value=None)
+
     def _root_with_cron(self, cron_lines: str) -> Path:
         root = Path(tempfile.mkdtemp())
         self.addCleanup(shutil.rmtree, root, True)
@@ -4460,7 +4477,8 @@ class TestStaleScheduleTracks(unittest.TestCase):
         root = self._root_with_cron('    - cron: "12 6 * * *"\n')
         now = datetime.datetime(2026, 8, 2, tzinfo=datetime.UTC)
         with mock.patch.object(ci_liveness, "_latest_success_run",
-                               return_value="2026-07-20T01:00:00Z"):
+                               return_value="2026-07-20T01:00:00Z"), \
+             mock.patch.object(ci_liveness, "_latest_attempt", **self._NO_ATTEMPT):
             stale = ci_liveness.stale_schedule_tracks(root, time.monotonic() + 25, now=now)
         self.assertEqual(len(stale), 1, f"日頻軌 13 天沒成功卻零訊號：{stale}")
         self.assertIn("demo.yml", stale[0])
@@ -4470,16 +4488,26 @@ class TestStaleScheduleTracks(unittest.TestCase):
         root = self._root_with_cron('    - cron: "12 6 * * *"\n')
         now = datetime.datetime(2026, 8, 2, tzinfo=datetime.UTC)
         with mock.patch.object(ci_liveness, "_latest_success_run",
-                               return_value="2026-08-01T01:00:00Z"):
+                               return_value="2026-08-01T01:00:00Z"), \
+             mock.patch.object(ci_liveness, "_latest_attempt", **self._NO_ATTEMPT):
             self.assertEqual(
                 ci_liveness.stale_schedule_tracks(root, time.monotonic() + 25, now=now), [])
 
     def test_weekly_track_tolerates_one_skip(self) -> None:
-        """週頻軌 13 天前成功仍在容忍內（7 × 2 = 14）——STALE_PERIOD_FACTOR 的存在理由。"""
+        """週頻軌 13 天前成功仍在容忍內（7 × 2 = 14）——STALE_PERIOD_FACTOR 的存在理由。
+
+        🔴 R71 保留本鎖的理由（D-5 的處置說明）：診斷把 `STALE_PERIOD_FACTOR=2.0`
+        列為缺陷（週頻門檻 14 天 ⇒ 結構上不可能「當場發現」）。本輪**刻意不動這個
+        常數**——它擋的是「單次 runner 排隊／額度抖動」造成的假紅，拿掉就回到天天
+        狼來了、然後被忽略（那正是 DEF-101-703 的死法）。改以**新增判準**取得當場
+        訊號：`_schedule_axis_note` 讓「cron 觸發後 run 轉紅」立刻出聲，不進容忍窗
+        （見 `test_failed_scheduled_attempt_inside_tolerance_window_still_speaks`）。
+        """
         root = self._root_with_cron('    - cron: "12 6 * * 1"\n')
         now = datetime.datetime(2026, 8, 2, tzinfo=datetime.UTC)
         with mock.patch.object(ci_liveness, "_latest_success_run",
-                               return_value="2026-07-20T01:00:00Z"):
+                               return_value="2026-07-20T01:00:00Z"), \
+             mock.patch.object(ci_liveness, "_latest_attempt", **self._NO_ATTEMPT):
             self.assertEqual(
                 ci_liveness.stale_schedule_tracks(root, time.monotonic() + 25, now=now), [])
 
@@ -4493,7 +4521,8 @@ class TestStaleScheduleTracks(unittest.TestCase):
     def test_never_succeeded_is_reported(self) -> None:
         """查得到但一次都沒成功過（空字串）⇒ 必須報——這正是 nightly-full 的實況。"""
         root = self._root_with_cron('    - cron: "12 6 * * *"\n')
-        with mock.patch.object(ci_liveness, "_latest_success_run", return_value=""):
+        with mock.patch.object(ci_liveness, "_latest_success_run", return_value=""), \
+             mock.patch.object(ci_liveness, "_latest_attempt", **self._NO_ATTEMPT):
             stale = ci_liveness.stale_schedule_tracks(root, time.monotonic() + 25)
         self.assertEqual(len(stale), 1)
         self.assertIn("查無任何成功", stale[0])
@@ -4504,19 +4533,253 @@ class TestStaleScheduleTracks(unittest.TestCase):
         self.assertEqual(ci_liveness.scheduled_workflow_periods(root), {})
 
     def test_deadline_stops_the_scan(self) -> None:
-        """預算耗盡即中止：advisory 哨兵寧可少報，不可拖住開工流程。"""
+        """預算耗盡即中止：advisory 哨兵寧可少報，不可拖住開工流程。
+
+        🔴 R71 訂正（本鎖唯一被改動的既有斷言，理由寫在這裡）：原本第二條是
+        `assertEqual(stale_schedule_tracks(...), [])`——也就是**把「沒查」與「查過、
+        很健康」編碼成同一個回傳值**。那正是 E-2 的病：`_scan_order` 前身是固定
+        字典序 ⇒ 預算截斷永遠砍掉排最後的 `windows-compat-ci.yml`（實測本 repo 7 軌
+        排序後它就是最後一名），而呼叫端收到 `[]`、印「排程軌正常」。
+        本鎖的**意圖**（不得對 probe 發動查詢、不得拖住開工）以 `assert_not_called()`
+        逐字保留並仍是主判準；改掉的只是「截斷必須靜默」這個附帶結果——靜默本身是
+        缺陷，不是要保護的行為。
+        """
         root = self._root_with_cron('    - cron: "12 6 * * *"\n')
         with mock.patch.object(ci_liveness, "_latest_success_run",
                                return_value="") as probe:
-            self.assertEqual(
-                ci_liveness.stale_schedule_tracks(root, time.monotonic() - 1), [])
+            out = ci_liveness.stale_schedule_tracks(root, time.monotonic() - 1)
         probe.assert_not_called()
+        self.assertEqual(len(out), 1, f"截斷必須留下自白，實得：{out}")
+        self.assertIn("掃描未完成", out[0])
+        self.assertIn("demo.yml", out[0],
+                      "截斷自白未指名被丟掉的是哪一軌——不指名等於沒說")
 
     def test_multiple_crons_take_the_strictest(self) -> None:
         """同檔多條 cron 取最短週期（最嚴），否則週頻那條會稀釋掉日頻的判準。"""
         root = self._root_with_cron(
             '    - cron: "12 6 * * 1"\n    - cron: "12 7 * * *"\n')
         self.assertEqual(ci_liveness.scheduled_workflow_periods(root), {"demo.yml": 1.0})
+
+    # ── R71 D-2：三種狀態必須可分辨（(a) 沒觸發／(b) 觸發但紅／(c) 還沒輪到）──
+
+    def test_stale_message_says_cron_never_fired(self) -> None:
+        """(a) 排程軌零 run ⇒ 訊息必須說「沒觸發」，不能只說「最近成功於 N 天前」。
+
+        Rule 9：兩者的處置完全不同——「沒觸發」要去看帳務／workflow state，
+        「觸發但紅」要去看那次 run。壓成同一句話的哨兵沒有診斷價值。
+        """
+        root = self._root_with_cron('    - cron: "12 6 * * *"\n')
+        now = datetime.datetime(2026, 8, 2, tzinfo=datetime.UTC)
+        with mock.patch.object(ci_liveness, "_latest_success_run",
+                               return_value="2026-07-20T01:00:00Z"), \
+             mock.patch.object(ci_liveness, "_latest_attempt", return_value={}):
+            stale = ci_liveness.stale_schedule_tracks(root, time.monotonic() + 25, now=now)
+        self.assertEqual(len(stale), 1)
+        self.assertIn("從未產生過任何 run", stale[0], f"實得：{stale[0]!r}")
+
+    def test_stale_message_carries_the_failing_attempt(self) -> None:
+        """(b) 排程軌有觸發但紅 ⇒ 訊息必須帶結論與 url，人才點得進去看。"""
+        root = self._root_with_cron('    - cron: "12 6 * * *"\n')
+        now = datetime.datetime(2026, 8, 2, tzinfo=datetime.UTC)
+        att = {"conclusion": "failure", "createdAt": "2026-07-27T10:06:01Z",
+               "updatedAt": "2026-07-27T10:06:08Z",
+               "url": "https://example.invalid/runs/30256689776"}
+        with mock.patch.object(ci_liveness, "_latest_success_run",
+                               return_value="2026-07-14T08:20:59Z"), \
+             mock.patch.object(ci_liveness, "_latest_attempt", return_value=att):
+            stale = ci_liveness.stale_schedule_tracks(root, time.monotonic() + 25, now=now)
+        self.assertEqual(len(stale), 1)
+        self.assertIn("failure", stale[0])
+        self.assertIn("2026-07-27T10:06:01Z", stale[0])
+        self.assertIn("30256689776", stale[0],
+                      "訊息沒有 run url——「去看那次 run」是唯一處置，卻要人自己去翻")
+
+    # ── R71 D-3：一次手動補跑不得買到整個容忍窗的靜默 ──────────────────────
+
+    def test_dispatch_only_freshness_is_reported_even_though_verdict_is_fresh(self) -> None:
+        """正向注入（今天正在真實發生的形態）：dispatch 成功「治好」了警告，
+        但 schedule 軌本身最近一次觸發是紅的、且晚於那次成功 ⇒ 必須出聲。
+
+        實證來源（2026-08-03 唯讀 gh 實查）：`aisdlc-sdd-arch-fitness.yml` 的
+        schedule 軌最後成功 2026-07-14、最近一次 schedule run 2026-07-27 failure，
+        而 08-02 14:24 有一次 workflow_dispatch 成功 ⇒ 主判準看起來新鮮。
+
+        🔴 為何不是把 `workflow_dispatch` 移出 `_LIVENESS_EVENTS`：那樣做會讓
+        DEF-101-703 的死鎖復發（哨兵印的處置指令產生的正是 dispatch run，不算數
+        就永遠解不開）。dispatch 繼續計入主判準，遮蔽事實另立一句話。
+        """
+        root = self._root_with_cron('    - cron: "37 2 * * 1"\n')
+        now = datetime.datetime(2026, 8, 3, tzinfo=datetime.UTC)
+        att = {"conclusion": "failure", "createdAt": "2026-07-27T06:05:35Z",
+               "updatedAt": "2026-07-27T06:05:44Z",
+               "url": "https://example.invalid/runs/30241622957"}
+        with mock.patch.object(ci_liveness, "_latest_success_run",
+                               return_value="2026-08-02T14:24:23Z"), \
+             mock.patch.object(ci_liveness, "_latest_attempt", return_value=att):
+            out = ci_liveness.stale_schedule_tracks(root, time.monotonic() + 25, now=now)
+        self.assertEqual(len(out), 1, f"dispatch 遮蔽未被偵測：{out}")
+        self.assertIn("不是排程軌掙來的", out[0])
+        self.assertIn("workflow_dispatch", out[0])
+
+    def test_healthy_schedule_attempt_stays_silent(self) -> None:
+        """還原（負控）：排程軌自己最近一次就是綠的 ⇒ 一個字都不准說。
+
+        缺這支，上一支可以靠「永遠報遮蔽」通過＝零鑑別力。
+        """
+        root = self._root_with_cron('    - cron: "37 2 * * 1"\n')
+        now = datetime.datetime(2026, 8, 3, tzinfo=datetime.UTC)
+        att = {"conclusion": "success", "createdAt": "2026-08-03T02:37:00Z",
+               "updatedAt": "2026-08-03T02:44:00Z", "url": "https://example.invalid/r/1"}
+        with mock.patch.object(ci_liveness, "_latest_success_run",
+                               return_value="2026-08-03T02:44:00Z"), \
+             mock.patch.object(ci_liveness, "_latest_attempt", return_value=att):
+            self.assertEqual(
+                ci_liveness.stale_schedule_tracks(root, time.monotonic() + 25, now=now), [])
+
+    def test_failed_scheduled_attempt_inside_tolerance_window_still_speaks(self) -> None:
+        """D-5 的處置：週頻軌只過了 2 天（遠在 14 天容忍窗內），但最近一次排程觸發
+        已經紅了 ⇒ **當場**出聲，不等 14 天。這就是「不動 STALE_PERIOD_FACTOR 也能
+        當場發現」的機制；動常數會讓容忍一次跳過的設計失效，兩者不可混為一談。
+        """
+        root = self._root_with_cron('    - cron: "12 6 * * 1"\n')
+        now = datetime.datetime(2026, 8, 3, tzinfo=datetime.UTC)
+        att = {"conclusion": "failure", "createdAt": "2026-08-03T06:12:00Z",
+               "updatedAt": "2026-08-03T06:12:09Z", "url": ""}
+        with mock.patch.object(ci_liveness, "_latest_success_run",
+                               return_value="2026-08-01T06:20:00Z"), \
+             mock.patch.object(ci_liveness, "_latest_attempt", return_value=att):
+            out = ci_liveness.stale_schedule_tracks(root, time.monotonic() + 25, now=now)
+        self.assertEqual(len(out), 1, f"容忍窗內的排程紅燈被吃掉了：{out}")
+        self.assertIn("failure", out[0])
+
+    # ── R71 E-1：同檔多條 cron 驅動不相交 job 集合 ⇒ run 層結論不構成證據 ──
+
+    def _root_with_workflow(self, body: str) -> Path:
+        root = Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, root, True)
+        wf = root / ".github" / "workflows"
+        wf.mkdir(parents=True)
+        (wf / "demo.yml").write_text(body, encoding="utf-8")
+        return root
+
+    _DISJOINT_WF = (
+        "on:\n  schedule:\n"
+        '    - cron: "7 2 * * 1"\n'
+        '    - cron: "7 3 * * 1"\n'
+        "jobs:\n"
+        "  pg-e2e-nightly:\n"
+        "    name: PG E2E - nightly\n"
+        "    if: (github.event_name == 'schedule' && github.event.schedule == '7 2 * * 1')\n"
+        "  mutation-tg:\n"
+        "    name: Mutation Test - TokenGuardPlugin\n"
+        "    if: (github.event_name == 'schedule' && github.event.schedule == '7 3 * * 1')\n"
+    )
+
+    def test_disjoint_cron_job_sets_are_reported_as_a_blind_spot(self) -> None:
+        """正向注入：兩條 cron 各驅動不同 job ⇒ 必須自白 run 層判定不構成證據。
+
+        WHY（Rule 9）：這不是風格問題。實證＝`autoclaude-ci.yml` 被採計為「最後
+        一次成功」的 run 29308467958 裡 PG E2E／Perf Baseline 是 `skipped`、
+        `steps=0`，而同日 `7 2` 那次（29306905483）Perf Baseline 是 `failure`、
+        `steps=11`＝真實測試紅。run 層綠遮蔽了另一條軌的死亡。
+        """
+        root = self._root_with_workflow(self._DISJOINT_WF)
+        blind = ci_liveness.multi_cron_blind_spot(root, "demo.yml")
+        self.assertIsNotNone(blind, "不相交 job 集合未被判為盲區")
+        self.assertIn("7 2 * * 1", blind)
+        self.assertIn("PG E2E - nightly", blind)
+        self.assertIn("Mutation Test - TokenGuardPlugin", blind)
+
+    def test_same_job_set_across_crons_is_not_a_blind_spot(self) -> None:
+        """還原（負控）：兩條 cron 驅動**同一組** job ⇒ run 層結論仍代表得了它們，
+        不得誤報。缺這支，上一支可以靠「凡多 cron 必報」通過＝零鑑別力。
+
+        🔴 本 fixture 的形狀是被鑑別力驗證逼出來的：第一版把 `7 3` 那個 job 的 `if:`
+        改成 `7 2`，結果 `cron_job_map` 只剩**一個**鍵 ⇒ 走的是 `len(mapping) < 2`
+        的早退，**根本沒碰到**要守的「同一組 job」判準。實測：把 `all(s == sets[0])`
+        整條刪掉，那一版仍然全綠＝死鎖。現在兩個 job 的 `if:` 都同時列出兩條 cron，
+        因此 map 有兩個鍵、兩鍵的 job 集合相同——這才真的走到那條判準上。
+        """
+        both = ("    if: (github.event_name == 'schedule' && "
+                "(github.event.schedule == '7 2 * * 1' || "
+                "github.event.schedule == '7 3 * * 1'))\n")
+        body = re.sub(r"^    if: .*\n", both, self._DISJOINT_WF, flags=re.MULTILINE)
+        root = self._root_with_workflow(body)
+        mapping = ci_liveness.cron_job_map(root / ".github" / "workflows" / "demo.yml")
+        self.assertEqual(
+            len(mapping), 2,
+            f"正控：fixture 必須產生兩個 cron 鍵，否則本鎖會走早退路徑而空轉：{mapping}")
+        self.assertEqual(len(set(map(frozenset, mapping.values()))), 1,
+                         f"正控：兩鍵的 job 集合必須相同：{mapping}")
+        self.assertIsNone(ci_liveness.multi_cron_blind_spot(root, "demo.yml"))
+
+    def test_single_cron_workflow_is_never_a_blind_spot(self) -> None:
+        """還原：單條 cron 的檔 run 粒度＝軌粒度，永遠不該報（零噪音下限）。
+
+        刻意用「有 job、且 job 真的綁在那條 cron 上」的檔，不是空殼——空殼的
+        `cron_job_map` 回 `{}`，那樣把靜態抽取式打壞本鎖仍會綠（實測），零鑑別力。
+
+        誠實劃界：本鎖擋得住的是「同一組 job 判準被拿掉」（拿掉後單鍵也會被報成
+        盲區 ⇒ 本鎖轉紅，實測 rc=1）。它**擋不住**把 `len(mapping) < 2` 那道早退
+        改寬——因為 `len==1` 時下面的同集合判準本來就會回 None，兩者是有意的冗餘，
+        不是兩道獨立防線。不在此宣稱守得住它。
+        """
+        root = self._root_with_workflow(
+            "on:\n  schedule:\n"
+            '    - cron: "12 6 * * 1"\n'
+            "jobs:\n"
+            "  only-track:\n"
+            "    name: Windows Nightly Full\n"
+            "    if: (github.event_name == 'schedule' && "
+            "github.event.schedule == '12 6 * * 1')\n")
+        self.assertEqual(
+            list(ci_liveness.cron_job_map(
+                root / ".github" / "workflows" / "demo.yml")),
+            ["12 6 * * 1"], "正控：靜態解析必須真的抓到那條 cron，否則下一句恆真")
+        self.assertIsNone(ci_liveness.multi_cron_blind_spot(root, "demo.yml"))
+
+    def test_real_repo_autoclaude_ci_is_the_live_specimen(self) -> None:
+        """活體覆蓋：本 repo 現況必須真的命中一支（否則上面三支全是實驗室綠燈）。
+
+        釘的是「偵測器對真實 repo 有輸出」，不是「恰好是這一支」——若哪天
+        autoclaude-ci.yml 被拆成兩支 workflow（就是本盲區的治本解），本鎖會紅並
+        提醒把這個活體標的改成當時真正存在的多 cron 檔，或刪掉本鎖。
+        """
+        repo = Path(__file__).resolve().parents[2]
+        blind = ci_liveness.multi_cron_blind_spot(repo, "autoclaude-ci.yml")
+        self.assertIsNotNone(
+            blind,
+            "autoclaude-ci.yml 不再是多 cron／不相交 job 形態——盲區可能已被治本"
+            "（拆檔），請改指到當時真正存在的多 cron 檔或刪掉本鎖")
+        self.assertIn("7 2 * * 1", blind)
+
+    # ── R71 E-2：掃描預算截斷不得有固定順序偏差 ────────────────────────────
+
+    def test_scan_order_rotates_so_the_last_track_is_not_always_the_same(self) -> None:
+        """正向：連續日期的起掃點必須不同 ⇒ 沒有哪一軌永遠排最後、被永遠丟掉。
+
+        修前形狀＝`sorted()` 直接迭代；實測本 repo 7 支含 cron workflow 排序後
+        最後一名正是 `windows-compat-ci.yml`（DEF-101-703 的主角），也就是哨兵的
+        系統性盲區恰好落在它最該看的那一支。
+        """
+        periods = {f"{c}.yml": 1.0 for c in "abcde"}
+        firsts = {
+            ci_liveness._scan_order(
+                periods, datetime.datetime(2026, 8, d, tzinfo=datetime.UTC))[0][0]
+            for d in range(1, 6)
+        }
+        self.assertEqual(
+            len(firsts), 5,
+            f"5 天內起掃點只出現 {len(firsts)} 種 ⇒ 輪轉沒生效，截斷仍有固定偏差：{firsts}")
+
+    def test_scan_order_is_a_permutation_not_a_filter(self) -> None:
+        """還原：輪轉不得吃掉任何一軌（否則「修好偏差」變成「直接漏軌」）。"""
+        periods = {f"{c}.yml": 1.0 for c in "abcde"}
+        for d in range(1, 8):
+            order = ci_liveness._scan_order(
+                periods, datetime.datetime(2026, 8, d, tzinfo=datetime.UTC))
+            self.assertEqual(sorted(order), sorted(periods.items()),
+                             f"第 {d} 天的掃描順序不是原集合的排列：{order}")
 
 
 class TestLivenessEventFilter(unittest.TestCase):
@@ -4588,12 +4851,348 @@ class TestLivenessEventFilter(unittest.TestCase):
 
 
 from _ps_engine import any_engine_available as _ps_any_engine  # noqa: E402
+from _ps_engine import native_ps51 as _ps_native_51  # noqa: E402
 from _ps_engine import production_engine as _ps_production_engine  # noqa: E402
+from _ps_engine import windows_with_engine as _ps_windows_with_engine  # noqa: E402
+from _ps_engine import windows_with_native_ps51 as _ps_windows_native_51  # noqa: E402
+
+# R71 併檔：`sdd_latest` 供下方 DEF-101-762 那組鎖動態解析 LATEST 版 SDD 根。
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "lib"))
+import sdd_latest  # noqa: E402
 
 _GUARD_SH_PATH = Path(__file__).resolve().parents[1] / "lib" / "windowsapps_guard.sh"
 _GUARD_PS1_PATH = Path(__file__).resolve().parents[1] / "lib" / "WindowsAppsGuard.ps1"
 _DEV_START_SH_PATH = Path(__file__).resolve().parents[1] / "dev_start.sh"
 _DEV_START_PS1_PATH = Path(__file__).resolve().parents[1] / "dev_start.ps1"
+
+# 🔴 R71（DEF-101-760）：PowerShell 寫進 pipe 的位元組編碼＝**console output code
+# page**，不是 UTF-8。Windows 繁中預設 CP=950（Big5），而本檔對 PowerShell 輸出的
+# 斷言含 `❌`（U+274C）——CP950 表示不了它，Windows PowerShell 5.1 會靜默換成 `?`，
+# Python 端再以 `encoding="utf-8"` 解碼整段中文即成亂碼 ⇒ `assertIn("❌", …)` 必紅。
+#
+# 為什麼以前沒紅（這才是本缺陷真正的形狀）：`chcp` 是**整個 console 共用**的行程外
+# 狀態，全套跑時只要有任何一支較早的測試把它換成 65001，後面所有 PowerShell 呼叫
+# 就跟著沾光。於是這支斷言「全套跑綠、單獨跑紅」——綠燈不是它自己掙來的，是別的
+# 測試檔的副作用借給它的。這種綠沒有鑑別力，也會隨測試順序漂移。
+#
+# 修法＝每次呼叫都自帶 UTF-8 前置，把 `[Console]::OutputEncoding`（引擎寫進 pipe 的
+# 編碼）釘成 UTF-8。前置字串本身住在 `_platform_helpers.PS_UTF8_PRELUDE`。
+#
+# 🔴 R71 訂正（原本這裡是第 4 份、且寫法與其他三處不同）：本檔首版自寫
+# `$OutputEncoding = [Console]::OutputEncoding = New-Object System.Text.UTF8Encoding
+# $false`，理由寫「`[System.Text.Encoding]::UTF8` 帶 preamble 會吐 BOM」。該理由經
+# Windows 11 真機 / PS 5.1 單變因實測**證偽**（三種寫法輸出逐位元組相同、BOM 全程
+# 未出現；`$OutputEncoding` 只管餵原生子行程 stdin，本檔無此用法）——完整量測貼在
+# `PS_UTF8_PRELUDE` 上方註解。故本檔改用既有多數寫法的共用常數，不留第 4 種。
+
+# 掃描面：三棵測試樹（比照 test_bash_probe_spec_contract._TEST_TREES——只守自己那棵
+# 等於留著下一次分歧）。AISDLC_SDD 側也有兩處行內複本，故不可只掃 tools/tests。
+_PS_UTF8_TEST_TREES = ("tools/tests", "AISDLC_SDD/scripts/tests", "AutoClaude/tests")
+_PS_UTF8_SCAN_ROOT = Path(__file__).resolve().parents[2]
+# 「這串字在講主控台輸出編碼」的辨識鍵，與「唯一合法寫法」的完整賦值式。兩者都從
+# SSOT 常數**推導**、不另寫字面值——寫成字面值會讓本檔自己被下面的掃描器命中。
+_PS_UTF8_MARKER = PS_UTF8_PRELUDE.split("=", 1)[0]
+_PS_UTF8_STATEMENT = PS_UTF8_PRELUDE.strip().rstrip(";")
+# 「這串字在指涉 UTF-8」的辨識鍵；`65001` 是以碼頁號指涉的形態，漏掉它會讓
+# `…OutputEncoding = [Text.Encoding]::GetEncoding(65001)` 這種分歧寫法從判準下溜走。
+# WHY 判準要多這一關見 `_names_utf8()`。
+_PS_UTF8_ALIASES = ("utf8", "utf-8", "65001")
+# 豁免標記（拼法與語意比照 `test_ps51_compat` 的 `# ps7-ok: <WHY>`）：WHY 必填、留空
+# 無豁免力；標記所在行若沒壓下任何命中即 stale ⇒ fail-loud，防豁免清單腐化。
+# 只認**真正的註解 token**（走 `tokenize`），字串裡出現同形字樣不算——否則本行自己
+# 就會被當成一個到處亂罩的豁免。
+_PS_UTF8_OK_MARKER = "ps-utf8-quote-ok:"
+# 0 命中假綠防線（同 test_bash_probe_spec_contract._MIN_SCANNED_FILES 慣例）。
+# R71 實測命中 5 處（1 個 SSOT 常數 + 4 個尚未收斂的行內複本）。刻意設 3 而非 5：
+# 本數字的用途只是「掃描面塌成 0 ⇒ 斷言恆真」的防線，不是站點數快照——之後把行內
+# 複本收斂掉會讓命中數合法下降，不該因此翻紅。
+_MIN_PS_UTF8_SITES = 3
+
+# unittest 斷言／skip 述詞的「訊息參數」位置；其餘形態一律靠 `msg=`／`reason=` 具名。
+# 表只列本 repo 實際用到的斷言，**漏列往嚴格方向倒**——沒列到的斷言，其訊息會被當成
+# 一份複本而翻紅（吵、當場看得見），不會讓真複本靜默溜過去（漏抓、看不見）。
+_ASSERT_MSG_POS = {
+    "assertTrue": 1, "assertFalse": 1, "assertIsNone": 1, "assertIsNotNone": 1,
+    "fail": 0,
+    "assertEqual": 2, "assertNotEqual": 2, "assertIn": 2, "assertNotIn": 2,
+    "assertIs": 2, "assertIsNot": 2, "assertIsInstance": 2, "assertCountEqual": 2,
+    "assertGreater": 2, "assertGreaterEqual": 2, "assertLess": 2, "assertLessEqual": 2,
+    "assertRegex": 2, "assertNotRegex": 2, "assertAlmostEqual": 2,
+}
+_SKIP_MSG_POS = {"skipUnless": 1, "skipIf": 1, "skip": 0, "skipTest": 0}
+_MSG_KEYWORDS = ("msg", "reason")
+
+
+def _names_utf8(text: str) -> bool:
+    """這串字是否在指涉 UTF-8（含以碼頁號 65001 指涉）。
+
+    WHY 判準要多這一關（R71／DEF-101-762 併檔）：`_PS_UTF8_MARKER` 只認得「有人在動
+    主控台輸出編碼」，但本鎖守的是 **UTF-8 前置的拼法**。把編碼**刻意設成別的東西**
+    （例如為了重現只在 CP950 才顯形的缺陷而 `GetEncoding(950)`）、或把先前存下的值
+    **還原**回去（`= $prevEnc`），都不是 UTF-8 前置的第 N 種拼法——它們是重現危害與
+    收拾現場的必要動作，判成分歧只會逼作者刪掉那段程式碼，與 docstring 自噬同型。
+    鑑別力不因此下降：任何真的「把輸出編碼設成 UTF-8」的寫法都必須指名 UTF-8
+    （`[System.Text.Encoding]::UTF8`／`New-Object System.Text.UTF8Encoding`／
+    `GetEncoding(65001)`／`GetEncoding('utf-8')`），三個別名把這些形態全涵蓋。
+    """
+    low = text.lower()
+    return any(alias in low for alias in _PS_UTF8_ALIASES)
+
+
+def _call_name(node: ast.Call) -> str:
+    """取呼叫的尾端名字（`self.assertIn` → `assertIn`；`unittest.skipUnless` → 同理）。"""
+    func = node.func
+    if isinstance(func, ast.Attribute):
+        return func.attr
+    if isinstance(func, ast.Name):
+        return func.id
+    return ""
+
+
+def _narrative_node_ids(tree: ast.AST) -> set[int]:
+    """回傳「敘述用字串」的 Constant 節點 id：docstring、斷言訊息、skip reason。
+
+    三者的共同性質是**不會被當成 PowerShell 送出去執行**——它們在講解與指路。
+
+    🔴 R71 為何要把 docstring 這一層擴出去（不是為了消紅，是兩道鎖真的互斥）：
+    `DEF-101-762` 的鎖必須**逐字引述**生產碼的拼法才斷言得了它，而本鎖規定測試樹內
+    唯一合法拼法是 SSOT 那一串。該組鎖併進本檔時，它「解釋 CP950 下會發生什麼事」的
+    斷言訊息與 skip reason 全被判成分歧拼法（實測 8 筆命中、其他檔 0 筆）。把講解算成
+    複本，作者唯一的消紅路徑是刪掉講解——鎖因此反過來消滅自己存在的理由，與本檔
+    `TestPsUtf8PreludeIsSingleSpelling` docstring 記載的自噬是同一形狀，只是換了位置。
+    真正需要「引述可執行拼法」的那一處另走具名豁免（`_PS_UTF8_OK_MARKER`），不走本層。
+    """
+    ids: set[int] = set()
+
+    def _absorb(expr: ast.AST) -> None:
+        for sub in ast.walk(expr):
+            if isinstance(sub, ast.Constant) and isinstance(sub.value, str):
+                ids.add(id(sub))
+
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Module | ast.ClassDef | ast.FunctionDef | ast.AsyncFunctionDef):
+            body = getattr(node, "body", None)
+            first = body[0] if body else None
+            if isinstance(first, ast.Expr) and isinstance(first.value, ast.Constant):
+                if isinstance(first.value.value, str):
+                    ids.add(id(first.value))
+        elif isinstance(node, ast.Call):
+            name = _call_name(node)
+            if name not in _ASSERT_MSG_POS and name not in _SKIP_MSG_POS:
+                continue
+            pos = _ASSERT_MSG_POS.get(name, _SKIP_MSG_POS.get(name))
+            if pos is not None and len(node.args) > pos:
+                _absorb(node.args[pos])
+            for kw in node.keywords:
+                if kw.arg in _MSG_KEYWORDS:
+                    _absorb(kw.value)
+    return ids
+
+
+def _waiver_comment_lines(source: str) -> dict[int, str]:
+    """行號 → 該行註解裡的豁免 WHY（WHY 留空即空字串）。
+
+    走 `tokenize` 只認 COMMENT token：字串字面值裡出現同形字樣不算豁免，否則
+    `_PS_UTF8_OK_MARKER` 的宣告行自己就會變成一個罩住該行的豁免。
+    """
+    out: dict[int, str] = {}
+    try:
+        for tok in tokenize.generate_tokens(io.StringIO(source).readline):
+            if tok.type == tokenize.COMMENT and _PS_UTF8_OK_MARKER in tok.string:
+                out[tok.start[0]] = tok.string.split(_PS_UTF8_OK_MARKER, 1)[1].strip()
+    except (tokenize.TokenError, IndentationError, SyntaxError):
+        # 走到這裡代表檔案 tokenize 不了，而 `ast.parse()` 在同一支檔上卻成功——
+        # 不吞掉：回空表 ⇒ 既有豁免全部失效 ⇒ 命中照樣紅（往嚴格方向倒）。
+        return {}
+    return out
+
+
+def scan_ps_utf8_source(source: str, rel: str) -> tuple[int, list[tuple[int, str]], list[str]]:
+    """純函式核心（供直接單元測試）：回傳 `(站點數, 分歧命中, stale 豁免)`。
+
+    · 站點＝該檔設定主控台輸出編碼的**可執行**字串字面值（含合法寫法，供下限釘選用）。
+    · 分歧命中＝站點中「指涉 UTF-8、卻沒有逐字使用 SSOT 寫法、也沒有具名豁免」的那些。
+    · stale＝豁免標記在、卻沒壓下任何命中（含 WHY 留空）——豁免清單腐化的 fail-loud。
+    三者同一次 AST parse 取得（分成多支公開函式會讓每支檔案被 parse 多遍，掃描面
+    500+ 檔時是白花數倍時間）；`tokenize` 只在檔內真的出現標記字樣時才跑。
+    """
+    tree = ast.parse(source)
+    waivers = _waiver_comment_lines(source) if _PS_UTF8_OK_MARKER in source else {}
+    used: set[int] = set()
+    skip = _narrative_node_ids(tree)
+    sites = 0
+    bad: list[tuple[int, str]] = []
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Constant) or not isinstance(node.value, str):
+            continue
+        if id(node) in skip or _PS_UTF8_MARKER not in node.value:
+            continue
+        sites += 1
+        if _PS_UTF8_STATEMENT in node.value or not _names_utf8(node.value):
+            continue
+        # 豁免標記須落在**這個字串字面值自己的行段內**（單行字串＝同一行，嚴格；三引號
+        # 字串沒有「行尾」可掛註解，收尾那行的 `"""` 之後就是它唯一的掛點）。放寬成
+        # 「附近幾行」會讓一個標記無聲地罩住上下文，那正是豁免腐化的起點。
+        span = range(node.lineno, (node.end_lineno or node.lineno) + 1)
+        hit = next((n for n in span if waivers.get(n)), None)
+        if hit is not None:
+            used.add(hit)
+            continue
+        head = node.value[: node.value.find(_PS_UTF8_MARKER) + 90].replace("\n", "\\n")
+        bad.append((node.lineno, head))
+    stale = [
+        f"{rel}:{n}：豁免標記 stale（WHY 留空，或該行沒有被壓下的分歧命中）"
+        for n in sorted(set(waivers) - used)
+    ]
+    return sites, bad, stale
+
+
+def scan_ps_utf8_prelude(path: Path) -> tuple[int, list[tuple[int, str]], list[str]]:
+    """`scan_ps_utf8_source` 的讀檔外殼（掃描面走磁碟，純函式核心供注入測試）。"""
+    return scan_ps_utf8_source(path.read_text(encoding="utf-8"), path.name)
+
+
+class TestPsUtf8PreludeIsSingleSpelling(unittest.TestCase):
+    """PowerShell 輸出編碼前置全 repo 只准有**一種寫法**（R71 C-2）。
+
+    WHY（Rule 9 — 鎖的是意圖不是行為）：這條規則不是風格潔癖。前置本身是
+    DEF-101-350／DEF-101-760 的修復，「行內各抄一份」讓它變成 N 份可獨立漂移的
+    修復：R71 就抄出了第 4 份、寫法不同——逐字是
+
+        $OutputEncoding = [Console]::OutputEncoding = New-Object System.Text.UTF8Encoding $false;
+
+    ——並在註解裡寫下一條**經實測證偽**的 BOM 理由。分歧本身還不致命，致命的是分歧
+    伴隨著一條沒人驗證過的理由——下一個人會照著那條理由再長出第 5 種。本鎖讓
+    「多一種寫法」在本機當場翻紅，理由與量測則集中在 `PS_UTF8_PRELUDE` 一處。
+
+    ⚠️ 上面那行**反例逐字寫在 docstring 裡是刻意的**：它同時是
+    `_narrative_node_ids()` 的活體覆蓋。docstring 不會被執行，講解一種寫法不等於
+    多一份複本；少了那層過濾，本鎖會對「解釋自己在防什麼」的文字翻紅（自噬），
+    而作者為了消紅只能把反例刪掉——鎖因此反過來消滅了它自己存在的理由。
+    R71 把同一層過濾擴到斷言訊息與 skip reason（WHY 見該函式），並為「必須逐字引述
+    生產碼拼法」的那一類加了具名豁免 `_PS_UTF8_OK_MARKER`（WHY 必填、stale 會紅）。
+
+    誠實劃界：本鎖鎖的是**不得分歧**，不是**必須改用 helper**。R71 射程只涵蓋
+    `test_dev_start.py`／`test_bootstrap_ps1.py` 兩個呼叫端，另外三處行內複本
+    （`test_dev_start_ps1_lastexitcode.py`、`test_windowsapps_guard_cross_consistency.py`、
+    `AISDLC_SDD/scripts/tests/test_install_post_commit_windowsapps_guard.py` ×2）
+    未收斂——但它們與 SSOT 常數**逐字相同**，故本鎖對它們是綠的，不是被豁免的。
+    """
+
+    def _scan(self) -> tuple[int, int, dict[str, list[tuple[int, str]]], list[str]]:
+        scanned = sites = 0
+        found: dict[str, list[tuple[int, str]]] = {}
+        stale: list[str] = []
+        for tree_rel in _PS_UTF8_TEST_TREES:
+            root = _PS_UTF8_SCAN_ROOT / tree_rel
+            self.assertTrue(root.is_dir(), f"掃描面 {tree_rel} 不存在——目錄已搬移，請同步本鎖")
+            for path in sorted(root.rglob("*.py")):
+                if "__pycache__" in path.parts:
+                    continue
+                scanned += 1
+                # `.as_posix()`：鍵會被印進失敗訊息，`str()` 在 Windows 上是
+                # 反斜線形態，與其他鎖的正斜線比對慣例不一致。
+                rel = path.relative_to(_PS_UTF8_SCAN_ROOT).as_posix()
+                found_here, bad, stale_here = scan_ps_utf8_prelude(path)
+                sites += found_here
+                stale.extend(s.replace(f"{path.name}:", f"{rel}:", 1) for s in stale_here)
+                if bad:
+                    found[rel] = bad
+        return scanned, sites, found, stale
+
+    def test_scan_surface_is_not_silently_empty(self) -> None:
+        """下限釘選：一個站點都掃不到時，本體斷言會假綠。"""
+        scanned, sites, _, _ = self._scan()
+        self.assertGreater(scanned, 100, f"只掃到 {scanned} 支 .py——掃描面已塌，本鎖失效")
+        self.assertGreaterEqual(
+            sites, _MIN_PS_UTF8_SITES,
+            f"只找到 {sites} 個輸出編碼前置站點（下限 {_MIN_PS_UTF8_SITES}）——"
+            "辨識鍵已對不上任何真實程式碼，本鎖形同虛設",
+        )
+
+    def test_no_divergent_spelling(self) -> None:
+        _, _, found, _ = self._scan()
+        detail = "\n".join(
+            f"  {rel}:{ln}  {frag}" for rel, hits in found.items() for ln, frag in hits
+        )
+        self.assertEqual(
+            found, {},
+            "出現與 SSOT 不同的主控台輸出編碼前置寫法（R71 C-2 的復發形態）。\n"
+            f"唯一合法寫法＝`_platform_helpers.PS_UTF8_PRELUDE`：{PS_UTF8_PRELUDE!r}\n"
+            "呼叫端請改用 `_platform_helpers.ps_utf8_command(snippet)`；真有理由行內寫，"
+            "也必須逐字使用同一串（不同寫法＝多一份會獨立漂移的修復）。\n"
+            "若那一串是**對生產碼的逐字引述**（改寫即失去斷言對象），於該行加註"
+            "具名豁免（WHY 必填）。\n"
+            f"命中：\n{detail}",
+        )
+
+    def test_no_stale_waivers(self) -> None:
+        """豁免清單不得腐化：標記還在、卻沒壓下任何分歧命中（含 WHY 留空）即紅。
+
+        Rule 9：沒有這一支，具名豁免就是單向閥——加得進、退不出場。R60 已實證過
+        `_PENDING_MIGRATION_SITES` 那種「自陳遷移完成後刪除」卻永遠留著的豁免。
+        """
+        _, _, _, stale = self._scan()
+        self.assertEqual(
+            stale, [],
+            "主控台輸出編碼前置的豁免標記已 stale——請移除標記或補 WHY：\n  "
+            + "\n  ".join(stale),
+        )
+
+    def test_scanner_classifies_each_category_by_construction(self) -> None:
+        """鑑別力自檢（同 `test_ps51_compat::test_scan_source_detects_each_pattern` 慣例）。
+
+        Rule 9：上面兩支在乾淨的樹上恆綠，本身證明不了新加的三層過濾（敘述字串／
+        非 UTF-8 的編碼操作／具名豁免）沒有把判準放寬到失去鑑別力。本支以構造輸入
+        逐類斷言分類結果——把任一層改成無條件放行，這裡當場紅。
+        """
+        # 🔴 樣本一律由 `_PS_UTF8_MARKER` **拼出來**、不寫字面值：本檔自己也在掃描面內，
+        # 寫成字面值會讓這些樣本被上面兩支鎖當成真命中（同本檔 `_PS_UTF8_MARKER` 宣告
+        # 上方那條理由，只是這次踩點在測試資料上）。
+        def _ps(rhs: str) -> str:
+            return f'"{_PS_UTF8_MARKER} = {rhs}"'
+
+        div = _ps("New-Object System.Text.UTF8Encoding($false)")
+        cases = {
+            # ① 真分歧：可執行位置、指涉 UTF-8、非 SSOT 寫法 ⇒ 必抓
+            "divergent": (f"run({div})\n", 1, 0),
+            # ② SSOT 逐字寫法 ⇒ 算站點但不算分歧
+            "ssot": (f"run({PS_UTF8_PRELUDE!r})\n", 0, 0),
+            # ③ 敘述：斷言訊息／skip reason ⇒ 不是複本
+            "assert_msg": (f"self.assertIn(x, y, {div})\n", 0, 0),
+            "skip_reason": (f"unittest.skipUnless(c, {div})\n", 0, 0),
+            # ④ 刻意設成**非** UTF-8／還原先前值 ⇒ 不是 UTF-8 前置的第 N 種拼法
+            "other_codepage": (
+                f'run({_ps("[System.Text.Encoding]::GetEncoding(950)")})\n', 0, 0),
+            "restore": (f'run({_ps("$prev")})\n', 0, 0),
+            # ⑤ 以碼頁號指涉 UTF-8 的分歧寫法（別名表漏掉 65001 就會從這裡溜走）
+            "by_codepage": (
+                f'run({_ps("[System.Text.Encoding]::GetEncoding(65001)")})\n', 1, 0),
+            # ⑥ 具名豁免：帶 WHY 壓下命中；WHY 留空無豁免力且回報 stale
+            "waived": (f"run({div})  # {_PS_UTF8_OK_MARKER} 引述生產碼\n", 0, 0),
+            "waiver_empty_why": (f"run({div})  # {_PS_UTF8_OK_MARKER}\n", 1, 1),
+            # ⑦ 標記在、該行卻沒有被壓下的命中 ⇒ stale
+            "waiver_stale": (f"run('noop')  # {_PS_UTF8_OK_MARKER} 已無命中\n", 0, 1),
+        }
+        got = {
+            label: scan_ps_utf8_source(src, f"{label}.py")[1:]
+            for label, (src, _, _) in cases.items()
+        }
+        want = {label: (n_bad, n_stale) for label, (_, n_bad, n_stale) in cases.items()}
+        self.assertEqual(
+            {label: (len(bad), len(stale)) for label, (bad, stale) in got.items()}, want,
+            f"掃描器的分類與構造預期不符（實際：{got}）",
+        )
+
+
+# 兩側「>= _MIN_PY 版本探測碼」的字面值抽取式（單引號宣告＝兩側現行形態；單引號
+# 是刻意的：bash 與 PowerShell 的單引號都不做內插，探測碼可原封不動送給 python）。
+# 抽取式本身失配時由 `test_probe_extraction_regexes_still_match` 出聲。
+_SH_PROBE_RE = re.compile(r"^PYTHON_GE_MIN_PROBE='(?P<probe>[^']*)'[ \t]*$", re.MULTILINE)
+_PS1_PROBE_RE = re.compile(
+    r"^\$script:PythonGeMinProbe = '(?P<probe>[^']*)'[ \t]*$", re.MULTILINE
+)
+
 
 # 假「系統 3.9」直譯器：轉呼叫**真**直譯器，但先把 `sys.version_info` 改寫成
 # 3.9.6，其餘行為（`-c` 探測／跑 script）逐字照舊。
@@ -4821,13 +5420,121 @@ class TestMinPythonVersionSsotSync(unittest.TestCase):
                 f"{label} 側版本探測碼與核心 _MIN_PY={core_mm} 不同步",
             )
 
+    # 🔴 R71（DEF-101-760）：上面那支鎖**只看版本數字**，看不到探測碼本體。兩份
+    # `.sh`／`.ps1` 的檔頭都白紙黑字寫「用**同一段**探測碼（同構，非各自發明）」，
+    # 但那是散文——實測（本輪動工前）單邊把探測碼改掉，本檔與 CI 全部照樣綠燈。
+    # DEF-101-760 正是踩在這個縫上：`else ""` 在 bash 沒事、在 PowerShell 5.1 會被
+    # 吃掉一個雙引號而整條失效，於是「兩側寫法必須逐字相同」這個假設一旦破裂，
+    # 就只剩其中一個平台的使用者會炸，而且沒有任何機械物會出聲。
+    def test_version_probe_literal_is_byte_identical_across_both_shells(self) -> None:
+        sh_probe, ps_probe = self._extract_probes()
+        self.assertEqual(
+            sh_probe, ps_probe,
+            "兩側探測碼字面值不再逐字相同——兩份檔頭都自述『同一段探測碼』，"
+            "散文對不上實況時必須是這裡先紅，而不是等某一個平台的使用者踩到：\n"
+            f"  bash       : {sh_probe!r}\n"
+            f"  powershell : {ps_probe!r}",
+        )
+
+    def test_version_probe_has_no_embedded_double_quote(self) -> None:
+        """探測碼不得含雙引號——Windows PowerShell 5.1 傳給原生 exe 時會吃掉它。
+
+        這條與上一條是**兩件事**，不可合併：上一條只保證「兩邊一樣」，兩邊一起改成
+        含雙引號的寫法仍然全綠，而那正好是 DEF-101-760 修復前的狀態（兩側當時確實
+        逐字相同，同時也確實兩側都寫著 `""`）。本條鎖的是「那個寫法本身不能用」。
+        行為面的證據由 tools/tests/test_ps51_compat.py::TestPs51NativeArgvRoundTrip
+        真的起一支 powershell.exe 提供；本條是不需要任何引擎、恆會執行的靜態備援。
+        """
+        sh_probe, ps_probe = self._extract_probes()
+        for label, probe in (("bash", sh_probe), ("powershell", ps_probe)):
+            self.assertNotIn(
+                '"', probe,
+                f"{label} 側探測碼含雙引號 → PS 5.1 會吃掉一個 ⇒ python 收到"
+                f"`unterminated string literal` ⇒ 每個候選都被判不合格 ⇒ "
+                f"Get-PythonGeMin 恆回 $null（DEF-101-760 復發）。"
+                f"空字串請寫 `str()`：{probe!r}",
+            )
+
+    def test_probe_extraction_regexes_still_match(self) -> None:
+        """載具自檢：抽取式失配時上面兩支鎖會因為抽不到而**無從比較**。
+
+        沒有這一支，把 `$script:PythonGeMinProbe` 改名或改成雙引號宣告，
+        `_extract_probes()` 的 assertIsNotNone 才是唯一防線；把它獨立成一支具名
+        測試，是為了讓「鎖失效」與「探測碼不同步」在報表上是兩個可區分的紅燈。
+        """
+        sh_probe, ps_probe = self._extract_probes()
+        for label, probe in (("bash", sh_probe), ("powershell", ps_probe)):
+            self.assertIn(
+                "sys.version_info[:2]", probe,
+                f"{label} 側抽到的內容不像版本探測碼（抽取式疑似錯位）：{probe!r}",
+            )
+
+    def _extract_probes(self) -> tuple[str, str]:
+        """(bash 側探測碼, powershell 側探測碼)；任一側抽不到即 fail-loud。"""
+        sh_text = _GUARD_SH_PATH.read_text(encoding="utf-8")
+        ps_text = _GUARD_PS1_PATH.read_text(encoding="utf-8-sig")
+        m_sh = _SH_PROBE_RE.search(sh_text)
+        m_ps = _PS1_PROBE_RE.search(ps_text)
+        self.assertIsNotNone(
+            m_sh, f"{_GUARD_SH_PATH.name} 找不到 PYTHON_GE_MIN_PROBE 單引號宣告"
+            "——宣告形態被改動，本鎖已無法比對（不得靜默略過）",
+        )
+        self.assertIsNotNone(
+            m_ps, f"{_GUARD_PS1_PATH.name} 找不到 $script:PythonGeMinProbe 單引號宣告"
+            "——宣告形態被改動，本鎖已無法比對（不得靜默略過）",
+        )
+        return m_sh.group("probe"), m_ps.group("probe")
+
+
+# ── R71（DEF-101-755 解鎖）：PowerShell 行為鎖用的假直譯器，依 `os.name` 分派 ──
+#
+# 為何 `os.name` 而不是 `sys.platform`：要分的是**行程建立語意**——POSIX 的 `execve`
+# 認 shebang，Windows 的 `CreateProcess` 只認 PE 映像＋PATHEXT 副檔名。判例＝
+# `tools/tests/test_bash_probe_spec_contract.py::_STUB_FORMS`（DEF-101-754）。
+#
+# 為何 Windows 的 3.9 冒充者拆成「`.cmd` ＋ 旁邊一支 `.py`」而不是把 spoof 程式塞進
+# `.cmd` 一行：`.cmd` 內若再寫一層 `-c "<python 程式碼>"`，cmd.exe 的跳脫規則會疊在
+# PowerShell 重組命令列的規則上——而本類要驗的正是「引數原封不動送到直譯器」
+# （DEF-101-760），載具自己絕不能引入第二層引號變因。`%*` 只是把 PowerShell 交來的
+# 參數原樣轉手，不新增任何一層。
+#
+# 內文全 ASCII（WHY 一律寫在本 Python 檔）：`.cmd` 由 cmd.exe 以 OEM code page 解讀，
+# 本機為 CP950，寫中文註解等於自找亂碼。換行 CRLF：cmd.exe 對純 LF 批次檔的行為在
+# 部分構造下未定義。兩項皆同 DEF-101-754 判例。
+_FAKE_39_SPOOF_PY = '''\
+import os
+import runpy
+import sys
+
+sys.version_info = (3, 9, 6, "final", 0)
+args = sys.argv[1:]
+if args and args[0] == "-c":
+    code = args[1]
+    sys.argv = ["-c"] + args[2:]
+    exec(code)
+elif args:
+    sys.argv = args
+    sys.path.insert(0, os.path.dirname(os.path.abspath(args[0])))
+    runpy.run_path(args[0], run_name="__main__")
+'''
+
+_FAKE_39_CMD = '@echo off\r\n"{real}" "{spoof}" %*\r\n'
+_PASSTHROUGH_CMD = '@echo off\r\n"{real}" %*\r\n'
+
 
 @unittest.skipUnless(_ps_any_engine(), "需要 PowerShell 引擎（pwsh/powershell）")
 class TestGetPythonGeMinPowerShell(unittest.TestCase):
-    """Windows 側同構實作的**行為**鎖（本機零 Windows，故以 pwsh 真的執行）。
+    """Windows 側同構實作的**行為**鎖：`.ps1` 的候選鏈必須真的被執行過。
 
-    ADR-XPLAT-002 §3.2 的紀律：字面比對型 parity 不算機械釘選——.ps1 的候選鏈
-    必須真的被執行過，才算「雙向對等」而不是「兩邊都寫了看起來很像的東西」。
+    ADR-XPLAT-002 §3.2 的紀律：字面比對型 parity 不算機械釘選。
+
+    🔴 R71（DEF-101-755 結案）：`test_skips_sub_311_candidate` 原掛
+    `@unittest.skipIf(os.name == "nt", "shim 為 POSIX sh 腳本")`——也就是說，
+    這支 `.ps1` **唯一真正出貨的平台**上，本類的行為鑑別力等於零，而類別 docstring
+    讀起來像它有。代價不是理論的：DEF-101-760（`else ""` 被 PS 5.1 吃掉一個雙引號，
+    `Get-PythonGeMin` 在真 Windows 上恆回 $null）就是躲在這個 skip 後面出貨的，
+    macOS/pwsh 上跑本類**全綠**。現改為依 `os.name` 造合適形態的假直譯器，
+    Windows 上真的執行（解鎖條件 (a)）。
     """
 
     def setUp(self) -> None:
@@ -4842,19 +5549,79 @@ class TestGetPythonGeMinPowerShell(unittest.TestCase):
         if path_env:
             env["PATH"] = path_env
         return subprocess.run(
-            [self.ps, "-NoProfile", "-Command", snippet],
+            [self.ps, "-NoProfile", "-Command", ps_utf8_command(snippet)],
             capture_output=True, encoding="utf-8", errors="replace",
             env=env, timeout=180,
         )
 
-    @unittest.skipIf(os.name == "nt", "shim 為 POSIX sh 腳本")
+    def _write_fake_39(self, stem: str) -> None:
+        """造一支「自稱 3.9.6」的候選，命名為 `stem`（Windows 上為 `stem.cmd`）。"""
+        if os.name == "nt":
+            spoof = self.bin / f"_spoof39_{stem.replace('.', '_')}.py"
+            spoof.write_text(_FAKE_39_SPOOF_PY, encoding="utf-8")
+            (self.bin / f"{stem}.cmd").write_text(
+                _FAKE_39_CMD.format(real=sys.executable, spoof=spoof),
+                encoding="ascii", newline="",
+            )
+            return
+        path = self.bin / stem
+        path.write_text(_FAKE_39_SHIM.format(real=sys.executable), encoding="utf-8")
+        path.chmod(0o755)
+
+    def _write_real_311(self, stem: str) -> None:
+        """把跑測試的直譯器（模組頂端版本閘保證 >= 3.11）以 `stem` 曝露到 PATH。"""
+        if os.name == "nt":
+            (self.bin / f"{stem}.cmd").write_text(
+                _PASSTHROUGH_CMD.format(real=sys.executable),
+                encoding="ascii", newline="",
+            )
+            return
+        path = self.bin / stem
+        path.write_text(f'#!/bin/sh\nexec "{sys.executable}" "$@"\n', encoding="utf-8")
+        path.chmod(0o755)
+
+    def _fixture_path(self) -> str:
+        """PATH＝fixture 目錄優先 ＋ 該平台跑得動 shim 所需的最小系統目錄。
+
+        Windows 上 System32 不可省：`.cmd` 由 `CreateProcess` 轉交 cmd.exe 執行。
+        目錄取自 `ComSpec`（`os.path.dirname`）而非寫死磁碟機路徑——後者會被
+        `tools/tests/test_platform_neutral_paths.py` 的假路徑鎖攔下，且在非預設
+        `SystemRoot` 的機器上是錯的。
+        """
+        if os.name == "nt":
+            comspec = os.environ.get("ComSpec", "")
+            extra = [os.path.dirname(comspec)] if comspec else []
+            return os.pathsep.join([str(self.bin), *extra])
+        return os.pathsep.join([str(self.bin), "/usr/bin", "/bin"])
+
+    def test_fake_39_shim_is_live_so_the_version_check_is_what_rejects_it(self) -> None:
+        """正控（鏡子自證）：假 3.9 候選必須**真的跑得起來**且自稱 3.9.6。
+
+        沒有這一支，下一支的 `only39=[]` 會在「shim 根本啟動失敗」時同樣成立
+        ⇒ 主判準（版本比較）一次都沒被執行卻顯示綠燈。DEF-101-755 之所以出現，
+        根子就是「Windows 上 shim 起不來」這件事沒有任何機械物在看。
+
+        🔴 本測試的探測片段刻意**不含任何雙引號**（第一版寫 `print("MM=%d.%d" % …)`
+        當場被 PS 5.1 吃掉一個引號、實測拿到 `SyntaxError: invalid syntax`）——
+        載具本身踩進 DEF-101-760 就會量到假紅，看起來像 shim 壞了。
+        改印 `sys.version_info[:2]` 這個 tuple 的預設 repr，零引號需求。
+        """
+        self._write_fake_39("python3")
+        r = self._run_ps(
+            "& python3 -c 'import sys;print(sys.version_info[:2])'; "
+            "'rc=' + $LASTEXITCODE",
+            path_env=self._fixture_path(),
+        )
+        self.assertIn(
+            "(3, 9)", r.stdout,
+            f"假 3.9 候選沒能冒充成功 ⇒ 下一支測試會失去鑑別力\n"
+            f"stdout={r.stdout!r}\nstderr={r.stderr!r}",
+        )
+        self.assertIn("rc=0", r.stdout, f"shim 非零退出：stdout={r.stdout!r}")
+
     def test_skips_sub_311_candidate(self) -> None:
-        shim = self.bin / "python3"
-        shim.write_text(_FAKE_39_SHIM.format(real=sys.executable), encoding="utf-8")
-        shim.chmod(0o755)
-        real = self.bin / "python3.11"
-        real.write_text(f'#!/bin/sh\nexec "{sys.executable}" "$@"\n', encoding="utf-8")
-        real.chmod(0o755)
+        self._write_fake_39("python3")
+        self._write_real_311("python3.11")
 
         r = self._run_ps(
             f'. "{_GUARD_PS1_PATH}"; '
@@ -4862,11 +5629,15 @@ class TestGetPythonGeMinPowerShell(unittest.TestCase):
             '"only39=[" + (Get-PythonGeMin) + "]"; '
             "$script:PythonGeMinCandidates = @('python3', 'python3.11'); "
             '"both=[" + (Get-PythonGeMin) + "]"',
-            path_env=f"{self.bin}:/usr/bin:/bin",
+            path_env=self._fixture_path(),
         )
         self.assertEqual(r.returncode, 0, f"stderr={r.stderr}")
         self.assertIn("only39=[]", r.stdout, "3.9 候選竟被 Get-PythonGeMin 接受")
-        self.assertNotIn("both=[]", r.stdout, "有 3.11 可用卻回 $null")
+        self.assertNotIn(
+            "both=[]", r.stdout,
+            "有 3.11 可用卻回 $null——這正是 DEF-101-760 在 Windows 上的病徵"
+            f"（探測碼被 PS 5.1 吃掉引號 ⇒ 每個候選 rc=1）\nstdout={r.stdout!r}",
+        )
 
     def test_remediation_lists_actionable_commands(self) -> None:
         r = self._run_ps(f'. "{_GUARD_PS1_PATH}"; Write-PythonGeMinRemediation')
@@ -5128,6 +5899,583 @@ class TestPy39PreludeStaticScan(unittest.TestCase):
         """棘輪：黑名單被清空/縮水，上面那支鎖就退化成永遠綠。"""
         self.assertIn("UTC", _POST_39_FROM_NAMES["datetime"], "R69 P1 的兇手")
         self.assertIn("tomllib", _POST_39_MODULES, "R68 DEF-101-628 的兇手")
+
+
+# ======================================================= 原生 stdout 解碼（DEF-101-762）
+# 🔴 為何這組鎖住在本檔、而不是自己一支檔（R71／DEF-101-561③）：架構級裁決「R61 開輪
+# 即禁止新增鎖檔、只准合併／刪除」——理由是護欄層已經比它所護的生產碼還大。R71 落地
+# 時新開了 `test_native_stdout_utf8_decoding.py`，使 tools/tests 鎖檔數 53→54，三支機械
+# 棘輪當場翻紅而四路收尾無一提到。四方指定的落點就是本檔：本檔已持有 `PS_UTF8_PRELUDE`
+# 一族判準，同源的判準放同一處；併進來也順帶逼出了「兩道鎖互斥」這個真設計衝突的解
+# （見 `_narrative_node_ids()`）。**併檔不等於降低鑑別力**：五個 case 逐一注入退化複驗。
+#
+# WHY（這條缺陷為什麼能活著出貨兩天以上）：
+# Windows PowerShell 解碼**原生指令 stdout** 用的是 `[Console]::OutputEncoding`，而本
+# repo 兩個上游都固定吐 UTF-8——`tools/git_hooks_install_common.py` 於載入
+# `tools/_stdio_utf8.py` 時把 stdout reconfigure 成 UTF-8（不看 locale），`git` 本身也
+# 一律以 UTF-8 輸出路徑。兩者只在 **UTF-8 主控台**下剛好對得上；在 **cp950**（繁中
+# Windows 的 OEM 預設）下，含非 ASCII 的路徑會被解成 mojibake（真機實測：`煙霧測試`
+# U+7159 U+9727 U+6E2C U+8A66 → U+003F U+EA57 U+EBEC U+769C U+7948 U+5CAB）。
+#
+# 致命的是**顯形條件與驗證條件互斥**：
+#   · schtasks 起的排程環境 codepage＝950 ⇒ 每日必現；
+#   · 人手動跑（Claude Code 的 PowerShell 工具／Windows Terminal）codepage＝65001
+#     ⇒ 永遠不現；
+#   · GitHub 的 windows runner 既非繁中系統、也不跑中文路徑情境 ⇒ 雲端 CI 抓不到。
+# 也就是說**所有既有的人工與 CI 驗證載具，系統性地繞開了缺陷所在的那個條件**。
+# `tools/windows_smoke_local.ps1` [6/9] 其實正確抓到了它，卻因為該腳本當時沒有任何 log
+# 落點（DEF-101-761）而讓紅燈原因連續兩天不可考。這組鎖的存在，就是把那個條件從
+# 「只有每日排程碰得到」搬進**平常就會跑的測試**。
+#
+# 三道鎖分工刻意不同，缺一都會退回原狀：①行為鎖（原生 5.1 才有鑑別力）②同類別內的
+# 負控（證明危害此刻仍存在，否則①在「載具沒走到危害條件」時一樣綠）③靜態備援（任何
+# 平台都跑）。③的誠實劃界（ADR-XPLAT-002 §3.2）：字面比對**不等於**行為證明，它只擋
+# 「有人把包裝拆掉退回裸呼叫」這條最可能的回歸路；真正的行為證據是①②。
+
+_PS1_SHIM = _TOOLS_DIR / "lib" / "GitHooksInstallCommon.ps1"
+_PY_SSOT = _TOOLS_DIR / "git_hooks_install_common.py"
+
+# 生產 `.ps1` 裡那道 UTF-8 釘選的**逐字引述**（DEF-101-762 的修復本體）。兩個安裝器都
+# 必須逐字帶這一串，故引述只留一份。它是被斷言的**對象**，不是本測試樹拿去執行的前置
+# ——改寫成 SSOT 寫法會讓斷言不再指向生產碼實際長的樣子＝鎖失效，故走具名豁免。
+_PROD_UTF8_PIN = (
+    "[Console]::OutputEncoding = New-Object "
+    "System.Text.UTF8Encoding($false)"  # ps-utf8-quote-ok: 逐字引述生產碼，非本樹前置
+)
+
+# 煙霧測試 —— 與 tools/windows_smoke_local.ps1 [6/9] 用的是同一個目錄名。刻意以碼位而非
+# 字面值書寫：本檔一旦被以非 UTF-8 讀取，字面值自己就先壞了，鎖會變成在驗自己（同
+# test_ps51_compat 對「載具不可踩進待測缺陷」的要求）。
+_CJK_CODEPOINTS = (0x7159, 0x9727, 0x6E2C, 0x8A66)
+_CJK = "".join(chr(cp) for cp in _CJK_CODEPOINTS)
+
+# 共用 Python CLI 的四個子指令——全部都必須經過 Invoke-CommonPy。
+_SUBCOMMANDS = (
+    "assert-not-linked-worktree",
+    "get-hooks-dir",
+    "assert-hooks-present",
+    "check-installed",
+)
+_RAW_PY_CALL = "& python $script:GitHooksInstallCommonPy"
+
+# DEF-101-762 在 LATEST 版 SDD 樹上的**兩個**同形態站點：都以 `git rev-parse` 的輸出反推
+# 路徑，cp950 下損毀即整條路不可用。R71 落地時只鎖了 install_post_commit.ps1，run_tlc.ps1
+# 雖已同法修好，卻只有 `check_script_parity._LATEST_PINNED_SHA256` 的 hash 釘選——那只證明
+# 「內容沒被動過」，證明不了「釘選在讀取之前」，而後者正是本缺陷的形狀。「同棵樹、同形態、
+# 只鎖一支」就是 DEF-101-757 入規要防的鎖射程缺口，故 R71 參數化到第二支（成本＝一個 case）。
+_LATEST_REV_PARSE_SITES = (
+    ("tools/install_hooks/install_post_commit.ps1",
+     "它用 `git rev-parse --git-common-dir` 的輸出反推 repo 根，cp950 下中文路徑損毀會讓它"
+     "以「找不到共用函式 …\\tools\\lib\\WindowsAppsGuard.ps1」中止（真機實測重現）"),
+    ("tools/fsm_runtime/formal/run_tlc.ps1",
+     "它同樣以 `--git-common-dir` 反推 `$MainCheckoutRoot` 再組出 WindowsAppsGuard.ps1 路徑，"
+     "損毀即以 exit 2 中止 ⇒ 中文路徑的 repo 上形式化驗證（TLA+/TLC）整條路不可用"),
+)
+
+
+def _ps_cjk_literal() -> str:
+    """在 PowerShell 端以碼位重建中文字串的運算式（保持本 snippet 純 ASCII）。
+
+    snippet 走 `-Command` 傳入，中文字面值本身雖能經 CreateProcessW 完好抵達，但純
+    ASCII 讓「傳輸層有沒有偷改東西」不再是本鎖需要先排除的變因。
+    """
+    chars = ", ".join(f"[char]0x{cp:04X}" for cp in _CJK_CODEPOINTS)
+    return f"(-join ({chars}))"
+
+
+def _parse_kv(stdout: str) -> dict[str, str]:
+    """收 `KEY=VALUE` 行（子行程刻意只吐 ASCII，避免回程再被編碼問題污染）。"""
+    out: dict[str, str] = {}
+    for line in stdout.splitlines():
+        if "=" in line:
+            key, _, value = line.partition("=")
+            out[key.strip()] = value.strip()
+    return out
+
+
+@unittest.skipUnless(
+    _ps_windows_native_51(),
+    "[WINDOWS-NATIVE-ONLY] 需要 Windows 真機上的原生 powershell.exe（5.1）："
+    "本鎖量的是 5.1 依 [Console]::OutputEncoding 解碼原生指令 stdout 的行為，"
+    "刻意不 fallback 到 pwsh（理由同 _ps_engine 語意④）。跨平台備援＝"
+    "TestNativeStdoutDecodingRoutingLock（不需任何引擎）",
+)
+class TestGetDispatcherHooksDirUnderCp950(unittest.TestCase):
+    """cp950 主控台 + 中文 repo 路徑下，共用 shim 回傳的路徑不得損毀。"""
+
+    def _probe(self, repo: Path) -> dict[str, str]:
+        """在強制 cp950 的子行程內，同時量「修復後」與「修復前寫法」兩個值。"""
+        snippet = f"""
+$env:PATH = '{Path(sys.executable).parent}' + ';' + $env:PATH
+[Console]::OutputEncoding = [System.Text.Encoding]::GetEncoding(950)
+$cn = {_ps_cjk_literal()}
+Set-Location -LiteralPath '{repo}'
+. '{_PS1_SHIM}'
+$fixed = Get-DispatcherHooksDir
+$raw = & python '{_PY_SSOT}' get-hooks-dir
+'CP=' + [Console]::OutputEncoding.CodePage
+'FIXED_INTACT=' + ([string]$fixed).Contains($cn)
+'RAW_INTACT=' + ([string]$raw).Contains($cn)
+'FIXED_EMPTY=' + [string]::IsNullOrEmpty([string]$fixed)
+"""
+        proc = subprocess.run(
+            [_ps_native_51(), "-NoProfile", "-Command", snippet],
+            capture_output=True, encoding="utf-8", errors="replace", timeout=180,
+        )
+        kv = _parse_kv(proc.stdout)
+        for key in ("CP", "FIXED_INTACT", "RAW_INTACT", "FIXED_EMPTY"):
+            self.assertIn(
+                key, kv,
+                f"載具故障：子行程未回報 {key}（不得當成通過）\n"
+                f"rc={proc.returncode}\nstdout={proc.stdout!r}\nstderr={proc.stderr!r}",
+            )
+        self.assertEqual(
+            kv["CP"], "950",
+            "載具故障：子行程的 [Console]::OutputEncoding 沒有停在 cp950——"
+            "危害條件根本沒被建立起來，本鎖此刻零鑑別力",
+        )
+        self.assertEqual(
+            kv["FIXED_EMPTY"], "False",
+            f"載具故障：Get-DispatcherHooksDir 回傳空值（shim 疑似在 dot-source 階段"
+            f"就 return，例如子行程解析不到 python）\nstderr={proc.stderr!r}",
+        )
+        return kv
+
+    def _cjk_repo(self, tmp: str) -> Path:
+        repo = Path(tmp) / _CJK / "repo"
+        repo.mkdir(parents=True)
+        init = subprocess.run(
+            ["git", "init", "--quiet", str(repo)],
+            capture_output=True, encoding="utf-8", errors="replace", timeout=60,
+        )
+        self.assertEqual(init.returncode, 0, f"載具故障：git init 失敗 {init.stderr!r}")
+        return repo
+
+    def test_hooks_dir_survives_cp950_console(self) -> None:
+        """本體：cp950 下 `Get-DispatcherHooksDir` 必須回傳未損毀的中文路徑。
+
+        壞掉的後果（真機實測，非推測）：路徑變 mojibake → 下游 `assert-hooks-present`
+        找不到 hook 檔 → `install_git_hooks.ps1` exit 1 ⇒ **路徑含中文的 repo 根本裝
+        不了 git hooks**，且只在非 UTF-8 主控台重現。
+        """
+        with tempfile.TemporaryDirectory() as tmp:
+            kv = self._probe(self._cjk_repo(tmp))
+        self.assertEqual(
+            kv["FIXED_INTACT"], "True",
+            "cp950 主控台下 Get-DispatcherHooksDir 回傳的路徑遺失了非 ASCII 片段"
+            "（DEF-101-762 回歸）。根因：PowerShell 依 [Console]::OutputEncoding 解碼"
+            "原生指令 stdout，而 git_hooks_install_common.py 固定吐 UTF-8。"
+            "修法：呼叫期間把 [Console]::OutputEncoding 釘成 UTF-8 再還原"
+            "（見 tools/lib/GitHooksInstallCommon.ps1 的 Invoke-CommonPy）",
+        )
+
+    def test_carrier_has_teeth_raw_call_really_is_corrupted(self) -> None:
+        """負控（鏡子自證）：修復前的裸呼叫寫法必須**真的**被改壞。
+
+        沒有這一支，上一支在「cp950 其實沒生效／危害已不存在」時同樣是綠的——本 repo
+        已兩度為此付出代價（DEF-101-760 唯一有行為鑑別力的鎖被 skip 在門外、
+        DEF-101-761 紅燈無 log 落點）。本測試把「這個危害在本機此刻仍然存在」變成可
+        觀測的事實，而不是註解裡的宣稱。
+        """
+        with tempfile.TemporaryDirectory() as tmp:
+            kv = self._probe(self._cjk_repo(tmp))
+        self.assertEqual(
+            kv["RAW_INTACT"], "False",
+            "裸 `& python …` 在 cp950 下竟原封不動傳回了中文路徑——本鎖假設的危害"
+            "不存在了（PowerShell 換版？Windows 改了 GetConsoleOutputCP 語意？）。"
+            "請重新量測並改寫本段註解，**不要留一支恆綠的鎖**；若危害真的消失，"
+            "Invoke-CommonPy 的 UTF-8 釘選也應一併重新評估是否還需要",
+        )
+
+
+class TestNativeStdoutDecodingRoutingLock(unittest.TestCase):
+    """靜態備援（任何平台都會跑）：帶 UTF-8 釘選的入口不得被繞過。
+
+    誠實劃界：字面比對不是行為證明（ADR-XPLAT-002 §3.2）。本類別只擋「把包裝拆掉、
+    退回裸呼叫」這條最可能的回歸路，讓 macOS/Linux 開發者改壞這裡時也有訊號——真正
+    的行為證據在 TestGetDispatcherHooksDirUnderCp950。
+    """
+
+    def test_shim_routes_every_python_call_through_invoke_commonpy(self) -> None:
+        """四個子指令全部經 `Invoke-CommonPy`；裸呼叫只准存在於該函式內部那一處。"""
+        text = _PS1_SHIM.read_text(encoding="utf-8-sig")
+        self.assertIn(
+            "function Invoke-CommonPy", text,
+            "tools/lib/GitHooksInstallCommon.ps1 找不到 Invoke-CommonPy——"
+            "UTF-8 釘選入口疑似被移除（DEF-101-762 回歸）",
+        )
+        self.assertEqual(
+            text.count(_RAW_PY_CALL), 1,
+            f"`{_RAW_PY_CALL}` 出現 {text.count(_RAW_PY_CALL)} 次，應恰為 1 次"
+            f"（只有 Invoke-CommonPy 內部那一處）。多出來的裸呼叫在非 UTF-8 主控台下"
+            f"會把非 ASCII 路徑解成 mojibake（DEF-101-762）",
+        )
+        for sub in _SUBCOMMANDS:
+            self.assertIn(
+                f"Invoke-CommonPy -PyArgs @('{sub}'", text,
+                f"子指令 {sub!r} 未經 Invoke-CommonPy 呼叫——該路徑缺 UTF-8 釘選",
+            )
+
+    def test_shim_invoke_commonpy_pins_utf8(self) -> None:
+        """釘選本體還在（防「留著函式殼、把釘選拿掉」——import 級/存在級鎖看不到）。"""
+        text = _PS1_SHIM.read_text(encoding="utf-8-sig")
+        self.assertIn(
+            _PROD_UTF8_PIN, text,
+            "Invoke-CommonPy 內的 UTF-8 釘選不見了——函式殼還在但已無作用",
+        )
+        self.assertIn(
+            "[Console]::OutputEncoding = $prevEnc", text,
+            "UTF-8 釘選沒有還原路徑——會把主控台編碼洩漏給呼叫端；對 "
+            "windows_smoke_local.ps1 而言更嚴重：受測腳本是同行程 `& $installer` "
+            "呼叫，繼承 UTF-8 主控台後 [6] 那個專測 cp950 的缺陷就再也重現不出來",
+        )
+
+    def test_latest_git_rev_parse_sites_pin_utf8_before_reading_output(self) -> None:
+        """LATEST 版**每一個** `git rev-parse → 路徑` 同型站點都必須先釘 UTF-8。
+
+        LATEST 動態解析，Copy-on-Evolve 升版後本鎖不失效；凍結版 v0.01~v0.(N-1) 依鐵律
+        不掃也不修。R71 本鎖只有 install_post_commit.ps1 一支（原名
+        `test_latest_install_post_commit_pins_utf8_before_reading_git_common_dir`），
+        R71 參數化到 `_LATEST_REV_PARSE_SITES`（WHY 見該表上方）。
+        """
+        latest = sdd_latest.resolve_latest_root(_TOOLS_DIR.parent / "AISDLC_SDD")
+        # 錨在**執行敘述**上，不是 `--git-common-dir` 這個字串本身——該字串在兩支檔的檔頭
+        # 註解都出現過，拿它比序會量到註解、不是程式碼。
+        read_stmt = "$GitCommonDir = (git rev-parse"
+        for rel, harm in _LATEST_REV_PARSE_SITES:
+            with self.subTest(site=rel):
+                target = latest / rel
+                self.assertTrue(target.is_file(), f"找不到 LATEST 版 {rel}：{target}")
+                text = target.read_text(encoding="utf-8-sig")
+                self.assertIn(
+                    _PROD_UTF8_PIN, text,
+                    f"{rel} 缺 UTF-8 釘選（DEF-101-762 同型站點）：{harm}",
+                )
+                self.assertIn(
+                    read_stmt, text,
+                    f"{rel} 找不到 `{read_stmt}` 敘述——檔案結構已變動，本鎖需重新錨定",
+                )
+                self.assertLess(
+                    text.index(_PROD_UTF8_PIN), text.index(read_stmt),
+                    f"{rel}：UTF-8 釘選必須在 `{read_stmt} …` **之前**——順序反了等於沒釘",
+                )
+
+
+# ================================================ 非 Windows 平台短路（DEF-101-766）
+# 缺陷本體：`WindowsAppsGuard.ps1::Resolve-NativeExecutable`（DEF-101-759 為擋 pyenv-win
+# 無副檔名 shim 而生）原本無條件照 `$env:PATHEXT` 過濾候選。PATHEXT 是 **Windows-only**
+# 概念——PS Core 跑在 macOS/Linux 時該變數不存在，且 POSIX 執行檔本來就不帶副檔名
+# ⇒ 每個候選都被淘汰 ⇒ `Get-PythonGeMin` 恆回 $null ⇒ macos-compat-ci 與
+# root-infra-ci(ubuntu) 必紅。與 DEF-101-759 是同一個病，只是換平台發作。
+#
+# 🔴 為何用「參數化 harness」而不是真的起一支 PS Core：缺陷只在
+# 「`$PSVersionTable.PSVersion.Major >= 6` 且 `$IsWindows` 為假」時顯形，而本機
+# （Windows 11）沒有 pwsh 7。替身變數這條路本包**實測走不通**：`$PSVersionTable` 在
+# PS 5.1 是 read-only，`$PSVersionTable = …`／`$local:PSVersionTable = …`／
+# `New-Variable -Force` 三種寫法皆回 `Cannot overwrite variable PSVersionTable because
+# it is read-only or constant.`，連子作用域都蓋不掉（函式內看到的仍是 Major=5）。
+# 故改為把**生產函式原始碼原封搬進 harness**，只把那一個蓋不掉的運算式換成可設定的
+# `$FakePsMajor`（替換恰 1 處，數目不對即 fail-loud）。`$IsWindows` 不必替換——它在
+# PS 5.1 本來就是未定義變數，harness 直接賦值即可，模擬 5.1 時則刻意**不定義**它。
+#
+# 🔴 被否決的第三種做法（誠實記錄，免下一個人再走一遍）：「在 PS 5.1 下清空
+# `$env:PATHEXT` 跑生產函式、斷言它不回 $null」**零鑑別力**。本包實測（原生 5.1、
+# 子行程內 `$env:PATHEXT = ''`）：修好之後的生產函式對無副檔名候選回 `FAKEPY_NULL=True`、
+# 對真 `.exe` 候選 `git` 也回 `GIT_NULL=True`——因為 Major=5 一律短路進 Windows 分支，
+# 清 PATHEXT 只是讓 Windows 分支把全部候選濾光，永遠碰不到本次修的那條路。修好修壞都綠。
+#
+# 兩道鎖分工（缺一即有缺口，且此處**不是**「行為＋字面」的例行搭配）：①行為鎖真的執行
+# 函式本體，抓「短路不存在／不生效」；②順序鎖抓「短路存在但落在 PATHEXT 過濾之後」。
+# ②不是①的字面備援：本包實測把短路整段**搬到 PATHEXT 迴圈之後**，①仍回
+# `RESULT_NULL=False`（迴圈在 POSIX 上濾光後落空、短路照樣接住）＝①對這種改法全綠，
+# 只有②看得見。反之刪掉整段短路時①當場紅（實測 `RESULT_NULL=True`）。
+
+_RESOLVE_FN = "Resolve-NativeExecutable"
+_PS_MAJOR_EXPR = "$PSVersionTable.PSVersion.Major"
+_PS_MAJOR_FAKE = "$FakePsMajor"
+_PATHEXT_EXPR = "$env:PATHEXT"
+_NON_WIN_GUARD = "if (-not $isWindowsHost)"
+# 主機判定式的**逐字**形態：版本比較必須排在 `$IsWindows` 前面。`$IsWindows` 在 PS 5.1
+# 未定義，對調後在 `Set-StrictMode -Version Latest` 的呼叫端會直接丟例外（生產碼在地
+# 註解逐字載明「判定式順序不可調換」，本常數就是那句話的機械化）。
+_ORDERED_HOST_TEST = "($PSVersionTable.PSVersion.Major -lt 6) -or $IsWindows"
+
+
+def slice_ps_function(source: str, name: str) -> str:
+    """切出 `function <name> { … }`（到收在第 0 欄的 `}` 為止——本 repo .ps1 的體例）。"""
+    start = source.index(f"function {name} {{")
+    return source[start : source.index("\n}\n", start) + len("\n}\n")]
+
+
+def ps_code_only(body: str) -> str:
+    """剝掉註解（整行 ＋ 行尾）：順序與計數判準量的是**程式碼**，不是講解。
+
+    整行註解：在地 WHY 就寫在短路上方、且逐字提到 PATHEXT，含註解比序會量到註解
+    （判例＝同檔 `test_latest_git_rev_parse_sites_pin_utf8_before_reading_output`
+    對 `--git-common-dir` 出現在檔頭註解而必須改錨的教訓）。
+
+    行尾註解：主機判定式那一行**可預期**會被掛上 `# ps7-ok: <WHY>` 豁免——
+    `tools/tests/test_ps51_compat.py` 把 `$IsWindows` 判為 PS 6.0+ 專屬自動變數，而本處
+    正是「確有必要」那一類（版本比較先短路，5.1 上根本不會讀到它）。豁免的 WHY 幾乎一定
+    會逐字提到 `$IsWindows`，不剝行尾註解的話那一掛就會把本檔的計數判準推翻——鎖因為
+    別人補了正確的豁免而翻紅，是最沒有說服力的一種紅。
+    引號平衡檢查是為了不誤剝字串裡的 `#`（本函式射程內的程式碼一個 `#` 都沒有，此判斷
+    是給未來的；踩到不平衡就整行保留，往「少剝」＝嚴格方向倒）。
+    """
+    kept: list[str] = []
+    for line in body.splitlines():
+        if line.lstrip().startswith("#"):
+            continue
+        cut = line.find(" #")
+        if cut != -1 and line.count("'", 0, cut) % 2 == 0 and line.count('"', 0, cut) % 2 == 0:
+            line = line[:cut].rstrip()
+        if line.strip():
+            kept.append(line)
+    return "\n".join(kept)
+
+
+def non_windows_short_circuit_problems(body: str) -> list[str]:
+    """純函式核心（供構造輸入自檢）：回傳結構／順序問題碼清單，空清單＝合格。"""
+    code = ps_code_only(body)
+    problems: list[str] = []
+    n_major = code.count(_PS_MAJOR_EXPR)
+    n_pathext = code.count(_PATHEXT_EXPR)
+    if n_major != 1:
+        problems.append(
+            f"version-probe-count：程式碼裡 `{_PS_MAJOR_EXPR}` 出現 {n_major} 次，應恰 1 次"
+            "（0 次＝非 Windows 短路被移除，DEF-101-766 回歸）"
+        )
+    if n_pathext != 1:
+        problems.append(
+            f"pathext-count：程式碼裡 `{_PATHEXT_EXPR}` 出現 {n_pathext} 次，應恰 1 次"
+            "（本鎖以它為 Windows-only 過濾的錨點，數目變了即需重新錨定）"
+        )
+    if _ORDERED_HOST_TEST not in code:
+        problems.append(
+            f"host-test-order：主機判定式必須逐字為 `{_ORDERED_HOST_TEST}`——"
+            "`$IsWindows` 在 PS 5.1 未定義，必須先由版本比較短路擋掉"
+        )
+    if _NON_WIN_GUARD not in code:
+        problems.append(f"guard-missing：找不到非 Windows 短路 `{_NON_WIN_GUARD}`")
+    elif n_pathext >= 1:
+        guard_at, pathext_at = code.index(_NON_WIN_GUARD), code.index(_PATHEXT_EXPR)
+        if guard_at > pathext_at:
+            problems.append(
+                "guard-after-pathext：非 Windows 短路落在 PATHEXT 過濾**之後**＝等於沒修"
+                "（POSIX 上 PATHEXT 不存在，過濾會先把所有候選濾光）"
+            )
+        elif "return" not in code[guard_at:pathext_at]:
+            problems.append(
+                "guard-does-not-return：短路區段內沒有 return，控制流仍會落進 PATHEXT 過濾"
+            )
+    return problems
+
+
+def _resolve_harness(body: str, major: int, is_windows: bool | None,
+                     cand: str, expected: Path) -> str:
+    """生產函式原封搬進 harness，只把蓋不掉的版本運算式換成可設定的 `$FakePsMajor`。
+
+    `is_windows=None`＝模擬 PS 5.1（該變數在 5.1 根本不存在，刻意不定義它才忠實）。
+    子行程只吐 ASCII 的 `KEY=VALUE`：路徑比對在 PowerShell 端做完，回程不帶非 ASCII，
+    本鎖因此不必先排除「回程編碼」這個與待驗缺陷無關的變因。
+    """
+    prelude = [f"{_PS_MAJOR_FAKE} = {major}"]
+    if is_windows is not None:
+        prelude.append("$IsWindows = $" + ("true" if is_windows else "false"))
+    return (
+        "\n".join(prelude) + "\n"
+        + body.replace(_PS_MAJOR_EXPR, _PS_MAJOR_FAKE) + "\n"
+        + f"$r = {_RESOLVE_FN} -CandidateName '{cand}'\n"
+        + "'PATHEXT_LEN=' + $env:PATHEXT.Length\n"
+        + "'RESULT_NULL=' + ($null -eq $r)\n"
+        + f"'IS_FIXTURE=' + ($r -eq '{expected}')\n"
+    )
+
+
+def _production_resolve_body() -> str:
+    return slice_ps_function(_GUARD_PS1_PATH.read_text(encoding="utf-8-sig"), _RESOLVE_FN)
+
+
+@unittest.skipUnless(
+    _ps_windows_with_engine(),
+    "[WINDOWS-ONLY] 需要 Windows 平台 ＋ PowerShell 引擎（語意③）：本鎖的負控靠**真實**"
+    "PATHEXT 語意——在沒有 PATHEXT 的平台上，負控會因為變數缺席而綠，而不是因為過濾"
+    "生效才綠，等於量不到東西。跨平台備援＝TestResolveNativeExecutableShortCircuitOrder",
+)
+class TestResolveNativeExecutableNonWindowsBranch(unittest.TestCase):
+    """行為鎖：同一支生產函式，只換平台判定的兩個輸入，四種平台各自的裁決都要對。"""
+
+    def setUp(self) -> None:
+        self.tmp = Path(tempfile.mkdtemp())
+        self.addCleanup(_rmtree_force, self.tmp)
+        self.assertNotIn(
+            "'", str(self.tmp),
+            "載具故障：暫存路徑含單引號，會剖壞 harness 內的 PowerShell 單引號字串",
+        )
+        self.bin = self.tmp / "bin"
+        self.bin.mkdir()
+        # 無副檔名候選＝POSIX 執行檔的形狀（也正是 DEF-101-759 那支 pyenv-win shim 的
+        # 形狀）：Windows 分支必須淘汰它，非 Windows 分支必須接受它。同一個候選在兩種
+        # 平台下裁決相反，正是本組鎖唯一需要的變因。
+        (self.bin / "fakepy").write_text("#!/bin/sh\nexit 0\n", encoding="ascii")
+        # `.cmd` 候選＝正控用：證明 Windows 分支本身沒壞、PATHEXT 確實有值。
+        (self.bin / "fakecmd.cmd").write_text(
+            "@echo off\r\nexit /b 0\r\n", encoding="ascii", newline="")
+        self.ps = _ps_production_engine()
+        # System32 不可省（`.cmd` 需 cmd.exe 解譯）；取自 `ComSpec` 而非寫死磁碟機路徑
+        # ——後者會被 test_platform_neutral_paths.py 的假路徑鎖攔下。
+        comspec = os.environ.get("ComSpec", "")
+        extra = [os.path.dirname(comspec)] if comspec else []
+        self.env = dict(os.environ)
+        self.env["PATH"] = os.pathsep.join([str(self.bin), *extra])
+        self.body = _production_resolve_body()
+
+    def _probe(self, major: int, is_windows: bool | None,
+               cand: str, expected_name: str) -> dict[str, str]:
+        script = self.tmp / f"harness_{major}_{is_windows}_{cand}.ps1"
+        # BOM 是刻意的：函式本體帶中文 WHY 註解，PS 5.1 讀無 BOM 的 UTF-8 會當成 ANSI
+        # （本機 CP950），註解位元組被重解讀，最壞情況吐出引號把腳本剖壞
+        # （同 tools/tests/test_ps1_bom.py 守的那件事）。
+        script.write_text(
+            _resolve_harness(self.body, major, is_windows, cand, self.bin / expected_name),
+            encoding="utf-8-sig",
+        )
+        proc = subprocess.run(
+            [self.ps, "-NoProfile", "-File", str(script)], env=self.env,
+            capture_output=True, encoding="utf-8", errors="replace", timeout=180,
+        )
+        kv = _parse_kv(proc.stdout)
+        for key in ("PATHEXT_LEN", "RESULT_NULL", "IS_FIXTURE"):
+            self.assertIn(
+                key, kv,
+                f"載具故障：子行程未回報 {key}（不得當成通過）\n"
+                f"rc={proc.returncode}\nstdout={proc.stdout!r}\nstderr={proc.stderr!r}",
+            )
+        self.assertNotEqual(
+            kv["PATHEXT_LEN"], "0",
+            "載具故障：子行程的 $env:PATHEXT 是空的——Windows 分支此刻會濾光所有候選，"
+            "負控會因為載具壞掉而綠",
+        )
+        return kv
+
+    def test_harness_is_a_faithful_copy_of_production(self) -> None:
+        """載具自證：harness 與生產函式只差那一個替身，其餘逐字相同。
+
+        沒有這一支，下面四支量的可能是一份被改寫過的副本——那就退化成「測試在測自己
+        寫的 PowerShell」，與 ADR-XPLAT-002 §3.2 拒斥的字面比對型 parity 同一個病。
+        """
+        code = ps_code_only(self.body)
+        self.assertEqual(
+            code.count(_PS_MAJOR_EXPR), 1,
+            f"生產函式裡 `{_PS_MAJOR_EXPR}` 不是恰 1 次——替身替換會失準，本組鎖需重新錨定",
+        )
+        self.assertEqual(
+            code.count("$IsWindows"), 1,
+            "生產函式裡 `$IsWindows` 不是恰 1 次——harness 的賦值可能罩不住全部讀取點",
+        )
+        harness = _resolve_harness(self.body, 7, False, "fakepy", self.bin / "fakepy")
+        self.assertIn(_RESOLVE_FN, harness)
+        self.assertNotIn(
+            _PS_MAJOR_EXPR, harness,
+            "harness 內仍留著讀不到的 `$PSVersionTable`——替身沒生效，四支行為斷言會全部"
+            "只量到 PS 5.1 那一種平台",
+        )
+        self.assertEqual(
+            ps_code_only(harness).count(_PS_MAJOR_FAKE), 2,
+            "替身在程式碼裡應恰出現 2 次（harness 前置賦值 1 ＋ 函式本體被替換的 1）",
+        )
+
+    def test_windows_branch_still_rejects_extensionless_candidate(self) -> None:
+        """DEF-101-759 不得因本次修復而回歸：PS 5.1 下無副檔名候選仍必須被淘汰。"""
+        kv = self._probe(5, None, "fakepy", "fakepy")
+        self.assertEqual(
+            kv["RESULT_NULL"], "True",
+            "PS 5.1 下無副檔名候選竟被接受——DEF-101-759 回歸（`&` 會對它回退 "
+            "ShellExecute 並彈出「你要如何開啟這個檔案？」對話框，無人值守環境直接掛住）",
+        )
+
+    def test_windows_branch_positive_control_accepts_pathext_candidate(self) -> None:
+        """正控（鏡子自證）：Windows 分支本身是活的，上一支的 $null 才歸因得了過濾。"""
+        kv = self._probe(5, None, "fakecmd", "fakecmd.cmd")
+        self.assertEqual(
+            kv["IS_FIXTURE"], "True",
+            "PS 5.1 下連 `.cmd` 候選都解析不到——Windows 分支或 fixture PATH 壞了，"
+            f"此刻整組鎖零鑑別力（kv={kv}）",
+        )
+
+    def test_ps_core_on_non_windows_falls_back_to_first_application(self) -> None:
+        """本體（DEF-101-766 的修復）：PS Core 非 Windows 必須跳過 PATHEXT 過濾。"""
+        kv = self._probe(7, False, "fakepy", "fakepy")
+        self.assertEqual(
+            kv["IS_FIXTURE"], "True",
+            "PS Core 在非 Windows 平台上仍照 PATHEXT 過濾 ⇒ POSIX 執行檔（無副檔名）"
+            "全被淘汰 ⇒ Get-PythonGeMin 恆回 $null ⇒ macos-compat-ci 與 "
+            f"root-infra-ci(ubuntu) 必紅（DEF-101-766 回歸；kv={kv}）",
+        )
+
+    def test_ps_core_on_windows_keeps_windows_semantics(self) -> None:
+        """修復不得過度：PS Core 跑在 Windows 上仍要走 PATHEXT 過濾。
+
+        少了這一支，把短路寫成「只要 Major >= 6 就跳過過濾」也會全綠——那會讓裝了
+        pwsh 7 的 Windows 開發機重新踩回 DEF-101-759 的 ShellExecute 對話框。
+        """
+        kv = self._probe(7, True, "fakepy", "fakepy")
+        self.assertEqual(
+            kv["RESULT_NULL"], "True",
+            "PS Core 跑在 Windows 上竟跳過了 PATHEXT 過濾——短路的條件寫成只看版本、"
+            f"沒看 `$IsWindows`（kv={kv}）",
+        )
+
+
+class TestResolveNativeExecutableShortCircuitOrder(unittest.TestCase):
+    """順序鎖（任何平台都跑）：短路必須存在，且排在 PATHEXT 過濾**之前**。
+
+    誠實劃界：本類別讀的是原始碼，不是行為證明（ADR-XPLAT-002 §3.2）。它存在的理由
+    不是「行為鎖跑不到的平台要有備援」那種例行搭配，而是行為鎖對「短路被搬到過濾之後」
+    這種改法**實測全綠**（見本節檔頭）——兩道鎖的射程真的不重疊。
+    """
+
+    def test_production_short_circuit_is_present_and_ordered(self) -> None:
+        problems = non_windows_short_circuit_problems(_production_resolve_body())
+        self.assertEqual(
+            problems, [],
+            f"{_GUARD_PS1_PATH.name}::{_RESOLVE_FN} 的非 Windows 短路不合格：\n  "
+            + "\n  ".join(problems),
+        )
+
+    def test_scanner_flags_each_degradation_by_construction(self) -> None:
+        """鑑別力自檢：三種退化各自被判出對應問題碼，否則上面那支是恆綠的。
+
+        退化樣本**由生產原始碼實地推導**（不是手寫的假 .ps1）——手寫樣本只證明掃描器
+        看得懂自己造的形狀，證明不了它看得懂生產碼那個形狀。
+        """
+        body = _production_resolve_body()
+        head, pathext_line, tail = "  $isWindowsHost =", "  $exts = @(", "  return $null\n}"
+        for anchor in (head, pathext_line):
+            self.assertIn(anchor, body, f"退化樣本錨點 `{anchor}` 已不在生產碼中，請重新錨定")
+        self.assertTrue(body.rstrip().endswith(tail), f"函式結尾不再是 `{tail}`，請重新錨定")
+        block = body[body.index(head) : body.index(pathext_line)]
+        removed = body[: body.index(head)] + body[body.index(pathext_line) :]
+        moved = removed.rstrip()[: -len(tail)] + block + tail + "\n"
+        swapped = body.replace(
+            _ORDERED_HOST_TEST, "$IsWindows -or ($PSVersionTable.PSVersion.Major -lt 6)")
+        cases = {
+            "clean": (body, []),
+            # ① 整段短路被刪掉＝退回修復前的生產碼形狀
+            "removed": (removed, ["version-probe-count", "host-test-order", "guard-missing"]),
+            # ② 短路還在、但被搬到 PATHEXT 過濾之後（行為鎖對這種改法全綠）
+            "moved_after_pathext": (moved, ["guard-after-pathext"]),
+            # ③ `-or` 兩側對調＝PS 5.1 上先讀未定義變數
+            "swapped_host_test": (swapped, ["host-test-order"]),
+        }
+        got = {
+            label: [p.split("：", 1)[0] for p in non_windows_short_circuit_problems(src)]
+            for label, (src, _) in cases.items()
+        }
+        self.assertEqual(
+            got, {label: want for label, (_, want) in cases.items()},
+            "順序掃描器的分類與構造預期不符——判準已被放寬到看不見對應退化",
+        )
 
 
 if __name__ == "__main__":

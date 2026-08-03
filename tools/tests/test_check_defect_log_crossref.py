@@ -6,11 +6,15 @@
 """
 from __future__ import annotations
 
+import ast
 import atexit
+import io
 import re
 import shutil
+import subprocess
 import sys
 import tempfile
+import tokenize
 import unittest
 from pathlib import Path
 from unittest import mock
@@ -1849,6 +1853,237 @@ class TestAdrClosureClaimsAreMechanicallyChecked(unittest.TestCase):
         self.assertEqual(
             m.closure_claim_problems("fake-adr.md", far, {"DEF-101-706": "open"}),
             [], "距離超出視窗仍綁定 ⇒ ADR 的數千字長列會把不相干的 ID 綁進來",
+        )
+
+
+# ── R71（`DEF-101-765` 解鎖條件 (c)）：程式碼註解輪號 ↔ 帳本當前輪的機械守 ──────────
+#
+# 根因逐字（帳本 `DEF-101-765`）：「`current_round()` **只讀帳本**，程式碼註解裡的輪號對它
+# 完全不可見，兩邊可以無限漂移」。`DEF-101-757` 入規「已知的鎖射程缺口不得只以劃界結案」，
+# 故本組鎖把那個盲區封起來——但**刻意射程窄而準**，判準是「超前」不是「不等於」：
+#
+#   ✅ 採用：輪號 **> 帳本當前輪** 即紅。
+#      · 對正當歷史引用**天然免疫**：「R70 那輪做了 X」講的是已發生的輪次，恆 ≤ 當前輪。
+#        這一點不是宣稱，由 `test_a_legitimate_historical_reference_is_not_flagged` 坐實。
+#      · 抓得到 `DEF-101-765` 的**實際形態**：本批程式碼自稱 R72、帳本當前輪 R71。round-label-ok
+#   ❌ 否決 ①「輪號 ≠ 當前輪即紅」：本 repo 的註解**大量**逐字引用往輪（`R42`／`R60`／
+#      `R69`…），實測全樹逾千處 ⇒ 幾乎每支檔都紅，屬「寬而吵」，鎖會被 opt-out 掉。
+#   ❌ 否決 ②「只掃未提交／本批新增的行」：可攔本次事故，但一 commit 就失明——鎖的價值
+#      在下一輪，而下一輪它什麼都看不到；且 `git diff` 面對 rebase／squash 不穩定。
+#   ❌ 否決 ③「凡輪號一律要求同行帶輪次來源註記」：等於強制全樹改寫上千處註解，成本遠高
+#      於收益，且新格式一樣會漂移（本 repo 已有多筆「格式訂了沒人跟」的前例）。
+#
+# 掃描面（**實測收斂**，非拍腦袋——手法同 `DEF-101-757` 那輪「寬判準 52 命中多為誤配 →
+# 收斂到零誤報」）：
+#   · 檔型＝`.py/.ps1/.sh/.psm1/.bash`，取 tracked ∪ untracked-not-ignored
+#     （`git ls-files` ∪ `-o --exclude-standard`；`DEF-101-752` 立的掃描面政策，
+#     未追蹤檔天然隱形正是那筆的根因）。
+#   · `.py` 只掃**註解與 docstring**（人寫給人看的輪號標籤只住在那裡），**不掃**一般字串
+#     字面值——後者是測試構造的**合成帳本語料**（本檔的 `R80`／`R90`／`R99`、  round-label-ok
+#     `test_archive_defect_log.py` 的 `R99`），逐字掃會當場多 9 筆假紅。這一刀由  round-label-ok
+#     `test_a_synthetic_ledger_fixture_in_a_string_literal_is_not_flagged` 雙向坐實。
+#   · `.py` 解析失敗 ⇒ 退回整檔逐行掃（**fail-closed**：寧可吵，不可瞎）。
+#   · `.ps1/.sh` 整行掃（實測零假紅，不必再切註解層）。
+#   · 同行帶 `round-label-ok` 具名豁免者跳過（比照本 repo `baseline-ok`／`ps7-ok` 家族）。
+#     現存 7 筆，全部是**在講輪號這件事本身**的散文：本段 WHY 註解 5 行、本組鎖其中一支的
+#     docstring 1 行，加上 `test_archive_defect_log.py` 那句 docstring 內的合成語料 1 行。
+#     🔴 這 7 筆是本鎖第一次實跑當場自己抓出來的（它先把自己的說明文字判紅），保留為
+#     「本鎖確實在看 docstring 與註解」的活體證據——它們一旦被刪，`test_scan_surface_is_alive`
+#     以外再無第二個訊號說明豁免機制還活著。
+#
+# 誠實劃界（是判準的已知邊界，**各自附實測理由**，不是「劃界代替補鎖」）：
+#   (a) 非程式碼文字檔（`.md`／`.yml`…）不在掃描面。`.yml`：實測全樹工作流只出現當前輪，
+#       零命中＝納入也不會多說什麼，故不付掃描成本。`.md` 是刻意排除——
+#       帳本自己就是當前輪的 SSOT，而它的列會**合法**引述別的輪號當證據
+#       （`DEF-101-765` 本列逐字並列 R70／R71／R72；`DEF-101-752` 寫「到 R72 就會低於  round-label-ok
+#       當前輪」的前瞻句）。實測納入 `.md` 立刻多 3 筆假紅 ⇒ 寬而吵。
+#   (b) **落後值抓不到**（把本批寫成 R70）：機械上分不出「本批自稱 R70」與「引用 R70 那輪」
+#       ——那要讀懂句意。本輪 131 處落後值是**人工逐處判讀**訂正的，不在本鎖射程內。
+_ROUND_LABEL_RE = re.compile(r"(?<![A-Z0-9_])R(\d{1,4})(?![0-9])")
+_ROUND_LABEL_EXEMPT = "round-label-ok"
+_ROUND_SCAN_EXTS = (".py", ".ps1", ".sh", ".psm1", ".bash")
+
+
+def _git_listed(*extra: str) -> set[str]:
+    # 🔴 DEF-101-762 同族防護（本輪 R71 自己踩過一次，由收官複審抓到）：
+    # `text=True` 不帶 encoding 會走 locale 解碼，zh-TW 下即 CP950 ⇒ 非 ASCII 路徑失真。
+    # `core.quotepath=false` 讓 git 直接吐 UTF-8 原字，而非預設的 `\\xxx` 八進位轉義
+    # ——兩者要成對，只給 encoding 仍會拿到轉義字面值。
+    out = subprocess.run(
+        ["git", "-c", "core.quotepath=false", "ls-files", *extra],
+        cwd=str(m._REPO_ROOT), capture_output=True,
+        text=True, encoding="utf-8", errors="replace", check=True,
+    ).stdout
+    return {ln.strip() for ln in out.splitlines() if ln.strip()}
+
+
+def round_scan_surface() -> list[Path]:
+    """tracked ∪ untracked-not-ignored 的程式碼檔。"""
+    names = _git_listed() | _git_listed("-o", "--exclude-standard")
+    return sorted(m._REPO_ROOT / n for n in names if n.endswith(_ROUND_SCAN_EXTS))
+
+
+def prose_spans(name: str, text: str) -> list[tuple[int, str]]:
+    """回傳 `(行號, 該行散文)`；`.py` 取註解＋docstring，其餘（與解析失敗）整檔逐行。"""
+    if not name.endswith(".py"):
+        return list(enumerate(text.split("\n"), 1))
+    chunks: list[tuple[int, str]] = []
+    try:
+        tree = ast.parse(text)
+        for node in ast.walk(tree):
+            if isinstance(node, (ast.Module, ast.ClassDef, ast.FunctionDef, ast.AsyncFunctionDef)):
+                doc = ast.get_docstring(node, clean=False)
+                if doc:
+                    chunks.append((getattr(node.body[0], "lineno", 1), doc))
+        for tok in tokenize.generate_tokens(io.StringIO(text).readline):
+            if tok.type == tokenize.COMMENT:
+                chunks.append((tok.start[0], tok.string))
+    except (SyntaxError, IndentationError, tokenize.TokenError, ValueError):
+        return list(enumerate(text.split("\n"), 1))
+    out: list[tuple[int, str]] = []
+    for base, chunk in chunks:
+        for off, line in enumerate(chunk.split("\n")):
+            out.append((base + off, line))
+    return out
+
+
+def future_round_labels(name: str, text: str, current: int) -> list[tuple[int, int, str]]:
+    """散文面上所有 `R<n>` 且 `n > current` 的 `(行號, 輪號, 片段)`。"""
+    hits: list[tuple[int, int, str]] = []
+    for lineno, line in prose_spans(name, text):
+        if _ROUND_LABEL_EXEMPT in line:
+            continue
+        for mm in _ROUND_LABEL_RE.finditer(line):
+            n = int(mm.group(1))
+            if n > current:
+                hits.append((lineno, n, line.strip()[:120]))
+    return hits
+
+
+class TestR71CodeRoundLabelsNeverExceedLedgerCurrentRound(unittest.TestCase):
+    """程式碼裡的輪號標籤不得超前帳本推得的當前輪（`DEF-101-765` 解鎖條件 (c)）。
+
+    意圖（Rule 9）：這條鎖的價值**不在**「輪號寫錯很難看」，而在 `current_round()` 是
+    `check_defect_log_crossref.py` 硬規則② 的比較基準——程式碼與帳本對「現在是第幾輪」
+    各說各話時，承接稽核就會拿一個錯的基準做判定（`DEF-101-765` 實測：當前輪被推成 72 時
+    `DEF-101-752` 立刻被誤判為孤兒 backlog、rc=1）。所以這是**判準基準的一致性**問題。
+    """
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        cls.current = m.current_round(m._DEFAULT_DEFECT_LOG.read_text(encoding="utf-8"))
+
+    def test_current_round_is_derivable(self) -> None:
+        """前提自檢：推不出當前輪時本組鎖整組失去意義，必須 fail-loud 而非靜默放行。"""
+        self.assertIsInstance(self.current, int, "帳本推不出當前輪 ⇒ 本鎖無比較基準")
+
+    def test_scan_surface_is_alive(self) -> None:
+        """載具自檢（fail-open 封死）：掃描面不得崩塌，散文抽取不得抽不到東西。
+
+        沒有這一條，`git ls-files` 換目錄或 AST 抽取寫壞時，本鎖會安靜地零命中假綠——
+        正是 `DEF-101-752`（掃描面看不到該看的地方）付過學費的形態。
+        """
+        surface = round_scan_surface()
+        self.assertGreater(len(surface), 500, f"掃描面只有 {len(surface)} 檔 ⇒ 已崩塌")
+        probe = m._REPO_ROOT / "tools" / "tests" / "test_dev_start.py"
+        self.assertIn(probe, surface, "已知含大量輪號註解的檔不在掃描面內")
+        alive = future_round_labels(probe.name, probe.read_text(encoding="utf-8"), current=1)
+        self.assertTrue(alive, "對真實檔以 current=1 掃仍零命中 ⇒ 散文抽取或 regex 已死")
+
+    def test_no_code_file_claims_a_round_beyond_the_ledger(self) -> None:
+        """全樹實掃：任何程式碼檔的輪號標籤都不得超前帳本當前輪。"""
+        assert isinstance(self.current, int)
+        problems: list[str] = []
+        for path in round_scan_surface():
+            try:
+                text = path.read_text(encoding="utf-8")
+            except (OSError, UnicodeDecodeError):
+                continue
+            # 便宜前置過濾：整檔沒有超前值就不必付 AST/tokenize 的錢（25s → 1.5s）。
+            if not any(int(mm.group(1)) > self.current for mm in _ROUND_LABEL_RE.finditer(text)):
+                continue
+            for lineno, n, snippet in future_round_labels(path.name, text, self.current):
+                rel = path.relative_to(m._REPO_ROOT).as_posix()
+                problems.append(f"{rel}:{lineno} 自稱 R{n} > 帳本當前輪 R{self.current}｜{snippet}")
+        self.assertEqual(
+            problems, [],
+            "程式碼註解的輪號超前帳本當前輪（`DEF-101-765` 形態）。兩條正解擇一：\n"
+            "  · 該處講的是本批 ⇒ 改成當前輪；\n"
+            "  · 該處是測試用的合成帳本語料 ⇒ 同行加具名豁免 `round-label-ok`。\n"
+            + "\n".join(problems),
+        )
+
+    def test_a_future_round_label_in_a_comment_is_flagged(self) -> None:
+        """注入退化（.py 註解）：超前輪號必須被抓到並指出行號與輪號。"""
+        text = "x = 1\n# R99 併檔：本批把某某鎖參數化過來。\n"
+        self.assertEqual(
+            [(ln, n) for ln, n, _ in future_round_labels("f.py", text, current=71)],
+            [(2, 99)], "超前輪號沒被抓到 ⇒ 本鎖無牙",
+        )
+
+    def test_a_future_round_label_in_a_docstring_is_flagged(self) -> None:
+        """docstring 也在射程內：`DEF-101-762` 那批 R72 有 4 處就住在 docstring。round-label-ok"""
+        text = 'def f():\n    """WHY（R72／DEF-101-762 併檔）：說明。"""\n'
+        self.assertEqual(
+            [n for _, n, _ in future_round_labels("f.py", text, current=71)], [72],
+            "docstring 不在射程內 ⇒ 本次事故有一半抓不到",
+        )
+
+    def test_a_future_round_label_in_a_shell_comment_is_flagged(self) -> None:
+        """`.ps1/.sh` 整行掃：`run_tlc.ps1:47` 那筆就是這個形態。"""
+        self.assertEqual(
+            [n for _, n, _ in future_round_labels("x.ps1", "# R72 由只鎖 A 參數化過來\n", 71)],
+            [72], ".ps1 註解不在射程內",
+        )
+
+    def test_a_legitimate_historical_reference_is_not_flagged(self) -> None:
+        """🔴 還原為綠的關鍵條：**正當的歷史引用不得誤報**。
+
+        沒有這一條，本鎖與「輪號 ≠ 當前輪即紅」那個被否決的寬判準在測試上不可區分——
+        而那個版本會把本 repo 上千處「R60 那輪…」的 WHY 註解全部打紅。
+        """
+        for prose in (
+            "# R70 那輪做了 X，本輪沿用其結論。",
+            "# 🔴 R42／DEF-101-350 起把這串行內抄寫在多個姊妹鎖裡。",
+            f"# R{71} 落地時只鎖了一支。",
+            "# 判準自 R60 起改指 ONBOARDING.md §7。",
+        ):
+            with self.subTest(prose=prose):
+                self.assertEqual(
+                    future_round_labels("f.py", prose + "\n", current=71), [],
+                    "正當歷史引用被誤報 ⇒ 鎖會逼人把正確的句子改錯",
+                )
+
+    def test_a_synthetic_ledger_fixture_in_a_string_literal_is_not_flagged(self) -> None:
+        """雙向坐實掃描面那一刀：同一串字放字串字面值不報、放註解要報。
+
+        只證前者的話，`.py` 改成整檔逐行掃時本鎖不會說話（而那正是 9 筆假紅的來源）。
+        """
+        as_literal = 'row = "| DEF-01-001 | 情境 | open（承接輪次：R99） |"\n'
+        self.assertEqual(
+            future_round_labels("f.py", as_literal, current=71), [],
+            "合成帳本語料被當成輪號標籤 ⇒ 假紅淹沒真訊號",
+        )
+        as_comment = '# 承接輪次：R99\n'
+        self.assertTrue(
+            future_round_labels("f.py", as_comment, current=71),
+            "同一串字寫進註解卻不報 ⇒ 那一刀切過頭了",
+        )
+
+    def test_named_exemption_is_honoured_and_line_scoped(self) -> None:
+        """具名豁免有效，且**只**及於同一行（不得整檔開天窗）。"""
+        exempt = "# 合成語料 R99 條目 round-label-ok\n# R98 這一行沒掛豁免\n"
+        self.assertEqual(
+            [n for _, n, _ in future_round_labels("f.py", exempt, current=71)], [98],
+            "豁免要嘛沒生效、要嘛外溢到下一行",
+        )
+
+    def test_unparseable_python_falls_back_to_whole_file_scan(self) -> None:
+        """fail-closed：`.py` 解析不了就整檔掃，寧可吵也不可瞎。"""
+        broken = "def f(:\n    # R99 本批\n"
+        self.assertTrue(
+            future_round_labels("f.py", broken, current=71),
+            "解析失敗時靜默零命中 ⇒ 只要把檔寫壞就能繞過本鎖",
         )
 
 

@@ -14,12 +14,14 @@ SD_06 W5-T5-3 / T5-10（新增）：
 from __future__ import annotations
 
 import logging
+from collections.abc import Callable
 from dataclasses import asdict, dataclass, field
 from datetime import datetime
-from typing import Any, Callable, Optional
+from typing import Any
 
 from ...utils.checkpoint_manager import PlaybookCheckpoint
 from ..services.state_normalize import diff_normalized
+from ._deprecation import warn_load_checkpoint_deprecated
 
 logger = logging.getLogger("autoclaude.infra.repositories.dual")
 
@@ -38,8 +40,8 @@ class DriftReport:
     source_right: str
     field_drift: dict[str, dict[str, Any]] = field(default_factory=dict)
     severity: str = "info"  # info / warn / critical
-    detected_at: Optional[str] = None
-    run_id: Optional[str] = None
+    detected_at: str | None = None
+    run_id: str | None = None
 
     @property
     def has_drift(self) -> bool:
@@ -48,7 +50,7 @@ class DriftReport:
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
 
-    def apply_pii_filter(self, pii_filter) -> "DriftReport":
+    def apply_pii_filter(self, pii_filter) -> DriftReport:
         """SD_06 W5-T5-20：寫入 drift_log 前必呼叫此方法。
 
         將 field_drift 內每個 left/right 值經 PIIFilter 處理；SECRET 欄位
@@ -114,8 +116,8 @@ class DualStateRepository:
         strict: bool = False,
         read_resolution: str = "yaml_wins",  # yaml_wins / db_wins / fail_loud
         dual_write_mode: str = "file_first",  # T5-10：file_first（v1.x）/ pg_first
-        drift_observer: Optional[Callable[[DriftReport], None]] = None,
-        reconcile_queue: Optional[list[tuple[str, PlaybookCheckpoint]]] = None,
+        drift_observer: Callable[[DriftReport], None] | None = None,
+        reconcile_queue: list[tuple[str, PlaybookCheckpoint]] | None = None,
     ):
         self._primary = primary
         self._shadow = shadow
@@ -165,21 +167,14 @@ class DualStateRepository:
             if self._strict:
                 raise
 
-    def load_checkpoint(self, playbook_id: str) -> Optional[PlaybookCheckpoint]:
+    def load_checkpoint(self, playbook_id: str) -> PlaybookCheckpoint | None:
         """⚠️ Deprecated（SD_06 W5-T5-8）：請改用 load_latest_by_playbook。"""
-        import os, warnings  # noqa: E401
-        if os.environ.get("AUTOCLAUDE_DEPRECATION_WARN") == "1":
-            warnings.warn(
-                "load_checkpoint(playbook_id) is deprecated since SD_06 W5; "
-                "use load_latest_by_playbook(playbook_id) instead.",
-                DeprecationWarning,
-                stacklevel=2,
-            )
+        warn_load_checkpoint_deprecated()
         return self.load_latest_by_playbook(playbook_id)
 
     def load_latest_by_playbook(
         self, playbook_id: str,
-    ) -> Optional[PlaybookCheckpoint]:
+    ) -> PlaybookCheckpoint | None:
         """SD_06 W5-T5-7：載入 playbook_id 最新 checkpoint，含 drift detection。
 
         對 primary backend 採新 API 優先；未實作時 fallback 至舊 load_checkpoint
@@ -207,7 +202,7 @@ class DualStateRepository:
                 )
         return primary_cp or shadow_cp
 
-    def load_by_run_id(self, run_id: str) -> Optional[PlaybookCheckpoint]:
+    def load_by_run_id(self, run_id: str) -> PlaybookCheckpoint | None:
         """SD_06 W5-T5-7：以 run_id 查詢 checkpoint。
 
         策略：primary 優先（File 遍歷），找不到再嘗試 shadow（PG indexed）。
@@ -301,13 +296,13 @@ class DualStateRepository:
         return succeeded
 
     # ──────────────────────────────────────────────
-    def _load_primary_latest(self, playbook_id: str) -> Optional[PlaybookCheckpoint]:
+    def _load_primary_latest(self, playbook_id: str) -> PlaybookCheckpoint | None:
         """W5 過渡：仍呼叫舊 load_checkpoint；三個 backend 已內部委派至
         load_latest_by_playbook，因此行為等價且維持 mock 相容。
         """
         return self._primary.load_checkpoint(playbook_id)
 
-    def _safe_shadow_load(self, playbook_id: str) -> Optional[PlaybookCheckpoint]:
+    def _safe_shadow_load(self, playbook_id: str) -> PlaybookCheckpoint | None:
         try:
             return self._shadow.load_checkpoint(playbook_id)
         except Exception as exc:

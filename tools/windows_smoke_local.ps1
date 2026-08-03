@@ -96,6 +96,46 @@
 $ScriptDir = $PSScriptRoot
 $RepoRoot = [System.IO.Path]::GetFullPath((Join-Path $ScriptDir '..'))
 
+# ── 取證層（DEF-101-761）：本腳本原本全檔只 Write-Host，schtasks 起的 console
+# 輸出直接進虛空 ⇒ 排程紅燈**事後完全不可考**。2026-08-01 與 08-03 兩次
+# LastTaskResult=1 的真因都因此永久佚失，而同一支腳本手動跑是 rc=0
+# （PASS=12 FAIL=0 實測）——「只在排程載具下紅」正是最需要取證的一類，卻剛好沒紀錄。
+#
+# 落點形狀對齊 nightly（AutoClaude/logs/ + `_latest` + 14 天輪替），差別在**歸檔時機**：
+# 本腳本有 3 個前置守門 exit 點 + 2 個結尾 exit 點，PowerShell 的 `exit` 不保證跑
+# finally，逐點加收尾容易漏。故改為「**下一次啟動時**把上一輪的 latest 歸檔成 dated」
+# ——不需要任何收尾 hook，且行程被強制中止（例如 ExecutionTimeLimit 到期）時，
+# 上一輪的內容依然會在下一輪被完整保留下來。
+# transcript 起在三道守門**之前**，故連「守門就 exit」也有紀錄。
+$LogDir = Join-Path $RepoRoot 'AutoClaude/logs'
+$LatestLog = Join-Path $LogDir 'windows_smoke_latest.log'
+try {
+  if (-not (Test-Path -LiteralPath $LogDir)) {
+    New-Item -ItemType Directory -Path $LogDir -Force | Out-Null
+  }
+  # 上一輪的 latest 先歸檔（以它自己的寫入時刻命名，不是現在時刻）
+  if (Test-Path -LiteralPath $LatestLog) {
+    $prev = Get-Item -LiteralPath $LatestLog
+    $archived = Join-Path $LogDir ("windows_smoke_{0}.log" -f $prev.LastWriteTime.ToString('yyyy-MM-dd_HHmmss'))
+    if (-not (Test-Path -LiteralPath $archived)) {
+      Move-Item -LiteralPath $LatestLog -Destination $archived -Force
+    }
+  }
+  Get-ChildItem -LiteralPath $LogDir -Filter 'windows_smoke_*.log' -ErrorAction SilentlyContinue |
+    Where-Object { $_.Name -ne 'windows_smoke_latest.log' -and $_.LastWriteTime -lt (Get-Date).AddDays(-14) } |
+    Remove-Item -Force -ErrorAction SilentlyContinue
+  Start-Transcript -LiteralPath $LatestLog -Force | Out-Null
+  # 排程載具診斷欄——手動跑全綠而排程跑紅時，差異幾乎都落在這幾項。
+  Write-Host "[smoke-env] cwd=$($PWD.Path)"
+  Write-Host "[smoke-env] whoami=$env:USERNAME interactive=$([Environment]::UserInteractive) msys=$($env:MSYSTEM)"
+  Write-Host "[smoke-env] codepage=$([Console]::OutputEncoding.CodePage) psver=$($PSVersionTable.PSVersion)"
+  Write-Host "[smoke-env] python=$((Get-Command python -ErrorAction SilentlyContinue).Source)"
+  Write-Host "[smoke-env] git=$((Get-Command git -ErrorAction SilentlyContinue).Source)"
+} catch {
+  # 取證層失敗**不得**阻斷驗證本身（否則等於用取證換掉被取證的東西）。
+  Write-Host "[smoke-env] ⚠️ 取證層啟動失敗，本輪無 log 落點：$($_.Exception.Message)" -ForegroundColor Yellow
+}
+
 # ── 前置守門：載具必須是原生 PowerShell（DEF-101-511，WHY 見檔頭「載具要求」）─────
 if ($env:MSYSTEM) {
   Write-Host "❌ 偵測到 MSYS 衍生環境（MSYSTEM=$env:MSYSTEM）— 本腳本必須以原生 PowerShell 執行，拒絕在此載具下跑。" -ForegroundColor Red
@@ -121,6 +161,30 @@ if (-not (Test-IsRealPython -CandidateName 'python')) {
 $script:Pass = 0
 $script:Fail = 0
 $script:FailList = @()
+
+# 讀「原生指令輸出的路徑」專用（DEF-101-762）：呼叫期間把主控台輸出編碼釘成 UTF-8。
+# WHY：PowerShell 解碼原生指令 stdout 用的是 `[Console]::OutputEncoding`，而 git／
+# 本 repo 的 python CLI 都以 UTF-8 輸出路徑。在 **cp950**（繁中 Windows 的 OEM 預設，
+# 也就是 schtasks 排程環境）下，含非 ASCII 的路徑會被解成 mojibake——本載具據以
+# Join-Path 出 .git/config 位置就會指到不存在的檔案，把生產缺陷誤報成本載具的紅燈。
+#
+# 🔴 刻意**只**包本載具自己的 git 讀取，絕不在腳本頂端整支釘 UTF-8：受測腳本是以
+# `& $installer`／`& $ipc` **同行程**呼叫的，會直接繼承主控台編碼。整支釘 UTF-8 等於
+# 讓 [5][6] 在任何載具下都拿到 UTF-8 主控台，那個「只在 cp950 顯形」的生產缺陷
+# （DEF-101-762 本體）就再也重現不出來——那是把 tripwire 拆掉，不是修好它。
+function Read-NativeUtf8 {
+  param([Parameter(Mandatory = $true)][scriptblock]$Body)
+  $prevEnc = $null
+  try {
+    if ([Console]::OutputEncoding.CodePage -ne 65001) {
+      $prevEnc = [Console]::OutputEncoding
+      [Console]::OutputEncoding = New-Object System.Text.UTF8Encoding($false)
+    }
+  } catch {
+    $prevEnc = $null   # 無主控台可設；維持既有行為，下游斷言仍會 fail-loud
+  }
+  try { & $Body } finally { if ($null -ne $prevEnc) { [Console]::OutputEncoding = $prevEnc } }
+}
 
 function Pass-Item([string]$Msg) {
   $script:Pass += 1
@@ -159,7 +223,7 @@ function Test-InstallRoundtrip {
   try {
     & $installer
     $rcInstall = $LASTEXITCODE
-    $hp = git config --get core.hooksPath
+    $hp = Read-NativeUtf8 { git config --get core.hooksPath }
     if ($rcInstall -ne 0) {
       Fail-Item "${Label}：安裝執行失敗（rc=${rcInstall}）"
       return
@@ -186,7 +250,7 @@ function Test-InstallRoundtrip {
       # 文件行為），令 $LASTEXITCODE/IsNullOrEmpty 兩道守衛皆偵測不到、把夾雜
       # 旗標字串的多行輸出誤當合法路徑餵進 Join-Path。強制用 @() 收成陣列並斷言
       # 恰好一行，才是能真正攔住此情境的判準。
-      $commonDirLines = @(git -C $TargetRepo rev-parse --path-format=absolute --git-common-dir 2>$null)
+      $commonDirLines = @(Read-NativeUtf8 { git -C $TargetRepo rev-parse --path-format=absolute --git-common-dir 2>$null })
       if ($LASTEXITCODE -ne 0 -or $commonDirLines.Count -ne 1 -or [string]::IsNullOrEmpty($commonDirLines[0])) {
         Fail-Item "${Label}：git rev-parse --git-common-dir 失敗（需 git >= 2.31）——無法定位共享 config"
         return
@@ -212,7 +276,7 @@ function Test-InstallRoundtrip {
         return
       }
     }
-    $hp2 = git config --get core.hooksPath
+    $hp2 = Read-NativeUtf8 { git config --get core.hooksPath }
     if (-not [string]::IsNullOrEmpty($hp2)) {
       Fail-Item "${Label}：解除後 core.hooksPath 仍殘留：${hp2}"
       return
@@ -465,7 +529,7 @@ try {
         # 不認得 --path-format 時不會以非零 rc 報錯，而是把未知旗標原樣 echo 成額外
         # 一行輸出，令 $LASTEXITCODE/IsNullOrEmpty 兩道守衛皆偵測不到。強制用 @()
         # 收成陣列並斷言恰好一行。
-        $commonDirLines = @(git -C $Fake rev-parse --path-format=absolute --git-common-dir 2>$null)
+        $commonDirLines = @(Read-NativeUtf8 { git -C $Fake rev-parse --path-format=absolute --git-common-dir 2>$null })
         if ($LASTEXITCODE -ne 0 -or $commonDirLines.Count -ne 1 -or [string]::IsNullOrEmpty($commonDirLines[0])) {
           Fail-Item '[5] git rev-parse --git-common-dir 失敗（需 git >= 2.31）'
           $step5Ok = $false

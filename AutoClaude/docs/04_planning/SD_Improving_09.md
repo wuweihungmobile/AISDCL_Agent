@@ -230,8 +230,10 @@ CREATE TABLE kb_metrics (
 | R-SD09-F-2 (**新增**) | multi-process trace_id 30 天觀察視窗無法在 W5 達成 | 🔴 | ADR-SD09-001 §2 明訂 W5 = 同 process trace_id GA 即可（multi-process GA 延 W6 / SD_10） |
 | R-SD09-G-1 (**新增**) | KB metric 落地 PG 後跨 storage.mode 三後端切換時 PG metric 表孤兒 | 🟠 | ADR-SD09 補設計「IKbMetricStore port + Local/Pg adapter 雙軌」確保 yaml_only 模式仍可運作 |
 | R-SD09-O-1 (**v0.4 zero-trust audit 新增**) | `tools/observability_ga_check.py` 不存在，但 ADR-SD09-001 §2.5/§2.6 + SD09_Execution_Guide T0-O1 列為 W5 切換硬性條件唯一取證工具 | 🔴 W0 啟動前必修 | (a) W0 T0-O1 補 stub W0 完成；(b) 完整實作延 SD_10。詳見 [risk_log.md §15](../05_development/risk_log.md) + [SD09_Pre_W0_Audit_Findings.md](../05_development/SD09_Pre_W0_Audit_Findings.md) |
-| R-SD09-A-5 (**v0.4 zero-trust audit 新增**) | `alembic_version=0012_yaml_import_staging`，但 0013_drift_log + 0014_config_audit_log 已落地未跑 → 觀察期 #3 取證 SQL 恆失敗 | 🔴 W0 啟動前必修 | W0 G0 預檢加 `alembic upgrade head` step；補 fixture 場景 A fall-back。詳見 [risk_log.md §15](../05_development/risk_log.md) + [SD09_Pre_W0_Audit_Findings.md](../05_development/SD09_Pre_W0_Audit_Findings.md) |
+| R-SD09-A-5 (**v0.4 zero-trust audit 新增**) | `alembic_version=0012_yaml_import_staging`，但 0013_drift_log + 0014_config_audit_log 已落地未跑 → 觀察期 #3 取證 SQL 恆失敗 | 🔴 → 🟢 **根因已消除 2026-08-03** | ~~W0 G0 預檢加 `alembic upgrade head` step~~ → **改列獨立前置動作 `P-0`，不再掛在 G0 底下**（死鎖解除，見 §8.3 D-2）；補 fixture 場景 A fall-back。**事實層**：唯讀實查 `alembic_version=0018_version_kind_discriminator`＝鏈頭、`drift_log` 表存在 ⇒ P-0 對本機為 no-op。詳見 [risk_log.md §15](../05_development/risk_log.md) + [SD09_Pre_W0_Audit_Findings.md](../05_development/SD09_Pre_W0_Audit_Findings.md) |
 | R-SD09-CI-3 (**v0.4 zero-trust audit 新增**) | CI nightly 4 個 job 全 `continue-on-error: true` 共 11 次掩護失敗 6+ 個月；R-SD08-D-1 / PM-#3 監控空跑 = 虛假狀態 | 🔴 重大架構異動風險 | 待 PM 拍板 Z1/Z2/Z3 後執行。詳見 [risk_log.md §15](../05_development/risk_log.md) + [SD09_Pre_W0_Audit_Findings.md](../05_development/SD09_Pre_W0_Audit_Findings.md) |
+| R-SD09-A-5-LOOP (**2026-08-03 新增；同日處置；§8.3 D-2**) | **R-SD09-A-5 的緩解措施自身構成死鎖**：觀察期 #3 達標 ← drift_log 表存在 ← `alembic upgrade head` ← 該緩解措施 (d) 明載「待 **W0 G0 預檢**執行」 ← W0 G0 需 #3 達標。**已實際發生**：2026-06-02 那筆 `drift_log_table_exists=false` 打斷 green_streak，是 #3 未達標的唯一原因 | 🔴 → 🟢 **已解** | **【已落實】把 `alembic upgrade head` 從「W0 G0 預檢」前移為與 G0 無關的獨立前置動作 `P-0`**（不需 G0 授權、不吃 W0 資源、不改應用碼）。同型（閘門擺錯位置）先例＝[ADR-SD09-013](ADR/ADR-SD09-013-w1-entry-gate-unique-sha-relocation.md)。**事實層另已解除**：2026-08-03 唯讀實查 `alembic_version=0018_version_kind_discriminator`＝鏈頭、`drift_log` 表存在 ⇒ P-0 對本機為 no-op，#3 只需再累積 **4 筆**綠紀錄。詳見 §8.3 D-2 + [SD09_Execution_Guide.md §0.1-P0](../05_development/SD09_Execution_Guide.md) + [risk_log.md §15](../05_development/risk_log.md) |
+| R-SD09-GATE-NOCARRIER (**2026-08-03 新增；§8.3 D-4/D-5**) | **判準／deadline 沒有偵測者**：(a) `tools/drift_log_ga_check.py`（#3 權威判準）零 production caller；(b) 舊載體 `g0_gate_check.ps1:41/63` 標籤寫 `#3 obs/drift` 但只查 obs GA；(c) 新載體 nightly G0 三軌 = mutation/ac4/**obs_ga**，不含 drift，且進度行印原始列數 `drift=34/30`（誤導為已達標）與較嚴 counter `mutation=5/7`（誤導為未達標）；(d) §6 PM #6(b)「最遲 2026-06-26」逾期 38 天無人察覺 | 🔴 → 🟡 **部分緩解 2026-08-03** | ✅ **(a)(c)(d 之偵測面) 已修（R71 G-1/G-3）**：`drift_log_ga_check.py` 已由 `Get-DriftGaPass` 接進 nightly 收尾、G0 擴為四軌、進度行四軌分子一律取權威判準值、`$G0_MUTATION_UNIQUE_SHA_TARGET` 已刪改問 `should_lock`（ADR-SD09-013 §3.3 L-3 落地）。<br>🟡 **殘留**：(b) 舊載體 `g0_gate_check.ps1` 標籤錯置（已非唯一管道，危害降級）；**(d) deadline 逾期本身仍無偵測者**（§8.3 D-4 規格已交付、實作未落地）。詳見 [risk_log.md §15](../05_development/risk_log.md) |
 
 ---
 
@@ -263,6 +265,7 @@ CREATE TABLE kb_metrics (
 | **X** | 觀察期 #2 解封路徑（**Pre-W0 audit 新增**）| **X1 補實作 seed_kb.py + 100 query fixture**（~1.5 PD；唯一保留 AC4 真實驗證信號）**— v1.4 SA 補述**：PM 已明確授權 X1 路徑執行；`tools/seed_kb.py`（204 LOC mock 完整 + BGE-M3 graceful stub）+ `tests/fixtures/pgvector_real_queries.json` / `pgvector_real_ground_truth.json` 已 commit；hardcoded skip 已改 conditional fixture-side skip | R-SD09-CI-2 → 🟢 緩解 | 2026-05-19 | PM (zero-trust) | 7883fe3+ |
 | **Y** | 10 項缺檔策略（**Pre-W0 audit 新增**）| **Y1 全部補實作**（F-01~F-09 + ADR-SD09-006；~3~5 PD）| W0 啟動阻塞解除；紅線 ❌21 三項齊備 | 2026-05-19 | PM (zero-trust) | 7883fe3+ |
 | **Z** | CI nightly gate 化（**Pre-W0 audit 新增**）| **Z1 全面移除 continue-on-error**（11 處 + 3 處 \|\| true 保留 mutmut 特性）| R-SD09-CI-3 → 🟢 緩解 | 2026-05-19 | PM (zero-trust) | 7883fe3+ |
+| **9** | 觀察期 #1 unique sha 入場死鎖處置（**2026-08-03 新增**）| **(b) 判定為條件設計缺陷 — 以「kill_rate streak 7/7 已達標」放行 W1；unique source_sha256 ≥ 7 移為 W1 內部（出場）驗收**。理由：一個必須先啟動才能滿足的啟動條件，本身就不是有效的啟動條件。<br>否決之選項：(a) 維持現狀繼續等（數學上不可解，見 [ADR-SD09-013](ADR/ADR-SD09-013-w1-entry-gate-unique-sha-relocation.md) §1.1）| **W1 入場解除阻塞**；⚠️ **這是放寬**：文件字面／nightly G0 counter 的入場門檻由 7 unique sha 降為 5（差額 2 個相異源碼版本移至出場補齊，並新增 X-2「每個 sha 需對應一筆實質變更 commit」之取證要求）。風險承擔者＝PM，風險評估 🟡 中低，見 ADR-SD09-013 §6.2 | **2026-08-03** | **PM（掌舵者）** | *待填* |
 
 > **2026-05-19 PM zero-trust audit 拍板補述（編號 1~8 全數定案 + X/Y/Z 三組新增）**：使用者明確授權「不顧預算徹底補做」 → X/Y/Z 三組皆採最完整路徑；W0 工程量估 4.5~6.5 PD（X1 1.5 + Y1 3~5）；啟動日 2026-06-26 已含緩衝。**Tech Lead 收到本拍板後即可啟動 W0 task breakdown**。
 > 編號 1~8 PM 預設選項拍板理由：(1)(a) 維持原規劃；(2)(a) 紅線 ❌19 禁並行；(3)(b) ≤$200/月租用平衡成本/訊號；(4)(b) W3C TraceContext 相容 OTel；(5)(a) PG 落地 + Port 9→10 + ADR-SD09-006；(6)(b) 2026-06-26 保守緩衝；(7)(a) 10/50/100 × 24h/48h/7d 預設；(8)(a) W4 中段紅線 ❌21 合規。
@@ -309,13 +312,58 @@ CREATE TABLE kb_metrics (
 
 ### 8.1 三觀察期一覽表
 
-> **🔴 SSOT 註記（R42 audit 修復，2026-05-28）**：本 §8.1/§8.2 為 2026-05-20 v1.0 快照，觀察期條件/日期之 **live SSOT 以 [SD09_Execution_Guide.md §0.1](../05_development/SD09_Execution_Guide.md) + 最新 RoundXX NextAction 為準**。下表已同步以下後續拍板：(1) **#2 已由 [ADR-SD09-008 v0.4](ADR/ADR-SD09-008-ac4-tolerant-track.md) 2026-05-25 拍板**改為 **60ms tolerant 升級門檻、結束日原投影 2026-06-08 → R55 forensic 訂正 ~2026-06-16**（`ac4_progress_check.filter_recent` 為過去 14 日曆天滾動窗口需 14 連續筆，對 schtasks 漏跑日 05-22/23、05-30/31、06-02 高度敏感，非「+1/日」累計；最後缺口 06-02 → 需 06-03~06-16 連續無缺口，任一漏跑即順延）（原「pg_real skip 阻塞 / X1-X3 拍板」缺口已透過 tolerant 雙軌制解決，不再阻塞）；(2) **#1 kill_rate 條件已達標**（streak 7/7 > 68% effective threshold，[ADR-SD09-009 §11](ADR/ADR-SD09-009-mutmut-suspicious-policy.md)），唯一剩餘為 **unique sha 源碼演進閘門**（R47 audit 訂正 §11.6：需 W1 active 改 token_guard 源碼，idle 期凍結不達標，非「自然多日 commit」可解）。
+> **🔴 SSOT 註記（R42 audit 修復，2026-05-28）**：本 §8.1/§8.2 為 2026-05-20 v1.0 快照，觀察期條件/日期之 **live SSOT 以 [SD09_Execution_Guide.md §0.1](../05_development/SD09_Execution_Guide.md) + 最新 RoundXX NextAction 為準**。下表已同步以下後續拍板：(1) **#2 已由 [ADR-SD09-008 v0.4](ADR/ADR-SD09-008-ac4-tolerant-track.md) 2026-05-25 拍板**改為 **60ms tolerant 升級門檻、結束日原投影 2026-06-08 → R55 forensic 訂正 ~2026-06-16**（`ac4_progress_check.filter_recent` 為過去 14 日曆天滾動窗口需 14 連續筆，對 schtasks 漏跑日 05-22/23、05-30/31、06-02 高度敏感，非「+1/日」累計；最後缺口 06-02 → 需 06-03~06-16 連續無缺口，任一漏跑即順延）（原「pg_real skip 阻塞 / X1-X3 拍板」缺口已透過 tolerant 雙軌制解決，不再阻塞）；(2) **#1 已由 [ADR-SD09-013](ADR/ADR-SD09-013-w1-entry-gate-unique-sha-relocation.md) 2026-08-03 PM 拍板 (b) 解除入場阻塞**（unique sha ≥ 7 移為 W1 出場驗收；R47 audit §11.6「需 W1 active 改源碼、idle 凍結」之敘述經 2026-08-03 實查已被事實推翻——W1 未啟動期間 token_guard 源碼仍自然演進出 4 個新 sha）。
 
 | # | 觀察期 | 起算日 | 結束日 | 失敗回退 |
 |---|--------|--------|--------|---------|
-| **#1** | mutation pilot TokenGuardPlugin 連續 7 次達 ≥ 70%（target 75% − tolerance 5% − ±2pp = **68% effective threshold**）**+ 紀律 #12 tail 7 筆 unique source_sha256 ≥ 7**（本地透過 Docker / Linux mutmut，見 ADR-SD09-002 §2.7）。**kill_rate 條件已達標**（streak 7/7），剩 unique sha 源碼演進閘門 | 2026-05-19 | kill_rate 已達標；unique sha 待 W1 改 token_guard 源碼（§11.6） | < 60% → SD_10 接續 pilot（不阻塞 SD_09 W0；R-SD08-PM-#3 + R-SD09-CI-1）|
-| **#2** | AC4 14 天 nightly 全綠（本地 `tools/run_local_nightly.ps1` artifact 累計）— **升級門檻 p95 < 60ms tolerant**（ADR-SD09-008 v0.4 ACCEPTED 2026-05-25）；strict 50ms 降為觀察指標 `strict_streak` 持續採集 | **2026-05-26**（新口徑首筆 jsonl）| **2026-06-08**（14 天累計達標窗口）| 黃線 3 次 / 紅線 5 次告警；未達 → W0 T0-C2 延期或議題 C 延 SD_10 |
-| **#3** | drift_log 30 天零事件（SD_08 W5 落地起算；本地腳本 drift_log-scan stage 每日掃描）| 2026-05-18 | 2026-06-17（最遲對齊主規劃 2026-06-24）| 任一 drift > 0 → W5 雙條件未達 → fall-back R-SD09-A-4 |
+| **#1** | mutation pilot TokenGuardPlugin 連續 7 次達 ≥ 70%（target 75% − tolerance 5% − ±2pp = **68% effective threshold**）。**✅ 已達標，不再阻塞 W1**（[ADR-SD09-013](ADR/ADR-SD09-013-w1-entry-gate-unique-sha-relocation.md) 2026-08-03 PM 拍板 (b)）：入場判準 = E-1 tail 7 筆 kill_rate 全 ≥ 68%（實測最小 **0.7071**）+ E-2 `should_lock()` 回 `True` 且 baseline 已寫入（實測 `(True, 0.7071…)`；`.mutation_baseline.toml` `token_guard = 0.7071` **鎖定於 2026-07-22**，取證 `logs/nightly_2026-07-22_183551.log:261`）。**紀律 #12 tail 7 筆 unique source_sha256 ≥ 7 已移為 W1 出場驗收 X-1/X-2**（現值 5 unique + 2 筆 legacy 缺欄位）。本地透過 Docker / Linux mutmut，見 ADR-SD09-002 §2.7 | 2026-05-19 | **✅ 2026-07-22 達標（baseline locked）** | < 60% → SD_10 接續 pilot（不阻塞 SD_09 W0；R-SD08-PM-#3 + R-SD09-CI-1）；W1 出場 X-1 未達 → ADR-SD09-013 §5.1 三階梯處置 |
+| **#2** | AC4 14 天 nightly 全綠（本地 `tools/run_local_nightly.ps1` artifact 累計）— **升級門檻 p95 < 60ms tolerant**（ADR-SD09-008 v0.4 ACCEPTED 2026-05-25）；strict 50ms 降為觀察指標 `strict_streak` 持續採集。**⏳ 未達標：2026-08-03T02:57Z 實測 `observation_days=8/14`、`ready_for_labeled_pr=false`**；判準本身之日曆連續問題由 [ADR-SD09-012](ADR/ADR-SD09-012-ac4-observation-decouple-calendar.md) 處理 — **PM 已於 2026-08-03 拍板**採用 gap-tolerant green_streak（門檻仍 14、反作弊零改動），🔴 **判準 code 尚未實作（NOT LANDED）**，落地清單見該 ADR §7.1 | **2026-05-26**（新口徑首筆 jsonl）| ~2026-06-16（R55 forensic 訂正；實際未達，滾動窗口任一漏跑即順延）| 黃線 3 次 / 紅線 5 次告警；未達 → W0 T0-C2 延期或議題 C 延 SD_10 |
+| **#3** | drift_log 30 天零事件（SD_08 W5 落地起算；本地腳本 drift_log-scan stage 每日掃描）。**⏳ 未達標，但已無阻礙、會自然到達**（見下方 🔴 #3 複核註記 + §8.3 D-2）| 2026-05-18 | **未達**（2026-08-03T02:57Z 實測 `green_streak=26 < window=30`，rc=1）→ **尚差 4 筆綠紀錄**；根因（alembic head 落後）**已消除**，**不需人工介入**，最快 4 個採集日達標 | 任一 drift > 0 → W5 雙條件未達 → fall-back R-SD09-A-4 |
+
+> **🔴 #3 複核註記（2026-08-03 zero-trust 複核，推翻先前「早已達標」之口語判斷）**
+>
+> 判準原文為「30 **天**零事件」，其**權威判定工具**為 [`tools/drift_log_ga_check.py`](../../tools/drift_log_ga_check.py)：
+> `green_streak` = 由最後一筆往回**連續** `passed=true` 的**紀錄筆數**（每筆 = 一個 UTC 採集日，同日去重），需 ≥ `--window`（預設 **30**）。
+> `passed` 之定義來自 [`tools/drift_log_snapshot.py:55`](../../tools/drift_log_snapshot.py) `build_record()`：`drift_log_table_exists AND severity_non_info_count == 0`。
+>
+> **初次實跑**（`.venv/Scripts/python.exe tools/drift_log_ga_check.py --json`，rc=1；**⚠️ 此為 02:00 nightly 寫入前之值，已被下方複核重測取代**）：
+> ```json
+> {"status": "observing", "green_streak": 25, "window": 30, "total_records": 34,
+>  "last_failure_reason": "drift_log_table_exists=False (alembic head 落後)"}
+> ```
+> **🔄 2026-08-03T02:57Z 複核重測**（同指令、於 `AutoClaude/` 下執行，rc=**1**）：
+> ```json
+> {"status": "observing", "green_streak": 26, "window": 30, "total_records": 35,
+>  "history_path": ".drift_log_history.jsonl",
+>  "last_failure_reason": "drift_log_table_exists=False (alembic head 落後)"}
+> ```
+> 差異來源＝**2026-08-03 02:00 那輪 nightly**（`logs/nightly_2026-08-03_020001.log`）寫入第 35 筆（綠）⇒ streak 25 → **26**，**距門檻 30 尚差 4 筆**。
+> ⚠️ `last_failure_reason` 仍顯示舊訊息屬**正常**：該欄描述的是**歷史上打斷 streak 的那一筆**（2026-06-02），不是現況；alembic head 現已在鏈頭（見 §8.3 D-2）。
+>
+> **判準比對（以複核重測值為準）**：`.drift_log_history.jsonl` **35 筆**（2026-05-21 ~ 2026-08-02；初次實跑時為 34 筆），
+> **`severity_non_info_count` 全 35 筆皆為 0** — 真實漂移事件數確為零；
+> **但** 2026-06-02 那筆 `drift_log_table_exists: false` / `passed: false`（採集失敗，非漂移事件），
+> 依 `_compute_green_streak` 語意**打斷 streak**，其後只累積到 **26** 筆 → **26/30 未達標，不可打勾**。
+>
+> **✅ 2026-08-03 後續（D-2 已解）**：alembic head 落後這個根因**現已不存在** —— 唯讀實查 `alembic_version = 0018_version_kind_discriminator`＝`alembic/versions/` 鏈頭、`drift_log` 表已建（total=0 / non_info=0）。
+> 治理層亦已修：`alembic upgrade head` 移出 G0 前置改列獨立 `P-0`。
+> ⇒ **#3 不需任何人工介入，只要再累積 4 筆綠紀錄（最快 4 個採集日）即自然達標**；✅ **且已有偵測者會通知你它到了**（D-5 已於 R71 G-3 解除，nightly G0 四軌納入 drift）。詳見 §8.3 D-2 處置框。
+>
+> **⚠️ 這筆採集失敗正是 [R-SD09-A-5](../05_development/risk_log.md) 風險的實際發生**（alembic head 落後 → drift_log 表不存在），
+> 而該風險的緩解措施 (d) 明載「待 **W0 G0 預檢**執行 `alembic upgrade head`」— W0 G0 又需 #3 達標 → **同型死鎖第二例**（見 §8.3）。
+>
+> **🔴 治理缺口（為何一個「看起來達標」的觀察期兩個月無人處理）— 2026-08-03 收尾複核：4 項中 3 項已修**：
+> 1. ✅ **已修（R71 G-3）**。〔原述〕`tools/drift_log_ga_check.py` 自 2026-05 建立至今 **零 production caller**。
+>    〔現況實查〕`run_local_nightly.ps1` 新增 **`Get-DriftGaPass`**，以 `--json` 呼叫該工具並做 rc↔status 一致性檢查（三態 `Ok/Pass/Error`）。**判準工具現在每晚都被呼叫。**
+> 2. 🔴 **仍未修**。舊載體 `tools/g0_gate_check.ps1:41/63` 把該檢查標為 `#3 observability/drift`，但實際只查 `observability_ga_check`（可觀測性 GA 軌）— **標籤與內容不符**，#3 被 obs 軌頂替。
+>    〔2026-08-03 實查確認仍為真〕該檔 L41 註解 `--- #3 observability/drift (need green_streak>=30) ---`、L63 `#3 obs/drift not ready`，其 VERDICT 只判 `$ac4_ready -and $obs_pass`，**不含 drift**。
+>    ⚠️ 惟其**危害已大幅下降**：新載體（nightly）已獨立涵蓋 drift 軌，舊載體不再是唯一管道。**建議處置：標籤改為 `#3 observability GA（非 drift）`，或直接標記該檔為 superseded。**
+> 3. ✅ **已修（R71 G-3）**。〔原述〕新載體 G0 判定為 **mutation / ac4 / obs_ga** 三軌，不含 drift。
+>    〔現況實查〕已擴為 **四軌**：`$g0MutOk -and $g0Ac4Ok -and $g0ObsOk -and $g0DriftOk`；drift 未達標時會列入 `$g0Gaps` 並印出
+>    `drift_log GA green_streak {n} < window {m}（採集失敗＝table_missing 也會打斷 streak，未必是真漂移事件）`。**#3 的達標與否現在有偵測者。**
+> 4. ✅ **已修（R71 G-1 / G-3）**。〔原述〕進度行 `drift=34/30` 印原始列數（方向：看似達標）、`mutation=5/7 unique-sha` 比權威 `should_lock` 嚴（方向：看似未達標）——一行同時兩個方向失真。
+>    〔現況實查〕`END observation progress:` 四軌分子**一律取權威判準值**：`drift={green_streak}/{window}`、`mutation={should_lock 布林判定}`（`tail unique-sha n/7` 降為併印進度、明文註記「那**不是**判準本身」）；
+>    `records=` 保留為 jsonl 原始列數，**僅供 delta 取證、絕不當分子**。ac4 軌亦已標明 `rolling-window-days` 語意（R69 S-1b）。
 
 > **採集環境變更（2026-05-19）**：GitHub Actions 額度受限 → 三觀察期改本地 `tools/run_local_nightly.ps1`（Windows Task Scheduler 每日 02:00 排程）；觀察期 #1 mutmut 透過 Docker `python:3.11-slim` 跑解 Windows 原生限制。觀察期 #2 原阻塞於 SD_07 PM #2 遺留缺口（seed_kb.py + 100 query fixture），**已透過 ADR-SD09-008 v0.4 tolerant 雙軌制（60ms tolerant 升級門檻 + strict/observation 觀察指標）於 2026-05-25 解除阻塞**，2026-05-26 起以新口徑累計；詳見 [SD09_W0_AC4_Implementation_TaskBreakdown.md](../05_development/SD09_W0_AC4_Implementation_TaskBreakdown.md) + R-SD09-CI-1。
 
@@ -327,9 +375,28 @@ CREATE TABLE kb_metrics (
 ### 8.2 啟動條件清單
 
 ```
-[~] (1) 觀察期 #1 mutation TokenGuardPlugin ≥ 70% — **kill_rate 條件已達標**（streak 7/7，76.51% > 68% effective threshold，ADR-SD09-009 §11）；剩 unique sha 源碼演進閘門 ⏳（需 W1 active 改 token_guard 源碼；idle 期凍結不達標，§11.6）
-[  ] (2) 觀察期 #2 AC4 14 天 nightly 全綠 ⏳ 累計中（ADR-SD09-008 v0.4 60ms tolerant 升級門檻；2026-05-26 起新口徑累計至 2026-06-08）
-[  ] (3) 觀察期 #3 drift_log 30 天零事件 ⏳ 累計中（W0 alembic 0015_merge 落地後 drift_log 表已 ready，累計至 2026-06-17）
+[x] (1) 觀察期 #1 mutation TokenGuardPlugin ≥ 70% — ✅ **已達標 2026-07-22**（ADR-SD09-013 PM 拍板 (b)）
+        E-1 tail 7 筆 kill_rate 全 ≥ 68% effective threshold（實測最小 0.7071；tail7 = 0.745/0.745/0.7517/0.7651/0.7625/0.7174/0.7071）
+        E-2 should_lock() = (True, 0.7071428571428572) + .mutation_baseline.toml token_guard = 0.7071
+            取證：logs/nightly_2026-07-22_183551.log:261 `::notice::token_guard baseline locked at 70.71%`
+                  logs/nightly_2026-08-01_101807.log:375（同）；baseline commit 3c612ad
+        ⚠️ unique source_sha256 ≥ 7 **已移為 W1 出場驗收 X-1/X-2**（現值 5 unique + 2 筆 legacy）— 這是放寬，非修 bug，見 ADR-SD09-013 §6
+[  ] (2) 觀察期 #2 AC4 14 天 nightly 全綠 ⏳ **未達標**（2026-08-03T02:57Z 實測 observation_days=8/14、ready_for_labeled_pr=false、reasons=["觀察期未滿（8/14 天）"]）
+        → **W1 啟動的唯一「無爭議」剩餘阻塞項**；判準之日曆連續問題由 ADR-SD09-012 處理 — **PM 已拍板 2026-08-03**，🔴 判準 code 待實作（ADR §7.1 L-1~L-7）
+        🔴 **拍板後訂正（2026-08-03 Architect 實測）**：該方案另有第二處放寬＝**證據新鮮度**（移除 `filter_recent` 即移除 `evaluate()` 唯一時鐘，採集停擺會永久假綠）。
+           **方向不變，但落地必須連 L-7 獨立 staleness 判準一起做**；只做 L-1 不做 L-7 = 淨拆一道防線
+[  ] (3) 觀察期 #3 drift_log 30 天零事件 ⏳ **未達標但已無阻礙**（2026-08-03T02:57Z 實測 green_streak=**26** < window=30；total_records=**35**；
+        last_failure_reason="drift_log_table_exists=False (alembic head 落後)"，2026-06-02 採集失敗打斷 streak）→ **尚差 4 筆**
+        註：severity_non_info_count 全 35 筆皆 0 — 真實漂移事件數為零，破 streak 者為採集失敗而非漂移
+        ✅ **根因已消除（§8.3 D-2）**：唯讀實查 alembic_version=0018_version_kind_discriminator＝鏈頭、drift_log 表已建；
+           `alembic upgrade head` 已移出 G0 前置改列獨立 P-0。**不需人工介入，最快 4 個採集日自然達標。**
+           ⚠️ `last_failure_reason` 仍印舊訊息屬正常（描述的是歷史那一筆，非現況）；✅ **已有載體會通知達標**（D-5 已修，R71 G-3 接入 nightly 四軌）
+        ⚠️ **判準衝突未決（不自行折衷，提請 PM）**：依本 §8.2 字面，(3) 是 W0/W1 啟動條件之一 → **未達標即阻塞 W1**；
+           ✅ **nightly 活載體現已把 drift 納入 G0 判定**（四軌 = mutation / ac4 / obs_ga / **drift**，R71 G-3；原三軌不含 drift 的敘述已過期），
+           **即活載體現在的立場是「#3 算 W1 入場條件」**；但 ADR-SD09-001 §2 / R-SD09-A-4 把 #3 定位為 **W5 db_only 切換雙條件**。
+           ⇒ **衝突並未消失，只是換了形狀**：原本是「載體不判 vs 文件說要判」，現在是「載體判了 vs ADR-001 說那是 W5 條件」。**仍需 PM 裁定歸屬。**
+           「#3 究竟是 W1 入場條件還是純 W5 條件」需 PM 裁定——此問題與 ADR-SD09-013 剛處理的 #1 屬**同一類**（閘門擺錯位置）
+        判準複核全文與治理缺口見 §8.1 下方 🔴 註記
 [x] (4) Tech Lead 提交 SD_09 W0 task breakdown（A + C + E + F 三方研究 + G 三方研究）✅ 2026-05-20
 [x] (5) 本文件 §6 PM 拍板 8 項全數填入並形式核准 → v1.0 ✅ 2026-05-20
 [x] (6) 本文件 §7 三方研究意見摘要（§7.1~§7.4）填入並四方審查 APPROVED ✅ 2026-05-20（13 bullet）
@@ -340,7 +407,106 @@ CREATE TABLE kb_metrics (
 ```
 
 > **預估啟動日**：**2026-06-18 或之後**（最晚觀察期結束日 2026-06-17 + ≥ 1 工作日提前期）；最遲 **2026-06-26**（PM 拍板 #6 (b) 保守緩衝）。
+> **🔴 逾期實況（2026-08-03）**：最遲啟動日 **2026-06-26 已逾期 38 天**，且**無任何機制偵測此 deadline 被跨過**（deadline 為死信，見 §8.3 D-4）。
 > **絕對禁止**：在啟動條件未齊備前推進 PG db_only 切換（ADR-SD08-005 §2.2 雙條件未達禁切換 + ADR-SD09-001 §2 同步）。
+
+### 8.2.1 剩餘阻塞項總結（2026-08-03 實測；每個數字皆本輪真跑）
+
+| 條件 | 權威判準工具 | 實測 | 阻塞 W1？ | 處置 |
+|---|---|---|---|---|
+| #1 mutation | `mutation_baseline_lock.should_lock()` | `(True, 0.7071…)`；baseline `0.7071` 鎖定於 2026-07-22 | ❌ 不阻塞 | ✅ ADR-SD09-013 已結（PM 拍板 (b)） |
+| #2 AC4 | `ac4_progress_check.py --json` | `observation_days=8/14`、`ready_for_labeled_pr=false`（2026-08-03 複核） | ✅ **阻塞** | ADR-SD09-012 **PM 已拍板 2026-08-03**；🔴 **判準 code 待實作**（ADR §7.1 落地清單 L-1~**L-7**）。<br>🔴 **拍板後訂正**：Architect 實測證偽「反作弊零改動」——移除 `filter_recent` 會連帶拆掉 `evaluate()` 唯一的時鐘，採集停擺時將**永久假綠**（一年前舊資料實測回 `ready=True`）。方向不變，但**落地必須加做 L-7 獨立 staleness 判準** |
+| #3 drift_log | `drift_log_ga_check.py --json`（**須於 `AutoClaude/` 下執行**，預設 history 為相對路徑） | `green_streak=26 < window=30`（rc=1，2026-08-03 複核）→ **尚差 4 筆** | ⚠️ **爭議中** — §8.2 字面說阻塞、**nightly 活載體現已納入 G0 判定**、ADR-SD09-001 定位為 W5 條件 | **待 PM 裁定歸屬**；✅ **根因已解（D-2）**：alembic 已在鏈頭，不需人工介入、最快 4 個採集日達標；✅ **活載體已補（D-5，R71 G-3）** |
+| — | ✅ **已修（R71 G-3）**〔原：活載體缺口〕`drift_log_ga_check.py` 零 production caller | 現況實查：`run_local_nightly.ps1` 的 `Get-DriftGaPass` 以 `--json` 呼叫它並做 rc↔status 一致性檢查 | — | ✅ **已接入 nightly 收尾 G0 四軌判定** |
+| — | ✅ **已修（R71 G-1/G-3）**〔原：活載體失真〕nightly 進度行 `drift=34/30`、`mutation=5/7` | 現況實查：`drift={green_streak}/{window}`、`mutation=should_lock 權威判定`；原始列數改以 `records=` 併印且**絕不當分子** | — | ✅ **四軌分子一律取權威判準值** |
+
+**結論**：**W1 啟動的無爭議剩餘阻塞項＝觀察期 #2（AC4 8/14）一項**。判準已由 **PM 於 2026-08-03 拍板**改為 gap-tolerant green_streak（ADR-SD09-012），
+🔴 **但判準 code 尚未落地** —— 在落地之前，AC4 仍以舊判準卡在 8/14，**W1 實際上仍未解鎖**。落地清單見 [ADR-SD09-012 §7.1](ADR/ADR-SD09-012-ac4-observation-decouple-calendar.md)（**L-1~L-7**，其中 **L-7 為 L-1 的必要配套**）。
+
+> 🔴 **落地前必讀**：ADR-SD09-012 拍板後經 Architect 實測，發現該方案**另有第二處放寬＝證據新鮮度（liveness）**，
+> 且**與安全有關**——`filter_recent` 是 `evaluate()` 唯一參照「現在」的項，移出閘門後達標退化為純檔案內容函式，
+> 採集器無聲死掉時 `green_streak` 會永久凍結、`ready` 永久為 `True`（實測：一年前資料回 `ready=True`）。
+> **PM 是在不完整的揭露上拍板的。方向（gap-tolerant）仍然有效，但落地 DoD 已加掛 L-7 為必要條件。**
+
+#3 是否同為 W1 入場阻塞項尚有判準衝突，需 PM 一併裁定；無論裁定結果為何：
+- #3 目前**確實未達標（26/30，尚差 4 筆）**，且它作為 **W5 雙條件**的角色不受任何裁定影響；
+- 但 **#3 已不再需要任何人工動作** —— 死鎖 D-2 已解、alembic 已在鏈頭，只需等 4 個採集日（§8.3 D-2 處置框）。
+
+### 8.3 同型死鎖盤點（2026-08-03 全文掃描 §4 / §6 / §8）
+
+> **形態定義**：「條件 C 的滿足，取決於某活動 A；而 A 又要等 C 通過才會發生。」
+> ADR-SD09-013 處理的 #1 是第一例。全文掃描結果如下——**這種形態不只一處**。
+
+| # | 死鎖 | 循環 | 嚴格程度 | 狀態 |
+|---|------|------|---------|------|
+| **D-1** | 觀察期 #1 unique sha | W1 啟動 ← #1 達標 ← unique sha ≥ 7 ← 改 token_guard 源碼 ← 「唯有 W1 active」（ADR-SD09-009 §11.6） | **文件層為硬循環；現實層為軟循環**（源碼在 W1 外仍會演進，但約每 14 天才 1 個 sha） | ✅ **已解** — ADR-SD09-013（PM 拍板 (b) 2026-08-03） |
+| **D-2** | 觀察期 #3 ← alembic head（**R-SD09-A-5**） | #3 達標 ← drift_log 表存在 ← `alembic upgrade head` ← 該緩解措施 (d) 明載「待 **W0 G0 預檢**執行」 ← W0 G0 需 #3 達標 | **硬循環**，且**已實際發生**：2026-06-02 那筆 `drift_log_table_exists=false` 打斷 streak，是 #3 未達標的**唯一原因** | ✅ **已解 2026-08-03**（見下方 D-2 處置框）|
+| **D-3** | 觀察期 #2 AC4 滾動窗口（同族，非嚴格循環） | #2 達標 ← 14 個**日曆天連續**無缺口 ← nightly 每天不漏跑 ← schtasks 不受睡眠／補跑跨日／`MultipleInstances=IgnoreNew` 影響（三者皆不在 SD_09 控制範圍） | **非循環，但同族「永遠到不了」**：任一漏跑即整段重算 | 🟡 **判準已由 PM 拍板改為 gap-tolerant（2026-08-03，ADR-SD09-012）**；🔴 **code 尚未落地**，落地後方解。<br>🔴 **注意藥方本身的副作用**：gap-tolerant 拿掉的不只是「相鄰」，還連帶拿掉 `evaluate()` 唯一的時鐘 ⇒ 會從「永遠到不了」翻轉成「**永遠假裝到了**」（D-6 同族反向）。**必須配 ADR-SD09-012 §7.1 L-7 staleness 判準**|
+| **D-4** | 啟動 deadline 自身無載體（同族「條件沒有偵測者」） | §6 PM #6(b)「最遲 2026-06-26」 ← 需有人／有機制在該日檢查 ← **無任何載體負責**（原 `AutoClaude_SD09_G0_GateCheck` 為一次性 TimeTrigger，2026-06-29 跑一次後 `NextRunTime` 永久空白） | 已逾期 **38 天**無人察覺 | 🟡 **規格已交付、待實作**（見下方 D-4 規格框）。實作歸屬＝`run_local_nightly.ps1`（gate-align 那一路），**本輪刻意不動該檔以免衝突** |
+| **D-5** | #3 權威判準工具無呼叫者（同族「判準沒有載體」） | #3 打勾 ← 有人跑 `drift_log_ga_check.py` ← **零 production caller**；新舊兩個活載體都不查它（舊載體 `g0_gate_check.ps1:41/63` 標籤寫 `#3 obs/drift` 但實際查 obs GA；新載體 nightly G0 三軌 = mutation/ac4/obs_ga） | 兩個月無人打勾／無人發現未達標 | ✅ **已解（R71 G-3，2026-08-03 複核實查）** — nightly 新增 `Get-DriftGaPass` 呼叫該工具，G0 判定由三軌擴為**四軌**（`$g0MutOk -and $g0Ac4Ok -and $g0ObsOk -and $g0DriftOk`），進度行分子改印權威 `green_streak/window`。<br>🟡 **殘留**：舊載體 `g0_gate_check.ps1:41/63` 的標籤錯置仍在（見 §8.1 治理缺口第 2 點），但已非唯一管道，危害降級 |
+
+#### ✅ D-2 處置紀錄（2026-08-03 落實）
+
+**治理修法**：`alembic upgrade head` **自「W0 G0 預檢」移出，改列為獨立前置動作 `P-0`**（[SD09_Execution_Guide.md §0.1-P0](../05_development/SD09_Execution_Guide.md)）。
+
+**判別準則（可複用於其他誤掛的前置項）**：
+> **「該動作若提前做，會不會讓 G0 的判定失真？」** —— 否 ⇒ 它就**不該掛在 G0 底下**。
+> `alembic upgrade head` 只是把 schema 補到與 `alembic/versions/` 一致，**不改任何應用程式碼、不影響任何觀察期的量測語意**，
+> 提前做只會讓 #3 的採集**恢復正常**。把它掛在 G0 下純屬**順手歸類**，卻製造了硬循環。
+
+**事實層複核（唯讀，未執行任何 upgrade）— 2026-08-03T02:57Z**：
+
+| 查核項 | 指令 | 結果 |
+|---|---|---|
+| DB 目前版本 | `docker exec autoclaude_pg psql -U autoclaude -d autoclaude -tAc "SELECT version_num FROM alembic_version;"` | **`0018_version_kind_discriminator`** |
+| `alembic/versions/` 鏈頭 | 解析 18 支 migration 的 `revision`／`down_revision` | **`0018_version_kind_discriminator`**（`0015` 為 merge revision，合併 `0003`+`0014`；其後 `0016→0017→0018` 單線） |
+| drift_log 表 | `SELECT to_regclass('public.drift_log');` | **`drift_log`（存在）** |
+| drift_log 內容 | `SELECT count(*) , count(*) FILTER (WHERE severity <> 'info') FROM drift_log;` | **total=0 / non_info=0** |
+
+⇒ **「alembic head 落後」這件事現在已不存在。** DB 版本 = 鏈頭，`drift_log` 表已建。
+
+**因此 #3 的結論**：
+- 不需要任何人工介入、不需要跑 `alembic upgrade head`（對本機為 **no-op**）；
+- `green_streak=26/30`（2026-08-03T02:57Z 實測，rc=1）⇒ **只要再累積 4 筆綠紀錄即自然達標**；
+- 每 UTC 日上限 1 筆（M-05）⇒ **最快 4 個採集日**。
+- ✅ 且這 4 筆**現在有偵測者了**——D-5 已於 R71 G-3 解除（nightly 收尾 `Get-DriftGaPass` → G0 四軌）。**D-2 與 D-5 皆已解。**
+
+> **仍需使用者執行的指令：無。**
+> 若在**全新環境／fresh clone** 上重建（P-0 對該環境非 no-op），才需要：
+> ```powershell
+> docker compose -f AutoClaude/docker-compose.ci.yml up -d
+> $env:AUTOCLAUDE_DB_DSN = "postgresql+asyncpg://autoclaude:autoclaude@localhost:5432/autoclaude"
+> $env:AUTOCLAUDE_ALLOW_INSECURE_DB = "1"
+> cd AutoClaude ; alembic upgrade head
+> alembic current   # 應印 0018_version_kind_discriminator
+> ```
+
+#### 🔴 D-4 規格（deadline 逾期偵測）— **交 gate-align 那一路實作，本輪不動 `run_local_nightly.ps1`**
+
+**問題**：2026-06-26 的啟動 deadline 逾期 **38 天**完全無人察覺。原偵測者是一次性排程任務 `AutoClaude_SD09_G0_GateCheck`（TimeTrigger 2026-06-29 觸發一次後 `NextRunTime` 永久空白），該任務本輪已移除。
+
+**設計原則**：deadline 是**日期條件**，不是量測條件 —— 它不需要新採集、不需要新工具，**只需要一個每晚都會跑的東西去看一眼時鐘**。nightly 收尾的 G0 判定（R71 後為**四軌**：mutation / ac4 / obs_ga / drift）已經是這個活載體，**掛上去即可，不要另造載具**（另造 = 又一個沒人看的載具，重演 D-4 本身）。
+
+| 項目 | 規格 |
+|---|---|
+| **落點** | `tools/run_local_nightly.ps1`，緊接既有 `[G0-READY]` / `[G0-NOT-READY]` 判定之後（同一區塊，共用已算好的三軌結果） |
+| **常數** | `$SD09_G0_DEADLINE = [datetime]'2026-06-26'`（單一來源，對齊 §6 PM #6(b)） |
+| **判定** | `$overdueDays = ([datetime]::Now.Date - $SD09_G0_DEADLINE).Days` |
+| **輸出（未逾期）** | 不印，或印 INFO `[G0-DEADLINE] 距最遲啟動日 N 天` |
+| **輸出（已逾期且 G0 未 READY）** | **`W()` WARN**：`[G0-OVERDUE] SD_09 W0 G0 最遲啟動日 2026-06-26 已逾期 {N} 天，且三軌尚未全綠 — 需 PM 裁示：延期／降級／改判準（gaps: …）` |
+| **輸出（已逾期但 G0 已 READY）** | **`W()` WARN**：`[G0-OVERDUE-READY] 已逾期 {N} 天但三軌全綠 — 應立即執行 G0 動作清單並更新 deadline` |
+| **rc 影響** | 🔴 **不進 `finalFailures`、不影響 exit code**。理由同既有 G0 判定註解：deadline 逾期是**人工決策訊號**，不是 nightly 健康度；污染 rc 會讓每晚都紅，違反紀律 #1 |
+| **WARN 而非 INFO 的理由** | 與 G0-NOT-READY 相反：`NOT-READY` 是**預期中的穩定狀態**（會持續數週，每晚 WARN 會訓練人忽略 WARN），而**逾期是異常且會單調惡化**——它**應該**越來越刺眼。這是本規格與既有 G0 行文刻意分歧之處，**實作者請勿「順手對齊」成 INFO** |
+| **測試鎖** | 於 `tests/tools/` 補 pure-function 版判定（例：`sd09_deadline_check.py` 或 ps1 helper 的 Python 對等）≥ 3 case：未逾期／逾期+未 READY／逾期+已 READY。**須做注入退化雙向驗證**（把 deadline 改到未來 → 必不觸發；改到過去 → 必觸發） |
+
+⚠️ **併輪警告**：本規格與 [ADR-SD09-012 §7.1 L-6](ADR/ADR-SD09-012-ac4-observation-decouple-calendar.md)（AC4 判準落地要同步 `Get-Ac4Gate`）**都會動 `run_local_nightly.ps1`**。
+該檔本輪實測正在被其他輪次編修（`mtime 2026-08-03 11:01:24`、行數 1,345 → 1,546）。
+**兩者請由同一路人依序實作，切勿並行各改各的。** 實作前務必重新 grep 錨點，**不可沿用任何歷史行號**。
+
+> **共通教訓**：D-1/D-2 是「閘門擺錯位置」，D-4/D-5 是「閘門沒有偵測者」。
+> 兩者的症狀相同（條件永遠不會被滿足／永遠不會被發現滿足），但藥方不同：
+> 前者要**移位**（入場 → 出場，或解除對後續活動的依賴），後者要**補活載體**（把判定接到每晚都會跑的東西上）。
+> 開任何新的觀察期／啟動條件之前，應先問兩題：**(a) 這條件在未投入資源時物理上可能成立嗎？(b) 誰會去查它？**
 
 ---
 
@@ -356,6 +522,11 @@ CREATE TABLE kb_metrics (
 | **v1.0** | **2026-05-20** | **T0-1 升 v1.0 + W0 task list 22/22 CLOSED + 5 方終審 APPROVED** — T0-1 §7.1~§7.4 13 bullet 已填實（Arch 4 + SA 3 + SD 3 + QA 3）；T0-7 PM 形式核准 6 份 ADR（001~006，場景 A dev 自核）；T0-F4 trace_id 路徑 (b) W3C TraceContext finalized（git rm 路徑 (a)/(c) + ADR-SD09-004 升 v1.0 + Execution_Guide W3 對齊）；T0-10 `.env.example` 補 `PG_PRODUCTION_CUTOVER_GUARD=true` + `AUTOCLAUDE_TRACE_ID_SUBPROCESS_PROPAGATION=w3c_traceparent`；T0-C3 SD08_AC_Matrix.md AC4-1/AC4-2 升級實測門檻（recall@10 ≥ 0.95 + p95 < 50ms + cb_open=0 連續 14 天）；T0-E1 sprint_history §1.5 SD_07 W0~W6 骨架建立（W6 末擴寫至 ≥ 300 行）；五方專家 zero-trust audit（PM/Architect/SA/SD/QA）全 APPROVED 2026-05-20 |
 | **v1.1** | **2026-05-24** | **W3 nightly system zero-trust audit FULLY APPROVED + F1/F2 修復** — 觸發：使用者要求徹底驗證 nightly 程式與執行結果正確性。**audit 範圍**：9 紀律 × 13 工具 + 9 測試鏡子 + run_local_nightly.ps1 447 行。**驗證結果**：紀律 #1-#9 全綠（bitmask 區分 / sqlite3 完整 counts / RunId log:L 引用 / 鏡子自驗 / 跨工具對齊 / 雙軌 env / cache fresh / .sh LF / SKIP 一致性）；2 條 P1 修復 — **(F1)** `tools/observability_snapshot.py` mock fallback 與真實 emit 1 次無法區分 → 改 `_emit_heartbeat_and_count()` 回 tuple `(count, emit_real)` + jsonl 寫 `observability_emit_real: bool` + `ga_check._is_green()` 拒絕 `emit_real=False`（舊紀錄缺欄寬鬆通過）；**(F2)** AC4 ready_for_labeled_pr 達標時 ps1 主動 WARN 提示 PM approval ceremony（autoclaude-pg-e2e-on-label.yml 雖 trigger active 但需文件記錄）。**新增測試鏡子**：`tests/tools/test_observability_ga_check.py`（14 case）+ `tests/tools/test_perf_regression_check.py`（18 case）+ observability_snapshot 補 2 case（emit_real 雙路徑）= **+34 case**。**CLAUDE.md 新增紀律 #10**「fallback 路徑與真實路徑必須 jsonl 可區分」。**全測 2,465 passed / 0 failed / 122 skipped**（W0 補測基線 2,413 +52）；importlinter 7 kept / 0 broken；LOC violations=0；CLAUDE.md 256 行 ≤ 400 |
 | **v1.2** | **2026-05-24** | **W3 nightly system zero-trust audit Round 2 完成 + P0-2/P0-3/P0-5/P0-6 + P1-1/P1-2/P1-7/P1-8 修復** — 觸發：使用者重跑 nightly 觸發 Round 2 audit；Audit Agent 找出 28 項（P0=7 / P1=10 / P2=11），驗證後 P0-4/P0-7 由 clean run 推翻、P0-1 暫時 OK（latest pointer 後續硬化）。**真實修復**：(P0-2) Add-Content 改 `[System.IO.File]::Open` + `FileShare.ReadWrite` + retry 5 次 50/100/150/200/250ms 解 tail -F 衝突，所有 Log/Invoke-Native 改呼叫 `Add-LogLineSafe`；(P0-3) 新建 `tools/drift_log_ga_check.py`（166 LOC ≤ 200 data tier，仿 observability_ga_check 設計）+ drift_log_snapshot 同日去重邏輯改「優先保留 `drift_log_table_exists=True`」（避免 SKIP 覆寫真實）；(P0-5) `mutation_baseline_lock.py` 新增 `compute_source_sha256()` + `should_lock` 強制 tail 7 筆 `unique source_sha256 ≥ 7`（缺欄寬鬆相容）；(P0-6) `perf_regression_check.py` rc 三態 0/2/1（warn → rc=2 而非 rc=0）+ `Invoke-Stage` rc=2 標 WARN 不算 fail；(P1-1) `observability_ga_check._is_green()` 加 `strict_emit_real` 參數，最新 3 筆強制要求欄位存在 + 新建 `tools/_backfill_emit_real.py` 一次性 backfill 工具；(P1-2) `mutation_baseline_lock` 新增 `--require-log-mtime-within-seconds 3600`（ps1 stage 呼叫加此參數）；(P1-7) `test_check_block_at_min_samples_exact`（samples=20 boundary）+ `test_check_warn_alone_emits_rc_2`；(P1-8) `_emit_heartbeat_and_count()` 三段 emit 各自 try/except，count 累計 partial success，避免單一 emit_histogram 失敗整段 fallback。**新增測試鏡子**：drift_log_ga_check 14 case + drift_log_snapshot 補 2 case（prefers_table_exists / upgrade_skip_to_real）+ mutation_baseline_lock 補 7 case（source_sha256 4 + log mtime 2 + 1 邊界）+ perf_regression_check 補 2 case（min_samples_exact / warn_rc_2）+ observability_snapshot 補 2 case（partial_success / all_fail）+ observability_ga_check 補 2 case（strict_recent_3）= **+29 case**。**CLAUDE.md 新增紀律 #11 + #12**（latest log pointer 必須引用完整 run / mutation history 必須有 source_sha256 區分）。**Clean nightly run 取證**：`logs/nightly_2026-05-24_223310.log:L237` `END nightly summary: mutation=0 pg-e2e=0 perf=0 drift=0 obs=0`（6 stages 全綠，elapsed 5min 46s）。預估全測 ≥ 2,494 passed（v1.1 基線 2,465 +29 新 case）；importlinter 7 kept / 0 broken；LOC violations=0；CLAUDE.md ≤ 400 行 |
+| **v1.3** | **2026-08-03** | **觀察期 #1 入場死鎖解除（PM 拍板 (b)）+ #3 判準 zero-trust 複核（推翻先前「早已達標」口語判斷）+ 同型死鎖盤點** — (1) 新增 §6 拍板列 #9 + [ADR-SD09-013](ADR/ADR-SD09-013-w1-entry-gate-unique-sha-relocation.md) ACCEPTED：unique `source_sha256` ≥ 7 由**入場條件移為 W1 出場驗收**（X-1/X-2，並新增「每 sha 需對應實質變更 commit」之取證要求）；**明列此為放寬（7→5）非修 bug**，風險承擔者 PM。(2) 起草期間 zero-trust 複核**訂正兩項拍板前提**：`should_lock()` 早已回 `True`、`.mutation_baseline.toml` `token_guard=0.7071` **已於 2026-07-22 鎖定**（`logs/nightly_2026-07-22_183551.log:261`），真正擋 W1 的是文件字面與 nightly counter，不是閘門邏輯；§11.6「idle 凍結」敘述已被事實推翻（W1 未啟動期間仍演進 4 個新 sha）。(3) **#3 複核結果為未達標**（`drift_log_ga_check.py` → `green_streak=25 < 30`，2026-06-02 採集失敗打斷 streak；`severity_non_info_count` 全 34 筆為 0），連帶揭露該工具**零 production caller**、新舊活載體皆不查 drift、nightly 進度行 `drift=34/30` 與 `mutation=5/7` 兩個方向的取證失真。(4) 新增 **§8.2.1 剩餘阻塞項總結** 與 **§8.3 同型死鎖盤點**（D-1 已解 / D-2 R-SD09-A-5 硬循環未解 / D-3 AC4 同族 / D-4 deadline 無偵測者 / D-5 判準無載體）|
+
+| **v1.4** | **2026-08-03** | **#3 誤述訂正 + D-2 死鎖處置 + D-4 規格交付 + ADR-SD09-012 PM 拍板記錄** — (1) **訂正 ADR-SD09-012 §1.1 的 #3 誤述**：原寫「#3 早已達標」為錯（把「真實漂移事件為零」誤推為「判準已通過」）；權威工具當回合實跑 `green_streak=26 < window=30`（rc=1），連帶訂正 §2.1 把 drift 標為 `PASS 34/30` 的同型錯誤（34 是總筆數非 green_streak）。**§3.2 論證經重新檢驗後仍成立但已重寫依據**：達標實例只剩 obs 一軌（42/30, rc=0），drift 改列為「判準保有鑑別力」的正面證據（35 個缺口日照樣累積、卻被一筆真紅正確擋下）。(2) **D-2（R-SD09-A-5-LOOP）已解**：`alembic upgrade head` 自「W0 G0 預檢」移出，改列獨立前置動作 **P-0**（判別準則＝「提前做會不會讓 G0 判定失真？否 ⇒ 不該掛在 G0 底下」）；**事實層另已解除** —— 唯讀實查 `alembic_version=0018_version_kind_discriminator`＝`alembic/versions/` 鏈頭、`drift_log` 表已建（total=0/non_info=0）⇒ P-0 對本機為 no-op，**#3 不需任何人工介入，尚差 4 筆綠紀錄即自然達標**。(3) **D-4 規格交付**（deadline 逾期偵測掛進 nightly 收尾活載體、WARN 不進 rc、三 case 測試鎖），**實作歸屬 gate-align 那一路，本輪刻意不動 `run_local_nightly.ps1`**（實測該檔正被他輪編修：mtime 11:01:24、行數 1,345→1,546）。(4) **ADR-SD09-012 轉 ACCEPTED**（PM 拍板 2026-08-03，採 gap-tolerant green_streak、門檻仍 14、反作弊零改動），🔴 **判準 code 一行未改（NOT LANDED）**，§7.1 交付精確落地清單 L-1~L-6（含最大地雷：`observation_days` 語意若隨全史改變，會讓 nightly 進度行復刻 §2.8 假達標）。(5) 三軌數字全面重測對齊 02:00 nightly 後之值（#2 7→8、#3 25→26、obs 41→42）。**發現但未修（射程外）**：`.alembic_offline_head.txt` 內容 `0015` 已落後真實鏈頭 3 版（無程式消費者，不阻塞） |
+
+| **v1.5** | **2026-08-03** | **R71 收尾訂正 — 「已修好的事，文件仍寫未修」全面清理 + ADR-SD09-012 反作弊揭露補完** — (1) 🔴 **ADR-SD09-012「反作弊零改動」經 Architect 實測證偽**：`filter_recent` 是 `evaluate()` **唯一參照「現在」的項**（`ac4_progress_check.py:141`，全檔唯一 `datetime.now()`），移出閘門後達標退化為**純檔案內容函式** ⇒ 採集器無聲死掉時 `green_streak` 永久凍結、`ready` 永久 `True`。**本輪獨立複跑證實：14 筆全綠但 timestamp 距今 354 天的資料，在提案判準下回 `ready=True`（現行判準回 `False`）。** 處置＝**不推翻拍板方向**（gap-tolerant 仍對），但 ADR §4.3 補列**第二處放寬（證據新鮮度，與安全有關）**、§1.4 日曆窗代理事項由 2 項改 3 項、§7.1 新增 **L-7 獨立 staleness 判準**（`STALENESS_MAX_DAYS` 建議 30，＝window 2 倍；取 14 會重蹈日曆綁定，因本機 8 月只活 2 天）並列入 DoD 必要條件。**PM 是在不完整揭露上拍板的，此點必須訂正。** (2) **五份文件 17+ 處「未修／射程外／待主控協調／⛔」逐處開檔核對後改寫**：✅ ADR-SD09-013 L-3 **已落地**（R71 G-1：`$G0_MUTATION_UNIQUE_SHA_TARGET` 已自 `run_local_nightly.ps1` 刪除，改由 `Get-MutationLockGate` 向 `should_lock` 現場提問）——連帶**刪除已成假且會誤導 PM 的「在 L-3 落地前，G0 放行是人工決策，不是機器判定」**；✅ §8.1 治理缺口 1/3/4 與 §8.2.1 後兩列、§8.3 **D-5 已解**（R71 G-3：`Get-DriftGaPass` 接入、G0 三軌擴為**四軌**、進度行四軌分子一律取權威判準值）；🟡 `R-SD09-GATE-NOCARRIER` 由 🔴 OPEN 降為 **🟡 部分緩解**（殘留＝D-4 deadline 無偵測者 + 舊載體 `g0_gate_check.ps1` 標籤錯置）。**刻意不改**：治理缺口第 2 點（`g0_gate_check.ps1:41/63` 標籤寫 drift 實查 obs）**實查確認仍為真**，維持 🔴。 (3) **數字全面訂正**：drift `green_streak` 25→**26**、`total_records` 34→**35**；AC4 `observation_days` 7→**8**；`.ac4_history.jsonl` 41→**42** 筆（42 個相異 UTC 日期、跨度 74 天、`circuit_breaker_open_count` 全 0——順帶訂正 ADR-012 誤用的欄名 `cb_open`，該 key 在 jsonl 內不存在） |
 
 ---
 

@@ -15,6 +15,7 @@ import unittest
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+from _platform_helpers import ps_utf8_command  # noqa: E402  # R71：UTF-8 前置 SSOT
 from _ps_engine import (  # noqa: E402  # R60 E-A-03：引擎述詞 SSOT
     any_engine_available,
     production_engine,
@@ -45,13 +46,12 @@ class TestBootstrapWindowsAppsGuard(unittest.TestCase):
         # Windows PowerShell 5.1 的 Write-Host 預設走主控台 OEM/ANSI codepage 輸出
         # 中文，非 UTF-8；用 -Command 前置 [Console]::OutputEncoding 才能讓 Python
         # 端以 utf-8 正確解碼（同款陷阱見 windows_smoke_local.ps1 R10 註記）。
+        # R71：前置字串原為本檔行內字面值，已收斂至 `_platform_helpers`——產生的
+        # `-Command` 引數與收斂前**逐字相同**，WHY 與量測見該檔 PS_UTF8_PRELUDE。
         exe = production_engine()  # R60 E-A-03：5.1 優先（DEF-101-509 判準）
         env = dict(os.environ)
         env["PATH"] = os.pathsep.join(str(p) for p in path_dirs)
-        cmd = (
-            "[Console]::OutputEncoding=[System.Text.Encoding]::UTF8; "
-            f"& '{_BOOTSTRAP_PS1}'"
-        )
+        cmd = ps_utf8_command(f"& '{_BOOTSTRAP_PS1}'")
         return subprocess.run(
             [exe, "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", cmd],
             capture_output=True, text=True, encoding="utf-8", errors="replace",

@@ -1359,7 +1359,7 @@ class TestCheckModeBugInjection(unittest.TestCase):
                 len([q for q in new_quoted if "術語提及" in q]), 1, f"{new_quoted!r}")
 
     def test_claim_shaped_prose_in_corner_brackets_is_still_caught(self):
-        """反向坐實 (乙) 例外的窄度：`「立帳見本表 R99 條目」` 仍必須被擋下。
+        """反向坐實 (乙) 例外的窄度：`「立帳見本表 R99 條目」` 仍必須被擋下。round-label-ok
 
         沒有這一條，(乙) 可能被寫成「凡在中文引號內就跳過」的寬鬆版，而那正是原始
         缺陷（宣稱形狀的無 ID 散句）最容易復活的地方——例外只准認「引號當場閉合、
@@ -2948,7 +2948,20 @@ class TestCriterion2Narrowing(unittest.TestCase):
 
     # 判準④ 安全網的具名樣本（散文帶交棒字樣、`--plan` 應判 needs_ack）。
     # 樣本會隨帳本歸檔逐筆離開主檔，故另設存活下限（見下方測試的 R69 段落）。
-    _HANDOFF_SAMPLE_IDS = ("DEF-101-521", "DEF-101-524", "DEF-101-554")
+    #
+    # 🔴 R71 補樣本（**這正是下限機制設計時預期的動作**）：本輪歸檔 `DEF-101-521` 後
+    # 存活樣本掉到 1 筆（`524` 早於 R69 隨 `archive_47` 離開主檔），觸發 fail-loud 下限。
+    # 依測試訊息的指路「從現行主檔挑一筆散文帶交棒字樣、且 `--plan` 判為 needs_ack 的
+    # DEF 補進本表」補入 `652`／`710` ⇒ 存活回到 3 筆。兩筆均為 `--plan` 現跑實查
+    # （2026-08-03）：`cls='fixed'`、`blockers=[]`（判準①②③ 全過）、`handoff_marker='改派'`
+    # 且該字樣確實逐字存在於各自列內——即「本會被判可搬、全靠判準④ 攔下」的樣本形態，
+    # 與原三筆同型。散文實據：`652`＝「…Windows 對等缺口仍在，改派為：未指派（解鎖條件
+    # ＝有 Windows 真機可實跑驗證的一輪）」；`710`＝「…超出本輪授權面），改派為：未指派。
+    # 解鎖條件＝回讀 `DEF-101-432` 全欄…」。
+    # 🔴 補樣本是唯一正解，**不得**改用 skip／下修 `_MIN_LIVE_HANDOFF_SAMPLES` 讓紅燈變綠
+    # ——那兩條路都是把「安全網已無驗證對象」這個真訊號消音，正是 R69 付過學費的形態。
+    _HANDOFF_SAMPLE_IDS = ("DEF-101-521", "DEF-101-524", "DEF-101-554",
+                           "DEF-101-652", "DEF-101-710")
     _MIN_LIVE_HANDOFF_SAMPLES = 2
 
     def test_handoff_net_is_untouched_by_the_narrowing(self):

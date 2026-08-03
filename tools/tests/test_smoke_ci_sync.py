@@ -794,6 +794,20 @@ _CI_STEP_LOCAL_CARRIER: dict[str, dict[str, str]] = {
         "Set up Python 3.11": f"{_INFRA}: 準備直譯器",
         "Install AutoClaude deps": f"{_INFRA}: 裝依賴，非驗證步",
         "安裝 AISDLC_SDD pinned deps": f"{_INFRA}: 裝依賴，非驗證步",
+        # key 折行理由同上（E501 shrink-only 棘輪）。
+        (
+            "Windows PowerShell 5.1 核心驗證（Get-PythonGeMin 開箱可解析；DEF-101-760 "
+            "症狀級迴歸鎖，以文件教學引擎執行）"
+        ): (
+            f"{_PARTIAL}: tools/tests/test_ps51_compat.py::TestPs51NativeArgvRoundTrip"
+            "（pre-push root-infra leg 經 tools/run_root_unittests.py 帶到，在 Windows "
+            "真機上以原生 powershell.exe 實跑）。**缺的那一段**：本地那支驗的是"
+            "**代理指標**——探測碼字串交給原生 exe 後有沒有被改寫；CI 這一步驗的是"
+            "**症狀本身**——`Get-PythonGeMin` 真的挑得到直譯器。任何非「引號被吃掉」"
+            "成因的 $null（DEF-101-759 pyenv shim／DEF-101-766 PATHEXT 全淘汰）只有 CI "
+            "這一步逮得到。刻意不把它搬進 pre-push：那會讓每次 push 多跑一次 guard 探測，"
+            "而 pre-push 已是本 repo 最重的閘門，換到的覆蓋則與既有代理指標高度重疊"
+        ),
         "tools/tests 第三方相依（清單 SSOT＝tools/run_root_unittests.py 的 _THIRD_PARTY_PREREQS；漏裝時該 runner 會 fail-fast 指路）": (
             f"{_INFRA}: 裝依賴，非驗證步——本機開發環境早已具備這些相依；"
             "「CI 有沒有裝」由 tools/tests/test_run_root_unittests.py::"

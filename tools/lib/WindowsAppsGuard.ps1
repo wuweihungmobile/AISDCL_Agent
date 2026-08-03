@@ -116,8 +116,70 @@ $script:PythonGeMinCandidates = @(
   'python', 'python3'
 )
 # 探測碼與 .sh 側 `PYTHON_GE_MIN_PROBE` 逐字相同：版本達標印直譯器絕對路徑，
-# 否則印空字串。
-$script:PythonGeMinProbe = 'import sys;print(sys.executable if sys.version_info[:2] >= (3, 11) else "")'
+# 否則印空字串。逐字相同由 tools/tests/test_dev_start.py::TestMinPythonVersionSsotSync
+# ::test_version_probe_literal_is_byte_identical_across_both_shells 機械鎖住。
+#
+# 🔴 空字串寫 `str()` 而**不是** `""`（DEF-101-760；改回去 = 整條 guard 立刻復活成
+# 死的）：Windows PowerShell 5.1 把參數交給**原生執行檔**時，會自己重組一次命令列
+# 字串再讓 `CreateProcess`／`CommandLineToArgvW` 拆解，過程中**吃掉字串內嵌的一個
+# 雙引號**。本機真機實測（powershell.exe 5.1，CP=950）：`else ""` 送到 python.exe
+# 後 argv[1] 尾巴只剩一個 `"`，直譯器回
+#   `SyntaxError: unterminated string literal (detected at line 1)` ⇒ rc=1
+# ⇒ 迴圈把**每一個**候選都當成不合格 ⇒ `Get-PythonGeMin` 恆回 $null
+# ⇒ `tools/dev_start.ps1` 的「無 .venv 開箱」路徑在全新 Windows 機器上直接死掉。
+# `str()` 與 `""` 語意完全相同（皆為空字串）但**不含任何引號字元**，故對這個重組
+# 過程免疫；bash 側同步採用同一寫法以維持逐字相同。
+# 這條「原生指令引數的引號傳遞」由 tools/tests/test_ps51_compat.py::
+# TestPs51NativeArgvRoundTrip 以真的起一支 powershell.exe 做 argv round-trip 看守
+# （行級 regex 掃描器對此類缺陷架構上無能為力：它掃的是已被剝除字串的程式碼）。
+$script:PythonGeMinProbe = 'import sys;print(sys.executable if sys.version_info[:2] >= (3, 11) else str())'
+
+function Resolve-NativeExecutable {
+  # 把候選命令名解析成「Windows 真能直接執行」的具體路徑；沒有就回 $null。
+  #
+  # WHY（DEF-101-759，本機 pyenv-win 真機才顯形）：pyenv-win 會在 shims 目錄
+  # 同時放兩支同名檔——無副檔名的 POSIX `sh` wrapper（內容為
+  # `#!/bin/sh` + `pyenv exec ...`，供 Git Bash/MSYS 使用）與對應的 `.bat`
+  # （供 cmd/PowerShell 使用）。而 `Get-Command <裸名>` 回的**第一筆就是無副檔名
+  # 那支**（實測 `Get-Command python3.11 -All` 順序：無副檔名 → .bat），
+  # 因為 PowerShell 的命令探索不受 PATHEXT 約束。
+  # 接著 `& $exe` 對它 CreateProcess 失敗、回退 ShellExecute，Windows 查不到
+  # 副檔名關聯，於是**彈出「你要如何開啟這個檔案？」GUI 對話框**：
+  #   · 互動式 → 每次探測騷擾使用者一次，且該次候選判定停在對話框上
+  #   · 無人值守（schtasks／CI）→ 沒有桌面可彈，直接失敗或掛住
+  # 雲端 Windows runner 不裝 pyenv，故此缺陷**只有真機跑得出來**。
+  # 修法＝只接受副檔名落在 PATHEXT 內的候選（與 cmd.exe 的解析規則一致）。
+  [CmdletBinding()]
+  [OutputType([string])]
+  param([Parameter(Mandatory = $true)][string]$CandidateName)
+
+  # 🔴 PATHEXT 是 Windows-only 概念（DEF-101-766）：PS Core 跑在 macOS/Linux 時
+  # `$env:PATHEXT` 不存在，且 POSIX 執行檔本來就不帶副檔名 ⇒ 若照 Windows 規則過濾，
+  # **每一個候選都會被淘汰**，`Get-PythonGeMin` 於是恆回 $null——與本函式要修的
+  # DEF-101-759 是同一個病，只是換平台發作。故非 Windows 平台直接退回「第一個
+  # Application」，也就是本函式導入前的原行為（該平台上沒有 shim 歧義問題）。
+  # 判定式順序不可調換：`$IsWindows` 在 PS 5.1 未定義，必須先由版本短路擋掉。
+  # 左側版本比較先短路 ⇒ PS 5.1 上右側運算元永不被求值（5.1 恆 $null 的陷阱在此構不成），
+  # 而 PS 6+ 上它才是唯一能分辨 Windows／非 Windows 的判準。此「短路必須在前」不是宣稱——由
+  # tools/tests/test_dev_start.py::TestResolveNativeExecutableShortCircuitOrder 機械看守（兩側對調即紅）。
+  $isWindowsHost = ($PSVersionTable.PSVersion.Major -lt 6) -or $IsWindows  # ps7-ok: 左側先短路，5.1 上不求值；順序由 TestResolveNativeExecutableShortCircuitOrder 機械看守
+  if (-not $isWindowsHost) {
+    foreach ($cmd in @(Get-Command $CandidateName -All -ErrorAction SilentlyContinue)) {
+      if ($cmd.CommandType -eq 'Application') { return [string]$cmd.Source }
+    }
+    return $null
+  }
+
+  $exts = @(($env:PATHEXT -split ';') |
+            Where-Object { $_ } |
+            ForEach-Object { $_.Trim().ToLowerInvariant() })
+  foreach ($cmd in @(Get-Command $CandidateName -All -ErrorAction SilentlyContinue)) {
+    if ($cmd.CommandType -ne 'Application') { continue }
+    $ext = [System.IO.Path]::GetExtension([string]$cmd.Source)
+    if ($ext -and ($exts -contains $ext.ToLowerInvariant())) { return [string]$cmd.Source }
+  }
+  return $null
+}
 
 function Get-PythonGeMin {
   # 回傳第一個可用且 >= 3.11 的直譯器**絕對路徑**；一個都沒有回 $null。
@@ -134,6 +196,12 @@ function Get-PythonGeMin {
       if (-not (Get-Command 'py' -ErrorAction SilentlyContinue)) { continue }
     } elseif (-not (Test-IsRealPython -CandidateName $exe)) {
       continue
+    } else {
+      # DEF-101-759：裸名交給 `&` 會選到 pyenv-win 的無副檔名 POSIX shim
+      # 並彈出 ShellExecute 對話框，故先解析成 PATHEXT 內的真執行檔再跑。
+      $resolved = Resolve-NativeExecutable -CandidateName $exe
+      if (-not $resolved) { continue }
+      $exe = $resolved
     }
     $rest = @()
     if ($parts.Count -gt 1) { $rest = $parts[1..($parts.Count - 1)] }

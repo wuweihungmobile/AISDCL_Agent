@@ -6,36 +6,28 @@ from __future__ import annotations
 
 import logging
 import re
-import subprocess
-import time
-from pathlib import Path
-from typing import Optional
+from typing import TYPE_CHECKING
 
-import yaml
-
-from ...models.playbook import Playbook, PlaybookTask
-from ...models.escalation import EscalationDump
-from ...models.step_mutation import StepMutation, StepMutationType
-from ...utils.checkpoint_manager import CheckpointManager, PlaybookCheckpoint
-from ...utils.token_tracker import extract_context_pct
-from ...perception.pty_wrapper import strip_ansi
-from ...decision.minimax_client import _validate_correction_quality
 from ...decision.prompt_builder import STRATEGY_PROMPTS
-from ..workflow_detector import WorkflowType
-from ..failure_tracker import FailureTracker
-from ..error_classifier import ErrorClass
-from ...plugins.goal_synthesis_plugin import GoalSynthesisPlugin as _GoalSynthesisPlugin
-from ..pre_run_validator import PreRunValidator
+from ...models.playbook import Playbook
+from ...utils.checkpoint_manager import PlaybookCheckpoint
 from ..error_budget import ErrorBudget
-
-from ..types import _StepOutput, PlaybookResult, _MutationResult
+from ..error_classifier import ErrorClass
+from ..failure_tracker import FailureTracker
 from ..playbook_runner import _pr
+from ..pre_run_validator import PreRunValidator
+from ..types import PlaybookResult, _StepOutput
+from ..workflow_detector import WorkflowType
+from ._escalation_handler import record_escalation_and_dump
+
+if TYPE_CHECKING:  # 循環相依：playbook_runner 反向 import 本模組，故僅型別期引入
+    from ..playbook_runner import PlaybookRunner
 
 logger = logging.getLogger("autoclaude.execution.playbook")
 
 
 def run_steps_impl(
-    runner: "PlaybookRunner",
+    runner: PlaybookRunner,
     playbook: Playbook,
     playbook_path: str,
     start_idx: int,
@@ -43,7 +35,7 @@ def run_steps_impl(
     is_first_prompt: bool,
     workflow: WorkflowType,
     total: int,
-    resume_checkpoint: Optional[PlaybookCheckpoint] = None,
+    resume_checkpoint: PlaybookCheckpoint | None = None,
 ) -> PlaybookResult:
     step_log = list(prior_log)
 
@@ -87,7 +79,7 @@ def run_steps_impl(
             continue
 
         # SD_06 W2 G2 階段 B-1：cross_hint + tracker init + hotkey check 抽至 _step_init.py
-        from ._step_init import build_cross_step_hint, init_step_tracker, check_hotkey_and_save
+        from ._step_init import build_cross_step_hint, check_hotkey_and_save, init_step_tracker
         _cross_hint = build_cross_step_hint(runner, playbook, task, step_idx, _prev_step_idx)
         tracker, attempt_offset, resume_checkpoint = init_step_tracker(
             task, _step_trackers, resume_checkpoint, playbook,
@@ -107,16 +99,16 @@ def run_steps_impl(
             if task.max_retries is not None
             else playbook.global_invariants.max_retries_per_step
         )
-        correction_prompt: Optional[str] = None
+        correction_prompt: str | None = None
         monitor = _pr().ConvergenceMonitor()
         minimax_reasoning = ""
         last_error_cls = ErrorClass.UNKNOWN
         last_strategy_used = "PINPOINT"
-        _task_goal_summary: Optional[str] = None
+        _task_goal_summary: str | None = None
         _inject_before_pending = False
-        _goto_target_idx: Optional[int] = None
+        _goto_target_idx: int | None = None
 
-        _pre_run_hint: Optional[str] = None
+        _pre_run_hint: str | None = None
         if not runner._dry_run and task.evaluator_command:
             pre_run_issues = PreRunValidator().validate_step(
                 task.evaluator_command, task.prompt
@@ -166,7 +158,7 @@ def run_steps_impl(
             correction_prompt = None
 
             if attempt == attempt_offset and _pre_run_hint:
-                original_prompt_preview = task.prompt[:1000] + ("..." if len(task.prompt) > 1000 else "")
+                original_prompt_preview = task.prompt[:1000] + ("..." if len(task.prompt) > 1000 else "")  # noqa: E501
                 prompt_to_send = (
                     _pre_run_hint
                     + "\n\n---\n\n完成修復後，繼續執行以下原始任務：\n"
@@ -188,9 +180,9 @@ def run_steps_impl(
 
             if attempt == attempt_offset:
                 if step_idx == 0:
-                    prompt_to_send = runner._prepend_global_goal(prompt_to_send, playbook.global_goal)
+                    prompt_to_send = runner._prepend_global_goal(prompt_to_send, playbook.global_goal)  # noqa: E501
                 else:
-                    # SD_07 W4-T4-6：直接走 plugin SSOT（原 runner._prepend_global_goal_brief shim 已物理拔除）
+                    # SD_07 W4-T4-6：直接走 plugin SSOT（原 _prepend_global_goal_brief shim 已拔除）
                     prompt_to_send = runner._goal_synthesis_plugin.prepend_global_goal_brief(
                         prompt_to_send, playbook.global_goal, runner._cfg,
                     )
@@ -331,16 +323,9 @@ def run_steps_impl(
                     "=== Gap-010-A | [%s] error_class=%s 語意預算耗盡（attempt=%d eff=%d）===",
                     task.step_id, error_cls.value, attempt, _eff_limit,
                 )
-                if tracker.history:
-                    kb_key = f"{error_cls.value}:{tracker.history[-1].error_signature[:60]}"
-                    runner._knowledge_base.record_escalation(
-                        kb_key, list(tracker._tried_strategies), task.step_id
-                    )
-                _dump = runner._save_escalation_dump(
-                    tracker, task, playbook_path, eval_output,
-                    human_hint=f"Gap-010-A: {error_cls.value} 語意預算耗盡（{_eff_limit + 1} 次修正無效）",
-                )
-                runner._escalation_history.append(_dump)
+                record_escalation_and_dump(
+                    runner, tracker, task, error_cls, playbook_path, eval_output,
+                    f"Gap-010-A: {error_cls.value} 語意預算耗盡（{_eff_limit + 1} 次修正無效）")
                 runner._notify(
                     "AutoClaude — 需要人工介入",
                     f"[{task.step_id}] {error_cls.value} 語意預算耗盡，提前 ESCALATION",

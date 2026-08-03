@@ -670,5 +670,131 @@ class TestStatusExitCodeRuntime(unittest.TestCase):
         )
 
 
+class TestUnattendedExecutionHardening(unittest.TestCase):
+    """R69（S-5）：讓「重跑 installer」不再是回歸源。
+
+    2026-08-01/02 真機事故的三個直接成因，全都能被「有人跑一次 installer」重新種回去
+    （install 路徑是「存在就 Unregister 再 Register」，每跑一次就重置一次）：
+      (1) 不帶 -Principal → 套預設 Interactive → 使用者未登入就整輪不跑
+          （實測 AutoClaude_WindowsSmoke：事件 332、NumberOfMissedRuns=1）
+      (2) 不帶 -ExecutionTimeLimit → 預設 PT72H → 被睡眠凍住 35.6 小時的實例仍在
+          額度內存活，隔日 02:00 觸發被擋掉（事件 322）
+      (3) MultipleInstances 預設 IgnoreNew → 同上，新觸發直接被丟棄
+    """
+
+    def setUp(self) -> None:
+        self.text = _read(_SCRIPT)
+        self.code = self._code_only(self.text)
+
+    @staticmethod
+    def _code_only(text: str) -> str:
+        """去掉 `<# ... #>` 說明區塊與 `#` 行註解，只留可執行碼。
+
+        WHY 必要：本檔註解密度極高（動輒數十行 WHY），註解裡會提到 cmdlet 名稱、
+        也會示範「錯誤寫法」。若直接對全檔做字面掃描：
+          - 正向計數會把 .PARAMETER／.NOTES 裡提到的 Register-ScheduledTask 算進去
+            （實測 2 處真呼叫被算成 6）；
+          - 反向鎖會被自己註解裡的反例觸發（本輪實際踩到）。
+        兩者都是「鎖打到註解」而非打到行為，屬假紅。
+        """
+        text = re.sub(r"(?s)<#.*?#>", "", text)
+        return "\n".join(
+            ln for ln in text.splitlines() if not ln.lstrip().startswith("#")
+        )
+
+    def test_principal_is_s4u_and_applied_to_both_tasks(self) -> None:
+        """(1) 兩支任務都必須顯式帶 S4U principal。
+
+        意圖（Rule 9）：S4U＝以該使用者身分執行但不需其登入。少了它，nightly 只在
+        「剛好有人登入著」時才跑——而 nightly 的整個存在理由就是無人值守。
+        """
+        self.assertRegex(
+            self.text,
+            r"\$principal\s*=\s*New-ScheduledTaskPrincipal[\s\S]{0,200}?-LogonType\s+S4U",
+            "必須建立 -LogonType S4U 的 principal（Interactive 在未登入時整輪不跑）",
+        )
+        # 反引號續行必須整段抓進來，否則 -Principal 落在第二行會被漏看（假綠）。
+        # 寫法注意：`[^\r\n]*` 放前面會貪婪吃掉續行的反引號且不回溯，故把「以反引號
+        # 結尾的整行」設成重複單元，最後再收一行。
+        registers = re.findall(
+            r"(?m)^[ \t]*Register-ScheduledTask(?:[^\r\n]*`[ \t]*\r?\n)*[^\r\n]*",
+            self.code,
+        )
+        self.assertEqual(
+            len(registers), 2,
+            f"預期恰好 2 處 Register-ScheduledTask（nightly + smoke），實得 {len(registers)}",
+        )
+        for i, reg in enumerate(registers):
+            self.assertIn(
+                "-Principal $principal", reg,
+                f"第 {i + 1} 處 Register-ScheduledTask 未帶 -Principal $principal——"
+                "會套用預設 Interactive，等於每跑一次 installer 就把 S4U 降級一次",
+            )
+
+    def test_execution_time_limit_is_bounded(self) -> None:
+        """(2) 必須帶 ExecutionTimeLimit，且不得回到 72 小時等級。
+
+        意圖：預設 PT72H 讓「凍住的實例」活過整整一個排程週期，於是它吃掉隔日觸發，
+        當日觀察期三軌全部零進帳——這正是 AC4 從 10/14 退回 7/14 的機制。
+        """
+        m = re.search(r"-ExecutionTimeLimit\s+\(New-TimeSpan\s+-Hours\s+(\d+)\)", self.text)
+        self.assertIsNotNone(
+            m, "New-ScheduledTaskSettingsSet 必須帶 -ExecutionTimeLimit (New-TimeSpan -Hours N)"
+        )
+        assert m is not None
+        hours = int(m.group(1))
+        self.assertLessEqual(
+            hours, 8,
+            f"ExecutionTimeLimit={hours}h 過寬——正常整輪 5~8 分鐘，上限須遠小於 24h "
+            "排程週期，否則凍住的實例仍會吃掉隔日觸發",
+        )
+
+    def test_stop_existing_applied_via_com_because_module_enum_cannot_express_it(self) -> None:
+        """(3) StopExisting 必須走 COM，且兩支任務都要套用。
+
+        意圖（DEF-101-249 同型加強版）：這次不是參數名不同，而是模組**根本表達不出
+        這個值**——ScheduledTasks 產生的 MultipleInstancesEnum 只有
+        Parallel/Queue/IgnoreNew，漏了 StopExisting。真機實測
+        `New-ScheduledTaskSettingsSet -MultipleInstances StopExisting` 與
+        `$t.Settings.MultipleInstances = 3` 皆被 enum 轉型擋下。
+        故本鎖同時是反向鎖：若有人「簡化」成模組寫法，安裝器會在真機炸掉。
+        """
+        self.assertIn(
+            "function Set-MultipleInstancesStopExisting", self.text,
+            "必須有 COM fixup 函式（模組 enum 表達不出 StopExisting）",
+        )
+        self.assertRegex(
+            self.text, r"\$def\.Settings\.MultipleInstances\s*=\s*3",
+            "COM 路徑必須寫入數值 3（TASK_INSTANCES_STOP_EXISTING）",
+        )
+        calls = re.findall(r"Set-MultipleInstancesStopExisting\s+-Name\s+\$(\w+)", self.text)
+        self.assertEqual(
+            sorted(calls), ["SmokeTaskName", "TaskName"],
+            f"兩支任務都必須套用 StopExisting fixup，實得 {calls}",
+        )
+        self.assertNotRegex(
+            self.code, r"-MultipleInstances\s+StopExisting",
+            "不得把該值直接傳給模組的 MultipleInstances 參數：ScheduledTasks 的 enum "
+            "只有 Parallel/Queue/IgnoreNew，真機呼叫必炸（只掃可執行碼，註解不算）",
+        )
+
+    def test_status_surfaces_the_three_regression_prone_fields(self) -> None:
+        """-Status 必須把三個回歸點印出來，否則只能等下次漏跑才發現。
+
+        意圖：這三項漂移是**靜默**的——任務照樣 State=Ready，只是不會在該跑的時候跑。
+        沒有可視化，回歸就沒有偵測管道。
+        """
+        for field in ("LogonType", "ExecutionTimeLimit", "MultipleInstancesPolicy"):
+            self.assertIn(
+                field, self.text, f"-Status 報表必須印出 {field}（回歸可偵測性）"
+            )
+        self.assertRegex(
+            self.text,
+            r"Export-ScheduledTask[\s\S]{0,140}?MultipleInstancesPolicy",
+            "MultipleInstancesPolicy 必須自 Export-ScheduledTask 的 XML 讀取"
+            "（Get-ScheduledTask 的 enum 對值 3 會印空白，會被誤讀成沒設定）",
+        )
+
+
 if __name__ == "__main__":
     unittest.main()

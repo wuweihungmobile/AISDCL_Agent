@@ -144,8 +144,9 @@
 #   $ python3 -c "import yaml,collections; d=yaml.safe_load(open('.github/workflows/windows-compat-ci.yml')); [print(n, j.get('runs-on'), dict(collections.Counter(s.get('shell','<implicit>') for s in j['steps'] if 'run' in s))) for n, j in d['jobs'].items()]"
 #   （以下為 2026-08-01 原樣輸出，僅為對齊欄位補了空白，其餘逐字未改；R68 新增
 #     「tools/tests 第三方相依」pwsh step 後由 19 → 20，R69 新增「tools/tests 外部
-#     工具相依」pwsh step 後由 20 → 21，本表隨之更新）
-#   windows-smoke         windows-latest {'pwsh': 21, 'bash': 1}
+#     工具相依」pwsh step 後由 20 → 21，R71 新增 windows-smoke 的 PS 5.1 核心驗證
+#     step 後該 job 多一格 `powershell: 1`，本表隨之更新）
+#   windows-smoke         windows-latest {'pwsh': 21, 'bash': 1, 'powershell': 1}
 #   windows-nightly-full  windows-latest {'powershell': 2, 'pwsh': 3}
 #   windows-nightly-alert ubuntu-latest  {'<implicit>': 3}
 #   （全檔無 workflow 層／job 層 `defaults:` 區塊，故上表即實際生效的引擎分佈；
@@ -159,10 +160,14 @@
 #   ③ windows-nightly-full 的 2 步顯式 `shell: powershell`（＝Windows PowerShell 5.1）：
 #      這兩步恰恰是為了**收斂本段所述的風險**而補的——R5/S8 補第一步（bootstrap.ps1 +
 #      dev_start.ps1，見該 step 內註解）、R48 補第二步（install_post_commit.ps1，
-#      DEF-101-389 的反斜線修復從未經原生 PS5.1 實際執行過）。因此本段風險應讀作
-#      「文件教學引擎已由這兩步在 nightly（非 PR 閘門）層級**部分**覆蓋」，而非完全
-#      未覆蓋；PR 閘門層級的 PS 5.1 保護則由 tools/tests/test_ps51_compat.py 的行級
-#      靜態機械鎖承擔（見上方 R56 訂正）。
+#      DEF-101-389 的反斜線修復從未經原生 PS5.1 實際執行過）。🔴 R71 實查訂正：這兩步
+#      **一次都沒有真的執行過**——`gh run view` 顯示 nightly-full 最後一次獲配 runner
+#      是 2026-07-14 的 run 29317698994（僅 9 步、不含這兩步），而 `git log -S` 顯示
+#      首次出現 `shell: powershell` 的 commit 是隔天的 1175555；其後 6 次 schedule
+#      觸發全部 steps=0（帳務平面攔阻，DEF-101-081），且該 job 的 `if:` 使 push 一律
+#      skipped。故本段**不得**再讀作「已由這兩步在 nightly 層級部分覆蓋」。
+#   ④ windows-smoke 的 1 步顯式 `shell: powershell`（R71 新增，理由見該 step 內註解）：
+#      把 PS 5.1 的**行為**驗證挪到每次 push 都會跑的閘門上，收斂 ③ 揭露的空窗。
 #
 #   同輪另一項訂正（Scan C1 原案，保留）：實測有 4 個 windows-latest 步驟（Install
 #   AutoClaude deps／pty_wrapper 平台解析單元測試／安裝 AISDLC_SDD pinned deps／安裝
@@ -538,6 +543,73 @@ jobs:
         uses: actions/setup-python@v6
         with:
           python-version: "3.11"
+
+      - name: Windows PowerShell 5.1 核心驗證（Get-PythonGeMin 開箱可解析；DEF-101-760 症狀級迴歸鎖，以文件教學引擎執行）
+        # 🔴 R71 新增。（step name 刻意不寫「本 job 唯一的 5.1 步驟」這類絕對詞：本檔
+        # 已因同款措辭三度失實，見檔頭 CLAIM-QUOTE 區；引擎分佈一律去看檔頭那張受
+        # test_gha_action_versions.py::TestWindowsCiHeaderSnapshotLock 看守的實測表。）
+        # WHY（三句話）：
+        #  ① **R71 之前，本 job 沒有任何一步跑在 Windows PowerShell 5.1 上**，而 5.1 正是
+        #     ONBOARDING／CLAUDE.md 教使用者用的引擎（`powershell -ExecutionPolicy
+        #     Bypass -File …`）。原本承擔這件事的兩步住在 windows-nightly-full，實查後
+        #     確認它們**一次都沒真的執行過**（檔頭 ③ 已逐項訂正：帳務平面 + 該 job 的
+        #     `if:` 讓 push 一律 skipped）⇒ PS 5.1 的**行為**面在 PR 閘門上等於零覆蓋。
+        #  ② 挑這一項而不是把上面二十餘步複製一份跑 5.1：5.1 與 pwsh 7 真正**行為不同**
+        #     的面向裡，只有「原生指令引數傳遞」在本輪實際造成 P0，且它是唯一無法用靜態
+        #     掃描抓到的（`tools/tests/test_ps51_compat.py` 的 12 條行級判準掃的是**已被
+        #     剝除字串**的 code 段，而缺陷本體就住在那個字串裡）。其餘 5.1 差異（`??`／
+        #     `?.`／`&&`／`||`／三元／`-AsHashtable`／`$IsWindows`）皆已由該檔的靜態鎖
+        #     在三平台涵蓋，重跑一次 5.1 買不到新東西。
+        #  ③ 為何斷言 `Get-PythonGeMin` 而不是只驗字串 round-trip：round-trip（同檔的
+        #     `TestPs51NativeArgvRoundTrip`）驗的是**代理指標**（探測碼字串有沒有被改寫），
+        #     本步驟驗的是**症狀本身**（開箱時真的挑得到直譯器嗎）。DEF-101-760 的實害是
+        #     「全新 Windows 機器 tools/dev_start.ps1 開箱路徑整條死掉」，任何**其他**讓
+        #     `Get-PythonGeMin` 在 5.1 上回 $null 的原因（DEF-101-759 的 pyenv shim、
+        #     DEF-101-766 的 PATHEXT 過濾把候選全淘汰）也會被這一步逮到，代理指標不會。
+        #
+        # 位置（緊接 setup-python、在任何 pip install／bootstrap 之前）＝刻意貼近
+        # 「全新機器開箱」狀態：DEF-101-760 只在那個狀態下有實害（有 .venv 的機器走另一條
+        # 分支）。前一步 setup-python 已保證 PATH 上有 3.11，故「找不到合格直譯器」只可能
+        # 是 guard 自己壞掉，不會是環境問題。
+        #
+        # 🔴 爆炸半徑（本步驟會在什麼情況下讓 windows-smoke 轉紅）：(a) DEF-101-760 家族
+        # 回歸〔本意〕；(b) `Get-PythonGeMin` 在 5.1 下因任何原因回 $null／回不存在的路徑
+        # 〔本意〕；(c) GitHub 的 `shell: powershell` 不再對應 5.1（第一道斷言 fail-loud，
+        # 刻意不 fallback——退化成「第 N 支 pwsh 重複驗證」而默默通過，才是真正的損失）；
+        # (d) runner 映像變更使 setup-python 不再把合格直譯器放上 PATH〔此時上一步會先紅〕。
+        # 本步驟**不進 pre-push**：本機 5.1 側的對等由 `tools/tests/test_ps51_compat.py::
+        # TestPs51NativeArgvRoundTrip`（pre-push root-infra leg 會跑到）承擔，那是代理指標
+        # 而非等價物——如實記於 test_smoke_ci_sync.py 的載具登記表，標 PARTIAL。
+        #
+        # 🔴 `run:` 本體刻意**全 ASCII**（訊息因此是英文，與本 repo 其餘 step 不同——
+        # 這是取捨不是疏漏）：`shell: powershell` 的腳本本體是**由 GitHub runner 寫成
+        # 暫存 .ps1 檔**再交給 powershell.exe，而該檔的編碼由 runner 決定、本 repo 無從
+        # 控制也**尚未實測過**。本機真機實證（本輪逐字量測）：同一段內容存成 UTF-8
+        # **無 BOM** ⇒ zh-TW 的 5.1 以 CP950 誤讀，中文字串字面值當場 ParserError、
+        # rc=1；改存 UTF-8 **有 BOM** ⇒ rc=0。這正是 tools/tests/test_ps1_bom.py 檔頭
+        # 記載的 DEF-101-002 政策所治的病，只是那道政策的射程是**repo 內 tracked .ps1**，
+        # 管不到 runner 生成的暫存檔。⇒ 讓一道**阻斷式 push 閘門**的成敗取決於一個未經
+        # 驗證的第三方編碼行為，是拿全員的 push 去賭；全 ASCII 則此風險歸零。
+        # （同款風險存在於 windows-nightly-full 那兩步 5.1 step 的中文 run 本體——它們
+        # 從未執行過，故該假設在本 repo 至今零實證；已列入回報給主控的殘留風險，本輪
+        # 不動它們〔射程外，且它們非阻斷〕。）
+        # 中文 WHY 一律留在上方註解：註解不會被執行，不受編碼影響。
+        #
+        # 成本：本機真機（powershell.exe 5.1.26100.8875）實測 0.53s，可忽略。
+        shell: powershell
+        run: |
+          if ($PSVersionTable.PSVersion.Major -ne 5) {
+            throw "ENGINE-MISMATCH: this step's entire discriminating power rests on running under Windows PowerShell 5.1 (the engine the docs teach users). Measured: $($PSVersionTable.PSVersion). If 'shell: powershell' stops meaning 5.1, this step silently degrades into yet another pwsh duplicate -- failing loud instead. See the Chinese WHY in the step comment above."
+          }
+          . ./tools/lib/WindowsAppsGuard.ps1
+          $py = Get-PythonGeMin
+          if (-not $py) {
+            throw "DEF-101-760 REGRESSION: Get-PythonGeMin returned null under native Windows PowerShell 5.1, which means the tools/dev_start.ps1 out-of-box path is dead on a fresh Windows machine. Most likely cause: the version-probe string embeds a double quote, which 5.1 eats while re-composing the native command line, so python receives syntactically invalid code (rc=1) and every candidate is rejected. Fix: see the PythonGeMinProbe comment in tools/lib/WindowsAppsGuard.ps1 -- write the empty string as str(), never as a quoted literal."
+          }
+          if (-not (Test-Path -LiteralPath $py)) {
+            throw "Get-PythonGeMin returned a path that is not on disk: $py -- probe output looks truncated or polluted."
+          }
+          Write-Host "PS 5.1 core check passed: engine=$($PSVersionTable.PSVersion) Get-PythonGeMin=$py"
 
       - name: tools/tests 第三方相依（清單 SSOT＝tools/run_root_unittests.py 的 _THIRD_PARTY_PREREQS；漏裝時該 runner 會 fail-fast 指路）
         shell: pwsh

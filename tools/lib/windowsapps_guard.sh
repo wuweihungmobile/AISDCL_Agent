@@ -86,8 +86,17 @@ PYTHON_GE_MIN_CANDIDATES=(
 )
 
 # 探測程式：版本達標才印出直譯器絕對路徑，否則印空字串（rc 仍為 0）。
-# 與 .ps1 側 `Get-PythonGeMin` 用**同一段**探測碼（同構，非各自發明）。
-PYTHON_GE_MIN_PROBE='import sys;print(sys.executable if sys.version_info[:2] >= (3, 11) else "")'
+# 與 .ps1 側 `Get-PythonGeMin` 用**同一段**探測碼（同構，非各自發明）。逐字相同由
+# tools/tests/test_dev_start.py::TestMinPythonVersionSsotSync::
+# test_version_probe_literal_is_byte_identical_across_both_shells 機械鎖住——在此之前
+# 只有散文宣稱「逐字相同」，單邊改可以通過所有閘門（DEF-101-760 就是這樣只修一邊）。
+#
+# 🔴 空字串寫 `str()` 而**不是** `""`：bash 這邊 `""` 本來沒問題，但 Windows
+# PowerShell 5.1 把參數交給原生執行檔時會吃掉內嵌的一個雙引號，讓 .ps1 側同一段
+# 探測碼變成 `SyntaxError: unterminated string literal` ⇒ 所有候選被淘汰
+# （詳見 tools/lib/WindowsAppsGuard.ps1 同位置的 WHY 區塊）。`str()` 語意相同且
+# 不含引號字元，兩側同步採用才能維持「逐字相同」這個前提。
+PYTHON_GE_MIN_PROBE='import sys;print(sys.executable if sys.version_info[:2] >= (3, 11) else str())'
 
 # 回傳（stdout）第一個可用且 >= 3.11 的直譯器**絕對路徑**；一個都沒有回 rc=1。
 pick_python_ge_min() {

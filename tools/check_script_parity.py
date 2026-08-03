@@ -404,8 +404,8 @@ _LATEST_PINNED_SHA256: dict[str, str] = {
     "LATEST/tools/fsm_runtime/formal/run_tlc.sh": (
         "76207165469914976ee49b536c9c81e89fee079daa4756b0a57c752e144983fe"
     ),
-    "LATEST/tools/fsm_runtime/formal/run_tlc.ps1": (
-        "f6bb3be45c92fdbaddfac34735e465474c7f32b40c06bb9d6ef50ec1cf775909"
+    "LATEST/tools/fsm_runtime/formal/run_tlc.ps1": (  # R71 DEF-101-762 重釘；根因見帳本列＋該檔:47
+        "feb3b9bf2ffdd35b789ca036a39f02cc6390769d3d9fb6fed3a9ef60cc3daf00"
     ),
 }
 

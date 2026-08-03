@@ -98,24 +98,218 @@ def _latest_success_run(workflow: str) -> str | None:
     return max(stamps) if stamps else ""
 
 
+# ── R71 D-2：「最近一次**嘗試**」軸（與上面的「最近一次**成功**」軸互補）──────
+#
+# 🔴 為何一個軸不夠：`_latest_success_run` 帶 `--status success`，於是三種處置完全
+# 不同的狀態被壓成同一句「最近成功於 N 天前」：
+#   (a) cron 根本沒觸發（帳務阻擋／workflow 被停用）→ 去看帳務／workflow state；
+#   (b) 觸發了但 run 紅（真的測試壞了）           → 去看那次 run 紅在哪；
+#   (c) 週頻軌還沒輪到                            → 什麼都不用做。
+# 混成一句話等於沒有診斷價值。本軸**不帶** `--status`，直接回報最近一次 run 的結論。
+#
+# 🔴 為何是**新增**一個軸而不是改掉舊的：`_latest_success_run` 的「兩事件取較新」
+# 語意是 DEF-101-703 的修復本體（處置指令 `gh workflow run` 產生的 dispatch run
+# 必須算數，否則閘門解不開）。把它改成 schedule-only 就是讓那個死鎖復發。兩軸並存
+# ⇒ 主判準不變，但陳述句能分辨「誰讓它變新鮮的」。
+def _latest_attempt(workflow: str, event: str = "schedule") -> dict[str, str] | None:
+    """該 workflow 在 `event` 下最近一次 run（**不分結論**）。
+
+    回傳三態，缺一即回到「無訊號 ≠ 壞訊號」被壓平的原病：
+      · `None` ＝ 無訊號（gh 不在／逾時／rc≠0／回應無法解析）；
+      · `{}`   ＝ 查得到但**零筆**（該事件從未產生過任何 run ⇒ cron 沒觸發）；
+      · dict   ＝ `conclusion`／`createdAt`／`updatedAt`／`url` 四鍵（值恆為 str，
+                  尚未結束的 run `conclusion` 為 `null` ⇒ 正規化成空字串）。
+    """
+    try:
+        r = subprocess.run(
+            ["gh", "run", "list", "--workflow", workflow, "--event", event,
+             "--limit", "1", "--json", "conclusion,createdAt,updatedAt,url"],
+            timeout=10, capture_output=True, encoding="utf-8", errors="replace")
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+    if r.returncode != 0:
+        return None
+    try:
+        runs = json.loads(r.stdout or "[]")
+    except ValueError:
+        return None
+    if not isinstance(runs, list):
+        return None
+    if not runs or not isinstance(runs[0], dict):
+        return {}
+    return {k: str(runs[0].get(k) or "")
+            for k in ("conclusion", "createdAt", "updatedAt", "url")}
+
+
+def _attempt_suffix(att: dict[str, str] | None) -> str:
+    """把「最近一次嘗試」軸接到陳舊訊息尾巴——(a)/(b)/(c) 的可分辨性就在這一句。"""
+    if att is None:
+        return ""  # 無訊號：不編造，保持原句
+    if not att:
+        return "；schedule 軌**從未產生過任何 run**（cron 沒觸發／workflow 被停用，非測試紅）"
+    url = f" {att['url']}" if att.get("url") else ""
+    return (f"；schedule 軌最近一次觸發於 {att.get('createdAt') or '?'}、結論 "
+            f"{att.get('conclusion') or '(尚未結束)'}{url}")
+
+
+def _schedule_axis_note(agg: str, att: dict[str, str] | None) -> str | None:
+    """D-3／D-5：run 層判定為「新鮮」時，那份新鮮度是不是**排程軌自己**掙來的。
+
+    D-3（遮蔽）：`_LIVENESS_EVENTS` 含 `workflow_dispatch` 是刻意的（DEF-101-703），
+    但副作用是**一次手動補跑成功就買到 `STALE_PERIOD_FACTOR × period` 天的靜默**。
+    2026-08-03 唯讀 gh 實查，這件事**正在發生**：`aisdlc-sdd-arch-fitness.yml` 於
+    2026-08-02T14:24 被一次 workflow_dispatch「治好」了警告，而它的 schedule 軌
+    最後一次成功是 2026-07-14、最近一次觸發（2026-07-27）是 failure。
+    本函式讓 dispatch 繼續計入主判準（死鎖不復發），但把「排程軌本身已死」單獨說出來。
+
+    D-5（同一函式順手覆蓋）：`STALE_PERIOD_FACTOR=2.0` 讓週頻軌的門檻是 14 天，
+    結構上不可能「當場發現」。本函式不動那個門檻（動它會讓「容忍一次跳過」的
+    `test_weekly_track_tolerates_one_skip` 失去理由、哨兵回到天天狼來了），改為：
+    只要**最近一次排程觸發已經紅了、且晚於被採計的最後成功**，就當場出聲——
+    「cron 觸發後 run 紅」不是「跳過一次」，不該被容忍窗吃掉。
+    """
+    if att is None:
+        return None
+    if not att:
+        return ("目前的成功紀錄**不是排程軌掙來的**：該 workflow 從未產生過任何 "
+                "schedule run（cron 沒觸發／workflow 被停用），新鮮度只可能來自 "
+                "workflow_dispatch 手動補跑")
+    concl = att.get("conclusion") or ""
+    if concl == "success":
+        return None  # 排程軌自己最近一次就是綠的 ⇒ 沒有遮蔽、也沒有新的紅
+    if not concl:
+        return None  # 尚未結束（GitHub 對 queued/in_progress 的 conclusion 為 null）
+    when = att.get("createdAt") or "?"
+    url = f" {att['url']}" if att.get("url") else ""
+    stamp = att.get("updatedAt") or att.get("createdAt") or ""
+    if stamp and stamp > agg:
+        # D-5：排程觸發**晚於**被採計的最後成功且已轉紅 ⇒ 這是新鮮的壞消息，
+        # 不該被 STALE_PERIOD_FACTOR 的容忍窗吃掉（容忍的是「跳過一次」，不是
+        # 「跑了而且紅了」）。
+        return (f"schedule 軌最近一次觸發於 {when}、結論 {concl}，且**晚於**被採計的"
+                f"最後成功（{agg}）⇒ 排程軌剛轉紅，別等容忍窗到期才看{url}")
+    # D-3：被採計的最後成功晚於最近一次排程觸發，而那次觸發是紅的 ⇒ 那份新鮮度
+    # 只可能來自 workflow_dispatch（`_LIVENESS_EVENTS` 的另一半）。
+    return (f"run 層判定為新鮮，但那份新鮮度**不是排程軌掙來的**：schedule 軌最近一次"
+            f"觸發於 {when}、結論 {concl}，其後排程軌未再成功；被採計的最後成功"
+            f"（{agg}）晚於該次 ⇒ 只可能來自 workflow_dispatch 手動補跑{url}")
+
+
+# ── R71 E-1：同檔多條 cron 驅動**不相交** job 集合 ⇒ run 層結論天生分辨不出 ──────
+#
+# 實證（2026-08-03 唯讀 gh 實查，零 Actions 額度）：`autoclaude-ci.yml` 有兩條 cron，
+# `7 2 * * 1` 驅動 pg-e2e-nightly + perf-baseline、`7 3 * * 1` 驅動 mutation-TG。
+# 被本模組採計為「最後一次成功」的 run 29308467958 裡，PG E2E 與 Perf Baseline 的
+# `conclusion=skipped`、`steps=0`——它根本沒跑那兩個 job；而同一天 `7 2` 那次
+# （run 29306905483）Perf Baseline 是 `failure`、`steps=11`＝真實測試紅。
+# 於是 `7 3` 的綠**遮蔽**了 `7 2` 的死亡，而 `scheduled_workflow_periods` 以**檔案**
+# 為單位、多 cron 取 min，兩層粒度對不上，run 層永遠看不出來。
+#
+# 誠實劃界：本函式做的是**靜態結構偵測**（宣告「這支檔的 run 層判定不構成證據」），
+# **不是**逐 cron 軌的活性量測——後者需要對每個候選 run 再打一次 `gh run view --json
+# jobs` 逐 job 比對，成本與 dev_start 的 25 秒掃描預算不成比例。要真正消滅這個盲區，
+# 治本是把兩條 cron 拆成兩支 workflow 檔（那樣 run 層粒度就等於軌粒度）。
+_JOB_ID_RE = re.compile(r"^  (?P<jid>[A-Za-z0-9_][A-Za-z0-9_-]*):\s*$")
+_JOB_NAME_RE = re.compile(r"^    name:\s*(?P<name>.+?)\s*$")
+_SCHEDULE_EQ_RE = re.compile(r"github\.event\.schedule\s*==\s*'([^']+)'")
+
+
+def cron_job_map(path: Path) -> dict[str, list[str]]:
+    """{cron 表達式: 受該條驅動的 job 顯示名清單}；靜態解析 workflow YAML，零網路。
+
+    只認 job 層 `if:` 內的 `github.event.schedule == '<expr>'`——那是 GitHub Actions
+    唯一能把 job 綁到特定 cron 的寫法，因此也是唯一可靠的靜態判準。
+    """
+    try:
+        lines = path.read_text(encoding="utf-8", errors="replace").splitlines()
+    except OSError:
+        return {}
+    out: dict[str, list[str]] = {}
+    label = ""
+    for ln in lines:
+        m = _JOB_ID_RE.match(ln)
+        if m:
+            label = m.group("jid")
+            continue
+        if not label:
+            continue
+        nm = _JOB_NAME_RE.match(ln)
+        if nm:
+            label = nm.group("name").strip().strip("\"'")
+            continue
+        if ln.startswith("    if:"):
+            for expr in _SCHEDULE_EQ_RE.findall(ln):
+                if label not in out.setdefault(expr, []):
+                    out[expr].append(label)
+    return out
+
+
+def multi_cron_blind_spot(root: Path, workflow: str) -> str | None:
+    """該 workflow 是否存在 E-1 形態的 run 層盲區；沒有就回 None（零噪音）。"""
+    mapping = cron_job_map(root / ".github" / "workflows" / workflow)
+    if len(mapping) < 2:
+        return None
+    sets = [frozenset(v) for v in mapping.values()]
+    if all(s == sets[0] for s in sets):
+        return None  # 多條 cron 但驅動同一組 job ⇒ run 層結論仍然代表得了它們
+    detail = "；".join(f"`{c}`→{sorted(j)}" for c, j in sorted(mapping.items()))
+    return (f"{workflow}（結構性偵測盲區：{len(mapping)} 條 cron 驅動**不相交**的 job "
+            f"集合——{detail}。run 層結論只要其中一條的 run 綠就整體算綠，另一條的死亡"
+            f"會被遮蔽 ⇒ 本模組對這支檔的「新鮮」判定不構成證據。治本＝拆成兩支 "
+            f"workflow 檔，讓 run 粒度等於軌粒度）")
+
+
+def _scan_order(periods: dict[str, float], ref: datetime) -> list[tuple[str, float]]:
+    """掃描順序：依日期輪轉起點（R71 E-2）。
+
+    🔴 為何不能用固定字典序：`stale_schedule_tracks` 每軌前先檢查掃描預算、超時即
+    `break`，而 `scheduled_workflow_periods` 用 `sorted()` ⇒ 順序固定 ⇒ **排最後的
+    那支永遠第一個被丟掉**。實測本 repo 的 7 支含 cron workflow 排序後最後一名正是
+    `windows-compat-ci.yml`——也就是說，這個哨兵的系統性盲區恰好落在它最該看的那一支
+    （DEF-101-703 的主角）。以 `ref` 的日序輪轉起點後，截斷面隨日期均攤、任何一軌都
+    不會被永久跳過；`ref` 可注入 ⇒ 本行為可被機械驗證，不是靠隨機。
+    """
+    items = sorted(periods.items())
+    if not items:
+        return []
+    offset = ref.toordinal() % len(items)
+    return items[offset:] + items[:offset]
+
+
 def stale_schedule_tracks(root: Path, deadline: float,
                           now: datetime | None = None) -> list[str]:
-    """逐軌查活性，回傳陳舊軌的人類可讀描述清單（空 list＝全部新鮮／全部查不到）。
+    """逐軌查活性，回傳需要人看一眼的描述清單（空 list＝全部新鮮／全部查不到）。
 
     `deadline`＝`time.monotonic()` 基準的總預算上限（多次 gh 呼叫可能各約 1 秒），
     超時即中止掃描——本哨兵是 advisory，寧可少報也不可拖住開工流程。
     查不到（gh 失敗／逾時／回應無法解析）一律**跳過而非報陳舊**：無訊號 ≠ 壞訊號。
+
+    R71 起回傳的清單含三類項目（全部都是「請人看一眼」，不只是「陳舊」）：
+      ① 陳舊軌（判準與 R68/R69 完全相同，尾巴多接「最近一次嘗試」軸供分辨 a/b/c）；
+      ② 新鮮但**新鮮度不是排程軌掙來的**（D-3 遮蔽／D-5 排程觸發後轉紅）；
+      ③ 掃描面本身的自白：預算截斷未查了哪幾軌（E-2）、哪支檔的 run 層判定
+         結構上不構成證據（E-1）。**未查 ≠ 健康**，靜默截斷正是哨兵自己的盲區。
     """
     ref = now or datetime.now(UTC)
-    stale: list[str] = []
-    for wf, period in scheduled_workflow_periods(root).items():
+    findings: list[str] = []
+    tracks = _scan_order(scheduled_workflow_periods(root), ref)
+    for index, (wf, period) in enumerate(tracks):
         if time.monotonic() > deadline:
+            skipped = [name for name, _ in tracks[index:]]
+            findings.append(
+                f"掃描未完成——預算用盡，{len(skipped)} 軌未查（{'／'.join(skipped)}）："
+                "其狀態**未知**，不是健康。起掃點依日期輪轉，下次會換一批先查")
             break
+        blind = multi_cron_blind_spot(root, wf)
+        if blind:
+            findings.append(blind)
         ts = _latest_success_run(wf)
         if ts is None:
             continue
+        att = _latest_attempt(wf)
         if ts == "":
-            stale.append(f"{wf}（查無任何成功的 schedule run）")
+            findings.append(f"{wf}（查無任何成功的 schedule／workflow_dispatch run）"
+                            + _attempt_suffix(att))
             continue
         try:
             when = datetime.fromisoformat(ts.replace("Z", "+00:00"))
@@ -123,5 +317,10 @@ def stale_schedule_tracks(root: Path, deadline: float,
             continue
         age = (ref - when).total_seconds() / 86400.0
         if age > STALE_PERIOD_FACTOR * period:
-            stale.append(f"{wf}（最近成功於 {age:.0f} 天前，cron 週期 {period:.0f} 天）")
-    return stale
+            findings.append(f"{wf}（最近成功於 {age:.0f} 天前，cron 週期 {period:.0f} 天）"
+                            + _attempt_suffix(att))
+            continue
+        note = _schedule_axis_note(ts, att)
+        if note:
+            findings.append(f"{wf}（{note}）")
+    return findings

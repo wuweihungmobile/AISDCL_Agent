@@ -40,6 +40,7 @@ from __future__ import annotations
 import shutil
 import subprocess
 import sys
+import tempfile
 import unittest
 from pathlib import Path, PureWindowsPath
 
@@ -60,6 +61,106 @@ ABS_FAKE_REPO = Path("D:/repo") if sys.platform == "win32" else Path("/repo")
 _BASH_SUBPATHS = ("usr/bin/bash.exe", "bin/bash.exe", "usr/bin/bash", "bin/bash")
 
 
+def _bash_candidates() -> list[str]:
+    """本機 bash 候選路徑（依序）：**git 相鄰的 bash 優先**（隨 git 安裝、必為真 Git
+    Bash），PATH 上的裸 bash 次之且須通過 System32 整段排除。
+
+    抽成獨立函式而非讓兩個消費者（`usable_bash_for_fixture()`／
+    `path_honouring_bash_for_fixture()`）各寫一份：候選蒐集規則裡的 System32 排除
+    正是 DEF-101-753 的本體，抄第二份就是把同一個盲點再種一次（本檔 docstring 第②類
+    收納判準）。兩個消費者的差別只在**怎麼挑**，不在**有哪些候選**。
+    """
+    candidates: list[str] = []
+    git = shutil.which("git")
+    if git:
+        for up in list(Path(git).resolve().parents)[:4]:
+            for sub in _BASH_SUBPATHS:
+                cand = up / sub
+                if cand.is_file():
+                    candidates.append(str(cand))
+    bare = shutil.which("bash")
+    if bare and not any(
+        part.lower() == _spec.SYSTEM32_SEGMENT for part in PureWindowsPath(bare).parts
+    ):
+        candidates.append(bare)
+    return candidates
+
+
+# `honours_external_path()` 的量測探針：**全部是 shell builtin**，一個外部指令都不用。
+# WHY：這支探針要在「PATH 只剩一個空目錄」下執行，任何外部指令（`tr`／`wc`／`env`…）
+# 本身就查不到 ⇒ 用了就量不到東西、還會把「查不到外部指令」誤記成「探針壞掉」。
+# `IFS=:` 讓 `$PATH` 依段切分、`set -f` 關掉未加引號展開時的 glob，`set --` 把各段變成
+# 位置參數；輸出兩行＝段數、第一段內容。
+_PATH_ECHO_CMD = 'IFS=: ; set -f ; set -- $PATH ; echo $# ; echo "$1"'
+
+
+def honours_external_path(bash: str) -> bool:
+    """這支 bash 是否**照單全收**呼叫端傳入的 `PATH`（沒有自我注入額外目錄）？
+
+    🔴 這是一條**載具性質**判準，不是「被測物會不會通過」的預判——它問的是「我用
+    `env={"PATH": …}` 限縮外部 PATH 這個模擬手法，對這支解譯器到底有沒有作用」。
+    量測方式是叫 bash 自己把它看到的 `$PATH` 段數與第一段印回來，與 `PROBE_CMD`／
+    `dirname` 完全無關：就算有人把 `PROBE_CMD` 退化成只剩 `echo`，本函式的判定也一字
+    不變（不會因此多 skip 掉一支測試）。
+
+    WHY 需要它（DEF-101-618(a) 的殘留，R71 於 Windows 11 真機實測收斂）：Git for
+    Windows 的 `bin\\bash.exe` 是 **MSYS 啟動器**，啟動時**無條件**把
+    `/mingw64/bin:/usr/bin`（相對自身安裝根）插到自己內部 PATH 最前面，不理會外部傳
+    進去的 PATH。實測（`env={"PATH": <單一空目錄>}`）：
+
+        Git\\bin\\bash.exe     -> $PATH 段數 4，
+                                 /mingw64/bin:/usr/bin:/d/bin:<空目錄>   ← 自我注入
+        Git\\usr\\bin\\bash.exe -> $PATH 段數 1，<空目錄>                 ← 照單全收
+
+    前者上面「限縮 PATH 讓 `dirname` 查不到」的模擬**完全是 no-op**（`dirname` 仍解析
+    到 `/usr/bin/dirname`），任何建立在該手法上的斷言量到的都是載具失效而非被測物缺陷。
+
+    判定為 True 的條件：子行程起得來、`rc == 0`、回報的 `$PATH` 只有 **1 段**、且該段
+    帶著我們剛建立的唯一暫存目錄名。任一條不成立即 False（fail-closed：寧可判成「這支
+    不能用來做這個模擬」，也不要在無鑑別力的載具上跑出誤導性的紅燈）。
+
+    已知邊界（誠實劃界）：段數以 `:` 切分，是 bash 內部的 PATH 分隔符，故 MSYS 會把
+    `C:\\Users\\…` 轉成 `/c/Users/…` 的情形已被涵蓋；若某天出現「不做 POSIX 轉換、原樣
+    保留磁碟機代號」的 bash，`C:` 的冒號會被算成兩段而判為 False ⇒ 方向仍是 fail-closed。
+    """
+    with tempfile.TemporaryDirectory(prefix="path_honour_probe_") as only_dir:
+        try:
+            proc = subprocess.run(
+                [bash, "-c", _PATH_ECHO_CMD],
+                capture_output=True, text=True, encoding="utf-8",
+                errors="replace", timeout=20, env={"PATH": only_dir},
+            )
+        except Exception:  # noqa: BLE001 — 任何載具問題都只代表「這支不能用來做模擬」
+            return False
+        lines = proc.stdout.splitlines()
+        if proc.returncode != 0 or len(lines) < 2:
+            return False
+        return lines[0].strip() == "1" and Path(only_dir).name in lines[1]
+
+
+def path_honouring_bash_for_fixture() -> str | None:
+    """回傳一支「外部傳入的 PATH 真的管得住其外部指令查找」的 bash；一支都沒有回 `None`。
+
+    給的是**做「限縮 PATH」這類模擬時該用的解譯器**，與 `usable_bash_for_fixture()`
+    的用途不同，兩者在同一台機器上很可能回不同的二進位，這是設計而非瑕疵：
+      · `usable_bash_for_fixture()` 要的是「能真的把 repo 的 .sh 跑完」⇒ 會挑通過
+        `PROBE_CMD` 驗活的那支。Windows 上當 ambient PATH 沒有 coreutils 目錄時，
+        `usr\\bin\\bash.exe` 會驗活失敗（找不到 `dirname`）而落到自我注入的
+        `bin\\bash.exe`——那支**能跑腳本**，正是它要的。
+      · 本函式要的是「我說 PATH 只有這些，它就只找這些」⇒ 刻意**不**要求候選通過
+        `PROBE_CMD` 驗活。要求了反而會把唯一合格的 `usr\\bin\\bash.exe` 排除掉
+        （它在受限 ambient PATH 下驗活本來就會失敗），等於自我否定。
+
+    回 `None` 代表本機沒有任何載具能做這個模擬。呼叫端必須**帶理由 skip**，且該情況
+    不得靜默——由 `test_bash_probe_spec_contract.py::
+    TestRestrictedPathCarrierCannotSilentlyVanish` 反向哨兵 fail-loud。
+    """
+    for cand in _bash_candidates():
+        if honours_external_path(cand):
+            return cand
+    return None
+
+
 def usable_bash_for_fixture() -> str | None:
     """回傳一支**真的能跑 repo bash 腳本**的 bash 路徑；一支都探不到回 `None`。
 
@@ -75,6 +176,9 @@ def usable_bash_for_fixture() -> str | None:
     `Windows Subsystem for Linux has no installed distributions.` 並 `exit 1`，
     受測腳本一行都沒被執行，測試看到的卻是「腳本回了非預期 rc」＝**歸因完全錯誤**
     的紅燈（DEF-101-753：R69 收輪 push 後由雲端 windows-compat-ci 抓到）。
+    **裝了發行版的機器上不會是紅燈，會更糟**：它不再 `exit 1`，而是把 repo 的腳本
+    丟進 Linux **真的跑起來**——沒有錯誤訊息、沒有非零 rc，只有語意悄悄換了一個
+    作業系統（實測見下方「R71 訂正」段）。
 
     **同一次 CI run 內就有對照組可證此機制**（run 30739865214）：
     `test_dev_start.TestPickPythonGeMin` 用的是 `shutil.which("bash")`（只查 PATH）
@@ -95,9 +199,26 @@ def usable_bash_for_fixture() -> str | None:
     假設）。收斂前 `tools/tests/` 內有兩份 fixture 用途的複本
     （`test_bash_probe_spec_contract._probe_a_real_usable_bash_for_fixture` 與
     `test_macos_smoke_skip_honesty._usable_bash`），且**兩份的排除規則並不一致**
-    ——後者對裸 bash 完全沒有 System32 排除，只是恰好因為驗活會失敗才沒出事
-    （fail-closed 的僥倖，不是設計）。這正是本檔 docstring 第②類判準所描述的
-    「同一盲點被抄 N 遍」形態，故比照 R57 `strip_ps_comments` 判例收斂為一份。
+    ——後者對裸 bash 完全沒有 System32 排除。這正是本檔 docstring 第②類判準所描述
+    的「同一盲點被抄 N 遍」形態，故比照 R57 `strip_ps_comments` 判例收斂為一份。
+
+    🔴 **R71 訂正：本段原本的因果宣稱是錯的，且把風險等級講低了一整級。**
+    原文寫「後者只是恰好因為驗活會失敗才沒出事（fail-closed 的僥倖，不是設計）」。
+    2026-08-02 於 Windows 11 真機（WSL **已裝**發行版）逐項實測，該僥倖並不存在：
+
+        C:\\Windows\\System32\\bash.exe   -c PROBE_CMD
+          → rc=0, stdout == b'probe_ok\\n/tmp/probe_dir\\n'
+        C:\\Program Files\\Git\\bin\\bash.exe -c PROBE_CMD
+          → rc=0, stdout == b'probe_ok\\n/tmp/probe_dir\\n'   ← **與上一行逐位元組相同**
+        shutil.which("bash")           → C:\\WINDOWS\\system32\\bash.EXE
+
+    也就是說**驗活對 WSL 佔位版的鑑別力是 0**：兩支 bash 的 rc 與 stdout 完全無法
+    區分，唯一擋得住的是 System32 路徑規則。所以「沒有 System32 排除」不是「靠運氣
+    沒出事」，而是「在任何裝了 WSL 發行版的機器上，直接把 repo 腳本送進 Linux 跑」。
+    `test_bash_probe_spec_contract.TestWslStubIsNeverAcceptedAsRealBash` 讓 stub
+    驗活成功因此不是假想情境，是照著本機現況造的。
+    ⚠️ 同型的舊敘述另有一份留在 `test_macos_smoke_skip_honesty.py`（該檔開頭
+    「fail-closed 的僥倖」註解），R71 本輪射程外未訂正，下輪一併處理。
 
     **刻意不收斂的兩份**：`test_pre_push_dispatcher._usable_bash()` 與
     `test_git_hooks_install_common._usable_bash()` 是**生產端探針的獨立重寫回歸鎖**
@@ -105,20 +226,7 @@ def usable_bash_for_fixture() -> str | None:
     ——共用函式會讓它們與被測對象同時失效。本函式與它們的差別是**用途**：本函式
     要的是「給我一支能跑的 bash」，它們要的是「驗證探測規則本身」。
     """
-    candidates: list[str] = []
-    git = shutil.which("git")
-    if git:
-        for up in list(Path(git).resolve().parents)[:4]:
-            for sub in _BASH_SUBPATHS:
-                cand = up / sub
-                if cand.is_file():
-                    candidates.append(str(cand))
-    bare = shutil.which("bash")
-    if bare and not any(
-        part.lower() == _spec.SYSTEM32_SEGMENT for part in PureWindowsPath(bare).parts
-    ):
-        candidates.append(bare)
-    for cand in candidates:
+    for cand in _bash_candidates():
         try:
             proc = subprocess.run(
                 [cand, "-c", _spec.PROBE_CMD],
@@ -197,6 +305,51 @@ def create_symlink_or_skip(
         link_path.symlink_to(target, target_is_directory=target_is_directory)
     except OSError as e:
         test_case.skipTest(f"本機無建立 symlink 權限（{e}），略過 symlink 情境")
+
+
+# PowerShell 子行程輸出編碼的 UTF-8 前置（DEF-101-350／DEF-101-760 同一修法）。
+#
+# WHY 需要它：PowerShell 寫進 pipe 的位元組編碼＝`[Console]::OutputEncoding`，預設值
+# 是**主控台 output code page**（繁中 Windows＝950/Big5），不是 UTF-8。於是含中文或
+# `❌`（U+274C）的輸出在 Python 端以 `encoding="utf-8"` 解碼即成亂碼／`?`，斷言假紅。
+# 而 `chcp` 是**整個 console 共用**的行程外狀態 ⇒ 全套跑時只要有較早的測試把它換成
+# 65001，後面所有 PowerShell 呼叫就跟著沾光：那種綠不是自己掙來的、會隨測試順序漂移
+# （DEF-101-760 的形狀）。每個呼叫端自帶前置才是自足的。
+#
+# WHY 只准有一種寫法（R71，第①類收納物：測試 fixture 對本機環境的隱性假設）：本 repo
+# 自 R42／DEF-101-350 起把這串**行內抄寫**在多個姊妹鎖裡，R71 又抄了第 4 份、且寫法
+# 不同（`$OutputEncoding = [Console]::OutputEncoding = New-Object
+# System.Text.UTF8Encoding $false`），理由寫的是「避免 `[System.Text.Encoding]::UTF8`
+# 帶 preamble、某些構造會在 stdout 開頭吐 BOM」。2026-08-02 於 Windows 11 真機、
+# Windows PowerShell 5.1 單變因實測（先把 `[Console]::OutputEncoding` 打成 cp950 造出
+# 「未被污染的 console」，再套各寫法跑 `WindowsAppsGuard.ps1` 的
+# `Write-PythonGeMinRemediation`，比對 stdout 原始位元組）：
+#
+#（列名為寫法的簡稱，逐字內容見各自來源；「本常數」即下方 PS_UTF8_PRELUDE）
+#     A 無前置（缺陷基準）        → b'? \xa7\xe4\xa4\xa3'  ，U+274C 遺失、中文亂碼
+#     B 本常數（既有多數寫法）    → b'\xe2\x9d\x8c \xe6\x89'，BOM=False
+#     C R71 第 4 種（$OutputEncoding + UTF8Encoding $false）
+#                                 → b'\xe2\x9d\x8c \xe6\x89'，BOM=False
+#     D 只設 Console + UTF8Encoding $false
+#                                 → b'\xe2\x9d\x8c \xe6\x89'，BOM=False
+#
+# B/C/D 三種前置**輸出逐位元組相同、BOM 一次都沒出現**（.NET 的 `Console.OutputEncoding`
+# setter 本來就會剝掉 preamble）⇒ 「BOM」這個分歧理由不成立。`$OutputEncoding` 管的是
+# 另一件事——PowerShell 經管線把文字餵給**原生子行程 stdin** 的編碼；本 repo 的呼叫端
+# 一個都沒有這種用法（同一實測的 native-child 情境四種寫法亦全同）。故取**既有多數
+# 寫法**為唯一形態（Rule 11 從眾，且此舉讓尚未收斂的行內複本與本常數逐字相等），
+# 不引入第 4 種。一致性由 `test_dev_start.py::TestPsUtf8PreludeIsSingleSpelling` 守護。
+PS_UTF8_PRELUDE = "[Console]::OutputEncoding=[System.Text.Encoding]::UTF8; "
+
+
+def ps_utf8_command(snippet: str) -> str:
+    """把 PowerShell 片段包成「輸出編碼已釘成 UTF-8」的 `-Command` 引數字串。
+
+    🔴 凡測試要斷言 PowerShell 子行程 stdout 的**非 ASCII 內容**，一律用本函式組
+    `-Command` 引數，不要在呼叫端行內再抄一次前置——抄第 N 份就會長出第 N 種寫法
+    （R71 實例與量測見上方 `PS_UTF8_PRELUDE` 註解）。
+    """
+    return PS_UTF8_PRELUDE + snippet
 
 
 # `#` 只在引號外、且位於行首或這些字元之後才算註解起點（避免誤剝 `$#`、`c#`）。

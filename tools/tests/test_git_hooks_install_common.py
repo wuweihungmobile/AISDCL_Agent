@@ -233,7 +233,14 @@ class TestWrapperThinnessGuard(unittest.TestCase):
     黑名單式做法的批評同樣適用於此），改用行數上限作為早期示警訊號已足夠：
     真正重新實作判定邏輯必然大幅增加行數。"""
 
-    _PS1_MAX_LINES = 150
+    # DEF-101-762（R71）：_PS1_MAX_LINES 由 150 上修至 195。上修的是**呈現/傳輸層**
+    # ——`Invoke-CommonPy` 只做「呼叫期間把 [Console]::OutputEncoding 釘成 UTF-8、
+    # 結束後還原」，一行判定邏輯都沒有搬回 .ps1 側（四個子指令的判準仍全在
+    # tools/git_hooks_install_common.py）。本守門要擋的「重新長出 git 偵測/路徑
+    # 判定邏輯」因此未被放寬。上修而非壓縮註解：該函式的 WHY 記載了「只在
+    # 非 UTF-8 主控台重現、人工驗證永遠碰不到」這個**已經害本 repo 漏測兩天**的
+    # 條件（連實測到的 mojibake 碼位都留著），刪掉它才是真的損失。
+    _PS1_MAX_LINES = 195
     _SH_MAX_LINES = 100
 
     def test_ps1_wrapper_within_line_budget(self) -> None:

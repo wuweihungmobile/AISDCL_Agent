@@ -24,7 +24,10 @@ from unittest import mock
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "lib"))
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import bash_probe_spec as _spec  # noqa: E402
-from _platform_helpers import usable_bash_for_fixture  # noqa: E402
+from _platform_helpers import (  # noqa: E402
+    path_honouring_bash_for_fixture,
+    usable_bash_for_fixture,
+)
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 
@@ -45,6 +48,36 @@ _REPO_ROOT = Path(__file__).resolve().parents[2]
 # 不受影響）；本行要的只是「給我一支能跑的 bash」當 fixture，用途不同。
 # 找不到就 `@unittest.skipUnless(_BASH, ...)` 跳過，不是失敗。
 _BASH = usable_bash_for_fixture()
+
+# 手法 A（`env={"PATH": <只有空目錄>}` 讓 `dirname` 查不到）專用的載具，與 `_BASH` 分開取
+# （DEF-101-762，R71 於 Windows 11 真機收斂 DEF-101-618(a) 的殘留）。
+#
+# WHY 不能沿用 `_BASH`：兩者要的性質不同，而在 Windows 上它們**經常不是同一支**。
+# `_BASH` 要的是「跑得動 repo 的 .sh」，於是當呼叫端 ambient PATH 不含 coreutils 目錄時，
+# `Git\usr\bin\bash.exe` 會因驗活找不到 `dirname` 被淘汰，`_BASH` 落到會自我注入
+# `/mingw64/bin:/usr/bin` 的 `Git\bin\bash.exe`——那支**外部 PATH 管不住**，手法 A 對它
+# 是 no-op（`_platform_helpers.honours_external_path()` docstring 有兩支的實測對照）。
+# 於是同一份工作樹、同一支測試，在 Git Bash 殼層下跑是綠的、在 PowerShell 殼層下跑是紅的
+# ——紅的那次量到的是載具失效，不是被測物缺陷。本常數改以「載具性質」機械挑選，讓結果
+# 不再隨呼叫端殼層的 ambient PATH 漂移。
+_PATH_HONOURING_BASH = path_honouring_bash_for_fixture()
+
+# 🔴 這個 skip **不是**「這支測試會失敗就跳過」——述詞完全不看 `PROBE_CMD` 的內容或結果，
+# 只看「限縮外部 PATH 這個模擬手法對本機載具有沒有作用」。把 `PROBE_CMD` 退化成只剩 echo
+# 時述詞一字不變，被守護的斷言照樣會紅（T-3 缺陷注入實證）。
+# 覆蓋不會因此消失：①手法 B（`TestUsableBashRejectsCoreutilsLessBinBashClone`）在自我注入
+# 啟動器上仍有 wiring 層鑑別力；②真的一支合格載具都沒有時，
+# `TestRestrictedPathCarrierCannotSilentlyVanish` 反向哨兵 fail-loud（R69 的教訓：靜默
+# skip 比紅燈更貴）。
+_needs_path_honouring_bash = unittest.skipUnless(
+    _PATH_HONOURING_BASH,
+    "[CARRIER-NO-DISCRIMINATION] 本機探不到任何「外部傳入的 PATH 真的管得住其外部指令"
+    "查找」的 bash（所有候選都像 Git\\bin\\bash.exe 那樣自我注入 /mingw64/bin:/usr/bin）"
+    "⇒ 手法 A 無法讓 dirname 查不到，此時的斷言量到的是載具失效而非被測物缺陷。"
+    "要驗到本判準需要一支不自我注入的解譯器：Git\\usr\\bin\\bash.exe，或 macOS/Linux 的 "
+    "/bin/bash。本 skip 由 TestRestrictedPathCarrierCannotSilentlyVanish 反向哨兵看守，"
+    "不會靜默（DEF-101-762）",
+)
 
 
 def _find_real_git_bash_install_root() -> Path | None:
@@ -176,19 +209,26 @@ class TestProbeCmdContentDependsOnCoreutils(unittest.TestCase):
 class TestProbeCmdRealSubprocessBehavior(unittest.TestCase):
     """行為層防線：不 mock subprocess，直接用真實 bash 執行 PROBE_CMD，
     以「PATH 缺 dirname」模擬 DEF-101-275 描述的殘缺 Git Bash 情境。
+
+    兩支測試刻意用**不同載具**（DEF-101-762）：「拒絕」方向需要一支外部 PATH 管得住的
+    解譯器（`_PATH_HONOURING_BASH`），否則模擬手法是 no-op；「接受」方向要驗的是本機
+    真正會被拿去跑 .sh 的那支（`_BASH`），換掉就不是在驗生產情境了。
     """
 
-    def _run_probe(self, path_env: str) -> subprocess.CompletedProcess:
+    def _run_probe(
+        self, path_env: str, bash: str | None = None
+    ) -> subprocess.CompletedProcess:
         env = {"PATH": path_env}
         return subprocess.run(
-            [_BASH, "-c", _spec.PROBE_CMD],
+            [bash or _BASH, "-c", _spec.PROBE_CMD],
             capture_output=True, text=True, encoding="utf-8",
             errors="replace", timeout=15, env=env,
         )
 
+    @_needs_path_honouring_bash
     def test_fails_when_path_lacks_dirname(self) -> None:
         # 空 PATH：shell 內建 echo 仍可跑，但外部指令 dirname 解析不到 → 非 0。
-        result = self._run_probe(path_env="")
+        result = self._run_probe(path_env="", bash=_PATH_HONOURING_BASH)
         self.assertNotEqual(
             result.returncode, 0,
             f"PATH 缺 dirname 時 PROBE_CMD 應失敗，實際 rc=0，stdout={result.stdout!r}",
@@ -219,6 +259,13 @@ class TestBinBashLauncherSelfInjectsPathContract(unittest.TestCase):
     此類與 `TestProbeCmdRealSubprocessBehavior`（驗證 `usr/bin/bash.exe` 這類
     不自我注入的解譯器）互補、不重複：兩者驗證的是兩款不同二進位對同一種模擬
     手法的不同反應，各自對不同候選類型維持鑑別力。
+
+    🔴 **R71／DEF-101-762 收斂上述「R64 殘留發現」**：該殘留當時只被記載、沒被修，
+    因為它在 macOS 與 Git Bash 殼層下不顯形。真正的觸發條件不是 pwsh，而是**呼叫端
+    ambient PATH 有沒有 coreutils 目錄**——沒有時 `usr/bin/bash.exe` 會驗活失敗，
+    `_BASH` 就落到這支自我注入的啟動器上。修法是讓那兩支「拒絕」測試改用依載具性質
+    機械挑選的 `_PATH_HONOURING_BASH`，不再沿用 `_BASH`；上面那句「互補」因此從
+    **巧合**變成**被強制**的事實。
     """
 
     def test_restricted_external_path_alone_is_ineffective(self) -> None:
@@ -343,7 +390,12 @@ class TestUsableBashEndToEndWithRestrictedPath(unittest.TestCase):
         import bash_probe  # noqa: PLC0415
         self.bash_probe = bash_probe
 
+    @_needs_path_honouring_bash
     def test_usable_bash_rejects_candidate_when_path_lacks_dirname(self) -> None:
+        # DEF-101-762：候選明確指定 `_PATH_HONOURING_BASH`，不再沿用 `_BASH`。生產端
+        # `usable_bash()` 把候選當黑盒子呼叫（argv 寫死 `[cand, "-c", PROBE_CMD]`），測試側
+        # 唯一能施力的就是「餵它一個外部 PATH 管得住的候選」；餵到自我注入的啟動器時，
+        # 下面那條 `assertNotEqual(rc, 0)` 量到的是載具失效（見類別上方 skip 述詞）。
         # R60 A-01 修正載具：舊版用 `{"PATH": ""}` + `clear=True`，在 Windows 上**兩段都壞**——
         #   ① Windows 的 `os.environ["PATH"] = ""` 是「**刪除**該變數」而非「設為空字串」
         #      （本機實測：設完 `GetEnvironmentVariableW("PATH")` 回 0／ERROR_ENVVAR_NOT_FOUND），
@@ -355,7 +407,7 @@ class TestUsableBashEndToEndWithRestrictedPath(unittest.TestCase):
         # 變數、卻找不到 `dirname`（本機實測 rc=127 / `dirname: command not found`）。
         with tempfile.TemporaryDirectory(prefix="probe_no_coreutils_") as empty_dir:
             result, completed, spawn_errors = usable_bash_with_probe_spy(
-                self.bash_probe, empty_dir
+                self.bash_probe, empty_dir, candidate_bash=_PATH_HONOURING_BASH
             )
         self.assertFalse(
             spawn_errors,
@@ -438,9 +490,14 @@ class TestNoneSourceIsDistinguishable(unittest.TestCase):
         self.assertEqual(spawn_errors, [], "驗活失敗不是 spawn 失敗，不可混記")
         self.assertEqual(completed, [(127, f"{_spec.PROBE_EXPECT_ECHO}\n")])
 
+    @_needs_path_honouring_bash
     def test_wiring_test_goes_red_instead_of_green_when_spawn_breaks(self) -> None:
         """把「子行程起不來」注入回 wiring 測試本體，斷言它 FAIL——這正是 A-01 的核心：
-        修復前同一注入下該測試印 `ok`（假綠），修復後必須紅並指名載具故障。"""
+        修復前同一注入下該測試印 `ok`（假綠），修復後必須紅並指名載具故障。
+
+        與被觀察的那支測試掛**同一個** skip 述詞（DEF-101-762）：它被 skip 時本類會數到
+        0 個 problem 而報「A-01 誤綠復發」，那是**歸因錯誤**的紅燈——真正發生的事是載具
+        沒有鑑別力，該由反向哨兵具名報告，不該由本類冒名頂替。"""
         case = TestUsableBashEndToEndWithRestrictedPath(
             "test_usable_bash_rejects_candidate_when_path_lacks_dirname"
         )
@@ -454,6 +511,40 @@ class TestNoneSourceIsDistinguishable(unittest.TestCase):
             f"（testsRun={result.testsRun}, skipped={result.skipped}）",
         )
         self.assertIn("載具故障", problems[0][1])
+
+
+@unittest.skipUnless(
+    _BASH,
+    "本機一支可用 bash 都探不到 ⇒ 本檔 bash 相關類別已整批 skip，那個事實由"
+    " run_root_unittests 的 skip 彙整呈現；本哨兵問的是「有 bash、卻沒有任何一支能做"
+    "限縮 PATH 模擬」這個更隱蔽的狀態",
+)
+class TestRestrictedPathCarrierCannotSilentlyVanish(unittest.TestCase):
+    """反向哨兵（DEF-101-762）：手法 A 的載具不得在無人察覺下全數失去鑑別力。
+
+    WHY（R69 教訓的直接套用）：上面兩支「拒絕」測試現在掛著 `_needs_path_honouring_bash`
+    這個帶述詞的 skip。帶述詞的 skip 解決了「在無鑑別力載具上報誤導性紅燈」，卻開了另一
+    個口子——**若哪天所有候選都變成自我注入形態，述詞會恆假、兩支測試永久空轉，而
+    `run_root_unittests.py` 的 rc 仍是 0**。那正是 R69 付過學費的形狀（樣本被搬光後靜默
+    skip），只是換成從載具側觸發。本類把「該 skip 述詞恆假」本身變成紅燈。
+
+    誠實劃界：本類只看**手法 A**這條通道。手法 B（`TestUsableBashRejectsCoreutilsLess
+    BinBashClone`，複製一份缺 coreutils 的 Git 樹）是對自我注入啟動器仍有效的互補通道，
+    它自己的存活由該類 `setUp()` 的具名 `skipTest` 呈現，不併入本哨兵——兩條通道驗的是
+    不同層（手法 A 兼顧 PROBE_CMD 本身與生產端 wiring，手法 B 只到 wiring 層），任一條
+    斷掉都該各自具名，混成一條會讓「斷了哪一條」變得不可讀。
+    """
+
+    def test_a_path_honouring_bash_exists_whenever_any_bash_does(self) -> None:
+        self.assertIsNotNone(
+            _PATH_HONOURING_BASH,
+            f"本機有可用 bash（_BASH={_BASH!r}），卻沒有任何一支「外部傳入的 PATH 真的"
+            "管得住其外部指令查找」⇒ 手法 A 的兩支「拒絕」測試本次**完全沒跑**，PROBE_CMD "
+            "的 coreutils 依賴退回只剩字面靜態鎖（TestProbeCmdContentDependsOnCoreutils）"
+            "與手法 B 的 wiring 層。這不是環境雜訊，是覆蓋損失：請確認本機 Git for "
+            "Windows 的 usr\\bin\\bash.exe 還在（或 POSIX 平台的 /bin/bash 還在），"
+            "**不要改本哨兵的述詞**（DEF-101-762）",
+        )
 
 
 # ---------------------------------------------------------------------------

@@ -3,9 +3,9 @@ from __future__ import annotations
 
 from copy import deepcopy
 from datetime import datetime, timedelta
-from typing import Optional
 
 from ...utils.checkpoint_manager import PlaybookCheckpoint
+from ._deprecation import warn_load_checkpoint_deprecated
 
 
 class InMemoryStateRepository:
@@ -19,26 +19,19 @@ class InMemoryStateRepository:
         self._store[playbook_id] = deepcopy(checkpoint)
         self._store[playbook_id].saved_at = datetime.now().isoformat(timespec="seconds")
 
-    def load_checkpoint(self, playbook_id: str) -> Optional[PlaybookCheckpoint]:
+    def load_checkpoint(self, playbook_id: str) -> PlaybookCheckpoint | None:
         """⚠️ Deprecated（SD_06 W5-T5-8）：請改用 load_latest_by_playbook。"""
-        import os, warnings  # noqa: E401
-        if os.environ.get("AUTOCLAUDE_DEPRECATION_WARN") == "1":
-            warnings.warn(
-                "load_checkpoint(playbook_id) is deprecated since SD_06 W5; "
-                "use load_latest_by_playbook(playbook_id) instead.",
-                DeprecationWarning,
-                stacklevel=2,
-            )
+        warn_load_checkpoint_deprecated()
         return self.load_latest_by_playbook(playbook_id)
 
     def load_latest_by_playbook(
         self, playbook_id: str,
-    ) -> Optional[PlaybookCheckpoint]:
+    ) -> PlaybookCheckpoint | None:
         """SD_06 W5-T5-7：載入指定 playbook_id 最新一筆（單條目即 latest）。"""
         cp = self._store.get(playbook_id)
         return deepcopy(cp) if cp else None
 
-    def load_by_run_id(self, run_id: str) -> Optional[PlaybookCheckpoint]:
+    def load_by_run_id(self, run_id: str) -> PlaybookCheckpoint | None:
         """SD_06 W5-T5-7：遍歷 store 找符合 run_id 的紀錄。"""
         if not run_id:
             return None

@@ -23,10 +23,12 @@ SD_09 W3 Round 19 audit P0-AUDIT-R18-2 修復（紀律 #4「驗證鏡子自身�
 """
 from __future__ import annotations
 
+import json
 import os
 import platform
 import re
 import subprocess
+import sys
 import time
 import uuid
 from pathlib import Path
@@ -673,16 +675,1146 @@ def test_nightly_log_retention_rotation_present(ps1_content: str) -> None:
     assert "Remove-Item" in block, "輪替區塊必須實際執行 Remove-Item（非只是掃描不刪除）"
 
 
-def test_mutation_progress_uses_unique_sha(ps1_content: str) -> None:
-    """case 24（R10 SA-2 / DEF-101-142）：END 進度 mutation 軌必須印 unique-sha 計數。
+def test_mutation_gate_asks_the_authority_and_holds_no_threshold(ps1_content: str) -> None:
+    """case 24（R10 SA-2 / DEF-101-142 → R71 G-1 改寫）：mutation 判定必須問權威實作。
 
-    意圖：ADR-SD09-011 後 mutation 以 source_sha256 去重——原始列數對 7 門檻會虛報
-    （R10 實測 29 列 vs 5 unique sha）。分子必須是 unique sha 證據數。
+    意圖（Rule 9 — 為何這件事重要）：舊版在 ps1 裡持有第二份門檻
+    `$G0_MUTATION_UNIQUE_SHA_TARGET = 7`，並用自寫的 Get-MutationUniqueCount 掃**整檔**
+    算 unique sha 去比對它。但權威 `mutation_baseline_lock.should_lock` 只看
+    `history[-CONSECUTIVE_RUNS:]` 的 tail，且有效門檻是 **≥5**
+    （`MAX_BACKWARD_COMPAT_MISSING=2` 允許 2 筆 legacy 缺 sha）。
+    真實後果（2026-08-03 實測）：should_lock 早已回 `(True, 0.7071…)`、
+    `.mutation_baseline.toml` 也真的鎖了，nightly 卻每晚照印
+    `[G0-NOT-READY] mutation unique-sha 未達 7` 把 W1 擋著——**兩處門檻各寫各的**。
+
+    本 case 鎖三件事：① 權威被真的呼叫；② ps1 端不再持有任何 mutation 門檻字面值；
+    ③ G0 mutation 軌的布林值只由權威回傳決定（不得再出現數值比較）。
+    行為層鑑別力（換不同 history 會不會跟著權威改答案）見 `TestMutationLockGateBehavior`。
     """
-    assert "function Get-MutationUniqueCount" in ps1_content, (
-        "必須有 Get-MutationUniqueCount helper（sha 證據計數）"
+    assert "function Get-MutationLockGate" in ps1_content, (
+        "必須有 Get-MutationLockGate helper（向 should_lock 現場提問）"
     )
-    assert "unique-sha" in ps1_content, "END observation progress 必須標示 unique-sha 語意"
+    m = re.search(r"(?ms)^function\s+Get-MutationLockGate\s*\{.*?^\}", ps1_content)
+    assert m, "抽不到 Get-MutationLockGate 本體"
+    body = m.group(0)
+    assert "mutation_baseline_lock" in body and "should_lock" in body, (
+        "Get-MutationLockGate 必須 import tools/mutation_baseline_lock 並呼叫 should_lock"
+        "——不得在 ps1 端重寫鎖定規則"
+    )
+    # 🔴 反向鎖 ①：門檻字面值不得回到本檔（把 7 改成 5 只是換一個寫死的數字）。
+    assert "$G0_MUTATION_UNIQUE_SHA_TARGET" not in ps1_content, (
+        "ps1 不得再持有 mutation 門檻常數——這正是 G-1 拔掉的第二份真相源"
+    )
+    assert "function Get-MutationUniqueCount" not in ps1_content, (
+        "自寫的整檔 unique-sha 計數器不得復活：它的射程（整檔）與權威（tail 7 筆）不同，"
+        "history 一超過 7 筆就分岔"
+    )
+    # 🔴 反向鎖 ②：G0 mutation 軌只能是「權威回傳的布林」，不得夾帶任何數值比較。
+    assigns = re.findall(r"(?m)^[ \t]*\$g0MutOk\s*=.*$", ps1_content)
+    assert len(assigns) == 1, f"$g0MutOk 必須恰有一處賦值，實得 {len(assigns)} 處：{assigns}"
+    assign = assigns[0]
+    assert "$mutGate.Ok" in assign and "$mutGate.Locked" in assign, (
+        f"$g0MutOk 必須同時要求 Ok（量得出來）與 Locked（權威判定）。實得：{assign.strip()!r}"
+    )
+    assert not re.search(r"-(ge|gt|le|lt|eq|ne)\s", assign), (
+        "$g0MutOk 不得出現數值比較——比較就代表 ps1 又自己持有了一個門檻。"
+        f"實得：{assign.strip()!r}"
+    )
+    assert "unique-sha" in ps1_content, (
+        "END observation progress 仍須保留 unique-sha 語意標記（人類判讀用；"
+        "紀律 #13 契約與 test_end_progress_format_contract_matches_discipline_doc 依賴它）"
+    )
+
+
+# ---------------------------------------------------------------------------
+# R69 取證失真修復（S-1a / S-1b / S-1c / S-4）回歸鎖
+#
+# 事故背景（2026-08-01~02 真機，logs/nightly_latest.log 為證）：
+#   8/1 02:00 觸發漏跑 → StartWhenAvailable 於 10:17:53 補跑 → 跑到 sdd-fsm-chaos
+#   時機器 10:23:30 睡眠 → 8/2 21:52 才醒 → pytest 自報
+#   `34 passed ... in 127828.28s (1 day, 11:30:28)` ＝ 35.6 小時。
+# 取證鏈卻完全看不出來，因為兩處數字失真：
+#   (a) elapsed 印成 `11:30:41.799`（days 分量被 .NET TimeSpan 'hh' 無聲丟棄）
+#   (b) `ac4=41/14` 取整檔原始列數，真實滾動窗閘門其實只有 7/14 且 ready=false
+# (b) 的方向偏向「看起來已達標」，比 (a) 更危險——會誤導人去按下升級動作。
+# ---------------------------------------------------------------------------
+
+
+# 「TimeSpan 自訂格式字串以 h 起頭」＝ days 分量會被 .NET 無聲丟棄的 bug 形狀。
+# 只錨定開頭字元，不碰內部跳脫（前一版正是死在把 PowerShell 的 `\:` 當成 Python
+# 跳脫來寫）。單引號/雙引號、`ToString(` 後的空白皆容忍。
+_BARE_HH_FORMAT_RE = re.compile(r"\.ToString\(\s*['\"]h")
+
+
+def test_bare_hh_format_regex_has_discrimination() -> None:
+    r"""紀律 #4：反向鎖的 regex 自身要被驗證（上一版就是漏了這步才交出死鎖）。
+
+    意圖：`test_stage_elapsed_preserves_days_component` 的反向鎖若 regex 寫錯，
+    它會「永遠通過」而不是「永遠失敗」——這種壞法在 CI 上完全無聲。本 case 直接
+    餵真實形狀的正/反樣本，讓 regex 失去鑑別力時當場翻紅。
+    """
+    must_hit = [
+        r"$e = $sw.Elapsed.ToString('hh\:mm\:ss\.fff')",   # ps1 真實字面（含 PS 跳脫）
+        r'$e = $sw.Elapsed.ToString("hh\:mm\:ss")',        # 雙引號變體
+        r"  Log ($span.ToString( 'hh\:mm' ))",             # 括號後有空白
+        "$e = $sw.Elapsed.ToString('hh:mm:ss')",           # 未跳脫變體（PS 亦合法）
+    ]
+    for sample in must_hit:
+        assert _BARE_HH_FORMAT_RE.search(sample), (
+            f"反向鎖 regex 漏抓真實繞過形狀（死鎖風險，紀律 #4）：{sample!r}"
+        )
+    must_miss = [
+        r"return $Span.ToString('d\.hh\:mm\:ss\.fff')",    # Format-Elapsed 內合法 days 格式
+        r"$todayUtc = (Get-Date).ToUniversalTime().ToString('yyyy-MM-dd')",
+    ]
+    for sample in must_miss:
+        assert not _BARE_HH_FORMAT_RE.search(sample), (
+            f"反向鎖 regex 誤傷合法寫法（會製造假紅）：{sample!r}"
+        )
+
+
+def test_stage_elapsed_preserves_days_component(ps1_content: str) -> None:
+    """S-1a：stage 耗時格式必須保留 days 分量。
+
+    意圖（Rule 9 — 為何這件事重要）：.NET TimeSpan 自訂格式的 `hh` 是「小時分量
+    0-23」，跨日耗時會被**無聲截斷**成看似正常的數字。這不是美觀問題——35.6 小時
+    印成 11:30 會讓「整輪被睡眠凍住並吃掉隔日觸發」這個 P0 完全隱形。
+    """
+    assert "function Format-Elapsed" in ps1_content, (
+        "必須有 Format-Elapsed helper（days-aware 耗時格式化）"
+    )
+    assert r"d\.hh\:mm\:ss\.fff" in ps1_content, (
+        r"TotalDays >= 1 時必須用帶 days 分量的格式 'd\.hh\:mm\:ss\.fff'"
+    )
+    assert re.search(r"\$elapsed\s*=\s*Format-Elapsed\s+\$sw\.Elapsed", ps1_content), (
+        "Invoke-Stage 必須經 Format-Elapsed 取得耗時字串"
+    )
+    # 反向鎖：Format-Elapsed **函式本體之外**不得再有任何以 'hh' 起頭的 TimeSpan
+    # 自訂格式字串——那正是 S-1a 的 bug 形狀（days 分量被 .NET 無聲丟棄）。
+    #
+    # 🔴 為何要重寫（前一版是零鑑別力的死鎖）：原本寫
+    #     re.findall(r"\.ToString\('hh\:mm", ps1_content)
+    # Python 的 re 對「非字母」跳脫（`\:`）直接還原成該字元，實際比對的字面是
+    # `.ToString('hh:mm`；但 ps1 裡真正的字面是 `.ToString('hh\:mm`（PowerShell 用
+    # 反斜線跳脫格式字串裡的 ':'）。兩者永遠對不上 → 恆 0 命中，把真正的繞過塞進
+    # ps1 也照樣全綠（實測：注入 `([TimeSpan]::Zero).ToString('hh\:mm\:ss\.fff')`
+    # 後本測試仍 2 passed）。改成只比對「格式字串的開頭字元」，完全不依賴內部跳脫，
+    # 單引號／雙引號／有無空白／`hh:mm` 或 `hh\:mm` 皆能命中；合法的
+    # `'d\.hh\:mm\:ss\.fff'`（開頭是 d）與 `'yyyy-MM-dd'` 不會誤傷。
+    fn = re.search(r"(?ms)^function\s+Format-Elapsed\s*\{.*?^\}", ps1_content)
+    assert fn, "抽不到 Format-Elapsed 函式本體——反向鎖無法定界"
+    fn_first = ps1_content[: fn.start()].count("\n") + 1
+    fn_last = ps1_content[: fn.end()].count("\n") + 1
+    bare = [
+        (i, line.strip())
+        for i, line in enumerate(ps1_content.splitlines(), start=1)
+        if not (fn_first <= i <= fn_last) and _BARE_HH_FORMAT_RE.search(line)
+    ]
+    assert bare == [], (
+        f"發現 {len(bare)} 處裸 TimeSpan 'hh' 格式化繞過 Format-Elapsed"
+        f"（Format-Elapsed 本體＝L{fn_first}~L{fn_last}，該區間內合法）——"
+        f"days 分量會再次被無聲丟棄。違規行：{bare}\n"
+        "註：**註解行也算**（不留反例免得被複製走）；要在註解裡提到這個壞寫法，"
+        "請用文字描述『以小時分量起頭的 TimeSpan 自訂格式』，不要寫出字面。"
+    )
+
+
+def test_slow_stage_emits_warning(ps1_content: str) -> None:
+    """S-1c：單一 stage 超過門檻須印 WARN，讓異常耗時在取證鏈裡當場可見。
+
+    意圖：B-01 那輪 stage rc 是 0（真的跑完了），純看 rc 永遠發現不了 35 小時的
+    異常。門檻告警是唯一能把「跑完了但不對勁」表面化的機制。
+    """
+    assert re.search(r"\$STAGE_SLOW_WARN_MINUTES\s*=\s*30", ps1_content), (
+        "必須定義 30 分鐘的 stage 耗時告警門檻"
+    )
     assert re.search(
-        r"mutation=\{0\}/7 unique-sha \(records=\{1\}", ps1_content
-    ), "mutation 進度格式必須為 unique/7 + records 併印（SA-2）"
+        r"\$sw\.Elapsed\.TotalMinutes\s+-gt\s+\$STAGE_SLOW_WARN_MINUTES", ps1_content
+    ), "Invoke-Stage 必須比較 TotalMinutes 與門檻（不可用會截斷的 .Minutes 分量）"
+    assert "Stage SLOW:" in ps1_content, "超時必須印可 grep 的 `Stage SLOW:` 標記"
+
+
+def test_ac4_progress_uses_rolling_window_not_raw_record_count(ps1_content: str) -> None:
+    """S-1b：AC4 進度分子必須取真實滾動 14 天窗，不得用整檔原始列數。
+
+    意圖（Rule 9）：`ac4=41/14` 這種假數字方向偏向「已達標」，會誘發錯誤的升級
+    決策；真實閘門是 ac4_progress_check.filter_recent() 的滾動 14 日曆天窗
+    （實測同日 observation_days=7、ready_for_labeled_pr=false）。
+    ps1 內**不可**自造第二套滾動窗邏輯——必須呼叫既有權威工具，否則就是新漂移點。
+    """
+    assert "function Get-Ac4Gate" in ps1_content, "必須有 Get-Ac4Gate helper"
+    assert "ac4_progress_check.py" in ps1_content, (
+        "Get-Ac4Gate 必須呼叫既有權威工具 ac4_progress_check.py（不自造滾動窗邏輯）"
+    )
+    assert "ready_for_labeled_pr" in ps1_content, "必須讀取真實 ready 旗標"
+    # R71：placeholder 索引不再寫死（END 進度加了 obs/drift 兩軌後索引會位移；
+    # 「分子綁到哪個變數」由 test_all_progress_numerators_come_from_authority_gates
+    # 以解析 -f 綁定的方式鎖住，比鎖索引字面值強）。
+    assert re.search(r"ac4=\{\d+\}/14 rolling-window-days", ps1_content), (
+        "END 進度 ac4 分子必須標明是 rolling-window-days（防再被誤讀為列數）"
+    )
+    # 🔴 R71 收緊（A-3）：舊寫法是
+    #     re.search(r"\$ac4Numerator\s*=.*\$ac4Gate\.Days", ps1_content, re.DOTALL)
+    # `re.DOTALL` + `.*` 讓 `.` 跨行貪婪吃到檔尾——只要**檔案後面任何地方**出現一次
+    # `$ac4Gate.Days`，這條就通過，即使 $ac4Numerator 本身已經被改回 $ac4Count。
+    # 今天全檔恰好只有 1 處所以還驗得出紅，多一處引用鎖就自動失效（潛伏假綠）。
+    # 改成把三項主張全部綁在**同一行賦值**上：來源是 Days、沒有 $ac4Count 回退、
+    # 失敗時印 'unavailable'。
+    assigns = re.findall(r"(?m)^[ \t]*\$ac4Numerator\s*=.*$", ps1_content)
+    assert len(assigns) == 1, (
+        "$ac4Numerator 必須恰有一處賦值（多處＝後面那處可能靜默覆寫前面的正確值，"
+        f"本檢查也會只驗到第一處）。實際找到 {len(assigns)} 處：{assigns}"
+    )
+    assign_line = assigns[0]
+    assert "$ac4Gate.Days" in assign_line, (
+        "ac4 分子必須來自 Get-Ac4Gate 的 Days，不得回退成 $ac4Count 原始列數。"
+        f"實際賦值行：{assign_line.strip()!r}"
+    )
+    assert "$ac4Count" not in assign_line, (
+        "$ac4Numerator 賦值行不得出現 $ac4Count（原始列數 41 對 14 門檻＝假達標，"
+        f"正是 S-1b 拔掉的東西）。實際賦值行：{assign_line.strip()!r}"
+    )
+    # 反向鎖：取不到閘門值時必須印 'unavailable'，**不得**退回原始列數假達標。
+    assert "'unavailable'" in assign_line, (
+        "Get-Ac4Gate 失敗時必須印 unavailable，不得靜默退回 $ac4Count（那等於把假達標裝回去）。"
+        f"實際賦值行：{assign_line.strip()!r}"
+    )
+
+
+def _extract_end_progress_statement(ps1_content: str) -> str:
+    """抽出 END observation progress 那一整條（含反引號續行）PowerShell 敘述。"""
+    lines = ps1_content.splitlines()
+    starts = [
+        i
+        for i, ln in enumerate(lines)
+        if "END observation progress:" in ln and not ln.strip().startswith("#")
+    ]
+    assert len(starts) == 1, f"ps1 必須恰有一處印 END observation progress，實得 {len(starts)}"
+    i = starts[0]
+    stmt = [lines[i]]
+    while lines[i].rstrip().endswith("`"):
+        i += 1
+        stmt.append(lines[i])
+    return "\n".join(stmt)
+
+
+def _parse_format_binding(stmt: str) -> tuple[str, list[str]]:
+    """把 `("<fmt>" -f $a, $b, …)` 拆成 (格式字串, 依序的引數運算式清單)。"""
+    m = re.search(r'\("(?P<fmt>.*?)"\s*-f\s*(?P<args>.*)\)\s*$', stmt, re.DOTALL)
+    assert m, f"解析不出 -f 綁定：{stmt[:120]!r}…"
+    raw_args = m.group("args").replace("`", " ").replace("\n", " ")
+    return m.group("fmt"), [a.strip() for a in raw_args.split(",")]
+
+
+def test_all_progress_numerators_come_from_authority_gates(ps1_content: str) -> None:
+    """R71 G-3：END 進度**每一軌**的分子都必須是判準算出來的值，不得是 jsonl 原始列數。
+
+    意圖（Rule 9 — 為何這件事重要）：「分母是判準門檻、分子卻是原始列數」是本包
+    反覆出現的同一種取證失真，而且方向偏向「看起來已達標」——會誘發錯誤的升級動作。
+    R69 只修了 ac4 一軌；R71 實測發現 obs（42 列 vs green_streak 42，**巧合相等**）、
+    drift（35 列 vs green_streak 26，**已經分岔**）、mutation（整檔 unique-sha vs
+    權威只看 tail 7 筆）三軌都還是舊病。
+
+    本 case 不看字面，而是**解析 `-f` 綁定**：把格式字串裡每個 `軌名={n}` 的 n 對到
+    第 n 個引數運算式，逐一斷言它來自對應的閘門 helper、且不是 `$*Count`。
+    這樣寫的理由：舊版 ac4 鎖用 `re.DOTALL` 跨行比對，只要檔案任何角落出現一次
+    `$ac4Gate.Days` 就通過（見 A-3 收緊註解）——位置無關的比對抓不到「分子被換掉」。
+    """
+    stmt = _extract_end_progress_statement(ps1_content)
+    fmt, args = _parse_format_binding(stmt)
+
+    expected_numerator = {
+        "mutation": "$mutVerdict",     # should_lock 布林判定（locked/observing/unavailable）
+        "ac4": "$ac4Numerator",        # ac4_progress_check 滾動 14 日曆天窗
+        "obs": "$obsNumerator",        # observability_ga_check green_streak
+        "drift": "$driftNumerator",    # drift_log_ga_check green_streak
+    }
+    for track, want in expected_numerator.items():
+        m = re.search(rf"(?<![A-Za-z_-]){track}=\{{(\d+)\}}", fmt)
+        assert m, f"格式字串裡找不到 `{track}={{n}}` 分子欄位"
+        idx = int(m.group(1))
+        assert idx < len(args), f"{track} 綁到 {{{idx}}} 但 -f 只有 {len(args)} 個引數"
+        got = args[idx]
+        assert got == want, (
+            f"{track} 軌分子必須綁 {want}（權威判準值），實得 {got!r}——"
+            "分子換成別的東西就是 S-1b 那種假達標復發"
+        )
+        assert not got.endswith("Count"), (
+            f"{track} 軌分子綁到 jsonl 原始列數 {got!r}：分母是判準門檻、分子卻是列數＝取證失真"
+        )
+
+    # obs / drift 的**分母**也必須來自工具回報的 window，不得寫死 30。
+    for track, want in (("obs", "$obsWindow"), ("drift", "$driftWindow")):
+        m = re.search(rf"(?<![A-Za-z_-]){track}=\{{\d+\}}/(?P<den>\{{(\d+)\}}|\d+)", fmt)
+        assert m, f"格式字串裡找不到 `{track}=N/門檻` 形狀"
+        den = m.group("den")
+        assert den.startswith("{"), (
+            f"{track} 軌分母寫死成 {den!r}——門檻必須取工具回報的 window，"
+            "否則工具改門檻時 nightly 會拿舊門檻報一個看起來合理的假進度"
+        )
+        assert args[int(den.strip("{}"))] == want, (
+            f"{track} 軌分母必須綁 {want}，實得 {args[int(den.strip('{}'))]!r}"
+        )
+
+    # 原始列數只准出現在 records= 欄位（保留 delta 取證用途），順序必須對得上四軌。
+    record_slots = [int(n) for n in re.findall(r"records=\{(\d+)\}", fmt)]
+    got_records = [args[i] for i in record_slots]
+    assert got_records == ["$mutCount", "$ac4Count", "$obsCount", "$driftCount"], (
+        f"records= 欄位必須依序綁四軌的 jsonl 原始列數，實得 {got_records}"
+    )
+    # 語意標記：obs/drift 兩軌的分子若不標明是 green_streak，讀者仍會把它讀成列數。
+    assert fmt.count("green_streak") >= 2, (
+        "obs / drift 兩軌分子必須各自標明 green_streak 語意（缺標記＝分子會被誤讀為整檔列數，"
+        "正是 S-1b 的假達標形狀）"
+    )
+
+
+_DISCIPLINE_MD = _REPO_ROOT / "docs" / "06_quality" / "Nightly_Forensic_Discipline.md"
+
+# ps1 進度行的格式字串在 em dash 之後接一段人類可讀的語意說明（提到
+# `mutation_baseline_lock.should_lock` / `ac4_progress_check` 等工具名與 `M-05` 等代號）。
+# 那段是**說明**、不是輸出形狀：擷取契約素材前必須切掉，否則工具名會被當成語意標記
+# 要求文件照抄，鎖就變成在鎖散文。
+_EM_DASH = "—"
+
+# 語意標記的**下限集合**：這幾個標記若從 ps1 消失，分子就會被讀回「整檔列數」
+# （S-1b 假達標的原形）。下限之外的標記由 `_semantic_markers_of` 自動納管——ps1 新增
+# 標記時文件不同步就會紅，不需要有人記得回來改這個常數。
+_REQUIRED_SEMANTIC_MARKERS = frozenset(
+    {"unique-sha", "rolling-window-days", "green_streak", "should_lock"}
+)
+
+
+def _end_progress_shape(ps1_line: str) -> str:
+    """ps1 進度行裡屬於「輸出形狀」的部分（切掉 em dash 之後的語意說明）。"""
+    return ps1_line.split(_EM_DASH, 1)[0]
+
+
+def _labels_of(text: str) -> set[str]:
+    """`x=` 形狀的欄位標籤集合。"""
+    return set(re.findall(r"(?<![A-Za-z0-9_-])([A-Za-z][A-Za-z0-9_-]*)=", text))
+
+
+def _semantic_markers_of(shape: str) -> set[str]:
+    """帶連字號／底線的小寫語彙＝語意標記（`green_streak`／`rolling-window-days`…）。
+
+    這類標記**不是 `x=` 形狀**，正是 B-5 的漏洞所在：舊鎖只掃標籤集合，R71 新增的
+    `green_streak` / `should_lock` 因此完全逃過。改成機械擷取後，ps1 加語意就自動納管。
+    """
+    stripped = re.sub(r"\{\d+\}", " ", shape)
+    return set(re.findall(r"(?<![A-Za-z0-9_-])[a-z][a-z0-9]*(?:[-_][a-z0-9]+)+", stripped))
+
+
+def _ps1_denominator_shapes(shape: str) -> dict[str, str | None]:
+    """每個欄位的**分母形狀**：None＝無分母／`<dynamic>`＝取自工具的 `{n}`／字面數字。
+
+    分母形狀本身就是語意：`ac4=…/14` 的 14 是常數（文件應逐字寫死），`obs=…/{12}` 的
+    分母來自工具回報的 window（文件**不得**填死數字，填了就是把「工具改門檻、nightly
+    仍報舊門檻」那個假進度裝回來），而 mutation 軌根本沒有分母（分子是 should_lock
+    判定詞、不是分數——文件若還寫 `mutation=U/7` 就是把 R71 拔掉的東西寫回契約）。
+    """
+    shapes: dict[str, str | None] = {}
+    for m in re.finditer(r"(?<![A-Za-z0-9_-])([A-Za-z][A-Za-z0-9_-]*)=\{\d+\}", shape):
+        label = m.group(1)
+        dm = re.match(r"/(\{\d+\}|\d+)", shape[m.end() :])
+        if dm is None:
+            den: str | None = None
+        elif dm.group(1).startswith("{"):
+            den = "<dynamic>"
+        else:
+            den = dm.group(1)
+        prev = shapes.setdefault(label, den)
+        assert prev == den, (
+            f"ps1 進度行的 {label}= 出現兩種分母形狀（{prev!r} vs {den!r}）——"
+            "同名欄位形狀不一致，文件無從對齊"
+        )
+    return shapes
+
+
+def _fence_field_values(fence: str) -> dict[str, list[str]]:
+    """code fence 裡每個 `x=` 欄位的值（同名欄位如 records= 會有多筆）。"""
+    values: dict[str, list[str]] = {}
+    for m in re.finditer(r"(?<![A-Za-z0-9_-])([A-Za-z][A-Za-z0-9_-]*)=([^\s;)]*)", fence):
+        values.setdefault(m.group(1), []).append(m.group(2))
+    return values
+
+
+def _extract_discipline_13_contract_fence(md: str) -> tuple[str, str]:
+    """回傳（紀律 #13 整節, 載明 END 進度契約的 **code fence 內文**）。
+
+    🔴 為何一定要收斂到 fence：#13 的**內文**為了解釋 R69/R71 訂正，本來就會出現
+    `green_streak`／`should_lock`／`rolling-window-days`／`/30` 這些字樣。若比對範圍是
+    整節，加了語意標記檢查也會**巧合通過**——那是巧合，不是設計，鑑別力仍為零。
+    """
+    start = md.find("### 紀律 #13")
+    assert start > 0, "紀律文件找不到 #13 節"
+    end = md.find("### 紀律 #14", start)
+    assert end > start, "紀律文件找不到 #13 節結尾（#14 標題）"
+    section = md[start:end]
+    fences = [
+        body
+        for body in re.findall(r"(?ms)^```[^\n]*\n(.*?)^```", section)
+        if "END observation progress:" in body
+    ]
+    assert len(fences) == 1, (
+        "紀律 #13 必須恰有一個 code fence 載明 END observation progress 契約"
+        f"（多個＝兩套契約並存，無從對齊）。實得 {len(fences)} 個"
+    )
+    fence = fences[0]
+    # 自我防呆：抓到的必須真的只是 fence，不是整節。markdown 連結語法
+    # （`](`）只會出現在內文、絕不會出現在一行 log 契約裡，用它當哨兵——
+    # 若哪天有人把範圍放寬回整節，下面第二個 assert 就會紅。
+    prose = section.replace(fence, "")
+    assert "](" in prose, (
+        "哨兵前提失效：紀律 #13 內文已無 markdown 連結，無法再用它判別「抓到的是 fence "
+        "還是整節」。請改用其他只存在於內文的標記，別直接刪掉這道防呆。"
+    )
+    assert "](" not in fence, (
+        "抓到的區塊含 markdown 連結＝抓到的是整節內文而非 code fence。"
+        "比對整節會讓語意標記檢查巧合通過（內文本來就在討論 green_streak），鑑別力歸零。"
+    )
+    return section, fence
+
+
+def test_end_progress_format_contract_matches_discipline_doc(ps1_content: str) -> None:
+    """A-4（B-5 升級）：ps1 實際輸出 ↔ 紀律 #13 **code fence** 契約，機械雙向對齊。
+
+    意圖（Rule 9 — 為何這件事重要）：R69 把 ac4 分子從「整檔列數」改成「滾動 14 日
+    曆天窗」並加印 `rolling-window-days` / `ready=` / `records=`，但紀律 #13 還寫著
+    舊格式 `ac4=N/14`。兩邊互相矛盾、且**沒有任何機械鎖會發現**——文件於是從「契約」
+    退化成「考古紀錄」，下一個讀文件的人會照舊格式去解析 log 或誤判分子語意。
+
+    B-5 揭露初版鎖對此形態**零鑑別力**：它只比對 `x=` 形狀的標籤集合，而 R71 G-1/G-2/G-3
+    換掉的是**語意**（mutation 分子→`should_lock` 判定詞、obs/drift 分子→`green_streak`
+    且分母改取工具回報的 window），這些都不是 `x=` 形狀，於是 fence 仍逐字寫著
+    `mutation=U/7 unique-sha`／`obs=N/30`（把剛修掉的缺陷寫成規範），鎖卻整路是綠的。
+    故本鎖擴為三面，素材全部自 ps1 格式字串機械擷取：
+      ① 欄位標籤**雙向**（ps1 有 fence 沒有＝漏記；fence 有 ps1 沒有＝考古殘留）
+      ② 語意標記（帶連字號／底線的小寫語彙，另設下限集合防 ps1 反向拔掉）
+      ③ 分母形狀三態（無分母／字面常數／取自工具的動態值）
+
+    **刻意仍不鎖排版與逐字措辭**：鎖逐字會讓任何文案微調都翻紅（脆弱耦合，最後一定
+    被人拿掉），漏欄位／錯分母才是真正會誤導判讀的漂移。
+    """
+    assert _DISCIPLINE_MD.exists(), f"紀律文件缺失：{_DISCIPLINE_MD}"
+    md = _DISCIPLINE_MD.read_text(encoding="utf-8")
+
+    # --- ps1 端：抓 END observation progress 的格式字串本體 ---
+    # 註解行要排除：ps1 內另有一則 R19 留下的**舊格式**舉例
+    # （`「END observation progress: ac4=4/14」誤導 user`），那是在說明 delta 取證的
+    # 由來、不是格式契約；拿它去比對會鎖到已被 R69 取代的形狀。
+    ps1_lines = [
+        ln
+        for ln in ps1_content.splitlines()
+        if "END observation progress:" in ln and not ln.strip().startswith("#")
+    ]
+    assert len(ps1_lines) == 1, (
+        "ps1 必須恰有一處印 END observation progress（紀律 #13）；多處＝兩套格式並存，"
+        f"文件契約無從對齊。實際找到 {len(ps1_lines)} 處"
+    )
+    shape = _end_progress_shape(ps1_lines[0])
+
+    # --- 文件端：只取 code fence，不取內文（理由見 _extract_… docstring） ---
+    _section, fence = _extract_discipline_13_contract_fence(md)
+    doc_values = _fence_field_values(fence)
+
+    # ① 欄位標籤雙向
+    ps1_labels = _labels_of(re.sub(r"\{\d+\}", "", shape))
+    assert ps1_labels, f"從 ps1 進度行擷取不到任何欄位標籤：{shape.strip()!r}"
+    missing = sorted(ps1_labels - set(doc_values))
+    assert not missing, (
+        f"ps1 進度行印了這些欄位但紀律 #13 的 code fence 沒記載：{missing}——"
+        "腳本輸出與文件契約已漂移（R69 就是這樣加了 rolling-window-days/ready= 卻沒同步）。"
+        f"ps1 全部標籤={sorted(ps1_labels)}"
+    )
+    stale = sorted(set(doc_values) - ps1_labels)
+    assert not stale, (
+        f"紀律 #13 的 code fence 還留著 ps1 已不再印的欄位：{stale}——"
+        "契約退化成考古紀錄，照它實作的人會去 parse 一個不存在的欄位"
+    )
+
+    # ② 語意標記（機械擷取 + 下限集合）
+    ps1_markers = _semantic_markers_of(shape)
+    floor_missing = sorted(_REQUIRED_SEMANTIC_MARKERS - ps1_markers)
+    assert not floor_missing, (
+        f"ps1 進度行少了語意標記 {floor_missing}——沒有它們，分子會被讀回整檔列數"
+        "（S-1b 假達標的原形）"
+    )
+    doc_missing = sorted(m for m in ps1_markers if m not in fence)
+    assert not doc_missing, (
+        f"ps1 進度行帶了語意標記 {doc_missing}，紀律 #13 的 code fence 卻沒有——"
+        "讀者會照 fence 把分子當成別的東西（B-5 就是這個形態：fence 停在 obs=N/30 列數，"
+        f"ps1 早已改印 green_streak）。ps1 全部標記={sorted(ps1_markers)}"
+    )
+
+    # ③ 分母形狀三態
+    for label, den in sorted(_ps1_denominator_shapes(shape).items()):
+        for value in doc_values[label]:
+            if den is None:
+                assert "/" not in value, (
+                    f"ps1 的 {label}= 沒有分母，fence 卻寫成 {value!r}——"
+                    "把分數形狀寫回契約（`mutation=U/7` 就是這樣把 R71 拔掉的寫死 7 復活）"
+                )
+            elif den == "<dynamic>":
+                assert "/" in value, f"ps1 的 {label}= 有分母，fence 的 {value!r} 卻沒有"
+                doc_den = value.rsplit("/", 1)[1]
+                assert doc_den and not doc_den.isdigit(), (
+                    f"{label} 軌分母取自工具回報的 window，fence 卻填死 {doc_den!r}——"
+                    "工具改門檻時文件會繼續宣稱舊門檻（`obs=N/30` 的原形）"
+                )
+            else:
+                assert value.endswith(f"/{den}"), (
+                    f"ps1 的 {label}= 分母是常數 {den}，fence 卻寫成 {value!r}"
+                )
+
+
+# G0 四軌的閘門 helper。R71 G-1/G-2 把 mutation 與 drift 兩軌接進來後，
+# 「三態契約」不再是兩支函式的巧合，而是四支必須共同遵守的規格。
+_GATE_HELPERS = ("Get-Ac4Gate", "Get-ObsGaPass", "Get-DriftGaPass", "Get-MutationLockGate")
+
+
+def test_ac4_and_obs_gate_helpers_are_stderr_safe(ps1_content: str) -> None:
+    """S-1b/S-4（R71 擴到四軌）：閘門 helper 不得依賴呼叫端的 $ErrorActionPreference。
+
+    意圖：PS 5.1 對 native 指令做 `2>&1` 時每行 stderr 會變 ErrorRecord，若當下
+    偏好設定是 'Stop' 就成終止性錯誤 → helper 回 Ok=$false → G0 判定永遠印 ERROR。
+    被呼叫的 python 工具**常態**會往 stderr 印東西（ac4/obs 的 legacy WARN、
+    drift 的 [FAIL] 行、should_lock 的 `reject reason=` 標籤），所以這不是邊角情境。
+    本檔開頭目前是 'Continue'，但那是環境剛好對，不是函式自身不變量
+    （以 'Stop' 實測確實重現該炸法）。
+    """
+    for fn in _GATE_HELPERS:
+        m = re.search(rf"(?ms)^function\s+{fn}\s*\{{.*?^\}}", ps1_content)
+        assert m, f"找不到函式 {fn}"
+        assert "$ErrorActionPreference = 'Continue'" in m.group(0), (
+            f"{fn} 必須在函式作用域內固定 $ErrorActionPreference='Continue'，"
+            "否則呼叫端改成 'Stop' 時會被 stderr 的 WARN 行炸掉並靜默回報失敗"
+        )
+
+
+def test_gate_helpers_share_three_state_contract(ps1_content: str) -> None:
+    """R71（G-1/G-2）：四軌閘門 helper 的三態契約以機械鎖綁在一起。
+
+    意圖（Rule 9）：R71 為 drift 軌新增的 Get-DriftGaPass 與 Get-ObsGaPass 是刻意的
+    逐行同構複製（不抽共用層的理由見 ps1 內註解：行為測試要能單獨抽出函式本體真跑）。
+    複製最怕的是**只改一邊**——某一支後來被「精簡」掉 rc 檢查或 Ok 三態，就會退回
+    A-2 那種「工具壞掉被讀成觀察期未達標」的假訊號，而且只在該軌無聲發生。
+    本 case 讓四支共用同一份結構斷言：任何一支缺項，這裡就紅。
+    """
+    for fn in _GATE_HELPERS:
+        m = re.search(rf"(?ms)^function\s+{fn}\s*\{{.*?^\}}", ps1_content)
+        assert m, f"找不到函式 {fn}"
+        body = m.group(0)
+        for field in ("Ok", "Error"):
+            assert re.search(rf"\b{field}\s*=", body), (
+                f"{fn} 回傳物件必須含 {field} 欄位——缺 Ok 就無法區分「觀察期未達標」"
+                "（要等）與「量不出來」（要修工具）"
+            )
+        assert "$result.Ok = $true" in body, (
+            f"{fn} 必須只在真的量到值時才把 Ok 設為 $true（fail-closed）"
+        )
+        assert "'python unavailable'" in body, (
+            f"{fn} 必須在 $script:PyExe 缺席時回 Ok=$false，而不是讓呼叫端拿到預設值"
+        )
+    # rc 感知：三支「shell out 到 python 並依 rc 判定」的 helper 必須讀 $LASTEXITCODE。
+    # （Get-Ac4Gate 例外：ac4_progress_check 的 rc 與 ready 旗標無契約關係，
+    #   它取的是 JSON 裡的 ready_for_labeled_pr，不是 rc。）
+    for fn in ("Get-ObsGaPass", "Get-DriftGaPass", "Get-MutationLockGate"):
+        body = re.search(rf"(?ms)^function\s+{fn}\s*\{{.*?^\}}", ps1_content).group(0)
+        assert "$LASTEXITCODE" in body, (
+            f"{fn} 必須讀取 $LASTEXITCODE——不看 rc 就等於相信一段可能來自壞掉行程的文字"
+            "（A-2 假綠根因）"
+        )
+        assert "--json" in body or "json.dumps" in body, (
+            f"{fn} 必須取結構化 JSON，不得刮人類可讀文字"
+        )
+
+
+def test_obs_ga_helper_consults_exit_code_and_has_three_states(ps1_content: str) -> None:
+    """A-2 靜態鎖：Get-ObsGaPass 必須看退出碼，且回傳型別要能表達「量不出來」。
+
+    意圖（Rule 9）：舊版只做 `$raw -match '\\[PASS\\]'`——工具 rc≠0 但輸出裡出現
+    `[PASS]` 字樣就回 Pass=$true，nightly 會印出**假的 [G0-READY]**。這包存在的
+    理由就是消滅假達標數字，在活載體上種一個是方向性自打臉。行為層鑑別力見
+    `TestObsGaPassBehavior`；本 case 只做便宜的結構防刪。
+    """
+    m = re.search(r"(?ms)^function\s+Get-ObsGaPass\s*\{.*?^\}", ps1_content)
+    assert m, "找不到函式 Get-ObsGaPass"
+    body = m.group(0)
+    assert "$LASTEXITCODE" in body, (
+        "Get-ObsGaPass 必須讀取 $LASTEXITCODE——不看 rc 就等於相信一段可能來自壞掉"
+        "行程的文字（A-2 假綠根因）"
+    )
+    assert "--json" in body, (
+        "必須走 --json 取結構化 status，不要刮人類可讀文字（[PASS] 三個字太容易被"
+        "任何一段輸出偶然滿足）"
+    )
+    for field in ("Ok", "Pass", "Error"):
+        assert re.search(rf"\b{field}\s*=", body), (
+            f"回傳物件必須含 {field} 欄位（Ok/Error 三態；缺 Ok 就無法區分"
+            "「觀察期未達標」與「工具壞了」）"
+        )
+    # 反向鎖：呼叫端必須真的把 Ok=$false 印成「量不出來」而不是「未達標」。
+    assert "TOOL-UNAVAILABLE" in ps1_content, (
+        "G0 gaps 敘述必須能區分 TOOL-UNAVAILABLE（量不出來，要修工具）與"
+        "「觀察期未達標」（要等）——兩者處置完全不同"
+    )
+
+
+def _write_fake_python(dir_path: Path, rc: int, payload: str) -> Path:
+    """造一支假的 python 載具：把 payload 原樣吐到 stdout，並以指定 rc 結束。
+
+    用 `type` 讀外部檔而不是在 batch 裡 `echo`，是為了完全避開 cmd 的跳脫地獄
+    （`{`/`>`/`|` 在 batch 裡都有特殊意義，payload 一旦被 shell 改寫，這個測試
+    就會變成在測 batch 跳脫而不是在測 Get-ObsGaPass）。
+    """
+    (dir_path / "payload.txt").write_text(payload, encoding="ascii")
+    fake = dir_path / "fake_python.cmd"
+    fake.write_text(
+        "@echo off\r\n"
+        'type "%~dp0payload.txt"\r\n'
+        f"exit /b {rc}\r\n",
+        encoding="ascii",
+    )
+    return fake
+
+
+_READY_JSON = '{"status": "ready", "green_streak": 41, "window": 30}'
+_OBSERVING_JSON = '{"status": "observing", "green_streak": 7, "window": 30}'
+_NO_HISTORY_JSON = '{"status": "no_history", "green_streak": 0, "window": 30}'
+_TRACEBACK = (
+    "Traceback (most recent call last):\n"
+    '  File "tools/observability_ga_check.py", line 204, in main\n'
+    "    records = _load_history(history_path)\n"
+    "MemoryError\n"
+)
+_LEGACY_PASS_TEXT = "[PASS] green_streak=41 >= window=30 (total 41 records)"
+
+
+@pytest.mark.skipif(
+    platform.system() != "Windows",
+    reason="[WINDOWS-NATIVE-ONLY] 需真的由 PowerShell 執行原生行程才能驗 $LASTEXITCODE "
+    "與 2>&1 合流行為；純 grep 證明不了『rc≠0 時不會回 Pass=True』",
+)
+class TestObsGaPassBehavior:
+    """A-2 行為鑑別力：抽出 ps1 裡 Get-ObsGaPass 的**實際文字**，餵假載具真跑。
+
+    WHY 不能只做 grep：上一批交出的三條鎖全是靜態字面比對，其中一條的 regex 根本
+    對不上檔案內容卻沒人發現（見 `test_bare_hh_format_regex_has_discrimination`）。
+    「有寫鎖」與「鎖擋得住」是兩件事。本類不重打一份函式副本（重打就變成測我自己
+    寫的東西、零鑑別力），而是從 ps1 原始碼抽文字執行。
+
+    三態契約（observability_ga_check.py:257 `return 0 if passed else 1`）：
+      Ok=True /Pass=True   ← rc=0 且 status=ready
+      Ok=True /Pass=False  ← rc≠0 且 status=observing（真正的「還在觀察」）
+      Ok=False             ← 量不出來（rc 與 status 不一致／無 JSON／no_history）
+    """
+
+    @staticmethod
+    def _run(ps1_content: str, tmp_path: Path, rc: int, payload: str) -> dict[str, str]:
+        m = re.search(r"(?ms)^function\s+Get-ObsGaPass\s*\{.*?^\}", ps1_content)
+        assert m, "抽不到 Get-ObsGaPass 函式本體"
+        fake = _write_fake_python(tmp_path, rc, payload)
+        history = tmp_path / ".observability_history.jsonl"
+        history.write_text('{"ts": "2026-08-02T00:00:00+00:00"}\n', encoding="utf-8")
+        probe = tmp_path / "probe.ps1"
+        probe.write_text(
+            # StrictMode 3.0 與 production 同條件（缺欄位存取必須拋例外並被 catch 接住）
+            "Set-StrictMode -Version 3.0\n"
+            f"$script:PyExe = '{fake}'\n"
+            f"{m.group(0)}\n"
+            f"$r = Get-ObsGaPass '{history}'\n"
+            'Write-Output ("OK={0}|PASS={1}|RC={2}|STATUS={3}|ERR={4}" -f '
+            "$r.Ok, $r.Pass, $r.Rc, $r.Status, $r.Error)\n",
+            encoding="utf-8-sig",
+        )
+        proc = subprocess.run(
+            ["powershell.exe", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", str(probe)],
+            capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=60,
+        )
+        assert proc.returncode == 0, f"probe 執行失敗：\n{proc.stdout}\n{proc.stderr}"
+        line = [ln for ln in proc.stdout.splitlines() if ln.startswith("OK=")]
+        assert line, f"probe 沒印出結果行：\n{proc.stdout!r}\n{proc.stderr!r}"
+        return dict(kv.split("=", 1) for kv in line[-1].split("|"))
+
+    def test_rc0_ready_is_the_only_pass(self, ps1_content: str, tmp_path: Path) -> None:
+        got = self._run(ps1_content, tmp_path, rc=0, payload=_READY_JSON)
+        assert got["OK"] == "True" and got["PASS"] == "True", got
+
+    def test_rc1_observing_is_ok_but_not_pass(self, ps1_content: str, tmp_path: Path) -> None:
+        """真正的「觀察期未達標」：工具健康、判定為 observing。"""
+        got = self._run(ps1_content, tmp_path, rc=1, payload=_OBSERVING_JSON)
+        assert got["OK"] == "True" and got["PASS"] == "False", got
+
+    def test_nonzero_rc_with_ready_status_is_not_a_pass(
+        self, ps1_content: str, tmp_path: Path
+    ) -> None:
+        """🔴 A-2 回歸鎖：rc≠0 但輸出宣稱達標 → 絕不可回 Pass=True。
+
+        這是「假的 [G0-READY]」的直接來源：輸出與 rc 不同源（被 shim/wrapper 攔截、
+        工具被換掉、輸出被截斷）時，唯一安全的答案是「量不出來」。
+        """
+        got = self._run(ps1_content, tmp_path, rc=1, payload=_READY_JSON)
+        assert got["PASS"] == "False", f"rc≠0 卻回報達標＝假綠：{got}"
+        assert got["OK"] == "False", f"rc/status 不一致必須判工具壞掉（Ok=False）：{got}"
+
+    def test_legacy_pass_text_with_nonzero_rc_is_not_a_pass(
+        self, ps1_content: str, tmp_path: Path
+    ) -> None:
+        """🔴 A-2 回歸鎖（舊實作的原形）：rc=2 + 純文字 `[PASS]` → 舊版回 Pass=True。
+
+        舊版是 `$raw -match '[PASS]'` 且不看 rc，這個 payload 會直接騙過它。
+        """
+        got = self._run(ps1_content, tmp_path, rc=2, payload=_LEGACY_PASS_TEXT)
+        assert got["PASS"] == "False", f"[PASS] 字樣 + rc=2 仍被當成達標＝A-2 假綠復發：{got}"
+        assert got["OK"] == "False", got
+
+    def test_crashed_tool_is_distinguishable_from_not_yet_met(
+        self, ps1_content: str, tmp_path: Path
+    ) -> None:
+        """A-2 另一半：工具壞掉不可被讀成「觀察期未達標」（一個要修、一個要等）。"""
+        got = self._run(ps1_content, tmp_path, rc=1, payload=_TRACEBACK)
+        assert got["OK"] == "False", f"traceback 必須判工具壞掉，不可回 Ok=True：{got}"
+        assert "no JSON" in got["ERR"], got
+
+    def test_no_history_is_not_reported_as_observing(
+        self, ps1_content: str, tmp_path: Path
+    ) -> None:
+        got = self._run(ps1_content, tmp_path, rc=1, payload=_NO_HISTORY_JSON)
+        assert got["OK"] == "False", f"no_history＝沒資料可判，不是「觀察中」：{got}"
+
+
+_DRIFT_READY_JSON = (
+    '{"status": "ready", "green_streak": 30, "window": 30, "total_records": 35}'
+)
+_DRIFT_OBSERVING_JSON = (
+    '{"status": "observing", "green_streak": 26, "window": 30, "total_records": 35}'
+)
+_DRIFT_NO_HISTORY_JSON = '{"status": "no_history", "green_streak": 0, "window": 30}'
+
+
+@pytest.mark.skipif(
+    platform.system() != "Windows",
+    reason="[WINDOWS-NATIVE-ONLY] 需真的由 PowerShell 執行原生行程才能驗 $LASTEXITCODE "
+    "與 2>&1 合流行為",
+)
+class TestDriftGaPassBehavior:
+    """R71 G-2 行為鑑別力：drift 軌 helper 與 obs 軌同契約，且真的擋得住假達標。
+
+    WHY 要獨立一份而不是相信「它是 Get-ObsGaPass 的複製品」：複製品最常見的壞法就是
+    複製時漏掉一段（rc 檢查、no_history 分支）。靜態測試只能證明字串在，證不了行為。
+    這裡比照 TestObsGaPassBehavior，從 ps1 抽 **Get-DriftGaPass 的實際文字**餵假載具真跑。
+    """
+
+    @staticmethod
+    def _run(ps1_content: str, tmp_path: Path, rc: int, payload: str) -> dict[str, str]:
+        m = re.search(r"(?ms)^function\s+Get-DriftGaPass\s*\{.*?^\}", ps1_content)
+        assert m, "抽不到 Get-DriftGaPass 函式本體"
+        fake = _write_fake_python(tmp_path, rc, payload)
+        history = tmp_path / ".drift_log_history.jsonl"
+        history.write_text(
+            '{"ts": "2026-08-03T00:00:00+00:00", "passed": true}\n', encoding="utf-8"
+        )
+        probe = tmp_path / "drift_probe.ps1"
+        probe.write_text(
+            "Set-StrictMode -Version 3.0\n"
+            f"$script:PyExe = '{fake}'\n"
+            f"{m.group(0)}\n"
+            f"$r = Get-DriftGaPass '{history}'\n"
+            'Write-Output ("OK={0}|PASS={1}|RC={2}|STATUS={3}|STREAK={4}|WINDOW={5}|ERR={6}" -f '
+            "$r.Ok, $r.Pass, $r.Rc, $r.Status, $r.Streak, $r.Window, $r.Error)\n",
+            encoding="utf-8-sig",
+        )
+        proc = subprocess.run(
+            ["powershell.exe", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", str(probe)],
+            capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=60,
+        )
+        assert proc.returncode == 0, f"probe 執行失敗：\n{proc.stdout}\n{proc.stderr}"
+        line = [ln for ln in proc.stdout.splitlines() if ln.startswith("OK=")]
+        assert line, f"probe 沒印出結果行：\n{proc.stdout!r}\n{proc.stderr!r}"
+        return dict(kv.split("=", 1) for kv in line[-1].split("|"))
+
+    def test_rc0_ready_is_the_only_pass(self, ps1_content: str, tmp_path: Path) -> None:
+        got = self._run(ps1_content, tmp_path, rc=0, payload=_DRIFT_READY_JSON)
+        assert got["OK"] == "True" and got["PASS"] == "True", got
+        assert got["STREAK"] == "30" and got["WINDOW"] == "30", got
+
+    def test_rc1_observing_carries_the_authoritative_streak(
+        self, ps1_content: str, tmp_path: Path
+    ) -> None:
+        """真機形態：total_records=35 但 green_streak=26——分子必須是 26 不是 35。"""
+        got = self._run(ps1_content, tmp_path, rc=1, payload=_DRIFT_OBSERVING_JSON)
+        assert got["OK"] == "True" and got["PASS"] == "False", got
+        assert got["STREAK"] == "26", f"分子必須取權威 green_streak，不得是列數 35：{got}"
+
+    def test_nonzero_rc_with_ready_status_is_not_a_pass(
+        self, ps1_content: str, tmp_path: Path
+    ) -> None:
+        """🔴 回歸鎖：rc≠0 但輸出宣稱達標 → 只能判「量不出來」，絕不可回 Pass=True。"""
+        got = self._run(ps1_content, tmp_path, rc=1, payload=_DRIFT_READY_JSON)
+        assert got["PASS"] == "False", f"rc≠0 卻回報達標＝假綠：{got}"
+        assert got["OK"] == "False", f"rc/status 不一致必須判工具壞掉：{got}"
+
+    def test_crashed_tool_is_distinguishable_from_not_yet_met(
+        self, ps1_content: str, tmp_path: Path
+    ) -> None:
+        got = self._run(ps1_content, tmp_path, rc=1, payload=_TRACEBACK)
+        assert got["OK"] == "False", f"traceback 必須判工具壞掉，不可回 Ok=True：{got}"
+        assert "no JSON" in got["ERR"], got
+
+    def test_no_history_is_not_reported_as_observing(
+        self, ps1_content: str, tmp_path: Path
+    ) -> None:
+        got = self._run(ps1_content, tmp_path, rc=1, payload=_DRIFT_NO_HISTORY_JSON)
+        assert got["OK"] == "False", f"no_history＝沒資料可判，不是「觀察中」：{got}"
+
+
+def _mutation_record(kill_rate: float, sha: str | None) -> str:
+    """一筆 .mutation_history.jsonl 紀錄（欄位對齊 mutation_baseline_lock.run()）。"""
+    rec: dict[str, object] = {
+        "timestamp": "2026-08-03T00:00:00+00:00",
+        "module": "token_guard",
+        "kill_rate": kill_rate,
+        "counts": {"killed": 10, "survived": 4},
+    }
+    if sha is not None:
+        rec["source_sha256"] = sha
+    return json.dumps(rec, ensure_ascii=False)
+
+
+@pytest.mark.skipif(
+    platform.system() != "Windows",
+    reason="[WINDOWS-NATIVE-ONLY] 要驗的是 PowerShell 5.1 把 inline python 探測碼交給 "
+    "CreateProcess 後還原不還原得回來（DEF-101-760 同型），純 python 測不到",
+)
+class TestMutationLockGateBehavior:
+    """🔴 R71 G-1 行為鑑別力：nightly 的 mutation 判定必須**跟著權威一起改答案**。
+
+    WHY 這組是真鎖而不是裝飾：Get-MutationLockGate 走的是 `python -c` inline 探測碼，
+    有兩種各自無聲的壞法——(a) PS 5.1 把探測碼的引號吃掉 → SyntaxError → 恆 unavailable
+    （本輪 DEF-101-760 就是這個形態）；(b) 有人「順手」把判定改回本地門檻比較 →
+    答案與權威分岔。兩者都只有「拿真 python 對不同 history 跑出不同答案」才驗得到。
+
+    這裡刻意用**真的** tools/mutation_baseline_lock.py（不是假載具）：fixture A 正是
+    production 現況——7 筆 tail 只有 **5** 個 unique sha（2 筆 legacy 缺欄位），
+    權威 should_lock 回 True。任何把門檻寫回 `>= 7` 的實作在這一格必然翻紅。
+    """
+
+    @staticmethod
+    def _run(ps1_content: str, tmp_path: Path, history_lines: list[str],
+             tools_dir: Path | None = None) -> dict[str, str]:
+        m = re.search(r"(?ms)^function\s+Get-MutationLockGate\s*\{.*?^\}", ps1_content)
+        assert m, "抽不到 Get-MutationLockGate 函式本體"
+        history = tmp_path / ".mutation_history.jsonl"
+        history.write_text("\n".join(history_lines) + "\n", encoding="utf-8")
+        probe = tmp_path / "mut_probe.ps1"
+        probe.write_text(
+            "Set-StrictMode -Version 3.0\n"
+            f"$script:PyExe = '{sys.executable}'\n"
+            f"{m.group(0)}\n"
+            f"$r = Get-MutationLockGate -HistoryPath '{history}' "
+            f"-ToolsDir '{tools_dir or (_REPO_ROOT / 'tools')}'\n"
+            'Write-Output ("OK={0}|LOCKED={1}|UNIQUE={2}|TAIL={3}|RECORDS={4}'
+            '|BASELINE={5}|RC={6}|REJECT={7}|ERR={8}" -f '
+            "$r.Ok, $r.Locked, $r.UniqueSha, $r.Tail, $r.Records, "
+            "$r.Baseline, $r.Rc, $r.Reject, $r.Error)\n",
+            encoding="utf-8-sig",
+        )
+        proc = subprocess.run(
+            ["powershell.exe", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", str(probe)],
+            capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=120,
+        )
+        assert proc.returncode == 0, f"probe 執行失敗：\n{proc.stdout}\n{proc.stderr}"
+        line = [ln for ln in proc.stdout.splitlines() if ln.startswith("OK=")]
+        assert line, f"probe 沒印出結果行：\n{proc.stdout!r}\n{proc.stderr!r}"
+        return dict(kv.split("=", 1) for kv in line[-1].split("|"))
+
+    def test_production_shape_five_unique_plus_two_legacy_is_locked(
+        self, ps1_content: str, tmp_path: Path
+    ) -> None:
+        """production 現況：tail 7 筆＝2 筆 legacy 缺 sha + 5 unique sha → 權威判 locked。
+
+        🔴 這一格就是 G-1 的核心鑑別力：舊實作（unique-sha >= 7）在這裡會回
+        observing，把 W1 擋住整整 12 天——而 `.mutation_baseline.toml` 早就寫了
+        `token_guard = 0.7071`。
+        """
+        lines = [_mutation_record(0.71, None), _mutation_record(0.71, None)]
+        lines += [_mutation_record(0.71, f"{i:064x}") for i in range(5)]
+        got = self._run(ps1_content, tmp_path, lines)
+        assert got["OK"] == "True", got
+        assert got["LOCKED"] == "True", (
+            f"權威 should_lock 對此 history 回 True，nightly 必須跟著回 True（否則就是"
+            f"又把門檻寫回 ps1 了）：{got}"
+        )
+        assert got["UNIQUE"] == "5" and got["TAIL"] == "7", got
+        assert got["REJECT"] == "", f"鎖定成功不應有拒鎖原因：{got}"
+
+    def test_same_sha_seven_times_is_rejected_with_authority_reason(
+        self, ps1_content: str, tmp_path: Path
+    ) -> None:
+        """反作弊：同一份源碼跑 7 次不得鎖定，且拒鎖原因必須是權威自己給的標籤。"""
+        lines = [_mutation_record(0.71, "a" * 64) for _ in range(7)]
+        got = self._run(ps1_content, tmp_path, lines)
+        assert got["OK"] == "True" and got["LOCKED"] == "False", got
+        assert "sha_not_unique_full" in got["REJECT"], (
+            f"拒鎖原因必須轉述 should_lock 寫到 stderr 的 reason 標籤，不得由 ps1 自行詮釋：{got}"
+        )
+
+    def test_insufficient_runs_reason_is_surfaced(
+        self, ps1_content: str, tmp_path: Path
+    ) -> None:
+        lines = [_mutation_record(0.71, f"{i:064x}") for i in range(3)]
+        got = self._run(ps1_content, tmp_path, lines)
+        assert got["OK"] == "True" and got["LOCKED"] == "False", got
+        assert "insufficient_runs" in got["REJECT"], got
+
+    def test_kill_rate_below_threshold_is_rejected_even_with_seven_unique_sha(
+        self, ps1_content: str, tmp_path: Path
+    ) -> None:
+        """反向：7 個 unique sha 但 kill_rate 不到門檻 → 仍不鎖。
+
+        意圖：證明 nightly 印的不是「unique sha 數量」這個單一維度——舊實作只看
+        unique sha，會在這一格印出達標；權威 should_lock 還要求 tail 全數 ≥
+        `target - TOLERANCE - EXTRA_TOLERANCE`（token_guard = 0.68）。
+        """
+        lines = [_mutation_record(0.50, f"{i:064x}") for i in range(7)]
+        got = self._run(ps1_content, tmp_path, lines)
+        assert got["OK"] == "True" and got["LOCKED"] == "False", got
+        assert "kill_rate_below_threshold" in got["REJECT"], got
+
+    def test_broken_probe_is_unavailable_not_not_yet_met(
+        self, ps1_content: str, tmp_path: Path
+    ) -> None:
+        """🔴 A-2 同型：探測碼跑不起來（找不到權威模組）→ Ok=False，不可讀成「未達標」。
+
+        這一格同時是 inline 探測碼的**存活哨兵**：若 PS 5.1 把探測碼引號吃掉導致
+        SyntaxError，正常 fixture 那幾格會全部退化成 Ok=False；反過來若探測碼永遠
+        「成功」，這一格會翻紅。兩個方向都被夾住。
+        """
+        empty_tools = tmp_path / "no_such_tools"
+        empty_tools.mkdir()
+        lines = [_mutation_record(0.71, f"{i:064x}") for i in range(7)]
+        got = self._run(ps1_content, tmp_path, lines, tools_dir=empty_tools)
+        assert got["OK"] == "False", f"找不到權威模組必須判「量不出來」：{got}"
+        assert got["LOCKED"] == "False", got
+        assert "no JSON" in got["ERR"] or "rc=" in got["ERR"], got
+
+
+def test_g0_three_track_verdict_is_on_the_live_carrier(ps1_content: str) -> None:
+    """S-4：G0 三軌綜合判定必須長在每晚都會跑的 nightly 上。
+
+    意圖：這段判定原本只活在一次性排程任務 AutoClaude_SD09_G0_GateCheck 裡，該任務
+    2026-06-29 觸發一次後 NextRunTime 永遠空白 → 此後 34 天零檢查，而三軌其實每晚
+    都在動。判定必須接到活載體才有意義。
+    三軌各取權威源（unique-sha / ac4 ready / obs GA [PASS]），且**不得**影響 exit
+    code——觀察期未滿是預期狀態，接進 finalFailures 會讓每晚都紅（違反紀律 #1）。
+    """
+    assert "[G0-READY]" in ps1_content, "四軌全過時必須印 [G0-READY]"
+    assert "[G0-NOT-READY]" in ps1_content, "未達標必須印 [G0-NOT-READY] 與 gaps"
+    assert "function Get-ObsGaPass" in ps1_content, (
+        "obs 軌必須取 observability_ga_check 的 [PASS]，不可拿 obs 原始列數當閘門"
+    )
+    assert re.search(
+        r"\$g0MutOk\s+-and\s+\$g0Ac4Ok\s+-and\s+\$g0ObsOk\s+-and\s+\$g0DriftOk", ps1_content
+    ), "必須四軌 AND 才判 READY（R71 G-2 起含 drift；任一軌未過即 NOT-READY）"
+    # 反向鎖：G0 判定不得污染 exit code。
+    assert not re.search(r"finalFailures\s*\+=.*[Gg]0", ps1_content), (
+        "G0 判定不得進 finalFailures——那會讓觀察期未滿的每一晚都翻紅"
+    )
+
+
+def test_drift_track_is_wired_into_the_g0_verdict(ps1_content: str) -> None:
+    """R71 G-2：觀察期 #3（drift_log）必須進 G0 判定視野。
+
+    意圖（Rule 9 — 為何這件事重要）：#3 的唯一權威判準 tools/drift_log_ga_check.py
+    在本輪前是**零 production caller**——舊載體 g0_gate_check.ps1 的標籤寫
+    「#3 observability/drift」但實際只查 observability，新載體 nightly 的 G0 又是
+    三軌（mutation/ac4/obs）不含它。於是 #3 從來沒有被任何自動載體判定過，
+    唯一看得到的數字是 END 進度那個原始列數（2026-08-03 實測 35，印成 `drift=35/30`
+    像早就達標；權威 green_streak 其實只有 26，被 2026-06-02 一筆採集失敗
+    `drift_log_table_exists=false` 打斷）。「有工具」與「工具被接上」是兩件事。
+    """
+    assert "function Get-DriftGaPass" in ps1_content, "必須有 Get-DriftGaPass helper"
+    m = re.search(r"(?ms)^function\s+Get-DriftGaPass\s*\{.*?^\}", ps1_content)
+    assert m, "抽不到 Get-DriftGaPass 本體"
+    body = m.group(0)
+    assert "drift_log_ga_check.py" in body, (
+        "drift 軌必須呼叫既有權威工具 drift_log_ga_check.py（不得在 ps1 內自造 streak 邏輯）"
+    )
+    assert "green_streak" in body, "必須讀取權威的 green_streak"
+    # G0 判定接線
+    assigns = re.findall(r"(?m)^[ \t]*\$g0DriftOk\s*=.*$", ps1_content)
+    assert len(assigns) == 1, f"$g0DriftOk 必須恰有一處賦值，實得 {len(assigns)} 處：{assigns}"
+    assert "$driftGa.Ok" in assigns[0] and "$driftGa.Pass" in assigns[0], (
+        f"$g0DriftOk 必須同時要求 Ok（量得出來）與 Pass（達標）。實得：{assigns[0].strip()!r}"
+    )
+    assert "drift_ga=" in ps1_content, (
+        "G0 明細必須印 drift_ga= 欄位，否則人類看不出這一軌被判成什麼"
+    )
+    # 反向鎖：drift 軌 gap 也要能區分「量不出來」與「未達標」（同 A-2）。
+    gap_block = ps1_content[ps1_content.find("$g0Gaps = @()") :]
+    drift_gap = re.search(r"drift_log GA TOOL-UNAVAILABLE", gap_block)
+    assert drift_gap, (
+        "drift 軌的 Ok=$false 必須印成 TOOL-UNAVAILABLE（要修工具），"
+        "不可與「observation window 未滿」（要等）混為一談"
+    )
+
+
+def test_trigger_timing_is_reported_and_never_defaults_to_on_time(ps1_content: str) -> None:
+    """額外項：桶位漂移可見化——本輪起跑時刻 vs 排定時刻必須印出來。
+
+    意圖（Rule 9）：本機 WakeToRun 實測失效（近 10 天 6 筆 Power-Troubleshooter
+    事件 1 的 WakeSourceType 全為 0/Unknown），02:00 從不準時、全靠開機後
+    StartWhenAvailable 補跑。腳本改不掉韌體，但可以讓它不再靜默——補跑若跨日，
+    隔日觸發會被 MultipleInstances=IgnoreNew 擋掉而該日零紀錄，AC4 滾動 14 日曆
+    天窗缺一天就順延。所以「補跑」是觀察期空洞的前兆指標，值得每輪印一行。
+
+    反向鎖重點：取不到排程資訊時**不得**預設成「準時」——那就是這包一路在拔的
+    假綠形狀（假達標比沒數字更糟）。
+    """
+    assert "function Get-NightlyScheduleTiming" in ps1_content, (
+        "必須有 Get-NightlyScheduleTiming helper（排定時刻 vs 實際起跑時刻）"
+    )
+    assert "function Get-ScheduleOffsetMinutes" in ps1_content, (
+        "位移計算必須抽成純函式（才驗得起來；混在 CIM 查詢裡就只能靠真排程碰運氣）"
+    )
+    assert "END trigger timing:" in ps1_content, (
+        "END 段必須印可 grep 的 `END trigger timing:` 標記"
+    )
+    m = re.search(r"(?ms)^function\s+Get-NightlyScheduleTiming\s*\{.*?^\}", ps1_content)
+    assert m, "找不到 Get-NightlyScheduleTiming 本體"
+    body = m.group(0)
+    assert re.search(r"Label\s*=\s*'unknown'", body), (
+        "初始 Label 必須是 'unknown'——取不到排程資訊時的預設值不可以是任何"
+        "「看起來準時」的字眼"
+    )
+    assert "'within-grace'" in body and "'off-schedule'" in body, (
+        "必須有 within-grace / off-schedule 兩種明確標籤"
+    )
+    # 反向鎖：unknown 分支不得被寫成 within-grace
+    unknown_branch = re.search(
+        r"unknown[^\n]*—[^\n]*不代表準時", ps1_content
+    )
+    assert unknown_branch, (
+        "取不到排程資訊的分支必須在 log 裡明說『不代表準時』，"
+        "否則讀者會把 unknown 讀成沒問題"
+    )
+
+
+@pytest.mark.skipif(
+    platform.system() != "Windows",
+    reason="[WINDOWS-NATIVE-ONLY] Get-ScheduledTask 是 Windows Task Scheduler CIM "
+    "provider；位移算術也要在真 PowerShell 的 DateTime 語意下驗",
+)
+class TestScheduleTimingBehavior:
+    """額外項行為驗證：抽 ps1 原文真跑，證明「算得對」且「查不到時不會謊報準時」。"""
+
+    @staticmethod
+    def _run(ps1_content: str, tmp_path: Path, body: str) -> str:
+        fns = []
+        for name in ("Get-ScheduleOffsetMinutes", "Get-NightlyScheduleTiming"):
+            m = re.search(rf"(?ms)^function\s+{name}\s*\{{.*?^\}}", ps1_content)
+            assert m, f"抽不到 {name} 本體"
+            fns.append(m.group(0))
+        probe = tmp_path / "sched_probe.ps1"
+        probe.write_text(
+            "Set-StrictMode -Version 3.0\n" + "\n".join(fns) + "\n" + body,
+            encoding="utf-8-sig",
+        )
+        proc = subprocess.run(
+            ["powershell.exe", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", str(probe)],
+            capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=120,
+        )
+        assert proc.returncode == 0, f"probe 失敗：\n{proc.stdout}\n{proc.stderr}"
+        return proc.stdout.strip()
+
+    def test_offset_arithmetic(self, ps1_content: str, tmp_path: Path) -> None:
+        """排定 02:00 下的位移：準時 0／小誤差 3／事故當輪 10:17 → 497／
+        01:30 起跑歸給昨天那格（1410，不可算成 -30 而被讀成差不多準時）。"""
+        body = (
+            "$tod = [timespan]'02:00:00'\n"
+            "$cases = @('2026-08-03 02:00:00','2026-08-03 02:03:00',"
+            "'2026-08-01 10:17:00','2026-08-03 01:30:00')\n"
+            "$out = foreach ($c in $cases) "
+            "{ Get-ScheduleOffsetMinutes -ActualStart ([datetime]$c) -ScheduledTimeOfDay $tod }\n"
+            'Write-Output ($out -join ",")\n'
+        )
+        assert self._run(ps1_content, tmp_path, body) == "0,3,497,1410"
+
+    def test_unknown_task_never_reports_within_grace(
+        self, ps1_content: str, tmp_path: Path
+    ) -> None:
+        """🔴 反向鎖：排程查不到時必須 Ok=False / Label=unknown，絕不謊報準時。"""
+        body = (
+            "$r = Get-NightlyScheduleTiming -ActualStart (Get-Date) "
+            "-TaskName 'AutoClaude_NoSuchTask_R71Probe'\n"
+            'Write-Output ("OK={0}|LABEL={1}|OFFSET={2}" -f $r.Ok, $r.Label, $r.OffsetMinutes)\n'
+        )
+        got = self._run(ps1_content, tmp_path, body)
+        assert "OK=False" in got, got
+        assert "LABEL=unknown" in got, f"查不到排程卻給了非 unknown 的標籤：{got}"
+        assert "within-grace" not in got, f"查不到排程卻謊報準時：{got}"
+
+    def test_real_task_is_read_when_present(self, ps1_content: str, tmp_path: Path) -> None:
+        """真機取證：排程存在時要真的讀到它的排定時刻（不是硬寫 02:00）。
+
+        排程未安裝的機器（fresh clone / 別台）走 skip，不製造假紅。
+        """
+        probe_exists = subprocess.run(
+            ["powershell.exe", "-NoProfile", "-Command",
+             "if (Get-ScheduledTask -TaskName 'AutoClaude_Nightly' "
+             "-ErrorAction SilentlyContinue) { 'YES' } else { 'NO' }"],
+            capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=60,
+        )
+        if "YES" not in probe_exists.stdout:
+            pytest.skip("本機未安裝 AutoClaude_Nightly 排程（非缺陷）")
+        body = (
+            "$r = Get-NightlyScheduleTiming -ActualStart (Get-Date)\n"
+            'Write-Output ("OK={0}|SCHED={1}|LABEL={2}" -f $r.Ok, $r.Scheduled, $r.Label)\n'
+        )
+        got = self._run(ps1_content, tmp_path, body)
+        assert "OK=True" in got, got
+        assert re.search(r"SCHED=\d{2}:\d{2}", got), f"未讀到排定時刻：{got}"
+
+
+@pytest.mark.skipif(
+    platform.system() != "Windows",
+    reason="[WINDOWS-NATIVE-ONLY] 需真的執行 PowerShell 才能驗證 .NET TimeSpan "
+    "格式化行為；純 grep 無法證明 days 分量真的被印出來",
+)
+def test_format_elapsed_runtime_actually_prints_days(ps1_content: str) -> None:
+    r"""S-1a 行為驗證：直接抽出腳本裡 Format-Elapsed 的**實際文字**執行。
+
+    WHY 不能只做 grep：格式字串對不對，最終取決於 .NET 怎麼解讀 `d\.hh\:mm\:ss`。
+    這正是 DEF-101-249 的教訓——「字面看起來對」與「真的呼叫起來對」是兩件事。
+    本測試不重打一份函式（重打就變成測我自己的副本、零鑑別力），而是從原始碼抽文字。
+    """
+    m = re.search(r"(?ms)^function\s+Format-Elapsed\s*\{.*?^\}", ps1_content)
+    assert m, "抽不到 Format-Elapsed 函式本體"
+    snippet = m.group(0)
+    # 舊格式對照組（PowerShell 單引號字面）。抽成變數是為了避開 Python 引號地獄：
+    # 內層需要真正的單引號，直接內嵌會提前終止 Python 字串字面。
+    buggy_probe = r"'hh\:mm\:ss'"
+    proc = subprocess.run(
+        [
+            "powershell.exe", "-NoProfile", "-Command",
+            f"{snippet}; "
+            # 35.6 小時＝事故當輪真實跨日耗時；2m52s＝正常 stage 量級
+            "$a = New-TimeSpan -Hours 35 -Minutes 30 -Seconds 41; "
+            "$b = New-TimeSpan -Minutes 2 -Seconds 52; "
+            'Write-Output "$(Format-Elapsed $a)|$(Format-Elapsed $b)'
+            f'|$($a.ToString({buggy_probe}))"',
+        ],
+        capture_output=True, text=True, encoding="utf-8", errors="replace",
+    )
+    assert proc.returncode == 0, f"Format-Elapsed 真機呼叫失敗：\n{proc.stdout}\n{proc.stderr}"
+    got = proc.stdout.strip()
+    days_fmt, short_fmt, buggy_fmt = got.split("|")
+    assert days_fmt.startswith("1."), (
+        f"35.5 小時必須印出 days 分量（預期 '1.11:30:41...'），實得 {days_fmt!r}"
+    )
+    assert short_fmt == "00:02:52.000", f"未滿一天須維持原格式，實得 {short_fmt!r}"
+    # 同一句話印出舊格式當對照：證明這個 bug 是真的，不是臆測。
+    assert buggy_fmt == "11:30:41", (
+        f"舊格式對照組應重現截斷後的 11:30:41（days 被吃掉），實得 {buggy_fmt!r}"
+    )

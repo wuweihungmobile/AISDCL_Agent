@@ -65,7 +65,14 @@ $ErrorActionPreference = 'Stop'
 
 $TaskName = 'AutoClaude_Nightly'
 # R60（DEF-101-517 backlog 收斂）：Windows smoke 補償控制的獨立任務。名稱沿用既有
-# `AutoClaude_*` 前綴慣例（同機另有 AutoClaude_Nightly／AutoClaude_SD09_G0_GateCheck）。
+# `AutoClaude_*` 前綴慣例。
+# R69 訂正：此處原記載「同機另有 AutoClaude_Nightly／AutoClaude_SD09_G0_GateCheck」。
+# AutoClaude_SD09_G0_GateCheck 已於 R69 移除——它是一次性 TimeTrigger，2026-06-29
+# 觸發一次（結論 [G0-NOT-READY]）後 NextRunTime 永遠空白，此後 34 天零檢查，是死排程。
+# G0 三軌判定已改由每晚都會跑的 run_local_nightly.ps1 收尾區塊印出（[G0-READY] /
+# [G0-NOT-READY]）。兩支腳本 AutoClaude/tools/g0_gate_check.ps1（人工隨時複查）與
+# reschedule_g0_gatecheck.ps1（需要時重新排程）**保留**，只是不再有常駐排程任務。
+# 本 installer 從未管理 G0 任務，故無需新增移除邏輯——它只管 Nightly + WindowsSmoke。
 $SmokeTaskName = 'AutoClaude_WindowsSmoke'
 $ScriptDir = $PSScriptRoot
 $RepoRoot = [System.IO.Path]::GetFullPath((Join-Path $ScriptDir '..'))
@@ -118,6 +125,14 @@ function Show-TaskDetail {
   Write-Output "  WakeToRun                  = $($s.WakeToRun)   (expected True)"
   Write-Output "  DisallowStartIfOnBatteries = $($s.DisallowStartIfOnBatteries)   (expected False)"
   Write-Output "  StopIfGoingOnBatteries     = $($s.StopIfGoingOnBatteries)   (expected False)"
+  # R69（S-5）：這三項是 2026-08-01/02 漏跑事故的直接成因，必須在 -Status 就看得見，
+  # 否則「installer 把 S4U 降級成 Interactive」這種回歸只能等下次漏跑才被發現。
+  # MultipleInstancesPolicy 刻意讀 XML 而非 $s.MultipleInstances：後者對 StopExisting
+  # （值 3）會印**空白**，空白會被誤讀成沒設定（見 Set-MultipleInstancesStopExisting 註解）。
+  Write-Output "  LogonType                  = $($task.Principal.LogonType)   (expected S4U — Interactive 在使用者未登入時整輪不跑)"
+  Write-Output "  ExecutionTimeLimit         = $($s.ExecutionTimeLimit)   (expected PT4H)"
+  $policy = try { ([xml](Export-ScheduledTask -TaskName $Name)).Task.Settings.MultipleInstancesPolicy } catch { '<unreadable>' }
+  Write-Output "  MultipleInstancesPolicy    = ${policy}   (expected StopExisting)"
 }
 
 function Show-NightlyStatus {
@@ -177,6 +192,58 @@ if (-not (Test-Path -LiteralPath $SmokePs1)) {
   exit 1
 }
 
+# R69（S-5，P0 回歸源）：明確指定 -Principal。
+# WHY：本檔的 install 路徑是「存在就 Unregister 再 Register」，而原本**不帶
+# -Principal** → Register-ScheduledTask 套用預設的 Interactive 登入類型。後果是
+# 任何人跑一次 installer，就把已經是 S4U 的 AutoClaude_Nightly **降級成 Interactive**
+# ——installer 自己是回歸源。Interactive 的任務在「符合啟動條件時使用者未登入」
+# 會整輪不跑：2026-08-02 實測 AutoClaude_WindowsSmoke 正是此形態（事件 332
+# 「由於符合啟動條件時使用者…並未登入，工作排程器並未啟動工作」、
+# NumberOfMissedRuns=1），而同機 AutoClaude_Nightly 是 S4U 就沒這問題。
+# S4U（Service For User）＝以該使用者身分執行但**不需其登入、也不需存密碼**，正是
+# 無人值守 nightly 的正確選擇；RunLevel 維持 Limited（兩支載體都不需要提權）。
+# ⚠️ 註冊 S4U 任務需要系統管理員權限（實測非提權時 Access is denied），這與本檔
+# 既有的 Test-IsAdmin 守門一致，不新增額外前提。
+$principal = New-ScheduledTaskPrincipal -UserId "$env:USERDOMAIN\$env:USERNAME" `
+  -LogonType S4U -RunLevel Limited
+
+# R69（S-5）：MultipleInstances=StopExisting 只能走 COM，**不能**走 ScheduledTasks 模組。
+# 這是 DEF-101-249（建構 cmdlet 參數名 vs 物件屬性名不一致）的加強版：這次不是名字
+# 不同，而是**模組根本表達不出這個值**。實測（真機三次）：把該值傳給
+# New-ScheduledTaskSettingsSet 的 MultipleInstances 參數，或直接指派數值 3 給
+# $t.Settings.MultipleInstances，兩者都被 enum 轉型擋下，錯誤訊息明列可用值只有
+# "Parallel,Queue,IgnoreNew"。
+# （本註解刻意不寫出「該參數名＋該值」相鄰的字面組合：測試以字面反向鎖掃描全檔，
+#   在註解裡示範錯誤寫法會誤觸自己的鎖——本輪已實際踩過一次。）
+# 也就是 Task Scheduler XML schema 有 StopExisting，但 PowerShell 產生的
+# MultipleInstancesEnum 漏了它。唯一可行路徑是 Schedule.Service COM 物件直接寫
+# 數值 3（TASK_INSTANCES_STOP_EXISTING）後以 TASK_UPDATE(4) 旗標重新註冊。
+# 驗證方式必須用 Export-ScheduledTask 讀 XML 的 MultipleInstancesPolicy——
+# `Get-ScheduledTask ... | Select MultipleInstances` 對值 3 會印**空白**（enum 找不到
+# 對應名稱），空白極易被誤讀成「沒設成功」（本輪實測踩過這個坑）。
+# 為何仍要設：ExecutionTimeLimit=PT4H 已能解決「凍住實例吃掉隔日觸發」，
+# StopExisting 是第二道防線（4 小時內就再次觸發的邊角情境）。失敗不致命，故只 Warning。
+function Set-MultipleInstancesStopExisting {
+  param([Parameter(Mandatory = $true)][string]$Name)
+  try {
+    $svc = New-Object -ComObject Schedule.Service
+    $svc.Connect()
+    $folder = $svc.GetFolder('\')
+    $def = $folder.GetTask($Name).Definition
+    $def.Settings.MultipleInstances = 3
+    $null = $folder.RegisterTaskDefinition(
+      $Name, $def, 4, $def.Principal.UserId, $null, $def.Principal.LogonType)
+    $policy = ([xml](Export-ScheduledTask -TaskName $Name)).Task.Settings.MultipleInstancesPolicy
+    if ($policy -eq 'StopExisting') {
+      Write-Output "   MultipleInstances=StopExisting 已套用（XML 實測 MultipleInstancesPolicy=$policy）"
+    } else {
+      Write-Warning "MultipleInstances 設定後回讀為 '${policy}'（預期 StopExisting）——${Name} 仍靠 ExecutionTimeLimit 兜底。"
+    }
+  } catch {
+    Write-Warning "MultipleInstances=StopExisting 套用失敗（${Name}）：$($_.Exception.Message)。ExecutionTimeLimit=PT4H 仍生效，不阻斷安裝。"
+  }
+}
+
 $action = New-ScheduledTaskAction -Execute 'powershell.exe' `
   -Argument "-NoProfile -ExecutionPolicy Bypass -File `"${NightlyPs1}`""
 $trigger = New-ScheduledTaskTrigger -Daily -At '02:00'
@@ -206,11 +273,19 @@ $smokeTrigger = New-ScheduledTaskTrigger -Daily -At $SmokeAt
 # 後讀物件屬性確認兩者對應正確（本節新參數名產出的 Settings 物件屬性值符合預期）。
 # 兩支任務共用同一份 $settings：四項補跑保護對 smoke 的必要性與 nightly 完全相同
 # （筆電夜間睡眠／關機是同一個漏跑成因），刻意不為 smoke 另立一份而製造第二處漂移點。
+# R69（S-5，DEF-101-249 同型第二例）：補 -ExecutionTimeLimit。
+# WHY：預設 ExecutionTimeLimit 是 PT72H（3 天）。2026-08-01 那輪 nightly 在
+# sdd-fsm-chaos 執行中機器進入睡眠，整個實例被凍住 35.6 小時仍在 72 小時額度內
+# → 隔日 02:00 觸發被 MultipleInstances 擋掉（事件 322「相同工作的執行個體已在
+# 執行中」）→ 該日觀察期三軌全部零進帳。正常整輪 5~8 分鐘，PT4H 已極寬鬆，
+# 卻能把「凍住的實例」在 4 小時後強制收掉，隔日觸發就不再被吃掉。
+# 參數型別是 TimeSpan（不是 'PT4H' 字串——字串會綁定失敗），故用 New-TimeSpan。
 $settings = New-ScheduledTaskSettingsSet `
   -StartWhenAvailable `
   -WakeToRun `
   -AllowStartIfOnBatteries `
-  -DontStopIfGoingOnBatteries
+  -DontStopIfGoingOnBatteries `
+  -ExecutionTimeLimit (New-TimeSpan -Hours 4)
 
 if ($PSCmdlet.ShouldProcess($TaskName, 'Register-ScheduledTask')) {
   $existing = Get-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue
@@ -218,9 +293,12 @@ if ($PSCmdlet.ShouldProcess($TaskName, 'Register-ScheduledTask')) {
     Unregister-ScheduledTask -TaskName $TaskName -Confirm:$false
   }
   Register-ScheduledTask -TaskName $TaskName -Action $action -Trigger $trigger -Settings $settings `
+    -Principal $principal `
     -Description 'AutoClaude nightly 本地聚合驗證（見 AutoClaude/tools/run_local_nightly.ps1）' | Out-Null
+  Set-MultipleInstancesStopExisting -Name $TaskName
   Write-Output "✅ 已安裝並註冊排程任務：${TaskName}（每日 02:00 → ${NightlyPs1}）"
   Write-Output "   另含 StartWhenAvailable/WakeToRun 補跑保護（關機/睡眠錯過仍可補跑）"
+  Write-Output "   LogonType=S4U（使用者未登入也會跑）；ExecutionTimeLimit=PT4H（凍住的實例不會吃掉隔日觸發）"
 }
 if ($PSCmdlet.ShouldProcess($SmokeTaskName, 'Register-ScheduledTask')) {
   $smokeExisting = Get-ScheduledTask -TaskName $SmokeTaskName -ErrorAction SilentlyContinue
@@ -228,8 +306,9 @@ if ($PSCmdlet.ShouldProcess($SmokeTaskName, 'Register-ScheduledTask')) {
     Unregister-ScheduledTask -TaskName $SmokeTaskName -Confirm:$false
   }
   Register-ScheduledTask -TaskName $SmokeTaskName -Action $smokeAction -Trigger $smokeTrigger `
-    -Settings $settings `
+    -Settings $settings -Principal $principal `
     -Description 'AutoClaude Windows smoke 執行級補償控制（見 tools/windows_smoke_local.ps1；DEF-101-139/517）' | Out-Null
+  Set-MultipleInstancesStopExisting -Name $SmokeTaskName
   Write-Output "✅ 已安裝並註冊排程任務：${SmokeTaskName}（每日 ${SmokeAt} → ${SmokePs1}）"
   Write-Output "   這是 CI 停擺期間 Windows 側唯一的執行級活體驗證管道，此前只能手動觸發"
 }

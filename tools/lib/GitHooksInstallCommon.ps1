@@ -57,6 +57,46 @@ if (-not (Test-IsRealPython -CandidateName 'python')) {
   if ($script:GitHooksInstallCommonScriptDriven) { [Environment]::Exit(1) } else { return }
 }
 
+function Invoke-CommonPy {
+  <#
+  .SYNOPSIS
+  以「主控台輸出編碼釘成 UTF-8」的狀態呼叫共用 Python CLI，回傳其 stdout 行。
+
+  .DESCRIPTION
+  DEF-101-762。PowerShell 解碼**原生指令 stdout** 用的是 `[Console]::OutputEncoding`，
+  而本檔呼叫的 Python 端一律以 UTF-8 輸出（`tools/_stdio_utf8.py` 於載入時
+  reconfigure，非 locale 決定）。兩者在 UTF-8 主控台下剛好對得上，在 **cp950**
+  （繁中 Windows 的 OEM 預設，schtasks 起的排程環境即為此）下就對不上：
+  `get-hooks-dir` 印出的 repo 路徑只要含非 ASCII 就被解成 mojibake（真機實測
+  `煙霧測試` U+7159 U+9727 U+6E2C U+8A66 → U+003F U+EA57 U+EBEC U+769C U+7948
+  U+5CAB），下游 `assert-hooks-present` 找不到 hook 檔 → exit 1。後果：中文路徑
+  下的 repo 根本裝不了 hooks，而**只在非 UTF-8 主控台重現**——人手動跑（CC／
+  Windows Terminal 皆 65001）永遠是綠的，每日排程則天天紅。
+  引數方向不受影響（PS→argv 走 UTF-16 CreateProcessW，實測 round-trip 相同），
+  故只需修解碼這一側。
+  #>
+  [CmdletBinding()]
+  param([Parameter(Mandatory)][string[]]$PyArgs)
+
+  $prevEnc = $null
+  try {
+    if ([Console]::OutputEncoding.CodePage -ne 65001) {
+      $prevEnc = [Console]::OutputEncoding
+      [Console]::OutputEncoding = New-Object System.Text.UTF8Encoding($false)
+    }
+  } catch {
+    # 沒有主控台可設（stdout 被導向非主控台裝置）時無法釘——維持既有行為即可，
+    # 損毀的路徑仍會被 assert-hooks-present／check-installed 以 exit 1 攔下，
+    # 不會退化成假成功。
+    $prevEnc = $null
+  }
+  try {
+    & python $script:GitHooksInstallCommonPy @PyArgs
+  } finally {
+    if ($null -ne $prevEnc) { [Console]::OutputEncoding = $prevEnc }
+  }
+}
+
 function Assert-NotLinkedWorktree {
   <#
   .SYNOPSIS
@@ -71,7 +111,7 @@ function Assert-NotLinkedWorktree {
   # 注意：PowerShell 呼叫原生 exe 時，空字串引數（$Prefix 預設值）在分離成兩個
   # token（`--prefix` `''`）時會被靜默吞掉（PS 5.1 實測重現：argparse 收到
   # `--prefix` 卻找不到值報錯），故一律用單一 token 的 `--prefix=值` 形式。
-  & python $script:GitHooksInstallCommonPy assert-not-linked-worktree "--prefix=$Prefix"
+  Invoke-CommonPy -PyArgs @('assert-not-linked-worktree', "--prefix=$Prefix")
   if ($LASTEXITCODE -ne 0) {
     if ($script:GitHooksInstallCommonScriptDriven) { exit 1 } else { return }
   }
@@ -87,7 +127,7 @@ function Get-DispatcherHooksDir {
   [CmdletBinding()]
   param([string]$Prefix = '')
 
-  $out = & python $script:GitHooksInstallCommonPy get-hooks-dir "--prefix=$Prefix"
+  $out = Invoke-CommonPy -PyArgs @('get-hooks-dir', "--prefix=$Prefix")
   if ($LASTEXITCODE -ne 0) {
     if ($script:GitHooksInstallCommonScriptDriven) { exit 1 } else { return }
   }
@@ -107,7 +147,7 @@ function Test-DispatcherHooksPresent {
     [string]$Prefix = ''
   )
 
-  & python $script:GitHooksInstallCommonPy assert-hooks-present $HooksDir "--prefix=$Prefix"
+  Invoke-CommonPy -PyArgs @('assert-hooks-present', $HooksDir, "--prefix=$Prefix")
   if ($LASTEXITCODE -ne 0) {
     if ($script:GitHooksInstallCommonScriptDriven) { exit 1 } else { return }
   }
@@ -123,7 +163,7 @@ function Test-GitHooksPathInstalled {
   [CmdletBinding()]
   param([Parameter(Mandatory)][string]$HooksDir)
 
-  $lines = & python $script:GitHooksInstallCommonPy check-installed $HooksDir
+  $lines = Invoke-CommonPy -PyArgs @('check-installed', $HooksDir)
   $cur = ''
   $ok = $false
   foreach ($line in $lines) {

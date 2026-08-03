@@ -929,11 +929,6 @@ def _stale_summary(text: str, platform_key: str, names: list[str], live: dict[st
     )
 
 
-def nightly_evidence(platform_key: str) -> str:
-    """該平台 nightly 心跳的單行現況（唯讀；WHY 見 `_BO` 的 NIGHTLY_HEARTBEATS 區塊）。"""
-    return _BO.nightly_evidence(_REPO_ROOT, platform_key)
-
-
 def snapshot_report(
     text: str, platform_key: str | None, live: dict[str, str] | None = None
 ) -> tuple[list[str], list[str]]:
@@ -1366,17 +1361,19 @@ def main(argv: list[str] | None = None) -> int:
         # 本機平台欄（本 repo「常亮的警告＝背景噪音」既定紀律，tools/run_root_unittests.py）。
         for n in notices:
             print(f"ℹ️ {n}")
+        rc = 1 if problems else 0
         if problems:
             print("❌ ONBOARDING.md §7 表② presumed stale：", file=sys.stderr)
             for p in problems:
                 print(f"  - {p}", file=sys.stderr)
-            return 1
         scope = (
             f"{_PLATFORM_COLUMN_LABELS[audit_platform]} 欄"
             if audit_platform
             else f"（本平台 sys.platform={sys.platform} 無對應欄，退化判準：全欄皆 stale 才紅）"
         )
-        print(f"✅ §7 表② 指紋相符 {scope}（{', '.join(f'{k}={v}' for k, v in live.items())}）")
+        # 🔴 判決行與逐欄明細在 ✅／🔴 **兩條路都印**（rc 語意不變）：原版 stale 時當場
+        # return 1，整段平台覆蓋資訊被一個無關漂移吃掉。WHY 見 `_BO.snapshot_verdict`。
+        print(_BO.snapshot_verdict(rc == 0, scope, live))
         for key in _PLATFORM_COLUMN_LABELS:
             documented = slow_documented(text, key)
             # 🔴 狀態人話排在原始 dict **之前**：原版只印 provenance，讀者看到四個
@@ -1384,14 +1381,15 @@ def main(argv: list[str] | None = None) -> int:
             # 量得的數字。先給結論、再給欄位，讓誤讀不靠讀者自律。DEF-101-756
             print(f"   [{_PLATFORM_COLUMN_LABELS[key]} 欄] {baseline_status_line(text, key)}")
             print(f"     provenance={parse_provenance(text, key)}")
-            print(f"     nightly 證據：{nightly_evidence(key)}")
+            for ev in _BO.daily_evidence(_REPO_ROOT, key):
+                print(f"     {ev}")
             for spec in _SLOW_SPECS:
                 print(f"     [{spec.anchor}] {documented[spec.anchor]}")
         print(
             "   ℹ️ 🔴 **本工具不是平台覆蓋的權威**：它只知道「表② 這一欄的數字在什麼環境量的」。"
             f"「哪一輪在哪個平台跑過真機」請查 {_COVERAGE_SOURCES}（DEF-101-756）"
         )
-        return 0
+        return rc
 
     measured = measure_all()
 

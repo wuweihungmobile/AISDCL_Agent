@@ -10,7 +10,8 @@ DEF-101-526 記載的治理衝突：在 LOC tier **滿載檔**上「修 lint」�
 
 鎖的不變量：
   1. 門檻常數存在，且**刻意不是 fail**：只有在 band 內的檔不得讓 rc 變 1
-     （現況 3 支合法滿載檔，改成 fail 會當場擋住 repo）。
+     （repo 現況存在合法滿載檔，改成 fail 會當場擋住 repo；**現值刻意不寫死在此**，
+     現查＝`python tools/check_loc_budget.py --json` 的 `tier_warn_band`）。
   2. 邊界精確：餘裕 == TIER_WARN_MARGIN 進 band；== +1 不進；已破預算的檔不進
      band（由既有 [TIER] 阻塞段接手，避免同一件事印兩段）。
   3. 標籤隔離：tier band 用 `[TIER-WARN]`，**不得**吐出 `[WARN]` ——後者被
@@ -18,11 +19,29 @@ DEF-101-526 記載的治理衝突：在 LOC tier **滿載檔**上「修 lint」�
      以 `("[WARN]" in out) is expect_warn` 釘為總量預警帶專屬訊號，共用標籤會讓那道鎖
      在 repo 現況下恆真而失效。
   4. JSON ↔ 文字一致（同 total band 先例：以 --json 取證的自動化才看得到本訊號）。
-  5. 真 repo 錨點：DEF-101-526 的當事檔 `pg_state_repository.py` 必須真的被命中
-     ——這是交棒條目的驗收條件本身，不能只用合成資料證明。
+  5. 真 repo 錨點：band 必須在真 repo 資料上真的命中、且命中的餘裕落在
+     [0, TIER_WARN_MARGIN] ——這是交棒條目的驗收條件本身，不能只用合成資料證明。
+     （原文寫死 DEF-101-526 當事檔 `pg_state_repository.py` 為 400/400 滿載錨點；
+     該檔於「刪死碼／收斂重複」輪降至 393/400 後合法離帶，錨點已改形，見該支測試）
 
-鑑別力（R60 實測）：把 `TIER_WARN_MARGIN` 改成 0 → 邊界與真 repo 錨點測試轉紅；
-把 tier band 的標籤改回 `[WARN]` → 標籤隔離測試轉紅。兩次還原後全綠。
+鑑別力（**本輪逐項重量**，取代 R60 原註記——原註記宣稱「把 `TIER_WARN_MARGIN` 改成 0
+→ 邊界**與真 repo 錨點**測試轉紅」，實測**真 repo 錨點測試不紅**，見下表第 2 列；
+該句在錨點測試改形後即已失真，屬本檔自己犯下的「寫死宣稱不隨改形同步」）：
+
+  (1) production band 篩選 `<=` 誤寫成 `<` ⇒ **2 failed / 7 passed**：
+      `test_boundary_at_margin_and_one_beyond[None-None]` ＋
+      `test_real_repo_band_is_exercised_on_real_data`。
+  (2) `TIER_WARN_MARGIN` 注入為 0（runtime patch，不落地改檔）⇒ **2 failed / 7 passed**：
+      `test_margin_constant_is_positive_and_documented` ＋
+      `test_boundary_at_margin_and_one_beyond[1-True]`。
+      🔴 **真 repo 錨點測試在此注入下不紅**——band 縮成「餘裕恰為 0」後仍非空
+      （現況有滿載檔），且測試側期望值與 production 同步縮小，故此注入抓不到它。
+      這正是 R60 原註記失真之處，記於此以免下一輪又照抄。
+  (3) tier band 標籤改回 `[WARN]` ⇒ **6 failed / 3 passed**，含
+      `test_tier_band_does_not_emit_the_total_band_tag`。
+
+  三次注入還原後皆為 `9 passed`；`tools/check_loc_budget.py` 以 `git diff --exit-code`
+  確認與 HEAD 逐位元組相同（注入僅為驗紅，未留在樹上）。
 """
 from __future__ import annotations
 
@@ -79,9 +98,11 @@ def test_full_tier_file_warns_but_does_not_fail(
 ) -> None:
     """餘裕 0（滿載）→ 印 [TIER-WARN] 但 rc 必須為 0。
 
-    刻意不改成 fail：repo 現況有 3 支合法滿載檔（pg_state_repository.py 400/400、
-    models/escalation.py 150/150、steps_orchestrator/_impl.py 500/500），改 fail
-    會當場把它們變成閘門紅。
+    刻意不改成 fail：repo 現況存在**合法**滿載／近滿載檔，改 fail 會當場把它們變成
+    閘門紅。**具體是哪幾支、各自餘裕多少刻意不寫死在此**——那是會隨每次瘦身漂移的
+    量測值（本檔原文寫死的三支已於「刪死碼／收斂重複」輪全數失真：
+    `pg_state_repository.py` 已降至 393/400、`steps_orchestrator/_impl.py` 已降至
+    494/500）。現查＝`python tools/check_loc_budget.py --json` 的 `tier_warn_band`。
     """
     isolated([_report("autoclaude/infra/repositories/x.py", 400, 400)])
     rc = clb.check()
@@ -174,19 +195,57 @@ def test_json_payload_matches_text_mode(
 
 # --- 不變量 5：真 repo 錨點（DEF-101-526 的當事檔）---
 
-def test_real_repo_full_tier_file_is_actually_caught() -> None:
-    """DEF-101-526 的當事檔（滿載 400/400）必須真的被命中——合成資料不算驗收。"""
+def test_real_repo_band_is_exercised_on_real_data(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """預警帶必須在**真 repo 資料**上真的跑起來，且 production 吐出的成員逐筆正確。
+
+    錨點沿革（本鎖原名 `test_real_repo_full_tier_file_is_actually_caught`）：
+      DEF-101-526 的當事檔 `pg_state_repository.py` 原為 400/400，本鎖曾以
+      `assert target in band and band[target] == 0` 寫死該檔名。ADR-SD07-001 §6.3
+      順位一（刪死碼／收斂重複）把四個 state repository 逐字重複的 deprecation
+      shim 收斂成共用函式之後，該檔降為 393/400（餘裕 7 > TIER_WARN_MARGIN），
+      **合法**離開預警帶，本鎖因此轉紅。
+
+      🔴 改形理由（而非只換一個檔名）：把「某支檔必須是滿載的」寫進斷言，等於讓
+      每一次成功瘦身都把這道鎖打紅，把「減行成功」誤報成「鎖壞了」——那是會養成
+      忽略紅燈習慣的反向誘因。真正該守的不變量是原註記那句「不能只用合成資料證明」：
+      band 的計算必須跑在真 repo 上、真的命中東西、且命中的成員與 production 一致。
+      滿載檔的**存在**不是本鎖的目的，是本 repo 當下的狀態。
+
+      🔴 二次改形（本輪；前一版第二條斷言是**恆真的**）：改形後的第二條斷言寫成
+      `all(0 <= h <= TIER_WARN_MARGIN for h in band.values())`，而 `band` 正是**本函式
+      自己**用 `over_by == 0 and budget - loc <= TIER_WARN_MARGIN` 篩出來的——篩選條件
+      直接蘊涵被斷言的區間（`over_by == 0` ⟺ `loc <= budget` ⟺ `h >= 0`，見
+      `check_loc_budget.py:327` 的 `over_by=max(0, loc - budget)`），故它對**任何** repo
+      狀態、**任何** TIER_WARN_MARGIN 值都不可能紅。等於「兩條真斷言」被換成「一條真
+      ＋一條永遠通過」，而註記還宣稱它有鑑別力——比沒有鎖更糟。
+      本版把比對對象換成 **production 實際吐出的 `--json` band**：測試側自 raw reports
+      獨立算出期望成員，再與 production 的輸出做集合相等比對。production 的篩選語意
+      一漂移（`<=` 誤寫成 `<`、漏排除破線檔、`headroom` 欄位算錯、排序去重寫壞）即紅。
+    """
     reports = clb.build_reports(clb.load_overrides())
-    band = {
+    # 測試側獨立推導期望成員（刻意不重用 production 的 band 物件——重用即恆真）。
+    expected = {
         r.rel_path: r.budget - r.loc
         for r in reports
         if r.over_by == 0 and r.budget - r.loc <= clb.TIER_WARN_MARGIN
     }
-    target = "autoclaude/infra/repositories/pg_state_repository.py"
-    assert target in band, (
-        f"DEF-101-526 的當事檔未被預警帶命中（band={band}）——交棒條目的驗收條件未達成"
+    assert expected, (
+        "真 repo 的 tier 預警帶為空 —— 本鎖退化為恆真（DEF-101-526 交棒條目要求以"
+        "真實資料驗收）。若 repo 真的已無任何接近 tier 上限的檔，請連同 "
+        "TIER_WARN_MARGIN 的存在意義一起重新評估，不要直接刪本鎖。"
     )
-    assert band[target] == 0, (
-        f"該檔應為滿載（餘裕 0），實測餘裕 {band[target]}；若 tier 或行數已變動，"
-        f"請重新核對本鎖的錨點"
+    clb.check(as_json=True)
+    emitted = {
+        e["rel_path"]: e["headroom"]
+        for e in json.loads(capsys.readouterr().out)["tier_warn_band"]
+    }
+    assert emitted == expected, (
+        "production 在**真 repo 資料**上吐出的 tier 預警帶與獨立推導的期望成員不符。\n"
+        f"  production 吐出：{emitted}\n"
+        f"  期望（over_by == 0 且餘裕 ≤ {clb.TIER_WARN_MARGIN}）：{expected}\n"
+        "  只出現在 production 側 ⇒ 篩選條件放太寬（如漏排除已破線檔）；\n"
+        "  只出現在期望側 ⇒ 篩選條件太緊（如 `<=` 誤寫成 `<`）；\n"
+        "  成員相同但值不同 ⇒ `headroom` 欄位的算式漂移。"
     )

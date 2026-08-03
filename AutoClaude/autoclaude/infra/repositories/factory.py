@@ -181,6 +181,35 @@ def _smoke_test_pg(engine) -> None:
         ) from exc
 
 
+def _build_pg_backend(storage: StorageConfig, load_adapter) -> tuple[Any, Any]:
+    # 四支 build_* 的「PG 後端」共用組裝：DSN 解析 → TLS 強制 → lazy import →
+    # asyncpg DSN 正規化 → NullPool engine。回傳 (adapter 類別, engine)。
+    #
+    # 🔴 lazy import 語意必須保留（PLC0415）：postgres extras 未裝時才拋 ImportError；
+    #    改成 module import-time 匯入會讓 yaml_only 使用者開箱即炸。load_adapter 為零參
+    #    callable，刻意與 sqlalchemy import 同置 try 內，以維持既有行為——adapter 模組
+    #    自身缺相依時，回的也是同一則安裝提示，而非裸 ImportError。
+    #
+    # NullPool：AutoClaude 為 CLI 工具，每次寫入各自呼叫 asyncio.run()。標準連線池的
+    # 連線 bound to 特定 event loop，跨 asyncio.run() 呼叫會失效；NullPool 每次
+    # connect() 建新連線、close() 即釋放，避免 cross-loop 問題。
+    dsn = _resolve_dsn(storage)
+    _enforce_tls(dsn)
+    try:
+        from sqlalchemy.ext.asyncio import create_async_engine  # noqa: PLC0415
+        from sqlalchemy.pool import NullPool  # noqa: PLC0415
+        adapter_cls = load_adapter()
+    except ImportError as exc:
+        raise ImportError(
+            "PostgreSQL backend 需安裝：pip install 'autoclaude[postgres]'"
+        ) from exc
+    dsn, ssl_connect_args = _normalize_asyncpg_dsn(dsn)
+    engine = create_async_engine(
+        dsn, echo=False, poolclass=NullPool, connect_args=ssl_connect_args,
+    )
+    return adapter_cls, engine
+
+
 def build_kb_metric_store(checkpoint_dir: str, storage: StorageConfig) -> Any:
     """F-C3 / ADR-SD09-006 §2.2：依 storage.mode 回傳 IKbMetricStore 後端。
 
@@ -194,22 +223,12 @@ def build_kb_metric_store(checkpoint_dir: str, storage: StorageConfig) -> Any:
         from ..adapters.local_kb_metric_store import LocalKbMetricStore  # noqa: PLC0415
         return LocalKbMetricStore(f"{checkpoint_dir}/.kb_metrics_local.jsonl")
 
-    dsn = _resolve_dsn(storage)
-    _enforce_tls(dsn)
-    try:
-        from sqlalchemy.ext.asyncio import create_async_engine  # noqa: PLC0415
-        from sqlalchemy.pool import NullPool  # noqa: PLC0415
-
+    def _load():
         from ..adapters.pg_kb_metric_store import PgKbMetricStore  # noqa: PLC0415
-    except ImportError as exc:
-        raise ImportError(
-            "PostgreSQL backend 需安裝：pip install 'autoclaude[postgres]'"
-        ) from exc
-    dsn, ssl_connect_args = _normalize_asyncpg_dsn(dsn)
-    engine = create_async_engine(
-        dsn, echo=False, poolclass=NullPool, connect_args=ssl_connect_args,
-    )
-    return PgKbMetricStore(engine)
+        return PgKbMetricStore
+
+    cls, engine = _build_pg_backend(storage, _load)
+    return cls(engine)
 
 
 def build_preference_store(checkpoint_dir: str, storage: StorageConfig) -> Any:
@@ -222,22 +241,12 @@ def build_preference_store(checkpoint_dir: str, storage: StorageConfig) -> Any:
         from ..adapters.file_preference_store import FilePreferenceStore  # noqa: PLC0415
         return FilePreferenceStore(f"{checkpoint_dir}/preferences.jsonl")
 
-    dsn = _resolve_dsn(storage)
-    _enforce_tls(dsn)
-    try:
-        from sqlalchemy.ext.asyncio import create_async_engine  # noqa: PLC0415
-        from sqlalchemy.pool import NullPool  # noqa: PLC0415
-
+    def _load():
         from ..adapters.pg_preference_store import PgPreferenceStore  # noqa: PLC0415
-    except ImportError as exc:
-        raise ImportError(
-            "PostgreSQL backend 需安裝：pip install 'autoclaude[postgres]'"
-        ) from exc
-    dsn, ssl_connect_args = _normalize_asyncpg_dsn(dsn)
-    engine = create_async_engine(
-        dsn, echo=False, poolclass=NullPool, connect_args=ssl_connect_args,
-    )
-    return PgPreferenceStore(engine)
+        return PgPreferenceStore
+
+    cls, engine = _build_pg_backend(storage, _load)
+    return cls(engine)
 
 
 def build_goal_progress_ledger(checkpoint_dir: str, storage: StorageConfig) -> Any:
@@ -250,22 +259,12 @@ def build_goal_progress_ledger(checkpoint_dir: str, storage: StorageConfig) -> A
         from ...utils.goal_progress import GoalProgressLedger  # noqa: PLC0415
         return GoalProgressLedger(f"{checkpoint_dir}/goal_progress.jsonl")
 
-    dsn = _resolve_dsn(storage)
-    _enforce_tls(dsn)
-    try:
-        from sqlalchemy.ext.asyncio import create_async_engine  # noqa: PLC0415
-        from sqlalchemy.pool import NullPool  # noqa: PLC0415
-
+    def _load():
         from ..adapters.pg_goal_progress_ledger import PgGoalProgressLedger  # noqa: PLC0415
-    except ImportError as exc:
-        raise ImportError(
-            "PostgreSQL backend 需安裝：pip install 'autoclaude[postgres]'"
-        ) from exc
-    dsn, ssl_connect_args = _normalize_asyncpg_dsn(dsn)
-    engine = create_async_engine(
-        dsn, echo=False, poolclass=NullPool, connect_args=ssl_connect_args,
-    )
-    return PgGoalProgressLedger(engine)
+        return PgGoalProgressLedger
+
+    cls, engine = _build_pg_backend(storage, _load)
+    return cls(engine)
 
 
 def build_state_repository(checkpoint_dir: str, storage: StorageConfig) -> Any:
@@ -273,36 +272,17 @@ def build_state_repository(checkpoint_dir: str, storage: StorageConfig) -> Any:
     if storage.mode == "yaml_only":
         return FileStateRepository(checkpoint_dir=checkpoint_dir)
 
-    # both / db_only 需 PG DSN + TLS
-    dsn = _resolve_dsn(storage)
-    _enforce_tls(dsn)
+    # both / db_only 需 PG DSN + TLS（DSN 解析／TLS／lazy import／NullPool 見 _build_pg_backend）
+    def _load():
+        from .pg_state_repository import PgStateRepository  # noqa: PLC0415
+        return PgStateRepository
 
-    try:
-        from sqlalchemy.ext.asyncio import create_async_engine
-        from sqlalchemy.pool import NullPool
-
-        from .pg_state_repository import PgStateRepository
-    except ImportError as exc:
-        raise ImportError(
-            "PostgreSQL backend 需安裝：pip install 'autoclaude[postgres]'"
-        ) from exc
-
-    # asyncpg 不接受 sslmode= 參數；正規化為 connect_args ssl
-    dsn, ssl_connect_args = _normalize_asyncpg_dsn(dsn)
-
-    # NullPool：AutoClaude 為 CLI 工具，每次 save_checkpoint 各自呼叫 asyncio.run()。
-    # 標準連線池的連線 bound to 特定 event loop，跨 asyncio.run() 呼叫會失效。
-    # NullPool 每次 connect() 建立新連線、close() 即釋放，避免 cross-loop 問題。
-    engine = create_async_engine(
-        dsn, echo=False,
-        poolclass=NullPool,
-        connect_args=ssl_connect_args,
-    )
+    pg_cls, engine = _build_pg_backend(storage, _load)
 
     # P1 #3：startup smoke test（SELECT 1 + alembic head check）
     _smoke_test_pg(engine)
 
-    pg_repo = PgStateRepository(engine)
+    pg_repo = pg_cls(engine)
 
     if storage.mode == "db_only":
         return pg_repo

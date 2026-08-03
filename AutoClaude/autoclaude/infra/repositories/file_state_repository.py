@@ -14,6 +14,7 @@ from pathlib import Path
 from ...core.ports.state_repository import StateRepositoryError
 from ...utils.checkpoint_manager import PlaybookCheckpoint
 from ...utils.logger import _sanitize_log_filename
+from ._deprecation import warn_load_checkpoint_deprecated
 
 logger = logging.getLogger("autoclaude.infra.file_state")
 
@@ -60,15 +61,7 @@ class FileStateRepository:
 
         env AUTOCLAUDE_DEPRECATION_WARN=1 時 emit DeprecationWarning。
         """
-        import os  # noqa: E401
-        import warnings
-        if os.environ.get("AUTOCLAUDE_DEPRECATION_WARN") == "1":
-            warnings.warn(
-                "load_checkpoint(playbook_id) is deprecated since SD_06 W5; "
-                "use load_latest_by_playbook(playbook_id) instead.",
-                DeprecationWarning,
-                stacklevel=2,
-            )
+        warn_load_checkpoint_deprecated()
         return self.load_latest_by_playbook(playbook_id)
 
     def load_latest_by_playbook(

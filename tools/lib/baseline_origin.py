@@ -33,7 +33,9 @@ Windows 欄的 `3767 passed / 208 skipped`**，那正是 Windows 實機量得的
 from __future__ import annotations
 
 import datetime
+import re
 from pathlib import Path
+from typing import NamedTuple
 
 # 「該欄的量測樹已不可考」的合法佔位值：**刻意讓它與任何 live 指紋都不相等**，於是該欄
 # 恆判 presumed stale。這比填一個猜的指紋誠實——猜的指紋會讓一欄假裝新鮮。
@@ -82,6 +84,89 @@ COVERAGE_SOURCES = (
 NIGHTLY_HEARTBEATS: dict[str, str] = {
     "win32": "AutoClaude/logs/nightly_latest.log",
     "darwin": "AutoClaude/logs/nightly_mac_latest.log",
+}
+
+# ── smoke tripwire：為何**不**加進上面那張表（D-4 評估結論，刻意寫在程式碼旁）────────
+#
+# 問題陳述是「smoke 是每日第二條真機證據源，卻不在平台覆蓋判定視野內」。逐平台查證後，
+# 「再讀一支心跳」這個做法在**兩個平台上各自因不同理由不成立**：
+#
+#   win32  ── `AutoClaude_WindowsSmoke` 每日 01:00 觸發，確實**獨立於** nightly（02:00），
+#             是名副其實的第二條證據。但它**沒有任何落地產物**：`install_windows_nightly.ps1`
+#             的 `$smokeAction` 是 `powershell.exe -NoProfile -ExecutionPolicy Bypass -File
+#             <windows_smoke_local.ps1>`，**無輸出重導**；而該 .ps1 全程只 `Write-Host`
+#             ⇒ Task Scheduler 收走 stdout 後直接丟棄。**這是載具缺口（無檔可讀），
+#             不是「還沒接線」**，探針再怎麼寫都讀不到東西。
+#   darwin ── `macos_smoke_local.sh` 的 `===== 彙總：PASS=n FAIL=n SKIP=n =====` 是
+#             `run_local_nightly.sh` 的 stage [1/4] 印的 ⇒ 它**不是**第二條獨立證據，
+#             而是同一輪 nightly 的子階段：nightly 心跳在，smoke 就跑過了。
+#
+# 若硬把 smoke 加進 `NIGHTLY_HEARTBEATS`，Windows 欄會**永遠**印「本機無 …」——而那句話
+# 會被讀成「Windows smoke 沒在跑」，這正是 DEF-101-756（缺記錄被寫成缺量測）換一個載體
+# 復發，且復發在專門用來防它的模組裡。故本輪的處置是：**不造假資料通道，改把上面兩段
+# 事實逐字印進 `--check-snapshot`**，讓 smoke 進入讀者視野、但拿到的是正確解讀。
+# 解鎖條件（下一輪可執行）：Windows smoke 先取得 log 落點（排程 action 加輸出重導，或
+# 該 .ps1 自寫心跳檔）；那天起這裡才有東西可讀，屆時再把它升級為真的機械證據源。
+SMOKE_EVIDENCE: dict[str, str] = {
+    "win32": (
+        "AutoClaude_WindowsSmoke 每日 01:00 獨立觸發（獨立於 02:00 nightly），"
+        "但排程 action 無輸出重導、載體全程只 Write-Host ⇒ **無 log 落點、本工具讀不到**。"
+        "🔴 這是**載具缺口**，**不得**讀成「Windows smoke 沒在跑」"
+        "（排程存在與否請查 `Get-ScheduledTask -TaskName AutoClaude_WindowsSmoke`）"
+    ),
+    "darwin": (
+        "macos_smoke_local.sh 是 run_local_nightly.sh 的 stage [1/4] ⇒ **不是**第二條獨立"
+        "證據，其 `===== 彙總：PASS=n FAIL=n SKIP=n =====` 已含在同一輪 nightly 的 RunId "
+        "log 內；上一行的 nightly 心跳綠即代表該輪 smoke 也跑過"
+    ),
+}
+
+# ── 心跳彙總行的解析契約：**逐平台**，因為兩邊根本不是同一種檔（DEF-101-759）─────
+#
+# 🔴 本探針的首版（R70 落地當天）把 mac 側的形狀硬套到兩個平台上——`splitlines()[:3]`
+# 找 `"PASS="`——於是 win32 欄**結構上永遠**落到 fallback，而 fallback 文案
+# 「（心跳無彙總行）」讀起來像「那支 log 確實沒寫彙總」，把解析失敗偽裝成資料現況。
+# 一道剛落地、用來讓平台覆蓋不再靠人記憶的機械守，自己一天都沒有真的量到過東西。
+# 諷刺的是這個差異**早就寫在本 repo 裡**：`tools/dev_start.py::_windows_heartbeat_fail_note`
+# 檔頭逐字記著「nightly_latest.log 是全量 log（可能數 MB）…故不能沿用讀前 3 行的作法」。
+#
+#   win32  = `AutoClaude/tools/run_local_nightly.ps1` 的**全量 log 複本**（實測 494 行；
+#            含完整 pytest／mutmut 輸出時可達數 MB），彙總行在**檔尾**，形如
+#            `[2026-08-02 21:54:01][INFO] END nightly summary: mutation=0 pg-e2e=0 …`
+#            （實測落在第 491 行；其後還有 `… summary json:` 與 `END exit decision:`）
+#   darwin = `AutoClaude/tools/run_local_nightly.sh::write_heartbeat()` 寫的**固定 4 行
+#            心跳**，第 2 行恆為 `===== nightly 彙總：PASS=n FAIL=n =====`（三站點契約，
+#            見 `tools/dev_start.py::_heartbeat_fail_count` 與 `tools/install_mac_nightly.sh`）
+#
+# 取捨（與 `_windows_heartbeat_fail_note` 同款、刻意不再論證一次）：`\s+` ＋ `IGNORECASE`
+# 容忍空白／大小寫微幅漂移；`(?<![\w-])` 擋掉 `append`／`front-end` 這類尾綴誤觸發。
+_NIGHTLY_TAIL_BYTES = 16384
+
+
+class _SummarySpec(NamedTuple):
+    """`head_lines is None` ⇒ 讀檔尾位元組窗格（全量 log，**絕不整檔載入記憶體**）。"""
+
+    shape: str
+    strict: re.Pattern[str]
+    loose: re.Pattern[str]
+    head_lines: int | None
+
+
+NIGHTLY_SUMMARY_SPECS: dict[str, _SummarySpec] = {
+    "win32": _SummarySpec(
+        shape="全量 log 檔尾的 `END nightly summary: …`",
+        strict=re.compile(r"(?<![\w-])(END\s+nightly\s+summary:\s*[^\r\n]+)", re.IGNORECASE),
+        # 命中 loose 但不命中 strict ⇒ 格式漂移（例：`summary json:` 還在、主彙總行改了名），
+        # 與「這輪根本沒跑到收尾」是**相反的處置**，故兩者不可共用一句話。
+        loose=re.compile(r"(?<![\w-])END\s+(?:nightly\s+summary|exit\s+decision)", re.IGNORECASE),
+        head_lines=None,
+    ),
+    "darwin": _SummarySpec(
+        shape="心跳第 2 行的 `===== nightly 彙總：PASS=n FAIL=n =====`",
+        strict=re.compile(r"(=====\s*nightly\s+彙總[：:]\s*PASS=\d+\s+FAIL=\d+\s*=====)"),
+        loose=re.compile(r"彙總|PASS=|FAIL="),
+        head_lines=3,
+    ),
 }
 
 
@@ -163,10 +248,39 @@ def status_line(label: str, prov: dict[str, str], state: str) -> str:
     )
 
 
+def _read_probe_window(path: Path, head_lines: int | None) -> str:
+    """依該平台契約取出待解析窗格：固定行數契約讀 head、全量 log 讀檔尾位元組窗格。"""
+    if head_lines is not None:
+        with path.open(encoding="utf-8", errors="replace") as f:
+            return "".join(next(f, "") for _ in range(head_lines))
+    with path.open("rb") as f:
+        f.seek(max(0, path.stat().st_size - _NIGHTLY_TAIL_BYTES))
+        return f.read().decode("utf-8", errors="replace")  # 窗格切斷多位元組字元 → replace
+
+
+def nightly_summary(window: str, spec: _SummarySpec) -> str:
+    """把窗格收斂成一句話。**三種結局措辭互不可混淆**——這正是本函式存在的理由。
+
+    「解析不到」與「檔裡真的沒有」的處置相反：前者要改探針（機械守失效、無聲），
+    後者是那一輪沒跑完（要去看那台機器）。首版把兩者併成「（心跳無彙總行）」，
+    於是探針壞掉的那一天，輸出看起來和一切正常時一模一樣。
+    """
+    hits = spec.strict.findall(window)
+    if hits:
+        return hits[-1].strip()  # 取最後一次命中：同一支 log 只會寫一次，多次純屬防禦
+    if spec.loose.search(window):
+        return (
+            f"⚠️ 有彙總區塊但**本探針解析不到**（預期 {spec.shape}）"
+            f"——格式已漂移、探針要跟著改；**不得**讀成「那一輪沒有彙總」"
+        )
+    return f"檔內找不到彙總行（預期 {spec.shape}）——該輪可能仍在跑或中途中止"
+
+
 def nightly_evidence(repo_root: Path, platform_key: str) -> str:
     """該平台 nightly 心跳的**單行**現況。純唯讀，找不到就說找不到、不猜。"""
     rel = NIGHTLY_HEARTBEATS.get(platform_key)
-    if rel is None:
+    spec = NIGHTLY_SUMMARY_SPECS.get(platform_key)
+    if rel is None or spec is None:
         return "本平台無已知 nightly 心跳檔"
     path = repo_root / rel
     if not path.is_file():
@@ -176,9 +290,39 @@ def nightly_evidence(repo_root: Path, platform_key: str) -> str:
             f"**不得**據此推論該平台沒有 nightly 或沒有真機"
         )
     try:
-        head = path.read_text(encoding="utf-8", errors="replace").splitlines()[:3]
+        window = _read_probe_window(path, spec.head_lines)
+        mtime = datetime.date.fromtimestamp(path.stat().st_mtime).isoformat()
     except OSError as exc:  # 讀不到就說讀不到，不靜默當作缺席
         return f"{rel} 存在但讀取失敗：{exc}"
-    mtime = datetime.date.fromtimestamp(path.stat().st_mtime).isoformat()
-    summary = next((ln.strip() for ln in head if "PASS=" in ln), "（心跳無彙總行）")
-    return f"{rel} 最後寫入 {mtime}：{summary}"
+    return f"{rel} 最後寫入 {mtime}：{nightly_summary(window, spec)}"
+
+
+def daily_evidence(repo_root: Path, platform_key: str) -> tuple[str, str]:
+    """該平台**每日真機證據**的兩行：nightly（有落地產物可讀）＋ smoke（載具現況）。
+
+    smoke 那行為何是寫死的說明而不是探測結果：見上方 `SMOKE_EVIDENCE` 的評估段落
+    （Windows 無 log 落點、mac 的 smoke 只是 nightly 的子階段）。刻意**不**假裝有通道。
+    """
+    smoke = SMOKE_EVIDENCE.get(platform_key, "本平台無已知 smoke tripwire")
+    return f"nightly 證據：{nightly_evidence(repo_root, platform_key)}", f"smoke 證據：{smoke}"
+
+
+def snapshot_verdict(ok: bool, scope: str, live: dict[str, str]) -> str:
+    """`--check-snapshot` 的**判決行**；stale 時仍是「下面照樣有逐欄明細」的開場白。
+
+    🔴 為何需要這一行（D-3／本批修的設計缺陷）：原版在 `problems` 非空時**當場 return 1**，
+    逐欄明細（baseline-origin 三態、provenance、nightly 證據、四格記載值）**一行都不印**。
+    而指紋 stale 在單機交替工作流下是**日常態**（動到任一棵測試樹就觸發）⇒ 那段專為根治
+    DEF-101-756 誤讀而加的說明，在最常見的路徑上結構性看不見；讀者只會看到一句「某欄某棵
+    樹的指紋變了」，正好又要自己去腦補「那這平台到底驗過沒有」——回到事故原點。
+    這與「fallback 文案掩蓋探針失效」（DEF-101-759）同族：**一個無關的漂移把整段資訊吃掉**。
+    修法：明細兩條路都印，rc 語意不變（stale 仍 rc=1），並在本行標明明細屬 presumed stale。
+    """
+    fp = ", ".join(f"{k}={v}" for k, v in live.items())
+    if ok:
+        return f"✅ §7 表② 指紋相符 {scope}（{fp}）"
+    return (
+        f"🔴 §7 表② **presumed stale** {scope}（live 指紋 {fp}）——rc=1，逐格 diff 與回填"
+        f"指令見上方 ❌ 區塊（stderr）。以下逐欄明細**照印**（平台覆蓋資訊不因指紋漂移而"
+        f"消失），但其中四格計數屬 **presumed stale**，回填前不得引用為現況"
+    )

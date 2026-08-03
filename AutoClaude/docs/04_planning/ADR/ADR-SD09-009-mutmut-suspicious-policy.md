@@ -124,7 +124,7 @@ $ python tools/mutation_baseline_lock.py token_guard \
 | **PROPOSED v0.1** | 本 ADR 落地 + `--policy-preview` 工具實作 + 5 case 單元測試 | Architect（2026-05-25）| 本輪 W3 Round 11 | ✅ 完成 2026-05-25 |
 | **REVIEW** | PM 看 policy-preview 對照 + 三選項決議 | PM（cut-off 2026-06-08；實際提前）| 2 週 | ✅ 提前完成（Round 14）|
 | **ACCEPTED v1.0** | PM 拍板**選項 A** → 切換 `calc_kill_rate` 主判定 + 同步 `mutation_analysis.py` + 更新 ADR-SD08-002 §2.1 | PM Agent（拍板）/ Tech Lead（實作）| PM 拍板後 1 PD | ✅ **拍板 + 實作均完成 2026-05-25**（拍板見 Round14 §3.1；實作於 W1 PR commit `0169b96`）|
-| **OBSOLETED** | 觀察期 #1 連續 7 次達標鎖定後 | — | TBD | ⏳ 待 #1 unique sha 源碼演進閘門（需 W1 active 改 token_guard 源碼；idle 期凍結不達標，見 §11.6）|
+| **OBSOLETED** | 觀察期 #1 連續 7 次達標鎖定後 | — | TBD | ⏳ 待 #1 unique sha 源碼演進閘門（需 W1 active 改 token_guard 源碼；idle 期凍結不達標，見 §11.6）<br>🔴 **本格已被 ADR-SD09-013（2026-08-03 ACCEPTED）supersede**：閘門移為 W1 出場驗收，且括號內因果已被實查推翻；**baseline 實際已於 2026-07-22 鎖定（0.7071）**，見 §11.3／§11.6 註記|
 
 ### 6.1 PROPOSED 階段強制週報（沿用 ADR-SD09-008 §6.1）
 
@@ -223,6 +223,9 @@ def should_compact_decision(*, token_pct, threshold, in_correction_loop, correct
 
 ### 11.3 PM 拍板決議（R38，選項 A）
 
+> ⚠️ **ADR-SD09-013（2026-08-03 ACCEPTED）supersede 本表「#1 唯一剩餘瓶頸」列的閘門位置**：unique source_sha256 由 **W1 入場條件**移為 **W1 出場驗收**（門檻 ≥ 7 unique sha 的數值完全不變，只改它擺在入場處還是出場處）。
+> 🔴 **本列「此唯有 W1 active 開發合法改動 token_guard 源碼時發生」的因果宣稱，已被 2026-08-03 磁碟實查推翻**：(a) W1 從未啟動，token_guard 源碼照樣持續演進 — `git log -- autoclaude/plugins/token_guard/` 在 W1 最遲啟動日 2026-06-26 前後仍有 5 筆 commit（`02cc073` 06-25、`318c965`／`ad334c2` 06-26、`a16e591` 06-27、`f356348` 07-10），`.mutation_history.jsonl` 對應記到 **5 個相異 `source_sha256`**（`5208cff3`→`20940e1b`→`4af78567`→`55013d0a`→`5a44cbba`）；(b) 權威閘門 `should_lock()` 的**有效門檻是 ≥ 5**（`MAX_BACKWARD_COMPAT_MISSING=2` 對 2 筆 legacy 缺欄位紀錄的寬容），**2026-07-22 即已達標並鎖定 baseline `token_guard = 0.7071`**（`logs/nightly_2026-07-22_183551.log:261`）。原文保留為 R38 當時的判斷紀錄，取證見 ADR-SD09-013 §1.4。
+
 | 項目 | 決議 |
 |------|------|
 | **76% 真實水位** | ✅ 接受 token_guard mutation kill_rate ~76% 為真實水位（等價變異天花板）。當前 R37 kill_rate=76.51% > 68% effective threshold（§5.5），且 streak 已 7/7，**觀察期 #1 的 kill_rate 條件已達標**。|
@@ -243,6 +246,9 @@ def should_compact_decision(*, token_pct, threshold, in_correction_loop, correct
 ### 11.6 R47 audit 訂正（unique sha 達標路徑心智模型）
 
 > ⚠️ **ADR-SD09-011（2026-06-30，improving_101）supersede 本節「需 W1 active 改源碼 × 多日演進」的時間綁定**：根因偵察揭露 M-05 同 UTC 日去重 + 每日 nightly 使 unique sha 每日上限 1、7 個需 ≥7 日曆天、idle 稀釋 tail → 空轉。改為「去重鍵 source_sha256（同日多 sha 皆計入）+ 源碼變動觸發」解除日曆綁定。**unique sha 反作弊與「禁 churn 衝 sha」仍完全保留**（§11 line 231/240 不變）；只取消與安全無關的日曆懲罰。詳見 ADR-SD09-011。
+
+> ⚠️ **ADR-SD09-013（2026-08-03 ACCEPTED）supersede 本節訂正結論的閘門位置**：unique sha 由 W1 **入場**條件移為 W1 **出場**驗收（門檻 ≥ 7 不變）。
+> 🔴 **本節下方「達標唯有 W1 active 開發合法改動 token_guard plugin 源碼」與「idle 觀察期源碼凍結不達標」兩句，已被 2026-08-03 實查推翻**：W1 未啟動期間 token_guard 源碼照樣持續演進（`.mutation_history.jsonl` 記到 **5 個相異 sha**，見 §11.3 註記）；且權威 `should_lock()` 有效門檻為 ≥ 5（含 2 筆 legacy 缺欄位寬容），2026-07-22 就已達標並鎖定 baseline 0.7071。原文保留為 R47 當時的判斷紀錄，取證見 ADR-SD09-013 §1.4。
 
 SD_09 W3 Round 47 Architect + SA 並行 zero-trust audit 獨立指出 §11.3 line 230 原敘述「靠自然多日 commit 累積相異 sha 解決（約 2026-06-02~03）」**與 line 231 自相矛盾且誤導**：
 

@@ -26,6 +26,17 @@
             "timeout": 10
           }
         ]
+      },
+      {
+        "_comment": "Windows 上禁用 Bash 工具（根 CLAUDE.md 鐵律一 / DEF-101-768）。matcher 帶 Task 是為滿足 AISDLC_SDD/scripts/tests/test_pretooluse_matcher_task.py 的全稱約定（根 settings.json 的每個 PreToolUse matcher 都須含 Task，DEF-CLDREV-017）；本守衛的實際射程由腳本內 `tool != 'Bash' → exit 0` 限縮，故 Task 呼叫一律放行、不受影響——該行原本就是為『matcher 若被改寬，守衛不應擴大射程』而寫。",
+        "matcher": "Bash|Task",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python -c \"import os,sys,runpy; r=os.environ.get('CLAUDE_PROJECT_DIR') or os.getcwd(); p=os.path.join(r,*sys.argv[1].split('/')); os.path.isfile(p) or sys.exit(0); os.chdir(r); sys.argv=[p]+sys.argv[2:]; runpy.run_path(p,run_name='__main__')\" .claude/hooks/block_bash_on_windows.py",
+            "timeout": 10
+          }
+        ]
       }
     ],
     "PostToolUse": [

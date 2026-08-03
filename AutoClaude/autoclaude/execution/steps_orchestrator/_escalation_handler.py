@@ -13,12 +13,30 @@ MinimaxEvolver → 規則引擎 fallback、apply_evolution、notify、PlaybookRe
 from __future__ import annotations
 
 import logging
-from typing import Optional
 
 from ...models.playbook import Playbook
 from ..types import PlaybookResult
 
 logger = logging.getLogger("autoclaude.execution.playbook")
+
+
+def record_escalation_and_dump(
+    runner, tracker, task, error_cls, playbook_path, eval_output, human_hint: str,
+):
+    # ESCALATION 三處共用的「記 KB → 存 EscalationDump → 追加歷史」三連，原本逐字
+    # 重複三份、只有 human_hint 不同（本檔兩條路徑 ＋ _impl.py 的 Gap-010-A 語意預算
+    # 耗盡分支）。順序是契約的一部分：KB 先於 dump、dump 後才 append。
+    # 回傳 dump 供呼叫端後續使用（GOAL_SYNTHESIS 復原 / MinimaxEvolver 都要吃它）。
+    if tracker.history:
+        kb_key = f"{error_cls.value}:{tracker.history[-1].error_signature[:60]}"
+        runner._knowledge_base.record_escalation(
+            kb_key, list(tracker._tried_strategies), task.step_id
+        )
+    _dump = runner._save_escalation_dump(
+        tracker, task, playbook_path, eval_output, human_hint=human_hint,
+    )
+    runner._escalation_history.append(_dump)
+    return _dump
 
 
 def handle_convergence_escalation(
@@ -46,16 +64,9 @@ def handle_convergence_escalation(
         "=== STATE: ESCALATION | [%s] %s ===",
         task.step_id, convergence_reasoning,
     )
-    if tracker.history:
-        kb_key = f"{error_cls.value}:{tracker.history[-1].error_signature[:60]}"
-        runner._knowledge_base.record_escalation(
-            kb_key, list(tracker._tried_strategies), task.step_id
-        )
-    _dump = runner._save_escalation_dump(
-        tracker, task, playbook_path, eval_output,
-        human_hint=f"收斂評估（trend={convergence_trend}）：{convergence_reasoning}",
-    )
-    runner._escalation_history.append(_dump)
+    _dump = record_escalation_and_dump(
+        runner, tracker, task, error_cls, playbook_path, eval_output,
+        f"收斂評估（trend={convergence_trend}）：{convergence_reasoning}")
 
     _is_goal_synthesis_esc = (task.step_id == "GOAL_SYNTHESIS")
     if _is_goal_synthesis_esc:
@@ -94,7 +105,7 @@ def handle_convergence_escalation(
         _proposal = runner._evolver.propose_evolution(
             playbook, step_idx, _dump, runner._escalation_history
         )
-    _evolved_path_esc: Optional[str] = None
+    _evolved_path_esc: str | None = None
     _esc_save_ok = True
     if _proposal:
         _evolved_path_esc = runner._evolver.apply_evolution(
@@ -150,16 +161,9 @@ def handle_max_retries_escalation(
         "=== STATE: ESCALATION | [%s] 達最大重試次數 %d ===",
         task.step_id, max_retries + 1,
     )
-    if tracker.history:
-        kb_key = f"{error_cls.value}:{tracker.history[-1].error_signature[:60]}"
-        runner._knowledge_base.record_escalation(
-            kb_key, list(tracker._tried_strategies), task.step_id
-        )
-    _dump = runner._save_escalation_dump(
-        tracker, task, playbook_path, eval_output,
-        human_hint=f"已重試 {max_retries + 1} 次仍失敗，請人工分析失敗鏈。",
-    )
-    runner._escalation_history.append(_dump)
+    _dump = record_escalation_and_dump(
+        runner, tracker, task, error_cls, playbook_path, eval_output,
+        f"已重試 {max_retries + 1} 次仍失敗，請人工分析失敗鏈。")
 
     _is_goal_synthesis_max = (task.step_id == "GOAL_SYNTHESIS")
     if _is_goal_synthesis_max:
@@ -198,7 +202,7 @@ def handle_max_retries_escalation(
         _proposal_max = runner._evolver.propose_evolution(
             playbook, step_idx, _dump, runner._escalation_history
         )
-    _evolved_path_max: Optional[str] = None
+    _evolved_path_max: str | None = None
     _max_save_ok = True
     if _proposal_max:
         _evolved_path_max = runner._evolver.apply_evolution(
@@ -244,9 +248,9 @@ def _handle_goal_synthesis_recovery(
     completed_step_ids: set[str],
     step_evolution_counter: dict[str, int],
     convergence_label: str,
-    max_retries: Optional[int],
+    max_retries: int | None,
     alert_ladder: dict | None = None,
-) -> Optional[PlaybookResult]:
+) -> PlaybookResult | None:
     """Gap-044 GOAL_SYNTHESIS 復原（共用於收斂 + 重試耗盡兩路徑）"""
     logger.warning(
         "=== Gap-044 | GOAL_SYNTHESIS ESCALATION（%s）：先嘗試 MinimaxEvolver 修復 ===",
@@ -262,7 +266,7 @@ def _handle_goal_synthesis_recovery(
         if _gs_evolved:
             if convergence_label == "重試耗盡":
                 logger.info(
-                    "=== Gap-044 | GOAL_SYNTHESIS 補完步驟已注入（重試耗盡，type=%s），重載演化版 ===",
+                    "=== Gap-044 | GOAL_SYNTHESIS 補完步驟已注入（重試耗盡，type=%s），重載演化版 ===",  # noqa: E501
                     _gs_proposal.evolution_type,
                 )
                 return_msg = "GOAL_SYNTHESIS ESCALATION（重試耗盡）：MinimaxEvolver 已補完步驟"

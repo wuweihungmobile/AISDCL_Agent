@@ -41,7 +41,6 @@ from ..utils.config import AppConfig
 from ..utils.knowledge_base import FailureKnowledgeBase
 from .event_bus import EventBus
 from .kernel import PlaybookKernel
-from .orchestration import OrchestrationCoordinator
 from .ports.brain import IBrain
 from .ports.evaluator import IEvaluator
 from .ports.executor import IExecutor
@@ -434,34 +433,4 @@ def build_goal_decomposer(
     return GoalDecomposer(
         brain, observability=observability, tool_invocation=tool,
         freeze_gate=freeze_gate,
-    )
-
-
-def build_coordinator(
-    *,
-    bus: EventBus,
-    brain: IBrain,
-    executor: IExecutor,
-    max_active_runs_per_goal: int | None = None,
-) -> OrchestrationCoordinator:
-    """組裝 OrchestrationCoordinator（SD_Improving_06 W1 T1-5）。
-
-    對應 ADR-SD06-001 §2 雙層架構：Layer 1.5（Coordinator）介於 Kernel
-    與 Layer 2 AutoResumeService 之間。
-
-    呼叫鏈：
-      AutoResumeService.run()         ← Layer 2（外層 retry / auto_resume / evolution）
-        → Kernel.run()                ← dispatch HookSpec phases + 15 Plugin
-          → Coordinator.run_step()    ← Layer 1.5（per step Brain/Executor 協調）
-
-    Args:
-        bus: 與 PlaybookKernel 共用同一 EventBus 實例
-        brain / executor: 與 PlaybookKernel 共用相同 adapter
-        max_active_runs_per_goal: PM #8 guard 上限（None=讀環境變數 / 預設 5）
-    """
-    return OrchestrationCoordinator(
-        bus=bus,
-        brain=brain,
-        executor=executor,
-        max_active_runs_per_goal=max_active_runs_per_goal,
     )

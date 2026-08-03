@@ -44,7 +44,12 @@ $ToolsParent = (Resolve-Path (Join-Path $ScriptDir "..\..\..")).Path
 # python 探測須經共用 WindowsAppsGuard.ps1::Test-IsRealPython SSOT 排除空殼
 # （DEF-101-273/279/300/303 復發模式；同 install_hooks/install_post_commit.ps1
 # 慣例，非本檔獨立重寫裸 Get-Command 判斷）。
-$GitCommonDir = (git rev-parse --path-format=absolute --git-common-dir 2>$null)
+# DEF-101-762（與 install_hooks/install_post_commit.ps1 的 git rev-parse 站點同形態，故用同一解法；完整根因與雙向驗證見該檔與帳本該列；本站點的順序鎖＝tools/tests/test_dev_start.py::TestNativeStdoutDecodingRoutingLock 的 _LATEST_REV_PARSE_SITES 第二筆，R71 由只鎖 install_post_commit 參數化過來）：
+# PS 解碼**原生指令 stdout** 用 `[Console]::OutputEncoding`、git 一律吐 UTF-8 ⇒ cp950（繁中 Windows 的 ANSI 預設，schtasks 排程環境即為此）下含中文的 repo 路徑被解成 mojibake
+# （本機實測 `煙霧測試` U+7159 U+9727 U+6E2C U+8A66 → U+003F U+EA57 U+EBEC U+769C U+7948 U+5CAB）、$MainCheckoutRoot 連帶損毀 → 本檔以「找不到共用函式」exit 2，中文路徑 repo 上形式化驗證整條路不可用。
+# 用完立刻還原、不整支釘 UTF-8（本檔可被 `. .\run_tlc.ps1` 同行程執行，不還原＝永久改掉該 session 的主控台編碼並拆掉其後專測 cp950 的 tripwire）；無主控台而釘不動時吞例外維持既有行為，損毀路徑仍由下面的 Test-Path 以 exit 2 fail-loud 攔下。薄殼上限 100 行（check_script_parity._check_latest_thinness）故寫緊湊式。
+$PrevOutEnc = $null; try { if ([Console]::OutputEncoding.CodePage -ne 65001) { $PrevOutEnc = [Console]::OutputEncoding; [Console]::OutputEncoding = New-Object System.Text.UTF8Encoding($false) } } catch { $PrevOutEnc = $null }
+try { $GitCommonDir = (git rev-parse --path-format=absolute --git-common-dir 2>$null) } finally { if ($null -ne $PrevOutEnc) { [Console]::OutputEncoding = $PrevOutEnc } }
 if ($LASTEXITCODE -ne 0 -or -not $GitCommonDir) {
     Write-Host "ERROR: 找不到 git repository（git rev-parse --git-common-dir 失敗）— 請在 monorepo checkout 內執行本腳本" -ForegroundColor Red
     exit 2

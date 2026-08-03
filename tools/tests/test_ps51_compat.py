@@ -101,6 +101,19 @@ negative lookbehind 收斂）。
     機械化；`tools/windows_smoke_local.ps1` 檔頭列的 4 項禁令中，三元這一項仍部分
     依賴人工複核。
 
+🔴 **本檔行級掃描架構上抓不到的一整類 5.1 缺陷（R71／DEF-101-760，誠實劃界）**：
+「原生指令引數的引號傳遞」。Windows PowerShell 5.1 把參數交給**原生執行檔**
+（非 cmdlet）時，會自行重組一次命令列字串再讓 `CommandLineToArgvW` 拆解，過程中
+**吃掉字串內嵌的雙引號**（本機真機實測：送 `A""B`、收到 `AB`）。
+`tools/lib/WindowsAppsGuard.ps1` 的版本探測碼原本寫 `else ""`，於是每個 Python 候選
+都收到 `unterminated string literal` ⇒ rc=1 ⇒ `Get-PythonGeMin` 恆回 $null ⇒
+全新 Windows 機器的 `dev_start.ps1` 開箱路徑整條是死的，而本檔 12 條判準**一條都
+不會響**。原因是結構性的、不是漏列一條 regex：上方 `scan_source()` 掃的是
+`split_code_comment()` **把字串字面值抹成空白之後**的 code 段，而缺陷本體就住在
+那個被抹掉的字串裡——「加一條 regex 抓內嵌雙引號」在這個掃描器裡無從實作。
+故該類別改由 `TestPs51NativeArgvRoundTrip` 以**真的起一支 powershell.exe 做 argv
+round-trip** 看守（行為鎖，不是字面掃描）。
+
 豁免機制：違規行行尾加註 `# ps7-ok: <WHY>`（WHY 必填，留空視同無豁免力）。
 stale 自檢：帶標記的行掃不到任何被壓下的違規（已改寫／標記放錯行）→ fail-loud
 指名該行請移除標記，防豁免清單腐化（語意對齊 bash4-ok／encoding-ok 慣例）。
@@ -113,6 +126,7 @@ v0.01~v0.(N-1) 依鐵律不掃、也不可修）。per-tree 檔數下限釘選�
 """
 from __future__ import annotations
 
+import platform
 import re
 import subprocess
 import sys
@@ -526,6 +540,146 @@ class TestPs51ScanConfigPinning(unittest.TestCase):
             'Join-Path "AISDLC_SDD" $latestName', step.group(0),
             "root-infra-ci.yml 第 2 道未見 LATEST 樹（Join-Path AISDLC_SDD $latestName）"
             "——第 4 棵樹疑似被移除",
+        )
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# R71（DEF-101-760）：「原生指令引數的引號傳遞」行為鎖。
+#
+# WHY 是行為鎖而不是第 13 條 regex：見檔頭同名段落——缺陷住在字串字面值裡，而本檔
+# 的掃描器在比對前就把字串抹成空白了，結構上看不見。ADR-XPLAT-002 §3.2 的紀律
+# 也指同一件事：字面比對型 parity 不算機械釘選，`.ps1` 得真的被執行過。
+# ─────────────────────────────────────────────────────────────────────────────
+
+sys.path.insert(0, str(_TESTS_DIR))
+from _ps_engine import native_ps51, windows_with_native_ps51  # noqa: E402
+
+_GUARD_PS1 = _REPO_ROOT / "tools" / "lib" / "WindowsAppsGuard.ps1"
+
+# 回聲程式：把收到的第一個「-c 之後的位置引數」原封不動寫回 stdout（不加換行，
+# 免得比對還要處理行尾）。**本身刻意不含任何引號字元**——載具若自己踩進待測的
+# 缺陷，量到的就是載具的假紅（R71 實測踩過一次：`print("MM=%d.%d" % …)` 當場
+# 被吃掉引號變成 `SyntaxError`）。
+_ARGV_ECHO = "import sys;sys.stdout.write(sys.argv[1])"
+
+# 明知會被 5.1 吃掉的樣本（負控用）。`A""B` 在 PowerShell 單引號字串裡是逐字四字元。
+_QUOTE_BEARING_SAMPLE = 'A""B'
+
+
+def _parse_sent_got(stdout: str) -> tuple[str, str]:
+    """從 `SENT=`／`GOT=` 兩行取回原值與回聲值（缺行即 KeyError，由呼叫端 fail-loud）。"""
+    found: dict[str, str] = {}
+    for line in stdout.splitlines():
+        for key in ("SENT=", "GOT="):
+            if line.startswith(key):
+                found[key.rstrip("=")] = line[len(key):]
+    return found["SENT"], found["GOT"]
+
+
+@unittest.skipUnless(
+    windows_with_native_ps51(),
+    "[WINDOWS-NATIVE-ONLY] 需要 Windows 真機上的原生 powershell.exe（5.1）："
+    "本鎖量的是 5.1 專屬的原生引數重組行為，pwsh 7.3+ 已改用新的 argv 傳遞、"
+    "在它身上跑會恆綠＝零鑑別力（刻意不 fallback，理由同 _ps_engine 語意④）",
+)
+class TestPs51NativeArgvRoundTrip(unittest.TestCase):
+    """交給原生 exe 的生產字串，必須原封不動抵達對方的 `argv`。
+
+    誠實劃界：本鎖**只在 Windows 原生 5.1 上有鑑別力**，macOS/Linux 一律 skip。
+    恆會執行的靜態備援＝`tools/tests/test_dev_start.py::TestMinPythonVersionSsotSync
+    ::test_version_probe_has_no_embedded_double_quote`（不需要任何引擎）。兩者是
+    「行為證據」與「不依賴環境的近似」的分工，缺一都會退回 DEF-101-760 的狀態。
+    """
+
+    def _round_trip(self, ps_expr_defining_sent: str):
+        """跑一次 round-trip；`ps_expr_defining_sent` 需把待測字串放進 `$sent`。"""
+        snippet = (
+            f"{ps_expr_defining_sent} "
+            f"$got = & '{sys.executable}' -c '{_ARGV_ECHO}' $sent; "
+            "'SENT=' + $sent; 'GOT=' + $got"
+        )
+        proc = subprocess.run(
+            [native_ps51(), "-NoProfile", "-Command", snippet],
+            capture_output=True, encoding="utf-8", errors="replace", timeout=180,
+        )
+        self.assertEqual(proc.returncode, 0, f"載具故障：stderr={proc.stderr!r}")
+        try:
+            return _parse_sent_got(proc.stdout)
+        except KeyError as exc:  # pragma: no cover - 載具壞掉才會走到
+            raise AssertionError(
+                f"載具故障：stdout 缺 {exc} 行（不得當成通過）\nstdout={proc.stdout!r}"
+            ) from exc
+
+    def test_production_version_probe_survives_native_argv_round_trip(self) -> None:
+        """本體：生產探測碼交給 python.exe 後，`sys.argv` 收到的必須逐字相同。
+
+        刻意 dot-source **真的**那支 `WindowsAppsGuard.ps1` 並取 `$script:
+        PythonGeMinProbe`，而不是在本檔複製一份字面值——複製品會與生產值漂移，
+        鎖就變成在驗自己（同 ADR-XPLAT-002 §3.2 對「兩邊都寫了看起來很像的東西」
+        的裁定）。
+        """
+        sent, got = self._round_trip(f". '{_GUARD_PS1}'; $sent = $script:PythonGeMinProbe;")
+        self.assertTrue(sent, "沒讀到 $script:PythonGeMinProbe——宣告被改名？")
+        self.assertEqual(
+            got, sent,
+            "生產探測碼在 PS 5.1 → 原生 exe 的邊界上被改寫了（典型是內嵌雙引號被吃掉"
+            "一個）。後果：python 收到語法錯誤的程式碼 → rc=1 → Get-PythonGeMin 的"
+            "每個候選都被判不合格 → 恆回 $null → 全新 Windows 機器 dev_start.ps1 "
+            "開箱路徑整條死掉（DEF-101-760）。修法：字串內不要用雙引號，空字串寫 "
+            f"`str()`。\n  送出：{sent!r}\n  收到：{got!r}",
+        )
+
+    def test_carrier_has_teeth_embedded_double_quotes_really_are_eaten(self) -> None:
+        """負控（鏡子自證）：明知有害的樣本必須真的被改寫，否則上一支恆綠。
+
+        沒有這一支，上一支在「載具其實根本沒走到原生邊界」時同樣是綠的——那正是
+        DEF-101-760 能出貨的原因（唯一有行為鑑別力的鎖被 skip 在門外，剩下的全是
+        文字比對）。本測試把「這個危害在本機仍然存在」變成可觀測的事實。
+        """
+        sent, got = self._round_trip(f"$sent = '{_QUOTE_BEARING_SAMPLE}';")
+        self.assertEqual(sent, _QUOTE_BEARING_SAMPLE, f"載具沒送對樣本：{sent!r}")
+        self.assertNotEqual(
+            got, sent,
+            "PS 5.1 竟原封不動傳遞了內嵌雙引號——本鎖假設的危害不存在了（引擎換版？）"
+            "；請重新量測並改寫本檔檔頭的判斷，不要留一支恆綠的鎖",
+        )
+        self.assertNotIn(
+            '"', got,
+            f"實測形態變了：雙引號沒有被完全吃掉（送 {sent!r} 收 {got!r}）"
+            "——上一支主鎖的診斷訊息需同步更新",
+        )
+
+
+class TestPs51BehaviouralLockCannotSilentlyVanish(unittest.TestCase):
+    """R71：`TestPs51NativeArgvRoundTrip` 的 skip 述詞在 Windows 上**不得**成立。
+
+    WHY（本鎖補的是上面那把鎖自己的 fail-open）：`TestPs51NativeArgvRoundTrip` 是本
+    repo 唯一具**行為**鑑別力的 PS 5.1 守門，而它掛在 `skipUnless(windows_with_native_
+    ps51())` 上。該述詞 ＝「在 Windows」且「`shutil.which('powershell')` 命中」——後者
+    一旦因 PATH 被改、映像變更、或 System32 被移出搜尋路徑而落空，整把鎖就**靜默 skip**：
+    `run_root_unittests.py` 只會多印一行 `[WINDOWS-NATIVE-ONLY]` 明細，rc 仍為 0。
+    也就是說「唯一的行為鎖消失」這件事在本 repo 現行機制下**不會變紅**——這正是
+    DEF-101-760 得以出貨的那個形狀（唯一有鑑別力的鎖被 skip 在門外，剩下的全是文字比對），
+    只是換成從環境側觸發。
+
+    判準邊界（誠實劃界）：本鎖只在 Windows 上說話。非 Windows 平台沒有 5.1、skip 是
+    正確語意，不是覆蓋損失（該方向的可見度由 `run_root_unittests.report_all_skips`
+    承接）。本鎖也不驗那支測試「跑完是對的」，只驗它**不會沒跑**。
+    """
+
+    @unittest.skipUnless(
+        platform.system() == "Windows",
+        "本鎖問的是「Windows 上 5.1 行為鎖有沒有被 skip 掉」，非 Windows 平台不適用"
+        "（該平台上 skip 是正確語意，不是覆蓋損失）",
+    )
+    def test_native_ps51_predicate_holds_on_windows(self) -> None:
+        self.assertTrue(
+            windows_with_native_ps51(),
+            "本機是 Windows，卻解析不到原生 powershell.exe ⇒ "
+            "TestPs51NativeArgvRoundTrip（唯一具行為鑑別力的 PS 5.1 守門）本次被靜默 "
+            "skip，PS 5.1 覆蓋退回純靜態掃描。powershell.exe 是 Windows 內建、且是本 "
+            "repo 文件教使用者用的引擎，解析不到代表 PATH 已壞（典型：System32 被移出 "
+            "PATH）——請修環境，不要改本鎖的述詞",
         )
 
 

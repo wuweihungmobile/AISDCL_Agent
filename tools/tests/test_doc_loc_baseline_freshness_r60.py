@@ -73,6 +73,7 @@ _ONBOARDING = _REPO_ROOT / "ONBOARDING.md"
 
 sys.path.insert(0, str(_REPO_ROOT / "tools"))
 import sync_onboarding_baselines as SYNC  # noqa: E402
+from lib import baseline_origin as BO  # noqa: E402  # nightly 探針的解析契約（DEF-101-759）
 
 
 @contextmanager
@@ -2134,10 +2135,22 @@ class TestR67SlowMeasurementWindowIsFingerprintBracketed(unittest.TestCase):
 #   ④ **本鎖自己也是量測載具，載具必須被驗證**，三條 fail-open 全部封死：
 #      (a) ADR 目錄不存在／零 `ADR-*.md` ⇒ 違規（掃描面崩塌，不得靜默零命中假綠）；
 #      (b) 取值來源給不出 total／baseline／cap 三個整數 ⇒ 違規（工具壞掉 ≠ ADR stale，分開回報）；
-#      (c) 全掃描面**零筆**受管 LOC token ⇒ 違規。這一條治的是「把數字整段刪掉本鎖就空轉」，
-#          與 `check_pytest_baseline_sites.py` 的 SSOT anchor 自檢同形。⚠️ 改為「指向 live
-#          來源而不寫死數字」本身是**更好**的作法，但它會讓本鎖失去唯一的活體比對——真要
-#          那樣改，請在同一個 commit 內把本條錨點自檢改指新的活體站點，別讓它空轉。
+#      (c) 全掃描面**零筆** LOC token（`total`／`baseline`／`cap` 形態，含已掛豁免者）⇒ 違規。
+#          這一條治的是「把數字整段刪掉本鎖就空轉」，與 `check_pytest_baseline_sites.py` 的
+#          SSOT anchor 自檢同形。
+#          🔴 **R71 錨點改指（本條原文自己預告過的那件事真的發生了）**：原文寫「改為指向
+#          live 來源而不寫死數字本身是更好的作法，但它會讓本鎖失去唯一的活體比對——真要
+#          那樣改，請在同一個 commit 內把本條錨點自檢改指新的活體站點」。R71 正是那一輪：
+#          `ADR-XPLAT-003` 的四處 `total=／cap=` 已全數改為時代快照（掛豁免）或改指 SSOT，
+#          `ADR-XPLAT-002` 的兩處本來就掛著豁免 ⇒ 非豁免受管 token 歸零。
+#          依原文指示同 commit 完成兩件事：
+#            ① 本條的計數改為「**掃描面上還看得見 LOC token 的形態**」（豁免者也計入）——
+#               它守的是「regex 與掃描面還活著」，這一層仍然有效且仍會在整段刪除時翻紅；
+#            ② **活體比對改指 `ONBOARDING.md` §7 表① 的 `loc-baseline-live:` 那一格**，
+#               由本檔 `TestR69AdrMeasurementTokensAreLive::
+#               test_live_loc_ssot_station_carries_the_live_comparison` 直接對現查值比對。
+#               該格本就是本 repo 指定的唯一 live 家、且有 `--write` 一鍵回填，
+#               ADR 不必也不該再開第二個家（理由與 ADR §8(b) 對 pytest 計數一字不差）。
 _ADR_DIR = _REPO_ROOT / "docs" / "04_planning" / "ADR"
 _ADR_WAIVER = "adr-measurement-historical:"
 _ADR_LOC_TOKEN_RE = re.compile(r"\b(total|baseline|cap|violations)=(\d+)")
@@ -2204,13 +2217,17 @@ def adr_measurement_problems(
 ) -> list[str]:
     """純函式：ADR 內量測 token 的違規清單（空＝通過）。判準見上方段落。"""
     problems: list[str] = []
-    governed_hits = 0
+    inspected_loc_tokens = 0
     for label, text in docs:
         for lineno, line in enumerate(text.splitlines(), 1):
             loc_hits = _ADR_LOC_TOKEN_RE.findall(line)
             py_hits = _ADR_PYTEST_TOKEN_RE.findall(line)
             if not loc_hits and not py_hits:
                 continue
+            # 判準 ④(c) 的錨點（R71 改指）：只要掃描面上還看得見 total／baseline／cap
+            # 形態的 token（**不論是否掛豁免**），就證明 regex 與掃描面都還活著。活體
+            # 比對本身已移至 ONBOARDING §7（見下方 `_LIVE_LOC_ANCHOR` 那支測試）。
+            inspected_loc_tokens += sum(1 for key, _ in loc_hits if key != "violations")
             waived = _adr_waiver_problem(label, lineno, line)
             if waived:  # 有標記但沒理由
                 problems.append(waived)
@@ -2228,7 +2245,6 @@ def adr_measurement_problems(
                         f"\n  行文：{line.strip()[:160]}"
                     )
                     continue
-                governed_hits += 1
                 if int(value) != live[key]:
                     problems.append(
                         f"{label}:{lineno}：`{key}={value}` 與現查值 {live[key]} 不符 — "
@@ -2245,10 +2261,13 @@ def adr_measurement_problems(
                     f"或若這是有輪次歸屬的時代快照，改掛 `{_ADR_WAIVER} <理由>`。"
                     f"\n  行文：{line.strip()[:160]}"
                 )
-    if governed_hits == 0:
+    if inspected_loc_tokens == 0:
         problems.append(
-            f"整個 ADR 掃描面（{len(docs)} 份）零筆受管 LOC token — 本鎖已無活體比對對象而空轉。"
-            f"若這是刻意「改為指向 live 來源」，請在同一個 commit 內把本條錨點自檢改指新站點。"
+            f"整個 ADR 掃描面（{len(docs)} 份）連一筆 `total=／baseline=／cap=` 形態的 token "
+            f"都掃不到（豁免者也算） — 這代表掃描面崩塌或 regex 失效，本鎖已空轉。"
+            f"注意：活體比對自 R71 起已改指 `ONBOARDING.md` §7 的 `loc-baseline-live:` 格"
+            f"（見 test_live_loc_ssot_station_carries_the_live_comparison），本條只負責"
+            f"「掃描面還活著」這一層。"
         )
     return problems
 
@@ -2272,6 +2291,29 @@ class TestR69AdrMeasurementTokensAreLive(unittest.TestCase):
             "ADR-XPLAT-003-autoclaude-platform-capability-layer.md", names,
             f"掃描面裡沒有 ADR-XPLAT-003（現有：{sorted(names)}）— 檔案改名時請同步本鎖",
         )
+
+    def test_live_loc_ssot_station_carries_the_live_comparison(self) -> None:
+        """🔴 判準 ④(c) 的**新錨點**（R71 改指）：ADR 交出去的活體比對落在這一格。
+
+        WHY 這支不是 `test_documented_live_cells_match_measured_values` 的重複：
+        那一支守的是「§7 表①**整張表**每一格都新鮮」；本支守的是「ADR 之所以可以不寫
+        `total`／`cap`，是**因為**這一格在替它扛」。兩者射程不同、失敗訊息也要不同——
+        錨點被刪／被改名時，讀到的人必須當場知道「ADR 那道鎖現在空轉了」，而不是只看到
+        一則泛用的表格 stale 訊息。`anchored_line` 對 0 行或 ≥2 行本身就 fail-loud。
+        """
+        text = _ONBOARDING.read_text(encoding="utf-8-sig")
+        line = SYNC.anchored_line(text, "loc-baseline-live:")
+        live = measure_adr_loc_live()
+        for key in ("total", "cap"):
+            self.assertIn(
+                f"{key}={live[key]}", line,
+                f"ONBOARDING.md §7 的 `loc-baseline-live:` 格沒有帶著現查的 `{key}="
+                f"{live[key]}` — 這一格自 R71 起是 `total`／`cap` 在本 repo 的**唯一** live 家"
+                f"（ADR 已依 §8(b) 全面改掛時代快照／改指本格）。本格一 stale，整條"
+                f"「ADR 不寫死數字」的收斂就失去支撐點。\n"
+                f"  一鍵回填：python tools/sync_onboarding_baselines.py --write\n"
+                f"  受鎖行實際內容：{line.strip()[:200]}",
+            )
 
     def test_live_source_is_sane(self) -> None:
         """取值來源自檢（判準 ④(b)）：三個 key 都拿得到且為正整數；`violations` 不得混入。"""
@@ -2331,10 +2373,31 @@ class TestR69AdrMeasurementTokensAreLive(unittest.TestCase):
         self.assertIn("total=20415", problems[0])
 
     def test_empty_corpus_is_a_violation_not_a_pass(self) -> None:
-        """判準 ④(c)：零受管 token ⇒ 本鎖空轉，必須紅。"""
+        """判準 ④(c)：掃描面上一筆 LOC token 都看不到 ⇒ 本鎖空轉，必須紅。"""
         problems = self._run("本節不再登載量測常數，一律現查。\n")
         self.assertEqual(len(problems), 1, problems)
         self.assertIn("空轉", problems[0])
+
+    def test_waived_only_corpus_does_not_trip_the_idle_anchor(self) -> None:
+        """R71 錨點改指後的新語意：全部掛豁免 ⇒ 通過（掃描面仍活著）。
+
+        WHY 這是**刻意**的行為改變，不是把鎖放鬆：ADR 是決策時點的紀錄，它裡面的量測
+        本來就該是「有輪次歸屬的時代快照」；活體比對已改由
+        `test_live_loc_ssot_station_carries_the_live_comparison` 對 ONBOARDING §7 執行。
+        改前這個語料會因「零筆**非豁免**受管 token」而紅，等於逼 ADR 永遠留一個活數字
+        在正文——那正是 R71 讓根層閘門紅 4 支的成因。
+        """
+        body = (
+            "| total=20361 <!-- adr-measurement-historical: R60 快照 -->\n"
+            "| cap=20438 <!-- adr-measurement-historical: R60 快照 -->\n"
+        )
+        self.assertEqual(self._run(body), [])
+
+    def test_idle_anchor_still_fires_when_every_number_is_deleted(self) -> None:
+        """反向：連豁免快照都被刪光 ⇒ 掃描面崩塌，仍須紅（本條沒有被放鬆）。"""
+        problems = self._run("本 ADR 完全不提任何量測。\n")
+        self.assertEqual(len(problems), 1, problems)
+        self.assertIn("掃描面崩塌", problems[0])
 
     def test_missing_adr_dir_fails_loud(self) -> None:
         """判準 ④(a)：掃描面崩塌不得靜默通過。"""
@@ -2426,6 +2489,327 @@ class TestR67R3ThisFileMakesNoUnstatedPlatformAssumption(unittest.TestCase):
             "本檔有鎖的結果隨 sys.platform 改變 ⇒ 它對『本機是哪個平台』做了未言明的"
             "前提假設。修法不是加 skip（那等於讓該平台永遠沒有覆蓋），而是把該鎖改成"
             "**吃平台當參數**——它驗的判準本來就是逐欄的純函式。",
+        )
+
+
+#: 逐字取自 `AutoClaude/logs/nightly_latest.log` 第 488~494 行（2026-08-02 那一輪的真實
+#: 收尾段，Windows 11 真機 Task Scheduler `AutoClaude_Nightly` 產出）。整支 log 實測 494 行，
+#: 彙總行落在**第 491 行**——首版探針只讀前 3 行，這就是它結構上永遠打不中的那 488 行差距。
+#:
+#: 🔴 provenance 訂正（本批）：上一批的同一句註解宣稱「488~494 行」，實際**靜默丟掉了第
+#: 493 行**（`END observation progress: …`）——七行只放了六行。這種「宣稱逐字、其實刪過」
+#: 正是本檔整章在治的病（宣稱與資料不符），且丟掉的偏偏是**唯一帶 `unique-sha` 觀察期進度
+#: 的那行**：它與 win32 strict 樣式擦身而過（`END observation …` 不是 `END nightly
+#: summary:`），若當初就在樣本裡，反而能多證一件事——strict 不會誤吃同前綴的鄰行。現已補回。
+#: 該檔 untracked（`AutoClaude/.gitignore: logs/`）故本測試不能讀它比對；落地當下以
+#: `python -c "...read().splitlines()[487:494]"` 逐行核對過，輸出貼在本批回報中。
+_REAL_WIN_NIGHTLY_TAIL = """\
+[2026-08-02 21:54:01][INFO] ===== Stage start: Cleanup =====
+[2026-08-02 21:54:01][INFO] 保留既有 container: autoclaude_pg（非本腳本建立）
+[2026-08-02 21:54:01][INFO] ===== Stage end:   Cleanup (exit=0, elapsed=00:00:00.015) =====
+[2026-08-02 21:54:01][INFO] END nightly summary: mutation=0 pg-e2e=0 perf=0 drift=0 obs=0 \
+local_ci_gate=0 sdd_chaos=0
+[2026-08-02 21:54:01][INFO] END nightly summary json: {"sdd_chaos":0,"mutation":0,"drift":0,\
+"local_ci_gate":0,"pg-e2e":0,"skip_sentinel":-1,"perf":0,"obs":0}
+[2026-08-02 21:54:03][INFO] END observation progress: mutation=5/7 unique-sha (records=7; \
+delta=0; stage=0) ac4=41/14 (delta=1; stage=0) obs=41/30 (delta=1; stage=0) drift=34/30 \
+(delta=1; stage=0) — mutation 按 source_sha256 去重（ADR-SD09-011）、其餘三軌 same \
+UTC-date dedup per M-05; delta=0 with stage!=0 表示本次未進帳
+[2026-08-02 21:54:03][INFO] END exit decision: exit=0 (no failed stages; SKIP/WARN 不計失敗)
+"""
+
+#: `AutoClaude/tools/run_local_nightly.sh::write_heartbeat()` 的固定 4 行心跳（FAIL=0 態，
+#: 該函式的 printf 形狀）。本機是 Windows、沒有這支檔，故形狀自產生程式碼取得——
+#: **未在 macOS 真機實測**，此註記刻意留著（本輪修的就是「照抄別平台形狀」的病）。
+_MAC_HEARTBEAT_FROM_WRITER = (
+    "nightly_mac heartbeat（UTC）：2026-08-02T02:14:07Z\n"
+    "===== nightly 彙總：PASS=4 FAIL=0 =====\n"
+    "log=/Users/probe/AISDCL_Agent/AutoClaude/logs/nightly_mac_20260802_021407.log\n"
+)
+
+
+class _CountingHandle:
+    """把每次 `read()`／逐行迭代真正吐出的位元組記到 `acc` 上（其餘方法原樣轉發）。"""
+
+    def __init__(self, fh, acc: _ReadAccountingPath) -> None:
+        self._fh, self._acc = fh, acc
+
+    def __enter__(self) -> _CountingHandle:
+        self._fh.__enter__()
+        return self
+
+    def __exit__(self, *exc) -> object:
+        return self._fh.__exit__(*exc)
+
+    def __iter__(self) -> _CountingHandle:
+        return self
+
+    def __next__(self) -> str | bytes:
+        return self._acc.note(next(self._fh))
+
+    def seek(self, *a, **kw) -> int:
+        return self._fh.seek(*a, **kw)
+
+    def read(self, *a, **kw) -> str | bytes:
+        return self._acc.note(self._fh.read(*a, **kw))
+
+
+class _ReadAccountingPath:
+    """`Path` 的 duck-typed 替身，只暴露 `_read_probe_window()` 真正該用的兩個方法。
+
+    刻意**不**繼承 `Path`、也刻意不補 `read_bytes`／`read_text`：那兩支正是「有界性被
+    悄悄拿掉」最可能的替代寫法，缺席即 AttributeError ⇒ 繞過本鎖只會換一種紅法。
+    """
+
+    def __init__(self, real: Path) -> None:
+        self.real, self.bytes_read = real, 0
+
+    def note(self, chunk: str | bytes) -> str | bytes:
+        self.bytes_read += len(chunk if isinstance(chunk, bytes) else chunk.encode("utf-8"))
+        return chunk
+
+    def stat(self) -> object:
+        return self.real.stat()
+
+    def open(self, *a, **kw) -> _CountingHandle:
+        return _CountingHandle(self.real.open(*a, **kw), self)
+
+
+class TestR71NightlyProbeActuallyParsesEachPlatformsOwnFormat(unittest.TestCase):
+    """🔴 DEF-101-759：讓平台覆蓋不再靠人記憶的那道機械守，自己一天都沒量到過東西。
+
+    `nightly_evidence()` 隨 `fbc9bb5`（DEF-101-756/757/758）落地，首版彙總行解析是
+    `read_text().splitlines()[:3]` 找 `"PASS="`——那是 **mac 心跳**的形狀。win32 讀的卻是
+    `run_local_nightly.ps1` 的**全量 log 複本**，彙總行在第 491 行、字面是
+    `END nightly summary: …`，兩個致命點各自獨立、任一個都足以讓它恆不命中。
+    於是 `--check-snapshot` 的 Windows 欄每天都印「（心跳無彙總行）」——而那句話讀起來
+    像資料現況，不像探針壞掉。**fallback 文案把自己的失效偽裝成正常**，這是最難被發現的
+    一種壞法：沒有紅燈、沒有 traceback，只有一句看似合理的話。
+
+    本類別鎖的**意圖**（Rule 9）：探針必須拿**該平台自己的**格式去解析，且「解析不到」
+    與「檔裡真的沒有」必須說得出差別——兩者的處置相反（改探針 vs 去看那台機器）。
+    """
+
+    def _probe(self, platform_key: str, body: str) -> str:
+        with tempfile.TemporaryDirectory() as td:
+            hb = Path(td) / BO.NIGHTLY_HEARTBEATS[platform_key]
+            hb.parent.mkdir(parents=True, exist_ok=True)
+            hb.write_text(body, encoding="utf-8")
+            return BO.nightly_evidence(Path(td), platform_key)
+
+    def test_windows_summary_is_found_in_a_real_full_log_not_only_its_first_lines(self) -> None:
+        """立案樣本：真實 log 片段前面墊 500 行，模擬彙總行遠離檔頭的真實佈局。
+
+        把讀取窗格改回 `[:3]` 這一支就必紅——那正是修復前的實況。
+        """
+        filler = "".join(
+            f"[2026-08-02 10:18:09][INFO] ===== Stage start: filler-{i} =====\n"
+            for i in range(500)
+        )
+        line = self._probe("win32", filler + _REAL_WIN_NIGHTLY_TAIL)
+        self.assertIn("END nightly summary: mutation=0", line)
+        self.assertIn("sdd_chaos=0", line)
+        self.assertNotIn(
+            "解析不到", line, "命中 loose 卻不命中 strict ⇒ win32 的 strict 樣式對不上真實 log"
+        )
+        self.assertNotIn(
+            "找不到彙總行", line,
+            "真實 log 明明有彙總行卻回 fallback——DEF-101-759 的原始症狀；"
+            "fallback 讀起來像資料現況，於是探針壞掉一整天沒人發現",
+        )
+
+    def test_the_windows_sample_contains_no_pass_equals_so_one_pattern_cannot_serve_both(
+        self,
+    ) -> None:
+        """🔴 **反「一個 pattern 硬套兩平台」的鑑別鎖**：兩邊的錨點字面互不出現。
+
+        沒有這一支，未來有人為了少幾行又把兩個 spec 併回一個——而併回去的當下不會有任何
+        東西轉紅（win32 欄只是安靜地落回 fallback）。所以要在這裡把「不可共用」變成硬事實。
+        """
+        self.assertNotIn(
+            "PASS=", _REAL_WIN_NIGHTLY_TAIL,
+            "真實 Windows nightly log 若真有 PASS= 則首版並非結構性失效，本鎖立案前提要重查",
+        )
+        self.assertNotIn("END nightly summary", _MAC_HEARTBEAT_FROM_WRITER)
+        win, mac = BO.NIGHTLY_SUMMARY_SPECS["win32"], BO.NIGHTLY_SUMMARY_SPECS["darwin"]
+        self.assertIsNone(win.strict.search(_MAC_HEARTBEAT_FROM_WRITER), "win 樣式吃進 mac 心跳")
+        self.assertIsNone(mac.strict.search(_REAL_WIN_NIGHTLY_TAIL), "mac 樣式吃進 win 全量 log")
+
+    def test_mac_heartbeat_contract_is_still_parsed(self) -> None:
+        """對照組：修 win32 不得把 mac 那條本來就對的路徑弄壞（形狀取自 writer，未實測）。"""
+        line = self._probe("darwin", _MAC_HEARTBEAT_FROM_WRITER)
+        self.assertIn("===== nightly 彙總：PASS=4 FAIL=0 =====", line)
+
+    def test_parse_miss_and_genuinely_absent_summary_do_not_share_one_sentence(self) -> None:
+        """🔴 本輪最重要的一條：**探針失效**與**那輪沒跑完**必須是兩句話。
+
+        首版兩者都印「（心跳無彙總行）」，於是「機械守壞了」在輸出上與「一切正常」同形。
+        """
+        drifted = _REAL_WIN_NIGHTLY_TAIL.replace("END nightly summary:", "END nightly SUMMARY-v2:")
+        drift_line = self._probe("win32", drifted)
+        truncated = self._probe("win32", "[2026-08-02 02:00:00][INFO] BEGIN nightly run\n")
+        self.assertIn("解析不到", drift_line)
+        self.assertIn("格式已漂移", drift_line, "未把矛頭指回探針 ⇒ 讀者會去查那台機器")
+        self.assertIn("找不到彙總行", truncated)
+        self.assertNotIn("解析不到", truncated, "沒有任何錨點時不得宣稱「解析不到」")
+        self.assertNotEqual(drift_line, truncated)
+
+    def test_probe_window_is_bounded_so_a_multi_megabyte_log_is_not_slurped(self) -> None:
+        """全量 log 可達數 MB：窗格必須有界。以**實際讀進記憶體的位元組數**機械證明。
+
+        🔴 本支上一版是**零鑑別力的死鎖**（本批注入實測：把 `f.seek(…)` 整行刪掉、改成
+        `f.read()` 讀滿全檔，6/6 照樣全綠）。它斷言的是「檔頭誘餌不出現在**輸出那一行**」，
+        而 `nightly_summary()` 取的是 `hits[-1]`——檔尾的真彙總行**永遠**會蓋掉檔頭誘餌，
+        於是它證的其實是「取最後一筆命中」，跟有沒有界完全無關；docstring 卻宣稱後者。
+        「寫了鎖沒驗鎖」與 DEF-101-759 的 fallback 文案同構：看起來有守，實際一天沒守過。
+
+        改法：用 duck-typed Path 替身把 `read()` 真正吐出的位元組記帳。任何形態的整檔讀
+        （`f.read()` 不 seek／先讀全檔再切尾）都會讓帳超出上限而轉紅；繞過 `path.open()`
+        改用 `read_bytes()`／`read_text()` 則因替身沒有該方法而 AttributeError——同樣是紅，
+        不會靜默通過。誘餌斷言保留但**改斷在窗格上**（`window`）而非輸出行，那才有牙。
+        """
+        oversize = BO._NIGHTLY_TAIL_BYTES * 4
+        decoy = "[2026-01-01 00:00:00][INFO] END nightly summary: DECOY-FROM-HEAD\n"
+        with tempfile.TemporaryDirectory() as td:
+            log = Path(td) / "nightly_latest.log"
+            log.write_text(decoy + "x" * oversize + "\n" + _REAL_WIN_NIGHTLY_TAIL, "utf-8")
+            size = log.stat().st_size
+            acc = _ReadAccountingPath(log)
+            window = BO._read_probe_window(acc, BO.NIGHTLY_SUMMARY_SPECS["win32"].head_lines)
+        self.assertGreater(
+            size, BO._NIGHTLY_TAIL_BYTES * 3,
+            "樣本不夠大 ⇒『整檔讀』與『讀檔尾』量不出差別，本鎖會退化成恆真",
+        )
+        self.assertLessEqual(
+            acc.bytes_read, BO._NIGHTLY_TAIL_BYTES,
+            f"探針自 {size} bytes 的 log 讀進了 {acc.bytes_read} bytes（上限 "
+            f"{BO._NIGHTLY_TAIL_BYTES}）⇒ 有界性沒了，數 MB 全量 log 會被整檔載入記憶體",
+        )
+        self.assertNotIn("DECOY-FROM-HEAD", window, "檔頭內容進了窗格 ⇒ 窗格不是檔尾窗格")
+        self.assertIn(
+            "END nightly summary: mutation=0", window,
+            "有界了卻也讀不到彙總行 ⇒ 窗格開錯位置（有界但無用，比沒界更糟）",
+        )
+
+    def test_every_heartbeat_platform_has_a_parsing_spec(self) -> None:
+        """兩張表必須同鍵：只加心跳檔卻忘了加 spec，該欄會安靜地退回「本平台無心跳檔」。"""
+        self.assertEqual(sorted(BO.NIGHTLY_HEARTBEATS), sorted(BO.NIGHTLY_SUMMARY_SPECS))
+
+
+class TestR71StaleFingerprintMustNotSwallowTheCoverageDetail(unittest.TestCase):
+    """🔴 D-3：**一個無關的漂移不得讓整段平台覆蓋明細消失**（與 DEF-101-759 同族）。
+
+    實測立案（本批以 production 入口重現）：`tools/sync_onboarding_baselines.py
+    --check-snapshot` → rc=1，輸出**停在 ❌ 指紋區塊**，逐欄明細（baseline-origin 三態、
+    provenance、nightly 證據、四格記載值）一行都沒印。原因是 `main()` 在 `problems`
+    非空時當場 `return 1`，而那段明細排在 return 之後。
+
+    為何這是設計缺陷而不只是「順序不巧」：指紋 stale 在單機交替工作流下是**日常態**
+    （動到四棵測試樹任一棵就觸發，本批實測就是被另一個並行包改動 AutoClaude/tests/ 觸發的）
+    ⇒ 專門為根治 DEF-101-756 誤讀而加的那段說明，**在最常見的那條路徑上結構性看不見**；
+    讀者拿到的只有「某棵樹指紋變了」，於是又得自己腦補「那這平台到底驗過沒有」——回到
+    事故原點。**掩蓋的形態與 fallback 文案一樣：沒有紅燈、沒有 traceback，只是資訊沒了。**
+
+    修法（rc 語意**不放寬**）：明細兩條路都印，判決行標明它屬 presumed stale。
+    """
+
+    def _run(self, problems: list[str]) -> tuple[int, str, str]:
+        """以替身 `snapshot_report` 驅動，讓本鎖與「真實文件此刻是否過期」解耦。
+
+        否則某一輪剛好全欄新鮮時，紅路徑那半邊會**從來沒被執行過**而沒人發現
+        （同 `TestR67...test_notice_goes_to_stdout...` 已論證過的退化）。
+        """
+        original = SYNC.snapshot_report
+        out, err = io.StringIO(), io.StringIO()
+        try:
+            SYNC.snapshot_report = lambda *a, **k: (list(problems), [])
+            with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+                rc = SYNC.main(["--check-snapshot"])
+        finally:
+            SYNC.snapshot_report = original
+        return rc, out.getvalue(), err.getvalue()
+
+    def test_red_path_still_prints_every_columns_coverage_detail(self) -> None:
+        rc, out, err = self._run(["PROBE-STALE-D3"])
+        self.assertEqual(rc, 1, "rc 語意被放寬 ⇒ stale 不再擋 pre-push，那是比原缺陷更糟的修法")
+        self.assertIn("PROBE-STALE-D3", err, "rc 級問題必須仍在 stderr 的 ❌ 區塊")
+        for label in SYNC._PLATFORM_COLUMN_LABELS.values():
+            self.assertIn(
+                f"[{label} 欄]", out,
+                f"{label} 欄的逐欄明細在紅路徑上被吞掉——一個無關漂移就讓平台覆蓋資訊消失",
+            )
+        self.assertIn("nightly 證據：", out, "nightly 落地產物證據在紅路徑上看不到（D-3 本體）")
+        self.assertIn("provenance=", out)
+        self.assertIn(
+            "presumed stale", out,
+            "紅路徑照印明細卻不標記 stale ⇒ 讀者會把過期的四格計數當現況引用，那是另一種假宣稱",
+        )
+
+    def test_green_path_verdict_and_rc_are_unchanged(self) -> None:
+        """對照組：修紅路徑不得動到綠路徑的既有契約（✅ 字面 + rc=0）。"""
+        rc, out, _err = self._run([])
+        self.assertEqual(rc, 0)
+        self.assertIn("✅ §7 表② 指紋相符", out)
+        self.assertNotIn("presumed stale", out, "全新鮮卻自稱 stale ⇒ 反向假宣稱")
+
+
+class TestR71SmokeTripwireIsInViewWithTheHonestReading(unittest.TestCase):
+    """D-4：smoke 這條每日證據要進讀者視野，但**不得**假裝本工具讀得到它。
+
+    評估結論（逐平台，見 `_BO.SMOKE_EVIDENCE` 上方的完整論證）：win32 的
+    `AutoClaude_WindowsSmoke` 確實是獨立於 nightly 的第二條證據，卻**沒有 log 落點**
+    （排程 action 無輸出重導、載體只 `Write-Host`）⇒ 無檔可讀；darwin 的
+    `macos_smoke_local.sh` 則是 `run_local_nightly.sh` 的 stage [1/4]，**根本不是**第二條
+    獨立證據。故不接資料通道、只把這兩件事逐字印出。
+
+    🔴 本類別鎖的意圖：把 smoke 塞進 `NIGHTLY_HEARTBEATS` 會讓 Windows 欄永遠印
+    「本機無 …」，而那句話會被讀成「Windows smoke 沒在跑」——DEF-101-756 換載體復發。
+    """
+
+    _SMOKE_ACTION = "$smokeAction = New-ScheduledTaskAction"
+    _REDIRECTS = ("Tee-Object", "Start-Transcript", "Out-File", ">>", "1>", "2>")
+
+    def test_smoke_line_is_emitted_for_every_managed_platform(self) -> None:
+        for key in BO.NIGHTLY_HEARTBEATS:
+            nightly, smoke = BO.daily_evidence(_REPO_ROOT, key)
+            self.assertTrue(nightly.startswith("nightly 證據："), nightly)
+            self.assertTrue(smoke.startswith("smoke 證據："), f"{key} 欄的 smoke 未進視野")
+
+    def test_smoke_is_not_faked_into_the_heartbeat_table(self) -> None:
+        """兩張表同鍵、且心跳表裡不得混進 smoke 檔——那會製造一條恆為「無檔」的假通道。"""
+        self.assertEqual(sorted(BO.NIGHTLY_HEARTBEATS), sorted(BO.SMOKE_EVIDENCE))
+        for rel in BO.NIGHTLY_HEARTBEATS.values():
+            self.assertNotIn("smoke", rel, f"smoke 被接成心跳檔：{rel}")
+
+    def test_windows_wording_blocks_the_not_running_misreading(self) -> None:
+        win = BO.SMOKE_EVIDENCE["win32"]
+        self.assertIn("無 log 落點", win, "未說明是載具缺口 ⇒ 讀者只會看到「讀不到」")
+        self.assertIn("不得", win, "缺明確禁止句 ⇒ 又一次把「沒記錄」讀成「沒在跑」")
+        self.assertIn("Get-ScheduledTask", win, "未給出可自行查證排程存在的指令")
+
+    def test_the_windows_no_log_premise_is_still_true(self) -> None:
+        """🔴 立案前提的機械看守：上面那段說明**只有在 smoke 排程仍無輸出重導時才誠實**。
+
+        哪天有人替 Windows smoke 接上 log（`> file`／`Tee-Object`／`Start-Transcript`），
+        本支就會轉紅，並直接指路「前提變了，該把 smoke 升級為真的機械證據源」——
+        deferral 因此有到期日，不會靠人記得。
+        """
+        ps1 = (_REPO_ROOT / "tools" / "install_windows_nightly.ps1").read_text(encoding="utf-8-sig")
+        at = ps1.find(self._SMOKE_ACTION)
+        self.assertGreater(at, -1, f"找不到 `{self._SMOKE_ACTION}` ⇒ 本鎖的取值面消失，先修取值面")
+        window = ps1[at:at + 400]
+        hits = [r for r in self._REDIRECTS if r in window]
+        self.assertEqual(
+            hits, [],
+            f"smokeAction 已含輸出重導 {hits} ⇒ Windows smoke 有 log 落點了；"
+            f"請把 `_BO.SMOKE_EVIDENCE['win32']` 由「無檔可讀」升級為真的探針（D-4 解鎖）",
+        )
+        # 🔴 掃描器自檢（否則上一段對任何輸入都恆綠＝本批正在清算的那種死鎖）：同一個
+        # 掃描器餵進「真的接上 log」的形態必須命中。本 repo 不准只寫鎖、不驗鎖。
+        wired = window + "\n  | Tee-Object -FilePath $LogDir\\smoke_latest.log"
+        self.assertEqual(
+            [r for r in self._REDIRECTS if r in wired], ["Tee-Object"],
+            "掃描器對已接上重導的形態也不命中 ⇒ 上一段是死鎖，前提失效那天不會有人知道",
         )
 
 

@@ -29,7 +29,9 @@ R60 增訂（承接 DEF-101-526 明文交棒的 R60 候選）：**單檔** tier 
 刻意用 `[TIER-WARN]` 而非沿用 `[WARN]` 標籤：後者已被
 tests/contract/test_loc_budget_tiered.py::test_warn_band_boundary_and_rc_invariant
 以 `("[WARN]" in out) is expect_warn` 精確釘選為「總量預警帶專屬訊號」，共用標籤會讓
-那道鎖在 repo 現況（3 支滿載檔）下恆真而失效。
+那道鎖在 repo 現況（預警帶非空）下恆真而失效。R71 訂正：此處原寫「3 支滿載檔」，
+該數字已隨「刪死碼／收斂重複」輪失真——**現況不寫死於此**，現查＝
+`python tools/check_loc_budget.py --json` 的 `tier_warn_band`。
 
 使用：
   python tools/check_loc_budget.py            # 檢查（CI gate）
@@ -120,8 +122,9 @@ TOTAL_WARN_MARGIN = 10
 
 # R60（DEF-101-526 交棒的 R60 候選）：單檔 tier 餘裕預警帶。餘裕 ≤ 本值即印
 # **非阻塞** [TIER-WARN]，不改 rc、不進 has_violation——刻意不改成 fail，那會當場
-# 擋住現有 3 支合法滿載檔（pg_state_repository.py 400/400、models/escalation.py
-# 150/150、steps_orchestrator/_impl.py 500/500）。
+# 擋住現有的**合法**滿載檔。R71 訂正：原文在此寫死三支檔名與各自行數
+# （pg_state_repository.py 400/400 等），已隨「刪死碼／收斂重複」輪全數失真；
+# 現況一律現查 `python tools/check_loc_budget.py --json` 的 `tier_warn_band`。
 #
 # 為什麼是 6，而不是交棒文字裡舉例的 3（刻意上調，理由留痕）：
 #   ① DEF-101-526 原文寫「如 `check_loc_budget` 對餘裕 ≤ 3 行的檔印 warning」——

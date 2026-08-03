@@ -16,9 +16,7 @@ W0 雛形範圍（只做 Pydantic 模型 + 不變式驗證）：
 """
 from __future__ import annotations
 
-from typing import List, Optional
-
-from pydantic import BaseModel, Field, field_validator, model_validator
+from pydantic import BaseModel, Field, model_validator
 
 # PM #1：sub-task 深度上限（W4 import 工具拒絕邊界）
 MAX_GOAL_TASK_DEPTH: int = 3
@@ -37,11 +35,11 @@ class ExecutionItem(BaseModel):
     exec_id: str = Field(..., min_length=1, description="唯一 ID（W3 PK）")
     action: str = Field(..., min_length=1, description="動作描述")
     status: str = Field(default="pending", description="pending / ok / failed")
-    estimated_minutes: Optional[int] = Field(default=None, ge=0)
+    estimated_minutes: int | None = Field(default=None, ge=0)
     # W-94-1 可執行欄（攤平為 PlaybookTask 用；Optional 向後相容）
-    prompt: Optional[str] = Field(default=None, description="可執行 task prompt（無則退回 action）")
-    expected_output_regex: Optional[str] = Field(default=None, description="期望輸出 regex")
-    evaluator_command: Optional[str] = Field(default=None, description="評估指令（白名單消毒）")
+    prompt: str | None = Field(default=None, description="可執行 task prompt（無則退回 action）")
+    expected_output_regex: str | None = Field(default=None, description="期望輸出 regex")
+    evaluator_command: str | None = Field(default=None, description="評估指令（白名單消毒）")
 
 
 class GoalTask(BaseModel):
@@ -52,22 +50,18 @@ class GoalTask(BaseModel):
 
     goal_task_id: str = Field(..., min_length=1)
     title: str = Field(..., min_length=1)
+    # 本欄自身的上界由 `le=` 核心約束強制（pydantic v2 的 field 約束先於 field_validator
+    # 執行）。此處曾另有一支 `_validate_depth_upper_bound` field_validator 重覆檢查
+    # `v > MAX_GOAL_TASK_DEPTH`，但該分支在 `le=` 之後**永遠不可達**——實測 depth=4／99
+    # 皆由 `le=` 攔下（"Input should be less than or equal to 3"），自訂訊息從未出現過。
+    # 已移除；勿再加回。跨節點（子樹）的檢查則仍需 model_validator，見下方。
     depth: int = Field(..., ge=1, le=MAX_GOAL_TASK_DEPTH)
     priority: int = Field(default=3, ge=1, le=5)
-    sub_tasks: List["GoalTask"] = Field(default_factory=list)
-    execution_items: List[ExecutionItem] = Field(default_factory=list)
-
-    @field_validator("depth")
-    @classmethod
-    def _validate_depth_upper_bound(cls, v: int) -> int:
-        if v > MAX_GOAL_TASK_DEPTH:
-            raise ValueError(
-                f"goal_task depth={v} 超過 PM #1 上限 {MAX_GOAL_TASK_DEPTH}"
-            )
-        return v
+    sub_tasks: list[GoalTask] = Field(default_factory=list)
+    execution_items: list[ExecutionItem] = Field(default_factory=list)
 
     @model_validator(mode="after")
-    def _validate_subtree_depth(self) -> "GoalTask":
+    def _validate_subtree_depth(self) -> GoalTask:
         """整棵子樹任一節點不得 > MAX_GOAL_TASK_DEPTH。"""
         for child in self.sub_tasks:
             if child.depth > MAX_GOAL_TASK_DEPTH:
@@ -87,16 +81,16 @@ class Project(BaseModel):
 
     project_id: str = Field(..., min_length=1)
     name: str = Field(..., min_length=1)
-    description: Optional[str] = None
-    goal_tasks: List[GoalTask] = Field(default_factory=list)
+    description: str | None = None
+    goal_tasks: list[GoalTask] = Field(default_factory=list)
 
 
 class ThreeTierFixture(BaseModel):
     """W0 fixture 載入入口（tests/fixtures/sample_goal_tasks.yaml）。"""
 
     version: str
-    fixture_purpose: Optional[str] = None
-    projects: List[Project]
+    fixture_purpose: str | None = None
+    projects: list[Project]
 
 
 __all__ = [

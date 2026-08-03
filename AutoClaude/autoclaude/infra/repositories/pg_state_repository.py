@@ -33,6 +33,7 @@ from ...core.ports.state_repository import StateRepositoryError
 from ...utils.checkpoint_manager import PlaybookCheckpoint
 
 # P1 #8：asyncio running-event-loop 相容包裝（共用實作移至 pg_async_utils，C-4 修復）
+from ._deprecation import warn_load_checkpoint_deprecated
 from .pg_async_utils import _make_retry, _run_async
 
 logger = logging.getLogger("autoclaude.infra.repositories.pg")
@@ -185,15 +186,7 @@ class PgStateRepository:
 
     def load_checkpoint(self, playbook_id: str) -> PlaybookCheckpoint | None:
         """⚠️ Deprecated（SD_06 W5-T5-8）：請改用 load_latest_by_playbook。"""
-        import os  # noqa: E401
-        import warnings
-        if os.environ.get("AUTOCLAUDE_DEPRECATION_WARN") == "1":
-            warnings.warn(
-                "load_checkpoint(playbook_id) is deprecated since SD_06 W5; "
-                "use load_latest_by_playbook(playbook_id) instead.",
-                DeprecationWarning,
-                stacklevel=2,
-            )
+        warn_load_checkpoint_deprecated()
         return self.load_latest_by_playbook(playbook_id)
 
     def load_latest_by_playbook(

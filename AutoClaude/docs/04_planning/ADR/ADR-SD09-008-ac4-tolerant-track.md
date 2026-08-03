@@ -118,6 +118,8 @@ SD_08 W2 PM #2 拍板 AC4 升級門檻 `p95 < 50ms`，作為 PG db_only cutover 
 
 #### 3.4.4 觀察期 #2 校準後達標時程
 
+> ⚠️ **ADR-SD09-012（2026-08-03 ACCEPTED）supersede 本節「連續 14 天」的「日曆連續」語意**：改採 obs／drift 兩軌線上同款的 **gap-tolerant green_streak**（漏跑一天不歸零、只有真紅才打斷），**門檻 14 與 p95 60ms／recall 0.95／σ 0.02 數值全部不變**。🔴 **判準 code 尚未落地** — `tools/ac4_progress_check.py` 至今一行未改（`evaluate()` 的 `n < OBSERVATION_DAYS` 分支仍在），**現行工具仍走本節的舊日曆語意**；落地清單（含 L-7 證據新鮮度 staleness 判準）見 ADR-SD09-012 §7.1。
+
 | 階段 | 日期 | 事件 |
 |------|------|------|
 | T0 | 2026-05-25 | PM 拍板 + Guide 同步 |

@@ -1,8 +1,28 @@
 # 04_planning/Archive — 已結案迭代計畫封存
 
-封存**已執行完並結案**的整合迭代（軌道①）計畫文件 `AutoSDD_improving_01.md ～ _12.md`，
-使 `docs/04_planning/` 只保留**最新一輪 active** 計畫，降低導航雜訊。
+封存**已執行完並結案**的整合迭代（軌道①）計畫文件，使 `docs/04_planning/` 只保留
+**最新一輪 active** 計畫，降低導航雜訊。
 
-> **最新 active**：`docs/04_planning/AutoSDD_improving_13.md`（留在上層，供下輪 `improving_14`
-> 階段一讀取）。對應審計封存於 `docs/06_quality/Archive/`。
-> **慣例**：每輪結案後將舊輪搬入本區，保留最新一輪在 active。git mv 搬移、歷史完整保留。
+> **慣例**：每輪結案後將舊輪搬入本區，保留最新一輪在 active。`git mv` 搬移、歷史完整保留。
+> 對應審計封存於 `docs/06_quality/Archive/`。
+> **現況以 `ls` 實查為準**——本檔刻意不快照「Archive 存到第幾號／active 是第幾號」：
+> 原文字（「封存 _01～_12」「最新 active＝improving_13」）自 improving_13 起就沒再更新過，
+> 到 R71 實查時 Archive 已有 50 檔、上層積了 51~103 共 53 輪，成為一份**看起來精確、
+> 實則差 90 號**的假資訊。與根 `CLAUDE.md` 三軌表「本欄不快照具體號次」同政策。
+
+## 🔴 執行歸檔前必讀：搬檔會打斷歷史帳本的交叉引用
+
+本區長期落後（R71 實查一次積了 53 輪未歸檔）**不是單純沒人做**，而是有一個未解的治理衝突：
+
+- `docs/06_quality/AutoSDD_Defect_Log_archive_*.md` 內有大量
+  `docs/04_planning/AutoSDD_improving_<NN>.md` 形態的引用（R71 抽樣即見 54／93／94／95／96／97）。
+- 把 `<NN>` 搬進本區後，這些引用全部指向不存在的路徑。
+- 但 **DEF-101-633 已訂立紀律：歷史歸檔帳本逐字保全、不得改寫其散文**
+  （該筆的處置原文即「不改散文、改搬檔」）。
+
+兩條規則正面相撞，所以歸檔**不是**一個可以順手做掉的雜務。動手前必須先決定引用怎麼辦
+（候選：搬檔同時同步更新引用並明文豁免該次改寫／改用不含目錄的檔名錨點／在本區留轉址 stub／
+接受歷史引用失效並以機械鎖記錄例外），且該決策需人工拍板。
+
+相關機械鎖：`tools/tests/test_ntfs_trailing_space_device_name.py::TestRootDocsPathRefsAreCaseExact`
+以 git index 為真相源掃根層 `docs/` 的路徑引用（DEF-101-633 落地），歸檔後務必重跑。

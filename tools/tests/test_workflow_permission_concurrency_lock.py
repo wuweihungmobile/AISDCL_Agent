@@ -538,6 +538,122 @@ class TestRootInfraNightlyStalenessSentinel(unittest.TestCase):
                 f"WAIVER_UNTIL={until} 距今超過 MAX_WAIVER_DAYS={max_days} 天——"
                 f"CI 上會 fail-loud，這條鎖讓它在本機就被抓到")
 
+    # --- R71：advisory 段（覆蓋面擴大，但不把主線抵押給雲端狀態）----------------
+    #
+    # 為何是**新增**判準而不是改 R69 那幾道：`_QUERY_LOOP_RE` 釘的「恰好一個
+    # `for wf in …; do`」守的是**阻斷段**的判準可讀性（R69 終審 P1：處置指令的 echo
+    # 也含那兩個檔名 ⇒ 比對全文會假綠）。advisory 段用不同的迭代變數（`advisory_wf`）
+    # 且**不得**觸碰 `stale`，所以那道鎖的語意一字未改、仍然只讀阻斷迴圈；本區三支是
+    # 疊在它上面的新防線，不是它的替代品。
+
+    _ADVISORY_LOOP_RE = re.compile(r"^\s*for advisory_wf in \$advisory_list;\s*do\s*$",
+                                   re.MULTILINE)
+    #: advisory 掃描面的排除清單（`case "$wf_base" in a|b) continue;; esac`）。
+    _ADVISORY_SKIP_RE = re.compile(
+        r'^\s*case "\$wf_base" in ([^)]+)\) continue;;\s*esac\s*$', re.MULTILINE)
+    #: 「現查含 cron 的 workflow」——與 workflow 內 grep 的語意同源（未被註解掉的 cron）。
+    _CRON_LINE_RE = re.compile(r"^[ \t]*-[ \t]*cron:", re.MULTILINE)
+    #: 掃描面塌陷下限（R71 現查 7 支；取 5 是為了容忍刻意減少排程軌，不是快照）。
+    _MIN_CRON_WORKFLOWS = 5
+
+    def _advisory_block(self, step: str) -> str:
+        """advisory 迴圈本體（`for advisory_wf …` 到同縮排的 `done`）。"""
+        lines = self._exec_lines(step).splitlines()
+        starts = [i for i, ln in enumerate(lines)
+                  if self._ADVISORY_LOOP_RE.match(ln)]
+        self.assertEqual(
+            len(starts), 1,
+            f"advisory 迴圈應恰好一個，實得 {len(starts)} 個——0＝覆蓋面擴充被移除，"
+            f"其餘含 cron 的排程軌回到零偵測；>1＝判準歧義")
+        indent = len(lines[starts[0]]) - len(lines[starts[0]].lstrip())
+        for i in range(starts[0] + 1, len(lines)):
+            if lines[i].strip() == "done" and (len(lines[i]) - len(lines[i].lstrip())) == indent:
+                return "\n".join(lines[starts[0]:i + 1])
+        self.fail("advisory 迴圈找不到同縮排的 `done`——區塊界線抓不到，下面兩支鎖會空轉")
+
+    def _cron_workflows(self) -> set[str]:
+        wf_dir = _REPO_ROOT / ".github" / "workflows"
+        found = {p.name for p in sorted(wf_dir.glob("*.yml"))
+                 if self._CRON_LINE_RE.search(p.read_text(encoding="utf-8", errors="replace"))}
+        self.assertGreaterEqual(
+            len(found), self._MIN_CRON_WORKFLOWS,
+            f"只掃到 {len(found)} 支含 cron 的 workflow（下限 {self._MIN_CRON_WORKFLOWS}）"
+            f"——掃描面已塌，本區三支鎖會變成恆真")
+        return found
+
+    def test_every_cron_track_is_watched_by_one_of_the_two_tiers(self):
+        """覆蓋面：每一支含 cron 的 workflow 都必須落在「阻斷段 ∪ advisory 段」。
+
+        Rule 9（鎖意圖）：R68/R69 只看兩支真機軌，而同批陣亡的排程軌有四支——
+        「阻斷射程收窄」是**有意的取捨**（見該 step 內註解：全掃即把全 repo 的 push
+        綁在雲端狀態上），但收窄的代價必須是「降級為 advisory」，不是「不看」。
+        本鎖釘住那個等式：阻斷清單與 advisory 的排除清單必須逐字相同 ⇒ 從阻斷段
+        移除一支就會自動掉進 advisory 段；兩份清單一旦分歧，中間那幾支會**靜默失聯**。
+        """
+        step = self._sentinel_step()
+        blocking = set(self._queried_workflows(step))
+        m = self._ADVISORY_SKIP_RE.search(self._exec_lines(step))
+        self.assertIsNotNone(
+            m, "advisory 段找不到 `case \"$wf_base\" in …) continue;; esac` 排除清單——"
+               "結構被改動，覆蓋面等式無從驗證（不得靜默略過）")
+        skipped = {s.strip() for s in m.group(1).split("|")}
+        self.assertEqual(
+            skipped, blocking,
+            f"advisory 的排除清單與阻斷清單不一致：只在阻斷段＝{sorted(blocking - skipped)}"
+            f"（會被印兩次，無害）；只在排除清單＝{sorted(skipped - blocking)}"
+            f"（**兩段都不看＝靜默失聯**，本鎖存在的唯一理由）",
+        )
+        cron_wfs = self._cron_workflows()
+        self.assertEqual(
+            blocking - cron_wfs, set(),
+            f"阻斷清單列了不存在／已無 cron 的 workflow：{sorted(blocking - cron_wfs)}"
+            f"——`gh run list --workflow <打錯的檔名>` 回零筆，哨兵會安靜地什麼都不查",
+        )
+
+    def test_advisory_survey_scans_the_directory_instead_of_a_second_hardcoded_list(self):
+        """advisory 的掃描面必須**現查**，不得是第二份會腐化的字面清單。
+
+        WHY：本 repo 反覆踩的形狀是「文件／腳本裡寫死機器算得出的清單」
+        （DEF-101-289／515 同一家族）。若 advisory 也列舉檔名，新增一支排程
+        workflow 時它不會自動納管，而「沒被列進去」在輸出上與「健康」無法區分。
+        """
+        block_src = self._exec_lines(self._sentinel_step())
+        self.assertIn(
+            "for wf_path in .github/workflows/*.yml; do", block_src,
+            "advisory 掃描面不是現查 workflow 目錄——第二份字面清單＝第二個漂移站點")
+        self.assertIn(
+            "grep -qE '^[[:space:]]*-[[:space:]]*cron:'", block_src,
+            "advisory 未以「未被註解掉的 cron」為納管判準——與本 repo 其他排程掃描器"
+            "（dormant 軌不算期望軌）語意不一致，會把刻意停用的軌報成失聯")
+
+    def test_advisory_survey_can_never_block_the_push(self):
+        """advisory 段不得觸碰 `stale`、不得自己 `exit`——它是提醒，不是閘門。
+
+        這是本輪取捨的**另一半**：覆蓋面擴大到 7 支的前提，就是多出來那 5 支
+        （含 4 支日頻）不會讓「某條日頻軌紅一天」變成「全 repo 不能 push」。
+        若哪天有人想把某一支升級成阻斷，正確做法是把它加進阻斷迴圈的清單並承擔
+        代價，而不是讓 advisory 段偷偷長出 exit——後者沒有任何 diff 訊號說明代價。
+        """
+        block = self._advisory_block(self._sentinel_step())
+        self.assertNotIn(
+            "stale=", block,
+            f"advisory 迴圈內指派了 `stale`——advisory 變成阻斷，且該轉變沒有經過"
+            f"「加進阻斷清單」這個看得見代價的動作：\n{block}")
+        self.assertNotRegex(
+            block, r"(?m)^\s*exit\s",
+            f"advisory 迴圈內出現 `exit`——同上，繞過了阻斷射程的取捨：\n{block}")
+        self.assertIn(
+            "::warning::", block,
+            "advisory 迴圈完全不出聲＝只是把查詢跑一遍給機器看，人不會知道")
+        # 🔴 上一句只擋得住「把 echo 刪掉」。鑑別力驗證當場證明它擋不住更常見的
+        # 形態：把觸發條件改成 `if false; then`——echo 字面還在，`assertIn` 照樣綠
+        # （實測 rc=0）。這與 DEF-101-743 同型：「宣告的字串在場」不等於「那件事會
+        # 發生」。故再釘一條：出聲與否必須由**查回來的結論**驅動。
+        self.assertRegex(
+            block, r"(?m)^\s*if .*\$a_concl.*;\s*then\s*$",
+            f"advisory 的出聲條件沒有引用查回來的結論（`$a_concl`）——條件被改成恆假／"
+            f"恆真時 `::warning::` 這行仍在原地，只看字串在不在的鎖抓不到：\n{block}")
+
     def test_waiver_is_not_expired_and_warns_before_it_is(self):
         """豁免到期／即將到期必須**在本機**就被看見（R69）。
 

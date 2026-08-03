@@ -217,6 +217,9 @@ if (-not $NightlyMutexAcquired) {
 # ----- 日誌 -----
 $LogDir = Join-Path $RepoRoot 'logs'
 if (-not (Test-Path $LogDir)) { New-Item -ItemType Directory -Path $LogDir | Out-Null }
+# R71：本輪實際起跑時刻（END trigger timing 用；與 $RunId 同一輪但取 DateTime 物件，
+# 免得事後又要從檔名字串回推）。
+$script:NightlyStart = Get-Date
 $Today = Get-Date -Format 'yyyy-MM-dd'
 $RunId = Get-Date -Format 'HHmmss'
 $Log = Join-Path $LogDir ("nightly_{0}_{1}.log" -f $Today, $RunId)
@@ -323,6 +326,28 @@ function Invoke-Native {
   }
 }
 
+# R69 取證失真修復（S-1a）：.NET TimeSpan 的自訂格式 'hh' 是「小時分量 0-23」，
+# **days 分量會被無聲丟棄**。2026-08-01 那輪 sdd-fsm-chaos 真實耗時 35.6 小時
+# （8/1 10:23:20 起跑 → 機器 10:23:30 睡眠 → 8/2 21:52 才醒；pytest 自報
+# `34 passed ... in 127828.28s (1 day, 11:30:28)`），卻被印成
+# `elapsed=11:30:41.799`（logs/nightly_latest.log:487）——讀起來像 11 小時，
+# 「整輪被睡眠凍住並跨日」這個 P0 事實在取證鏈上完全隱形，還連帶讓隔日 02:00
+# 觸發被 MultipleInstances=IgnoreNew 擋掉（事件 322）卻無人察覺。
+# 修法：TotalDays >= 1 時改用 'd\.hh\:mm\:ss\.fff' 顯式帶出天數分量；未滿一天
+# 維持原格式（不動既有 log 形狀，避免無謂 diff）。
+function Format-Elapsed {
+  param([TimeSpan]$Span)
+  if ($Span.TotalDays -ge 1) { return $Span.ToString('d\.hh\:mm\:ss\.fff') }
+  return $Span.ToString('hh\:mm\:ss\.fff')
+}
+
+# R69（S-1c）：單一 stage 耗時上限告警門檻。正常整輪 5~8 分鐘、最慢的
+# sdd-fsm-chaos 歷史約 3 分鐘，故 30 分鐘對任何單一 stage 都屬「明顯異常」
+# （睡眠凍住 / 卡在互動提示 / 外部服務 hang），必須在取證鏈裡當場可見，
+# 不能只靠人事後翻 elapsed 數字。刻意只印 WARN 不改 rc：stage 本身可能仍
+# 正確完成（B-01 那輪 rc 就是 0），把它判成失敗會製造假紅。
+$STAGE_SLOW_WARN_MINUTES = 30
+
 function Invoke-Stage {
   param([string]$Name, [scriptblock]$Block)
   Log "===== Stage start: $Name ====="
@@ -339,8 +364,11 @@ function Invoke-Stage {
     $rc = 99
   }
   $sw.Stop()
-  $elapsed = $sw.Elapsed.ToString('hh\:mm\:ss\.fff')
+  $elapsed = Format-Elapsed $sw.Elapsed
   Log ("===== Stage end:   $Name (exit={0}, elapsed={1}) =====" -f $rc, $elapsed)
+  if ($sw.Elapsed.TotalMinutes -gt $STAGE_SLOW_WARN_MINUTES) {
+    Log ("Stage SLOW: name={0} elapsed={1} (> {2} min — 異常耗時；常見成因：執行中機器進入睡眠（本輪會跨日並讓隔日觸發被 MultipleInstances 擋掉）、卡在互動提示、外部服務 hang。rc 不受影響，僅取證告警)" -f $Name, $elapsed, $STAGE_SLOW_WARN_MINUTES) 'WARN'
+  }
   # SD_09 W3 Round 2 audit P0-6 修復：rc=2 視為 WARN（不算 fail，但保留至 summary）
   # 區分真綠 (rc=0) / 觀察期等待 (rc=2 WARN) / 真實失敗 (rc=1 / rc>=3)
   if ($rc -eq 2) {
@@ -425,26 +453,332 @@ function Get-JsonlCount {
 }
 
 # R10 SA-2（DEF-101-142）：mutation 軌自 ADR-SD09-011 起以 source_sha256 去重
-# （同日多 sha 全計入、同 sha 留最新）——END 進度不可再拿原始列數對 7 門檻
-# （R10 實測：live 檔 29 筆原始列會虛報 29/7；壓縮後 7 筆中僅 5 unique sha）。
-# 語意：「/7」的分子＝unique source_sha256 累積證據數（module 過濾；legacy 缺
-# sha 紀錄非源碼演進證據、不計入），對齊 should_lock 的 sha 檢查方向與
-# tools/mutation_baseline_lock.py（去重 SSOT）；改動去重語意須同步兩處。
-function Get-MutationUniqueCount {
-  param([string]$Path, [string]$Module = 'token_guard')
-  if (-not (Test-Path $Path)) { return 0 }
-  $keys = @{}
-  foreach ($line in @(Get-Content -Path $Path -ErrorAction SilentlyContinue)) {
-    $t = ([string]$line).Trim()
-    if ($t -eq '') { continue }
-    try { $rec = $t | ConvertFrom-Json } catch { continue }
-    if (-not ($rec.PSObject.Properties.Name -contains 'module') -or [string]$rec.module -ne $Module) { continue }
-    if ($rec.PSObject.Properties.Name -contains 'source_sha256' -and $rec.source_sha256) {
-      $keys['sha:' + [string]$rec.source_sha256] = $true
-    }
+# （同日多 sha 全計入、同 sha 留最新）——END 進度不可再拿原始列數對門檻。
+#
+# 🔴 R71 修復（G-1，本檔第二個「兩處門檻各寫各的」死鎖）：
+# 前一版做了兩件都不對的事：
+#   (a) 在本檔宣告一個 mutation unique-sha 門檻常數（值 7），把權威門檻抄成第二份
+#       字面值——**註**：此處刻意不寫出那個常數名，靜態測試
+#       test_mutation_gate_asks_the_authority_and_holds_no_threshold 的反向鎖連註解
+#       都會抓（同 Format-Elapsed 反向鎖的做法：不留反例免得被複製走）；
+#   (b) 分子由本檔自寫的整檔 unique-sha 計數器掃**整檔**算，
+#       但權威 should_lock 只看 `history[-CONSECUTIVE_RUNS:]` 的 **tail 7 筆**——
+#       射程根本不同（今天 history 恰為 7 筆才碰巧相等，一旦累積到第 8 筆就分岔）。
+# 真實後果（2026-08-03 實測）：mutation_baseline_lock.should_lock 早在 2026-07-22
+# 就回 `(True, 0.7071428571428572)`、`.mutation_baseline.toml` 也真的寫了
+# `token_guard = 0.7071`，但 nightly 每晚照樣印 `[G0-NOT-READY] mutation unique-sha
+# 未達 7`——因為 should_lock 的有效門檻是 **≥5**（`MAX_BACKWARD_COMPAT_MISSING=2`
+# 允許 2 筆 R2 P0-5 修復前的 legacy 紀錄缺 sha），而本檔寫死 7。W1 於是被一個
+# 「自己算的、算錯射程的、對著錯門檻比的」數字擋住。
+#
+# 修法（為什麼不是把 7 改成 5）：把 7 換成 5 只是把一個寫死的數字換成另一個寫死的
+# 數字——`MAX_BACKWARD_COMPAT_MISSING` 之後只要調整，本檔又立刻落後。這裡改成
+# **直接向權威實作提問**：以 `python -c` import `tools/mutation_baseline_lock`
+# 並呼叫 `should_lock(history, module)`，判定值（locked）100% 由權威回傳，本檔
+# 不再持有任何 mutation 門檻常數。連拒鎖原因都取權威自己寫到 stderr 的
+# `[should_lock] reject ... reason=...` 標籤（暫時換掉 sys.stderr 收下來），
+# 不在 ps1 端重新解讀。
+#
+# 為何不改 mutation_baseline_lock.py 加一個 `--check-lock` 子命令（更漂亮的做法）：
+# 本輪射程只有本檔與其靜態測試，且該模組的 CLI 現況是「必帶 --log、且會 append
+# 一筆新紀錄」——要做成唯讀查詢等於改它的 main()，屬跨檔契約變更，需另輪處理。
+# 已將此列為建議後續（見回報）。inline 探測碼刻意**只用單引號、不含任何雙引號**：
+# PS 5.1 重組原生指令命令列時會吃掉內嵌雙引號（本輪 DEF-101-760 同型事故）。
+# 探測碼放在函式內而非 script 作用域，是為了讓函式**自足可抽取**——
+# tests/tools/test_run_local_nightly_static.py 的行為測試是把函式本體整段抽出來
+# 真跑的，依賴外部變數會讓抽出來的副本跑不起來。
+#
+# 三態語意（與 Get-Ac4Gate / Get-ObsGaPass / Get-DriftGaPass 同構）：
+#   Ok=$true , Locked=$true   → 權威判定已鎖定（baseline 已寫入）
+#   Ok=$true , Locked=$false  → 權威判定仍觀察中，Reject 帶權威自己的拒鎖原因
+#   Ok=$false                 → **量不出來**（python 缺席／history 缺／無 JSON／
+#                                rc≠0／解析失敗），Error 說明原因；絕不當成「未達標」
+function Get-MutationLockGate {
+  param([string]$HistoryPath, [string]$ToolsDir, [string]$Module = 'token_guard')
+  $result = [pscustomobject]@{
+    Ok = $false; Locked = $false; Baseline = ''; UniqueSha = -1; Tail = -1
+    Records = -1; Reject = ''; Rc = -1; Error = ''
   }
-  return $keys.Count
+  if (-not $script:PyExe) { $result.Error = 'python unavailable'; return $result }
+  if (-not (Test-Path $HistoryPath)) { $result.Error = 'history missing'; return $result }
+  try {
+    # 同 Get-Ac4Gate / Get-ObsGaPass：函式作用域固定 'Continue'（理由見 Get-Ac4Gate
+    # 內註解）——should_lock 拒鎖時**必定**往 stderr 寫 reason 標籤，'Stop' 下會炸。
+    $ErrorActionPreference = 'Continue'
+    $probe = "import sys,json,io;sys.path.insert(0,sys.argv[2]);from pathlib import Path;import mutation_baseline_lock as m;h=m.load_module_history(Path(sys.argv[1]),sys.argv[3]);t=h[-m.CONSECUTIVE_RUNS:];u=len(set(r.get('source_sha256') for r in t if r.get('source_sha256')));_e=sys.stderr;sys.stderr=io.StringIO();lk,bv=m.should_lock(h,sys.argv[3]);rj=sys.stderr.getvalue().strip().replace(chr(10),chr(59));sys.stderr=_e;print(json.dumps({'locked':lk,'baseline':bv,'unique_sha':u,'tail':m.CONSECUTIVE_RUNS,'records':len(h),'reject':rj}))"
+    $raw = & $script:PyExe -c $probe $HistoryPath $ToolsDir $Module 2>&1 | Out-String
+    # 必須緊接著原生呼叫取值：任何中間的 native 指令都會覆寫 $LASTEXITCODE。
+    $rc = $LASTEXITCODE
+    $result.Rc = $rc
+    $jsonLines = @()
+    foreach ($line in ($raw -split "`n")) {
+      if ($line.Trim().StartsWith('{') -or $jsonLines.Count -gt 0) { $jsonLines += $line }
+    }
+    if ($jsonLines.Count -eq 0) {
+      $result.Error = "tool broken: no JSON in output (rc=$rc)"
+      return $result
+    }
+    if ($rc -ne 0) {
+      # 有 JSON 但 rc≠0＝輸出與 rc 不同源（被 shim 攔截／輸出殘留），fail-closed。
+      $result.Error = "tool broken: rc=$rc 但仍印出 JSON（探測碼契約為成功才 print）"
+      return $result
+    }
+    $parsed = ($jsonLines -join "`n") | ConvertFrom-Json
+    $result.Locked = [bool]$parsed.locked
+    $result.Baseline = if ($null -eq $parsed.baseline) { 'n/a' } else { ('{0:N4}' -f [double]$parsed.baseline) }
+    $result.UniqueSha = [int]$parsed.unique_sha
+    $result.Tail = [int]$parsed.tail
+    $result.Records = [int]$parsed.records
+    $result.Reject = [string]$parsed.reject
+    $result.Ok = $true
+  } catch {
+    $result.Error = "$_"
+  }
+  return $result
 }
+# R69（S-1b，P0 假達標數字）：AC4 軌的 END 進度分子原本取 Get-JsonlCount 的**整檔
+# 原始列數**（實測 41 筆）→ 印成 `ac4=41/14`，讀起來像超標三倍、像早就達標；但 AC4
+# 的真實閘門是 tools/ac4_progress_check.py 的 `filter_recent()` **過去 14 日曆天滾動
+# 窗口**，同日實測只有 `observation_days=7`、`ready_for_labeled_pr=false`。
+# 方向性很重要：這個假數字偏向「看起來已達標」，比 S-1a 的耗時少印一天更危險
+# （少印天數是漏報異常，假達標是誤導人去按下升級動作）。
+# 修法：直接呼叫既有的 ac4_progress_check --json 取權威值，不在 ps1 內另造第二套
+# 滾動窗口邏輯（否則就是第二個漂移點）。原始列數改以 records= 併印保留取證，語意
+# 對齊 mutation 軌 R10 SA-2（DEF-101-142）已採用的「分子＝真實閘門值、原始列數併印」
+# 形狀。解析方式刻意複用 Stage 2 F2 分支的「只收 `{` 起頭之後的行」濾法（stderr
+# 的 `[ac4_progress_check] WARN:` 等警告行會混進 2>&1，不濾會讓 ConvertFrom-Json 炸）。
+# 取不到值時回傳 Ok=$false，由呼叫端印出 `unavailable` 而**不是**退回原始列數——
+# 退回原始列數就是把剛拔掉的假達標數字又裝回去。
+function Get-Ac4Gate {
+  param([string]$HistoryPath)
+  $result = [pscustomobject]@{ Ok = $false; Days = -1; Ready = $false; Error = '' }
+  if (-not $script:PyExe) { $result.Error = 'python unavailable'; return $result }
+  if (-not (Test-Path $HistoryPath)) { $result.Error = 'history missing'; return $result }
+  try {
+    # 函式作用域內固定 'Continue'（不外洩、不依賴呼叫端）：PS 5.1 對 native 指令做
+    # `2>&1` 時，每行 stderr 會變成 ErrorRecord 進入管線，若當下
+    # $ErrorActionPreference='Stop' 就會被當成**終止性錯誤**拋出 → 本函式回 Ok=$false，
+    # G0 判定於是永遠印 ERROR。本檔開頭目前是 'Continue'（run_local_nightly.ps1:77）
+    # 所以現況不會炸，但那是「靠環境剛好對」而非函式自身不變量——探針以 'Stop' 實測
+    # 確實重現該炸法（ac4_progress_check 的 legacy_lenient WARN、
+    # observability_ga_check 的 legacy record WARN 都走 stderr，是常態不是例外）。
+    $ErrorActionPreference = 'Continue'
+    $raw = & $script:PyExe tools/ac4_progress_check.py --history $HistoryPath --json 2>&1 | Out-String
+    $jsonLines = @()
+    foreach ($line in ($raw -split "`n")) {
+      if ($line.Trim().StartsWith('{') -or $jsonLines.Count -gt 0) { $jsonLines += $line }
+    }
+    if ($jsonLines.Count -eq 0) { $result.Error = 'no JSON in output'; return $result }
+    $parsed = ($jsonLines -join "`n") | ConvertFrom-Json
+    $result.Days = [int]$parsed.observation_days
+    $result.Ready = [bool]$parsed.ready_for_labeled_pr
+    $result.Ok = $true
+  } catch {
+    $result.Error = "$_"
+  }
+  return $result
+}
+
+# R69（S-4）：obs 軌的**真實 GA 判準**是 tools/observability_ga_check.py
+# （green_streak >= 30 連續綠），不是 END 進度那個 `obs=N/30` 原始列數——兩者今天
+# 剛好都是 41 純屬巧合（沒有中斷過），一旦中間出現一筆非綠就會分岔，屆時拿列數
+# 當閘門會重演 S-1b 的假達標。
+#
+# 🔴 R71 修復（A-2，本包宗旨自打臉）：前一版只做 `$raw -match '\[PASS\]'` 且
+# **完全不看退出碼**，於是「工具 rc≠0 但 stdout 裡出現 [PASS] 字樣」就回 Pass=$true
+# → nightly 印出假的 [G0-READY]。這包存在的理由就是消滅假達標數字，結果自己在
+# 活載體上種了一個。另一半同樣壞：工具真的壞掉（rc≠0、輸出裡沒有 [PASS]）時，
+# 舊版仍回 Ok=$true/Pass=$false，被讀成「觀察期未達標」——「還沒到」與「量不出來」
+# 是兩種完全不同的處置（前者等，後者要修工具），必須可區分。
+#
+# 修法（比照 Get-Ac4Gate 的 Ok/Error 三態）：改走 `--json` 取結構化 status，
+# 而不是刮人類文字；再加一道 rc ↔ status 一致性檢查。observability_ga_check.py
+# 的 main 是 `return 0 if passed else 1`（tools/observability_ga_check.py:257），
+# 故 rc=0 ⟺ status='ready' 為工具的硬不變量；兩者對不上就代表輸出與 rc 不同源
+# （被 shim/wrapper 攔截、工具被換掉、部分輸出遺失），一律判工具壞掉。
+# 三態語意：
+#   Ok=$true , Pass=$true   → GA 達標（status=ready 且 rc=0）
+#   Ok=$true , Pass=$false  → 工具正常判定「觀察中」（status=observing 且 rc≠0）
+#   Ok=$false               → **量不出來**（python 缺席／檔案缺／無 JSON／解析失敗／
+#                              rc 與 status 不一致／no_history），Error 說明原因
+# 注意：g0_gate_check.ps1:45（人工複查用的一次性腳本）仍以 `[PASS]` 文字判定，
+# 本函式改走 --json 後兩者不再同源；該檔不在本輪射程，僅在此註記差異。
+function Get-ObsGaPass {
+  param([string]$HistoryPath)
+  # R71（G-3）：新增 Streak / Window——END 進度的 `obs=N/30` 分子原本取整檔原始列數，
+  # 分母卻是 GA 判準門檻，屬「分母是門檻、分子不是判準算出來的值」同型失真
+  # （今天兩者恰好都是 42 純屬巧合：一次都沒斷過）。分子改取本函式的 green_streak，
+  # 分母也改取工具回報的 window，兩端都不再由 ps1 自己持有。
+  $result = [pscustomobject]@{
+    Ok = $false; Pass = $false; Rc = -1; Status = ''; Streak = -1; Window = -1; Error = ''
+  }
+  if (-not $script:PyExe) { $result.Error = 'python unavailable'; return $result }
+  if (-not (Test-Path $HistoryPath)) { $result.Error = 'history missing'; return $result }
+  try {
+    # 同 Get-Ac4Gate：函式作用域固定 'Continue'，理由見該函式內註解（此處更關鍵——
+    # observability_ga_check 每次都會印 legacy record WARN 到 stderr）。
+    $ErrorActionPreference = 'Continue'
+    $raw = & $script:PyExe tools/observability_ga_check.py --history $HistoryPath --json 2>&1 | Out-String
+    # 必須緊接著原生呼叫取值：任何中間的 native 指令都會覆寫 $LASTEXITCODE。
+    $rc = $LASTEXITCODE
+    $result.Rc = $rc
+    $jsonLines = @()
+    foreach ($line in ($raw -split "`n")) {
+      if ($line.Trim().StartsWith('{') -or $jsonLines.Count -gt 0) { $jsonLines += $line }
+    }
+    if ($jsonLines.Count -eq 0) {
+      $result.Error = "tool broken: no JSON in output (rc=$rc)"
+      return $result
+    }
+    $parsed = ($jsonLines -join "`n") | ConvertFrom-Json
+    $status = [string]$parsed.status
+    $result.Status = $status
+    $result.Streak = [int]$parsed.green_streak
+    $result.Window = [int]$parsed.window
+    $passed = ($status -eq 'ready')
+    if (($rc -eq 0) -ne $passed) {
+      $result.Error = "tool broken: rc=$rc 與 status='$status' 不一致（工具契約 rc=0 ⟺ status=ready）"
+      return $result
+    }
+    if ($status -eq 'no_history') {
+      $result.Error = "no usable history: status=no_history (rc=$rc)"
+      return $result
+    }
+    $result.Pass = $passed
+    $result.Ok = $true
+  } catch {
+    $result.Error = "$_"
+  }
+  return $result
+}
+
+# 🔴 R71 修復（G-2，drift 軌整條不在判定視野內）：
+# `.drift_log_history.jsonl` 的**唯一權威判準**是 tools/drift_log_ga_check.py
+# （green_streak >= window 連續綠），但它在本輪前是 **零 production caller**：
+#   · 舊載體 g0_gate_check.ps1 的標籤寫 `#3 observability/drift`，實際只查 observability；
+#   · 新載體 nightly 的 G0 判定是三軌（mutation / ac4 / obs），**根本不含 drift**；
+#   · END 進度那個 `drift=N/30` 印的是整檔原始列數。
+# 2026-08-03 實測：原始列數 35 → 印成 `drift=35/30` 看起來早就超標，權威值其實是
+# `green_streak=26`（2026-06-02 有一筆 `drift_log_table_exists=false` 採集失敗打斷
+# streak，那不是漂移事件、卻同樣讓 streak 歸零）。方向是「看起來已達標」，與 S-1b
+# 同型、比漏報更危險。
+#
+# 本函式與 Get-ObsGaPass 刻意維持**逐行同構**（同樣的 --json、同樣的 rc↔status
+# 一致性檢查、同樣的 Ok/Pass/Error 三態）：兩支工具的 main 契約完全一樣
+# （`return 0 if passed else 1`，drift_log_ga_check.py:169 / observability_ga_check.py:257）。
+# 不抽共用函式的理由：本檔的行為測試（TestObsGaPassBehavior 一族）是把單一函式本體
+# 整段抽出來丟進 probe.ps1 真跑的，抽共用層會讓被抽出的副本缺相依而跑不起來；
+# 兩份的契約一致性改由靜態測試 test_gate_helpers_share_three_state_contract 機械綁定。
+function Get-DriftGaPass {
+  param([string]$HistoryPath)
+  $result = [pscustomobject]@{
+    Ok = $false; Pass = $false; Rc = -1; Status = ''; Streak = -1; Window = -1; Error = ''
+  }
+  if (-not $script:PyExe) { $result.Error = 'python unavailable'; return $result }
+  if (-not (Test-Path $HistoryPath)) { $result.Error = 'history missing'; return $result }
+  try {
+    # 同 Get-ObsGaPass：函式作用域固定 'Continue'（理由見 Get-Ac4Gate 內註解）。
+    $ErrorActionPreference = 'Continue'
+    $raw = & $script:PyExe tools/drift_log_ga_check.py --history $HistoryPath --json 2>&1 | Out-String
+    # 必須緊接著原生呼叫取值：任何中間的 native 指令都會覆寫 $LASTEXITCODE。
+    $rc = $LASTEXITCODE
+    $result.Rc = $rc
+    $jsonLines = @()
+    foreach ($line in ($raw -split "`n")) {
+      if ($line.Trim().StartsWith('{') -or $jsonLines.Count -gt 0) { $jsonLines += $line }
+    }
+    if ($jsonLines.Count -eq 0) {
+      $result.Error = "tool broken: no JSON in output (rc=$rc)"
+      return $result
+    }
+    $parsed = ($jsonLines -join "`n") | ConvertFrom-Json
+    $status = [string]$parsed.status
+    $result.Status = $status
+    $result.Streak = [int]$parsed.green_streak
+    $result.Window = [int]$parsed.window
+    $passed = ($status -eq 'ready')
+    if (($rc -eq 0) -ne $passed) {
+      $result.Error = "tool broken: rc=$rc 與 status='$status' 不一致（工具契約 rc=0 ⟺ status=ready）"
+      return $result
+    }
+    if ($status -eq 'no_history') {
+      $result.Error = "no usable history: status=no_history (rc=$rc)"
+      return $result
+    }
+    $result.Pass = $passed
+    $result.Ok = $true
+  } catch {
+    $result.Error = "$_"
+  }
+  return $result
+}
+
+# R71（額外項）：把「本輪是在排定時刻起跑，還是事後補跑」變成 log 裡看得到的一行。
+#
+# WHY：本機 WakeToRun 實測失效（近 10 天 6 筆 Power-Troubleshooter 事件 1 的
+# WakeSourceType 全為 0/Unknown）——機器睡著時 02:00 根本沒被喚醒，全靠人開機後
+# StartWhenAvailable 補跑。這是韌體/BIOS 層問題，**腳本改不掉**；但腳本可以讓它
+# 「不再靜默」。2026-08-01 的事故形態就是這樣長出來的：02:00 漏跑 → 10:17:53 補跑
+# → 跑到一半機器睡著跨日 → 8/2 02:00 觸發被 MultipleInstances=IgnoreNew 擋掉 →
+# 該日觀察期零紀錄。AC4 的閘門是**滾動 14 日曆天窗**，缺一天就順延，所以「補跑」
+# 是空洞的**前兆指標**，值得每輪印一行。
+#
+# 🔴 刻意只做「描述」不做「歸因」：本函式回報的是時鐘事實（起跑時刻 vs 排定時刻
+# 差幾分鐘），**不宣稱**這輪是排程觸發還是人工重跑。要區分那個得比對
+# Get-ScheduledTaskInfo 的 LastRunTime，而該欄位是「啟動時寫入」還是「完成時寫入」
+# 在本輪無法安全實測（要驗證就得真的觸發一次數小時的 nightly，且會污染觀察期
+# jsonl）。與其種一個沒驗過的因果宣稱，不如印一個不會錯的事實——手動重跑同樣會
+# 顯示 off-schedule，那是預期內的，因為這一行講的是時鐘不是成因。
+# 取不到排程資訊時回 Ok=$false / Label='unknown'，**絕不**預設成 within-grace
+# （預設成「準時」就是這包一路在拔的那種假綠）。
+function Get-ScheduleOffsetMinutes {
+  param([datetime]$ActualStart, [timespan]$ScheduledTimeOfDay)
+  # 對齊到「起跑時刻之前最近的一次排定時刻」——問的是「這輪有沒有在它的時段起跑」，
+  # 所以 01:30 起跑算成昨天 02:00 的 1410 分鐘遲到（而不是今天 02:00 的 -30 分鐘，
+  # 那會被讀成「差不多準時」）。
+  $sched = $ActualStart.Date.Add($ScheduledTimeOfDay)
+  if ($ActualStart -lt $sched) { $sched = $sched.AddDays(-1) }
+  return [int][math]::Round(($ActualStart - $sched).TotalMinutes)
+}
+
+function Get-NightlyScheduleTiming {
+  param(
+    [datetime]$ActualStart,
+    [string]$TaskName = 'AutoClaude_Nightly',
+    # 15 分鐘寬限：schtasks 實際啟動與排定時刻本來就有秒~分級誤差（服務啟動排隊、
+    # 剛喚醒時 I/O 壅塞）。超過就不是誤差，是真的沒在排定時刻起跑。
+    [int]$GraceMinutes = 15
+  )
+  $result = [pscustomobject]@{
+    Ok = $false; Label = 'unknown'; Scheduled = ''; OffsetMinutes = -1; Error = ''
+  }
+  try {
+    $task = Get-ScheduledTask -TaskName $TaskName -ErrorAction Stop
+    $timeTriggers = @($task.Triggers | Where-Object { $_.StartBoundary })
+    if ($timeTriggers.Count -eq 0) {
+      $result.Error = "scheduled task '$TaskName' 無時間觸發器"
+      return $result
+    }
+    $tod = ([datetime]$timeTriggers[0].StartBoundary).TimeOfDay
+    # 刻意用 -f 組字串，不走 TimeSpan 那個以小時分量起頭的自訂格式：後者正是
+    # Format-Elapsed 反向鎖禁掉的整類寫法（連註解裡都不留反例，免得被複製走）。
+    $result.Scheduled = ('{0:00}:{1:00}' -f $tod.Hours, $tod.Minutes)
+    $offset = Get-ScheduleOffsetMinutes -ActualStart $ActualStart -ScheduledTimeOfDay $tod
+    $result.OffsetMinutes = $offset
+    $result.Label = if ($offset -le $GraceMinutes) { 'within-grace' } else { 'off-schedule' }
+    $result.Ok = $true
+  } catch {
+    $result.Error = "$_"
+  }
+  return $result
+}
+
+# R71（G-1）：此處原有 R69 加入的 mutation unique-sha 門檻常數（值 7）已移除
+# （常數名刻意不寫出，理由見 Get-MutationLockGate 上方註解的反向鎖說明）。
+# 它宣稱自己「只用於印出綜合判定、不參與鎖定決策」——但 nightly 正是 G0 判定的
+# **唯一活載體**，印出來的 [G0-NOT-READY] 就是實際擋住 W1 的東西，「只是印一下」
+# 這個說法本身就是漏洞。門檻不再由本檔持有，改由 Get-MutationLockGate 向
+# mutation_baseline_lock.should_lock 現場提問（見該函式上方註解）。
 $script:PreMutationCount = Get-JsonlCount (Join-Path $RepoRoot '.mutation_history.jsonl')
 $script:PreAc4Count = Get-JsonlCount (Join-Path $RepoRoot '.ac4_history.jsonl')
 $script:PreObsCount = Get-JsonlCount (Join-Path $RepoRoot '.observability_history.jsonl')
@@ -1060,10 +1394,17 @@ Log "END nightly summary json: $summaryJson"
 #   新增 pre/post delta 與 stage rc 對照，明示「本次 run 是否真進帳」。
 #   例：ac4=4/14 (delta=0; stage=99 EXCEPTION) → stage crash, jsonl 凍結（首次自動跑 P0 BUG 場景）
 # R10 SA-2（DEF-101-142）去重語意分軌：mutation 軌自 ADR-SD09-011 起按 source_sha256
-#   去重（同日多 sha 全計入），進度改印 unique-sha 對 7 門檻（should_lock 同源語意），
-#   原始列數以 records= 併印；ac4/obs/drift 三軌維持 same UTC-date dedup per M-05。
+#   去重（同日多 sha 全計入），原始列數以 records= 併印；ac4/obs/drift 三軌維持
+#   same UTC-date dedup per M-05。（R10 當時是「unique-sha 對 7 門檻」，該門檻已於
+#   R71 G-1 拔除——理由見 Get-MutationLockGate 上方註解。）
+# 🔴 R71（G-1 / G-2 / G-3）：四軌分子**一律**取權威判準值，ps1 不自己算、不持有門檻。
+#   mutation → mutation_baseline_lock.should_lock（布林判定，無分數；併印權威回報的
+#              tail unique-sha 供人類判讀，但那**不是**判準本身）
+#   ac4      → ac4_progress_check 滾動 14 日曆天窗（R69 S-1b 已修）
+#   obs      → observability_ga_check green_streak / window（本輪修；原為整檔列數）
+#   drift    → drift_log_ga_check green_streak / window（本輪接入；原為整檔列數）
+# records= 一律保留為 jsonl 原始列數，僅供「本次是否進帳」的 delta 取證，**絕不當分子**。
 $mutCount = Get-JsonlCount (Join-Path $RepoRoot '.mutation_history.jsonl')
-$mutUnique = Get-MutationUniqueCount (Join-Path $RepoRoot '.mutation_history.jsonl')
 $ac4Count = Get-JsonlCount (Join-Path $RepoRoot '.ac4_history.jsonl')
 $obsCount = Get-JsonlCount (Join-Path $RepoRoot '.observability_history.jsonl')
 $driftCount = Get-JsonlCount (Join-Path $RepoRoot '.drift_log_history.jsonl')
@@ -1071,7 +1412,128 @@ $mutDelta = $mutCount - $script:PreMutationCount
 $ac4Delta = $ac4Count - $script:PreAc4Count
 $obsDelta = $obsCount - $script:PreObsCount
 $driftDelta = $driftCount - $script:PreDriftCount
-Log ("END observation progress: mutation={0}/7 unique-sha (records={1}; delta={2}; stage={3}) ac4={4}/14 (delta={5}; stage={6}) obs={7}/30 (delta={8}; stage={9}) drift={10}/30 (delta={11}; stage={12}) — mutation 按 source_sha256 去重（ADR-SD09-011）、其餘三軌 same UTC-date dedup per M-05; delta=0 with stage!=0 表示本次未進帳" -f $mutUnique, $mutCount, $mutDelta, $rc1Label, $ac4Count, $ac4Delta, $rc2Label, $obsCount, $obsDelta, $rc5Label, $driftCount, $driftDelta, $rc4Label)
+# R69 S-1b：ac4 分子改取真實滾動 14 天窗（見 Get-JsonlCount 下方 Get-Ac4Gate 註解）。
+$ac4Gate = Get-Ac4Gate (Join-Path $RepoRoot '.ac4_history.jsonl')
+$ac4Numerator = if ($ac4Gate.Ok) { [string]$ac4Gate.Days } else { 'unavailable' }
+$ac4ReadyLabel = if ($ac4Gate.Ok) { [string]$ac4Gate.Ready } else { "ERROR:$($ac4Gate.Error)" }
+# R71 G-1：mutation 判定值直接來自 should_lock；取不到時印 unavailable，**不得**
+# 退回任何本檔自算的數字（退回就是把剛拔掉的第二套門檻裝回去）。
+$mutGate = Get-MutationLockGate -HistoryPath (Join-Path $RepoRoot '.mutation_history.jsonl') -ToolsDir $PSScriptRoot
+$mutVerdict = if (-not $mutGate.Ok) { 'unavailable' } elseif ($mutGate.Locked) { 'locked' } else { 'observing' }
+$mutUniqueLabel = if ($mutGate.Ok) { [string]$mutGate.UniqueSha } else { 'unavailable' }
+$mutTailLabel = if ($mutGate.Ok) { [string]$mutGate.Tail } else { 'unavailable' }
+# R71 G-3：obs / drift 分子改取權威 green_streak、分母改取工具回報的 window。
+$obsGa = Get-ObsGaPass (Join-Path $RepoRoot '.observability_history.jsonl')
+$driftGa = Get-DriftGaPass (Join-Path $RepoRoot '.drift_log_history.jsonl')
+$obsNumerator = if ($obsGa.Ok) { [string]$obsGa.Streak } else { 'unavailable' }
+$obsWindow = if ($obsGa.Ok) { [string]$obsGa.Window } else { 'unavailable' }
+$driftNumerator = if ($driftGa.Ok) { [string]$driftGa.Streak } else { 'unavailable' }
+$driftWindow = if ($driftGa.Ok) { [string]$driftGa.Window } else { 'unavailable' }
+Log ("END observation progress: mutation={0} (should_lock 權威判定; tail unique-sha {1} of {2}; records={3}; delta={4}; stage={5}) ac4={6}/14 rolling-window-days (ready={7}; records={8}; delta={9}; stage={10}) obs={11}/{12} green_streak (records={13}; delta={14}; stage={15}) drift={16}/{17} green_streak (records={18}; delta={19}; stage={20}) — 四軌分子一律取權威判準值（mutation_baseline_lock.should_lock / ac4_progress_check 滾動 14 日曆天窗 / observability_ga_check / drift_log_ga_check），records= 為 jsonl 原始列數僅供 delta 取證、絕不當分子；mutation 按 source_sha256 去重（ADR-SD09-011），obs/drift 維持 same UTC-date dedup per M-05; delta=0 with stage!=0 表示本次未進帳" -f `
+  $mutVerdict, $mutUniqueLabel, $mutTailLabel, $mutCount, $mutDelta, $rc1Label, `
+  $ac4Numerator, $ac4ReadyLabel, $ac4Count, $ac4Delta, $rc2Label, `
+  $obsNumerator, $obsWindow, $obsCount, $obsDelta, $rc5Label, `
+  $driftNumerator, $driftWindow, $driftCount, $driftDelta, $rc4Label)
+
+# R71（額外項）：桶位漂移可見化——本輪起跑時刻 vs 排定時刻（理由見
+# Get-NightlyScheduleTiming 上方註解）。純取證，不影響 rc / exit code。
+$schedTiming = Get-NightlyScheduleTiming -ActualStart $script:NightlyStart
+$actualHm = ('{0:00}:{1:00}' -f $script:NightlyStart.Hour, $script:NightlyStart.Minute)
+if ($schedTiming.Ok) {
+  Log ("END trigger timing: {0} scheduled={1} actual={2} offset_min={3} — off-schedule 代表本輪不是在排定時刻起跑（本機 WakeToRun 實測失效：睡眠中 02:00 不喚醒，靠 StartWhenAvailable 事後補跑；人工重跑亦同）。連續 off-schedule 是觀察期桶位漂移／空洞的前兆：補跑若跨日，隔日觸發會被 MultipleInstances=IgnoreNew 擋掉而該日零紀錄（2026-08-01 事故形態），AC4 滾動 14 日曆天窗缺一天即順延" -f $schedTiming.Label, $schedTiming.Scheduled, $actualHm, $schedTiming.OffsetMinutes)
+} else {
+  Log ("END trigger timing: unknown actual={0} — 取不到排程資訊，**不代表準時**（不預設 within-grace）：{1}" -f $actualHm, $schedTiming.Error) 'WARN'
+}
+
+# R69（S-4）：SD_09 W0 G0 三軌綜合判定接到活載體。
+# WHY：這段判定原本只活在一次性排程任務 AutoClaude_SD09_G0_GateCheck 裡——該任務的
+# TimeTrigger 於 2026-06-29 觸發一次（結論 [G0-NOT-READY]）後 NextRunTime 就永遠空白，
+# 此後 34 天零檢查，而三軌其實每晚都在動。把判定搬到每晚都會跑的 nightly，一次性
+# 排程就不再是唯一載體（該任務於本輪移除，兩支腳本 g0_gate_check.ps1 /
+# reschedule_g0_gatecheck.ps1 保留供人工隨時複查）。
+# 🔴 R71（G-1 / G-2）：三軌 → **四軌**，且四軌判準全部改由權威實作回答：
+#   mutation = mutation_baseline_lock.should_lock（原為本檔自算 unique-sha 對寫死的 7）
+#   ac4      = ac4_progress_check 的 ready_for_labeled_pr（滾動 14 天窗）
+#   obs      = observability_ga_check 的 status/rc
+#   drift    = drift_log_ga_check 的 status/rc ← **本輪新接入**
+# drift 軌為何一直缺席：觀察期 #3 的權威判準 drift_log_ga_check.py 在本輪前是零
+# production caller——舊載體 g0_gate_check.ps1 的標籤寫「#3 observability/drift」但
+# 實際只查 observability，新載體 nightly 的三軌也不含它。於是 #3 從來沒有被任何
+# 自動載體判定過，只有 END 進度那個原始列數（35）看起來早就超標（權威值 26/30）。
+# 判定不影響 exit code：G0 是「可以開始做 W0 動作清單了」的人工決策訊號，不是
+# nightly 健康度；把它接進 finalFailures 會讓觀察期未滿的每一晚都紅，紀律 #1
+# 「stage rc 必須反映真實失敗」正是要杜絕這種訊號污染。
+# NOT-READY 走 INFO 不走 WARN：觀察期未滿是**預期中的穩定狀態**（會持續數週），
+# 每晚一則 WARN 只會訓練人忽略 WARN；語意對齊 g0_gate_check.ps1 兩個分支都用同一個
+# W() 印出的既有作法。
+# 註：$mutGate / $obsGa / $driftGa 於上方 END 進度段已取得（各軌工具每輪只呼叫一次，
+# 避免同一晚對同一份 jsonl 問兩次卻拿到兩個不同答案）。
+$g0MutOk = ($mutGate.Ok -and $mutGate.Locked)
+$g0Ac4Ok = ($ac4Gate.Ok -and $ac4Gate.Ready)
+$g0ObsOk = ($obsGa.Ok -and $obsGa.Pass)
+$g0DriftOk = ($driftGa.Ok -and $driftGa.Pass)
+# R71（A-2）：gap 敘述必須區分「還沒到」與「量不出來」。閘門 helper 回 Ok=$false 時
+# 代表工具/資料本身有問題（要去修工具），把它印成「觀察期未達標」會讓人繼續等一個
+# 永遠不會到的日子——與 S-1b 假達標同一種取證失真，只是方向相反。
+$obsGaLabel = if ($obsGa.Ok) {
+  ('{0} (status={1}; rc={2}; green_streak={3}/{4})' -f `
+    $(if ($obsGa.Pass) { '[PASS]' } else { 'not passed' }), $obsGa.Status, $obsGa.Rc, $obsGa.Streak, $obsGa.Window)
+} else {
+  "TOOL-ERROR:$($obsGa.Error)"
+}
+$driftGaLabel = if ($driftGa.Ok) {
+  ('{0} (status={1}; rc={2}; green_streak={3}/{4})' -f `
+    $(if ($driftGa.Pass) { '[PASS]' } else { 'not passed' }), $driftGa.Status, $driftGa.Rc, $driftGa.Streak, $driftGa.Window)
+} else {
+  "TOOL-ERROR:$($driftGa.Error)"
+}
+$mutGateLabel = if ($mutGate.Ok) {
+  ('should_lock={0}; baseline={1}; tail unique-sha {2}/{3}; records={4}{5}' -f `
+    $mutGate.Locked, $mutGate.Baseline, $mutGate.UniqueSha, $mutGate.Tail, $mutGate.Records, `
+    $(if ($mutGate.Reject) { '; reject=' + $mutGate.Reject } else { '' }))
+} else {
+  "TOOL-ERROR:$($mutGate.Error)"
+}
+$g0Detail = ("mutation={0} ({1}) ac4={2} (ready={3}; {4}/14 rolling-window-days) obs_ga={5} ({6}) drift_ga={7} ({8})" -f `
+  $g0MutOk, $mutGateLabel, `
+  $g0Ac4Ok, $ac4ReadyLabel, $ac4Numerator, `
+  $g0ObsOk, $obsGaLabel, `
+  $g0DriftOk, $driftGaLabel)
+if ($g0MutOk -and $g0Ac4Ok -and $g0ObsOk -and $g0DriftOk) {
+  Log ("[G0-READY] SD_09 W0 四軌全數達標：{0} — 需 PM 拍板執行 G0 動作清單（AutoSDD_improving_34.md §4；細節見 AutoClaude/tools/g0_gate_check.ps1 VERDICT 分支）" -f $g0Detail)
+} else {
+  $g0Gaps = @()
+  if (-not $g0MutOk) {
+    if (-not $mutGate.Ok) {
+      $g0Gaps += ("mutation 閘門 TOOL-UNAVAILABLE（量不出來，非未達標——請修工具/資料）：{0}" -f $mutGate.Error)
+    } else {
+      # 拒鎖原因直接轉述 should_lock 自己寫到 stderr 的 reason 標籤，不在此重新詮釋。
+      $g0Gaps += ("mutation baseline 未鎖定（權威 should_lock 拒鎖）：{0}" -f $(if ($mutGate.Reject) { $mutGate.Reject } else { '(權威未給 reason)' }))
+    }
+  }
+  if (-not $g0Ac4Ok) {
+    if (-not $ac4Gate.Ok) {
+      $g0Gaps += ("AC4 閘門 TOOL-UNAVAILABLE（量不出來，非未達標——請修工具/資料）：{0}" -f $ac4Gate.Error)
+    } else {
+      $g0Gaps += 'AC4 滾動 14 天窗未滿或非全綠（漏跑一天即順延）'
+    }
+  }
+  if (-not $g0ObsOk) {
+    if (-not $obsGa.Ok) {
+      $g0Gaps += ("observability GA TOOL-UNAVAILABLE（量不出來，非未達標——請修工具/資料）：{0}" -f $obsGa.Error)
+    } else {
+      $g0Gaps += ('observability GA green_streak {0} < window {1}' -f $obsGa.Streak, $obsGa.Window)
+    }
+  }
+  if (-not $g0DriftOk) {
+    if (-not $driftGa.Ok) {
+      $g0Gaps += ("drift_log GA TOOL-UNAVAILABLE（量不出來，非未達標——請修工具/資料）：{0}" -f $driftGa.Error)
+    } else {
+      $g0Gaps += ('drift_log GA green_streak {0} < window {1}（採集失敗＝table_missing 也會打斷 streak，未必是真漂移事件）' -f $driftGa.Streak, $driftGa.Window)
+    }
+  }
+  Log ("[G0-NOT-READY] {0} — gaps: {1}" -f $g0Detail, ($g0Gaps -join ' ; '))
+}
 
 # R10 QA-11（DEF-101-140）：Docker 長期不可用偵測——單次 SKIP 屬合理設計（Docker
 # Desktop 未開），但連續 ≥3 次 SKIP 代表 mutation/pg-e2e/drift（含 PG contract 硬閘

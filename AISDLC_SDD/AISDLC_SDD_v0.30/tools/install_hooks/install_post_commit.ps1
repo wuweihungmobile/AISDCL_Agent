@@ -13,7 +13,30 @@
 # 乾淨 Write-Error。設 Stop + 明確判斷 $LASTEXITCODE/$GitCommonDir，讓失敗在第一時間
 # 乾淨導流，不再串連炸出一串難解錯誤。
 $ErrorActionPreference = 'Stop'
-$GitCommonDir = (git rev-parse --path-format=absolute --git-common-dir 2>$null)
+# DEF-101-762：PowerShell 用 `[Console]::OutputEncoding` 解碼原生指令 stdout，而 git
+# 一律以 UTF-8 輸出路徑。兩者在 UTF-8 主控台下對得上，在 **cp950**（繁中 Windows 的
+# OEM 預設，schtasks 排程環境即為此）下就對不上：含非 ASCII 的 repo 路徑會被解成
+# mojibake，$MainCheckoutRoot 連帶損毀 ⇒ 本檔在中文路徑的 repo 上以「找不到共用函式
+# …\tools\lib\WindowsAppsGuard.ps1」中止（真機實測重現）。與檔頭第 82 行那條「hook
+# 內嵌路徑被 -Encoding ascii 換成 ?」是同一個危害（中文使用者路徑）的另一條入口。
+# 只包這一次讀取並立即還原：本檔會被 windows_smoke_local.ps1 [5] 以 `& $installer`
+# **同行程**呼叫，若把主控台整段釘成 UTF-8 不還原，隨後的 [6] 會繼承 UTF-8 主控台，
+# 那個專測 cp950 的生產缺陷就再也重現不出來（＝把 tripwire 拆掉）。
+$PrevOutEnc = $null
+try {
+  if ([Console]::OutputEncoding.CodePage -ne 65001) {
+    $PrevOutEnc = [Console]::OutputEncoding
+    [Console]::OutputEncoding = New-Object System.Text.UTF8Encoding($false)
+  }
+} catch {
+  # 無主控台可設時釘不了；維持既有行為，損毀路徑仍由下面的 Test-Path 守門 fail-loud。
+  $PrevOutEnc = $null
+}
+try {
+  $GitCommonDir = (git rev-parse --path-format=absolute --git-common-dir 2>$null)
+} finally {
+  if ($null -ne $PrevOutEnc) { [Console]::OutputEncoding = $PrevOutEnc }
+}
 if ($LASTEXITCODE -ne 0 -or -not $GitCommonDir) {
   Write-Error "找不到 git repository（git rev-parse --git-common-dir 失敗）— 請在 git repo 內執行本腳本"
   exit 1

@@ -105,7 +105,62 @@ Get-ScheduledTask -TaskName '<名稱>' | Get-ScheduledTaskInfo |
   Select-Object TaskName,LastRunTime,LastTaskResult,NextRunTime   # NextRunTime 就是憑證
 ```
 - 排出去的 job 必須留下**可稽核痕跡**（log 檔＋時間戳），讓「沒觸發」是**可偵測**而非靜默假設。
-- ⚠️ **查詢載具自己也會騙人**：`schtasks /query /fo CSV | grep AutoClaude` 在本機回**空**（假陰性），而 `Get-ScheduledTask` 同時查到 `AutoClaude_Nightly`／`AutoClaude_SD09_G0_GateCheck` 皆 `State=Ready`。**查排程一律用 `Get-ScheduledTask`**（同「驗證載具本身要被驗證」紀律 #4）。
+- ⚠️ **查詢載具自己也會騙人**：`schtasks /query /fo CSV | grep AutoClaude` 在本機回**空**（假陰性），而 `Get-ScheduledTask` 對同一批工作查得到、且回報 `State=Ready`。**查排程一律用 `Get-ScheduledTask`**（同「驗證載具本身要被驗證」紀律 #4）。
+  🔴 **本條刻意不寫死「本機現有哪幾支工作」**（R71 訂正）：原文以 `AutoClaude_Nightly`／`AutoClaude_SD09_G0_GateCheck` 兩支具名舉例，而後者已於 R71 從本機移除（腳本保留；該移除即本輪 S-4 處置，非過往輪），使**這段教人取證的文字自己拿過期事實當證據**——正是本節在防的「事後諸葛」。工作清單是會漂移的量測值，一律現查：
+
+  ```powershell
+  Get-ScheduledTask | Where-Object TaskName -like 'AutoClaude*' | Select-Object TaskName,State
+  ```
+
+---
+
+## 🔴 Windows 側單一載具原則（R71 訂立 — 低級錯誤的結構性根因與解法）
+
+> **為何特立此節**：R71（Windows 真機輪）實測記錄到 8 筆操作失誤，逐筆歸因後 **5 筆是平台相關、3 筆無關**。掌舵者觀察「在 Windows 常犯低級錯誤、在 mac 好像不會」屬實，但根因**不是**「Windows 上比較不小心」——是**同時操作兩個 shell 造成的決策負荷**。每下一個指令要同時決定：用哪個 shell／什麼編碼／哪種路徑格式／cwd 現在在哪／這支腳本拒不拒絕這個載具。mac 側這六項全部不存在。**被這些決策擠掉的注意力，正是「查權威源再宣稱」那類紀律失守的原因**——所以連平台無關的錯，密度也在 Windows 側偏高。
+
+### 鐵律一：Windows 上**禁用 Bash 工具**，一律走 PowerShell 工具
+
+> 🔴 **這是掌舵者 2026-08-03 的直接指令**（原文：「只使用 PowerShell 5.1, 不用 Git Bash ==> 請遵守」），
+> 不是建議、不是預設值。**「兩個載具擇優使用」這個選項已被移除**——因為擇優本身就是那個要付出注意力的決策，
+> 而它換來的效率遠不及它造成的失誤。掌舵者原話：「常常做錯誤的事，並不會比較有效率」。
+
+| 需求 | 載具 | 理由 |
+|------|------|------|
+| **一切 shell 指令** | **PowerShell 工具** | schtasks／生產環境跑的就是 `powershell.exe`（PS 5.1），載具對齊＝驗證條件對齊 |
+| `.sh` 腳本 | **PowerShell 內**呼叫 `bash <script>` | 這是「執行一支 .sh」不是「用 Bash 當載具」，兩者別混淆。同 `tools/git-hooks/pre-push` 既有作法（`env -u GIT_DIR -u GIT_WORK_TREE bash scripts/ci-gate.sh`） |
+| 讀檔／搜尋／算行數 | **Read／Grep 工具**，不經 shell | 🔴 **編碼邊界雙向都會出錯**，不是只有「Bash 讀 PS 輸出」那一向。R71 同輪兩次實證：① Git Bash `grep` 讀 CP950 的 PS 輸出 → 命中 0、誤判「沒有失敗行」；② PowerShell `Get-Content` 以 CP950 讀 UTF-8 的 `CLAUDE.md` → 回報「237 行／最長 962 codepoints」，python 實際「324 行／無任何行 >800」——**兩個數字都假，且假在會讓人誤以為破閘的方向**。要在 shell 內算就必須指名 `-Encoding utf8`，但更省事的是根本不用 shell |
+| ❌ **Bash 工具** | **禁用** | R71 實測兩次事故：① `windows_smoke_local.ps1` 被 MSYS 守衛擋下（rc=1，DEF-101-511 刻意設計）；② Git Bash 去 grep CP950 編碼的 PS 輸出 → 命中 0、**誤判「沒有失敗行」** |
+
+**如何檢核**：看工具呼叫名稱即可，不需要相信任何宣稱——出現 `Bash` 就是違規。
+
+🔴 **本條已有機械物，不靠自律**：`.claude/hooks/block_bash_on_windows.py`
+（PreToolUse／`matcher: Bash`，在根 `.claude/settings.json` 註冊）。
+**為何非上機械物不可**：本節由 session **開場**載入，session 中途訂立的規則對「當下的模型」
+只能靠主動記得，而主動記得正是決策負荷會擠掉的東西——R71 實證：**寫完本節的同一個回合仍用了 Bash 工具**，
+掌舵者兩度指出「你還是沒有遵守」之後才改上阻斷。這正是 `DEF-101-757`「已知的鎖射程缺口不得只以劃界結案」
+的又一個實例，只是這次的缺口在模型自身的行為上。
+守衛四種輸入皆實測：`Bash`→exit 2 阻斷／`Read`→exit 0（射程不擴大）／壞 JSON 與空輸入→exit 2（fail-closed）；
+**非 Windows 一律 exit 0**（mac/Linux 上 bash 才是正確載具，單平台判準不可無條件外推——`DEF-101-766` 同型教訓）；
+任何非預期例外 fail-open（`settings.json` 記載過的 P0：hook 誤觸 deny 會把所有工具硬鎖死）。
+端到端實證：故意呼叫 Bash → `PreToolUse:Bash hook error` 攔下。
+
+### 鐵律二：**一律絕對路徑，禁用裸 `cd`**
+
+PowerShell 工具的 cwd **會跨呼叫持續**（工具說明明載），但人容易假設它會重置。R71 單輪就因此失誤 **3 次**（`cd AutoClaude` 之後的指令全部找錯路徑，其中一次還誤判成「檔案不存在」）。
+
+- ✅ `& 'D:\CursorProject\AISDCL_Agent\.venv\Scripts\python.exe' <絕對路徑腳本>`
+- ✅ 需要切目錄時用 `Push-Location <絕對路徑>; …; Pop-Location`（同一次呼叫內成對，不遺留狀態）
+- ❌ 先跑 `Set-Location AutoClaude`，下一個呼叫再用相對路徑
+
+### 鐵律三：寫跨平台程式碼時，強制自問「**這在另一個平台是什麼值？**」
+
+R71 最諷刺的一筆：在修一個 Windows 專屬缺陷（DEF-101-759）時，寫出了另一個只在 Windows 成立的判準——`$env:PATHEXT` 在 macOS/Linux 的 PS Core 上不存在、POSIX 執行檔也不帶副檔名，兩個原因各自都足以讓函式恆回 `$null`，**會讓 macos-compat-ci 與 root-infra-ci(ubuntu) 必紅**（DEF-101-766）。成因是當下整個思考脈絡都泡在 Windows 語境裡。
+
+觸發清單（出現任一就必須自問）：`$env:*` 讀取／副檔名判斷／路徑分隔符／`Get-Command` 解析／console 編碼／行尾／大小寫敏感度／`$IsWindows` 這類 PS 6+ 專屬自動變數（5.1 恆 `$null`，需 `# ps7-ok: <WHY>` 行尾豁免，**獨立註解行無效**——掃描器只認行尾）。
+
+### 鐵律四：本節之外的三筆「平台無關」失誤，共同形態是**宣稱先於查證**
+
+R71 實例：輪號 R70／R71 全程講錯（採信提示詞而未查 `current_round()` 權威源）／宣稱「資訊零損失」但帳本實際沒有該站點／豁免標記形態靠猜而未讀掃描器實作。**這三筆在 mac 側同樣會發生**，只是 Windows 的決策負荷讓它們更容易漏。對策不是「更小心」，而是套用既有紀律 [[no-fabricated-tool-output]]：**任何「已驗證／已達標／零損失」的宣稱，都要附當回合真跑的輸出**——貼不出來就改寫成「未驗證」。
 
 ---
 

@@ -131,6 +131,19 @@
 #                      （continue-on-error: true）被忽略 18 天的機制，再加一層非阻斷等於
 #                      複製病因。門檻取 10 天＝週頻 cron（週一 06:12／07:18 UTC）正常最長
 #                      間隔 7 天 ＋ 3 天餘裕。
+#                      🔴 R71 擴充「覆蓋面 vs 綁架主線」的取捨：原本阻斷清單只有那兩支，
+#                      但同批陣亡的排程軌有四支，其餘含 cron 的 workflow 完全無人看。
+#                      直接把阻斷射程改成「現掃所有含 cron 的 workflow」（今天 7 支、
+#                      其中 4 支日頻）＝ 任何一條日頻軌紅一天就擋住全 repo 的 push，
+#                      而本道與被偵測者同計費平面（帳務一掛一起紅）⇒ 那是把主線抵押
+#                      給雲端狀態。故取**兩段式**：阻斷段維持兩支真機**週頻**軌
+#                      （DEF-101-703 主角，且週頻軌結構上不可能被日常 push 順手發現），
+#                      其餘一律走同 step 內的 advisory 段——現掃 workflow 目錄取得清單
+#                      （不寫死第二份會腐化的字面清單）、逐軌印最近一次 schedule 觸發
+#                      的結論／時間／url、非 success 或過齡即 ::warning::，但**不改
+#                      本 step 的 rc**。同段順帶標記「同檔多條 cron 驅動不相交 job 集合」
+#                      這個 run 層天生分辨不出的盲區。誠實劃界：advisory 是提醒不是閘門，
+#                      它擋不住任何人無視；要當場擋下的判準請放進阻斷段並承擔其代價。
 #   16. 根層護欄層 ruff — `ruff check tools/`（設定＝`tools/ruff.toml`，由 ruff 自己
 #                      「從檔往上找最近設定檔」解析到）。R69 立此道的直接理由：該設定檔
 #                      是 R69 新增的，落地時**全 repo 零執行者**——於是它自陳要治的病
@@ -481,6 +494,9 @@ jobs:
           WAIVER_UNTIL: "2026-08-10"
           WAIVER_REASON: "DEF-101-703：根因＝GitHub 帳務阻擋（非 workflow 定義缺陷，本 repo 無可修處），帳務已於 2026-08-01 恢復，等 2026-08-03／08-10 兩個排程窗口自證"
           MAX_WAIVER_DAYS: "21"
+          # advisory 巡檢的粗門檻（見 run: 內該段的取捨說明）。刻意單一數字而非
+          # 逐檔依 cron 週期計算：advisory 不擋路，精算留給本機那支逐軌偵測器。
+          ADVISORY_MAX_AGE_DAYS: "8"
         run: |
           set -euo pipefail
           now=$(date -u +%s)
@@ -529,6 +545,50 @@ jobs:
             if [ "$age" -gt "$MAX_AGE_DAYS" ]; then
               echo "::${lvl}::${wf} 的 *-nightly-full 已 ${age} 天沒有成功執行（門檻 ${MAX_AGE_DAYS} 天）——真機深度回歸通道處於死亡狀態，此期間任何「CI 全綠」宣稱都只涵蓋 push 事件"
               stale=1
+            fi
+          done
+          # --- 其餘含 cron 的 workflow：advisory 巡檢（永不影響本 step 的 rc）-----
+          # 🔴 R71 取捨（為何**不**把它們併進上面那個阻斷迴圈）：那道是 push 閘
+          # （exit 1）。今天含 cron 的 workflow 有 7 支，其中 4 支是**日頻**——任何
+          # 一條日頻軌紅一天，整個 repo 的 push 就被雲端狀態綁架，而本道自己的檔頭
+          # 已經寫明它與被偵測者同屬 GitHub Actions 計費平面（帳務一掛全部一起紅）。
+          # 阻斷射程刻意只留兩支**真機週頻**軌：它們是 DEF-101-703 的主角，且週頻
+          # 軌結構上不可能被日常 push 順手發現（最新一筆 run 永遠是 push 的）。
+          # 其餘一律「大聲印、不擋路」——覆蓋面補齊，代價不轉嫁到主線。
+          # 掃描面**現查**（不寫死第二份清單）：凡 .github/workflows/*.yml 內有未被
+          # 註解掉的 cron 即納入，扣掉上面已阻斷的那兩支。新增排程 workflow 自動納管。
+          echo "── advisory：其餘含 cron 的排程軌（只印不擋，見上方取捨說明）"
+          advisory_list=""
+          for wf_path in .github/workflows/*.yml; do
+            wf_base=$(basename "$wf_path")
+            case "$wf_base" in windows-compat-ci.yml|macos-compat-ci.yml) continue;; esac
+            if grep -qE '^[[:space:]]*-[[:space:]]*cron:' "$wf_path"; then
+              advisory_list="${advisory_list} ${wf_base}"
+            fi
+          done
+          for advisory_wf in $advisory_list; do
+            row=$(gh run list --repo "${GITHUB_REPOSITORY}" --workflow "$advisory_wf" \
+                    --event schedule --limit 1 --json conclusion,createdAt,url \
+                    --jq '.[0] // {} | "\(.conclusion // "(無結論)")|\(.createdAt // "")|\(.url // "-")"' \
+                  || echo "(gh 查詢失敗)||-")
+            a_concl=${row%%|*}; a_rest=${row#*|}; a_when=${a_rest%%|*}; a_url=${a_rest#*|}
+            a_age=-1
+            if [ -n "$a_when" ]; then
+              if a_epoch=$(date -u -d "$a_when" +%s 2>/dev/null); then
+                a_age=$(( (now - a_epoch) / 86400 ))
+              fi
+            fi
+            # E-1：同檔多條 cron 驅動不相交 job 集合時，run 層結論分辨不出哪條軌活著
+            # （實證：autoclaude-ci.yml 的 `7 3` run 綠，而同一 run 裡 `7 2` 那組 job
+            #  是 skipped/steps=0；同日 `7 2` 的 run 才是真實測試紅）。
+            a_crons=$(grep -cE '^[[:space:]]*-[[:space:]]*cron:' ".github/workflows/${advisory_wf}")
+            a_multi=""
+            if [ "$a_crons" -gt 1 ]; then
+              a_multi="；⚠️ 此檔 ${a_crons} 條 cron ⇒ run 層結論分辨不出哪一條軌活著"
+            fi
+            echo "   ${advisory_wf}：最近一次 schedule run＝${a_concl}（${a_when:-從未觸發}，${a_url}）${a_multi}"
+            if [ "$a_concl" != "success" ] || [ "$a_age" -gt "$ADVISORY_MAX_AGE_DAYS" ]; then
+              echo "::warning::${advisory_wf} 的排程軌最近一次觸發為 ${a_concl}（${a_when:-從未觸發}）——本段是 advisory、刻意不擋 push（避免把全 repo 的 push 綁在雲端狀態上），但這條兜底軌目前不成立，別把「四支 CI 全綠」讀成排程軌也綠"
             fi
           done
           if [ "$stale" -ne 0 ]; then

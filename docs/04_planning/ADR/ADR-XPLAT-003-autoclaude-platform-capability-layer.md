@@ -41,12 +41,26 @@ autoclaude/perception/pty_wrapper.py:311:        elif sys.platform != "win32" an
 2. **跨樹不可共用**：根層已有 `tools/lib/platform_utils.py`，但它與 `autoclaude/` 分屬不同封裝樹，
    `autoclaude/` import 它會建立 repo 級的反向相依（且 `.importlinter` 的 `root_packages = autoclaude`
    對它完全不設防）⇒ 結構上不可能共用，不是沒人想到。
-3. **LOC 政策壓力**：`check_loc_budget.py` 實測 `total=20436 / cap=20438` ⇒ **餘裕 2 行**，
-   `autoclaude/` 生產碼實質凍結。護欄層與生產碼的比例失衡（`ADR-XPLAT-002` §1）在此表現為
-   「想修生產碼卻一行都放不下」。
-   🔴 **本 ADR 落地後這一條**依然成立、且**一個字都沒有緩解**：§3 的 −21 行只是把額度讓給了
-   同輪其他修復包，交付樹現查仍是 `total=20436 / cap=20438`＝**餘裕 2 行、凍結未解除**。
-   本節刻意不寫成「壓力已降低」——那正是 §3 原始版本犯的錯（見該節 R69 訂正段）。
+3. **LOC 政策壓力**：R69 動工當下 `check_loc_budget.py` 實測 `total=20436 / cap=20438` ⇒ **餘裕 2 行**，`autoclaude/` 生產碼實質凍結。<!-- adr-measurement-historical: R69 動工當下的決策脈絡快照；ADR §1 記的就是「決策時點的世界長什麼樣」，不是現況宣稱 -->
+   護欄層與生產碼的比例失衡（`ADR-XPLAT-002` §1）在此表現為「想修生產碼卻一行都放不下」。
+   🔴 **本 ADR 落地當下這一條依然成立、且一個字都沒有緩解**：§3 的 −21 行只是把額度讓給了
+   同輪其他修復包，全樹淨值為 0。本節刻意不寫成「壓力已降低」——那正是 §3 原始版本犯的錯
+   （見該節 R69 訂正段）。
+   🔴 **R71 訂正（本節此前把「動工時的狀態」寫成了「永遠的現況」）**：上面兩段都是
+   **R69 時點**的量，本節原文卻用「交付樹現查仍是…」的現在式再寫死一次同樣的數字，等於
+   在 ADR 裡開了第二個「現況」的家——而它必然隨每一次生產碼增減而失真（R71 即命中：
+   一批死碼清除後，`cap − total` 已與上述快照相差兩位數）。
+   **本 ADR 自此不再登載 `total` / `cap` 的現況值**，理由與 §8(b)(c) 對 pytest 計數與
+   `violations=` 的處置完全相同（見該節）。判定現況請照這條可執行判準，不要讀本文：
+
+   ```
+   cd AutoClaude && python tools/check_loc_budget.py --json   # 讀 cap − total
+   ```
+
+   `cap − total` ≥ 100 行即滿足 `DEF-101-706` 解鎖條件 ①（該筆缺陷的權威狀態以帳本為準）；
+   低於此值則本條「生產碼實質凍結」的壓力仍然成立。唯一的 live 展示站點＝
+   `ONBOARDING.md` §7 表① 的 `loc-baseline-live:` 那一格（一鍵回填：
+   `python tools/sync_onboarding_baselines.py --write`）。
 
 ---
 
@@ -117,11 +131,12 @@ autoclaude/perception/pty_wrapper.py:311:        elif sys.platform != "win32" an
 | `utils/platform_caps.py`（抽象層自身） | 0 | 2 |
 | **合計** | **7 處 / 3 檔** | **2 處 / 1 檔** |
 
-閘門實測（改後，於**交付樹**現查；`cd AutoClaude`）：
+閘門實測（改後，**R69 交付樹當下的逐字轉錄**；`cd AutoClaude`）。⚠️ 這是有輪次歸屬的
+時代快照、不是現況——`total` / `cap` 的現況一律照 §1 第 3 點那條判準現查：
 
 ```
 $ python tools/check_loc_budget.py     # 只引與本 ADR 射程相關的三欄，見下方訂正段 (c)
-[check_loc_budget v2-tiered] total=20436 baseline=17032 cap=20438
+[check_loc_budget v2-tiered] total=20436 baseline=17032 cap=20438   # adr-measurement-historical: R69 交付樹當下的逐字轉錄，非現況宣稱
 
 $ PYTHONUTF8=1 lint-imports
 Contracts: 8 kept, 0 broken.
@@ -138,13 +153,24 @@ message 宣稱閘門全綠」是同一型缺陷，只是搬進了 ADR）**。原
 訂正三點：
 
 (a) **餘裕沒有變成 23 行**。上表 −21 行是**本包四個檔**的淨值，是真的；但它與「`autoclaude/`
-    總量下降 21 行」是**兩件事**——同輪其他修復包已把這 21 行額度全數消耗，交付樹現查
-    `total=20436 / cap=20438`，**餘裕仍是 2 行，生產碼凍結完全沒有解除**（與 §1 第 3 點
-    記載的動工前狀態逐字相同）。這正是 `ADR-XPLAT-002` §1.1 那條約束要防的事：本節**照辦了
-    「前後各量一次」**，卻把「本包四檔的 Δ」講成了「全樹的餘裕」，射程偷換。
+    總量下降 21 行」是**兩件事**——同輪其他修復包已把這 21 行額度全數消耗，R69 交付樹上
+    **餘裕仍是 2 行、生產碼凍結完全沒有解除**（與 §1 第 3 點記載的動工前狀態逐字相同）。
+    這正是 `ADR-XPLAT-002` §1.1 那條約束要防的事：本節**照辦了「前後各量一次」**，卻把
+    「本包四檔的 Δ」講成了「全樹的餘裕」，射程偷換。
+    🔴 **R71 追加訂正**：本點原文用「交付樹現查 `total=… / cap=…`」的現在式又把同一組
+    數字寫死一次——**訂正 stale 時順手製造了新的 stale 站點**，形態與它自己正在訂正的錯誤
+    完全相同（R71 即命中：死碼清除後該組數字已失真）。本點自此只陳述**R69 當時**的結論，
+    現況一律照 §1 第 3 點那條判準現查。
 (b) **pytest 計數不再登載於此**。原文的 `3923` 與實測差 6，而根層閘門**取不到** AutoClaude
     全套的現場值（跑一次 80 秒以上）。本 repo 早已為這個數字指定唯一的家：`ONBOARDING.md §7`
     （守門者＝`tools/check_pytest_baseline_sites.py`），要引請指向該處，不要在 ADR 裡再開一個家。
+    🔴 **R71 起本點的射程擴及 `total` / `cap`**：理由與 pytest 計數一字不差——這兩個數字
+    同樣早有唯一的家（`ONBOARDING.md §7` 表① `loc-baseline-live:` 格，守門者＝
+    `tools/tests/test_doc_loc_baseline_freshness_r60.py`，且有 `sync_onboarding_baselines.py
+    --write` 一鍵回填）。R69 只把 (b) 套在 pytest 計數上、卻讓 `total` / `cap` 留在正文，
+    於是同一個數字在本 repo 有 5 個家（§1、本節轉錄段、本點、§8 末、`ONBOARDING.md`），
+    改一次 LOC 要同步 5 處、漏一處就紅——**這正是 R71 讓根層閘門紅 4 支的直接原因**。
+    ADR 內殘留的 `total=` / `cap=` 一律改掛 `adr-measurement-historical` 時代快照標記。
 (c) **`violations=` 欄位刻意不登載**：它是**整棵樹當下的裁決**、由最後一個動到任何受管檔的人
     決定。R69 本包量測期間**當場目睹它翻了兩次**——與本 ADR 完全無關的 `tools/dev_start.py`
     一度破 special 2000 上限而讓該欄位轉為非零、稍後被另一包壓回零，而 `autoclaude/` 的
