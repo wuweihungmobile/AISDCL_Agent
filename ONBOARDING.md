@@ -293,7 +293,7 @@ powershell -ExecutionPolicy Bypass -File scripts\ci-gate.ps1   # 偵測到 Git B
 >   `parametrize` 來源」也能改變計數，該面**不在指紋內**；docker daemon 可用性、平台差異亦然
 >   （見下方容差訂正段）。故它是 stale 的**充分觸發器、非必要條件**——會漏、不會冤。
 > <!-- snapshot-fingerprints-darwin: v001=8ffe3c3dabbd v030=f9b73917d436 scripts=68052c079d55 autoclaude=687d060ebae4 measured-at=2026-08-02 host=Darwin-25.5.0-arm64 docker=up pgextras=absent baseline-origin=self-recorded ／ 由 `python tools/sync_onboarding_baselines.py --write --with-slow` 在 macOS 上維護，勿手改；刪除本標記會讓 --check-snapshot fail-loud -->
-> <!-- snapshot-fingerprints-win32: v001=8ffe3c3dabbd v030=f9b73917d436 scripts=68052c079d55 autoclaude=38b4b96d5ac7 measured-at=2026-08-04 host=Windows-10-AMD64 docker=up pgextras=absent baseline-origin=self-recorded ／ 同上，由 Windows 側維護。🔴 該 origin 值的語意＝**本欄的數字是 Windows 11 實機量得的，只是量測早於 R67 引入的 provenance 機制，故環境不可考**；**不是**「沒量過」（DEF-101-756）。史料見下方「Windows 欄為何整欄記 unrecorded」段 -->
+> <!-- snapshot-fingerprints-win32: v001=8ffe3c3dabbd v030=f9b73917d436 scripts=68052c079d55 autoclaude=d85942493958 measured-at=2026-08-04 host=Windows-10-AMD64 docker=up pgextras=absent baseline-origin=self-recorded ／ 同上，由 Windows 側維護。🔴 該 origin 值的語意＝**本欄的數字是 Windows 11 實機量得的，只是量測早於 R67 引入的 provenance 機制，故環境不可考**；**不是**「沒量過」（DEF-101-756）。史料見下方「Windows 欄為何整欄記 unrecorded」段 -->
 >
 > 🔴 **Windows 欄為何整欄記 `unrecorded`（R67 誠實化，不是漏填）**：R67 建立逐平台記帳時實查
 > git 沿革，Windows 欄的四格是**混世代**——`v0.30` 那格於 R65（`58a829f`）回填 1747→1750，其餘
