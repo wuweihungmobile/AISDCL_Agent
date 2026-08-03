@@ -13,11 +13,18 @@ AutoClaude/tools/fix_nightly_catchup.ps1——假設 AutoClaude_Nightly 這個 s
 跑一次 fix_nightly_catchup.ps1（已安裝的舊機器仍可用該腳本校正）。
 
 本安裝器管理的是一**組**任務（不是單一任務），四個模式一律作用於整組：
-  ① AutoClaude_Nightly      每日 $NightlyAt（預設 22:30）→ AutoClaude/tools/run_local_nightly.ps1
-  ② AutoClaude_WindowsSmoke 每日 $SmokeAt（預設 23:30）→ tools/windows_smoke_local.ps1
-  🔴 R73（DEF-101-779）：時間改由參數提供、預設值＝本機現行實況；本檔原先寫死
-  02:00／01:00，與實際排程（22:30／23:30）不符，使「跑安裝器套設定」會靜默改掉時間。
-  查現況一律 `Get-ScheduledTask ... | Get-ScheduledTaskInfo`，不要相信本段文字。
+  ① AutoClaude_Nightly      每日 $NightlyAt → AutoClaude/tools/run_local_nightly.ps1
+  ② AutoClaude_WindowsSmoke 每日 $SmokeAt   → tools/windows_smoke_local.ps1
+  🔴 R73（DEF-101-779）：時間改由參數提供；本檔原先把兩個時刻寫死在程式碼裡，
+  **預設值一律見 param 區塊**（那裡有取捨 WHY）；**現行排程一律現查**
+  `Get-ScheduledTask ... | Get-ScheduledTaskInfo`——本段刻意不寫任何 HH:mm 字面值。
+  🔴 R73 二審訂正（DEF-101-781）：本段初版把兩個 param 預設值逐字抄了一份進來，
+  其中 ② 抄錯（與 param 區塊實際值不符），且同段又寫「預設值＝本機現行實況」——與 param 區塊
+  「之所以**不**把兩個預設都設成現行實況」直接互相打臉。方向還是危險側：讀檔頭的人
+  會以為不帶參數跑不動 smoke，實際會把它搬走。**這是 DEF-101-779 要治的同一個病，
+  在同一支檔、同一個 commit 內當場重生**（Architect 與 SA 二審獨立命中）。
+  故本段改為零時刻字面，並由 `test_install_windows_nightly.py` 上鎖釘住——
+  「不寫死」若只靠自律，第三次還會長回來。
 R60 新增 ②，收斂 DEF-101-517 的 backlog（該列明文交棒「下一輪先評估較便宜的兩條
 路徑」，本輪落地其中的路徑①）。WHY 必須自動觸發：`windows_smoke_local.ps1` 正是
 DEF-101-139 為「雲端 CI 帳務停擺（DEF-101-081）」而建的 Windows 側**執行級補償
@@ -29,7 +36,7 @@ DEF-101-139 為「雲端 CI 帳務停擺（DEF-101-081）」而建的 Windows �
 summary JSON／exit-decision 清單／Format-Rc 標籤共四處，而 summary 行被
 tools/dev_start.py 的心跳哨兵以跨檔字面正則解析（DEF-101-263②／R25 已建跨檔字面鎖），
 改動 summary 契約會連帶動到那組鎖。獨立任務與 nightly summary **零耦合**，且沿用本檔
-既有的 install／-Status／-WhatIf 冪等骨架，`-WhatIf` 更可在不等 02:00、不動使用者機器
+既有的 install／-Status／-WhatIf 冪等骨架，`-WhatIf` 更可在不等排定時刻、不動使用者機器
 狀態的前提下當場取得驗證證據。
 心跳從哪裡讀：Windows 側不另造心跳檔——`-Status` 讀 Get-ScheduledTaskInfo 的
 LastRunTime／LastTaskResult 即為兩支任務各自的心跳（語意對應 mac 版讀心跳檔 mtime，
@@ -90,10 +97,29 @@ param(
   [ValidatePattern('^([01]\d|2[0-3]):[0-5]\d$')]
   [string]$NightlyAt = '22:30',
   [ValidatePattern('^([01]\d|2[0-3]):[0-5]\d$')]
-  [string]$SmokeAt = '21:30'
+  [string]$SmokeAt = '21:30',
+  # 🔴 R73 二審補（DEF-101-782）：「smoke 早於 nightly」在參數化**之前**是由寫死的字面值
+  # 由構造保證的；參數化之後，該不變量只剩一條 python 靜態鎖在看 **param 預設值**，
+  # 真實安裝路徑（使用者顯式傳參）**完全無人看管**——而本檔自己有兩處在建議
+  # `-SmokeAt 23:30`（＝直接違反它）。不變量降級成「只有預設值遵守」是本輪新開的洞。
+  # 修法＝把檢查放到 runtime，並提供**顯式**旁路：要違反可以，但必須說出口。
+  [switch]$AllowSmokeAfterNightly
 )
 
 $ErrorActionPreference = 'Stop'
+
+# ── 不變量 runtime 守門（R73 二審／DEF-101-782）：smoke 必須早於 nightly ────────────
+# WHY 見 $AllowSmokeAfterNightly 上方註解。判準與 python 靜態鎖同語意（該鎖看 param
+# 預設值、本段看**實際生效值**），兩者合起來才涵蓋「預設」與「顯式傳參」兩條路。
+# 刻意用字串直接比較而非 ParseExact：`HH:mm` 零填補後字典序 == 時序，且 ValidatePattern
+# 已保證格式，省掉一個會因 culture 而變的 API（本 repo 對 culture 敏感 API 有前例教訓）。
+if (-not $AllowSmokeAfterNightly -and ($SmokeAt -ge $NightlyAt)) {
+  Write-Host "❌ SMOKE-AFTER-NIGHTLY：smoke ($SmokeAt) 未早於 nightly ($NightlyAt)。" -ForegroundColor Red
+  Write-Host '   WHY：smoke 是便宜的 tripwire（實測 88 秒）、nightly 是深度回歸（實測 5 分 38 秒）；' -ForegroundColor Red
+  Write-Host '        機器當晚只醒一小段時間時，先跑完便宜那支才有意義。' -ForegroundColor Red
+  Write-Host '   確定要這個順序請顯式加 -AllowSmokeAfterNightly（要違反可以，但必須說出口）。' -ForegroundColor Yellow
+  exit 1
+}
 
 $TaskName = 'AutoClaude_Nightly'
 # R60（DEF-101-517 backlog 收斂）：Windows smoke 補償控制的獨立任務。名稱沿用既有

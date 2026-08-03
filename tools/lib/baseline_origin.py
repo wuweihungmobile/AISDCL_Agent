@@ -14,7 +14,8 @@ R70 主控讀 `--check-snapshot` 印出的「Windows 欄**尚未建立基線**�
 unrecorded）」，據此宣稱「**Windows 側從未有真機輪**」  <!-- stale-premise-ok: 逐字保全原話 -->
 ——被使用者當場以開發史
 駁回：本 repo 本來就是在 Windows 上開發的（R20／R42／R59／R64／R66 皆為 Windows 真機輪，
-每日 02:00 另有 Windows Task Scheduler 的 nightly 全套回歸）。而**同一份輸出的下三行就印著
+另有 Windows Task Scheduler 的每日 nightly 全套回歸，時刻現查 Get-ScheduledTaskInfo）。
+而**同一份輸出的下三行就印著
 Windows 欄的 `3767 passed / 208 skipped`**，那正是 Windows 實機量得的值——訊息與它自己的
 資料自相矛盾，而讀者採信先看到的那一句。
 
@@ -68,7 +69,7 @@ COVERAGE_SOURCES = (
 # ── nightly 落地產物：每日在該平台真機跑完整回歸的證據（DEF-101-757）──────────────
 #
 # 🔴 **這是 DEF-101-756 事故裡「證據明明每天都在產生、卻沒有任何通道流進判定」的那一半。**
-# 每日 02:00 的 nightly 排在 **Windows 11 真機**的 Task Scheduler（`AutoClaude_Nightly`，
+# 每日 nightly 排在 **Windows 11 真機**的 Task Scheduler（`AutoClaude_Nightly`，時刻現查，
 # 見 `tools/install_windows_nightly.ps1`）。那是本 repo **最密集的平台真機證據來源**——
 # 每天一輪完整回歸——而在本輪之前**沒有任何工具或文件讀過它**：基線工具的 provenance 只認
 # 「有人手動跑過 `--write --with-slow`」，`dev_start` 的心跳哨兵只讀**本機平台那一支**
@@ -91,12 +92,22 @@ NIGHTLY_HEARTBEATS: dict[str, str] = {
 # 問題陳述是「smoke 是每日第二條真機證據源，卻不在平台覆蓋判定視野內」。逐平台查證後，
 # 「再讀一支心跳」這個做法在**兩個平台上各自因不同理由不成立**：
 #
-#   win32  ── `AutoClaude_WindowsSmoke` 每日 01:00 觸發，確實**獨立於** nightly（02:00），
-#             是名副其實的第二條證據。但它**沒有任何落地產物**：`install_windows_nightly.ps1`
-#             的 `$smokeAction` 是 `powershell.exe -NoProfile -ExecutionPolicy Bypass -File
-#             <windows_smoke_local.ps1>`，**無輸出重導**；而該 .ps1 全程只 `Write-Host`
-#             ⇒ Task Scheduler 收走 stdout 後直接丟棄。**這是載具缺口（無檔可讀），
-#             不是「還沒接線」**，探針再怎麼寫都讀不到東西。
+#   win32  ── `AutoClaude_WindowsSmoke` 每日觸發（時刻現查 `Get-ScheduledTaskInfo`），
+#             確實**獨立於** nightly，是名副其實的第二條證據。
+#             🔴 **R73 訂正（DEF-101-786）**：本段原本斷言它「沒有任何落地產物 / 全程只
+#             `Write-Host` / 探針再怎麼寫都讀不到」——**三句皆為假**，而且寫下當天就為假：
+#             `tools/windows_smoke_local.ps1:111,127` 的 `Start-Transcript -LiteralPath
+#             <logs/windows_smoke_latest.log>` ＋ `:125` 的 14 天日期輪替，是 **R71 同一個
+#             commit（1e5214b）**加進去的（SA 二審以 `git log -S` 證實）。磁碟實查有
+#             `windows_smoke_latest.log` ＋多支 `windows_smoke_<日期>_<時分秒>.log`，
+#             且該 log 內含可解析的 `===== 彙總：PASS=n FAIL=n =====` 行。
+#             ⇒ 下方「解鎖條件」在寫下的那一刻就已達成，卻跨 R72、R73 兩輪無人回看。
+#             這正是 `DEF-101-757`「已知缺口只以劃界結案」的又一次復發，且復發在
+#             專門用來防這類事的模組裡（同本段自己在批 DEF-101-756 的那個形態）。
+#             本輪只訂正事實敘述、不順手改判定邏輯：把 smoke 升為第三個
+#             `NIGHTLY_HEARTBEATS` 條目需要新增逐平台解析契約並連動平台覆蓋判定，
+#             那會改動 `--check-snapshot` 的輸出面（本輪已在回填 ONBOARDING §7 快照），
+#             屬需獨立驗證的設計變更 ⇒ 見帳本 `DEF-101-786` 承接輪次。
 #   darwin ── `macos_smoke_local.sh` 的 `===== 彙總：PASS=n FAIL=n SKIP=n =====` 是
 #             `run_local_nightly.sh` 的 stage [1/4] 印的 ⇒ 它**不是**第二條獨立證據，
 #             而是同一輪 nightly 的子階段：nightly 心跳在，smoke 就跑過了。
@@ -105,14 +116,21 @@ NIGHTLY_HEARTBEATS: dict[str, str] = {
 # 會被讀成「Windows smoke 沒在跑」，這正是 DEF-101-756（缺記錄被寫成缺量測）換一個載體
 # 復發，且復發在專門用來防它的模組裡。故本輪的處置是：**不造假資料通道，改把上面兩段
 # 事實逐字印進 `--check-snapshot`**，讓 smoke 進入讀者視野、但拿到的是正確解讀。
-# 解鎖條件（下一輪可執行）：Windows smoke 先取得 log 落點（排程 action 加輸出重導，或
-# 該 .ps1 自寫心跳檔）；那天起這裡才有東西可讀，屆時再把它升級為真的機械證據源。
+# 解鎖條件：**已於 R71 達成**（Start-Transcript 落點 ＋ 日期輪替，見上方 R73 訂正）。
+# 剩下的工作是把 smoke 升為第三個 `NIGHTLY_HEARTBEATS` 條目（需新增其解析契約：
+# 讀 `logs/windows_smoke_latest.log` 的 `===== 彙總：PASS=n FAIL=n =====` 行），
+# 並讓它進入平台覆蓋判定。承接見帳本 `DEF-101-786`——**不再寫「下一輪可執行」這種
+# 無主詞的交棒**，那正是它跨兩輪蒸發的原因。
 SMOKE_EVIDENCE: dict[str, str] = {
     "win32": (
-        "AutoClaude_WindowsSmoke 每日 01:00 獨立觸發（獨立於 02:00 nightly），"
-        "但排程 action 無輸出重導、載體全程只 Write-Host ⇒ **無 log 落點、本工具讀不到**。"
-        "🔴 這是**載具缺口**，**不得**讀成「Windows smoke 沒在跑」"
-        "（排程存在與否請查 `Get-ScheduledTask -TaskName AutoClaude_WindowsSmoke`）"
+        "AutoClaude_WindowsSmoke 每日獨立觸發（獨立於 nightly；時刻現查 "
+        "`Get-ScheduledTask -TaskName AutoClaude_WindowsSmoke | Get-ScheduledTaskInfo`）。"
+        "log 落點**存在**：`AutoClaude/logs/windows_smoke_latest.log`（Start-Transcript，"
+        "R71 起）＋ `windows_smoke_<日期>_<時分秒>.log` 14 天輪替，內含可解析的 "
+        "`===== 彙總：PASS=n FAIL=n =====` 行。"
+        "🔴 但本工具**尚未**把它接成機械證據源（需新增解析契約並連動平台覆蓋判定，"
+        "承接見帳本 DEF-101-786）⇒ 目前這行是**人工可查的指路**，不是量測值；"
+        "**不得**讀成「Windows smoke 沒在跑」，也不得讀成「已納入覆蓋判定」"
     ),
     "darwin": (
         "macos_smoke_local.sh 是 run_local_nightly.sh 的 stage [1/4] ⇒ **不是**第二條獨立"

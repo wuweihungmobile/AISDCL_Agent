@@ -11,12 +11,7 @@ import json
 
 import pytest
 
-from tools.ac4_nightly_alert_parser import (
-    AlertDecision,
-    parse,
-    split_stdout_stderr,
-)
-
+from tools.ac4_nightly_alert_parser import parse, split_stdout_stderr
 
 # ---------------------------------------------------------------------------
 # split_stdout_stderr — JSON 起點偵測 + stderr 攔截
@@ -230,7 +225,7 @@ def test_parse_real_nightly_122635_output_legacy_schema() -> None:
             "recall_sigma": 0.0,
             "ready_for_labeled_pr": False,
             "reasons": [
-                "p95 卡嚴格門檻 50ms~60ms neutral 區（60ms = P95_MAX_MS × 1.2 內部 neutral buffer，非 ADR-SD09-008 PROPOSED tolerant 軌拍板門檻；雙軌設計觀察等待，非 X1 阻塞；需採集寬鬆→升級嚴格分軌持續累積）"
+                "p95 卡嚴格門檻 50ms~60ms neutral 區（60ms = P95_MAX_MS × 1.2 內部 neutral buffer，非 ADR-SD09-008 PROPOSED tolerant 軌拍板門檻；雙軌設計觀察等待，非 X1 阻塞；需採集寬鬆→升級嚴格分軌持續累積）"  # noqa: E501  # 逐字保全 nightly 真實輸出，斷行會失去對照價值
             ],
         },
         ensure_ascii=False,
@@ -309,10 +304,48 @@ def test_ps1_helper_alignment_legitimate_json_array_treated_as_stderr() -> None:
     assert stderr_lines == ["[1, 2, 3]"]
 
 
+def test_stderr_after_complete_json_does_not_break_parsing() -> None:
+    """🔴 R73 回歸鎖（DEF-101-783）：JSON **之後**的 stderr 行不得毀掉解析。
+
+    意圖（Rule 9）：本鎖存在的理由不是「JSON 要能解析」，而是**方向**——舊實作
+    「JSON 起點之後的所有行都收」會把尾隨的 `[ac4_progress_check] WARN:` 接進
+    json_lines，`json.loads` 拋 `Extra data` ⇒ 判 F2 WARN（解析失敗），而真值是
+    F2 ALERT（**已達標**）。真達標被讀成「量不出來」，與 ps1 側 DEF-101-775
+    完全同型；本檔是那條缺陷的 SSOT 鏡像，R73 首版只修了 ps1 側。
+
+    第二個斷言同樣重要：那行 WARN 必須**還在 stderr_lines 裡**。舊實作把它吞進
+    json_lines ⇒ `stderr_lines=()` ⇒ 連取證都掉了（Architect 二審實測），
+    而 ps1 側修法特意保住了 `[F2 stderr]` 記錄能力。取證不得因修 bug 而縮水。
+    """
+    raw = '{"ready_for_labeled_pr": true, "status": "green"}\n[ac4_progress_check] WARN: legacy\n'
+    decision = parse(raw)
+    assert decision.level == "ALERT", f"真值為 ready 卻被讀成 {decision.level}：{decision}"
+    assert decision.parsed_json is not None
+    assert decision.parsed_json["ready_for_labeled_pr"] is True
+    assert decision.stderr_lines == ("[ac4_progress_check] WARN: legacy",), (
+        f"尾隨的 stderr 行必須仍被攔截記錄，不得被吞進 JSON：{decision.stderr_lines}"
+    )
+
+
+def test_truncated_json_still_fails_closed() -> None:
+    """fail-closed：JSON 起了頭卻永遠解析不完 ⇒ 判 F2 WARN，絕不可猜成 OK/ALERT。
+
+    意圖（Rule 9）：R73 把「收到所有行」改為「解析成功即停」，必須確認這個改動
+    **沒有**把「輸出被截斷」誤判成某個確定結論——截斷代表工具壞了，唯一安全的
+    答案是「量不出來」。
+    """
+    decision = parse('{"ready_for_labeled_pr": true,\n')
+    assert decision.level == "WARN", f"截斷的 JSON 必須判解析失敗：{decision}"
+    assert decision.parsed_json is None
+
+
 def test_ps1_helper_alignment_bracket_at_end_after_json_is_kept_as_json() -> None:
     """P2-R10-1 修復配套：一旦 JSON 起點（`{`）已被偵測，後續以 `[` 開頭的行
     應被視為 JSON 內容（如 multi-line JSON 內含 array），不再進 stderr。
-    對應 ps1 line 433 `$ac4JsonLines.Count -gt 0` 條件 — JSON started 後全收。
+    對應 ps1 F2 區塊的 `$ac4JsonLines.Count -gt 0` 條件。
+    🔴 R73（DEF-101-783）：「JSON started 後**全收**」已改為「解析成功即停」，
+    本 case 的 multi-line JSON 因此仍全數被收（頂層 `{` 閉合前任何前綴都不合法，
+    不可能提早停在半截物件上）——行為不變，故本 case 原樣保留為對照組。
     """
     raw = '{"reasons":\n[\n"a",\n"b"\n]\n}\n'
     json_lines, stderr_lines = split_stdout_stderr(raw)

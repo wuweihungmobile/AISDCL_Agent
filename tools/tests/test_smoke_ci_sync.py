@@ -303,6 +303,67 @@ class TestWindowsSmokeCarrierGuard(unittest.TestCase):
             guard_at, first_step,
             "MSYSTEM 守門必須在任何驗證段落之前——晚於任何副作用就失去 fail-fast 意義")
 
+    def test_engine_mismatch_guard_present_and_before_any_work(self):
+        """🔴 R73（DEF-101-784）：ENGINE-MISMATCH 引擎守門必須有回歸鎖。
+
+        WHY 與上一支同構（QA-R59-04 的原話直接適用）：「守門本身若沒有鎖，刪掉它
+        全套照綠——那就與註解同級，主張自我否定」。R73 為 DEF-101-776 補了守門
+        卻**沒補鎖**，而同一輪的 DEF-101-773 結案語才剛寫下「已知缺口不得只以劃界
+        結案（DEF-101-757）」——同輪自我違反，QA 二審點名。實測本鎖之前全庫
+        `*test*.py` 對 `ENGINE-MISMATCH` **零命中**。
+
+        為何這個守門特別需要鎖：它的鑑別力來源是「[1/9] 的 Parser 解析必須用 5.1
+        的文法」，而 5.1 對「UTF-8 無 BOM ＋ 中文註解」的 .ps1 會 parse 死、pwsh 7
+        不會（R73 全庫 137 支實測 5.1 ERR=29 / 7.6.4 ERR=0）。守門被刪掉時**不會
+        有任何紅燈**——本機照跑、CI 不執行這支腳本——直到某天有人在 mac/CI 上炸掉。
+        """
+        ps1 = _REPO_ROOT / "tools" / "windows_smoke_local.ps1"
+        text = ps1.read_text(encoding="utf-8-sig", errors="replace")
+        # 🔴 必須錨定**行首的程式碼行**，不能只用 `text.index(needle)`：該檔的 WHY
+        # 註解裡逐字引述了 CI 側的同一個判準，`index` 會命中註解、於是切出的
+        # guard_block 是一段註解而非程式碼（我第一版就是這樣寫的，實測誤判）。
+        # 這與 R59 二審 QA-R59-P2 訂正的是同一類「窗口取錯」問題，只是方向不同。
+        m = re.search(
+            r"(?m)^if \(\$PSVersionTable\.PSVersion\.Major -ne 5\) \{", text)
+        self.assertIsNotNone(
+            m,
+            "缺少引擎守門（行首的 if 程式碼行）——用 pwsh 7 跑本腳本會讓 [1/9] 的語法"
+            "解析改用 PS 7 文法，「5.1 解析不過、7 解析得過」的寫法全部逸出，"
+            "且不會有任何訊號（DEF-101-776）")
+        guard_at = m.start()
+        # 切到本區塊自己的結尾（沿用 R59 二審 QA-R59-P2 的訂正：固定寬度窗口會越界
+        # 吃進後面自帶 exit 1 的守門，使「降級成只印警告」這個最可能的退化照綠）
+        guard_block = text[guard_at:text.index("\n}", guard_at)]
+        self.assertIn(
+            "exit 1", guard_block,
+            "引擎守門必須 exit 1 拒跑，不可只印警告——R73 之前它就是只 Write-Host 印版本")
+        first_step = text.index("--- [1/")
+        self.assertLess(
+            guard_at, first_step,
+            "引擎守門必須早於任何驗證段落：晚於 [1/9] 就等於先用錯的文法驗過一遍才拒絕")
+
+    def test_engine_assertion_exists_on_both_sides(self):
+        """跨檔字面鎖：本機 smoke 與 CI 兩側的引擎斷言必須並存。
+
+        WHY（Rule 9）：R73 的整個敘事是「CI 有牙、本機沒牙」。若日後任一側被拿掉，
+        就退回單側防護而另一側靜默降級——正是本輪要消滅的形態。兩側失敗形態不同
+        （本機 `exit 1`、CI `throw`）是刻意的（載具不同），故只釘「斷言存在」。
+        """
+        ci = _REPO_ROOT / ".github" / "workflows" / "windows-compat-ci.yml"
+        ci_text = ci.read_text(encoding="utf-8", errors="replace")
+        self.assertIn(
+            "ENGINE-MISMATCH", ci_text,
+            "CI 側的 ENGINE-MISMATCH 斷言不見了——本機側單獨存在時，"
+            "CI runner 上的引擎漂移會完全無訊號")
+        self.assertIn(
+            "$PSVersionTable.PSVersion.Major -ne 5", ci_text,
+            "CI 側引擎斷言的判準已變動，需與本機側同步核對")
+        ps1_text = (_REPO_ROOT / "tools" / "windows_smoke_local.ps1").read_text(
+            encoding="utf-8-sig", errors="replace")
+        self.assertIn(
+            "ENGINE-MISMATCH", ps1_text,
+            "本機側的 ENGINE-MISMATCH 訊息不見了——兩側必須並存（DEF-101-784）")
+
 
 class TestSmokeCiSync(unittest.TestCase):
     def test_onboarding_pass_claims_match_script_pins(self) -> None:

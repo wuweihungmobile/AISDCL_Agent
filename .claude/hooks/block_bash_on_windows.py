@@ -65,11 +65,13 @@ _GUIDANCE = """🔴 Windows 上已禁用 Bash 工具（根 CLAUDE.md〈Windows �
   · 切目錄     → Push-Location <絕對路徑>; …; Pop-Location（同一次呼叫內成對）
 
 避免 && 與 ||：用 `;` 或 `A; if ($?) { B }`。
-（🔴 R73 訂正：本行原本寫「PowerShell 5.1 沒有 && 與 ||」，那句話在互動載具升到
-  PowerShell 7 之後對讀者為假——7.x 支援這兩個運算子，於是這條建議看起來已過期而
-  被忽略。真正的理由與互動載具是哪一版無關：**生產路徑（schtasks 兩支 job 的 Action）
-  跑的是 powershell.exe＝5.1**，在那裡 `&&` 是 parse error。判準要綁生產引擎，
-  不要綁你手上這個 session 剛好是哪一版。）
+（🔴 R73 訂正：本行原本把理由綁在「互動載具的 PowerShell 版本不支援這兩個運算子」上。
+  互動載具升到 PowerShell 7 之後那個理由對讀者為假——7.x 支援它們——於是整條建議
+  看起來已過期而會被忽略。真正的理由與互動載具是哪一版無關：**生產路徑（schtasks
+  兩支 job 的 Action）跑的是 powershell.exe＝5.1**，在那裡 `&&` 是 parse error。
+  判準要綁生產引擎，不要綁你手上這個 session 剛好是哪一版。
+  本段措辭刻意不逐字重述那句已為假的話——樹裡不留假句子，否則下一個人 grep 到它
+  會以為那是現行說法，且 tools/tests/test_block_bash_on_windows_hook.py 會判紅。）
 """
 
 

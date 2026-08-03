@@ -38,20 +38,52 @@ def split_stdout_stderr(raw_output: str) -> tuple[list[str], list[str]]:
         - 第一個以 `{` 開頭的行視為 JSON 起點（不接受 `[` 因 ps1 stderr warning
           常含 `[ac4_progress_check] WARN: ...` 字面）
         - JSON 起點之前的非空行 → stderr_lines（去頭尾空白）
-        - JSON 起點之後的所有行（含空行）→ json_lines（保留以利後續 json.loads）
+        - JSON 起點之後：**累積到第一次 `json.loads` 成功即停**；其後的行照舊
+          當 stderr 攔截（見下方 R73 WHY）
 
     回傳：(json_lines, stderr_lines)
+
+    🔴 **R73 二審修復（DEF-101-783，Architect B1）**：本函式原本的第 6 條規則是
+    「JSON 起點之後的**所有行**（含空行）→ json_lines」，與 ps1 側 `DEF-101-775`
+    修掉的缺陷**逐字同形**——排在 JSON **之後**的 stderr 行會被接進 json_lines，
+    `json.loads` 拋 `Extra data` ⇒ 走 F2 WARN（解析失敗），而真值可能是 F2 ALERT
+    （已達標）。方向與 DEF-101-775 完全同型：**真達標被讀成「量不出來」**。
+    Architect 二審以本檔真跑證實：payload＝合法 JSON ＋ 隨後一行
+    `[ac4_progress_check] WARN:` ⇒ `level=WARN / parsed_json=None / stderr_lines=()`
+    ——**連那行 WARN 的取證也一併掉了**（它被吞進 json_lines，走不到 stderr 分支），
+    而 ps1 側的修法特意保住了 `[F2 stderr]` 記錄能力。
+
+    為何這是「只修一半」而非另一筆獨立缺陷：`run_local_nightly.ps1` 的 F2 區塊
+    **明文宣告**「本區塊 4 條分支邏輯與 tools/ac4_nightly_alert_parser.py 同構
+    （SSOT 樣板），任一邏輯變動須同步：① 本檔 ② tests/tools/
+    test_ac4_nightly_alert_parser.py（16 cases），否則 nightly 端與 helper 端 drift
+    → audit 取證錯位」。R73 首版改了 ps1 側卻沒動這兩個檔，於是鏡像成了
+    「已修缺陷的完整複製品 ＋ 16 條 case 幫它防迴歸」（ADR-SD09-010 記載本鏡像的用途
+    是「W1+ 若遷移 ps1 至 helper-driven 模式可直接 import 使用」⇒ 不同步等於把缺陷
+    埋在未來的遷移路徑上）。
     """
     lines = raw_output.split("\n")
     json_lines: list[str] = []
     stderr_lines: list[str] = []
     json_started = False
+    json_done = False
     for line in lines:
         trim = line.strip()
+        if json_done:
+            # JSON 已取滿：其後的行一律當 stderr 攔截（保住取證，同 ps1 側 [F2 stderr]）
+            if trim != "":
+                stderr_lines.append(trim)
+            continue
         if not json_started and trim.startswith("{"):
             json_started = True
         if json_started:
             json_lines.append(line)
+            try:
+                json.loads("\n".join(json_lines))
+            except json.JSONDecodeError:
+                pass  # 還沒湊成完整 JSON（pretty-print 多行）；繼續累積
+            else:
+                json_done = True
             continue
         if trim == "":
             continue

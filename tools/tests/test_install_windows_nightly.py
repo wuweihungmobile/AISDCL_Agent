@@ -121,7 +121,7 @@ class TestInstallWindowsNightlyStructure(unittest.TestCase):
             "smoke 在睡眠/關機/電池情境下會靜默漏跑",
         )
         # 🔴 R73（DEF-101-779）：時刻已從寫死字面值改為 param 預設值（理由見該 param
-        # 區塊 WHY——原本寫死的 02:00/01:00 與本機實況 22:30/23:30 不符，使「跑安裝器
+        # 區塊 WHY——原本寫死在程式碼裡的時刻與本機實況不符（R73 實測），使「跑安裝器
         # 套設定」會靜默改時間，導致 ADR-SD09-012 點名的五項設定連兩輪沒人敢套）。
         # 本鎖守的不變量**不變**：兩個 trigger 都必須吃參數，且**預設值**仍須滿足
         # 「smoke 早於 nightly」。改讀 param 預設值即可繼續守住順序，不必弱化斷言。
@@ -237,7 +237,7 @@ class TestInstallWindowsNightlyStructure(unittest.TestCase):
         self.assertIn("-NoProfile -ExecutionPolicy Bypass -File", self.text)
         self.assertIn("run_local_nightly.ps1", self.text)
         self.assertIn("-Daily", self.text)
-        # 🔴 R73（DEF-101-779）：原本斷言 `"'02:00'" in text`，即把觸發時間的**字面值**
+        # 🔴 R73（DEF-101-779）：原本斷言 help 區塊含某個時刻字面值，即把觸發時間**釘進鎖裡**
         # 釘進鎖裡。那個字面值與本機實際排程（22:30）不符，而 install 路徑是
         # Unregister→Register ⇒ 「跑安裝器套設定」會靜默把時間改掉，於是 ADR-SD09-012
         # 點名的五項排程設定連兩輪沒人敢套。時間改為參數後，鎖要釘的是**結構**：
@@ -264,6 +264,56 @@ class TestInstallWindowsNightlyStructure(unittest.TestCase):
                 "Register-ScheduledTask 會拋難懂的例外，或更糟："
                 "建出一個時間錯誤但看起來成功的排程",
             )
+
+    def test_help_block_contains_no_hardcoded_clock_time(self) -> None:
+        """🔴 R73 二審（DEF-101-781）：`<# … #>` help 區塊不得出現任何 `HH:mm` 字面值。
+
+        意圖（Rule 9）：DEF-101-779 把觸發時刻從程式碼裡的寫死值改成參數，但 R73 首版
+        **同時在 help 區塊寫下一組錯的預設值**（`② … 預設 23:30`，實際 param 是 21:30），
+        且同段又寫「預設值＝本機現行實況」——與 param 區塊「刻意不把兩個預設都設成現況」
+        直接互相打臉。方向仍是危險側：讀 help 的人以為不帶參數跑不會動 smoke，實際會被
+        搬走。**「靜默改掉時間」這個陷阱沒被消滅，只是從程式碼搬進了說明文字**
+        （Architect／SA／SD 三方二審獨立命中同一筆）。
+
+        所以鎖的判準不是「說明要正確」（那無法機械判定），而是「說明裡**不准有時刻**」
+        ——預設值只有 param 區塊一個權威源，現行排程只有 `Get-ScheduledTaskInfo` 一個
+        權威源。只靠自律的話，這個形態已證實會在同一支檔、同一個 commit 內重生。
+        """
+        # `<#` 不在檔案第一行（第 1 行是 `#Requires -Version 5.1`），故不加 `^` 錨點。
+        m = re.search(r"(?s)<#(.*?)#>", self.text)
+        self.assertIsNotNone(m, "找不到 `<# … #>` help 區塊——結構已變動")
+        help_block = m.group(1)
+        hits = re.findall(r"\b([01]?\d|2[0-3]):[0-5]\d\b", help_block)
+        self.assertEqual(
+            hits, [],
+            f"help 區塊出現時刻字面值 {hits}——預設值請只寫在 param 區塊（那裡有取捨 WHY），"
+            "現行排程請叫讀者現查 `Get-ScheduledTask ... | Get-ScheduledTaskInfo`。"
+            "寫在說明裡的時刻會過期，而過期的說明會誘發破壞性操作（DEF-101-781）",
+        )
+
+    def test_smoke_after_nightly_has_a_runtime_guard(self) -> None:
+        """🔴 R73 二審（DEF-101-782）：順序不變量必須在 runtime 也被守住。
+
+        意圖（Rule 9）：參數化**之前**，「smoke 早於 nightly」是由寫死的字面值**由構造
+        保證**的；參數化之後，它只剩一條靜態鎖在看 param 預設值，而真實安裝路徑
+        （使用者顯式傳參）無人看管——SD 二審實測 `-WhatIf -SmokeAt 23:30 -NightlyAt 22:30`
+        → **rc=0、零警告**。更糟的是本檔自己有兩處在建議 `-SmokeAt 23:30`。
+        把不變量降級成「只有預設值遵守」是把它變成裝飾品。
+        """
+        self.assertIn(
+            "$AllowSmokeAfterNightly", self.text,
+            "缺少顯式旁路開關——要違反不變量可以，但必須說出口，不能靜默通過",
+        )
+        self.assertRegex(
+            self.text, r"if \(-not \$AllowSmokeAfterNightly -and \(\$SmokeAt -ge \$NightlyAt\)\)",
+            "缺少 runtime 順序守門：顯式傳參違反「smoke 早於 nightly」時必須 fail-loud",
+        )
+        guard_at = self.text.index("-not $AllowSmokeAfterNightly")
+        guard_block = self.text[guard_at:self.text.index("\n}", guard_at)]
+        self.assertIn(
+            "exit 1", guard_block,
+            "順序守門必須 exit 1，不可只印警告——只印警告在排程／CI 情境下等於沒有",
+        )
 
     def test_admin_elevation_check_present(self) -> None:
         """install/uninstall 需要 Register/Unregister-ScheduledTask 的系統管理員權限
@@ -679,7 +729,7 @@ class TestStatusExitCodeRuntime(unittest.TestCase):
             )
 
     def test_whatif_previews_every_task_without_touching_scheduler(self) -> None:
-        """`-WhatIf` 是 DEF-101-517 解鎖條件明文點出的「不必等 02:00 就能取得驗證
+        """`-WhatIf` 是 DEF-101-517 解鎖條件明文點出的「不必等排定時刻就能取得驗證
         證據」那條路——本鎖把它變成每輪自動跑的證據，而不是靠人記得手動跑一次。
 
         刻意跑**真腳本**（非改名複本）：複本的 `$PSScriptRoot` 落在 temp，算出的

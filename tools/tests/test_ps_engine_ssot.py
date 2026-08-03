@@ -496,6 +496,11 @@ SAMPLE = 'shutil.which("powershell")'   # 字串常數內的樣本
         )
 
 
+# skip 機制的**允許清單**（R73 二審／Architect N2）。刻意不用「名字含 skip」的模糊判準：
+# 那讓任何自訂 `_skip_note(...)` 都能取得豁免，等於把鎖的洞開給呼叫端命名自由。
+_SKIP_CALLABLES = frozenset({"skip", "skipIf", "skipUnless", "skipTest", "skipif", "importorskip"})
+
+
 def _skip_reason_linenos(text: str) -> set[int]:
     """走 `ast` 找出「skip 機制的理由字串」佔用的行號集合。
 
@@ -519,10 +524,20 @@ def _skip_reason_linenos(text: str) -> set[int]:
             fname = node.func.attr
         elif isinstance(node.func, ast.Name):
             fname = node.func.id
-        if "skip" not in fname.lower():
+        # 🔴 R73 二審收窄（Architect N2）：初版判準是 `"skip" in fname.lower()`，
+        # 實測可被自訂函式名繞過（`_skip_note("<假事實句>")`、
+        # `doc.skipped_reason_note(...)` 皆取得豁免）。改為**允許清單**：
+        # 只認 unittest／pytest 的既有 skip 機制，新增機制得顯式加進來。
+        if fname not in _SKIP_CALLABLES:
             continue
         for arg in list(node.args) + [kw.value for kw in node.keywords]:
-            if isinstance(arg, ast.Constant) and isinstance(arg.value, str):
+            # 🔴 `JoinedStr` 必須一併認：f-string 的 skip 理由（`skipTest(f"…{name}")`）
+            # 在 AST 上**不是** `Constant`，只認 Constant 會讓它逸出豁免 ⇒ 假紅。
+            # 這類假紅比漏抓更糟：它會逼下一輪的人去「修」一段本來正確的碼，
+            # 或更可能——直接把整條鎖關掉。
+            if isinstance(arg, ast.JoinedStr) or (
+                isinstance(arg, ast.Constant) and isinstance(arg.value, str)
+            ):
                 for ln in range(arg.lineno, (arg.end_lineno or arg.lineno) + 1):
                     exempt.add(ln)
     return exempt
@@ -536,7 +551,7 @@ _STALE_SAMPLE_MARKER = "# stale-sample:"
 class TestNoStaleLocalEngineClaims(unittest.TestCase):
     """不得把「這台機器有沒有某個引擎」寫成常數。**射程＝整個 `tools/` 樹**（R73 擴）。
 
-    WHY（R69 原案）：`_ps_engine.py` 的 docstring 有兩處把「這台機器沒有 pwsh 7」寫成
+    WHY（R69 原案）：`_ps_engine.py` 的 docstring 有兩處把「這台機器缺 pwsh 7」這件事寫成
     常數，那是撰寫當輪那台 Windows 機器的屬性；R69 在 macOS 真機上 `shutil.which("pwsh")` 命中
     ⇒ 該前提為假，而它正是「⑤ 這條為什麼測不出差別」的**唯一理由**——理由失效後，
     讀者會以為那個風險在本機不存在，實際上正在發生。同 ADR-XPLAT-002 §6 邊界 1 已裁定
@@ -561,8 +576,15 @@ class TestNoStaleLocalEngineClaims(unittest.TestCase):
         `test_stale_sample_marker_stays_bounded` 防它被拿去豁免真的違規。
     """
 
+    # 🔴 R73 二審擴（SD）：初版主語只認「本機」、否定只認「無/沒有/不存在」，實測
+    # 換主語（這台機器／此機器／機器上）或換否定詞（未裝／未安裝／並未安裝）的說法
+    # 全部 MISS ⇒ 下一個人只要換個說法就繞過。這正是本鎖 docstring 自己在批的
+    # 「劃界結案」，所以主語與否定詞都補齊；仍刻意不抓「根本沒有 5.1（macOS/Linux）」
+    # 這類**通則**敘述（它說的不是這台機器）。
     _STALE_RE = re.compile(
-        r"本機[^。\n]{0,8}?(?:無|沒有|不存在)[^。\n]{0,4}?(pwsh|powershell|PS\s*[57])"
+        r"(?:本機|這台機器|此機器|機器上)[^。\n]{0,8}?"
+        r"(?:無|沒有|沒裝|不存在|未裝|未安裝|並未安裝)[^。\n]{0,6}?"
+        r"(pwsh|powershell|PS\s*[57]|PowerShell\s*[57])"
     )
     # 射程＝`tools/` 樹全部 .py。刻意不限 `tools/tests/`：本輪命中的最嚴重一筆在
     # `tools/lib/windows_skip_tags.py`＝護欄層生產碼，只掃測試就會漏掉它。
@@ -572,17 +594,52 @@ class TestNoStaleLocalEngineClaims(unittest.TestCase):
     def _scan_files(cls) -> list[Path]:
         return sorted(p for p in cls._SCAN_ROOT.rglob("*.py") if "__pycache__" not in p.parts)
 
+    def test_scan_root_is_anchored(self) -> None:
+        """🔴 R73 二審防呆（SD）：射程錯位必須 fail-loud，不得靜默縮小。
+
+        `_SCAN_ROOT = parents[1]` 依賴本檔位於 `tools/tests/`。若本檔被移到
+        `tools/tests/sub/`，射程會靜默縮成 `tools/tests`（SD 實測 79 檔 → 56 檔），
+        而唯一守衛 `assertGreater(scanned, 20)` **抓不到**——本輪最嚴重的那筆違規
+        （`tools/lib/windows_skip_tags.py`）就會逸出而全套照綠。
+        故除了檔數下限，另釘「樹根叫 tools」與「sentinel 檔必須在掃描集合內」。
+        """
+        self.assertEqual(
+            self._SCAN_ROOT.name, "tools",
+            f"射程樹根不是 tools/（實得 {self._SCAN_ROOT}）——本檔可能被移動了位置",
+        )
+        sentinel = self._SCAN_ROOT / "lib" / "windows_skip_tags.py"
+        self.assertIn(
+            sentinel, self._scan_files(),
+            "sentinel `tools/lib/windows_skip_tags.py` 不在掃描集合內——射程已錯位。"
+            "它是 R73 實測到的最嚴重違規所在（護欄層生產碼），漏掃等於鎖白裝",
+        )
+
     def test_tools_tree_has_no_hardcoded_local_engine_absence(self) -> None:
         offenders: list[str] = []
         scanned = 0
         for path in self._scan_files():
-            text = path.read_text(encoding="utf-8")
+            # `errors="replace"`：非 UTF-8 的 .py 落進 tools/ 時，鎖應該回報 finding
+            # 而不是自己拋 UnicodeDecodeError（SD 二審指出的失效模式）。
+            text = path.read_text(encoding="utf-8", errors="replace")
             scanned += 1
             exempt = _skip_reason_linenos(text)
             for lineno, line in enumerate(text.splitlines(), 1):
                 if not self._STALE_RE.search(line):
                     continue
-                if lineno in exempt or _STALE_SAMPLE_MARKER in line:
+                # 🔴 R73 二審收窄（Architect N2）：只看**去掉行尾註解後**的部分是否被豁免。
+                # 實測最實際的一條繞道是：skip 理由後面接一個帶假事實的行尾註解
+                # ——假事實藏在 skip 理由**同一行的行尾註解**裡即取得豁免，而初版
+                # docstring 卻宣稱「不得外溢到註解」（它只驗了獨立成行的註解）。
+                in_trailing_comment = False
+                if lineno in exempt and "#" in line:
+                    head, _, tail = line.partition("#")
+                    in_trailing_comment = (
+                        self._STALE_RE.search(tail) is not None
+                        and self._STALE_RE.search(head) is None
+                    )
+                if (lineno in exempt and not in_trailing_comment) or (
+                    _STALE_SAMPLE_MARKER in line
+                ):
                     continue
                 rel = path.relative_to(self._SCAN_ROOT)
                 offenders.append(f"{rel}:{lineno}: {line.strip()}")
@@ -617,6 +674,48 @@ class TestNoStaleLocalEngineClaims(unittest.TestCase):
             with self.subTest(sample=sample):
                 self.assertIsNotNone(self._STALE_RE.search(sample))
 
+    def test_detector_catches_the_paraphrases_that_used_to_escape(self) -> None:
+        """🔴 R73 二審（SD）：換個說法就繞過的那些句子，必須逐句被命中。
+
+        意圖（Rule 9）：初版判準主語只認「本機」、否定只認「無/沒有/不存在」。
+        SD 二審實測下列五句全部 MISS ⇒ 鎖等於只擋「照抄原句」的人。
+        一條只擋得住原句的鎖，對「同型復發」零防護——而同型復發正是它存在的理由。
+        """
+        for sample in (
+            "這台機器沒有 pwsh 7",  # stale-sample: SD 二審 MISS 樣本
+            "機器上不存在 pwsh 7",  # stale-sample: SD 二審 MISS 樣本
+            "此機器無 PowerShell 7",  # stale-sample: SD 二審 MISS 樣本
+            "本機並未安裝 pwsh",  # stale-sample: SD 二審 MISS 樣本
+            "本機未裝 pwsh 7",  # stale-sample: SD 二審 MISS 樣本
+        ):
+            with self.subTest(sample=sample):
+                self.assertIsNotNone(self._STALE_RE.search(sample))
+
+    def test_skip_exemption_cannot_be_used_as_a_hiding_place(self) -> None:
+        """🔴 R73 二審（Architect N2）：豁免不得成為藏假事實的地方。
+
+        意圖（Rule 9）：豁免是鎖上的洞，而洞的形狀必須恰好等於「正當理由」。
+        Architect 實測四條繞道全部成功，其中最實際的是**同行行尾註解**——
+        把假事實寫在 skip 理由後面的 `#` 註解裡即取得整行豁免，
+        而初版 docstring 卻宣稱「不得外溢到註解」。
+        """
+        # (1) 自訂函式名含 skip 不得取得豁免（允許清單）
+        # stale-sample: 繞道樣本（自訂函式名含 skip，不得因此取得豁免）
+        src_custom = 'def _skip_note(m): pass\n_skip_note("本機無 pwsh 7")\n'  # stale-sample:
+        self.assertNotIn(
+            2, _skip_reason_linenos(src_custom),
+            "自訂 `_skip_note(...)` 取得了豁免——判準必須是允許清單，不是「名字含 skip」",
+        )
+        # (2) 屬性呼叫名含 skip 亦不得
+        src_attr = 'doc.skipped_reason_note("本機無 pwsh 7")\n'  # stale-sample: 繞道樣本
+        self.assertNotIn(
+            1, _skip_reason_linenos(src_attr),
+            "`doc.skipped_reason_note(...)` 取得了豁免——同上",
+        )
+        # (3) 真正的 skip 機制仍須豁免（不得因收窄而假紅）
+        src_real = 'self.skipTest("本機無 pwsh 7")\n'  # stale-sample: 正向樣本
+        self.assertIn(1, _skip_reason_linenos(src_real), "真正的 skipTest 理由必須仍豁免")
+
     def test_detector_does_not_flag_conditional_prose(self) -> None:
         """對照組：說通則而非說這台機器的句子不得誤報。"""
         for sample in (
@@ -633,15 +732,21 @@ class TestNoStaleLocalEngineClaims(unittest.TestCase):
             '@unittest.skipUnless(cond, "本機無 pwsh 7")\n'  # stale-sample: 正向
             'class A(unittest.TestCase):\n'
             '    def t(self):\n'
-            '        self.skipTest("本機無 powershell")\n'  # stale-sample: AST 豁免正向樣本
-            '        msg = "本機無 pwsh 7"\n'  # stale-sample: 一般字串對照組（不得豁免）
-            '        # 本機無 pwsh 7\n'  # stale-sample: 註解對照組（不在 AST 上）
+            '        self.skipTest("本機無 powershell")\n'  # stale-sample: 正向
+            '        self.skipTest(f"本機無 pwsh 7（{x}）")\n'  # stale-sample: f-string 正向
+            '        msg = "本機無 pwsh 7"\n'  # stale-sample: 對照組（不得豁免）
+            '        # 本機無 pwsh 7\n'  # stale-sample: 註解對照組
         )
         exempt = _skip_reason_linenos(src)
         self.assertIn(2, exempt, "skipUnless 的理由字串必須豁免")
         self.assertIn(5, exempt, "skipTest 的理由字串必須豁免")
-        self.assertNotIn(6, exempt, "一般字串賦值不是 skip 理由，不得豁免")
-        self.assertNotIn(7, exempt, "註解不在 AST 上，本來就不該出現在豁免集合")
+        self.assertIn(
+            6, exempt,
+            "f-string 的 skip 理由必須豁免——`JoinedStr` 在 AST 上不是 `Constant`，"
+            "只認 Constant 會讓它逸出豁免而假紅（假紅會逼人去修正確的碼，或直接關掉鎖）",
+        )
+        self.assertNotIn(7, exempt, "一般字串賦值不是 skip 理由，不得豁免")
+        self.assertNotIn(8, exempt, "註解不在 AST 上，本來就不該出現在豁免集合")
 
     def test_stale_sample_marker_stays_bounded(self) -> None:
         """行尾豁免標記不得擴散：只允許出現在本檔（偵測器自己的樣本）。

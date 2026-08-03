@@ -3,7 +3,8 @@
 
 WHY（為何非得有這道鎖）：
   R60 為 `tools/windows_smoke_local.ps1` 補上獨立 schtasks 心跳
-  （`AutoClaude_WindowsSmoke`，每日 01:00，由 `tools/install_windows_nightly.ps1` 註冊），
+  （`AutoClaude_WindowsSmoke`，每日觸發，由 `tools/install_windows_nightly.ps1` 註冊；
+時刻現查 `Get-ScheduledTaskInfo`——R73/DEF-101-779 訂正：本檔原寫死的時刻與實況不符），
   修復確實落地；但兩份**活文件**仍逐字保留已被推翻的宣稱——
     · `ONBOARDING.md` §8：「…只能手動觸發…沒有自動觸發器＝補償控制自己沒有心跳」
     · `AutoClaude/tools/run_local_nightly.ps1` 檔頭第 1 項：同一組敘述
@@ -138,7 +139,7 @@ class TestWindowsSmokeHeartbeatDocSync(unittest.TestCase):
             [],
             "以下活文件仍帶已被 R60 修復推翻的宣稱，且同檔沒有任何訂正脈絡：\n"
             + "\n".join(f"  - {o}" for o in offenders)
-            + f"\n修法：在該敘述旁註明「現由 {_SMOKE_TASK_NAME}（每日 01:00，由 "
+            + f"\n修法：在該敘述旁註明「現由 {_SMOKE_TASK_NAME}（每日觸發，時刻現查，由 "
             "tools/install_windows_nightly.ps1 註冊）觸發；心跳讀 Get-ScheduledTaskInfo，"
             "-Status 對缺席回 exit 1」，並保留仍為真的那半句"
             "（run_local_nightly.ps1 對它零呼叫＝刻意解耦）。",

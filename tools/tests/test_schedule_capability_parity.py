@@ -218,7 +218,14 @@ class TestScheduleCapabilityParity(unittest.TestCase):
         """靜態抽取本身要抽到已知的 switch 集合，證明 regex 未失準（鏡子自證）。"""
         switches = _win_switch_names(_win_source())
         self.assertEqual(
-            switches, {"Uninstall", "Status"},
+            # 🔴 R73（DEF-101-782）新增 `AllowSmokeAfterNightly`：它**不是**一項對外能力，
+            # 而是「smoke 早於 nightly」這條不變量的**顯式旁路**（要違反可以，但必須說出口）。
+            # mac 側沒有對等物，也不該有——mac 的 launchd plist 兩支時刻由
+            # `install_mac_nightly.sh` 各自寫死，沒有讓使用者傳入時刻的路徑，
+            # 因此不存在「顯式傳參違反順序」這條需要旁路的風險面。
+            # 故本項刻意**不**列入下方逐項能力對照（那些對照斷言 mac/win 兩側並存），
+            # 只登記在此以維持抽取器的鏡子自證。
+            switches, {"Uninstall", "Status", "AllowSmokeAfterNightly"},
             f"windows switch 抽取結果與預期不符（可能新增/刪除了 switch，"
             f"需同步更新本測試的能力對照表）：{switches}",
         )

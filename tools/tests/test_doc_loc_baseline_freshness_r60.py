@@ -2782,34 +2782,58 @@ class TestR71SmokeTripwireIsInViewWithTheHonestReading(unittest.TestCase):
             self.assertNotIn("smoke", rel, f"smoke 被接成心跳檔：{rel}")
 
     def test_windows_wording_blocks_the_not_running_misreading(self) -> None:
+        """🔴 R73 訂正（DEF-101-786）：本 case 原本斷言該段**必須含「無 log 落點」**
+        ——也就是**這條鎖在守一句假話**。R71 已在 `tools/windows_smoke_local.ps1`
+        加上 `Start-Transcript` 落點＋14 天輪替（SA 二審以 `git log -S` 證實與那句
+        「無落點」是**同一個 commit**），故該斷言反過來把訂正擋住了。
+        改為守**現況為真的那組語意**：落點存在、但尚未接成機械證據源、且兩種誤讀都要擋。
+        """
         win = BO.SMOKE_EVIDENCE["win32"]
-        self.assertIn("無 log 落點", win, "未說明是載具缺口 ⇒ 讀者只會看到「讀不到」")
+        self.assertIn("log 落點**存在**", win, "未說明落點已存在 ⇒ 又退回 R71 前的假事實")
+        self.assertIn("尚未", win, "未說明「落點存在 ≠ 已接成證據源」⇒ 讀者會誤以為已納入判定")
         self.assertIn("不得", win, "缺明確禁止句 ⇒ 又一次把「沒記錄」讀成「沒在跑」")
         self.assertIn("Get-ScheduledTask", win, "未給出可自行查證排程存在的指令")
 
-    def test_the_windows_no_log_premise_is_still_true(self) -> None:
-        """🔴 立案前提的機械看守：上面那段說明**只有在 smoke 排程仍無輸出重導時才誠實**。
+    def test_the_windows_log_landing_premise_matches_reality(self) -> None:
+        """🔴 R73 重寫（DEF-101-786）——**本鎖原本的射程漏掉了真正的機制，導致它
+        自己就是「到期日不會到」的原因**。
 
-        哪天有人替 Windows smoke 接上 log（`> file`／`Tee-Object`／`Start-Transcript`），
-        本支就會轉紅，並直接指路「前提變了，該把 smoke 升級為真的機械證據源」——
-        deferral 因此有到期日，不會靠人記得。
+        原設計：掃 `install_windows_nightly.ps1` 的**排程 action** 有無輸出重導
+        （`>`／`Tee-Object`／`Start-Transcript`），有就轉紅指路「前提變了」。
+        實況：R71 把 `Start-Transcript` 加在 **`tools/windows_smoke_local.ps1` 腳本自己
+        裡面**（`:111,127` ＋ `:125` 的 14 天輪替），排程 action 完全沒動 ⇒ 本鎖恆綠，
+        而它守的那個前提在同一個 commit 就已為假。跨 R72、R73 兩輪無人察覺。
+        這是本輪第三次遇到同一形態（另兩筆：`DEF-101-777` 鎖只圈一個檔、
+        `DEF-101-784` 守門沒鎖），也是 `DEF-101-757` 的又一次復發。
+
+        改寫方向：**射程涵蓋兩個站點**（排程 action ＋ 腳本本體），且判準反轉——
+        現況是「落點確實存在」，所以本鎖改為守住「落點存在」與「說明文字承認它存在」
+        兩者一致；哪天有人把落點拿掉，說明文字就會與實況脫節而轉紅。
         """
-        ps1 = (_REPO_ROOT / "tools" / "install_windows_nightly.ps1").read_text(encoding="utf-8-sig")
-        at = ps1.find(self._SMOKE_ACTION)
-        self.assertGreater(at, -1, f"找不到 `{self._SMOKE_ACTION}` ⇒ 本鎖的取值面消失，先修取值面")
-        window = ps1[at:at + 400]
-        hits = [r for r in self._REDIRECTS if r in window]
-        self.assertEqual(
-            hits, [],
-            f"smokeAction 已含輸出重導 {hits} ⇒ Windows smoke 有 log 落點了；"
-            f"請把 `_BO.SMOKE_EVIDENCE['win32']` 由「無檔可讀」升級為真的探針（D-4 解鎖）",
+        landing_sites = {
+            "tools/windows_smoke_local.ps1": self._REDIRECTS,
+            "tools/install_windows_nightly.ps1": self._REDIRECTS,
+        }
+        found: dict[str, list[str]] = {}
+        for rel, needles in landing_sites.items():
+            text = (_REPO_ROOT / rel).read_text(encoding="utf-8-sig")
+            found[rel] = [n for n in needles if n in text]
+        self.assertTrue(
+            found["tools/windows_smoke_local.ps1"],
+            "`windows_smoke_local.ps1` 內找不到任何 log 落點機制（`>`／`Tee-Object`／"
+            "`Start-Transcript`）⇒ 落點被移除了，而 `SMOKE_EVIDENCE['win32']` 仍宣稱它存在。"
+            "兩者必須同進同退（DEF-101-786：上一版本鎖只掃排程 action，漏掉這個站點）",
         )
-        # 🔴 掃描器自檢（否則上一段對任何輸入都恆綠＝本批正在清算的那種死鎖）：同一個
-        # 掃描器餵進「真的接上 log」的形態必須命中。本 repo 不准只寫鎖、不驗鎖。
-        wired = window + "\n  | Tee-Object -FilePath $LogDir\\smoke_latest.log"
+        self.assertIn(
+            "log 落點**存在**", BO.SMOKE_EVIDENCE["win32"],
+            "落點機制在磁碟上存在，但說明文字沒承認 ⇒ 又回到 R71 那句假事實",
+        )
+        # 🔴 掃描器自檢（否則上面兩段可能對任何輸入都恆綠＝本批正在清算的那種死鎖）：
+        # 餵進「落點被拔掉」的形態必須命中。本 repo 不准只寫鎖、不驗鎖。
+        stripped = "# 這個假樣本刻意不含任何輸出重導字樣\nWrite-Host 'hello'\n"
         self.assertEqual(
-            [r for r in self._REDIRECTS if r in wired], ["Tee-Object"],
-            "掃描器對已接上重導的形態也不命中 ⇒ 上一段是死鎖，前提失效那天不會有人知道",
+            [n for n in self._REDIRECTS if n in stripped], [],
+            "掃描器對「完全沒有落點」的形態也命中 ⇒ 判準恆真，落點被拔掉那天不會有人知道",
         )
 
 

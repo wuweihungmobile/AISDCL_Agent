@@ -1200,9 +1200,13 @@ def test_gate_helpers_stop_at_first_parseable_json(ps1_content: str) -> None:
     排在 JSON **之後**，`2>&1` 合流後被接到尾巴 ⇒ ConvertFrom-Json 炸 ⇒ 閘門把
     「已達標 43/30」報成「量不出來」（假未達標，與 R71 要治的假達標同樣是假訊號）。
 
-    為何要**靜態**鎖而不只靠行為鎖：四支之中只有 Get-ObsGaPass 與 Get-DriftGaPass
-    有行為測試（能抽出函式本體真跑）；`Get-Ac4Gate` 與 `Get-MutationLockGate` 沒有，
-    只靠行為鎖會漏掉「只改兩邊」。本 case 讓四支一起被綁住。
+    為何要**靜態**鎖而不只靠行為鎖：四支之中 `Get-Ac4Gate` **沒有**行為測試，
+    只靠行為鎖會漏掉它。本 case 讓四支一起被綁住。
+    🔴 R73 二審訂正（Architect N1）：本段初版寫「只有 Get-ObsGaPass 與 Get-DriftGaPass
+    有行為測試，`Get-Ac4Gate` 與 `Get-MutationLockGate` 沒有」——**後半為假**，
+    `TestMutationLockGateBehavior` 就是抽 `Get-MutationLockGate` 本體餵真 python 跑的。
+    四支裡有三支有行為測試。在一輪專門治「治理文件寫假事實」的迭代裡，
+    新鎖的 docstring 自己寫了一筆假事實，訂正於此。
 
     判準取「函式本體內必須出現 break-on-success 的三個要件」，不比對整段字面——
     字面比對會在任何無害重排下假紅（本 repo 已有 `test_bare_hh_format_regex_has_

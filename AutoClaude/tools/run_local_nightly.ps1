@@ -650,10 +650,16 @@ function Get-ObsGaPass {
     $rc = $LASTEXITCODE
     $result.Rc = $rc
     # 🔴 R73（DEF-101-775，本輪唯一活體 P0）：原濾法是「見到第一個 `{` 之後**後面全收**」，
-    # 隱含假設 stderr 一律排在 JSON **之前**（上方註解也是這樣寫的）。實測不成立——
-    # `observability_ga_check.py` 的 legacy-record WARN 走 stderr 且排在 JSON **之後**，
-    # `2>&1` 合流後被接到 JSON 尾巴 ⇒ ConvertFrom-Json 拋
+    # 隱含假設 stderr 一律排在 JSON **之前**（上方註解也是這樣寫的）。該假設不成立——
+    # `observability_ga_check.py` 的 legacy-record WARN 走 stderr、與 JSON 走 stdout，
+    # `2>&1` 合流後**兩者的先後順序是非決定性的**（PS 分別讀兩個 stream）。當 WARN 落在
+    # JSON 之後，它就被接到 JSON 尾巴 ⇒ ConvertFrom-Json 拋
     # 「Additional text encountered after finished reading JSON」⇒ 走 catch ⇒ Ok=$false。
+    # 🔴 R73 二審訂正（SD）：本段初版寫成「WARN **排在** JSON 之後」＝把一次觀測寫成必然。
+    # SD 二審在同一支工具上實測到**相反順序**（WARN 在前），舵手先前在 pwsh 7.6.4 下量到
+    # WARN 在後、在 PS 5.1 下量到 stderr 被包成 ErrorRecord 排在最前。⇒ 這個缺陷是
+    # **間歇性**的，log 上那個回歸點是順序運氣。修法「不依賴順序」因此比原本更必要，
+    # 但不可把運氣寫成機制（否則下一個人會以為順序固定，再寫出依賴順序的碼）。
     #
     # 方向性（為何算 P0）：工具的真實答案是 `status=ready, green_streak=43, window=30`
     # ——obs GA **早已達標**——卻被自己的載具報成 `TOOL-ERROR`／`unavailable`。R71 那包
