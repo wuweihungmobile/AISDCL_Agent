@@ -53,15 +53,18 @@ WHY（為何非得有這道鎖）：
 """
 from __future__ import annotations
 
+import ast
 import contextlib
 import datetime
 import hashlib
+import inspect
 import io
 import json
 import re
 import subprocess
 import sys
 import tempfile
+import textwrap
 import unittest
 from contextlib import contextmanager
 from dataclasses import replace
@@ -3330,6 +3333,18 @@ def _repo_history_is_verifiable() -> bool:
     return bool(r and r.returncode == 0 and r.stdout.strip() == "false")
 
 
+def _head_commit() -> str | None:
+    """當前 HEAD 的 sha；解不出回 None。
+
+    刻意用 HEAD 而非任何 remote-tracking ref：HEAD 是**被測 commit 自己**，在 CI 與本機
+    都指向同一個東西；remote ref 會在 push 的那一瞬間前進，拿它當判準對象即不可滿足
+    （見 `cloud_pending_problems` 的教訓段）。
+    """
+    r = _git("rev-parse", "HEAD")
+    out = r.stdout.strip() if r and r.returncode == 0 else ""
+    return out if _FULL_SHA_RE.match(out) else None
+
+
 def _commit_iso_time(sha: str) -> str | None:
     """該 commit 的 committer 時間（ISO8601 帶時區）；解不出回 None。"""
     r = _git("show", "-s", "--format=%cI", sha)
@@ -3463,8 +3478,9 @@ def cloud_status_problems(onboarding_text: str, workflows_dir: Path) -> list[str
             problems.append(
                 f"{wf} 帶 `push:` 觸發但 §7 表③ 無對應列 ⇒ 它在雲端紅掉時本機沒有任何"
                 "東西會顯形（本輪 P0 的形態）。處置：跑表③ 上方那條 gh 指令補一列")
-    # 判準②′：覆蓋面新鮮度——錨必須覆蓋「最後一次 push 的 commit」，或誠實宣告 pending。
-    problems += cloud_coverage_problems(fields)
+    # 判準②′：`pending=`（「已推上去、結論尚未進表」）只驗非假性——不驗「是否等於最後
+    # 一次 push」，那個問題結構上不可能由住在被測 commit 內的測試回答（見該函式的教訓段）。
+    problems += cloud_pending_problems(fields)
     # 判準③④⑤：`head-sha` 綁到一個真實、且屬本分支的 commit（QA-R74-01 第 1 層）。
     problems += cloud_sha_problems(fields)
     # 判準⑥：因果——雲端結論不可能早於它所評的那個 commit 存在的時間。
@@ -3474,83 +3490,70 @@ def cloud_status_problems(onboarding_text: str, workflows_dir: Path) -> list[str
     return problems
 
 
-#: `cloud_coverage_problems` 的「請現查」哨兵（`None` 是合法的「查不出來」，不能兼作預設）。
+#: 「請現查」哨兵（`None` 是合法的「查不出來」，不能兼作預設）。
 _AUTO_REMOTE = object()
 
 
-def _remote_main_sha() -> str | None:
-    """最後一次 push 到 `origin/main` 的 commit；解不出回 None（＝未驗證）。"""
-    r = _git("rev-parse", "--verify", "--quiet", "origin/main")
-    out = r.stdout.strip() if r and r.returncode == 0 else ""
-    return out if _FULL_SHA_RE.match(out) else None
-
-
-def cloud_coverage_problems(
-    fields: dict[str, str], *, remote_main: object = _AUTO_REMOTE
+def cloud_pending_problems(
+    fields: dict[str, str], *, head: object = _AUTO_REMOTE
 ) -> list[str]:
-    """錨必須覆蓋**最後一次 push 的 commit**（`origin/main`），或誠實宣告 `pending=`。
+    """`pending=` 若存在，必須指向一個**真的、屬本分支歷史、且比 `head-sha` 更新**的 commit。
 
-    🔴 **這一條取代了 R74 原本的判準②**（`checked-at < max(measured-at)` 的**日期字串**
-    比較）。取代而非疊加，因為原判準的觸發條件選錯了對象，會製造一個**無法合法解除的
-    紅燈**——實測死結（舵手 2026-08-05 當回合重現）：
-      ① 本輪改了測試樹 ⇒ 表② 指紋漂移 ⇒ 必須 `--write --with-slow` 回填，否則
-         `--check-snapshot` rc=1 擋 pre-push；
-      ② 回填把 `measured-at` 推到今天；
-      ③ 原判準於是判「雲端結論早於本機量測 ⇒ 重查雲端」rc=1；
-      ④ **但雲端結論只在 push 之後才存在**，而 pre-push 會跑到 ③ 而擋住 push
-      ⇒ 「要有雲端結論才能 push，要 push 才會有雲端結論」。
-    唯一能讓它變綠的操作是把 `checked-at` 填成今天，而那是**宣稱一次沒發生過的查核**
-    ——判準逼出假宣稱，就是判準壞了，不是文件壞了。
+    語意＝「這個 commit 已經推上去，它的雲端結論**尚未**進本表」。它讓「還沒查」成為一個
+    可以誠實寫出來、且**合法通過**的狀態，而不必靠把 `checked-at` 填成今天來解紅（那是
+    宣稱一次沒發生過的查核）。
 
-    改成以 commit 身分為準之後，三件事同時解決：
-      · **不可能死結**：本判準要求的結論永遠是「**已經** push 出去的那個 commit」的結論，
-        那個結論按定義取得得到（或正在跑，見 `pending`），不需要先 push 一次未來的 commit。
-      · **同日內有效**：比的是 40 位 sha 而不是日期 ⇒ 一天內做幾個 commit 都分辨得出來
-        （這正是 QA-R74-01 指出、而日期判準結構上做不到的那一層）。
-      · **不會被遺忘**：`pending` 的值必須**逐字等於** `origin/main`，所以下一次 push 一到
-        它就自動失效轉紅。它是**本機算得出的字串**（不需要網路），所以「更新它」永遠做得到
-        ——這是它與「必須先有雲端結論」的關鍵差別。
+    🔴 **本判準刻意只驗「非假性」，不驗「是否等於最後一次 push」——後者結構上不可滿足。**
+    R75 落地時我第一版就是拿 `git rev-parse origin/main` 當比較對象，實測後果：main 上
+    三支 workflow 全紅（root-infra／windows-compat／macos-compat），而且**每一次 push 都
+    必紅**。推導很短：CI 是在 push **之後**跑的，那時 `origin/main` 已經等於被測的那個
+    commit；要讓 commit X 通過，X 的檔案內容就必須寫進 X 自己的 sha——而 sha 是 X 內容的
+    雜湊，**自我指涉、不可能滿足**。當回合實測重現（HEAD == `origin/main` == `21354c9`
+    時跑同一支測試即紅），錯誤訊息還指著兩個其實相等的值。
 
-    判準要分的是「**尚未查核**」與「**假稱已查核**」：
-      · `head-sha == origin/main` ⇒ 錨覆蓋了最後一次 push，合格（此時不得再掛 `pending`）。
-      · `head-sha != origin/main` 且**有** `pending == origin/main` ⇒ 「已推上去、結論尚未
-        查核／仍在跑」，這是輪次進行中的**正常狀態**，合格。
-      · `head-sha != origin/main` 且**沒有** `pending` ⇒ 紅。這才是缺陷：錨讀起來像現況，
-        實際覆蓋的是一個更舊的 commit（R73→R74 那次事故的形態本體）。
-      · `pending` 存在但不等於 `origin/main` ⇒ 紅（它沒指向最後一次 push，等於一張過期的
-        免責聲明——那正是本判準最不能容忍的東西）。
+    ⇒ **教訓（已升為機械物，見 `TestR75CloudCriteriaAreSatisfiableAtAnyCommit`）：判準的
+    比較對象若會隨「被該判準所判的那個動作」本身而改變，這個判準結構上不可滿足。**
+    「錨有沒有覆蓋最新 push」這個問題**不可能由住在該 commit 內的測試回答**，因為答案依賴
+    一個在 commit 之後才確定的值。它的歸宿是 **pre-push／收輪清單**（那個時點 `origin/main`
+    尚未前進，比較才有意義，而且「去查雲端」這個動作那時也真的做得到）。
 
-    `origin/main` 解不出來（無 remote／CI 的 detached checkout）⇒ 整條**未驗證、不判紅**
-    （同 `_git` 的 WHY：取證載具不在不等於事實為假）。誠實邊界：這道鎖的牙長在**本機
-    pre-push**，也正是收輪動作發生的地方。
+    留在本判準（CI 會跑、對任何 commit 皆可滿足）的四層，全部只問**過去**：
+      ① 形態＝恰 40 位小寫 hex 且非全同字元；
+      ② 解析得出 commit 物件（shallow／無 git ⇒ 未驗證，不判紅）；
+      ③ 是 HEAD 或 HEAD 的祖先——**不得宣稱一個不存在或未來的 commit**；
+      ④ 是 `head-sha` 的**嚴格後代**——否則它沒有宣告任何新的未查核狀態，只是雜訊。
+    四層都只涉及被測 commit 自己的歷史 ⇒ 任何 commit 上都滿足得了。
     """
-    remote = _remote_main_sha() if remote_main is _AUTO_REMOTE else remote_main
-    if not isinstance(remote, str) or not _FULL_SHA_RE.match(remote):
-        return []
-    sha, pending = fields.get("head-sha", ""), fields.get("pending", "")
-    if sha == remote:
-        if pending:
-            return [f"表③ 錨已覆蓋最後一次 push（`head-sha` == `origin/main` "
-                    f"{remote[:12]}…），卻還掛著 `pending={pending[:12]}…` ⇒ 自相矛盾："
-                    f"結論已經查到了，pending 是忘了清的殘留。處置：刪掉 `pending=` 欄"]
-        return []
+    pending = fields.get("pending", "")
     if not pending:
-        return [f"表③ 錨的 `head-sha={sha[:12]}…` 不是最後一次 push 的 commit "
-                f"（`origin/main`={remote[:12]}…），而錨也沒有宣告 `pending=` ⇒ 這張表"
-                f"讀起來像現況，實際覆蓋的是一個更舊的 commit——**R73 收輪時本機全綠、"
-                f"雲端 windows-compat-ci 紅卻沒人發現，就是這個形態**。\n"
-                f"    兩條合法出路（都不需要編造任何東西）：①已 push 且五支 run 都 "
-                f"completed ⇒ 現查後把真實結論填進表格、`head-sha` 改為 {remote[:12]}…；"
-                f"②尚未查核／run 還在跑 ⇒ 在錨上加 `pending={remote}`，誠實表示"
-                f"「這個 commit 已推上去、結論還沒進表」"]
-    if pending != remote:
-        return [f"表③ 錨的 `pending={pending[:12]}…` 不等於最後一次 push 的 commit "
-                f"（`origin/main`={remote[:12]}…）⇒ 這是一張**過期的免責聲明**：它宣告"
-                f"「某個較舊的 commit 尚未查核」，而此後又推了新的東西上去。\n"
-                f"    `pending` 必須逐字等於 `origin/main`——這就是它無法被遺忘的機制："
-                f"下一次 push 一到它就失效轉紅，而更新它只需要本機一個 "
-                f"`git rev-parse origin/main`（不需要網路、不需要等雲端）"]
-    return []
+        return []
+    problems: list[str] = []
+    if not _FULL_SHA_RE.match(pending) or len(set(pending)) == 1:
+        return [f"表③ 錨的 `pending={pending!r}` 不是完整 commit sha（須恰 40 位小寫 hex、"
+                f"且不得為全同字元的佔位值）——這一欄的意義是唯一定位「哪個 commit 的結論"
+                f"還沒進表」，填不合形態的值等於沒填"]
+    sha = fields.get("head-sha", "")
+    if pending == sha:
+        return [f"表③ 錨的 `pending` 與 `head-sha` 是同一個 commit（{sha[:12]}…）⇒ 它沒有"
+                f"宣告任何「尚未查核」的狀態。若該 commit 的結論已進表就刪掉 `pending=` 欄；"
+                f"若還沒查，`pending` 應指向那個**更新的**、結論還沒進表的 commit"]
+    head_sha = _head_commit() if head is _AUTO_REMOTE else head
+    if not _repo_history_is_verifiable() or not isinstance(head_sha, str):
+        return problems          # 未驗證（同 `_git` 的 WHY），不判紅
+    r = _git("rev-parse", "--verify", "--quiet", f"{pending}^{{commit}}")
+    if r is None or r.returncode != 0:
+        return [f"表③ 錨的 `pending={pending[:12]}…` 在本 repo 解析不出 commit 物件"
+                f"（本 repo 有完整歷史）⇒ 它宣稱一個不存在的 commit 尚未查核"]
+    if _git("merge-base", "--is-ancestor", pending, head_sha).returncode != 0:
+        problems.append(
+            f"表③ 錨的 `pending={pending[:12]}…` 不是 HEAD（{head_sha[:12]}…）本身也不是"
+            f"它的祖先 ⇒ 錨在宣稱一個**未來或別條分支**的 commit。本欄只能記載已經進入"
+            f"本分支歷史的 commit——這一層就是它不能被拿來編造的原因")
+    if sha and _git("merge-base", "--is-ancestor", sha, pending).returncode != 0:
+        problems.append(
+            f"表③ 錨的 `pending={pending[:12]}…` 不是 `head-sha`（{sha[:12]}…）的後代 ⇒ "
+            f"它比已查核的那個 commit 還舊，宣告不出任何新的未查核狀態")
+    return problems
 
 
 def cloud_causality_problems(fields: dict[str, str]) -> list[str]:
@@ -3631,52 +3634,61 @@ class TestR74CloudCiStatusIsRecorded(unittest.TestCase):
     _SHA_A = "a" * 39 + "0"
     _SHA_B = "b" * 39 + "1"
 
-    def test_an_anchor_behind_the_last_push_without_pending_is_red(self) -> None:
-        """注入＝R73→R74 事故的形態本體：錨覆蓋的是更舊的 commit，且沒宣告 pending。"""
-        problems = cloud_coverage_problems(
-            {"head-sha": self._SHA_A}, remote_main=self._SHA_B)
-        self.assertTrue(any("沒有宣告 `pending=`" in p for p in problems), problems)
+    def test_a_malformed_or_placeholder_pending_is_red(self) -> None:
+        """注入：pending 填短 sha／全零／非 hex ⇒ 必紅（同 `head-sha` 的非假性門檻）。"""
+        for bad in ("deadbeef", "0" * 40, "ZZ" + "0" * 38):
+            with self.subTest(bad):
+                self.assertTrue(
+                    cloud_pending_problems({"head-sha": self._SHA_A, "pending": bad},
+                                           head=self._SHA_B),
+                    f"{bad!r} 應判紅卻放行")
 
-    def test_an_honest_pending_declaration_is_green(self) -> None:
-        """🔴 死結的解：「已 push、結論尚未查核」必須是**合法通過**的狀態。
+    def test_pending_equal_to_head_sha_is_red(self) -> None:
+        """注入：pending == head-sha ⇒ 沒宣告任何「尚未查核」狀態，只是雜訊。"""
+        problems = cloud_pending_problems(
+            {"head-sha": self._SHA_A, "pending": self._SHA_A}, head=self._SHA_B)
+        self.assertTrue(any("同一個 commit" in p for p in problems), problems)
 
-        少了這條，判準會逼出唯一一種讓它變綠的操作——把 `checked-at` 填成今天、
-        `head-sha` 填成 HEAD，也就是**宣稱一次沒發生過的雲端查核**。判準逼出假宣稱，
-        就是判準壞了（`[[no-fabricated-tool-output]]`）。
+    def test_a_pending_naming_a_nonexistent_commit_is_red(self) -> None:
+        """注入：形態合法但 repo 裡沒這個 commit ⇒ 宣稱一個不存在的 commit 尚未查核。"""
+        if not _repo_history_is_verifiable():
+            self.skipTest("本 repo 非完整歷史（shallow／無 git）⇒ 該層依設計未驗證")
+        fake = "0123456789abcdef" * 2 + "89abcdef"
+        problems = cloud_pending_problems(
+            {"head-sha": self._SHA_A, "pending": fake}, head=self._head_or_skip())
+        self.assertTrue(any("解析不出 commit" in p for p in problems), problems)
+
+    def test_the_real_anchor_pending_is_green(self) -> None:
+        """對照組：文件現值必須綠——否則上面幾支只是把所有輸入都判紅。"""
+        fields, dup = parse_cloud_fields(
+            SYNC.anchored_line(_ONBOARDING.read_text(encoding="utf-8-sig"),
+                               _CLOUD_ANCHOR).split(_CLOUD_ANCHOR, 1)[1])
+        self.assertEqual(dup, [])
+        self.assertEqual(cloud_pending_problems(fields), [])
+
+    def _head_or_skip(self) -> str:
+        head = _head_commit()
+        if head is None:
+            self.skipTest("取不到 HEAD（無 git）⇒ 該層依設計未驗證")
+        return head
+
+    def test_pending_is_green_even_when_head_equals_the_pushed_commit(self) -> None:
+        """🔴 **本次 main 三支全紅的直接重現條件**（結構性回歸鎖）。
+
+        CI 是在 push **之後**跑的，所以在 CI 上「最後一次 push 的 commit」就等於**被測的
+        那個 commit 自己**。第一版判準拿 remote ref 當比較對象，於是要求 X 的內容寫進 X
+        自己的 sha——自我指涉、不可能滿足，**每一次 push 都必紅**。
+
+        本測試把那個條件直接餵進來：`head` 就是被測 commit（＝CI 上的狀態），而錨記載的
+        `head-sha`／`pending` 都是它的祖先。這在任何 commit 上都必須綠。
         """
+        head = self._head_or_skip()
+        fields, _dup = parse_cloud_fields(
+            SYNC.anchored_line(_ONBOARDING.read_text(encoding="utf-8-sig"),
+                               _CLOUD_ANCHOR).split(_CLOUD_ANCHOR, 1)[1])
         self.assertEqual(
-            cloud_coverage_problems(
-                {"head-sha": self._SHA_A, "pending": self._SHA_B}, remote_main=self._SHA_B),
-            [])
-
-    def test_a_pending_that_does_not_point_at_the_last_push_is_red(self) -> None:
-        """注入：pending 指向一個更舊的 commit ⇒ 過期的免責聲明，必紅。
-
-        這一支就是「不會被遺忘」的機械面：再推一次 push，`origin/main` 前進，
-        原本合法的 pending 當場失效。
-        """
-        stale_pending = {"head-sha": self._SHA_A, "pending": self._SHA_A}
-        self.assertTrue(any("過期的免責聲明" in p
-                            for p in cloud_coverage_problems(stale_pending,
-                                                             remote_main=self._SHA_B)))
-
-    def test_covering_the_last_push_is_green_and_must_not_keep_pending(self) -> None:
-        """對照組＋反向：覆蓋到最後一次 push 即綠；此時仍掛 pending ⇒ 自相矛盾必紅。"""
-        self.assertEqual(
-            cloud_coverage_problems({"head-sha": self._SHA_B}, remote_main=self._SHA_B), [])
-        self.assertTrue(any("自相矛盾" in p for p in cloud_coverage_problems(
-            {"head-sha": self._SHA_B, "pending": self._SHA_B}, remote_main=self._SHA_B)))
-
-    def test_unresolvable_remote_is_not_verified_rather_than_red(self) -> None:
-        """邊界：`origin/main` 解不出來（無 remote／CI detached）⇒ 未驗證、不判紅。
-
-        取證載具不在 ≠ 事實為假（`DEF-101-756` 的形態）。若改成判紅，這道鎖會在每一個
-        沒有 remote 的 checkout 上假紅，然後被整道關掉。
-        """
-        for absent in (None, "", "not-a-sha"):
-            with self.subTest(absent):
-                self.assertEqual(
-                    cloud_coverage_problems({"head-sha": self._SHA_A}, remote_main=absent), [])
+            cloud_pending_problems(fields, head=head), [],
+            "在 CI 的條件（被測 commit == 最新 push）下判紅 ⇒ 又是一個不可滿足的判準")
 
     def test_the_deadlock_scenario_no_longer_forces_a_fabricated_check(self) -> None:
         """🔴 死結回歸鎖（端到端）：舵手 2026-08-05 實測的那個狀態必須可以合法通過。
@@ -3696,7 +3708,10 @@ class TestR74CloudCiStatusIsRecorded(unittest.TestCase):
         self.assertEqual(dup, [])
         self.assertEqual(fields["checked-at"], old_checked, "量測日期被動過＝假宣稱")
         self.assertEqual(fields["head-sha"], old_sha, "覆蓋的 commit 被動過＝假宣稱")
-        self.assertEqual(cloud_coverage_problems(fields, remote_main=self._SHA_B), [])
+        # 合成 sha 在 repo 裡不存在 ⇒ 只驗前兩層（形態、≠head-sha）；存在性那層由
+        # `test_a_pending_naming_a_nonexistent_commit_is_red` 以真 repo 覆蓋。
+        self.assertTrue(_FULL_SHA_RE.match(fields["pending"]))
+        self.assertNotEqual(fields["pending"], fields["head-sha"])
 
     def test_prose_on_the_anchor_line_cannot_hijack_a_field(self) -> None:
         """🔴 注入＝R75 落地當回合自己踩到的那一筆：同一行散文裡的 `pending=<值>…`
@@ -3788,6 +3803,83 @@ class TestR74CloudCiStatusIsRecorded(unittest.TestCase):
         self.assertEqual(
             cloud_red_set_problems(table, {"red": "windows-compat-ci.yml"}), [],
             "正確對應卻判紅 ⇒ 判準退化成永遠紅")
+
+
+#: 「會隨 push 這個動作本身而改變」的 git 參照。判準的比較對象**不得**是其中任何一個。
+_MOVING_REF_TOKENS: tuple[str, ...] = (
+    "origin/", "@{u", "@{upstream", "ls-remote", "--remotes", "for-each-ref",
+)
+
+
+class TestR75CloudCriteriaAreSatisfiableAtAnyCommit(unittest.TestCase):
+    """🔴 **本輪最貴的一課，升為機械物**（比個案修復更重要）：
+
+    **判準的比較對象若會隨「被該判準所判的那個動作」本身而改變，這個判準結構上不可滿足。**
+
+    實證（R75，代價＝main 上三支 workflow 全紅）：表③ 的覆蓋面判準第一版拿
+    `git rev-parse origin/main` 當比較對象，要求錨的 `head-sha` 等於它。推導只有兩步——
+    CI 在 push **之後**執行，那時 `origin/main` 已經等於被測的那個 commit；於是要讓
+    commit X 通過，X 的檔案內容必須寫進 X 自己的 sha，而 sha 是 X 內容的雜湊 ⇒ **自我
+    指涉，任何 commit 都滿足不了**。本機 pre-push 時 `origin/main` 還沒前進所以是綠的，
+    push 完就紅——「本機全綠、雲端紅」在同一輪內第二次發生，而且兩次都出在**用來防這件事
+    的那個機制自己身上**。
+
+    本鎖讀 `cloud_*` 判準家族的**執行碼**（以 AST 去掉 docstring 與註解——教訓必須能寫在
+    散文裡，但不得寫進判準），任一支只要碰到 remote-tracking 參照就當場點名。這樣下一個
+    人想加「跟 origin 比一下」的判準時，會在寫完的那一刻就紅，而不是在 push 之後才紅。
+    """
+
+    def _executable_source(self, fn: object) -> str:
+        """函式的執行碼（剝掉 docstring 與註解），用來與散文分開判定。"""
+        tree = ast.parse(textwrap.dedent(inspect.getsource(fn)))  # type: ignore[arg-type]
+        node = tree.body[0]
+        body = getattr(node, "body", [])
+        if (body and isinstance(body[0], ast.Expr)
+                and isinstance(body[0].value, ast.Constant)
+                and isinstance(body[0].value.value, str)):
+            node.body = body[1:] or [ast.Pass()]  # type: ignore[attr-defined]
+        return ast.unparse(tree)
+
+    def _criterion_functions(self) -> dict[str, object]:
+        """判準家族現查枚舉（不寫死清單 ⇒ 新增一支判準自動納管）。"""
+        return {
+            name: obj for name, obj in globals().items()
+            if callable(obj) and (name.startswith("cloud_") or name.startswith("_head_")
+                                  or name == "parse_cloud_fields")
+        }
+
+    def test_scan_surface_is_non_empty(self) -> None:
+        """自錨：枚舉不到判準時本鎖恆綠。"""
+        names = self._criterion_functions()
+        for expected in ("cloud_status_problems", "cloud_pending_problems",
+                         "cloud_sha_problems", "cloud_causality_problems"):
+            self.assertIn(expected, names, f"判準家族枚舉不到 {expected} ⇒ 本鎖已空轉")
+
+    def test_no_criterion_compares_against_a_ref_that_push_itself_moves(self) -> None:
+        offenders: list[str] = []
+        for name, fn in sorted(self._criterion_functions().items()):
+            code = self._executable_source(fn)
+            for token in _MOVING_REF_TOKENS:
+                if token in code:
+                    offenders.append(f"{name} 的執行碼含 {token!r}")
+        self.assertEqual(
+            offenders, [],
+            "判準拿「會隨 push 前進」的參照當比較對象 ⇒ 在 CI 上對任何 commit 都不可滿足"
+            "（R75 實測：main 三支全紅）。改法：只比**被測 commit 自己的歷史**（HEAD 及其"
+            "祖先）；「有沒有真的重查雲端」屬 pre-push／收輪清單的職責，不是 CI 測試的。\n  "
+            + "\n  ".join(offenders))
+
+    def test_the_lock_would_catch_a_reintroduction(self) -> None:
+        """鑑別力：把違規寫法餵進同一個判定路徑必須被抓到（否則上一支恆綠）。"""
+        def _relapse() -> list[str]:
+            """散文裡提 origin/main 不算違規，執行碼裡才算。"""
+            ref = "origin/main"
+            return [ref]
+
+        code = self._executable_source(_relapse)
+        self.assertNotIn("散文裡提", code, "docstring 沒被剝掉 ⇒ 判準會誤把教訓本身當違規")
+        self.assertTrue(any(t in code for t in _MOVING_REF_TOKENS),
+                        "違規寫法沒被偵測到 ⇒ 本鎖不具鑑別力")
 
 
 class TestR71SmokeTripwireIsInViewWithTheHonestReading(unittest.TestCase):

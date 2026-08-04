@@ -369,33 +369,43 @@ powershell -ExecutionPolicy Bypass -File scripts\ci-gate.ps1   # 偵測到 Git B
 > 5. 錨的 `red=` 必須**逐字等於**表格裡結論為 `failure` 的 workflow 集合（全綠就寫 `red=none`）。
 >    這一條比的是內容不是日期，所以「改了表格忘了改錨」在同一天內也會紅。
 >
-> 🔴 **覆蓋面判準（R75 訂立，取代原本的日期比較）＋「還沒查」怎麼合法表達**：判準要求錨覆蓋
-> **最後一次 push 的 commit**，也就是 `head-sha` 必須等於 `git rev-parse origin/main`。這比
-> 「日期新不新」精確得多（同一天內做幾個 commit 都分辨得出來），而且**不可能死結**——它要的
-> 永遠是一個**已經推上去**的 commit 的結論，不是還沒 push 的那個。
->
-> 輪次進行中常態就是「推上去了、run 還在跑／還沒去查」。這個狀態**要誠實寫出來，不准用填假值
-> 讓它變綠**：在錨上加一欄
+> 🔴 **「還沒查」怎麼合法表達**：輪次進行中的常態就是「推上去了、run 還在跑／還沒去查」。這個
+> 狀態**要誠實寫出來，不准用填假值讓它變綠**：在錨上加一欄
 >
 > ```
-> pending=<git rev-parse origin/main 的完整 40 位 sha>
+> pending=<那個已 push、但結論還沒進本表的 commit 的完整 40 位 sha>
 > ```
 >
 > 語意＝「這個 commit 已 push，它的結論**尚未**進本表；本表現有結論覆蓋的是 `head-sha` 那個
 > 較舊的 commit」。此時 `checked-at`／`head-sha`／表格列**一律保持原值不動**——它們記載的是
 > 一次**真的發生過**的查核，改動它們就是宣稱一次沒發生過的查核（`[[no-fabricated-tool-output]]`）。
+> 查完之後：把真實結論填進表格、`head-sha` 改成那個 commit、**刪掉 `pending=` 欄**。
 >
-> **為什麼這不會被忘記（機械面，不是散文承諾）**：`pending` 的值必須**逐字等於** `origin/main`。
-> 所以下一次 push 一到，`origin/main` 前進、這個 pending 當場失效轉紅，逼人回來處理；而「處理」
-> 只需要本機一個 `git rev-parse origin/main`（不需要網路、不需要等雲端），所以它永遠做得到。
-> 反過來，`head-sha` 一旦等於 `origin/main`（＝真的查完填好了），錨上**不得**再留 `pending=`
-> ——那會被判為自相矛盾。**收輪前的終局狀態＝沒有 `pending` 欄**，這就是那個可判定的解除條件。
+> 🔴 **哪一半由 CI 守、哪一半由 pre-push 守（R75 付了代價才劃清的界線）**：
 >
-> ⚠️ **誠實邊界**：`origin/main` 解不出來時（無 remote、CI 的 detached checkout）本判準整條
-> **未驗證、不判紅**——取證載具不在不等於事實為假（`DEF-101-756` 的形態）。它的牙長在**本機
-> pre-push**，也正是收輪動作發生的地方。
+> | 問題 | 誰能回答 | 現況 |
+> |---|---|---|
+> | 錨**有沒有說假話**（sha 是否真實、是否 HEAD 祖先、`checked-at` 是否早於它所評的 commit、`red=` 是否對得上表格列、同欄位是否重複衝突） | **repo 內的測試（CI 會跑）** | 已機械化，見上方 `TestR74CloudCiStatusIsRecorded` |
+> | 錨**有沒有覆蓋最新一次 push** | **只有 pre-push／收輪清單** | 人工，見下方 ⚠️ |
 >
-> <!-- cloud-ci-status: checked-at=2026-08-04 granularity=day head-sha=82eee9209f51c854d73f5761d9ce03330700c599 pending=a371068448a5b8ebeea19bfd24c2929e6f42fab8 red=windows-compat-ci.yml ／ 由上方 gh 指令現查後手動回填，回填步驟見上方五步 SOP；`tools/tests/test_doc_loc_baseline_freshness_r60.py` 的 TestR74CloudCiStatusIsRecorded 機械守（掃描面＝帶 push: 觸發的 workflow／新鮮度＝不得早於 snapshot-fingerprints 的最新 measured-at／head-sha 形態＋真 commit＋HEAD 祖先／checked-at ↔ commit 時間的因果／`head-sha` ↔ `origin/main` 的覆蓋面／red= ↔ 表格 failure 列）。🔴 本錨現值描述的是 `82eee92`（R73 收輪 commit）那一次 push 的結論，**不是最後一次 push**；本錨的 `pending` 欄即是那個誠實宣告（值＝`a371068…` 那個 commit）——它已推上去、其五支 run 的結論**尚未由人現查回填進本表**，故 `checked-at`／`head-sha`／表格列一律保持原值。收輪前必須把 `pending` 解除（現查 → 填真值 → 刪 `pending` 欄），判準會在下一次 push 後自動轉紅提醒。刪除本標記會讓該鎖 fail-loud -->
+> **為什麼第二列不可能由 CI 守（不是偷懶，是結構）**：CI 在 push **之後**才跑，那時「最後一次
+> push 的 commit」就等於**被測的那個 commit 自己**。要讓 commit X 通過這種判準，X 的檔案內容
+> 就得寫進 X 自己的 sha——而 sha 是 X 內容的雜湊，**自我指涉、任何 commit 都滿足不了**。R75
+> 第一版正是這樣寫的，實測代價是 main 上三支 workflow 全紅、且**每一次 push 都會紅**。
+> 這條教訓已升為機械物 `TestR75CloudCriteriaAreSatisfiableAtAnyCommit`：判準的執行碼裡出現
+> 任何 remote-tracking 參照（`origin/…`／`@{u}`／`ls-remote` 等）即當場判紅。
+>
+> **一般化的規則（比這個個案重要）**：**判準的比較對象若會隨「被該判準所判的那個動作」本身而
+> 改變，這個判準結構上不可滿足。** 遇到這種問題，判準要拆成「內部一致性／非假性」（可住在
+> repo 內）與「與外部世界對帳」（只能住在動作發生的那個時點）兩半。
+>
+> ⚠️ **殘留缺口（誠實揭露）**：「收輪前必須把 `pending` 解除」目前**沒有** rc 級機械物——它的
+> 正確歸宿是 pre-push（比照 `--check-snapshot` 只接 pre-push 的既有先例，在那個時點
+> `origin/main` 尚未前進、比較才有意義，而「去查雲端」那時也真的做得到），需在
+> `tools/sync_onboarding_baselines.py` 加一條，屬另一件事。在那之前，收輪檢查清單第一項＝
+> **確認本錨沒有 `pending` 欄**。
+>
+> <!-- cloud-ci-status: checked-at=2026-08-04 granularity=day head-sha=82eee9209f51c854d73f5761d9ce03330700c599 pending=a371068448a5b8ebeea19bfd24c2929e6f42fab8 red=windows-compat-ci.yml ／ 由上方 gh 指令現查後手動回填，回填步驟見上方五步 SOP；`tools/tests/test_doc_loc_baseline_freshness_r60.py` 的 TestR74CloudCiStatusIsRecorded 機械守（掃描面＝帶 push: 觸發的 workflow／新鮮度＝不得早於 snapshot-fingerprints 的最新 measured-at／head-sha 形態＋真 commit＋HEAD 祖先／checked-at ↔ commit 時間的因果／pending 欄的非假性：真 commit＋HEAD 祖先＋head-sha 的後代／red= ↔ 表格 failure 列）。🔴 本錨現值描述的是 `82eee92`（R73 收輪 commit）那一次 push 的結論，**不是最後一次 push**；本錨的 `pending` 欄即是那個誠實宣告（值＝`a371068…` 那個 commit）——它已推上去、其 run 結論**尚未由人現查回填進本表**，故 `checked-at`／`head-sha`／表格列一律保持原值。收輪前必須把 `pending` 解除（現查 → 填真值 → 刪 `pending` 欄）；🔴 該解除**沒有** rc 級機械物、也刻意不做成 CI 判準（會不可滿足，見上方表格與 TestR75CloudCriteriaAreSatisfiableAtAnyCommit），故列為收輪檢查清單第一項。刪除本標記會讓該鎖 fail-loud -->
 >
 > **訂正一項已被證偽的容差宣稱（DEF-101-515 併同處理）**：本節下方 R33 註尾原寫「`ci-gate.sh`
 > 的逐軌 passed 計數對 **docker daemon 可用性**敏感（daemon 停用時 v0.01／v0.30 各 -3），

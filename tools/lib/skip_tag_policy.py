@@ -199,14 +199,19 @@ _POSIX_TAG_RATCHET: dict[str, int] = {
 #:
 #: R75 落地實測（三棵活測試樹共 115 個站點，`unclassified` 為 0 ⇒ 沒有任何站點隱形）。
 #: 對照 QA 量到的修**前**狀態：103 個 decorator 站點中 63 筆方向判不出來、且對所有機械物
-#: 隱形（61%）。修後那 63 筆歸入 `tool-absence`（本表可見、可稽核），另有 10 筆函式體內
+#: 隱形（61%）。修後那 63 筆歸入 `tool-absence`（本表可見、可稽核），函式體內
 #: `self.skipTest(...)`（此前完全在射程外，連站點都抽不到）歸入 `runtime-skipTest`。
+#:
+#: 🔴 R75 收輪重釘 `tools/tests` 的 `runtime-skipTest` 10 → 12：雲端錨判準改寫時新增兩條
+#: 「shallow clone／無 git ⇒ 未驗證而不判紅」路徑，兩者都是函式體內 `self.skipTest(...)`。
+#: 這正是本表的設計意圖生效——相等判準讓新站點在落地當回合就被逼進帳、不會靜默變隱形，
+#: 且失敗訊息自己會印出該填的數字，所以重釘是**設計好的流程**而不是繞過判準。
 _SITE_CLASS_CENSUS: dict[str, dict[str, int]] = {
     "tools/tests": {
         "windows-only": 13,
         "posix-only": 11,
         "tool-absence": 38,
-        "runtime-skipTest": 10,
+        "runtime-skipTest": 12,
         "unclassified": 0,
     },
     "AutoClaude/tests": {
