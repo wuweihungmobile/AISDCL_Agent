@@ -3573,6 +3573,14 @@ def cloud_causality_problems(fields: dict[str, str]) -> list[str]:
         return []            # 形態問題由 cloud_sha_problems／欄位存在性判準報，不重複
     problems: list[str] = []
     has_time = "T" in checked or " " in checked.strip()
+    if has_time and fields.get("granularity") == "day":
+        problems.append(
+            f"表③ `checked-at={checked}` 已帶完整時間，錨卻還自陳 `granularity=day`"
+            "——同一行內資料與自陳互相矛盾，而自陳是**較弱**的那一個 ⇒ 讀者會低估這份"
+            "查核的精度。處置：刪掉 `granularity=day` 欄。\n"
+            "    🔴 為何這一條非有不可：`granularity=day` 是在 `checked-at` 只寫到日時"
+            "被判準逼出來的**誠實補償**；一旦升級成時間戳，它就從補償變成假話，而『補償"
+            "留在原地沒人收』正是本輪反覆在治的形態（同 `Spec.historical` 的 stale 自檢）")
     if not has_time and fields.get("granularity") != "day":
         problems.append(
             f"表③ `checked-at={checked}` 只寫到日，錨卻沒有 `granularity=day` 自陳"
@@ -3772,7 +3780,8 @@ class TestR74CloudCiStatusIsRecorded(unittest.TestCase):
         sha = self._real_sha()
         commit_time = _commit_iso_time(sha)
         if commit_time is None:
-            self.skipTest("[POSIX-NATIVE-ONLY] 取不到 commit 時間（無 git）⇒ ⑥a 未驗證")
+            # 與平台無關（成因是無 git）⇒ 刻意不貼任何 `[*-NATIVE-ONLY]` 平台標籤。
+            self.skipTest("取不到 commit 時間（無 git）⇒ 判準⑥a 依設計未驗證")
         same_day_but_earlier = f"{commit_time[:10]}T00:00:00"
         problems = cloud_causality_problems(
             {"head-sha": sha, "checked-at": same_day_but_earlier})
@@ -3792,6 +3801,21 @@ class TestR74CloudCiStatusIsRecorded(unittest.TestCase):
             cloud_causality_problems(
                 {"head-sha": sha, "checked-at": "2026-12-31", "granularity": "day"}),
             [])
+
+    def test_a_timestamped_anchor_must_not_keep_the_day_granularity_waiver(self) -> None:
+        """注入⑥c：升級成時間戳之後，`granularity=day` 就從誠實補償變成假話 ⇒ 必紅。
+
+        這一支防的是「補償留在原地沒人收」——與 `Spec.historical` 的 stale 自檢同型：
+        豁免／補償一旦不再需要，繼續留著就是一句與同一行資料矛盾的較弱宣稱。
+        """
+        sha = self._real_sha()
+        stamped = f"{_commit_iso_time(sha) or '2026-12-31T12:00:00+08:00'}"
+        problems = cloud_causality_problems(
+            {"head-sha": sha, "checked-at": stamped, "granularity": "day"})
+        self.assertTrue(any("互相矛盾" in p for p in problems), problems)
+        # 反向對照：刪掉該欄即綠（否則判準退化成「帶時間戳就永遠紅」）
+        self.assertEqual(
+            cloud_causality_problems({"head-sha": sha, "checked-at": stamped}), [])
 
     def test_red_set_must_match_the_table_rows(self) -> None:
         """注入⑦：表格說某支 failure、錨的 `red=` 沒列到 ⇒ 必紅（同日內仍有效）。"""

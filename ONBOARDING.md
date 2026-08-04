@@ -342,12 +342,12 @@ powershell -ExecutionPolicy Bypass -File scripts\ci-gate.ps1   # 偵測到 Git B
 >
 > | workflow（push 軌） | 最近一次 push run 結論 | 該 run 的 commit | 判讀 |
 > |---|---|---|---|
-> | `windows-compat-ci.yml` | 🔴 **failure** | `82eee92`（＝R73 收輪 commit） | R73 收輪時六道本機閘門全綠、雲端這支紅 ⇒ **本表存在的理由**。承接見缺陷帳本 R74 列 |
-> | `macos-compat-ci.yml` | ✅ success | `82eee92` | — |
-> | `root-infra-ci.yml` | ✅ success | `82eee92` | — |
-> | `autoclaude-ci.yml` | ✅ success | `82eee92` | — |
-> | `aisdlc-sdd-ci.yml` | ✅ success | `1e5214b` | 該 workflow 的 `paths:` 過濾使 `82eee92` 未觸發 ⇒ **「沒觸發」與「跑過且綠」在 GitHub UI 上長得一樣**，故 commit 欄一律照實記那次 run 的 sha，不得填 HEAD |
-> | `autoclaude-mutation-on-change.yml` | ✅ success | `0b6468b` | 同上（源碼變動觸發軌，見 `ADR-SD09-011`） |
+> | `windows-compat-ci.yml` | ✅ success | `a61bf0c` | 🔴 **本表存在的理由（史料保留）**：R73 收輪時六道本機閘門全綠、而雲端這支在 `82eee92` 上是紅的，沒有任何本機機械物報得出來。R74 修掉那筆、R75 又因「判準拿會隨 push 前進的參照當比較對象」讓它連同另兩支再紅一次；本列現值即該問題修好後的現查結果 |
+> | `macos-compat-ci.yml` | ✅ success | `a61bf0c` | — |
+> | `root-infra-ci.yml` | ✅ success | `a61bf0c` | — |
+> | `autoclaude-ci.yml` | ✅ success | `21354c9` | 該 workflow 的 `paths:` 過濾使 `a61bf0c` **未觸發** ⇒ commit 欄照實記那次 run 的 sha，不得填 HEAD（見下一列的完整說明） |
+> | `aisdlc-sdd-ci.yml` | ✅ success | `21354c9` | 同上未觸發。**「沒觸發」與「跑過且綠」在 GitHub UI 上長得一樣**，故 commit 欄一律照實記那次 run 的 sha、不得填 HEAD——本列的 sha 本次由現查前進（前一版記的是更早那次 run） |
+> | `autoclaude-mutation-on-change.yml` | ✅ success | `0b6468b` | 同上未觸發（源碼變動觸發軌，見 `ADR-SD09-011`） |
 >
 > ⚠️ **本表刻意不含 `conclusion` 之外的判定**：一個 run 的 `conclusion=success` **不代表**它裡面
 > 每個 job 都綠——兩支 compat-CI 的 `*-nightly-full` 帶 job 層 `continue-on-error: true`，紅了
@@ -405,7 +405,7 @@ powershell -ExecutionPolicy Bypass -File scripts\ci-gate.ps1   # 偵測到 Git B
 > `tools/sync_onboarding_baselines.py` 加一條，屬另一件事。在那之前，收輪檢查清單第一項＝
 > **確認本錨沒有 `pending` 欄**。
 >
-> <!-- cloud-ci-status: checked-at=2026-08-04 granularity=day head-sha=82eee9209f51c854d73f5761d9ce03330700c599 pending=a371068448a5b8ebeea19bfd24c2929e6f42fab8 red=windows-compat-ci.yml ／ 由上方 gh 指令現查後手動回填，回填步驟見上方五步 SOP；`tools/tests/test_doc_loc_baseline_freshness_r60.py` 的 TestR74CloudCiStatusIsRecorded 機械守（掃描面＝帶 push: 觸發的 workflow／新鮮度＝不得早於 snapshot-fingerprints 的最新 measured-at／head-sha 形態＋真 commit＋HEAD 祖先／checked-at ↔ commit 時間的因果／pending 欄的非假性：真 commit＋HEAD 祖先＋head-sha 的後代／red= ↔ 表格 failure 列）。🔴 本錨現值描述的是 `82eee92`（R73 收輪 commit）那一次 push 的結論，**不是最後一次 push**；本錨的 `pending` 欄即是那個誠實宣告（值＝`a371068…` 那個 commit）——它已推上去、其 run 結論**尚未由人現查回填進本表**，故 `checked-at`／`head-sha`／表格列一律保持原值。收輪前必須把 `pending` 解除（現查 → 填真值 → 刪 `pending` 欄）；🔴 該解除**沒有** rc 級機械物、也刻意不做成 CI 判準（會不可滿足，見上方表格與 TestR75CloudCriteriaAreSatisfiableAtAnyCommit），故列為收輪檢查清單第一項。刪除本標記會讓該鎖 fail-loud -->
+> <!-- cloud-ci-status: checked-at=2026-08-05T01:24:40+08:00 head-sha=a61bf0c243dd336828c12d568211027ff06b3cd0 red=none ／ 由上方 gh 指令現查後手動回填，回填步驟見上方五步 SOP；`tools/tests/test_doc_loc_baseline_freshness_r60.py` 的 TestR74CloudCiStatusIsRecorded 機械守（掃描面＝帶 push: 觸發的 workflow／新鮮度＝不得早於 snapshot-fingerprints 的最新 measured-at／head-sha 形態＋真 commit＋HEAD 祖先／checked-at ↔ commit 時間的因果／pending 欄（若有）的非假性：真 commit＋HEAD 祖先＋head-sha 的後代／`red` 欄 ↔ 表格 failure 列）。🔴 本錨現值＝**已完成一次真正的雲端現查**：`a61bf0c` 的三支 compat／root-infra run 皆 completed 且 success，另三支因 `paths:` 過濾未觸發、其 commit 欄照實記各自最近一次 push run 的 sha（見表格判讀欄）。六列全綠，故 `red` 欄填 none；`pending` 欄**已解除並刪除**（它先前宣告的是「某個已 push 的 commit 結論尚未進表」，該狀態已結束）。`granularity` 欄亦已刪除——`checked-at` 現在帶完整時間與時區，再自陳「只到日」就是一句與同一行資料矛盾的假話，該矛盾另有判準守。🔴 **本行的說明文字刻意不寫出任何 `欄位＝值` 形態的字樣**：機器欄位與人讀散文同住這一行，散文裡只要出現可被解析的那種寫法就會覆蓋真欄位值（本輪已兩度實測踩到，第二次是由該筆的根治判準自己抓出來的）。🔴 下一次 push 之後本表即成為 dated snapshot，收輪檢查清單第一項＝重跑上方 gh 指令、確認六列與錨都對得上現況（該項無 rc 級機械物，且刻意不做成 CI 判準——會不可滿足，見上方分工表與 TestR75CloudCriteriaAreSatisfiableAtAnyCommit）。刪除本標記會讓該鎖 fail-loud -->
 >
 > **訂正一項已被證偽的容差宣稱（DEF-101-515 併同處理）**：本節下方 R33 註尾原寫「`ci-gate.sh`
 > 的逐軌 passed 計數對 **docker daemon 可用性**敏感（daemon 停用時 v0.01／v0.30 各 -3），
