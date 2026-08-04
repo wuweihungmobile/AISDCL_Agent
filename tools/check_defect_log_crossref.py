@@ -468,10 +468,10 @@ _HANDOVER_ROUND_RES: tuple[tuple[str, re.Pattern[str]], ...] = (
 # 🔴 刻意**不**把 `routed@R61`／`deferred@R59` 當承接者：實測 `DEF-101-518` 寫
 # `**routed（deferred@R59，附解鎖條件）**`，那個 `@R59` 是「在 R59 這一輪被 defer」的
 # **時點**，不是被指派的對象（同族寫法 `fixed@R57` 更明顯）。把時點當承接者會製造假紅。
-_REASSIGN_RE = re.compile(r"改派|回執")
-# 未結案＝仍需要有人接手。`routed` 涵蓋帳本慣用的 `routed（deferred@Rnn）` 寫法；
-# `None`（狀態欄辨識不出關鍵字）一併納入——「看不出結案」不等於「已結案」。
-_UNRESOLVED_CLASSES: frozenset[str | None] = frozenset({"open", "routed", None})
+# 🔴 R74 PKG-2：出口判準本體與它五種「白拿豁免」形態的處置外移至
+# `_ledger_index.reassign_hit()`（只判**狀態欄**、先遮 code span、擋否定語意）——WHY 見該處。
+_REASSIGN_RE, _reassign_hit = _ledger_index.REASSIGN_RE, _ledger_index.reassign_hit
+_UNRESOLVED_CLASSES = _ledger_index.UNRESOLVED_CLASSES
 
 
 def current_round(ledger_text: str) -> int | None:
@@ -529,20 +529,15 @@ def orphan_backlog_problems(ledger_text: str) -> list[str]:
       · `列 R2 backlog`／`open（backlog R2…）`／`交棒給 R2`
       · 未結案（`open`／`routed`／狀態含糊）才判；已 `fixed`／`wontfix`／
         `closed-by-decision` 的歷史列一律不判（歷史檔逐字保全，見上方第一個坑）。
-      · 該列或**更後面**任一列載明「改派」／「回執」即放行。
+      · 該列**狀態欄**（或更後面提及本列 ID 的那一列的狀態欄）載明「改派」／「回執」
+        即放行；判定走 `_reassign_hit()`（R74 起只判狀態欄、遮 code span、擋否定語意）。
 
     **已實測不涵蓋**（逐項跑過，並釘成常駐斷言）：
-      · **否定語意**——本鎖只做關鍵字比對，`無回執`／`零改派` 這類**否定**敘述同樣會被
-        當成「已載明」而放行。真實實例：`DEF-101-561` 目前正是靠狀態欄一句「無輪次無
-        回執」（描述的還是另一個子項）通過本鎖；它**實質上不是孤兒**（同列已載明
-        「R61 Architect 評估結論：本輪逐項回覆①②③」＝真有回執），故結論湊巧正確、
-        機制不精確。要收掉這個縫需要否定語意分析，超出逐行正則的能力天花板
-        （同 DEF-101-333 對 parity 鎖家族的比例原則裁定）。
+      · **跨列**：更後面那一列的認定條件只是「該列提及本列 ID」這個弱條件；「哪一列才算
+        更新的紀錄、要不要接受它的改派」需要語意判斷，不在逐行正則的能力內。
       · **`status@Rnn` 形態**（`deferred@R59`）刻意不當承接者，理由見 `_REASSIGN_RE`
         上方註解。若未來有人真的用 `@Rnn` 表示指派對象，本鎖抓不到。
-      · **散文式指派**（「留給下一輪某人」「排入未來輪」）不含 `R\\d+` ⇒ 本鎖無從比較；
-        那一類由硬規則②散文的「明確標為未指派」條款以人工紀律處理。
-
+      · **散文式指派**（「留給下一輪某人」）無 `R\\d+` ⇒ 由後半句 `unpinned_...()` 接手。
     **未窮舉**：本清單非窮舉，不做「唯一殘餘風險是 X」這類宣稱（R57 判例第 (4) 條）。
     """
     layout = _table_layout(ledger_text)
@@ -566,10 +561,10 @@ def orphan_backlog_problems(ledger_text: str) -> list[str]:
         handovers = _handover_rounds(line)
         if not handovers:
             continue
-        if _REASSIGN_RE.search(line):
+        if _reassign_hit(cells[status_idx]):
             continue
         def_id = cells[id_idx]
-        if any(def_id in later and _REASSIGN_RE.search(later) for _, _, later in rows[i + 1:]):
+        if any(def_id in ln and _reassign_hit(c[status_idx]) for _, c, ln in rows[i + 1:]):
             continue
         if cur is None:
             problems.append(
@@ -602,43 +597,38 @@ def orphan_backlog_problems(ledger_text: str) -> list[str]:
 # 「任何 `deferred`／`backlog` 必須指向一個存在的輪次**或明確標為「未指派」**」，而
 # `orphan_backlog_problems()` 只落地了前半句（輪號比大小）。後半句在程式裡的形態是
 # `if not handovers: continue` ——**一個短路出口**：整列找不到承接語境輪號就直接放行。
-# 實測後果：77 筆未結列中，只有 6 筆帶承接輪號而真的走到比較（8%），15 筆寫了「未指派」，
-# 其餘 **61 筆兩者皆無**、全部從短路出口走掉；其中 43 筆帶「排入下一輪」「擇機」
-# 「留待下輪」這類**散文式延後**——規則想擋的正是它們。
+# 實測後果：R68 上線時絕大多數未結列既無承接輪號也無「未指派」，全部從短路出口走掉，
+# 其中大半帶「排入下一輪」「擇機」「留待下輪」這類**散文式延後**——規則想擋的正是它們。
+# （逐項實數一律現查：`--unresolved-count` ＋ 下方白名單筆數，此處刻意不寫死快照。）
 #
 # 🔴 為何要 grandfather 白名單而不是直接硬擋（ARCH-R59-NB4 的永紅警告仍然適用）：
-# 那 61 筆是**存量歷史列**，一次全紅等於閘門上線即永紅，而永紅的閘門會被整個關掉，
-# 比沒有鎖更糟。所以照 R59 判例採「釘現況 ＋ 只硬擋新增列」：白名單是**棘輪**，
-# 只准變小（`_UNPINNED_HANDOVER_CEILING`），且列在裡面卻**已經不需要**豁免的 ID 一律
-# fail-loud 要求刪除（見 `stale_grandfather_problems()`）——沒有這一條，白名單會變成
-# 一張只進不出的死名單，那正是本 repo 反覆在治的腐化形態。
-#
-# 判準沿用 repo 內**既有形態**而非新造：`tools/check_script_parity.py:550` 的
-# `_UNPINNED_EXIT_RE = re.compile(r"退場：(未指派|R\d+(?![\d+＋]))")` 就是同一個
-# 「二擇一」判準的先例，本檔平移其形狀（可解析的承接輪號 ／ 字面「未指派」）。
+# 那批是**存量歷史列**，一次全紅等於閘門上線即永紅，而永紅的閘門會被整個關掉，比沒有鎖
+# 更糟。所以照 R59 判例採「釘現況 ＋ 只硬擋新增列」：白名單是**棘輪**，只准變小
+# （`_UNPINNED_HANDOVER_CEILING`），且列在裡面卻**已經不需要**豁免的 ID 一律 fail-loud
+# 要求刪除（見 `stale_grandfather_problems()`）——沒有這一條它會變成只進不出的死名單。
+# 判準沿用 repo 內**既有形態**而非新造：`tools/check_script_parity.py` 的
+# `_UNPINNED_EXIT_RE`（`退場：(未指派|R\d+…)`）就是同一個「二擇一」判準的先例。
 _UNASSIGNED_LITERAL = "未指派"
 
 #: R68 上線時**釘死現況**的存量未結列（既無承接輪號、也無「未指派」）。
 #: 🔴 這張表只准變小。新增未結列一律不得進入本表——那是硬擋的對象。
+#: 🔴 R74 首次真正轉動本棘輪（R70~R73 三輪零收縮）：56 → 48。逐筆處置見缺陷帳本各列：
+#: `432`／`416` 回樹實查後結案、`417`／`393` 依自述 wontfix 判例訂正首詞、`674` 缺口已
+#: 收掉、`271`／`274`／`388` 改走合法出口②「未指派」＋可執行解鎖條件。
 _UNPINNED_HANDOVER_GRANDFATHERED = frozenset({
-    "DEF-01-007", "DEF-01-009", "DEF-17-001", "DEF-19-001",
-    "DEF-42-001", "DEF-53-001", "DEF-100-002", "DEF-101-018",
-    "DEF-101-021", "DEF-101-022", "DEF-101-025", "DEF-101-055",
-    "DEF-101-060", "DEF-101-068", "DEF-101-200", "DEF-101-206",
-    "DEF-101-214", "DEF-101-217", "DEF-101-233", "DEF-101-234",
-    "DEF-101-235", "DEF-101-238", "DEF-101-242", "DEF-101-243",
-    "DEF-101-263", "DEF-101-268", "DEF-101-271", "DEF-101-274",
-    "DEF-101-278", "DEF-101-296", "DEF-101-297", "DEF-101-308",
-    "DEF-101-309", "DEF-101-313", "DEF-101-324", "DEF-101-335",
-    "DEF-101-348", "DEF-101-351", "DEF-101-358", "DEF-101-377",
-    "DEF-101-388", "DEF-101-392", "DEF-101-393", "DEF-101-398",
-    "DEF-101-399", "DEF-101-400", "DEF-101-401", "DEF-101-402",
-    "DEF-101-412", "DEF-101-416", "DEF-101-417", "DEF-101-418",
-    "DEF-101-432", "DEF-101-628", "DEF-101-646",
-    "DEF-101-674",
+    "DEF-01-007", "DEF-01-009", "DEF-17-001", "DEF-19-001", "DEF-42-001",
+    "DEF-53-001", "DEF-100-002", "DEF-101-018", "DEF-101-021", "DEF-101-022",
+    "DEF-101-025", "DEF-101-055", "DEF-101-060", "DEF-101-068", "DEF-101-200",
+    "DEF-101-206", "DEF-101-214", "DEF-101-217", "DEF-101-233", "DEF-101-234",
+    "DEF-101-235", "DEF-101-238", "DEF-101-242", "DEF-101-243", "DEF-101-263",
+    "DEF-101-268", "DEF-101-278", "DEF-101-296", "DEF-101-297", "DEF-101-308",
+    "DEF-101-309", "DEF-101-313", "DEF-101-324", "DEF-101-335", "DEF-101-348",
+    "DEF-101-351", "DEF-101-358", "DEF-101-377", "DEF-101-392", "DEF-101-398",
+    "DEF-101-399", "DEF-101-400", "DEF-101-401", "DEF-101-402", "DEF-101-412",
+    "DEF-101-418", "DEF-101-628", "DEF-101-646",
 })
 #: shrink-only 棘輪上限（形狀比照 `tools/tests/` 的檔數棘輪）。只能往小改。
-_UNPINNED_HANDOVER_CEILING = 56
+_UNPINNED_HANDOVER_CEILING = 48
 
 
 def unpinned_handover_problems(ledger_text: str) -> list[str]:
@@ -685,10 +675,9 @@ def unpinned_handover_problems(ledger_text: str) -> list[str]:
 def stale_grandfather_problems(ledger_text: str) -> list[str]:
     """棘輪的另一半：白名單裡**已不需要豁免**的 ID 必須刪除（純函式）。
 
-    🔴 沒有這一條，`_UNPINNED_HANDOVER_GRANDFATHERED` 就是一張只進不出的死名單：
-    存量列被補標「未指派」或結案之後，它仍靜靜留在表裡，於是「還有幾筆存量沒清」這個
-    數字永遠不會下降，棘輪也就永遠不會轉。判定條件三選一即算「不再需要豁免」：
-    該 ID 已不在主檔（歸檔或刪除）／已結案／已滿足二擇一。
+    🔴 沒有這一條，`_UNPINNED_HANDOVER_GRANDFATHERED` 就是一張只進不出的死名單：存量列被
+    補標「未指派」或結案之後仍靜靜留在表裡，「還有幾筆存量沒清」就永遠不會下降、棘輪永遠
+    不會轉。三選一即算「不再需要豁免」：已不在主檔（歸檔／刪除）／已結案／已滿足二擇一。
     """
     layout = _table_layout(ledger_text)
     if layout is None:
@@ -721,21 +710,19 @@ def stale_grandfather_problems(ledger_text: str) -> list[str]:
 def grandfather_ceiling_problems() -> list[str]:
     """棘輪本體：白名單筆數不得超過 `_UNPINNED_HANDOVER_CEILING`（純函式）。
 
-    🔴 缺陷（R69 複審變異測試實證，`DEF-101-731`）：`_UNPINNED_HANDOVER_CEILING`
-    自 R68 上線起，註解自稱「shrink-only 棘輪、只准變小」，**但全檔零比較、零強制**
-    ——它只被讀進成功訊息裡印出來。實測（本函式落地前）：往帳本插一列散文式延後的
-    未結列、再把該 ID 加進白名單，工具印的是「存量豁免 58 筆／棘輪上限 57」而
-    `rc=0`——**天花板被超過的事實原樣印在成功訊息裡，卻不擋**。於是白名單可以隨每一輪
-    「順手加一筆」無聲膨脹，硬規則② 後半句被逐列贖回，最終退化成一張只進不出的死名單
-    ——正是 `stale_grandfather_problems()` 想防、卻只防住另外半邊的那個形態。
+    🔴 缺陷（R69 複審變異測試實證，`DEF-101-731`）：本天花板自 R68 上線起註解自稱
+    「shrink-only 棘輪」，**但全檔零比較、零強制**——只被讀進成功訊息裡印出來。實測（本
+    函式落地前）：插一列散文式延後的未結列、再把該 ID 加進白名單 ⇒ 成功訊息把「筆數已超過
+    上限」這件事原樣印出來而仍 `rc=0`。於是白名單可隨每輪「順手加一筆」無聲膨脹，硬規則②
+    後半句被逐列贖回——正是 `stale_grandfather_problems()` 只防住另外半邊的那個形態。
 
     分工（兩者缺一都不成棘輪）：
       * 本函式擋 **膨脹**（len > ceiling ⇒ 有人偷加豁免而沒有真的去修那一列）。
       * `stale_grandfather_problems()` 擋 **不縮**（豁免已不需要卻仍留在表裡）。
 
-    刻意**不吃參數、不看帳本**：這是對原始碼常數本身的斷言，與餵哪一本帳本無關，
-    因此必須在 `main()` 裡**無條件**執行（不受 `_DEFECT_LOG == _DEFAULT_DEFECT_LOG`
-    守衛約束）——否則換一本帳本就能繞過棘輪，那又是一個假鎖。
+    刻意**不吃參數、不看帳本**：這是對原始碼常數本身的斷言，與餵哪一本帳本無關，因此必須
+    在 `main()` 裡**無條件**執行（不受 `_DEFECT_LOG == _DEFAULT_DEFECT_LOG` 守衛約束）
+    ——否則換一本帳本就能繞過棘輪，那又是一個假鎖。
     """
     actual = len(_UNPINNED_HANDOVER_GRANDFATHERED)
     if actual <= _UNPINNED_HANDOVER_CEILING:
@@ -779,7 +766,7 @@ def lagging_clock_notes(ledger_text: str) -> list[str]:
         if _classify(cells[status_idx]) not in _UNRESOLVED_CLASSES:
             continue
         rounds = [n for _, n, _ in _handover_rounds(line)]
-        if rounds and max(rounds) == cur and not _REASSIGN_RE.search(line):
+        if rounds and max(rounds) == cur and not _reassign_hit(cells[status_idx]):
             notes.append(
                 f"帳本 :{lineno} {cells[id_idx]}：承接輪次 R{cur} **恰等於**由「"
                 f"{_CONTEXT_HEADER}」欄推得的當前輪 —— 若本輪尚未寫入任何帳本列，"
@@ -816,9 +803,9 @@ _STATUS_VARIANT_RE = re.compile(
 )
 #: markdown 行內 code span。反引號內是**逐字引述**（例如 `DEF-101-541` 逐字引用它自己
 #: 被訂正掉的舊寫法 `partially-fixed`），不算新的狀態宣稱。與
-#: `archive_defect_log._CODE_SPAN_RE` 是**同一個物件**（該檔 `= gate._CODE_SPAN_RE`
-#: 再匯出，形狀沿用既有的 `_CELL_SPLIT_RE` 先例）——同一個判準只有一份實作。
-_CODE_SPAN_RE = re.compile(r"`[^`]*`")
+#: `archive_defect_log._CODE_SPAN_RE` 是**同一個物件**——同一個判準只有一份實作；R74 起
+#: 本體住 `tools/lib/defect_ledger_index.CODE_SPAN_RE`（`reassign_hit()` 也消費它）。
+_CODE_SPAN_RE = _ledger_index.CODE_SPAN_RE
 _SUPERSEDE_RE = re.compile(
     r"[→⇒]\s*[*＊`\s]{0,4}(fixed|closed-by-decision|no_action_needed|wontfix)"
     r"(?![A-Za-z0-9-])"
@@ -1253,7 +1240,8 @@ def oversize_problems(paths: list[Path]) -> tuple[list[str], list[str]]:
 _USAGE = (
     "用法：\n"
     "  python3 tools/check_defect_log_crossref.py                 # 全套閘門\n"
-    "  python3 tools/check_defect_log_crossref.py --reconcile F.json  # 修復包自報對帳"
+    "  python3 tools/check_defect_log_crossref.py --reconcile F.json  # 修復包自報對帳\n"
+    "  python3 tools/check_defect_log_crossref.py --unresolved-count  # 未結存量唯一量測入口"
 )
 
 
@@ -1264,6 +1252,8 @@ def cli(argv: list[str]) -> int:
     """
     if len(argv) == 2 and argv[0] == "--reconcile":
         return _run_reconcile(Path(argv[1]))
+    if argv == ["--unresolved-count"]:  # 未結存量的唯一量測入口（R74 PKG-2）
+        return _ledger_index.report_unresolved(_load_ledger_status())
     if argv:
         print(f"❌ 無法辨識的參數：{argv}\n{_USAGE}", file=sys.stderr)
         return 2
@@ -1375,10 +1365,16 @@ def main() -> int:
     # 路徑上 `_DEFECT_LOG` 恆為預設值 ⇒ 真 repo 一定跑得到這道，鑑別力不減。
     # 規則本體的鑑別力由 `TestUnpinnedHandoverAndStaleGrandfather` 以純函式直接驗
     # （雙向注入），不經 `main()`——正因為經 `main()` 就得餵合成帳本。
+    # 🔴 R74 併入本區塊的第三道＝**未結存量列數棘輪**：門檻按真實主檔平均列大小推得（見
+    # `_ledger_index.UNRESOLVED_ROWS_*`），故與上兩道同受預設路徑守衛約束（合成 fixture 的
+    # 列數與那組算式無關，硬判會是與規則無關的假紅／假綠）。
+    unres_warns: list[str] = []
     unpinned_problems: list[str] = []
     if _DEFECT_LOG == _DEFAULT_DEFECT_LOG:
         unpinned_problems = unpinned_handover_problems(ledger_text)
         unpinned_problems += stale_grandfather_problems(ledger_text)
+        unres_fails, unres_warns = _ledger_index.unresolved_ceiling_problems(ledger)
+        unpinned_problems += unres_fails
     if unpinned_problems:
         print(f"❌ 未結列缺承接指派（硬規則② 後半句，{len(unpinned_problems)} 筆）：",
               file=sys.stderr)
@@ -1410,6 +1406,8 @@ def main() -> int:
     # 以下三組是 warning（不 fail）——它們指的都是**帳本品質提示**而非跨文件矛盾，
     # 硬擋會製造假紅。但必須每次都印：它們原本全部只活在 docstring 或 `--plan` 裡，
     # 而「只在有人主動去看時才被看到」的清單等於沒有（DEF-101-709 立案理由）。
+    for w in unres_warns:
+        print(f"⚠️  未結存量逼近列數上限：{w}", file=sys.stderr)
     for note in lagging_clock_notes(ledger_text):
         print(f"⚠️  當前輪時鐘 fail-open 窗口：{note}", file=sys.stderr)
     for note in supersession_notes(ledger_text):
@@ -1459,9 +1457,11 @@ def main() -> int:
           f"（登記面對 {_GOVERNANCE_DOC_GLOB} 發現面雙向核對）；"
           f"全部未結案列的承接輪次皆 ≥ 當前輪 R{current_round(ledger_text)} 或已載明改派"
           "（硬規則②；已實測不涵蓋的形態見 orphan_backlog_problems docstring）；"
-          f"未結列皆二擇一（承接輪號／字面「{_UNASSIGNED_LITERAL}」，存量豁免 "
-          f"{len(_UNPINNED_HANDOVER_GRANDFATHERED)} 筆／棘輪上限 "
-          f"{_UNPINNED_HANDOVER_CEILING}，只准變小）"
+          f"未結存量 {len(_ledger_index.unresolved_ids(ledger))} 列（唯一量測入口＝"
+          f"`--unresolved-count`；warn {_ledger_index.UNRESOLVED_ROWS_WARN}／fail "
+          f"{_ledger_index.UNRESOLVED_ROWS_FAIL} 列）且皆二擇一（承接輪號／字面"
+          f"「{_UNASSIGNED_LITERAL}」，存量豁免 {len(_UNPINNED_HANDOVER_GRANDFATHERED)}"
+          f" 筆／棘輪上限 {_UNPINNED_HANDOVER_CEILING}，只准變小）"
           f"{f'；另 {len(residual)} 筆已結列殘留待辦，見 warning' if residual else ''}。"
           f"\n🔴 當前輪 R{current_round(ledger_text)} 係由帳本「{_CONTEXT_HEADER}」欄"
           "**現查**推得（不寫死）——本輪若尚未寫入任何帳本列，此值仍停在上一輪，"

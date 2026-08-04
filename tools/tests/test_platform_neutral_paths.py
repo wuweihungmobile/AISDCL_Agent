@@ -1416,5 +1416,431 @@ class TestNoPlatformDependentPathStringIdentity(unittest.TestCase):
         self.assertEqual((off_now, stale_now), ([], []), f"{rel} 現行必須已無此病灶")
 
 
+# ══════════════════════════════════════════════════════════════════════════════
+# R74 — 第五道判準：平台專屬環境變數的讀取必須帶平台守衛（PKG-4 C）
+# ══════════════════════════════════════════════════════════════════════════════
+# WHY（本檔第五道判準；與前四道同屬「跨平台寫法」家族，故沿用本檔的掃描根／豁免／
+# stale 慣例，不另開新檔——R73 的 `_FROZEN_GUARD_FILE_COUNT` 明文要求新增鎖併入既有檔）：
+#   `DEF-101-766` 的病灶是 `WindowsAppsGuard.ps1::Resolve-NativeExecutable` **無條件**
+#   照 `$env:PATHEXT` 過濾候選——PATHEXT 是 Windows-only 概念，PS Core 跑在
+#   macOS/Linux 上該變數不存在、POSIX 執行檔又不帶副檔名 ⇒ 每個候選都被淘汰 ⇒
+#   函式恆回 `$null` ⇒ macos-compat-ci 與 root-infra-ci(ubuntu) 必紅。
+#
+#   🔴 R74 要治的不是那個缺陷（R71 已修），而是**它的鎖只圈一個站點**：修復當時建的鎖
+#   （`tools/tests/test_dev_start.py::TestResolveNativeExecutable*`）綁死在那一支
+#   `.ps1` 的那一個函式上——換一支檔案、換一種語言（Python 的
+#   `os.environ["PATHEXT"]`）寫同一個缺陷，全 repo 零掃描。這是 `DEF-101-757`／
+#   `DEF-101-777` 判過的同一件事（已知的鎖射程缺口不得只以劃界結案），而本 repo 已經
+#   為它付過三次代價。故本判準改成**形態掃描**：不問「哪一支檔案」，只問
+#   「這一處讀 PATHEXT 的程式碼，有沒有先確認自己在 Windows 上」。
+#
+# 判準（逐行文字，射程含 `.py`／`.ps1`／`.psm1`／`.sh`）：
+#   讀取形態＝`$env:PATHEXT`（PowerShell）／`PATHEXT` 出現在 `os.environ`、`getenv`
+#   同一行（Python）／`$PATHEXT`（shell）。
+#   「有守衛」＝同一個檔案內、該行**之前**出現過平台守衛述詞（見 `_PLATFORM_GUARDS`）。
+#
+# 🔴 刻意劃界（誠實記錄，勿超譯）：
+#   ❌ **只看「之前出現過」，不做控制流分析**。靜態判不出守衛是否真的支配該行（R71 的
+#      `DEF-101-766` 正是「守衛存在但排在過濾之後」）。那一半由既有的**順序鎖**
+#      （`test_dev_start.py::TestResolveNativeExecutableShortCircuitOrder`）承接——
+#      兩道鎖的射程刻意不同：本鎖問「有沒有」（廣、全庫），順序鎖問「排對了沒」
+#      （窄、逐站點）。把兩者混成一道會兩頭都做不好。
+#   ❌ **註解與 docstring 內提到 PATHEXT 不算讀取**（本 repo 有大量在地 WHY 逐字提到
+#      它）。做法＝掃描前先剝行尾 `#` 之後的部分（heuristic，沿用本檔第一道判準
+#      `_scan_file` 的既有取捨：不解析字串內的 `#`，代價是「字串內含 `#` 且其後才出現
+#      讀取語法」會漏掃）。判準另要求出現**真正的讀取語法**，不只是出現這個字。
+#   ❌ **注入／設定（`mock.patch.dict(os.environ, {"PATHEXT": …})`）不算讀取**。
+#      實測本 repo 有這種站點（`tools/tests/test_bash_probe_spec_contract.py`），
+#      它是在替被測碼**佈置**環境，本身不依賴本機平台。故 Python 側的形態刻意寫得窄
+#      （下標／`.get`／`in`／`getenv` 四種真讀取），不用「同一行出現 os.environ」這種
+#      寬判準——寬判準製造的假紅會逼下一輪的人把整條鎖關掉。
+_PATHEXT_OK_MARKER = "pathext-ok:"
+_PATHEXT_READ_RES: tuple[re.Pattern[str], ...] = (
+    re.compile(r"\$env:PATHEXT", re.IGNORECASE),  # pathext-ok: 偵測器自己的形態表（PowerShell）
+    re.compile(r"""os\.environ\[\s*["']PATHEXT"""),          # Python 下標讀取
+    re.compile(r"""os\.environ\.get\(\s*["']PATHEXT"""),     # Python .get 讀取
+    re.compile(r"""["']PATHEXT["']\s+in\s+os\.environ"""),   # Python 存在性判斷
+    re.compile(r"""getenv\(\s*["']PATHEXT"""),               # os.getenv / C 風格
+    re.compile(r"\$\{?PATHEXT\}?"),                          # POSIX shell
+)
+# 平台守衛述詞：出現任一即視為該檔已在判平台。刻意含 PowerShell 與 Python 兩套——
+# 同一個判準要能對兩種語言說話，否則「換語言寫同一個缺陷」又是一個免費的繞道。
+_PLATFORM_GUARDS: tuple[str, ...] = (
+    # Python
+    'os.name == "nt"', "os.name == 'nt'",
+    'sys.platform == "win32"', "sys.platform == 'win32'",
+    'sys.platform.startswith("win")', "sys.platform.startswith('win')",
+    'platform.system() == "Windows"', "platform.system() == 'Windows'",
+    "is_windows()", "IS_WINDOWS", "_is_windows",
+    # PowerShell
+    "$IsWindows", "$isWindowsHost", "PSVersion.Major -lt 6",
+    "[System.Environment]::OSVersion", "$env:OS -eq",
+    # POSIX shell
+    "uname -s", "OSTYPE",
+)
+
+
+def _pathext_markers(source: str, *, is_python: bool) -> dict[int, str]:
+    """{行號: WHY}——行尾豁免標記。
+
+    🔴 Python 檔一律走 `tokenize`（沿用本檔前四道判準的既有慣例）：**本判準的射程含
+    偵測器自己**，而偵測器的原始碼必然多處逐字提到標記字串（常數定義、docstring 說明、
+    測試訊息）。純逐行文字掃描會把那些提及都當成真的豁免標記，於是每一處都被判 stale
+    並要求刪除——鎖因為「說明自己」而翻紅，是最沒有說服力的一種紅（同
+    `test_dev_start.py::ps_code_only` 剝行尾註解的理由）。
+    `.ps1`／`.sh` 不是 Python，`tokenize` 會拋錯，故退回逐行掃描並要求標記出現在 `#`
+    **之後**（那兩種語言沒有 docstring，此近似足夠）。
+    """
+    markers: dict[int, str] = {}
+    if is_python:
+        try:
+            for tok in tokenize.generate_tokens(io.StringIO(source).readline):
+                if tok.type == tokenize.COMMENT and _PATHEXT_OK_MARKER in tok.string:
+                    markers[tok.start[0]] = tok.string.split(_PATHEXT_OK_MARKER, 1)[1].strip()
+            return markers
+        except (tokenize.TokenError, IndentationError, SyntaxError):
+            markers.clear()  # 壞檔退回逐行，掃描面不得靜默縮小
+    for lineno, line in enumerate(source.splitlines(), 1):
+        head, sep, tail = line.partition("#")
+        if sep and _PATHEXT_OK_MARKER in tail:
+            markers[lineno] = tail.split(_PATHEXT_OK_MARKER, 1)[1].strip()
+    return markers
+
+
+def scan_unguarded_pathext(
+    source: str, rel: str, *, is_python: bool | None = None
+) -> tuple[list[str], list[str]]:
+    """純函式核心：回傳 (offenders, stale_markers)，元素皆為 `rel:行號: 說明`。"""
+    if is_python is None:
+        is_python = rel.endswith(".py") or not rel.rpartition(".")[2]
+    markers = _pathext_markers(source, is_python=is_python)
+    lines = source.splitlines()
+    guard_first_at: int | None = next(
+        (n for n, line in enumerate(lines, 1) if any(g in line for g in _PLATFORM_GUARDS)),
+        None,
+    )
+    offenders: list[str] = []
+    used: set[int] = set()
+    for lineno, line in enumerate(lines, 1):
+        code = line.split("#", 1)[0]   # 剝行尾註解（heuristic，見區段劃界）
+        if not any(rx.search(code) for rx in _PATHEXT_READ_RES):
+            continue
+        # 🔴 `used` 記在「這一行確實有讀取語法」之後、**與守衛判斷無關**：stale 的語意
+        # 是「標記在、但這一行根本沒有要壓下的東西」。若把 `used` 記在守衛判斷之後，
+        # 一支檔案只要在前面某處出現過守衛，其標記就會被判 stale 而要求刪除——刪掉之後
+        # 那一行就只靠「檔案前面有守衛」這個寬判準撐著，鑑別力反而下降。
+        if markers.get(lineno):
+            used.add(lineno)
+            continue
+        if guard_first_at is not None and guard_first_at < lineno:
+            continue
+        offenders.append(
+            f"{rel}:{lineno}: 讀取 PATHEXT 但該行之前全檔沒有任何平台守衛"
+            f"（`{line.strip()[:70]}`）——PATHEXT 是 Windows-only 概念，POSIX 上不存在"
+            "且執行檔不帶副檔名 ⇒ 依它過濾候選會把所有候選濾光（DEF-101-766 形態）"
+        )
+    stale = [
+        f"{rel}:{lineno}: {_PATHEXT_OK_MARKER} 標記 stale"
+        f"（{'WHY 留空' if not why else '該行無被壓下的違規'}）"
+        for lineno, why in sorted(markers.items())
+        if lineno not in used or not why
+    ]
+    return offenders, stale
+
+
+def _pathext_scan_files() -> list[Path]:
+    """全庫（**遞迴**）`.py`／`.ps1`／`.psm1`／`.sh`，排除快取／venv／版控目錄。
+
+    射程刻意是**全庫**而不是「幾棵樹」：本判準治的正是「鎖只圈一個站點」，若又挑幾棵
+    樹來圈，下一次同型缺陷只要寫在第 N+1 棵樹裡就免費過關。凍結版 v0.01~v0.29 亦在
+    射程內——它們不可**修**，但若其中有未守衛的 PATHEXT 讀取，那是必須被看見的事實，
+    不是可以從掃描面移除的事實（真要處置時再走 Copy-on-Evolve 例外核准）。
+    """
+    skip_parts = {"__pycache__", ".git", ".venv", "venv", ".pytest_cache",
+                  ".ruff_cache", ".mypy_cache", "node_modules"}
+    out: list[Path] = []
+    for suffix in ("*.py", "*.ps1", "*.psm1", "*.sh"):
+        for p in _REPO_ROOT.rglob(suffix):
+            if skip_parts & set(p.parts):
+                continue
+            out.append(p)
+    return sorted(out)
+
+
+class TestPathextReadsAreePlatformGuarded(unittest.TestCase):
+    """PATHEXT 讀取必須帶平台守衛（見上方區段 WHY）。"""
+
+    def test_no_unguarded_pathext_read_in_repo(self) -> None:
+        offenders: list[str] = []
+        stale: list[str] = []
+        scanned = 0
+        for path in _pathext_scan_files():
+            rel = path.relative_to(_REPO_ROOT).as_posix()
+            off, st = scan_unguarded_pathext(
+                path.read_text(encoding="utf-8-sig", errors="replace"), rel)
+            offenders.extend(off)
+            stale.extend(st)
+            scanned += 1
+        # 反空轉下限＝R74 實掃數打八折取整。射程若被縮小（改成幾棵樹、或漏了某個
+        # 副檔名）必紅——「鎖只圈一個站點」正是本判準要治的病，不得原地復發。
+        self.assertGreaterEqual(
+            scanned, 1000, f"PATHEXT 掃描面只有 {scanned} 檔——射程疑似被縮小")
+        self.assertEqual(
+            offenders, [],
+            "發現未帶平台守衛的 PATHEXT 讀取（DEF-101-766 形態；R74 把該缺陷的鎖從"
+            "「一個站點」擴為全庫形態掃描）——請在讀取前先判平台，或於該行行尾加 "
+            f"`# {_PATHEXT_OK_MARKER} <WHY>`：\n" + "\n".join(offenders),
+        )
+        self.assertEqual(
+            stale, [],
+            f"{_PATHEXT_OK_MARKER} 豁免標記 stale（防清單腐化）：\n" + "\n".join(stale),
+        )
+
+    # ── 以下以合成樣本自證判準紅綠（樣本只存在於字串，不留違規樣本於 repo）──
+
+    def _scan(self, source: str) -> tuple[list[str], list[str]]:
+        return scan_unguarded_pathext(source, "fixture_case")
+
+    def test_injected_ps1_defect_shape_is_detected(self) -> None:
+        """DEF-101-766 的原形態（.ps1 無條件照 PATHEXT 過濾）必紅。"""
+        off, stale = self._scan(
+            "function Resolve-NativeExecutable {\n"
+            "  $exts = @($env:PATHEXT -split ';')\n"
+            "  return $null\n"
+            "}\n"
+        )
+        self.assertEqual(len(off), 1, off)
+        self.assertEqual(stale, [])
+
+    def test_injected_python_port_of_the_same_defect_is_detected(self) -> None:
+        """🔴 換語言寫同一個缺陷也必紅——這正是「一個站點級鎖」抓不到的那條路。"""
+        for sample in (
+            'exts = os.environ["PATHEXT"].split(os.pathsep)\n',
+            'exts = os.environ.get("PATHEXT", "").split(";")\n',
+            'exts = os.getenv("PATHEXT", "").split(";")\n',
+            'if "PATHEXT" in os.environ: pass\n',
+        ):
+            with self.subTest(sample=sample):
+                off, _ = self._scan(sample)
+                self.assertEqual(len(off), 1, f"{sample!r} 漏抓：{off}")
+
+    def test_injected_shell_port_is_detected(self) -> None:
+        off, _ = self._scan('echo "$PATHEXT" | tr ";" "\\n"\n')
+        self.assertEqual(len(off), 1, off)
+
+    def test_guarded_form_is_accepted(self) -> None:
+        """修法慣例（先判平台）必綠——否則本鎖會逼人改回舊寫法。"""
+        for sample in (
+            "if (-not $isWindowsHost) { return $candidate }\n"
+            "$exts = @($env:PATHEXT -split ';')\n",
+            'if os.name == "nt":\n    exts = os.environ["PATHEXT"].split(";")\n',
+            'if sys.platform.startswith("win"):\n'
+            '    exts = os.environ.get("PATHEXT", "")\n',
+        ):
+            with self.subTest(sample=sample):
+                off, stale = self._scan(sample)
+                self.assertEqual((off, stale), ([], []), f"{sample!r} 誤報")
+
+    def test_guard_after_the_read_does_not_count(self) -> None:
+        """守衛排在讀取**之後**不算——順序反了等於沒守（與 DEF-101-766 同型）。"""
+        off, _ = self._scan(
+            "$exts = @($env:PATHEXT -split ';')\n"
+            "if (-not $isWindowsHost) { return $candidate }\n"
+        )
+        self.assertEqual(len(off), 1, off)
+
+    def test_mentioning_pathext_in_prose_is_not_flagged(self) -> None:
+        """對照組：註解／docstring 提到 PATHEXT 不算讀取（本 repo 有大量在地 WHY）。"""
+        off, _ = self._scan(
+            "# PATHEXT 是 Windows-only 概念，POSIX 上不存在\n"
+            '"""這個函式不再依 PATHEXT 過濾候選。"""\n'
+        )
+        self.assertEqual(off, [])
+
+    def test_marker_suppresses_and_missing_violation_makes_it_stale(self) -> None:
+        """豁免標記能壓下違規；標記在、違規不在（或 WHY 留空）→ stale 必紅。"""
+        off, stale = self._scan(
+            f'exts = os.environ["PATHEXT"]  # {_PATHEXT_OK_MARKER} 僅供 Windows 分支使用\n')
+        self.assertEqual((off, stale), ([], []))
+
+        off, stale = self._scan(f'exts = os.environ["PATHEXT"]  # {_PATHEXT_OK_MARKER}\n')
+        self.assertEqual(len(off), 1, "WHY 留空的標記不得生效")
+        self.assertEqual(len(stale), 1, stale)
+
+        off, stale = self._scan(f"x = 1  # {_PATHEXT_OK_MARKER} 已改走平台守衛\n")
+        self.assertEqual(off, [])
+        self.assertEqual(len(stale), 1, "違規已消失的標記必須被指名刪除")
+
+    def test_detector_catches_the_pre_fix_form_of_the_real_guard_ps1(self) -> None:
+        """自我驗證（最重要的一支）：對**真實病灶檔的修復前形態**必須紅。
+
+        沿用本檔慣例——不查 git（綁 HEAD 會在修復 commit 後反過來變紅），而是把現行
+        真檔的短路整段移除再餵給判準；現行真檔同時必須乾淨，兩個方向一起鎖。
+        """
+        rel = "tools/lib/WindowsAppsGuard.ps1"
+        src = (_REPO_ROOT / rel).read_text(encoding="utf-8-sig")
+        guard_line = "if (-not $isWindowsHost)"
+        self.assertIn(
+            guard_line, src,
+            f"{rel} 內找不到非 Windows 短路 `{guard_line}` ⇒ 本自證失去對象——"
+            "該處若被重寫，請同步更新這支測試指向新的守衛形態，不要直接刪掉自證",
+        )
+        pre_fix = "\n".join(
+            line for line in src.splitlines()
+            if not any(g in line for g in _PLATFORM_GUARDS)
+        )
+        off, _ = scan_unguarded_pathext(pre_fix, f"{rel}@修復前重建")
+        self.assertTrue(off, f"本鎖對 {rel} 修復前的病灶抓不到 ⇒ 判準空轉")
+        off_now, stale_now = scan_unguarded_pathext(src, rel)
+        self.assertEqual((off_now, stale_now), ([], []), f"{rel} 現行必須已無此病灶")
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# R74 — 第六道判準：平台專屬 skip 的**方向**與**標籤對稱性**（PKG-4 D‧E‧F）
+# ══════════════════════════════════════════════════════════════════════════════
+# WHY 放在本檔（不另開新檔，沿用本檔「跨平台寫法家族」的收納契約）：判準本體住在
+# `tools/lib/windows_skip_tags.py`（供 `tools/run_root_unittests.py` 在閘門上消費
+# rc），本節是它的**單元測試**——證明四格方向表算得對、證明 pytest 形態真的在射程內、
+# 證明反方向棘輪不是空轉。沒有這一節，那些判準只有「repo 現況是綠的」這一個證據，
+# 而綠可能只是因為它什麼都沒看見（本 repo 已有三次同型前例）。
+sys.path.insert(0, str(_REPO_ROOT / "tools" / "lib"))
+import windows_skip_tags as _wst  # noqa: E402
+
+
+class TestSkipDirectionAndTagSymmetry(unittest.TestCase):
+    """skip 方向判準的四格與雙向標籤（`windows_skip_tags`）。"""
+
+    def _sites(self, src: str) -> list[_wst.SkipSite]:
+        return _wst.skip_decorator_sites({"fixture_case.py": src})
+
+    def test_pytest_skipif_form_is_in_scope(self) -> None:
+        """🔴 PKG-4 D 的核心：同一個缺陷改寫成 pytest 形態必須仍被看見。
+
+        意圖（Rule 9）：R72 的方向判準只走 `unittest` 的 decorator 且只讀位置引數的
+        reason，於是每一個 `@pytest.mark.skipif(cond, reason=...)` 站點在抽取階段就被
+        整個丟掉——連「未登記述詞」那道 fail-open 守衛都看不到它。一道只認一種測試
+        框架的判準，對「換框架寫同一個缺陷」零防護。
+        """
+        sites = self._sites(
+            "import pytest, sys\n"
+            '@pytest.mark.skipif(sys.platform != "win32", reason="需要 Windows")\n'
+            "def test_x(): pass\n"
+        )
+        self.assertEqual(len(sites), 1, sites)
+        self.assertEqual(sites[0].decorator, "skipif")
+        self.assertEqual(sites[0].reason, "需要 Windows")
+        self.assertEqual(
+            _wst.skipped_platform(sites[0]), "non-windows",
+            "pytest 形態的方向判錯——`skipif(sys.platform != \"win32\")` 是在**非** "
+            "Windows 上 skip（Windows 專屬測試）",
+        )
+
+    def test_module_level_pytestmark_and_alias_are_in_scope(self) -> None:
+        """模組級 `pytestmark` 與「先存成常數再當 decorator」兩種寫法都在射程內。
+
+        意圖：這兩種寫法的**射程比 decorator 大**（前者整檔 skip），漏掉它們等於在
+        覆蓋面最大的那一種寫法上失明。本 repo 兩種都真的在用。
+        """
+        sites = self._sites(
+            "import pytest, sys\n"
+            'pytestmark = pytest.mark.skipif(sys.platform == "win32", reason="POSIX 專屬")\n'
+            '_ALIAS = pytest.mark.skipif(sys.platform != "win32", reason="Windows 專屬")\n'
+        )
+        by_target = {s.target: s for s in sites}
+        self.assertEqual(sorted(by_target), ["_ALIAS", "pytestmark"], sites)
+        self.assertEqual(_wst.skipped_platform(by_target["pytestmark"]), "windows")
+        self.assertEqual(_wst.skipped_platform(by_target["_ALIAS"]), "non-windows")
+
+    def test_direction_table_covers_all_four_cells(self) -> None:
+        """四格方向表逐格斷言（極性 × 述詞在 Windows 上的值）。
+
+        意圖：R72 只有一格（`skipUnless` × Windows 述詞），其餘三格靜默判不出方向。
+        任何人把某一格拿掉，本支當場紅。
+        """
+        cases = {
+            ('skipIf', 'os.name == "nt"'): "windows",
+            ('skipIf', 'os.name != "nt"'): "non-windows",
+            ('skipUnless', 'os.name == "nt"'): "non-windows",
+            ('skipUnless', 'os.name != "nt"'): "windows",
+        }
+        for (deco, cond), want in cases.items():
+            site = _wst.SkipSite("f.py", 1, "t", deco, cond, "r")
+            with self.subTest(deco=deco, cond=cond):
+                self.assertEqual(_wst.skipped_platform(site), want)
+
+    def test_negated_predicate_does_not_invert_the_direction(self) -> None:
+        """🔴 `not <Windows 述詞>` 不得被判成 Windows 述詞（R74 落地時實測的方向反轉）。
+
+        意圖：兩極模型只問「條件文字裡有沒有 Windows 述詞」，於是
+        `skipif(not _windows_pwsh_available())` 被判成「Windows 上會 skip」，而它的
+        語意恰恰相反。**方向算反比判不出方向更糟**——它會要求作者貼上錯的標籤。
+        """
+        site = _wst.SkipSite("f.py", 1, "t", "skipif", "not _windows_pwsh_available()", "r")
+        self.assertEqual(_wst.skipped_platform(site), "non-windows")
+        self.assertEqual(
+            _wst.skipped_platform(
+                _wst.SkipSite("f.py", 1, "t", "skipif", "_windows_pwsh_available()", "r")),
+            "windows",
+        )
+
+    def test_untagged_non_windows_side_is_reported(self) -> None:
+        """反方向（POSIX 側）漏標必須被回報，且兩種標籤都算已標籤。"""
+        src = (
+            "import unittest, os, sys\n"
+            '@unittest.skipIf(os.name == "nt", "POSIX 專屬")\n'
+            "def test_a(): pass\n"
+            f'@unittest.skipIf(os.name == "nt", "{_wst.POSIX_NATIVE_SKIP_TAG} POSIX 專屬")\n'
+            "def test_b(): pass\n"
+            f'@unittest.skipUnless(sys.platform == "darwin", "{_wst.MAC_NATIVE_SKIP_TAG} mac")\n'
+            "def test_c(): pass\n"
+        )
+        offenders = _wst.untagged_non_windows_skip_decorators({"fixture_case.py": src})
+        self.assertEqual(
+            [label for label, _ in offenders], ["fixture_case.py:2 test_a"],
+            f"反方向漏標判準不對（實得 {offenders!r}）——已帶 POSIX／MAC 標籤者不得再被點名",
+        )
+
+    def test_ratchet_flags_both_directions_of_drift(self) -> None:
+        """棘輪對「新增未標籤」與「已補標未下修基線」兩向都說話（防基線腐化）。
+
+        意圖：只擋「不得增加」的棘輪會腐化——補完標籤後基線留在舊值，鑑別力靜默歸零
+        （`MIN_TESTS` 的註記逐字記載腐化 11 輪的後果）。故判準是**相等**。
+        """
+        baseline = dict(_wst._POSIX_TAG_RATCHET)
+        self.assertEqual(
+            _wst.posix_tag_ratchet_problems(baseline), [],
+            "基線自己對自己都不相等——表壞了",
+        )
+        tree = next(iter(baseline))
+        worse = {**baseline, tree: baseline[tree] + 1}
+        better = {**baseline, tree: max(0, baseline[tree] - 1)}
+        self.assertTrue(_wst.posix_tag_ratchet_problems(worse), "新增未標籤站點沒被擋下")
+        self.assertTrue(
+            _wst.posix_tag_ratchet_problems(better),
+            "補標後基線未下修卻放行——棘輪會就地腐化",
+        )
+        self.assertTrue(
+            _wst.posix_tag_ratchet_problems({}), "掃描面整組消失竟放行——fail-open")
+
+    def test_scan_surface_spans_the_three_live_test_trees(self) -> None:
+        """🔴 PKG-4 D 的射程面：判準必須看到三棵活測試樹，不是只有一棵。
+
+        意圖：R72 的射程只有 `tools/tests/`（實測 53 支檔），而 repo 活測試檔共 337 支
+        ⇒ 84% 不在任何方向判準的射程內。射程若被縮回一棵樹，本支當場紅。
+        """
+        trees = _wst.scan_tree_sources(_REPO_ROOT, _TESTS_DIR, "test_*.py")
+        self.assertEqual(
+            sorted(trees),
+            ["AISDLC_SDD/scripts/tests", "AutoClaude/tests", "tools/tests"],
+            f"掃描面的樹清單不對（實得 {sorted(trees)}）",
+        )
+        for tree, sources in trees.items():
+            floor = _wst._TREE_FILE_FLOORS[tree]
+            self.assertGreaterEqual(
+                len(sources), floor,
+                f"{tree} 掃到 {len(sources)} 支 < 下限 {floor}——該樹掃描面疑似縮小",
+            )
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -8,22 +8,31 @@
 - ADR-SD09-008 v0.1 PROPOSED（雙軌設計理由）
 - SD_09 W3 Round 6 audit P0-AUDIT-R5-B（time-flaky main test — 改相對 now 避免跨日 cutoff race）
 - SD_09 W3 Round 12 P0-R12-1（ADR-SD09-008 v0.4 ACCEPTED 拍板實作落地：升 60ms tolerant 為主軌）
+- ADR-SD09-012 ACCEPTED（PM 2026-08-03 拍板落地：gap-tolerant green_streak + L-7 staleness）
+
+🔴 ADR-SD09-012 落地後本檔全部 evaluate 呼叫改走 `_eval()` 注入時鐘（見該函式註解）：
+新增的 L-7 staleness 判準會拿「最新一筆 vs 現在」比對，而本檔的 fixture 用的是寫死的
+2026-05 日期——不注入時鐘的話，這些 case 會在 2026-06-25 之後開始集體判 stale 而變紅。
+那不是測到了缺陷，是測試自己踩到日曆（同 Round 6 P0-AUDIT-R5-B 的 time-flaky 形態）。
 """
 from __future__ import annotations
 
 import datetime as _dt
 import json
 from pathlib import Path
+from typing import Any
 
 import pytest
 
 from tools.ac4_progress_check import (
+    OBSERVATION_REQUIRED_RUNS,
     P95_MAX_MS,
-    P95_OBSERVATION_MS,
+    STALENESS_MAX_DAYS,
     _is_green,
     _is_green_observation,
     _is_green_tolerant,
     evaluate,
+    latest_timestamp,
     main,
 )
 
@@ -38,6 +47,23 @@ def _rec(*, p95: float, recall: float = 0.999, cb: int = 0,
         "circuit_breaker_open_count": cb,
         "status": status,
     }
+
+
+def _eval(records: list[dict[str, Any]], **kwargs: Any) -> dict[str, Any]:
+    """evaluate()，`now` 預設鎖在「最新一筆的隔天」。
+
+    為何不用真實時鐘：L-7 的 staleness 判準對時鐘敏感，而本檔 fixture 是寫死日期。
+    把 now 綁到資料本身，這些 case 就永久不受日曆影響；要測 staleness 的 case 自己
+    顯式傳 now（那才是它們的受測對象）。
+    """
+    if "now" not in kwargs:
+        latest = latest_timestamp(records)
+        kwargs["now"] = (
+            latest + _dt.timedelta(days=1)
+            if latest is not None
+            else _dt.datetime.now(tz=_dt.UTC)
+        )
+    return evaluate(records, **kwargs)
 
 
 # ========== _is_green_tolerant 單筆（向下相容；ADR v0.4 ACCEPTED 後保留供舊呼叫） ==========
@@ -95,7 +121,7 @@ def test_observation_fails_at_50ms_and_above() -> None:
 def test_evaluate_dual_track_strict_pass_tolerant_pass() -> None:
     """升級門檻 + 觀察軌全綠 → ready=True，兩 streak 都累計。"""
     records = [_rec(p95=45.0, ts=f"2026-05-{d:02d}T00:00:00+00:00") for d in range(11, 25)]
-    rpt = evaluate(records, tolerant_p95_ms=60.0)
+    rpt = _eval(records, tolerant_p95_ms=60.0)
     assert rpt["tolerant_streak"] == 14
     assert rpt["observation_streak"] == 14  # p95=45 < 50 → 觀察軌綠
     assert rpt["green_streak"] == 14
@@ -109,7 +135,7 @@ def test_evaluate_dual_track_upgrade_pass_observation_fail() -> None:
     p95=52 → 升級門檻綠（streak=14, ready=True）+ 觀察軌 fail（streak=0）。
     """
     records = [_rec(p95=52.0, ts=f"2026-05-{d:02d}T00:00:00+00:00") for d in range(11, 25)]
-    rpt = evaluate(records, tolerant_p95_ms=60.0)
+    rpt = _eval(records, tolerant_p95_ms=60.0)
     assert rpt["tolerant_streak"] == 14, "升級門檻 60ms tolerant → streak=14"
     assert rpt["observation_streak"] == 0, "觀察軌 50ms → p95=52 不達標 streak=0"
     # ADR v0.4 ACCEPTED：60ms 為升級門檻，ready 由升級門檻決定 → True
@@ -119,7 +145,7 @@ def test_evaluate_dual_track_upgrade_pass_observation_fail() -> None:
 def test_evaluate_dual_track_both_fail() -> None:
     """p95=70 > 兩軌 → 兩 streak=0 / ready=False。"""
     records = [_rec(p95=70.0, ts=f"2026-05-{d:02d}T00:00:00+00:00") for d in range(11, 25)]
-    rpt = evaluate(records, tolerant_p95_ms=60.0)
+    rpt = _eval(records, tolerant_p95_ms=60.0)
     assert rpt["tolerant_streak"] == 0
     assert rpt["observation_streak"] == 0
     assert rpt["green_streak"] == 0
@@ -129,8 +155,9 @@ def test_evaluate_dual_track_both_fail() -> None:
 def test_evaluate_no_tolerant_uses_default_60ms() -> None:
     """未傳 tolerant_p95_ms → tolerant_streak 同 green_streak（升級門檻預設 60ms）。"""
     records = [_rec(p95=45.0, ts=f"2026-05-{d:02d}T00:00:00+00:00") for d in range(11, 25)]
-    rpt = evaluate(records)
-    # ADR v0.4 ACCEPTED：未傳 tolerant_p95_ms 時，tolerant_streak = green_streak（= P95_MAX_MS 控制）
+    rpt = _eval(records)
+    # ADR v0.4 ACCEPTED：未傳 tolerant_p95_ms 時
+    # tolerant_streak = green_streak（由 P95_MAX_MS 控制）
     assert rpt["tolerant_streak"] == 14
     assert rpt["tolerant_p95_ms"] == P95_MAX_MS
     assert rpt["green_streak"] == 14
@@ -150,7 +177,7 @@ def test_round12_case_a_p95_55ms_tolerant_pass_observation_fail() -> None:
         - ready_for_labeled_pr=True（由升級門檻 60ms 決定）
     """
     records = [_rec(p95=55.0, ts=f"2026-05-{d:02d}T00:00:00+00:00") for d in range(11, 25)]
-    rpt = evaluate(records)
+    rpt = _eval(records)
     assert rpt["tolerant_streak"] == 14, "升級門檻 60ms tolerant: p95=55<60 → streak=14"
     assert rpt["observation_streak"] == 0, "觀察軌 50ms: p95=55≥50 → streak=0"
     assert rpt["tolerant_p95_ms"] == 60.0
@@ -167,7 +194,7 @@ def test_round12_case_b_p95_45ms_dual_track_pass_streak_sync() -> None:
         - 兩軌 streak 同步累計，提供 PM 後續是否需重新拍板回 50ms 的資料依據
     """
     records = [_rec(p95=45.0, ts=f"2026-05-{d:02d}T00:00:00+00:00") for d in range(11, 25)]
-    rpt = evaluate(records)
+    rpt = _eval(records)
     assert rpt["tolerant_streak"] == 14, "升級門檻 60ms: p95=45<60 → streak=14"
     assert rpt["observation_streak"] == 14, "觀察軌 50ms: p95=45<50 → streak=14"
     assert rpt["tolerant_streak"] == rpt["observation_streak"], "雙軌同步累計"
@@ -183,7 +210,7 @@ def test_round12_case_c_p95_65ms_dual_track_zero_both() -> None:
         - ready_for_labeled_pr=False
     """
     records = [_rec(p95=65.0, ts=f"2026-05-{d:02d}T00:00:00+00:00") for d in range(11, 25)]
-    rpt = evaluate(records)
+    rpt = _eval(records)
     assert rpt["tolerant_streak"] == 0, "升級門檻 60ms: p95=65≥60 → streak=0"
     assert rpt["observation_streak"] == 0, "觀察軌 50ms: p95=65≥50 → streak=0"
     assert rpt["ready_for_labeled_pr"] is False
@@ -191,14 +218,16 @@ def test_round12_case_c_p95_65ms_dual_track_zero_both() -> None:
 
 # ========== main CLI 整合 ==========
 
-def test_main_default_60ms_upgrade_threshold(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+def test_main_default_60ms_upgrade_threshold(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
     """main 不傳 --tolerant-p95-ms → JSON 含 tolerant_streak（預設 60ms 升級門檻）。
 
     SD_09 W3 Round 12 P0-R12-1：ADR v0.4 ACCEPTED 後升級門檻已固定 60ms，
     p95=52 場景 ready_for_labeled_pr=True（升級門檻達標）。
     """
     history = tmp_path / "ac4.jsonl"
-    now = _dt.datetime.now(tz=_dt.timezone.utc)
+    now = _dt.datetime.now(tz=_dt.UTC)
     records = [
         _rec(
             p95=52.0,
@@ -221,10 +250,12 @@ def test_main_default_60ms_upgrade_threshold(tmp_path: Path, capsys: pytest.Capt
     assert rc == 0
 
 
-def test_main_tolerant_flag_backward_compat(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+def test_main_tolerant_flag_backward_compat(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
     """向下相容：傳 --tolerant-p95-ms 60 行為與 ADR v0.3 預設一致。"""
     history = tmp_path / "ac4.jsonl"
-    now = _dt.datetime.now(tz=_dt.timezone.utc)
+    now = _dt.datetime.now(tz=_dt.UTC)
     records = [
         _rec(
             p95=52.0,
@@ -285,3 +316,81 @@ def test_resolve_strict_threshold_no_env_default_no_warn(
     assert val == 60.0
     captured = capsys.readouterr()
     assert "WARN" not in captured.err
+
+
+# ========== ADR-SD09-012 L-7 staleness 三 case（新鮮／N 邊界／超過 N） ==========
+#
+# 為何這三 case 是本次落地的必要條件而非加分項（ADR §7.4 DoD 1b）：
+# L-1 把 filter_recent() 移出閘門路徑，而它是 evaluate() 內**唯一**參照「現在」的項。
+# 移走後達標退化成純檔案內容函式——採集器無聲死掉時 green_streak 永久凍結、ready
+# 永久為 True，且沒有任何東西會察覺（ADR §1.4 實測：一年前的死資料回 ready=True）。
+# 三 case 都刻意讓 green_streak **達標**，把鑑別力集中在「新鮮度」這一個變數上：
+# 若有人把 stale 分支拿掉，第三個 case 立刻紅；若寫成 `>=` 而非 `>`，第二個立刻紅。
+
+_STALE_BASE = _dt.datetime(2026, 5, 24, tzinfo=_dt.UTC)
+
+
+def _fourteen_green() -> list[dict]:
+    """14 筆全綠，最新一筆 = _STALE_BASE。"""
+    return [
+        _rec(p95=45.0, ts=(_STALE_BASE - _dt.timedelta(days=d)).isoformat())
+        for d in range(OBSERVATION_REQUIRED_RUNS - 1, -1, -1)
+    ]
+
+
+def test_staleness_fresh_history_is_ready() -> None:
+    """case 1（新鮮）：最新一筆為昨日 → 不 stale、ready=True。"""
+    rpt = evaluate(_fourteen_green(), now=_STALE_BASE + _dt.timedelta(days=1))
+    assert rpt["staleness_days"] == 1
+    assert rpt["status"] == "ready"
+    assert rpt["ready_for_labeled_pr"] is True
+
+
+def test_staleness_exactly_at_limit_is_still_fresh() -> None:
+    """case 2（邊界）：距今恰為上限 → 仍算新鮮（判準是 `>` 不是 `>=`）。"""
+    rpt = evaluate(
+        _fourteen_green(), now=_STALE_BASE + _dt.timedelta(days=STALENESS_MAX_DAYS)
+    )
+    assert rpt["staleness_days"] == STALENESS_MAX_DAYS
+    assert rpt["status"] == "ready"
+    assert rpt["ready_for_labeled_pr"] is True
+
+
+def test_staleness_beyond_limit_blocks_despite_sufficient_green_streak() -> None:
+    """case 3（超過 N）：綠證據**仍然達標**，但採集已停擺 → stale、ready=False。"""
+    rpt = evaluate(
+        _fourteen_green(), now=_STALE_BASE + _dt.timedelta(days=STALENESS_MAX_DAYS + 1)
+    )
+    assert rpt["green_streak"] >= OBSERVATION_REQUIRED_RUNS, "前提：綠證據本身是足夠的"
+    assert rpt["status"] == "stale"
+    assert rpt["ready_for_labeled_pr"] is False
+    assert any("採集可能已停擺" in r for r in rpt["reasons"])
+
+
+def test_staleness_unparseable_timestamps_fail_closed() -> None:
+    """全部 timestamp 無法解析 → fail-closed 判 stale，不得因「量不出新鮮度」而放行。
+
+    意圖（Rule 9）：`_parse_ts` 回 None 的紀錄會被 filter_recent 丟掉，若 staleness 也
+    比照「丟掉就算了」，寫入端一旦壞掉（時間格式漂移）就會變成無限期假綠——與採集器
+    死掉的後果完全相同，只是更難看出來。
+    """
+    records = [_rec(p95=45.0, ts="not-a-timestamp") for _ in range(OBSERVATION_REQUIRED_RUNS)]
+    rpt = evaluate(records, now=_STALE_BASE)
+    assert rpt["staleness_days"] is None
+    assert rpt["status"] == "stale"
+    assert rpt["ready_for_labeled_pr"] is False
+
+
+def test_green_streak_gate_breaks_on_single_red_at_tail() -> None:
+    """green_streak 閘門的牙：尾端一筆 p95 超門檻 → streak 歸零、ready=False。
+
+    意圖（Rule 9）：ADR-SD09-012 放寬的是「缺口零容忍」，**不是**「紅了也算過」。
+    這條就是 ADR §7.2 要求的受控突變驗牙——把它與上面的 staleness 三 case 併看，
+    才構成「門檻改鬆了，但仍然關得起來」的完整證據。
+    """
+    records = _fourteen_green()
+    records.append(_rec(p95=63.0, ts=(_STALE_BASE + _dt.timedelta(days=1)).isoformat()))
+    rpt = evaluate(records, now=_STALE_BASE + _dt.timedelta(days=2))
+    assert rpt["green_streak"] == 0
+    assert rpt["ready_for_labeled_pr"] is False
+    assert any("連續全綠不足" in r for r in rpt["reasons"])

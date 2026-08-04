@@ -229,6 +229,73 @@ else
   rc=1
 fi
 
+# ── 行尾閘（R74）：進 commit 的 .sh／無副檔名 hook 檔不得含 CR ─────────────
+# 🔴 為何非有這道閘不可（Windows 側對這件事**完全沒有訊號**，本輪同機實測）：
+#   · Git Bash 對 CRLF 完全容忍——`bash -n` 對 CRLF 腳本 rc=0，直接執行也 rc=0 且
+#     正常輸出。⇒ 下方 A4 那道 `bash -n` 看不到它（而且 A4 只掃根層基建路徑）。
+#   · 同一份位元組在 POSIX bash（mac / Linux / Docker / act）上是 `$'\r': command
+#     not found` ＋ syntax error。這就是「在 Windows 開發 → mac 才爆」最直接的來源。
+# 🔴 為何看**暫存區 blob**（`git show :<path>`）而不是工作樹檔案：決定 mac 那邊拿到
+#   什麼位元組的是入庫內容。本 repo 現況正好是這個區分的活教材——Windows checkout 上
+#   有相當數量的 tracked `.sh` 工作樹是 CRLF，而 index 全部是 LF（`.gitattributes` 的
+#   `*.sh text eol=lf` 正在生效，clone 到 mac 拿到的是 LF ⇒ 無危害）。看工作樹的閘門會
+#   對這批檔天天假紅，看 blob 才對得上真正的危害。
+#   （筆數是會漂移的量測值，刻意不寫死成本檔的常數——現查：
+#    `git ls-files --eol -- '*.sh'`，看 `i/` 欄才是入庫行尾，`w/` 欄只是本機 checkout。）
+# 🔴 為何有 `.gitattributes` 還要這道閘（不是重複）：那是一份**設定**。設定被削弱時
+#   （新增子樹自帶 `.gitattributes` 漏了這條、或有人寫成 `*.sh -text`）CRLF 會無聲進
+#   index，而 Windows 側從頭到尾零訊號，直到 mac/CI 那邊爆。內容級斷言不依賴設定是否
+#   正確——這是分工：`.gitattributes` 負責「自動修正」，本閘負責「確認真的修正了」。
+# 射程刻意涵蓋**全部**子專案（不像 A4 只掃根層）：CRLF 腳本在哪一棵樹都一樣會在
+#   POSIX 上爆，按目錄劃界就是「鎖射程只圈一個站點」。無副檔名 hook 檔一併納入——
+#   它們同樣以 bash 執行，卻沒有 `.sh` 副檔名可比對，只鎖 `*.sh` 等於只鎖一半。
+# --diff-filter=ACM：刪除（D）的路徑暫存區已無 blob，`git show` 必然失敗；把那個
+#   失敗讀成「驗不過」會讓任何人都不能刪腳本。
+# 🔴🔴 偵測手法**不可用 grep**（本輪實測，這一步差點讓整道閘變成 Windows 上的 no-op）：
+#   Git Bash（MSYS）的 grep 自己就把 CR 當行尾剝掉，`grep -qF $'\r' <CRLF檔>` 與
+#   `grep -qF "$(printf '\r')" <同檔>` 在本機**雙雙 MISS**（同一支檔用 `cmp` 驗證
+#   確實含 CR）。也就是說：grep 版的閘門在 Windows 上會恆綠——一道回報綠的閘門，正是
+#   本閘要治的那個病本身。同款教訓已見於「Git Bash grep 讀 CP950 輸出命中 0、誤判沒有
+#   失敗行」：量測載具自己會騙人，載具必須先被驗證。
+#   改用「剝掉 CR 後與原檔逐位元組比對」：`tr`／`cmp` 都是位元組級，不解讀行尾語意。
+# 刻意不接管線（`tr … | cmp -s - file`）：本檔檔頭記載過 `pipefail` ＋ 早退讀端的
+#   SIGPIPE 陷阱；落地成第二個暫存檔再 `cmp` 兩檔，結構上就沒有管線可踩。
+if eol_files="$(git -c core.quotepath=false diff --cached --name-only --no-renames --diff-filter=ACM)"; then
+  while IFS= read -r f; do
+    [ -z "$f" ] && continue
+    do_eol=0
+    case "$f" in *.sh|*.bash) do_eol=1 ;; esac
+    case "$f" in
+      */git-hooks/*|*/.githooks/*|git-hooks/*|.githooks/*)
+        # 無副檔名者才算（同目錄下的 *.py 等已由自己的政策管）
+        case "${f##*/}" in *.*) : ;; *) do_eol=1 ;; esac ;;
+    esac
+    [ "$do_eol" -eq 1 ] || continue
+    _blob="$(mktemp)"
+    _blob_nocr="$(mktemp)"
+    if git show ":$f" >"$_blob" 2>/dev/null; then
+      LC_ALL=C tr -d '\r' <"$_blob" >"$_blob_nocr"
+      if ! cmp -s "$_blob" "$_blob_nocr"; then
+        # ${f} 帶大括號：bash 3.2 對「$f 後緊接全形字元」有 multibyte 變數名邊界 bug
+        echo "[pre-commit dispatcher] ❌ 行尾含 CR：${f}（進 commit 的 .sh／hook 檔必須是純 LF）" >&2
+        echo "                        POSIX bash（mac/Linux/Docker/act）會噴 \$'\\r' + syntax error；Windows 的 Git Bash 對此完全容忍（bash -n 亦 rc=0）＝本機零訊號" >&2
+        echo "                        修法：把該檔改成 LF 後重新暫存；並確認 .gitattributes 對該路徑有 \`text eol=lf\`（正常情況下 git add 會自動正規化，需要人工修表示那條規則沒覆蓋到）" >&2
+        rc=1
+      fi
+    else
+      echo "[pre-commit dispatcher] ❌ 無法讀取暫存區內容：${f} → 行尾閘無法驗證，擋下" >&2
+      rc=1
+    fi
+    rm -f "$_blob" "$_blob_nocr"
+  done <<EOF_EOL
+$eol_files
+EOF_EOL
+else
+  # 取不到清單＝無法驗證正確性閘 → fail-loud（同上方 NTFS 閘的處置）
+  echo "[pre-commit dispatcher] ❌ 無法取得暫存清單（git diff --diff-filter=ACM 失敗）→ 行尾閘無法驗證，擋下" >&2
+  rc=1
+fi
+
 # ── 根層基建 leg（A4）────────────────────────────────────────────────────
 # 變更清單含根層 tools/ / .gitattributes / .editorconfig / .github/ 時，對「本次變更到的」
 # .sh 與無副檔名 hook 檔（tools/git-hooks/*）跑 bash -n 語法檢查（快速、零依賴）；

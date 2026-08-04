@@ -165,6 +165,16 @@ on:
       # DEF-101-703：兩支 *-nightly-full 18 天零成功而三道既有哨兵結構上都偵測不到。
       # 由 test_ci_paths_cover_root_consumers.py 當場攔下並要求雙邊補列（該鎖有效）。
       - "tools/lib/ci_liveness.py"
+      # R74：本輪新增/新被消費的根層檔——test_ci_paths_cover_root_consumers.py 實測
+      # 攔下（DEF-101-042 同構）。CLAUDE.md 由 tools/tests/
+      # test_doc_loc_baseline_freshness_r60.py 的鐵律機械物盤點鎖逐行消費；
+      # windows_skip_tags.py 是 skip 標籤家族 SSOT；後三支是本輪新建的排程漂移
+      # 偵測器與其期望值 SSOT（DEF-101-794）與旗標解析共用層。
+      - "CLAUDE.md"
+      - "tools/lib/windows_skip_tags.py"
+      - "tools/_cli_flags.py"
+      - "tools/check_scheduled_task_drift.py"
+      - "tools/scheduled_task_expectations.json"
       - "tools/bootstrap_core.py"
       - "AutoClaude/tools/run_act_core.py"
       - "AutoClaude/tools/git-hooks/pre-commit"
@@ -313,6 +323,16 @@ on:
       # DEF-101-703：兩支 *-nightly-full 18 天零成功而三道既有哨兵結構上都偵測不到。
       # 由 test_ci_paths_cover_root_consumers.py 當場攔下並要求雙邊補列（該鎖有效）。
       - "tools/lib/ci_liveness.py"
+      # R74：本輪新增/新被消費的根層檔——test_ci_paths_cover_root_consumers.py 實測
+      # 攔下（DEF-101-042 同構）。CLAUDE.md 由 tools/tests/
+      # test_doc_loc_baseline_freshness_r60.py 的鐵律機械物盤點鎖逐行消費；
+      # windows_skip_tags.py 是 skip 標籤家族 SSOT；後三支是本輪新建的排程漂移
+      # 偵測器與其期望值 SSOT（DEF-101-794）與旗標解析共用層。
+      - "CLAUDE.md"
+      - "tools/lib/windows_skip_tags.py"
+      - "tools/_cli_flags.py"
+      - "tools/check_scheduled_task_drift.py"
+      - "tools/scheduled_task_expectations.json"
       - "tools/bootstrap_core.py"
       - "AutoClaude/tools/run_act_core.py"
       - "AutoClaude/tools/git-hooks/pre-commit"

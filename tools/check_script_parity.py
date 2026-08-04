@@ -132,11 +132,9 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+import _cli_flags  # noqa: E402  # 未知旗標 rc=2 fail-loud 的 SSOT（見該檔檔頭 WHY）
 import _stdio_utf8  # noqa: E402,F401  # Windows 非 UTF-8 終端 print(✅/❌/⚠) 防崩潰保護
-from _script_scan_surface import (  # noqa: E402
-    SCRIPT_SCAN_ROOTS,
-    iter_tree_scripts,
-)
+from _script_scan_surface import SCRIPT_SCAN_ROOTS, iter_tree_scripts  # noqa: E402
 
 _REPO_ROOT = Path(__file__).resolve().parents[1]
 
@@ -1561,8 +1559,9 @@ def _print_collapse() -> int:
 
 def main(argv: list[str] | None = None) -> int:
     args = sys.argv[1:] if argv is None else argv
-    if args == ["--print-collapse"]:
-        return _print_collapse()
+    rc = _cli_flags.reject_unknown_argv("check_script_parity.py", args, ("--print-collapse",))
+    if args:  # 未知引數 rc=2 fail-loud（R67-D20 射程擴張）：靜默吞掉即 rc=0 假綠
+        return _print_collapse() if rc is None else rc
 
     ok = True
 

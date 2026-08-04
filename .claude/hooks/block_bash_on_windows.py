@@ -49,6 +49,28 @@ import json
 import os
 import sys
 
+# 🔴 自己的 stderr／stdout 強制 UTF-8（DEF-101-789）。
+# 缺這段時發生什麼：`sys.stderr` 的預設 `errors` 是 `backslashreplace`，於是
+#   · locale 編碼**表達不了** CJK（en-US Windows／GitHub windows-latest ＝ cp1252）
+#     → 整段指引變成 `\\uXXXX` 逃脫字面；
+#   · locale 表達得了但不是 UTF-8（zh-TW ＝ cp950）
+#     → 讀者端（以 UTF-8 讀取的 Claude Code）拿到亂碼。
+# 兩種都讓「阻斷有了、教學沒了」：使用者被 exit 2 硬擋，卻拿不到替代指令——而這支
+# hook 存在的唯一理由就是「純文件約束實證無攔阻力」，指引不可讀等於把它砍掉一半。
+# 這不只是測試紅：雲端 windows-compat-ci 是**因為使用者真的會看到那串轉義碼**才紅的。
+# 姊妹檔 `sdd_hook_router.py` 早就有這段，同目錄兩支 hook 一支守一支不守。
+# 為何就地 reconfigure 而不 import `tools/_stdio_utf8`：本檔的 fail-open 契約要求
+# 零外部相依（見上方 docstring 的 P0），且 `tools/` 不在 hook 行程的 sys.path 上。
+for _stream in (sys.stdout, sys.stderr):
+    try:
+        _stream.reconfigure(encoding="utf-8", errors="replace")  # type: ignore[union-attr]
+    except Exception:  # noqa: BLE001 — 見下
+        # 這裡刻意比姊妹檔的 `(AttributeError, ValueError, OSError)` 更寬：
+        # 那三種涵蓋了「非 TextIOWrapper（測試替身）／串流已關閉」等實際情形，但本檔的
+        # fail-open 是 **P0**（hook 崩潰會把所有工具硬鎖死），而**模組層**崩潰發生在
+        # main() 的 try 之外、繞得過那道保險。指引印不漂亮遠好過守衛自己變成故障源。
+        pass
+
 _GUIDANCE = """🔴 Windows 上已禁用 Bash 工具（根 CLAUDE.md〈Windows 側單一載具原則〉鐵律一）。
 
 改用 **PowerShell 工具**：
@@ -71,7 +93,7 @@ _GUIDANCE = """🔴 Windows 上已禁用 Bash 工具（根 CLAUDE.md〈Windows �
   兩支 job 的 Action）跑的是 powershell.exe＝5.1**，在那裡 `&&` 是 parse error。
   判準要綁生產引擎，不要綁你手上這個 session 剛好是哪一版。
   本段措辭刻意不逐字重述那句已為假的話——樹裡不留假句子，否則下一個人 grep 到它
-  會以為那是現行說法，且 tools/tests/test_block_bash_on_windows_hook.py 會判紅。）
+  會以為那是現行說法，且 tools/tests/test_check_hooks_liveness.py 會判紅。）
 """
 
 

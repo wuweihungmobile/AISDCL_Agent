@@ -18,9 +18,31 @@ import json
 import sys
 from pathlib import Path
 
-PROJECT_ROOT = Path(__file__).resolve().parents[2]
+_AUTOCLAUDE_ROOT = Path(__file__).resolve().parents[2]
+_MONOREPO_ROOT = _AUTOCLAUDE_ROOT.parent
 
-sys.path.insert(0, str(PROJECT_ROOT.parent / "tools" / "lib"))
+# 🔴 R74（PKG-4 G）：解析基準由 `AutoClaude/` 上移到 **monorepo 根**。
+#
+# WHY：舊版以 `AutoClaude/` 為根，而 `normalize_rel_path()` 對「resolve 後不在該根底下」
+# 的絕對路徑一律回 None ⇒ exit 0。於是在 monorepo 根 session 下編輯
+# `tools/*.sh`／`AISDLC_SDD/**/*.sh` 時，本 hook **整支靜默失效**——`AutoClaude/` 之外的
+# 每一支 .sh 都沒有事中守門，而本 hook 的立意（紀律 #8：CRLF 的 .sh 在 Linux container
+# 內噴 `$'\r': command not found`，視為 P0）與檔案住在哪個子專案完全無關。
+# 這正是「鎖射程只圈一個站點」的同型（`DEF-101-757`／`DEF-101-777`）：守衛存在、
+# 但它看得見的範圍只有當初落地的那一棵樹。
+#
+# 相依上本來就已經綁死 monorepo 佈局（下一行 import 的 `platform_utils` 住在
+# **根層** `tools/lib/`），故以「根層 tools/lib/platform_utils.py 是否存在」判定
+# monorepo checkout；不成立時退回舊行為（獨立 AutoClaude checkout）。
+# 變數名沿用 `PROJECT_ROOT`：既有單元測試以 `monkeypatch.setattr(mod, "PROJECT_ROOT", …)`
+# 注入假樹，改名會讓那些測試靜默失去注入點（測試會照綠，但驗的是別的東西）。
+PROJECT_ROOT = (
+    _MONOREPO_ROOT
+    if (_MONOREPO_ROOT / "tools" / "lib" / "platform_utils.py").is_file()
+    else _AUTOCLAUDE_ROOT
+)
+
+sys.path.insert(0, str(_MONOREPO_ROOT / "tools" / "lib"))
 from platform_utils import (  # noqa: E402
     init_utf8_streams as _init_utf8_streams,  # type: ignore[import-not-found]
 )

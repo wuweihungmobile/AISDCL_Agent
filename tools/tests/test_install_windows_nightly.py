@@ -17,6 +17,8 @@ Windows 主機（含本專案開發常用的 macOS/Linux pwsh）無法真的執�
 """
 from __future__ import annotations
 
+import io
+import json
 import platform
 import re
 import shutil
@@ -25,6 +27,8 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from typing import Any
+from unittest import mock
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from _ps_engine import production_engine  # noqa: E402  # R60 E-A-03：引擎述詞 SSOT
@@ -886,6 +890,260 @@ class TestUnattendedExecutionHardening(unittest.TestCase):
             r"Export-ScheduledTask[\s\S]{0,140}?MultipleInstancesPolicy",
             "MultipleInstancesPolicy 必須自 Export-ScheduledTask 的 XML 讀取"
             "（Get-ScheduledTask 的 enum 對值 3 會印空白，會被誤讀成沒設定）",
+        )
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# R74 — 線上排程設定的期望值 SSOT ＋ 漂移偵測器
+# ══════════════════════════════════════════════════════════════════════════════
+# 🔴 **為何併進本檔而非另立新檔**：`tools/tests/test_adr_xplat001_c1c2_lock.py` 的
+# `_FROZEN_GUARD_FILE_COUNT` 是 shrink-only 棘輪，`DEF-101-561③` 明文裁決「禁止新增
+# 鎖檔、只准合併／刪除」。本檔是最貼近的家——它本來就是這兩支排程任務與其安裝器
+# 的鎖之家，上方 TestUnattendedExecutionHardening 鎖的正是同一組設定值。
+#
+# 🔴 缺陷本體（R74 實測，唯讀即可證）：ADR-SD09-012 §8.2 在 2026-08-03 就列出五項
+# 線上排程落差，而它連續三輪（R71/R72/R73）原封不動存活且**沒有任何東西轉紅**。
+# 機械成因：線上排程只以「機器狀態」存在，repo 裡沒有任何檔案是它們 ⇒ 沒有對照組
+# ⇒ 沒有任何檢查器能比。補法是兩件事一起做：
+#   ① 期望值落成 repo 內的檔（tools/scheduled_task_expectations.json）；
+#   ② 比對器（tools/check_scheduled_task_drift.py），不符即 rc=1。
+# 本節鎖的是「① 與安裝器不得漂移」＋「② 的判定與跨平台安全性」。
+_EXPECTATIONS_JSON = _REPO_ROOT / "tools" / "scheduled_task_expectations.json"
+_DRIFT_CHECKER = _REPO_ROOT / "tools" / "check_scheduled_task_drift.py"
+
+_SAMPLE_TASK_XML = """<?xml version="1.0" encoding="UTF-16"?>
+<Task version="1.4" xmlns="http://schemas.microsoft.com/windows/2004/02/mit/task">
+  <Principals>
+    <Principal id="Author">
+      <UserId>DOMAIN\\user</UserId>
+      <LogonType>S4U</LogonType>
+      <RunLevel>LeastPrivilege</RunLevel>
+    </Principal>
+  </Principals>
+  <Settings>
+    <MultipleInstancesPolicy>StopExisting</MultipleInstancesPolicy>
+    <DisallowStartIfOnBatteries>false</DisallowStartIfOnBatteries>
+    <StopIfGoingOnBatteries>false</StopIfGoingOnBatteries>
+    <StartWhenAvailable>true</StartWhenAvailable>
+    <WakeToRun>true</WakeToRun>
+    <ExecutionTimeLimit>PT4H</ExecutionTimeLimit>
+  </Settings>
+</Task>
+"""
+
+
+def _load_drift_module():
+    """以檔案路徑載入比對器（根層 tools/ 非 package，不能 import 名稱）。"""
+    import importlib.util
+
+    spec = importlib.util.spec_from_file_location("_drift_checker", _DRIFT_CHECKER)
+    assert spec and spec.loader
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+
+
+class TestScheduledTaskExpectationsSsot(unittest.TestCase):
+    """期望值 SSOT 與安裝器之間不得漂移（同一份知識只准有一個家）。"""
+
+    def setUp(self) -> None:
+        self.installer = _read(_SCRIPT)
+        self.spec = json.loads(_EXPECTATIONS_JSON.read_text(encoding="utf-8"))
+        self.tasks = self.spec["tasks"]
+
+    def test_ssot_covers_exactly_the_tasks_the_installer_registers(self) -> None:
+        """SSOT 的任務集合必須逐字等於安裝器註冊的兩支。
+
+        意圖（Rule 9）：若安裝器多註冊一支而 SSOT 沒跟上，那支新任務的設定就回到
+        「只以機器狀態存在」的失明狀態——本缺陷會原地復發，只是換一個任務名。
+        """
+        registered = set(re.findall(r"^\$(?:Smoke)?TaskName\s*=\s*'([^']+)'",
+                                    self.installer, re.MULTILINE))
+        self.assertEqual(
+            set(self.tasks), registered,
+            f"SSOT 任務集合 {sorted(self.tasks)} 與安裝器註冊的 {sorted(registered)} 不一致",
+        )
+
+    def test_every_expected_value_is_actually_applied_by_the_installer(self) -> None:
+        """七項期望值逐項都要能在安裝器裡找到對應的套用手段。
+
+        意圖：SSOT 若寫了安裝器做不到的期望值，比對器會永久紅（沒有修法），
+        人就會把它關掉——期望值必須與唯一的套用途徑同源。
+        對照表刻意寫死在測試裡：它就是「期望值 ↔ 套用手段」的橋，兩邊任一改動都會紅。
+        """
+        applied = {
+            "Settings/StartWhenAvailable": r"-StartWhenAvailable",
+            "Settings/WakeToRun": r"-WakeToRun",
+            # 建構 cmdlet 的參數名極性相反（DEF-101-249），故期望 false ↔ Allow/DontStop
+            "Settings/DisallowStartIfOnBatteries": r"-AllowStartIfOnBatteries",
+            "Settings/StopIfGoingOnBatteries": r"-DontStopIfGoingOnBatteries",
+            "Settings/ExecutionTimeLimit": r"-ExecutionTimeLimit\s+\(New-TimeSpan",
+            "Settings/MultipleInstancesPolicy": r"\$def\.Settings\.MultipleInstances\s*=\s*3",
+            "Principals/Principal/LogonType": r"-LogonType\s+S4U",
+        }
+        for task, spec in self.tasks.items():
+            self.assertEqual(
+                set(spec["expected"]), set(applied),
+                f"{task} 的期望值欄位集合與「安裝器套用手段」對照表不一致",
+            )
+            for key, pattern in applied.items():
+                self.assertRegex(
+                    self.installer, pattern,
+                    f"{task} 期望 {key}={spec['expected'][key]}，"
+                    f"但安裝器找不到套用手段（pattern={pattern}）",
+                )
+
+    def test_execution_time_limit_expectation_matches_installer_hours(self) -> None:
+        """PT<N>H 的 N 必須等於安裝器 New-TimeSpan -Hours 的 N（數值層對齊，非只有形狀）。"""
+        m = re.search(r"-ExecutionTimeLimit\s+\(New-TimeSpan\s+-Hours\s+(\d+)\)", self.installer)
+        assert m is not None
+        for task, spec in self.tasks.items():
+            self.assertEqual(
+                spec["expected"]["Settings/ExecutionTimeLimit"], f"PT{m.group(1)}H",
+                f"{task} 的 ExecutionTimeLimit 期望值與安裝器實際套用的小時數不一致",
+            )
+
+    def test_every_expected_setting_has_a_recorded_why(self) -> None:
+        """每一項期望值都要有 WHY——沒有理由的期望值遲早被當成雜訊刪掉。"""
+        why = self.spec["why_each"]
+        for task, spec in self.tasks.items():
+            missing = sorted(set(spec["expected"]) - set(why))
+            self.assertEqual(missing, [], f"{task} 這些期望值缺 WHY：{missing}")
+
+
+class TestScheduledTaskDriftChecker(unittest.TestCase):
+    """比對器的判定（純函式層，不觸碰真實排程；跨平台可跑）。"""
+
+    def setUp(self) -> None:
+        self.mod = _load_drift_module()
+        self.expectations = self.mod.load_expectations(_EXPECTATIONS_JSON)
+
+    def test_parses_namespaced_task_xml(self) -> None:
+        """Task Scheduler XML 帶命名空間，解析必須去前綴後仍取得七項值。"""
+        parsed = self.mod.parse_task_xml(_SAMPLE_TASK_XML)
+        self.assertEqual(parsed["Settings/WakeToRun"], "true")
+        self.assertEqual(parsed["Settings/ExecutionTimeLimit"], "PT4H")
+        self.assertEqual(parsed["Settings/MultipleInstancesPolicy"], "StopExisting")
+        self.assertEqual(parsed["Principals/Principal/LogonType"], "S4U")
+
+    def test_all_settings_matching_is_ok(self) -> None:
+        parsed = self.mod.parse_task_xml(_SAMPLE_TASK_XML)
+        report = self.mod.evaluate(self.expectations, dict.fromkeys(self.expectations, parsed))
+        self.assertEqual(report["status"], "ok", report)
+        self.assertEqual(report["drifts"], [])
+
+    def test_missing_execution_time_limit_is_drift_not_ok(self) -> None:
+        """實機現況：ExecutionTimeLimit 元素**根本不存在**（＝套用預設 PT72H）。
+
+        意圖（Rule 9）：這是本缺陷五項之二的真實形態。若比對器只在「值不同」時判紅、
+        對「欄位缺席」放行，那兩項就會永久隱形——正是它要治的病。
+        """
+        parsed = self.mod.parse_task_xml(_SAMPLE_TASK_XML)
+        del parsed["Settings/ExecutionTimeLimit"]
+        report = self.mod.evaluate(self.expectations, dict.fromkeys(self.expectations, parsed))
+        self.assertEqual(report["status"], "drift")
+        self.assertTrue(
+            any(d["setting"] == "Settings/ExecutionTimeLimit" and d["actual"] == "<missing>"
+                for d in report["drifts"]),
+            report["drifts"],
+        )
+
+    def test_interactive_logon_type_is_drift(self) -> None:
+        """smoke 的實機現況 InteractiveToken 必須被判紅（未登入時整輪不跑）。"""
+        parsed = self.mod.parse_task_xml(
+            _SAMPLE_TASK_XML.replace("<LogonType>S4U</LogonType>",
+                                     "<LogonType>InteractiveToken</LogonType>")
+        )
+        report = self.mod.evaluate(self.expectations, dict.fromkeys(self.expectations, parsed))
+        self.assertEqual(report["status"], "drift")
+
+    def test_absent_tasks_are_skip_not_drift(self) -> None:
+        """任務都不存在（CI runner／未安裝的開發機）→ skip，不得判紅。
+
+        意圖：把「這台機器沒有這個受測對象」判成失敗，等於讓每個 CI runner 永久紅，
+        而人的反應會是把這道檢查關掉——那就把剛補上的偵測管道又拆了。
+        """
+        report = self.mod.evaluate(self.expectations, dict.fromkeys(self.expectations, None))
+        self.assertEqual(report["status"], "skip")
+        self.assertEqual(sorted(report["absent"]), sorted(self.expectations))
+
+    def test_non_windows_exits_zero_without_touching_task_scheduler(self) -> None:
+        """非 Windows 必須 rc=0 且不得呼叫 PowerShell（macos/ubuntu CI 不可因此紅）。
+
+        意圖（DEF-101-766 同型教訓）：單平台判準無條件外推是本 repo 踩過的坑；
+        本鎖同時反向確認它沒有偷偷去跑 subprocess（那在 CI 容器裡會是另一種紅）。
+        """
+        called: list[Any] = []
+
+        def _boom(*a: Any, **k: Any) -> None:
+            called.append(a)
+            raise AssertionError("非 Windows 不得呼叫排程 API")
+
+        with mock.patch.object(self.mod.sys, "platform", "darwin"), \
+             mock.patch.object(self.mod, "_run_powershell", _boom), \
+             mock.patch("sys.stdout", io.StringIO()):
+            rc = self.mod.main(["--json"])
+        self.assertEqual(rc, 0)
+        self.assertEqual(called, [])
+
+    def test_rejects_task_names_with_shell_metacharacters(self) -> None:
+        """任務名會被代入 PowerShell 命令字串 → 非白名單字元必須拒絕。"""
+        with self.assertRaises(ValueError):
+            self.mod.export_task_xml("Bad'; rm -rf /; '")
+
+
+class TestWindowsSmokeTaskHasWrittenExitCriteria(unittest.TestCase):
+    """R74 F 項：AutoClaude_WindowsSmoke 這支排程任務必須有成文、可機械查的退出判準。
+
+    🔴 缺陷本體：該任務自 R60 建立起，全庫查不到任何一條退出判準——於是「這個測試
+    測完了嗎、能不能結束」這個問題**在結構上無法回答**，使用者連問三輪都得不到答案。
+    補償控制沒有退場條件，就會從「暫時的補償」腐化成「永久的儀式」。
+
+    本鎖釘住三件事（都在 tools/windows_smoke_local.ps1 的檔頭）：
+      ① 判準存在且分清「腳本（永久）」與「每日排程任務（有退場）」；
+      ② 判準是可機械查的（點名 gh 查詢與既有的兩支檢查器），不是「覺得夠了就撤」；
+      ③ **不得**以「連續 N 天零發現」當退場依據——R74 同輪雲端 windows-compat-ci
+         抓到一筆本機十道閘門全綠的 P0，證明零發現只代表這一層看不到那一類缺陷。
+    """
+
+    def setUp(self) -> None:
+        self.smoke = _read(_SMOKE_PS1)
+
+    def test_exit_criteria_section_exists(self) -> None:
+        self.assertIn(
+            "退出判準", self.smoke,
+            "windows_smoke_local.ps1 檔頭必須載明退出判準——"
+            "沒有退出判準的補償控制無法被結束，只能被遺忘",
+        )
+        for marker in ("E1.", "E2.", "E3."):
+            self.assertIn(marker, self.smoke, f"退出判準必須逐條編號，缺 {marker}")
+
+    def test_criteria_are_mechanically_checkable(self) -> None:
+        """三條判準各自要指名一個可實跑的查法，不得只是形容詞。"""
+        for probe in ("gh run list", "test_smoke_ci_sync.py",
+                      "check_scheduled_task_drift.py"):
+            self.assertIn(
+                probe, self.smoke,
+                f"退出判準必須指名可實跑的查法，缺 {probe}",
+            )
+
+    def test_separates_the_script_from_the_scheduled_task(self) -> None:
+        """腳本與排程任務的存廢理由不同，判準必須分開陳述。"""
+        self.assertIn("AutoClaude_WindowsSmoke", self.smoke)
+        self.assertRegex(
+            self.smoke, r"永久保留",
+            "本腳本本身（push 前／離線的 88 秒 tripwire）不應有退出判準，須明說",
+        )
+
+    def test_zero_findings_is_explicitly_rejected_as_a_retirement_basis(self) -> None:
+        """反向鎖：不得把「零發現」寫成退場依據。
+
+        意圖（Rule 9）：「連續 N 天沒抓到東西所以撤掉」是最自然、也最錯的判準——
+        它會在通道還有價值時把它撤掉，而且錯誤方向是不可逆的（撤掉後就沒有訊號了）。
+        """
+        self.assertIn(
+            "零發現", self.smoke,
+            "必須明文交代為何不以『零發現』當退場依據（否則下一個人一定會這樣做）",
         )
 
 

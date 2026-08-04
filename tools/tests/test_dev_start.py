@@ -1359,7 +1359,7 @@ class TestStreamNewProcessGroup(DevStartTestCase):
     參數為 POSIX-only，Windows 上傳入非假值會拋 `ValueError`）。
     """
 
-    @unittest.skipIf(os.name == "nt", "pgid 語意僅適用 POSIX")
+    @unittest.skipIf(os.name == "nt", "[POSIX-NATIVE-ONLY] pgid 語意僅適用 POSIX")
     def test_posix_child_pid_equals_its_own_pgid(self):
         captured: dict = {}
 
@@ -1401,7 +1401,7 @@ class TestStreamNewProcessGroup(DevStartTestCase):
             "Windows 上不可傳遞 start_new_session（POSIX-only kwarg，Windows 上"
             "subprocess.Popen 對非假值會拋 ValueError）")
 
-    @unittest.skipIf(os.name == "nt", "pgid 語意僅適用 POSIX")
+    @unittest.skipIf(os.name == "nt", "[POSIX-NATIVE-ONLY] pgid 語意僅適用 POSIX")
     def test_new_process_group_false_does_not_isolate(self):
         """對照組：new_process_group 預設 False（既有呼叫端，如 git pull／hooks
         安裝）不應被本輪修改影響——子行程仍與呼叫端同一 process group。"""
@@ -1564,7 +1564,7 @@ class TestStreamNewProcessGroupSurvivesDirectChildDeath(DevStartTestCase):
     """
 
     @unittest.skipIf(os.name == "nt",
-                      "process group / os.killpg 僅適用 POSIX；Windows 維持既有"
+                      "[POSIX-NATIVE-ONLY] process group / os.killpg 僅適用 POSIX；Windows 維持既有"
                       " _DescendantWatcher 設計，見 dev_start.py 對應 docstring")
     def test_killpg_survives_direct_child_kill_while_grandchild_alive(self):
         with tempfile.TemporaryDirectory() as td:
@@ -1654,7 +1654,7 @@ class TestBootstrapProcessGroupSurvivesDirectChildKill(DevStartTestCase):
     """
 
     @unittest.skipIf(os.name == "nt",
-                      "process group / os.killpg 僅適用 POSIX；Windows 維持既有"
+                      "[POSIX-NATIVE-ONLY] process group / os.killpg 僅適用 POSIX；Windows 維持既有"
                       " _DescendantWatcher 設計，見 dev_start.py 對應分支")
     def test_lock_stays_busy_via_killpg_while_any_grandchild_alive_then_clears(self):
         with tempfile.TemporaryDirectory() as td:
@@ -1782,7 +1782,7 @@ class TestSigintForwardsToBootstrapProcessGroup(DevStartTestCase):
         dev_start._set_active_bootstrap_pgid(None)
         super().tearDown()
 
-    @unittest.skipIf(os.name == "nt", "SIGINT/os.killpg 訊號轉發僅適用 POSIX；"
+    @unittest.skipIf(os.name == "nt", "[POSIX-NATIVE-ONLY] SIGINT/os.killpg 訊號轉發僅適用 POSIX；"
                       "Windows 未使用 start_new_session，既有 Ctrl-C 行為不變（見"
                       " main() 內對應安裝條件）")
     def test_real_sigint_terminates_direct_child_and_grandchild(self):
@@ -1863,7 +1863,7 @@ class TestNormalBootstrapFlowUnaffectedByProcessGroupChange(DevStartTestCase):
     在流程結束後正確清除。
     """
 
-    @unittest.skipIf(os.name == "nt", "pgid 語意僅適用 POSIX；Windows 分支未變動")
+    @unittest.skipIf(os.name == "nt", "[POSIX-NATIVE-ONLY] pgid 語意僅適用 POSIX；Windows 分支未變動")
     def test_successful_bootstrap_with_short_lived_grandchild_releases_lock_cleanly(self):
         with tempfile.TemporaryDirectory() as td:
             root = Path(td)
@@ -1908,7 +1908,7 @@ class TestNormalBootstrapFlowUnaffectedByProcessGroupChange(DevStartTestCase):
                 "_run_bootstrap() 返回後，無論成功與否都應清除 _ACTIVE_BOOTSTRAP_PGID"
                 "（避免遺留給下一次無關的 Ctrl-C 誤轉發）")
 
-    @unittest.skipIf(os.name == "nt", "pgid 語意僅適用 POSIX；Windows 分支未變動")
+    @unittest.skipIf(os.name == "nt", "[POSIX-NATIVE-ONLY] pgid 語意僅適用 POSIX；Windows 分支未變動")
     def test_stream_rc_and_stdout_passthrough_unaffected_by_new_process_group(self):
         """對照組：`_stream(new_process_group=True)` 對一個會印出 stdout 且
         正常結束的指令，rc 仍正確傳遞、且 Popen 未攔截 stdout（維持即時可見，
@@ -2538,7 +2538,7 @@ class TestMainInstallsSignalHandlerReference(DevStartTestCase):
     預設 handler」，而是驗證裝的正是這個函式本身。
     """
 
-    @unittest.skipIf(os.name == "nt", "本 handler 僅在 POSIX 安裝（見 main() 內"
+    @unittest.skipIf(os.name == "nt", "[POSIX-NATIVE-ONLY] 本 handler 僅在 POSIX 安裝（見 main() 內"
                       "對應條件判斷與其 docstring）")
     def test_main_installs_forward_signal_handler_during_step_venv(self):
         with tempfile.TemporaryDirectory() as td:
@@ -2781,7 +2781,10 @@ class TestNightlyHeartbeatFilenameContract(unittest.TestCase):
         pos_exit = sh.find('if [ "$FAIL" -gt 0 ]')
         self.assertGreater(pos_summary, 0, "最終彙總 printf 錨點消失")
         self.assertGreater(pos_call, pos_summary, "write_heartbeat 呼叫須在最終彙總之後")
-        self.assertGreater(pos_exit, pos_call, "write_heartbeat 呼叫須在 exit 判定之前（失敗路徑也要寫）")
+        self.assertGreater(
+            pos_exit, pos_call,
+            "write_heartbeat 呼叫須在 exit 判定之前（失敗路徑也要寫）",
+        )
 
     def test_windows_reader_filename_matches_ps1_writer(self) -> None:
         ps1 = (self._REPO / "AutoClaude" / "tools" / "run_local_nightly.ps1").read_text(
@@ -3553,7 +3556,7 @@ class TestNightlyHeartbeatDimensionContract(_NightlyHeartbeatDimensionMixin, uni
 
 @unittest.skipUnless(
     sys.platform == "darwin",
-    "install_mac_nightly.sh 的 report_heartbeat() 依賴 BSD `stat -f %m`（見該檔"
+    "[MAC-NATIVE-ONLY] install_mac_nightly.sh 的 report_heartbeat() 依賴 BSD `stat -f %m`（見該檔"
     "頭『非 macOS fail-loud』guard，非 Darwin 上執行本身即為無意義假訊號，GNU "
     "stat 的 -f 語意也完全不同）——本鎖只在 macOS runner（macos-compat-ci.yml）"
     "上有意義，非 Darwin 平台跳過而非假綠",
@@ -3842,7 +3845,7 @@ _MACNIGHTLY_DEGENERATE_PLIST = """<?xml version="1.0" encoding="UTF-8"?>
 
 @unittest.skipUnless(
     sys.platform == "darwin",
-    "install_mac_nightly.sh 對非 Darwin 直接 fail-loud（該檔 `uname != Darwin` "
+    "[MAC-NATIVE-ONLY] install_mac_nightly.sh 對非 Darwin 直接 fail-loud（該檔 `uname != Darwin` "
     "guard），且本組依賴 plutil／BSD `date -v`／launchd plist 語意——非 macOS 上"
     "執行本身即為無意義假訊號，跳過而非假綠",
 )
@@ -4932,6 +4935,7 @@ class TestLivenessEventFilter(unittest.TestCase):
 
 
 from _ps_engine import any_engine_available as _ps_any_engine  # noqa: E402
+from _ps_engine import available_engines as _ps_available_engines  # noqa: E402
 from _ps_engine import native_ps51 as _ps_native_51  # noqa: E402
 from _ps_engine import production_engine as _ps_production_engine  # noqa: E402
 from _ps_engine import windows_with_engine as _ps_windows_with_engine  # noqa: E402
@@ -6250,8 +6254,11 @@ class TestNativeStdoutDecodingRoutingLock(unittest.TestCase):
 # root-infra-ci(ubuntu) 必紅。與 DEF-101-759 是同一個病，只是換平台發作。
 #
 # 🔴 為何用「參數化 harness」而不是真的起一支 PS Core：缺陷只在
-# 「`$PSVersionTable.PSVersion.Major >= 6` 且 `$IsWindows` 為假」時顯形，而本機
-# （Windows 11）沒有 pwsh 7。替身變數這條路本包**實測走不通**：`$PSVersionTable` 在
+# 「`$PSVersionTable.PSVersion.Major >= 6` 且 `$IsWindows` 為假」時顯形，而在 Windows
+# 上**任何**引擎都讓 `$IsWindows` 為真（它是唯讀常數），故那個組合在此平台結構性
+# 不可達——引擎裝了什麼一律現查 `tools/tests/_ps_engine.py::available_engines()`，
+# 不寫進本檔（R74：原句把量測當時的機器屬性寫成了常數，DEF-101-777 同型）。
+# 替身變數這條路本包**實測走不通**：`$PSVersionTable` 在
 # PS 5.1 是 read-only，`$PSVersionTable = …`／`$local:PSVersionTable = …`／
 # `New-Variable -Force` 三種寫法皆回 `Cannot overwrite variable PSVersionTable because
 # it is read-only or constant.`，連子作用域都蓋不掉（函式內看到的仍是 Major=5）。
@@ -6505,6 +6512,120 @@ class TestResolveNativeExecutableNonWindowsBranch(unittest.TestCase):
             kv["RESULT_NULL"], "True",
             "PS Core 跑在 Windows 上竟跳過了 PATHEXT 過濾——短路的條件寫成只看版本、"
             f"沒看 `$IsWindows`（kv={kv}）",
+        )
+
+
+def _real_pwsh7() -> str | None:
+    """真 pwsh 7 的路徑（缺席即 None）。走 `_ps_engine` SSOT 的 `available_engines()`，
+    **不**在此行內 `shutil.which("pwsh")`——那正是 `test_ps_engine_ssot.py` 的反增生鎖
+    在擋的形態（DEF-101-509／E-A-03 家族）。"""
+    return _ps_available_engines().get("pwsh")
+
+
+@unittest.skipUnless(
+    os.name == "nt" and _real_pwsh7() is not None,
+    "[WINDOWS-NATIVE-ONLY] 需要 Windows 平台 ＋ **真** pwsh 7 行程：本組的全部價值就是"
+    "「不用 harness 替身」，缺 pwsh 7 時沒有替代載具（harness 版＝"
+    "TestResolveNativeExecutableNonWindowsBranch）",
+)
+class TestResolveNativeExecutableOnRealPwsh7(unittest.TestCase):
+    """🔴 `DEF-101-769` 殘留項的補驗：`Major >= 6` 分支以**真 pwsh 7 行程**跑一次。
+
+    WHY 這一支非補不可（帳本逐字指派 R74）：`DEF-101-766` 的修法此前**只有 harness 鎖**
+    ——把生產函式原始碼搬進 harness、把唯讀的 `$PSVersionTable.PSVersion.Major` 換成可
+    設定的替身。那份鎖量的是**一份副本**，它證明不了「真的用 PS 7 跑起來時，這個分支
+    真的走得到、且行為與副本一致」。帳本把解鎖條件寫成三個可辨認的觸發時刻，其中
+    「要改雙引擎判準」已於 R73 發生、pwsh 7.6.4 也已在機器上 ⇒ 條件成立，補驗即到期。
+
+    🔴 誠實劃界（勿超譯）：真 pwsh 7 在 Windows 上 `$IsWindows` **恆為真**（自動變數是
+    唯讀常數，`Set-Variable -Force` 亦蓋不掉——同檔上方 harness 區段已實測記載）。
+    故本組能真機補驗的是「`Major >= 6` 且在 Windows」這一格：分支確實走得到、且
+    Windows 語意（PATHEXT 過濾）沒有因為版本判斷而被跳過。「`Major >= 6` 且非 Windows」
+    那一格在本平台結構性不可達，仍只有 harness 鎖 ＋ macos/ubuntu CI 兜底。
+    把這句寫進 docstring 而不是宣稱「已用真引擎全面補驗」，正是本輪主軸本身。
+    """
+
+    def setUp(self) -> None:
+        self.tmp = Path(tempfile.mkdtemp())
+        self.addCleanup(_rmtree_force, self.tmp)
+        self.bin = self.tmp / "bin"
+        self.bin.mkdir()
+        (self.bin / "fakepy").write_text("#!/bin/sh\nexit 0\n", encoding="ascii")
+        (self.bin / "fakecmd.cmd").write_text(
+            "@echo off\r\nexit /b 0\r\n", encoding="ascii", newline="")
+        comspec = os.environ.get("ComSpec", "")
+        extra = [os.path.dirname(comspec)] if comspec else []
+        self.env = dict(os.environ)
+        self.env["PATH"] = os.pathsep.join([str(self.bin), *extra])
+        self.ps = _real_pwsh7()
+
+    def _probe(self, cand: str, expected_name: str) -> dict[str, str]:
+        """把**未經任何替換**的生產函式交給真 pwsh 7 執行。"""
+        body = _production_resolve_body()
+        self.assertNotIn(
+            _PS_MAJOR_FAKE, body,
+            "生產碼裡出現了 harness 的替身變數——本組的前提是「不做任何替換」",
+        )
+        script = self.tmp / f"real_pwsh7_{cand}.ps1"
+        script.write_text(
+            body + "\n"
+            + f"$r = {_RESOLVE_FN} -CandidateName '{cand}'\n"
+            + "'PS_MAJOR=' + $PSVersionTable.PSVersion.Major\n"
+            + "'IS_WINDOWS=' + $IsWindows\n"  # ps7-ok: 本組刻意只在 pwsh 7 上跑（skipUnless 已守）
+            + "'RESULT_NULL=' + ($null -eq $r)\n"
+            + f"'IS_FIXTURE=' + ($r -eq '{self.bin / expected_name}')\n",
+            encoding="utf-8-sig",
+        )
+        proc = subprocess.run(
+            [self.ps, "-NoProfile", "-File", str(script)], env=self.env,
+            capture_output=True, encoding="utf-8", errors="replace", timeout=180,
+        )
+        kv = _parse_kv(proc.stdout)
+        for key in ("PS_MAJOR", "IS_WINDOWS", "RESULT_NULL", "IS_FIXTURE"):
+            self.assertIn(
+                key, kv,
+                f"載具故障：真 pwsh 7 子行程未回報 {key}（不得當成通過）\n"
+                f"rc={proc.returncode}\nstdout={proc.stdout!r}\nstderr={proc.stderr!r}",
+            )
+        return kv
+
+    def test_real_pwsh7_actually_enters_the_major_ge_6_branch(self) -> None:
+        """載具自證：真的是 PS 7 在跑（否則下面兩支量的還是 5.1 那一格）。"""
+        kv = self._probe("fakecmd", "fakecmd.cmd")
+        self.assertGreaterEqual(
+            int(kv["PS_MAJOR"]), 6,
+            f"用來跑本組的引擎不是 PS 6+（kv={kv}）——`Major >= 6` 分支根本沒被觸及，"
+            "整組退化成第二份 5.1 測試",
+        )
+        self.assertEqual(
+            kv["IS_WINDOWS"], "True",
+            f"真 pwsh 7 在 Windows 上回報 $IsWindows 非 True（kv={kv}）——"
+            "本組的劃界前提（那一格結構性不可達）已不成立，請重讀類別 docstring",
+        )
+
+    def test_real_pwsh7_on_windows_keeps_pathext_filtering(self) -> None:
+        """本體：PS 7 跑在 Windows 上**仍**必須照 PATHEXT 過濾（不得因版本短路而放行）。
+
+        這是 harness 鎖唯一無法真正證明的那一半：harness 把版本運算式換成替身，
+        它證明的是「副本在 major=7 時的行為」；本支證明真引擎在真 `$PSVersionTable`
+        下走同一條路。若有人把短路條件寫成「只要 Major >= 6 就跳過過濾」，
+        裝了 pwsh 7 的 Windows 開發機會重新踩回 `DEF-101-759` 的 ShellExecute 對話框，
+        而本支會在那一刻紅。
+        """
+        kv = self._probe("fakepy", "fakepy")
+        self.assertEqual(
+            kv["RESULT_NULL"], "True",
+            f"真 pwsh 7 在 Windows 上接受了無副檔名候選（kv={kv}）——版本短路把 Windows "
+            "語意一起跳過了（DEF-101-759 回歸路徑）",
+        )
+
+    def test_real_pwsh7_positive_control_accepts_pathext_candidate(self) -> None:
+        """正控（鏡子自證）：真 pwsh 7 下 Windows 分支本身是活的，上一支的 $null 才歸因得了過濾。"""
+        kv = self._probe("fakecmd", "fakecmd.cmd")
+        self.assertEqual(
+            kv["IS_FIXTURE"], "True",
+            f"真 pwsh 7 下連 `.cmd` 候選都解析不到（kv={kv}）——引擎或 fixture PATH 壞了，"
+            "此刻整組鎖零鑑別力",
         )
 
 

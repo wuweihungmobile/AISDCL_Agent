@@ -153,9 +153,11 @@ CLOSED_CLASSES = frozenset({"fixed", "wontfix", "closed-by-decision"})
 # 再匯出維持相容，並把「該檔應改用 `gate._row_cells(line)[1:-1]`」列為跨包請求。
 _CELL_SPLIT_RE = gate._CELL_SPLIT_RE
 
-# 判準② — ASCII 邊界，故 `OpenMutexW`／`reopened` 不會誤命中（G-refuter-4）。
+# 判準② — token 邊界字元集與 gate `_FIRST_WORD_RE`（`[A-Za-z][A-Za-z0-9_-]*`，故
+# `closed-by-decision` 整體是一個詞）**對齊**：`OpenMutexW`／`reopened` 不誤命中
+# （G-refuter-4），`fail-open` 這類設計術語亦然（R74，WHY 見 `active_status_hit()` 第④類）。
 ACTIVE_STATUS_RE = re.compile(
-    r"(?<![A-Za-z0-9])(?:open|routed|deferred|watch)(?![A-Za-z0-9])|workaround"
+    r"(?<![A-Za-z0-9_-])(?:open|routed|deferred|watch)(?![A-Za-z0-9_-])|workaround"
 )
 
 # 判準④ — 「向未來輪次交棒」的散文標記。刻意保守（寧可多攔下來要求具名承認）。
@@ -372,11 +374,9 @@ POINTER_VERB = "立帳見"
 # (b) `check()` **每一次執行都會逐處列印**被視為例外的位置、原文與**憑哪一條**（比照
 # `check_pytest_baseline_sites.py` 的 `baseline-ok:` 豁免逐次列印稽核慣例），
 # 所以拿反引號夾帶一個真指針來規避，會在每一次閘門輸出裡現形，不可能靜默。
-# 🔴 **再匯出（re-export），不是複本**（R68）：`= gate._CODE_SPAN_RE` 綁的是**同一個
-# 物件**，形狀沿用本檔既有的 `_CELL_SPLIT_RE = gate._CELL_SPLIT_RE` 先例。R68 在
-# `check_defect_log_crossref.status_variant_problems()` 也需要「反引號內是逐字引述、
-# 不算宣稱」這條判準；同一個判準寫兩份正是本 repo 反覆在治的複本型缺陷，故收斂為
-# 一份 SSOT（方向必然是 gate → 本檔：本檔 import gate，反向會是循環 import）。
+# 🔴 **再匯出（re-export），不是複本**（R68）：綁的是**同一個物件**，形狀沿用本檔既有的
+# `_CELL_SPLIT_RE = gate._CELL_SPLIT_RE` 先例——同一個判準寫兩份正是本 repo 反覆在治的
+# 複本型缺陷。R74 起本體住 `tools/lib/defect_ledger_index.CODE_SPAN_RE`（三個消費端一份）。
 _CODE_SPAN_RE = gate._CODE_SPAN_RE
 _TERM_MENTION_SUFFIXES = ("」", "』")
 # 例外 (丁) 收窄用（SA-R60R3-06）：同一行的成對轉角引號。與 `_CODE_SPAN_RE` 同形狀——
@@ -457,7 +457,6 @@ _BARE_RESIDENCE_ID_WINDOW = 40
 # 這兩種若哪天真的被拿來夾帶失實宣稱，本項抓不到；記在這裡以免下一輪誤以為已覆蓋。
 
 
-
 def criteria_sentence() -> str:
     """把 `CHECK_CRITERIA` 攤成一句「本次稽核查了哪幾件事」——成功訊息的唯一來源。
 
@@ -516,34 +515,35 @@ def active_status_hit(status_cell: str) -> re.Match[str] | None:
     """判準② 的實際判讀入口：**排除程式碼片段與角引號引述之後**再找活躍字樣（R68）。
 
     🔴 為何非收窄不可（DEF-101-676 實測，2026-08-01 於主檔 109 列現查）——判準② 原本是
-    對整個狀態欄做裸掃描，於是把以下三類**與本列現況無關**的字元一律當成「本列還活著」：
+    對整個狀態欄做裸掃描，於是把下列**與本列現況無關**的字元一律當成「本列還活著」
+    （項數不寫死：清單會長，寫死就是下一個 stale 站點）：
 
       · **程式碼片段裡的 Python 內建函式 `open`**。實例 `DEF-101-391`：狀態欄寫
         `` fixed@R48：`python3 -c "import yaml; yaml.safe_load(open('...yml'))"` ``——
-        命中的 `open` 是 `open()` 呼叫。`DEF-101-524` 同型（`open(..., newline="")`）。
-        這與本判準 ASCII 邊界那一版要消滅的 `OpenMutexW` 誤報**完全同型**，只是逸出面
-        從「英文字母相鄰」換成「反引號內」。
+        命中的 `open` 是 `open()` 呼叫。`DEF-101-524` 同型（`open(..., newline="")`）；
+        與 ASCII 邊界那一版的 `OpenMutexW` 誤報同型，逸出面換成「反引號內」。
       · **引述本列自己被推翻的舊狀態**。實例 `DEF-101-554`：`` 本欄原文為「`open`（待
-        主控還原）」…（污染已還原，後續輪不需再執行任何動作） ``；`DEF-101-581`：
-        `` 原記狀態 `open（未指派）` ``。這些字面出現的用途正是**宣告它已不成立**，
-        判準② 卻把它讀成「還成立」——語意剛好相反。
+        主控還原）」… ``；`DEF-101-581`：`` 原記狀態 `open（未指派）` ``。這些字面出現的
+        用途正是**宣告它已不成立**，判準② 卻把它讀成「還成立」——語意剛好相反。
       · **在講別的 DEF-ID**。實例 `DEF-101-541`／`564`／`565`：`routed` 指的是被拆出去
         的另一列（`DEF-101-559` 等），不是本列。
+      · **以 `-`／`_` 黏成複合 token 的設計術語**（R74）。實例 `DEF-101-699`／`768` 的
+        狀態欄寫 `fail-open`（守衛的失敗**方向**），而邊界 lookaround 原本只排除
+        `[A-Za-z0-9]`、放連字號通過 ⇒ 兩筆已結列被永久釘在主檔。修法是把邊界字元集對齊
+        gate `_FIRST_WORD_RE` 的 token 定義，**不是**加遮罩、也**不是**開白名單。
 
     後果不是「多攔幾筆」而是**結構性死結**：這 16 筆全是 `_classify` 已判已結（fixed／
     closed-by-decision）、只被判準② 一項擋住的列，合計 **39705 bytes** 永久卡在主檔，
     使輪替吞吐趨近零、主檔單調逼近 256KB 硬線（DEF-101-676）。
 
-    收窄手法刻意**復用本工具既有基元**（`_CODE_SPAN_RE`／`_CORNER_QUOTE_RE`，判準④⑥
-    已在用），不另寫一套規則——否則就是製造第二份說法，重演 P7-4「兩份清單」病。
+    收窄手法刻意**復用既有基元**（`_CODE_SPAN_RE`／`_CORNER_QUOTE_RE`），不另寫一套規則。
 
     🔴 **鑑別力不得因此流失**，三道保留：
       (a) 裸散文裡的活躍字樣照樣命中（未加反引號、未加角引號者一律算數）；
       (b) 判準① 仍先要求狀態欄首詞分類為已結，本判準只是第二層；
-      (c) 判準④（`HANDOFF_PROSE_RE`：下輪／留待／解鎖條件／承接者／改派／backlog／
-          deferred）完全不受本次收窄影響，且它掃的是**整列**而非狀態欄——真正的活交棒
-          仍會被攔下要求 `--ack-handoff` 具名承認。實測本次放行的 6 筆中，`DEF-101-521`
-          （backlog）／`524`（解鎖條件）／`554`（backlog）三筆仍落在判準④ 手上。
+      (c) 判準④（`HANDOFF_PROSE_RE`）完全不受影響，且它掃的是**整列**而非狀態欄——真正的
+          活交棒仍會被攔下要求 `--ack-handoff` 具名承認（R68 實測放行的 6 筆中有 3 筆
+          隨即落在判準④ 手上；R74 的 `fail-open` 兩筆亦同）。
     對應機械鎖：`tools/tests/test_defect_log_capacity_policy_r68.py::TestCriterion2Narrowing`
     """
     masked = list(status_cell)

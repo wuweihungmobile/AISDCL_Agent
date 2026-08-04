@@ -64,6 +64,7 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+import _cli_flags  # noqa: E402  # 未知旗標 rc=2 fail-loud 的 SSOT（見該檔檔頭 WHY）
 import _stdio_utf8  # noqa: E402,F401  # Windows 非 UTF-8 終端 print(✅/❌) 防崩潰保護
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -432,8 +433,18 @@ def check_wrapper_thinness() -> list[str]:
     return problems
 
 
+#: 本工具接受的全部引數。**新增旗標時必須同步本元組**，否則它自己會被下面那道
+#: 未知引數守衛擋下——刻意讓「加了旗標卻沒宣告」立刻可見，而不是靜默生效。
+_KNOWN_ARGV: tuple[str, ...] = ("--print-hash", "--print-lines")
+
+
 def main(argv: list[str] | None = None) -> int:
     args = sys.argv[1:] if argv is None else argv
+    # 未知引數 rc=2 fail-loud（R67-D20 射程擴張）：修前 `--bogus-flag-xyz` 會靜默掉進
+    # 下方全檢查路徑並印綠燈 ⇒ 使用者以為自己下的旗標生效了。
+    rc = _cli_flags.reject_unknown_argv("check_wrapper_thinness.py", args, _KNOWN_ARGV)
+    if rc is not None:
+        return rc
     if args == ["--print-hash"]:
         for rel in _PINNED_SHA256:
             path = ROOT / rel

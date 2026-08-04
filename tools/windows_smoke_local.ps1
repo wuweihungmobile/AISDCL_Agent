@@ -86,6 +86,46 @@
 #     本身完好），零鑑別力；真正壞掉的環節在 [6] 的 `git clone` 到含中文路徑時的
 #     msys 路徑轉換，而那條路徑無法用一行探針忠實模擬，故改用身分訊號。
 #
+# ─────────────────────────────────────────────────────────────────────────────
+# 🔴 退出判準（R74 新增；此前全庫查不到任何一條，這是它至今無法結束的直接原因）
+# ─────────────────────────────────────────────────────────────────────────────
+# 先分清兩個不同的東西——之前沒分清，所以「這個測試能不能結束」根本問不出答案：
+#
+#   (甲) **本腳本**（tools\windows_smoke_local.ps1）＝Windows 側對雲端
+#        windows-compat-ci 的本地鏡像。**永久保留、無退出判準。**
+#        理由：它的價值是「push 前／離線時能在 88 秒內知道有沒有壞」，這個價值與雲端
+#        CI 活不活著無關。雲端 CI 再健康，也不會在你 push 之前告訴你答案。
+#
+#   (乙) **每日排程任務 AutoClaude_WindowsSmoke**＝R60 為「雲端 CI 帳務停擺
+#        （DEF-101-081）期間 Windows 側零執行級訊號」而建的**補償控制**。
+#        補償控制的存在理由是「主通道死了」，所以它**有**退出判準：主通道復活即退場。
+#
+# ⇒ 下面這條判準只管 (乙)，不管 (甲)。
+#
+# 【(乙) 的退出判準｜可機械查】三條**全部**成立才可移除該排程任務：
+#   E1. 雲端主通道活著：windows-compat-ci 近 30 天內有 ≥ 20 個 run，且其中零筆
+#       conclusion 屬 billing/startup_failure 類（＝帳務或基礎設施停擺已結束）。
+#           gh run list --workflow windows-compat-ci.yml --limit 40 \
+#             --json createdAt,conclusion,status
+#   E2. 本腳本每一項都有雲端對應 step：由 tools/tests/test_smoke_ci_sync.py 的
+#       步驟語意鎖判定（該鎖已存在且為綠＝零 smoke-only 項目）。
+#   E3. 移除後 Windows 側仍有每日執行級心跳：AutoClaude_Nightly 存在且
+#       tools/check_scheduled_task_drift.py 回 rc=0（設定沒漂移，會真的跑）。
+#
+# 🔴 為何 E1 不是「smoke 連續 N 天零發現就可以撤」（本輪實測反證）：
+#   R74 同輪雲端 windows-compat-ci 抓到一筆**本機十道閘門全綠**的 P0（hook 的中文
+#   指引在非 CJK codepage 被 escape）。也就是說「零發現」不代表「沒有東西可發現」，
+#   只代表這一層看不到那一類缺陷。用「零發現」當退場依據，會在通道還有價值時把它撤掉。
+#   反過來說，那筆缺陷是**雲端** runner 抓的、不是本機 smoke——所以它也不支持
+#   「smoke 排程是唯一發現通道」這個 R60 立案前提。**兩個方向都不成立，這正是為什麼
+#   判準要綁在「主通道活性」（E1）而不是綁在「發現數」上。**
+#
+# 現況（2026-08-04 實查）：E1 尚未取證（需 gh 查詢，本輪未跑）；E2 綠；E3 **不成立**
+# ——check_scheduled_task_drift.py 實測 rc=1（smoke 任務 LogonType=InteractiveToken、
+# ExecutionTimeLimit 未設、MultipleInstancesPolicy=IgnoreNew）。⇒ **現在不可移除**：
+# 一個設定錯到「使用者未登入就整輪不跑」的任務，先修設定再談退場，否則等於拿「它反正
+# 也沒在跑」當撤除理由。
+#
 # 用法：powershell -NoProfile -ExecutionPolicy Bypass -File tools\windows_smoke_local.ps1
 # Exit：0＝全部 PASS；1＝任一 FAIL（結尾彙總）或前置守門失敗。
 

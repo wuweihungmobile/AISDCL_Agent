@@ -97,6 +97,15 @@ def has_version_marker(log_path: Path) -> bool:
 
 
 def main(argv: list[str] | None = None) -> int:
+    # DEF-101-789 家族：FAIL 訊息含中文，Windows 非 UTF-8 終端下 stderr 的預設
+    # errors='backslashreplace' 會把它印成 \uXXXX 逃脫字面（stdout 更是
+    # errors='strict' 直接崩潰）——本工具的整個用途就是「說清楚為什麼不算 pass」，
+    # 理由讀不到等於退化成一個沒有訊息的 exit code。同 tools/mutation_analysis.py 慣例。
+    for _stream in (sys.stdout, sys.stderr):
+        try:
+            _stream.reconfigure(encoding="utf-8", errors="replace")
+        except (AttributeError, ValueError, OSError):
+            pass
     args = sys.argv[1:] if argv is None else argv
     require_version_marker = "--require-version-marker" in args
     args = [a for a in args if a != "--require-version-marker"]

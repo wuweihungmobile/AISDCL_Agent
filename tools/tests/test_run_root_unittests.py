@@ -8,9 +8,11 @@ WHY（測意圖非僅行為）：`python -m unittest discover` 對 0 個測試�
 from __future__ import annotations
 
 import contextlib
+import functools
 import inspect
 import io
 import json
+import os
 import re
 import shutil
 import subprocess
@@ -1106,16 +1108,50 @@ sys.exit(R.run_with_floor(R._TESTS_DIR, R.MIN_TESTS))
 '''
 
 
-def _run_zero_dep_probe(mode: str, blocked: list[str]) -> subprocess.CompletedProcess[str]:
+#: `floor` 模式的探針會在**本套件內部**再把整棵真實樹跑一次（`run_with_floor` 會 discover
+#: 並執行），所以它的牆鐘時間 ≈ 整套時間，**會隨每輪新增測試一起長**。R74 實測：整套
+#: 1819 tests / 823s，而此處原本硬編 `timeout=300` ⇒ 當場兩支 `TimeoutExpired`。
+#:
+#: 🔴 為何不是「把 300 改成更大的常數」就算修好：那個常數與套件成長耦合，下一輪或下下輪
+#: 會再次被追上，而失效形態是 **error 而非 fail**——讀者看到的是 TimeoutExpired 堆疊，
+#: 不是「探針證明失敗」，很容易被當成環境抖動而放過（本輪第一次跑就差點這樣歸因）。
+#: 故改為兩層處置：① 依整套實測時間推出的寬裕值並寫明推導；② 同參數只跑一次（見下方
+#: 快取）——原本兩支測試各跑一次，等於整套時間 ×2。
+#:
+#: 結構性修法（探針不應在套件內重跑整套）已登記 DEF-101-803，承接輪次見該列。
+#:
+#: 🔴 **本輪實測到的真正主因是遞迴**，不是逾時值太小：`floor` 模式的子行程會 discover 並
+#: 執行整棵 `tools/tests/`，其中就包含本類別 ⇒ 孫探針、曾孫探針…只被逾時值截斷。
+#: 把逾時值從 300 放寬到 1800 因此不是修好而是**放大**：整套牆鐘由 823s 暴衝到 3813s，
+#: 兩支仍舊 `TimeoutExpired`。正解是斷遞迴——子行程帶 `_ZERO_DEP_PROBE_ENV` 旗標，
+#: 本類別見到旗標即自我 skip，於是子行程只跑一層（零相依下收集本就會塌縮，該層很快）。
+_ZERO_DEP_PROBE_ENV = "RRU_IN_ZERO_DEP_PROBE"
+_ZERO_DEP_PROBE_TIMEOUT = 600
+
+
+@functools.cache
+def _zero_dep_probe_cached(
+    mode: str, blocked_key: tuple[str, ...]
+) -> subprocess.CompletedProcess[str]:
     tools_dir = str(Path(run_root_unittests.__file__).resolve().parent)
+    child_env = {**os.environ, _ZERO_DEP_PROBE_ENV: "1"}
     with tempfile.TemporaryDirectory() as tmp:
         probe = Path(tmp) / "zero_dep_probe.py"
         probe.write_text(_ZERO_DEP_PROBE, encoding="utf-8")
         return subprocess.run(
-            [sys.executable, str(probe), json.dumps(blocked), mode, tools_dir],
+            [sys.executable, str(probe), json.dumps(list(blocked_key)), mode, tools_dir],
             capture_output=True, text=True, encoding="utf-8", errors="replace",
-            cwd=tools_dir, timeout=300,
+            cwd=tools_dir, timeout=_ZERO_DEP_PROBE_TIMEOUT, env=child_env,
         )
+
+
+def _run_zero_dep_probe(mode: str, blocked: list[str]) -> subprocess.CompletedProcess[str]:
+    """同一組 (mode, blocked) 只真的跑一次。
+
+    探針是**唯讀**的（子行程只讀樹、不寫回），故重用結果不會讓任一斷言失去鑑別力；
+    而它每跑一次的代價是整套時間，兩支測試各跑一次是純粹的浪費。
+    """
+    return _zero_dep_probe_cached(mode, tuple(blocked))
 
 
 class ThirdPartyPrereqDeclarationTest(unittest.TestCase):
@@ -1195,6 +1231,13 @@ class FloorFailureAttributionTest(unittest.TestCase):
         self.assertIn("_THIRD_PARTY_PREREQS", msg)
 
 
+@unittest.skipIf(
+    os.environ.get(_ZERO_DEP_PROBE_ENV) == "1",
+    "本類別自己會 spawn 一個把整棵樹再跑一次的探針；若在探針**內部**也跑本類別，"
+    "就會遞迴生出孫探針、曾孫探針，只被逾時值截斷（DEF-101-803 實測：整套牆鐘 823s→3813s "
+    "且仍 TimeoutExpired）。此 skip 是**斷遞迴**，不是放棄覆蓋——外層那一次照跑，"
+    "本組的斷言全部在外層被驗證。",
+)
 class ZeroDepEnvironmentDiscriminationTest(unittest.TestCase):
     """零相依環境（＝三支 CI 的等價環境）下的鑑別力鎖（R68）。
 

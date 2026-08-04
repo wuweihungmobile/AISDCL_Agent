@@ -883,7 +883,7 @@ class TestPrintCollapseFlag(unittest.TestCase):
         接受可選 argv，預設仍讀 sys.argv——呼叫端零改動）。"""
         with mock.patch.object(sys, "argv", ["check_script_parity.py"]), \
              mock.patch("builtins.print"):
-            rc = m.main()
+            rc = m.main([])
         self.assertEqual(rc, 0)
 
 
@@ -1209,7 +1209,7 @@ class TestR64TierShrinkOnlyRatchet(unittest.TestCase):
         """`_check_tier_ratchet()` 已隨 `main()` 執行（無參數呼叫路徑），非孤兒函式。"""
         with mock.patch.object(sys, "argv", ["check_script_parity.py"]), \
              mock.patch("builtins.print"):
-            rc = m.main()
+            rc = m.main([])
         self.assertEqual(rc, 0, "真 repo 現況應為零降級，main() 應 rc=0")
 
 

@@ -250,13 +250,41 @@ _HOOK = _REPO_ROOT / ".claude" / "hooks" / "block_bash_on_windows.py"
 _SETTINGS = _REPO_ROOT / ".claude" / "settings.json"
 
 
-def _run_hook(stdin_text: str, *, force_os_name: str | None = None) -> tuple[int, str]:
+def _child_env(extra: dict[str, str] | None = None) -> dict[str, str]:
+    """子行程環境：**顯式剝除** `PYTHONUTF8` / `PYTHONIOENCODING`（可再疊 `extra`）。
+
+    🔴 為何不能靠繼承（DEF-101-789）：`_run_hook` 原本不傳 `env=`，於是子行程的
+    UTF-8 串流設定由**外層環境供應**——本機唯一來源是 `.claude/settings.json` 的
+    `env.PYTHONUTF8=1`（User/Machine scope 實測皆空），也就是說這支鎖的綠燈是
+    agent harness 注入的，不是被測物的性質。同一份知識 repo 內早有兩處落地：
+    `test_find_git_bash_parity.py` 對 `PYTHONUTF8` 的 `env.pop`（該處逐字寫明
+    「不能靠繼承而假綠」）與 `test_git_hooks_install_common.py` 的
+    `_env_without_utf8_overrides()`。**知識在樹裡、只有一處有鎖，新站點照樣踩進去**
+    ——本函式把它補齊到第三處。
+    """
+    env = {k: v for k, v in os.environ.items()
+           if k not in ("PYTHONUTF8", "PYTHONIOENCODING")}
+    if extra:
+        env.update(extra)
+    return env
+
+
+def _run_hook(
+    stdin_text: str,
+    *,
+    force_os_name: str | None = None,
+    env_extra: dict[str, str] | None = None,
+) -> tuple[int, str]:
     """以子行程真跑 hook，回 `(rc, stderr)`。
 
     刻意走子行程而非 import + monkeypatch：hook 的契約是「被 Claude Code 以獨立行程
     呼叫、讀 stdin、以 exit code 表態」，import 進來直接呼叫 `main()` 會繞過
     `sys.stdin` 與 exit code 這兩個契約面（本 repo 有「驗證載具必須對齊 production
     真正執行路徑」的既有紀律）。
+
+    子行程環境一律走 `_child_env()`（剝除 UTF-8 覆寫），理由見該函式。`env_extra`
+    用來**指定**一個非 UTF-8 的 locale 編碼，重現 en-US Windows／GitHub
+    windows-latest 的條件。
 
     `force_os_name` 用來驗非 Windows 分支：hook 讀 `os.name`，而測試機是 Windows。
     以 `-c` 前置注入假 `os.name` 再 exec hook 本體，是唯一能在單一平台上驗到
@@ -275,6 +303,7 @@ def _run_hook(stdin_text: str, *, force_os_name: str | None = None) -> tuple[int
     proc = subprocess.run(
         cmd, input=stdin_text, capture_output=True, text=True,
         encoding="utf-8", errors="replace", timeout=60,
+        env=_child_env(env_extra),
     )
     return proc.returncode, proc.stderr or ""
 
@@ -324,6 +353,55 @@ class TestBlockBashHookDoesNotHurtOtherPlatforms(unittest.TestCase):
         self.assertEqual(
             rc, 0,
             f"非 Windows 上必須放行 Bash——誤傷會讓 mac/Linux 開發者無法用正確載具\n{err}",
+        )
+
+
+class TestBlockBashHookGuidanceSurvivesNonUtf8Locale(unittest.TestCase):
+    """阻斷指引在**非 UTF-8 locale** 下仍必須可讀（DEF-101-789）。
+
+    WHY：`sys.stderr` 的預設 `errors` 是 `backslashreplace`，所以 locale 編碼
+    表達不了 CJK 時（en-US Windows／GitHub windows-latest 的 cp1252）整段指引
+    會變成 `\\uXXXX` 逃脫字面；locale 表達得了但不是 UTF-8 時（zh-TW 的 cp950）
+    則是讀者端亂碼。兩種都不是「測試紅」而是**功能缺陷**：這支 hook 的存在理由
+    就是「純文件約束無攔阻力」，指引不可讀＝阻斷有了、教學沒了，使用者被 exit 2
+    硬擋卻拿不到替代指令。
+
+    判準刻意寫在**測試名**上，不隱含在環境裡——上一版的綠燈來自 harness 注入的
+    `PYTHONUTF8`，而環境是會變的，沒有人會去讀它。
+
+    兩案皆以 `force_os_name="nt"` 驅動，因此在 mac/Linux 也真的會跑：這個缺陷
+    的成因是「locale 不是 UTF-8」，不是「作業系統是 Windows」（`DEF-101-766`
+    的反面教訓——判準的射程不該被當下這台機器的平台綁住）。
+    """
+
+    _NEEDLE = "Windows 上已禁用 Bash 工具"
+
+    def test_guidance_is_readable_without_inherited_pythonutf8(self) -> None:
+        rc, err = _run_hook(json.dumps({"tool_name": "Bash"}), force_os_name="nt")
+        self.assertEqual(rc, 2, f"仍須阻斷；實得 rc={rc}")
+        self.assertIn(
+            self._NEEDLE, err,
+            "剝除繼承而來的 PYTHONUTF8 後指引就讀不到了 ⇒ hook 沒有自己強制 UTF-8，"
+            f"綠燈是外層環境供應的。實得 stderr（前 200 字）：{err[:200]!r}",
+        )
+
+    def test_guidance_is_readable_under_non_cjk_locale_encoding(self) -> None:
+        """cp1252＝GitHub windows-latest（en-US）的條件，逐字重現雲端那筆失敗。"""
+        rc, err = _run_hook(
+            json.dumps({"tool_name": "Bash"}),
+            force_os_name="nt",
+            env_extra={"PYTHONIOENCODING": "cp1252"},
+        )
+        self.assertEqual(rc, 2, f"仍須阻斷；實得 rc={rc}")
+        self.assertNotIn(
+            "\\u", err,
+            "指引出現 `\\uXXXX` 逃脫字面＝stderr 的 backslashreplace 生效了，"
+            "非 CJK 語系的使用者只會看到一串轉義碼",
+        )
+        self.assertIn(
+            self._NEEDLE, err,
+            "非 CJK locale 編碼下指引不可讀——這是功能缺陷，不只是測試紅。"
+            f"實得 stderr（前 200 字）：{err[:200]!r}",
         )
 
 
@@ -385,6 +463,50 @@ class TestBlockBashHookGuidanceContent(unittest.TestCase):
             "生產", self.text,
             "&&／|| 的建議必須說明理由綁在生產引擎（5.1）上，而非綁當下 session 版本",
         )
+
+
+_NAMED_TEST_RE = re.compile(r"tools/tests/test_[A-Za-z0-9_]+\.py")
+
+
+def named_test_files(text: str) -> list[str]:
+    """`text` 裡指名的所有 `tools/tests/test_*.py` 路徑（去重、排序）。"""
+    return sorted(set(_NAMED_TEST_RE.findall(text)))
+
+
+class TestHooksDoNotSignpostMissingLocks(unittest.TestCase):
+    """機械強制物指名的鎖檔必須真的存在（DEF-101-790）。
+
+    WHY：`block_bash_on_windows.py` 的指引訊息指名一支從未存在的鎖檔，真正的鎖
+    卻在本檔裡。**執行規則的機械物給錯的指路比沒有指路更糟**——讀者會認為它比
+    文件權威，於是「我查過了」是假的（`tools/ruff.toml` 檔頭有過同型訂正：原本
+    指向一支沒有該類別的測試檔）。射程刻意只到 `.claude/hooks/`：那是本 repo 唯一
+    「會主動阻斷使用者操作」的一層，指路錯誤的代價最高。
+    """
+
+    def test_every_named_lock_file_exists(self) -> None:
+        hooks = sorted((_REPO_ROOT / ".claude" / "hooks").glob("*.py"))
+        self.assertTrue(hooks, "`.claude/hooks/` 下掃不到任何 .py——射程不得靜默縮小")
+        missing: list[str] = []
+        total = 0
+        for hook in hooks:
+            named = named_test_files(hook.read_text(encoding="utf-8"))
+            total += len(named)
+            missing += [f"{hook.name} 指名了不存在的 {rel}" for rel in named
+                        if not (_REPO_ROOT / rel).is_file()]
+        self.assertEqual(missing, [], "\n".join(missing))
+        # 反空轉：一個都沒指名時上面的斷言恆真，鎖就只是擺設。
+        self.assertGreaterEqual(
+            total, 1,
+            "`.claude/hooks/` 內已不再指名任何 tools/tests/test_*.py ⇒ 本鎖恆綠、"
+            "等於沒有（若確實移除了所有指路，請連同本斷言一起處置）",
+        )
+
+    def test_criterion_catches_a_dangling_reference(self) -> None:
+        """判準自證：指名一支不存在的鎖檔必須被抓到（不靠 repo 現況是否剛好有病）。"""
+        fake = "tools/tests/test_this_lock_was_never_created.py"
+        self.assertFalse((_REPO_ROOT / fake).exists(), "fixture 名稱意外真的存在")
+        self.assertEqual(named_test_files(f"見 {fake} 會判紅。"), [fake])
+        self.assertEqual(named_test_files("完全沒有指路的文字"), [])
 
 
 class TestBlockBashHookIsActuallyRegistered(unittest.TestCase):

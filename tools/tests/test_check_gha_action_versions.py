@@ -105,7 +105,7 @@ class TestScan(unittest.TestCase):
         original = m._WORKFLOWS_DIR
         m._WORKFLOWS_DIR = wf_dir
         try:
-            self.assertEqual(m.main(), 1)
+            self.assertEqual(m.main([]), 1)
         finally:
             m._WORKFLOWS_DIR = original
 
@@ -156,7 +156,7 @@ class TestScan(unittest.TestCase):
         original = m._WORKFLOWS_DIR
         m._WORKFLOWS_DIR = wf_dir
         try:
-            self.assertEqual(m.main(), 1)
+            self.assertEqual(m.main([]), 1)
         finally:
             m._WORKFLOWS_DIR = original
 
@@ -242,7 +242,7 @@ class TestMain(unittest.TestCase):
         original = m._WORKFLOWS_DIR
         m._WORKFLOWS_DIR = wf_dir
         try:
-            return m.main()
+            return m.main([])
         finally:
             m._WORKFLOWS_DIR = original
 
@@ -265,7 +265,7 @@ class TestMain(unittest.TestCase):
         人工核實 11 支 workflow 現行版本一致（無違規），此測試把該次人工核實
         轉為可重複執行的機械回歸鎖（往後任一輪破壞一致性即紅，不必再靠人工
         grep 才能發現）。"""
-        self.assertEqual(m.main(), 0)
+        self.assertEqual(m.main([]), 0)
 
     def test_real_repo_scan_coverage_does_not_silently_shrink(self) -> None:
         """R56 新增（QA bug-injection：舊版唯一斷言是 `main() == 0`，把

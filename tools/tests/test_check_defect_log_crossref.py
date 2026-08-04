@@ -1348,19 +1348,57 @@ class TestOrphanBacklogProblems(unittest.TestCase):
         )
         self.assertEqual(m.orphan_backlog_problems(_ledger_text(self._CONTEXT + row)), [])
 
-    def test_known_uncovered_negated_reassignment_still_escapes(self) -> None:
-        """🔴 **已實測不涵蓋**，釘成常駐斷言（R57 判例第 (4) 條三段式的中段）。
+    def test_negated_reassignment_no_longer_buys_the_exemption(self) -> None:
+        """🔴 R74（`DEF-101-674` 結案）：否定語意的出口字樣**不再**買到豁免。
 
-        本鎖只做關鍵字比對、**不做否定語意分析**：一句「無回執」照樣被當成「已載明回執」
-        而放行。真實實例＝`DEF-101-561`（它實質上不是孤兒——同列已載明「R61 Architect
-        評估結論：本輪逐項回覆①②③」＝真有回執——所以結論湊巧正確、機制不精確）。
-        本斷言的用途是：哪天有人把否定語意收掉，這裡會翻紅，強迫同步更新
-        `orphan_backlog_problems()` docstring 與規格文件的「已實測不涵蓋」清單。
+        本斷言的前身刻意寫成「這個缺口仍開著」，用途是在有人收掉缺口時翻紅、強迫同步更新
+        兩處「已實測不涵蓋」清單。R74 收掉了（`_ledger_index.reassign_hit()` 擋否定前綴），
+        清單已同步，故本斷言翻轉為正向：一列「未結案 ＋ 承接者早於當前輪 ＋ 狀態欄只寫得出
+        否定形態的出口字樣」必須**被判為孤兒**。
+
+        鑑別力：同一列把否定字拿掉（改成真正的「已回執」）就必須放行 —— 兩個方向都驗，
+        否則「恆紅」也會通過本測試。
         """
-        row = self._INJECTED_ORPHAN.rstrip("\n|\r ") + " 交棒給一個輪內已消滅的實體、無輪次無回執 |\n"
+        negated = (self._INJECTED_ORPHAN.rstrip("\n|\r ")
+                   + " 交棒給一個輪內已消滅的實體、無輪次無回執 |\n")
+        problems = m.orphan_backlog_problems(_ledger_text(self._CONTEXT + negated))
+        self.assertEqual(len(problems), 1, f"否定形態必須仍被判孤兒：{problems}")
+        affirmed = (self._INJECTED_ORPHAN.rstrip("\n|\r ")
+                    + " 該輪已交出成果，此處追記回執 |\n")
         self.assertEqual(
-            m.orphan_backlog_problems(_ledger_text(self._CONTEXT + row)), [],
-            "否定語意已被收掉 ⇒ 請同步更新兩處『已實測不涵蓋』清單後再改本斷言",
+            m.orphan_backlog_problems(_ledger_text(self._CONTEXT + affirmed)), [],
+            "真正的『回執』必須照樣放行 —— 否則本鎖變成恆紅、合法出口被關掉",
+        )
+
+    def test_reassignment_token_outside_the_status_column_buys_nothing(self) -> None:
+        """🔴 R74：出口字樣寫在**別的欄位**不再算數（原判準對整列做裸比對）。
+
+        合法出口的體例是閘門自己的錯誤訊息逐字指定的——「就地於**狀態欄**追加一筆載明
+        「改派」的附記」。判準若掃整列，一列只要在「現象與證據」欄敘述**別人的**改派，
+        就替自己買到豁免。兩個方向都驗：寫在證據欄 ⇒ 仍判孤兒；寫在狀態欄 ⇒ 放行。
+        """
+        base = _row4("DEF-01-996", "R60 r3 Pkg-X", "去向",
+                     "open（承接輪次：**R2**）")
+        in_evidence = base.replace("| 現象 |", "| 現象；另見 DEF-9-9 的改派紀錄 |") \
+            if "| 現象 |" in base else base
+        self.assertNotEqual(in_evidence, base, "fixture 未命中證據欄，測試會空過")
+        self.assertEqual(
+            len(m.orphan_backlog_problems(_ledger_text(self._CONTEXT + in_evidence))), 1,
+            "出口字樣落在證據欄卻買到豁免 ⇒ 跨欄白拿又開了",
+        )
+        in_status = base.replace("**R2**）", "**R2**）；本輪改派為：未指派")
+        self.assertEqual(
+            m.orphan_backlog_problems(_ledger_text(self._CONTEXT + in_status)), [],
+            "寫在狀態欄的改派必須放行 —— 否則合法出口被關掉",
+        )
+
+    def test_quoted_reassignment_token_buys_nothing(self) -> None:
+        """🔴 R74：反引號內是**逐字引述**（帳本體例），引述一句舊改派不是做出新改派。"""
+        base = _row4("DEF-01-995", "R60 r3 Pkg-X", "去向", "open（承接輪次：**R2**）")
+        quoted = base.replace("**R2**）", "**R2**）；原欄文為 `改派為：未指派`（已被推翻）")
+        self.assertEqual(
+            len(m.orphan_backlog_problems(_ledger_text(self._CONTEXT + quoted))), 1,
+            "code span 內的引述買到豁免 ⇒ 引述白拿又開了",
         )
 
     def test_a_row_without_any_handover_round_is_not_judged(self) -> None:
@@ -1432,7 +1470,9 @@ class TestOrphanBacklogAgainstTheRealLedger(unittest.TestCase):
             handovers = m._handover_rounds(line)
             if not handovers or max(n for _, n, _ in handovers) >= cur:
                 continue
-            if m._REASSIGN_RE.search(line):
+            # 🔴 R74：判定面必須與 production 一致（狀態欄、遮 code span、擋否定），否則本
+            # 測試會拿一組「整列比對才算合法」的列去要求 production 放行 ⇒ 假紅。
+            if m._reassign_hit(cells[self.status_idx]):
                 legal.append(cells[self.id_idx])
         self.assertTrue(
             legal,
@@ -2085,6 +2125,195 @@ class TestR71CodeRoundLabelsNeverExceedLedgerCurrentRound(unittest.TestCase):
             future_round_labels("f.py", broken, current=71),
             "解析失敗時靜默零命中 ⇒ 只要把檔寫壞就能繞過本鎖",
         )
+
+
+class TestReassignHitJudgement(unittest.TestCase):
+    """`_ledger_index.reassign_hit()` 的單元鑑別力（R74，`DEF-101-674` 結案的判準本體）。
+
+    形態級逐項驗證，比 `orphan_backlog_problems()` 那一層更近判準本身：那一層還要湊出
+    「未結案 ＋ 承接者早於當前輪」的前置條件，形態一多就會把測試意圖埋在 fixture 裡。
+    """
+
+    def test_affirmative_tokens_are_recognised(self) -> None:
+        for cell in ("open（改派為：未指派）", "routed（本輪追記回執）",
+                     "改派", "回執", "open；已於 R70 回執"):
+            with self.subTest(cell=cell):
+                self.assertTrue(m._reassign_hit(cell))
+
+    def test_negated_tokens_are_rejected(self) -> None:
+        """`無回執`／`零改派`／`未改派` 字面帶 token 而語意**相反**。"""
+        for cell in ("open（無輪次無回執）", "open（零改派）", "open（未改派、未回執）",
+                     "routed（沒有回執）", "open（非改派，只是記事）"):
+            with self.subTest(cell=cell):
+                self.assertFalse(m._reassign_hit(cell))
+
+    def test_the_three_closed_forms_would_all_have_passed_the_old_judgement(self) -> None:
+        """🔴 **鑑別力 A/B**：同一組輸入，舊判準（整列裸關鍵字比對）全部放行、新判準全部擋下。
+
+        沒有這一組，上面三支「必須擋下」的斷言無法證明它們**曾經**是縫——一個從來就擋得住
+        的形態，鎖上去只是裝飾。`_REASSIGN_RE` 仍以再匯出形式在（判準本體改用
+        `reassign_hit()`），所以舊行為可以就地重現、不必動任何原始碼。
+        """
+        cases = {
+            "跨欄": ("| DEF-9-9 | d | c | 另見 DEF-8-8 的改派紀錄 | P3 | 去向 | open |",
+                     "open"),
+            "引述": ("| DEF-9-9 | d | c | 現象 | P3 | 去向 | open（原欄文 `改派為：X`）|",
+                     "open（原欄文 `改派為：X`）"),
+            "否定": ("| DEF-9-9 | d | c | 現象 | P3 | 去向 | open（無輪次無回執）|",
+                     "open（無輪次無回執）"),
+        }
+        for name, (whole_row, status_cell) in cases.items():
+            with self.subTest(form=name):
+                self.assertTrue(
+                    m._REASSIGN_RE.search(whole_row),
+                    f"{name}：舊判準（整列裸比對）本來就擋得住 ⇒ 這不是一條真縫，"
+                    "本測試會是裝飾",
+                )
+                self.assertFalse(
+                    m._reassign_hit(status_cell),
+                    f"{name}：新判準仍放行 ⇒ 該形態的白拿豁免沒有真的被收掉",
+                )
+
+    def test_code_span_quotations_are_rejected(self) -> None:
+        """反引號內是逐字引述（帳本體例），不是做出一次新的改派。"""
+        self.assertFalse(m._reassign_hit("open（原欄文為 `改派為：未指派`，已被推翻）"))
+        self.assertFalse(m._reassign_hit("routed（引述判準用語 `回執`）"))
+
+    def test_a_bare_token_next_to_a_quotation_still_counts(self) -> None:
+        """遮罩只遮反引號內：同欄另有一處**裸**的出口字樣時仍必須算數。
+
+        沒有這一條，「把其中一處包進反引號」就會被誤讀成整欄豁免（收窄不得擴大成豁免口，
+        同 `archive_defect_log.active_status_hit()` 的鑑別力保留 (a)）。
+        """
+        self.assertTrue(m._reassign_hit("open（原欄文 `改派為：X`）；本輪實際改派為：未指派"))
+
+    def test_the_hit_is_shared_with_the_regex_re_export(self) -> None:
+        """`_REASSIGN_RE` 與判準本體必須是**同一個 SSOT 的兩個名字**，不得漂成兩份。"""
+        self.assertIs(m._REASSIGN_RE, m._ledger_index.REASSIGN_RE)
+        self.assertIs(m._reassign_hit, m._ledger_index.reassign_hit)
+        self.assertIs(m._CODE_SPAN_RE, m._ledger_index.CODE_SPAN_RE)
+
+
+class TestResidualTodoAndSupersessionNotesHaveTeeth(unittest.TestCase):
+    """🔴 R74 補測試覆蓋：這兩支偵測器在 R68 落地後**全 repo 零測試**（R74 PKG-2 補上）。
+
+    為何非補不可：它們是「已結列殘留待辦」與「首詞待更新」這兩個中間態的**唯一**偵測器
+    ——`_UNRESOLVED_CLASSES` 排除 `fixed`，所以那些列在結構上進不了承接稽核，而歸檔判準④
+    同時擋住它們搬遷。零覆蓋的偵測器就是沒有牙的偵測器：它靜默失效時，那批列會同時逸出
+    承接稽核與歸檔，沒有任何訊號。故兩支都要**雙向**驗（該命中的命中、不該命中的不命中）。
+    """
+
+    def test_residual_todo_flags_a_closed_row_that_still_carries_a_todo(self) -> None:
+        notes = m.residual_todo_notes(_ledger_text(
+            _row("DEF-01-901", "fixed@R70（殘餘兩項，承接輪次：未指派）")))
+        self.assertEqual(len(notes), 1, notes)
+        self.assertIn("DEF-01-901", notes[0])
+        self.assertIn("fixed", notes[0])
+
+    def test_residual_todo_ignores_unresolved_rows(self) -> None:
+        """未結列不由本支管（它們走承接稽核）——否則同一件事會被報兩次。"""
+        self.assertEqual(m.residual_todo_notes(_ledger_text(
+            _row("DEF-01-902", "open（承接輪次：未指派）"))), [])
+
+    def test_residual_todo_is_silent_on_a_clean_closed_row(self) -> None:
+        """不該命中的必須不命中：否則它退化成「每一列都印一次」＝等於沒印。"""
+        self.assertEqual(m.residual_todo_notes(_ledger_text(
+            _row("DEF-01-903", "fixed@R70（已完整落地並實測）"))), [])
+
+    def test_supersession_flags_a_first_word_that_lags_its_own_correction(self) -> None:
+        """`DEF-101-432` 的真實形態：首詞判未結，同欄後段已有「→ fixed」訂正。"""
+        notes = m.supersession_notes(_ledger_text(
+            _row("DEF-01-904", "open watch（R55）→ **fixed@R56**：已完整修復")))
+        self.assertEqual(len(notes), 1, notes)
+        self.assertIn("DEF-01-904", notes[0])
+
+    def test_supersession_ignores_a_quoted_correction(self) -> None:
+        """反引號內是逐字引述 —— 已訂正過的列不該每輪再被點名一次。
+
+        這正是 R74 對 `DEF-101-432` 的處置形態（首詞改 `fixed`、原欄文包進 code span
+        保留於後）：處置完成後本支必須安靜，否則「該把首詞改了」這個提示永遠不會消失，
+        而永不消失的提示會被讀者整批忽略。
+        """
+        self.assertEqual(m.supersession_notes(_ledger_text(
+            _row("DEF-01-905",
+                 "fixed@R56（訂正首詞）：`open watch（R55）→ **fixed@R56**`：已修"))), [])
+
+    def test_supersession_is_silent_on_a_plain_unresolved_row(self) -> None:
+        self.assertEqual(m.supersession_notes(_ledger_text(
+            _row("DEF-01-906", "open（承接輪次：**R99**）"))), [])
+
+    def test_both_detectors_are_wired_into_main(self) -> None:
+        """可重跑而**沒有任何閘門看它的輸出**與不可重跑是同一個病（Scan-H 必跑項 #5）。"""
+        src = Path(m.__file__).read_text(encoding="utf-8")
+        self.assertIn("for note in supersession_notes(ledger_text):", src)
+        self.assertIn("residual = residual_todo_notes(ledger_text)", src)
+        self.assertIn("已結列殘留待辦", src)
+        self.assertIn("狀態首詞待更新", src)
+
+
+class TestUnresolvedInventoryHasASingleMeasurementEntry(unittest.TestCase):
+    """🔴 R74 PKG-2：未結存量的唯一量測入口 ＋ 列數棘輪。
+
+    立案理由：同一個問題「未結存量是多少」曾同時有三個互斥答案，而工作樹與上一輪收輪
+    commit 完全相同 ⇒ 差異全部出自量測法不一致。三條臨時路徑其實各自回答不同問題
+    （人工點數／`--plan` 的「不可搬」筆數〔六項判準聯集〕／逐列 `_classify`），只有最後
+    一個才是未結列數。本類鎖住「入口只有一個、且它有上限」。
+    """
+
+    def test_unresolved_ids_counts_exactly_the_unresolved_classes(self) -> None:
+        ledger = {"A": "open", "B": "routed", "C": None,
+                  "D": "fixed", "E": "wontfix", "F": "closed-by-decision"}
+        self.assertEqual(m._ledger_index.unresolved_ids(ledger), ["A", "B", "C"])
+
+    def test_none_counts_as_unresolved(self) -> None:
+        """「看不出結案」不等於「已結案」——含糊列必須算進存量，否則寫壞狀態欄即可脫帳。"""
+        self.assertEqual(m._ledger_index.unresolved_ids({"X": None}), ["X"])
+
+    def test_ceiling_is_a_ratchet_with_both_bands(self) -> None:
+        warn, fail = (m._ledger_index.UNRESOLVED_ROWS_WARN,
+                      m._ledger_index.UNRESOLVED_ROWS_FAIL)
+        self.assertLess(warn, fail, "warn 必須嚴格小於 fail，否則 warn 帶不存在")
+        below = {f"D-{i}": "open" for i in range(warn - 1)}
+        self.assertEqual(m._ledger_index.unresolved_ceiling_problems(below), ([], []))
+        at_warn = {f"D-{i}": "open" for i in range(warn)}
+        f_, w_ = m._ledger_index.unresolved_ceiling_problems(at_warn)
+        self.assertEqual(f_, [])
+        self.assertEqual(len(w_), 1, "恰達 warn 線必須出聲")
+        at_fail = {f"D-{i}": "open" for i in range(fail)}
+        f2, w2 = m._ledger_index.unresolved_ceiling_problems(at_fail)
+        self.assertEqual(len(f2), 1, "恰達 fail 線必須 fail，不是只 warn")
+        self.assertEqual(w2, [], "同時 warn＋fail 會讓同一件事被報兩次")
+        self.assertIn("不要調高本門檻", f2[0])
+
+    def test_closed_rows_never_reduce_the_count_by_being_archived(self) -> None:
+        """🔴 本鎖的核心語意：門檻面刻意是**列數**而不是 bytes。
+
+        bytes 會被歸檔動作攪動，於是「靠歸檔把數字壓下去」可以掩蓋未結存量持續累積；
+        未結列在結構上不可歸檔，所以列數問的正是「還有幾筆缺陷沒人處理」。此處以構造
+        輸入證明：把任意多筆**已結**列加進帳本，未結列數一動也不動。
+        """
+        base = {f"U-{i}": "open" for i in range(10)}
+        padded = {**base, **{f"C-{i}": "fixed" for i in range(500)}}
+        self.assertEqual(len(m._ledger_index.unresolved_ids(base)),
+                         len(m._ledger_index.unresolved_ids(padded)))
+
+    def test_the_cli_entry_point_exists_and_prints_the_ids(self) -> None:
+        """只印一個數字的載具無法被複驗（下一個人只能相信它）⇒ 必須連 ID 一起印。"""
+        r = subprocess.run(
+            [sys.executable, str(Path(m.__file__)), "--unresolved-count"],
+            capture_output=True, text=True, encoding="utf-8",
+        )
+        self.assertEqual(r.returncode, 0, r.stderr[-2000:])
+        self.assertIn("未結列數＝", r.stdout)
+        self.assertIn("未結列 ID：", r.stdout)
+        self.assertRegex(r.stdout, r"DEF-\d+-\d+")
+        self.assertIn("--unresolved-count", m._USAGE)
+
+    def test_main_actually_enforces_the_ceiling(self) -> None:
+        """接線鎖：門檻若只被印出來而沒有任何 `return 1`，它就是 `DEF-101-731` 的重演。"""
+        src = Path(m.__file__).read_text(encoding="utf-8")
+        self.assertIn("unresolved_ceiling_problems(ledger)", src)
+        self.assertIn("unpinned_problems += unres_fails", src)
 
 
 if __name__ == "__main__":

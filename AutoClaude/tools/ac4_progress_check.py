@@ -3,22 +3,35 @@
 對應 [SD_Improving_08.md §3 W2 + PM #2 漸進式升級](../docs/04_planning/SD_Improving_08.md)。
 
 職責：
-    1. 讀 .ac4_history.jsonl 最近 14 天紀錄
-    2. 計算 recall σ_14d + 全綠連續天數
+    1. 讀 .ac4_history.jsonl **全史**紀錄（ADR-SD09-012 L-1；滾動窗降為資訊欄）
+    2. 計算 recall σ（最近 OBSERVATION_REQUIRED_RUNS 筆）+ 連續全綠**筆數**
     3. 判定告警等級（黃 3 次 / 紅 5 次 / 阻塞 P1）
-    4. 達 14 天全綠 → 輸出 ready_for_labeled_pr=true（升級條件達成）
+    4. 判定證據新鮮度（ADR-SD09-012 L-7 staleness；採集停擺不得假綠）
+    5. 連續 14 筆全綠 → 輸出 ready_for_labeled_pr=true（升級條件達成）
 
-通過門檻（PM #2 拍板 + ADR-SD09-008 v0.4 ACCEPTED 2026-05-25 更新）：
+通過門檻（PM #2 拍板 + ADR-SD09-008 v0.4 ACCEPTED 2026-05-25
+        + ADR-SD09-012 ACCEPTED 2026-08-03 PM 拍板落地）：
     recall@10 ≥ 0.95
     p95 latency < 60ms（升級門檻；ADR-SD09-008 v0.4 ACCEPTED 自 50ms 升 60ms tolerant）
     observation p95 < 50ms（觀察軌指標；向上相容，未來 production hardware 切換用）
-    recall σ_14d ≤ 0.02
+    recall σ ≤ 0.02（取最近 OBSERVATION_REQUIRED_RUNS 筆）
     CircuitBreaker open=0
-    連續 14 天全綠
+    **連續 14 筆綠紀錄**（gap-tolerant green_streak；ADR-SD09-012 §3.2）
+    最新一筆距今 ≤ STALENESS_MAX_DAYS（ADR-SD09-012 L-7）
+
+🔴 ADR-SD09-012 判準單位變更（PM 2026-08-03 拍板 §7.0）：
+    達標條件由「14 筆須落在最近 14 個**連續日曆天**」改為「連續 14 **筆**綠紀錄」。
+    門檻數值不變（仍是 14），改的只有計量單位。反作弊未放寬——writer 端
+    ac4_nightly_collector 的 M-05「同 UTC 日去重」原封不動，每 UTC 日上限 1 筆，
+    故「14 筆」在數學上仍蘊含「≥ 14 個不同 UTC 日期」，時間跨度一天沒少；
+    被移除的只有「這 14 天必須相鄰」（＝量使用者開機作息，不量系統品質）。
+    配套的 L-7 staleness 判準是**必要條件不是加分項**：舊判準的 filter_recent()
+    是 evaluate() 唯一參照「現在」的項，把它移出閘門路徑會讓達標退化成純檔案
+    內容函式（採集器無聲死掉 → green_streak 永久凍結 → 永遠回 ready=True）。
 
 退出碼：
-    0  observing（未達 14 天）/ ready（達標可升級）
-    1  alert（黃線 3 次以上 / 紅線 5 次以上）
+    0  observing（連續全綠未滿）/ ready（達標可升級）
+    1  alert（黃線 3 次以上 / 紅線 5 次以上）/ stale（證據過期，採集可能已停擺）
 
 JSONL schema：由 tools/ac4_nightly_collector.py 產出。
 """
@@ -97,7 +110,16 @@ P95_MAX_MS = _resolve_strict_p95_threshold()
 P95_OBSERVATION_MS = _resolve_observation_p95_threshold()
 RECALL_SIGMA_MAX = 0.02
 CB_OPEN_MAX = 0
-OBSERVATION_DAYS = 14
+# ADR-SD09-012 L-2：判準的計量單位是「綠紀錄筆數」，不是日曆天。舊名保留為別名，
+# 免得打斷既有 import（tests/contract 與 run_local_nightly 都讀過舊名）。
+OBSERVATION_REQUIRED_RUNS = 14
+OBSERVATION_DAYS = OBSERVATION_REQUIRED_RUNS
+# ADR-SD09-012 L-7 / §7.5 S4：證據新鮮度上限（PM 建議值 30 = window 14 的約 2 倍）。
+#
+# 為何不是 14：這台機器近 75 天只活 52 天、7/22、7/29、8/1 各一次冷開機（ADR §2.5/§2.6
+# 實測）。N 取 14 等於把剛拆掉的「機器要天天開機」換個名字裝回來，AC4 會再次卡死。
+# N 的職責**只有一個**：區分「使用者放了個長假」與「採集器死了」，不是重新量作息。
+STALENESS_MAX_DAYS = 30
 ALERT_YELLOW_THRESHOLD = 3  # 連續 3 次未達 → 黃線
 ALERT_RED_THRESHOLD = 5  # 連續 5 次未達 → 紅線
 
@@ -132,13 +154,23 @@ def _parse_ts(record: dict[str, Any]) -> _dt.datetime | None:
         return None
 
 
-def filter_recent(records: list[dict[str, Any]], days: int = OBSERVATION_DAYS) -> list[dict[str, Any]]:
+def filter_recent(
+    records: list[dict[str, Any]],
+    days: int = OBSERVATION_REQUIRED_RUNS,
+    *,
+    now: _dt.datetime | None = None,
+) -> list[dict[str, Any]]:
     """取最近 `days` 天的紀錄（依 timestamp 排序）。
 
     SD_09 W2 audit P2-AUDIT-25 修復：對 _parse_ts 回 None 的 record 印 WARN 到 stderr，
     不再靜默丟掉壞 timestamp 紀錄（避免歷史資料因格式錯誤被悄悄忽略）。
+
+    ADR-SD09-012 L-1：本函式**已不在閘門路徑上**，退為資訊欄（`observation_days`）
+    與人類判讀用的滾動窗計數器。閘門改由 `evaluate()` 的 green_streak + staleness 決定。
+    `now` 可注入，讓 staleness／滾動窗兩者的測試不必依賴真實時鐘（ADR L-7 要求
+    staleness 有雙向鑑別力測試，注入時鐘是唯一能穩定驗紅／驗綠的方式）。
     """
-    now = _dt.datetime.now(tz=_dt.timezone.utc)
+    now = now or _dt.datetime.now(tz=_dt.UTC)
     cutoff = now - _dt.timedelta(days=days)
     recent: list[dict[str, Any]] = []
     dropped = 0
@@ -155,6 +187,26 @@ def filter_recent(records: list[dict[str, Any]], days: int = OBSERVATION_DAYS) -
         )
     recent.sort(key=lambda r: _parse_ts(r) or now)
     return recent
+
+
+def sort_by_timestamp(
+    records: list[dict[str, Any]], *, now: _dt.datetime | None = None
+) -> list[dict[str, Any]]:
+    """依 timestamp 升冪排序**全史**（ADR-SD09-012 L-1 配套）。
+
+    為何需要：green_streak 與 consecutive_failures 都是「自尾端往前數」，其正確性
+    完全依賴呼叫端已排序。舊路徑靠 `filter_recent()` 順手排序；它退出閘門路徑後，
+    全史若不排序，jsonl 內任何一筆順序異常都會讓 streak 從錯的地方起算。
+    壞 timestamp 的紀錄排到最後（與 filter_recent 的 `or now` 同慣例，不另立第二套）。
+    """
+    now = now or _dt.datetime.now(tz=_dt.UTC)
+    return sorted(records, key=lambda r: _parse_ts(r) or now)
+
+
+def latest_timestamp(records: list[dict[str, Any]]) -> _dt.datetime | None:
+    """全史中最新的可解析 timestamp；全部不可解析或空 history → None。"""
+    parsed = [ts for ts in (_parse_ts(r) for r in records) if ts is not None]
+    return max(parsed) if parsed else None
 
 
 def _is_green(record: dict[str, Any]) -> bool | None:
@@ -281,19 +333,29 @@ def evaluate(
     records: list[dict[str, Any]],
     *,
     tolerant_p95_ms: float | None = None,
+    now: _dt.datetime | None = None,
 ) -> dict[str, Any]:
-    """評估觀察期狀態（ADR-SD09-008 v0.4 ACCEPTED 雙軌語意）。
+    """評估觀察期狀態（ADR-SD09-008 v0.4 + ADR-SD09-012 ACCEPTED 語意）。
 
     Args:
-        records: 14 天紀錄
+        records: **全史**紀錄（ADR-SD09-012 L-1；不再是「滾動 14 天窗內的紀錄」）。
+            仍可傳入已過濾的子集（舊呼叫站行為不會炸），但那樣會少算 green_streak。
         tolerant_p95_ms: 向下相容參數；若提供，額外計算 tolerant_streak。
             ADR v0.4 ACCEPTED 後 tolerant 軌已成為升級主軌（預設 60ms），
             本參數保留兼容舊呼叫站；新呼叫可不傳。
+        now: 可注入的「現在」（ADR-SD09-012 L-7）。staleness 判準需要時鐘，
+            注入才能對它做雙向鑑別力測試。
 
-    回傳 dict（v0.4 ACCEPTED schema）：
-        status: observing | ready | alert_yellow | alert_red
-        observation_days: 已採集天數
-        green_streak: 連續全綠次數（= 升級門檻 streak）
+    回傳 dict（v0.4 ACCEPTED + ADR-SD09-012 schema）：
+        status: observing | ready | alert_yellow | alert_red | stale
+        observation_days: 滾動 14 日曆天窗內筆數（**資訊欄**，ADR-SD09-012 L-4 (a)
+            語意凍結——它**不是**閘門值，閘門值是 green_streak）
+        gate_basis: 'green_streak'（明示閘門依據，供下游不必猜哪個欄位是判準）
+        green_streak_required: 達標所需連續綠筆數（= OBSERVATION_REQUIRED_RUNS）
+        total_records: 全史筆數
+        staleness_days: 最新一筆距今天數（None＝無可解析 timestamp）
+        staleness_max_days: 上限（超過即 status='stale'）
+        green_streak: 連續全綠**筆數**（= 升級門檻 streak，ADR-SD09-012 唯一達標閘門）
         tolerant_streak: 升級門檻連續綠（P95_MAX_MS=60ms ACCEPTED）
         observation_streak: 觀察軌連續綠（P95_OBSERVATION_MS=50ms，向上相容指標，不影響 ready）
         strict_streak: 向下相容別名（= tolerant_streak；舊呼叫站讀此欄）
@@ -304,6 +366,7 @@ def evaluate(
         ready_for_labeled_pr: 是否可升級（由升級門檻 60ms 決定，ADR v0.4 ACCEPTED）
         reasons: list[str] 不可升級的原因
     """
+    now = now or _dt.datetime.now(tz=_dt.UTC)
     n = len(records)
     consecutive_failures = _consecutive_failures_from_tail(records)
 
@@ -328,20 +391,47 @@ def evaluate(
     # SD_09 W0 P0-AUDIT-33 修復：拆 None 為兩態，避免訊息漂移
     #   true_skip   = status=='skip'（X1 補實作前的 hardcoded skip）
     #   ADR v0.4 ACCEPTED 後不再有 neutral_p95 區（60ms 已成升級門檻，非 neutral buffer）
+    # ADR-SD09-012 L-5：改吃全史後語意由「窗內全 skip」變成「**史上全 skip**」。
+    # 實務上只在冷啟動期成立（第一筆真量測寫進來就不再成立），但屬語意變更，
+    # 故明示於此並在 tests/contract 補一個「全史含真量測 → 不得誤報 skip 阻塞」的 case。
     all_true_skip = n > 0 and all(r.get("status") == "skip" for r in records)
 
-    # recall σ（僅取有 recall 值的紀錄）
-    recalls = [r["recall_at_10"] for r in records if r.get("recall_at_10") is not None]
+    # ADR-SD09-012 L-3：σ 取樣集合＝**最近 N 筆**，不是全史。
+    # 🔴 這是本次落地最容易漏、且會靜默削弱反漂移的一處：全史傳進來後若不切片，
+    # σ 會變成對 40+ 筆求標準差＝偷偷放大取樣窗、把漂移平均掉。ADR §3.3 ② 明載
+    # 「σ 的統計內容不變，只是取樣集合從日曆窗換成最近 N 筆」。
+    sigma_window = records[-OBSERVATION_REQUIRED_RUNS:]
+    recalls = [r["recall_at_10"] for r in sigma_window if r.get("recall_at_10") is not None]
     if len(recalls) >= 2:
         recall_sigma = statistics.pstdev(recalls)
     else:
         recall_sigma = None
 
+    # ADR-SD09-012 L-7：證據新鮮度（liveness）——**與 green_streak 完全無關的獨立判準**。
+    # green_streak 回答「證據夠不夠」，staleness 回答「證據還算不算數」；兩者混成一個
+    # 變數就會重演「一個變數兼兩個職責」那個病（舊 filter_recent 同時當窗口與時鐘）。
+    latest_ts = latest_timestamp(records)
+    staleness_days: int | None = None
+    if latest_ts is not None:
+        staleness_days = max(0, (now - latest_ts).days)
+    # 有紀錄卻連一筆可解析 timestamp 都沒有＝採集端壞掉，fail-closed 當 stale 處理。
+    is_stale = n > 0 and (staleness_days is None or staleness_days > STALENESS_MAX_DAYS)
+
     reasons: list[str] = []
     ready = False
     status = "observing"
 
-    if all_true_skip:
+    if is_stale:
+        # 排在最前面：證據不新鮮的話，後面每個判定都是在對死資料下結論。
+        status = "stale"
+        if staleness_days is None:
+            reasons.append("證據時間戳全數無法解析，採集可能已停擺（無法判定新鮮度）")
+        else:
+            reasons.append(
+                f"證據過期（最新一筆距今 {staleness_days} 天 > {STALENESS_MAX_DAYS} 天），"
+                "採集可能已停擺"
+            )
+    elif all_true_skip:
         # AC4 hardcoded skip 情境（X1 補實作前）
         status = "observing"
         reasons.append("AC4 hardcoded skip 阻塞，需 X1 補實作")
@@ -351,19 +441,33 @@ def evaluate(
     elif consecutive_failures >= ALERT_YELLOW_THRESHOLD:
         status = "alert_yellow"
         reasons.append(f"連續 {consecutive_failures} 次未達綠線（黃線 ≥ {ALERT_YELLOW_THRESHOLD}）")
-    elif n < OBSERVATION_DAYS:
-        reasons.append(f"觀察期未滿（{n}/{OBSERVATION_DAYS} 天）")
-    elif green_streak < OBSERVATION_DAYS:
-        reasons.append(f"連續全綠不足（{green_streak}/{OBSERVATION_DAYS} 天）")
+    elif green_streak < OBSERVATION_REQUIRED_RUNS:
+        # ADR-SD09-012 L-2：此分支是**唯一**達標閘門。
+        # 舊版另有一道「n < 門檻」分支（n＝滾動 14 日曆天窗內筆數）——它要求 14 筆落在
+        # 14 個相鄰日曆天，也就是零缺口，等於把「使用者有沒有天天開機」寫進系統品質判準
+        # （這台機器的期望達標時間 1.5～89 年，ADR §2.5）。單位一併從「天」改成「筆」。
+        reasons.append(f"連續全綠不足（{green_streak}/{OBSERVATION_REQUIRED_RUNS} 筆）")
     elif recall_sigma is not None and recall_sigma > RECALL_SIGMA_MAX:
         reasons.append(f"recall σ={recall_sigma:.4f} > {RECALL_SIGMA_MAX}")
     else:
         status = "ready"
         ready = True
 
+    # ADR-SD09-012 L-4 (a)【落地輪拍板採 (a)】：`observation_days` **語意凍結**＝滾動
+    # 14 日曆天窗計數，維持原義不漂移；閘門值改由新欄 `green_streak` + `gate_basis`
+    # 明示。理由：該欄有三個下游消費者（run_local_nightly 的 Get-Ac4Gate、END 進度行、
+    # F2 區塊）。若改成全史筆數，它們會印出 `ac4=43/14` 這種「看起來超標三倍」的數字
+    # ——那正是 ADR §2.8 記載、R69 剛修好的假達標誤導，不能由我們自己再造一次。
+    rolling_window_count = len(filter_recent(records, now=now))
+
     result: dict[str, Any] = {
         "status": status,
-        "observation_days": n,
+        "observation_days": rolling_window_count,
+        "total_records": n,
+        "gate_basis": "green_streak",
+        "green_streak_required": OBSERVATION_REQUIRED_RUNS,
+        "staleness_days": staleness_days,
+        "staleness_max_days": STALENESS_MAX_DAYS,
         "green_streak": green_streak,
         "tolerant_streak": tolerant_streak,
         "observation_streak": observation_streak,
@@ -403,9 +507,11 @@ def main(argv: list[str] | None = None) -> int:
     )
     args = parser.parse_args(argv)
 
-    records = load_history(args.history)
-    recent = filter_recent(records)
-    report = evaluate(recent, tolerant_p95_ms=args.tolerant_p95_ms)
+    # ADR-SD09-012 L-1：閘門吃**全史**（先排序，理由見 sort_by_timestamp）。
+    # filter_recent 仍被 evaluate() 內部用來算資訊欄 observation_days，這裡不再預先過濾
+    # ——預先過濾就是把剛拆掉的「零缺口」要求裝回去。
+    records = sort_by_timestamp(load_history(args.history))
+    report = evaluate(records, tolerant_p95_ms=args.tolerant_p95_ms)
 
     if args.json:
         print(json.dumps(report, ensure_ascii=False, indent=2))
@@ -413,7 +519,22 @@ def main(argv: list[str] | None = None) -> int:
         # SD_09 W3 Round 12 P0-R12-1（ADR-SD09-008 v0.4 ACCEPTED）：
         # 升級門檻 60ms tolerant 為主軌；50ms observation 軌為觀察指標
         print(f"[AC4 progress] status={report['status']}")
-        print(f"  observation_days={report['observation_days']}/{OBSERVATION_DAYS}")
+        # ADR-SD09-012 §7.4 DoD #5：切換當下印一行 [MIGRATION] 取證，同時列出
+        # **舊口徑**（滾動窗筆數）與**新口徑**（green_streak），供日後稽核判準是何時、
+        # 從哪個數字換到哪個數字。刻意不寫死任何數字——ADR 起草期間該對數字已從
+        # 7/14→8/14→9/14 漂移過三次，寫死必過期。
+        print(
+            f"  [MIGRATION] gate_basis={report['gate_basis']} "
+            f"(ADR-SD09-012 ACCEPTED)：新口徑 green_streak="
+            f"{report['green_streak']}/{report['green_streak_required']} 筆；"
+            f"舊口徑 observation_days={report['observation_days']}/{OBSERVATION_REQUIRED_RUNS} "
+            f"rolling-window-days（已降為資訊欄，不再是閘門）"
+        )
+        print(
+            f"  staleness_days={report['staleness_days']}"
+            f"/{report['staleness_max_days']} (L-7 獨立判準；超過即 status=stale)"
+        )
+        print(f"  total_records={report['total_records']}")
         print(
             f"  tolerant_streak={report['tolerant_streak']} "
             f"(p95 < {report['tolerant_p95_ms']:.0f}ms; ADR-SD09-008 v0.4 ACCEPTED 升級門檻)"
@@ -430,7 +551,8 @@ def main(argv: list[str] | None = None) -> int:
             for r in report["reasons"]:
                 print(f"    - {r}")
 
-    if report["status"] in ("alert_yellow", "alert_red"):
+    # 'stale' 一併回 1：採集停擺與告警一樣「需要人去修」，不是「再等等就好」。
+    if report["status"] in ("alert_yellow", "alert_red", "stale"):
         return 1
     return 0
 

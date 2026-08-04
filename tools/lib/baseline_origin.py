@@ -87,50 +87,48 @@ NIGHTLY_HEARTBEATS: dict[str, str] = {
     "darwin": "AutoClaude/logs/nightly_mac_latest.log",
 }
 
-# ── smoke tripwire：為何**不**加進上面那張表（D-4 評估結論，刻意寫在程式碼旁）────────
+# ── smoke tripwire：R74 起 win32 側是**真探針**，darwin 側刻意不接（逐平台不同理由）──
 #
-# 問題陳述是「smoke 是每日第二條真機證據源，卻不在平台覆蓋判定視野內」。逐平台查證後，
-# 「再讀一支心跳」這個做法在**兩個平台上各自因不同理由不成立**：
+# 問題陳述（D-4）是「smoke 是每日第二條真機證據源，卻不在平台覆蓋判定視野內」。
+# 兩個平台的 smoke 根本不是同一種東西，故處置也不同：
 #
 #   win32  ── `AutoClaude_WindowsSmoke` 每日觸發（時刻現查 `Get-ScheduledTaskInfo`），
-#             確實**獨立於** nightly，是名副其實的第二條證據。
-#             🔴 **R73 訂正（DEF-101-786）**：本段原本斷言它「沒有任何落地產物 / 全程只
-#             `Write-Host` / 探針再怎麼寫都讀不到」——**三句皆為假**，而且寫下當天就為假：
-#             `tools/windows_smoke_local.ps1:111,127` 的 `Start-Transcript -LiteralPath
-#             <logs/windows_smoke_latest.log>` ＋ `:125` 的 14 天日期輪替，是 **R71 同一個
-#             commit（1e5214b）**加進去的（SA 二審以 `git log -S` 證實）。磁碟實查有
-#             `windows_smoke_latest.log` ＋多支 `windows_smoke_<日期>_<時分秒>.log`，
-#             且該 log 內含可解析的 `===== 彙總：PASS=n FAIL=n =====` 行。
-#             ⇒ 下方「解鎖條件」在寫下的那一刻就已達成，卻跨 R72、R73 兩輪無人回看。
-#             這正是 `DEF-101-757`「已知缺口只以劃界結案」的又一次復發，且復發在
-#             專門用來防這類事的模組裡（同本段自己在批 DEF-101-756 的那個形態）。
-#             本輪只訂正事實敘述、不順手改判定邏輯：把 smoke 升為第三個
-#             `NIGHTLY_HEARTBEATS` 條目需要新增逐平台解析契約並連動平台覆蓋判定，
-#             那會改動 `--check-snapshot` 的輸出面（本輪已在回填 ONBOARDING §7 快照），
-#             屬需獨立驗證的設計變更 ⇒ 見帳本 `DEF-101-786` 承接輪次。
+#             **獨立於** nightly，是名副其實的第二條證據；且它自 R71 起就在寫落地產物
+#             （`tools/windows_smoke_local.ps1:111,127` 的 `Start-Transcript` ＋ `:125`
+#             的 14 天日期輪替，與那些「無落點」敘述是同一個 commit `1e5214b`）。
+#             🔴 **R74 接線（DEF-101-786 殘留收尾）**：R73 已查證落點存在、解鎖條件成立，
+#             卻只訂正了敘述、判定邏輯一行未動 ⇒ 這條每日真機證據又多兩輪留在判定之外。
+#             那是 `DEF-101-757`「已知缺口只以劃界結案」的形態，而且發生在專門用來防這件
+#             事的模組裡。本輪把它接成 `SMOKE_HEARTBEATS` 真探針（解析契約見
+#             `SMOKE_SUMMARY_SPECS`）：`daily_evidence()` 的 smoke 那行自此是**量測值**，
+#             不是寫死的指路。
 #   darwin ── `macos_smoke_local.sh` 的 `===== 彙總：PASS=n FAIL=n SKIP=n =====` 是
 #             `run_local_nightly.sh` 的 stage [1/4] 印的 ⇒ 它**不是**第二條獨立證據，
-#             而是同一輪 nightly 的子階段：nightly 心跳在，smoke 就跑過了。
+#             而是同一輪 nightly 的子階段：nightly 心跳在，smoke 就跑過了。故 darwin 側
+#             刻意**不**接探針——接了會憑空多出一條看似獨立的通道，而它量的是同一件事，
+#             那是「造假資料通道」而不是補齊覆蓋。
 #
-# 若硬把 smoke 加進 `NIGHTLY_HEARTBEATS`，Windows 欄會**永遠**印「本機無 …」——而那句話
-# 會被讀成「Windows smoke 沒在跑」，這正是 DEF-101-756（缺記錄被寫成缺量測）換一個載體
-# 復發，且復發在專門用來防它的模組裡。故本輪的處置是：**不造假資料通道，改把上面兩段
-# 事實逐字印進 `--check-snapshot`**，讓 smoke 進入讀者視野、但拿到的是正確解讀。
-# 解鎖條件：**已於 R71 達成**（Start-Transcript 落點 ＋ 日期輪替，見上方 R73 訂正）。
-# 剩下的工作是把 smoke 升為第三個 `NIGHTLY_HEARTBEATS` 條目（需新增其解析契約：
-# 讀 `logs/windows_smoke_latest.log` 的 `===== 彙總：PASS=n FAIL=n =====` 行），
-# 並讓它進入平台覆蓋判定。承接見帳本 `DEF-101-786`——**不再寫「下一輪可執行」這種
-# 無主詞的交棒**，那正是它跨兩輪蒸發的原因。
+# 為何**不**把 smoke 併成 `NIGHTLY_HEARTBEATS` 的第三個條目（R73 留下的建議寫法）：
+# 那張表的鍵是**平台鍵**，三道既有鎖依賴這個契約（兩表同鍵／心跳檔名不得含 smoke／
+# 逐平台各印一行）。塞一個 `win32-smoke` 偽平台進去，等於為了省一張表而打壞「鍵＝平台」
+# 的語意，下一個讀者會拿它去跟 `sys.platform` 比對。兩張表分開、由 `daily_evidence()` 併攏。
+#
+# 誠實劃界（與 nightly 心跳同一條，不因為接上探針就消失）：transcript 與心跳皆 untracked
+# （`AutoClaude/.gitignore: logs/`）、日期輪替、只存在於產出它的那台機器上 ⇒
+# **「本機看不到」只代表「這台機器不是它」，絕不代表「那個平台沒在跑」**。
+SMOKE_HEARTBEATS: dict[str, str] = {
+    "win32": "AutoClaude/logs/windows_smoke_latest.log",
+}
+
 SMOKE_EVIDENCE: dict[str, str] = {
     "win32": (
         "AutoClaude_WindowsSmoke 每日獨立觸發（獨立於 nightly；時刻現查 "
         "`Get-ScheduledTask -TaskName AutoClaude_WindowsSmoke | Get-ScheduledTaskInfo`）。"
         "log 落點**存在**：`AutoClaude/logs/windows_smoke_latest.log`（Start-Transcript，"
-        "R71 起）＋ `windows_smoke_<日期>_<時分秒>.log` 14 天輪替，內含可解析的 "
-        "`===== 彙總：PASS=n FAIL=n =====` 行。"
-        "🔴 但本工具**尚未**把它接成機械證據源（需新增解析契約並連動平台覆蓋判定，"
-        "承接見帳本 DEF-101-786）⇒ 目前這行是**人工可查的指路**，不是量測值；"
-        "**不得**讀成「Windows smoke 沒在跑」，也不得讀成「已納入覆蓋判定」"
+        "R71 起）＋ `windows_smoke_<日期>_<時分秒>.log` 14 天輪替。R74 起本工具**已**把它"
+        "接成探針，故本行前半段是量測值、這條每日真機證據已在平台覆蓋判定視野內。"
+        "🔴 但落地產物 untracked、只存在於產出它的那台機器上 ⇒ 「本機無此檔」"
+        "**不得**讀成「Windows smoke 沒在跑」（DEF-101-756 換載體）"
     ),
     "darwin": (
         "macos_smoke_local.sh 是 run_local_nightly.sh 的 stage [1/4] ⇒ **不是**第二條獨立"
@@ -184,6 +182,21 @@ NIGHTLY_SUMMARY_SPECS: dict[str, _SummarySpec] = {
         strict=re.compile(r"(=====\s*nightly\s+彙總[：:]\s*PASS=\d+\s+FAIL=\d+\s*=====)"),
         loose=re.compile(r"彙總|PASS=|FAIL="),
         head_lines=3,
+    ),
+}
+
+# smoke transcript 的解析契約（R74）。刻意與 nightly 那張表**分開**：形狀不同
+# （`Start-Transcript` 的全量 transcript，彙總行在檔尾 ⇒ `head_lines=None` 讀尾窗格），
+# 而且 darwin 沒有對應條目——合成一張表會逼出一個「darwin 恆為無檔」的假通道。
+SMOKE_SUMMARY_SPECS: dict[str, _SummarySpec] = {
+    "win32": _SummarySpec(
+        shape="transcript 檔尾的 `===== 彙總：PASS=n FAIL=n =====`",
+        # 不含 `nightly` 字樣：那是 mac 心跳的形狀，smoke 的彙總行沒有它（沿用
+        # DEF-101-759 的教訓——把一個平台的形狀硬套到另一個上，fallback 文案會把
+        # 解析失敗偽裝成資料現況）。
+        strict=re.compile(r"(=====\s*彙總[：:]\s*PASS=\d+\s+FAIL=\d+\s*=====)"),
+        loose=re.compile(r"彙總|PASS=|FAIL="),
+        head_lines=None,
     ),
 }
 
@@ -315,14 +328,39 @@ def nightly_evidence(repo_root: Path, platform_key: str) -> str:
     return f"{rel} 最後寫入 {mtime}：{nightly_summary(window, spec)}"
 
 
-def daily_evidence(repo_root: Path, platform_key: str) -> tuple[str, str]:
-    """該平台**每日真機證據**的兩行：nightly（有落地產物可讀）＋ smoke（載具現況）。
+def smoke_evidence(repo_root: Path, platform_key: str) -> str:
+    """該平台 smoke tripwire 的**單行**現況（R74）。
 
-    smoke 那行為何是寫死的說明而不是探測結果：見上方 `SMOKE_EVIDENCE` 的評估段落
-    （Windows 無 log 落點、mac 的 smoke 只是 nightly 的子階段）。刻意**不**假裝有通道。
+    有探針的平台回**量測值 ＋ 解讀守則**；沒有探針的平台只回解讀守則，並且不假裝
+    有通道——`SMOKE_HEARTBEATS` 沒有 darwin 條目是設計而非漏填（見該表上方論證：
+    mac 的 smoke 是同一輪 nightly 的子階段，另接一條探針等於同一件事量兩次）。
     """
-    smoke = SMOKE_EVIDENCE.get(platform_key, "本平台無已知 smoke tripwire")
-    return f"nightly 證據：{nightly_evidence(repo_root, platform_key)}", f"smoke 證據：{smoke}"
+    note = SMOKE_EVIDENCE.get(platform_key, "本平台無已知 smoke tripwire")
+    rel = SMOKE_HEARTBEATS.get(platform_key)
+    spec = SMOKE_SUMMARY_SPECS.get(platform_key)
+    if rel is None or spec is None:
+        return note
+    path = repo_root / rel
+    if not path.is_file():
+        return (f"本機無 {rel}——**這只代表本機不是跑該 smoke 的那台機器**"
+                f"（transcript untracked＋日期輪替）；{note}")
+    try:
+        window = _read_probe_window(path, spec.head_lines)
+        mtime = datetime.date.fromtimestamp(path.stat().st_mtime).isoformat()
+    except OSError as exc:  # 讀不到就說讀不到，不靜默當作缺席
+        return f"{rel} 存在但讀取失敗：{exc}；{note}"
+    return f"{rel} 最後寫入 {mtime}：{nightly_summary(window, spec)}；{note}"
+
+
+def daily_evidence(repo_root: Path, platform_key: str) -> tuple[str, str]:
+    """該平台**每日真機證據**的兩行：nightly ＋ smoke，兩者皆為落地產物的唯讀探測。
+
+    R74 起 smoke 那行對有 `SMOKE_HEARTBEATS` 條目的平台是**量測值**（win32：
+    `windows_smoke_local.ps1` 的 `Start-Transcript` 落地產物）；沒有條目的平台
+    （darwin）只印解讀守則，理由與逐平台差異見 `SMOKE_HEARTBEATS` 上方論證。
+    """
+    return (f"nightly 證據：{nightly_evidence(repo_root, platform_key)}",
+            f"smoke 證據：{smoke_evidence(repo_root, platform_key)}")
 
 
 def snapshot_verdict(ok: bool, scope: str, live: dict[str, str]) -> str:

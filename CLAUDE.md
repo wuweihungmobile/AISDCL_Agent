@@ -50,10 +50,14 @@ monorepo 根目錄（`AISDCL_Agent/`，各機器 checkout 路徑不同）底下�
 
 兩個子專案明文共享以下規範（細則見各自 CLAUDE.md）：
 
-1. **繁體中文回覆**（見頂部）。AutoClaude 另有 Stop hook `check_lang.py` 事後偵測韓／日／簡體字並 warn。
+1. **繁體中文回覆**（見頂部）。`check_lang.py`（Stop hook，事後偵測韓／日／簡體字並 warn）**僅 AutoClaude 子專案 session** 生效。
 2. **開發-編譯-測試循環（強制）**：每完成一支程式立即編譯＋跑單元測試，**絕不累積開發**；編譯／測試失敗立即停下修復，禁止跳過或註解掉失敗測試。
-3. **文檔目錄編號制**：產出文件寫入 `docs/0[1-8]_*/`（01_requirements ～ 08_deployment）對應子目錄，不可亂放。AutoClaude 以 PreToolUse hook `enforce_docs_path.py` 強制。
+3. **文檔目錄編號制**：產出文件寫入 `docs/0[1-8]_*/`（01_requirements ～ 08_deployment）對應子目錄，不可亂放。`enforce_docs_path.py`（PreToolUse hook）**僅 AutoClaude 子專案 session** 生效。
 4. **規格先行**：寫程式前先有規格／通過閘門（AISDLC_SDD 的 SCG-0~6；AutoClaude 的 G0~G6 Gate）。
+
+> 🔴 **R74 訂正：上面兩條 hook 的射程（DEF-101-798）**。本節此前把 `enforce_docs_path.py` 寫成「強制」、把 `check_lang.py` 寫成「另有」，讀起來像是**在本檔生效的環境裡**也會攔。實查 `AutoClaude/.claude/settings.json` 註冊 6 支 hook——`enforce_docs_path.py`／`loc_budget_check.py`／`check_sh_eol.py`／`check_ps1_encoding.py`／`check_lang.py`／`claude_md_freshness.py`，除 `check_ps1_encoding.py` 外**皆僅 AutoClaude 子專案 session** 生效——而根 `.claude/settings.json` 只橋接其中 **1 支**。Claude Code **不會**遞迴子目錄載 hook（見記憶 `sdd-claude-hooks-skills-loading`）⇒ 在 monorepo 根 session（＝本檔被載入的那種 session）下，另外 5 支**一行都不會跑**。
+>
+> 「文件宣稱 ↔ 實際註冊」自此有機械物：`tools/tests/test_doc_loc_baseline_freshness_r60.py::TestR74RootClaudeMdHookClaimsMatchRegistration`——本檔提到的每一支 hook 腳本，**要嘛**在根 `.claude/settings.json` 註冊，**要嘛**同一行必須帶「僅 AutoClaude 子專案 session」字樣。少一邊即紅。**把未橋接的 5 支橋進根層是另一件事**（會改動 PreToolUse deny 面，該檔自己記載過「hook 誤觸 deny 會把所有工具硬鎖死」的 P0），不在本次訂正射程內，已列入交棒。
 
 ---
 
@@ -157,6 +161,21 @@ PowerShell 工具的 cwd **會跨呼叫持續**（工具說明明載），但人
 R71 最諷刺的一筆：在修一個 Windows 專屬缺陷（DEF-101-759）時，寫出了另一個只在 Windows 成立的判準——`$env:PATHEXT` 在 macOS/Linux 的 PS Core 上不存在、POSIX 執行檔也不帶副檔名，兩個原因各自都足以讓函式恆回 `$null`，**會讓 macos-compat-ci 與 root-infra-ci(ubuntu) 必紅**（DEF-101-766）。成因是當下整個思考脈絡都泡在 Windows 語境裡。
 
 觸發清單（出現任一就必須自問）：`$env:*` 讀取／副檔名判斷／路徑分隔符／`Get-Command` 解析／console 編碼／行尾／大小寫敏感度／`$IsWindows` 這類 PS 6+ 專屬自動變數（5.1 恆 `$null`，需 `# ps7-ok: <WHY>` 行尾豁免，**獨立註解行無效**——掃描器只認行尾）。
+
+🔴 **這 8 項裡只有 4 項有掃描器，剩下 4 項純靠自律（R74 誠實化）**——而 `DEF-101-766`（`$env:PATHEXT` ＋ 副檔名判斷）正好落在沒有掃描器的那兩格，這不是巧合：有掃描器的那幾項，缺陷在寫出來的當回合就被擋掉了，所以不會留到複審。
+
+| 觸發項 | 機械物 | 違反時什麼會紅 |
+|--------|--------|----------------|
+| 路徑分隔符 | `tools/tests/test_platform_neutral_paths.py` | 根層 unittest 閘門 |
+| console 編碼 | `tools/tests/test_subprocess_encoding_hygiene.py` | 同上 |
+| 行尾 | `tools/tests/test_ps1_bom.py` ＋ `AutoClaude/tools/hooks/check_sh_eol.py` | 同上 ＋ PostToolUse hook |
+| `$IsWindows` 等 PS 6+ 專屬 | `tools/tests/test_ps51_compat.py` | 同上 |
+| `$env:*` 讀取 | **無機械物** | 沒有東西會紅（DEF-101-766 的落點） |
+| 副檔名判斷 | **無機械物** | 同上（DEF-101-766 的另一半） |
+| `Get-Command` 解析 | **無機械物**（`test_find_git_bash_parity.py` 只守 `Find-GitBash` 這一個消費者，不是判準本身） | 只有那一個站點會紅 |
+| 大小寫敏感度 | **無機械物** | 沒有東西會紅 |
+
+上表的「無機械物」四列是 **shrink-only 棘輪**，由 `tools/tests/test_doc_loc_baseline_freshness_r60.py::TestR74IronLawMechanismAccounting` 釘住：**只准變少**（補了掃描器就把該列改掉），而且表內每一個具名檔案都必須真的存在——**本檔不得宣稱一個不存在的機械物**。這一條的存在理由是 R71 的實證：純文件約束對「當下的模型」零攔阻力，所以「哪幾項其實沒人在守」必須是**可查的量測值**，不是散文。
 
 ### 鐵律四：本節之外的三筆「平台無關」失誤，共同形態是**宣稱先於查證**
 

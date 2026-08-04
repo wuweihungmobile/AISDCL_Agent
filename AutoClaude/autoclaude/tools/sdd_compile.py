@@ -60,6 +60,15 @@ def compile_spec(
 
 
 def main(argv: list[str] | None = None) -> int:
+    # DEF-101-789 家族：本 CLI 的錯誤訊息全是中文，Windows 非 UTF-8 終端下
+    # stdout（預設 errors='strict'）直接 UnicodeEncodeError，stderr（預設
+    # errors='backslashreplace'）則把訊息印成 \uXXXX 逃脫字面 —— 兩者都讓
+    # 「規格未凍結」這類硬閘的理由讀不到。同 tools/mutation_analysis.py 慣例。
+    for _stream in (sys.stdout, sys.stderr):
+        try:
+            _stream.reconfigure(encoding="utf-8", errors="replace")
+        except (AttributeError, ValueError, OSError):
+            pass
     parser = argparse.ArgumentParser(
         prog="python -m autoclaude.tools.sdd_compile",
         description="編譯已凍結的 AISDLC-SDD 規格為標準 AutoClaude playbook YAML",

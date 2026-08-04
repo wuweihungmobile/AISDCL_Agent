@@ -48,6 +48,7 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+import _cli_flags  # noqa: E402  # 未知旗標 rc=2 fail-loud 的 SSOT（見該檔檔頭 WHY）
 import _stdio_utf8  # noqa: E402,F401  # Windows 非 UTF-8 終端 print(✅/❌/⚠) 防崩潰保護
 
 _REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -184,7 +185,13 @@ def scan(file_paths: list[Path], ssot_path: Path) -> list[str]:
     return problems
 
 
-def main() -> int:
+def main(argv: list[str] | None = None) -> int:
+    # 本工具**不接受任何引數**。修前它連 argv 都不看 ⇒ `--bogus-flag-xyz` 靜默 rc=0
+    # 印綠燈（R67-D20 同一個洞，射程擴張至本檔）。
+    rc = _cli_flags.reject_unknown_argv(
+        "check_pytest_baseline_sites.py", sys.argv[1:] if argv is None else argv, ())
+    if rc is not None:
+        return rc
     files = [_REPO_ROOT / rel for rel in _SCAN_FILES]
     ssot = _REPO_ROOT / _SSOT_FILE
 

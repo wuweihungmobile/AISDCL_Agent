@@ -52,6 +52,7 @@ from __future__ import annotations
 import ast
 import re
 import sys
+import tempfile
 import unittest
 from pathlib import Path
 from unittest import mock
@@ -282,20 +283,66 @@ class TestNativePs51NeverFallsBack(unittest.TestCase):
             self.assertEqual(native_ps51(), _FAKE_PS51)
 
 
+# 掃描面的快取目錄（不進版控；列進來會讓兩邊基準不同）。沿用
+# `tools/lib/windows_skip_tags.py::_CACHE_DIR_NAMES` 的既有形態。
+_CACHE_DIR_NAMES = frozenset({"__pycache__", ".pytest_cache", ".mypy_cache", ".ruff_cache"})
+
+
+def inline_engine_hits(root: Path) -> dict[str, list[int]]:
+    """`root` 底下（**遞迴**）所有行內引擎挑選站點 `{相對路徑: 行號}`。
+
+    🔴 R74 改遞迴（原為 `root.glob("*.py")`，非遞迴）：非遞迴 glob 對「新增子目錄
+    裡的檔案」是結構性隱形的，而本 repo 已為同一個不對稱付過兩次代價——
+    `test_adr_xplat001_c1c2_lock.guard_files_in_worktree`（改 top-level 檔→紅、新增
+    子目錄檔→綠）與 `windows_skip_tags.read_test_sources` 的 docstring 都逐字記過。
+    反增生鎖的價值全在「第 N+1 份選錯必紅」，而射程裡開一個只要建子目錄就能鑽的洞，
+    等於把 N+1 的成本降到「多打一個 `mkdir`」。
+    """
+    found: dict[str, list[int]] = {}
+    for path in sorted(root.rglob("*.py")):
+        if _CACHE_DIR_NAMES & set(path.parts):
+            continue
+        if path.name == _SSOT_MODULE:
+            continue
+        rel = path.relative_to(root).as_posix()
+        linenos = _engine_selection_linenos(
+            path.read_text(encoding="utf-8", errors="replace"), rel
+        )
+        if linenos:
+            found[rel] = linenos
+    return found
+
+
 class TestNoInlineEngineSelection(unittest.TestCase):
-    """反增生：`tools/tests/*.py` 不得再出現行內引擎挑選（第 10 處重新發明必紅）。"""
+    """反增生：`tools/tests/` 樹（遞迴）不得再出現行內引擎挑選（第 10 處重新發明必紅）。"""
 
     def _hits(self) -> dict[str, list[int]]:
-        found: dict[str, list[int]] = {}
-        for path in sorted(_TESTS_DIR.glob("*.py")):
-            if path.name == _SSOT_MODULE:
-                continue
-            linenos = _engine_selection_linenos(
-                path.read_text(encoding="utf-8", errors="replace"), path.name
-            )
-            if linenos:
-                found[path.name] = linenos
-        return found
+        return inline_engine_hits(_TESTS_DIR)
+
+    def test_scan_is_recursive_not_top_level_only(self) -> None:
+        """🔴 R74 鑑別力：子目錄裡的違規必須被抓到（非遞迴 glob 會靜默放行）。
+
+        意圖（Rule 9）：現行 `tools/tests/` 是平的，所以「遞迴 vs 非遞迴」在真實樹上
+        量不出差別——恰恰因此，改回非遞迴不會有任何鎖翻紅。本支用合成樹把兩者分開：
+        頂層檔與子目錄檔各放一個同形違規，斷言**兩者都**被回報。哪天有人把 `rglob`
+        改回 `glob`，本支當場紅。
+        """
+        offender = 'import shutil\nexe = shutil.which("pwsh") or shutil.which("powershell")\n'
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            (root / "test_top.py").write_text(offender, encoding="utf-8", newline="\n")
+            nested = root / "sub" / "deeper"
+            nested.mkdir(parents=True)
+            (nested / "test_nested.py").write_text(offender, encoding="utf-8", newline="\n")
+            cache = root / "__pycache__"
+            cache.mkdir()
+            (cache / "test_cached.py").write_text(offender, encoding="utf-8", newline="\n")
+            hits = inline_engine_hits(root)
+        self.assertEqual(
+            sorted(hits), ["sub/deeper/test_nested.py", "test_top.py"],
+            f"遞迴掃描面不對（實得 {hits!r}）——子目錄漏抓＝只要 mkdir 就能繞過反增生鎖；"
+            "`__pycache__` 內的位元碼副本則不得計入（兩邊基準會不同）",
+        )
 
     def test_scanner_has_teeth(self) -> None:
         """鑑別力自檢：掃描器對合成樣本必須命中，對對照樣本必須不命中。"""
@@ -547,6 +594,88 @@ def _skip_reason_linenos(text: str) -> set[int]:
 # （獨立註解行無效，必須行尾），並由 `test_stale_sample_marker_stays_bounded` 界定射程。
 _STALE_SAMPLE_MARKER = "# stale-sample:"
 
+# 「把機器屬性寫成常數」的句型判準。**射程單位＝邏輯段，不是物理行**（R74 修
+# `DEF-101-777` 的漏抓面，見 `_logical_segments` 與 `stale_local_engine_claims`）。
+#
+# 🔴 R74 放寬主語與否定詞之間的視窗（8 → 16 字）：舊視窗是照最短句型的長度訂的，
+# 主語後面只要插一段括號補述（實測逃掉的那個站點插了 11 字的機型括號）就超窗漏抓。
+# 窗放寬不會讓判準失控——`[^。]` 仍把射程關在**同一個句子**內，這才是真正的邊界。
+# 逐字樣本一律只放在下方 `test_detector_catches_*` 的樣本清單裡並帶行尾豁免標記，
+# 不寫進說明散文（R73 教訓：訂正註記逐字引述假話＝在樹裡多留一句假話）。
+_STALE_CLAIM_RE = re.compile(
+    r"(?:本機|這台機器|此機器|機器上)[^。\n]{0,16}?"
+    r"(?:無|沒有|沒裝|不存在|未裝|未安裝|並未安裝)[^。\n]{0,6}?"
+    r"(pwsh|powershell|PS\s*[57]|PowerShell\s*[57])"
+)
+
+
+def _logical_segments(text: str) -> list[tuple[str, list[int]]]:
+    """把連續的非空行併成**邏輯段**；回傳 `[(段文字, 每個字元的來源行號)]`。
+
+    🔴 WHY（R74 修 `DEF-101-777` 的漏抓面——「有鎖在守假話」的實例）：R73 把射程
+    擴到整個 `tools/` 樹，但判定仍是**逐行**掃描，而中文散文的斷行位置是排版偶然。
+    落地當時樹裡就有一筆真違規逃過：主語落在某一行的行尾、否定詞與引擎名落在下一行
+    的行首——兩個片段各自都不成句，鎖因此全綠。**這比沒有鎖更糟**：讀者會把綠燈
+    當成「這類假事實已經清乾淨了」。
+
+    合併規則刻意最笨：整行 `#` 註解剝掉 `#` 與前後空白後接續，其餘行原樣接續，
+    空行為段界。散文的**句號**由 `_STALE_CLAIM_RE` 的 `[^。]` 自己擋住，所以合併
+    到段不等於把射程放大到整檔——邊界從「排版換行」換成「作者寫的句號」，而後者
+    才是語意邊界。
+    """
+    segments: list[tuple[str, list[int]]] = []
+    chars: list[str] = []
+    linenos: list[int] = []
+    for lineno, line in enumerate(text.splitlines(), 1):
+        body = line.strip()
+        if not body:
+            if chars:
+                segments.append(("".join(chars), list(linenos)))
+                chars, linenos = [], []
+            continue
+        if body.startswith("#"):
+            body = body[1:].strip()
+        chars.extend(body)
+        linenos.extend([lineno] * len(body))
+    if chars:
+        segments.append(("".join(chars), list(linenos)))
+    return segments
+
+
+def stale_local_engine_claims(text: str) -> list[tuple[tuple[int, ...], str]]:
+    """回傳 `[(涵蓋的來源行號, 逐字命中)]`——`text` 內把機器屬性寫成常數的句子。
+
+    豁免兩類（各有獨立鎖，見 `TestNoStaleLocalEngineClaims` docstring）：skip 理由
+    字串（`_skip_reason_linenos`，走 AST）與偵測器自己的樣本（行尾
+    `_STALE_SAMPLE_MARKER`）。**跨行命中必須「每一行都各自豁免」才放行**——否則
+    「把主語藏進 skip 理由那一行、把假事實寫在下一行」就是新的繞道。
+    """
+    exempt = _skip_reason_linenos(text)
+    lines = text.splitlines()
+
+    def _line_exempt(lineno: int) -> bool:
+        line = lines[lineno - 1]
+        if _STALE_SAMPLE_MARKER in line:
+            return True
+        if lineno not in exempt:
+            return False
+        # 🔴 R73 二審（Architect N2）保留：假事實藏在 skip 理由**同一行的行尾註解**
+        # 裡不得取得豁免。合併成段之後這條判斷改在「該行的原文」上做，語意不變。
+        if "#" in line:
+            head, _, tail = line.partition("#")
+            if _STALE_CLAIM_RE.search(tail) and not _STALE_CLAIM_RE.search(head):
+                return False
+        return True
+
+    out: list[tuple[tuple[int, ...], str]] = []
+    for segment, linemap in _logical_segments(text):
+        for match in _STALE_CLAIM_RE.finditer(segment):
+            spanned = tuple(sorted(set(linemap[match.start() : match.end()])))
+            if spanned and all(_line_exempt(ln) for ln in spanned):
+                continue
+            out.append((spanned, match.group(0)))
+    return out
+
 
 class TestNoStaleLocalEngineClaims(unittest.TestCase):
     """不得把「這台機器有沒有某個引擎」寫成常數。**射程＝整個 `tools/` 樹**（R73 擴）。
@@ -581,11 +710,10 @@ class TestNoStaleLocalEngineClaims(unittest.TestCase):
     # 全部 MISS ⇒ 下一個人只要換個說法就繞過。這正是本鎖 docstring 自己在批的
     # 「劃界結案」，所以主語與否定詞都補齊；仍刻意不抓「根本沒有 5.1（macOS/Linux）」
     # 這類**通則**敘述（它說的不是這台機器）。
-    _STALE_RE = re.compile(
-        r"(?:本機|這台機器|此機器|機器上)[^。\n]{0,8}?"
-        r"(?:無|沒有|沒裝|不存在|未裝|未安裝|並未安裝)[^。\n]{0,6}?"
-        r"(pwsh|powershell|PS\s*[57]|PowerShell\s*[57])"
-    )
+    # R74：句型判準本體與掃描器一起上移成模組層（`_STALE_CLAIM_RE`／
+    # `stale_local_engine_claims`），本欄保留為同一個物件的別名——既有斷言逐句
+    # 直接對句型判準說話，不必繞過掃描器。
+    _STALE_RE = _STALE_CLAIM_RE
     # 射程＝`tools/` 樹全部 .py。刻意不限 `tools/tests/`：本輪命中的最嚴重一筆在
     # `tools/lib/windows_skip_tags.py`＝護欄層生產碼，只掃測試就會漏掉它。
     _SCAN_ROOT = Path(__file__).resolve().parents[1]
@@ -622,27 +750,10 @@ class TestNoStaleLocalEngineClaims(unittest.TestCase):
             # 而不是自己拋 UnicodeDecodeError（SD 二審指出的失效模式）。
             text = path.read_text(encoding="utf-8", errors="replace")
             scanned += 1
-            exempt = _skip_reason_linenos(text)
-            for lineno, line in enumerate(text.splitlines(), 1):
-                if not self._STALE_RE.search(line):
-                    continue
-                # 🔴 R73 二審收窄（Architect N2）：只看**去掉行尾註解後**的部分是否被豁免。
-                # 實測最實際的一條繞道是：skip 理由後面接一個帶假事實的行尾註解
-                # ——假事實藏在 skip 理由**同一行的行尾註解**裡即取得豁免，而初版
-                # docstring 卻宣稱「不得外溢到註解」（它只驗了獨立成行的註解）。
-                in_trailing_comment = False
-                if lineno in exempt and "#" in line:
-                    head, _, tail = line.partition("#")
-                    in_trailing_comment = (
-                        self._STALE_RE.search(tail) is not None
-                        and self._STALE_RE.search(head) is None
-                    )
-                if (lineno in exempt and not in_trailing_comment) or (
-                    _STALE_SAMPLE_MARKER in line
-                ):
-                    continue
-                rel = path.relative_to(self._SCAN_ROOT)
-                offenders.append(f"{rel}:{lineno}: {line.strip()}")
+            rel = path.relative_to(self._SCAN_ROOT)
+            for spanned, hit in stale_local_engine_claims(text):
+                where = "-".join(str(ln) for ln in spanned)
+                offenders.append(f"{rel}:{where}: {hit}")
         self.assertGreater(scanned, 20, "射程掃到的檔案數異常少——rglob 可能沒對上樹根")
         self.assertEqual(
             offenders, [],
@@ -690,6 +801,56 @@ class TestNoStaleLocalEngineClaims(unittest.TestCase):
         ):
             with self.subTest(sample=sample):
                 self.assertIsNotNone(self._STALE_RE.search(sample))
+
+    def test_detector_catches_the_cross_line_form_that_used_to_escape(self) -> None:
+        """🔴 R74（`DEF-101-777` 漏抓面）：句子被排版斷行切開時仍必須命中。
+
+        意圖（Rule 9）：R73 擴了射程卻留下逐行判定，於是**樹裡當下就有一筆真違規而
+        鎖是綠的**——主語在行尾、否定詞與引擎名在下一行行首。這支用兩種當時實際
+        逃掉的形狀釘死：① 跨行；② 主語與否定詞之間插了 11 字的機型括號（超過舊的
+        8 字視窗）。任何人把判定改回逐行、或把視窗縮回 8 字，本支必紅。
+        """
+        cross_line = (
+            "# 缺陷只在 Major >= 6 且 $IsWindows 為假時顯形，而本機\n"  # stale-sample: 跨行上半
+            "# （Windows 11）沒有 pwsh 7。替身變數這條路走不通。\n"  # stale-sample: 跨行下半
+        )
+        hits = stale_local_engine_claims(cross_line)
+        self.assertTrue(hits, "跨行形態漏抓——判定退回逐行掃描（DEF-101-777 漏抓面復發）")
+        self.assertEqual(hits[0][0], (1, 2), f"命中應橫跨兩行（實得 {hits!r}）")
+
+        wide_window = "本機（Windows 11）沒有 pwsh 7"  # stale-sample: R74 超窗樣本
+        self.assertIsNotNone(
+            self._STALE_RE.search(wide_window),
+            "主語與否定詞之間插入括號補述即漏抓——視窗被縮回 8 字",
+        )
+
+        # 對照組：句號是語意邊界，合併成段不得讓射程跨過句子。
+        across_sentences = (
+            "# 本機的 PATH 設定與此無關。\n"
+            "# 這台機器沒有安裝任何東西。\n"
+            "# 順序即判準：powershell 在前。\n"
+        )
+        self.assertEqual(
+            stale_local_engine_claims(across_sentences), [],
+            "合併成段後跨句誤命中——`[^。]` 邊界失效，鎖會變成噪音來源",
+        )
+
+    def test_cross_line_exemption_requires_every_line_to_be_exempt(self) -> None:
+        """🔴 跨行豁免不得「一行豁免全段放行」（R74 隨合併判定一併封的新繞道）。
+
+        意圖（Rule 9）：合併成段之後，豁免判斷從「一行」變成「一組行」。若只看命中
+        起始行，把主語塞進一句真的 skip 理由、假事實寫在下一行就能整段脫身——那正是
+        R73 二審 Architect N2 抓到的「豁免成為藏假事實的地方」在新判定下的翻版。
+        """
+        src = (
+            'self.skipTest("本機")\n'   # stale-sample: 第 1 行＝真 skip 理由（該行豁免）
+            'x = "沒有 pwsh 7"\n'      # stale-sample: 第 2 行＝一般字串（不得豁免）
+        )
+        hits = stale_local_engine_claims(src)
+        self.assertTrue(
+            hits,
+            "跨行命中因為起始行落在 skip 理由內就整段放行——豁免必須逐行成立",
+        )
 
     def test_skip_exemption_cannot_be_used_as_a_hiding_place(self) -> None:
         """🔴 R73 二審（Architect N2）：豁免不得成為藏假事實的地方。

@@ -63,8 +63,9 @@ REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 }
 
 # python 缺席 fail-loud（R14 SCAN-SH-1）：現代 macOS 乾淨 PATH 只有 python3 沒有
-# python，未啟 venv 直跑時下方 LATEST 解析的 `|| true` 會把 127（command not found）
-# 靜默吞成「無演化版」——dry-run 假綠、非 dry-run 雙軌閘門靜默降為單軌 v0.01。
+# python，未啟 venv 直跑時下方的 LATEST 解析會收到 127（command not found），而 127
+# 一旦被當成「無演化版」處理，就是 dry-run 假綠、非 dry-run 雙軌閘門靜默降為單軌
+# v0.01（下方 R74 的退出碼分級是第二道；本守門讓最常見的那條路連分級都不用走）。
 # 與姊妹腳本（tools/integration_gate.sh / AutoClaude/tools/local_ci_gate.sh）同款守門。
 if ! is_real_python_candidate python; then
   echo "❌ 找不到 python — 請先啟用 venv（macOS/Linux: source .venv/bin/activate；Windows: .venv/Scripts/activate；見 ONBOARDING.md §3）" >&2
@@ -78,11 +79,27 @@ FROZEN_BASELINE="AISDLC_SDD_v0.01"   # 凍結基線：恆測，回歸防護
 # 且掃磁碟非 git tracked——`AISDLC_SDD_v0.30.bak`、檔總管複製品「v0.30 - Copy」、未 commit
 # 手動複製目錄都會被選成 LATEST，閘門綠燈實為測錯樹（R10 ARCH-3 實測重現）。SSOT 語意：
 # git tracked（含 index）＋完整錨定 `^AISDLC_SDD_v\d+\.\d+$`＋(major,minor) 數值取最大。
-# `|| true`：resolver 找不到任何版本目錄時 exit 1，維持原「LATEST 可為空」語意
-# （空 → 僅測凍結基線；stderr 警告直通 console 不吞）。python 缺席已由檔頭守門
-# fail-loud 攔下，此處 `|| true` 只剩「resolver 自身失敗/無版本」兩情境，均以下方
-# 降軌警示可見化（R14 SCAN-SH-1：杜絕「驗證鏡子靜默縮面」）。
-LATEST="$(python "${REPO_ROOT}/scripts/sdd_version.py" || true)"
+# ── 退出碼分級（R74）─────────────────────────────────────────────────────────
+# 🔴 為何不能一律容忍：本行過去把 resolver 的**所有**非零退出碼一併抹平，於是
+#    126（存在但不可執行／權限）、127（PATH 上的 python 消失）、2（腳本檔不存在，
+#    或 argparse 拒絕參數）這些「resolver 根本沒跑起來」的情境，全部被讀成「這個
+#    repo 沒有演化版」→ 閘門降為只測凍結基線 v0.01 **且 rc=0**。閘門靜默降級是最
+#    危險的一類缺陷，因為它回報綠：使用者拿到「✅ 全數通過」，而 LATEST 軌（真正
+#    承載框架演化的那一軌）與其後全部硬閘一次都沒跑。上方的 python 缺席守門只覆蓋
+#    「PATH 上沒有 python」這一種，攔不到 126/2 這些「有 python、但呼叫本身壞了」。
+# 唯一容忍的是 rc=1 ——`scripts/sdd_version.py` 的 main() 只有「找不到任何版本目錄」
+#    這一條回 1，正是下方降軌警示要可見化的那個合法情境（空 → 僅測凍結基線；
+#    resolver 自己的 stderr 警告直通 console 不吞）。
+# `set +e`／`set -e` 成對包夾：檔頭 `set -e` 下 `VAR="$(cmd)"` 失敗即整檔中止，取不到
+#    rc 做分級；手法沿用本檔下方 arch_fitness 取 `AF_CODE` 的既有寫法（Rule 11）。
+set +e
+LATEST="$(python "${REPO_ROOT}/scripts/sdd_version.py")"
+_LATEST_RC=$?
+set -e
+if [[ "${_LATEST_RC}" -ne 0 && "${_LATEST_RC}" -ne 1 ]]; then
+  echo "::error:: LATEST 解析器異常退出（rc=${_LATEST_RC}）— 這不是「沒有演化版」（那是 rc=1），而是 resolver 沒能正常執行（126＝存在但不可執行／權限、127＝找不到直譯器、2＝腳本缺失或參數錯）。閘門拒絕靜默降級為只測凍結基線 ${FROZEN_BASELINE}：LATEST 軌與其後全部硬閘都不會跑，卻會回報綠。修法：確認 venv 已啟用且 ${REPO_ROOT}/scripts/sdd_version.py 可執行" >&2
+  exit 1
+fi
 
 FW_VERSIONS=("${FROZEN_BASELINE}")
 if [[ -n "${LATEST}" && "${LATEST}" != "${FROZEN_BASELINE}" ]]; then

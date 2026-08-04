@@ -892,5 +892,105 @@ class TestCompatCiScriptTriggerSymmetry(unittest.TestCase):
         self.assertIsNotNone(_gh_filter_pattern_to_re("tools/tests/**").match("tools/tests/x/y.py"))
 
 
+# ══════════════════════════════════════════════════════════════════════════════
+# R74：`continue-on-error: true` 讓 CI 活性哨兵的 run 層判準**活體 fail-open**
+# ══════════════════════════════════════════════════════════════════════════════
+# 🔴 為何併進本檔：本檔已是 DEF-101-703（`*-nightly-full` 18 天零成功而三道哨兵
+# 結構上偵測不到）的鎖之家——見上方 `TestRootInfraNightlyStalenessSentinel`。
+# 另立新檔會撞 `_FROZEN_GUARD_FILE_COUNT` shrink-only 棘輪（DEF-101-561③）。
+#
+# 🔴 缺陷本體（唯讀實查即可證，零網路）：`tools/lib/ci_liveness.py` 的活性判準是
+# 「該 workflow 有沒有 `--status success` 的 run」。而兩支 compat-CI 的
+# `*-nightly-full` 都帶 **job 層 `continue-on-error: true`**，語意逐字就是
+# 「這個 job 紅了別影響 run 結論」⇒ 深度回歸整包爛掉，run 仍是 success，
+# 哨兵照樣判新鮮、一聲不響。R69/R71 那三道偵測問的是「有沒有 run／是哪個事件帶來
+# 的／run 結論代不代表這條軌」，都不是「run 結論代不代表那個 **job**」。
+class TestRunLevelFailOpenOnNonBlockingNightly(unittest.TestCase):
+    """哨兵必須自白「這支檔的 run 層綠燈不構成 nightly-full 健康的證據」。"""
+
+    @staticmethod
+    def _ci_liveness():
+        import sys  # noqa: PLC0415
+
+        sys.path.insert(0, str(_REPO_ROOT / "tools" / "lib"))
+        import ci_liveness  # noqa: PLC0415
+
+        return ci_liveness
+
+    def test_both_compat_ci_are_flagged_as_run_level_fail_open(self) -> None:
+        """活體：兩支 compat-CI 現況就命中。修前 `stale_schedule_tracks` 對此完全沉默。"""
+        c = self._ci_liveness()
+        for wf in (_WINDOWS_COMPAT_CI, _MACOS_COMPAT_CI):
+            jobs = c.non_blocking_scheduled_jobs(wf)
+            self.assertTrue(
+                jobs,
+                f"{wf.name} 的 nightly-full 帶 continue-on-error: true 卻沒被偵測到 ⇒ "
+                "偵測器已與 workflow 形狀漂移（run 層假綠會回來）",
+            )
+            note = c.run_level_fail_open(_REPO_ROOT, wf.name)
+            self.assertIsNotNone(note)
+            self.assertIn("fail-open", note)
+            self.assertIn("哨兵會把紅讀成綠", note,
+                          "訊息必須逐字說出後果，否則讀者會把它當成無害的技術註記")
+
+    def test_push_gated_non_blocking_job_is_not_flagged(self) -> None:
+        """鑑別力（反向）：push 也會跑的非阻斷 job 紅了會讓 run 紅 ⇒ 不該報。
+
+        沒有這一支，`non_blocking_scheduled_jobs` 可以退化成「只看
+        continue-on-error」而照樣全綠——那會把大量無害站點報成盲區，
+        而誤報的鎖最後一定被加豁免繞過（比沒有鎖更糟）。
+        """
+        c = self._ci_liveness()
+        with self.subTest("排程閘 ＋ 非阻斷 ⇒ 命中"):
+            self.assertEqual(
+                c.non_blocking_scheduled_jobs(self._fixture(gated=True, soft=True)),
+                ["nightly"])
+        with self.subTest("非阻斷但無排程閘 ⇒ 不命中"):
+            self.assertEqual(
+                c.non_blocking_scheduled_jobs(self._fixture(gated=False, soft=True)), [])
+        with self.subTest("有排程閘但阻斷 ⇒ 不命中"):
+            self.assertEqual(
+                c.non_blocking_scheduled_jobs(self._fixture(gated=True, soft=False)), [])
+
+    def _fixture(self, *, gated: bool, soft: bool) -> Path:
+        import tempfile  # noqa: PLC0415
+
+        body = ["on:", "  schedule:", "    - cron: \"0 0 * * *\"", "jobs:", "  nightly:"]
+        if gated:
+            body.append("    if: github.event_name == 'schedule'")
+        if soft:
+            body.append("    continue-on-error: true")
+        body += ["    runs-on: ubuntu-latest", "    steps:", "      - run: echo hi", ""]
+        d = tempfile.mkdtemp()
+        self.addCleanup(__import__("shutil").rmtree, d, True)
+        p = Path(d) / "fixture.yml"
+        p.write_text("\n".join(body), encoding="utf-8", newline="\n")
+        return p
+
+    def test_the_finding_reaches_the_consumer(self) -> None:
+        """接線鎖：偵測到卻沒接進 `stale_schedule_tracks` ⇒ 使用者一輩子看不到。
+
+        這正是 DEF-101-786 那個形態（事實查證了、判定沒接上）在本模組的同款風險。
+        """
+        import shutil  # noqa: PLC0415
+        import tempfile  # noqa: PLC0415
+        import time  # noqa: PLC0415
+        from unittest import mock  # noqa: PLC0415
+
+        c = self._ci_liveness()
+        root = Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, root, True)
+        (root / ".github" / "workflows").mkdir(parents=True)
+        shutil.copy(self._fixture(gated=True, soft=True),
+                    root / ".github" / "workflows" / "demo.yml")
+        with mock.patch.object(c, "_latest_success_run",
+                               return_value=datetime.datetime.now(
+                                   datetime.UTC).isoformat().replace("+00:00", "Z")), \
+             mock.patch.object(c, "_latest_attempt", return_value=None):
+            out = c.stale_schedule_tracks(root, time.monotonic() + 25)
+        self.assertTrue(any("fail-open" in f for f in out),
+                        f"run 層 fail-open 未進入回報清單（實得 {out}）")
+
+
 if __name__ == "__main__":
     unittest.main()

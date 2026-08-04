@@ -691,6 +691,12 @@ _COUNTERFACTUAL_CARRIER_REFS: dict[str, str] = {
     "test_windowsapps_verdict_parity.py":
         "WindowsApps guard 行為表 parity 的專屬鎖檔——同被 DEF-101-561③ 否決，判準併入 "
         "test_windowsapps_guard_cross_consistency.py，該處引用亦明說『原本寫成獨立檔…被擋下』",
+    "test_this_lock_was_never_created.py":
+        "R74（DEF-101-787 家族）新增的『指路死信偵測』本身的 fixture 名——它是**刻意造的、"
+        "永遠不該存在**的檔名，用來驗證該判準在遇到不存在的鎖檔時真的會紅。"
+        "取這個名字是為了不把任何**真實**的死檔名寫進樹裡：真死名一旦留下，下一個人 grep 到"
+        "會以為那是待建的容器（本輪修的 DEF-101-787 就含這個形態）。見 "
+        "tools/tests/test_check_hooks_liveness.py 的 TestHooksDoNotSignpostMissingLocks",
 }
 
 

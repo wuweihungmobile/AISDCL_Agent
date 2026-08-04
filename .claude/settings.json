@@ -51,11 +51,17 @@
         ]
       },
       {
+        "_comment": "R74（PKG-4 G）：check_sh_eol.py 原本只掛在 AutoClaude/.claude/settings.json，且其解析基準釘在 AutoClaude/ ⇒ 在 monorepo 根 session 下對 AutoClaude/ 之外的 .sh 整支靜默失效（根層 tools/*.sh 與 AISDLC_SDD/**/*.sh 零事中守門）。腳本側已把基準上移到 monorepo 根（見該檔 PROJECT_ROOT 的 WHY），此處補上 wiring；與 check_ps1_encoding.py 同一個 matcher 區塊、同一支 python -c shim（缺檔＝fail-open exit 0，不得讓 hook 缺席演變成全工具硬鎖死的 P0）。",
         "matcher": "Write|Edit",
         "hooks": [
           {
             "type": "command",
             "command": "python -c \"import os,sys,runpy; r=os.environ.get('CLAUDE_PROJECT_DIR') or os.getcwd(); p=os.path.join(r,*sys.argv[1].split('/')); os.path.isfile(p) or sys.exit(0); os.chdir(r); sys.argv=[p]+sys.argv[2:]; runpy.run_path(p,run_name='__main__')\" AutoClaude/tools/hooks/check_ps1_encoding.py",
+            "timeout": 10
+          },
+          {
+            "type": "command",
+            "command": "python -c \"import os,sys,runpy; r=os.environ.get('CLAUDE_PROJECT_DIR') or os.getcwd(); p=os.path.join(r,*sys.argv[1].split('/')); os.path.isfile(p) or sys.exit(0); os.chdir(r); sys.argv=[p]+sys.argv[2:]; runpy.run_path(p,run_name='__main__')\" AutoClaude/tools/hooks/check_sh_eol.py",
             "timeout": 10
           }
         ]

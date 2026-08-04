@@ -196,6 +196,63 @@ def test_resolver_failure_downgrades_with_stderr_warning():
     )
 
 
+@pytest.mark.parametrize(
+    ("stub_body", "label"),
+    [
+        ("import sys; sys.exit(2)\n", "rc=2（腳本缺失／參數被拒）"),
+        ("import sys; sys.exit(126)\n", "rc=126（存在但不可執行／權限）"),
+        ("import sys; sys.exit(127)\n", "rc=127（找不到直譯器）"),
+    ],
+)
+def test_resolver_abnormal_exit_code_fails_loud_not_silent_downgrade(stub_body, label):
+    """R74：resolver **異常**退出（非 rc=1）須 fail-loud，不得降級為只測凍結基線。
+
+    WHY（測意圖，Rule 9）：修復前本行對 resolver 的所有非零退出碼一律抹平，於是
+    「resolver 根本沒跑起來」與「這個 repo 沒有演化版」在閘門眼中完全同義——結果是
+    只測 v0.01 凍結基線、LATEST 軌與其後全部硬閘一次都沒跑，**而且 rc=0 印出成功**。
+    閘門靜默降級是最危險的一類缺陷，因為它回報綠：稽核者拿到的是「通過」。
+    上方 `test_missing_python_fails_loud_not_silent_downgrade` 只覆蓋「PATH 上沒有
+    python」（由檔頭守門攔下），攔不到本組這三種「有 python、但呼叫本身壞了」。
+
+    三個退出碼各跑一次而非只挑一個：分級判準寫成 `-ne 0 && -ne 1` 是一句話，但退化
+    成「只擋某個特定碼」時單一樣本看不出來。
+    """
+    import shutil
+    import tempfile
+
+    with tempfile.TemporaryDirectory() as td:
+        # sandbox 扮演 AISDLC_SDD/ 這一層（同上兩測試的既有構造說明）。
+        sandbox = Path(td) / "AISDLC_SDD"
+        sandbox.mkdir()
+        (sandbox / "scripts").mkdir()
+        shutil.copy2(CI_GATE, sandbox / "scripts" / "ci-gate.sh")
+        (sandbox / "scripts" / "sdd_version.py").write_text(stub_body, encoding="utf-8")
+        guard_dir = Path(td) / "tools" / "lib"
+        guard_dir.mkdir(parents=True)
+        shutil.copy2(_GUARD_SH, guard_dir / "windowsapps_guard.sh")
+        proc = subprocess.run(
+            [_BASH, "-c", "SDD_GATE_DRY_RUN=1 bash scripts/ci-gate.sh"],
+            cwd=str(sandbox),
+            capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=60,
+            env=_env_without_fw_version(),
+        )
+    assert proc.returncode != 0, (
+        f"resolver {label} 應 fail-loud，實得 rc=0——閘門又把「沒跑起來」讀成「無演化版」，"
+        f"只測凍結基線卻回報綠。\nstdout={proc.stdout!r}\nstderr={proc.stderr!r}"
+    )
+    assert "SDD_GATE_VERSIONS" not in proc.stdout, (
+        f"異常退出時不得輸出版本清單（那正是降級後的假綠證據），實得：{proc.stdout!r}"
+    )
+    assert "LATEST 解析器異常退出" in proc.stderr, (
+        f"stderr 須明說是 resolver 異常而非「無演化版」（訊息含糊時讀者會照降軌流程"
+        f"排查，找錯方向），實得：{proc.stderr!r}"
+    )
+    assert "LATEST 解析為空" not in proc.stderr, (
+        "異常退出不得沿用「解析為空」的降軌警示——那句話會把「呼叫壞了」講成"
+        f"「這個 repo 沒有演化版」，實得：{proc.stderr!r}"
+    )
+
+
 def test_override_with_failed_resolver_suppresses_downgrade_warning():
     """R14 一審 SD-R14-REV-1 鎖：SDD_FW_VERSION 覆寫時不印降軌警示（避免「警示說
     僅測基線、實際測覆寫版」的自相矛盾訊息）。"""

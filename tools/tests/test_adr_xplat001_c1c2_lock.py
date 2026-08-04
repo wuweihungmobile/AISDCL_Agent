@@ -277,16 +277,8 @@ _BASELINE_WAIVERS: dict[str, Waiver] = {
         "——判定確實需要 §9 列則補列（並刪本登記）；或在 ADR §4.3.1 之外另立「全版本一致"
         "存在」的分類，使本列不再落入 §4.3）",
     ),
-    "DEF-101-393": Waiver(
-        frozenset({"C1", "C2"}),
-        "R60 前的舊列（2026-07-26）且是**帳本記載完整性補記列**：它把 DEF-101-382 只記"
-        " `.sh` 側的缺口補上 `.ps1` 側，現象欄逐字「套用同一 DEF-101-056/057 既有 wontfix"
-        " 判例」——實質的 §9 列與重新評估條件都掛在 056／057 那兩列上（兩者 C1／C2 皆已滿足），"
-        "本列自己沒有獨立的一組。P3 且明載「不影響任何現行測試/CI 判準」。",
-        "承接輪次：**未指派**（觸發點＝任何輪次下次觸及 DEF-101-382／393 家族時，二擇一"
-        "——把 `.ps1` 側併入 056／057 的 §9 列敘述並於本列補觸發條件；或為 `.ps1` 側補"
-        "獨立 §9 列。兩者任一完成即刪本登記）",
-    ),
+    # R74 刪除一筆：該列已隨本輪歸檔離開主檔 ⇒ 已在本鎖射程外，登記若留著就是在遮蔽一個
+    # 不存在的標的（本鎖自帶的 stale 自檢會判紅，正確處置是刪登記而非放寬判準）。
 }
 
 # 🔴 R60 本輪自己的兩列（`DEF-101-534`／`DEF-101-552`）**刻意不在上表內**——它們是
@@ -2325,6 +2317,55 @@ def sc8_no_dead_letter_waiver_marker(c: Corpus) -> list[str]:
     ]
 
 
+# ---- SC-10：§6 邊界 1 的逐輪覆蓋表必須有當前輪次那一列（本檔第一條**缺席型**判準）------
+# 🔴 R74（本輪 P0 的一半）：§6 邊界 1 的 R70 段落逐字寫著「逐輪補列是收輪必做項（缺列比
+# 欄位寫錯更難發現：缺列不會有任何東西轉紅）」，而該診斷接下來就在 R73 上再度成立——
+# R74 開輪時該表停在 R72。SC-1~SC-9 全是「壞形態不得出現」，對「該出現的沒出現」零覆蓋。
+# 輪號**現查**（帳本「發現情境」欄最大 `R\d+`），寫死就是下一輪的 stale 站點。
+_SC10_ROW_RE = re.compile(r"^\s*\|\s*R(\d+)", re.M)
+
+
+def _coverage_table_rounds(adr2: str) -> set[int]:
+    """§6 邊界 1 逐輪覆蓋表已登記的輪號集合。
+
+    刻意取**整節**而非精準切表：該表的列以 `| R<n>` 開頭，而 §6 其餘散文不會這樣起行
+    （實測對現行 ADR 只抽到覆蓋表的列）。切得太精準的判準會在表格縮排微調時靜默崩塌，
+    而崩塌的方向是「抽到空集合 ⇒ 恆紅」——那還好；反之若寫成 `if rows:` 就會恆綠。
+    """
+    section = awk_range(adr2, r"^## 6\.", r"^## 7\.")
+    return {int(m) for m in _SC10_ROW_RE.findall("\n".join(ln for _, ln in section))}
+
+
+def sc10_coverage_table_has_a_row_for_the_current_round(c: Corpus) -> list[str]:
+    """WHY：那張表的唯一用途是回答「哪一輪在哪個平台、雲端 CI 什麼狀態」。缺當前輪的列，
+    讀者就會改用別的來源反推——`DEF-101-756` 就是這樣得出與開發史相反的結論的。
+    """
+    rounds = _coverage_table_rounds(c.adr2)
+    if not rounds:
+        return ["SC-10：§6 抽不到任何 `| R<n>` 覆蓋表列 — 掃描面已崩塌（表被改名／改格式？）"]
+    current = _current_round_from_ledger(c)
+    if current is None:
+        return []  # 帳本推不出輪次時不猜（無訊號 ≠ 壞訊號），與 ci_liveness 同紀律
+    if current in rounds:
+        return []
+    return [
+        f"SC-10：§6 邊界 1 逐輪覆蓋表缺 R{current} 那一列（現有最大 R{max(rounds)}）。"
+        f"該表自陳「逐輪補列是收輪必做項」，而缺列此前不會讓任何東西轉紅 ⇒ R73 就是這樣"
+        f"漏掉的（連帶漏查雲端 CI，該輪收官 commit 的 windows-compat-ci 為紅）。"
+        f"輪次權威源＝tools/check_defect_log_crossref.py::current_round（帳本「發現情境」欄）"
+    ]
+
+
+def _current_round_from_ledger(c: Corpus) -> int | None:
+    """從語料裡的帳本主檔推當前輪次；權威源是既有函式，本檔不自寫第二份判準。"""
+    import check_defect_log_crossref as CDX  # noqa: PLC0415  # 延後 import：避開 stdio 手術
+
+    for name, body in c.family:
+        if name.endswith(MAIN_LEDGER_NAME):
+            return CDX.current_round(body)
+    return None
+
+
 class Check(NamedTuple):
     """一條常設不變式：`sc` 代號、規格出處、判準本體（回空 list ＝通過）。"""
 
@@ -2343,6 +2384,7 @@ _SECTION_91_CHECKS: tuple[Check, ...] = (
     Check("SC-7", _SPEC_SCAN, sc7_every_used_scan_code_is_defined),
     Check("SC-8", _SPEC_ADR2, sc8_no_dead_letter_waiver_marker),
     Check("SC-9", _SPEC_ADR2, sc9_no_unscoped_zero_real_machine_claim),
+    Check("SC-10", _SPEC_ADR2, sc10_coverage_table_has_a_row_for_the_current_round),
 )
 
 
@@ -2519,7 +2561,19 @@ _SECTION_91_INJECTIONS: tuple[Injection, ...] = (
               lambda c: _append_to_adr2(c, _SC8_INJECT)),
     Injection("SC-9", "規格記載的修復前實況：R69/R70 把「Windows 零真機」寫得橫跨 docs 與 .py",
               lambda c: _append_to_wide(c, _SC9_INJECT)),
+    Injection("SC-10", "規格記載的修復前實況：§6 逐輪覆蓋表停在較早輪次、缺當前輪那一列",
+              lambda c: _drop_current_round_row(c)),
 )
+
+
+def _drop_current_round_row(c: Corpus) -> Corpus:
+    """把當前輪那一列從 §6 覆蓋表刪掉＝R74 開輪時的實況（表停在 R72、缺 R73）。"""
+    current = _current_round_from_ledger(c)
+    assert current is not None, "SC-10 注入需要帳本能推出輪次"
+    kept = [ln for ln in c.adr2.splitlines()
+            if not re.match(rf"^\s*\|\s*R{current}\b", ln)]
+    assert len(kept) < len(c.adr2.splitlines()), f"注入未刪到任何 R{current} 列"
+    return c._replace(adr2="\n".join(kept))
 
 
 class TestSection91InvariantsAreLive(unittest.TestCase):

@@ -300,6 +300,19 @@ def install_dependencies(use_uv: bool, venv_py: Path) -> int:
 
 
 def print_completion_guide() -> None:
+    """印出啟用指引。
+
+    🔴 Windows 分支的閘門入口必須是 `.ps1`，不可寫成 `bash scripts/ci-gate.sh`：
+    Windows 上 `bash` 由 `PATH` 解析到 `C:\\WINDOWS\\system32\\bash.exe`（WSL 佔位
+    或真 WSL），落進的是一個沒有本 repo Windows venv／依賴的 Linux 環境；且反斜線
+    路徑會被吃掉。本檔是新機器 bootstrap 後使用者唯一會照著敲的那幾行，教錯等於
+    每台新 Windows 機器第一次跑閘門就撞牆——與 `DEF-101-778`（治理文件自己教壞掉的
+    載具）同一個病，只是站點不同。
+    `AISDLC_SDD/scripts/ci-gate.ps1` 已內建 `tools/lib/Find-GitBash.ps1`（SSOT，含
+    system32/WSL 逐段排除）→ 偵測到 Git Bash 即薄委派完整雙軌閘門、偵測不到才走
+    自陳降級的 fallback。指向它＝零硬寫磁碟路徑（寫死路徑會被 commit，對 Git 裝在
+    別處的 checkout 一律是錯的），且與 ONBOARDING.md §6 對照表的 Windows 欄一致。
+    """
     if IS_WINDOWS:
         _out(r"""
 ✅ bootstrap 完成。
@@ -312,7 +325,7 @@ def print_completion_guide() -> None:
 啟用後驗證：
     Get-Command python      # 應指向 .venv\Scripts\python.exe
     cd AutoClaude; python -m pytest tests/ -q
-    cd AISDLC_SDD; bash scripts/ci-gate.sh   # 需 Git Bash
+    powershell -ExecutionPolicy Bypass -File AISDLC_SDD\scripts\ci-gate.ps1
 
 git hooks（選用）：安裝根層 dispatcher hooks — 兩子專案閘門同時生效
 （AutoClaude pre-commit/pre-push ＋ AISDLC_SDD pre-push，依 commit/push

@@ -2753,17 +2753,249 @@ class TestR71StaleFingerprintMustNotSwallowTheCoverageDetail(unittest.TestCase):
         self.assertNotIn("presumed stale", out, "全新鮮卻自稱 stale ⇒ 反向假宣稱")
 
 
+# ══════════════════════════════════════════════════════════════════════════════
+# R74：根 CLAUDE.md 的「治理宣稱」↔ 實際機械物 對帳鎖
+# ══════════════════════════════════════════════════════════════════════════════
+# 🔴 缺陷本體（兩筆，同一個形態）：
+#   ① 根 CLAUDE.md 把 `enforce_docs_path.py` 寫成「強制」、`check_lang.py` 寫成「另有」
+#      ——而 `AutoClaude/.claude/settings.json` 註冊的 6 支 hook 只有 1 支橋接到根
+#      `.claude/settings.json`，且 Claude Code 不遞迴子目錄載 hook ⇒ 在 monorepo 根
+#      session（本檔被載入的那種）下，另外 5 支一行都不會跑。**文件宣稱與實際生效不符。**
+#   ② 鐵律三的 8 項觸發清單只有 4 項有掃描器，而 `DEF-101-766` 正落在沒有掃描器的兩格。
+#      散文寫「必須自問」對「當下的模型」零攔阻力（R71 已實證），所以「哪幾項沒人在守」
+#      必須是可查的量測值。
+# 兩筆的共同修法：**把宣稱與機械物綁成同進同退**，任一邊漂移即紅。
+_ROOT_CLAUDE_MD = _REPO_ROOT / "CLAUDE.md"
+_ROOT_SETTINGS = _REPO_ROOT / ".claude" / "settings.json"
+#: 未橋接到根層 ⇒ 宣稱它的那一行必須帶這個字樣，讀者才不會誤以為根 session 也攔。
+_SUBPROJECT_SCOPE_MARK = "僅 AutoClaude 子專案 session"
+#: 鐵律三觸發清單中**沒有掃描器**的項（shrink-only：補了掃描器就從表與此處一起刪）。
+_IRON_LAW3_UNCOVERED: tuple[str, ...] = (
+    "`$env:*` 讀取", "副檔名判斷", "`Get-Command` 解析", "大小寫敏感度",
+)
+
+
+def hook_scripts_named_in(text: str, repo_root: Path) -> dict[str, list[str]]:
+    """{hook 腳本 basename: 提到它的行}。掃描面＝repo 內實存的 hook 腳本，不寫死清單。"""
+    known = {
+        p.name
+        for d in ("\\.claude/hooks", "AutoClaude/tools/hooks")
+        for p in (repo_root / d.replace("\\.", ".")).glob("*.py")
+    }
+    out: dict[str, list[str]] = {}
+    for line in text.splitlines():
+        for name in known:
+            if name in line:
+                out.setdefault(name, []).append(line)
+    return out
+
+
+def hook_claim_problems(text: str, settings_text: str, repo_root: Path) -> list[str]:
+    """根 CLAUDE.md 提到的每支 hook：已註冊、或該行標明子專案射程。否則違規。"""
+    problems: list[str] = []
+    for name, lines in sorted(hook_scripts_named_in(text, repo_root).items()):
+        if name in settings_text:
+            continue
+        unmarked = [ln for ln in lines if _SUBPROJECT_SCOPE_MARK not in ln]
+        if unmarked:
+            problems.append(
+                f"{name} 未註冊於根 .claude/settings.json，但根 CLAUDE.md 有 "
+                f"{len(unmarked)} 行提到它且未標「{_SUBPROJECT_SCOPE_MARK}」⇒ 讀者會以為"
+                f"在根 session 也會攔（實際一行都不會跑）。首例：{unmarked[0][:70]}")
+    return problems
+
+
+class TestR74RootClaudeMdHookClaimsMatchRegistration(unittest.TestCase):
+    """根 CLAUDE.md 不得宣稱一支「其實不會在本 session 生效」的 hook 為強制。"""
+
+    def test_current_claude_md_passes(self) -> None:
+        problems = hook_claim_problems(
+            _ROOT_CLAUDE_MD.read_text(encoding="utf-8-sig"),
+            _ROOT_SETTINGS.read_text(encoding="utf-8-sig"), _REPO_ROOT)
+        self.assertEqual(problems, [], "根 CLAUDE.md hook 宣稱與註冊不符：\n  "
+                                       + "\n  ".join(problems))
+
+    def test_scan_surface_is_non_empty(self) -> None:
+        """自錨：枚舉不到 hook 腳本時，判準對任何文件恆綠。"""
+        named = hook_scripts_named_in(
+            _ROOT_CLAUDE_MD.read_text(encoding="utf-8-sig"), _REPO_ROOT)
+        self.assertIn("enforce_docs_path.py", named, "掃描面抓不到已知站點 ⇒ 鎖已空轉")
+        self.assertIn("block_bash_on_windows.py", named)
+
+    def test_an_unmarked_unregistered_hook_is_red(self) -> None:
+        """注入＝修前實況：宣稱「以 enforce_docs_path.py 強制」而根層沒註冊它。"""
+        problems = hook_claim_problems(
+            "文檔目錄編號制：AutoClaude 以 PreToolUse hook `enforce_docs_path.py` 強制。",
+            _ROOT_SETTINGS.read_text(encoding="utf-8-sig"), _REPO_ROOT)
+        self.assertTrue(any("enforce_docs_path.py" in p for p in problems), problems)
+
+    def test_a_registered_hook_needs_no_marker(self) -> None:
+        """反向：已橋接到根層的 hook 不必加射程註記（否則鎖會逼出誤導性的註記）。"""
+        self.assertEqual(
+            hook_claim_problems("根層已註冊 `block_bash_on_windows.py`，會攔。",
+                                _ROOT_SETTINGS.read_text(encoding="utf-8-sig"),
+                                _REPO_ROOT),
+            [])
+
+
+class TestR74IronLawMechanismAccounting(unittest.TestCase):
+    """鐵律三「哪幾項有掃描器」必須是可查的量測值，且不得宣稱不存在的機械物。"""
+
+    #: 解析基準。根 CLAUDE.md 自己就有〈路徑陷阱〉一節明載：子專案段落的相對路徑是
+    #: **相對於該子專案目錄**（`AutoClaude — 常用指令` 段的 `tools/check_loc_budget.py`
+    #: 就是 `AutoClaude/tools/check_loc_budget.py`）。只拿 repo 根去解會把那些正確引用
+    #: 誤報成不存在——誤報的鎖最後一定被整道關掉，比沒有鎖更糟。
+    _PATH_BASES: tuple[str, ...] = (".", "AutoClaude", "AISDLC_SDD")
+
+    def test_named_mechanism_files_all_exist(self) -> None:
+        """根 CLAUDE.md 不得指向一個不存在的掃描器（假機械物比沒有機械物更糟）。"""
+        text = _ROOT_CLAUDE_MD.read_text(encoding="utf-8-sig")
+        cited = re.findall(r"`((?:tools|AutoClaude|\.claude)[\w./-]+\.py)`", text)
+        self.assertGreaterEqual(len(cited), 8, "引用面枚舉異常少 ⇒ 本鎖可能已空轉")
+        missing = [
+            rel for rel in sorted(set(cited))
+            if not any((_REPO_ROOT / b / rel).is_file() for b in self._PATH_BASES)
+        ]
+        self.assertEqual(missing, [], f"根 CLAUDE.md 指向不存在的檔案：{missing}")
+
+    def test_a_phantom_mechanism_would_be_caught(self) -> None:
+        """鑑別力：三個解析基準都找不到的路徑必須被點名（否則上一支恆綠）。"""
+        self.assertFalse(
+            any((_REPO_ROOT / b / "tools/no_such_scanner_xyz.py").is_file()
+                for b in self._PATH_BASES),
+            "合成路徑撞到真實檔，換一個名字")
+
+    def test_uncovered_trigger_list_is_shrink_only_and_still_documented(self) -> None:
+        """棘輪：無掃描器的觸發項只准變少，且每一項都必須在文件表裡標著「無機械物」。"""
+        self.assertLessEqual(
+            len(_IRON_LAW3_UNCOVERED), 4,
+            "鐵律三未覆蓋項只准往下改：補了掃描器就把該列從 CLAUDE.md 與本常數一起刪")
+        text = _ROOT_CLAUDE_MD.read_text(encoding="utf-8-sig")
+        for item in _IRON_LAW3_UNCOVERED:
+            rows = [ln for ln in text.splitlines()
+                    if ln.startswith("|") and item in ln]
+            self.assertTrue(rows, f"鐵律三對照表缺「{item}」列 ⇒ 覆蓋缺口又變回散文")
+            self.assertTrue(
+                any("無機械物" in r for r in rows),
+                f"「{item}」列未標『無機械物』⇒ 讀者會以為它有人在守（DEF-101-766 的落點）")
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# R74：ONBOARDING §7 表③「雲端 CI 狀態」的機械鎖（本輪 P0 的結構解）
+# ══════════════════════════════════════════════════════════════════════════════
+# 🔴 缺陷本體：§7 表①②量的全是**本機**（六道根層閘門／四棵測試樹／LOC），整節
+# **零欄位**承載雲端結論；而 `tools/lib/ci_liveness.py` 的哨兵只查排程軌（`--event
+# schedule` / `workflow_dispatch`），push 軌完全不在視野內。於是 R73 收輪時本機全綠、
+# `82eee92` 推上去，而**同一個 commit 的 `windows-compat-ci` 在雲端是 failure**
+# ——這件事結構上不可能被任何本機機械物報出來。缺的不是新鮮度，是**平面**。
+_CLOUD_ANCHOR = "cloud-ci-status:"
+_CLOUD_FIELD_RE = re.compile(r"(\w[\w-]*)=([^\s]+)")
+_WORKFLOWS_DIR = _REPO_ROOT / ".github" / "workflows"
+_PUSH_TRIGGER_RE = re.compile(r"^  push:", re.M)
+
+
+def push_triggered_workflows(workflows_dir: Path) -> list[str]:
+    """帶 `push:` 觸發的 workflow 檔名（現查，不寫死清單）。
+
+    掃描面現查而非寫死：寫死的清單在「新增一支 push 軌」那天靜默縮面，
+    而那正是本鎖要防的病（同 `check_gha_action_versions.py` 掃描面邊界的紀律）。
+    """
+    out: list[str] = []
+    for f in sorted(workflows_dir.glob("*.yml")):
+        if _PUSH_TRIGGER_RE.search(f.read_text(encoding="utf-8", errors="replace")):
+            out.append(f.name)
+    return out
+
+
+def cloud_status_problems(onboarding_text: str, workflows_dir: Path) -> list[str]:
+    """§7 表③ 的三條判準；回傳違規說明（空＝通過）。純函式，可注入。"""
+    problems: list[str] = []
+    anchors = [ln for ln in onboarding_text.splitlines() if _CLOUD_ANCHOR in ln]
+    if len(anchors) != 1:
+        return [f"`{_CLOUD_ANCHOR}` 錨在 ONBOARDING.md 命中 {len(anchors)} 次（須恰 1）"
+                "——0 次＝表③ 被刪或改名（雲端結論再度無處顯形），≥2 次＝兩份會漂移的真相"]
+    fields = dict(_CLOUD_FIELD_RE.findall(anchors[0].split(_CLOUD_ANCHOR, 1)[1]))
+    for required in ("checked-at", "head-sha"):
+        if required not in fields:
+            problems.append(f"表③ 錨缺 `{required}=`——少了它就無法判斷這份雲端結論是"
+                            "什麼時候、對哪個 commit 查的")
+    # 判準①：掃描面完整性。帶 push: 觸發的每一支都必須在表③ 出現。
+    for wf in push_triggered_workflows(workflows_dir):
+        if f"`{wf}`" not in onboarding_text:
+            problems.append(
+                f"{wf} 帶 `push:` 觸發但 §7 表③ 無對應列 ⇒ 它在雲端紅掉時本機沒有任何"
+                "東西會顯形（本輪 P0 的形態）。處置：跑表③ 上方那條 gh 指令補一列")
+    # 判準②：因果新鮮度。回填了本機基線卻沒重查雲端 ⇒ 紅。
+    measured = re.findall(r"snapshot-fingerprints-\w+:.*?measured-at=(\d{4}-\d{2}-\d{2})",
+                          onboarding_text)
+    checked = fields.get("checked-at", "")
+    if measured and checked and checked < max(measured):
+        problems.append(
+            f"表③ `checked-at={checked}` 早於表② 最新 `measured-at={max(measured)}` ⇒ "
+            "有人回填了**本機**基線卻沒重查**雲端**——這正是「本機全綠所以是綠的」那個"
+            "誤讀的機制來源。判準刻意是因果的（不是距今 N 天）：動了本機基線就得重查雲端")
+    return problems
+
+
+class TestR74CloudCiStatusIsRecorded(unittest.TestCase):
+    """§7 必須有一處承載雲端 CI 結論，且與本機基線的回填動作因果綁定。"""
+
+    def test_current_onboarding_passes(self) -> None:
+        problems = cloud_status_problems(
+            _ONBOARDING.read_text(encoding="utf-8-sig"), _WORKFLOWS_DIR)
+        self.assertEqual(problems, [], "ONBOARDING §7 表③ 違規：\n  " + "\n  ".join(problems))
+
+    def test_scan_surface_is_live_and_non_empty(self) -> None:
+        """自錨：掃描面枚舉不到東西時，判準①會對任何文件恆綠。"""
+        wfs = push_triggered_workflows(_WORKFLOWS_DIR)
+        self.assertGreaterEqual(len(wfs), 5, f"push 軌枚舉異常少（{wfs}）⇒ 判準①可能空轉")
+        self.assertIn("windows-compat-ci.yml", wfs)
+
+    def test_missing_anchor_is_red(self) -> None:
+        """刪錨＝靜默縮面。修前實況：整節沒有這個錨，也沒有任何東西會紅。"""
+        self.assertTrue(cloud_status_problems("§7 完全沒有雲端欄位", _WORKFLOWS_DIR))
+
+    def test_a_new_push_workflow_that_is_not_recorded_is_red(self) -> None:
+        """注入：新增一支 push 軌而表③ 沒補列 ⇒ 必紅（不靠任何人記得）。"""
+        with tempfile.TemporaryDirectory() as td:
+            d = Path(td)
+            (d / "brand-new-push-ci.yml").write_text(
+                "on:\n  push:\n    branches: [main]\njobs: {}\n",
+                encoding="utf-8", newline="\n")
+            problems = cloud_status_problems(
+                _ONBOARDING.read_text(encoding="utf-8-sig"), d)
+        self.assertTrue(any("brand-new-push-ci.yml" in p for p in problems), problems)
+
+    def test_stale_cloud_check_versus_local_refill_is_red(self) -> None:
+        """注入：本機基線回填到 2026-12-31、雲端只查到 2026-08-04 ⇒ 必紅。"""
+        text = (
+            "<!-- snapshot-fingerprints-win32: measured-at=2026-12-31 -->\n"
+            "<!-- cloud-ci-status: checked-at=2026-08-04 head-sha=deadbeef -->\n"
+            + "".join(f"`{wf}`\n" for wf in push_triggered_workflows(_WORKFLOWS_DIR))
+        )
+        problems = cloud_status_problems(text, _WORKFLOWS_DIR)
+        self.assertTrue(any("早於" in p for p in problems), problems)
+        # 反向對照：同日即通過（否則判準退化成「永遠紅」而被整道關掉）
+        self.assertEqual(
+            cloud_status_problems(text.replace("checked-at=2026-08-04",
+                                               "checked-at=2026-12-31"), _WORKFLOWS_DIR),
+            [])
+
+
 class TestR71SmokeTripwireIsInViewWithTheHonestReading(unittest.TestCase):
-    """D-4：smoke 這條每日證據要進讀者視野，但**不得**假裝本工具讀得到它。
+    """D-4：smoke 這條每日證據要進讀者視野，且不得憑空多出一條假通道。
 
-    評估結論（逐平台，見 `_BO.SMOKE_EVIDENCE` 上方的完整論證）：win32 的
-    `AutoClaude_WindowsSmoke` 確實是獨立於 nightly 的第二條證據，卻**沒有 log 落點**
-    （排程 action 無輸出重導、載體只 `Write-Host`）⇒ 無檔可讀；darwin 的
-    `macos_smoke_local.sh` 則是 `run_local_nightly.sh` 的 stage [1/4]，**根本不是**第二條
-    獨立證據。故不接資料通道、只把這兩件事逐字印出。
+    🔴 **R74 重寫（DEF-101-786 殘留收尾）**：本類別的舊敘述把「win32 smoke 讀不到、
+    故只印說明」寫成現況——而落點自 R71 的 `1e5214b` 起就存在（`Start-Transcript`
+    ＋ 14 天輪替），R73 已查證並訂正敘述，判定邏輯卻沒動。也就是說**這組鎖守的是一個
+    已經不成立的設計取捨**，於是那條每日真機證據又多兩輪留在平台覆蓋判定之外。
 
-    🔴 本類別鎖的意圖：把 smoke 塞進 `NIGHTLY_HEARTBEATS` 會讓 Windows 欄永遠印
-    「本機無 …」，而那句話會被讀成「Windows smoke 沒在跑」——DEF-101-756 換載體復發。
+    現行判準（逐平台不同，因為兩邊的 smoke 不是同一種東西）：
+      · win32  ＝ `SMOKE_HEARTBEATS` 真探針，smoke 那行必須是**量測值**；
+      · darwin ＝ 刻意無探針（它的 smoke 是同一輪 nightly 的 stage [1/4]），只印解讀
+        守則；接一條探針會讓同一件事被量兩次、看起來像兩條獨立證據。
+    兩種誤讀都要擋：「本機無此檔」不得讀成「該平台沒在跑」（DEF-101-756 換載體），
+    「有說明文字」也不得讀成「已納入判定」。
     """
 
     _SMOKE_ACTION = "$smokeAction = New-ScheduledTaskAction"
@@ -2782,17 +3014,50 @@ class TestR71SmokeTripwireIsInViewWithTheHonestReading(unittest.TestCase):
             self.assertNotIn("smoke", rel, f"smoke 被接成心跳檔：{rel}")
 
     def test_windows_wording_blocks_the_not_running_misreading(self) -> None:
-        """🔴 R73 訂正（DEF-101-786）：本 case 原本斷言該段**必須含「無 log 落點」**
-        ——也就是**這條鎖在守一句假話**。R71 已在 `tools/windows_smoke_local.ps1`
-        加上 `Start-Transcript` 落點＋14 天輪替（SA 二審以 `git log -S` 證實與那句
-        「無落點」是**同一個 commit**），故該斷言反過來把訂正擋住了。
-        改為守**現況為真的那組語意**：落點存在、但尚未接成機械證據源、且兩種誤讀都要擋。
+        """守**現況為真的那組語意**：落點存在、已接成探針、兩種誤讀都被明文擋下。
+
+        （R73 版此處曾斷言該段必須含「落點不存在」語意，那使這條鎖反過來擋住訂正；
+        R74 隨探針落地一併改為守可驗證的現況。）
         """
         win = BO.SMOKE_EVIDENCE["win32"]
         self.assertIn("log 落點**存在**", win, "未說明落點已存在 ⇒ 又退回 R71 前的假事實")
-        self.assertIn("尚未", win, "未說明「落點存在 ≠ 已接成證據源」⇒ 讀者會誤以為已納入判定")
         self.assertIn("不得", win, "缺明確禁止句 ⇒ 又一次把「沒記錄」讀成「沒在跑」")
         self.assertIn("Get-ScheduledTask", win, "未給出可自行查證排程存在的指令")
+
+    def test_windows_smoke_is_a_measurement_not_a_hardcoded_signpost(self) -> None:
+        """🔴 R74 本體鎖：win32 的 smoke 那行必須是**解析出來的量測值**。
+
+        修前實況：`daily_evidence()` 的 smoke 那行對任何 repo_root 都回同一段寫死文字
+        ⇒ 就算那台機器的 smoke 連跑都沒跑，輸出也一模一樣（＝零鑑別力）。本鎖以合成
+        transcript 注入：解析得到的彙總行必須出現在輸出裡，且**換一個值就要跟著變**。
+        """
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            rel = BO.SMOKE_HEARTBEATS["win32"]
+            log = root / rel
+            log.parent.mkdir(parents=True, exist_ok=True)
+            log.write_text(
+                "TranscriptStart\n… 中略 …\n===== 彙總：PASS=7 FAIL=1 =====\n",
+                encoding="utf-8", newline="\n")
+            line = BO.smoke_evidence(root, "win32")
+            self.assertIn("===== 彙總：PASS=7 FAIL=1 =====", line, line)
+            log.write_text("TranscriptStart\n===== 彙總：PASS=99 FAIL=0 =====\n",
+                           encoding="utf-8", newline="\n")
+            self.assertIn("PASS=99", BO.smoke_evidence(root, "win32"),
+                          "換了 transcript 內容輸出卻不變 ⇒ 這行不是量測值")
+            log.unlink()
+            missing = BO.smoke_evidence(root, "win32")
+            self.assertIn("本機無", missing)
+            self.assertIn("不得", missing,
+                          "缺檔訊息必須擋住「該平台沒在跑」的誤讀（DEF-101-756 換載體）")
+
+    def test_darwin_has_no_fake_smoke_channel(self) -> None:
+        """darwin 刻意無探針：憑空多一條看似獨立的通道，量的卻是同一輪 nightly。"""
+        self.assertNotIn("darwin", BO.SMOKE_HEARTBEATS)
+        self.assertEqual(sorted(BO.SMOKE_HEARTBEATS), sorted(BO.SMOKE_SUMMARY_SPECS),
+                         "smoke 兩張表必須同鍵，否則會出現有檔名沒解析契約的半條通道")
+        line = BO.smoke_evidence(_REPO_ROOT, "darwin")
+        self.assertIn("stage [1/4]", line, "未說明它是 nightly 子階段 ⇒ 會被當成第二條證據")
 
     def test_the_windows_log_landing_premise_matches_reality(self) -> None:
         """🔴 R73 重寫（DEF-101-786）——**本鎖原本的射程漏掉了真正的機制，導致它

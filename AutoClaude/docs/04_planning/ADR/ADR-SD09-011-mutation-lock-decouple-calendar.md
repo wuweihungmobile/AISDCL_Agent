@@ -44,6 +44,22 @@ SD_09 W1 mutation pilot（TokenGuardPlugin）`should_lock` 需 tail 7 筆紀錄�
 - **nightly 角色轉為監控**（紀律 #6 分軌精神）：監控 kill_rate 漂移 + `compute_consistency_warning` flaky 偵測，**不再充當鎖定計時器**。
 - 效果：源碼演進證據隨開發節奏即時累積，不靠日曆；idle 不空轉計時。
 
+> #### ✅ 2026-08-04（R74）補落地：本節的**觸發側**在此之前只存在於文件
+>
+> improving_101 落地了去重鍵（§2.1）與 tail 語意（§2.3），也在 `run_local_nightly.ps1` 補了
+> 「角色轉為監控」的**註解**——但**觸發邏輯一行沒改**：nightly 每晚照樣跑完整 mutmut
+> （實測 2 分 54 秒 ~ 4 分 05 秒，佔整輪 53%），而按 `source_sha256` 去重使那一輪
+> 在源碼未變時只是覆寫同一筆，對鎖定判準的增益**精確為 0**。也就是本節宣告的
+> 「不再充當鎖定計時器」在機械層未生效：它仍然每晚計時，只是計出來的東西被丟掉。
+>
+> **R74 修法**（`run_local_nightly.ps1::Get-MutationRetestNeeded`）：跑 mutmut 前先向權威
+> `mutation_baseline_lock` 現場提問，**兩個條件同時成立才跳過**——① `should_lock` 已判定鎖定；
+> ② 當前源碼 sha 已在 history 裡量過。任一不成立即照跑；探測不出來也照跑（fail-open 方向＝多驗一次）。
+> ⇒ 反作弊未鬆動：源碼一變動立刻恢復重測，被省掉的只有「同一份源碼、已鎖定、再測一次」這個零資訊量組合。
+> 模組路徑同樣向權威模組取（`_MODULE_PATHS`），ps1 端不持有任何模組路徑或門檻常數。
+> 鎖：`tests/tools/test_run_local_nightly_static.py::test_mutation_stage_skips_only_when_locked_and_sha_already_measured`
+> （受控突變實證：把跳過條件改成只看鎖定 → 當場紅）。
+
 ### 2.3 tail 語意：每源碼版本一筆，tail N = 最近 N 個 unique sha
 改 §2.1 後 history 每 unique sha 一筆，`should_lock` 的 tail N 自然＝「最近 N 個不同源碼版本」，idle 不再產生重複筆稀釋窗口。kill_rate 閘（tail N all ≥ effective threshold）與 unique sha 閘（恆成立）維持。
 - `CONSECUTIVE_RUNS=7`、effective threshold（0.68）、kill_rate 公式**數值全不變**——只改「7 的計量單位」從日曆天變源碼版本。

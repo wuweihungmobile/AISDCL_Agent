@@ -282,10 +282,13 @@ class TestCheckWrapperThinness(unittest.TestCase):
         self.assertEqual(problems, [])
 
     def test_main_exit_code_reflects_result(self) -> None:
+        # 🔴 一律顯式傳 `[]`（R74）：`main()` 不傳引數時讀的是 `sys.argv[1:]`＝**跑測試
+        # 的那條 pytest 命令列**。未知引數守衛落地後那條會被正確地擋成 rc=2，於是本鎖
+        # 原本的 `m.main()` 寫法在測「零引數行為」時其實餵了一整串 pytest 旗標進去。
         with mock.patch.object(m, "check_wrapper_thinness", return_value=[]):
-            self.assertEqual(m.main(), 0)
+            self.assertEqual(m.main([]), 0)
         with mock.patch.object(m, "check_wrapper_thinness", return_value=["x broke"]):
-            self.assertEqual(m.main(), 1)
+            self.assertEqual(m.main([]), 1)
 
 
 class TestKeywordDetectionParallel(unittest.TestCase):
@@ -703,6 +706,133 @@ class TestR67ShebangIsNotAComment(unittest.TestCase):
             )
             checked += 1
         self.assertGreaterEqual(checked, 7, "釘選面內 .sh 支數低於預期，鎖可能已空轉")
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# R74：根層守門工具的「未知引數 fail-loud」行為級鎖（R67-D20 射程自 3 站擴至全部）
+# ══════════════════════════════════════════════════════════════════════════════
+# 🔴 **為何併進本檔而非另立新檔**：`tools/tests/test_adr_xplat001_c1c2_lock.py` 的
+# `_FROZEN_GUARD_FILE_COUNT` 是 shrink-only 棘輪，`DEF-101-561③` 明文裁決「禁止新增
+# 鎖檔、只准合併／刪除」（R73 首版新建獨立檔案當場被該棘輪擋下的實錄見
+# `test_check_hooks_liveness.py` 同款註記）。本檔是「根層守門工具自身契約」的既有家。
+#
+# 🔴 **為何是行為級枚舉而不是逐檔比對原始碼**：R67-D20 的修法只落在三支具名工具上，
+# 於是同一個洞在其餘工具身上活了七輪。實測（本輪唯讀）：`check_wrapper_thinness.py`
+# ／`check_pytest_baseline_sites.py`／`check_gha_action_versions.py`
+# ／`check_script_parity.py` 拿到 `--bogus-flag-xyz` 全部 **rc=0 並印綠燈**。
+# 本鎖改為 **glob 現查 `tools/check_*.py` 全體 ＋ 真的拿假引數跑一遍**：
+#   · 新增一支守門工具而忘了接 `_cli_flags` ⇒ 本鎖當場紅，不必有人記得；
+#   · 「靜默吞掉」是**行為**，故判準也只能是行為——比對原始碼有沒有某個 import
+#     會被任何一種等價寫法繞過（同 `DEF-101-757` 的劃界結案形態）。
+_BOGUS_ARGV = "--bogus-flag-xyz-not-a-real-flag"
+
+#: 本輪**未持有所有權**、因此仍是舊行為的工具：shrink-only 豁免，只准變少。
+#: 逐支寫 WHY 與承接者，不寫「TODO」——無主詞的交棒正是缺陷跨輪蒸發的原因。
+_UNKNOWN_ARGV_WAIVED: dict[str, str] = {
+    "check_ntfs_paths.py": (
+        "R74 PKG-5 檔案所有權界外（本包只持有 wrapper_thinness／script_parity／"
+        "pytest_baseline_sites／gha_action_versions 四支的未知旗標處理段）；"
+        "修法逐字同已修四支＝`_cli_flags.reject_unknown_argv(<prog>, argv, ())`"
+    ),
+    "check_hooks_liveness.py": (
+        "同上，界外；另其對應鎖檔 `test_check_hooks_liveness.py` 亦屬別包，"
+        "修它必須連同鎖一起改才有鑑別力"
+    ),
+}
+
+
+class TestRootGateToolsRejectUnknownFlags(unittest.TestCase):
+    """`tools/check_*.py` 拿到未宣告的引數必須 rc≠0，不得靜默改跑預設路徑。
+
+    測意圖（Rule 9）：`rc=0` 對呼叫端（pre-push／CI／人）的語意是「這道守門通過了」。
+    一支工具在**根本沒理解使用者要它做什麼**的情況下印綠燈，是最壞的一種假綠——
+    使用者以為自己下的旗標生效了，實際上跑的是別的東西（R67-D20 實測：
+    `--check-snapsho` 少一個字母就在確實過期的工作樹上回 rc=0）。
+    """
+
+    _TOOLS_DIR = Path(__file__).resolve().parents[1]
+
+    def _gate_tools(self) -> list[Path]:
+        found = sorted(self._TOOLS_DIR.glob("check_*.py"))
+        self.assertGreaterEqual(
+            len(found), 6, "掃描面枚舉不到預期支數的 check_*.py —— 本鎖可能已空轉")
+        return found
+
+    @staticmethod
+    def _offenders(tools: list[Path], waived: dict[str, str]) -> list[str]:
+        """真的拿假引數跑一遍，回傳仍然 rc=0 的工具（＝靜默吞掉）。
+
+        抽成純函式是為了讓**鑑別力可被合成注入證明**：判準若只跑真實目錄，
+        「現在是綠的」無法區分「守衛有牙」與「守衛根本沒被叫到」。
+        """
+        import subprocess  # noqa: PLC0415  # 僅本鎖需要，不進本檔 import 期
+
+        offenders: list[str] = []
+        for tool in tools:
+            if tool.name in waived:
+                continue
+            proc = subprocess.run(
+                [sys.executable, str(tool), _BOGUS_ARGV],
+                capture_output=True, encoding="utf-8", errors="replace", timeout=180)
+            if proc.returncode == 0:
+                offenders.append(f"{tool.name}（rc=0，靜默吞掉未知引數）")
+        return offenders
+
+    def test_a_synthetic_swallower_is_caught(self) -> None:
+        """鑑別力注入：合成一支「吞掉任何引數並 rc=0」的守門工具 ⇒ 必須被點名。
+
+        修前實況即長這樣（本輪唯讀實測：四支真實工具拿 `--bogus-flag-xyz` 全 rc=0）。
+        合成注入而**不動 tracked 生產碼**：對主樹做突變會與同輪並行的其他包互踩假紅
+        （本 repo 已重演三次）。
+        """
+        import tempfile  # noqa: PLC0415
+
+        with tempfile.TemporaryDirectory() as td:
+            swallower = Path(td) / "check_synthetic_swallower.py"
+            swallower.write_text("import sys\nsys.exit(0)\n", encoding="utf-8",
+                                 newline="\n")
+            self.assertEqual(
+                self._offenders([swallower], {}),
+                ["check_synthetic_swallower.py（rc=0，靜默吞掉未知引數）"],
+            )
+            self.assertEqual(
+                self._offenders([swallower], {swallower.name: "具名豁免"}), [],
+                "具名豁免必須真的讓該支退出判定，否則豁免機制形同虛設",
+            )
+
+    def test_every_gate_tool_rejects_an_unknown_flag(self) -> None:
+        """修前實況：四支全部 rc=0 印綠燈；修後必須 rc≠0。"""
+        offenders = self._offenders(self._gate_tools(), _UNKNOWN_ARGV_WAIVED)
+        self.assertEqual(
+            offenders, [],
+            "下列根層守門工具對未知引數靜默 rc=0 —— 請接 `tools/_cli_flags.py` 的 "
+            "`reject_unknown_argv()`（SSOT），或在 `_UNKNOWN_ARGV_WAIVED` 具名豁免"
+            "（附 WHY ＋ 承接者）：\n  " + "\n  ".join(offenders),
+        )
+
+    def test_waiver_set_is_shrink_only_and_every_entry_still_exists(self) -> None:
+        """豁免只准變少；豁免掉一支已不存在的檔＝棘輪張力靜默消失。"""
+        self.assertLessEqual(
+            len(_UNKNOWN_ARGV_WAIVED), 2,
+            "未知引數豁免集合只准往下改（shrink-only）：要新增一筆，先問「為什麼這支"
+            "不能接 `_cli_flags`」——七輪的教訓是劃界結案會讓缺口活下來",
+        )
+        names = {p.name for p in self._gate_tools()}
+        for waived, why in _UNKNOWN_ARGV_WAIVED.items():
+            self.assertIn(waived, names, f"{waived} 已不在掃描面內，請刪掉這筆豁免")
+            self.assertTrue(why.strip(), f"{waived} 的豁免 WHY 為空 ⇒ 不具豁免力")
+
+    def test_the_helper_itself_has_teeth(self) -> None:
+        """SSOT 本體的鑑別力：合法引數回 None（不干擾），未知引數回 rc=2。"""
+        import _cli_flags  # noqa: PLC0415
+
+        self.assertIsNone(_cli_flags.reject_unknown_argv("t", [], ()))
+        self.assertIsNone(_cli_flags.reject_unknown_argv("t", ["--x"], ("--x",)))
+        self.assertEqual(
+            _cli_flags.reject_unknown_argv("t", ["--xy"], ("--x",)),
+            _cli_flags.UNKNOWN_FLAG_RC,
+            "前綴縮寫不得被「好心地」補全成合法旗標——那正是 --check-snapsho 那個洞",
+        )
 
 
 if __name__ == "__main__":

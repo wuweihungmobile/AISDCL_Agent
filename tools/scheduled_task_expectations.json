@@ -1,0 +1,50 @@
+{
+  "schema_version": 1,
+  "_why": [
+    "線上 schtasks 排程的設定值在此之前**只以機器狀態存在**——repo 裡沒有任何一份檔案",
+    "是它們。後果實測可見：ADR-SD09-012 §8.2 早在 2026-08-03 就列出五項落差",
+    "（ExecutionTimeLimit=PT72H 應為 PT4H ×2、MultipleInstancesPolicy=IgnoreNew 應為",
+    "StopExisting ×2、smoke 的 LogonType=InteractiveToken 應為 S4U），而它連續三輪",
+    "（R71/R72/R73）原封不動存活，**沒有任何東西轉紅**——因為沒有任何檢查器有對照組。",
+    "本檔就是那個對照組（期望值 SSOT）；比對器＝tools/check_scheduled_task_drift.py。",
+    "安裝器 tools/install_windows_nightly.ps1 是套用者，兩者由",
+    "tools/tests/test_scheduled_task_expectations.py 機械釘在一起——同一份知識不得住兩個家。",
+    "🔴 改本檔＝改排程契約：必須同時改安裝器並以提權重跑一次，否則比對器會立刻轉紅",
+    "（那正是它該有的行為：期望與現場不符就是漂移，不論是哪一邊先動）。"
+  ],
+  "tasks": {
+    "AutoClaude_Nightly": {
+      "role": "nightly 七軌深度回歸（AutoClaude/tools/run_local_nightly.ps1）",
+      "expected": {
+        "Settings/StartWhenAvailable": "true",
+        "Settings/WakeToRun": "true",
+        "Settings/DisallowStartIfOnBatteries": "false",
+        "Settings/StopIfGoingOnBatteries": "false",
+        "Settings/ExecutionTimeLimit": "PT4H",
+        "Settings/MultipleInstancesPolicy": "StopExisting",
+        "Principals/Principal/LogonType": "S4U"
+      }
+    },
+    "AutoClaude_WindowsSmoke": {
+      "role": "Windows smoke 執行級 tripwire（tools/windows_smoke_local.ps1；DEF-101-139/517）",
+      "expected": {
+        "Settings/StartWhenAvailable": "true",
+        "Settings/WakeToRun": "true",
+        "Settings/DisallowStartIfOnBatteries": "false",
+        "Settings/StopIfGoingOnBatteries": "false",
+        "Settings/ExecutionTimeLimit": "PT4H",
+        "Settings/MultipleInstancesPolicy": "StopExisting",
+        "Principals/Principal/LogonType": "S4U"
+      }
+    }
+  },
+  "why_each": {
+    "Settings/StartWhenAvailable": "關機錯過觸發時，開機後補跑（DEF-101-002 四項之一）",
+    "Settings/WakeToRun": "睡眠/休眠時喚醒機器準時執行（另需 powercfg RTCWAKE）",
+    "Settings/DisallowStartIfOnBatteries": "筆電吃電池時不擋啟動（/create 預設不利）",
+    "Settings/StopIfGoingOnBatteries": "執行中切到電池不中途砍掉（R71 實機第 4 風險）",
+    "Settings/ExecutionTimeLimit": "預設 PT72H 讓被睡眠凍住 35.6h 的實例仍存活，隔日觸發被吃掉 → 該日觀察期三軌零進帳（2026-08-01 實測事故）。正常整輪 5~8 分鐘，PT4H 已極寬鬆",
+    "Settings/MultipleInstancesPolicy": "IgnoreNew 會讓凍住的實例吃掉後續所有觸發；StopExisting 是 ExecutionTimeLimit 之外的第二道防線",
+    "Principals/Principal/LogonType": "InteractiveToken 在「符合啟動條件時使用者未登入」會整輪不跑（2026-08-02 事件 332 實測 NumberOfMissedRuns=1）；S4U＝以該使用者身分執行但不需登入、不需存密碼"
+  }
+}

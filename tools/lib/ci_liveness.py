@@ -259,6 +259,78 @@ def multi_cron_blind_spot(root: Path, workflow: str) -> str | None:
             f"workflow 檔，讓 run 粒度等於軌粒度）")
 
 
+# ── R74 DEF-101-703 殘留：`continue-on-error: true` 讓 run 層結論**結構上**看不到紅 ──
+#
+# 🔴 這是本模組最嚴重的一種假綠，而且是**活體**（本輪唯讀實查磁碟即可證，零網路）：
+# `_latest_success_run` 的判準是「該 workflow 有沒有 `--status success` 的 run」。
+# 但 `.github/workflows/windows-compat-ci.yml` 的 `windows-nightly-full` 帶
+# **job 層 `continue-on-error: true`**（該檔檔頭逐字寫著「非阻斷」），語意就是
+# 「這個 job 紅了不要影響 run 結論」⇒ 深度回歸整包爛掉，run 仍然是 success，
+# 於是哨兵**照樣判新鮮、照樣不出聲**。三道 R69/R71 偵測（D-2 嘗試軸／D-3 遮蔽／
+# E-1 多 cron）沒有一道看得到它：那三道問的都是「有沒有 run／run 是哪個事件帶來的
+# ／run 結論代不代表這條軌」，而這一筆的病在**run 結論本身就不代表那個 job**。
+#
+# 誠實劃界（與 `multi_cron_blind_spot` 同款，刻意不假裝在量測）：本函式做的是
+# **靜態結構偵測**——宣告「這支檔的 run 層綠燈不構成該 job 健康的證據」，
+# 而不是去問那個 job 這次到底紅不紅（後者要對候選 run 再打一次
+# `gh run view <id> --json jobs`，且必須先取得 run id，成本與 dev_start 的 25 秒
+# 掃描預算不成比例）。**但宣告本身就消滅了假綠**：讀者不會再把 ✅ 讀成
+# 「深度回歸也綠」，而處置指令就寫在訊息裡。
+#
+# 為何**不**把這類 workflow 從活性判準裡剔除：那會讓 DEF-101-703 的死鎖復發
+# （剔除後它永遠「查無成功 run」⇒ 天天喊、被當狼來了）。主判準不動，只加一句自白。
+_JOB_CONTINUE_ON_ERROR_RE = re.compile(r"^    continue-on-error:\s*true\s*$")
+_EVENT_GATED_RE = re.compile(r"github\.event_name\s*==\s*'(?:schedule|workflow_dispatch)'")
+
+
+def non_blocking_scheduled_jobs(path: Path) -> list[str]:
+    """該 workflow 內「只在 schedule／workflow_dispatch 跑」且 job 層非阻斷的 job 名。
+
+    兩個條件都必要：
+      · **非阻斷**（`continue-on-error: true`）⇒ 它紅了 run 仍是 success；
+      · **只在排程／手動觸發**⇒ 它正是本模組宣稱在守的那條軌，而 push 觸發的 job
+        紅了會讓 run 紅、本來就看得見，納入只會製造噪音。
+    """
+    try:
+        lines = path.read_text(encoding="utf-8", errors="replace").splitlines()
+    except OSError:
+        return []
+    out: list[str] = []
+    label, non_blocking, event_gated = "", False, False
+    for ln in [*lines, "  _sentinel_:"]:  # 尾端哨兵：讓最後一個 job 也被結算
+        m = _JOB_ID_RE.match(ln)
+        if m:
+            if label and non_blocking and event_gated:
+                out.append(label)
+            label, non_blocking, event_gated = m.group("jid"), False, False
+            continue
+        if not label:
+            continue
+        nm = _JOB_NAME_RE.match(ln)
+        if nm:
+            label = nm.group("name").strip().strip("\"'")
+            continue
+        if _JOB_CONTINUE_ON_ERROR_RE.match(ln):
+            non_blocking = True
+        elif ln.startswith("    if:") and _EVENT_GATED_RE.search(ln):
+            event_gated = True
+    return out
+
+
+def run_level_fail_open(root: Path, workflow: str) -> str | None:
+    """該 workflow 的 run 層結論是否**結構上**遮蔽得住排程軌的紅；沒有就回 None。"""
+    jobs = non_blocking_scheduled_jobs(root / ".github" / "workflows" / workflow)
+    if not jobs:
+        return None
+    return (f"{workflow}（**run 層 fail-open**：{sorted(jobs)} 為 job 層 "
+            f"`continue-on-error: true` ＋ 只在 schedule／workflow_dispatch 觸發 ⇒ "
+            f"該 job 整包紅掉時 run 結論仍是 success，而本模組的活性判準帶 "
+            f"`--status success` ⇒ **哨兵會把紅讀成綠**。本行不是量測值、是結構宣告："
+            f"要知道那個 job 這次到底紅不紅，看該 workflow 的 `*-nightly-alert` job "
+            f"或 `gh run view <run-id> --json jobs`；**不得**把上方的新鮮判定讀成"
+            f"「深度回歸也綠」）")
+
+
 def _scan_order(periods: dict[str, float], ref: datetime) -> list[tuple[str, float]]:
     """掃描順序：依日期輪轉起點（R71 E-2）。
 
@@ -288,7 +360,8 @@ def stale_schedule_tracks(root: Path, deadline: float,
       ① 陳舊軌（判準與 R68/R69 完全相同，尾巴多接「最近一次嘗試」軸供分辨 a/b/c）；
       ② 新鮮但**新鮮度不是排程軌掙來的**（D-3 遮蔽／D-5 排程觸發後轉紅）；
       ③ 掃描面本身的自白：預算截斷未查了哪幾軌（E-2）、哪支檔的 run 層判定
-         結構上不構成證據（E-1）。**未查 ≠ 健康**，靜默截斷正是哨兵自己的盲區。
+         結構上不構成證據（E-1 多 cron／R74 `continue-on-error` run 層 fail-open）。
+         **未查 ≠ 健康**，靜默截斷正是哨兵自己的盲區。
     """
     ref = now or datetime.now(UTC)
     findings: list[str] = []
@@ -303,6 +376,9 @@ def stale_schedule_tracks(root: Path, deadline: float,
         blind = multi_cron_blind_spot(root, wf)
         if blind:
             findings.append(blind)
+        fail_open = run_level_fail_open(root, wf)
+        if fail_open:
+            findings.append(fail_open)
         ts = _latest_success_run(wf)
         if ts is None:
             continue

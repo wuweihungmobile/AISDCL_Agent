@@ -573,5 +573,122 @@ class TestScanSurfaceCoversUntrackedFiles(unittest.TestCase):
         self.assertFalse(probe_dir.exists(), f"探針目錄未清除：{probe_dir}")
 
 
+# ══════════════════════════════════════════════════════════════════════════════
+# R74：島模型對「**行內語句**複本」結構性全盲 —— 先讓它可量測並上棘輪
+# ══════════════════════════════════════════════════════════════════════════════
+# 🔴 缺陷本體：本檔的比對式一律是 `^\s*def <name>\(`（`_EXTRA_DEF_RES`／
+# `_SDD_LATEST_DEF_RES`／`_HELPER_ISLAND_SSOT`），只認**函式定義**形態。於是同一份
+# 知識若以「行內語句」複製，島模型一個都看不到——而本 repo 最常被複製的正是這種：
+# `tools/_stdio_utf8.py` 已經是 SSOT（15 支 `import _stdio_utf8` 的消費者，現查），
+# 但仍有檔案直接寫 `sys.stdout.reconfigure(encoding="utf-8", ...)` 就地重做一次。
+#
+# 誠實劃界（本輪刻意**不**收斂，只讓它可量測）：
+#   · 有些行內複本是**合法的**——`tools/_stdio_utf8.py` 自己、以及刻意驗證行為的鎖
+#     （`test_subprocess_encoding_hygiene.py`）、以及測試 fixture 的假 CLI。故判準是
+#     **shrink-only 棘輪**而不是「零容忍」：現況凍結，只准變少。
+#   · 診斷階段曾以「43 份行內複本 vs 19 個 SSOT 消費者」描述本筆。**本輪以下方判準
+#     實測不複現**：`sys.std{out,err}.reconfigure(` 形態為 9 處／8 檔，`import
+#     _stdio_utf8` 消費者 15 支（`PYTHONUTF8` 字樣另有 46 處／19 檔，那是環境變數
+#     設定、不是本 SSOT 的行內複本，兩者不可混為一談）。故本棘輪釘的是**本輪實測值**，
+#     不是任何轉述的數字——這正是本檔一貫的「不寫死轉述來的量」紀律。
+_INLINE_STDIO_RE = re.compile(r"(?:sys\.)?std(?:out|err)\s*\.\s*reconfigure\s*\(")
+_STDIO_SSOT_REL = "tools/_stdio_utf8.py"
+_STDIO_SSOT_IMPORT_RE = re.compile(r"^\s*import\s+_stdio_utf8\b", re.M)
+
+#: 行內複本的 shrink-only 棘輪：{檔案: 該檔命中數}。**只准變少**。
+#: 新增一處行內複本（不論在哪一島）即紅，訊息指路 `import _stdio_utf8`。
+_FROZEN_INLINE_STDIO_SITES: dict[str, int] = {
+    "AISDLC_SDD/scripts/agent_template_lint.py": 1,
+    "AutoClaude/tests/fixtures/dummy_cli.py": 2,
+    "AutoClaude/tools/ab_compare_backends.py": 1,
+    "AutoClaude/tools/ac4_progress_check.py": 1,
+    "AutoClaude/tools/migrate_yaml_to_db.py": 1,
+    "AutoClaude/tools/run_bridge_e2e.py": 1,
+    "AutoClaude/tools/three_tier_to_playbook.py": 1,
+    "tools/tests/test_subprocess_encoding_hygiene.py": 1,
+}
+
+
+def _read_scanned(rel: str) -> str:
+    """讀掃描面內的一支 `.py`；讀不到即 fail-loud（比照 `_scan_repo_py_for`：靜默跳過
+    等於掃描面無聲縮小，而縮小掉什麼無從得知）。"""
+    try:
+        return (_REPO_ROOT / rel).read_text(encoding="utf-8", errors="replace")
+    except OSError as exc:
+        raise AssertionError(
+            f"掃描面內的 {rel} 讀不到（{type(exc).__name__}）⇒ 掃描面已縮小，"
+            "本棘輪的凍結值不再有意義") from exc
+
+
+def inline_stdio_sites() -> dict[str, int]:
+    """全掃描面（含 untracked）的行內 stdio-UTF-8 複本；SSOT 自己不算。"""
+    out: dict[str, int] = {}
+    # 排除 SSOT 自己與**本檔**：本檔是判準的**定義側**（樣式字面 ＋ 判準自檢樣本各命中
+    # 一次），把定義側算進使用側會讓判準自我循環——同 `sc7_every_used_scan_code_is_defined`
+    # 刻意排除維度表自己的理由，逐字同型。
+    skip = {_STDIO_SSOT_REL, Path(__file__).resolve().relative_to(_REPO_ROOT).as_posix()}
+    for rel in _repo_py_files():
+        if rel in skip:
+            continue
+        hits = len(_INLINE_STDIO_RE.findall(_read_scanned(rel)))
+        if hits:
+            out[rel] = hits
+    return out
+
+
+def inline_ratchet_problems(frozen: dict[str, int], current: dict[str, int]) -> list[str]:
+    """棘輪判準（純函式，供合成注入自證）：任一檔命中數上升、或出現新檔，即違規。"""
+    problems = [
+        f"{rel}：行內 stdio-UTF-8 複本 {n} 處 > 凍結值 {frozen.get(rel, 0)} 處"
+        for rel, n in sorted(current.items()) if n > frozen.get(rel, 0)
+    ]
+    return problems
+
+
+class TestR74InlineCopyRatchetForStdioSsot(unittest.TestCase):
+    """島模型看不到行內語句複本 ⇒ 先讓數量可量測、且只准往下。"""
+
+    def test_inline_copies_do_not_grow(self) -> None:
+        problems = inline_ratchet_problems(_FROZEN_INLINE_STDIO_SITES, inline_stdio_sites())
+        self.assertEqual(
+            problems, [],
+            "行內 stdio-UTF-8 複本增加了：\n  " + "\n  ".join(problems)
+            + f"\n修法＝改用 SSOT：`import _stdio_utf8`（{_STDIO_SSOT_REL}，import 期即生效）。"
+            "本棘輪是 shrink-only：要新增一處必須先論證為何不能用 SSOT",
+        )
+
+    def test_frozen_map_matches_the_worktree(self) -> None:
+        """自緊：刪掉一處而不下修凍結值 ⇒ 餘裕就是破口（同 `_FROZEN_GUARD_FILE_COUNT`）。"""
+        self.assertEqual(
+            inline_stdio_sites(), _FROZEN_INLINE_STDIO_SITES,
+            "工作樹現況與 `_FROZEN_INLINE_STDIO_SITES` 已漂移——收斂掉一處後請同步下修")
+
+    def test_the_ssot_has_real_consumers(self) -> None:
+        """反空轉：SSOT 若零消費者，本棘輪守的就不是「該用 SSOT 卻沒用」而是別的事。"""
+        consumers = [rel for rel in _repo_py_files()
+                     if rel != _STDIO_SSOT_REL
+                     and _STDIO_SSOT_IMPORT_RE.search(_read_scanned(rel))]
+        self.assertGreaterEqual(len(consumers), 10,
+                                f"`import _stdio_utf8` 消費者異常少（{len(consumers)}）")
+
+    def test_the_ratchet_has_teeth(self) -> None:
+        """合成注入（不碰磁碟）：新檔與既有檔命中數上升兩種形態都必須被點名。"""
+        frozen = {"a.py": 1}
+        self.assertTrue(inline_ratchet_problems(frozen, {"a.py": 2}))
+        self.assertTrue(inline_ratchet_problems(frozen, {"a.py": 1, "b.py": 1}))
+        self.assertEqual(inline_ratchet_problems(frozen, {"a.py": 1}), [])
+        self.assertEqual(inline_ratchet_problems(frozen, {}), [],
+                         "收斂到零不得被判違規——棘輪的方向只有一個")
+
+    def test_the_pattern_recognises_both_written_forms(self) -> None:
+        """判準自檢：兩種常見寫法都要抓到，否則棘輪的凍結值是假的。"""
+        for sample in ('sys.stdout.reconfigure(encoding="utf-8")',
+                       'stderr.reconfigure(encoding="utf-8", errors="replace")'):
+            with self.subTest(sample=sample):
+                self.assertIsNotNone(_INLINE_STDIO_RE.search(sample))
+        self.assertIsNone(_INLINE_STDIO_RE.search("f.reconfigure(encoding='utf-8')"),
+                          "非 stdio 串流不得誤觸（誤報的鎖最後一定被繞過）")
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -339,5 +339,101 @@ class TestUsageEpilogFlagAttributionIsNotStale(unittest.TestCase):
             )
 
 
+class TestWindowsGuidanceNeverTeachesBareBash(unittest.TestCase):
+    """Windows 分支的**每一句**使用者指引都不得教「裸 `bash <腳本>.sh`」。
+
+    WHY（不是風格潔癖，是新機器第一次跑閘門就撞牆）：Windows 上 `bash` 由 `PATH`
+    解析到 `C:\\WINDOWS\\system32\\bash.exe`（WSL 佔位或真 WSL）——落進的是一個沒有
+    本 repo Windows venv／依賴的 Linux 環境，且反斜線路徑會被吃掉。本檔的核心是新機器
+    bootstrap 完成後使用者唯一會照著敲的那幾行，教錯的代價由每一台新 Windows 機器付。
+    這與 `DEF-101-778`（治理文件自己教壞掉的載具）是同一個病，只是站點不同——而那一輪
+    的教訓正是「鎖射程只圈一個站點」，故本鎖**一次圈住全部 Windows 分支訊息函式**，
+    不只圈完成指引那一處。
+
+    刻意用「執行並攔截輸出」而非讀原始碼字串：分支是 `if IS_WINDOWS:` 於呼叫時求值，
+    patch 模組全域即可在任何平台驗證 Windows 分支，且鎖的是使用者真的會看到的位元組。
+    """
+
+    # 「裸 bash」＝前面沒有路徑/識別字元的 `bash`，後接一個 .sh 檔。刻意放過
+    # `/abs/path/bash x.sh` 與 `& (Find-GitBash) -n x.sh`：問題從來不是 bash 本身，
+    # 而是「靠 PATH 去猜哪個 bash」。
+    _BARE_BASH = re.compile(r"(?<![\w.\\/-])bash\s+[\w./\\-]*\.sh\b")
+
+    # Windows 分支帶使用者指引的訊息函式（無參數者直呼；帶參數者給代表值）。
+    _MESSAGE_CALLS = (
+        ("print_completion_guide", ()),
+        ("_reused_venv_error", ()),
+        ("_reused_venv_ok_message", ()),
+        ("_no_interpreter_error", ("3.11",)),
+        ("_venv_shape_mismatch_error", ("py -3.11",)),
+    )
+
+    def _emit(self, name: str, args: tuple, *, is_windows: bool) -> str:
+        buf = io.StringIO()
+        with mock.patch.object(bootstrap_core, "IS_WINDOWS", is_windows), \
+                contextlib.redirect_stdout(buf), contextlib.redirect_stderr(buf):
+            getattr(bootstrap_core, name)(*args)
+        return buf.getvalue()
+
+    def test_the_detector_flags_the_pre_fix_form(self) -> None:
+        """鑑別力自錨：偵測器必須認得修復前那個形狀，否則下面兩條是空轉。
+
+        不引用修復前那行的完整字面值（樹裡不留可被 grep 誤認為現行寫法的句子），
+        只用等價的最小構造證明偵測器有牙。
+        """
+        self.assertRegex("cd X; bash scripts/some-gate.sh", self._BARE_BASH)
+        self.assertRegex("    bash tools/some_installer.sh", self._BARE_BASH)
+        self.assertNotRegex(
+            r"powershell -ExecutionPolicy Bypass -File X\scripts\some-gate.ps1",
+            self._BARE_BASH,
+            ".ps1 入口不得被誤判為裸 bash（否則本鎖會逼人改回錯的那一邊）",
+        )
+        self.assertNotRegex(
+            '. "$(git rev-parse --show-toplevel)/tools/lib/Find-GitBash.ps1"; '
+            "& (Find-GitBash) -n 'x/y.sh'",
+            self._BARE_BASH,
+            "經 SSOT 解析出的 bash 絕對路徑是正解，不得被判違規",
+        )
+
+    def test_no_windows_message_teaches_bare_bash(self) -> None:
+        for name, args in self._MESSAGE_CALLS:
+            with self.subTest(message=name):
+                text = self._emit(name, args, is_windows=True)
+                hit = self._BARE_BASH.search(text)
+                self.assertIsNone(
+                    hit,
+                    f"bootstrap_core.{name}() 的 Windows 分支教使用者跑裸 bash："
+                    f"{hit.group(0) if hit else ''!r}——Windows 的 `bash` 會解析到 "
+                    "system32（WSL），該環境沒有本 repo 的 Windows venv／依賴，且反斜線"
+                    "路徑會被吃掉。改指 `.ps1` 入口（其內部走 tools/lib/Find-GitBash.ps1 "
+                    "這個 SSOT），或以該 SSOT 解析出的 bash 絕對路徑呼叫。"
+                    "🔴 不得改成寫死磁碟路徑（DEF-101-778）。",
+                )
+
+    def test_windows_completion_guide_points_at_the_ps1_gate_entry(self) -> None:
+        """反向鎖：光是「不含裸 bash」不夠——整行刪掉同樣全綠，而使用者就再也不知道
+        AISDLC_SDD 的閘門怎麼跑。故要求 Windows 完成指引指名 `.ps1` 閘門入口，且該
+        入口檔真的存在於磁碟（指向不存在的東西比不指路更糟）。"""
+        text = self._emit("print_completion_guide", (), is_windows=True)
+        self.assertIn(
+            "ci-gate.ps1", text,
+            "Windows 完成指引必須指名 AISDLC_SDD 的 .ps1 閘門入口"
+            "（ONBOARDING.md §6 對照表的 Windows 欄）",
+        )
+        entry = (
+            Path(__file__).resolve().parents[2] / "AISDLC_SDD" / "scripts" / "ci-gate.ps1"
+        )
+        self.assertTrue(entry.is_file(), f"指引指向的閘門入口不存在：{entry}")
+
+    def test_posix_branch_still_uses_bash(self) -> None:
+        """對照組（防過度套用）：mac/Linux 分支**應該**繼續用 `bash <腳本>`——那裡
+        `bash` 就是正確載具。把單平台判準無條件外推是 `DEF-101-766` 同型教訓。"""
+        text = self._emit("print_completion_guide", (), is_windows=False)
+        self.assertRegex(
+            text, self._BARE_BASH,
+            "POSIX 分支不應被連坐改掉；若這裡紅了，代表修復把兩個平台混為一談",
+        )
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -1911,3 +1911,102 @@ def test_format_elapsed_runtime_actually_prints_days(ps1_content: str) -> None:
     assert buggy_fmt == "11:30:41", (
         f"舊格式對照組應重現截斷後的 11:30:41（days 被吃掉），實得 {buggy_fmt!r}"
     )
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# R74 — 本輪四項落地的靜態鎖（mutation 監控角色 / AC4 判準 / 排程漂移 / 達標憑證）
+# ══════════════════════════════════════════════════════════════════════════════
+
+
+def test_mutation_stage_skips_only_when_locked_and_sha_already_measured(
+    ps1_content: str,
+) -> None:
+    """ADR-SD09-011 §2.2：mutation 轉監控角色，但**不得**因此漏測真變動。
+
+    意圖（Rule 9 — 為何這條比「有沒有跳過」重要）：把「已鎖定就不再跑」寫成單一條件，
+    就會在源碼改動後仍然不跑 —— 那是反作弊的真實破口（改了 code 卻不重測 mutation，
+    baseline 從此守著一份不存在的源碼）。所以本鎖釘的是**兩個條件同時成立**才跳過，
+    以及「探測不出來時照跑」這個 fail-open 方向。
+    """
+    assert "function Get-MutationRetestNeeded" in ps1_content, (
+        "必須有 Get-MutationRetestNeeded helper（跳過決策要能被單獨檢視）"
+    )
+    m = re.search(
+        r"if \(\$result\.Locked -and \$result\.ShaAlreadyMeasured[^\)]*\) \{\s*\n"
+        r"\s*\$result\.Needed = \$false",
+        ps1_content,
+    )
+    assert m, (
+        "跳過條件必須是「已鎖定 AND 該 sha 已量過」兩者同時成立——"
+        "只看鎖定就跳過＝源碼改了也不重測，是反作弊破口"
+    )
+    # fail-open 方向：探測失敗必須維持 Needed=$true（預設值即 $true，且不得被改成 $false）
+    assert re.search(r"Needed = \$true;", ps1_content), (
+        "result 物件的 Needed 預設必須是 $true——探測失敗時要照跑，不得靜默省測"
+    )
+    assert "Skip mutation-test（監控角色，非失敗）" in ps1_content, (
+        "跳過時必須印可 grep 的原因，否則『今晚為何沒跑 mutation』會靜默消失"
+    )
+
+
+def test_ac4_gate_reads_green_streak_and_recognises_stale(ps1_content: str) -> None:
+    """ADR-SD09-012 L-6：AC4 閘門值改為 green_streak，且必須認得 status='stale'。
+
+    意圖（Rule 9）：`ready=false` 有兩種成因——「還在累積」與「採集器死了」。
+    印成同一句話會讓人繼續等一個不會到的日子（同 A-2 對 obs 軌「還沒到 vs 量不出來」
+    的處置）。另一半意圖：門檻（green_streak_required）必須向工具現場問，
+    ps1 不得再持有第二份門檻數字。
+    """
+    assert "$parsed.green_streak_required" in ps1_content, (
+        "門檻必須取工具回報的 green_streak_required，不得在 ps1 寫死第二份"
+    )
+    assert "$parsed.green_streak" in ps1_content, "閘門值必須取 green_streak"
+    assert re.search(r"\$result\.Stale\s*=\s*\(\$result\.Status\s+-eq\s+'stale'\)", ps1_content), (
+        "必須認得新的 status='stale'（ADR-SD09-012 L-7）"
+    )
+    assert re.search(r"elseif \(\$ac4Gate\.Stale\)", ps1_content), (
+        "G0 gap 敘述必須把 stale 與『連續綠不足』分開——處置完全不同"
+    )
+    assert "採集停擺" in ps1_content, "stale 的 gap 文案必須明說是採集停擺而非未達標"
+
+
+def test_schedule_settings_drift_turns_nightly_red(ps1_content: str) -> None:
+    """R74 E 項：線上排程設定漂移必須進 finalFailures（真的翻紅）。
+
+    意圖（Rule 9）：ADR-SD09-012 §8.2 的五項排程落差連續三輪存活且沒有任何東西轉紅，
+    因為線上設定沒有任何自動比對者。補上偵測器之後，若它的結果只印 log 不影響 exit，
+    就會複製同一個失明（「有偵測、無訊號」）。故本鎖同時釘住呼叫與 rc 傳導。
+    這一項與 G0 判定的處置刻意相反：G0 不得進 finalFailures（觀察期未滿是預期狀態），
+    排程設定錯誤則是現在就錯、有明確修法、且後果就是讓 nightly 自己漏跑。
+    """
+    assert "check_scheduled_task_drift.py" in ps1_content, "必須呼叫排程漂移偵測器"
+    assert re.search(
+        r"if \(\$schedDriftRc -ne 0\) \{\s*\n\s*\$finalFailures \+=", ps1_content
+    ), "偵測器 rc≠0 必須進 finalFailures，否則就是『有偵測、無訊號』"
+    assert "[SCHED-DRIFT]" in ps1_content, "輸出必須帶可 grep 的標記"
+
+
+def test_g0_readiness_certificate_is_machine_readable_and_always_written(
+    ps1_content: str,
+) -> None:
+    """R74 D 項：四軌判定必須留下機器可讀憑證，且每輪都寫。
+
+    意圖（Rule 9）：在此之前 [G0-READY] 只是一行文字，需要有人在對的那一晚剛好去讀
+    log（而 log 14 天就被輪替刪掉）。使用者問了三輪「這測試測完了嗎」都得不到答案，
+    機械成因就是達標事件沒有留下任何可查詢的狀態。
+    「每輪都寫」也是判準的一部分：只在達標時寫，就無法區分「還沒達標」與「nightly
+    根本沒跑」——後者才是真正危險的狀態（同 AC4 staleness 要防的病）。
+    """
+    assert "$g0CertPath" in ps1_content, "必須有憑證檔路徑變數"
+    assert ".g0_readiness.json" in ps1_content, "憑證必須是 JSON（機器可讀）"
+    assert "generated_at" in ps1_content, "憑證必須帶產出時間，否則無法判斷新鮮度"
+    assert "recommended_action" in ps1_content, "憑證必須帶下一步建議（供降頻／退場判斷）"
+    # 不得只在 ready 分支寫：憑證區塊必須在 [G0-READY]/[G0-NOT-READY] 兩個分支之外
+    cert_idx = ps1_content.index("$g0CertPath = ")
+    notready_idx = ps1_content.index("[G0-NOT-READY]")
+    assert cert_idx > notready_idx, (
+        "憑證必須寫在 G0 兩分支之後（每輪都寫），不得只在達標時寫"
+    )
+    assert "UTF8Encoding($false)" in ps1_content, (
+        "憑證不得帶 BOM——第一個消費者是 python json.load，遇 BOM 會炸"
+    )

@@ -2946,60 +2946,126 @@ class TestCriterion2Narrowing(unittest.TestCase):
             with self.subTest(benign=benign):
                 self.assertIsNone(ADL.active_status_hit(f"fixed@R60：{benign} 已處理"))
 
-    # 判準④ 安全網的具名樣本（散文帶交棒字樣、`--plan` 應判 needs_ack）。
-    # 樣本會隨帳本歸檔逐筆離開主檔，故另設存活下限（見下方測試的 R69 段落）。
+    def test_hyphen_joined_design_terms_are_not_status_words(self):
+        """🔴 R74：`fail-open` 這類**設計術語**不是本列的狀態。
+
+        原始缺陷：邊界 lookaround 只排除 `[A-Za-z0-9]`，連字號通過 ⇒ 狀態欄寫
+        「非預期例外 **fail-open**」（守衛的失敗**方向**）被讀成「本列還活著」，兩筆已結列
+        因此永久釘在主檔（`DEF-101-699`／`768` 實例）。修法是把 token 邊界字元集對齊
+        `gate._FIRST_WORD_RE`（`[A-Za-z][A-Za-z0-9_-]*`），**不是**加遮罩或白名單。
+        """
+        for term in ("fail-open", "fail-closed", "open-source", "always-open",
+                     "no_action_needed", "watch-dog", "deferred-work"):
+            with self.subTest(term=term):
+                self.assertIsNone(
+                    ADL.active_status_hit(f"fixed@R71：非預期例外 **{term}**（設計方向）"),
+                    f"{term} 是複合 token，不是本列的狀態字",
+                )
+
+    def test_bare_status_words_still_hit_after_the_boundary_widening(self):
+        """🔴 鑑別力對照組：邊界放寬不得把**裸**狀態字一起放掉（否則判準② 等於拆掉）。
+
+        沒有這一組，「排除連字號」很容易寫成「凡帶標點就跳過」而靜默失效。
+        """
+        for cell in ("fixed@R60（殘項 open 未處理）", "fixed@R60；routed 半邊仍在",
+                     "fixed@R60（deferred 至下輪）", "fixed@R60 → open",
+                     "fixed@R60（watch）", "fixed@R60（workaround 上線）"):
+            with self.subTest(cell=cell):
+                self.assertIsNotNone(ADL.active_status_hit(cell))
+
+    # 判準④ 安全網的鑑別力鎖 —— 🔴 **R74 重構：驗證對象由「現行主檔的具名 DEF 樣本」改為
+    # 構造輸入**。以下逐字記錄為何這**不是**把鎖放寬，以免下一輪誤讀成退讓：
     #
-    # 🔴 R71 補樣本（**這正是下限機制設計時預期的動作**）：本輪歸檔 `DEF-101-521` 後
-    # 存活樣本掉到 1 筆（`524` 早於 R69 隨 `archive_47` 離開主檔），觸發 fail-loud 下限。
-    # 依測試訊息的指路「從現行主檔挑一筆散文帶交棒字樣、且 `--plan` 判為 needs_ack 的
-    # DEF 補進本表」補入 `652`／`710` ⇒ 存活回到 3 筆。兩筆均為 `--plan` 現跑實查
-    # （2026-08-03）：`cls='fixed'`、`blockers=[]`（判準①②③ 全過）、`handoff_marker='改派'`
-    # 且該字樣確實逐字存在於各自列內——即「本會被判可搬、全靠判準④ 攔下」的樣本形態，
-    # 與原三筆同型。散文實據：`652`＝「…Windows 對等缺口仍在，改派為：未指派（解鎖條件
-    # ＝有 Windows 真機可實跑驗證的一輪）」；`710`＝「…超出本輪授權面），改派為：未指派。
-    # 解鎖條件＝回讀 `DEF-101-432` 全欄…」。
-    # 🔴 補樣本是唯一正解，**不得**改用 skip／下修 `_MIN_LIVE_HANDOFF_SAMPLES` 讓紅燈變綠
-    # ——那兩條路都是把「安全網已無驗證對象」這個真訊號消音，正是 R69 付過學費的形態。
-    _HANDOFF_SAMPLE_IDS = ("DEF-101-521", "DEF-101-524", "DEF-101-554",
-                           "DEF-101-652", "DEF-101-710")
-    _MIN_LIVE_HANDOFF_SAMPLES = 2
+    #   · 舊設計把樣本釘成一組活體 DEF-ID，並對「還有幾筆沒被歸檔」設 fail-loud 下限。
+    #     它防的是「鎖無聲退化到零樣本」——那個顧慮完全正確，處置方向卻與工具的目的衝突：
+    #     `archive_defect_log.py` 存在的意義就是把已結列搬走，而樣本**只能**取自「已結
+    #     ＋ 帶交棒字樣」的列，也就是判準④ 一旦被具名承認就會離開主檔的那一批。於是
+    #     「把該歸檔的都歸檔」與「保住足夠樣本」在結構上不可能同時成立：R74 要做最大化
+    #     歸檔時，存活樣本必然歸零，而鎖自己的訊息同時禁止 skip、禁止下修下限、只准補新
+    #     樣本——可是能補的樣本正好也都在這一次歸檔清單裡。三條出路全被堵住。
+    #   · 真正該被鎖住的性質是**函式的行為**（「散文帶交棒字樣的列必須落在 needs_ack、
+    #     不得落進 movable」），那是 `classify_row()`／`plan()` 的性質，與現行主檔裡剛好
+    #     還剩幾筆無關。改用構造輸入之後，這條鎖**永遠有驗證對象**，不會隨歸檔流失——
+    #     形狀沿用本 repo 既有的「抽成純函式即可用構造輸入證明有牙」慣例
+    #     （`conservation_problems()`／`status_first_word_problems()` 皆如此）。
+    #   · 生產面沒有因此失去覆蓋：`test_live_needs_ack_rows_really_carry_their_marker()`
+    #     對現行主檔逐筆驗「工具報的 marker 逐字存在於該列、且該列不在 movable」，且它在
+    #     needs_ack 為空時**不是靜默通過**——那時它改為斷言「主檔確實不存在任何
+    #     (已結 ∧ 判準①②③⑤⑥ 全過 ∧ 帶交棒字樣) 的列」，兩種狀態下都是真斷言。
+    #
+    # marker 詞彙表：逐項取自 `ADL.HANDOFF_PROSE_RE`，每個 alternative 一個樣本。
+    _HANDOFF_MARKER_SAMPLES = (
+        "R99 候選", "下一輪再評估", "下輪處理", "解鎖條件＝有真機的一輪",
+        "留待後續", "承接者為 X", "改派為：未指派", "deferred", "backlog",
+    )
 
-    def test_handoff_net_is_untouched_by_the_narrowing(self):
-        """🔴 鑑別力保留 (c)：判準④ 掃**整列**、且不套遮罩，真交棒仍會被攔下要求具名承認。
+    def _synthetic_closed_row(self, def_id: str, marker: str) -> str:
+        """組一列「①②③⑤ 全過」的已結列；`marker` 放進**分流去向**欄（不是狀態欄）。
 
-        實測坐實：本次因收窄而通過判準② 的 6 筆中，521／524／554 三筆隨即落在判準④
-        手上（`--plan` 把它們列在「需具名承認」而非「可搬」）。
+        🔴 刻意放在狀態欄**之外**：判準④ 的設計就是掃**整列**，而 `deferred`／`backlog`
+        同時也是判準② 的活躍字樣——放在狀態欄會讓兩道判準同時命中，於是測不出「攔下它的
+        到底是哪一道」。放在分流去向欄則 ② 完全看不到（它只讀狀態欄），命中只能來自 ④。
+        """
+        return (f"| {def_id} | 2026-08-04 | R99 構造輸入 | 現象 | P3 | 去向{marker} | "
+                f"fixed@R99：已完整落地 |")
 
-        🔴 R69：原版對「樣本已被歸檔」的處置是 `self.skipTest(...)`，實測後果是
-        `archive_47` 搬走 DEF-101-524 之後，根層多出**第 16 支 skip、且是唯一未標籤
-        的樣本流失型 skip**（`run_root_unittests.py` 的明細印為
-        `[未標籤] …(def_id='DEF-101-524')`）。silent skip 正是本 repo 反覆付學費的形態
-        （R68「122 支迴歸鎖一支都沒跑」）：安全網樣本一支支被歸檔搬走，這條鎖會**無聲
-        地**縮到零樣本，而輸出上只是多一行 skipped。改為：對「仍在主檔」的樣本照跑，
-        並對存活樣本數設 fail-loud 下限——樣本掉到下限以下即紅，逼人補新樣本而不是
-        讓鎖靜默退化。
+    def test_handoff_net_has_teeth_on_constructed_rows(self):
+        """🔴 鑑別力（構造輸入，永不隨歸檔流失）：每一種交棒字樣都必須被判準④ 攔下。
+
+        雙向驗：帶字樣 ⇒ `handoff_marker` 非 None；同一列去掉字樣 ⇒ None 且判準①②③⑤
+        全過。少了後半，一個「恆回 marker」的壞實作也會通過本測試。
+        """
+        layout = (9, 1, 7)  # (表頭欄數, ID 欄索引, 狀態欄索引)：與主檔表頭同形
+        clean = self._synthetic_closed_row("DEF-999-001", "")
+        base = ADL.classify_row(clean, set(), layout)
+        self.assertEqual(base["blockers"], [], f"對照組本身就被擋住，測試會空過：{base}")
+        self.assertIsNone(base["handoff_marker"], "無交棒字樣的列不得被報成 needs_ack")
+        for tail in self._HANDOFF_MARKER_SAMPLES:
+            with self.subTest(marker=tail):
+                v = ADL.classify_row(
+                    self._synthetic_closed_row("DEF-999-001", f"；{tail}"), set(), layout)
+                self.assertEqual(v["blockers"], [], f"應只被判準④ 攔下：{v['blockers']}")
+                self.assertIsNotNone(
+                    v["handoff_marker"],
+                    f"交棒字樣 {tail!r} 沒被判準④ 認出 ⇒ 它會直接落進可搬清單",
+                )
+
+    def test_handoff_net_routes_to_needs_ack_and_ack_releases_it(self):
+        """🔴 端到端（沙箱注入）：帶交棒字樣的列必須進 `needs_ack`，且**只有** `--ack` 放行。
+
+        這一層驗的是 `plan()` 的分流（`classify_row()` 只給 marker，分流在 `plan()`），
+        並同時證明具名承認**真的**是放行的唯一途徑——否則「需具名承認」只是一句話。
+        """
+        with _ledger_sandbox():
+            _append_to(ADL._LEDGER,
+                       "\n" + self._synthetic_closed_row("DEF-999-002", "；留待下一輪") + "\n")
+            p = ADL.plan()
+            self.assertIn("DEF-999-002", {v["id"] for v in p["needs_ack"]})
+            self.assertNotIn("DEF-999-002", {v["id"] for v in p["movable"]})
+            acked = ADL.plan(frozenset({"DEF-999-002"}))
+            self.assertIn("DEF-999-002", {v["id"] for v in acked["movable"]},
+                          "具名承認後必須可搬 —— 否則判準④ 變成硬擋、帳本永遠搬不動")
+
+    def test_live_needs_ack_rows_really_carry_their_marker(self):
+        """生產面：工具報的 marker 必須逐字在該列內，且該列不得同時落在可搬清單。
+
+        🔴 needs_ack 為空時**不是**靜默通過：那時改為斷言主檔確實不存在任何
+        「已結 ∧ 其他判準全過 ∧ 帶交棒字樣」的列（＝空清單是真的，不是鎖瞎了）。
         """
         p = ADL.plan()
-        needs_ack_ids = {v["id"] for v in p["needs_ack"]}
         movable_ids = {v["id"] for v in p["movable"]}
-        in_main = needs_ack_ids | movable_ids
-        live = [d for d in self._HANDOFF_SAMPLE_IDS if d in in_main]
-        archived = [d for d in self._HANDOFF_SAMPLE_IDS if d not in in_main]
-        self.assertGreaterEqual(
-            len(live), self._MIN_LIVE_HANDOFF_SAMPLES,
-            f"判準④ 安全網的存活樣本只剩 {len(live)} 筆（下限 "
-            f"{self._MIN_LIVE_HANDOFF_SAMPLES}）：仍在主檔={live}／已歸檔={archived}。"
-            "樣本被歸檔搬光後本鎖就沒有驗證對象了——請從現行主檔挑一筆散文帶交棒字樣、"
-            "且 `--plan` 判為 needs_ack 的 DEF 補進 _HANDOFF_SAMPLE_IDS，"
-            "**不要**改用 skip 讓它靜默退化（R69 已為此付過一支未標籤 skip 的學費）",
-        )
-        for def_id in live:
-            with self.subTest(def_id=def_id):
-                self.assertIn(
-                    def_id, needs_ack_ids,
-                    f"{def_id} 散文帶交棒字樣，判準② 收窄後必須由判準④ 接手攔下；"
-                    "它若直接落進可搬清單，代表安全網真的破了",
-                )
+        for v in p["needs_ack"]:
+            with self.subTest(def_id=v["id"]):
+                self.assertIn(v["handoff_marker"], v["line"],
+                              "工具報的 marker 不在該列內 ⇒ 報告與資料脫節")
+                self.assertNotIn(v["id"], movable_ids)
+        if not p["needs_ack"]:
+            leaked = [v["id"] for v in p["movable"]
+                      if ADL.HANDOFF_PROSE_RE.search(v["line"])]
+            self.assertEqual(
+                leaked, [],
+                f"needs_ack 為空，但可搬清單裡有帶交棒字樣的列 {leaked} ⇒ 安全網真的破了",
+            )
 
 
 class TestCriterion8VerifiesClaimsResolveAcrossFamily(unittest.TestCase):

@@ -49,11 +49,16 @@ select = ["E", "F", "I", "UP", "W"]
 # ── 條 2：`tools/tests/` 的 E501 存量債（**有到期日、且只准變小**）
 # 到期日：2026-11-02（自 R69 P3 落地日起三個月）。到期時二擇一：清完並刪掉本條，或在
 # 缺陷帳本具名續期並寫下當時的實際筆數趨勢。**不得**靜默沿用。
+# 🔴 這個日期**真的會到期**（R74／DEF-101-791 訂正）：`TestRootToolsLintPolicy::
+# test_the_e501_waiver_expiry_is_actually_enforced` 拿 `date.today()` 與本行比對，
+# 過期即紅、缺日期即紅、填一個很遠的日期（超過單次續期上限）也紅。此前那道鎖只驗
+# 「有沒有這串字樣」，於是本段宣告的「不得靜默沿用」沒有任何執行者——同 root-infra-ci
+# 的 `WAIVER_UNTIL` 三道保險，本條現在是同一個體例而不只是同一種措辭。
 # 為何不是「立刻全清」：本 repo 的豁免體例要求標記與被豁免的內容**同一行**
 # （`# platform-ok:`／`# encoding-ok:`／`<!-- zsh-glob-ok: -->`），大量測試斷言訊息因此
 # 天生就長；硬拆行會把標記與內容拆散、當場讓那幾道鎖失效。本條不是「不修」，是「修法
 # 本身要一支一支評估、不能一次機械換行」。
 # 為何不會腐化成永久豁免：`tools/tests/test_subprocess_encoding_hygiene.py::
 # TestRootToolsLintPolicy` 以**shrink-only 棘輪**釘住當前筆數（`_E501_DEBT_CEILING`），
-# 只准往下改；同一支類別另驗本檔的到期日字樣還在、且規則集與 AutoClaude 側逐字同步。
+# 只准往下改；同一支類別另驗本檔的到期日尚未逾期、且規則集與 AutoClaude 側逐字同步。
 "tests/*.py" = ["E501"]

@@ -5,7 +5,7 @@
 
 | 欄位 | 內容 |
 |------|------|
-| 狀態 | **ACCEPTED — PM 拍板 2026-08-03**（採用 §3.2 gap-tolerant green_streak）。⚠️ **判準 code 落地狀態＝🔴 待實作**：本 ADR 目前**只有文件，`ac4_progress_check.py` 一行未改**（2026-08-03 複核仍為真：`evaluate()` 的 `n < OBSERVATION_DAYS` 分支還在）。落地清單見 **§7.1**，實作另輪執行 |
+| 狀態 | **ACCEPTED — PM 拍板 2026-08-03；判準 code 已於 2026-08-04（R74）落地**（採用 §3.2 gap-tolerant green_streak ＋ §7.1 L-7 staleness 配套）。落地清單與逐項處置見 **§7.1**；落地當回合實測見 **§7.6** |
 | 🔴 拍板後訂正 | **2026-08-03 Architect 複審實測證偽「反作弊零改動」**：本方案有**第二處放寬＝證據新鮮度（liveness）**，且**與安全有關**。PM 是在不完整的揭露上拍板的。**方向不變**（gap-tolerant 仍採用），但落地必須加做 **§7.1 L-7 獨立 staleness 判準**。詳見 §1.4 訂正框、§4.3、§7.0 |
 | 提案輪 | AutoSDD improving（C 軌 SD_09 W1 觀察期收斂） |
 | 編號 | 由主控集中發號（012）。013 已配給 mutation 軌死鎖案，勿混用 |
@@ -466,11 +466,12 @@ all recall>=0.95: True | circuit_breaker_open_count: Counter({'0': 42})
 | **門檻數值** | **維持 14**（只改計量單位：日曆天 → 綠紀錄筆數） |
 | **反作弊** | **去重機制零改動** —— M-05 的 UTC-date 去重原封不動保留。因每 UTC 日上限 1 筆，「14 筆」數學上仍蘊含「≥ 14 個不同 UTC 日期」，**時間跨度一天沒少**；移除的是「必須相鄰」。<br>🔴 **2026-08-03 訂正：拍板當下所依據的「反作弊零改動／唯一放寬與安全無關」表述不完整。** 實測另有**第二處放寬＝證據新鮮度（liveness）**：`filter_recent` 退出閘門後，`evaluate()` 再無時鐘參照，採集器無聲死掉時會**永遠回報 ready=True**（§1.4 訂正框、§4.3 強度對照表）。**方向不改**（gap-tolerant 仍採用），但**落地必須連 §7.1 L-7 獨立 staleness 判準一起做**，否則等於淨拆一道防線 |
 | **拍板依據實測** | 套用後 `green_streak=42/14`、`recall_sigma=0.0000 ≤ 0.02`、`ready=True`（§3.4 記憶體內模擬，production code 未改；**2026-08-03 重跑值**，拍板當下為 41/14） |
-| 🔴 **落地狀態** | **待實作（NOT LANDED）** —— **`tools/ac4_progress_check.py` 目前一行未改**。本 ADR 現況＝**只有文件**。實作、測試鎖更新與鑑別力驗證**另輪執行**，清單見 §7.1 |
+| 🔴 **落地狀態** | ✅ **LANDED — 2026-08-04（R74）**。`tools/ac4_progress_check.py` L-1~L-5 ＋ L-7 全數落地；`tools/run_local_nightly.ps1` L-6 同輪同步；兩支測試檔更新並附雙向鑑別力取證。落地當回合實測見 §7.6 |
 
-> **為何拍板了卻不當輪落地**：判準變更必須配「注入退化→必紅／還原→必綠」的雙向鑑別力驗證，
-> 且會連動 `run_local_nightly.ps1`（他人持有，本輪射程外）。同輪硬幹會產生**改了判準卻沒有測試鎖證明它還擋得住真紅**的空窗——
-> 那正是本 ADR §2.8／§8.2 一路在批評的「數字好看但沒人驗」。故**拍板與落地分輪**，本節即交接單。
+> **拍板與落地為何分兩輪（史料，已結束）**：拍板輪刻意不動 code，因為判準變更必須配
+> 「注入退化→必紅／還原→必綠」的雙向鑑別力驗證，而 `run_local_nightly.ps1` 當時由他人持有。
+> 落地輪（R74）已把兩件事一起做完：判準改動與測試鎖同輪落地，且鎖的鑑別力以受控突變當回合實證
+> （§7.6）。**本節自此為交接完成紀錄，不再是待辦單。**
 
 ### 7.1 🔴 精確落地清單（交下一輪執行）
 
@@ -590,6 +591,42 @@ recalls = [r["recall_at_10"] for r in records if r.get("recall_at_10") is not No
 4. 零退化（pytest ≥ 基線、lint-imports 8 kept、LOC 0）。
 5. 切換當下印一行 `[MIGRATION]` 取證（記錄切換前後 `green_streak`／`ready`），供日後稽核。
 6. 文件：本 §7.0 落地狀態改為 **LANDED**（附 commit）＋ ADR-SD09-008 §v0.4 補 supersede 註記。
+
+### 7.6 ✅ 落地實測（2026-08-04 R74 當回合真跑，非引述）
+
+**落地前後（同一份 `.ac4_history.jsonl`，43 筆，production code 真改）**：
+
+```
+BEFORE  status=observing  observation_days=9  green_streak=9   ready=false  rc=0
+        reasons=['觀察期未滿（9/14 天）']
+AFTER   status=ready      observation_days=9  green_streak=43  ready=true   rc=0
+        [MIGRATION] gate_basis=green_streak：新口徑 43/14 筆；舊口徑 9/14 rolling-window-days（資訊欄）
+        staleness_days=0/30   total_records=43   recall_sigma=0.0
+```
+
+⇒ **AC4 觀察期即刻達標。** 卡住 W1 的不是資料量（證據多出門檻 3 倍），是拍板結果沒進 code。
+
+**雙向鑑別力取證（scratchpad 副本，真實 jsonl 未觸碰）**：
+
+```
+FRESH          rc=0 status=ready     green_streak=43/14 staleness_days=0   ready=True
+RED-INJECTED   rc=0 status=observing green_streak=0/14  staleness_days=0   ready=False
+               reasons=['連續全綠不足（0/14 筆）']          <- 尾端注入 p95_ms=63
+STALE(-400d)   rc=1 status=stale     green_streak=43/14 staleness_days=400 ready=False
+               reasons=['證據過期（最新一筆距今 400 天 > 30 天），採集可能已停擺']
+```
+
+**STALE 那一列是 L-7 的關鍵證據**：`green_streak` **仍然是 43**（綠證據本身照樣足夠），
+卻被獨立的新鮮度判準擋下——這正是 §1.4 訂正框實測「一年前死資料回 ready=True」的反面。
+若少了 L-7，這一列會回 `ready=True`。
+
+**測試鎖驗牙（受控突變於 production code）**：把 `is_stale` 的判定改成恆假 →
+`tests/tools`（2 case）＋`tests/contract`（1 case）當場紅；還原 → 39 passed / rc=0。
+
+**L-4 決策：採 (a) 語意凍結。** `observation_days` 維持滾動窗計數（實測仍為 9，未變成 43），
+另加新欄 `gate_basis` / `green_streak_required` / `staleness_days` / `staleness_max_days` / `total_records`。
+下游三個消費者零破壞，且不製造第二個 §2.8 假達標。
+**S4 決策：`STALENESS_MAX_DAYS = 30`**（＝§7.5 建議值；取 14 會重蹈日曆綁定）。
 
 ### 7.5 仍待 PM 裁示（本 ADR 未決）
 

@@ -459,6 +459,20 @@ PY
 | 🔴 **R65 實測（Phase 2-A 已達成）** | **5**（`_EXEMPT_PAIRS`=5，`_TLC_TRACK_ENROLLED` 已整條退場） | `run_tlc.{sh,ps1}` 降為委派 `tools.fsm_runtime.tlc_runner` 的薄殼，原客製鎖退場並升級為 hash 釘選；上列指令 2026-07-31 工作樹重跑，詳見 §5 Phase 2-A 列 |
 | **地板（可辯護殘留）** | **4** | `run_local_nightly`（R11 D1 拍板兩側語意刻意不同）／`init_project`（§3.3 #6）／`install_post_commit`／`run_self_evolution`；Phase 2-B（ci-gate，需 signoff）落地後可達 |
 
+🔴 **R74 明說一件此前只能靠人拼出來的事：本階梯的最後一階在結構上不可達。**
+UEP 自 R65 起停在 **5**，連續 8 輪 ΔUEP＝0（逐輪三元組見 §4.3.1）。而 `≤ 4` 這一階的唯一路徑
+是 Phase 2-B（`ci-gate.ps1` fallback 刪除），它明文**需使用者／PM signoff**，回執容器是 §8.1
+——那張表自 R67 建立至今**仍是空表**（item 7／8 自 R60 起零回執）。
+兩件事合起來的後果：**任何以「UEP 是否下降」為唯一通過判準的掃描維度，其通過條件不在工程側**
+——不是沒人做，是做不到（唯一那一步卡在一份不存在的回執）。`CrossPlatform_Scan_Dimensions.md`
+的 Scan-H 正是這種維度，故該處已於 R74 改寫（見該檔 Scan-H 段）。
+
+**可達的替代判準（不需 signoff、本輪即採用）**：把 Scan-H 的通過條件由「ΔUEP < 0」改為
+**「三元組（UEP／AC／GLC）逐輪登記完整 ＋ 反位移未發生（ΔAC ≤ 0）＋ 護欄層規模趨勢有量測」**。
+理由：UEP 的地板 4 是 §4.3／§3.3 明文論證過的**可辯護殘留**，把「已抵達可辯護地板」判成
+「維度未通過」會逼出兩種壞行為——把可辯護的列硬刪（本節開頭已警告過「UEP 下降只是把列刪掉」），
+或整條維度被當噪音關掉。**要重開 `≤ 4` 這一階，先取得 §8.1 的回執，不是先改工程。**
+
 **對偶判準（必須同時上升，否則 UEP 下降只是把列刪掉）**：
 
 | 指標 | 基線（實測） | R61 目標 | 🔴 R61 實測（已達成） |
@@ -993,6 +1007,16 @@ python -m pytest tools/tests/test_dev_start.py -k CrossSiteBehavioralEquivalence
    | R71 | **Windows 11 真機**（PowerShell 5.1／繁中系統 console codepage **950**；收輪 commit `1e5214b`） | 收輪當下未逐筆核對 ⇒ **本輪漏做**：該收官 commit 使 `macos-compat-ci` 與 `root-infra-ci` **由綠轉紅**（前一 commit `fd860ab` 兩支皆 `success`），直到 R72 開輪核對才發現並修復（`DEF-101-771`）。本格即「收輪不查雲端 CI」的代價實例 | launchd／`plutil`／`launchctl`／BSD `stat -f`／bash 3.2／zsh／`macos_smoke_local.sh` 的實際執行行為；**pwsh 7**（本機未安裝，`DEF-101-769`；PS 5.1 上 `$IsWindows` 恆 `$null`） |
    | R72 | **Windows 11 真機**（PowerShell 5.1／繁中系統 console codepage **950**）。⚠️ **本列為進行中輪次，收輪時必須複驗本列**（本表補列本身即本輪處置項之一：R71 漏登、而 R70 才剛把「逐輪補列是收輪必做項」寫進上方段落 ⇒ 下一輪即失守） | 一律現查（`gh run list`）；本輪**開輪第一動**即核對雲端 CI，據此查出並修復 R71 收官造成的兩支紅（`DEF-101-771`）。另以 `Start-ScheduledTask` 隨選觸發 `AutoClaude_WindowsSmoke`，`LastTaskResult=0`、log 逐字 `codepage=950`／`PASS=12 FAIL=0`（`DEF-101-774`）＝Windows 側**排程環境**首次取得真機證據 | 同 R71（launchd 家族／bash 3.2／zsh／`macos_smoke_local.sh` 的實際執行行為）；**pwsh 7 仍未安裝**（`DEF-101-769` 本輪複驗維持 open，(a)(b) 兩筆補驗做不到） |
 
+   | R73 | **Windows 11 真機**（收輪 commit `82eee92`）。**pwsh 7.6.4 首次進場**：工具側跑 7.6.4、Task Scheduler 側仍是 PS 5.1 ⇒ 同一份 `.ps1` 在兩個引擎下被執行，全庫 137 支 `.ps1` 在 5.1 下 ERR=29（全因缺 BOM 被 big5 誤讀） | **收輪當下未查 ⇒ 本輪漏做（與 R71 同一形態復發）**：R74 開輪唯讀實查 `gh run list --workflow windows-compat-ci.yml --event push --limit 1`，該收輪 commit `82eee92` 的 `windows-compat-ci` 為 **`failure`**，而同 commit 的 `macos-compat-ci`／`root-infra-ci`／`autoclaude-ci` 三支皆 `success`、六道本機閘門亦全綠。R70 已把「逐輪補列是收輪必做項」寫進上方段落、R71 已付過一次同樣的代價，仍第三次失守 ⇒ R74 起本項改由機械物承接（`ONBOARDING.md` §7 表③ ＋ §9.1 SC-10） | launchd 家族／bash 3.2／zsh／`macos_smoke_local.sh` 的實際執行行為 |
+   | R74 | **Windows 11 真機**（PowerShell 工具側；⚠️ **本列為進行中輪次，收輪時必須複驗本列**——比照 R72 的作法） | 一律現查（`gh run list`）；**開輪即查出 R73 收輪 commit 的 `windows-compat-ci` 為紅**（見上一列），該筆即本輪 P0 之一，處置＝把雲端結論接進 `ONBOARDING.md` §7 表③ 並讓「沒記錄」會轉紅 | 同 R73（launchd 家族／bash 3.2／zsh／`macos_smoke_local.sh`）；**pwsh 7 已於 R73 進場**故該面不再列為未覆蓋，但**排程環境仍是 5.1** ⇒ 兩引擎差異屬新增的常設覆蓋缺口 |
+
+   🔴 **R74：「缺列不會有任何東西轉紅」已改為會轉紅（§9.1 SC-10）。** 上方 R70 段落逐字寫著
+   「本表逐輪補列是收輪必做項（缺列比欄位寫錯更難發現：缺列不會有任何東西轉紅）」——那句自我
+   診斷是對的，而它接下來就連續在 R73 上再度成立（本表在 R74 開輪時停在 R72）。SC-1~SC-9 沒有
+   任何一條在驗這件事。SC-10 的判準：**本表必須有一列對應 `current_round()`**（權威源＝
+   `tools/check_defect_log_crossref.py::current_round`，取帳本「發現情境」欄最大 `R\d+`，
+   刻意不寫死輪號）。
+
    🔴 **R67r2 新增（ARCH-R67-04）：雲端 CI 可用性與平台一樣是輪次屬性，不是本 ADR 的常數。**
    R67 曾在 §8 item 9 把「雲端停擺」當成穩定前提來重寫論證（原文與訂正見該列），而該前提在
    文字寫下後 **24 小時內就翻轉**——月份翻轉時額度重置，排程 workflow 當日全數恢復。
@@ -1353,6 +1377,21 @@ grep -nE '<!--[[:space:]]*[a-z][a-z-]*-ok:' "$ADR2" "$ADR1" | grep -vE 'zsh-glob
 #             下列 grep 只是**粗篩**，命中數會多於真判準，不得拿它的輸出當結論。
 grep -rnE '(零|無|沒有|未曾|從未|不曾)[A-Za-z0-9 有側過的]{0,12}(真機|實機)' \
   docs/ tools/ AutoClaude/autoclaude/ AutoClaude/tests/ | grep -E 'Windows|macOS|Darwin|PowerShell'
+
+# SC-10 標的：**§6 邊界 1 的逐輪覆蓋表**（本檔）
+#       判準：該表必須有一列對應**當前輪次**。當前輪次的權威源＝
+#             `tools/check_defect_log_crossref.py::current_round`（取缺陷帳本「發現情境」欄
+#             的最大 `R\d+`），**刻意不寫死輪號**——寫死的下一輪就過期，正是本檔在治的病。
+#       預期：rc=1、零輸出
+#       🔴 R74 新增：§6 邊界 1 的 R70 段落**逐字寫著**「本表逐輪補列是收輪必做項（缺列比欄位
+#             寫錯更難發現：缺列不會有任何東西轉紅）」——那句自我診斷是對的，而它接下來就在
+#             R73 上再度成立（本表在 R74 開輪時停在 R72，缺 R73 列）。SC-1~SC-9 沒有任何一條
+#             在驗這件事：它們全是「壞形態不得出現」，而這一筆的病是「該出現的沒出現」。
+#             ⇒ 本條是本檔第一條**缺席型**判準。連帶後果：R73 收輪未查雲端 CI，而該輪收官
+#             commit 的 `windows-compat-ci` 為紅（見該列與 `ONBOARDING.md` §7 表③）。
+#       ⚠️ 判準本體住 Python（`sc10_coverage_table_has_a_row_for_the_current_round`）：
+#             需 import 帳本輪次權威源再比對，grep 表達不了。下列 grep 只能印出現有列供人對照。
+grep -nE '^   \| R[0-9]+' "$ADR2" | tail -3
 ```
 
 🔴 **鑑別力是實測出來的，不是設計出來的**：R67 動工前對**修復前**的本檔逐條跑過，

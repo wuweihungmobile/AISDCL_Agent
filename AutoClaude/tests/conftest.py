@@ -185,6 +185,20 @@ def pytest_collection_modifyitems(config, items):  # noqa: ARG001
 # （即使 `-q` 也不會被吞掉——terminal summary 一律印出，不受 verbosity 影響）。
 WINDOWS_NATIVE_SKIP_TAG = "[WINDOWS-NATIVE-ONLY]"
 
+# R74（PKG-4 E）：**反方向**的對稱標籤。SSOT＝根層 `tools/lib/windows_skip_tags.py`
+# （`POSIX_NATIVE_SKIP_TAG`／`MAC_NATIVE_SKIP_TAG`），此處比照上一行 `WINDOWS_NATIVE_
+# SKIP_TAG` 的既有慣例各持一份字面值——兩套測試框架 pytest root 不同、本檔刻意不 import
+# 根層模組（本檔頭已載明「兩套測試框架不強求共用同一檔案，但邏輯必須一致」）。
+# 形態不一致由 `tools/tests/test_platform_neutral_paths.py::TestSkipDirectionAndTagSymmetry`
+# 那一組的靜態判準看著：它掃 `AutoClaude/tests` 整棵樹，reason 沒帶標籤的站點會被棘輪擋。
+#
+# WHY 這一段非加不可：本檔原本只把 `[WINDOWS-NATIVE-ONLY]` 那一批另印成醒目清單，
+# 於是在 **Windows 上跑** 時（此機器每天在跑的那一側）真正的覆蓋損失一筆都不會被凸顯
+# ——那一批全落在反方向，而反方向此前沒有標籤、沒有摘要、沒有計數。
+POSIX_NATIVE_SKIP_TAG = "[POSIX-NATIVE-ONLY]"
+MAC_NATIVE_SKIP_TAG = "[MAC-NATIVE-ONLY]"
+NON_WINDOWS_SKIP_TAGS = (POSIX_NATIVE_SKIP_TAG, MAC_NATIVE_SKIP_TAG)
+
 
 def _skip_reason(report) -> str | None:
     """從一則 skipped `TestReport` 取出 reason 文字。
@@ -215,6 +229,17 @@ def windows_native_skips(terminalreporter) -> list[str]:
     return tagged
 
 
+def non_windows_native_skips(terminalreporter) -> list[str]:
+    """純函式（無 I/O 副作用，與印出分離，比照 `windows_native_skips`）：篩出帶
+    `[POSIX-NATIVE-ONLY]`／`[MAC-NATIVE-ONLY]` 的 skip，回傳 nodeid 清單。"""
+    tagged: list[str] = []
+    for report in terminalreporter.stats.get("skipped", []):
+        reason = _skip_reason(report)
+        if reason and any(tag in reason for tag in NON_WINDOWS_SKIP_TAGS):
+            tagged.append(report.nodeid)
+    return tagged
+
+
 def pytest_terminal_summary(terminalreporter, exitstatus, config):  # noqa: ARG001
     """在一般 `skipped=N` 摘要之外，另印出「僅原生 Windows 上才具驗證價值」的
     skip 清單（R44，DEF-101-348 方向①補完；對等
@@ -225,12 +250,21 @@ def pytest_terminal_summary(terminalreporter, exitstatus, config):  # noqa: ARG0
     （`write_sep`）換取同等「不會被淹沒在 -q 摘要裡」的醒目效果更安全。
     """
     tagged_ids = windows_native_skips(terminalreporter)
-    if not tagged_ids:
-        return
-    terminalreporter.write_sep("=", "WINDOWS-NATIVE-ONLY SKIPS (未在原生 Windows 環境驗證)")
-    terminalreporter.write_line(
-        f"{len(tagged_ids)} 個 Windows 專屬測試本次「未在原生 Windows 環境驗證」"
-        f"（非一般 skip，見 DEF-101-348/R44）："
-    )
-    for node_id in tagged_ids:
-        terminalreporter.write_line(f"  - {node_id}")
+    if tagged_ids:
+        terminalreporter.write_sep("=", "WINDOWS-NATIVE-ONLY SKIPS (未在原生 Windows 環境驗證)")
+        terminalreporter.write_line(
+            f"{len(tagged_ids)} 個 Windows 專屬測試本次「未在原生 Windows 環境驗證」"
+            f"（非一般 skip，見 DEF-101-348/R44）："
+        )
+        for node_id in tagged_ids:
+            terminalreporter.write_line(f"  - {node_id}")
+    posix_ids = non_windows_native_skips(terminalreporter)
+    if posix_ids:
+        terminalreporter.write_sep(
+            "=", "POSIX/MAC-NATIVE-ONLY SKIPS (本次跑在 Windows 上失去的覆蓋)")
+        terminalreporter.write_line(
+            f"{len(posix_ids)} 個非 Windows 專屬測試本次「因為跑在 Windows 上而沒跑」"
+            f"（R74／PKG-4 E：反方向的覆蓋損失此前無任何標籤／摘要／計數）："
+        )
+        for node_id in posix_ids:
+            terminalreporter.write_line(f"  - {node_id}")
