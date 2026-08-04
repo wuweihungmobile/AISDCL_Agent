@@ -3069,5 +3069,209 @@ class TestSc6PatternIsNotEnumerationBound(unittest.TestCase):
         self.assertIn(f"共{token}條", _sc6_inject(corpus))
 
 
+# ================================================ Scan-H 三元組（UEP／AC／GLC）的機械承接者
+# 🔴 R75（本輪 BLOCKING 的落地物）：`CrossPlatform_Scan_Dimensions.md` Scan-H 的通過判準在
+# R74 被改寫成「三元組**逐輪登記**完整 ＋ 反位移未發生 ＋ 護欄層規模趨勢有量測」，而「逐輪
+# 登記」的承接者是**人**——每輪收尾把三個數字手抄進 `ADR-XPLAT-002` §4.3.1 的表。實況：該表
+# 自 R69 之後零新增列，其後連續數輪零登記 ⇒ **新判準在寫下的當輪即不成立**。同一輪對孿生案例
+# （§6 邊界 1 覆蓋表缺列）正確地上了 SC-10，卻把這一半留成散文交棒 ⇒ 同一個「缺席型漏做不會
+# 轉紅」的病治了一邊，而留下的那邊剛好就是新判準本身。
+#
+# 🔴 為何**不**仿 SC-10 再加一條「當前輪沒有登記列即紅」的缺席型判準（架構決定，ADR §4.3.1
+# R75 裁決；本段是那道裁決的機械面）：那會讓一道鎖去**強制製造手抄常數**。§9.1 邊界 (d-2)
+# 逐字記載 §4.3／§4.3.1 的量測數字沒有機械承接者，而 ARCH-R67R2-01 在 §4.3.1 抓到的正是一個
+# 「量測 → 寫進文件 → 同輪後續波次讓它失真」的常數，當時的處置是**移除常數、改指現查指令**；
+# 逼人逐輪手抄＝把那次處置反向執行。且現存兩組配對量測的段首都自陳「量測面髒 ⇒ 不得作為新
+# 基線」、GLC 行數欄從一開始就只寫「見上列指令」⇒ 這個儀式在最順利的情況下，產出的也是自陳
+# 不可用的資料。⇒ 判準改為「三元組**由機械物一次取齊且不退化**」，由本段承接。
+class Triplet(NamedTuple):
+    """Scan-H 三元組的現查值（同一個工作樹、同一次呼叫取齊——跨時點取值本身即無效）。"""
+
+    uep: int
+    ac: int
+    glc_files: int
+    glc_lines: int
+
+
+def live_triplet() -> Triplet:
+    """三元組一次取齊。
+
+    UEP／AC 一律走生產碼 `check_script_parity` 的**同一份計算**（`_EXEMPT_PAIRS` 與
+    `ac_registries()`），本檔不重寫公式：§4.2 的 AC 早在 R67-H34 就從寫死算式改為對具名清單
+    動態求值，照抄算式等於把那次修復退回去，並多開一個會漂移的站點。
+    GLC 用的 glob 逐字等於 ADR §4.3／§4.3.1 現查指令裡那一個（`tools/tests/*.py`，非遞迴），
+    刻意**不**重用 `guard_files_in_worktree()`——後者遞迴且只數 `test_*.py`（護欄層檔數棘輪的
+    量測面），兩個量不同名也不同義，混用會讓 ADR 的指令與本檔的數字對不起來。
+    """
+    import check_script_parity as P  # noqa: PLC0415  # 延後 import：避開 import 期副作用
+
+    files = sorted((_REPO / _GUARD_DIR_REL).glob("*.py"))
+    return Triplet(
+        uep=len(P._EXEMPT_PAIRS),
+        ac=sum(len(reg) for reg in P.ac_registries().values()),
+        glc_files=len(files),
+        glc_lines=sum(
+            len(f.read_text(encoding="utf-8", errors="replace").splitlines()) for f in files
+        ),
+    )
+
+
+# 🔴 凍結對＝R75 落地當回合的現查值，**不做任何推算**（同 `_FROZEN_GUARD_FILE_COUNT` 的
+# 「填實測值」紀律：R57 三度用算式推 `MIN_TESTS`，三度當場與實況不符）。
+# 這兩個常數是本檔對該量的**唯一宣告**、不是散文複本；與現況的一致性由
+# `test_the_frozen_pair_matches_the_live_values` 強制（多退少補都紅），所以「凍結值停在舊
+# 高點、餘裕變成破口」在本檔結構上留不住（同 SA-R67-08 對可被自由調高的假棘輪的裁決）。
+_FROZEN_SCAN_H_UEP = 5
+_FROZEN_SCAN_H_AC = 48
+
+
+def synthetic_at_par() -> Triplet:
+    """紅綠自證用的**合成**基底：恰好等於凍結對、GLC 量測面非空 ⇒ 自身零違規。
+
+    🔴 刻意不用現查值當基底（本段落地時第一版就是那樣寫的，注入實測當場暴露問題）：一旦
+    工作樹真的退化，那幾支「注入後必紅」與「對照組必綠」會**跟著一起紅**——它們的基底被
+    污染了。後果不是漏抓而是**紅燈失去指向性**：一筆真實的 UEP 回歸會同時點亮數支測試，
+    讀者無從判斷哪一支在講真實違規、哪一支只是基底被帶壞。本檔對「零串音」的要求
+    （見 `test_only_the_matching_check_reds`）在這裡是同一條紀律。
+    GLC 兩欄只要非零即可——它們在本函式的用途是「量測面沒崩塌」的哨兵，不是量測值。
+    """
+    return Triplet(uep=_FROZEN_SCAN_H_UEP, ac=_FROZEN_SCAN_H_AC, glc_files=1, glc_lines=1)
+
+
+def scan_h_problems(frozen_uep: int, frozen_ac: int, current: Triplet) -> list[str]:
+    """Scan-H 判準的違規清單（空＝通過）。三款逐字對應 ADR §4.2 判定規則與 §4.3 的報表定位。
+
+    (1) **UEP 不得上升**：UEP 量的是「零機械守門的雙平台等價宣稱」數，上升＝豁免列長回來。
+        刻意不要求「必須下降」——§4.1 的地板是可辯護殘留，要求下降會讓本維度依定義不可能
+        通過，那正是 R74 認定舊判準不可達的理由。
+    (2) **AC 上升時必須同時有 UEP 下降**（§4.2 判定規則 2 的逐字機械化）。只擋「UEP 未降而
+        AC 上升」，**不擋**規則 2 明文允許的「類別升級帶動 AC 上升」——把後者也判紅就是把
+        「不計為收斂成果」超譯成「禁止」（同 `guard_count_problems` 不把改名判紅的理由）。
+    (3) **GLC 量測面不得崩塌**：GLC 是報表、不設上限（§4.3 已用兩組實測否決兩種上限設計），
+        但「算不出來」必須 fail-loud——glob 對錯路徑回空清單，在原語意下等同「零行」＝假綠。
+    """
+    problems: list[str] = []
+    if current.uep > frozen_uep:
+        problems.append(
+            f"UEP 由 {frozen_uep} 上升為 {current.uep} —— ADR-XPLAT-002 §4.1 的 UEP 只准往下，"
+            "上升代表又多了一份沒有任何機械守門的雙平台等價宣稱。"
+            "現查：python tools/check_script_parity.py --print-collapse"
+        )
+    if current.ac > frozen_ac and current.uep >= frozen_uep:
+        problems.append(
+            f"AC 由 {frozen_ac} 上升為 {current.ac}，而 UEP 未下降（仍為 {current.uep}）——"
+            "§4.2 判定規則 2 判定為「換個地方複雜」：每一筆 AC 上升必須在同一個 commit 內"
+            "具名對應一筆 UEP 下降。合法出口＝同 commit 讓 UEP 降下來，並同步下修本檔凍結對。"
+        )
+    if current.glc_files <= 0:
+        problems.append(
+            f"GLC 量測面抽不到任何 {_GUARD_DIR_REL}/*.py —— 掃描面崩塌（目錄改名／glob 寫壞？）。"
+            "GLC 不設上限，但算不出來一律紅：空清單在原語意下等同「零行」＝假綠。"
+        )
+    return problems
+
+
+class TestScanHTripletIsTheLiveCriterion(unittest.TestCase):
+    """Scan-H 通過判準的可執行本體（R75 起取代 §4.3.1 的逐輪手抄登記）。
+
+    WHY：判準若只是散文，缺席型的漏做不會讓任何東西轉紅——那正是本判準上一版在寫下的當輪
+    就已不成立的機制。本類把「三元組一次取齊 ＋ 不退化」接上閘門的 rc，並在 `setUpClass`
+    印出單行報表：§4.3.1 建立時要的「三個數字同時出現」自此由**每次跑閘門**承接，而不是
+    由「某人每輪記得抄」承接。
+    """
+
+    live: Triplet
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        cls.live = live_triplet()
+        # 報表行刻意全 ASCII：本檔的消費者含 Windows 排程環境（console codepage 950），
+        # 一行報表不該成為編碼事故的來源。
+        print(
+            f"[Scan-H triplet] UEP={cls.live.uep} AC={cls.live.ac} "
+            f"GLC_FILES={cls.live.glc_files} GLC_LINES={cls.live.glc_lines}"
+        )
+
+    def test_the_live_triplet_satisfies_the_scan_h_criterion(self) -> None:
+        """判準必須在**本 commit** 上成立——這一支就是「判準不是寫下來就過期」的那條證據。"""
+        problems = scan_h_problems(_FROZEN_SCAN_H_UEP, _FROZEN_SCAN_H_AC, self.live)
+        self.assertEqual(
+            problems, [],
+            "Scan-H 判準在現行工作樹上不成立：\n  " + "\n  ".join(problems),
+        )
+
+    def test_the_frozen_pair_matches_the_live_values(self) -> None:
+        """自緊：凍結對必須與現況逐字相等（多退少補都紅）。
+
+        WHY：只擋「上升」的棘輪會累積餘裕——UEP／AC 降下來之後若不同步下修凍結值，之後可以
+        無聲地把它們「加回」那個舊高點。這與 `test_frozen_guard_count_matches_the_worktree`
+        是同一個形狀、同一個理由。
+        """
+        self.assertEqual(
+            (self.live.uep, self.live.ac), (_FROZEN_SCAN_H_UEP, _FROZEN_SCAN_H_AC),
+            "凍結對與現況已漂移——UEP／AC 降下來後請同步下修本檔的 _FROZEN_SCAN_H_* 以維持"
+            "棘輪張力；若是上升，請先讀 ADR-XPLAT-002 §4.2 判定規則 2（AC 上升必須具名對應"
+            "一筆 UEP 下降）。現查：python tools/check_script_parity.py --print-collapse",
+        )
+
+    def test_the_synthetic_base_is_itself_green(self) -> None:
+        """反空轉：合成基底自己必須零違規，否則下面各支「注入後必紅」全部無鑑別力（恆紅）。"""
+        self.assertEqual(
+            scan_h_problems(_FROZEN_SCAN_H_UEP, _FROZEN_SCAN_H_AC, synthetic_at_par()), [],
+            "合成基底自身即違規 —— 注入測試會恆紅，等於沒有鑑別力",
+        )
+
+    def test_a_uep_rise_is_red(self) -> None:
+        """注入①：UEP 長回一階（＝把一對已納管的腳本退回零守門的決策豁免）必須紅。"""
+        risen = synthetic_at_par()._replace(uep=_FROZEN_SCAN_H_UEP + 1)
+        problems = scan_h_problems(_FROZEN_SCAN_H_UEP, _FROZEN_SCAN_H_AC, risen)
+        self.assertTrue(problems, "UEP 上升未被偵測 —— 棘輪失效")
+        self.assertIn("UEP", problems[0])
+
+    def test_an_ac_rise_without_a_uep_drop_is_red(self) -> None:
+        """注入②：反位移（AC 上升而 UEP 不動）必須紅——這是 §4.2 判定規則 2 的射程。"""
+        displaced = synthetic_at_par()._replace(ac=_FROZEN_SCAN_H_AC + 1)
+        problems = scan_h_problems(_FROZEN_SCAN_H_UEP, _FROZEN_SCAN_H_AC, displaced)
+        self.assertTrue(problems, "反位移未被偵測 —— 判定規則 2 沒有機械面")
+        self.assertIn("AC", problems[0])
+
+    def test_an_ac_rise_paired_with_a_uep_drop_is_accepted(self) -> None:
+        """對照組：AC 上升**且** UEP 同時下降＝§4.2 判定規則 2 明文允許的類別升級 ⇒ 綠。
+
+        測意圖：擋的是「換個地方複雜」，不是「AC 不准動」。若這裡誤紅，下一個人為了做
+        「零守門 → hash 釘選」的升級就得先把鎖關掉——本檔檔頭反覆講的那種賠掉全部價值的
+        失敗模式。
+        """
+        upgraded = synthetic_at_par()._replace(
+            ac=_FROZEN_SCAN_H_AC + 4, uep=_FROZEN_SCAN_H_UEP - 1,
+        )
+        self.assertEqual(
+            scan_h_problems(_FROZEN_SCAN_H_UEP, _FROZEN_SCAN_H_AC, upgraded), [],
+            "把規則 2 允許的類別升級判成違規＝超譯裁決",
+        )
+
+    def test_a_collapsed_glc_measurement_surface_is_red(self) -> None:
+        """注入③：GLC 量測面歸零（目錄改名／glob 寫壞）必須紅，不得靜默當成「零行」。"""
+        collapsed = synthetic_at_par()._replace(glc_files=0, glc_lines=0)
+        problems = scan_h_problems(_FROZEN_SCAN_H_UEP, _FROZEN_SCAN_H_AC, collapsed)
+        self.assertTrue(problems, "GLC 掃描面崩塌未被偵測 —— fail-open")
+        self.assertIn("GLC", problems[0])
+
+    def test_both_specs_name_this_carrier(self) -> None:
+        """規格 ↔ 實作雙向綁定：ADR 與維度表都必須指名本類。
+
+        WHY：本輪修的病就是「判準寫在散文裡、承接者不存在」。若兩份規格說得出通過判準卻
+        指不出承接者，或本類改名而散文沒跟，那句宣稱又會變成死信（同 SC-8 的形態，只是死
+        的不是豁免標記而是承接者）。
+        """
+        for path in (_ADR2, _SCAN_DIMS):
+            with self.subTest(spec=path.name):
+                self.assertIn(
+                    type(self).__name__, path.read_text(encoding="utf-8"),
+                    f"{path.name} 未指名 Scan-H 三元組的承接者 {type(self).__name__} —— "
+                    f"判準與承接者失聯；本類改名時請同步兩份規格",
+                )
+
+
 if __name__ == "__main__":  # pragma: no cover
     unittest.main(verbosity=2)

@@ -278,12 +278,9 @@ def nested_generation_drift(generation: dict[str, set[str]]) -> list[str]:
 
 
 def main(argv: list[str] | None = None) -> int:
-    # 本工具**不接受任何引數**。修前它連 argv 都不看 ⇒ `--bogus-flag-xyz` 靜默 rc=0
-    # 印綠燈（R67-D20 同一個洞，射程擴張至本檔）。
-    rc = _cli_flags.reject_unknown_argv(
-        "check_gha_action_versions.py", sys.argv[1:] if argv is None else argv, ())
-    if rc is not None:
-        return rc
+    # 本工具**不接受任何引數**（`argv` 只為既有程式化呼叫端的簽章相容保留）。
+    # 🔴 本層**絕不讀 `sys.argv`**——未知引數的拒收在 `cli()`，WHY 見該處。
+    del argv
     # 只有掃描真實根層目錄時才做結構性邊界稽核；單元測試以 fixture 目錄注入
     # `_WORKFLOWS_DIR` 時跳過（那時談「repo 掃描面」沒有意義）。
     if _WORKFLOWS_DIR == _REPO_ROOT / ".github" / "workflows":
@@ -374,5 +371,18 @@ def main(argv: list[str] | None = None) -> int:
     return 0
 
 
+def cli(argv: list[str]) -> int:
+    """CLI 入口：未知引數 rc=2 fail-loud（R67-D20 同一個洞，射程擴張至本檔）。
+
+    🔴 為何拒收待在這一層（R75 統一四支，理由同 `tools/_cli_flags.py` 檔頭〈接線紀律〉）：
+    `main(argv=None) → sys.argv[1:]` 會誤傷程式化呼叫端。**本檔就是那筆實例的現場**——
+    `python -m unittest tools.tests.test_gha_action_versions` 時 unittest 把模組名放進
+    `sys.argv`，`m.main()` 於是把它當未知旗標拒收 rc=2，而該測試斷言 rc=1
+    ⇒ HEAD 既存 3 支假紅（R75 本機實測 `Ran 14 / FAILED (failures=3)`）。
+    """
+    rc = _cli_flags.reject_unknown_argv("check_gha_action_versions.py", argv, ())
+    return main(argv) if rc is None else rc
+
+
 if __name__ == "__main__":
-    sys.exit(main())
+    sys.exit(cli(sys.argv[1:]))

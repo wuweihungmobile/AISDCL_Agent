@@ -51,12 +51,15 @@ R70 訂正兩件事（`DEF-101-751` 實質／`DEF-101-752` 元層級，兩者由
 from __future__ import annotations
 
 import ast
+import inspect
 import os
 import re
 import shutil
 import subprocess
 import sys
+import tempfile
 import unittest
+from collections.abc import Mapping
 from pathlib import Path
 from unittest import mock
 
@@ -271,39 +274,82 @@ class TestPlatformUtilsApi(unittest.TestCase):
             self.assertTrue(m.is_macos())
             self.assertTrue(m.is_posix())
 
-    def test_init_utf8_streams_wraps_on_posix(self) -> None:
-        """R16 訂正：POSIX 上也必須重新包裝（不再是 no-op）——
-        `test_hooks_stdin_utf8.py::test_enforce_docs_path_blocks_chinese_path_under_cp950`
-        證明呼叫端可在任何平台以 PYTHONIOENCODING 覆寫預設編碼，POSIX 若不強制
-        重新包裝，阻斷級 hook 的中文錯誤訊息會被以覆寫編碼寫出而讀成亂碼。
-        用 mock 物件而非真實 sys.stdout/stderr，避免污染 pytest 自身的擷取機制。"""
+    # 🔴 R75：下面三支取代原本的 `test_init_utf8_streams_wraps_on_{posix,windows}`。
+    # 原斷言是 `assertIsInstance(sys.stdout, io.TextIOWrapper)`——那**釘住的是手法**
+    # （「一定要換掉串流物件」），不是意圖（「兩個平台都必須變成 UTF-8/replace」）。
+    # R75 去重把唯一實作改成「先就地 `.reconfigure()`、沒有該方法時才包 wrapper」，是先前
+    # 兩份實作的嚴格聯集且對真實串流更安全（保留物件同一性與 line_buffering）；照原斷言
+    # 會紅，但那是**斷言選錯了層次**，不是行為退化。故改為釘意圖：無論走哪條路徑，
+    # 結果都必須是 UTF-8 ＋ `errors="replace"`。
+    # 三支合起來覆蓋實作的三條分支（有 reconfigure／只有 buffer／兩者皆無），缺任一支
+    # 都會讓另兩條分支可以悄悄壞掉。
+
+    def _fake_std_pair(self, **attrs: object) -> tuple[object, object]:
+        """造一對假串流；`spec` 明列屬性，避免 `mock.Mock` 自動長出 `reconfigure`
+        （那正是「有 reconfigure」與「沒有 reconfigure」兩條分支分不開的原因）。"""
+        return (mock.Mock(**attrs), mock.Mock(**attrs))
+
+    def test_init_utf8_streams_forces_utf8_on_both_platforms(self) -> None:
+        """R16 訂正的意圖不變、只是斷言換層次：POSIX 上也必須生效（不是 no-op）——
+        `AutoClaude/tests/tools/hooks/test_hooks_stdin_utf8.py` 的
+        `test_enforce_docs_path_blocks_chinese_path_under_cp950`
+        證明呼叫端可在任何平台以 PYTHONIOENCODING 覆寫預設編碼，POSIX 若不強制改，
+        阻斷級 hook 的中文錯誤訊息會被以覆寫編碼寫出而讀成亂碼。
+
+        `errors="replace"` 是斷言的一部分而非細節：R74 的 P0 就是 `sys.stderr` 預設
+        `errors='backslashreplace'`，中文指引在非 CJK codepage 降解成 `\\uXXXX` 字面。
+        用假串流而非真實 sys.stdout/stderr，避免污染 pytest 自身的擷取機制。
+        """
+        # 先把委派解析好（`_stdio_utf8` 的 import **本身**就會套用一次——那是它的契約）。
+        # 不先暖機的話，第一個 subTest 會量到「import 期那次 ＋ 委派呼叫那次」＝2 次，
+        # 讓斷言變成在量「這支測試是不是第一個 import 它的人」而不是在量行為。
+        m._stdio_utf8_impl()
+        for platform in ("darwin", "win32", "linux"):
+            with self.subTest(platform=platform):
+                fake_stdout, fake_stderr = self._fake_std_pair()
+                with mock.patch.object(sys, "platform", platform), \
+                        mock.patch.object(sys, "stdout", fake_stdout), \
+                        mock.patch.object(sys, "stderr", fake_stderr):
+                    m.init_utf8_streams()
+                for stream in (fake_stdout, fake_stderr):
+                    stream.reconfigure.assert_called_once_with(
+                        encoding="utf-8", errors="replace")
+
+    def test_init_utf8_streams_wraps_when_stream_has_no_reconfigure(self) -> None:
+        """回退路徑：沒有 `.reconfigure` 但有 `.buffer` 的串流仍必須被強制成 UTF-8。
+
+        這一路正是去重前 8 支 AutoClaude hook 走的唯一路徑，保留它才叫「嚴格聯集」；
+        少了它，遇到非 `TextIOWrapper` 的 stdout 時保護會靜默消失。
+        """
         import io
 
-        fake_stdout = mock.Mock()
-        fake_stdout.buffer = io.BytesIO()
-        fake_stderr = mock.Mock()
-        fake_stderr.buffer = io.BytesIO()
-        with mock.patch.object(sys, "platform", "darwin"), \
-                mock.patch.object(sys, "stdout", fake_stdout), \
+        class _NoReconfigure:  # 刻意不是 Mock：Mock 會自動長出 reconfigure
+            def __init__(self) -> None:
+                self.buffer = io.BytesIO()
+
+        fake_stdout, fake_stderr = _NoReconfigure(), _NoReconfigure()
+        with mock.patch.object(sys, "stdout", fake_stdout), \
                 mock.patch.object(sys, "stderr", fake_stderr):
             m.init_utf8_streams()
-            self.assertIsInstance(sys.stdout, io.TextIOWrapper)
-            self.assertIsInstance(sys.stderr, io.TextIOWrapper)
+            for name in ("stdout", "stderr"):
+                stream = getattr(sys, name)
+                self.assertIsInstance(stream, io.TextIOWrapper, f"sys.{name} 未被包裝")
+                self.assertEqual(stream.encoding, "utf-8")
+                self.assertEqual(stream.errors, "replace")
 
-    def test_init_utf8_streams_wraps_on_windows(self) -> None:
-        """Windows 上同樣重新包裝（有 `.buffer` 屬性時）。"""
+    def test_init_utf8_streams_is_a_safe_noop_without_reconfigure_or_buffer(self) -> None:
+        """`io.StringIO`（測試替身最常見的形態）兩者皆無 ⇒ 安全 no-op，不拋
+        AttributeError。這是 `tools/_stdio_utf8.py` 原本以 `hasattr` 守門承諾的行為，
+        去重後必須一字不差地保留（`tools/tests/test_stdio_utf8.py` 亦鎖同一條）。"""
         import io
 
-        fake_stdout = mock.Mock()
-        fake_stdout.buffer = io.BytesIO()
-        fake_stderr = mock.Mock()
-        fake_stderr.buffer = io.BytesIO()
-        with mock.patch.object(sys, "platform", "win32"), \
-                mock.patch.object(sys, "stdout", fake_stdout), \
+        fake_stdout, fake_stderr = io.StringIO(), io.StringIO()
+        self.assertFalse(hasattr(fake_stdout, "reconfigure"))
+        self.assertFalse(hasattr(fake_stdout, "buffer"))
+        with mock.patch.object(sys, "stdout", fake_stdout), \
                 mock.patch.object(sys, "stderr", fake_stderr):
-            m.init_utf8_streams()
-            self.assertIsInstance(sys.stdout, io.TextIOWrapper)
-            self.assertIsInstance(sys.stderr, io.TextIOWrapper)
+            m.init_utf8_streams()  # 不應拋例外
+            self.assertIs(sys.stdout, fake_stdout, "no-op 路徑不得換掉串流物件")
 
 
 class TestNoDuplicateDefinitions(unittest.TestCase):
@@ -579,8 +625,19 @@ class TestScanSurfaceCoversUntrackedFiles(unittest.TestCase):
 # 🔴 缺陷本體：本檔的比對式一律是 `^\s*def <name>\(`（`_EXTRA_DEF_RES`／
 # `_SDD_LATEST_DEF_RES`／`_HELPER_ISLAND_SSOT`），只認**函式定義**形態。於是同一份
 # 知識若以「行內語句」複製，島模型一個都看不到——而本 repo 最常被複製的正是這種：
-# `tools/_stdio_utf8.py` 已經是 SSOT（15 支 `import _stdio_utf8` 的消費者，現查），
-# 但仍有檔案直接寫 `sys.stdout.reconfigure(encoding="utf-8", ...)` 就地重做一次。
+# 有一支公認的共用入口（`import _stdio_utf8`，R74 實測 15 支消費者），但仍有檔案直接寫
+# `sys.stdout.reconfigure(encoding="utf-8", ...)` 就地重做一次。
+#
+# 🔴 **R75 訂正（本段原文自己就是那個病）**：上一行原本逐字寫「`tools/_stdio_utf8.py`
+# **已經是 SSOT**」。那句話在寫下的當時就是假的——同一份知識當時有**兩個各自宣稱是
+# SSOT 的家**：`tools/_stdio_utf8.py::reconfigure_stdio_utf8`（`.reconfigure()` 就地改、
+# import 期生效）與 `tools/lib/platform_utils.py::init_utf8_streams`（`TextIOWrapper`
+# 換掉串流、只在 `__main__` 呼叫），實作／啟用時機／對測試替身的行為三者皆不同，而
+# 本檔的兩把鎖（`:335` 的 def 唯一性、下方這個行內複本棘輪）**都只守自己那一支**。
+# 把「其中一支是 SSOT」寫成註解，正是讓那個衝突躲過複審的原因（同 R73「訂正註記逐字
+# 引述假話＝製造新假話」）。R75 已真正去重（唯一實作＝`tools/lib/platform_utils.py`，
+# `_stdio_utf8` 逐字委派同一個函式物件），並補上
+# `TestR75StdioUtf8HasOneImplementation`——**兩把鎖從此看得見彼此**。
 #
 # 誠實劃界（本輪刻意**不**收斂，只讓它可量測）：
 #   · 有些行內複本是**合法的**——`tools/_stdio_utf8.py` 自己、以及刻意驗證行為的鎖
@@ -592,8 +649,16 @@ class TestScanSurfaceCoversUntrackedFiles(unittest.TestCase):
 #     設定、不是本 SSOT 的行內複本，兩者不可混為一談）。故本棘輪釘的是**本輪實測值**，
 #     不是任何轉述的數字——這正是本檔一貫的「不寫死轉述來的量」紀律。
 _INLINE_STDIO_RE = re.compile(r"(?:sys\.)?std(?:out|err)\s*\.\s*reconfigure\s*\(")
-_STDIO_SSOT_REL = "tools/_stdio_utf8.py"
+#: 🔴 R75：**唯一實作**所在（`reconfigure_stdio_utf8`，import 期即生效）。
+#: 選它而非 `tools/lib/platform_utils.py` 的理由＝**可搬遷契約**（見該檔檔頭與下方
+#: `test_the_ssot_survives_being_copied_out_of_the_repo`）。
+_STDIO_IMPL_REL = "tools/_stdio_utf8.py"
+#: 委派方（公開名 `init_utf8_streams` 沿用，8 支 AutoClaude hook／工具的呼叫端不動）。
+_STDIO_DELEGATE_REL = "tools/lib/platform_utils.py"
+_STDIO_SSOT_REL = _STDIO_IMPL_REL  # 沿用舊名（訊息文字與既有斷言引用它）
 _STDIO_SSOT_IMPORT_RE = re.compile(r"^\s*import\s+_stdio_utf8\b", re.M)
+#: 走委派那個公開名的消費者。
+_STDIO_DELEGATE_IMPORT_RE = re.compile(r"^\s*from\s+platform_utils\s+import\b", re.M)
 
 #: 行內複本的 shrink-only 棘輪：{檔案: 該檔命中數}。**只准變少**。
 #: 新增一處行內複本（不論在哪一島）即紅，訊息指路 `import _stdio_utf8`。
@@ -620,13 +685,19 @@ def _read_scanned(rel: str) -> str:
             "本棘輪的凍結值不再有意義") from exc
 
 
+#: 唯一實作的住址 ＋ 判準的**定義側**（本檔）——只有這兩者不算「複本」。
+#: 🔴 委派方（`tools/lib/platform_utils.py`）**刻意不在此列**：它只准委派、不准自帶機制，
+#: 一旦有人在那裡再寫一份就必須被算進棘輪而轉紅。
+#: 本檔是判準的定義側（樣式字面 ＋ 判準自檢樣本各命中數次），把定義側算進使用側會讓
+#: 判準自我循環——同 `sc7_every_used_scan_code_is_defined` 刻意排除維度表自己的理由。
+_SELF_REL = Path(__file__).resolve().relative_to(_REPO_ROOT).as_posix()
+_STDIO_LEGIT_HOMES = frozenset({_STDIO_IMPL_REL, _SELF_REL})
+
+
 def inline_stdio_sites() -> dict[str, int]:
     """全掃描面（含 untracked）的行內 stdio-UTF-8 複本；SSOT 自己不算。"""
     out: dict[str, int] = {}
-    # 排除 SSOT 自己與**本檔**：本檔是判準的**定義側**（樣式字面 ＋ 判準自檢樣本各命中
-    # 一次），把定義側算進使用側會讓判準自我循環——同 `sc7_every_used_scan_code_is_defined`
-    # 刻意排除維度表自己的理由，逐字同型。
-    skip = {_STDIO_SSOT_REL, Path(__file__).resolve().relative_to(_REPO_ROOT).as_posix()}
+    skip = set(_STDIO_LEGIT_HOMES)
     for rel in _repo_py_files():
         if rel in skip:
             continue
@@ -688,6 +759,322 @@ class TestR74InlineCopyRatchetForStdioSsot(unittest.TestCase):
                 self.assertIsNotNone(_INLINE_STDIO_RE.search(sample))
         self.assertIsNone(_INLINE_STDIO_RE.search("f.reconfigure(encoding='utf-8')"),
                           "非 stdio 串流不得誤觸（誤報的鎖最後一定被繞過）")
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# R75：「強制 stdio 為 UTF-8」只准有一份實作 —— 讓兩把鎖看得見彼此
+# ══════════════════════════════════════════════════════════════════════════════
+# 🔴 缺陷本體（本輪主題正中靶心）：同一份知識先前有**兩個各自宣稱是 SSOT 的家**，
+# 手法／啟用時機／對測試替身的行為三者皆不同，消費端分屬兩群（8 支 AutoClaude hook 走
+# `from platform_utils import init_utf8_streams`、15 支根層 tools 走 `import _stdio_utf8`），
+# 換用另一支會**靜默改變行為**；而既有兩把鎖（`:335` def 唯一性、上方行內複本棘輪）
+# 都只守自己那一支，沒有任何機械物在看「這兩者是同一份知識」。
+# R74 的 P0（`sys.stderr` 預設 `errors='backslashreplace'` 讓 hook 中文指引在非 CJK
+# codepage 降解）正好就落在這一層。
+#
+# 本節是「去重之後不准再散開」的機械物，三個方向各一把牙：
+#   ① **委派不可退化**：兩個公開名必須是**同一個函式物件**，且 shim 檔內不得有任何
+#      `def`——「保留公開名以免動消費端」與「其實各自寫了一份」在原始碼上長得很像，
+#      物件同一性是唯一分得清的判準（同 `test_hints_and_tag_are_shared_with_the_
+#      runtime_lock_not_copied` 既有手法）。
+#   ② **SSOT 必須真的實作**：唯一實作那一支若哪天被改成也去 import 別人（或實作被搬走），
+#      ①會照樣成立而整組變成恆綠空砲。故正向釘住「實作的兩條路徑都在該函式體內」。
+#   ③ **第三份實作長出來即紅**：判準面刻意比上方 `_INLINE_STDIO_RE` **寬**——它只認
+#      `sys.stdout.reconfigure(` 這一種寫法，對 `for s in (sys.stdout, sys.stderr):
+#      s.reconfigure(encoding=…)` 這個**實際上最普遍的寫法**結構性全盲（R75 實測：窄判準
+#      看得到 9 處／8 檔，寬判準看得到 81 處／77 檔——也就是既有棘輪只看到約一成）。
+#      這正是 R73「已知的鎖射程缺口不得只以劃界結案」的形態，故本節補上寬判準。
+_STDIO_FORCE_RE = re.compile(
+    # a) 任何串流的 `reconfigure(encoding=…)`（含 `for s in (sys.stdout, sys.stderr)`
+    #    迴圈變數、以及唯一實作內的裸區域名呼叫）
+    r"(?:\breconfigure\s*\(\s*encoding)"
+    # b) 直接拿 std 串流的 `.buffer` 包 TextIOWrapper（去重前 `init_utf8_streams` 的手法）
+    r"|(?:TextIOWrapper\s*\(\s*(?:sys\.)?std(?:out|err)\s*\.\s*buffer)"
+)
+
+#: 凍結版 SDD 樹（Copy-on-Evolve 政策：一律不可改）——單獨成一格，讓「不可修的存量」
+#: 與「可修的存量」在基線表上就分得開，而不是混成一個數字之後沒人分得清哪些其實能收斂。
+_FROZEN_SDD_TREE_KEY = "AISDLC_SDD/<frozen-versions>"
+_FROZEN_SDD_PREFIX = "AISDLC_SDD/AISDLC_SDD_v"
+_STDIO_TREE_PREFIXES: tuple[str, ...] = (
+    ".claude/hooks", "AISDLC_SDD/scripts", "AutoClaude", "tools",
+)
+
+#: 🔴 **shrink-only 棘輪（per-tree）**：R75 實測值，只准變少。
+#: 為何是 per-tree 而非 per-file（與上方窄判準的取捨差異，必須寫下來）：寬判準命中 77 檔，
+#: 逐檔列名會讓本檔多出近八十行**且大半落在其他包的所有權內**（並行包互踩＝假紅）。
+#: per-tree 仍保有「新增一處即紅」的牙，失去的只是「訊息逐字指名哪一支」——而那個由
+#: 斷言失敗時當場現查的明細補回（見 `stdio_force_problems` 的訊息）。
+_FROZEN_STDIO_FORCE_TREES: dict[str, int] = {
+    ".claude/hooks": 2,
+    _FROZEN_SDD_TREE_KEY: 36,
+    "AISDLC_SDD/scripts": 10,
+    # R75 收輪下修 26→24：`AutoClaude/tmp_lint_check.py` 是 tracked 的一次性除錯腳本
+    # （內容＝重跑 `lint-imports` CLI 已有的行為），本輪依「暫存檔直接刪」慣例 `git rm`，
+    # 連帶少掉它自帶的 2 處行內複本。棘輪只准變少，故同步下修而非留餘裕。
+    "AutoClaude": 24,
+    "tools": 6,
+}
+
+
+def stdio_force_tree_of(rel: str) -> str:
+    """repo 相對路徑 → 棘輪基線表的樹名（純函式，供合成注入自證）。
+
+    落在所有已知前綴之外的新樹回 `"<other>"`——**不是靜默放行**：`"<other>"` 不在基線表
+    內，`stdio_force_problems` 會要求它顯式入表（同 `posix_tag_ratchet_problems` 對
+    「出現在掃描面卻不在基線表」的處置）。
+    """
+    if rel.startswith(_FROZEN_SDD_PREFIX):
+        return _FROZEN_SDD_TREE_KEY
+    for prefix in _STDIO_TREE_PREFIXES:
+        if rel.startswith(prefix + "/"):
+            return prefix
+    return "<other>"
+
+
+def stdio_force_sites() -> dict[str, list[str]]:
+    """全掃描面（含 untracked）的「強制 stdio 為 UTF-8」複本：`{樹名: [檔(命中數), …]}`。
+
+    兩個公開名的合法住址與本檔（判準定義側）一律排除，見 `_STDIO_LEGIT_HOMES`。
+    """
+    out: dict[str, list[str]] = {}
+    for rel in _repo_py_files():
+        if rel in _STDIO_LEGIT_HOMES:
+            continue
+        hits = len(_STDIO_FORCE_RE.findall(_read_scanned(rel)))
+        if hits:
+            out.setdefault(stdio_force_tree_of(rel), []).append(f"{rel}({hits})")
+    return out
+
+
+def stdio_force_counts(sites: Mapping[str, list[str]]) -> dict[str, int]:
+    """`stdio_force_sites()` → `{樹名: 命中總數}`（純函式）。"""
+    return {
+        tree: sum(int(entry.rsplit("(", 1)[1].rstrip(")")) for entry in entries)
+        for tree, entries in sites.items()
+    }
+
+
+def stdio_force_problems(
+    frozen: Mapping[str, int], counts: Mapping[str, int]
+) -> list[str]:
+    """棘輪判準（純函式，供合成注入自證）：任一樹命中數上升、新樹未入表、
+    或樹在表內卻從掃描面消失（＝射程疑似縮小），皆為違規。"""
+    problems: list[str] = []
+    for tree in sorted(set(frozen) | set(counts)):
+        want = frozen.get(tree)
+        got = counts.get(tree)
+        if want is None:
+            problems.append(
+                f"{tree}：出現在掃描面卻不在基線表內（實測 {got}）"
+                "——新樹必須顯式入表，否則它的複本靜默不計"
+            )
+        elif got is None:
+            problems.append(f"{tree}：在基線表內卻不在掃描面（基線 {want}）——射程疑似縮小")
+        elif got > want:
+            problems.append(f"{tree}：強制 stdio-UTF-8 的複本 {got} 處 > 凍結值 {want} 處")
+    return problems
+
+
+class TestR75StdioUtf8HasOneImplementation(unittest.TestCase):
+    """「強制 stdio 為 UTF-8」的**唯一實作**不變量（R75）。"""
+
+    @staticmethod
+    def _ssot():
+        """唯一實作（`tools/_stdio_utf8.py`）。
+
+        ⚠️ import 它會**真的**對本進程的 stdout/stderr 動手（那就是它存在的理由）——
+        但同一件事 `tools/tests/test_stdio_utf8.py` 早已在同一輪 discovery 裡做過，
+        故本測試不引入新的副作用，只是共用它。
+        """
+        sys.path.insert(0, str(_REPO_ROOT / "tools"))
+        import _stdio_utf8
+
+        return _stdio_utf8
+
+    def test_the_delegate_resolves_to_the_ssot_function(self) -> None:
+        """① 委派不可退化成獨立複本：委派方解析出來的必須就是 SSOT 那個函式物件。
+
+        驗「同一性」而非「行為等價」：行為等價可以由兩份各自寫對的複本滿足，而那正是
+        R75 前的狀態（兩份**都能**強制 UTF-8，差別在啟用時機與測試替身行為，於是沒人
+        發現它們是兩份）。同一性是唯一能把「委派」與「巧合一致」分開的判準。
+        """
+        self.assertIs(
+            m._stdio_utf8_impl(), self._ssot().reconfigure_stdio_utf8,
+            f"{_STDIO_DELEGATE_REL} 的委派沒有解析到 {_STDIO_IMPL_REL} 的 "
+            "reconfigure_stdio_utf8 ⇒ 退化成第二份實作或解析壞了",
+        )
+
+    def test_the_delegate_holds_no_mechanism_of_its_own(self) -> None:
+        """① 的另一半（原始碼側）：委派方檔內不得出現任何強制 stdio 的**機制**。
+
+        只驗同一性不夠：有人可以在委派方新寫一支「解析失敗時的內建回退」當補強，
+        同一性斷言照樣綠，而第二份實作已經進來了。判準用的是與③同一個寬樣式
+        ——共用判準才不會兩邊各自漂移。
+        """
+        hits = _STDIO_FORCE_RE.findall(_read_scanned(_STDIO_DELEGATE_REL))
+        self.assertEqual(
+            hits, [],
+            f"{_STDIO_DELEGATE_REL} 出現了 {len(hits)} 處強制 stdio 的機制（{hits}）"
+            f"——它只准委派到 {_STDIO_IMPL_REL}。若真的需要回退，回退本身就是第二份實作，"
+            "請改成讓 SSOT 自我完備（那正是 R75 選它當 SSOT 的理由）",
+        )
+
+    def test_the_ssot_really_holds_the_implementation(self) -> None:
+        """② 反空砲：唯一實作那一支必須真的三條分支都在它體內。
+
+        缺這條時，把 SSOT 改成「去 import 別人」也能讓①全綠——整組鎖變成恆綠空砲
+        （同本檔 `test_platform_judgment_helpers_*` 的「反方向的牙」）。
+        """
+        src = inspect.getsource(self._ssot().reconfigure_stdio_utf8)
+        self.assertIn("reconfigure(", src, "SSOT 內找不到就地 reconfigure 那條路徑")
+        self.assertIn("TextIOWrapper(", src, "SSOT 內找不到 wrapper 回退那條路徑")
+        self.assertIn('errors="replace"', src,
+                      "errors 必須顯式為 replace——R74 P0 的成因正是 stderr 預設 "
+                      "backslashreplace 讓中文指引降解成 \\uXXXX 字面")
+
+    def test_the_ssot_only_imports_stdlib(self) -> None:
+        """🔴 **可搬遷契約（原始碼側）**：SSOT 一個本地 import 都不准有。
+
+        WHY 這條是 blocking 級（R75 第一版當回合實測付過代價）：本檔的既有契約包含
+        「被複製到別處單獨執行」——`AISDLC_SDD/scripts/tests/test_copy_on_evolve.py`／
+        `test_ntfs_length_gate.py` 會把 `tools/check_ntfs_paths.py` 連同它複製進 tmp
+        沙箱 repo（**不含 `tools/lib/`**）再以子行程執行。R75 第一版把實作搬去
+        `tools/lib/platform_utils.py`、讓它改成 `from platform_utils import …`，沙箱裡
+        import 期 `ModuleNotFoundError`，6 支測試當場紅。
+        ⇒ 去重方案不得讓這支基礎件相依於 repo 佈局。
+        """
+        allowed = {"io", "sys", "__future__"}
+        tree = ast.parse((_REPO_ROOT / _STDIO_IMPL_REL).read_text(encoding="utf-8"))
+        bad: list[str] = []
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Import):
+                bad += [a.name for a in node.names if a.name.split(".")[0] not in allowed]
+            elif isinstance(node, ast.ImportFrom):
+                mod_name = node.module or ""
+                if node.level or mod_name.split(".")[0] not in allowed:
+                    bad.append(f"{'.' * node.level}{mod_name}")
+        self.assertEqual(
+            bad, [],
+            f"{_STDIO_IMPL_REL} import 了非 stdlib 的 {bad} ⇒ 破壞可搬遷契約"
+            "（被複製到不含 tools/lib/ 的沙箱時 import 期就會爆，連帶讓消費端全滅）",
+        )
+
+    def test_the_ssot_survives_being_copied_out_of_the_repo(self) -> None:
+        """🔴 **可搬遷契約（行為側）**：把 SSOT 單獨複製到 tmp 後 import 必須成功，
+        且在 R74 P0 的重現環境（`PYTHONIOENCODING=cp1252` ＋剝掉 `PYTHONUTF8`）下
+        中文仍不降解。
+
+        只驗「import 不爆」不夠：no-op 降級也能讓 import 成功，但保護就靜默消失了
+        ——而沙箱裡那些子行程正是靠這道保護在印中文。故連保護效果一起驗。
+        """
+        with tempfile.TemporaryDirectory() as td:
+            box = Path(td)
+            shutil.copy(_REPO_ROOT / _STDIO_IMPL_REL, box / "_stdio_utf8.py")
+            probe = box / "probe.py"
+            # 探針刻意不帶 lint 抑制註解：`test_no_invalid_escape_sequences.py` 會掃本檔的
+            # 字串字面、把「規則碼後緊接非空白」判為非法抑制（實測當回合被它抓到）。
+            probe.write_text(
+                "import _stdio_utf8\n"
+                "import sys\n"
+                "assert _stdio_utf8.reconfigure_stdio_utf8 is not None\n"
+                "print('中文')\n"
+                "print('中文', file=sys.stderr)\n",
+                encoding="utf-8", newline="\n",
+            )
+            env = dict(os.environ)
+            env.pop("PYTHONUTF8", None)
+            env["PYTHONIOENCODING"] = "cp1252"
+            env["PYTHONDONTWRITEBYTECODE"] = "1"
+            done = subprocess.run(
+                [sys.executable, str(probe)], cwd=str(box), capture_output=True, env=env
+            )
+        want = "中文".encode()
+        self.assertEqual(
+            done.returncode, 0,
+            f"單獨複製到 tmp 後 import 失敗（rc={done.returncode}）："
+            f"{done.stderr.decode('utf-8', 'replace')[:400]}",
+        )
+        self.assertIn(want, done.stdout, "複製版的 stdout 保護失效（中文降解）")
+        self.assertIn(want, done.stderr, "複製版的 stderr 保護失效（中文降解）")
+
+    def test_both_public_names_have_real_consumers(self) -> None:
+        """兩個公開名都必須有真消費者，否則「保留兩個名字」的理由不成立。"""
+        ssot_users, delegate_users = [], []
+        for rel in _repo_py_files():
+            if rel in _STDIO_LEGIT_HOMES:
+                continue
+            text = _read_scanned(rel)
+            if _STDIO_SSOT_IMPORT_RE.search(text):
+                ssot_users.append(rel)
+            if _STDIO_DELEGATE_IMPORT_RE.search(text) and "init_utf8_streams" in text:
+                delegate_users.append(rel)
+        self.assertGreaterEqual(len(ssot_users), 10,
+                                f"`import _stdio_utf8` 消費者異常少（{len(ssot_users)}）")
+        self.assertGreaterEqual(
+            len(delegate_users), 6,
+            f"`from platform_utils import init_utf8_streams` 消費者異常少"
+            f"（{len(delegate_users)}：{delegate_users}）——若真的歸零，該刪掉的是那個公開名",
+        )
+
+    def test_no_third_implementation_grows(self) -> None:
+        """③ shrink-only 棘輪：任一樹再長出一處「自己重做一次」即紅。"""
+        sites = stdio_force_sites()
+        problems = stdio_force_problems(_FROZEN_STDIO_FORCE_TREES, stdio_force_counts(sites))
+        self.assertEqual(
+            problems, [],
+            "強制 stdio-UTF-8 的複本增加了：\n  " + "\n  ".join(problems)
+            + "\n現況明細：\n  "
+            + "\n  ".join(f"{tree}: {entries}" for tree, entries in sorted(sites.items()))
+            + f"\n修法＝改用唯一實作：根層工具 `import _stdio_utf8`（{_STDIO_IMPL_REL}，"
+            f"import 期即生效）／其他樹 `from platform_utils import init_utf8_streams`"
+            f"（{_STDIO_DELEGATE_REL} 的委派，於 `__main__` 呼叫）。本棘輪是 shrink-only：要新增"
+            "一處必須先論證為何不能用它（例：`.claude/hooks/block_bash_on_windows.py` "
+            "的 fail-open 契約，該檔已就地寫明理由）",
+        )
+
+    def test_frozen_trees_match_the_worktree(self) -> None:
+        """自緊：收斂掉一處而不下修基線 ⇒ 餘裕就是破口（同 `_FROZEN_INLINE_STDIO_SITES`）。"""
+        self.assertEqual(
+            stdio_force_counts(stdio_force_sites()), dict(_FROZEN_STDIO_FORCE_TREES),
+            "工作樹現況與 `_FROZEN_STDIO_FORCE_TREES` 已漂移——收斂掉一處後請同步下修")
+
+    def test_the_wide_pattern_sees_what_the_narrow_one_cannot(self) -> None:
+        """判準自檢：寬判準必須抓到窄判準結構性看不到的那種寫法，否則③白做。"""
+        loop_form = (
+            "for _stream in (sys.stdout, sys.stderr):\n"
+            '    _stream.reconfigure(encoding="utf-8")\n'
+        )
+        self.assertIsNone(_INLINE_STDIO_RE.search(loop_form),
+                          "窄判準竟看得到迴圈形態——本節的立論前提不成立")
+        self.assertIsNotNone(_STDIO_FORCE_RE.search(loop_form), "寬判準漏掉迴圈形態")
+        self.assertIsNotNone(
+            _STDIO_FORCE_RE.search('io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8")'),
+            "寬判準漏掉 wrapper 形態（去重前 init_utf8_streams 的手法）")
+        self.assertIsNone(
+            _STDIO_FORCE_RE.search("f.reconfigure(errors='replace')"),
+            "沒帶 encoding= 的 reconfigure 不是本判準的對象（誤報的鎖最後一定被繞過）")
+
+    def test_the_tree_ratchet_has_teeth(self) -> None:
+        """合成注入（不碰磁碟）：上升／新樹／樹消失三種形態都必須被點名。"""
+        frozen = {"tools": 1}
+        self.assertTrue(stdio_force_problems(frozen, {"tools": 2}))
+        self.assertTrue(stdio_force_problems(frozen, {"tools": 1, "<other>": 1}))
+        self.assertTrue(stdio_force_problems(frozen, {}))
+        self.assertEqual(stdio_force_problems(frozen, {"tools": 1}), [])
+        self.assertEqual(stdio_force_problems(frozen, {"tools": 0}), [],
+                         "收斂到零不得被判違規——棘輪的方向只有一個")
+
+    def test_tree_classification_boundary(self) -> None:
+        """樹分類：凍結版 SDD 與活躍樹必須分得開，未知樹不得被靜默歸進既有樹。"""
+        self.assertEqual(
+            stdio_force_tree_of("AISDLC_SDD/AISDLC_SDD_v0.01/tools/arch_fitness/arch_fitness.py"),
+            _FROZEN_SDD_TREE_KEY)
+        self.assertEqual(stdio_force_tree_of("AISDLC_SDD/scripts/sdd_version.py"),
+                         "AISDLC_SDD/scripts")
+        self.assertEqual(stdio_force_tree_of("AutoClaude/tools/local_ci_gate.py"), "AutoClaude")
+        self.assertEqual(stdio_force_tree_of("tools/bootstrap_core.py"), "tools")
+        self.assertEqual(stdio_force_tree_of("brand_new_tree/helper.py"), "<other>")
 
 
 if __name__ == "__main__":

@@ -1131,8 +1131,13 @@ class TestEvidenceFamilyPointersResolve(unittest.TestCase):
     本項守的是**帳本 → 證據檔**的跨檔錨點。同一個病（指針失實），不同的邊。
     """
 
+    # 🔴 R75：樣式由「只認 R60 那一組檔名」放寬為**任一輪的 `CrossPlatform_R<n>_*.md`**。
+    # 原因與 DEF-101-757 同型：兩層化（主檔留摘要＋指針、詳情外置）R60 用過、R68 用過、
+    # R75 又用了一次（`CrossPlatform_R75_Review_Evidence.md`，20 個具名節指針），而本鎖的
+    # 樣式把輪號寫死 ⇒ 同一種指針換一輪就整批逸出，這正是本鎖要防的「指針靜默失實」。
+    # 放寬只擴**發現面**，判準（錨必須真的存在於被指名的那份檔）一字未改。
     _POINTER_RE = re.compile(
-        r"`(?P<file>CrossPlatform_R60_Fix_Evidence(?:_\w+)?\.md)`?\s*的\s*"
+        r"`(?P<file>CrossPlatform_R\d+_\w+\.md)`?\s*的\s*"
         r"`## (?P<anchor>DEF-\d+-\d+)`\s*節"
     )
 

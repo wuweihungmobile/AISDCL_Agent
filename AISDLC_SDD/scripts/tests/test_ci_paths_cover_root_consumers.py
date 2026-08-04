@@ -191,6 +191,43 @@ R67 round 2（SA-R67-01 ＋ SD-R67-02 兩方交叉發現，**同輪原地復發*
      / "conftest.py"` 消費它，`_SLASH_RE` 命中），是最後那道 `not p.startswith(
      "AISDLC_SDD/")` 把它扔了。單修第 1 層而不拆這個豁免，本鎖仍會對整個
      `AISDLC_SDD/` 子樹（compat-CI 四條白名單之外的部分）繼續失明。
+
+盲區 G ── `from <套件> import <模組>`（DEF-101-042 假綠第 7 種形態）
+  舊 `_FROM_IMPORT_RE` 只抓 `from` 後**第一段名稱**，下游再把它當模組名去找 `<name>.py`。
+  於是 `from lib import baseline_origin as BO` 得出的是**套件名** `lib`，找不到 `lib.py`
+  就**靜默丟棄**——真正被消費的 `tools/lib/baseline_origin.py` 對本鎖結構性隱形。同構受害者
+  `tools/lib/defect_ledger_index.py`（`tools/archive_defect_log.py` ＋
+  `tools/check_defect_log_crossref.py` 以同一句式消費）。實測後果：兩支 SSOT 在
+  windows-compat-ci.yml／macos-compat-ci.yml 的 paths **雙邊命中 0 次**，而本鎖 34 passed
+  全綠 ⇒ 只改這兩支檔的 push 不會觸發任一支 compat-CI。`root-infra-ci.yml` 無 paths 過濾故
+  純 Python 迴歸仍被 ubuntu 攔下，**逃掉的正是 Windows／macOS 專屬迴歸**——也就是這兩支
+  workflow 唯一存在的理由。
+
+  依 R54 收斂門檻（第 4 個盲區起優先程式化反向驗證、不再疊手寫登記字典）與 R67 的先例，
+  本輪**拆掉兩條 import 正則、改 AST**（`ast.Import` 逐 alias、`ast.ImportFrom` 以
+  `module` ＋ `alias.name` 組出候選），並一併修掉同源的兩個結構性限制：
+    · **候選基底目錄**由「自身目錄＋父目錄」兩層寫死，改為**逐層祖先到 monorepo 根**。
+      `AISDLC_SDD/scripts/tests/` 下 20 支測試寫 `from scripts import sdd_version`，靠的是
+      ci-gate 的 `cd AISDLC_SDD && python -m pytest scripts/tests/` 把 `AISDLC_SDD/` 放進
+      sys.path（第三層祖先）——兩層候選對它零命中。
+    · **sys.path 是行程全域的**：`tools/tests/test_find_git_bash_parity.py` 的
+      `import bash_probe_spec` 依賴 `import integration_gate_core` 的 side effect（該檔逐字
+      註解如此記載）。故 BFS 改為累積一個全域 sys.path 池並跑到 fixed point（實測 2 輪收斂）。
+  fail-loud（`test_no_unresolvable_imports`）：解析不出對應檔案的 import 會被列名讓本鎖紅，
+  唯一可辯護的忽略理由是「標準庫（`sys.stdlib_module_names` 機械認定）／已宣告第三方
+  （`_KNOWN_EXTERNAL_MODULES`，刻意最小）」。**靜默丟棄本身就是機制缺陷**——盲區 E 與盲區 G
+  兩次都是靠它存活的。實測：改 AST ＋ 祖先基底 ＋ 全域池後，無法解析的 import 由 21 筆降為
+  **0 筆**，掃描面 84 → 113 檔（NEW=29、LOST=0）。
+
+盲區 H ── 模組層 list literal 內的相對路徑字串
+  `tools/tests/test_doc_env_prefix_platform_parity_r60.py` 用模組層 `_LIVE_DOCS = [...]`
+  名冊（10 份活文件）逐份讀取，而非 `_REPO_ROOT / "…"` 路徑運算式，也不是 import ⇒
+  `_JOIN_RE`／`_SLASH_RE`／import BFS 三者同時零訊號。實測使 `README.md`／`useMacWin.md`／
+  `docs/AISDLC_Agent_UserGuide.md`（名冊 n=10，三者皆在冊且磁碟存在，兩支 compat-CI 都跑
+  這棵樹）在雙邊 paths 皆未涵蓋。新增 `_module_level_list_literal_strings()`（AST：
+  模組層 `ast.Assign`／`ast.AnnAssign` 的 `ast.List`，含巢狀結構內的 `ast.Constant` 字串），
+  刻意不含模組層 `dict`／`tuple`——本鎖自己的 `_KNOWN_*` 登記表正是那個形狀，納入會把
+  「鎖記載的檔案」誤算成消費檔而逼出一批假需求。
 """
 from __future__ import annotations
 
@@ -200,6 +237,8 @@ import ntpath
 import os
 import re
 import subprocess
+import sys
+from typing import NamedTuple
 
 import pytest
 import yaml
@@ -247,21 +286,10 @@ _SLASH_RE = re.compile(
 )
 _STR_RE = re.compile(r'"([^"]+)"')
 
-# S26：`import <module>` / `import <module> as <alias>` 頂層陳述式（tools/tests/ 三支
-# 新測試檔的「直接 import 根層同儕模組」慣用法，見上方檔頭 S26 說明）。
-_IMPORT_RE = re.compile(
-    r"^import\s+([A-Za-z_][A-Za-z0-9_]*)(?:\s+as\s+[A-Za-z_][A-Za-z0-9_]*)?\s*(?:#.*)?$",
-    re.MULTILINE,
-)
-
-# R19 四方一審 QA 對抗式 bug-injection 發現：`_IMPORT_RE` 只認 `import X`／
-# `import X as Y`，`from X import Y` 這種同樣常見的頂層 import 陳述式完全零防護
-# （QA 實測：建一支根層模組＋一支測試以 `from <module> import <name>` 消費，掃描器
-# 10 passed 全綠、完全偵測不到）。補一支對稱正則堵上這第三種消費模式。
-_FROM_IMPORT_RE = re.compile(
-    r"^from\s+([A-Za-z_][A-Za-z0-9_]*)\s+import\s+",
-    re.MULTILINE,
-)
+# S26／R19 舊實作：`_IMPORT_RE`（`import X`／`import X as Y`）＋ `_FROM_IMPORT_RE`
+# （只取 `from` 後第一段名稱）兩條正則。兩者已由下方 AST 解析取代——理由見檔頭
+# 〈盲區 G〉：`_FROM_IMPORT_RE` 對 `from lib import baseline_origin as BO` 得出的是
+# **套件名** `lib`，下游拿它去找 `lib.py` 找不到就靜默丟棄，被消費的模組因此隱形。
 
 # R19 修復包 A 盲區 A：`sys.path.insert(0, str(Path(__file__).resolve().parents[N]))`
 # 或其後接 `/ "seg1" / "seg2" ...` 路徑片段（如 tools/tests/test_platform_utils_dedup.py
@@ -459,31 +487,136 @@ def _scan_dir_for_root_paths(directory: str) -> set[str]:
     return found
 
 
-def _scan_import_consumed_paths(
-    directory: str, unresolved_out: list[str] | None = None
-) -> set[str]:
-    """BFS 掃描 `directory` 內 test_*.py 的頂層 `import <module>`，將 module 解析為
-    「來源檔自身所在目錄」或「其父目錄」下的 `<module>.py`（本 repo 兩種並存慣例：
-    tools/*.py 用 `sys.path.insert(0, ...parent)`＝自身目錄；tools/tests/test_*.py
-    用 `sys.path.insert(0, ...parents[1])`＝父目錄——兩者恰好都解到 tools/ 本身，
-    故兩層候選皆試、以磁碟上實際存在者為準），並對新發現的根層 .py 檔遞迴重複同一
-    掃描（fixed point），關閉「測試只 import A、A 內部又 import B」的第二層盲區
-    （見檔頭 S26）。
+# ── 盲區 G：import 陳述式解析（AST，取代兩條正則）─────────────────────────────
+class _ImportRequest(NamedTuple):
+    """一句 import（或 `import a, b` 的單一 alias）對「磁碟檔案」的解析請求。
 
-    R67：`unresolved_out` 若給定，會收集 BFS 走訪範圍內**無法靜態解析**的
-    `sys.path.insert` 陳述式描述（見 `_parse_sys_path_inserts`），供
-    `test_no_unresolvable_sys_path_inserts` fail-loud；不給則行為與先前完全相同。
+    `targets` 是**候選模組路徑段序列**——`from lib import baseline_origin` 同時可能意指
+    「`lib.py` 裡的一個名字」與「`lib/` 底下的模組 `baseline_origin`」，兩者都列為候選、
+    由磁碟存在性裁決（不猜）。舊 `_FROM_IMPORT_RE` 只產生前者的套件名 `lib`，於是後者
+    ——也就是真正被消費的那個檔——結構上永遠看不見（檔頭〈盲區 G〉）。
     """
+
+    targets: tuple[tuple[str, ...], ...]
+    level: int          # 相對 import 層數（`from ..x import y` ⇒ 2）；0 ＝ 絕對 import
+    top: str            # 頂層名稱，用於判定「標準庫／已宣告第三方 ⇒ 可正當忽略」
+    lineno: int
+    source: str         # ast.unparse 還原的原式，供 fail-loud 訊息引用
+
+
+def _import_requests(src: str) -> list[_ImportRequest]:
+    """把原始碼中每一句 import 解析為「被消費的模組」候選（語意，不是字面排列）。
+
+    - `ast.Import`：**逐 alias** 一個請求——`import a, b` 少解析到一個也必須被看見。
+    - `ast.ImportFrom`：整句一個請求，候選同時含 `<module>` 與 `<module>/<name>`，
+      因此 `from lib import baseline_origin`、`from lib import a, b as c`、
+      `from lib.sub import x` 三種形態都得出被消費的模組本身。
+    """
+    try:
+        tree = ast.parse(src)
+    except SyntaxError:  # 語法壞掉的檔案由 py_compile／ruff 負責，本鎖不重複報
+        return []
+    out: list[_ImportRequest] = []
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            for alias in node.names:
+                segs = tuple(alias.name.split("."))
+                out.append(
+                    _ImportRequest((segs,), 0, segs[0], node.lineno, ast.unparse(node))
+                )
+        elif isinstance(node, ast.ImportFrom):
+            mod = tuple(node.module.split(".")) if node.module else ()
+            targets: list[tuple[str, ...]] = [mod] if mod else []
+            targets += [mod + (a.name,) for a in node.names if a.name != "*"]
+            out.append(
+                _ImportRequest(
+                    tuple(targets), node.level, mod[0] if mod else ".",
+                    node.lineno, ast.unparse(node),
+                )
+            )
+    return out
+
+
+def _ancestor_dirs(source_file: str) -> list[str]:
+    """來源檔自身目錄起逐層向上到 monorepo 根（含），近者優先。
+
+    WHY（為何不是「自身目錄＋父目錄」兩層寫死候選）：`import X` 解析到哪個檔，取決於
+    執行期 sys.path／cwd。`AISDLC_SDD/scripts/tests/` 下 20 支測試寫 `from scripts import
+    sdd_version`，靠的是 ci-gate 以 `cd AISDLC_SDD && python -m pytest scripts/tests/`
+    把 `AISDLC_SDD/` 放進 sys.path（`python -m` 會插入 cwd）——那是**第三層祖先**，兩層
+    寫死候選對它結構性零命中。逐層向上是「哪一層是 sys.path 根」這件事的誠實超集；
+    誤配到的候選一律被下游磁碟存在性過濾器濾除（與既有正則路徑同一道安全網）。
+    """
+    root = os.path.normpath(_monorepo_root())
+    out: list[str] = []
+    d = os.path.dirname(os.path.abspath(source_file))
+    while True:
+        out.append(d)
+        if os.path.normpath(d) == root:
+            break
+        parent = os.path.dirname(d)
+        if parent == d:  # 走到檔案系統根（來源檔在 repo 外）
+            break
+        d = parent
+    return out
+
+
+def _resolve_import_request(
+    req: _ImportRequest, own_dir: str, base_dirs: list[str]
+) -> list[str]:
+    """把一個解析請求對映到磁碟上實際存在的 .py 檔（可能多個；找不到回空清單）。"""
+    if req.level:
+        # 相對 import：基底是「來源檔所在套件」往上 level-1 層
+        base = own_dir
+        for _ in range(req.level - 1):
+            base = os.path.dirname(base)
+        search = [base]
+    else:
+        search = base_dirs
+    hits: list[str] = []
+    for base in search:
+        for segs in req.targets:
+            candidate = os.path.join(base, *segs) + ".py"
+            if os.path.isfile(candidate):
+                hits.append(candidate)
+    return hits
+
+
+# 可正當忽略的**第三方**頂層模組。標準庫另由 `sys.stdlib_module_names` 機械認定（不手
+# 維護）。本集合刻意保持最小：新增一個沒登記的第三方 import 會讓
+# `test_no_unresolvable_imports` 當場列名——那就是「解析不出不准靜默跳過」的意思，
+# 同 `tools/run_root_unittests.py::_THIRD_PARTY_PREREQS` 的理念（宣告清單即豁免依據）。
+_KNOWN_EXTERNAL_MODULES = frozenset({"pytest", "yaml"})
+
+# sys.path 是**行程全域**的：A 模組 import B 時把某目錄插進 sys.path，之後 C 模組的
+# `import D` 就解析得到。實例：`tools/tests/test_find_git_bash_parity.py` 的
+# `import bash_probe_spec` 依賴的是 `import integration_gate_core` 的 side effect
+# （該檔逐字註解如此記載）。故 BFS 維護一個**累積**的 sys.path 池並跑到 fixed point；
+# 池只會單調成長、且成員數以走訪檔數為界，實測 2 輪收斂（上限純為防呆）。
+_MAX_SYS_PATH_POOL_ROUNDS = 5
+
+# directory → (consumed, unresolvable sys.path.insert, unresolvable import) 記憶化。
+# 本鎖有 6 支測試各自要整份掃描結果，fixed point 又把單次成本乘上收斂輪數。
+_IMPORT_SCAN_CACHE: dict[str, tuple[set[str], list[str], list[str]]] = {}
+
+
+def _import_scan_round(
+    directory: str, sys_path_pool: frozenset[str]
+) -> tuple[set[str], list[str], list[str], frozenset[str]]:
+    """單輪 BFS。回傳 (消費檔, 無解 sys.path.insert, 無解 import, 更新後的 sys.path 池)。"""
+    consumed: set[str] = set()
+    bad_inserts: list[str] = []
+    bad_imports: list[str] = []
+    pool = set(sys_path_pool)
     if not os.path.isdir(directory):
-        return set()
-    seed_files = [
+        return consumed, bad_inserts, bad_imports, frozenset(pool)
+    root = _monorepo_root()
+    visited: set[str] = set()
+    queue = [
         os.path.join(directory, name)
         for name in sorted(os.listdir(directory))
         if name.startswith("test_") and name.endswith(".py")
     ]
-    consumed: set[str] = set()
-    visited: set[str] = set()
-    queue = list(seed_files)
     while queue:
         f = os.path.abspath(queue.pop(0))
         if f in visited or not os.path.isfile(f):
@@ -493,28 +626,143 @@ def _scan_import_consumed_paths(
             src = fh.read()
         own_dir = os.path.dirname(f)
         insert_dirs, unresolved = _parse_sys_path_inserts(src, f)
-        if unresolved_out is not None:
-            unresolved_out.extend(unresolved)
-        candidate_base_dirs = [
-            own_dir,
-            os.path.dirname(own_dir),
-            *insert_dirs,
-        ]
-        module_names = [m.group(1) for m in _IMPORT_RE.finditer(src)]
-        module_names += [m.group(1) for m in _FROM_IMPORT_RE.finditer(src)]
-        for module_name in module_names:
-            for base_dir in candidate_base_dirs:
-                candidate_abs = os.path.join(base_dir, module_name + ".py")
-                if not os.path.isfile(candidate_abs):
+        bad_inserts.extend(unresolved)
+        pool.update(insert_dirs)
+        base_dirs = [*_ancestor_dirs(f), *sorted(pool)]
+        for req in _import_requests(src):
+            hits = _resolve_import_request(req, own_dir, base_dirs)
+            if not hits:
+                # 🔴 靜默丟棄本身就是機制缺陷（檔頭〈盲區 G〉）：只有「標準庫／已宣告
+                # 第三方」是可辯護的忽略理由，其餘一律列名讓本鎖紅。
+                if (
+                    req.top not in sys.stdlib_module_names
+                    and req.top not in _KNOWN_EXTERNAL_MODULES
+                ):
+                    where = os.path.relpath(f, root).replace(os.sep, "/")
+                    bad_imports.append(f"{where}:{req.lineno}: {req.source[:120]}")
+                continue
+            for hit in hits:
+                rel = os.path.relpath(hit, root).replace(os.sep, "/")
+                if rel.startswith(".."):  # repo 外，非本鎖標的
                     continue
-                rel = os.path.relpath(candidate_abs, _monorepo_root()).replace(os.sep, "/")
                 consumed.add(rel)
-                queue.append(candidate_abs)
+                queue.append(hit)
+    return consumed, bad_inserts, bad_imports, frozenset(pool)
+
+
+def _import_scan(directory: str) -> tuple[set[str], list[str], list[str]]:
+    """BFS ＋ 全域 sys.path 池 fixed point 的完整 import 消費掃描（記憶化）。"""
+    cached = _IMPORT_SCAN_CACHE.get(directory)
+    if cached is None:
+        pool: frozenset[str] = frozenset()
+        consumed: set[str] = set()
+        bad_inserts: list[str] = []
+        bad_imports: list[str] = []
+        for _ in range(_MAX_SYS_PATH_POOL_ROUNDS):
+            consumed, bad_inserts, bad_imports, new_pool = _import_scan_round(directory, pool)
+            if new_pool <= pool:
+                break
+            pool = new_pool
+        cached = (consumed, bad_inserts, bad_imports)
+        _IMPORT_SCAN_CACHE[directory] = cached
+    return set(cached[0]), list(cached[1]), list(cached[2])
+
+
+def _scan_import_consumed_paths(
+    directory: str,
+    unresolved_out: list[str] | None = None,
+    unresolved_imports_out: list[str] | None = None,
+) -> set[str]:
+    """BFS 掃描 `directory` 內 test_*.py 的 import 陳述式 → 被消費的根層檔案。
+
+    對新發現的根層 .py 檔遞迴重複同一掃描（fixed point），關閉「測試只 import A、
+    A 內部又 import B」的第二層盲區（見檔頭 S26）。
+
+    R67：`unresolved_out` 收集走訪範圍內**無法靜態解析**的 `sys.path.insert` 描述，供
+    `test_no_unresolvable_sys_path_inserts` fail-loud。
+    盲區 G：`unresolved_imports_out` 收集**解析不出對應檔案、又非標準庫／已宣告第三方**
+    的 import 描述，供 `test_no_unresolvable_imports` fail-loud——舊實作對這些一律靜默
+    丟棄，而那正是本輪缺陷得以存活的機制。
+    """
+    consumed, bad_inserts, bad_imports = _import_scan(directory)
+    if unresolved_out is not None:
+        unresolved_out.extend(bad_inserts)
+    if unresolved_imports_out is not None:
+        unresolved_imports_out.extend(bad_imports)
     return consumed
 
 
+# ── 盲區 H：模組層 list literal 內的相對路徑字串 ─────────────────────────────
+def _module_level_list_literal_strings(src: str) -> set[str]:
+    """模組層 list literal（含其內嵌結構）裡的全部字串字面值（檔頭〈盲區 H〉）。
+
+    這是本 repo 宣告「這支測試會讀哪幾份檔」的既有形態——例：
+    `tools/tests/test_doc_env_prefix_platform_parity_r60.py::_LIVE_DOCS`（10 份活文件
+    名冊）。它既不是 `_REPO_ROOT / "…"` 路徑運算式、也不是 import 陳述式，兩套既有
+    掃描器同時零訊號。
+
+    誠實劃界：
+      · 只認**模組層指派**的 `ast.List`。函式／類別內的 list 不在射程內（那是區域資料，
+        納入會把大量非宣告字串掃進來）。
+      · 刻意**不**含模組層 `dict`／`tuple`：本鎖自己的 `_KNOWN_*` 登記表正是那個形狀，
+        納入會把「鎖記載的檔案」誤算成「aisdlc-sdd-ci 的消費檔」而逼出一批假需求。
+      · 是否為真路徑不在此判定——由 `_scan_module_level_path_literals()` 的形態過濾與
+        `_consumed_root_paths()` 的磁碟存在性過濾器裁決。
+    """
+    try:
+        tree = ast.parse(src)
+    except SyntaxError:
+        return set()
+    out: set[str] = set()
+    for stmt in tree.body:
+        value = stmt.value if isinstance(stmt, (ast.Assign, ast.AnnAssign)) else None
+        if not isinstance(value, ast.List):
+            continue
+        for node in ast.walk(value):
+            if isinstance(node, ast.Constant) and isinstance(node.value, str):
+                out.add(node.value)
+    return out
+
+
+def _looks_like_repo_relative_path(text: str) -> bool:
+    """只放行「repo 相對、POSIX 分隔符」的字串——絕對路徑／磁碟機／`..` 逃逸一律擋掉。
+
+    否則 `os.path.join(_monorepo_root(), text)` 可能組出 repo 外的真實檔案，讓它以
+    無法被 workflow paths（一律 repo 相對）匹配的形態進入消費集合而假紅。
+    單一前導點是**允許**的（`.github/workflows/…`／`.claude/…` 都是合法 repo 相對路徑），
+    擋掉的是 `..` 逃逸。
+    """
+    return bool(
+        text
+        and "\\" not in text
+        and ":" not in text
+        and not text.startswith(("/", ".."))
+        and not os.path.isabs(text)
+    )
+
+
+def _scan_module_level_path_literals(directory: str) -> set[str]:
+    found: set[str] = set()
+    if not os.path.isdir(directory):
+        return found
+    for name in sorted(os.listdir(directory)):
+        if not (name.startswith("test_") and name.endswith(".py")):
+            continue
+        with open(os.path.join(directory, name), encoding="utf-8") as f:
+            src = f.read()
+        found |= {
+            s for s in _module_level_list_literal_strings(src)
+            if _looks_like_repo_relative_path(s)
+        }
+    return found
+
+
 def _consumed_root_paths(directory: str) -> set[str]:
-    found = _scan_dir_for_root_paths(directory) | _scan_import_consumed_paths(directory)
+    found = (
+        _scan_dir_for_root_paths(directory)
+        | _scan_import_consumed_paths(directory)
+        | _scan_module_level_path_literals(directory)
+    )
     # 只留「磁碟上存在的檔案」——join 到目錄／動態片段者非本鎖標的
     return {p for p in found if os.path.isfile(os.path.join(_monorepo_root(), p))}
 
@@ -725,6 +973,133 @@ def test_no_unresolvable_sys_path_inserts():
     )
 
 
+# ──────────────────────────────────────────────────────────────
+# 盲區 G 回歸鎖：`from <套件> import <模組>` 必須解析出**被消費的模組**
+# ──────────────────────────────────────────────────────────────
+@pytest.mark.parametrize(
+    "src,must_contain",
+    [
+        # 盲區 G 本體（`tools/tests/test_doc_loc_baseline_freshness_r60.py` 與
+        # `tools/sync_onboarding_baselines.py` 的真實寫法）。舊 `_FROM_IMPORT_RE` 對這一句
+        # 得出的是套件名 `lib`，找不到 `lib.py` 即靜默丟棄 ⇒ tools/lib/baseline_origin.py
+        # 對本鎖結構性隱形，雙 compat-CI 漏列它卻 34 passed 全綠。
+        ("from lib import baseline_origin as BO\n", ("lib", "baseline_origin")),
+        # 多目標：兩個都要看得見（舊正則一個都沒有）
+        ("from lib import a, b as c\n", ("lib", "a")),
+        ("from lib import a, b as c\n", ("lib", "b")),
+        # 點狀套件路徑（舊正則的 `[A-Za-z_][A-Za-z0-9_]*` 只吃到第一段）
+        ("from lib.sub import x\n", ("lib", "sub", "x")),
+        ("from autoclaude.utils import logger as L\n", ("autoclaude", "utils", "logger")),
+        # 🔴 既有形態不得退化（S26／R19 已守住的三種）
+        ("import platform_utils\n", ("platform_utils",)),
+        ("import check_hooks_liveness as m\n", ("check_hooks_liveness",)),
+        ("import autoclaude.models.escalation\n", ("autoclaude", "models", "escalation")),
+        # `from mymod import func`：被消費的是 mymod 本身，這一半也要在候選內
+        ("from integration_gate_core import main\n", ("integration_gate_core",)),
+    ],
+)
+def test_import_parser_yields_consumed_module_not_only_package_name(src, must_contain):
+    """盲區 G 回歸鎖：import 解析的判別條件必須是**語意**（誰被消費），不是**寫法**。
+
+    WHY（Rule 9 — 測意圖）：本鎖存在的唯一理由是「知道測試會讀到哪些根層檔，才能斷言
+    那些檔在 compat-CI 的 paths 內」。`from lib import baseline_origin` 被消費的是
+    `tools/lib/baseline_origin.py`——這與作者寫 `import` 還是 `from … import`、有沒有
+    `as`、套件名有幾段點，語意上毫無關係。舊實作卻只認 `from` 後第一段名稱，於是
+    `tools/lib/baseline_origin.py` 與 `tools/lib/defect_ledger_index.py` 兩支被真實消費的
+    SSOT 在雙 compat-CI paths 皆缺席而無任何訊號：**只改這兩支檔的 push 不會觸發任一支
+    compat-CI**，Windows／macOS 專屬迴歸因此逃過雲端攔阻（DEF-101-042 假綠第 7 種形態）。
+    任何讓解析退回「只認第一段名稱／只認某種字面排列」的改動（含改回正則）即刻轉紅。
+    """
+    targets = {t for r in _import_requests(src) for t in r.targets}
+    assert must_contain in targets, (
+        f"import 陳述式 {src.strip()!r} 應解析出被消費模組 {must_contain}，"
+        f"實得候選 {sorted(targets)}——解析器又退回認寫法而非認語意（盲區 G 同構）"
+    )
+
+
+def test_from_import_does_not_collapse_to_package_name_only():
+    """把舊行為**逐一點名**釘死：只得出套件名 ＝ 解析失敗，不是解析成功。
+
+    WHY：上一條斷言的是「新答案在候選裡」，本條斷言的是「舊答案不足以充當答案」。
+    兩者缺一都可能被一個「候選集合裡塞進套件名就算過」的實作騙過去。
+    """
+    targets = {t for r in _import_requests("from lib import baseline_origin as BO\n")
+               for t in r.targets}
+    assert targets != {("lib",)}, (
+        "解析結果只有套件名 `lib`——這正是舊 `_FROM_IMPORT_RE` 的行為：下游拿 `lib` 去找 "
+        "`lib.py` 找不到就靜默丟棄，被消費的 tools/lib/baseline_origin.py 因此隱形"
+    )
+    assert ("lib", "baseline_origin") in targets
+
+
+def test_no_unresolvable_imports():
+    """盲區 G fail-loud（Rule 12）：解析不出對應檔案的 import 必須當場列名。
+
+    WHY：盲區 G 之所以能存活，不是掃描器「判斷錯」，而是它對解析不出的模組名
+    **靜默跳過**——沒有任何訊號說「這裡有一句我沒對映到檔案，因此消費面是不完整的」。
+    本鎖把它升級為顯式失敗，唯一可辯護的忽略理由是「標準庫（`sys.stdlib_module_names`
+    機械認定）／已宣告第三方（`_KNOWN_EXTERNAL_MODULES`）」。新增一個沒登記的第三方
+    相依、或寫出本解析器對映不到的 import 形態時，作者當場看到它。
+    """
+    unresolved: list[str] = []
+    for directory in _WORKFLOW_TEST_DIRS.values():
+        _scan_import_consumed_paths(directory, unresolved_imports_out=unresolved)
+    assert not unresolved, (
+        "以下 import 陳述式解析不出對應檔案，且頂層名稱既非標準庫也未登記於 "
+        "_KNOWN_EXTERNAL_MODULES ⇒ 其消費的檔案（若在 repo 內）對本鎖隱形（盲區 G 同構"
+        "假綠）。請擴充 _resolve_import_request()／_ancestor_dirs() 的解析面，或把該第三方"
+        "模組登記進 _KNOWN_EXTERNAL_MODULES：\n  " + "\n  ".join(sorted(set(unresolved)))
+    )
+
+
+# ──────────────────────────────────────────────────────────────
+# 盲區 H 回歸鎖：模組層 list literal 內的相對路徑字串
+# ──────────────────────────────────────────────────────────────
+def test_module_level_list_literal_paths_are_visible():
+    """盲區 H：以 list literal 宣告「我會讀這幾份檔」的形態必須被掃描面看見。
+
+    WHY（Rule 9 — 測意圖）：`tools/tests/test_doc_env_prefix_platform_parity_r60.py` 用
+    模組層 `_LIVE_DOCS = [...]` 名冊逐份讀取活文件（而非 `_REPO_ROOT / "…"` 路徑運算式），
+    於是 `README.md`／`useMacWin.md`／`docs/AISDLC_Agent_UserGuide.md` 三份**真被消費**的
+    文件在雙 compat-CI paths 皆缺席——改文件不觸發 compat-CI，守著它們的鎖恰好不跑。
+    這與盲區 A~F 的每一種都不同：既非路徑運算式、亦非 import、亦非 glob／子行程／
+    conftest 隱式載入，而是「宣告資料」這第三種消費宣告形態。
+    """
+    src = (
+        "_LIVE_DOCS = [\n"
+        '    "README.md",\n'
+        '    "docs/AISDLC_Agent_UserGuide.md",\n'
+        '    ".github/workflows/autoclaude-ci.yml",\n'
+        "]\n"
+        "_PAIRS = [(\"useMacWin.md\", 3)]\n"
+    )
+    got = _module_level_list_literal_strings(src)
+    for expected in (
+        "README.md",
+        "docs/AISDLC_Agent_UserGuide.md",
+        ".github/workflows/autoclaude-ci.yml",
+        "useMacWin.md",  # 巢狀 tuple 內的字串也算（名冊常帶伴隨值）
+    ):
+        assert expected in got, f"模組層 list literal 內的 {expected!r} 未被掃出，實得 {sorted(got)}"
+    # 單一前導點不得被誤當成 `..` 逃逸擋掉（`.github/`／`.claude/` 是合法 repo 相對路徑）
+    assert _looks_like_repo_relative_path(".github/workflows/autoclaude-ci.yml")
+    assert not _looks_like_repo_relative_path("../outside.md")
+
+
+def test_live_docs_registry_consumers_are_detected():
+    """盲區 H 端到端：真實名冊的三份代表必須出現在 tools/tests 的消費集合裡。
+
+    上一條驗解析器、本條驗「接到真實 repo 上仍然有效」——解析器對得起自己卻沒被接進
+    `_consumed_root_paths()` 的話，覆蓋斷言照樣是恆真的（本鎖歷史上多次的失效形態）。
+    """
+    consumed = _consumed_root_paths(os.path.join(_monorepo_root(), "tools", "tests"))
+    for rel in ("README.md", "useMacWin.md", "docs/AISDLC_Agent_UserGuide.md"):
+        assert rel in consumed, (
+            f"{rel} 是 test_doc_env_prefix_platform_parity_r60.py::_LIVE_DOCS 的成員"
+            f"（磁碟上存在），卻不在消費集合內——盲區 H 掃描器未被接進 _consumed_root_paths()"
+        )
+
+
 @pytest.mark.parametrize("workflow_filename", sorted(_WORKFLOW_TEST_DIRS))
 def test_push_and_pr_paths_symmetric(workflow_filename):
     push, pr = _workflow_paths(workflow_filename)
@@ -764,6 +1139,26 @@ def test_known_consumers_detected():
         # 才讓雙 compat-CI paths 缺列假綠存活。改 AST 解析後偵得；同步釘進本表，
         # 使「解析器再退化回只認 inline 形態」當場紅（見檔頭 R67）。
         "tools/lib/sdd_latest.py",
+        # 盲區 G（`from <套件> import <模組>`）：舊 `_FROM_IMPORT_RE` 只取 `from` 後第一段
+        # 名稱 `lib`，找不到 `lib.py` 就靜默丟棄。這兩支被 `from lib import …` 消費的 SSOT
+        # 因此隱形（baseline_origin：tools/tests/test_doc_loc_baseline_freshness_r60.py ＋
+        # tools/sync_onboarding_baselines.py；defect_ledger_index：tools/archive_defect_log.py
+        # ＋ tools/check_defect_log_crossref.py）。改 AST 解析後偵得。
+        "tools/lib/baseline_origin.py",
+        "tools/lib/defect_ledger_index.py",
+        # 盲區 G 附帶揭露：`from autoclaude.execution.pre_run_validator import
+        # _is_windows_apps_alias_stub`（tools/tests/test_windowsapps_guard_cross_consistency.py）
+        # ——舊正則吃不到點狀套件路徑的第二段起，這支被直接斷言行為的檔一直缺席雙邊 paths。
+        "AutoClaude/autoclaude/execution/pre_run_validator.py",
+        # 盲區 G 附帶揭露：`from scripts import sdd_version`（AISDLC_SDD/scripts/tests/ 下
+        # 20 支測試的慣用法，靠 ci-gate 的 `cd AISDLC_SDD` 讓 cwd 進 sys.path）——舊「自身
+        # 目錄＋父目錄」兩層寫死候選解不到第三層祖先，改逐層向上後偵得。
+        "AISDLC_SDD/scripts/sdd_version.py",
+        # 盲區 H（模組層 list literal 內的相對路徑字串）：
+        # tools/tests/test_doc_env_prefix_platform_parity_r60.py::_LIVE_DOCS 名冊成員。
+        "README.md",
+        "useMacWin.md",
+        "docs/AISDLC_Agent_UserGuide.md",
     }
     missing = expected - consumed
     assert not missing, f"掃描器漏抓已知消費檔（正則退化）：{missing}"

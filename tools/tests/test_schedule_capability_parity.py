@@ -32,6 +32,7 @@ from __future__ import annotations
 
 import ast
 import re
+import sys
 import unittest
 import warnings
 from pathlib import Path
@@ -41,6 +42,15 @@ _REPO_ROOT = Path(__file__).resolve().parents[2]
 _MAC_SCRIPT = _REPO_ROOT / "tools" / "install_mac_nightly.sh"
 _WIN_SCRIPT = _REPO_ROOT / "tools" / "install_windows_nightly.ps1"
 _TESTS_DIR = Path(__file__).resolve().parent
+
+# 掃描面下限的政策（比例）與 `tools/lib/skip_tag_policy.py` 的逐樹下限共用同一份常數
+# ——本檔若自己再寫一個 0.8，就是同一份知識的第二個家（R75 主題）。
+sys.path.insert(0, str(_REPO_ROOT / "tools" / "lib"))
+from skip_tag_policy import TREE_FLOOR_RATIO as _TREE_FLOOR_RATIO  # noqa: E402
+
+#: `tools/tests/` 頂層 `test_*.py` 的檔數下限＝重釘當回合實測 53 × `_TREE_FLOOR_RATIO`。
+#: 兩個方向都有斷言，見 `test_scan_surface_is_not_silently_empty`。
+_SCAN_FLOOR = 42
 
 
 def _mac_source() -> str:
@@ -427,12 +437,26 @@ class TestUnittestDiscoverConformance(unittest.TestCase):
         return sorted(_TESTS_DIR.glob("test_*.py"))
 
     def test_scan_surface_is_not_silently_empty(self) -> None:
-        """掃描面自檢：本鎖若因目錄結構變動而掃到 0 份檔案，必須紅而非靜默通過。"""
+        """掃描面自檢：本鎖若因目錄結構變動而掃到 0 份檔案，必須紅而非靜默通過。
+
+        🔴 R75 訂正（SD 追加②）：下限原為寫死的 `40`、註解寫「R60 實測 43 份」，而 R75
+        實測已是 53 份 ⇒ 下限只剩實測的 75%，對「靜默縮面」的鑑別力被吃掉一截，而
+        **沒有任何東西會在它過期時說話**——這與 R74 自己踩到的 `MIN_TESTS` 腐化 11 輪
+        是同一種病。現改為與 `tools/lib/skip_tag_policy.py` 的逐樹下限**共用同一條政策**
+        （下限＝實測的 `TREE_FLOOR_RATIO`），並補上第二個方向的斷言：下限一旦跌破該比例
+        就是一筆失敗，逼人回來重釘。比例常數刻意 import 而非在此再寫一份 0.8。
+        """
         modules = self._test_modules()
         self.assertGreaterEqual(
-            len(modules), 40,
-            f"tools/tests/ 只掃到 {len(modules)} 份 test_*.py——掃描面疑似靜默縮小"
-            f"（目錄改名/pattern 不符）；R60 實測 43 份",
+            len(modules), _SCAN_FLOOR,
+            f"tools/tests/ 只掃到 {len(modules)} 份 test_*.py < 下限 {_SCAN_FLOOR}"
+            "——掃描面疑似靜默縮小（目錄改名/pattern 不符）",
+        )
+        self.assertGreaterEqual(
+            _SCAN_FLOOR, int(len(modules) * _TREE_FLOOR_RATIO),
+            f"下限 {_SCAN_FLOOR} 已過期（實測 {len(modules)}，下限只剩實測的 "
+            f"{_SCAN_FLOOR / len(modules):.0%}、低於 {_TREE_FLOOR_RATIO:.0%}）"
+            f"——請把 _SCAN_FLOOR 重釘為 {int(len(modules) * _TREE_FLOOR_RATIO)}",
         )
 
     def test_every_test_module_contributes_at_least_one_discovered_test(self) -> None:

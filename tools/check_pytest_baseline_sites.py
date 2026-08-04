@@ -186,12 +186,9 @@ def scan(file_paths: list[Path], ssot_path: Path) -> list[str]:
 
 
 def main(argv: list[str] | None = None) -> int:
-    # 本工具**不接受任何引數**。修前它連 argv 都不看 ⇒ `--bogus-flag-xyz` 靜默 rc=0
-    # 印綠燈（R67-D20 同一個洞，射程擴張至本檔）。
-    rc = _cli_flags.reject_unknown_argv(
-        "check_pytest_baseline_sites.py", sys.argv[1:] if argv is None else argv, ())
-    if rc is not None:
-        return rc
+    # 本工具**不接受任何引數**（`argv` 只為既有程式化呼叫端的簽章相容保留）。
+    # 🔴 本層**絕不讀 `sys.argv`**——未知引數的拒收在 `cli()`，WHY 見該處。
+    del argv
     files = [_REPO_ROOT / rel for rel in _SCAN_FILES]
     ssot = _REPO_ROOT / _SSOT_FILE
 
@@ -220,5 +217,18 @@ def main(argv: list[str] | None = None) -> int:
     return 0
 
 
+def cli(argv: list[str]) -> int:
+    """CLI 入口：未知引數 rc=2 fail-loud（R67-D20 同一個洞，射程擴張至本檔）。
+
+    🔴 為何拒收待在這一層（R75 統一四支，理由同 `tools/_cli_flags.py` 檔頭〈接線紀律〉）：
+    `main(argv=None) → sys.argv[1:]` 會把**程式化呼叫端**的參數當成本工具的旗標。實例
+    （HEAD 既存、R75 實測）：`python -m unittest tools.tests.test_gha_action_versions`
+    下 unittest 把模組名放進 `sys.argv` ⇒ 3 支真鎖變假紅。閘門路徑
+    （`sys.argv[1:] == []`）恆綠，所以這個洞七輪沒被任何人看見。
+    """
+    rc = _cli_flags.reject_unknown_argv("check_pytest_baseline_sites.py", argv, ())
+    return main(argv) if rc is None else rc
+
+
 if __name__ == "__main__":
-    sys.exit(main())
+    sys.exit(cli(sys.argv[1:]))

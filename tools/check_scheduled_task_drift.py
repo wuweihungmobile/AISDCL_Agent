@@ -7,11 +7,37 @@
     線上排程只以「機器狀態」存在，repo 裡沒有任何一份檔案是它們，於是也就沒有
     任何檢查器有對照組可比。本檔＝比對器，對照組＝tools/scheduled_task_expectations.json。
 
-判準（刻意設計成 CI 安全）：
-    · 非 Windows              → SKIP，rc=0（macos/ubuntu CI 不得因此轉紅）
-    · 兩支任務都不存在        → SKIP，rc=0（本機未安裝排程／CI runner 的正常狀態）
-    · 任務存在但設定不符期望  → DRIFT，rc=1  ← 這才是要偵測的東西
-    · 任務存在但讀不到設定    → rc=1（fail-closed：量不出來不得當成沒問題）
+判準（刻意設計成 CI 安全，但「任務不見了」必須非綠）：
+    · 非 Windows                → SKIP，rc=0（macos/ubuntu CI 不得因此轉紅）
+    · 受管任務**全部**不存在    → SKIP，rc=0（本機未安裝排程／CI runner 的正常狀態）；
+                                   帶 --require-installed 則改判 TASK_MISSING、rc=1
+    · **部分**存在、部分不存在  → TASK_MISSING，rc=1  ← R75 補登記的一格
+    · 任務存在但設定不符期望    → DRIFT，rc=1
+    · 任務存在但讀不到設定      → ERROR，rc=1（fail-closed：量不出來不得當成沒問題）
+
+🔴 R75：為何要多一個狀態字，而不是把「部分缺席」折進 DRIFT（SD 複審 blocking）：
+    落地首版只登記了「全缺席＝skip」與「存在但設定不符＝drift」兩格，「部分存在」
+    這一格**沒有登記、沒有判準、也沒有測試**——實測「一支設定完美 ＋ 一支整支不存在」
+    回 status=ok、rc=0、drifts=[]，人類可讀輸出還照實印「不存在（未安裝）」，
+    也就是**印得出來卻判它綠**。本偵測器要守的是「排程會不會漏跑」，而「任務不見了」
+    是漏跑的最強形態（R71 就真的從本機移除過一支 AutoClaude* 任務），卻是它唯一
+    看不到的形態。
+    不折進 DRIFT 的理由是**接線層的處置不同**：run_local_nightly.ps1 對 `status=drift`
+    設了一條具名豁免（DEF-101-794 那五項設定的修法需系統管理員提權，故只 WARN、
+    不計入 finalFailures），而該豁免的射程是「設定值不對」。任務整支不見的修法完全
+    不同（重跑安裝器註冊回來，不需要等提權），不該搭那條豁免的便車——那等於把最強
+    的漏跑訊號從 exit code 上拿掉，缺陷只是往上搬一層。該接線層對狀態字採**白名單
+    fail-closed**（`-notin @('drift','ok','skip')` 即計失敗，明文寫「含未來新增的
+    狀態字」），所以新狀態字自動落在「計失敗」那一側——這是它設計好的擴充點。
+
+🔴 R75：「全缺席＝skip」為何**維持**預設 skip（同一次複審的第二問）：
+    偵測器在「全缺席」這個 vantage point 上沒有任何證據能區分「這台機器從沒裝過」
+    與「兩支都被移除了」——把它判紅會讓每個 CI runner 與每個 fresh clone 永久紅，
+    而人的反應是把檢查關掉（＝把剛補上的偵測管道又拆了）。而且這一格在**自動偵測上
+    本來就是空的**：受管的兩支任務裡有一支就是 nightly 自己，兩支都不見時已經沒有
+    任何排程載具會跑到本偵測器。故正解不是改預設，而是給「知道自己該有排程」的機器
+    一個顯式開關：`--require-installed`（人工／push 前閘門可用），把這個無法由預設值
+    關閉的缺口變成可被顯式關閉的缺口，而不是只劃界結案（DEF-101-757）。
 
 實際值一律取 `Export-ScheduledTask` 的 XML，不用 `Get-ScheduledTask | Select ...`：
     後者對 MultipleInstances=StopExisting（enum 值 3）會印**空白**，空白極易被讀成
@@ -43,6 +69,9 @@ STATUS_OK = "ok"
 STATUS_DRIFT = "drift"
 STATUS_SKIP = "skip"
 STATUS_ERROR = "error"
+# R75：受管任務有一支以上整支不存在（見檔頭判準表；刻意不叫 partial——
+# 該狀態字在本 repo 另有既定的窄語意，R64 有誤用紀錄）。
+STATUS_TASK_MISSING = "task_missing"
 
 
 def load_expectations(path: Path) -> dict[str, dict[str, str]]:
@@ -118,10 +147,19 @@ def export_task_xml(task_name: str) -> str | None:
 def evaluate(
     expectations: dict[str, dict[str, str]],
     actuals: dict[str, dict[str, str] | None],
+    *,
+    require_installed: bool = False,
 ) -> dict[str, Any]:
     """純函式判定（可單元測試，不碰真實排程）。
 
-    actuals[task] is None ⇒ 該任務不存在。全部不存在 ⇒ skip。
+    actuals[task] is None ⇒ 該任務不存在。狀態格對照見檔頭判準表：
+        全部存在 + 全符期望            → ok
+        全部存在 + 有一項不符          → drift
+        **部分**存在（其餘整支不見）   → task_missing（R75 補登記）
+        全部不存在                     → skip；require_installed=True 時改判 task_missing
+
+    `require_installed` 的用途見檔頭「全缺席」段：預設 False 讓 CI runner／未安裝的
+    開發機保持綠，True 給「知道自己該有排程」的機器把那一格關上。
     """
     report: dict[str, Any] = {"status": STATUS_OK, "tasks": {}, "drifts": [], "absent": []}
     present = 0
@@ -143,9 +181,28 @@ def evaluate(
         report["tasks"][task] = {"present": True, "drifts": task_drifts}
         for d in task_drifts:
             report["drifts"].append({"task": task, **d})
+    report["present_count"] = present
+    report["expected_count"] = len(expectations)
     if present == 0:
-        report["status"] = STATUS_SKIP
-        report["reason"] = "本機未安裝任何受管排程任務（CI runner／未安裝的開發機屬正常）"
+        if require_installed:
+            report["status"] = STATUS_TASK_MISSING
+            report["reason"] = (
+                "受管排程任務全部不存在，而 --require-installed 宣告本機應已安裝"
+                f"（缺席：{', '.join(report['absent'])}）"
+            )
+        else:
+            report["status"] = STATUS_SKIP
+            report["reason"] = "本機未安裝任何受管排程任務（CI runner／未安裝的開發機屬正常）"
+    elif present < len(expectations):
+        # 🔴 R75 補登記的一格。刻意排在 drifts 判定**之前**：兩者同時成立時（有任務不見
+        # 了、剩下的那支設定也不對）以 task_missing 為主狀態——它的修法（重跑安裝器）
+        # 涵蓋另一者，而反過來不成立。drifts 清單仍照實回報，不因主狀態改變而丟資訊。
+        report["status"] = STATUS_TASK_MISSING
+        report["reason"] = (
+            f"受管排程任務部分缺席（{present}/{len(expectations)} 存在）："
+            f"{', '.join(report['absent'])} 整支不存在 ⇒ 該任務不可能觸發，"
+            "＝漏跑的最強形態，不得判綠"
+        )
     elif report["drifts"]:
         report["status"] = STATUS_DRIFT
     return report
@@ -155,6 +212,14 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="比對線上 schtasks 設定 vs 期望值 SSOT")
     parser.add_argument("--expectations", type=Path, default=_DEFAULT_EXPECTATIONS)
     parser.add_argument("--json", action="store_true", help="輸出 JSON")
+    parser.add_argument(
+        "--require-installed",
+        action="store_true",
+        help=(
+            "宣告本機應已安裝受管排程：全缺席由 SKIP 改判 task_missing（rc=1）。"
+            "預設關閉的理由見檔頭「全缺席」段（CI runner／fresh clone 不得因此永久紅）"
+        ),
+    )
     args = parser.parse_args(argv)
 
     if sys.platform != "win32":
@@ -178,14 +243,22 @@ def main(argv: list[str] | None = None) -> int:
               else f"[schedule-drift] ERROR — {exc}")
         return 1  # fail-closed：量不出來不得當成沒問題
 
-    report = evaluate(expectations, actuals)
+    report = evaluate(expectations, actuals, require_installed=args.require_installed)
     if args.json:
         print(json.dumps(report, ensure_ascii=False, indent=2))
     else:
         print(f"[schedule-drift] status={report['status']}")
         for task, info in report["tasks"].items():
             if not info["present"]:
-                print(f"  - {task}: 不存在（未安裝）")
+                # R75：缺席行必須自己說出它算綠還是算紅。原文一律只印「不存在（未安裝）」
+                # ——同一句話在「全缺席＝skip、rc=0」與「部分缺席＝rc=1」兩種相反結論下
+                # 都會出現，讀者無從分辨自己看到的是哪一種。
+                verdict = (
+                    "判定為失敗（該任務不可能觸發）"
+                    if report["status"] == STATUS_TASK_MISSING
+                    else "本機未安裝受管排程，整體判 SKIP"
+                )
+                print(f"  - {task}: 不存在 ⇒ {verdict}")
                 continue
             if not info["drifts"]:
                 print(f"  - {task}: 全部 {len(expectations[task])} 項設定符合期望")
@@ -193,14 +266,16 @@ def main(argv: list[str] | None = None) -> int:
             print(f"  - {task}: {len(info['drifts'])} 項漂移")
             for d in info["drifts"]:
                 print(f"      {d['setting']}: 實機={d['actual']} 期望={d['expected']}")
-        if report["status"] == STATUS_DRIFT:
+        if report["status"] == STATUS_TASK_MISSING:
+            print(f"  原因：{report['reason']}")
+        if report["status"] in (STATUS_DRIFT, STATUS_TASK_MISSING):
             installer = "tools\\install_windows_nightly.ps1"
             print("  修法（需「以系統管理員身分執行」）：")
             print(f"    powershell -ExecutionPolicy Bypass -File {installer}")
             print(f"    powershell -ExecutionPolicy Bypass -File {installer} -Status")
             print("  ⚠️ 安裝器會 Unregister→Register，觸發時刻取自 param 預設值——"
                   "要保留現行時刻請顯式傳 -NightlyAt/-SmokeAt（見該檔 param 區塊）")
-    return 1 if report["status"] in (STATUS_DRIFT, STATUS_ERROR) else 0
+    return 1 if report["status"] in (STATUS_DRIFT, STATUS_ERROR, STATUS_TASK_MISSING) else 0
 
 
 if __name__ == "__main__":

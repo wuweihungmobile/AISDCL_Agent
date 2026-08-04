@@ -1067,6 +1067,147 @@ class TestScheduledTaskDriftChecker(unittest.TestCase):
         self.assertEqual(report["status"], "skip")
         self.assertEqual(sorted(report["absent"]), sorted(self.expectations))
 
+    # ──────────────────────────────────────────────────────────────────────
+    # 🔴 R75（SD 複審 blocking）：「部分缺席」這一格此前沒有登記、沒有判準、沒有測試
+    #
+    # 缺陷實測（修復前，唯讀即可證）：一支存在且七項設定全符 ＋ 一支整支不存在
+    #   → status=ok、drifts=[]、main() rc=0（全綠），
+    #     而同一份人類可讀輸出照實印著「AutoClaude_WindowsSmoke: 不存在（未安裝）」。
+    # 也就是**印得出來卻判它綠**：判準與被判準物錯配——偵測器要守的是「排程會不會漏
+    # 跑」，而「任務不見了」是漏跑的最強形態（R71 真的從本機移除過一支 AutoClaude*
+    # 任務），卻是它唯一看不到的形態。上方 test_absent_tasks_are_skip_not_drift 只覆蓋
+    # **全**缺席，剛好把這一格繞過去。
+    # ──────────────────────────────────────────────────────────────────────
+
+    def test_partial_absence_is_not_green(self) -> None:
+        """一支完美 ＋ 一支整支不存在 → 非 ok、非 skip，且缺席那支要點名。
+
+        意圖（Rule 9）：這條的鑑別力來源是「存在的那支刻意設成七項全符」——只要有人
+        把判準退回「只看設定值」，剩下的那支就會讓整體回綠，本 case 立刻紅。
+        """
+        tasks = list(self.expectations)
+        self.assertGreaterEqual(len(tasks), 2, "SSOT 至少要有兩支任務，本 case 才有意義")
+        perfect = self.mod.parse_task_xml(_SAMPLE_TASK_XML)
+        actuals: dict[str, Any] = dict.fromkeys(self.expectations, perfect)
+        actuals[tasks[-1]] = None
+
+        report = self.mod.evaluate(self.expectations, actuals)
+
+        self.assertEqual(report["status"], self.mod.STATUS_TASK_MISSING, report)
+        self.assertNotIn(report["status"], ("ok", "skip"), "部分缺席不得判綠")
+        self.assertEqual(report["absent"], [tasks[-1]])
+        self.assertEqual(report["present_count"], len(tasks) - 1)
+        self.assertIn(tasks[-1], report["reason"])
+
+    def test_partial_absence_still_reports_the_surviving_tasks_drifts(self) -> None:
+        """主狀態是 task_missing，但存活那支的設定漂移**不得**被吞掉。
+
+        意圖：狀態字只有一個，資訊不該因此變少——不然「先修回任務、再跑一次才看到
+        設定也不對」會變成兩趟，而每一趟都需要一次提權操作。
+        """
+        tasks = list(self.expectations)
+        parsed = self.mod.parse_task_xml(
+            _SAMPLE_TASK_XML.replace("<LogonType>S4U</LogonType>",
+                                     "<LogonType>InteractiveToken</LogonType>")
+        )
+        actuals: dict[str, Any] = dict.fromkeys(self.expectations, parsed)
+        actuals[tasks[-1]] = None
+
+        report = self.mod.evaluate(self.expectations, actuals)
+
+        self.assertEqual(report["status"], self.mod.STATUS_TASK_MISSING)
+        self.assertTrue(
+            any(d["setting"] == "Principals/Principal/LogonType" for d in report["drifts"]),
+            f"存活任務的漂移被主狀態吞掉了：{report['drifts']}",
+        )
+
+    def test_partial_absence_makes_main_exit_nonzero(self) -> None:
+        """端到端（注入式）：main() 對部分缺席必須 rc=1。
+
+        意圖：evaluate() 判對了但 main() 的 rc 白名單沒跟上，對接線層而言等於沒修
+        ——nightly 讀的是 rc 與 `status=` 那一行，不是 report dict。
+        本 case 以注入 `export_task_xml` 取代真排程查詢，故任何平台都跑得到。
+        """
+        tasks = list(self.expectations)
+        absent = tasks[-1]
+
+        def _fake_export(task_name: str) -> str | None:
+            return None if task_name == absent else _SAMPLE_TASK_XML
+
+        buf = io.StringIO()
+        with mock.patch.object(self.mod.sys, "platform", "win32"), \
+             mock.patch.object(self.mod, "export_task_xml", _fake_export), \
+             mock.patch("sys.stdout", buf):
+            rc = self.mod.main([])
+        out = buf.getvalue()
+
+        self.assertEqual(rc, 1, f"部分缺席回了 rc=0（缺陷原形）。輸出：\n{out}")
+        self.assertIn(f"status={self.mod.STATUS_TASK_MISSING}", out)
+        self.assertIn("判定為失敗", out, f"缺席行必須自己說出它算紅。輸出：\n{out}")
+        self.assertIn("install_windows_nightly.ps1", out, "必須印出修法")
+
+    def test_all_absent_is_skip_by_default_and_fails_only_when_declared_installed(self) -> None:
+        """全缺席維持 skip（CI 安全），但 --require-installed 可把那一格關上。
+
+        意圖（DEF-101-757：已知缺口不得只以劃界結案）：偵測器在「全缺席」這個位置
+        沒有證據能區分「從沒裝過」與「兩支都被移除」，故預設不判紅；但「知道自己該有
+        排程」的機器必須有辦法讓它紅。預設值與顯式宣告兩向都鎖，免得日後有人為了讓
+        某台機器紅而改預設（那會讓每個 fresh clone 永久紅 → 檢查被關掉）。
+        """
+        all_absent: dict[str, Any] = dict.fromkeys(self.expectations, None)
+
+        default = self.mod.evaluate(self.expectations, all_absent)
+        self.assertEqual(default["status"], "skip")
+
+        declared = self.mod.evaluate(self.expectations, all_absent, require_installed=True)
+        self.assertEqual(declared["status"], self.mod.STATUS_TASK_MISSING)
+        self.assertEqual(declared["present_count"], 0)
+
+    def test_require_installed_still_exits_zero_on_non_windows(self) -> None:
+        """新旗標不得破壞非 Windows 的 SKIP rc=0（DEF-101-766 教訓不得回歸）。
+
+        意圖：`--require-installed` 是「這台機器該有排程」的宣告，而 macOS/Linux 上
+        連 Task Scheduler 都不存在——把宣告外推成跨平台判準，就是那筆缺陷的原形。
+        """
+        def _boom(*a: Any, **k: Any) -> None:
+            raise AssertionError("非 Windows 不得呼叫排程 API")
+
+        with mock.patch.object(self.mod.sys, "platform", "darwin"), \
+             mock.patch.object(self.mod, "_run_powershell", _boom), \
+             mock.patch("sys.stdout", io.StringIO()):
+            rc = self.mod.main(["--json", "--require-installed"])
+        self.assertEqual(rc, 0)
+
+    def test_task_missing_is_not_whitelisted_as_pass_by_the_nightly_wiring(self) -> None:
+        """接線層核對：新狀態字必須落在 run_local_nightly.ps1 的 fail-closed 那一側。
+
+        意圖（Rule 9）：偵測器 rc=1 只有在接線層把它算成失敗時才有效。該檔對狀態字
+        採白名單（`-notin @('drift','ok','skip')` 即計入 finalFailures，並明文寫「含
+        未來新增的狀態字」），所以 `task_missing` **不得**被加進那份白名單——`drift`
+        目前那條豁免的射程是 DEF-101-794（五項設定值的修法需提權），而任務整支不見的
+        修法是重跑安裝器、不需等提權，不該搭那條豁免的便車（那等於把最強的漏跑訊號
+        從 exit code 上拿掉，缺陷只是往上搬一層）。
+        """
+        wiring = _read(_NIGHTLY_PS1)
+        m = re.search(r"\$schedDriftStatus\s+-notin\s+@\(([^)]*)\)", wiring)
+        self.assertIsNotNone(
+            m,
+            "run_local_nightly.ps1 的 [SCHED-DRIFT] 狀態字白名單結構已變動——"
+            "task_missing 落在哪一側需重新確認（本鎖刻意不猜）",
+        )
+        assert m is not None
+        whitelisted = set(re.findall(r"'([^']+)'", m.group(1)))
+        self.assertNotIn(
+            self.mod.STATUS_TASK_MISSING, whitelisted,
+            f"task_missing 被列入不計失敗的白名單 {sorted(whitelisted)}——"
+            "任務不見了會只印一行 WARN 而 nightly 照樣 exit 0",
+        )
+        self.assertEqual(
+            whitelisted, {"drift", "ok", "skip"},
+            f"白名單內容已變動（實得 {sorted(whitelisted)}）——請重新確認 "
+            "task_missing 仍計入 finalFailures",
+        )
+
     def test_non_windows_exits_zero_without_touching_task_scheduler(self) -> None:
         """非 Windows 必須 rc=0 且不得呼叫 PowerShell（macos/ubuntu CI 不可因此紅）。
 

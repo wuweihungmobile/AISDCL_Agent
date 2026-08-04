@@ -1557,12 +1557,7 @@ def _print_collapse() -> int:
     return 0
 
 
-def main(argv: list[str] | None = None) -> int:
-    args = sys.argv[1:] if argv is None else argv
-    rc = _cli_flags.reject_unknown_argv("check_script_parity.py", args, ("--print-collapse",))
-    if args:  # 未知引數 rc=2 fail-loud（R67-D20 射程擴張）：靜默吞掉即 rc=0 假綠
-        return _print_collapse() if rc is None else rc
-
+def main() -> int:
     ok = True
 
     for label, sh_rel, ps1_rel in _MARKER_PAIRS:
@@ -1613,5 +1608,10 @@ def main(argv: list[str] | None = None) -> int:
     return 0
 
 
+def cli(argv: list[str]) -> int:  # 拒收層＝唯一讀 sys.argv 之處（WHY 見 _cli_flags.py 檔頭）
+    rc = _cli_flags.reject_unknown_argv("check_script_parity.py", argv, ("--print-collapse",))
+    return rc if rc is not None else (_print_collapse() if argv else main())
+
+
 if __name__ == "__main__":
-    sys.exit(main())
+    sys.exit(cli(sys.argv[1:]))

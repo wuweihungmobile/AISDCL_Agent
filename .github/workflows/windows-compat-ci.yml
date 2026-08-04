@@ -220,7 +220,6 @@ on:
       - "tools/run_root_unittests.py"
       # R14：tools/tests/test_subprocess_encoding_hygiene.py 單檔掃描清單消費此檔
       #（樹外 tracked 零散 .py 納管）——只改該檔時其回歸鎖須跑（DEF-101-042 同構）
-      - "AutoClaude/tmp_lint_check.py"
       # R10：tools/tests 內含讀取這兩支 workflow 的回歸鎖（test_root_infra_parity
       # / test_pre_push_dispatcher 經 pre-push 消費 aisdlc-sdd-ci paths）——只改
       # 該兩支 yml 時本 workflow 也須重跑該鎖（DEF-101-042 同構）
@@ -295,6 +294,10 @@ on:
       # 偵測器與其期望值 SSOT（DEF-101-794）與旗標解析共用層。
       - "CLAUDE.md"
       - "tools/lib/windows_skip_tags.py"
+      - "tools/lib/skip_tag_policy.py"
+      - "tools/lib/skip_static_scan.py"
+      - "tools/lib/skip_source_io.py"
+      - "tools/lib/skip_runtime_report.py"
       - "tools/_cli_flags.py"
       - "tools/check_scheduled_task_drift.py"
       - "tools/scheduled_task_expectations.json"
@@ -369,6 +372,51 @@ on:
       # （修 R67-H36：正則認不出 `m._REPO_ROOT` 這種「跨模組屬性存取」根路徑慣用法）
       # 後才揭露此一直存在的漏列。
       - "docs/06_quality/CrossPlatform_Scan_Dimensions.md"
+      # 🔴 盲區 G／H（DEF-101-042 假綠第 7、8 種形態）：以下 19 條全部由
+      # AISDLC_SDD/scripts/tests/test_ci_paths_cover_root_consumers.py 的掃描器升級後當場
+      # 攔下——升級前這批檔在本檔與 macos-compat-ci.yml 的 paths **雙邊命中 0 次**，而該鎖
+      # 34 passed 全綠。逃掉的正是 Windows／macOS 專屬迴歸（root-infra-ci.yml 無 paths
+      # 過濾，純 Python 迴歸仍被 ubuntu 攔下），也就是本 workflow 唯一存在的理由。
+      #
+      # ① 盲區 G ── `from <套件> import <模組>`：舊 `_FROM_IMPORT_RE` 只取 `from` 後第一段
+      #    名稱（＝套件名），找不到 `<套件>.py` 就**靜默丟棄**被消費的模組。已改 AST 解析。
+      #    · tools/lib/baseline_origin.py — tools/tests/test_doc_loc_baseline_freshness_r60.py
+      #      與 tools/sync_onboarding_baselines.py 以 `from lib import baseline_origin` 消費
+      #    · tools/lib/defect_ledger_index.py — tools/archive_defect_log.py 與
+      #      tools/check_defect_log_crossref.py 以 `from lib import defect_ledger_index` 消費
+      #    · AutoClaude/autoclaude/ 下 10 支 — 起點是
+      #      tools/tests/test_windowsapps_guard_cross_consistency.py 的
+      #      `from autoclaude.execution.pre_run_validator import _is_windows_apps_alias_stub`
+      #      （直接斷言該函式行為；點狀套件路徑第二段起舊正則吃不到），其餘 9 支是它
+      #      **import 期的遞移閉包**——module-level import 失敗＝測試收集當場爆，同樣讓本
+      #      workflow 轉紅，故同屬承重檔。
+      #      🔴 刻意逐檔列舉而不改上 `AutoClaude/autoclaude/**`：後者會讓幾乎任何 AutoClaude
+      #      核心改動都拉起兩個 runner（額度治理見本檔 schedule 區塊 R11 註解）。代價是
+      #      autoclaude 的 import 圖若重構，該鎖會紅並要求同步補列——那是 fail-loud 設計本身，
+      #      不是缺陷；沉默的覆蓋不足才是本鎖要治的病。
+      # ② 盲區 H ── 模組層 list literal 內的相對路徑字串：
+      #    tools/tests/test_doc_env_prefix_platform_parity_r60.py 的 `_LIVE_DOCS = [...]`
+      #    名冊（n=10）逐份讀取活文件，既非 `_REPO_ROOT / "…"` 路徑運算式、亦非 import ⇒
+      #    三套既有掃描器同時零訊號。名冊成員中此前未被任何 pattern 涵蓋者即下列 7 份文件。
+      - "tools/lib/baseline_origin.py"
+      - "tools/lib/defect_ledger_index.py"
+      - "AutoClaude/autoclaude/execution/pre_run_validator.py"
+      - "AutoClaude/autoclaude/core/ports/observability.py"
+      - "AutoClaude/autoclaude/core/ports/rtm_feedback.py"
+      - "AutoClaude/autoclaude/core/ports/rtm_sink.py"
+      - "AutoClaude/autoclaude/core/ports/translation_learning.py"
+      - "AutoClaude/autoclaude/infra/adapters/rtm_file_feedback_source.py"
+      - "AutoClaude/autoclaude/infra/adapters/rtm_file_sink.py"
+      - "AutoClaude/autoclaude/infra/adapters/translation_learning_sink.py"
+      - "AutoClaude/autoclaude/models/escalation.py"
+      - "AutoClaude/autoclaude/plugins/checkpoint/_escalation.py"
+      - "README.md"
+      - "useMacWin.md"
+      - "docs/AISDLC_Agent_UserGuide.md"
+      - "AISDLC_SDD/CLAUDE.md"
+      - "AutoClaude/CLAUDE.md"
+      - "AutoClaude/README.md"
+      - "AutoClaude/docs/08_deployment/Local_CI_Parity_Guide.md"
   pull_request:
     paths:
       - "AutoClaude/autoclaude/perception/**"
@@ -388,7 +436,6 @@ on:
       - "tools/run_root_unittests.py"
       # R14：tools/tests/test_subprocess_encoding_hygiene.py 單檔掃描清單消費此檔
       #（樹外 tracked 零散 .py 納管）——只改該檔時其回歸鎖須跑（DEF-101-042 同構）
-      - "AutoClaude/tmp_lint_check.py"
       # R10：tools/tests 內含讀取這兩支 workflow 的回歸鎖（test_root_infra_parity
       # / test_pre_push_dispatcher 經 pre-push 消費 aisdlc-sdd-ci paths）——只改
       # 該兩支 yml 時本 workflow 也須重跑該鎖（DEF-101-042 同構）
@@ -455,6 +502,10 @@ on:
       # 偵測器與其期望值 SSOT（DEF-101-794）與旗標解析共用層。
       - "CLAUDE.md"
       - "tools/lib/windows_skip_tags.py"
+      - "tools/lib/skip_tag_policy.py"
+      - "tools/lib/skip_static_scan.py"
+      - "tools/lib/skip_source_io.py"
+      - "tools/lib/skip_runtime_report.py"
       - "tools/_cli_flags.py"
       - "tools/check_scheduled_task_drift.py"
       - "tools/scheduled_task_expectations.json"
@@ -504,6 +555,27 @@ on:
       - "AutoClaude/tools/run_local_nightly.sh"
       # R67：同上（push 段說明），pull_request 段同步補齊
       - "docs/06_quality/CrossPlatform_Scan_Dimensions.md"
+      # 盲區 G／H：同上（push 段說明），pull_request 段同步補齊（19 條，push/PR 對稱鎖
+      # test_push_and_pr_paths_symmetric 會抓單側漏補）
+      - "tools/lib/baseline_origin.py"
+      - "tools/lib/defect_ledger_index.py"
+      - "AutoClaude/autoclaude/execution/pre_run_validator.py"
+      - "AutoClaude/autoclaude/core/ports/observability.py"
+      - "AutoClaude/autoclaude/core/ports/rtm_feedback.py"
+      - "AutoClaude/autoclaude/core/ports/rtm_sink.py"
+      - "AutoClaude/autoclaude/core/ports/translation_learning.py"
+      - "AutoClaude/autoclaude/infra/adapters/rtm_file_feedback_source.py"
+      - "AutoClaude/autoclaude/infra/adapters/rtm_file_sink.py"
+      - "AutoClaude/autoclaude/infra/adapters/translation_learning_sink.py"
+      - "AutoClaude/autoclaude/models/escalation.py"
+      - "AutoClaude/autoclaude/plugins/checkpoint/_escalation.py"
+      - "README.md"
+      - "useMacWin.md"
+      - "docs/AISDLC_Agent_UserGuide.md"
+      - "AISDLC_SDD/CLAUDE.md"
+      - "AutoClaude/CLAUDE.md"
+      - "AutoClaude/README.md"
+      - "AutoClaude/docs/08_deployment/Local_CI_Parity_Guide.md"
   schedule:
     # R11 額度治理：每日 → 每週一（CI 額度緊張、Windows 側已有 schtasks 本地 nightly
     # run_local_nightly.ps1 承接每日訊號）；需要時可 workflow_dispatch 手動觸發。

@@ -55,9 +55,14 @@ monorepo 根目錄（`AISDCL_Agent/`，各機器 checkout 路徑不同）底下�
 3. **文檔目錄編號制**：產出文件寫入 `docs/0[1-8]_*/`（01_requirements ～ 08_deployment）對應子目錄，不可亂放。`enforce_docs_path.py`（PreToolUse hook）**僅 AutoClaude 子專案 session** 生效。
 4. **規格先行**：寫程式前先有規格／通過閘門（AISDLC_SDD 的 SCG-0~6；AutoClaude 的 G0~G6 Gate）。
 
-> 🔴 **R74 訂正：上面兩條 hook 的射程（DEF-101-798）**。本節此前把 `enforce_docs_path.py` 寫成「強制」、把 `check_lang.py` 寫成「另有」，讀起來像是**在本檔生效的環境裡**也會攔。實查 `AutoClaude/.claude/settings.json` 註冊 6 支 hook——`enforce_docs_path.py`／`loc_budget_check.py`／`check_sh_eol.py`／`check_ps1_encoding.py`／`check_lang.py`／`claude_md_freshness.py`，除 `check_ps1_encoding.py` 外**皆僅 AutoClaude 子專案 session** 生效——而根 `.claude/settings.json` 只橋接其中 **1 支**。Claude Code **不會**遞迴子目錄載 hook（見記憶 `sdd-claude-hooks-skills-loading`）⇒ 在 monorepo 根 session（＝本檔被載入的那種 session）下，另外 5 支**一行都不會跑**。
+> 🔴 **R74 訂正：上面兩條 hook 的射程（DEF-101-798）**。本節此前把 `enforce_docs_path.py` 寫成「強制」、把 `check_lang.py` 寫成「另有」（兩支皆**僅 AutoClaude 子專案 session** 生效），讀起來像是**在本檔生效的環境裡**也會攔。實查 `AutoClaude/.claude/settings.json` 註冊 6 支 hook，而 Claude Code **不會**遞迴子目錄載 hook（見記憶 `sdd-claude-hooks-skills-loading`）⇒ 在 monorepo 根 session（＝本檔被載入的那種 session）下，**只有被根 `.claude/settings.json` 明文橋接的那幾支會跑**。現況（R75 訂正、逐行實查根 `.claude/settings.json`）：
 >
-> 「文件宣稱 ↔ 實際註冊」自此有機械物：`tools/tests/test_doc_loc_baseline_freshness_r60.py::TestR74RootClaudeMdHookClaimsMatchRegistration`——本檔提到的每一支 hook 腳本，**要嘛**在根 `.claude/settings.json` 註冊，**要嘛**同一行必須帶「僅 AutoClaude 子專案 session」字樣。少一邊即紅。**把未橋接的 5 支橋進根層是另一件事**（會改動 PreToolUse deny 面，該檔自己記載過「hook 誤觸 deny 會把所有工具硬鎖死」的 P0），不在本次訂正射程內，已列入交棒。
+> - **已橋接到根層、在根 session 會跑＝2 支**：`check_ps1_encoding.py`（根 `.claude/settings.json` 第 59 行）、`check_sh_eol.py`（同檔第 64 行）。
+> - **未橋接、在根 session 一行都不會跑＝4 支**：`enforce_docs_path.py`／`loc_budget_check.py`／`check_lang.py`／`claude_md_freshness.py`，四支皆**僅 AutoClaude 子專案 session** 生效。
+>
+> 🔴 **為何需要二次訂正（同一段訂正文自己成了假話）**：R74 第一版的橋接支數少算一支——同一個 commit（`a371068`）的另一個包已把 `check_sh_eol.py` 補進根層 wiring，訂正文卻仍把它歸在「不會跑」那一組，於是這段話**在寫下的當回合就與磁碟不符**。當時的鎖判準是 OR（已註冊**或**該行標明子專案射程），「已註冊**且**被某一行寫成不會跑」這個組合結構上恆綠 ⇒ 沒有任何東西轉紅。
+>
+> 「文件宣稱 ↔ 實際註冊」的機械物：`tools/tests/test_doc_loc_baseline_freshness_r60.py::TestR74RootClaudeMdHookClaimsMatchRegistration`——本檔提到的每一支 hook 腳本受**雙向**判準：①未橋接者，凡提到它的行都必須帶「僅 AutoClaude 子專案 session」字樣；②**已橋接者，任何一行都不得帶該字樣**（把會跑的東西寫成不會跑，與①同樣是假事實）。任一向違反即紅。上面兩條列因此**刻意分行**：已橋接的那 2 支與該字樣不同行，逐行判準才判得準。**把未橋接的 4 支橋進根層是另一件事**（會改動 PreToolUse deny 面，該檔自己記載過「hook 誤觸 deny 會把所有工具硬鎖死」的 P0），不在本次訂正射程內，已列入交棒。
 
 ---
 
@@ -97,7 +102,7 @@ claude -c               # 續接最近一次對話
 |------|------|------|
 | **Token reset 後重啟** | **磁碟任務書 ＋ `claude -r`** | 唯一不依賴 session 存活的路 ← **本節主線** |
 | session 開著、人離開一下要它自己做完 | `/loop`／`ScheduleWakeup` | 同 session、**同一個 Token 池**；`ScheduleWakeup` 單次上限 1 小時，要撐過數小時 reset 得靠多次醒來且終端全程不能關 → **不是 token reset 的方案** |
-| 跨 session／機器會睡的定時工作 | `schtasks`（照 `AutoClaude/tools/install_windows_nightly.ps1` 的 `New-ScheduledTaskSettingsSet` 建法） | 四項設定缺一即漏跑：`WakeToRun=True`／`StartWhenAvailable=True`／`DisallowStartIfOnBatteries=False`／`StopIfGoingOnBatteries=False`（建構 cmdlet 的參數名與物件屬性名**不同**，見該檔檔頭 DEF-101-249） |
+| 跨 session／機器會睡的定時工作 | `schtasks`（照 `tools/install_windows_nightly.ps1` 的 `New-ScheduledTaskSettingsSet` 建法；🔴 R75 訂正：該安裝器住**monorepo 根層** `tools/`，此格原先寫的 `AutoClaude/` 前綴在磁碟上不存在，而當時的具名機械物鎖只認 `.py` 副檔名故照樣放行） | 四項設定缺一即漏跑：`WakeToRun=True`／`StartWhenAvailable=True`／`DisallowStartIfOnBatteries=False`／`StopIfGoingOnBatteries=False`（建構 cmdlet 的參數名與物件屬性名**不同**，見該檔檔頭 DEF-101-249） |
 | ❌ 不要用 | `CronCreate` | `CronList` 印 `[session-only]`＝session 關掉就沒了，**不是離線排程** |
 
 ### 🔴 反「事後諸葛」取證規則（本節重點）
@@ -168,14 +173,23 @@ R71 最諷刺的一筆：在修一個 Windows 專屬缺陷（DEF-101-759）時�
 |--------|--------|----------------|
 | 路徑分隔符 | `tools/tests/test_platform_neutral_paths.py` | 根層 unittest 閘門 |
 | console 編碼 | `tools/tests/test_subprocess_encoding_hygiene.py` | 同上 |
-| 行尾 | `tools/tests/test_ps1_bom.py` ＋ `AutoClaude/tools/hooks/check_sh_eol.py` | 同上 ＋ PostToolUse hook |
+| 行尾 | `tools/tests/test_pre_commit_dispatcher_sigpipe.py::TestPreCommitBlocksCrOnShellScripts` ＋ `AutoClaude/tools/hooks/check_sh_eol.py` | 同上 ＋ PostToolUse hook |
 | `$IsWindows` 等 PS 6+ 專屬 | `tools/tests/test_ps51_compat.py` | 同上 |
 | `$env:*` 讀取 | **無機械物** | 沒有東西會紅（DEF-101-766 的落點） |
 | 副檔名判斷 | **無機械物** | 同上（DEF-101-766 的另一半） |
-| `Get-Command` 解析 | **無機械物**（`test_find_git_bash_parity.py` 只守 `Find-GitBash` 這一個消費者，不是判準本身） | 只有那一個站點會紅 |
+| `Get-Command` 解析 | **無機械物**（`tools/tests/test_find_git_bash_parity.py` 只守 `Find-GitBash` 這一個消費者，不是判準本身；🔴 R75 訂正：此格原先只寫裸檔名，任何以路徑為單位的鎖都解析不到它） | 只有那一個站點會紅 |
 | 大小寫敏感度 | **無機械物** | 沒有東西會紅 |
 
 上表的「無機械物」四列是 **shrink-only 棘輪**，由 `tools/tests/test_doc_loc_baseline_freshness_r60.py::TestR74IronLawMechanismAccounting` 釘住：**只准變少**（補了掃描器就把該列改掉），而且表內每一個具名檔案都必須真的存在——**本檔不得宣稱一個不存在的機械物**。這一條的存在理由是 R71 的實證：純文件約束對「當下的模型」零攔阻力，所以「哪幾項其實沒人在守」必須是**可查的量測值**，不是散文。
+
+🔴 **該鎖在 R75 訂正時被擴了三面**（原版的射程只有「根 CLAUDE.md 內、以反引號寫出、副檔名為 `.py`」，四筆幽靈機械物就是從這三個縫逃出去的）：
+1. **掃描面**加上 `tools/*.py` 與 `tools/*.json` 內帶「機械鎖／機械釘」字樣的行——那類註解與 JSON `_why` 是本 repo 指認機械物的第二個主要住所，先前完全不在任何鎖的視野內。
+2. **副檔名**由 `.py` 擴到 `.py`／`.ps1`／`.sh`／`.json`。
+3. **實質判準**（`TestR75IronLawMechanismSubstance`）：上表的具名檔案不只要存在，還要**真的在守該列的主題**——以該列主題的關鍵詞在該檔內出現佐證。同時凡帶 `::Symbol` 的引用，該符號必須真的是那個檔裡的 `class`／`def`。
+
+> 🔴 **第 3 面是為了治 `行尾` 那一列的實況**：該列先前具名的是 `tools/tests/test_ps1_bom.py`，而那支守的是 **.ps1 的 UTF-8 BOM 政策**，對 CRLF／行尾**零判準**（實測：`crlf`／`eol`／`\r\n`／`line ending` 在該檔命中 0）。這是「檔案在、但守的是別的東西」——只斷言檔案存在的鎖照樣放行，比指向一個不存在的檔更難看見。真正會因 CRLF `.sh` 轉紅的根層 unittest 是現在表上那一支。**注意**：上表任一列的機械物欄若再把 `test_ps1_bom.py` 以反引號寫回去，實質判準會當場紅——那正是它該有的行為，該檔的正確主題是 BOM 而不是行尾。
+>
+> 覆蓋邊界（誠實劃界）：關鍵詞佐證是**必要條件不是充分條件**——它抓得到「完全沒碰那個主題」，抓不到「碰了但判準很弱」；`AISDLC_SDD/**` 各版目錄與 `.md` 文件（含本檔之外的活文件）內的機械物宣稱仍不在射程內。
 
 ### 鐵律四：本節之外的三筆「平台無關」失誤，共同形態是**宣稱先於查證**
 

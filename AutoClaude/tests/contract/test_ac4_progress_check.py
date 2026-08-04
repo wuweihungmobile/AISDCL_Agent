@@ -21,6 +21,11 @@
 
 ≥ 4 case：連綠未滿 / 連綠達標 / 單日抖動 / CircuitBreaker open 紅線
       ＋ ADR-SD09-012 新增：staleness schema / 全史含真量測不得誤報 skip 阻塞。
+
+🔴 R75（QA-R74-03）fixture 慣例：斷言 ready=True 的 fixture，**每筆 p95 必須微幅不同**。
+真實 collector 每晚重新量測，p95 必然不同；「窗內每筆指標完全相同」自 R75 起會被判
+「無法證明重新量測過」而不 ready（寫入端卡住／複製上一筆也長這樣）。本檔三組原本用
+常數 p95 的 ready case 已改帶 `+ i * 0.01` 確定性抖動，值域不跨任何門檻。
 """
 from __future__ import annotations
 
@@ -95,7 +100,12 @@ def test_gap_tolerant_streak_ignores_calendar_gaps(tmp_path: Path) -> None:
     反之 M-05 去重仍保證每 UTC 日上限 1 筆，故「14 筆」仍蘊含 ≥14 個不同日期，
     時間跨度並未被放寬——這也是本 case 用「散佈」而非「同一天塞 14 筆」的原因。
     """
-    records = [_record(days_ago=i * 3) for i in range(OBSERVATION_REQUIRED_RUNS - 1, -1, -1)]
+    # p95 帶 i*0.01 抖動：見檔頭 R75 fixture 慣例（每筆指標完全相同會被判「無法證明
+    # 重新量測過」而不 ready，那會讓本 case 的受測對象——日曆缺口——失焦）。
+    records = [
+        _record(days_ago=i * 3, p95=40.0 + i * 0.01)
+        for i in range(OBSERVATION_REQUIRED_RUNS - 1, -1, -1)
+    ]
     path = _write_history(tmp_path, records)
 
     report = evaluate(sort_by_timestamp(load_history(path)))
@@ -139,7 +149,7 @@ def test_staleness_boundary_exactly_at_limit_is_still_fresh(tmp_path: Path) -> N
     人就會開始無視 stale 這個訊號（訓練人忽略告警＝把防線做廢）。
     """
     records = [
-        _record(days_ago=STALENESS_MAX_DAYS + i)
+        _record(days_ago=STALENESS_MAX_DAYS + i, p95=40.0 + i * 0.01)  # 抖動：見檔頭 R75
         for i in range(OBSERVATION_REQUIRED_RUNS - 1, -1, -1)
     ]
     path = _write_history(tmp_path, records)
@@ -283,7 +293,10 @@ def test_all_pass_p95_under_60ms_reaches_ready_not_hardcoded_skip(tmp_path: Path
     """
     # 全 14 筆 status=pass，p95=54.3ms（v0.4 ACCEPTED 後 < 60ms 升級門檻 → 直接綠）
     # 注意 _record 內加 hours=1，days_ago=14 會超出 14 天 cutoff → 取 13~0 共 14 筆
-    records = [_record(days_ago=i, p95=54.3) for i in range(OBSERVATION_DAYS - 1, -1, -1)]
+    records = [
+        _record(days_ago=i, p95=54.3 + i * 0.01)  # 抖動：見檔頭 R75 fixture 慣例
+        for i in range(OBSERVATION_DAYS - 1, -1, -1)
+    ]
     path = _write_history(tmp_path, records)
 
     report = evaluate(sort_by_timestamp(load_history(path)))

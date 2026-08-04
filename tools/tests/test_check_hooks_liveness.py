@@ -261,6 +261,12 @@ def _child_env(extra: dict[str, str] | None = None) -> dict[str, str]:
     「不能靠繼承而假綠」）與 `test_git_hooks_install_common.py` 的
     `_env_without_utf8_overrides()`。**知識在樹裡、只有一處有鎖，新站點照樣踩進去**
     ——本函式把它補齊到第三處。
+
+    🔴 R75 補記（DEF-101-803）：上一段逐字指名「本機唯一 UTF-8 來源是
+    `.claude/settings.json` 的 `env.PYTHONUTF8=1`」，而那個 env 條目**當時零鎖看守**
+    ——被誰刪掉都不會有任何測試變紅，R74 P0 就靜默復發。**在註記裡指出一個關鍵依賴
+    卻不給它鎖，等於把它標成「已知且已接受」**。該鎖現在在
+    `TestSettingsProvideUtf8ForHookChildren`。
     """
     env = {k: v for k, v in os.environ.items()
            if k not in ("PYTHONUTF8", "PYTHONIOENCODING")}
@@ -533,6 +539,95 @@ class TestBlockBashHookIsActuallyRegistered(unittest.TestCase):
             "block_bash_on_windows.py 未註冊於 .claude/settings.json 的 "
             "PreToolUse 且 matcher 未命中 Bash——守衛存在但不會被觸發，等於沒有。"
             f"實查 PreToolUse matcher 清單：{[e.get('matcher') for e in pre]}",
+        )
+
+
+def settings_utf8_env_verdict(settings: dict) -> str | None:
+    """`None`＝`env.PYTHONUTF8` 宣告到位；回字串＝失效理由（純函式，日期無關）。"""
+    env = settings.get("env")
+    if not isinstance(env, dict):
+        return ("`.claude/settings.json` 沒有 `env` 區塊 ⇒ hook 子行程的 UTF-8 "
+                "串流設定失去本機唯一來源（User/Machine scope 實測皆空）")
+    if "PYTHONUTF8" not in env:
+        return ("`.claude/settings.json` 的 `env` 沒有 `PYTHONUTF8` ⇒ hook 子行程"
+                "改吃 locale 預設編碼，zh-TW 的 cp950 讀寫 UTF-8 內容即亂碼／"
+                "UnicodeDecodeError（DEF-101-789 家族）")
+    value = str(env["PYTHONUTF8"])
+    if value != "1":
+        return (f"`env.PYTHONUTF8` 是 {value!r} 而不是 \"1\" ⇒ 只有 \"1\" 會開啟 "
+                "Python UTF-8 mode，其他值（含 \"0\"、\"\"）等於沒設")
+    return None
+
+
+class TestSettingsProvideUtf8ForHookChildren(unittest.TestCase):
+    """`.claude/settings.json` 的 `env.PYTHONUTF8=1` 回歸鎖（R75／DEF-101-803）。
+
+    WHY 這道非有不可：本檔上方 `_child_env()` 的註記逐字宣告「本機唯一 UTF-8 來源
+    是 `.claude/settings.json` 的 `env.PYTHONUTF8=1`」，而該 env 條目此前**零鎖
+    看守**（R75 QA 全域搜尋 `tools/tests` 內對 settings.json 的 `PYTHONUTF8` 斷言：
+    零命中；旁邊那道 `TestBlockBashHookIsActuallyRegistered` 只驗 hook 註冊）。
+    也就是說：把那三行刪掉，全庫測試一片綠，而 R74 那筆 P0（hook 中文指引在非
+    UTF-8 codepage 下降解）就靜默復發。**在註記裡點名一個關鍵依賴、卻不給它鎖，
+    等於把它登記成「已知且已接受」。**
+
+    🔴 為何注入案走「讀真實內容 → 在記憶體裡拿掉那把鑰匙」而不是真的改磁碟上的
+    settings.json：該檔自己記載過 P0「hook 誤觸 PreToolUse deny 會把所有工具硬鎖
+    死」，而 R75 是多 agent 同時在同一棵樹作業的輪次——把 hook 子行程的編碼設定
+    真的拔掉幾秒鐘，影響面是**全部** agent 的工具呼叫。記憶體注入對「判準有沒有
+    鑑別力」的證明力完全相同（被注入的是真實檔案的內容），風險卻是零。
+    """
+
+    def _real(self) -> dict:
+        self.assertTrue(_SETTINGS.is_file(), f"找不到 {_SETTINGS}")
+        return json.loads(_SETTINGS.read_text(encoding="utf-8"))
+
+    def test_real_settings_declares_pythonutf8(self) -> None:
+        verdict = settings_utf8_env_verdict(self._real())
+        self.assertIsNone(verdict, verdict or "")
+
+    def test_removing_it_from_the_real_content_is_red(self) -> None:
+        """注入式：拿掉真實檔案內容裡的那把鑰匙 ⇒ 必紅（反空轉）。"""
+        without_key = self._real()
+        without_key["env"].pop("PYTHONUTF8")
+        self.assertIsNotNone(
+            settings_utf8_env_verdict(without_key),
+            "把 env.PYTHONUTF8 拿掉之後判準仍為綠 ⇒ 這道鎖是空轉的",
+        )
+        without_env = self._real()
+        without_env.pop("env", None)
+        self.assertIsNotNone(settings_utf8_env_verdict(without_env))
+
+    def test_criterion_red_green_on_synthetic_values(self) -> None:
+        """判準自證：四種形態（不靠 repo 現況剛好是哪一種）。"""
+        self.assertIsNone(settings_utf8_env_verdict({"env": {"PYTHONUTF8": "1"}}))
+        self.assertIn("沒有 `env` 區塊", settings_utf8_env_verdict({}) or "")
+        self.assertIn("沒有 `PYTHONUTF8`",
+                      settings_utf8_env_verdict({"env": {}}) or "")
+        for dud in ("0", "", "true", "1 "):
+            self.assertIn(
+                "只有", settings_utf8_env_verdict({"env": {"PYTHONUTF8": dud}}) or "",
+                f"{dud!r} 應被判為「等於沒設」",
+            )
+
+    def test_the_p0_hook_is_covered_by_the_production_form_lock(self) -> None:
+        """交叉指路：本檔 `_run_hook` 的直接執行形態**不再**是那支 hook 進入 child
+        編碼判準的唯一途徑。
+
+        WHY（R75／DEF-101-802）：改寫 `_run_hook` 的 argv（例如換成 `-c` 形態）
+        曾經會讓 `.claude/hooks/block_bash_on_windows.py` 靜默離開 child 編碼判準的
+        射程——一支**測試**的寫法決定另一道鎖的射程。判準四改以 production 的註冊表
+        （`.claude/settings.json` 的 `-c` ＋ runpy 形態）為掃描面，本案只確認那道鎖
+        真的存在且真的罩住這支 hook，避免本檔日後被重構時無人知情。
+        """
+        sys.path.insert(0, str(_REPO_ROOT))
+        from tools.tests import test_subprocess_encoding_hygiene as hygiene
+
+        scripts = {
+            rel for _event, rel in hygiene.hook_command_scripts(self._real())
+        }
+        self.assertIn(
+            ".claude/hooks/block_bash_on_windows.py", scripts,
+            "判準四已看不到 R74 P0 那支 hook ⇒ 射程又回到「靠本檔某一行碰巧怎麼寫」",
         )
 
 

@@ -439,12 +439,9 @@ _KNOWN_ARGV: tuple[str, ...] = ("--print-hash", "--print-lines")
 
 
 def main(argv: list[str] | None = None) -> int:
-    args = sys.argv[1:] if argv is None else argv
-    # 未知引數 rc=2 fail-loud（R67-D20 射程擴張）：修前 `--bogus-flag-xyz` 會靜默掉進
-    # 下方全檢查路徑並印綠燈 ⇒ 使用者以為自己下的旗標生效了。
-    rc = _cli_flags.reject_unknown_argv("check_wrapper_thinness.py", args, _KNOWN_ARGV)
-    if rc is not None:
-        return rc
+    # 🔴 本層**絕不讀 `sys.argv`**：`argv=None` 的語意是「零引數」，不是「去看命令列」。
+    # 未知引數的拒收在 `cli()`（WHY 見該處與 `tools/_cli_flags.py` 檔頭〈接線紀律〉）。
+    args = [] if argv is None else list(argv)
     if args == ["--print-hash"]:
         for rel in _PINNED_SHA256:
             path = ROOT / rel
@@ -469,5 +466,19 @@ def main(argv: list[str] | None = None) -> int:
     return 1
 
 
+def cli(argv: list[str]) -> int:
+    """CLI 入口：未知引數 rc=2 fail-loud（R67-D20 射程擴張），全合法才委派 `main()`。
+
+    🔴 為何拒收待在這一層、而不是寫進 `main()`（R75 統一四支，理由同
+    `tools/run_root_unittests.py::cli`／`tools/_cli_flags.py` 檔頭〈接線紀律〉）：
+    `main(argv=None) → sys.argv[1:]` 會誤傷**程式化呼叫端**——`python -m unittest
+    tools.tests.test_gha_action_versions` 時 unittest 把模組名放進 `sys.argv`，被當成
+    未知旗標拒收 rc=2，而該測試斷言 rc=1 ⇒ HEAD 既存 **3 支假紅**（R75 本機實測）。
+    閘門路徑（`sys.argv[1:] == []`）恆綠，所以這個洞七輪沒被任何人看見。
+    """
+    rc = _cli_flags.reject_unknown_argv("check_wrapper_thinness.py", argv, _KNOWN_ARGV)
+    return main(argv) if rc is None else rc
+
+
 if __name__ == "__main__":
-    sys.exit(main())
+    sys.exit(cli(sys.argv[1:]))

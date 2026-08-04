@@ -282,9 +282,11 @@ class TestCheckWrapperThinness(unittest.TestCase):
         self.assertEqual(problems, [])
 
     def test_main_exit_code_reflects_result(self) -> None:
-        # 🔴 一律顯式傳 `[]`（R74）：`main()` 不傳引數時讀的是 `sys.argv[1:]`＝**跑測試
-        # 的那條 pytest 命令列**。未知引數守衛落地後那條會被正確地擋成 rc=2，於是本鎖
-        # 原本的 `m.main()` 寫法在測「零引數行為」時其實餵了一整串 pytest 旗標進去。
+        # 顯式傳 `[]`＝直說「零引數」。史料（R74，勿逐字沿用成現況）：`main(argv=None)`
+        # 當時讀的是 `sys.argv[1:]`＝**跑測試的那條命令列**，於是 `m.main()` 在測「零引數
+        # 行為」時其實餵了一整串 pytest 旗標進去。R75 已把讀 `sys.argv` 收進 `cli()`
+        # （見 `TestRootGateToolsRejectUnknownFlags::test_rejection_never_reads_sys_argv_
+        # inside_main`），故這個 `[]` 現在只是顯式，不再承載保護作用。
         with mock.patch.object(m, "check_wrapper_thinness", return_value=[]):
             self.assertEqual(m.main([]), 0)
         with mock.patch.object(m, "check_wrapper_thinness", return_value=["x broke"]):
@@ -720,19 +722,59 @@ class TestR67ShebangIsNotAComment(unittest.TestCase):
 # 於是同一個洞在其餘工具身上活了七輪。實測（本輪唯讀）：`check_wrapper_thinness.py`
 # ／`check_pytest_baseline_sites.py`／`check_gha_action_versions.py`
 # ／`check_script_parity.py` 拿到 `--bogus-flag-xyz` 全部 **rc=0 並印綠燈**。
-# 本鎖改為 **glob 現查 `tools/check_*.py` 全體 ＋ 真的拿假引數跑一遍**：
+# 本鎖改為 **現查全體 CLI 入口 ＋ 真的拿假引數跑一遍**：
 #   · 新增一支守門工具而忘了接 `_cli_flags` ⇒ 本鎖當場紅，不必有人記得；
 #   · 「靜默吞掉」是**行為**，故判準也只能是行為——比對原始碼有沒有某個 import
 #     會被任何一種等價寫法繞過（同 `DEF-101-757` 的劃界結案形態）。
+#
+# 🔴 **R74 射程修復（SD 獨立複審抓到）：判準原本是 `glob("check_*.py")`，用檔名劃界**
+# ——於是不叫 `check_*` 的工具全部在射程外，而**後果最大的那一支正好在射程外**：
+# `tools/run_root_unittests.py` 是 pre-push root-infra leg ＋ 三支 CI 真正執行的那一支，
+# 修前全檔 grep `argv|argparse|_cli_flags` 零命中，帶未知旗標時直接跑預設路徑、跑完整棵樹
+# （逾 120 秒），最終 rc 反映的是「套件結果」而非「旗標被拒收」。它逃掉的唯一原因是檔名。
+# ⇒ 判準改為 **`tools/*.py` 中帶 `if __name__ == "__main__"` 者**（＝真正的 CLI 入口）。
+# 這與 `DEF-101-757`「已知的鎖射程缺口不得只以劃界結案」同型，只是這次的界是**檔名**；
+# 修法刻意**不是**「把那一支加進白名單」——那等於把同一個機制再用一次。
 _BOGUS_ARGV = "--bogus-flag-xyz-not-a-real-flag"
+
+#: CLI 入口的判準。刻意只認 `__main__` guard，**不**額外要求「而且要讀 `sys.argv`」：
+#: 後者會原地複製同一個洞——「不讀 `sys.argv`」正是「靜默吞掉未知旗標」的實作方式，
+#: 拿它當射程條件等於自動豁免每一支還沒修的工具（`run_root_unittests.py` 修前就是
+#: 這個樣子）。**射程條件必須與「有沒有病」正交**，否則病人自己決定要不要被檢查。
+#: `_` 前綴的共用模組（`_cli_flags.py`／`_stdio_utf8.py`／`_script_scan_surface.py`）
+#: 沒有 `__main__` guard，自然落在射程外——不必也不該再用檔名把它們排除。
+_MAIN_GUARD_RE = re.compile(r"^if __name__ == ['\"]__main__['\"]", re.MULTILINE)
+
+#: 「`sys.argv` 只在 `__main__` 那一行讀」這條性質的射程判準＝**接 `_cli_flags` SSOT 的檔**。
+#: 同樣刻意由現查枚舉、不寫死清單：新工具接上 SSOT 的那一刻就落進射程。
+#: ⚠️ 誠實劃界：自行用 argparse 拒收、沒接本 SSOT 的工具（`sync_onboarding_baselines.py`
+#: 等）**不在本鎖射程**——它們的「未知旗標要拒收」那一半由下方行為級鎖
+#: `test_every_gate_tool_rejects_an_unknown_flag` 覆蓋，但「`main()` 讀不讀 `sys.argv`」
+#: 這一半確實仍無人看守。要納管得先取得那些檔的所有權，R75 本包界外。
+_CLI_FLAGS_IMPORT_RE = re.compile(r"^import _cli_flags\b", re.MULTILINE)
+
+#: `__main__` 那一行的唯一合法形狀（分層的最後一段：讀 `sys.argv` 只能發生在這裡）。
+_CLI_ENTRY_RE = re.compile(
+    r"if __name__ == [\"']__main__[\"']:\s*\n\s*sys\.exit\(cli\(sys\.argv\[1:\]\)\)")
 
 #: 本輪**未持有所有權**、因此仍是舊行為的工具：shrink-only 豁免，只准變少。
 #: 逐支寫 WHY 與承接者，不寫「TODO」——無主詞的交棒正是缺陷跨輪蒸發的原因。
+#:
+#: 🔴 **R74 射程擴張後的實查結論（誠實記錄，免得下一輪把它當成擴張引入的新缺口）**：
+#: 擴張新納入 9 支 CLI 入口（`run_root_unittests` / `sync_onboarding_baselines` /
+#: `dev_start` / `bootstrap_core` / `integration_gate_core` / `archive_defect_log` /
+#: `check_defect_log_crossref` / `check_scheduled_task_drift` / `git_hooks_install_common`），
+#: 逐一實測後 8 支**早就已經拒收**（argparse 或自寫分派，rc=2、≤0.1s），唯一不拒收的是
+#: `run_root_unittests.py`，已於同一包修好。⇒ **擴張暴露的新違規數＝0**，本字典維持兩筆、
+#: 內容未動。那兩支對射程修復包同樣是所有權界外（本包只持有 `run_root_unittests.py`／
+#: `_cli_flags.py`／本檔），承接者仍見各筆自己的 WHY。
 _UNKNOWN_ARGV_WAIVED: dict[str, str] = {
     "check_ntfs_paths.py": (
         "R74 PKG-5 檔案所有權界外（本包只持有 wrapper_thinness／script_parity／"
         "pytest_baseline_sites／gha_action_versions 四支的未知旗標處理段）；"
-        "修法逐字同已修四支＝`_cli_flags.reject_unknown_argv(<prog>, argv, ())`"
+        "修法逐字同已修四支（R75 起為 `cli`/`main` 分層）＝把 "
+        "`_cli_flags.reject_unknown_argv(<prog>, argv, ())` 放進 `cli(argv)`、"
+        "`main()` 完全不碰 `sys.argv`、`__main__` 只留 `sys.exit(cli(sys.argv[1:]))`"
     ),
     "check_hooks_liveness.py": (
         "同上，界外；另其對應鎖檔 `test_check_hooks_liveness.py` 亦屬別包，"
@@ -752,10 +794,28 @@ class TestRootGateToolsRejectUnknownFlags(unittest.TestCase):
 
     _TOOLS_DIR = Path(__file__).resolve().parents[1]
 
+    #: 射程下限。取落地當下實查值（`tools/*.py` 共 18 支，其中 15 支帶 `__main__` guard）。
+    #: 掉到下限以下＝掃描面壞掉（目錄搬走／讀檔失敗），與「工具變少」不可分辨 ⇒ 一律判紅。
+    _SCOPE_FLOOR = 15
+
+    @staticmethod
+    def _cli_entrypoints(tools_dir: Path) -> list[Path]:
+        """`tools_dir` 底下**真正是 CLI 入口**的 `*.py`（判準見 `_MAIN_GUARD_RE`）。
+
+        `tools_dir` 參數化是為了讓**判準本身**也能被合成注入證明——舊版把目錄寫死在
+        方法裡，於是「射程對不對」只能靠讀原始碼判斷，那正是本輪要修掉的那種盲信。
+        """
+        return [
+            path for path in sorted(tools_dir.glob("*.py"))
+            if _MAIN_GUARD_RE.search(path.read_text(encoding="utf-8"))
+        ]
+
     def _gate_tools(self) -> list[Path]:
-        found = sorted(self._TOOLS_DIR.glob("check_*.py"))
+        found = self._cli_entrypoints(self._TOOLS_DIR)
         self.assertGreaterEqual(
-            len(found), 6, "掃描面枚舉不到預期支數的 check_*.py —— 本鎖可能已空轉")
+            len(found), self._SCOPE_FLOOR,
+            f"掃描面只枚舉到 {len(found)} 支 CLI 入口（下限 {self._SCOPE_FLOOR}）"
+            f"—— 本鎖可能已空轉")
         return found
 
     @staticmethod
@@ -764,6 +824,11 @@ class TestRootGateToolsRejectUnknownFlags(unittest.TestCase):
 
         抽成純函式是為了讓**鑑別力可被合成注入證明**：判準若只跑真實目錄，
         「現在是綠的」無法區分「守衛有牙」與「守衛根本沒被叫到」。
+
+        🔴 逾時**也算 offender**（R74 補）：不拒收的工具會改跑預設路徑，而那條路徑可能
+        很長——`run_root_unittests.py` 修前就是跑完整棵樹（逾 120 秒）。放任
+        `TimeoutExpired` 拋出去，讀者看到的是一坨堆疊「error」而不是「這支不拒收」的
+        **fail**，很容易被當成環境抖動放過（本 repo 剛為同一形態付過學費：`DEF-101-803`）。
         """
         import subprocess  # noqa: PLC0415  # 僅本鎖需要，不進本檔 import 期
 
@@ -771,9 +836,15 @@ class TestRootGateToolsRejectUnknownFlags(unittest.TestCase):
         for tool in tools:
             if tool.name in waived:
                 continue
-            proc = subprocess.run(
-                [sys.executable, str(tool), _BOGUS_ARGV],
-                capture_output=True, encoding="utf-8", errors="replace", timeout=180)
+            try:
+                proc = subprocess.run(
+                    [sys.executable, str(tool), _BOGUS_ARGV],
+                    capture_output=True, encoding="utf-8", errors="replace", timeout=60)
+            except subprocess.TimeoutExpired:
+                offenders.append(
+                    f"{tool.name}（逾時未回：拿到未知引數後改跑預設路徑，"
+                    f"而拒收應該是**秒回**的）")
+                continue
             if proc.returncode == 0:
                 offenders.append(f"{tool.name}（rc=0，靜默吞掉未知引數）")
         return offenders
@@ -800,8 +871,243 @@ class TestRootGateToolsRejectUnknownFlags(unittest.TestCase):
                 "具名豁免必須真的讓該支退出判定，否則豁免機制形同虛設",
             )
 
+    def test_scope_is_not_a_filename_glob(self) -> None:
+        """**本輪缺陷的直接回歸鎖**：射程不得回退成檔名 glob。
+
+        測意圖（Rule 9）：一條紀律「管誰」如果由命名習慣決定，那它管不到的地方就是
+        缺陷的永久居所——而 R74 SD 複審實測到的正是「後果最大的那一支剛好不叫
+        `check_*`」。故本鎖同時釘三件事：① 那一支確實在射程內（具名，因為它是 pre-push
+        ＋三支 CI 唯一真正執行的工具）；② 射程內有足夠多**非** `check_*` 的工具，
+        證明判準不是換個前綴的檔名 glob；③ 判準的實作面不得出現 `check_*` 這種前綴 glob。
+        """
+        import inspect  # noqa: PLC0415
+
+        names = {p.name for p in self._gate_tools()}
+        self.assertIn(
+            "run_root_unittests.py", names,
+            "pre-push root-infra leg ＋ 三支 CI 真正執行的那一支不在射程內——"
+            "這正是 R74 SD 複審抓到的缺口本體，不得回退",
+        )
+        non_check = sorted(n for n in names if not n.startswith("check_"))
+        self.assertGreaterEqual(
+            len(non_check), 5,
+            f"射程內非 check_* 的 CLI 入口只有 {non_check}——判準疑似又退回檔名劃界",
+        )
+        src = inspect.getsource(TestRootGateToolsRejectUnknownFlags._cli_entrypoints)
+        self.assertNotIn(
+            'glob("check_', src,
+            "判準又用檔名前綴 glob 劃界了——那正是本輪修掉的機制（見本節 R74 註記）",
+        )
+
+    def test_a_synthetic_tools_dir_discriminates_entrypoints_from_helpers(self) -> None:
+        """判準的注入式鑑別力：合成一棵 `tools/` 目錄，三支檔各代表一種身分。
+
+        🔴 為何合成在 tmpdir 而**不是**真的往 `tools/` 丟一支探針：本輪多個 agent 同樹
+        並行，往 `tools/` 新增一支 `*.py` 會同時污染 ruff／LOC 棘輪／`_script_scan_surface`
+        等多個掃描面 ⇒ 別人的全套會假紅（本 repo 已重演三次「並行突變互踩假紅」）。
+        判準已參數化，注入不需要動真實目錄。
+
+        本合成樹刻意**不含任何** `check_*` 命名 ⇒ 舊判準在這棵樹上枚舉不到任何東西，
+        故本測試同時是「射程已不再是檔名 glob」的**行為級**證明，而非只讀原始碼。
+        """
+        import tempfile  # noqa: PLC0415
+
+        entry = 'import sys\n\n\nif __name__ == "__main__":\n    sys.exit({})\n'
+        with tempfile.TemporaryDirectory() as td:
+            d = Path(td)
+            (d / "shared_helper.py").write_text(
+                "VALUE = 1\n", encoding="utf-8", newline="\n")          # 無 guard＝非入口
+            (d / "swallowing_tool.py").write_text(
+                entry.format("0"), encoding="utf-8", newline="\n")      # 吞掉引數 rc=0
+            (d / "rejecting_tool.py").write_text(
+                entry.format("2 if sys.argv[1:] else 0"),
+                encoding="utf-8", newline="\n")                          # 拒收 rc=2
+            self.assertEqual(
+                sorted(p.name for p in d.glob("check_*.py")), [],
+                "合成樹刻意零 check_* 命名——這是舊判準在此枚舉不到東西的前提",
+            )
+            found = [p.name for p in self._cli_entrypoints(d)]
+            self.assertEqual(
+                found, ["rejecting_tool.py", "swallowing_tool.py"],
+                "判準必須恰好收進兩支 CLI 入口：無 `__main__` guard 的共用模組不該進來"
+                "（會被當成不拒收的工具而假紅），有 guard 的一支都不能漏",
+            )
+            self.assertEqual(
+                self._offenders(self._cli_entrypoints(d), {}),
+                ["swallowing_tool.py（rc=0，靜默吞掉未知引數）"],
+                "注入的吞掉者必須被點名——否則本鎖對『判準+行為』整條鏈零鑑別力",
+            )
+
+    @staticmethod
+    def _cli_flags_consumers(tools_dir: Path) -> list[Path]:
+        """`tools_dir` 底下接了 `_cli_flags` SSOT 的 CLI 入口（判準見 `_CLI_FLAGS_IMPORT_RE`）。"""
+        return [
+            path for path in TestRootGateToolsRejectUnknownFlags._cli_entrypoints(tools_dir)
+            if _CLI_FLAGS_IMPORT_RE.search(path.read_text(encoding="utf-8"))
+        ]
+
+    @staticmethod
+    def _layering_offenders(tools: list[Path]) -> list[str]:
+        """回傳違反 `cli`/`main` 分層的工具（純函式 ⇒ 鑑別力可被合成注入證明）。
+
+        以 **AST 讀原始碼**而刻意**不 import** 目標模組：這一層的工具在 import 期會做
+        stdio 手術（`tools/_stdio_utf8.py`）、注入 `sys.path`、甚至解析整棵 repo。為了
+        讀一段原始碼去觸發那些副作用，本身就是「驗證載具汙染被驗證對象」的另一種形態。
+
+        🔴 判準看的是 **AST 節點**、不是原始碼字串（R75 落地當回合實測到的假陽性）：
+        本鎖第一版用 `"sys.argv" in ast.get_source_segment(...)`，於是 `main()` 裡一句
+        「本層絕不讀 `sys.argv`」的**註解**就被判成違規。字串比對在這裡不只是不精確，
+        它的方向是錯的——**它懲罰把紀律寫下來的人**，而那正是本 repo 要鼓勵的行為。
+        """
+        import ast  # noqa: PLC0415
+
+        def reads_sys_argv(node: ast.AST) -> bool:
+            return any(
+                isinstance(n, ast.Attribute) and n.attr == "argv"
+                and isinstance(n.value, ast.Name) and n.value.id == "sys"
+                for n in ast.walk(node)
+            )
+
+        def calls_reject(node: ast.AST) -> bool:
+            return any(
+                (isinstance(n, ast.Attribute) and n.attr == "reject_unknown_argv")
+                or (isinstance(n, ast.Name) and n.id == "reject_unknown_argv")
+                for n in ast.walk(node)
+            )
+
+        offenders: list[str] = []
+        for tool in tools:
+            src = tool.read_text(encoding="utf-8")
+            funcs = {
+                node.name: node
+                for node in ast.parse(src).body
+                if isinstance(node, ast.FunctionDef)
+            }
+            for name in ("main", "cli"):
+                if name not in funcs:
+                    offenders.append(f"{tool.name}：缺頂層 `{name}()` ⇒ 未走 cli/main 分層")
+            if "main" in funcs and reads_sys_argv(funcs["main"]):
+                offenders.append(f"{tool.name}：`main()` 讀了 `sys.argv`")
+            if "cli" in funcs and not calls_reject(funcs["cli"]):
+                offenders.append(f"{tool.name}：拒收不在 `cli()` 這一層")
+            if not _CLI_ENTRY_RE.search(src):
+                offenders.append(
+                    f"{tool.name}：`__main__` 那一行不是 `sys.exit(cli(sys.argv[1:]))`")
+        return offenders
+
+    def test_rejection_never_reads_sys_argv_inside_main(self) -> None:
+        """`sys.argv` 只能在 `__main__` 那一行讀；`main()` 一律只吃顯式引數。
+
+        測意圖（Rule 9）：`main()` 有**程式化呼叫端**，而它們的 `sys.argv` 裝的是別人的
+        參數。兩筆實測都是「一道真鎖被弄成假紅」，不是風格偏好：
+          · `python -m unittest tools.tests.test_gha_action_versions` —— unittest 把模組名
+            放進 `sys.argv`，被 `main()` 當成未知旗標拒收 rc=2，而該測試斷言 rc=1
+            ⇒ **HEAD 既存 3 支假紅**（R75 實測 `Ran 14 / FAILED (failures=3)`）；
+          · `test_run_root_unittests.py` 的零相依探針在子行程內叩 `R.main()`，該子行程的
+            `sys.argv` 帶的是探針自己的三個參數（blocked JSON／mode／tools_dir）。
+        🔴 為何非機械釘住不可：這個洞在**閘門路徑**（`sys.argv[1:] == []`）恆綠，所以
+        「四支工具跑起來都是綠的」對本性質零鑑別力——它就是這樣活過七輪的。
+        🔴 R75 射程擴張：原版只具名釘 `run_root_unittests.py` 一支，而同一個洞當時正躺在
+        另外四支上（`DEF-101-757`「已知的鎖射程缺口不得只以劃界結案」同型，這次的界是
+        「上一包剛好修到的那一支」）。射程改為現查枚舉 `_cli_flags` 消費者。
+        """
+        consumers = self._cli_flags_consumers(self._TOOLS_DIR)
+        names = sorted(p.name for p in consumers)
+        self.assertGreaterEqual(
+            len(consumers), 5,
+            f"只枚舉到 {names}——`_cli_flags` 消費者不該少於 R75 落地當下的 5 支；"
+            f"掉下來與「工具真的變少」不可分辨 ⇒ 一律判紅（掃描面壞掉也算紅）",
+        )
+        self.assertIn(
+            "run_root_unittests.py", names,
+            "pre-push root-infra leg ＋ 三支 CI 唯一真正執行的那一支必須在射程內",
+        )
+        self.assertEqual(
+            self._layering_offenders(consumers), [],
+            "下列工具未走 `cli`/`main` 分層 —— 修法＝把 `reject_unknown_argv` 搬進 "
+            "`cli(argv)`、`main()` 完全不碰 `sys.argv`、`__main__` 只留一行 "
+            "`sys.exit(cli(sys.argv[1:]))`（先例：`tools/run_root_unittests.py`；"
+            "拍板記錄見 `tools/_cli_flags.py` 檔頭〈接線紀律〉R75 段）",
+        )
+
+    def test_the_layering_judgement_has_teeth(self) -> None:
+        """注入式鑑別力：合成一棵樹，每支檔代表一種形態 ⇒ 逐筆點名，正控不得誤報。
+
+        合成在 tmpdir 而**不動 tracked 生產碼**：對主樹做突變會與同輪並行的其他包互踩
+        假紅（本 repo 已重演三次）。同時證明射程選取有效——沒接 SSOT 的那支不得被枚舉。
+        """
+        import tempfile  # noqa: PLC0415
+
+        cli_block = (
+            'def cli(argv):\n'
+            '    rc = _cli_flags.reject_unknown_argv("t", argv, ())\n'
+            '    return main(argv) if rc is None else rc\n\n\n'
+            'if __name__ == "__main__":\n'
+            '    sys.exit(cli(sys.argv[1:]))\n'
+        )
+        head = "import sys\n\nimport _cli_flags\n\n\n"
+        with tempfile.TemporaryDirectory() as td:
+            d = Path(td)
+            (d / "good_tool.py").write_text(
+                head + "def main(argv=None):\n    return 0\n\n\n" + cli_block,
+                encoding="utf-8", newline="\n")
+            (d / "argv_in_main_tool.py").write_text(
+                head + "def main(argv=None):\n"
+                "    args = sys.argv[1:] if argv is None else argv\n"
+                "    return 0 if args else 1\n\n\n" + cli_block,
+                encoding="utf-8", newline="\n")
+            (d / "no_cli_layer_tool.py").write_text(
+                head + 'def main(argv=None):\n    return 0\n\n\n'
+                'if __name__ == "__main__":\n    sys.exit(main())\n',
+                encoding="utf-8", newline="\n")
+            (d / "argparse_tool.py").write_text(
+                'import sys\n\n\ndef main(argv=None):\n'
+                "    return 0 if sys.argv[1:] else 1\n\n\n"
+                'if __name__ == "__main__":\n    sys.exit(main())\n',
+                encoding="utf-8", newline="\n")
+            # 反向正控：只在**散文**裡提到那個名字，不得被判違規（本鎖第一版的假陽性本體）。
+            (d / "prose_only_tool.py").write_text(
+                head + 'def main(argv=None):\n'
+                '    """本層絕不讀 sys.argv（拒收在 cli()）。"""\n'
+                "    # 這一行也只是註解：sys.argv 三個字不等於讀它\n"
+                "    return 0\n\n\n" + cli_block,
+                encoding="utf-8", newline="\n")
+
+            enrolled = sorted(p.name for p in self._cli_flags_consumers(d))
+            self.assertEqual(
+                enrolled,
+                ["argv_in_main_tool.py", "good_tool.py", "no_cli_layer_tool.py",
+                 "prose_only_tool.py"],
+                "射程選取壞了：沒接 `_cli_flags` 的 argparse 工具不得被枚舉"
+                "（納管它得先有那些檔的所有權），接了的一支都不能漏",
+            )
+            self.assertEqual(
+                self._layering_offenders([d / "good_tool.py"]), [],
+                "正控被誤報 ⇒ 本判準會逼出「為了過鎖而改壞正確寫法」的假修復",
+            )
+            self.assertEqual(
+                self._layering_offenders([d / "prose_only_tool.py"]), [],
+                "只在 docstring／註解提到 `sys.argv` 被判違規＝本鎖第一版的假陽性復發；"
+                "它會逼人刪掉紀律說明才能過鎖，方向完全相反",
+            )
+            self.assertEqual(
+                self._layering_offenders([d / "argv_in_main_tool.py"]),
+                ["argv_in_main_tool.py：`main()` 讀了 `sys.argv`"],
+                "注入「main() 讀 sys.argv」必須被點名——這就是 HEAD 既存那 3 支假紅的形狀",
+            )
+            self.assertEqual(
+                self._layering_offenders([d / "no_cli_layer_tool.py"]),
+                [
+                    "no_cli_layer_tool.py：缺頂層 `cli()` ⇒ 未走 cli/main 分層",
+                    "no_cli_layer_tool.py：`__main__` 那一行不是 "
+                    "`sys.exit(cli(sys.argv[1:]))`",
+                ],
+                "缺 cli() 層必須同時點名兩件事：函式不存在、入口那一行形狀不對",
+            )
+
     def test_every_gate_tool_rejects_an_unknown_flag(self) -> None:
-        """修前實況：四支全部 rc=0 印綠燈；修後必須 rc≠0。"""
+        """修前實況：四支 `check_*` 全部 rc=0 印綠燈；R74 擴射程後另納入 `run_root_unittests.py`
+        （修前不拒收、跑整棵樹）與其餘 8 支既已拒收的 CLI 入口。修後全體必須 rc≠0。"""
         offenders = self._offenders(self._gate_tools(), _UNKNOWN_ARGV_WAIVED)
         self.assertEqual(
             offenders, [],

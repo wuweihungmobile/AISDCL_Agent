@@ -38,6 +38,7 @@ from __future__ import annotations
 
 import ast
 import io
+import json
 import re
 import shutil
 import subprocess
@@ -67,32 +68,84 @@ def _latest_root() -> Path:
     return sdd_latest.resolve_latest_root(_REPO_ROOT / "AISDLC_SDD")
 
 
+# ── per-tree 檔數下限的「腐化偵測帶」（R75／DEF-101-800）────────────────────
+# 🔴 缺陷本體：下限原本是**單邊**的，而單邊下限只會腐化——樹會長大、下限不會，
+# 於是它實際守住的比例逐年下滑。R75 QA 實測：`tools` 樹 files=81 對 floor=18
+# ⇒ 掉掉 63/81（78%）掃描面仍然全綠，而那個 18 的來源是 2026-07-19 首掃數
+# 打八折，中間 R74 又是新增檔案最多的一輪。**「掃描面靜默縮小必紅」這個存在
+# 理由當時已經不成立**，鎖還在，牙掉了。
+#
+# 機制（刻意不外接基線同步器）：改成**雙邊帶**。
+#   · 低於下限 ⇒ 縮面（原意，不變）；
+#   · 高於「下限 ＋ 成長餘裕」⇒ **下限自己過時**，當場紅並在訊息裡直接給出該填的
+#     數字。腐化從此不是「等某人有空注意到」，而是一個會自己敲門的機械事件。
+# 為何不掛 `tools/sync_onboarding_baselines.py`：那條路要改 ONBOARDING §7 表格與
+# 產生器兩處（另有 owner），而它治的是「數字要跟著實測走」；本缺陷治的是「數字
+# **可以**不跟著實測走多遠」——後者只需要一個上界，而上界就地可判、零跨檔耦合。
+#: 下限＝實測 × 0.95（四捨五入）：容許少量檔案被合併／刪除而不必動下限。
+_SHRINK_SLACK = 0.05
+#: 實測 > 下限 × 1.25 ⇒ 判定下限腐化。取 25% 是讓「一輪正常增檔」不用重釘、
+#: 「累積數輪的漂移」一定會被逼著重釘（R75 那筆是 350%，任何合理閾值都會抓到）。
+_REPIN_HEADROOM = 0.25
+#: 小樹的絕對餘裕：百分比在 1~5 檔的樹上失效（floor=2 的 25% 是 0 檔）。
+_REPIN_MIN_HEADROOM = 10
+
+
+def repin_ceiling(floor: int) -> int:
+    """下限 `floor` 的腐化上界——實測超過它就必須重釘。"""
+    return max(floor + _REPIN_MIN_HEADROOM, int(floor * (1 + _REPIN_HEADROOM)))
+
+
+def suggested_floor(actual: int) -> int:
+    """依實測值算出該釘的下限（重釘時直接照抄，不必再想公式）。"""
+    return max(1, round(actual * (1 - _SHRINK_SLACK)))
+
+
+def tree_count_verdict(label: str, actual: int, floor: int) -> str | None:
+    """`None`＝在帶內；回字串＝失效理由（純函式，紅綠由合成注入自證）。"""
+    if actual < floor:
+        return (f"{label} 掃描檔數 {actual} < 下限 {floor}——該樹掃描面疑似縮小"
+                "（檔案被刪／被移出樹／glob 被改窄）")
+    ceiling = repin_ceiling(floor)
+    if actual > ceiling:
+        return (f"{label} 掃描檔數 {actual} 已超過下限 {floor} 的腐化上界 {ceiling}"
+                f"——這個下限只還守得住 {floor / actual:.0%} 的掃描面，"
+                f"請把它重釘為 {suggested_floor(actual)}。"
+                "單邊下限必然腐化：R75 實測過 files=81 對 floor=18 的狀態，"
+                "當時容許 78% 掃描面靜默蒸發而全綠")
+    return None
+
+
 def _scan_roots() -> list[tuple[Path, int]]:
-    """（掃描根, 該樹檔數下限）清單；根缺席或低於下限由測試 fail-loud。
+    """（掃描根, 該樹檔數下限）清單；根缺席或**離開下限帶**由測試 fail-loud。
 
     per-tree 下限（對齊 test_platform_neutral_paths SD-3 慣例）：逐樹釘選使任一樹
-    縮面必紅、不被他樹總量掩蓋。下限＝2026-07-19 首跑實掃數（23/46/200/272/31/162）
-    打八折取整，隨基線上修。R13 一審 ARCH-R13-REV-5 補納四個小樹（.claude/hooks／
-    AutoClaude/scripts／AutoClaude/alembic／LATEST .claude/hooks——其中
-    AutoClaude/scripts 正是 DEF-101-178 實證的 R12 清查漏網目錄），納管當下
-    實掃 1/1/19/5、同法打八折（最低 1）。樹清單本體由
-    TestScanRootsConfigPinning 釘選，防「刪清單一列」整樹靜默出界（QA-R13-2 同構）。"""
+    縮面必紅、不被他樹總量掩蓋。R13 一審 ARCH-R13-REV-5 補納四個小樹
+    （.claude/hooks／AutoClaude/scripts／AutoClaude/alembic／LATEST .claude/hooks
+    ——其中 AutoClaude/scripts 正是 DEF-101-178 實證的 R12 清查漏網目錄）。
+    樹清單本體由 TestScanRootsConfigPinning 釘選，防「刪清單一列」整樹靜默出界
+    （QA-R13-2 同構）。
+
+    🔴 下限值＝**R75 當回合實測 × 0.95**（見 `suggested_floor()`），不再是
+    2026-07-19 首掃數打八折的化石。實測值（2026-08-04，本機）：
+    81／43／204／282／1／19／2／43／166／2／5。上界機制見 `tree_count_verdict()`
+    ——下限與實測拉開太遠時它自己會紅，所以這一串數字不會再默默腐化。"""
     latest = _latest_root()
     return [
-        (_REPO_ROOT / "tools", 18),
-        (_REPO_ROOT / "AutoClaude" / "tools", 36),
-        (_REPO_ROOT / "AutoClaude" / "autoclaude", 160),
-        (_REPO_ROOT / "AutoClaude" / "tests", 217),
+        (_REPO_ROOT / "tools", 77),
+        (_REPO_ROOT / "AutoClaude" / "tools", 41),
+        (_REPO_ROOT / "AutoClaude" / "autoclaude", 194),
+        (_REPO_ROOT / "AutoClaude" / "tests", 268),
         (_REPO_ROOT / "AutoClaude" / "scripts", 1),
-        (_REPO_ROOT / "AutoClaude" / "alembic", 15),
-        (_REPO_ROOT / ".claude" / "hooks", 1),
-        (_REPO_ROOT / "AISDLC_SDD" / "scripts", 24),
-        (latest / "tools" / "fsm_runtime", 129),
+        (_REPO_ROOT / "AutoClaude" / "alembic", 18),
+        (_REPO_ROOT / ".claude" / "hooks", 2),
+        (_REPO_ROOT / "AISDLC_SDD" / "scripts", 41),
+        (latest / "tools" / "fsm_runtime", 158),
         # R14 SCAN-PY-1：LATEST tools/ 下 fsm_runtime 之外唯一 Python 樹——現況零
         # subprocess 站點（arch_fitness.py 明文「不執行 shell」），納管防未來引入
-        # 漏網（升版由 _latest_root() 動態跟隨）。實掃 2 檔（__init__ + 本體），下限 1。
-        (latest / "tools" / "arch_fitness", 1),
-        (latest / ".claude" / "hooks", 4),
+        # 漏網（升版由 _latest_root() 動態跟隨）。實掃 2 檔（__init__ + 本體）。
+        (latest / "tools" / "arch_fitness", 2),
+        (latest / ".claude" / "hooks", 5),
     ]
 
 
@@ -100,12 +153,13 @@ def _scan_roots() -> list[tuple[Path, int]]:
 # 又不能把整個 AISDLC_SDD/ 根樹納入——rglob 會誤掃凍結版 v0.01~v0.29）。
 # 清單由 TestScanRootsConfigPinning 一併釘選。R14 一審（SD-R14-REV-3＋ARCH-R14-REV-4
 # 獨立交叉發現）以 `git ls-files '*.py'` 全列舉打破「唯一漏網」宣稱，補齊為 3 檔；
-# tmp_lint_check.py 為 tracked 暫存殘留（2026-06-12 入庫、命名即臨時檔），去留另裁決
-# ——刪檔時 pinning 紅燈會提醒同步本清單。
+# R75 裁決並執行：`AutoClaude/tmp_lint_check.py`（2026-06-12 入庫的 tracked 暫存殘留，
+# 內容＝重跑 `lint-imports` CLI 已有的行為）依「暫存檔直接刪」慣例 `git rm`，故從本清單
+# 顯式除名。設計如預期運作——刪檔當回合本模組 1 failure + 2 errors，訊息逐字要求
+# 「邊界不得靜默縮小」，於是縮面必須是**寫下來的動作**而不是靜默發生。
 def _scan_single_files() -> list[Path]:
     return [
         _REPO_ROOT / "AISDLC_SDD" / "conftest.py",
-        _REPO_ROOT / "AutoClaude" / "tmp_lint_check.py",
         _latest_root() / "tools" / "__init__.py",
     ]
 
@@ -352,9 +406,56 @@ def _is_sys_executable(expr: ast.expr) -> bool:
             and isinstance(expr.value, ast.Name) and expr.value.id == "sys")
 
 
+#: tokenize 分類上「不是程式碼」的 token：註解與字串字面（含 3.12+ 的 f-string 分段）。
+#: 以 `getattr` 取值是為了跨 Python 版本——3.11 沒有 FSTRING_* 這組 token。
+_NON_CODE_TOKENS = frozenset(
+    {tokenize.COMMENT, tokenize.STRING}
+    | {tt for tt in (getattr(tokenize, name, None) for name in
+                     ("FSTRING_START", "FSTRING_MIDDLE", "FSTRING_END"))
+       if tt is not None}
+)
+
+
+def code_only(source: str) -> str:
+    """把註解與字串字面**塗白成等寬空白**後的原始碼（行號與欄位皆不位移）。
+
+    🔴 為何非要塗白（R75／DEF-101-801）：本判準原本是**整檔子字串比對**，於是
+    一行註解 `# init_utf8_streams` 就能讓一支毫無保護的檔案被判為「有保護」。
+    QA 以同樣手法複算過本輪納管的 child，14/14 命中皆落在真實程式碼 ⇒ 現況沒有
+    實例在濫用，屬**潛在缺口**。但這個缺口的形狀是「假綠」，而假綠一旦發生就
+    沒有任何訊號——本檔另一道判準（`_marker_lines`）早就只認 COMMENT token、
+    刻意不用裸子字串，同一份謹慎沒有套到這裡來。
+
+    tokenize 失敗（壞檔／怪編碼）時回空字串＝**視為無保護**：方向刻意選紅不選綠，
+    判準的存在理由就是防假綠。掃描面內的檔另有 `ast.parse` 的 fail-loud 會先叫。
+    """
+    try:
+        toks = list(tokenize.generate_tokens(io.StringIO(source).readline))
+    except (tokenize.TokenError, IndentationError, SyntaxError):
+        return ""
+    grid = [list(line) for line in source.splitlines(keepends=True)]
+    for tok in toks:
+        if tok.type not in _NON_CODE_TOKENS:
+            continue
+        (row1, col1), (row2, col2) = tok.start, tok.end
+        for row in range(row1, min(row2, len(grid)) + 1):
+            line = grid[row - 1]
+            lo = col1 if row == row1 else 0
+            hi = col2 if row == row2 else len(line)
+            for col in range(lo, min(hi, len(line))):
+                if line[col] != "\n":
+                    line[col] = " "
+    return "".join("".join(line) for line in grid)
+
+
 def has_utf8_stdio_protection(source: str) -> bool:
-    """三種保護形態任一即算——只認前兩種會誤判 `.reconfigure` 派的檔案。"""
-    return any(mark in source for mark in _PROTECTION_MARKS)
+    """三種保護形態任一即算——只認前兩種會誤判 `.reconfigure` 派的檔案。
+
+    比對面是 `code_only(source)`：註解、docstring、**被註解掉的程式碼**都不算保護
+    （見 `code_only` 的 WHY）。
+    """
+    code = code_only(source)
+    return any(mark in code for mark in _PROTECTION_MARKS)
 
 
 def scan_child_encoding(
@@ -436,12 +537,14 @@ def scan_files_child_encoding(
     return offenders, stale, parse_failures, in_scope
 
 
-#: 納管站點數下限（**shrink-only**）。值＝落地當下實測 26 筆打八折取整
-#: （分佈：tools 10／AutoClaude/tests 12／AutoClaude/tools 2／AISDLC_SDD/scripts 2）。
-#: 為何非有不可：本判準的射程取決於「靜態路徑解析得出來幾筆」，而那是實作細節
-#: ——有人把解析器改弱一點，offenders 一樣是 0，鎖卻靜默變成擺設。同 per-tree
-#: 檔數下限的語意，只是這裡守的是「解析力」而非「檔數」。
-_CHILD_SITE_FLOOR = 20
+#: 納管站點數下限。為何非有不可：本判準的射程取決於「靜態路徑解析得出來幾筆」，
+#: 而那是實作細節——有人把解析器改弱一點，offenders 一樣是 0，鎖卻靜默變成擺設。
+#: 同 per-tree 檔數下限的語意，只是這裡守的是「解析力」而非「檔數」。
+#:
+#: 🔴 R75：值改為當回合實測 27 × 0.95（`suggested_floor`），並**套同一條腐化上界**
+#: （`tree_count_verdict`）。原值 20 是落地當下 26 筆打八折——那個算法就是 per-tree
+#: 下限腐化成 18 vs 81 的同一個算法，差別只在它還沒漂夠久。上界讓它不必靠人記得。
+_CHILD_SITE_FLOOR = 26
 
 
 class TestSubprocessEncodingHygiene(unittest.TestCase):
@@ -452,11 +555,9 @@ class TestSubprocessEncodingHygiene(unittest.TestCase):
         for root, floor in _scan_roots():
             self.assertTrue(root.is_dir(), f"掃描根缺席：{root}（邊界不得靜默縮小）")
             files = sorted(root.rglob("*.py"))
-            # per-tree 下限釘選：單樹縮面必紅
-            self.assertGreaterEqual(
-                len(files), floor,
-                f"{root} 掃描檔數 {len(files)} < 下限 {floor}——該樹掃描面疑似縮小",
-            )
+            # per-tree 下限帶：單樹縮面必紅；下限離實測太遠（＝腐化）也必紅
+            verdict = tree_count_verdict(str(root), len(files), floor)
+            self.assertIsNone(verdict, verdict or "")
             off, st, pf = scan_files(files, _REPO_ROOT)
             offenders.extend(off)
             stale.extend(st)
@@ -600,10 +701,12 @@ class TestChildEncodingHygiene(unittest.TestCase):
         )
         self.assertEqual(stale, [],
                          f"{_CHILD_OK_MARKER} 豁免標記 stale：\n" + "\n".join(stale))
-        self.assertGreaterEqual(
-            in_scope, _CHILD_SITE_FLOOR,
-            f"納管站點數 {in_scope} < 下限 {_CHILD_SITE_FLOOR}——本判準的射程取決於"
-            "靜態路徑解析力，解析器變弱時 offenders 一樣是 0、鎖卻靜默變擺設",
+        verdict = tree_count_verdict("child 編碼判準納管站點數", in_scope,
+                                     _CHILD_SITE_FLOOR)
+        self.assertIsNone(
+            verdict,
+            f"{verdict}\n（低於下限＝靜態路徑解析力變弱，offenders 一樣會是 0、"
+            "鎖卻靜默變擺設；高於上界＝下限已腐化，照訊息重釘 _CHILD_SITE_FLOOR）",
         )
 
     # ── 判準紅綠自證（fixture 全落在 tmp，repo 內不留違規樣本）──────────────
@@ -667,6 +770,71 @@ class TestChildEncodingHygiene(unittest.TestCase):
             with self.subTest(guard=guard.splitlines()[0]):
                 off, stale, cnt = self._fixture(self._CALL_ONE_HOP, guard)
                 self.assertEqual((off, stale, cnt), ([], [], 1))
+
+    #: 保護字樣只出現在「不是程式碼」的位置的四種形態（R75／DEF-101-801）。
+    #: 刻意不含 `sys.std{out,err}.reconfigure(` 字面：`test_platform_utils_dedup.py` 的
+    #: `_FROZEN_INLINE_STDIO_SITES` 把本檔的該形態命中數凍結在 1，多寫一處即紅。
+    #: （R75 訂正：本行原本逐字寫出了那個字面，於是自己就是那「多寫的一處」、把上述棘輪
+    #:  弄紅——與 R73「訂正註記逐字引述＝製造新事實」同型，改用第 820 行同樣的非字面寫法。）
+    _FAKE_PROTECTION = (
+        ("行註解", "# init_utf8_streams\nprint('中文')\n"),
+        ("docstring", '"""本檔應該 import _stdio_utf8（TODO）。"""\nprint(\'中文\')\n'),
+        ("被註解掉的程式碼",
+         "# from platform_utils import init_utf8_streams\n"
+         "# init_utf8_streams()\nprint('中文')\n"),
+        ("字串常數", "_TODO = 'import _stdio_utf8'\nprint('中文')\n"),
+    )
+
+    def test_protection_marks_outside_real_code_do_not_count(self) -> None:
+        """保護字樣落在註解／docstring／被註解掉的程式碼／字串常數 ⇒ **無保護**。
+
+        WHY 這條是必要的（DEF-101-801）：判準原本是整檔子字串比對，上面任一種形態
+        都能讓一支毫無保護的 child 被判成合規——而「合規」在本判準裡就是綠燈，
+        沒有第二個訊號。本檔另一道判準（`_marker_lines`）早就只認 COMMENT token，
+        同一份謹慎沒有套過來。
+        """
+        for label, child in self._FAKE_PROTECTION:
+            with self.subTest(form=label):
+                self.assertFalse(
+                    has_utf8_stdio_protection(child),
+                    f"{label} 內的保護字樣被當成真的保護了（整檔子字串比對的病）",
+                )
+                off, stale, cnt = self._fixture(self._CALL_ONE_HOP, child)
+                self.assertEqual(len(off), 1, f"{label}：應判違規，實得 {off}")
+                self.assertEqual((stale, cnt), ([], 1))
+
+    def test_code_only_blanks_non_code_without_shifting_line_numbers(self) -> None:
+        """塗白必須**等寬**：行號／欄位一位移，`_marker_lines` 與 offender 行號就對不上。"""
+        source = "x = 1  # init_utf8_streams\ny = '''import _stdio_utf8\n多行'''\nz = 2\n"
+        blanked = code_only(source)
+        self.assertEqual(len(blanked.splitlines()), len(source.splitlines()))
+        for before, after in zip(source.splitlines(), blanked.splitlines()):
+            self.assertEqual(len(before), len(after))
+        self.assertNotIn("init_utf8_streams", blanked)
+        self.assertNotIn("_stdio_utf8", blanked)
+        self.assertIn("x = 1", blanked)
+        self.assertIn("z = 2", blanked)
+
+    def test_real_code_protection_survives_the_blanking(self) -> None:
+        """反向：真實程式碼的三種保護形態塗白後仍在（判準不得因塗白變成恆假）。
+
+        第三種形態以 `_PROTECTION_MARKS` 拼出而不寫字面：
+        `test_platform_utils_dedup.py::_FROZEN_INLINE_STDIO_SITES` 把本檔的
+        `std{out,err}.reconfigure(` 命中數凍結在 1（既有 fixture 那處），
+        多寫一處字面就會讓那道棘輪翻紅。
+        """
+        for guard in (
+            "import _stdio_utf8  # noqa: F401 \n",
+            "from platform_utils import init_utf8_streams\ninit_utf8_streams()\n",
+            "import sys\nsys.stdout" + _PROTECTION_MARKS[2] + "'utf-8')\n",
+        ):
+            with self.subTest(guard=guard.splitlines()[0]):
+                self.assertTrue(has_utf8_stdio_protection(guard))
+
+    def test_unparseable_child_is_treated_as_unprotected(self) -> None:
+        """tokenize 不了的 child ⇒ 判無保護（方向選紅不選綠）。"""
+        self.assertFalse(has_utf8_stdio_protection("def broken(:\n"))
+        self.assertEqual(code_only("def broken(:\n"), "")
 
     def test_flag_forms_and_unresolvable_paths_are_out_of_scope(self) -> None:
         """`-m` / `-c` 與解析不出來的路徑：不納管（劃界，非放行）。"""
@@ -789,7 +957,12 @@ def nonascii_console_lines(source: str) -> list[int]:
 
 
 def is_entry_point(source: str) -> bool:
-    """有 `__main__` 守衛＝會被當成獨立行程執行。"""
+    """有 `__main__` 守衛＝會被當成獨立行程執行。
+
+    🔴 這裡**刻意不塗白**（與 `has_utf8_stdio_protection` 相反）：比對樣本本身含
+    字串字面 `"__main__"`，塗白後會恆為 False。方向也是對的——註解掉的 `__main__`
+    守衛會讓本判準過度納管（偏紅、要人補保護或列豁免），不會產生假綠。
+    """
     return ('__name__ == "__main__"' in source
             or "__name__ == '__main__'" in source)
 
@@ -895,6 +1068,185 @@ class TestEntryPointStdioProtection(unittest.TestCase):
         self.assertEqual(nonascii_console_lines(source), [3])
 
 
+# ══════════════════════════════════════════════════════════════════════════
+# 判準四：**production 的 hook 呼叫形態**（R75／DEF-101-802）
+# ══════════════════════════════════════════════════════════════════════════
+# 🔴 缺陷本體：判準二只認「argv 第一個非旗標元素能解析成 repo 內某支 .py」的形態，
+# `-m`／`-c` 明文不追（見該處劃界，那個劃界本身沒錯）。而 `.claude/settings.json`
+# 註冊 hook 用的**正是** `python -c "...runpy.run_path(p)..."` ＋ 把腳本路徑當成
+# 給 `-c` 程式碼的引數——判準二對它結構性全盲。
+#
+# 後果是：R74 那筆 P0（`block_bash_on_windows.py` 的中文指引在 cp1252 下降解成
+# `\uXXXX`）之所以被 child 編碼判準覆蓋到，**唯一原因**是
+# `tools/tests/test_check_hooks_liveness.py` 這支**測試**恰好用
+# `[sys.executable, str(_HOOK)]` 直接執行形態起它（R75 QA 突變時 offender 訊息
+# 逐字指向該行）。那一行改寫成 `-c`、或改用別的起法，判準就**靜默失去 production
+# 唯一的那個站點**——而 production 一直都是 `-c` 形態，從來沒進過射程。
+#
+# 「量測載具只認棄用路徑的 marker、production 走另一條路所以真跑恆 0」是本 repo
+# 已有前例的缺陷形態（DEF-76-001）。本判準把 production 的**註冊表自己**當成掃描
+# 面：settings.json 內每一支被註冊的 hook 腳本都要有 UTF-8 stdio 保護，與誰在測
+# 試裡怎麼起它完全無關。
+_SETTINGS_JSON = _REPO_ROOT / ".claude" / "settings.json"
+
+#: hook command 字串裡的腳本路徑（正／反斜線皆收）。刻意不去解析 `-c` 那段
+#: Python 程式碼：shim 本體不含任何 `.py` 字面，路徑一律以引數形式出現在尾端。
+_PY_ARG_RE = re.compile(r"[\w./\\-]+\.py")
+
+
+def hook_command_scripts(settings: dict) -> list[tuple[str, str]]:
+    """`settings` 內每個 hook command 指名的腳本 → [(事件名, repo 相對 posix 路徑)]。"""
+    out: list[tuple[str, str]] = []
+    for event, entries in (settings.get("hooks") or {}).items():
+        for entry in entries or []:
+            for hook in entry.get("hooks") or []:
+                command = str(hook.get("command", ""))
+                for found in _PY_ARG_RE.finditer(command):
+                    out.append((event, found.group(0).replace("\\", "/")))
+    return out
+
+
+def scan_hook_command_children(
+    settings: dict, repo_root: Path
+) -> tuple[list[str], list[str], int]:
+    """回 (offenders, missing, 納管腳本數)——腳本去重後計數。
+
+    `missing`＝註冊了卻不存在的腳本。settings.json 明載「目標腳本缺檔＝fail-open
+    exit 0」，那是**執行期**刻意的 P0 防護（hook 缺檔不該把所有工具鎖死）；但
+    「註冊表指向一支不存在的腳本」在**靜態**上就是一道靜默死掉的 hook，兩件事不同。
+    """
+    offenders: list[str] = []
+    missing: list[str] = []
+    seen: set[str] = set()
+    for event, rel in hook_command_scripts(settings):
+        if rel in seen:
+            continue
+        seen.add(rel)
+        script = repo_root / rel
+        if not script.is_file():
+            missing.append(f"{event} 註冊了不存在的腳本 {rel}（hook 靜默失效）")
+            continue
+        if has_utf8_stdio_protection(script.read_text(encoding="utf-8")):
+            continue
+        offenders.append(
+            f"{rel}（由 .claude/settings.json 的 {event} 以 `python -c` ＋ "
+            "runpy 形態起）無 UTF-8 stdio 保護——hook 的輸出是使用者唯一看得到的"
+            "指引，非 UTF-8 locale 下 stderr 會逃脫成 \\uXXXX、stdout 直接"
+            "UnicodeEncodeError（DEF-101-789 逐字重現於 GitHub windows-latest）"
+        )
+    return offenders, missing, len(seen)
+
+
+#: 註冊腳本數下限（同 `tree_count_verdict` 的雙邊帶）。值＝R75 實測去重 4 支
+#: （sdd_hook_router／block_bash_on_windows／check_ps1_encoding／check_sh_eol）
+#: × 0.95。低於下限＝有 hook 被拔掉或正則失效；高於上界＝下限過時要重釘。
+_HOOK_SCRIPT_FLOOR = 4
+
+#: R74 那筆 P0 的站點。判準四必須**自己**罩得住它，不靠任何測試檔碰巧用了
+#: 直接執行形態（那正是本判準存在的理由）。
+_R74_P0_HOOK_REL = ".claude/hooks/block_bash_on_windows.py"
+
+
+class TestRegisteredHookScriptsAreInChildEncodingScope(unittest.TestCase):
+    """判準四：`.claude/settings.json` 註冊的 hook 腳本必須自帶 UTF-8 stdio 保護。"""
+
+    def _real_settings(self) -> dict:
+        self.assertTrue(_SETTINGS_JSON.is_file(), f"找不到 {_SETTINGS_JSON}")
+        return json.loads(_SETTINGS_JSON.read_text(encoding="utf-8"))
+
+    def test_every_registered_hook_script_is_protected(self) -> None:
+        offenders, missing, count = scan_hook_command_children(
+            self._real_settings(), _REPO_ROOT
+        )
+        self.assertEqual(missing, [], "\n".join(missing))
+        self.assertEqual(
+            offenders, [],
+            "以下 production hook 腳本無 UTF-8 stdio 保護（請在該檔加 "
+            "`import _stdio_utf8` / `init_utf8_streams` / 就地 reconfigure）：\n"
+            + "\n".join(offenders),
+        )
+        verdict = tree_count_verdict("settings.json 註冊 hook 腳本數", count,
+                                     _HOOK_SCRIPT_FLOOR)
+        self.assertIsNone(verdict, verdict or "")
+
+    def test_the_r74_p0_site_is_in_scope_without_help_from_any_test_file(self) -> None:
+        """R74 P0 的那支 hook 必須經 **production 註冊表**進入射程。
+
+        WHY 這條要單獨具名：它此前進入 child 編碼判準的唯一途徑是
+        `tools/tests/test_check_hooks_liveness.py` 用直接執行形態起它——一支測試的
+        寫法決定了另一道鎖的射程，改寫那行就靜默失去站點。本斷言只讀
+        `.claude/settings.json`，與任何測試檔怎麼寫完全無關。
+        """
+        scripts = {rel for _event, rel in hook_command_scripts(self._real_settings())}
+        self.assertIn(
+            _R74_P0_HOOK_REL, scripts,
+            f"{_R74_P0_HOOK_REL} 不在 settings.json 的 hook command 掃描結果內 ⇒ "
+            "判準四對 R74 P0 站點失去射程（hook 被拔掉，或 command 形態變了而 "
+            "_PY_ARG_RE 撈不到路徑）。實得：" + repr(sorted(scripts)),
+        )
+        self.assertTrue(
+            has_utf8_stdio_protection(
+                (_REPO_ROOT / _R74_P0_HOOK_REL).read_text(encoding="utf-8")
+            ),
+            f"{_R74_P0_HOOK_REL} 失去 UTF-8 stdio 保護＝R74 P0 復發",
+        )
+
+    # ── 判準紅綠自證：用**真實 production command 字樣**驅動，不用簡化版 ──────
+
+    def _settings_with(self, script_rel: str) -> dict:
+        """把真實 settings.json 裡起 R74 P0 那支 hook 的 command 原字串取來，
+        只把腳本路徑換掉——這樣 fixture 驗的就是 production 的 `-c` ＋ runpy
+        形態本身，而不是一個我自己寫得比較好認的簡化字串。"""
+        real = json.loads(_SETTINGS_JSON.read_text(encoding="utf-8"))
+        for _event, entries in (real.get("hooks") or {}).items():
+            for entry in entries:
+                for hook in entry.get("hooks") or []:
+                    command = str(hook.get("command", ""))
+                    if _R74_P0_HOOK_REL in command:
+                        self.assertIn("runpy.run_path", command,
+                                      "production command 已不是 runpy 形態，"
+                                      "本 fixture 的前提要重新確認")
+                        self.assertIn(" -c ", command,
+                                      "production command 已不是 -c 形態")
+                        return {"hooks": {"PreToolUse": [{
+                            "matcher": "Bash",
+                            "hooks": [{"command": command.replace(
+                                _R74_P0_HOOK_REL, script_rel)}],
+                        }]}}
+        self.fail(f"真實 settings.json 內找不到起 {_R74_P0_HOOK_REL} 的 command")
+
+    def test_criterion_red_green_on_the_real_production_command_form(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            (root / "hooks").mkdir()
+            target = root / "hooks" / "probe_hook.py"
+            settings = self._settings_with("hooks/probe_hook.py")
+
+            target.write_text("print('中文')\n", encoding="utf-8")
+            offenders, missing, count = scan_hook_command_children(settings, root)
+            self.assertEqual((missing, count), ([], 1))
+            self.assertEqual(len(offenders), 1, offenders)
+            self.assertIn("hooks/probe_hook.py", offenders[0])
+
+            target.write_text("import _stdio_utf8  # noqa: F401 \nprint('中文')\n",
+                              encoding="utf-8")
+            self.assertEqual(scan_hook_command_children(settings, root)[0], [])
+
+            # 只有註解寫著保護字樣 ⇒ 仍必須是紅（與判準二共用 code_only）
+            target.write_text("# init_utf8_streams\nprint('中文')\n", encoding="utf-8")
+            self.assertEqual(len(scan_hook_command_children(settings, root)[0]), 1)
+
+            target.unlink()
+            self.assertEqual(len(scan_hook_command_children(settings, root)[1]), 1)
+
+    def test_the_floor_band_is_wired_to_the_same_criterion(self) -> None:
+        """下限帶自證：註冊腳本被拔到只剩 1 支 ⇒ 紅（不靠 repo 現況剛好有幾支）。"""
+        verdict = tree_count_verdict("settings.json 註冊 hook 腳本數", 1,
+                                     _HOOK_SCRIPT_FLOOR)
+        self.assertIsNotNone(verdict)
+        self.assertIn("疑似縮小", verdict or "")
+
+
 class TestScanRootsConfigPinning(unittest.TestCase):
     """守門自身樹清單釘選（QA-R13-2 同構延伸；手法同 parity test_tools_lib_in_scan_dirs）。
 
@@ -926,6 +1278,42 @@ class TestScanRootsConfigPinning(unittest.TestCase):
             },
         )
 
+    def test_the_floor_band_catches_both_shrink_and_rot(self) -> None:
+        """下限帶紅綠自證（R75／DEF-101-800）——**含 QA 實測到的那個腐化狀態**。
+
+        `(files=81, floor=18)` 是 R75 QA 在本檔量到的真實數字：可以掉掉 63/81
+        掃描面仍全綠。舊判準（單邊 `assertGreaterEqual`）對它是綠的，新判準必須紅，
+        而且要在訊息裡直接給出該重釘的數字——否則「腐化了要重釘」只是一句期許。
+        """
+        rot = tree_count_verdict("tools", 81, 18)
+        self.assertIsNotNone(rot, "QA 實測的腐化狀態（81 vs 18）竟被判為合格")
+        self.assertIn("腐化上界", rot or "")
+        self.assertIn(str(suggested_floor(81)), rot or "", "訊息須直接給出該填的數字")
+        # 縮面（原意）仍必須紅
+        shrink = tree_count_verdict("tools", 10, 77)
+        self.assertIsNotNone(shrink)
+        self.assertIn("疑似縮小", shrink or "")
+        # 帶內＝綠：等於下限、等於上界、以及當回合實測值
+        for actual, floor in ((77, 77), (repin_ceiling(77), 77), (81, 77)):
+            self.assertIsNone(tree_count_verdict("tools", actual, floor),
+                              f"帶內組合 ({actual}, {floor}) 被誤判為紅")
+
+    def test_every_pinned_floor_is_inside_its_own_band(self) -> None:
+        """釘下去的每個下限都必須對**當下實測**成立（含上界）——這是防「重釘時
+        只改一棵樹、其他棵繼續腐化」。正職那道測試逐樹跑同一判準，本案是它的
+        設定面複本：即使正職因別的原因被 skip，下限本身仍被量。"""
+        stale: list[str] = []
+        for root, floor in _scan_roots():
+            if not root.is_dir():
+                continue
+            verdict = tree_count_verdict(
+                root.relative_to(_REPO_ROOT).as_posix(),
+                len(sorted(root.rglob("*.py"))), floor,
+            )
+            if verdict:
+                stale.append(verdict)
+        self.assertEqual(stale, [], "\n".join(stale))
+
     def test_scan_single_files_pinned(self) -> None:
         """R14 SCAN-PY-2：單檔清單釘選——刪一列即該檔靜默出界，同樹清單防護語意。
         LATEST 版名正規化，升版不失效（同樹清單慣例）。"""
@@ -938,7 +1326,6 @@ class TestScanRootsConfigPinning(unittest.TestCase):
             rels,
             {
                 "AISDLC_SDD/conftest.py",
-                "AutoClaude/tmp_lint_check.py",
                 "AISDLC_SDD/LATEST/tools/__init__.py",
             },
         )

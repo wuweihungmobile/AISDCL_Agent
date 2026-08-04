@@ -1822,6 +1822,163 @@ class TestSkipDirectionAndTagSymmetry(unittest.TestCase):
         self.assertTrue(
             _wst.posix_tag_ratchet_problems({}), "掃描面整組消失竟放行——fail-open")
 
+    # ══════════════════════════════════════════════════════════════════════════
+    # R75：SD 追加①（複合布林方向）＋ QA-R74-02（63 筆對所有機械物隱形）的注入式鎖
+    # ══════════════════════════════════════════════════════════════════════════
+
+    def test_composite_boolean_condition_is_evaluated_not_guessed(self) -> None:
+        """🔴 SD 追加①：複合布林條件不得以「字串比對挑一個 marker」猜方向。
+
+        意圖（Rule 9）：R74 的判準是「依 marker 長度遞減排序取第一個命中」，於是
+        `skipIf(sys.platform == 'win32' or sys.platform == 'darwin')` 取到較長的
+        `darwin`（24 字 > 23 字）⇒ 判成 `non-windows`，而它**實際在 Windows 上會 skip**。
+        方向算反正是該檔自承「比判不出方向更糟」的形態（它會要求作者貼上錯的標籤）。
+        修法是真值運算（`or`／`and`／`not` 逐層求值），故本支逐格斷言真值表——包含
+        「一個葉判得出、另一個判不出」的短路情形，那是純字串比對絕對做不到的。
+        """
+        cases = {
+            "sys.platform == 'win32' or sys.platform == 'darwin'": True,
+            "sys.platform == 'win32' and sys.platform != 'darwin'": True,
+            "not (sys.platform == 'win32' or sys.platform == 'darwin')": False,
+            "os.name == 'nt' or _brand_new_probe()": True,       # True or 未知 == True
+            "os.name != 'nt' and _brand_new_probe()": False,     # False and 未知 == False
+            "_brand_new_probe() or _other()": None,              # 兩葉皆未知 ⇒ 不猜
+            "os.name == 'nt' and _brand_new_probe()": None,      # True and 未知 ⇒ 不猜
+        }
+        for cond, want in cases.items():
+            with self.subTest(cond=cond):
+                self.assertIs(
+                    _wst._predicate_value_on_windows(cond), want,
+                    f"{cond!r} 在 Windows 上的值應為 {want}",
+                )
+        # 端到端：SD 舉的那一筆必須歸到 `posix-only`（Windows 上會 skip），而不是反方向。
+        site = _wst.SkipSite(
+            "f.py", 1, "t", "skipIf", "sys.platform == 'win32' or sys.platform == 'darwin'", "r")
+        self.assertEqual(_wst.skipped_platform(site), "windows")
+        self.assertEqual(_wst.site_class(site), "posix-only")
+
+    def test_every_site_lands_in_exactly_one_census_class(self) -> None:
+        """🔴 QA-R74-02：每個站點都必須落在某一格 ⇒ 沒有站點能對所有機械物隱形。
+
+        意圖：修前三棵活測試樹共 103 個 decorator 站點、其中 63 筆（61%）方向判不出來，
+        而 docstring 宣稱承接它們的收口網對這 63 筆命中 0 ⇒ 兩道方向判準與收口網**全部
+        看不到**。本支鎖「分類是全覆蓋的」：站點總數 ＝ 各類別數字之和，且
+        `unclassified` 有明細可查。
+        """
+        src = (
+            "import os, shutil, sys, unittest, pytest\n"
+            '@unittest.skipUnless(os.name == "nt", "Windows 專屬")\n'
+            "def test_a(): pass\n"
+            '@unittest.skipIf(os.name == "nt", "POSIX 專屬")\n'
+            "def test_b(): pass\n"
+            '@unittest.skipUnless(shutil.which("git"), "需 git")\n'
+            "def test_c(): pass\n"
+            '@unittest.skipUnless(_BASH, "需 bash")\n'
+            "def test_d(): pass\n"
+            "class T(unittest.TestCase):\n"
+            "    def test_e(self):\n"
+            '        self.skipTest("函式體內 skip")\n'
+        )
+        sources = {"fixture_case.py": src}
+        counts = _wst.site_class_counts(sources)
+        self.assertEqual(
+            counts,
+            {"windows-only": 1, "posix-only": 1, "tool-absence": 2,
+             "runtime-skipTest": 1, "unclassified": 0},
+            f"分類全覆蓋性壞了（實得 {counts}）",
+        )
+        self.assertEqual(
+            sum(counts.values()), len(_wst.skip_decorator_sites(sources)),
+            "各類別之和 ≠ 站點總數 ⇒ 有站點沒被歸類（那就是隱形）",
+        )
+
+    def test_runtime_skiptest_form_is_in_scope(self) -> None:
+        """🔴 QA-R74-02 第 3 點：函式體內的 `self.skipTest()` 此前完全在射程外。
+
+        意圖：`_SKIP_CALL_SKIPS_WHEN_TRUE` 只認 decorator，於是「把條件寫在 `if` 裡再
+        `self.skipTest(...)`」這種寫法連站點都抽不到（R75 實測 `tools/tests/` 有 10 筆）。
+        它們沒有條件引數、方向天生判不出來——但「判不出來」不等於「可以隱形」。
+        """
+        sites = self._sites(
+            "import unittest\n"
+            "class T(unittest.TestCase):\n"
+            "    def test_x(self):\n"
+            "        if not _HAS_TOOL:\n"
+            '            self.skipTest("缺工具")\n'
+        )
+        self.assertEqual(len(sites), 1, sites)
+        self.assertEqual(sites[0].decorator, "skipTest")
+        self.assertEqual(sites[0].reason, "缺工具")
+        self.assertEqual(sites[0].target, "test_x", "必須點名到那支測試")
+        self.assertEqual(_wst.site_class(sites[0]), "runtime-skipTest")
+
+    def test_unregistered_predicate_is_judged_per_leaf_not_whole_condition(self) -> None:
+        """🔴 逐葉判「未登記」，不看整條條件（R75 落地時實測到假紅）。
+
+        意圖：`os.name == "nt" and _real_pwsh7() is not None` 整條含 `nt` 字樣、整條方向
+        判不出來，於是「整條」版判準把它報成「未登記的 Windows 述詞」——可它的兩個葉一個
+        已登記、一個根本不像 Windows，**沒有任何述詞需要登記**，訊息給的修法是空的。
+        逐葉之後假紅歸零，而真正的漏登記仍抓得到（下半段）。
+        """
+        self.assertEqual(
+            _wst.suspect_unregistered_leaves('os.name == "nt" and _real_pwsh7() is not None'),
+            [], "已登記葉 ＋ 非 Windows 葉的組合不得被報成漏登記",
+        )
+        self.assertEqual(
+            _wst.suspect_unregistered_leaves("_brand_new_windows_probe()"),
+            ["_brand_new_windows_probe()"], "真正的漏登記必須抓到",
+        )
+        # 端到端：前者歸 tool-absence（可見、可記帳），後者歸 unclassified（逐筆點名）。
+        ok = _wst.SkipSite("f.py", 1, "t", "skipUnless",
+                           'os.name == "nt" and _real_pwsh7() is not None', "r")
+        bad = _wst.SkipSite("f.py", 2, "t", "skipUnless", "_brand_new_windows_probe()", "r")
+        self.assertEqual(_wst.site_class(ok), "tool-absence")
+        self.assertEqual(_wst.site_class(bad), "unclassified")
+
+    def test_tree_floor_ratchet_flags_both_shrinkage_and_staleness(self) -> None:
+        """🔴 SD 追加②要的**防腐機制**：下限過期本身必須是一筆 problem。
+
+        意圖：下限只擋「縮面」時會單向腐化——樹長大、下限不動，鑑別力靜默歸零而沒有任何
+        東西會說話（`MIN_TESTS` 腐化 11 輪就是這麼發生的）。下限的語意既然是「實測的
+        八成」，那 `floor < actual × 0.8` 就該紅。
+        """
+        floors = dict(_wst._TREE_FILE_FLOORS)
+        tree, floor = next(iter(floors.items()))
+        # 對照組：實測恰為 floor/0.8 ⇒ 合格（下限剛好在設計比例上）。
+        exact = int(floor / _wst.TREE_FLOOR_RATIO)
+        self.assertEqual(
+            _wst.tree_floor_problems({t: int(f / _wst.TREE_FLOOR_RATIO)
+                                      for t, f in floors.items()}), [],
+            "下限恰在設計比例上竟被判違規",
+        )
+        self.assertTrue(
+            _wst.tree_floor_problems({**floors, tree: floor - 1}),
+            "掃描面縮到下限以下沒被擋（原本就該有的那一向）",
+        )
+        stale = {t: int(f / _wst.TREE_FLOOR_RATIO) for t, f in floors.items()}
+        stale[tree] = exact * 3
+        problems = _wst.tree_floor_problems(stale)
+        self.assertTrue(problems, "樹長大三倍、下限不動竟放行 ⇒ 下限會就地腐化")
+        self.assertTrue(
+            any("已過期" in p and tree in p for p in problems),
+            f"訊息未指出是哪一棵樹的下限過期：{problems}",
+        )
+        self.assertTrue(_wst.tree_floor_problems({}), "掃描面整組消失竟放行——fail-open")
+
+    def test_census_ratchet_flags_drift_in_both_directions(self) -> None:
+        """普查棘輪對「新增」與「收斂後未下修」兩向都說話（同 `_POSIX_TAG_RATCHET` 政策）。"""
+        baseline = {t: dict(c) for t, c in _wst._SITE_CLASS_CENSUS.items()}
+        self.assertEqual(
+            _wst.site_class_census_problems(baseline), [], "基線自己對自己不相等——表壞了")
+        tree = next(iter(baseline))
+        worse = {**baseline, tree: {**baseline[tree], "unclassified": 1}}
+        better = {**baseline, tree: {**baseline[tree],
+                                     "tool-absence": baseline[tree]["tool-absence"] - 1}}
+        self.assertTrue(_wst.site_class_census_problems(worse), "新增 unclassified 沒被擋")
+        self.assertTrue(
+            _wst.site_class_census_problems(better), "收斂後未下修基線卻放行——會就地腐化")
+        self.assertTrue(_wst.site_class_census_problems({}), "掃描面消失竟放行——fail-open")
+
     def test_scan_surface_spans_the_three_live_test_trees(self) -> None:
         """🔴 PKG-4 D 的射程面：判準必須看到三棵活測試樹，不是只有一棵。
 

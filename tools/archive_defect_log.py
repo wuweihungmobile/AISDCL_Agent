@@ -544,7 +544,7 @@ def active_status_hit(status_cell: str) -> re.Match[str] | None:
       (c) 判準④（`HANDOFF_PROSE_RE`）完全不受影響，且它掃的是**整列**而非狀態欄——真正的
           活交棒仍會被攔下要求 `--ack-handoff` 具名承認（R68 實測放行的 6 筆中有 3 筆
           隨即落在判準④ 手上；R74 的 `fail-open` 兩筆亦同）。
-    對應機械鎖：`tools/tests/test_defect_log_capacity_policy_r68.py::TestCriterion2Narrowing`
+    對應機械鎖：`tools/tests/test_archive_defect_log.py::TestCriterion2Narrowing`（R75 訂正）
     """
     masked = list(status_cell)
     for pattern in (_CODE_SPAN_RE, _CORNER_QUOTE_RE):

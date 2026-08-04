@@ -2791,10 +2791,34 @@ def hook_scripts_named_in(text: str, repo_root: Path) -> dict[str, list[str]]:
 
 
 def hook_claim_problems(text: str, settings_text: str, repo_root: Path) -> list[str]:
-    """根 CLAUDE.md 提到的每支 hook：已註冊、或該行標明子專案射程。否則違規。"""
+    """根 CLAUDE.md 提到的每支 hook，**雙向**都要與根層註冊實況相符。
+
+    ① 未註冊者：凡提到它的行都必須標明子專案射程，否則讀者會以為根 session 也會攔。
+    ② **已註冊者：任何一行都不得標成「僅 AutoClaude 子專案 session」**（R75 訂正）。
+
+    🔴 為何非補 ② 不可（本函式自己放行過一次假事實）：原判準是 OR——「已註冊 **或**
+    該行標明子專案射程」，於是 `if name in settings_text: continue` 讓「已註冊」單獨
+    成為免檢通行證，**完全不看那些行實際寫了什麼**。實況：`a371068` 這個 commit 的
+    一個包把 `check_sh_eol.py` 橋進根 `.claude/settings.json`，同一個 commit 的訂正文
+    卻仍把它算在「不會跑」那一組並連帶少報了橋接支數 ⇒ 假事實在寫下的當回合就成立，
+    而這道鎖結構上恆綠（實跑當時 4 tests 全 ok、rc=0）。
+
+    ②「一行都不得」而非「主要那行不得」是刻意的：這個字樣的語意是絕對的（「這支在根
+    session 不會跑」），一支會跑的 hook 沒有任何語境能讓那句話變成真的。副作用是文件
+    必須把「已橋接清單」與「未橋接清單」**分行寫**——那不是本判準的成本，而是它要的
+    結構：兩組事實混在同一行時，逐行 substring 判準對任何一組都判不準。
+    """
     problems: list[str] = []
     for name, lines in sorted(hook_scripts_named_in(text, repo_root).items()):
         if name in settings_text:
+            mislabelled = [ln for ln in lines if _SUBPROJECT_SCOPE_MARK in ln]
+            if mislabelled:
+                problems.append(
+                    f"{name} **已註冊**於根 .claude/settings.json（根 session 會跑），"
+                    f"但根 CLAUDE.md 有 {len(mislabelled)} 行把它標成「"
+                    f"{_SUBPROJECT_SCOPE_MARK}」⇒ 把會跑的東西寫成不會跑，與反向那筆"
+                    f"同樣是假事實。修法：把已橋接的 hook 名稱與該字樣寫在不同行。"
+                    f"首例：{mislabelled[0][:70]}")
             continue
         unmarked = [ln for ln in lines if _SUBPROJECT_SCOPE_MARK not in ln]
         if unmarked:
@@ -2830,40 +2854,275 @@ class TestR74RootClaudeMdHookClaimsMatchRegistration(unittest.TestCase):
         self.assertTrue(any("enforce_docs_path.py" in p for p in problems), problems)
 
     def test_a_registered_hook_needs_no_marker(self) -> None:
-        """反向：已橋接到根層的 hook 不必加射程註記（否則鎖會逼出誤導性的註記）。"""
+        """反向：已橋接到根層的 hook 不必加射程註記（否則鎖會逼出誤導性的註記）。
+
+        這條語意在 R75 訂正時**刻意保留**：新增的是「已註冊者不得被標成不會跑」，
+        不是「已註冊者必須加註記」。兩者混淆會把鎖變成假註記的生產者。
+        """
         self.assertEqual(
             hook_claim_problems("根層已註冊 `block_bash_on_windows.py`，會攔。",
                                 _ROOT_SETTINGS.read_text(encoding="utf-8-sig"),
                                 _REPO_ROOT),
             [])
 
+    def test_a_registered_hook_marked_subproject_only_is_red(self) -> None:
+        """注入＝修前實況（R75 訂正的鑑別力）：`check_sh_eol.py` 已橋接到根層，
+        而合成文字把它與另外幾支一起寫在同一行並標成僅子專案生效 ⇒ 必須紅。
+
+        用 `check_sh_eol.py` 而不是造一個假名，是因為它就是真的踩過這個組合的那一支；
+        名字若換成不存在的 hook，`hook_scripts_named_in` 的掃描面根本不會收它，測試
+        會因為「掃不到」而綠，那是最沒鑑別力的一種綠。
+        """
+        settings = _ROOT_SETTINGS.read_text(encoding="utf-8-sig")
+        self.assertIn("check_sh_eol.py", settings, "前提已變：該 hook 已不在根層註冊，"
+                                                   "請改用另一支已註冊的 hook 重寫本注入")
+        problems = hook_claim_problems(
+            "註冊 6 支 hook——`enforce_docs_path.py`／`check_sh_eol.py`／"
+            f"`check_lang.py`，除某支外皆{_SUBPROJECT_SCOPE_MARK} 生效。",
+            settings, _REPO_ROOT)
+        self.assertTrue(
+            any("check_sh_eol.py" in p and "已註冊" in p for p in problems),
+            f"已註冊卻被標成不會跑，判準必須點名它；實得：{problems}")
+
+    def test_reverse_criterion_does_not_fire_on_unregistered_hooks(self) -> None:
+        """對照組：反向判準不得把「未註冊 ＋ 有標記」這個**正確**的組合也判紅。
+
+        少了這條，把 ② 寫成「任何一行都不得帶該字樣」（漏掉已註冊這個前提）會全綠通過，
+        而那樣的判準會逼所有正確的射程註記消失——比沒有判準更糟。
+
+        🔴 前提刻意以**行為**自證，而不是對 `settings.json` 整份文件斷言某字樣不出現：
+        後者正是 `test_archive_defect_log.py::TestNoAssertionSamplesALiveDocumentWholesale`
+        禁止的形態（文件只要合法地提到該字樣就假紅），本測試初稿即被那道鎖抓到。
+        下面第二個斷言同時比原前提**更強**：它證明這支 hook 走的確實是「未註冊」那一支
+        判準，第一行的綠不是因為它被當成已註冊而整支免檢。
+        """
+        settings = _ROOT_SETTINGS.read_text(encoding="utf-8-sig")
+        self.assertEqual(
+            hook_claim_problems(
+                f"`enforce_docs_path.py`（PreToolUse hook）**{_SUBPROJECT_SCOPE_MARK}** 生效。",
+                settings, _REPO_ROOT),
+            [])
+        self.assertTrue(
+            hook_claim_problems("`enforce_docs_path.py`（PreToolUse hook）生效。",
+                                settings, _REPO_ROOT),
+            "拿掉射程註記仍全綠 ⇒ 該 hook 被當成已註冊而免檢，上一個斷言是空虛的綠")
+
+
+# ── R75 訂正：具名機械物鎖的三面擴張（幽靈機械物 4 筆的逃逸路徑）─────────────
+#
+# 🔴 缺陷本體：原判準是「掃根 CLAUDE.md、要求反引號、副檔名只認 `.py`、只斷言檔案存在」。
+# 四個縫各自漏了東西，實測逃逸 4 筆（Architect／SA 實查，本輪以探針全部重現）：
+#   ① 掃描面只有根 CLAUDE.md ⇒ `tools/*.py` 註解與 `tools/*.json` 的 `_why` 裡指認機械物
+#      的宣稱完全不在視野內。逃逸：`archive_defect_log.py` 與 `check_defect_log_crossref.py`
+#      各指向一支從未存在的 `test_defect_log_capacity_policy_r68.py`（R68 落地時
+#      `tools/tests` 鎖檔數棘輪擋下新增鎖檔，判準併進了 `test_archive_defect_log.py`，
+#      指標卻留在原本打算開的檔名上）；`scheduled_task_expectations.json` 同型。
+#   ② 副檔名只認 `.py` ⇒ 根 CLAUDE.md 對 `install_windows_nightly.ps1` 寫了 `AutoClaude/`
+#      前綴（該安裝器住 monorepo 根層 `tools/`），三個解析基準都找不到，卻因為是 `.ps1`
+#      而不被檢查。
+#   ③ 只斷言「檔案存在」⇒ **「檔案在、但守的是別的東西」照樣通過**。鐵律三 `行尾` 列
+#      具名 `test_ps1_bom.py`，而該檔全篇是 .ps1 的 UTF-8 BOM 政策，對 CRLF／行尾零判準。
+#      這一種比指向不存在的檔更難看見：路徑點得開、檔案打得開，只有讀完才知道守錯東西。
+#   ④ `::Symbol` 從不驗證 ⇒ 類別改名／搬家後指標靜默失效。
+_MECHANISM_CLAIM_MARKS: tuple[str, ...] = ("機械鎖", "機械釘")
+_MECHANISM_EXTS = "py|ps1|sh|json"
+#: 具名機械物引用的形狀：`<路徑>.<副檔名>` ＋ 可選的 `::Symbol`（可多段）。
+_MECHANISM_PATH_RE = re.compile(
+    r"((?:tools|AutoClaude|AISDLC_SDD|\.claude)[\w./-]+\.(?:" + _MECHANISM_EXTS + r"))"
+    r"((?:::[\w.]+)*)"
+)
+#: 解析基準。根 CLAUDE.md 自己就有〈路徑陷阱〉一節明載：子專案段落的相對路徑是
+#: **相對於該子專案目錄**（`AutoClaude — 常用指令` 段的 `tools/check_loc_budget.py`
+#: 就是 `AutoClaude/tools/check_loc_budget.py`）。只拿 repo 根去解會把那些正確引用
+#: 誤報成不存在——誤報的鎖最後一定被整道關掉，比沒有鎖更糟。
+_MECHANISM_PATH_BASES: tuple[str, ...] = (".", "AutoClaude", "AISDLC_SDD")
+#: 額外掃描面（相對 repo 根的 glob）。只掃**檔名層**、不遞迴：`tools/tests/` 底下是
+#: 鎖本身的住所，鎖檔互相引用是常態而非宣稱，納入只會製造噪音。
+_MECHANISM_EXTRA_GLOBS: tuple[str, ...] = ("tools/*.py", "tools/*.json")
+#: 鐵律三各列主題 → 該列具名檔案內至少須出現其中一個關鍵詞（大小寫不敏感）。
+#: 這是「實質」判準的取值面：**必要條件不是充分條件**（抓得到「完全沒碰那個主題」，
+#: 抓不到「碰了但判準很弱」）。刻意用關鍵詞而不是解析判準內容——後者要為每一種主題
+#: 寫一個專用分析器，那本身就是新的漂移來源。
+_IRON_LAW3_TOPIC_KEYWORDS: dict[str, tuple[str, ...]] = {
+    "路徑分隔符": ("sep", "分隔符", "backslash", "posixpath"),
+    "console 編碼": ("encoding", "編碼", "cp950"),
+    "行尾": ("crlf", "eol", r"\r\n", "行尾"),
+    "$IsWindows": ("iswindows",),
+    "Get-Command": ("get-command",),
+}
+
+
+def mechanism_claims(
+    text: str, source: str, *, require_backticks: bool
+) -> list[tuple[str, str, str, str]]:
+    """`(來源, 相對路徑, 符號, 原行)`；`source` 只用於失敗訊息定位。
+
+    `require_backticks`：活文件（根 CLAUDE.md）一律以反引號寫路徑，要求它可濾掉散文
+    裡的假路徑；`.json` 的 `_why` 陣列寫不出反引號慣例，故程式碼面不要求，改以「該行
+    帶『機械鎖／機械釘』字樣」限縮——那個字樣就是**指認機械物**這個宣稱本身的標記。
+    整檔掃會把純敘事的路徑提及（「見 tools/lib/xxx.py」）一併納入，偽陽性會讓這道鎖
+    被整道關掉，那是比縮面更糟的結局。
+    """
+    out: list[tuple[str, str, str, str]] = []
+    for line in text.splitlines():
+        if not require_backticks and not any(k in line for k in _MECHANISM_CLAIM_MARKS):
+            continue
+        for m in _MECHANISM_PATH_RE.finditer(line):
+            if require_backticks:
+                start, end = m.start(1), m.end(2)
+                if not (start and line[start - 1] == "`" and line[end:end + 1] == "`"):
+                    continue
+            out.append((source, m.group(1), m.group(2).lstrip(":"), line.strip()))
+    return out
+
+
+def collect_mechanism_claims(repo_root: Path) -> list[tuple[str, str, str, str]]:
+    """三面掃描面合起來的全部具名機械物引用（現查，不寫死清單）。"""
+    claims = mechanism_claims(
+        (repo_root / "CLAUDE.md").read_text(encoding="utf-8-sig"),
+        "CLAUDE.md", require_backticks=True)
+    for glob in _MECHANISM_EXTRA_GLOBS:
+        for path in sorted(repo_root.glob(glob)):
+            claims += mechanism_claims(
+                path.read_text(encoding="utf-8", errors="replace"),
+                path.relative_to(repo_root).as_posix(), require_backticks=False)
+    return claims
+
+
+def resolve_named_path(rel: str, repo_root: Path) -> Path | None:
+    for base in _MECHANISM_PATH_BASES:
+        candidate = repo_root / base / rel
+        if candidate.is_file():
+            return candidate
+    return None
+
+
+def mechanism_claim_problems(
+    claims: list[tuple[str, str, str, str]], repo_root: Path
+) -> list[str]:
+    """具名機械物必須①檔案存在、且②帶 `::Symbol` 時該符號真的是那檔裡的 class/def。"""
+    problems: list[str] = []
+    for source, rel, symbol, line in claims:
+        target = resolve_named_path(rel, repo_root)
+        if target is None:
+            problems.append(
+                f"{source} 指名一個不存在的機械物 {rel}（三個解析基準 "
+                f"{_MECHANISM_PATH_BASES} 皆找不到）——假機械物比沒有機械物更糟，"
+                f"讀者會以為這件事有人在守。出處：{line[:100]}")
+            continue
+        if not symbol or target.suffix != ".py":
+            continue
+        body = target.read_text(encoding="utf-8", errors="replace")
+        for seg in re.split(r"::|\.", symbol):
+            if seg and not re.search(rf"^\s*(?:class|def)\s+{re.escape(seg)}\b", body, re.M):
+                problems.append(
+                    f"{source} 指名 {rel}::{symbol}，但 `{seg}` 不是該檔裡的 class／def "
+                    f"⇒ 指標已因改名或搬家靜默失效。出處：{line[:100]}")
+    return problems
+
+
+def iron_law3_topic_pairs(text: str) -> list[tuple[str, str, str]]:
+    """鐵律三對照表上「主題 × 具名機械物」配對：`(主題鍵, 相對路徑, 原列)`。
+
+    只認 `|` 起頭的表格列、且**只看第 1 欄（觸發項）**判主題——第 3 欄常提到別列的
+    檔名，拿整列比對會把配對算錯。
+    """
+    pairs: list[tuple[str, str, str]] = []
+    for line in text.splitlines():
+        if not line.startswith("|"):
+            continue
+        cells = [c.strip() for c in line.strip("|").split("|")]
+        if len(cells) < 2:
+            continue
+        keys = [k for k in _IRON_LAW3_TOPIC_KEYWORDS if k in cells[0]]
+        if not keys:
+            continue
+        for _src, rel, _sym, _ln in mechanism_claims(
+                cells[1], "iron-law-3", require_backticks=True):
+            for key in keys:
+                pairs.append((key, rel, line))
+    return pairs
+
+
+def iron_law3_substance_problems(text: str, repo_root: Path) -> list[str]:
+    """具名檔案必須**真的在守該列的主題**（關鍵詞佐證）。"""
+    problems: list[str] = []
+    for key, rel, line in iron_law3_topic_pairs(text):
+        target = resolve_named_path(rel, repo_root)
+        if target is None:      # 不存在由 mechanism_claim_problems 報，不重複
+            continue
+        body = target.read_text(encoding="utf-8", errors="replace").lower()
+        keywords = _IRON_LAW3_TOPIC_KEYWORDS[key]
+        if not any(kw.lower() in body for kw in keywords):
+            problems.append(
+                f"鐵律三「{key}」列具名 {rel}，但該檔內找不到任何一個該主題關鍵詞 "
+                f"{keywords} ⇒ 「檔案在、但守的是別的東西」的實質假機械物。"
+                f"出處：{line[:100]}")
+    return problems
+
 
 class TestR74IronLawMechanismAccounting(unittest.TestCase):
     """鐵律三「哪幾項有掃描器」必須是可查的量測值，且不得宣稱不存在的機械物。"""
 
-    #: 解析基準。根 CLAUDE.md 自己就有〈路徑陷阱〉一節明載：子專案段落的相對路徑是
-    #: **相對於該子專案目錄**（`AutoClaude — 常用指令` 段的 `tools/check_loc_budget.py`
-    #: 就是 `AutoClaude/tools/check_loc_budget.py`）。只拿 repo 根去解會把那些正確引用
-    #: 誤報成不存在——誤報的鎖最後一定被整道關掉，比沒有鎖更糟。
-    _PATH_BASES: tuple[str, ...] = (".", "AutoClaude", "AISDLC_SDD")
+    _PATH_BASES: tuple[str, ...] = _MECHANISM_PATH_BASES
 
     def test_named_mechanism_files_all_exist(self) -> None:
-        """根 CLAUDE.md 不得指向一個不存在的掃描器（假機械物比沒有機械物更糟）。"""
-        text = _ROOT_CLAUDE_MD.read_text(encoding="utf-8-sig")
-        cited = re.findall(r"`((?:tools|AutoClaude|\.claude)[\w./-]+\.py)`", text)
-        self.assertGreaterEqual(len(cited), 8, "引用面枚舉異常少 ⇒ 本鎖可能已空轉")
-        missing = [
-            rel for rel in sorted(set(cited))
-            if not any((_REPO_ROOT / b / rel).is_file() for b in self._PATH_BASES)
-        ]
-        self.assertEqual(missing, [], f"根 CLAUDE.md 指向不存在的檔案：{missing}")
+        """三面掃描面內都不得指向一個不存在的機械物（假機械物比沒有機械物更糟）。"""
+        claims = collect_mechanism_claims(_REPO_ROOT)
+        self.assertGreaterEqual(len(claims), 20, "引用面枚舉異常少 ⇒ 本鎖可能已空轉")
+        problems = mechanism_claim_problems(claims, _REPO_ROOT)
+        self.assertEqual(problems, [], "具名機械物與磁碟不符：\n  " + "\n  ".join(problems))
+
+    def test_scan_surface_covers_all_three_faces(self) -> None:
+        """自錨：三面掃描面每一面都必須真的收到東西。
+
+        少了這條，`_MECHANISM_EXTRA_GLOBS` 哪天寫錯或目錄改名，鎖會退回只掃根
+        CLAUDE.md 而總數仍然過關（原鎖就是只有那一面）——靜默縮面正是本鎖要治的病。
+        """
+        sources = {src for src, _rel, _sym, _ln in collect_mechanism_claims(_REPO_ROOT)}
+        self.assertIn("CLAUDE.md", sources)
+        self.assertTrue([s for s in sources if s.endswith(".py") and s.startswith("tools/")],
+                        f"tools/*.py 這一面收不到任何具名機械物宣稱：{sorted(sources)}")
+        self.assertTrue([s for s in sources if s.endswith(".json")],
+                        f"tools/*.json 這一面收不到任何具名機械物宣稱：{sorted(sources)}")
 
     def test_a_phantom_mechanism_would_be_caught(self) -> None:
-        """鑑別力：三個解析基準都找不到的路徑必須被點名（否則上一支恆綠）。"""
-        self.assertFalse(
-            any((_REPO_ROOT / b / "tools/no_such_scanner_xyz.py").is_file()
-                for b in self._PATH_BASES),
-            "合成路徑撞到真實檔，換一個名字")
+        """鑑別力（注入）：四筆逃逸形態逐一餵進判準，每一筆都必須紅。"""
+        self.assertIsNone(resolve_named_path("tools/no_such_scanner_xyz.py", _REPO_ROOT),
+                          "合成路徑撞到真實檔，換一個名字")
+        cases = {
+            "①程式碼註解面": (
+                "# 對應機械鎖：`tools/tests/no_such_scanner_xyz.py::TestFoo`", "x.py", False),
+            "②.ps1 副檔名": (
+                "照 `AutoClaude/tools/no_such_installer_xyz.ps1` 的機械釘建法", "x.md", True),
+            "③.json 面": (
+                '"由 tools/tests/no_such_scanner_xyz.py 機械釘在一起",', "x.json", False),
+            "④符號不存在": (
+                "# 對應機械鎖：`tools/tests/test_ps1_bom.py::NoSuchClassXyz`", "x.py", False),
+        }
+        for label, (text, source, backticks) in cases.items():
+            with self.subTest(label):
+                claims = mechanism_claims(text, source, require_backticks=backticks)
+                self.assertTrue(claims, f"{label}：擷取器抓不到引用 ⇒ 判準沒被考到")
+                self.assertTrue(mechanism_claim_problems(claims, _REPO_ROOT),
+                                f"{label}：應判紅卻放行")
+
+    def test_backtick_requirement_only_applies_to_the_doc_face(self) -> None:
+        """對照組：程式碼面不得因為「沒加反引號」而靜默漏掉（那是 ①③ 的成因之一），
+        而活文件面不得因為放寬反引號而把散文裡的假路徑一起收進來。"""
+        bare = "# 對應機械鎖：tools/tests/test_ps1_bom.py"
+        self.assertTrue(mechanism_claims(bare, "x.py", require_backticks=False))
+        self.assertEqual(mechanism_claims(bare, "x.md", require_backticks=True), [])
+
+    def test_code_face_only_reads_mechanism_claim_lines(self) -> None:
+        """對照組：程式碼面不是整檔掃——沒有「機械鎖／機械釘」字樣的行一律不收。
+
+        這條把「偽陽性會讓鎖被整道關掉」這個取捨釘住：放寬成整檔掃時本測試會紅。
+        """
+        self.assertEqual(
+            mechanism_claims("# 詳見 tools/lib/ci_liveness.py 的先例", "x.py",
+                             require_backticks=False),
+            [])
 
     def test_uncovered_trigger_list_is_shrink_only_and_still_documented(self) -> None:
         """棘輪：無掃描器的觸發項只准變少，且每一項都必須在文件表裡標著「無機械物」。"""
@@ -2880,6 +3139,144 @@ class TestR74IronLawMechanismAccounting(unittest.TestCase):
                 f"「{item}」列未標『無機械物』⇒ 讀者會以為它有人在守（DEF-101-766 的落點）")
 
 
+class TestR75IronLawMechanismSubstance(unittest.TestCase):
+    """鐵律三具名的機械物必須**真的在守該列的主題**（第 ③ 面：實質假機械物）。
+
+    🔴 為何「檔案存在」不夠：`行尾` 列先前具名的是 `tools/tests/test_ps1_bom.py`，而該檔
+    全篇是 .ps1 的 UTF-8 BOM 政策，對 CRLF／行尾**零判準**（實測 `crlf`／`eol`／`\\r\\n`／
+    `line ending` 在該檔命中 0）。路徑點得開、檔案打得開，只有讀完才知道守錯東西——
+    這比指向一個不存在的檔更難看見，而只斷言存在的鎖照樣放行。
+    """
+
+    def test_every_named_mechanism_actually_guards_its_row_topic(self) -> None:
+        problems = iron_law3_substance_problems(
+            _ROOT_CLAUDE_MD.read_text(encoding="utf-8-sig"), _REPO_ROOT)
+        self.assertEqual(problems, [], "鐵律三具名機械物守錯主題：\n  " + "\n  ".join(problems))
+
+    def test_topic_pairing_surface_is_non_empty(self) -> None:
+        """自錨：配對面消失（表格改版／欄位換位）時，上一支對任何內容恆綠。"""
+        pairs = iron_law3_topic_pairs(_ROOT_CLAUDE_MD.read_text(encoding="utf-8-sig"))
+        self.assertGreaterEqual(
+            len(pairs), 5,
+            f"鐵律三「主題 × 具名機械物」配對只抓到 {len(pairs)} 組 ⇒ 本鎖疑似空轉：{pairs}")
+        self.assertEqual(
+            {k for k, _rel, _ln in pairs}, set(_IRON_LAW3_TOPIC_KEYWORDS),
+            "主題鍵與 CLAUDE.md 表格對不上——補了新掃描器就要同步 _IRON_LAW3_TOPIC_KEYWORDS")
+
+    def test_a_file_that_guards_the_wrong_thing_is_red(self) -> None:
+        """鑑別力（注入）＝修前實況：`行尾` 列具名一支只驗 BOM 的鎖 ⇒ 必須紅。
+
+        用真檔而非合成檔：合成檔證明不了「這道判準對 repo 現有的那一支有牙」，而它
+        當初放行的正是那一支。
+        """
+        row = "| 行尾 | `tools/tests/test_ps1_bom.py` | 根層 unittest 閘門 |"
+        problems = iron_law3_substance_problems(row, _REPO_ROOT)
+        self.assertTrue(
+            any("test_ps1_bom.py" in p for p in problems),
+            f"守錯主題的具名機械物被放行（這就是修前實況）；實得：{problems}")
+
+    def test_the_corrected_row_is_green(self) -> None:
+        """對照組：改指到真的在守行尾的那兩支之後必須綠——否則上一支只是全都判紅。"""
+        row = ("| 行尾 | `tools/tests/test_pre_commit_dispatcher_sigpipe.py"
+               "::TestPreCommitBlocksCrOnShellScripts` ＋ "
+               "`AutoClaude/tools/hooks/check_sh_eol.py` | 同上 |")
+        self.assertEqual(iron_law3_substance_problems(row, _REPO_ROOT), [])
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# R75 訂正：ONBOARDING §7 表① 的 `skipped=N` 格——數字與逐項清單必須同進同退
+# ══════════════════════════════════════════════════════════════════════════════
+# 🔴 缺陷本體：該格的受鎖 token 只有「N tests OK」（見 `SYNC._SPECS`），`skipped=N` 與
+# **其後的逐項清單**明文不在鎖內。後果實測：受鎖 token 每輪被產生器更新，而 `skipped=N`
+# 與那份手寫清單自寫下之後從未被核對過；本輪淨增約 33 筆 skip，零機械記帳。
+#
+# 🔴 為何**不**把那個數字本身做成 live 鎖（誠實的設計裁決，不是偷懶）：
+#   ① 結構性不可能在同一次執行內取值——跑在套件**裡面**的測試不可能知道自己這一次跑完
+#      的最終 skip 數（`MIN_TESTS` 能鎖是因為它是靜態常數，不是 runtime 結果）。
+#   ② 就算改由 runner 事後比對，skip 數**依機器而變**（docker 在不在、pwsh 7 裝沒裝、
+#      zsh 有沒有）⇒ 硬相等會在任何一台環境略異的機器上假紅，而假紅的鎖最後一定被關掉。
+#   ③ 靜態站點數不是它的替代量：本輪實測 tools/tests 有 11 個「Windows 上會 skip」的
+#      站點，卻對應到 32 支已標籤 skip（class 級 decorator 一對多），差 3 倍。
+# 故本鎖改守**可稽核性**這三件事（成本近零、零假紅面）：數字只准有一個、必須帶量測日期、
+# 且清單必須指向那個每輪都會現場印出的權威來源，而不是自己養一份沒人維護的散文清單。
+# 正解的下一步（本輪未做，須動別包持有的檔）：由 `tools/run_root_unittests.py` 在跑完後
+# 讀 `result.skipped` 與本格記載值做**告知式對帳**（不同就印出來、不改 rc）。
+_SKIPPED_CELL_RE = re.compile(r"`skipped=(\d+)`")
+_MEASURED_AT_RE = re.compile(r"\d{4}-\d{2}-\d{2}")
+#: 逐項清單的權威來源模組——本格必須指向它，而不是自己列一份。
+_SKIP_ITEMIZATION_SOURCE = "windows_skip_tags"
+
+
+def skipped_cell_problems(onboarding_text: str) -> list[str]:
+    """§7 表① `skipped=N` 格的三條可稽核性判準。純函式，可注入合成行。"""
+    line = SYNC.anchored_line(onboarding_text, "rootunit-baseline-live:")
+    problems: list[str] = []
+    hits = _SKIPPED_CELL_RE.findall(line)
+    if not hits:
+        problems.append(
+            "受鎖行上找不到 `skipped=N`——該格被刪或改名，Windows 側因平台語意而失去的"
+            "那批覆蓋會再度無處顯形（它本來就不在 live 鎖內，刪掉不會有別的東西轉紅）")
+        return problems
+    # 🔴 刻意**不**要求「恰 1 次」：受鎖行是一整列，macOS 欄與 Windows 欄各自帶一個
+    # `skipped=N` 是**正確**的版面（實測該列同時有 macOS 側與 Windows 側兩個值）。
+    # 硬判恰 1 會把正確版面判成違規，而假紅的鎖最後一定被整道關掉。受管 token 的重複
+    # 由 `SYNC.prose_problems` 判準(1) 負責，`skipped` 不是受管 token，本鎖不越界。
+    if not _MEASURED_AT_RE.search(line):
+        problems.append(
+            "受鎖行沒有 `YYYY-MM-DD` 形態的量測日期——`skipped=N` 是 dated snapshot，"
+            "沒有日期的快照無法判斷落後多久，讀者只能把它當現況引用（本格的原始病灶）")
+    if _SKIP_ITEMIZATION_SOURCE not in line:
+        problems.append(
+            f"受鎖行未指向逐項清單的權威來源 `{_SKIP_ITEMIZATION_SOURCE}`——一旦本格改回"
+            f"自己手寫一份分類清單，那份清單就再度零機械記帳（本格已經這樣壞過一次）")
+    return problems
+
+
+class TestR75SkippedCellIsAuditable(unittest.TestCase):
+    """`skipped=N` 不在 live 鎖內是刻意的（見上方裁決），但它必須是**可稽核的快照**。"""
+
+    def test_current_onboarding_passes(self) -> None:
+        problems = skipped_cell_problems(_ONBOARDING.read_text(encoding="utf-8-sig"))
+        self.assertEqual(problems, [], "§7 表① skipped 格不可稽核：\n  " + "\n  ".join(problems))
+
+    def _synth(self, cell: str) -> str:
+        return ("# 標題\n"
+                f"| 根層 unittest | {cell} | 見左 "
+                "<!-- rootunit-baseline-live: 錨點 --> |\n")
+
+    def test_an_undated_hand_written_itemization_is_red(self) -> None:
+        """注入＝修前實況：數字沒有量測日期、清單自己手寫在格內 ⇒ 兩條都必須紅。"""
+        problems = skipped_cell_problems(self._synth(
+            "**1819 tests OK**（`skipped=10`）；10 支全為 POSIX-only 語意：8 支 pgid、"
+            "1 支 BSD stat 等價鎖、1 支無 symlink 權限"))
+        self.assertTrue(any("量測日期" in p for p in problems), problems)
+        self.assertTrue(any(_SKIP_ITEMIZATION_SOURCE in p for p in problems), problems)
+
+    def test_deleting_the_skipped_cell_is_red(self) -> None:
+        """注入：`skipped=N` 整格被刪 ⇒ 必須紅（它不在 live 鎖內，沒別的東西會抓）。"""
+        problems = skipped_cell_problems(self._synth("**1819 tests OK**"))
+        self.assertTrue(any("找不到" in p for p in problems), problems)
+
+    def test_both_platform_columns_carrying_a_skipped_value_is_green(self) -> None:
+        """對照組：同一列兩欄各帶一個 `skipped=N` 是**正確**版面，不得判紅。
+
+        少了這條，把判準寫成「恰 1 次」會全綠通過，而它會對現行的雙平台版面假紅。
+        """
+        self.assertEqual(
+            skipped_cell_problems(self._synth(
+                "macOS `skipped=15` ／ Windows `skipped=43`（量測時點 2026-08-04；"
+                "逐項清單見 tools/lib/windows_skip_tags.py 的 report_all_skips 輸出）")),
+            [])
+
+    def test_a_dated_cell_pointing_at_the_live_source_is_green(self) -> None:
+        """對照組：三條都滿足時必須綠——否則上面兩支只是全都判紅。"""
+        self.assertEqual(
+            skipped_cell_problems(self._synth(
+                "`skipped=43`（量測時點 2026-08-04；逐項清單見 "
+                "tools/lib/windows_skip_tags.py 的 report_all_skips 輸出）")),
+            [])
+
+
 # ══════════════════════════════════════════════════════════════════════════════
 # R74：ONBOARDING §7 表③「雲端 CI 狀態」的機械鎖（本輪 P0 的結構解）
 # ══════════════════════════════════════════════════════════════════════════════
@@ -2888,10 +3285,121 @@ class TestR74IronLawMechanismAccounting(unittest.TestCase):
 # schedule` / `workflow_dispatch`），push 軌完全不在視野內。於是 R73 收輪時本機全綠、
 # `82eee92` 推上去，而**同一個 commit 的 `windows-compat-ci` 在雲端是 failure**
 # ——這件事結構上不可能被任何本機機械物報出來。缺的不是新鮮度，是**平面**。
+#
+# 🔴 **QA-R74-01（BLOCKING）：本鎖的第一版把 `head-sha` 當成「有寫就算」**。實測取證：
+# 把該欄換成全零的 40 位 sha，`cloud_status_problems` 仍回 `[]`；全庫搜尋
+# `head-sha` 除本檔外**沒有任何生產碼消費它** ⇒ 這個欄位是裝飾品。而新鮮度判準是
+# `checked-at < max(measured-at)` 的**日期字串**比較，本 repo 一輪常在同一天內完成
+# （R74 的兩個 commit 相隔 8 小時、同一天）⇒「動了本機基線就得重查雲端」這條因果判準
+# 在一輪之內結構上不可能觸發。兩層加起來的後果正是 R74 頭號發現的成因本體：
+# 錨上記載的雲端結論屬於**上一個** commit，而鎖全綠。
 _CLOUD_ANCHOR = "cloud-ci-status:"
 _CLOUD_FIELD_RE = re.compile(r"(\w[\w-]*)=([^\s]+)")
 _WORKFLOWS_DIR = _REPO_ROOT / ".github" / "workflows"
 _PUSH_TRIGGER_RE = re.compile(r"^  push:", re.M)
+#: 完整 commit sha 的形態（短 sha 不收：短 sha 會碰撞，且無法唯一定位一個 commit）。
+_FULL_SHA_RE = re.compile(r"^[0-9a-f]{40}$")
+#: 表③ 每一列的 workflow 檔名（列首可帶 blockquote 的 `> `）。
+_CLOUD_ROW_WF_RE = re.compile(r"^>?\s*\|\s*`([\w.-]+\.yml)`\s*\|")
+_YML_RE = re.compile(r"[\w.-]+\.yml")
+
+
+def _git(*args: str) -> subprocess.CompletedProcess[str] | None:
+    """跑一次 git；git 不存在／逾時一律回 None（呼叫端須把 None 當「未驗證」）。
+
+    🔴 為何不讓 git 缺席變成紅：本鎖跑在根層 unittest 閘門上，而該閘門也在**沒有 git
+    的環境**（容器內、tarball 解出來的樹）跑過。把「取證載具不在」當成「事實為假」是
+    本 repo 反覆記載的誤讀形態（`DEF-101-756`：本機沒有心跳檔 ≠ 該平台沒跑 nightly）。
+    未驗證與違規必須分開回報。
+    """
+    try:
+        return subprocess.run(["git", *args], cwd=str(_REPO_ROOT), capture_output=True,
+                              text=True, encoding="utf-8", errors="replace", timeout=60)
+    except (OSError, subprocess.SubprocessError):
+        return None
+
+
+def _repo_history_is_verifiable() -> bool:
+    """完整歷史才驗得動「這個 sha 是不是真 commit」。
+
+    shallow clone（`actions/checkout` 預設 `fetch-depth: 1`）只有 HEAD 一個 commit，
+    對「錨記載的是上一個 commit」這種**正常且合法**的狀態會解不出物件 ⇒ 在那種環境
+    硬判紅就是製造與環境相關的假紅。故 shallow 一律降級為未驗證。
+    """
+    r = _git("rev-parse", "--is-shallow-repository")
+    return bool(r and r.returncode == 0 and r.stdout.strip() == "false")
+
+
+def _commit_iso_time(sha: str) -> str | None:
+    """該 commit 的 committer 時間（ISO8601 帶時區）；解不出回 None。"""
+    r = _git("show", "-s", "--format=%cI", sha)
+    if r is None or r.returncode != 0:
+        return None
+    out = r.stdout.strip()
+    return out or None
+
+
+def cloud_sha_problems(fields: dict[str, str]) -> list[str]:
+    """`head-sha` 必須是**本 repo 真的有的、且是 HEAD 祖先**的完整 commit sha。
+
+    三層，前一層過了才驗下一層：
+      ③ 形態＝恰 40 位小寫 hex，且不得全為同一個字元（全零那種佔位值）。**純字串判準、
+         零環境相依**——QA 實測的「換成全零仍綠」由這一層單獨消滅，不依賴 git 在不在。
+      ④ 該 sha 在本 repo 解析得出 commit 物件。
+      ⑤ 該 commit 是 HEAD 本身或 HEAD 的祖先——擋「填了別的分支／別的 repo 的 sha」。
+    ④⑤ 需要完整歷史；shallow／無 git ⇒ 明說未驗證而不判紅（見 `_git` 的 WHY）。
+    """
+    sha = fields.get("head-sha", "")
+    problems: list[str] = []
+    if not _FULL_SHA_RE.match(sha):
+        return [f"表③ 錨的 `head-sha={sha!r}` 不是完整 commit sha（須恰 40 位小寫 hex）"
+                "——這個欄位存在的意義是唯一定位「這份雲端結論是對哪個 commit 查的」，"
+                "填不合形態的值等於沒填"]
+    if len(set(sha)) == 1:
+        return [f"表③ 錨的 `head-sha={sha}` 是全同字元的佔位值，不是真 commit"
+                "——QA-R74-01 的實測就是把它換成全零而本鎖仍全綠"]
+    if not _repo_history_is_verifiable():
+        return problems      # shallow／無 git：④⑤ 未驗證，不判紅
+    r = _git("rev-parse", "--verify", "--quiet", f"{sha}^{{commit}}")
+    if r is None or r.returncode != 0:
+        problems.append(
+            f"表③ 錨的 `head-sha={sha[:12]}…` 在本 repo 解析不出 commit 物件"
+            "（本 repo 有完整歷史，故這不是 shallow clone 造成的）⇒ 那份雲端結論"
+            "所宣稱的 commit 不存在，整列判讀無從複驗")
+        return problems
+    anc = _git("merge-base", "--is-ancestor", sha, "HEAD")
+    if anc is not None and anc.returncode not in (0,):
+        problems.append(
+            f"表③ 錨的 `head-sha={sha[:12]}…` 不是 HEAD 本身也不是 HEAD 的祖先"
+            "⇒ 它來自別的分支或別的 repo，對「本分支現在該不該收輪」沒有效力")
+    return problems
+
+
+def cloud_red_set_problems(onboarding_text: str, fields: dict[str, str]) -> list[str]:
+    """錨的 `red=` 必須逐字等於表③ 裡結論為 failure 的 workflow 集合。
+
+    🔴 這一條是**同日內仍然有效**的那道判準（QA-R74-01 第 2 層）：它比的是**內容**
+    而不是日期，所以「同一天內改了表格卻沒改錨」「改了錨卻沒改表格」兩個方向都會紅，
+    不受「一輪之內只有一個日期」這件事影響。
+    """
+    failing: set[str] = set()
+    listed: set[str] = set()
+    for line in onboarding_text.splitlines():
+        m = _CLOUD_ROW_WF_RE.match(line)
+        if not m:
+            continue
+        listed.add(m.group(1))
+        cells = [c.strip() for c in line.split("|")]
+        if any("failure" in c for c in cells[2:3]):
+            failing.add(m.group(1))
+    if not listed:            # 表格不在（合成注入語料）⇒ 本條無取值面，交由判準①管
+        return []
+    declared = set(_YML_RE.findall(fields.get("red", "")))
+    if declared == failing:
+        return []
+    return [f"表③ 錨宣告 `red={sorted(declared)}`，而表格裡結論為 failure 的是 "
+            f"{sorted(failing)}——兩者不符即代表有一邊沒跟上。**這一條刻意比內容不比"
+            f"日期**：R74 的兩個 commit 同一天，任何以日期為準的新鮮度判準都抓不到"]
 
 
 def push_triggered_workflows(workflows_dir: Path) -> list[str]:
@@ -2907,6 +3415,35 @@ def push_triggered_workflows(workflows_dir: Path) -> list[str]:
     return out
 
 
+def parse_cloud_fields(anchor_tail: str) -> tuple[dict[str, str], list[str]]:
+    """錨尾解析成 `({欄位: 值}, 問題清單)`；同一欄位出現 ≥2 次一律 **fail-loud**。
+
+    🔴 WHY fail-loud 而不是沿用「取最後一個」（R75 落地當回合被自己咬到，實測取證）：
+    原版是 `dict(_CLOUD_FIELD_RE.findall(...))`，而錨是**單獨一行**、機器欄位與人讀散文
+    同住那一行。我為了說明 pending 的用法，在同一行散文裡寫了一個 `pending=<sha>…` 字樣，
+    它就**靜默覆蓋**掉真正的欄位值，判準於是拿一個帶省略號的字串去比 sha ⇒ 假紅，而錯誤
+    訊息還印著一個看起來正確的值（`pending=a371068…` vs `origin/main=a371068448a5…`
+    ——兩者其實是同一個 commit）。
+
+    這與根 CLAUDE.md 那條「已橋接的 hook 名稱不得與射程字樣同行」是**同一個病**：逐行
+    substring 判準遇上同一行的散文。那邊的解是把文件寫成可精確判定，這邊的解是讓歧義
+    **當場 fail-loud**——兩者都不是「把判準放寬」。少了這一條，下一個在錨上寫說明文字的
+    人會再踩一次，而症狀是一個指著正確值卻說它不對的假紅（最難查的那種）。
+    """
+    fields: dict[str, str] = {}
+    problems: list[str] = []
+    for key, value in _CLOUD_FIELD_RE.findall(anchor_tail):
+        if key in fields and fields[key] != value:
+            problems.append(
+                f"表③ 錨的 `{key}=` 在同一行出現 ≥2 次且值不同（`{fields[key]}` 與 "
+                f"`{value}`）⇒ 機器讀到的是最後一個，而那通常是散文裡的舉例。"
+                f"處置：說明文字裡不要寫出 `{key}=<值>` 這種可被解析的字樣，改寫成"
+                f"「本錨的 `{key}` 欄」")
+            continue
+        fields.setdefault(key, value)
+    return fields, problems
+
+
 def cloud_status_problems(onboarding_text: str, workflows_dir: Path) -> list[str]:
     """§7 表③ 的三條判準；回傳違規說明（空＝通過）。純函式，可注入。"""
     problems: list[str] = []
@@ -2914,7 +3451,8 @@ def cloud_status_problems(onboarding_text: str, workflows_dir: Path) -> list[str
     if len(anchors) != 1:
         return [f"`{_CLOUD_ANCHOR}` 錨在 ONBOARDING.md 命中 {len(anchors)} 次（須恰 1）"
                 "——0 次＝表③ 被刪或改名（雲端結論再度無處顯形），≥2 次＝兩份會漂移的真相"]
-    fields = dict(_CLOUD_FIELD_RE.findall(anchors[0].split(_CLOUD_ANCHOR, 1)[1]))
+    fields, dup = parse_cloud_fields(anchors[0].split(_CLOUD_ANCHOR, 1)[1])
+    problems += dup
     for required in ("checked-at", "head-sha"):
         if required not in fields:
             problems.append(f"表③ 錨缺 `{required}=`——少了它就無法判斷這份雲端結論是"
@@ -2925,15 +3463,128 @@ def cloud_status_problems(onboarding_text: str, workflows_dir: Path) -> list[str
             problems.append(
                 f"{wf} 帶 `push:` 觸發但 §7 表③ 無對應列 ⇒ 它在雲端紅掉時本機沒有任何"
                 "東西會顯形（本輪 P0 的形態）。處置：跑表③ 上方那條 gh 指令補一列")
-    # 判準②：因果新鮮度。回填了本機基線卻沒重查雲端 ⇒ 紅。
-    measured = re.findall(r"snapshot-fingerprints-\w+:.*?measured-at=(\d{4}-\d{2}-\d{2})",
-                          onboarding_text)
-    checked = fields.get("checked-at", "")
-    if measured and checked and checked < max(measured):
+    # 判準②′：覆蓋面新鮮度——錨必須覆蓋「最後一次 push 的 commit」，或誠實宣告 pending。
+    problems += cloud_coverage_problems(fields)
+    # 判準③④⑤：`head-sha` 綁到一個真實、且屬本分支的 commit（QA-R74-01 第 1 層）。
+    problems += cloud_sha_problems(fields)
+    # 判準⑥：因果——雲端結論不可能早於它所評的那個 commit 存在的時間。
+    problems += cloud_causality_problems(fields)
+    # 判準⑦：錨的 `red=` ↔ 表格 failure 列（同日內仍有效，QA-R74-01 第 2 層）。
+    problems += cloud_red_set_problems(onboarding_text, fields)
+    return problems
+
+
+#: `cloud_coverage_problems` 的「請現查」哨兵（`None` 是合法的「查不出來」，不能兼作預設）。
+_AUTO_REMOTE = object()
+
+
+def _remote_main_sha() -> str | None:
+    """最後一次 push 到 `origin/main` 的 commit；解不出回 None（＝未驗證）。"""
+    r = _git("rev-parse", "--verify", "--quiet", "origin/main")
+    out = r.stdout.strip() if r and r.returncode == 0 else ""
+    return out if _FULL_SHA_RE.match(out) else None
+
+
+def cloud_coverage_problems(
+    fields: dict[str, str], *, remote_main: object = _AUTO_REMOTE
+) -> list[str]:
+    """錨必須覆蓋**最後一次 push 的 commit**（`origin/main`），或誠實宣告 `pending=`。
+
+    🔴 **這一條取代了 R74 原本的判準②**（`checked-at < max(measured-at)` 的**日期字串**
+    比較）。取代而非疊加，因為原判準的觸發條件選錯了對象，會製造一個**無法合法解除的
+    紅燈**——實測死結（舵手 2026-08-05 當回合重現）：
+      ① 本輪改了測試樹 ⇒ 表② 指紋漂移 ⇒ 必須 `--write --with-slow` 回填，否則
+         `--check-snapshot` rc=1 擋 pre-push；
+      ② 回填把 `measured-at` 推到今天；
+      ③ 原判準於是判「雲端結論早於本機量測 ⇒ 重查雲端」rc=1；
+      ④ **但雲端結論只在 push 之後才存在**，而 pre-push 會跑到 ③ 而擋住 push
+      ⇒ 「要有雲端結論才能 push，要 push 才會有雲端結論」。
+    唯一能讓它變綠的操作是把 `checked-at` 填成今天，而那是**宣稱一次沒發生過的查核**
+    ——判準逼出假宣稱，就是判準壞了，不是文件壞了。
+
+    改成以 commit 身分為準之後，三件事同時解決：
+      · **不可能死結**：本判準要求的結論永遠是「**已經** push 出去的那個 commit」的結論，
+        那個結論按定義取得得到（或正在跑，見 `pending`），不需要先 push 一次未來的 commit。
+      · **同日內有效**：比的是 40 位 sha 而不是日期 ⇒ 一天內做幾個 commit 都分辨得出來
+        （這正是 QA-R74-01 指出、而日期判準結構上做不到的那一層）。
+      · **不會被遺忘**：`pending` 的值必須**逐字等於** `origin/main`，所以下一次 push 一到
+        它就自動失效轉紅。它是**本機算得出的字串**（不需要網路），所以「更新它」永遠做得到
+        ——這是它與「必須先有雲端結論」的關鍵差別。
+
+    判準要分的是「**尚未查核**」與「**假稱已查核**」：
+      · `head-sha == origin/main` ⇒ 錨覆蓋了最後一次 push，合格（此時不得再掛 `pending`）。
+      · `head-sha != origin/main` 且**有** `pending == origin/main` ⇒ 「已推上去、結論尚未
+        查核／仍在跑」，這是輪次進行中的**正常狀態**，合格。
+      · `head-sha != origin/main` 且**沒有** `pending` ⇒ 紅。這才是缺陷：錨讀起來像現況，
+        實際覆蓋的是一個更舊的 commit（R73→R74 那次事故的形態本體）。
+      · `pending` 存在但不等於 `origin/main` ⇒ 紅（它沒指向最後一次 push，等於一張過期的
+        免責聲明——那正是本判準最不能容忍的東西）。
+
+    `origin/main` 解不出來（無 remote／CI 的 detached checkout）⇒ 整條**未驗證、不判紅**
+    （同 `_git` 的 WHY：取證載具不在不等於事實為假）。誠實邊界：這道鎖的牙長在**本機
+    pre-push**，也正是收輪動作發生的地方。
+    """
+    remote = _remote_main_sha() if remote_main is _AUTO_REMOTE else remote_main
+    if not isinstance(remote, str) or not _FULL_SHA_RE.match(remote):
+        return []
+    sha, pending = fields.get("head-sha", ""), fields.get("pending", "")
+    if sha == remote:
+        if pending:
+            return [f"表③ 錨已覆蓋最後一次 push（`head-sha` == `origin/main` "
+                    f"{remote[:12]}…），卻還掛著 `pending={pending[:12]}…` ⇒ 自相矛盾："
+                    f"結論已經查到了，pending 是忘了清的殘留。處置：刪掉 `pending=` 欄"]
+        return []
+    if not pending:
+        return [f"表③ 錨的 `head-sha={sha[:12]}…` 不是最後一次 push 的 commit "
+                f"（`origin/main`={remote[:12]}…），而錨也沒有宣告 `pending=` ⇒ 這張表"
+                f"讀起來像現況，實際覆蓋的是一個更舊的 commit——**R73 收輪時本機全綠、"
+                f"雲端 windows-compat-ci 紅卻沒人發現，就是這個形態**。\n"
+                f"    兩條合法出路（都不需要編造任何東西）：①已 push 且五支 run 都 "
+                f"completed ⇒ 現查後把真實結論填進表格、`head-sha` 改為 {remote[:12]}…；"
+                f"②尚未查核／run 還在跑 ⇒ 在錨上加 `pending={remote}`，誠實表示"
+                f"「這個 commit 已推上去、結論還沒進表」"]
+    if pending != remote:
+        return [f"表③ 錨的 `pending={pending[:12]}…` 不等於最後一次 push 的 commit "
+                f"（`origin/main`={remote[:12]}…）⇒ 這是一張**過期的免責聲明**：它宣告"
+                f"「某個較舊的 commit 尚未查核」，而此後又推了新的東西上去。\n"
+                f"    `pending` 必須逐字等於 `origin/main`——這就是它無法被遺忘的機制："
+                f"下一次 push 一到它就失效轉紅，而更新它只需要本機一個 "
+                f"`git rev-parse origin/main`（不需要網路、不需要等雲端）"]
+    return []
+
+
+def cloud_causality_problems(fields: dict[str, str]) -> list[str]:
+    """`checked-at` 不得早於 `head-sha` 那個 commit 自己的提交時間，且粒度必須自陳。
+
+    兩條：
+      ⑥a **因果**：一份「對 commit X 的雲端結論」不可能在 X 存在之前查到。這一條在
+         **同一天內**也有效（比的是時間戳，不是日期字串）——前提是 `checked-at` 真的
+         帶了時間成分。
+      ⑥b **粒度自陳**：`checked-at` 只寫到日 ⇒ 錨必須帶 `granularity=day` 明說它的
+         新鮮度只到「日」。🔴 為何是自陳而不是直接強制寫時間戳：本輪落地時錨上那個
+         日期是既有值，補一個「看起來精確」的時間會是憑空編造（`[[no-fabricated-tool-
+         output]]`）。自陳讓弱點寫在錨上、下一次回填時無處可躲——SOP 已要求改寫成時間戳。
+    """
+    sha, checked = fields.get("head-sha", ""), fields.get("checked-at", "")
+    if not _FULL_SHA_RE.match(sha) or not checked:
+        return []            # 形態問題由 cloud_sha_problems／欄位存在性判準報，不重複
+    problems: list[str] = []
+    has_time = "T" in checked or " " in checked.strip()
+    if not has_time and fields.get("granularity") != "day":
         problems.append(
-            f"表③ `checked-at={checked}` 早於表② 最新 `measured-at={max(measured)}` ⇒ "
-            "有人回填了**本機**基線卻沒重查**雲端**——這正是「本機全綠所以是綠的」那個"
-            "誤讀的機制來源。判準刻意是因果的（不是距今 N 天）：動了本機基線就得重查雲端")
+            f"表③ `checked-at={checked}` 只寫到日，錨卻沒有 `granularity=day` 自陳"
+            "——本 repo 一輪常在同一天內完成多個 commit（R74 兩個 commit 相隔 8 小時、"
+            "同一天），日粒度的新鮮度在一輪之內結構上抓不到「錨落後一個 commit」。"
+            "回填時請改寫成帶時間的 `checked-at`；暫時只有日期就必須把粒度寫在錨上")
+    commit_time = _commit_iso_time(sha)
+    if commit_time is None:
+        return problems      # shallow／無 git：⑥a 未驗證（同 cloud_sha_problems 的邊界）
+    left = checked if has_time else f"{checked[:10]}T23:59:59"   # 只有日期＝從寬取當日末
+    if left[:19] < commit_time[:19]:
+        problems.append(
+            f"表③ `checked-at={checked}` 早於 `head-sha` 那個 commit 自己的提交時間 "
+            f"{commit_time} ⇒ 因果不成立：不可能在一個 commit 存在之前就查到它的雲端"
+            f"結論。這通常表示 sha 或時間有一個是抄錯的")
     return problems
 
 
@@ -2966,20 +3617,177 @@ class TestR74CloudCiStatusIsRecorded(unittest.TestCase):
                 _ONBOARDING.read_text(encoding="utf-8-sig"), d)
         self.assertTrue(any("brand-new-push-ci.yml" in p for p in problems), problems)
 
-    def test_stale_cloud_check_versus_local_refill_is_red(self) -> None:
-        """注入：本機基線回填到 2026-12-31、雲端只查到 2026-08-04 ⇒ 必紅。"""
+    #: 合成語料要用**真** sha，否則 QA-R74-01 補的形態／存在性判準會把它判紅，
+    #: 反向對照組就永遠紅而失去意義。git 不在時退回一個合形態的假值（此時 ④⑤⑥a
+    #: 本來就降級為未驗證，見 `_git` 的 WHY）。
+    @staticmethod
+    def _real_sha() -> str:
+        r = _git("rev-parse", "HEAD")
+        out = r.stdout.strip() if r and r.returncode == 0 else ""
+        return out if _FULL_SHA_RE.match(out) else "a" * 39 + "b"
+
+    # ── 判準②′：覆蓋面以 commit 身分為準（取代 R74 的日期字串比較）──────────────
+    #: 兩個互不相等的合形態 sha，供注入用（不碰本機真實 remote 狀態）。
+    _SHA_A = "a" * 39 + "0"
+    _SHA_B = "b" * 39 + "1"
+
+    def test_an_anchor_behind_the_last_push_without_pending_is_red(self) -> None:
+        """注入＝R73→R74 事故的形態本體：錨覆蓋的是更舊的 commit，且沒宣告 pending。"""
+        problems = cloud_coverage_problems(
+            {"head-sha": self._SHA_A}, remote_main=self._SHA_B)
+        self.assertTrue(any("沒有宣告 `pending=`" in p for p in problems), problems)
+
+    def test_an_honest_pending_declaration_is_green(self) -> None:
+        """🔴 死結的解：「已 push、結論尚未查核」必須是**合法通過**的狀態。
+
+        少了這條，判準會逼出唯一一種讓它變綠的操作——把 `checked-at` 填成今天、
+        `head-sha` 填成 HEAD，也就是**宣稱一次沒發生過的雲端查核**。判準逼出假宣稱，
+        就是判準壞了（`[[no-fabricated-tool-output]]`）。
+        """
+        self.assertEqual(
+            cloud_coverage_problems(
+                {"head-sha": self._SHA_A, "pending": self._SHA_B}, remote_main=self._SHA_B),
+            [])
+
+    def test_a_pending_that_does_not_point_at_the_last_push_is_red(self) -> None:
+        """注入：pending 指向一個更舊的 commit ⇒ 過期的免責聲明，必紅。
+
+        這一支就是「不會被遺忘」的機械面：再推一次 push，`origin/main` 前進，
+        原本合法的 pending 當場失效。
+        """
+        stale_pending = {"head-sha": self._SHA_A, "pending": self._SHA_A}
+        self.assertTrue(any("過期的免責聲明" in p
+                            for p in cloud_coverage_problems(stale_pending,
+                                                             remote_main=self._SHA_B)))
+
+    def test_covering_the_last_push_is_green_and_must_not_keep_pending(self) -> None:
+        """對照組＋反向：覆蓋到最後一次 push 即綠；此時仍掛 pending ⇒ 自相矛盾必紅。"""
+        self.assertEqual(
+            cloud_coverage_problems({"head-sha": self._SHA_B}, remote_main=self._SHA_B), [])
+        self.assertTrue(any("自相矛盾" in p for p in cloud_coverage_problems(
+            {"head-sha": self._SHA_B, "pending": self._SHA_B}, remote_main=self._SHA_B)))
+
+    def test_unresolvable_remote_is_not_verified_rather_than_red(self) -> None:
+        """邊界：`origin/main` 解不出來（無 remote／CI detached）⇒ 未驗證、不判紅。
+
+        取證載具不在 ≠ 事實為假（`DEF-101-756` 的形態）。若改成判紅，這道鎖會在每一個
+        沒有 remote 的 checkout 上假紅，然後被整道關掉。
+        """
+        for absent in (None, "", "not-a-sha"):
+            with self.subTest(absent):
+                self.assertEqual(
+                    cloud_coverage_problems({"head-sha": self._SHA_A}, remote_main=absent), [])
+
+    def test_the_deadlock_scenario_no_longer_forces_a_fabricated_check(self) -> None:
+        """🔴 死結回歸鎖（端到端）：舵手 2026-08-05 實測的那個狀態必須可以合法通過。
+
+        場景逐字重現：本輪改了測試樹 → `--write --with-slow` 把 `measured-at` 推到
+        比 `checked-at` 更新的一天 → 舊判準在此判紅，而唯一的解紅操作是編造一次查核。
+        本測試斷言：**同一份文件**在誠實宣告 pending 之後 rc 面全綠，且**沒有任何欄位
+        被改成當天／HEAD**（`checked-at` 與 `head-sha` 逐字保持原值）。
+        """
+        old_checked, old_sha = "2026-08-04", self._SHA_A
         text = (
             "<!-- snapshot-fingerprints-win32: measured-at=2026-12-31 -->\n"
-            "<!-- cloud-ci-status: checked-at=2026-08-04 head-sha=deadbeef -->\n"
-            + "".join(f"`{wf}`\n" for wf in push_triggered_workflows(_WORKFLOWS_DIR))
+            f"<!-- cloud-ci-status: checked-at={old_checked} granularity=day "
+            f"head-sha={old_sha} pending={self._SHA_B} -->\n"
         )
-        problems = cloud_status_problems(text, _WORKFLOWS_DIR)
-        self.assertTrue(any("早於" in p for p in problems), problems)
-        # 反向對照：同日即通過（否則判準退化成「永遠紅」而被整道關掉）
+        fields, dup = parse_cloud_fields(text.split(_CLOUD_ANCHOR, 1)[1])
+        self.assertEqual(dup, [])
+        self.assertEqual(fields["checked-at"], old_checked, "量測日期被動過＝假宣稱")
+        self.assertEqual(fields["head-sha"], old_sha, "覆蓋的 commit 被動過＝假宣稱")
+        self.assertEqual(cloud_coverage_problems(fields, remote_main=self._SHA_B), [])
+
+    def test_prose_on_the_anchor_line_cannot_hijack_a_field(self) -> None:
+        """🔴 注入＝R75 落地當回合自己踩到的那一筆：同一行散文裡的 `pending=<值>…`
+        字樣曾**靜默覆蓋**真正的欄位值，判準因此拿帶省略號的字串去比 sha ⇒ 假紅，
+        而訊息印著一個看起來正確的值（最難查的那種）。現在必須當場 fail-loud。
+        """
+        tail = (f" checked-at=2026-08-04 head-sha={self._SHA_A} pending={self._SHA_B}"
+                f" ／ 說明：本錨的 `pending={self._SHA_B[:7]}…` 即是那個宣告")
+        fields, dup = parse_cloud_fields(tail)
+        self.assertTrue(any("≥2 次" in p for p in dup), dup)
+        self.assertEqual(fields["pending"], self._SHA_B,
+                         "第一個（機器欄位）才是真值——不得被散文那個覆蓋")
+
+    def test_duplicate_field_with_the_same_value_is_not_flagged(self) -> None:
+        """對照組：同一欄位重複但值相同＝無歧義，不得判紅（否則會逼出無謂的改寫）。"""
+        _fields, dup = parse_cloud_fields(
+            f" head-sha={self._SHA_A} ／ 再提一次 head-sha={self._SHA_A}")
+        self.assertEqual(dup, [])
+
+    # ── QA-R74-01：`head-sha` 從裝飾品變成受驗欄位 ────────────────────────────
+    def test_an_all_zero_head_sha_is_red(self) -> None:
+        """🔴 QA 實測的那一筆：全零 sha 曾經全綠。這一支是它的墓碑。
+
+        刻意**不**依賴 git：形態層（40 位 hex ＋ 非全同字元）就足以判它，所以本判準
+        在 shallow clone 與無 git 的環境同樣有牙。
+        """
+        problems = cloud_sha_problems({"head-sha": "0" * 40})
+        self.assertTrue(any("全同字元" in p for p in problems), problems)
+
+    def test_a_short_or_malformed_head_sha_is_red(self) -> None:
+        """注入：短 sha／非 hex／空值一律紅——短 sha 會碰撞，定位不了唯一 commit。"""
+        for bad in ("deadbeef", "82eee92", "", "ZZ" + "0" * 38, "A" * 40):
+            with self.subTest(bad):
+                self.assertTrue(cloud_sha_problems({"head-sha": bad}),
+                                f"{bad!r} 應判紅卻放行")
+
+    def test_a_syntactically_valid_but_nonexistent_sha_is_red(self) -> None:
+        """注入：形態完全合法、repo 裡卻沒有這個 commit ⇒ 必紅（完整歷史下）。"""
+        if not _repo_history_is_verifiable():
+            # 🔴 刻意**不**貼 `[POSIX-NATIVE-ONLY]`／`[WINDOWS-NATIVE-ONLY]`：這個 skip
+            # 與平台無關（成因是 shallow clone／無 git），貼平台標籤會是假分類。
+            self.skipTest("本 repo 非完整歷史（shallow clone 或無 git）⇒ 判準④⑤ 依設計"
+                          "降級為未驗證，此注入沒有取值面")
+        fake = "0123456789abcdef" * 2 + "01234567"
+        self.assertEqual(len(fake), 40)
+        problems = cloud_sha_problems({"head-sha": fake})
+        self.assertTrue(any("解析不出 commit" in p for p in problems), problems)
+
+    def test_the_real_head_sha_is_green(self) -> None:
+        """對照組：真 HEAD 必須綠——否則上面三支只是把所有輸入都判紅。"""
+        self.assertEqual(cloud_sha_problems({"head-sha": self._real_sha()}), [])
+
+    def test_a_cloud_conclusion_predating_its_commit_is_red(self) -> None:
+        """注入⑥a：`checked-at` 早於該 commit 的提交時間 ⇒ 因果不成立，必紅。
+
+        這一支是**同日內**判準的鑑別力證明：兩個值同一天、只差時分，仍然抓得到。
+        """
+        sha = self._real_sha()
+        commit_time = _commit_iso_time(sha)
+        if commit_time is None:
+            self.skipTest("[POSIX-NATIVE-ONLY] 取不到 commit 時間（無 git）⇒ ⑥a 未驗證")
+        same_day_but_earlier = f"{commit_time[:10]}T00:00:00"
+        problems = cloud_causality_problems(
+            {"head-sha": sha, "checked-at": same_day_but_earlier})
+        self.assertTrue(any("因果不成立" in p for p in problems), problems)
+        # 反向對照：同日但晚於提交時間 ⇒ 綠
+        later_same_day = f"{commit_time[:10]}T23:59:59"
         self.assertEqual(
-            cloud_status_problems(text.replace("checked-at=2026-08-04",
-                                               "checked-at=2026-12-31"), _WORKFLOWS_DIR),
+            cloud_causality_problems({"head-sha": sha, "checked-at": later_same_day}), [])
+
+    def test_a_day_granularity_anchor_must_say_so(self) -> None:
+        """注入⑥b：`checked-at` 只寫到日卻沒自陳 `granularity=day` ⇒ 必紅。"""
+        sha = self._real_sha()
+        self.assertTrue(any(
+            "granularity=day" in p
+            for p in cloud_causality_problems({"head-sha": sha, "checked-at": "2026-12-31"})))
+        self.assertEqual(
+            cloud_causality_problems(
+                {"head-sha": sha, "checked-at": "2026-12-31", "granularity": "day"}),
             [])
+
+    def test_red_set_must_match_the_table_rows(self) -> None:
+        """注入⑦：表格說某支 failure、錨的 `red=` 沒列到 ⇒ 必紅（同日內仍有效）。"""
+        table = ("> | `windows-compat-ci.yml` | 🔴 **failure** | `abc1234` | x |\n"
+                 "> | `macos-compat-ci.yml` | ✅ success | `abc1234` | — |\n")
+        self.assertTrue(any("red=" in p for p in cloud_red_set_problems(
+            table, {"red": "macos-compat-ci.yml"})), "錯的 red= 被放行")
+        self.assertTrue(cloud_red_set_problems(table, {}), "漏填 red= 被放行")
+        self.assertEqual(
+            cloud_red_set_problems(table, {"red": "windows-compat-ci.yml"}), [],
+            "正確對應卻判紅 ⇒ 判準退化成永遠紅")
 
 
 class TestR71SmokeTripwireIsInViewWithTheHonestReading(unittest.TestCase):

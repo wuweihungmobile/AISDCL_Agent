@@ -266,7 +266,7 @@ tasks:
 5. **跨工具數字對齊 assertion** — 同來源多 parser 不一致時印 WARN，summary 為單一真相
 6. **採集寬鬆 vs 升級嚴格分軌** — 雙 env（採集容忍 + 升級嚴格）；單 env 同時控兩語意即放棄門檻
 7. **cache 路徑強制 fresh** — `.mutmut-cache` / `.pytest_cache` / `.ac4_junit.xml` 跑前 `rm -rf`，避免舊資料騙過驗證
-8. **載具 .sh 必須 LF 行尾** — Windows autocrlf 轉 CRLF → bash 報錯訊息尾帶「dollar 引號包住反斜線＋小寫 r」逸出字樣（本句刻意全中文描述，防反斜線再遭寫入管道吞掉致本行自身格式毀損——R12 SA-3R 同款根絕法，R13 DOC-5 實證本行原文已毀）；`.gitattributes *.sh text eol=lf` + hook `check_sh_eol.py`
+8. **載具 .sh 必須 LF 行尾** — Windows autocrlf 轉 CRLF → bash 報錯訊息尾帶「dollar 引號包住反斜線＋小寫 r」逸出字樣（本句刻意全中文描述，防反斜線再遭寫入管道吞掉致本行自身格式毀損——R12 SA-3R 同款根絕法，R13 DOC-5 實證本行原文已毀）；`.gitattributes *.sh text eol=lf` + hook `check_sh_eol.py`（該 hook 判準是 git blob 而非工作樹磁碟：磁碟 CRLF 若只是 checkout 期轉換產物則放行，詳見其檔頭）
 9. **Docker SKIP 跨 stage 一致** — Docker 不可用時所有依賴 stage 同模式 SKIP，禁空殼 if 跳過回 rc=0 偽綠燈
 10. **fallback 真實 jsonl 可區分** — `try/except` 後 mock fallback 須寫布林標記欄（如 `emit_real:bool`），拒絕 `=False` 紀錄
 11. **latest log pointer 完整 run** — 末段 `Copy-Item` 自當次完整 $Log 寫入，禁 partial buffer；Windows file lock 用 `FileShare.ReadWrite` + retry
@@ -311,7 +311,7 @@ tasks:
 | 文件路徑強制 | PreToolUse(Write) | [enforce_docs_path.py](tools/hooks/enforce_docs_path.py) | `.md` 必須在 `docs/0[1-8]_*/` 或根層白名單；違規 exit 2 阻斷 |
 | LOC 預算檢查 | PostToolUse(Edit\|Write) | [loc_budget_check.py](tools/hooks/loc_budget_check.py) | `.py` 超 tier budget → warn；CLAUDE.md > 400 行或單行 > 800 codepoint → exit 2 阻斷（#10a） |
 | Snapshot 新鮮度 | Stop | [claude_md_freshness.py](tools/hooks/claude_md_freshness.py) | `snapshot_sync.py --check` drift → warn；CLAUDE.md > 400 行 → exit 2 |
-| .sh LF 行尾 | PostToolUse(Edit\|Write) | [check_sh_eol.py](tools/hooks/check_sh_eol.py) | `.sh`/`.bash` 含 CR/CRLF → exit 2 阻斷（紀律 #8 / SD_09 W2 nightly audit） |
+| .sh LF 行尾 | PostToolUse(Edit\|Write) | [check_sh_eol.py](tools/hooks/check_sh_eol.py) | `.sh`/`.bash` 判準＝**repo 端 blob**：未追蹤新檔、或 blob 自身含 CR → exit 2 阻斷；blob 是 LF 而只有工作樹含 CRLF（autocrlf checkout 產物）、或位於 AISDLC_SDD 凍結版樹 → 放行並 stderr 說明（紀律 #8 / SD_09 W2 nightly audit；R75 改判準：問磁碟會讓同一 commit 在不同機器結論不同） |
 | ps1 編碼根治 | PostToolUse(Edit\|Write) | [check_ps1_encoding.py](tools/hooks/check_ps1_encoding.py) | `.ps1`/`.psm1`/`.psd1` 含非 ASCII 且無 BOM → **自動補 UTF-8 BOM**（防 PS5.1 ANSI 亂碼破壞 parser；auto-fix 不阻斷，因 Write 無法產 BOM）。同 wire 於根 `.claude/settings.json` 使 root session 亦生效 |
 
 **Backlog（暫未啟用）**：`build_test_cycle.py`（PostToolUse 每個 py edit 跑測試太慢）、`agent_autoloader.py`（yaml header 注入誤觸發風險高）、`check_id_naming.py`（誤判率高）、`nightly_guard.py`（後續評估）。

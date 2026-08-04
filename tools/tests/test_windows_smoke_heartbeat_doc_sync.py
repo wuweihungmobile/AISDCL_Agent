@@ -62,6 +62,12 @@ _CLAIM_SCAN_FILES = (
     "tools/install_windows_nightly.ps1",
     "tools/tests/test_install_windows_nightly.py",
     "tools/tests/test_windows_smoke_heartbeat_doc_sync.py",  # 本檔（判準字面本身）
+    # R75：排程 Job 生命週期複查。§2.2.6「移除會失去什麼」逐字引 DEF-101-529 訂正**前**
+    # 的舊狀態（「補償控制自己沒有心跳」）當論據，屬②要求的「宣稱旁有訂正脈絡」那一類，
+    # 而非③的時代快照——該檔通篇以 `AutoClaude_WindowsSmoke` 現況取證（`Get-ScheduledTask`
+    # 實測 State/LastRunTime/NextRunTime），是活文件。故登記在此、不進 _SNAPSHOT_PREFIXES：
+    # 進白名單等於讓它日後改述成「現在沒有心跳」也不會被本鎖看見。
+    "docs/06_quality/Scheduled_Jobs_Lifecycle_Review_R75.md",
 )
 
 # 時代快照：逐字保留過期宣稱是其職責，刻意不納管（前綴比對）。

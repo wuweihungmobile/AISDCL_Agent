@@ -846,7 +846,7 @@ class TestPrintCollapseFlag(unittest.TestCase):
 
         buf = io.StringIO()
         with redirect_stdout(buf):
-            rc = m.main(["--print-collapse"])
+            rc = m.cli(["--print-collapse"])
         self.assertEqual(rc, 0)
         out = buf.getvalue()
         expected_uep = len(m._EXEMPT_PAIRS)
@@ -875,7 +875,7 @@ class TestPrintCollapseFlag(unittest.TestCase):
         )
         buf = io.StringIO()
         with redirect_stdout(buf):
-            m.main(["--print-collapse"])
+            m.cli(["--print-collapse"])
         self.assertIn(f"AC={expected_ac}", buf.getvalue())
 
     def test_no_arg_invocation_unaffected(self) -> None:
@@ -883,7 +883,7 @@ class TestPrintCollapseFlag(unittest.TestCase):
         接受可選 argv，預設仍讀 sys.argv——呼叫端零改動）。"""
         with mock.patch.object(sys, "argv", ["check_script_parity.py"]), \
              mock.patch("builtins.print"):
-            rc = m.main([])
+            rc = m.main()
         self.assertEqual(rc, 0)
 
 
@@ -1209,7 +1209,7 @@ class TestR64TierShrinkOnlyRatchet(unittest.TestCase):
         """`_check_tier_ratchet()` 已隨 `main()` 執行（無參數呼叫路徑），非孤兒函式。"""
         with mock.patch.object(sys, "argv", ["check_script_parity.py"]), \
              mock.patch("builtins.print"):
-            rc = m.main([])
+            rc = m.main()
         self.assertEqual(rc, 0, "真 repo 現況應為零降級，main() 應 rc=0")
 
 
@@ -1655,7 +1655,7 @@ class TestR67AcCoverage(unittest.TestCase):
         expected = sum(len(reg) for reg in m.ac_registries().values())
         buf = io.StringIO()
         with redirect_stdout(buf):
-            m.main(["--print-collapse"])
+            m.cli(["--print-collapse"])
         self.assertIn(f"AC={expected}", buf.getvalue())
 
 

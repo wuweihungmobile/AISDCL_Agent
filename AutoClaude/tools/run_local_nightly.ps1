@@ -652,6 +652,11 @@ function Get-Ac4Gate {
   $result = [pscustomobject]@{
     Ok = $false; Days = -1; Ready = $false; Streak = -1; Required = -1
     Status = ''; Stale = $false; StalenessDays = -1; StalenessMax = -1; Error = ''
+    # R75：ac4_progress_check 新增的兩個欄位。caveats＝「ready 成立但有保留」（例如
+    # ready=True 而 50ms 觀察軌連續綠只有 1/14）；clock_anomaly＝最後一筆量測時間戳
+    # 落在未來 ⇒ 新鮮度不可採信。兩者都只活在 JSON 深處的話，log 讀者會把 ready=True
+    # 讀成「毫無保留達標」——那正是本檔 G0 段一直在防的假達標讀法。
+    Caveats = @(); ClockAnomaly = $false
   }
   if (-not $script:PyExe) { $result.Error = 'python unavailable'; return $result }
   if (-not (Test-Path $HistoryPath)) { $result.Error = 'history missing'; return $result }
@@ -687,6 +692,10 @@ function Get-Ac4Gate {
     $result.Stale = ($result.Status -eq 'stale')
     if ($null -ne $parsed.staleness_days) { $result.StalenessDays = [int]$parsed.staleness_days }
     if ($null -ne $parsed.staleness_max_days) { $result.StalenessMax = [int]$parsed.staleness_max_days }
+    # 兩者皆以 $null 檢查取值：舊版工具沒有這兩個欄位時維持預設（空清單／$false），
+    # 不因為多讀了新欄位而讓整支 helper 回 Ok=$false（那會把 G0 判定變成 TOOL-ERROR）。
+    if ($null -ne $parsed.caveats) { $result.Caveats = @($parsed.caveats) }
+    if ($null -ne $parsed.clock_anomaly) { $result.ClockAnomaly = [bool]$parsed.clock_anomaly }
     $result.Ok = $true
   } catch {
     $result.Error = "$_"
@@ -1597,9 +1606,13 @@ $ac4GateStreak = if ($ac4Gate.Ok) { [string]$ac4Gate.Streak } else { 'unavailabl
 $ac4GateRequired = if ($ac4Gate.Ok) { [string]$ac4Gate.Required } else { 'unavailable' }
 # status 併入 ready 標籤：`stale`（採集停擺）與「還在累積」都會讓 ready=False，
 # 但處置完全不同——前者要去修採集器，後者只要等。
+# R75：clock_anomaly / caveats 併入同一行印出。ready=True 併著「觀察軌只有 1/14 綠」
+# 這類保留事項時，讀 log 的人有權當場看到——把保留只留在 JSON 裡等於沒印。
 $ac4ReadyLabel = if ($ac4Gate.Ok) {
-  ('{0} (status={1}; staleness_days={2}/{3})' -f `
-    $ac4Gate.Ready, $ac4Gate.Status, $ac4Gate.StalenessDays, $ac4Gate.StalenessMax)
+  ('{0} (status={1}; staleness_days={2}/{3}{4}{5})' -f `
+    $ac4Gate.Ready, $ac4Gate.Status, $ac4Gate.StalenessDays, $ac4Gate.StalenessMax, `
+    $(if ($ac4Gate.ClockAnomaly) { '; clock_anomaly=True（最後一筆量測時間戳在未來，新鮮度不可採信）' } else { '' }), `
+    $(if ($ac4Gate.Caveats.Count -gt 0) { '; caveats=' + ($ac4Gate.Caveats -join ' ; ') } else { '' }))
 } else { "ERROR:$($ac4Gate.Error)" }
 # R71 G-1：mutation 判定值直接來自 should_lock；取不到時印 unavailable，**不得**
 # 退回任何本檔自算的數字（退回就是把剛拔掉的第二套門檻裝回去）。
@@ -1769,6 +1782,9 @@ try {
         ok = [bool]$ac4Gate.Ok; pass = [bool]$g0Ac4Ok; status = [string]$ac4Gate.Status
         green_streak = [int]$ac4Gate.Streak; green_streak_required = [int]$ac4Gate.Required
         staleness_days = [int]$ac4Gate.StalenessDays; staleness_max_days = [int]$ac4Gate.StalenessMax
+        # R75：pass=true 併著 caveats 非空時，憑證讀者才分得出「毫無保留達標」與
+        # 「達標但有保留」；clock_anomaly 讓 staleness_days 這個數字的可信度一起可查。
+        caveats = @($ac4Gate.Caveats); clock_anomaly = [bool]$ac4Gate.ClockAnomaly
       }
       obs      = [ordered]@{ ok = [bool]$obsGa.Ok; pass = [bool]$g0ObsOk; detail = [string]$obsGaLabel }
       drift    = [ordered]@{
@@ -1823,25 +1839,68 @@ if (-not $script:DockerOK) {
 # 不破壞「stage 失敗不中斷後續 stage」設計（所有 stage 此時已跑完）。
 # R10：清單加入 sdd_chaos（QA-6）；Docker 連續 SKIP ≥3 亦計失敗（QA-11）。
 # 🔴 R74（E 項）：線上排程設定漂移偵測——把「已知缺陷連續三輪存活而沒東西轉紅」補上訊號。
+# 偵測器本體的判準（非 Windows → SKIP rc=0；受管任務都不存在 → SKIP rc=0；讀不到設定
+# → fail-closed rc=1）見該檔判準段，故沒安裝排程的開發機與 CI 不會無故翻紅。
 #
-# WHY 這一項要進 finalFailures（＝真的翻紅），與 G0 判定刻意相反：
-#   · G0 是「觀察期到了沒」＝預期中會持續數週的狀態，翻紅只會訓練人忽略紅燈；
-#   · 排程設定漂移是**已知的、現在就錯的、有明確修法的**設定錯誤，而它的後果正是
-#     讓 nightly 自己漏跑（2026-08-01 實測：凍住的實例吃掉隔日觸發 → 該日三軌零進帳）。
-#     一個會讓自己漏跑的設定錯誤，卻在自己的 log 裡只算 WARN，就是本項要治的失明。
-# 檢查器對「任務不存在」與「非 Windows」都回 rc=0（見該檔判準段），故不會讓沒安裝排程
-# 的開發機或 CI 無故翻紅——會紅的唯一情況是「任務存在但設定不是期望值」。
+# 🔴 R75 訂正 — 「已知存量」與「回歸」必須分開處置：
+# 偵測器落地當輪就把 rc≠0 直接計入 finalFailures，而它當場報出的漂移**修法需要系統
+# 管理員提權**，該提權至今未執行（DEF-101-794）。於是這一項自上線起就是「每晚必紅，
+# 且在被修好之前沒有任何一晚會綠」——這正是本檔在 G0 判定那段明文要避免的訊號污染
+# （見上方 R69 註解：預期中會持續一段時間的狀態翻紅，只會訓練人忽略紅燈）。同一套
+# 判斷標準必須一致地套到兩處，故改用與 G0 相同的處置：**不進 finalFailures，但每輪必印**。
+#
+# 刻意只降級一種狀態（不是整項降級）。判定改由 **$schedDriftStatus 單一變數**決定，
+# 白名單式 fail-closed——只有下面三種狀態不計失敗，其餘（含未來新增的狀態字）一律計失敗：
+#   · status=drift      ＝量出來了，是已知存量（修法明確、只缺提權） → WARN，不計失敗
+#   · status=ok / skip   ＝真正通過（設定全符 / 本機無受管任務或非 Windows）
+#   · status=task_missing ＝受管任務整支不存在（R75 偵測器新增格）→ **計失敗**，且有
+#     專屬訊息與專屬 finalFailures 標籤。不折進 drift 的理由見下方該分支註解。
+#   · 其他一切（偵測器或 python 缺席 absent／輸出讀不出 status／status=error）
+#     ＝**量不出來** → 計入 finalFailures。這一向與偵測器本體同向：該檔 fail-closed
+#     的理由是「量不出來不得當成沒問題」，接線層不得把它反轉回 fail-open。
+#     🔴 R75 二次訂正（SD 複審）：缺席那一向此前只印一行字、$schedDriftRc 留在 0，
+#     於是 nightly 照樣 exit 0——**印的字與程式行為相反**，而觸發條件是真會發生的
+#     （偵測器改名／搬走／$RepoRoot 上一層不是 monorepo 根）。現況＝缺席即 absent 計失敗。
+#
+# 🔴 恢復為硬失敗的條件（可判定，不是「等某人有空」）：
+#   偵測器回報 `status=ok`（語意＝至少一支受管任務存在、且期望值 SSOT 的每一項都符合）。
+#   該狀態一出現即代表提權修復已執行，此後任何 drift 都是**回歸**而非存量，屆時應把
+#   drift 移回 finalFailures。不需有人記得：下方在 status=ok 時會印一行 WARN 明示條件已成立。
+#   人工隨時可查（一行）：`& $PyExe tools\check_scheduled_task_drift.py` 後看輸出的 status=。
 $monoRoot = Split-Path -Parent $RepoRoot
 $schedDriftScript = Join-Path $monoRoot 'tools\check_scheduled_task_drift.py'
 $schedDriftRc = 0
+$schedDriftStatus = 'unmeasured'
 if ($script:PyExe -and (Test-Path $schedDriftScript)) {
-  $schedDriftOut = & $script:PyExe $schedDriftScript 2>&1 | Out-String
+  # rc 不接管線讀取：本檔 Invoke-Native 已記載 PS 5.1 pipeline 末段 cmdlet 會覆寫
+  # $LASTEXITCODE，先取 rc 再 Out-String，避免拿到管線的 rc（R73「讀 rc 禁接管線」）。
+  $schedDriftRaw = & $script:PyExe $schedDriftScript 2>&1
   $schedDriftRc = $LASTEXITCODE
+  $schedDriftOut = ($schedDriftRaw | Out-String)
+  if ($schedDriftOut -match '\[schedule-drift\]\s+status=(\w+)') {
+    $schedDriftStatus = $Matches[1]
+  } elseif ($schedDriftOut -match '\[schedule-drift\]\s+SKIP') {
+    $schedDriftStatus = 'skip'
+  }
   foreach ($line in ($schedDriftOut -split "`n")) {
-    if ("$line".Trim() -ne '') { Log ("[SCHED-DRIFT] {0}" -f "$line".TrimEnd()) $(if ($schedDriftRc -ne 0) { 'ERROR' } else { 'INFO' }) }
+    if ("$line".Trim() -ne '') { Log ("[SCHED-DRIFT] {0}" -f "$line".TrimEnd()) $(if ($schedDriftRc -ne 0) { 'WARN' } else { 'INFO' }) }
+  }
+  if ($schedDriftStatus -eq 'drift') {
+    Log '[SCHED-DRIFT] 上列漂移＝已知存量（DEF-101-794；修法需系統管理員提權）——顯著可見但不計入本輪失敗。偵測器回報 status=ok 之後，本項應移回 finalFailures（見本段註解）' 'WARN'
+  } elseif ($schedDriftStatus -eq 'task_missing') {
+    # R75：受管任務整支不存在。**刻意不與 drift 共用那條具名豁免**——drift 的豁免理由是
+    # 「五項設定要提權才能改」，而任務不見了的修法（重跑安裝器）不需等那個提權；讓它搭
+    # 便車等於把「漏跑」這個最強訊號從 exit code 上拿掉，而漏跑正是整條偵測鏈要防的事。
+    Log '[SCHED-DRIFT] 受管排程任務缺席 ⇒ 該任務不可能觸發，計入本輪失敗（不套用 drift 的存量豁免）；修法＝以系統管理員身分重跑 tools/install_windows_nightly.ps1（並以 -Status 複查）' 'ERROR'
+  } elseif ($schedDriftRc -ne 0) {
+    Log ('[SCHED-DRIFT] rc={0} 但讀不出 status（＝量不出來，非已知存量）——計入本輪失敗，fail-closed' -f $schedDriftRc) 'ERROR'
+  } elseif ($schedDriftStatus -eq 'ok') {
+    Log '[SCHED-DRIFT] status=ok：受管排程設定已全部符合期望 ⇒ 「恢復硬失敗」的條件已成立，請把 drift 移回 finalFailures（見本段註解）' 'WARN'
   }
 } else {
-  Log '[SCHED-DRIFT] 跳過：python 或偵測器缺席（無法量測，不當成通過）' 'WARN'
+  # 缺席＝量不出來，**計入本輪失敗**（狀態字留在白名單外即可，見下方判定）。
+  $schedDriftStatus = 'absent'
+  Log '[SCHED-DRIFT] python 或偵測器缺席（偵測器改名／搬走／$RepoRoot 上一層不是 monorepo 根）——量不出來，計入本輪失敗；只有量出來且是已知存量（status=drift）才豁免' 'ERROR'
 }
 
 $finalFailures = @()
@@ -1856,8 +1915,16 @@ foreach ($pair in @(
 if ($dockerSkipStreak -ge 3) {
   $finalFailures += ('docker_skip_streak={0}' -f $dockerSkipStreak)
 }
-if ($schedDriftRc -ne 0) {
-  $finalFailures += ('schedule_settings_drift={0}' -f $schedDriftRc)
+# 見上方 [SCHED-DRIFT] 段：白名單式 fail-closed。drift＝已知存量（不計失敗，靠 WARN
+# 保持可見）；ok/skip＝真正通過；其餘一切（absent／unmeasured／未知狀態字）＝量不出來，
+# 一律計失敗——**判定不看 rc**：缺席那一向根本沒有 rc 可看（曾因此靜默通過）。
+if ($schedDriftStatus -notin @('drift', 'ok', 'skip')) {
+  # 標籤分兩種：task_missing（任務不見了＝會漏跑）與 unmeasured（量不出來）處置雖同為
+  # 計失敗，但修法完全不同（重跑安裝器 vs 修工具/佈局），END 那行必須分得出是哪一種。
+  $schedDriftFailLabel =
+    if ($schedDriftStatus -eq 'task_missing') { 'schedule_drift_task_missing' }
+    else { 'schedule_drift_unmeasured' }
+  $finalFailures += ('{0}=status={1}/rc={2}' -f $schedDriftFailLabel, $schedDriftStatus, $schedDriftRc)
 }
 if ($finalFailures.Count -gt 0) {
   Log ("END exit decision: exit=1 (failed stages: {0})" -f ($finalFailures -join ', ')) 'ERROR'

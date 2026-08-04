@@ -1970,20 +1970,182 @@ def test_ac4_gate_reads_green_streak_and_recognises_stale(ps1_content: str) -> N
     assert "採集停擺" in ps1_content, "stale 的 gap 文案必須明說是採集停擺而非未達標"
 
 
-def test_schedule_settings_drift_turns_nightly_red(ps1_content: str) -> None:
-    """R74 E 項：線上排程設定漂移必須進 finalFailures（真的翻紅）。
+def test_schedule_drift_is_visible_but_known_backlog_does_not_turn_red(
+    ps1_content: str,
+) -> None:
+    """R75：排程漂移必須顯著可見，但「已知存量」不得製造無限期紅燈；量不出來仍要紅。
 
-    意圖（Rule 9）：ADR-SD09-012 §8.2 的五項排程落差連續三輪存活且沒有任何東西轉紅，
-    因為線上設定沒有任何自動比對者。補上偵測器之後，若它的結果只印 log 不影響 exit，
-    就會複製同一個失明（「有偵測、無訊號」）。故本鎖同時釘住呼叫與 rc 傳導。
-    這一項與 G0 判定的處置刻意相反：G0 不得進 finalFailures（觀察期未滿是預期狀態），
-    排程設定錯誤則是現在就錯、有明確修法、且後果就是讓 nightly 自己漏跑。
+    意圖（Rule 9 — 這裡要守的是**兩個方向**，少一邊都會壞）：
+      ① 不可靜默：線上排程設定沒有任何自動比對者，五項落差曾連續三輪存活而沒東西轉紅。
+         故偵測器呼叫、可 grep 的標記、每輪印出，三者都不得消失。
+      ② 不可無限期紅：偵測器落地當輪就把 rc≠0 直接計入 finalFailures，而當時報出的漂移
+         修法需要系統管理員提權（尚未執行）——「先武裝、後修復」讓 nightly 在修好之前
+         沒有任何一晚會綠，正是本檔 G0 段明文要避免的訊號污染（預期中會持續一段時間的
+         狀態翻紅，只會訓練人忽略紅燈）。故 status=drift 走 WARN 不計失敗。
+      ③ fail-closed 不得被②一起放掉：status 讀不出來／status=error＝**量不出來**，
+         那是工具或系統壞了，不是「已知還沒修」，必須照樣計入 finalFailures。
+      ④ 恢復硬失敗的條件必須可判定且會自己現身：status=ok（受管任務存在且設定全符期望）
+         時要印出「條件已成立」，否則這個豁免就會永久留著而沒人知道該收回。
     """
     assert "check_scheduled_task_drift.py" in ps1_content, "必須呼叫排程漂移偵測器"
-    assert re.search(
-        r"if \(\$schedDriftRc -ne 0\) \{\s*\n\s*\$finalFailures \+=", ps1_content
-    ), "偵測器 rc≠0 必須進 finalFailures，否則就是『有偵測、無訊號』"
     assert "[SCHED-DRIFT]" in ps1_content, "輸出必須帶可 grep 的標記"
+    # ② status=drift 不得進 finalFailures
+    assert not re.search(
+        r"if \(\$schedDriftRc -ne 0\) \{\s*\n\s*\$finalFailures \+=", ps1_content
+    ), "rc≠0 一律計失敗＝已知存量會讓 nightly 無限期恆紅（修法需提權，非本檔可解）"
+    # ③ 量不出來仍計失敗，且判定必須是**白名單式**（不看 rc）：缺席那一向沒有 rc 可看
+    assert re.search(
+        r"if \(\$schedDriftStatus -notin @\('drift', 'ok', 'skip'\)\) \{", ps1_content
+    ), (
+        "判定必須白名單式（只有 drift/ok/skip 不計失敗）：以 rc 為主判準時，"
+        "「偵測器缺席」那一向沒有 rc 可讀 → 靜默通過"
+    )
+    assert "'task_missing'" in ps1_content, (
+        "R75 偵測器新增的 task_missing 必須有專屬分支（訊息＋標籤）；它落在白名單外"
+        "＝計失敗，但不得沿用 drift 的存量豁免（修法不需等提權）"
+    )
+    for label in ("schedule_drift_task_missing", "schedule_drift_unmeasured"):
+        assert label in ps1_content, f"缺 {label} 標籤——END 那行必須分得出是哪一種失敗"
+    assert re.search(r"\$schedDriftStatus = 'absent'", ps1_content), (
+        "偵測器缺席必須寫進狀態字（否則它落在白名單外這件事沒有來源）"
+    )
+    # ④ 收回豁免的條件要自己現身
+    assert re.search(r"\$schedDriftStatus -eq 'ok'", ps1_content), (
+        "status=ok＝提權修復已完成，此時必須印出『可以把 drift 移回硬失敗』"
+    )
+    assert "恢復為硬失敗的條件" in ps1_content, (
+        "豁免必須寫明可判定的收回條件，不能只留一個沒有出口的例外"
+    )
+
+
+def _extract_sched_drift_snippet(ps1_content: str) -> str:
+    """抽出 [SCHED-DRIFT] 偵測器段 + 它對應的 finalFailures 判定（兩段真原始碼）。
+
+    與 `_extract_mutex_guard_snippet` 同手法：靜態字面比對抓不到「印的字說要計失敗、
+    程式卻沒計」這種**行為**缺陷（字面全在，行為相反），故把真程式碼抽出來真跑。
+    """
+    block = re.search(
+        r"\$monoRoot = Split-Path -Parent \$RepoRoot\n.*?\n\} else \{\n.*?\n\}\n",
+        ps1_content,
+        re.DOTALL,
+    )
+    assert block is not None, "找不到 [SCHED-DRIFT] 偵測器段——結構已變動，需同步更新此測試"
+    # 判定段刻意以「它做什麼」（往 $finalFailures 加 schedule_drift_* 標籤）錨定，
+    # **不錨定判準寫法、也不假設 body 幾行**：若錨定 `-notin` 這種形態，判準退回舊寫法時
+    # 會在「抽不到片段」就先炸，行為斷言反而永遠沒機會執行——鎖會紅，但紅的理由與真缺陷
+    # 無關（R75 實測踩過一次）。改成行索引式：找到那行 `+=`，往上找 col-0 的 `if (`、
+    # 往下找 col-0 的 `}`。
+    lines = ps1_content.split("\n")
+    plus = [
+        i for i, ln in enumerate(lines)
+        if "$finalFailures +=" in ln
+        and ("schedule_drift" in ln or "$schedDriftStatus" in ln)
+    ]
+    assert len(plus) == 1, f"預期恰一處排程漂移的 finalFailures 寫入，實際 {len(plus)} 處"
+    idx = plus[0]
+    start = max(i for i in range(idx, -1, -1) if lines[i].startswith("if ("))
+    end = min(i for i in range(idx, len(lines)) if lines[i] == "}")
+    decision = "\n".join(lines[start:end + 1]) + "\n"
+    assert "check_scheduled_task_drift.py" in block.group(0), "抽出片段錯位（未含偵測器路徑）"
+    return block.group(0) + "\n$finalFailures = @()\n" + decision
+
+
+_DRIFT_STUB = "print('[schedule-drift] status=drift')\nraise SystemExit(1)\n"
+_TASK_MISSING_STUB = (
+    "print('[schedule-drift] status=task_missing')\n"
+    "print('  - AutoClaude_WindowsSmoke: bu cun zai')\n"
+    "raise SystemExit(1)\n"
+)
+
+
+@pytest.mark.skipif(
+    platform.system() != "Windows",
+    reason="[WINDOWS-NATIVE-ONLY] 需以 powershell.exe 真跑 ps1 片段驗證分支行為"
+    "（判定邏輯本身平台中立，但載具只在 Windows 上存在；標籤供 "
+    "conftest.py::pytest_terminal_summary 彙整可見度）",
+)
+class TestSchedDriftDispositionBehavior:
+    """R75 二次訂正（SD 複審）注入式行為鎖：「量不出來」兩個方向都必須真的計入失敗。
+
+    為何非行為鎖不可（Rule 9）：缺席那一向原本印著「無法量測，不當成通過」，而
+    `$schedDriftRc` 留在 0 ⇒ 判定看 rc 就必然放行——**字面與行為相反，任何字面鎖都抓不到**。
+    偵測器本體刻意 fail-closed（讀不到設定回 rc=1，理由是「量不出來不得當成沒問題」），
+    接線層把它反轉回 fail-open，等於把那份設計意圖在最後一哩丟掉。
+    觸發條件是真會發生的：偵測器改名／搬走／`$RepoRoot` 上一層不是 monorepo 根。
+    """
+
+    def _run(self, ps1_content: str, tmp_path: Path, repo_root: Path) -> str:
+        script = tmp_path / "probe.ps1"
+        body = (
+            "function Log { param([string]$Msg,[string]$Level='INFO') "
+            "Write-Output (\"LOG[{0}] {1}\" -f $Level, $Msg) }\n"
+            f"$RepoRoot = '{repo_root}'\n"
+            f"$script:PyExe = '{sys.executable}'\n"
+            f"{_extract_sched_drift_snippet(ps1_content)}\n"
+            'Write-Output ("STATUS={0}" -f $schedDriftStatus)\n'
+            'Write-Output ("FINALFAILURES={0}" -f ($finalFailures -join \',\'))\n'
+        )
+        # BOM：PS 5.1 以 ANSI 碼頁讀無 BOM 的 UTF-8 會把片段內的中文毀成亂碼 → parser 爆
+        script.write_text(body, encoding="utf-8-sig")
+        proc = subprocess.run(
+            ["powershell.exe", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", str(script)],
+            capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=120,
+        )
+        return proc.stdout + proc.stderr
+
+    def test_detector_absent_counts_as_failure(self, ps1_content: str, tmp_path: Path) -> None:
+        """偵測器缺席（Test-Path 為假）→ 必須計入 finalFailures，不得靜默通過。"""
+        repo_root = tmp_path / "mono_absent" / "AutoClaude"
+        repo_root.mkdir(parents=True)
+        out = self._run(ps1_content, tmp_path, repo_root)
+        assert "STATUS=absent" in out, f"缺席未寫進狀態字：\n{out}"
+        assert "FINALFAILURES=schedule_drift_unmeasured" in out, (
+            f"偵測器缺席＝量不出來，必須計入本輪失敗（否則 nightly 照樣 exit 0）：\n{out}"
+        )
+
+    def test_task_missing_counts_as_failure_with_its_own_message(
+        self, ps1_content: str, tmp_path: Path
+    ) -> None:
+        """`status=task_missing`（受管任務整支不存在）→ 必須計失敗，且訊息不得說「讀不出 status」。
+
+        意圖（Rule 9）兩層：
+          ① **不得搭 drift 的便車**：drift 的豁免理由是「那五項設定要提權才能改」，而任務
+             不見了的修法（重跑安裝器）不需等那個提權。折進 drift 就等於把「漏跑」這個最強
+             訊號從 exit code 上拿掉——漏跑正是整條偵測鏈存在的理由。
+          ② **訊息要對**：status 其實讀到了（只是新值），若還印「rc≠0 但讀不出 status」，
+             人會去修一個不存在的解析問題，而真正該做的是重跑安裝器。標籤同理要分得出來。
+        """
+        repo_root = tmp_path / "mono_missing" / "AutoClaude"
+        repo_root.mkdir(parents=True)
+        detector = tmp_path / "mono_missing" / "tools" / "check_scheduled_task_drift.py"
+        detector.parent.mkdir(parents=True, exist_ok=True)
+        detector.write_text(_TASK_MISSING_STUB, encoding="utf-8", newline="\n")
+        out = self._run(ps1_content, tmp_path, repo_root)
+        assert "STATUS=task_missing" in out, f"未解析出新狀態字：\n{out}"
+        assert "FINALFAILURES=schedule_drift_task_missing" in out, (
+            f"任務缺席必須計失敗，且標籤要與『量不出來』分開（修法不同）：\n{out}"
+        )
+        assert "讀不出 status" not in out, (
+            f"status 已讀到（task_missing），不得印成解析失敗——會把人導向錯的修法：\n{out}"
+        )
+        assert "install_windows_nightly.ps1" in out, "訊息必須給出可執行的修法（重跑安裝器）"
+
+    def test_known_drift_still_exempt(self, ps1_content: str, tmp_path: Path) -> None:
+        """對照組：偵測器在、回報 status=drift（rc=1）→ 不得計入失敗。
+
+        沒有這一組，「把缺席改成計失敗」很容易被實作成「一律計失敗」——那會退回
+        本輪要治的無限期紅燈。兩組必須同時綠，判定才真的分得清兩件事。
+        """
+        repo_root = tmp_path / "mono_drift" / "AutoClaude"
+        repo_root.mkdir(parents=True)
+        detector = tmp_path / "mono_drift" / "tools" / "check_scheduled_task_drift.py"
+        detector.parent.mkdir(parents=True, exist_ok=True)
+        detector.write_text(_DRIFT_STUB, encoding="utf-8", newline="\n")
+        out = self._run(ps1_content, tmp_path, repo_root)
+        assert "STATUS=drift" in out, f"未解析出 status=drift：\n{out}"
+        assert "FINALFAILURES=\n" in out or out.rstrip().endswith("FINALFAILURES="), (
+            f"已知存量不得計入失敗（那會製造無限期紅燈）：\n{out}"
+        )
 
 
 def test_g0_readiness_certificate_is_machine_readable_and_always_written(

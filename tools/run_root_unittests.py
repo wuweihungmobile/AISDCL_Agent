@@ -33,7 +33,9 @@ R68 補第四層 `_THIRD_PARTY_PREREQS`——前三層都預設「環境是完�
   step 8、windows-compat-ci.yml、macos-compat-ci.yml 對應 step。
 
 使用：python tools/run_root_unittests.py（repo 內任意 cwd；路徑以本檔自身定位）
-測試：tools/tests/test_run_root_unittests.py
+CLI 契約：**零旗標**——任何引數一律 rc=2 fail-loud（見 `cli()` 的 WHY）。
+測試：tools/tests/test_run_root_unittests.py（未知引數那一層在
+      tools/tests/test_check_wrapper_thinness.py 的 `TestRootGateToolsRejectUnknownFlags`）
 """
 from __future__ import annotations
 
@@ -45,6 +47,7 @@ import unittest
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+import _cli_flags  # noqa: E402  # 未知旗標 rc=2 fail-loud 的 SSOT（見該檔檔頭 WHY）
 import _stdio_utf8  # noqa: E402,F401  # Windows 非 UTF-8 終端 print(✅/❌) 防崩潰保護
 
 _TESTS_DIR = Path(__file__).resolve().parent / "tests"
@@ -637,5 +640,37 @@ def main() -> int:
     return run_with_floor(_TESTS_DIR, MIN_TESTS)
 
 
+#: 本 runner 的 CLI 契約＝**零旗標**（呼叫端實查：`tools/git-hooks/pre-push` root-infra
+#: leg ②、`root-infra-ci.yml` step 8、`windows-compat-ci.yml`、`macos-compat-ci.yml`
+#: 四處全都是裸呼叫、一個引數都沒傳）。空 tuple 讓 `_cli_flags` 印「本工具不接受任何旗標」。
+_KNOWN_ARGV: tuple[str, ...] = ()
+
+
+def cli(argv: list[str]) -> int:
+    """CLI 入口：未知引數一律 rc=2 fail-loud，全合法才委派 `main()`。
+
+    WHY 本層存在（R74 SD 獨立複審抓到的射程缺口）：本檔修前全檔 grep
+    `argv|argparse|_cli_flags` **零命中** ⇒ 帶未知旗標時直接跑預設路徑、跑完整棵樹
+    （逾 120 秒），最終 rc 反映的是「套件結果」而不是「旗標被拒收」。而本檔正是
+    pre-push root-infra leg ＋ 三支 CI 真正執行的那一支——後果最大的工具，逃掉
+    R67-D20 那道紀律的唯一原因是**檔名不叫 `check_*`**（該鎖以檔名 glob 劃界）。
+
+    🔴 為何拒收寫在這裡、而**不是**寫進 `main()`（同 `tools/check_defect_log_crossref.py`
+    已付過學費的判斷，逐字沿用它的理由）：`main()` 有既有的**程式化呼叫端**——
+    `tools/tests/test_run_root_unittests.py` 的零相依探針在子行程內叩 `R.main()`，
+    而那個子行程的 `sys.argv` 帶的是**探針自己**的三個參數（blocked JSON／mode／
+    tools_dir）。若在 `main()` 內讀 `sys.argv`，那三個參數會被當成本 runner 的旗標
+    ⇒ 探針 `main` 模式回 rc=2 而不是它斷言的 rc=1，一道真鎖當場變假紅。
+    同一個誤傷面本輪另有實例（本機實測、HEAD 既存）：
+    `python -m unittest tools.tests.test_gha_action_versions` 3 支假紅，
+    因為 `main(argv=None)` 讀到的是 unittest 放進 `sys.argv` 的模組名。
+    ⇒ 判準：**「讀 `sys.argv`」只能發生在只有真 CLI 才會走的這一層**，
+    `main()` 一律只吃顯式引數。機械看守見
+    `tools/tests/test_check_wrapper_thinness.py::TestRootGateToolsRejectUnknownFlags`。
+    """
+    rc = _cli_flags.reject_unknown_argv("run_root_unittests.py", argv, _KNOWN_ARGV)
+    return main() if rc is None else rc
+
+
 if __name__ == "__main__":
-    sys.exit(main())
+    sys.exit(cli(sys.argv[1:]))

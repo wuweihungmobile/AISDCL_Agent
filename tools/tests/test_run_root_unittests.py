@@ -1280,6 +1280,64 @@ class ZeroDepEnvironmentDiscriminationTest(unittest.TestCase):
         )
 
 
+class ZeroDepProbeFlagIsNotAFailOpenTest(unittest.TestCase):
+    """上一組的自我 skip 是 **fail-open**，本組是它唯一的看守者。
+
+    WHY（Rule 12 fail-loud）：用 `RRU_IN_ZERO_DEP_PROBE=1` 斷遞迴本身是對的（R74 實測：
+    探針在套件內重跑整棵樹，放寬逾時只把整套牆鐘從 823s 放大到 3813s 且仍 TimeoutExpired）。
+    問題在**沒有任何東西斷言「外層那一次真的跑了」**：`unittest` 的 `Ran N tests` 把 skipped
+    計入，所以 `MIN_TESTS` 下限對「整組被 skip 掉」結構性失明；而該變數全 repo 只出現在本檔
+    數行，一旦以任何方式漏進外層環境（開發者 shell／CI 的 `env:`／包裝腳本／schtasks 排程的
+    使用者環境），那三支「零相依鑑別力鎖」會靜默全滅而閘門照樣印綠——**閘門自己壞掉卻不吭聲**。
+    實測（本輪）：`$env:RRU_IN_ZERO_DEP_PROBE='1'` 後跑那個類別得到 `Ran 3 tests / OK
+    (skipped=3) / rc=0`，三支鑑別力鎖等於不存在。
+
+    🔴 本組刻意**不 spawn 任何子行程**（唯讀環境查詢），所以它不可能遞迴、也因此**不需要**
+    自我 skip——它在探針內部與外部都跑得起來，兩種環境各有一條為真的斷言。這正是它有資格
+    看守 fail-open 的前提：看守者自己若也帶同一個豁免，等於沒有看守者。
+
+    誠實劃界：若外層環境**同時**漏了旗標又真的缺相依，本組不會紅（兩側都成立）。那種環境
+    早已被 `main()` 的 fail-fast 與 `report_missing_third_party_prereqs()` 判紅，不是靜默面。
+    """
+
+    def test_probe_flag_implies_dependencies_really_blocked(self) -> None:
+        """旗標與「相依真的被擋掉」必須同真同假——旗標本身不足以自證身在探針內。
+
+        這是「注入該變數即紅」的那條斷言：正常環境（相依齊備）只要旗標為 1，左右不等即紅。
+        判準刻意取旗標**之外的獨立訊號**（`find_spec` 找不找得到宣告相依）——只看旗標的話，
+        「真的在探針內」與「旗標漏進外層」在觀測上完全一樣，而那正是這個缺陷藏身的地方。
+        """
+        flag_set = os.environ.get(_ZERO_DEP_PROBE_ENV) == "1"
+        missing = run_root_unittests.missing_third_party_prereqs()
+        self.assertEqual(
+            flag_set, bool(missing),
+            f"{_ZERO_DEP_PROBE_ENV}={os.environ.get(_ZERO_DEP_PROBE_ENV)!r} 與「宣告相依是否"
+            f"真的取不到」不一致（缺漏={[imp for imp, _ in missing]}）。\n"
+            f"  · 旗標為 1 但相依都在 ⇒ 該變數**漏進了外層環境**："
+            f"{ZeroDepEnvironmentDiscriminationTest.__name__} 三支鑑別力鎖會全部自我 skip，"
+            f"而 unittest 把 skipped 計入 `Ran N tests` ⇒ MIN_TESTS 看不出來、閘門照綠。"
+            f"處置：把該變數從環境中移除（它只該由 _zero_dep_probe_cached() 傳給子行程）。\n"
+            f"  · 旗標未設但相依取不到 ⇒ 環境不完整（非本組職責，main() 會 fail-fast 判紅）。",
+        )
+
+    def test_group_is_skipped_exactly_when_the_probe_flag_is_set(self) -> None:
+        """釘住 skip 的**接線**：條件必須恰好是那個旗標，不寬不窄。
+
+        `@unittest.skipIf` 在 class 建立時就把判定結果寫成 `__unittest_skip__`，故此處讀到的
+        是「本次執行到底 skip 了沒」這個既成事實，不是重算一次條件。上一支保證「旗標為 1 時
+        真的在探針內」，本支保證「不在探針內時那三支鎖真的被執行」——把條件改寬（例如改成
+        任何非空值即 skip、或退化成無條件 `@unittest.skip`）會讓本支當場紅。
+        """
+        in_probe = os.environ.get(_ZERO_DEP_PROBE_ENV) == "1"
+        skipped = bool(getattr(ZeroDepEnvironmentDiscriminationTest, "__unittest_skip__", False))
+        self.assertEqual(
+            skipped, in_probe,
+            f"{ZeroDepEnvironmentDiscriminationTest.__name__} 的 skip 狀態（{skipped}）與"
+            f"「是否在探針子行程內」（{in_probe}）不符。skip 只准為了斷遞迴而發生；"
+            f"在正常環境被 skip ＝ 那三支零相依鑑別力鎖沒跑，而下限守門對此失明。",
+        )
+
+
 # `tools/tests/` 的**外部可執行檔**前置宣告（SSOT）——`(命令名, pip 名)`。
 #
 # WHY（R69 終審 SD 實測；與 `run_root_unittests._THIRD_PARTY_PREREQS` 是同一個病的

@@ -22,6 +22,37 @@ rc=0 並印綠燈。也就是說「已知的缺陷類只圈了三個站點」，
 刻意**不**在此改用 argparse：本層工具多是「零旗標或一兩個報表旗標」的形狀，
 argparse 會逼每支各寫一份 parser 宣告（又是複本），而真正要守的性質只有一條
 ——**沒被宣告的引數不得被靜默忽略**。本模組只提供那一條。
+
+═══════════════════════════════════════════════════════════════════════════════
+🔴 接線紀律：`sys.argv` 只能在「只有真 CLI 才會走」的那一層讀（R74，兩筆實測）
+═══════════════════════════════════════════════════════════════════════════════
+本模組唯一的輸入是 `args`；它從哪裡來由呼叫端決定。若「從 `sys.argv` 來」這個
+決定下在 `main()` 裡（`main(argv=None)` → `sys.argv[1:]`），就會誤傷**程式化
+呼叫端**——它們的 `sys.argv` 裝的是別人的參數：
+  · `python -m unittest tools.tests.test_gha_action_versions` → **3 支假紅**
+    （HEAD 既存、R74 本機實測）：unittest 把模組名放進 `sys.argv`，被
+    `main()` 當成未知旗標拒收 rc=2，而該測試斷言的是 rc=1；
+  · `tools/run_root_unittests.py` 的零相依探針在子行程內叩 `main()`，該子行程的
+    `sys.argv` 帶的是探針自己的三個參數（blocked JSON／mode／tools_dir）。
+兩種安全接法（皆已在本 repo 落地）：
+  ① **分層**：`cli(argv)` 做拒收、`main()` 只吃顯式引數，只有 `__main__` 那一行
+     讀 `sys.argv`（`tools/run_root_unittests.py`、`check_defect_log_crossref.py`）；
+  ② 保留 `main(argv=None)` → `sys.argv[1:]`，但**測試一律顯式傳 `[]`**
+     （`tools/tests/test_check_wrapper_thinness.py` 有逐字 WHY）。
+①優於②：②要求每一個測試呼叫端都記得，而漏掉的那一個就是上面那 3 支假紅。
+
+🔴 **R75 拍板：接本模組的工具一律走 ①，② 不再是可選項**（Rule 7 — 兩種矛盾寫法
+不得並存）。四支受害工具已全數改為 `cli`/`main` 分層：`check_wrapper_thinness`／
+`check_script_parity`／`check_pytest_baseline_sites`／`check_gha_action_versions`。
+機械看守＝`tools/tests/test_check_wrapper_thinness.py::
+TestRootGateToolsRejectUnknownFlags::test_rejection_never_reads_sys_argv_inside_main`
+（射程＝**每一支接本模組的工具**，不是具名一支）。
+②「測試顯式傳引數」的習慣本身無害、可留：① 落地後 `main()` 根本不讀 `sys.argv`，
+那個 `[]` 已不承載任何保護作用 ⇒ 它不是第二套判準，只是普通的顯式呼叫。
+`check_script_parity.py` 的 `main()` 收斂為**零引數**（`--print-collapse` 上移
+`cli()`）＝逐字沿用 `run_root_unittests.py` 的形狀。成因是該檔卡在
+`check_loc_budget.SPECIAL_FILES` 的 1618 行 shrink-only 棘輪（實測 1617、餘 1 行），
+分層必須**淨零成長**——把它記在這裡，免得下一輪誤讀成「同一件事有兩種寫法」。
 """
 from __future__ import annotations
 

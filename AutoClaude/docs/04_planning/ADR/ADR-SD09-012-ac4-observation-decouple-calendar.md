@@ -466,7 +466,7 @@ all recall>=0.95: True | circuit_breaker_open_count: Counter({'0': 42})
 | **門檻數值** | **維持 14**（只改計量單位：日曆天 → 綠紀錄筆數） |
 | **反作弊** | **去重機制零改動** —— M-05 的 UTC-date 去重原封不動保留。因每 UTC 日上限 1 筆，「14 筆」數學上仍蘊含「≥ 14 個不同 UTC 日期」，**時間跨度一天沒少**；移除的是「必須相鄰」。<br>🔴 **2026-08-03 訂正：拍板當下所依據的「反作弊零改動／唯一放寬與安全無關」表述不完整。** 實測另有**第二處放寬＝證據新鮮度（liveness）**：`filter_recent` 退出閘門後，`evaluate()` 再無時鐘參照，採集器無聲死掉時會**永遠回報 ready=True**（§1.4 訂正框、§4.3 強度對照表）。**方向不改**（gap-tolerant 仍採用），但**落地必須連 §7.1 L-7 獨立 staleness 判準一起做**，否則等於淨拆一道防線 |
 | **拍板依據實測** | 套用後 `green_streak=42/14`、`recall_sigma=0.0000 ≤ 0.02`、`ready=True`（§3.4 記憶體內模擬，production code 未改；**2026-08-03 重跑值**，拍板當下為 41/14） |
-| 🔴 **落地狀態** | ✅ **LANDED — 2026-08-04（R74）**。`tools/ac4_progress_check.py` L-1~L-5 ＋ L-7 全數落地；`tools/run_local_nightly.ps1` L-6 同輪同步；兩支測試檔更新並附雙向鑑別力取證。落地當回合實測見 §7.6 |
+| 🔴 **落地狀態** | ✅ **LANDED — 2026-08-04（R74）**。`tools/ac4_progress_check.py` L-1~L-5 ＋ L-7 全數落地；`tools/run_local_nightly.ps1` L-6 同輪同步；兩支測試檔更新並附雙向鑑別力取證。落地當回合實測見 §7.6。🔴 **L-7 判準已於 R75 修正**（staleness 取樣改「最後一筆真量測」、未來時間戳改 `clock_anomaly` fail-closed、新增「認證前窗內須有指標變異」必要條件，並分離 `caveats`／`reasons`）——現行判準見 L-7 末「R75 同步」小節，R75 重驗仍為 `ready`（見 §7.6）。🔴 **「已達標」這句宣稱的證據不可攜**：觀察期紀錄 `AutoClaude/.ac4_history.jsonl` 為 untracked、只存在於產出它的那台機器上 ⇒ 讀本列與 §7.6 的數字前先讀 §7.6 的 **provenance 揭露**段（該段同時載明「本輪不改此設計」的理由與承接觸發點） |
 
 > **拍板與落地為何分兩輪（史料，已結束）**：拍板輪刻意不動 code，因為判準變更必須配
 > 「注入退化→必紅／還原→必綠」的雙向鑑別力驗證，而 `run_local_nightly.ps1` 當時由他人持有。
@@ -549,9 +549,10 @@ recalls = [r["recall_at_10"] for r in records if r.get("recall_at_10") is not No
 > 實測：一年前的舊資料在提案判準下回 `ready=True`（§1.4 訂正框）。
 > **L-7 不是可選加強，是 L-1 的配套。少了它，本 ADR 就是「拿掉一道防線而不補」。**
 
-- **改法**：`evaluate()` 內新增一道**與 green_streak 無關的獨立判準**——
-  取 `records[-1]` 的 timestamp，若距今 > `STALENESS_MAX_DAYS` 則 `status='stale'`、`ready=False`、
-  `reasons.append(f"證據過期（最新一筆距今 {n} 天 > {STALENESS_MAX_DAYS} 天），採集可能已停擺")`。
+- **改法（R74 提案原文，取樣集合已於 R75 收窄 ⇒ 現行判準見本節末「R75 同步」）**：
+  `evaluate()` 內新增一道**與 green_streak 無關的獨立判準**——
+  取最新一筆的 timestamp，若距今 > `STALENESS_MAX_DAYS` 則 `status='stale'`、`ready=False`、
+  並在 `reasons` 寫出「證據過期／採集可能已停擺」。
 - **N 的取法（🔴 別重蹈日曆綁定）**：建議 `STALENESS_MAX_DAYS = 30 ~ 42`（＝ window 14 的 **2~3 倍**）。
   **理由**：這台機器 8 月只活 2 天（§2.5/§2.6 實測，近 75 天活 52 天、7/22、7/29、8/1 各一次冷開機）。
   N 取太小（例如 14）等於把剛拆掉的「機器要天天開機」換個名字裝回來，**AC4 會再次卡死**。
@@ -564,6 +565,42 @@ recalls = [r["recall_at_10"] for r in records if r.get("recall_at_10") is not No
   `tests/contract/` 補 `status='stale'` 的 schema case。
 - ⚠️ **`stale` 是新的 status 值**，`Get-Ac4Gate` 與 `[G0-*]` 判定需一併認得它（併入 L-6 一起做，**不可只認 `ready`**——
   否則 nightly 會把 stale 印成單純的 not-ready，人看不出「是採集死了」還是「還在累積」）。
+
+##### 🔴 L-7 的 R75 同步（現行判準；本小節與 `tools/ac4_progress_check.py` 實查一致）
+
+R74 版 L-7 只堵住「**沒有新列**」那一半，而本 ADR 記載 L-7 要防的是「`ready` 永久凍結」。
+R75 三項變更（前兩項是修判準的取樣與邊界、第三項是**新增一條收緊條件**，不是放寬）：
+
+1. **staleness 量的是「最後一筆真量測」，不是「最後一筆紀錄」**（`_is_measurement()`＝
+   `status != "skip"`；`pass`／`fail` 都算量測，只有 `skip` 不算）。
+   **理由**：PG／Docker 不可用時採集器**每晚照樣寫入一筆帶當日 timestamp 的 `status="skip"`**
+   （`run_local_nightly` 另建 `.docker_skip_streak` 計數器，證明這是常態而非邊角）。而 `skip`
+   對 `green_streak` 是中性（不累計也不中斷）、對舊 staleness 卻算一筆新列 ⇒ **streak 凍在
+   達標值、staleness 恆保新鮮 ⇒ `ready` 永久為真且無人察覺**——正是 L-7 立判準時逐字要防的
+   狀態，換了個入口重演。一句話：**量「有沒有新紀錄」量到的是採集器心跳，量「有沒有新量測」
+   量到的才是證據新鮮度。**
+   `skip` 對 `green_streak` **維持中性不動**（不碰 P0-02 的三態 sentinel）——職責分離。
+2. **負值（未來時間戳）不得夾成 0**：改報新欄 `clock_anomaly=True` 並 **fail-closed 判 stale**。
+   夾負值會讓時鐘偏移／手改檔案的資料恆為「距今 0 天」＝永久新鮮，採集器死掉也不轉 stale，
+   而本判準自陳是「必要條件、不是加分項」。
+3. **新增：認證前必須看到「重新量測過」的痕跡**（收緊）。`green_streak` 已達標時，若窗內
+   有 ≥2 筆可比量測卻**任一指標都沒有出現變異**，一律不 ready。擋的是 stuck writer／每晚
+   複製上一筆——那種資料上 `recall σ = 0` 不構成反漂移證據（σ 讀 0 是「沒變」而不是「驗過
+   了」）。⚠️ 判準內容本身**不改**：recall 對固定語料＋固定索引是確定性量測，σ=0 是正常
+   讀數，其鑑別力是**前瞻的**；故改的是「把這件事講出來」＋補一條 liveness 必要條件。
+
+**新增可讀欄位**（皆為資訊欄／診斷用，非閘門，除 `clock_anomaly` 參與 fail-closed）：
+`measured_records`（全史真量測筆數）、`record_staleness_days`（最後一筆**任何**紀錄距今天數
+——與 `staleness_days` 的**落差**即診斷依據：兩者接近 ⇒ 採集器死了、修排程／載具；record 很新
+而 staleness 很舊 ⇒ 採集器活著但量測沒發生、修 PG／Docker）、`clock_anomaly`、
+`recall_distinct_values`／`p95_distinct_values`／`metric_variance_observed`／
+`recall_sigma_discriminating`（σ 這把尺的輸入有沒有在動）、以及 **`caveats`**。
+
+🔴 **`caveats` 與 `reasons` 刻意分離、不得合併**：`reasons` ＝「不可升級的原因」（有它就
+不 ready）；`caveats` ＝「ready 成立，但成立得有保留」。混成一個清單會產出「`ready=True`
+卻列著一堆原因」那種讀不懂的輸出；而只塞進 JSON 深處不印出來，就會讓 `reasons=[]` 被讀成
+「毫無保留就達標」。⇒ 上游消費者（`Get-Ac4Gate`／`[G0-*]`）判 gate 一律只看 `reasons`／
+`ready`，`caveats` 與 `clock_anomaly` 是**要印給人看**的，別當成 not-ready 訊號。
 
 ### 7.2 會打到的既有測試鎖
 
@@ -605,6 +642,62 @@ AFTER   status=ready      observation_days=9  green_streak=43  ready=true   rc=0
 ```
 
 ⇒ **AC4 觀察期即刻達標。** 卡住 W1 的不是資料量（證據多出門檻 3 倍），是拍板結果沒進 code。
+
+🔴 **provenance 揭露（R75 補；沿用 `ONBOARDING.md` §7／§8 對 nightly 心跳檔既有的措辭體例，
+刻意不自創第三種寫法）**：上面這組數字的證據檔是 `AutoClaude/.ac4_history.jsonl`，它被
+`AutoClaude/.gitignore` 排除（實查：`git check-ignore -v` 命中該檔、
+`git ls-files --error-unmatch` rc=1＝未追蹤）⇒ **這份紀錄 untracked，只存在於產出它的那台
+機器上**（＝跑 nightly 採集的那台 Windows 11 真機）。因此：
+- **不得**據此推論「任何一台 checkout 都能複現 `green_streak=43`」；
+- **不得**在另一台機器上把「本機算不到那個 streak」讀成「觀察期未達標」或「採集停擺」。
+  缺檔時的行為已驗為 fail-open（`status=observing`／`ready=false`／rc=0，不會假紅），
+  所以在別台機器上跑這支 checker 得到的是**「這台機器沒有證據」，不是「證據不存在」**
+  ——與 `DEF-101-148`「本機副作用類宣稱綁定該機器」同性質。
+- 引用本節數字時一律連同「哪台機器、什麼時候」一起引，或改為現查
+  （`python AutoClaude/tools/ac4_progress_check.py`）。把它當成 ADR 的常數就會重演
+  `ADR-XPLAT-002` §4.3.1 已記載過的「量測 → 寫進文件 → 之後失真」。
+
+**這個「達標證據不可攜」的設計要不要改？R75 判斷：揭露必做（即本段），設計本輪不改。**
+- **改成 tracked 的代價高於收益**：這是每台機器**各自 append** 的量測流，nightly 每跑一輪就
+  多一筆 ⇒ 納入版控後每天都讓工作樹變髒（而排程 job 沒有人在旁邊 commit），多機並用時
+  幾乎每一行都會衝突；且它的反作弊語意（尾端往前數連續綠、遇紅中斷）建立在「單一機器的
+  時序流」上，合併過的檔算出來的 streak 沒有定義。
+- **雲端重建也不是現成的**：雲端側沒有等價的每日採集鏈；同型前例是 `mutation-history`
+  artifact 受 GitHub retention 上限限制（見根層 `ONBOARDING.md` §9 該列，並已註明本機
+  nightly 與雲端是兩個互不同步的累積點）。要讓雲端能重建觀察期證據，等於新開一條採集＋
+  保存鏈，屬獨立標的、需授權，不是順手可做的事。
+- **一個真正便宜的改法（讓 `ac4_progress_check.py` 自己印一行 provenance：主機名 ＋ 該檔
+  untracked 的事實）本輪未做，但已有承接者**。原因不是難度，是它的 stdout 有三個既有錨點被
+  `AutoClaude/tools/run_local_nightly.ps1` 的 `Get-Ac4Gate` 解析，而該檔本輪由另一個修復包
+  持有 ⇒ 同輪由兩邊各自動輸出面會製造互踩型假紅。
+  **承接：`run_local_nightly.ps1` 的持有者已收到轉達**，正評估上游面要不要多讀 R75 新增的
+  `caveats`／`clock_anomaly`；provenance 行併入該次輸出面調整一起做（同一支解析器只動一次）。
+  ⚠️ 若該次評估決定不動輸出面，本點即回到「無承接者」狀態，屆時必須在此就地改寫成
+  **承接輪次：未指派** ＋ 觸發點，不得留著一句已經不成立的「已有承接者」。
+⇒ 處置與 nightly 心跳檔一致（`ONBOARDING.md` §8 R12 段：跨機限制如實揭露，不強求可攜）。
+
+🔴 **R75 判準修正後的重驗（R75 當回合真跑 `python AutoClaude/tools/ac4_progress_check.py`，
+rc=0）——上面 R74 的達標宣稱在新判準下仍然站得住，但要多揭露一件事**：
+
+```
+status=ready   green_streak=44/14   measured_records=44/44   staleness_days=0/30
+record_staleness_days=0   total_records=44   ready_for_labeled_pr=True
+tolerant_streak=44 (p95 < 60ms)     observation_streak=1 (p95 < 50ms)
+recall_sigma=0.0 (recall distinct=1, p95 distinct=14, discriminating=False)
+```
+
+- **L-7 的 R75 收窄沒有讓 AC4 退回 not-ready**：`measured_records` 與 `total_records` 相等
+  ⇒ 全史每一筆都是真量測、沒有 `skip` 混充新鮮度，最新一筆就在今天（`staleness_days=0`，
+  且 `record_staleness_days` 與它相等＝採集器與量測同步活著）。R75 的新收緊條件也放行
+  （`p95 distinct=14`＝窗內每晚的量測值都在動，不是 stuck writer）。
+- 🔴 **但「達標」的組成必須講清楚：`ready` 完全由 60ms tolerant 軌成立，50ms 觀察軌並未達標**
+  （`observation_streak=1/14`）。這一點目前只出現在工具的 `caveats` 裡，本 ADR 補記於此：
+  讀「AC4 觀察期已達標」時**不得**推論「p95 已穩定落在 50ms 觀察目標之內」——那是兩條不同
+  的軌（升級門檻 60ms 見 `ADR-SD09-008` §v0.4 ACCEPTED；50ms 是向上相容的觀察指標，
+  不影響 `ready`）。同理 `recall_sigma=0.0` 是「recall 沒變」而不是「反漂移驗過了」
+  （`recall distinct=1`、`discriminating=False`），該尺的鑑別力是前瞻的。
+- ⇒ 本段三個數字（`44`／`1`／`0.0`）與上方 provenance 揭露同一紀律：它們是**那台機器、
+  那個時點**的量測值，引用時連同機器與時點一起引，或改為現查。
 
 **雙向鑑別力取證（scratchpad 副本，真實 jsonl 未觸碰）**：
 

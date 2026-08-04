@@ -53,6 +53,13 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 BASELINE_FILE = PROJECT_ROOT / ".loc_baseline"
 OVERRIDE_FILE = PROJECT_ROOT / ".loc-budget.toml"
 
+# 強制 stdout/stderr 為 UTF-8 的唯一實作住 monorepo 根層 `tools/lib/`（見該檔
+# `init_utf8_streams` 上方的 SSOT 說明）；取用方式同 `AutoClaude/tools/snapshot_sync.py`。
+sys.path.insert(0, str(PROJECT_ROOT.parent / "tools" / "lib"))
+from platform_utils import (  # noqa: E402
+    init_utf8_streams as _init_utf8_streams,  # type: ignore[import-not-found]
+)
+
 # ADR-SD07-001 §4.2 分級表（順序敏感：上方 tier 優先匹配）
 LOC_TIERS: dict[str, dict] = {
     "data": {
@@ -201,6 +208,41 @@ _SPECIAL_REASONS: dict[str, str] = {
 }
 
 
+# ══════════════════════════════════════════════════════════════════════════════
+# R75：monorepo **根層 `tools/`**（跨子專案護欄層）的 LOC 分級
+# ══════════════════════════════════════════════════════════════════════════════
+# 🔴 缺陷本體：`SCAN_ROOT = "autoclaude"` ⇒ 分級政策（tier ＋ 絕對紅線）**一行都照不到
+# 根層 `tools/`**，而那是一整層兩萬行以上的護欄程式碼。R68／R69 P3 已察覺一半，處置是
+# 把當時 ≥700 行的 6 支具名檔掛上 `SPECIAL_FILES` 的 raw-line 棘輪——但那是**一次性快照**：
+#   ① 當時 <700 行、後來長大的檔完全無人看守。R75 實測 `tools/lib/windows_skip_tags.py`
+#      在 R74 一輪內 +385 行、達 508 code／727 raw，**零訊號**（`tools/lib/` 整個目錄
+#      先前一支都沒納管）。
+#   ② 「守的是檔名，不是那一層的成長」——這正是 R69 P3 自己寫下的教訓，卻只修了一半。
+#
+# 本節把既有載具（`count_loc`／`FileReport`／`_matches_pattern`／同一套報表與 rc 收斂）
+# 延伸到根層 `tools/`，**不另造第二套 LOC 檢查器**（那會重演「同一份知識兩個家」）。
+#
+# 三個判準決定，逐條寫下理由（免得下一輪把它讀成任意數字）：
+#   · **預算沿用既有數字，不發明新的**：`guardrail_cli` ＝ `ABSOLUTE_LIMIT`(750)，即
+#     ADR-SD07-001 的全域絕對紅線原封不動；`guardrail_lib` ＝ 400，取既有
+#     `adapter`／`contract` tier 的值——`tools/lib/` 是**共用函式庫層**，與 adapter 同性質，
+#     且一支超過 400 行的共用模組按定義已不只做一件事（`windows_skip_tags.py` 就是實例）。
+#   · **`tools/tests/` 不納管**：與 AutoClaude 側 `SCAN_ROOT="autoclaude"`（不含
+#     `AutoClaude/tests/`）**對稱**。這是政策一致，不是為了讓現況通過——根層測試樹
+#     另有 `tools/tests/` 專屬的 E501 存量債棘輪與 `_FROZEN_GUARD_FILE_COUNT` 在管。
+#   · **已在 `SPECIAL_FILES` 的檔排除在 tier 檢查外**：同一支檔不受兩種度量（raw line
+#     vs count_loc）雙重審判；那 5~6 支 1000 行級的護欄 CLI 沿用 R69 P3 立的 raw-line
+#     棘輪即可。反過來說，**沒被 `SPECIAL_FILES` 收錄又超過 tier 預算的檔一律紅** ⇒
+#     這道機制會自己補完收錄面（要嘛瘦身、要嘛具名入表附理由），不再是一次性快照。
+ROOT_TOOLS_ROOT = PROJECT_ROOT.parent / "tools"
+ROOT_TOOLS_TIERS: dict[str, dict] = {
+    "guardrail_lib": {"budget": 400, "patterns": ["tools/lib/"]},
+    "guardrail_cli": {"budget": ABSOLUTE_LIMIT, "patterns": ["tools/"]},
+}
+#: 不納管的子目錄（相對 `tools/`）——理由見上方第二條判準。
+ROOT_TOOLS_EXCLUDED_DIRS: frozenset[str] = frozenset({"tests"})
+
+
 @dataclass(frozen=True)
 class FileReport:
     rel_path: str
@@ -308,6 +350,60 @@ def iter_source_files() -> Iterable[Path]:
         yield p
 
 
+def iter_root_tools_files() -> Iterable[Path]:
+    """monorepo 根層 `tools/` 底下納管的 `.py`（排除 `tests/` 與快取目錄）。"""
+    if not ROOT_TOOLS_ROOT.is_dir():  # pragma: no cover - 非 monorepo checkout
+        return
+    for p in ROOT_TOOLS_ROOT.rglob("*.py"):
+        parts = set(p.relative_to(ROOT_TOOLS_ROOT).parts[:-1])
+        if "__pycache__" in parts or parts & ROOT_TOOLS_EXCLUDED_DIRS:
+            continue
+        yield p
+
+
+def classify_root_tools_file(rel_posix: str) -> tuple[str, int]:
+    """依 `ROOT_TOOLS_TIERS` 順序匹配（順序敏感：`tools/lib/` 必須排在 `tools/` 之前）。"""
+    for tier_name, spec in ROOT_TOOLS_TIERS.items():
+        for pat in spec["patterns"]:
+            if _matches_pattern(rel_posix, pat):
+                return tier_name, spec["budget"]
+    return "unclassified", ABSOLUTE_LIMIT  # pragma: no cover - `tools/` 樣式已涵蓋全樹
+
+
+def build_root_tools_reports() -> list[FileReport]:
+    """根層 `tools/` 的違規清單（**只回違規**，不像 `build_reports()` 回全表）。
+
+    只回違規的理由：本層不參與 `total`／baseline cap 的計算（那個 baseline 是
+    `autoclaude/` 專屬的成長上限，把兩萬行護欄碼灌進去會讓 cap 立即破線、而那不是
+    任何人想量的東西），故沒有「全表」的消費者。
+    """
+    violations: list[FileReport] = []
+    for p in iter_root_tools_files():
+        rel_posix = p.relative_to(ROOT_TOOLS_ROOT.parent).as_posix()
+        # 已由 SPECIAL_FILES 的 raw-line 棘輪管的檔不重複審判（見上方第三條判準）。
+        if f"../{rel_posix}" in SPECIAL_FILES:
+            continue
+        loc = count_loc(p)
+        tier_name, budget = classify_root_tools_file(rel_posix)
+        if loc > budget:
+            violations.append(
+                FileReport(
+                    rel_path=rel_posix,
+                    loc=loc,
+                    tier=tier_name,
+                    budget=budget,
+                    over_by=loc - budget,
+                    override_reason=(
+                        "R75 根層護欄層 LOC 分級：先拆職責／抽共用模組"
+                        "（先例：tools/lib/ci_liveness.py），確認為不可壓縮的真實功能後，"
+                        "才把該檔具名加進 check_loc_budget.SPECIAL_FILES 的 raw-line 棘輪"
+                        "並在缺陷帳本寫明理由"
+                    ),
+                )
+            )
+    return sorted(violations, key=lambda r: (-r.over_by, r.rel_path))
+
+
 def build_reports(overrides: dict[str, dict]) -> list[FileReport]:
     reports: list[FileReport] = []
     for p in iter_source_files():
@@ -348,6 +444,8 @@ def check(update_baseline: bool = False, as_json: bool = False) -> int:
 
     # ADR-SD08-001 §3.1：CLAUDE.md ≤ 400 強制
     special_violations = check_special_files()
+    # R75：monorepo 根層 tools/ 的分級（獨立帳，不進 total／baseline cap）
+    root_tools_violations = build_root_tools_reports()
 
     total = sum(r.loc for r in reports)
     baseline = read_baseline()
@@ -388,6 +486,10 @@ def check(update_baseline: bool = False, as_json: bool = False) -> int:
             "absolute_violations": [r.__dict__ for r in absolute_violations],
             "tier_violations": [r.__dict__ for r in tier_violations],
             "special_violations": [r.__dict__ for r in special_violations],
+            # R75：根層護欄層獨立一欄（不併進 tier_violations——兩者度量面不同：那邊是
+            # `autoclaude/`＋baseline cap，這邊是跨子專案護欄層、無 cap）。
+            "root_tools_violations": [r.__dict__ for r in root_tools_violations],
+            "root_tools_tiers": {k: v["budget"] for k, v in ROOT_TOOLS_TIERS.items()},
             "policy_version": "v2-tiered+sd08-special",
             "absolute_limit": ABSOLUTE_LIMIT,
             "special_files": SPECIAL_FILES,
@@ -398,6 +500,7 @@ def check(update_baseline: bool = False, as_json: bool = False) -> int:
             len(absolute_violations)
             + len(tier_violations)
             + len(special_violations)
+            + len(root_tools_violations)
             + (1 if total_violation else 0)
         )
         print(
@@ -405,6 +508,7 @@ def check(update_baseline: bool = False, as_json: bool = False) -> int:
             f"cap={cap} violations={violations_count} "
             f"(absolute={len(absolute_violations)} tier={len(tier_violations)} "
             f"special={len(special_violations)} "
+            f"root_tools={len(root_tools_violations)} "
             f"total={'1' if total_violation else '0'})"
         )
         if absolute_violations:
@@ -459,11 +563,23 @@ def check(update_baseline: bool = False, as_json: bool = False) -> int:
                     f"  [{r.tier}<={r.budget}] {r.rel_path}: {r.loc} > {r.budget} "
                     f"(+{r.over_by}) — {r.override_reason}"
                 )
+        if root_tools_violations:
+            print(
+                "\n[ROOT-TOOLS] monorepo 根層 tools/ 分級違規（R75；"
+                f"guardrail_lib<={ROOT_TOOLS_TIERS['guardrail_lib']['budget']} / "
+                f"guardrail_cli<={ROOT_TOOLS_TIERS['guardrail_cli']['budget']}）："
+            )
+            for r in root_tools_violations:
+                print(
+                    f"  [{r.tier}<={r.budget}] {r.rel_path}: {r.loc} > {r.budget} "
+                    f"(+{r.over_by}) — {r.override_reason}"
+                )
 
     has_violation = (
         bool(absolute_violations)
         or bool(tier_violations)
         or bool(special_violations)
+        or bool(root_tools_violations)
         or total_violation
     )
     return 1 if has_violation else 0
@@ -472,11 +588,14 @@ def check(update_baseline: bool = False, as_json: bool = False) -> int:
 def main() -> int:
     # DEF-82-001/DEF-101-070 家族慣例：報表含中文/→ 等非 ASCII，Windows cp950 console
     # 直接 print 會 UnicodeEncodeError 中斷；stdout + stderr 皆強制 utf-8。
-    for _stream in (sys.stdout, sys.stderr):
-        try:
-            _stream.reconfigure(encoding="utf-8")  # type: ignore[union-attr]
-        except (AttributeError, OSError):
-            pass
+    # 🔴 R75：此處原本自帶一份「迴圈走 std 兩串流、逐一就地改編碼」的行內複本，而且它
+    # 連 errors 參數都沒帶（stderr 預設 backslashreplace ⇒ 中文在非 CJK codepage 降解成
+    # 反斜線逃逸字面，正是 R74 P0 的形態）。改為呼叫唯一實作
+    # （`tools/lib/platform_utils.init_utf8_streams`，同 `snapshot_sync.py` 既有作法）。
+    # ⚠️ 本註解刻意**不逐字引述**原本那段程式碼：`tools/tests/test_platform_utils_dedup.py`
+    # 的寬判準是原始碼文字掃描，逐字引述會讓這支檔案照樣被算成一處複本（R73 教訓
+    # 「訂正註記逐字引述＝製造新事實」的機械版）。
+    _init_utf8_streams()
     update = "--update" in sys.argv
     as_json = "--json" in sys.argv
     return check(update_baseline=update, as_json=as_json)

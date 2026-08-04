@@ -615,20 +615,20 @@ _UNASSIGNED_LITERAL = "未指派"
 #: 🔴 R74 首次真正轉動本棘輪（R70~R73 三輪零收縮）：56 → 48。逐筆處置見缺陷帳本各列：
 #: `432`／`416` 回樹實查後結案、`417`／`393` 依自述 wontfix 判例訂正首詞、`674` 缺口已
 #: 收掉、`271`／`274`／`388` 改走合法出口②「未指派」＋可執行解鎖條件。
+#: 🔴 R75 第二次轉動：48 → 36。刪掉的 12 筆全是「早就修好、只有首詞沒跟上」，逐筆回樹複驗
+#: 後結案（指令＋rc 見帳本該列「R75 複驗」段）⇒ 依「已結案」條款不再需要豁免。
 _UNPINNED_HANDOVER_GRANDFATHERED = frozenset({
-    "DEF-01-007", "DEF-01-009", "DEF-17-001", "DEF-19-001", "DEF-42-001",
-    "DEF-53-001", "DEF-100-002", "DEF-101-018", "DEF-101-021", "DEF-101-022",
-    "DEF-101-025", "DEF-101-055", "DEF-101-060", "DEF-101-068", "DEF-101-200",
-    "DEF-101-206", "DEF-101-214", "DEF-101-217", "DEF-101-233", "DEF-101-234",
-    "DEF-101-235", "DEF-101-238", "DEF-101-242", "DEF-101-243", "DEF-101-263",
-    "DEF-101-268", "DEF-101-278", "DEF-101-296", "DEF-101-297", "DEF-101-308",
-    "DEF-101-309", "DEF-101-313", "DEF-101-324", "DEF-101-335", "DEF-101-348",
-    "DEF-101-351", "DEF-101-358", "DEF-101-377", "DEF-101-392", "DEF-101-398",
+    "DEF-01-007", "DEF-42-001", "DEF-53-001", "DEF-100-002", "DEF-101-018",
+    "DEF-101-021", "DEF-101-022", "DEF-101-025", "DEF-101-055", "DEF-101-060",
+    "DEF-101-206", "DEF-101-214", "DEF-101-217", "DEF-101-234", "DEF-101-235",
+    "DEF-101-238", "DEF-101-243", "DEF-101-268", "DEF-101-278", "DEF-101-296",
+    "DEF-101-297", "DEF-101-308", "DEF-101-309", "DEF-101-313", "DEF-101-324",
+    "DEF-101-335", "DEF-101-348", "DEF-101-377", "DEF-101-392", "DEF-101-398",
     "DEF-101-399", "DEF-101-400", "DEF-101-401", "DEF-101-402", "DEF-101-412",
-    "DEF-101-418", "DEF-101-628", "DEF-101-646",
+    "DEF-101-418",
 })
 #: shrink-only 棘輪上限（形狀比照 `tools/tests/` 的檔數棘輪）。只能往小改。
-_UNPINNED_HANDOVER_CEILING = 48
+_UNPINNED_HANDOVER_CEILING = 36
 
 
 def unpinned_handover_problems(ledger_text: str) -> list[str]:
@@ -1113,7 +1113,7 @@ def _scan_target(path: Path, ledger: dict[str, str | None],
 # 檔——「讀不完整的 SSOT」比「撞閘門」壞得多（讀者只讀到前半段還以為讀完了，是靜默
 # 失效）。容量問題的正解是提高輪替**吞吐**（見 `archive_defect_log.py` 判準②③ 的 R68
 # 修訂），不是提高上限。
-# 對應機械鎖：`tools/tests/test_defect_log_capacity_policy_r68.py::TestHardLineIsToolFact`
+# 對應機械鎖：`tools/tests/test_archive_defect_log.py::TestHardLineIsToolFact`（R75 訂正）
 _LEDGER_WARN_BYTES = 240 * 1024
 _LEDGER_FAIL_BYTES = 256 * 1024
 #: Read 工具實測單次讀取上限（見上方探針取證）。硬線必須恰等於它——不得「留一點餘裕」
@@ -1170,18 +1170,18 @@ _GOVERNANCE_DOCS = (
     _REPO_ROOT / "docs" / "06_quality" / "CrossPlatform_R60_Fix_Evidence.md",
     _REPO_ROOT / "docs" / "06_quality" / "CrossPlatform_R60_Fix_Evidence_r3.md",
     _REPO_ROOT / "docs" / "06_quality" / "CrossPlatform_Scan_Dimensions.md",
-    # R61 Architect 收輪證據（本輪新增，同符合姊妹檔命名慣例，登記面即刻補上避免
-    # 重演 SA-R60R3-01 的「新建證據檔兩張清單都沒進」路徑）。
+    # R61 Architect 收輪證據（即刻登記，免重演 SA-R60R3-01「新建證據檔兩張清單都沒進」）。
     _REPO_ROOT / "docs" / "06_quality" / "CrossPlatform_R61_Architect_Evidence.md",
     # R61 SA/QA 收輪證據（同理即刻登記）。
     _REPO_ROOT / "docs" / "06_quality" / "CrossPlatform_R61_SAQA_Evidence.md",
-    # R62 Architect 收輪證據（本輪新增，同理即刻登記，避免重演 R61「插曲二」——
-    # 新建證據檔忘了登記進本清單而致 test_check_defect_log_crossref.py 轉紅）。
+    # R62 Architect 收輪證據（同理即刻登記，免重演 R61「插曲二」：忘了登記而致本檔測試轉紅）。
     _REPO_ROOT / "docs" / "06_quality" / "CrossPlatform_R62_Architect_Evidence.md",
     # R68 十二維掃描的 69 筆存活缺陷清單（帳本 DEF-101-702 的詳情面）。它承擔的正是
     # 本清單所定義的那個資格：複審者要逐條重驗就得讀完它（⇒ 受體積守門），且它會寫出
     # 「某缺陷現居何處／座標為何」的宣稱（⇒ 受指針稽核）。即刻登記，不等下一輪。
     _REPO_ROOT / "docs" / "06_quality" / "CrossPlatform_R68_Scan_Findings.md",
+    # R75 缺陷詳情面（即刻登記；本檔受 raw-line 棘輪零餘裕，上兩段註解各兩行併一行換出額度）。
+    _REPO_ROOT / "docs" / "06_quality" / "CrossPlatform_R75_Review_Evidence.md",
 )
 
 # 姊妹治理文件的命名慣例：`docs/06_quality/CrossPlatform_*.md`。這**不是**把具名常數
