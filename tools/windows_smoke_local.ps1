@@ -147,6 +147,42 @@
 # 只留**不會過期**的處置規則：三條全成立才可移除該排程任務；任一條未取證就不算成立
 # （「沒去查」不等於「已通過」）。移除本身是掌舵者的決定，本腳本不自動執行。
 #
+# ─────────────────────────────────────────────────────────────────────────────
+# 🔴 E1 的現況欄（R76 收尾新增）——記的是**事件**，不是顏色
+# ─────────────────────────────────────────────────────────────────────────────
+# 上一段刻意不快照顏色，理由是顏色會過期。**事件不會**：它有日期、有 run id、
+# 有逐字 annotation，十年後查得到同一份憑證。所以這一格記事件與它推得的處置，
+# 不記「E1 現在是什麼顏色」。
+#
+#   事件（2026-08-05T16:05:50Z）：對 windows-compat-ci.yml 的一次 workflow_dispatch
+#   （run 31023606162）三個 job 全部 conclusion=failure、steps 長度 0、2~4 秒結束。
+#   annotation 逐字命中 billing 類：
+#       "The job was not started because recent account payments have failed or
+#        your spending limit needs to be increased."
+#   而同一個 sha 的 push run 在 21 分鐘前還全數 success ⇒ 額度是在這中間耗盡的。
+#   立帳 DEF-101-866（DEF-101-081 同型復發，補償控制立案的原始情境重演）。
+#
+#   ⇒ E1 逐字要求「近 30 天內零筆 conclusion 屬 billing/startup_failure 類」，
+#     現在有一筆 ⇒ **E1 不成立**。三條全成立才可移除，故
+#     **AutoClaude_WindowsSmoke 排程維持每日、不得退場**。
+#     E1 要重新成立有兩個必要條件（缺一不可）：① 掌舵者在 GitHub 的
+#     Billing & plans 恢復額度；② 此後的 30 天窗口內不再出現同類事件。
+#     🔴 **判準本身一個字都不用改**——它問對了問題，而且今天問出了答案。
+#
+#   🔴 量測配方要補一步（判準對，但 E1 上面那條 gh run list 量不到它）：billing
+#   事件在 run 層的 conclusion 就是普通的 failure，與「測試真的紅了」逐字同形。
+#   只看 run list 分不出兩者，必須下沉到 job 層與 annotation，兩個特徵同時成立才算：
+#       gh api repos/:owner/:repo/actions/runs/<runId>/jobs --jq '.jobs[].steps|length'
+#         ⇒ 0 代表工作根本沒開始，不是跑到一半失敗
+#       gh api repos/:owner/:repo/check-runs/<jobId>/annotations
+#         ⇒ 訊息含 payments have failed 或 spending limit
+#
+# 🔴 順帶記一筆設計佐證（上一段「為何 E1 綁主通道活性、不綁發現數」今天被驗了一次）：
+#   補償控制立案的原始情境（雲端帳務停擺 ⇒ Windows 側零執行級訊號）**正在重演**。
+#   若當初把退場判準寫成「smoke 連續 N 天零發現就撤」，此刻它早已被撤掉——而被撤掉的
+#   正是主通道倒下時唯一還活著的那條通道。**判準綁對象選對了**，這不是事後諸葛：
+#   同一份檔案在事件發生前就已經把理由寫在上一段，本格只是回填它的第一筆實證。
+#
 # 用法：powershell -NoProfile -ExecutionPolicy Bypass -File tools\windows_smoke_local.ps1
 # Exit：0＝全部 PASS；1＝任一 FAIL（結尾彙總）或前置守門失敗。
 
