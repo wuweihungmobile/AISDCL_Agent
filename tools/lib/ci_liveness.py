@@ -279,7 +279,20 @@ def multi_cron_blind_spot(root: Path, workflow: str) -> str | None:
 #
 # 為何**不**把這類 workflow 從活性判準裡剔除：那會讓 DEF-101-703 的死鎖復發
 # （剔除後它永遠「查無成功 run」⇒ 天天喊、被當狼來了）。主判準不動，只加一句自白。
-_JOB_CONTINUE_ON_ERROR_RE = re.compile(r"^    continue-on-error:\s*true\s*$")
+#: 🔴 **job 層 `continue-on-error: true` 的唯一判準（SSOT）**。R76 複審 SA-02 之前，
+#: 這條正則有**兩份逐字相同的複本**（本檔 ＋
+#: `tools/tests/test_doc_loc_baseline_freshness_r60.py::_JOB_FAIL_OPEN_RE`），且兩份
+#: 都寫成 `…true\s*$`＝**行尾不得有註解**。磁碟上當時就有一個活體逃逸案例：
+#: `.github/workflows/autoclaude-pg-e2e-on-label.yml:35` 是
+#: `    continue-on-error: true  # 同 nightly：警示不阻塞 PR merge`——YAML 最普通的寫法，
+#: 兩支消費者同時失明。實測：對 `windows-compat-ci.yml` 的那一行加個行尾註解，本檔的
+#: `non_blocking_scheduled_jobs()` 就從回報一筆變成回報零筆，R74 那道「run 層 fail-open
+#: 自白」跟著一起啞掉。故 (a) 容許行尾註解、(b) 兩處合併成本常數一份（掌舵者第 2 點
+#: 「不重複模組」；先例＝`archive_defect_log.ACTIVE_STATUS_RE = _ledger_index.ACTIVE_STATUS_RE`）。
+#: 射程仍刻意只認**恰 4 空白縮排**（＝job 層）與**字面 `true`**：step 層縮排更深、
+#: `${{ … }}` 運算式判不出真假值，兩者皆出射程（後者若出現，判準會漏——已知邊界）。
+JOB_FAIL_OPEN_RE = re.compile(r"^    continue-on-error:\s*true\s*(?:#.*)?$")
+_JOB_CONTINUE_ON_ERROR_RE = JOB_FAIL_OPEN_RE
 _EVENT_GATED_RE = re.compile(r"github\.event_name\s*==\s*'(?:schedule|workflow_dispatch)'")
 
 

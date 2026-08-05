@@ -7,7 +7,10 @@
 # mac 側只要「平台相容性＋回歸」的每日訊號，深度 stage（mutation Docker/pg-e2e/
 # perf/obs）留在 Windows 主開發機承載；不移植 929 行 .ps1（避免第二支巨型雙實作）。
 # 七軌去向帳目補齊（R11 ARCH-1）：其餘兩軌——drift＝nightly 取證帳本紀律由 Windows
-# 主開發機承載（drift_log_history 例行 commit 即其產物）；sdd-fsm-chaos＝非平台敏感
+# 主開發機承載（🔴 R76 訂正：原文寫「drift_log_history 例行 commit 即其產物」已成假話——
+# 該帳本自 R76 起與另四本觀察期帳本對齊，列入 AutoClaude/.gitignore 且已 git rm --cached，
+# 理由見 AutoClaude/tools/drift_log_snapshot.py 檔頭：被 git 追蹤時，git checkout -- . ／
+# stash ／reset --hard ／worktree 切換會靜默回捲進帳，已實測損失一整天）；sdd-fsm-chaos＝非平台敏感
 # 之純 Python 邏輯回歸，Windows 本地 nightly 每日承接＋CI chaos workflow 覆蓋，
 # mac 薄聚合器均不重複。
 # R11 教訓：smoke 全綠 ≠ unittest 全綠，故 [1] 與 [2]~[4] 都必跑。

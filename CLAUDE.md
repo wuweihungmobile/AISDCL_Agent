@@ -167,7 +167,7 @@ R71 最諷刺的一筆：在修一個 Windows 專屬缺陷（DEF-101-759）時�
 
 觸發清單（出現任一就必須自問）：`$env:*` 讀取／副檔名判斷／路徑分隔符／`Get-Command` 解析／console 編碼／行尾／大小寫敏感度／`$IsWindows` 這類 PS 6+ 專屬自動變數（5.1 恆 `$null`，需 `# ps7-ok: <WHY>` 行尾豁免，**獨立註解行無效**——掃描器只認行尾）。
 
-🔴 **這 8 項裡只有 4 項有掃描器，剩下 4 項純靠自律（R74 誠實化）**——而 `DEF-101-766`（`$env:PATHEXT` ＋ 副檔名判斷）正好落在沒有掃描器的那兩格，這不是巧合：有掃描器的那幾項，缺陷在寫出來的當回合就被擋掉了，所以不會留到複審。
+🔴 **這 8 項裡只有 4 項有掃描器，剩下 4 項純靠自律（R74 誠實化；🔴 R76 訂正：這句話裡的「4 項」是**觸發項**的粒度，不等於「這 4 格內沒有任何守衛」——見下表 `$env:*` 那一列的例外）**——而 `DEF-101-766` 的「副檔名判斷」那一半仍落在沒有掃描器的格子裡（另一半 `$env:PATHEXT` 已有專屬掃描器，R74 同一個 commit 落地）。有掃描器的那幾項，缺陷在寫出來的當回合就被擋掉了，所以不會留到複審。
 
 | 觸發項 | 機械物 | 違反時什麼會紅 |
 |--------|--------|----------------|
@@ -175,7 +175,7 @@ R71 最諷刺的一筆：在修一個 Windows 專屬缺陷（DEF-101-759）時�
 | console 編碼 | `tools/tests/test_subprocess_encoding_hygiene.py` | 同上 |
 | 行尾 | `tools/tests/test_pre_commit_dispatcher_sigpipe.py::TestPreCommitBlocksCrOnShellScripts` ＋ `AutoClaude/tools/hooks/check_sh_eol.py` | 同上 ＋ PostToolUse hook |
 | `$IsWindows` 等 PS 6+ 專屬 | `tools/tests/test_ps51_compat.py` | 同上 |
-| `$env:*` 讀取 | **無機械物** | 沒有東西會紅（DEF-101-766 的落點） |
+| `$env:*` 讀取 | **無機械物**（唯一例外：`PATHEXT` 這一個變數已由 `tools/tests/test_platform_neutral_paths.py::TestPathextReadsAreePlatformGuarded` 覆蓋——🔴 R76 訂正：該掃描器與本表這句「無機械物」是**同一個 commit**（R74 `a371068`）落地的，也就是說本表在寫下的當回合就把一個已經有人在守的形態記成沒人守，撐了兩輪沒被發現） | 其餘 `$env:*` 沒有東西會紅 |
 | 副檔名判斷 | **無機械物** | 同上（DEF-101-766 的另一半） |
 | `Get-Command` 解析 | **無機械物**（`tools/tests/test_find_git_bash_parity.py` 只守 `Find-GitBash` 這一個消費者，不是判準本身；🔴 R75 訂正：此格原先只寫裸檔名，任何以路徑為單位的鎖都解析不到它） | 只有那一個站點會紅 |
 | 大小寫敏感度 | **無機械物** | 沒有東西會紅 |

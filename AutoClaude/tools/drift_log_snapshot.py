@@ -5,6 +5,15 @@
   下游無法計算「連續 N 天 zero drift」。本工具提供 jsonl 持久化（同 observability_snapshot
   模式），ps1 stage 4 在 PG 查詢後呼叫此工具寫 1 筆，30 天累計由 record line 數判定。
 
+🔴 R76（掃描發現 R76-12）——`.drift_log_history.jsonl` 是**本機 SSOT，不入 git history**：
+  它在 R76 之前是五本觀察期帳本裡唯一被 git 追蹤的一本，於是進帳會被 `git checkout -- .`
+  ／`stash`／`reset --hard`／worktree 切換靜默回捲；已實測損失 UTC 2026-07-27 一整天
+  （該日 nightly log 寫了、磁碟與所有 commit 都沒有那筆）。R76 起改與另外四本
+  （`.observability_history.jsonl`／`.ac4_history.jsonl`／`.mutation_history.jsonl`／
+  `.perf_history.jsonl`）一致，列入 `AutoClaude/.gitignore`。
+  ⇒ **不要 commit 這個檔**；要看觀察期進度請跑 `python tools/drift_log_ga_check.py --json`，
+  它才是權威判準（本檔只負責累計，不負責判定）。
+
 設計原則：
   - LOC ≤ 100（data tier）
   - 同 UTC date 去重（覆寫該日最後一筆，對齊 observability_snapshot / ac4_nightly_collector）
@@ -12,13 +21,18 @@
   - jsonl 格式：one record per line
 
 對應 test：tests/tools/test_drift_log_snapshot.py（≥ 3 case）
+
+R76 附帶清償：`datetime.UTC`（原 `datetime.timezone.utc`）——ruff UP017，py311 起的正名。
+本檔在本輪被觸碰後由 AutoClaude pre-commit 的**整檔** ruff 當場攔下這 3 筆存量債；
+該 leg 只掃「已暫存的 .py」，所以沒被碰過的檔會一直帶著債（見記憶
+`precommit-ruff-wholefile-vs-loc-tier`）。純正名，零行為變化。
 """
 from __future__ import annotations
 
 import argparse
 import json
 import sys
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -29,8 +43,8 @@ def _utc_date(ts_iso: str) -> str:
     try:
         dt = datetime.fromisoformat(ts_iso.replace("Z", "+00:00"))
         if dt.tzinfo is None:
-            dt = dt.replace(tzinfo=timezone.utc)
-        return dt.astimezone(timezone.utc).strftime("%Y-%m-%d")
+            dt = dt.replace(tzinfo=UTC)
+        return dt.astimezone(UTC).strftime("%Y-%m-%d")
     except ValueError:
         return ""
 
@@ -49,7 +63,7 @@ def build_record(
         ts: ISO timestamp；None 時用 now。
     """
     return {
-        "ts": ts or datetime.now(timezone.utc).isoformat(timespec="seconds"),
+        "ts": ts or datetime.now(UTC).isoformat(timespec="seconds"),
         "drift_log_table_exists": bool(table_exists),
         "severity_non_info_count": int(severity_non_info_count),
         "passed": (bool(table_exists) and int(severity_non_info_count) == 0),

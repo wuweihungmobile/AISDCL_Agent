@@ -273,6 +273,12 @@ def install_dependencies(use_uv: bool, venv_py: Path) -> int:
             _err(f"❌ pip 升級失敗（rc={rc}）")
             return rc
 
+    # 🔴 R76：extras 刻意**不含** `hotkey`（＝ESC+F12 的 `keyboard` 後端）。理由不是遺漏：
+    # `keyboard` 的 metadata 逐字 `Requires-Dist: pyobjc ; sys_platform == "darwin"`，加進來
+    # 等於讓每一個 mac 的 bootstrap 都拖進整個 pyobjc 傘包；而它在非 root 的 mac 上
+    # （`_darwinkeyboard.listen()` 首行 `os.geteuid() != 0`）根本不會生效 ⇒ 付了安裝面拿不到
+    # 功能。代價已誠實記在 ONBOARDING.md 雷區表與 docs/AISDLC_Agent_UserGuide.md §4.2：
+    # 出廠環境按 ESC+F12 無反應（程式面優雅降級只印 warning），要用請 `.[hotkey]` 顯式裝。
     _out("[1/2] AutoClaude（editable, [dev,notifications,lint]）")
     autoclaude_target = f"{REPO_ROOT / 'AutoClaude'}{os.sep}.[dev,notifications,lint]"
     rc = pip_install(use_uv, venv_py, ["-e", autoclaude_target])

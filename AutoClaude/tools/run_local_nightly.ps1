@@ -717,7 +717,9 @@ function Get-Ac4Gate {
 #
 # 修法（比照 Get-Ac4Gate 的 Ok/Error 三態）：改走 `--json` 取結構化 status，
 # 而不是刮人類文字；再加一道 rc ↔ status 一致性檢查。observability_ga_check.py
-# 的 main 是 `return 0 if passed else 1`（tools/observability_ga_check.py:257），
+# 的 main 是 `return 0 if passed else 1`（tools/observability_ga_check.py，行號會漂移故
+# 不寫死；R76 訂正：該檔加了 staleness／sparse 兩個狀態，`passed` 的定義變嚴但
+# **rc=0 ⟺ status='ready' 這個契約不變**，故本函式無需改動），
 # 故 rc=0 ⟺ status='ready' 為工具的硬不變量；兩者對不上就代表輸出與 rc 不同源
 # （被 shim/wrapper 攔截、工具被換掉、部分輸出遺失），一律判工具壞掉。
 # 三態語意：
@@ -733,8 +735,13 @@ function Get-ObsGaPass {
   # 分母卻是 GA 判準門檻，屬「分母是門檻、分子不是判準算出來的值」同型失真
   # （今天兩者恰好都是 42 純屬巧合：一次都沒斷過）。分子改取本函式的 green_streak，
   # 分母也改取工具回報的 window，兩端都不再由 ps1 自己持有。
+  # 🔴 R76 複審 SD-01：新增 Reason／SpanDays 兩欄。缺陷本體＝工具早就算出了正確診斷
+  # （`last_failure_reason`：「窗內不連續：last-30 筆橫跨 58 個日曆天 > 40」），而本函式的
+  # 回傳物件沒有欄位承接它 ⇒ **最好的解釋在進 log 之前就被丟掉**，呼叫端只剩 Streak/Window
+  # 可用，於是印出 `green_streak 44 < window 30` 這種數學上為假的句子（見下方 g0Gaps 段）。
   $result = [pscustomobject]@{
-    Ok = $false; Pass = $false; Rc = -1; Status = ''; Streak = -1; Window = -1; Error = ''
+    Ok = $false; Pass = $false; Rc = -1; Status = ''; Streak = -1; Window = -1
+    Reason = ''; SpanDays = -1; Error = ''
   }
   if (-not $script:PyExe) { $result.Error = 'python unavailable'; return $result }
   if (-not (Test-Path $HistoryPath)) { $result.Error = 'history missing'; return $result }
@@ -789,6 +796,18 @@ function Get-ObsGaPass {
     $result.Status = $status
     $result.Streak = [int]$parsed.green_streak
     $result.Window = [int]$parsed.window
+    # 工具自己算出的診斷（`last_failure_reason`／`window_span_days`）——不承接就等於
+    # 把最好的解釋丟掉，呼叫端只好拿 Streak/Window 硬湊一句話（R76 複審 SD-01）。
+    # 🔴 以 PSObject.Properties 探詢而非直接取值：本檔跑在 `Set-StrictMode -Version 3.0`
+    # 之下，直接讀不存在的屬性會**擲例外**（實測：舊版工具的 JSON 沒有這兩個鍵時，
+    # 整支 helper 會掉進 catch 而回 Ok=$false ⇒ 把「未達標」誤報成「量不出來」）。
+    $props = $parsed.PSObject.Properties
+    if ($props['last_failure_reason'] -and $null -ne $props['last_failure_reason'].Value) {
+      $result.Reason = [string]$props['last_failure_reason'].Value
+    }
+    if ($props['window_span_days'] -and $null -ne $props['window_span_days'].Value) {
+      $result.SpanDays = [int]$props['window_span_days'].Value
+    }
     $passed = ($status -eq 'ready')
     if (($rc -eq 0) -ne $passed) {
       $result.Error = "tool broken: rc=$rc 與 status='$status' 不一致（工具契約 rc=0 ⟺ status=ready）"
@@ -819,14 +838,17 @@ function Get-ObsGaPass {
 #
 # 本函式與 Get-ObsGaPass 刻意維持**逐行同構**（同樣的 --json、同樣的 rc↔status
 # 一致性檢查、同樣的 Ok/Pass/Error 三態）：兩支工具的 main 契約完全一樣
-# （`return 0 if passed else 1`，drift_log_ga_check.py:169 / observability_ga_check.py:257）。
+# （`return 0 if passed else 1`；行號會漂移故不寫死。R76：兩支同步加了 staleness／sparse
+# 兩個新狀態字，落在 Pass=$false／Ok=$true 那一格＝「工具正常判定尚未達標」，語意正確）。
 # 不抽共用函式的理由：本檔的行為測試（TestObsGaPassBehavior 一族）是把單一函式本體
 # 整段抽出來丟進 probe.ps1 真跑的，抽共用層會讓被抽出的副本缺相依而跑不起來；
 # 兩份的契約一致性改由靜態測試 test_gate_helpers_share_three_state_contract 機械綁定。
 function Get-DriftGaPass {
   param([string]$HistoryPath)
+  # Reason／SpanDays 兩欄：見 Get-ObsGaPass 同位置的 WHY（R76 複審 SD-01，四支同源）。
   $result = [pscustomobject]@{
-    Ok = $false; Pass = $false; Rc = -1; Status = ''; Streak = -1; Window = -1; Error = ''
+    Ok = $false; Pass = $false; Rc = -1; Status = ''; Streak = -1; Window = -1
+    Reason = ''; SpanDays = -1; Error = ''
   }
   if (-not $script:PyExe) { $result.Error = 'python unavailable'; return $result }
   if (-not (Test-Path $HistoryPath)) { $result.Error = 'history missing'; return $result }
@@ -858,6 +880,17 @@ function Get-DriftGaPass {
     $result.Status = $status
     $result.Streak = [int]$parsed.green_streak
     $result.Window = [int]$parsed.window
+    # 同 Get-ObsGaPass：承接工具自己算出的診斷，不讓呼叫端硬湊（R76 複審 SD-01）。
+    # 🔴 以 PSObject.Properties 探詢而非直接取值：本檔跑在 `Set-StrictMode -Version 3.0`
+    # 之下，直接讀不存在的屬性會**擲例外**（實測：舊版工具的 JSON 沒有這兩個鍵時，
+    # 整支 helper 會掉進 catch 而回 Ok=$false ⇒ 把「未達標」誤報成「量不出來」）。
+    $props = $parsed.PSObject.Properties
+    if ($props['last_failure_reason'] -and $null -ne $props['last_failure_reason'].Value) {
+      $result.Reason = [string]$props['last_failure_reason'].Value
+    }
+    if ($props['window_span_days'] -and $null -ne $props['window_span_days'].Value) {
+      $result.SpanDays = [int]$props['window_span_days'].Value
+    }
     $passed = ($status -eq 'ready')
     if (($rc -eq 0) -ne $passed) {
       $result.Error = "tool broken: rc=$rc 與 status='$status' 不一致（工具契約 rc=0 ⟺ status=ready）"
@@ -1648,8 +1681,8 @@ if ($schedTiming.Ok) {
 # WHY：這段判定原本只活在一次性排程任務 AutoClaude_SD09_G0_GateCheck 裡——該任務的
 # TimeTrigger 於 2026-06-29 觸發一次（結論 [G0-NOT-READY]）後 NextRunTime 就永遠空白，
 # 此後 34 天零檢查，而三軌其實每晚都在動。把判定搬到每晚都會跑的 nightly，一次性
-# 排程就不再是唯一載體（該任務於本輪移除，兩支腳本 g0_gate_check.ps1 /
-# reschedule_g0_gatecheck.ps1 保留供人工隨時複查）。
+# 排程就不再是唯一載體（該任務於本輪移除，g0_gate_check.ps1 保留供人工複查。R76 訂正：
+# 原寫「兩支腳本」，同伴檔 reschedule_g0_gatecheck.ps1 已刪＝真孤兒，每路徑停在 not found）。
 # 🔴 R71（G-1 / G-2）：三軌 → **四軌**，且四軌判準全部改由權威實作回答：
 #   mutation = mutation_baseline_lock.should_lock（原為本檔自算 unique-sha 對寫死的 7）
 #   ac4      = ac4_progress_check 的 ready_for_labeled_pr（滾動 14 天窗）
@@ -1739,14 +1772,24 @@ if ($g0MutOk -and $g0Ac4Ok -and $g0ObsOk -and $g0DriftOk) {
     if (-not $obsGa.Ok) {
       $g0Gaps += ("observability GA TOOL-UNAVAILABLE（量不出來，非未達標——請修工具/資料）：{0}" -f $obsGa.Error)
     } else {
-      $g0Gaps += ('observability GA green_streak {0} < window {1}' -f $obsGa.Streak, $obsGa.Window)
+      # 🔴 R76 複審 SD-01：原文是 `green_streak {0} < window {1}`。R76 之前 `passed` 唯一
+      # 的來源就是 `streak >= window`，那句話恆為真；R76 加了 staleness／sparse 之後它
+      # **結構上可以為假，而且當場就是假的**（實測 status=sparse、green_streak=44、
+      # window=30 ⇒ 印出「44 < 30」）。這一行是人判斷 G0 進度的日常介面，印一句自打
+      # 嘴巴的話會把讀者指向錯誤的修法（「再等幾天湊滿 streak」），而真因是採集不連續。
+      # 判準改為**印工具自己的 status 與診斷**，不由 ps1 自己推導不等式。
+      $g0Gaps += ('observability GA 未達標（status={0}；green_streak {1}/{2}；span {3} 天）：{4}' -f `
+        $obsGa.Status, $obsGa.Streak, $obsGa.Window, $obsGa.SpanDays, $obsGa.Reason)
     }
   }
   if (-not $g0DriftOk) {
     if (-not $driftGa.Ok) {
       $g0Gaps += ("drift_log GA TOOL-UNAVAILABLE（量不出來，非未達標——請修工具/資料）：{0}" -f $driftGa.Error)
     } else {
-      $g0Gaps += ('drift_log GA green_streak {0} < window {1}（採集失敗＝table_missing 也會打斷 streak，未必是真漂移事件）' -f $driftGa.Streak, $driftGa.Window)
+      # 同上（四支同源）：這一支今天的 28<30 恰好為真，但**歸因是錯的**（真因是 sparse），
+      # 且 streak 一旦補到 30 而 span 仍過大就會與 obs 同樣說謊。
+      $g0Gaps += ('drift_log GA 未達標（status={0}；green_streak {1}/{2}；span {3} 天）：{4}（採集失敗＝table_missing 也會打斷 streak，未必是真漂移事件）' -f `
+        $driftGa.Status, $driftGa.Streak, $driftGa.Window, $driftGa.SpanDays, $driftGa.Reason)
     }
   }
   Log ("[G0-NOT-READY] {0} — gaps: {1}" -f $g0Detail, ($g0Gaps -join ' ; '))
@@ -1842,17 +1885,20 @@ if (-not $script:DockerOK) {
 # 偵測器本體的判準（非 Windows → SKIP rc=0；受管任務都不存在 → SKIP rc=0；讀不到設定
 # → fail-closed rc=1）見該檔判準段，故沒安裝排程的開發機與 CI 不會無故翻紅。
 #
-# 🔴 R75 訂正 — 「已知存量」與「回歸」必須分開處置：
-# 偵測器落地當輪就把 rc≠0 直接計入 finalFailures，而它當場報出的漂移**修法需要系統
-# 管理員提權**，該提權至今未執行（DEF-101-794）。於是這一項自上線起就是「每晚必紅，
-# 且在被修好之前沒有任何一晚會綠」——這正是本檔在 G0 判定那段明文要避免的訊號污染
-# （見上方 R69 註解：預期中會持續一段時間的狀態翻紅，只會訓練人忽略紅燈）。同一套
-# 判斷標準必須一致地套到兩處，故改用與 G0 相同的處置：**不進 finalFailures，但每輪必印**。
+# 🔴 R76 — DEF-101-794 的具名豁免**已退場**（解除條件達成，當輪即收回）：
+#   史料（一句，勿再擴寫）：R75 曾把 status=drift 降級為「只印 WARN、不計失敗」，因為當時
+#   報出的漂移修法需要系統管理員提權而該提權尚未執行，讓 nightly 在修好前沒有一晚會綠。
+#   該豁免自己寫下的解除條件是「偵測器回報 status=ok 之後，本項應移回 finalFailures」。
+#   2026-08-05 提權安裝器已由掌舵者執行，`tools/check_scheduled_task_drift.py` 實測
+#   `status=ok` / rc=0（AutoClaude_Nightly 與 AutoClaude_WindowsSmoke 各 7 項全符期望）
+#   ⇒ 條件成立，豁免於本輪移除：**此後任何 drift 都是回歸，一律計入 finalFailures**。
 #
-# 刻意只降級一種狀態（不是整項降級）。判定改由 **$schedDriftStatus 單一變數**決定，
-# 白名單式 fail-closed——只有下面三種狀態不計失敗，其餘（含未來新增的狀態字）一律計失敗：
-#   · status=drift      ＝量出來了，是已知存量（修法明確、只缺提權） → WARN，不計失敗
+# 判定由 **$schedDriftStatus 單一變數**決定，白名單式 fail-closed——只有下面兩種狀態
+# 不計失敗，其餘（含未來新增的狀態字）一律計失敗：
 #   · status=ok / skip   ＝真正通過（設定全符 / 本機無受管任務或非 Windows）
+#   · status=drift      ＝量出來了、有落差 ⇒ **計失敗**（標籤 schedule_drift_regression）。
+#     修法＝以系統管理員身分重跑 tools/install_windows_nightly.ps1。刻意與 task_missing
+#     分標籤：兩者修法雖同源，但「設定值漂了」與「任務整支不見」的診斷路徑不同。
 #   · status=task_missing ＝受管任務整支不存在（R75 偵測器新增格）→ **計失敗**，且有
 #     專屬訊息與專屬 finalFailures 標籤。不折進 drift 的理由見下方該分支註解。
 #   · 其他一切（偵測器或 python 缺席 absent／輸出讀不出 status／status=error）
@@ -1862,10 +1908,13 @@ if (-not $script:DockerOK) {
 #     於是 nightly 照樣 exit 0——**印的字與程式行為相反**，而觸發條件是真會發生的
 #     （偵測器改名／搬走／$RepoRoot 上一層不是 monorepo 根）。現況＝缺席即 absent 計失敗。
 #
-# 🔴 恢復為硬失敗的條件（可判定，不是「等某人有空」）：
-#   偵測器回報 `status=ok`（語意＝至少一支受管任務存在、且期望值 SSOT 的每一項都符合）。
-#   該狀態一出現即代表提權修復已執行，此後任何 drift 都是**回歸**而非存量，屆時應把
-#   drift 移回 finalFailures。不需有人記得：下方在 status=ok 時會印一行 WARN 明示條件已成立。
+# 🔴 立新豁免的規矩（R76 從本項學到的一般化教訓，下一個人請照做）：
+#   任何「暫時不計失敗」的具名豁免，其解除條件必須①是偵測器輸出裡一個可機械讀取的值，
+#   且②同時上一道會在該值出現當天轉紅的鎖。只留一行給人看的 WARN ＝ 永久豁免——本項
+#   就是實證：解除條件（status=ok）達成後豁免仍在生效，而唯一的自檢是那行沒人讀的 WARN。
+#   本項的退場鎖：tools/tests/test_install_windows_nightly.py::
+#   TestNamedExemptionRetiresWhenItsUnlockConditionHolds（偵測器回 status=ok 時，本檔若
+#   仍把 'drift' 留在不計失敗的白名單裡即轉紅）。
 #   人工隨時可查（一行）：`& $PyExe tools\check_scheduled_task_drift.py` 後看輸出的 status=。
 $monoRoot = Split-Path -Parent $RepoRoot
 $schedDriftScript = Join-Path $monoRoot 'tools\check_scheduled_task_drift.py'
@@ -1886,21 +1935,21 @@ if ($script:PyExe -and (Test-Path $schedDriftScript)) {
     if ("$line".Trim() -ne '') { Log ("[SCHED-DRIFT] {0}" -f "$line".TrimEnd()) $(if ($schedDriftRc -ne 0) { 'WARN' } else { 'INFO' }) }
   }
   if ($schedDriftStatus -eq 'drift') {
-    Log '[SCHED-DRIFT] 上列漂移＝已知存量（DEF-101-794；修法需系統管理員提權）——顯著可見但不計入本輪失敗。偵測器回報 status=ok 之後，本項應移回 finalFailures（見本段註解）' 'WARN'
+    Log '[SCHED-DRIFT] 上列漂移＝設定回歸，計入本輪失敗（R76：DEF-101-794 的具名豁免已隨 status=ok 達成而退場，drift 不再降級為 WARN）；修法＝以系統管理員身分重跑 tools/install_windows_nightly.ps1（並以 -Status 複查）' 'ERROR'
   } elseif ($schedDriftStatus -eq 'task_missing') {
-    # R75：受管任務整支不存在。**刻意不與 drift 共用那條具名豁免**——drift 的豁免理由是
-    # 「五項設定要提權才能改」，而任務不見了的修法（重跑安裝器）不需等那個提權；讓它搭
-    # 便車等於把「漏跑」這個最強訊號從 exit code 上拿掉，而漏跑正是整條偵測鏈要防的事。
-    Log '[SCHED-DRIFT] 受管排程任務缺席 ⇒ 該任務不可能觸發，計入本輪失敗（不套用 drift 的存量豁免）；修法＝以系統管理員身分重跑 tools/install_windows_nightly.ps1（並以 -Status 複查）' 'ERROR'
+    # R75：受管任務整支不存在。當時的重點是**不與 drift 共用那條具名豁免**（讓它搭便車
+    # 等於把「漏跑」這個最強訊號從 exit code 上拿掉）。R76 豁免退場後兩者同為計失敗，
+    # 但**標籤仍分開**：診斷路徑不同（任務不見 vs 設定值漂），END 那行要分得出來。
+    Log '[SCHED-DRIFT] 受管排程任務缺席 ⇒ 該任務不可能觸發，計入本輪失敗；修法＝以系統管理員身分重跑 tools/install_windows_nightly.ps1（並以 -Status 複查）' 'ERROR'
   } elseif ($schedDriftRc -ne 0) {
-    Log ('[SCHED-DRIFT] rc={0} 但讀不出 status（＝量不出來，非已知存量）——計入本輪失敗，fail-closed' -f $schedDriftRc) 'ERROR'
-  } elseif ($schedDriftStatus -eq 'ok') {
-    Log '[SCHED-DRIFT] status=ok：受管排程設定已全部符合期望 ⇒ 「恢復硬失敗」的條件已成立，請把 drift 移回 finalFailures（見本段註解）' 'WARN'
+    Log ('[SCHED-DRIFT] rc={0} 但讀不出 status（＝量不出來）——計入本輪失敗，fail-closed' -f $schedDriftRc) 'ERROR'
   }
+  # R76：刻意不再有 status=ok 的專屬分支。它此前的職責是「提醒人把 drift 移回硬失敗」，
+  # 而那個豁免已經沒了；上方的逐行 Log 迴圈本來就會印出偵測器的「全部 N 項設定符合期望」。
 } else {
   # 缺席＝量不出來，**計入本輪失敗**（狀態字留在白名單外即可，見下方判定）。
   $schedDriftStatus = 'absent'
-  Log '[SCHED-DRIFT] python 或偵測器缺席（偵測器改名／搬走／$RepoRoot 上一層不是 monorepo 根）——量不出來，計入本輪失敗；只有量出來且是已知存量（status=drift）才豁免' 'ERROR'
+  Log '[SCHED-DRIFT] python 或偵測器缺席（偵測器改名／搬走／$RepoRoot 上一層不是 monorepo 根）——量不出來，計入本輪失敗；R76 起僅 status=ok／skip 不計失敗' 'ERROR'
 }
 
 $finalFailures = @()
@@ -1915,14 +1964,15 @@ foreach ($pair in @(
 if ($dockerSkipStreak -ge 3) {
   $finalFailures += ('docker_skip_streak={0}' -f $dockerSkipStreak)
 }
-# 見上方 [SCHED-DRIFT] 段：白名單式 fail-closed。drift＝已知存量（不計失敗，靠 WARN
-# 保持可見）；ok/skip＝真正通過；其餘一切（absent／unmeasured／未知狀態字）＝量不出來，
-# 一律計失敗——**判定不看 rc**：缺席那一向根本沒有 rc 可看（曾因此靜默通過）。
-if ($schedDriftStatus -notin @('drift', 'ok', 'skip')) {
-  # 標籤分兩種：task_missing（任務不見了＝會漏跑）與 unmeasured（量不出來）處置雖同為
-  # 計失敗，但修法完全不同（重跑安裝器 vs 修工具/佈局），END 那行必須分得出是哪一種。
+# 見上方 [SCHED-DRIFT] 段：白名單式 fail-closed。只有 ok/skip＝真正通過；其餘一切
+# （drift／task_missing／absent／unmeasured／未知狀態字）一律計失敗——**判定不看 rc**：
+# 缺席那一向根本沒有 rc 可看（曾因此靜默通過）。R76：'drift' 已移出白名單，理由見上段。
+if ($schedDriftStatus -notin @('ok', 'skip')) {
+  # 標籤分三種：task_missing（任務不見了＝會漏跑）／drift（設定值漂了）／unmeasured
+  # （量不出來）處置雖同為計失敗，但診斷路徑不同，END 那行必須分得出是哪一種。
   $schedDriftFailLabel =
     if ($schedDriftStatus -eq 'task_missing') { 'schedule_drift_task_missing' }
+    elseif ($schedDriftStatus -eq 'drift') { 'schedule_drift_regression' }
     else { 'schedule_drift_unmeasured' }
   $finalFailures += ('{0}=status={1}/rc={2}' -f $schedDriftFailLabel, $schedDriftStatus, $schedDriftRc)
 }

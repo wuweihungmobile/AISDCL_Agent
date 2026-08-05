@@ -28,6 +28,31 @@
 
 ## 2. 一鍵設定（bootstrap）
 
+### 🔴 第 0 步（Windows 必讀）：`git clone` 當下就要帶 `core.longpaths`
+
+本節此前直接從 `bootstrap.ps1` 開始，**完全沒有 clone 這一步**——而 Windows 上「怎麼 clone」本身就是一個會讓開箱失敗的決定。R76-01 單變因實測（目標目錄長度 168）：
+
+| clone 指令 | rc | 落地檔數 | `tools\bootstrap.ps1` 在磁碟上？ |
+|---|---|---|---|
+| `git clone <url>`（未帶旗標） | **128** | **301** | **否** |
+| `git clone -c core.longpaths=true <url>` | 0 | 27,523 | 是 |
+
+失敗形態是**無聲的半套 checkout**：git 印幾行 `Filename too long` 就結束，目錄看起來有東西、`git status` 也不會告訴你少了兩萬多支檔案，而本節教的第一個指令（`bootstrap.ps1`）根本不在磁碟上。
+
+```powershell
+# Windows：clone 當下就帶旗標（這一條是開箱的第 0 步，不可省略）
+git clone -c core.longpaths=true <repo-url>
+
+# 建議同時做一次機器級設定，讓「忘記帶旗標」不再是單點故障（一次性、對之後所有 clone 生效）
+git config --global core.longpaths true
+```
+
+> 🔴 **為什麼不能只靠 `dev_start` 的 [6/7] 平台健檢**：那一步設的是 `--local`，也就是**這個 repo 已經 clone 成功之後**才寫得進去的設定。clone 失敗的那個當下它還不存在。實查三層 config：`--system` rc=1、`--global` rc=1、主 checkout `--local` → `true` ⇒ **保護只存在於已經 clone 好的 repo 裡，fresh clone 零保護**。上面那條 `--global` 就是把這個單點故障補起來。
+>
+> 幾何上界（現況一律現查 `python tools/check_ntfs_paths.py`，它每次執行都會印出算式與代入值，本節刻意不寫死當下的數字）：checkout 根前綴（含結尾分隔符）受兩個面同時約束——檔案面 `259 − 最長 tracked 相對路徑`、目錄面 `247 − 最深 tracked 相對目錄`。🔴 **這個上界是會隨 repo 長大而縮水的量，不是常數**：每多一層深目錄或一個長檔名，所有人的可用根前綴就同步變少，而超過上界時沒有任何警告、只有半套 checkout。實測的失敗點是 168 字元的根目錄——巢狀 workspace／帶組織名的同步資料夾／`worktree` 子目錄疊起來很容易到那個量級（**未逐一量測各種常見安裝位置，此句是機制說明不是量測宣稱**）。
+>
+> macOS/Linux 不需要這一步（PATH_MAX 1024/4096，結構上沒有這個形態）——**這正是「只在 mac 開發的人永遠不會發現它」的原因**。
+
 在 repo 根目錄執行：
 
 **macOS / Linux**
@@ -293,7 +318,7 @@ powershell -ExecutionPolicy Bypass -File scripts\ci-gate.ps1   # 偵測到 Git B
 >   `parametrize` 來源」也能改變計數，該面**不在指紋內**；docker daemon 可用性、平台差異亦然
 >   （見下方容差訂正段）。故它是 stale 的**充分觸發器、非必要條件**——會漏、不會冤。
 > <!-- snapshot-fingerprints-darwin: v001=8ffe3c3dabbd v030=f9b73917d436 scripts=68052c079d55 autoclaude=687d060ebae4 measured-at=2026-08-02 host=Darwin-25.5.0-arm64 docker=up pgextras=absent baseline-origin=self-recorded ／ 由 `python tools/sync_onboarding_baselines.py --write --with-slow` 在 macOS 上維護，勿手改；刪除本標記會讓 --check-snapshot fail-loud -->
-> <!-- snapshot-fingerprints-win32: v001=8ffe3c3dabbd v030=f9b73917d436 scripts=b32aa50fa7b4 autoclaude=cee2d4e49669 measured-at=2026-08-05 host=Windows-10-AMD64 docker=up pgextras=absent baseline-origin=self-recorded ／ 同上，由 Windows 側維護。🔴 該 origin 值的語意以 `tools/lib/baseline_origin.py::ORIGIN_SELF` 為準（本行不另寫一份定義）＝**本欄四格是在同一台 Windows 真機上一次量完、env provenance 四項齊全** -->
+> <!-- snapshot-fingerprints-win32: v001=8ffe3c3dabbd v030=f9b73917d436 scripts=b32aa50fa7b4 autoclaude=5043b032ee04 measured-at=2026-08-05 host=Windows-10-AMD64 docker=up pgextras=absent baseline-origin=self-recorded ／ 同上，由 Windows 側維護。🔴 該 origin 值的語意以 `tools/lib/baseline_origin.py::ORIGIN_SELF` 為準（本行不另寫一份定義）＝**本欄四格是在同一台 Windows 真機上一次量完、env provenance 四項齊全** -->
 >
 > 🔴 **Windows 欄 provenance 沿革（史料段，非現況；R74 訂正）**：本段標題與內文自 R67 起逐字寫著
 > 「Windows 欄整欄記 `unrecorded`」並解釋為何如此，而 R73 已在一台 Windows 真機上一次量完四格、
@@ -312,7 +337,7 @@ powershell -ExecutionPolicy Bypass -File scripts\ci-gate.ps1   # 偵測到 Git B
 >
 > | 量測項 | macOS（provenance 見 snapshot-fingerprints-darwin 錨） | **Windows 11（provenance 見 snapshot-fingerprints-win32 錨）** | 差異歸因（實測，非推算） |
 > |---|---|---|---|
-> | AutoClaude `pytest tests/ -q` | **3839 passed / 210 skipped** | **3900 passed / 224 skipped** | 🔴 **R67 訂正一句已失實的宣稱（R67-F28 併同處理）**：本欄原寫「兩平台的 **passed+skipped 結果總數相同**（3948）」，而 R67 逐欄回填後 macOS 側 passed+skipped 與 Windows 側**都不等於 3948**——該總數是更早世代的值，兩欄本來就在不同時點、不同測試樹上量的（見各自 `snapshot-fingerprints-<平台>` 錨的 `measured-at`），**跨世代的兩欄本就不該相加比對**。故此處**不再寫死任何總數**：要比對兩平台，先確認兩欄的 `measured-at` 指向同一棵樹，否則差額只是時代差。〔**保留的二審 SA 訂正用詞**：`--collect-only` 的計數會**低於** passed+skipped，差額來自兩個模組級 `pytest.importorskip("sqlalchemy")`——sqlalchemy ABSENT 時整檔跳過、collect 少算但跑起來各記 1 skip。原寫「收集總數」會讓照本節驗證的人以為少了 3 支。〕Windows 上 `[WINDOWS-NATIVE-ONLY]` 標籤的 3 支（`test_perception.py::TestCloseKillsCmdShimGrandchild` 1 支、`test_run_local_nightly_static.py::TestConcurrencyGuardBehavior` 2 支）由 skip 轉 pass；反向新增 2 支 Windows 專屬 skip（`test_perception.py` POSIX process-group、`test_sdd_to_playbook_adapter.py` 無 symlink 權限 `[WinError 1314]`）。**殘差 ±1 未歸因**——需一台 macOS 同時量測才能對帳，本節依既定紀律**不做加減推算**、只填實測值 🔴 **量測旗標會改變結果（R60 ARCH-R60-04）**：本格值以 plain `python -m pytest tests/ -q` 量得；R60 四方複審在**同一棵工作樹**加 `PYTHONDONTWRITEBYTECODE=1 … -p no:cacheprovider` 後實測 rc=1（2~3 failed，失敗集中在 `tests/test_gap021_028.py` 的 `--collect-only` 子行程，其 rootdir 退化到磁碟根、掃到 system temp 兄弟項而撞 `WinError 2`），plain 兩次皆 rc=0。照本表驗證時請用 plain 形態；該非確定性已於 R60 立案（macOS 的 `/var/folders` 是同構暴露面）。<!-- autoclaude-pytest-snapshot: R60 round 3 錨點，勿刪；刪除本標記會讓 --check-snapshot fail-loud --> |
+> | AutoClaude `pytest tests/ -q` | **3839 passed / 210 skipped** | **3919 passed / 224 skipped** | 🔴 **R67 訂正一句已失實的宣稱（R67-F28 併同處理）**：本欄原寫「兩平台的 **passed+skipped 結果總數相同**（3948）」，而 R67 逐欄回填後 macOS 側 passed+skipped 與 Windows 側**都不等於 3948**——該總數是更早世代的值，兩欄本來就在不同時點、不同測試樹上量的（見各自 `snapshot-fingerprints-<平台>` 錨的 `measured-at`），**跨世代的兩欄本就不該相加比對**。故此處**不再寫死任何總數**：要比對兩平台，先確認兩欄的 `measured-at` 指向同一棵樹，否則差額只是時代差。〔**保留的二審 SA 訂正用詞**：`--collect-only` 的計數會**低於** passed+skipped，差額來自兩個模組級 `pytest.importorskip("sqlalchemy")`——sqlalchemy ABSENT 時整檔跳過、collect 少算但跑起來各記 1 skip。原寫「收集總數」會讓照本節驗證的人以為少了 3 支。〕Windows 上 `[WINDOWS-NATIVE-ONLY]` 標籤的 3 支（`test_perception.py::TestCloseKillsCmdShimGrandchild` 1 支、`test_run_local_nightly_static.py::TestConcurrencyGuardBehavior` 2 支）由 skip 轉 pass；反向新增 2 支 Windows 專屬 skip（`test_perception.py` POSIX process-group、`test_sdd_to_playbook_adapter.py` 無 symlink 權限 `[WinError 1314]`）。**殘差 ±1 未歸因**——需一台 macOS 同時量測才能對帳，本節依既定紀律**不做加減推算**、只填實測值 🔴 **量測旗標會改變結果（R60 ARCH-R60-04）**：本格值以 plain `python -m pytest tests/ -q` 量得；R60 四方複審在**同一棵工作樹**加 `PYTHONDONTWRITEBYTECODE=1 … -p no:cacheprovider` 後實測 rc=1（2~3 failed，失敗集中在 `tests/test_gap021_028.py` 的 `--collect-only` 子行程，其 rootdir 退化到磁碟根、掃到 system temp 兄弟項而撞 `WinError 2`），plain 兩次皆 rc=0。照本表驗證時請用 plain 形態；該非確定性已於 R60 立案（macOS 的 `/var/folders` 是同構暴露面）。<!-- autoclaude-pytest-snapshot: R60 round 3 錨點，勿刪；刪除本標記會讓 --check-snapshot fail-loud --> |
 > | AISDLC_SDD `ci-gate` v0.01 | **1478** | **1478** | v0.01 的 3 支 docker 測試無 Windows 排除 ⇒ **本列的兩欄差額完全由 docker daemon 狀態解釋，不是平台差、更不是退化**（daemon 停用時該 3 支跳過＝ −3，方向與是否成立一律看兩欄各自的 provenance）。🔴 **R67 round 2 訂正（SA-R67-07 同類，本輪回填時自查發現）**：原句進一步寫死了「Windows 欄量測時 daemon 執行中／macOS 欄量測時 daemon 停用」這個**當時的組合**，而 R67 round 2 於 macOS 側回填時 daemon 為 `up`，該句當場失實（兩欄現為同值、差額 0）。**故此處不再寫死任何一欄的 daemon 狀態與差額方向**，一律現查：`grep -n 'snapshot-fingerprints-' ONBOARDING.md`（實跑 rc=0，兩條錨各印一行含 `docker=`）。🔴 **兩欄的 docker 狀態一律以各自 `snapshot-fingerprints-<平台>` 錨的 `docker=` provenance 為準**（R67 起機械記錄）——原句寫「本機 docker 執行中故全跑」而沒說「本機」是哪一台，正是 DEF-101-515「容差宣稱漏掉一個維度比沒有容差宣稱更糟」的同型。<!-- cigate-v001-snapshot: R60 round 3 錨點，勿刪；刪除本標記會讓 --check-snapshot fail-loud --> |
 > | AISDLC_SDD `ci-gate` v0.30 | **1743** | **1742** | −4 ＝ 2 支 `test_phase_h.py` `requires_docker_success`（**`sys.platform.startswith("win")` 硬排除，與 docker 是否可用無關**，見 DEF-101-062）＋ 2 支 `test_post_commit_drift_worktree.py`（POSIX shebang hook chain，`skipif(win)`） 🔴 **R60 訂正：兩欄已不可直接相減**——上述 −4 是 R59 時的平台差（當時 Windows 1725 ／ macOS 1729）；R60 Windows 由 1725 增至**Windows 欄實測值**（本輪 v0.30 側新增回歸鎖；round 1 時點為 1736、round 2 四方三方獨立測得 1747 ⇒ round 3 訂正，過程見上方 provenance 表）。🔴 **R67 訂正**：此處原寫「而 macOS 欄仍是 R59 記載、本輪未重測」——R67 已在 macOS 真機一次量完四格並逐欄回填（provenance 見 `snapshot-fingerprints-darwin` 錨），該句已成假話故改寫；**兩欄現在也仍不可直接相減**，因為兩欄的 `measured-at`／`docker`／`pgextras` 不同（Windows 欄整欄 `unrecorded`，見上方說明），本節依既定紀律**不做加減推算**。🔴 **當輪值刻意不寫進歸因散文**（Cluster B 教訓：受管值在同一行出現第二次就是下一個 stale 站點）。<!-- cigate-v030-snapshot: R60 round 3 錨點，勿刪；刪除本標記會讓 --check-snapshot fail-loud --> |
 > | AISDLC_SDD `ci-gate` scripts/tests | **303** | **320** | R59 動工時實測 245（比 R57 記載的 244 +1，未追查是平台差異或 R57 收尾後的回填落差）；收尾為 248＝再 +3，即 DEF-101-512 的兩道降級 fallback 鎖 + QA-R59-10 的 `-rs` 鎖；**R60 收尾見 Windows 欄**＝再 +1（本輪 `AISDLC_SDD/scripts/tests/` 側之鎖；`--collect-only` 實測較 passed 數多 1 collected＝多出的那支為 skip，與 passed 數相符）。**未逐支追認該 +1 的來源**，依紀律只填實測值、不做歸因推算。🔴 **當輪值刻意不寫進歸因散文**（同上，Cluster B 教訓）。<!-- cigate-scripts-snapshot: R60 round 3 錨點，勿刪；刪除本標記會讓 --check-snapshot fail-loud --> |
@@ -354,6 +379,31 @@ powershell -ExecutionPolicy Bypass -File scripts\ci-gate.ps1   # 偵測到 Git B
 > run 仍是 success（R74 已讓 `tools/lib/ci_liveness.py::run_level_fail_open` 把這件事逐字說出來）。
 > 要看真實 job 結論：`gh run view <run-id> --json jobs`。
 >
+> **表③-b — 兩支 compat-CI 的 `continue-on-error` nightly job（上表結構上看不到的那一半）**
+>
+> 🔴 **為何非另立一張表不可（R76-03）**：上表記的是 **run 層 conclusion**，而這兩支 job 的紅
+> 被 `continue-on-error: true` 吸收掉 ⇒ 上表照實填 `success` 也**不算填錯**，問題正在這裡。
+> 這條紅唯一的顯形通道是 GitHub issue，而該通道**零讀者**：實查唯一一筆 issue #10 自
+> 2026-07-14 起 OPEN、橫跨 R72~R75 四輪「雲端全綠」宣稱都沒人讀到。
+>
+> 🔴 **取樣的是各自最近一次 `--event schedule` 的 run，不是 push run**：這兩支 job 在 push 事件
+> 上一律 `skipped`（實查 a61bf0c 的 windows run：nightly-full 與 nightly-alert 皆 skipped）
+> ⇒ 若照 push run 記帳，這一欄結構上恆為 `none`＝一道永遠不會響的鎖。**它們的 provenance 因此
+> 與上表不同**（不同 run、不同 commit、週頻），故逐列自帶 run 與 commit，不共用上方的錨欄位。
+>
+> 🔴 **第一欄刻意放 job id 而不是 workflow 檔名**：上表的判準⑦ 以「列首是反引號包住的 `*.yml`」
+> 認列，把 workflow 檔名擺第一格會讓本表被它一起吃進去、`failure` 列被要求進上表的紅集合。
+> 兩張表的紅集合是兩個不同的東西，**不要「整理」成同一種列首**。
+>
+> | job id | workflow | 最近一次 schedule run 結論 | run id ／ commit | 判讀 |
+> |---|---|---|---|---|
+> | `windows-nightly-full` | windows-compat-ci.yml | 🔴 **failure** | `30803941764` ／ `1e5214b` | run 層 conclusion 是 **success**——這一列就是那個差距本身。內容缺陷見 R76-02（`shell: powershell` 步驟以無 BOM 暫存 `.ps1` 落地，PS 5.1 以 ANSI codepage 誤讀繁中 ⇒ 該步驟自 R48 起從未成功執行過） |
+> | `macos-nightly-full` | macos-compat-ci.yml | ✅ success | `30807193487` ／ `1e5214b` | 對照組：同一個 commit、同一種 job 形態，mac 側是綠的 ⇒ 上一列不是「這種 job 本來就會紅」 |
+>
+> 對應的機器欄位是錨上的 `nightly-red`（值＝以逗號分隔的 `<workflow 檔名>:<job id>` 集合，
+> 全綠時寫 none）。它與 `red` 欄刻意分開：`red` 對的是 push 軌 run 層、`nightly-red` 對的是
+> 排程軌 job 層，混成一欄就等於把「被 `continue-on-error` 吸收掉」這件事又蓋回去。
+>
 > 🔴 **回填 SOP（QA-R74-01 訂立 — 照這五步做，填錯會紅）**。下方那個錨是表③ 的機械受檢面；
 > 它的每一個欄位都有判準，**不是註解**：
 >
@@ -368,6 +418,36 @@ powershell -ExecutionPolicy Bypass -File scripts\ci-gate.ps1   # 偵測到 Git B
 >    日粒度在一輪之內抓不到「錨落後一個 commit」，那個弱點必須寫在錨上而不是靜默存在。
 > 5. 錨的 `red=` 必須**逐字等於**表格裡結論為 `failure` 的 workflow 集合（全綠就寫 `red=none`）。
 >    這一條比的是內容不是日期，所以「改了表格忘了改錨」在同一天內也會紅。
+> 6. **（R76-03 新增）另記表③-b 與錨的 `nightly-red` 欄**——兩支 compat-CI 帶
+>    `continue-on-error` 的 job，其紅**不會**出現在第 2 步那條指令的 `conclusion` 裡。
+>    逐支現查各自最近一次**排程軌** run 的 job 層結論：
+>
+>    ```powershell
+>    foreach($wf in @('windows-compat-ci.yml','macos-compat-ci.yml')){
+>      $r = gh run list --workflow $wf --event schedule --limit 1 `
+>             --json conclusion,headSha,databaseId | ConvertFrom-Json
+>      gh run view $r.databaseId --json jobs --jq '.jobs[] | "\(.name) => \(.conclusion)"' }
+>    ```
+>
+>    把結果填進表③-b，錨的 `nightly-red` 欄則填**以逗號分隔的 `<workflow 檔名>:<job id>`
+>    集合**（全綠寫 none）。⚠️ 這一欄取樣的是**排程軌**：push run 上這兩支恆為 `skipped`，
+>    照 push run 記帳會讓它結構上恆綠——那就白做了（同「判準的比較對象要選對」那條教訓）。
+>    ⚠️ 本欄與 `checked-at`／`head-sha` **不同步**（週頻 vs 每次 push），故 provenance 逐列
+>    寫在表③-b 裡，不要拿上表的 commit 去代言它。
+>
+>    🔴 **（R76 複審 ARCH-03 補）同時更新錨上另外兩欄，缺一即紅**：
+>    `nightly-run=<那一次 schedule run 的 databaseId>`（必須逐字出現在表③-b 的 run id 欄，
+>    這是錨 ↔ 表格的內容綁定，同 `red=` 那條）、`nightly-checked-at=<帶時區的 ISO8601>`
+>    （這一次查核的時點）。**`nightly-red=none` 也必須帶這兩欄**——沒有 provenance 時
+>    「沒查」與「查過全綠」在錨上長得一模一樣。判準另設**過期帶 14 天**（＝排程軌兩個
+>    週期），逾期即紅並在訊息裡印回這一段指令。
+>
+>    ⚠️ **這一欄的失明面（誠實劃界，勿超譯）**：機械物保證的是「有人在 14 天內查過並
+>    留下 run-id、而且那個 run-id 對得上表③-b」，**不是**「此刻雲端的 job 結論就是錨上
+>    寫的那樣」。本判準不去雲端對帳（那要拿 push 之後才確定的值來比，見下方 §「一般化的
+>    規則」）。R76 之前這一欄連時點都沒有，於是 PKG-B 修好 `windows-nightly-full` 之後
+>    錨仍會逐字宣告它是紅的、而鎖照樣綠——**一句被鎖守著的假話**；反向若下週換
+>    `macos-nightly-full` 轉紅，判準也一行都不會響。過期帶治的就是這兩個方向。
 >
 > 🔴 **「還沒查」怎麼合法表達**：輪次進行中的常態就是「推上去了、run 還在跑／還沒去查」。這個
 > 狀態**要誠實寫出來，不准用填假值讓它變綠**：在錨上加一欄
@@ -405,7 +485,7 @@ powershell -ExecutionPolicy Bypass -File scripts\ci-gate.ps1   # 偵測到 Git B
 > `tools/sync_onboarding_baselines.py` 加一條，屬另一件事。在那之前，收輪檢查清單第一項＝
 > **確認本錨沒有 `pending` 欄**。
 >
-> <!-- cloud-ci-status: checked-at=2026-08-05T01:24:40+08:00 head-sha=a61bf0c243dd336828c12d568211027ff06b3cd0 red=none ／ 由上方 gh 指令現查後手動回填，回填步驟見上方五步 SOP；`tools/tests/test_doc_loc_baseline_freshness_r60.py` 的 TestR74CloudCiStatusIsRecorded 機械守（掃描面＝帶 push: 觸發的 workflow／新鮮度＝不得早於 snapshot-fingerprints 的最新 measured-at／head-sha 形態＋真 commit＋HEAD 祖先／checked-at ↔ commit 時間的因果／pending 欄（若有）的非假性：真 commit＋HEAD 祖先＋head-sha 的後代／`red` 欄 ↔ 表格 failure 列）。🔴 本錨現值＝**已完成一次真正的雲端現查**：`a61bf0c` 的三支 compat／root-infra run 皆 completed 且 success，另三支因 `paths:` 過濾未觸發、其 commit 欄照實記各自最近一次 push run 的 sha（見表格判讀欄）。六列全綠，故 `red` 欄填 none；`pending` 欄**已解除並刪除**（它先前宣告的是「某個已 push 的 commit 結論尚未進表」，該狀態已結束）。`granularity` 欄亦已刪除——`checked-at` 現在帶完整時間與時區，再自陳「只到日」就是一句與同一行資料矛盾的假話，該矛盾另有判準守。🔴 **本行的說明文字刻意不寫出任何 `欄位＝值` 形態的字樣**：機器欄位與人讀散文同住這一行，散文裡只要出現可被解析的那種寫法就會覆蓋真欄位值（本輪已兩度實測踩到，第二次是由該筆的根治判準自己抓出來的）。🔴 下一次 push 之後本表即成為 dated snapshot，收輪檢查清單第一項＝重跑上方 gh 指令、確認六列與錨都對得上現況（該項無 rc 級機械物，且刻意不做成 CI 判準——會不可滿足，見上方分工表與 TestR75CloudCriteriaAreSatisfiableAtAnyCommit）。刪除本標記會讓該鎖 fail-loud -->
+> <!-- cloud-ci-status: checked-at=2026-08-05T01:24:40+08:00 head-sha=a61bf0c243dd336828c12d568211027ff06b3cd0 red=none nightly-red=windows-compat-ci.yml:windows-nightly-full nightly-run=30803941764 nightly-checked-at=2026-08-05T11:26:37+08:00 ／ 由上方 gh 指令現查後手動回填，回填步驟見上方六步 SOP；`tools/tests/test_doc_loc_baseline_freshness_r60.py` 的 TestR74CloudCiStatusIsRecorded 機械守（掃描面＝帶 push: 觸發的 workflow／新鮮度＝不得早於 snapshot-fingerprints 的最新 measured-at／head-sha 形態＋真 commit＋HEAD 祖先／checked-at ↔ commit 時間的因果／pending 欄（若有）的非假性：真 commit＋HEAD 祖先＋head-sha 的後代／`red` 欄 ↔ 表格 failure 列）。🔴 本錨現值＝**已完成一次真正的雲端現查**：`a61bf0c` 的三支 compat／root-infra run 皆 completed 且 success，另三支因 `paths:` 過濾未觸發、其 commit 欄照實記各自最近一次 push run 的 sha（見表格判讀欄）。六列全綠，故 `red` 欄填 none；`pending` 欄**已解除並刪除**（它先前宣告的是「某個已 push 的 commit 結論尚未進表」，該狀態已結束）。`granularity` 欄亦已刪除——`checked-at` 現在帶完整時間與時區，再自陳「只到日」就是一句與同一行資料矛盾的假話，該矛盾另有判準守。🔴 **R76-03 新增的那一欄（表③-b 的機器面）取樣的是排程軌 job 層、不是 push 軌 run 層**，故它的新鮮度與本行其餘欄位**刻意不同步**（週頻 vs 每次 push），逐列 provenance 寫在表③-b；現值指向的是 `windows-nightly-full` 那一列的 failure——那筆紅在 run 層看不見，正是它存在的理由。🔴 **R76 複審 ARCH-03 之後，這一欄自己也帶時點與出處**（`nightly-run` 是那一次 schedule run 的 databaseId、必須逐字對得上表③-b；`nightly-checked-at` 是查核時點，逾 14 天即紅）——沒有這兩欄的話，本欄只保證「有人查過一次」而不是「現在是什麼狀態」，於是「修好之後沒人回來清」與「新的紅沒人補進來」兩個方向都不會有任何東西出聲。🔴 **本行的說明文字刻意不寫出任何 `欄位＝值` 形態的字樣**：機器欄位與人讀散文同住這一行，散文裡只要出現可被解析的那種寫法就會覆蓋真欄位值（本輪已兩度實測踩到，第二次是由該筆的根治判準自己抓出來的）。🔴 下一次 push 之後本表即成為 dated snapshot，收輪檢查清單第一項＝重跑上方 gh 指令、確認六列與錨都對得上現況（該項無 rc 級機械物，且刻意不做成 CI 判準——會不可滿足，見上方分工表與 TestR75CloudCriteriaAreSatisfiableAtAnyCommit）。刪除本標記會讓該鎖 fail-loud -->
 >
 > **訂正一項已被證偽的容差宣稱（DEF-101-515 併同處理）**：本節下方 R33 註尾原寫「`ci-gate.sh`
 > 的逐軌 passed 計數對 **docker daemon 可用性**敏感（daemon 停用時 v0.01／v0.30 各 -3），
@@ -474,7 +554,7 @@ AutoClaude 有一套 nightly 取證流程（7 stage：local_ci_gate / mutation /
 - **Windows（既有，可用；R19 起一鍵化）**：`AutoClaude/tools/run_local_nightly.ps1` 由 Windows 工作排程器 `schtasks` 每日觸發（任務名 `AutoClaude_Nightly`；**時刻現查** `Get-ScheduledTask -TaskName AutoClaude_Nightly | Get-ScheduledTaskInfo`，本節刻意不快照——R73/DEF-101-779 實證寫死的時刻會過期並誘發破壞性操作）。**R19 前**該任務須手動 `schtasks`/GUI 建立，`AutoClaude/tools/fix_nightly_catchup.ps1` 只能「校正既有任務設定」（`Get-ScheduledTask` 找不到任務即直接拋錯），無法從零建立——與 mac 側 `install_mac_nightly.sh` 的一鍵化體驗不對稱。**R19 新增 `tools/install_windows_nightly.ps1`**（鏡射 `install_mac_nightly.sh` 定位）補上這段：`install`（預設，冪等建立排程＋內建 `fix_nightly_catchup.ps1` 記載的補跑保護設定，新機器不必再另跑一次 fix 腳本）／`-Uninstall`／`-Status`（查詢任務狀態；Windows 工作排程器原生以 `Get-ScheduledTaskInfo` 提供上次執行時間，取代 mac 版讀心跳檔案 mtime 的機制）／`-WhatIf`（PowerShell 內建預覽模式，只印將執行的動作不變更系統）。設定事後校正仍可用 `AutoClaude/tools/fix_nightly_catchup.ps1`。R9 三項強化：①前置新增 local_ci_gate 全套 stage（對齊 `windows-nightly-full` 深度回歸，push 空窗期也有每日全套訊號）；②pg-e2e stage 加跑 PG contract 測試（`tests/contract/test_pg_state_repository_contract.py`，CI 硬閘的本地對等）；③終端 exit code 帶訊號（任一 stage 失敗→exit 1；SKIP/WARN 不計）——schtasks「上次結果」從此可反映 stage 健康，不再恆 0x0。R10 五項強化：④新增 **sdd-fsm-chaos stage**（鏡射 `aisdlc-sdd-fsm-chaos-nightly.yml` 兩步：pytest `-m chaos`＋100 輪 chaos_runner sweep，CI 停擺期間 Rule 9.9.4 的本地補償，實測 <1 分鐘）；⑤pgvector recall pytest rc 以 `[ref]` 捕捉（先前被 collector 覆蓋，單日真紅假綠）；⑥mutmut log 驗證失敗改 rc=1（先前誤設 WARN 級 rc=2，「防假 pass 守門自身觸發」反而綠出場）；⑦Docker 連續 ≥3 次不可用升級為 exit 1（`.docker_skip_streak` 累計；單次 SKIP 仍屬合理）；⑧END 進度 mutation 軌改印 unique-sha 計數（ADR-SD09-011 語意，原始列數會虛報）。全部強化由 `tests/tools/test_run_local_nightly_static.py` 24 個靜態錨點鎖住。
 - **macOS（R11 已落地薄聚合器）**：`schtasks` 在 macOS 無對應；等價機制是 `launchd`（推薦）或 `cron`。R11 依 Architect D1 拍板落地 `AutoClaude/tools/run_local_nightly.sh`——**薄聚合器**，只串接四支既有腳本、不重寫任何檢查（四 stage：`tools/macos_smoke_local.sh` 強制系統 bash 3.2 ＋ 根層 `tools/run_root_unittests.py` ＋ AutoClaude `tools/local_ci_gate.sh` ＋ SDD `scripts/ci-gate.sh`；任一 stage 失敗記名續跑、結尾彙總、exit 1——對齊 `.ps1` R9 ③ exit 語意），下方 launchd/cron 範本即可直接啟用。**如實揭露：這不是 `.ps1` 的對等移植，而是刻意的薄聚合**——mac 側只要「平台相容性＋回歸」每日訊號（R11 教訓：smoke 全綠 ≠ unittest 全綠，故兩者都必跑），深度 stage（mutation Docker/pg-e2e/perf/obs）維持 Windows 主開發機承載；七軌其餘兩軌去向——drift＝nightly 取證帳本紀律由 Windows 主開發機承載（drift_log_history 例行 commit 即其產物）、sdd-fsm-chaos＝非平台敏感之純 Python 邏輯回歸（Windows 本地 nightly 每日承接＋CI chaos workflow 覆蓋），mac 薄聚合器均不重複。
 
-> ⚠️ **ops 排程家族其餘三支仍 Windows-only**：`run_local_nightly` 已有 `.sh`（R11 薄聚合器，見上；launchd 排程啟用已於 R13 一鍵化——`bash tools/install_mac_nightly.sh`，見下）；但 ops 排程家族其餘三支（`g0_gate_check.ps1`、`reschedule_g0_gatecheck.ps1`、`fix_nightly_catchup.ps1`）仍屬 Windows-only、無 `.sh` 對等，為本節的明示缺口。
+> ⚠️ **ops 排程家族其餘三支仍 Windows-only**：`run_local_nightly` 已有 `.sh`（R11 薄聚合器，見上；launchd 排程啟用已於 R13 一鍵化——`bash tools/install_mac_nightly.sh`，見下）；但 ops 排程家族其餘兩支（`g0_gate_check.ps1`、`fix_nightly_catchup.ps1`）仍屬 Windows-only、無 `.sh` 對等，為本節的明示缺口。🔴 **R76 訂正**：本行原列三支，第三支 reschedule_g0_gatecheck.ps1（**刻意不加反引號**——本行的反引號 `.ps1` token 正是 `test_onboarding_parity_interlock.py` 抽取的清單本體，加了就等於把已刪的檔又登記回去）已整支刪除——它唯一能做的事是重排 `AutoClaude_SD09_G0_GateCheck`，而該排程工作於 R71 從本機移除，每條路徑都停在「Task not found」守衛 exit 1；缺口清單只該列「還活著但只有 Windows 有」的東西，孤兒留在清單裡會讓缺口看起來比實際大。
 >
 > ✅ **不同軌的另一層已補上：雲端機械化 CI 安全網（`.github/workflows/macos-compat-ci.yml`）**：上面講的是「開發者個人機器上的排程自動化」缺口；與此無關的是——在本輪之前，macOS 端**完全沒有任何機械化 CI 驗證**（全部 workflow 的 `runs-on` 只有 `ubuntu-latest`／`windows-latest`，macOS 側長期僅靠人工對照與文件宣稱）。Mac/Windows 相容性修復輪新增了 `macos-compat-ci.yml`，補上先前完全沒有的 macOS 機器化覆蓋：**`macos-smoke`**（PR/push 閘門，觸及平台敏感路徑才觸發，實際「執行」而非僅語法解析）涵蓋 `bootstrap.sh`／`dev_start.sh`（含 mac 專屬的 `cross_same_flavor` 分支）、`install_git_hooks.sh`／`install-hooks.sh`（含 linked worktree 拒絕情境）、`install_post_commit.sh` 在 **git worktree** 下的寫入情境、根層 `tools/git-hooks/` 三支 dispatcher 在 macOS **系統內建 bash 3.2**（非 Homebrew 新版）下的直接執行、`AISDLC_SDD/scripts/ci-gate.sh`（凍結基線 v0.01 + LATEST 雙軌）；**`macos-nightly-full`**（`schedule`/`workflow_dispatch`）另跑兩子專案完整測試套件在 `macos-latest` 上的深度回歸。因此「開發迴圈（測試／lint／ci-gate／整合閘門）在 macOS 已對等」現在**有機器驗證佐證**，不再只是文件宣稱——但仍有限制須如實揭露：① `macos-nightly-full` 為 `continue-on-error: true` 非阻斷 job，失敗不擋 PR、僅供事後觀察；② GitHub-hosted `macos-latest` runner 與開發者個人 Mac 的實際硬體／OS 版本仍可能有落差；③ 此 CI 與本節開頭的「本機排程自動化」（launchd/cron）屬不同層次缺口，未被本次新增的 CI 覆蓋，該缺口依然存在。
 >
@@ -526,7 +606,8 @@ macOS 排程啟用（R13 一鍵化）：`bash tools/install_mac_nightly.sh`（�
 |------|------|------|
 | **凍結版 47 支 ps1 無 UTF-8 BOM**：`AISDLC_SDD_v0.01~v0.29` 的 `run_tlc.ps1`（29 支）+ `v0.12~v0.29` 的 `install_post_commit.ps1`（18 支） | 含非 ASCII 字元且無 BOM，zh-TW Windows PowerShell 5.1 直跑會 parser 斷裂 | 改用 **v0.30 對應檔**（已補 BOM）；凍結版依紀律不回改 |
 | **凍結版 `verify_traceability.sh` 用 `declare -A`**（v0.01~v0.29） | macOS 內建 bash 3.2 不支援關聯陣列，**必炸** | 用 **v0.30 同檔**（已改 bash 3.2 相容），或 `brew install bash` 後以新 bash 執行 |
-| **macOS `keyboard` 套件熱鍵（ESC+F12）需「輔助使用」權限** | 未授權時 hotkey 背景執行緒**靜默失效**（無錯誤訊息） | 系統設定 → 隱私權與安全性 → 輔助使用，把執行 AutoClaude 的終端機 App 加入允許清單（平台限制，無對應 DEF 條目） |
+| **熱鍵 ESC+F12 預設不再安裝**（R76 起） | `keyboard` 已從 core 相依移到選配 extra（成因：其 metadata 逐字 `Requires-Dist: pyobjc ; sys_platform == "darwin"`，把整個 pyobjc 傘包拖進 macOS 安裝面）。`bootstrap` 裝的是 `[dev,notifications,lint]`，**不含** `hotkey` ⇒ 出廠環境按 ESC+F12 無反應，程式面優雅降級只印 warning | 要用就顯式裝：`uv pip install -e 'AutoClaude[hotkey]'`（zsh 需引號，見 §5）。Ctrl+C 一律可用且同樣寫 checkpoint |
+| **macOS 上 ESC+F12 即使裝了也不會生效** | 🔴 R76 訂正：真正擋路的**不是**「輔助使用」權限，是 `keyboard` 的 `_darwinkeyboard.listen()` 首行 `os.geteuid() != 0` 直接拋 `OSError: Error 13 - Must be run as administrator`（R68 macOS 26.5.2 / keyboard 0.13.5 真機取證，見 `AutoClaude/autoclaude/perception/hotkey_handler.py:37-39`）——授權輔助使用也一樣失敗 | 非 root 的 mac 上請直接用 `Ctrl + C`（同樣寫 checkpoint 後退出）。要熱鍵只能 sudo 執行，不建議（平台限制，無對應 DEF 條目） |
 | **凍結版 v0.01 `sandbox_runner.py:252`／`tlc_runner.py:69` subprocess 無 encoding** | zh-TW Windows（cp950）下子程序輸出含中文可能 UnicodeDecodeError（v0.30 已補 `encoding="utf-8"`） | ci-gate `.sh`/`.ps1` 已設 `PYTHONUTF8=1`；凍結版依紀律不回改（DEF-101-019） |
 | **v0.12~v0.29 中間凍結版 `test_closure_evidence.py` fixture 未清洗 GIT_DIR/GIT_WORK_TREE** | 僅「人工在中間版目錄帶敵意 env 手跑 pytest」的邊角情境可能誤操作真 repo（v0.30 已補 `_clean_git_env()`） | 閘門路徑不執行中間版＋hook 層已 `env -u` 清洗；凍結版依紀律不回改（DEF-101-020） |
 | **mutation artifact 累積鏈 90 天上限**（GitHub retention 上限） | 連續 90 天無 token_guard 源碼變動觸發 → GitHub 側 `mutation-history` 過期、累積歸零重累 | Windows 本機 nightly 為另一獨立累積點（兩者互不同步）；限制已註記於 workflow 檔頭（DEF-101-021） |

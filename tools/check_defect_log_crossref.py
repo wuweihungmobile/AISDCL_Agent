@@ -41,37 +41,25 @@
 寫法會靜默命中 `fixed`（`-fixed` 對邊界 lookaround 成立），於是「只修了一部分」在閘門
 眼中等於「已修」，而本檔對非法首詞原本一句話都不說。
 
-第三件本檔**會**做的事（R60 round 3 Pkg-P6 新增，且是上面兩件事的**前提**）：
-每一缺陷列切出的欄數必須等於表頭欄數（`row_arity_problems()`），且「狀態欄」一律由
-**表頭**定位（`_table_layout()`）而非取 `cells[-1]`。
-為何必須另立這一項——舊實作切欄寫成
-`[c.strip() for c in re.split(...) if c.strip()]`，`if c.strip()` 會把**空欄整個濾掉**，
-且全程沒有任何「欄數 == 表頭欄數」的檢查，於是狀態欄留空時 `cells[-1]` 會靜默**位移**
-到「分流去向」欄。本包實測構造輸入（未動主檔）：
-  - 狀態欄空白 ＋ 分流去向＝「已於上游 fixed 故不另修」
-    ⇒ `_load_ledger_status()` 回 `{'DEF-01-001': 'fixed'}`，而該 ID 狀態欄其實是空的。
-  - 最壞複合：狀態欄空白 ＋ 分流去向以合法關鍵字開頭（`open 待下輪處理`）
-    ⇒ `status_first_word_problems()` 回 `[]` ⇒ **上面兩道檢查同時完全放行、零訊號**。
-即「抓跨文件假綠」的工具自己長了一個同型假綠面。修法選 (乙)＝表頭定位而非位置依賴：
-`[-1]` 這種位置依賴本身就是脆弱來源，且保留空欄後 `[-1]` 會變成 markdown 表格尾端的
-空片段，非改不可。
+第三件本檔**會**做的事（R60 round 3 Pkg-P6，且是上面兩件事的**前提**）：每一缺陷列切出
+的欄數必須等於表頭欄數（`row_arity_problems()`），且「狀態欄」一律由**表頭**定位
+（`_table_layout()`）而非取 `cells[-1]`——位置依賴在狀態欄留空時會靜默位移到左鄰的「分流
+去向」欄，使上面兩道檢查同時零訊號。構造復現輸入與逐項實測見 `row_arity_problems()`
+docstring 與 `tools/tests/test_check_defect_log_crossref.py`
+::`TestRowArityAndHeaderAnchoredStatusColumn`。
 
-🔴 **表頭同形性的正確說法（R60 round 3 SA-R60R3-02 訂正）**：本段原寫「實查帳本家族
-32 檔的表頭欄數全部同形」，兩層都錯——(i) 家族檔數當時實查已是 33（且每跑一次
-`--apply` 就再變一次），(ii) **「有表頭」這個性質根本不對整個家族成立**：家族內有一批
-純散文 archive 完全沒有表格。把只對「具表格表頭的那些檔」成立的性質宣稱到整個家族上，
-比數字過期更重一層。正確的斷言是：**家族內「具表格表頭」的那些檔，其表頭切片數全部
-同形**（首尾空片段 ＋ 資料欄，狀態欄恆為最後一個資料欄；只有其中一個資料欄的欄名有兩
-種寫法，不影響定位）。檔數與切片數一律**現查**——家族檔數見
-`archive_defect_log._family_files()`、切片數見 `_table_layout()`，本 docstring 不寫死
-任何一個（Scan-H 必跑項 #3：鎖的散文不得寫死可由程式現查的數字）。
+🔴 **表頭同形性的正確說法（R60 round 3 SA-R60R3-02 訂正）**：該性質只對「具表格表頭的
+那些檔」成立——家族內另有一批純散文 archive 根本沒有表格，把它宣稱到整個家族上比數字
+過期更重一層。正確斷言＝那些檔的表頭切片數全部同形（首尾空片段 ＋ 資料欄，狀態欄恆為
+最後一個資料欄）。檔數與切片數一律**現查**（`archive_defect_log._family_files()`／
+`_table_layout()`），本 docstring 不寫死任一個（Scan-H 必跑項 #3）。
 機械守門＝`tools/tests/test_check_defect_log_crossref.py::TestFamilyHeaderUniformity`。
 
-⚠️ arity 檢查的作用範圍**僅主檔**（`_DEFECT_LOG`）——本檔對 archive 只 `stat()` 量大小、
-從不解析其表格列，故 `DEF-101-560` 具名不修的 archive 側既有壞列（含未轉義字面豎線、
-被多切出欄位）不會被本檢查誤紅；那些列今日零活體後果且已在帳本具名記載，筆數由
-`archive_defect_log._ARITY_BASELINE` 逐檔登記並帶 stale 自檢，本檔不複寫該數字。
-這**不是**對整個檔的靜默豁免：那些列本來就不在本檔的解析面內，一旦被搬進主檔就會當場紅。
+⚠️ arity 檢查的作用範圍**僅主檔**（`_DEFECT_LOG`）：`DEF-101-560` 具名不修的 archive 側
+既有壞列不會被本檢查誤紅（筆數由 `archive_defect_log._ARITY_BASELINE` 逐檔登記並帶 stale
+自檢，本檔不複寫）。這**不是**靜默豁免——那些列一旦被搬進主檔就會當場紅。
+（🔴 訂正：本段原稱「本檔對 archive 只量大小、從不解析其表格列」，該句自
+`_load_archive_status()` 落地起即為假——archive 會被解析，只是不參與 arity 判定。）
 
 使用：
   python3 tools/check_defect_log_crossref.py   # 於 repo 內任意 cwd；不一致印清單並 exit 1
@@ -1120,52 +1108,26 @@ _LEDGER_FAIL_BYTES = 256 * 1024
 #: 地調低（那會讓政策與工具事實脫鉤、下一輪讀者無從判斷哪個數字才是真的），更不得調高。
 _READ_TOOL_MAX_BYTES = 256 * 1024
 
-# 🔴 R60 round 3（DEF-101-587）：體積守門的涵蓋面由「帳本家族」擴到**具名治理文件**。
+# 🔴 R60 round 3（`DEF-101-587` ＋ SA-R60R3-01）：體積守門的涵蓋面由「帳本家族」擴到
+# **具名治理文件**，且**全 repo 只有這一張清單**。詳細史料見帳本該兩列與
+# `docs/06_quality/CrossPlatform_R60_Fix_Evidence_r3.md`；此處只留仍在約束今日行為的 WHY：
 #
-# 為何需要：本輪把帳本改為「兩層化」——帳本列只寫摘要、完整證據（bug-injection 紅綠、
-# 逐條指令與真實輸出）落在 `CrossPlatform_R60_Fix_Evidence*.md`。那些檔於是承擔了與帳本
-# **同等**的可讀性義務（四方複審者要逐條重驗就得讀它們），卻**完全不在任何體積守門的
-# 涵蓋面內**——實測它一度達 260,963 bytes、距上限僅 1,181 bytes。這與 `DEF-99-001`／
-# `DEF-101-123` 完全同型：**政策有上限、卻無機械守門**（R9 就是這樣讓帳本默默長到 272KB）。
-# 把資料搬到另一支檔就繞過守門，等於守門只綁在**檔名**上、沒綁在**義務**上。
-#
-# 為何用具名常數而不是 glob 整個 docs/：glob 會把不相干的檔一起管、製造誤紅，且
-# 「哪些檔承擔了帳本級的可讀性義務」是**判斷**，判斷要具名、要能被 review 看見。
-# 新增治理文件時在此加一筆，並在該檔內寫明它為何屬於這一類。
-# 🔴 路徑刻意**不**由 `_DEFECT_LOG.parent` 推導，而是各自獨立解析：治理文件在哪，
-# 與帳本主檔在哪是兩件事。前者一旦綁上後者，測試把 `_DEFECT_LOG` mock 到暫存目錄時，
-# 這些檔會跟著「搬去」一個不存在的位置而被判為缺席 ⇒ 一批既有測試假紅（落地時實際踩到）。
-#
-# ============================================================================
-# 🔴 R60 round 3 SA-R60R3-01（BLOCKING）：本常數是**全 repo 唯一**的具名治理文件清單
-# ============================================================================
-# 原始缺陷：`archive_defect_log.py` 當時也叫 `_GOVERNANCE_DOCS`，**同名而成員不同**——
-# 本檔一份 = (Evidence.md, Evidence_r3.md)（體積守門），archive 那份 =
-# (Evidence.md, Scan_Dimensions.md)（指針稽核），**各缺對方一支**。後果是本輪新生的
-# `CrossPlatform_R60_Fix_Evidence_r3.md` 進了體積閘門卻**完全不在指針稽核面**，其中
-# 十餘處指針方言零檢查；對稱地，`CrossPlatform_Scan_Dimensions.md` 進了指針稽核面卻
-# 完全不在體積守門的涵蓋面內。這正是 `DEF-101-587` 講的「把資料搬到另一支檔就繞過
-# 守門」，只是這次繞過的是**指針鎖**——而且同名常數各寫一份，本身就是本輪反覆立帳要
-# 消滅的**複本型缺陷**在守門程式自己身上復發。
-#
-# 🔴 為何是**一個集合**而不是「體積用一張、指針用另一張」（本包的設計判斷）：
-# 兩項義務綁的是**同一個資格**——「這份檔承擔了帳本級的可讀性與可稽核義務」。
-#   · 體積守門的 WHY：複審者要逐條重驗就得讀完它 ⇒ 不得超過 Read 單次上限。
-#   · 指針稽核的 WHY：它會寫出「某 DEF-ID 現居某檔」的宣稱 ⇒ 歸檔動作會讓它失實。
-# 一份治理文件必然同時具備這兩種身分（它就是拿來寫證據與指針的），故任何「只該進其中
-# 一張」的成員都不存在。實測坐實：把兩張清單併成一張之後，`--check` 與體積閘門**雙雙
-# rc=0**、零誤紅（見交件報告 B1 的紅綠實測）。若未來真出現只該受其中一項管的檔，
-# 那時才拆成 `_SIZE_GUARDED_DOCS`／`_POINTER_AUDITED_DOCS` 兩個**不同名字**的常數並各
-# 寫 WHY——**絕不可**讓兩個同名常數有不同成員，那正是本筆缺陷的形狀。
-#
-# 消費端（本檔 `oversize_problems()`、`archive_defect_log._pointer_audit_files()`）
-# 綁的是**同一個 tuple 物件**：archive 那側寫成 `_GOVERNANCE_DOCS = gate._GOVERNANCE_DOCS`
-# 再匯出，並由 `TestGovernanceDocsAreOneSharedSsotObject` 以 `assertIs` 鎖住，形狀沿用
-# 本 repo 既有的 `_CELL_SPLIT_RE` 再匯出先例。
-#
-# 另一道機械鎖（`unregistered_governance_docs()`）：磁碟上凡符合姊妹檔命名慣例
-# （`_GOVERNANCE_DOC_GLOB`）而未登記於本常數者一律 rc=1 —— 「新增姊妹治理文件卻忘了
-# 登記」正是 r3 那次的真實路徑，不能只靠人記得。
+#   · **為何要管**：帳本兩層化後，完整證據（bug-injection 紅綠、逐條指令與輸出）住在這些
+#     檔裡，它們承擔與帳本**同等**的可讀性義務，卻一度完全不在任何體積守門內（實測曾距
+#     上限僅 1,181 bytes）。把資料搬到另一支檔就繞過守門＝守門綁在檔名而非義務上。
+#   · **為何具名而不 glob 整個 docs/**：「哪些檔承擔帳本級義務」是判斷，判斷要能被 review
+#     看見。新增治理文件時在此加一筆，並在該檔內寫明它為何屬於這一類。
+#   · **為何路徑不由 `_DEFECT_LOG.parent` 推導**：治理文件在哪與帳本主檔在哪是兩件事；
+#     綁在一起會讓測試把 `_DEFECT_LOG` mock 到暫存目錄時，這些檔被判為缺席而整批假紅。
+#   · **為何是一個集合而非「體積一張、指針一張」**：兩項義務綁同一個資格——複審者要逐條
+#     重驗就得讀完它（⇒ 體積），它會寫出「某 DEF-ID 現居某檔」的宣稱（⇒ 指針稽核）。
+#     曾經兩支工具各有一個同名 `_GOVERNANCE_DOCS` 而成員不同、各缺對方一支，於是新生的
+#     姊妹檔只進了其中一張清單。今日兩側綁的是**同一個 tuple 物件**（archive 側
+#     `_GOVERNANCE_DOCS = gate._GOVERNANCE_DOCS` 再匯出，`assertIs` 鎖住）。若未來真出現
+#     只受其中一項管的檔，才拆成兩個**不同名字**的常數並各寫 WHY——絕不可同名而成員不同。
+#   · 另一道守門（`unregistered_governance_docs()`）：磁碟上凡符合姊妹檔命名慣例
+#     （`_GOVERNANCE_DOC_GLOB`）而未登記者一律 rc=1——「新增姊妹檔卻忘了登記」正是實際
+#     發生過的路徑，不能只靠人記得。
 _GOVERNANCE_DOCS = (
     _REPO_ROOT / "docs" / "06_quality" / "CrossPlatform_R60_Fix_Evidence.md",
     _REPO_ROOT / "docs" / "06_quality" / "CrossPlatform_R60_Fix_Evidence_r3.md",
@@ -1182,6 +1144,9 @@ _GOVERNANCE_DOCS = (
     _REPO_ROOT / "docs" / "06_quality" / "CrossPlatform_R68_Scan_Findings.md",
     # R75 缺陷詳情面（即刻登記；本檔受 raw-line 棘輪零餘裕，上兩段註解各兩行併一行換出額度）。
     _REPO_ROOT / "docs" / "06_quality" / "CrossPlatform_R75_Review_Evidence.md",
+    # 本輪掃描發現清單（承擔同一個資格：複審者要逐條重驗就得讀完它 ⇒ 受體積守門；它逐筆
+    # 寫出「某缺陷現居何處」的座標宣稱 ⇒ 受指針稽核）。即刻登記，不等下一輪。
+    _REPO_ROOT / "docs" / "06_quality" / "CrossPlatform_R76_Scan_Findings.md",
 )
 
 # 姊妹治理文件的命名慣例：`docs/06_quality/CrossPlatform_*.md`。這**不是**把具名常數
@@ -1244,6 +1209,46 @@ _USAGE = (
     "  python3 tools/check_defect_log_crossref.py --unresolved-count  # 未結存量唯一量測入口"
 )
 
+#: `main()` 的檢查序（**執行順序即本序**，逐名對應下方每一個早退點）。
+#: 🔴 存在理由＝**早退遮蔽**：`main()` 任一道紅就 `return 1`，其後整批檢查一行都不會跑，
+#: 而輸出看起來只是「少了幾行」——消失的方向是「看起來變乾淨」，正是本 repo 最怕的假訊號
+#: 方向。實測：帳本目錄新增一份未登記的治理文件時，本工具只印 2 行、原本 8 筆孤兒 warning
+#: 全數靜默消失，讀者無從得知後面十來道根本沒跑。`_bail()` 依本序把「尚有幾道未執行」逐名
+#: 印出來，使早退**可見**而非隱形。新增／調動檢查時必須同步本序（兩邊由
+#: `tools/tests/test_check_defect_log_crossref.py::TestEarlyExitAnnouncesUnrunChecks` 綁定）。
+_CHECK_ORDER: tuple[str, ...] = (
+    "缺陷帳本存在", "缺陷帳本主檔體積", "帳本歸檔體積",
+    "具名治理文件涵蓋面與磁碟脫節", "具名治理文件體積",
+    "帳本表格欄位切分結構不合", "帳本解析結果非空", "合法首詞缺分類器對應",
+    "帳本狀態欄首詞不合法", "孤兒承接輪次（硬規則②）",
+    "未結列缺承接指派（硬規則② 後半句）", "存量豁免棘輪被撐大", "狀態欄非法狀態 token",
+    "掃描目標齊備", "缺陷帳本跨文件狀態不一致",
+)
+
+
+def _bail(header: str, problems: list[str] | None = None, detail: str = "") -> int:
+    """印出一道檢查的紅，並**明說後面還有哪幾道沒跑**，恆回 1。
+
+    `problems` 給定時以「`❌ <header>（N 筆）：` ＋ 逐條 `  - `」形態印；`detail` 供
+    不成清單的單句紅（體積、缺檔）使用。兩者可並用，也可只給其一。
+    """
+    if header not in _CHECK_ORDER:  # fail-loud：序漏了一項會讓殘餘清單說謊
+        print(f"🔴 內部錯誤：{header!r} 不在 _CHECK_ORDER 內，殘餘檢查清單不可信",
+              file=sys.stderr)
+    if problems is not None:
+        print(f"❌ {header}（{len(problems)} 筆）：", file=sys.stderr)
+        for p in problems:
+            print(f"  - {p}", file=sys.stderr)
+    if detail:
+        print(f"❌ {detail}", file=sys.stderr)
+    idx = _CHECK_ORDER.index(header) if header in _CHECK_ORDER else -1
+    rest = _CHECK_ORDER[idx + 1:] if idx >= 0 else ()
+    if rest:
+        print(f"🔴 早退：本次尚有 {len(rest)} 道檢查**未執行**（{'／'.join(rest)}）"
+              "——修好上列後請重跑，勿把「輸出只剩這幾行」讀成「其餘都乾淨」",
+              file=sys.stderr)
+    return 1
+
 
 def cli(argv: list[str]) -> int:
     """參數分派。刻意**不**寫進 `main()`：既有大批測試直接呼叫 `main()`，若在那裡讀
@@ -1262,15 +1267,13 @@ def cli(argv: list[str]) -> int:
 
 def main() -> int:
     if not _DEFECT_LOG.exists():
-        print(f"❌ 找不到缺陷帳本：{_DEFECT_LOG}", file=sys.stderr)
-        return 1
+        return _bail("缺陷帳本存在", detail=f"找不到缺陷帳本：{_DEFECT_LOG}")
     ledger_bytes = _DEFECT_LOG.stat().st_size
     if ledger_bytes >= _LEDGER_FAIL_BYTES:
-        print(f"❌ 缺陷帳本主檔 {ledger_bytes} bytes ≥ 輪替上限 {_LEDGER_FAIL_BYTES}"
-              "（DEF-99-001 政策 <256KB）——請將已結列搬遷至下一個 "
-              "AutoSDD_Defect_Log_archive_NN.md（參照 DEF-101-123 之 R9 輪替程序）",
-              file=sys.stderr)
-        return 1
+        return _bail("缺陷帳本主檔體積", detail=(
+            f"缺陷帳本主檔 {ledger_bytes} bytes ≥ 輪替上限 {_LEDGER_FAIL_BYTES}"
+            "（DEF-99-001 政策 <256KB）——請將已結列搬遷至下一個 "
+            "AutoSDD_Defect_Log_archive_NN.md（參照 DEF-101-123 之 R9 輪替程序）"))
     if ledger_bytes >= _LEDGER_WARN_BYTES:
         print(f"⚠️  缺陷帳本主檔 {ledger_bytes} bytes 已逼近輪替上限 "
               f"{_LEDGER_FAIL_BYTES}（DEF-99-001 政策），請規劃已結列搬遷 archive",
@@ -1280,10 +1283,9 @@ def main() -> int:
     for arch in sorted(_DEFECT_LOG.parent.glob("AutoSDD_Defect_Log_archive_*.md")):
         arch_bytes = arch.stat().st_size
         if arch_bytes >= _LEDGER_FAIL_BYTES:
-            print(f"❌ 帳本歸檔 {arch.name} {arch_bytes} bytes ≥ 上限 "
-                  f"{_LEDGER_FAIL_BYTES}（DEF-99-001 政策）——請拆分至下一個 archive_NN",
-                  file=sys.stderr)
-            return 1
+            return _bail("帳本歸檔體積", detail=(
+                f"帳本歸檔 {arch.name} {arch_bytes} bytes ≥ 上限 {_LEDGER_FAIL_BYTES}"
+                "（DEF-99-001 政策）——請拆分至下一個 archive_NN"))
         if arch_bytes >= _LEDGER_WARN_BYTES:
             print(f"⚠️  帳本歸檔 {arch.name} {arch_bytes} bytes 已逼近上限 "
                   f"{_LEDGER_FAIL_BYTES}（DEF-99-001 政策），請規劃拆分", file=sys.stderr)
@@ -1291,18 +1293,13 @@ def main() -> int:
     # 的檔在體積面與指針面同時是零檢查，先講「涵蓋面對不對」再講「涵蓋面內的檔多大」。
     unregistered = unregistered_governance_docs()
     if unregistered:
-        print(f"❌ 具名治理文件涵蓋面與磁碟脫節（{len(unregistered)} 筆）：", file=sys.stderr)
-        for u in unregistered:
-            print(f"  - {u}", file=sys.stderr)
-        return 1
+        return _bail("具名治理文件涵蓋面與磁碟脫節", unregistered)
     # 具名治理文件的體積（DEF-101-587）——與帳本同一條物理界線，見 `oversize_problems()`。
     gov_fails, gov_warns = oversize_problems(list(_GOVERNANCE_DOCS))
     for w in gov_warns:
         print(f"⚠️  治理文件 {w}", file=sys.stderr)
     if gov_fails:
-        for f in gov_fails:
-            print(f"❌ 治理文件 {f}", file=sys.stderr)
-        return 1
+        return _bail("具名治理文件體積", [f"治理文件 {f}" for f in gov_fails])
     ledger_text = _DEFECT_LOG.read_text(encoding="utf-8-sig")
 
     # 欄位切分結構硬閘（Pkg-P6）——擺在**所有**解析之前：表頭定位或欄數一旦不對，
@@ -1310,16 +1307,13 @@ def main() -> int:
     # （修復前實測：狀態欄空白 + 分流去向以 `open` 開頭 ⇒ 兩道檢查同時零訊號）。
     arity_problems = row_arity_problems(ledger_text)
     if arity_problems:
-        print(f"❌ 帳本表格欄位切分結構不合（{len(arity_problems)} 筆）：", file=sys.stderr)
-        for p in arity_problems:
-            print(f"  - {p}", file=sys.stderr)
-        return 1
+        return _bail("帳本表格欄位切分結構不合", arity_problems)
 
     ledger = _load_ledger_status()
     if not ledger:
-        print("❌ 缺陷帳本解析結果為空 — 表格格式可能已改版導致比對邏輯失效，"
-              "請同步本腳本的 _ROW_RE / 欄位解析", file=sys.stderr)
-        return 1
+        return _bail("帳本解析結果非空", detail=(
+            "缺陷帳本解析結果為空 — 表格格式可能已改版導致比對邏輯失效，"
+            "請同步本腳本的 _ROW_RE / 欄位解析"))
 
     # 狀態欄首詞合法值硬斷言（SA-R60R2-06）——擺在跨文件比對**之前**：帳本自身的狀態欄
     # 若寫得不合法，跨文件一致性的結論就建立在含糊的基礎上（round 1 已證 `partially-fixed`
@@ -1329,17 +1323,11 @@ def main() -> int:
     # 「狀態含糊」桶。先確定詞彙表本身自洽，再談每一列合不合詞彙表。
     orphan_problems = unclassifiable_first_word_problems()
     if orphan_problems:
-        print(f"❌ 合法首詞缺分類器對應（{len(orphan_problems)} 筆）：", file=sys.stderr)
-        for p in orphan_problems:
-            print(f"  - {p}", file=sys.stderr)
-        return 1
+        return _bail("合法首詞缺分類器對應", orphan_problems)
 
     first_word_problems = status_first_word_problems(ledger_text)
     if first_word_problems:
-        print(f"❌ 帳本狀態欄首詞不合法（{len(first_word_problems)} 筆）：", file=sys.stderr)
-        for p in first_word_problems:
-            print(f"  - {p}", file=sys.stderr)
-        return 1
+        return _bail("帳本狀態欄首詞不合法", first_word_problems)
 
     # 孤兒承接輪次硬閘（硬規則②，R67 落地）——擺在跨文件比對**之前**、首詞檢查**之後**：
     # 首詞合法是本檢查的前提（要先能可靠判斷「這列結案了沒」），而本檢查與跨文件一致性
@@ -1348,10 +1336,7 @@ def main() -> int:
     # （Scan-H 必跑項 #5：稽核工具必須有閘門看它的 rc）。
     orphan_problems = orphan_backlog_problems(ledger_text)
     if orphan_problems:
-        print(f"❌ 孤兒承接輪次（硬規則②，{len(orphan_problems)} 筆）：", file=sys.stderr)
-        for p in orphan_problems:
-            print(f"  - {p}", file=sys.stderr)
-        return 1
+        return _bail("孤兒承接輪次（硬規則②）", orphan_problems)
 
     # 硬規則② 後半句（二擇一，R68）——緊接在輪號比大小之後：兩者是**同一條規則的兩半**，
     # 前半判「指向的輪次夠不夠新」，後半判「到底有沒有指向任何東西」。少了後半，
@@ -1376,11 +1361,7 @@ def main() -> int:
         unres_fails, unres_warns = _ledger_index.unresolved_ceiling_problems(ledger)
         unpinned_problems += unres_fails
     if unpinned_problems:
-        print(f"❌ 未結列缺承接指派（硬規則② 後半句，{len(unpinned_problems)} 筆）：",
-              file=sys.stderr)
-        for p in unpinned_problems:
-            print(f"  - {p}", file=sys.stderr)
-        return 1
+        return _bail("未結列缺承接指派（硬規則② 後半句）", unpinned_problems)
 
     # 棘輪本體（R69 假鎖修正，`DEF-101-731`）——**無條件**跑：這是對原始碼常數的斷言，
     # 與餵哪一本帳本
@@ -1389,19 +1370,13 @@ def main() -> int:
     # 的實測復現）。
     ceiling_problems = grandfather_ceiling_problems()
     if ceiling_problems:
-        print(f"❌ 存量豁免棘輪被撐大（{len(ceiling_problems)} 筆）：", file=sys.stderr)
-        for p in ceiling_problems:
-            print(f"  - {p}", file=sys.stderr)
-        return 1
+        return _bail("存量豁免棘輪被撐大", ceiling_problems)
 
     # 狀態 token 變體硬閘（R68）——放在首詞鎖之後：首詞鎖只看第一個詞，
     # `open watch（R55）→ closed-by-verification@R56` 這種訂正 token 躲在後面。
     variant_problems = status_variant_problems(ledger_text)
     if variant_problems:
-        print(f"❌ 狀態欄非法狀態 token（{len(variant_problems)} 筆）：", file=sys.stderr)
-        for p in variant_problems:
-            print(f"  - {p}", file=sys.stderr)
-        return 1
+        return _bail("狀態欄非法狀態 token", variant_problems)
 
     # 以下三組是 warning（不 fail）——它們指的都是**帳本品質提示**而非跨文件矛盾，
     # 硬擋會製造假紅。但必須每次都印：它們原本全部只活在 docstring 或 `--plan` 裡，
@@ -1434,18 +1409,14 @@ def main() -> int:
     all_problems: list[str] = []
     for target in _CROSSREF_TARGETS:
         if not target.exists():
-            print(f"❌ 找不到掃描目標：{target}", file=sys.stderr)
-            return 1
+            return _bail("掃描目標齊備", detail=f"找不到掃描目標：{target}")
         all_problems.extend(_scan_target(target, ledger, archive_status))
         # R69 DEF-101-735：`_scan_target` 只認「ID 緊接括號」，散文式「<ID> …結案」它看不見。
         all_problems.extend(closure_claim_problems(
             target.name, target.read_text(encoding="utf-8-sig"), {**archive_status, **ledger}))
 
     if all_problems:
-        print(f"❌ 缺陷帳本跨文件狀態不一致（{len(all_problems)} 筆）：", file=sys.stderr)
-        for p in all_problems:
-            print(f"  - {p}", file=sys.stderr)
-        return 1
+        return _bail("缺陷帳本跨文件狀態不一致", all_problems)
 
     vague_note = f"（另 {len(vague_ids)} 筆狀態含糊，見 warning）" if vague_ids else ""
     print(f"✅ 缺陷帳本跨文件狀態一致：帳本 {len(ledger) - len(vague_ids)} 筆有效狀態紀錄"

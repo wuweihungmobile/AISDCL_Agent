@@ -22,11 +22,24 @@
   3. 大小寫碰撞：兩 tracked 路徑正規化鍵（NFC → lowercase）相同但原字串不同
      （NTFS 大小寫不敏感 → checkout 時互相覆蓋）
   4. MAX_PATH 保守長度閘（DEF-101-039）：Windows 未開 core.longpaths 時絕對路徑上限
-     MAX_PATH=260 UTF-16 單位（含結尾 NUL，可用 259）；預留 clone 前綴 59 字元＋NUL
-     （C:\\Users\\<user>\\...\\<repo>\\，259−200＝59）→ repo 相對路徑 >200 字元 fail、
+     MAX_PATH=260 UTF-16 單位（含結尾 NUL，可用 259）→ repo 相對路徑 >200 字元 fail、
      >180 字元 warn（不影響退出碼）。長度＝Unicode code point 數（len()；BMP 字元＝
      1 UTF-16 單位；hook 版以「刪 UTF-8 連續位元組計數」達成同語意且 locale 無關；
      astral 字元低估 1 單位屬可忽略邊角）。
+     🔴 **R76-01：這道門檻隱含一個從未寫下的假設，現改以算式表達並每次執行都印出來。**
+     兩個面各自的關係式（根前綴＝checkout 根**含結尾分隔符**的長度）：
+         檔案面   根前綴 ≤ 259 − 最長 tracked 相對路徑
+         目錄面   根前綴 ≤ 247 − 最深 tracked 相對目錄（CreateDirectoryW 上限 248 含 NUL）
+     fail 門檻 200 只保證「根前綴 ≤ 259 − 200」這一種 checkout；那個減出來的數字就是
+     本檔此前寫死在散文裡的「預留 clone 前綴」，它**不是** repo 現況能撐的長度。現況
+     兩個面的實際值一律由 `_clone_prefix_budget_lines()` 現算現印，本 docstring 不寫死
+     任何當下的數字（寫下即開始過期——同 ONBOARDING §7 表①「受管值不得寫進散文」）。
+     🔴 **本閘測不到、也擋不住的那一半**：它量的是 **repo 相對長度**，對「checkout 根
+     前綴有多長」結構上失明。R76-01 實測：Windows 上 `git clone` 到 168 字元的目錄、
+     未帶 `-c core.longpaths=true` ⇒ rc=128 且 27,523 支 tracked 檔只落地 301 支
+     （半套 checkout，連 `tools/bootstrap.ps1` 都不在磁碟上）。而該旗標查下來只存在於
+     **已 clone 成功**的那個 repo 的 `--local` config（`--system`／`--global` 皆 rc=1）
+     ⇒ fresh clone 零保護。開箱指引見 ONBOARDING.md §2 第 0 步。
   5. 目錄段層級碰撞（R67-A2）：把每條 tracked 路徑的**每一層目錄前綴**收集後以同一組
      正規化鍵分群，同鍵而拼法不同即違規。第 3 項只比「整條路徑」，對「目錄段拼法不同、
      basename 完全不重複」結構上失明——本 repo 曾因此長出 `docs/04_planning/Archive/`
@@ -55,8 +68,13 @@ precompose_argv、走目錄走訪有 readdir precompose（實測：磁碟 NFD �
 機械釘住。第 5 項（目錄段碰撞）則**有**鏡射進 hook（bash 3.2 相容實作），因為那條路徑
 開發者在 mac/Win 上按 tab 補全就會踩到。
 
-已知侷限：大小寫折疊用 str.lower()（hook 的 grep -iFx 在 UTF-8 locale 亦
-fold 非 ASCII 字母，方向一致）。檔名內嵌換行/控制字元非缺口：git 對含控制字元
+已知侷限：大小寫折疊用 str.lower()（Unicode 全覆蓋）。🔴 R76-10 訂正：本段原稱
+「hook 的 grep -iFx 在 UTF-8 locale 亦 fold 非 ASCII 字母，方向一致」——hook 側自
+R76-10 起已改為 `tr '[:upper:]' '[:lower:]'` ＋不帶 `-i` 的 `grep -Fx`（`-i`＋`-F`
+在無 UTF-8 locale 時 SIGABRT，而 `|| true` 把崩潰吞成「沒有碰撞」）。`tr` **只折
+ASCII** ⇒ 兩側折疊面自此**刻意不對稱**：非 ASCII 字母的大小寫碰撞由本 CI 版的全量
+tracked 掃描獨力兜底。這不是退化——原本那條「hook 也折得到非 ASCII」的路，成立條件
+正好就是會讓 grep 崩潰的那個 locale。檔名內嵌換行/控制字元非缺口：git 對含控制字元
 路徑恆 C-quote（不受 core.quotepath=false 影響），hook 逐行讀所見之引號化表徵
 含 " 與 \\ 觸發第 1 項攔截；本腳本 -z 讀原始路徑由控制字元檢查攔截——兩側皆
 封閉（第五輪 SD/QA 雙實證）。`_tracked_files()` 對 `git ls-files` 輸出以
@@ -130,7 +148,9 @@ _RESERVED_RE = re.compile(
 )
 
 # MAX_PATH 保守長度閘（DEF-101-039）：
-# 可用 259（260 含 NUL）− 59（clone 前綴預留）＝ 200 fail；180 warn
+# 可用 259（260 含 NUL）− clone 前綴預留 ＝ 200 fail；180 warn
+# （預留值不再寫死在此，由 `_clone_prefix_budget_lines()` 以 `_MAX_PATH_USABLE - _LEN_FAIL`
+#  算出並印出——R76-01：那個數字是門檻的**衍生物**，寫死一份就是第二個會漂移的真相）
 # 🔴 R68 三站點長度政策（本處是第 3 站，治理 tracked git **整條相對路徑**）：另兩站是
 # `AISDLC_SDD/scripts/component_sanitizer.py::_MAX_COMPONENT_LEN=80`（FSM state 檔名的
 # **單一 component**，為前後綴留餘裕）與 `AutoClaude/autoclaude/utils/logger.py`（runtime
@@ -271,6 +291,45 @@ def _scan_violations(files: list[str]) -> tuple[list[str], list[str]]:
     return violations, warnings
 
 
+# ── R76-01：checkout 根前綴預算（把隱含假設變成每次執行都印出來的量測值）──────────
+# 兩個 Windows 上限都以「含結尾 NUL 的字串上限」計，減 1 即可用字元數：
+#   檔案 CreateFileW    MAX_PATH = 260 ⇒ 可用 259
+#   目錄 CreateDirectoryW      248 ⇒ 可用 247（MAX_PATH−12，替 8.3 短檔名留位）
+# 「根前綴」一律指 **含結尾分隔符** 的 checkout 根（`C:\\Users\\u\\repo\\` ＝ 20），
+# 這樣 `根前綴 + 相對路徑` 就是完整絕對路徑，算式不必再另外記一個 ±1。
+_MAX_PATH_USABLE = 259
+_MAX_DIRPATH_USABLE = 247
+
+
+def _deepest_dir_len(files: list[str]) -> int:
+    """最深 tracked **目錄**相對路徑的長度（無目錄時 0）。
+
+    與「最長路徑」是兩個不同的量：目錄面的上限比檔案面低 12，故最長檔案路徑所在的
+    目錄不一定就是綁住 clone 的那一個（R76-01 的實測順序正是先炸在建目錄那一步）。
+    """
+    return max((len(d) for f in files for d in _dir_prefixes(f)), default=0)
+
+
+def _clone_prefix_budget_lines(files: list[str]) -> list[str]:
+    """現況能安全 checkout 的「根前綴」上限——算式與代入值一起印，不寫死任何現值。"""
+    longest = max((len(f) for f in files), default=0)
+    deepest = _deepest_dir_len(files)
+    file_side = _MAX_PATH_USABLE - longest
+    dir_side = _MAX_DIRPATH_USABLE - deepest
+    gate_side = _MAX_PATH_USABLE - _LEN_FAIL
+    return [
+        "📏 checkout 根前綴預算（含結尾分隔符，UTF-16 單位；未開 core.longpaths 時）：",
+        f"   檔案面 {_MAX_PATH_USABLE} − 最長 tracked 路徑 {longest} = {file_side}",
+        f"   目錄面 {_MAX_DIRPATH_USABLE} − 最深 tracked 目錄 {deepest} = {dir_side}",
+        f"   ⇒ 現況根前綴上限 = min({file_side}, {dir_side}) = {min(file_side, dir_side)} 字元",
+        f"   fail 門檻 {_LEN_FAIL} 對應的根前綴預留 = {_MAX_PATH_USABLE} − {_LEN_FAIL}"
+        f" = {gate_side} 字元（本閘只保證這一種 checkout；上一行才是 repo 現況）",
+        "   🔴 本閘量的是 repo **相對**長度，對 checkout 根前綴結構上失明 ⇒ clone 一律帶"
+        " `-c core.longpaths=true`（R76-01：168 字元的根 → 27,523 檔只落地 301 檔、"
+        "rc=128、無聲半套 checkout）。開箱指引：ONBOARDING.md §2 第 0 步",
+    ]
+
+
 def _tracked_files() -> list[str]:
     out = subprocess.run(
         ["git", "-c", "core.quotepath=false", "ls-files", "-z"],
@@ -287,6 +346,11 @@ def _tracked_files() -> list[str]:
 def main() -> int:
     files = _tracked_files()
     violations, warnings = _scan_violations(files)
+
+    # 預算區塊**先印且無條件印**：它是本閘的射程自陳，違規與否都要看得到
+    # （R76-01：這道閘擋不住的那一半，只有寫成輸出才有人會讀到）。
+    for line in _clone_prefix_budget_lines(files):
+        print(line)
 
     for w in warnings:
         print(f"⚠ {w}", file=sys.stderr)

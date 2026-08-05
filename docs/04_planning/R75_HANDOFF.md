@@ -91,6 +91,11 @@ push 的那一瞬間前進：本機 pre-push 時它還指上一個 commit（綠�
 ## 5. 交給 R76 的事（依優先序）
 
 ### 5-1 🔴 需掌舵者提權（R75 無法代做，已連續兩輪卡住）
+🔴 **R76 回執：本項已完成**——掌舵者提權套用後，`python tools/check_scheduled_task_drift.py`
+當回合實測 `status=ok`／**rc=0**（兩支任務各 7 項全符），`run_local_nightly.ps1` 的
+`status=drift` 具名豁免亦已於 R76 移除（白名單只剩 `ok`／`skip`）。以下為 R75 當時的原文，
+逐字保留為時代快照，**不要照著再跑一次**（無害但無事可做）。
+
 排程漂移偵測器 `python tools/check_scheduled_task_drift.py` 回 rc=1、5 項漂移。
 其中兩項（`ExecutionTimeLimit=PT72H` 應為 `PT4H`、`MultipleInstances=IgnoreNew` 應為 `StopExisting`）
 **已實際造成一整天的觀察期進帳消失**（08-01 那輪跑了 35.6 小時，UTC 08-02 三軌零進帳）。
@@ -106,6 +111,33 @@ powershell -ExecutionPolicy Bypass -File <repo 根>\tools\install_windows_nightl
 （該處已寫下可判定的解除條件並會在 `status=ok` 出現時主動印出提示，不靠任何人記得）。
 
 ### 5-2 觀察期收尾（不需 code，只需拍板）
+
+> 🔴 **R76 回執（2026-08-05）— 本節下方原文的四軌狀態已被 R76 自己推翻，先讀這裡**：
+> R76 PKG-D 依 R76-13 **收緊了兩支 GA 判準**（新增 staleness ＋ 窗內連續性：last-30 筆的
+> 日曆跨度必須 ≤ 40 天）。方向正確、**不得放寬**——原判準只數筆數，於是「44 筆散在 58 個
+> 日曆天、中間有 12 天全黑」也算達標，那不是觀察期要證明的事。代價是狀態翻轉：
+>
+> | 軌 | R75 原文 | **R76 現查（當回合實跑 `--json`）** | rc |
+> |---|---|---|---|
+> | mutation | ✅ | ✅（`locked=true`，源碼未動） | 0 |
+> | AC4 | ✅ | ✅ | 0 |
+> | obs GA | ✅ 達標 | ❌ `status=sparse green_streak=44/30 span=58/40 max_gap=12d` | **1** |
+> | drift GA | ⏳ 差 2 筆 | ❌ `status=sparse green_streak=28/30 span=65/40 max_gap=12d` | **1** |
+>
+> **新的可判定終點**：綁住兩軌的不再是 `green_streak` 而是 **span**，所以「再等兩天」
+> 這個心智模型整個作廢（drift 補滿那 2 筆之後 span 仍約 63 天）。以兩支工具的判準公式
+> 對現有帳本日期逐日試算：**obs 需再連續進帳 17 晚（最早 2026-08-21）／drift 18 晚
+> （最早 2026-08-22）**，前提是每晚 22:30 排程不漏跑——**中間漏一晚就往後推**，因為
+> 連續性本身現在就是判準。
+>
+> **拍板時點因此順延**，且在兩軌轉綠之前**不得降頻**（每週採集結構上永遠滿足不了
+> span ≤ 40 天這一條）。⚠️ `AutoClaude/.g0_readiness.json` 是每晚重生的量測檔，可能
+> **早於**本次判準變更 —— 讀它之前先看 `generated_at`；今晚 nightly 跑完它會自己把
+> obs 翻成 `pass=false`，不必手改。詳見
+> `docs/06_quality/Scheduled_Jobs_Lifecycle_Review_R75.md` §0 的 R76 全域訂正塊。
+
+以下為 R75 當時的原文，逐字保留為時代快照：
+
 G0 四軌：mutation ✅／AC4 ✅／obs GA ✅／**drift GA 差 2 筆**（一天最多入帳 1 筆，同 UTC 日去重）。
 機器可讀憑證：`AutoClaude/.g0_readiness.json`（本輪起，已 gitignored ⇒ 只存在於產出它的機器）。
 四軌全綠後由 PM 拍板；建議**降頻而非移除**——AC4 有 `STALENESS_MAX_DAYS=30`，

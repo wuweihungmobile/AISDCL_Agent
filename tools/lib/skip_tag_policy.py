@@ -184,9 +184,36 @@ TREE_FLOOR_RATIO = 0.8
 # （跨界改動＝並行包互踩假紅）。棘輪讓「新增未標籤站點」當場紅、同時不假裝存量已清乾淨
 # ——它是**可見的欠債**，不是豁免。判準刻意是**相等**而非「不得增加」：任一方向的變動
 # 都必須有人回來改這張表，否則它會像 `MIN_TESTS` 那樣腐化。
+#
+# 🔴 R76（R76-15 ①）：`AutoClaude/tests` 由 6 下修為 **0**——那 6 筆已於本輪補標
+# （`test_evaluator_kill_tree.py` ×3／`test_perception.py`／
+# `test_perception_platform_honesty.py`〔darwin 專屬故用 `[MAC-NATIVE-ONLY]`〕／
+# `tools/test_run_local_nightly_sh_static.py`）。**為何非補不可**：那 6 筆是
+# `AutoClaude/tests` 唯一的反方向站點，未標籤 ⇒ `conftest.py::non_windows_native_skips()`
+# 在 Windows 上恆回空清單 ⇒ R74 為此新增的「本次跑在 Windows 上失去的覆蓋」摘要區塊
+# **結構性零輸出**，而本表把欠債凍結成 6 讓棘輪同時恆綠 ⇒ 一個為了看見覆蓋損失而建的
+# 機制，與看著它的鎖，兩者一起沉默。
 _POSIX_TAG_RATCHET: dict[str, int] = {
     "tools/tests": 1,
-    "AutoClaude/tests": 6,
+    "AutoClaude/tests": 0,
+    "AISDLC_SDD/scripts/tests": 1,
+}
+
+#: 🔴 R76（R76-15 ①）：上表各格的 **shrink-only 天花板**（基線只准下修）。
+#:
+#: 為何上表自己不夠：它的判準是「相等」，而 `got > want` 的失敗訊息會誠實列出兩條
+#: 出口，其中一條是「把基線改成實測值」。相等判準對那條出口**零阻力**——新增未標籤
+#: 站點後把 6 改成 7，鎖當場全綠，欠債就這樣被合法地加大，而且看起來像在維護基線。
+#: 本表讓「加大欠債」變成必須**同時**改兩個地方的顯式動作：一個會出現在 diff 裡、
+#: 需要在 PR 說明的決定，而不是照著失敗訊息把數字改大就沒事。
+#:
+#: 誠實劃界：本表擋的是「上修基線」，擋不了「同一個 commit 把天花板也一起上修」——
+#: 兩個常數住同一支檔，沒有任何機械物能阻止那個動作。本表買到的是**可見度**
+#: （上修天花板是具名的、可被複審點名的），不是不可能性。真正的不可能性只有把欠債
+#: 清成 0（`AutoClaude/tests` 本輪已做到）。
+_POSIX_TAG_RATCHET_CEILING: dict[str, int] = {
+    "tools/tests": 1,
+    "AutoClaude/tests": 0,
     "AISDLC_SDD/scripts/tests": 1,
 }
 
@@ -267,8 +294,27 @@ def tree_floor_problems(counts: Mapping[str, int]) -> list[str]:
 
 
 def posix_tag_ratchet_problems(counts: Mapping[str, int]) -> list[str]:
-    """純函式：實測未標籤數與棘輪基線的差異；空清單＝合格。"""
+    """純函式：實測未標籤數與棘輪基線的差異；空清單＝合格。
+
+    R76 增第二向（與 `counts` 無關、只看兩張常數表）：基線不得高於 shrink-only
+    天花板 `_POSIX_TAG_RATCHET_CEILING`。沒有這一向，「相等」判準的合法修法之一
+    就是把基線改大，欠債可以無聲增長（見該常數上方的 WHY）。
+    """
     problems: list[str] = []
+    for tree in sorted(set(_POSIX_TAG_RATCHET) | set(_POSIX_TAG_RATCHET_CEILING)):
+        want = _POSIX_TAG_RATCHET.get(tree)
+        ceiling = _POSIX_TAG_RATCHET_CEILING.get(tree)
+        if want is None or ceiling is None:
+            problems.append(
+                f"{tree}：只出現在 _POSIX_TAG_RATCHET／_POSIX_TAG_RATCHET_CEILING 其中一張表"
+                f"（基線 {want}／天花板 {ceiling}）——兩表必須逐格對位，否則天花板形同虛設"
+            )
+        elif want > ceiling:
+            problems.append(
+                f"{tree}：基線 {want} 高於 shrink-only 天花板 {ceiling}——"
+                "反方向標籤欠債只准變少。要真的加大欠債，必須在同一個 commit 顯式上修 "
+                f"skip_tag_policy._POSIX_TAG_RATCHET_CEILING['{tree}'] 並在 PR 說明理由"
+            )
     for tree in sorted(set(counts) | set(_POSIX_TAG_RATCHET)):
         want = _POSIX_TAG_RATCHET.get(tree)
         got = counts.get(tree)
@@ -280,12 +326,24 @@ def posix_tag_ratchet_problems(counts: Mapping[str, int]) -> list[str]:
         elif got is None:
             problems.append(f"{tree}：在基線表內卻不在掃描面（基線 {want}）——射程疑似縮小")
         elif got != want:
-            verb = "新增了未標籤站點" if got > want else "已補標（請下修基線）"
+            if got > want:
+                verb = "新增了未標籤站點"
+                fix = (
+                    f"在該 skip 的 reason 最前面加 {POSIX_NATIVE_SKIP_TAG}"
+                    f"（darwin 專屬用 {MAC_NATIVE_SKIP_TAG}）。"
+                    "🔴 R76 起「把基線改大」不再是等價出口——基線受 shrink-only 天花板"
+                    "管轄，改大它必須同時顯式上修 _POSIX_TAG_RATCHET_CEILING"
+                )
+            else:
+                verb = "已補標（請下修基線）"
+                fix = (
+                    f"把 skip_tag_policy._POSIX_TAG_RATCHET['{tree}'] 與 "
+                    f"_POSIX_TAG_RATCHET_CEILING['{tree}'] **一起**改為 {got}"
+                    "（天花板不跟著下修＝把剛還掉的欠債額度留著，日後可無聲用回去）"
+                )
             problems.append(
                 f"{tree}：未標籤的「Windows 上會 skip」站點實測 {got}、基線 {want}"
-                f"——{verb}。修法：在該 skip 的 reason 最前面加 "
-                f"{POSIX_NATIVE_SKIP_TAG}（darwin 專屬用 {MAC_NATIVE_SKIP_TAG}），"
-                f"或把 skip_tag_policy._POSIX_TAG_RATCHET['{tree}'] 改為 {got}"
+                f"——{verb}。修法：{fix}"
             )
     return problems
 

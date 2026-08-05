@@ -81,9 +81,17 @@ class TestHotkeyRegisterHonesty:
             live.join(timeout=2)
 
 
-@pytest.mark.skipif(sys.platform != "darwin", reason="macOS 真機專屬（非 Darwin 上 skip 而非恆綠）")
 @pytest.mark.skipif(
-    not hotkey_handler._KEYBOARD_AVAILABLE, reason="keyboard 套件未安裝"
+    sys.platform != "darwin",
+    reason="[MAC-NATIVE-ONLY] macOS 真機專屬（非 Darwin 上 skip 而非恆綠）",
+)
+@pytest.mark.skipif(
+    not hotkey_handler._KEYBOARD_AVAILABLE,
+    # 🔴 標籤必須掛在**這一層**（R76 四方複審 SD-03）：pytest 疊多層 skipif 時只印最上
+    # 層命中的那個 reason，而 R76 把 `keyboard` 移進 `[hotkey]` extra 之後，實際命中的
+    # 就是這一層（不是上面那個 darwin 層）。沒有標籤 ⇒ 這支從 skip 盤點的反方向摘要裡
+    # 整個消失，「本輪唯一一筆淨覆蓋損失」會靜默發生。
+    reason="[MAC-NATIVE-ONLY] keyboard 套件未安裝（需 `.[hotkey]` extra；macOS CI 已裝）",
 )
 @pytest.mark.skipif(
     hasattr(os, "geteuid") and os.geteuid() == 0, reason="root 下 keyboard 可正常監聽"

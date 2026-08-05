@@ -1639,11 +1639,15 @@ class TestR67AcCoverage(unittest.TestCase):
         §4.2 判定規則 2：AC 每一筆上升必須在同一 commit 內具名對應一筆 UEP 下降。
         R67 前 AC 完全無值鎖（實測 AC 48→49 全綠）；現在上升即紅、下降亦紅（提醒
         同步下修以維持張力）。R67 現值 48 = 14+7+5+18+2+1+1。
+        R76 現值 47 = 14+7+5+**17**+2+1+1：`_SINGLE_SIDED_EXEMPT` 由 18 降為 17——
+        reschedule_g0_gatecheck.ps1 整支刪除（真孤兒：它唯一能做的事是重排
+        AutoClaude_SD09_G0_GateCheck，而該工作於 R71 已從本機移除）。方向是**下降**，
+        非規則 2 所管的上升，故不需具名對應 UEP 下降（UEP 維持 5）。
         """
         ac = sum(len(reg) for reg in m.ac_registries().values())
         self.assertEqual(
-            ac, 48,
-            f"AC 由 48 變為 {ac} —— 上升請依 ADR-XPLAT-002 §4.2 規則 2 具名對應一筆 "
+            ac, 47,
+            f"AC 由 47 變為 {ac} —— 上升請依 ADR-XPLAT-002 §4.2 規則 2 具名對應一筆 "
             f"UEP 下降後同步本釘選值；下降請一併下修本值",
         )
 

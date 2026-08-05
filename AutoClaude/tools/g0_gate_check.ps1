@@ -1,6 +1,15 @@
 # g0_gate_check.ps1 -- SD_09 W0 G0 gate check (improving_34 schedule artifact)
+# NO SCHEDULED CONSUMER (R76 note): the one-time task 'AutoClaude_SD09_G0_GateCheck' that used
+#   to fire this script was removed from the machine in R71. Measured 2026-08-05 on this host:
+#   Get-ScheduledTask | Where-Object TaskName -like 'AutoClaude*' -> AutoClaude_Nightly,
+#   AutoClaude_WindowsSmoke only. The live G0 carrier is run_local_nightly.ps1's four-track G0
+#   verdict (:1647+) plus the machine-readable certificate .g0_readiness.json (:1772+).
+#   This script is KEPT on purpose as the manual re-check / human-readable VERDICT branch
+#   (run_local_nightly.ps1:1714 points readers here), NOT as dead code -- but do not assume
+#   anything runs it for you. Beware the known divergence recorded in run_local_nightly.ps1:812:
+#   the "#3 observability/drift" label below actually only checks observability.
 # Purpose: re-verify observation gates #1/#2/#3; write result to logs/.
-#   Run manually anytime, or fired once by a one-time schtasks on 2026-06-26.
+#   Run manually anytime (the 2026-06-26 one-time schtasks that used to fire it is gone).
 # Zero-trust: only reads real local jsonl honestly; never fabricates nightly / inflates progress.
 # Path: derived from $PSScriptRoot (this script lives in <repo>/AutoClaude/tools/), so it
 #   works on any machine / drive / clone location (no hardcoded d:\ absolute path).

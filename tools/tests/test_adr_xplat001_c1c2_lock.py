@@ -3122,7 +3122,10 @@ def live_triplet() -> Triplet:
 # `test_the_frozen_pair_matches_the_live_values` 強制（多退少補都紅），所以「凍結值停在舊
 # 高點、餘裕變成破口」在本檔結構上留不住（同 SA-R67-08 對可被自由調高的假棘輪的裁決）。
 _FROZEN_SCAN_H_UEP = 5
-_FROZEN_SCAN_H_AC = 48
+# R76：AC 由 48 下修為 47——`_SINGLE_SIDED_EXEMPT` 少一筆（reschedule_g0_gatecheck.ps1
+# 整支刪除，真孤兒）。方向是**下降**＝收斂，非 §4.2 規則 2 所管的上升情形；下降時本值
+# 必須跟著降，否則凍結值停在舊高點、餘裕就成了日後無聲加回一筆豁免的破口。
+_FROZEN_SCAN_H_AC = 47
 
 
 def synthetic_at_par() -> Triplet:

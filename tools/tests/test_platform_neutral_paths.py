@@ -1999,5 +1999,464 @@ class TestSkipDirectionAndTagSymmetry(unittest.TestCase):
             )
 
 
+# ══════════════════════════════════════════════════════════════════════════════
+# R76 — 第七道判準：文字讀寫必須指名 encoding（PKG-E 標的三；R76-09）
+# ══════════════════════════════════════════════════════════════════════════════
+# WHY（沿用本檔的掃描根／標記／stale 慣例，不另開新檔——`_FROZEN_GUARD_FILE_COUNT`
+# 明文要求新增鎖併入既有檔）：
+#   `Path.read_text()`／`write_text()`／`open()` 不帶 `encoding=` 時，用的是**本機
+#   locale 預設編碼**。mac 上那是 UTF-8，所以在 mac 寫、在 mac 跑，永遠是綠的；
+#   同一行程式碼在 zh-TW Windows 上是 cp950，讀到任何非 Big5 字元就 `UnicodeDecodeError`。
+#   這是「mac→Windows 落差」最典型的一整類缺陷，而 R76 掃描實測它**零靜態掃描器**。
+#
+# 🔴 更麻煩的是它連**執行期**都看不見：根 `.claude/settings.json` 設了 `PYTHONUTF8=1`，
+#   於是 agent 驅動的開發迴圈裡每一支 python 都跑在 UTF-8 模式下、這類缺陷在本機一次
+#   都不會現形（而另有一道鎖在強制那個值存在）。把區分本機與雲端的變數全域正規化掉，
+#   結果就是**唯一能看見它的環境被關掉了** ⇒ 只剩靜態判準這一條路。
+#
+# 判準（AST，非逐行文字）：
+#   · `<expr>.read_text(...)`／`<expr>.write_text(...)` — 恆為文字 I/O，必須有 encoding。
+#   · `open(...)`（builtin 形態）與 `<expr>.open(...)`（pathlib 形態）— mode 帶 `b`
+#     即二進位，出射程；其餘要求 encoding。
+#   · encoding 可以是關鍵字，也可以是**位置引數**（四種呼叫形態的位置各不相同，見
+#     `_ENC_POS`）——只認關鍵字會對合法寫法製造假紅。
+#   · 行尾 `<標記> <WHY>` 豁免（標記字串見 `_ENCODING_OK_MARKER`）＋ stale 自檢：
+#     標記在而違規不在（或 WHY 留空）即紅，防清單腐化。
+#
+# 🔴 刻意劃界（誠實記錄，勿超譯）：
+#   ❌ **mode 是非字面值運算式時出射程**（`open(p, mode_var)`）——靜態判不出它是不是
+#      二進位，硬判會製造假紅。實測本 repo 現況零此形態；這是**已知可繞道**，不是沒想到。
+#   ❌ **`**kwargs` 轉發視為已帶 encoding**（同樣判不出來，且該形態通常是包裝函式）。
+#   ❌ **非 pathlib 的 `.open(`**（`os.open` 連 encoding 參數都沒有、`gzip`/`tarfile`/
+#      `zipfile` 預設二進位）由 `_NON_TEXT_OPEN_OWNERS` 排除。R76 落地前實測：不排除
+#      的話光 `os.open` 就製造 5 筆假紅，而寬判準製造的假紅會逼下一輪把整條鎖關掉
+#      （同第五道判準對 `mock.patch.dict` 的取捨）。
+#   ❌ **`errors=` 不在本判準射程內**（那是另一個軸，不混進來）。
+#
+# 🔴 標記字串為何取專屬主題名（值見下方常數；本註解刻意不逐字寫出它——寫出來就會被
+#   自己的取標記函式當成一個真標記而判 stale，同 `_encoding_markers` docstring 的理由）：
+#   R76 落地首版與 `tools/tests/test_subprocess_encoding_hygiene.py`
+#   的判準一 `_OK_MARKER` **逐字相同**，而兩支掃描器的掃描面是包含關係（本判準 810 檔
+#   全在對方 854 檔之內）⇒ 任一方的**合法**豁免會在另一方變成一筆 `標記 stale` 紅，
+#   而那筆紅的訊息還寫著「該行無被壓下的違規」（對他那一行是誤導）。兩支的錯誤訊息都
+#   主動教人加這個標記，所以第一個照做的人就會踩到。這正是本輪 PKG-0 在拆的「兩道鎖的
+#   合法動作互為對方違規」死結，不可在同一輪又造一個。命名比照同檔既有的
+#   `_PATHEXT_OK_MARKER`／`_TMPDIR_OK_MARKER`：**每道判準取專屬主題名**。
+#   另：比對改用邊界正則（同姊妹檔 `_marker_lines`），裸子字串比對是縱深防禦缺的那一層
+#   ——未來若再出現含本標記為子字串的第三個標記，改名這一層就擋不住了。
+_ENCODING_OK_MARKER = "file-encoding-ok:"
+#: 標記比對的邊界（前面不得是字母／數字／連字號）：與姊妹檔 `_marker_lines` 同一條，
+#: 讓「某標記內含另一標記」這種形態不會被互相認領。`TestEncodingMarkersDoNotCollide`
+#: 常駐守著編碼家族三個豁免標記彼此不認領。
+#: 🔴 本區塊的註解**刻意不逐字寫出任何一個編碼家族標記字串**（連姊妹檔的也不行）：
+#:   `#` 註解是 COMMENT token，兩支掃描器的取標記函式都只認 COMMENT ⇒ 在註解裡「提到」
+#:   一個標記，與「登記」一個標記在機器眼中完全同形，當場多一筆 `標記 stale` 紅。
+#:   R76 首版修法就是這樣把姊妹檔弄紅的（本檔 :2047 上方已為自家標記寫過同一條理由，
+#:   卻只戒了自己那一個字串）。要引述標記字串，寫進 docstring／字串字面值（STRING token）。
+_ENCODING_MARKER_RE = re.compile(r"(?<![\w-])" + re.escape(_ENCODING_OK_MARKER))
+_TEXT_RW_ATTRS = frozenset({"read_text", "write_text"})
+#: encoding 的**位置引數**索引（呼叫形態 → 索引）。四種形態的簽名各不相同：
+#: `open(file, mode, buffering, encoding)`／`Path.open(mode, buffering, encoding)`／
+#: `Path.read_text(encoding, errors)`／`Path.write_text(data, encoding, errors)`。
+_ENC_POS = {"open": 3, "path_open": 2, "read_text": 0, "write_text": 1}
+#: mode 的位置引數索引（只有兩種 open 形態有 mode）。
+_MODE_POS = {"open": 1, "path_open": 0}
+_NON_TEXT_OPEN_OWNERS = frozenset({
+    "os", "gzip", "bz2", "lzma", "tarfile", "zipfile", "socket", "webbrowser",
+    "shelve", "dbm", "sqlite3",
+})
+
+
+def _encoding_markers(source: str) -> dict[int, str]:
+    """{行號: WHY}——行尾豁免標記（只認 COMMENT token，理由同 `_pathext_markers`）。
+
+    本判準的射程含偵測器自己，而偵測器原始碼必然多處逐字提到標記字串（常數、docstring、
+    測試訊息）。純文字掃描會把那些提及都當成真標記並判 stale ⇒ 鎖因為「說明自己」而翻紅。
+    """
+    markers: dict[int, str] = {}
+    try:
+        for tok in tokenize.generate_tokens(io.StringIO(source).readline):
+            if tok.type != tokenize.COMMENT:
+                continue
+            found = _ENCODING_MARKER_RE.search(tok.string)
+            if found:
+                markers[tok.start[0]] = tok.string[found.end():].strip()
+    except (tokenize.TokenError, IndentationError, SyntaxError):
+        markers.clear()          # 壞檔退回空集合；掃描面本身不縮小（下方 ast.parse 亦會失敗）
+    return markers
+
+
+def _call_kind(call: ast.Call) -> str | None:
+    """呼叫形態分類；不在射程內回 None。"""
+    f = call.func
+    if isinstance(f, ast.Name):
+        return "open" if f.id == "open" else None
+    if not isinstance(f, ast.Attribute):
+        return None
+    if f.attr in _TEXT_RW_ATTRS:
+        return f.attr
+    if f.attr != "open":
+        return None
+    owner = f.value
+    name = owner.id if isinstance(owner, ast.Name) else (
+        owner.attr if isinstance(owner, ast.Attribute) else "")
+    return None if name in _NON_TEXT_OPEN_OWNERS else "path_open"
+
+
+def _binary_or_unknown_mode(call: ast.Call, kind: str) -> bool:
+    """mode 帶 `b`（二進位）或 mode 是非字面值（判不出來）⇒ 出射程。"""
+    pos = _MODE_POS.get(kind)
+    if pos is None:
+        return False                       # read_text/write_text 恆為文字
+    mode: ast.AST | None = None
+    if len(call.args) > pos:
+        mode = call.args[pos]
+    for kw in call.keywords:
+        if kw.arg == "mode":
+            mode = kw.value
+    if mode is None:
+        return False                       # 省略 mode ＝ 預設 "r" ＝ 文字
+    if isinstance(mode, ast.Constant) and isinstance(mode.value, str):
+        return "b" in mode.value
+    return True                            # 非字面值：見上方劃界，刻意出射程
+
+
+def _declares_encoding(call: ast.Call, kind: str) -> bool:
+    if any(kw.arg == "encoding" for kw in call.keywords):
+        return True
+    if any(kw.arg is None for kw in call.keywords):
+        return True                        # `**kwargs` 轉發：判不出來，見劃界
+    return len(call.args) > _ENC_POS[kind]
+
+
+def scan_missing_encoding(source: str, rel: str) -> tuple[list[str], list[str]]:
+    """純函式核心：回傳 (offenders, stale_markers)，元素皆為 `rel:行號: 說明`。"""
+    markers = _encoding_markers(source)
+    try:
+        tree = ast.parse(source)
+    except SyntaxError:
+        return [], []
+    offenders: list[str] = []
+    used: set[int] = set()
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Call):
+            continue
+        kind = _call_kind(node)
+        if kind is None or _binary_or_unknown_mode(node, kind) or _declares_encoding(node, kind):
+            continue
+        # `used` 記在「這一行確實有違規」之後（同第五道判準的 WHY）：stale 的語意是
+        # 「標記在、但這一行根本沒有要壓下的東西」。
+        if markers.get(node.lineno):
+            used.add(node.lineno)
+            continue
+        shown = "open()" if kind in ("open", "path_open") else f".{kind}()"
+        offenders.append(
+            f"{rel}:{node.lineno}: {shown} 未指名 encoding ⇒ 用本機 locale 預設編碼"
+            "（mac=UTF-8 恆綠／zh-TW Windows=cp950，讀到非 Big5 字元即 UnicodeDecodeError）"
+        )
+    stale = [
+        f"{rel}:{lineno}: {_ENCODING_OK_MARKER} 標記 stale"
+        f"（{'WHY 留空' if not why else '該行無被壓下的違規'}）"
+        for lineno, why in sorted(markers.items())
+        if lineno not in used or not why
+    ]
+    return offenders, stale
+
+
+def _encoding_scan_files() -> list[Path]:
+    """射程＝本檔第一道判準的 `_scan_roots()`（四棵測試樹 ＋ 生產碼樹）。
+
+    刻意**共用**同一組掃描根而不另列一份：兩份清單就是兩個會漂移的真相，而
+    `_scan_roots()` 已有逐樹檔數下限在守「靜默縮面」。
+    """
+    out: list[Path] = []
+    for root, recursive, _floor in _scan_roots():
+        if not root.is_dir():
+            continue
+        for p in (root.rglob("*.py") if recursive else root.glob("*.py")):
+            if "__pycache__" in p.parts:
+                continue
+            out.append(p)
+    return sorted(set(out))
+
+
+#: 🔴 **shrink-only 存量棘輪 — 承接輪次＝下一輪**（帳本 `DEF-101-845`；此處刻意**不寫死輪號**
+#: ——寫死會在下一輪開始時當場過期，而且會被 `TestR71CodeRoundLabelsNeverExceedLedgerCurrentRound`
+#: 判成「程式碼自稱的輪號超前帳本當前輪」。落地當下的所有權只到本檔＋另四支，
+#: 下列每一支都在別的包手上，當輪修改必然互踩）。語意與 `_POSIX_TAG_RATCHET` 同族：
+#:   · 任何一支的違規數**變多**、或出現不在表上的檔 ⇒ 紅（新缺陷不得混進存量）。
+#:   · 任何一支**變少**（含修光）⇒ 也紅，訊息會指名要把本表下修——**只准往下改**。
+#: 這不是「凍結成永遠綠」：兩個方向都會響，而且表一空掉這道鎖就升級為零容忍。
+#: 承接動作：逐支補 `encoding="utf-8"`（讀 `.md`／log 一律 UTF-8），每修好一支就把
+#: 該列從本表刪掉；全部清空後把本表留成空 dict（空 dict ＝ 零容忍，不要連常數一起刪）。
+#: 🔴 **本表釘的是「每支檔幾筆」而不是行號**：R76 落地當回合實測，並行包在 `test_perception.py`
+#: 上游插了幾行、違規行號由 434 漂到 437 而筆數不變——釘行號的表會在別人動別的東西時假紅。
+#: 🔴 **收輪時看到本鎖紅、訊息說「請把棘輪同步下修」＝正常且正確**（不是本包留下的破口）：
+#: R76 是多包並行輪，別的包順手補了 `encoding=` 就會讓某一列變小（落地當回合就發生過一次：
+#: `tools/tests/test_doc_loc_baseline_freshness_r60.py` 由 1 → 0，該列已據實移除）。照訊息
+#: 印出的實得值下修即可，**不要**改成 `<=` 之類的單邊判準——那正是「凍結成永遠綠」的入口。
+_ENCODING_DEBT_RATCHET: dict[str, int] = {
+    "AutoClaude/tests/test_evaluator_kill_tree.py": 2,
+    "AutoClaude/tests/test_perception.py": 4,
+    "AutoClaude/tests/tools/test_run_act_core.py": 3,
+}
+
+
+class TestTextIoDeclaresEncoding(unittest.TestCase):
+    """文字讀寫必須指名 encoding（見上方區段 WHY）。"""
+
+    @staticmethod
+    def _scan_repo() -> tuple[dict[str, int], list[str], list[str], int]:
+        per_file: dict[str, int] = {}
+        stale: list[str] = []
+        detail: list[str] = []
+        scanned = 0
+        for path in _encoding_scan_files():
+            rel = path.relative_to(_REPO_ROOT).as_posix()
+            off, st = scan_missing_encoding(
+                path.read_text(encoding="utf-8-sig", errors="replace"), rel)
+            if off:
+                per_file[rel] = len(off)
+                detail.extend(off)
+            stale.extend(st)
+            scanned += 1
+        return per_file, stale, detail, scanned
+
+    def test_debt_ratchet_is_exact_and_shrink_only(self) -> None:
+        per_file, stale, detail, scanned = self._scan_repo()
+        # 反空轉下限＝R76 實掃數打八折取整；射程若被縮小必紅。
+        self.assertGreaterEqual(
+            scanned, 648, f"encoding 掃描面只有 {scanned} 檔——射程疑似被縮小")
+        self.assertEqual(
+            stale, [],
+            f"{_ENCODING_OK_MARKER} 豁免標記 stale（防清單腐化）：\n" + "\n".join(stale))
+        grew = {
+            rel: (n, _ENCODING_DEBT_RATCHET.get(rel, 0))
+            for rel, n in sorted(per_file.items())
+            if n > _ENCODING_DEBT_RATCHET.get(rel, 0)
+        }
+        self.assertEqual(
+            grew, {},
+            "新增（或增加）未指名 encoding 的文字讀寫——**不得調高棘輪**，請補上 "
+            f"`encoding=\"utf-8\"`，或於該行行尾加標記（`{_ENCODING_OK_MARKER}` ＋ WHY）：\n"
+            + "\n".join(detail),
+        )
+        shrank = {
+            rel: (per_file.get(rel, 0), frozen)
+            for rel, frozen in sorted(_ENCODING_DEBT_RATCHET.items())
+            if per_file.get(rel, 0) < frozen
+        }
+        self.assertEqual(
+            shrank, {},
+            "存量已被修掉（實得, 棘輪）如上 ⇒ 請把 `_ENCODING_DEBT_RATCHET` 同步下修。"
+            "棘輪只准往下改；不下修的話下一次退化會被舊值遮住",
+        )
+
+    # ── 以下以合成樣本自證判準紅綠（樣本只存在於字串，不留違規樣本於 repo）──
+
+    def _scan(self, source: str) -> tuple[list[str], list[str]]:
+        return scan_missing_encoding(source, "fixture_case")
+
+    def test_injected_missing_encoding_shapes_are_detected(self) -> None:
+        """三種文字 I/O 形態各自漏 encoding 都必紅。"""
+        for sample in (
+            "text = path.read_text()\n",
+            'path.write_text("x")\n',
+            'with open(path) as fh:\n    pass\n',
+            'with path.open("w") as fh:\n    pass\n',
+        ):
+            with self.subTest(sample=sample):
+                off, _ = self._scan(sample)
+                self.assertEqual(len(off), 1, f"{sample!r} 漏抓：{off}")
+
+    def test_declared_encoding_is_accepted(self) -> None:
+        """修法慣例必綠——否則本鎖會逼人改回舊寫法。關鍵字與位置引數兩種都要接受。"""
+        for sample in (
+            'text = path.read_text(encoding="utf-8")\n',
+            'text = path.read_text("utf-8")\n',
+            'path.write_text("x", encoding="utf-8")\n',
+            'path.write_text("x", "utf-8")\n',
+            'with open(path, "r", encoding="utf-8") as fh:\n    pass\n',
+            'with path.open("w", encoding="utf-8") as fh:\n    pass\n',
+            "def wrap(p, **kw):\n    return p.read_text(**kw)\n",
+        ):
+            with self.subTest(sample=sample):
+                off, stale = self._scan(sample)
+                self.assertEqual((off, stale), ([], []), f"{sample!r} 誤報")
+
+    def test_binary_and_non_pathlib_open_are_out_of_scope(self) -> None:
+        """對照組：二進位模式與 `os.open` 等非文字 I/O 不得誤報（假紅會逼人關掉整條鎖）。"""
+        for sample in (
+            'with path.open("rb") as fh:\n    pass\n',
+            'with open(path, "wb") as fh:\n    pass\n',
+            'fd = os.open(path, os.O_RDONLY)\n',
+            'with gzip.open(path) as fh:\n    pass\n',
+            "data = path.read_bytes()\n",
+            "path.write_bytes(b'x')\n",
+            "with open(path, mode_var) as fh:\n    pass\n",
+        ):
+            with self.subTest(sample=sample):
+                off, _ = self._scan(sample)
+                self.assertEqual(off, [], f"{sample!r} 誤報：{off}")
+
+    def test_marker_suppresses_and_missing_violation_makes_it_stale(self) -> None:
+        """豁免標記能壓下違規；標記在、違規不在（或 WHY 留空）→ stale 必紅。"""
+        off, stale = self._scan(
+            f'text = path.read_text()  # {_ENCODING_OK_MARKER} 讀的是自己剛寫的純 ASCII\n')
+        self.assertEqual((off, stale), ([], []))
+
+        off, stale = self._scan(f"text = path.read_text()  # {_ENCODING_OK_MARKER}\n")
+        self.assertEqual(len(off), 1, "WHY 留空的標記不得生效")
+        self.assertEqual(len(stale), 1, stale)
+
+        off, stale = self._scan(f"x = 1  # {_ENCODING_OK_MARKER} 已補上 encoding\n")
+        self.assertEqual(off, [])
+        self.assertEqual(len(stale), 1, "違規已消失的標記必須被指名刪除")
+
+    def test_marker_inside_a_string_literal_is_not_honoured(self) -> None:
+        """字串裡出現標記字樣不算豁免（否則寫一句說明就能買到免檢）。"""
+        off, _ = self._scan(
+            f'MSG = "{_ENCODING_OK_MARKER} 說明文字"\ntext = path.read_text()\n')
+        self.assertEqual(len(off), 1, off)
+
+    def test_detector_catches_the_pre_fix_form_of_a_real_file(self) -> None:
+        """自我驗證（最重要的一支）：對**真實檔案的修復前形態**必須紅。
+
+        沿用本檔慣例——不查 git（綁 HEAD 會在修復 commit 後反過來變紅），而是把現行真檔
+        的 `encoding=` 拿掉再餵給判準；現行真檔同時必須乾淨，兩個方向一起鎖。
+        取樣 `tools/check_gha_action_versions.py`＝R76-09 點名的代表站點。
+        """
+        rel = "tools/check_gha_action_versions.py"
+        src = (_REPO_ROOT / rel).read_text(encoding="utf-8")
+        fixed_form = 'path.read_text(encoding="utf-8")'
+        self.assertIn(
+            fixed_form, src,
+            f"{rel} 內找不到 `{fixed_form}` ⇒ 本自證失去對象——該處若被重寫，請同步更新"
+            "這支測試指向新的取樣站點，不要直接刪掉自證",
+        )
+        pre_fix = src.replace(fixed_form, "path.read_text()")
+        off, _ = scan_missing_encoding(pre_fix, f"{rel}@修復前重建")
+        self.assertTrue(off, f"本鎖對 {rel} 修復前的形態抓不到 ⇒ 判準空轉")
+        off_now, stale_now = scan_missing_encoding(src, rel)
+        self.assertEqual((off_now, stale_now), ([], []), f"{rel} 現行必須已無此病灶")
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# R76 複審 ARCH-01：豁免標記**不得跨判準互相認領**（本輪自造死結的根治面）
+# ══════════════════════════════════════════════════════════════════════════════
+# 缺陷本體（實測重現，非理論）：新落地的 file-IO 判準，其標記字串與
+# `test_subprocess_encoding_hygiene.py` 判準一的 `_OK_MARKER` **逐字相同**（值不在此
+# 逐字引述，理由見 :2048 那段），而兩者掃描面是包含關係 ⇒ 一個**合法**的 subprocess
+# 豁免會在 file-IO 這邊多出一筆 `標記 stale`，反向亦然。兩支的錯誤訊息都主動教人加該
+# 標記，所以第一個照訊息辦事的人就會撞上一筆指著自己剛加的合法豁免的紅——正是本輪
+# PKG-0 在拆的那種死結。
+#
+# 這道鎖守的是**根因而非個案**：全庫每一個「行尾 `<slug>-ok:` 豁免標記」常數都必須
+# 是各判準專屬的，且彼此不得互相認領。姊妹檔已有一支同型鎖
+# （`test_the_two_criteria_markers_do_not_claim_each_other`），但它只驗自己那兩個，
+# 對**跨檔**碰撞零射程——那個縫就是這次逃出去的地方。
+#: 豁免標記常數的形態：模組層 `_XXX = "<slug>-ok:"`。
+_MARKER_CONST_RE = re.compile(
+    r'^(_[A-Z0-9_]+)\s*(?::\s*str\s*)?=\s*"([a-z0-9][a-z0-9-]*-ok:)"\s*$', re.MULTILINE)
+
+
+def collect_exemption_markers() -> dict[str, set[str]]:
+    """{標記字串: {"<檔名>::<常數名>", …}}——現查 `tools/tests/*.py` 的所有豁免標記。
+
+    現查而非寫死清單：寫死的在「新增一支掃描器」那天靜默縮面，而那正是本鎖要防的事。
+    """
+    found: dict[str, set[str]] = {}
+    for path in sorted((_REPO_ROOT / "tools" / "tests").glob("*.py")):
+        text = path.read_text(encoding="utf-8", errors="replace")
+        for const, value in _MARKER_CONST_RE.findall(text):
+            found.setdefault(value, set()).add(f"{path.name}::{const}")
+    return found
+
+
+class TestEncodingMarkersDoNotCollide(unittest.TestCase):
+    """豁免標記彼此不得互相認領（跨判準、跨檔）。"""
+
+    def test_no_two_files_share_the_same_marker_string(self) -> None:
+        """判準是**跨檔**共用，不是「任何共用」——這條界線是實測收斂出來的。
+
+        `test_adr_xplat001_c1c2_lock.py` 的 SC-4／SC-9 **刻意**共用同一個
+        `stale-premise-ok:`（該檔 `sc9_…` 的 docstring 逐字寫「豁免沿用 SC-4 的…」，
+        且死信偵測的 `consumed` 集合把它算成同一個），那是**同一位擁有者**在同一份檔裡
+        自己看得到的設計；把它判紅只會是自製誤報。真正會出事的是**跨檔**：兩支互不知情
+        的掃描器各有一套 stale 偵測，其中一方的合法豁免就是另一方的紅——ARCH-01 那筆
+        逃出去的縫正是這一格。
+
+        誠實劃界：同檔內共用仍可能出錯（若該檔沒把 stale 偵測接起來），本條抓不到。
+        """
+        markers = collect_exemption_markers()
+        self.assertGreaterEqual(
+            len(markers), 10,
+            f"只掃到 {len(markers)} 個豁免標記常數 ⇒ 射程疑似被縮小（形態改了？）")
+        shared = {
+            value: sorted(sites)
+            for value, sites in sorted(markers.items())
+            if len({s.split("::")[0] for s in sites}) > 1
+        }
+        self.assertEqual(
+            shared, {},
+            "以下豁免標記字串被 ≥2 **支檔**的判準共用 ⇒ 其中一方的**合法**豁免會在另一方"
+            "變成一筆 `標記 stale` 紅（訊息還會說「該行無被壓下的違規」，對那一行是誤導）。"
+            "處置：給每道判準取專屬主題名，比照 `pathext-ok:`／`tmpdir-ok:`：\n"
+            f"{shared}",
+        )
+
+    @staticmethod
+    def _claims(owner: str, other: str) -> bool:
+        """`owner` 的邊界正則會不會把一行合法的 `other` 豁免認領走。"""
+        pattern = re.compile(r"(?<![\w-])" + re.escape(owner))
+        return pattern.search(f"# {other} 某個合法 WHY") is not None
+
+    def test_markers_do_not_claim_each_other_under_the_boundary_regex(self) -> None:
+        """縱深防禦：即使字串不同，含包關係也不得讓一個標記被兩個判準認領。
+
+        判準沿用兩支掃描器實際在用的那條邊界正則；本測試對**全庫每一對**標記檢查，
+        不是只驗手上這幾個（那正是姊妹檔那支鎖的射程缺口）。
+
+        🔴 先自證判準有鑑別力再掃 repo：現行標記形態（`<slug>-ok:`，尾端有冒號）結構上
+        不可能互為前綴，所以 repo 掃描那一半**今天必然全過**。只斷言「全過」的鎖看起來
+        跟一個壞掉的鎖一模一樣——故先餵一對真的會互相認領的合成標記，確認它會抓到。
+        """
+        self.assertTrue(
+            self._claims("tmpdir-ok:", "tmpdir-ok:extra"),
+            "判準對一對明顯互相認領的標記都抓不到 ⇒ 下面那半是恆真的假綠")
+        self.assertFalse(
+            self._claims("encoding-ok:", "child-encoding-ok:"),
+            "判準把既有的合法含包關係誤判成認領 ⇒ 會對現況製造假紅")
+        markers = sorted(collect_exemption_markers())
+        for owner in markers:
+            for other in markers:
+                if other == owner:
+                    continue
+                with self.subTest(owner=owner, other=other):
+                    self.assertFalse(
+                        self._claims(owner, other),
+                        f"`{owner}` 的判準會把一行合法的 `{other}` 豁免認領走 ⇒ 跨鎖假紅",
+                    )
+
+    def test_the_three_encoding_family_markers_are_mutually_exclusive(self) -> None:
+        """具名回歸（ARCH-01 的原案）：三個 `*encoding-ok:` 逐一互不認領。
+
+        直接用**本檔真正在跑的**取標記函式，不是另寫一份等價實作——後者只會證明
+        我重寫的那份是對的。
+        """
+        subprocess_marker, child_marker = "encoding-ok:", "child-encoding-ok:"
+        self.assertNotEqual(
+            _ENCODING_OK_MARKER, subprocess_marker,
+            "file-IO 判準與 subprocess 判準一的標記又撞回同一字串")
+        for foreign in (subprocess_marker, child_marker):
+            with self.subTest(foreign=foreign):
+                self.assertEqual(
+                    _encoding_markers(f"x = 1  # {foreign} 走系統碼頁\n"), {},
+                    f"本判準把 `{foreign}` 的合法豁免認領走了")
+        self.assertEqual(
+            _encoding_markers(f"x = 1  # {_ENCODING_OK_MARKER} 自家 WHY\n"),
+            {1: "自家 WHY"}, "本判準認不出自己的標記 ⇒ 上一條變成恆真的假綠")
+
+
 if __name__ == "__main__":
     unittest.main()

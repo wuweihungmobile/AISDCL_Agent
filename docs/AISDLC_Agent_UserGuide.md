@@ -366,7 +366,10 @@ Playbook 全部步驟完成 → 進入 `GOAL_SYNTHESIS` 驗證全局目標 → �
 | **全域熱鍵** | `ESC + F12` | 安全停止：寫入 checkpoint 後退出，**下次啟動可續傳** |
 | **中斷訊號** | `Ctrl + C` | 中止當前程序；已寫入的 checkpoint 仍可續傳 |
 
-> 推薦用 `ESC + F12`（需裝 `keyboard` 套件，已含於 core 依賴），它會確保 checkpoint 原子寫入後再退出，續傳最乾淨。
+> `ESC + F12` 需要 `keyboard` 套件。🔴 **R76 起它已不在 core 依賴裡**（移到選配 extra，成因見
+> `AutoClaude/pyproject.toml` 的 `[hotkey]` 段），`bootstrap` 建的環境**預設沒有**它 ⇒ 按了不會有反應，
+> 只會在 log 看到一行 warning。要用請顯式安裝：`uv pip install -e 'AutoClaude[hotkey]'`。
+> 沒裝（或在非 root 的 macOS 上）就用 `Ctrl + C`——它同樣會寫完 checkpoint 再退出，一樣可續傳。
 
 ### 4.3 關閉選配的常駐服務（Docker）
 

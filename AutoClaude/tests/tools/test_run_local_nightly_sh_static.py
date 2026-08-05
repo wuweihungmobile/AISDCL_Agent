@@ -185,8 +185,8 @@ def test_heartbeat_three_site_contract_lines(sh_content: str) -> None:
 
 _POSIX_ONLY = pytest.mark.skipif(
     sys.platform == "win32" or shutil.which("bash") is None,
-    reason="需要 POSIX bash 實跑本 .sh（Windows 側對等品為 run_local_nightly.ps1，"
-           "其 CLI 契約缺口另案處理）",
+    reason="[POSIX-NATIVE-ONLY] 需要 POSIX bash 實跑本 .sh（Windows 側對等品為 "
+           "run_local_nightly.ps1，其 CLI 契約缺口另案處理）",
 )
 
 

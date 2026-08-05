@@ -2321,5 +2321,322 @@ class TestUnresolvedInventoryHasASingleMeasurementEntry(unittest.TestCase):
         self.assertIn("unpinned_problems += unres_fails", src)
 
 
+# ── 早退遮蔽 ＋ 「訊息教人加內容的檔必須加得下」（P0-A；本批落地） ─────────────────
+# 兩道鎖同源於一次實測事故：帳本目錄新增一份未登記的治理文件時，本工具**只印 2 行**
+# （`❌ 具名治理文件涵蓋面與磁碟脫節` ＋ 那一筆），原本會印的 8 筆孤兒 warning、18 筆
+# 已結列殘留待辦全部消失——而讀者看到的是「輸出變乾淨了」。同一則訊息教人「請在該常數
+# 補上一筆」，但那支檔當時卡在 raw-line 棘輪 1474/1474、**餘裕 0 行**，照做即破另一道
+# 硬閘 ⇒ 訊息在磁碟現況下不可執行，兩道鎖互為對方的違規。
+#
+# 誠實劃界（R76 複審後訂正——原文對第二半的宣稱在寫下當回合就是假的，見下方表的訂正段）：
+#   · **早退遮蔽**那一半只管 `check_defect_log_crossref.py` 這一支工具的檢查序（`main()`
+#     的 `_bail()` 紀律），其他工具不在射程內；那需要一套跨工具的檢查序模型，本鎖不假裝有。
+#   · **「訊息教人加內容 ⇒ 該檔加得下」**那一半是**真的跨工具**：登記表
+#     `_ADD_CONTENT_DIRECTIVES` 現為三欄，餘裕斷言逐筆迭代第三欄，加一筆就真的把那支
+#     工具納管進來（現有兩支：本工具 ＋ `tools/sync_onboarding_baselines.py`）。
+#     加一筆時**必須同時**在 `_message()` 的 dispatch 表補一支訊息產生器，否則當場 fail。
+#   · 仍不在射程內：訊息教人加內容的檔若不在 `check_loc_budget.SPECIAL_FILES` 裡（例如
+#     `AutoClaude/` 側的 tier 分級檔），本鎖量不到餘裕、會 fail-loud 要求先納管。
+
+
+def _main_source() -> str:
+    return Path(m.__file__).read_text(encoding="utf-8")
+
+
+def _bail_headers_in_main_order() -> list[str]:
+    """`main()` 原始碼裡 `_bail("<header>"…)` 的**行號序**（以 AST 取，不靠正則猜）。
+
+    刻意依 `lineno` 排序而不是 `ast.walk()` 的輸出序：後者是 BFS，巢在 `for`／`if` 裡
+    的呼叫會被排到最後（實測「帳本歸檔體積」「掃描目標齊備」兩道就是這樣被排錯的），
+    那會讓本鎖對真正的順序錯置失去鑑別力，同時又對正確的程式碼假紅。
+    """
+    tree = ast.parse(_main_source())
+    fn = next(n for n in ast.walk(tree)
+              if isinstance(n, ast.FunctionDef) and n.name == "main")
+    calls = [
+        node for node in ast.walk(fn)
+        if isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Name) and node.func.id == "_bail"
+        and node.args and isinstance(node.args[0], ast.Constant)
+    ]
+    return [c.args[0].value for c in sorted(calls, key=lambda c: c.lineno)]
+
+
+class TestEarlyExitAnnouncesUnrunChecks(unittest.TestCase):
+    """早退時必須明說「還有幾道沒跑」，且 `_CHECK_ORDER` 與 `main()` 逐名對齊。"""
+
+    def test_main_has_no_bare_return_one(self) -> None:
+        """🔴 本組鎖的本體：`main()` 內不得有任何**不經 `_bail()`** 的 `return 1`。
+
+        繞過 `_bail()` 就等於繞過「尚有 N 道未執行」那句話——而那句話正是這次事故裡
+        缺席的東西。以 AST 判（不是 grep），故 `return 1  # 註解` 之類也躲不掉。
+        """
+        tree = ast.parse(_main_source())
+        fn = next(n for n in ast.walk(tree)
+                  if isinstance(n, ast.FunctionDef) and n.name == "main")
+        bare = [
+            node.lineno for node in ast.walk(fn)
+            if isinstance(node, ast.Return)
+            and isinstance(node.value, ast.Constant) and node.value.value == 1
+        ]
+        self.assertEqual(
+            bare, [],
+            f"main() :{bare} 直接 `return 1` 而未經 `_bail()` ⇒ 該早退點不會告訴讀者"
+            "後面還有哪幾道檢查沒跑，輸出變短會被誤讀成「問題變少」",
+        )
+
+    def test_every_bail_header_is_registered_and_in_execution_order(self) -> None:
+        """`_CHECK_ORDER` ↔ `main()` 雙向：漏登記或順序不符即紅（否則殘餘清單說謊）。"""
+        used = _bail_headers_in_main_order()
+        self.assertTrue(used, "main() 內找不到任何 `_bail(...)` 呼叫 ⇒ 早退未被納管")
+        unknown = [h for h in used if h not in m._CHECK_ORDER]
+        self.assertEqual(unknown, [], f"這些早退點的名稱不在 _CHECK_ORDER 內：{unknown}")
+        ranks = [m._CHECK_ORDER.index(h) for h in used]
+        self.assertEqual(ranks, sorted(ranks),
+                         f"_CHECK_ORDER 的排序與 main() 實際執行序不符：{used}")
+        never = [h for h in m._CHECK_ORDER if h not in used]
+        self.assertEqual(never, [],
+                         f"_CHECK_ORDER 登記了 main() 不會走到的名目：{never}"
+                         "（會讓「尚有 N 道未執行」把不存在的檢查算進去）")
+
+    def test_the_message_names_the_remaining_checks(self) -> None:
+        """鑑別力：從**第一道**早退，訊息必須點名其後全部檢查。"""
+        with mock.patch("builtins.print") as fake:
+            rc = m._bail(m._CHECK_ORDER[0], detail="x")
+        printed = " ".join(str(a) for c in fake.call_args_list for a in c.args)
+        self.assertEqual(rc, 1)
+        self.assertIn(f"尚有 {len(m._CHECK_ORDER) - 1} 道檢查", printed)
+        for header in m._CHECK_ORDER[1:]:
+            self.assertIn(header, printed, f"殘餘清單漏掉 {header!r}")
+
+    def test_the_last_check_does_not_claim_phantom_remainders(self) -> None:
+        """反向：最後一道早退時**不得**再說「尚有 N 道未執行」（那會是假話）。"""
+        with mock.patch("builtins.print") as fake:
+            m._bail(m._CHECK_ORDER[-1], ["p"])
+        printed = " ".join(str(a) for c in fake.call_args_list for a in c.args)
+        self.assertNotIn("尚有", printed)
+
+    def test_an_unregistered_header_fails_loud_instead_of_lying(self) -> None:
+        """未登記的名目不得靜默：殘餘清單算不出來時要說出來，不可假裝算得出。"""
+        with mock.patch("builtins.print") as fake:
+            m._bail("這個名目不存在", ["p"])
+        printed = " ".join(str(a) for c in fake.call_args_list for a in c.args)
+        self.assertIn("不在 _CHECK_ORDER", printed)
+
+    def test_the_real_gate_still_reaches_the_late_checks(self) -> None:
+        """端到端：真實 repo 上必須真的跑到**最後一道**，而不是在中途早退後顯綠。
+
+        沒有這一條，上面幾道都可能在「工具早退但 rc 恰為 0」的世界裡全綠。
+        """
+        r = subprocess.run(
+            [sys.executable, str(Path(m.__file__))],
+            capture_output=True, text=True, encoding="utf-8",
+        )
+        self.assertEqual(r.returncode, 0, r.stderr[-3000:])
+        self.assertIn("未結存量", r.stdout, "成功訊息缺末段 ⇒ 尾端檢查可能沒跑到")
+        self.assertNotIn("尚有", r.stderr.split("已結列殘留待辦")[0])
+
+
+#: 「錯誤訊息教人往某檔加內容」的登記表：`(訊息產生器, 訊息必含的識別字, 被要求編輯的檔)`。
+#: 訊息一律**當場真的產生一次**（不是讀 docstring）——讀 docstring 的鎖抓不到「訊息被改寫
+#: 成指向別的檔」。
+#:
+#: 🔴 R76 複審 ARCH-02／SD-02 訂正：本表落地首版**只有兩欄**（第三欄「被要求編輯的檔」
+#: 在註解裡宣告、在實作裡不存在），而餘裕斷言硬編 `Path(m.__file__)`、根本不讀本表 ⇒
+#: 上方 `:2333` 那句「要納入就在本表加一筆」是假的：照三欄格式加一筆會 `ValueError:
+#: too many values to unpack`，退成兩欄則 `_message()` 靜默跑到別支函式、產生一則講
+#: 別的常數的誤導訊息。現已補成真三欄、餘裕斷言逐筆迭代、`_message()` 具名 dispatch
+#: 且未知名字 fail-loud。同時把第二支工具真的納管進來（那正是它「做成表格」的意義）。
+_ADD_CONTENT_DIRECTIVES: tuple[tuple[str, str, str], ...] = (
+    ("unregistered_governance_docs", "_GOVERNANCE_DOCS",
+     "tools/check_defect_log_crossref.py"),
+    ("stale_grandfather_problems", "_UNPINNED_HANDOVER_GRANDFATHERED",
+     "tools/check_defect_log_crossref.py"),
+    ("unclassifiable_first_word_problems", "_STATUS_KEYWORDS",
+     "tools/check_defect_log_crossref.py"),
+    # 第二支工具（R76 納管）：`--write --with-slow` 在無對應平台欄時 rc=2 並教人
+    # 「在 `_PLATFORM_COLUMN_LABELS` 加一筆」；`prose_problems()` 則教人「在 `_SPECS`
+    # 的 `historical` 登記 (輪號, 值, WHY)」。兩則都住同一支檔，故餘裕只需量一次。
+    ("sync_platform_column_labels", "_PLATFORM_COLUMN_LABELS",
+     "tools/sync_onboarding_baselines.py"),
+    ("sync_historical_registration", "historical",
+     "tools/sync_onboarding_baselines.py"),
+)
+
+#: 「照著訊息做」最少要花掉的行數：1 行常數 ＋ 該訊息自己要求的 WHY 註解（實測 2~4 行）。
+#: 低於此值時訊息在磁碟現況下**不可執行**。刻意不設更大值——那會變成憑空的舒適區。
+_MIN_DIRECTIVE_HEADROOM = 5
+
+
+def _loc_budget_module():
+    """以檔案路徑載入 `AutoClaude/tools/check_loc_budget.py`（LOC 上限的唯一權威源）。
+
+    🔴 `sys.modules[name] = mod` 必須在 `exec_module` **之前**：該檔用 `@dataclass`，
+    而 `dataclasses` 會回查 `sys.modules[cls.__module__].__dict__`，沒先註冊會炸
+    `AttributeError: 'NoneType' object has no attribute '__dict__'`（實測）。
+    """
+    import importlib.util
+    name = "_clb_for_test"
+    if name in sys.modules:
+        return sys.modules[name]
+    path = m._REPO_ROOT / "AutoClaude" / "tools" / "check_loc_budget.py"
+    spec = importlib.util.spec_from_file_location(name, path)
+    mod = importlib.util.module_from_spec(spec)
+    sys.modules[name] = mod
+    spec.loader.exec_module(mod)  # type: ignore[union-attr]
+    return mod
+
+
+def _sync_module():
+    """以檔案路徑載入 `tools/sync_onboarding_baselines.py`（本表第二支受管工具）。
+
+    以路徑載入而非 `import`：該檔名與本檔不同層，且它自己會 `sys.path.insert` tools/。
+    """
+    import importlib.util
+    name = "_sync_ob_for_test"
+    if name in sys.modules:
+        return sys.modules[name]
+    path = m._REPO_ROOT / "tools" / "sync_onboarding_baselines.py"
+    spec = importlib.util.spec_from_file_location(name, path)
+    mod = importlib.util.module_from_spec(spec)
+    sys.modules[name] = mod
+    spec.loader.exec_module(mod)  # type: ignore[union-attr]
+    return mod
+
+
+def _raw_line_headroom(path: Path) -> int | None:
+    """該檔在 `check_loc_budget.SPECIAL_FILES` 的 raw-line 餘裕；未納管回 `None`。"""
+    clb = _loc_budget_module()
+    for key, budget in clb.SPECIAL_FILES.items():
+        try:
+            candidate = (clb.PROJECT_ROOT / key).resolve()
+        except OSError:  # pragma: no cover - 非本平台的分隔符寫法
+            continue
+        if candidate == path.resolve():
+            return budget - clb.count_raw_lines(path)
+    return None
+
+
+class TestActionableMessagesHaveLocHeadroom(unittest.TestCase):
+    """Scan-H 必跑項⑥：訊息教人「往某檔加內容」時，該檔必須真的加得下。
+
+    🔴 為何是**一般化**判準而不是「這次把那支檔瘦一點」：兩道硬閘各自都對，衝突在於
+    沒有任何東西在看「A 的合法動作是不是 B 的違規」。一支卡在棘輪上限的檔，它所有
+    「請在此加一筆」的訊息就全部變成死路，而讀者只會看到兩個互相矛盾的紅。
+
+    🔴 「一般化」在 R76 落地首版是一句**空話**（複審 ARCH-02／SD-02）：餘裕斷言硬編
+    `Path(m.__file__)`、完全不讀登記表，所以「加一筆就納入」加了也沒用；而磁碟上當時
+    就有第二個實例（`tools/sync_onboarding_baselines.py` 餘裕 2 < 5）沒被看見。現在
+    斷言逐筆迭代登記表第三欄，且那支檔已瘦身到餘裕 ≥5 並正式登記。
+    """
+
+    def test_each_directive_message_names_its_target_constant(self) -> None:
+        """前提：訊息真的指名了要改哪個常數，否則「加得下」也無從執行。"""
+        for fn_name, needle, _target in _ADD_CONTENT_DIRECTIVES:
+            with self.subTest(fn=fn_name):
+                self.assertIn(needle, self._message(fn_name))
+
+    def test_the_registered_targets_still_have_room_for_those_edits(self) -> None:
+        """逐筆迭代**本表第三欄**——不是硬編某一支檔。
+
+        硬編版的病：加一筆進本表對餘裕斷言零效果，而註解卻宣稱「加一筆就納入了」，
+        於是加的人拿到一個看不見的覆蓋幻覺（R76 複審 ARCH-02／SD-02）。
+        """
+        checked: set[str] = set()
+        for fn_name, _needle, rel in _ADD_CONTENT_DIRECTIVES:
+            if rel in checked:
+                continue          # 同一支檔的多則訊息共用同一份餘裕，量一次即可
+            checked.add(rel)
+            with self.subTest(target=rel):
+                target = m._REPO_ROOT / rel
+                self.assertTrue(target.is_file(), f"{rel} 不存在 ⇒ 本表第三欄已 stale")
+                headroom = _raw_line_headroom(target)
+                self.assertIsNotNone(
+                    headroom,
+                    f"{rel} 不在 check_loc_budget.SPECIAL_FILES 內 —— 本鎖對它失去量測面。"
+                    f"要嘛把它納管進 SPECIAL_FILES，要嘛把這一列從本表移除並說明理由",
+                )
+                self.assertGreaterEqual(
+                    headroom, _MIN_DIRECTIVE_HEADROOM,
+                    f"{rel} 的 raw-line 餘裕只剩 {headroom} 行，而它自己的錯誤訊息"
+                    f"（{fn_name}）教人「請在 `{_needle}` 補上一筆」⇒ 照做即撞 LOC 棘輪，"
+                    f"訊息在磁碟現況下**不可執行**。"
+                    f"🔴 正解是**瘦身**（刪死碼／併註解／抽共用模組），"
+                    f"**不得**調高 check_loc_budget.SPECIAL_FILES 的上限（那是砸溫度計）",
+                )
+        self.assertGreaterEqual(
+            len(checked), 2,
+            "本表只納管了一支檔 ⇒ 又退回硬編那種形態（見本表上方的 R76 訂正段）")
+
+    def _message(self, fn_name: str) -> str:
+        """具名 dispatch：未知名字 **fail-loud**，不得靜默 fallback 到別支函式。
+
+        舊版是 if/elif 且最後一支沒有守衛，任何不認得的名字都會落到
+        `unclassifiable_first_word_problems()` ⇒ 讀者拿到一則講別的常數的誤導紅。
+        """
+        builders = {
+            "unregistered_governance_docs": self._msg_governance_docs,
+            "stale_grandfather_problems": self._msg_stale_grandfather,
+            "unclassifiable_first_word_problems": self._msg_unclassifiable,
+            "sync_platform_column_labels": self._msg_sync_platform_labels,
+            "sync_historical_registration": self._msg_sync_historical,
+        }
+        builder = builders.get(fn_name)
+        if builder is None:
+            self.fail(
+                f"`{fn_name}` 沒有對應的訊息產生器 —— 在 `_ADD_CONTENT_DIRECTIVES` 加一筆"
+                f"時必須同時在 `_message()` 的 dispatch 表補一支產生器。"
+                f"現有：{sorted(builders)}")
+        return builder()
+
+    @staticmethod
+    def _msg_governance_docs() -> str:
+        with mock.patch.object(m, "_GOVERNANCE_DOCS", m._GOVERNANCE_DOCS[:-1]):
+            return " ".join(m.unregistered_governance_docs())
+
+    @staticmethod
+    def _msg_stale_grandfather() -> str:
+        with mock.patch.object(m, "_UNPINNED_HANDOVER_GRANDFATHERED",
+                               frozenset({"DEF-99-999"})):
+            return " ".join(m.stale_grandfather_problems(_LEDGER_MIN))
+
+    @staticmethod
+    def _msg_unclassifiable() -> str:
+        with mock.patch.object(m, "_STATUS_FIRST_WORDS",
+                               m._STATUS_FIRST_WORDS | {"never-classifiable-xyz"}):
+            return " ".join(m.unclassifiable_first_word_problems())
+
+    @staticmethod
+    def _msg_sync_platform_labels() -> str:
+        """真跑 `--write --with-slow` 在「本平台無對應欄」時那條路徑（stderr 捕捉）。"""
+        syn = _sync_module()
+
+        def _forbid_write(*_a, **_k):     # 探針絕不得改到真的 ONBOARDING.md
+            raise AssertionError("訊息探針不該走到寫檔路徑")
+
+        with mock.patch.object(syn, "current_platform_key", lambda *a, **k: None), \
+                mock.patch.object(Path, "write_bytes", _forbid_write), \
+                mock.patch("sys.stderr", io.StringIO()) as err:
+            rc = syn.main(["--write", "--with-slow"])
+        assert rc == 2, f"該路徑應 fail-loud rc=2，實得 {rc}"
+        return err.getvalue()
+
+    @staticmethod
+    def _msg_sync_historical() -> str:
+        """真跑 `prose_problems()` 的「未登記歷史值」分支（純函式，零磁碟接觸）。"""
+        syn = _sync_module()
+        spec = syn._SPECS[0]
+        live = {f.name: 111 + i for i, f in enumerate(spec.fields)}
+        return " ".join(syn.prose_problems("R42=987654 見上", spec, live))
+
+
+#: 給上面 `stale_grandfather_problems` 用的最小合法帳本（表頭 ＋ 一列已結）。
+_LEDGER_MIN = (
+    "| ID | 日期 | 發現情境 | 現象與證據 | 嚴重度 | 分流去向 | 狀態 |\n"
+    "|---|---|---|---|---|---|---|\n"
+    "| DEF-01-001 | d | R75 | x | P3 | y | fixed |\n"
+)
+
+
 if __name__ == "__main__":
     unittest.main()

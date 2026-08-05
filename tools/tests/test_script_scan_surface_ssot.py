@@ -200,11 +200,13 @@ class TestScanSurfaceCompleteness(unittest.TestCase):
 
     def test_every_tracked_script_in_ssot_trees_is_discovered(self) -> None:
         tracked = self._tracked_scripts()
-        # 下限釘選：2026-07-28 實測 35 支（三棵樹內、不含 LATEST 版樹）。低於此數
+        # 下限釘選：R76 實測 34 支（三棵樹內、不含 LATEST 版樹）。低於此數
         # ＝git ls-files 樣式或 SSOT 前綴被改壞，等同掃描面靜默縮小。
+        # R76 由 35 下修為 34：reschedule_g0_gatecheck.ps1 整支刪除（真孤兒，它要重排的
+        # AutoClaude_SD09_G0_GateCheck 於 R71 已從本機移除）——刻意刪減，非掃描面縮水。
         self.assertGreaterEqual(
-            len(tracked), 35,
-            f"SSOT 三棵樹內只找到 {len(tracked)} 支 tracked .sh/.ps1（下限 35）"
+            len(tracked), 34,
+            f"SSOT 三棵樹內只找到 {len(tracked)} 支 tracked .sh/.ps1（下限 34）"
             "——掃描面疑似縮小；刻意刪減腳本請同步下修本下限",
         )
         parity = _load_parity()

@@ -21,7 +21,8 @@ dependencies = [
     # Windows 上恆無法 import、PtyWrapper 全數退回 subprocess fallback。
     # 顯式鎖 setuptools<81 以確保 pkg_resources 隨 uv venv/pip 安裝存在。
     "setuptools<81; sys_platform == 'win32'",
-    "keyboard>=0.13",
+    # R76（R76-17／R68-67，open 跨 8 輪）：`keyboard` 已移出核心相依，改為 `[hotkey]`
+    # 選配 extra（見下方 optional-dependencies）。WHY 與消費面現況見那一段。
 ]
 
 [project.optional-dependencies]
@@ -29,9 +30,14 @@ dev = [
     # DEF-101-006 鎖版：dev 工具鏈未鎖版致 fresh bootstrap 漂移 —
     # pytest 鎖 9.1.1 與 AISDLC_SDD/AISDLC_SDD_v0.01/requirements-ci.txt 一致
     # （鎖版消除 fresh bootstrap 的安裝順序漂移）；
-    # ruff 鎖 0.15.21（QA 實測 fresh bootstrap 安裝版、baseline 1,147 筆一致
-    # 〔R23 複審實測更新，原 1,339 筆為舊測值，非機械斷言、僅描述性存量〕，
-    # 未鎖版曾致 baseline 漂移）。升版規則比照 requirements-ci.txt：本機先升跑全綠再回寫釘選。
+    # ruff 鎖 0.15.21（QA 實測 fresh bootstrap 安裝版；未鎖版曾致存量筆數 baseline 漂移）。
+    # 升版規則比照 requirements-ci.txt：本機先升跑全綠再回寫釘選。
+    # 🔴 R76（DEF-101-018／R76-47）：**存量筆數刻意不登載於此**。原文寫死「1,147 筆一致
+    # 〔原 1,339 筆為舊測值〕」，八輪無人重量、今日實測任一讀法下都失實 —— 一個沒有量測
+    # 配方的數字只會愈放愈久愈假。改記**配方**：
+    #     ruff check . --statistics      # 總筆數＝各列計數相加
+    # 並且**必須同時記 cwd**：`AutoClaude/` 與 monorepo 根是**兩個不同的量**（ruff 逐檔
+    # 往上找設定，兩處適用的規則集與掃描面都不同），混用兩個數字就是製造下一筆 stale。
     # pytest 釘選與 requirements-ci.txt 的一致性由根層 tools/check_script_parity.py 機械比對（root-infra-ci）。
     "pytest==9.1.1",
     "pytest-mock>=3.14",
@@ -62,6 +68,29 @@ mutation = [
 lint = [
     "import-linter>=2.0",
 ]
+# 全域熱鍵（ESC+F12 乾淨 checkpoint 退出）選配後端：
+#   uv pip install -e '.[hotkey]'
+#
+# R76（R76-17；R68-67 open 跨 8 輪）為何從核心相依移出來：
+#   · `keyboard` 0.13.5 自己的 metadata 逐字是 `Requires-Dist: pyobjc ;
+#     sys_platform == "darwin"` ⇒ 它就是 macOS 側被拖進 pyobjc 傘包的**成因**，
+#     而 pyobjc 是一整批發行版、不是一個套件。
+#   · 而它在 macOS 上**根本不生效**：真正擋路的是 `_darwinkeyboard.listen()` 首行的
+#     `os.geteuid() != 0`（見 autoclaude/perception/hotkey_handler.py 的 R68 真機取證
+#     註記）⇒ 非 root 的 mac 使用者付了整個安裝面卻拿不到任何功能。
+#   · 刻意**不寫** `sys_platform == 'win32'`：Linux 的 root 使用者仍可用，寫死 win32
+#     等於製造一個新的單平台判準（根 CLAUDE.md 鐵律三的形態）。用 extra 表達「這是
+#     選配能力」比用平台 marker 表達「這是某個 OS 的東西」誠實。
+#   · 消費面本來就已為缺席設計：`hotkey_handler.py` 的 `_KEYBOARD_AVAILABLE` 旗標在
+#     ImportError 時降級為 warning log，`register()` 直接回 False；
+#     `tests/test_perception_platform_honesty.py` 亦以 skipif 處理缺席。
+#   🔴 **未同步的消費面（本包無權改，交收斂包／R77）**：`tools/bootstrap_core.py`
+#      裝的是 `.[dev,notifications,lint]`（不含 hotkey）⇒ 走 bootstrap 的環境自本次起
+#      **預設不再有** ESC+F12；`docs/AISDLC_Agent_UserGuide.md:369` 仍寫「已含於 core
+#      依賴」、`ONBOARDING.md:529` 仍把 macOS 失效歸因於「輔助使用權限」（實為 euid）。
+hotkey = [
+    "keyboard>=0.13,<0.14",
+]
 # 桌面通知後端（任選其一即可）：
 #   pip install 'autoclaude[notifications]'
 notifications = [
@@ -80,6 +109,15 @@ postgres = [
     "asyncpg>=0.29",
     "psycopg2-binary>=2.9",
     "alembic>=1.13",
+    # 🔴 R76（DEF-101-838；根治位置）：Mako 1.4.0 的 wheel 誤打包了一個**頂層**
+    # `tools/` 套件（RECORD 逐字含 `tools/__init__.py`／`tools/toxnox.py`／
+    # `tools/warn_tox.py`）。`AutoClaude/tools/` 沒有 `__init__.py` ⇒ regular package
+    # 恆勝 namespace package，**與 sys.path 順序無關**，於是凡裝了本 extra 的環境
+    # `import tools.*` 全被遮蔽（R76 實測：5 支模組 ImportError rc=2 ＋ 1 支子行程
+    # ModuleNotFoundError；釘 1.3.12 後全消）。mako 是 alembic 的相依，故約束下在這裡。
+    # CI 端 autoclaude-ci.yml 亦就地帶同一個約束（那是**第二道**，不是唯一一道——
+    # 只釘 CI 會讓本機 `uv pip install -e '.[dev,postgres]'` 的人照樣踩到）。
+    "mako<1.4",
     "tenacity>=8.2",
     "cachetools>=5.3",
 ]

@@ -3307,5 +3307,308 @@ class TestArchiveIndexDocIsExternalized(unittest.TestCase):
                       "新 archive 未登記進索引檔")
 
 
+class TestCriterion2VerbatimQuoteTailMask(unittest.TestCase):
+    """判準② 第三種遮罩（R76）：「訂正首詞（原文…接於後）：」之後是**舊狀態引文**。
+
+    立案實測（R76 動工時對主檔現查）：20 筆列**只**被判準② 一項擋著、合計 69,113 bytes
+    ＝主檔的 29.3%，其中 15 筆命中的字樣全部落在這一族慣用語之後的引文裡——那段文字的
+    用途正是**宣告該狀態已不成立**，判準② 卻把它讀成「還成立」，語意剛好相反。這是
+    `DEF-101-676`（R68 收窄反引號／角引號）的同型復發，第三種逸出面。
+
+    🔴 本類刻意雙向鎖，只做 (a) 不算有鑑別力：
+      (a) 帶慣用語且**現況已結** ⇒ 修後可搬（下方三種真實形態 ＋ row 級控制組）；
+      (b) **現況真的未結** ⇒ 修前修後都不可搬（`_ROW_STILL_OPEN`／`_ROW_REOPENED_AFTER`）。
+    誠實劃界：本遮罩認的是「首詞已被訂正、原文接在後面」這個**具名慣用語**，判定面是
+    「首詞是什麼」——那本來就是本 repo 帳本的權威狀態欄語意（`gate._classify()` 只讀首詞、
+    `status_first_word_problems()` 另有硬閘管它合不合法）。引文段裡寫什麼都不改變現況。
+    """
+
+    #: 主檔實際使用的三種形態（形態逐字取自 `docs/06_quality/AutoSDD_Defect_Log.md`；
+    #: 內容截短以免把活文件整段複製進測試，判定面只吃到標記與其後的活躍字樣）。
+    _REAL_FORMS = (
+        "closed-by-decision｜🔴 R75 訂正首詞（原文逐字接於後）：open watch（2026-06-14）",
+        "fixed@R75｜🔴 R75 訂正首詞（原文接於後，含原解鎖條件）：**open** — 解鎖條件＝…",
+        "fixed@R57 round 3｜🔴 R60 round 2 補《格式定義》合法首詞"
+        "（原首詞非合法值，原文完整接於後）：fixed/deferred@R57 round 3：**①** …",
+    )
+
+    def _row(self, def_id: str, status: str) -> str:
+        return f"| {def_id} | 2026-08-05 | R76 構造輸入 | 現象 | P3 | 去向 | {status} |"
+
+    def _verdict(self, def_id: str, status: str) -> dict:
+        layout = ADL.gate._table_layout(_MAIN_LEDGER.read_text(encoding="utf-8-sig"))
+        self.assertIsNotNone(layout, "主檔查無合格表頭 ⇒ 本組構造輸入沒有欄位定位依據")
+        return ADL.classify_row(self._row(def_id, status), set(), layout)
+
+    def test_the_three_real_forms_are_all_masked(self):
+        """(a)：三種真實形態都必須被遮罩；前置斷言確保裸正則本來就會命中。"""
+        for cell in self._REAL_FORMS:
+            with self.subTest(cell=cell[:24]):
+                self.assertIsNotNone(
+                    ADL.ACTIVE_STATUS_RE.search(cell),
+                    "前提：裸正則本來就命中（否則本條沒在驗任何東西）",
+                )
+                self.assertIsNone(
+                    ADL.active_status_hit(cell),
+                    "被推翻的舊狀態引文仍被判為活躍 ⇒ 第三種遮罩未生效",
+                )
+
+    def test_the_mask_stops_at_the_note_separator(self):
+        """🔴 鑑別力 (b) 之一：引文之後以 `｜` 追加的**現況**敘述不得被一起遮掉。
+
+        帳本體例是「引文之後再 `｜🔴 …` 追加新註記」。遮到欄尾就等於用一句舊引文
+        替整欄買到永久豁免——那是唯一會讓真未結列漏搬的方向。
+        """
+        cell = ("fixed@R74｜🔴 R75 訂正首詞（原文逐字接於後）：open watch（登帳）"
+                "｜🔴 複驗：本項改為 routed 給別人做")
+        hit = ADL.active_status_hit(cell)
+        self.assertIsNotNone(hit, "引文之後的現況敘述被遮掉 ⇒ 一句舊引文買到整欄豁免")
+        self.assertEqual(hit.group(0), "routed")
+
+    def test_masking_still_preserves_offsets(self):
+        """遮罩仍須等長置換：命中 offset 必須能在**原字串**上取回同一個詞。"""
+        cell = "fixed@R74｜🔴 訂正首詞（原文逐字接於後）：open｜殘項 deferred 未處理"
+        hit = ADL.active_status_hit(cell)
+        self.assertIsNotNone(hit)
+        self.assertEqual(cell[hit.start():hit.end()], "deferred")
+
+    def test_a_row_whose_current_first_word_is_open_is_never_released(self):
+        """🔴 鑑別力 (b) 之二：現況真未結的列，加不加這句慣用語都不可搬。"""
+        v = self._verdict(
+            "DEF-999-802",
+            "open｜🔴 訂正首詞（原文逐字接於後）：open（舊狀態，本列現況仍未結）")
+        self.assertTrue(v["blockers"], "現況未結的列被遮罩放行 ⇒ 遮罩把真未結列也放掉了")
+        self.assertTrue(any(b.startswith("①") for b in v["blockers"]),
+                        f"擋下它的理由必須是判準①（狀態分類非已結）：{v['blockers']}")
+
+    def test_a_row_reopened_after_the_quote_is_never_released(self):
+        """🔴 鑑別力 (b) 之三：引文之後才寫的「又活了」必須照樣擋下（row 級對照）。"""
+        v = self._verdict(
+            "DEF-999-803",
+            "fixed@R76｜🔴 訂正首詞（原文逐字接於後）：open（舊）｜🔴 現改為 routed")
+        self.assertTrue(any(b.startswith("②") for b in v["blockers"]),
+                        f"引文之後的 routed 沒被判準② 抓到：{v['blockers']}")
+
+    def test_a_closed_row_carrying_the_idiom_becomes_movable(self):
+        """(a) 的 row 級控制組：現況已結 ＋ 帶慣用語 ⇒ 六項判準零 blocker。"""
+        v = self._verdict(
+            "DEF-999-801",
+            "fixed@R76｜🔴 訂正首詞（原文逐字接於後）：open（舊狀態，已被推翻）")
+        self.assertEqual(v["blockers"], [],
+                         "現況已結、僅引述舊狀態的列仍被釘住 ⇒ 第三種遮罩未生效")
+
+    def test_the_idiom_is_the_load_bearing_token_not_any_parenthesis(self):
+        """遮罩不得寬到「任何括號註記之後都算引文」——那會是新的豁免口。"""
+        for cell in ("fixed@R76（補充說明）：open 待處理",
+                     "fixed@R76｜🔴 R76 複驗（已重跑）：open 仍在"):
+            with self.subTest(cell=cell[:20]):
+                self.assertIsNotNone(
+                    ADL.active_status_hit(cell),
+                    "不帶「首詞…原文…接於後」的一般括號註記不得買到遮罩",
+                )
+
+
+class TestMoveSubsetSelectionIsNamedAndTraceable(unittest.TestCase):
+    """`--only`／`--keep`（`DEF-101-811`）：排除入口不得成為無聲的少搬後門。
+
+    原始缺陷：`--apply` 全有全無，唯一的「不要搬這一筆」入口是判準④ 的 `--ack-handoff`
+    ——而那是**加入**用的，方向相反。於是每輪都得先讓工具把本輪列一起搬走、再手工把它們
+    還原回主檔；手工還原一份剛被就地覆寫的帳本，正是本工具立帳要消滅的動作。
+
+    🔴 本類鎖的是「這個入口為什麼不是後門」那三條設計約束（見
+    `defect_ledger_index.select_move_subset()` docstring）：只會讓集合變小、打錯即
+    fail-loud、排除留痕且下一次 `--plan` 照樣看得到。
+    """
+
+    def _prepare(self, n: int = 3) -> list[str]:
+        ids = [f"DEF-999-8{i}0" for i in range(1, n + 1)]
+        for def_id in ids:
+            _append_to(
+                ADL._LEDGER,
+                f"| {def_id} | 2026-08-05 | R76 構造輸入 | 合成 | P4 "
+                "| 合成分流 | fixed@R76（合成，僅存在於沙箱） |\n",
+            )
+        return ids
+
+    def test_keep_excludes_only_the_named_rows(self):
+        with _ledger_sandbox():
+            ids = self._prepare()
+            base = [v["id"] for v in ADL.plan()["movable"]]
+            p = ADL.plan(frozenset(), frozenset(), frozenset([ids[0]]))
+        self.assertEqual(p["selection_problems"], [])
+        for def_id in ids:
+            self.assertIn(def_id, base, "前提：控制組三列都必須本來就可搬")
+        self.assertNotIn(ids[0], [v["id"] for v in p["movable"]])
+        self.assertEqual([v["id"] for v in p["excluded"]], [ids[0]])
+        self.assertIn(ids[1], [v["id"] for v in p["movable"]],
+                      "--keep 波及了未被指名的列")
+
+    def test_only_picks_exactly_the_named_subset(self):
+        with _ledger_sandbox():
+            ids = self._prepare()
+            p = ADL.plan(frozenset(), frozenset(ids[:2]), frozenset())
+        self.assertEqual(sorted(v["id"] for v in p["movable"]), sorted(ids[:2]))
+        self.assertIn(ids[2], [v["id"] for v in p["excluded"]])
+
+    def test_a_typo_is_fail_loud_and_writes_nothing(self):
+        """打錯一個 ID 就靜默少搬／全搬是無聲的錯，兩個方向都不可接受。"""
+        dest_name = "AutoSDD_Defect_Log_archive_97.md"
+        with _ledger_sandbox():
+            self._prepare()
+            before = ADL._LEDGER.read_bytes()
+            out, err = io.StringIO(), io.StringIO()
+            with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+                rc = ADL.apply(97, frozenset(), "typo 測試",
+                               frozenset(), frozenset(["DEF-999-999"]))
+            unchanged = ADL._LEDGER.read_bytes() == before
+            created = (ADL._QUALITY_DIR / dest_name).exists()
+        self.assertEqual(rc, 1, "--keep 指名不存在的 ID 竟照樣落地")
+        self.assertTrue(unchanged, "選集不合法時主檔不得被改動")
+        self.assertFalse(created, "選集不合法時不得產生 archive")
+        self.assertIn("不在可搬清單內", err.getvalue())
+
+    def test_only_can_never_promote_a_blocked_row(self):
+        """🔴 後門的正面反證：把**被擋下**的 ID 餵進 `--only`，它不得因此變成可搬。"""
+        blocked_id = "DEF-999-870"
+        with _ledger_sandbox():
+            _append_to(
+                ADL._LEDGER,
+                f"| {blocked_id} | 2026-08-05 | R76 構造輸入 | 合成 | P4 "
+                "| 合成分流 | open（合成未結列） |\n",
+            )
+            p = ADL.plan(frozenset(), frozenset([blocked_id]), frozenset())
+            blocked_ids = [v["id"] for v in p["blocked"]]
+        self.assertIn(blocked_id, blocked_ids, "前提：該列必須是被判準擋下的")
+        self.assertNotIn(blocked_id, [v["id"] for v in p["movable"]],
+                         "--only 把被擋下的列提升成可搬 ⇒ 它是繞過判準的後門")
+        self.assertTrue(p["selection_problems"], "餵進不可搬的 ID 必須 fail-loud")
+
+    def test_exclusions_leave_a_permanent_trace_and_hide_nothing(self):
+        """排除必須留痕（archive 標頭＋索引 bullet＋`--plan` 列印），且不影響 `--check`。"""
+        with _ledger_sandbox():
+            ids = self._prepare()
+            out, err = io.StringIO(), io.StringIO()
+            with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+                rc = ADL.apply(98, frozenset(), "排除留痕測試",
+                               frozenset(), frozenset([ids[0]]))
+            self.assertEqual(rc, 0, err.getvalue())
+            header = _generated_header_of(
+                ADL._QUALITY_DIR / "AutoSDD_Defect_Log_archive_98.md")
+            index_text = ADL.ARCHIVE_INDEX_DOC().read_bytes().decode("utf-8")
+            after = ADL.plan()
+            plan_out = io.StringIO()
+            with contextlib.redirect_stdout(plan_out):
+                # 用**仍留在主檔**的那一筆（ids[0]）：拿已被搬走的 ID 會走 fail-loud 分支，
+                # 訊息裡照樣有那個 ID ⇒ 斷言會被錯誤訊息滿足，而不是被排除列印滿足。
+                ADL._print_plan(ADL.plan(frozenset(), frozenset(), frozenset([ids[0]])))
+            rc_check, problems, _ = _run_check()
+        self.assertIn(ids[0], header, "archive 標頭未記下被排除的 ID ⇒ 排除是無聲的")
+        self.assertIn(ids[0], index_text, "索引 bullet 未記下被排除的 ID")
+        self.assertIn(ids[0], [v["id"] for v in after["movable"]],
+                      "被排除的列必須仍留在主檔、下次 --plan 照樣報成可搬")
+        self.assertRegex(
+            plan_out.getvalue(), r"以 --only／--keep 排除[^\n]*" + ids[0],
+            "--plan 未逐次列印被排除的 ID（豁免看不見就是靜默豁免口）")
+        self.assertEqual(rc_check, 0, f"排除之後保全稽核轉紅：{problems}")
+
+    def test_check_still_catches_a_pointer_that_assumes_the_row_moved(self):
+        """🔴 設計約束的另一半：`--keep` 之後若有指針宣稱該列已歸檔，`--check` 必須抓到。
+
+        這是「搬了但指針沒更新」的**鏡像**形態，也是本入口唯一新增的風險面：操作者先把
+        指針改成「現居 archive_NN」、再用 `--keep` 把那一列留下來。判準(4)(6) 比對的是
+        **實際居所**而不是「有沒有執行搬遷動作」，所以它照樣命中——本條把這件事從推論
+        變成實測（推論在本 repo 不算證據）。
+        """
+        with _ledger_sandbox():
+            ids = self._prepare(2)
+            out, err = io.StringIO(), io.StringIO()
+            with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+                rc_apply = ADL.apply(99, frozenset(), "指針鏡像測試",
+                                     frozenset(), frozenset([ids[0]]))
+            self.assertEqual(rc_apply, 0, err.getvalue())
+            _append_to(ADL._LEDGER, f"\n> 立帳見 {ids[0]}（現居 archive_99）\n")
+            rc, problems, _ = _run_check()
+        self.assertEqual(rc, 1, "指針宣稱該列已歸檔、實際仍在主檔，--check 竟回 0")
+        self.assertTrue(any(ids[0] in pb and "失實" in pb for pb in problems),
+                        f"問題清單未指名該筆失實指針：{problems}")
+
+    def test_the_default_call_is_byte_identical_to_the_pre_r76_behaviour(self):
+        """不給任何選集時，行為必須與 R75 完全相同（新入口不得改變預設路徑）。"""
+        with _ledger_sandbox():
+            ids = self._prepare()
+            p = ADL.plan()
+        self.assertEqual(p["excluded"], [])
+        self.assertEqual(p["selection_problems"], [])
+        for def_id in ids:
+            self.assertIn(def_id, [v["id"] for v in p["movable"]])
+
+
+class TestUnresolvedAdvisoryBandIsBelowWarnAndNeverRed(unittest.TestCase):
+    """未結列數的**預警帶**（R76）：歸檔買不到這條線的餘裕，所以必須提早出聲。
+
+    立案形狀：bytes 那條線撞到時有洩壓閥（歸檔），未結列數這條**結構上沒有**——未結列
+    不可搬（判準① 硬擋）。而歸檔會讓 bytes 大幅下降 ⇒ 剛跑完歸檔的人看到的訊號是
+    「餘裕變多了」，方向正好與真正會破的那道閘門相反。R76 實測：歸檔釋出兩萬餘 bytes
+    的同一次操作裡，未結列數一筆都沒動。
+    """
+
+    def _ledger(self, n: int) -> dict[str, str]:
+        return {f"D-{i}": "open" for i in range(n)}
+
+    def test_the_band_fires_below_warn_and_says_archiving_does_not_help(self):
+        li = ADL._ledger_index
+        n = li.UNRESOLVED_ROWS_FAIL - li.UNRESOLVED_ROWS_ADVISORY_MARGIN
+        self.assertLess(n, li.UNRESOLVED_ROWS_WARN,
+                        "預警帶必須落在 warn 線之下，否則它與既有 warn 完全重疊")
+        notes = li.unresolved_advisory_notes(self._ledger(n))
+        self.assertEqual(len(notes), 1, "距 fail 線恰為預警寬度時必須出聲")
+        self.assertIn("歸檔不會降低此數", notes[0])
+        self.assertIn("唯一出路是把列真的結掉", notes[0])
+
+    def test_it_is_silent_one_row_below_the_band(self):
+        li = ADL._ledger_index
+        n = li.UNRESOLVED_ROWS_FAIL - li.UNRESOLVED_ROWS_ADVISORY_MARGIN - 1
+        self.assertEqual(li.unresolved_advisory_notes(self._ledger(n)), [],
+                         "帶外仍出聲 ⇒ 永不消失的提示會被整批忽略")
+
+    def test_it_is_silent_at_and_above_warn(self):
+        """同一件事報兩次只會讓兩個訊號一起被忽略（warn 帶已由既有函式出聲）。"""
+        li = ADL._ledger_index
+        for n in (li.UNRESOLVED_ROWS_WARN, li.UNRESOLVED_ROWS_FAIL):
+            with self.subTest(n=n):
+                self.assertEqual(li.unresolved_advisory_notes(self._ledger(n)), [])
+
+    def test_the_band_never_changes_rc(self):
+        """🔴 預警＝非阻斷。它一旦會把 rc 弄紅就會被整個關掉，比沒有更糟。"""
+        li = ADL._ledger_index
+        n = li.UNRESOLVED_ROWS_FAIL - li.UNRESOLVED_ROWS_ADVISORY_MARGIN
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            rc = li.report_unresolved(self._ledger(n))
+        self.assertEqual(rc, 0, "預警帶把 --unresolved-count 的 rc 弄紅了")
+        self.assertIn("歸檔不會降低此數", out.getvalue())
+
+    def test_the_existing_two_lines_are_shrink_only_and_untouched(self):
+        """棘輪：新增預警帶不得順手放寬既有兩線（那就是砸溫度計）。"""
+        li = ADL._ledger_index
+        self.assertLessEqual(li.UNRESOLVED_ROWS_WARN, 86, "warn 線只准往下改")
+        self.assertLessEqual(li.UNRESOLVED_ROWS_FAIL, 98, "fail 線只准往下改")
+        below = self._ledger(li.UNRESOLVED_ROWS_WARN - 1)
+        self.assertEqual(
+            li.unresolved_ceiling_problems(below), ([], []),
+            "預警帶被塞進 unresolved_ceiling_problems ⇒ 既有門檻鎖會合法轉紅，"
+            "而它守的是門檻語意、不該為了加一條提示被改動",
+        )
+
+    def test_the_band_is_wired_into_both_carriers(self):
+        """可重跑而沒有任何載具在印＝等於沒有（`DEF-101-731` 的形狀）。"""
+        self.assertIn("unresolved_advisory_notes",
+                      _TOOL_PATH.read_text(encoding="utf-8"),
+                      "`--plan` 沒有印預警帶 ⇒ 剛歸檔的人看不到這條線")
+        lib_src = Path(ADL._ledger_index.__file__).read_text(encoding="utf-8")
+        self.assertIn("warns + unresolved_advisory_notes(ledger)", lib_src,
+                      "`--unresolved-count` 沒有印預警帶")
+
+
 if __name__ == "__main__":
     unittest.main()

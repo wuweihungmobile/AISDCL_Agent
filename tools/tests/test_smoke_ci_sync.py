@@ -842,6 +842,15 @@ _CI_STEP_LOCAL_CARRIER: dict[str, dict[str, str]] = {
         "根層 dispatcher hooks：/bin/bash（系統 bash 3.2，非 Homebrew 新版）直接執行驗證": "macos_smoke_local.sh [2/7]",
         "AISDLC_SDD LATEST/tools/install_hooks/install_post_commit.sh 於 worktree 執行，驗證寫入共用 .git/hooks/post-commit": "macos_smoke_local.sh [4/7]",
         "pty_wrapper / hotkey_handler 平台解析單元測試（AutoClaude tests/test_perception.py）": "nightly stage 3 autoclaude_gate（AutoClaude 全套 pytest 含 AutoClaude/tests/test_perception.py）",
+        # R76-11 新增（兩平台對稱）。key 折行理由同上（E501 shrink-only 棘輪）。
+        (
+            "AutoClaude 平台敏感測試子集（R76-11：push 閘門對 AutoClaude 生產樹"
+            "此前零執行證據）"
+        ): (
+            "nightly stage 3 autoclaude_gate（AutoClaude 全套 pytest，是本步驟所選"
+            "子集的**超集**）；本步驟買的不是新斷言，是「同一批斷言在真 macOS runner "
+            "上、每次 push 都跑一次」——本地載具跑的是開發者自己那台機器"
+        ),
         "執行 tools/integration_gate.sh --skip-full（實際執行，非僅語法解析；R34 Scan-C 發現修正）": (
             f"{_NO_CARRIER}: 全 repo 零自動呼叫端（R67-C19 實查：所有命中皆為文件／parity "
             "登記／薄殼守門，無任何本地流程執行它）"
@@ -892,6 +901,15 @@ _CI_STEP_LOCAL_CARRIER: dict[str, dict[str, str]] = {
         "dot-source tools/dev_start.ps1（同上，日常開工入口）": f"{_NO_CARRIER}: 會改寫本機依賴基準狀態與 .venv（同 macOS 側 dev_start 實跑）",
         "觸發 tools/dev_start.py 的 .venv 形狀換手分支（posix→windows，僅 Windows runner 可測）": "tools/tests/test_dev_start.py（posix→windows 形狀換手分支）",
         "pty_wrapper / hotkey_handler 平台解析單元測試": "nightly autoclaude gate（AutoClaude 全套 pytest）",
+        # R76-11 新增（兩平台對稱）。key 折行理由同上（E501 shrink-only 棘輪）。
+        (
+            "AutoClaude 平台敏感測試子集（R76-11：push 閘門對 AutoClaude 生產樹"
+            "此前零執行證據）"
+        ): (
+            "nightly autoclaude gate（AutoClaude 全套 pytest，是本步驟所選子集的"
+            "**超集**）；本步驟買的不是新斷言，是「同一批斷言在真 Windows runner 上、"
+            "每次 push 都跑一次」——本地載具跑的是開發者自己那台機器"
+        ),
         "執行 tools/integration_gate.ps1 -SkipFull（實際執行，非僅語法解析；P1 Architect 發現修正）": f"{_NO_CARRIER}: 同 macOS 側——integration_gate 全 repo 零自動呼叫端",
         "執行（非僅解析）ci-gate.ps1（凍結基線 + LATEST 雙軌）": "nightly sdd ci-gate stage",
         "install_git_hooks.ps1 安裝／解除往返驗證": "windows_smoke_local.ps1 [2/9]",

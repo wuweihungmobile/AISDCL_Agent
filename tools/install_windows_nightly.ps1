@@ -128,8 +128,8 @@ $TaskName = 'AutoClaude_Nightly'
 # AutoClaude_SD09_G0_GateCheck 已於 R69 移除——它是一次性 TimeTrigger，2026-06-29
 # 觸發一次（結論 [G0-NOT-READY]）後 NextRunTime 永遠空白，此後 34 天零檢查，是死排程。
 # G0 三軌判定已改由每晚都會跑的 run_local_nightly.ps1 收尾區塊印出（[G0-READY] /
-# [G0-NOT-READY]）。兩支腳本 AutoClaude/tools/g0_gate_check.ps1（人工隨時複查）與
-# reschedule_g0_gatecheck.ps1（需要時重新排程）**保留**，只是不再有常駐排程任務。
+# [G0-NOT-READY]）。腳本 AutoClaude/tools/g0_gate_check.ps1（人工隨時複查）**保留**，不再有
+# 常駐排程任務。R76 訂正：原寫「兩支腳本」，reschedule_g0_gatecheck.ps1 已刪＝真孤兒。
 # 本 installer 從未管理 G0 任務，故無需新增移除邏輯——它只管 Nightly + WindowsSmoke。
 $SmokeTaskName = 'AutoClaude_WindowsSmoke'
 $ScriptDir = $PSScriptRoot

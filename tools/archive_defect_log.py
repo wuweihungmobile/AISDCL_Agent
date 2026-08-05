@@ -89,8 +89,10 @@
 `tools/_script_scan_surface.py`），不另創第二種收斂方式。
 
 使用：
-  python tools/archive_defect_log.py --plan
+  python tools/archive_defect_log.py --plan [--only DEF-x,...] [--keep DEF-y,...]
   python tools/archive_defect_log.py --apply --archive-num 31 [--ack-handoff DEF-101-517,...]
+  # `--only`／`--keep`＝判準全過之後的**具名排除**入口（DEF-101-811）：排除留痕（寫進
+  # archive 標頭與索引 bullet）、ID 打錯即 fail-loud，且結構上只會讓搬遷集合變小。
   python tools/archive_defect_log.py --check      # 事後保全稽核（項數＝ `CHECK_CRITERIA`）
 
 `--apply` 除了搬列，**還會自己把該次歸檔的索引 bullet 寫進歸檔索引檔**
@@ -153,12 +155,11 @@ CLOSED_CLASSES = frozenset({"fixed", "wontfix", "closed-by-decision"})
 # 再匯出維持相容，並把「該檔應改用 `gate._row_cells(line)[1:-1]`」列為跨包請求。
 _CELL_SPLIT_RE = gate._CELL_SPLIT_RE
 
-# 判準② — token 邊界字元集與 gate `_FIRST_WORD_RE`（`[A-Za-z][A-Za-z0-9_-]*`，故
-# `closed-by-decision` 整體是一個詞）**對齊**：`OpenMutexW`／`reopened` 不誤命中
-# （G-refuter-4），`fail-open` 這類設計術語亦然（R74，WHY 見 `active_status_hit()` 第④類）。
-ACTIVE_STATUS_RE = re.compile(
-    r"(?<![A-Za-z0-9_-])(?:open|routed|deferred|watch)(?![A-Za-z0-9_-])|workaround"
-)
+# 判準② — **再匯出（re-export），不是複本**：本體自 R76 起住
+# `tools/lib/defect_ledger_index`（WHY 與四類誤報面見該處 `active_status_hit()`）。
+# 形狀沿用本檔既有的 `_CELL_SPLIT_RE = gate._CELL_SPLIT_RE` 先例。
+ACTIVE_STATUS_RE = _ledger_index.ACTIVE_STATUS_RE
+active_status_hit = _ledger_index.active_status_hit
 
 # 判準④ — 「向未來輪次交棒」的散文標記。刻意保守（寧可多攔下來要求具名承認）。
 # SA-R63-01：原清單遺漏「留待」「承接者」「改派」三種同語意交棒措辭——
@@ -246,7 +247,8 @@ CHECK_CRITERIA: tuple[tuple[str, str], ...] = (
 MOVE_CRITERIA: tuple[str, ...] = (
     "狀態欄分類已結（fixed／wontfix／closed-by-decision）",
     "狀態欄無活躍字樣（open／routed／deferred／watch／workaround，ASCII 邊界非子字串；"
-    "程式碼片段與角引號引述內的字樣不算，R68 收窄）",
+    "程式碼片段、角引號引述、與「訂正首詞（原文…接於後）：」之後到下一個 `｜` 為止的"
+    "舊狀態引文內的字樣皆不算，R68 收窄／R76 補第三種）",
     "被 crossref 掃描目標宣稱過狀態者可搬，但搬後該宣稱必須仍解析得到"
     "（帳本家族＝主檔 ∪ archive；由 --check 判準(8) 實跑驗證，R68 改寫）",
     "散文帶交棒字樣者需 `--ack-handoff` 具名承認",
@@ -381,7 +383,8 @@ _CODE_SPAN_RE = gate._CODE_SPAN_RE
 _TERM_MENTION_SUFFIXES = ("」", "』")
 # 例外 (丁) 收窄用（SA-R60R3-06）：同一行的成對轉角引號。與 `_CODE_SPAN_RE` 同形狀——
 # 兩者都是「看得見的刻意標記」，故用同一種判定方式（掃出成對區間、看該處落不落在區間內）。
-_CORNER_QUOTE_RE = re.compile(r"「[^「」]*」|『[^『』]*』")
+# R76 起同樣是再匯出（判準② 也要用它，同一條判準不留兩份）。
+_CORNER_QUOTE_RE = _ledger_index.CORNER_QUOTE_RE
 
 # 判準④ 的稽核面第二半：具名治理文件集合（ARCH-R60R2-05 方案甲）。
 # 這些檔不是帳本，**不參與**居所判定的來源（居所一律由帳本家族的表格列決定），只是
@@ -511,50 +514,6 @@ def _status_claimed_ids() -> set[str]:
     return claimed
 
 
-def active_status_hit(status_cell: str) -> re.Match[str] | None:
-    """判準② 的實際判讀入口：**排除程式碼片段與角引號引述之後**再找活躍字樣（R68）。
-
-    🔴 為何非收窄不可（DEF-101-676 實測，2026-08-01 於主檔 109 列現查）——判準② 原本是
-    對整個狀態欄做裸掃描，於是把下列**與本列現況無關**的字元一律當成「本列還活著」
-    （項數不寫死：清單會長，寫死就是下一個 stale 站點）：
-
-      · **程式碼片段裡的 Python 內建函式 `open`**。實例 `DEF-101-391`：狀態欄寫
-        `` fixed@R48：`python3 -c "import yaml; yaml.safe_load(open('...yml'))"` ``——
-        命中的 `open` 是 `open()` 呼叫。`DEF-101-524` 同型（`open(..., newline="")`）；
-        與 ASCII 邊界那一版的 `OpenMutexW` 誤報同型，逸出面換成「反引號內」。
-      · **引述本列自己被推翻的舊狀態**。實例 `DEF-101-554`：`` 本欄原文為「`open`（待
-        主控還原）」… ``；`DEF-101-581`：`` 原記狀態 `open（未指派）` ``。這些字面出現的
-        用途正是**宣告它已不成立**，判準② 卻把它讀成「還成立」——語意剛好相反。
-      · **在講別的 DEF-ID**。實例 `DEF-101-541`／`564`／`565`：`routed` 指的是被拆出去
-        的另一列（`DEF-101-559` 等），不是本列。
-      · **以 `-`／`_` 黏成複合 token 的設計術語**（R74）。實例 `DEF-101-699`／`768` 的
-        狀態欄寫 `fail-open`（守衛的失敗**方向**），而邊界 lookaround 原本只排除
-        `[A-Za-z0-9]`、放連字號通過 ⇒ 兩筆已結列被永久釘在主檔。修法是把邊界字元集對齊
-        gate `_FIRST_WORD_RE` 的 token 定義，**不是**加遮罩、也**不是**開白名單。
-
-    後果不是「多攔幾筆」而是**結構性死結**：這 16 筆全是 `_classify` 已判已結（fixed／
-    closed-by-decision）、只被判準② 一項擋住的列，合計 **39705 bytes** 永久卡在主檔，
-    使輪替吞吐趨近零、主檔單調逼近 256KB 硬線（DEF-101-676）。
-
-    收窄手法刻意**復用既有基元**（`_CODE_SPAN_RE`／`_CORNER_QUOTE_RE`），不另寫一套規則。
-
-    🔴 **鑑別力不得因此流失**，三道保留：
-      (a) 裸散文裡的活躍字樣照樣命中（未加反引號、未加角引號者一律算數）；
-      (b) 判準① 仍先要求狀態欄首詞分類為已結，本判準只是第二層；
-      (c) 判準④（`HANDOFF_PROSE_RE`）完全不受影響，且它掃的是**整列**而非狀態欄——真正的
-          活交棒仍會被攔下要求 `--ack-handoff` 具名承認（R68 實測放行的 6 筆中有 3 筆
-          隨即落在判準④ 手上；R74 的 `fail-open` 兩筆亦同）。
-    對應機械鎖：`tools/tests/test_archive_defect_log.py::TestCriterion2Narrowing`（R75 訂正）
-    """
-    masked = list(status_cell)
-    for pattern in (_CODE_SPAN_RE, _CORNER_QUOTE_RE):
-        for m in pattern.finditer(status_cell):
-            # 以空白覆蓋（等長置換，保住 offset 與長度，便於報告引用原字串位置）
-            for i in range(m.start(), m.end()):
-                masked[i] = " "
-    return ACTIVE_STATUS_RE.search("".join(masked))
-
-
 def classify_row(line: str, claimed: set[str], layout: tuple[int, int, int]) -> dict:
     """對單一表格列套用搬遷判準 ①②⑤，回傳結構化裁決（④ 由 `plan()` 依 ack 判）。
 
@@ -626,7 +585,11 @@ def _row_id(line: str, layout: tuple[int, int, int]) -> str | None:
     return cells[id_idx] if gate._ID_RE.fullmatch(cells[id_idx]) else None
 
 
-def plan(ack: frozenset[str] = frozenset()) -> dict:
+def plan(ack: frozenset[str] = frozenset(), only: frozenset[str] = frozenset(),
+         keep: frozenset[str] = frozenset()) -> dict:
+    """六項搬遷判準的裁決；`only`／`keep` 只在判準全跑完之後對結果做集合運算（見
+    `_ledger_index.select_move_subset()` 的三條設計約束）。預設空集合＝行為與 R75 相同。
+    """
     claimed = _status_claimed_ids()
     text = _LEDGER.read_text(encoding="utf-8-sig")
     layout = gate._table_layout(text)
@@ -662,6 +625,7 @@ def plan(ack: frozenset[str] = frozenset()) -> dict:
             continue
         movable.append(v)
     movable.sort(key=lambda v: -v["bytes"])
+    movable, excluded, sel_problems = _ledger_index.select_move_subset(movable, only, keep)
     return {
         "claimed_count": len(claimed),
         "movable_claimed": sum(1 for v in movable if v["claimed"]),
@@ -669,6 +633,8 @@ def plan(ack: frozenset[str] = frozenset()) -> dict:
         "movable": movable,
         "needs_ack": needs_ack,
         "blocked": blocked,
+        "excluded": excluded,
+        "selection_problems": sel_problems,
         "ledger_bytes": _LEDGER.stat().st_size,
     }
 
@@ -697,6 +663,15 @@ def _print_plan(p: dict) -> None:
     print(f"\n不可搬：{len(p['blocked'])} 筆")
     for v in p["blocked"]:
         print(f"  {v['id']:<14} {'; '.join(v['blockers'])}")
+    if p["selection_problems"]:
+        print("\n❌ --only／--keep 選集不合法：" + "；".join(p["selection_problems"]))
+    if p["excluded"]:
+        print(f"\nℹ️  以 --only／--keep 排除（仍留在主檔，下次 --plan 照樣報成可搬）："
+              f"{'、'.join(v['id'] for v in p['excluded'])}")
+    # 🔴 第二條天花板：未結列數。歸檔對它零效果，而歸檔會讓 bytes 訊號往**相反**方向動
+    #    ——剛跑完 `--apply` 的人最容易誤以為餘裕買到了（WHY 見 lib 該函式）。
+    for note in _ledger_index.unresolved_advisory_notes(gate._load_ledger_status()):
+        print(f"\n⚠️  {note}")
 
 
 def _family_files() -> list[Path]:
@@ -1347,7 +1322,8 @@ def conservation_problems(orig_text: str, new_main: str, move_lines: list[str],
 
 
 def _index_bullet(dest: Path, move_ids: list[str], orig_bytes: int, released: int,
-                  archive_bytes: int, needs_ack: list[dict], note: str) -> str:
+                  archive_bytes: int, needs_ack: list[dict], note: str,
+                  excluded: list[dict] = ()) -> str:
     """組出該次歸檔的索引 bullet（體例照 archive_30 那條；R69 起寫進歸檔索引檔）。
 
     載明：建立時點／筆數／ID 清單／bytes 變化／判準④ 攔下哪幾筆／操作備註。
@@ -1358,6 +1334,8 @@ def _index_bullet(dest: Path, move_ids: list[str], orig_bytes: int, released: in
     「不對餘裕做定性宣稱／不快照可漂移數字」的既有紀律同向（R59 SA-R59-P2-1）。
     """
     held = "、".join(f"`{v['id']}`" for v in needs_ack) or "（無）"
+    # DEF-101-811：`--only`／`--keep` 的排除必須**留痕**，否則它就是一個無聲的少搬入口。
+    skipped = "、".join(f"`{v['id']}`" for v in excluded) or "（無）"
     return (
         f"> - **`{dest.name}`**（`tools/archive_defect_log.py --apply` 於 "
         f"{_date.today().isoformat()} 建立，{archive_bytes} bytes）："
@@ -1367,16 +1345,22 @@ def _index_bullet(dest: Path, move_ids: list[str], orig_bytes: int, released: in
         f"（搬後實數以 `python tools/check_defect_log_crossref.py` 實跑為權威——本 bullet"
         f"自身的寫入也計入主檔體積，故不在此寫死搬後數字）。"
         f"**判準④ 攔下、刻意未加 `--ack-handoff` 而留在主檔者**：{held}。"
+        f"**判準全過但以 `--only`／`--keep` 具名排除、刻意留在主檔者**：{skipped}。"
         f"**本次操作備註**：{note}"
     )
 
 
-def apply(archive_num: int, ack: frozenset[str], header_note: str) -> int:
+def apply(archive_num: int, ack: frozenset[str], header_note: str,
+          only: frozenset[str] = frozenset(), keep: frozenset[str] = frozenset()) -> int:
     dest = _QUALITY_DIR / f"AutoSDD_Defect_Log_archive_{archive_num:02d}.md"
     if dest.exists():
         print(f"❌ {dest.name} 已存在，拒絕覆蓋", file=sys.stderr)
         return 1
-    p = plan(ack)
+    p = plan(ack, only, keep)
+    if p["selection_problems"]:
+        # fail-loud，**未寫入任何檔案**：打錯一個 ID 就靜默少搬／全搬是無聲的錯。
+        print("❌ " + "；".join(p["selection_problems"]), file=sys.stderr)
+        return 1
     if not p["movable"]:
         print("❌ 無任何可搬列，拒絕產生空 archive", file=sys.stderr)
         return 1
@@ -1394,6 +1378,7 @@ def apply(archive_num: int, ack: frozenset[str], header_note: str) -> int:
 
     kept = [ln for ln in text.split("\n") if ln not in set(move_lines)]
     rows_removed = "\n".join(kept)
+    skipped_ids = "、".join(f"`{v['id']}`" for v in p["excluded"]) or "（無）"
 
     # 🔴 判準清單一律由 `MOVE_CRITERIA`／`CHECK_CRITERIA` 生成，**不得手寫**（P7-4）：
     # archive 是零刪除的史料檔，手寫清單一旦與實作脫節，每次 `--apply` 都會把那份失實宣稱
@@ -1413,6 +1398,8 @@ def apply(archive_num: int, ack: frozenset[str], header_note: str) -> int:
         f"> 且散文所載判準與實際執行的判準不一致——R60 起改為引用可重跑的工具，"
         f"見該檔 docstring。\n>\n"
         f"> **搬遷清單**：{'、'.join(f'`{i}`' for i in move_ids)}\n>\n"
+        f"> **判準全過但以 `--only`／`--keep` 具名排除、刻意留在主檔者**"
+        f"（DEF-101-811；排除留痕，非無聲少搬）：{skipped_ids}\n>\n"
         f"> **本次操作備註**：{header_note}\n>\n"
         f"> 餘裕一律以 `python tools/check_defect_log_crossref.py` 的實跑訊號為權威，\n"
         f"> 本標頭**不對餘裕做定性宣稱**"
@@ -1434,7 +1421,7 @@ def apply(archive_num: int, ack: frozenset[str], header_note: str) -> int:
     index_doc = ARCHIVE_INDEX_DOC()
     index_orig_bytes = index_doc.stat().st_size if index_doc.exists() else 0
     bullet = _index_bullet(dest, move_ids, len(orig), released, len(archive_body),
-                           p["needs_ack"], header_note)
+                           p["needs_ack"], header_note, p["excluded"])
     bullet_bytes = len(bullet.encode("utf-8")) + 1
     new_index, index_problem = _ledger_index.prepare_index_insert(index_doc, bullet)
     if index_problem or new_index is None:
@@ -1490,17 +1477,24 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--ack-handoff", default="",
                     help="逗號分隔的 DEF-ID，具名承認搬遷帶交棒字樣的列")
     ap.add_argument("--note", default="（未填）", help="--apply 時寫入 archive 標頭的操作備註")
+    # DEF-101-811 的排除入口（`--ack-handoff` 只能**加入**，方向相反）。兩者可併用：
+    # 先取 `--only` 交集再扣 `--keep`。排除留痕＋打錯 ID 即 fail-loud，見 lib 該函式。
+    ap.add_argument("--only", default="", help="逗號分隔的 DEF-ID：只搬這幾筆（其餘留主檔）")
+    ap.add_argument("--keep", default="", help="逗號分隔的 DEF-ID：這幾筆不搬，留在主檔")
     a = ap.parse_args(argv)
-    ack = frozenset(x.strip() for x in a.ack_handoff.split(",") if x.strip())
+    ack, only, keep = (frozenset(x.strip() for x in s.split(",") if x.strip())
+                       for s in (a.ack_handoff, a.only, a.keep))
 
     if a.check:
         return check()
     if a.plan:
-        _print_plan(plan(ack))
-        return 0
+        p = plan(ack, only, keep)
+        _print_plan(p)
+        # 乾跑也必須把「選集不合法」報成 rc≠0：只印不回 rc 就是 DEF-101-731 的形狀。
+        return 1 if p["selection_problems"] else 0
     if a.archive_num is None:
         ap.error("--apply 需要 --archive-num")
-    return apply(a.archive_num, ack, a.note)
+    return apply(a.archive_num, ack, a.note, only, keep)
 
 
 if __name__ == "__main__":

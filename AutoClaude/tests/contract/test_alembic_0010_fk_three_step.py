@@ -178,7 +178,17 @@ class TestStep2BackfillFunction:
                 "WHERE proname = 'backfill_legacy_fk';"
             )
             row = cur.fetchone()
-        assert row is not None, "backfill_legacy_fk() 不存在"
+        # 🔴 R76：訊息不只說「不存在」，要指得到**唯一已知成因**。0010 的 upgrade() 無條件
+        # `op.execute(_UPGRADE_SQL_STEP2)`（見該檔），所以真的跑過整條鏈的 DB 必定有它。
+        # R76 真機實測：`alembic_version` 已在 head 卻查無此 function 的 DB 確實存在
+        # （長壽開發 DB，疑似 `alembic stamp` 或由 schema dump 建起）；同一個容器內新建 DB
+        # 跑 `alembic upgrade head` 後本檔 16 tests 全綠。⇒ 這是**環境**問題不是實作問題，
+        # 但**不得**為此放寬斷言：它正確地抓到了「這個 DB 沒有真的被 migrate 過」。
+        assert row is not None, (
+            "backfill_legacy_fk() 不存在。alembic_version 在 head **不代表**整條鏈真的跑過"
+            "（stamp／schema dump 建起的 DB 同樣顯示 head）。處置：換一個乾淨 DB 跑 "
+            "`alembic upgrade head` 再重跑本檔；不要改本斷言。"
+        )
         assert row[0] == "bigint", f"預期 returns bigint，實際 {row[0]!r}"
 
     def test_backfill_callable_returns_zero(self, conn, alembic_head):

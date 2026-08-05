@@ -14,10 +14,30 @@
 
 > 🔴 **本檔撰寫期間（2026-08-04 22:30~22:34）今晚的 nightly 就跑完了**，四軌數字與 `.g0_readiness.json` 憑證均已更新。本節與 §2.1.4／§6 為**跑完後**的值。
 
+> ## 🔴 R76 全域訂正（2026-08-05）— 讀本檔任何日期／筆數之前先讀這一塊
+>
+> R76 對這份檔案動了兩件事，使**全文所有 GA 終點日期與「差 N 筆」都已作廢**。原文
+> 一律逐字保留為 R75 時代快照（樹裡不重述被推翻的話，但也不改寫史料），現況以本塊為準：
+>
+> 1. **兩支 GA 判準被收緊**（PKG-D／R76-13：新增 staleness ＋ 窗內連續性 span ≤ 40 天）。
+>    方向正確、**不得放寬**。代價：obs 由 `ready` 翻成 `sparse`（rc 1）、drift 亦 `sparse`。
+>    **G0 四軌現況＝mutation ✅／AC4 ✅／obs ❌(sparse)／drift ❌(sparse)。**
+>    新終點＝**再連續進帳 obs 17 晚（最早 2026-08-21）／drift 18 晚（最早 2026-08-22）**。
+>    全文出現的「差 2 筆」「最快 2026-08-06 夜」「2 晚後」「另三軌已全綠」一律以此取代。
+>    綁住兩軌的是 **span 不是筆數**——補筆數沒有用，要的是**不中斷**。
+> 2. **E3 已達標**：掌舵者提權完成，`check_scheduled_task_drift.py` 實測 `status=ok`／rc=0，
+>    且該判準已改為逐任務量測（不再結構性不可滿足）。`AutoClaude_WindowsSmoke` 的
+>    **三條退出判準現在全數成立**，剩下的只有 PM 拍板（見 §2.2.6 三段表的第 ② 段）。
+>
+> 現查配方（不要相信本檔任何一個數字，跑一次）：
+> `python AutoClaude/tools/observability_ga_check.py --json`、
+> `python AutoClaude/tools/drift_log_ga_check.py --json`、
+> `python tools/check_scheduled_task_drift.py --json`。
+
 | Job | 性質 | 測完了嗎 | 距終點 | 建議 |
 |---|---|---|---|---|
-| `AutoClaude_Nightly` | **混合**：觀察期採集＝階段性（有終點）＋ local_ci_gate／perf／chaos＝常態回歸（無終點） | **非常接近**。四軌中 3 軌已達標，只剩 drift GA `28/30` | **2 筆紀錄**（＝2 個 UTC 日）⇒ 最快 **2026-08-06 夜** | **保留、先不動**。四軌全綠後 PM 拍板 → **降頻（例如每週）而非移除** |
-| `AutoClaude_WindowsSmoke` | **補償控制**（雲端 CI 帳務停擺期間的替代通道），**有正式退出判準** | 退出判準 3 條中 **2 條已達標**，唯一卡點是排程設定漂移 | 一條提權指令 | 先修設定；之後**可退場**，但退場是一輪 code 工作（見 §5 D-4），不是刪個工作了事。折衷建議先降頻 |
+| `AutoClaude_Nightly` | **混合**：觀察期採集＝階段性（有終點）＋ local_ci_gate／perf／chaos＝常態回歸（無終點） | **非常接近**。四軌中 3 軌已達標，只剩 drift GA `28/30`〔R76：見上方訂正塊，現為 2 軌未達標〕 | **2 筆紀錄**（＝2 個 UTC 日）⇒ 最快 **2026-08-06 夜**〔R76：見上方訂正塊，現為 17／18 晚〕 | **保留、先不動**。四軌全綠後 PM 拍板 → **降頻（例如每週）而非移除** |
+| `AutoClaude_WindowsSmoke` | **補償控制**（雲端 CI 帳務停擺期間的替代通道），**有正式退出判準** | 退出判準 3 條中 **2 條已達標**，唯一卡點是排程設定漂移〔R76：3 條全數達標，見上方訂正塊〕 | 一條提權指令〔R76：已執行完畢〕 | 先修設定；之後**可退場**，但退場是一輪 code 工作（見 §5 D-4），不是刪個工作了事。折衷建議先降頻 |
 
 🔴 **最省力的加速手段不是改判準，是修排程設定**（§3）：`ExecutionTimeLimit=PT72H` ＋ `MultipleInstancesPolicy=IgnoreNew` 這組合在 2026-08-02 已經吃掉一整天的三軌進帳一次；drift **只剩 2 筆**，再被吃一次終點就往後推好幾天。
 
@@ -195,6 +215,23 @@ rc=0
 
 **⇒ 只差 drift 一軌、只差 2 筆紀錄。**
 
+> 🔴 **R76 就地訂正（上表 R75 欄位逐字保留為時代快照；本塊才是現況）**：本輪 PKG-D 依
+> R76-13 **收緊了兩支 GA 判準**（新增 staleness ＋ 窗內連續性：last-30 筆的日曆跨度必須
+> ≤ 40 天）。方向正確、**不得放寬**，但代價是上表兩列同時失效：
+>
+> | 軌 | R75 欄（上表） | **R76 現查實測** | rc |
+> |---|---|---|---|
+> | obs GA | `status=ready 44/30` ✅ 達標 | `status=sparse green_streak=44/30 span=58/40 max_gap=12d` ❌ **由達標翻回未達標** | **1** |
+> | #3 drift GA | `status=observing 28/30`（⏳ 差 2 筆） | `status=sparse green_streak=28/30 span=65/40 max_gap=12d` ❌ | **1** |
+>
+> 🔴 **「差 2 筆」這個心智模型整個作廢**：綁住兩軌的不再是 `green_streak`，而是 **span**。
+> drift 就算把那 2 筆補滿，span 仍約 63 天、照樣 sparse。新的終點是**再連續進帳**：
+> **obs 17 晚（最早 2026-08-21）／drift 18 晚（最早 2026-08-22）**，前提是每晚 22:30
+> 排程不漏跑。此值以兩支工具的判準公式對現有帳本日期獨立試算所得（`window_span_days`
+> 由 58／65 降到 39／40 的那一步），非估算；重算配方＝以 last-30 的日曆跨度逐日模擬。
+> ⚠️ `AutoClaude/.g0_readiness.json` 是每晚重生的量測檔，可能**早於**本次判準變更
+> （讀之前先看它的 `generated_at`）；今晚 nightly 跑完它會自己把 obs 翻成 `pass=false`。
+
 🔴 **兩筆「已修好但線上還沒反映」的假訊號**——這是為什麼看 log 會以為離終點還很遠：
 
 `logs/nightly_2026-08-03_223001.log` 的 `[G0-NOT-READY]` 行印的是：
@@ -265,7 +302,23 @@ green tail count: 27
 
 **⇒ 加速結論：只做 B，不動判準。最快達標日＝2026-08-06 夜（08-05／08-06 兩個 UTC 日各補一筆），前提是那兩晚 22:30 機器開著。**
 
-> ⚠️ 一項判準衝突，順便呈報 PM：`run_local_nightly.ps1:1700` 的 G0 閘門是 `mutation AND ac4 AND obs AND drift` **四軌全要**；而 ADR-SD09-012 §1.1 寫 drift「**非 W1 入場阻塞項**（歸屬待 PM 裁定），但 W5 雙條件角色不受影響」。若 PM 裁定 drift 不是 W1 入場條件，**W1 現在就可以啟動**（另三軌已全綠），drift 只需繼續累積供 W5 使用。這一項不需要改判準、只需要拍板。
+> 🔴 **R76 訂正上面這一行與下面那一段（兩句都已被本輪自己推翻）**：
+> ① **最快達標日不是 08-06**。PKG-D 收緊判準後綁住兩軌的是 span 不是筆數，新終點＝
+>    **obs 最早 2026-08-21／drift 最早 2026-08-22**（見 §2.1.4 的 R76 訂正塊）。
+>    加速手段 B（修排程設定）仍是唯一有效的，且**現在更重要**——連續性本身成了判準，
+>    中間漏一晚就會把 span 推回去。
+> ② **「另三軌已全綠 ⇒ W1 現在就可以啟動」已不成立**：obs 也翻成 sparse 了。現況＝
+>    mutation ✅／AC4 ✅／obs ❌(sparse)／drift ❌(sparse)。若 PM 裁定 drift 非 W1 入場
+>    條件，**還是要等 obs**（最早 08-21）。這一句原本是一張綠燈，本輪把它弄假了，
+>    故在此就地標紅而不是留著讓人照做。
+> ③ 加速手段 **E（把採集失敗與漂移事件分開判定）** 的成本效益也翻轉了：原文以「自然
+>    路徑只剩 2 天」否決它，而現在是 17～18 天。**若 PM 要縮短，E 值得重新評估**——
+>    但它治的是 `green_streak`，對 span 這一半無效，所以單靠 E 仍到不了終點。
+>
+> ⚠️ 一項判準衝突，順便呈報 PM：`run_local_nightly.ps1` 的 G0 閘門是
+> `mutation AND ac4 AND obs AND drift` **四軌全要**；而 ADR-SD09-012 §1.1 寫 drift
+> 「**非 W1 入場阻塞項**（歸屬待 PM 裁定），但 W5 雙條件角色不受影響」。這一項仍然
+> 只需要拍板、不需要改判準——但拍板的輸入請用上面 ② 的現況，不是本段原文。
 
 #### 2.1.7 處置建議：**保留，先不動；2 晚後降頻，不要移除**
 
@@ -311,18 +364,33 @@ green tail count: 27
 | **(甲) 腳本本身** `tools\windows_smoke_local.ps1` | 常態工具 | **永久保留、無退出判準**。理由（原文）：「它的價值是『push 前／離線時能在 88 秒內知道有沒有壞』，這個價值與雲端 CI 活不活著無關」 |
 | **(乙) 每日排程任務** `AutoClaude_WindowsSmoke` | **補償控制**（R60 為雲端 CI 帳務停擺 DEF-101-081 期間「Windows 側零執行級訊號」而建） | ✅ **有**。「補償控制的存在理由是主通道死了，所以它有退出判準：**主通道復活即退場**」——三條 E1/E2/E3 全部成立才可移除 |
 
-⇒ **掌舵者問的「這個測試的目的為何、能不能結束」，對 (甲) 的答案是「不會結束，這是設計」；對 (乙) 的答案是「可以結束，判準寫在腳本 :105-113」。這兩件事此前被混為一談，正是它一直問不出答案的原因。**
+⇒ **掌舵者問的「這個測試的目的為何、能不能結束」，對 (甲) 的答案是「不會結束，這是設計」；對 (乙) 的答案是「可以結束，判準寫在 `tools/windows_smoke_local.ps1` 的退出判準段」（R76 起刻意不寫死行號——R76 PKG-D 改寫該段後行號已位移，寫死的引用會指向別的文字）。這兩件事此前被混為一談，正是它一直問不出答案的原因。**
 
 #### 2.2.3 三條退出判準逐條實測
 
-| 條 | 判準原文（`:106-113`） | 本輪實測 | 結論 |
+| 條 | 判準原文（`tools/windows_smoke_local.ps1` 退出判準段；R76 起不寫死行號） | 本輪實測 | 結論 |
 |---|---|---|---|
 | **E1** | 雲端主通道活著：`windows-compat-ci` 近 30 天 ≥ 20 個 run，且零筆 conclusion 屬 billing／startup_failure 類 | `gh run list --workflow windows-compat-ci.yml --limit 40 --json createdAt,conclusion,status`：<br>`total_runs=40`，跨度 `2026-07-25 16:21Z ~ 2026-08-04 02:04Z`（**10 天內 40 run**）<br>`success=8  failure=32`<br>`non_completed_status=0`<br>`billing_or_startup=0`（無 `startup_failure`／`action_required`／`null`） | ✅ **達標** |
 | **E2** | 本腳本每一項都有雲端對應 step（`tools/tests/test_smoke_ci_sync.py` 步驟語意鎖為綠＝零 smoke-only 項目） | `pytest tools/tests/test_smoke_ci_sync.py -q` → `23 passed, 1 skipped, 2 subtests passed`，**rc=0** | ✅ **達標** |
 | **E3** | 移除後 Windows 側仍有每日執行級心跳：`AutoClaude_Nightly` 存在且 `tools/check_scheduled_task_drift.py` 回 rc=0 | `AutoClaude_Nightly` 存在 ✅（§1.1）；但 `check_scheduled_task_drift.py` → **rc=1 / status=drift**（§3） | ❌ **未達標** |
 
-**訂正腳本內的現況欄**：`:123-127` 寫「E1 尚未取證（需 gh 查詢，本輪未跑）；E2 綠；E3 **不成立**」。
-⇒ **E1 現已取證且達標**（本節上表）。E2 仍綠。E3 仍不成立。**三條中兩條已成立。**
+> 🔴 **R76 就地訂正 E3（本列 R75 欄位逐字保留為時代快照，不改寫）**：兩件事都變了。
+> ① **量測值**：掌舵者提權重跑安裝器後，`tools/check_scheduled_task_drift.py` 當回合實測
+>    `status=ok`／**rc=0**（`AutoClaude_Nightly` 與 `AutoClaude_WindowsSmoke` 各 7 項全符）。
+> ② **判準本身有結構性缺陷、已改寫**（R76-06／本輪 PKG-D）：E3 原文以**整支工具的 rc** 取證，
+>    而該工具的期望值 SSOT 同時列著兩支任務——執行 E3 自己授權的動作（移除 smoke）必然讓它
+>    回 `task_missing`／rc=1 ⇒ **這條判準結構上不可能被滿足**。已改為逐任務量測（只看
+>    `.tasks.AutoClaude_Nightly`），並在 `tools/windows_smoke_local.ps1` 就地寫下一般化規則
+>    「判準的量測對象不得隨被它所判的動作而改變」（R75 頭號教訓第三次復發）。
+> ⇒ 現況：**E1／E2／E3 三條可能都已成立**，但「是否真的移除 `AutoClaude_WindowsSmoke`」是
+>    掌舵者的決定，本輪零 `Register-`／`Unregister-ScheduledTask` 呼叫。
+
+**訂正腳本內的現況欄（R76 二次訂正 — 這兩行本身在 R76 已成假話，見上方訂正塊）**：
+`tools/windows_smoke_local.ps1` 的「現況快照」段已於 R76 **整段移除**，改為只留不會過期的
+處置規則（在該檔的判準段之後；本行刻意**不寫死行號**——R76 第一版就是因為寫死行號而在
+同一次提交裡指向一段已被自己刪掉的文字）。三條的**現況以上方 R76 訂正塊為準**：
+E1 達標、E2 達標、E3 **在改為逐任務判準後亦達標**（實測 `status=ok`／rc=0）。
+本行不逐字重述被推翻的舊結論——樹裡不留假句子（R75 交棒書禁止事項 #5／R73 頭號教訓）。
 
 > **關於那 32 筆 failure**：它們是真正的測試紅（R 系列跨平台修復期的 push churn），**不是**帳務或基礎設施停擺——E1 要區分的正是這件事，而它區分對了。`status` 全為 `completed`、零 `startup_failure` ⇒ workflow 真的跑起來了，主通道是活的。最新一筆 `2026-08-04T02:04:23Z`（＝R74 `a371068` 的 push）為 `success`。
 
@@ -332,6 +400,9 @@ green tail count: 27
 
 - **不需要加速驗證**——需要的是**修一項設定，然後拍板退場**。
 - 唯一卡點 E3 是一條提權指令的事（§3、§5 D-1）。修完設定後 E1/E2/E3 **三條全數成立**。
+- 🔴 **R76 回執**：該提權指令**已由掌舵者執行完畢**，`check_scheduled_task_drift.py` 當回合
+  實測 `status=ok`／rc=0 ⇒ 上一行的「修完設定後」這個前提已經發生，三條現況全部成立。
+  剩下的**只有** ② 拍板（見 §2.2.6 的三段表）——不再有任何工程前置。
 
 #### 2.2.5 排程載具下實測正常（不是「它反正也沒在跑」）
 
@@ -354,7 +425,7 @@ green tail count: 27
 **🔴 「只刪工作」會留下兩個誤導訊號（本輪實查程式碼確認）：**
 
 1. `install_windows_nightly.ps1 -Status` 的判準是「整組任務**全部**存在＝0；任一缺席＝1」（檔頭 `:52`，實作 `:212-213` `$loaded = (Test-TaskPresent nightly) -and (Test-TaskPresent smoke)`）⇒ **只刪 smoke 會讓 `-Status` 永遠 exit 1**，變成一個恆紅、因此會被習慣性忽略的心跳查詢。
-2. `tools/scheduled_task_expectations.json` 仍列 `AutoClaude_WindowsSmoke` ⇒ drift checker 會印「不存在（未安裝）」。**rc 不會轉紅**（`evaluate()` `:130-133` 把缺席記進 `absent` 不記 `drifts`，`:149-151` rc 只由 `drifts` 驅動）——也就是**對照組與現場從此靜默脫節**，正是這支 checker 立案要消滅的狀態。
+2. `tools/scheduled_task_expectations.json` 仍列 `AutoClaude_WindowsSmoke` ⇒ drift checker 會判該任務缺席。🔴 **R76 訂正（本列原文已為假）**：原文寫「**rc 不會轉紅**（缺席只記 `absent` 不記 `drifts`，rc 只由 `drifts` 驅動）」——那是 R75 之前的實作。R75 已補上 `elif present < len(expectations): report["status"] = STATUS_TASK_MISSING`（該行註解逐字「＝漏跑的最強形態，**不得判綠**」），而 `check_scheduled_task_drift.py` 的收尾是 `return 1 if report["status"] in (STATUS_DRIFT, STATUS_ERROR, STATUS_TASK_MISSING) else 0` ⇒ **只刪 smoke 會讓它 rc=1**，且該工具在 nightly 是 fail-closed。所以這一項的實害方向與原文相反：不是「靜默脫節」，是「當場整條 nightly 轉紅」。兩種都不可接受，處置一樣（見下方 ⇒ 那一段），但**別照原文以為刪了不會有事**。
 3. 安裝器**沒有「只移除 smoke」的模式**：`-Uninstall` 對整組生效（`:221` `foreach ($name in @($TaskName, $SmokeTaskName))`）。
 
 ⇒ 真正的退場＝改 `install_windows_nightly.ps1`（把 smoke 移出受管組）＋ `tools/scheduled_task_expectations.json` ＋ `tools/tests/test_install_windows_nightly.py`（含 `TestScheduledTaskExpectationsSsot` 與 `test_smoke_task_shares_catchup_settings_and_runs_before_nightly` 兩道鎖）＋ `tools/windows_smoke_local.ps1:99-127` 的判準段改述為「已退場」。**這是一輪有 DoD 的工作，不是一條指令。**
@@ -498,14 +569,17 @@ Get-ScheduledTask | Where-Object TaskName -like 'AutoClaude*' | Get-ScheduledTas
 ⚠️ **不要為了「趕進度」在同一個 UTC 日重複跑**：UTC-date 去重會讓第二次只是覆寫同一筆，而 last-write-wins 意味著**如果第二次剛好抖一下，會把已經入帳的綠改成紅、streak 歸零**（ADR-SD09-012 §2.3 EXP-B 實測）。**重跑是負收益。**
 
 **接下來要做的事只有一件：確保 08-05 與 08-06 兩晚 22:30 機器開著。**
+> 🔴 **R76 訂正**：不是兩晚，是**連續 17／18 晚**（obs 最早 08-21、drift 最早 08-22）——
+> 判準改為看 span 之後，「不中斷」本身成了判準，中間漏一晚就會把終點往後推。見 §0 訂正塊。
 
 ---
 
 ### D-3　PM 拍板｜2 晚後對 G0 四軌拍板（預估 2026-08-06 夜 ~ 08-07 晨）
+> 🔴 **R76 訂正：時點改為 2026-08-22 之後**（見 §0 訂正塊）。本標題的日期為 R75 快照。
 
-**要做什麼**：等 `AutoClaude/.g0_readiness.json` 的 `ready` 變成 `true`（該檔已存在，今晚起每輪都會覆寫），然後拍三件事：
-1. 觀察期 stage **降頻**（SA 建議每週；🔴 上限是 30 天，因為 AC4 `STALENESS_MAX_DAYS=30`），或維持每日。
-2. drift 是不是 W1 入場條件？（判準衝突見 §2.1.6 末：nightly 的 G0 要四軌，ADR-SD09-012 §1.1 說 drift「非入場阻塞項、歸屬待 PM 裁定」。**若裁定不是，W1 現在就能啟動**。）
+**要做什麼**：等 `AutoClaude/.g0_readiness.json` 的 `ready` 變成 `true`（該檔已存在，今晚起每輪都會覆寫；🔴 R76：讀它之前先看 `generated_at`，那是每晚重生的量測檔，可能早於最近一次判準變更），然後拍三件事：
+1. 觀察期 stage **降頻**（SA 建議每週；🔴 上限是 30 天，因為 AC4 `STALENESS_MAX_DAYS=30`），或維持每日。🔴 **R76：在 obs／drift 兩軌轉綠之前不得降頻**——新判準要求 last-30 筆落在 ≤40 個日曆天內，每週採集結構上永遠達不到。
+2. drift 是不是 W1 入場條件？（判準衝突見 §2.1.6 末：nightly 的 G0 要四軌，ADR-SD09-012 §1.1 說 drift「非入場阻塞項、歸屬待 PM 裁定」。〔🔴 R76 訂正：原文此處寫「若裁定不是，W1 現在就能啟動」——**已不成立**，obs 也翻成 sparse 了，裁定 drift 出局仍要等 obs（最早 08-21）。〕）
 3. ADR-SD09-012 §7.5 仍掛著的 S3（UTC 桶錯位是否另開一輪）。
 
 **查詢指令（不需提權）**：

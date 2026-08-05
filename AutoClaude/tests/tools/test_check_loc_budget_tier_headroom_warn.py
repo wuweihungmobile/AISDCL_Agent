@@ -249,3 +249,161 @@ def test_real_repo_band_is_exercised_on_real_data(
         "  只出現在期望側 ⇒ 篩選條件太緊（如 `<=` 誤寫成 `<`）；\n"
         "  成員相同但值不同 ⇒ `headroom` 欄位的算式漂移。"
     )
+
+
+# --- R76（R76-16）：另外兩層預警帶（SPECIAL_FILES raw-line 棘輪／根層 tools tier）---
+#
+# 🔴 為何非補不可：這兩層是 R76 新增的，而它們的鎖檔（本檔）當時不在該包的授權面 ⇒
+# 落地當下「整段 [SPECIAL-WARN]／[ROOT-TOOLS-WARN] 與兩個 JSON 欄位刪掉不會有任何東西
+# 轉紅」（該包自陳缺口 DEF-101-856①）。沒有回歸鎖的預警帶，會在下一次有人「順手清理
+# 輸出」時無聲消失，而它防的正是「第一個訊號就是紅」——消失了也沒人會發現。
+
+
+@pytest.fixture
+def isolated_layers(monkeypatch: pytest.MonkeyPatch):
+    """把 SPECIAL_FILES 與根層 tools 兩層的**資料來源**換成合成報表。
+
+    與 `isolated` 互補：那個 fixture 只隔離 tier 層（`build_reports`）與
+    `check_special_files`（違規側），本 fixture 隔離的是 R76 新增的預警帶取數面
+    （`special_file_reports` / `root_tools_reports`）——兩者是不同函式，漏了任一個，
+    測試就會混進真 repo 現況而不再是確定性判準。
+    """
+    def _use(
+        special: list[clb.FileReport] | None = None,
+        root_tools: list[clb.FileReport] | None = None,
+    ) -> None:
+        monkeypatch.setattr(clb, "special_file_reports", lambda: list(special or []))
+        monkeypatch.setattr(clb, "root_tools_reports", lambda: list(root_tools or []))
+
+    return _use
+
+
+@pytest.mark.parametrize(
+    "tag,margin_name,tier,budget",
+    [
+        ("[SPECIAL-WARN]", "SPECIAL_WARN_MARGIN", "special", 1618),
+        ("[ROOT-TOOLS-WARN]", "TIER_WARN_MARGIN", "guardrail_cli", 750),
+    ],
+)
+def test_new_warn_bands_are_non_blocking_and_boundary_exact(
+    tag, margin_name, tier, budget, isolated, isolated_layers,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """兩層各自：餘裕 == margin 進帶、== margin+1 不進、已破線不進帶，且 rc 恆 0。
+
+    意圖（Rule 9）：預警帶一旦變成阻塞，repo 當場被自己的合法現況擋死（這批棘輪
+    依 R69 P3 慣例＝納管當下實際行數，零餘裕本來就是合法狀態）；而邊界若寫成 `<`，
+    「剛好卡在門檻上」的檔——也就是最需要被警告的那一支——會靜靜地不出現。
+    """
+    margin = getattr(clb, margin_name)
+    is_special = tag == "[SPECIAL-WARN]"
+    for headroom, expect in ((margin, True), (margin + 1, False), (-3, False)):
+        rep = _report("x/y.py", budget - headroom, budget, tier=tier)
+        isolated([])
+        isolated_layers(
+            special=[rep] if is_special else [],
+            root_tools=[] if is_special else [rep],
+        )
+        rc = clb.check()
+        out = capsys.readouterr().out
+        if headroom >= 0:
+            # 只有「尚未破線」這一側該保證 rc 不變 —— 破線側本來就該由各自的阻塞段
+            # 接手（根層 tools 破線＝rc 1）。把 rc==0 一律要求下去，等於順手把阻塞段
+            # 也一起斷言掉，那是另一件事，而且方向是把閘門變鬆。
+            assert rc == 0, f"{tag} 必須非阻塞（餘裕 {headroom}），實得 rc={rc}\n{out}"
+        assert (tag in out) is expect, (
+            f"餘裕 {headroom} 行（margin={margin}）時 {tag} 應"
+            f"{'出現' if expect else '不出現'}；實際輸出：\n{out}"
+        )
+
+
+def test_special_warn_margin_is_positive_and_separate_from_tier_margin() -> None:
+    """`SPECIAL_WARN_MARGIN` 必須存在且為正；≤0 等於把整個預警帶關掉。
+
+    刻意也不斷言它「等於」或「不等於」`TIER_WARN_MARGIN`：兩者度量面不同
+    （raw line vs `count_loc`），未來調成同值不是缺陷；要守的是**它是一個獨立的、
+    可被單獨調整的門檻**，而不是被誤讀成 tier 那個數字的別名。
+    """
+    assert isinstance(clb.SPECIAL_WARN_MARGIN, int)
+    assert clb.SPECIAL_WARN_MARGIN > 0, "SPECIAL_WARN_MARGIN ≤ 0 等於關掉 R76-16 的預警帶"
+
+
+def test_new_bands_are_machine_readable_and_match_text_mode(
+    isolated, isolated_layers, capsys: pytest.CaptureFixture[str],
+) -> None:
+    """JSON ↔ 文字一致：只印文字的話，以 `--json` 取證的自動化看不到這兩層訊號。
+
+    同時釘住 `headroom` 欄位——沒有它，機讀端只知道「有東西快滿了」卻不知道「剩幾行」，
+    而「剩幾行」正是這個訊號唯一可行動的部分。
+    """
+    special = [_report("../tools/a.py", 1616, 1618, tier="special")]
+    root_tools = [_report("tools/b.py", 748, 750, tier="guardrail_cli")]
+    isolated([])
+    isolated_layers(special=special, root_tools=root_tools)
+    clb.check()
+    text_out = capsys.readouterr().out
+
+    isolated([])
+    isolated_layers(special=special, root_tools=root_tools)
+    clb.check(as_json=True)
+    payload = json.loads(capsys.readouterr().out)
+
+    assert payload["special_warn_margin"] == clb.SPECIAL_WARN_MARGIN
+    assert bool(payload["special_warn_band"]) is ("[SPECIAL-WARN]" in text_out)
+    assert bool(payload["root_tools_warn_band"]) is ("[ROOT-TOOLS-WARN]" in text_out)
+    assert [(e["rel_path"], e["headroom"]) for e in payload["special_warn_band"]] == [
+        ("../tools/a.py", 2)
+    ], "special 預警帶成員／餘裕不符"
+    assert [(e["rel_path"], e["headroom"]) for e in payload["root_tools_warn_band"]] == [
+        ("tools/b.py", 2)
+    ], "根層 tools 預警帶成員／餘裕不符"
+
+
+def test_special_warn_text_tells_people_not_to_raise_the_ratchet(
+    isolated, isolated_layers, capsys: pytest.CaptureFixture[str],
+) -> None:
+    """訊息必須明說「不得調高棘輪」並給出正解順序。
+
+    意圖（Rule 9）：這批門檻是 shrink-only 棘輪，而看到紅字最省事的做法就是把數字改大
+    ——本 repo 已明文禁止（砸溫度計）。預警帶若只說「快滿了」而不說「不准調高、該怎麼做」，
+    它把人推向的正是那個錯誤出口。
+    """
+    isolated([])
+    isolated_layers(special=[_report("../tools/a.py", 1618, 1618, tier="special")])
+    clb.check()
+    out = capsys.readouterr().out
+    assert "[SPECIAL-WARN]" in out
+    assert "不得為了讓修改通過而調高" in out, "預警訊息沒有擋住「調高棘輪」這個錯誤出口"
+    assert "抽共用模組" in out, "預警訊息沒有給出正解順序（先刪死碼／抽共用模組）"
+
+
+def test_all_three_bands_share_one_selection_implementation(
+    isolated, isolated_layers, capsys: pytest.CaptureFixture[str],
+) -> None:
+    """三層預警帶必須走同一個 `warn_band()`：把它換掉，三層應**同時**失聲。
+
+    這是「同一份知識只有一個家」的行為版斷言（不是讀原始碼比對字面）：若哪一層自己
+    另抄一份篩選條件，它就不會跟著這個 monkeypatch 一起消失 ⇒ 本鎖轉紅。
+    """
+    tier_rep = _report("autoclaude/infra/repositories/x.py", 400, 400)
+    special_rep = _report("../tools/a.py", 1618, 1618, tier="special")
+    root_rep = _report("tools/b.py", 750, 750, tier="guardrail_cli")
+
+    isolated([tier_rep])
+    isolated_layers(special=[special_rep], root_tools=[root_rep])
+    clb.check()
+    before = capsys.readouterr().out
+    for tag in ("[TIER-WARN]", "[SPECIAL-WARN]", "[ROOT-TOOLS-WARN]"):
+        assert tag in before, f"控制組未命中 {tag} —— 本鎖的注入基底已失效\n{before}"
+
+    with pytest.MonkeyPatch.context() as mp:
+        mp.setattr(clb, "warn_band", lambda _reports, _margin: [])
+        isolated([tier_rep])
+        isolated_layers(special=[special_rep], root_tools=[root_rep])
+        clb.check()
+        after = capsys.readouterr().out
+    for tag in ("[TIER-WARN]", "[SPECIAL-WARN]", "[ROOT-TOOLS-WARN]"):
+        assert tag not in after, (
+            f"{tag} 沒有走共用的 warn_band() —— 那一層自己抄了第二份篩選條件，"
+            f"判準從此有兩個家（改一邊不會改到另一邊）\n{after}"
+        )

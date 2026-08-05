@@ -22,7 +22,8 @@ smoke 異名對等品等不對應 ONBOARDING 行內清單的條目）：
     install_mac_nightly.sh 的 rationale 亦含 schtasks 但為 .sh 鍵，
     以副檔名過濾排除）。
 
-抽取數量下限釘選（＝2026-07-20 實測值：①6、②3）：宣告 pattern 漂移
+抽取數量下限釘選（①6＝2026-07-20 實測值；②2＝R76 刪除 reschedule_g0_gatecheck.ps1
+後的實測值，原為 3）：宣告 pattern 漂移
 （措辭改寫/反引號拆掉）時 0 命中即紅、fail-loud 不縮面（比照
 check_script_parity._MIN_EXTRACT_COUNTS 慣例）；錨定行數量亦鎖恰一行，
 文件改組時紅燈指路同步本案。
@@ -41,8 +42,11 @@ _ONBOARDING = _REPO_ROOT / "ONBOARDING.md"
 sys.path.insert(0, str(_REPO_ROOT / "tools"))
 import check_script_parity as _parity  # noqa: E402
 
-# 抽取數量下限釘選＝2026-07-20 實測值；刻意刪減清單條目時同步下修。
-_MIN_EXTRACT = {"bash_only": 6, "sched_family": 3}
+# 抽取數量下限釘選＝實測值；刻意刪減清單條目時同步下修。
+# sched_family：R76 由 3 下修為 2——reschedule_g0_gatecheck.ps1 整支刪除（真孤兒，
+# 它要重排的 AutoClaude_SD09_G0_GateCheck 於 R71 已從本機移除），文件與 parity 兩側
+# 同步減一，下限不跟著減會讓這道鎖從此恆紅。
+_MIN_EXTRACT = {"bash_only": 6, "sched_family": 2}
 # 反引號 token（含可選「各版」前綴——§6 以此指涉隨版繼承的 LATEST 工具）
 _TOKEN_RE = re.compile(r"(各版\s*)?`([^`]+)`")
 

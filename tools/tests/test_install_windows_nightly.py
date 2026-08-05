@@ -321,7 +321,8 @@ class TestInstallWindowsNightlyStructure(unittest.TestCase):
 
     def test_admin_elevation_check_present(self) -> None:
         """install/uninstall 需要 Register/Unregister-ScheduledTask 的系統管理員權限
-        （比照既有 fix_nightly_catchup.ps1／reschedule_g0_gatecheck.ps1 慣例），
+        （比照既有 fix_nightly_catchup.ps1 慣例；R76 訂正：原文並列的
+        reschedule_g0_gatecheck.ps1 已整支刪除，不再是可引用的先例），
         非管理員身分須 fail-loud 提示，而非讓 Register-ScheduledTask 自己拋出難懂的例外。"""
         self.assertIn("WindowsBuiltInRole]::Administrator", self.text)
 
@@ -1182,28 +1183,19 @@ class TestScheduledTaskDriftChecker(unittest.TestCase):
         """接線層核對：新狀態字必須落在 run_local_nightly.ps1 的 fail-closed 那一側。
 
         意圖（Rule 9）：偵測器 rc=1 只有在接線層把它算成失敗時才有效。該檔對狀態字
-        採白名單（`-notin @('drift','ok','skip')` 即計入 finalFailures，並明文寫「含
-        未來新增的狀態字」），所以 `task_missing` **不得**被加進那份白名單——`drift`
-        目前那條豁免的射程是 DEF-101-794（五項設定值的修法需提權），而任務整支不見的
-        修法是重跑安裝器、不需等提權，不該搭那條豁免的便車（那等於把最強的漏跑訊號
-        從 exit code 上拿掉，缺陷只是往上搬一層）。
+        採白名單（`-notin @('ok','skip')` 即計入 finalFailures，並明文寫「含未來新增
+        的狀態字」），所以 `task_missing` **不得**被加進那份白名單。
+        R76 註記：`drift` 也已移出白名單（見 TestNamedExemptionRetires... 那支鎖），
+        故現值只剩 ok/skip；本鎖的職責不變——task_missing 落在計失敗那一側。
         """
-        wiring = _read(_NIGHTLY_PS1)
-        m = re.search(r"\$schedDriftStatus\s+-notin\s+@\(([^)]*)\)", wiring)
-        self.assertIsNotNone(
-            m,
-            "run_local_nightly.ps1 的 [SCHED-DRIFT] 狀態字白名單結構已變動——"
-            "task_missing 落在哪一側需重新確認（本鎖刻意不猜）",
-        )
-        assert m is not None
-        whitelisted = set(re.findall(r"'([^']+)'", m.group(1)))
+        whitelisted = _nightly_drift_pass_whitelist(_read(_NIGHTLY_PS1))
         self.assertNotIn(
             self.mod.STATUS_TASK_MISSING, whitelisted,
             f"task_missing 被列入不計失敗的白名單 {sorted(whitelisted)}——"
             "任務不見了會只印一行 WARN 而 nightly 照樣 exit 0",
         )
         self.assertEqual(
-            whitelisted, {"drift", "ok", "skip"},
+            whitelisted, {"ok", "skip"},
             f"白名單內容已變動（實得 {sorted(whitelisted)}）——請重新確認 "
             "task_missing 仍計入 finalFailures",
         )
@@ -1231,6 +1223,141 @@ class TestScheduledTaskDriftChecker(unittest.TestCase):
         """任務名會被代入 PowerShell 命令字串 → 非白名單字元必須拒絕。"""
         with self.assertRaises(ValueError):
             self.mod.export_task_xml("Bad'; rm -rf /; '")
+
+
+def _nightly_drift_pass_whitelist(wiring: str) -> set[str]:
+    """抽出 `run_local_nightly.ps1` 對排程漂移狀態字的「不計入 finalFailures」白名單。
+
+    抽不到時 **raise 而不是回空集合**：回空集合會讓所有「某狀態不得被豁免」的斷言
+    自動通過（fail-open），而接線層改寫正是最需要有人回來看一眼的時機。
+    """
+    m = re.search(r"\$schedDriftStatus\s+-notin\s+@\(([^)]*)\)", wiring)
+    if m is None:
+        raise AssertionError(
+            "run_local_nightly.ps1 的 [SCHED-DRIFT] 狀態字白名單結構已變動——"
+            "各狀態字落在哪一側需重新確認（本鎖刻意不猜）"
+        )
+    return set(re.findall(r"'([^']+)'", m.group(1)))
+
+
+class TestNamedExemptionRetiresWhenItsUnlockConditionHolds(unittest.TestCase):
+    """R76：具名豁免的**解除條件一旦成立，豁免就必須消失**——由機械物盯，不靠人讀 WARN。
+
+    🔴 缺陷本體（DEF-101-794 的第二段）：R75 為排程漂移立了一條具名豁免（`status=drift`
+    只印 WARN、不計 nightly 失敗），理由是修法卡在未執行的系統管理員提權。那條豁免**自己
+    寫下了**可判定的解除條件——「偵測器回報 status=ok 之後，本項應移回 finalFailures」
+    ——並且只安排了一個承接者：nightly log 裡一行給人看的 WARN。提權於 2026-08-05 執行、
+    偵測器實測 `status=ok` / rc=0 之後，那行 WARN 每晚都在印，而豁免**照樣生效**。
+    ⇒ 承接者是「人記得讀一行 WARN」的豁免，一律等於永久豁免。
+
+    本鎖是那個教訓的一般化：**豁免的解除條件必須有東西在條件成立當天說話**。三個方向：
+      ① 靜態（平台中立，三個平台都說話）：接線層已記載那次觀測 ⇒ 白名單不得再含 drift。
+      ② 真機交叉核對：偵測器**現在**若也回 status=ok，同一結論必須成立。
+      ③ 鑑別力（合成輸入）：把豁免加回去的白名單必須被本鎖判紅——否則①②都只是恆綠。
+
+    🔴 為何本鎖**不用 `skipUnless` / `skipTest`**（誠實劃界，這是刻意的取捨）：
+    ② 在非 Windows／未安裝受管排程的機器上量不出來，慣例作法是 `self.skipTest`。但
+    `tools/lib/skip_tag_policy.py::_SITE_CLASS_CENSUS` 是**相等**棘輪，新增任何一個字面
+    reason 的 skip 站點都必須同步重釘那張表，而該檔不在本包的檔案所有權內（跨界改動＝
+    並行包互踩）。故 ② 改為「量不出來時退回①的靜態結論並把原因印到 stderr」——**兩條
+    分支都真的斷言**，沒有任何一條是 `return` 靜默通過。代價誠實記在這裡：量不出來這件
+    事不會出現在 unittest 的 skipped 統計裡，只會出現在 stderr。
+    """
+
+    #: 偵測器回這個狀態＝受管任務都在、每一項設定都符合期望＝提權修復已完成。
+    UNLOCK_STATUS = "ok"
+    #: 語意上真的等於「通過」的兩格。其餘任何狀態字被列進白名單，就是一條具名豁免。
+    PASS_STATUSES = frozenset({"ok", "skip"})
+    #: 豁免要退場的那個狀態字（本輪的具體標的；一般化規則見上方 docstring）。
+    RETIRED_EXEMPTION = "drift"
+
+    def setUp(self) -> None:
+        self.wiring = _read(_NIGHTLY_PS1)
+        self.whitelist = _nightly_drift_pass_whitelist(self.wiring)
+
+    def _revived(self, whitelist: set[str]) -> set[str]:
+        """白名單裡「不等於通過」的狀態字＝仍然活著的具名豁免。"""
+        return whitelist - set(self.PASS_STATUSES)
+
+    def test_recorded_unlock_observation_forbids_the_exemption(self) -> None:
+        """①：接線層已記載 status=ok 這次觀測 ⇒ 豁免必須已經不在白名單裡。
+
+        觀測是**歷史事實**，不因今天這台機器量不到而失效，故本判準無平台條件。
+        同時要求那次觀測的字面留在檔內：沒有它，「為什麼可以移除豁免」就失去來源，
+        下一個人會以為 drift 計失敗是從來就有的設計，看不到真正的教訓。
+        """
+        self.assertIn(
+            f"status={self.UNLOCK_STATUS}", self.wiring,
+            "接線層必須留下『解除條件已達成』那次觀測的字面——它是移除豁免的唯一依據",
+        )
+        self.assertEqual(
+            self._revived(self.whitelist), set(),
+            f"白名單 {sorted(self.whitelist)} 仍含具名豁免，而解除條件（偵測器回 "
+            f"status={self.UNLOCK_STATUS}）已經達成並記載在同一份檔案裡",
+        )
+
+    def test_live_detector_agreeing_with_the_record_forbids_the_exemption(self) -> None:
+        """②：真機交叉核對——偵測器**現在**若回 status=ok，同一結論必須成立。
+
+        本鎖存在的理由是「解除條件達成當天就要有東西說話」，所以它必須真的去問偵測器，
+        而不是只讀一段人寫的紀錄（那正是 R75 那條 WARN 的失敗形態：紀錄在、沒人讀）。
+        """
+        status = self._live_detector_status()
+        if status is None or status == "skip":
+            # 量不出來（非 Windows／偵測器問不到／本機沒裝受管排程）：不 skip、不靜默，
+            # 退回①的靜態結論並把原因印出來，讓「這台機器沒驗到②」是看得見的。
+            print(
+                "[R76-exemption-retire] 本機量不出來（status="
+                f"{status!r}, sys.platform={sys.platform}）⇒ 本格退回靜態判準",
+                file=sys.stderr,
+            )
+            self.assertEqual(
+                self._revived(self.whitelist), set(),
+                f"白名單 {sorted(self.whitelist)} 仍含具名豁免（靜態判準；本機未取得真機證據）",
+            )
+            return
+        self.assertEqual(
+            status, self.UNLOCK_STATUS,
+            f"偵測器回 status={status!r} ⇒ 排程設定現在就有問題，先修排程再談豁免退場"
+            "（修法：以系統管理員身分重跑 tools/install_windows_nightly.ps1）",
+        )
+        self.assertEqual(
+            self._revived(self.whitelist), set(),
+            f"偵測器真機回 status={self.UNLOCK_STATUS}（＝解除條件成立），"
+            f"而白名單 {sorted(self.whitelist)} 仍含具名豁免 ⇒ 豁免活過了自己的解除條件",
+        )
+
+    def test_lock_turns_red_when_a_retired_exemption_is_revived(self) -> None:
+        """③ 鑑別力（合成輸入，三平台都跑）：把豁免加回去必須被判紅。
+
+        沒有這一格，①②在「白名單抽取失效」時會一起變成恆綠——本鎖自己就是它在防的
+        那種「看起來有在守、其實不會紅」的護欄。
+        """
+        revived = "if ($schedDriftStatus -notin @('drift', 'ok', 'skip')) {"
+        self.assertEqual(
+            self._revived(_nightly_drift_pass_whitelist(revived)),
+            {self.RETIRED_EXEMPTION},
+            "合成的『豁免復活』白名單未被判出——抽取或比較失效，①②已無鑑別力",
+        )
+        current = "if ($schedDriftStatus -notin @('ok', 'skip')) {"
+        self.assertEqual(
+            self._revived(_nightly_drift_pass_whitelist(current)), set(),
+            "合成的『豁免已退場』白名單被誤判——本鎖會對正確狀態誤報",
+        )
+        with self.assertRaises(AssertionError):
+            _nightly_drift_pass_whitelist("接線層被改寫成別的形態，抽不到白名單")
+
+    def _live_detector_status(self) -> str | None:
+        """問偵測器本體要 status；問不到回 None。**唯讀**：不註冊、不移除任何排程任務。"""
+        if sys.platform != "win32":
+            return None
+        buf = io.StringIO()
+        try:
+            with mock.patch("sys.stdout", buf):
+                _load_drift_module().main(["--json"])
+            return str(json.loads(buf.getvalue()).get("status")) or None
+        except (OSError, RuntimeError, ValueError, json.JSONDecodeError):
+            return None
 
 
 class TestWindowsSmokeTaskHasWrittenExitCriteria(unittest.TestCase):
@@ -1276,6 +1403,47 @@ class TestWindowsSmokeTaskHasWrittenExitCriteria(unittest.TestCase):
             "本腳本本身（push 前／離線的 88 秒 tripwire）不應有退出判準，須明說",
         )
 
+    def _e3_paragraph(self) -> str:
+        """抽出 E3 那一段（從 `#   E3.` 到該段落結束的空註解行）。"""
+        m = re.search(r"^#   E3\..*?(?=^#\s*$)", self.smoke, re.S | re.M)
+        self.assertIsNotNone(
+            m, "抽不到 E3 段落——退出判準的排版已變動，本鎖刻意不猜（fail-closed）"
+        )
+        assert m is not None
+        return m.group(0)
+
+    def test_e3_measures_only_what_survives_its_own_action(self) -> None:
+        """🔴 R76：E3 的量測對象不得隨「被它所判的動作」而改變（R75 頭號教訓第三次復發）。
+
+        缺陷本體：E3 原文要求「移除後 `check_scheduled_task_drift.py` 回 rc=0」，而該工具的
+        期望值 SSOT（`tools/scheduled_task_expectations.json`）**同時列兩支任務** ⇒ 執行
+        E3 自己授權的動作（移除 AutoClaude_WindowsSmoke）必然讓它回 `task_missing`／rc=1。
+        判準在結構上不可滿足 ⇒ 這支排程永遠退不了場，而失敗看起來只像「條件還沒到」。
+
+        意圖（Rule 9）：本鎖守的不是「E3 現在寫得對」，而是**不可滿足的判準不得再被寫回去**。
+        三個方向：①E3 必須點名它真正關心的那一支；②不得把它授權移除的那一支算進量測對象；
+        ③必須是**逐任務**讀法（整支工具的 rc／status 會把 smoke 算進去）。
+        """
+        e3 = self._e3_paragraph()
+        self.assertIn(
+            "AutoClaude_Nightly", e3,
+            "E3 必須點名它真正關心的那一支（每日執行級心跳＝nightly，不是 smoke）",
+        )
+        self.assertNotIn(
+            "AutoClaude_WindowsSmoke", e3,
+            "E3 把它自己授權移除的那支任務算進了量測對象 ⇒ 判準結構上不可滿足："
+            "執行 E3 授權的動作必然讓 E3 轉紅（R75 頭號教訓同形態）",
+        )
+        self.assertIn(
+            "tasks.AutoClaude_Nightly", e3,
+            "E3 必須用**逐任務**欄位取證（--json 的 .tasks.<name>）；改讀整支工具的 "
+            "rc／status 就等於把 smoke 任務的存在與否又綁回判準裡",
+        )
+        self.assertIn(
+            "不得隨「被它所判的動作」而改變", self.smoke,
+            "一般化規則必須成文留在判準段旁邊——只修好這一條 E3 不會阻止下一條同形態判準",
+        )
+
     def test_zero_findings_is_explicitly_rejected_as_a_retirement_basis(self) -> None:
         """反向鎖：不得把「零發現」寫成退場依據。
 
@@ -1289,4 +1457,12 @@ class TestWindowsSmokeTaskHasWrittenExitCriteria(unittest.TestCase):
 
 
 if __name__ == "__main__":
+    # 🔴 只有「直接以本檔為入口點跑」時才需要自備保護（R76 收斂包）：本檔有一格會把中文
+    # 診斷印到 stderr（TestNamedExemptionRetiresWhenItsUnlockConditionHolds 的「本機量不
+    # 出來」分支刻意不 skip、改印原因），Windows 非 UTF-8 主控台會讓那行崩潰或降解成
+    # \uXXXX——那正是 DEF-101-798 的形態。經 run_root_unittests.py／pytest 啟動時保護屬
+    # 載具，本區塊不執行。實作走唯一 SSOT `tools/_stdio_utf8.py`，不在此複製第二份。
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+    import _stdio_utf8  # noqa: E402,F401  （side effect：強制 stdout/stderr 為 UTF-8）
+
     unittest.main()

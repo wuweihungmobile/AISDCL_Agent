@@ -75,8 +75,21 @@ _REPO_ROOT = _TESTS_DIR.parents[1]
 _ONBOARDING = _REPO_ROOT / "ONBOARDING.md"
 
 sys.path.insert(0, str(_REPO_ROOT / "tools"))
+sys.path.insert(0, str(_TESTS_DIR))
+# 🔴 R76：「這支 hook 有沒有被根層註冊」的解析走**既有 SSOT**，不在本檔再寫一份
+# （同 `test_ntfs_trailing_space_device_name` 直接 import `test_windows_forbidden_
+# filename_parity` 的既有慣例）。自寫一份 JSON 解析＝同一份知識住兩個家、只有一個家
+# 被鎖（R73 教訓）。⚠️ 位置刻意排在下面兩行**之前**：ruff 的 isort 以 `tools/ruff.toml`
+# 所在目錄為 project root，故 `tools/tests/` 底下的模組被歸為 third-party、`tools/`
+# 底下的歸 first-party，順序寫反即 I001（實測）。
+import test_subprocess_encoding_hygiene as _HYGIENE  # noqa: E402
+
 import sync_onboarding_baselines as SYNC  # noqa: E402
 from lib import baseline_origin as BO  # noqa: E402  # nightly 探針的解析契約（DEF-101-759）
+from lib import ci_liveness as _CI_LIVENESS  # noqa: E402  # job 層 fail-open 正則 SSOT
+from lib import defect_ledger_index as _LEDGER_INDEX  # noqa: E402  # 改派判定的生產 SSOT
+
+hook_command_scripts = _HYGIENE.hook_command_scripts
 
 
 @contextmanager
@@ -2793,6 +2806,22 @@ def hook_scripts_named_in(text: str, repo_root: Path) -> dict[str, list[str]]:
     return out
 
 
+def registered_hook_basenames(settings_text: str) -> set[str]:
+    """根 `.claude/settings.json` 內**真的被註冊**的 hook 腳本 basename 集合。
+
+    解析走既有 SSOT `test_subprocess_encoding_hygiene.hook_command_scripts()`
+    （`json.loads` → `hooks[*][*].hooks[*].command`），該函式自己另有紅綠自證
+    （該檔判準四），故本檔不重寫一份解析。
+
+    JSON 壞掉時**刻意讓 `json.loads` 拋出**：settings 解析不了是註冊表本身壞了，
+    比「當成沒有任何 hook 被註冊」誠實——後者會讓 ② 那一向整組靜默失效。
+    """
+    return {
+        PurePosixPath(rel).name
+        for _event, rel in hook_command_scripts(json.loads(settings_text))
+    }
+
+
 def hook_claim_problems(text: str, settings_text: str, repo_root: Path) -> list[str]:
     """根 CLAUDE.md 提到的每支 hook，**雙向**都要與根層註冊實況相符。
 
@@ -2810,10 +2839,20 @@ def hook_claim_problems(text: str, settings_text: str, repo_root: Path) -> list[
     session 不會跑」），一支會跑的 hook 沒有任何語境能讓那句話變成真的。副作用是文件
     必須把「已橋接清單」與「未橋接清單」**分行寫**——那不是本判準的成本，而是它要的
     結構：兩組事實混在同一行時，逐行 substring 判準對任何一組都判不準。
+
+    🔴 **R76 訂正（同一個通行證換皮復活）**：「已註冊」的判定原本是
+    `if name in settings_text:`——拿**整份 settings.json 的文字**做 substring。於是
+    該檔任何角落提到過的名字（`_comment`／`_why` 敘述、被註解掉的舊 wiring、`matcher`
+    說明裡順口舉的例）都算「已註冊」而讓那支 hook **整支免檢**；把真 wiring 拔掉、
+    只留一句註解，根 CLAUDE.md 那句「已橋接 N 支」就成了假話而零訊號。R75 才剛拆掉
+    OR 型通行證（見上方 ②），這裡是同一個病的第二個住所：**判定「有沒有」時，掃描面
+    必須是解析出來的結構，不是整檔文字。** 現行判定改走
+    `registered_hook_basenames()`（既有 SSOT 的 `hooks[*][*].hooks[*].command`）。
     """
     problems: list[str] = []
+    registered = registered_hook_basenames(settings_text)
     for name, lines in sorted(hook_scripts_named_in(text, repo_root).items()):
-        if name in settings_text:
+        if name in registered:
             mislabelled = [ln for ln in lines if _SUBPROJECT_SCOPE_MARK in ln]
             if mislabelled:
                 problems.append(
@@ -2909,6 +2948,68 @@ class TestR74RootClaudeMdHookClaimsMatchRegistration(unittest.TestCase):
             hook_claim_problems("`enforce_docs_path.py`（PreToolUse hook）生效。",
                                 settings, _REPO_ROOT),
             "拿掉射程註記仍全綠 ⇒ 該 hook 被當成已註冊而免檢，上一個斷言是空虛的綠")
+
+    # ── R76：「已註冊」的判定面（整檔 substring → 解析出的 command 集合）────────
+    def test_the_registered_set_comes_from_the_parsed_commands(self) -> None:
+        """自錨（對照組）：真 settings 解析得出的集合必須非空、且含真的橋接過去那幾支。
+
+        少了這一條，`registered_hook_basenames()` 一旦解析壞掉（回空集合）會讓每一支
+        hook 都落進「未註冊」那一支判準——①那一向會對已橋接的 hook 逼出誤導性註記、
+        ②那一向則整組失效，而兩者都不會有任何東西說話。
+        """
+        registered = registered_hook_basenames(
+            _ROOT_SETTINGS.read_text(encoding="utf-8-sig"))
+        self.assertTrue(registered, "解析不出任何已註冊 hook ⇒ 判準的兩向同時失真")
+        for expected in ("block_bash_on_windows.py", "check_sh_eol.py"):
+            self.assertIn(expected, registered,
+                          f"{expected} 在根層 settings.json 有 wiring 卻解析不到 ⇒ "
+                          f"command 形態變了而解析面沒跟上；實得：{sorted(registered)}")
+
+    def test_a_name_that_only_appears_in_a_comment_does_not_count_as_registered(self) -> None:
+        """🔴 R76 注入＝修前 fail-open 的逐字形態：一個 `_comment` 就買到整支免檢。
+
+        修前判準是 `if name in settings_text: continue`。本注入的 settings **只在
+        `_comment` 裡**提到 `enforce_docs_path.py`（真 wiring 完全沒有它），而文件那行
+        又漏了射程註記——這正是本鎖存在的理由那一種假事實。修前：名字出現在檔內 ⇒
+        判為已註冊 ⇒ `continue` ⇒ 全綠。現行：必須紅。
+
+        用 `enforce_docs_path.py` 而不是造一個假名，理由同 `check_sh_eol.py` 那支注入：
+        假名不在 `hook_scripts_named_in` 的掃描面內，測試會因為「掃不到」而綠。
+        """
+        settings = json.dumps(
+            {"_comment": "曾評估把 enforce_docs_path.py 橋到根層，先記個名字備忘",
+             "hooks": {"PreToolUse": [{"matcher": "Bash", "hooks": [{
+                 "type": "command",
+                 "command": "python .claude/hooks/block_bash_on_windows.py"}]}]}},
+            ensure_ascii=False)
+        self.assertIn("enforce_docs_path.py", settings, "注入語料本身沒帶那個名字 ⇒ "
+                                                        "它證明不了整檔 substring 的問題")
+        self.assertNotIn(
+            "enforce_docs_path.py", registered_hook_basenames(settings),
+            "只出現在 `_comment` 的名字被算成已註冊 ⇒ 判定面又退回整檔 substring")
+        problems = hook_claim_problems(
+            "文檔目錄編號制：AutoClaude 以 PreToolUse hook `enforce_docs_path.py` 強制。",
+            settings, _REPO_ROOT)
+        self.assertTrue(
+            any("enforce_docs_path.py" in p for p in problems),
+            f"註解裡的名字買到了免檢 ⇒ R75 拆掉的 OR 型通行證換皮復活；實得：{problems}")
+
+    def test_a_really_registered_hook_is_still_judged_registered(self) -> None:
+        """反向對照：真 wiring 仍必須被判為已註冊（否則上一支只是把所有輸入都判紅）。
+
+        判定的是**同一支**在上面被註解形態擋掉的判準路徑：這裡 `block_bash_on_windows.py`
+        走的是真 command，標成「僅子專案生效」必須紅（②那一向）。
+        """
+        settings = json.dumps(
+            {"hooks": {"PreToolUse": [{"matcher": "Bash", "hooks": [{
+                "type": "command",
+                "command": "python .claude/hooks/block_bash_on_windows.py"}]}]}},
+            ensure_ascii=False)
+        self.assertIn("block_bash_on_windows.py", registered_hook_basenames(settings))
+        problems = hook_claim_problems(
+            f"`block_bash_on_windows.py` **{_SUBPROJECT_SCOPE_MARK}** 生效。",
+            settings, _REPO_ROOT)
+        self.assertTrue(any("已註冊" in p for p in problems), problems)
 
 
 # ── R75 訂正：具名機械物鎖的三面擴張（幽靈機械物 4 筆的逃逸路徑）─────────────
@@ -3430,6 +3531,180 @@ def push_triggered_workflows(workflows_dir: Path) -> list[str]:
     return out
 
 
+#: `jobs:` 區塊內的 job 名（恰 2 空白縮排）與 **job 層** `continue-on-error: true`
+#: （恰 4 空白縮排）。step 層（`steps:` 的 `- ` 條目底下，縮排更深）刻意不收：step 紅
+#: 仍會讓 job 紅、run 層看得到；job 層才是「job 紅而 run 仍 conclusion=success」的那種。
+_JOB_NAME_RE = re.compile(r"^  ([A-Za-z0-9_-]+):\s*$")
+#: 🔴 **不在此另寫一份**（R76 複審 SA-02）：本判準與 `tools/lib/ci_liveness.py` 原本各有
+#: 一份逐字相同的正則，兩份同時把「值後面有行尾註解」漏掉，而磁碟上就有一個活體
+#: （`autoclaude-pg-e2e-on-label.yml:35`）⇒ 判準⑧ 的「掃描面現查而非寫死」在落地當天
+#: 就有一個現查不到的東西。改為共用該檔的 SSOT，任一邊修好兩邊同時得利。
+_JOB_FAIL_OPEN_RE = _CI_LIVENESS.JOB_FAIL_OPEN_RE
+#: `nightly-red=` 的項目分隔（值內不得有空白——錨是單獨一行、空白即欄位邊界）。
+_NIGHTLY_RED_SEP = ","
+#: 全綠時的合法值。刻意**不**提供「還沒查」的值：R76-03 的缺陷本體就是這一層從來
+#: 沒有人去查（一筆真實 P1 橫跨四輪「雲端全綠」宣稱），開一個 `unchecked` 出口等於
+#: 把那個缺陷寫成合法狀態。要嘛去 `gh run view <id> --json jobs` 查一次，要嘛就紅。
+_NIGHTLY_RED_CLEAN = "none"
+#: 🔴 **R76 複審 ARCH-03 補的兩欄 provenance**。落地首版的判準⑧ 只有三種判定：欄位缺席、
+#: 值是 `none`、值裡有現查不到的 job 名——**沒有任何一條在看「那個宣告現在還成不成立」**。
+#: 實測四個互相矛盾的值（宣告 windows 紅／宣告 macos 紅／宣告兩支都紅／宣告全綠）全部判綠。
+#: 於是兩個方向都失明：①本輪 PKG-B 修好 `windows-nightly-full` 之後，錨仍會逐字宣告它是
+#: 紅的而判準照樣綠＝**一句被鎖守著的假話**；②下週換 `macos-nightly-full` 轉紅，一行都不會響。
+#: 它買到的是「有人查過一次」，而它替代的正是那個「橫跨四輪沒人讀」的 issue 通道。
+#:
+#: 修法＝讓這一欄自帶時點，並給它一個**本機算得出來**的過期界線：
+#:   · `nightly-run=<run-id>`：查的是哪一次 run。必須逐字出現在表③-b（錨 ↔ 表格綁定，
+#:     形同 `red=` ↔ 表格那條），「改了表格忘了改錨」就會紅。
+#:   · `nightly-checked-at=<ISO8601 帶時間>`：什麼時候查的。超過 `_NIGHTLY_MAX_AGE_DAYS`
+#:     即紅，訊息直接印回填 SOP 第 6 步那段 gh 指令。
+#: 🔴 比較對象是**時鐘**與**本 commit 的檔案內容**，不是 `origin/main`——任何 commit
+#: 上照 SOP 查一次就綠，不會落入 R75 那個自我指涉陷阱
+#: （見 `TestR75CloudCriteriaAreSatisfiableAtAnyCommit`）。
+#: `none` 同樣必須帶 provenance：否則「沒查」與「查過全綠」在錨上長得一模一樣。
+_NIGHTLY_RUN_FIELD = "nightly-run"
+_NIGHTLY_CHECKED_FIELD = "nightly-checked-at"
+_NIGHTLY_RUN_RE = re.compile(r"^\d{6,}$")
+#: 排程軌是**週頻**（兩支 compat-CI 的 cron）⇒ 14 天＝最多兩個週期沒人回來看。
+#: 取更大就等於容許「一個月前查的」還算新鮮，那正是本判準要治的病；取更小會在正常
+#: 輪距內製造噪音。過期時的處置成本＝跑一次 SOP 第 6 步的 gh 指令（秒級）。
+_NIGHTLY_MAX_AGE_DAYS = 14
+
+
+def cloud_fail_open_jobs(workflows_dir: Path) -> list[str]:
+    """`<workflow>.yml:<job>` — 帶 **job 層** `continue-on-error: true` 的 job（現查）。
+
+    WHY（R76-03）：表③ 記的是 run 層 `conclusion`，而 job 層 `continue-on-error: true`
+    讓那個 job 紅掉時 run 仍是 `success` ⇒ 表③ 六列全 ✅ 與「裡面有 job 是紅的」可以
+    同時為真。該通道在本 repo 已實測**零讀者**（唯一顯形處是一張沒人看的 GitHub issue），
+    一筆真實 P1 因此橫跨數輪的「雲端全綠」宣稱。
+
+    掃描面現查而非寫死：寫死清單在「某支 workflow 新增一個 fail-open job」那天靜默縮面
+    （同 `push_triggered_workflows` 的紀律）。
+    """
+    found: list[str] = []
+    for f in sorted(workflows_dir.glob("*.yml")):
+        in_jobs, job = False, None
+        for line in f.read_text(encoding="utf-8", errors="replace").splitlines():
+            if line.startswith("jobs:"):
+                in_jobs, job = True, None
+                continue
+            if line and not line[0].isspace():
+                in_jobs, job = False, None
+                continue
+            if not in_jobs:
+                continue
+            m = _JOB_NAME_RE.match(line)
+            if m:
+                job = m.group(1)
+            elif job and _JOB_FAIL_OPEN_RE.match(line):
+                found.append(f"{f.name}:{job}")
+    return sorted(set(found))
+
+
+def _nightly_provenance_problems(
+    fields: dict[str, str], onboarding_text: str, now: datetime.datetime,
+) -> list[str]:
+    """判準⑧-b：`nightly-red` 的 provenance（哪一次 run／何時查的）＋ 過期帶。
+
+    純函式（`now` 由呼叫端注入）——時鐘是本判準唯一的外部輸入，注入才驗得了兩個方向。
+    """
+    problems: list[str] = []
+    run_id = fields.get(_NIGHTLY_RUN_FIELD, "")
+    checked = fields.get(_NIGHTLY_CHECKED_FIELD, "")
+    sop = ("處置＝跑一次 §7 回填 SOP 第 6 步那段 `gh run list --event schedule` ＋ "
+           "`gh run view <id> --json jobs`，把結果填進表③-b，並把 "
+           f"`{_NIGHTLY_RUN_FIELD}=`／`{_NIGHTLY_CHECKED_FIELD}=` 一併更新")
+    if not _NIGHTLY_RUN_RE.match(run_id):
+        problems.append(
+            f"表③ 錨的 `{_NIGHTLY_RUN_FIELD}=` 缺席或形態不合法（實得 {run_id!r}，"
+            f"預期是 `gh run list` 回的那串 databaseId 純數字）。沒有它，`nightly-red` "
+            f"就只是一句沒有時點也沒有出處的斷言——它宣告的紅可能早就修好了、"
+            f"新的紅也不會有人補進來。{sop}")
+    elif run_id not in onboarding_text:
+        problems.append(
+            f"表③ 錨宣告 `{_NIGHTLY_RUN_FIELD}={run_id}`，但 §7 表③-b 裡找不到這個 run id "
+            f"⇒ 錨與表格有一邊沒跟上（同 `red=` ↔ 表格那條判準，比的是內容不是日期）。{sop}")
+    if not checked:
+        problems.append(
+            f"表③ 錨缺 `{_NIGHTLY_CHECKED_FIELD}=`（帶時間的 ISO8601，例 "
+            f"`2026-08-05T14:30:00+08:00`）⇒ 這一欄沒有新鮮度，「查過一次」與「三個月前"
+            f"查過一次」在錨上長得一樣。{sop}")
+        return problems
+    try:
+        stamp = datetime.datetime.fromisoformat(checked)
+    except ValueError:
+        problems.append(
+            f"表③ 錨的 `{_NIGHTLY_CHECKED_FIELD}={checked}` 不是合法 ISO8601。{sop}")
+        return problems
+    if stamp.tzinfo is None:
+        problems.append(
+            f"表③ 錨的 `{_NIGHTLY_CHECKED_FIELD}={checked}` 沒有時區 ⇒ 跨平台／跨時區讀者"
+            f"對同一個字串會算出不同的年齡。請帶時區偏移。{sop}")
+        return problems
+    age = (now - stamp).days
+    if age > _NIGHTLY_MAX_AGE_DAYS:
+        problems.append(
+            f"表③ 錨的 `{_NIGHTLY_CHECKED_FIELD}={checked}` 已是 {age} 天前（上限 "
+            f"{_NIGHTLY_MAX_AGE_DAYS} 天＝排程軌兩個週期）⇒ `nightly-red` 現值只是一句"
+            f"過期的宣稱：它說的紅可能已經修好、新的紅也不會有人補進來。{sop}")
+    if stamp > now + datetime.timedelta(days=1):
+        problems.append(
+            f"表③ 錨的 `{_NIGHTLY_CHECKED_FIELD}={checked}` 在未來 ⇒ 一次沒發生過的查核"
+            f"（`[[no-fabricated-tool-output]]`）")
+    return problems
+
+
+def cloud_nightly_red_problems(
+    fields: dict[str, str], workflows_dir: Path,
+    onboarding_text: str = "", now: datetime.datetime | None = None,
+) -> list[str]:
+    """判準⑧：凡存在 fail-open job，錨就必須帶 `nightly-red=`，且值只能是現查得到的。
+
+    語意＝「那些 run 層看不見紅的 job，這一次查核的**真實 job 層結論**」。全綠寫
+    `none`；有紅就逐項寫 `<workflow>.yml:<job>`（多筆以半形逗號相接，值內不得有空白）。
+
+    🔴 **比較對象只能是被測 commit 自己看得到的東西**（R75 頭號教訓）：本判準比的是
+    「錨宣告的集合」↔「本 commit 的 workflow 檔現查出的 fail-open job 集合」，兩者都
+    住在被測 commit 內 ⇒ 任何 commit 上都滿足得了。它**不**去問「雲端那一次 run 的 job
+    到底是什麼結論」——那要拿一個 push 之後才確定的值來比，正是結構上不可滿足的形態
+    （見 `cloud_pending_problems` 的教訓段與 `TestR75CloudCriteriaAreSatisfiableAtAnyCommit`）。
+    去雲端查那一半的歸宿是回填 SOP，不是 CI 測試。
+
+    誠實劃界（兩層，缺一不可）：
+      · 本判準管得住「有沒有查、宣告的 job 名對不對、是哪一次 run、多久以前查的」，
+        **管不住**「查到的結論是不是照實填的」——那與表③ 其他列同屬人寫入的事實，
+        靠的是回填 SOP 與取證紀律。
+      · 它**不去雲端對帳**。過期帶保證的是「有人在 N 天內查過並留下 run-id」，不是
+        「此刻雲端的狀態就是錨上寫的那樣」。這一段（R76 複審 ARCH-03 要求補的劃界）
+        原文完全沒有，於是一句沒有清除路徑的宣告看起來像一道會過期的鎖。
+    """
+    fail_open = cloud_fail_open_jobs(workflows_dir)
+    if not fail_open:
+        return []            # 無 fail-open job ⇒ 本欄無取值面（不是「通過」，是不適用）
+    problems = _nightly_provenance_problems(
+        fields, onboarding_text, now or datetime.datetime.now(datetime.UTC))
+    declared = fields.get("nightly-red", "")
+    if not declared:
+        return problems + [
+            "表③ 錨缺 `nightly-red=`——run 層 `conclusion` 看不見 job 層 "
+            f"`continue-on-error: true` 的紅，現查有 {len(fail_open)} 個這種 job："
+            f"{fail_open}。處置：`gh run view <run-id> --json jobs` 查它們的真實結論，"
+            f"全綠就寫 `nightly-red={_NIGHTLY_RED_CLEAN}`，有紅就逐項寫 "
+            f"`<workflow>.yml:<job>`（半形逗號相接）"
+        ]
+    if declared == _NIGHTLY_RED_CLEAN:
+        return problems
+    unknown = [x for x in declared.split(_NIGHTLY_RED_SEP) if x not in fail_open]
+    if not unknown:
+        return problems
+    return problems + [
+        f"表③ 錨的 `nightly-red=` 列了 {unknown}，而現查帶 job 層 continue-on-error 的"
+        f"只有 {fail_open} ⇒ 兩邊有一邊沒跟上（job 改名／被移除／打錯字）。全綠請寫 "
+        f"`{_NIGHTLY_RED_CLEAN}`，不要留一個指向不存在 job 的宣告"
+    ]
+
+
 def parse_cloud_fields(anchor_tail: str) -> tuple[dict[str, str], list[str]]:
     """錨尾解析成 `({欄位: 值}, 問題清單)`；同一欄位出現 ≥2 次一律 **fail-loud**。
 
@@ -3487,6 +3762,9 @@ def cloud_status_problems(onboarding_text: str, workflows_dir: Path) -> list[str
     problems += cloud_causality_problems(fields)
     # 判準⑦：錨的 `red=` ↔ 表格 failure 列（同日內仍有效，QA-R74-01 第 2 層）。
     problems += cloud_red_set_problems(onboarding_text, fields)
+    # 判準⑧：run 層 conclusion 看不見的那一層（job 層 continue-on-error）必須另行宣告，
+    # 且該宣告要自帶 provenance（哪一次 run／何時查的）並在過期時轉紅（判準⑧-b）。
+    problems += cloud_nightly_red_problems(fields, workflows_dir, onboarding_text)
     return problems
 
 
@@ -3817,6 +4095,162 @@ class TestR74CloudCiStatusIsRecorded(unittest.TestCase):
         self.assertEqual(
             cloud_causality_problems({"head-sha": sha, "checked-at": stamped}), [])
 
+    # ── 判準⑧（R76-03）：job 層 fail-open 的紅必須另有一欄承載 ────────────────
+    def test_fail_open_job_scan_surface_is_live_and_discriminating(self) -> None:
+        """自錨＋鑑別力：現查得到 job 層的 fail-open，且**不**把 step 層算進來。
+
+        少了下半條，判準會把「step 失敗但 job 仍紅、run 看得到」的那種也拖進來，
+        逼錨去宣告一堆 run 層本來就顯形的東西 ⇒ 誤報的鎖最後一定被整道關掉。
+        """
+        jobs = cloud_fail_open_jobs(_WORKFLOWS_DIR)
+        self.assertTrue(jobs, "現查不到任何 job 層 continue-on-error ⇒ 判準⑧ 已空轉"
+                              "（縮排形態變了？還是 workflow 目錄抓錯？）")
+        self.assertTrue(
+            any(name.endswith("-nightly-full") for name in jobs),
+            f"兩支 compat-CI 的 *-nightly-full 是本判準的立案站點，卻不在現查結果內：{jobs}")
+        step_level = [x for x in jobs if x.startswith("aisdlc-sdd-arch-fitness.yml")]
+        self.assertEqual(
+            step_level, [],
+            "step 層 `continue-on-error: true`（該 workflow 的 artifact 上傳步驟）被誤收"
+            f"成 job 層 ⇒ 判準⑧ 的取值面過寬：{step_level}")
+
+    def test_a_job_level_fail_open_with_a_trailing_comment_is_still_seen(self) -> None:
+        """🔴 注入＝R76 複審 SA-02 的活體逃逸形態：值後面加一個行尾註解。
+
+        落地首版的正則寫成 `…true\\s*$`（行尾不得有東西），而 YAML 最普通的寫法就是
+        `continue-on-error: true  # 理由`——磁碟上當時就有一個
+        （`autoclaude-pg-e2e-on-label.yml`）。它逃掉的方向有兩個：新增的同形態 job
+        永遠不必申報；反過來若有人照實把它填進 `nightly-red=` 反而會被判成 unknown 假紅。
+        """
+        with tempfile.TemporaryDirectory() as td:
+            d = Path(td)
+            (d / "commented.yml").write_text(
+                "on:\n  schedule:\n    - cron: '0 0 * * 0'\n"
+                "jobs:\n  deep:\n    runs-on: ubuntu-latest\n"
+                "    continue-on-error: true  # 警示不阻塞 merge\n",
+                encoding="utf-8", newline="\n")
+            self.assertEqual(cloud_fail_open_jobs(d), ["commented.yml:deep"])
+            # 反向對照：step 層（縮排更深）仍然不得被收進來。
+            (d / "steponly.yml").write_text(
+                "jobs:\n  build:\n    runs-on: ubuntu-latest\n    steps:\n"
+                "      - run: x\n        continue-on-error: true  # 上傳失敗不擋\n",
+                encoding="utf-8", newline="\n")
+            self.assertEqual(cloud_fail_open_jobs(d), ["commented.yml:deep"])
+            # 已知邊界（誠實劃界，非疏漏）：`${{ }}` 運算式判不出真假值 ⇒ 出射程。
+            (d / "expr.yml").write_text(
+                "jobs:\n  maybe:\n    runs-on: ubuntu-latest\n"
+                "    continue-on-error: ${{ github.event_name == 'schedule' }}\n",
+                encoding="utf-8", newline="\n")
+            self.assertEqual(cloud_fail_open_jobs(d), ["commented.yml:deep"])
+
+    def test_the_regex_is_shared_with_ci_liveness_not_copied(self) -> None:
+        """兩個消費者必須是**同一個物件**（掌舵者第 2 點：不重複模組）。
+
+        R76 之前是兩份逐字相同的複本，於是同一個瞎點有兩個家、修一個不會修到另一個
+        （實測：對 windows-compat-ci 那一行加註解，`ci_liveness` 的 run 層 fail-open
+        自白會一起啞掉）。`assertIs` 讓「又抄了一份」在下一次就當場紅。
+        """
+        self.assertIs(_JOB_FAIL_OPEN_RE, _CI_LIVENESS.JOB_FAIL_OPEN_RE)
+
+    def test_a_missing_nightly_red_field_is_red(self) -> None:
+        """注入＝修前實況：錨只記 run 層 conclusion，job 層 fail-open 完全無處顯形。"""
+        problems = cloud_nightly_red_problems({"red": "none"}, _WORKFLOWS_DIR)
+        self.assertTrue(any("nightly-red" in p for p in problems), problems)
+
+    def test_nightly_red_none_is_green(self) -> None:
+        """對照組：查過且全綠是合法且必須可通過的狀態（否則判準退化成永遠紅）。"""
+        self.assertEqual(
+            cloud_nightly_red_problems(
+                self._fields("none"), _WORKFLOWS_DIR, self._TEXT, self._NOW), [])
+
+    def test_nightly_red_naming_a_nonexistent_job_is_red(self) -> None:
+        """注入：宣告一個現查不到的 `workflow:job`（改名／打錯字）⇒ 必紅。"""
+        problems = cloud_nightly_red_problems(
+            self._fields("windows-compat-ci.yml:no-such-job"),
+            _WORKFLOWS_DIR, self._TEXT, self._NOW)
+        self.assertTrue(any("no-such-job" in p for p in problems), problems)
+
+    def test_nightly_red_naming_a_real_fail_open_job_is_green(self) -> None:
+        """對照組：照實填一個現查得到的 fail-open job ⇒ 綠（這才是它的正常用法）。"""
+        live = cloud_fail_open_jobs(_WORKFLOWS_DIR)
+        self.assertTrue(live, "取值面為空 ⇒ 本對照組沒有意義")
+        self.assertEqual(
+            cloud_nightly_red_problems(
+                self._fields(live[0]), _WORKFLOWS_DIR, self._TEXT, self._NOW), [])
+
+    def test_nightly_red_is_not_required_when_no_job_is_fail_open(self) -> None:
+        """邊界：沒有 fail-open job 的 repo 不得被逼著宣告一欄無意義的值。"""
+        with tempfile.TemporaryDirectory() as td:
+            d = Path(td)
+            (d / "plain-ci.yml").write_text(
+                "on:\n  push:\njobs:\n  build:\n    runs-on: ubuntu-latest\n",
+                encoding="utf-8", newline="\n")
+            self.assertEqual(cloud_fail_open_jobs(d), [])
+            self.assertEqual(cloud_nightly_red_problems({}, d), [])
+
+    # ── 判準⑧-b：provenance ＋ 過期帶（R76 複審 ARCH-03）────────────────────────
+    _NOW = datetime.datetime(2026, 8, 5, 12, 0, tzinfo=datetime.UTC)
+    _TEXT = "…表③-b 那一列寫著 `30803941764` ／ `1e5214b` …"
+
+    @classmethod
+    def _fields(cls, declared: str, *, run: str = "30803941764",
+                checked: str = "2026-08-05T01:24:40+08:00") -> dict[str, str]:
+        return {"nightly-red": declared, _NIGHTLY_RUN_FIELD: run,
+                _NIGHTLY_CHECKED_FIELD: checked}
+
+    def test_nightly_red_without_provenance_is_red(self) -> None:
+        """🔴 本組的本體：沒有 run-id／時點的宣告＝「有人查過一次」，不是狀態。"""
+        problems = cloud_nightly_red_problems(
+            {"nightly-red": "none"}, _WORKFLOWS_DIR, self._TEXT, self._NOW)
+        self.assertTrue(any(_NIGHTLY_RUN_FIELD in p for p in problems), problems)
+        self.assertTrue(any(_NIGHTLY_CHECKED_FIELD in p for p in problems), problems)
+
+    def test_a_run_id_absent_from_the_table_is_red(self) -> None:
+        """錨 ↔ 表③-b 綁定：改了表格忘了改錨（或反之）必紅。"""
+        problems = cloud_nightly_red_problems(
+            self._fields("none", run="99999999999"),
+            _WORKFLOWS_DIR, self._TEXT, self._NOW)
+        self.assertTrue(any("找不到這個 run id" in p for p in problems), problems)
+
+    def test_a_stale_check_turns_red_even_when_the_declaration_is_well_formed(self) -> None:
+        """🔴 修好之後沒人回來清、或新的紅沒人補進來——兩個方向都靠這一條顯形。
+
+        它比的是**時鐘**，不是 `origin/main`：任何 commit 上照 SOP 查一次就綠
+        （見 `TestR75CloudCriteriaAreSatisfiableAtAnyCommit`）。
+        """
+        later = self._NOW + datetime.timedelta(days=_NIGHTLY_MAX_AGE_DAYS + 2)
+        problems = cloud_nightly_red_problems(
+            self._fields("none"), _WORKFLOWS_DIR, self._TEXT, later)
+        self.assertTrue(any("天前" in p for p in problems), problems)
+        # 邊界對照：剛好在帶內就必須是綠的（否則判準退化成「永遠紅」）。
+        inside = self._NOW + datetime.timedelta(days=_NIGHTLY_MAX_AGE_DAYS - 1)
+        self.assertEqual(
+            cloud_nightly_red_problems(
+                self._fields("none"), _WORKFLOWS_DIR, self._TEXT, inside), [])
+
+    def test_a_naive_or_future_timestamp_is_red(self) -> None:
+        """無時區＝跨時區讀者算出不同年齡；未來時點＝一次沒發生過的查核。"""
+        naive = cloud_nightly_red_problems(
+            self._fields("none", checked="2026-08-05T01:24:40"),
+            _WORKFLOWS_DIR, self._TEXT, self._NOW)
+        self.assertTrue(any("沒有時區" in p for p in naive), naive)
+        future = cloud_nightly_red_problems(
+            self._fields("none", checked="2026-09-30T00:00:00+08:00"),
+            _WORKFLOWS_DIR, self._TEXT, self._NOW)
+        self.assertTrue(any("在未來" in p for p in future), future)
+
+    def test_the_live_anchor_satisfies_the_new_provenance_criteria(self) -> None:
+        """端到端：真實錨（本 commit 的 ONBOARDING.md）現在必須自己過得了這一關。
+
+        沒有這一條，上面幾支都可能在一個「合成語料全綠、真檔其實紅」的世界裡通過。
+        """
+        text = _ONBOARDING.read_text(encoding="utf-8-sig")
+        fields, parse_problems = parse_cloud_fields(
+            SYNC.anchored_line(text, _CLOUD_ANCHOR).split(_CLOUD_ANCHOR, 1)[1])
+        self.assertEqual(parse_problems, [], parse_problems)
+        self.assertEqual(
+            cloud_nightly_red_problems(fields, _WORKFLOWS_DIR, text), [])
+
     def test_red_set_must_match_the_table_rows(self) -> None:
         """注入⑦：表格說某支 failure、錨的 `red=` 沒列到 ⇒ 必紅（同日內仍有效）。"""
         table = ("> | `windows-compat-ci.yml` | 🔴 **failure** | `abc1234` | x |\n"
@@ -3904,6 +4338,388 @@ class TestR75CloudCriteriaAreSatisfiableAtAnyCommit(unittest.TestCase):
         self.assertNotIn("散文裡提", code, "docstring 沒被剝掉 ⇒ 判準會誤把教訓本身當違規")
         self.assertTrue(any(t in code for t in _MOVING_REF_TOKENS),
                         "違規寫法沒被偵測到 ⇒ 本鎖不具鑑別力")
+
+
+# ── R76：「已實測不涵蓋」清單必須綁**現行行為**，不得綁字面 token ──────────────
+#
+# 🔴 缺陷本體（R76-08，「有鎖在守假話」的實例）：`CrossPlatform_Scan_Dimensions.md`
+# 硬規則② 的「已實測不涵蓋」清單裡，**否定語意**（「無回執」「零改派」）自 R74 起已被
+# `_REASSIGN_NEGATED_RE` 涵蓋，那一項因此成了假話；而釘住它的判準是
+# `assertIn("否定語意", rule2)`——綁**字面 token**。兩件事合起來的方向是最壞的那個：
+# 照本檔自訂的規矩去訂正文件，根層閘門反而會**轉紅**（該文件自陳的規矩是「被涵蓋時
+# 翻紅、強迫改文件」，實況卻是「改文件才紅」）。
+#
+# 本段是那條規矩的機械面：清單成員與**探針實跑的結果**雙向綁定——探針說「此刻仍未涵蓋」
+# 就必須列著，說「已涵蓋」就必須不在清單內。探針跑的是生產判定函式本身
+# （`lib.defect_ledger_index.reassign_hit`），所以它不可能與實作各說各話。
+_SCAN_DIMS_DOC = _REPO_ROOT / "docs" / "06_quality" / "CrossPlatform_Scan_Dimensions.md"
+#: 不涵蓋清單的區段界線。刻意用**逐字**界線而非整段搜尋：訂正散文必須說得出「原文錯在
+#: 哪」，那句話會提到被移除的形態名，整段搜尋會把訂正文自己判成違規（R73 教訓）。
+_UNCOVERED_LIST_HEAD = "**本鎖已實測不涵蓋的形態**"
+_UNCOVERED_LIST_TAIL = "本清單非窮舉"
+
+
+def uncovered_form_list(spec_text: str) -> str | None:
+    """硬規則② 那份「已實測不涵蓋」清單的區段原文；抓不到回 `None`（呼叫端 fail-loud）。"""
+    head = spec_text.find(_UNCOVERED_LIST_HEAD)
+    if head < 0:
+        return None
+    tail = spec_text.find(_UNCOVERED_LIST_TAIL, head)
+    return None if tail < 0 else spec_text[head:tail]
+
+
+def uncovered_claim_problems(
+    spec_text: str, probes: dict[str, tuple[tuple[str, ...], tuple[str, ...]]]
+) -> list[str]:
+    """清單成員 ↔ 探針實跑結果，**雙向**。
+
+    `probes` ＝ `{形態名: (仍未涵蓋時會買到豁免的狀態欄樣本, 對照組樣本)}`。
+    「此刻仍未涵蓋」＝任一樣本仍讓 `reassign_hit()` 回 True（買到豁免）。
+    對照組樣本必須回 True，否則探針只是「什麼都回 False」——那種綠沒有鑑別力。
+    """
+    segment = uncovered_form_list(spec_text)
+    if segment is None:
+        return ["硬規則② 抓不到「已實測不涵蓋」清單區段（界線字樣被改寫？）"
+                "——本判準拒絕靜默通過"]
+    problems: list[str] = []
+    for form, (samples, controls) in sorted(probes.items()):
+        if not any(_LEDGER_INDEX.reassign_hit(c) for c in controls):
+            problems.append(
+                f"「{form}」的對照組樣本一個都沒買到豁免 ⇒ 探針對任何輸入都回 False，"
+                f"「已涵蓋」這個結論是空虛的綠；請重寫對照組：{list(controls)}")
+            continue
+        still_uncovered = any(_LEDGER_INDEX.reassign_hit(s) for s in samples)
+        listed = form in segment
+        if still_uncovered and not listed:
+            problems.append(
+                f"探針實測「{form}」此刻**仍未涵蓋**（樣本 {list(samples)} 仍買得到豁免），"
+                f"而規格的不涵蓋清單沒有列它 ⇒ 文件比實作樂觀，讀者會以為那條路已封")
+        if listed and not still_uncovered:
+            problems.append(
+                f"規格的不涵蓋清單仍列著「{form}」，而探針實測它**已被涵蓋**"
+                f"（樣本 {list(samples)} 全部不再買到豁免）⇒ 清單裡躺著一句假話。"
+                f"處置：把該項從清單移除，並在清單之外寫一句訂正說明它何時被涵蓋"
+                f"（訂正文提到形態名不算違規——判定面只有清單區段本身）")
+    return problems
+
+
+class TestR76UncoveredFormListTracksActualBehaviour(unittest.TestCase):
+    """🔴 R76-08：「已實測不涵蓋」清單的守門判準必須綁行為，不得綁字面 token。"""
+
+    #: `{形態名: (仍未涵蓋時會買到豁免的樣本, 對照組)}`。樣本一律是**狀態欄**字串
+    #: （`reassign_hit()` R74 起只判狀態欄），與生產判定路徑同一個入口。
+    _PROBES: dict[str, tuple[tuple[str, ...], tuple[str, ...]]] = {
+        "否定語意": (
+            ("open（無回執）", "open（零改派）", "open（沒有回執）", "open（未改派）"),
+            ("open（改派為：未指派）", "open（🔴 R76 回執：已服務）"),
+        ),
+    }
+
+    def test_the_live_spec_matches_the_probes(self) -> None:
+        problems = uncovered_claim_problems(
+            _SCAN_DIMS_DOC.read_text(encoding="utf-8-sig"), self._PROBES)
+        self.assertEqual(problems, [], "\n  ".join(problems))
+
+    def test_the_scan_surface_is_live(self) -> None:
+        """自錨：清單區段抓不到時本判準必須 fail-loud，不得靜默通過。"""
+        self.assertIsNotNone(
+            uncovered_form_list(_SCAN_DIMS_DOC.read_text(encoding="utf-8-sig")),
+            "抽不到不涵蓋清單區段 ⇒ 界線字樣被改寫，本鎖已空轉")
+        self.assertTrue(uncovered_claim_problems("（整份規格不見了）", self._PROBES))
+
+    def test_relisting_an_already_covered_form_is_red(self) -> None:
+        """注入＝修前實況逐字：清單把「否定語意」列成未涵蓋，而它早已被涵蓋 ⇒ 必紅。"""
+        stale = (f"{_UNCOVERED_LIST_HEAD}：**否定語意**（「無回執」「零改派」照樣被當成"
+                 f"已載明而放行）、**`status@Rnn` 時點寫法**。{_UNCOVERED_LIST_TAIL}。")
+        problems = uncovered_claim_problems(stale, self._PROBES)
+        self.assertTrue(any("躺著一句假話" in p for p in problems), problems)
+
+    def test_a_correction_sentence_outside_the_list_is_not_red(self) -> None:
+        """反向對照：清單**之外**的訂正說明提到形態名不算違規。
+
+        少了這一條，本鎖會逼人不准寫下「這一項為何被移除」，而那句話正是下一輪讀者
+        唯一能據以判斷「清單為什麼變短」的東西（R73：訂正註記不得因此被判成新違規）。
+        """
+        fixed = (f"{_UNCOVERED_LIST_HEAD}：**`status@Rnn` 時點寫法**。"
+                 f"{_UNCOVERED_LIST_TAIL}。\n"
+                 f"🔴 訂正：**否定語意**自 R74 起已由 `_REASSIGN_NEGATED_RE` 涵蓋。")
+        self.assertEqual(uncovered_claim_problems(fixed, self._PROBES), [])
+
+    def test_the_probe_would_notice_a_regression(self) -> None:
+        """鑑別力：探針必須真的在跑生產判定函式（拔掉否定語意處置即應轉為「仍未涵蓋」）。
+
+        不改生產碼的驗法：直接對**否定前綴被拿掉**的等價樣本取值——那正是 R74 修前
+        `reassign_hit` 看到的字串形態。它必須回 True，否則「False ⇒ 已涵蓋」這個推論
+        其實來自別的原因（例如整個判定被關掉），本鎖的綠就是假的。
+        """
+        samples, _controls = self._PROBES["否定語意"]
+        stripped = [s.replace("無", "").replace("零", "").replace("沒有", "")
+                     .replace("未", "") for s in samples]
+        self.assertTrue(
+            any(_LEDGER_INDEX.reassign_hit(s) for s in stripped),
+            f"拿掉否定前綴後仍全部不算改派 ⇒ 探針的 False 來自別的原因：{stripped}")
+
+
+# ── R76：把 R75 頭號教訓擴到**退場／解除條件**類判準（不限 Python、不限 cloud_ 前綴）──
+#
+# 🔴 為何非擴不可（同形態第三次復發，而上面那道旗艦鎖結構上抓不到它）：R75 的鎖讀的是
+# **本模組內 `cloud_*` 家族的 Python 執行碼**。第三次復發卻住在
+# `tools/windows_smoke_local.ps1` 的**註解散文**裡——E3 原文要求「移除該排程任務後，
+# `check_scheduled_task_drift.py` 回 rc=0」，而該 checker 的期望值 SSOT
+# （`tools/scheduled_task_expectations.json`）**同時列著要被移除的那支任務** ⇒ 執行 E3
+# 自己授權的動作必然讓 E3 轉紅。語言不同（PowerShell 註解）、載體不同（散文而非執行碼）、
+# 命名不同（沒有 `cloud_` 前綴），三個縫任一個都足以讓上面那道鎖看不見它。
+#
+# 本段守的是**結構**而不是那一個站點：退場判準若拿「整支工具的 rc／status」當取證，而
+# 那支工具的比較對象是一份列了多個實體的期望值 SSOT，則移除其中任一實體必然讓取證轉紅。
+# 站點層的鎖由 `tools/tests/test_install_windows_nightly.py::
+# TestWindowsSmokeTaskHasWrittenExitCriteria` 承接（該檔逐字釘 E3 的三個方向）；本段刻意
+# 只做**家族層**判準，兩者不重複：那支答「E3 這一條現在寫得對不對」，本段答「下一條退場
+# 判準寫成同一個形狀時會不會有人說話」。
+_EXIT_SECTION_MARKS: tuple[str, ...] = ("退出判準", "退場判準", "退場條件", "解除條件")
+#: 判準項目的起頭（`E1.`／`E2.`…）。刻意只認這一種編號形態，其餘寫法列入不涵蓋清單。
+_EXIT_ITEM_RE = re.compile(r"^\s*(?:#|//)?\s*(E\d+)[.．]")
+#: 「整支工具的判決」——把工具當黑箱讀它的總結論，等於把它的**全部**比較對象綁進判準。
+_WHOLE_TOOL_VERDICT_MARKS: tuple[str, ...] = (
+    "rc=0", "rc = 0", "rc＝0", "回 0", "status=ok", "全綠", "零違規",
+)
+#: 收窄量測對象的寫法：逐實體欄位讀法（`.tasks.<name>`）或收窄旗標。任一出現即不成立。
+_SCOPE_NARROWED_RE = re.compile(
+    r"\.tasks?\.[A-Za-z0-9_]+|--tasks?\b|--expectations\b|--only\b|--filter\b")
+#: 期望值 SSOT（`{實體: 期望}` 形態的 JSON，checker 逐實體比對）。現查 glob，不寫死檔名。
+_EXPECTATION_SSOT_GLOBS: tuple[str, ...] = ("tools/*expectations*.json",)
+#: 會寫下退場判準的可執行文本。**刻意含非 Python**——本輪的復發就住在 `.ps1` 註解裡。
+_EXIT_CRITERION_GLOBS: tuple[str, ...] = (
+    "tools/*.ps1", "tools/*.sh", "tools/*.py",
+    "AutoClaude/tools/*.ps1", "AutoClaude/tools/*.py",
+)
+
+
+def expectation_ssot_entities(repo_root: Path) -> dict[str, tuple[str, ...]]:
+    """`{SSOT 檔名: (它列出的實體名, …)}`——現查，不寫死。
+
+    形態＝JSON 內任一層 `{容器: {實體: {…}}}`（`scheduled_task_expectations.json` 的
+    `tasks` 即是）。只認「值也是 dict」的那一層，避免把 `why_each` 這類說明表誤當實體。
+    """
+    out: dict[str, tuple[str, ...]] = {}
+    for pattern in _EXPECTATION_SSOT_GLOBS:
+        for path in sorted(repo_root.glob(pattern)):
+            try:
+                data = json.loads(path.read_text(encoding="utf-8"))
+            except (json.JSONDecodeError, OSError):
+                continue
+            names = {
+                name
+                for value in (data.values() if isinstance(data, dict) else ())
+                if isinstance(value, dict)
+                for name, inner in value.items()
+                if isinstance(inner, dict)
+            }
+            if names:
+                out[path.name] = tuple(sorted(names))
+    return out
+
+
+def checker_expectation_ssot(repo_root: Path, ssots: dict[str, tuple[str, ...]]) -> dict[str, str]:
+    """`{checker 檔名: 它讀的期望值 SSOT 檔名}`——以 checker 原始碼是否指名該 SSOT 判定。"""
+    out: dict[str, str] = {}
+    for path in sorted(repo_root.glob("tools/*.py")):
+        source = path.read_text(encoding="utf-8", errors="replace")
+        for ssot_name in ssots:
+            if ssot_name in source:
+                out[path.name] = ssot_name
+    return out
+
+
+def exit_criterion_items(text: str) -> list[tuple[str, str]]:
+    """`(項目代號, 項目原文)`——退場判準區塊內逐條編號的項目。
+
+    項目界線＝自 `E<N>.` 那一行起，到下一個項目起頭、或一行「空註解／空白行」為止
+    （手法對齊 `test_install_windows_nightly.py` 抽 E3 段的既有作法）。抓不到任何項目
+    時回空 list，呼叫端把「檔內有退場判準字樣卻抽不到項目」當掃描面崩塌回報。
+    """
+    if not any(mark in text for mark in _EXIT_SECTION_MARKS):
+        return []
+    items: list[tuple[str, str]] = []
+    tag, buf = None, []
+    for line in text.splitlines():
+        m = _EXIT_ITEM_RE.match(line)
+        if m:
+            if tag:
+                items.append((tag, "\n".join(buf)))
+            tag, buf = m.group(1), [line]
+            continue
+        if tag is None:
+            continue
+        if not line.strip().lstrip("#/").strip():      # 空行／空註解行＝項目結束
+            items.append((tag, "\n".join(buf)))
+            tag, buf = None, []
+            continue
+        buf.append(line)
+    if tag:
+        items.append((tag, "\n".join(buf)))
+    return items
+
+
+def unsatisfiable_exit_criterion_problems(
+    text: str, source: str, checker_ssot: dict[str, str],
+    ssots: dict[str, tuple[str, ...]],
+) -> list[str]:
+    """純函式：回傳該份文本內「執行自己授權的動作後必然轉紅」的退場判準項目。
+
+    判準（四條**同時**成立才算違規，寧可漏抓也不製造假紅）：
+      ① 該項目屬退場／解除條件區塊，且逐條編號；
+      ② 項目內指名一支 checker，而該 checker 的比較對象是一份期望值 SSOT；
+      ③ 該 SSOT 列了 **≥2 個實體**（只列一個時，移除它等於整條判準沒有意義，不是本病）；
+      ④ 項目以**整支工具的判決**取證（`rc=0`／`status=ok`／「全綠」…）且**沒有**收窄
+         量測對象（無逐實體欄位讀法、無收窄旗標）⇒ 該工具的比較對象包含被授權移除的
+         那個實體 ⇒ 判準結構上不可滿足。
+
+    **已實測涵蓋**（逐項以構造輸入跑過，見 `TestR76ExitCriteriaSurviveTheirOwnAction`）：
+      · `.ps1` 註解內的 `E<N>.` 項目要求「移除後 <checker>.py 回 rc=0」（R76 復發原形）；
+      · 同形態改用「status=ok」「全綠」措辭；
+      · 反向對照：同一項目改成逐實體讀法（`.tasks.<name>`）或帶收窄旗標 ⇒ 不判紅。
+    **已實測不涵蓋**（逐項跑過，並釘成常駐斷言）：
+      · **編號形態**只認 `E<N>.`；`(1)`／`條件一`／無編號的散文段落抓不到；
+      · **比較對象只認期望值 JSON SSOT**：checker 把清單寫死在自己的原始碼裡、或比較
+        對象是別的資料形態（資料庫、線上 API）時，本判準無從得知它有幾個實體；
+      · **語意層的「授權移除什麼」不做判讀**：本判準以「SSOT 有多個實體 ＋ 取整支 rc」
+        這個結構近似它，抓不到「移除的東西不在該 SSOT 內、卻仍與判準耦合」的變體；
+      · **收窄的有效性不驗**：項目寫了 `--tasks` 卻傳錯值，本判準照樣放行。
+    **未窮舉**：本清單非窮舉，不做「唯一殘餘風險是 X」這類宣稱（R57 判例第 (4) 條）。
+    """
+    problems: list[str] = []
+    for tag, item in exit_criterion_items(text):
+        if not any(mark in item for mark in _WHOLE_TOOL_VERDICT_MARKS):
+            continue
+        if _SCOPE_NARROWED_RE.search(item):
+            continue
+        for hit in re.findall(r"[\w./\\-]+\.py", item):
+            name = PurePosixPath(hit.replace("\\", "/")).name
+            ssot = checker_ssot.get(name)
+            if ssot is None or len(ssots.get(ssot, ())) < 2:
+                continue
+            problems.append(
+                f"{source} 的退場判準 {tag} 以「{name} 的整支判決」取證，而該工具的比較"
+                f"對象是 {ssot}（現列 {len(ssots[ssot])} 個實體：{list(ssots[ssot])}）"
+                f"⇒ 一旦執行本判準自己授權的移除動作，被移除的那個實體就會讓該工具轉紅"
+                f"，判準結構上不可滿足（R75 頭號教訓的第三種載體）。改法：把量測對象收窄"
+                f"到**會存活下來**的那些實體——逐實體欄位讀法（`--json` 後讀 "
+                f"`.tasks.<name>`）或收窄旗標（`--tasks`／`--expectations`），"
+                f"不要讀整支工具的 rc／status"
+            )
+    return problems
+
+
+def repo_exit_criterion_problems(repo_root: Path) -> tuple[list[str], list[str]]:
+    """`(問題清單, 掃到判準項目的檔案清單)`——掃描面現查，不寫死檔名。"""
+    ssots = expectation_ssot_entities(repo_root)
+    checker_ssot = checker_expectation_ssot(repo_root, ssots)
+    problems: list[str] = []
+    seen: list[str] = []
+    for pattern in _EXIT_CRITERION_GLOBS:
+        for path in sorted(repo_root.glob(pattern)):
+            text = path.read_text(encoding="utf-8", errors="replace")
+            if not exit_criterion_items(text):
+                continue
+            rel = path.resolve().relative_to(repo_root.resolve()).as_posix()
+            seen.append(rel)
+            problems += unsatisfiable_exit_criterion_problems(
+                text, rel, checker_ssot, ssots)
+    return problems, seen
+
+
+class TestR76ExitCriteriaSurviveTheirOwnAction(unittest.TestCase):
+    """🔴 R75 頭號教訓的**家族層**承接者：退場／解除條件也適用同一條規則。
+
+    **判準的量測對象若會隨「被它所判的動作」而改變，這個判準結構上不可滿足。**
+    上方 `TestR75CloudCriteriaAreSatisfiableAtAnyCommit` 讀的是本模組內 `cloud_*` 家族的
+    Python 執行碼；本類別讀的是**任何語言的退場判準散文**——第三次復發正是從那兩個縫
+    （非 Python、非 cloud_ 前綴）走掉的。
+    """
+
+    def _live(self) -> tuple[list[str], list[str]]:
+        return repo_exit_criterion_problems(_REPO_ROOT)
+
+    def test_scan_surface_is_live_and_non_empty(self) -> None:
+        """自錨：抽不到任何退場判準項目時本鎖恆綠。"""
+        _problems, seen = self._live()
+        self.assertTrue(seen, "全 repo 抽不到任何逐條編號的退場判準 ⇒ 本鎖已空轉"
+                              "（編號形態變了，或掃描面 glob 沒跟上）")
+        self.assertIn("tools/windows_smoke_local.ps1", seen,
+                      f"已知站點不在掃描面內 ⇒ 縮面了；實得：{seen}")
+
+    def test_the_expectation_ssot_surface_is_live(self) -> None:
+        """自錨：期望值 SSOT 枚舉不到實體時，判準③ 恆不成立 ⇒ 整條鎖靜默失效。"""
+        ssots = expectation_ssot_entities(_REPO_ROOT)
+        self.assertTrue(ssots, "現查不到任何期望值 SSOT ⇒ 本鎖已空轉")
+        multi = {k: v for k, v in ssots.items() if len(v) >= 2}
+        self.assertTrue(multi, f"沒有任何 SSOT 列出 ≥2 個實體 ⇒ 判準③ 永不成立：{ssots}")
+
+    def test_no_live_exit_criterion_measures_what_it_removes(self) -> None:
+        problems, _seen = self._live()
+        self.assertEqual(problems, [], "\n  ".join(problems))
+
+    #: 復發原形的**逐字**骨架（R76 修前的 E3；`tools/windows_smoke_local.ps1` 現已改寫，
+    #: 故此處保留一份合成語料，讓鑑別力不依賴磁碟上那個站點是否還壞著）。
+    _RELAPSE = (
+        "# 🔴 退出判準\n"
+        "#   E3. 移除後 Windows 側仍有每日執行級心跳：AutoClaude_Nightly 存在且\n"
+        "#       tools/check_scheduled_task_drift.py 回 rc=0（設定沒漂移，會真的跑）。\n"
+        "#\n"
+    )
+
+    def _probe(self, text: str) -> list[str]:
+        ssots = expectation_ssot_entities(_REPO_ROOT)
+        return unsatisfiable_exit_criterion_problems(
+            text, "PROBE", checker_expectation_ssot(_REPO_ROOT, ssots), ssots)
+
+    def test_the_relapse_form_is_red(self) -> None:
+        """注入＝修前逐字原形：拿整支工具的 rc 當退場取證 ⇒ 必紅。"""
+        problems = self._probe(self._RELAPSE)
+        self.assertTrue(problems, "修前原形沒被抓到 ⇒ 本鎖不具鑑別力")
+        self.assertIn("E3", problems[0])
+        self.assertIn("scheduled_task_expectations.json", problems[0])
+
+    def test_other_whole_tool_verdict_wordings_are_red_too(self) -> None:
+        """注入：換一種「整支判決」的措辭仍必須紅（否則改個字就走掉）。"""
+        for wording in ("status=ok", "全綠", "零違規"):
+            with self.subTest(wording=wording):
+                self.assertTrue(
+                    self._probe(self._RELAPSE.replace("回 rc=0", f"回報 {wording}")),
+                    f"改寫成「{wording}」即逸出 ⇒ 判準只認一種字面",
+                )
+
+    def test_narrowing_the_measured_set_turns_it_green(self) -> None:
+        """反向對照：收窄量測對象即通過——否則判準退化成「提到 checker 就永遠紅」。
+
+        兩條出口都驗：逐實體欄位讀法，與收窄旗標。少了這一條，本鎖會把**正確的修法**
+        也判紅，而誤報的鎖最後一定被整道關掉（比沒有鎖更糟）。
+        """
+        for fix in (
+            "讀 .tasks.AutoClaude_Nightly.present 為 true",
+            "tools/check_scheduled_task_drift.py --tasks AutoClaude_Nightly 回 rc=0",
+        ):
+            with self.subTest(fix=fix):
+                self.assertEqual(
+                    self._probe(self._RELAPSE.replace(
+                        "tools/check_scheduled_task_drift.py 回 rc=0", fix)),
+                    [], f"正確的收窄寫法被判紅：{fix}")
+
+    def test_a_criterion_outside_a_numbered_item_is_not_flagged(self) -> None:
+        """反向對照：**引述**修前壞形態來解釋它的散文不算違規（否則訂正文自己會紅）。
+
+        這正是 R73 那條教訓的機械面：訂正註記必須說得出「原文錯在哪」，而說出來的那句
+        話不得因此被判成新的違規——與 R75 旗艦鎖用 AST 剝掉 docstring 是同一個取捨，
+        只是這裡沒有 AST 可用，改以「只判逐條編號的項目本體」界定。
+        """
+        prose = (
+            "# 🔴 退出判準的一般化規則\n"
+            "#   E3 原文寫的是「移除後 tools/check_scheduled_task_drift.py 回 rc=0」，\n"
+            "#   而該工具的期望值 SSOT 同時列了兩支任務 ⇒ 結構上不可滿足。\n"
+        )
+        self.assertEqual(self._probe(prose), [],
+                         "引述壞形態的訂正散文被判紅 ⇒ 鎖在逼人不要寫下教訓")
 
 
 class TestR71SmokeTripwireIsInViewWithTheHonestReading(unittest.TestCase):

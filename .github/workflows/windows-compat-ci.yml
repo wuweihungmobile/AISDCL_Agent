@@ -145,8 +145,9 @@
 #   （以下為 2026-08-01 原樣輸出，僅為對齊欄位補了空白，其餘逐字未改；R68 新增
 #     「tools/tests 第三方相依」pwsh step 後由 19 → 20，R69 新增「tools/tests 外部
 #     工具相依」pwsh step 後由 20 → 21，R71 新增 windows-smoke 的 PS 5.1 核心驗證
-#     step 後該 job 多一格 `powershell: 1`，本表隨之更新）
-#   windows-smoke         windows-latest {'pwsh': 21, 'bash': 1, 'powershell': 1}
+#     step 後該 job 多一格 `powershell: 1`，R76 新增「AutoClaude 平台敏感測試子集」
+#     pwsh step 後由 21 → 22，本表隨之更新）
+#   windows-smoke         windows-latest {'pwsh': 22, 'bash': 1, 'powershell': 1}
 #   windows-nightly-full  windows-latest {'powershell': 2, 'pwsh': 3}
 #   windows-nightly-alert ubuntu-latest  {'<implicit>': 3}
 #   （全檔無 workflow 層／job 層 `defaults:` 區塊，故上表即實際生效的引擎分佈；
@@ -897,6 +898,32 @@ jobs:
         shell: pwsh
         run: python -m pytest tests/test_perception.py -q -rs --tb=short  # -rs：R59 ARCH-R59-NB1
 
+      - name: AutoClaude 平台敏感測試子集（R76-11：push 閘門對 AutoClaude 生產樹此前零執行證據）
+        working-directory: AutoClaude
+        # 🔴 R76-11：`AutoClaude/tests/**` 100% 落在本檔 paths 內（本輪實測 340/340），
+        # 但本 job 此前只跑 `tests/test_perception.py` 一支 ⇒ **觸發面有、執行面近乎零**。
+        # 跑整棵樹的只有每週一次、`continue-on-error: true` 的 windows-nightly-full。
+        # 「push 後全綠」對 AutoClaude 生產碼在 Windows 上的行為因此零證據力，而
+        # `paths` 命中很容易被讀成「已覆蓋」——這一步把那個數字從 0 提到非 0。
+        #
+        # 為何取子集而非全樹：全樹是 nightly 的職責，PR/push 閘門要的是快速迴圈；
+        # 這一步只買「平台假設在真 Windows 上還成立嗎」，不買回歸完整性。
+        #
+        # 🔴 為何用 `-k` 而不是新增 marker：新 marker 要逐支標，漏標＝掃描面靜默縮小
+        # （本 repo 已有多起判例）。關鍵字選法對「日後新寫的平台相關測試」自動生效——
+        # 檔名／測試名帶 path／encoding／platform／shell／subprocess 是本 repo 既有命名
+        # 慣例。代價明說：會選進一些名字沾邊但與平台無關的測試，那是可接受的多跑。
+        #
+        # 🔴 成本為**本機真機實測值、非推估**（Windows 11 Pro 26200 ／ venv Python
+        # 3.11.9 ／ 2026-08-05，同一條命令列）：`277 passed, 7 skipped, 3840 deselected
+        # in 13.54s`。runner 會慢一些，但與本 job 既有的 bootstrap／ci-gate 步驟同數量級。
+        #
+        # 🔴 掃描面歸零的失效方向刻意是紅燈：若日後重構把這些關鍵字改光，`-k` 選出 0 支
+        # 時 pytest 回 **rc=5**（本輪以 `-k zzz_no_such_keyword_r76` 實測 rc=5）⇒ 本步驟
+        # 當場紅，不會靜默通過。故此處刻意不加任何 `|| true`／`continue-on-error` 兜底。
+        shell: pwsh
+        run: python -m pytest tests -q -rs -m 'not perf and not pg_real' -k 'path or encoding or platform or shell or subprocess'
+
       - name: 執行 tools/integration_gate.ps1 -SkipFull（實際執行，非僅語法解析；P1 Architect 發現修正）
         # Architect 發現：root-infra-ci.yml 對 .ps1 僅做 AST 語法解析，本 workflow
         # 先前把 6 個入口點升級為實際執行，但漏了 tools/integration_gate.ps1（monorepo
@@ -907,12 +934,14 @@ jobs:
         # 已知覆蓋率限制（R34 一審 QA 於 macos-compat-ci.yml 同款措辭發現修正，本檔為
         # 同一失實敘述的原始出處，一併訂正）：[2/5] 確實由本 job 下一步涵蓋；但
         # [1/5]（`tools/local_ci_gate.{sh,ps1}` 全套，含 pytest 全套）**並未**在本
-        # windows-smoke job 另跑——本 job 上方只執行了單一檔案
-        # `pytest tests/test_perception.py`，AutoClaude 完整測試套件在本 PR/push 閘門
-        # 上零覆蓋，只靠每週一次的 `windows-nightly-full`（continue-on-error 非阻斷）
-        # 執行 `local_ci_gate.ps1`（見本檔頂部 R2 段落既有揭露）。如實記載，避免「已於
-        # 本 job 另跑」的失實宣稱誤導後續維護者；符合 PR-gate 快速迴圈定位；depends
-        # 僅需前一步已安裝的 AutoClaude deps。
+        # windows-smoke job 另跑，只靠每週一次的 `windows-nightly-full`
+        # （continue-on-error 非阻斷）執行 `local_ci_gate.ps1`（見本檔頂部 R2 段落既有
+        # 揭露）。🔴 R76-11 訂正：本段原文寫「AutoClaude 完整測試套件在本 PR/push 閘門
+        # 上零覆蓋」——「完整套件」那半句今日仍成立，但「零覆蓋」自本輪起已失實：上方
+        # 新增的「AutoClaude 平台敏感測試子集」步驟在本 job 實跑 AutoClaude/tests 的
+        # 平台敏感子集（本機實測 277 passed）。故此處改為窄斷言：**完整**套件仍只在
+        # nightly；平台敏感子集已進 push 閘門。如實記載，避免任一方向的失實宣稱；符合
+        # PR-gate 快速迴圈定位；depends 僅需前面已安裝的 AutoClaude deps。
         shell: pwsh
         run: ./tools/integration_gate.ps1 -SkipFull
 
@@ -1234,17 +1263,32 @@ jobs:
         # 回歸其實只跑了一步就死」。改用 if: ${{ !cancelled() }}（而非
         # always()——always() 連使用者手動取消都會硬跑，!cancelled() 才是「前面
         # 失敗仍照跑，但使用者主動取消時不硬跑」的正確語意）。
+        #
+        # 🔴 R76-02：`run:` 本體改為**全 ASCII**（訊息因此是英文），中文 WHY 一律留在
+        # 本註解區——註解不會被執行，不受編碼影響。作法與判準逐字沿用同檔 windows-smoke
+        # 的 PS 5.1 核心驗證 step 上方那段「`run:` 本體刻意全 ASCII」註解，**不另發明
+        # 新方案**；那段當時明文把本步驟與下一步列為「已列入回報給主控的殘留風險，本輪
+        # 不動它們」，R76 雲端實查證實該風險**早已發生且從未被任何人看見**：
+        # run 30803941764 的本步驟輸出裡是 `Unexpected token` ＋
+        # `CategoryInfo : ParserError`，前置行的中文被以 cp1252 解成拉丁字母亂碼
+        # ⇒ runner 把 `shell: powershell` 的 run 本體寫成**無 BOM** 暫存 .ps1，
+        # powershell.exe（5.1）以 ANSI codepage 誤讀，中文字串字面值當場 ParserError，
+        # **整支腳本一行都沒執行**。本步驟自 R48 起「跑了四輪」全是這個形態；
+        # 下一步（install_post_commit.ps1）則是靠亂碼後的引號恰好成對而偶然通過，
+        # 那種「偶然」不是覆蓋。
+        # 🔴 R13 CI-6（原本寫在 run 本體內、隨本輪一併搬上來）：補 --no-sync，同
+        # windows-smoke dot-source step 的說明——對齊 macos 側既有寫法；$RestArgs
+        # 透傳，PS5.1 與 pwsh 參數機制相同。
+        # 機械物：tools/tests/test_gha_action_versions.py::TestPowershellRunBodyIsAscii
         if: ${{ !cancelled() }}
         shell: powershell
         run: |
           ./tools/bootstrap.ps1
-          if (-not (Test-Path .venv\Scripts\python.exe)) { throw "bootstrap.ps1（Windows PowerShell 5.1）執行後 .venv\Scripts\python.exe 未建立" }
-          Write-Host "bootstrap.ps1（Windows PowerShell 5.1）執行成功，.venv 已建立"
-          # R13 CI-6：補 --no-sync（同 windows-smoke dot-source step 的說明——對齊
-          # macos 側既有寫法；$RestArgs 透傳，PS5.1 與 pwsh 參數機制相同）
+          if (-not (Test-Path .venv\Scripts\python.exe)) { throw "bootstrap.ps1 (Windows PowerShell 5.1) did not create .venv\Scripts\python.exe" }
+          Write-Host "bootstrap.ps1 (Windows PowerShell 5.1) succeeded, .venv created"
           . ./tools/dev_start.ps1 --no-sync
-          if ($LASTEXITCODE -ne 0) { throw "dev_start.ps1（Windows PowerShell 5.1）核心邏輯（tools/dev_start.py）回報失敗，exit=$LASTEXITCODE" }
-          Write-Host "dev_start.ps1（Windows PowerShell 5.1）執行成功"
+          if ($LASTEXITCODE -ne 0) { throw "dev_start.ps1 (Windows PowerShell 5.1) core logic (tools/dev_start.py) reported failure, exit=$LASTEXITCODE" }
+          Write-Host "dev_start.ps1 (Windows PowerShell 5.1) succeeded"
           Remove-Item -Recurse -Force .venv
 
       - name: Windows PowerShell 5.1（非 pwsh）驗證 install_post_commit.ps1（R48 Architect 複審發現：DEF-101-389 反斜線修復從未被原生 PS5.1 實際驗證過）
@@ -1277,34 +1321,41 @@ jobs:
         # powershell.exe）上無法實際執行驗證，只能在真 Windows GitHub Runner 上跑
         # ——這是上一個既有 step（bootstrap.ps1/dev_start.ps1）從一開始就有的相同
         # 限制，非本次新增的額外問題。
+        #
+        # 🔴 R76-02：`run:` 本體改為**全 ASCII**，理由與上一步逐字同源（見該 step 的
+        # R76-02 註解）。本步驟的實況比上一步更陰險：R76 位元組掃描顯示它的中文密度
+        # 更高，而雲端 log 沒有留下它自己的 ParserError——因為上一步先炸，同 job 的
+        # 後續 step 在 `if: ${{ !cancelled() }}` 下雖會續跑，但整段驗證從未被人讀過。
+        # 「跑過」與「跑對」的差別在這裡是整整四輪。
+        # 🔴 R11 DEF-101-133（原本寫在 run 本體內、隨本輪一併搬上來）：LATEST 解析
+        # 委派 scripts/sdd_version.py 單一真相源，不寫死版本號（同上方 R2 Architect
+        # 複審修正、下方 fsm_runtime pytest step 同款慣例）。
+        # 機械物：tools/tests/test_gha_action_versions.py::TestPowershellRunBodyIsAscii
         if: ${{ !cancelled() }}
         shell: powershell
         run: |
-          # R11 DEF-101-133：LATEST 解析委派 scripts/sdd_version.py 單一真相源，
-          # 不寫死版本號（同上方 R2 Architect 複審修正、下方 fsm_runtime pytest
-          # step 同款慣例）。
           $latestName = (& python AISDLC_SDD/scripts/sdd_version.py --sdd-root AISDLC_SDD | Out-String).Trim()
-          if (-not $latestName) { throw "找不到任何 AISDLC_SDD_v* 版本目錄（sdd_version.py SSOT 解析失敗）" }
+          if (-not $latestName) { throw "No AISDLC_SDD_v* version directory found (sdd_version.py SSOT resolution failed)" }
           $installer = "./AISDLC_SDD/$latestName/tools/install_hooks/install_post_commit.ps1"
-          if (-not (Test-Path $installer)) { throw "找不到安裝器：$installer" }
+          if (-not (Test-Path $installer)) { throw "Installer not found: $installer" }
 
           & $installer
-          if ($LASTEXITCODE -ne 0) { throw "install_post_commit.ps1（Windows PowerShell 5.1）執行失敗，exit=$LASTEXITCODE" }
-          Write-Host "install_post_commit.ps1（Windows PowerShell 5.1）執行成功（LATEST=$latestName）"
+          if ($LASTEXITCODE -ne 0) { throw "install_post_commit.ps1 (Windows PowerShell 5.1) failed, exit=$LASTEXITCODE" }
+          Write-Host "install_post_commit.ps1 (Windows PowerShell 5.1) succeeded (LATEST=$latestName)"
 
           $commonDir = (git rev-parse --path-format=absolute --git-common-dir).Trim()
           $hookTarget = Join-Path $commonDir "hooks/post-commit"
-          if (-not (Test-Path $hookTarget)) { throw "install_post_commit.ps1 執行成功但未產出 hook 檔：$hookTarget" }
+          if (-not (Test-Path $hookTarget)) { throw "install_post_commit.ps1 succeeded but produced no hook file: $hookTarget" }
           $content = Get-Content -Raw $hookTarget
           if ($content -match '"([^"]*windowsapps_guard\.sh)"') {
             $guardPath = $Matches[1]
           } else {
-            throw "hook 內容未找到 guard 來源路徑字串（windowsapps_guard.sh）——DEF-101-383/389 修復內容疑似遺失"
+            throw "Hook body has no guard source path string (windowsapps_guard.sh) -- the DEF-101-383/389 fix looks lost"
           }
           if ($guardPath -match '\\') {
-            throw "guard 來源路徑內嵌反斜線，原生 Windows PowerShell 5.1 下 bash [ -f ]／source 可能吃不到此路徑（DEF-101-389 回歸）：$guardPath"
+            throw "Guard source path embeds a backslash; under native Windows PowerShell 5.1 bash [ -f ] / source may not resolve it (DEF-101-389 regression): $guardPath"
           }
-          Write-Host "install_post_commit.ps1（Windows PowerShell 5.1）hook 內嵌 guard 路徑不含反斜線驗證通過：$guardPath"
+          Write-Host "install_post_commit.ps1 (Windows PowerShell 5.1) hook-embedded guard path is backslash-free: $guardPath"
 
       - name: 安裝 AutoClaude 開發 + lint 依賴（供 local_ci_gate.ps1 使用）
         # 2026-07-16 四方複審 QA 發現：見上一 step 註解——job 層級 continue-on-error

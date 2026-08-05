@@ -51,8 +51,11 @@ TestRootGateToolsRejectUnknownFlags::test_rejection_never_reads_sys_argv_inside_
 那個 `[]` 已不承載任何保護作用 ⇒ 它不是第二套判準，只是普通的顯式呼叫。
 `check_script_parity.py` 的 `main()` 收斂為**零引數**（`--print-collapse` 上移
 `cli()`）＝逐字沿用 `run_root_unittests.py` 的形狀。成因是該檔卡在
-`check_loc_budget.SPECIAL_FILES` 的 1618 行 shrink-only 棘輪（實測 1617、餘 1 行），
-分層必須**淨零成長**——把它記在這裡，免得下一輪誤讀成「同一件事有兩種寫法」。
+`check_loc_budget.SPECIAL_FILES` 的 shrink-only 棘輪、當時餘裕近乎為零，分層必須
+**淨零成長**——把它記在這裡，免得下一輪誤讀成「同一件事有兩種寫法」。
+🔴 R76 訂正：原文寫死「1618 棘輪／實測 1617／餘 1 行」，R76 收斂該檔重複邏輯後餘裕已
+不同（棘輪未動，只准往下改）。**餘裕是量測值不是常數**，一律現查：
+`python AutoClaude/tools/check_loc_budget.py --json` 的 `special_files` 欄 ＋ 該檔實際行數。
 """
 from __future__ import annotations
 

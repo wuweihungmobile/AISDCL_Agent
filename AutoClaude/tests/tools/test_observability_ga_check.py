@@ -6,9 +6,13 @@
 對應修復來源：
 - SD_09 W1 backlog P1-TEST-MIRROR-1（W3 zero-trust audit 識別）
 - SD_09 W3 zero-trust audit F1（observability_emit_real 欄位 fallback 拒絕）
+
+R76 追加（掃描發現 R76-13）：window 量的是**筆數**不是日曆天 ⇒ 新增 staleness／窗內連續性
+兩個獨立判準的雙向鑑別力測試（連續 30 天 → 綠；30 筆但中間空 12 天 → 紅）。
 """
 from __future__ import annotations
 
+import datetime as _dt
 import json
 from pathlib import Path
 
@@ -16,11 +20,31 @@ import pytest
 
 from tools.observability_ga_check import (
     KB_METRIC_REQUIRED_KEYS,
+    STALENESS_MAX_DAYS,
     _compute_green_streak,
     _is_green,
     _load_history,
+    evaluate,
     main,
 )
+
+#: 注入式時鐘（ac4_progress_check.py 的同款作法）：staleness／窗內連續性都是時間判準，
+#: 要有雙向鑑別力就必須能穩定驗紅與驗綠，而真實時鐘做不到。
+_NOW = _dt.datetime(2026, 6, 30, 12, 0, tzinfo=_dt.UTC)
+
+
+def _ts_before(days: int, *, now: _dt.datetime = _NOW) -> str:
+    """相對某個「現在」往回 N 天的 UTC 時間戳。"""
+    return (now - _dt.timedelta(days=days)).isoformat(timespec="seconds")
+
+
+def _recent_ts(days_ago: int) -> str:
+    """相對**真實**現在往回 N 天——給走 `main()`（真實時鐘）的整合測試用。
+
+    🔴 R76 起 GA 判準含 staleness，寫死日期的 fixture 會隨時間腐化成 stale：那時紅的是
+    測試自己過期，不是被測物壞掉，而訊息會指向錯的方向。
+    """
+    return _ts_before(days_ago, now=_dt.datetime.now(tz=_dt.UTC))
 
 
 def _make_record(
@@ -146,7 +170,7 @@ def test_green_streak_partial_recovery() -> None:
 def test_main_passes_when_streak_meets_window(tmp_path: Path) -> None:
     """main --window 3 + 5 筆全綠 → exit 0。"""
     history = tmp_path / "history.jsonl"
-    records = [_make_record(ts=f"2026-05-{d:02d}T00:00:00+00:00") for d in range(1, 6)]
+    records = [_make_record(ts=_recent_ts(d)) for d in range(4, -1, -1)]
     history.write_text("\n".join(json.dumps(r) for r in records) + "\n", encoding="utf-8")
 
     rc = main(["--window", "3", "--history", str(history), "--json"])
@@ -160,27 +184,36 @@ def test_main_fails_when_no_history(tmp_path: Path, capsys: pytest.CaptureFixtur
     assert rc == 1
 
 
-def test_main_fails_when_fallback_emit_in_streak(tmp_path: Path) -> None:
-    """F1 整合驗證：末筆 fallback emit → ga_check exit 1（fake-PASS 場景被拒絕）。"""
-    history = tmp_path / "history.jsonl"
+def test_main_fails_when_fallback_emit_in_streak() -> None:
+    """F1 整合驗證：末筆 fallback emit → 非 ready（fake-PASS 場景被拒絕）。
+
+    🔴 R76 改走 `evaluate(now=…)`：原本走 `main()` 配寫死的 2026-05 日期，加了 staleness
+    之後它會因為「證據過期」而 rc=1——**答案對、理由錯**，等於這支測試從此不再守
+    emit_real 那一格。注入時鐘讓紅的理由回到 streak 本身。
+    """
     records = [
-        _make_record(ts="2026-05-01T00:00:00+00:00"),
-        _make_record(ts="2026-05-02T00:00:00+00:00"),
-        _make_record(ts="2026-05-03T00:00:00+00:00", emit_real=False),  # 末筆 fallback
+        _make_record(ts=_ts_before(2)),
+        _make_record(ts=_ts_before(1)),
+        _make_record(ts=_ts_before(0), emit_real=False),  # 末筆 fallback
     ]
-    history.write_text("\n".join(json.dumps(r) for r in records) + "\n", encoding="utf-8")
+    report = evaluate(records, window=2, now=_NOW)
+    assert report["status"] == "observing", report
+    assert report["green_streak"] == 0, "末筆 emit_real=False 應中斷 streak"
+    assert "observability_emit_real" in report["last_failure_reason"]
 
-    rc = main(["--window", "2", "--history", str(history), "--json"])
-    assert rc == 1, "末筆 emit_real=False 應 fail（streak=0 < window=2）"
+
+#: cutoff 相關的兩支測試必須用**真實歷史日期**（EMIT_REAL_REQUIRED_FROM=2026-05-24 是
+#: 寫死的日期），故它們的「現在」得跟著釘在那段期間，否則 staleness 會先把它們判紅
+#: （答案對、理由錯 ⇒ 這兩支從此不再守 cutoff 那一格）。
+_CUTOFF_ERA_NOW = _dt.datetime(2026, 5, 28, 12, 0, tzinfo=_dt.UTC)
 
 
-def test_strict_cutoff_rejects_missing_emit_real_after_cutoff(tmp_path: Path) -> None:
+def test_strict_cutoff_rejects_missing_emit_real_after_cutoff() -> None:
     """SD_09 W3 Round 3 audit P1-2：ts >= 2026-05-24 cutoff 缺 emit_real → fail。
 
     取代 W3 Round 2 P1-1 滑動窗口設計（最新 3 筆 strict）：
     cutoff-based 語意明確（一個明確日期判定），不會因 history 長度而漂移。
     """
-    history = tmp_path / "h.jsonl"
     records = [
         # 舊紀錄（cutoff 前）缺 emit_real → 寬鬆通過
         _make_record(ts="2026-05-21T00:00:00+00:00", emit_real=None),
@@ -190,18 +223,19 @@ def test_strict_cutoff_rejects_missing_emit_real_after_cutoff(tmp_path: Path) ->
         _make_record(ts="2026-05-25T00:00:00+00:00", emit_real=True),
         _make_record(ts="2026-05-26T00:00:00+00:00", emit_real=None),
     ]
-    history.write_text("\n".join(json.dumps(r) for r in records) + "\n", encoding="utf-8")
+    report = evaluate(records, window=2, now=_CUTOFF_ERA_NOW)
+    assert report["status"] == "observing", report
+    assert report["green_streak"] == 0, "cutoff 後缺 emit_real strict 模式應中斷 streak"
+    assert "observability_emit_real missing" in report["last_failure_reason"]
 
-    rc = main(["--window", "2", "--history", str(history), "--json"])
-    assert rc == 1, "cutoff 後缺 emit_real strict 模式應 fail"
 
-
-def test_legacy_records_before_cutoff_lenient_pass(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+def test_legacy_records_before_cutoff_lenient_pass(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
     """P1-2：cutoff 前舊紀錄缺 emit_real 寬鬆放行，cutoff 後紀錄有 emit_real=True → 全綠。
 
     且 stderr 印 warning（紀律 #10：不可 backfill 偽造欄位，需明確告知 lenient 路徑）。
     """
-    history = tmp_path / "h.jsonl"
     records = [
         # cutoff 前舊紀錄缺欄位（寬鬆）
         _make_record(ts=f"2026-05-{d:02d}T00:00:00+00:00", emit_real=None)
@@ -212,14 +246,60 @@ def test_legacy_records_before_cutoff_lenient_pass(tmp_path: Path, capsys: pytes
         _make_record(ts=f"2026-05-{d:02d}T00:00:00+00:00", emit_real=True)
         for d in range(24, 28)
     )
-    history.write_text("\n".join(json.dumps(r) for r in records) + "\n", encoding="utf-8")
-
-    rc = main(["--window", "7", "--history", str(history), "--json"])
+    report = evaluate(records, window=7, now=_CUTOFF_ERA_NOW)
     captured = capsys.readouterr()
-    assert rc == 0, "舊寬鬆 + 新 strict 全通過 → 7 筆綠"
+    assert report["status"] == "ready", f"舊寬鬆 + 新 strict 全通過 → 7 筆綠；{report}"
     # 紀律 #10：lenient 路徑必須印 warning（不可悄悄通過）
     assert "legacy record" in captured.err.lower()
     assert "lenient pass" in captured.err.lower()
+
+
+# ----- R76：筆數 ≠ 天數（掃描發現 R76-13）----- #
+
+
+def test_thirty_consecutive_days_is_green() -> None:
+    """✅ 綠向：30 筆鋪在 30 個**連續**日曆天上 → ready。
+
+    意圖（Rule 9）：這一格是 sparse/stale 兩條新判準的「不得誤殺」邊界。少了它，
+    「把門檻收緊」很容易被實作成「任何窗都判紅」，那會讓 GA 永遠到不了。
+    """
+    records = [_make_record(ts=_ts_before(d)) for d in range(29, -1, -1)]
+    report = evaluate(records, window=30, now=_NOW)
+    assert report["status"] == "ready", report["last_failure_reason"]
+    assert report["green_streak"] == 30
+    assert report["window_span_days"] == 30
+    assert report["window_max_gap_days"] == 1
+    assert report["staleness_days"] == 0
+
+
+def test_thirty_records_with_a_hole_is_sparse() -> None:
+    """🔴 紅向：一樣 30 筆全綠，但窗內有一段 12 天全黑 → sparse（rc≠0）。
+
+    這正是 2026-08-05 在本機實測到的形態：obs 以「30 筆橫跨 58 個日曆天、含
+    `2026-06-29 -> 2026-07-11 = 12 天`全黑」宣告「30 天零事件 GA 取證通過」。
+    """
+    # 舊區塊 13 筆（days_ago 41..29）→ 中間 12 天全黑（28..17）→ 新區塊 17 筆（16..0）
+    days = [*range(41, 28, -1), *range(16, -1, -1)]
+    records = [_make_record(ts=_ts_before(d)) for d in days]
+    report = evaluate(records, window=30, now=_NOW)
+    assert len(records) == 30
+    assert report["green_streak"] == 30, "筆數判準本身仍然是滿的——紅必須來自天數這一面"
+    assert report["status"] == "sparse", report
+    assert report["window_span_days"] == 42, "42 天塞 30 筆＝12 天沒量到"
+    assert report["window_max_gap_days"] == 13, "相鄰兩筆差 13 天＝中間 12 天全黑"
+    assert report["window_span_max_days"] == 40, "window=30 × 4/3 = 40，門檻本身也要被釘住"
+    assert "筆數夠不代表天數夠" in report["last_failure_reason"]
+
+
+def test_stale_evidence_is_not_ready() -> None:
+    """🔴 紅向：streak 與跨度都完美，但整批是 STALENESS_MAX_DAYS 以前的舊帳 → stale。"""
+    offset = STALENESS_MAX_DAYS + 5
+    records = [_make_record(ts=_ts_before(offset + d)) for d in range(29, -1, -1)]
+    report = evaluate(records, window=30, now=_NOW)
+    assert report["green_streak"] == 30
+    assert report["window_span_days"] == 30, "跨度這一面是乾淨的——紅必須來自新鮮度"
+    assert report["status"] == "stale", report
+    assert report["staleness_days"] == offset
 
 
 def test_load_history_skips_blank_lines(tmp_path: Path) -> None:

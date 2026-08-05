@@ -1,5 +1,7 @@
-"""缺陷帳本的**歸檔索引**、**散文式結案宣稱**與**未結存量**共用基元
-（R69 `DEF-101-734`／`DEF-101-735`；R74 新增未結存量量測入口與「改派／回執」判準本體）。
+"""缺陷帳本的**歸檔索引**、**散文式結案宣稱**、**未結存量**與**狀態欄語意判準**共用基元
+（R69 `DEF-101-734`／`DEF-101-735`；R74 新增未結存量量測入口與「改派／回執」判準本體；
+R76 自 `archive_defect_log.py` 外移搬遷判準② 的活躍字樣判讀，並新增搬遷子集選取
+`select_move_subset()` 與未結存量預警帶 `unresolved_advisory_notes()`）。
 
 為何獨立成模組（而不是留在兩支工具裡各自長大）：
   · 索引 bullet 的樣式／解析／插入是 `archive_defect_log.py` 判準⑤ 與 `--apply` 自動註冊
@@ -222,6 +224,132 @@ def reassign_hit(status_cell: str) -> bool:
     return bool(REASSIGN_RE.search(_REASSIGN_NEGATED_RE.sub(" ", bare)))
 
 
+# --------------------------- 搬遷判準② 的狀態欄活躍字樣判讀（R76 自 archive_defect_log 外移）
+# 🔴 為何住這裡而不是留在工具內：本模組已經是「狀態欄語意判準」的家（`reassign_hit()`
+# 就在上面，且它與本判準用的是**同一條** `CODE_SPAN_RE` 遮罩基元）。外移的直接觸發因是
+# `tools/archive_defect_log.py` 的 raw-line 棘輪餘裕為 0，而該棘輪自己指定的第一順位處置
+# 就是「先刪死碼／抽共用模組」（見 `check_loc_budget._ROOT_TOOLS_RATCHET_REASON`）——
+# 不是調高門檻。工具側以**再匯出**消費本節，不留第二份實作。
+#
+#: token 邊界字元集與 gate `_FIRST_WORD_RE`（`[A-Za-z][A-Za-z0-9_-]*`，故
+#: `closed-by-decision` 整體是一個詞）**對齊**：`OpenMutexW`／`reopened` 不誤命中
+#: （G-refuter-4），`fail-open` 這類設計術語亦然（R74，WHY 見 `active_status_hit()`）。
+ACTIVE_STATUS_RE = re.compile(
+    r"(?<![A-Za-z0-9_-])(?:open|routed|deferred|watch)(?![A-Za-z0-9_-])|workaround"
+)
+#: 角引號引述。與 `CODE_SPAN_RE` 同屬「看得見的刻意標記」，故用同一種遮罩方式。
+CORNER_QUOTE_RE = re.compile(r"「[^「」]*」|『[^『』]*』")
+
+#: 第三種「看得見的刻意標記」（R76）：**訂正首詞、原文逐字接於後**的帳本慣用語。
+#: 語意＝從該標記之後到下一個 `｜` 分隔（或欄尾）為止，整段是**被推翻的舊狀態逐字引述**，
+#: 不是本列現況。三種實際形態（逐字取自主檔，皆命中本樣式）：
+#:   · `🔴 R75 訂正首詞（原文逐字接於後）：`
+#:   · `🔴 R75 訂正首詞（原文接於後，含原解鎖條件）：`
+#:   · `🔴 R60 round 2 補《格式定義》合法首詞（原首詞非合法值，原文完整接於後）：`
+#:
+#: 🔴 立此遮罩的理由（DEF-101-676 的同型復發，R76 實測）：判準② 對這一整族慣用語誤命中，
+#: 把一批**現況已結**的列永久釘死在主檔——它們的首詞已被訂正為合法已結值（判準① 因此
+#: 放行），命中的字樣全部落在「本列自己被推翻的舊狀態」那段引文裡，語意剛好與判定相反。
+#: 這與 R68 收窄反引號／角引號是同一個病的第三種逸出面（`DEF-101-676` docstring 第②類）。
+#:
+#: 🔴 邊界刻意停在 `｜` 而**不是**吃到欄尾：帳本體例是「引文之後再以 `｜🔴 …` 追加新註記」
+#: （實例：`｜🔴 **R75 複驗（類別 A）**：…`）。吃到欄尾會把那段**現況**敘述一起遮掉，
+#: 等於用一句舊引文替整欄買到豁免——那才是真正會讓未結列漏搬的方向。
+#:
+#: ⚠️ 誠實劃界：樣式要求「首詞」＋「原文…接於後」同時出現，故只認這一族**具名慣用語**。
+#: 其他形態的舊狀態引述（例：只寫「原記 open，現已…」而不帶括號註記）本遮罩抓不到，
+#: 它們仍會被判準② 擋下＝**保守方向**（多攔不誤放），要放行請改寫成上列慣用語。
+VERBATIM_QUOTE_TAIL_RE = re.compile(r"首詞（[^（）]*原文[^（）]*接於後[^（）]*）：")
+#: 引文段的結束標記（帳本體例的欄內註記分隔符；欄分隔用的半形 `|` 在帳本列內禁用）。
+VERBATIM_QUOTE_STOP = "｜"
+
+
+def verbatim_quote_spans(status_cell: str) -> list[tuple[int, int]]:
+    """回傳「訂正首詞（原文…接於後）：」引文段的 `(起, 迄)` 區間（純函式，可構造輸入驗）。
+
+    起點＝標記本身之後（標記文字自己不含活躍字樣，遮不遮都一樣，留著便於報告引用）；
+    迄點＝其後第一個 `｜`，沒有就到欄尾。
+    """
+    spans: list[tuple[int, int]] = []
+    for m in VERBATIM_QUOTE_TAIL_RE.finditer(status_cell):
+        stop = status_cell.find(VERBATIM_QUOTE_STOP, m.end())
+        spans.append((m.end(), len(status_cell) if stop < 0 else stop))
+    return spans
+
+
+def active_status_hit(status_cell: str) -> re.Match[str] | None:
+    """判準② 的實際判讀入口：**排除三種看得見的刻意標記之後**再找活躍字樣。
+
+    🔴 為何非收窄不可（DEF-101-676，R68 立、R76 補第三種）——判準② 原本是對整個狀態欄
+    做裸掃描，於是把下列**與本列現況無關**的字元一律當成「本列還活著」
+    （項數不寫死：清單會長，寫死就是下一個 stale 站點）：
+
+      · **程式碼片段裡的 Python 內建函式 `open`**。實例 `DEF-101-391`：狀態欄寫
+        `` fixed@R48：`python3 -c "import yaml; yaml.safe_load(open('...yml'))"` ``——
+        命中的 `open` 是 `open()` 呼叫；與 ASCII 邊界那一版的 `OpenMutexW` 誤報同型。
+      · **引述本列自己被推翻的舊狀態**。實例 `DEF-101-554`：`` 本欄原文為「`open`（待
+        主控還原）」… ``。這些字面出現的用途正是**宣告它已不成立**。
+      · **在講別的 DEF-ID**（`DEF-101-541`／`564`／`565` 的 `routed`）。
+      · **以 `-`／`_` 黏成複合 token 的設計術語**（R74 的 `fail-open`）——那一類靠邊界
+        字元集對齊 gate `_FIRST_WORD_RE` 解決，**不是**靠遮罩。
+      · **「訂正首詞（原文逐字接於後）」之後的整段舊狀態引文**（R76 新增，見
+        `VERBATIM_QUOTE_TAIL_RE`）。這一類的規模最大，且會**永久**釘住已結列。
+
+    後果不是「多攔幾筆」而是**結構性死結**：被擋的全是 `_classify` 已判已結、只被判準②
+    一項擋住的列，它們合計佔主檔可觀比例卻搬不動 ⇒ 輪替吞吐趨近零、主檔單調逼近硬線。
+    實數一律以 `archive_defect_log.py --plan` 現跑為準（此處不寫死，寫死即 stale 站點）。
+
+    🔴 **鑑別力不得因此流失**，四道保留：
+      (a) 裸散文裡的活躍字樣照樣命中（未加標記者一律算數）；
+      (b) 判準① 仍先要求狀態欄**首詞**分類為已結，本判準只是第二層；
+      (c) 判準④（`HANDOFF_PROSE_RE`）掃的是**整列**且不套任何遮罩——真正的活交棒仍會被
+          攔下要求 `--ack-handoff` 具名承認；
+      (d) 第三種遮罩停在 `｜`，引文之後的**現況**敘述不受遮蔽（見該常數上方）。
+    對應機械鎖：`tools/tests/test_archive_defect_log.py::TestCriterion2Narrowing`。
+    """
+    masked = list(status_cell)
+    spans = [(m.start(), m.end()) for pattern in (CODE_SPAN_RE, CORNER_QUOTE_RE)
+             for m in pattern.finditer(status_cell)]
+    for start, end in spans + verbatim_quote_spans(status_cell):
+        # 以空白**等長**置換（保住 offset 與長度，便於報告引用原字串位置）
+        for i in range(start, end):
+            masked[i] = " "
+    return ACTIVE_STATUS_RE.search("".join(masked))
+
+
+def select_move_subset(
+        movable: list[dict], only: frozenset[str],
+        keep: frozenset[str]) -> tuple[list[dict], list[dict], list[str]]:
+    """從**已通過全部搬遷判準**的清單裡挑子集；回傳 `(選中, 排除, 問題)`（DEF-101-811）。
+
+    🔴 立此入口的理由：`--apply` 原本是全有全無，唯一的「不要搬這一筆」入口是判準④ 的
+    `--ack-handoff`（那是**加入**用的，方向相反）⇒ 每輪都得先讓工具把本輪列一起搬走、
+    再手工把它們還原回主檔。手工還原一份剛被就地覆寫的帳本，正是本工具立帳要消滅的動作。
+
+    🔴 **為何這不是繞過保全稽核的後門**（設計約束，三條同時成立）：
+      (a) 本函式**只在六項搬遷判準全部跑完之後**對結果做集合運算，且只會讓搬遷集合**變小**
+          ——它在結構上不可能讓一筆被擋下的列變成可搬（由鎖以「把被擋 ID 餵進 `--only`」
+          反向驗證）。安全包絡單調收縮，不擴張。
+      (b) 排除是**具名**的：ID 打錯一個字就整批 fail-loud（下方 `unknown`），不會靜默
+          少搬一筆。這比照判準④ `--ack-handoff` 的既有體例——差別只在方向。
+      (c) 排除**留痕**：呼叫端把 `excluded` 寫進 archive 標頭與歸檔索引 bullet，且
+          `--plan` 每次執行都列印。被排除的列仍留在主檔 ⇒ 下一次 `--plan` 照樣把它報成
+          可搬，`--check` 的指針／欄數／跨檔判準也照樣看得到它。**沒有任何東西被藏起來。**
+    """
+    ids = {v["id"] for v in movable}
+    unknown = sorted((set(only) | set(keep)) - ids)
+    if unknown:
+        return movable, [], [
+            f"--only／--keep 指名了不在可搬清單內的 ID：{unknown}。可能是打錯字、或該列"
+            "本來就被某項判準擋著（`--plan` 會逐筆說明理由）。拒絕靜默忽略：忽略等於"
+            "「以為排除了、實際照搬」或「以為指定了、實際全搬」，兩個方向都是無聲的錯"
+        ]
+    chosen = [v for v in movable
+              if (not only or v["id"] in only) and v["id"] not in keep]
+    picked = {v["id"] for v in chosen}
+    return chosen, [v for v in movable if v["id"] not in picked], []
+
+
 # ----------------------------------------- 未結存量的唯一量測入口與列數棘輪（R74 PKG-2）
 #: 未結案＝仍需要有人接手。`routed` 涵蓋帳本慣用的 `routed（deferred@Rnn）` 寫法；
 #: `None`（狀態欄辨識不出關鍵字）一併納入——「看不出結案」不等於「已結案」。
@@ -322,6 +450,46 @@ def unresolved_ceiling_problems(
     return [], []
 
 
+#: warn 線**之下**的預警帶寬度（列）。R76 新增，**不動** warn/fail 兩線。
+#:
+#: 🔴 為何 warn 線之外還需要這一帶（R76 實測形狀）：bytes 那條線撞到時有洩壓閥——歸檔。
+#: 未結列數這條**結構上沒有**：未結列不可搬（判準① 硬擋），所以歸檔一筆都降不下來。
+#: 而歸檔動作會讓 bytes 大幅下降 ⇒ 剛跑完歸檔的人看到的訊號是「餘裕變多了」，方向正好
+#: 與真正會破的那道閘門相反。本帶的唯一工作就是在那個時刻把這句話講出來：
+#: **歸檔不會降低此數，唯一出路是把列真的結掉。**
+#:
+#: 20 列的來源（可重算，不是憑感覺）：近幾輪每輪淨增未結列在個位數，20 列≈2~3 輪的
+#: 前置量——夠一輪把列真的結掉，而不是撞線當下才發現只剩「調門檻或不 push」兩個選項。
+#: 🔴 這是**收緊**（多一個更早的非阻斷訊號），不是放寬：warn=86／fail=98 兩個常數與
+#: `unresolved_ceiling_problems()` 的 rc 語意完全未動。**不得**以「太吵」為由調大本值。
+UNRESOLVED_ROWS_ADVISORY_MARGIN = 20
+
+
+def unresolved_advisory_notes(ledger: dict[str, str | None]) -> list[str]:
+    """warn 線之下、距 fail 線 ≤ `UNRESOLVED_ROWS_ADVISORY_MARGIN` 的**非阻斷**預警。
+
+    刻意與 `unresolved_ceiling_problems()` 分成兩支函式而不是塞進它的 warn 清單：
+    後者的 `(fails, warns)` 契約有消費端與鎖在釘（`check_defect_log_crossref.py` 與
+    `test_check_defect_log_crossref.py::test_ceiling_is_a_ratchet_with_both_bands`
+    逐字驗「warn−1 列時兩邊皆空」），把新訊號塞進去會讓那道鎖**合法轉紅**——而它守的
+    是門檻語意，不該為了加一條提示就被改動。純函式，可構造輸入驗牙。
+
+    n ≥ warn 時回空：那一帶已由 `unresolved_ceiling_problems()` 出聲，同一件事報兩次
+    只會讓兩個訊號一起被忽略。
+    """
+    n = len(unresolved_ids(ledger))
+    if n >= UNRESOLVED_ROWS_WARN or UNRESOLVED_ROWS_FAIL - n > UNRESOLVED_ROWS_ADVISORY_MARGIN:
+        return []
+    return [
+        f"未結列 {n} 筆，距 fail 線 {UNRESOLVED_ROWS_FAIL} 只剩 "
+        f"{UNRESOLVED_ROWS_FAIL - n} 筆（warn 線 {UNRESOLVED_ROWS_WARN}）。"
+        f"🔴 **歸檔不會降低此數，唯一出路是把列真的結掉**（或改派給具名承接者）："
+        f"未結列在結構上不可搬（搬遷判準① 硬擋），所以 bytes 那條線的洩壓閥對這一條"
+        f"完全無效——剛跑完歸檔看到「主檔變小了」時，這個數字一筆都沒動。"
+        f"量測入口＝`check_defect_log_crossref.py --unresolved-count`"
+    ]
+
+
 def report_unresolved(ledger: dict[str, str | None]) -> int:
     """`--unresolved-count` 的輸出本體：印出未結列數、門檻與逐筆 ID，回 rc。
 
@@ -334,7 +502,7 @@ def report_unresolved(ledger: dict[str, str | None]) -> int:
           f"｜warn={UNRESOLVED_ROWS_WARN} fail={UNRESOLVED_ROWS_FAIL}")
     print(f"判準＝狀態欄 _classify() ∈ {sorted(str(c) for c in UNRESOLVED_CLASSES)}")
     print("未結列 ID：" + "、".join(ids))
-    for w in warns:
+    for w in warns + unresolved_advisory_notes(ledger):
         print(f"⚠️  {w}")
     for f in fails:
         print(f"❌ {f}")

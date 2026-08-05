@@ -441,6 +441,33 @@ def _check_latest_thinness(latest_tools: Path | None) -> bool:
     return ok
 
 
+def _cross_lock(label: str, enrolled: set[str], pinned_map: dict[str, str],
+                enrolled_name: str, pinned_name: str) -> bool:
+    """「stem 登記表 ↔ hash 釘選表」鍵集合交叉鎖的**唯一實作**（R76 收斂）。
+
+    WHY 收斂：`_check_thinness_cross_lock()` 與 `_check_latest_thinness_cross_lock()`
+    的函式體原本逐字相同（只差標籤與兩張表的名字）——而這兩支存在的**唯一理由**正是
+    「兩份獨立字面清單會各自腐化」。判準自己複製兩份，等於把它負責攔的病帶進守門層本身
+    （R12 QA-1 → R66 DEF-101-622 的復發路徑就是「照著上一份抄一份新的」）。
+    訊息字面刻意逐字沿用（ADR-XPLAT-002 §3 引用過成功訊息的形狀）。
+    """
+    pinned = set(pinned_map)
+    expected = {f"{stem}{ext}" for stem in enrolled for ext in (".sh", ".ps1")}
+    ok = True
+    for rel in sorted(expected - pinned):
+        print(f"❌ {label}：{rel} 已登記 {enrolled_name} 但不在 "
+              f"{pinned_name} — 薄殼宣稱無 hash 釘選守門", file=sys.stderr)
+        ok = False
+    for rel in sorted(pinned - expected):
+        print(f"❌ {label}：{rel} 在 {pinned_name} 但其 stem 未登記 "
+              f"{enrolled_name} — 兩清單腐化（請同步）", file=sys.stderr)
+        ok = False
+    if ok:
+        print(f"✅ {label}：{len(enrolled)} 對薄殼登記與 "
+              f"{len(pinned)} 支 hash 釘選鍵集合一致")
+    return ok
+
+
 def _check_thinness_cross_lock() -> bool:
     """parity↔thinness 兩份登記清單交叉鎖（R12 QA 一審 QA-1）。
 
@@ -450,24 +477,8 @@ def _check_thinness_cross_lock() -> bool:
     pin（表內出現未登記 stem）亦紅，杜絕「登記與釘選各自腐化」的零訊號窗。"""
     import check_wrapper_thinness as _thinness  # 同目錄，頂部已 sys.path 注入
 
-    pinned = set(_thinness._PINNED_SHA256)
-    expected = {f"{stem}{ext}" for stem in _THINNESS_ENROLLED for ext in (".sh", ".ps1")}
-    missing = sorted(expected - pinned)
-    extra = sorted(pinned - expected)
-    ok = True
-    for rel in missing:
-        print(f"❌ thinness 交叉鎖：{rel} 已登記 _THINNESS_ENROLLED 但不在 "
-              f"check_wrapper_thinness._PINNED_SHA256 — 薄殼宣稱無 hash 釘選守門",
-              file=sys.stderr)
-        ok = False
-    for rel in extra:
-        print(f"❌ thinness 交叉鎖：{rel} 在 _PINNED_SHA256 但其 stem 未登記 "
-              f"_THINNESS_ENROLLED — 兩清單腐化（請同步）", file=sys.stderr)
-        ok = False
-    if ok:
-        print(f"✅ thinness 交叉鎖：{len(_THINNESS_ENROLLED)} 對薄殼登記與 "
-              f"{len(pinned)} 支 hash 釘選鍵集合一致")
-    return ok
+    return _cross_lock("thinness 交叉鎖", _THINNESS_ENROLLED, _thinness._PINNED_SHA256,
+                       "_THINNESS_ENROLLED", "check_wrapper_thinness._PINNED_SHA256")
 
 
 def _check_latest_thinness_cross_lock() -> bool:
@@ -483,25 +494,9 @@ def _check_latest_thinness_cross_lock() -> bool:
     此鎖斷言每個 `_LATEST_THINNESS_ENROLLED` 登記 stem 的 `.sh` 與 `.ps1` 都在
     pin 表，反向多餘 pin（表內出現未登記 stem）亦紅，鍵集合形狀與
     `_check_thinness_cross_lock` 相同，只是鍵改為 LATEST-relative。"""
-    pinned = set(_LATEST_PINNED_SHA256)
-    expected = {
-        f"{stem}{ext}" for stem in _LATEST_THINNESS_ENROLLED for ext in (".sh", ".ps1")
-    }
-    missing = sorted(expected - pinned)
-    extra = sorted(pinned - expected)
-    ok = True
-    for rel in missing:
-        print(f"❌ LATEST thinness 交叉鎖：{rel} 已登記 _LATEST_THINNESS_ENROLLED 但不在 "
-              f"_LATEST_PINNED_SHA256 — 薄殼宣稱無 hash 釘選守門", file=sys.stderr)
-        ok = False
-    for rel in extra:
-        print(f"❌ LATEST thinness 交叉鎖：{rel} 在 _LATEST_PINNED_SHA256 但其 stem 未登記 "
-              f"_LATEST_THINNESS_ENROLLED — 兩清單腐化（請同步）", file=sys.stderr)
-        ok = False
-    if ok:
-        print(f"✅ LATEST thinness 交叉鎖：{len(_LATEST_THINNESS_ENROLLED)} 對薄殼登記與 "
-              f"{len(pinned)} 支 hash 釘選鍵集合一致")
-    return ok
+    return _cross_lock("LATEST thinness 交叉鎖", _LATEST_THINNESS_ENROLLED,
+                       _LATEST_PINNED_SHA256, "_LATEST_THINNESS_ENROLLED",
+                       "_LATEST_PINNED_SHA256")
 
 
 def _check_pytest_pin() -> bool:
@@ -642,16 +637,8 @@ _VALID_TIERS = frozenset({
 _UNPINNED_EXIT_RE = re.compile(r"退場：(未指派|R\d+(?![\d+＋]))")
 
 _HARD_REASON_KEYWORDS = (
-    "launchd",
-    "schtasks",
-    "container",
-    "GNU",
-    "Copy-on-Evolve",
-    "驗證載具",
-    "心跳檔",
-    "R12 QA-2",
-    "明文禁止收斂",
-    "無共同 API",
+    "launchd", "schtasks", "container", "GNU", "Copy-on-Evolve",
+    "驗證載具", "心跳檔", "R12 QA-2", "明文禁止收斂", "無共同 API",
 )
 
 # ── 異名對等品（R63 Phase 1-C (a)）────────────────────────────────────────────
@@ -660,22 +647,13 @@ _HARD_REASON_KEYWORDS = (
 # 磁碟存在性／仍登記於 _SINGLE_SIDED_EXEMPT／stem 確實不同，三者缺一即紅
 # （見 _check_equivalence_groups_fresh）。
 _EQUIVALENCE_GROUPS: dict[str, tuple[str, str]] = {
-    "smoke_local": (
-        "tools/macos_smoke_local.sh",
-        "tools/windows_smoke_local.ps1",
-    ),
-    "git_hooks_install_common": (
-        "tools/lib/git_hooks_install_common.sh",
-        "tools/lib/GitHooksInstallCommon.ps1",
-    ),
-    "windowsapps_guard": (
-        "tools/lib/windowsapps_guard.sh",
-        "tools/lib/WindowsAppsGuard.ps1",
-    ),
-    "nightly_installer": (
-        "tools/install_mac_nightly.sh",
-        "tools/install_windows_nightly.ps1",
-    ),
+    "smoke_local": ("tools/macos_smoke_local.sh", "tools/windows_smoke_local.ps1"),
+    "git_hooks_install_common": ("tools/lib/git_hooks_install_common.sh",
+                                 "tools/lib/GitHooksInstallCommon.ps1"),
+    "windowsapps_guard": ("tools/lib/windowsapps_guard.sh",
+                          "tools/lib/WindowsAppsGuard.ps1"),
+    "nightly_installer": ("tools/install_mac_nightly.sh",
+                          "tools/install_windows_nightly.ps1"),
 }
 
 
@@ -837,15 +815,17 @@ _SINGLE_SIDED_EXEMPT: dict[str, tuple[str, str]] = {
         "能力對照由 test_schedule_capability_parity.py 守門；ADR-XPLAT-002 §3.3 #1："
         "對等 mac 側走 launchd，兩排程原語無共同 API"
     ),
-    # Windows schtasks 排程家族三支（ONBOARDING.md §8 明文 Windows-only、無 .sh 對等；
+    # Windows schtasks 排程家族兩支（ONBOARDING.md §8 明文 Windows-only、無 .sh 對等；
     # run_local_nightly 於 R11 已成對——mac .sh 薄聚合器落地——移登記至 _EXEMPT_PAIRS）
+    # R76：原第三支 reschedule_g0_gatecheck.ps1 已整支刪除（它唯一能做的事是重排
+    # AutoClaude_SD09_G0_GateCheck，而該工作於 R71 從本機移除 ⇒ 每條路徑都停在
+    # 「Task not found」守衛 exit 1，是真孤兒）。本表刪這一筆＝磁碟已無對應物，
+    # 留著會被 _check_pair_enrollment 的「單邊豁免 stale」反向檢查判紅；
+    # `_TIER_BASELINE` 那一筆則依該表維護規則**刻意保留**（永久記憶，防同名回鍋降級）。
     "AutoClaude/tools/fix_nightly_catchup.ps1": (
         _TIER3_OS_PRIMITIVE, "schtasks 排程家族（ONBOARDING §8）"
     ),
     "AutoClaude/tools/g0_gate_check.ps1": (
-        _TIER3_OS_PRIMITIVE, "schtasks 排程家族（ONBOARDING §8）"
-    ),
-    "AutoClaude/tools/reschedule_g0_gatecheck.ps1": (
         _TIER3_OS_PRIMITIVE, "schtasks 排程家族（ONBOARDING §8）"
     ),
     # bash-only 工具（ONBOARDING.md §6 明文無 .ps1 對等，Windows 以 Git Bash 執行）
@@ -1172,6 +1152,8 @@ _TIER_BASELINE: dict[str, str] = {
     "tools/install_windows_nightly.ps1": _TIER3_OS_PRIMITIVE,
     "AutoClaude/tools/fix_nightly_catchup.ps1": _TIER3_OS_PRIMITIVE,
     "AutoClaude/tools/g0_gate_check.ps1": _TIER3_OS_PRIMITIVE,
+    # R76 已整支刪除（真孤兒），依上方維護規則「已收斂移出活體表的 key 刻意保留」留存；
+    # `_TIER34_FLOOR` 的課責數把這種 key 仍計入，故刪檔不必也不得下修那個地板。
     "AutoClaude/tools/reschedule_g0_gatecheck.ps1": _TIER3_OS_PRIMITIVE,
     "AutoClaude/tools/run_mutmut_in_docker.sh": _TIER3_OS_PRIMITIVE,
     "AutoClaude/tools/sd06_w3_staging_dryrun.sh": _UNPINNED,

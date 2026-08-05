@@ -15,6 +15,10 @@
      期望值**從檔頭註解表本身抽出**、實況從 YAML 重算，兩側任一漂移即紅燈，
      避免「註解快照靜默過期」再度發生（R57 同一輪內已因此產生三處失實宣稱）。
 
+  C. 全 `.github/workflows/*.yml`：凡 `shell: powershell` 的步驟，其 `run:`
+     本體必須全 ASCII（R76-02）。詳見 `TestPowershellRunBodyIsAscii` 的
+     docstring——含它**守不到**哪一面的誠實劃界。
+
 【B 節為何不用 pyyaml】根層 `tools/`＋`tools/tests/` 全數 stdlib-only，
 `root-infra-ci.yml` 的 root-infra job 沒有 `setup-python`、也沒有任何
 `pip install` 步驟（實查該檔可證），引入 pyyaml 會替根層閘門新增一個此前不存在
@@ -34,6 +38,19 @@
   以外的區塊純量寫法、tab 縮排等）一律不保證——掃描器對認不得的形狀是
   raise 而非猜測，故失效方向是紅燈不是綠燈。
 
+【C 節為何**可以**用 pyyaml（與 B 節不同調，這是有據的差別不是矛盾）】上段
+「根層全數 stdlib-only」寫於 R57；R68 之後該前提已由 repo 自己推翻並改成受管
+相依——`tools/run_root_unittests.py` 的 `_THIRD_PARTY_PREREQS` 明列
+`("yaml", "pyyaml")`，且由三道機械物看守：runner 開場 fail-fast、下限失敗訊息
+歸因、以及 `test_run_root_unittests.py::CiPrereqInstallLockTest`（凡在 CI 跑本
+runner 的 job 都必須先裝清單裡每一個 pip 名）。實查三個消費者皆已安裝：
+`root-infra-ci.yml:396`、`windows-compat-ci.yml`／`macos-compat-ci.yml` 的
+「tools/tests 第三方相依」步驟；本機 pre-push 走 `.venv`（AutoClaude runtime
+本就相依 pyyaml）。C 節要判的是「run 本體」這個**值**，縮排掃描器對區塊純量的
+續行、`|`／`>`／`|-` 變體、行內註解各有一套規則，自寫近似只會多一個新的失明
+面——B 節當時付不起的相依成本，今天已經是既成事實，故不重複造輪。
+B 節維持原樣（不改動既有綠鎖）。
+
 執行：python3 -m unittest tools.tests.test_gha_action_versions -v
 （亦由 tools/run_root_unittests.py discover 納入）
 """
@@ -49,10 +66,13 @@ from contextlib import redirect_stderr, redirect_stdout
 from pathlib import Path
 from unittest import mock
 
+import yaml
+
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import check_gha_action_versions as m  # noqa: E402
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
+_WORKFLOW_DIR = _REPO_ROOT / ".github" / "workflows"
 _WINDOWS_CI = _REPO_ROOT / ".github" / "workflows" / "windows-compat-ci.yml"
 _PS51_TEST = _REPO_ROOT / "tools" / "tests" / "test_ps51_compat.py"
 
@@ -298,6 +318,174 @@ class TestWindowsCiHeaderSnapshotLock(unittest.TestCase):
         """檔頭必須指名本鎖（而非停留在 R57 round 2 的「目前沒有機械鎖」誠實
         揭露）；本鎖若被改名／刪除，檔頭的指引也會被這條測試逼著同步。"""
         self.assertIn("tools/tests/test_gha_action_versions.py", self.text)
+
+
+# ─── C 節：`shell: powershell` 步驟的 run 本體必須全 ASCII（R76-02）─────────────
+
+# 🔴 判準**刻意只鎖 `powershell`、不鎖 `pwsh`**（這是有據的射程選擇，不是漏網）：
+#   · `shell: powershell` → runner 叫的是 Windows 內建 `powershell.exe`＝
+#     Windows PowerShell 5.1。它讀腳本檔時，**無 BOM 就退回作業系統的 ANSI
+#     codepage**（zh-TW 機器＝CP950、多數 GitHub runner＝CP1252）。而 runner 是
+#     把 `run:` 本體寫成一支**暫存 .ps1** 再交給它——那支檔的編碼由 runner 決定，
+#     本 repo 無從控制。⇒ 非 ASCII 字元落在字串字面值裡，就會被解成別的字元，
+#     引號可能整個對不起來，**整支腳本 ParserError、一行都不執行**。
+#   · `shell: pwsh` → PowerShell 7（Core），**預設就以 UTF-8 讀無 BOM 檔**，
+#     同一段中文完全正常。把 pwsh 也鎖進來只會逼二十餘個既有步驟改寫英文訊息，
+#     買不到任何實害防護——那是拿可讀性換零收益。
+# 判準若哪天要擴到 pwsh，先拿出「pwsh 也會誤讀」的實測，不要靠對稱性直覺。
+#
+# 這一格治的實害（不是假想）：`windows-compat-ci.yml::windows-nightly-full` 的
+# 兩步 5.1 驗證自 R48 起「跑了四輪」，雲端 run 30803941764 逐字留下
+# `Unexpected token` ＋ `CategoryInfo : ParserError`——驗證邏輯**從未執行過一次**。
+_MIN_POWERSHELL_STEPS = 3
+
+# 下限的**上緣**（同 `run_root_unittests.RATCHET_STALE_RATIO` 體例）：純下限會腐化
+# ——掃描面長到 30 步時，下限 3 讓 27 步靜默蒸發仍綠。超過此倍數即要求重釘下限。
+_POWERSHELL_STEPS_STALE_RATIO = 3
+
+
+def nonascii_powershell_steps(text: str, source: str) -> list[str]:
+    """回傳 `(source::job::step)` 清單：`shell` 解析為 `powershell` 且 run 本體
+    含非 ASCII 字元的步驟。shell 解析順序＝step > job defaults > workflow defaults
+    （與 GitHub 的覆寫順序一致）。"""
+    data = yaml.safe_load(text) or {}
+    wf_shell = (((data.get("defaults") or {}).get("run") or {}).get("shell"))
+    flagged: list[str] = []
+    for job_name, job in (data.get("jobs") or {}).items():
+        if not isinstance(job, dict):
+            continue
+        job_shell = ((job.get("defaults") or {}).get("run") or {}).get("shell", wf_shell)
+        for idx, step in enumerate(job.get("steps") or []):
+            if not isinstance(step, dict):
+                continue
+            body = step.get("run")
+            if body is None or step.get("shell", job_shell) != "powershell":
+                continue
+            if not body.isascii():
+                offenders = sorted({c for c in body if not c.isascii()})
+                flagged.append(
+                    f"{source}::{job_name}::step[{idx}] {step.get('name')!r} "
+                    f"non-ASCII={''.join(offenders)[:40]!r}"
+                )
+    return flagged
+
+
+def _all_powershell_steps() -> list[str]:
+    """全 workflow 的 `shell: powershell` run 步驟識別字（不論是否 ASCII）。"""
+    found: list[str] = []
+    for path in sorted(_WORKFLOW_DIR.glob("*.yml")):
+        data = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+        wf_shell = (((data.get("defaults") or {}).get("run") or {}).get("shell"))
+        for job_name, job in (data.get("jobs") or {}).items():
+            if not isinstance(job, dict):
+                continue
+            job_shell = ((job.get("defaults") or {}).get("run") or {}).get("shell", wf_shell)
+            for idx, step in enumerate(job.get("steps") or []):
+                if isinstance(step, dict) and step.get("run") is not None:
+                    if step.get("shell", job_shell) == "powershell":
+                        found.append(f"{path.name}::{job_name}::step[{idx}]")
+    return found
+
+
+class TestPowershellRunBodyIsAscii(unittest.TestCase):
+    """C 節（R76-02）：`shell: powershell` 步驟的 `run:` 本體必須全 ASCII。
+
+    🔴 **這道鎖守不到什麼（誠實劃界，不是免責聲明）**：
+    `AutoClaude/tools/hooks/check_ps1_encoding.py` 是本 repo 治「無 BOM 的 .ps1
+    被 5.1 以 ANSI codepage 誤讀」的既有機械物，但它以**副檔名**過濾
+    （`PS_SUFFIXES = {".ps1", ".psm1", ".psd1"}`，非該三者一律 no-op）⇒ runner
+    由 `run:` 本體**現生**的那支暫存 .ps1，副檔名雖是 .ps1 卻**不在磁碟上、也不
+    經過任何 hook**，結構上不在任何既有鎖的視野內。本鎖補的正是這一格，但補法是
+    「讓那支暫存檔的內容不含非 ASCII」——**不是**去控制它的編碼（我們控制不了）。
+    因此：runner 若哪天改用 UTF-16 或加了 BOM，本鎖對此**零訊號**；同理，本鎖也
+    管不到 `.ps1` 檔案本體的 BOM 政策（那是 `test_ps1_bom.py` 的職責）。
+    另一段未涵蓋：`shell: powershell -Command …` 這類自訂 shell 字串（本 repo 現
+    無此寫法），字串不等於 `powershell` 就不進射程。
+    """
+
+    def test_every_powershell_run_body_is_ascii(self) -> None:
+        flagged: list[str] = []
+        for path in sorted(_WORKFLOW_DIR.glob("*.yml")):
+            flagged += nonascii_powershell_steps(
+                path.read_text(encoding="utf-8"), path.name
+            )
+        self.assertEqual(
+            flagged,
+            [],
+            "下列 `shell: powershell`（＝Windows PowerShell 5.1）步驟的 run 本體含非 "
+            "ASCII 字元。runner 把 run 本體寫成無 BOM 暫存 .ps1，5.1 以 ANSI codepage "
+            "誤讀 ⇒ 字串字面值 ParserError、整支腳本一行都不執行（R76-02：實害已在雲端 "
+            "run 30803941764 兌現，兩步自 R48 起四輪從未真的執行過）。\n"
+            "  處置：把 run 本體改成全 ASCII（訊息寫英文），中文 WHY 移到 step 上方的 "
+            "YAML 註解——註解不會被執行，不受編碼影響。逐字範例見 "
+            "windows-compat-ci.yml::windows-smoke 的 PS 5.1 核心驗證 step。\n"
+            f"  命中：{flagged}",
+        )
+
+    def test_scan_surface_is_not_empty(self) -> None:
+        """反向守門：解析式漂移導致 0 命中時，上一條會兩側同空而假綠——本 repo 已有
+        「掃描面歸零靜默通過」的判例，故掃描面本身要有下限。"""
+        steps = _all_powershell_steps()
+        self.assertGreaterEqual(
+            len(steps),
+            _MIN_POWERSHELL_STEPS,
+            f"全 workflow 只掃到 {len(steps)} 個 `shell: powershell` run 步驟 < 下限 "
+            f"{_MIN_POWERSHELL_STEPS}——若真的刻意移除了 PS 5.1 覆蓋，請同步下修本下限"
+            f"並在 commit 訊息寫明；否則就是解析式壞了。實抽：{steps}",
+        )
+
+    def test_scan_surface_floor_is_not_stale(self) -> None:
+        """下限的上緣：純下限會腐化（掃描面長大後，蒸發一半仍在下限之上）。"""
+        steps = _all_powershell_steps()
+        ceiling = _MIN_POWERSHELL_STEPS * _POWERSHELL_STEPS_STALE_RATIO
+        self.assertLessEqual(
+            len(steps),
+            ceiling,
+            f"`shell: powershell` 步驟已達 {len(steps)} 個，超過下限 "
+            f"{_MIN_POWERSHELL_STEPS} 的 {_POWERSHELL_STEPS_STALE_RATIO} 倍——請重釘 "
+            "`_MIN_POWERSHELL_STEPS`，否則下限已失去鑑別力（同 run_root_unittests.py "
+            "的 RATCHET_STALE_RATIO 體例）",
+        )
+
+    def test_criterion_flags_a_nonascii_powershell_body(self) -> None:
+        """鑑別力（Rule 9：測意圖）——判準必須真的抓得到中文 run 本體。"""
+        synthetic = (
+            "jobs:\n"
+            "  demo:\n"
+            "    steps:\n"
+            "      - name: x\n"
+            "        shell: powershell\n"
+            '        run: throw "找不到"\n'
+        )
+        self.assertEqual(len(nonascii_powershell_steps(synthetic, "syn.yml")), 1)
+
+    def test_criterion_deliberately_ignores_pwsh(self) -> None:
+        """射程宣告的機械化：同一段中文換成 `shell: pwsh` 必須**不**被判紅。
+        pwsh 7 預設以 UTF-8 讀無 BOM 檔，本 repo 二十餘個 pwsh 步驟的中文訊息
+        是安全的；把它們也鎖進來是拿可讀性換零收益。"""
+        synthetic = (
+            "jobs:\n"
+            "  demo:\n"
+            "    steps:\n"
+            "      - name: x\n"
+            "        shell: pwsh\n"
+            '        run: throw "找不到"\n'
+        )
+        self.assertEqual(nonascii_powershell_steps(synthetic, "syn.yml"), [])
+
+    def test_job_level_defaults_shell_is_honoured(self) -> None:
+        """step 未宣告 `shell:` 時繼承 job defaults——不解析這一層就會漏掉整個 job。"""
+        synthetic = (
+            "jobs:\n"
+            "  demo:\n"
+            "    defaults:\n"
+            "      run:\n"
+            "        shell: powershell\n"
+            "    steps:\n"
+            "      - name: x\n"
+            '        run: throw "找不到"\n'
+        )
+        self.assertEqual(len(nonascii_powershell_steps(synthetic, "syn.yml")), 1)
 
 
 if __name__ == "__main__":  # pragma: no cover

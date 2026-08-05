@@ -80,7 +80,9 @@ fi
 # test_ntfs_trailing_space_device_name.py::TestNfcAxisScopeIsCiOnlyByDesign 機械釘住。
 # 另註：merge/rebase/cherry-pick 不經 pre-commit（git 無此 hook 觸發點），本閘 1~4 項
 # 皆由 root-infra-ci（全變更觸發）之 check_ntfs_paths.py 雲端兜底。
-# bash 3.2 相容：無 assoc array / ${var,,}，以 case pattern + tr + grep -iFx 實作。
+# bash 3.2 相容：無 assoc array / ${var,,}，以 case pattern + tr + grep -Fx 實作
+# （R76-10 起刻意**不帶 `-i`**：GNU grep 3.0 的 `-i`＋`-F` 在無 UTF-8 locale 時 SIGABRT，
+#  詳見下方第 3／5 項實作處的在地註解）。
 _ntfs_seg_bad() {  # $1=完整路徑；有問題 → stdout 印原因並回 0，乾淨 → 回 1
   local p="$1" rest seg base up
   # 控制字元（整條路徑一次檢查；LC_ALL=C 使 [:cntrl:] 按位元組判定）
@@ -141,7 +143,9 @@ _ntfs_seg_bad() {  # $1=完整路徑；有問題 → stdout 印原因並回 0，
 if added="$(git -c core.quotepath=false diff --cached --name-only --no-renames --diff-filter=AC)"; then
   if [ -n "$added" ]; then
     tracked=""        # 全 repo tracked 清單只取一次（大小寫碰撞比對用）
+    tracked_lc=""     # 上者的小寫折疊面（R76-10：比對在折疊面做、報告在原始面取）
     tracked_dirs=""   # 由 tracked 導出的「每一層目錄前綴」清單（A3 第 5 項用），同樣只算一次
+    tracked_dirs_lc="" # 同上的小寫折疊面
     seen_dirs=""      # 已回報過的目錄前綴，避免同一次 commit 新增 N 檔就噴 N 次同一則
     while IFS= read -r f; do
       [ -z "$f" ] && continue
@@ -166,14 +170,41 @@ if added="$(git -c core.quotepath=false diff --cached --name-only --no-renames -
         rc=1
         continue
       fi
-      # 大小寫碰撞：grep -iFx 對 tracked 清單做「整行、固定字串、不分大小寫」比對；
+      # 大小寫碰撞：對 tracked 清單做「整行、固定字串、折疊後」比對；
       # index 已含本次新增檔自身（原字串相同會被排除，不誤報）。grep 讀至 EOF 無 SIGPIPE 疑慮。
+      #
+      # 🔴 R76-10：本段（與下方目錄段那段）原本是 `grep -iFx … || true`，那是一道
+      #   **locale 相依的 fail-open**。Git Bash 的 GNU grep 3.0 對 `-i` ＋ `-F` 在無
+      #   UTF-8 locale 時直接 **SIGABRT**（實測：無 locale → `Aborted` rc=134；
+      #   `LC_CTYPE=C.UTF-8` → 正常命中 rc=0；同一組資料不帶 `-i` 的 `-Fx` → rc=1 正常），
+      #   而 `|| true` 把「工具自己崩了」吞成「沒有碰撞」⇒ 閘門靜默漏跑。更糟的是：照
+      #   根 CLAUDE.md 鐵律一用 `Find-GitBash` 複驗這道閘的人，拿到的正是那個假綠。
+      #   兩件事一起改：
+      #     ① 折疊比對改用本檔既有的 bash 3.2 慣例（`tr` 各折一次 ＋ 不帶 `-i` 的
+      #        `grep -Fx`）——`-F` 單獨使用不走那條崩潰路徑；
+      #     ② rc 不再吞：grep 的 **1＝無命中（正常）**，**≥2＝工具本身出事**，一律
+      #        fail-loud 擋下。「無法驗證」與「驗證通過」不是同一件事（同 L228 的既有慣例）。
+      #   誠實記錄代價：`tr '[:upper:]' '[:lower:]'` 只折 ASCII，非 ASCII 字母的大小寫
+      #   碰撞由 CI 版 `tools/check_ntfs_paths.py`（Python `str.lower()`、全量 tracked）
+      #   兜底——而原本的 `grep -i` 也只有在 UTF-8 locale 下才折得到非 ASCII，那正好就是
+      #   會崩潰的那條路，故此改動在實務上沒有讓任何真的守得住的東西變弱。
+      # 🔴 為何要 `grep -n` 再回查原字串：訊息必須指名**既有路徑的真實拼法**（使用者要
+      #   照著去 `git rm`），而折疊面上只剩小寫。故**比對在折疊面做、報告在原始面取**；
+      #   兩份清單同源同序（同一個 printf 出來再 tr），行號可直接互指。
       if [ -z "$tracked" ]; then
         tracked="$(git -c core.quotepath=false ls-files)" || tracked=""
+        tracked_lc="$(printf '%s\n' "$tracked" | tr '[:upper:]' '[:lower:]')"
       fi
-      collisions="$(printf '%s\n' "$tracked" | grep -iFx -e "$f" || true)"
-      while IFS= read -r m; do
-        [ -z "$m" ] && continue
+      f_lc="$(printf '%s' "$f" | tr '[:upper:]' '[:lower:]')"
+      collisions="$(printf '%s\n' "$tracked_lc" | grep -nFx -e "$f_lc")"; _grc=$?
+      if [ "$_grc" -gt 1 ]; then
+        echo "[pre-commit dispatcher] ❌ 大小寫碰撞比對失敗（grep rc=${_grc}）→ 無法驗證，擋下：${f}" >&2
+        echo "                        grep 的 1＝無命中屬正常，≥2＝工具本身出事（R76-10：無 UTF-8 locale 時 GNU grep 曾 SIGABRT 而被 || true 吞掉）" >&2
+        rc=1
+      fi
+      while IFS= read -r hit; do
+        [ -z "$hit" ] && continue
+        m="$(printf '%s\n' "$tracked" | sed -n "${hit%%:*}p")"   # 折疊面行號 → 原始拼法
         if [ "$m" != "$f" ]; then
           # ${f}/${m} 必須帶大括號：bash 3.2 對「$f 後緊接全形字元」的變數名邊界
           # 判定有 multibyte bug（會把後續位元組併入變數名 → unbound variable）
@@ -184,7 +215,7 @@ if added="$(git -c core.quotepath=false diff --cached --name-only --no-renames -
       done <<EOF2
 $collisions
 EOF2
-      # 目錄段層級碰撞（A3 第 5 項，R67-A2）：上一段的 grep -iFx 拿**整行**比對，對
+      # 目錄段層級碰撞（A3 第 5 項，R67-A2）：上一段的折疊比對拿**整行**比對，對
       # 「目錄段拼法不同、basename 完全不重複」的形態結構上失明。本 repo 就是這樣長出
       # docs/04_planning/{Archive,archive}/ 與 docs/06_quality/{Archive,archive}/ 兩對
       # index 目錄並靜默共存 6 週：f81ad94 用大寫收 01–31、22782fe 改小寫收 32–50，
@@ -192,10 +223,12 @@ EOF2
       # Linux CI／act 容器／github.com 上卻是兩個獨立目錄（真・case-sensitive APFS 卷實測）。
       # 立即危害不是覆蓋（basename 不重疊時不會），而是同一份程式碼兩平台掃到不同檔案集合、
       # 交叉引用在 Linux/github.com 變死連結。
-      # bash 3.2 相容：無 assoc array／無 ${var,,}；前綴切分用 awk、折疊比對沿用 grep -iFx。
+      # bash 3.2 相容：無 assoc array／無 ${var,,}；前綴切分用 awk、折疊比對同上一段
+      # （R76-10：`tr` 折疊 + 不帶 `-i` 的 `grep -nFx` + rc≥2 fail-loud，理由見上一段）。
       if [ -z "$tracked_dirs" ]; then
         tracked_dirs="$(printf '%s\n' "$tracked" \
           | awk -F/ '{p="";for(i=1;i<NF;i++){p=(i==1?$i:p"/"$i);print p}}' | sort -u)"
+        tracked_dirs_lc="$(printf '%s\n' "$tracked_dirs" | tr '[:upper:]' '[:lower:]')"
       fi
       prefixes="$(printf '%s\n' "$f" \
         | awk -F/ '{p="";for(i=1;i<NF;i++){p=(i==1?$i:p"/"$i);print p}}')"
@@ -203,9 +236,16 @@ EOF2
         [ -z "$d" ] && continue
         # 已回報過就跳過（同時省下重複 grep）。case pattern 內的 "$d" 加引號＝字面比對。
         case $'\n'"$seen_dirs" in *$'\n'"$d"$'\n'*) continue ;; esac
-        dir_collisions="$(printf '%s\n' "$tracked_dirs" | grep -iFx -e "$d" || true)"
-        while IFS= read -r dm; do
-          [ -z "$dm" ] && continue
+        d_lc="$(printf '%s' "$d" | tr '[:upper:]' '[:lower:]')"
+        dir_collisions="$(printf '%s\n' "$tracked_dirs_lc" | grep -nFx -e "$d_lc")"; _dgrc=$?
+        if [ "$_dgrc" -gt 1 ]; then
+          echo "[pre-commit dispatcher] ❌ 目錄段碰撞比對失敗（grep rc=${_dgrc}）→ 無法驗證，擋下：${d}" >&2
+          echo "                        grep 的 1＝無命中屬正常，≥2＝工具本身出事（R76-10）" >&2
+          rc=1
+        fi
+        while IFS= read -r dhit; do
+          [ -z "$dhit" ] && continue
+          dm="$(printf '%s\n' "$tracked_dirs" | sed -n "${dhit%%:*}p")"   # 折疊面行號 → 原始拼法
           if [ "$dm" != "$d" ]; then
             # ${d}/${dm} 帶大括號：bash 3.2 對「變數後緊接全形字元」有 multibyte 變數名邊界 bug
             echo "[pre-commit dispatcher] ❌ NTFS 目錄段大小寫碰撞：新增路徑的目錄「${d}」與既有目錄「${dm}」僅大小寫不同" >&2

@@ -8,8 +8,20 @@
     - trace_id ContextVar 連續性（``trace_id_continuity == true``）
     - KB metric 4 項 snapshot（hit_rate / query_p95_ms / strategy_rotation / cache_eviction）
 
-通過：green_streak >= window（預設 30）→ exit 0
+通過：green_streak >= window **且** 證據新鮮 **且** 窗內連續 → exit 0
 不通過：exit 1（含無紀錄檔；訊息「nightly 採集未啟動」）
+
+🔴 R76（掃描發現 R76-13）——window 量的是**紀錄筆數**，不是日曆天數：
+  本工具此前唯一的判準是 `green_streak >= window`，於是「30 筆」被當成「30 天」。
+  實測（2026-08-05）：last-30 筆橫跨 **58 個日曆天**、窗內 9 個 >1 日 gap、最大一段
+  `2026-06-29 -> 2026-07-11 = 12 天全黑`，而工具照樣印
+  `[PASS] green_streak=44 >= window=30 → GA 取證通過`。**筆數判準對「整段沒跑」零偵測**
+  ——採集器停擺時它不會退步，只會停住，而停住看起來跟「還在觀察」一模一樣。
+  修法沿用 tools/ac4_progress_check.py 已有的欄位語意（ADR-SD09-012 L-7 解過同一題），
+  不另發明第三套：①`staleness_days` 超標 ⇒ status='stale'；②last-window 日曆跨度
+  超過 window×係數 ⇒ status='sparse'。兩者 rc≠0。
+  與 tools/drift_log_ga_check.py **刻意逐段同構**（兩支工具的 rc↔status 契約相同，
+  run_local_nightly.ps1 的兩支 helper 也是逐行同構的複本）。
 
 對應：
     - ADR-SD09-001 §2.5/§2.6 — W5 db_only 切換 (1a)(1b) 雙條件唯一取證
@@ -24,6 +36,15 @@ import json
 import sys
 from pathlib import Path
 from typing import Any
+
+# 🔴 兩種載入方式各走一條路，且同一個 process 內只會走到其中一條——理由與姊妹檔
+# `tools/drift_log_ga_check.py` 同位置那段完全相同（兩條都成立會產生兩個 module 物件，
+# 共用層退化成「同一份原始碼的兩個實例」）。
+try:
+    from tools import ga_window as _ga_window
+except ImportError:  # pragma: no cover - 以腳本形態執行時才會走到
+    sys.path.insert(0, str(Path(__file__).resolve().parent))
+    import ga_window as _ga_window  # noqa: E402
 
 # KB metric 4 項（PM 拍板）
 # 注意：必須與 autoclaude.utils.knowledge_base_metrics.KnowledgeBaseMetrics.snapshot()
@@ -42,16 +63,20 @@ KB_METRIC_REQUIRED_KEYS = (
 # 取代 W3 Round 2 P1-1「最新 3 筆 strict」滑動窗口設計（語義不明確）。
 EMIT_REAL_REQUIRED_FROM = _dt.datetime(2026, 5, 24, tzinfo=_dt.UTC)
 
+# ── R76：兩個「時間」面的門檻。🔴 **值與 WHY 的唯一的家是 `tools/ga_window.py`**
+# （R76 四方複審 SD-04：原本與 `drift_log_ga_check.py` 各存一份、逐字相同 112 行、零
+# parity 鎖，實測單邊改一個常數兩支公然不一致而三支測試檔仍 108 passed rc=0）。
+# 此處只做 re-export 讓既有消費者的匯入路徑不變。
+STALENESS_MAX_DAYS = _ga_window.STALENESS_MAX_DAYS
+WINDOW_SPAN_MAX_FACTOR = _ga_window.WINDOW_SPAN_MAX_FACTOR
 
-def _parse_ts(record: dict[str, Any]) -> _dt.datetime | None:
-    """Parse record timestamp from ``ts`` / ``timestamp`` / ``date`` 欄位；None-safe。"""
-    ts = record.get("ts") or record.get("timestamp") or record.get("date")
-    if not isinstance(ts, str) or not ts:
-        return None
-    try:
-        return _dt.datetime.fromisoformat(ts.replace("Z", "+00:00"))
-    except (TypeError, ValueError):
-        return None
+# 🔴 `_parse_ts` 同樣改為共用（R76 複審 SD-04 的核心證據）：本檔原有的版本**不做 tz
+# 正規化**，而 R76 新貼進來的 `_staleness_days`／`_window_calendar_span`（自 drift 複製）
+# 消費的正是它 ⇒ 兩支「逐字相同」的 evaluate 餵同一筆 naive 時戳，drift 回 ready、
+# 本檔 `TypeError: can't compare offset-naive and offset-aware datetimes`。
+# 本檔的 `_compute_green_streak` 拿 `ts >= EMIT_REAL_REQUIRED_FROM`（aware）比較，
+# 也是同一個地雷的第二個引信。共用版一律補 UTC。
+_parse_ts = _ga_window.parse_ts
 
 
 def _load_history(path: Path) -> list[dict[str, Any]]:
@@ -170,6 +195,26 @@ def _compute_green_streak(records: list[dict[str, Any]]) -> tuple[int, list[dict
     return streak, judgements
 
 
+# 🔴 兩支同樣 re-export 自 `tools/ga_window.py`（R76 複審 SD-04），理由見 `_parse_ts` 上方。
+_staleness_days = _ga_window.staleness_days
+_window_calendar_span = _ga_window.window_calendar_span
+
+
+def evaluate(
+    records: list[dict[str, Any]],
+    *,
+    window: int,
+    now: _dt.datetime | None = None,
+) -> dict[str, Any]:
+    """純函式判定；判準本體見 `tools/ga_window.evaluate`（兩支 checker 共用同一份）。
+
+    本檔唯一不共用的是 `_compute_green_streak`——它帶 legacy／strict 的 ts cutoff，
+    與 drift 的 `drift_log_table_exists` 判準是兩件不同的事，故以參數注入。
+    """
+    return _ga_window.evaluate(
+        records, window=window, streak_fn=_compute_green_streak, now=now)
+
+
 def main(argv: list[str] | None = None) -> int:
     # DEF-82-001/DEF-101-070 家族慣例：報表含中文/非 ASCII 符號，Windows cp950 console
     # 直接 print 會 UnicodeEncodeError 中斷；stdout + stderr 皆強制 utf-8。
@@ -185,7 +230,10 @@ def main(argv: list[str] | None = None) -> int:
         "--window",
         type=int,
         default=30,
-        help="連續綠天數門檻（預設 30 天）",
+        help=(
+            "連續綠**紀錄筆數**門檻（預設 30 筆）。R76 訂正：本值的單位是筆數不是日曆天"
+            "——日曆天由 staleness_days 與 window_span_days 兩個獨立判準各自把關"
+        ),
     )
     parser.add_argument(
         "--history",
@@ -218,41 +266,35 @@ def main(argv: list[str] | None = None) -> int:
             print(f"[FAIL] {msg}", file=sys.stderr)
         return 1
 
-    streak, judgements = _compute_green_streak(records)
-    passed = streak >= args.window
-    last_failure_reason = ""
-    if not passed:
-        # 找最後一筆非綠的原因
-        for j in reversed(judgements):
-            if not j["green"]:
-                last_failure_reason = j["reason"]
-                break
-
-    result = {
-        "status": "ready" if passed else "observing",
-        "green_streak": streak,
-        "window": args.window,
-        "total_records": len(records),
-        "history_path": str(history_path),
-        "last_failure_reason": last_failure_reason,
-    }
+    result = evaluate(records, window=args.window)
+    result["history_path"] = str(history_path)
+    passed = result["status"] == "ready"
+    # 三個量在 PASS／FAIL 兩向都印：R76 之前 PASS 訊息只有筆數，於是「30 筆橫跨 58 天」
+    # 這個事實在人看得到的那一行上完全不存在。
+    span = (
+        f"span={result['window_span_days']}/{result['window_span_max_days']}d "
+        f"max_gap={result['window_max_gap_days']}d "
+        f"stale={result['staleness_days']}/{result['staleness_max_days']}d"
+    )
 
     if args.json:
         print(json.dumps(result, ensure_ascii=False))
+    elif passed:
+        print(
+            f"[PASS] green_streak={result['green_streak']} >= window={args.window} "
+            f"(total {len(records)} records; {span}) → GA 取證通過"
+        )
     else:
-        if passed:
+        print(
+            f"[FAIL] status={result['status']} green_streak={result['green_streak']}"
+            f"/{args.window} (total {len(records)} records; {span})",
+            file=sys.stderr,
+        )
+        if result["last_failure_reason"]:
             print(
-                f"[PASS] green_streak={streak} >= window={args.window} "
-                f"(total {len(records)} records) → GA 取證通過"
-            )
-        else:
-            print(
-                f"[FAIL] green_streak={streak} < window={args.window} "
-                f"(total {len(records)} records)",
+                f"        last_failure_reason: {result['last_failure_reason']}",
                 file=sys.stderr,
             )
-            if last_failure_reason:
-                print(f"        last_failure_reason: {last_failure_reason}", file=sys.stderr)
 
     return 0 if passed else 1
 

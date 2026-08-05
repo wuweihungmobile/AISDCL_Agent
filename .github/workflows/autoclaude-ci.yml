@@ -91,9 +91,19 @@ jobs:
           cache-dependency-path: AutoClaude/pyproject.toml
 
       - name: Install dependencies
+        # R76（R76-14）：加 `sdk` extra。`tests/infra/adapters/test_sdk_executor_adapter.py`
+        # 有 3 處 `pytest.importorskip("claude_agent_sdk")`，而 `sdk` extra **在全部 11 支
+        # workflow 裡從來沒有被安裝過一次** ⇒ 那 3 支斷言（真 `PermissionResult` 型別的
+        # can_use_tool 決策路徑）在兩個平台都零覆蓋。生產碼 `sdk_executor_adapter.py` 對它
+        # 是 lazy import，裝了不改變預設後端（仍為 pty）。
+        # 先量再改（Windows 11 真機、全新 venv、`pytest tests/ -q -rs` 全樹前後對照，
+        # 見 docs/06_quality/Skipped_Test_Inventory_R76.md §4.5）：
+        #   `pip install -e ".[dev]"`      → 3902 passed, 224 skipped, 86.98s, rc=0
+        #   `pip install -e ".[dev,sdk]"`  → 3905 passed, 221 skipped, 88.64s, rc=0
+        #   ⇒ 3 支由 skip 轉 passed、其餘 3902 支零變動、耗時 +1.66s。
         run: |
           python -m pip install --upgrade pip
-          pip install -e ".[dev]"
+          pip install -e ".[dev,sdk]"
 
       - name: Run pytest
         run: |
@@ -238,9 +248,25 @@ jobs:
           cache-dependency-path: AutoClaude/pyproject.toml
 
       - name: Install postgres dependencies
+        # R76（R76-14）：加 `pgvector` extra——`tests/contract/test_pg_existing_schema_lock.py`
+        # 的 63 支「PG 既有 9 表 DDL 漂移鎖」需要它才會真的執行（缺它整檔 skip）。
+        #
+        # 🔴 `mako<1.4`：Mako 1.4.0 的 wheel 誤打包了一個**頂層** `tools/` 套件
+        # （RECORD 逐字列出 `tools/__init__.py`／`tools/toxnox.py`／`tools/warn_tox.py`），
+        # 而 `AutoClaude/tools/` 沒有 `__init__.py`（隱式 namespace package）。Python 的
+        # 匯入規則是「regular package 一律勝過先掃到的 namespace portion」⇒ site-packages
+        # 的 mako `tools` 會把 `AutoClaude/tools` 整個遮蔽，**與 sys.path 順序無關**。
+        # Mako 是 alembic 的相依，所以只有裝了 `[postgres]` 的 job 會中招；本 job 先前
+        # 只跑一支不 import `tools.*` 的檔案，故從未顯形。R76 本機實測（Windows 11 +
+        # 同一組 extras）：不釘版 ⇒ `tests/contract/` 5 支模組 collection ImportError
+        # (`No module named 'tools.check_loc_budget'` 等) ＋ `test_rollback_compat.py`
+        # 的子行程 `No module named 'tools.fsm_runtime'`，rc=2/1；釘 mako 1.3.12 ⇒ 全消、
+        # `tools` 正確解析到 `AutoClaude/tools`、`alembic upgrade head` 仍 rc=0。
+        # 根治位置是 `AutoClaude/pyproject.toml` 的 postgres extra（PKG-C 無該檔授權，
+        # 已列交棒 R77）；在那之前這裡釘版，讓本 job 的擴大射程不是建在流沙上。
         run: |
           python -m pip install --upgrade pip
-          pip install -e ".[dev,postgres]"
+          pip install -e ".[dev,postgres,pgvector]" "mako<1.4"
 
       - name: Run alembic migrations
         # DEF-101-049：持久化守門——env.py 交易語意缺陷曾使 upgrade「exit 0 但整包
@@ -250,9 +276,34 @@ jobs:
           alembic upgrade head
           alembic current | grep -q "(head)" || { echo "❌ migration 未持久化（alembic current 未達 head）— env.py 交易語意回歸？"; exit 1; }
 
-      - name: Run PG contract tests
+      - name: Run PG-gated contract + integration + infra tests
+        # 🔴 R76（R76-14）：本步先前只跑 `tests/contract/test_pg_state_repository_contract.py`
+        # 一支檔。R76 盤點實測：AutoClaude 224 支 skip 裡有 192 支（86%）在兩個平台與全部
+        # 11 支 workflow 都沒有任何通道跑到，而本 job 早就備妥了救回它們所需的**整套**
+        # 條件（service container ＋ postgres extras ＋ DSN env ＋ `alembic upgrade head`）
+        # ——缺的只是把最後一行的射程從一支檔擴成兩個目錄。其中 alembic 0007~0012 的
+        # migration 契約、三層 schema 契約、PG 既有 9 表 DDL 漂移鎖，都是**從未被執行過
+        # 一次的斷言**。
+        #
+        # `tests/infra/` 一併納入的理由：另有 7 支同因（3 支模組級
+        # `importorskip("sqlalchemy")` ＋ 4 支 `test_storage_factory.py` DSN 解析）住在那裡，
+        # 而它們與本 job 的 extras 是同一個開關；主 `test` job 只裝 `[dev]` 永遠救不到。
+        #
+        # 先量再改（Windows 11 真機、同一組 extras、pgvector/pgvector:pg18 容器、
+        # `alembic upgrade head` 後實測，指令與 rc 見
+        # docs/06_quality/Skipped_Test_Inventory_R76.md §4.4）：
+        #   改前（repo .venv，無 PG 相依、無 DSN）：1052 passed, 195 skipped, 15.79s, rc=0
+        #   改後（本 recipe）                    ：1241 passed,  40 skipped, 21.66s, rc=0
+        #   ⇒ **155 支由 skip 轉 passed**，pytest 耗時 +5.87s。
+        #   （passed 淨增 189 > 155：3 支模組級 importorskip 解除後，其模組內原本連
+        #     collect 都沒被算到的 34 支測試一併現身——ONBOARDING §7 記載的那個差額。）
+        # 剩下的 40 支不是本步能救的，已逐支歸因（同檔 §4.4.2）：29 支無條件
+        # `pytest.mark.skip`（AC matrix scaffolding 技術債）／2 支 absent-present 互斥對
+        # （結構上必有一支 skip，健康）／2 支需 W3 G3 staging／3 支 `pg_real` 由
+        # `pg-e2e-nightly` 覆蓋／3 支 `claude_agent_sdk` 由主 `test` job 的 sdk extra 覆蓋／
+        # 1 支需 symlink 權限（ubuntu runner 原生有）。**刻意不把它們硬塞進來**。
         run: |
-          python -m pytest tests/contract/test_pg_state_repository_contract.py -v --tb=short
+          python -m pytest tests/contract/ tests/integration/ tests/infra/ -q -rs --tb=short
 
   # SD_07 W2 T2-6（PM #2）：真實 PG e2e（pgvector + recall@10 + p95 latency）
   # 觸發：nightly schedule + 手動 workflow_dispatch

@@ -195,6 +195,16 @@ WINDOWS_NATIVE_SKIP_TAG = "[WINDOWS-NATIVE-ONLY]"
 # WHY 這一段非加不可：本檔原本只把 `[WINDOWS-NATIVE-ONLY]` 那一批另印成醒目清單，
 # 於是在 **Windows 上跑** 時（此機器每天在跑的那一側）真正的覆蓋損失一筆都不會被凸顯
 # ——那一批全落在反方向，而反方向此前沒有標籤、沒有摘要、沒有計數。
+#
+# 🔴 R76 誠實補記（R76-15）：上面那句「非加不可」在 R74~R75 兩輪裡**沒有兌現**——
+# 機制加了，但 `AutoClaude/tests` 的 6 個 posix-only 站點 0/6 帶標籤，`non_windows_
+# native_skips()` 在 Windows 上恆回空清單 ⇒ 本區塊連續兩輪一行都沒印過，而
+# `skip_tag_policy._POSIX_TAG_RATCHET` 把那 6 筆凍結成「可見欠債」讓鎖同時恆綠。
+# R76 把 6 筆全補標（棘輪降為 0、並加 shrink-only 天花板擋住「把基線改大」這條出口），
+# 同一批測試實測印出 17 行。教訓：**加一個為了看見 X 的機制，若 X 的入口（標籤）沒人
+# 補，機制與看著它的鎖會一起沉默**，而沉默的方向永遠是「看起來很乾淨」。
+# 本區塊自 R76 起有回歸鎖：`tests/test_conftest_windows_native_skip_report.py` 的
+# 反方向兩支（正向＋負向），刪掉本區塊或把標籤篩選改成「全收」都會當場紅。
 POSIX_NATIVE_SKIP_TAG = "[POSIX-NATIVE-ONLY]"
 MAC_NATIVE_SKIP_TAG = "[MAC-NATIVE-ONLY]"
 NON_WINDOWS_SKIP_TAGS = (POSIX_NATIVE_SKIP_TAG, MAC_NATIVE_SKIP_TAG)

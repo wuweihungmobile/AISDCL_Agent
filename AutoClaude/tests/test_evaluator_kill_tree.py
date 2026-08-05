@@ -53,7 +53,10 @@ _SHELL_TRUE_SITES = {
 # 1. 行為鎖：POSIX 孤兒孫行程
 # ──────────────────────────────────────────────
 
-@pytest.mark.skipif(sys.platform == "win32", reason="POSIX killpg 專屬行為（Windows 見平台鎖）")
+@pytest.mark.skipif(
+    sys.platform == "win32",
+    reason="[POSIX-NATIVE-ONLY] POSIX killpg 專屬行為（Windows 見平台鎖）",
+)
 def test_timeout_kills_grandchild_spawned_via_shell_compound_command(tmp_path):
     marker = tmp_path / "orphan_marker.txt"
     # `&&` 讓 /bin/sh 無法 exec 自我取代 → python 成為 sh 的子行程（即
@@ -88,7 +91,10 @@ def _write_pgid_probe(tmp_path):
     return probe, tmp_path / "pgid.txt"
 
 
-@pytest.mark.skipif(sys.platform == "win32", reason="POSIX process group 專屬（Windows 見平台鎖）")
+@pytest.mark.skipif(
+    sys.platform == "win32",
+    reason="[POSIX-NATIVE-ONLY] POSIX process group 專屬（Windows 見平台鎖）",
+)
 def test_evaluator_child_runs_in_its_own_process_group(tmp_path):
     """🔴 本檔最關鍵的一道：`kill_process_tree()` 走的是 `killpg(os.getpgid(pid))`，
     所以「子行程有沒有自己的 process group」不是風格問題，而是決定那一發 SIGKILL
@@ -109,7 +115,10 @@ def test_evaluator_child_runs_in_its_own_process_group(tmp_path):
     )
 
 
-@pytest.mark.skipif(sys.platform == "win32", reason="POSIX process group 專屬（Windows 見平台鎖）")
+@pytest.mark.skipif(
+    sys.platform == "win32",
+    reason="[POSIX-NATIVE-ONLY] POSIX process group 專屬（Windows 見平台鎖）",
+)
 def test_conditional_evaluator_child_runs_in_its_own_process_group(tmp_path):
     """對稱鎖：`_conditional.py` 是第二個 `shell=True` 站點，共用同一條 killpg
     收殺路徑，因此同一個自殺級退化在它身上獨立成立，必須各鎖一道。"""

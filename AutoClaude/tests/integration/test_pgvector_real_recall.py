@@ -23,7 +23,6 @@ import time
 
 import pytest
 
-from autoclaude.core.ports.vector_search import VectorHit, VectorSearchError
 from autoclaude.infra.adapters.circuit_breaker import CircuitBreaker
 from autoclaude.infra.adapters.pg_vector_search import PgVectorSearchAdapter
 
@@ -44,17 +43,79 @@ _P95_THRESHOLD_MS = float(os.environ.get("AUTOCLAUDE_TEST_P95_THRESHOLD_MS", "50
 # Per-class marker（CircuitBreaker 純單元 case 不掛 pg_real，保留為 baseline）
 
 
+#: 本檔啟用條件（檔頭第 9~14 行）逐條落成 code 的第 4 條。R76 之前只有前 3 條有 code，
+#: 「預先 seed ≥ 100 列 KB」這一條**只寫在 docstring 裡**——於是把 DSN 指向任何一個沒被
+#: 同一次 seed 過的 DB，recall 測試會以 `recall@10 = 0.000` 轉紅，把讀者指向檢索實作，
+#: 而真因是「這個 DB 裡根本沒有那份語料」。R76 真機實測（Windows 11 ＋ pgvector/pgvector:pg18）：
+#:   · 未 seed 的 DB → `recall@10 = 0.000`（誤導性紅）
+#:   · 同一次 `python tools/seed_kb.py --mock-pg-seed` 產出的語料＋ground truth
+#:     → `recall@10 = 0.999` ⇒ **檢索實作沒問題**。
+#: 🔴 為何 ground truth 不可能事後對得上：`seed_kb.py --mock-pg-seed` 每跑一次就重新
+#:   隨機產生列 UUID，而 ground truth 檔記的就是那些 UUID（repo 內那份與本機 seed 出來
+#:   的那份實測交集＝0／100）。所以「語料 ↔ ground truth」只在**同一次 seed 之內**成立，
+#:   CI 與 nightly 也都是先跑 seed 再跑本檔（`autoclaude-ci.yml`／
+#:   `autoclaude-pg-e2e-on-label.yml`／`run_local_nightly.ps1` 皆逐字如此）。
+_SEED_HINT = (
+    "先跑 `python tools/seed_kb.py --mock-pg-seed --pg-dsn <同一個 DSN>`"
+    "（它會同時寫 PG 與 tests/fixtures/ 兩份檔，兩者必須同一次產出）"
+)
+_MIN_CORPUS_ROWS = 100
+
+
 def _require_real_pg() -> None:
     """fixture skip helper：未啟用真實 PG 則 skip。"""
     if not _REAL_PG_ENABLED:
         pytest.skip(
             "SD07_REAL_PG_E2E_ENABLED != 'true' — skip 真實 PG e2e。"
             "本地預設 skip；CI nightly 啟用（PM #2）。"
+            "【未啟用，非缺件】設 SD07_REAL_PG_E2E_ENABLED=true 即可啟用。"
         )
     if not _DSN:
         pytest.skip(
             "AUTOCLAUDE_TEST_PG_DSN 未設定 — skip 真實 PG e2e。"
+            "【未啟用，非缺件】設 AUTOCLAUDE_TEST_PG_DSN=<sync 或 asyncpg DSN> 即可啟用。"
         )
+
+
+def _corpus_ids() -> set[str]:
+    """DB 內帶檢索用向量的 knowledge_entries 主鍵集合。
+
+    欄名一律**現查而非照抄**：本表主鍵是 `entry_id`（不是 `id`），檢索走的是
+    `embedding_v halfvec(1024)`（不是舊的 `embedding vector(1536)`，後者實測 0 列）。
+    這兩個名字寫錯時症狀是 `UndefinedColumn` 當場炸——刻意不 try/except 吞掉：
+    前置檢查自己壞掉時必須 fail-loud，不得退化成「查不到 ⇒ 一律 skip」。
+    """
+    psycopg2 = pytest.importorskip("psycopg2")
+    with psycopg2.connect(_DSN) as conn, conn.cursor() as cur:
+        cur.execute(
+            "SELECT entry_id::text FROM knowledge_entries "
+            "WHERE embedding_v IS NOT NULL;")
+        return {row[0] for row in cur.fetchall()}
+
+
+def _require_seeded_corpus(ground_truth: dict[str, list[str]] | None = None) -> None:
+    """前置：ground truth 所描述的那份語料必須真的在**這個** DB 裡。
+
+    🔴 這條判準刻意設計成**分得開兩件事**，不是把紅換成綠：
+      · 語料不在 DB（或在的是別一次 seed 的語料）⇒ 環境沒備妥 ⇒ skip，訊息直接給指令；
+      · 語料在、ground truth 對得上、但檢索撈不回來 ⇒ **真回歸** ⇒ 照樣紅。
+    後者正是本測試存在的理由，判準不碰它：只要交集 > 0 就一路跑到 assert。
+    """
+    ids = _corpus_ids()
+    if len(ids) < _MIN_CORPUS_ROWS:
+        pytest.skip(
+            f"[PG-CORPUS-MISSING] 本 DB 只有 {len(ids)} 列帶 embedding 的 "
+            f"knowledge_entries（需 ≥ {_MIN_CORPUS_ROWS}）⇒ 這是**缺件**不是實作問題。"
+            f"{_SEED_HINT}"
+        )
+    if ground_truth is not None:
+        expected = {i for v in ground_truth.values() for i in v}
+        if not (expected & ids):
+            pytest.skip(
+                "[PG-CORPUS-STALE] 本 DB 有語料，但 ground truth 檔記的列 UUID 與 DB 內的"
+                f"交集為 0（ground truth {len(expected)} 個 id、DB {len(ids)} 列）⇒ 兩者"
+                f"來自**不同次** seed。這是**缺件**不是檢索問題。{_SEED_HINT}"
+            )
 
 
 # ──────────────────────────────────────────────────────────────
@@ -68,8 +129,8 @@ class TestRecallAt10:
         前置：seed_kb.py 已 seed 100 列；ground truth 為 brute force cosine top-10。
         """
         _require_real_pg()
-        from pathlib import Path
         import json
+        from pathlib import Path
 
         # SD_09 Pre-W0 audit B-01 修復（2026-05-20）：移除硬編碼 pytest.skip。
         # 改由 fixture 載入控制；無 fixture 時 fixture-side skip（X1 路徑）。
@@ -84,6 +145,7 @@ class TestRecallAt10:
         queries = json.loads(queries_path.read_text(encoding="utf-8"))
         ground_truth = json.loads(gt_path.read_text(encoding="utf-8"))
         assert len(queries) >= 100, f"query 數量不足：{len(queries)} < 100"
+        _require_seeded_corpus(ground_truth)
 
         adapter = PgVectorSearchAdapter.from_dsn(_DSN)
         hits_per_query: list[set] = []
@@ -116,8 +178,8 @@ class TestP95Latency:
         SD_09 Pre-W0 audit B-01 修復（2026-05-20）：移除硬編碼 pytest.skip。
         """
         _require_real_pg()
-        from pathlib import Path
         import json
+        from pathlib import Path
 
         queries_path = Path("tests/fixtures/pgvector_real_queries.json")
         if not queries_path.exists():
@@ -126,6 +188,11 @@ class TestP95Latency:
             )
 
         queries = json.loads(queries_path.read_text(encoding="utf-8"))
+        # 🔴 R76：這一條在本測試上治的是**假綠**不是紅——空 DB 上 100 次 top-10 查詢
+        # 幾乎不花時間，於是 p95 會愉快地通過，量到的卻是「對零列做 HNSW 查詢有多快」。
+        # 實測：本機空 DB 綠、seed 100 列後同一台機器 p95=51.32ms（Windows + Docker
+        # Desktop，該情境本檔第 41 行本來就備了 AUTOCLAUDE_TEST_P95_THRESHOLD_MS）。
+        _require_seeded_corpus()
         adapter = PgVectorSearchAdapter.from_dsn(_DSN)
         # warmup：穩定連線 + PG 快取（排除首次連線 overhead 對 p95 影響）
         for _ in range(5):

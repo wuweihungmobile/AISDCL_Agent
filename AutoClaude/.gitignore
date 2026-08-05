@@ -74,6 +74,16 @@ perf_results.json
 # SD_Improving_09 W0 nightly 採集 artifact（每日 1 筆累計，本機 SSOT；不入 git history）
 .perf_history.jsonl
 .observability_history.jsonl
+# 🔴 R76 補列（掃描發現 R76-12，見 docs/06_quality/CrossPlatform_R76_Scan_Findings.md；
+# 缺陷帳本 ID 由該輪收斂包統一配號，故此處刻意不寫死一個可能撞號的 DEF 編號）：
+# 五本觀察期帳本裡，drift 這本此前是**唯一被 git 追蹤**的
+# ——於是它的進帳會被 `git checkout -- .`／`stash`／`reset --hard`／worktree 切換靜默
+# 回捲。已實測損失 UTC 2026-07-27 一整天（該日 nightly log 寫了、磁碟與所有 commit 都
+# 沒有那筆）。選 (A) 與其他四本對齊而不選 (B)「保留追蹤 + 加防抹除棘輪」的理由：帳本
+# 的內容是「這台機器的觀察期進度」，commit 進 git 會讓單機偶然事實變成版本庫事實
+# （同 .g0_readiness.json 那條的理由），而防抹除棘輪只是替一個本來就不該入庫的東西
+# 加保險。權威判準一律現查 `python tools/drift_log_ga_check.py --json`。
+.drift_log_history.jsonl
 # R75：G0 四軌就緒憑證。由上列本機累計檔推導 ⇒ 內容是「這台機器的觀察期進度」，
 # commit 進 git 會讓單機偶然事實變成版本庫事實（本輪正在修的同型缺陷）。讀它請跑 nightly。
 .g0_readiness.json

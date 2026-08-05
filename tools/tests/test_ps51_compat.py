@@ -215,7 +215,9 @@ def _git_tracked_ps1(rel_prefix: str) -> list[str]:
 # `_TREE_FLOORS[root]` 直接 KeyError＝fail-loud，不會靜默把新樹當 floor 0 放過。
 _TREE_FLOORS = {
     "tools": 8,
-    "AutoClaude/tools": 7,
+    # AutoClaude/tools：R76 由 7 下修為 6——reschedule_g0_gatecheck.ps1 整支刪除
+    # （真孤兒，它要重排的 AutoClaude_SD09_G0_GateCheck 於 R71 已從本機移除）。
+    "AutoClaude/tools": 6,
     "AISDLC_SDD/scripts": 2,
     LATEST_TREE_KEY: 4,
 }
@@ -477,7 +479,9 @@ class TestPs51ScanConfigPinning(unittest.TestCase):
         keys_floors = [(key, floor) for key, _files, floor in scan_trees()]
         self.assertEqual(
             keys_floors,
-            [("tools", 8), ("AutoClaude/tools", 7), ("AISDLC_SDD/scripts", 2), ("LATEST", 4)],
+            # R76：AutoClaude/tools 由 7 下修為 6（reschedule_g0_gatecheck.ps1 整支刪除，
+            # 真孤兒）——第三份硬編實作在 tools/windows_smoke_local.ps1 [1/9] $ps1Trees，已同步。
+            [("tools", 8), ("AutoClaude/tools", 6), ("AISDLC_SDD/scripts", 2), ("LATEST", 4)],
             "掃描樹清單或 per-tree 檔數下限被改動——四棵樹必須與 root-infra-ci.yml "
             "第 2 道 pwsh parse 的掃描面一致（該 step 是本鎖在 CI 上的姊妹守門），"
             "下限值則與 tools/windows_smoke_local.ps1 [1/9] 的 $ps1Trees Floor 逐值"

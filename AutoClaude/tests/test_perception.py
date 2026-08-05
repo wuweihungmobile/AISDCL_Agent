@@ -409,7 +409,10 @@ def _pid_alive(pid: int) -> bool:
     return True
 
 
-@pytest.mark.skipif(sys.platform == "win32", reason="POSIX process-group 孤兒防護僅適用於 POSIX")
+@pytest.mark.skipif(
+    sys.platform == "win32",
+    reason="[POSIX-NATIVE-ONLY] POSIX process-group 孤兒防護僅適用於 POSIX",
+)
 class TestCloseKillsPosixGrandchild:
     """R16 P2（Mac/Windows 相容性掃描）：POSIX 側 close() 修復前只呼叫
     self._proc.terminate()（只殺直接子行程 sh），若 sh 再背景 fork 出孫行程

@@ -203,11 +203,12 @@ on:
       - "AutoClaude/tools/g0_gate_check.ps1"
       # R50：四方複審發現 tools/tests/test_windowsapps_guard_cross_consistency.py 的
       # `_tracked_files("*.ps1")` 是 repo-wide `git ls-files` 掃描（非單檔字面引用），
-      # 會讀取全部 tracked .ps1（含以下 6 支）驗證其 WindowsApps guard 呼叫是否走
+      # 會讀取全部 tracked .ps1（含以下 5 支）驗證其 WindowsApps guard 呼叫是否走
       # SSOT；windows-compat-ci.yml 側已有 "**/*.ps1" 萬用字元天然覆蓋，本檔沿用
       # R27/R34/R37/R44 既有「逐檔顯式列舉」慣例（而非改上兜底萬用字元，避免任何
-      # .ps1 異動都觸發 macOS runner），補齊此前遺漏的 6 支（DEF-101-042 同構）。
-      - "AutoClaude/tools/reschedule_g0_gatecheck.ps1"
+      # .ps1 異動都觸發 macOS runner），補齊此前遺漏的 5 支（DEF-101-042 同構）。
+      # R76：原為 6 支，reschedule_g0_gatecheck.ps1 已整支刪除（真孤兒）⇒ 不再是
+      # tracked .ps1，repo-wide 掃描不會讀到它，留著這條 path 只會是死觸發面。
       - "AutoClaude/tools/local_ci_gate.ps1"
       - "AutoClaude/tools/run_act.ps1"
       - "tools/integration_gate.ps1"
@@ -404,9 +405,9 @@ on:
       # **/*.ps1 覆蓋，本檔無 .ps1 兜底 glob，需顯式列舉（DEF-101-042 同構，
       # test_ci_paths_cover_root_consumers.py 實測揪出）
       - "AutoClaude/tools/g0_gate_check.ps1"
-      # R50：同上 push 區塊說明（DEF-101-042 同構，四方複審發現本 6 支被
-      # test_windowsapps_guard_cross_consistency.py repo-wide *.ps1 掃描消費卻漏列）
-      - "AutoClaude/tools/reschedule_g0_gatecheck.ps1"
+      # R50：同上 push 區塊說明（DEF-101-042 同構，四方複審發現本 5 支被
+      # test_windowsapps_guard_cross_consistency.py repo-wide *.ps1 掃描消費卻漏列；
+      # R76：原為 6 支，reschedule_g0_gatecheck.ps1 已整支刪除，同步移除該條 path）
       - "AutoClaude/tools/local_ci_gate.ps1"
       - "AutoClaude/tools/run_act.ps1"
       - "tools/integration_gate.ps1"
@@ -792,6 +793,19 @@ jobs:
         working-directory: AutoClaude
         run: python -m pytest tests/test_perception.py -q -rs --tb=short  # -rs：R59 ARCH-R59-NB1
 
+      - name: AutoClaude 平台敏感測試子集（R76-11：push 閘門對 AutoClaude 生產樹此前零執行證據）
+        working-directory: AutoClaude
+        # 🔴 R76-11：與 `windows-compat-ci.yml` 同一步的**對稱物**，完整 WHY 寫在該檔
+        # （命名慣例、為何用 `-k` 而非新 marker、掃描面歸零時 pytest 回 rc=5 而非靜默
+        # 通過）。此處只記與該檔不同的兩件事：
+        #   ① 本 job 不宣告 `shell:`（沿用 macOS runner 預設 bash，同本檔其餘全部步驟；
+        #      理由見檔頭「刻意不補顯式 shell: bash」段——補宣告會連帶開啟 pipefail）。
+        #   ② 🔴 成本**在 macOS 上未實測**（R76 是 Windows 真機輪，無 mac 機器）。已測
+        #      的是 Windows 側同一條命令列：`277 passed, 7 skipped, 3840 deselected in
+        #      13.54s`。選中支數在兩平台可能不同（部分測試帶平台 skip），故此處刻意
+        #      **不**把那個數字寫成 macOS 的實測值——第一次真跑後再回填。
+        run: python -m pytest tests -q -rs -m 'not perf and not pg_real' -k 'path or encoding or platform or shell or subprocess'
+
       - name: 執行 tools/integration_gate.sh --skip-full（實際執行，非僅語法解析；R34 Scan-C 發現修正）
         # Scan-C 發現：windows-compat-ci.yml 先前已修過同一缺陷模式（P1 Architect 發現：
         # root-infra-ci.yml 對 .ps1/.sh 僅做語法解析，非實際執行），並補上 windows-smoke
@@ -804,11 +818,13 @@ jobs:
         # 已知覆蓋率限制（R34 一審 QA 發現修正，比照下方 ci-gate.sh 步驟既有誠實揭露
         # 慣例）：[2/5] 確實由本 job 下一步 `bash scripts/ci-gate.sh` 涵蓋；但 [1/5]
         # （`tools/local_ci_gate.{sh,ps1}` 全套，含 editable 哨兵/LOC 預算/import-linter/
-        # pytest 全套）**並未**在本 smoke job 另跑——本 job 上方只執行了單一檔案
-        # `pytest tests/test_perception.py`，AutoClaude 完整測試套件在 macOS PR/push
-        # 閘門上零覆蓋，只靠每週一次的 `macos-nightly-full`（continue-on-error 非阻斷）
-        # 執行 `local_ci_gate.sh`。此為既有侷限（非本步驟新增），如實記載，避免「已於
-        # 本 job 另跑」的失實宣稱誤導後續維護者。
+        # pytest 全套）**並未**在本 smoke job 另跑，只靠每週一次的 `macos-nightly-full`
+        # （continue-on-error 非阻斷）執行 `local_ci_gate.sh`。🔴 R76-11 訂正：本段原文
+        # 寫「AutoClaude 完整測試套件在 macOS PR/push 閘門上零覆蓋」——「完整套件」那半句
+        # 今日仍成立，但「零覆蓋」自本輪起已失實：上方新增的「AutoClaude 平台敏感測試
+        # 子集」步驟在本 job 實跑 AutoClaude/tests 的平台敏感子集。故改為窄斷言：
+        # **完整**套件仍只在 nightly；平台敏感子集已進 push 閘門。此為既有侷限（非本
+        # 步驟新增），如實記載，避免任一方向的失實宣稱誤導後續維護者。
         run: bash tools/integration_gate.sh --skip-full
 
       - name: 執行（非僅解析）AISDLC_SDD/scripts/ci-gate.sh（凍結基線 v0.01 + LATEST 雙軌）
@@ -867,7 +883,16 @@ jobs:
         working-directory: AutoClaude
         run: |
           python -m pip install --upgrade pip
-          pip install -e ".[dev,lint]"
+          # 🔴 `hotkey` extra 必須裝（R76 四方複審 SD-03）：R76 把 `keyboard` 由核心
+          # dependencies 移進 `[hotkey]` optional extra（理由是開發者本機 bootstrap
+          # 不該被 pyobjc 傘包拖累）。副作用是 macOS CI 從此**不再**裝 keyboard ⇒
+          # `AutoClaude/tests/test_perception_platform_honesty.py` 那支
+          # `test_macos_non_root_register_reports_unavailable_for_real` 由 passed 變
+          # skipped——而那支正是本次變更論證所引用的 R68 真機取證（`_darwinkeyboard`
+          # 非 root 不可監聽）。論證與證據互相拆台，且方向是 passed→skipped（摘要看
+          # 起來更乾淨），是本 repo 最怕的那個方向。CI 是 ephemeral 環境，pyobjc 的
+          # 安裝面成本不是這次要省的那一個——要省的是**開發者本機**的 bootstrap。
+          pip install -e ".[dev,lint,hotkey]"
           bash tools/local_ci_gate.sh
 
       - name: AISDLC_SDD LATEST fsm_runtime pytest（排除 chaos；動態解析 LATEST 版本，R2 Architect 複審發現修正）

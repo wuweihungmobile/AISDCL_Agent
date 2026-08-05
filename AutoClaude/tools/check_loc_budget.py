@@ -147,7 +147,32 @@ TOTAL_WARN_MARGIN = 10
 #      不新增第二種機制語意。
 # 本值 ↔ 上述判準由 AutoClaude/tests/tools/test_check_loc_budget_tier_headroom_warn.py
 # 釘選（含 bug-injection 驗紅）。
+# R76 增訂：本常數同時是**根層 tools/ 分級**（`ROOT_TOOLS_TIERS`）的預警門檻——那一層
+# 與 AutoClaude tier 是同一種度量（`count_loc` × tier 預算），沿用同一個數字才不會憑空
+# 生出第三種「近上限」語意；`SPECIAL_FILES` 是 raw-line 棘輪、度量面不同，另立
+# `SPECIAL_WARN_MARGIN`（見該常數上方）。
 TIER_WARN_MARGIN = 6
+
+# R76（R76-16）：`SPECIAL_FILES` raw-line 棘輪的預警帶門檻。**非阻塞**（不進
+# has_violation、不改 rc），理由同 TIER_WARN_MARGIN——現況那批檔餘裕 0~2 全是**合法**
+# 狀態（門檻依 R69 P3 慣例＝納管當下的實際行數，本來就是零餘裕設計），改 fail 會當場
+# 擋住 repo。
+#
+# 為什麼另立一個數字、而不是沿用 TIER_WARN_MARGIN：兩者度量面不同。tier 量 `count_loc`
+# （排除空行與純註解），SPECIAL_FILES 量 raw line（空行、註解、Markdown 全算）。
+#
+# 為什麼是 5：
+#   ① 這批檔的最小合法增量不是「一行程式」，而是「一筆具名登記」或「一段訂正註記」。
+#      R76-00 實測到的死結正是這個形狀：工具訊息教人往 `_GOVERNANCE_DOCS` 補一筆
+#      ＝+1 行，而 `check_defect_log_crossref.py` 當時 1474/1474 餘裕 0 ⇒ **A 鎖要求的
+#      補救動作正好是 B 鎖的違規**。第一個訊號就是紅，中間沒有任何預警。
+#   ② 一段照本 repo 體例寫的訂正註記（WHY ＋ 實測 ＋ 邊界）實測約 4~5 行，取 5 剛好
+#      覆蓋「照規矩留痕」這個最常見的增量形態。
+#   ③ 不取更大：raw line 連空行都算，門檻愈大愈接近「常駐全亮」，而常駐全亮的燈等於
+#      沒有燈。超過 5 就不是「快滿了」而是「一直都很滿」，那是棘輪本身該被重新談的事。
+# 落地當下即有五支落在帶內（餘裕 0~2）——那正是 R76-16 要曝光的事實本身，不是雜訊；
+# 現值一律現查 `python tools/check_loc_budget.py --json` 的 `special_warn_band`。
+SPECIAL_WARN_MARGIN = 5
 
 # ADR-SD08-001 §3.1：CLAUDE.md 文件治理（≤ 400 行強制）
 # SPECIAL_FILES 採 raw line count（wc -l 等價，含空行/註解，因 CLAUDE.md 為 Markdown）
@@ -275,27 +300,54 @@ def count_raw_lines(path: Path) -> int:
         return sum(1 for _ in f)
 
 
-def check_special_files() -> list[FileReport]:
-    """ADR-SD08-001 §3.1：檢查 SPECIAL_FILES 的 raw line count。"""
-    violations: list[FileReport] = []
+def warn_band(reports: Iterable[FileReport], margin: int) -> list[FileReport]:
+    """近上限但**尚未破線**的檔（餘裕 ≤ margin），以餘裕升冪排序（最緊的排最前）。
+
+    R76：三層預警帶（AutoClaude tier／SPECIAL_FILES／根層 tools tier）共用這一個判準。
+    刻意做成單一實作而非各層各寫一次——「同一份知識三個家」正是本檔一路在治的病，
+    且已破線的檔一律排除（`over_by == 0`）由各自的阻塞段接手，免得同一件事印兩段。
+    """
+    return sorted(
+        (r for r in reports if r.over_by == 0 and r.budget - r.loc <= margin),
+        key=lambda r: (r.budget - r.loc, r.rel_path),
+    )
+
+
+def special_file_reports() -> list[FileReport]:
+    """SPECIAL_FILES 的逐檔 raw-line 報表（**含未違規者**）。
+
+    違規清單與預警帶共用**同一次掃描**：兩者若各走各的迴圈，判準就有兩個家。
+    """
+    reports: list[FileReport] = []
     for file_path, max_lines in SPECIAL_FILES.items():
         f = PROJECT_ROOT / file_path
         if not f.exists():
             continue
         actual = count_raw_lines(f)
-        if actual > max_lines:
-            violations.append(
-                FileReport(
-                    rel_path=file_path,
-                    loc=actual,
-                    tier="special",
-                    budget=max_lines,
-                    over_by=actual - max_lines,
-                    override_reason=_SPECIAL_REASONS.get(
-                        file_path, "ADR-SD08-001 CLAUDE.md 文件治理"),
-                )
+        reports.append(
+            FileReport(
+                rel_path=file_path,
+                loc=actual,
+                tier="special",
+                budget=max_lines,
+                over_by=max(0, actual - max_lines),
+                override_reason=_SPECIAL_REASONS.get(
+                    file_path, "ADR-SD08-001 CLAUDE.md 文件治理"),
             )
-    return violations
+        )
+    return reports
+
+
+def check_special_files() -> list[FileReport]:
+    """ADR-SD08-001 §3.1：SPECIAL_FILES 的 raw line count **違規**清單。
+
+    回傳型別刻意維持 `list[FileReport]`（不改成 `(violations, warn_band)` 二元組）：
+    `AutoClaude/tests/tools/test_check_loc_budget_tier_headroom_warn.py` 以
+    `monkeypatch.setattr(clb, "check_special_files", lambda: [])` 隔離本函式，改簽章
+    會讓那道鎖在解包時 ValueError——修法不得把既有的鎖打紅。預警帶另由
+    `special_file_reports()` ＋ `warn_band()` 取得，兩者共用同一次掃描。
+    """
+    return [r for r in special_file_reports() if r.over_by > 0]
 
 
 def collect_total_loc(root: Path) -> int:
@@ -370,14 +422,14 @@ def classify_root_tools_file(rel_posix: str) -> tuple[str, int]:
     return "unclassified", ABSOLUTE_LIMIT  # pragma: no cover - `tools/` 樣式已涵蓋全樹
 
 
-def build_root_tools_reports() -> list[FileReport]:
-    """根層 `tools/` 的違規清單（**只回違規**，不像 `build_reports()` 回全表）。
+def root_tools_reports() -> list[FileReport]:
+    """根層 `tools/` 的逐檔報表（**含未違規者**）。
 
-    只回違規的理由：本層不參與 `total`／baseline cap 的計算（那個 baseline 是
-    `autoclaude/` 專屬的成長上限，把兩萬行護欄碼灌進去會讓 cap 立即破線、而那不是
-    任何人想量的東西），故沒有「全表」的消費者。
+    R76 訂正：本函式原本只回違規（`build_root_tools_reports()`），理由寫的是「本層
+    不參與 `total`／baseline cap 的計算，故沒有全表的消費者」——那句話在**預警帶**
+    出現之前成立。預警帶正是「未違規但快滿了」的消費者，只回違規等於結構上看不到它。
     """
-    violations: list[FileReport] = []
+    reports: list[FileReport] = []
     for p in iter_root_tools_files():
         rel_posix = p.relative_to(ROOT_TOOLS_ROOT.parent).as_posix()
         # 已由 SPECIAL_FILES 的 raw-line 棘輪管的檔不重複審判（見上方第三條判準）。
@@ -385,23 +437,30 @@ def build_root_tools_reports() -> list[FileReport]:
             continue
         loc = count_loc(p)
         tier_name, budget = classify_root_tools_file(rel_posix)
-        if loc > budget:
-            violations.append(
-                FileReport(
-                    rel_path=rel_posix,
-                    loc=loc,
-                    tier=tier_name,
-                    budget=budget,
-                    over_by=loc - budget,
-                    override_reason=(
-                        "R75 根層護欄層 LOC 分級：先拆職責／抽共用模組"
-                        "（先例：tools/lib/ci_liveness.py），確認為不可壓縮的真實功能後，"
-                        "才把該檔具名加進 check_loc_budget.SPECIAL_FILES 的 raw-line 棘輪"
-                        "並在缺陷帳本寫明理由"
-                    ),
-                )
+        reports.append(
+            FileReport(
+                rel_path=rel_posix,
+                loc=loc,
+                tier=tier_name,
+                budget=budget,
+                over_by=max(0, loc - budget),
+                override_reason=(
+                    "R75 根層護欄層 LOC 分級：先拆職責／抽共用模組"
+                    "（先例：tools/lib/ci_liveness.py），確認為不可壓縮的真實功能後，"
+                    "才把該檔具名加進 check_loc_budget.SPECIAL_FILES 的 raw-line 棘輪"
+                    "並在缺陷帳本寫明理由"
+                ),
             )
-    return sorted(violations, key=lambda r: (-r.over_by, r.rel_path))
+        )
+    return reports
+
+
+def build_root_tools_reports() -> list[FileReport]:
+    """根層 `tools/` 的**違規**清單（破線最多的排最前）。"""
+    return sorted(
+        (r for r in root_tools_reports() if r.over_by > 0),
+        key=lambda r: (-r.over_by, r.rel_path),
+    )
 
 
 def build_reports(overrides: dict[str, dict]) -> list[FileReport]:
@@ -446,6 +505,11 @@ def check(update_baseline: bool = False, as_json: bool = False) -> int:
     special_violations = check_special_files()
     # R75：monorepo 根層 tools/ 的分級（獨立帳，不進 total／baseline cap）
     root_tools_violations = build_root_tools_reports()
+    # R76（R76-16）：上面兩層各自的**非阻塞**預警帶。刻意各自重掃一次而非把違規與
+    # 預警帶一起回傳：`check_special_files()` 被既有鎖以 monkeypatch 抽換，改簽章會讓
+    # 那道鎖解包 ValueError；重掃的成本是幾十次 `count_loc`，換掉一次打紅既有鎖。
+    special_warn = warn_band(special_file_reports(), SPECIAL_WARN_MARGIN)
+    root_tools_warn = warn_band(root_tools_reports(), TIER_WARN_MARGIN)
 
     total = sum(r.loc for r in reports)
     baseline = read_baseline()
@@ -462,10 +526,8 @@ def check(update_baseline: bool = False, as_json: bool = False) -> int:
 
     # R60（DEF-101-526）：單檔 tier 餘裕預警帶。排除已違規檔（由 [TIER] 阻塞段接手，
     # 免得同一件事印兩段）；以餘裕升冪排序，最緊的排最前面。
-    tier_warn_band = sorted(
-        (r for r in reports if r.over_by == 0 and r.budget - r.loc <= TIER_WARN_MARGIN),
-        key=lambda r: (r.budget - r.loc, r.rel_path),
-    )
+    # R76：判準本體上移為共用的 `warn_band()`（三層同一份實作）。
+    tier_warn_band = warn_band(reports, TIER_WARN_MARGIN)
 
     if as_json:
         payload = {
@@ -486,9 +548,20 @@ def check(update_baseline: bool = False, as_json: bool = False) -> int:
             "absolute_violations": [r.__dict__ for r in absolute_violations],
             "tier_violations": [r.__dict__ for r in tier_violations],
             "special_violations": [r.__dict__ for r in special_violations],
+            # R76（R76-16）：SPECIAL_FILES 與根層 tools 兩層的預警帶亦須機讀——只印
+            # 文字的話，以 --json 取證的自動化（含 nightly 報表、sync_onboarding_baselines）
+            # 結構上看不到「還剩幾行」，而那正是這兩層唯一的事前訊號。
+            "special_warn_margin": SPECIAL_WARN_MARGIN,
+            "special_warn_band": [
+                {**r.__dict__, "headroom": r.budget - r.loc} for r in special_warn
+            ],
             # R75：根層護欄層獨立一欄（不併進 tier_violations——兩者度量面不同：那邊是
             # `autoclaude/`＋baseline cap，這邊是跨子專案護欄層、無 cap）。
             "root_tools_violations": [r.__dict__ for r in root_tools_violations],
+            # 根層 tools 與 AutoClaude tier 同度量，故共用 tier_warn_margin，不另立欄位。
+            "root_tools_warn_band": [
+                {**r.__dict__, "headroom": r.budget - r.loc} for r in root_tools_warn
+            ],
             "root_tools_tiers": {k: v["budget"] for k, v in ROOT_TOOLS_TIERS.items()},
             "policy_version": "v2-tiered+sd08-special",
             "absolute_limit": ABSOLUTE_LIMIT,
@@ -563,6 +636,34 @@ def check(update_baseline: bool = False, as_json: bool = False) -> int:
                     f"  [{r.tier}<={r.budget}] {r.rel_path}: {r.loc} > {r.budget} "
                     f"(+{r.over_by}) — {r.override_reason}"
                 )
+        if special_warn:
+            print(
+                f"\n[SPECIAL-WARN] {len(special_warn)} 支 SPECIAL_FILES raw-line 棘輪"
+                f"餘裕 ≤ {SPECIAL_WARN_MARGIN} 行（非阻塞，rc 不變）——**動這些檔前先讀這段**："
+            )
+            for r in special_warn:
+                print(f"  [{r.tier}<={r.budget}] {r.rel_path}: {r.loc} "
+                      f"（餘裕 {r.budget - r.loc} 行）")
+            print(
+                "       這批門檻是 shrink-only 棘輪（R69 P3：門檻＝納管當下實際行數），"
+                "**不得為了讓修改通過而調高**。"
+                "\n       餘裕 0 時「補一筆具名登記」這種一行修法本身就會破線"
+                "（R76-00 實測：A 鎖要求 +1 行、B 鎖禁止那一行）。"
+                "\n       正解順序：①刪死碼／抽共用模組（先例 tools/lib/ci_liveness.py）"
+                " ②確認為不可壓縮的真實功能後，才在缺陷帳本具名理由調高。"
+            )
+        if root_tools_warn:
+            print(
+                f"\n[ROOT-TOOLS-WARN] {len(root_tools_warn)} 支根層 tools/ 檔案 tier 餘裕"
+                f" ≤ {TIER_WARN_MARGIN} 行（非阻塞，rc 不變）："
+            )
+            for r in root_tools_warn:
+                print(f"  [{r.tier}<={r.budget}] {r.rel_path}: {r.loc} "
+                      f"（餘裕 {r.budget - r.loc} 行）")
+            print(
+                "       破線後不是「調高預算」而是拆職責／抽共用模組；真的不可壓縮才"
+                "具名加進 SPECIAL_FILES 的 raw-line 棘輪並在缺陷帳本寫明理由。"
+            )
         if root_tools_violations:
             print(
                 "\n[ROOT-TOOLS] monorepo 根層 tools/ 分級違規（R75；"

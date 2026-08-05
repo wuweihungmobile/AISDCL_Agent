@@ -109,8 +109,24 @@
 #             --json createdAt,conclusion,status
 #   E2. 本腳本每一項都有雲端對應 step：由 tools/tests/test_smoke_ci_sync.py 的
 #       步驟語意鎖判定（該鎖已存在且為綠＝零 smoke-only 項目）。
-#   E3. 移除後 Windows 側仍有每日執行級心跳：AutoClaude_Nightly 存在且
-#       tools/check_scheduled_task_drift.py 回 rc=0（設定沒漂移，會真的跑）。
+#   E3. 移除後 Windows 側仍有每日執行級心跳。**量測對象只有 AutoClaude_Nightly 這一支**：
+#       它存在，且它自己那 7 項設定零漂移。可機械查（兩步都不看 smoke 任務在不在）：
+#           Get-ScheduledTask -TaskName AutoClaude_Nightly -ErrorAction SilentlyContinue
+#           python tools/check_scheduled_task_drift.py --json
+#             ⇒ 讀 .tasks.AutoClaude_Nightly.present 為 true 且 .tasks.AutoClaude_Nightly.drifts 為空
+#       刻意讀**逐任務**欄位而不是整支工具的 rc／status：後者把 smoke 任務一起算進去。
+#
+# 🔴 E3 的一般化規則（R75 頭號教訓，在它第三次同形態復發後就地寫下）：
+#   **判準的量測對象，不得隨「被它所判的動作」而改變。**
+#   E3 原文寫的是「移除後 tools/check_scheduled_task_drift.py 回 rc=0」，而該工具的期望值
+#   SSOT（tools/scheduled_task_expectations.json）**同時列了兩支任務** ⇒ 一旦執行 E3 自己
+#   授權的動作（移除 AutoClaude_WindowsSmoke），該工具必然回 status=task_missing／rc=1。
+#   判準因此在結構上不可滿足：這支排程永遠退不了場，而且沒有人看得出原因——它看起來只是
+#   「條件還沒到」。R75 已為同一形態付出代價（雲端錨判準拿 origin/main 當比較對象，於是
+#   結構上每次 push 必紅、main 三支全紅）。寫任何退場／解鎖判準前先問一句：
+#   **「執行我授權的那個動作之後，我自己還量得到綠嗎？」**
+#   本條的機械物：tools/tests/test_install_windows_nightly.py::
+#   TestWindowsSmokeTaskHasWrittenExitCriteria::test_e3_measures_only_what_survives_its_own_action
 #
 # 🔴 為何 E1 不是「smoke 連續 N 天零發現就可以撤」（本輪實測反證）：
 #   R74 同輪雲端 windows-compat-ci 抓到一筆**本機十道閘門全綠**的 P0（hook 的中文
@@ -120,11 +136,16 @@
 #   「smoke 排程是唯一發現通道」這個 R60 立案前提。**兩個方向都不成立，這正是為什麼
 #   判準要綁在「主通道活性」（E1）而不是綁在「發現數」上。**
 #
-# 現況（2026-08-04 實查）：E1 尚未取證（需 gh 查詢，本輪未跑）；E2 綠；E3 **不成立**
-# ——check_scheduled_task_drift.py 實測 rc=1（smoke 任務 LogonType=InteractiveToken、
-# ExecutionTimeLimit 未設、MultipleInstancesPolicy=IgnoreNew）。⇒ **現在不可移除**：
-# 一個設定錯到「使用者未登入就整輪不跑」的任務，先修設定再談退場，否則等於拿「它反正
-# 也沒在跑」當撤除理由。
+# 🔴 本節刻意**不再快照三條判準的顏色**（R76 訂正）。原文把 2026-08-04 當天量到的三個
+# 顏色連同 smoke 任務的逐項漂移值寫成常數；2026-08-05 掌舵者提權重跑安裝器後，那三句
+# 全部與磁碟相反，而沒有任何東西會因為它們過期而說話。**這裡刻意不逐字重述那三句**
+# ——訂正文若把假話原樣抄一遍，讀者只會記得那三個數字（R73 已為此付出過代價）。
+# 判準的顏色是會漂移的量測值，一律現查（同根 CLAUDE.md「工作清單是會漂移的量測值」）：
+#     gh run list --workflow windows-compat-ci.yml --limit 40 --json createdAt,conclusion,status
+#     python -m unittest discover -s tools/tests -p test_smoke_ci_sync.py
+#     python tools/check_scheduled_task_drift.py --json
+# 只留**不會過期**的處置規則：三條全成立才可移除該排程任務；任一條未取證就不算成立
+# （「沒去查」不等於「已通過」）。移除本身是掌舵者的決定，本腳本不自動執行。
 #
 # 用法：powershell -NoProfile -ExecutionPolicy Bypass -File tools\windows_smoke_local.ps1
 # Exit：0＝全部 PASS；1＝任一 FAIL（結尾彙總）或前置守門失敗。
@@ -478,7 +499,9 @@ try {
   }
   $ps1Trees = @(
     @{ Rel = 'tools'; Floor = 8 },
-    @{ Rel = 'AutoClaude\tools'; Floor = 7 },
+    # R76：Floor 由 7 下修為 6（reschedule_g0_gatecheck.ps1 整支刪除，真孤兒——它要重排的
+    # AutoClaude_SD09_G0_GateCheck 於 R71 已從本機移除）。姊妹站點＝test_ps51_compat._TREE_FLOORS。
+    @{ Rel = 'AutoClaude\tools'; Floor = 6 },
     @{ Rel = 'AISDLC_SDD\scripts'; Floor = 2 }
   )
   if ($latestName) {

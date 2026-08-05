@@ -1299,6 +1299,54 @@ def test_obs_ga_helper_consults_exit_code_and_has_three_states(ps1_content: str)
     )
 
 
+#: G0 gap 敘述必須承接的診斷欄位（工具 `--json` 已經算出來的東西）。
+_GA_DIAGNOSTIC_FIELDS = ("Reason", "SpanDays")
+
+
+def test_ga_gap_messages_do_not_hardcode_a_false_inequality(ps1_content: str) -> None:
+    """🔴 R76 複審 SD-01：G0 gap 敘述不得自己推導 `streak < window` 這種不等式。
+
+    意圖（Rule 9 — 這條測的是「印出來的話會不會是假的」，不是字串長相）：
+    R76 之前 `passed` 唯一的來源就是 `green_streak >= window`，所以
+    `'... green_streak {0} < window {1}'` 恆為真。R76 給兩支 GA 工具加了 staleness 與
+    窗內連續性（sparse）之後，「未達標」不再蘊含「streak 不足」——實測
+    `status=sparse green_streak=44 window=30` 會讓那句話印出 **「44 < 30」**。
+    它是人判斷 G0 進度的日常介面，一句自打嘴巴的話會把讀者指向錯誤的修法
+    （「再等幾天湊滿 streak」），而真因是採集不連續、該修的是排程。
+
+    判準有兩半，缺一都可能全綠而缺陷仍在：
+      ① gap 敘述不得帶硬編的 `<` 比較字樣；
+      ② 必須帶 `status=` 並承接工具自己算出的診斷欄位（`Reason`／`SpanDays`），
+         否則「不印假話」會退化成「什麼都不印」。
+    """
+    gap_lines = [
+        ln for ln in ps1_content.splitlines()
+        if "$g0Gaps +=" in ln and ("observability GA" in ln or "drift_log GA" in ln)
+    ]
+    assert len(gap_lines) >= 2, (
+        f"找不到兩支 GA 的 g0Gaps 敘述（實得 {len(gap_lines)} 行）——判準失去量測面")
+    for ln in gap_lines:
+        assert "TOOL-UNAVAILABLE" in ln or "<" not in ln, (
+            "GA gap 敘述帶硬編的 `<` 比較 ⇒ 在 sparse／stale 狀態下會印出數學上為假的"
+            f"不等式（實測 44 < 30）：{ln.strip()}")
+        if "TOOL-UNAVAILABLE" in ln:
+            continue
+        assert "status=" in ln, (
+            "GA gap 敘述必須印工具的 status（sparse／stale／observing 處置各不相同）："
+            f"{ln.strip()}")
+    # 兩支 helper 都必須有欄位承接工具算好的診斷，否則呼叫端只能拿 Streak/Window 硬湊。
+    for fn in ("Get-ObsGaPass", "Get-DriftGaPass"):
+        body = re.search(rf"(?ms)^function\s+{fn}\s*\{{.*?^\}}", ps1_content)
+        assert body, f"找不到函式 {fn}"
+        for field in _GA_DIAGNOSTIC_FIELDS:
+            assert re.search(rf"\b{field}\s*=", body.group(0)), (
+                f"{fn} 缺 {field} 欄位 ⇒ 工具算好的 `last_failure_reason`／"
+                "`window_span_days` 在進 log 之前就被丟掉（最好的解釋被丟掉，"
+                "呼叫端只好硬湊一句話）")
+        assert "last_failure_reason" in body.group(0), (
+            f"{fn} 必須真的去取 `last_failure_reason`——只宣告欄位不取值＝永遠是空字串")
+
+
 def _write_fake_python(dir_path: Path, rc: int, payload: str) -> Path:
     """造一支假的 python 載具：把 payload 原樣吐到 stdout，並以指定 rc 結束。
 
@@ -1970,51 +2018,51 @@ def test_ac4_gate_reads_green_streak_and_recognises_stale(ps1_content: str) -> N
     assert "採集停擺" in ps1_content, "stale 的 gap 文案必須明說是採集停擺而非未達標"
 
 
-def test_schedule_drift_is_visible_but_known_backlog_does_not_turn_red(
+def test_schedule_drift_counts_as_failure_and_unmeasured_stays_fail_closed(
     ps1_content: str,
 ) -> None:
-    """R75：排程漂移必須顯著可見，但「已知存量」不得製造無限期紅燈；量不出來仍要紅。
+    """R76：排程漂移必須顯著可見**且計入失敗**；「量不出來」仍要紅。
 
-    意圖（Rule 9 — 這裡要守的是**兩個方向**，少一邊都會壞）：
+    R75 版的本鎖守的是相反的一半（「已知存量不得製造無限期紅燈」⇒ status=drift 只印
+    WARN）。那個豁免的解除條件是「偵測器回報 status=ok」，2026-08-05 提權安裝器執行後
+    實測 `status=ok` / rc=0 ⇒ 條件達成，豁免退場，本鎖同步翻向。**保留這段歷史是刻意的**：
+    翻向的理由必須留在鎖裡，否則下一個人會以為「drift 計失敗」是從來就有的設計，
+    而看不到「暫時豁免會活過它自己的解除條件」這個真正的教訓。
+
+    意圖（Rule 9 — 這裡要守的是**三個方向**，少一邊都會壞）：
       ① 不可靜默：線上排程設定沒有任何自動比對者，五項落差曾連續三輪存活而沒東西轉紅。
          故偵測器呼叫、可 grep 的標記、每輪印出，三者都不得消失。
-      ② 不可無限期紅：偵測器落地當輪就把 rc≠0 直接計入 finalFailures，而當時報出的漂移
-         修法需要系統管理員提權（尚未執行）——「先武裝、後修復」讓 nightly 在修好之前
-         沒有任何一晚會綠，正是本檔 G0 段明文要避免的訊號污染（預期中會持續一段時間的
-         狀態翻紅，只會訓練人忽略紅燈）。故 status=drift 走 WARN 不計失敗。
-      ③ fail-closed 不得被②一起放掉：status 讀不出來／status=error＝**量不出來**，
-         那是工具或系統壞了，不是「已知還沒修」，必須照樣計入 finalFailures。
-      ④ 恢復硬失敗的條件必須可判定且會自己現身：status=ok（受管任務存在且設定全符期望）
-         時要印出「條件已成立」，否則這個豁免就會永久留著而沒人知道該收回。
+      ② 漂移即回歸：提權修復已完成，此後任何 drift 都是**回歸**而非存量，必須計入
+         finalFailures，且要有自己的標籤（與 task_missing／unmeasured 分得開）。
+      ③ fail-closed：status 讀不出來／status=error＝**量不出來**，那是工具或系統壞了，
+         必須照樣計入 finalFailures；判定必須是**白名單式**（不看 rc）——缺席那一向
+         根本沒有 rc 可讀，以 rc 為主判準時它會靜默通過。
     """
     assert "check_scheduled_task_drift.py" in ps1_content, "必須呼叫排程漂移偵測器"
     assert "[SCHED-DRIFT]" in ps1_content, "輸出必須帶可 grep 的標記"
-    # ② status=drift 不得進 finalFailures
+    # ③ 判定必須白名單式（不看 rc）：缺席那一向沒有 rc 可看
     assert not re.search(
         r"if \(\$schedDriftRc -ne 0\) \{\s*\n\s*\$finalFailures \+=", ps1_content
-    ), "rc≠0 一律計失敗＝已知存量會讓 nightly 無限期恆紅（修法需提權，非本檔可解）"
-    # ③ 量不出來仍計失敗，且判定必須是**白名單式**（不看 rc）：缺席那一向沒有 rc 可看
+    ), "以 rc 為主判準時「偵測器缺席」那一向沒有 rc 可讀 → 靜默通過"
     assert re.search(
-        r"if \(\$schedDriftStatus -notin @\('drift', 'ok', 'skip'\)\) \{", ps1_content
+        r"if \(\$schedDriftStatus -notin @\('ok', 'skip'\)\) \{", ps1_content
     ), (
-        "判定必須白名單式（只有 drift/ok/skip 不計失敗）：以 rc 為主判準時，"
-        "「偵測器缺席」那一向沒有 rc 可讀 → 靜默通過"
+        "白名單只准留 ok/skip：R76 已把 drift 移出（豁免解除條件 status=ok 已達成）。"
+        "把 drift 加回去＝復活一個解除條件早已成立的豁免"
     )
     assert "'task_missing'" in ps1_content, (
-        "R75 偵測器新增的 task_missing 必須有專屬分支（訊息＋標籤）；它落在白名單外"
-        "＝計失敗，但不得沿用 drift 的存量豁免（修法不需等提權）"
+        "R75 偵測器新增的 task_missing 必須有專屬分支（訊息＋標籤）"
     )
-    for label in ("schedule_drift_task_missing", "schedule_drift_unmeasured"):
+    for label in ("schedule_drift_task_missing", "schedule_drift_unmeasured",
+                  "schedule_drift_regression"):
         assert label in ps1_content, f"缺 {label} 標籤——END 那行必須分得出是哪一種失敗"
     assert re.search(r"\$schedDriftStatus = 'absent'", ps1_content), (
         "偵測器缺席必須寫進狀態字（否則它落在白名單外這件事沒有來源）"
     )
-    # ④ 收回豁免的條件要自己現身
-    assert re.search(r"\$schedDriftStatus -eq 'ok'", ps1_content), (
-        "status=ok＝提權修復已完成，此時必須印出『可以把 drift 移回硬失敗』"
-    )
-    assert "恢復為硬失敗的條件" in ps1_content, (
-        "豁免必須寫明可判定的收回條件，不能只留一個沒有出口的例外"
+    # ② 豁免退場的史料與一般化教訓不得被清掉（下一個人立新豁免時要看得到）
+    assert "立新豁免的規矩" in ps1_content, (
+        "本項的一般化教訓（豁免解除條件必須機械可讀＋同時上鎖）必須留在檔內；"
+        "刪掉它等於把『暫時豁免＝永久豁免』這個實證重新變成未知"
     )
 
 
@@ -2130,11 +2178,15 @@ class TestSchedDriftDispositionBehavior:
         )
         assert "install_windows_nightly.ps1" in out, "訊息必須給出可執行的修法（重跑安裝器）"
 
-    def test_known_drift_still_exempt(self, ps1_content: str, tmp_path: Path) -> None:
-        """對照組：偵測器在、回報 status=drift（rc=1）→ 不得計入失敗。
+    def test_drift_counts_as_failure_under_its_own_label(
+        self, ps1_content: str, tmp_path: Path
+    ) -> None:
+        """R76 翻向：偵測器在、回報 status=drift（rc=1）→ **必須**計入失敗。
 
-        沒有這一組，「把缺席改成計失敗」很容易被實作成「一律計失敗」——那會退回
-        本輪要治的無限期紅燈。兩組必須同時綠，判定才真的分得清兩件事。
+        R75 版這一組斷言的是相反結論（drift 不得計失敗），因為當時的漂移修法卡在未執行
+        的系統管理員提權。提權已於 2026-08-05 執行、偵測器實測 status=ok ⇒ 豁免的解除
+        條件成立，drift 自此是**回歸**。標籤要與 unmeasured 分開：漂移是量到的，
+        把它印成「量不出來」會把人導向修工具而不是重跑安裝器。
         """
         repo_root = tmp_path / "mono_drift" / "AutoClaude"
         repo_root.mkdir(parents=True)
@@ -2143,8 +2195,11 @@ class TestSchedDriftDispositionBehavior:
         detector.write_text(_DRIFT_STUB, encoding="utf-8", newline="\n")
         out = self._run(ps1_content, tmp_path, repo_root)
         assert "STATUS=drift" in out, f"未解析出 status=drift：\n{out}"
-        assert "FINALFAILURES=\n" in out or out.rstrip().endswith("FINALFAILURES="), (
-            f"已知存量不得計入失敗（那會製造無限期紅燈）：\n{out}"
+        assert "FINALFAILURES=schedule_drift_regression" in out, (
+            f"漂移＝回歸，必須計入本輪失敗（豁免已隨 status=ok 退場）：\n{out}"
+        )
+        assert "schedule_drift_unmeasured" not in out, (
+            f"漂移是量到的，不得掛上『量不出來』的標籤（修法完全不同）：\n{out}"
         )
 
 
