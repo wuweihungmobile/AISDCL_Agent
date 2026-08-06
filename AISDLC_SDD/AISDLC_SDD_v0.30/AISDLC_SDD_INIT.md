@@ -1,11 +1,11 @@
-# AISDLC-SDD v0.01 框架初始化配置文件
+# AISDLC-SDD v0.30 框架初始化配置文件
 # AISDLC-SDD (Spec-First / System Design Document Driven) Framework Init
 
 > **重要**: 使用任何 AISDLC-SDD workflow 前，必須先載入此配置！
 
 ## 版本說明
 
-AISDLC-SDD v0.01 是基於 AISDLC v0.09 的 **SDD（規格先行/系統設計文件驅動）** 擴展框架。
+AISDLC-SDD v0.30 是基於 AISDLC v0.09 的 **SDD（規格先行/系統設計文件驅動）** 擴展框架。
 
 ### SDD 三大支柱
 
@@ -739,7 +739,7 @@ auto_load_config:
 ## 專案文件目錄結構
 
 ```
-AISDLC_SDD_v0.01/
+AISDLC_SDD_v0.30/
 ├── docs/                              # 專案文檔輸出目錄
 │   ├── 01_requirements/               # 需求文檔 (PRD, FRD, Invariant Specs)
 │   ├── 02_architecture/               # 架構設計 (SRD, C4, ADR)
@@ -934,7 +934,7 @@ AISDLC_SDD_v0.01/
 **來源框架**: AISDLC v0.09
 **建立日期**: 2026-04-12
 **最後更新**: 2026-06-06
-**版本**: AISDLC-SDD v0.01 — **Phase Y 可解釋性轉向（meta⁸ 互遞迴呼叫圖人類視覺化儀表板）**
+**版本**: AISDLC-SDD v0.30 — **Phase Y 可解釋性轉向（meta⁸ 互遞迴呼叫圖人類視覺化儀表板）**
 
 **演進鏈**：Phase A~G L5 Self-Driving → H L5 Reality-Grounded（執行接地 / 鷹架代謝 / 舵手交棒，ACT-045~058）→ I L6 Trustworthy Scaled（判官自審 / 成功結晶 / 艦隊並行 / 形式化雙證明，ACT-059~072）→ J L7 入口（對抗判官 / 規格自癒，ACT-073~080 / R-9.22）→ K 意圖規劃 + 辯證消歧 + 因果定位（ACT-081~088 / R-9.23）→ L 元停機 META_FSM 形式化 + 反事實重放 + 脆弱性（ACT-089~096 / R-9.24）→ M 組合 COMPOSITION_FSM（ACT-097~104 / R-9.25）→ N 全域組合最佳化 OPTIMIZATION_FSM（ACT-105~110 / R-9.26）→ O 自調目標權重 + 反 Goodhart held-out oracle（ACT-111~116 / R-9.27）→ P 全評分器一體化自校準（ACT-117~122 / R-9.28）→ Q 價值維度自我擴充（ACT-123~128 / R-9.29）→ R 維度語意自我發明（ACT-129~134 / R-9.30）→ S meta⁴ 詞彙自我擴充（ACT-135~140 / R-9.31）→ T meta⁵ 算子文法（ACT-141~146 / R-9.32）→ U meta⁶ 組合算子文法（ACT-147~149 / R-9.33）→ V meta⁷ 算子組合深度（ACT-150~152 / R-9.34）→ W meta⁸ 互遞迴 + 良基停機證書（ACT-153~155 / R-9.35）→ X 完整具身接地（ACT-156~158 / R-9.36）→ **Y 可解釋性視覺化儀表板（ACT-159~161 / R-9.37）**。詳見 CLAUDE.md §9.20~9.37 與 governance/RULES_INDEX.md。
 

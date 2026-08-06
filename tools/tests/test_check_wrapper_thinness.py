@@ -823,8 +823,9 @@ class TestConvergenceTargetsArePerShell(unittest.TestCase):
 # R74：根層守門工具的「未知引數 fail-loud」行為級鎖（R67-D20 射程自 3 站擴至全部）
 # ══════════════════════════════════════════════════════════════════════════════
 # 🔴 **為何併進本檔而非另立新檔**：`tools/tests/test_adr_xplat001_c1c2_lock.py` 的
-# `_FROZEN_GUARD_FILE_COUNT` 是 shrink-only 棘輪，`DEF-101-561③` 明文裁決「禁止新增
-# 鎖檔、只准合併／刪除」（R73 首版新建獨立檔案當場被該棘輪擋下的實錄見
+# `TestGuardLayerRatchet` 是 shrink-only 棘輪，`DEF-101-561③` 明文裁決「禁止新增
+# 鎖檔、只准合併／刪除」（🔴 R78 ARCH-03 訂正：那是 R74 當時**檔數**棘輪的語意；R77 起
+# 換成逐檔行數表，現行語意是**淨行數不得上升**。R73 首版新建獨立檔案當場被擋下的實錄見
 # `test_check_hooks_liveness.py` 同款註記）。本檔是「根層守門工具自身契約」的既有家。
 #
 # 🔴 **為何是行為級枚舉而不是逐檔比對原始碼**：R67-D20 的修法只落在三支具名工具上，

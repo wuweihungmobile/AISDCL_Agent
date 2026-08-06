@@ -11,10 +11,12 @@ from unittest.mock import patch
 
 import pytest
 
-from autoclaude.utils.config import AppConfig, StorageConfig
 from autoclaude.infra.repositories import (
-    FileStateRepository, DualStateRepository, build_state_repository,
+    DualStateRepository,
+    FileStateRepository,
+    build_state_repository,
 )
+from autoclaude.utils.config import AppConfig, StorageConfig
 
 
 class TestStorageConfigDefaults:
@@ -52,7 +54,8 @@ class TestBuildStateRepositoryBothMode:
             StorageConfig(mode="both", db_dsn=None)
 
     def test_both_mode_uses_env_var_for_dsn(self, tmp_path: Path):
-        # StorageConfig 建構須在設定 AUTOCLAUDE_DB_DSN 的 patch.dict 範圍內（T3 修正後 validator 即時驗證）
+        # StorageConfig 建構須在設定 AUTOCLAUDE_DB_DSN 的 patch.dict 範圍內
+        # （T3 修正後 validator 即時驗證）
         with patch.dict(
             os.environ,
             {"AUTOCLAUDE_DB_DSN": "postgresql+asyncpg://x/y?sslmode=require"},
@@ -64,10 +67,21 @@ class TestBuildStateRepositoryBothMode:
                 try:
                     repo = build_state_repository(str(tmp_path), cfg)
                 except ImportError:
-                    pytest.skip("sqlalchemy 未安裝；DSN 解析路徑驗證仍通過（拋 ImportError 而非 RuntimeError）")
+                    pytest.skip(
+                        "sqlalchemy 未安裝；DSN 解析路徑驗證仍通過"
+                        "（拋 ImportError 而非 RuntimeError）"
+                    )
             assert isinstance(repo, DualStateRepository)
 
-    def test_both_mode_strict_propagates(self, tmp_path: Path):
+    def test_both_mode_strict_propagates(self, tmp_path: Path, monkeypatch):
+        # 本 case 驗的是「顯式 cfg.db_dsn 的 strict 旗標會傳到 DualStateRepository」，
+        # 故必須看不到環境上的 DSN——env 優先於 config（factory 既有設計），機器上若
+        # 已 export AUTOCLAUDE_DB_DSN（nightly／PG 全開的開發環境都會設）就會改用那條
+        # DSN；本 repo 的 DSN 是同步 psycopg2，create_async_engine 當場拋
+        # InvalidRequestError，測試以一個與斷言無關的理由變紅。同班其餘 case
+        # （test_both_mode_without_dsn_raises 等）本來就有這道隔離，本 case 漏了。
+        monkeypatch.delenv("AUTOCLAUDE_DB_DSN", raising=False)
+        monkeypatch.delenv("AUTOCLAUDE_PG_DSN", raising=False)
         cfg = StorageConfig(
             mode="both", db_dsn="postgresql+asyncpg://x/y?sslmode=require",
             dual_write_strict=True, dual_read_resolution="fail_loud",
@@ -106,7 +120,13 @@ class TestBuildStateRepositoryTLSEnforcement:
             with pytest.raises(RuntimeError, match="必須啟用 TLS"):
                 build_state_repository(str(tmp_path), cfg)
 
-    def test_dsn_with_sslmode_passes_tls_check(self, tmp_path: Path):
+    def test_dsn_with_sslmode_passes_tls_check(self, tmp_path: Path, monkeypatch):
+        # 隔離理由同 test_both_mode_strict_propagates；另外 AUTOCLAUDE_ALLOW_INSECURE_DB
+        # 也必須清掉——它一旦存在，本 case 就算 sslmode 沒生效也會過，鑑別力歸零
+        # （對照組是同班的 test_insecure_override_disables_tls_check）。
+        monkeypatch.delenv("AUTOCLAUDE_DB_DSN", raising=False)
+        monkeypatch.delenv("AUTOCLAUDE_PG_DSN", raising=False)
+        monkeypatch.delenv("AUTOCLAUDE_ALLOW_INSECURE_DB", raising=False)
         cfg = StorageConfig(
             mode="db_only",
             db_dsn="postgresql+asyncpg://u:p@h/d?sslmode=require",
@@ -190,10 +210,12 @@ class TestDualStateRepositoryBehavior:
             self.fail_save = fail_save
             self.fail_load = fail_load
         def save_checkpoint(self, pid, cp):
-            if self.fail_save: raise RuntimeError("PG down")
+            if self.fail_save:
+                raise RuntimeError("PG down")
             self.saved[pid] = cp
         def load_checkpoint(self, pid):
-            if self.fail_load: raise RuntimeError("PG down")
+            if self.fail_load:
+                raise RuntimeError("PG down")
             return self.saved.get(pid)
         def clear_checkpoint(self, pid): self.saved.pop(pid, None)
         def schedule_resume(self, pid, m):

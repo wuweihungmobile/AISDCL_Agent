@@ -15,9 +15,9 @@ unrecorded）」，據此宣稱「**Windows 側從未有真機輪**」  <!-- sta
 ——被使用者當場以開發史
 駁回：本 repo 本來就是在 Windows 上開發的（R20／R42／R59／R64／R66 皆為 Windows 真機輪，
 另有 Windows Task Scheduler 的每日 nightly 全套回歸，時刻現查 Get-ScheduledTaskInfo）。
-而**同一份輸出的下三行就印著
-Windows 欄的 `3767 passed / 208 skipped`**，那正是 Windows 實機量得的值——訊息與它自己的
-資料自相矛盾，而讀者採信先看到的那一句。
+而**同一份輸出的下三行就印著 Windows 欄的實測計數**
+（`3767 passed / 208 skipped` <!-- baseline-ok: DEF-101-756 事故原文，非現行基線 -->），
+那正是 Windows 實機量得的值——訊息與它自己的資料自相矛盾，而讀者採信先看到的那一句。
 
 根因：**用同一個 `unrecorded` 同時表達兩件相反的事**——
   ① 該平台**從未量測**  → **平台覆蓋缺口**，只能去那台機器跑一輪才補得起來
@@ -64,10 +64,24 @@ ORIGIN_VALUES: tuple[str, ...] = (ORIGIN_SELF, ORIGIN_PRE_MECHANISM, ORIGIN_NEVE
 
 # ── 本輪 Q-03：三個直譯器＝三個 skip profile，而上面四欄記不到它 ──────────────────
 #
-# 同一棵樹、同一天、四項 env provenance 可以完全相同，而 AutoClaude 的 skipped 差 15 支：
-# `.venv` 4017/160、pyenv-win（每日 nightly 用的那支）4032/145、出廠 cleanvenv 3919/224。
-# 差異來源是**直譯器本身**（pyenv-win 那支裝了 `claude_agent_sdk`，`.venv` 沒有），
-# 而它從來不在記錄裡 ⇒ 兩份不同環境的數字在錨上長得一模一樣，沒有任何東西會說話。
+# 同一棵樹、同一天、四項 env provenance 可以完全相同，而 AutoClaude 的 passed／skipped
+# 兩個數字都對不上：`.venv`／pyenv-win（每日 nightly 用的那支）／出廠 cleanvenv＝三支直譯器
+# ＝三個 skip profile。差異來源是**直譯器本身**（pyenv-win 那支裝了 `claude_agent_sdk`，
+# `.venv` 沒有），而它從來不在記錄裡 ⇒ 兩份不同環境的數字在錨上長得一模一樣，沒有任何
+# 東西會說話。**三支的計數各有各的取得方式，本檔一個都不登載**：出廠 cleanvenv 那一支的
+# 唯一出處是 `ONBOARDING.md` §7 表② 逐平台欄（＋同節平台錨的 `interpreter`／`sdk-extra`）；
+# 另外兩支是隨環境浮動的本機量測，**不屬於任何文件**，要就當場跑
+# （`python -m pytest tests/ -q` 於 `AutoClaude/`）。
+#
+# 🔴 **R78（QA-02）：本段原本就地列出三組實測計數，而其中至少一組在被引用的當下已與磁碟
+# 不符**（R78 於主 `.venv` 親跑全套複驗，兩個數字皆與原記的那組差達數十支；現值只看 SSOT，
+# 本段刻意不再抄一份下來）。兩層原因，兩層都在本次一起修：
+#   ① **量測值離開 SSOT 就只會腐化**——這裡不是它的家，改為指向 SSOT；
+#   ② **當時沒有任何鎖看得到這一行**——`tools/check_pytest_baseline_sites.py` 的掃描面
+#      當時只有 `.md`，且其判準要求同一行出現 `passed`／`skipped` 字樣，於是把計數
+#      **簡寫成一組斜線對**（`NNNN/NNN`）的形態結構上漏接：即使把本檔加進掃描面也照樣
+#      抓不到。該工具已於同一次變更補上簡寫判準（`_PAIR_RE`）並把本檔納入掃描面
+#      ⇒ 本檔（與 `sync_onboarding_baselines.py`）再出現量測值會當場轉紅。
 #
 # 🔴 為何另立一個 tuple、不併進 `ENV_PROVENANCE_FIELDS`：磁碟上兩條錨（darwin／win32）
 # 都是在本欄位存在之前量的。併進去會讓 `validate_state` 的「宣告 self-recorded 卻有欄位
@@ -89,6 +103,32 @@ PRE_FIELD = "pre-field"
 # 「既有欄非表態不可」這條紀律改由 `late_field_report()` 承擔：它直接讀**真實文件**的
 # 錨行，缺席即 rc 級 fail-loud（注入實測見該函式），而合成輸入不經過它。
 PROVENANCE_FIELDS: tuple[str, ...] = (*ENV_PROVENANCE_FIELDS, ORIGIN_FIELD)
+
+
+def _assert_late_fields_are_disjoint() -> None:
+    """兩個集合互斥＝上面那段設計說明的**可執行形態**（R78 SD-05）。
+
+    為何要有這一條：`LATE_ENV_FIELDS` 不併進 `PROVENANCE_FIELDS` 是**刻意**的（併進去會讓
+    數支既有測試的合成 prov dict 當場 `KeyError`），而「刻意」在這個檔裡此前只寫成散文——
+    同一檔內另一段散文就已經把它講反了，且兩段互相矛盾不會讓任何東西轉紅。日後有人「順手
+    補齊」把兩欄併進去時，紅的會是一批看起來與他無關的既有測試（KeyError），而不是這個決定
+    本身；此處當場 fail-loud 並把 WHY 講完，才是那個決定的鎖。
+
+    刻意用 `raise` 而非 `assert`：`python -O` 會把 `assert` 整行拿掉，那正是「鎖在生產環境
+    自己消失」的形態。
+    """
+    overlap = set(LATE_ENV_FIELDS) & set(PROVENANCE_FIELDS)
+    if overlap:
+        raise AssertionError(
+            f"LATE_ENV_FIELDS 與 PROVENANCE_FIELDS 重疊：{sorted(overlap)}——這兩個集合"
+            f"**必須互斥**。PROVENANCE_FIELDS 是 `parse_provenance()` 的必備集合，同時被"
+            f"`render_fingerprints()` 與數支既有測試的合成 prov dict 消費 ⇒ 併入即 KeyError；"
+            f"late 欄的 rc 級 fail-loud 由 `late_field_report()`（讀真實錨行）承擔。"
+            f"要改這個決定，得先把那些合成輸入一起改，並同步改寫本檔兩處說明。"
+        )
+
+
+_assert_late_fields_are_disjoint()
 
 # 平台覆蓋的權威來源。**基線工具不是**——它只知道「這一欄的數字在什麼環境量的」。
 # 逐字寫進訊息裡，讓下一個讀者不必再從 provenance 欄位反推平台覆蓋。
@@ -312,8 +352,16 @@ def late_field_notices(label: str, prov: dict[str, str], live: dict[str, str]) -
     （＝本 repo 已付過代價的死鎖形狀）。本函式要治的病是「兩個環境的數字長得一樣而
     沒有東西會說話」，把它講出來就已經治好了；把它升成阻斷反而換來另一個病。
 
-    rc 級的那一半由**欄位存在性**承擔：兩欄已併入 `PROVENANCE_FIELDS`，缺席或改名
-    即 `parse_provenance()` fail-loud（`--check-snapshot` 當場非零）。
+    rc 級的那一半由**欄位存在性**承擔，但**承擔它的不是 `parse_provenance()`**：`LATE_ENV_FIELDS`
+    這兩欄刻意**不在** `PROVENANCE_FIELDS` 裡（理由見該 tuple 上方那段 Scan-H⑥ 互鎖說明），
+    改由 `late_field_report()` 直接讀真實文件的錨行，缺席或改名即 rc 級 fail-loud
+    （`--check-snapshot` 當場非零）。
+    🔴 **R78（SD-05）訂正**：本段原先寫的是「兩欄已併入 `PROVENANCE_FIELDS`、由
+    `parse_provenance()` fail-loud」——與同檔上方那段說明**直接對立**，而兩段都是散文、
+    沒有任何東西會因為它們互斥而轉紅。實害不是讀起來矛盾：照原文的理解，`late_field_report()`
+    看起來只是一道重複檢查，重構時把它從呼叫鏈拿掉是**看似安全**的動作，而那會讓這兩欄的
+    rc 級 fail-loud 靜默消失（`parse_provenance()` 根本沒在管它們）。兩段之間的互斥已由
+    模組層 `_assert_late_fields_are_disjoint()` 升級為 import 期硬約束。
     """
     out: list[str] = []
     for field in LATE_ENV_FIELDS:

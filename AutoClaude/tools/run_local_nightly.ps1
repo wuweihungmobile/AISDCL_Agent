@@ -503,6 +503,47 @@ if (-not $branch -or -not $sha) {
   Log "git context: branch=$branch sha=$sha (verified non-empty)"
 }
 
+# ── 樣本效度戳記（本輪新增）──────────────────────────────────────────────────────
+# 🔴 缺陷本體：排程在**收輪作業進行中**觸發時，量到的是一棵半成品樹，而這種紅
+# **既不是缺陷也不是綠——它是無效樣本**，可是整條取證鏈裡沒有任何地方能表達這件事。
+# 2026-08-06 22:30 那輪就是實例：HEAD=a1ee537，而該輪的收官 commit a7a3080 在
+# 1.6 小時後才落地；工作樹上的 tools/check_script_parity.py 當時是 1635 行，
+# 而**沒有任何一個 commit** 的該檔是 1635 行（a1ee537=1447、a7a3080=1460）
+# ⇒ 那個 rc=1 量的是一個從未存在於版本史上的狀態。
+# 回溯統計（2026-08-07 實測）：本機 17 份有 header 的 per-run log 中，13 份在跑完
+# 6 小時內就有新 commit 落地 ⇒ 高度疑似中間態。而 .ac4_history.jsonl／
+# .observability_history.jsonl 各 46 筆樣本**一個欄位都沒記樹狀態**，故 2026-07-27
+# 以前的樣本連這個 proxy 都做不了——**回溯不可判定**，只能從今天起讓它可判定。
+#
+# 為何是「標記」而不是「髒樹就跳過不跑」：跳過會讓漏跑更嚴重，而漏跑正是 obs／drift
+# 卡在 span 門檻的直接原因（見 tools/observability_ga_check.py 的 span 判準）。
+# 樣本要照收，但必須自帶「這筆可不可信」的標籤。
+#
+# 指紋刻意**含內容**（不只 --porcelain 的狀態字母＋路徑）：只雜湊狀態列的話，
+# 「對一支已在清單內的檔再改一次」對它完全不可見——同 MIN_TESTS 重釘紀律踩過的坑。
+$treeDirtyCount = 0
+$treeFingerprint = ''
+try {
+  $porcelain = (& git status --porcelain 2>$null | Out-String)
+  $global:LASTEXITCODE = 0
+  $treeDirtyCount = @($porcelain -split "`n" | Where-Object { $_.Trim() -ne '' }).Count
+  $diffText = (& git diff HEAD 2>$null | Out-String)
+  $global:LASTEXITCODE = 0
+  $sha1 = [System.Security.Cryptography.SHA256]::Create()
+  $bytes = [System.Text.Encoding]::UTF8.GetBytes($porcelain + $diffText)
+  $treeFingerprint = ([System.BitConverter]::ToString($sha1.ComputeHash($bytes)) -replace '-','').Substring(0, 12).ToLower()
+  $sha1.Dispose()
+} catch {
+  Log "工作樹狀態取樣失敗（$_）——本輪樣本效度**未知**，不得當成乾淨" 'WARN'
+  $treeDirtyCount = -1
+}
+$script:TreeState = if ($treeDirtyCount -eq 0) { 'clean' } elseif ($treeDirtyCount -lt 0) { 'unknown' } else { 'dirty' }
+Log ("SAMPLE VALIDITY: tree_state={0} dirty_entries={1} tree_fingerprint={2} head={3}" -f `
+     $script:TreeState, $treeDirtyCount, $treeFingerprint, $sha)
+if ($script:TreeState -ne 'clean') {
+  Log ("SAMPLE VALIDITY: 本輪在**非乾淨**工作樹上採集（{0} 筆未提交變更）⇒ 本輪任何紅燈都可能是「量到半成品」而非真缺陷，任何綠燈也不代表 HEAD 為綠；判讀本輪 log 前先確認上列指紋對應的是誰的作業" -f $treeDirtyCount) 'WARN'
+}
+
 # SD_09 W3 Round 19 audit P1-AUDIT-R18-2 修復（紀律 #13 觀察期 jsonl 進度可見 + delta 取證）：
 # 跑前 snapshot 各 jsonl 行數；跑後比對 delta，明示「本次 run 是否進帳」。
 # 避免 stage exception 但 jsonl 凍結時，「END observation progress: ac4=4/14」誤導 user

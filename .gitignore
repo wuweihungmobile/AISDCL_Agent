@@ -74,3 +74,9 @@ desktop.ini
 
 # R57 ARCH-R57R3-03：run_root_unittests 失敗明細落檔（診斷用，不入庫）
 tools/.last_failure.log
+
+# act 實跑帳本（run_act_core.py `--verify-all` 寫入，`--list` 讀取）。
+# 刻意**不入庫**：它記的是「**這台機器**上那一次 act 執行真的走完了」——是本機量測值，
+# 不是 repo 的性質。入庫等於把 A 機器的實跑結果變成 B 機器的 ✅，而那正是本 repo 反覆在
+# 治的「宣稱先於查證」。每台機器自己跑、自己記帳。
+/.act-runs/

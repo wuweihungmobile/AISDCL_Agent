@@ -51,6 +51,7 @@
 from __future__ import annotations
 
 import argparse
+import datetime as _dt
 import json
 import re
 import subprocess
@@ -72,6 +73,31 @@ STATUS_ERROR = "error"
 # R75：受管任務有一支以上整支不存在（見檔頭判準表；刻意不叫 partial——
 # 該狀態字在本 repo 另有既定的窄語意，R64 有誤用紀錄）。
 STATUS_TASK_MISSING = "task_missing"
+# 本輪新增：受管任務**很久沒有真的跑過**（排程沒有觸發）。與 task_missing 分開：
+# 任務還在、設定也對，但它沒有在跑——這是「漏跑」的第二強形態，修法也不同
+# （查 powercfg 喚醒計時器／機器整段離線／MultipleInstances 把後續觸發吃掉），
+# 不是重跑安裝器。
+STATUS_STALE_RUN = "stale_run"
+
+#: 「多久沒跑算漂移」。兩支受管任務都是**每日**觸發，故 1 天內必有一次；取 3 天＝
+#: 容許「機器整個週末關機 + StartWhenAvailable 補跑」這種正常情形，又不至於讓一整週
+#: 的漏跑靜默。刻意不取 1：那會讓任何一次正常的關機夜變紅（永紅的閘門會被關掉，
+#: 見 tools/check_defect_log_crossref.py 的 ARCH-R59-NB4 判例）。
+STALE_RUN_DAYS_DEFAULT = 3
+
+#: 觸發時刻在 Task XML 裡的位置。兩種 trigger 型別都收，取先命中者。
+_TRIGGER_XML_PATHS = (
+    "Triggers/CalendarTrigger/StartBoundary",
+    "Triggers/TimeTrigger/StartBoundary",
+)
+
+#: `LastTaskResult` 的**已知良性值**——這些不代表排程壞了，不得據以判紅。
+#:   0x00000000 成功
+#:   0x00041301 (267009) 任務正在執行中
+#:   0x00041303 (267011) 任務尚未執行過
+_LAST_RESULT_OK = 0
+_LAST_RESULT_RUNNING = 267009
+_LAST_RESULT_NEVER_RAN = 267011
 
 
 def load_expectations(path: Path) -> dict[str, dict[str, str]]:
@@ -144,11 +170,140 @@ def export_task_xml(task_name: str) -> str | None:
     return out
 
 
+def query_task_info(task_name: str) -> dict[str, Any] | None:
+    """取單一任務的執行史（LastRunTime／LastTaskResult／NumberOfMissedRuns）。
+
+    刻意**不**走 `Export-ScheduledTask`：那份 XML 是**定義**，不含任何執行結果——
+    這正是本檔此前看不到「昨晚跑失敗了」的機械原因（對照組只有定義、沒有履歷）。
+
+    `LastRunTime` 顯式格式化成 ISO-8601 UTC 字串再交給 JSON：PS 5.1 的
+    `ConvertTo-Json` 會把 `DateTime` 序列化成 `/Date(…)/`，那個形狀在 Python 端解析
+    要多一層正則，而且不同 PS 版本行為不同（本 repo 對「同一份輸出兩種形狀」有前例教訓）。
+    """
+    if not re.fullmatch(r"[A-Za-z0-9_\-]+", task_name):
+        raise ValueError(f"任務名稱含非預期字元，拒絕代入命令：{task_name!r}")
+    rc, out = _run_powershell(
+        "$ErrorActionPreference='Stop'; "
+        f"$i = Get-ScheduledTaskInfo -TaskName '{task_name}' -ErrorAction SilentlyContinue; "
+        "if (-not $i) { exit 9 }; "
+        "[pscustomobject]@{ "
+        "LastRunTime = $(if ($i.LastRunTime) "
+        "{ $i.LastRunTime.ToUniversalTime().ToString('yyyy-MM-ddTHH:mm:ssZ') } else { '' }); "
+        "LastTaskResult = $i.LastTaskResult; "
+        "NumberOfMissedRuns = $i.NumberOfMissedRuns "
+        "} | ConvertTo-Json -Compress"
+    )
+    if rc == 9:
+        return None
+    if rc != 0:
+        return None  # 讀不到履歷不阻斷設定比對；classify_last_result 會標成 unmeasured
+    start = out.find("{")
+    if start < 0:
+        return None
+    try:
+        return json.loads(out[start:])
+    except json.JSONDecodeError:
+        return None
+
+
+def load_trigger_expectations(path: Path) -> dict[str, str]:
+    """讀期望觸發時刻 SSOT → {task_name: 'HH:mm'}；未登記者不列入。
+
+    刻意放在 `expected` **之外**（任務層的 sibling 欄位）：`expected` 那組的每一個鍵
+    都受 `tools/tests/test_install_windows_nightly.py::TestScheduledTaskExpectationsSsot::
+    test_every_expected_value_is_actually_applied_by_the_installer` 的「欄位集合必須
+    逐字等於安裝器套用手段對照表」約束，塞進去會當場讓那道鎖紅。
+    """
+    raw = json.loads(path.read_text(encoding="utf-8"))
+    out: dict[str, str] = {}
+    for name, spec in raw["tasks"].items():
+        want = spec.get("expected_trigger_time")
+        if want:
+            out[name] = str(want)
+    return out
+
+
+def trigger_time_of(actual: dict[str, str]) -> str | None:
+    """從已解析的 Task XML 取觸發時刻的 `HH:mm`（不比日期）。
+
+    WHY 只比 HH:mm：`StartBoundary` 是完整時間戳（例 `2026-08-05T21:30:00+08:00`），
+    其中的**日期**是註冊當天、每次重跑安裝器都會變 ⇒ 整串拿去等值比對必然天天漂移，
+    而真正被治理的不變量只有「每天幾點跑」。
+    """
+    for key in _TRIGGER_XML_PATHS:
+        raw = actual.get(key)
+        if not raw:
+            continue
+        m = re.search(r"T(\d{2}:\d{2})", raw)
+        if m:
+            return m.group(1)
+    return None
+
+
+def classify_last_result(info: dict[str, Any] | None) -> tuple[str, str]:
+    """把 `LastTaskResult` 翻成 `(類別, 人話)`。純函式，可單元測試。
+
+    🔴 這裡是本檔此前**結構性失明**的那一格：偵測器驗了 7 項設定卻從不看
+    「上一次到底跑成功了沒」，於是 2026-08-06 兩支任務雙雙 `LastTaskResult=1`，
+    它照樣印 `status=ok` / rc=0。
+
+    🔴 為什麼 `failed` 這一類**不得**升級成頂層 status（設計上最要緊的一句）：
+    `AutoClaude_Nightly` 的工作就是「抓到問題時回 1」。若把 rc≠0 一律判紅，本偵測器
+    會在**nightly 正常發揮作用的每一個晚上**轉紅，而它自己又是由那支 nightly 呼叫的
+    （run_local_nightly.ps1 對狀態字採白名單 fail-closed）⇒ nightly 失敗 → 隔夜偵測器
+    報紅 → nightly 再失敗，形成**自我維持的永紅迴圈**。永紅的閘門會被整個關掉，比沒有
+    鎖更糟（ARCH-R59-NB4 判例）。故本類別一律「大聲印、進 JSON、不動 rc」——
+    要治的是**靜默**，不是要多一個紅燈。
+    """
+    if info is None:
+        return "unmeasured", "讀不到 Get-ScheduledTaskInfo（量不出來）"
+    rc = info.get("LastTaskResult")
+    if rc is None:
+        return "unmeasured", "Get-ScheduledTaskInfo 沒有 LastTaskResult 欄位"
+    rc = int(rc)
+    if rc == _LAST_RESULT_OK:
+        return "ok", "上次執行成功（rc=0）"
+    if rc == _LAST_RESULT_RUNNING:
+        return "running", "任務正在執行中（0x00041301）"
+    if rc == _LAST_RESULT_NEVER_RAN:
+        return "never_ran", "任務尚未執行過（0x00041303）"
+    return "failed", (
+        f"上次執行回報失敗 rc={rc}（0x{rc & 0xFFFFFFFF:08X}）"
+        "——這代表**那支工作自己**判定失敗，不代表排程設定漂移；"
+        "請看該任務的 log（nightly＝AutoClaude/logs/nightly_latest.log）"
+    )
+
+
+def _parse_iso_utc(text: str) -> _dt.datetime | None:
+    try:
+        return _dt.datetime.strptime(text, "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=_dt.UTC)
+    except (TypeError, ValueError):
+        return None
+
+
+def stale_run_days(info: dict[str, Any] | None, now: _dt.datetime) -> float | None:
+    """距離上次真的跑過幾天；沒跑過／讀不到回 None（**不算 stale**）。
+
+    「沒跑過」刻意不判紅：fresh clone／剛裝好還沒到第一次觸發的機器都是這一格，
+    判紅等於讓新機器開箱即紅（同本檔「全缺席＝skip」那一段的理由）。
+    """
+    if not info:
+        return None
+    last = _parse_iso_utc(str(info.get("LastRunTime") or ""))
+    if last is None:
+        return None
+    return (now - last).total_seconds() / 86400.0
+
+
 def evaluate(
     expectations: dict[str, dict[str, str]],
     actuals: dict[str, dict[str, str] | None],
     *,
     require_installed: bool = False,
+    infos: dict[str, dict[str, Any] | None] | None = None,
+    trigger_expectations: dict[str, str] | None = None,
+    stale_days: float = STALE_RUN_DAYS_DEFAULT,
+    now: _dt.datetime | None = None,
 ) -> dict[str, Any]:
     """純函式判定（可單元測試，不碰真實排程）。
 
@@ -161,7 +316,13 @@ def evaluate(
     `require_installed` 的用途見檔頭「全缺席」段：預設 False 讓 CI runner／未安裝的
     開發機保持綠，True 給「知道自己該有排程」的機器把那一格關上。
     """
-    report: dict[str, Any] = {"status": STATUS_OK, "tasks": {}, "drifts": [], "absent": []}
+    infos = infos or {}
+    trigger_expectations = trigger_expectations or {}
+    now = now or _dt.datetime.now(_dt.UTC)
+    report: dict[str, Any] = {
+        "status": STATUS_OK, "tasks": {}, "drifts": [], "absent": [],
+        "health": [], "stale": [],
+    }
     present = 0
     for task, expected in expectations.items():
         actual = actuals.get(task)
@@ -178,9 +339,42 @@ def evaluate(
                 task_drifts.append(
                     {"setting": key, "expected": want_norm, "actual": got if got else "<missing>"}
                 )
+        # 觸發時刻＝與那 7 項同一類（「排程契約被改掉了」），故併入 drifts 而非另立狀態字。
+        # 實證這一格非補不可：2026-08-06 實查 AutoClaude_WindowsSmoke 觸發在 21:30，
+        # 而掌舵者記得自己設的是 23:30 —— install_windows_nightly.ps1 的 `-SmokeAt`
+        # **預設值就是 21:30**，任何一次不帶參數重跑安裝器都會 Unregister→Register 把它
+        # 改回預設，而本偵測器當時看不到觸發時刻 ⇒ 整個改動靜默失效。
+        want_time = trigger_expectations.get(task)
+        if want_time:
+            got_time = trigger_time_of(actual)
+            if got_time != want_time:
+                task_drifts.append({
+                    "setting": "Triggers/StartBoundary(HH:mm)",
+                    "expected": want_time,
+                    "actual": got_time or "<missing>",
+                })
         report["tasks"][task] = {"present": True, "drifts": task_drifts}
         for d in task_drifts:
             report["drifts"].append({"task": task, **d})
+
+        info = infos.get(task)
+        kind, human = classify_last_result(info)
+        days = stale_run_days(info, now)
+        report["tasks"][task]["last_result"] = {
+            "kind": kind,
+            "message": human,
+            "last_run_time": (info or {}).get("LastRunTime") or "",
+            "last_task_result": (info or {}).get("LastTaskResult"),
+            "missed_runs": (info or {}).get("NumberOfMissedRuns"),
+            "days_since_last_run": None if days is None else round(days, 2),
+        }
+        report["health"].append({"task": task, "kind": kind, "message": human})
+        # 「很久沒真的跑過」＝排程沒觸發，這**才**是本偵測器的射程（會判紅）。
+        # 與上面的 `failed` 相反：那個是工作自己失敗（工作在做事），這個是工作沒被叫起來。
+        if days is not None and days > stale_days:
+            report["stale"].append({
+                "task": task, "days_since_last_run": round(days, 2), "threshold_days": stale_days,
+            })
     report["present_count"] = present
     report["expected_count"] = len(expectations)
     if present == 0:
@@ -205,6 +399,15 @@ def evaluate(
         )
     elif report["drifts"]:
         report["status"] = STATUS_DRIFT
+    elif report["stale"]:
+        # 排在 drift 之後：設定不對時 drift 的修法（重跑安裝器）通常也會把觸發重新排上，
+        # 兩者同時成立時先講 drift。
+        report["status"] = STATUS_STALE_RUN
+        report["reason"] = "；".join(
+            f"{s['task']} 已 {s['days_since_last_run']} 天沒有真的執行過"
+            f"（> {s['threshold_days']} 天門檻）⇒ 排程沒有觸發，觀察期當日零進帳"
+            for s in report["stale"]
+        )
     return report
 
 
@@ -220,6 +423,10 @@ def main(argv: list[str] | None = None) -> int:
             "預設關閉的理由見檔頭「全缺席」段（CI runner／fresh clone 不得因此永久紅）"
         ),
     )
+    parser.add_argument(
+        "--stale-days", type=float, default=STALE_RUN_DAYS_DEFAULT,
+        help=f"上次真的執行過超過幾天算漂移（預設 {STALE_RUN_DAYS_DEFAULT}；WHY 見該常數）",
+    )
     args = parser.parse_args(argv)
 
     if sys.platform != "win32":
@@ -232,18 +439,27 @@ def main(argv: list[str] | None = None) -> int:
         return 0
 
     expectations = load_expectations(args.expectations)
+    trigger_expectations = load_trigger_expectations(args.expectations)
     actuals: dict[str, dict[str, str] | None] = {}
+    infos: dict[str, dict[str, Any] | None] = {}
     try:
         for task in expectations:
             xml_text = export_task_xml(task)
             actuals[task] = parse_task_xml(xml_text) if xml_text is not None else None
+            infos[task] = query_task_info(task) if xml_text is not None else None
     except (RuntimeError, ValueError, ET.ParseError, OSError) as exc:
         payload = {"status": STATUS_ERROR, "reason": str(exc)}
         print(json.dumps(payload, ensure_ascii=False) if args.json
               else f"[schedule-drift] ERROR — {exc}")
         return 1  # fail-closed：量不出來不得當成沒問題
 
-    report = evaluate(expectations, actuals, require_installed=args.require_installed)
+    report = evaluate(
+        expectations, actuals,
+        require_installed=args.require_installed,
+        infos=infos,
+        trigger_expectations=trigger_expectations,
+        stale_days=args.stale_days,
+    )
     if args.json:
         print(json.dumps(report, ensure_ascii=False, indent=2))
     else:
@@ -266,6 +482,30 @@ def main(argv: list[str] | None = None) -> int:
             print(f"  - {task}: {len(info['drifts'])} 項漂移")
             for d in info["drifts"]:
                 print(f"      {d['setting']}: 實機={d['actual']} 期望={d['expected']}")
+        # 🔴 執行履歷一律印，**與 rc 無關**——本檔要治的缺陷是「兩支任務昨晚都
+        # LastTaskResult=1 而它印 status=ok」，也就是**靜默**，不是少一個紅燈。
+        # 為何 kind=failed 不動 rc：見 classify_last_result 的 docstring（永紅迴圈）。
+        print("  執行履歷（LastTaskResult／LastRunTime — 本段不影響 rc，見下方說明）：")
+        for task, info in report["tasks"].items():
+            lr = info.get("last_result")
+            if not lr:
+                continue
+            mark = {"ok": "✅", "failed": "❌", "running": "⏳",
+                    "never_ran": "•", "unmeasured": "❓"}.get(lr["kind"], "•")
+            age = lr["days_since_last_run"]
+            age_txt = "（從未執行）" if age is None else f"（{age} 天前）"
+            print(f"    {mark} {task}: {lr['message']} — 上次執行 "
+                  f"{lr['last_run_time'] or 'n/a'} {age_txt}"
+                  f"，錯過次數 {lr['missed_runs']}")
+        if any(h["kind"] == "failed" for h in report["health"]):
+            print("    ⚠️ 上面有工作自報失敗。**這不會讓本檢查轉紅**——那代表該工作"
+                  "自己抓到問題（它在做事），而不是排程漂移；把它判紅會讓本檢查在"
+                  "nightly 每次發揮作用的晚上都紅，且本檢查正是由 nightly 呼叫的"
+                  "（＝自我維持的永紅迴圈）。請直接看該工作的 log。")
+        if report["stale"]:
+            print(f"  ❌ 排程未觸發：{report['reason']}")
+            print("     排查：powercfg 喚醒計時器是否關閉／機器整段離線／"
+                  "MultipleInstances 把後續觸發吃掉／WakeToRun 未生效")
         if report["status"] == STATUS_TASK_MISSING:
             print(f"  原因：{report['reason']}")
         if report["status"] in (STATUS_DRIFT, STATUS_TASK_MISSING):
@@ -275,7 +515,9 @@ def main(argv: list[str] | None = None) -> int:
             print(f"    powershell -ExecutionPolicy Bypass -File {installer} -Status")
             print("  ⚠️ 安裝器會 Unregister→Register，觸發時刻取自 param 預設值——"
                   "要保留現行時刻請顯式傳 -NightlyAt/-SmokeAt（見該檔 param 區塊）")
-    return 1 if report["status"] in (STATUS_DRIFT, STATUS_ERROR, STATUS_TASK_MISSING) else 0
+    return 1 if report["status"] in (
+        STATUS_DRIFT, STATUS_ERROR, STATUS_TASK_MISSING, STATUS_STALE_RUN
+    ) else 0
 
 
 if __name__ == "__main__":

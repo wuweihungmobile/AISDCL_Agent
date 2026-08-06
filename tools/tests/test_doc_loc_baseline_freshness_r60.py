@@ -2789,6 +2789,13 @@ _SUBPROJECT_SCOPE_MARK = "僅 AutoClaude 子專案 session"
 #: 補了掃描器就把該列的機械物欄改掉，並把該項從此處刪除——兩邊由下方雙向判準綁住。
 _IRON_LAW3_UNCOVERED: tuple[str, ...] = (
     "`$env:*` 讀取", "副檔名判斷", "`Get-Command` 解析", "大小寫敏感度",
+    # R78 新登記的危害類：`.ps1` 方向的行尾。原本整類被「行尾」一個詞蓋住，而那一列
+    # 具名的兩個機械物射程**只有** `.sh`／`.bash`。逐項實查後確認 `.ps1` 方向零守門：
+    # BOM hook 是逐位元組保留、git hooks 零命中、唯一在管的 CI 判準因 checkout 必定
+    # 重新 smudge 而**結構上永遠綠**。本輪用 act 跑工作樹才讓 6 支檔顯形。
+    # 🔴 登記它會讓分母 +1 而分子不動——依本表的雙邊棘輪設計這是**綠**的，
+    #    誠實登記新發現的無守門危害類不再有代價（那正是 R77 改造這條棘輪的目的）。
+    "行尾（**`.ps1` 方向**",
 )
 #: 鐵律三對照表的表頭（定位那**一張**表，不是 CLAUDE.md 內所有表格）。
 _IRON_LAW3_TABLE_HEAD = "| 觸發項 |"
@@ -3497,6 +3504,265 @@ class TestR75IronLawMechanismSubstance(unittest.TestCase):
                "::TestPreCommitBlocksCrOnShellScripts` ＋ "
                "`AutoClaude/tools/hooks/check_sh_eol.py` | 同上 |")
         self.assertEqual(iron_law3_substance_problems(row, _REPO_ROOT), [])
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# R78 ARCH-03／SD-07：具名機械物鎖的第四面 —— **反引號 Python 識別字**
+# ══════════════════════════════════════════════════════════════════════════════
+# 🔴 缺陷本體（複審逐字指出的逃逸縫）：上面三面判準的擷取器 `_MECHANISM_PATH_RE` 只認
+# **帶副檔名的路徑**。於是「以一個**裸識別字**指認機械物」這種寫法完全不在任何鎖的視野內：
+#   · R77 的護欄層**檔數**棘輪常數被它自己那一輪刪掉，全庫剩零個賦值定義、十餘個引用
+#     （分布十支檔）——**專門偵測懸空引用的那道鎖照樣綠**。
+#     （🔴 本段刻意不逐字寫出那個已死的名字：本節新加的判準會把它判成幽靈，而那正是它
+#      該有的行為；訂正註記引述假話等於製造新假話——同 R73 已立的紀律。）
+#   · 最嚴重的一處：`AutoClaude/tools/check_loc_budget.py` 拿它當「根層 `tools/tests/`
+#     不納入 LOC 分級管轄」的正當性依據 ⇒ 一整層數萬行護欄碼的豁免，掛在一個不存在的符號上。
+#   · 同源還有一個已移除的測試方法名與一個從未存在的函式名，散在十餘處註解／docstring。
+#
+# 判準：文字裡以反引號**單獨**框起來的 Python 識別字（三種形狀：前導底線的 ALLCAPS 常數、
+# Test 開頭的類名、test_ 開頭的方法名），必須在 repo 的符號索引裡找得到定義，否則就是幽靈。
+#
+# 三個刻意的設計選擇（都付過偽陽性的學費，別回頭放寬）：
+#   ① **只認整段反引號內容就是識別字**：`` `a/b.py::TestFoo` `` 這種形態歸上面三面管，
+#      本面不重複收（重複收會讓同一筆違規印兩次，讀者無從判斷是幾個問題）。
+#   ② **形狀刻意窄**：ALLCAPS 那一款要求前導底線（環境變數如 PYTHONUTF8 沒有底線開頭，
+#      不會被誤收）；`func()` 這種呼叫形態**整類不收**——實測會大量收到 `read_text()`／
+#      `sorted()` 這類 stdlib 方法，而偽陽性會讓整道鎖被關掉，那比縮面更糟。
+#   ③ **符號索引含模組檔名**：`` `test_ps1_bom` `` 這種「不帶副檔名的模組提及」是本 repo
+#      的既有寫法，不是幽靈。
+_SYMBOL_CLAIM_RE = re.compile(
+    r"`("
+    r"_[A-Z][A-Z0-9_]{3,}"            # 私有 ALLCAPS 常數
+    r"|Test[A-Z][A-Za-z0-9_]{3,}"     # TestXxx 測試類
+    r"|test_[a-z0-9_]{5,}"            # test_xxx 測試方法
+    r")`"
+)
+#: unittest 自己的類名——它們不是本 repo 的符號，卻長得一模一樣。
+_SYMBOL_STDLIB_OK: frozenset[str] = frozenset(
+    {"TestCase", "TestLoader", "TestResult", "TestSuite", "TestProgram"})
+#: 引用面（誰會寫出「指認機械物」的句子）。
+_SYMBOL_REF_GLOBS: tuple[str, ...] = ("tools/**/*.py", "AutoClaude/tools/*.py")
+#: 定義面（符號可能住在哪）。刻意比引用面寬：跨層引用（測試提生產碼的常數）是常態。
+_SYMBOL_DEF_GLOBS: tuple[str, ...] = (
+    "tools/**/*.py", "AutoClaude/tools/**/*.py", "AutoClaude/autoclaude/**/*.py")
+_SYMBOL_DEF_RE = re.compile(r"^\s*(?:class|def)\s+(\w+)", re.M)
+_SYMBOL_ASSIGN_RE = re.compile(r"^\s*(\w+)\s*(?::[^=\n]+)?=", re.M)
+
+#: 🔴 **具名基線豁免**（grandfathered）——形狀與理由逐字沿用本 repo 既有慣例
+#: （`test_adr_xplat001_c1c2_lock._BASELINE_WAIVERS`：舊列具名登記、新列一律硬擋）。
+#:
+#: 為何不是「一上線就全紅」：本判準落地當回合實測，`tools/**` 既有的幽靈符號有數十個
+#: 名字、散在六十餘處，全部來自歷輪的重構與改名。鎖若一上線就對它們全紅，下一個人會直接
+#: 把鎖關掉／加 `@skip`——那樣連「硬擋新幽靈」這個真正的價值也一起賠掉（R60 為同一個取捨
+#: 寫過同一段話）。
+#:
+#: 兩道自檢確保它不會變成永久豁免（`TestR78GhostSymbolClaims` 各有一支）：
+#:   (a) **只准變少**：不在表上的幽靈名一律硬擋，表本身不得因為「順手加一筆」而長大。
+#:   (b) **stale 自檢**：表上的名字若①現在解析得到了（有人把符號補回來／改對了），或
+#:       ②整個 repo 已經沒有任何一處引用它了，都必須把那一筆**刪掉**，否則紅。
+#:       豁免只能因為「還沒清乾淨」而存在，不能因為「沒人記得回收」而存在。
+_GHOST_SYMBOL_BASELINE: frozenset[str] = frozenset({
+    "TestDescendantWatcherFinalSyncSample",
+    "TestMultiGrandchildLockNotPrematurelyStale",
+    "_ADDITIONAL_RISKY_NAMES",
+    "_CALL",
+    "_CELL",
+    "_FROZEN_SDD_VERSION_RE",
+    "_HAPPY_PATH",
+    "_LATEST_PINNED_SHA256",
+    "_LATEST_THINNESS_ENROLLED",
+    "_LIVE_LOC_ANCHOR",
+    "_MY_PIPE_RE",
+    "_PENDING_MIGRATION_SITES",
+    "_PG_REAL_ENABLED",
+    "_PROVENANCE_FIELDS",
+    "_REASSIGN_RE",
+    "_ROW_REOPENED_AFTER",
+    "_ROW_STILL_OPEN",
+    "_SDD_PRESENT",
+    "_SOURCE",
+    "_SURVIVED_ID_PATTERNS",
+    "_TLC_TRACK_ENROLLED",
+    "_TRACKED_ACTIONS",
+    "_TREE_FLOOR_RATIO",
+    "test_ac_matches_sum_of_seven_registries",
+    "test_constants_never_increase_versus_head",
+    "test_enforce_docs_path_blocks_chinese_path_under_cp950",
+    "test_is_windows_apps_stub_defined_exactly_once",
+    "test_latest_install_post_commit_pins_utf8_before_reading_git_common_dir",
+    "test_main_separates_vague_rows_from_valid_count_and_does_not_fail",
+    "test_only_the_matching_check_reds",
+    "test_the_header_boundary_excludes_a_row_that_legitimately_quotes_it",
+    "test_untracked_action_is_ignored",
+})
+
+_SYMBOL_INDEX_CACHE: dict[str, frozenset[str]] = {}
+
+
+def python_symbol_index(repo_root: Path) -> frozenset[str]:
+    """repo 的 Python 符號索引：`class`／`def` 名 ＋ 賦值目標 ＋ **模組檔名**。
+
+    刻意用正則而不是 AST：AST 對每一支檔都要 parse 一次（實測慢一個量級），而本判準要的
+    只是「這個名字在樹裡有沒有被定義過」——過度寬鬆的方向是**漏報**，那比誤報安全
+    （誤報會讓鎖被整道關掉，本檔上方已為此付過學費）。
+    """
+    key = str(repo_root)
+    if key in _SYMBOL_INDEX_CACHE:
+        return _SYMBOL_INDEX_CACHE[key]
+    names: set[str] = set()
+    for glob in _SYMBOL_DEF_GLOBS:
+        for path in repo_root.glob(glob):
+            if "__pycache__" in path.parts:
+                continue
+            names.add(path.stem)
+            body = path.read_text(encoding="utf-8", errors="replace")
+            names.update(_SYMBOL_DEF_RE.findall(body))
+            names.update(_SYMBOL_ASSIGN_RE.findall(body))
+    index = frozenset(names | _SYMBOL_STDLIB_OK)
+    _SYMBOL_INDEX_CACHE[key] = index
+    return index
+
+
+def symbol_claims(text: str, source: str) -> list[tuple[str, str, str]]:
+    """`(來源, 識別字, 原行)`；只收「整段反引號內容就是識別字」的形態（見設計選擇①）。"""
+    return [
+        (source, m.group(1), line.strip())
+        for line in text.splitlines()
+        for m in _SYMBOL_CLAIM_RE.finditer(line)
+    ]
+
+
+def collect_symbol_claims(repo_root: Path) -> list[tuple[str, str, str]]:
+    """引用面全部的裸識別字引用（現查，不寫死清單）。含根 `CLAUDE.md`。"""
+    claims = symbol_claims(
+        (repo_root / "CLAUDE.md").read_text(encoding="utf-8-sig"), "CLAUDE.md")
+    for glob in _SYMBOL_REF_GLOBS:
+        for path in sorted(repo_root.glob(glob)):
+            if "__pycache__" in path.parts:
+                continue
+            claims += symbol_claims(
+                path.read_text(encoding="utf-8", errors="replace"),
+                path.relative_to(repo_root).as_posix())
+    return claims
+
+
+def ghost_symbol_problems(
+    claims: list[tuple[str, str, str]],
+    index: frozenset[str],
+    baseline: frozenset[str],
+) -> list[str]:
+    """解析不到、且不在具名基線內的識別字引用（空＝通過）。"""
+    return [
+        f"{source} 以反引號指名 `{name}`，但全 repo 的 Python 符號索引裡找不到它的定義"
+        f"（class／def／賦值／模組名皆無）⇒ 幽靈符號。R77 的護欄層檔數棘輪常數"
+        f"就是這樣活下來的：符號被刪、引用留著，而只認『帶副檔名的路徑』的三面判準看不到它。"
+        f"出處：{line[:100]}"
+        for source, name, line in claims
+        if name not in index and name not in baseline
+    ]
+
+
+def stale_ghost_baseline_problems(
+    claims: list[tuple[str, str, str]],
+    index: frozenset[str],
+    baseline: frozenset[str],
+) -> list[str]:
+    """具名基線的兩款 stale：已解析得到／已無人引用。皆須刪除該筆登記。"""
+    referenced = {name for _src, name, _ln in claims}
+    problems = [
+        f"`{name}` 已在基線豁免表上，但它現在**解析得到**了（有人把符號補回來或改對了）"
+        f"——請把這一筆從 _GHOST_SYMBOL_BASELINE 刪掉，否則餘裕會變成日後的破口"
+        for name in sorted(baseline & index)
+    ]
+    problems += [
+        f"`{name}` 在基線豁免表上，但全引用面已經**沒有任何一處**提到它"
+        f"——幽靈已清乾淨，請把這一筆刪掉（豁免只能因為「還沒清」而存在）"
+        for name in sorted(baseline - referenced - index)
+    ]
+    return problems
+
+
+class TestR78GhostSymbolClaims(unittest.TestCase):
+    """第四面：以**裸識別字**指認機械物時，那個符號必須真的存在。
+
+    🔴 這一類是 R78 本包最重要的交付。ARCH-03／SD-07 的十餘處逃逸全部從同一個縫出去：
+    上面三面的擷取器只認「帶副檔名的路徑」，而「裸常數名」這種寫法既不是
+    路徑、也不帶 `::`，於是「專門偵測懸空引用的那道鎖」對它結構上盲。只補個案不補判準，
+    同型缺陷下一輪必然再來——本 repo 已有多次同型復發的紀錄。
+    """
+
+    def test_no_new_ghost_symbols(self) -> None:
+        """主牙：引用面不得出現基線之外的幽靈符號。"""
+        claims = collect_symbol_claims(_REPO_ROOT)
+        problems = ghost_symbol_problems(
+            claims, python_symbol_index(_REPO_ROOT), _GHOST_SYMBOL_BASELINE)
+        self.assertEqual(problems, [], "發現幽靈符號：\n  " + "\n  ".join(problems))
+
+    def test_the_baseline_is_not_stale(self) -> None:
+        """(b) 兩款 stale 自檢：解析得到了／已無人引用，都必須把登記刪掉。"""
+        claims = collect_symbol_claims(_REPO_ROOT)
+        problems = stale_ghost_baseline_problems(
+            claims, python_symbol_index(_REPO_ROOT), _GHOST_SYMBOL_BASELINE)
+        self.assertEqual(problems, [], "基線豁免表已 stale：\n  " + "\n  ".join(problems))
+
+    def test_the_reference_surface_is_not_vacuous(self) -> None:
+        """自錨：三個引用面每一面都必須真的收到東西（靜默縮面＝本家族一再犯的病）。"""
+        sources = {src for src, _n, _l in collect_symbol_claims(_REPO_ROOT)}
+        self.assertIn("CLAUDE.md", sources)
+        self.assertTrue([s for s in sources if s.startswith("tools/tests/")],
+                        f"tools/tests 這一面收不到任何裸識別字引用：{sorted(sources)[:10]}")
+        self.assertTrue([s for s in sources if s.startswith("tools/") and "/" not in s[6:]],
+                        f"tools/ 頂層這一面收不到任何裸識別字引用：{sorted(sources)[:10]}")
+
+    def test_the_symbol_index_is_not_vacuous(self) -> None:
+        """自錨：索引垮掉（glob 寫壞／目錄改名）時，主牙會把**每一個**引用判成幽靈——
+        那種全紅的鎖一定會被關掉，所以索引崩塌必須先被自己抓到。"""
+        index = python_symbol_index(_REPO_ROOT)
+        self.assertGreater(len(index), 2000, "符號索引異常少 ⇒ 定義面 glob 可能已失效")
+        for anchor in ("_GHOST_SYMBOL_BASELINE", "python_symbol_index", "MIN_TESTS"):
+            self.assertIn(anchor, index, f"索引裡找不到 `{anchor}` ⇒ 抽取正則已失效")
+
+    def test_a_deleted_constant_leaves_a_detectable_ghost(self) -> None:
+        """鑑別力（注入）＝修前實況重演：R77 那個常數的引用形態必須被判紅。
+
+        🔴 合成字串刻意**接起來**而不是寫成一個字面：本判準的引用面含本檔，寫成完整字面
+        會讓上面的活體測試在本檔裡抓到它（自我違規）——這與上一輪那些幽靈引用是同一種
+        「寫下來就變成事實」的機制，只是這次方向對我們不利。
+        """
+        tick = "`"
+        ghost = tick + "_NO_SUCH_FROZEN_CONSTANT_XYZ" + tick
+        line = f"# 對應機械鎖：{ghost} 是 shrink-only 棘輪，禁止新增鎖檔"
+        claims = symbol_claims(line, "x.py")
+        self.assertTrue(claims, "擷取器抓不到裸識別字引用 ⇒ 判準沒被考到")
+        problems = ghost_symbol_problems(
+            claims, python_symbol_index(_REPO_ROOT), _GHOST_SYMBOL_BASELINE)
+        self.assertTrue(problems, "幽靈符號被放行 ⇒ 這正是 R77 讓十餘處引用活下來的縫")
+
+    def test_a_real_symbol_is_not_flagged(self) -> None:
+        """對照組：真實存在的符號不得被判紅——否則本鎖只是全都判紅（無鑑別力）。"""
+        tick = "`"
+        line = f"# 對應機械鎖：{tick}MIN_TESTS{tick} 與 {tick}_GHOST_SYMBOL_BASELINE{tick}"
+        self.assertEqual(
+            ghost_symbol_problems(symbol_claims(line, "x.py"),
+                                  python_symbol_index(_REPO_ROOT), frozenset()),
+            [])
+
+    def test_path_shaped_claims_are_left_to_the_other_faces(self) -> None:
+        """邊界：帶副檔名／帶 `::` 的形態歸前三面管，本面不重複收（免同一筆印兩次）。"""
+        self.assertEqual(
+            symbol_claims("見 `tools/tests/test_ps1_bom.py::TestBomPolicy`", "x.py"), [])
+
+    def test_a_stale_baseline_entry_is_red(self) -> None:
+        """鑑別力（注入）：把一個**真實存在**的符號放進基線 ⇒ stale 自檢必紅。"""
+        problems = stale_ghost_baseline_problems(
+            [], python_symbol_index(_REPO_ROOT), frozenset({"MIN_TESTS"}))
+        self.assertTrue(any("MIN_TESTS" in p for p in problems), problems)
+
+    def test_an_unreferenced_baseline_entry_is_red(self) -> None:
+        """鑑別力（注入）：幽靈已清乾淨卻沒把登記刪掉 ⇒ 必紅（豁免不得永久化）。"""
+        problems = stale_ghost_baseline_problems(
+            [], frozenset(), frozenset({"_NO_LONGER_REFERENCED_XYZ"}))
+        self.assertTrue(any("沒有任何一處" in p for p in problems), problems)
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -5137,6 +5403,246 @@ class TestR71SmokeTripwireIsInViewWithTheHonestReading(unittest.TestCase):
             [n for n in self._REDIRECTS if n in stripped], [],
             "掃描器對「完全沒有落點」的形態也命中 ⇒ 判準恆真，落點被拔掉那天不會有人知道",
         )
+
+
+# ── R78 ARCH-05：成熟度判準 M1〜M6 的 SSOT 歸屬 ＋ M5 攔截率的新鮮度 ────────────────
+_MATURITY_SSOT_REL = "docs/06_quality/CrossPlatform_Maturity_Criteria.md"
+_MATURITY_ROW_RE = re.compile(r"\|\s*\*\*(M[1-6])\*\*\s*\|")
+#: 觸發字後 40 字元內的「攔截率字面值」。`(?<![≥≤<>=\d])` 排除門檻（`≥80%`）與
+#: 數字中段的假命中（`80%` 不得被讀成 `0%`）。
+_RATE_RE = re.compile(
+    r"(?:mac→Win|Win→mac|攔截率)[^|\n]{0,40}?"
+    r"(?<![≥≤<>=\d])(\d{1,3}/\d{1,3}|\d{1,3}\s*(?:〜|~)\s*\d{1,3}%|\d{1,3}%)"
+)
+_RATE_MARK = "xplat-rate-history:"
+_RATE_GLOBS = (
+    "docs/04_planning/*HANDOFF*.md",
+    "docs/06_quality/CrossPlatform_*.md",
+    "docs/04_planning/ADR/ADR-XPLAT-002-platform-surface-reduction.md",
+)
+
+
+def _rate_problems(lines: list[tuple[str, int, str]], live: dict) -> tuple[list[str], int]:
+    """治理面上每一個攔截率字面值：與現場活值相符，或帶歷史標記。回傳 (違規, 命中數)。"""
+    problems: list[str] = []
+    hits = 0
+    for where, lineno, line in lines:
+        for m in _RATE_RE.finditer(line):
+            hits += 1
+            literal, whole = m.group(1), m.group(0)
+            direction = next((d for d in live if whole.startswith(d)), None)
+            ok = False
+            if direction:
+                caught, total = live[direction]
+                ok = literal in {f"{caught}/{total}", f"{round(100 * caught / total)}%"}
+            if not ok and _RATE_MARK not in line:
+                problems.append(
+                    f"{where}:{lineno} 的攔截率 `{literal}` 既不等於現場活值"
+                    f"（{ {d: f'{c}/{t}' for d, (c, t) in live.items()} }），"
+                    f"也沒有 `<!-- {_RATE_MARK} WHY -->` 標記說明它是歷史值"
+                )
+    return problems, hits
+
+
+class TestR78MaturityCriteriaSsot(unittest.TestCase):
+    """M1〜M6 只有一個家，且 M5 的數字只能來自載具（R78 ARCH-05）。
+
+    🔴 為何是 blocking 級：這六條是**治理層判「這一輪算不算成熟」的判準**，而它們原本
+    寄生在 `CrossPlatform_R76_Scan_Findings.md` ——一份輪次專屬的掃描發現文件。輪次文件
+    按定義是凍結記錄，不會有人回頭維護；活判準寄生在凍結記錄裡，等於**沒有家**。
+    後果已經發生：M5 的攔截率同時住三個地方（判準表／交棒書 Q3／ADR 逐輪覆蓋表 R77 列），
+    三處全部停在**修復前**的值——而讓它們過期的，正是同一個 commit 落地的第六道判準。
+    低報自己的成果不是好事：下一輪跑載具會看到「一輪暴衝」，然後去找一個不存在的原因。
+
+    四道判準（前三道守歸屬，第四道守新鮮度）＋ 一道掃描器自檢。
+    """
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        import test_platform_neutral_paths as xplat  # noqa: PLC0415  # 載具即 SSOT
+        cls.live = xplat.live_interception()
+        cls.ssot = _REPO_ROOT / _MATURITY_SSOT_REL
+
+    def _scan_lines(self) -> list[tuple[str, int, str]]:
+        out: list[tuple[str, int, str]] = []
+        for pattern in _RATE_GLOBS:
+            for path in sorted(_REPO_ROOT.glob(pattern)):
+                rel = path.relative_to(_REPO_ROOT).as_posix()
+                for lineno, line in enumerate(
+                    path.read_text(encoding="utf-8-sig").splitlines(), 1
+                ):
+                    out.append((rel, lineno, line))
+        return out
+
+    def test_the_six_criteria_live_in_one_named_home(self) -> None:
+        self.assertTrue(self.ssot.is_file(), f"成熟度判準 SSOT 不存在：{_MATURITY_SSOT_REL}")
+        rows = set(_MATURITY_ROW_RE.findall(self.ssot.read_text(encoding="utf-8-sig")))
+        self.assertEqual(
+            rows, {f"M{i}" for i in range(1, 7)},
+            "SSOT 少了某幾條判準列 ⇒ 判準被搬走／刪掉而沒人知道",
+        )
+
+    def test_m5_points_at_the_carrier_instead_of_carrying_a_number(self) -> None:
+        """M5 那一列必須具名載具——這一條就是「不寫死數字」的可執行形態。"""
+        row = next(
+            ln for ln in self.ssot.read_text(encoding="utf-8-sig").splitlines()
+            if "**M5**" in ln
+        )
+        self.assertIn(
+            "TestXplatInjectionMatrix", row,
+            "M5 列沒有具名載具 ⇒ 讀者只能相信文件上的數字，而那正是本鎖在治的病",
+        )
+
+    def test_any_second_copy_points_back_to_the_ssot(self) -> None:
+        """別處還留著 M 列可以（輪次文件的原始記載要保留），但必須指回現行的家。"""
+        ssot_name = Path(_MATURITY_SSOT_REL).name
+        offenders: list[str] = []
+        for pattern in _RATE_GLOBS:
+            for path in sorted(_REPO_ROOT.glob(pattern)):
+                if path == self.ssot:
+                    continue
+                text = path.read_text(encoding="utf-8-sig")
+                if len(set(_MATURITY_ROW_RE.findall(text))) >= 3 and ssot_name not in text:
+                    offenders.append(path.relative_to(_REPO_ROOT).as_posix())
+        self.assertEqual(
+            offenders, [],
+            f"這些檔載著半套以上的 M1〜M6 判準表卻沒有指回 {ssot_name} ⇒ 第二個家："
+            f"{offenders}",
+        )
+
+    def test_every_interception_rate_is_live_or_labelled_history(self) -> None:
+        problems, hits = _rate_problems(self._scan_lines(), self.live)
+        self.assertEqual(problems, [], "\n".join(problems))
+        self.assertGreaterEqual(
+            hits, 1,
+            "整個治理面掃不到任何攔截率字面值 ⇒ glob 或正則壞了，本鎖正在對空氣空轉假綠",
+        )
+
+    def test_the_scanner_tells_stale_from_live(self) -> None:
+        """掃描器自檢：活值放行、過期值判紅、標記過的歷史值放行。
+
+        少了這一條，上一支測試可能是「對任何輸入都綠」——本 repo 對「鎖存在但沒有
+        鑑別力」已有 44% 的實測占比，不准只寫鎖不驗鎖。
+        """
+        caught, total = self.live["mac→Win"]
+        live_line = [("syn.md", 1, f"mac→Win {caught}/{total}")]
+        stale_line = [("syn.md", 1, f"mac→Win {caught + 1}/{total}")]
+        marked = [("syn.md", 1, f"mac→Win {caught + 1}/{total} <!-- {_RATE_MARK} 舊值 -->")]
+        self.assertEqual(_rate_problems(live_line, self.live)[0], [], "活值被誤判為過期")
+        self.assertEqual(len(_rate_problems(stale_line, self.live)[0]), 1, "過期值沒被抓到")
+        self.assertEqual(_rate_problems(marked, self.live)[0], [], "標記過的歷史值被誤殺")
+
+
+# ── R78 SA-04／SA-05：交棒書的「尚未做」必須附現查指令 ──────────────────────────
+_HANDOFF_GLOB = "docs/04_planning/*HANDOFF*.md"
+_HANDOFF_SECTION_RE = re.compile(r"^#{2,}\s+(.*)$")
+_HANDOFF_SECTION_WORDS = ("開場必讀", "還沒做", "未做", "待辦")
+_HANDOFF_ITEM_RE = re.compile(r"^\s*(?:\d+\.|[-*])\s+")
+_HANDOFF_STALE_WORDS = ("尚未", "還沒", "仍缺", "未執行", "沒跑", "未推送", "仍未")
+#: 「現查指令」＝帶動詞的行內程式碼片段。只認得出動詞才算數：一段
+#: 純檔名的 code span（`DEF-101-876`）不是指令，而那正是被訂正的兩筆原本的樣子。
+_HANDOFF_CMD_RE = re.compile(
+    r"`[^`]*(git |python|pytest|Select-String|Get-|gh |powershell|& )[^`]*`"
+)
+_HANDOFF_MARK = "handoff-claim-verified:"
+
+
+def _handoff_claim_blocks(text: str) -> list[list[str]]:
+    """把「開場必讀／還沒做」類章節切成逐條目的區塊（含其下的引言續行）。
+
+    刻意**只看條目**、不看章節前言：前言是體例與訂正說明的住處，把它當成宣稱會逼人
+    在規則本身上貼標記（噪音），而規則不會過期。
+    """
+    out: list[list[str]] = []
+    cur: list[str] = []
+    in_section = False
+    for line in text.splitlines():
+        heading = _HANDOFF_SECTION_RE.match(line)
+        if heading:
+            if cur:
+                out.append(cur)
+            cur = []
+            in_section = any(w in heading.group(1) for w in _HANDOFF_SECTION_WORDS)
+            continue
+        if not in_section:
+            continue
+        if _HANDOFF_ITEM_RE.match(line):
+            if cur:
+                out.append(cur)
+            cur = [line]
+        elif cur:
+            cur.append(line)
+    if cur:
+        out.append(cur)
+    return out
+
+
+def _handoff_problems(rel: str, text: str) -> tuple[list[str], int]:
+    problems: list[str] = []
+    claims = 0
+    for block in _handoff_claim_blocks(text):
+        body = "\n".join(block)
+        if not any(w in body for w in _HANDOFF_STALE_WORDS):
+            continue
+        claims += 1
+        if _HANDOFF_CMD_RE.search(body) or _HANDOFF_MARK in body:
+            continue
+        problems.append(
+            f"{rel} 的「{block[0].strip()[:60]}」宣稱某事尚未完成，卻沒有附任何現查指令，"
+            f"也沒有 `<!-- {_HANDOFF_MARK} WHY -->` 說明它為何無法現查"
+        )
+    return problems, claims
+
+
+class TestR78HandoffClaimsCarryLiveCommands(unittest.TestCase):
+    """交棒書凡述及「尚未做」，一律附現查指令（R78 SA-04／SA-05 的體例層修法）。
+
+    🔴 為何是體例而不是兩個個案：R78 收到的兩筆 finding 是**同一個形態**——
+      · 「30 支 tag 尚未推送」：R78 開場實查，遠端 30 支都在（`git ls-remote --tags`）。
+      · 「Windows nightly 缺 root_unittests」：R77 自己在同一輪已把它併進 STAGE-L，
+        照原文再加一次的代價是每晚多跑一次 260〜313 秒的全套。
+    兩筆都不是「寫錯了」，是**把量測值當常數寫**：交棒書記的是收輪那一刻的狀態，讀者卻
+    在數天後、由別人動過的樹上讀它。附上現查指令，讀者的第一動作就會是重量而不是採信。
+
+    逃生口是 `handoff-claim-verified:`（WHY 必填）：有些事（例如「這一輪有沒有做複審」）
+    真的沒有機械現查管道，逼人編一個指令比誠實說沒有更糟。
+    """
+
+    def _docs(self) -> list[tuple[str, str]]:
+        return [
+            (p.relative_to(_REPO_ROOT).as_posix(), p.read_text(encoding="utf-8-sig"))
+            for p in sorted(_REPO_ROOT.glob(_HANDOFF_GLOB))
+        ]
+
+    def test_every_not_yet_done_claim_is_checkable(self) -> None:
+        docs = self._docs()
+        self.assertTrue(docs, f"掃不到任何交棒書（{_HANDOFF_GLOB}）⇒ 本鎖在對空氣空轉")
+        problems: list[str] = []
+        claims = 0
+        for rel, text in docs:
+            found, n = _handoff_problems(rel, text)
+            problems += found
+            claims += n
+        self.assertEqual(problems, [], "\n".join(problems))
+        self.assertGreaterEqual(
+            claims, 1,
+            "所有交棒書的「還沒做」章節裡一句 stale 宣稱都掃不到 ⇒ 章節標題或觸發字改了，"
+            "本鎖已失去射程（這正是它要防的形態）",
+        )
+
+    def test_the_scanner_can_tell_a_bare_claim_from_a_checkable_one(self) -> None:
+        """掃描器自檢：裸宣稱判紅、附指令放行、附標記放行、沒有 stale 字樣不判。"""
+        head = "## 0. 開場必讀\n\n"
+        bare = head + "1. **30 支 tag 尚未推送**，下一輪要先推。\n"
+        with_cmd = head + "1. **30 支 tag 尚未推送**，現查 `git ls-remote --tags origin`。\n"
+        with_mark = head + f"1. **尚未推送**。<!-- {_HANDOFF_MARK} 無現查管道 -->\n"
+        no_claim = head + "1. 本輪已推完 30 支 tag。\n"
+        outside = "## 9. 其他\n\n1. **30 支 tag 尚未推送**，沒有指令。\n"
+        self.assertEqual(len(_handoff_problems("syn.md", bare)[0]), 1, "裸宣稱沒被抓到")
+        self.assertEqual(_handoff_problems("syn.md", with_cmd)[0], [], "附指令被誤殺")
+        self.assertEqual(_handoff_problems("syn.md", with_mark)[0], [], "附標記被誤殺")
+        self.assertEqual(_handoff_problems("syn.md", no_claim), ([], 0), "無 stale 字樣卻計入")
+        self.assertEqual(_handoff_problems("syn.md", outside), ([], 0), "射程外的章節被誤收")
 
 
 if __name__ == "__main__":

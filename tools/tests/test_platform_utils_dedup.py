@@ -729,7 +729,7 @@ class TestR74InlineCopyRatchetForStdioSsot(unittest.TestCase):
         )
 
     def test_frozen_map_matches_the_worktree(self) -> None:
-        """自緊：刪掉一處而不下修凍結值 ⇒ 餘裕就是破口（同 `_FROZEN_GUARD_FILE_COUNT`）。"""
+        """自緊：刪掉一處而不下修凍結值 ⇒ 餘裕就是破口（同 `_FROZEN_GUARD_LINES`）。"""
         self.assertEqual(
             inline_stdio_sites(), _FROZEN_INLINE_STDIO_SITES,
             "工作樹現況與 `_FROZEN_INLINE_STDIO_SITES` 已漂移——收斂掉一處後請同步下修")
@@ -821,7 +821,14 @@ _FROZEN_STDIO_FORCE_TREES: dict[str, int] = {
     #   另外兩支（sdd_hook_router／block_bash_on_windows）本來就是同一個理由。
     #   收斂方向仍存在但不在本輪射程：要讓這一格回到 1，得先改 shim 的起法（那是
     #   PreToolUse deny 面的變更，另有 P0 判例）。
-    ".claude/hooks": 3,
+    # R78 3→4：新增 `.claude/hooks/context_budget_guard.py`（session context 水位觀測者，
+    # 掌舵者連續多輪明令「注意上下文是否超出 90%、不要爆」的機械化）。理由與上方三條**逐字相同**
+    # ——同一支 shim、同一個 fail-open P0、同一個 `runpy.run_path` 不供 sys.path 的實測。
+    # 也就是說：這一格會長到 4，不是因為多了一種新情況，而是因為那三條約束對**每一支**
+    # 註冊進 PreToolUse／PostToolUse 的 hook 都成立 ⇒ 每加一支 hook 就必然 +1。
+    # 🔴 這是本格的結構性性質，不是本輪的疏忽：真正的收斂點仍是「改 shim 的起法」，
+    #    而那是 PreToolUse deny 面的變更（另有 P0 判例），不在任何單一輪次的射程內。
+    ".claude/hooks": 4,
     _FROZEN_SDD_TREE_KEY: 36,
     "AISDLC_SDD/scripts": 10,
     # R75 收輪下修 26→24：`AutoClaude/tmp_lint_check.py` 是 tracked 的一次性除錯腳本

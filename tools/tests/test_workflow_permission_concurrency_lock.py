@@ -1120,7 +1120,8 @@ class TestCompatCiScriptTriggerSymmetry(unittest.TestCase):
 # ══════════════════════════════════════════════════════════════════════════════
 # 🔴 為何併進本檔：本檔已是 DEF-101-703（`*-nightly-full` 18 天零成功而三道哨兵
 # 結構上偵測不到）的鎖之家——見上方 `TestRootInfraNightlyStalenessSentinel`。
-# 另立新檔會撞 `_FROZEN_GUARD_FILE_COUNT` shrink-only 棘輪（DEF-101-561③）。
+# 另立新檔會撞 `TestGuardLayerRatchet` shrink-only 棘輪（DEF-101-561③；🔴 R78 ARCH-03
+# 訂正：R77 起它量的是逐檔行數的**淨額**而非檔數，新增檔案本身不再違規）。
 #
 # 🔴 缺陷本體（唯讀實查即可證，零網路）：`tools/lib/ci_liveness.py` 的活性判準是
 # 「該 workflow 有沒有 `--status success` 的 run」。而兩支 compat-CI 的
@@ -1218,8 +1219,8 @@ class TestRunLevelFailOpenOnNonBlockingNightly(unittest.TestCase):
 # ══════════════════════════════════════════════════════════════════════════════
 # 本輪 R77-06b：push 閘 never-started 比率（ci_liveness 原本結構上看不見的那一半）
 # ══════════════════════════════════════════════════════════════════════════════
-# 🔴 併進本檔的理由與上一節同：本檔已是「CI 死亡通道」那一族鎖的家，另立新檔會撞
-# `_FROZEN_GUARD_FILE_COUNT` shrink-only 棘輪（DEF-101-561③）。
+# 🔴 併進本檔的理由與上一節同：本檔已是「CI 死亡通道」那一族鎖的家，另立新檔會推高
+# `TestGuardLayerRatchet` 的淨行數（DEF-101-561③；R78 ARCH-03 訂正過的現行語意）。
 #
 # 缺陷本體（唯讀 gh 實查）：`ci_liveness` 的掃描面只認有 cron 的 workflow，而 push 軌的
 # 主閘門（root-infra-ci／aisdlc-sdd-ci）沒有 cron ⇒ 一輩子不會被看到。實查近 100 筆／軌

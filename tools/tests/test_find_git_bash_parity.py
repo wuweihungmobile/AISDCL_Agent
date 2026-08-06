@@ -853,9 +853,10 @@ class TestFindGitBashCallSites(unittest.TestCase):
 #
 # 為何住在本檔（收納契約，非雜物抽屜）：本檔已是 `tools/integration_gate_core.py` 的
 # 既有鎖檔（上方 `find_git_bash` 家族即該模組的函式），import 與 `_PY_PATH` 都指著它。
-# `DEF-101-561③`（由 `test_adr_xplat001_c1c2_lock.py::TestGuardFileCountShrinkOnlyRatchet`
-# 機械強制）明文禁止在 `tools/tests/` 新增鎖檔、只准「把新判準擴充進既有鎖檔」，
-# 本節即依該裁決把新判準併進同一模組的既有鎖檔，而不是再開一支。
+# `DEF-101-561③`（由 `test_adr_xplat001_c1c2_lock.py::TestGuardLayerRatchet` 機械強制）
+# 要求「把新判準擴充進既有鎖檔」，本節即依該裁決把新判準併進同一模組的既有鎖檔。
+# 🔴 R78 ARCH-03 訂正：該棘輪量的已不是**檔數**（R77 退場），而是逐檔行數表的**淨額**
+# ——新增檔案只要同一次變更內刪掉等量以上的行就合法，別把舊語意當現行規則照抄。
 #
 # WHY 這組鎖必須存在（Rule 9 — 鎖意圖而不只鎖行為）：
 # 整合層閘門的存在理由是「兩子專案各自綠燈不代表整合綠燈」（[3/5] SDD bridge 整合煙霧、

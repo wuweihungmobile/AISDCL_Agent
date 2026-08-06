@@ -12,8 +12,22 @@
 # 地端閘門是 docker compose ci-runner / scripts/ci-gate.sh（跑實際檢查命令）。
 # act 的價值在於：抓 YAML 語法錯、步驟順序、缺套件、shell 相容性等結構問題。
 
--P ubuntu-latest=catthehacker/ubuntu:act-latest
--P ubuntu-24.04=catthehacker/ubuntu:act-latest
+# 🔴 本機自建薄映像（tools/act/Dockerfile）＝ catthehacker/ubuntu:act-latest ＋ pwsh ＋ gh。
+# WHY（R77 實測破口）：中型映像**沒有** pwsh，而 GitHub 的 ubuntu-latest runner 自帶。
+# 於是 root-infra-ci.yml 的第 3 個 step（`pwsh 語法解析 + UTF-8 BOM 守門`）在 act 內
+# 一律 `exitcode 127`——`act -n` 卻回 rc=0，因為 dry-run 只證明 YAML 寫對。
+# 這一行把「🟡 可解析」升級為「✅ 真的跑得完」，方向與本檔既有的 amd64／--init 兩段
+# 一致：**提高**地端與雲端的等價度，不是放寬判準。映像內的 pwsh/gh 版本刻意釘成雲端
+# runner 當下實際在跑的那一版（實查 actions/runner-images，取值方式見 Dockerfile 檔頭）。
+# tag 的單一定義在 `AutoClaude/tools/run_act_core.py::RUNNER_IMAGE`，下面兩行必須與它
+# 逐字相同（機械鎖＝tools/tests/test_act_local_runner_image.py）。
+# 本地沒有這顆映像時：`python AutoClaude/tools/run_act_core.py --build-image`
+# （`run_act_core.ensure_images()` 也會在缺席時自動建，見該檔）。
+-P ubuntu-latest=aisdcl-act/ubuntu:act-latest
+-P ubuntu-24.04=aisdcl-act/ubuntu:act-latest
+# 22.04 刻意**不**跟著換：全庫 25 個 job 的 runs-on 逐行實查，`ubuntu-22.04` 今天零消費者
+# （全部 ubuntu job 都寫 `ubuntu-latest`）。為零消費者再建、再維護一顆映像是純成本；
+# 未來真有 job 指定 22.04 時，照 tools/act/Dockerfile 的形狀多一個 base 即可。
 -P ubuntu-22.04=catthehacker/ubuntu:act-22.04
 # Mac/Windows 相容性優化補註：此設定在 Apple Silicon（arm64）Mac 上會強制整條 act
 # pipeline（含 runner 映像與內部起的 PG 容器）走 QEMU amd64 模擬，即使映像本身有原生

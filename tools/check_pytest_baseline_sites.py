@@ -20,6 +20,19 @@
     2. 含「千分位數字」（如 3,566）或「≥4 位連續整數」（如 3567；badge 的
        URL-encoded 形態 `tests-3567%20passed` 亦天然命中；年份 2026 等 4 位數
        與 passed 同行時同樣命中，屬刻意保守）。
+  🔴 **R78（QA-02）新增第二種命中形態：計數簡寫 `NNNN/NNN`**。上面那條判準要求同一行
+  出現 `passed`／`skipped` 字樣，於是**把兩個數字簡寫成一組斜線對**（`tools/lib/
+  baseline_origin.py` 實測寫法：三支直譯器各一組 `4 位/2~3 位`）整類漏接——那一筆在
+  磁碟上錯了兩輪、沒有任何東西轉紅，而「把該檔加進 `_SCAN_FILES`」也**修不好**它
+  （形態不匹配）。第二形態＝同一行同時滿足：
+    1'. 含 `\\d{3,5}/\\d{1,3}` 且前後不接數字／斜線（排除日期 `2026/08/07`、
+        `Gap-042/048` 這類三段式與後接數字的形狀）；
+    2'. 含環境／測試脈絡字（`pytest`／`venv`／`直譯器`／`interpreter`／`passed`／
+        `skipped`）——**沒有這道脈絡閘就會誤殺** `improving_100/101`、`Gap-042/048`
+        這類編號對（落地前對全掃描面實測：無脈絡閘 4 筆誤殺，加閘後淨命中恰為那筆真缺陷）。
+  掃描面同時擴至 `.py`：基線機制自己的兩支（`tools/lib/baseline_origin.py`／
+  `tools/sync_onboarding_baselines.py`）。理由沿用本清單既有語意「已經漂移過的既成事實」，
+  且它們正是**最會就地寫下量測值**的地方（工具的註解裡）。
   規則：
     - 非 SSOT 掃描檔命中 → 紅（列 檔:行）。
     - SSOT 檔命中數 <1 → 紅（anchor 自檢：防 SSOT 自己被刪成零訊號後，
@@ -66,6 +79,11 @@ _SCAN_FILES = [
     # 翻紅。加入掃描面的判準沿用本清單既有語意（「基線數字歷史上實際漂移過的高風險
     # 文件」）：它不只是有風險，是已經漂移過的既成事實。
     "docs/AISDLC_Agent_UserGuide.md",
+    # R78（QA-02）：基線機制自己的兩支工具。前者的註解裡就住著三組實測計數、且**在寫下的
+    # 那一輪就已與磁碟不符**；掃描面此前清一色 `.md`，工具原始碼結構上不在任何鎖的視野內。
+    # 兩支一起收：數字會被就地寫下的地方是「讀寫基線的那一層」，不是只有第一個被抓到的檔。
+    "tools/lib/baseline_origin.py",
+    "tools/sync_onboarding_baselines.py",
 ]
 # 唯一准許載有基線數字的檔（SSOT＝ONBOARDING.md §7〈常用驗證指令〉附註）。
 _SSOT_FILE = "ONBOARDING.md"
@@ -76,10 +94,19 @@ _KEYWORD_RE = re.compile(r"passed|skipped", re.IGNORECASE)
 # 千分位（1,234 / 12,345,678）或 ≥4 位連續整數（3567、20260713…）
 _NUMBER_RE = re.compile(r"\d{1,3}(?:,\d{3})+|\d{4,}")
 
+# 第二形態（R78 QA-02）：計數簡寫「passed/skipped」一組斜線對。前後的 lookaround 排除
+# 日期（`2026/08/07`）與版本／路徑段那種**後面還接著數字或斜線**的形狀。
+_PAIR_RE = re.compile(r"(?<![\d/.])\d{3,5}/\d{1,3}(?![\d/])")
+# 脈絡閘：沒有它，`improving_100/101`／`Gap-042/048` 這類編號對會被誤殺（實測 4 筆）。
+# 誤殺的代價不是麻煩而已——被迫在無關的行貼豁免標記會讓標記本身貶值。
+_PAIR_CONTEXT_RE = re.compile(r"pytest|venv|直譯器|interpreter|passed|skipped", re.IGNORECASE)
+
 
 def _line_is_claim(line: str) -> bool:
-    """行是否構成「pytest 基線數字宣稱」命中（判準見模組 docstring）。"""
-    return bool(_KEYWORD_RE.search(line) and _NUMBER_RE.search(line))
+    """行是否構成「pytest 基線數字宣稱」命中（兩種形態，判準見模組 docstring）。"""
+    if _KEYWORD_RE.search(line) and _NUMBER_RE.search(line):
+        return True
+    return bool(_PAIR_RE.search(line) and _PAIR_CONTEXT_RE.search(line))
 
 
 def _display(path: Path) -> str:

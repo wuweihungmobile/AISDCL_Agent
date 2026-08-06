@@ -65,10 +65,26 @@ nightly/排程 job（mutation / pg-e2e / perf）以 `if: schedule` 排除，push
   6. 空 .env 覆蓋（安全 + 忠實：GitHub runner 無 .env，避免注入個人憑證/偽 fail）
   7. 組裝並執行 act
 
+  (4) **本機自建 runner 映像**（本輪；`RUNNER_IMAGE` ＋ `tools/act/Dockerfile`）：
+      (3) 那條「映像缺件只警告不阻斷」的警語治的是症狀——真正的病是 `.actrc` 釘的
+      中型映像**沒有 pwsh**，而 GitHub 的 ubuntu-latest runner 自帶。實測後果：
+      root-infra-ci `act -n` rc=0（dry-run 只證明 YAML 寫對），真跑到第 3 個 step
+      `exitcode 127`。本輪把 `.actrc` 指向 base ＋ pwsh／gh 的薄映像，於是那一格從
+      「🟡 可解析」升級為真的跑得完。版本刻意釘成雲端 runner 當下實際在跑的那一版
+      （pwsh 7.6.3／gh 2.96.0，取值方式見 Dockerfile 檔頭）——這是**提高**等價度。
+
+  (5) **`--verify-all`：推 GitHub 前的一鍵本機全驗**（本輪）。它把跑得動的 job 全部
+      真跑一次並寫進實跑帳本（`.act-runs/ledger.json`），跑不動的逐個列出替代驗證
+      出口，最後印一張不許留白的總表。連帶讓 `--list` 的 ✅ 有了唯一合法來源：
+      **那次執行自己留下的紀錄**（見 `record_run()` 上方對「為何只有這個入口能寫」
+      的論證）。任何靜態分析都不得把自己升格成 ✅。
+
 用法（一般經薄殼呼叫；直接呼叫亦可）：
+  python tools/run_act_core.py --build-image   # 先建本機 runner 映像（可重跑；秒級 cache 命中）
+  python tools/run_act_core.py --verify-all    # 🔴 推 GitHub 前的一鍵本機全驗
   python tools/run_act_core.py --job test     # 最快：只跑主測試閘門
   python tools/run_act_core.py                 # 完整：跑 push 全部 job（含 PG 契約）
-  python tools/run_act_core.py --list          # 列出 job ＋ 全庫盤點
+  python tools/run_act_core.py --list          # 列出 job ＋ 全庫盤點（含實跑帳本）
   python tools/run_act_core.py --dry-run       # 只解析不執行
   python tools/run_act_core.py --workflow .github/workflows/root-infra-ci.yml \
       --job root-infra                         # 指定別的 workflow
@@ -78,12 +94,15 @@ nightly/排程 job（mutation / pg-e2e / perf）以 `if: schedule` 排除，push
 from __future__ import annotations
 
 import argparse
+import hashlib
+import json
 import os
 import re
 import shutil
 import subprocess
 import sys
 import tempfile
+from datetime import UTC, datetime
 from pathlib import Path
 
 SCRIPT_DIR = Path(__file__).resolve().parent          # AutoClaude/tools
@@ -97,16 +116,51 @@ DEFAULT_EVENT = "push"
 #: `run_act.ps1` 補上 -Event 參數之前，Windows 側指定事件的唯一入口（同 WORKFLOW_ENV）。
 #: 少了這一個，Windows 側對「無 push 觸發的那 5 支 workflow」連指都指不到。
 EVENT_ENV = "RUN_ACT_EVENT"
-RUNNER_IMAGE = "catthehacker/ubuntu:act-latest"
-#: 含 pwsh/gh/ruff 的大型映像——`RUNNER_IMAGE_MISSING_TOOLS` 的唯一指路目的地。
-FULL_RUNNER_IMAGE = "catthehacker/ubuntu:full-latest"
+#: act 實際會起的 runner 映像＝**本機自建薄映像**（`tools/act/Dockerfile`）。
+#: 這個字面值是 `.actrc` 兩行 `-P` 的 SSOT，兩處必須逐字相同
+#: （機械鎖＝`tools/tests/test_act_local_runner_image.py`）。
+RUNNER_IMAGE = "aisdcl-act/ubuntu:act-latest"
+#: 上者的 base——`catthehacker` 的中型映像。它**沒有** pwsh，而 GitHub 的 ubuntu-latest
+#: runner 自帶 ⇒ root-infra-ci 的 pwsh 守門 step 在它上面一律 `exitcode 127`。
+ACT_BASE_IMAGE = "catthehacker/ubuntu:act-latest"
+#: 自建映像的 Dockerfile 與 build context（context 內只有 Dockerfile，刻意極小）。
+ACT_DOCKERFILE = "tools/act/Dockerfile"
+ACT_BUILD_CONTEXT = "tools/act"
 PG_IMAGE = "pgvector/pgvector:pg17"
 
-#: `.actrc` 現釘的中型 runner 映像缺、而 GitHub 真 ubuntu-latest 有的工具。
-#: 取值方式（不是抄來的）：`docker run --rm <RUNNER_IMAGE> bash -lc "command -v <tool>"`
-#: 逐項實跑，三支皆 not found。缺件會讓 job 在中途 `exitcode 127`——**真紅不是假綠**，
-#: 故本清單只驅動警告、不驅動阻斷（見檔頭 (3)）。
-RUNNER_IMAGE_MISSING_TOOLS = ("pwsh", "gh", "ruff")
+#: `.actrc` 現釘的 runner 映像缺、而 GitHub 真 ubuntu-latest 有的工具。
+#: 🔴 本輪由三支收為一支，兩個方向的訂正各有取證，別讀成「順手縮小了警告面」：
+#:   · pwsh／gh 移出＝**缺口已被補上**：自建映像實測 `pwsh 7.6.3`／`gh 2.96.0`
+#:     （`docker run --rm <RUNNER_IMAGE> bash -lc 'pwsh --version; gh --version'`），
+#:     且版本刻意釘成雲端 runner 當下實際在跑的那一版（見 tools/act/Dockerfile 檔頭）。
+#:   · ruff 移出＝**原本的歸類就是錯的**：本清單自陳收「雲端有、地端沒有」的工具，
+#:     而實查 actions/runner-images 的 Ubuntu2404-Readme.md，ruff **不在**雲端 runner
+#:     的預裝清單裡（同一份 grep 對 `Ruff` 零命中）；root-infra-ci 第 16 道自己
+#:     `pip install 'ruff==0.15.21'`。把它留在這裡會讓警告指向一個不存在的落差。
+#: 那 ruff 為什麼還在？因為 `command -v ruff` 在映像內仍是 not found，而本清單的**消費
+#: 語意**是「job 的 YAML 提到它、映像裡卻沒有 ⇒ 該 step 可能 127」——對 ruff 而言那一步
+#: 會不會紅取決於容器有沒有網路裝得下去，仍值得先講一聲。刻意**不**預裝：預裝等於遮蔽
+#: 「那行 pip install 壞掉」這個雲端會紅、地端卻綠的差異（見 Dockerfile 檔頭同一段）。
+#: 缺件會讓 job 在中途 `exitcode 127`——**真紅不是假綠**，故本清單只驅動警告、不驅動阻斷。
+RUNNER_IMAGE_MISSING_TOOLS = ("ruff",)
+
+#: 非 ubuntu runner 的替代驗證出口。**鍵是 runner 標籤（2 筆）而非 job（4 筆）**：
+#: 以 job 為鍵的清單每新增一個 macOS/Windows job 就要補一列，而漏補的方向是「留白」
+#: ——那正是要治的病。以標籤為鍵時新 job 自動繼承正確的替代出口，沒有會腐化的第二份
+#: 逐 job 清單。（`tools/tests/test_smoke_ci_sync.py::_ACT_NO_LOCAL_RUNNER_JOBS` 是**另一
+#: 件事**：它鎖的是「零通道 job 有沒有被逐個具名登記」＝登記完整性，本表答的是「那要
+#: 改用什麼驗」＝處置指路，粒度刻意不同，不是同一份清單抄兩遍。）
+NO_LOCAL_CHANNEL_ALTERNATIVES = {
+    "macos-latest": (
+        "mac 真機跑 tools/macos_smoke_local.sh（深度回歸＝"
+        "AutoClaude/tools/run_local_nightly.sh）。🔴 本機（Windows）對 macOS **零覆蓋**"
+    ),
+    "windows-latest": (
+        "Windows 真機跑 tools/windows_smoke_local.ps1（深度回歸＝"
+        "AutoClaude/tools/run_local_nightly.ps1）。🔴 該腳本自帶 PS 5.1 引擎守衛，"
+        "須顯式外呼 powershell.exe，不能在 pwsh 7.x 內直接跑"
+    ),
+}
 
 # job 起始行（workflows 的 job 鍵一律縮排 2 空格）／`runs-on:`／`services:`。
 _JOB_RE = re.compile(r"^  ([A-Za-z0-9_-]+):\s*$", re.MULTILINE)
@@ -147,6 +201,18 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
             "模擬哪個 GitHub 事件（預設 " + DEFAULT_EVENT + "）。無 push 觸發的 workflow "
             "必須指定，否則 act 零執行卻回 rc=0"
         ),
+    )
+    parser.add_argument(
+        "--build-image", action="store_true",
+        help=f"（重）建本機 act runner 映像 {RUNNER_IMAGE}（來源 {ACT_DOCKERFILE}）後結束",
+    )
+    parser.add_argument(
+        "--no-cache", action="store_true",
+        help="搭配 --build-image：不吃 docker layer cache（改了 Dockerfile 的 ARG 版本號時必用）",
+    )
+    parser.add_argument(
+        "--verify-all", action="store_true",
+        help="一鍵推送前本機全驗：跑得動的 job 全部真跑並記帳，跑不動的逐個列出替代驗證出口",
     )
     return parser.parse_args(argv)
 
@@ -232,43 +298,119 @@ def job_inventory() -> list[tuple[str, str, str, bool, bool]]:
     return rows
 
 
-def print_job_inventory() -> None:
-    """把「哪些 job 在本機 act 上結構性無通道」印在使用者眼前，而不是留白。"""
-    rows = job_inventory()
-    events_by_wf = {p.name: workflow_events(p) for p in workflow_files()}
-    print(f"[run_act] 全庫 job 盤點（{WORKFLOW_DIR}/*.yml 共 {len(rows)} 個 job）：")
-    for wf, job, label, has_runner, has_services in rows:
-        events = events_by_wf.get(wf, set())
-        # 三個障礙**各自獨立**，一個 job 可以同時中兩個（實測：pg-e2e-on-label 既無 push
-        # 觸發又帶 services:）。此處刻意**累加**而非 if/elif 擇一：擇一等於讓先命中的那
-        # 個障礙把後面的蓋掉，使用者排除完第一個才發現還有第二個——Scan-H⑦ 早退遮蔽的
-        # 同一形態，且遮蔽方向是「看起來只有一個問題」。
-        notes: list[str] = []
-        if events and DEFAULT_EVENT not in events:
-            notes.append(
-                f"⚠️ 無 {DEFAULT_EVENT} 觸發（on: {','.join(sorted(events))}）"
-                f"——不加 --event 會零執行卻回 rc=0"
+# ── job 分類（`--list` 與 `--verify-all` 的**唯一**判準實作）─────────────────────
+# 兩個消費者共用同一支：兩份各自演化的分類邏輯會讓「盤點說可跑、驗證卻跳過」這種
+# 自相矛盾變成可能，而它在畫面上看起來完全正常。
+CAT_VERIFIED = "verified"        # 本機實跑過且 rc=0，且 workflow 自那次之後沒變
+CAT_FAILED = "failed"            # 本機實跑過但 rc!=0
+CAT_STALE = "stale"              # 實跑過，但 workflow 已變動 ⇒ 那筆綠不再代表現況
+CAT_RUNNABLE = "runnable"        # 結構上跑得起來，但從未實跑過
+CAT_NO_RUNNER = "no-runner"      # runs-on 不在 .actrc 映射內（macOS／Windows）
+CAT_SERVICES = "services"        # 帶 services: ⇒ act 0.2.89 panic
+CAT_WRONG_EVENT = "wrong-event"  # 本次事件不在該 workflow 的 on: 內 ⇒ 零執行假綠
+
+#: 分類 → 顯示徽章。`--verify-all` 的總表與 `--list` 用同一組字面，兩處讀起來一致。
+CAT_BADGE = {
+    CAT_VERIFIED: "✅ 已實跑通過",
+    CAT_FAILED: "❌ 已實跑但失敗",
+    CAT_STALE: "🟡 證據過期（實跑後 workflow 已改）",
+    CAT_RUNNABLE: "🟡 可解析未實跑",
+    CAT_NO_RUNNER: "❌ 結構上無本機通道",
+    CAT_SERVICES: "❌ 帶 services: 無本機 act 通道",
+    CAT_WRONG_EVENT: "⚠️ 需 --event",
+}
+#: 「本機 act 跑得起來」的分類集合——`verify_all()` 要跑的就是這幾格。
+RUNNABLE_CATS = frozenset({CAT_VERIFIED, CAT_FAILED, CAT_STALE, CAT_RUNNABLE})
+
+
+def classify_job(
+    wf: str, job: str, label: str, has_runner: bool, has_services: bool,
+    events: set[str], event: str, ledger: dict[str, dict[str, object]],
+) -> tuple[str, list[str]]:
+    """回傳 `(分類, 全部障礙／證據說明)`。
+
+    🔴 `notes` 刻意**累加**而非 if/elif 擇一：一個 job 可以同時中兩個障礙（實測：
+    pg-e2e-on-label 既無 push 觸發又帶 `services:`）。擇一等於讓先命中的那個把後面的
+    蓋掉，使用者排除完第一個才發現還有第二個——Scan-H⑦ 早退遮蔽的同一形態，且遮蔽
+    方向是「看起來只有一個問題」。**分類**取最先命中的阻斷原因（要放進哪一格只能有
+    一個答案），但**說明**一個都不吞。
+    """
+    notes: list[str] = []
+    if events and event not in events:
+        notes.append(
+            f"本 workflow 的 on: 是 {','.join(sorted(events))}，不含 `{event}`"
+            f"——不加 --event 會零執行卻回 rc=0（假綠）"
+        )
+    if not has_runner:
+        notes.append(
+            f"runs-on={label} 不在 .actrc 的 -P 映射內。替代驗證＝"
+            + NO_LOCAL_CHANNEL_ALTERNATIVES.get(
+                label, "（本表未登記該 runner 的替代出口——請補 NO_LOCAL_CHANNEL_ALTERNATIVES）"
             )
-        if not has_runner:
-            notes.append("❌ 本機 act 無此 runner（結構上零本機通道，只能靠雲端／該平台真機）")
-        if has_services:
-            notes.append("❌ 帶 services:，act 0.2.89 會 panic ⇒ 改走 docker-compose.ci.yml")
-        print(f"  {wf:34s} {job:36s} {label:16s} {' ／ '.join(notes) or '🟡 act 可解析'}")
+        )
+    if has_services:
+        notes.append(
+            "帶 services:，act 0.2.89 對它 panic（run_context.go 對 nil container 解參考，"
+            "上游 bug）。替代驗證＝`docker compose -f AutoClaude/docker-compose.ci.yml up -d`"
+            " ＋本機 pytest"
+        )
+    if not has_runner:
+        return CAT_NO_RUNNER, notes
+    if has_services:
+        return CAT_SERVICES, notes
+    if events and event not in events:
+        return CAT_WRONG_EVENT, notes
+    entry = ledger.get(f"{wf}::{job}")
+    if not entry:
+        return CAT_RUNNABLE, notes
+    at, rc = entry.get("at", "?"), entry.get("rc")
+    notes.append(f"最近一次本機實跑：{at} rc={rc}（映像 {entry.get('image', '?')}）")
+    if workflow_fingerprint(MONOREPO_ROOT / WORKFLOW_DIR / wf) != entry.get("wf_sha"):
+        notes.append("⚠️ 該次實跑之後 workflow 檔已變動 ⇒ 那筆結論不再代表現況，請重驗")
+        return CAT_STALE, notes
+    return (CAT_VERIFIED if rc == 0 else CAT_FAILED), notes
+
+
+def classified_inventory(event: str = DEFAULT_EVENT) -> list[tuple[str, str, str, str, list[str]]]:
+    """`[(workflow, job, runs-on, 分類, 說明)]`——`--list` 與 `--verify-all` 的共同輸入。"""
+    ledger = read_ledger()
+    events_by_wf = {p.name: workflow_events(p) for p in workflow_files()}
+    return [
+        (wf, job, label,
+         *classify_job(wf, job, label, has_runner, has_services,
+                       events_by_wf.get(wf, set()), event, ledger))
+        for wf, job, label, has_runner, has_services in job_inventory()
+    ]
+
+
+def print_job_inventory(event: str = DEFAULT_EVENT) -> None:
+    """把每個 job 落在哪一格印在使用者眼前，而不是留白。
+
+    🔴 「🟡 可解析」**不等於「能跑完」**——它判的是三件結構事實（runner／services／
+    事件），判不到「映像裡有沒有那支工具」。R77 實測：root-infra dry-run rc=0，真跑到
+    第 3 個 step（需要 pwsh）`exitcode 127`。故 ✅ 這一格**只**來自 `verify_all()` 寫下的
+    實跑帳本，任何靜態分析都不得把自己升格成 ✅。
+    """
+    rows = classified_inventory(event)
+    print(f"[run_act] 全庫 job 盤點（{WORKFLOW_DIR}/*.yml 共 {len(rows)} 個 job；"
+          f"事件＝{event}）：")
+    for wf, job, label, cat, notes in rows:
+        print(f"  {wf:34s} {job:36s} {label:16s} {CAT_BADGE[cat]}")
+        for note in notes:
+            print(f"       └─ {note}")
+    tally = {cat: sum(1 for r in rows if r[3] == cat) for cat in CAT_BADGE}
+    print("[run_act] 小計：" + "／".join(
+        f"{CAT_BADGE[c]} {n}" for c, n in tally.items() if n
+    ))
     print(
-        f"[run_act] 上表任一支請以 --workflow {WORKFLOW_DIR}/<檔名> --job <job> 執行；"
-        f"標 ⚠️ 者另需 --event <事件>"
-        f"（Windows 薄殼尚未轉這兩個旗標，請改設環境變數 {WORKFLOW_ENV} / {EVENT_ENV}）。"
+        f"[run_act] 單支執行：--workflow {WORKFLOW_DIR}/<檔名> --job <job>"
+        f"（標 ⚠️ 者另需 --event <事件>）。"
+        f"一鍵把「跑得動的全部跑一次並記帳」：--verify-all。"
     )
-    # 🔴 本輪實測訂正：「🟡 act 可解析」**不等於「能跑完」**。本欄判的是三件結構事實
-    # （有無該 runner／有無 services:／有無該事件觸發），判不到「映像裡有沒有那支工具」。
-    # 實例：root-infra-ci 的第 3 個 step 需要 pwsh，而 act 預設映像（catthehacker
-    # ubuntu:act-latest，見根層 .actrc）沒有裝 ⇒ 真跑到該步 `command not found` rc=127，
-    # 而 GitHub 的 ubuntu-latest runner 自帶 pwsh。原措辭寫「✅ 本機 act 可達」會讓讀者
-    # 把「解析得動」讀成「驗過了」——那正是本 repo 反覆在治的那種宣稱。
     print(
-        "[run_act] 🔴 「🟡 act 可解析」只表示結構上跑得起來（runner／services／事件三項），"
-        "**不保證跑得完**——act 預設映像缺 pwsh 等工具，需要它們的 step 會以 rc=127 收場。"
-        "要證明一支 job 真的通過，唯一憑證是該次執行自己的逐步輸出。"
+        "[run_act] 🔴 ✅ 只代表**這台機器**上那一次執行的逐步輸出真的走完了，且 workflow "
+        "自那次之後沒改過；它不代表雲端會綠（act 與雲端仍有已知落差：不連 artifact 儲存、"
+        "gh API 無 token、`services:` 走 docker compose 替代）。"
     )
 
 
@@ -321,14 +463,14 @@ def preflight(workflow: str, job: str, event: str = DEFAULT_EVENT) -> tuple[list
         missing = [t for t in RUNNER_IMAGE_MISSING_TOOLS if re.search(rf"(?<![\w-]){t}\b", block)]
         if missing:
             warnings.append(
-                f"{name}：疑似用到 {'/'.join(missing)}，而 {RUNNER_IMAGE} 沒有這些工具 —— "
-                f"act 會在該 step `exitcode 127`（真紅，非假綠；本輪對 root-infra 實測即"
-                f"停在第 3 道 pwsh 守門）。要在本機跑完整條需換映像，而 .actrc 帶 "
-                f"`--pull=false` ⇒ **必須先自己 pull**，否則換了映像只會換一種失敗：\n"
-                f"      docker pull {FULL_RUNNER_IMAGE}\n"
-                f"      act -P ubuntu-latest={FULL_RUNNER_IMAGE} -W <workflow> -j {name}\n"
-                f"    （該映像體積遠大於 {RUNNER_IMAGE}；本輪未在本機驗過換映像後是否全綠，"
-                f"別把這行指路當成已驗證的通道）"
+                f"{name}：疑似用到 {'/'.join(missing)}，而 {RUNNER_IMAGE} 沒有這些工具。"
+                f"若該 step 直接呼叫它 ⇒ `exitcode 127`（真紅，非假綠）。\n"
+                f"    現況（實測，別當成待辦）：本清單只剩 ruff，而 root-infra-ci 第 16 道"
+                f"自己會 `pip install 'ruff==0.15.21'`，容器有網路就裝得起來——刻意不預裝，"
+                f"預裝會遮蔽「那行 pip install 壞掉」這個雲端會紅、地端卻綠的差異。\n"
+                f"    真的需要在映像內補一支工具時：改 {ACT_DOCKERFILE} 後 "
+                f"`--build-image --no-cache` 重建（不要改 workflow 去遷就地端——雲端 runner "
+                f"本來就有的東西，不該為了地端讓雲端每次 push 多裝一次）。"
             )
     return blockers, warnings
 
@@ -405,12 +547,109 @@ def image_ready(image: str) -> bool:
     return _run_quiet(["docker", "image", "inspect", image]) == 0
 
 
+def build_runner_image(no_cache: bool = False) -> int:
+    """`docker build` 出 `RUNNER_IMAGE`（tools/act/Dockerfile；WHY 見該檔檔頭）。
+
+    可重跑：docker layer cache 命中時是秒級；改了 Dockerfile 的 `ARG` 版本號後
+    **必須**帶 `no_cache=True`，否則 cache 會沿用舊版本的那一層。
+    """
+    dockerfile = MONOREPO_ROOT / ACT_DOCKERFILE
+    if not dockerfile.is_file():
+        print(f"[run_act] 找不到 {ACT_DOCKERFILE} —— 自建 runner 映像的唯一來源缺席。",
+              file=sys.stderr)
+        return 1
+    cmd = ["docker", "build", "-f", str(dockerfile), "-t", RUNNER_IMAGE]
+    if no_cache:
+        cmd.append("--no-cache")
+    cmd.append(str(MONOREPO_ROOT / ACT_BUILD_CONTEXT))
+    print(f"[run_act] 建置本機 act runner 映像：{' '.join(cmd)}")
+    print(f"[run_act] （base＝{ACT_BASE_IMAGE}；補 pwsh／gh 兩支雲端 runner 自帶、"
+          f"base 沒有的工具。首次含 base 下載約 2.3GB）")
+    rc = subprocess.run(cmd).returncode
+    if rc != 0:
+        print(f"[run_act] ❌ docker build {RUNNER_IMAGE} 失敗（rc={rc}）。", file=sys.stderr)
+    return rc
+
+
 def pull_image(image: str) -> int:
+    """取得本地缺少的鏡像——**`RUNNER_IMAGE` 走 build，其餘走 `docker pull`**。
+
+    🔴 為何是分派而不是兩個各自被呼叫的函式：`ensure_images()` 的職責是「act 開跑前
+    本地要有的鏡像都在」，取得方式（pull／build）是實作細節。把分派放在這一層，
+    `ensure_images()` 與它的呼叫端一個字都不用改，也不會多出第二條「誰負責確保映像在」
+    的路徑——多一條就多一個會腐化的分歧面（本 repo 反覆在收斂的正是這個形態）。
+    函式名沿用 `pull_image`：`AutoClaude/tests/tools/test_run_act_core.py` 以這個名字
+    monkeypatch 並斷言 `ensure_images()` 對它的呼叫序列，改名會讓那組行為鎖失去對象。
+    """
+    if image == RUNNER_IMAGE:
+        print(f"[run_act] 本地缺鏡像 {image}（本機自建，pull 不到）→ docker build…")
+        return build_runner_image()
     print(f"[run_act] 本地缺鏡像 {image} → docker pull（首次約 1~1.5GB）…")
     rc = subprocess.run(["docker", "pull", image]).returncode
     if rc != 0:
         print(f"[run_act] docker pull {image} 失敗。", file=sys.stderr)
     return rc
+
+
+# ── 實跑帳本（本輪新增）──────────────────────────────────────────────────────
+# WHY：`--list` 原本只有「🟡 act 可解析」這一格，而它判的是三件**結構**事實
+# （runner／services／事件），判不到「這支到底有沒有真的在本機跑完過」。R77 已用一次
+# 實測證明兩者不同：root-infra dry-run rc=0，真跑第 3 步 rc=127。要讓 `--list` 說得出
+# 「✅ 已實跑通過」，唯一誠實的來源是**那次執行自己留下的紀錄**，不是任何人寫在文件裡
+# 的宣稱——所以本帳本只由 `verify_all()`（唯一以「產生證據」為目的的指令）寫入。
+#
+# 🔴 為何刻意**不**讓單支 `--job` 執行也寫帳本：`main()` 在
+# `AutoClaude/tests/tools/test_run_act_core.py` 裡被呼叫時 `run_act` 是 mock 的
+# （`lambda *a, **k: 0`）——那條路徑寫下的 rc=0 會是一筆**從未真的執行過**的 ✅。
+# 帳本一旦能被 mock 餵出綠燈，它就從證據退化成裝飾。`verify_all()` 不被任何既有測試
+# 呼叫，是目前唯一「寫進去的一定是真跑過」的入口。
+#
+# 新鮮度：每筆記下當時 workflow 檔的 sha256 前 12 碼。workflow 改過之後那筆證據就過期，
+# `--list` 會把它降級回 🟡 而不是繼續顯示 ✅（過期的綠比沒有綠更危險）。
+LEDGER_REL = ".act-runs/ledger.json"
+
+
+def ledger_path() -> Path:
+    return MONOREPO_ROOT / LEDGER_REL
+
+
+def workflow_fingerprint(path: Path) -> str:
+    """workflow 檔內容指紋（sha256 前 12 碼）——證據新鮮度的判準。"""
+    try:
+        return hashlib.sha256(path.read_bytes()).hexdigest()[:12]
+    except OSError:
+        return ""
+
+
+def read_ledger() -> dict[str, dict[str, object]]:
+    """讀實跑帳本；不存在／壞掉一律回空 dict（＝一筆 ✅ 都不敢宣稱）。
+
+    壞掉時回空而不是 raise：帳本的失效方向必須是「少宣稱」，不是「擋住所有人」。
+    """
+    try:
+        data = json.loads(ledger_path().read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return {}
+    return data if isinstance(data, dict) else {}
+
+
+def record_run(wf_name: str, job: str, event: str, rc: int) -> None:
+    """把一次**真跑**寫進帳本（唯一寫入者＝`verify_all()`）。"""
+    ledger = read_ledger()
+    wf_path = MONOREPO_ROOT / WORKFLOW_DIR / wf_name
+    ledger[f"{wf_name}::{job}"] = {
+        "rc": rc,
+        "event": event,
+        "image": RUNNER_IMAGE,
+        "wf_sha": workflow_fingerprint(wf_path),
+        "at": datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ"),
+    }
+    path = ledger_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    # newline="\n"：本 repo 對 Python 寫檔的既有紀律（Windows 預設會寫成 CRLF）。
+    with path.open("w", encoding="utf-8", newline="\n") as fh:
+        json.dump(ledger, fh, ensure_ascii=False, indent=2, sort_keys=True)
+        fh.write("\n")
 
 
 def ensure_images(job: str) -> int:
@@ -450,6 +689,52 @@ def run_act(
     return subprocess.run(act_prefix + act_args).returncode
 
 
+def verify_all(
+    act_prefix: list[str], event: str, empty_env_path: str, workflow_filter: str = "",
+) -> int:
+    """一鍵「推 GitHub 前的本機全驗」：跑得動的全部真跑一次並記帳，跑不動的逐個講明。
+
+    這一層刻意做得很薄——它不是新框架，只是把既有的 `classified_inventory()`（判準）
+    與 `run_act()`（執行）串起來，再加一張**不許留白**的結案總表。設計上守兩條：
+
+      1. **不得靜默略過**：結構上驗不了的 job（macOS／Windows runner、帶 `services:`、
+         事件對不上）一樣列進總表並附替代驗證出口。本 repo 最大宗的缺陷形態是「鎖存在
+         但沒有鑑別力」與「早退遮蔽訊號」，而「沒被列出來」正是最省力的遮蔽方式。
+      2. **rc 語意單一**：只要有任何一支「該跑」的 job 失敗就回非 0；「跑不動」不影響
+         rc（那不是本次改動造成的紅，把它算進 rc 只會逼人整條停用本指令）——但它在總表
+         上是 ❌，讀者一眼看得到覆蓋面的洞。
+    """
+    rows = classified_inventory(event)
+    if workflow_filter:
+        wanted = Path(workflow_filter).name
+        rows = [r for r in rows if r[0] == wanted]
+        if not rows:
+            print(f"[run_act] ❌ --workflow {workflow_filter} 盤不到任何 job", file=sys.stderr)
+            return 1
+    todo = [r for r in rows if r[3] in RUNNABLE_CATS]
+    print(f"[run_act] 一鍵全驗：{len(rows)} 個 job，其中 {len(todo)} 支本機 act 跑得動"
+          f"（事件＝{event}）。開跑——")
+    failures: list[str] = []
+    for i, (wf, job, _label, _cat, _notes) in enumerate(todo, 1):
+        print(f"[run_act] ── [{i}/{len(todo)}] {wf}::{job}")
+        rc = run_act(act_prefix, job, False, empty_env_path, f"{WORKFLOW_DIR}/{wf}", event)
+        record_run(wf, job, event, rc)
+        if rc != 0:
+            failures.append(f"{wf}::{job}（rc={rc}）")
+    # 總表由**剛寫完的帳本**重新分類而來，不是把迴圈內的變數再抄一遍：抄一遍就是第二個
+    # 會與帳本分歧的來源，而分歧時畫面上完全看不出來。
+    print("[run_act] ════ 本機驗證結案總表 ════")
+    print_job_inventory(event)
+    if failures:
+        print(f"[run_act] ❌ 本機全驗未通過（{len(failures)} 支該跑而失敗）："
+              f"{'；'.join(failures)}", file=sys.stderr)
+        return 1
+    print(f"[run_act] ✅ 本機全驗通過：{len(todo)} 支該跑的 job 全數 rc=0。")
+    print("[run_act] 🔴 但這**不等於**雲端會綠——上表 ❌／⚠️ 那幾格結構上沒有本機通道，"
+          "各自的替代驗證出口已逐行列在表上，請照著補完再 push。")
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     # 自身 stdout/stderr best-effort UTF-8 + 行緩衝：非 TTY（管線/log 擷取）下 Python 預設
     # 對 stdout 做 full buffering，會讓 stdout 進度訊息與 stderr 錯誤訊息交錯錯亂
@@ -479,14 +764,34 @@ def main(argv: list[str] | None = None) -> int:
     workflow = run_workflow(args)
     args.event = run_event(args)
 
+    # `--build-image` 刻意排在 List／preflight 之前並自成終點：它是**準備動作**，
+    # 與「跑哪一支 workflow」正交，不該被任何 workflow 層的判準擋住（例如映像還沒建
+    # 的時候，preflight 對事件的抱怨與你此刻想做的事無關）。
+    if getattr(args, "build_image", False):
+        return build_runner_image(no_cache=getattr(args, "no_cache", False))
+
     print("[3/7] List 模式")
     if args.list:
         # 顯式指定時縮到那一支；未指定時維持原本的 `-W <預設>` 呼叫形態，另由本檔自己
         # 解析出全庫盤點補上缺的 16 個 job（不再多開一次 act 子行程）。
         rc = subprocess.run(act_prefix + ["-l", "-W", workflow]).returncode
         if not explicit:
-            print_job_inventory()
+            print_job_inventory(args.event)
         return rc
+
+    if getattr(args, "verify_all", False):
+        print("[4/7] 一鍵全驗（--verify-all）：先備妥鏡像，再逐支真跑")
+        if ensure_images("") != 0:
+            return 1
+        fd, env_path = tempfile.mkstemp(prefix="autoclaude_act_empty_")
+        try:
+            os.close(fd)
+            return verify_all(act_prefix, args.event, env_path, explicit)
+        finally:
+            try:
+                os.remove(env_path)
+            except OSError:
+                pass
 
     print("[4/7] preflight（本機 act 結構上跑不動的先講清楚）")
     blockers, warnings = preflight(workflow, args.job, args.event)

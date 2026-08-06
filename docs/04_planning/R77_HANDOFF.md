@@ -9,13 +9,31 @@
 
 ## 0. 🔴 R78 開場必讀的三件事
 
+> 🔴 **R78 追加的體例（SA-04／SA-05 兩筆同型，故寫成規則而不是只修個案）：
+> 交棒書凡述及「尚未做／還沒做／仍缺」的事，一律附**現查指令**，不寫快照結論。**
+> 理由：交棒書記的是「收輪那一刻的狀態」，而讀者是在數天後、由別人動過的樹上讀它。
+> 本節下方兩筆都被 R78 開場實查推翻（tag 其實已在遠端；`root_unittests` 其實已併進
+> Windows nightly 的 STAGE-L），而照原文做的代價分別是「重推一次」與「每晚多跑一次
+> 260〜313 秒的全套」。**「尚未做」是一個會過期的量測值，不是常數。**
+> 機械物：`tools/tests/test_doc_loc_baseline_freshness_r60.py::TestR78HandoffClaimsCarryLiveCommands`
+> ——本節與「還沒做什麼」類章節內，凡帶「尚未／還沒／仍缺／未執行／沒跑」的條目，
+> 必須附一段可執行的現查指令，或以 `<!-- handoff-claim-verified: WHY -->` 明說
+> 「這件事沒有機械現查管道」。
+
 1. **本輪四方複審一次都沒跑**（月度支出上限，`DEF-101-876`）。所有「已修畢」宣稱皆為
    **作者自證**，而本 repo 的成熟度判準 M3 明文「作者自證不計分」。**R78 第一件事是補跑複審。**
+   <!-- handoff-claim-verified: 「複審有沒有跑過」不落磁碟，無機械現查管道；只能看該輪的複審輸出檔是否存在 -->
 2. **三個修復包完全未執行**：skipped 治理、承接稽核覆蓋率、依賴債。它們的規格書仍在
    `docs/06_quality/CrossPlatform_R77_Fix_Plan.md`（PKG-11-SKIPGOV／PKG-04-CROSSREF／PKG-12-DEBT），
-   可直接照做。
+   可直接照做。現查各包是否已落地：`git log --oneline --grep=PKG-11-SKIPGOV --grep=PKG-04-CROSSREF --grep=PKG-12-DEBT`
 3. **30 支 `sdd-v0.NN` tag 已建但尚未推送**。下一輪若要談刪除凍結版目錄，**前提是先把 tag 推上去**
    （`git push origin 'refs/tags/sdd-v*'`）——兜底只存在本機等於沒有兜底。
+   > 🔴 **R78 訂正（SA-04）：這一條在 R78 開場已為假，而它正是本節自列的「必讀」之一。**
+   > 現查：`git ls-remote --tags origin 'refs/tags/sdd-v*'` 回 60 refs（annotated tag 每支
+   > 兩列，`refs/tags/X` ＋ `refs/tags/X^{}`）＝**30 支已在遠端**；與 `git tag --list 'sdd-v*'`
+   > 的 30 支逐名比對零差異。**兜底已經存在。**照原文再推一次雖然無害，但把「已完成」讀成
+   > 「待辦」會讓 R78 誤判凍結版目錄那個決策的前提還沒到位。
+   > 判斷「現在推了沒」請跑上面那兩行，不要讀這裡的結論。
 
 ---
 
@@ -82,9 +100,22 @@ Architect 給出 **5 列減法清單**（每列附三段論：當初為何存在
 
 ### Q3｜雙向落差（mac 開發 ↔ Windows 開發）
 
-**實測攔截率：mac→Win 0/10（0%）、Win→mac 4/12（33%）。**
+**實測攔截率：mac→Win 0/10（0%）、Win→mac 4/12（33%）。** <!-- xplat-rate-history: R77 動工前量測，見下方 R78 訂正 -->
 
-🔴 R76 交棒書把這兩個方向**寫反了**，並誤診成「只有 mac 真機補得了」。實際上 mac→Win 的 0/10
+> 🔴 **R78 訂正（ARCH-05）：上面那兩個數字是 R77 動工前的量測，不是收輪值。** 同一個 commit
+> 落地的第六道判準把兩個方向都往上推了，而本節、M5 判準表、ADR 的 R77 列三處**全部**停在
+> 修復前的值。方向是低報自己的成果，但代價落在下一輪：R78 一跑載具會拿到明顯較高的數字，
+> 與這裡一比像「一輪暴衝」，於是去找一個不存在的原因。
+> **前後對照**（這一輪到底動了多少）：動工前 mac→Win 0/10、Win→mac 4/12 <!-- xplat-rate-history: 動工前量測 -->
+> ；R78 現查 mac→Win 5/10、Win→mac 6/12。
+> ⬆ 上面那一行**刻意不帶歷史標記**：它會被 `TestR78MaturityCriteriaSsot` 拿去與現場活值
+> 逐字比對，一漂就紅——這是全樹唯一可以安心寫死攔截率的地方，因為它寫死不了。
+> 其餘各處一律現跑：
+> `python -m unittest tools.tests.test_platform_neutral_paths.TestXplatInjectionMatrix`
+> （`setUpClass` 末行印 `[Xplat injection matrix] Win2mac=<hit>/<total> mac2Win=<hit>/<total>`）。
+> 判準表已搬到 [`docs/06_quality/CrossPlatform_Maturity_Criteria.md`](../06_quality/CrossPlatform_Maturity_Criteria.md)。
+
+🔴 R76 交棒書把這兩個方向**寫反了**，並誤診成「只有 mac 真機補得了」。實際上 mac→Win 的 0/10 <!-- xplat-rate-history: 同上，動工前量測 -->
 **全是靜態掃描面缺口**（`os.getlogin`／`import pwd`／`os.fork`／`killpg+SIGKILL`／`os.symlink`／
 `/tmp` 硬編／`chmod 0o755`／POSIX 路徑串接整類零判準），**在 Windows 上就補得起來也驗得到紅綠**；
 需要 mac 真機的是執行期那一半。兩者不是同一件事。已訂正。
@@ -133,6 +164,23 @@ M1~M6 六條**全部被指出判準本身有問題**，其中兩條特別刺眼�
 ### S1｜`AutoClaude_Nightly` 還要跑多久、能不能加速
 
 **不得退場**，而且它現在還**漏了 3 個 stage**（Windows 側缺 `root_unittests`，mac 側有）。
+
+> 🔴 **R78 訂正（SA-05）：括號裡那句在寫下的當回合就已為假，而且照做會造成實害。**
+> `root_unittests` 已由 **R77 自己**（`R77-04`）併進 Windows nightly 的 **Stage L**，
+> 與 `local_ci_gate.ps1` 並列為該 stage 的第二道檢查（兩道 rc 各自留證、合併時真失敗優先
+> 於 WARN）。R78 若照原文再加一次，每晚會**多跑一次 260〜313 秒的全套根層 unittest**。
+> 現查（權威源是腳本自己，不是本檔）：
+> `Select-String -Path AutoClaude\tools\run_local_nightly.ps1 -Pattern 'root_unittests'`
+> ——命中即代表已接上；該檔第 17 行起的「反向去向帳目」也逐項寫著現況。
+>
+> **另外，「漏了 3 個」通篇沒有列出是哪三個**（＝一個無法被證偽的數字）。照該帳目逐項核對，
+> 三項的**現況各不相同**，不是三個一樣的缺口：
+> | # | 項目 | 現況 |
+> |---|---|---|
+> | 1 | 平台 smoke（mac `[1/4]` 跑 `macos_smoke_local.sh`） | **不是缺口**：Windows 側由獨立 schtasks 任務 `AutoClaude_WindowsSmoke` 觸發，與本檔**刻意解耦**（理由寫在該帳目內） |
+> | 2 | 根層 unittest（mac `[2/4]`） | **已補**（R77-04，Stage L 第二道檢查） |
+> | 3 | SDD 完整閘門（mac `[4/4]` 跑 `ci-gate.sh` 雙軌全套） | **仍是缺口**：本檔只有 `sdd-fsm-chaos`（chaos 子集），不含 v0.01/LATEST 雙軌 pytest 與 10 道 lint 硬閘 |
+> ⇒ 真正還缺的是**第 3 項一項**。要不要補是另一個決策（那是最貴的一 stage），但別再用「3 個」這個數字。
 
 觀察期四軌的終點由 **span** 綁住而非筆數（R76 收緊判準後的正確行為）：obs 最早 08-21、drift 08-22，
 **前提是每晚不漏跑**。唯一合法槓桿是**提高命中率**——近 30 天實測只有 15/30 晚有進帳。
@@ -275,7 +323,7 @@ act 盤點把三項結構事實都判對了（runner／services／事件），�
 | 內容 | 強度 |
 |---|---|
 | §1 十二道閘門的 rc、`MIN_TESTS`、基線數字 | **當回合真跑**（Windows 11 真機，收尾者本人） |
-| §2 Q3 攔截率 0/10 與 4/12 | **引用**（PKG-01／PKG-09 的量測，收尾者未重跑） |
+| §2 Q3 攔截率 0/10 與 4/12 | **引用**（PKG-01／PKG-09 的量測，收尾者未重跑）。<!-- xplat-rate-history: 動工前量測 --> 🔴 **R78 訂正：那是動工前值、且本欄自陳「未重跑」卻沒有任何人回頭跑** ⇒ 現值改為現跑 `TestXplatInjectionMatrix`，見 §2 Q3 的訂正框 |
 | §2 Q4 的 n=36 歸因與 20~35% 違規率 | **引用**（Scan-W 的量測，收尾者未重跑） |
 | §2 S1 的 obs 08-21／drift 08-22 | **引用** R76 的試算，本輪未重算 |
 | §2 S2 的「19 天 373/584 job 未啟動」 | **引用**（PKG-05-CI 的量測） |

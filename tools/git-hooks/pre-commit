@@ -87,9 +87,19 @@ fi
 # （R76-10 起刻意**不帶 `-i`**：GNU grep 3.0 的 `-i`＋`-F` 在無 UTF-8 locale 時 SIGABRT，
 #  詳見下方第 3／5 項實作處的在地註解）。
 _ntfs_seg_bad() {  # $1=完整路徑；有問題 → stdout 印原因並回 0，乾淨 → 回 1
-  local p="$1" rest seg base up
+  local p="$1" rest seg base up cntrl=0
   # 控制字元（整條路徑一次檢查；LC_ALL=C 使 [:cntrl:] 按位元組判定）
-  if printf '%s' "$p" | LC_ALL=C grep -q '[[:cntrl:]]'; then
+  # 🔴 DEF-101-297（R33 立帳、R78 修）：原本**只**有下面那條 grep，它對「路徑段內嵌
+  #   換行（0x0A）」結構性失明——`printf '%s'` 把 \n 寫成真正的換行，於是它成為 grep 的
+  #   **行分隔符**而被消耗掉，不會出現在任一行的內容裡讓 `[[:cntrl:]]` 看到。這不是機率
+  #   問題：任何以「行」為單位的載具都看不到自己的分隔符。故先用 bash 自身的 pattern
+  #   match 判一次（不經任何以行為單位的載具，整條字串一次比對），grep 保留為第二層。
+  #   R78 實測（Git Bash 5.2.37）：內嵌 \n 舊式 MISS／新式 HIT；\r/\t/ESC/DEL 兩式皆 HIT；
+  #   對全 repo 27534 條 tracked 路徑 case-pattern 零命中（無假陽性，含 CJK 與含空白路徑）。
+  #   CI 側鏡射 tools/check_ntfs_paths.py 走 Python `str` 不分行，本來就看得到，故此修為
+  #   「本機 hook 追上 CI」而非新增判準。
+  case "$p" in *[[:cntrl:]]*) cntrl=1 ;; esac
+  if [ "$cntrl" -eq 1 ] || printf '%s' "$p" | LC_ALL=C grep -q '[[:cntrl:]]'; then
     echo "含控制字元"
     return 0
   fi

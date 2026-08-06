@@ -14,7 +14,15 @@
 #   arch-fitness-findings  ← aisdlc-sdd-arch-fitness.yml（arch-fitness-findings 與
 #                            arch-fitness-findings-nightly，前綴同時涵蓋，retention 7）
 #   fsm-chaos-report-      ← aisdlc-sdd-fsm-chaos-nightly.yml（fsm-chaos-report-<seed>，retention 7）
-# （aisdlc-sdd-drift-daily.yml 無 upload；新增 aisdlc-sdd artifact 時須同步本清單。）
+# 🔴 刻意**不在** allowlist 內的 aisdlc-sdd artifact（不是漏列，是決策；DEF-101-435 訂正）：
+#   drift-daily-report    ← aisdlc-sdd-drift-daily.yml 的 `Upload DAILY report` 步驟
+#                            （retention-days: 90）。本檔原註解逐字寫「aisdlc-sdd-drift-
+#                            daily.yml 無 upload」＝**假事實**，自 R55（DEF-101-435）記錄
+#                            至 R78 未訂正。它確實有 upload；不列入刪除清單的理由與
+#                            AutoClaude 家族同構：retention 90 > 本檔 7 天門檻，代表它被
+#                            刻意設計為長期取證產物，7 天門檻會把它殲滅。
+# （新增 aisdlc-sdd artifact 時須同步本清單——要刪的加進 ALLOWLIST_PREFIXES，
+#  不刪的加進上面這段「刻意不列入」，兩邊都不要留白。）
 #
 # 觸發：每日 03:03 UTC（排在 chaos 02:03 / drift 02:33 / arch-fitness 02:37 之後，
 # 清的是舊產物，不動當天剛產生的；R16 SCAN-C-4 由整點 03:00 錯開 3 分避開

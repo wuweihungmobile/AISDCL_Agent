@@ -20,9 +20,11 @@ test_component_sanitizer_reserved_trailing_space.py`）。四處成因相同：�
 ────────────────────────────────────────────────────────────────────────────
 ## R67 併入：目錄段大小寫碰撞（A2）／文件引用大小寫（A15）／Unicode NFC 正規化（B16）
 
-**為何併進本檔而不另開一支**：`tools/tests/` 有一道護欄層檔數棘輪
-（`test_adr_xplat001_c1c2_lock.py::TestGuardFileCountShrinkOnlyRatchet`，機械承載
-DEF-101-561③／DEF-101-565 的架構級裁決）——「R61 開輪即禁止新增鎖檔、只准合併／刪除」，
+**為何併進本檔而不另開一支**：`tools/tests/` 有一道護欄層棘輪
+（`test_adr_xplat001_c1c2_lock.py::TestGuardLayerRatchet`，機械承載
+DEF-101-561③／DEF-101-565 的架構級裁決）——R67 當時它量的是**檔數**，語意是
+「R61 開輪即禁止新增鎖檔、只准合併／刪除」（🔴 R78 ARCH-03 訂正：R77 起改量逐檔行數的
+**淨額**，新增檔案只要同一次變更刪掉等量以上的行就合法；下段是 R67 當時的實錄），
 理由是護欄層已比它所護的生產碼還大。R67 初版確實另開了一支獨立鎖檔
 （`test_path_segment_case_and_nfc_collision.py`），**當場被該棘輪擋下**；依其明示的合法作法
 （「把新判準擴充進既有鎖檔」）改為併入本檔。本檔是最貼近的宿主：它既有的職責就是

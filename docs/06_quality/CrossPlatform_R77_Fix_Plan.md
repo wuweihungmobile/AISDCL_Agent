@@ -18,7 +18,7 @@
 | 八支快層守門 | `check_script_parity` / `check_ntfs_paths` / `check_defect_log_crossref` / `check_wrapper_thinness` / `check_pytest_baseline_sites` / `check_gha_action_versions` / `archive_defect_log --check` / `sync_onboarding_baselines --check-snapshot` **rc 全 0** | 逐支真跑 |
 | 根層護欄 ruff | `All checks passed!` rc=0 | `ruff check tools/ --no-cache` |
 | 缺陷帳本未結列 | **85／全 104**，warn=86、fail=98；主檔 232,158 bytes | `check_defect_log_crossref.py --unresolved-count` |
-| `_FROZEN_GUARD_FILE_COUNT` | `53`（`tools/tests/test_adr_xplat001_c1c2_lock.py:682`）；`tools/tests/*.py` 磁碟實數 **56** | Grep ＋ 檔案計數 |
+| 護欄層棘輪（R77 當時＝**檔數**） | 凍結值 `53` vs `tools/tests/*.py` 磁碟實數 **56**。🔴 R78 ARCH-03：該檔數常數已於 R77 移除，接手者為 `TestGuardLayerRatchet` 的逐檔行數表 `_FROZEN_GUARD_LINES`（量的是**淨行數**）。本列保留為 R77 當回合的量測快照，**不是現行判準** | Grep ＋ 檔案計數 |
 | ONBOARDING 快照（Windows 欄） | `autoclaude-pytest-snapshot: {'passed': 3919, 'skipped': 224}` | `sync_onboarding_baselines.py --check-snapshot` |
 | **AISDLC_SDD/scripts/tests** | **rc=1，3 failed / 317 passed / 1 skipped**（triage §9 的線索，本回合現查坐實） | `python -m pytest AISDLC_SDD/scripts/tests -q` |
 
@@ -63,7 +63,7 @@ scripts/copy_on_evolve.sh: line 81: mkdir: command not found
 
 **全域規則（每包都適用，寫進 must_not_touch）**
 1. 只准動自己 `files_touched` 列出的檔。要動別包的檔＝寫進交件回報，不要自己改。
-2. **不得在 `tools/tests/` 新增檔案**——`_FROZEN_GUARD_FILE_COUNT = 53` 是 shrink-only 棘輪，新增鎖檔必紅（DEF-101-561③）。一律併進既有檔。
+2. 🔴 **R78 ARCH-03 訂正（原文已作廢，勿照做）**：本條原本寫「不得在 `tools/tests/` 新增檔案——`_FROZEN_GUARD_FILE_COUNT = 53` 是 shrink-only 棘輪」。那個常數在 R77 同輪就被刪了（全庫零賦值定義），**接手者是逐檔行數棘輪** `tools/tests/test_adr_xplat001_c1c2_lock.py::TestGuardLayerRatchet`（`_FROZEN_GUARD_LINES`）。現行規則：**`tools/tests/` 的淨行數不得上升**（DEF-101-561③）——新增檔案本身**不**違規，只要同一次變更內刪掉等量以上的行；反之只改既有巨檔卻淨增一行照樣紅。仍**優先**併進既有檔（那是成本最低的合法路徑），但不要拿一個不存在的理由砍掉設計選項。重釘須跑 `--print-guard-lines` 並在 `_GUARD_LINES_REPIN_LOG` 補一列（含淨額與理由）。
 3. **不得刪除任何測試**：根層實況 1979 ＝ `MIN_TESTS` 1979，**slack 0**，刪一支當場紅。新增測試上限到 2473（保鮮期 FAIL 線）。
 4. **不得重釘 `MIN_TESTS`**：那是收尾包在所有包停工後的動作，任一修復包重釘都會製造中途值（DEF-101-701 已列舉七次前例）。
 5. **只有 PKG-03 可以寫缺陷帳本**（`AutoSDD_Defect_Log*.md`）。其他包要新增／結掉的列，寫成交件回報交給 PKG-03 統一落列。
@@ -286,7 +286,7 @@ scripts/copy_on_evolve.sh: line 81: mkdir: command not found
   - `tools/run_root_unittests.py`
 - **做什麼**
   1. **R77-52**：兩支姊妹鎖掃描面差 44 檔（缺口正好蓋住整層 hook）＋下限無腐化上界（`tools/tests` floor=10／actual=56 ⇒ **82% 掃描面可靜默蒸發而全綠**）＋方向判不出 108 站點。**藥方已存在**：`test_subprocess_encoding_hygiene.py:105-116` 早就把這個病診斷完並開好藥（雙邊帶＋`repin_ceiling`），只餵給兩個病人中的一個 ⇒ **把同一套雙邊帶搬到 `test_platform_neutral_paths.py`**。
-  2. **R77-33**：對面平台專屬 API 整類零機械物。🔴 **不得新建掃描器檔**（`_FROZEN_GUARD_FILE_COUNT = 53` ＋ DEF-101-561③）——**併進 `test_platform_neutral_paths.py`**，該檔已在 `:1423`／`:2005` 記載過這個做法。
+  2. **R77-33**：對面平台專屬 API 整類零機械物。**併進 `test_platform_neutral_paths.py`**，該檔已在檔內兩處記載過這個做法（🔴 R78 ARCH-03 訂正：原文的禁令理由 `_FROZEN_GUARD_FILE_COUNT = 53` 已不存在，見 §2 全域規則第 2 條——現行約束是「淨行數不得上升」，併進既有檔仍是成本最低的合法路徑，但那是**取捨**不是禁令）。
   3. **R77-18**：`_WINDOWS_SKIP_TAG_EXEMPT` 零 stale 自檢、零牙。在既有 `tools/tests/test_run_root_unittests.py` 內加自檢（不新增檔案）。兩個具體風險：①`run_root_unittests.py:119` 明載既有測試會 `mock.patch.dict(run_root_unittests._WINDOWS_SKIP_TAG_EXEMPT, …)`，新斷言必須在 assert 當下讀**活體模組屬性**；②不得與那些 patch 併行（unittest 序列執行沒問題，但任何平行 runner 會互踩——本 repo 有「並行突變互踩假紅」判例）。
   4. **R77-56a**：`skip_tag_policy.py:44,152-155,236` 標籤詞彙表無成員檢查、兩棵 `fsm_runtime` 樹零覆蓋。🔴 **不得把測試側的平台述詞換成 `is_windows()` helper**——`skip_tag_policy.py:66-97` 是用**述詞的字面原始碼**（`sys.platform == "win32"`、`os.name == "nt"` …）判定是否需要 Windows skip 標籤，換掉會讓它們對該表**隱形**（Scan-H⑥ 教科書式互撞，R77-27 已證偽該方向）。
 - **must_not_touch**：`tools/git-hooks/**`（PKG-06）；`CLAUDE.md`（PKG-01——你若補了新掃描器而鐵律三那張表該改列，**寫進交件回報**，不要自己改）；`tools/tests/test_doc_loc_baseline_freshness_r60.py`（PKG-01）；`AutoClaude/tests/**`。🔴 **不得重釘 `MIN_TESTS`**（收尾包的事）。🔴 **不得下修任何 floor**；補雙邊帶時上界只准是「當下實況＋明示的成長容忍」，不得是拍腦袋的大數。
@@ -309,7 +309,7 @@ scripts/copy_on_evolve.sh: line 81: mkdir: command not found
 - **做什麼**
   1. **R77-13**：8 筆「退場：未指派」。**安全解＝把 8 筆改填具名輪號，或真的收斂掉幾筆**。🔴 **不要**把鎖改成「驗證輪號仍在未來」——`:624-627` 與 `CrossPlatform_Scan_Dimensions.md §191` 已載明會造成永紅，且形狀等同 R75 那個 P0（判準的比較對象隨被判動作改變）。收斂任一筆須**同 commit** 同步 `_TIER_BASELINE`（`test_baseline_covers_every_live_entry_and_agrees_on_tier` 要求逐字相等）；`_TIER34_FLOOR = 10` 只准上修、`_UNPINNED_CEILING = 8` 只准下修（本回合實查 `tools/check_script_parity.py:1172,1198`）。
   2. **R77-54**：parity 家族四缺口——①LATEST 薄殼釘選分成兩套（`check_script_parity.py:386`）；②薄殼宣稱沒人量（`check_wrapper_thinness.py:82,409`）；③紅印在第 1 行後接 12 行綠（同 R77-17 的 accumulate-then-report 形態）；④訊息指路單一檔（`tools/lib/GitHooksInstallCommon.ps1`）。
-- **must_not_touch**：`tools/tests/test_ps1_bom.py`（**特別警告**：鐵律三那張表若把它以反引號寫回「行尾」那一列，實質判準會當場紅——它守的是 BOM 不是行尾）；`tools/git-hooks/**`（PKG-06）；`AutoClaude/tools/run_act*`（PKG-08）；`CLAUDE.md`（PKG-01）。🔴 **不得新增鎖檔**（`_FROZEN_GUARD_FILE_COUNT`）。🔴 **不得上修 `_UNPINNED_CEILING`／下修 `_TIER34_FLOOR`**。
+- **must_not_touch**：`tools/tests/test_ps1_bom.py`（**特別警告**：鐵律三那張表若把它以反引號寫回「行尾」那一列，實質判準會當場紅——它守的是 BOM 不是行尾）；`tools/git-hooks/**`（PKG-06）；`AutoClaude/tools/run_act*`（PKG-08）；`CLAUDE.md`（PKG-01）。🔴 **`tools/tests/` 淨行數不得上升**（`TestGuardLayerRatchet`；R78 ARCH-03 訂正：原文寫的「不得新增鎖檔」是已退場的檔數棘輪語意）。🔴 **不得上修 `_UNPINNED_CEILING`／下修 `_TIER34_FLOOR`**。
 - **acceptance**
   1. `& $py tools\check_script_parity.py` → **rc=0**，且輸出的 `unpinned` 計數 **< 8**（動工前實測 `unpinned 8/8`；持平不算完成）
   2. `& $py tools\check_wrapper_thinness.py` → **rc=0**

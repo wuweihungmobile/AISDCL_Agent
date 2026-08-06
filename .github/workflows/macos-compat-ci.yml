@@ -85,6 +85,19 @@ on:
       - "tools/dev_start.py"
       - "tools/tests/**"
       - "tools/run_root_unittests.py"
+      # R78：新增 tools/act/（act 自建 runner 映像的 Dockerfile）。
+      # tools/tests/test_act_local_runner_image.py 對它做「映像三處一致」斷言，而
+      # tools/tests/** 只涵蓋測試那一側——只改 Dockerfile 不改測試時該鎖不會被觸發、
+      # 漏檢（DEF-101-874 同構：新增 tools/ 子目錄必須同時補這兩支的 paths）
+      - "tools/act/**"
+      # R78（同一筆漏做的第二半，由回填包實測揪出）：`.actrc` 與
+      # tools/session_resume_planner.py 同樣被根層測試消費
+      # （test_act_local_runner_image.py 讀 .actrc 的映像指向；
+      #  test_context_budget_guard.py 讀 planner）——只改這兩者時鎖不會跑。
+      # 收尾者第一次只補了 tools/act/**，是 test_ci_paths_cover_root_consumers.py
+      # 把剩下這兩筆逐字點名出來的。
+      - ".actrc"
+      - "tools/session_resume_planner.py"
       # R14：tools/tests/test_subprocess_encoding_hygiene.py 單檔掃描清單消費此檔
       #（樹外 tracked 零散 .py 納管）——只改該檔時其回歸鎖須跑（DEF-101-042 同構）
       # R10：tools/tests 內含讀取這兩支 workflow 的回歸鎖（test_root_infra_parity
@@ -316,6 +329,19 @@ on:
       - "tools/dev_start.py"
       - "tools/tests/**"
       - "tools/run_root_unittests.py"
+      # R78：新增 tools/act/（act 自建 runner 映像的 Dockerfile）。
+      # tools/tests/test_act_local_runner_image.py 對它做「映像三處一致」斷言，而
+      # tools/tests/** 只涵蓋測試那一側——只改 Dockerfile 不改測試時該鎖不會被觸發、
+      # 漏檢（DEF-101-874 同構：新增 tools/ 子目錄必須同時補這兩支的 paths）
+      - "tools/act/**"
+      # R78（同一筆漏做的第二半，由回填包實測揪出）：`.actrc` 與
+      # tools/session_resume_planner.py 同樣被根層測試消費
+      # （test_act_local_runner_image.py 讀 .actrc 的映像指向；
+      #  test_context_budget_guard.py 讀 planner）——只改這兩者時鎖不會跑。
+      # 收尾者第一次只補了 tools/act/**，是 test_ci_paths_cover_root_consumers.py
+      # 把剩下這兩筆逐字點名出來的。
+      - ".actrc"
+      - "tools/session_resume_planner.py"
       # R14：tools/tests/test_subprocess_encoding_hygiene.py 單檔掃描清單消費此檔
       #（樹外 tracked 零散 .py 納管）——只改該檔時其回歸鎖須跑（DEF-101-042 同構）
       # R10：tools/tests 內含讀取這兩支 workflow 的回歸鎖（test_root_infra_parity

@@ -11,9 +11,10 @@
 
   (2) **行尾閘（R74）**——進 commit 的 `.sh`／無副檔名 hook 檔不得含 CR。
 
-🔴 為何 (2) 併進本檔而非另立新檔：`tools/tests/test_adr_xplat001_c1c2_lock.py` 的
-`_FROZEN_GUARD_FILE_COUNT` 是 **shrink-only 棘輪**，`DEF-101-561③` 明文裁決「禁止新增
-鎖檔、只准合併／刪除」。本檔是最貼近的家——它已經備好「真 git repo ＋ 真 commit
+🔴 為何 (2) 併進本檔而非另立新檔：`tools/tests/` 有一道護欄層 shrink-only 棘輪
+（`DEF-101-561③`；R74 當時量的是檔數。🔴 R78 ARCH-03 訂正：R77 起接手者是
+`test_adr_xplat001_c1c2_lock.py::TestGuardLayerRatchet` 的逐檔行數表，現行語意是
+**淨行數不得上升**、不是「禁止新增檔案」）。本檔是最貼近的家——它已經備好「真 git repo ＋ 真 commit
 觸發 dispatcher」這套沙盒（行尾閘唯一能被行為級驗證的方式就是真的 commit 一次），
 新開一支等於把同一套 fixture 抄第二份，還會撞上那條裁決。
 
@@ -381,15 +382,82 @@ class TestHookPathScopeDirectoryBoundary(unittest.TestCase):
                 )
 
 
+# 具名排除（不納入單一實作約束）＋逐筆理由。形狀照抄
+# `tools/check_script_parity.py` 的 `_AC_EXCLUDED_REGISTRIES`：排除是**決策**，必須寫
+# 下來被複審看見；同目錄新增一支而不表態就會落進掃描面並轉紅。
+_PATH_SCOPE_EXCLUDED: dict[str, str] = {
+    "hook_path_scope.py":
+        "共用層本身——它就是被委派的那一份實作，不是消費者；納入即自我指涉",
+    "check_ps1_encoding.py":
+        "不做「repo 相對路徑」轉換：`resolve_path()` 只把 payload 路徑補成絕對路徑後"
+        "直接讀寫該檔，判決不問「這個檔在不在某棵樹底下」⇒ 沒有 root 前綴大小寫分歧"
+        "這個成因。且它 best-effort 永遠 exit 0，非阻斷級",
+    "check_lang.py":
+        "Stop 事件，payload 只有 transcript_path，全檔零 `file_path` 處理"
+        "（Grep 實查：該識別字在本檔零命中）⇒ 不在本判準的射程內",
+    "claude_md_freshness.py":
+        "目標路徑是寫死的模組層常數 `PROJECT_ROOT / \"CLAUDE.md\"`，不從 payload 取"
+        "路徑（同上 Grep 實查零命中）⇒ 無正規化面",
+}
+
+
+def _path_scope_consumers() -> list[str]:
+    """`AutoClaude/tools/hooks/*.py` 扣掉具名排除——本鎖的掃描面（列舉，非白名單）。"""
+    return sorted(
+        p.name for p in _BLOCKING_HOOKS_DIR.glob("*.py")
+        if p.name not in _PATH_SCOPE_EXCLUDED
+    )
+
+
 class TestBlockingHooksShareOnePathNormalizer(unittest.TestCase):
-    """R77-50 的**單一實作**約束：兩支 hook 不得再各自長出一份路徑正規化。
+    """R77-50 的**單一實作**約束：hook 不得再各自長出一份路徑正規化。
 
     WHY：本缺陷的成因不是「某一行寫錯」，而是同一份知識住兩個家而只有一個家被想過
     （R73 `DEF-101-778` 同型）。只修那兩行、不釘「別再分家」，下一個人照樣會在其中
     一支就地補一段 `resolve().relative_to(...)`，而分歧會再度只在對面平台顯形。
+
+    🔴 R78／ARCH-06：本鎖此前是**寫死兩項的白名單** `("enforce_docs_path.py",
+    "check_sh_eol.py")`，於是同目錄第三支 `loc_budget_check.py`（保留了逐字相同的舊
+    寫法）與**任何未來新增者**都在射程外——R77 的 commit message 逐字寫「收斂到單一
+    實作並補 parity 測試」，收斂是真的，但鎖只擋在當初被想到的那兩個站點上。這正是
+    本 repo 反覆出現的「白名單型的鎖對未來新增者失明」。改成「列舉整個目錄 − 具名
+    排除表」後，掃描面隨磁碟走，漏掉一支就是紅。
     """
 
-    HOOKS = ("enforce_docs_path.py", "check_sh_eol.py")
+    @property
+    def HOOKS(self) -> tuple[str, ...]:  # noqa: N802 — 沿用原常數名，呼叫端不變
+        return tuple(_path_scope_consumers())
+
+    def test_enrolment_is_exactly_listing_minus_named_exclusions(self) -> None:
+        """掃描面的**推導式**本身：納管面 ≡ 目錄列舉 − 具名排除，中間不得有過濾器。
+
+        🔴 本條取代初稿裡一條**恆真**的斷言（`on_disk − 納管 − 排除 == []`——在
+        「納管 ≡ 列舉 − 排除」的定義下結構上永遠是空集）。那正是本包在修的
+        「鎖存在但沒有鑑別力」，寫在自己身上格外難看，故改成真的會被改壞的性質：
+        日後有人為了消一個紅而在 `_path_scope_consumers()` 裡加一道隱形過濾
+        （例如「只收檔名含 `check_` 的」），掃描面就會悄悄縮回白名單，而排除表上
+        一個字都不用改、複審也看不到。新增者「必須委派或必須具名排除」這件事本身
+        由下面兩條負責（實測：目錄裡放一支未表態的 hook → 立刻紅）。
+        """
+        on_disk = {p.name for p in _BLOCKING_HOOKS_DIR.glob("*.py")}
+        self.assertTrue(on_disk, f"掃不到任何 hook：{_BLOCKING_HOOKS_DIR} ⇒ 本鎖恆綠")
+        self.assertEqual(
+            set(self.HOOKS), on_disk - set(_PATH_SCOPE_EXCLUDED),
+            "納管面不等於「目錄列舉 − 具名排除」⇒ 兩者之間多了一道隱形過濾器，"
+            "掃描面已悄悄縮小而排除表看不出來",
+        )
+        # 反空轉下限：掃描面若塌到剩一支，下面兩條斷言幾乎恆真。現況 3 支
+        # （enforce_docs_path／check_sh_eol／loc_budget_check）。
+        self.assertGreaterEqual(
+            len(self.HOOKS), 3,
+            f"納管數 {len(self.HOOKS)} < 3——刻意移除消費者請同步下修本下限並寫理由",
+        )
+
+    def test_excluded_names_all_exist(self) -> None:
+        """反向 stale：排除表指向已不存在的檔 ⇒ 紅（防清單腐化後悄悄放寬射程）。"""
+        on_disk = {p.name for p in _BLOCKING_HOOKS_DIR.glob("*.py")}
+        stale = sorted(set(_PATH_SCOPE_EXCLUDED) - on_disk)
+        self.assertEqual(stale, [], f"排除表指向不存在的 hook：{stale}")
 
     def _tree(self, name: str) -> ast.Module:
         """以 AST 檢視，而不是字串搜尋。
@@ -399,7 +467,7 @@ class TestBlockingHooksShareOnePathNormalizer(unittest.TestCase):
         """
         return ast.parse((_BLOCKING_HOOKS_DIR / name).read_text(encoding="utf-8"))
 
-    def test_shared_module_exists_and_is_imported_by_both(self) -> None:
+    def test_shared_module_exists_and_is_imported_by_all_consumers(self) -> None:
         shared = _BLOCKING_HOOKS_DIR / "hook_path_scope.py"
         self.assertTrue(shared.is_file(), f"共用正規化層不存在：{shared}")
         for name in self.HOOKS:

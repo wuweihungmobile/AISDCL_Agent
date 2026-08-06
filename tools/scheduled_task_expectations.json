@@ -21,6 +21,7 @@
   "tasks": {
     "AutoClaude_Nightly": {
       "role": "nightly 七軌深度回歸（AutoClaude/tools/run_local_nightly.ps1）",
+      "expected_trigger_time": "22:30",
       "expected": {
         "Settings/StartWhenAvailable": "true",
         "Settings/WakeToRun": "true",
@@ -33,6 +34,7 @@
     },
     "AutoClaude_WindowsSmoke": {
       "role": "Windows smoke 執行級 tripwire（tools/windows_smoke_local.ps1；DEF-101-139/517）",
+      "expected_trigger_time": "21:30",
       "expected": {
         "Settings/StartWhenAvailable": "true",
         "Settings/WakeToRun": "true",
@@ -44,6 +46,22 @@
       }
     }
   },
+  "_why_trigger_time": [
+    "🔴 本輪新增 `expected_trigger_time`（比對器只比 HH:mm，不比日期——StartBoundary 的",
+    "日期是註冊當天、每次重跑安裝器都會變）。它刻意是 `expected` 的 **sibling** 而不是",
+    "其成員：`expected` 的欄位集合受 test_install_windows_nightly.py::",
+    "TestScheduledTaskExpectationsSsot::test_every_expected_value_is_actually_applied_by_the_installer",
+    "的『逐字等於安裝器套用手段對照表』約束，塞進去會當場讓那道鎖紅。",
+    "為何非補不可（2026-08-07 實證）：掌舵者記得自己把 smoke 設成 23:30，實查卻是 21:30。",
+    "成因＝install_windows_nightly.ps1 的 `-SmokeAt` **預設值就是 21:30**（R73 刻意設成",
+    "『回復 smoke 早於 nightly 的不變量』），任何一次不帶參數重跑安裝器都會",
+    "Unregister→Register 把它改回預設——而本比對器當時看不到觸發時刻，整個改動靜默失效。",
+    "🔴 此處釘的是**現況實測值**（nightly 22:30／smoke 21:30），不是誰的記憶：釘現況才",
+    "不會讓這道新判準一上線就紅（永紅的閘門會被關掉，見 ARCH-R59-NB4 判例）。",
+    "smoke 21:30 同時滿足既有的『smoke 早於 nightly』機械鎖。若掌舵者確定要 23:30，",
+    "改法＝以提權跑安裝器並顯式傳 `-SmokeAt 23:30 -AllowSmokeAfterNightly`，**同時**把",
+    "本欄改成 23:30；只改一邊必然轉紅，那正是它該有的行為。"
+  ],
   "why_each": {
     "Settings/StartWhenAvailable": "關機錯過觸發時，開機後補跑（DEF-101-002 四項之一）",
     "Settings/WakeToRun": "睡眠/休眠時喚醒機器準時執行（另需 powercfg RTCWAKE）",

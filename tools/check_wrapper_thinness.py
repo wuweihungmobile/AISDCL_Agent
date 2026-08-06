@@ -195,8 +195,20 @@ _PINNED_SHA256: dict[str, str] = {
         "422af63e6e74ef0b88ba4dbc3ca63e893a08470b451118d8f6d388d366fd848b"
     ),
     # R44：python 前置檢查改走 tools/lib/WindowsAppsGuard.ps1::Test-IsRealPython SSOT
+    # 🔴 本輪重釘（SD-06，LOCKBLIND）：補上 `-Workflow`／`-Event`（Alias，變數名為
+    # `EventName`——`$Event` 是 PowerShell 自動變數）與本輪新增的 `-BuildImage`／
+    # `-NoCache`／`-VerifyAll`，五個參數映射到核心同名長旗標。仍屬「參數映射 → 轉呼叫
+    # 核心」薄殼職責（零業務邏輯；行數餘裕現查 `--print-lines`，本檔不寫死那個數字——
+    # 見 MAX_LINES 上方 SD-R60-08 的 WHY 與 TestNoHardcodedLineCounts），故重釘非降級。
+    # WHY 這次非重釘不可：R77 只給 `.sh` 接上 `--workflow`／`--event`，本檔沒跟上 ⇒
+    # Windows 側薄殼指不到 11 支 workflow 裡的 10 支，而**本檔與 check_script_parity 對
+    # 這個落差雙雙 rc=0**——hash 釘選是**逐檔**的，它問「這份檔案有沒有變」，從不把兩側
+    # 拿來互相比較。本輪同批補上會讓下一次落差自己轉紅的判準：
+    # `tools/tests/test_act_local_runner_image.py::TestRunActShellFlagParity`
+    # （核心 `parse_args([])` 現查出的每個長旗標，兩側殼都必須到得了；刻意不在那裡抄
+    # 一份旗標清單——抄的那份會是第三個會腐化的家）。
     "AutoClaude/tools/run_act.ps1": (
-        "a2caf019457ef4c5f32fddfb7babbd01004a1d02625cba0eb51036740c76725b"
+        "cdb4c2ff17e4ca57c7b6988ddb9f49825f19fb94d26545469e9a209e7357cabe"
     ),
     # R61（ADR-XPLAT-002 Phase 1-B，DEF-101-088 由零守門的 _EXEMPT_PAIRS 決策豁免升級
     # 為 hash 釘選）：業務邏輯本已下沉 tools/git_hooks_install_common.py 單一真相源，

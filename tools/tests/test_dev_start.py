@@ -3814,8 +3814,10 @@ import test_schedule_capability_parity as _cap_parity  # noqa: E402
 
 # 為何長在 test_dev_start.py 而不是自成一支 test_install_mac_nightly.py：
 # `DEF-101-561③`／`DEF-101-565` 已裁定「R61 開輪起 tools/tests 禁止新增鎖檔、只准
-# 合併／刪除」，並由 test_adr_xplat001_c1c2_lock.TestGuardFileCountShrinkOnlyRatchet
-# 對 HEAD 逐檔比對強制（本輪實測：新開一支檔案即 `鎖檔數由 53 調升為 55` 翻紅）。
+# 合併／刪除」，並由 test_adr_xplat001_c1c2_lock.TestGuardLayerRatchet 機械強制
+# （當時的實測：新開一支檔案即翻紅）。
+# 🔴 R78 ARCH-03 訂正：那道棘輪 R77 起改量逐檔行數的**淨額**、也不再比 HEAD——
+# 新增檔案本身不違規，淨行數上升才違規。本節併入本檔的理由與量測面無關，仍然成立。
 # 本檔本來就是 install_mac_nightly.sh 三道跨站鎖的所在地（`test_installer_third_
 # site_filename_and_threshold`／`TestCrossSiteLiteralLocks`／上方的行為等價鎖），
 # 新判準擴充進來與既有同源鎖相鄰，正是該裁定指定的「合法作法」。

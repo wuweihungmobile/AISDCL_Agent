@@ -186,7 +186,7 @@ SPECIAL_FILES: dict[str, int] = {
     # 行、距門檻僅 82 行且無人察覺（帳本同時還在寫「零成長／餘裕 228 行」）。本列即該
     # 門檻的機械量測者：路徑刻意以 `../` 越出 AutoClaude（唯一的 dev_start.py 在
     # monorepo 根 tools/，SCAN_ROOT="autoclaude" 掃不到它）。**棘輪：只准往下改**，
-    # 要往上調必須在缺陷帳本具名理由（同 _FROZEN_GUARD_FILE_COUNT 慣例）。
+    # 要往上調必須在缺陷帳本具名理由（同 _FROZEN_GUARD_LINES 的重釘慣例）。
     # 現值不寫死在此（會過期）：`python tools/check_loc_budget.py --json` 現查。
     "../tools/dev_start.py": 2000,
     # 🔴 R69 P3：上一列（R68 落地）**只守 `dev_start.py` 一支**，而根層 `tools/` 是一整層
@@ -254,7 +254,13 @@ _SPECIAL_REASONS: dict[str, str] = {
 #     且一支超過 400 行的共用模組按定義已不只做一件事（`windows_skip_tags.py` 就是實例）。
 #   · **`tools/tests/` 不納管**：與 AutoClaude 側 `SCAN_ROOT="autoclaude"`（不含
 #     `AutoClaude/tests/`）**對稱**。這是政策一致，不是為了讓現況通過——根層測試樹
-#     另有 `tools/tests/` 專屬的 E501 存量債棘輪與 `_FROZEN_GUARD_FILE_COUNT` 在管。
+#     另有 `tools/tests/` 專屬的 E501 存量債棘輪，以及
+#     `tools/tests/test_adr_xplat001_c1c2_lock.py::TestGuardLayerRatchet` 的
+#     **逐檔行數棘輪**（`_FROZEN_GUARD_LINES`，淨行數只准往下）在管。
+#     🔴 **R78 ARCH-03 訂正**：本列原本把這層豁免的正當性掛在 R77 已刪除的那個**檔數**
+#     棘輪常數上（全庫零定義）——也就是說一整層數萬行護欄碼的 LOC 豁免，有一段時間是
+#     掛在一個**不存在的符號**上。接手者見上。此處刻意不逐字引述那個已死的常數名：
+#     訂正註記引述假話等於製造新假話，而下一個人 grep 到它會以為那是現行說法。
 #   · **已在 `SPECIAL_FILES` 的檔排除在 tier 檢查外**：同一支檔不受兩種度量（raw line
 #     vs count_loc）雙重審判；那 5~6 支 1000 行級的護欄 CLI 沿用 R69 P3 立的 raw-line
 #     棘輪即可。反過來說，**沒被 `SPECIAL_FILES` 收錄又超過 tier 預算的檔一律紅** ⇒

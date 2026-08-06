@@ -897,9 +897,10 @@ class TestUnattendedExecutionHardening(unittest.TestCase):
 # ══════════════════════════════════════════════════════════════════════════════
 # R74 — 線上排程設定的期望值 SSOT ＋ 漂移偵測器
 # ══════════════════════════════════════════════════════════════════════════════
-# 🔴 **為何併進本檔而非另立新檔**：`tools/tests/test_adr_xplat001_c1c2_lock.py` 的
-# `_FROZEN_GUARD_FILE_COUNT` 是 shrink-only 棘輪，`DEF-101-561③` 明文裁決「禁止新增
-# 鎖檔、只准合併／刪除」。本檔是最貼近的家——它本來就是這兩支排程任務與其安裝器
+# 🔴 **為何併進本檔而非另立新檔**：`tools/tests/` 有一道護欄層 shrink-only 棘輪
+# （`DEF-101-561③`；R74 當時量的是檔數，🔴 R78 ARCH-03 訂正：R77 起已換成
+# `test_adr_xplat001_c1c2_lock.py::TestGuardLayerRatchet` 的逐檔行數表，現行語意是
+# **淨行數不得上升**、不是「禁止新增檔案」）。本檔是最貼近的家——它本來就是這兩支排程任務與其安裝器
 # 的鎖之家，上方 TestUnattendedExecutionHardening 鎖的正是同一組設定值。
 #
 # 🔴 缺陷本體（R74 實測，唯讀即可證）：ADR-SD09-012 §8.2 在 2026-08-03 就列出五項

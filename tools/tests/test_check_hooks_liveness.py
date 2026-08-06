@@ -6,6 +6,7 @@
 """
 from __future__ import annotations
 
+import ast
 import json
 import os
 import re
@@ -208,9 +209,11 @@ class TestRunEncodingRegression(unittest.TestCase):
 # R73（DEF-101-785）：`.claude/hooks/block_bash_on_windows.py` 的回歸鎖
 # ══════════════════════════════════════════════════════════════════════════
 # 🔴 **為何併進本檔而非另立新檔**：`tools/tests/test_adr_xplat001_c1c2_lock.py` 的
-# `_FROZEN_GUARD_FILE_COUNT` 是 **shrink-only 棘輪**，`DEF-101-561③` 明文裁決
-# 「禁止新增鎖檔、只准合併／刪除」。R73 首版新建了一支獨立檔案，當場被該棘輪攔下
-# （53 → 54，三條斷言同時翻紅）。**正解是併入既有鎖檔而不是調升那個常數**——
+# `TestGuardLayerRatchet` 是 **shrink-only 棘輪**，承載 `DEF-101-561③`。R73 當時它量的
+# 是**檔數**、語意是「禁止新增鎖檔、只准合併／刪除」，首版新建一支獨立檔案當場被攔下
+# （三條斷言同時翻紅）。🔴 R78 ARCH-03 訂正：R77 起量測面換成逐檔行數表，現行語意是
+# **淨行數不得上升**——新增檔案只要同一次變更刪掉等量以上的行就合法。
+# **正解仍是併入既有鎖檔而不是調升那個基準**——
 # 調升等於用一行 diff 推翻一條裁決。本檔是最貼近的家：它本來就管「hook 有沒有
 # 註冊、是不是活的」。
 #
@@ -807,26 +810,121 @@ class TestLintPowerShellHookBehaviour(unittest.TestCase):
     def _lint(self, command: str) -> tuple[int, str]:
         return _run_lint_hook(_ps_payload(command), force_os_name="nt")
 
-    def test_naked_cd_is_blocked(self) -> None:
-        rc, err = self._lint("cd AutoClaude; python -m pytest")
-        self.assertEqual(rc, 2, f"裸 cd 未被擋；rc={rc}\n{err}")
-        self.assertIn("Push-Location", err, "阻斷時必須給出替代出口")
+    # ══ R78：兩個方向的判準表（四方複審 SA-01／SD-01／QA-01／SD-02）═════════
+    # 🔴 為何整組改寫：上一版的鎖**只測「會過的那幾種寫法」**，於是三條規則各自被
+    # 一步穿透而全程綠——`| select -First 5` 放行、`| Select-Object -First 5` 擋下
+    # （12 組別名對照 12/12 不對稱），`&&` 之後的 cd 逃、`bash.exe` 逃、rc 讀取只要
+    # 隔一句就逃；反方向則把 `"rc=$LASTEXITCODE" | Out-File`（完全安全）與「違規
+    # 形態只住在引號／here-string 內」（寫文件、寫探針、重現缺陷的日常）硬擋。
+    # ⇒ 本表**每一條規則都同時帶漏擋與誤擋兩列**。只帶一個方向的鎖，必然在另一個
+    # 方向上恆綠，而恆綠的鎖就是這一輪 44% 缺陷的形狀本身。
 
-    def test_set_location_is_blocked_but_push_location_is_not(self) -> None:
-        rc_bad, _ = self._lint("Set-Location /repo/a")
-        self.assertEqual(rc_bad, 2)
-        rc_ok, err = self._lint("Push-Location /repo/a; Pop-Location")
-        self.assertEqual(rc_ok, 0, f"Push-Location 是正解，不得誤擋\n{err}")
+    #: `(別名, 全名)`：其餘字元**逐字相同**，兩者判定必須一致。這一組是 SA-01 的
+    #: 判準——不對稱本身就是缺陷，不需要先知道「哪一個才對」。
+    PIPE_ALIAS_PAIRS = (
+        ("select", "Select-Object"), ("sls", "Select-String"),
+        ("sort", "Sort-Object"), ("measure", "Measure-Object"),
+        ("%", "ForEach-Object"), ("foreach", "ForEach-Object"),
+        ("?", "Where-Object"), ("where", "Where-Object"),
+        ("ft", "Format-Table"), ("fl", "Format-List"),
+        ("oh", "Out-Host"), ("tee", "Tee-Object"),
+    )
 
-    def test_pipe_then_lastexitcode_is_blocked(self) -> None:
-        rc, err = self._lint(
-            "& git status | Select-Object -First 3\n\"rc=$LASTEXITCODE\"")
-        self.assertEqual(rc, 2, f"管線後讀 rc 未被擋；rc={rc}\n{err}")
+    #: 漏擋方向：每一筆上一版都**放行**，而每一筆都只差一步。
+    MUST_BLOCK = (
+        ("裸 cd", "cd AutoClaude; python -m pytest", "Push-Location"),
+        ("Set-Location", "Set-Location /repo/a", "Push-Location"),
+        ("Set-Location -Path（上一版被 `(?!-)` 整條放行）",
+         "Set-Location -Path AutoClaude", "Push-Location"),
+        ("chdir 別名", "chdir AutoClaude", "Push-Location"),
+        ("sl 別名", "sl AutoClaude", "Push-Location"),
+        ("cd 在 && 之後", "echo hi && cd AutoClaude", "Push-Location"),
+        ("cd 在 || 之後", "echo hi || cd AutoClaude", "Push-Location"),
+        ("cd 在 | 之後", "echo hi | cd AutoClaude", "Push-Location"),
+        ("cd 在 { 區塊內", "if ($true) { cd AutoClaude }", "Push-Location"),
+        ("裸 bash", "bash tools/install_mac_nightly.sh", "Find-GitBash"),
+        ("bash.exe（上一版只認 `bash` 字面）",
+         "bash.exe tools/install_mac_nightly.sh", "Find-GitBash"),
+        ("bash 帶引號路徑（遮蔽面看不到 .sh，佐證必須回原文找）",
+         'bash "tools/x.sh"', "Find-GitBash"),
+        ("bash 在 && 之後", "echo hi && bash tools/x.sh", "Find-GitBash"),
+        ("管線後讀 rc（同一句）",
+         '& git status | Select-Object -First 3; "rc=$LASTEXITCODE"',
+         "LASTEXITCODE"),
+        ("管線後讀 rc（下一句）",
+         '& git status | Select-Object -First 3\n"rc=$LASTEXITCODE"',
+         "LASTEXITCODE"),
+        ("管線後隔一句才讀 rc（`$x = 1` 不會重設 rc，上一版視窗只看緊鄰下一句）",
+         '& git status | select -First 3\n$x = 1\n"rc=$LASTEXITCODE"',
+         "LASTEXITCODE"),
+    )
 
-    def test_bare_bash_on_sh_is_blocked(self) -> None:
-        rc, err = self._lint("bash tools/install_mac_nightly.sh")
-        self.assertEqual(rc, 2, f"裸 bash 未被擋；rc={rc}\n{err}")
-        self.assertIn("Find-GitBash", err, "必須指向 repo 既有 SSOT")
+    #: 誤擋方向：每一筆都是安全的、或是文件／探針的日常寫法。誤報會讓整個機制被
+    #: 關掉，而被關掉的守衛比沒有守衛更糟（本檔守的那支 hook 自己的設計前提）。
+    MUST_PASS = (
+        ("Push-Location 正解 ＋ 乾淨讀 rc",
+         'Push-Location /repo/a; & py a.py; "rc=$LASTEXITCODE"; Pop-Location'),
+        ("純管線、沒讀 rc", "Get-ChildItem | Select-Object Name"),
+        ("純管線用別名、沒讀 rc", "Get-ChildItem | select Name"),
+        ("Find-GitBash SSOT 形態",
+         ". '/repo/tools/lib/Find-GitBash.ps1'; & (Find-GitBash) -n 'a.sh'"),
+        ("rc 在管線**之前**就展開了（QA-01：安全卻被硬擋）",
+         '"rc=$LASTEXITCODE" | Out-File a.txt'),
+        ("rc 讀在前、管線在後一句",
+         '"rc=$LASTEXITCODE"\ngit log | select -First 1'),
+        ("中間有新的 & 呼叫重設了 rc",
+         'git log | select -First 1; & py a.py; "rc=$LASTEXITCODE"'),
+        ("違規形態只住在單引號內（SD-02：寫文件／重現缺陷的日常）",
+         "$doc = 'never write cd AutoClaude here'"),
+        ("違規形態只住在雙引號內", '$doc = "do not write bash tools/x.sh"'),
+        ("違規管線＋rc 只住在字串內",
+         "$doc = 'git log | select -First 1 ; $LASTEXITCODE'"),
+        ("違規形態只住在字面 here-string 內", "$doc = @'\ncd AutoClaude\n'@"),
+        ("違規形態只住在可展開 here-string 內", '$doc = @"\nbash tools/x.sh\n"@'),
+        ("違規形態只住在註解內", "Get-Date  # never write cd AutoClaude"),
+        ("`$_ % 2` 是運算子不是 ForEach-Object 別名",
+         "Get-Random | Where-Object { $_ % 2 -eq 0 }"),
+        ("bash 但不是在跑 .sh", "bash --version"),
+        ("豁免理由裡有撇號（先遮蔽再找豁免會把它吃掉）",
+         "cd x  # ps-lint-ok: don't touch this"),
+        ("一般指令", "git log --oneline -3"),
+    )
+
+    def test_pipe_aliases_are_judged_the_same_as_their_full_names(self) -> None:
+        """SA-01：別名與全名其餘字元逐字相同 ⇒ 判定必須相同，且必須是「擋」。
+
+        不對稱本身就是缺陷：`select -First N` 是提前結束管線最常見的寫法，
+        只認全名等於這道鎖擋掉的剛好是沒人會寫的那一半。
+        """
+        for alias, full in self.PIPE_ALIAS_PAIRS:
+            with self.subTest(alias=alias, full=full):
+                rc_alias, err_a = self._lint(
+                    f'& git status | {alias} -First 3\n"rc=$LASTEXITCODE"')
+                rc_full, err_f = self._lint(
+                    f'& git status | {full} -First 3\n"rc=$LASTEXITCODE"')
+                self.assertEqual(rc_full, 2, f"全名版就沒擋；{err_f}")
+                self.assertEqual(
+                    rc_alias, rc_full,
+                    f"`| {alias}` rc={rc_alias} 但 `| {full}` rc={rc_full}——"
+                    f"其餘字元逐字相同卻判不同，這道鎖只認得沒人會寫的那一半\n{err_a}",
+                )
+
+    def test_forms_that_slip_through_are_blocked(self) -> None:
+        """漏擋方向：逐一注入「只差一步」的形態，每一筆都必須轉紅。"""
+        for label, command, needle in self.MUST_BLOCK:
+            with self.subTest(label):
+                rc, err = self._lint(command)
+                self.assertEqual(rc, 2, f"未被擋（{label}）：{command!r}\n{err}")
+                self.assertIn(
+                    needle, err, f"擋是擋了，但沒指出出口（{label}）：{err}")
+
+    def test_safe_forms_are_not_blocked(self) -> None:
+        """誤擋方向：逐一注入安全形態，任何一筆轉紅都是這道鎖在自我毀滅。"""
+        for label, command in self.MUST_PASS:
+            with self.subTest(label):
+                rc, err = self._lint(command)
+                self.assertEqual(rc, 0, f"合法形態被誤擋（{label}）："
+                                        f"{command!r}\n{err}")
 
     def test_all_hits_are_reported_at_once(self) -> None:
         """不早退：早退會遮蔽後面檢查的訊號，而遮蔽方向是「看起來變乾淨」。"""
@@ -836,16 +934,15 @@ class TestLintPowerShellHookBehaviour(unittest.TestCase):
         for needle in ("Push-Location", "Find-GitBash", "LASTEXITCODE"):
             self.assertIn(needle, err, f"三條違規未一次報齊，缺 {needle}")
 
-    def test_legal_forms_are_not_flagged(self) -> None:
-        """誤報比漏擋更糟——被誤報的守衛會被整個關掉。"""
-        for cmd in (
-            "Push-Location /repo/a; & py a.py; \"rc=$LASTEXITCODE\"; Pop-Location",
-            "Get-ChildItem | Select-Object Name",
-            ". '/repo/tools/lib/Find-GitBash.ps1'; & (Find-GitBash) -n 'a.sh'",
-            "git log --oneline -3",
-        ):
-            rc, err = self._lint(cmd)
-            self.assertEqual(rc, 0, f"合法形態被誤擋：{cmd!r}\n{err}")
+    def test_the_exemption_exit_is_on_the_first_line(self) -> None:
+        """出口寫在頁尾等於沒有：第一次撞到的人先讀到三段責備才看到出路，而
+        「窄守衛必須有出口」是這支 hook 的設計前提（SA-01 附帶）。"""
+        _rc, err = self._lint("cd AutoClaude")
+        first_line = (err.strip().splitlines() or [""])[0]
+        self.assertIn(
+            "ps-lint-ok", first_line,
+            f"阻斷訊息第一行沒有豁免出口，讀者要翻到最後才看得到：{first_line!r}",
+        )
 
     def test_inline_exemption_releases_the_guard(self) -> None:
         rc, err = self._lint("cd x  # ps-lint-ok: 重現缺陷用")
@@ -948,21 +1045,25 @@ def _run_audit_probe(args: list[str]) -> tuple[int, str]:
     return proc.returncode, proc.stdout or ""
 
 
-def _tool_use(command: str) -> dict:
+def _tool_use(command: str, tool: str = "PowerShell") -> dict:
     return {"message": {"role": "assistant", "content": [
-        {"type": "tool_use", "name": "PowerShell",
+        {"type": "tool_use", "name": tool,
          "input": {"command": command}}]}}
+
+
+def _write_transcript(directory: str, records: list[dict], name: str) -> str:
+    path = Path(directory) / name
+    with path.open("w", encoding="utf-8", newline="\n") as fh:
+        for rec in records:
+            fh.write(json.dumps(rec, ensure_ascii=False) + "\n")
+    return str(path)
 
 
 class TestSessionAuditProbeContract(unittest.TestCase):
     """量測器的三件事：量得準、崩塌時出聲、不得被接成閘門。"""
 
     def _write(self, tmp: str, records: list[dict]) -> str:
-        path = Path(tmp) / "synthetic.jsonl"
-        with path.open("w", encoding="utf-8", newline="\n") as fh:
-            for rec in records:
-                fh.write(json.dumps(rec, ensure_ascii=False) + "\n")
-        return str(path)
+        return _write_transcript(tmp, records, "synthetic.jsonl")
 
     def test_it_counts_the_patterns_it_claims_to_count(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -974,9 +1075,99 @@ class TestSessionAuditProbeContract(unittest.TestCase):
             rc, out = _run_audit_probe(["--transcript", path, "--json"])
         self.assertEqual(rc, 0, out)
         summary = json.loads(out)["summary"]
-        self.assertEqual(summary["shell_calls"], 3)
-        self.assertEqual(summary["patterns"]["naked-cd"], 1)
-        self.assertEqual(summary["patterns"]["rc-after-pipe"], 1)
+        self.assertEqual(summary["shell_calls_by_tool"]["PowerShell"], 3)
+        self.assertEqual(summary["patterns"]["PowerShell"]["naked-cd"], 1)
+        self.assertEqual(summary["patterns"]["PowerShell"]["rc-after-pipe"], 1)
+
+    def test_bash_tool_commands_never_land_on_powershell_rules(self) -> None:
+        """🔴 R78／SD-04 的機械面：**分母與分子都不得跨工具混用**。
+
+        上一版把兩個工具的指令倒進同一個計數器，實測訊噪比 43︰1820（裸 cd）與
+        0︰80（裸 bash）——後者是 100% 假陽性，因為在 Bash 工具裡寫 `bash x.sh`
+        本來就是對的。更糟的是方向性偏誤：Bash 工具已被守衛擋掉 ⇒ 未來輪那兩個
+        數字會自己「變好看」，而那不是改善。這支測試就是那個混用的紅燈。
+        """
+        with tempfile.TemporaryDirectory() as tmp:
+            path = self._write(tmp, [
+                _tool_use("cd AutoClaude"),
+                _tool_use("cd /repo && bash tools/x.sh", tool="Bash"),
+                _tool_use("cd /repo/b", tool="Bash"),
+            ])
+            rc, out = _run_audit_probe(["--transcript", path, "--json"])
+        self.assertEqual(rc, 0, out)
+        summary = json.loads(out)["summary"]
+        self.assertEqual(summary["shell_calls_by_tool"], {"PowerShell": 1, "Bash": 2},
+                         "分母沒有逐工具拆開")
+        self.assertEqual(summary["patterns"]["PowerShell"]["naked-cd"], 1)
+        self.assertEqual(
+            summary["patterns"]["Bash"], {},
+            "Bash 工具竟被套上 PowerShell 的形態判準——那三條規則講的是 PowerShell "
+            "工具的 cwd／$LASTEXITCODE／載具選擇，套到 Bash 上是純雜訊",
+        )
+        self.assertEqual(summary["bash_tool_attempts"], 2,
+                         "Bash 工具本身（鐵律一）仍必須被數到，不能因為不套形態就消失")
+
+    def test_collapse_is_judged_per_session_not_by_the_historical_total(self) -> None:
+        """🔴 R78／SD-03 的機械面：**一支崩塌就要紅，不准被歷史總量蓋掉**。
+
+        上一版的崩塌判準建在跨 session 合計的 `shell_calls == 0` 上，而預設用法會
+        把整個逐字稿目錄加總（本機 51 支）——那是只會單調增長的歷史量，於是「今天
+        格式改了」這個唯一要防的失效結構上打不出來。本測試餵的正是那個情境：一支
+        舊的、量得到東西的逐字稿 ＋ 一支新的、有記錄卻抽不到任何 shell 呼叫的。
+        合計 `shell_calls` 是 2（>0）⇒ 舊判準會回 rc=0＝「本輪零違規」。
+        """
+        with tempfile.TemporaryDirectory() as tmp:
+            _write_transcript(tmp, [_tool_use("git status"), _tool_use("git log")],
+                              "old_busy.jsonl")
+            # 「格式變了」的長相：記錄還在、tool_use 也還在，但工具名／欄位認不得。
+            _write_transcript(tmp, [{"message": {"role": "assistant", "content": [
+                {"type": "tool_use", "name": "PwSh", "input": {"cmd": "cd x"}}]}}],
+                "new_broken.jsonl")
+            rc, out = _run_audit_probe(["--project-dir", tmp, "--json"])
+        payload = json.loads(out)
+        self.assertEqual(payload["summary"]["shell_calls"], 2,
+                         "前提沒成立：合計必須 >0，否則測不到「被歷史總量蓋掉」")
+        self.assertEqual(
+            payload["summary"]["collapsed_sessions"], ["new_broken.jsonl"],
+            "崩塌訊號沒有落在那一支上",
+        )
+        self.assertEqual(rc, 1, f"單支崩塌被合計蓋掉 ⇒ 靜默讀成「零違規」\n{out}")
+
+    def test_window_flags_scope_the_measurement_to_this_round(self) -> None:
+        """`--latest`／`--since`：沒有量測窗，per-round 的分母就只能是歷史總量。"""
+        with tempfile.TemporaryDirectory() as tmp:
+            for index in range(3):
+                path = Path(_write_transcript(
+                    tmp, [_tool_use("git status")], f"s{index}.jsonl"))
+                os.utime(path, (1_700_000_000 + index * 86400,) * 2)
+            rc_all, out_all = _run_audit_probe(["--project-dir", tmp, "--json"])
+            rc_one, out_one = _run_audit_probe(
+                ["--project-dir", tmp, "--json", "--latest", "1"])
+            rc_none, _ = _run_audit_probe(
+                ["--project-dir", tmp, "--json", "--since", "2099-01-01"])
+        self.assertEqual((rc_all, rc_one), (0, 0), out_all)
+        self.assertEqual(json.loads(out_all)["summary"]["sessions"], 3)
+        picked = json.loads(out_one)["sessions"]
+        self.assertEqual([s["transcript"] for s in picked], ["s2.jsonl"],
+                         "--latest 沒有挑最近改動的那一支")
+        self.assertEqual(rc_none, 1,
+                         "窗篩空必須 fail-loud——『量到零』與『量不到』要分得開")
+
+    def test_inline_exemption_is_released_but_still_counted(self) -> None:
+        """攔截器放行的，量測器也要放行——否則兩邊的數字對不起來，而 Q4 是拿來下
+        結論的。但放行不等於消失：豁免另計，靜默丟掉才是「看起來變乾淨」。"""
+        with tempfile.TemporaryDirectory() as tmp:
+            path = self._write(tmp, [
+                _tool_use("cd x  # ps-lint-ok: 重現缺陷用"),
+                _tool_use("cd y"),
+            ])
+            rc, out = _run_audit_probe(["--transcript", path, "--json"])
+        self.assertEqual(rc, 0, out)
+        summary = json.loads(out)["summary"]
+        self.assertEqual(summary["patterns"]["PowerShell"]["naked-cd"], 1,
+                         "帶行內豁免的那一筆不該被計為違規")
+        self.assertEqual(summary["exempted_calls"], 1,
+                         "豁免必須被單獨數出來，不得靜默消失")
 
     def test_a_collapsed_scan_surface_fails_loud(self) -> None:
         """掃不到東西必須 rc=1。這個失效方向看起來像「變乾淨了」，比紅更危險。"""
@@ -1038,6 +1229,351 @@ class TestSessionAuditProbeContract(unittest.TestCase):
             f"量測器被接進硬閘：{offenders}——逐字稿在別台機器上不存在，"
             "接成閘門結構上恆紅。要自動化請改成 advisory 且不影響 rc",
         )
+
+
+# ══════════════════════════════════════════════════════════════════════════
+# 攔截器 × 量測器：同一條規則的兩份複本必須綁在一起（R78／SA-02）
+# ══════════════════════════════════════════════════════════════════════════
+# 現象：`lint_powershell_command.py`（事中攔截）與 `tools/probe/audit_session.py`
+# （事後量測）判的是同一組規則，卻各存一份判準字面，而 R77 交付時**已經不一致**
+# ——hook 那份有 `Tee-Object`、探針那份沒有，兩份零比對。後果不是「少擋一種」而是
+# 更難看見的那一種：同一段違規**攔得下、卻量不到**，於是量出來的違規率偏低，
+# 而那個數字正是拿來寫進根 CLAUDE.md 下結論用的。
+#
+# 為何不抽共用模組：hook 由 `runpy.run_path` 起，`sys.path` 上沒有 `tools/`，
+# import 期爆掉會破壞它的 fail-open 契約（settings.json 記載過的 P0）。複本是
+# **結構上被逼出來的**。既然只能留複本，就把複本的一致性變成會轉紅的事件。
+#
+# 兩向都要，缺一即有繞道：
+#   ① 字面相等——兩份 `SHARED_PATTERN_SOURCE` 必須逐字相同。抽不到（改名／改寫成
+#      非字面）也算紅，否則「把常數拿掉」就是一條無聲的出口。
+#   ② 行為一致——同一批指令餵進兩邊，判定必須相同。這一向抓得到「字典同步了，
+#      但某一邊另外藏了第二份複本／組裝時漏接」，字面相等抓不到那個。
+
+_PARITY_HITS = (
+    ("naked-cd", "cd AutoClaude"),
+    ("naked-cd", "Set-Location -Path /repo/a"),
+    ("naked-cd", "sl /repo/a"),
+    ("rc-after-pipe", "& git status | select -First 3\n$LASTEXITCODE"),
+    ("rc-after-pipe", "& git status | Tee-Object out.txt\n$LASTEXITCODE"),
+    ("bare-bash-sh", "bash tools/install_mac_nightly.sh"),
+    ("bare-bash-sh", "bash.exe tools/install_mac_nightly.sh"),
+)
+#: 兩邊都必須放行。誤報會讓機制被整個關掉，那比漏擋更糟——所以這一半和上一半同等重要。
+_PARITY_CLEAN = (
+    "Push-Location /repo/a; & py a.py; $LASTEXITCODE; Pop-Location",
+    "Get-ChildItem",
+    ". /repo/tools/lib/Find-GitBash.ps1; & (Find-GitBash) -n /repo/a.sh",
+    "git log --oneline -3",
+)
+
+
+def _shared_pattern_source(path: Path) -> dict[str, str]:
+    """以 AST 抽 `SHARED_PATTERN_SOURCE`（**不 import**：hook 有模組層副作用且
+    刻意零外部相依，import 它等於在測試裡重現它最怕的那件事）。"""
+    tree = ast.parse(path.read_text(encoding="utf-8"))
+    for node in tree.body:
+        if isinstance(node, ast.AnnAssign):
+            targets = [node.target]
+        elif isinstance(node, ast.Assign):
+            targets = list(node.targets)
+        else:
+            continue
+        if any(isinstance(t, ast.Name) and t.id == "SHARED_PATTERN_SOURCE"
+               for t in targets) and node.value is not None:
+            return dict(ast.literal_eval(node.value))
+    raise AssertionError(
+        f"{path.name} 抽不到 SHARED_PATTERN_SOURCE（改名？改寫成非字面？）——"
+        "抽不到就是紅：讓常數消失不能成為繞過『兩份複本必須同步』的出口。"
+        "要改結構請同時改本鎖，別讓它靜默失效"
+    )
+
+
+class TestHookAndProbeShareOneCriterion(unittest.TestCase):
+    """攔截器與量測器的判準必須同步（字面 ＋ 行為，兩向）。"""
+
+    def _probe_hits(self, command: str) -> set[str]:
+        with tempfile.TemporaryDirectory() as tmp:
+            path = _write_transcript(tmp, [_tool_use(command)], "one.jsonl")
+            rc, out = _run_audit_probe(["--transcript", path, "--json"])
+        self.assertEqual(rc, 0, f"探針對 {command!r} 非預期地 fail-loud\n{out}")
+        per_tool = json.loads(out)["summary"]["patterns"]["PowerShell"]
+        return {key for key, value in per_tool.items() if value}
+
+    def test_shared_pattern_source_is_literally_identical(self) -> None:
+        hook = _shared_pattern_source(_LINT_HOOK)
+        probe = _shared_pattern_source(_AUDIT_PROBE)
+        self.assertTrue(hook, "hook 那份是空的——空字典會讓兩邊「一致地什麼都不擋」")
+        self.assertEqual(
+            hook, probe,
+            "攔截器與量測器的判準字面已漂移。這不是風格問題：R77 就是這樣讓 "
+            "Tee-Object『攔得下卻量不到』，而量出來的數字被寫進根 CLAUDE.md 當結論。"
+            "改一邊就要同一次改另一邊（兩份刻意連換行位置都相同）。",
+        )
+
+    def test_both_sides_agree_on_the_same_commands(self) -> None:
+        """字面同步了還不夠：組裝時漏接、或某一邊另有第二份複本，只有行為抓得到。"""
+        for category, command in _PARITY_HITS:
+            with self.subTest(command=command):
+                rc, err = _run_lint_hook(_ps_payload(command), force_os_name="nt")
+                hits = self._probe_hits(command)
+                self.assertEqual(rc, 2, f"攔截器放行了 {command!r}（探針判 {hits}）\n{err}")
+                self.assertIn(
+                    category, hits,
+                    f"攔截器擋下 {command!r}，量測器卻沒記——違規率會被系統性低估，"
+                    "而那個數字是拿來下結論的",
+                )
+        for command in _PARITY_CLEAN:
+            with self.subTest(command=command):
+                rc, err = _run_lint_hook(_ps_payload(command), force_os_name="nt")
+                hits = self._probe_hits(command)
+                self.assertEqual(rc, 0, f"攔截器誤擋合法形態 {command!r}\n{err}")
+                self.assertEqual(hits, set(),
+                                 f"量測器把合法形態 {command!r} 記成違規：{hits}")
+
+
+# ══════════════════════════════════════════════════════════════════════════
+# 註冊面棘輪：hook 的觸發射程只准擴大、不准縮小（R78／QA-03）
+# ══════════════════════════════════════════════════════════════════════════
+# 🔴 這一筆比「鎖沒有鑑別力」再深一層：**鎖本身可以被無聲拆掉**。
+#
+# QA 的突變測試 M4 實測：把根 `.claude/settings.json` 的 PostToolUse
+# `matcher: "Write|Edit"` 改成 `"Write"`——這會讓 `check_ps1_encoding.py` 與
+# `check_sh_eol.py` 對 **Edit 工具整支失效**（Edit 寫出的 CRLF `.sh`、無 BOM `.ps1`
+# 從此無人守）——全套閘門 **rc=0 全綠，零鑑別力**。同時實查：本檔上方的
+# `matchers_for_script()` 只掃 PreToolUse；全 `tools/tests/` 除本輪新建的
+# `test_context_budget_guard.py` 外，沒有任何檔案提到 `PostToolUse`。
+# ⇒ PostToolUse 的註冊面（matcher 射程、條目存在性）在此之前**完全無人守**，
+# 而根 CLAUDE.md 花了整整一節在講「已橋接的 2 支 hook 在根 session 會跑」。
+#
+# 與 `test_doc_loc_baseline_freshness_r60.py::TestR74RootClaudeMdHookClaimsMatchRegistration`
+# 的**分工**（兩者都讀同一份 settings.json，但問的問題不同，不重複）：
+#   · 那一道守「**文件怎麼寫**」——根 CLAUDE.md 對某支 hook 的射程宣稱，與它在
+#     settings.json 裡「有沒有被註冊」是否雙向一致。它的判定面是**腳本 basename 的
+#     存在性**，對 matcher 圈了哪些工具、掛在哪個事件**完全不看**（M4 那個突變在它
+#     眼裡毫無變化：hook 還在，只是不再對 Edit 觸發）。
+#   · 本道守「**註冊面怎麼變**」——每支已註冊 hook 的 (事件, 觸發工具集合) 相對釘選
+#     基準只准擴大。它不讀任何 .md，不管文件怎麼寫。
+#
+# 🔴 為何是「釘現況＋只硬擋劣化方向」而不是「必須等於某個理想集合」：本 repo 明文
+# 判例——**永紅的閘門會被整個關掉，比沒有鎖更糟**。擴大 matcher（多守一個工具）與
+# 換成 `*` 一律綠；只有「某支 hook 不再被它原本守著的工具觸發」與「條目整個消失」
+# 會紅。要合法縮小射程，就得在同一次變更裡動下面那張表，讓那個決定被複審看見。
+#
+# 誠實劃界：本鎖只讀 repo 內的 `.claude/settings.json`。`settings.local.json`／
+# 使用者層設定的合併結果不在射程內（那些不進版控，鎖不到也不該鎖）。
+
+#: hook command 字串裡的腳本路徑。與 `test_subprocess_encoding_hygiene._PY_ARG_RE`
+#: 同一形態，兩者由 `test_two_enumerators_agree_on_the_script_set` 綁在一起。
+_HOOK_SCRIPT_RE = re.compile(r"[\w./\\-]+\.py")
+
+
+def registered_tool_scope(settings: dict) -> dict[tuple[str, str], set[str]]:
+    """`{(事件名, 腳本 repo 相對路徑): 會觸發它的工具名集合}`。
+
+    matcher 為空字串或缺席 → `{"*"}`（＝不限工具；`SessionStart` 這類無 matcher 的
+    事件即此形）。同一支腳本在同一事件下註冊於多個條目時取**聯集**——它實際的觸發面
+    就是那些 matcher 的聯集。
+    """
+    scope: dict[tuple[str, str], set[str]] = {}
+    for event, entries in (settings.get("hooks") or {}).items():
+        for entry in entries or []:
+            tools = matcher_tokens(str(entry.get("matcher", "")))
+            for hook in entry.get("hooks") or []:
+                command = str(hook.get("command", ""))
+                for found in _HOOK_SCRIPT_RE.finditer(command):
+                    key = (str(event), found.group(0).replace("\\", "/"))
+                    scope.setdefault(key, set()).update(tools)
+    return scope
+
+
+#: 釘選基準＝R78 當下的真實註冊面（`git show HEAD:.claude/settings.json` 逐項讀出）。
+#: 這是**下限**不是等式：值只准變大。要縮小或移除，就改這裡並在 commit 裡說明。
+_REGISTRATION_BASELINE: dict[tuple[str, str], frozenset[str]] = {
+    ("SessionStart", ".claude/hooks/sdd_hook_router.py"): frozenset({"*"}),
+    ("PreToolUse", ".claude/hooks/sdd_hook_router.py"): frozenset(
+        {"Write", "Edit", "Read", "Bash", "NotebookEdit", "Task"}),
+    ("PreToolUse", ".claude/hooks/lint_powershell_command.py"): frozenset(
+        {"PowerShell"}),
+    ("PreToolUse", ".claude/hooks/block_bash_on_windows.py"): frozenset({"Bash"}),
+    ("PostToolUse", ".claude/hooks/sdd_hook_router.py"): frozenset(
+        {"Write", "Edit", "Read", "Bash", "NotebookEdit"}),
+    # 🔴 QA M4 打的就是下面這兩支共用的那個 `Write|Edit` 條目。
+    ("PostToolUse", "AutoClaude/tools/hooks/check_ps1_encoding.py"): frozenset(
+        {"Write", "Edit"}),
+    ("PostToolUse", "AutoClaude/tools/hooks/check_sh_eol.py"): frozenset(
+        {"Write", "Edit"}),
+    # R78 context 水位觀測者。matcher 刻意不含 Write|Edit（那些內容在模型寫出時
+    # 已在 context 內，對「還剩多少」沒有新資訊），也刻意不用 `*`（每次呼叫要付
+    # 約 42ms 的 python 啟動成本；水位偵測漏掉某一次呼叫不會漏掉那個門檻）。
+    # 選型理由與 fail-open 契約寫在 .claude/settings.json 該條目的 _comment。
+    ("PostToolUse", ".claude/hooks/context_budget_guard.py"): frozenset(
+        {"Read", "Task", "Grep", "Glob", "WebFetch", "WebSearch", "Bash",
+         "PowerShell"}),
+}
+
+
+def registration_shrink_problems(
+    current: dict[tuple[str, str], set[str]],
+    baseline: dict[tuple[str, str], frozenset[str]],
+) -> list[str]:
+    """回劣化理由清單；`[]`＝沒有任何 hook 的觸發射程縮小（純函式，紅綠可合成自證）。"""
+    problems: list[str] = []
+    for (event, script), pinned in sorted(baseline.items()):
+        got = current.get((event, script))
+        if got is None:
+            problems.append(
+                f"{event} 底下的 {script} 註冊條目整個不見了——hook 檔還在磁碟上也沒用，"
+                "它不會再被觸發。若確為刻意移除，請在同一次變更裡改 "
+                "_REGISTRATION_BASELINE 並寫下理由"
+            )
+            continue
+        if "*" in got:
+            continue  # 通配＝涵蓋全部工具，是擴大不是縮小
+        lost = sorted(pinned - got)
+        if lost:
+            problems.append(
+                f"{event} 底下的 {script} 不再被 {lost} 觸發（現為 {sorted(got)}）"
+                "——射程縮小是靜默失效：hook 仍在註冊表裡、測試仍全綠，但那些工具"
+                "寫出來的檔從此無人守"
+            )
+    return problems
+
+
+class TestHookRegistrationScopeIsShrinkOnly(unittest.TestCase):
+    """註冊面棘輪的本體（WHY／與姊妹鎖的分工／劣化方向，見上方區塊註記）。"""
+
+    def _real(self) -> dict:
+        self.assertTrue(_SETTINGS.is_file(), f"找不到 {_SETTINGS}")
+        return json.loads(_SETTINGS.read_text(encoding="utf-8-sig"))
+
+    _M4_SCRIPT = "check_sh_eol.py"  # QA M4 打的那個條目（與 check_ps1_encoding 同住）
+
+    def _m4_entries(self, settings: dict) -> list[dict]:
+        """PostToolUse 底下承載 `_M4_SCRIPT` 的條目。
+
+        刻意以**腳本名**定位而不是以 matcher 字面（如 `"Write|Edit"`）定位：後者會讓
+        本類別在「磁碟上的 matcher 被改過」時整組因前提不成立而錯亂報紅——而那正是
+        本鎖要用來做鑑別力注入的場景，判準自己不該被注入弄瞎。
+        """
+        hits = [
+            entry for entry in settings.get("hooks", {}).get("PostToolUse", []) or []
+            if any(self._M4_SCRIPT in str(h.get("command", ""))
+                   for h in entry.get("hooks") or [])
+        ]
+        self.assertEqual(
+            len(hits), 1,
+            f"PostToolUse 底下承載 {self._M4_SCRIPT} 的條目有 {len(hits)} 個（預期 1）"
+            "——註冊佈局已變，請重寫本案而不是放寬斷言")
+        return hits
+
+    def _mutate_matcher(self, settings: dict, new: str) -> dict:
+        self._m4_entries(settings)[0]["matcher"] = new
+        return settings
+
+    def test_real_settings_meets_the_baseline(self) -> None:
+        problems = registration_shrink_problems(
+            registered_tool_scope(self._real()), _REGISTRATION_BASELINE)
+        self.assertEqual(problems, [], "註冊面出現劣化：\n  " + "\n  ".join(problems))
+
+    def test_scan_surface_is_not_vacuous(self) -> None:
+        """自錨：解析塌掉時 `current` 會是空 dict，上一條會全報 missing 而紅——
+        但那條紅的訊息會指錯方向，故此處直接對掃描面本身斷言。"""
+        scope = registered_tool_scope(self._real())
+        self.assertIn(
+            ("PostToolUse", "AutoClaude/tools/hooks/check_sh_eol.py"), scope,
+            f"掃不到 QA M4 打的那個站點 ⇒ 本鎖已空轉。實得 keys：{sorted(scope)}")
+        self.assertGreaterEqual(
+            len(scope), len(_REGISTRATION_BASELINE),
+            "解析出的註冊條目少於釘選基準——枚舉器疑似壞了")
+
+    def test_baseline_covers_every_current_registration(self) -> None:
+        """誠實全集：新增一支 hook 而不進基準表 ⇒ 它一輩子不受棘輪保護（跟 QA M4
+        的處境完全相同）。此條逼新增者表態，形狀同
+        `check_script_parity._AC_EXCLUDED_REGISTRIES` 那張表的「漏排即紅」。"""
+        unpinned = sorted(set(registered_tool_scope(self._real()))
+                          - set(_REGISTRATION_BASELINE))
+        self.assertEqual(
+            unpinned, [],
+            f"下列 (事件, 腳本) 已註冊但不在 _REGISTRATION_BASELINE：{unpinned}"
+            "——請把它現在的 matcher 工具集合釘進去")
+
+    def test_baseline_scripts_all_exist_on_disk(self) -> None:
+        """反向 stale：釘住一支不存在的腳本＝守著一個幽靈，且會遮蔽真正的移除。"""
+        ghosts = sorted({script for _event, script in _REGISTRATION_BASELINE
+                         if not (_REPO_ROOT / script).is_file()})
+        self.assertEqual(ghosts, [], f"基準表指向不存在的腳本：{ghosts}")
+
+    # ── 鑑別力：三種變更方向各自自證（不靠 repo 現況剛好是哪一種）───────────
+    def test_narrowing_the_posttooluse_matcher_is_red(self) -> None:
+        """🔴 QA M4 的逐字重建：`Write|Edit` → `Write`（Edit 側整支失效）。"""
+        mutated = self._mutate_matcher(self._real(), "Write")
+        problems = registration_shrink_problems(
+            registered_tool_scope(mutated), _REGISTRATION_BASELINE)
+        for script in ("check_ps1_encoding.py", "check_sh_eol.py"):
+            self.assertTrue(
+                any(script in p and "Edit" in p for p in problems),
+                f"M4 突變後 {script} 仍被判為合格 ⇒ 這道鎖是空轉的。實得：{problems}")
+
+    def test_removing_the_whole_entry_is_red(self) -> None:
+        settings = self._real()
+        doomed = self._m4_entries(settings)[0]
+        post = settings["hooks"]["PostToolUse"]
+        settings["hooks"]["PostToolUse"] = [e for e in post if e is not doomed]
+        self.assertEqual(len(settings["hooks"]["PostToolUse"]), len(post) - 1)
+        problems = registration_shrink_problems(
+            registered_tool_scope(settings), _REGISTRATION_BASELINE)
+        self.assertTrue(
+            any("整個不見了" in p for p in problems),
+            f"整條 hook 條目被刪掉竟仍為綠。實得：{problems}")
+
+    def test_widening_the_matcher_is_green(self) -> None:
+        """方向性：多守一個工具不得轉紅——會把「加強防護」變成要改鎖才能做的事。"""
+        mutated = self._mutate_matcher(self._real(), "Write|Edit|NotebookEdit")
+        self.assertEqual(
+            registration_shrink_problems(
+                registered_tool_scope(mutated), _REGISTRATION_BASELINE),
+            [])
+
+    def test_wildcard_matcher_is_green(self) -> None:
+        mutated = self._mutate_matcher(self._real(), "*")
+        self.assertEqual(
+            registration_shrink_problems(
+                registered_tool_scope(mutated), _REGISTRATION_BASELINE),
+            [])
+
+    def test_criterion_red_green_on_synthetic_input(self) -> None:
+        """判準自證：不讀磁碟，四種形態直接餵。"""
+        base = {("PostToolUse", "a.py"): frozenset({"Write", "Edit"})}
+        self.assertEqual(
+            registration_shrink_problems(
+                {("PostToolUse", "a.py"): {"Write", "Edit"}}, base), [])
+        self.assertEqual(
+            registration_shrink_problems(
+                {("PostToolUse", "a.py"): {"Write", "Edit", "Read"}}, base), [])
+        self.assertTrue(registration_shrink_problems(
+            {("PostToolUse", "a.py"): {"Write"}}, base))
+        self.assertTrue(registration_shrink_problems({}, base))
+        # 同一支腳本換到別的事件下＝原事件的射程歸零，必須紅（不得因 basename
+        # 還在就放行——那正是姊妹鎖看不見的那一面）。
+        self.assertTrue(registration_shrink_problems(
+            {("PreToolUse", "a.py"): {"Write", "Edit"}}, base))
+
+    def test_two_enumerators_agree_on_the_script_set(self) -> None:
+        """本檔的枚舉器與 `test_subprocess_encoding_hygiene.hook_command_scripts()`
+        讀的是同一份註冊表，兩者的 (事件, 腳本) 集合必須一致。
+
+        WHY：同一份知識住兩個家、只有一個家被改，是本 repo 反覆出現的形態。把兩者
+        綁在一起之後，任一支的解析被改窄都會當場顯形（而不是等到某道鎖恆綠）。
+        """
+        sys.path.insert(0, str(_REPO_ROOT))
+        from tools.tests import test_subprocess_encoding_hygiene as hygiene
+
+        real = self._real()
+        self.assertEqual(
+            set(registered_tool_scope(real)),
+            set(hygiene.hook_command_scripts(real)),
+            "兩支枚舉器對同一份 settings.json 給出不同的 (事件, 腳本) 集合")
 
 
 if __name__ == "__main__":

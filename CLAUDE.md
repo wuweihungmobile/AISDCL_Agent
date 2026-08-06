@@ -180,7 +180,8 @@ R71 最諷刺的一筆：在修一個 Windows 專屬缺陷（DEF-101-759）時�
 |--------|--------|----------------|
 | 路徑分隔符 | `tools/tests/test_platform_neutral_paths.py` | 根層 unittest 閘門 |
 | console 編碼 | `tools/tests/test_subprocess_encoding_hygiene.py` | 同上 |
-| 行尾 | `tools/tests/test_pre_commit_dispatcher_sigpipe.py::TestPreCommitBlocksCrOnShellScripts` ＋ `AutoClaude/tools/hooks/check_sh_eol.py` | 同上 ＋ PostToolUse hook |
+| 行尾（`.sh`／`.bash` 方向） | `tools/tests/test_pre_commit_dispatcher_sigpipe.py::TestPreCommitBlocksCrOnShellScripts` ＋ `AutoClaude/tools/hooks/check_sh_eol.py`（🔴 R78 訂正欄名：這兩者的射程**只有** `.sh`／`.bash`，後者檔頭逐字寫「非 `.sh`／`.bash` → exit 0」。原欄名寫「行尾」讓人以為整類有人守） | 同上 ＋ PostToolUse hook |
+| 行尾（**`.ps1` 方向**，政策要求工作樹為 CRLF） | **無機械物**（R78 逐項實查：`check_ps1_encoding.py` 只補 BOM 且是逐位元組保留、碰都不碰行尾；git hooks 三處 grep 零命中；唯一在管的 `root-infra-ci.yml` 第 4 道**結構上永遠綠**——`actions/checkout` 必定重新 smudge，CI 天生看不到本機工作樹漂移） | 沒有東西會紅。本輪實測到 6 支 `.ps1` 工作樹為 LF、`git status` 全乾淨，是用 act 跑**工作樹**才顯形的 |
 | `$IsWindows` 等 PS 6+ 專屬 | `tools/tests/test_ps51_compat.py` | 同上 |
 | `$env:*` 讀取 | **無機械物**（唯一例外：`PATHEXT` 這一個變數已由 `tools/tests/test_platform_neutral_paths.py::TestPathextReadsAreePlatformGuarded` 覆蓋——🔴 R76 訂正：該掃描器與本表這句「無機械物」是**同一個 commit**（R74 `a371068`）落地的，也就是說本表在寫下的當回合就把一個已經有人在守的形態記成沒人守，撐了兩輪沒被發現） | 其餘 `$env:*` 沒有東西會紅 |
 | 副檔名判斷 | **無機械物** | 同上（DEF-101-766 的另一半） |

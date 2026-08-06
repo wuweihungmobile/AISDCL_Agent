@@ -605,18 +605,24 @@ _UNASSIGNED_LITERAL = "未指派"
 #: 收掉、`271`／`274`／`388` 改走合法出口②「未指派」＋可執行解鎖條件。
 #: 🔴 R75 第二次轉動：48 → 36。刪掉的 12 筆全是「早就修好、只有首詞沒跟上」，逐筆回樹複驗
 #: 後結案（指令＋rc 見帳本該列「R75 複驗」段）⇒ 依「已結案」條款不再需要豁免。
+#: 🔴 第三次轉動：36 → 34。刪掉 `DEF-101-278`（腳本對等閘摘要句）與 `DEF-101-297`
+#: （pre-commit 控制字元閘漏內嵌換行）——兩筆皆**真的修掉**並附紅→綠實測，逐筆證據見
+#: `docs/06_quality/CrossPlatform_R78_Debt_Audit.md` §一（該檔另載本輪未結的 82 筆分類）。
+#: 🔴 輪號刻意不寫進本檔散文：程式碼檔的輪號標籤受
+#: `TestR71CodeRoundLabelsNeverExceedLedgerCurrentRound` 管，不得超前帳本「發現情境」欄
+#: 推得的當前輪——而帳本時鐘在本輪第一列落地前仍停在上一輪，本次即實測當場轉紅。
 _UNPINNED_HANDOVER_GRANDFATHERED = frozenset({
     "DEF-01-007", "DEF-42-001", "DEF-53-001", "DEF-100-002", "DEF-101-018",
     "DEF-101-021", "DEF-101-022", "DEF-101-025", "DEF-101-055", "DEF-101-060",
     "DEF-101-206", "DEF-101-214", "DEF-101-217", "DEF-101-234", "DEF-101-235",
-    "DEF-101-238", "DEF-101-243", "DEF-101-268", "DEF-101-278", "DEF-101-296",
-    "DEF-101-297", "DEF-101-308", "DEF-101-309", "DEF-101-313", "DEF-101-324",
+    "DEF-101-238", "DEF-101-243", "DEF-101-268", "DEF-101-296",
+    "DEF-101-308", "DEF-101-309", "DEF-101-313", "DEF-101-324",
     "DEF-101-335", "DEF-101-348", "DEF-101-377", "DEF-101-392", "DEF-101-398",
     "DEF-101-399", "DEF-101-400", "DEF-101-401", "DEF-101-402", "DEF-101-412",
     "DEF-101-418",
 })
 #: shrink-only 棘輪上限（形狀比照 `tools/tests/` 的檔數棘輪）。只能往小改。
-_UNPINNED_HANDOVER_CEILING = 36
+_UNPINNED_HANDOVER_CEILING = 34
 
 
 def unpinned_handover_problems(ledger_text: str) -> list[str]:
@@ -1151,6 +1157,15 @@ _GOVERNANCE_DOCS = (
     # 同一個資格——複審者要逐條重驗就得讀完，且兩者都寫出缺陷座標宣稱。即刻登記。
     _REPO_ROOT / "docs" / "06_quality" / "CrossPlatform_R77_Triage.md",
     _REPO_ROOT / "docs" / "06_quality" / "CrossPlatform_R77_Fix_Plan.md",
+    # 技術債清除輪：未結列逐筆實查的證據面（結案 3 筆的紅→綠實測、STILL-OPEN 的當回合
+    # 量測、NEEDS-DECISION 清單）。同一個資格——複審者要重驗結案判定就得讀完它。即刻登記。
+    _REPO_ROOT / "docs" / "06_quality" / "CrossPlatform_R78_Debt_Audit.md",
+    # M1~M6 成熟度判準的 SSOT（R78 ARCH-05 搬家：原本寄生在輪次專屬的掃描發現文件裡，
+    # 那種文件是凍結記錄、沒人回頭維護，於是 M5 的攔截率三處各寫一份且全部過期）。
+    # 資格同上：複審者要判「這一輪算不算成熟」就得讀完它，且它寫出載具座標宣稱。
+    _REPO_ROOT / "docs" / "06_quality" / "CrossPlatform_Maturity_Criteria.md",
+    # R78 四方複審與五修復包的證據面（30 findings 逐筆、每道新判準的注入紅綠）。
+    _REPO_ROOT / "docs" / "06_quality" / "CrossPlatform_R78_Review.md",
 )
 
 # 姊妹治理文件的命名慣例：`docs/06_quality/CrossPlatform_*.md`。這**不是**把具名常數

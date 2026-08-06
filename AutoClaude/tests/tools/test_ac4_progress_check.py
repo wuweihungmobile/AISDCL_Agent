@@ -45,6 +45,30 @@ from tools.ac4_progress_check import (
 )
 
 
+@pytest.fixture(autouse=True)
+def _isolate_p95_threshold_env(monkeypatch: pytest.MonkeyPatch) -> None:
+    """把本檔的判定固定在**預設**門檻上（strict 60ms／observation 50ms）。
+
+    WHY：`ac4_progress_check` 的門檻是從 env 解析的，而且 strict 未設時會**回退**到
+    legacy 的 `AUTOCLAUDE_TEST_P95_THRESHOLD_MS`（見該模組 `_strict_p95_threshold`）。
+    `AutoClaude/tools/run_local_nightly.ps1` 與任何「PG 全開」的開發環境都會 export
+    那一項（值 80＝採集用的寬鬆值），於是本檔多數 case 會以一個**與受測邏輯無關**的
+    理由變紅。實測（2026-08-07，本機）：只加 `AUTOCLAUDE_TEST_P95_THRESHOLD_MS=80`
+    一項、其餘什麼都不動，本檔即 4 紅、contract 對應檔 1 紅。
+
+    刻意用 autouse 而不是逐 case 補 delenv：漏補的那一支**不會有任何訊號**，只有在
+    剛好設了該 env 的機器上才現形——這正是本輪要治的「skip／環境相依藏著真紅」同型。
+    以 env 本身為受測對象的 case 在自己的 body 內 `monkeypatch.setenv`，晚於本
+    fixture 生效，語意不受影響。
+    """
+    for name in (
+        "AUTOCLAUDE_STRICT_P95_THRESHOLD_MS",
+        "AUTOCLAUDE_TEST_P95_THRESHOLD_MS",
+        "AUTOCLAUDE_OBSERVATION_P95_THRESHOLD_MS",
+    ):
+        monkeypatch.delenv(name, raising=False)
+
+
 def _rec(*, p95: float, recall: float = 0.999, cb: int = 0,
          status: str = "pass", ts: str = "2026-05-24T00:00:00+00:00") -> dict:
     return {

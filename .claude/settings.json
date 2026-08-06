@@ -76,6 +76,17 @@
             "timeout": 10
           }
         ]
+      },
+      {
+        "_comment": "R78：Claude Code session 的 context 水位觀測者（掌舵者連續多輪明令『注意上下文是否超出 90%、不要爆』的機械化）。<75% 靜默 exit 0／≥75% stderr 提示 exit 0／≥90% stderr 強制指引＋產出可重啟點任務書骨架＋exit 2（PostToolUse 的 exit 2 把 stderr 回饋給模型，不阻斷已完成的呼叫）。同一門檻每 session 只喊一次（state 檔在系統暫存、帶 session id）——每次呼叫都 exit 2 的守衛會被整個關掉，而被關掉的守衛比沒有守衛更糟。payload 讀不出／無 transcript_path／掃不到 usage／任何例外一律 exit 0（fail-open，見本檔 description 記載的 P0）。與 SDD context_ledger 的分工（兩者量的不是同一個東西，不是重複）：那支走 sdd_hook_router、SDD_ACTIVE_VERSION 未設時休眠，量的是 SDD Stage 的**估算式**預算（_estimate_tokens 只看 tool_input，看不到工具輸出／subagent 回傳／對話本身）；本支量的是 session context 的**實測**佔用（逐字稿 message.usage 的 input+cache_creation+cache_read）。matcher 選『結果會大量灌進 context』那批工具，刻意不含 Write|Edit（其內容在模型寫出時已在 context 內，對『還剩多少』沒有新資訊），也刻意不用 *：實測單次 47ms（其中約 42ms 是 python 直譯器啟動，掃描本身 4.9ms），圈愈寬愈常付那 42ms；本檢查是水位偵測不是邊緣偵測，漏掉某次呼叫不會漏掉那個門檻。timeout 取 30 而非 10：hook 內對 planner 的子行程 timeout 是 15s，必須留在註冊 timeout 之內，否則 CC 先砍 hook 會讓強制指引一個字都印不出來。🔴 刻意**不**在 env 釘 AUTOSDD_CONTEXT_WINDOW=1000000：本檔是 repo 層設定、會跟著 checkout 到別的機器與別的模型變體，而釘死後若真跑在 200K window 的 session 上會嚴重低報（危險方向）；不釘時 guard 走『曾觀測 used>200K ⇒ window 必大於它』的可證下界推論，代價是 1M session 在真實 15% 時可能被喊一次 75%（誤報方向、只喊一次、訊息標明是推斷值）。要消掉這個噪音請在 user 層 settings 或環境變數設，不要寫進本檔。回歸鎖 tools/tests/test_context_budget_guard.py；註冊面本身受 tools/tests/test_check_hooks_liveness.py::TestHookRegistrationScopeIsShrinkOnly 保護。",
+        "matcher": "Read|Task|Grep|Glob|WebFetch|WebSearch|Bash|PowerShell",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python -c \"import os,sys,runpy; r=os.environ.get('CLAUDE_PROJECT_DIR') or os.getcwd(); p=os.path.join(r,*sys.argv[1].split('/')); os.path.isfile(p) or sys.exit(0); os.chdir(r); sys.argv=[p]+sys.argv[2:]; runpy.run_path(p,run_name='__main__')\" .claude/hooks/context_budget_guard.py",
+            "timeout": 30
+          }
+        ]
       }
     ]
   }

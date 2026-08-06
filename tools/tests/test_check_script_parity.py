@@ -1085,12 +1085,13 @@ class TestR64TierShrinkOnlyRatchet(unittest.TestCase):
     （升級/不變/整筆移出登記表皆合法）、(d) 字典改名不得靜默放行、(e) 真棘輪
     （對 HEAD 現查）。
 
-    本類刻意加進本檔而非新開檔案：`TestGuardFileCountShrinkOnlyRatchet`
-    （`test_adr_xplat001_c1c2_lock.py`）已把 `tools/tests/*.py` 的檔數棘輪化
-    （DEF-101-561③，R61 起禁止新增鎖檔、只准合併）——新開一支 `test_*.py` 會讓
-    那道鎖翻紅，故比照該裁決的既有慣例（`TestGuardFileCountShrinkOnlyRatchet`
-    自己也是主題不同卻擴進既有檔的先例），把本鎖擴進本檔（`check_script_parity`
-    既有測試檔）。
+    本類刻意加進本檔而非新開檔案：`TestGuardLayerRatchet`
+    （`test_adr_xplat001_c1c2_lock.py`）已把 `tools/tests/*.py` 這一層棘輪化
+    （DEF-101-561③）——當時量的是**檔數**，新開一支 `test_*.py` 就會讓那道鎖翻紅，
+    故比照該裁決的既有慣例（該類自己也是主題不同卻擴進既有檔的先例），把本鎖擴進本檔
+    （`check_script_parity` 既有測試檔）。
+    🔴 R78 ARCH-03 訂正：R77 起量測面換成逐檔行數的**淨額**，新增檔案本身不再違規；
+    但「同族判準住同一個家」這個理由與量測面無關，仍然成立。
     """
 
     @staticmethod

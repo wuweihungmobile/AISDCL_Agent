@@ -41,8 +41,9 @@ state_loader`），一次沒清乾淨就會讓後面的版本悄悄沿用前一�
 R66 追加（Review round 1 QA 發現，DEF-101-627）：`tools/lib/sdd_latest.py`
 （R66 新增，DEF-101-624）當時只做手動 bug-injection 驗證、未落成任何測試檔的
 永久斷言。本應為它新增專屬 `tools/tests/test_sdd_latest.py`，但 `DEF-101-561③`
-棘輪（`TestGuardFileCountShrinkOnlyRatchet`）自 R61 起禁止 `tools/tests/` 新增
-鎖檔、只准擴充既有檔或先合併／刪除等量舊檔——故改把 `FROZEN_VERSION_DIR_RE`
+棘輪（`TestGuardLayerRatchet`）自 R61 起要求 `tools/tests/` 擴充既有檔、或先合併／
+刪除等量舊物再加（🔴 R78 ARCH-03 訂正：R66 當時量的是**檔數**，R77 起改量逐檔行數的
+**淨額**——新增檔案本身不違規，淨額上升才違規）——故改把 `FROZEN_VERSION_DIR_RE`
 的 `.fullmatch()` 回歸鎖、`resolve_latest_name`/`resolve_latest_root` 的
 success/fail-loud 覆蓋，併入本檔（本檔是原始兩個肇事呼叫端之一，且已 import
 `sdd_latest`）；`exclude_frozen_sdd_versions` 的過濾語意併入姊妹檔

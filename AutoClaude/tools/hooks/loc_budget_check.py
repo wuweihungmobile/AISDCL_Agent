@@ -21,6 +21,12 @@ from pathlib import Path
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(PROJECT_ROOT / "tools"))
 sys.path.insert(0, str(PROJECT_ROOT.parent / "tools" / "lib"))
+# 本檔會被 `runpy.run_path()`（settings.json 的 shim）與 `importlib` 載入，兩者都**不會**
+# 把本檔所在目錄放進 sys.path ⇒ 同層共用模組必須自己接上（同 check_sh_eol.py 的理由）。
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from hook_path_scope import (  # noqa: E402
+    repo_relative_posix as _repo_relative_posix,  # type: ignore[import-not-found]
+)
 from platform_utils import (  # noqa: E402
     init_utf8_streams as _init_utf8_streams,  # type: ignore[import-not-found]
 )
@@ -59,15 +65,22 @@ def read_hook_payload() -> dict:
 
 
 def normalize_rel_path(file_path: str) -> Path | None:
-    if not file_path:
-        return None
-    try:
-        p = Path(file_path)
-        if p.is_absolute():
-            return p.resolve().relative_to(PROJECT_ROOT)
-        return p
-    except (ValueError, OSError):
-        return None
+    """payload 路徑 → 相對 PROJECT_ROOT 的 Path；不在樹內回 None（→ main 放行）。
+
+    🔴 正規化本體住共用層 `hook_path_scope.py`（與 `enforce_docs_path.py`／
+    `check_sh_eol.py` 同一份實作）。本檔是**第三支**委派者：R77-50 把前兩支收斂到共用層
+    時，parity 鎖寫成「寫死兩項的白名單」，於是同目錄的本檔照樣留著逐字相同的舊寫法而
+    沒有任何東西轉紅——單一實作做了 2/3，鎖對第三支結構性失明（R78／ARCH-06）。
+
+    舊寫法 `p.resolve().relative_to(PROJECT_ROOT)` 的大小寫語意由 path flavour 決定：
+    POSIX 上 `realpath` 不動大小寫而 `PurePosixPath.relative_to` 分大小寫 ⇒ root 前綴
+    大小寫對不上就拋 ValueError → 回 None → `main()` return 0 ⇒ CLAUDE.md 行數紅線與
+    單行 codepoint 紅線這兩道**阻斷級**檢查整支靜默略過（fail-open，沒有人會發現）。
+
+    回傳型別維持 `Path`：下游用到 `rel.suffix` / `rel.as_posix()` / `PROJECT_ROOT / rel`。
+    """
+    rel_posix = _repo_relative_posix(file_path, PROJECT_ROOT)
+    return None if rel_posix is None else Path(rel_posix)
 
 
 def check_python_file(rel: Path) -> int:

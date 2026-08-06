@@ -60,10 +60,13 @@ WHY（為何非得有這道鎖）：
         實證：`_MAX_BASELINE_ENTRIES` 由現值改成放大十餘倍後 commit，本類全綠零訊號。
         這與同輪 R67-H14 在 `tools/check_script_parity.py` 修掉的是同一個病（那一支是照抄
         本檔而來的），本輪把本體也修了：基準改為簽入本檔的凍結常數，整條 git 依賴移除。
-    (d) **護欄層檔數棘輪**（`TestGuardFileCountShrinkOnlyRatchet`，round 3 ARCH-R60R3-04）：
+    (d) **護欄層行數棘輪**（`TestGuardLayerRatchet`，round 3 ARCH-R60R3-04 立案、R77 換量）：
         `DEF-101-561③` 裁定「R61 開輪即禁止新增鎖檔、只准合併／刪除」，而該裁決原本零機械
-        強制。同 (c) 的形狀，且同 (c) 於 R67 round 2 一併脫離 git 狀態（原本走
-        `git ls-tree -r HEAD`，恆真理由與 (c) 逐字相同）。
+        強制。R77 把量測面由「檔數」換成逐檔行數表（`_FROZEN_GUARD_LINES`）——檔數被釘住之後
+        成長全部灌進既有巨檔，同期行數翻倍而唯一的判準全程綠。
+        🔴 **接手者的語意不是「禁止新增檔案」**（R78 ARCH-03：散落各處的引用逐字這樣寫，那是
+        對已移除機制的複述）：新表管的是**淨行數**，新增鎖檔只要同一次變更內刪掉等量以上的
+        行就合法；反之只改既有檔卻淨增一行照樣紅。重釘須留稽核痕跡，見 `_GUARD_LINES_REPIN_LOG`。
 
 另加一組**標的是 `ADR-XPLAT-002` §9.1 與 `CrossPlatform_Scan_Dimensions.md`〈常設自檢〉**的
 常設不變式（`TestSection91*` 三類，R67 round 2 SA-R67-03 的落地）：那兩處把跨平台三項頭號
@@ -104,9 +107,11 @@ WHY（為何非得有這道鎖）：
      散文——寫了就是下一個 stale 站點（帳本開新號就會少一個），而且會立刻被本檔自己的
      `TestThisLockObeysItsOwnNoHardcodedCountRule` 判為犯規；這段措辭與現況是否同步由
      `TestIdCeilingBypassReachabilityIsLive` 雙向機械綁定。
-  ❌ **兩道 shrink-only 棘輪在其比較對象的首個 commit 上都是空轉的**：常數棘輪是 HEAD 還沒有
-     本檔可比、檔數棘輪是 HEAD 還沒有 `tools/tests/` 可比。兩者都 `skipTest` 並印出理由
-     （`run_root_unittests.py` 會逐處列印全部 skip），鑑別力另以合成上一版永久釘住。
+  ❌ **兩道棘輪都只保證「淨額不惡化」，不保證每一列在每個時點與磁碟逐字相符**：常數棘輪比的
+     是簽入本檔的凍結常數（R67 round 2 起整條 git 依賴已移除，不再有「首個 commit 空轉」
+     那個舊形態），行數棘輪比的是 `_FROZEN_GUARD_LINES` 這張表的**總量**——淨額為零的
+     「A 減 B 增」對調兩者都不會說話（見 `guard_line_problems` 的誠實劃界段）。
+     兩者的鑑別力皆以合成注入永久釘住，不依賴工作樹當下剛好處於哪個狀態。
   ⚠️ **不要因為這道鎖是綠的就以為 §4.3 已被完全保證。**
 
 執行：python tools/run_root_unittests.py
@@ -119,7 +124,7 @@ import inspect
 import re
 import sys
 import unittest
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Callable, Iterable, Mapping, Sequence
 from pathlib import Path
 from types import ModuleType
 from typing import NamedTuple
@@ -637,10 +642,10 @@ def frozen_ratchet_problems(
     )
 
 
-# ---------------------------------------------------------------- 護欄層檔數棘輪（DEF-101-561③）
+# ---------------------------------------------------------------- 護欄層掃描面（DEF-101-561③）
 _GUARD_DIR_REL = "tools/tests"
 # 計數面＝根層閘門的 discovery pattern。這裡的字面值由
-# `TestGuardFileCountShrinkOnlyRatchet::test_the_counted_surface_is_the_root_gate_pattern`
+# `TestGuardLayerRatchet::test_the_counted_surface_is_the_root_gate_pattern`
 # 與 `run_root_unittests._PATTERN` 雙向綁定（那支才是 SSOT，本常數只是不想在 import 期
 # 付 `_stdio_utf8` 的副作用代價而做的鏡像；兩邊漂移即紅）。
 _GUARD_FILE_PATTERN = "test_*.py"
@@ -685,13 +690,19 @@ def guard_files_in_worktree() -> frozenset[str]:
 #
 # 🔴 方向是**收緊**：改版前「一輪加三萬行全綠」，改版後「淨增一行即紅」。
 # 🔴 重釘紀律（照抄 `run_root_unittests.MIN_TESTS` 的既有慣例，不另立體例）：值一律是
-# **當回合實測**、零加減推算；多包並行的輪次由**收尾包在所有包停工後**重釘一次。
-# 現查／重釘用：`python tools/tests/test_adr_xplat001_c1c2_lock.py --print-guard-lines`。
+# **當回合實測**、零加減推算；多包並行的輪次由**收尾包在所有包停工後**重釘一次，
+# 並在 `_GUARD_LINES_REPIN_LOG` 補一列（不補即紅——淨額因此在結構上不可能缺席）。
+# 現查／重釘用：`python tools/tests/test_adr_xplat001_c1c2_lock.py --print-guard-lines`
+# （🔴 R78 ARCH-02：這個旗標在 R77 只存在於紅燈訊息裡，實跑 rc=2 `unrecognized arguments`；
+#   本輪補上 `__main__` 分派，並由 `TestRepinCommandIsReal` 雙向釘住「訊息教的指令必須真的
+#   跑得動」——否則棘輪一紅，唯一出路是逐列手改整張凍結表，而那樣改的人不會順手算淨額）。
 
 #: 行數面的 glob——**非遞迴 `*.py`**，逐字等於 ADR §4.3 GLC 現查指令用的那一個。
 #: 刻意與 `_GUARD_FILE_PATTERN`（遞迴 `test_*.py`）分開：後者是「閘門會跑哪幾支」，
 #: 前者是「這一層有多大」。兩個量不同名也不同義，混用會讓 ADR 的指令與本檔的數字對不
-#: 起來；涵蓋關係改由 `guard_baseline_gaps()` 證明，而不是把兩個面硬併成一個。
+#: 起來；涵蓋關係改由 `guard_baseline_gaps()` 證明，而不是把兩個面硬併成一個
+#: （🔴 R78 ARCH-04：R77 寫下這句時那個函式並不存在——AST 實查零定義。本輪補上實作＋
+#:  `test_the_two_surfaces_have_no_coverage_gap`，讓這句宣稱有東西承接）。
 _GUARD_LINE_PATTERN = "*.py"
 
 #: 基準與實況的**縮小**容忍帶。🔴 這不是成長緩衝——成長側零容忍（見 `glc_growth_problem`）。
@@ -699,8 +710,8 @@ _GUARD_LINE_PATTERN = "*.py"
 #: 只會腐化，縮下來卻不重釘的話，餘裕就是日後無聲加回去的破口（同 SA-R67-08 的裁決）。
 _GUARD_LINE_STALE_SLACK = 0.02
 
-#: 逐檔行數的**凍結基準**（本輪 PKG-GUARD／R77-24：取代已移除的 `_FROZEN_GUARD_FILE_COUNT`
-#: 檔數棘輪）。取值紀律同 `_TIER_BASELINE`：**當回合實測直接填入、零加減推算、不留成長緩衝**。
+#: 逐檔行數的**凍結基準**（R77 PKG-GUARD／R77-24：取代已於同輪移除的檔數棘輪常數）。
+#: 取值紀律同 `_TIER_BASELINE`：**當回合實測直接填入、零加減推算、不留成長緩衝**。
 #:
 #: 🔴 為何檔數棘輪要退場、而這張表是它的接手者：檔數被釘住之後，護欄層的成長並沒有停，
 #: 只是全部灌進既有巨檔——同期行數翻倍而唯一的通過判準（檔數相等＋glob 非空）全程綠。
@@ -715,38 +726,40 @@ _FROZEN_GUARD_LINES: dict[str, int] = {
     "_ci_scan_anchors.py": 154,
     "_platform_helpers.py": 519,
     "_ps_engine.py": 115,
-    "test_adr_xplat001_c1c2_lock.py": 3443,
-    "test_archive_defect_log.py": 3784,
+    "test_act_local_runner_image.py": 322,
+    "test_adr_xplat001_c1c2_lock.py": 3797,
+    "test_archive_defect_log.py": 3786,
     "test_bash32_compat.py": 609,
     "test_bash_probe_spec_contract.py": 960,
     "test_bootstrap_core.py": 439,
     "test_bootstrap_ps1.py": 160,
     "test_check_defect_log_crossref.py": 2642,
     "test_check_gha_action_versions.py": 295,
-    "test_check_hooks_liveness.py": 1044,
-    "test_check_pytest_baseline_sites.py": 182,
-    "test_check_script_parity.py": 1887,
-    "test_check_wrapper_thinness.py": 1254,
+    "test_check_hooks_liveness.py": 1580,
+    "test_check_pytest_baseline_sites.py": 226,
+    "test_check_script_parity.py": 1888,
+    "test_check_wrapper_thinness.py": 1255,
     "test_ci_scan_anchors.py": 712,
-    "test_component_sanitizer_shared_layer_lock.py": 292,
+    "test_component_sanitizer_shared_layer_lock.py": 293,
+    "test_context_budget_guard.py": 360,
     "test_defect_id_reference_integrity.py": 261,
-    "test_dev_start.py": 6684,
-    "test_dev_start_ps1_lastexitcode.py": 453,
+    "test_dev_start.py": 6686,
+    "test_dev_start_ps1_lastexitcode.py": 454,
     "test_doc_env_prefix_platform_parity_r60.py": 332,
-    "test_doc_loc_baseline_freshness_r60.py": 5143,
+    "test_doc_loc_baseline_freshness_r60.py": 5649,
     "test_extras_quoting_zsh_safety.py": 402,
-    "test_find_git_bash_parity.py": 1225,
+    "test_find_git_bash_parity.py": 1226,
     "test_gha_action_versions.py": 703,
     "test_git_hooks_install_common.py": 521,
-    "test_install_windows_nightly.py": 1468,
+    "test_install_windows_nightly.py": 1469,
     "test_macos_smoke_skip_honesty.py": 225,
     "test_nightly_interpreter_determinism.py": 278,
     "test_no_invalid_escape_sequences.py": 329,
-    "test_ntfs_trailing_space_device_name.py": 770,
+    "test_ntfs_trailing_space_device_name.py": 772,
     "test_onboarding_parity_interlock.py": 235,
-    "test_platform_neutral_paths.py": 3024,
+    "test_platform_neutral_paths.py": 3061,
     "test_platform_utils_dedup.py": 1096,
-    "test_pre_commit_dispatcher_sigpipe.py": 430,
+    "test_pre_commit_dispatcher_sigpipe.py": 498,
     "test_pre_push_dispatcher.py": 779,
     "test_ps1_bom.py": 301,
     "test_ps51_compat.py": 691,
@@ -754,8 +767,8 @@ _FROZEN_GUARD_LINES: dict[str, int] = {
     "test_python_c_percent_shim.py": 119,
     "test_root_infra_parity.py": 441,
     "test_run_root_unittests.py": 1680,
-    "test_sanitize_component_frozen_sdd_versions_lock.py": 373,
-    "test_schedule_capability_parity.py": 586,
+    "test_sanitize_component_frozen_sdd_versions_lock.py": 375,
+    "test_schedule_capability_parity.py": 587,
     "test_script_scan_surface_ssot.py": 226,
     "test_smoke_ci_sync.py": 1526,
     "test_stdio_utf8.py": 76,
@@ -765,10 +778,117 @@ _FROZEN_GUARD_LINES: dict[str, int] = {
     "test_windows_smoke_heartbeat_doc_sync.py": 197,
     "test_windowsapps_guard_bash_parity.py": 956,
     "test_windowsapps_guard_cross_consistency.py": 2213,
-    "test_workflow_permission_concurrency_lock.py": 1356,
+    "test_workflow_permission_concurrency_lock.py": 1357,
     "test_workflow_schedule_sync.py": 309,
     "test_workflow_timeout_coverage.py": 158,
 }
+
+
+#: 重釘稽核痕跡（**append-only**）：`(輪號, 舊總量, 新總量, 淨額, 理由)`。
+#:
+#: 🔴 R78 ARCH-01 的落地物。缺陷本體：舊的檔數棘輪重釘是**一個**數字，一望即知方向；
+#: 換成逐檔行數表之後，重釘變成「整張表同時變」，而**淨額不出現在任何地方**——
+#: 實測 `a7a3080` 這一個 commit 內量測面 54188 → 57693（+3505），閘門全程 rc=0。
+#: 也就是說「重釘」在機械上與「順手更新一下」無法區分，棘輪的張力全靠人自律。
+#:
+#: 本表把淨額變成**結構上不可能缺席**的東西：`test_the_repin_log_accounts_for_the_frozen_table`
+#: 斷言「表尾那一列的新總量必須逐字等於 `sum(_FROZEN_GUARD_LINES.values())`」⇒ 動了那張表
+#: 而不補一列理由，當場紅；補了列卻算錯淨額，也紅（逐列自洽 ＋ 首尾相接）。
+#: 維護方式：`--print-guard-lines` 會連這一列的草稿一起印出來，照貼即可。
+_GUARD_LINES_REPIN_LOG: tuple[tuple[str, int, int, int, str], ...] = (
+    (
+        "R77", 54188, 57693, 3505,
+        "PKG-GUARD／R77-24：檔數棘輪退場、逐檔行數表接手。本列是回填的**起點列**——"
+        "R77 當輪並沒有稽核痕跡這回事（那正是 R78 ARCH-01 的缺陷本體），"
+        "兩個數字取自 skeptic 對 a7a3080 的實測，非事後推算。",
+    ),
+    (
+        "R78", 57693, 59936, 2243,
+        "R78 四方複審後的五個修復包，加上兩支新機械物，"
+        "由收尾者在所有包停工後一次重釘。"
+        "淨額歸因（各包自陳，可回查各自交件回報）："
+        "A-lint +129（把「只測會過的那幾種寫法」的回歸鎖，"
+        "換成漏擋與誤擋兩個方向逐一注入的判準表，"
+        "另加別名與全名的對稱性判準）；"
+        "D-doc +315（成熟度 SSOT 新鮮度鎖、交棒書宣稱可查性鎖、"
+        "pytest 基線簡寫形態判準）；"
+        "E-posttooluse +237（PostToolUse 註冊面 shrink-only 鎖，"
+        "該面此前完全無人守；hook 路徑去重的納管面"
+        "由寫死名單改為目錄列舉減具名排除表）；"
+        "C-ghost（幽靈符號判準射程由「反引號路徑」"
+        "擴到「反引號 Python 識別字」——那正是懸空引用逃逸的縫；"
+        "另含本表本體與 guard_baseline_gaps 實作）；"
+        "B-audit（probe 逐工具計數與 per-session 崩塌判準的回歸鎖）。"
+        "另新增兩個鍵：act 自建映像的一致性與雙平台旗標對等鎖、"
+        "session context 水位守衛的回歸鎖（值見上方凍結表）。"
+        "🔴 本輪未刪任何行換取餘裕、未調高任何門檻；"
+        "成長全部是新判準，且每一道都附"
+        "「改壞→紅→還原→驗乾淨」的注入證明。",
+    ),
+)
+
+
+def repin_log_problems(
+    log: Sequence[tuple[str, int, int, int, str]], frozen_total: int
+) -> list[str]:
+    """重釘稽核痕跡的違規清單（空＝通過）。純函式，紅綠由合成注入自證。
+
+    四款，各帶方括號標籤（本檔的零串音紀律）：
+      (1) `[空表]` 一列都沒有 —— 整張表被刪掉時，下面三條全部無事可判＝fail-open。
+      (2) `[淨額不符]` 某列的 `新總量 - 舊總量 != 淨額` —— 手抄淨額算錯。
+      (3) `[斷鏈]` 某列的舊總量 != 前一列的新總量 —— 中間漏記了一次重釘。
+      (4) `[未對帳]` 表尾的新總量 != `sum(_FROZEN_GUARD_LINES.values())` —— **本判準的主牙**：
+          改了凍結表卻沒補一列理由（或補了列卻沒真的改表）。
+      (5) `[無理由]` 理由欄過短 —— 「重釘」三個字不算理由；淨額要有人負責解釋。
+
+    誠實劃界：本判準保證「有一列、算術自洽、與凍結表對得上」，**不保證那個理由是好理由**
+    （那是人審責任，同 C2 只保證字樣在、不保證觸發條件寫得對）。
+    """
+    problems: list[str] = []
+    if not log:
+        return ["[空表] _GUARD_LINES_REPIN_LOG 一列都沒有——重釘的淨額又回到「不出現在任何"
+                "地方」的狀態（R78 ARCH-01 的缺陷本體）。至少要有一列起點列。"]
+    for i, (rnd, old, new, delta, reason) in enumerate(log):
+        if new - old != delta:
+            problems.append(
+                f"[淨額不符] {rnd} 那一列：{old}→{new} 的淨額應為 {new - old}，表上寫 {delta}")
+        if i and old != log[i - 1][2]:
+            problems.append(
+                f"[斷鏈] {rnd} 那一列的舊總量 {old} 不等於前一列（{log[i - 1][0]}）的新總量 "
+                f"{log[i - 1][2]} —— 中間有一次重釘沒有留下痕跡")
+        if len(reason.strip()) < 20:
+            problems.append(
+                f"[無理由] {rnd} 那一列的理由欄只有 {len(reason.strip())} 字——"
+                "淨額要有人負責解釋，「重釘」兩個字不是理由")
+    if log[-1][2] != frozen_total:
+        problems.append(
+            f"[未對帳] 稽核痕跡表尾的新總量 {log[-1][2]} 不等於 _FROZEN_GUARD_LINES 實際總量 "
+            f"{frozen_total}——改了凍結表就必須同一次變更補一列 "
+            f"(輪號, {log[-1][2]}, {frozen_total}, {frozen_total - log[-1][2]}, '理由')；"
+            "少了這條，整張表同時變而淨額不出現在任何地方（R78 ARCH-01）。"
+            "草稿：python tools/tests/test_adr_xplat001_c1c2_lock.py --print-guard-lines")
+    return problems
+
+
+def guard_baseline_gaps() -> list[str]:
+    """檔數面有、行數面看不到的鎖檔（正常為空清單）——兩個掃描面的**涵蓋關係**證明。
+
+    🔴 R78 ARCH-04：`_GUARD_LINE_PATTERN` 上方那句「涵蓋關係改由 `guard_baseline_gaps()`
+    證明」在 R77 寫下時，這個函式**並不存在**（全庫 AST 零定義）。兩個面刻意不同——
+    檔數面是遞迴 `test_*.py`（閘門會跑哪幾支），行數面是非遞迴 `*.py`（這一層有多大）——
+    而「不同」與「有東西從縫裡掉出去」是兩件事，後者需要有人算。
+
+    本函式算的就是那個縫：閘門會跑、但行數棘輪量不到的檔 ⇒ 它的成長不會讓任何東西轉紅。
+    與 `guard_surface_escapes()` 的分工：那一支問「子目錄裡有沒有 .py」（行數面的已知代價），
+    本函式問「檔數面的每一支是不是都被行數面數到了」（兩面之間的涵蓋關係）。今天兩者的
+    答案同源（唯一的逃逸方式就是落進子目錄），但它們是**不同的問句**——把它們併成一個，
+    日後任一 glob 改動時就會有一個問題沒人問。
+    """
+    line_face = set(guard_lines_in_worktree())
+    return sorted(
+        rel for rel in guard_files_in_worktree()
+        if rel.rsplit("/", 1)[-1] not in line_face
+    )
 
 
 def guard_lines_in_worktree() -> dict[str, int]:
@@ -813,8 +933,11 @@ def glc_growth_problem(frozen_total: int, current_total: int) -> str | None:
     return (
         f"[成長] 護欄層行數由 {frozen_total} 增為 {current_total}（+{delta}）——"
         "DEF-101-561③ 的語意本輪由「檔數」升級為「行數」：擴充既有鎖檔一樣要付代價。"
-        "合法出口＝同一次變更內把等量以上的行刪掉／抽成共用層；"
-        "真的必須長大時，重釘 _FROZEN_GUARD_LINES 並在交件回報寫出淨額"
+        "合法出口＝同一次變更內把等量以上的行刪掉／抽成共用層——"
+        "🔴 注意本裁決的語意**不是**「禁止新增鎖檔」（那是已退場的檔數棘輪；R78 ARCH-03 抓到"
+        "散落各處的引用仍在複述舊語意）：新增檔案只要淨額不上升就合法。"
+        "真的必須長大時：`--print-guard-lines` 重釘 _FROZEN_GUARD_LINES、"
+        "在 _GUARD_LINES_REPIN_LOG 補一列（含淨額與理由，不補即紅），並在交件回報寫出淨額"
         "（重釘一律由收尾包在所有包停工後做一次，同 MIN_TESTS 慣例）。"
     )
 
@@ -1859,31 +1982,32 @@ class TestShrinkOnlyRatchet(unittest.TestCase):
         self.assertEqual(_BASELINE_ID_CEILING, _FROZEN_BASELINE_ID_CEILING)
 
 
-class TestGuardFileCountShrinkOnlyRatchet(unittest.TestCase):
-    """(d) 護欄層檔數棘輪：`tools/tests/` 的鎖檔數只准往下走（`DEF-101-561③`）。
+class TestGuardLayerRatchet(unittest.TestCase):
+    """(d) 護欄層棘輪：`tools/tests/` 這一層的**淨行數**只准往下走（`DEF-101-561③`）。
 
     WHY（ARCH-R60R3-04）：`DEF-101-561③` 在 R60 round 3 被訂正為「**現在即判定已觸發**：
     R61 開輪即進入禁止新增鎖檔、只准合併／刪除」。Architect 全 repo 實查該裁決的落地狀況，
     結果是它只活在帳本一格散文與一行註解裡——**零機械強制**。而本檔檔頭自己立的標準是
     「把 §4.3 的兩條件做成機械鎖才叫落地——沒有這道鎖，§4.3 就只是散文，本輪已經自證」。
-    同一把尺量回這條裁決，結論一樣：沒有鎖，它就只是散文。本類就是那道鎖，形狀直接沿用
-    上面的 `TestShrinkOnlyRatchet`（ADR §4.4 指定的照抄對象）。
+    同一把尺量回這條裁決，結論一樣：沒有鎖，它就只是散文。本類就是那道鎖。
 
-    🔴 語意與生效時點（動它之前先搞清楚基準點）：
-      · 🔴🔴 **R67 round 2 訂正（SA-R67-08）**：原本比的是「工作樹 vs HEAD」，理由寫著
-        「沒有常數要維護、沒有第二個 stale 站點、合併後上限自動跟著降（棘輪自緊）」。
-        那些優點是真的，但代價是**這道鎖在它唯一被消費的時點沒有作用**：pre-push 的
-        root-infra leg 與三支 CI 都在 commit 之後跑，HEAD 逐字等於工作樹 ⇒ 比較退化。
-        現改為與簽入本檔的 `_FROZEN_GUARD_FILE_COUNT` 比對；自緊性質改由
-        `test_frozen_guard_count_matches_the_worktree` 以「凍結值必須等於現況」人工維持
-        （多退少補都紅），代價是多一個 stale 站點——與「鎖形同虛設」相比，這個代價值得付。
-      · 因此它現在**任何時點都有牙**：新增一支 `tools/tests/test_*.py`（不論 commit 與否）
-        即紅。綠不等於空轉：鑑別力由本類的合成注入永久釘住，且工作樹側列舉的非空由自錨
-        斷言保證。
-      · 計數面＝根層閘門的 discovery pattern ⇒ 「閘門真的會跑的那批鎖檔」。
-        `_*.py` 這種**共享零件刻意不算**：`DEF-101-561①` 指定的 R61 合併動作本身就是
-        「把四支 AST helper 抽成一支共享剝除層」，把零件算進來會讓那個**被裁決指定的
-        合併動作自己翻紅**（獎勵把重複貼回各鎖檔、懲罰抽共用層），與裁決意圖相反。
+    🔴 **量測面在 R77 換過一次，語意跟著換了**（動它之前先搞清楚現在管的是什麼）：
+      · **舊**：純量「鎖檔支數」，只准往下 ⇒ 讀起來就是「禁止新增鎖檔」。長期實測的結論是
+        它把病換了個地方長——支數一格不動，同期行數翻倍有餘，判準全程綠。
+      · **現**：`_FROZEN_GUARD_LINES` 逐檔行數表，判準是**淨行數不得上升**
+        （`guard_line_problems`／`glc_growth_problem`）。
+      · 🔴 因此接手者的語意**不是**「禁止新增檔案」：新增一支鎖檔，只要同一次變更內刪掉
+        等量以上的行就合法（那正是該裁決指定的「合併」動作）；反之只改既有巨檔卻淨增一行
+        照樣紅。**R78 ARCH-03 實查到散落各處的引用仍逐字寫著舊語意**，那是對已移除機制的
+        複述，不是接手者的規則——看到那種寫法請一併訂正，不要照著做。
+      · 重釘不是「調高就好」：`--print-guard-lines` 產出新表，並在 `_GUARD_LINES_REPIN_LOG`
+        補一列（含淨額與理由），不補即紅（R78 ARCH-01）。
+
+    本類仍保留兩支**檔案面**的自錨（`guard_files_in_worktree()` 與根層閘門 pattern 的
+    SSOT 綁定）：行數面是非遞迴 `*.py`、檔案面是遞迴 `test_*.py`，兩個面的涵蓋關係由
+    `guard_baseline_gaps()` 證明。`_*.py` 這種**共享零件不進檔案面**：`DEF-101-561①`
+    指定的 R61 合併動作本身就是「把四支 AST helper 抽成一支共享剝除層」，把零件算進來
+    會讓那個**被裁決指定的合併動作自己翻紅**（獎勵把重複貼回各鎖檔、懲罰抽共用層）。
     """
 
     def test_the_worktree_enumerator_is_not_vacuous(self) -> None:
@@ -1919,9 +2043,9 @@ class TestGuardFileCountShrinkOnlyRatchet(unittest.TestCase):
     def test_the_line_ratchet_took_over_and_has_teeth(self) -> None:
         """接手證明：檔數棘輪退場後，行數棘輪必須真的在守，且注入會紅。
 
-        WHY 這一支存在：本輪移除 `_FROZEN_GUARD_FILE_COUNT` 檔數棘輪的理由是它**把病
-        換了個地方長**——檔數被釘住，成長就全部灌進既有巨檔（同期行數翻倍而判準全程綠）。
-        移除一道鎖若不同時證明接手者有牙，等於淨損一道防護；這支測試就是那個證明。
+        WHY 這一支存在：R77 移除檔數棘輪的理由是它**把病換了個地方長**——檔數被釘住，
+        成長就全部灌進既有巨檔（同期行數翻倍而判準全程綠）。移除一道鎖若不同時證明接手者
+        有牙，等於淨損一道防護；這支測試就是那個證明。
         """
         current = guard_lines_in_worktree()
         self.assertEqual(
@@ -1938,6 +2062,77 @@ class TestGuardFileCountShrinkOnlyRatchet(unittest.TestCase):
             "檔數棘輪的退場就變成淨損一道防護",
         )
 
+    # ── R78 ARCH-01：重釘必須留下淨額與理由 ────────────────────────────────
+    def test_the_repin_log_accounts_for_the_frozen_table(self) -> None:
+        """主牙：稽核痕跡表尾的新總量必須逐字等於凍結表實際總量。
+
+        WHY：逐列手改整張表與「順手更新一下」在機械上原本無法區分（實測 `a7a3080` 一個
+        commit 內量測面 +3505 而閘門 rc=0）。要求對帳之後，重釘不寫理由＝紅。
+        """
+        problems = repin_log_problems(
+            _GUARD_LINES_REPIN_LOG, sum(_FROZEN_GUARD_LINES.values()))
+        self.assertEqual(problems, [], "重釘稽核痕跡不合規：\n  " + "\n  ".join(problems))
+
+    def test_repinning_without_logging_a_reason_is_red(self) -> None:
+        """注入①：凍結表被改動（總量 +1）卻沒補一列 ⇒ `[未對帳]` 必紅。"""
+        total = sum(_FROZEN_GUARD_LINES.values())
+        problems = repin_log_problems(_GUARD_LINES_REPIN_LOG, total + 1)
+        self.assertTrue(problems, "改了凍結表而不補稽核列竟然放行 ⇒ ARCH-01 沒有被修")
+        self.assertTrue(any("[未對帳]" in p for p in problems), problems)
+
+    def test_a_miscomputed_net_or_a_broken_chain_is_red(self) -> None:
+        """注入②③：淨額算錯／中間漏記一次重釘，各自必紅（且是對的那一款）。"""
+        reason = "理由夠長夠長夠長夠長夠長夠長夠長夠長"
+        bad_net = (("Rx", 100, 200, 99, reason),)
+        self.assertTrue(any("[淨額不符]" in p for p in repin_log_problems(bad_net, 200)))
+        broken = (("Rx", 100, 200, 100, reason), ("Ry", 300, 400, 100, reason))
+        self.assertTrue(any("[斷鏈]" in p for p in repin_log_problems(broken, 400)))
+
+    def test_an_empty_or_unreasoned_log_is_red(self) -> None:
+        """注入④⑤：整張表被刪掉／理由欄敷衍了事，都不得靜默通過。"""
+        self.assertTrue(any("[空表]" in p for p in repin_log_problems((), 0)))
+        self.assertTrue(any("[無理由]" in p for p in repin_log_problems(
+            (("Rx", 0, 1, 1, "重釘"),), 1)))
+
+    def test_a_correct_repin_is_green(self) -> None:
+        """對照組：算術自洽、首尾相接、與凍結表對得上 ⇒ 綠。
+
+        少了這一支，上面四支「注入必紅」可能只是因為本判準恆紅（無鑑別力）。
+        """
+        reason = "把兩支鎖檔合併，淨額為零但鍵集合改變，故一併重釘"
+        good = (("Rx", 100, 200, 100, reason), ("Ry", 200, 190, -10, reason))
+        self.assertEqual(repin_log_problems(good, 190), [])
+
+    # ── R78 ARCH-04：兩個掃描面的涵蓋關係必須有人算 ──────────────────────
+    def test_the_two_surfaces_have_no_coverage_gap(self) -> None:
+        """檔數面（遞迴 `test_*.py`）的每一支都必須被行數面（非遞迴 `*.py`）數到。
+
+        WHY：閘門會跑、行數棘輪卻量不到的檔＝它的成長不會讓任何東西轉紅。R77 宣稱這件事
+        由 `guard_baseline_gaps()` 證明，而那個函式當時並不存在（R78 ARCH-04）。
+        """
+        gaps = guard_baseline_gaps()
+        self.assertEqual(
+            gaps, [],
+            f"這幾支鎖檔在閘門的收集面內、卻不在行數棘輪的量測面內：{gaps}——"
+            "它們可以無限長大而不會有任何東西轉紅。修法：移回 tools/tests/ 頂層，"
+            "或連同 ADR §4.3 的現查指令一起把行數面改成遞迴",
+        )
+
+    def test_the_gap_detector_is_not_vacuous(self) -> None:
+        """自錨：涵蓋關係函式必須真的在比兩個面，而不是恆回空清單。
+
+        用**真實**的兩個面做正控：檔數面非空、且它的每一支都能在行數面找到同名鍵——
+        兩個條件同時成立，上一支的「零缺口」才是量出來的，不是 glob 寫壞後的假綠。
+        """
+        files = guard_files_in_worktree()
+        line_face = guard_lines_in_worktree()
+        self.assertTrue(files, "檔數面為空 ⇒ 涵蓋關係恆真通過（fail-open）")
+        self.assertTrue(line_face, "行數面為空 ⇒ 涵蓋關係會把每一支都判成缺口")
+        self.assertIn(
+            _SELF_REL.rsplit("/", 1)[-1], line_face,
+            "行數面連本檔都沒數到——glob 寫壞了？",
+        )
+
 
 # ================================================================ ADR §9.1／掃描維度 常設自檢（SC-*）
 # 🔴 本段落地的是 **SA-R67-03**：`ADR-XPLAT-002` §9.1 與 `CrossPlatform_Scan_Dimensions.md`
@@ -1949,8 +2144,9 @@ class TestGuardFileCountShrinkOnlyRatchet(unittest.TestCase):
 # discover 收集面內 ⇒ 自動被 pre-push root-infra leg 與三支 CI 消費）。
 #
 # 宿主選擇（§9.1 末段已具名指派，本段沿用）：**擴充本檔而非新增鎖檔**——
-# `TestGuardFileCountShrinkOnlyRatchet` 的護欄層檔數棘輪對 `tools/tests/test_*.py` 只准降不准升
-# （DEF-101-561③），且 `ADR-XPLAT-002` §4.2 rule 1 明文「不要一個 finding 一支鎖」。
+# `TestGuardLayerRatchet` 的護欄層棘輪要求 `tools/tests/` 的**淨行數**不得上升
+# （DEF-101-561③；新增檔案本身不違規，淨額上升才違規），
+# 且 `ADR-XPLAT-002` §4.2 rule 1 明文「不要一個 finding 一支鎖」。
 #
 # 🔴 從 shell 規格搬進 Python 時**刻意改掉的語意**（照抄原形態會得到假鎖）：
 #   (1) SC-7 的規格形態尾巴掛著 `| grep .`，因為 `comm` **無論有無差集都 exit 0**，直接讀它的
@@ -3279,7 +3475,7 @@ def live_triplet() -> Triplet:
     )
 
 
-# 🔴 凍結對＝R75 落地當回合的現查值，**不做任何推算**（同 `_FROZEN_GUARD_FILE_COUNT` 的
+# 🔴 凍結對＝R75 落地當回合的現查值，**不做任何推算**（同 `_FROZEN_GUARD_LINES` 的
 # 「填實測值」紀律：R57 三度用算式推 `MIN_TESTS`，三度當場與實況不符）。
 # 這兩個常數是本檔對該量的**唯一宣告**、不是散文複本；與現況的一致性由
 # `test_the_frozen_pair_matches_the_live_values` 強制（多退少補都紅），所以「凍結值停在舊
@@ -3370,7 +3566,7 @@ class TestScanHTripletIsTheLiveCriterion(unittest.TestCase):
         """自緊：凍結對必須與現況逐字相等（多退少補都紅）。
 
         WHY：只擋「上升」的棘輪會累積餘裕——UEP／AC 降下來之後若不同步下修凍結值，之後可以
-        無聲地把它們「加回」那個舊高點。這與 `test_frozen_guard_count_matches_the_worktree`
+        無聲地把它們「加回」那個舊高點。這與 `guard_line_problems` 的 `[基準過時]` 那一款
         是同一個形狀、同一個理由。
         """
         self.assertEqual(
@@ -3439,5 +3635,152 @@ class TestScanHTripletIsTheLiveCriterion(unittest.TestCase):
                 )
 
 
+# ══════════════════════════════════════════════════════════════════ R78 ARCH-02：重釘入口
+# 🔴 缺陷本體：棘輪的紅燈訊息（`guard_line_problems` 的 `[基準過時]`／`glc_growth_problem`）
+# 逐字教操作者跑 `--print-guard-lines`，而 R77 從未實作它——skeptic 實跑 rc=2
+# `unrecognized arguments`，AST 側證全檔沒有任何 `argparse`。後果不是「少個小工具」：
+# 棘輪一紅，唯一出路變成**逐列手改整張凍結表**，而那樣改的人不會順手算淨額
+# ⇒ 這條缺口與 ARCH-01（淨額無處可見）是同一件事的兩端。
+#
+# 刻意**不引入 argparse**：本檔是 unittest 檔，多一個 parser 就多一條會與 `unittest.main()`
+# 搶 `sys.argv` 的路徑。旗標集合是一個 frozenset，判準讀它。
+_DISPATCHED_FLAGS: frozenset[str] = frozenset({"--print-guard-lines"})
+#: 「本檔自己被指名要怎麼跑」的形狀——只認**指名本檔**的呼叫，別的工具的旗標不歸本判準管。
+_SELF_INVOCATION_RE = re.compile(r"test_adr_xplat001_c1c2_lock\.py\s+(--[a-z][a-z0-9-]*)")
+
+
+def self_invocation_flag_problems(text: str, dispatched: Iterable[str]) -> list[str]:
+    """**雙向**：訊息教的旗標必須跑得動，宣告的旗標必須有人教（空＝通過）。
+
+    (1) `[死指令]` 文字裡出現「指名本檔 ＋ 一個旗標」的呼叫，而那個旗標沒被分派
+        ⇒ 照著做會拿到 rc=2。這是 R78 ARCH-02 的修前實況。
+        （本段刻意不示範一個假旗標字面：掃描面就是本檔全文，示範會讓活體判準自己轉紅。）
+    (2) `[孤兒旗標]` 分派了卻沒有任何一行教人用 ⇒ 沒有消費者的入口會靜默腐爛，
+        而下一個人讀紅燈訊息時仍然找不到路（同一個病的另一面）。
+
+    誠實劃界：本判準保證「旗標名對得上」，**不保證那個旗標印出來的東西是對的**——
+    後者由 `test_the_repin_command_emits_a_pastable_table` 真跑一次來證。
+    """
+    named = set(dispatched)
+    mentioned = set(_SELF_INVOCATION_RE.findall(text))
+    problems = [
+        f"[死指令] 文字教人跑 `{flag}`，但 __main__ 沒有分派它——照著做會拿到 rc=2 "
+        f"`unrecognized arguments`（R78 ARCH-02 的修前實況）"
+        for flag in sorted(mentioned - named)
+    ]
+    problems += [
+        f"[孤兒旗標] `{flag}` 已分派卻沒有任何一行教人用——入口會靜默腐爛"
+        for flag in sorted(named - mentioned)
+    ]
+    return problems
+
+
+def _print_guard_lines() -> None:
+    """印出可直接貼回 `_FROZEN_GUARD_LINES` 的 dict 字面 ＋ 淨額 ＋ 稽核列草稿。
+
+    三段輸出對應重釘要動的三個地方，照貼即可：淨額註解行、新的凍結表、
+    `_GUARD_LINES_REPIN_LOG` 的新列（理由欄留空給人填——**刻意不代填**，
+    ARCH-01 要的就是有人為那個淨額負責）。
+    """
+    current = guard_lines_in_worktree()
+    old, new = sum(_FROZEN_GUARD_LINES.values()), sum(current.values())
+    print(f"# 淨額 {old}→{new} ({new - old:+d})")
+    print("_FROZEN_GUARD_LINES: dict[str, int] = {")
+    for name, n in sorted(current.items()):
+        print(f'    "{name}": {n},')
+    print("}")
+    print(f'# _GUARD_LINES_REPIN_LOG 新列：("R<n>", {old}, {new}, {new - old:+d}, "<理由>"),')
+    for label, items in (("逃逸", guard_surface_escapes()), ("涵蓋缺口", guard_baseline_gaps())):
+        if items:
+            print(f"# [{label}] {items}")
+
+
+class TestRepinCommandIsReal(unittest.TestCase):
+    """R78 ARCH-02：棘輪紅燈訊息裡具名的重釘指令必須真的跑得動。
+
+    WHY 這一類存在：一道「紅了卻沒有出路」的棘輪，實務上等同一道會被關掉的棘輪。
+    R77 的紅燈訊息教人跑一個不存在的旗標，操作者拿到 rc=2 之後唯一的路是逐列手改整張
+    凍結表——而那樣改的人不會順手算淨額（ARCH-01 的成因）。
+    """
+
+    def test_every_flag_this_file_tells_you_to_run_is_dispatched(self) -> None:
+        """雙向綁定：訊息教的旗標必須被分派，分派的旗標必須有人教。"""
+        text = _HERE.read_text(encoding="utf-8")
+        problems = self_invocation_flag_problems(text, _DISPATCHED_FLAGS)
+        self.assertEqual(problems, [], "本檔的自呼叫指令與 __main__ 不符：\n  "
+                         + "\n  ".join(problems))
+
+    def test_the_flag_scanner_is_not_vacuous(self) -> None:
+        """自錨：抽取器至少要在本檔真的抓到一個自呼叫旗標，否則上一支對任何內容恆綠。"""
+        found = set(_SELF_INVOCATION_RE.findall(_HERE.read_text(encoding="utf-8")))
+        self.assertTrue(found, "本檔找不到任何「指名自己 ＋ 旗標」的行 ⇒ 抽取器已空轉")
+        self.assertTrue(found & _DISPATCHED_FLAGS)
+
+    def test_a_dead_command_in_a_red_message_is_red(self) -> None:
+        """注入＝修前實況：訊息教一個沒被分派的旗標 ⇒ `[死指令]` 必紅。
+
+        🔴 合成字串刻意**接起來**而不是寫成一個字面：本判準的掃描面就是本檔全文，
+        寫成完整字面會讓上面那支活體測試在本檔裡抓到這個假旗標而紅（自我違規）。
+        """
+        text = "重釘：python tools/tests/" + _HERE.name + " --no-such-flag"
+        problems = self_invocation_flag_problems(text, _DISPATCHED_FLAGS)
+        self.assertTrue(any("[死指令]" in p for p in problems), problems)
+        self.assertTrue(any("--no-such-flag" in p for p in problems), problems)
+
+    def test_an_undocumented_dispatched_flag_is_red(self) -> None:
+        """注入②：分派了卻沒人教 ⇒ `[孤兒旗標]` 必紅（同一個病的另一面）。"""
+        problems = self_invocation_flag_problems("", {"--print-guard-lines"})
+        self.assertTrue(any("[孤兒旗標]" in p for p in problems), problems)
+
+    def test_another_tools_flag_is_not_this_locks_business(self) -> None:
+        """對照組：別的工具的旗標不歸本判準管（誤報的鎖最後一定被整道關掉）。"""
+        problems = self_invocation_flag_problems(
+            "現查：python tools/check_script_parity.py --print-collapse", _DISPATCHED_FLAGS)
+        self.assertFalse(
+            [p for p in problems if "[死指令]" in p],
+            f"別的工具的旗標被誤判成本檔的死指令：{problems}")
+
+    def test_the_repin_command_emits_a_pastable_table(self) -> None:
+        """端到端真跑：rc 必須是 0，且輸出的 dict 字面必須 `ast.literal_eval` 得回來。
+
+        🔴 不用 mock：ARCH-02 的病灶就是「訊息宣稱的東西沒人真的跑過」，用 mock 驗證
+        等於再犯一次。子行程刻意帶 `PYTHONUTF8=1`——本檔的消費者含 console codepage 950
+        的 Windows 排程環境，那裡預設編碼會把輸出讀成亂碼（本 repo 已為此付過學費）。
+        """
+        import os  # noqa: PLC0415
+        import subprocess  # noqa: PLC0415
+
+        env = {**os.environ, "PYTHONUTF8": "1"}
+        proc = subprocess.run(
+            [sys.executable, str(_HERE), "--print-guard-lines"],
+            capture_output=True, text=True, encoding="utf-8", env=env, check=False)
+        self.assertEqual(
+            proc.returncode, 0,
+            f"重釘指令實跑失敗（rc={proc.returncode}）：{proc.stderr[-800:]}")
+        body = proc.stdout
+        self.assertRegex(body.splitlines()[0], r"^# 淨額 \d+→\d+ \([+-]\d+\)$")
+        self.assertIn("_GUARD_LINES_REPIN_LOG 新列：", body)
+        start = body.index("{")
+        end = body.index("\n}") + 2
+        table = ast.literal_eval(body[start:end])
+        self.assertEqual(
+            table, guard_lines_in_worktree(),
+            "印出來的表與現況不符 ⇒ 貼回去也還是錯的")
+
+
 if __name__ == "__main__":  # pragma: no cover
-    unittest.main(verbosity=2)
+    # R78：`--print-guard-lines` 的輸出含中文（淨額註解行與稽核列草稿），而
+    # `test_subprocess_encoding_hygiene` 判準四要求「被當成 Python child 起的檔必須自帶
+    # UTF-8 stdio 保護」——否則非 CJK locale 逃脫成 \uXXXX、非 UTF-8 locale 給亂碼、
+    # stdout 更是 errors='strict' 直接崩潰。
+    # 🔴 刻意放在 `__main__` 內而非模組層：本檔被當測試模組 import 時**不付**
+    # `_stdio_utf8` 的副作用代價（同檔既有註解已載明那個代價是刻意迴避的），
+    # 只有真的被當 child 起來印東西時才需要它。也刻意**不用**就地 reconfigure ——
+    # 那會讓 `_FROZEN_STDIO_FORCE_TREES['tools']` 這個「複本數只准變少」的棘輪 +1，
+    # 而這裡明明有唯一實作可用。
+    import _stdio_utf8  # noqa: F401
+    _flags = [a for a in sys.argv[1:] if a.startswith("--")]
+    if "--print-guard-lines" in _flags:
+        _print_guard_lines()
+    else:
+        unittest.main(verbosity=2)

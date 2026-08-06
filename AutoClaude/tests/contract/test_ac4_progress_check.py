@@ -33,6 +33,8 @@ import datetime as _dt
 import json
 from pathlib import Path
 
+import pytest
+
 from tools.ac4_progress_check import (
     OBSERVATION_DAYS,
     OBSERVATION_REQUIRED_RUNS,
@@ -42,6 +44,23 @@ from tools.ac4_progress_check import (
     load_history,
     sort_by_timestamp,
 )
+
+
+@pytest.fixture(autouse=True)
+def _isolate_p95_threshold_env(monkeypatch: pytest.MonkeyPatch) -> None:
+    """把本檔的判定固定在**預設**門檻上；完整 WHY 見
+    `AutoClaude/tests/tools/test_ac4_progress_check.py` 內同名 fixture。
+
+    一句話版：門檻由 env 解析、strict 未設時回退 legacy
+    `AUTOCLAUDE_TEST_P95_THRESHOLD_MS`，而 nightly／PG 全開的開發環境都會 export
+    它（80ms），使本檔 case 以與受測邏輯無關的理由變紅（2026-08-07 實測 1 紅）。
+    """
+    for name in (
+        "AUTOCLAUDE_STRICT_P95_THRESHOLD_MS",
+        "AUTOCLAUDE_TEST_P95_THRESHOLD_MS",
+        "AUTOCLAUDE_OBSERVATION_P95_THRESHOLD_MS",
+    ):
+        monkeypatch.delenv(name, raising=False)
 
 
 def _record(

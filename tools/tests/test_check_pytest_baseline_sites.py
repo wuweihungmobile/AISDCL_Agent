@@ -149,6 +149,46 @@ class TestScan(unittest.TestCase):
         self.assertEqual(m.scan([ssot, ok], ssot), [])
 
 
+class TestPairShorthandForm(unittest.TestCase):
+    """案 12~14（R78 QA-02）：計數簡寫 `NNNN/NNN` 形態。
+
+    WHY：`tools/lib/baseline_origin.py` 的註解把三支直譯器的計數簡寫成斜線對、不寫
+    `passed`／`skipped` 字樣，於是原判準（關鍵字＋數字）整類漏接——那一筆在磁碟上錯了
+    兩輪零訊號，且**把該檔加進 `_SCAN_FILES` 也修不好**（形態不匹配才是根因）。三案分別
+    釘住：真缺陷形態要紅／脈絡閘外的編號對不得誤殺／日期形狀不得誤殺。
+    """
+
+    def test_pair_shorthand_in_tool_comment_is_flagged(self) -> None:
+        """案 12：真缺陷的原始形狀（工具註解裡的三組斜線對）→ 必須紅。"""
+        ssot = _write_tmp(_SSOT_OK)
+        bad = _write_tmp(
+            "# `.venv` 4017/160、pyenv-win 4032/145、出廠 cleanvenv 3919/224。\n",
+            name="pair_site.py",
+        )
+        problems = m.scan([ssot, bad], ssot)
+        self.assertEqual(len(problems), 1, problems)
+        self.assertIn("pair_site.py:1", problems[0])
+
+    def test_numbered_pairs_without_context_word_are_not_flagged(self) -> None:
+        """案 13（誤殺下界）：`improving_100/101`／`Gap-042/048` 無環境脈絡字 → 不命中。
+
+        脈絡閘不是為了讓現況通過：落地前對真實掃描面實測，拿掉它會誤殺 4 筆編號對，
+        而被迫在無關的行貼豁免標記會讓標記本身貶值。
+        """
+        ssot = _write_tmp(_SSOT_OK)
+        clean = _write_tmp(
+            "後續 improving_100/101 等輪持續累積（現行基線見 ONBOARDING.md §7）\n"
+            "跨 Session 計數器持久化（Gap-042/048）：4 個 counter 寫入 checkpoint\n"
+        )
+        self.assertEqual(m.scan([ssot, clean], ssot), [])
+
+    def test_dates_are_not_mistaken_for_count_pairs(self) -> None:
+        """案 14（誤殺下界）：日期 `2026/08/07` 即使同行有 pytest 字樣也不得命中。"""
+        ssot = _write_tmp(_SSOT_OK)
+        clean = _write_tmp("2026/08/07 於 .venv 重跑 pytest 全套，結果見 SSOT。\n")
+        self.assertEqual(m.scan([ssot, clean], ssot), [])
+
+
 class TestRealRepoConfigPinning(unittest.TestCase):
     """案 11：守門自身組態釘選（ARCH-R13-REV-1/QA-R13-2）。
 
@@ -172,6 +212,10 @@ class TestRealRepoConfigPinning(unittest.TestCase):
                 # 數百支且從未翻紅。本鎖同步擴充（否則加了掃描面卻沒有 roster 鎖，
                 # 等於把新加的那一項留在「刪掉也沒訊號」的狀態）。
                 "docs/AISDLC_Agent_UserGuide.md",
+                # R78（QA-02）：掃描面此前清一色 `.md`，而量測值最會被就地寫下的地方是
+                # 讀寫基線的那一層工具原始碼。兩支一起收（只收被抓到的那一支＝個案修法）。
+                "tools/lib/baseline_origin.py",
+                "tools/sync_onboarding_baselines.py",
             },
         )
         self.assertEqual(m._SSOT_FILE, "ONBOARDING.md")

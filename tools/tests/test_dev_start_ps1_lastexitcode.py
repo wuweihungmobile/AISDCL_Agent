@@ -17,8 +17,9 @@ dot-source 與 `$LASTEXITCODE` 的語言層行為一致，故不比照
 # 第二部分（R67-C17 併入）：tools/dev_start.sh 的 zsh／bash 實跑載具
 
 **為何併進本檔而不新開一支**：`DEF-101-561③`（由
-`test_adr_xplat001_c1c2_lock.py::TestGuardFileCountShrinkOnlyRatchet` 機械強制）明文
-禁止在 `tools/tests/` 新增鎖檔、只准「把新判準擴充進既有鎖檔」。而本檔正是 dev_start
+`test_adr_xplat001_c1c2_lock.py::TestGuardLayerRatchet` 機械強制）要求
+「把新判準擴充進既有鎖檔」（🔴 R78 ARCH-03 訂正：R67 當時它量的是**檔數**、語意是
+「禁止新增」；R77 起改量逐檔行數的**淨額**，新增檔案本身不違規）。而本檔正是 dev_start
 兩支殼「被 source／dot-source 時如何傳 rc」的既有鎖檔——上面第一部分的緣起，逐字就是
 「對等的 `tools/dev_start.sh` 用 `return 1` 正確傳遞失敗」這句**從未被機械驗證過**的
 對照宣稱。第二部分把那句話變成真跑出來的事實，是同一條軸上的補完，不是雜物。

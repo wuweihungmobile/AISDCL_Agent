@@ -8,57 +8,66 @@ macOS/Linux 對等：tools/run_act.sh
   收斂模式）。本檔只做：確認直譯器 → 參數映射 → 轉呼叫核心 → 傳遞 exit code。介面
   （-Job / -List / -DryRun）與收斂前完全相容。
 
-對應 GitHub push/PR 觸發的 gating jobs（autoclaude-ci.yml）：
-  test               pytest + LOC budget + import-linter（主閘門）
-  claude-md-budget   CLAUDE.md <= 400 行 + snapshot freshness
-  equivalence        equivalence snapshot（needs: test）
-  pg-contract        PG 契約測（含 postgres service；CI 標 continue-on-error）
+🔴 本檔刻意只留「這一版與上一版差在哪」；jobs 清單、act 與雲端的落差、實跑帳本語意等
+  完整說明一律住核心 run_act_core.py 的檔頭（本檔受 100 行薄殼上限，塞說明會擠爆它）。
 
-nightly/排程 job（mutation / pg-e2e / perf）以 `if: schedule` 排除，push 事件不會觸發，
-本地請改用 tools/run_local_nightly.ps1。
-
-🔴 射程（本輪實測後補上；先前這份說明讀起來像「act ＝ 地端跑真 CI」，沒有任何限定詞）：
-  上面那四個 job 只是 autoclaude-ci.yml 一支的內容。monorepo 根層現有 11 支 workflow
-  共 25 個 job——`-List` 印的 act 表只有 9 個，其餘 16 個（含 root-infra-ci.yml 這支
-  承載根層全部守門的、以及兩支 compat-CI 的 nightly 告警鏈）不在預設射程內。核心
-  run_act_core.py 已有 `--workflow <路徑>` 可指到任何一支，但本薄殼**尚未**轉這個旗標：
-  它的正規化內容 hash 釘在 tools/check_wrapper_thinness.py，補參數會改 hash，而該檔
-  本輪由另一個修復包擁有 ⇒ 補參數與更新釘選必須同一個 commit，不能分兩包做。
-
-  在補上之前，Windows 側指定 workflow／事件的唯一入口是**環境變數**（兩平台皆生效）：
-    $env:RUN_ACT_WORKFLOW = '.github/workflows/root-infra-ci.yml'
-    powershell -ExecutionPolicy Bypass -File AutoClaude/tools/run_act.ps1 -Job root-infra
-  或直接呼叫核心（不經薄殼，無此限制）：
-    python AutoClaude/tools/run_act_core.py --workflow <路徑> --job <job>
-
-🔴 事件（本輪實測踩到的假綠）：本殼與核心一律以 `push` 事件呼叫 act，而根層 11 支
-  workflow 裡有 5 支的 `on:` **不含 push**（arch-fitness／artifact-cleanup／drift-daily／
-  fsm-chaos-nightly／pg-e2e-on-label）。act 對事件對不上的處置是「不跑任何 job 然後回
-  rc=0」——沒有紅字，只是什麼都沒發生。核心的 preflight 現在會把它擋成 rc=1 並指路；
-  要真的跑那 5 支，請設 $env:RUN_ACT_EVENT（例 'pull_request'）或直接用核心的 --event。
-
-  `-List` 在未指定 workflow 時會在 act 那張表之後另印一張**全庫 job 盤點**，逐行標出
-  每個 job 在本機 act 有無通道——四個 non-ubuntu 的 job 結構上零通道（見盤點輸出）。
+🔴 SD-06（本輪修的技術債）：R77 給 `.sh` 接上 `--workflow`／`--event`（該側 "$@" 全轉），
+  本檔卻沒跟上 ⇒ Windows（本 repo 主要開發平台）的薄殼指不到 11 支 workflow 裡的 10 支。
+  而 check_script_parity.py／check_wrapper_thinness.py **雙雙 rc=0**：hash 釘選只問「這份
+  檔案有沒有變」，從不把兩側互相比較（LOCKBLIND）。修法三件同批：① 本檔補齊參數；
+  ② 同 commit 更新 hash 釘選；③ 補判準讓下一次落差自己轉紅——
+  tools/tests/test_act_local_runner_image.py::TestRunActShellFlagParity（核心 argparse
+  宣告的每個長旗標，兩側殼都必須到得了）。只補旗標不補判準，同型缺陷會再來一次。
 
 .PARAMETER Job
 只跑單一 job（例：test）。省略則跑整份 push 圖（與 GitHub 在 push 時等價）。
 
+.PARAMETER Workflow
+要跑哪一支 workflow（repo 相對路徑）。省略＝autoclaude-ci.yml（零行為變更）。
+
+.PARAMETER EventName
+模擬哪個 GitHub 事件（預設 push）；命令列寫 `-Event` 亦可（Alias）。無該事件觸發的
+workflow 不指定時，act 會「零執行卻回 rc=0」＝假綠，核心 preflight 會擋成 rc=1。
+🔴 變數名刻意不是 `$Event`：那是 PowerShell **自動變數**，拿來當參數名會遮蔽 runtime
+語意（PSScriptAnalyzer `PSAvoidAssignmentToAutomaticVariable`）。`[Alias]` 讓「對外與
+--event 對稱」與「不碰自動變數」同時成立——鐵律三「這個名字在另一個環境是什麼意思」。
+
 .PARAMETER List
-列出 workflow 所有 job 後結束（act -l）。
+列出 job（act -l）＋全庫盤點：每個 job 落在 ✅ 已實跑通過／🟡 可解析未實跑／
+❌ 結構上無本機通道／⚠️ 需 -Event 哪一格，逐行附替代驗證出口。
 
 .PARAMETER DryRun
-傳 -n，只解析不實際執行（驗證 workflow 語法 / job 圖）。
+傳 -n，只解析不執行。🔴 dry-run 全綠只證明 YAML 寫對——R77 實測 root-infra dry-run
+rc=0、真跑第 3 步 rc=127。
+
+.PARAMETER BuildImage
+（重）建本機 act runner 映像（tools/act/Dockerfile：base ＋ pwsh ＋ gh）後結束。
+
+.PARAMETER NoCache
+搭配 -BuildImage：不吃 docker layer cache（改了 Dockerfile 的 ARG 版本號時必用）。
+
+.PARAMETER VerifyAll
+🔴 推 GitHub 前的一鍵本機全驗：跑得動的 job 全部真跑並記帳，跑不動的逐個列出替代
+驗證出口；任一支「該跑而失敗」即回非 0。
 
 .EXAMPLE
-  powershell -ExecutionPolicy Bypass -File tools/run_act.ps1 -Job test          # 最快：只跑主測試閘門
-  powershell -ExecutionPolicy Bypass -File tools/run_act.ps1                     # 完整：跑 push 全部 job（含 PG 契約）
-  powershell -ExecutionPolicy Bypass -File tools/run_act.ps1 -List               # 看有哪些 job
+  powershell -ExecutionPolicy Bypass -File tools/run_act.ps1 -BuildImage   # 先備妥 runner 映像
+  powershell -ExecutionPolicy Bypass -File tools/run_act.ps1 -VerifyAll    # 推送前一鍵本機全驗
+  powershell -ExecutionPolicy Bypass -File tools/run_act.ps1 -Job test     # 最快：只跑主測試閘門
+  powershell -ExecutionPolicy Bypass -File tools/run_act.ps1 `
+      -Workflow .github/workflows/root-infra-ci.yml -Job root-infra        # 指定別支 workflow
 #>
 [CmdletBinding()]
 param(
   [string]$Job,
+  [string]$Workflow,
+  [Alias('Event')]
+  [string]$EventName,
   [switch]$List,
-  [switch]$DryRun
+  [switch]$DryRun,
+  [switch]$BuildImage,
+  [switch]$NoCache,
+  [switch]$VerifyAll
 )
 
 $ErrorActionPreference = 'Stop'
@@ -73,7 +82,12 @@ if (-not (Test-IsRealPython -CandidateName 'python')) {
 $env:PYTHONUTF8 = '1'
 $CliArgs = @()
 if ($Job) { $CliArgs += @('--job', $Job) }
+if ($Workflow) { $CliArgs += @('--workflow', $Workflow) }
+if ($EventName) { $CliArgs += @('--event', $EventName) }
 if ($List) { $CliArgs += '--list' }
 if ($DryRun) { $CliArgs += '--dry-run' }
+if ($BuildImage) { $CliArgs += '--build-image' }
+if ($NoCache) { $CliArgs += '--no-cache' }
+if ($VerifyAll) { $CliArgs += '--verify-all' }
 & python (Join-Path $PSScriptRoot 'run_act_core.py') @CliArgs
 exit $LASTEXITCODE

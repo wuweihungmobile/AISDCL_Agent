@@ -44,6 +44,32 @@ WHY
 撰寫。真正要防的是**守衛靜默失效**，exit 1 已經滿足——它不阻斷，但會出聲。
 這條「rc==2 就必須配窄 matcher」的對應關係由
 `tools/tests/test_check_hooks_liveness.py` 機械釘住，不靠本段散文。
+
+R78：三條規則的鑑別力修復（四方複審 SA-01／SD-01／QA-01／SD-02）
+--------------------------------------------------------------
+上一版三條規則各自被實測穿透，而且**兩個方向都破**：
+
+· **漏擋**：`| select -First 5` 全數放行、`| Select-Object -First 5` 全數擋下
+  （12 組別名 vs 全名、其餘字元逐字相同，12/12 不對稱）。`select` 正是「提前結束
+  管線」最常見的寫法 ⇒ 這道鎖擋掉的剛好是沒人會寫的那一半。
+  同理 `cd` 只認行首（`&&`／`||`／`|`／`{` 之後全逃）、`bash` 只認特定字面
+  （`bash.exe` 逃）、rc 讀取只看緊鄰下一句（中間插一句就逃）。
+· **誤擋**：`"rc=$LASTEXITCODE" | Out-File` 完全安全卻被硬擋（rc 在管線**之前**
+  就展開了，判準卻只看「同一句有沒有同時出現」不看先後）；違規形態只住在
+  引號／here-string 內時（寫探針、寫文件、重現缺陷——最常見的正當情境）三條全誤擋。
+
+修法的共同形狀是**先把「不是可執行結構」的區段拿掉，再比對**，而不是把個案
+一個一個加進正則。核心是 `mask_regions()` 的兩種遮蔽（見該函式 docstring）：
+
+  · `keep_expandable=False`（structural）＝指令**結構**面：引號字串、here-string、
+    註解全部換成等長空白。管線在哪、指令字在哪，只准從這一面讀。
+  · `keep_expandable=True`（expandable）＝**變數展開**面：只遮蔽字面量
+    （`'…'`／`@'…'@`／註解），保留 `"…"`／`@"…"@`——PowerShell 在那裡面**真的會**
+    展開 `$LASTEXITCODE`，所以那是一次真的 rc 讀取。
+
+兩面等長、位置一一對應，於是「管線在第幾個字元、rc 讀在第幾個字元」可以跨面比較——
+規則①的先後順序判定就是靠這個，QA-01 的誤擋也是靠這個消掉的。這**不是同一份東西的
+兩份複本**：它們對應 PowerShell 的兩種不同語意，合成一面就必然在某個方向上判錯。
 """
 
 from __future__ import annotations
@@ -84,15 +110,68 @@ OWN_TOOL = "PowerShell"
 #: 豁免卻沒有被壓下的違規」而轉紅（本輪實測撞過一次，兩道鎖的合法動作互為違規）。
 _EXEMPT_RE = re.compile(r"#\s*ps-lint-ok:\s*\S")
 
-#: 管線接進這些 cmdlet 之後再讀 rc，才算命中（不是看到任何 `|` 都算）。
+#: 🔴 **事中攔截（本檔）與事後量測（`tools/probe/audit_session.py`）共用的判準字面**。
+#: 兩邊各存一份**逐字相同**的複本——理由與上面 `_stdio_utf8` 那一處同源：本檔由
+#: `runpy.run_path` 起、`sys.path` 上既沒有 `tools/` 也沒有 `.claude/hooks/`，import 期
+#: 爆掉正是 fail-open 契約絕不能發生的事，所以本檔只能是「被抄的那一份」，不能 import。
+#:
+#: 代價是真的發生過：R77 交付時，本檔的 cmdlet 清單有 `Tee-Object` 而探針那份沒有，
+#: 兩份零比對 ⇒ 同一條規則「攔得下、卻量不到」。既然結構上只能留複本，那就把複本的
+#: **一致性**變成會轉紅的事件：`tools/tests/test_check_hooks_liveness.py` 的
+#: `TestHookAndProbeShareOneCriterion` 兩向釘住——① 兩份字典字面相等；
+#: ② 同一批指令字串餵進兩邊，判定必須一致（後者連「不經由本字典的第二份複本」也抓得到）。
+SHARED_PATTERN_SOURCE: dict[str, str] = {
+    # 管線接進這些 cmdlet 之後再讀 rc，才算命中（不是看到任何 `|` 都算）。
+    # 🔴 R78／SA-01：**內建別名與全名同列**。上一版只列全名，實測 12 組「別名 vs
+    # 全名、其餘字元逐字相同」的配對 **12/12 不對稱**（`| select -First 5` 放行、
+    # `| Select-Object -First 5` 擋下）——而 `select` 正是「提前結束管線」最常見的
+    # 寫法，等於這道鎖擋掉的剛好是沒人會寫的那一半。每個別名自帶右邊界
+    # `(?![\w-])` 以免吃到 `selection`／`sortable`；`%` 與 `?` 另用 `(?=\s|\{|$)`，
+    # 避免誤傷 `$_ % 2` 那類真正的運算子用法。
+    "pipe-cmdlets": (
+        r"(?:Select-Object|Select-String|Out-\w+|Format-\w+|Sort-Object"
+        r"|Measure-Object|ForEach-Object|Where-Object|Tee-Object"
+        r"|head|tail|findstr)(?![\w-])"
+        r"|(?:select|sls|sort|measure|foreach|where|ft|fl|oh|tee)(?![\w-])"
+        r"|[%?](?=\s|\{|$)"
+    ),
+    # 裸 cd／Set-Location 的**動詞面**（不含錨點——兩邊各自接自己的邊界）。
+    # 🔴 R78／SD-01：補上 `chdir`／`sl` 兩個內建別名；並**移除 `(?!-)`**——
+    # `Set-Location -Path X` 與 `cd X` 是同一件事，上一版只因為下一個字元是 `-`
+    # 就整條放行＝一步就繞過。
+    "naked-cd": r"(cd|chdir|sl|Set-Location)(?![\w-])\s+\S",
+    # 裸 bash 的**指令字面**（`bash` / `bash.exe`）。刻意只到動詞為止：「跑的是不是
+    # .sh」由兩邊各自補上（hook 要在遮蔽過的結構面找指令位置、回原文找 `.sh`，探針
+    # 則就地把兩者接成一條），見各自的組裝處。
+    # 🔴 R78／SD-01：上一版只認 `bash` 字面，`bash.exe` 一步就繞過。
+    "bare-bash-sh": r"bash(?:\.exe)?(?![\w.-])",
+}
+
+#: 兩邊共用的字面之外，本檔自己的**邊界**。上一版三條規則的邊界各有一個一步繞過口：
+#: cd 只認 `^`（`&&`／`||`／`|`／`{` 之後全逃）、bash 只認裸字面。統一改成「語句／
+#: 管線／鏈接／區塊起頭」這個集合——它們是 PowerShell 裡「下一個指令從這裡開始」的
+#: 全部入口，比逐個補個案穩。
+_CMD_START = r"(?:^|[;\n|&{}()])\s*"
+
 _PIPE_INTO_RE = re.compile(
-    r"\|\s*(Select-Object|Select-String|Out-\w+|Format-\w+|Sort-Object"
-    r"|Measure-Object|ForEach-Object|Where-Object|Tee-Object|head|tail|findstr)",
-    re.IGNORECASE,
+    r"\|\s*(" + SHARED_PATTERN_SOURCE["pipe-cmdlets"] + r")", re.IGNORECASE
 )
 _RC_READ_RE = re.compile(r"\$LASTEXITCODE", re.IGNORECASE)
-_NAKED_CD_RE = re.compile(r"^\s*(cd|Set-Location)\b\s+(?!-)", re.IGNORECASE)
-_BARE_BASH_RE = re.compile(r"(?<![\w/\\'\"-])bash\s+[^\n]*\.sh")
+#: 「rc 已被重新建立」——呼叫運算子 `&` 或一個 `.exe`。用途見 `_rc_after_pipe()`：
+#: 截斷管線造成的污染會**一直延續**，但 hint 教的正解 `& <exe> <args>; "rc=$LASTEXITCODE"`
+#: 本來就會重設 rc，不該被前面某一句的管線牽連。刻意窄（只認這兩種）＝寧可偏向擋，
+#: 因為「同一個指令字串裡既有截斷管線又要讀 rc」本身就是這條規則要消滅的混寫。
+_RC_RESET_RE = re.compile(r"(?<![&\w])&(?!&)\s*\S|\.exe(?![\w])", re.IGNORECASE)
+_NAKED_CD_RE = re.compile(
+    _CMD_START + SHARED_PATTERN_SOURCE["naked-cd"], re.IGNORECASE
+)
+_BARE_BASH_RE = re.compile(
+    _CMD_START + SHARED_PATTERN_SOURCE["bare-bash-sh"], re.IGNORECASE
+)
+#: 規則③的佐證面：真的在跑一支 `.sh`。刻意**對原文**比對而不是對遮蔽面——
+#: `bash "tools/x.sh"` 的路徑住在引號裡，遮蔽面上看不到 `.sh`。指令位置從結構面讀
+#: （所以 `$doc = 'bash x.sh'` 不會命中）、佐證從原文讀（所以引號路徑不會逃）。
+_SH_SCRIPT_RE = re.compile(r"\.sh(?![\w])", re.IGNORECASE)
 _FIND_GIT_BASH_RE = re.compile(r"Find-GitBash", re.IGNORECASE)
 
 _RC_HINT = (
@@ -114,17 +193,140 @@ _BASH_HINT = (
     "  出口：. \"$(git rev-parse --show-toplevel)/tools/lib/Find-GitBash.ps1\"; "
     "& (Find-GitBash) -n '<正斜線腳本路徑>'"
 )
+#: 🔴 出口寫在**第一行**（R78／SA-01 附帶）：上一版把它放在頁尾，第一次撞到的人
+#: 先讀到的是三段責備、最後才看到出口——而「窄守衛必須有出口」正是本檔的設計前提，
+#: 出口看不見等於沒有。
+_HEADER = (
+    "🔴 需要就地寫出這個形態？在指令內加行內豁免 `# ps-lint-ok: <理由>`（理由必填）"
+    "即放行——寫文件／寫探針／重現缺陷本來就會寫出違規形態，那不是違規。\n"
+    "以下是本次命中的項目：\n\n"
+)
 _FOOTER = (
-    "\n（刻意極窄：本守衛只擋這三件事。真的需要寫出該形態時，在指令內加行內豁免 "
-    "`# ps-lint-ok: <理由>` 即放行——誤報讓機制被關掉比漏擋更糟。"
-    "回歸鎖：tools/tests/test_check_hooks_liveness.py）"
+    "\n（刻意極窄：本守衛只擋這三件事，其餘一律放行——誤報讓機制被整個關掉，"
+    "比漏擋更糟。回歸鎖：tools/tests/test_check_hooks_liveness.py）"
 )
 
 
-def statements(command: str) -> list[str]:
-    """把指令切成語句（`;` 與換行）。刻意不解析引號——本檔是 lint 不是 parser，
-    切錯的代價由行內豁免出口承擔。"""
-    return [s for s in re.split(r"[;\n]", command)]
+def mask_regions(command: str, *, keep_expandable: bool) -> str:
+    """把「不是可執行結構」的區段換成**等長**空白：引號字串、here-string、註解。
+
+    等長是關鍵：遮蔽後與原字串**位置一一對應**，兩種遮蔽版本因此可以互相比位置
+    （規則①要同時知道「管線在第幾個字元」與「rc 讀在第幾個字元」）。換行刻意保留，
+    語句切割才不會被遮蔽改變。
+
+    兩種遮蔽對應 PowerShell 的兩種語意，**不是同一份東西的兩份複本**：
+
+    · `keep_expandable=False`（結構面）：`'…'`／`"…"`／`@'…'@`／`@"…"@`／`#…`／
+      `<#…#>` 全遮。裡面的 `|`／`cd`／`bash` 都不是指令結構，上一版對它們一律誤擋
+      （SD-02 實測三條規則全中），而那撞的是最常見的正當情境：寫探針、寫文件、
+      重現缺陷。
+    · `keep_expandable=True`（展開面）：只遮字面量（`'…'`／`@'…'@`／註解），保留
+      `"…"`／`@"…"@`——PowerShell 在那裡面**真的會**展開 `$LASTEXITCODE`，
+      `"rc=$LASTEXITCODE"` 是一次貨真價實的 rc 讀取。合成一面就必然在某個方向判錯：
+      全遮則規則①的正典案例整個消失（漏擋），全不遮則 SD-02 回來（誤擋）。
+
+    這仍然不是 parser（不處理子運算式巢狀、不管 escape 以外的引號規則）；它只需要
+    分得出「這段字元會被當成指令」還是「會被當成資料」。切錯的代價由行內豁免承擔。
+    """
+    out = list(command)
+    length = len(command)
+
+    def blank(start: int, end: int) -> None:
+        for index in range(start, min(end, length)):
+            if out[index] != "\n":
+                out[index] = " "
+
+    cursor = 0
+    while cursor < length:
+        head = command[cursor:cursor + 2]
+
+        if head in ("@'", '@"'):  # here-string：結尾必須是行首的 '@ ／ "@
+            quote = head[1]
+            close = command.find("\n" + quote + "@", cursor + 2)
+            end = length if close < 0 else close + 3
+            if not (keep_expandable and quote == '"'):
+                blank(cursor, end)
+            cursor = end
+            continue
+
+        if head == "<#":  # 區塊註解
+            close = command.find("#>", cursor + 2)
+            end = length if close < 0 else close + 2
+            blank(cursor, end)
+            cursor = end
+            continue
+
+        char = command[cursor]
+
+        # 行註解：`#` 只有在 token 起頭才起註解（`a#b` 是一個 token）。
+        if char == "#" and (cursor == 0 or command[cursor - 1] in " \t\r\n;|&({"):
+            close = command.find("\n", cursor)
+            end = length if close < 0 else close
+            blank(cursor, end)
+            cursor = end
+            continue
+
+        if char in "'\"":
+            scan = cursor + 1
+            while scan < length:
+                if char == '"' and command[scan] == "`":  # 反引號 escape
+                    scan += 2
+                    continue
+                if command[scan] == char:
+                    if scan + 1 < length and command[scan + 1] == char:  # '' ／ ""
+                        scan += 2
+                        continue
+                    break
+                scan += 1
+            end = min(scan + 1, length)
+            if not (keep_expandable and char == '"'):
+                blank(cursor, end)
+            cursor = end
+            continue
+
+        cursor += 1
+
+    return "".join(out)
+
+
+def statement_spans(masked: str) -> list[tuple[int, int]]:
+    """語句（`;` 與換行分隔）在**原字串座標系**上的 `[start, end)` 清單。
+
+    回位置而不是回切片：規則①要把「結構面找到的管線位置」與「展開面找到的 rc
+    位置」放在同一把尺上比大小，切片會讓兩面的座標對不起來。
+    """
+    spans: list[tuple[int, int]] = []
+    start = 0
+    for separator in re.finditer(r"[;\n]", masked):
+        spans.append((start, separator.start()))
+        start = separator.end()
+    spans.append((start, len(masked)))
+    return spans
+
+
+def _rc_after_pipe(structural: str, expandable: str) -> bool:
+    """規則①：**先後順序**與**跨語句污染**都算數。
+
+    上一版兩個方向都錯：
+    · 漏擋（SD-01）——只看「緊鄰的下一句」（`parts[index + 1]`），中間插任何一句
+      就逃出視窗，而 `$x = 1` 這種句子根本不會重設 `$LASTEXITCODE`，rc 照樣是髒的。
+      改成污染會**一直延續**到某一句真的重新發起呼叫（`_RC_RESET_RE`）為止。
+    · 誤擋（QA-01）——`"rc=$LASTEXITCODE" | Out-File` 是先展開變數再進管線，
+      rc 讀取發生在任何管線中斷**之前**，完全安全卻被硬擋，因為判準只問「同一句
+      有沒有同時出現」不問先後。改成比位置：rc 在管線**之後**才算命中。
+    """
+    contaminated = False
+    for start, end in statement_spans(structural):
+        pipe = _PIPE_INTO_RE.search(structural, start, end)
+        pipe_pos = pipe.start() if pipe else -1
+        for read in _RC_READ_RE.finditer(expandable[start:end]):
+            if contaminated or (pipe_pos >= 0 and start + read.start() > pipe_pos):
+                return True
+        if pipe_pos >= 0:
+            contaminated = True
+        elif _RC_RESET_RE.search(structural, start, end):
+            contaminated = False
+    return False
 
 
 def lint_command(command: str) -> list[str]:
@@ -133,28 +335,30 @@ def lint_command(command: str) -> list[str]:
     **不早退**：三條檢查全部跑完再一次回報。早退會讓第二、三條的訊號被第一條
     遮蔽，而遮蔽的方向是「看起來變乾淨」。
     """
+    # 豁免刻意比對**原文**：豁免理由本來就可能含 `'`（例如「don't」），先遮蔽再找
+    # 會讓那半行被當成未閉合字串吞掉，一個合法的豁免就此靜默失效——而那個失效方向
+    # 是誤擋，正是本檔最不能發生的那一種。
     if _EXEMPT_RE.search(command):
         return []
 
-    hits: list[str] = []
-    parts = statements(command)
+    structural = mask_regions(command, keep_expandable=False)
+    expandable = mask_regions(command, keep_expandable=True)
 
-    # ① 管線 × 讀 rc：同一句、或前一句管線後一句讀 rc。
-    for index, part in enumerate(parts):
-        pipes_here = bool(_PIPE_INTO_RE.search(part))
-        if not pipes_here:
-            continue
-        following = parts[index + 1] if index + 1 < len(parts) else ""
-        if _RC_READ_RE.search(part) or _RC_READ_RE.search(following):
-            hits.append(_RC_HINT)
-            break
+    hits: list[str] = []
+
+    # ① 管線 × 讀 rc（順序敏感 ＋ 跨語句污染）。
+    if _rc_after_pipe(structural, expandable):
+        hits.append(_RC_HINT)
 
     # ② 裸 cd／Set-Location（Push-Location／Pop-Location 不在此列）。
-    if any(_NAKED_CD_RE.search(part) for part in parts):
+    if _NAKED_CD_RE.search(structural):
         hits.append(_CD_HINT)
 
-    # ③ 裸 bash + .sh（已走 Find-GitBash SSOT 者放行）。
-    if _BARE_BASH_RE.search(command) and not _FIND_GIT_BASH_RE.search(command):
+    # ③ 裸 bash 跑 .sh（已走 Find-GitBash SSOT 者放行）。指令位置看結構面、
+    #    `.sh` 佐證看原文，理由見 `_SH_SCRIPT_RE`。
+    if (_BARE_BASH_RE.search(structural)
+            and _SH_SCRIPT_RE.search(command)
+            and not _FIND_GIT_BASH_RE.search(command)):
         hits.append(_BASH_HINT)
 
     return hits
@@ -217,7 +421,7 @@ def main() -> int:
         hits = lint_command(command)
         if not hits:
             return 0
-        sys.stderr.write("\n\n".join(hits) + _FOOTER + "\n")
+        sys.stderr.write(_HEADER + "\n\n".join(hits) + _FOOTER + "\n")
         return 2
     except Exception:  # noqa: BLE001 — fail-open 是刻意的，見模組 docstring 的 P0
         return 0

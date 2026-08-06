@@ -1517,7 +1517,8 @@ class TestNoPlatformDependentPathStringIdentity(unittest.TestCase):
 # R74 — 第五道判準：平台專屬環境變數的讀取必須帶平台守衛（PKG-4 C）
 # ══════════════════════════════════════════════════════════════════════════════
 # WHY（本檔第五道判準；與前四道同屬「跨平台寫法」家族，故沿用本檔的掃描根／豁免／
-# stale 慣例，不另開新檔——R73 的 `_FROZEN_GUARD_FILE_COUNT` 明文要求新增鎖併入既有檔）：
+# stale 慣例，不另開新檔——護欄層棘輪 `TestGuardLayerRatchet` 要求新鎖併入既有檔；
+# 🔴 R78 ARCH-03 訂正：R74 當時它量的是檔數，R77 起改量逐檔行數的**淨額**）：
 #   `DEF-101-766` 的病灶是 `WindowsAppsGuard.ps1::Resolve-NativeExecutable` **無條件**
 #   照 `$env:PATHEXT` 過濾候選——PATHEXT 是 Windows-only 概念，PS Core 跑在
 #   macOS/Linux 上該變數不存在、POSIX 執行檔又不帶副檔名 ⇒ 每個候選都被淘汰 ⇒
@@ -2103,8 +2104,9 @@ class TestSkipDirectionAndTagSymmetry(unittest.TestCase):
 # ══════════════════════════════════════════════════════════════════════════════
 # R76 — 第七道判準：文字讀寫必須指名 encoding（PKG-E 標的三；R76-09）
 # ══════════════════════════════════════════════════════════════════════════════
-# WHY（沿用本檔的掃描根／標記／stale 慣例，不另開新檔——`_FROZEN_GUARD_FILE_COUNT`
-# 明文要求新增鎖併入既有檔）：
+# WHY（沿用本檔的掃描根／標記／stale 慣例，不另開新檔——護欄層棘輪
+# `TestGuardLayerRatchet` 要求新增鎖併入既有檔；🔴 R78 ARCH-03 訂正：R76 當時它量的是
+# 檔數，R77 起改量逐檔行數的**淨額**，新增檔案本身不違規）：
 #   `Path.read_text()`／`write_text()`／`open()` 不帶 `encoding=` 時，用的是**本機
 #   locale 預設編碼**。mac 上那是 UTF-8，所以在 mac 寫、在 mac 跑，永遠是綠的；
 #   同一行程式碼在 zh-TW Windows 上是 cp950，讀到任何非 Big5 字元就 `UnicodeDecodeError`。
@@ -2956,6 +2958,24 @@ _XPLAT_INJECTION_CORPUS: tuple[tuple[str, str, str, bool], ...] = (
 )
 
 
+def live_interception() -> dict[str, tuple[int, int]]:
+    """兩個方向各自的 `(攔截數, 題數)` **現場實算值**——M5 那個數字的唯一權威來源。
+
+    抽成公開函式的理由（R78 ARCH-05）：M5 的攔截率此前只以散文寫在三份治理文件裡，
+    而三處全部停在**修復前**的值（同一個 commit 落地的第六道判準已經把數字推上去，
+    文件卻低報自己的成果）。文件低報看似無害，代價在下一輪：下一位讀者拿載具一跑，
+    會看到「一輪暴衝」而去找一個不存在的原因。數字從此**只准由本函式產生**，
+    文件寫指令不寫數字（同 M1 那一列 `[Scan-H triplet]` 的手法）。
+    """
+    totals: dict[str, list[int]] = {}
+    for _case_id, direction, source, _expected in _XPLAT_INJECTION_CORPUS:
+        slot = totals.setdefault(direction, [0, 0])
+        slot[1] += 1
+        if injection_hits(source):
+            slot[0] += 1
+    return {d: (v[0], v[1]) for d, v in totals.items()}
+
+
 def injection_hits(source: str) -> list[str]:
     """語料被哪幾道判準攔下（排序後的判準名清單）。純函式，供矩陣與統計共用。"""
     hits: list[str] = []
@@ -2971,6 +2991,16 @@ def injection_hits(source: str) -> list[str]:
 
 class TestXplatInjectionMatrix(unittest.TestCase):
     """雙向注入語料矩陣——M5 那個數字的唯一落點。"""
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        # 報表行刻意全 ASCII（同 `[Scan-H triplet]` 的理由：消費者含 codepage 950 的排程環境）。
+        # 這一行就是 M5「不寫死數字、指向載具」的那個載具出口。
+        live = live_interception()
+        cls.live = live
+        print("[Xplat injection matrix] " + " ".join(
+            f"{d.replace('→', '2')}={hit}/{total}" for d, (hit, total) in sorted(live.items())
+        ))
 
     def test_every_sample_matches_its_recorded_verdict(self) -> None:
         drift: list[str] = []
@@ -2996,14 +3026,13 @@ class TestXplatInjectionMatrix(unittest.TestCase):
     def test_the_interception_rate_only_improves(self) -> None:
         """逐輪可比的那個數字：兩個方向各自的攔截數，只准上升。
 
-        釘的是**當回合實測**（mac→Win 5/10、Win→mac 6/12）。動工前的實測是
-        mac→Win **0/10**——那一整類此前零機械物，本輪由第六道判準補上。
+        釘的是**當回合實測**：下面 `floors` 那兩個數字**就是**那份實測，本 docstring
+        刻意不再抄一份（R78 ARCH-05：M5 的攔截率此前散在三份文件裡各抄一份，三處全部
+        停在修復前的值）。想知道現值就跑本測試——`setUpClass` 會印 `[Xplat injection
+        matrix]`。R77 動工前 mac→Win 那一格是零：整類對面平台專屬 API 此前無任何判準。
         """
         floors = {"mac→Win": 5, "Win→mac": 6}
-        caught = {"mac→Win": 0, "Win→mac": 0}
-        for _case_id, direction, source, _expected in _XPLAT_INJECTION_CORPUS:
-            if injection_hits(source):
-                caught[direction] += 1
+        caught = {d: hit for d, (hit, _total) in live_interception().items()}
         for direction, floor in floors.items():
             with self.subTest(direction=direction):
                 self.assertGreaterEqual(
@@ -3021,4 +3050,12 @@ class TestXplatInjectionMatrix(unittest.TestCase):
 
 
 if __name__ == "__main__":
+    # R78：本檔被當 entry point 直接起（M5 的載具出口就在 TestXplatInjectionMatrix
+    # 的 setUpClass），而檔內多處印中文 ⇒ `test_subprocess_encoding_hygiene` 判準要求
+    # 入口點自帶 UTF-8 stdio 保護（非 CJK locale 逃脫成 \uXXXX、非 UTF-8 locale 亂碼、
+    # stdout 更是 errors='strict' 直接崩潰）。用唯一實作而非就地 reconfigure，理由同
+    # `test_adr_xplat001_c1c2_lock.py` 檔尾：後者會讓 stdio 複本棘輪 +1。
+    # 放在 `__main__` 內 ⇒ 被當測試模組 import 時不付這個副作用代價。
+    sys.path.insert(0, str(_REPO_ROOT / "tools"))
+    import _stdio_utf8  # noqa: F401
     unittest.main()

@@ -50,7 +50,11 @@ from skip_tag_policy import TREE_FLOOR_RATIO as _TREE_FLOOR_RATIO  # noqa: E402
 
 #: `tools/tests/` 頂層 `test_*.py` 的檔數下限＝重釘當回合實測 53 × `_TREE_FLOOR_RATIO`。
 #: 兩個方向都有斷言，見 `test_scan_surface_is_not_silently_empty`。
-_SCAN_FLOOR = 42
+#: R78 重釘 42→44（收緊，非放寬）：本輪新增 `test_act_local_runner_image.py` 與
+#: `test_context_budget_guard.py` 兩支鎖檔，實測檔數上升，鎖自己印出「下限只剩實測的 76%、
+#: 低於 80%」並指名要重釘為 44。下限型判準的意義是「掃描面不得靜默縮小」，
+#: 故它必須跟著實測往上走——停在舊值等於讓保護逐輪稀釋。
+_SCAN_FLOOR = 44
 
 
 def _mac_source() -> str:
@@ -529,8 +533,9 @@ if __name__ == "__main__":
 # ── smoke 家族雙平台 CLI 契約對等（DEF-101-810 同型缺口，本輪補上）─────────
 # 為何住這一檔：本檔主題就是「兩平台排程腳本的能力必須對等」，而兩支 smoke 正是
 # install_mac_nightly.sh／install_windows_nightly.ps1 註冊的排程對象之一。
-# 為何不新開一支鎖檔：`tools/tests` 有 `_FROZEN_GUARD_FILE_COUNT` 棘輪（新增鎖檔
-# 必紅），沿用 DEF-101-519 的折中慣例——併進既有 parity 測試。
+# 為何不新開一支鎖檔：`tools/tests` 有護欄層棘輪（`TestGuardLayerRatchet`）——🔴 R78
+# ARCH-03 訂正：它管的是**淨行數**，不是「新增鎖檔必紅」（那是 R77 已退場的檔數棘輪）。
+# 沿用 DEF-101-519 的折中慣例——併進既有 parity 測試。
 _MAC_SMOKE = _REPO_ROOT / "tools" / "macos_smoke_local.sh"
 _WIN_SMOKE = _REPO_ROOT / "tools" / "windows_smoke_local.ps1"
 
