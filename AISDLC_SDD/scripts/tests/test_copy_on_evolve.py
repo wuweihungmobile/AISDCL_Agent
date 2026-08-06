@@ -231,32 +231,50 @@ def test_wrong_arg_count(repo: Path):
 
 
 # ── DEF-58-002（P1 根因）：建版後自動同步框架版本戳記 + 父層鏡像 ──────────────────────
-def _bash_with_python() -> str | None:
-    """解析一個「PATH 內含 python」的 bash。
+_PROBE_READY = "COE-BASH-READY"
+# 三段皆為外部指令（非 shell builtin），任一缺席即代表該 bash 的 PATH 不含 coreutils／python
+_PROBE_CMD = (
+    "command -v python >/dev/null && command -v mkdir >/dev/null "
+    f"&& command -v dirname >/dev/null && echo {_PROBE_READY}"
+)
 
-    WHY：本測試的 auto-sync 步驟需在 bash 內呼叫 python；Windows 上裸 `bash` 常解析到 WSL bash
-    （環境隔離、無 Windows python）。Git Bash（隨 git 安裝、繼承 Windows PATH）則有 python。
-    逐一探測候選（git 相鄰 bash + 裸 bash），回傳第一個 `command -v python` 成功者；皆無則 None
-    （→ 環境 gated skip，對齊既有 bash/tar/git skipif 慣例）。CI（Linux）裸 bash 即含 python。
+
+def _bash_with_python() -> str | None:
+    """解析一個「PATH 同時含 python 與 coreutils」的 bash。
+
+    WHY：本測試的 auto-sync 步驟需在 bash 內呼叫 python，而 `copy_on_evolve.sh` 自己要用
+    `mkdir`／`dirname` 等 coreutils；Windows 上裸 `bash` 常解析到 WSL bash（環境隔離、無
+    Windows python）。**候選順序與驗活條件都是本函式曾經踩過的坑**：
+
+    - 本輪實測，Git 安裝樹下 `usr/bin/bash.exe` 與 `bin/bash.exe` **兩支都存在**，但只有後者
+      會把 Git 的 `/usr/bin` 併進 PATH。前者繼承 Windows PATH ⇒ `command -v python` 照樣成功，
+      於是舊版「只探 python、且把 `usr/bin` 排在前面」的邏輯必然選中它，腳本一跑到
+      `mkdir` 就 rc=127（`mkdir: command not found`），三支 DEF 意圖鎖同時假紅。
+    - 修法＝**先用 SSOT** `scripts/bash_probe.usable_bash()` 的結果（它已驗過 coreutils，
+      DEF-101-275），再以 git 相鄰候選補位、且 `bin/` 優先於 `usr/bin/`；每個候選都必須同時
+      通過 python 與 coreutils 探測才回傳。同一份「哪支 bash 能用」的知識不再有第二個家。
+
+    皆無則 None（→ 環境 gated skip，對齊既有 bash/tar/git skipif 慣例）。
+    CI（Linux）裸 bash 即含 python 與 coreutils。
     """
     candidates: list[str] = []
+    # 裸 bash 只在非 WSL 佔位（System32）時列為候選——WSL bash 的 python 是 WSL 側的，
+    # 跑不了 Windows 路徑引數（第五輪 DEF-101 P3）。此處直接吃 bash_probe 的裁決，不重寫判準。
+    if _BASH_PLAIN is not None:
+        candidates.append(_BASH_PLAIN)
     git = shutil.which("git")
     if git:
         gp = Path(git).resolve()
         for up in list(gp.parents)[:4]:
-            for sub in ("usr/bin/bash.exe", "bin/bash.exe"):
+            for sub in ("bin/bash.exe", "usr/bin/bash.exe"):
                 c = up / sub
-                if c.exists():
+                if c.exists() and str(c) not in candidates:
                     candidates.append(str(c))
-    # 裸 bash 只在非 WSL 佔位（System32）時列為候選——WSL bash 的 python 是 WSL 側的，
-    # 跑不了 Windows 路徑引數（第五輪 DEF-101 P3，與 bash_probe 同判準）
-    if _BASH_PLAIN is not None:
-        candidates.append(_BASH_PLAIN)
     for b in candidates:
         try:
-            r = subprocess.run([b, "-c", "command -v python"], capture_output=True,
+            r = subprocess.run([b, "-c", _PROBE_CMD], capture_output=True,
                                text=True, encoding="utf-8", errors="replace", timeout=15)
-            if r.returncode == 0 and r.stdout.strip():
+            if r.returncode == 0 and r.stdout.strip() == _PROBE_READY:
                 return b
         except Exception:
             continue

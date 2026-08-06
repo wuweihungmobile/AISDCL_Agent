@@ -12,21 +12,16 @@ E-A-01 收斂為 SSOT 名冊＋遞迴**）：掃描根一律取自 `tools/_scrip
 LATEST 以 scripts/sdd_version.py SSOT 動態解析，解析失敗 fail-loud——parity 只在 repo
 內跑，git 必在；凍結版 v0.01~v0.2X 依鐵律不掃）下的每支 .sh/.ps1 必屬五類之一，否則
 fail-loud 列出未納管檔名：
-  (1) 成對納管（_MARKER_PAIRS 標籤比對）；(2) 薄殼 hash 釘選（_THINNESS_ENROLLED）；
-  (3) LATEST 版薄殼 hash 釘選（_LATEST_THINNESS_ENROLLED，R65；🔴 前身是 R12 的
-  run_tlc FSM 軌錨點集合鎖 _TLC_TRACK_ENROLLED——ADR-XPLAT-002 §5 Phase 2-A 將
-  run_tlc.{sh,ps1} 薄殼化為委派 tools.fsm_runtime.tlc_runner 後，兩側腳本已不再
-  內嵌 .tla/.cfg 檔名字面，原鎖失去可抽取對象，退場並升級為 hash 釘選——語意同
-  _THINNESS_ENROLLED，但鍵是 LATEST-relative、需動態解析，故不與其共表，見
-  _check_latest_thinness 區塊註解）；(4) 成對豁免（_EXEMPT_PAIRS，
-  附 (tier, reason)）；(5) 單邊豁免（_SINGLE_SIDED_EXEMPT，附 (tier, reason)）。LATEST 下的納管
+  (1) 成對納管（_MARKER_PAIRS 標籤比對）；(2) 薄殼 hash 釘選（_THINNESS_ENROLLED，
+  **含 LATEST-relative 鍵**）；(3) 成對豁免（_EXEMPT_PAIRS，附 (tier, reason)）；
+  (4) 單邊豁免（_SINGLE_SIDED_EXEMPT，附 (tier, reason)）。LATEST 下的納管
   登記一律用「LATEST/tools/…」相對 key（版本升版 copy-on-evolve 時登記不失效）。
   各清單另有 stale 反向檢查（防清單腐化），詳見 _check_pair_enrollment 區塊註解。
 
-  🔴 R66（DEF-101-622）：(3) 的兩張表（_LATEST_THINNESS_ENROLLED／
-  _LATEST_PINNED_SHA256）與 (2) 的姊妹表同型（R12 QA-1 病灶：兩份獨立字面清單
-  同時腐化即雙工具全綠），但直到 R66 前一直沒有比照 _check_thinness_cross_lock
-  建立交叉鎖。已補 _check_latest_thinness_cross_lock()，見該函式區塊註解。
+  🔴 本輪（E-06／R77-54①）把類別由五類收為四類：R65 為 LATEST 薄殼另立的第 (3) 類與 (2)
+  的姊妹物同語言、同執行時機、觀測同一類對象——正是 R12 QA-1 →（DEF-101-622）→ 本輪的
+  復發路徑（兩份獨立字面清單同時腐化即雙工具全綠，第二份 cross-lock 是事後補的）。4 表收
+  2、2 檢查器收 1、2 份 cross-lock 收 1；`_check_latest_thinness()` 留為呼叫點（詳見該函式）。
 
   🔴 R63（ADR-XPLAT-002 §5 Phase 1-C (b)(d)）：(4)(5) 的值由純理由字串升級為
   `(tier, reason)` 二元組，`tier` 取自 §3.1~3.4 定義的六類集合（`_VALID_TIERS`）；
@@ -134,9 +129,26 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _cli_flags  # noqa: E402  # 未知旗標 rc=2 fail-loud 的 SSOT（見該檔檔頭 WHY）
 import _stdio_utf8  # noqa: E402,F401  # Windows 非 UTF-8 終端 print(✅/❌/⚠) 防崩潰保護
+import check_wrapper_thinness as _thinness  # noqa: E402  # 薄殼釘選唯一實作（本輪併表）
 from _script_scan_surface import SCRIPT_SCAN_ROOTS, iter_tree_scripts  # noqa: E402
 
 _REPO_ROOT = Path(__file__).resolve().parents[1]
+
+
+def _fail(msg: str) -> None:
+    """紅燈輸出的**唯一出口**：先把 stdout 排空，再寫 stderr。
+
+    🔴 WHY（F-09／R77-54③）：本工具的綠燈走 stdout、紅燈走 stderr，而 Python 在輸出
+    被導向檔案／管線時 stdout 是**塊緩衝**、stderr 不是 ⇒ 合流檢視（`2>&1`）時整批紅燈
+    會先出現、後面跟著一長串綠燈。實測形態：紅在第 1 行、其後 12 行全綠，於是「跑指令
+    → 看尾巴」這種既有的閘門檢視慣例（R76_HANDOFF §1 那張十道閘門表就是這樣記的）
+    會在**真紅**的情況下讀到一個綠色結尾。這與 Scan-H⑦「早退遮蔽訊號」同族、方向相反：
+    不是少印，是把紅埋在前面。先 flush stdout 就讓紅燈落在它真正發生的位置。
+    刻意仍寫 stderr（不是改印 stdout）：既有消費端靠串流分流抓紅燈，改流向會動到它們。
+    """
+    sys.stdout.flush()
+    print(msg, file=sys.stderr)
+    sys.stderr.flush()
 
 # `[n/m]` + 其後字面文字（至引號/反引號/$/反斜線/換行為止），rstrip 收尾空白
 _MARKER_RE = re.compile(r"\[\d+/\d+\][^\"'`$\\\n]*")
@@ -178,10 +190,9 @@ def _check_extract_floor(label: str, sh_items: list[str], ps1_items: list[str]) 
     floor = _MIN_EXTRACT_COUNTS[label]
     if len(sh_items) >= floor and len(ps1_items) >= floor:
         return True
-    print(f"❌ {label}：抽取數量（.sh {len(sh_items)} / .ps1 {len(ps1_items)}）低於"
+    _fail(f"❌ {label}：抽取數量（.sh {len(sh_items)} / .ps1 {len(ps1_items)}）低於"
           f"釘選下限 {floor} — 最可能是宣告 pattern 被改寫、step 靜默退出守護範圍；"
-          f"若確為刻意刪減 step，請同步更新本腳本 _MIN_EXTRACT_COUNTS['{label}'] 釘選值",
-          file=sys.stderr)
+          f"若確為刻意刪減 step，請同步更新本腳本 _MIN_EXTRACT_COUNTS['{label}'] 釘選值")
     return False
 
 
@@ -189,14 +200,13 @@ def _compare(label: str, sh_items: list[str], ps1_items: list[str]) -> bool:
     if sh_items == ps1_items:
         print(f"✅ {label}：{len(sh_items)} 個 step 標籤一致")
         return True
-    print(f"❌ {label}：step 標籤不一致（.sh {len(sh_items)} vs .ps1 {len(ps1_items)}）",
-          file=sys.stderr)
+    _fail(f"❌ {label}：step 標籤不一致（.sh {len(sh_items)} vs .ps1 {len(ps1_items)}）")
     width = max(len(sh_items), len(ps1_items))
     for i in range(width):
         a = sh_items[i] if i < len(sh_items) else "（缺）"
         b = ps1_items[i] if i < len(ps1_items) else "（缺）"
         mark = " " if a == b else "≠"
-        print(f"  {mark} .sh: {a!r}\n  {mark} .ps1: {b!r}", file=sys.stderr)
+        _fail(f"  {mark} .sh: {a!r}\n  {mark} .ps1: {b!r}")
     return False
 
 
@@ -222,7 +232,7 @@ def _find_latest_sdd_version(aisdlc_sdd_dir: Path) -> Path | None:
         return None
     name = proc.stdout.strip()
     if proc.stderr.strip():
-        print(proc.stderr.strip(), file=sys.stderr)  # SSOT 警告（未 tracked 目錄等）直通
+        _fail(proc.stderr.strip())  # SSOT 警告（未 tracked 目錄等）直通
     if not name:
         return None
     return aisdlc_sdd_dir / name
@@ -270,15 +280,14 @@ def _check_run_tlc_invocation_parity(latest_tools: Path) -> bool:
     sh = latest_tools / "fsm_runtime" / "formal" / "run_tlc.sh"
     ps1 = latest_tools / "fsm_runtime" / "formal" / "run_tlc.ps1"
     if not sh.is_file() or not ps1.is_file():
-        print(f"❌ {label}：LATEST run_tlc 腳本缺失（{sh} / {ps1}）— 該對若已移除，"
-              f"請同步更新 _LATEST_THINNESS_ENROLLED 與本檢查", file=sys.stderr)
+        _fail(f"❌ {label}：LATEST run_tlc 腳本缺失（{sh} / {ps1}）— 該對若已移除，"
+              f"請同步更新 _THINNESS_ENROLLED 與本檢查")
         return False
     sh_args = _extract_tlc_runner_invocations(sh)
     ps1_args = _extract_tlc_runner_invocations(ps1)
     if not sh_args or not ps1_args:
-        print(f"❌ {label}：抽取到空引數清單（.sh {len(sh_args)} / .ps1 "
-              f"{len(ps1_args)}）— 宣告 pattern 可能已改，請同步本腳本",
-              file=sys.stderr)
+        _fail(f"❌ {label}：抽取到空引數清單（.sh {len(sh_args)} / .ps1 "
+              f"{len(ps1_args)}）— 宣告 pattern 可能已改，請同步本腳本")
         return False
     ok = _check_extract_floor(label, sh_args, ps1_args)
     return _compare(f"{label}（LATEST tlc_runner 委派引數集合）", sh_args, ps1_args) and ok
@@ -333,38 +342,36 @@ def _check_exit_code_contract(latest_tools: Path) -> bool:
     ps1 = latest_tools / "arch_fitness" / "run_self_evolution.ps1"
     for path in (spec, sh, ps1):
         if not path.is_file():
-            print(f"❌ {label}：{path} 不存在——契約的三處來源缺一即無法比對",
-                  file=sys.stderr)
+            _fail(f"❌ {label}：{path} 不存在——契約的三處來源缺一即無法比對")
             return False
     declared = _exit_contract_from_spec(spec)
     if declared is None:
-        print(f"❌ {label}：{spec} 找不到 {_EXIT_CONTRACT_BEGIN} … {_EXIT_CONTRACT_END} "
-              f"標記區段——SSOT 章節被刪或改名（R68 的原始病灶就是『指向不存在的章節』）",
-              file=sys.stderr)
+        _fail(f"❌ {label}：{spec} 找不到 {_EXIT_CONTRACT_BEGIN} … {_EXIT_CONTRACT_END} "
+              f"標記區段——SSOT 章節被刪或改名（R68 的原始病灶就是『指向不存在的章節』）")
         return False
     ok = True
     if len(declared) < _EXIT_CONTRACT_FLOOR:
-        print(f"❌ {label}：SSOT 表只抽到 {len(declared)} 筆（下限 {_EXIT_CONTRACT_FLOOR}）"
+        _fail(f"❌ {label}：SSOT 表只抽到 {len(declared)} 筆（下限 {_EXIT_CONTRACT_FLOOR}）"
               f"——表格結構或抽取 pattern 疑似漂移；刻意刪碼請同步下修 "
-              f"_EXIT_CONTRACT_FLOOR", file=sys.stderr)
+              f"_EXIT_CONTRACT_FLOOR")
         ok = False
     for side, path in (("sh", sh), ("ps1", ps1)):
         found = _exit_contract_from_script(path)
         if found != declared:
             only_spec = {k: v for k, v in declared.items() if found.get(k) != v}
             only_side = {k: v for k, v in found.items() if declared.get(k) != v}
-            print(f"❌ {label}：.{side} 檔頭枚舉與 SSOT（{_EXIT_CONTRACT_SPEC_REL} §6.1）"
+            _fail(f"❌ {label}：.{side} 檔頭枚舉與 SSOT（{_EXIT_CONTRACT_SPEC_REL} §6.1）"
                   f"不一致——SSOT 有而檔頭不符：{only_spec}；檔頭有而 SSOT 不符：{only_side}。"
-                  f"先改 SSOT 表，再同步兩側檔頭的 rc= 枚舉行", file=sys.stderr)
+                  f"先改 SSOT 表，再同步兩側檔頭的 rc= 枚舉行")
             ok = False
         literals = set(_EXIT_LITERAL_RE.findall(
             _strip_comments(path.read_text(encoding="utf-8-sig"), is_ps1=(side == "ps1"))
         ))
         unlisted = sorted(literals - set(declared), key=int)
         if unlisted:
-            print(f"❌ {label}：.{side} 實作有未登記的 exit 碼 {unlisted}——"
+            _fail(f"❌ {label}：.{side} 實作有未登記的 exit 碼 {unlisted}——"
                   f"新增退出碼必須先寫進 SSOT 表（否則兩側可各自長出碰撞碼，"
-                  f"正是 R68 修過的那個病）", file=sys.stderr)
+                  f"正是 R68 修過的那個病）")
             ok = False
     if ok:
         print(f"✅ {label}：SSOT／.sh／.ps1 三處 {len(declared)} 筆逐筆一致，"
@@ -372,73 +379,52 @@ def _check_exit_code_contract(latest_tools: Path) -> bool:
     return ok
 
 
-# ── LATEST 版薄殼 hash 釘選（R65，ADR-XPLAT-002 §5 Phase 2-A）─────────────────
-# WHY 不併入 check_wrapper_thinness._PINNED_SHA256：該表的鍵是「固定 repo-root
-# 相對路徑」設計（其自身 tools/tests/test_check_wrapper_thinness.py::
-# TestNoHardcodedLineCounts.test_print_lines_reports_real_counts 直接以
-# `m.ROOT / rel` 驗證磁碟存在性，是刻意的設計不變量，非疏漏）；LATEST 演化版路徑
-# 隨 Copy-on-Evolve 逐版變動，需要動態解析——本檔既有的 _resolve_latest_tools()／
-# _registered_path() 已具備這個能力（_EXEMPT_PAIRS／_SINGLE_SIDED_EXEMPT／已退場的
-# _TLC_TRACK_ENROLLED 皆走這條路）。故 run_tlc 薄殼化後的 hash 釘選改在本檔自建
-# 一份小型登記表，**重用**（非重寫）check_wrapper_thinness 的正規化/hash 純函式
-# （normalized_sha256／MAX_LINES），不強行把 LATEST 語意塞進其固定路徑設計、
-# 也不動它既有的 10 支釘選與既有測試。
-_LATEST_THINNESS_ENROLLED = {"LATEST/tools/fsm_runtime/formal/run_tlc"}
-_LATEST_PINNED_SHA256: dict[str, str] = {
-    # 2026-07-31 實測
-    # （`python -c "import check_wrapper_thinness as t; print(t.normalized_sha256(...))"`）。
-    # R65 四方複審 7 項修復落地後的最終內容：(1) 裸執行三軌呼叫恆帶 --download 恢復
-    # jar 自動下載、(3) .ps1 python 候選探測順序改 python3 優先（同 .sh）、(4) 新增
-    # --tla-version 轉傳（.sh 讀 TLA_VERSION 環境變數／.ps1 讀 -TlaVersion 參數，
-    # 皆只在使用者顯式帶值時才轉傳）。
-    # 🔴 R67（R67-H35）：`check_wrapper_thinness._normalize()` 改為保留首行 shebang
-    # ⇒ `.sh` 側重釘（`.ps1` 側首行非 shebang，hash 逐字不變）。內容未竄改的三段
-    # 取證見 check_wrapper_thinness.py `_PINNED_SHA256` 上方 R67 註解。
-    # 🔴 R68（Scan-A2）：`.sh` 側重釘——LATEST run_tlc.sh 在 macOS 系統 bash 3.2 下每一條
-    # 執行路徑都必死於 `set -u` 空陣列展開（`${arr[@]}` 對空陣列在 bash 3.2 視為 unbound），
-    # 且該死法回 rc=1，恰好撞上本檔自訂的「1＝TLC 偵測到 invariant violation」語意 ⇒ 把
-    # 環境問題誤報成形式化驗證失敗。修法為 bash 3.2 安全展開 + 環境失敗改用獨立 rc。
-    # 變更仍屬薄殼職責（只改展開語法與 rc 分派，未新增業務邏輯），故重釘而非降級豁免。
-    "LATEST/tools/fsm_runtime/formal/run_tlc.sh": (
-        "76207165469914976ee49b536c9c81e89fee079daa4756b0a57c752e144983fe"
-    ),
-    "LATEST/tools/fsm_runtime/formal/run_tlc.ps1": (  # R71 DEF-101-762 重釘；根因見帳本列＋該檔:47
-        "feb3b9bf2ffdd35b789ca036a39f02cc6390769d3d9fb6fed3a9ef60cc3daf00"
-    ),
-}
+# ── LATEST 版薄殼 hash 釘選（R65 立於本檔；**本輪併回 check_wrapper_thinness**）───
+# 本輪處置（E-06／R77-54①）：原本這裡住著第二套完整實作（自己的 stem 登記表／hash 釘選
+# 表／檢查迴圈／交叉鎖），與 `check_wrapper_thinness` 的四件同名物同語言、同執行時機、
+# 觀測同一類對象。分家的唯一理由「那張表的鍵是**固定** repo-relative 路徑，表達不了
+# Copy-on-Evolve 逐版變動的 LATEST 路徑」已由 `tools/lib/sdd_latest.py`（R66 落地）的
+# resolver 參數解消 ⇒ 依 ADR §4.2 rule 3 dominance test 逐條覆核（見
+# `_check_latest_thinness()` docstring），四表收兩表、兩檢查器收一支、兩份 cross-lock 收一份。
+# 仍留一個呼叫點而非整段刪掉的理由：`check_wrapper_thinness.py` 只在 pre-push 與
+# root-infra-ci 有具名執行步驟，**macos/windows-compat-ci 與兩支 smoke 只跑本檔**（逐行
+# 實查）——刪掉會讓 LATEST 釘選在那四條路徑失去守門＝覆蓋面退化，不是去重。
+def _check_latest_thinness() -> bool:
+    """LATEST 版薄殼 hash 釘選守門——**委派** `check_wrapper_thinness`（唯一實作）。
 
-
-def _check_latest_thinness(latest_tools: Path | None) -> bool:
-    """LATEST 版薄殼 hash 釘選守門（同 check_wrapper_thinness.check_wrapper_thinness()
-    邏輯，重用其正規化/hash 純函式，範圍限定 _LATEST_PINNED_SHA256 這組
-    LATEST-relative 對子）。"""
-    import check_wrapper_thinness as _thinness
-
-    ok = True
-    for rel in sorted(_LATEST_PINNED_SHA256):
-        pinned = _LATEST_PINNED_SHA256[rel]
-        path = _registered_path(rel, latest_tools)
-        if path is None or not path.is_file():
-            print(f"❌ LATEST 薄殼釘選：{rel} 檔案不存在或 LATEST 解析失敗",
-                  file=sys.stderr)
-            ok = False
-            continue
-        line_count = len(path.read_text(encoding="utf-8-sig").splitlines())
-        if line_count > _thinness.MAX_LINES:
-            print(f"❌ LATEST 薄殼釘選：{rel} {line_count} 行超過薄殼上限 "
-                  f"{_thinness.MAX_LINES} 行", file=sys.stderr)
-            ok = False
-        actual = _thinness.normalized_sha256(path)
-        if actual != pinned:
-            print(f"❌ LATEST 薄殼釘選：{rel} 正規化內容 hash 與釘選不符（釘選 "
-                  f"{pinned[:12]}… / 實際 {actual[:12]}…）—— wrapper 實質內容變動；"
-                  f"若變更仍屬薄殼職責，請以 check_wrapper_thinness.normalized_sha256() "
-                  f"取新值同步更新 _LATEST_PINNED_SHA256", file=sys.stderr)
-            ok = False
-    if ok:
-        print(f"✅ LATEST 薄殼釘選：{len(_LATEST_PINNED_SHA256)} 支 hash 釘選皆正常"
-              f"（{len(_LATEST_THINNESS_ENROLLED)} 對）")
-    return ok
+    dominance test（原第二套的每條斷言，逐條指名接手者；接手者一律是併表後的
+    `check_wrapper_thinness.check_wrapper_thinness()`）：
+      (a) 「兩側 run_tlc.{sh,ps1} 必須存在」→ 其 `檔案不存在` 分支，逐鍵；
+      (b) 「LATEST 解析失敗必須紅、不得靜默略過」→ 其 `LATEST 版本解析失敗` 分支
+          （原實作與「檔案不存在」共用一條訊息、兩種病因分不開，現已分家）；
+      (c) 「raw 行數 ≤ MAX_LINES」→ 其行數上限分支，且指路目的地改為逐殼查表
+          （原實作連指路都沒有，只印「超過薄殼上限」）；
+      (d) 「正規化內容 hash 逐字相符」→ 其 hash 分支，同一組純函式、同一個 `MAX_LINES`；
+      (e) 「stem 登記表 ↔ hash 釘選表鍵集合一致」→ `_check_thinness_cross_lock()`
+          （LATEST 鍵併入 `_THINNESS_ENROLLED`／`_PINNED_SHA256` 後，原本要另立一支
+          `_check_latest_thinness_cross_lock()` 的理由隨兩表合一而消失）；
+      (f) **新增覆蓋**（原第二套沒有的）：`_FORBIDDEN` 並聯關鍵字訊號現在對 LATEST 鍵
+          同樣生效——該表目前無 run_tlc 條目故實際為空集合，但機制已接上，日後補字即生效。
+    只挑 LATEST 鍵回報：其餘 14 支殼是 `check_wrapper_thinness` 自己那道閘門的職責，
+    在本檔重印一次只會讓同一筆違規在兩個地方各紅一次、卻不增加任何鑑別力。
+    """
+    problems = [
+        p for p in _thinness.check_wrapper_thinness()
+        if p.startswith(_LATEST_PREFIX)
+    ]
+    if problems:
+        for p in problems:
+            _fail(f"❌ LATEST 薄殼釘選：{p}")
+        return False
+    latest_pins = [k for k in _thinness._PINNED_SHA256 if k.startswith(_LATEST_PREFIX)]
+    if not latest_pins:
+        _fail("❌ LATEST 薄殼釘選：併表後的 _PINNED_SHA256 內已無任何 LATEST 鍵 —— "
+              "本檢查等於空轉（零迴圈恆綠正是 R66 DEF-101-622 攔下的那個形態）；"
+              "若確為刻意退場，請連同本函式與其呼叫點一併移除")
+        return False
+    print(f"✅ LATEST 薄殼釘選：{len(latest_pins)} 支 hash 釘選皆正常"
+          f"（委派 check_wrapper_thinness，唯一實作）")
+    return True
 
 
 def _cross_lock(label: str, enrolled: set[str], pinned_map: dict[str, str],
@@ -455,12 +441,12 @@ def _cross_lock(label: str, enrolled: set[str], pinned_map: dict[str, str],
     expected = {f"{stem}{ext}" for stem in enrolled for ext in (".sh", ".ps1")}
     ok = True
     for rel in sorted(expected - pinned):
-        print(f"❌ {label}：{rel} 已登記 {enrolled_name} 但不在 "
-              f"{pinned_name} — 薄殼宣稱無 hash 釘選守門", file=sys.stderr)
+        _fail(f"❌ {label}：{rel} 已登記 {enrolled_name} 但不在 "
+              f"{pinned_name} — 薄殼宣稱無 hash 釘選守門")
         ok = False
     for rel in sorted(pinned - expected):
-        print(f"❌ {label}：{rel} 在 {pinned_name} 但其 stem 未登記 "
-              f"{enrolled_name} — 兩清單腐化（請同步）", file=sys.stderr)
+        _fail(f"❌ {label}：{rel} 在 {pinned_name} 但其 stem 未登記 "
+              f"{enrolled_name} — 兩清單腐化（請同步）")
         ok = False
     if ok:
         print(f"✅ {label}：{len(enrolled)} 對薄殼登記與 "
@@ -481,22 +467,12 @@ def _check_thinness_cross_lock() -> bool:
                        "_THINNESS_ENROLLED", "check_wrapper_thinness._PINNED_SHA256")
 
 
-def _check_latest_thinness_cross_lock() -> bool:
-    """LATEST 版 parity↔thinness 兩份登記清單交叉鎖（R66 DEF-101-622，同 R12 QA-1
-    教訓套用於 R65 新表）。
-
-    WHY：`_LATEST_THINNESS_ENROLLED`（stem 登記）與 `_LATEST_PINNED_SHA256`（hash 釘選）
-    是兩份獨立字面清單，與 `_THINNESS_ENROLLED`／`check_wrapper_thinness._PINNED_SHA256`
-    同型——`_check_latest_thinness()` 的迴圈只走 `_LATEST_PINNED_SHA256`，若把
-    `_LATEST_PINNED_SHA256` 清空但不動 `_LATEST_THINNESS_ENROLLED`，該函式的迴圈
-    次數為零、`ok` 從未被設為 False，會印出「0 支 hash 釘選皆正常（1 對）」這種
-    自相矛盾的假綠訊息，且 exit code 仍是 0——兩份清單各自腐化即雙訊號雙盲。
-    此鎖斷言每個 `_LATEST_THINNESS_ENROLLED` 登記 stem 的 `.sh` 與 `.ps1` 都在
-    pin 表，反向多餘 pin（表內出現未登記 stem）亦紅，鍵集合形狀與
-    `_check_thinness_cross_lock` 相同，只是鍵改為 LATEST-relative。"""
-    return _cross_lock("LATEST thinness 交叉鎖", _LATEST_THINNESS_ENROLLED,
-                       _LATEST_PINNED_SHA256, "_LATEST_THINNESS_ENROLLED",
-                       "_LATEST_PINNED_SHA256")
+# R66 DEF-101-622 曾在此另立 `_check_latest_thinness_cross_lock()`——LATEST 鍵於本輪
+# 併入 `_THINNESS_ENROLLED`／`check_wrapper_thinness._PINNED_SHA256` 後，它與上面那支
+# 比對的是**同一組**鍵集合，重複呼叫只是把同一筆違規印兩次。它防的那個情境
+# （「pin 表被清空、stem 登記還在 ⇒ 零迴圈恆綠」）由兩處接手：`_check_thinness_cross_lock()`
+# 對合併後的鍵集合照樣成立，而「LATEST 鍵整組蒸發」另由 `_check_latest_thinness()`
+# 的 `latest_pins` 非空斷言直接判紅（見該函式）。
 
 
 def _check_pytest_pin() -> bool:
@@ -510,26 +486,23 @@ def _check_pytest_pin() -> bool:
 
     m1 = re.search(r'"pytest==([^"]+)"', pyproject.read_text(encoding="utf-8"))
     if not m1:
-        print(f"❌ pytest 釘選：找不到 pytest== 釘選字串（{pyproject}）", file=sys.stderr)
+        _fail(f"❌ pytest 釘選：找不到 pytest== 釘選字串（{pyproject}）")
         return False
 
     ok = True
     for label, req_ci in targets:
         if not req_ci.is_file():
-            print(f"❌ pytest 釘選：{label} 找不到 requirements-ci.txt（{req_ci}）",
-                  file=sys.stderr)
+            _fail(f"❌ pytest 釘選：{label} 找不到 requirements-ci.txt（{req_ci}）")
             ok = False
             continue
         m2 = re.search(r"(?m)^pytest==(\S+)", req_ci.read_text(encoding="utf-8"))
         if not m2:
-            print(f"❌ pytest 釘選：{label}（{req_ci}）找不到 pytest== 釘選字串",
-                  file=sys.stderr)
+            _fail(f"❌ pytest 釘選：{label}（{req_ci}）找不到 pytest== 釘選字串")
             ok = False
             continue
         if m1.group(1) != m2.group(1):
-            print(f"❌ pytest 釘選漂移：{pyproject.name}={m1.group(1)} vs "
-                  f"{label} {req_ci.name}={m2.group(1)} — 三處必須同版（同一 .venv 共裝）",
-                  file=sys.stderr)
+            _fail(f"❌ pytest 釘選漂移：{pyproject.name}={m1.group(1)} vs "
+                  f"{label} {req_ci.name}={m2.group(1)} — 三處必須同版（同一 .venv 共裝）")
             ok = False
 
     if ok:
@@ -552,8 +525,7 @@ def _check_git_longpaths_flag_parity() -> bool:
     windows_ps1 = _REPO_ROOT / "tools" / "windows_smoke_local.ps1"
     for path in (macos_sh, windows_ps1):
         if not path.is_file():
-            print(f"❌ git longpaths 旗標鎖：{path} 不存在——請同步更新本檢查",
-                  file=sys.stderr)
+            _fail(f"❌ git longpaths 旗標鎖：{path} 不存在——請同步更新本檢查")
             return False
     # 剝除註解行後再數（沿用既有 _strip_comments）：只有註解裡提及旗標、
     # 實際 git clone 指令已把旗標拿掉，不得被註解殘留誤判為仍存在（bug-injection
@@ -567,14 +539,14 @@ def _check_git_longpaths_flag_parity() -> bool:
     ).count(_GIT_LONGPATHS_FLAG)
     ok = True
     if macos_hits == 0:
-        print(f"❌ git longpaths 旗標鎖：tools/macos_smoke_local.sh 未見 "
+        _fail(f"❌ git longpaths 旗標鎖：tools/macos_smoke_local.sh 未見 "
               f"'{_GIT_LONGPATHS_FLAG}'——與 windows_smoke_local.ps1（{windows_hits} 處）"
-              "不對等", file=sys.stderr)
+              "不對等")
         ok = False
     if windows_hits == 0:
-        print(f"❌ git longpaths 旗標鎖：tools/windows_smoke_local.ps1 未見 "
+        _fail(f"❌ git longpaths 旗標鎖：tools/windows_smoke_local.ps1 未見 "
               f"'{_GIT_LONGPATHS_FLAG}'——與 macos_smoke_local.sh（{macos_hits} 處）"
-              "不對等", file=sys.stderr)
+              "不對等")
         ok = False
     if ok:
         print(f"✅ git longpaths 旗標鎖：兩側皆含 '{_GIT_LONGPATHS_FLAG}'"
@@ -636,6 +608,50 @@ _VALID_TIERS = frozenset({
 # （`R68`）或**未指派**——與 §8 表頭規則 1 逐字同源，規則不再只存在於散文裡。
 _UNPINNED_EXIT_RE = re.compile(r"退場：(未指派|R\d+(?![\d+＋]))")
 
+# ── 退場輪號的**可比性**判準（本輪 E-05／R77-13）────────────────────────────────
+# 病灶：上面那條正則只驗「字面長得像輪號」，擋不住**憑空捏造一個不存在的輪號**——捏一個
+# 遠在天邊的輪號與寫「未指派」效果一樣（永不到期）；實證就長在守它那支測試的對照組裡。
+# 🔴 判準是「不得**超前**當前輪」，**不是**「必須仍在未來」——方向相反，別搞混：後者
+#   (`N >= current_round()`) 會讓當初合法的舊錨點隨帳本推進一列列轉紅＝結構上必然永紅
+#   （同 Scan_Dimensions.md 與本檔上一版的警告）；本判準 `N <= current_round() + 1` 因
+#   current_round() 單調增加，今天合法的錨點明天永遠仍合法，只抓「寫下的當回合就指向
+#   不可能被排進來的輪次」（+1＝指派給下一輪，這是本欄位唯一有意義的用法）。
+# fail-open（誠實揭露）：`current_round()` 讀不到或推不出輪號時本判準**整條略過**——parity
+# 每次 push 都跑，因另一份文件的可讀性擋下所有人代價過高（捏造輪號另有 `_UNPINNED_CEILING`
+# 與人審兩層）。窗口由該判準的 `test_missing_ledger_is_skipped_not_red` 明寫。
+_EXIT_ANCHOR_ROUND_RE = re.compile(r"退場：R(\d+)")
+_DEFECT_LOG_REL = "docs/06_quality/AutoSDD_Defect_Log.md"
+
+
+def _current_round() -> int | None:
+    """當前跨平台複審輪號（委派 `check_defect_log_crossref.current_round()` 唯一實作）。
+
+    刻意不在本檔重寫「怎麼從帳本推當前輪」——那段判準有三個候選取值方式、兩個是錯的
+    （見該函式 docstring 逐條論證），複製一份等於把那三個候選重新打開一次。
+    """
+    try:
+        import check_defect_log_crossref as _crossref
+        text = (_REPO_ROOT / _DEFECT_LOG_REL).read_text(encoding="utf-8")
+    except (OSError, ImportError):
+        return None
+    return _crossref.current_round(text)
+
+
+def _exit_anchor_round_problems(
+    table_name: str, key: str, reason: str, current: int | None
+) -> list[str]:
+    """reason 內每個 `退場：R<N>` 的可比性檢查（`current is None` ⇒ 略過，見上）。"""
+    if current is None:
+        return []
+    return [
+        f"❌ tier 分類：{table_name}[{key!r}] 的退場錨點寫 R{n}，而當前輪是 R{current}"
+        f"——承接輪號不得超前當前輪 +1（R{current + 1} 為上限）。遠在天邊的輪號與"
+        f"『未指派』效果相同（永遠不到期）卻讀起來像有人接；請改填 R{current + 1}、"
+        f"或誠實寫 `退場：未指派`"
+        for n in (int(x) for x in _EXIT_ANCHOR_ROUND_RE.findall(reason))
+        if n > current + 1
+    ]
+
 _HARD_REASON_KEYWORDS = (
     "launchd", "schtasks", "container", "GNU", "Copy-on-Evolve",
     "驗證載具", "心跳檔", "R12 QA-2", "明文禁止收斂", "無共同 API",
@@ -665,7 +681,9 @@ _MARKER_PAIRS: list[tuple[str, str, str]] = []
 _PAIR_SCAN_DIRS = SCRIPT_SCAN_ROOTS
 # LATEST 納管 key 前綴（R12 ARCH-R12-3）：登記用「相對 LATEST 的路徑」，版本升版
 # （copy-on-evolve）時登記不失效；實體路徑由 _resolve_latest_tools() 動態解析。
-_LATEST_PREFIX = "LATEST/tools/"
+# 本輪併表後這個前綴同時是 `check_wrapper_thinness` 釘選鍵的前綴 ⇒ 只留一個家，
+# 本檔取用而非各寫一份字面（兩份同值字面正是本輪在收斂的那個形態的最小實例）。
+_LATEST_PREFIX = _thinness._LATEST_KEY_PREFIX
 # tools/check_wrapper_thinness.py hash 釘選（R12 起 local_ci_gate 收斂為薄殼＋
 # tools/local_ci_gate.py 單核心後加入，DEF-101-070 ②；gate-call 抽取比對隨之退場。
 # R16（Architect 建議 B）比照同一模式收斂 bootstrap/integration_gate/run_act 三對，
@@ -682,6 +700,10 @@ _THINNESS_ENROLLED = {
     # 不變，本次只是把「無守門」升級為「hash 釘選＋行數上限＋業務樣板關鍵字並聯」。
     "AutoClaude/tools/install_git_hooks",
     "AISDLC_SDD/scripts/install-hooks",
+    # 本輪自已退場的 `_LATEST_THINNESS_ENROLLED` 併入（E-06／R77-54①）：鍵是
+    # LATEST-relative，由 check_wrapper_thinness.pinned_path() 動態解析成實體路徑。
+    # 併表的直接效果＝這一對從此與其餘 7 對走**同一支**檢查器、**同一份**交叉鎖。
+    "LATEST/tools/fsm_runtime/formal/run_tlc",
 }
 _EXEMPT_PAIRS: dict[str, tuple[str, str]] = {
     "AISDLC_SDD/scripts/ci-gate": (
@@ -881,8 +903,7 @@ if _zombie_exempt:
 
 def _enrolled_pairs() -> set[str]:
     parity = {sh_rel[: -len(".sh")] for _label, sh_rel, _ps1 in _MARKER_PAIRS}
-    return (parity | _THINNESS_ENROLLED | _LATEST_THINNESS_ENROLLED
-            | set(_EXEMPT_PAIRS))
+    return parity | _THINNESS_ENROLLED | set(_EXEMPT_PAIRS)
 
 
 def _registered_path(rel: str, latest_tools: Path | None) -> Path | None:
@@ -930,9 +951,8 @@ def _check_pair_enrollment(latest_tools: Path | None = None) -> bool:
     if latest_tools is None:
         # fail-loud：parity 只在 repo 內跑（git 必在），LATEST 解析失敗＝SSOT 壞了，
         # 不得靜默縮小掃描邊界；本輪僅比對非 LATEST 部分後回紅。
-        print("❌ LATEST 解析失敗（AISDLC_SDD/scripts/sdd_version.py 缺席或執行失敗）"
-              "— LATEST tools 掃描無法進行，LATEST/ 納管條目本輪不比對",
-              file=sys.stderr)
+        _fail("❌ LATEST 解析失敗（AISDLC_SDD/scripts/sdd_version.py 缺席或執行失敗）"
+              "— LATEST tools 掃描無法進行，LATEST/ 納管條目本輪不比對")
         ok = False
     known = _enrolled_pairs()
     single_exempt = dict(_SINGLE_SIDED_EXEMPT)
@@ -946,25 +966,19 @@ def _check_pair_enrollment(latest_tools: Path | None = None) -> bool:
     unknown_singles = [s for s in singles if s not in single_exempt]
     stale_singles = sorted(set(single_exempt) - set(singles))
     for p in unknown:
-        print(
+        _fail(
             f"❌ 未註冊的成對腳本：{p}.sh / {p}.ps1 —— 新增成對腳本必須擇一納管："
             f"(1) 有標籤錨點 → 加入 _MARKER_PAIRS；(2) 薄殼 → 掛 check_wrapper_thinness "
-            f"hash 釘選；(3) 決策豁免 → 加入 _EXEMPT_PAIRS 並附缺陷帳本依據",
-            file=sys.stderr,
-        )
+            f"hash 釘選；(3) 決策豁免 → 加入 _EXEMPT_PAIRS 並附缺陷帳本依據")
         ok = False
     for p in stale:
-        print(
-            f"❌ 註冊清單 stale：{p} 已不存在同名 .sh/.ps1 對 —— 請自對應清單移除",
-            file=sys.stderr,
-        )
+        _fail(
+            f"❌ 註冊清單 stale：{p} 已不存在同名 .sh/.ps1 對 —— 請自對應清單移除")
         ok = False
     for s in unknown_singles:
-        print(
+        _fail(
             f"❌ 未納管的單邊腳本：{s} —— 新增單邊 .sh/.ps1 必須附決策依據登記至 "
-            f"_SINGLE_SIDED_EXEMPT（或補上對邊腳本走成對納管）",
-            file=sys.stderr,
-        )
+            f"_SINGLE_SIDED_EXEMPT（或補上對邊腳本走成對納管）")
         ok = False
     for s in stale_singles:
         p = _registered_path(s, latest_tools)
@@ -974,23 +988,17 @@ def _check_pair_enrollment(latest_tools: Path | None = None) -> bool:
             # 兩者都紅，但誤導的排障方向會浪費修復時間，故查對邊實存後分流。
             _other = p.with_suffix(".ps1" if p.suffix == ".sh" else ".sh")
             if _other.is_file():
-                print(
+                _fail(
                     f"❌ 單邊豁免 stale：{s} 的對邊腳本已出現（不再是單邊）—— 請自 "
-                    f"_SINGLE_SIDED_EXEMPT 移除，並將該對依納管類別語意重新納管",
-                    file=sys.stderr,
-                )
+                    f"_SINGLE_SIDED_EXEMPT 移除，並將該對依納管類別語意重新納管")
             else:
-                print(
+                _fail(
                     f"❌ 單邊豁免 stale：{s} 仍在磁碟但未被掃描發現——其所在目錄疑似"
                     f"已自 _PAIR_SCAN_DIRS 移除（守門縮面），請恢復掃描目錄或連同"
-                    f"豁免登記一併遷移",
-                    file=sys.stderr,
-                )
+                    f"豁免登記一併遷移")
         else:
-            print(
-                f"❌ 單邊豁免 stale：{s} 已不存在 —— 請自 _SINGLE_SIDED_EXEMPT 移除",
-                file=sys.stderr,
-            )
+            _fail(
+                f"❌ 單邊豁免 stale：{s} 已不存在 —— 請自 _SINGLE_SIDED_EXEMPT 移除")
         ok = False
     if ok:
         print(f"✅ 腳本註冊完整性：{len(pairs)} 對 + {len(singles)} 支單邊皆已納管"
@@ -1013,20 +1021,18 @@ def _check_equivalence_groups_fresh(repo_root: Path | None = None) -> bool:
     for name, (a, b) in _EQUIVALENCE_GROUPS.items():
         for rel in (a, b):
             if not (root / rel).is_file():
-                print(f"❌ 異名對等品 stale：{name} 的成員 {rel} 已不存在於磁碟——"
-                      f"請同步更新 _EQUIVALENCE_GROUPS 或確認檔案是否被改名/刪除",
-                      file=sys.stderr)
+                _fail(f"❌ 異名對等品 stale：{name} 的成員 {rel} 已不存在於磁碟——"
+                      f"請同步更新 _EQUIVALENCE_GROUPS 或確認檔案是否被改名/刪除")
                 ok = False
             if rel not in _SINGLE_SIDED_EXEMPT:
-                print(f"❌ 異名對等品 stale：{name} 的成員 {rel} 已不在 "
-                      f"_SINGLE_SIDED_EXEMPT 登記——已改納管類別或被移除卻未同步本組",
-                      file=sys.stderr)
+                _fail(f"❌ 異名對等品 stale：{name} 的成員 {rel} 已不在 "
+                      f"_SINGLE_SIDED_EXEMPT 登記——已改納管類別或被移除卻未同步本組")
                 ok = False
         stem_a, stem_b = Path(a).stem, Path(b).stem
         if stem_a == stem_b:
-            print(f"❌ 異名對等品 stale：{name} 兩成員 stem 相同（{stem_a}）——"
+            _fail(f"❌ 異名對等品 stale：{name} 兩成員 stem 相同（{stem_a}）——"
                   f"已不是『異名』對等品，應改走成對納管（_THINNESS_ENROLLED 或 "
-                  f"_MARKER_PAIRS），不該留在 _EQUIVALENCE_GROUPS", file=sys.stderr)
+                  f"_MARKER_PAIRS），不該留在 _EQUIVALENCE_GROUPS")
             ok = False
     if ok:
         print(f"✅ 異名對等品 stale 自檢：{len(_EQUIVALENCE_GROUPS)} 組皆新鮮"
@@ -1044,6 +1050,7 @@ def _check_tier_classification() -> bool:
     §4.3.4 對 C1/C2 已劃的同型邊界——這是防呆，不是語意驗證，見 ADR-XPLAT-002 §6 邊界 4）。
     """
     ok = True
+    current = _current_round()
     tables: tuple[tuple[str, dict[str, tuple[str, str]]], ...] = (
         ("_EXEMPT_PAIRS", _EXEMPT_PAIRS),
         ("_SINGLE_SIDED_EXEMPT", _SINGLE_SIDED_EXEMPT),
@@ -1051,38 +1058,48 @@ def _check_tier_classification() -> bool:
     for table_name, table in tables:
         for key, entry in table.items():
             if not (isinstance(entry, tuple) and len(entry) == 2):
-                print(f"❌ tier 分類：{table_name}[{key!r}] 值須為 (tier, reason) 二元組，"
-                      f"實得 {entry!r}", file=sys.stderr)
+                _fail(f"❌ tier 分類：{table_name}[{key!r}] 值須為 (tier, reason) 二元組，"
+                      f"實得 {entry!r}")
                 ok = False
                 continue
             tier, reason = entry
             entry_ok = True
             if tier not in _VALID_TIERS:
-                print(f"❌ tier 分類：{table_name}[{key!r}] 的 tier {tier!r} 不在合法集合 "
-                      f"{sorted(_VALID_TIERS)}", file=sys.stderr)
+                _fail(f"❌ tier 分類：{table_name}[{key!r}] 的 tier {tier!r} 不在合法集合 "
+                      f"{sorted(_VALID_TIERS)}")
                 ok = False
                 entry_ok = False
             if not reason.strip():
-                print(f"❌ tier 分類：{table_name}[{key!r}] 的 reason 為空", file=sys.stderr)
+                _fail(f"❌ tier 分類：{table_name}[{key!r}] 的 reason 為空")
                 ok = False
                 entry_ok = False
             if entry_ok and tier in (_TIER3_OS_PRIMITIVE, _TIER4_FORBIDDEN):
                 if not any(kw in reason for kw in _HARD_REASON_KEYWORDS):
-                    print(f"❌ tier 分類：{table_name}[{key!r}]（tier={tier}）的 reason "
+                    _fail(f"❌ tier 分類：{table_name}[{key!r}]（tier={tier}）的 reason "
                           f"未含任何硬理由關鍵詞 {_HARD_REASON_KEYWORDS}——{tier} 需明確"
-                          f"的不可收斂技術理由，非泛泛決策豁免散文", file=sys.stderr)
+                          f"的不可收斂技術理由，非泛泛決策豁免散文")
                     ok = False
             if entry_ok and tier == _UNPINNED and not _UNPINNED_EXIT_RE.search(reason):
-                print(f"❌ tier 分類：{table_name}[{key!r}]（tier=unpinned）的 reason "
+                _fail(f"❌ tier 分類：{table_name}[{key!r}]（tier=unpinned）的 reason "
                       f"未含退場錨點——unpinned＝『不符任一 Tier 定義』，是分類法的"
                       f"『以上皆非』桶，必須明說誰來接：請在 reason 內寫 "
-                      f"`退場：未指派` 或 `退場：R<輪號>…`（R67-E24）", file=sys.stderr)
+                      f"`退場：未指派` 或 `退場：R<輪號>…`（R67-E24）")
                 ok = False
+            if entry_ok:
+                # 射程刻意涵蓋**全部 tier**（不只 unpinned）：捏造輪號這件事與該筆
+                # 被歸成哪一類無關，限縮在 unpinned 只會留下一條同義逃生口。
+                for problem in _exit_anchor_round_problems(
+                    table_name, key, reason, current
+                ):
+                    _fail(problem)
+                    ok = False
     if ok:
         n = len(_EXEMPT_PAIRS) + len(_SINGLE_SIDED_EXEMPT)
+        anchored = "（帳本讀不到當前輪，可比性判準本次略過）" if current is None else (
+            f"、退場輪號皆不超前當前輪 R{current}")
         print(f"✅ tier 分類完整性：{n} 筆（_EXEMPT_PAIRS {len(_EXEMPT_PAIRS)} + "
               f"_SINGLE_SIDED_EXEMPT {len(_SINGLE_SIDED_EXEMPT)}）tier 合法、reason 非空、"
-              f"tier3/4 硬理由關鍵詞齊備、unpinned 退場錨點齊備")
+              f"tier3/4 硬理由關鍵詞齊備、unpinned 退場錨點齊備{anchored}")
     return ok
 
 
@@ -1430,10 +1447,10 @@ def _check_tier_ratchet() -> bool:
     """
     problems = baseline_ratchet_problems()
     if problems:
-        print("❌ tier 棘輪違反（與凍結基準 _TIER_BASELINE 比對，"
-              "ADR-XPLAT-002 §8 item 12 / R67-H14）：", file=sys.stderr)
+        _fail("❌ tier 棘輪違反（與凍結基準 _TIER_BASELINE 比對，"
+              "ADR-XPLAT-002 §8 item 12 / R67-H14）：")
         for p in problems:
-            print(f"  · {p}", file=sys.stderr)
+            _fail(f"  · {p}")
         return False
     live = _live_tier_map(None, None)
     print(f"✅ tier 棘輪：與凍結基準 _TIER_BASELINE（{len(_TIER_BASELINE)} 筆）比對，"
@@ -1460,8 +1477,9 @@ _AC_REGISTRY_NAMES: tuple[tuple[str, str], ...] = (
     ("parity", "_THINNESS_ENROLLED"),
     ("parity", "_EXEMPT_PAIRS"),
     ("parity", "_SINGLE_SIDED_EXEMPT"),
-    ("parity", "_LATEST_PINNED_SHA256"),
-    ("parity", "_LATEST_THINNESS_ENROLLED"),
+    # 本輪（E-06／R77-54①）：`_LATEST_PINNED_SHA256`(2)／`_LATEST_THINNESS_ENROLLED`(1)
+    # 兩張表已併回 thinness 側的 `_PINNED_SHA256`／本檔的 `_THINNESS_ENROLLED`
+    # ⇒ 同樣 3 筆登記換了住所、**AC 逐字不變**（併表是去重不是收斂，不該讓 AC 動）。
     ("parity", "_MIN_EXTRACT_COUNTS"),
 )
 # 具名排除（不計入 AC）＋逐筆理由。排除是決策，必須寫下來被複審看見；漏排即紅。
@@ -1482,6 +1500,11 @@ _AC_EXCLUDED_REGISTRIES: dict[tuple[str, str], str] = {
     ("thinness", "_FORBIDDEN"):
         "業務邏輯樣板關鍵字黑名單（並聯診斷訊號），登記的是『禁止出現的字串』"
         "而非『被豁免／被釘選的腳本』，不屬 §4.2 的描述性常數登記面",
+    ("thinness", "_CORE_TARGET"):
+        "違規訊息的『該收斂到哪個 Python 核心』指路表（本輪 E-05b），登記的是"
+        "『既有殼 → 既有核心』的**投影**，成員本身已逐鍵計入 _PINNED_SHA256；"
+        "計入即同一筆重複計數兩次（同 _EQUIVALENCE_GROUPS 的排除理由）。"
+        "它不擴大任何豁免面——查無登記時該函式回傳 fail-loud 字樣而非放行",
 }
 
 
@@ -1520,8 +1543,6 @@ def _print_collapse() -> int:
     print(f"PINNED_SHA256={len(_thinness._PINNED_SHA256)}")
     print(f"EXEMPT_PAIRS={len(_EXEMPT_PAIRS)}")
     print(f"SINGLE_SIDED_EXEMPT={len(_SINGLE_SIDED_EXEMPT)}")
-    print(f"LATEST_THINNESS_ENROLLED={len(_LATEST_THINNESS_ENROLLED)}")
-    print(f"LATEST_PINNED_SHA256={len(_LATEST_PINNED_SHA256)}")
     print(f"MIN_EXTRACT_COUNTS={len(_MIN_EXTRACT_COUNTS)}")
     print(f"EQUIVALENCE_GROUPS={len(_EQUIVALENCE_GROUPS)}")
     print("--- _EXEMPT_PAIRS（key -> tier / reason）---")
@@ -1546,9 +1567,8 @@ def main() -> int:
         sh_items = _extract_markers(_REPO_ROOT / sh_rel)
         ps1_items = _extract_markers(_REPO_ROOT / ps1_rel)
         if not sh_items or not ps1_items:
-            print(f"❌ {label}：抽取到空標籤清單（.sh {len(sh_items)} / .ps1 "
-                  f"{len(ps1_items)}）— 宣告 pattern 可能已改，請同步本腳本",
-                  file=sys.stderr)
+            _fail(f"❌ {label}：抽取到空標籤清單（.sh {len(sh_items)} / .ps1 "
+                  f"{len(ps1_items)}）— 宣告 pattern 可能已改，請同步本腳本")
             ok = False
             continue
         ok = _check_extract_floor(label, sh_items, ps1_items) and ok
@@ -1561,30 +1581,29 @@ def main() -> int:
     # 納管完整性共用結果（R65：原 run_tlc 軌鎖已退場，見上方區塊說明）
     latest_tools = _resolve_latest_tools()
     if latest_tools is None:
-        print("❌ LATEST 解析失敗 — 無法比對 LATEST run_tlc 委派引數與薄殼 hash 釘選"
-              "（詳見下方納管完整性紅燈）", file=sys.stderr)
+        _fail("❌ LATEST 解析失敗 — 無法比對 LATEST run_tlc 委派引數與薄殼 hash 釘選"
+              "（詳見下方納管完整性紅燈）")
         ok = False
     else:
         ok = _check_run_tlc_invocation_parity(latest_tools) and ok
-        ok = _check_latest_thinness(latest_tools) and ok
+        ok = _check_latest_thinness() and ok
         ok = _check_exit_code_contract(latest_tools) and ok
 
     ok = _check_pytest_pin() and ok
     ok = _check_git_longpaths_flag_parity() and ok
     ok = _check_thinness_cross_lock() and ok
-    ok = _check_latest_thinness_cross_lock() and ok
     ok = _check_pair_enrollment(latest_tools) and ok
     ok = _check_tier_classification() and ok
     ok = _check_equivalence_groups_fresh() and ok
     ok = _check_tier_ratchet() and ok
 
     if not ok:
-        print("\n❌ 雙平台腳本對等檢查未通過 — .sh/.ps1 必須同步修改（見上列 diff）",
-              file=sys.stderr)
+        _fail("\n❌ 雙平台腳本對等檢查未通過 — .sh/.ps1 必須同步修改（見上列 diff）")
         return 1
     print(f"\n✅ 雙平台腳本對等檢查通過（{len(_MARKER_PAIRS)} 對標籤腳本 + "
           "LATEST run_tlc 委派引數鎖 + "
-          "LATEST 薄殼釘選 + LATEST 薄殼交叉鎖 + run_self_evolution 退出碼契約三方鎖 + "
+          "LATEST 薄殼釘選（委派 check_wrapper_thinness）+ 薄殼交叉鎖 + "
+          "run_self_evolution 退出碼契約三方鎖 + "
           "pytest 釘選 + git longpaths 旗標內容鎖 + "
           "成對/單邊註冊完整性；薄殼對子另由 check_wrapper_thinness 釘選）")
     return 0

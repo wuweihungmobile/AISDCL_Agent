@@ -12,6 +12,7 @@ check_script_parity._MIN_EXTRACT_COUNTS 慣例）。
 from __future__ import annotations
 
 import importlib.util
+import os
 import re
 import shutil
 import subprocess
@@ -784,6 +785,18 @@ class TestSmokeCiSync(unittest.TestCase):
 #       多筆 `NO-LOCAL-CARRIER` 的成因），要嘛靠比對散文語意（那是另一種推論，不是取證）。
 #       故此處**誠實劃界而不假裝**：本節買到的是「沒人想過這一步」與「想過、決定不做，理由
 #       如下」的區別，以及「登記指向的東西還在」；買不到的是語意等價。
+#
+#   (d) **本輪把 (c) 的天花板往上頂了半階**：載具寫成 `nightly:<token>@<腳本相對路徑>` 者，
+#       `TestNightlyCarrierReferencesResolve` 會要求 `<token>` **真的在該腳本內抓得到**。
+#       WHY 非上不可：本輪在原生 Windows 上逐列覆核 Windows 半張表時，實測抓到**兩筆假
+#       登記**——被指名的 `AutoClaude/tools/run_local_nightly.ps1` 自己的檔頭逐字否認它跑
+#       那兩件事（`run_root_unittests` 與 `ci-gate` 兩個字樣在該檔全檔命中 0）。舊守門只驗
+#       「檔案存在」，而那支腳本當然存在 ⇒ 這張表可以說謊而零訊號。`<token>` 必須挑「那一
+#       步真的被做了」的**字面證據**（被呼叫的檔名／stage 函式名），不是好聽的 stage 別名：
+#       別名只證明有人取過名字，證明不了那件事被做了。
+#       兩筆的處置：一筆因本輪另一個修復包已把根層 unittest 掛進該檔而**轉為真**（token 改
+#       成該呼叫的檔名，它若被撤回本鎖當場紅）；另一筆改判為零本機承載並寫明理由。
+#       仍未買到的：token 命中證明「該檔提到／呼叫了它」，不證明「跑的範圍與 CI 那一步相同」。
 _NO_CARRIER = "NO-LOCAL-CARRIER"
 _PARTIAL = "PARTIAL"
 _INFRA = "INFRA"
@@ -811,7 +824,7 @@ _CI_STEP_LOCAL_CARRIER: dict[str, dict[str, str]] = {
             "tools/tests/test_run_root_unittests.py::CiPrereqInstallLockTest::"
             "test_every_ci_job_running_the_runner_installs_all_external_tools 機械看守"
         ),
-        "tools/tests/（SIGPIPE 回歸鎖 + dev_start.py 平台邏輯；R3 QA 發現：paths 雖已涵蓋 tools/tests/**，但先前從未有任何 step 真的執行過，只在 root-infra-ci.yml 的 ubuntu-latest 上以 mock 跑過）": "nightly stage 2 root_unittests（tools/run_root_unittests.py）＋ pre-push root-infra leg",
+        "tools/tests/（SIGPIPE 回歸鎖 + dev_start.py 平台邏輯；R3 QA 發現：paths 雖已涵蓋 tools/tests/**，但先前從未有任何 step 真的執行過，只在 root-infra-ci.yml 的 ubuntu-latest 上以 mock 跑過）": "nightly:run_root_unittests.py@AutoClaude/tools/run_local_nightly.sh（stage 2 root_unittests）＋ pre-push root-infra leg",
         "install_mac_nightly.sh --render-only（plist 產出＋plutil -lint；鏡射本機 smoke [6]，QA-R13-3 補齊四向互鎖缺角）": "macos_smoke_local.sh [6/7]",
         "執行 tools/bootstrap.sh（全新 .venv 建立情境）": (
             f"{_NO_CARRIER}: 需在乾淨 checkout 上建立**全新** .venv；在開發者機器上跑會覆蓋"
@@ -855,7 +868,8 @@ _CI_STEP_LOCAL_CARRIER: dict[str, dict[str, str]] = {
             f"{_NO_CARRIER}: 全 repo 零自動呼叫端（R67-C19 實查：所有命中皆為文件／parity "
             "登記／薄殼守門，無任何本地流程執行它）"
         ),
-        "執行（非僅解析）AISDLC_SDD/scripts/ci-gate.sh（凍結基線 v0.01 + LATEST 雙軌）": "nightly stage 4 sdd_ci_gate（AutoClaude/tools/run_local_nightly.sh:176 sdd_gate）",
+        "執行（非僅解析）AISDLC_SDD/scripts/ci-gate.sh（凍結基線 v0.01 + LATEST 雙軌）":
+            "nightly:sdd_gate@AutoClaude/tools/run_local_nightly.sh（stage 4 sdd_ci_gate）",
         "tools/check_script_parity.py（雙平台腳本對等 + pytest 釘選一致）": "macos_smoke_local.sh [5/7]",
         "tools/check_ntfs_paths.py（NTFS 敵意檔名，全量 tracked 路徑）": "macos_smoke_local.sh [5/7]",
     },
@@ -894,7 +908,7 @@ _CI_STEP_LOCAL_CARRIER: dict[str, dict[str, str]] = {
             "tools/tests/test_run_root_unittests.py::CiPrereqInstallLockTest::"
             "test_every_ci_job_running_the_runner_installs_all_external_tools 機械看守"
         ),
-        "tools/tests/（SIGPIPE 回歸鎖 + dev_start.py 平台邏輯；R3 QA 發現：先前只在 root-infra-ci.yml 的 ubuntu-latest 上以 mock 跑過，從未在真實 Windows 執行過）": "nightly root_unittests（AutoClaude/tools/run_local_nightly.ps1）＋ pre-push root-infra leg",
+        "tools/tests/（SIGPIPE 回歸鎖 + dev_start.py 平台邏輯；R3 QA 發現：先前只在 root-infra-ci.yml 的 ubuntu-latest 上以 mock 跑過，從未在真實 Windows 執行過）": "nightly:run_root_unittests.py@AutoClaude/tools/run_local_nightly.ps1（掛在 local-ci-gate stage 內的第二道檢查）＋ pre-push root-infra leg",
         "install_windows_nightly.ps1 -WhatIf 預覽（R26 Scan-C 發現：從未在真實 CI 執行過；鏡射 macos-compat-ci.yml install_mac_nightly.sh --render-only 步驟，DEF-101-269）": "windows_smoke_local.ps1 [9/9]",
         "執行 tools/bootstrap.ps1（R1 SA 發現：Windows 新人上手入口從未被實測）": f"{_NO_CARRIER}: 同 macOS 側——需乾淨 checkout 建全新 .venv，破壞性且分鐘級",
         "重跑 tools/bootstrap.ps1（既有 .venv 沿用情境；R9 Fix-D）": f"{_NO_CARRIER}: 同上，驗證對象是「既有 .venv 沿用」路徑",
@@ -911,7 +925,15 @@ _CI_STEP_LOCAL_CARRIER: dict[str, dict[str, str]] = {
             "每次 push 都跑一次」——本地載具跑的是開發者自己那台機器"
         ),
         "執行 tools/integration_gate.ps1 -SkipFull（實際執行，非僅語法解析；P1 Architect 發現修正）": f"{_NO_CARRIER}: 同 macOS 側——integration_gate 全 repo 零自動呼叫端",
-        "執行（非僅解析）ci-gate.ps1（凍結基線 + LATEST 雙軌）": "nightly sdd ci-gate stage",
+        "執行（非僅解析）ci-gate.ps1（凍結基線 + LATEST 雙軌）": (
+            f"{_NO_CARRIER}: Windows 側零通道（本輪原生 Windows 實查）——"
+            "run_local_nightly.ps1 內唯一的 SDD stage 是 sdd-fsm-chaos"
+            "（chaos 子集），不含雙軌 pytest 與 10 道 lint 硬閘；"
+            "該檔檔頭自述此項「仍是缺口，本輪未補」。"
+            "act 也補不到：本 job runs-on=windows-latest，"
+            "見下方 _ACT_NO_LOCAL_RUNNER_JOBS。"
+            "手動出口＝在 AISDLC_SDD 下直接跑 scripts/ci-gate.ps1"
+        ),
         "install_git_hooks.ps1 安裝／解除往返驗證": "windows_smoke_local.ps1 [2/9]",
         "GitHooksInstallCommon.ps1 Assert-NotLinkedWorktree 於 linked worktree 下應正確拒絕（fail-loud；獨立複審發現：macOS 側已測、Windows 側零覆蓋 P0）": "windows_smoke_local.ps1 [3/9]＋[7/9]",
         "AISDLC_SDD/scripts/install-hooks.ps1 驗證（R1 SA 發現：第二入口從未被測到）": "windows_smoke_local.ps1 [4/9]",
@@ -1259,3 +1281,246 @@ class TestMacSmokeCliContract(unittest.TestCase):
             r"\.\s+\"\$SCRIPT_DIR/lib/windowsapps_guard\.sh\"\s*\|\|",
             "windowsapps_guard.sh 的 dot-source 未接失敗分支——載入失敗會被靜默吞掉",
         )
+
+
+# --- `nightly:<token>@<腳本>` 載具指涉解析（本輪；見上方取證邊界 (d)）--------------
+
+_NIGHTLY_CARRIER_RE = re.compile(r"nightly:([^@\s]+)@([\w./\\-]+\.(?:sh|ps1))")
+_PS1_BLOCK_COMMENT_RE = re.compile(r"<#.*?#>", re.DOTALL)
+
+
+def _script_code_only(path: Path) -> str:
+    """腳本的**可執行內容**：先剝 `.ps1` 的 `<# … #>` 區塊，再剝整行 `#` 註解。
+
+    WHY 兩層都要剝：本輪抓到的兩筆假登記中，被指名的那支 `.ps1` 檔頭區塊註解裡
+    **逐字寫著**要找的那個檔名（在說明「mac 那支有、本檔沒有」）。只剝整行 `#`
+    的話，token 會被那句「說明自己沒有」的散文滿足——鎖回報「有」，而可執行內容
+    裡一個呼叫都沒有。判準必須落在會被執行的那些行上。
+    """
+    text = _read(path)
+    if path.suffix.lower() == ".ps1":
+        text = _PS1_BLOCK_COMMENT_RE.sub("", text)
+    return _code_only(text)
+
+
+class TestNightlyCarrierReferencesResolve(unittest.TestCase):
+    """登記成 `nightly:<token>@<腳本>` 者，token 必須在該腳本的可執行內容裡抓得到。
+
+    這道鎖要擋的**具體失敗**（本輪實測，不是假想）：登記表把兩個 CI step 指給
+    `AutoClaude/tools/run_local_nightly.ps1`，而該檔當時**根本沒有**那兩件事——
+    舊守門 `test_named_local_carriers_actually_exist` 只驗「被指名的檔案存在」，
+    nightly 腳本當然存在，於是這張表可以說謊而零訊號。ONBOARDING §6.1 又刻意
+    不再重抄、直接指向本表當唯一真相源 ⇒ 任何人拿它回答「什麼只能等雲端」都會
+    得到錯的答案，而雲端此刻因帳務停擺根本不會跑。
+
+    **仍未買到的**（誠實劃界，同上方邊界 (c)）：token 命中只證明「那支腳本真的
+    呼叫／定義了它」，不證明「跑的範圍與 CI 那一步相同」。
+    """
+
+    def test_registered_nightly_tokens_exist_in_that_script(self) -> None:
+        checked = 0
+        for spec, registry in _CI_STEP_LOCAL_CARRIER.items():
+            for step, carrier in registry.items():
+                for token, rel in _NIGHTLY_CARRIER_RE.findall(carrier):
+                    checked += 1
+                    path = _REPO_ROOT / rel
+                    self.assertTrue(
+                        path.is_file(),
+                        f"{spec}::{step} 登記的 nightly 載具 {rel} 不存在",
+                    )
+                    # 用 assertTrue 而非 assertIn：後者失敗時會把整支腳本（數萬字元）
+                    # 傾印進訊息，判決句被埋在最後——與 F-09「紅不得被綠行淹掉」同族。
+                    self.assertTrue(
+                        token in _script_code_only(path),
+                        f"{spec}::{step} 登記成 nightly:{token}@{rel}，但 {rel} 的"
+                        f"可執行內容裡抓不到 {token!r}——註解裡提到不算數（那正是本鎖"
+                        f"要抓的假登記）。處置：要嘛讓該腳本真的跑它，要嘛把本列改判為 "
+                        f"{_NO_CARRIER} 並寫明理由",
+                    )
+        self.assertGreaterEqual(
+            checked, 3,
+            f"只驗到 {checked} 筆 nightly 載具指涉——登記寫法或抽取式疑似漂移"
+            f"（0 命中會讓本鎖恆真，方向正好是「看起來變乾淨」）",
+        )
+
+
+# --- act 地端通道：workflow 可達性 ＋ 零通道 job 逐個具名登記（本輪 Scan-F）--------
+#
+# WHY：`AutoClaude/tools/run_act_core.py` 原先把 workflow 寫死成模組常數，於是薄殼
+# 只指得到 autoclaude-ci.yml 一支；同一時間根層有 11 支 workflow 共 25 個 job，其中
+# root-infra-ci.yml（承載根層全部守門）與兩支 compat-CI 的 nightly 告警鏈**一個都碰
+# 不到**。本輪實測：`run_act.ps1 -List` 印 9 個 job、repo 根 `act -l` 印 25 個。而根
+# CLAUDE.md 與 ONBOARDING 都把 act 寫成「Linux 容器跑真 CI」且無任何限定詞 ⇒ 讀者會
+# 把 9/25 讀成全部。雲端帳務停擺期間，這個差是實質的驗證真空。
+#
+# 本節鎖三件事：
+#   ① 每一支帶 ubuntu runs-on 的 workflow 都指得到（`--workflow` 真的被消費）；
+#   ② 未指定旗標時的執行標的**維持原值**——零行為變更的機械證明，不是宣稱；
+#   ③ runs-on 非 ubuntu 的 job 逐個具名登記為「結構上零本機通道」，不留白。
+#
+# 邊界（誠實劃界）：只驗「指得到」與「登記完整」，**不驗那支在 act 上跑得完**。跑得完
+# 與否取決於 runner 映像缺件（pwsh/gh/ruff）與 act 0.2.89 對 `services:` 的上游 panic，
+# 兩者由 `run_act_core.preflight()` 在燒掉幾分鐘之前逐項講明，不由本節代為裁決。
+_ACT_CORE_PATH = _REPO_ROOT / "AutoClaude" / "tools" / "run_act_core.py"
+
+#: runs-on 不是 ubuntu 的 job ⇒ act 結構上零通道。值＝為何零通道 ＋ 該平台的替代出口。
+#: 判準刻意用**逐字相等**而非「只准變少」：新增一個 non-ubuntu job 時必須在這裡補一句
+#: 話。留白正是本表要治的病——這 4 個 job 先前在 repo 任何登記表裡都不存在。
+_ACT_NO_LOCAL_RUNNER_JOBS: dict[str, str] = {
+    "macos-compat-ci.yml::macos-smoke": (
+        "runs-on=macos-latest —— Docker 無 macOS 容器，act 結構上不可能有此 runner。"
+        "替代＝mac 真機直接跑 tools/macos_smoke_local.sh"
+    ),
+    "macos-compat-ci.yml::macos-nightly-full": (
+        "runs-on=macos-latest —— 同上。"
+        "替代＝mac 真機直接跑 AutoClaude/tools/run_local_nightly.sh"
+    ),
+    "windows-compat-ci.yml::windows-smoke": (
+        "runs-on=windows-latest —— act 只起 Linux 容器，Windows runner 無此通道。"
+        "替代＝Windows 真機直接跑 tools/windows_smoke_local.ps1"
+    ),
+    "windows-compat-ci.yml::windows-nightly-full": (
+        "runs-on=windows-latest —— 同上。"
+        "替代＝Windows 真機直接跑 AutoClaude/tools/run_local_nightly.ps1"
+    ),
+}
+
+#: 全庫 job 數下限（防抽取式漂移後 0 命中，讓下方每一條 for 迴圈都恆真）。
+_MIN_ACT_JOBS = 20
+#: workflow 檔數下限（同上，另一個維度）。
+_MIN_ACT_WORKFLOWS = 8
+
+
+def _load_act_core() -> ModuleType:
+    """以檔案路徑載入 `run_act_core`（不寫 sys.modules，沿用本檔 `_load_ps51_module`）。
+
+    刻意載入**模組本體**並呼叫它的函式，而不是用 regex 讀原始碼：後者只鎖得住長相，
+    「旗標宣告了但沒人消費」照樣綠——而那正是本鎖要抓的失敗形態。
+    """
+    spec = importlib.util.spec_from_file_location("_run_act_core_for_sync_lock", _ACT_CORE_PATH)
+    if spec is None or spec.loader is None:
+        raise AssertionError(f"無法載入 {_ACT_CORE_PATH}——act 地端通道鎖失效")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+class TestActWorkflowReachability(unittest.TestCase):
+    """act 薄殼的射程：全庫 workflow 都指得到，指不到的逐個具名登記。"""
+
+    def setUp(self) -> None:
+        self.core = _load_act_core()
+
+    def _target(self, argv: list[str]) -> str:
+        """在環境變數被清空的前提下解析出「實際會交給 act 的 workflow」。
+
+        WHY 要清：本機若剛好設了那個環境變數，下面的斷言會量到它而不是被測邏輯——
+        載具自身不得成為變因（本 repo 對「量測管道給假數字」已付過多次學費）。
+        """
+        saved = os.environ.pop(self.core.WORKFLOW_ENV, None)
+        try:
+            return self.core.run_workflow(self.core.parse_args(argv))
+        finally:
+            if saved is not None:
+                os.environ[self.core.WORKFLOW_ENV] = saved
+
+    def test_default_target_is_unchanged_without_the_flag(self) -> None:
+        """未給旗標＝沿用原本那支。這條是「零行為變更」的機械證明。"""
+        self.assertEqual(
+            self._target([]), self.core.WORKFLOW,
+            "未指定 --workflow 時的執行標的已被改動——加旗標不得順手改預設，"
+            "既有使用者（含文件、薄殼、AutoClaude 側呼叫端）都靠它",
+        )
+
+    def test_every_ubuntu_workflow_is_reachable_via_the_flag(self) -> None:
+        """每一支含 ubuntu job 的 workflow 都指得到，且 preflight 認得那條路徑。"""
+        rows = self.core.job_inventory()
+        self.assertGreaterEqual(
+            len(rows), _MIN_ACT_JOBS,
+            f"全庫只盤到 {len(rows)} 個 job < 下限 {_MIN_ACT_JOBS}——job 抽取式疑似漂移",
+        )
+        self.assertGreaterEqual(len(self.core.workflow_files()), _MIN_ACT_WORKFLOWS)
+        ubuntu_files = sorted({wf for wf, _j, label, _r, _s in rows if label.startswith("ubuntu")})
+        self.assertTrue(ubuntu_files, "一支帶 ubuntu job 的 workflow 都沒盤到——抽取式已壞")
+        for name in ubuntu_files:
+            rel = f"{self.core.WORKFLOW_DIR}/{name}"
+            self.assertEqual(
+                self._target(["--workflow", rel]), rel,
+                f"--workflow {rel} 沒有被消費——旗標宣告了卻沒接到執行路徑上，"
+                f"薄殼會退回只看得到單一 workflow 的狀態",
+            )
+            blockers, _warnings = self.core.preflight(rel, "")
+            self.assertEqual(
+                [b for b in blockers if "不存在" in b], [],
+                f"preflight 認為 {rel} 不存在——路徑基準（repo 相對）已不一致",
+            )
+
+    def test_workflows_without_push_are_blocked_not_silently_green(self) -> None:
+        """`on:` 不含預設事件者，必須被 preflight **阻斷**，不得零執行卻回 rc=0。
+
+        WHY 這條非有不可：本輪把 `--workflow` 接上之後，第一次真跑就踩到——act 對事件
+        對不上的 workflow 是「不跑任何 job 然後回 rc=0」，畫面上只有一行 `Using docker
+        host`。實測逐字：`--workflow …arch-fitness.yml --job pr-advisory` → ACT_RC=0、
+        零 job 執行。全庫 11 支裡有 5 支的 `on:` 不含 push ⇒ 把 workflow 指得到這件事
+        **本身**讓這個假綠第一次變得碰得到，兩者必須同批落地。
+        """
+        no_push = 0
+        for path in self.core.workflow_files():
+            events = self.core.workflow_events(path)
+            # 解析式漂移會讓 workflow_events 回空集合（刻意 fail-open，見該函式 docstring）
+            # ⇒ preflight 的事件判準整條靜默失效。那個方向看起來正好像「都沒問題」。
+            self.assertTrue(
+                events, f"{path.name} 解析不到 on: 觸發事件——事件判準會整條靜默失效",
+            )
+            rel = f"{self.core.WORKFLOW_DIR}/{path.name}"
+            hit = [
+                b for b in self.core.preflight(rel, "", self.core.DEFAULT_EVENT)[0]
+                if "觸發事件" in b  # preflight 事件不符那筆的判別詞（改措辭會讓本鎖紅）
+            ]
+            if self.core.DEFAULT_EVENT in events:
+                self.assertEqual(hit, [], f"{path.name} 有 {self.core.DEFAULT_EVENT} 觸發卻被誤擋")
+                continue
+            no_push += 1
+            self.assertTrue(
+                hit,
+                f"{path.name} 的 on: 是 {sorted(events)}，不含 {self.core.DEFAULT_EVENT}，"
+                f"preflight 卻放行——使用者會拿到零執行的 rc=0 假綠",
+            )
+            ok = [b for b in self.core.preflight(rel, "", sorted(events)[0])[0] if "觸發事件" in b]
+            self.assertEqual(
+                ok, [],
+                f"{path.name} 改用它自己接受的事件 {sorted(events)[0]} 後仍被擋——"
+                f"這條判準會變成沒有出口的死鎖",
+            )
+        self.assertGreaterEqual(
+            no_push, 1,
+            "全庫沒有任何一支缺預設事件的 workflow——若屬實可刪本鎖；更可能是 on: 抽取式"
+            "已漂移，而漂移方向正好是「看起來都沒問題」",
+        )
+
+    def test_every_ubuntu_job_has_a_runner_mapping_in_actrc(self) -> None:
+        """ubuntu job 必須在 `.actrc` 的 `-P` 映射內，否則 act 只印一行就回 rc=0＝假綠。"""
+        for wf, job, label, has_runner, _services in self.core.job_inventory():
+            if label.startswith("ubuntu"):
+                self.assertTrue(
+                    has_runner,
+                    f"{wf}::{job} runs-on={label} 不在 .actrc 的 -P 映射內 —— act 對沒有"
+                    f"映射的 runner 會印「Skipping unsupported platform」然後**回 rc=0**"
+                    f"（假綠）。處置：在根層 .actrc 補一行 -P {label}=<映像>",
+                )
+
+    def test_non_ubuntu_jobs_are_registered_as_having_no_local_channel(self) -> None:
+        """非 ubuntu 的 job 必須逐個具名登記並寫明替代出口——不得留白。"""
+        actual = {
+            f"{wf}::{job}"
+            for wf, job, label, _r, _s in self.core.job_inventory()
+            if not label.startswith("ubuntu")
+        }
+        self.assertEqual(
+            actual, set(_ACT_NO_LOCAL_RUNNER_JOBS),
+            "本機 act 零通道的 job 清單與 `_ACT_NO_LOCAL_RUNNER_JOBS` 不一致——"
+            "新增／刪除非 ubuntu 的 job 時必須同步登記。留白會讓下一位讀者以為"
+            "「act 跑得動全部 CI」，而那正是本節在治的病",
+        )
+        for key, reason in _ACT_NO_LOCAL_RUNNER_JOBS.items():
+            self.assertIn("替代", reason, f"{key} 的登記沒寫替代出口——只說「不行」不夠")

@@ -19,6 +19,35 @@
 >
 > **原文逐字保全、零刪除**（搬移非刪除，git 亦保歷史）。查詢缺陷現況一律先看主檔缺陷總表。
 
+## R77 逐列複驗（`DEF-101-792` 解鎖條件的執行紀錄）
+
+> **為什麼在這裡**：`DEF-101-792` 於 R74 立案、R76 改派 R77，解鎖條件逐字＝「逐列開啟本檔的
+> 11 筆已結列，每列各附一條當回合可重跑的複驗指令與 rc，確認無『未修卻標已修』」。紀錄寫在
+> **被複驗的對象自己這一份檔**，而不是另立一支外部證據檔——後者會漂移、且新增
+> `CrossPlatform_*.md` 需同步 crossref 的具名治理文件登記表（本輪非本包持有）。
+>
+> **結論：11 筆全部相符，零筆「未修卻標已修」。** 逐列判準與當回合實測：
+>
+> | 列 | 判準（可重跑） | 實測 |
+> |---|---|---|
+> | `DEF-101-554` | `git status --porcelain -- AISDLC_SDD/AISDLC_SDD_v0.30/governance/rules/` 需為空 | rc=0、輸出空 ⇒ 污染確已還原 |
+> | `DEF-101-416` | `AutoClaude` 下 `python tools/check_loc_budget.py --json`：`special_violations` 空且 `total < cap` | `total=20296`／`cap=20438`／violations 空 |
+> | `DEF-101-768` | `.claude/hooks/block_bash_on_windows.py` 存在且根 `.claude/settings.json` 有註冊 | 兩者皆 True |
+> | `DEF-101-432` | `AutoClaude/autoclaude/plugins/checkpoint/_escalation.py` 內仍有第 5 處自述 | 命中 1 處 |
+> | `DEF-101-393` | 所引 wontfix 判例 `DEF-101-382` 在帳本家族解析得到 | 命中 4 處 |
+> | `DEF-101-434` | `python tools/check_gha_action_versions.py` rc=0 | rc=0（4 道全過） |
+> | `DEF-101-433` | `python tools/check_script_parity.py` rc=0 | rc=0 |
+> | `DEF-101-201` | `tools/install_mac_nightly.sh` 有 launchd log 改道；`AutoClaude/tools/run_local_nightly.sh` 有 RunId log 改道 | 兩者皆 True |
+> | `DEF-101-417` | 所引 known-gap wontfix 家族（`DEF-101-019`）在帳本家族解析得到 | 命中 9 處 |
+> | `DEF-101-005` | `AISDLC_SDD/AISDLC_SDD_v0.30/tools/verify_traceability.sh` 的「或真」短路守衛 ≥ 9 處 | 15 處 |
+> | `DEF-101-564` | `docs/06_quality/CrossPlatform_Scan_Dimensions.md` 內有 Scan-H 段 | 命中 11 處 |
+>
+> **附帶量到、但刻意不改狀態的一筆**：`DEF-101-005` 散文記「9 處」而現查 15 處。判準取
+> **下限**（≥9）而非相等，正是因為那是會隨檔案長大的族群量——數字變大是該檔成長，不是誤標。
+>
+> ⚠️ **誠實劃界**：本次驗的是「該列宣稱的修復產物今天仍在／仍綠」，**不是**重跑當初的完整
+> 驗收。三筆 wontfix／裁決型（`393`／`417`／`433`）本質是決定而非產物，只驗其所引判例仍在。
+
 ## 缺陷總表（已結列，逐字保全）
 
 | ID | 發現日期 | 發現情境 | 現象與證據（file:line） | 嚴重度 | 分流去向 | 狀態 |

@@ -38,6 +38,7 @@ import re
 import shutil
 import subprocess
 import sys
+import tempfile
 import unittest
 from pathlib import Path, PureWindowsPath
 
@@ -171,6 +172,159 @@ class TestForbiddenCharsCrossConsistency(unittest.TestCase):
             self.assertNotIn(
                 "不允許字元", out, f"bash 誤攔了不在 Python 禁用集合內的字元 {ch!r}：{out!r}"
             )
+
+
+# ── R77-51：外接 oracle 對拍（本檔既有各鎖都只驗「四處彼此一致」）────────────────
+# WHY 需要一個 repo 外的裁判：本檔全部既有斷言的形狀都是「四份實作互相對照」。那種
+# 判準對「四處一起錯」**結構上恆綠**——四份都寫同一個錯的集合時，等值鎖一片綠，沒有
+# 任何東西會紅。R77 掃描實測到的正是這一格：四處一致地攔下 git 其實接受的名字。
+#
+# 裁判＝`git -c core.protectNTFS=true update-index --add --cacheinfo`（git for Windows
+# 的路徑合法性檢查，Windows 預設啟用）。它是 repo 外的第三方，不隨本 repo 的四份實作
+# 一起漂移。
+#
+# 🔴 分歧不是自動判紅：repo 判準是 protectNTFS 的**刻意嚴格超集**（掌舵者 R77 明文裁決
+# 保留過攔）。故本鎖採**雙向**判準：
+#   ① 每一筆分歧都必須在 `_ORACLE_INTENTIONAL_STRICTER` 內具名並附理由；
+#   ② 名單內每一筆都必須**真的還是分歧**——過攔哪天消失（有人「順手對齊 git」）也會紅。
+#   ③ 反方向（git REJECT 而 repo ACCEPT）一律紅、無豁免：那是漏擋，會讓 Windows clone
+#      整棵樹開不出來，正是本閘存在的理由。
+_ORACLE_SAMPLES = [
+    "CON.txt", "PRN", "AUX.txt", "NUL.log", "con.log",
+    "COM0.txt", "COM1.txt", "COM9.log", "LPT0.txt", "LPT1.txt",
+    "CONIN$.log", "CONOUT$.txt", "CLOCK$.txt", "CONIN.log", "COM10.txt",
+    "CON .txt", " CON.txt",
+    "COM¹.txt", "COM²", "LPT³.log",
+    "trailing_dot.", "trailing_space ", "normal.txt", "hello.md",
+]
+
+#: repo BLOCK 而 git ACCEPT 的刻意分歧（過攔方向）。鍵＝樣本，值＝理由。
+_ORACLE_INTENTIONAL_STRICTER = {
+    "COM0.txt": (
+        "git 只把 COM1~COM9 當裝置名，COM0 放行；本判準寫 COM[0-9] 一併擋下。"
+        "注意 git 對 LPT0 反而 REJECT——兩者在 git 側並不對稱，本判準擋下 LPT0 與 git "
+        "同結論純屬巧合。過攔一個沒人會用的檔名，成本遠低於漏擋。"
+    ),
+    "COM¹.txt": "R68 依 MS 官方保留名清單納入的上標變體；git 不檢查它們。",
+    "COM²": "同上（無副檔名形態）。",
+    "LPT³.log": "同上（LPT 系列）。",
+}
+
+
+def _git_accepts_path(repo: Path, blob_sha: str, name: str) -> bool:
+    """git（protectNTFS=true）願不願意把這個路徑放進 index。"""
+    proc = subprocess.run(
+        ["git", "-C", str(repo), "update-index", "--add", "--cacheinfo",
+         f"100644,{blob_sha},{name}"],
+        capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=30,
+    )
+    return proc.returncode == 0
+
+
+def _build_oracle_repo(tmp: Path) -> tuple[Path, str] | None:
+    """建一個拋棄式 repo 並回 (repo 路徑, 空 blob sha)；git 不可用時回 None。"""
+    if shutil.which("git") is None:
+        return None
+    repo = tmp / "oracle_repo"
+    repo.mkdir(parents=True)
+    for args in (("init", "-q"), ("config", "core.protectNTFS", "true")):
+        if subprocess.run(["git", "-C", str(repo), *args], capture_output=True,
+                          timeout=30).returncode != 0:
+            return None
+    payload = tmp / "payload.txt"
+    payload.write_bytes(b"oracle")
+    got = subprocess.run(
+        ["git", "-C", str(repo), "hash-object", "-w", str(payload)],
+        capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=30,
+    )
+    if got.returncode != 0 or not got.stdout.strip():
+        return None
+    return repo, got.stdout.strip()
+
+
+class TestReservedNameVsGitOracle(unittest.TestCase):
+    """R77-51：拿 repo 外的第三方裁判對拍，讓「四處一起錯」不再結構上恆綠。
+
+    🔴 gating 刻意綁**能力**而非平台：`is_valid_win32_path()` 只編進 git for Windows，
+    在 Linux/macOS 的 git 上 `protectNTFS` 不做保留名檢查 ⇒ 那裡的 oracle 對每個樣本都
+    回 ACCEPT，拿它對拍只會製造整批假分歧。故先探一個**已知必被 git 擋**的樣本
+    （`CON.txt`）；探不到就整組 skip 並說明「這個 git 建置沒有這道檢查」。
+    寫成平台述詞（`sys.platform == "win32"`）也能得到同樣效果，但那會把判準綁在
+    「哪個作業系統」而不是「這個載具有沒有這個能力」——後者才是真正的前提。
+    """
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        cls._tmpdir = tempfile.TemporaryDirectory(prefix="ntfs_oracle_")
+        built = _build_oracle_repo(Path(cls._tmpdir.name))
+        if built is None:
+            cls._oracle = None
+            return
+        repo, blob = built
+        # 能力探針：git 願意收下 `CON.txt` ⇒ 這個 git 建置沒有 NTFS 路徑檢查。
+        cls._oracle = None if _git_accepts_path(repo, blob, "CON.txt") else (repo, blob)
+
+    @classmethod
+    def tearDownClass(cls) -> None:
+        cls._tmpdir.cleanup()
+
+    def setUp(self) -> None:
+        if self._oracle is None:
+            self.skipTest(
+                "此 git 建置未啟用 NTFS 保留名檢查（`CON.txt` 被收下）——"
+                "外接 oracle 不可用，對拍會產生整批假分歧"
+            )
+
+    def _verdicts(self) -> dict[str, tuple[bool, bool]]:
+        """{樣本: (repo 是否 BLOCK, git 是否 ACCEPT)}。"""
+        repo, blob = self._oracle
+        return {
+            name: (check_ntfs_paths._ntfs_seg_bad(name) is not None,
+                   _git_accepts_path(repo, blob, name))
+            for name in _ORACLE_SAMPLES
+        }
+
+    def test_repo_is_never_looser_than_the_oracle(self) -> None:
+        """漏擋方向零豁免：git 擋而本判準放行 ⇒ 那個檔名會入庫，Windows clone 整棵樹開不出來。"""
+        looser = [n for n, (blocked, accepted) in self._verdicts().items()
+                  if not accepted and not blocked]
+        self.assertEqual(
+            looser, [],
+            f"本判準比 git 寬鬆的樣本：{looser}——這是漏擋方向，沒有豁免可言",
+        )
+
+    def test_every_over_block_is_named_with_a_reason(self) -> None:
+        """過攔方向要具名：未具名的分歧＝有人擴了攔截面卻沒說為什麼。"""
+        unnamed = sorted(
+            n for n, (blocked, accepted) in self._verdicts().items()
+            if blocked and accepted and n not in _ORACLE_INTENTIONAL_STRICTER
+        )
+        self.assertEqual(
+            unnamed, [],
+            f"本判準攔下 git 接受的檔名但未具名：{unnamed}。"
+            "過攔本身是允許的方向，但必須寫進 _ORACLE_INTENTIONAL_STRICTER 並附理由，"
+            "否則下一個人無從判斷那是刻意還是抄錯。",
+        )
+
+    def test_named_over_blocks_are_still_real_divergences(self) -> None:
+        """反向：豁免名單不得腐化成「歷史殘留」。
+
+        少了這一條，本鎖就只剩單邊——有人把 `COM[0-9]` 改成 `COM[1-9]`「對齊 git」時
+        （那正是掌舵者本輪明文否決的方向），豁免名單會靜靜地變成一份沒有對應現實的
+        清單，而所有測試照樣全綠。
+        """
+        verdicts = self._verdicts()
+        stale = []
+        for name, reason in _ORACLE_INTENTIONAL_STRICTER.items():
+            blocked, accepted = verdicts[name]
+            if not (blocked and accepted):
+                stale.append(f"{name}(repo_block={blocked}, git_accept={accepted})")
+            self.assertTrue(reason.strip(), f"{name} 的豁免理由是空的")
+        self.assertEqual(
+            stale, [],
+            f"豁免名單已與實況脫節：{stale}。過攔消失代表有人放寬了攔截面——"
+            "掌舵者 R77 裁決是『過攔保留、只修失實宣稱』，放寬需重新拍板。",
+        )
 
 
 class TestReservedNameCrossConsistency(unittest.TestCase):

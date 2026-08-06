@@ -27,9 +27,16 @@ on:
       - "AISDLC_SDD/AISDLC_SDD_v0.01/**"
       - "AISDLC_SDD/AISDLC_SDD_v0.02/**"
       - "AISDLC_SDD/AISDLC_SDD_v0.05/**"
-  # SD_07 W2 T2-6（PM #2）：真實 PG e2e（02:00 UTC）
-  # SD_09 W0 M-01：mutation cron 拆 3 job — TG 03:00 UTC active；GS/Coord dormant 待 W1/W2 啟用
-  # ADR-SD09-002 §2.3：單一時間 1 個 active pilot module（GS 04 / Coord 05 UTC schedule 待 W1/W2 開啟）
+  # SD_07 W2 T2-6（PM #2）：真實 PG e2e（實際 cron 見下方 schedule 區塊）
+  # SD_09 W0 M-01：mutation cron 拆 3 job — TG active（cron 見下）；GS/Coord dormant，
+  #   **目前沒有任何 cron**，只能 workflow_dispatch 手動觸發（待 W1/W2 才掛排程）
+  # ADR-SD09-002 §2.3：單一時間 1 個 active pilot module
+  # 🔴 本輪 R77-20 訂正：本段與下面兩支 dormant job 的**顯示名**原本各自寫死了一個
+  #   時刻（04:00／05:00 UTC），而 schedule 區塊裡對應的兩條 cron 是**註解掉的**
+  #   ⇒ 讀 GitHub UI 的人會以為它們每週各跑一次，實際上可觀測歷史內執行次數為 0
+  #   （全歷史零筆 workflow_dispatch，排程 run 上它們一律 skipped、steps=0）。
+  #   時刻宣稱一律以 schedule 區塊為準；沒有 active cron 的 job 名不得寫時刻。
+  #   機械物＝tools/tests/test_workflow_schedule_sync.py::TestJobNameScheduleClaims。
   # R14 CI-2 額度裁決（2026-07-20，使用者核可）：pg-e2e/perf/mutation 由每日降為每週一，
   # 對齊 macos/windows-compat weekly 的「週一深度回歸窗口」。每日兜底＝本地 nightly，
   # 且深度三軌（pg-e2e/perf/mutation）僅由 Windows 7-stage（run_local_nightly.ps1 +
@@ -302,8 +309,75 @@ jobs:
         # （結構上必有一支 skip，健康）／2 支需 W3 G3 staging／3 支 `pg_real` 由
         # `pg-e2e-nightly` 覆蓋／3 支 `claude_agent_sdk` 由主 `test` job 的 sdk extra 覆蓋／
         # 1 支需 symlink 權限（ubuntu runner 原生有）。**刻意不把它們硬塞進來**。
+        #
+        # 🔴 本輪 R77-36：上面那段「155 支由 skip 轉 passed」是一次性的量測，而**整個
+        # job 對「這 155 支到底有沒有真的跑」零斷言**——唯一的守門是上一步的
+        # `alembic current | grep -q "(head)"`，它守的是 migration 有沒有持久化，不是
+        # 測試有沒有執行。當回合注入實測（把四個 env 拿掉，等價於 env: 區塊被刪／
+        # service container 改名／DSN 打錯）：`1150 passed, 131 skipped`、**rc 仍為 0**。
+        # ⇒ 這批救回來的覆蓋可以整批靜默停跑而 job 照樣全綠，而且比原本更糟：原本是
+        # 「沒人跑過」（盤點抓得到），變成「跑過一次、之後靜默停跑」（盤點會說已補）。
+        # 故加一段 census 斷言。兩個門檻的角色**刻意不同**，不要混為一談：
+        #   · MAX_SKIPPED 是**鑑別器**：健康 40 vs 環境掉了 131，取 80（健康值的兩倍）
+        #     ——留足平台差異的餘裕（Windows-only 測試在 ubuntu 上會多 skip 幾支），
+        #     同時距離 131 仍有 51 的距離。
+        #   · MIN_PASSED 是**防塌陷地板**，不是 DSN 鑑別器（1100 < 1150，它抓不到那個
+        #     形態，這裡明說以免下一個人誤讀）。它抓的是「目錄改名／collection 壞掉／
+        #     大半測試消失」。健康值 1241。
+        # ⚠️ 誠實劃界：兩組數字都是**本機**量測（R76 的 1241/40、本輪的 1150/131）。
+        # GitHub Actions 帳務停擺中 ⇒ 本段**零雲端執行驗證**，只有 YAML 靜態驗證與
+        # 本機 bash -n。ubuntu runner 的偏移預期是個位數，若首次雲端執行落在門檻外，
+        # 正確處置是**用那次的實測值重釘門檻並記錄**，不是把門檻放寬到沒有鑑別力。
+        env:
+          PG_CONTRACT_MIN_PASSED: "1100"
+          PG_CONTRACT_MAX_SKIPPED: "80"
+        # run 本體刻意全 ASCII：runner 把它寫成暫存腳本，中文訊息在部分 shell/codepage
+        # 組合下會壞掉（同本 repo 對 `shell: powershell` 步驟立下的紀律）。中文 WHY 全在
+        # 上方註解裡——註解不會被執行。
         run: |
-          python -m pytest tests/contract/ tests/integration/ tests/infra/ -q -rs --tb=short
+          python -m pytest tests/contract/ tests/integration/ tests/infra/ -q -rs --tb=short \
+            | tee pg-contract-pytest.log
+          python - <<'PY'
+          import os, pathlib, re, sys
+
+          log = pathlib.Path("pg-contract-pytest.log").read_text(
+              encoding="utf-8", errors="replace")
+          tail = "\n".join(log.strip().splitlines()[-3:])
+
+          def count(word: str) -> int:
+              hits = re.findall(r"(\d+) " + word, tail)
+              return int(hits[-1]) if hits else 0
+
+          passed, skipped = count("passed"), count("skipped")
+          floor = int(os.environ["PG_CONTRACT_MIN_PASSED"])
+          ceiling = int(os.environ["PG_CONTRACT_MAX_SKIPPED"])
+          print(f"PG-CONTRACT-CENSUS passed={passed} skipped={skipped} "
+                f"floor={floor} ceiling={ceiling}")
+
+          # accumulate-then-report: report BOTH problems, never stop at the first one.
+          problems = []
+          if passed < floor:
+              problems.append(
+                  f"::error::PG-CONTRACT-CENSUS passed={passed} < floor={floor} -- "
+                  "collection collapsed (renamed dir / import error / tests removed). "
+                  "This floor is an anti-collapse guard, not the DSN discriminator.")
+          if skipped > ceiling:
+              problems.append(
+                  f"::error::PG-CONTRACT-CENSUS skipped={skipped} > ceiling={ceiling} -- "
+                  "the PG-gated tests this job exists to run are being skipped. Check the "
+                  "job env: block (AUTOCLAUDE_TEST_PG_DSN / AUTOCLAUDE_DB_DSN / "
+                  "AUTOCLAUDE_ALLOW_INSECURE_DB), the postgres service container name, "
+                  "and that the postgres+pgvector extras really installed. A green rc "
+                  "here without this check would mean 155 assertions silently stopped "
+                  "running (measured: healthy 1241/40, env-less 1150/131, rc=0 both).")
+          for line in problems:
+              print(line)
+          if problems:
+              print("::error::PG-CONTRACT-CENSUS failed "
+                    f"({len(problems)} of 2 checks). Skip reasons are in the -rs section "
+                    "above; do not raise these thresholds to make it green.")
+              sys.exit(1)
+          PY
 
   # SD_07 W2 T2-6（PM #2）：真實 PG e2e（pgvector + recall@10 + p95 latency）
   # 觸發：nightly schedule + 手動 workflow_dispatch
@@ -407,7 +481,8 @@ jobs:
 
   # SD_09 W0 M-01：mutation cron 拆 3 job（ADR-SD09-002 §2.3 落地）
   # 設計原則：單一時間 1 個 active pilot module，避免並行超時 + 互相干擾
-  # 排程：TG 03:00 UTC（active）/ GS 04:00 UTC（dormant，W1 啟用）/ Coord 05:00 UTC（dormant，W2 啟用）
+  # 排程：只有 TG 有 active cron（見上方 schedule 區塊）；GS／Coord 為 dormant，
+  #      無 cron、僅 workflow_dispatch（時刻宣稱一律以 schedule 區塊為準，見檔頭 R77-20）
   # 對應前身 mutation-test-nightly（SD_07 W5 T5-6 / SD_08 W3 T3-D2 pilot）
   #
   # === Job 1：TokenGuardPlugin（active pilot）===
@@ -490,12 +565,12 @@ jobs:
   # === Job 2：GoalSynthesisPlugin（dormant，待 W1 啟用）===
   # ADR-SD09-002 §2.3：單一時間 1 個 active pilot module
   # 目標：mutation score ≥ 70%（W1 啟用後納入連續 7 次達標規則）
-  # 觸發：04:00 UTC nightly + 手動 workflow_dispatch（dormant 期間僅 workflow_dispatch 允許執行）
+  # 觸發：**僅** workflow_dispatch（dormant：cron 尚未掛上，見檔頭 R77-20 訂正）
   mutation-test-goalsynthesis-nightly:
-    name: Mutation Test - GoalSynthesisPlugin (dormant W1) - 04:00 UTC
+    name: Mutation Test - GoalSynthesisPlugin (dormant W1, workflow_dispatch only)
     runs-on: ubuntu-latest
     timeout-minutes: 45
-    # dormant：暫不掛 04:00 UTC schedule（待 W1 啟用）；現階段僅 workflow_dispatch
+    # dormant：schedule 區塊內對應的 cron 仍是註解態（待 W1 啟用）；現階段僅 workflow_dispatch
     if: github.event_name == 'workflow_dispatch'
     # SD_09 W0 Z1 解除（2026-05-20，B-09）：X1/Y1/B-01/B-07/B-08 全綠後移除 continue-on-error: true
 
@@ -542,12 +617,12 @@ jobs:
   # === Job 3：OrchestrationCoordinator（dormant，待 W2 啟用）===
   # ADR-SD09-002 §2.3：單一時間 1 個 active pilot module
   # 目標：mutation score ≥ 65%（W2 啟用後納入連續 7 次達標規則）
-  # 觸發：05:00 UTC nightly + 手動 workflow_dispatch（dormant 期間僅 workflow_dispatch 允許執行）
+  # 觸發：**僅** workflow_dispatch（dormant：cron 尚未掛上，見檔頭 R77-20 訂正）
   mutation-test-coordinator-nightly:
-    name: Mutation Test - OrchestrationCoordinator (dormant W2) - 05:00 UTC
+    name: Mutation Test - OrchestrationCoordinator (dormant W2, workflow_dispatch only)
     runs-on: ubuntu-latest
     timeout-minutes: 45
-    # dormant：暫不掛 05:00 UTC schedule（待 W2 啟用）；現階段僅 workflow_dispatch
+    # dormant：schedule 區塊內對應的 cron 仍是註解態（待 W2 啟用）；現階段僅 workflow_dispatch
     if: github.event_name == 'workflow_dispatch'
     # SD_09 W0 Z1 解除（2026-05-20，B-09）：X1/Y1/B-01/B-07/B-08 全綠後移除 continue-on-error: true
 

@@ -413,6 +413,165 @@ class UntaggedWindowsLikeSkipsTest(unittest.TestCase):
         self.assertEqual(rc_tagged, 0, "補上標籤後同一棵樹必須轉綠——否則本鎖無法被滿足")
 
 
+class WindowsSkipTagExemptionSelfCheckTest(unittest.TestCase):
+    """本輪：具名豁免表 `_WINDOWS_SKIP_TAG_EXEMPT` 的 stale／格式自檢。
+
+    WHY（實測到的缺口，不是理論）：動工前往該表塞一筆指向不存在檔案的豁免、以及
+    一筆指向真檔但根本不需要豁免的條目，整支本檔（73 tests）兩次都**零 failure**。
+    對照組是同一支 runner 的姊妹表 `_COLLECTION_EXEMPT`：塞一筆多餘豁免當場紅。
+    ⇒ 同一個 repo 對「豁免表要有 stale 自檢」有明確認知，卻只實作在兩張表中的一張；
+    本表現在是空的所以看起來乾淨，第一筆進去的那天起它就是一張只進不出的永久豁免表。
+
+    本組鎖的是判準本身（純函式 ＋ 合成注入），另加一支接線鎖確認 rc 真的被消費。
+    """
+
+    def _result_with_skips(self, *skips: tuple[str, str]) -> unittest.TestResult:
+        class _T:
+            def __init__(self, tid: str) -> None:
+                self._tid = tid
+
+            def id(self) -> str:
+                return self._tid
+
+        result = unittest.TestResult()
+        result.skipped = [(_T(tid), reason) for tid, reason in skips]
+        return result
+
+    def test_an_exemption_that_suppresses_nothing_is_stale(self) -> None:
+        """注入：豁免指向的站點在「當表是空的」重掃裡根本不會被判違規 ⇒ 必紅。"""
+        problems = windows_skip_tags.exemption_problems(
+            {"m.C.test_gone": "R70 起改走別的路，暫時豁免"},
+            flagged_without_exempt={},
+        )
+        self.assertEqual(len(problems), 1, problems)
+        self.assertIn("stale", problems[0])
+
+    def test_an_exemption_that_still_suppresses_something_is_accepted(self) -> None:
+        """對照組：仍在壓住真違規的豁免必須放行，否則本鎖無法被滿足。"""
+        self.assertEqual(
+            windows_skip_tags.exemption_problems(
+                {"m.C.test_x": "R70 複查：本機 docker 供給問題，非平台語意"},
+                flagged_without_exempt={"m.C.test_x": "需要 Windows 主開發機才有的 docker"},
+            ),
+            [],
+        )
+
+    def test_an_exemption_without_a_handover_round_is_flagged(self) -> None:
+        """格式面：沒寫承接輪次的豁免＝沒有人負責拿掉它。"""
+        problems = windows_skip_tags.exemption_problems(
+            {"m.C.test_x": "本機 docker 供給問題，非平台語意"},
+            flagged_without_exempt={"m.C.test_x": "需要 Windows 的 docker"},
+        )
+        self.assertEqual(len(problems), 1, problems)
+        self.assertIn("承接輪次", problems[0])
+
+    def test_the_stale_face_is_off_when_the_detector_is_silent(self) -> None:
+        """🔴 Scan-H⑥ 互鎖：偵測器在 Windows 上整組早退，此時不得判 stale。
+
+        沒有這一條，Windows 上每一筆合法豁免都會被判 stale ＝整片假紅，而那個早退
+        本身是對的（見 `untagged_windows_like_skips` 的 WHY）。
+        """
+        self.assertEqual(
+            windows_skip_tags.exemption_problems(
+                {"m.C.test_x": "R70 複查：非平台語意"}, flagged_without_exempt=None),
+            [],
+        )
+
+    def test_the_live_table_passes_its_own_check(self) -> None:
+        """現況自檢：活體表（讀 assert 當下的模組屬性，不快照）必須合格。"""
+        self.assertEqual(
+            windows_skip_tags.exemption_problems(
+                windows_skip_tags._WINDOWS_SKIP_TAG_EXEMPT), [])
+
+    def test_the_check_is_wired_into_the_runner_and_reds_the_run(self) -> None:
+        """接線鎖 ＋ rc 鎖：單元測了卻沒接線、或接線了不改 rc，都是假綠。
+
+        注入方式刻意是 `mock.patch.dict` **活體模組屬性**——`run_root_unittests`
+        的名字與 `windows_skip_tags` 的必須是同一個 dict，否則既有的 patch 契約
+        （見 `test_hints_and_tag_are_shared_with_the_runtime_lock_not_copied`）
+        已經悄悄退化成兩份副本。
+        """
+        result = self._result_with_skips(("m.C.test_x", "一般性 skip，與平台無關"))
+        buf = io.StringIO()
+        with mock.patch.object(windows_skip_tags.os, "name", "posix"), \
+             mock.patch.dict(run_root_unittests._WINDOWS_SKIP_TAG_EXEMPT,
+                             {"m.C.test_gone": "R70 暫時豁免"}, clear=False), \
+             contextlib.redirect_stdout(buf), contextlib.redirect_stderr(buf):
+            problems = run_root_unittests.report_windows_skip_tag_exemption_problems(result)
+        self.assertEqual(len(problems), 1, problems)
+        self.assertIn("m.C.test_gone", buf.getvalue(), "必須逐筆點名，否則讀者不知道刪哪一筆")
+
+    def test_real_run_with_floor_reds_on_a_bad_exemption(self) -> None:
+        """端到端常駐對照組：合成樹本身乾淨，只有豁免表壞掉 ⇒ rc 必須由 0 變 1。
+
+        沒有這一支，「印了紅字卻照樣 rc=0」這種 fail-open 不會被任何東西看見。
+        注入的是**格式面**（沒有承接輪次）——它不分平台，故本支在三個平台都說話。
+        """
+        base = Path(tempfile.mkdtemp(prefix="rru_exempt_"))
+        self.addCleanup(lambda: shutil.rmtree(base, ignore_errors=True))
+        mod = "test_fixture_clean_for_exempt"
+        self.addCleanup(lambda: sys.modules.pop(mod, None))
+        (base / f"{mod}.py").write_text(
+            textwrap.dedent(
+                """\
+                import unittest
+
+
+                class Dummy(unittest.TestCase):
+                    def test_a(self):
+                        self.assertTrue(True)
+
+                    def test_b(self):
+                        self.assertTrue(True)
+                """
+            ),
+            encoding="utf-8",
+        )
+        with contextlib.redirect_stdout(io.StringIO()), \
+             contextlib.redirect_stderr(io.StringIO()):
+            rc_clean = run_root_unittests.run_with_floor(base, min_tests=2)
+            with mock.patch.dict(run_root_unittests._WINDOWS_SKIP_TAG_EXEMPT,
+                                 {"m.C.test_x": "沒有承接者的理由"}, clear=False):
+                rc_bad = run_root_unittests.run_with_floor(base, min_tests=2)
+        self.assertEqual(rc_clean, 0, "乾淨樹必須 rc=0——否則下一條比較沒有意義")
+        self.assertEqual(rc_bad, 1, "豁免表壞掉時 rc 仍為 0 ⇒ 判準沒有接進 rc（fail-open）")
+
+
+class UnregisteredSkipTagVocabularyTest(unittest.TestCase):
+    """本輪：`ALL_SKIP_TAGS` 的**成員檢查**（R76 §3 finding F3，當輪未修）。
+
+    WHY：該常數此前只被用來「比對已知標籤」，沒有任何機械物反向問「這個看起來像
+    標籤的字面有沒有登記過」⇒ 發明一個新標籤是零成本的，而後果是人看起來有標籤、
+    機器看起來沒標籤，同一支 skip 在兩份報表上分類不一致。
+    """
+
+    def test_an_unregistered_tag_beyond_the_ratchet_is_flagged(self) -> None:
+        """語料含存量那一筆（讓它對帳），另加一個未登記標籤 ⇒ 只該多出一筆問題。"""
+        problems = windows_skip_tags.unregistered_tag_problems(
+            ["[CARRIER-NO-DISCRIMINATION] 存量那一筆", "[TOOL-MISSING] ruff 不在 PATH"])
+        self.assertEqual(len(problems), 1, problems)
+        self.assertIn("[TOOL-MISSING]", problems[0])
+        self.assertIn(windows_skip_tags.TOOL_ABSENCE_SKIP_TAG, problems[0],
+                      "訊息須給出可行動的替代標籤，否則作者只能再發明一個")
+
+    def test_registered_tags_and_untagged_reasons_are_accepted(self) -> None:
+        """對照組：已登記標籤與完全沒有標籤的 reason 都不歸本判準管。"""
+        self.assertEqual(
+            windows_skip_tags.unregistered_tag_problems(
+                [f"{tag} 說明" for tag in windows_skip_tags.ALL_SKIP_TAGS]
+                + ["本機缺 docker daemon"]
+                + ["句中提到 [SOME-MARKER] 但不在開頭"]
+                + ["[CARRIER-NO-DISCRIMINATION] 存量那一筆"]),
+            [],
+        )
+
+    def test_clearing_the_debt_also_speaks(self) -> None:
+        """棘輪雙向：存量清掉而沒下修，訊息必須指名要改哪一個常數。"""
+        problems = windows_skip_tags.unregistered_tag_problems([])
+        self.assertEqual(len(problems), 1, problems)
+        self.assertIn("_UNREGISTERED_TAG_DEBT", problems[0])
+
+
 class StaticWindowsSkipTagScanTest(unittest.TestCase):
     """R72：`[WINDOWS-NATIVE-ONLY]` 標籤完整性的**靜態、跨平台**鎖。
 

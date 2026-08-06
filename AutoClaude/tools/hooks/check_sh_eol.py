@@ -71,6 +71,13 @@ _MONOREPO_ROOT = _AUTOCLAUDE_ROOT.parent
 PROJECT_ROOT = _MONOREPO_ROOT
 
 sys.path.insert(0, str(_MONOREPO_ROOT / "tools" / "lib"))
+# 本檔會被 `runpy.run_path()`（.claude/settings.json 的 shim）與
+# `importlib.util.spec_from_file_location()`（單元測試）載入，兩者都**不會**把本檔所在
+# 目錄放進 sys.path ⇒ 同層模組必須自己接上，否則 hook 會在 import 期炸掉。
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from hook_path_scope import (  # noqa: E402
+    repo_relative_posix as _repo_relative_posix,  # type: ignore[import-not-found]
+)
 from platform_utils import (  # noqa: E402
     init_utf8_streams as _init_utf8_streams,  # type: ignore[import-not-found]
 )
@@ -105,15 +112,19 @@ def read_hook_payload() -> dict:
 
 
 def normalize_rel_path(file_path: str) -> Path | None:
-    if not file_path:
-        return None
-    try:
-        p = Path(file_path)
-        if p.is_absolute():
-            return p.resolve().relative_to(PROJECT_ROOT)
-        return p
-    except (ValueError, OSError):
-        return None
+    """payload 路徑 → 相對 PROJECT_ROOT 的 Path；不在樹內回 None（→ main 放行）。
+
+    🔴 正規化本體住共用層 `hook_path_scope.py`（與 `enforce_docs_path.py` 同一份實作）。
+    舊版直接吃 `resolve().relative_to(PROJECT_ROOT)` 的 flavour 語意：`PureWindowsPath`
+    的 `relative_to` 不分大小寫、`PurePosixPath` 的分 ⇒ 在 POSIX 上只要 root 前綴大小寫
+    對不上就拋 ValueError → 回 None → 本 hook **整支靜默略過**（CRLF 守衛 fail-open，
+    沒有人會發現）。純字面 casefold 比對讓兩種 flavour 對同一組輸入同判決。
+
+    回傳型別維持 `Path`：下游用到 `rel.suffix` / `rel.parts` / `PROJECT_ROOT / rel`，
+    改成 str 會讓那些站點靜默改變語意。
+    """
+    rel_posix = _repo_relative_posix(file_path, PROJECT_ROOT)
+    return None if rel_posix is None else Path(rel_posix)
 
 
 def _has_cr(raw: bytes) -> bool:

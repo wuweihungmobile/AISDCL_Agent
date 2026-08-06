@@ -344,6 +344,130 @@ def run_level_fail_open(root: Path, workflow: str) -> str | None:
             f"「深度回歸也綠」）")
 
 
+# ── 本輪 R77-06b：push 閘的 never-started 比率（本模組原本整片看不見的那一半）─────
+#
+# 🔴 缺陷本體（唯讀 gh 實查，非推論）：本模組的掃描面 ＝ `scheduled_workflow_periods()`
+# ＝**只認有 `on.schedule.cron` 的 workflow**。而 `root-infra-ci.yml` 與
+# `aisdlc-sdd-ci.yml` 沒有 cron ⇒ 這支哨兵一輩子不會看它們——偏偏它們正是 **push 軌的
+# 主閘門**。本輪以近 100 筆／軌的視窗實查：兩者分別有 73／42 筆 run 的 job 從未被配置
+# runner（`steps` 長度 0 ＋ annotation 逐字為帳務／額度訊息），橫跨十餘個日曆天，
+# 而全 repo **零機械物**在量這個數字。同期本模組實跑的結論是「零陳舊軌」——它沒有說謊，
+# 它只是**結構上看不到**那一半。
+#
+# 🔴 為何不塞進 `scheduled_workflow_periods()`：那張表的值是 `cron_period_days`，無 cron
+# 的 workflow 沒有值可填，硬塞只會讓「陳舊」判準對它們恆真或恆假。push 軌要問的是
+# **另一個問題**：不是「多久沒成功了」，而是「最近這批 run 裡有多少根本沒被配置 runner」。
+# 故獨立成判準，並接進 `stale_schedule_tracks()` 的回傳——那是本模組唯一有消費者的
+# 出口（`tools/dev_start.py`）。偵測到卻沒接線＝使用者一輩子看不到，本 repo 已為這個
+# 形態付過學費。
+
+#: 帶 `push:` 觸發的 workflow 判準（**本模組是 SSOT**；同 `JOB_FAIL_OPEN_RE` 的體例
+#: ——`tools/tests/test_doc_loc_baseline_freshness_r60.py` 已有一份逐字相同的複本，
+#: 應改為消費本常數，兩份判準同時漂移正是本 repo 反覆吃過的病）。
+PUSH_TRIGGER_RE = re.compile(r"^  push:", re.M)
+#: never-started 的**代理**判準：結論 failure ＋ 牆鐘時長 ≤ 本值。
+#: 🔴 這是代理不是量測（誠實劃界）：真正的判準是逐 run 讀 `jobs[].steps|length == 0`
+#: ＋ annotation 關鍵字，成本約每筆一次 API 呼叫，與本模組的秒級掃描預算不成比例。
+#: 門檻取 10 秒而不是 20：實測有一筆 15 秒的 failure 是**真紅**（steps=26），
+#: 收緊的代價是可能少算幾筆——失效方向刻意選「少報」而非「冤枉」。
+NEVER_STARTED_MAX_SECONDS = 10.0
+#: 出聲門檻。取 1/4：低於此比率可能是零星的 runner 抖動，高於此就不是抖動了。
+PUSH_NEVER_STARTED_RATIO = 0.25
+#: 樣本下限。小樣本的比率沒有意義（2 筆裡有 1 筆＝50%），硬報只會製造噪音。
+PUSH_NEVER_STARTED_MIN_SAMPLE = 20
+#: 每軌取樣筆數＝「視窗」的定義。🔴 視窗是**截斷**的：視窗下緣不是問題的起點，
+#: 不得把「視窗內最早那一筆的日期」讀成「這件事從那天開始」。
+PUSH_SAMPLE_LIMIT = 50
+
+
+def push_triggered_workflows(root: Path) -> list[str]:
+    """帶 `push:` 觸發的 workflow 檔名（現查，不存第二份會腐化的字面清單）。"""
+    out: list[str] = []
+    for f in sorted((root / ".github" / "workflows").glob("*.yml")):
+        try:
+            text = f.read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            continue
+        if PUSH_TRIGGER_RE.search(text):
+            out.append(f.name)
+    return out
+
+
+def _push_runs(workflow: str) -> list[dict] | None:
+    """該 workflow 最近 `PUSH_SAMPLE_LIMIT` 筆 **push** 事件的 run；查不到回 None。"""
+    try:
+        r = subprocess.run(
+            ["gh", "run", "list", "--workflow", workflow, "--event", "push",
+             "--limit", str(PUSH_SAMPLE_LIMIT), "--json",
+             "conclusion,startedAt,updatedAt"],
+            timeout=15, capture_output=True, encoding="utf-8", errors="replace")
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+    if r.returncode != 0:
+        return None
+    try:
+        runs = json.loads(r.stdout or "[]")
+    except ValueError:
+        return None
+    return runs if isinstance(runs, list) else None
+
+
+def never_started_count(runs: list[dict]) -> int:
+    """代理判準的命中數（見 `NEVER_STARTED_MAX_SECONDS` 的誠實劃界）。"""
+    hits = 0
+    for run in runs:
+        if not isinstance(run, dict) or run.get("conclusion") != "failure":
+            continue
+        started, updated = run.get("startedAt"), run.get("updatedAt")
+        if not started or not updated:
+            continue
+        try:
+            delta = (datetime.fromisoformat(str(updated).replace("Z", "+00:00"))
+                     - datetime.fromisoformat(str(started).replace("Z", "+00:00")))
+        except ValueError:
+            continue
+        if 0 <= delta.total_seconds() <= NEVER_STARTED_MAX_SECONDS:
+            hits += 1
+    return hits
+
+
+# 三種「不出聲」各有理由，缺一就會回到本模組原本的病：
+#   · 查不到（gh 不在／逾時／回應壞掉）⇒ 跳過。無訊號 ≠ 壞訊號。
+#   · 樣本 < `PUSH_NEVER_STARTED_MIN_SAMPLE` ⇒ 跳過。小樣本比率是噪音。
+#   · 比率 ≤ 門檻 ⇒ 跳過（零噪音原則，同 `multi_cron_blind_spot`）。
+# 預算用盡時**會出聲**（不是靜默截斷）——除非進場時預算就已用盡，那種情況
+# `stale_schedule_tracks()` 的排程迴圈已經印過一次「掃描未完成」，不重複吵。
+def push_gate_never_started(root: Path, deadline: float) -> list[str]:
+    """push 軌 never-started 比率超標的描述清單（空＝正常／樣本不足／查不到）。"""
+    workflows = push_triggered_workflows(root)
+    findings: list[str] = []
+    if not workflows or time.monotonic() > deadline:
+        return findings
+    for index, wf in enumerate(workflows):
+        if time.monotonic() > deadline:
+            rest = workflows[index:]
+            findings.append(
+                f"push 閘 never-started 巡檢未完成——預算用盡，{len(rest)} 軌未查"
+                f"（{'／'.join(rest)}）：其狀態**未知**，不是健康")
+            break
+        runs = _push_runs(wf)
+        if runs is None or len(runs) < PUSH_NEVER_STARTED_MIN_SAMPLE:
+            continue
+        hits = never_started_count(runs)
+        ratio = hits / len(runs)
+        if ratio <= PUSH_NEVER_STARTED_RATIO:
+            continue
+        findings.append(
+            f"{wf}（**push 閘 never-started {hits}/{len(runs)}＝{ratio:.0%}**：這些 run "
+            f"的結論是 failure 但牆鐘時長 ≤{NEVER_STARTED_MAX_SECONDS:.0f} 秒 ⇒ runner "
+            f"多半根本沒被配置（帳務／額度平面），**不是**測試紅。含意：這段期間任何"
+            f"「push 軌全綠」宣稱都不成立，而且**不得假設雲端會接住任何東西**。"
+            f"兩點誠實劃界：①本判準是代理指標，逐 run 的權威判法是 "
+            f"`gh run view <id> --json jobs` 看 `steps` 長度是否為 0 ＋ 讀 annotation；"
+            f"②取樣視窗只有最近 {PUSH_SAMPLE_LIMIT} 筆，**視窗下緣不是問題的起點**）")
+    return findings
+
+
 def _scan_order(periods: dict[str, float], ref: datetime) -> list[tuple[str, float]]:
     """掃描順序：依日期輪轉起點（R71 E-2）。
 
@@ -375,6 +499,9 @@ def stale_schedule_tracks(root: Path, deadline: float,
       ③ 掃描面本身的自白：預算截斷未查了哪幾軌（E-2）、哪支檔的 run 層判定
          結構上不構成證據（E-1 多 cron／R74 `continue-on-error` run 層 fail-open）。
          **未查 ≠ 健康**，靜默截斷正是哨兵自己的盲區。
+      ④ 本輪 R77-06b 起：**push 閘**的 never-started 比率（見
+         `push_gate_never_started`）。前三類全部只看有 cron 的 workflow，而 push 軌的
+         主閘門（root-infra-ci／aisdlc-sdd-ci）沒有 cron ⇒ 結構上不在前三類的視野內。
     """
     ref = now or datetime.now(UTC)
     findings: list[str] = []
@@ -412,4 +539,6 @@ def stale_schedule_tracks(root: Path, deadline: float,
         note = _schedule_axis_note(ts, att)
         if note:
             findings.append(f"{wf}（{note}）")
+    # ④ push 閘（R77-06b）：接在同一個出口，否則偵測到也沒人看得到。
+    findings += push_gate_never_started(root, deadline)
     return findings

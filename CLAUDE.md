@@ -57,7 +57,7 @@ monorepo 根目錄（`AISDCL_Agent/`，各機器 checkout 路徑不同）底下�
 
 > 🔴 **R74 訂正：上面兩條 hook 的射程（DEF-101-798）**。本節此前把 `enforce_docs_path.py` 寫成「強制」、把 `check_lang.py` 寫成「另有」（兩支皆**僅 AutoClaude 子專案 session** 生效），讀起來像是**在本檔生效的環境裡**也會攔。實查 `AutoClaude/.claude/settings.json` 註冊 6 支 hook，而 Claude Code **不會**遞迴子目錄載 hook（見記憶 `sdd-claude-hooks-skills-loading`）⇒ 在 monorepo 根 session（＝本檔被載入的那種 session）下，**只有被根 `.claude/settings.json` 明文橋接的那幾支會跑**。現況（R75 訂正、逐行實查根 `.claude/settings.json`）：
 >
-> - **已橋接到根層、在根 session 會跑＝2 支**：`check_ps1_encoding.py`（根 `.claude/settings.json` 第 59 行）、`check_sh_eol.py`（同檔第 64 行）。
+> - **已橋接到根層、在根 session 會跑＝2 支**：`check_ps1_encoding.py`、`check_sh_eol.py`（兩支同住根 `.claude/settings.json` 內 `PostToolUse` 事件、matcher 為 `Write|Edit` 的那**一個**區塊。🔴 **R77 訂正：此處原本以寫死行號指認橋接站點**——而守本段的機械物比的是「hook 名稱 ↔ 有沒有真的被註冊」，**不比行號**；該檔增刪任一 hook 區塊就會讓那兩個行號同時失準，而不會有任何東西轉紅。錨改成「事件＋matcher」這種改了就是真的改了的形狀；要確切位置就現查一次：用 Grep 工具在該檔搜這兩個檔名）。
 > - **未橋接、在根 session 一行都不會跑＝4 支**：`enforce_docs_path.py`／`loc_budget_check.py`／`check_lang.py`／`claude_md_freshness.py`，四支皆**僅 AutoClaude 子專案 session** 生效。
 >
 > 🔴 **為何需要二次訂正（同一段訂正文自己成了假話）**：R74 第一版的橋接支數少算一支——同一個 commit（`a371068`）的另一個包已把 `check_sh_eol.py` 補進根層 wiring，訂正文卻仍把它歸在「不會跑」那一組，於是這段話**在寫下的當回合就與磁碟不符**。當時的鎖判準是 OR（已註冊**或**該行標明子專案射程），「已註冊**且**被某一行寫成不會跑」這個組合結構上恆綠 ⇒ 沒有任何東西轉紅。
@@ -127,6 +127,12 @@ Get-ScheduledTask -TaskName '<名稱>' | Get-ScheduledTaskInfo |
 
 > **為何特立此節**：R71（Windows 真機輪）實測記錄到 8 筆操作失誤，逐筆歸因後 **5 筆是平台相關、3 筆無關**。掌舵者觀察「在 Windows 常犯低級錯誤、在 mac 好像不會」屬實，但根因**不是**「Windows 上比較不小心」——是**同時操作兩個 shell 造成的決策負荷**。每下一個指令要同時決定：用哪個 shell／什麼編碼／哪種路徑格式／cwd 現在在哪／這支腳本拒不拒絕這個載具。mac 側這六項全部不存在。**被這些決策擠掉的注意力，正是「查權威源再宣稱」那類紀律失守的原因**——所以連平台無關的錯，密度也在 Windows 側偏高。
 
+> 🔴 **R77 訂正上一段結論的射程（原句對 R71 那 8 筆為真，但它被當成現行結論用了五輪，期間沒有任何一輪重跑那次歸因）**：R77 以 R71~R76 全部自陳的失誤列重跑一次分群（樣本數是當初的數倍），結果是「**選錯載具**」只佔約五分之一，最大宗（約四成）是「**鎖存在但沒有鑑別力／射程失明**」，其次才是「宣稱先於查證」與「取數管道給假數字」。完整答案是三層疊加：
+> ① **決策負荷**（R71 已答，且已由鐵律一＋PreToolUse 阻斷解決——逐字稿稽核實測「1 次嘗試、1 次攔下」）；
+> ② **失誤發生的那個平面上一個觀測者都沒有**：inline 指令字串、rc 讀數、宣稱本身，既不匹配任何現行 hook matcher，也**永遠不會變成 repo 裡的檔案** ⇒ 全部靜態掃描器結構上看不到它；
+> ③ **護欄自己是最大單一缺陷來源**——這一桶不會因為多加一道鎖而變小。
+> 🔴 **這段歸因是量測值、不是常數**：每輪重跑一次，分群腳本與桶的判準要具名可重跑；**確切百分比不得被引用為常數**（分群是關鍵詞啟發式，量級穩健、小數不穩健）。
+
 ### 鐵律一：Windows 上**禁用 Bash 工具**，一律走 PowerShell 工具
 
 > 🔴 **這是掌舵者 2026-08-03 的直接指令**（原文：「只使用 PowerShell 5.1, 不用 Git Bash ==> 請遵守」），
@@ -135,7 +141,8 @@ Get-ScheduledTask -TaskName '<名稱>' | Get-ScheduledTaskInfo |
 
 | 需求 | 載具 | 理由 |
 |------|------|------|
-| **一切 shell 指令** | **PowerShell 工具** | schtasks／生產環境跑的就是 `powershell.exe`（PS 5.1），載具對齊＝驗證條件對齊 |
+| **一切 shell 指令** | **PowerShell 工具** | 「兩個載具擇優」本身就是那個要付出注意力的決策（見本節開頭掌舵者的直接指令），移除它換到的失誤下降遠大於效率損失。<br>🔴 **R77 訂正本欄的理由（原理由已被雙引擎實測推翻，故不逐字複述）**：這個工具跑的是 **pwsh 7.x（Core）**；`powershell.exe`（Windows PowerShell 5.1）是 **schtasks 兩支 job 的 Action** 在跑的那一支。兩者**不是同一個引擎**，所以本欄不能拿「載具與生產環境對齊」當理由。代價已經發生：照本欄直接在工具內跑 Windows smoke，會被該腳本自己的引擎守衛擋下（實測 rc=1，訊息逐字要求 5.1）。差異今天量得到——同一份 `[Parser]::ParseFile` 探針掃全庫 `.ps1`，兩引擎的預設編碼不同而解析失敗數不同（現查為準，本檔不寫死支數）。<br>🔴 **推論（新規則）**：凡標的是 **PS 5.1 語意**者（`tools/windows_smoke_local.ps1`、`tools/install_windows_nightly.ps1`、任何 schtasks Action），**一律顯式外呼** `powershell.exe -NoProfile -ExecutionPolicy Bypass -File <絕對路徑>`；在本工具內直接跑得到的是另一個引擎的行為。 |
+| **讀取指令的 rc** | 指令**不接管線**（要看輸出就先接到變數再讀 `$LASTEXITCODE`），或乾脆讓 Python 用 `subprocess.run(...).returncode` 取 | 🔴 **R77 訂正本條的理由（此前記載的風險方向與實測相反，故不逐字複述）**：提前結束管線的元素（`Select-Object -First N`）會讓 `$LASTEXITCODE` 不可信，但**污染值隨引擎而異**——工具實際跑的 pwsh 7.x 上實測會**保留前一個值**（受測程式真 rc=3、讀到 **0**，3/3 重現）＝**真紅被讀成綠**；PS 5.1 上同一支腳本寫入 **-1**。連 `2>&1` 這種與 rc 毫無語意關係的細節都會翻轉結果 ⇒ **沒有一個方向可以靠記憶避開**。`-Last N` 不提前結束管線，兩引擎實測皆不污染——但別把它當白名單背，規則就是「讀 rc 不接管線」。 |
 | `.sh` 腳本 | **PowerShell 內**用 repo 既有 SSOT 解析 Git Bash ＋ **正斜線**腳本路徑：<br>`. "$(git rev-parse --show-toplevel)/tools/lib/Find-GitBash.ps1"; & (Find-GitBash) -n '<正斜線腳本路徑>'` | 這是「執行一支 .sh」不是「用 Bash 當載具」，兩者別混淆。同 `tools/git-hooks/pre-push` 既有作法。<br>🔴 **不可寫裸 `bash <script>`**——`Get-Command bash` 解析到 `C:\WINDOWS\system32\bash.exe`（WSL 佔位／真 WSL），且反斜線路徑會被吃掉。R72 實測逐字：`/bin/bash: D:CursorProjectAISDCL_Agenttoolsinstall_mac_nightly.sh: No such file or directory`（rc=127，注意 `D:` 後的分隔符全部消失）。**與 DEF-101-617/618 的 WSL 佔位版誤解析同源**。<br>🔴 **R73 訂正（DEF-101-778）**：本欄 R72 版改成寫死 `C:\Program Files\Git\bin\bash.exe`——治好了裸 `bash`，卻把**一台機器的安裝路徑寫成了本檔的常數**，Git 裝在別處的 checkout 一律照著失敗；而 repo 自己早就有 `tools/lib/Find-GitBash.ps1`（含 system32/WSL 逐段排除，R60 P10-2 加固）。**同一份知識住兩個家、只有一個家被鎖**——而它發生在專門用來防這件事的這一節自己身上。R73 雙引擎實測：`Find-GitBash` → `C:\Program Files\Git\bin\bash.exe`（5.1 與 7.6.4 皆同），對照 `Get-Command bash` → `C:\WINDOWS\system32\bash.exe`（兩引擎皆誤），SSOT 版 `-n` 語法檢查 rc=0 |
 | 讀檔／搜尋／算行數 | **Read／Grep 工具**，不經 shell | 🔴 **編碼邊界雙向都會出錯**，不是只有「Bash 讀 PS 輸出」那一向。R71 同輪兩次實證：① Git Bash `grep` 讀 CP950 的 PS 輸出 → 命中 0、誤判「沒有失敗行」；② PowerShell `Get-Content` 以 CP950 讀 UTF-8 的 `CLAUDE.md` → 回報「237 行／最長 962 codepoints」，python 實際「324 行／無任何行 >800」——**兩個數字都假，且假在會讓人誤以為破閘的方向**。要在 shell 內算就必須指名 `-Encoding utf8`，但更省事的是根本不用 shell |
 | ❌ **Bash 工具** | **禁用** | R71 實測兩次事故：① `windows_smoke_local.ps1` 被 MSYS 守衛擋下（rc=1，DEF-101-511 刻意設計）；② Git Bash 去 grep CP950 編碼的 PS 輸出 → 命中 0、**誤判「沒有失敗行」** |
@@ -180,7 +187,9 @@ R71 最諷刺的一筆：在修一個 Windows 專屬缺陷（DEF-101-759）時�
 | `Get-Command` 解析 | **無機械物**（`tools/tests/test_find_git_bash_parity.py` 只守 `Find-GitBash` 這一個消費者，不是判準本身；🔴 R75 訂正：此格原先只寫裸檔名，任何以路徑為單位的鎖都解析不到它） | 只有那一個站點會紅 |
 | 大小寫敏感度 | **無機械物** | 沒有東西會紅 |
 
-上表的「無機械物」四列是 **shrink-only 棘輪**，由 `tools/tests/test_doc_loc_baseline_freshness_r60.py::TestR74IronLawMechanismAccounting` 釘住：**只准變少**（補了掃描器就把該列改掉），而且表內每一個具名檔案都必須真的存在——**本檔不得宣稱一個不存在的機械物**。這一條的存在理由是 R71 的實證：純文件約束對「當下的模型」零攔阻力，所以「哪幾項其實沒人在守」必須是**可查的量測值**，不是散文。
+上表由 `tools/tests/test_doc_loc_baseline_freshness_r60.py::TestR74IronLawMechanismAccounting` 釘住，判準是**覆蓋率棘輪**：**分子（有機械物的列數）只准上升、分母（已登記的危害類數）也只准上升**，而「還有幾類沒人守」＝分母−分子，**刻意不設上限**。補了掃描器就把該列的機械物欄改掉（不是把整列拿掉），而且表內每一個具名檔案都必須真的存在——**本檔不得宣稱一個不存在的機械物**。
+
+> 🔴 **本輪改的是這條棘輪的形狀，不是調高門檻**：原判準是單邊計數「未覆蓋項數 ≤ 一個常數」，它把兩件事綁成同一個數字——「還有幾類沒人守」（只准變少）與「我們知道有幾類危害」（每挖深一輪就會變多，而且變多是好事）。後果是**誠實登記一個新發現的無掃描器危害類會當場讓根層閘門轉紅**，於是最省力的滿足方式變成「不要記錄新發現」；R72~R76 五類已實證的新危害因此一項都沒進到這張表。拆成兩個各自單邊的量之後：新增一列「無機械物」＝分母升、分子不動 ⇒ 綠（誠實登記不再有代價）；拆掉一支掃描器 ⇒ 分子降 ⇒ 紅；把一列已知危害整列刪掉 ⇒ 分母降 ⇒ 紅——**這一招在舊判準下反而是綠的**。⇒ 上一段那兩個數字是**當下的量測值不是常數**：判準讀的是這張表本身，兩者不一致時以表為準。這一條的存在理由是 R71 的實證：純文件約束對「當下的模型」零攔阻力，所以「哪幾項其實沒人在守」必須是**可查的量測值**，不是散文。
 
 🔴 **該鎖在 R75 訂正時被擴了三面**（原版的射程只有「根 CLAUDE.md 內、以反引號寫出、副檔名為 `.py`」，四筆幽靈機械物就是從這三個縫逃出去的）：
 1. **掃描面**加上 `tools/*.py` 與 `tools/*.json` 內帶「機械鎖／機械釘」字樣的行——那類註解與 JSON `_why` 是本 repo 指認機械物的第二個主要住所，先前完全不在任何鎖的視野內。
@@ -223,9 +232,10 @@ python -m pytest tests/test_playbook_runner.py -v # 單檔
 python -m pytest tests/ -k <substring> -v         # 單一測試
 python -m pytest tests/ -m pg_real                # 需 SD07_REAL_PG_E2E_ENABLED=true + PG DSN
 PYTHONUTF8=1 lint-imports                          # import-linter（8 kept / 0 broken）
-ruff check .                                       # lint（line-length=100, py311；含 E,F,I,UP）
+ruff check <改到的檔>                              # lint（規則集 SSOT＝AutoClaude/pyproject.toml 的 [tool.ruff]，本檔不複寫清單）
 ```
 - 🔴 上列為 **bash 形態**。PowerShell **沒有** `VAR=value <指令>` 前綴語法，`PYTHONUTF8=1 lint-imports` 照抄會得到 `The term 'PYTHONUTF8=1' is not recognized`；Windows 須寫 `$env:PYTHONUTF8=1; lint-imports`（雙平台完整對照見 [ONBOARDING.md](ONBOARDING.md) §7；DEF-101-513）。
+- 🔴 **R77 訂正上一格的 `ruff` 那一行（兩個問題，故不逐字複述原文）**：① 它在同一行**複寫了一份規則集清單**，而那份複本已與 `AutoClaude/pyproject.toml` 的 SSOT 不一致（實測少列一類）——同一份知識住兩個家、只有一個家會被人改；現改為指向 SSOT。② 原文教人對**整棵樹**跑，而那件事今天回 **rc=1**（存量債，數百筆，現查為準），且**沒有任何閘門在跑它**：pre-commit 只對「已暫存」的 `.py` 做整檔掃描，CI 與本機閘門都不掃 AutoClaude 這一棵。照原文做的人會拿到一個與自己這次修改無關的紅。存量債本身不在本輪射程（另案），此處只把指令改成不誤導：**只 lint 你改到的檔**。
 - pytest markers：`pg_real`（真 PG e2e）、`perf`、`benchmark`。
 - `pytest-randomly` **未啟用**，順序由 collection 決定。
 

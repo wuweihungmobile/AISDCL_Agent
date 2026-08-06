@@ -62,7 +62,19 @@ class TestCheckWrapperThinness(unittest.TestCase):
             problems = m.check_wrapper_thinness()
         # 全部釘選 wrapper 皆回報不存在（R12 起釘選對象不只 dev_start，數量隨表走）
         self.assertEqual(len(problems), len(m._PINNED_SHA256))
-        self.assertTrue(all("檔案不存在" in p for p in problems))
+        # 🔴 兩種病因**刻意分成兩條訊息**（本輪併表）：固定相對路徑鍵是「檔案不存在」；
+        # LATEST 鍵在 ROOT 被指到空目錄時連版本都解析不出來，那是另一回事，讀者的下一步
+        # 也不同（一個去找檔案、一個去看 sdd_version.py）。此處逐筆要求命中其中之一，
+        # 不接受任何一筆落在兩者之外＝靜默略過。
+        self.assertTrue(
+            all("檔案不存在" in p or "LATEST 版本解析失敗" in p for p in problems),
+            problems,
+        )
+        self.assertEqual(
+            sum("LATEST 版本解析失敗" in p for p in problems),
+            sum(k.startswith(m._LATEST_KEY_PREFIX) for k in m._PINNED_SHA256),
+            "LATEST 鍵未逐鍵回報解析失敗——解析不出來卻少報，等於釘選面無聲縮小",
+        )
 
     def _make_fake_root(self, tmp_dir: Path, sh_text: str, ps1_text: str) -> Path:
         tools_dir = tmp_dir / "tools"
@@ -469,11 +481,14 @@ class TestBomIsNotContent(unittest.TestCase):
         若哪天全部 `.ps1` 都不帶 BOM 了，上面三支就退化成恆真斷言（測不到任何東西），
         而且那本身是 PS 5.1 中文亂碼的前兆——故在此 fail-loud。
         """
+        latest_tools = m.latest_tools_root()
         ps1_rels = [r for r in m._PINNED_SHA256 if r.endswith(".ps1")]
         self.assertTrue(ps1_rels, "釘選表裡沒有 .ps1——本類別的前提消失")
+        # 走 guard 自己的鍵→路徑解析（本輪併表後 LATEST 鍵不能再用 `ROOT / rel`
+        # 拼——那樣拼出來的路徑不存在，恰好會讓本斷言靜默略過它）。
         no_bom = [
             rel for rel in ps1_rels
-            if not (m.ROOT / rel).read_bytes().startswith(b"\xef\xbb\xbf")
+            if not m.pinned_path(rel, latest_tools).read_bytes().startswith(b"\xef\xbb\xbf")
         ]
         self.assertEqual(
             no_bom, [],
@@ -586,8 +601,10 @@ class TestNoHardcodedLineCounts(unittest.TestCase):
         """產生器側：`wrapper_line_counts()` 必須是真算的，不是另一份寫死表。"""
         counts = m.wrapper_line_counts()
         self.assertEqual(set(counts), set(m._PINNED_SHA256))
+        latest_tools = m.latest_tools_root()
         for rel, count in counts.items():
-            path = m.ROOT / rel
+            path = m.pinned_path(rel, latest_tools)
+            self.assertIsNotNone(path, f"{rel} 解析不出實體路徑（LATEST 解析失敗？）")
             self.assertTrue(path.is_file(), f"{rel} 不存在——釘選表與磁碟脫鉤")
             # 走 guard 自己的讀檔口：這裡若另寫 `encoding="utf-8"`，等於在測試側
             # 重建 P10-1 的錯誤慣例（帶 BOM 的 .ps1 又變成第二種讀法）。
@@ -694,10 +711,18 @@ class TestR67ShebangIsNotAComment(unittest.TestCase):
 
     def test_every_pinned_sh_carries_its_shebang_into_the_hash(self) -> None:
         """全面性：釘選面內每一支 `.sh` 的正規化首行都必須是它自己的 shebang——
-        防「只有 dev_start 被修好、其餘 6 支仍在覆蓋面外」。"""
+        防「只有 dev_start 被修好、其餘 6 支仍在覆蓋面外」。
+
+        🔴 本輪併表時**差點在這裡開一個靜默洞**：本迴圈原本以 `ROOT / rel` 拼路徑並在
+        `not path.is_file()` 時 `continue`，於是新併入的 LATEST 鍵會被無聲略過、而
+        `checked` 仍達得到舊下限 ⇒ 覆蓋面縮小卻全綠。改走 guard 自己的鍵→路徑解析，
+        並把下限一併上修（下限只准上修，這裡是收緊不是放寬）。
+        """
+        latest_tools = m.latest_tools_root()
         checked = 0
         for rel in m._PINNED_SHA256:
-            path = m.ROOT / rel
+            path = m.pinned_path(rel, latest_tools)
+            self.assertIsNotNone(path, f"{rel} 解析不出實體路徑（LATEST 解析失敗？）")
             if path.suffix != ".sh" or not path.is_file():
                 continue
             first_line = m._read_source(path).splitlines()[0]
@@ -707,7 +732,91 @@ class TestR67ShebangIsNotAComment(unittest.TestCase):
                 f"{rel} 的 shebang 未進入 hash 輸入",
             )
             checked += 1
-        self.assertGreaterEqual(checked, 7, "釘選面內 .sh 支數低於預期，鎖可能已空轉")
+        self.assertGreaterEqual(checked, 8, "釘選面內 .sh 支數低於預期，鎖可能已空轉")
+
+
+class TestConvergenceTargetsArePerShell(unittest.TestCase):
+    """本輪 E-05b：違規訊息的「該收斂到哪」必須逐殼查表，且那個目的地要真的在。
+
+    病灶（修前逐字）：行數上限與 hash 不符兩條訊息一律寫「業務邏輯應收斂進
+    `tools/dev_start.py`」，**不看 `rel` 屬於哪一棵樹**。兩個問題疊在一起——
+      (1) 語意錯：`AISDLC_SDD/scripts/install-hooks.*` 的契約住
+          `tools/git_hooks_install_common.py`，`AutoClaude/tools/run_act.*` 的核心是
+          `run_act_core.py`，都不是 dev_start；
+      (2) 可滿足性：被無條件指路的那支檔是 shrink-only 特例棘輪、餘裕個位數，照訊息
+          辦事極可能當場撞 LOC violation（Scan-H 必跑項⑥「A 鎖要你加、B 鎖不准你加」）。
+    這條分支從未被觸發過（受管殼全部遠低於上限），所以修前沒有任何人會發現。
+    """
+
+    def test_every_pinned_key_has_a_registered_core(self) -> None:
+        """涵蓋面：每個釘選鍵都查得到目的地——查無登記時函式回 fail-loud 字樣，
+        本斷言即是在擋那個字樣出現在真表上。"""
+        unmapped = [
+            rel for rel in m._PINNED_SHA256
+            if "_CORE_TARGET 未登記" in m.convergence_target(rel)
+        ]
+        self.assertEqual(unmapped, [], f"下列釘選鍵沒有收斂目的地：{unmapped}")
+
+    def test_every_registered_core_exists_on_disk(self) -> None:
+        """反 stale：指路的目的地若不存在，訊息就是另一種形式的死路。"""
+        latest_tools = m.latest_tools_root()
+        self.assertIsNotNone(latest_tools, "真 repo 內 LATEST 解析不得失敗")
+        missing = []
+        for rel in m._PINNED_SHA256:
+            target = m.convergence_target(rel)
+            path = m.pinned_path(target, latest_tools)
+            if path is None or not path.is_file():
+                missing.append(target)
+        self.assertEqual(sorted(set(missing)), [], f"指路目的地不存在：{missing}")
+
+    def test_targets_really_differ_across_trees(self) -> None:
+        """🔴 鑑別力本體：三棵樹不得指向同一個目的地。
+
+        測意圖非僅行為——若哪天有人把 `_CORE_TARGET` 改回「全部指 dev_start」，
+        上面兩支照樣全綠（dev_start.py 存在、每個鍵都查得到），只有本支會紅。
+        """
+        targets = {m.convergence_target(rel) for rel in m._PINNED_SHA256}
+        self.assertGreaterEqual(
+            len(targets), 4,
+            f"收斂目的地只有 {sorted(targets)}——受管殼跨三棵樹，一律指同一個檔正是本"
+            "修復要治的病（訊息在架構上錯，且該檔餘裕不足以照做）",
+        )
+        self.assertEqual(
+            m.convergence_target("AISDLC_SDD/scripts/install-hooks.ps1"),
+            "tools/git_hooks_install_common.py",
+        )
+        self.assertEqual(
+            m.convergence_target("AutoClaude/tools/run_act.sh"),
+            "AutoClaude/tools/run_act_core.py",
+        )
+
+    def test_unregistered_key_is_fail_loud_not_silent(self) -> None:
+        """缺陷注入：查無登記時必須回可讀的 fail-loud 字樣，不得回空字串／None。
+
+        空字串會讓訊息長成「應收斂進 ，不應長在 wrapper 內」——讀者看不出是登記漏了。
+        """
+        msg = m.convergence_target("tools/never_registered_shell.sh")
+        self.assertIn("_CORE_TARGET 未登記", msg)
+        self.assertIn("never_registered_shell", msg)
+
+    def test_violation_message_carries_the_headroom_hint(self) -> None:
+        """訊息必須要人**先量目的地餘裕**，而不是照著撞上另一道棘輪。"""
+        import tempfile
+
+        with tempfile.TemporaryDirectory() as td:
+            fake = Path(td)
+            (fake / "tools").mkdir(parents=True)
+            (fake / "tools" / "dev_start.sh").write_text(
+                "#!/usr/bin/env bash\n" + "echo x\n" * (m.MAX_LINES + 3), encoding="utf-8"
+            )
+            pins = {"tools/dev_start.sh": "0" * 64}
+            with mock.patch.object(m, "ROOT", fake), \
+                 mock.patch.object(m, "_PINNED_SHA256", pins):
+                problems = m.check_wrapper_thinness()
+        over = [p for p in problems if "超過薄殼上限" in p]
+        self.assertTrue(over, problems)
+        self.assertIn("tools/dev_start.py", over[0])
+        self.assertIn("check_loc_budget.py --json", over[0])
 
 
 # ══════════════════════════════════════════════════════════════════════════════

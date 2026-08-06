@@ -728,6 +728,70 @@ class TestRootInfraNightlyStalenessSentinel(unittest.TestCase):
             "豁免到期後本道自動恢復阻斷", exec_only,
             "豁免通過時未聲明「到期自動恢復阻斷」——讀 log 的人會以為它被關掉了")
 
+    # --- 本輪 R77-14：run 層看不見的那一半 ＋ 續期理由不得綁在日期上 ----------
+
+    def test_sentinel_reads_the_job_layer_not_only_the_run_layer(self):
+        """哨兵必須把 job 層 `steps` 長度算出來，不能只印 run 層 conclusion。
+
+        Rule 9（測意圖）：run 層 `conclusion=failure` 在本 repo 有兩個**處置完全相反**
+        的成因——(a) runner 從未被配置（帳務／額度平面，本 repo 內無可修處）、
+        (b) 測試真的紅了（去看那次 run 紅在哪）。兩者在 run 層是同一個字，唯一分得
+        出來的欄位是 job 的 `steps` 長度：帳務阻擋時 GitHub 連 step 都不會建立。
+        修復前本道只印 run 層，於是它的「處置」段只能寫成一句要人自己去查的指示，
+        而那句指示在整輪停擺期間**沒有任何一次被執行過**。
+        """
+        exec_only = self._exec_lines(self._sentinel_step())
+        # 判準字串刻意不以 `/` 開頭：本樹另有一道鎖禁止 assert 拿 POSIX 絕對路徑
+        # 字面值比對（Windows 上會渲染成反斜線 ⇒ Mac 全綠 Windows 假紅）。這裡比對
+        # 的是 gh api 的**相對**路徑片段，不是檔案系統路徑。
+        self.assertIn(
+            "actions/runs/${run_id}/jobs", exec_only,
+            "哨兵沒有查 job 層（gh api 的 actions/runs/<id>/jobs 端點）——只有 run 層 "
+            "conclusion 時，「runner 從未配置」與「測試真的紅了」在輸出上無法分辨")
+        self.assertIn(
+            "(.steps|length)==0", exec_only,
+            "哨兵沒有以 `steps` 長度為零判定 never-started——那是唯一分得出帳務"
+            "阻擋與測試紅的欄位")
+        self.assertIn(
+            "never-started", exec_only,
+            "哨兵沒有把 never-started 統計印出來——算了不印等於沒算")
+
+    #: 續期理由內**不得**出現日曆日期（見下方測試的 WHY）。
+    _CALENDAR_DATE_RE = re.compile(r"\d{4}-\d{2}-\d{2}")
+    #: 解除判準的必要標記——理由必須說「怎樣才算可以解除」，而不是「我猜它會好」。
+    _RELEASE_CRITERION_MARK = "解除判準="
+
+    def test_waiver_reason_states_a_checkable_release_criterion_not_a_dated_claim(self):
+        """WAIVER_REASON 必須是可現查的解除判準，且不得夾帶日曆日期。
+
+        Rule 9：豁免的正當性建立在「根因在本 repo 之外」這個**事實**上，而事實會變。
+        修復前的理由把續期綁在一句對未來的預測上（斷言帳務已在某日恢復、再等兩個
+        排程窗口即可自證）；後續量測推翻了那個預測，而**沒有任何機械物會說話**——
+        豁免照樣自動生效到期滿。日期一旦寫進理由，它從被推翻的那一刻起就開始說謊。
+        改法：理由只准描述「怎樣才算可以解除」，而那個判準必須是本 step 自己就會
+        印出來的量測值（見 test_sentinel_reads_the_job_layer_not_only_the_run_layer）。
+
+        射程劃界：`WAIVER_UNTIL` 本身**仍然是日期**且不受本條管——它是豁免視窗的
+        界線（反 fail-open 三道保險之一），不是對世界的事實宣稱。
+        """
+        step = self._sentinel_step()
+        if not self._WAIVER_RE.search(step).group(1):
+            return  # 空字串＝無豁免，無理由可言（合法終態）
+        rm = re.search(r'^          WAIVER_REASON: "([^"]+)"$', step, re.MULTILINE)
+        self.assertIsNotNone(rm, "設了 WAIVER_UNTIL 卻沒有 WAIVER_REASON")
+        reason = rm.group(1)
+        self.assertNotRegex(
+            reason, self._CALENDAR_DATE_RE,
+            f"WAIVER_REASON 內出現日曆日期：{reason!r}——續期理由不得綁在對未來的"
+            f"預測或某個時點的量測快照上（預測被推翻時沒有任何東西會響，豁免仍會"
+            f"自動生效到期滿）。改寫成「怎樣才算可以解除」，並讓那個判準是本 step "
+            f"自己會印出來的量測值。日期只准出現在 WAIVER_UNTIL")
+        self.assertIn(
+            self._RELEASE_CRITERION_MARK, reason,
+            f"WAIVER_REASON 沒有寫出解除判準（缺 `{self._RELEASE_CRITERION_MARK}`）"
+            f"——沒有解除判準的豁免只能靠日期到期，而到期＝硬紅，那正是 R68 死鎖"
+            f"的形狀：現行理由＝{reason!r}")
+
     def test_workflow_level_permissions_include_actions_read(self):
         text = _ROOT_INFRA_CI.read_text(encoding="utf-8")
         m = re.search(r"^permissions:\n((?:  \w+: \w+\n)+)", text, re.MULTILINE)
@@ -744,6 +808,165 @@ class TestRootInfraNightlyStalenessSentinel(unittest.TestCase):
             f"root-infra-ci.yml 出現寫入權限（現況應全唯讀）：{perms!r}——"
             f"本 workflow 純驗證不回寫，最小權限原則",
         )
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# 本輪 R77-55：concurrency 的 **repo-wide 枚舉**（不再只看 5 個具名常數）
+# ══════════════════════════════════════════════════════════════════════════════
+# 🔴 缺陷本體：本檔上方全部 concurrency 斷言都綁在 `_ARCH_FITNESS`／`_AUTOCLAUDE_CI`／
+# 兩支 compat-CI／`_ROOT_INFRA_CI` 這 5 個**具名常數**上，而且問的都是「那一段字面值
+# 還在不在」。於是：
+#   ① 沒被具名的 workflow 上，同一類缺陷完全隱形——實查 11 支，有 3 支的 workflow 層
+#      group 只綁 `github.ref` 卻帶 `cancel-in-progress: true`，其中兩支同時被 schedule
+#      與 workflow_dispatch 觸發；
+#   ② 「group 分不分得出事件類型」這個**判準**本身，全 repo 沒有任何一支測試在問。
+# 而這正是 R7／R15／R23 已經在 autoclaude-ci 與兩支 compat-CI 上各修過一次的缺陷——
+# 修的是站點，不是判準，所以它在沒被具名的檔案上原封不動地活著。
+#
+# 為什麼「不分事件」會出事：`cancel-in-progress: true` 的語意是「同 group 的新 run
+# 取消舊 run」。group 只綁 ref 時，在 main 上一次 workflow_dispatch 就會取消掉正在跑的
+# push 閘門／排程強制閘門，而**被取消的 run 在結論欄不是紅色**——「沒跑完」與「跑過
+# 且通過」幾乎無從分辨。這與本檔既有的 `TestNightlyAlertConclusionWhitelist` 是同一族：
+# 非綠的東西被讀成綠。
+#
+# 射程劃界（誠實，不是免責）：本鎖只看**workflow 層** concurrency。job 層（兩支
+# compat-CI 各三組）不納入，理由不是「懶得做」而是**該處不成立**：那三組要嘛是固定
+# 字串＋`cancel-in-progress: false`（不取消，跨事件不可能互殺），要嘛是 per-ref cancel
+# 而其觸發事件（push／pull_request）的 `github.ref` 天生不同（`refs/heads/*` vs
+# `refs/pull/*/merge`）。job 層另有上方六支逐字面值鎖在守。
+_WORKFLOW_DIR = _REPO_ROOT / ".github" / "workflows"
+#: 掃描面下限（現況 11 支）——枚舉器抓不到東西時下方斷言恆真。
+_MIN_WORKFLOWS = 9
+#: 有取值面的 workflow 下限（現況 4 支：workflow 層 concurrency ＋ cancel:true ＋ 多事件）。
+#: 沒有這一條，把全部 concurrency 區塊刪光反而會讓本鎖全綠。
+_MIN_CANCELLING_WORKFLOWS = 3
+_WF_LEVEL_CONCURRENCY_RE = re.compile(
+    r"^concurrency:\n(?:\s*#.*\n)*  group:\s*(?P<group>.+?)[ \t]*\n"
+    r"(?:\s*#.*\n)*  cancel-in-progress:\s*(?P<cancel>\S+)[ \t]*$",
+    re.MULTILINE,
+)
+_EVENT_DIMENSION_RE = re.compile(r"github\.event_name")
+_ON_EVENT_KEY_RE = re.compile(r"^  ([A-Za-z_]+):")
+
+
+def workflow_events(text: str) -> list[str]:
+    """該 workflow `on:` 區塊下宣告的事件名（2 空白縮排的鍵）。
+
+    以行級掃描而非 yaml：本樹的根層 unittest 慣例是零第三方依賴（同本檔檔頭），
+    且 YAML 會把 `on` 解析成布林 True 這個著名坑，行級掃描反而少一個失效面。
+    """
+    out: list[str] = []
+    in_on = False
+    for line in text.splitlines():
+        if line.startswith("on:"):
+            in_on = True
+            continue
+        if not in_on:
+            continue
+        if line and not line[0].isspace():
+            break
+        m = _ON_EVENT_KEY_RE.match(line)
+        if m:
+            out.append(m.group(1))
+    return out
+
+
+def cancelling_groups_without_event_dimension(workflow_dir: Path) -> tuple[list[str], int]:
+    """回傳 (違規描述清單, 有取值面的 workflow 數)。
+
+    有取值面＝同時滿足三條：有 workflow 層 concurrency、`cancel-in-progress: true`、
+    `on:` 宣告 ≥2 種事件。三條缺一，「跨事件互殺」在該檔結構上不可能發生。
+    """
+    offenders: list[str] = []
+    in_scope = 0
+    for path in sorted(workflow_dir.glob("*.yml")):
+        text = path.read_text(encoding="utf-8")
+        m = _WF_LEVEL_CONCURRENCY_RE.search(text)
+        if m is None or m.group("cancel").strip().lower() != "true":
+            continue
+        events = workflow_events(text)
+        if len(events) < 2:
+            continue
+        in_scope += 1
+        if not _EVENT_DIMENSION_RE.search(m.group("group")):
+            offenders.append(
+                f"{path.name}：group={m.group('group')!r}（事件 {events}，"
+                f"cancel-in-progress: true）"
+            )
+    return offenders, in_scope
+
+
+class TestConcurrencyGroupsAreEnumeratedRepoWide(unittest.TestCase):
+    """R77-55：判準改成 repo-wide 枚舉，新增 workflow 自動納管。"""
+
+    def test_scan_surface_is_not_empty(self) -> None:
+        found = sorted(p.name for p in _WORKFLOW_DIR.glob("*.yml"))
+        self.assertGreaterEqual(
+            len(found), _MIN_WORKFLOWS,
+            f"只枚舉到 {len(found)} 支 workflow（下限 {_MIN_WORKFLOWS}）——"
+            f"掃描面已塌，本類其餘斷言會變成恆真：{found}")
+
+    def test_every_cancelling_group_distinguishes_the_event(self) -> None:
+        offenders, in_scope = cancelling_groups_without_event_dimension(_WORKFLOW_DIR)
+        self.assertGreaterEqual(
+            in_scope, _MIN_CANCELLING_WORKFLOWS,
+            f"只有 {in_scope} 支 workflow 落在本判準的取值面（下限 "
+            f"{_MIN_CANCELLING_WORKFLOWS}）——取值面歸零時下一條會恆真而假綠")
+        self.assertEqual(
+            offenders, [],
+            "下列 workflow 的 concurrency group 分不出事件類型，而它同時帶 "
+            "`cancel-in-progress: true` 且由多種事件觸發 ⇒ 一次手動 dispatch 就會"
+            "取消掉進行中的 push／排程閘門，而被取消的 run 在結論欄不是紅色（與"
+            "「跑過且通過」幾乎無從分辨）。\n"
+            f"  命中：{offenders}\n"
+            "  處置：在 group 尾端補 `-${{ github.event_name }}`"
+            "（同 autoclaude-ci.yml 的既有寫法）；同檔多條 cron 另需補 "
+            "`-${{ github.event.schedule }}`",
+        )
+
+    def test_criterion_flags_a_bare_ref_group_and_spares_the_safe_shapes(self) -> None:
+        """鑑別力（Rule 9）：三種安全形狀不得誤報，唯一的危險形狀必須命中。"""
+        import tempfile  # noqa: PLC0415
+
+        d = Path(tempfile.mkdtemp())
+        self.addCleanup(__import__("shutil").rmtree, d, True)
+        head = "on:\n  push:\n    branches: [main]\n  workflow_dispatch:\n"
+        single = "on:\n  push:\n    branches: [main]\n"
+        cases = {
+            # 危險：多事件 ＋ cancel ＋ group 只綁 ref
+            "bad.yml": head + "concurrency:\n  group: x-${{ github.ref }}\n"
+                              "  cancel-in-progress: true\njobs: {}\n",
+            # 安全①：group 帶 event_name
+            "ok_event.yml": head + "concurrency:\n"
+                                   "  group: x-${{ github.ref }}-${{ github.event_name }}\n"
+                                   "  cancel-in-progress: true\njobs: {}\n",
+            # 安全②：不取消 ⇒ 跨事件不會互殺
+            "ok_nocancel.yml": head + "concurrency:\n  group: x-${{ github.ref }}\n"
+                                      "  cancel-in-progress: false\njobs: {}\n",
+            # 安全③：只有一種事件 ⇒ 沒有跨事件可言
+            "ok_single.yml": single + "concurrency:\n  group: x-${{ github.ref }}\n"
+                                      "  cancel-in-progress: true\njobs: {}\n",
+        }
+        for name, body in cases.items():
+            (d / name).write_text(body, encoding="utf-8", newline="\n")
+        offenders, in_scope = cancelling_groups_without_event_dimension(d)
+        self.assertEqual(in_scope, 2, f"取值面應為 bad.yml ＋ ok_event.yml：{offenders}")
+        self.assertEqual(len(offenders), 1, offenders)
+        self.assertIn("bad.yml", offenders[0])
+
+    def test_event_extractor_reads_the_on_block_only(self) -> None:
+        """`workflow_events` 自證：不得把 `on:` 之外的 2 空白縮排鍵算進來。"""
+        text = ("name: demo\n"
+                "on:\n"
+                "  push:\n"
+                "    branches: [main]\n"
+                "  # 註解不算事件\n"
+                "  schedule:\n"
+                '    - cron: "0 0 * * *"\n'
+                "jobs:\n"
+                "  build:\n"
+                "    runs-on: ubuntu-latest\n")
+        self.assertEqual(workflow_events(text), ["push", "schedule"])
 
 
 # --- compat-CI paths 觸發面對稱性 ------------------------------------------
@@ -990,6 +1213,143 @@ class TestRunLevelFailOpenOnNonBlockingNightly(unittest.TestCase):
             out = c.stale_schedule_tracks(root, time.monotonic() + 25)
         self.assertTrue(any("fail-open" in f for f in out),
                         f"run 層 fail-open 未進入回報清單（實得 {out}）")
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# 本輪 R77-06b：push 閘 never-started 比率（ci_liveness 原本結構上看不見的那一半）
+# ══════════════════════════════════════════════════════════════════════════════
+# 🔴 併進本檔的理由與上一節同：本檔已是「CI 死亡通道」那一族鎖的家，另立新檔會撞
+# `_FROZEN_GUARD_FILE_COUNT` shrink-only 棘輪（DEF-101-561③）。
+#
+# 缺陷本體（唯讀 gh 實查）：`ci_liveness` 的掃描面只認有 cron 的 workflow，而 push 軌的
+# 主閘門（root-infra-ci／aisdlc-sdd-ci）沒有 cron ⇒ 一輩子不會被看到。實查近 100 筆／軌
+# 的視窗，兩者分別有 73／42 筆 run 的 job 從未被配置 runner；同一時間本模組實跑的結論
+# 是「零陳舊軌」。本節鎖三件事：判準有鑑別力、不誤報、而且**接得到消費者**。
+class TestPushGateNeverStartedRatio(unittest.TestCase):
+    """R77-06b：push 軌 never-started 比率的鑑別力與接線。"""
+
+    @staticmethod
+    def _ci_liveness():
+        import sys  # noqa: PLC0415
+
+        sys.path.insert(0, str(_REPO_ROOT / "tools" / "lib"))
+        import ci_liveness  # noqa: PLC0415
+
+        return ci_liveness
+
+    @staticmethod
+    def _run(concl: str, seconds: float) -> dict:
+        start = datetime.datetime(2026, 8, 1, tzinfo=datetime.UTC)
+        end = start + datetime.timedelta(seconds=seconds)
+        return {"conclusion": concl,
+                "startedAt": start.isoformat().replace("+00:00", "Z"),
+                "updatedAt": end.isoformat().replace("+00:00", "Z")}
+
+    def test_never_started_proxy_separates_billing_block_from_a_real_red(self) -> None:
+        """鑑別力（Rule 9）：判準要分得出「runner 沒被配置」與「測試真的紅了」。
+
+        門檻取 10 秒不是隨手挑的：實測有一筆 15 秒的 failure 是**真紅**（steps=26）。
+        若把上界放寬到 20 秒，那一筆會被誤判成帳務阻擋——判準會開始替真紅背書。
+        """
+        c = self._ci_liveness()
+        self.assertEqual(c.never_started_count([self._run("failure", 2)]), 1)
+        self.assertEqual(c.never_started_count([self._run("failure", 15)]), 0,
+                         "15 秒的 failure 是真紅（實測 steps=26），不得算成 never-started")
+        self.assertEqual(c.never_started_count([self._run("success", 2)]), 0)
+        self.assertEqual(c.never_started_count([{"conclusion": "failure"}]), 0,
+                         "缺時戳的 run 無從判斷，不得猜")
+        self.assertEqual(c.never_started_count([{"nonsense": 1}, "not-a-dict"]), 0)
+
+    def _probe(self, runs, *, push_yaml: bool = True):
+        import shutil  # noqa: PLC0415
+        import tempfile  # noqa: PLC0415
+        import time  # noqa: PLC0415
+        from unittest import mock  # noqa: PLC0415
+
+        c = self._ci_liveness()
+        root = Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, root, True)
+        (root / ".github" / "workflows").mkdir(parents=True)
+        head = "on:\n  push:\n    branches: [main]\n" if push_yaml else "on:\n  schedule:\n"
+        (root / ".github" / "workflows" / "demo.yml").write_text(
+            head + "jobs: {}\n", encoding="utf-8", newline="\n")
+        with mock.patch.object(c, "_push_runs", return_value=runs):
+            return c.push_gate_never_started(root, time.monotonic() + 25)
+
+    def test_a_billing_stall_window_is_reported(self) -> None:
+        """正向注入：73/100 的 never-started 比率必須出聲（實測過的真實比率）。"""
+        runs = [self._run("failure", 2)] * 73 + [self._run("success", 300)] * 27
+        out = self._probe(runs)
+        self.assertEqual(len(out), 1, out)
+        self.assertIn("73/100", out[0])
+        self.assertIn("不是**測試紅", out[0],
+                      "訊息必須說出後果，否則讀者會把它當成無害的技術註記")
+        self.assertIn("視窗下緣不是問題的起點", out[0],
+                      "取樣視窗是截斷的，判準必須自己說出這個邊界（不然下一個人會"
+                      "把視窗下緣讀成停擺起點——本輪就有一份文件這樣寫）")
+
+    def test_a_healthy_window_is_not_reported(self) -> None:
+        """還原：偶發一兩筆抖動不得出聲（會出聲的哨兵天天喊就會被忽略）。"""
+        runs = [self._run("failure", 2)] * 3 + [self._run("success", 300)] * 97
+        self.assertEqual(self._probe(runs), [])
+
+    def test_small_sample_and_no_signal_are_not_reported(self) -> None:
+        """小樣本的比率是噪音；查不到是無訊號 ≠ 壞訊號。兩者都不得出聲。"""
+        self.assertEqual(self._probe([self._run("failure", 2)] * 3), [])
+        self.assertEqual(self._probe(None), [])
+
+    def test_a_workflow_without_push_trigger_is_out_of_scope(self) -> None:
+        """反向：沒有 `push:` 的 workflow 不進本判準（那是排程軌，另有三道在看）。"""
+        runs = [self._run("failure", 2)] * 73 + [self._run("success", 300)] * 27
+        self.assertEqual(self._probe(runs, push_yaml=False), [])
+
+    def test_the_finding_reaches_the_consumer(self) -> None:
+        """接線鎖：偵測到卻沒接進 `stale_schedule_tracks` ⇒ 使用者一輩子看不到。
+
+        這正是本 repo 反覆吃過的形態（事實查證了、判定沒接上）。`dev_start.py` 只呼叫
+        `stale_schedule_tracks`，新判準不接進那個出口就等於不存在。
+        """
+        import shutil  # noqa: PLC0415
+        import tempfile  # noqa: PLC0415
+        import time  # noqa: PLC0415
+        from unittest import mock  # noqa: PLC0415
+
+        c = self._ci_liveness()
+        root = Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, root, True)
+        (root / ".github" / "workflows").mkdir(parents=True)
+        (root / ".github" / "workflows" / "demo.yml").write_text(
+            "on:\n  push:\n    branches: [main]\njobs: {}\n",
+            encoding="utf-8", newline="\n")
+        runs = [self._run("failure", 2)] * 73 + [self._run("success", 300)] * 27
+        with mock.patch.object(c, "_push_runs", return_value=runs):
+            out = c.stale_schedule_tracks(root, time.monotonic() + 25)
+        self.assertTrue(any("never-started" in f for f in out),
+                        f"push 閘 never-started 未進入回報清單（實得 {out}）")
+
+    def test_push_trigger_surface_on_the_real_repo_is_not_empty(self) -> None:
+        """掃描面下限：現查本 repo 應有數支 push 軌，抓不到即判準恆真。"""
+        c = self._ci_liveness()
+        found = c.push_triggered_workflows(_REPO_ROOT)
+        self.assertGreaterEqual(
+            len(found), 4,
+            f"只現查到 {len(found)} 支帶 `push:` 的 workflow——判準的掃描面已塌：{found}")
+        self.assertIn("root-infra-ci.yml", found,
+                      "push 閘主閘門不在掃描面內，本判準等於沒有射程")
+
+    def test_the_ratio_threshold_is_not_silently_disarmed(self) -> None:
+        """門檻自證：比率門檻若被調到 1.0（＝永遠不出聲），本條當場紅。
+
+        沒有這一條，「把數字調到判準永遠不成立」是讓紅燈消失的最短路徑，而它在
+        diff 上只有一個字元的差別。
+        """
+        c = self._ci_liveness()
+        self.assertLess(c.PUSH_NEVER_STARTED_RATIO, 0.5,
+                        "比率門檻 ≥50% 等於只在「一半以上的 run 都沒起來」時才出聲")
+        self.assertGreater(c.PUSH_NEVER_STARTED_RATIO, 0.0,
+                           "門檻 0 會讓任何一筆抖動都出聲 ⇒ 天天狼來了、然後被忽略")
+        self.assertLessEqual(c.NEVER_STARTED_MAX_SECONDS, 10.0,
+                             "上界放寬會開始把真紅（實測 15 秒 steps=26）誤判成帳務阻擋")
 
 
 if __name__ == "__main__":

@@ -488,5 +488,216 @@ class TestPowershellRunBodyIsAscii(unittest.TestCase):
         self.assertEqual(len(nonascii_powershell_steps(synthetic, "syn.yml")), 1)
 
 
+# ─── D 節：`runs-on:` runner 標籤白名單（本輪 R77-02）─────────────────────────
+#
+# 🔴 為何需要（與 C 節同一族，但守的是另一個欄位）：`uses:` 的版本漂移已有
+# `check_gha_action_versions.py` 在守，而 **`runs-on:` 這個決定「這段 CI 在哪個作業
+# 系統上跑」的欄位，全 repo 零機械物**。它的失效方式安靜且昂貴：
+#   · 打錯字（`ubunut-latest`）⇒ GitHub 永遠找不到 runner，job 一直 queued 直到逾時，
+#     而 workflow 檔本身完全合法、任何 YAML lint 都不會響；
+#   · 悄悄改成已退役的映像標籤（`ubuntu-20.04`／`macos-11`）⇒ GitHub 直接讓該 job
+#     failed，而本 repo 的雲端結論錨只記 run 層 conclusion，分不出「測試紅」與
+#     「runner 標籤不存在」；
+#   · 把某支跨平台驗證改成 `ubuntu-latest`（省時間）⇒ 該平台的覆蓋**靜默歸零**，
+#     而 GitHub UI 上「跑過且通過」與「在錯的平台上跑過且通過」長得一模一樣。
+# 本鎖刻意做成**白名單**而非黑名單：黑名單只擋得住已知的壞值，白名單擋得住打錯字
+# （同 `TestNightlyAlertConclusionWhitelist` 對結論判讀所做的極性選擇）。
+#
+# 白名單內容＝GitHub 目前提供、且本 repo 真的用得到的標籤。要新增一個標籤請直接改
+# 這個集合（那是一個看得見代價的動作），**不要**改成正則模糊比對。
+_ALLOWED_RUNNER_LABELS = frozenset({
+    "ubuntu-latest",
+    "ubuntu-24.04",
+    "ubuntu-22.04",
+    "windows-latest",
+    "macos-latest",
+})
+_RUNS_ON_RE = re.compile(r"^\s*runs-on:\s*(\S+)\s*$")
+#: `${{ … }}` 運算式（matrix runner）——本鎖判不出它的真值，故不套白名單，改為
+#: 要求「出現即需人裁定」。現況零筆；真要引入 matrix runner 時請擴充本鎖而不是
+#: 加一條豁免（豁免清單本身即 fail-open 面，同 TestCompatCiScriptTriggerSymmetry）。
+_RUNNER_EXPR_RE = re.compile(r"\$\{\{")
+#: 掃描面下限（現況 25 筆宣告）＋上緣倍數（純下限會腐化，同 C 節體例）。
+_MIN_RUNS_ON_DECLS = 20
+_RUNS_ON_STALE_RATIO = 3
+
+
+def runner_labels(text: str, source: str) -> list[tuple[str, str]]:
+    """回傳 `(source:lineno, runs-on 值)`；共用 C 節同一套 YAML 註解剝除規則。"""
+    out: list[tuple[str, str]] = []
+    for lineno, raw in enumerate(text.splitlines(), start=1):
+        mt = _RUNS_ON_RE.match(m._strip_yaml_comment(raw))
+        if mt:
+            out.append((f"{source}:{lineno}", mt.group(1).strip("\"'")))
+    return out
+
+
+def _all_runner_labels() -> list[tuple[str, str]]:
+    found: list[tuple[str, str]] = []
+    for path in sorted(set(_WORKFLOW_DIR.glob("*.yml")) | set(_WORKFLOW_DIR.glob("*.yaml"))):
+        found += runner_labels(path.read_text(encoding="utf-8"), path.name)
+    return found
+
+
+class TestRunnerLabelWhitelist(unittest.TestCase):
+    """D 節（R77-02）：`runs-on:` 只准出現白名單內的 runner 標籤。"""
+
+    def test_every_runs_on_label_is_whitelisted(self) -> None:
+        offenders = [
+            f"{site} → {label!r}"
+            for site, label in _all_runner_labels()
+            if not _RUNNER_EXPR_RE.search(label) and label not in _ALLOWED_RUNNER_LABELS
+        ]
+        self.assertEqual(
+            offenders, [],
+            "下列 `runs-on:` 不在白名單內。打錯字的標籤不會讓 YAML 失效，只會讓 job "
+            "永遠 queued 到逾時；退役標籤則讓 job 直接 failed，而本 repo 的雲端結論錨"
+            "只記 run 層 conclusion，分不出這兩者與「測試真的紅了」。\n"
+            f"  白名單：{sorted(_ALLOWED_RUNNER_LABELS)}\n"
+            f"  命中：{offenders}\n"
+            "  處置：確認那是 GitHub 現行提供的標籤後，把它加進 "
+            "`_ALLOWED_RUNNER_LABELS`（那是一個看得見代價的動作）",
+        )
+
+    def test_no_unresolvable_matrix_runner_sneaks_in(self) -> None:
+        """`${{ … }}` 形態本鎖判不出真值 ⇒ 出現即要求人裁定，不得靜默放行。"""
+        exprs = [f"{s} → {v!r}" for s, v in _all_runner_labels() if _RUNNER_EXPR_RE.search(v)]
+        self.assertEqual(
+            exprs, [],
+            "偵測到運算式形態的 `runs-on:`（matrix runner）。本鎖對它零判準——放行"
+            "等於在白名單上開一個任意大的洞。處置：擴充本鎖去解析該 matrix 的取值面，"
+            f"或改回字面標籤；不要加豁免。命中：{exprs}",
+        )
+
+    def test_scan_surface_is_not_empty(self) -> None:
+        """反向守門：解析式漂移導致 0 命中時，上兩條會兩側同空而假綠。"""
+        labels = _all_runner_labels()
+        self.assertGreaterEqual(
+            len(labels), _MIN_RUNS_ON_DECLS,
+            f"全 workflow 只掃到 {len(labels)} 個 `runs-on:` 宣告 < 下限 "
+            f"{_MIN_RUNS_ON_DECLS}——若真的刪了 job 請同步下修本下限；否則就是"
+            f"解析式壞了。實抽：{labels}",
+        )
+
+    def test_scan_surface_floor_is_not_stale(self) -> None:
+        """下限的上緣：掃描面長大後，蒸發一半仍在下限之上（同 C 節 stale ratio）。"""
+        labels = _all_runner_labels()
+        ceiling = _MIN_RUNS_ON_DECLS * _RUNS_ON_STALE_RATIO
+        self.assertLessEqual(
+            len(labels), ceiling,
+            f"`runs-on:` 宣告已達 {len(labels)} 個，超過下限 {_MIN_RUNS_ON_DECLS} 的 "
+            f"{_RUNS_ON_STALE_RATIO} 倍——請重釘 `_MIN_RUNS_ON_DECLS`，否則下限已"
+            f"失去鑑別力",
+        )
+
+    def test_criterion_flags_a_typo_and_a_retired_label(self) -> None:
+        """鑑別力（Rule 9）：判準必須真的抓得到打錯字與已退役的映像標籤。"""
+        synthetic = (
+            "jobs:\n"
+            "  a:\n"
+            "    runs-on: ubunut-latest\n"
+            "  b:\n"
+            "    runs-on: ubuntu-20.04\n"
+            "  c:\n"
+            "    runs-on: ubuntu-latest\n"
+        )
+        bad = [
+            v for _s, v in runner_labels(synthetic, "syn.yml")
+            if v not in _ALLOWED_RUNNER_LABELS
+        ]
+        self.assertEqual(bad, ["ubunut-latest", "ubuntu-20.04"])
+
+    def test_commented_out_runs_on_is_not_counted(self) -> None:
+        """被註解掉的舊 `runs-on:` 不得被當成現行宣告（同 C 節註解剝除紀律）。"""
+        synthetic = "jobs:\n  a:\n    # runs-on: ubuntu-20.04\n    runs-on: ubuntu-latest\n"
+        self.assertEqual(
+            [v for _s, v in runner_labels(synthetic, "syn.yml")], ["ubuntu-latest"]
+        )
+
+
+# ─── E 節：`check_gha_action_versions.main()` 不得早退遮蔽（本輪 R77-17）────────
+#
+# 🔴 缺陷本體與端到端實測見主檔 `_CHECK_ORDER` 上方那段註解。這裡只放鎖。
+# 為何鎖在**行為**而不只是「有沒有 `_CHECK_ORDER` 這個常數」：常數在場不等於它被用到
+# （同 DEF-101-743「宣告的字串在場 ≠ 那件事會發生」）。下面兩支各自模擬一種前置失敗，
+# 直接斷言「後面那幾道的輸出仍然出現」與「跑不了的那幾道被逐名列出」。
+class TestNoEarlyExitMaskingInGhaChecker(unittest.TestCase):
+    """E 節（R77-17）：四道檢查必須跑得完的全部跑完，跑不了的必須逐名自白。"""
+
+    @staticmethod
+    def _run() -> tuple[int, str, str]:
+        out, err = io.StringIO(), io.StringIO()
+        with redirect_stdout(out), redirect_stderr(err):
+            rc = m.main()
+        return rc, out.getvalue(), err.getvalue()
+
+    def test_check_order_is_declared_and_non_trivial(self) -> None:
+        self.assertGreaterEqual(
+            len(m._CHECK_ORDER), 4,
+            "_CHECK_ORDER 少於 4 道——殘餘清單會把不存在的檢查算進去或漏掉真檢查",
+        )
+
+    def test_every_return_in_main_goes_through_the_reporter(self) -> None:
+        """靜態面：`main()` 內不得有繞過 `_report()` 的裸 `return`。
+
+        繞過 reporter 就等於繞過「綠／紅／未執行三塊各自印完」那件事，而那正是
+        這次事故的機制本身（原版 7 個裸 `return 1`）。
+        """
+        src = (_REPO_ROOT / "tools" / "check_gha_action_versions.py").read_text(
+            encoding="utf-8"
+        )
+        fn = next(
+            n for n in ast.walk(ast.parse(src))
+            if isinstance(n, ast.FunctionDef) and n.name == "main"
+        )
+        bare = [
+            node.lineno for node in ast.walk(fn)
+            if isinstance(node, ast.Return)
+            and not (
+                isinstance(node.value, ast.Call)
+                and getattr(node.value.func, "id", "") == "_report"
+            )
+        ]
+        self.assertEqual(
+            bare, [],
+            f"main() 這幾行直接 `return` 而未經 `_report()`：{bare}——該早退點不會"
+            f"印出「尚有 N 道未執行」，輸出變短會被誤讀成「問題變少」",
+        )
+
+    def test_a_failing_first_check_does_not_swallow_the_later_ones(self) -> None:
+        """鑑別力（本鎖存在的唯一理由）：①紅時，③④ 的輸出必須仍然在。
+
+        修復前實測：控制組 7 行 stdout 整批消失、換成 2 行 stderr，且沒有任何一句話
+        說「後面 3 道一行都沒跑」。
+        """
+        with mock.patch.object(
+            m, "_audit_scan_surface",
+            return_value=["AutoClaude/.github/workflows/synthetic-probe.yml"],
+        ):
+            rc, out, err = self._run()
+        self.assertEqual(rc, 1)
+        self.assertIn("synthetic-probe.yml", err)
+        self.assertIn(m._CHECK_ORDER[3], out,
+                      f"①紅時 ④ 的結論不見了（stdout={out!r}）——早退遮蔽回歸")
+        self.assertIn("巢狀排除區實查", out,
+                      "①紅時 ② 的結論不見了——早退遮蔽回歸")
+
+    def test_a_check_that_could_not_run_is_named_not_silently_dropped(self) -> None:
+        """②因前置條件不成立而跑不了時，必須逐名列出——未執行 ≠ 通過。"""
+        with mock.patch.object(m.subprocess, "run", side_effect=OSError("no git")):
+            rc, out, err = self._run()
+        self.assertEqual(rc, 1)
+        self.assertIn("未執行", err)
+        self.assertIn(m._CHECK_ORDER[1], err)
+        self.assertIn(m._CHECK_ORDER[3], out,
+                      "git 不可用時 ④ 仍應照跑（它不依賴 git）")
+
+    def test_green_run_says_how_many_checks_actually_ran(self) -> None:
+        """全綠時也必須說出「幾道」——只印 ✅ 而不說數量，掃描面塌掉時看不出來。"""
+        rc, out, err = self._run()
+        self.assertEqual(rc, 0, err)
+        self.assertIn(f"（{len(m._CHECK_ORDER)} 道）", out)
+
+
 if __name__ == "__main__":  # pragma: no cover
     unittest.main()

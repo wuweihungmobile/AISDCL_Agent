@@ -3164,6 +3164,176 @@ class TestUnlockConditionIsMechanicallyChecked(unittest.TestCase):
             )
 
 
+# ------------------------------------------- archive 內未結列的常設複驗（本輪新增）
+#: 存量具名基線：`(archive 檔名, DEF-ID)`，本輪實查現況釘死。**只准變小**。
+#:
+#: 🔴 本鎖為何住在測試檔、而不是 `archive_defect_log.py --check` 的第 (9) 項判準
+#: （本輪實際撞到的硬約束，寫下來以免下一輪重走一次）：那支工具受
+#: `AutoClaude/tools/check_loc_budget.py` 的 `SPECIAL_FILES` **raw-line 棘輪**管，
+#: 本輪動工前實測 1501 行／上限 1507 ⇒ 餘裕 6 行，而一項新判準（常數＋docstring 條目
+#: ＋`# (N)` 實作段，三者由 `TestCriteriaListIsASingleSsot` 綁死、缺一即紅）實測要
+#: 73 行。合法出口只剩「調高棘輪」，而那是本輪明令禁止的方向（棘輪只准變少），
+#: 且該棘輪住在別包持有的檔。⇒ 判準改以測試側落地：射程由「pre-push 守門迴圈＋
+#: root-infra-ci 的 --check step」縮為「根層 unittest 樹」，**誠實記載這個縮小**。
+_ARCHIVE_UNRESOLVED_BASELINE: frozenset[tuple[str, str]] = frozenset({
+    ("AutoSDD_Defect_Log_archive_01.md", "DEF-24-001"),
+    ("AutoSDD_Defect_Log_archive_01.md", "DEF-42-001"),
+    ("AutoSDD_Defect_Log_archive_16.md", "DEF-101-089"),
+    ("AutoSDD_Defect_Log_archive_18.md", "DEF-13-002"),
+})
+
+
+def _archive_unresolved_now() -> set[tuple[str, str]]:
+    """現查：archive 內狀態分類仍未結的列 `(檔名, DEF-ID)`。
+
+    刻意複用閘門的 `_table_layout`／`_row_cells`／`_classify`，不自寫第二份判讀
+    ——本檔既有紀律（QA-R60-02：測試自寫一份比生產窄的正則，等於在測另一個東西）。
+    """
+    found: set[tuple[str, str]] = set()
+    for f in sorted(ADL._QUALITY_DIR.glob("AutoSDD_Defect_Log_archive_*.md")):
+        txt = f.read_text(encoding="utf-8-sig")
+        layout = ADL.gate._table_layout(txt)
+        if layout is None:
+            continue
+        ncols, id_idx, st_idx = layout
+        for line in ADL.load_rows(txt):
+            cells = ADL.gate._row_cells(line)
+            if len(cells) != ncols or not ADL.gate._ID_RE.fullmatch(cells[id_idx]):
+                continue
+            if ADL.gate._classify(cells[st_idx]) in ADL.gate._UNRESOLVED_CLASSES:
+                found.add((f.name, cells[id_idx]))
+    return found
+
+
+class TestArchiveUnresolvedRowsAreRatcheted(unittest.TestCase):
+    """歸檔之後仍要有人問「這一列是不是還沒結」。
+
+    原始缺陷（本輪 Scan-G）：搬遷判準① 只在 `plan()`／`classify_row()` 執行一次，
+    也就是**搬遷當下**；此後那一列的狀態欄怎麼變都沒有任何東西會看。而
+    `--unresolved-count` 與三道承接判準又都只讀主檔 ⇒ 進了 archive 就等於離開稽核。
+    實測現況：archive 內有未結分類列，全 repo 沒有任何閘門對它們說一個字。
+
+    棘輪為何是**雙向**：只擋「表外新增」會讓具名基線變成只進不出的死名單，
+    「archive 裡還剩幾列未結」永遠不會下降（同 crossref 的
+    `stale_grandfather_problems()` 判例）。刻意不一次全紅：存量是歷史事實，
+    硬擋會讓鎖上線即永紅（ARCH-R59-NB4），比沒有鎖更糟。
+    """
+
+    def test_named_baseline_matches_the_measured_reality(self):
+        """綠向硬驗收：基線必須恰等於現查集合（多一筆少一筆都是漂移）。
+
+        兩個方向的修法不同，故訊息分開講：現況多出來的（有人把未結列搬進
+        archive，或 archive 內某列被改回未結）＝把它搬回主檔讓它重新進入承接
+        稽核，或就地結案並附取證；基線多出來的（已結案／已不在該檔）＝刪除該筆。
+        **不要**為了讓本測綠就把新命中加進基線——那正是死名單的長法。
+        """
+        now, base = _archive_unresolved_now(), set(_ARCHIVE_UNRESOLVED_BASELINE)
+        self.assertEqual(
+            now - base, set(),
+            "archive 內出現不在具名基線的未結列 —— 請搬回主檔或就地結案並附取證；"
+            "**不要**把它加進 _ARCHIVE_UNRESOLVED_BASELINE（那張表只准變小）",
+        )
+        self.assertEqual(
+            base - now, set(),
+            "具名基線有已不成立的筆（已結案／已不在該檔）—— 請刪除它們，"
+            "不刪＝這張表變成只進不出的死名單，「還剩幾列未結」就永遠不會下降",
+        )
+
+    def test_an_unresolved_row_moved_into_an_archive_is_caught(self):
+        """紅向鑑別力：往沙箱 archive 注入一列 `open`，判準必須抓到它。
+
+        注入對象是 tracked 帳本家族，故一律走 `_ledger_sandbox()` 複本
+        （本檔既有紀律：本輪一度有 agent 寫穿 15 支 tracked YAML）。
+        """
+        inj = "DEF-" + "998-" + "001"
+        with _ledger_sandbox() as dst:
+            before = _archive_unresolved_now() - set(_ARCHIVE_UNRESOLVED_BASELINE)
+            self.assertEqual(before, set(), "沙箱基線本身就不乾淨 ⇒ 下一句沒有鑑別力")
+            _append_to(
+                dst / "AutoSDD_Defect_Log_archive_01.md",
+                f"| {inj} | 2026-07-29 | 注入 | 合成 | P4 | 合成 "
+                "| open（合成，僅存在於沙箱） |\n",
+            )
+            after = _archive_unresolved_now() - set(_ARCHIVE_UNRESOLVED_BASELINE)
+        self.assertEqual(
+            after, {("AutoSDD_Defect_Log_archive_01.md", inj)},
+            f"注入的 archive 未結列未被抓到（差集＝{after!r}）",
+        )
+
+    def test_a_closed_row_moved_into_an_archive_is_not_flagged(self):
+        """綠向控制組：注入一列 `fixed` 不得命中 —— 否則上一測只是恆真。"""
+        inj = "DEF-" + "998-" + "002"
+        with _ledger_sandbox() as dst:
+            _append_to(
+                dst / "AutoSDD_Defect_Log_archive_01.md",
+                f"| {inj} | 2026-07-29 | 注入 | 合成 | P4 | 合成 "
+                "| fixed@R60（合成，僅存在於沙箱） |\n",
+            )
+            after = _archive_unresolved_now() - set(_ARCHIVE_UNRESOLVED_BASELINE)
+        self.assertEqual(after, set(), f"已結列被誤判為未結：{after!r}")
+
+
+class TestTemporalNarrativeSamplesStayUncaught(unittest.TestCase):
+    """把 `NONVERB_RESIDENCE_RE` 上方那句「時態性敘述不會被誤收」接上機械物。
+
+    為何需要（本輪實證）：那句話原本只寫「實測家族內…」而不寫樣本住哪一支檔，
+    於是一次以**主檔**為掃描面的複查把它讀成 stale（樣本其實住 archive）。
+    一句對的話因為缺座標而被讀成錯的，下一次就可能被「順手訂正」成真的錯的。
+    兩條缺一不可：樣本仍在（否則是對不存在字串的空斷言）＋樣式仍零命中。
+    """
+
+    #: 兩則樣本的逐字內容與所在檔（`archive_defect_log.py` 的
+    #: `NONVERB_RESIDENCE_RE` 上方註解逐字指名本常數為它們的家）。
+    _SAMPLES: tuple[tuple[str, str], ...] = (
+        ("AutoSDD_Defect_Log_archive_25.md", "5 列刻意留在主檔"),
+        ("AutoSDD_Defect_Log_archive_28.md", "標頭與主檔 DEF-101-493"),
+    )
+
+    def test_each_sample_still_lives_in_its_named_archive(self):
+        for fname, sample in self._SAMPLES:
+            with self.subTest(sample=sample):
+                p = ADL._QUALITY_DIR / fname
+                self.assertTrue(p.is_file(), f"{fname} 不存在 ⇒ 樣本座標已失效")
+                self.assertIn(
+                    sample, p.read_text(encoding="utf-8-sig"),
+                    f"{fname} 內已無樣本「{sample}」—— 請改寫上方註解的座標，"
+                    "不要留下一句指向不存在字串的斷言",
+                )
+
+    def test_the_residence_pattern_scores_zero_on_them(self):
+        for fname, sample in self._SAMPLES:
+            with self.subTest(sample=sample):
+                line = self._line_of(fname, sample)
+                self.assertEqual(
+                    ADL.NONVERB_RESIDENCE_RE.findall(line), [],
+                    f"{fname} 的時態性敘述被居所樣式收進來了 —— 歷史檔逐字保全，"
+                    "誤收即閘門永紅（壞的失敗模式）",
+                )
+
+    def test_the_assertion_is_not_vacuous(self):
+        """牙：把樣式放寬成「主檔 … DEF-x」，這些歷史紀錄必須全部翻紅。
+
+        沒有這一條，上一測會在「樣式對任何東西都零命中」時照樣綠。
+        """
+        widened = re.compile(r"主檔[^｜|]{0,40}?(?P<id>DEF-\d+-\d+)")
+        caught = 0
+        for fname, sample in self._SAMPLES:
+            if widened.search(self._line_of(fname, sample)):
+                caught += 1
+        self.assertEqual(
+            caught, len(self._SAMPLES),
+            "放寬後仍抓不到全部樣本 ⇒ 上一測的「零命中」可能只是樣本選得太窄",
+        )
+
+    @staticmethod
+    def _line_of(fname: str, sample: str) -> str:
+        txt = (ADL._QUALITY_DIR / fname).read_text(encoding="utf-8-sig")
+        for line in txt.splitlines():
+            if sample in line:
+                return line
+        raise AssertionError(f"{fname} 內找不到樣本「{sample}」")
+
+
 class TestOpenBacklogArchiveIsRejected(unittest.TestCase):
     """方向②（讓長期未結的 known-gap 列搬進 open-backlog archive、主檔只留指針）駁回鎖。
 

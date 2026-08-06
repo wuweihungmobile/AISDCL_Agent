@@ -36,10 +36,16 @@ from autoclaude.utils.config import AppConfig
 # DEF-101-089 補強：本機裝有 `claude` CLI 且從巢狀 Claude Code session 執行 pytest 時，這裡
 # spawn 的巢狀 `claude` 子行程會無限掛起（見 test_gap014_020.py 同款註解的完整根因說明）。
 # `CLAUDECODE=1` 為 Claude Code 官方啟動時設定的環境變數，非行程樹猜測。
+#
+# 🔴 本輪訂正分類（完整推導見 test_gap014_020.py 同款註解）：這一批**不是**永久不覆蓋，
+# 而是「只在巢狀 Claude Code session 不可跑」；每日 nightly（非巢狀）實測會真的跑。
+# reason 因此改為寫得出那條真的可用的配方。
 requires_claude_cli = pytest.mark.skipif(
     shutil.which("claude") is None or os.environ.get("CLAUDECODE") == "1",
-    reason="需要 claude CLI binary 且非巢狀 Claude Code session（CLAUDECODE=1 時真實 spawn 會"
-    "死結，見 DEF-101-089）；CI 無 claude 或本機巢狀 session → 環境前提 skip",
+    reason="【未啟用，非缺件】需要 claude CLI binary 且非巢狀 Claude Code session"
+    "（CLAUDECODE=1 時真實 spawn 會死結，見 DEF-101-089）。跑法：在**非** Claude Code "
+    "session 的 PowerShell 執行 `python -m pytest tests/test_gap039_049.py`"
+    "（每日 nightly 排程即為此環境，實測會真的跑）",
 )
 
 

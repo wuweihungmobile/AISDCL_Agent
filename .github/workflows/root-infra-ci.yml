@@ -118,9 +118,17 @@
 #                      ⚠️ 誠實劃界（不可讀成「這道補上了平面外偵測」）：本道與被偵測者
 #                      **同屬 GitHub Actions 計費平面**——帳務停擺時本 workflow 自己也
 #                      不會被配置 runner，故它抓不到停擺當下，只抓得到「cron 靜默沒觸發
-#                      ／job 被停用／停擺恢復後沒人補跑」這一類非帳務型陳舊（2026-07-15～
-#                      08-01 的實況正是第三種：帳務已於 08-01 恢復、push run 正常跑滿
-#                      21 個 step，而 nightly 沒有任何人補跑）。真正平面外的偵測只能長在
+#                      ／job 被停用／停擺恢復後沒人補跑」這一類非帳務型陳舊。
+#                      🔴 本輪訂正（把一個會過期的量測快照換成現查判準）：本段原先以一組
+#                      **寫死的日期**斷言帳務平面已回復正常，並據此判定當時的陳舊屬於上列
+#                      第三型。後續量測推翻了那個判定——同一輪停擺在該日期之後仍持續產生
+#                      job 層 steps 長度為 0 的 run。日期快照不該長在一道每次 push 都執行的
+#                      哨兵的說明裡：它從被推翻的那一刻起就開始說謊，而沒有任何機械物在看。
+#                      改為**現查**：本道 run: 段已逐 workflow 印出最近一次 schedule run 的
+#                      job 層 steps 長度統計（`never-started=<零步驟 job 數>/<job 總數>`）。
+#                      該值非 0/N ⇒ runner 從未被配置＝帳務／額度平面，本 repo 內無可修處；
+#                      0/N ⇒ runner 真的跑過，陳舊就是上列前兩型或測試真紅。判「現在是不是
+#                      停擺」一律看那一行，不要看任何寫死的日期。真正平面外的偵測只能長在
 #                      本機 `dev_start.py`（純唯讀 gh API、零 Actions 額度），該項
 #                      🔴 本段兩處刻意寫成不帶 `tools/` 前綴的 `dev_start.py`：帶前綴的
 #                      字面是 test_root_infra_parity 的抽取標的（檔頭條目提及＝該道守門
@@ -172,8 +180,13 @@ on:
   pull_request:
   workflow_dispatch:
 
+# 🔴 group 含 `github.event_name`（本輪 R77-55，與兩支 SDD workflow 同批）：本檔由
+# push(main)＋pull_request＋workflow_dispatch 觸發，`cancel-in-progress: true` 下若
+# group 只綁 `github.ref`，在 main 上手動 dispatch 一次就會取消掉進行中的 push 閘門 run
+# ——而被取消的 run 不是紅色，它在結論欄與「跑過且通過」幾乎無從分辨。連續兩次 push
+# 仍會互相取消（同 event_name、同 ref），省額度的原意一字未變。
 concurrency:
-  group: root-infra-ci-${{ github.ref }}
+  group: root-infra-ci-${{ github.ref }}-${{ github.event_name }}
   cancel-in-progress: true
 
 # 純驗證、不寫回 repo → 最小權限唯讀。
@@ -483,16 +496,22 @@ jobs:
           # 週頻 cron（週一 06:12／07:18 UTC）正常最長間隔 7 天，取 10 天＝3 天餘裕。
           MAX_AGE_DAYS: "10"
           # 顯式豁免（UTC，YYYY-MM-DD；**空字串＝無豁免**）。
-          # 現行豁免的唯一理由（DEF-101-703 根因已查明，非猜測）：2026-07-15～07-27 連續
-          # 5 次排程失敗的原因是 GitHub 帳務阻擋——run 30256689776 的 job annotation 逐字
-          # 為 "The job was not started because recent account payments have failed or your
-          # spending limit needs to be increased."，三個 job 全部 steps 長度 0、耗時 2 秒
-          # ⇒ **不是** workflow 定義缺陷，本 repo 內無可修之處。帳務已於 2026-08-01 恢復
-          # （push run 30695971130 的 windows-latest job steps=26＝runner 真的有跑）。
-          # 下兩個排程窗口是 2026-08-03 與 08-10 的 06:12／07:18 UTC；豁免到 08-10 恰好
-          # 蓋滿這兩次，若兩次都仍未成功，到期即自動恢復阻斷、缺陷重新現形。
-          WAIVER_UNTIL: "2026-08-10"
-          WAIVER_REASON: "DEF-101-703：根因＝GitHub 帳務阻擋（非 workflow 定義缺陷，本 repo 無可修處），帳務已於 2026-08-01 恢復，等 2026-08-03／08-10 兩個排程窗口自證"
+          # 現行豁免的唯一理由（DEF-101-703 根因已查明，非猜測）：排程失敗的原因是 GitHub
+          # 帳務阻擋——job annotation 逐字為 "The job was not started because recent account
+          # payments have failed or your spending limit needs to be increased."，該 run 的
+          # job 全部 steps 長度 0、耗時個位數秒 ⇒ **不是** workflow 定義缺陷，本 repo 內
+          # 無可修之處。
+          # 🔴 本輪訂正：上一版的續期理由是一句**帶日期的事實宣稱**（斷言帳務已在某日恢復、
+          # 只要再等兩個排程窗口自證即可）。後續量測推翻了它——同一輪停擺在那個日期之後
+          # 仍持續產生 job 層零步驟的 run，跨越十餘個日曆天。教訓不是「日期填錯了」，是
+          # **續期理由不該綁在對未來的預測上**：預測被推翻時沒有任何機械物會說話，而豁免
+          # 會照樣自動生效到期滿。故 WAIVER_REASON 改寫成一條「隨時可現查、且查得出真假」
+          # 的解除判準（見下），並由 test_workflow_permission_concurrency_lock.py 的
+          # TestRootInfraNightlyStalenessSentinel 機械禁止該欄再出現日曆日期。
+          # WAIVER_UNTIL 仍是日期——那是**豁免視窗的界線**（反 fail-open 三道保險之一，
+          # 到期即自動恢復阻斷），不是對世界的事實宣稱，兩者不可混為一談。
+          WAIVER_UNTIL: "2026-08-26"
+          WAIVER_REASON: "DEF-101-703／DEF-101-081：根因＝GitHub 帳務／額度平面阻擋 runner 配置（非 workflow 定義缺陷，本 repo 無可修處）。解除判準=本 step 印出的 never-started 統計回到 0/N（＝runner 真的被配置）後，把 WAIVER_UNTIL 清成空字串；不得以「日期到了」當解除依據"
           MAX_WAIVER_DAYS: "21"
           # advisory 巡檢的粗門檻（見 run: 內該段的取捨說明）。刻意單一數字而非
           # 逐檔依 cron 週期計算：advisory 不擋路，精算留給本機那支逐軌偵測器。
@@ -526,6 +545,31 @@ jobs:
                        --jq '.[0] // {} | "\(.conclusion // "(無)")  \(.createdAt // "-")  \(.url // "-")"' \
                      || echo "(gh API 查詢失敗)")
             echo "   最近一次 schedule run：${latest}"
+            # 🔴 R77：run 層 `conclusion` **結構上**分不出「runner 從未被配置」與「測試
+            # 真的紅了」——兩者都是 failure。job 層的 `steps` 長度是唯一分得出來的欄位：
+            # 帳務／額度阻擋時 GitHub 連 step 都不會建立，長度恆 0。本段把它算成
+            # never-started=<零步驟 job 數>/<job 總數> 印出來，於是下方「處置」那段從
+            # 「請你自己去查 job steps 長度」變成**已經查好的量測值**，而豁免理由的解除
+            # 判準也因此有了可現查的載體（不必再靠一個會過期的日期宣稱）。
+            # 刻意**不**讓它影響 rc：帳務平面本 repo 無可修處，升成阻斷就是 R68 死鎖形狀。
+            run_id=$(gh run list --repo "${GITHUB_REPOSITORY}" --workflow "$wf" \
+                       --event schedule --limit 1 --json databaseId \
+                       --jq '.[0].databaseId // empty' \
+                     || echo "")
+            never="(查不到 run id：該軌從未產生過 schedule run，或 gh API 查詢失敗)"
+            if [ -n "$run_id" ]; then
+              never=$(gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${run_id}/jobs" \
+                        --jq '"\([.jobs[] | select((.steps|length)==0)] | length)/\(.jobs | length)"' \
+                      || echo "(gh API 查詢失敗)")
+            fi
+            echo "   job 層 never-started（steps 長度為 0 的 job 數／job 總數）：${never}"
+            case "$never" in
+              0/*)
+                ;;
+              *)
+                echo "::notice::${wf} 最近一次 schedule run 內有 job 從未啟動（${never}）——這是 runner 未被配置（GitHub 帳務／額度平面），**不是**測試紅；本 repo 內無可修處，解除判準見本 step 的 WAIVER_REASON"
+                ;;
+            esac
             last=""
             for ev in schedule workflow_dispatch; do
               t=$(gh run list --repo "${GITHUB_REPOSITORY}" --workflow "$wf" \

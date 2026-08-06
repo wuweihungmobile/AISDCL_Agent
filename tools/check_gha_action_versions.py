@@ -277,98 +277,168 @@ def nested_generation_drift(generation: dict[str, set[str]]) -> list[str]:
     return problems
 
 
+# ─── 早退遮蔽的解藥：accumulate-then-report（本輪 H-01）──────────────────────
+# 🔴 缺陷本體（端到端實測，非推論）：本檔 `main()` 原本有 7 個 `return 1`、對應 4 道
+# 彼此獨立的檢查，任一道紅就當場返回。以 mock 讓第①道回報一筆未登記 workflow 後實測：
+# 控制組的 7 行 stdout（含巢狀世代對帳與逐 action 一致性）**整批消失**，換成 2 行
+# stderr，而沒有任何一句話告訴讀者「後面 3 道一行都沒跑」。遮蔽方向是「看起來變乾淨」
+# ——讀者拿到一個短短的紅，會以為問題只有那一筆。這與 `check_defect_log_crossref.py`
+# 已被治好的那個事故逐字同型（該支的鎖自陳「其他工具不在射程內」，本檔就是那句劃界
+# 的另一半）。本檔是 pre-push 硬閘 ＋ root-infra-ci 的一道，且它同時守著「AISDLC_SDD
+# 各版巢狀 workflow 的 Node20 到期風險」這種**只有它在看**的東西。
+#
+# 修法刻意選 accumulate-then-report 而不是抄 `_bail()`：本檔的四道彼此**無資料相依**
+# （只有③→④ 一條），沒有理由在第一道就停手。跑得完的全部跑完、一次報完；真的因為
+# 前置條件不成立而跑不了的，逐名列進「未執行」清單——**未執行 ≠ 通過**。
+_CHECK_ORDER: tuple[str, ...] = (
+    "①掃描面邊界稽核（git-tracked workflow 全部已納管或已明文排除）",
+    "②巢狀排除區 action 世代 vs 登記快照",
+    "③workflows 目錄存在且掃得到 uses: 宣告",
+    "④跨 workflow 的 actions/* 版本唯一性",
+)
+
+
+def _report(notes: list[str], problems: list[str], unrun: list[str]) -> int:
+    """把綠／紅／未執行三塊各自完整印出，最後才收斂 rc。
+
+    順序刻意是「綠先、紅後」：紅印在最後一行附近才不會被其後十幾行綠捲走
+    （原版逐 action 依字典序印，`checkout` 的紅後面接 12 行綠）。
+    """
+    for line in notes:
+        print(line)
+    for block in problems:
+        print(block, file=sys.stderr)
+    if unrun:
+        print(
+            f"\n⚠️ 尚有 {len(unrun)} 道檢查**未執行**（前置條件不成立；其結果**未知**，"
+            f"不是通過）：",
+            file=sys.stderr,
+        )
+        for name in unrun:
+            print(f"    - {name}", file=sys.stderr)
+    if problems:
+        print(
+            f"\n❌ 本工具 {len(_CHECK_ORDER)} 道檢查中有 {len(problems)} 道未通過。"
+            f"上列是本次**跑得完的全部問題**（accumulate-then-report），不是第一筆——"
+            f"修掉最上面那筆之後不要預期其餘會自己消失",
+            file=sys.stderr,
+        )
+        return 1
+    print(f"\n✅ GitHub Actions workflow 檢查全數通過（{len(_CHECK_ORDER)} 道）")
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     # 本工具**不接受任何引數**（`argv` 只為既有程式化呼叫端的簽章相容保留）。
     # 🔴 本層**絕不讀 `sys.argv`**——未知引數的拒收在 `cli()`，WHY 見該處。
     del argv
+    notes: list[str] = []
+    problems: list[str] = []
+    unrun: list[str] = []
+
     # 只有掃描真實根層目錄時才做結構性邊界稽核；單元測試以 fixture 目錄注入
-    # `_WORKFLOWS_DIR` 時跳過（那時談「repo 掃描面」沒有意義）。
-    if _WORKFLOWS_DIR == _REPO_ROOT / ".github" / "workflows":
+    # `_WORKFLOWS_DIR` 時跳過（那時談「repo 掃描面」沒有意義）——這是**射程外**
+    # 而非「未執行」，故走 notes 不走 unrun（把它算進未執行清單會讓每次 fixture
+    # 測試都印出一段假警告，警告一旦有雜訊就沒人讀）。
+    if _WORKFLOWS_DIR != _REPO_ROOT / ".github" / "workflows":
+        notes.append(
+            f"ℹ️  _WORKFLOWS_DIR 為注入的 fixture 目錄 ⇒ {_CHECK_ORDER[0]}／"
+            f"{_CHECK_ORDER[1]} 射程外（談「repo 掃描面」對 fixture 沒有意義）"
+        )
+    else:
+        git_ok = True
         try:
             unregistered = _audit_scan_surface()
         except RuntimeError as exc:
-            print(f"❌ {exc}", file=sys.stderr)
-            return 1
-        if unregistered:
-            print(
-                "❌ 發現掃描面外、未登記於排除樣式的 workflow 檔 — 請先做出納管與否的"
-                "明文裁定（見本檔〈掃描面邊界〉區塊），不可讓它退回「沒人想過」狀態：",
-                file=sys.stderr,
-            )
-            for rel in unregistered:
-                print(f"    - {rel}", file=sys.stderr)
-            return 1
-        # R60 Scan-C C-03：巢狀排除區的「Node20 世代」事實宣稱由此升為機械斷言，
-        # 讓 ⚠️ 段那份到期風險揭露不可能與實況靜默背離（原缺陷＝承接者不存在）。
-        nested = nested_excluded_workflows()
-        try:
-            generation = nested_action_generation(nested)
-        except OSError as exc:
-            print(f"❌ 巢狀排除區世代稽核失敗：{exc}", file=sys.stderr)
-            return 1
-        drift = nested_generation_drift(generation)
-        if drift:
-            print(
-                "❌ 巢狀排除區（AISDLC_SDD 各版 .github/workflows/）的 action 世代與本檔"
-                "〈掃描面邊界〉⚠️ 段的登記快照不符 — 請先回答「LATEST 該不該隨根層升版」"
-                "（擁有者＝AISDLC_SDD 凍結/LATEST 政策側），把答案同步進 ⚠️ 段與缺陷帳本，"
-                "最後才更新 _NESTED_DISCLOSED_GENERATION：",
-                file=sys.stderr,
-            )
-            for problem in drift:
-                print(f"    - {problem}", file=sys.stderr)
-            return 1
-        gen_text = "／".join(
-            f"{a}@{_NESTED_DISCLOSED_GENERATION[a]}" for a in sorted(_NESTED_DISCLOSED_GENERATION)
-        )
-        print(
-            f"ℹ️  巢狀排除區實查：{len(nested)} 份 workflow，action 世代 {gen_text} "
-            f"與登記快照一致（Node20 於 2026-09-16 自 runner 移除，到期風險與分流"
-            f"結論見本檔〈掃描面邊界〉⚠️ 段）"
-        )
+            git_ok = False
+            problems.append(f"❌ [{_CHECK_ORDER[0]}] {exc}")
+        else:
+            if unregistered:
+                problems.append(
+                    f"❌ [{_CHECK_ORDER[0]}] 發現掃描面外、未登記於排除樣式的 workflow 檔"
+                    " — 請先做出納管與否的明文裁定（見本檔〈掃描面邊界〉區塊），不可讓它"
+                    "退回「沒人想過」狀態：\n"
+                    + "\n".join(f"    - {rel}" for rel in unregistered)
+                )
+        if not git_ok:
+            # ②與①共用同一次 `git ls-files`：①拿不到清單時②結構上無從執行。
+            unrun.append(f"{_CHECK_ORDER[1]}（前置：①的 `git ls-files` 未成功）")
+        else:
+            # R60 Scan-C C-03：巢狀排除區的「Node20 世代」事實宣稱由此升為機械斷言，
+            # 讓 ⚠️ 段那份到期風險揭露不可能與實況靜默背離（原缺陷＝承接者不存在）。
+            nested = nested_excluded_workflows()
+            try:
+                generation = nested_action_generation(nested)
+            except OSError as exc:
+                problems.append(f"❌ [{_CHECK_ORDER[1]}] 巢狀排除區世代稽核失敗：{exc}")
+            else:
+                drift = nested_generation_drift(generation)
+                if drift:
+                    problems.append(
+                        f"❌ [{_CHECK_ORDER[1]}] 巢狀排除區（AISDLC_SDD 各版 "
+                        ".github/workflows/）的 action 世代與本檔〈掃描面邊界〉⚠️ 段的"
+                        "登記快照不符 — 請先回答「LATEST 該不該隨根層升版」（擁有者＝"
+                        "AISDLC_SDD 凍結/LATEST 政策側），把答案同步進 ⚠️ 段與缺陷帳本，"
+                        "最後才更新 _NESTED_DISCLOSED_GENERATION：\n"
+                        + "\n".join(f"    - {p}" for p in drift)
+                    )
+                else:
+                    gen_text = "／".join(
+                        f"{a}@{_NESTED_DISCLOSED_GENERATION[a]}"
+                        for a in sorted(_NESTED_DISCLOSED_GENERATION)
+                    )
+                    notes.append(
+                        f"ℹ️  巢狀排除區實查：{len(nested)} 份 workflow，action 世代 "
+                        f"{gen_text} 與登記快照一致（Node20 於 2026-09-16 自 runner "
+                        f"移除，到期風險與分流結論見本檔〈掃描面邊界〉⚠️ 段）"
+                    )
 
     if not _WORKFLOWS_DIR.is_dir():
-        print(f"❌ 找不到 workflows 目錄：{_WORKFLOWS_DIR}", file=sys.stderr)
-        return 1
+        problems.append(f"❌ [{_CHECK_ORDER[2]}] 找不到 workflows 目錄：{_WORKFLOWS_DIR}")
+        unrun.append(f"{_CHECK_ORDER[3]}（前置：③的 workflows 目錄不存在）")
+        return _report(notes, problems, unrun)
 
     findings = scan(_WORKFLOWS_DIR)
     if not findings:
         # R56 補：掃描面整個斷掉（glob/regex 被改壞、workflows 目錄搬家）時，
         # 舊版會印「0 個追蹤 action」並 rc=0——與本工具存在的目的直接矛盾。
-        print(
-            f"❌ {_WORKFLOWS_DIR} 內找不到任何 `uses: actions/…@…` 宣告 — "
-            "掃描面疑似被改壞（本 repo 現況應為數十處）",
-            file=sys.stderr,
+        problems.append(
+            f"❌ [{_CHECK_ORDER[2]}] {_WORKFLOWS_DIR} 內找不到任何 "
+            "`uses: actions/…@…` 宣告 — 掃描面疑似被改壞（本 repo 現況應為數十處）"
         )
-        return 1
-    ok = True
+        unrun.append(f"{_CHECK_ORDER[3]}（前置：③掃到零筆 `uses:` 宣告）")
+        return _report(notes, problems, unrun)
+
+    inconsistent: list[str] = []
     total_files = 0
     for action in sorted(findings):
         versions = findings[action]
         if len(versions) > 1:
-            ok = False
-            print(f"❌ actions/{action} 版本不一致：發現 {len(versions)} 種版本", file=sys.stderr)
-            for version, sites in sorted(versions.items()):
-                print(f"  {version}：", file=sys.stderr)
-                for site in sites:
-                    print(f"    - {site}", file=sys.stderr)
+            detail = "\n".join(
+                f"  {version}：\n" + "\n".join(f"    - {site}" for site in sites)
+                for version, sites in sorted(versions.items())
+            )
+            inconsistent.append(
+                f"  · actions/{action}：發現 {len(versions)} 種版本\n{detail}"
+            )
         else:
             (version, sites), = versions.items()
             total_files += len(sites)
-            print(f"✅ actions/{action}@{version}：{len(sites)} 處一致")
-
-    if not ok:
-        print(
-            "\n❌ GitHub Actions 版本一致性檢查未通過 — 同一 action 在不同 "
-            "workflow 內必須釘同一版本（見上列 file:line）",
-            file=sys.stderr,
+            notes.append(f"✅ actions/{action}@{version}：{len(sites)} 處一致")
+    if inconsistent:
+        problems.append(
+            f"❌ [{_CHECK_ORDER[3]}] {len(inconsistent)} 個 action 的版本跨 workflow "
+            "不一致（同一 action 在不同 workflow 內必須釘同一版本）：\n"
+            + "\n".join(inconsistent)
         )
-        return 1
-    # R56：印「實際掃到的 action 數」而非白名單長度——舊版印 len(_TRACKED_ACTIONS)，
-    # 掃描面縮小時這個數字不動，等於把唯一的人工觀測訊號也一併蒙蔽。
-    print(f"\n✅ GitHub Actions 版本一致性檢查通過（{len(findings)} 個 actions/* action，"
-          f"共 {total_files} 處 uses: 宣告皆同名同版）")
-    return 0
+    else:
+        # R56：印「實際掃到的 action 數」而非白名單長度——舊版印 len(_TRACKED_ACTIONS)，
+        # 掃描面縮小時這個數字不動，等於把唯一的人工觀測訊號也一併蒙蔽。
+        notes.append(
+            f"✅ [{_CHECK_ORDER[3]}] {len(findings)} 個 actions/* action、"
+            f"共 {total_files} 處 uses: 宣告皆同名同版"
+        )
+    return _report(notes, problems, unrun)
 
 
 def cli(argv: list[str]) -> int:

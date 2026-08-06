@@ -49,8 +49,13 @@ on:
 # PR-advisory 併發以分支序列化（同分支新 push 取消舊跑，省 runner）。
 # R40 起 nightly-strict 不再 push main，先前與 drift-daily 共用的
 # `main-push-serialize` 序列化群組已移除（見下方 job 註解）。
+# 🔴 group 必須含 `github.event_name`（本輪 R77-55）：本檔的兩個 job 走**不同事件**
+# ——`nightly-strict` 只在 schedule 跑（每週一 02:37 UTC 的強制閘門），`pr-advisory`
+# 在 pull_request／workflow_dispatch 跑。group 只綁 `github.ref` 時，在 main 上一次
+# workflow_dispatch 就會取消掉正在跑的排程強制閘門，而那種 dispatch **實際發生過**
+# （tools/lib/ci_liveness.py 的 D-3 段記載了一筆：一次手動補跑買到了整個容忍窗的靜默）。
 concurrency:
-  group: arch-fitness-${{ github.ref }}
+  group: arch-fitness-${{ github.ref }}-${{ github.event_name }}
   cancel-in-progress: true
 
 # R15 SCAN-C-4（比照 autoclaude-ci.yml R13 CI-7）：顯式最小權限——先前全檔未宣告

@@ -34,8 +34,11 @@ import re
 import unicodedata
 
 _WIN_FORBIDDEN_CHARS = frozenset('<>:"|?*\\')
-# R60：`CONIN$`／`CONOUT$` 補齊（四處同修）。判準的權威模型是 git for Windows 的
-# `core.protectNTFS`——本機實測（Win 11 Pro 26200，拋棄式 repo）`CONIN$.log`／
+# R60：`CONIN$`／`CONOUT$` 補齊（四處同修）。納入的**證據來源**是 git for Windows 的
+# `core.protectNTFS`（只是證據來源，不是本判準要對齊的模型——R77-51 以外接 oracle 逐名
+# 對拍後證實兩者在四個樣本上判決相反；實測與裁決見根層 tools/check_ntfs_paths.py 的
+# `_RESERVED_RE` 上方 R77-51 段落，本檔不複製第二份證據）
+# ——本機實測（Win 11 Pro 26200，拋棄式 repo）`CONIN$.log`／
 # `CONOUT$.txt`／`conin$.log`／`CONIN$.tar.gz`／`CONIN$ .log` 全數 Invalid path，
 # 含此類檔名的 repo 在 Windows 上 clone rc=128 且工作樹全空；`CLOCK$.txt` 實測 ACCEPT
 # 且 clone 正常，故刻意不納入（`CONIN`／`CONIN.log` 少了 `$` 亦非裝置名，正則要求完整 token）。
@@ -45,11 +48,12 @@ _WIN_FORBIDDEN_CHARS = frozenset('<>:"|?*\\')
 # R68（四處同修）：追加 Microsoft《Naming Files, Paths, and Namespaces》保留名清單明列的
 # 上標變體 `COM¹ COM² COM³ LPT¹ LPT² LPT³`（該文件與 ASCII 數字版並列，成因是 Windows
 # 裝置名解析把上標數字視同數字；本機實測 `unicodedata.normalize("NFKC","COM¹")=="COM1"`
-# 佐證兩者在相容性分解下同值）。🔴 **證據等級＝官方文件＋靜態分析，非 Windows 真機實測**
-# ——本輪無 Windows 真機，未跑 `core.protectNTFS` / Win32 `CreateFile` 對照（CONIN$／CLOCK$
-# 當初是實測後才分別納入／排除）。取捨方向刻意選「擋」：若 Windows 實際 ACCEPT，代價僅是
+# 佐證兩者在相容性分解下同值）。取捨方向刻意選「擋」：若 Windows 實際 ACCEPT，代價僅是
 # 對一個沒人會用的檔名多加一個 `_` 前綴；若實際 REJECT 而不擋，代價是整個 clone 壞掉。
-# 未來若在真機實測到 ACCEPT，四處一併移除並比照 CLOCK$ 於此註記「已實測不納入」。
+# 🔴 R77-51 訂正：R68 當時的證據等級是「官方文件＋靜態分析」並附了一條「真機測到就四處
+# 移除」的指示——本輪已在 Win 11 Pro 26200 真機補跑，該條件成立，而它導出的動作**被掌舵者
+# 明文推翻**：上標變體與 COM0 的過攔一律保留（過攔是安全方向），只修失實的宣稱。實測數據、
+# 裁決與外接 oracle 鎖的位置，見根層 tools/check_ntfs_paths.py 的 R77-51 段落（單一份）。
 _WIN_RESERVED_NAME_RE = re.compile(
     r"^(CON|PRN|AUX|NUL|COM[0-9]|LPT[0-9]|CONIN\$|CONOUT\$|COM[¹²³]|LPT[¹²³])$", re.IGNORECASE
 )

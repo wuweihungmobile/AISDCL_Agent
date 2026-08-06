@@ -133,14 +133,12 @@ class TestSingleSidedEnrollment(unittest.TestCase):
             mock.patch.object(m, "_THINNESS_ENROLLED", set()),
             mock.patch.object(m, "_EXEMPT_PAIRS", {}),
             mock.patch.object(m, "_SINGLE_SIDED_EXEMPT", single_exempt),
-            mock.patch.object(m, "_LATEST_THINNESS_ENROLLED", set()),
             mock.patch.object(m, "_resolve_latest_tools", lambda: latest_tools),
         )
 
     def _run_enrollment(self, fake_root: Path, single_exempt: dict[str, str]):
         patches = self._patched(fake_root, single_exempt)
         with patches[0], patches[1], patches[2], patches[3], patches[4], patches[5], \
-             patches[6], \
              mock.patch("builtins.print") as fake_print:
             ok = m._check_pair_enrollment()
         printed = " ".join(
@@ -283,7 +281,6 @@ class TestLatestToolsEnrollment(unittest.TestCase):
              mock.patch.object(m, "_THINNESS_ENROLLED", set()), \
              mock.patch.object(m, "_EXEMPT_PAIRS", {}), \
              mock.patch.object(m, "_SINGLE_SIDED_EXEMPT", {}), \
-             mock.patch.object(m, "_LATEST_THINNESS_ENROLLED", set()), \
              mock.patch("builtins.print") as fake_print:
             ok = m._check_pair_enrollment(latest_tools)
         printed = " ".join(
@@ -404,7 +401,7 @@ class TestRunTlcInvocationParityLock(unittest.TestCase):
         self.assertIn("SDX_FSM", printed, "diff 須點名改名後的 token")
 
     def test_missing_script_is_red(self) -> None:
-        """run_tlc 檔案消失 → 紅（指路更新 _LATEST_THINNESS_ENROLLED）。"""
+        """run_tlc 檔案消失 → 紅（指路更新 _THINNESS_ENROLLED）。"""
         empty = _TMP_DIR / "inv_missing" / "tools"
         empty.mkdir(parents=True, exist_ok=True)
         with mock.patch("builtins.print"):
@@ -583,11 +580,17 @@ class TestR69ExitCodeContract(unittest.TestCase):
 
 
 class TestLatestThinnessPin(unittest.TestCase):
-    """R65（ADR-XPLAT-002 §5 Phase 2-A）：LATEST 版薄殼 hash 釘選
-    （`_check_latest_thinness`）紅/綠自證——接手退場的 `_TLC_TRACK_ENROLLED` 的
-    「run_tlc.{sh,ps1} 兩側檔案存在、內容未偏離已核准樣子」這條斷言，且比舊鎖更
-    嚴格（舊鎖只比對抽取到的軌 token 集合，本鎖鎖住整份正規化內容——任何實質
-    修改，不論是否影響 --module/--cfg 引數，都會先在這裡紅燈）。
+    """LATEST 版薄殼 hash 釘選的紅/綠自證（R65 立，**本輪改為委派**）。
+
+    R65 起本鎖接手退場的 `_TLC_TRACK_ENROLLED` 的「run_tlc.{sh,ps1} 兩側檔案存在、
+    內容未偏離已核准樣子」這條斷言，且比舊鎖更嚴格（舊鎖只比對抽取到的軌 token
+    集合，本鎖鎖住整份正規化內容）。
+
+    🔴 本輪（E-06／R77-54①）：受測對象由本檔的第二套實作改為
+    `check_wrapper_thinness`（唯一實作）＋ 本檔的薄呼叫點。**斷言逐條保留**——
+    這一整個類別就是併表的 dominance test 本體：若併表弄丟了任何一條，下面任一支
+    會由紅轉綠（＝抓不到它該抓的東西），而不是靜悄悄地消失。
+    注入面因此改 patch `check_wrapper_thinness` 的表與 LATEST 解析器。
     """
 
     def _make_shell_tree(self, name: str, sh_body: str, ps1_body: str) -> Path:
@@ -598,11 +601,26 @@ class TestLatestThinnessPin(unittest.TestCase):
         (formal / "run_tlc.ps1").write_text(ps1_body, encoding="utf-8")
         return latest_tools
 
+    @staticmethod
+    def _run(pins: dict[str, str] | None, latest_tools: Path | None) -> tuple[bool, str]:
+        """以指定的釘選表與 LATEST 解析結果跑一次委派檢查，回傳 (rc 布林, 印出的字)。"""
+        import check_wrapper_thinness as _thinness
+
+        table = _thinness._PINNED_SHA256 if pins is None else pins
+        with mock.patch.object(_thinness, "_PINNED_SHA256", table), \
+             mock.patch.object(_thinness, "latest_tools_root", lambda: latest_tools), \
+             mock.patch("builtins.print") as fake_print:
+            ok = m._check_latest_thinness()
+        printed = " ".join(
+            str(arg) for call in fake_print.call_args_list for arg in call.args
+        )
+        return ok, printed
+
     def test_real_tree_pins_green(self) -> None:
         latest_tools = m._resolve_latest_tools()
         self.assertIsNotNone(latest_tools)
-        with mock.patch("builtins.print"):
-            self.assertTrue(m._check_latest_thinness(latest_tools))
+        ok, _ = self._run(None, latest_tools)
+        self.assertTrue(ok)
 
     def test_tampered_content_is_red(self) -> None:
         """正規化內容偏離釘選 → 紅（hash 釘選是權威判定，不是抽取式比對）。"""
@@ -612,12 +630,7 @@ class TestLatestThinnessPin(unittest.TestCase):
             "LATEST/tools/fsm_runtime/formal/run_tlc.sh": "0" * 64,
             "LATEST/tools/fsm_runtime/formal/run_tlc.ps1": "0" * 64,
         }
-        with mock.patch.object(m, "_LATEST_PINNED_SHA256", fake_pins), \
-             mock.patch("builtins.print") as fake_print:
-            ok = m._check_latest_thinness(latest_tools)
-        printed = " ".join(
-            str(arg) for call in fake_print.call_args_list for arg in call.args
-        )
+        ok, printed = self._run(fake_pins, latest_tools)
         self.assertFalse(ok)
         self.assertIn("hash 與釘選不符", printed)
 
@@ -625,25 +638,17 @@ class TestLatestThinnessPin(unittest.TestCase):
         empty = _TMP_DIR / "thin_missing" / "tools"
         empty.mkdir(parents=True, exist_ok=True)
         fake_pins = {"LATEST/tools/fsm_runtime/formal/run_tlc.sh": "0" * 64}
-        with mock.patch.object(m, "_LATEST_PINNED_SHA256", fake_pins), \
-             mock.patch("builtins.print") as fake_print:
-            ok = m._check_latest_thinness(empty)
-        printed = " ".join(
-            str(arg) for call in fake_print.call_args_list for arg in call.args
-        )
+        ok, printed = self._run(fake_pins, empty)
         self.assertFalse(ok)
         self.assertIn("檔案不存在", printed)
 
     def test_latest_resolution_failure_is_red(self) -> None:
+        """LATEST 解析失敗必須自成一種紅——併表前它與「檔案不存在」共用同一條訊息，
+        兩種病因（版本解析壞了 vs 檔案被刪）分不開，讀者無從決定下一步。"""
         fake_pins = {"LATEST/tools/fsm_runtime/formal/run_tlc.sh": "0" * 64}
-        with mock.patch.object(m, "_LATEST_PINNED_SHA256", fake_pins), \
-             mock.patch("builtins.print") as fake_print:
-            ok = m._check_latest_thinness(None)
-        printed = " ".join(
-            str(arg) for call in fake_print.call_args_list for arg in call.args
-        )
+        ok, printed = self._run(fake_pins, None)
         self.assertFalse(ok)
-        self.assertIn("LATEST 解析失敗", printed)
+        self.assertIn("LATEST 版本解析失敗", printed)
 
     def test_line_count_over_max_lines_is_red(self) -> None:
         import check_wrapper_thinness as _thinness
@@ -654,14 +659,34 @@ class TestLatestThinnessPin(unittest.TestCase):
             "LATEST/tools/fsm_runtime/formal/run_tlc.sh": _thinness.normalized_sha256(
                 latest_tools / "fsm_runtime" / "formal" / "run_tlc.sh"),
         }
-        with mock.patch.object(m, "_LATEST_PINNED_SHA256", fake_pins), \
-             mock.patch("builtins.print") as fake_print:
-            ok = m._check_latest_thinness(latest_tools)
-        printed = " ".join(
-            str(arg) for call in fake_print.call_args_list for arg in call.args
-        )
+        ok, printed = self._run(fake_pins, latest_tools)
         self.assertFalse(ok)
         self.assertIn("超過薄殼上限", printed)
+
+    def test_empty_latest_pin_surface_is_red(self) -> None:
+        """🔴 併表後新增的反空轉斷言：釘選表內一支 LATEST 鍵都不剩 → 必紅。
+
+        WHY：委派版的迴圈次數由 `_PINNED_SHA256` 的 LATEST 鍵數決定，鍵全被刪掉時
+        「零違規」與「全部通過」在回傳值上不可分——那正是 R66 DEF-101-622 記載的
+        自相矛盾假綠（印「0 支 hash 釘選皆正常（1 對）」而 rc=0）。原本靠第二份
+        cross-lock 擋，兩表合一後改由本斷言直接擋在檢查器內。
+        """
+        ok, printed = self._run({"tools/dev_start.sh": "0" * 64}, None)
+        self.assertFalse(ok)
+        self.assertIn("已無任何 LATEST 鍵", printed)
+
+    def test_non_latest_problems_are_not_reported_here(self) -> None:
+        """射程邊界（反過度擴張）：非 LATEST 鍵的違規不由本呼叫點回報。
+
+        測意圖：同一筆違規若在兩支閘門各紅一次，不會多出任何鑑別力，只會讓讀者
+        以為有兩個問題。那 14 支殼是 `check_wrapper_thinness` 自己那道閘門的職責。
+        """
+        latest_tools = m._resolve_latest_tools()
+        pins = dict(__import__("check_wrapper_thinness")._PINNED_SHA256)
+        pins["tools/dev_start.sh"] = "0" * 64   # 非 LATEST 鍵，刻意弄壞
+        ok, printed = self._run(pins, latest_tools)
+        self.assertTrue(ok, "非 LATEST 鍵的違規不該讓本呼叫點轉紅")
+        self.assertNotIn("dev_start", printed)
 
 
 class TestThinnessCrossLock(unittest.TestCase):
@@ -699,55 +724,66 @@ class TestThinnessCrossLock(unittest.TestCase):
         self.assertIn("rogue_wrapper.sh", printed)
 
 
-class TestLatestThinnessCrossLock(unittest.TestCase):
-    """LATEST 版 parity↔thinness 鍵集合交叉鎖（R66 DEF-101-622，同 R12 QA-1 教訓
-    套用於 R65 新表 _LATEST_THINNESS_ENROLLED／_LATEST_PINNED_SHA256）。
+class TestLatestKeysAreCoveredByTheSingleCrossLock(unittest.TestCase):
+    """R66 DEF-101-622 的斷言，**改由合併後的那一份 cross-lock 承接**（本輪 E-06）。
 
-    WHY：兩份獨立字面清單同一 commit 各自腐化（清空 pin 表但不動 enrollment 集合）
-    若無交叉鎖，`_check_latest_thinness()` 的迴圈只走 `_LATEST_PINNED_SHA256`，
-    清空後迴圈次數為零、恆回傳 True，且會印出自相矛盾的「0 支 hash 釘選皆正常」
-    訊息——本鎖必須攔下這個情境。"""
+    原本這裡是 `_check_latest_thinness_cross_lock()` 的專屬類別——它與
+    `TestThinnessCrossLock` 逐字同形，只差兩張表的名字，而這兩支存在的**唯一理由**
+    正是「兩份獨立字面清單會各自腐化」。判準自己複製兩份，等於把它負責攔的病帶進
+    守門層本身。兩表合一後只剩一份 cross-lock，本類別因此改成：證明 LATEST 鍵**確實
+    落在那一份的射程內**（不是「少了一支測試」，是「同一批斷言換人承接」）。
+    """
 
-    def test_current_tables_consistent_green(self) -> None:
-        with mock.patch("builtins.print"):
-            self.assertTrue(m._check_latest_thinness_cross_lock())
-
-    def test_bug_injection_cleared_pins_still_enrolled_is_red(self) -> None:
-        """紅：清空 _LATEST_PINNED_SHA256、不動 _LATEST_THINNESS_ENROLLED——這正是
-        缺陷描述裡實測過的自相矛盾情境（_check_latest_thinness 本身會誤判綠燈，
-        本鎖須攔下）。"""
-        with mock.patch.object(m, "_LATEST_PINNED_SHA256", {}), \
+    def test_missing_latest_pin_key_is_red(self) -> None:
+        """紅：LATEST 的 .ps1 釘選被刪、stem 登記還在 → 合併後的 cross-lock 須攔下。"""
+        import check_wrapper_thinness as t
+        pins = {k: v for k, v in t._PINNED_SHA256.items()
+                if k != "LATEST/tools/fsm_runtime/formal/run_tlc.ps1"}
+        with mock.patch.object(t, "_PINNED_SHA256", pins), \
              mock.patch("builtins.print") as fake_print:
-            self.assertFalse(m._check_latest_thinness_cross_lock())
+            self.assertFalse(m._check_thinness_cross_lock())
+        printed = " ".join(
+            str(arg) for call in fake_print.call_args_list for arg in call.args
+        )
+        self.assertIn("run_tlc.ps1", printed)
+
+    def test_cleared_latest_pins_still_enrolled_is_red(self) -> None:
+        """紅：LATEST 兩支釘選整組清空、stem 登記不動——缺陷描述裡實測過的自相矛盾情境。"""
+        import check_wrapper_thinness as t
+        pins = {k: v for k, v in t._PINNED_SHA256.items()
+                if not k.startswith(m._LATEST_PREFIX)}
+        with mock.patch.object(t, "_PINNED_SHA256", pins), \
+             mock.patch("builtins.print") as fake_print:
+            self.assertFalse(m._check_thinness_cross_lock())
         printed = " ".join(
             str(arg) for call in fake_print.call_args_list for arg in call.args
         )
         self.assertIn("run_tlc.sh", printed)
         self.assertIn("run_tlc.ps1", printed)
 
-    def test_missing_pin_key_is_red(self) -> None:
-        pins = {
-            k: v for k, v in m._LATEST_PINNED_SHA256.items()
-            if k != "LATEST/tools/fsm_runtime/formal/run_tlc.ps1"
-        }
-        with mock.patch.object(m, "_LATEST_PINNED_SHA256", pins), \
-             mock.patch("builtins.print") as fake_print:
-            self.assertFalse(m._check_latest_thinness_cross_lock())
-        printed = " ".join(
-            str(arg) for call in fake_print.call_args_list for arg in call.args
-        )
-        self.assertIn("run_tlc.ps1", printed)
-
-    def test_extra_pin_without_enrollment_is_red(self) -> None:
-        pins = dict(m._LATEST_PINNED_SHA256)
+    def test_extra_latest_pin_without_enrollment_is_red(self) -> None:
+        """紅（反向）：多一支沒人登記 stem 的 LATEST 釘選。"""
+        import check_wrapper_thinness as t
+        pins = dict(t._PINNED_SHA256)
         pins["LATEST/tools/rogue_wrapper.sh"] = "0" * 64
-        with mock.patch.object(m, "_LATEST_PINNED_SHA256", pins), \
+        with mock.patch.object(t, "_PINNED_SHA256", pins), \
              mock.patch("builtins.print") as fake_print:
-            self.assertFalse(m._check_latest_thinness_cross_lock())
+            self.assertFalse(m._check_thinness_cross_lock())
         printed = " ".join(
             str(arg) for call in fake_print.call_args_list for arg in call.args
         )
         self.assertIn("rogue_wrapper.sh", printed)
+
+    def test_the_retired_second_cross_lock_is_really_gone(self) -> None:
+        """反殘留：第二份 cross-lock 不得以任何形式留在原始碼裡。
+
+        測意圖：去重若只做一半（函式還在、只是沒人呼叫），下一個複審者讀到它會以為
+        還有第二道防線，而它其實從不執行——比沒去重更糟。
+        """
+        for name in ("_check_latest_thinness_cross_lock", "_LATEST_PINNED_SHA256",
+                     "_LATEST_THINNESS_ENROLLED"):
+            with self.subTest(name=name):
+                self.assertFalse(hasattr(m, name), f"{name} 仍存在於 check_script_parity")
 
 
 class TestGitLongpathsFlagParity(unittest.TestCase):
@@ -827,7 +863,7 @@ class TestR61Phase1BMigration(unittest.TestCase):
         歷史：R60 基線 8 → R61 Phase 1-B 遷移兩對至 `_THINNESS_ENROLLED` 後為 6
         （公式當時是 `_EXEMPT_PAIRS` + `_TLC_TRACK_ENROLLED`）→ R65 Phase 2-A 把
         run_tlc 那唯一一筆 `_TLC_TRACK_ENROLLED` 條目也升級為 hash 釘選
-        （`_LATEST_THINNESS_ENROLLED`，不計入 UEP）後，`_TLC_TRACK_ENROLLED` 本身
+        （不計入 UEP）後，`_TLC_TRACK_ENROLLED` 本身
         退場、公式不再有該項，UEP 應為 5。本測試名稱雖冠 R61，但斷言的是「當前
         UEP 公式與數值」的活體回歸鎖（非凍結歷史快照），故隨本輪同步更新，防止
         被靜默改回。"""
@@ -853,12 +889,13 @@ class TestPrintCollapseFlag(unittest.TestCase):
         self.assertIn(f"UEP={expected_uep}", out)
         self.assertIn("AC=", out)
 
-    def test_ac_matches_sum_of_seven_registries(self) -> None:
+    def test_ac_matches_sum_of_the_registries(self) -> None:
         """AC 定義（§4.2）＝描述性常數登記表長度總和；本測試獨立重算，防止
         `_print_collapse()` 內部算式與 ADR 定義漂移卻無人發現（既有各表各自已有
-        其他鎖守著不被誤刪）。R65：原「六張表」的 `_TLC_TRACK_ENROLLED` 已退場，
-        改由 `_LATEST_PINNED_SHA256`／`_LATEST_THINNESS_ENROLLED` 兩張新表接手其
-        「描述性常數登記」角色，故現為七張表。"""
+        其他鎖守著不被誤刪）。沿革：R65 原「六張表」的 `_TLC_TRACK_ENROLLED` 退場、
+        由 LATEST 兩張新表接手成七張；**本輪（E-06／R77-54①）那兩張併回
+        `_PINNED_SHA256`／`_THINNESS_ENROLLED`，回到五張，而 AC 總數逐字不變**
+        ——併表是換住所不是收斂，AC 若因此變動反而代表算錯了。"""
         import io
         from contextlib import redirect_stdout
 
@@ -869,8 +906,6 @@ class TestPrintCollapseFlag(unittest.TestCase):
             + len(m._THINNESS_ENROLLED)
             + len(m._EXEMPT_PAIRS)
             + len(m._SINGLE_SIDED_EXEMPT)
-            + len(m._LATEST_PINNED_SHA256)
-            + len(m._LATEST_THINNESS_ENROLLED)
             + len(m._MIN_EXTRACT_COUNTS)
         )
         buf = io.StringIO()
@@ -1479,8 +1514,16 @@ class TestR67UnpinnedExitObligation(unittest.TestCase):
         self.assertIn("退場錨點", printed)
 
     def test_reason_with_exit_anchor_is_green(self) -> None:
-        """對照組（雙向）：帶錨點即通過——證明紅燈來自缺錨點，不是 fixture 本身壞掉。"""
-        for anchor in ("退場：未指派", "退場：R99（某具名解鎖條件）"):
+        """對照組（雙向）：帶錨點即通過——證明紅燈來自缺錨點，不是 fixture 本身壞掉。
+
+        🔴 本輪（E-05／R77-13）訂正：具名輪次的正控樣本原本寫死一個**不存在的輪號**，
+        於是這支「證明合法寫法會通過」的對照組，用的是一個與『未指派』等效（永遠不到
+        期）的假承諾當範例——判準的正控自己就是它該擋的東西。改為自帳本現查當前輪推導
+        下一輪，樣本因此永遠是「真的可能被排進來」的那一個，且不隨輪次推進而過期。
+        """
+        current = m._current_round()
+        self.assertIsNotNone(current, "真 repo 內帳本必須推得出當前輪，否則本正控空轉")
+        for anchor in ("退場：未指派", f"退場：R{current + 1}（某具名解鎖條件）"):
             with self.subTest(anchor=anchor):
                 with mock.patch.object(
                     m, "_EXEMPT_PAIRS", {"x/y": (m._UNPINNED, f"某理由；{anchor}")}
@@ -1533,6 +1576,75 @@ class TestR67UnpinnedExitObligation(unittest.TestCase):
             "reason 內出現開放下界承接（`退場：R<N>+`）——只准具名輪次或未指派："
             f"{offenders}",
         )
+
+    # ── 本輪（E-05／R77-13）：退場輪號必須「可與 current_round() 比大小」──────
+    def test_fabricated_far_future_round_is_red(self) -> None:
+        """🔴 缺陷注入：`退場：R99`（遠超當前輪）必紅。  # round-label-ok: 合成注入語料，非本批輪號宣稱
+
+        修前唯一的門檻是「字面長得像輪號」，於是捏一個遠在天邊的號碼就能買到與
+        『未指派』完全相同的效果（永遠不到期），卻讀起來像有人接。本支證明那條路已封。
+        """
+        current = m._current_round()
+        self.assertIsNotNone(current)
+        far = current + 50
+        with mock.patch.object(
+            m, "_EXEMPT_PAIRS", {"x/y": (m._UNPINNED, f"某理由；退場：R{far}")}
+        ), mock.patch.object(m, "_SINGLE_SIDED_EXEMPT", {}), \
+             mock.patch("builtins.print") as fake_print:
+            ok = m._check_tier_classification()
+        self.assertFalse(ok, f"R{far} 被放行——與『未指派』等效卻讀起來像有承接對象")
+        printed = " ".join(
+            str(a) for call in fake_print.call_args_list for a in call.args
+        )
+        self.assertIn("不得超前當前輪", printed)
+
+    def test_next_round_and_past_rounds_stay_green(self) -> None:
+        """對照組：`current+1`（正常指派）與**過去的輪號**都必須綠。
+
+        🔴 這一支是本判準與被明文禁止的那個形狀（「驗證輪號仍在未來」）之間的分界線：
+        過去的輪號恆綠 ⇒ `current_round()` 單調增加時，今天合法的錨點明天仍合法
+        ⇒ 時間流逝結構上無法讓任何一列轉紅。若哪天有人把判準改成「必須仍在未來」，
+        本支會第一個紅——它就是那道防線。
+        """
+        current = m._current_round()
+        self.assertIsNotNone(current)
+        for n in (current + 1, current, current - 1, 1):
+            with self.subTest(round=n):
+                with mock.patch.object(
+                    m, "_EXEMPT_PAIRS", {"x/y": (m._UNPINNED, f"某理由；退場：R{n}")}
+                ), mock.patch.object(m, "_SINGLE_SIDED_EXEMPT", {}), \
+                     mock.patch("builtins.print"):
+                    self.assertTrue(
+                        m._check_tier_classification(),
+                        f"R{n} 被判紅——過去/當前/下一輪都必須是合法錨點",
+                    )
+
+    def test_missing_ledger_is_skipped_not_red(self) -> None:
+        """fail-open 窗口（明寫而非藏在 docstring）：帳本推不出當前輪 ⇒ 整條判準略過。
+
+        方向是刻意的：parity 是每次 push 都跑的閘門，讓它因為另一份文件的可讀性擋下
+        所有人，代價遠高於漏掉一個捏造的輪號。此處把該窗口變成可執行的斷言，
+        免得它日後被誤讀成「已覆蓋」。
+        """
+        with mock.patch.object(m, "_current_round", lambda: None), \
+             mock.patch.object(
+                 m, "_EXEMPT_PAIRS", {"x/y": (m._UNPINNED, "某理由；退場：R99999")}
+             ), mock.patch.object(m, "_SINGLE_SIDED_EXEMPT", {}), \
+             mock.patch("builtins.print"):
+            self.assertTrue(m._check_tier_classification())
+
+    def test_real_tables_carry_no_fabricated_round(self) -> None:
+        """真表現況：兩張活體登記表不得留下任何超前當前輪的錨點。"""
+        current = m._current_round()
+        self.assertIsNotNone(current)
+        offenders = [
+            p
+            for table_name, table in (("_EXEMPT_PAIRS", m._EXEMPT_PAIRS),
+                                      ("_SINGLE_SIDED_EXEMPT", m._SINGLE_SIDED_EXEMPT))
+            for key, (_tier, reason) in table.items()
+            for p in m._exit_anchor_round_problems(table_name, key, reason, current)
+        ]
+        self.assertEqual(offenders, [], f"活體登記表出現捏造輪號：{offenders}")
 
     def test_non_unpinned_tiers_are_not_required_to_carry_the_anchor(self) -> None:
         """邊界：退場義務只加在 unpinned；tier3/4 是明文封頂類別，本來就不該退場。"""
@@ -1663,26 +1775,103 @@ class TestR67AcCoverage(unittest.TestCase):
         self.assertIn(f"AC={expected}", buf.getvalue())
 
 
-class TestR67LatestPinnedShebangCoverage(unittest.TestCase):
-    """R67-H35 回歸鎖（LATEST 側）：`_LATEST_PINNED_SHA256` 的 `.sh` 也須把 shebang
-    納入 hash 輸入。
+class TestRedOutputGoesThroughTheSingleExit(unittest.TestCase):
+    """本輪 F-09／R77-54③：紅燈不得被綠燈淹沒——所有 stderr 輸出走 `_fail()` 唯一出口。
 
-    WHY：`_check_latest_thinness()` 重用 `check_wrapper_thinness` 的同一組純函式，
-    LATEST run_tlc.sh 同樣是 `#!/usr/bin/env bash`。`tools/tests/
-    test_check_wrapper_thinness.py` 那支全面性測試只走 `_PINNED_SHA256`，LATEST 這
-    一支不在它的迴圈裡——不補這條就會出現「主表修好、LATEST 仍在覆蓋面外」。
+    病灶（注入實測）：綠燈走 stdout、紅燈走 stderr，而輸出被導向檔案／管線時 stdout 是
+    塊緩衝、stderr 不是 ⇒ 合流檢視（`2>&1`）時整批紅燈先出現、後面跟著一長串綠燈。
+    實測形態：紅在第 1 行、其後 12 行全綠。而 `R76_HANDOFF.md` §1 那張十道閘門表正是
+    用「跑指令 → 看尾巴」記錄的 ⇒ 這支工具在**真紅**時尾巴是綠的。
+    與 Scan-H⑦（早退遮蔽訊號）同族、方向相反：不是少印，是把紅埋在前面。
+
+    🔴 為何鎖「唯一出口」而不是鎖「最後一行是紅的」：後者只驗一個表象，下一個新增的
+    紅燈站點照樣可以繞過去（同 `test_guard_has_a_single_encoding_decision` 治「讀檔決策
+    散落三處」的理由——只改三處字面值治不了病）。
+    """
+
+    @staticmethod
+    def _stderr_print_lines() -> list[str]:
+        """以 AST 找出 `print(..., file=sys.stderr)` 呼叫（`_fail` 自身那一處除外）。"""
+        import ast
+
+        src = Path(m.__file__).read_text(encoding="utf-8")
+        tree = ast.parse(src)
+        fail_def = next(
+            n for n in ast.walk(tree)
+            if isinstance(n, ast.FunctionDef) and n.name == "_fail"
+        )
+        skip = set(range(fail_def.lineno, fail_def.end_lineno + 1))
+        return [
+            f"L{node.lineno}"
+            for node in ast.walk(tree)
+            if isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
+            and node.func.id == "print" and node.lineno not in skip
+            and any(kw.arg == "file" and ast.unparse(kw.value) == "sys.stderr"
+                    for kw in node.keywords)
+        ]
+
+    def test_no_direct_stderr_print_outside_the_single_exit(self) -> None:
+        offenders = self._stderr_print_lines()
+        self.assertEqual(
+            offenders, [],
+            f"下列站點直接寫 stderr、繞過 `_fail()`：{offenders}——紅燈會回到「先於所有"
+            "綠燈整批出現」的排版，`2>&1` 檢視時真紅會以綠行收尾",
+        )
+
+    def test_the_scanner_has_teeth(self) -> None:
+        """鑑別力自檢：掃描器對合成的違規樣本必須抓得到（否則上一支恆綠）。"""
+        import ast
+
+        tree = ast.parse(
+            "import sys\n"
+            "def _fail(msg):\n    print(msg, file=sys.stderr)\n"
+            "def other():\n    print('x', file=sys.stderr)\n"
+        )
+        fail_def = next(
+            n for n in ast.walk(tree)
+            if isinstance(n, ast.FunctionDef) and n.name == "_fail"
+        )
+        skip = set(range(fail_def.lineno, fail_def.end_lineno + 1))
+        hits = [
+            node.lineno for node in ast.walk(tree)
+            if isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
+            and node.func.id == "print" and node.lineno not in skip
+            and any(kw.arg == "file" and ast.unparse(kw.value) == "sys.stderr"
+                    for kw in node.keywords)
+        ]
+        self.assertEqual(hits, [5], "掃描器抓不到合成違規（或誤抓 `_fail` 自身）")
+
+    def test_fail_flushes_stdout_before_writing(self) -> None:
+        """行為面：`_fail()` 必須先排空 stdout——那才是紅燈落回正確位置的原因。"""
+        order: list[str] = []
+        with mock.patch.object(sys.stdout, "flush", lambda: order.append("flush")), \
+             mock.patch("builtins.print", lambda *a, **k: order.append("print")):
+            m._fail("x")
+        self.assertEqual(order[:2], ["flush", "print"])
+
+
+class TestR67LatestPinnedShebangCoverage(unittest.TestCase):
+    """R67-H35 回歸鎖（LATEST 側）：LATEST 釘選鍵的 `.sh` 也須把 shebang 納入 hash。
+
+    WHY 當初要另立一支：R67 時 LATEST 釘選住在本檔的第二張表，而
+    `test_check_wrapper_thinness.py` 那支全面性測試只走 `_PINNED_SHA256` 的迴圈——
+    LATEST 那兩支不在它的射程裡，不補這條就會「主表修好、LATEST 仍在覆蓋面外」。
+    🔴 本輪（E-06／R77-54①）兩表合一後，那支全面性測試的迴圈**自動涵蓋** LATEST 鍵；
+    本類別因此改為守住「合併確實把 LATEST 帶進了那個迴圈」——刻意不刪，因為刪掉
+    就沒有任何東西會在「有人把 LATEST 鍵再拆出去」時說話。
     """
 
     def test_latest_pinned_sh_shebang_enters_hash(self) -> None:
         import check_wrapper_thinness as _thinness
 
-        latest_tools = m._resolve_latest_tools()
+        latest_tools = _thinness.latest_tools_root()
         self.assertIsNotNone(latest_tools, "真 repo 內 LATEST 解析不得失敗")
         checked = 0
-        for rel in m._LATEST_PINNED_SHA256:
-            path = latest_tools / rel[len(m._LATEST_PREFIX):]
-            if path.suffix != ".sh":
+        for rel in _thinness._PINNED_SHA256:
+            if not rel.startswith(m._LATEST_PREFIX) or not rel.endswith(".sh"):
                 continue
+            path = _thinness.pinned_path(rel, latest_tools)
+            self.assertIsNotNone(path, f"{rel} 解析不出實體路徑")
             self.assertTrue(path.is_file(), f"{rel} 不存在於磁碟")
             first = _thinness._read_source(path).splitlines()[0]
             self.assertTrue(first.startswith("#!"), f"{rel} 首行非 shebang：{first!r}")

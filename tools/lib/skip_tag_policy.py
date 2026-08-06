@@ -21,7 +21,17 @@ WHY 常數要獨立成①而不是跟著某一面走：②與④是**同一個�
 from __future__ import annotations
 
 import re
-from collections.abc import Mapping
+import sys
+from collections.abc import Iterable, Mapping
+from pathlib import Path
+
+# 本檔住 `<repo>/tools/lib/`：與 `sdd_latest` 同層，呼叫端一律已把 `tools/lib`
+# 放上 sys.path（同 `skip_source_io` 的既有慣例）。此處仍自行補一次，讓「只 import
+# 本模組」的呼叫端也成立。
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import sdd_latest  # noqa: E402
+
+_REPO_ROOT = Path(__file__).resolve().parents[2]
 
 # ── 標籤字面 ────────────────────────────────────────────────────────────────────
 # R43 Architect P1（DEF-101-348 方向①）：DEF-101-343~345 揪出 5 支 Windows 專屬
@@ -57,7 +67,50 @@ _WINDOWS_LIKE_SKIP_HINTS = ("windows", "win32", "pathext", "bash.exe", "mutex", 
 # 具名豁免：reason 命中關鍵詞但**確實不是** Windows 專屬的 skip（鍵＝test id，
 # 值＝理由）。現況為空集合。刻意保留這個空常數而非省略——例外必須逐支具名並附
 # 理由，不接受「整批略過」的通用開關。
+#
+# 🔴 本輪補上自檢（此前**零 stale 自檢、零牙**）：注入實測顯示，往本表塞一筆指向
+# 不存在檔案的豁免、或一筆指向真檔但根本不需要豁免的條目，整支
+# `tools/tests/test_run_root_unittests.py`（73 tests）仍然全綠——也就是說本表現在
+# 是空的所以看起來乾淨，第一筆進去的那天起它就是一張**只進不出**的永久豁免表。
+# 對照組：姊妹表 `_COLLECTION_EXEMPT` 早就有牙（多餘的豁免會被抓）。同一個 repo
+# 對「豁免表要有 stale 自檢」有明確認知，卻只實作在兩張表中的一張。
 _WINDOWS_SKIP_TAG_EXEMPT: dict[str, str] = {}
+
+#: 豁免理由必須寫出**承接輪次**（形態＝大寫 R 後接兩位以上數字）。沒有承接輪次的
+#: 豁免＝沒有人負責把它拿掉，也就是永久豁免——Scan-H 必跑項② 對每一個豁免的要求。
+_EXEMPT_HANDOVER_RE = re.compile(r"R\d{2,}")
+
+
+def exemption_problems(
+    exempt: Mapping[str, str],
+    *,
+    flagged_without_exempt: Mapping[str, str] | None = None,
+) -> list[str]:
+    """`_WINDOWS_SKIP_TAG_EXEMPT` 的雙面自檢（純函式）。回空 list ＝合格。
+
+    · **格式面**（不分平台）：值必須寫出承接輪次，否則就是只進不出的永久豁免。
+    · **stale 面**（`flagged_without_exempt` 為 None 時**不判**）：該筆豁免若在
+      「假裝豁免表是空的」的重掃結果裡根本不會被判違規，代表它壓的東西已經不在
+      （測試改名／reason 改寫／已補標籤）⇒ 必須移除。
+
+    🔴 為何 stale 面要能被關掉（Scan-H⑥ 互鎖）：它的資料來源
+    `untagged_windows_like_skips` 在 **Windows 上整組早退回空清單**（那個早退本身
+    是對的，理由見該函式）。若無條件套用，Windows 上每一筆豁免都會被判 stale ＝
+    整片假紅。呼叫端只在該面真的有在說話時才把資料傳進來。
+    """
+    problems: list[str] = []
+    for test_id, why in sorted(exempt.items()):
+        if not _EXEMPT_HANDOVER_RE.search(why):
+            problems.append(
+                f"豁免 `{test_id}` 的理由沒有寫承接輪次——沒有承接者的豁免就是永久豁免。"
+                "請在理由裡寫明由哪一輪回來複查（形態：大寫 R 加輪號）"
+            )
+        if flagged_without_exempt is not None and test_id not in flagged_without_exempt:
+            problems.append(
+                f"豁免 `{test_id}` 已 stale：把本表當成空的重掃，這一筆根本不會被判違規"
+                "（測試改名／reason 改寫／已補標籤）⇒ 請自表中移除，不要留著佔位"
+            )
+    return problems
 
 # ── 述詞方向登記表 ──────────────────────────────────────────────────────────────
 # 「條件為真 ⇒ 執行環境是 Windows」的述詞。判準：
@@ -146,12 +199,35 @@ _CACHE_DIR_NAMES = frozenset({"__pycache__", ".pytest_cache", ".mypy_cache", ".r
 # 🔴 為何非擴不可：R72 建立方向判準時射程只有 `tools/tests/`，而 repo 的活測試檔共
 # 三百餘支——絕大多數不在任何方向判準的射程內。判準的價值是「同一個缺陷換個寫法／
 # 換棵樹就必紅」，射程只圈一棵樹等於把成本降到「寫在另一個目錄」。
-# 刻意**不含** `AISDLC_SDD/AISDLC_SDD_v0.NN/`（Copy-on-Evolve 政策下凍結版與中間版
-# 一律不可改，納入等於一上線就要求修改不可改的樹；LATEST 版單獨納入則會讓射程隨版本
-# 目錄改名而漂移，需先把 `tools/lib/sdd_latest.py` 的解析接進來，屬另一件事）。
+# 刻意**不含**凍結版 `AISDLC_SDD/AISDLC_SDD_v0.01`~`v0.29`（Copy-on-Evolve 政策下
+# 一律不可改，納入等於一上線就要求修改不可改的樹）。
+#
+# 🔴 本輪補上 LATEST 版的 `tools/fsm_runtime/tests`（此前**整棵零覆蓋**：該樹的 4 個
+# skip 站點對所有機械物隱形，新增第 2 個未標籤 posix-only 站點是零成本的）。原註記
+# 給的理由是「LATEST 單獨納入會隨版本目錄改名而漂移，需先接 `tools/lib/sdd_latest.py`」
+# ——那個理由成立，但它推導出的結論應該是「接上 `sdd_latest` 再納入」，而不是「不納」。
+# 現在就接上了；下方四張表的鍵一律用同一個計算值，升版時四張表一起跟著移動。
+def _latest_fsm_tests_rel() -> str:
+    """LATEST 版 `tools/fsm_runtime/tests` 的 repo 相對路徑（SSOT＝`sdd_latest`）。
+
+    🔴 解析失敗時**不**靜默丟掉這棵樹（那是 fail-open，正是本模組通篇在防的事），
+    而是回一個磁碟上必然不存在的路徑：`scan_tree_sources` 對它取得空 dict，
+    `report_untagged_windows_skip_decorators` 隨即報「掃描面為空」並讓 rc 為 1。
+    """
+    try:
+        latest = sdd_latest.resolve_latest_root(_REPO_ROOT / "AISDLC_SDD")
+        rel = latest.relative_to(_REPO_ROOT).as_posix()
+    except (AssertionError, OSError, ValueError):
+        rel = "AISDLC_SDD/LATEST-解析失敗"
+    return f"{rel}/tools/fsm_runtime/tests"
+
+
+LATEST_FSM_TESTS_TREE = _latest_fsm_tests_rel()
+
 _EXTRA_SCAN_TREES: tuple[str, ...] = (
     "AutoClaude/tests",
     "AISDLC_SDD/scripts/tests",
+    LATEST_FSM_TESTS_TREE,
 )
 
 #: 逐樹檔數**下限**（防掃描面靜默縮小）。語意固定為「重釘當時實測值的八成」。
@@ -171,6 +247,7 @@ _TREE_FILE_FLOORS: dict[str, int] = {
     "tools/tests": 42,
     "AutoClaude/tests": 204,
     "AISDLC_SDD/scripts/tests": 23,
+    LATEST_FSM_TESTS_TREE: 60,   # 本輪納入；實測 76 × 0.8
 }
 
 #: 下限相對實測值的目標比例（`floor ≈ actual × 本值`）。兩個方向都由它定義：
@@ -197,6 +274,10 @@ _POSIX_TAG_RATCHET: dict[str, int] = {
     "tools/tests": 1,
     "AutoClaude/tests": 0,
     "AISDLC_SDD/scripts/tests": 1,
+    # 本輪納入 LATEST fsm_runtime/tests：實測 1 筆未標籤（`test_post_commit_drift_
+    # worktree.py` 的模組級 pytestmark）。以棘輪凍結而不當場補標——該檔不在本包的
+    # 檔案所有權內，跨界改動＝並行包互踩假紅（同本表其餘各列的既有理由）。
+    LATEST_FSM_TESTS_TREE: 1,
 }
 
 #: 🔴 R76（R76-15 ①）：上表各格的 **shrink-only 天花板**（基線只准下修）。
@@ -215,6 +296,7 @@ _POSIX_TAG_RATCHET_CEILING: dict[str, int] = {
     "tools/tests": 1,
     "AutoClaude/tests": 0,
     "AISDLC_SDD/scripts/tests": 1,
+    LATEST_FSM_TESTS_TREE: 1,
 }
 
 #: 🔴 R75 新增（QA-R74-02）：**站點分類普查**的棘輪基線 `{樹: {類別: 站點數}}`。
@@ -233,16 +315,27 @@ _POSIX_TAG_RATCHET_CEILING: dict[str, int] = {
 #: 「shallow clone／無 git ⇒ 未驗證而不判紅」路徑，兩者都是函式體內 `self.skipTest(...)`。
 #: 這正是本表的設計意圖生效——相等判準讓新站點在落地當回合就被逼進帳、不會靜默變隱形，
 #: 且失敗訊息自己會印出該填的數字，所以重釘是**設計好的流程**而不是繞過判準。
+#:
+#: 🔴 本輪收斂重釘 `tools/tests` 的 `runtime-skipTest` 12 → 13：NTFS 保留名判準新增的
+#: 外接 oracle 對拍測試（`test_windows_forbidden_filename_parity.py` 的 `setUp`）在
+#: 「此 git 建置未啟用 NTFS 保留名檢查」時以函式體內 `self.skipTest(...)` 退場——沒有
+#: 第三方裁判時對拍只會產生整批假分歧，跳過比假紅正確。定位方式：對每支 test 檔各以
+#: HEAD 版與工作樹版跑一次 `site_class_counts()` 相減（探針不寫死期望值，差異由兩次量測得出）。
 _SITE_CLASS_CENSUS: dict[str, dict[str, int]] = {
     "tools/tests": {
         "windows-only": 13,
         "posix-only": 11,
         "tool-absence": 38,
-        "runtime-skipTest": 12,
+        "runtime-skipTest": 13,
         "unclassified": 0,
     },
+    # 🔴 本輪 `windows-only` 由 8 重釘為 9：並行包在
+    # `AutoClaude/tests/tools/test_run_local_nightly_static.py` 新增了一個
+    # windows-only 站點（該檔不在本包的檔案所有權內，本包只負責讓帳對得上）。
+    # 這正是「相等」判準的設計意圖生效——新站點在落地當回合就被逼進帳。
+    # 若該包後續再動該檔，收輪者必須依當場實測重釘（同 `MIN_TESTS` 的紀律）。
     "AutoClaude/tests": {
-        "windows-only": 8,
+        "windows-only": 9,
         "posix-only": 6,
         "tool-absence": 16,
         "runtime-skipTest": 0,
@@ -255,7 +348,62 @@ _SITE_CLASS_CENSUS: dict[str, dict[str, int]] = {
         "runtime-skipTest": 0,
         "unclassified": 0,
     },
+    LATEST_FSM_TESTS_TREE: {   # 本輪納入；此前整棵樹的 4 個站點對所有機械物隱形
+        "windows-only": 1,
+        "posix-only": 1,
+        "tool-absence": 2,
+        "runtime-skipTest": 0,
+        "unclassified": 0,
+    },
 }
+
+# ── 標籤詞彙表的**成員檢查**（本輪；R76 §3 finding F3 點名、當輪未修）──────────
+# 缺陷本體：`ALL_SKIP_TAGS` 只被用來「比對已知標籤」，**沒有任何機械物反向檢查**
+# 「reason 開頭出現了一個 `[XXX-YYY]` 形態、但它不在 `ALL_SKIP_TAGS`」。於是
+# **發明一個新標籤是零成本的**：人看起來有標籤、機器看起來沒標籤，兩份報表對同一支
+# skip 的分類會不一致。落地當回合實測：四棵活測試樹的 122 個字面 reason 站點中，
+# 有 2 個用了未登記的標籤。
+#
+#: 未登記標籤的**存量棘輪**（{標籤字面: 站點數}）。判準是**相等**（同本檔其餘棘輪
+#: 的理由）：清掉要回來下修、新增要回來上修並在 PR 說明——兩個方向都必須有人動手。
+#: 現存這一筆住在 `tools/tests/test_bash_probe_spec_contract.py`，該檔不在本包的檔案
+#: 所有權內；本包同輪已把自己那一筆（`test_subprocess_encoding_hygiene.py`）改成
+#: `[TOOL-ABSENCE]`，故本表由 2 起始值降為 1。
+_UNREGISTERED_TAG_DEBT: dict[str, int] = {
+    "[CARRIER-NO-DISCRIMINATION]": 1,
+}
+
+#: reason 開頭的標籤形態：`[大寫段-大寫段…]`。刻意只認**開頭**——標籤的契約就是
+#: 「加在 reason 的最前面」，句中提到某個 `[XXX]` 字樣不是在標記這支 skip。
+_TAG_PREFIX_RE = re.compile(r"^\s*(\[[A-Z][A-Z0-9]*(?:-[A-Z0-9]+)+\])")
+
+
+def unregistered_tag_problems(reasons: Iterable[str]) -> list[str]:
+    """純函式：reason 開頭用了不在 `ALL_SKIP_TAGS` 內的標籤 ⇒ 與棘輪對帳。
+
+    回傳問題描述清單；空＝合格。判準對兩個方向都說話（見 `_UNREGISTERED_TAG_DEBT`）。
+    """
+    seen: dict[str, int] = {}
+    for reason in reasons:
+        found = _TAG_PREFIX_RE.match(reason)
+        if found and found.group(1) not in ALL_SKIP_TAGS:
+            seen[found.group(1)] = seen.get(found.group(1), 0) + 1
+    problems: list[str] = []
+    for tag in sorted(set(seen) | set(_UNREGISTERED_TAG_DEBT)):
+        got, want = seen.get(tag, 0), _UNREGISTERED_TAG_DEBT.get(tag, 0)
+        if got == want:
+            continue
+        fix = (
+            f"改用 {TOOL_ABSENCE_SKIP_TAG}（或其他已登記標籤），"
+            f"或把 `{tag}` 具名登記進 skip_tag_policy.ALL_SKIP_TAGS 並寫 WHY"
+            if got > want else
+            f"存量已清掉，請把 skip_tag_policy._UNREGISTERED_TAG_DEBT['{tag}'] 改為 {got}"
+            "（清空時整列刪除；本表空掉即升級為零容忍）"
+        )
+        problems.append(
+            f"未登記的 skip 標籤 `{tag}`：實測 {got} 個站點、棘輪 {want}——{fix}"
+        )
+    return problems
 
 
 def tree_floor_problems(counts: Mapping[str, int]) -> list[str]:

@@ -28,8 +28,19 @@
         ]
       },
       {
-        "_comment": "Windows 上禁用 Bash 工具（根 CLAUDE.md 鐵律一 / DEF-101-768）。matcher 帶 Task 是為滿足 AISDLC_SDD/scripts/tests/test_pretooluse_matcher_task.py 的全稱約定（根 settings.json 的每個 PreToolUse matcher 都須含 Task，DEF-CLDREV-017）；本守衛的實際射程由腳本內 `tool != 'Bash' → exit 0` 限縮，故 Task 呼叫一律放行、不受影響——該行原本就是為『matcher 若被改寬，守衛不應擴大射程』而寫。",
-        "matcher": "Bash|Task",
+        "_comment": "PowerShell 指令字串的極窄 lint（鐵律二首次有牙）。只擋三件事：管線後讀 $LASTEXITCODE／行首裸 cd 或 Set-Location／裸 bash + .sh；其餘一律放行，並提供行內豁免 `# ps-lint-ok: <WHY>`。非 Windows exit 0；tool_name != PowerShell exit 0；退化 payload exit 1（出聲但不阻斷——PowerShell 是本機唯一 shell 載具，對讀不出內容的 payload 硬擋它代價遠大於漏一次 lint）；任何例外 exit 0（fail-open，見本檔 description 記載的 P0）。matcher 刻意只圈 PowerShell：`tools/tests/test_check_hooks_liveness.py` 釘住「對退化 payload 回 rc=2 的守衛，matcher 不得含射程外工具」，本守衛退化回 1 故不受該條約束，但仍取窄 matcher 以維持零附帶面。事後量測的另一半＝tools/probe/audit_session.py。",
+        "matcher": "PowerShell",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python -c \"import os,sys,runpy; r=os.environ.get('CLAUDE_PROJECT_DIR') or os.getcwd(); p=os.path.join(r,*sys.argv[1].split('/')); os.path.isfile(p) or sys.exit(0); os.chdir(r); sys.argv=[p]+sys.argv[2:]; runpy.run_path(p,run_name='__main__')\" .claude/hooks/lint_powershell_command.py",
+            "timeout": 10
+          }
+        ]
+      },
+      {
+        "_comment": "Windows 上禁用 Bash 工具（根 CLAUDE.md 鐵律一 / DEF-101-768）。matcher 刻意只圈 Bash＝本守衛自己的射程：它對解析不出工具名的退化 payload 是 fail-closed（exit 2），而 fail-closed 的爆炸半徑等於 matcher 圈住的工具集合。此處先前多圈了一個 Task（為滿足 AISDLC_SDD/scripts/tests/test_pretooluse_matcher_task.py 的全稱約定），使一份退化 payload 能硬擋子代理派工並回報不相干的原因——本輪七輸入實測重現後移除；那條全稱約定同步收斂為只約束承載 ACT-020 注入的 router 條目（本檔第一個 PreToolUse 條目仍含 Task，保證未變）。腳本內 `tool != 'Bash' → exit 0` 保留，作為 matcher 被改寬時的第二道限縮。「rc==2 必須配窄 matcher」由 tools/tests/test_check_hooks_liveness.py 機械釘住。",
+        "matcher": "Bash",
         "hooks": [
           {
             "type": "command",

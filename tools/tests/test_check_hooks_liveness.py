@@ -11,6 +11,7 @@ import os
 import re
 import subprocess
 import sys
+import tempfile
 import unittest
 from pathlib import Path
 from unittest import mock
@@ -314,6 +315,100 @@ def _run_hook(
     return proc.returncode, proc.stderr or ""
 
 
+# ══════════════════════════════════════════════════════════════════════════
+# 退化 payload × matcher 射程：兩道鎖的交界（本輪，DEF 待登記）
+# ══════════════════════════════════════════════════════════════════════════
+# 這一段取代了此前兩條「退化 payload 一律 exit 2」的平坦斷言。**不是放寬**，是把
+# 它們真正要防的東西寫清楚，順便解掉一組互鎖。
+#
+#   · 那兩條要防的是**守衛靜默失效**：讀不懂輸入時放行，等於讓「送壞 payload」
+#     成為讓守衛整支消失的免費手段，而且失效不會有任何人看見。這個意圖不變。
+#   · 但它們寫成「一律 exit 2」，於是硬擋的爆炸半徑完全由**註冊面的 matcher**
+#     決定，而 matcher 由另一道鎖在管（子代理注入曾要求每個 matcher 都含 Task）。
+#     兩者相乘的結果：一份解析不出工具名的 payload 會讓一支與子代理無關的守衛
+#     硬擋派工，訊息還指向不相干的原因。七輸入實測逐字重現過該狀態。
+#
+# 新判準把兩件事綁成一個不可拆的組合：
+#   ① 退化 payload **不得被靜默放行**（rc==0 即紅——原意保住）；
+#   ② 若守衛選擇硬擋（rc==2），它註冊的 matcher **不得圈到射程外的工具**。
+# 想放寬 matcher 的人會被逼著同時面對退化行為，反之亦然，交界處不再有無人同意的
+# 狀態。對稱的另一半在 AISDLC_SDD/scripts/tests/test_pretooluse_matcher_task.py
+# （全稱約定收斂為只約束承載子代理注入的那些條目）。
+#
+# 誠實劃界：本判準**不**釘住「某支守衛必須選 rc==2 而不是 rc==1」。rc 2→1 是行為
+# 變更但不是靜默失效（仍會出聲），要不要那樣改屬設計決定，記在各 hook 自己的
+# docstring 裡；本判準只保證兩者永遠是配套的。
+
+
+def matcher_tokens(matcher: str) -> set[str]:
+    """把 matcher（正則交替字串）拆成工具名集合；空字串／`*`＝全部，以 `*` 表示。"""
+    text = str(matcher or "").strip()
+    if not text or text == "*":
+        return {"*"}
+    return {tok.strip() for tok in text.split("|") if tok.strip()}
+
+
+def matchers_for_script(settings: dict, needle: str) -> list[str]:
+    """`settings` 的 PreToolUse 內，command 指名 `needle` 的所有 matcher。"""
+    found: list[str] = []
+    for entry in settings.get("hooks", {}).get("PreToolUse", []) or []:
+        commands = [str(h.get("command", "")) for h in entry.get("hooks") or []]
+        if any(needle in command for command in commands):
+            found.append(str(entry.get("matcher", "")))
+    return found
+
+
+def degraded_payload_verdict(
+    script: str, own_tools: set[str], degraded_rc: int, matchers: list[str]
+) -> str | None:
+    """`None`＝合格；回字串＝失效理由（純函式，紅綠由合成注入自證）。"""
+    if degraded_rc == 0:
+        return (f"{script} 對退化 payload 靜默放行（rc=0）——讀不懂輸入時放行，"
+                "等於讓『送壞 payload』成為讓守衛整支消失的免費手段，"
+                "而且它失效時沒有任何人會看見")
+    if degraded_rc != 2:
+        return None  # 出聲但不阻斷：爆炸半徑為零，合法
+    if not matchers:
+        return (f"{script} 對退化 payload 硬擋（rc=2），卻在 .claude/settings.json 的"
+                " PreToolUse 內找不到它的註冊 ⇒ 射程無從判定（可能已靜默失效）")
+    outside = sorted({t for m in matchers for t in matcher_tokens(m)} - own_tools)
+    if outside:
+        return (f"{script} 對退化 payload 硬擋（rc=2），而它註冊的 matcher 還圈了"
+                f"射程外的工具 {outside} ⇒ 一份解析不出工具名的 payload 會連那些"
+                "工具一起擋掉，訊息還指向不相干的原因。二擇一：把 matcher 收到"
+                "自己的射程內，或把退化行為改成『出聲但不阻斷』")
+    return None
+
+
+class TestDegradedPayloadScopeCriterion(unittest.TestCase):
+    """判準自證：六種組合，不靠 repo 現況剛好是哪一種。"""
+
+    def test_silent_allow_is_red(self) -> None:
+        verdict = degraded_payload_verdict("h.py", {"Bash"}, 0, ["Bash"])
+        self.assertIn("靜默放行", verdict or "")
+
+    def test_hard_block_with_wide_matcher_is_red(self) -> None:
+        """本輪那筆缺陷的狀態逐字重建：rc=2 ＋ matcher 多圈一個子代理工具。"""
+        verdict = degraded_payload_verdict("h.py", {"Bash"}, 2, ["Bash|Task"])
+        self.assertIsNotNone(verdict, "多圈一個工具的硬擋守衛竟被判為合格")
+        self.assertIn("Task", verdict or "")
+
+    def test_hard_block_with_narrow_matcher_is_green(self) -> None:
+        self.assertIsNone(degraded_payload_verdict("h.py", {"Bash"}, 2, ["Bash"]))
+
+    def test_loud_but_non_blocking_is_green_even_with_wide_matcher(self) -> None:
+        self.assertIsNone(
+            degraded_payload_verdict("h.py", {"PowerShell"}, 1, ["PowerShell|Task"])
+        )
+
+    def test_wildcard_matcher_counts_as_outside_scope(self) -> None:
+        self.assertIsNotNone(degraded_payload_verdict("h.py", {"Bash"}, 2, ["*"]))
+
+    def test_hard_block_without_registration_is_red(self) -> None:
+        verdict = degraded_payload_verdict("h.py", {"Bash"}, 2, [])
+        self.assertIn("找不到它的註冊", verdict or "")
+
+
 @unittest.skipUnless(
     os.name == "nt",
     "[WINDOWS-NATIVE-ONLY] 阻斷契約只在 Windows 成立；非 Windows 分支另有專屬 case",
@@ -335,15 +430,33 @@ class TestBlockBashHookBehaviourOnWindows(unittest.TestCase):
         rc, _ = _run_hook(json.dumps({"tool_name": "Read"}))
         self.assertEqual(rc, 0, "非 Bash 工具必須放行——射程擴大會把所有工具鎖死（P0）")
 
-    def test_malformed_json_fails_closed(self) -> None:
-        """壞 JSON ⇒ 仍阻斷。fail-**closed** 是刻意方向：讀不懂輸入時，
-        放行等於讓「送壞 payload」成為繞過守衛的免費手段。"""
-        rc, _ = _run_hook("{ this is not json")
-        self.assertEqual(rc, 2, "壞 JSON 必須 fail-closed（exit 2），不可放行")
+    def _verdict_for(self, rc: int) -> str | None:
+        settings = json.loads(_SETTINGS.read_text(encoding="utf-8"))
+        return degraded_payload_verdict(
+            _HOOK.name, {"Bash"}, rc,
+            matchers_for_script(settings, "block_bash_on_windows"),
+        )
 
-    def test_empty_stdin_fails_closed(self) -> None:
+    def test_malformed_json_is_not_silently_allowed(self) -> None:
+        """壞 JSON ⇒ 不得靜默放行；選擇硬擋就必須配窄 matcher（判準見上方註記）。"""
+        rc, _ = _run_hook("{ this is not json")
+        verdict = self._verdict_for(rc)
+        self.assertIsNone(verdict, verdict or "")
+
+    def test_empty_stdin_is_not_silently_allowed(self) -> None:
         rc, _ = _run_hook("")
-        self.assertEqual(rc, 2, "空 stdin 必須 fail-closed（exit 2）")
+        verdict = self._verdict_for(rc)
+        self.assertIsNone(verdict, verdict or "")
+
+    def test_missing_tool_name_key_is_not_silently_allowed(self) -> None:
+        """本輪那筆缺陷的原始形態：payload 是合法 JSON，但沒有 tool_name。
+
+        此前它會走到硬擋分支，而當時的 matcher 還圈著子代理工具 ⇒ 擋錯對象、
+        還給錯理由。現在由上方判準把「硬擋」與「窄 matcher」綁在一起判。
+        """
+        rc, _ = _run_hook(json.dumps({"tool_input": {"command": "ls"}}))
+        verdict = self._verdict_for(rc)
+        self.assertIsNone(verdict, verdict or "")
 
 
 class TestBlockBashHookDoesNotHurtOtherPlatforms(unittest.TestCase):
@@ -628,6 +741,302 @@ class TestSettingsProvideUtf8ForHookChildren(unittest.TestCase):
         self.assertIn(
             ".claude/hooks/block_bash_on_windows.py", scripts,
             "判準四已看不到 R74 P0 那支 hook ⇒ 射程又回到「靠本檔某一行碰巧怎麼寫」",
+        )
+
+
+# ══════════════════════════════════════════════════════════════════════════
+# `.claude/hooks/lint_powershell_command.py` 的回歸鎖（本輪新增）
+# ══════════════════════════════════════════════════════════════════════════
+# 為何併進本檔：`tools/tests/` 檔數是 shrink-only 棘輪，明文禁止新增鎖檔；而本檔
+# 本來就是「hook 有沒有註冊、是不是活的」那一層的家。
+#
+# 為何非有這支守衛不可（本輪立案量測）：session 逐字稿實測到一組乾淨的對照——
+# **有觀測者的那條規則違規 1 次且被當場擋下，沒有觀測者的那些違規率 20~35%**。
+# PowerShell 工具面在它出現之前**零觀測者**：禁裸 cd 那條規則的違規面在**指令
+# 字串的內容**裡，而那個字串永遠不會變成 repo 裡的檔案，於是全庫靜態掃描器
+# 結構上都看不見它。差別不在紀律寫得夠不夠嚴厲。
+#
+# 本鎖守五件事：①三條檢查各自真的會擋；②合法形態不得誤擋（誤報會讓整個機制被
+# 關掉，那比漏擋更糟）；③不早退——三條命中要一次報齊；④射程不得擴大；
+# ⑤退化 payload 走「出聲但不阻斷」，且與 matcher 射程配套（見上方判準）。
+
+_LINT_HOOK = _REPO_ROOT / ".claude" / "hooks" / "lint_powershell_command.py"
+
+
+def _ps_payload(command: str) -> str:
+    return json.dumps(
+        {"hook_event_name": "PreToolUse", "tool_name": "PowerShell",
+         "tool_input": {"command": command}},
+        ensure_ascii=False,
+    )
+
+
+def _run_lint_hook(
+    stdin_text: str, *, force_os_name: str | None = None
+) -> tuple[int, str]:
+    """以子行程真跑 lint 守衛，回 `(rc, stderr)`（走子行程的理由同 `_run_hook`）。"""
+    if force_os_name is None:
+        cmd = [sys.executable, str(_LINT_HOOK)]
+    else:
+        bootstrap = (
+            "import os, runpy, sys\n"
+            f"os.name = {force_os_name!r}\n"
+            f"runpy.run_path({str(_LINT_HOOK)!r}, run_name='__main__')\n"
+        )
+        cmd = [sys.executable, "-c", bootstrap]
+    proc = subprocess.run(
+        cmd, input=stdin_text, capture_output=True, text=True,
+        encoding="utf-8", errors="replace", timeout=60, env=_child_env(),
+    )
+    return proc.returncode, proc.stderr or ""
+
+
+class TestLintPowerShellHookBehaviour(unittest.TestCase):
+    """三條檢查 × 擋／放行 × 射程 × 退化的行為契約。
+
+    🔴 **刻意不掛 `skipUnless(os.name == "nt")`**，兩個理由：
+      ① 這些判準的成因是「payload 帶的是一段 PowerShell 指令」，不是「這台機器是
+         Windows」——把它綁在當下平台上，mac/Linux 一側就永遠沒人跑過（本檔的
+         `TestBlockBashHookGuidanceSurvivesNonUtf8Locale` 早有同樣的取捨與理由）。
+      ② 新增一個平台 skip 站點會動到 `skip_tag_policy._SITE_CLASS_CENSUS` 的相等
+         判準，而那張表由另一個工作面在維護。用注入 `os.name` 取得**更大**的覆蓋、
+         同時零跨檔耦合，比「多開一個站點再去別人的表上加一」好。
+    平台分支本身另有 `TestLintPowerShellHookDoesNotHurtOtherPlatforms` 專屬 case。
+    """
+
+    def _lint(self, command: str) -> tuple[int, str]:
+        return _run_lint_hook(_ps_payload(command), force_os_name="nt")
+
+    def test_naked_cd_is_blocked(self) -> None:
+        rc, err = self._lint("cd AutoClaude; python -m pytest")
+        self.assertEqual(rc, 2, f"裸 cd 未被擋；rc={rc}\n{err}")
+        self.assertIn("Push-Location", err, "阻斷時必須給出替代出口")
+
+    def test_set_location_is_blocked_but_push_location_is_not(self) -> None:
+        rc_bad, _ = self._lint("Set-Location /repo/a")
+        self.assertEqual(rc_bad, 2)
+        rc_ok, err = self._lint("Push-Location /repo/a; Pop-Location")
+        self.assertEqual(rc_ok, 0, f"Push-Location 是正解，不得誤擋\n{err}")
+
+    def test_pipe_then_lastexitcode_is_blocked(self) -> None:
+        rc, err = self._lint(
+            "& git status | Select-Object -First 3\n\"rc=$LASTEXITCODE\"")
+        self.assertEqual(rc, 2, f"管線後讀 rc 未被擋；rc={rc}\n{err}")
+
+    def test_bare_bash_on_sh_is_blocked(self) -> None:
+        rc, err = self._lint("bash tools/install_mac_nightly.sh")
+        self.assertEqual(rc, 2, f"裸 bash 未被擋；rc={rc}\n{err}")
+        self.assertIn("Find-GitBash", err, "必須指向 repo 既有 SSOT")
+
+    def test_all_hits_are_reported_at_once(self) -> None:
+        """不早退：早退會遮蔽後面檢查的訊號，而遮蔽方向是「看起來變乾淨」。"""
+        rc, err = self._lint("cd x\ngit log | Select-Object -First 1\n"
+                             "\"$LASTEXITCODE\"\nbash a.sh")
+        self.assertEqual(rc, 2, err)
+        for needle in ("Push-Location", "Find-GitBash", "LASTEXITCODE"):
+            self.assertIn(needle, err, f"三條違規未一次報齊，缺 {needle}")
+
+    def test_legal_forms_are_not_flagged(self) -> None:
+        """誤報比漏擋更糟——被誤報的守衛會被整個關掉。"""
+        for cmd in (
+            "Push-Location /repo/a; & py a.py; \"rc=$LASTEXITCODE\"; Pop-Location",
+            "Get-ChildItem | Select-Object Name",
+            ". '/repo/tools/lib/Find-GitBash.ps1'; & (Find-GitBash) -n 'a.sh'",
+            "git log --oneline -3",
+        ):
+            rc, err = self._lint(cmd)
+            self.assertEqual(rc, 0, f"合法形態被誤擋：{cmd!r}\n{err}")
+
+    def test_inline_exemption_releases_the_guard(self) -> None:
+        rc, err = self._lint("cd x  # ps-lint-ok: 重現缺陷用")
+        self.assertEqual(rc, 0, f"行內豁免失效——沒有出口的窄守衛會被關掉\n{err}")
+
+    def test_exemption_without_a_reason_is_not_an_exemption(self) -> None:
+        rc, _ = self._lint("cd x  # ps-lint-ok:")
+        self.assertEqual(rc, 2, "空理由的豁免必須無效，否則等於整包 noqa")
+
+    def test_scope_does_not_expand_to_other_tools(self) -> None:
+        """射程不擴大——兩個平台都必須成立，故走直接執行形態不注入 os.name。"""
+        for tool in ("Read", "Task", "Bash", "Edit", "Write"):
+            rc, _ = _run_lint_hook(json.dumps({"tool_name": tool}))
+            self.assertEqual(rc, 0, f"{tool} 被誤擋——射程擴大會把工具鎖死（P0）")
+
+    def test_degraded_payload_is_loud_but_not_blocking(self) -> None:
+        """退化 payload：不靜默、也不硬擋唯一的 shell 載具。"""
+        settings = json.loads(_SETTINGS.read_text(encoding="utf-8"))
+        matchers = matchers_for_script(settings, "lint_powershell_command")
+        cases = (
+            ("壞 JSON", "{ this is not json"),
+            ("空 stdin", ""),
+            ("缺 tool_name", json.dumps({"tool_input": {"command": "cd x"}})),
+            ("缺 command", json.dumps({"tool_name": "PowerShell",
+                                       "tool_input": {}})),
+        )
+        for label, text in cases:
+            rc, err = _run_lint_hook(text, force_os_name="nt")
+            verdict = degraded_payload_verdict(
+                _LINT_HOOK.name, {"PowerShell"}, rc, matchers)
+            self.assertIsNone(verdict, f"{label}：{verdict}")
+            self.assertNotEqual(rc, 2, f"{label} 不得硬擋本機唯一的 shell 載具")
+            self.assertTrue(err.strip(), f"{label} 必須出聲，守衛失效要看得見")
+
+
+class TestLintPowerShellHookDoesNotHurtOtherPlatforms(unittest.TestCase):
+    """非 Windows 一律放行——mac/Linux 的載具規則不同，單平台判準不可外推。"""
+
+    def test_posix_allows_a_violating_command(self) -> None:
+        rc, err = _run_lint_hook(_ps_payload("cd x"), force_os_name="posix")
+        self.assertEqual(rc, 0, f"非 Windows 上誤擋；rc={rc}\n{err}")
+
+
+class TestLintPowerShellHookIsActuallyRegistered(unittest.TestCase):
+    """「裝了但不會跑的鎖」防護：守衛必須真的接在自動觸發點上。"""
+
+    def test_registered_as_pretooluse_powershell_matcher(self) -> None:
+        settings = json.loads(_SETTINGS.read_text(encoding="utf-8"))
+        matchers = matchers_for_script(settings, "lint_powershell_command")
+        self.assertTrue(
+            matchers,
+            "lint_powershell_command.py 未註冊於 .claude/settings.json 的 "
+            "PreToolUse——守衛存在但不會被觸發，等於沒有",
+        )
+        self.assertTrue(
+            any(re.search(r"(^|\|)PowerShell(\||$)", m) for m in matchers),
+            f"註冊到位但 matcher 不命中 PowerShell：{matchers}",
+        )
+
+
+class TestLintPowerShellGuidanceContent(unittest.TestCase):
+    """指引訊息內容：這則訊息比純文件更權威，讀者會照它做。"""
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        cls.text = _LINT_HOOK.read_text(encoding="utf-8")
+
+    def test_points_at_the_find_git_bash_ssot(self) -> None:
+        self.assertIn(
+            "Find-GitBash", self.text,
+            "跑 .sh 的出口必須指向 repo 既有 SSOT，不可自創第二種做法",
+        )
+
+    def test_offers_push_location_as_the_cd_exit(self) -> None:
+        self.assertIn("Push-Location", self.text)
+
+    def test_does_not_hardcode_a_drive_path(self) -> None:
+        """本檔會被 commit，寫死磁碟機路徑對其他 checkout 一律是錯的指引。"""
+        drive_c, drive_d = chr(67) + ":", chr(68) + ":"
+        for bad in (drive_c + "\\", drive_c + "/", drive_d + "\\", drive_d + "/"):
+            self.assertNotIn(bad, self.text, f"指引寫死了機器特定路徑 {bad!r}")
+
+
+# ══════════════════════════════════════════════════════════════════════════
+# `tools/probe/audit_session.py` 的契約鎖（本輪新增）
+# ══════════════════════════════════════════════════════════════════════════
+# 為何住在本檔：`tools/tests/` 不得新增鎖檔，而本檔是「那幾條鐵律的機械物有沒有
+# 在做事」最貼近的家——這支探針正是同一組規則**事後量測**的那一半（事中攔截的
+# 一半是上面那支 hook）。
+
+_AUDIT_PROBE = _REPO_ROOT / "tools" / "probe" / "audit_session.py"
+
+
+def _run_audit_probe(args: list[str]) -> tuple[int, str]:
+    proc = subprocess.run(
+        [sys.executable, str(_AUDIT_PROBE), *args],
+        capture_output=True, text=True, encoding="utf-8", errors="replace",
+        timeout=120, env=_child_env({"PYTHONUTF8": "1"}),
+    )
+    return proc.returncode, proc.stdout or ""
+
+
+def _tool_use(command: str) -> dict:
+    return {"message": {"role": "assistant", "content": [
+        {"type": "tool_use", "name": "PowerShell",
+         "input": {"command": command}}]}}
+
+
+class TestSessionAuditProbeContract(unittest.TestCase):
+    """量測器的三件事：量得準、崩塌時出聲、不得被接成閘門。"""
+
+    def _write(self, tmp: str, records: list[dict]) -> str:
+        path = Path(tmp) / "synthetic.jsonl"
+        with path.open("w", encoding="utf-8", newline="\n") as fh:
+            for rec in records:
+                fh.write(json.dumps(rec, ensure_ascii=False) + "\n")
+        return str(path)
+
+    def test_it_counts_the_patterns_it_claims_to_count(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            path = self._write(tmp, [
+                _tool_use("cd AutoClaude"),
+                _tool_use("git log | Select-Object -First 1\n\"$LASTEXITCODE\""),
+                _tool_use("Push-Location /repo; Pop-Location"),
+            ])
+            rc, out = _run_audit_probe(["--transcript", path, "--json"])
+        self.assertEqual(rc, 0, out)
+        summary = json.loads(out)["summary"]
+        self.assertEqual(summary["shell_calls"], 3)
+        self.assertEqual(summary["patterns"]["naked-cd"], 1)
+        self.assertEqual(summary["patterns"]["rc-after-pipe"], 1)
+
+    def test_a_collapsed_scan_surface_fails_loud(self) -> None:
+        """掃不到東西必須 rc=1。這個失效方向看起來像「變乾淨了」，比紅更危險。"""
+        with tempfile.TemporaryDirectory() as tmp:
+            rc, out = _run_audit_probe(["--project-dir", tmp, "--json"])
+        self.assertEqual(rc, 1, f"空掃描面竟回 rc=0（＝被讀成本輪零違規）\n{out}")
+
+    def test_a_transcript_with_no_shell_call_also_fails_loud(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            path = self._write(tmp, [{"message": {"role": "assistant", "content": [
+                {"type": "text", "text": "沒有任何工具呼叫"}]}}])
+            rc, out = _run_audit_probe(["--transcript", path, "--json"])
+        self.assertEqual(rc, 1, f"shell 呼叫數 0 必須 fail-loud\n{out}")
+
+    def test_claim_reconciliation_flags_only_the_uncorroborated_one(self) -> None:
+        say = {"message": {"role": "assistant", "content": [
+            {"type": "text", "text": "全部通過。"}]}}
+        proof = {"message": {"role": "user", "content": [
+            {"type": "tool_result", "content": "3 passed in 1.2s"}]}}
+        with tempfile.TemporaryDirectory() as tmp:
+            bare = self._write(tmp, [_tool_use("git status"), say])
+            rc_bare, out_bare = _run_audit_probe(["--transcript", bare, "--json"])
+            path = Path(tmp) / "synthetic.jsonl"
+            path.unlink()
+            backed = self._write(tmp, [_tool_use("git status"), proof, say])
+            rc_backed, out_backed = _run_audit_probe(
+                ["--transcript", backed, "--json"])
+        self.assertEqual(rc_bare, 0, out_bare)
+        self.assertEqual(rc_backed, 0, out_backed)
+        self.assertEqual(
+            json.loads(out_bare)["summary"]["unsupported_claim_count"], 1,
+            "沒有任何對應輸出的宣稱竟沒被列出",
+        )
+        self.assertEqual(
+            json.loads(out_backed)["summary"]["unsupported_claim_count"], 0,
+            "前面就有對應輸出的宣稱不該被列（誤報會讓這份清單被忽略）",
+        )
+
+    def test_docstring_declares_the_not_a_gate_boundary(self) -> None:
+        """邊界必須寫在被讀的地方：逐字稿是本機、untracked、會被清的資料。"""
+        text = _AUDIT_PROBE.read_text(encoding="utf-8")
+        self.assertIn("不得接成 push 閘門", text)
+
+    def test_it_is_not_wired_into_any_hard_gate(self) -> None:
+        """接成硬閘會在別台機器上恆紅，而恆紅的閘門會被整個關掉。"""
+        gates = [
+            _REPO_ROOT / "tools" / "git-hooks" / "pre-push",
+            _REPO_ROOT / "tools" / "git-hooks" / "pre-commit",
+        ]
+        gates += sorted((_REPO_ROOT / ".github" / "workflows").glob("*.yml"))
+        present = [p for p in gates if p.is_file()]
+        self.assertGreaterEqual(len(present), 3, "閘門掃描面塌了，本鎖會恆綠")
+        offenders = [
+            p.name for p in present
+            if "audit_session" in p.read_text(encoding="utf-8", errors="replace")
+        ]
+        self.assertEqual(
+            offenders, [],
+            f"量測器被接進硬閘：{offenders}——逐字稿在別台機器上不存在，"
+            "接成閘門結構上恆紅。要自動化請改成 advisory 且不影響 rc",
         )
 
 

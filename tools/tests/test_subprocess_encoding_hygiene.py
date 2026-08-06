@@ -1482,7 +1482,7 @@ class TestRootToolsLintPolicy(unittest.TestCase):
         ruff = shutil.which("ruff")
         if ruff is None:
             self.skipTest(
-                "[TOOL-MISSING] ruff 不在 PATH——本道要驗的是 ruff **自己**的設定解析結果，"
+                "[TOOL-ABSENCE] ruff 不在 PATH——本道要驗的是 ruff **自己**的設定解析結果，"
                 "沒有 ruff 就無從驗起。刻意 skip 而非靜默通過：假綠正是本道要治的病"
             )
         probe = Path(__file__).resolve()  # tools/tests/ 底下任一支檔＝本檔自己

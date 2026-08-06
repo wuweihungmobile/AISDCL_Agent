@@ -119,7 +119,7 @@ import inspect
 import re
 import sys
 import unittest
-from collections.abc import Callable
+from collections.abc import Callable, Mapping, Sequence
 from pathlib import Path
 from types import ModuleType
 from typing import NamedTuple
@@ -667,36 +667,223 @@ def guard_files_in_worktree() -> frozenset[str]:
     )
 
 
-# 🔴🔴 R67 round 2（SA-R67-08）：本棘輪的比對基準同 (c) 一併脫離 git 狀態。
-# 原實作走 `git ls-tree -r HEAD -- tools/tests/`，恆真理由與 (c) 逐字相同（pre-push／CI 都
-# 在 commit 之後跑 ⇒ HEAD == 工作樹 ⇒ 比較退化）。原 docstring 把「無常數要維護、沒有第二個
-# stale 站點」寫成優點——實測顯示那個優點的代價是「這道鎖在它唯一被消費的時點沒有作用」，
-# 兩者無法兼得時，寧可付一個 stale 站點的維護成本。
+# ------------------------------------------- 護欄層逐檔行數棘輪（本輪；接手 DEF-101-561③）
+# 🔴 本輪落地物（掌舵者親自拍板）：這個位置原本是一個**純量檔數**棘輪——
+# `tools/tests/` 的鎖檔支數只准往下。它擋的是「一個 finding 一支新鎖檔」的檔案增生，
+# 而長期實測的結論是**它把病換了個地方長**：歷次取樣的支數一格不動，同期行數卻翻倍有餘
+# （現值現查 `live_triplet()` 的 glc 兩欄）。舊訊息指示「擴充進既有鎖檔」，增量因此被擠進
+# 少數 mega-file，而護欄層**行數**在全 repo 一個消費者都沒有——
+# `AutoClaude/tools/check_loc_budget.py` 把 `tools/tests/` 排除在 tier 檢查外，其理由欄
+# 指向的兩道機制一個量的是檔數、一個量的是行**長度**，都不是行數。
 #
-# 凍結的是**數量**而不是檔名集合：`DEF-101-561③` 要的語意是「禁止新增、只准合併／刪除」，
-# 改名（一增一減、淨增為零）是合法的，既有對照組 `test_renaming_a_guard_file_is_not_flagged`
-# 就在守這件事；凍結檔名集合會讓每次改名都翻紅＝把裁決超譯成「檔名不准動」。
-# 代價（誠實揭露）：訊息無法再逐字指名「新增的是哪一支」，改為附現查指令；合併／刪除後
-# 上限不再自動跟著降，須連同本行下修——由 `test_frozen_guard_count_matches_the_worktree`
-# 強制（現況與凍結值必須逐字相等，多退少補都會紅）。
-_FROZEN_GUARD_FILE_COUNT = 53
+# ⇒ 一進一出、機制數不變：純量檔數 → **逐檔行數表**。新表同時承接三件事：
+#   (a) `DEF-101-561③`「禁止新增鎖檔、只准合併／刪除」——新檔在表上沒有列，且只要
+#       淨行數上升就紅；淨額不上升的合併／改名照舊合法（那是該裁決指定的動作）。
+#   (b) 護欄層**行數**第一次有判準在讀（`guard_line_problems`／`glc_growth_problem`）。
+#   (c) ADR §4.3 的 GLC 行數與本表是**同一個家**：`live_triplet().glc_lines` 與
+#       `sum(_FROZEN_GUARD_LINES.values())` 走同一個 glob，不再是兩個各自漂移的站點。
+#
+# 🔴 方向是**收緊**：改版前「一輪加三萬行全綠」，改版後「淨增一行即紅」。
+# 🔴 重釘紀律（照抄 `run_root_unittests.MIN_TESTS` 的既有慣例，不另立體例）：值一律是
+# **當回合實測**、零加減推算；多包並行的輪次由**收尾包在所有包停工後**重釘一次。
+# 現查／重釘用：`python tools/tests/test_adr_xplat001_c1c2_lock.py --print-guard-lines`。
+
+#: 行數面的 glob——**非遞迴 `*.py`**，逐字等於 ADR §4.3 GLC 現查指令用的那一個。
+#: 刻意與 `_GUARD_FILE_PATTERN`（遞迴 `test_*.py`）分開：後者是「閘門會跑哪幾支」，
+#: 前者是「這一層有多大」。兩個量不同名也不同義，混用會讓 ADR 的指令與本檔的數字對不
+#: 起來；涵蓋關係改由 `guard_baseline_gaps()` 證明，而不是把兩個面硬併成一個。
+_GUARD_LINE_PATTERN = "*.py"
+
+#: 基準與實況的**縮小**容忍帶。🔴 這不是成長緩衝——成長側零容忍（見 `glc_growth_problem`）。
+#: 形狀照抄 `test_subprocess_encoding_hygiene.tree_count_verdict()` 的雙邊帶：單邊棘輪
+#: 只會腐化，縮下來卻不重釘的話，餘裕就是日後無聲加回去的破口（同 SA-R67-08 的裁決）。
+_GUARD_LINE_STALE_SLACK = 0.02
+
+#: 逐檔行數的**凍結基準**（本輪 PKG-GUARD／R77-24：取代已移除的 `_FROZEN_GUARD_FILE_COUNT`
+#: 檔數棘輪）。取值紀律同 `_TIER_BASELINE`：**當回合實測直接填入、零加減推算、不留成長緩衝**。
+#:
+#: 🔴 為何檔數棘輪要退場、而這張表是它的接手者：檔數被釘住之後，護欄層的成長並沒有停，
+#: 只是全部灌進既有巨檔——同期行數翻倍而唯一的通過判準（檔數相等＋glob 非空）全程綠。
+#: 「只准變少」預設了「變多是安全的」，而那個預設在這一層被實測推翻。行數面把成長本身
+#: 變成會轉紅的事件，方向仍是收緊（成長側零容忍，見 `glc_growth_problem`）。
+#:
+#: 維護方式（不是「調高就好」）：合法縮小後**必須**同步下修本表，否則餘裕就是日後無聲
+#: 加回去的破口（`[基準過時]` 那一款在守這件事）。真的必須長大時，重釘本表並在交件回報
+#: 寫出淨額與理由——讓方向在 diff 上一望即知。
+#: 🔴 本表含**本檔自己**，所以動本檔就會動到本表 ⇒ 改完必須重跑一次並用實測值收斂。
+_FROZEN_GUARD_LINES: dict[str, int] = {
+    "_ci_scan_anchors.py": 154,
+    "_platform_helpers.py": 519,
+    "_ps_engine.py": 115,
+    "test_adr_xplat001_c1c2_lock.py": 3443,
+    "test_archive_defect_log.py": 3784,
+    "test_bash32_compat.py": 609,
+    "test_bash_probe_spec_contract.py": 960,
+    "test_bootstrap_core.py": 439,
+    "test_bootstrap_ps1.py": 160,
+    "test_check_defect_log_crossref.py": 2642,
+    "test_check_gha_action_versions.py": 295,
+    "test_check_hooks_liveness.py": 1044,
+    "test_check_pytest_baseline_sites.py": 182,
+    "test_check_script_parity.py": 1887,
+    "test_check_wrapper_thinness.py": 1254,
+    "test_ci_scan_anchors.py": 712,
+    "test_component_sanitizer_shared_layer_lock.py": 292,
+    "test_defect_id_reference_integrity.py": 261,
+    "test_dev_start.py": 6684,
+    "test_dev_start_ps1_lastexitcode.py": 453,
+    "test_doc_env_prefix_platform_parity_r60.py": 332,
+    "test_doc_loc_baseline_freshness_r60.py": 5143,
+    "test_extras_quoting_zsh_safety.py": 402,
+    "test_find_git_bash_parity.py": 1225,
+    "test_gha_action_versions.py": 703,
+    "test_git_hooks_install_common.py": 521,
+    "test_install_windows_nightly.py": 1468,
+    "test_macos_smoke_skip_honesty.py": 225,
+    "test_nightly_interpreter_determinism.py": 278,
+    "test_no_invalid_escape_sequences.py": 329,
+    "test_ntfs_trailing_space_device_name.py": 770,
+    "test_onboarding_parity_interlock.py": 235,
+    "test_platform_neutral_paths.py": 3024,
+    "test_platform_utils_dedup.py": 1096,
+    "test_pre_commit_dispatcher_sigpipe.py": 430,
+    "test_pre_push_dispatcher.py": 779,
+    "test_ps1_bom.py": 301,
+    "test_ps51_compat.py": 691,
+    "test_ps_engine_ssot.py": 933,
+    "test_python_c_percent_shim.py": 119,
+    "test_root_infra_parity.py": 441,
+    "test_run_root_unittests.py": 1680,
+    "test_sanitize_component_frozen_sdd_versions_lock.py": 373,
+    "test_schedule_capability_parity.py": 586,
+    "test_script_scan_surface_ssot.py": 226,
+    "test_smoke_ci_sync.py": 1526,
+    "test_stdio_utf8.py": 76,
+    "test_subprocess_encoding_hygiene.py": 1525,
+    "test_windows_forbidden_filename_parity.py": 1043,
+    "test_windows_nightly_anchor_parity.py": 135,
+    "test_windows_smoke_heartbeat_doc_sync.py": 197,
+    "test_windowsapps_guard_bash_parity.py": 956,
+    "test_windowsapps_guard_cross_consistency.py": 2213,
+    "test_workflow_permission_concurrency_lock.py": 1356,
+    "test_workflow_schedule_sync.py": 309,
+    "test_workflow_timeout_coverage.py": 158,
+}
 
 
-def guard_count_problems(previous_count: int, current: frozenset[str]) -> list[str]:
-    """護欄層檔數棘輪：現版鎖檔數不得高於凍結基準。回傳違規說明（空＝未調升）。
+def guard_lines_in_worktree() -> dict[str, int]:
+    """`tools/tests/*.py` 的 {檔名: 行數}（非遞迴、含未追蹤檔）。
 
-    比的是**數量**而非集合：改名（一增一減）、以及「合併成一支再刪掉舊的」都是零淨增，
-    照綠；只增不減才紅。這是 `DEF-101-561③` 逐字要的語意（「禁止新增鎖檔、只准合併／
-    刪除」），不是「檔名不准動」。
+    兩個刻意的選擇，與 `guard_files_in_worktree()` 同一組理由：
+      · **含未追蹤檔**：行一落到磁碟上就該被算進去，不必等 commit。
+      · **檔名當鍵**：非遞迴面上檔名唯一；子目錄逃逸另由 `guard_surface_escapes()`
+        fail-loud，不靠鍵的形態去兼職偵測那件事。
     """
-    if len(current) <= previous_count:
-        return []
-    return [
-        f"{_GUARD_DIR_REL} 鎖檔數由 {previous_count} 調升為 {len(current)}——"
-        "DEF-101-561③ 已裁定「R61 開輪即禁止新增鎖檔、只准合併／刪除」。"
-        "現查是哪一支新增：`git status --porcelain tools/tests/`＋`git diff --stat`。"
-        "合法作法：把新判準**擴充進既有鎖檔**，或先合併／刪除等量的舊鎖檔再加。"
-    ]
+    root = _REPO / _GUARD_DIR_REL
+    return {
+        p.name: len(p.read_text(encoding="utf-8", errors="replace").splitlines())
+        for p in sorted(root.glob(_GUARD_LINE_PATTERN))
+    }
+
+
+def guard_surface_escapes() -> list[str]:
+    """落在子目錄、因而逃出非遞迴行數面的 `.py`（正常為空清單）。
+
+    WHY：行數面刻意非遞迴（要與 ADR §4.3 的指令逐字相同），代價是「新增子目錄裡的檔」
+    對它隱形——`sync_onboarding_baselines._FINGERPRINT_TREES` 實測過這種漏法。這裡把
+    那個代價變成**會轉紅的事件**而不是靜默盲區。
+    """
+    root = _REPO / _GUARD_DIR_REL
+    return sorted(
+        p.relative_to(root).as_posix()
+        for p in root.rglob("*.py")
+        if p.parent != root and not _CACHE_DIR_NAMES & set(p.parts)
+    )
+
+
+def glc_growth_problem(frozen_total: int, current_total: int) -> str | None:
+    """護欄層總行數的成長判準——**單一實作，兩個消費者**（本層棘輪與 Scan-H 判準）。
+
+    `None`＝未成長。刻意不做「成長多少以內免談」的緩衝：那個數字沒有任何實測依據，
+    而它一旦存在，下一輪的增量就會剛好長到緩衝的上緣（本 repo 對下限型判準的既有判例）。
+    """
+    if current_total <= frozen_total:
+        return None
+    delta = current_total - frozen_total
+    return (
+        f"[成長] 護欄層行數由 {frozen_total} 增為 {current_total}（+{delta}）——"
+        "DEF-101-561③ 的語意本輪由「檔數」升級為「行數」：擴充既有鎖檔一樣要付代價。"
+        "合法出口＝同一次變更內把等量以上的行刪掉／抽成共用層；"
+        "真的必須長大時，重釘 _FROZEN_GUARD_LINES 並在交件回報寫出淨額"
+        "（重釘一律由收尾包在所有包停工後做一次，同 MIN_TESTS 慣例）。"
+    )
+
+
+def guard_line_problems(
+    frozen: Mapping[str, int],
+    current: Mapping[str, int],
+    escapes: Sequence[str] = (),
+) -> list[str]:
+    """護欄層逐檔行數棘輪的違規清單（空＝通過）。純函式，紅綠由合成注入自證。
+
+    五款，各帶方括號標籤讓注入測試能斷言「紅的是對的那一款」（本檔的零串音紀律）：
+
+    (1) `[崩塌]` 量測面為空 —— glob 寫壞／目錄改名時，`sum({}) <= frozen` 在原語意下
+        是通過，那正是 fail-open。空集合一律紅。
+    (2) `[逃逸]` 子目錄裡出現 `.py` —— 非遞迴面看不到它，等於一條合法的繞道。
+    (3) `[新增]` 表上沒有列的檔案，且淨行數上升 —— `DEF-101-561③` 的機械面。
+        淨額不上升時**不判違規**：那是該裁決明文指定的合併／改名，判紅就是超譯。
+    (4) `[成長]` 淨行數上升（`glc_growth_problem`）—— 本輪新增的牙。
+    (5) `[基準過時]` 鍵集合改變、或總量比基準低超過 `_GUARD_LINE_STALE_SLACK` ——
+        棘輪的餘裕就是它的破口，縮下來不重釘等於替日後的無聲加回開門。
+
+    誠實劃界（本判準抓不到的）：淨額為零的「A 減 B 增」對調——表上兩列同時失真而總量
+    不變時，(4)(5) 都不會說話。抓得到的是這一層**整體**的膨脹與基準腐化，不是每一列
+    在每個時點都與磁碟逐字相符。
+    """
+    problems: list[str] = []
+    if not current:
+        return [
+            f"[崩塌] 行數面抽不到任何 {_GUARD_DIR_REL}/{_GUARD_LINE_PATTERN}——"
+            "掃描面崩塌（目錄改名／glob 寫壞？）。空清單在原語意下等同「零行」＝假綠。"
+        ]
+    if escapes:
+        problems.append(
+            f"[逃逸] {_GUARD_DIR_REL} 子目錄內出現 .py：{sorted(escapes)}——"
+            "行數面刻意非遞迴（對齊 ADR §4.3 指令），子目錄因此是繞道。"
+            "請把它移回 tools/tests/ 頂層，或連同 ADR 的指令一起改成遞迴。"
+        )
+    frozen_total = sum(frozen.values())
+    current_total = sum(current.values())
+    newcomers = sorted(set(current) - set(frozen))
+    vanished = sorted(set(frozen) - set(current))
+    if newcomers and current_total > frozen_total:
+        problems.append(
+            f"[新增] 基準表沒有這幾支：{newcomers}——DEF-101-561③ 已裁定"
+            "「R61 開輪即禁止新增鎖檔、只准合併／刪除」，而本次淨行數也上升。"
+            "現查：`git status --porcelain tools/tests/`＋`git diff --stat`。"
+            "合法作法：把新判準擴充進既有鎖檔，或先合併／刪除等量的舊鎖檔再加。"
+        )
+    grown = glc_growth_problem(frozen_total, current_total)
+    if grown:
+        top = sorted(
+            ((n, v - frozen.get(n, 0)) for n, v in current.items() if v > frozen.get(n, 0)),
+            key=lambda pair: -pair[1],
+        )[:5]
+        problems.append(grown + f" 成長最多的幾支：{top}")
+    if newcomers or vanished:
+        problems.append(
+            f"[基準過時] 鍵集合已漂移（新增 {newcomers}／消失 {vanished}）——"
+            "改名／合併本身不是違規，但基準表必須同一次變更跟著改，否則棘輪張力靠餘裕撐。"
+        )
+    floor = int(frozen_total * (1 - _GUARD_LINE_STALE_SLACK))
+    if current_total < floor:
+        problems.append(
+            f"[基準過時] 實況 {current_total} 已低於基準 {frozen_total} 的容忍下界 {floor}"
+            "——縮下來要同步重釘，否則這段餘裕日後可被無聲地加回去。"
+            "重釘：python tools/tests/test_adr_xplat001_c1c2_lock.py --print-guard-lines"
+        )
+    return problems
 
 
 def _fmt(items: dict[str, Finding]) -> str:
@@ -1633,8 +1820,13 @@ class TestShrinkOnlyRatchet(unittest.TestCase):
              mock.patch("subprocess.check_output", _boom), \
              mock.patch("subprocess.Popen", _boom):
             self.assertEqual(frozen_ratchet_problems(), [])
+            # 護欄層那一側的同型斷言：檔數棘輪本輪已由行數棘輪取代（見 `guard_line_problems`
+            # 上方區塊註解），此處改驗接手者同樣不碰外部行程。
             self.assertEqual(
-                guard_count_problems(_FROZEN_GUARD_FILE_COUNT, guard_files_in_worktree()), []
+                guard_line_problems(
+                    _FROZEN_GUARD_LINES, guard_lines_in_worktree(), guard_surface_escapes()
+                ),
+                [],
             )
 
     def test_raising_a_constant_is_red_even_when_the_worktree_is_clean(self) -> None:
@@ -1707,7 +1899,6 @@ class TestGuardFileCountShrinkOnlyRatchet(unittest.TestCase):
             f"工作樹列舉器找不到本檔（{_SELF_REL}）——pattern／路徑寫壞了？"
             "列舉器一旦回空集合，棘輪比較會恆真通過＝靜默失效",
         )
-        self.assertEqual(guard_count_problems(len(current), current), [])
 
     def test_the_counted_surface_is_the_root_gate_pattern(self) -> None:
         """SSOT 綁定：計數面必須等於根層閘門 discover 用的 pattern，兩邊漂移即紅。
@@ -1725,70 +1916,26 @@ class TestGuardFileCountShrinkOnlyRatchet(unittest.TestCase):
             "後者是 SSOT，請改本檔這一側",
         )
 
-    def test_adding_a_guard_file_is_detected(self) -> None:
-        """注入：現版比凍結基準多一支鎖檔 ⇒ 必須紅、指回裁決編號並附現查指令。
+    def test_the_line_ratchet_took_over_and_has_teeth(self) -> None:
+        """接手證明：檔數棘輪退場後，行數棘輪必須真的在守，且注入會紅。
 
-        （R67 round 2 起訊息不再逐字指名新增檔——基準是純量而非檔名集合，理由見
-        `_FROZEN_GUARD_FILE_COUNT` 上方：凍結檔名集合會讓合法的改名也翻紅。）
+        WHY 這一支存在：本輪移除 `_FROZEN_GUARD_FILE_COUNT` 檔數棘輪的理由是它**把病
+        換了個地方長**——檔數被釘住，成長就全部灌進既有巨檔（同期行數翻倍而判準全程綠）。
+        移除一道鎖若不同時證明接手者有牙，等於淨損一道防護；這支測試就是那個證明。
         """
-        current = guard_files_in_worktree()
-        newcomer = f"{_GUARD_DIR_REL}/{_GUARD_FILE_PATTERN.replace('*', 'synthetic_new_lock')}"
-        self.assertNotIn(newcomer, current, "合成檔名撞到真實檔，換一個名字")
-        problems = guard_count_problems(len(current), current | {newcomer})
-        self.assertEqual(len(problems), 1, f"預期恰一處違規，實得：{problems}")
-        self.assertIn("561", problems[0], "訊息必須指回裁決本體，否則讀者不知道為何被擋")
-        self.assertIn("git status", problems[0], "訊息必須附現查指令取代原本的逐字指名")
-
-    def test_merging_or_deleting_guard_files_is_accepted(self) -> None:
-        """對照組：合併／刪除（淨減）與完全不動 ⇒ 零違規。棘輪只擋調升。"""
-        current = guard_files_in_worktree()
-        self.assertEqual(guard_count_problems(len(current), current), [])
-        merged = current - {_SELF_REL}
-        self.assertEqual(guard_count_problems(len(current), merged), [])
-
-    def test_renaming_a_guard_file_is_not_flagged(self) -> None:
-        """對照組：改名＝一增一減、淨增為零 ⇒ 綠。
-
-        測意圖：裁決擋的是「護欄層繼續長大」，不是「檔名不准動」。若這裡誤紅，下一個人
-        會為了改名而把整道鎖關掉——那是本檔檔頭反覆講的那種賠掉全部價值的失敗模式。
-        """
-        current = guard_files_in_worktree()
-        renamed = (current - {_SELF_REL}) | {
-            f"{_GUARD_DIR_REL}/{_GUARD_FILE_PATTERN.replace('*', 'renamed_lock')}"
-        }
-        self.assertEqual(len(renamed), len(current), "改名構造必須是等量替換")
-        self.assertEqual(guard_count_problems(len(current), renamed), [])
-
-    def test_guard_file_count_never_rises_versus_frozen_baseline(self) -> None:
-        """真棘輪（R67 round 2 起）：工作樹鎖檔數 vs 凍結基準，只准往下。
-
-        取代原本的 `..._versus_head`：那一支在 pre-push／CI 這些唯一消費它的時點恆真
-        （HEAD == 工作樹），且帶著「git 取不到 ⇒ skip」的 fail-open 分支。現版無 git 依賴。
-        """
-        problems = guard_count_problems(
-            _FROZEN_GUARD_FILE_COUNT, guard_files_in_worktree()
-        )
+        current = guard_lines_in_worktree()
         self.assertEqual(
-            problems, [],
-            "護欄層檔數棘輪被違反（工作樹 vs 凍結基準）：\n  " + "\n  ".join(problems)
-            + "\n這道棘輪是 DEF-101-561③／DEF-101-565 那條架構級裁決的機械載體："
-            "護欄層已比它所護的生產碼還大，且連續數輪的新發現零筆落在生產碼上。"
-            "要新增鎖檔請先合併掉等量的舊鎖檔——這不是流程刁難，是該裁決的字面要求。",
+            guard_line_problems(_FROZEN_GUARD_LINES, current, guard_surface_escapes()),
+            [],
+            "行數棘輪對現況應為零違規（控制組）",
         )
-
-    def test_frozen_guard_count_matches_the_worktree(self) -> None:
-        """基準新鮮度：凍結值必須與工作樹現況逐字相等（多退少補都紅）。
-
-        WHY：本棘輪原本的「自緊」性質（合併掉之後上限自動跟著降）來自對 HEAD 現查，脫離
-        git 後就沒了；若凍結值停在舊高點，之後可以無聲地把鎖檔數「加回」那個高點——餘裕
-        就是破口。本鎖把自緊改成人工但強制：合併／刪除後不同步下修即紅。
-        """
-        current = len(guard_files_in_worktree())
-        self.assertEqual(
-            current, _FROZEN_GUARD_FILE_COUNT,
-            "工作樹鎖檔數與 _FROZEN_GUARD_FILE_COUNT 已漂移——"
-            "合併／刪除後請同步下修該常數以維持棘輪張力；"
-            "若是新增，請先讀 DEF-101-561③（本檔上方 (d) 段）",
+        shrunk = dict(_FROZEN_GUARD_LINES)
+        first = sorted(shrunk)[0]
+        shrunk[first] = max(0, shrunk[first] - 1000)
+        self.assertTrue(
+            guard_line_problems(shrunk, current),
+            "把凍結基準人為壓低 1000 行（＝製造一次淨成長）後行數棘輪仍不紅 ⇒ 它沒有牙，"
+            "檔數棘輪的退場就變成淨損一道防護",
         )
 
 
@@ -2796,10 +2943,26 @@ class TestSection91InvariantsHaveTeeth(unittest.TestCase):
         `Scan-M` 之後多打的那個空行讓 `Scan-N`／`Scan-T` 在 GitHub 上渲染成兩段裸文字，
         而任何鎖都不會說話——程式讀得到、人讀到的是壞掉的表。本支對每一個現行定義列逐一
         注入該形態，確保這件事在任何一列上都轉紅（不是只對當初那兩列有效）。
+
+        🔴 **本輪：注入面必須是「已定義 ∩ 已使用」，不是全部已定義**。SC-7 判的是
+        「**用了**卻沒定義」，所以一個**剛定義、還沒有任何帳本列或治理文件用到**的代號
+        被空行截出表格時，SC-7 依定義沒有話說——本支若照舊對它斷言必紅，就是拿一個
+        SC-7 從未承諾的性質去要求它。實證：本輪依規定**先**把當輪兩個新代號補進維度表
+        （不先補，代號一寫進帳本就擋住每一次 push），本支當場對那兩列判 FAIL——
+        **一道鎖要求你做的動作，讓同一支鎖檔的另一支測試轉紅**，即維度表 Scan-H 必跑項⑥
+        的形態。修法刻意不是「把新列排在別的列前面」（那樣的綠來自「後面那些已使用的列
+        一起被截斷」，是位置的巧合，而且會在下一個依慣例把新列附加在表尾的人身上復發），
+        而是把注入面對齊判準自己的語意。尚未被使用的代號在有人用它的那一刻自動回到注入面。
         """
         defined = sorted(scan_codes_defined(self.live.scan))
         self.assertTrue(defined, "維度表抽不到任何定義列 — 注入基底已失效")
-        for code in defined:
+        used = scan_codes_used(self.live.family + self.live.governance)
+        targets = sorted(set(defined) & used)
+        self.assertTrue(
+            targets,
+            f"已定義與已使用的代號零交集 — 注入基底已失效（defined={defined}）",
+        )
+        for code in targets:
             with self.subTest(code=code):
                 broken = self.live._replace(
                     scan=_break_scan_table_before(self.live.scan, code)

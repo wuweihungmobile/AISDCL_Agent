@@ -2785,10 +2785,23 @@ _ROOT_CLAUDE_MD = _REPO_ROOT / "CLAUDE.md"
 _ROOT_SETTINGS = _REPO_ROOT / ".claude" / "settings.json"
 #: 未橋接到根層 ⇒ 宣稱它的那一行必須帶這個字樣，讀者才不會誤以為根 session 也攔。
 _SUBPROJECT_SCOPE_MARK = "僅 AutoClaude 子專案 session"
-#: 鐵律三觸發清單中**沒有掃描器**的項（shrink-only：補了掃描器就從表與此處一起刪）。
+#: 鐵律三觸發清單中**沒有掃描器**的項（人可讀的宣告面；量測面是 CLAUDE.md 那張表本身）。
+#: 補了掃描器就把該列的機械物欄改掉，並把該項從此處刪除——兩邊由下方雙向判準綁住。
 _IRON_LAW3_UNCOVERED: tuple[str, ...] = (
     "`$env:*` 讀取", "副檔名判斷", "`Get-Command` 解析", "大小寫敏感度",
 )
+#: 鐵律三對照表的表頭（定位那**一張**表，不是 CLAUDE.md 內所有表格）。
+_IRON_LAW3_TABLE_HEAD = "| 觸發項 |"
+#: 機械物欄用來自陳「這一格沒人在守」的字樣。
+_IRON_LAW3_NO_MECHANISM = "無機械物"
+#: 覆蓋率棘輪的兩個釘（本輪取代單邊計數；完整理由見同檔
+#: `TestR74IronLawMechanismAccounting` 的
+#: `test_iron_law3_coverage_only_goes_up_and_the_denominator_may_grow`）。
+#: 分子＝**有機械物**的觸發項數，只准上升（拆掉掃描器即紅）。
+_IRON_LAW3_COVERED_FLOOR = 4
+#: 分母＝**已登記**的危害類數，只准上升（刪列來讓數字好看即紅）。未覆蓋數＝分母−分子，
+#: 刻意**不設上限**——那正是舊判準把「還有幾類沒人守」與「我們知道有幾類危害」綁死的地方。
+_IRON_LAW3_KNOWN_FLOOR = 8
 
 
 def hook_scripts_named_in(text: str, repo_root: Path) -> dict[str, list[str]]:
@@ -3148,6 +3161,68 @@ def iron_law3_topic_pairs(text: str) -> list[tuple[str, str, str]]:
     return pairs
 
 
+def iron_law3_trigger_rows(text: str) -> list[list[str]]:
+    """鐵律三對照表的**資料列**（每列切成欄）——現查，不寫死列數。
+
+    界定方式與 `test_adr_xplat001_c1c2_lock.scan_table_lines()` 同構：自表頭列起、
+    遇第一個非 `|` 起頭行止（**同一段連續 markdown 表格**），再濾掉 `|---|` 分隔列。
+    被空行截出表格的列不算數——它在 GitHub 上本來就已經不再渲染成表格列。
+    """
+    lines = text.splitlines()
+    start = next(
+        (i for i, ln in enumerate(lines) if ln.startswith(_IRON_LAW3_TABLE_HEAD)), None)
+    if start is None:
+        return []
+    rows: list[list[str]] = []
+    for ln in lines[start + 1:]:
+        if not ln.startswith("|"):
+            break
+        cells = [c.strip() for c in ln.strip("|").split("|")]
+        if len(cells) < 2 or not set(cells[0]) - set("-: "):
+            continue                                   # 分隔列／空首欄
+        rows.append(cells)
+    return rows
+
+
+def iron_law3_coverage(text: str) -> tuple[int, int]:
+    """`(有機械物的觸發項數, 已登記的危害類總數)`——兩個量都自 CLAUDE.md 那張表現查。
+
+    「有機械物」＝該列機械物欄**沒有**自陳 `無機械物`。刻意不去解析它指名了哪一支
+    （那由 `mechanism_claim_problems()`／`iron_law3_substance_problems()` 兩道判準各自負責），
+    本函式只負責把「覆蓋率」變成一個可比較的量測值。
+    """
+    rows = iron_law3_trigger_rows(text)
+    uncovered = [r for r in rows if _IRON_LAW3_NO_MECHANISM in r[1]]
+    return len(rows) - len(uncovered), len(rows)
+
+
+def iron_law3_ratchet_problems(
+    text: str, *, covered_floor: int, known_floor: int
+) -> list[str]:
+    """覆蓋率棘輪的違規清單（空＝通過）。**兩個地板都是參數**，不是讀模組常數。
+
+    🔴 為何非參數化不可（落地當回合就被自己抓到）：注入測試如果拿模組常數當地板，
+    它們就只在「真表剛好貼著常數」時才有鑑別力——而本判準解開的正是「分母允許長大」。
+    第一版正是那樣寫的：把第 5 類危害誠實登記進表之後，`test_taking_a_scanner_away_is_red`
+    與 `test_deleting_a_known_hazard_row_is_red` 兩支**注入測試**當場轉紅，也就是說
+    「解開棘輪」這個動作被我自己新寫的兩道鎖擋住了——與本判準要治的病同型、同一回合復發。
+    現行形態：注入測試拿**現況**當地板（相對比較），活體判準拿釘住的常數當地板。
+    """
+    covered, known = iron_law3_coverage(text)
+    problems: list[str] = []
+    if known < known_floor:
+        problems.append(
+            f"鐵律三對照表的已登記危害類數 {known} 低於地板 {known_floor} ⇒ 有列被刪掉"
+            f"（或表格被空行截斷）。已知危害只能被承認、不能被撤銷；補了掃描器要改的是"
+            f"該列的機械物欄，不是把整列拿掉")
+    if covered < covered_floor:
+        problems.append(
+            f"鐵律三覆蓋數 {covered}/{known} 低於地板 {covered_floor} ⇒ 有掃描器被拆掉，"
+            f"或該列被改回自陳「{_IRON_LAW3_NO_MECHANISM}」。覆蓋只准往上：補了新掃描器"
+            f"就把 _IRON_LAW3_COVERED_FLOOR 一起往上釘")
+    return problems
+
+
 def iron_law3_substance_problems(text: str, repo_root: Path) -> list[str]:
     """具名檔案必須**真的在守該列的主題**（關鍵詞佐證）。"""
     problems: list[str] = []
@@ -3228,12 +3303,50 @@ class TestR74IronLawMechanismAccounting(unittest.TestCase):
                              require_backticks=False),
             [])
 
-    def test_uncovered_trigger_list_is_shrink_only_and_still_documented(self) -> None:
-        """棘輪：無掃描器的觸發項只准變少，且每一項都必須在文件表裡標著「無機械物」。"""
-        self.assertLessEqual(
-            len(_IRON_LAW3_UNCOVERED), 4,
-            "鐵律三未覆蓋項只准往下改：補了掃描器就把該列從 CLAUDE.md 與本常數一起刪")
+    def test_iron_law3_coverage_only_goes_up_and_the_denominator_may_grow(self) -> None:
+        """棘輪的形狀：**覆蓋率**只准上升，分母（已知危害類數）允許長大。
+
+        🔴 本輪改的是**判準形狀**，不是把門檻調大。原判準是單邊計數
+        （未覆蓋項數 ≤ 一個常數），它把兩個不同的量綁成同一個數字：
+          (甲) 已知危害類裡**還有幾類沒人守** —— 這個確實只准變少；
+          (乙) 我們**知道有幾類危害** —— 這個每挖深一輪就會變多，而且變多是好事。
+        於是「誠實登記一個新發現的無掃描器危害類」會當場 AssertionError，最省力的滿足
+        方式變成「不要記錄新發現」——正是本 repo 判過的「早退／遮蔽，且方向是看起來
+        變乾淨」。同型判例已有一次：`CrossPlatform_Scan_Dimensions.md` 的 Scan-H 判準④
+        為「每輪必須下降」這個形狀付過學費，該處逐字寫著不要繞回去。
+
+        現行判準＝**兩個各自單邊的量**，未覆蓋數（＝分母−分子）刻意不設上限：
+          · 分子（有機械物的觸發項數）只准上升 ⇒ **拆掉一支掃描器即紅**；
+          · 分母（已登記的危害類數）只准上升 ⇒ **刪掉一列未覆蓋項來讓數字好看即紅**
+            （舊判準反而放行這一招：把列刪了，計數自然就降了）。
+        推得的三種編輯行為：新增「已有掃描器」的列 → 兩量皆升，綠；新增「無機械物」的
+        列 → 分子不動、分母升，綠（誠實登記不再有代價）；把某列的掃描器拆掉 → 分子降，
+        紅。shrink-only 的精神沒有被放寬，只是釘在分子上而不是釘在「未覆蓋數」上。
+        """
         text = _ROOT_CLAUDE_MD.read_text(encoding="utf-8-sig")
+        problems = iron_law3_ratchet_problems(
+            text, covered_floor=_IRON_LAW3_COVERED_FLOOR,
+            known_floor=_IRON_LAW3_KNOWN_FLOOR)
+        self.assertEqual(problems, [], "\n  ".join(problems))
+
+    def test_uncovered_trigger_list_is_shrink_only_and_still_documented(self) -> None:
+        """宣告面（常數）與量測面（CLAUDE.md 那張表）必須**雙向**對得上。
+
+        ① 每一個宣告的未覆蓋項都要在表裡有列，且該列標著「無機械物」（原有判準）；
+        ② 表裡每一列標著「無機械物」的，都必須有人在常數裡宣告它（本輪補的反向）。
+        少了 ②，往表裡加一列未覆蓋項卻不動常數不會有任何訊號，那個常數就會靜默失真——
+        而它正是人讀「哪幾類沒人守」的第一站。
+        """
+        text = _ROOT_CLAUDE_MD.read_text(encoding="utf-8-sig")
+        rows = iron_law3_trigger_rows(text)
+        self.assertTrue(rows, "鐵律三對照表抽不到任何資料列 ⇒ 本鎖已空轉（表頭改了？）")
+        for cells in rows:
+            if _IRON_LAW3_NO_MECHANISM not in cells[1]:
+                continue
+            self.assertTrue(
+                [item for item in _IRON_LAW3_UNCOVERED if item in cells[0]],
+                f"表裡「{cells[0]}」列標著{_IRON_LAW3_NO_MECHANISM}，卻沒有任何一項在 "
+                f"_IRON_LAW3_UNCOVERED 宣告它 ⇒ 宣告面靜默失真")
         for item in _IRON_LAW3_UNCOVERED:
             rows = [ln for ln in text.splitlines()
                     if ln.startswith("|") and item in ln]
@@ -3241,6 +3354,105 @@ class TestR74IronLawMechanismAccounting(unittest.TestCase):
             self.assertTrue(
                 any("無機械物" in r for r in rows),
                 f"「{item}」列未標『無機械物』⇒ 讀者會以為它有人在守（DEF-101-766 的落點）")
+
+    # ── 覆蓋率棘輪的紅綠實測（注入面刻意用**真表**，合成表證明不了對它有牙）──
+    @staticmethod
+    def _table_bounds(lines: list[str]) -> tuple[int, int]:
+        start = next(
+            (i for i, ln in enumerate(lines) if ln.startswith(_IRON_LAW3_TABLE_HEAD)), -1)
+        if start < 0:
+            raise RuntimeError("注入基底已失效：CLAUDE.md 找不到鐵律三對照表的表頭")
+        end = start + 1
+        while end < len(lines) and lines[end].startswith("|"):
+            end += 1
+        return start, end
+
+    def _with_extra_row(self, row: str) -> str:
+        lines = _ROOT_CLAUDE_MD.read_text(encoding="utf-8-sig").splitlines()
+        _start, end = self._table_bounds(lines)
+        lines.insert(end, row)
+        return "\n".join(lines)
+
+    def _live_floors(self) -> dict[str, int]:
+        """**現況**當地板——注入測試一律用它，不用模組常數（見
+        `iron_law3_ratchet_problems()` docstring：拿常數當地板的注入只在
+        「真表剛好貼著常數」時有鑑別力，而本判準解開的正是分母會長大）。"""
+        covered, known = iron_law3_coverage(
+            _ROOT_CLAUDE_MD.read_text(encoding="utf-8-sig"))
+        return {"covered_floor": covered, "known_floor": known}
+
+    def test_registering_a_newly_found_uncovered_hazard_stays_green(self) -> None:
+        """🔴 這一支就是本輪立案的那件事：**誠實登記**一個新發現的無掃描器危害類。
+
+        改判準之前，這個動作會得到 `AssertionError: 5 not less than or equal to 4`
+        ——制度在懲罰誠實。現在它必須是綠的：分子不動、分母 +1，兩個地板都沒被踩。
+        """
+        floors = self._live_floors()
+        text = self._with_extra_row("| 合成新危害 | **無機械物** | 沒有東西會紅 |")
+        covered, known = iron_law3_coverage(text)
+        self.assertEqual(
+            (covered, known), (floors["covered_floor"], floors["known_floor"] + 1),
+            "誠實登記應該只動分母")
+        self.assertEqual(
+            iron_law3_ratchet_problems(text, **floors), [],
+            "登記一個新的無掃描器危害類竟然轉紅 ⇒ 制度又在懲罰誠實（本判準的立案理由）")
+
+    def test_registering_a_new_trigger_that_already_has_a_scanner_stays_green(self) -> None:
+        """對照：新增一個**已有掃描器**的觸發項，兩個量都升，同樣不得紅。"""
+        floors = self._live_floors()
+        text = self._with_extra_row(
+            "| 合成觸發項 | `tools/tests/test_ps51_compat.py` | 根層 unittest 閘門 |")
+        covered, known = iron_law3_coverage(text)
+        self.assertEqual(
+            (covered, known), (floors["covered_floor"] + 1, floors["known_floor"] + 1))
+        self.assertEqual(iron_law3_ratchet_problems(text, **floors), [])
+
+    def test_taking_a_scanner_away_is_red(self) -> None:
+        """鑑別力（注入）：把一列的掃描器拿掉改回自陳沒人守 ⇒ 分子降 ⇒ 必紅。
+
+        這是唯一該紅的方向——覆蓋率下降。用真表上真的有掃描器的那一列做注入。
+        """
+        lines = _ROOT_CLAUDE_MD.read_text(encoding="utf-8-sig").splitlines()
+        start, end = self._table_bounds(lines)
+        victim = next(
+            (i for i in range(start + 1, end)
+             if lines[i].startswith("| 路徑分隔符 ")), -1)
+        self.assertGreater(victim, 0, "注入基底已失效：找不到『路徑分隔符』那一列")
+        floors = self._live_floors()
+        cells = lines[victim].strip("|").split("|")
+        cells[1] = f" **{_IRON_LAW3_NO_MECHANISM}** "
+        lines[victim] = "|" + "|".join(cells) + "|"
+        text = "\n".join(lines)
+        covered, known = iron_law3_coverage(text)
+        self.assertEqual(known, floors["known_floor"], "分母不該因為這個注入而變")
+        problems = iron_law3_ratchet_problems(text, **floors)
+        self.assertTrue(problems, "拆掉一支掃描器仍未轉紅 ⇒ 分子那一釘沒有牙")
+        self.assertIn("覆蓋數", problems[0])
+        self.assertEqual(covered, floors["covered_floor"] - 1)
+
+    def test_deleting_a_known_hazard_row_is_red(self) -> None:
+        """鑑別力（注入）：把一列未覆蓋項整列刪掉 ⇒ 分母降 ⇒ 必紅。
+
+        🔴 這一招在**舊判準下是綠的**（未覆蓋項數從 4 掉到 3，`<= 4` 照樣通過），
+        也就是說舊棘輪同時懲罰誠實登記、又放行「把已知危害刪掉」。新判準把它堵住。
+        """
+        lines = _ROOT_CLAUDE_MD.read_text(encoding="utf-8-sig").splitlines()
+        start, end = self._table_bounds(lines)
+        victim = next(
+            (i for i in range(start + 1, end)
+             if _IRON_LAW3_NO_MECHANISM in lines[i]), -1)
+        self.assertGreater(victim, 0, "注入基底已失效：表內找不到任何未覆蓋列")
+        floors = self._live_floors()
+        removed = lines.pop(victim)
+        text = "\n".join(lines)
+        covered, known = iron_law3_coverage(text)
+        problems = iron_law3_ratchet_problems(text, **floors)
+        self.assertTrue(
+            problems, f"刪掉一列已知危害（{removed[:40]}…）仍未轉紅 ⇒ 分母那一釘沒有牙")
+        self.assertIn("已登記危害類數", problems[0])
+        self.assertEqual(known, floors["known_floor"] - 1)
+        self.assertEqual(covered, floors["covered_floor"],
+                         "本注入不該動到分子，否則證明不了是分母在說話")
 
 
 class TestR75IronLawMechanismSubstance(unittest.TestCase):
@@ -4477,8 +4689,16 @@ class TestR76UncoveredFormListTracksActualBehaviour(unittest.TestCase):
 # 只做**家族層**判準，兩者不重複：那支答「E3 這一條現在寫得對不對」，本段答「下一條退場
 # 判準寫成同一個形狀時會不會有人說話」。
 _EXIT_SECTION_MARKS: tuple[str, ...] = ("退出判準", "退場判準", "退場條件", "解除條件")
-#: 判準項目的起頭（`E1.`／`E2.`…）。刻意只認這一種編號形態，其餘寫法列入不涵蓋清單。
-_EXIT_ITEM_RE = re.compile(r"^\s*(?:#|//)?\s*(E\d+)[.．]")
+#: 判準項目的起頭。兩種形態：註解／散文的 `E1.`，與 **markdown 表格 cell** `| **E1** |`。
+#: 🔴 本輪補上表格 cell 那一種：本 repo 最常見的退場判準寫法就是一張 `| 條 | 判準 | 實測 |`
+#: 的表，而原正則只認行首 `E<N>.` ⇒ 就算把 `.md` 加進掃描面也是**零命中**（實測 items=0）。
+#: 「擴了掃描面卻抽不到東西」比不擴更糟：它看起來像已經覆蓋了。
+_EXIT_ITEM_RE = re.compile(r"^\s*(?:\|\s*)?(?:#|//)?\s*\**(E\d+)\**\s*(?:[.．]|\|)")
+#: 就地訂正／時代快照的標記。歷史檔逐字保全是本 repo 的明文紀律（帳本列不改寫、
+#: 快照欄保留原值），所以判準必須留一條「該列或一筆更新的紀錄載明訂正」的合法出口——
+#: 否則擴到 `.md` 的當下就會對一列**刻意保留的歷史快照**永紅，而永紅的閘門會被整個關掉
+#: （同 `check_defect_log_crossref.orphan_backlog_problems()` 為硬規則② 設計的出口）。
+_EXIT_CORRECTION_MARKS: tuple[str, ...] = ("訂正", "改述", "已改為", "時代快照", "已退場")
 #: 「整支工具的判決」——把工具當黑箱讀它的總結論，等於把它的**全部**比較對象綁進判準。
 _WHOLE_TOOL_VERDICT_MARKS: tuple[str, ...] = (
     "rc=0", "rc = 0", "rc＝0", "回 0", "status=ok", "全綠", "零違規",
@@ -4488,11 +4708,33 @@ _SCOPE_NARROWED_RE = re.compile(
     r"\.tasks?\.[A-Za-z0-9_]+|--tasks?\b|--expectations\b|--only\b|--filter\b")
 #: 期望值 SSOT（`{實體: 期望}` 形態的 JSON，checker 逐實體比對）。現查 glob，不寫死檔名。
 _EXPECTATION_SSOT_GLOBS: tuple[str, ...] = ("tools/*expectations*.json",)
-#: 會寫下退場判準的可執行文本。**刻意含非 Python**——本輪的復發就住在 `.ps1` 註解裡。
+#: 會寫下退場判準的文本。**刻意含非 Python**——R76 的復發就住在 `.ps1` 註解裡。
+#: 🔴 本輪補三個縫（前兩個是實測缺口、第三個是雙平台不對稱的前瞻補齊）：
+#:   ①`docs/**/*.md`／根層 `*.md`——**治理決策的主要住所**，而它整個不在原掃描面內；
+#:     同一組 E1／E2／E3 的第二個家就住在 `docs/06_quality/` 的一份 `.md` 表格裡。
+#:   ②`AutoClaude/tools/*.sh`（同目錄的 `*.ps1` 有列而 `.sh` 缺席，其中含 mac 側主入口）。
 _EXIT_CRITERION_GLOBS: tuple[str, ...] = (
     "tools/*.ps1", "tools/*.sh", "tools/*.py",
-    "AutoClaude/tools/*.ps1", "AutoClaude/tools/*.py",
+    "AutoClaude/tools/*.ps1", "AutoClaude/tools/*.py", "AutoClaude/tools/*.sh",
+    "*.md", "docs/**/*.md",
 )
+
+
+def exit_criterion_correction_record(text: str, tag: str) -> str | None:
+    """該份文本內是否有一筆**就地訂正／時代快照**紀錄涵蓋這一條判準；有就回傳那一行。
+
+    形態照 `orphan_backlog_problems()` 的既有出口：**同一份文本內、提及該項目代號、
+    且帶訂正標記**的行即算數。這條出口不是寬鬆，是必要——本 repo 的歷史列一律逐字保全
+    （帳本列不改寫、快照欄保留原值再於下方補訂正塊），沒有這條出口，判準會對一列
+    **刻意保留的錯誤快照**永紅。
+
+    誠實劃界（同體例）：**跨列認定條件偏弱**——只要同檔有一行同時提到代號與訂正字樣就
+    接受，判不出「那筆訂正講的是不是同一件事」；那需要語意判讀，不在逐行正則的能力內。
+    """
+    for line in text.splitlines():
+        if tag in line and any(m in line for m in _EXIT_CORRECTION_MARKS):
+            return line.strip()
+    return None
 
 
 def expectation_ssot_entities(repo_root: Path) -> dict[str, tuple[str, ...]]:
@@ -4575,12 +4817,21 @@ def unsatisfiable_exit_criterion_problems(
          量測對象（無逐實體欄位讀法、無收窄旗標）⇒ 該工具的比較對象包含被授權移除的
          那個實體 ⇒ 判準結構上不可滿足。
 
+    ⑤ 該份文本內**沒有**就地訂正／時代快照紀錄涵蓋這一條（見
+       `exit_criterion_correction_record()`）——歷史列逐字保全是本 repo 的明文紀律，
+       沒有這條出口，判準會對刻意保留的錯誤快照永紅，而永紅的閘門會被整個關掉。
+
     **已實測涵蓋**（逐項以構造輸入跑過，見 `TestR76ExitCriteriaSurviveTheirOwnAction`）：
       · `.ps1` 註解內的 `E<N>.` 項目要求「移除後 <checker>.py 回 rc=0」（R76 復發原形）；
       · 同形態改用「status=ok」「全綠」措辭；
-      · 反向對照：同一項目改成逐實體讀法（`.tasks.<name>`）或帶收窄旗標 ⇒ 不判紅。
+      · **markdown 表格 cell 形態**（`| **E3** | …回 rc=0 |`，本輪補上——那是本 repo 寫
+        退場判準最常見的形狀，而 `.md` 此前整個不在掃描面內）；
+      · 反向對照：同一項目改成逐實體讀法（`.tasks.<name>`）或帶收窄旗標 ⇒ 不判紅；
+      · 反向對照：同檔已有就地訂正紀錄 ⇒ 不判紅（否則對逐字保全的歷史快照永紅）。
     **已實測不涵蓋**（逐項跑過，並釘成常駐斷言）：
-      · **編號形態**只認 `E<N>.`；`(1)`／`條件一`／無編號的散文段落抓不到；
+      · **編號形態**只認 `E<N>.` 與 `| **E<N>** |`；`(1)`／`條件一`／無編號的散文抓不到；
+      · **訂正紀錄的內容不判讀**：同檔有一行同時提到代號與訂正字樣就放行，判不出那筆
+        訂正講的是不是同一件事（跨列認定條件偏弱，同 `orphan_backlog_problems()`）；
       · **比較對象只認期望值 JSON SSOT**：checker 把清單寫死在自己的原始碼裡、或比較
         對象是別的資料形態（資料庫、線上 API）時，本判準無從得知它有幾個實體；
       · **語意層的「授權移除什麼」不做判讀**：本判準以「SSOT 有多個實體 ＋ 取整支 rc」
@@ -4594,6 +4845,8 @@ def unsatisfiable_exit_criterion_problems(
             continue
         if _SCOPE_NARROWED_RE.search(item):
             continue
+        if exit_criterion_correction_record(text, tag):
+            continue                       # 已有就地訂正／時代快照紀錄（見該函式 docstring）
         for hit in re.findall(r"[\w./\\-]+\.py", item):
             name = PurePosixPath(hit.replace("\\", "/")).name
             ssot = checker_ssot.get(name)
@@ -4680,6 +4933,50 @@ class TestR76ExitCriteriaSurviveTheirOwnAction(unittest.TestCase):
         self.assertTrue(problems, "修前原形沒被抓到 ⇒ 本鎖不具鑑別力")
         self.assertIn("E3", problems[0])
         self.assertIn("scheduled_task_expectations.json", problems[0])
+
+    #: 本輪補上的第二種載體：markdown 表格 cell。這是本 repo 寫退場判準最常見的形狀，
+    #: 而 `.md` 此前整個不在掃描面內、且原正則只認行首 `E<N>.` ⇒ 兩層都要補才抓得到。
+    _MD_RELAPSE = (
+        "## 2.2.3 三條退出判準逐條實測\n"
+        "\n"
+        "| 條 | 判準原文 | 本輪實測 | 結論 |\n"
+        "|---|---|---|---|\n"
+        "| **E3** | 移除後仍有每日心跳：`tools/check_scheduled_task_drift.py` 回 rc=0 "
+        "| 未達標 | ❌ |\n"
+        "\n"
+    )
+
+    def test_the_markdown_table_cell_form_is_red(self) -> None:
+        """注入（本輪新增鑑別力）：同一個病寫成 markdown 表格 cell ⇒ 必紅。
+
+        修前實況：`.md` 不在 glob 內、`_EXIT_ITEM_RE` 只認行首 `E<N>.` ⇒ 這份語料
+        **抽不到任何項目**（items=0），鎖對治理文件那個主要住所整個沉默。
+        """
+        self.assertTrue(exit_criterion_items(self._MD_RELAPSE),
+                        "表格 cell 形態抽不到項目 ⇒ 擴掃描面等於沒擴（看起來覆蓋了而已）")
+        problems = self._probe(self._MD_RELAPSE)
+        self.assertTrue(problems, "表格 cell 形態沒被抓到 ⇒ 本鎖對 .md 那一半不具鑑別力")
+        self.assertIn("E3", problems[0])
+
+    def test_a_preserved_snapshot_with_a_correction_record_is_green(self) -> None:
+        """反向對照：同一份文本補上就地訂正紀錄 ⇒ 不判紅。
+
+        少了這條出口，擴到 `.md` 的當下就會對一列**刻意逐字保留的歷史快照**永紅——
+        而永紅的閘門會被整個關掉，比沒有鎖更糟（同硬規則② 為歷史列留改派出口的理由）。
+        少了這條**測試**，那條出口哪天被拿掉也不會有任何東西說話。
+        """
+        corrected = self._MD_RELAPSE + (
+            "> 🔴 **就地訂正 E3（本列欄位逐字保留為時代快照，不改寫）**：判準已改為逐任務量測。\n")
+        self.assertEqual(self._probe(corrected), [],
+                         "已有就地訂正紀錄卻仍判紅 ⇒ 歷史保全與本鎖互為對方的違規")
+        self.assertTrue(self._probe(self._MD_RELAPSE),
+                        "對照組本身不紅 ⇒ 上一個斷言是空虛的綠")
+
+    def test_the_md_surface_is_live(self) -> None:
+        """自錨：`.md` 這一面必須真的收到檔——glob 寫錯時上面兩支合成語料照樣全綠。"""
+        _problems, seen = self._live()
+        self.assertTrue([s for s in seen if s.endswith(".md")],
+                        f"掃描面收不到任何 .md ⇒ 本輪擴的那一面已靜默失效；實得：{seen}")
 
     def test_other_whole_tool_verdict_wordings_are_red_too(self) -> None:
         """注入：換一種「整支判決」的措辭仍必須紅（否則改個字就走掉）。"""

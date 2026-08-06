@@ -5,8 +5,8 @@
 | 角色 | SA（系統分析），**唯讀分析**（除本檔外零改動） |
 | 日期 | 2026-08-04 |
 | 觸發 | 掌舵者提問：兩支 Job「還有需要嗎／測完了嗎／能不能加速結束」 |
-| 載具 | PowerShell 工具（PS 5.1 引擎經 `powershell.exe`）＋ Read/Grep；排程一律 `Get-ScheduledTask`（不用 `schtasks /query`，本機對這批工作回空＝假陰性） |
-| 引用政策 | 本檔所有數字皆為**當回合真跑**輸出，逐項附指令。行號為 2026-08-04 實查值 |
+| 載具 | PowerShell 工具（🔴 **本輪 F-07 訂正：它不是「PS 5.1 引擎經 `powershell.exe`」**——當回合在該工具內實測 `$PSVersionTable.PSVersion` ＝ **7.6.4 Core**；`powershell.exe -NoProfile` 才是 **5.1.26100.8875 Desktop**。兩者預設檔案編碼分別為 utf-8 與 big5，同一批 `.ps1` 以 `[Parser]::ParseFile` 對跑實測 7.6.4 零錯、5.1 有 29 支錯 ⇒ 引擎敏感的驗證必須顯式外呼 `powershell.exe`，而本檔當時**沒有**這麼做，故凡本檔涉及引擎行為的結論一律標為未以 5.1 複驗）＋ Read/Grep；排程一律 `Get-ScheduledTask`（不用 `schtasks /query`，本機對這批工作回空＝假陰性） |
+| 引用政策 | 本檔所有數字皆為**當回合真跑**輸出，逐項附指令。行號為 2026-08-04 實查值 🔴 **本輪 D-05 訂正：行號本身就是會漂的量**——本檔對高頻改動檔寫死行號的兩處（§2.2.6 與 §5 D-4 第 4 步）已改為符號錨；其餘行號一律讀成「2026-08-04 的位置」，複驗前先以符號搜尋定位 |
 
 ---
 
@@ -472,7 +472,7 @@ E1 達標、E2 達標、E3 **在改為逐任務判準後亦達標**（實測 `st
 2. `tools/scheduled_task_expectations.json` 仍列 `AutoClaude_WindowsSmoke` ⇒ drift checker 會判該任務缺席。🔴 **R76 訂正（本列原文已為假）**：原文寫「**rc 不會轉紅**（缺席只記 `absent` 不記 `drifts`，rc 只由 `drifts` 驅動）」——那是 R75 之前的實作。R75 已補上 `elif present < len(expectations): report["status"] = STATUS_TASK_MISSING`（該行註解逐字「＝漏跑的最強形態，**不得判綠**」），而 `check_scheduled_task_drift.py` 的收尾是 `return 1 if report["status"] in (STATUS_DRIFT, STATUS_ERROR, STATUS_TASK_MISSING) else 0` ⇒ **只刪 smoke 會讓它 rc=1**，且該工具在 nightly 是 fail-closed。所以這一項的實害方向與原文相反：不是「靜默脫節」，是「當場整條 nightly 轉紅」。兩種都不可接受，處置一樣（見下方 ⇒ 那一段），但**別照原文以為刪了不會有事**。
 3. 安裝器**沒有「只移除 smoke」的模式**：`-Uninstall` 對整組生效（`:221` `foreach ($name in @($TaskName, $SmokeTaskName))`）。
 
-⇒ 真正的退場＝改 `install_windows_nightly.ps1`（把 smoke 移出受管組）＋ `tools/scheduled_task_expectations.json` ＋ `tools/tests/test_install_windows_nightly.py`（含 `TestScheduledTaskExpectationsSsot` 與 `test_smoke_task_shares_catchup_settings_and_runs_before_nightly` 兩道鎖）＋ `tools/windows_smoke_local.ps1:99-127` 的判準段改述為「已退場」。**這是一輪有 DoD 的工作，不是一條指令。**
+⇒ 真正的退場＝改 `install_windows_nightly.ps1`（把 smoke 移出受管組）＋ `tools/scheduled_task_expectations.json` ＋ `tools/tests/test_install_windows_nightly.py`（含 `TestScheduledTaskExpectationsSsot` 與 `test_smoke_task_shares_catchup_settings_and_runs_before_nightly` 兩道鎖）＋ `tools/windows_smoke_local.ps1` **檔頭退場判準區塊**的改述為「已退場」。🔴 **本輪 D-05 訂正：此處原以 `:99-127` 這個寫死行號指認該區塊，而它已經漂了**——現查該區塊自檔頭註解「先分清兩個不同的東西」起，經 E1／E2／E3 三條、「E3 的一般化規則」、「為何 E1 不是連續 N 天零發現」、到 R76 收尾新增的「E1 的現況欄」為止，實際跨度約為原範圍的兩倍；照 `:99-127` 執行只會改到前半，**漏掉的正好是 R76 剛寫進去的「不得退場」處置結論**。一律以那幾個小標題字串搜尋定位，不要用行號（同 `CrossPlatform_Scan_Dimensions.md` 對高頻改動檔「刻意以符號而非行號錨定」那條）。**這是一輪有 DoD 的工作，不是一條指令。**
 
 **移除會失去什麼（具體清單）：**
 
@@ -553,12 +553,19 @@ drift 軌**只剩 2 筆**。#1+#2 這個組合已經在 08-02 實際吃掉一整
 
 > 附帶觀察（無功能影響、僅記錄）：兩支的磁碟機字母大小寫不一致（`d:\` vs `D:\`），且 nightly 有 `WorkingDirectory`、smoke 沒有。NTFS 路徑不區分大小寫，兩支腳本都自行以 `$PSScriptRoot` 定位 repo 根，故無影響。這是兩支在不同輪次註冊留下的痕跡。
 
-### 4.2 孤兒腳本（有腳本、沒有對應 Job）：**3 支，性質各不相同**
+### 4.2 孤兒腳本（有腳本、沒有對應 Job）：R75 當時 **3 支**，🔴 **現存 2 支**（本輪 D-04 訂正）
+
+> 🔴 **本輪（D-04）訂正**：下表第二列所指的檔案**已不在磁碟上**——R76 於 `5993f09` 把
+> `AutoClaude/tools/reschedule_g0_gatecheck.ps1` 整支刪除（當回合 `Test-Path` 實測 `False`；
+> 對照組 `g0_gate_check.ps1`／`fix_nightly_catchup.ps1` 皆 `True`）。R76 在**同一份檔案**上做了
+> 六處就地訂正，卻沒有一處碰到本節與 §5 D-5 這兩張表，而刪檔正是同一輪的產出。
+> 成因是本 repo 的引用完整性掃描面只覆蓋 ONBOARDING 與 ADR 兩家，`docs/06_quality/*.md`
+> **零覆蓋**（D-06）⇒ 指向已刪檔的引用沒有任何機械物會出聲。原列逐字保留為 R75 史料。
 
 | 腳本 | 狀態 | 判定 |
 |---|---|---|
 | `AutoClaude/tools/g0_gate_check.ps1` | 原由 `AutoClaude_SD09_G0_GateCheck` 排程呼叫；**該工作已於 R71 從本機移除**（腳本刻意保留）。現無排程消費者，仍可手動跑 | ⚠️ **真孤兒（可接受）**——它的功能已被 nightly 內建的四軌 G0 判定 ＋ `.g0_readiness.json` 憑證取代。建議保留供手動查詢，但應在檔頭註明「已無排程消費者」 |
-| `AutoClaude/tools/reschedule_g0_gatecheck.ps1` | 唯一用途是重排上面那支**已不存在**的工作 | 🔴 **真孤兒（無用途）**。建議列入清理候選（本輪唯讀，不動） |
+| ~~`AutoClaude/tools/reschedule_g0_gatecheck.ps1`~~ **（已刪除，R76 `5993f09`）** | 〔R75 史料〕唯一用途是重排上面那支**已不存在**的工作 | ✅ **已結案**：R76 已執行本列的建議並刪檔。〔R75 原判定：🔴 真孤兒（無用途）。建議列入清理候選（本輪唯讀，不動）〕 |
 | `AutoClaude/tools/fix_nightly_catchup.ps1` | 補跑保護校正器。`install_windows_nightly.ps1:320-322` 建立時已內建同款設定 | ✅ **非孤兒缺陷**。該檔檔頭 `:13` 明文「已安裝的舊機器仍可用該腳本校正」＝刻意保留的歷史修復路徑 |
 
 ### 4.3 對照組 vs 現場（任務清單層面）
@@ -641,7 +648,7 @@ Get-Content 'D:\CursorProject\AISDCL_Agent\AutoClaude\.g0_readiness.json' -Encod
 1. `tools/install_windows_nightly.ps1` — 把 smoke 移出受管組（含 `-Status` 的 `$loaded` 判準、`-Uninstall` 的 `foreach`）。
 2. `tools/scheduled_task_expectations.json` — 移除 `AutoClaude_WindowsSmoke` 條目。
 3. `tools/tests/test_install_windows_nightly.py` — 更新 `TestScheduledTaskExpectationsSsot` 與 `test_smoke_task_shares_catchup_settings_and_runs_before_nightly` 兩道鎖。
-4. `tools/windows_smoke_local.ps1:99-127` — 判準段改述為「(乙) 已於 R__ 退場，附 E1/E2/E3 取證」；**(甲) 腳本永久保留的段落不動**。
+4. `tools/windows_smoke_local.ps1` — **檔頭退場判準區塊**（自註解「先分清兩個不同的東西」起，至「E1 的現況欄」段落結束；🔴 本輪 D-05 訂正：原文寫死的 `:99-127` 已漂，實際約為該範圍兩倍，用行號會漏掉後半的處置結論）改述為「(乙) 已於 R__ 退場，附 E1/E2/E3 取證」；**(甲) 腳本永久保留的段落不動**。
 5. 提權跑 `-Uninstall` 後重新 install（或直接 `Unregister-ScheduledTask -TaskName 'AutoClaude_WindowsSmoke' -Confirm:$false`）。
 
 **為什麼不能只刪工作**：`-Status` 會永遠 exit 1（`:212-213` 整組全在才回 0）；drift checker 會靜默把它記成 `absent` 而 rc 不變紅（`:130-133`／`:149-151`）⇒ 對照組與現場靜默脫節，正是這支 checker 立案要消滅的狀態。
@@ -654,7 +661,7 @@ Get-Content 'D:\CursorProject\AISDCL_Agent\AutoClaude\.g0_readiness.json' -Encod
 
 | 腳本 | 建議 | 不做的後果 |
 |---|---|---|
-| `AutoClaude/tools/reschedule_g0_gatecheck.ps1` | **刪除或標記廢棄**——它唯一的用途是重排一支 R71 已移除的工作 | 樹裡留一支「看起來還在用」的腳本，下一個人會以為那支排程還存在 |
+| ~~`AutoClaude/tools/reschedule_g0_gatecheck.ps1`~~ **✅ 已於 R76（`5993f09`）刪除，本列結案** | 〔R75 建議〕**刪除或標記廢棄**——它唯一的用途是重排一支 R71 已移除的工作 | 〔已不適用〕樹裡留一支「看起來還在用」的腳本，下一個人會以為那支排程還存在。🔴 本輪 D-04：這一列自己就變成了它所描述的那個問題——檔案刪了兩輪，兩張表還在把它當待辦 |
 | `AutoClaude/tools/g0_gate_check.ps1` | **保留，檔頭加註「已無排程消費者，功能由 nightly 四軌 G0 ＋ `.g0_readiness.json` 承載」** | 同上，但這支手動仍有用，風險較低 |
 | `AutoClaude/tools/fix_nightly_catchup.ps1` | **保留不動** | 無（檔頭已明說是舊機器校正路徑） |
 

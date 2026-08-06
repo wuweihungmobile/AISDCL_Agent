@@ -34,7 +34,11 @@ Windows 欄的 `3767 passed / 208 skipped`**，那正是 Windows 實機量得的
 from __future__ import annotations
 
 import datetime
+import importlib.util
+import platform as platform_mod
 import re
+import subprocess
+import sys
 from pathlib import Path
 from typing import NamedTuple
 
@@ -57,6 +61,33 @@ ORIGIN_VALUES: tuple[str, ...] = (ORIGIN_SELF, ORIGIN_PRE_MECHANISM, ORIGIN_NEVE
 # 時，既有的 Windows 欄資料**沒有被回溯處理**，只是整欄填 `unrecorded` 了事 ⇒「機制引入前
 # 就存在的量測」與「不存在的量測」變成同一個字。`ORIGIN_FIELD` 之所以列入必備欄位
 # （缺席即 fail-loud），就是要讓**下一次有人加欄位時，既有欄非表態不可**：它無法靠沉默通過。
+
+# ── 本輪 Q-03：三個直譯器＝三個 skip profile，而上面四欄記不到它 ──────────────────
+#
+# 同一棵樹、同一天、四項 env provenance 可以完全相同，而 AutoClaude 的 skipped 差 15 支：
+# `.venv` 4017/160、pyenv-win（每日 nightly 用的那支）4032/145、出廠 cleanvenv 3919/224。
+# 差異來源是**直譯器本身**（pyenv-win 那支裝了 `claude_agent_sdk`，`.venv` 沒有），
+# 而它從來不在記錄裡 ⇒ 兩份不同環境的數字在錨上長得一模一樣，沒有任何東西會說話。
+#
+# 🔴 為何另立一個 tuple、不併進 `ENV_PROVENANCE_FIELDS`：磁碟上兩條錨（darwin／win32）
+# 都是在本欄位存在之前量的。併進去會讓 `validate_state` 的「宣告 self-recorded 卻有欄位
+# 是 unrecorded」那一條對兩條**沒有說謊**的真實錨判紅——它們只是早於這個欄位。而回填一個
+# 猜的值（把今天的直譯器寫在昨天的數字旁邊）就是捏造 provenance，比缺欄更糟。
+LATE_ENV_FIELDS: tuple[str, ...] = ("interpreter", "sdk-extra")
+
+#: 「本錨早於這一欄」的合法值。**與 `UNRECORDED` 刻意不同字**（那個字的二義性正是
+#: DEF-101-756 的根因，不得復發）：`UNRECORDED` ＝量過但環境不可考、要人去查史料；
+#: `PRE_FIELD` ＝量過、環境當時也記了，只是這一格那時還不存在，在該平台重跑一次
+#: `--write --with-slow` 就會自動被真值取代。兩者的處置不同，故不可共用一個字。
+PRE_FIELD = "pre-field"
+
+# 🔴 **兩欄刻意不併進 `PROVENANCE_FIELDS`**（＝`parse_provenance()` 的必備集合）。
+# 這不是把要求放寬，而是一道 Scan-H⑥ 互鎖的解法：那個 tuple 同時被
+# `render_fingerprints()`（以 `provenance[key]` 直接索引）與數支既有測試的**合成 prov dict**
+# （由 `ENV_PROVENANCE_FIELDS ＋ ORIGIN_FIELD` 建出）消費 ⇒ 併進去會讓那些合成輸入
+# 當場 `KeyError`，而那些測試住在本輪不得編輯的檔案裡。
+# 「既有欄非表態不可」這條紀律改由 `late_field_report()` 承擔：它直接讀**真實文件**的
+# 錨行，缺席即 rc 級 fail-loud（注入實測見該函式），而合成輸入不經過它。
 PROVENANCE_FIELDS: tuple[str, ...] = (*ENV_PROVENANCE_FIELDS, ORIGIN_FIELD)
 
 # 平台覆蓋的權威來源。**基線工具不是**——它只知道「這一欄的數字在什麼環境量的」。
@@ -199,6 +230,108 @@ SMOKE_SUMMARY_SPECS: dict[str, _SummarySpec] = {
         head_lines=None,
     ),
 }
+
+
+def docker_state() -> str:
+    """docker daemon 狀態（provenance 用）。停用時 v0.01／v0.30 各 −3，見 §7 容差段。"""
+    try:
+        proc = subprocess.run(["docker", "info"], capture_output=True, timeout=60)
+    except FileNotFoundError:
+        return "absent"
+    except (OSError, subprocess.TimeoutExpired):
+        return "unknown"
+    return "up" if proc.returncode == 0 else "down"
+
+
+def pg_extras_state() -> str:
+    """本直譯器有無 PG extras（provenance 用；`present` 會讓 AutoClaude 計數虛高）。
+
+    刻意在**本行程內**探測而非另開子行程：`_run_autoclaude_pytest()` 用的就是
+    `sys.executable`，兩者必須是同一個 venv 才叫同一件事。
+    """
+    present = [m for m in ("psycopg2", "sqlalchemy") if importlib.util.find_spec(m) is not None]
+    return "present" if present else "absent"
+
+
+def live_late_fields() -> dict[str, str]:
+    """`LATE_ENV_FIELDS` 的現況值。**一律無空白**（錨是單行，空白即欄位邊界）。
+
+    `interpreter` 取「上上層／上層＠版本」而非完整路徑：三個實際會被用到的直譯器
+    （`.venv/Scripts`、`versions/<ver>`＝pyenv-win、`cleanvenv/Scripts`＝出廠環境）
+    在這個粒度下互不相同，而它不含機器專屬的絕對路徑前綴，跨 checkout 仍可比對。
+    `sdk-extra` 是 `claude_agent_sdk` 在不在——本 repo 有兩組測試以它為 skip 條件。
+    """
+    exe = Path(sys.executable)
+    return {
+        "interpreter": f"{exe.parent.parent.name}/{exe.parent.name}@"
+                       f"{platform_mod.python_version()}",
+        "sdk-extra": (
+            "present" if importlib.util.find_spec("claude_agent_sdk") is not None else "absent"
+        ),
+    }
+
+
+def late_field_report(
+    anchor_lines: dict[str, str], labels: dict[str, str], local_key: str | None,
+) -> tuple[list[str], list[str]]:
+    """`LATE_ENV_FIELDS` 的兩層判定：`(rc 級：欄位缺席, 告知級：環境對照)`。
+
+    刻意直接吃**錨行原文**而不吃已解析的 dict：這兩欄的 rc 級判準就是「真實文件的錨上
+    有沒有這一欄」，而唯一能回答它的輸入就是那一行。合成 prov dict 走不到這裡（見
+    `PROVENANCE_FIELDS` 上方那段互鎖說明）。
+    """
+    live = live_late_fields()
+    missing: list[str] = []
+    notices: list[str] = []
+    for key, line in anchor_lines.items():
+        prov = {}
+        for field in LATE_ENV_FIELDS:
+            hits = re.findall(rf"{re.escape(field)}=(\S+)", line)
+            if len(hits) == 1:
+                prov[field] = hits[0]
+            else:
+                missing.append(
+                    f"{labels[key]} 欄的錨缺 `{field}=`（命中 {len(hits)} 次，預期恰 1）"
+                    f"——本欄與 `pgextras` 同級：它決定表② 那一欄的計數在哪個環境量得。"
+                    f"合法值＝現況真值，或 `{PRE_FIELD}`（該錨早於本欄位）。"
+                    f"刪掉它就是讓「哪個直譯器量的」重新變成沒人知道的事"
+                )
+        if key == local_key:
+            notices += late_field_notices(labels[key], prov, live)
+    return missing, notices
+
+
+def late_field_notices(label: str, prov: dict[str, str], live: dict[str, str]) -> list[str]:
+    """把「表② 那一欄是在哪個環境量的、你現在跑的是哪個」講出來（**告知級，不計 rc**）。
+
+    🔴 為何刻意不做成 rc 級（這一條若做錯就是一條清不掉的紅）：回填路徑
+    `--write --with-slow` 在**可 import psycopg2／sqlalchemy 的 venv 上一律 rc=2 拒跑**
+    （出廠環境定義），也就是說錨上被記下來的必然是那支乾淨 venv；而 pre-push 跑
+    `--check-snapshot` 的是開發主樹的 venv（帶 PG extras）。兩者結構上不可能是同一支
+    ⇒ 用相等當判準會在每一次 push 上製造一條**沒有任何合法動作能清掉**的紅
+    （＝本 repo 已付過代價的死鎖形狀）。本函式要治的病是「兩個環境的數字長得一樣而
+    沒有東西會說話」，把它講出來就已經治好了；把它升成阻斷反而換來另一個病。
+
+    rc 級的那一半由**欄位存在性**承擔：兩欄已併入 `PROVENANCE_FIELDS`，缺席或改名
+    即 `parse_provenance()` fail-loud（`--check-snapshot` 當場非零）。
+    """
+    out: list[str] = []
+    for field in LATE_ENV_FIELDS:
+        recorded = prov.get(field, "")
+        if recorded == PRE_FIELD:
+            out.append(
+                f"{label} 欄的 `{field}` 記著 {PRE_FIELD}（該錨早於這一欄；現況量得 "
+                f"{live[field]}）——**不得手填**（把今天的環境寫在昨天的數字旁邊＝捏造 "
+                f"provenance），唯一出路是在該平台重跑 "
+                f"`python tools/sync_onboarding_baselines.py --write --with-slow`"
+            )
+        elif recorded != live[field]:
+            out.append(
+                f"{label} 欄的數字是在 `{field}={recorded}` 量的，你現在跑的是 "
+                f"{live[field]} ⇒ **直接拿本機重跑的計數與表② 相比會有落差，那不是退化**"
+                f"（本輪 Q-03：四項 env provenance 全同、skipped 仍可差 15 支）"
+            )
+    return out
 
 
 def validate_state(label: str, prov: dict[str, str], measured: bool, fix: str) -> str:

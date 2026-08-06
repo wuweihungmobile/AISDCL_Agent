@@ -55,10 +55,21 @@ from tests.helpers.kernel_fixtures import make_service
 # CPU delta=0 確定性死結，非負載慢）。`CLAUDECODE=1` 是 Claude Code 執行環境官方在啟動時
 # 就會設定的環境變數（非行程樹猜測），用它額外 skip 巢狀 session 情境是可靠訊號、非
 # heuristic 賭注——一般 CI runner／非巢狀本機開發環境不受影響（該變數不存在）。
+#
+# 🔴 本輪訂正分類（Rule 12 fail-loud：分類錯的方向是**悲觀**，後果一樣是資訊遺失）。
+# 前一份全庫 skip 盤點把這一批歸為「可辯護的永久不覆蓋」、並寫「在 Claude Code session
+# 內永遠跑不到」。前半句是真的，後半句被推廣成了「永遠跑不到」——而上面那個 `or` 有
+# **兩個**條件：本機 `claude` binary 存在（第一個條件為 False），只有巢狀那個條件成立。
+# 於是在**非**巢狀 session（＝ schtasks 跑的每日 nightly）兩個條件都不成立，這一批會真的
+# 跑。當回合對帳：nightly log 與巢狀 session 同一棵樹 collected 相同，nightly 少了 15 支
+# skip、多了 15 支 passed，且其 `-rs` 清單對本檔零命中 ⇒ 它們跑了而且綠。
+# 代價是那條**真的可用的配方**從未進過任何文件；reason 因此改為寫得出配方。
 requires_claude_cli = pytest.mark.skipif(
     shutil.which("claude") is None or os.environ.get("CLAUDECODE") == "1",
-    reason="需要 claude CLI binary 且非巢狀 Claude Code session（CLAUDECODE=1 時真實 spawn 會"
-    "死結，見 DEF-101-089）；CI 無 claude 或本機巢狀 session → 環境前提 skip",
+    reason="【未啟用，非缺件】需要 claude CLI binary 且非巢狀 Claude Code session"
+    "（CLAUDECODE=1 時真實 spawn 會死結，見 DEF-101-089）。跑法：在**非** Claude Code "
+    "session 的 PowerShell 執行 `python -m pytest tests/test_gap014_020.py`"
+    "（每日 nightly 排程即為此環境，實測會真的跑）",
 )
 
 

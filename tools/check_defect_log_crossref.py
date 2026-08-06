@@ -1147,6 +1147,10 @@ _GOVERNANCE_DOCS = (
     # 本輪掃描發現清單（承擔同一個資格：複審者要逐條重驗就得讀完它 ⇒ 受體積守門；它逐筆
     # 寫出「某缺陷現居何處」的座標宣稱 ⇒ 受指針稽核）。即刻登記，不等下一輪。
     _REPO_ROOT / "docs" / "06_quality" / "CrossPlatform_R76_Scan_Findings.md",
+    # 本輪的兩份：triage（去重分級與跨維形態）與 fix plan（修復包切分與驗收指令）。
+    # 同一個資格——複審者要逐條重驗就得讀完，且兩者都寫出缺陷座標宣稱。即刻登記。
+    _REPO_ROOT / "docs" / "06_quality" / "CrossPlatform_R77_Triage.md",
+    _REPO_ROOT / "docs" / "06_quality" / "CrossPlatform_R77_Fix_Plan.md",
 )
 
 # 姊妹治理文件的命名慣例：`docs/06_quality/CrossPlatform_*.md`。這**不是**把具名常數

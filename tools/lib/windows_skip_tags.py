@@ -72,6 +72,7 @@ from skip_static_scan import (  # noqa: E402
 )
 from skip_tag_policy import (  # noqa: E402
     _CACHE_DIR_NAMES,  # noqa: F401  ← 再匯出（既有引用：test_ps_engine_ssot 引為先例）
+    _EXEMPT_HANDOVER_RE,  # noqa: F401  ← 再匯出（本輪：豁免格式面的判準本體）
     _POSIX_TAG_RATCHET,  # noqa: F401  ← 再匯出
     _SITE_CLASS_CENSUS,  # noqa: F401  ← 再匯出
     _TREE_FILE_FLOORS,  # noqa: F401  ← 再匯出
@@ -85,9 +86,11 @@ from skip_tag_policy import (  # noqa: E402
     TOOL_ABSENCE_SKIP_TAG,
     TREE_FLOOR_RATIO,  # noqa: F401  ← 再匯出
     WINDOWS_NATIVE_SKIP_TAG,
+    exemption_problems,
     posix_tag_ratchet_problems,  # noqa: F401  ← 再匯出
     site_class_census_problems,
     tree_floor_problems,
+    unregistered_tag_problems,
 )
 
 # 本模組住 `<repo>/tools/lib/`：parents[1]＝tools、parents[2]＝repo 根。
@@ -122,6 +125,37 @@ def untagged_non_windows_skip_decorators(sources: Mapping[str, str]):
 
 def untagged_tool_absence_sites(sources: Mapping[str, str]):
     return _untagged_tool_absence_sites(sources, tag=TOOL_ABSENCE_SKIP_TAG)
+
+
+def report_windows_skip_tag_exemption_problems(result) -> list[str]:
+    """具名豁免表的自檢（本輪；回傳非空 ⇒ 呼叫端須讓 rc 為 1）。
+
+    stale 那一面的資料由**同一支偵測器**在「豁免表當成空的」條件下重跑取得——
+    不另寫一份等價實作，否則證明的只是我重寫的那份是對的。
+    它在 Windows 上整組早退（見 `untagged_windows_like_skips`），故那一面只在
+    非 Windows 上啟用；格式面不分平台。
+    """
+    on_windows = os.name == "nt"
+    flagged = None
+    if not on_windows:
+        flagged = {
+            test_id: reason
+            for test_id, _hit, reason in _untagged_windows_like_skips(
+                result, on_windows=False, hints=_WINDOWS_LIKE_SKIP_HINTS,
+                exempt={}, tag=WINDOWS_NATIVE_SKIP_TAG,
+            )
+        }
+    problems = exemption_problems(_WINDOWS_SKIP_TAG_EXEMPT,
+                                  flagged_without_exempt=flagged)
+    if problems:
+        print(
+            f"❌ 具名豁免表 `_WINDOWS_SKIP_TAG_EXEMPT` 有 {len(problems)} 筆問題"
+            "——沒有 stale 自檢的豁免表是只進不出的：",
+            file=sys.stderr,
+        )
+        for msg in problems:
+            print(f"   - {msg}", file=sys.stderr)
+    return problems
 
 
 def _is_repo_main_tests_dir(tests_dir: Path) -> bool:
@@ -174,9 +208,14 @@ def report_untagged_windows_skip_decorators(tests_dir: Path, pattern: str) -> li
     ratchet = posix_tag_ratchet_problems(posix_counts) if repo_mode else []
     floors = tree_floor_problems(file_counts) if repo_mode else []
     census_problems = site_class_census_problems(census) if repo_mode else []
+    # 本輪：標籤詞彙表的成員檢查。射程與上面三道一致（只在 repo 模式），資料取自
+    # **同一批** sources 抽出的字面 reason，不另掃一次磁碟。
+    vocab = unregistered_tag_problems(
+        [site.reason for site in skip_decorator_sites(sources)]) if repo_mode else []
     problems += [f"反方向標籤棘輪：{msg}" for msg in ratchet]
     problems += [f"掃描面下限：{msg}" for msg in floors]
     problems += [f"站點分類普查：{msg}" for msg in census_problems]
+    problems += [f"標籤詞彙表：{msg}" for msg in vocab]
     if not problems:
         return []
     if census_problems:
@@ -196,6 +235,15 @@ def report_untagged_windows_skip_decorators(tests_dir: Path, pattern: str) -> li
     if floors:
         for msg in floors:
             print(f"❌ 掃描面下限：{msg}", file=sys.stderr)
+    if vocab:
+        print(
+            f"❌ 標籤詞彙表 {len(vocab)} 筆——`ALL_SKIP_TAGS` 此前只被用來「比對已知"
+            f"標籤」，沒有任何機械物反向問「這個看起來像標籤的字面有沒有登記過」，"
+            f"於是**發明新標籤是零成本的**（人看起來有標籤、機器看起來沒標籤）：",
+            file=sys.stderr,
+        )
+        for msg in vocab:
+            print(f"   - {msg}", file=sys.stderr)
     if ratchet:
         print(
             f"❌ 反方向（POSIX 側）標籤棘輪 {len(ratchet)} 筆——`{WINDOWS_NATIVE_SKIP_TAG}` "
@@ -234,12 +282,15 @@ __all__ = [
     "ALL_SKIP_TAGS", "MAC_NATIVE_SKIP_TAG", "NON_WINDOWS_SKIP_TAGS",
     "POSIX_NATIVE_SKIP_TAG", "SITE_CLASSES", "SkipSite", "TOOL_ABSENCE_SKIP_TAG",
     "WINDOWS_NATIVE_SKIP_TAG", "all_skips", "is_tool_probe",
-    "posix_tag_ratchet_problems", "read_test_sources", "report_all_skips",
+    "exemption_problems", "posix_tag_ratchet_problems",
+    "read_test_sources", "report_all_skips",
     "report_untagged_windows_like_skips", "report_untagged_windows_skip_decorators",
-    "report_windows_native_skips", "scan_tree_sources", "site_class",
+    "report_windows_native_skips", "report_windows_skip_tag_exemption_problems",
+    "scan_tree_sources", "site_class",
     "site_class_census_problems", "site_class_counts", "skip_decorator_sites",
     "skipped_platform", "tree_floor_problems", "unclassified_sites",
     "untagged_non_windows_skip_decorators", "untagged_tool_absence_sites",
     "untagged_windows_like_skips", "untagged_windows_skip_decorators",
-    "unregistered_windows_like_predicates", "windows_native_skips",
+    "unregistered_tag_problems", "unregistered_windows_like_predicates",
+    "windows_native_skips",
 ]

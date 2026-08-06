@@ -17,6 +17,29 @@ macOS/Linux 對等：tools/run_act.sh
 nightly/排程 job（mutation / pg-e2e / perf）以 `if: schedule` 排除，push 事件不會觸發，
 本地請改用 tools/run_local_nightly.ps1。
 
+🔴 射程（本輪實測後補上；先前這份說明讀起來像「act ＝ 地端跑真 CI」，沒有任何限定詞）：
+  上面那四個 job 只是 autoclaude-ci.yml 一支的內容。monorepo 根層現有 11 支 workflow
+  共 25 個 job——`-List` 印的 act 表只有 9 個，其餘 16 個（含 root-infra-ci.yml 這支
+  承載根層全部守門的、以及兩支 compat-CI 的 nightly 告警鏈）不在預設射程內。核心
+  run_act_core.py 已有 `--workflow <路徑>` 可指到任何一支，但本薄殼**尚未**轉這個旗標：
+  它的正規化內容 hash 釘在 tools/check_wrapper_thinness.py，補參數會改 hash，而該檔
+  本輪由另一個修復包擁有 ⇒ 補參數與更新釘選必須同一個 commit，不能分兩包做。
+
+  在補上之前，Windows 側指定 workflow／事件的唯一入口是**環境變數**（兩平台皆生效）：
+    $env:RUN_ACT_WORKFLOW = '.github/workflows/root-infra-ci.yml'
+    powershell -ExecutionPolicy Bypass -File AutoClaude/tools/run_act.ps1 -Job root-infra
+  或直接呼叫核心（不經薄殼，無此限制）：
+    python AutoClaude/tools/run_act_core.py --workflow <路徑> --job <job>
+
+🔴 事件（本輪實測踩到的假綠）：本殼與核心一律以 `push` 事件呼叫 act，而根層 11 支
+  workflow 裡有 5 支的 `on:` **不含 push**（arch-fitness／artifact-cleanup／drift-daily／
+  fsm-chaos-nightly／pg-e2e-on-label）。act 對事件對不上的處置是「不跑任何 job 然後回
+  rc=0」——沒有紅字，只是什麼都沒發生。核心的 preflight 現在會把它擋成 rc=1 並指路；
+  要真的跑那 5 支，請設 $env:RUN_ACT_EVENT（例 'pull_request'）或直接用核心的 --event。
+
+  `-List` 在未指定 workflow 時會在 act 那張表之後另印一張**全庫 job 盤點**，逐行標出
+  每個 job 在本機 act 有無通道——四個 non-ubuntu 的 job 結構上零通道（見盤點輸出）。
+
 .PARAMETER Job
 只跑單一 job（例：test）。省略則跑整份 push 圖（與 GitHub 在 push 時等價）。
 

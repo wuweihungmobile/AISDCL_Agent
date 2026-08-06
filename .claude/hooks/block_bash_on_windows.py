@@ -26,6 +26,25 @@ R71（Windows 真機輪）逐筆歸因 8 筆操作失誤，**5 筆源於同時�
   （本 repo 雙平台對稱紀律：單平台規則不可無條件套到另一平台，DEF-101-766 即此類教訓）。
 · 任何非預期例外 → exit 0（fail-open）。理由見 .claude/settings.json description 記載的
   P0：hook 誤觸 PreToolUse deny 會把**所有**工具硬鎖死，守衛自身絕不可成為那種故障源。
+· payload 解析不出工具名（壞 JSON／空 stdin／缺 tool_name）→ exit 2（fail-closed）。
+  這個方向對**本檔**是對的，前提是下一段那條配套約束成立。
+
+🔴 本輪訂正：fail-closed 必須配窄 matcher（R77-08）
+---------------------------------------------------
+上面那條 fail-closed 分支的爆炸半徑，取決於**註冊面的 matcher 圈了哪些工具**。
+本檔此前的 matcher 是兩個工具的交替（為滿足另一支測試的全稱約定而放寬），
+於是一份解析不出工具名的 payload 會連**子代理派工**一起硬擋，而使用者拿到的
+訊息指向一個與那次呼叫無關的原因。同一時間，註冊面的說明文字把這個組合描述成
+不會發生——那句描述已被本輪七輸入實測推翻，故一併改寫（措辭刻意不重述它，
+樹裡不留假句子）。
+
+處置是**讓兩件事各自回到它真正要的東西**，而不是拆掉 fail-closed：
+  · matcher 收窄到本守衛自己那一個工具 ⇒ 退化 payload 的代價回到「擋掉一次 Bash」，
+    那正是本守衛的職責範圍；
+  · 那條全稱約定改成只約束它真正需要的載體（子代理注入走的那一支 router hook）。
+「rc==2 的守衛必須配窄 matcher」現在由
+tools/tests/test_check_hooks_liveness.py 機械釘住——把 matcher 再放寬回去即紅，
+不靠任何人記得本段文字。
 
 繞道
 ----
@@ -102,8 +121,18 @@ def main() -> int:
         if os.name != "nt":
             return 0  # mac/Linux 上 bash 是正確載具，不誤傷
 
+        # 走 **bytes 端**再以 UTF-8+replace 解碼，不用 `json.load(sys.stdin)`：
+        # zh-TW Windows 的 pipe 預設編碼是 cp950，文字端 read 遇到含中文的 UTF-8
+        # payload 會拋 UnicodeDecodeError。本檔的 fail-closed 讓那個例外表現成
+        # 「阻斷」而非崩潰，所以它不會被看見——一支**阻斷級**守衛靜默改變行為，
+        # 比崩潰更難察覺。三支姊妹 hook 都早有這道防線，唯獨 fail-closed 的這支沒有。
         try:
-            payload = json.load(sys.stdin)
+            buffer = getattr(sys.stdin, "buffer", None)
+            raw = (buffer.read().decode("utf-8", "replace") if buffer is not None
+                   else sys.stdin.read())
+            payload = json.loads((raw or "").strip() or "{}")
+            if not isinstance(payload, dict):
+                payload = {}
         except Exception:
             payload = {}
 

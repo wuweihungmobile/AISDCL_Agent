@@ -149,7 +149,6 @@ from __future__ import annotations
 import argparse
 import datetime
 import hashlib
-import importlib.util
 import json
 import platform as platform_mod
 import re
@@ -925,6 +924,14 @@ def _stale_summary(text: str, platform_key: str, names: list[str], live: dict[st
     )
 
 
+def _late_fields(text: str, platform_key: str | None) -> tuple[list[str], list[str]]:
+    """late provenance 兩欄：`(缺席＝rc 級, 環境對照＝告知級)`。判準與 WHY 全在 `_BO`。"""
+    return _BO.late_field_report(
+        {k: anchored_line(text, fingerprint_anchor(k)) for k in _PLATFORM_COLUMN_LABELS},
+        _PLATFORM_COLUMN_LABELS, platform_key,
+    )
+
+
 def snapshot_report(
     text: str, platform_key: str | None, live: dict[str, str] | None = None
 ) -> tuple[list[str], list[str]]:
@@ -992,32 +999,19 @@ def render_fingerprints(
         new_line = re.sub(
             rf"{re.escape(name)}=[0-9a-zA-Z]+", f"{name}={live[name]}", new_line, count=1
         )
-    for key in _PROVENANCE_FIELDS:
-        new_line = re.sub(
-            rf"{re.escape(key)}=\S+", f"{key}={provenance[key]}", new_line, count=1
-        )
+    # late 兩欄不在 `_PROVENANCE_FIELDS` 內（互鎖說明見 `_BO`）⇒ 這裡以 `.get()` 容忍缺席：
+    # 呼叫端若沒給（既有測試的合成 prov dict 就沒有），錨上那一欄保持原值不動。
+    for key in (*_PROVENANCE_FIELDS, *_BO.LATE_ENV_FIELDS):
+        if (value := provenance.get(key)) is None:
+            continue
+        new_line = re.sub(rf"{re.escape(key)}=\S+", f"{key}={value}", new_line, count=1)
     return text.replace(line, new_line, 1)
 
 
-def _docker_state() -> str:
-    """docker daemon 狀態（provenance 用）。停用時 v0.01／v0.30 各 −3，見 §7 容差段。"""
-    try:
-        proc = subprocess.run(["docker", "info"], capture_output=True, timeout=60)
-    except FileNotFoundError:
-        return "absent"
-    except (OSError, subprocess.TimeoutExpired):
-        return "unknown"
-    return "up" if proc.returncode == 0 else "down"
-
-
-def pg_extras_state() -> str:
-    """本直譯器有無 PG extras（provenance 用；`present` 會讓 AutoClaude 計數虛高）。
-
-    刻意在**本行程內**探測而非另開子行程：`_run_autoclaude_pytest()` 用的就是
-    `sys.executable`，兩者必須是同一個 venv 才叫同一件事。
-    """
-    present = [m for m in ("psycopg2", "sqlalchemy") if importlib.util.find_spec(m) is not None]
-    return "present" if present else "absent"
+# 兩支環境探針的本體依 `SPECIAL_FILES` 棘輪自訂的解鎖程序搬進 `tools/lib/baseline_origin.py`
+# （該檔就是 provenance 的家）。此處保留**模組級別名**而非改呼叫端寫 `_BO.x()`：既有的
+# 沙箱 fixture 以 `getattr/setattr` 對這兩個名字做 monkeypatch，改成屬性存取會讓那層失效。
+_docker_state, pg_extras_state = _BO.docker_state, _BO.pg_extras_state
 
 
 def measure_provenance() -> dict[str, str]:
@@ -1027,6 +1021,7 @@ def measure_provenance() -> dict[str, str]:
         "host": f"{platform_mod.system()}-{platform_mod.release()}-{platform_mod.machine()}",
         "docker": _docker_state(),
         "pgextras": pg_extras_state(),
+        **_BO.live_late_fields(),   # 直譯器／sdk extra（本輪 Q-03；WHY 見 `_BO`）
         # 實跑量測 ⇒ 必為 self-recorded；另兩態只可能由人依史料填（機器不替歷史作證）。
         _ORIGIN_FIELD: _ORIGIN_SELF,
     }
@@ -1355,13 +1350,16 @@ def main(argv: list[str] | None = None) -> int:
         # stderr 的 `⚠️`。理由見 `_stale_summary` 的 docstring——它在單機交替工作流下
         # **結構上恆亮**，掛在警告頻道只會訓練讀者略過這一段，連帶略過同段真正會紅的
         # 本機平台欄（本 repo「常亮的警告＝背景噪音」既定紀律，tools/run_root_unittests.py）。
-        for n in notices:
+        late_missing, late_info = _late_fields(text, audit_platform)
+        for n in notices + late_info:
             print(f"ℹ️ {n}")
-        rc = 1 if problems else 0
+        rc = 1 if problems or late_missing else 0
         if problems:
             print("❌ ONBOARDING.md §7 表② presumed stale：", file=sys.stderr)
             for p in problems:
                 print(f"  - {p}", file=sys.stderr)
+        for m in late_missing:
+            print(f"❌ {m}", file=sys.stderr)
         scope = (
             f"{_PLATFORM_COLUMN_LABELS[audit_platform]} 欄"
             if audit_platform

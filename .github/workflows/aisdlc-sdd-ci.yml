@@ -9,7 +9,22 @@
 #   - push 只在 main（驗證主線）；PR 涵蓋所有分支，避免 push+PR 雙跑。
 #   - 不推送、不寫回 repo（純驗證），故不需 contents:write，也無推送競爭。
 #   - artifact 上傳 continue-on-error（observability-only，配額耗盡不判紅）。
-#   - chaos / 五軌完整 TLC 仍留 nightly（重；不上 PR 熱路徑）。
+#   - chaos 留 nightly（aisdlc-sdd-fsm-chaos-nightly.yml；重，不上 PR 熱路徑）。
+#   - 🔴 TLC-NO-AUTOMATED-CHANNEL（R77-38 訂正）：五軌完整 TLA+/TLC **目前沒有任何
+#     自動通道**。本行原文把它與 chaos 併寫成同一句「仍留 nightly」，而實查三個方向
+#     全部零命中：`SDD_RUN_TLC`／`--full-tlc` 在根層 workflow 全體、以及兩支
+#     run_local_nightly（.ps1／.sh）內皆不出現；ci-gate.sh 自己也印「跳過完整 TLC」。
+#     實際情形是：每一個通道、每一次執行，兩棵 SDD 樹各 4 支 TLC 測試一律 skip。
+#     要跑只能人工 `bash scripts/ci-gate.sh --full-tlc`（需 Java ＋ tla2tools.jar；
+#     R76 實測整套 333.01s、96 passed / skipped=0 ⇒ **成本已知、通道不存在**）。
+#     刻意不在本輪補通道：新增雲端排程負載在 Actions 帳務停擺期間是負收益，且要引入
+#     Java 外部相依——先讓這行說實話，通道另案。
+#     誠實劃界（不是零防護）：離線可達性 BFS 不變量每次 pytest 都跑，缺的是完整 TLC
+#     那一層；而能抓到 `_HAPPY_PATH` ↔ `formal/SDD_FSM.tla` 漂移的那支，正是被 skip 的
+#     其中之一 ⇒ 根 CLAUDE.md 那條「改 _HAPPY_PATH 必須重跑 TLC」的紀律目前零機械強制。
+#     機械物：tools/tests/test_workflow_schedule_sync.py::TestFullTlcChannelDisclosure
+#     ——它**雙向**綁住：通道真的建起來的那天，這段揭露必須同時刪掉（否則轉紅），
+#     所以樹裡不會留下一句方向相反的舊話。
 #
 # monorepo 根層接線（2026-07-10）：本 workflow 自 AISDLC_SDD/.github/workflows/ci.yml
 # 遷入根層 .github/workflows/（GitHub Actions 只讀 repo 根層）。run step 以 defaults
@@ -68,8 +83,14 @@ on:
       - "AutoClaude/autoclaude/utils/logger.py"
   workflow_dispatch:
 
+# 🔴 group 必須含 `github.event_name`（本輪 R77-55）：本 workflow 由 push(main)＋
+# pull_request＋workflow_dispatch 三種事件觸發，而 `cancel-in-progress: true` 的語意是
+# 「同 group 新 run 取消舊 run」。group 只綁 `github.ref` 時，在 main 上手動 dispatch
+# 一次就會**取消掉正在跑的 push 驗證 run**，而被取消的 run 在 GitHub UI 上不是紅色
+# ——「沒跑完」與「跑過且通過」在結論欄長得幾乎一樣。這是 R7／R15／R23 已在
+# autoclaude-ci／兩支 compat-CI 上各修過一次的同一個缺陷，這裡是它的殘留站點。
 concurrency:
-  group: aisdlc-sdd-ci-${{ github.ref }}
+  group: aisdlc-sdd-ci-${{ github.ref }}-${{ github.event_name }}
   cancel-in-progress: true
 
 # 純驗證、不寫回 repo → 最小權限唯讀（佐證無推送競爭）。

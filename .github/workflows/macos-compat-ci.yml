@@ -178,6 +178,13 @@ on:
       - "tools/_cli_flags.py"
       - "tools/check_scheduled_task_drift.py"
       - "tools/scheduled_task_expectations.json"
+      # 本輪：tools/probe/ 是量測配方的唯一可執行家（M6），其下的 session 逐字稿稽核器
+      # 被 tools/tests/ 的 hook 存活性鎖消費，故只改該目錄時那道鎖也必須跑。由
+      # test_ci_paths_cover_root_consumers.py 當場攔下並要求雙邊補列（DEF-101-042 同構）。
+      # 🔴 這裡刻意不寫該腳本的檔名字面：另一道鎖以「本檔是否提及該檔名」判斷它有沒有被
+      # 接成閘門步驟（逐字稿是本機資料，接成閘門會在別台機器恆紅）——提及與登記在機器眼中
+      # 同形，寫了就會被判成違規。paths 觸發面與執行步驟是兩件事，但判準分不出來。
+      - "tools/probe/**"
       - "tools/bootstrap_core.py"
       - "AutoClaude/tools/run_act_core.py"
       - "AutoClaude/tools/git-hooks/pre-commit"
@@ -385,6 +392,13 @@ on:
       - "tools/_cli_flags.py"
       - "tools/check_scheduled_task_drift.py"
       - "tools/scheduled_task_expectations.json"
+      # 本輪：tools/probe/ 是量測配方的唯一可執行家（M6），其下的 session 逐字稿稽核器
+      # 被 tools/tests/ 的 hook 存活性鎖消費，故只改該目錄時那道鎖也必須跑。由
+      # test_ci_paths_cover_root_consumers.py 當場攔下並要求雙邊補列（DEF-101-042 同構）。
+      # 🔴 這裡刻意不寫該腳本的檔名字面：另一道鎖以「本檔是否提及該檔名」判斷它有沒有被
+      # 接成閘門步驟（逐字稿是本機資料，接成閘門會在別台機器恆紅）——提及與登記在機器眼中
+      # 同形，寫了就會被判成違規。paths 觸發面與執行步驟是兩件事，但判準分不出來。
+      - "tools/probe/**"
       - "tools/bootstrap_core.py"
       - "AutoClaude/tools/run_act_core.py"
       - "AutoClaude/tools/git-hooks/pre-commit"
@@ -461,7 +475,13 @@ on:
   workflow_dispatch:
     inputs:
       simulate_nightly_failure:
-        description: "手動驗證 macos-nightly-alert 紅色路徑：覆寫視同 nightly-full 失敗（R3 QA 發現：至今連 green path 都從未真正觸發過，不影響 nightly-full 本身執行結果）"
+        # 🔴 R77-20 訂正：本欄原先夾帶一句「覆蓋度快照」，宣稱這條 alert 通道連綠路徑
+        # 都還沒被真正觸發過。後續量測推翻了它——綠路徑（自動關單）已在一次真實排程
+        # run 上執行成功。仍未被驗證的是**紅路徑**，而本輸入自建立起 dispatch 次數為 0。
+        # 教訓與 root-infra-ci 第 15 道的豁免理由同型：量測快照不該長在一個會被人讀來
+        # 判斷「還缺什麼覆蓋」的欄位裡，它從被推翻的那一刻起就開始說謊。故本欄改為只
+        # 描述**這個開關做什麼**，覆蓋度一律現查（`gh run list --event workflow_dispatch`）。
+        description: "手動驗證 macos-nightly-alert 紅色路徑：覆寫視同 nightly-full 失敗（不影響 nightly-full 本身執行結果）。本開關的實際使用次數請現查，不要讀本欄的散文"
         type: boolean
         default: false
 

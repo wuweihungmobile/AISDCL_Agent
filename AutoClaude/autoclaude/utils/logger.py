@@ -67,9 +67,19 @@ def setup_logger(log_dir: str = "logs", level: int = logging.DEBUG) -> logging.L
 
 # DEF-101（Mac/Windows 相容性 R16）：raw log 檔名由 playbook 作者自訂的
 # task.step_id 組成（見 pty_executor.py / prompt_dispatcher.py），在 macOS/Linux
-# 上檔名規則寬鬆（僅 / 與 NUL 不合法）完全合法；同一字串若含 Windows 禁用字元
-# （< > : " | ? * \）、以空白/句點結尾、或恰為保留裝置名（CON/PRN/...），Windows
-# 上 open() 會拋出未捕捉的 OSError，導致該 step 每次重試都對同一個壞檔名再炸一次。
+# 上檔名規則寬鬆（僅 / 與 NUL 不合法）完全合法；同一字串在 Windows 上則可能出事。
+# 🔴 R77-51 訂正（Win 11 Pro 26200 真機，當回合實測）：本段原先把**三類**形態一起歸因
+# 到「open() 會拋 OSError」，實測只有第一類成立，另兩類的立案理由不同——
+#   ① 禁用字元（< > : " | ? * \）：`open()` 真的拋 OSError（八個字元逐一實測，
+#      errno 22／2）。這一類的原歸因正確：不淨化就是每次重試對同一個壞檔名再炸一次。
+#   ② 保留裝置名（CON／PRN／NUL／COM1／CONIN$ …）：`open()` **不拋例外**，檔案照樣落地
+#      為真檔案、`os.listdir` 命中。淨化它的理由不是本行程會不會炸，而是這種檔名**進不了
+#      git**（`core.protectNTFS` REJECT），而 log／escalation dump 是會被收集、附進
+#      artifact 與帳本證據檔的產物；一旦入庫，Windows clone 會 rc=128、工作樹全空。
+#   ③ 以空白／句點結尾：`open()` 同樣不拋例外，但 Win32 會**靜默剝掉**尾端——實測
+#      `trail.txt.` 落地成 `trail.txt`、`trail.` 落地成 `trail`，於是「寫出去的檔名」與
+#      「記在 log／帳本裡的檔名」對不上，事後照名字找不到檔。
+# 三類的危害不同、但淨化動作相同，故本函式一次處理；**不得**因為②③不拋例外就拿掉淨化。
 #
 # 本檔與 tools/check_ntfs_paths.py（及 tools/git-hooks/pre-commit 的
 # _ntfs_seg_bad()）三處各自獨立維護同一份禁用字元/保留裝置名判準（R33
@@ -85,8 +95,11 @@ def setup_logger(log_dir: str = "logs", level: int = logging.DEBUG) -> logging.L
 # `_sanitize_log_filename`，理由同上——同一規則被多處獨立實作正是本缺陷類別
 # （DEF-101-219／DEF-101-295）反覆復發的根因。
 #
-# R60：`CONIN$`／`CONOUT$` 補齊（四處同修）。判準的權威模型是 git for Windows 的
-# `core.protectNTFS`——實測 `CONIN$.log`／`CONOUT$.txt`（含大小寫、多重副檔名、尾隨空白
+# R60：`CONIN$`／`CONOUT$` 補齊（四處同修）。納入的**證據來源**是 git for Windows 的
+# `core.protectNTFS`（只是證據來源，不是本判準要對齊的模型——R77-51 以外接 oracle 逐名
+# 對拍後證實兩者在四個樣本上判決相反，完整實測與裁決見 tools/check_ntfs_paths.py 的
+# `_RESERVED_RE` 上方 R77-51 段落，本檔不複製第二份證據）
+# ——實測 `CONIN$.log`／`CONOUT$.txt`（含大小寫、多重副檔名、尾隨空白
 # 變體）皆被判 Invalid path，含此類檔名的 repo 在 Windows 上 clone 直接 rc=128、工作樹
 # 全空；`CLOCK$` 實測 ACCEPT 故刻意不納入。前導空白（' CON.txt'）則實測 git 與 Win32 皆
 # 視為正常檔名，四處一致刻意不當成保留名逃逸處理（完整實測見 tools/check_ntfs_paths.py
@@ -98,10 +111,13 @@ def setup_logger(log_dir: str = "logs", level: int = logging.DEBUG) -> logging.L
 #
 # R68（四處同修）：追加 Microsoft《Naming Files, Paths, and Namespaces》保留名清單明列的
 # 上標變體 `COM¹ COM² COM³ LPT¹ LPT² LPT³`（與 ASCII 數字版並列；`unicodedata.normalize
-# ("NFKC","COM¹")=="COM1"` 佐證兩者在相容性分解下同值）。🔴 **證據等級＝官方文件＋靜態
-# 分析，非 Windows 真機實測**——本輪無 Windows 真機，未跑 core.protectNTFS／Win32 對照
-# （CONIN$／CLOCK$ 當初是實測後才分別納入／排除）。取捨刻意選「擋」：誤擋只多一個 `_`
-# 前綴，漏擋則整個 clone 壞掉。未來真機實測到 ACCEPT 時四處一併移除並註記「已實測不納入」。
+# ("NFKC","COM¹")=="COM1"` 佐證兩者在相容性分解下同值）。取捨刻意選「擋」：誤擋只多一個
+# `_` 前綴，漏擋則整個 clone 壞掉。
+# 🔴 R77-51 訂正：R68 當時的證據等級是「官方文件＋靜態分析」並附了一條「真機測到兩個
+# oracle 都接受就四處移除」的指示——本輪已在 Win 11 Pro 26200 真機補跑，該條件成立，
+# 而它導出的動作**被掌舵者明文推翻**：上標變體與 COM0 的過攔一律保留（過攔是安全方向），
+# 只修失實的宣稱。實測數據與裁決住 tools/check_ntfs_paths.py 的 `_RESERVED_RE` 上方
+# R77-51 段落（單一份，本檔不複製）；外接 oracle 鎖見同段指名的測試。
 _WIN_FORBIDDEN_CHARS = frozenset('<>:"|?*\\')
 _WIN_RESERVED_NAME_RE = re.compile(
     r"^(CON|PRN|AUX|NUL|COM[0-9]|LPT[0-9]|CONIN\$|CONOUT\$|COM[¹²³]|LPT[¹²³])$", re.IGNORECASE

@@ -190,6 +190,35 @@
 # 刻意不設 $ErrorActionPreference = 'Stop'——受測腳本自帶 exit 慣例，用
 # $LASTEXITCODE 斷言比例外傳播可預期（見 windows-compat-ci.yml 同款手法註解）。
 
+# ── CLI 契約（DEF-101-810 同型；本檔是 smoke 家族裡零登記的那一支）─────────────
+# 對等物 tools/macos_smoke_local.sh 自 R69（DEF-101-702）起就有 _usage()＋for/case
+# 關卡，本檔全檔零 argv 處理 ⇒ `--help` 與任何打錯的旗標都被靜默丟棄、整套 smoke
+# 照跑到底。本檔的副作用比 .sh 側更重：下方取證層會**先把上一輪的
+# windows_smoke_latest.log 搬成 dated 檔**再開新 transcript，所以一次誤打旗標就
+# 會把上一輪的心跳指標推走。關卡因此必須排在取證層與兩道前置守門之前。
+# 關卡形狀與 .sh 側同構：-Help（PowerShell 對開關做前綴比對 ⇒ --help／-h 同樣命中）
+# → rc=0 零步驟；其餘引數（未綁定者一律落進 $args）→ 逐字指名 rc=2；無引數 → 照跑。
+param([switch]$Help)
+
+$SMOKE_USAGE = @'
+USAGE: powershell -NoProfile -ExecutionPolicy Bypass -File tools\windows_smoke_local.ps1 [-Help]
+
+  (no args)  跑完整 smoke（涵蓋範圍固定，見檔頭「涵蓋」段；預期 PASS 總數 = 12）
+  -Help      印本說明後結束，不執行任何步驟（--help、-h 亦可）
+
+本腳本不接受其他任何引數。載具必須是原生 Windows PowerShell 5.1（見檔頭「載具要求」段）。
+Exit：0＝全部 PASS；1＝任一 FAIL 或前置守門失敗；2＝用法錯誤。
+'@
+if ($Help) {
+  Write-Output $SMOKE_USAGE
+  exit 0
+}
+if ($args.Count -gt 0) {
+  [Console]::Error.WriteLine("UNKNOWN-ARG 未知或多餘的引數：" + ($args -join ' '))
+  [Console]::Error.WriteLine($SMOKE_USAGE)
+  exit 2
+}
+
 $ScriptDir = $PSScriptRoot
 $RepoRoot = [System.IO.Path]::GetFullPath((Join-Path $ScriptDir '..'))
 

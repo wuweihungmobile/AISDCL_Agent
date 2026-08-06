@@ -4,7 +4,9 @@
 
 .DESCRIPTION
 取代 GitHub Actions nightly cron job，於本地依序執行（7 stage）：
-  - local_ci_gate 全套（Stage L）          — R9：push 空窗期每日全套訊號
+  - local_ci_gate 全套 + 根層 unittest（Stage L）
+                                          — R9：push 空窗期每日全套訊號；本輪起同 stage
+                                            內另跑 <monorepo>/tools/run_root_unittests.py
   - mutation-test (Docker / Linux mutmut) — 觀察期 #1（Docker 解 Windows 限制）
   - pg-e2e-nightly + AC4 collector        — 觀察期 #2（R9 含 PG contract；R10 recall rc [ref]）
   - perf-baseline-nightly                  — 補強信號
@@ -35,22 +37,26 @@
      心跳查詢走
      Get-ScheduledTaskInfo，該安裝腳本的 -Status 對任務缺席回 exit 1。
      **「本檔零呼叫」這半句仍為真且刻意保留**：兩者解耦，smoke 的心跳由它自己的
-     排程任務負責，不寄生在本檔上——理由見下方「刻意只補帳目、不補 stage」段
-     （動 stage 會連帶動到 summary 契約與 dev_start.py 的跨檔字面鎖）。
-  2. **根層 unittest**：mac 的 [2/4] 每日跑 tools/run_root_unittests.py；本檔不跑。
-     本檔的 local-ci-gate stage 走 AutoClaude/tools/local_ci_gate.py，範圍是
-     pytest + check_loc_budget + lint-imports（**皆 AutoClaude scope**），不含根層 tools/tests。
+     排程任務負責，不寄生在本檔上——理由見下方第 3 項後那段「為何補的是既有 stage
+     內的第二道檢查」（動 stage 會連帶動到 summary 契約與 dev_start.py 的跨檔字面鎖）。
+  2. **根層 unittest**：mac 的 [2/4] 每日跑 tools/run_root_unittests.py。
+     ✅ **本輪起本檔亦跑**（R77-04）：掛在 Stage L 內（見該 stage 上方註解），與
+     local_ci_gate.ps1 並列為該 stage 的第二道檢查，兩道 rc 各自留證、合併時真失敗
+     優先於 WARN。本項自此**不再是缺口**。
+     本檔的 local-ci-gate stage 另跑 AutoClaude/tools/local_ci_gate.ps1，範圍是
+     pytest + check_loc_budget + lint-imports（**皆 AutoClaude scope**），不含根層 tools/tests
+     ——這正是為什麼根層那批跨平台靜態掃描器需要第二道呼叫、而不是靠 gate 順帶。
   3. **SDD 完整閘門**：mac 的 [4/4] 每日跑 AISDLC_SDD/scripts/ci-gate.sh 雙軌全套；
      本檔只有 sdd-fsm-chaos（chaos 子集），不含 v0.01/LATEST 雙軌 pytest 與 10 道 lint 硬閘。
-  **本輪刻意只補帳目、不補 stage**（明說理由，非無謂延後）：新增 stage 需同步改動
-  summary 行、summary JSON、exit-decision 清單與 Format-Rc 標籤共四處，而其中 summary
-  行被 tools/dev_start.py 的心跳哨兵以**跨檔字面正則**解析（見 DEF-101-263②／R25 的
-  跨檔字面鎖），改動 summary 契約會連帶動到那組鎖；同時本檔是 CI 停擺期間**唯一的
-  活體驗證管道**，而當時無法觀測到真正的排程執行結果。此項列為
-  backlog（帳本 DEF-101-517），需獨立一輪並以一次真實排程執行收尾驗證。
-  🔴 **R73 補記**：「無法觀測排程執行結果」這個前提已不成立——`Start-ScheduledTask`
-  可隨選觸發並取得排程環境下的真實結果（R73 實測 smoke 88 秒完成、rc=0）。
-  「要等到半夜才知道」不再是有效理由。
+     ❌ 仍是缺口，本輪未補（第 1 項的 smoke 解耦亦刻意維持）。
+  **為何補的是「既有 stage 內的第二道檢查」而不是第 8 個 stage**（DEF-101-517 的處置
+  決定，非無謂延後）：新增 stage 需同步改動 summary 行、summary JSON、exit-decision
+  清單與 Format-Rc 標籤共四處，而其中 summary 行被 tools/dev_start.py 的心跳哨兵以
+  **跨檔字面正則**解析（見 DEF-101-263②／R25 的跨檔字面鎖）；掛進 Stage L 則四處全部
+  不動。代價已明說：兩道檢查共用一個 summary 欄位，故 stage 內必須逐道印 rc。
+  🔴 **R73 補記**（此段當初被列 backlog 的第二個前提，其失效紀錄保留供追溯）：
+  「要等到半夜才知道排程結果」已不成立——`Start-ScheduledTask` 可隨選觸發並取得
+  排程環境下的真實結果（R73 實測 smoke 88 秒完成、rc=0）。
 
 容器策略：優先沿用既有 autoclaude_pg；若不存在才新建臨時 container。
 既有 container 不在 Cleanup 中拆除。
@@ -87,6 +93,21 @@ SD_09 W0 zero-trust audit 修復清單（2026-05-20）：
   P1-4  alembic 預設用 sync DSN；asyncpg DSN 改成 stage 內 lazy 設
 #>
 
+# ── CLI 契約：param 宣告（DEF-101-810）────────────────────────────────────────
+# 本檔在本輪之前**沒有任何頂層 param()**（第一個 param( 落在 Add-LogLineSafe 函式內），
+# 於是 PowerShell 把使用者打的任何旗標整批丟進 $args 靜默丟棄，整支 7-stage nightly
+# 照跑到底——會搶去重 Mutex、動 Docker、寫進 nightly_latest.log 心跳，讓一次「查說明」
+# 被下游哨兵（tools/dev_start.py 的心跳三態）記成一輪真的 nightly。mac 側對等物
+# run_local_nightly.sh 自 R67 起就有 print_usage()＋case 關卡（DEF-101-652），本檔是
+# 雙平台不對稱剩下的那一邊。
+# param 依 PowerShell 文法必須是腳本第一個**述句**（其前只能有註解／#Requires），
+# 故宣告放這裡、關卡本體放在下方 console UTF-8 設定之後——用法文字含繁中，在 cp950
+# 主控台下若先印再設編碼會直接輸出亂碼（同本檔 P0-C 修復要解的那個問題）。
+# 關卡與第一個**磁碟／跨行程**副作用（Mutex 取得、logs 目錄與 log 檔建立）之間
+# 沒有任何其他述句，此順序由 tests/tools/test_run_local_nightly_static.py 的
+# CLI 契約鎖釘住。
+param([switch]$Help)
+
 $ErrorActionPreference = 'Continue'
 # SD_09 W3 Round 3 audit P2-2 修復：啟用 StrictMode 防止未定義變數 / 屬性錯誤靜默通過。
 # 採用 3.0（涵蓋未初始化變數 + 不存在屬性 + 函數參數錯誤）；Latest 對 here-string / array
@@ -102,6 +123,33 @@ Set-Location $RepoRoot
 $OutputEncoding = [System.Text.Encoding]::UTF8
 $env:PYTHONIOENCODING = 'utf-8'
 $env:PYTHONUTF8 = '1'
+
+# ── CLI 契約：關卡本體（DEF-101-810；WHY 見上方 param 宣告處）──────────────────
+# 形狀刻意與 run_local_nightly.sh 的 print_usage()／case 關卡同構：
+#   -Help（PowerShell 對開關做前綴比對 ⇒ --help／-h 同樣命中）→ 印用法、rc=0、零 stage
+#   其餘任何引數（未綁定者一律落進 $args）→ 逐字指名、印用法、rc=2、零 stage
+#   無引數 → 照常往下跑（鑑別力對照組：關卡不得把排程路徑一起擋掉）
+$NIGHTLY_USAGE = @'
+用法：powershell.exe -NoProfile -ExecutionPolicy Bypass -File AutoClaude\tools\run_local_nightly.ps1 [-Help]
+
+  （無參數）   排程／正常模式：依序跑 7 stage
+               local_ci_gate（含根層 unittest）／mutation／pg-e2e／perf／drift／obs／sdd-fsm-chaos
+  -Help        印本說明後結束，不執行任何 stage（--help、-h 亦可）
+
+本腳本不接受其他任何引數（打錯的旗標一律 rc=2，不會被靜默丟棄後照跑）。
+log：AutoClaude/logs/nightly_<日期>_<時分秒>.log；latest 指標／心跳：AutoClaude/logs/nightly_latest.log
+排程：tools\install_windows_nightly.ps1（觸發時刻一律現查 Get-ScheduledTaskInfo，勿相信文件內的數字）
+Exit：0＝無失敗 stage；1＝任一 stage 失敗；2＝用法錯誤
+'@
+if ($Help) {
+  Write-Output $NIGHTLY_USAGE
+  exit 0
+}
+if ($args.Count -gt 0) {
+  [Console]::Error.WriteLine("UNKNOWN-ARG 未知或多餘的引數：" + ($args -join ' '))
+  [Console]::Error.WriteLine($NIGHTLY_USAGE)
+  exit 2
+}
 
 # SD_09 W3 Round 19 audit P0-AUDIT-R18-1 修復（紀律 #14 schtasks PATH 補強）：
 # 02:00 schtasks 第 14 跑（首次自動跑）pg-e2e stage 36ms 內 EXCEPTION crash：
@@ -986,8 +1034,53 @@ Log ("BEGIN observation pre-snapshot: mutation={0} ac4={1} obs={2} drift={3} (js
 # 此處環境等同開發者手動跑 tools/local_ci_gate.ps1，不受 nightly PG env 污染。
 # 失敗不中斷後續 stage（Invoke-Stage 既有 continue-on-error 精神），rc 進
 # summary 與終端 exit code。
-$rcGate = Invoke-Stage 'local-ci-gate full (對齊 windows-nightly-full)' {
+#
+# 本 stage 內含**兩道**檢查（R77-04；為何不開第 8 個 stage 見下）：
+#   ① AutoClaude scope 深度回歸：tools/local_ci_gate.ps1（pytest + LOC + lint-imports）
+#   ② 根層 tools/tests unittest 全套：<monorepo>/tools/run_root_unittests.py
+#      ——含測試數量下限釘選，是全部跨平台靜態掃描器（路徑分隔符／子行程編碼／
+#      PS 5.1 相容／行尾）在本機的唯一執行載體。
+# WHY ② 必須在這裡：mac 側 run_local_nightly.sh 的 [2/4] 每日就跑它，Windows 側先前
+# 完全不跑（本 stage 的 local_ci_gate 範圍全在 AutoClaude scope 內，不含根層 tools/tests）
+# ⇒ 這台機器上那批掃描器的唯一執行機會是「push 剛好動到根層檔」。純子專案 push 不觸發
+# pre-push 慢層，於是 Windows 開發時的跨平台落差要等 mac 那台或雲端才看得見，而雲端
+# 帳務停擺期間連那條也沒有。
+# WHY 掛在既有 stage 內、不新增 stage：新增 stage 要同步 summary 行／summary JSON／
+# exit-decision 清單／Format-Rc 標籤共四處，而 summary 契約被 tools/dev_start.py 的
+# 心跳哨兵以跨檔字面正則解析（DEF-101-263②／R25 跨檔字面鎖）。掛進本 stage 則四處
+# 全部不動，代價是兩道檢查共用一個 rc 欄位——故下面**兩道各自的 rc 都要留證**。
+# 🔴 rc 合併規則（不得讓任一道遮蔽另一道）：
+#   · 兩道都跑，**不早退**——早退會讓後面那道的訊號消失，而消失的方向是「看起來變乾淨」。
+#   · 真失敗（rc ∉ {0, 2}）優先於 WARN(2)：若 gate 回 2 而 unittest 回 1，stage 必須是 1，
+#     否則一個真紅會被降級成觀察期 WARN 而不計入 exit decision。
+$rcGate = Invoke-Stage 'local-ci-gate full (對齊 windows-nightly-full) + root unittests' {
   Invoke-Native { powershell -NoProfile -ExecutionPolicy Bypass -File tools/local_ci_gate.ps1 }
+  $gateRc = [int]$LASTEXITCODE
+
+  # $RepoRoot 是 AutoClaude/；根層 runner 住 monorepo 根的 tools/（同 :1521 的取法）。
+  $rootUnittestsPy = Join-Path (Split-Path -Parent $RepoRoot) 'tools\run_root_unittests.py'
+  $rootRc = 0
+  if (-not $script:PyExe) {
+    Log '[ROOT-UNITTESTS] python 不可用（見腳本開頭的可用性驗證）——量不出來，計入本 stage 失敗' 'ERROR'
+    $rootRc = 1
+  } elseif (-not (Test-Path $rootUnittestsPy)) {
+    Log ("[ROOT-UNITTESTS] 執行器缺席（{0}）——改名／搬走／`$RepoRoot 上一層不是 monorepo 根；量不出來，計入本 stage 失敗" -f $rootUnittestsPy) 'ERROR'
+    $rootRc = 1
+  } else {
+    # 零旗標契約（run_root_unittests.py 檔頭：任何引數一律 rc=2）——刻意不傳任何參數。
+    Invoke-Native { & $script:PyExe $rootUnittestsPy }
+    $rootRc = [int]$LASTEXITCODE
+  }
+  Log ("[STAGE-L] 兩道檢查各自的 rc：local_ci_gate={0} root_unittests={1}（合併規則：真失敗優先於 WARN(2)）" -f $gateRc, $rootRc)
+  if ($rootRc -ne 0) {
+    Log ("[ROOT-UNITTESTS] 根層 unittest 未全綠 rc={0}——標記本 stage 失敗" -f $rootRc) 'ERROR'
+  }
+  $combinedRc = 0
+  foreach ($subRc in @($gateRc, $rootRc)) {
+    if ($subRc -ne 0 -and $subRc -ne 2) { $combinedRc = $subRc; break }
+  }
+  if ($combinedRc -eq 0 -and ($gateRc -eq 2 -or $rootRc -eq 2)) { $combinedRc = 2 }
+  $global:LASTEXITCODE = $combinedRc
 }
 
 # ----- Stage 0: Docker / PG 準備（優先沿用既有 autoclaude_pg）-----
@@ -1252,12 +1345,36 @@ if ($script:DockerOK) {
     # 取證（collector 對 junit 內任一 failure/skip 都會降級 status）。
     # rc 以 [ref] 捕捉（D-10 模式），stage 末端還原，不被 collector /
     # progress_check 的 rc 蓋掉（紀律 #1 真實 rc）。
+    #
+    # R77-05：選擇面自「一支檔」擴到「該支 ＋ tests/contract/test_alembic_*.py」。
+    # WHY：本 stage 的 DSN 到這裡才就緒（Stage L 刻意跑在四個 env 之前，見 :1144-1149
+    # 的 P1-4 說明；alembic 之後才 swap 成 asyncpg），而先前只跑一支檔 ⇒ 五支
+    # migration 契約（0007/0008/0010/0011/0012）＋鏈完整性鎖每晚照樣以「需設定
+    # AUTOCLAUDE_DB_DSN／AUTOCLAUDE_TEST_PG_DSN」被 skip 掉。它們在雲端的唯一通道是
+    # autoclaude-ci 的 pg-contract job，而該通道在 Actions 帳務停擺期間一次都沒跑成
+    # ⇒ 這批的實際覆蓋是 0。本輪實測邊際成本：1.69s → 2.12s（多跑 60 支）。
+    # 🔴 用 Get-ChildItem 現場列舉、不寫 glob 字面：PowerShell **不**對原生命令做萬用
+    # 字元展開，`tests/contract/test_alembic_*.py` 會被原樣交給 pytest 並當成不存在的
+    # 路徑（＝靜默少跑）。列舉數低於下限即判本 stage 失敗，不讓選擇面靜默縮回一支檔。
+    # 下限＝實測 6 支保留一支合法退場的餘裕；真要減檔請連同本常數一起下修並說明。
+    $ALEMBIC_CONTRACT_FLOOR = 5
+    $contractFiles = @('tests/contract/test_pg_state_repository_contract.py')
+    $alembicContractFiles = @(
+      Get-ChildItem -Path (Join-Path $RepoRoot 'tests\contract') -Filter 'test_alembic_*.py' `
+        -File -ErrorAction SilentlyContinue | ForEach-Object { 'tests/contract/' + $_.Name }
+    )
     $contractRcRef = [ref] 0
-    Invoke-Native {
-      & $script:PyExe -m pytest tests/contract/test_pg_state_repository_contract.py `
-        -v --tb=short
+    if ($alembicContractFiles.Count -lt $ALEMBIC_CONTRACT_FLOOR) {
+      Log ("[PG-CONTRACT] tests/contract 只列舉到 {0} 支 test_alembic_*.py（下限 {1}）——選擇面疑似靜默縮小（目錄改名／檔名不符），計入本 stage 失敗" -f $alembicContractFiles.Count, $ALEMBIC_CONTRACT_FLOOR) 'ERROR'
+      $contractRcRef.Value = 1
+    } else {
+      $contractFiles += $alembicContractFiles
+      Log ("[PG-CONTRACT] 本輪選擇面 {0} 支：{1}" -f $contractFiles.Count, ($contractFiles -join ' '))
+      Invoke-Native {
+        & $script:PyExe -m pytest @contractFiles -v --tb=short -rs
+      }
+      $contractRcRef.Value = $LASTEXITCODE
     }
-    $contractRcRef.Value = $LASTEXITCODE
     Invoke-Native {
       & $script:PyExe tools/ac4_nightly_collector.py `
         --junit-xml .ac4_junit.xml `

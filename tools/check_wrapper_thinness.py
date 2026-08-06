@@ -69,6 +69,42 @@ import _stdio_utf8  # noqa: E402,F401  # Windows 非 UTF-8 終端 print(✅/❌)
 
 ROOT = Path(__file__).resolve().parent.parent
 
+# ── LATEST 演化版釘選鍵（本輪合併，原住 check_script_parity 的第二套實作）───────
+# 分家的唯一理由曾是「本表的鍵是**固定** repo-relative 路徑，表達不了 Copy-on-Evolve
+# 逐版變動的 LATEST 路徑」——而 `tools/lib/sdd_latest.py` 就是那個 resolver，差的只是
+# 一個參數。分家的代價是同一個概念養出 4 張登記表、2 支檢查器、2 份交叉鎖，正是本
+# repo 明文禁止的形態（同語言、同執行時機、觀測同一類對象 ⇒ 複本不產生鑑別力，只
+# 產生兩份會各自腐化的清單；那第二份 cross-lock 還是事後補的）。
+# 鍵以 `LATEST/tools/` 前綴表示「相對 LATEST 版 tools/ 的路徑」，升版時登記不失效。
+_LATEST_KEY_PREFIX = "LATEST/tools/"
+
+
+def latest_tools_root() -> Path | None:
+    """LATEST 演化版 `tools/` 實體路徑；解析失敗回 `None`（呼叫端 fail-loud 印紅燈）。
+
+    委派 `tools/lib/sdd_latest.py`（LATEST 解析唯一 SSOT，內部再委派
+    `AISDLC_SDD/scripts/sdd_version.py`）。該模組的契約是「失敗即 raise」，本檔守門
+    需要的是「失敗轉紅燈」——故在此吸收例外，**不**在 SSOT 內另開第二種契約。
+    每個公開入口各解析一次（一次 subprocess），結果沿呼叫鏈傳遞、不做模組層快取
+    （快取會在測試 mock `ROOT` 後回傳上一次的真實路徑＝跨測試污染）。
+    """
+    sys.path.insert(0, str(ROOT / "tools" / "lib"))
+    try:
+        import sdd_latest
+        return sdd_latest.resolve_latest_root(ROOT / "AISDLC_SDD") / "tools"
+    except (AssertionError, OSError, ImportError):
+        return None
+
+
+def pinned_path(rel: str, latest_tools: Path | None) -> Path | None:
+    """釘選鍵 → 磁碟路徑；`LATEST/tools/…` 鍵須經 LATEST 解析，解析失敗回 `None`。"""
+    if rel.startswith(_LATEST_KEY_PREFIX):
+        if latest_tools is None:
+            return None
+        return latest_tools / rel[len(_LATEST_KEY_PREFIX):]
+    return ROOT / rel
+
+
 # 薄殼行數上限（第二訊號；權威判定仍是下方 hash 釘選）。
 #
 # 🔴 R60 round-2（SD-R60-08）刻意**不再寫死各殼當下行數**：本處原本列了 8 支殼的行數
@@ -177,7 +213,64 @@ _PINNED_SHA256: dict[str, str] = {
     "AISDLC_SDD/scripts/install-hooks.ps1": (
         "42b01cc883e29b79405abc0f0db5f2a9bf16e7e0b04ac399c0ddc47b16d03403"
     ),
+    # ── LATEST 演化版（本輪自 check_script_parity._LATEST_PINNED_SHA256 併入）──
+    # R65（ADR-XPLAT-002 §5 Phase 2-A）run_tlc 薄殼化後納入釘選。歷次重釘理由逐條保留：
+    #   · R65 四方複審 7 項修復落地後的最終內容：(1) 裸執行三軌呼叫恆帶 --download 恢復
+    #     jar 自動下載、(3) .ps1 python 候選探測順序改 python3 優先（同 .sh）、
+    #     (4) 新增 --tla-version 轉傳（.sh 讀 TLA_VERSION 環境變數／.ps1 讀 -TlaVersion
+    #     參數，皆只在使用者顯式帶值時才轉傳）。
+    #   · R67（R67-H35）：`_normalize()` 改為保留首行 shebang ⇒ `.sh` 側重釘
+    #     （`.ps1` 側首行非 shebang，hash 逐字不變）。三段取證見上方 R67 註解。
+    #   · R68（Scan-A2）：`.sh` 側重釘——LATEST run_tlc.sh 在 macOS 系統 bash 3.2 下每一條
+    #     執行路徑都必死於 `set -u` 空陣列展開，且該死法回 rc=1，恰好撞上該檔自訂的
+    #     「1＝TLC 偵測到 invariant violation」語意 ⇒ 把環境問題誤報成形式化驗證失敗。
+    #     修法為 bash 3.2 安全展開 + 環境失敗改用獨立 rc，仍屬薄殼職責，故重釘非降級。
+    "LATEST/tools/fsm_runtime/formal/run_tlc.sh": (
+        "76207165469914976ee49b536c9c81e89fee079daa4756b0a57c752e144983fe"
+    ),
+    # R71 DEF-101-762 重釘；根因見帳本列＋該檔:47
+    "LATEST/tools/fsm_runtime/formal/run_tlc.ps1": (
+        "feb3b9bf2ffdd35b789ca036a39f02cc6390769d3d9fb6fed3a9ef60cc3daf00"
+    ),
 }
+
+# ── 違規訊息的指路目的地（本輪 E-05b）────────────────────────────────────────
+# 病灶：行數上限與 hash 不符兩條訊息原先對**全部**受管殼一律寫同一個目的地，不看
+# `rel` 屬於哪一棵樹。兩個問題疊在一起：
+#   (1) 語意錯——`AISDLC_SDD/scripts/install-hooks.*` 的契約住
+#       `tools/git_hooks_install_common.py`（ADR-XPLAT-002 §3.1 活體先例），
+#       `AutoClaude/tools/run_act.*` 的核心是 `run_act_core.py`，都不是 dev_start。
+#   (2) 可滿足性——被無條件指路的那個檔是 `check_loc_budget.SPECIAL_FILES` 的
+#       shrink-only 棘輪檔且餘裕僅個位數，照訊息辦事極可能當場觸發 LOC violation
+#       （A 鎖要你把邏輯搬進去、B 鎖禁止你在那裡加行；Scan-H 必跑項⑥ 的活體實例）。
+# 修法：逐殼查表指路它自己的 Python 核心，並在訊息內附「動手前先現查目的地餘裕」的
+# 指令——本檔不寫死任何餘裕數字（那正是 SD-R60-08 在治的病）。
+# 鍵＝釘選鍵去副檔名（stem）；`tools/tests/test_check_wrapper_thinness.py::
+# TestConvergenceTargetsArePerShell` 機械守「每個釘選鍵都查得到目的地、且目的地存在」。
+_CORE_TARGET: dict[str, str] = {
+    "tools/dev_start": "tools/dev_start.py",
+    "tools/bootstrap": "tools/bootstrap_core.py",
+    "tools/integration_gate": "tools/integration_gate_core.py",
+    "AutoClaude/tools/local_ci_gate": "AutoClaude/tools/local_ci_gate.py",
+    "AutoClaude/tools/run_act": "AutoClaude/tools/run_act_core.py",
+    "AutoClaude/tools/install_git_hooks": "tools/git_hooks_install_common.py",
+    "AISDLC_SDD/scripts/install-hooks": "tools/git_hooks_install_common.py",
+    "LATEST/tools/fsm_runtime/formal/run_tlc":
+        "LATEST/tools/fsm_runtime/tlc_runner.py",
+}
+#: 指路訊息共同的尾巴——要人先量目的地，而不是照著撞上另一道棘輪。
+_HEADROOM_HINT = (
+    "（動手前先跑 `python AutoClaude/tools/check_loc_budget.py --json` 現查該目的地"
+    "餘裕；餘裕不足時先瘦身或改分拆，不要硬塞）"
+)
+
+
+def convergence_target(rel: str) -> str:
+    """該支殼的業務邏輯該收斂到哪一個 Python 核心（查無登記即 fail-loud 字樣）。"""
+    stem = rel.rsplit(".", 1)[0]
+    return _CORE_TARGET.get(
+        stem, f"（_CORE_TARGET 未登記 {stem!r} 的核心，請先補一筆再談收斂）"
+    )
 
 # 業務邏輯樣板關鍵字（診斷輔助；權威判定為上方 hash 釘選）。歷史上三輪被繞的
 # 史料保留於此，作為 hash 紅燈時的定位提示。
@@ -390,25 +483,38 @@ def wrapper_line_counts() -> dict[str, int | None]:
     （本檔原註解 8 支殼行數全數過期）。`--print-lines` 是唯一的取值介面。
     """
     counts: dict[str, int | None] = {}
+    latest_tools = latest_tools_root()
     for rel in _PINNED_SHA256:
-        path = ROOT / rel
-        counts[rel] = len(_read_source(path).splitlines()) if path.is_file() else None
+        path = pinned_path(rel, latest_tools)
+        counts[rel] = (
+            len(_read_source(path).splitlines())
+            if path is not None and path.is_file() else None
+        )
     return counts
 
 
 def check_wrapper_thinness() -> list[str]:
     """回傳違規訊息清單；空清單＝全部通過。"""
     problems: list[str] = []
+    latest_tools = latest_tools_root()
     for rel, pinned in _PINNED_SHA256.items():
-        path = ROOT / rel
+        path = pinned_path(rel, latest_tools)
+        if path is None:
+            problems.append(
+                f"{rel}：LATEST 版本解析失敗，無法定位此殼 —— 釘選鍵以 "
+                f"{_LATEST_KEY_PREFIX!r} 起頭者需動態解析（tools/lib/sdd_latest.py）；"
+                f"解析不出來一律紅，不得靜默略過（略過即釘選面無聲縮小）"
+            )
+            continue
         if not path.is_file():
             problems.append(f"{rel}：檔案不存在（wrapper 被移除或改名？）")
             continue
         line_count = len(_read_source(path).splitlines())
         if line_count > MAX_LINES:
             problems.append(
-                f"{rel}：{line_count} 行超過薄殼上限 {MAX_LINES} 行 —— "
-                f"業務邏輯應收斂進 tools/dev_start.py，不應長在 wrapper 內"
+                f"{rel}：{line_count} 行超過薄殼上限 {MAX_LINES} —— "
+                f"業務邏輯應收斂進 {convergence_target(rel)}，不應長在 wrapper 內"
+                f"{_HEADROOM_HINT}"
             )
         norm = normalized_content(path)
         actual = _sha256_text(norm)
@@ -417,7 +523,8 @@ def check_wrapper_thinness() -> list[str]:
                 f"{rel}：正規化內容 hash 與釘選不符（釘選 {pinned[:12]}… / 實際 "
                 f"{actual[:12]}…）—— wrapper 實質內容變動；若變更仍屬「選直譯器／"
                 f"轉呼叫核心／啟用 venv」薄殼職責，請以 --print-hash 取新值同步更新 "
-                f"_PINNED_SHA256；否則請把邏輯收斂進 tools/dev_start.py"
+                f"_PINNED_SHA256；否則請把邏輯收斂進 {convergence_target(rel)}"
+                f"{_HEADROOM_HINT}"
             )
         # R60 Scan-E E-A-02：**並聯**（刻意不縮排進上方 if）。原本巢狀在 hash 已紅
         # 分支內＝串聯，一旦有人更新 pin（正常維護動作）整組偵測同時失效。比對
@@ -443,9 +550,13 @@ def main(argv: list[str] | None = None) -> int:
     # 未知引數的拒收在 `cli()`（WHY 見該處與 `tools/_cli_flags.py` 檔頭〈接線紀律〉）。
     args = [] if argv is None else list(argv)
     if args == ["--print-hash"]:
+        latest_tools = latest_tools_root()
         for rel in _PINNED_SHA256:
-            path = ROOT / rel
-            shown = normalized_sha256(path) if path.is_file() else "（檔案不存在）"
+            path = pinned_path(rel, latest_tools)
+            shown = (
+                normalized_sha256(path)
+                if path is not None and path.is_file() else "（檔案不存在）"
+            )
             print(f"{rel}: {shown}")
         return 0
     if args == ["--print-lines"]:

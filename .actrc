@@ -25,3 +25,13 @@
 # 「authentication required」失敗（公開鏡像但 act 送出 ~/.docker 認證）。
 # 首次請先：docker pull catthehacker/ubuntu:act-latest（act-ci.sh 會自動預拉）。
 --pull=false
+# 🔴 容器內必須有 PID 1 reaper（本輪 Scan-F 實測落地）。act 起 runner 容器時的
+# entrypoint 是 `tail -f /dev/null`，它**不回收殭屍子行程**；於是任何用
+# `os.kill(pid, 0)` 判定「行程還在不在」的測試，在 act 內看到的殭屍一律回「還在」
+# ⇒ 產生與真缺陷逐字同形的**假紅**（本輪實測：AutoClaude 的 test_perception.py
+# 孫行程回收回歸鎖，雲端真 ubuntu-latest 零 failed、act 預設 1 failed）。
+# 本機探針工作流實測（同一支 workflow、同一顆映像，唯一差異就是本行）：
+#   加本行前 → PID1_COMM=tail        加本行後 → PID1_COMM=docker-init
+# `--init` 讓 Docker 把 tini 塞成 PID 1，語意與 GitHub 真 runner（VM 內有 init）
+# 對齊——這是**提高**地端與雲端的等價度，不是放寬判準。
+--container-options=--init

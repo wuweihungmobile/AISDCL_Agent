@@ -37,13 +37,24 @@ import sys
 import tempfile
 import tokenize
 import unittest
+from collections.abc import Callable
 from pathlib import Path
 
 _TESTS_DIR = Path(__file__).resolve().parent
 _REPO_ROOT = _TESTS_DIR.parents[1]
 
+# 🔴 姊妹鎖（`test_subprocess_encoding_hygiene`）的三支下限帶純函式**直接取用、
+# 不複製**。WHY：兩支鎖守的是同一件事「掃描面不得靜默腐化」，判準各寫一份就是兩個
+# 會漂移的真相——本輪立案的形態正是「藥已開好，卻只餵給兩個病人中的一個」。
+sys.path.insert(0, str(_TESTS_DIR))
 sys.path.insert(0, str(_REPO_ROOT / "tools" / "lib"))
 import sdd_latest  # noqa: E402
+import test_subprocess_encoding_hygiene as _sister  # noqa: E402
+from test_subprocess_encoding_hygiene import (  # noqa: E402
+    repin_ceiling,
+    suggested_floor,
+    tree_count_verdict,
+)
 
 # 任意字串字面值以「單一字母磁碟機 + 冒號 + / 或 \」開頭即命中；
 # 匹配起點為引號本身，r/f/b 等前綴與 Path( 包裹與否皆無關（裸字串同樣命中）。
@@ -67,45 +78,181 @@ _OK_MARKER = "platform-ok:"
 _EXPLICIT_PLATFORM = ("PureWindowsPath(", "PurePosixPath(")
 
 
-def _latest_fsm_tests_dir() -> Path:
-    """LATEST 版 fsm_runtime/tests（sdd_version.py SSOT；解析失敗即 AssertionError）。
+def _latest_root() -> Path:
+    """LATEST 版根目錄（sdd_version.py SSOT；解析失敗即 AssertionError）。
     委派 tools/lib/sdd_latest.py 單一真相源（ADR-XPLAT-002 Phase 2-C，R66 收斂）。"""
-    latest_root = sdd_latest.resolve_latest_root(_REPO_ROOT / "AISDLC_SDD")
-    return latest_root / "tools" / "fsm_runtime" / "tests"
+    return sdd_latest.resolve_latest_root(_REPO_ROOT / "AISDLC_SDD")
+
+
+def _latest_fsm_tests_dir() -> Path:
+    """LATEST 版 fsm_runtime/tests。"""
+    return _latest_root() / "tools" / "fsm_runtime" / "tests"
 
 
 def _scan_roots() -> list[tuple[Path, bool, int]]:
-    """（掃描根, 是否遞迴, 該樹檔數下限）清單；根缺席或低於下限由測試 fail-loud。
+    """（掃描根, 是否遞迴, 該樹檔數下限）清單；根缺席或**離開下限帶**由測試 fail-loud。
 
     per-tree 下限（R12 SD 一審 SD-3）：全域總數下限對「單樹靜默縮面」不敏感
     （如 LATEST 樹 rglob 被改 glob，總數 377→303 仍過全域 200）；逐樹釘選使任一
-    樹縮面必紅。下限＝2026-07-18 實測實掃數（13/19/271/74；AutoClaude 樹總檔 272
-    扣除 _ALLOWED 豁免 1 檔——斷言對象為排除豁免後的實掃數）打八折取整，隨基線上修。"""
+    樹縮面必紅。
+
+    🔴 本輪三處修正（缺陷本體＝**同一份知識住兩個家、只有一個家被修好**）：
+
+    ① **掃描面對稱化**。與姊妹鎖 `test_subprocess_encoding_hygiene._scan_roots()`
+       逐檔對拍，本清單此前少看 44 支 active `.py`，而缺口**正好蓋住整層 hook**
+       （`AutoClaude/tools/hooks/` 6 支＋LATEST `.claude/hooks/` 5 支）——hook 是本
+       repo 唯一「會主動阻斷使用者操作」的一層，指路錯誤代價最高。兩個成因並存：
+       `AutoClaude/tools` 一邊 flat glob 一邊 rglob；本清單少了 4 棵樹。修法＝改
+       recursive ＋ 補齊 4 棵樹 ＋ 補 `_scan_single_files()`；對稱性此後由
+       `TestScanSurfaceParityWithSisterLock` 機械看守（擴一邊沒擴另一邊即紅）。
+       落地當回合實測：缺口內的存量債對本檔五道判準**全為 0**，屬零成本擴面。
+
+    ② **下限改雙邊帶**。原下限是單邊的（只有 `assertGreaterEqual`），而單邊下限
+       必然腐化：樹會長大、下限不會。落地當回合實測 `tools/tests` floor=10／
+       actual=56 ⇒ **可靜默蒸發 82% 掃描面而全綠**，比姊妹鎖當初立案的 78% 更差。
+       姊妹鎖已把藥開好（`repin_ceiling`／`suggested_floor`／`tree_count_verdict`
+       三支純函式），本檔改為直接 import 那三支，兩鎖共用同一組上下界。
+       🔴 下限值一律＝**落地當回合實測 × 0.95**（`suggested_floor()`），不再是
+       「首掃數打八折」那種化石；實測值隨行註記於各列。
+
+    ③ **一律遞迴**（落地當回合被上面那道對稱鎖自己抓到的第三個病灶）：本清單原本
+       混用 flat／rglob，而 flat 的那幾棵對「有人在樹下新開一個子目錄」結構性隱形
+       ——並行包當回合新增的 `tools/probe/` 就是這樣落在射程外。巢狀樹（如
+       `tools/tests` 住在 `tools` 底下）仍各自保有自己的下限，由 `_scan_units()`
+       的**最長前綴認領**分帳，不會被外層重複計算。
+
+    🔴 **下方刻意不逐列寫「實測 N」**：那等於在每一列旁邊放一個沒有任何機械物看守的
+    量測快照（同 ADR-XPLAT-002 §8 表頭規則 3）。當回合實際發生過：兩列的隨行實測值在
+    寫下後幾分鐘內就被並行包改動的樹弄過期。下限本身受雙邊帶看守，實測值由失敗訊息
+    當場印出——那才是唯一不會腐化的取值面。"""
+    latest = _latest_root()
     return [
-        (_TESTS_DIR, False, 10),
-        (_REPO_ROOT / "AISDLC_SDD" / "scripts" / "tests", False, 15),
-        (_REPO_ROOT / "AutoClaude" / "tests", True, 217),
-        (_latest_fsm_tests_dir(), True, 59),
-        # 🔴 R69（DEF-101-702／R68-34）：以上四棵**全是測試樹**。於是「Windows 開發者把
-        # `D:/…` 字面路徑寫進生產碼」這條路在 mac 側全套護欄全綠——掃描面與缺陷面錯位。
-        # R69 實測擴面後存量債為 0（原缺陷報告點名的 `_conditional_evaluator.py` 現已無
-        # 命中），屬零成本擴面：現在起生產碼與測試碼受同一判準。
-        # 下限＝R69 實測（203/37/16/1/14/4/79）打八折取整，隨基線上修。
-        (_REPO_ROOT / "AutoClaude" / "autoclaude", True, 162),
-        (_REPO_ROOT / "AutoClaude" / "tools", False, 29),
-        (_REPO_ROOT / "tools", False, 12),
-        (_REPO_ROOT / ".claude" / "hooks", False, 1),
-        (_REPO_ROOT / "AISDLC_SDD" / "scripts", False, 11),
-        (_REPO_ROOT / "tools" / "lib", False, 3),
-        # fsm_runtime 頂層（非遞迴）——其 tests/ 子樹已由上方第 4 棵覆蓋，不重複掃。
-        (_latest_fsm_tests_dir().parent, False, 63),
+        (_TESTS_DIR, True, 53),
+        (_REPO_ROOT / "AISDLC_SDD" / "scripts" / "tests", True, 28),
+        (_REPO_ROOT / "AutoClaude" / "tests", True, 268),
+        # LATEST fsm_runtime **整棵遞迴**（原本 tests/ 與頂層分兩列、頂層還是 flat
+        # ⇒ `meta_halt/`／`modality/` 兩個子樹整組在射程外）。
+        (latest / "tools" / "fsm_runtime", True, 158),
+        # 🔴 R69（DEF-101-702／R68-34）：以上全是測試樹。於是「Windows 開發者把
+        # `D:/…` 字面路徑寫進生產碼」這條路在 mac 側全套護欄全綠——掃描面與缺陷面
+        # 錯位。R69 實測擴面後存量債為 0，屬零成本擴面：生產碼與測試碼受同一判準。
+        (_REPO_ROOT / "AutoClaude" / "autoclaude", True, 194),
+        (_REPO_ROOT / "AutoClaude" / "tools", True, 42),
+        (_REPO_ROOT / "AutoClaude" / "scripts", True, 1),
+        (_REPO_ROOT / "AutoClaude" / "alembic", True, 18),
+        # `tools` 與 `.claude/hooks` 兩棵的下限刻意只認並行包動工前就存在的那些檔：
+        # 把一個當下還在變動的量寫成常數，下一輪必然對不上。
+        (_REPO_ROOT / "tools", True, 17),
+        (_REPO_ROOT / ".claude" / "hooks", True, 2),
+        (_REPO_ROOT / "AISDLC_SDD" / "scripts", True, 13),
+        (_REPO_ROOT / "tools" / "lib", True, 10),
+        (latest / "tools" / "arch_fitness", True, 2),
+        (latest / ".claude" / "hooks", True, 5),
     ]
 
 
-def _scan_file(py: Path) -> list[str]:
+def _scan_single_files() -> list[Path]:
+    """樹機制掃不到的零散活躍 `.py`（逐檔具名，與姊妹鎖同一份清單）。
+
+    不能把整個 `AISDLC_SDD/` 根樹納入——rglob 會誤掃凍結版 v0.01~v0.29。
+    """
+    return [
+        _REPO_ROOT / "AISDLC_SDD" / "conftest.py",
+        _latest_root() / "tools" / "__init__.py",
+    ]
+
+
+#: 零散單檔的檔數下限（等於清單長度：少一支＝有人刪了具名檔，必須是寫下來的動作）。
+_SINGLE_FILE_FLOOR = 2
+#: 零散單檔在下限帶訊息裡的標籤。
+_SINGLE_UNIT_LABEL = "<零散單檔>"
+
+
+def _scan_units() -> list[tuple[str, list[Path], int]]:
+    """（標籤, 檔案清單, 檔數下限）——樹與零散單檔統一形狀，本檔五道判準共用。
+
+    🔴 統一成一支的理由：本檔原有五個各自展開的掃描迴圈，每一個都自帶一份
+    「列舉檔案 ＋ 判下限」的複本。擴掃描面時只改其中幾份，就是①那個缺口的
+    製造方式；五份複本也讓「下限只有下界」這件事要修五次。
+    """
+    specs: list[tuple[Path, int, list[Path]]] = []
+    for root, recursive, floor in _scan_roots():
+        if not root.is_dir():
+            raise AssertionError(f"掃描根缺席：{root}（邊界不得靜默縮小）")
+        found = root.rglob("*.py") if recursive else root.glob("*.py")
+        specs.append((root, floor, sorted(p for p in found
+                                          if "__pycache__" not in p.parts)))
+    roots = [root for root, _floor, _files in specs]
+    units: list[tuple[str, list[Path], int]] = []
+    for root, floor, files in specs:
+        owned = [p for p in files if _owning_root(p, roots) == root]
+        units.append((root.relative_to(_REPO_ROOT).as_posix(), owned, floor))
+    singles = sorted(p for p in _scan_single_files() if p.is_file())
+    units.append((_SINGLE_UNIT_LABEL, singles, _SINGLE_FILE_FLOOR))
+    return units
+
+
+def _owning_root(py: Path, roots: list[Path]) -> Path:
+    """巢狀掃描根之間由**最長前綴**（最具體的那棵）認領該檔。
+
+    order-independent：不靠清單順序決定歸屬，改清單順序不會讓某棵樹的下限
+    突然對不上。這是「全部改遞迴」得以成立的前提——否則 `tools` 遞迴會把
+    `tools/tests` 的 56 支再算一次，兩邊下限都失去意義。
+    """
+    return max((r for r in roots if r == py.parent or r in py.parents),
+               key=lambda r: len(r.parts))
+
+
+def floor_band_problems(counts: list[tuple[str, int, int]]) -> list[str]:
+    """（標籤, 實測, 下限）逐筆過姊妹鎖的雙邊帶；回問題清單，空＝合格。
+
+    純函式（紅綠由合成注入自證，見 `TestScanRootFloorBand`）。
+    """
+    return [
+        verdict
+        for label, actual, floor in counts
+        if (verdict := tree_count_verdict(label, actual, floor)) is not None
+    ]
+
+
+def run_unit_scan(
+    scanner: Callable[[str, str], tuple[list[str], list[str]]],
+) -> tuple[list[str], list[str], list[str], list[str]]:
+    """對 `_scan_units()` 每一支檔跑 `scanner`；回 (違規, stale, parse 失敗, 下限帶)。
+
+    🔴 早退不得遮蔽（Scan-H⑦）：單檔 parse 失敗只記一筆並續掃，下限帶在**全部**
+    掃完之後才算——原本的寫法把下限斷言放在迴圈內，第一棵樹一失敗就同時吃掉
+    「其他樹的下限」與「違規清單」兩份訊號，而失敗訊息只講第一棵樹。
+    """
     offenders: list[str] = []
-    rel = py.relative_to(_REPO_ROOT).as_posix()
-    for lineno, line in enumerate(py.read_text(encoding="utf-8").splitlines(), start=1):
+    stale: list[str] = []
+    parse_failures: list[str] = []
+    counts: list[tuple[str, int, int]] = []
+    for label, files, floor in _scan_units():
+        scanned = 0
+        for py in files:
+            rel = py.relative_to(_REPO_ROOT).as_posix()
+            try:
+                off, st = scanner(py.read_text(encoding="utf-8"), rel)
+            except (SyntaxError, UnicodeDecodeError, ValueError) as exc:
+                parse_failures.append(f"{rel}: {type(exc).__name__}: {exc}")
+                continue
+            offenders.extend(off)
+            stale.extend(st)
+            scanned += 1
+        counts.append((label, scanned, floor))
+    return offenders, stale, parse_failures, floor_band_problems(counts)
+
+
+def scan_drive_literal(source: str, rel: str) -> tuple[list[str], list[str]]:
+    """純函式核心：回傳 (offenders, stale)。stale 恆空（本判準的標記不做 stale 偵測）。
+
+    本輪抽出：第一道判準原本只有「吃 `Path`」的入口，於是它是本檔唯一無法用合成
+    字串直接餵的判準——注入語料矩陣（`TestXplatInjectionMatrix`）需要對**每一道**
+    判準問同一個問題，缺一個入口就等於那一格永遠量不到。
+    """
+    offenders: list[str] = []
+    for lineno, line in enumerate(source.splitlines(), start=1):
         if _OK_MARKER in line:  # (c) 行尾豁免標記（附理由）
             continue
         code = line.split("#", 1)[0]  # (a) 剝註解尾（heuristic，見 docstring）
@@ -113,26 +260,26 @@ def _scan_file(py: Path) -> list[str]:
             continue
         if _DRIVE_STR_RE.search(code):
             offenders.append(f"{rel}:{lineno}: {line.strip()}")
-    return offenders
+    return offenders, []
+
+
+def _scan_file(py: Path) -> list[str]:
+    rel = py.relative_to(_REPO_ROOT).as_posix()
+    return scan_drive_literal(py.read_text(encoding="utf-8"), rel)[0]
 
 
 class TestPlatformNeutralPaths(unittest.TestCase):
     def test_no_windows_drive_fake_paths(self) -> None:
         offenders: list[str] = []
-        for root, recursive, floor in _scan_roots():
-            self.assertTrue(root.is_dir(), f"掃描根缺席：{root}（邊界不得靜默縮小）")
-            files = root.rglob("*.py") if recursive else root.glob("*.py")
+        counts: list[tuple[str, int, int]] = []
+        for label, files, floor in _scan_units():
             tree_scanned = 0
-            for py in sorted(files):
+            for py in files:
                 if py.relative_to(_REPO_ROOT).as_posix() in _ALLOWED:
                     continue
                 offenders.extend(_scan_file(py))
                 tree_scanned += 1
-            # per-tree 下限釘選（SD-3）：單樹縮面必紅，不被他樹總量掩蓋
-            self.assertGreaterEqual(
-                tree_scanned, floor,
-                f"{root} 掃描檔數 {tree_scanned} < 下限 {floor}——該樹掃描面疑似縮小",
-            )
+            counts.append((label, tree_scanned, floor))
         self.assertEqual(
             offenders,
             [],
@@ -141,6 +288,8 @@ class TestPlatformNeutralPaths(unittest.TestCase):
             "改寫為顯式 PureWindowsPath(…) 或行尾加 `# platform-ok: <理由>` 豁免：\n"
             + "\n".join(offenders),
         )
+        band = floor_band_problems(counts)
+        self.assertEqual(band, [], "掃描面下限帶：\n" + "\n".join(band))
 
     def test_allowed_exemptions_not_stale(self) -> None:
         """豁免清單防腐化：登記的檔案消失即紅（比照 parity 清單 stale 檢查）。"""
@@ -352,7 +501,12 @@ def scan_intree_tmpdir(source: str, rel: str) -> tuple[list[str], list[str]]:
 
 
 def _tmpdir_scan_roots() -> list[tuple[Path, bool, int]]:
-    """（掃描根, 是否遞迴, 該樹檔數下限）；下限＝2026-07-29 實掃數打八折取整。
+    """（掃描根, 是否遞迴, 該樹檔數下限）；下限＝落地當回合實測 × 0.95。
+
+    🔴 本輪重釘（與 `_scan_roots()` 同一筆缺陷的第二個病灶）：原下限是「首掃數打
+    八折」的化石且**只有下界**。落地當回合實測三棵已越過腐化上界（56 對 44、
+    282 對 223、54 對 43），也就是本判準的掃描面此前可以掉掉兩成而全綠。改用姊妹
+    鎖的雙邊帶（`tree_count_verdict`）後，下限自己過期時會當場紅並印出該填的數字。
 
     🔴 掃描面比本檔第一道判準多一棵「**凍結基線 v0.01**」，這是刻意的，WHY：
       `AISDLC_SDD/scripts/ci-gate.sh` 的 `FROZEN_BASELINE="AISDLC_SDD_v0.01"` 是
@@ -365,12 +519,12 @@ def _tmpdir_scan_roots() -> list[tuple[Path, bool, int]]:
       把它們納進來會讓本鎖一上線就紅，而那紅燈反映的是待決策，不是新退化。
     """
     return [
-        (_TESTS_DIR, False, 44),
-        (_REPO_ROOT / "AISDLC_SDD" / "scripts" / "tests", False, 22),
-        (_REPO_ROOT / "AutoClaude" / "tests", True, 223),
-        (_latest_fsm_tests_dir(), True, 63),
-        (_REPO_ROOT / "AISDLC_SDD" / "AISDLC_SDD_v0.01"
-         / "tools" / "fsm_runtime" / "tests", True, 43),
+        (_TESTS_DIR, False, 53),                                       # 實測 56
+        (_REPO_ROOT / "AISDLC_SDD" / "scripts" / "tests", False, 28),  # 實測 29
+        (_REPO_ROOT / "AutoClaude" / "tests", True, 268),              # 實測 282
+        (_latest_fsm_tests_dir(), True, 74),                           # 實測 78
+        (_REPO_ROOT / "AISDLC_SDD" / "AISDLC_SDD_v0.01"                # 實測 54
+         / "tools" / "fsm_runtime" / "tests", True, 51),
     ]
 
 
@@ -381,6 +535,7 @@ class TestNoInTreeWritableTmpDir(unittest.TestCase):
         offenders: list[str] = []
         stale: list[str] = []
         parse_failures: list[str] = []
+        counts: list[tuple[str, int, int]] = []
         for root, recursive, floor in _tmpdir_scan_roots():
             self.assertTrue(root.is_dir(), f"掃描根缺席：{root}（邊界不得靜默縮小）")
             files = sorted(root.rglob("*.py") if recursive else root.glob("*.py"))
@@ -395,10 +550,7 @@ class TestNoInTreeWritableTmpDir(unittest.TestCase):
                 offenders.extend(off)
                 stale.extend(st)
                 scanned += 1
-            self.assertGreaterEqual(
-                scanned, floor,
-                f"{root} 掃描檔數 {scanned} < 下限 {floor}——該樹掃描面疑似縮小",
-            )
+            counts.append((root.relative_to(_REPO_ROOT).as_posix(), scanned, floor))
         self.assertEqual(
             parse_failures, [],
             "以下 .py 無法 parse——掃描面不得靜默縮小：\n" + "\n".join(parse_failures),
@@ -414,6 +566,8 @@ class TestNoInTreeWritableTmpDir(unittest.TestCase):
             stale, [],
             f"{_TMPDIR_OK_MARKER} 豁免標記 stale（防清單腐化）：\n" + "\n".join(stale),
         )
+        band = floor_band_problems(counts)
+        self.assertEqual(band, [], "掃描面下限帶：\n" + "\n".join(band))
 
     # ── 以下以注入 fixture 自證判準紅綠（fixture 僅存在於 tmp，不留違規樣本於 repo）──
 
@@ -643,27 +797,7 @@ class TestNoPosixAbsPathLiteralInAsserts(unittest.TestCase):
     """assert 引數不得寫死 POSIX 絕對路徑字面值（見上方區段 WHY）。"""
 
     def test_no_posix_abs_literal_asserted_against_path_output(self) -> None:
-        offenders: list[str] = []
-        stale: list[str] = []
-        parse_failures: list[str] = []
-        for root, recursive, floor in _scan_roots():
-            self.assertTrue(root.is_dir(), f"掃描根缺席：{root}（邊界不得靜默縮小）")
-            files = sorted(root.rglob("*.py") if recursive else root.glob("*.py"))
-            scanned = 0
-            for py in files:
-                rel = py.relative_to(_REPO_ROOT).as_posix()
-                try:
-                    off, st = scan_posix_abs_asserts(py.read_text(encoding="utf-8"), rel)
-                except (SyntaxError, UnicodeDecodeError, ValueError) as exc:
-                    parse_failures.append(f"{rel}: {type(exc).__name__}: {exc}")
-                    continue
-                offenders.extend(off)
-                stale.extend(st)
-                scanned += 1
-            self.assertGreaterEqual(
-                scanned, floor,
-                f"{root} 掃描檔數 {scanned} < 下限 {floor}——該樹掃描面疑似縮小",
-            )
+        offenders, stale, parse_failures, band = run_unit_scan(scan_posix_abs_asserts)
         self.assertEqual(
             parse_failures, [],
             "以下 .py 無法 parse——掃描面不得靜默縮小：\n" + "\n".join(parse_failures),
@@ -680,6 +814,7 @@ class TestNoPosixAbsPathLiteralInAsserts(unittest.TestCase):
             stale, [],
             f"{_POSIX_OK_MARKER} 豁免標記 stale（防清單腐化）：\n" + "\n".join(stale),
         )
+        self.assertEqual(band, [], "掃描面下限帶：\n" + "\n".join(band))
 
     # ── 以下以注入 fixture 自證判準紅綠（fixture 僅存在於字串，不留違規樣本於 repo）──
 
@@ -918,27 +1053,7 @@ class TestNoMockCallObjectRepr(unittest.TestCase):
     """拼裝斷言用輸出時不得 repr 整個 mock.call 物件（見上方區段 WHY）。"""
 
     def test_no_call_object_repr_used_to_build_asserted_output(self) -> None:
-        offenders: list[str] = []
-        stale: list[str] = []
-        parse_failures: list[str] = []
-        for root, recursive, floor in _scan_roots():
-            self.assertTrue(root.is_dir(), f"掃描根缺席：{root}（邊界不得靜默縮小）")
-            files = sorted(root.rglob("*.py") if recursive else root.glob("*.py"))
-            scanned = 0
-            for py in files:
-                rel = py.relative_to(_REPO_ROOT).as_posix()
-                try:
-                    off, st = scan_call_obj_repr(py.read_text(encoding="utf-8"), rel)
-                except (SyntaxError, UnicodeDecodeError, ValueError) as exc:
-                    parse_failures.append(f"{rel}: {type(exc).__name__}: {exc}")
-                    continue
-                offenders.extend(off)
-                stale.extend(st)
-                scanned += 1
-            self.assertGreaterEqual(
-                scanned, floor,
-                f"{root} 掃描檔數 {scanned} < 下限 {floor}——該樹掃描面疑似縮小",
-            )
+        offenders, stale, parse_failures, band = run_unit_scan(scan_call_obj_repr)
         self.assertEqual(
             parse_failures, [],
             "以下 .py 無法 parse——掃描面不得靜默縮小：\n" + "\n".join(parse_failures),
@@ -953,6 +1068,7 @@ class TestNoMockCallObjectRepr(unittest.TestCase):
             stale, [],
             f"{_CALLREPR_OK_MARKER} 豁免標記 stale（防清單腐化）：\n" + "\n".join(stale),
         )
+        self.assertEqual(band, [], "掃描面下限帶：\n" + "\n".join(band))
 
     # ── 以注入 fixture 自證判準紅綠 ──────────────────────────────────────────
 
@@ -1258,27 +1374,7 @@ class TestNoPlatformDependentPathStringIdentity(unittest.TestCase):
     """Path 的平台相依字串化不得當識別鍵／比對值（見上方區段 WHY）。"""
 
     def test_no_platform_dependent_path_string_identity(self) -> None:
-        offenders: list[str] = []
-        stale: list[str] = []
-        parse_failures: list[str] = []
-        for root, recursive, floor in _scan_roots():
-            self.assertTrue(root.is_dir(), f"掃描根缺席：{root}（邊界不得靜默縮小）")
-            files = sorted(root.rglob("*.py") if recursive else root.glob("*.py"))
-            scanned = 0
-            for py in files:
-                rel = py.relative_to(_REPO_ROOT).as_posix()
-                try:
-                    off, st = scan_path_str_identity(py.read_text(encoding="utf-8"), rel)
-                except (SyntaxError, UnicodeDecodeError, ValueError) as exc:
-                    parse_failures.append(f"{rel}: {type(exc).__name__}: {exc}")
-                    continue
-                offenders.extend(off)
-                stale.extend(st)
-                scanned += 1
-            self.assertGreaterEqual(
-                scanned, floor,
-                f"{root} 掃描檔數 {scanned} < 下限 {floor}——該樹掃描面疑似縮小",
-            )
+        offenders, stale, parse_failures, band = run_unit_scan(scan_path_str_identity)
         self.assertEqual(
             parse_failures, [],
             "以下 .py 無法 parse——掃描面不得靜默縮小：\n" + "\n".join(parse_failures),
@@ -1293,6 +1389,7 @@ class TestNoPlatformDependentPathStringIdentity(unittest.TestCase):
             stale, [],
             f"{_PATHKEY_OK_MARKER} 豁免標記 stale（防清單腐化）：\n" + "\n".join(stale),
         )
+        self.assertEqual(band, [], "掃描面下限帶：\n" + "\n".join(band))
 
     # ── 以注入 fixture 自證判準紅綠 ──────────────────────────────────────────
 
@@ -1979,16 +2076,20 @@ class TestSkipDirectionAndTagSymmetry(unittest.TestCase):
             _wst.site_class_census_problems(better), "收斂後未下修基線卻放行——會就地腐化")
         self.assertTrue(_wst.site_class_census_problems({}), "掃描面消失竟放行——fail-open")
 
-    def test_scan_surface_spans_the_three_live_test_trees(self) -> None:
-        """🔴 PKG-4 D 的射程面：判準必須看到三棵活測試樹，不是只有一棵。
+    def test_scan_surface_spans_the_live_test_trees(self) -> None:
+        """🔴 PKG-4 D 的射程面：判準必須看到全部活測試樹，不是只有一棵。
 
         意圖：R72 的射程只有 `tools/tests/`（實測 53 支檔），而 repo 活測試檔共 337 支
         ⇒ 84% 不在任何方向判準的射程內。射程若被縮回一棵樹，本支當場紅。
+        本輪第四棵＝LATEST 版 `tools/fsm_runtime/tests`（此前整棵零覆蓋，該樹的 4 個
+        skip 站點對所有機械物隱形）；版本目錄名以「LATEST」正規化，升版不失效。
         """
+        latest_name = _latest_root().name
         trees = _wst.scan_tree_sources(_REPO_ROOT, _TESTS_DIR, "test_*.py")
         self.assertEqual(
-            sorted(trees),
-            ["AISDLC_SDD/scripts/tests", "AutoClaude/tests", "tools/tests"],
+            sorted(t.replace(latest_name, "LATEST") for t in trees),
+            ["AISDLC_SDD/LATEST/tools/fsm_runtime/tests",
+             "AISDLC_SDD/scripts/tests", "AutoClaude/tests", "tools/tests"],
             f"掃描面的樹清單不對（實得 {sorted(trees)}）",
         )
         for tree, sources in trees.items():
@@ -2164,19 +2265,14 @@ def scan_missing_encoding(source: str, rel: str) -> tuple[list[str], list[str]]:
 
 
 def _encoding_scan_files() -> list[Path]:
-    """射程＝本檔第一道判準的 `_scan_roots()`（四棵測試樹 ＋ 生產碼樹）。
+    """射程＝本檔共用的 `_scan_units()`（測試樹 ＋ 生產碼樹 ＋ 零散單檔）。
 
-    刻意**共用**同一組掃描根而不另列一份：兩份清單就是兩個會漂移的真相，而
-    `_scan_roots()` 已有逐樹檔數下限在守「靜默縮面」。
+    刻意**共用**同一組掃描單位而不另列一份：兩份清單就是兩個會漂移的真相，而
+    `_scan_units()` 已有逐單位檔數的雙邊帶在守「靜默縮面」與「下限自己過期」。
     """
     out: list[Path] = []
-    for root, recursive, _floor in _scan_roots():
-        if not root.is_dir():
-            continue
-        for p in (root.rglob("*.py") if recursive else root.glob("*.py")):
-            if "__pycache__" in p.parts:
-                continue
-            out.append(p)
+    for _label, files, _floor in _scan_units():
+        out.extend(files)
     return sorted(set(out))
 
 
@@ -2224,9 +2320,10 @@ class TestTextIoDeclaresEncoding(unittest.TestCase):
 
     def test_debt_ratchet_is_exact_and_shrink_only(self) -> None:
         per_file, stale, detail, scanned = self._scan_repo()
-        # 反空轉下限＝R76 實掃數打八折取整；射程若被縮小必紅。
-        self.assertGreaterEqual(
-            scanned, 648, f"encoding 掃描面只有 {scanned} 檔——射程疑似被縮小")
+        # 反空轉下限＝落地當回合實測 × 0.95（本輪由「打八折的化石 648」重釘），
+        # 並套與各掃描單位同一條腐化上界——單邊下限必然腐化，見 `_scan_roots` WHY。
+        surface = tree_count_verdict("encoding 掃描面", scanned, 812)
+        self.assertIsNone(surface, surface or "")
         self.assertEqual(
             stale, [],
             f"{_ENCODING_OK_MARKER} 豁免標記 stale（防清單腐化）：\n" + "\n".join(stale))
@@ -2453,6 +2550,471 @@ class TestEncodingMarkersDoNotCollide(unittest.TestCase):
                 self.assertEqual(
                     _encoding_markers(f"x = 1  # {foreign} 走系統碼頁\n"), {},
                     f"本判準把 `{foreign}` 的合法豁免認領走了")
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# 本輪 — 掃描面對稱鎖 ＋ 下限雙邊帶自證（缺陷本體見 `_scan_roots()` 的 ① ②）
+# ══════════════════════════════════════════════════════════════════════════════
+class TestScanSurfaceParityWithSisterLock(unittest.TestCase):
+    """本檔與姊妹鎖的掃描面必須逐檔對得起來（擴一邊沒擴另一邊即紅）。
+
+    WHY 這道鎖非有不可：兩支鎖各自維護一份樹清單，而「擴掃描面」是一個**逐鎖**
+    發生的動作。本輪實測到的落差是 44 支 active `.py`，且缺口正好蓋住整層 hook
+    ——沒有任何機械物會在落差出現的當回合說話，兩份清單只會愈走愈遠。
+    判準取**集合相等**而非「本檔 ⊇ 姊妹鎖」：後者允許本檔單向長大，於是下一次
+    輪到姊妹鎖漏掉東西時同樣沒人說話（單邊判準必然腐化，與下限那筆同型）。
+    """
+
+    @staticmethod
+    def _sister_files() -> set[Path]:
+        files: set[Path] = set()
+        for root, _floor in _sister._scan_roots():
+            if not root.is_dir():
+                continue
+            files.update(p for p in root.rglob("*.py") if "__pycache__" not in p.parts)
+        files.update(p for p in _sister._scan_single_files() if p.is_file())
+        return files
+
+    def _own_files(self) -> set[Path]:
+        return {p for _label, files, _floor in _scan_units() for p in files}
+
+    def test_the_two_locks_see_exactly_the_same_python_files(self) -> None:
+        mine, sister = self._own_files(), self._sister_files()
+        only_sister = sorted(p.relative_to(_REPO_ROOT).as_posix() for p in sister - mine)
+        only_mine = sorted(p.relative_to(_REPO_ROOT).as_posix() for p in mine - sister)
+        self.assertEqual(
+            (only_sister, only_mine), ([], []),
+            "兩支姊妹平台鎖的掃描面已分岔——只有一邊看得到的檔就是「同一種缺陷換棵樹"
+            "寫就免費過關」的那個縫。修法＝把缺的樹補進 `_scan_roots()`／"
+            "`_scan_single_files()`（兩邊都要），不要縮小另一邊來湊相等。\n"
+            f"只有姊妹鎖看得到：{only_sister}\n只有本檔看得到：{only_mine}",
+        )
+
+    def test_the_surface_is_not_trivially_small(self) -> None:
+        """反空轉：兩邊同時崩塌成空集合時「相等」也會成立，故另釘絕對量。"""
+        verdict = tree_count_verdict("兩鎖共同掃描面", len(self._own_files()), 812)
+        self.assertIsNone(verdict, verdict or "")
+
+
+class TestScanRootFloorBand(unittest.TestCase):
+    """下限帶的紅綠自證（雙向）＋ 每個釘下去的下限都必須對當下實測成立。"""
+
+    def test_the_band_is_red_in_both_directions(self) -> None:
+        """人為**壓低**實測值與**抬高**實測值，兩個方向都必須轉紅。
+
+        單邊下限只在往下掉時說話——這正是本輪立案的形態（實測 `tools/tests`
+        floor=10／actual=56 ⇒ 可靜默蒸發 82% 掃描面而全綠）。
+        """
+        floor = 53
+        shrink = floor_band_problems([("tools/tests", 10, floor)])
+        self.assertEqual(len(shrink), 1, "壓低實測值竟未轉紅 ⇒ 下界那一半沒有牙")
+        self.assertIn("疑似縮小", shrink[0])
+        rot = floor_band_problems([("tools/tests", repin_ceiling(floor) + 1, floor)])
+        self.assertEqual(len(rot), 1, "抬高實測值竟未轉紅 ⇒ 上界那一半沒有牙")
+        self.assertIn("腐化上界", rot[0])
+        self.assertIn(str(suggested_floor(repin_ceiling(floor) + 1)), rot[0],
+                      "訊息必須直接給出該重釘的數字，否則「該重釘」只是一句期許")
+        inside = floor_band_problems([
+            ("tools/tests", floor, floor),
+            ("tools/tests", repin_ceiling(floor), floor),
+            ("tools/tests", 56, floor),
+        ])
+        self.assertEqual(inside, [], f"帶內組合被誤判為紅：{inside}")
+
+    def test_every_pinned_floor_is_inside_its_own_band_right_now(self) -> None:
+        """設定面複本：即使正職判準因別的原因沒跑，下限本身仍被量。"""
+        counts = [(label, len(files), floor) for label, files, floor in _scan_units()]
+        problems = floor_band_problems(counts)
+        self.assertEqual(problems, [], "\n".join(problems))
+
+    def test_tmpdir_floors_are_inside_their_band_too(self) -> None:
+        """第二道判準的掃描根用的是另一份清單，同樣受雙邊帶管轄。"""
+        counts = []
+        for root, recursive, floor in _tmpdir_scan_roots():
+            found = root.rglob("*.py") if recursive else root.glob("*.py")
+            n = len([p for p in found if "__pycache__" not in p.parts])
+            counts.append((root.relative_to(_REPO_ROOT).as_posix(), n, floor))
+        problems = floor_band_problems(counts)
+        self.assertEqual(problems, [], "\n".join(problems))
+
+    def test_single_file_unit_is_pinned_by_name(self) -> None:
+        """零散單檔清單釘選：刪一列即該檔靜默出界（同樹清單防護語意）。"""
+        latest_name = _latest_root().name
+        rels = {
+            f.relative_to(_REPO_ROOT).as_posix().replace(latest_name, "LATEST")
+            for f in _scan_single_files()
+        }
+        self.assertEqual(
+            rels,
+            {"AISDLC_SDD/conftest.py", "AISDLC_SDD/LATEST/tools/__init__.py"},
+        )
+        self.assertEqual(_SINGLE_FILE_FLOOR, len(_scan_single_files()),
+                         "單檔下限與清單長度脫鉤 ⇒ 刪一列不會紅")
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# 本輪 — 第六道判準：對面平台專屬 API 必須帶平台守衛
+# ══════════════════════════════════════════════════════════════════════════════
+# 缺陷本體（雙向注入實測，注入點固定為**生產碼**路徑而非測試樹，R68-34 判例）：
+#   方向 mac→Windows 的 10 題語料，被本 repo 全部靜態判準攔下的是 **0 題**；
+#   方向 Windows→mac 的 12 題，攔下 5 題（扣掉順帶命中只有 4 題）。也就是
+#   「在 mac 上寫出只有 POSIX 成立的程式碼」這一整類，本機四關全部放行，唯一的
+#   發現通道是雲端 windows-compat-ci——而雲端額度正好停擺。
+#
+# 判準只問兩個問題（刻意窄，寬判準製造的假紅會逼下一輪把整條鎖關掉）：
+#   ① 這個 symbol 是不是單平台專屬？（下方三張白名單，**不含**跨平台但語意不同的
+#      `os.chmod`／`os.stat` 那類——落地當回合實測 `os.chmod` 帶執行位的站點有 9 個
+#      合法用法在 `tools/tests`，納入即上線全紅，正是本 repo 判過的「永紅的閘門會被
+#      整個關掉」形態）；
+#   ② 它之前有沒有平台守衛？**直接複用**第五道判準已驗紅綠的 `_PLATFORM_GUARDS`
+#      與「守衛必須排在讀取之前」那條順序判準，不另立一套。
+#      另接受 `hasattr(os, "<名字>")` 這種明示能力探測——那正是修法慣例，判準不能
+#      反過來懲罰它。
+#
+# 🔴 刻意劃界（勿超譯）：判準是 **AST** 的，故註解與 docstring 內提到這些名字不算
+#   使用（落地當回合先寫過一版行掃描，實測 68 筆命中裡絕大多數是 docstring 舉例）；
+#   也**不做值流分析**——`getattr(os, "fork")()` 這種動態取用抓不到。
+#   字面值類（`/tmp` 硬編、`"/" `串接、`.exe` 後綴假設）**不在本判準內**，理由是
+#   實測存量 52 筆且多為測試 fixture 的不透明字串；它們在下方注入語料矩陣裡以
+#   `caught=False` 逐題記帳，於是「還沒被守住的是哪幾類」是可查的量測值而非散文。
+_XPLAT_OK_MARKER = "xplat-ok:"
+#: POSIX 專屬模組（Windows 上 import 即 ModuleNotFoundError）。
+_POSIX_ONLY_MODULES = frozenset({"pwd", "grp", "fcntl", "termios", "resource"})
+#: Windows 專屬模組（POSIX 上 import 即 ModuleNotFoundError）。
+_WINDOWS_ONLY_MODULES = frozenset({"winreg", "msvcrt", "_winapi"})
+#: `os.<名字>`：POSIX 專屬（Windows 上該屬性不存在）。
+_POSIX_ONLY_OS_ATTRS = frozenset({
+    "fork", "forkpty", "killpg", "getuid", "geteuid", "getgid", "getegid",
+    "getlogin", "setsid", "chown", "uname", "getpgid", "symlink",
+})
+#: `os.<名字>`：Windows 專屬。
+_WINDOWS_ONLY_OS_ATTRS = frozenset({"startfile", "O_BINARY", "O_NOINHERIT"})
+#: `signal.<名字>`：POSIX 專屬訊號。
+_POSIX_ONLY_SIGNALS = frozenset({"SIGKILL", "SIGUSR1", "SIGUSR2", "SIGHUP", "SIGQUIT"})
+
+
+def _xplat_markers(source: str) -> dict[int, str]:
+    """{行號: WHY}——只認 COMMENT token（字串內同形文字不得當豁免用）。"""
+    markers: dict[int, str] = {}
+    try:
+        for tok in tokenize.generate_tokens(io.StringIO(source).readline):
+            if tok.type == tokenize.COMMENT and _XPLAT_OK_MARKER in tok.string:
+                markers[tok.start[0]] = tok.string.split(_XPLAT_OK_MARKER, 1)[1].strip()
+    except (tokenize.TokenError, IndentationError, SyntaxError):
+        markers.clear()
+    return markers
+
+
+def _capability_probed(tree: ast.AST) -> set[str]:
+    """`hasattr(<任何東西>, "<名字>")` 探測過的名字＝作者已明示這是可選能力。"""
+    probed: set[str] = set()
+    for node in ast.walk(tree):
+        if (isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
+                and node.func.id == "hasattr" and len(node.args) == 2
+                and isinstance(node.args[1], ast.Constant)
+                and isinstance(node.args[1].value, str)):
+            probed.add(node.args[1].value)
+    return probed
+
+
+def _foreign_api_uses(tree: ast.AST, probed: set[str]) -> list[tuple[int, str, str]]:
+    """(行號, 方向, 說明)——AST 上所有單平台專屬 symbol 的使用點。"""
+    found: list[tuple[int, str, str]] = []
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            for alias in node.names:
+                top = alias.name.split(".")[0]
+                if top in _POSIX_ONLY_MODULES:
+                    found.append((node.lineno, "POSIX-only", f"import {top}"))
+                elif top in _WINDOWS_ONLY_MODULES:
+                    found.append((node.lineno, "Windows-only", f"import {top}"))
+        elif isinstance(node, ast.ImportFrom) and node.module:
+            top = node.module.split(".")[0]
+            if top in _POSIX_ONLY_MODULES:
+                found.append((node.lineno, "POSIX-only", f"from {top} import …"))
+            elif top in _WINDOWS_ONLY_MODULES:
+                found.append((node.lineno, "Windows-only", f"from {top} import …"))
+        elif isinstance(node, ast.Attribute) and isinstance(node.value, ast.Name):
+            owner, attr = node.value.id, node.attr
+            if attr in probed:
+                continue
+            if owner == "os" and attr in _POSIX_ONLY_OS_ATTRS:
+                found.append((node.lineno, "POSIX-only", f"os.{attr}"))
+            elif owner == "os" and attr in _WINDOWS_ONLY_OS_ATTRS:
+                found.append((node.lineno, "Windows-only", f"os.{attr}"))
+            elif owner == "signal" and attr in _POSIX_ONLY_SIGNALS:
+                found.append((node.lineno, "POSIX-only", f"signal.{attr}"))
+        elif isinstance(node, ast.keyword) and node.arg == "preexec_fn":
+            found.append((node.lineno, "POSIX-only", "preexec_fn=（Windows 不支援）"))
+        elif (isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)
+              and node.func.attr in {"set_start_method", "get_context"}
+              and node.args and isinstance(node.args[0], ast.Constant)
+              and node.args[0].value in {"fork", "forkserver"}):
+            found.append((node.lineno, "POSIX-only",
+                          f"{node.func.attr}('{node.args[0].value}')"))
+    return found
+
+
+def scan_foreign_platform_api(source: str, rel: str) -> tuple[list[str], list[str]]:
+    """純函式核心：回傳 (offenders, stale_markers)，元素皆為 `rel:行號: 說明`。"""
+    try:
+        tree = ast.parse(source)
+    except SyntaxError:
+        return [], []
+    lines = source.splitlines()
+    markers = _xplat_markers(source)
+    guard_first_at: int | None = next(
+        (n for n, line in enumerate(lines, 1) if any(g in line for g in _PLATFORM_GUARDS)),
+        None,
+    )
+    offenders: list[str] = []
+    used: set[int] = set()
+    for lineno, side, what in sorted(set(_foreign_api_uses(tree, _capability_probed(tree)))):
+        if markers.get(lineno):
+            used.add(lineno)
+            continue
+        if guard_first_at is not None and guard_first_at < lineno:
+            continue
+        offenders.append(
+            f"{rel}:{lineno}: 使用 {side} 的 `{what}` 但該行之前全檔沒有任何平台守衛"
+            "——對面平台上它不是「行為不同」而是「直接炸掉」（缺屬性／ImportError）"
+        )
+    stale = [
+        f"{rel}:{lineno}: {_XPLAT_OK_MARKER} 標記 stale"
+        f"（{'WHY 留空' if not why else '該行無被壓下的違規'}）"
+        for lineno, why in sorted(markers.items())
+        if lineno not in used or not why
+    ]
+    return offenders, stale
+
+
+class TestForeignPlatformApiIsGuarded(unittest.TestCase):
+    """對面平台專屬 API 必須帶平台守衛（見上方區段 WHY）。"""
+
+    def test_no_unguarded_foreign_platform_api(self) -> None:
+        offenders, stale, parse_failures, band = run_unit_scan(scan_foreign_platform_api)
+        self.assertEqual(
+            parse_failures, [],
+            "以下 .py 無法 parse——掃描面不得靜默縮小：\n" + "\n".join(parse_failures),
+        )
+        self.assertEqual(
+            offenders, [],
+            "發現未守衛的單平台專屬 API（落地當回合全庫存量為 0，故本判準是零容忍、"
+            "沒有棘輪可以躲）——請加平台守衛（見 `_PLATFORM_GUARDS`）、改用 "
+            f"`hasattr` 明示可選能力，或於該行行尾加 `# {_XPLAT_OK_MARKER} <WHY>`：\n"
+            + "\n".join(offenders),
+        )
+        self.assertEqual(
+            stale, [],
+            f"{_XPLAT_OK_MARKER} 豁免標記 stale（防清單腐化）：\n" + "\n".join(stale),
+        )
+        self.assertEqual(band, [], "掃描面下限帶：\n" + "\n".join(band))
+
+    # ── 以合成樣本自證判準紅綠（樣本只存在於字串，不留違規樣本於 repo）──────
+
+    def _scan(self, source: str) -> tuple[list[str], list[str]]:
+        return scan_foreign_platform_api(source, _INJECTION_TARGET_REL)
+
+    def test_each_whitelisted_symbol_family_is_detected(self) -> None:
+        for sample in (
+            "import pwd\n",
+            "import winreg\n",
+            "def f():\n    return os.fork()\n",
+            "def f(p):\n    os.killpg(p, signal.SIGKILL)\n",
+            "def f(p):\n    os.startfile(p)\n",
+            "def f(c):\n    subprocess.run(c, preexec_fn=None)\n",
+            'def f(mp):\n    mp.set_start_method("fork")\n',
+        ):
+            with self.subTest(sample=sample):
+                off, _ = self._scan(sample)
+                self.assertTrue(off, f"{sample!r} 漏抓 ⇒ 白名單那一半沒有牙")
+
+    def test_a_guard_before_the_use_is_accepted(self) -> None:
+        """修法慣例必綠——否則本鎖會逼人把守衛拿掉。"""
+        for sample in (
+            'import sys\nif sys.platform == "win32":\n    import winreg\n',
+            'def f():\n    if os.name == "nt":\n        return None\n    return os.fork()\n',
+            'def f():\n    if hasattr(os, "geteuid"):\n        return os.geteuid()\n'
+            "    return 0\n",
+        ):
+            with self.subTest(sample=sample):
+                off, stale = self._scan(sample)
+                self.assertEqual((off, stale), ([], []), f"{sample!r} 誤報")
+
+    def test_a_guard_after_the_use_does_not_count(self) -> None:
+        """守衛排在使用之後不算（DEF-101-766 的形態，沿用第五道判準的順序語意）。"""
+        off, _ = self._scan(
+            'def f():\n    pid = os.fork()\n    if os.name == "nt":\n'
+            "        return None\n    return pid\n"
+        )
+        self.assertEqual(len(off), 1, off)
+
+    def test_mentions_in_comments_and_docstrings_are_not_uses(self) -> None:
+        """對照組：註解／docstring 提到這些名字不算使用（假紅會逼人關掉整條鎖）。"""
+        for sample in (
+            "# 這裡本來想用 os.fork()，改走 subprocess\nx = 1\n",
+            '"""說明：POSIX 上是 os.killpg + signal.SIGKILL。"""\nx = 1\n',
+            'MSG = "import pwd 在 Windows 上會 ImportError"\n',
+        ):
+            with self.subTest(sample=sample):
+                off, _ = self._scan(sample)
+                self.assertEqual(off, [], f"{sample!r} 誤報：{off}")
+
+    def test_marker_suppresses_and_a_dangling_marker_is_stale(self) -> None:
+        off, stale = self._scan(
+            f"def f():\n    return os.fork()  # {_XPLAT_OK_MARKER} 只在 POSIX 分支呼叫\n")
+        self.assertEqual((off, stale), ([], []))
+        off, stale = self._scan(f"x = 1  # {_XPLAT_OK_MARKER} 已改走 subprocess\n")
+        self.assertEqual(off, [])
+        self.assertEqual(len(stale), 1, "違規已消失的標記必須被指名刪除")
+        off, stale = self._scan(f"def f():\n    return os.fork()  # {_XPLAT_OK_MARKER}\n")
+        self.assertEqual(len(off), 1, "WHY 留空的標記不得生效")
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# 本輪 — 雙向注入語料矩陣（M5 的可重跑載具；此前語料零落點、結構上不可逐輪比較）
+# ══════════════════════════════════════════════════════════════════════════════
+# 缺陷本體：M5「雙向注入攔截率」的量測配方寫著「每輪跑固定形制 N=10 注入矩陣」，
+# 但語料本身**沒有任何落點**——每輪重新發明、量完就丟。R74 宣稱的六類基線全庫查無，
+# 於是那個數字結構上不可跨輪比較（`DEF-101-018` 同型：不可重現的存量數字）。
+#
+# 本表把語料落成**字串常數**（不是檔案：違規樣本不留在樹裡）並逐題釘住「現在有沒有
+# 被攔下」。兩個方向都會說話：
+#   · 某題由攔得到變成攔不到 ⇒ 判準退化，紅；
+#   · 某題由攔不到變成攔得到 ⇒ 有人補了判準，也紅，訊息要求把該題改成 True。
+# 後者刻意不放行——「進步沒有被記錄」就是下一輪又要重新發明語料的起點。
+#
+# 🔴 注入點固定為**生產碼**路徑：R68-34 判過「只掃測試樹」的偏差，語料若掛在測試樹
+#   路徑上，量到的是一個比實況樂觀的數字。
+_INJECTION_TARGET_REL = "AutoClaude/autoclaude/infra/adapters/injected_probe.py"
+#: 本檔自身也在掃描面內，故語料中會被**行掃描型**判準命中的字面值一律拆寫。
+_DRIVE_FRAG = "D" + ":/repo/out"
+_PATHEXT_FRAG = "PATH" + "EXT"
+
+
+def _injection_criteria() -> dict[str, Callable[[str, str], tuple[list[str], list[str]]]]:
+    """本檔全部判準的統一入口——語料逐題過**每一道**，不是只過一道。"""
+    return {
+        "drive-literal": scan_drive_literal,
+        "intree-tmpdir": scan_intree_tmpdir,
+        "posix-abs-assert": scan_posix_abs_asserts,
+        "call-obj-repr": scan_call_obj_repr,
+        "path-str-identity": scan_path_str_identity,
+        "pathext-guard": scan_unguarded_pathext,
+        "text-io-encoding": scan_missing_encoding,
+        "foreign-platform-api": scan_foreign_platform_api,
+    }
+
+
+#: (題號, 方向, 語料, 目前是否至少被一道判準攔下)
+_XPLAT_INJECTION_CORPUS: tuple[tuple[str, str, str, bool], ...] = (
+    # ── 方向甲：在 mac 上寫得出來、到 Windows 會壞 ──────────────────────────
+    ("a1-posix-sep-concat", "mac→Win",
+     'def f(root, name):\n    return root + "/" + name\n', False),
+    ("a2-tmp-hardcode", "mac→Win",
+     'OUT = "/tmp/autoclaude.log"\n', False),
+    ("a3-getlogin", "mac→Win",
+     "def f():\n    return os.getlogin()\n", True),
+    ("a4-pwd-module", "mac→Win",
+     "import pwd\n\n\ndef f(uid):\n    return pwd.getpwuid(uid).pw_name\n", True),
+    ("a5-chmod-exec", "mac→Win",
+     "def f(p):\n    os.chmod(p, 0o755)\n", False),
+    ("a6-fork", "mac→Win",
+     "def f():\n    return os.fork()\n", True),
+    ("a7-killpg-sigkill", "mac→Win",
+     "def f(pgid):\n    os.killpg(pgid, signal.SIGKILL)\n", True),
+    ("a8-shebang-exec", "mac→Win",
+     'def f(sub):\n    return sub.run(["./tools/local_ci_gate.sh"])\n', False),
+    ("a9-lf-only-write", "mac→Win",
+     'def f(p, body):\n    p.write_text(body, encoding="utf-8")\n', False),
+    ("a10-symlink", "mac→Win",
+     "def f(src, dst):\n    os.symlink(src, dst)\n", True),
+    # ── 方向乙：在 Windows 上寫得出來、到 mac 會壞 ──────────────────────────
+    ("b1-drive-literal", "Win→mac", f'ROOT = "{_DRIVE_FRAG}"\n', True),
+    ("b2-backslash-join", "Win→mac",
+     'def f(root, name):\n    return root + "\\\\" + name\n', False),
+    ("b3-pathext", "Win→mac",
+     f'def f():\n    return os.environ["{_PATHEXT_FRAG}"].split(";")\n', True),
+    ("b4-exe-suffix", "Win→mac",
+     'def f(name):\n    return name + ".exe"\n', False),
+    ("b5-cp950-encoding", "Win→mac",
+     'def f(p):\n    return p.read_text(encoding="cp950")\n', False),
+    ("b6-no-encoding", "Win→mac",
+     "def f(p):\n    return p.read_text()\n", True),
+    ("b7-winreg", "Win→mac",
+     "import winreg\n\n\ndef f():\n    return winreg.HKEY_LOCAL_MACHINE\n", True),
+    ("b8-schtasks", "Win→mac",
+     'def f(sub):\n    return sub.run(["schtasks", "/query"], check=False)\n', False),
+    ("b9-startfile", "Win→mac", "def f(p):\n    os.startfile(p)\n", True),
+    ("b10-case-insensitive", "Win→mac",
+     'def f(a, b):\n    return a.lower() == b.lower()\n', False),
+    ("b11-powershell-shell", "Win→mac",
+     'def f(sub, c):\n    return sub.run(["powershell.exe", "-Command", c],\n'
+     "                   capture_output=True, text=True)\n", False),
+    ("b12-msvcrt", "Win→mac",
+     "import msvcrt\n\n\ndef f():\n    return msvcrt.getch()\n", True),
+)
+
+
+def injection_hits(source: str) -> list[str]:
+    """語料被哪幾道判準攔下（排序後的判準名清單）。純函式，供矩陣與統計共用。"""
+    hits: list[str] = []
+    for name, scanner in _injection_criteria().items():
+        try:
+            offenders, _stale = scanner(source, _INJECTION_TARGET_REL)
+        except (SyntaxError, ValueError):
+            continue
+        if offenders:
+            hits.append(name)
+    return sorted(hits)
+
+
+class TestXplatInjectionMatrix(unittest.TestCase):
+    """雙向注入語料矩陣——M5 那個數字的唯一落點。"""
+
+    def test_every_sample_matches_its_recorded_verdict(self) -> None:
+        drift: list[str] = []
+        for case_id, direction, source, expected in _XPLAT_INJECTION_CORPUS:
+            hits = injection_hits(source)
+            if bool(hits) != expected:
+                verb = "現在攔得到了（請把該題改成 True）" if hits else "現在攔不到了（判準退化）"
+                drift.append(f"{case_id}［{direction}］{verb}；命中判準={hits}")
+        self.assertEqual(
+            drift, [],
+            "注入語料矩陣與釘住的判決不符。兩個方向都必須回來改這張表——"
+            "「進步沒有被記錄」就是下一輪又要重新發明語料的起點：\n" + "\n".join(drift),
+        )
+
+    def test_the_corpus_covers_both_directions_and_is_not_shrinking(self) -> None:
+        """語料本身不得縮水（`每輪強制抽換 ≥2 題防過擬合` 的前提是題數不掉）。"""
+        directions = {d for _c, d, _s, _e in _XPLAT_INJECTION_CORPUS}
+        self.assertEqual(directions, {"mac→Win", "Win→mac"})
+        self.assertGreaterEqual(len(_XPLAT_INJECTION_CORPUS), 22, "語料題數縮水")
+        ids = [c for c, _d, _s, _e in _XPLAT_INJECTION_CORPUS]
+        self.assertEqual(len(ids), len(set(ids)), "題號重複 ⇒ 逐題比較會對錯位")
+
+    def test_the_interception_rate_only_improves(self) -> None:
+        """逐輪可比的那個數字：兩個方向各自的攔截數，只准上升。
+
+        釘的是**當回合實測**（mac→Win 5/10、Win→mac 6/12）。動工前的實測是
+        mac→Win **0/10**——那一整類此前零機械物，本輪由第六道判準補上。
+        """
+        floors = {"mac→Win": 5, "Win→mac": 6}
+        caught = {"mac→Win": 0, "Win→mac": 0}
+        for _case_id, direction, source, _expected in _XPLAT_INJECTION_CORPUS:
+            if injection_hits(source):
+                caught[direction] += 1
+        for direction, floor in floors.items():
+            with self.subTest(direction=direction):
+                self.assertGreaterEqual(
+                    caught[direction], floor,
+                    f"{direction} 攔截數由 {floor} 掉到 {caught[direction]} ⇒ 判準退化",
+                )
+                self.assertEqual(
+                    caught[direction], floor,
+                    f"{direction} 攔截數由 {floor} 升到 {caught[direction]}——"
+                    "請把本表的下限同步上修，否則下一次退化會被舊值遮住",
+                )
         self.assertEqual(
             _encoding_markers(f"x = 1  # {_ENCODING_OK_MARKER} 自家 WHY\n"),
             {1: "自家 WHY"}, "本判準認不出自己的標記 ⇒ 上一條變成恆真的假綠")

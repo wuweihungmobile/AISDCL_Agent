@@ -526,3 +526,61 @@ class TestUnittestDiscoverConformance(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+# ── smoke 家族雙平台 CLI 契約對等（DEF-101-810 同型缺口，本輪補上）─────────
+# 為何住這一檔：本檔主題就是「兩平台排程腳本的能力必須對等」，而兩支 smoke 正是
+# install_mac_nightly.sh／install_windows_nightly.ps1 註冊的排程對象之一。
+# 為何不新開一支鎖檔：`tools/tests` 有 `_FROZEN_GUARD_FILE_COUNT` 棘輪（新增鎖檔
+# 必紅），沿用 DEF-101-519 的折中慣例——併進既有 parity 測試。
+_MAC_SMOKE = _REPO_ROOT / "tools" / "macos_smoke_local.sh"
+_WIN_SMOKE = _REPO_ROOT / "tools" / "windows_smoke_local.ps1"
+
+
+class TestSmokeCliContractParity(unittest.TestCase):
+    """兩支 smoke 都必須有「印用法即結束／未知引數 fail-loud」的關卡。
+
+    WHY：mac 側自 R69（DEF-101-702）就有 `_usage()` ＋ for/case 關卡；Windows 側
+    在本輪之前全檔零 argv 處理，`--help` 與任何打錯的旗標都被靜默丟棄、整套 smoke
+    照跑到底。這是純粹的雙平台不對稱，而且 `.ps1` 那一側的副作用更重——它的取證層
+    會**先把上一輪的 windows_smoke_latest.log 搬成 dated 檔**再開新 transcript，
+    於是一次誤打旗標就把上一輪的心跳指標推走。
+    """
+
+    def test_mac_smoke_has_usage_and_rejects_unknown_flags(self) -> None:
+        src = _MAC_SMOKE.read_text(encoding="utf-8")
+        self.assertIn("-h|--help)", src, "mac smoke 必須有 -h/--help 分支")
+        self.assertIn("未知旗標", src, "mac smoke 必須對未知旗標 fail-loud")
+        self.assertIn("exit 2", src, "用法錯誤必須 rc=2（與 .ps1 側同語意）")
+
+    def test_win_smoke_has_usage_and_rejects_unknown_args(self) -> None:
+        src = _WIN_SMOKE.read_text(encoding="utf-8")
+        self.assertIn(
+            "param([switch]$Help)", src,
+            "windows smoke 必須有頂層 param()——沒有它，PowerShell 會把旗標整批"
+            "丟進 $args 靜默丟棄，整套 smoke 照跑",
+        )
+        self.assertIn("if ($Help) {", src, "必須有 -Help 分支（--help／-h 由前綴比對命中）")
+        self.assertIn(
+            "if ($args.Count -gt 0) {", src,
+            "必須拒絕未知／多餘引數；只加 -Help 而不擋 $args 等於只修一半",
+        )
+        self.assertIn("exit 2", src, "用法錯誤必須 rc=2（與 .sh 側同語意）")
+
+    def test_win_smoke_guard_precedes_its_first_side_effect(self) -> None:
+        """順序才是本缺陷的本體：關卡排在取證層之後，副作用一件都沒少。"""
+        src = _WIN_SMOKE.read_text(encoding="utf-8")
+        help_idx = src.index("if ($Help) {")
+        args_idx = src.index("if ($args.Count -gt 0) {")
+        move_idx = src.index("Move-Item -LiteralPath $LatestLog")
+        transcript_idx = src.index("Start-Transcript")
+        self.assertLess(
+            args_idx, move_idx,
+            "關卡必須排在「把上一輪 latest 歸檔」之前，否則誤打旗標就推走心跳",
+        )
+        self.assertLess(args_idx, transcript_idx, "關卡必須排在 Start-Transcript 之前")
+        self.assertLess(help_idx, args_idx, "-Help 分支必須與未知引數關卡相鄰")
+        # 形狀在不代表行為在：兩個分支都必須真的中止（只印訊息＝照樣往下跑）
+        self.assertIn("exit 0", src[help_idx:args_idx], "-Help 分支必須 exit 0 中止")
+        self.assertIn(
+            "exit 2", src[args_idx:transcript_idx],
+            "未知引數分支必須 exit 2 中止，不得只印訊息後落下去",
+        )

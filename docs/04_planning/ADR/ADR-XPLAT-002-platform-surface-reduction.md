@@ -109,6 +109,11 @@ Architect 給的判準是「`13 對 + 18 支單邊` 必須下降」。但那個�
 
 ### 2.1 登記表現況
 
+🔴 **本小節是本 ADR 撰寫當時的 dated snapshot，不是今天的現況**（本輪 E-11 併同標注：
+標題的「現況」二字在寫下的那一刻是對的，此後每一輪都讓它更假——下方 UEP 與 AC 兩個值
+如今皆已改變）。要今天的值一律現查 `python tools/check_script_parity.py --print-collapse`；
+本小節保留原值是因為 §4 的判定規則以它為**起算基線**，改掉會讓「相對於基線降了多少」失去參照。
+
 ```
 $ python <scratchpad>/uep.py            # 只 import 既有登記表，不新增度量檔
 REAL_RC=0
@@ -511,11 +516,20 @@ AC = |_PINNED_SHA256| + |_THINNESS_ENROLLED| + |_EXEMPT_PAIRS|
 🔴 **R65 訂正（四方複審 MAJOR）**：`_TLC_TRACK_ENROLLED` 已隨 run_tlc.{sh,ps1} 薄殼化
 整條退場（見 §4.1「已達成」列），AC 公式改以 `_LATEST_PINNED_SHA256`／
 `_LATEST_THINNESS_ENROLLED` 兩張新表接手其「描述性常數登記」角色（同 §5 Phase 2-A
-說明）。**現值＝48**（14 + 7 + 5 + 18 + 2 + 1 + 1，`python tools/check_script_parity.py
---print-collapse` 2026-07-31 工作樹實測逐字輸出：`PINNED_SHA256=14`／
-`THINNESS_ENROLLED=7`／`EXEMPT_PAIRS=5`／`SINGLE_SIDED_EXEMPT=18`／
-`LATEST_PINNED_SHA256=2`／`LATEST_THINNESS_ENROLLED=1`／`MIN_EXTRACT_COUNTS=1`，
-rc=0，與 `tools/check_script_parity.py::_print_collapse()` 程式碼逐項核對一致）。
+說明）。
+
+🔴 **本輪（E-11）訂正：本段不再登載 AC 現值與各分項筆數，一律現查**——
+```
+python tools/check_script_parity.py --print-collapse     # 前兩行即 UEP／AC，其下逐項列出七張表的筆數
+```
+被拿掉的是**兩個會漂的常數**：此處原先寫死的 AC 值與 `_SINGLE_SIDED_EXEMPT` 筆數，
+在 R76 刪掉一支真孤兒（`reschedule_g0_gatecheck.ps1`）之後**同一輪就過期了**——
+`tools/tests/test_adr_xplat001_c1c2_lock.py` 的 `_FROZEN_SCAN_H_AC` 那一家由
+`test_the_frozen_pair_matches_the_live_values` 逐字綁著現況、自動跟著下修，
+而本段這一家沒有任何機械物在看。**同一份知識住兩個家、只有一個家被鎖**，
+正是本 ADR §8 表頭規則 3（完成判準欄禁寫死量測常數）要治的形態在**規則自己那一節之外**的復發；
+守該規則的 SC-3 只掃 §8，掃不到 §4.2。權威值只有一個家：上面那條指令；
+它與 `_FROZEN_SCAN_H_AC` 的一致性由該鎖強制（多退少補都紅）。
 
 「描述性常數」＝存在的唯一目的是「描述另一個檔案現在長什麼樣」的登記項。
 B 案的 M2 只挑了會歸零的子集（11）；本 ADR 用**誠實的全集**。
@@ -1056,6 +1070,8 @@ python -m pytest tools/tests/test_dev_start.py -k CrossSiteBehavioralEquivalence
 
    | R75 | **Windows 11 真機**（PowerShell 工具側；⚠️ **本列為進行中輪次，收輪時必須複驗本列**——比照 R72／R74 的作法。本列於帳本尚未寫入 R75 列時即先行建立；帳本 R75 列落地後 `current_round()` 現查已為 **75**，本列即 SC-10 要求的那一列） | 一律現查（`gh run list`）；**本輪收輪必等五支 workflow completed 再收**（R74 已把「沒等雲端結論就收官」列為必修項，見帳本該輪列） | 同 R74（launchd 家族／bash 3.2／zsh／`macos_smoke_local.sh` 的實際執行行為）；**排程環境仍是 PowerShell 5.1** 而工具側為 pwsh 7 ⇒ 兩引擎差異仍是常設覆蓋缺口 |
    | R76 | **Windows 11 真機**（PowerShell 工具側，繁中 console codepage 950）。⚠️ **本列為進行中輪次，收輪時必須複驗本列**。本輪為 **7 個修復包並行**於同一棵工作樹，收斂包在各包停工後於主樹重跑全套閘門——任何「全套 rc=0」只對取得它的那個時點有效 | 一律現查（`gh run list`）；🔴 **本輪查出雲端有一整類紅是本機看不到的**：兩支 compat-CI 的 nightly-full 帶 job 層 `continue-on-error`，job 紅但 run 層 conclusion 仍 `success`（實查 `windows-nightly-full=failure`＠run 30803941764）⇒ 「五支全綠」這個判準結構上讀不到它。處置＝`ONBOARDING.md` §7 新增表③-b 逐列記 job 層結論 ＋ 判準⑧ `cloud_nightly_red_problems()`（帳本 `DEF-101-846`） | 同 R75（launchd 家族／bash 3.2／zsh／`macos_smoke_local.sh` 的實際執行行為；**排程環境仍是 PowerShell 5.1** 而工具側為 pwsh 7）。另本輪新增兩支 compat-CI smoke 的 AutoClaude 平台敏感子集步驟，**macOS 側的支數與耗時尚未在真 mac 上量過**（Windows 側已在真機量過，數字只記在帳本 `DEF-101-835`，本表刻意不建第二個家），刻意不把 Windows 的數字寫成 macOS 的實測值 |
+
+   | R77 | **Windows 11 真機**（PowerShell 工具側）。⚠️ **本列為進行中輪次，收輪時必須複驗本列**——比照 R72／R74／R75／R76 的作法。🔴 本輪實測訂正一句沿用多輪的載具宣稱：**PowerShell 工具是 pwsh 7.6.4（Core）**、`powershell.exe -NoProfile` 才是 5.1（Desktop）；上方 R74~R76 三列寫的「PowerShell 工具側」因此**不等於** PS 5.1，凡引擎相依的結論須以顯式 `powershell.exe` 外呼複驗。本輪為 **12 個修復包並行**於同一棵工作樹 ⇒ 任何「全套 rc=0」只對取得它的那個時點有效 | 一律現查（`gh run list`）；🔴 **本輪開輪即查出收輪前的錨落後 4 個 commit 且宣告全綠**，實查 HEAD 的三支 compat／root-infra 皆 `failure`（逐筆查證每個 job 的 steps 數為 0＝Actions 帳務停擺造成的未啟動，不是程式碼紅）⇒ `ONBOARDING.md` §7 表③ 與錨的 `red` 欄已照實回填。**帳務未恢復前，雲端結論不可得，不得以本機全綠代替** | 同 R76（launchd 家族／bash 3.2／zsh／`macos_smoke_local.sh` 的實際執行行為；**排程環境仍是 PowerShell 5.1**）。🔴 本輪另以逐題可重跑矩陣量到一個此前未登記的覆蓋缺口：**mac→Win 方向的靜態注入攔截率為 0/10**（對面平台專屬 API 整類零判準），該缺口**不需 mac 真機**即可補（屬靜態掃描面），與「需 mac 真機的執行期覆蓋」是兩件事 |
 
    🔴 **R74：「缺列不會有任何東西轉紅」已改為會轉紅（§9.1 SC-10）。** 上方 R70 段落逐字寫著
    「本表逐輪補列是收輪必做項（缺列比欄位寫錯更難發現：缺列不會有任何東西轉紅）」——那句自我

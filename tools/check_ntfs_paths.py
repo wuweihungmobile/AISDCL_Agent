@@ -99,9 +99,11 @@ import _stdio_utf8  # noqa: E402,F401  # Windows 非 UTF-8 終端 print(✅/❌/
 _REPO_ROOT = Path(__file__).resolve().parents[1]
 
 _FORBIDDEN_CHARS = set('<>:"|?*\\')
-# R60（DEF-101-B-refuter-1）：補上 `CONIN$`／`CONOUT$`。權威模型＝git for Windows 的
-# `core.protectNTFS`（Windows 預設 true），因為真正炸掉的環節不是 Win32 建檔而是 git
-# 簽出。本機實測（Win 11 Pro 26200 / Git Bash 5.2.37，拋棄式 repo、不碰本 repo）：
+# R60（DEF-101-B-refuter-1）：補上 `CONIN$`／`CONOUT$`。納入的**證據來源**是 git for
+# Windows 的 `core.protectNTFS`（Windows 預設 true），因為真正炸掉的環節不是 Win32 建檔
+# 而是 git 簽出——但它只是證據來源，**不是本判準要對齊的模型**（本檔下方 R77-51 段落以
+# 外接 oracle 逐名對拍過，兩者在四個樣本上判決相反）。
+# 本機實測（Win 11 Pro 26200 / Git Bash 5.2.37，拋棄式 repo、不碰本 repo）：
 #   git -c core.protectNTFS=true update-index --add --cacheinfo …
 #     REJECT: CONIN$.log / CONOUT$.txt / CONIN$ / conin$.log / CONIN$.tar.gz /
 #             CONIN$ .log / CONOUT$   .txt（大小寫、多重副檔名、尾隨空白皆不影響）
@@ -142,7 +144,22 @@ _FORBIDDEN_CHARS = set('<>:"|?*\\')
 # `core.protectNTFS` update-index／clone 對照（CONIN$ 納入、CLOCK$ 排除當初都是實測後才定）。
 # 取捨刻意選「擋」：本檔是 validator，誤擋的代價是一個沒人會用的檔名進不了庫（可用
 # --no-verify 或改名繞過）；漏擋的代價是每一台 Windows clone 的 checkout 整體失敗。
-# 未來若在真機實測到 git/Win32 皆 ACCEPT，四處一併移除並比照 CLOCK$ 註記「已實測不納入」。
+#
+# 🔴 R77-51 訂正（Windows 11 Pro 26200 真機，當回合實測）——上一段末尾原本留下一條
+# 「將來真機測到兩個 oracle 都接受就四處移除」的指示，那個條件**已經成立**，而它導出的
+# 動作已被明文推翻，故該指示就地改寫為以下裁決，不得再照舊執行：
+#   ① `git -c core.protectNTFS=true update-index --add --cacheinfo` 逐名對拍本檔
+#      `_ntfs_seg_bad()`，四個樣本判決相反——`COM0.txt`／`COM¹.txt`／`COM²`／`LPT³.log`
+#      git ACCEPT 而本判準 BLOCK。對照 `LPT0.txt` git REJECT：git 側 COM0 與 LPT0 並不
+#      對稱，本判準擋下 LPT0 與 git 同結論**純屬巧合**，不是因為本判準在模擬 git。
+#   ② Win32 `open()`：上列四者連同 `CON.txt`／`PRN`／`NUL.log`／`COM1.txt`／`CONIN$.log`
+#      全部落地為**真檔案**（size 正確、`os.listdir` 命中），無一拋 OSError。會拋 OSError
+#      的是禁用字元那一組（八個字元逐一實測，errno 22／2）——兩件事不可混為一談。
+#   ⇒ 本判準與 protectNTFS 是**刻意的嚴格超集**關係，不是對齊關係。掌舵者本輪裁決：
+#      過攔保留（過攔是安全方向），只修失實的宣稱；四處一律**不得**因「git 也接受」放寬。
+#      這層超集關係現在有外接 oracle 在守，不再只靠四處互相對照（四處一起錯時，等值鎖
+#      結構上恆綠）：`tools/tests/test_windows_forbidden_filename_parity.py`
+#      的 `TestReservedNameVsGitOracle`——刻意分歧須逐筆具名，且**分歧消失也會紅**。
 _RESERVED_RE = re.compile(
     r"^(CON|PRN|AUX|NUL|COM[0-9]|LPT[0-9]|CONIN\$|CONOUT\$|COM[¹²³]|LPT[¹²³])$"
 )

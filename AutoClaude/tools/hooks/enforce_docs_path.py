@@ -21,6 +21,16 @@ from pathlib import Path
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 
 sys.path.insert(0, str(PROJECT_ROOT.parent / "tools" / "lib"))
+# 本檔會被 `runpy.run_path()`（.claude/settings.json 的 shim）與
+# `importlib.util.spec_from_file_location()`（單元測試）載入，兩者都**不會**把本檔所在
+# 目錄放進 sys.path ⇒ 同層模組必須自己接上，否則 hook 會在 import 期炸掉。
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from hook_path_scope import (  # noqa: E402
+    repo_relative_posix as _repo_relative_posix,  # type: ignore[import-not-found]
+)
+from hook_path_scope import (  # noqa: E402
+    under_prefix as _under_prefix,  # type: ignore[import-not-found]
+)
 from platform_utils import (  # noqa: E402
     init_utf8_streams as _init_utf8_streams,  # type: ignore[import-not-found]
 )
@@ -64,30 +74,23 @@ def read_hook_payload() -> dict:
 
 
 def normalize_rel_path(file_path: str) -> str | None:
-    """嘗試把絕對路徑轉成相對於 PROJECT_ROOT 的 POSIX 路徑；非專案路徑回 None。"""
-    if not file_path:
-        return None
-    try:
-        p = Path(file_path)
-        if p.is_absolute():
-            rel = p.resolve().relative_to(PROJECT_ROOT)
-        else:
-            rel = p
-        return rel.as_posix()
-    except (ValueError, OSError):
-        # 不在 PROJECT_ROOT 之下 → 不歸我們管，fail-open
-        return None
+    """嘗試把絕對路徑轉成相對於 PROJECT_ROOT 的 POSIX 路徑；非專案路徑回 None。
+
+    正規化本體住共用層 `hook_path_scope.py`（與 `check_sh_eol.py` 同一份實作）——
+    見該檔檔頭：舊的 `resolve().relative_to()` 在 POSIX 上會讓本 hook 對大小寫變體
+    **假陽性硬擋**，而讓姊妹 hook 靜默略過。不在 PROJECT_ROOT 之下 → fail-open。
+    """
+    return _repo_relative_posix(file_path, PROJECT_ROOT)
 
 
 def is_allowed_md(rel_posix: str) -> bool:
-    # 根層白名單
-    if "/" not in rel_posix and rel_posix in ROOT_WHITELIST:
-        return True
-    # 目錄前綴
-    for prefix in ALLOWED_DIR_PREFIXES:
-        if rel_posix.startswith(prefix):
+    # 根層白名單（大小寫不敏感，與目錄前綴同一套語意）
+    if "/" not in rel_posix:
+        folded = rel_posix.casefold()
+        if any(folded == name.casefold() for name in ROOT_WHITELIST):
             return True
-    return False
+    # 目錄前綴：`_under_prefix` 帶目錄邊界，`docs/06_qualityEXTRA/` 不再被收下
+    return any(_under_prefix(rel_posix, prefix) for prefix in ALLOWED_DIR_PREFIXES)
 
 
 def main() -> int:

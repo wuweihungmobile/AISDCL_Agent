@@ -79,7 +79,10 @@ fi
 # pre-commit，鏡射進來是零收益死碼。此決策由 tools/tests/
 # test_ntfs_trailing_space_device_name.py::TestNfcAxisScopeIsCiOnlyByDesign 機械釘住。
 # 另註：merge/rebase/cherry-pick 不經 pre-commit（git 無此 hook 觸發點），本閘 1~4 項
-# 皆由 root-infra-ci（全變更觸發）之 check_ntfs_paths.py 雲端兜底。
+# 名目上由 root-infra-ci（全變更觸發）之 check_ntfs_paths.py 雲端兜底——🔴 R77-51 訂正：
+# 該兜底「有沒有真的跑」是量測值而非設計保證（R77 實測該 workflow 高比例 run 從未啟動，
+# 本輪更因 Actions 帳務停擺而完全不跑），故此處不得再被讀成「已被接住」。現查指令與
+# 完整劃界見下方 `run_root_infra` 段落的 R77-51 註解。
 # bash 3.2 相容：無 assoc array / ${var,,}，以 case pattern + tr + grep -Fx 實作
 # （R76-10 起刻意**不帶 `-i`**：GNU grep 3.0 的 `-i`＋`-F` 在無 UTF-8 locale 時 SIGABRT，
 #  詳見下方第 3／5 項實作處的在地註解）。
@@ -124,8 +127,11 @@ _ntfs_seg_bad() {  # $1=完整路徑；有問題 → stdout 印原因並回 0，
     # R68：追加 MS 官方保留名清單明列的上標變體。刻意逐個列出而非寫 `COM[¹²³]`——
     # bash 3.2 的 glob bracket 在 C locale 下是**逐位元組**比對，`[¹²³]`（UTF-8 共 6 bytes）
     # 會退化成單位元組集合而永不匹配 3 bytes 的 `COM¹`（本機實測）。上標不受
-    # `tr '[:lower:]' '[:upper:]'` 影響，故 `com¹` 亦命中。🔴 證據等級＝官方文件＋靜態
-    # 分析，非 Windows 真機實測（本輪無真機），完整取捨見 check_ntfs_paths.py `_RESERVED_RE`。
+    # `tr '[:lower:]' '[:upper:]'` 影響，故 `com¹` 亦命中。
+    # 🔴 R77-51 訂正：R68 當時只有官方文件＋靜態分析，本輪已在 Win 11 Pro 26200 真機補跑
+    # 兩個外接 oracle——上標變體與 COM0 在 git 與 Win32 兩側**都被接受**，本清單是刻意的
+    # 嚴格超集而非在模擬 git。過攔保留（掌舵者本輪明文裁決，過攔是安全方向），
+    # 完整實測、裁決與外接 oracle 鎖的位置見 check_ntfs_paths.py `_RESERVED_RE` 上方。
     case "$up" in
       CON|PRN|AUX|NUL|COM[0-9]|LPT[0-9]|'CONIN$'|'CONOUT$'|'COM¹'|'COM²'|'COM³'|'LPT¹'|'LPT²'|'LPT³')
         echo "路徑段「${seg}」為 Windows 保留裝置名（${up}）"
@@ -347,9 +353,16 @@ if [ "$run_root_infra" -eq 1 ]; then
     case "$f" in
       # 只檢查根層基建路徑。R56 訂正：本行原註解宣稱「子專案腳本由各自 hook
       # 把關」，實測兩子專案 pre-commit 皆未做 `.sh` 語法檢查——委派鏈是空的。
-      # 兜底改由 root-infra-ci.yml 第 1 道（全庫 tracked `*.sh` 的 bash -n）承擔；
       # 此處維持只掃根層基建，是「commit 前只驗本次動到的檔、保持 hook 輕量」的
       # 刻意取捨，不是委派。
+      # 🔴 R77-51 訂正：R56 當時把缺口記成「兜底改由 root-infra-ci.yml 第 1 道
+      # （全庫 tracked `*.sh` 的 bash -n）承擔」——那是把一個**雲端**通道當成已生效的
+      # 兜底，而「它有沒有真的跑」是量測值不是設計保證。R77 掃描實測該 workflow 有
+      # 極高比例的 run 從未啟動（never-started），本輪更因 Actions 帳務停擺而完全不跑。
+      # 數字刻意不寫死在此（會過期）；現查：
+      #   gh run list --workflow root-infra-ci.yml --json status,conclusion,createdAt
+      # ⇒ 子專案 `.sh` 的語法檢查目前**沒有可依賴的兜底**。這是誠實劃界，不是修復；
+      # 真要補，屬「把哪些檢查提到本機快層」那條線（本輪 R77-03 只提跨平台掃描器）。
       tools/*|.github/*) : ;;
       *) continue ;;
     esac

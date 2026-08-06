@@ -23,7 +23,6 @@ from __future__ import annotations
 import os
 import re
 import time
-from typing import Any, Iterable
 
 import pytest
 
@@ -38,7 +37,8 @@ _DSN = re.sub(r"\+asyncpg", "", _DSN_RAW) if _DSN_RAW else None
 # ── 純單元：fake SQL executor ─────────────────────────────────
 
 class _FakeSql:
-    def __init__(self, *, rows: list[dict] = None, raise_on_new: bool = False, latency_ms: float = 5.0) -> None:
+    def __init__(self, *, rows: list[dict] | None = None, raise_on_new: bool = False,
+                 latency_ms: float = 5.0) -> None:
         self.rows = rows or []
         self.raise_on_new = raise_on_new
         self.latency_ms = latency_ms
@@ -151,17 +151,39 @@ def test_pgvector_adapter_namespaces_unknown_raises():
 
 pg_required = pytest.mark.skipif(
     _DSN is None,
-    reason="需設定 AUTOCLAUDE_DB_DSN 或 AUTOCLAUDE_TEST_PG_DSN + alembic upgrade head + seed 1k KB rows",
+    reason="【未啟用，非缺件】設 AUTOCLAUDE_DB_DSN 或 AUTOCLAUDE_TEST_PG_DSN "
+           "＋ `alembic upgrade head` ＋ seed 1k KB rows 即可啟用",
+)
+
+# ── 🔴 本輪訂正：reason 指向一個磁碟上不存在的通道 ────────────────────────────────
+# 下面兩支的 skip reason 此前結尾都掛著一句「這個通道會跑它」的宣稱，而當回合實查
+# `.github/workflows/**` 對 `hnsw`／本檔檔名**零命中**——也就是說 reason 告訴讀者
+# 有人在跑，磁碟上沒有任何 job 在跑，而兩份說法從未對帳。
+#
+# 這比「沒寫」更糟：它讓複審者不再追查（同 `skip_static_scan._predicate_value_on_
+# windows` docstring 記載的那次「宣稱有人承接、實際無人承接」）。純形式的可操作性
+# 判準（`DEF-101-863` 原本的解鎖條件）放行這種假指路——它形式上指名了一個通道，
+# 只是那個通道不存在。**指涉必須被解析**，這是本輪補上的第二半。
+#
+# 現況（寫現在為真的事）：本檔 T1/T2 需要一組本 repo 尚未建置的 staging 資料
+# （1k 列真實 BGE-M3 向量 ＋ HNSW index），**任何自動通道都不跑它**。在該資料集
+# 與對應 job 落地之前，這兩支是誠實的零覆蓋，不是「等 nightly」。
+# 看著這一段不再退化的機械物：`AutoClaude/tests/test_conftest_windows_native_skip_
+# report.py` 的 `SkipReasonChannelClaimTest`（無條件 skip ＋ 通道宣稱 ⇒ 紅）。
+_NO_AUTOMATED_CHANNEL = (
+    "本 repo 目前沒有任何自動通道會跑這兩支（當回合實查 .github/workflows 對本檔零命中）。"
+    "要在本機跑：備妥 1k 列真實 BGE-M3 向量 ＋ HNSW index 的 staging DB，"
+    "設 AUTOCLAUDE_TEST_PG_DSN 指向它，再把本行的 skip 拿掉。"
 )
 
 
 @pg_required
 def test_pgvector_recall_at_10_ge_095():
     """T1 真實 pgvector HNSW recall@10 ≥ 0.95（AC4-5 上線基線）。"""
-    pytest.skip("需 W3 G3 staging 環境執行：1k seed + BGE-M3 真實向量；CI nightly 啟用")
+    pytest.skip(f"需 W3 G3 staging 資料集：1k seed + BGE-M3 真實向量。{_NO_AUTOMATED_CHANNEL}")
 
 
 @pg_required
 def test_pgvector_p95_latency_under_50ms():
     """T2 真實 pgvector HNSW p95 latency < 50ms。"""
-    pytest.skip("需 W3 G3 staging 環境執行；CI nightly 啟用")
+    pytest.skip(f"需 W3 G3 staging 資料集（同 T1）。{_NO_AUTOMATED_CHANNEL}")

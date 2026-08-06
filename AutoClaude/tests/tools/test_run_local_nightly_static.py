@@ -2227,3 +2227,322 @@ def test_g0_readiness_certificate_is_machine_readable_and_always_written(
     assert "UTF8Encoding($false)" in ps1_content, (
         "憑證不得帶 BOM——第一個消費者是 python json.load，遇 BOM 會炸"
     )
+# ═══════════════════════════════════════════════════════════════════════════════
+# 本輪新增三組鎖：Stage L 第二道檢查（R77-04）／pg-contract 選擇面（R77-05）／
+# CLI 契約（DEF-101-810）。形狀比照 .sh 側既有的
+# tests/tools/test_run_local_nightly_sh_static.py（--help／未知旗標／無參數對照組）。
+# ═══════════════════════════════════════════════════════════════════════════════
+
+_WIN_NATIVE_ONLY = pytest.mark.skipif(
+    platform.system() != "Windows",
+    reason="[WINDOWS-NATIVE-ONLY] 需真的由 powershell.exe 執行 .ps1 才驗得到參數繫結與 "
+    "exit code；純字串比對證明不了『--help 真的不會開跑 stage』（對等物 "
+    "run_local_nightly.sh 的 CLI 契約鎖在 test_run_local_nightly_sh_static.py）",
+)
+
+
+def _run_ps1(script: Path, *args: str, timeout: int = 90) -> subprocess.CompletedProcess:
+    return subprocess.run(
+        ["powershell.exe", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", str(script), *args],
+        capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=timeout,
+    )
+
+
+def _sandbox_nightly(tmp_path: Path) -> Path:
+    """把真的 run_local_nightly.ps1 放進臨時樹（$RepoRoot 由 $PSScriptRoot/.. 推得）。
+
+    比照 .sh 側 `_sandbox_nightly` 的理由，外加一條本檔特有的：本組要斷言的正是「有沒有
+    真的開跑」，而契約一旦退化，**在真 repo 上跑就會真的啟動整套 nightly**——搶 Global
+    Mutex、寫真心跳、與正在進行的工作互踩。本鎖第一版就是直接對真檔跑的，注入實測時
+    四個 case 各自把真 nightly 拉起來、各撞 90 秒逾時（合計 363 秒）才停。沙箱裡
+    `$RepoRoot/tools/*.ps1` 全不存在，退化時第一個 stage 就失敗而非跑完整套。
+    """
+    dest = tmp_path / "AutoClaude" / "tools"
+    dest.mkdir(parents=True)
+    target = dest / "run_local_nightly.ps1"
+    target.write_bytes(_NIGHTLY_PS1.read_bytes())
+    return target
+
+
+def _log_snapshot(sandbox_script: Path) -> set[str]:
+    """沙箱 AutoClaude/logs 下的 nightly RunId log 檔名集合（判斷有沒有真的開跑）。"""
+    logs = sandbox_script.parent.parent / "logs"
+    if not logs.is_dir():
+        return set()
+    return {p.name for p in logs.glob("nightly_2*.log")}
+
+
+# ── 組一：CLI 契約（DEF-101-810）─────────────────────────────────────────────
+#
+# WHY 這組不能只做 grep：修復前全檔零頂層 `param()`，PowerShell 把任何旗標整批丟進
+# `$args` 後靜默丟棄，7 stage 照跑到底——會搶 Global\ 具名 Mutex、動 Docker、寫進
+# nightly_latest.log 心跳，於是 tools/dev_start.py 的心跳哨兵把一次「查說明」記成一輪
+# 真的 nightly。「有沒有 param」grep 得到，「--help 之後有沒有副作用」grep 不到。
+
+
+def test_cli_guard_precedes_every_disk_and_cross_process_side_effect(ps1_content: str) -> None:
+    """順序鎖：關卡必須排在 Mutex 取得與 log 檔建立**之前**。
+
+    這一條才是缺陷的本體。把關卡加在檔尾同樣能讓「--help 印得出用法」為真，卻早已
+    搶完 Mutex、建完 RunId log——訊號看起來乾淨、副作用一件不少。
+    """
+    guard_idx = ps1_content.index("if ($args.Count -gt 0) {")
+    mutex_idx = ps1_content.index("New-Object System.Threading.Mutex")
+    logdir_idx = ps1_content.index("$LogDir = Join-Path $RepoRoot 'logs'")
+    assert guard_idx < mutex_idx, (
+        "未知引數關卡必須排在具名 Mutex 取得之前（否則已產生跨行程副作用）"
+    )
+    assert guard_idx < logdir_idx, "未知引數關卡必須排在 logs 目錄／RunId log 建立之前"
+    help_idx = ps1_content.index("if ($Help) {")
+    assert help_idx < guard_idx < mutex_idx, "-Help 分支必須與未知引數關卡相鄰且同樣在副作用之前"
+    # 🔴 位置對了還不夠，**兩個分支都必須真的中止**。本鎖第一版只比索引，於是「把
+    # `-Help` 分支的 exit 拿掉、讓它落下去照跑」這個注入完全不會轉紅——正是本節在防的
+    # 那一類（形狀看起來還在、行為已經沒了）。
+    help_branch = ps1_content[help_idx:guard_idx]
+    assert "exit 0" in help_branch, "-Help 分支必須 exit 0 中止；只印用法再落下去＝照樣開跑"
+    args_branch = ps1_content[guard_idx:mutex_idx]
+    assert "exit 2" in args_branch, "未知引數分支必須 exit 2 中止（fail-loud，不得只印訊息）"
+
+
+@_WIN_NATIVE_ONLY
+@pytest.mark.parametrize("flag", ["--help", "-h", "-Help"])
+def test_help_prints_usage_rc_zero_and_leaves_no_trace(tmp_path: Path, flag: str) -> None:
+    script = _sandbox_nightly(tmp_path)
+    before = _log_snapshot(script)
+    proc = _run_ps1(script, flag, timeout=60)
+    assert proc.returncode == 0, f"{flag} 必須 rc=0，實得 {proc.returncode}：{proc.stderr!r}"
+    assert "run_local_nightly.ps1 [-Help]" in proc.stdout, (
+        f"{flag} 必須印出用法行，實得 stdout={proc.stdout[:400]!r}"
+    )
+    assert "local_ci_gate" in proc.stdout, "用法必須說明 stage 組成（否則沒有查說明的價值）"
+    assert _log_snapshot(script) == before, f"{flag} 產生了 nightly RunId log ⇒ 它其實開跑了"
+
+
+@_WIN_NATIVE_ONLY
+@pytest.mark.parametrize("bad", ["--forse", "-f", "--force", "bogus-positional"])
+def test_unknown_argument_fails_loud_and_leaves_no_trace(tmp_path: Path, bad: str) -> None:
+    """打錯的旗標一律 rc=2 且逐字指名——修復前這些變體全部 rc=0 並開跑整套 nightly。
+
+    `--force` 也在清單內是刻意的：那是 .sh 側的合法旗標、本檔沒有對等語意，靜默吞掉
+    會讓使用者以為自己繞過了什麼。
+    """
+    script = _sandbox_nightly(tmp_path)
+    before = _log_snapshot(script)
+    proc = _run_ps1(script, bad, timeout=60)
+    assert proc.returncode == 2, f"未知引數 {bad!r} 必須 rc=2，實得 {proc.returncode}"
+    assert bad in proc.stderr, f"錯誤訊息必須逐字指名 {bad!r}，實得 {proc.stderr[:400]!r}"
+    assert _log_snapshot(script) == before, f"{bad!r} 被拒後不得留下任何 nightly log"
+
+
+def _extract_cli_guard(ps1_content: str) -> str:
+    """自 ps1 原文抽出 CLI 關卡本體（不重打副本——重打就變成測我自己寫的東西）。
+
+    刻意**不**在 probe 裡設主控台輸出編碼：本組只斷言 rc 與 ASCII 哨兵 `PAST_GUARD`，
+    加那一行既無收益，又會踩上 `tools/tests/test_dev_start.py` 的
+    `TestPsUtf8PreludeIsSingleSpelling`——它要求全庫只有 `_platform_helpers.
+    PS_UTF8_PRELUDE` 一種寫法（本鎖第一版就是被它當場攔下的）。
+    """
+    start = ps1_content.index("$NIGHTLY_USAGE = @'")
+    exit2 = ps1_content.index("  exit 2\n", start)
+    end = ps1_content.index("}\n", exit2) + 2
+    return "param([switch]$Help)\nSet-StrictMode -Version 3.0\n" + ps1_content[start:end]
+
+
+@_WIN_NATIVE_ONLY
+@pytest.mark.parametrize(
+    ("args", "want_rc", "want_past"),
+    [
+        ((), 0, True),            # 🔴 鑑別力對照組：排程路徑（無引數）不得被關卡擋掉
+        (("--help",), 0, False),
+        (("-h",), 0, False),
+        (("--forse",), 2, False),
+        (("--help", "extra"), 0, False),   # -Help 綁定成功、extra 落進 $args → 仍不開跑
+        (("a", "b"), 2, False),
+    ],
+)
+def test_cli_guard_behaviour_matrix(
+    ps1_content: str, tmp_path: Path, args: tuple[str, ...], want_rc: int, want_past: bool
+) -> None:
+    """把關卡原文抽出來真跑，補上「無引數必須通過」這一格。
+
+    這一格在真腳本上做不到（無引數＝真的開跑 7 stage），但少了它，把腳本改成
+    「一律 exit 2」也能讓上面兩組全綠——而那會讓 schtasks 每晚空轉。
+    """
+    probe = tmp_path / "cli_guard_probe.ps1"
+    probe.write_text(
+        _extract_cli_guard(ps1_content) + "\nWrite-Output 'PAST_GUARD'\nexit 0\n",
+        encoding="utf-8-sig", newline="\n",
+    )
+    proc = _run_ps1(probe, *args)
+    assert proc.returncode == want_rc, (
+        f"args={args} 期望 rc={want_rc} 實得 {proc.returncode}\n{proc.stdout}\n{proc.stderr}"
+    )
+    assert ("PAST_GUARD" in proc.stdout) is want_past, (
+        f"args={args} 期望 past_guard={want_past}，實得 stdout={proc.stdout[:400]!r}"
+    )
+
+
+# ── 組二：Stage L 的第二道檢查（R77-04）──────────────────────────────────────
+
+
+def test_stage_l_also_runs_root_unittests(ps1_content: str) -> None:
+    """Stage L 必須實跑 monorepo 根層的 unittest runner。
+
+    WHY：本 stage 的 local_ci_gate.ps1 範圍全在 AutoClaude scope（pytest +
+    check_loc_budget + lint-imports），不含根層 tools/tests——那裡住著全部跨平台靜態
+    掃描器。mac 側 run_local_nightly.sh 的 [2/4] 每日跑它，Windows 側先前一次都不跑，
+    於是這台機器上那批掃描器的唯一執行機會是「push 剛好動到根層檔」。
+    """
+    block = _extract_stage_block(
+        ps1_content, "$rcGate = Invoke-Stage 'local-ci-gate full", "# ----- Stage 0:"
+    )
+    assert "local_ci_gate.ps1" in block, (
+        "Stage L 仍必須跑 tools/local_ci_gate.ps1（既有職責不得被換掉）"
+    )
+    assert "run_root_unittests.py" in block, (
+        "Stage L 必須另跑 <monorepo>/tools/run_root_unittests.py（R77-04）"
+    )
+    assert "$script:PyExe $rootUnittestsPy" in block, (
+        "必須經 $script:PyExe 呼叫（WindowsApps 空殼守衛的 SSOT），不得裸打 python"
+    )
+    # 零旗標契約：run_root_unittests.py 對任何引數回 rc=2，傳參數＝每晚必紅
+    assert "$rootUnittestsPy }" in block, "呼叫時不得夾帶任何旗標（該 runner 的 CLI 契約是零旗標）"
+
+
+def _extract_stage_l_body(ps1_content: str) -> str:
+    start = ps1_content.index("$rcGate = Invoke-Stage '")
+    brace = ps1_content.index("{\n", start) + 2
+    end = ps1_content.index("\n}\n", brace) + 1
+    return ps1_content[brace:end]
+
+
+@_WIN_NATIVE_ONLY
+@pytest.mark.parametrize(
+    ("gate_rc", "root_rc", "want_combined"),
+    [
+        (0, 0, 0),
+        (1, 0, 1),
+        (0, 1, 1),   # 🔴 遮蔽方向一：gate 綠而根層 unittest 紅 → stage 必須紅
+        (2, 1, 1),   # 🔴 遮蔽方向二：WARN(2) 不得把真失敗降級成觀察期
+        (1, 2, 1),
+        (2, 0, 2),
+        (0, 2, 2),
+        (1, 1, 1),
+    ],
+)
+def test_stage_l_rc_merge_never_masks_either_check(
+    ps1_content: str, tmp_path: Path, gate_rc: int, root_rc: int, want_combined: int
+) -> None:
+    """兩道檢查共用一個 summary 欄位，故合併規則必須逐格驗。
+
+    Scan-H⑦：遮蔽的方向是「看起來變乾淨」，比紅更危險——若只把最後一個
+    $LASTEXITCODE 交給 Invoke-Stage，gate 紅而 unittest 綠會讓整個 stage 回綠。
+    """
+    out = _run_stage_l_probe(ps1_content, tmp_path, gate_rc, root_rc)
+    assert f"COMBINED={want_combined}|" in out, (
+        f"gate={gate_rc} root={root_rc} 期望 COMBINED={want_combined}：\n{out}"
+    )
+    assert "CALLS=2" in out, (
+        f"兩道檢查都必須跑（不得早退）——gate={gate_rc} root={root_rc} 實際只跑了：\n{out}"
+    )
+
+
+def _run_stage_l_probe(
+    ps1_content: str, tmp_path: Path, gate_rc: int, root_rc: int, *, py_exe: str = "python",
+    make_runner: bool = True,
+) -> str:
+    sandbox_repo = tmp_path / "AutoClaude"
+    sandbox_repo.mkdir(parents=True, exist_ok=True)
+    root_tools = tmp_path / "tools"
+    root_tools.mkdir(parents=True, exist_ok=True)
+    if make_runner:
+        (root_tools / "run_root_unittests.py").write_text(
+            "# stub\n", encoding="utf-8", newline="\n"
+        )
+    # 🔴 stub 變數一律加 `Pkg07Stub` 前綴：PowerShell 變數名**大小寫不敏感**，被測本體
+    # 的區域變數 `$rootRc` 與樸素命名的 `$script:RootRc` 是同一個變數 ⇒ 本體那句
+    # `$rootRc = 0` 會把注入值抹掉，讓每一格都量到 0（本鎖第一版正是這樣，且它自己
+    # 當場把這件事抓了出來）。
+    probe = tmp_path / "stage_l_probe.ps1"
+    probe.write_text(
+        "Set-StrictMode -Version 3.0\n"
+        f"$RepoRoot = '{sandbox_repo}'\n"
+        f"$script:PyExe = '{py_exe}'\n"
+        f"$script:Pkg07StubGate = {gate_rc}\n"
+        f"$script:Pkg07StubRoot = {root_rc}\n"
+        "$script:Pkg07StubCalls = 0\n"
+        "$global:LASTEXITCODE = 0\n"
+        "function Log { param([string]$Msg, [string]$Level = 'INFO')\n"
+        "  Write-Output ('LOG|' + $Level + '|' + $Msg) }\n"
+        "function Invoke-Native { param([scriptblock]$Block)\n"
+        "  $script:Pkg07StubCalls++\n"
+        "  if ($script:Pkg07StubCalls -eq 1) { $global:LASTEXITCODE = $script:Pkg07StubGate }\n"
+        "  else { $global:LASTEXITCODE = $script:Pkg07StubRoot } }\n"
+        + _extract_stage_l_body(ps1_content)
+        + "\nWrite-Output ('RESULT|COMBINED=' + $LASTEXITCODE"
+          " + '|CALLS=' + $script:Pkg07StubCalls)\n",
+        encoding="utf-8-sig", newline="\n",
+    )
+    proc = _run_ps1(probe)
+    assert proc.returncode == 0, f"probe 執行失敗：\n{proc.stdout}\n{proc.stderr}"
+    return proc.stdout
+
+
+@_WIN_NATIVE_ONLY
+def test_stage_l_fails_closed_when_root_runner_is_unreachable(
+    ps1_content: str, tmp_path: Path
+) -> None:
+    """runner 缺席／python 不可用＝量不出來，必須計入失敗（不得靜默當成通過）。
+
+    「量不出來」被判成綠是本 repo 反覆付過學費的形態：缺席那一向根本沒有 rc 可看。
+    """
+    missing = _run_stage_l_probe(ps1_content, tmp_path / "a", 0, 0, make_runner=False)
+    assert "COMBINED=1|" in missing, f"runner 缺席必須判失敗：\n{missing}"
+    assert "CALLS=1" in missing, f"runner 缺席時不得還去呼叫它：\n{missing}"
+    nopy = _run_stage_l_probe(ps1_content, tmp_path / "b", 0, 0, py_exe="")
+    assert "COMBINED=1|" in nopy, f"python 不可用必須判失敗：\n{nopy}"
+
+
+# ── 組三：pg-contract 選擇面（R77-05）────────────────────────────────────────
+
+
+def test_pg_contract_selection_covers_alembic_migration_contracts(ps1_content: str) -> None:
+    """pg-e2e stage 必須把 tests/contract/test_alembic_*.py 一起跑。
+
+    WHY：四個 PG env 在 Stage L 之後才設（那個順序是刻意的，Stage L 要等同開發者手動
+    跑 local_ci_gate 的乾淨環境），而其後唯一用得到 DSN 的地方就是本 stage。先前它只
+    跑一支 contract 檔 ⇒ 五支 migration 契約每晚照樣以「需設定 DSN」被 skip；它們在
+    雲端的唯一通道是 autoclaude-ci 的 pg-contract job，而該通道在 Actions 帳務停擺期間
+    一次都沒跑成 ⇒ 這批的實際覆蓋是 0。
+    """
+    swap_idx = ps1_content.index("$env:AUTOCLAUDE_DB_DSN = $asyncDsn")
+    enum_idx = ps1_content.index("-Filter 'test_alembic_*.py'")
+    assert enum_idx > swap_idx, (
+        "擴大後的選擇面必須排在 alembic → asyncpg DSN swap 之後——"
+        "提前跑會撞 MissingGreenlet（R77-05 的原提案即因此被證偽）"
+    )
+    assert "@contractFiles" in ps1_content, (
+        "必須以陣列 splat 傳檔案清單；PowerShell 不對原生命令展開萬用字元，"
+        "寫 glob 字面會被 pytest 當成不存在的路徑＝靜默少跑"
+    )
+    assert "pytest tests/contract/test_alembic_*.py" not in ps1_content, (
+        "不得把 glob 字面直接交給 pytest（見上一條的 WHY）"
+    )
+
+
+def test_pg_contract_alembic_floor_is_neither_fail_open_nor_permanently_red() -> None:
+    """列舉下限必須雙邊帶：> 0（不得 fail-open）且 ≤ 磁碟實況（不得結構上永紅）。
+
+    單邊判準在這裡兩個方向都會出事：下限 0 讓「選擇面靜默縮回一支檔」零訊號；
+    下限高於實況則每晚必紅，而永紅的閘門會被整個關掉，比沒有鎖更糟。
+    """
+    ps1 = _NIGHTLY_PS1.read_text(encoding="utf-8")
+    m = re.search(r"\$ALEMBIC_CONTRACT_FLOOR = (\d+)", ps1)
+    assert m, "pg-e2e stage 必須帶 $ALEMBIC_CONTRACT_FLOOR 下限守門（缺席＝選擇面可靜默縮小）"
+    floor = int(m.group(1))
+    actual = len(list((_REPO_ROOT / "tests" / "contract").glob("test_alembic_*.py")))
+    assert actual >= 5, f"tests/contract 只剩 {actual} 支 test_alembic_*.py——掃描面疑似靜默縮小"
+    assert 0 < floor <= actual, (
+        f"下限 {floor} 不合法（磁碟實況 {actual}）：0 ＝ fail-open，> 實況 ＝ 每晚結構性必紅"
+    )
+    assert "$contractRcRef.Value = 1" in ps1, "低於下限時必須把 stage 標記為失敗，不得只印訊息"

@@ -21,15 +21,18 @@
 """
 from __future__ import annotations
 
+import ast
+import importlib.util
 import os
 import shutil
 import subprocess
 import tempfile
 import unittest
-from pathlib import Path
+from pathlib import Path, PurePosixPath, PureWindowsPath
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 DISPATCHER = REPO_ROOT / "tools" / "git-hooks" / "pre-commit"
+_BLOCKING_HOOKS_DIR = REPO_ROOT / "AutoClaude" / "tools" / "hooks"
 
 
 def _git(*args: str, cwd: Path) -> subprocess.CompletedProcess:
@@ -254,6 +257,173 @@ class TestPreCommitBlocksCrOnShellScripts(unittest.TestCase):
             commit.returncode, 0,
             f"刪除 .sh 被誤擋：\nstdout={commit.stdout}\nstderr={commit.stderr}",
         )
+
+
+def _load_hook_path_scope():
+    """載入 `AutoClaude/tools/hooks/hook_path_scope.py`（兩支阻斷級 hook 的共用正規化層）。
+
+    以檔案路徑載入而非 import：該目錄不是套件、且生產路徑本身也是被
+    `runpy.run_path()` 以絕對路徑叫起來的。
+    """
+    path = _BLOCKING_HOOKS_DIR / "hook_path_scope.py"
+    spec = importlib.util.spec_from_file_location("_root_test_hook_path_scope", path)
+    assert spec is not None and spec.loader is not None, f"無法載入 {path}"
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+
+
+class TestHookPathScopeFlavourParity(unittest.TestCase):
+    """R77-50：兩支 exit-2 阻斷級 hook 的路徑正規化，兩種 flavour 必須同判決。
+
+    WHY 這件事重要（Rule 9 — 測的是「為什麼」，不是「是什麼」）：
+    `enforce_docs_path.py` 與 `check_sh_eol.py` 都是 exit 2 硬阻斷。它們此前各自靠
+    `Path.resolve().relative_to(PROJECT_ROOT)` 取相對路徑，而**那條路的大小寫語意由
+    flavour 決定**（見下方 `test_stdlib_relative_to_is_the_divergence_being_absorbed`
+    的實測）。同一份判準因此在兩個平台壞向相反的兩邊：
+      · POSIX 上 `enforce_docs_path` 對大小寫變體**假陽性硬擋**——使用者當場撞到，
+        卻只會以為是自己路徑打錯（本輪 Windows 真機 rc 矩陣：改前 rc=2、改後 rc=0）；
+      · POSIX 上 `check_sh_eol` 的 `relative_to` 拋 ValueError → 回 None → main 直接
+        return 0 ⇒ **CRLF 守衛整支靜默略過**，fail-open，沒有人會發現。
+    「壞的方向依平台而反轉」正是單一平台實測抓不到的那一類——Windows 真機把兩個錯都
+    蓋住了。所以判準必須是**純字面**、可對兩種 flavour 直接對拍，而不是問檔案系統。
+    """
+
+    def setUp(self) -> None:
+        self.mod = _load_hook_path_scope()
+
+    #: (情境, Windows 形式的絕對路徑, POSIX 形式的絕對路徑, 期望相對路徑)
+    #: 兩欄描述的是「同一件事」在兩個平台的寫法；期望值只有一個。
+    CASES = (
+        ("root 前綴大小寫相同",
+         r"D:\p\AISDCL_Agent\tools\x.sh", "/h/u/AISDCL_Agent/tools/x.sh",  # platform-ok: 對拍語料
+         "tools/x.sh"),
+        ("root 前綴大小寫不同（舊實作在 POSIX 回 None ⇒ 守衛整支略過）",
+         r"D:\P\AISDCL_AGENT\tools\x.sh", "/h/U/aisdcl_agent/tools/x.sh",  # platform-ok: 對拍語料
+         "tools/x.sh"),
+        ("尾段大小寫不同（原樣保留，交給 under_prefix 做不分大小寫比對）",
+         r"D:\p\AISDCL_Agent\DOCS\06_QUALITY\a.md",  # platform-ok: 對拍語料
+         "/h/u/AISDCL_Agent/DOCS/06_QUALITY/a.md",
+         "DOCS/06_QUALITY/a.md"),
+        ("路徑中含 . 與 ..（必須先收斂再比對）",
+         r"D:\p\AISDCL_Agent\tools\.\sub\..\x.sh",  # platform-ok: 對拍語料
+         "/h/u/AISDCL_Agent/tools/./sub/../x.sh",
+         "tools/x.sh"),
+        ("以 .. 跳出 root（不歸我管，兩種 flavour 都必須是 None）",
+         r"D:\p\AISDCL_Agent\..\outside\x.sh",  # platform-ok: 對拍語料
+         "/h/u/AISDCL_Agent/../outside/x.sh",
+         None),
+        ("完全在樹外", r"D:\other\x.sh", "/var/other/x.sh", None),  # platform-ok: 對拍語料
+    )
+
+    def test_same_verdict_under_both_flavours(self) -> None:
+        win_root = PureWindowsPath(r"D:\p\AISDCL_Agent")
+        posix_root = PurePosixPath("/h/u/AISDCL_Agent")
+        for label, win, posix, expected in self.CASES:
+            with self.subTest(label):
+                got_win = self.mod.relative_within(PureWindowsPath(win), win_root)
+                got_posix = self.mod.relative_within(PurePosixPath(posix), posix_root)
+                self.assertEqual(
+                    got_win, got_posix,
+                    f"同一件事在兩個平台判決不同（{label}）："
+                    f"Windows={got_win!r} POSIX={got_posix!r}——"
+                    "阻斷級 hook 的判決不得隨 flavour 反轉",
+                )
+                self.assertEqual(got_win, expected, f"{label}：判決與規格不符")
+
+    def test_stdlib_relative_to_is_the_divergence_being_absorbed(self) -> None:
+        """本 shim 為何不能直接用 `PurePath.relative_to`——把成因釘成可執行的事實。
+
+        這一條刻意斷言**標準庫現況**：哪天 `relative_to` 兩種 flavour 語意統一了，
+        本條會紅，而那正是「這層 shim 可以退場」的訊號。沒有這條的話，上一條全綠只
+        證明 shim 自己前後一致，證不出它在吸收一個真實存在的分歧。
+        """
+        win = PureWindowsPath(r"D:\PROJ\AISDCL_AGENT\tools\x.sh")
+        self.assertEqual(
+            win.relative_to(PureWindowsPath(r"D:\proj\AISDCL_Agent")).as_posix(),
+            "tools/x.sh", "relative_to 應大小寫不敏感",  # path-key-ok: 上一行已 as_posix
+        )
+        with self.assertRaises(ValueError):
+            PurePosixPath("/home/U/aisdcl_agent/tools/x.sh").relative_to(
+                PurePosixPath("/home/u/AISDCL_Agent")
+            )
+
+
+class TestHookPathScopeDirectoryBoundary(unittest.TestCase):
+    """R77-50 附帶：白名單前綴比對必須帶目錄邊界。
+
+    WHY：舊實作是裸 `str.startswith(prefix)`，於是與白名單目錄**同前綴的另一個目錄**
+    會被整片收下。本輪實測改前逐字：`is_allowed_md('docs/06_qualityEXTRA/a.md')` → True。
+    這一格與平台無關，兩個平台一起錯。
+    """
+
+    def setUp(self) -> None:
+        self.mod = _load_hook_path_scope()
+
+    def test_sibling_directory_sharing_the_prefix_is_not_under_it(self) -> None:
+        for rel in ("docs/06_qualityEXTRA/a.md", "docs/06_quality_backup/a.md",
+                    "docs/06_qualityX", "testsX/a.md"):
+            with self.subTest(rel):
+                self.assertFalse(
+                    any(self.mod.under_prefix(rel, p)
+                        for p in ("docs/06_quality", "tests/")),
+                    f"{rel} 與白名單目錄只是前綴相同，不在它底下",
+                )
+
+    def test_real_members_and_case_variants_are_under_it(self) -> None:
+        for rel in ("docs/06_quality/a.md", "docs/06_quality/sub/a.md",
+                    "DOCS/06_QUALITY/a.md", "tests/a.md"):
+            with self.subTest(rel):
+                self.assertTrue(
+                    any(self.mod.under_prefix(rel, p)
+                        for p in ("docs/06_quality", "tests/")),
+                    f"{rel} 應被視為在白名單目錄底下（大小寫不敏感是刻意選的方向）",
+                )
+
+
+class TestBlockingHooksShareOnePathNormalizer(unittest.TestCase):
+    """R77-50 的**單一實作**約束：兩支 hook 不得再各自長出一份路徑正規化。
+
+    WHY：本缺陷的成因不是「某一行寫錯」，而是同一份知識住兩個家而只有一個家被想過
+    （R73 `DEF-101-778` 同型）。只修那兩行、不釘「別再分家」，下一個人照樣會在其中
+    一支就地補一段 `resolve().relative_to(...)`，而分歧會再度只在對面平台顯形。
+    """
+
+    HOOKS = ("enforce_docs_path.py", "check_sh_eol.py")
+
+    def _tree(self, name: str) -> ast.Module:
+        """以 AST 檢視，而不是字串搜尋。
+
+        判準看的是**程式碼**：兩支 hook 的 docstring 必須能自由引述被取代的舊寫法
+        （那是訂正註記的價值所在），字面掃描會把那些說明本身判成違規。
+        """
+        return ast.parse((_BLOCKING_HOOKS_DIR / name).read_text(encoding="utf-8"))
+
+    def test_shared_module_exists_and_is_imported_by_both(self) -> None:
+        shared = _BLOCKING_HOOKS_DIR / "hook_path_scope.py"
+        self.assertTrue(shared.is_file(), f"共用正規化層不存在：{shared}")
+        for name in self.HOOKS:
+            with self.subTest(name):
+                imported = any(
+                    isinstance(n, ast.ImportFrom) and n.module == "hook_path_scope"
+                    for n in ast.walk(self._tree(name))
+                )
+                self.assertTrue(
+                    imported, f"{name} 未取用共用正規化層——判決會再度依平台分歧",
+                )
+
+    def test_neither_hook_keeps_a_private_relative_to_implementation(self) -> None:
+        for name in self.HOOKS:
+            with self.subTest(name):
+                hits = [
+                    n for n in ast.walk(self._tree(name))
+                    if isinstance(n, ast.Attribute) and n.attr == "relative_to"
+                ]
+                self.assertFalse(
+                    hits,
+                    f"{name} 又自帶了一份 relative_to 正規化（行 "
+                    f"{[n.lineno for n in hits]}）：那正是本鎖要擋的第二個家",
+                )
 
 
 if __name__ == "__main__":

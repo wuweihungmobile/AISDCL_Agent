@@ -302,6 +302,13 @@ on:
       - "tools/_cli_flags.py"
       - "tools/check_scheduled_task_drift.py"
       - "tools/scheduled_task_expectations.json"
+      # 本輪：tools/probe/ 是量測配方的唯一可執行家（M6），其下的 session 逐字稿稽核器
+      # 被 tools/tests/ 的 hook 存活性鎖消費，故只改該目錄時那道鎖也必須跑。由
+      # test_ci_paths_cover_root_consumers.py 當場攔下並要求雙邊補列（DEF-101-042 同構）。
+      # 🔴 這裡刻意不寫該腳本的檔名字面：另一道鎖以「本檔是否提及該檔名」判斷它有沒有被
+      # 接成閘門步驟（逐字稿是本機資料，接成閘門會在別台機器恆紅）——提及與登記在機器眼中
+      # 同形，寫了就會被判成違規。paths 觸發面與執行步驟是兩件事，但判準分不出來。
+      - "tools/probe/**"
       # R43：tools/tests/test_windowsapps_guard_bash_parity.py 消費此根層檔（bash 側
       # WindowsApps guard SSOT，DEF-101-353）與其全部已知呼叫端——只改任一檔時本
       # workflow 須重跑該鎖（DEF-101-042 同構；.sh 本檔無 **/*.sh 兜底 glob〔對稱
@@ -510,6 +517,13 @@ on:
       - "tools/_cli_flags.py"
       - "tools/check_scheduled_task_drift.py"
       - "tools/scheduled_task_expectations.json"
+      # 本輪：tools/probe/ 是量測配方的唯一可執行家（M6），其下的 session 逐字稿稽核器
+      # 被 tools/tests/ 的 hook 存活性鎖消費，故只改該目錄時那道鎖也必須跑。由
+      # test_ci_paths_cover_root_consumers.py 當場攔下並要求雙邊補列（DEF-101-042 同構）。
+      # 🔴 這裡刻意不寫該腳本的檔名字面：另一道鎖以「本檔是否提及該檔名」判斷它有沒有被
+      # 接成閘門步驟（逐字稿是本機資料，接成閘門會在別台機器恆紅）——提及與登記在機器眼中
+      # 同形，寫了就會被判成違規。paths 觸發面與執行步驟是兩件事，但判準分不出來。
+      - "tools/probe/**"
       # R43：tools/tests/test_windowsapps_guard_bash_parity.py 消費此根層檔（bash 側
       # WindowsApps guard SSOT，DEF-101-353）與其全部已知呼叫端——只改任一檔時本
       # workflow 須重跑該鎖（DEF-101-042 同構；.sh 本檔無 **/*.sh 兜底 glob〔對稱
