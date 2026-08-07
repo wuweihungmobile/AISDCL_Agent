@@ -727,7 +727,7 @@ _FROZEN_GUARD_LINES: dict[str, int] = {
     "_platform_helpers.py": 519,
     "_ps_engine.py": 115,
     "test_act_local_runner_image.py": 322,
-    "test_adr_xplat001_c1c2_lock.py": 4144,
+    "test_adr_xplat001_c1c2_lock.py": 4158,
     "test_archive_defect_log.py": 3786,
     "test_bash32_compat.py": 609,
     "test_bash_probe_spec_contract.py": 960,
@@ -740,7 +740,7 @@ _FROZEN_GUARD_LINES: dict[str, int] = {
     "test_check_script_parity.py": 1973,
     "test_check_wrapper_thinness.py": 1316,
     "test_component_sanitizer_shared_layer_lock.py": 293,
-    "test_context_budget_guard.py": 1401,
+    "test_context_budget_guard.py": 1427,
     "test_defect_id_reference_integrity.py": 261,
     "test_dev_start.py": 6686,
     "test_dev_start_ps1_lastexitcode.py": 462,
@@ -898,6 +898,20 @@ _GUARD_LINES_REPIN_LOG: tuple[tuple[str, int, int, int, str], ...] = (
         "刪掉別處的判準來換這裡的額度，等於用一個已經守住的面換一個新開的面，"
         "淨鑑別力不升反降。未調高任何門檻、未放寬任何棘輪、未動漂移容忍值。",
     ),
+    (
+        "R79", 62781, 62821, 40,
+        "R79 收輪後的靜默修復（掌舵者當場回報：哨兵每 15 分鐘彈出一個 console 視窗）。"
+        "🔴 本列的價值在於**任務書給的根因是錯的**：舵手判定「LogonType 沒對齊既有兩支」，"
+        "而修復者當回合實測打掉了這個前提——註冊 S4U 需要提權，非提權下 Register-ScheduledTask "
+        "直接存取被拒、工作根本不會建立；而哨兵的主要武裝路徑是 SessionStart hook＝一律非提權，"
+        "只掛 S4U 會把「彈視窗」換成「整條武裝不起來」。真正的解在**載具**："
+        "python.exe 是 CONSOLE 子系統、pythonw.exe 是 GUI 子系統，後者 OS loader 不配置 console，"
+        "不論 LogonType 為何都不彈。成長即這兩條鎖（無 console 直譯器、S4U 先試非提權回退）"
+        "與其成對注入。同一趟另修掉一個同型缺陷：Register-ScheduledTask 失敗後仍印 REGISTER_OK"
+        "（非終止錯誤沒中斷 scriptblock）＝本 repo 反覆在治的「真紅讀成綠」。"
+        "🔴 未調高任何門檻；planner 一度 750/750 滿載，是以壓縮接續行與 docstring 騰出空間"
+        "（`count_loc` 排除空行與註解行，所以把註解搬進 ADR 一行都省不到——這一點也是實測得知）。",
+    ),
 )
 
 
@@ -916,10 +930,10 @@ _GUARD_LINE_DRIFT_TOLERANCE = 0
 #: 追加當輪不必動指紋（一列寬限），下一輪要再追加就必須先把前一列納入前綴並重釘，
 #: 否則 `[前綴過期]` 轉紅。草稿兩個值都由 `--print-guard-lines` 印出
 #: （ARCH-02 的教訓：紅了卻沒有出路的鎖會被關掉）。
-_REPIN_LOG_FROZEN_PREFIX_LEN = 6
+_REPIN_LOG_FROZEN_PREFIX_LEN = 7
 _REPIN_LOG_MAX_UNFROZEN_TAIL = 1
 _REPIN_LOG_HISTORY_SHA256 = (
-    "84a11592992d753a5393a5e4b67b1f1a813dbb0a0fc84d28c2e2da20e1f5444d")
+    "9d140759e87e04579bd32d7ac4460ac47db5bd30fab1b89dd4db9285dd39c726")
 
 
 def repin_log_history_digest(

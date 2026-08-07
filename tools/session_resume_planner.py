@@ -101,10 +101,18 @@ PLAN_PREFIX = guard.PLAN_PREFIX
 #: StopIfGoingOnBatteries，而 New-ScheduledTaskSettingsSet 的參數叫 -AllowStartIfOnBatteries／
 #: -DontStopIfGoingOnBatteries。抄錯只在真機非 -WhatIf 呼叫時才會拋 NamedParameterNotFound，
 #: 語法解析與 CI 一律看不到 ⇒ 這裡逐字沿用 tools/install_windows_nightly.ps1 的既有寫法。
-_SCHTASKS_SETTINGS = (
-    "New-ScheduledTaskSettingsSet -StartWhenAvailable -WakeToRun "
-    "-AllowStartIfOnBatteries -DontStopIfGoingOnBatteries"
-)
+_SCHTASKS_SETTINGS = ("New-ScheduledTaskSettingsSet -StartWhenAvailable -WakeToRun "
+                      "-AllowStartIfOnBatteries -DontStopIfGoingOnBatteries")
+
+#: 🔴 R79 續修：與 `tools/install_windows_nightly.ps1` 的兩支既有工作對齊（該檔 R69
+#: S-5 段）。S4U＝以該使用者身分跑但**不需登入、不存密碼**，工作落在 session 0 ⇒
+#: 不會有視窗跳到使用者臉上。**但註冊 S4U 需要提權**（該檔已載明，本輪非提權真機
+#: 複測：`Register-ScheduledTask ... -LogonType S4U` → 「存取被拒」，工作根本沒建），
+#: 而哨兵的主要武裝路徑是 SessionStart hook＝一律非提權 ⇒ 只掛 S4U 會讓武裝整條斷掉。
+#: 故採「S4U 優先、失敗回退預設 Principal」，**不彈視窗這件事改由載具保證**（見
+#: `_no_console_python`）：兩層各自獨立成立，任一層在時都不彈。
+_SCHTASKS_PRINCIPAL = ("New-ScheduledTaskPrincipal -UserId \"$env:USERDOMAIN\\$env:USERNAME\" "
+                       "-LogonType S4U -RunLevel Limited")
 
 
 # 優先序：`--transcript` 顯式路徑 → `--session-id` 對應的 `<id>.jsonl` →
@@ -353,7 +361,10 @@ def run_powershell(script: str) -> subprocess.CompletedProcess[str]:
             ["powershell.exe", "-NoProfile", "-ExecutionPolicy", "Bypass",
              "-File", str(holder)],
             capture_output=True, encoding="utf-8", errors="replace",
-            timeout=120, check=False)
+            # 父行程若是 pythonw（排程 Action 的載具，見 endurance_schtasks_script）
+            # 就沒有 console，此時開一個 console 子行程會**新配置一個視窗**＝彈窗又
+            # 回來了。CREATE_NO_WINDOW 讓這一層獨立成立，不依賴 LogonType。
+            timeout=120, check=False, creationflags=subprocess.CREATE_NO_WINDOW)
     finally:
         try:
             holder.unlink()
@@ -585,8 +596,7 @@ def sentinel_task_name(session_id: str, given: str = DEFAULT_TASK_NAME) -> str:
 # 之後，醒來的第一段是**確定性的 Python**：先留痕、再判定、再動作。
 # `tick` 選的是醒來要走哪一支：`--resume-tick`＝已撞線在等額度（醒來必探測）；
 # `--sentinel-tick`＝預防性巡邏（醒來只讀檔，零 token）。兩者共用同一份註冊腳本。
-def runner_action_argument(plan_path: str, task_name: str,
-                           tick: str = RESUME_TICK) -> str:
+def runner_action_argument(plan_path: str, task_name: str, tick: str = RESUME_TICK) -> str:
     """schtasks Action 的參數字串：叫**本檔**回來，不是叫一個模型回合。"""
     return (f'"{Path(__file__).resolve()}" {tick} '
             f'--plan "{plan_path}" --task-name "{task_name}"')
@@ -597,7 +607,18 @@ def runner_action_argument(plan_path: str, task_name: str,
 def endurance_schtasks_script(plan_path: str, task_name: str, at_expr: str,
                               tick: str = RESUME_TICK) -> str:
     """續航／哨兵排程的註冊腳本。與手動路徑共用取證段，但 Action 指向 runner。"""
-    python = _ps_single_quote(str(Path(sys.executable).resolve()))
+    # 🔴 R79 續修的**本體**（掌舵者當場回報：哨兵每 15 分鐘彈一個 console 視窗）。
+    # 根因不在「醒來做了什麼」，而在**載具**：`sys.executable` 是 console 子系統的
+    # `python.exe`，在 Interactive 登入類型下 Windows 必定替它開一個視窗。既有兩支
+    # nightly 工作不彈，是因為它們是 S4U（跑在 session 0）——而 S4U 註冊需提權、
+    # 哨兵的武裝路徑（SessionStart hook）拿不到（見 `_SCHTASKS_PRINCIPAL`）⇒ 只調
+    # LogonType 治不了非提權那條路。`pythonw.exe` 是同一個直譯器的 GUI 子系統版本，
+    # **不配置 console**，故不論 LogonType 為何都不彈。
+    # 代價已查證：`sys.stdout`／`sys.stderr` 為 `None`。CPython 的 `print()` 對
+    # `stdout is None` 是靜默 no-op（不拋例外），`_stdio_utf8` 亦已明文處理該情境；
+    # 而本檔的稽核痕跡一律 `append_log()` 寫檔、不靠 stdout ⇒ 可觀測性零損失。
+    quiet = Path(sys.executable).resolve().with_name("pythonw.exe")
+    python = _ps_single_quote(str(quiet if quiet.is_file() else Path(sys.executable).resolve()))
     plan_q = _ps_single_quote(plan_path)
     task_q = _ps_single_quote(task_name)
     argument = _ps_single_quote(runner_action_argument(plan_path, task_name, tick))
@@ -608,15 +629,17 @@ def endurance_schtasks_script(plan_path: str, task_name: str, at_expr: str,
         f"-Argument '{argument}'\n"
         f"$trigger = New-ScheduledTaskTrigger -Once -At {at_expr}\n"
         f"$settings = {_SCHTASKS_SETTINGS}\n"
-        f"Register-ScheduledTask -TaskName '{task_q}' -Action $action "
-        "-Trigger $trigger -Settings $settings -Force | Out-Null\n"
+        f"$principal = {_SCHTASKS_PRINCIPAL}\n"
+        f"$common = @{{TaskName='{task_q}'; Action=$action; Trigger=$trigger; "
+        "Settings=$settings; Force=$true}\n"
+        "try { Register-ScheduledTask @common -Principal $principal -EA Stop | Out-Null }\n"
+        "catch { Register-ScheduledTask @common | Out-Null }\n"
         "\n"
         f"{_EVIDENCE_TEMPLATE.format(task=task_q)}\n"
     )
 
 
-def register_endurance(state: dict, at: datetime,
-                       tick: str = RESUME_TICK) -> tuple[int, str]:
+def register_endurance(state: dict, at: datetime, tick: str = RESUME_TICK) -> tuple[int, str]:
     """註冊／重排並取證。回 `(rc, next_run_time)`；拿不到憑證一律 rc=1。"""
     at_expr = f"'{at.strftime('%Y-%m-%d %H:%M:%S')}'"
     proc = run_powershell(endurance_schtasks_script(
@@ -763,8 +786,7 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def _schtasks_verify(task_name: str) -> int:
-    proc = run_powershell(
-        _EVIDENCE_TEMPLATE.format(task=_ps_single_quote(task_name)) + "\n")
+    proc = run_powershell(_EVIDENCE_TEMPLATE.format(task=_ps_single_quote(task_name)) + "\n")
     print(proc.stdout, end="")
     moment = next_run_time(proc.stdout)
     if proc.returncode != 0 or not moment:
@@ -781,8 +803,7 @@ def _schtasks_remove(task_name: str) -> int:
         f"Unregister-ScheduledTask -TaskName '{task_q}' -Confirm:$false\n"
         f"if (Get-ScheduledTask -TaskName '{task_q}' "
         "-ErrorAction SilentlyContinue) { Write-Output 'STILL-PRESENT' } "
-        "else { Write-Output 'REMOVED' }\n"
-    )
+        "else { Write-Output 'REMOVED' }\n")
     print(proc.stdout, end="")
     if "REMOVED" not in proc.stdout:
         print(f"❌ `{task_name}` 沒有真的被移除（rc={proc.returncode}）\n"
@@ -814,8 +835,7 @@ def _base_state(session_id: str, plan: Path, args, kind: str, task: str) -> dict
 
 # 武裝／重排的共同尾段。三條路走同一份，是因為「拿不到 `NextRunTime` 卻仍把 state
 # 寫成 armed」這種假綠只要有一條路漏掉就等於沒有防；集中一處才有辦法一次證完。
-def _register_and_record(plan: Path, state: dict, at: datetime,
-                         tick: str) -> tuple[int, str]:
+def _register_and_record(plan: Path, state: dict, at: datetime, tick: str) -> tuple[int, str]:
     """寫狀態 → 註冊排程 → 取憑證 → 把憑證（或 abandoned）寫回狀態。"""
     write_relay(plan, state)
     rc, moment = register_endurance(state, at, tick)

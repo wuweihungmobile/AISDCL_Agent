@@ -1061,6 +1061,32 @@ class EnduranceWiringTest(unittest.TestCase):
             with self.subTest(flag=flag):
                 self.assertIn(flag, script)
 
+    def test_the_action_uses_a_no_console_interpreter(self) -> None:
+        """🔴 R79 續修的回歸鎖（掌舵者當場回報：哨兵每 15 分鐘彈一個 console 視窗）。
+
+        鎖的是**載具**而不是只鎖 LogonType，理由是射程：S4U 註冊需要提權，而哨兵的
+        主要武裝路徑（SessionStart hook）一律非提權——本輪真機實測 `Register-ScheduledTask
+        ... -LogonType S4U` 在非提權下回「存取被拒」且工作根本沒建立。在那條路上唯一
+        還成立的「不彈視窗」保證就是載具：`python.exe` 是 console 子系統、Interactive
+        下必定配一個視窗；`pythonw.exe` 是同一個直譯器的 GUI 子系統版本，不配置 console。
+        把它改回 `python.exe` 就是那個缺陷本身，故本條必須紅。"""
+        script = planner.endurance_schtasks_script(_A_PLAN, "T", "'09:00'")
+        self.assertIn("pythonw.exe", script)
+
+    def test_the_principal_is_s4u_first_with_a_non_elevated_fallback(self) -> None:
+        """與 `tools/install_windows_nightly.ps1` 的兩支既有工作對齊（該檔 R69 S-5 段）：
+        Interactive 的工作在使用者未登入時整輪不跑，且視窗開在使用者桌面上。
+
+        兩個方向都要鎖：① S4U 必須是**先試的**那一支（回退分支才有意義，否則等於沒改）；
+        ② 回退分支必須存在（非提權下 S4U 會被拒，只掛 S4U 會讓哨兵整條武裝斷掉——
+        那是把一個干擾缺陷換成一個功能缺陷，不是修好）。"""
+        script = planner.endurance_schtasks_script(_A_PLAN, "T", "'09:00'")
+        self.assertIn("-LogonType S4U", script)
+        self.assertNotIn("-LogonType Interactive", script)
+        self.assertLess(script.index("-Principal $principal"),
+                        script.index("catch { Register-ScheduledTask"),
+                        "S4U 必須是 try 的那一支，回退才有意義")
+
     def test_the_audit_trail_has_exactly_one_home(self) -> None:
         """🔴 本輪端到端實測抓到的真缺陷：稽核痕跡分裂成兩個檔。
 
