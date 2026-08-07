@@ -33,6 +33,10 @@ WHY
   遮蔽後面檢查的訊號，而遮蔽的方向是「看起來變乾淨」，比紅更危險）。
 · 任何非預期例外 → exit 0（fail-open）。`.claude/settings.json` 記載過的 P0：
   hook 誤觸 PreToolUse deny 會把**所有**工具硬鎖死，守衛自身絕不可成為故障源。
+· 上面「只擋三件事」講的是 **lint**。本檔另載一條與 lint 無關的**授權邊界**：
+  環境變數 `AUTOSDD_UNATTENDED` 有設時（＝被排程叫起來的無人看管回合）擋下
+  commit／push，且**不吃行內豁免**。互動 session 上那個變數不存在 ⇒ 整段不參與
+  判定。射程、擋不到的形態與立案理由全部寫在下方 `UNATTENDED_ENV` 的區塊註解。
 
 為何退化 payload 不 fail-closed
 --------------------------------
@@ -240,6 +244,60 @@ _FOOTER = (
     "比漏擋更糟。回歸鎖：tools/tests/test_check_hooks_liveness.py）"
 )
 
+# ══════════════════════════════════════════════════════════════════════════
+# 無人看管那一跑的 commit／push 阻斷（R79 Auto Pilot 解鎖的**條件**）
+# ══════════════════════════════════════════════════════════════════════════
+# 掌舵者 R79 逐字裁決：「現在開，但禁止 commit/push」。開的是
+# `tools/session_resume_planner.py` 的 `--allow-resume` 預設——續航哨兵探測到額度回來
+# 之後會真的 spawn `claude -p -r <sid>` 把工作續跑起來，而那一個回合**沒有人在看**。
+#
+# 為何非機械物不可：那一跑要遵守的東西全部寫在任務書第 4 節〈禁止事項〉——散文。
+# 而本 repo 對「純文件約束對當下的模型零攔阻力」已有三次實證（`block_bash_on_windows.py`
+# 的立案理由、本檔自己的立案理由、R77 的 20~35% 違規率對照）。裁決是條件不是建議，
+# 條件就必須有牙。
+#
+# 訊號：環境變數 `AUTOSDD_UNATTENDED=1`，由 planner 的 `_run_resume()` 在 spawn 那一刻
+# 注入子行程環境（hook 是那個 `claude` 行程的子行程 ⇒ 一路繼承得到，含子代理派工）。
+# **正常互動 session 一律沒有這個變數**，本段整個不參與判定＝零附帶面。這是刻意的：
+# 掌舵者自己 commit 的那條路不能被這道鎖碰到。
+#
+# 🔴 這一段刻意放在行內豁免（`# ps-lint-ok:`）**之前**、且不經過 `lint_command()`：
+# 那個豁免的設計前提是「窄守衛需要出口」，但這一條不是 lint 而是**授權邊界**——一個
+# 無人看管的模型回合可以自己寫出豁免註解，出口留給它等於沒有鎖。三條 lint 規則的
+# 豁免行為完全不變（`lint_command()` 一個字都沒動），兩者互不影響。
+#
+# 誠實劃界（擋不到的形態，別假裝完整）：
+#   · 使用者自訂函式／別名（`function gp { git push }` 之後只寫 `gp`）——判準看不到
+#     定義，解析不出來。
+#   · 不經 shell 的路徑：MCP git 工具、Write 工具直接改 `.git/`、`Agent` 子代理若走
+#     非 PowerShell 載具（Windows 上 Bash 已被姊妹 hook 擋死，故實務上只剩前兩者）。
+#   · 非 Windows：本檔 `os.name != 'nt'` 一律 exit 0。續航整條路是 schtasks ⇒ 只在
+#     Windows 成立，射程對齊；mac/Linux 要開 Auto Pilot 時這道鎖必須另外補。
+# 這些寫在這裡而不是只寫在交棒文件裡，是因為讀到這支 hook 的人才是會誤以為它完整的人。
+UNATTENDED_ENV = "AUTOSDD_UNATTENDED"
+
+#: `git`／`gh` 的**指令位置**：允許帶路徑前綴（`<某處>/git.exe`），但前綴必須以路徑
+#: 分隔符結尾——否則 `legit commit`／`weigh pr create` 這種字尾巧合會被誤判。
+_EXE_HEAD = r"(?:[^\s;|&]*[\\/])?"
+#: 動詞與子指令之間允許夾參數（`git -C <path> commit`／`git -c user.name=x push`），
+#: 但**不得跨越管線**（`git log | Select-String push` 不是在 push）。子指令前要求一個
+#: 空白，於是 `--grep=push` 這種「push 只是參數的值」不會命中。
+_ARGS = r"[^;\n|]*?\s"
+_GIT_WRITE_RE = re.compile(
+    _CMD_START + _EXE_HEAD + r"git(?:\.exe)?(?![\w.-])" + _ARGS
+    + r"(?:commit|push)(?![\w-])", re.IGNORECASE)
+_GH_WRITE_RE = re.compile(
+    _CMD_START + _EXE_HEAD + r"gh(?:\.exe)?(?![\w.-])" + _ARGS
+    + r"(?:pr|release)\s+(?:create|merge)(?![\w-])", re.IGNORECASE)
+
+_UNATTENDED_HEADER = (
+    f"🔴 這一跑是**被排程叫起來的無人看管回合**（環境變數 {UNATTENDED_ENV} 有設），"
+    "禁止動 git 歷史。這是掌舵者開啟 Auto Pilot 時的**條件**，不是可以商量的建議，"
+    "行內豁免 `# ps-lint-ok:` 對本條**無效**（豁免是給窄 lint 的出口，不是給授權邊界的）。\n"
+    "  該做的事：把改動留在工作樹、把狀態寫進任務書／稽核痕跡，然後停下來讓人回來收。\n"
+    "  本次命中：\n"
+)
+
 
 def mask_regions(command: str, *, keep_expandable: bool,
                  keep_comments: bool = False) -> str:
@@ -415,6 +473,24 @@ def lint_command(command: str) -> list[str]:
     return hits
 
 
+def unattended_hits(command: str) -> list[str]:
+    """無人看管那一跑的 commit／push 命中清單（空＝放行）。純函式，紅綠由注入自證。
+
+    只讀**結構面**（引號／here-string／註解已遮蔽）：訊息文字裡提到「git commit」
+    不是在 commit，硬擋它會讓那一跑連留下狀態都做不到——而「把狀態寫下來然後停」
+    正是本條要它做的事。指令位置的判準與三條 lint 規則共用同一組邊界（`_CMD_START`），
+    不自創第二套「什麼算一個指令的起頭」。
+    """
+    structural = mask_regions(command, keep_expandable=False)
+    hits: list[str] = []
+    if _GIT_WRITE_RE.search(structural):
+        hits.append("  · git commit／git push（含 `git -C <path> …`、`git.exe`、"
+                    "`;`／換行／`&&`／`|` 之後的第二段指令）")
+    if _GH_WRITE_RE.search(structural):
+        hits.append("  · gh pr create／pr merge／release create（把改動送出去的另一條路）")
+    return hits
+
+
 def read_payload() -> dict | None:
     """讀 stdin 的 hook payload；`None`＝退化（讀不出來）。
 
@@ -468,6 +544,14 @@ def main() -> int:
                 "[lint_powershell_command] PowerShell payload 沒有 command 字串 ⇒ 本次不 lint。\n"
             )
             return 1
+
+        # 🔴 授權邊界先判，且**不經 `lint_command()`**：那支函式第一件事是認行內豁免，
+        # 而無人看管的那個回合可以自己寫出豁免註解。順序本身就是判準的一部分。
+        if os.environ.get(UNATTENDED_ENV):
+            blocked = unattended_hits(command)
+            if blocked:
+                sys.stderr.write(_UNATTENDED_HEADER + "\n".join(blocked) + "\n")
+                return 2
 
         hits = lint_command(command)
         if not hits:

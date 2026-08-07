@@ -727,7 +727,7 @@ _FROZEN_GUARD_LINES: dict[str, int] = {
     "_platform_helpers.py": 519,
     "_ps_engine.py": 115,
     "test_act_local_runner_image.py": 322,
-    "test_adr_xplat001_c1c2_lock.py": 4158,
+    "test_adr_xplat001_c1c2_lock.py": 4172,
     "test_archive_defect_log.py": 3786,
     "test_bash32_compat.py": 609,
     "test_bash_probe_spec_contract.py": 960,
@@ -735,12 +735,12 @@ _FROZEN_GUARD_LINES: dict[str, int] = {
     "test_bootstrap_ps1.py": 160,
     "test_check_defect_log_crossref.py": 2770,
     "test_check_gha_action_versions.py": 295,
-    "test_check_hooks_liveness.py": 1930,
+    "test_check_hooks_liveness.py": 2048,
     "test_check_pytest_baseline_sites.py": 297,
     "test_check_script_parity.py": 1973,
     "test_check_wrapper_thinness.py": 1316,
     "test_component_sanitizer_shared_layer_lock.py": 293,
-    "test_context_budget_guard.py": 1427,
+    "test_context_budget_guard.py": 1530,
     "test_defect_id_reference_integrity.py": 261,
     "test_dev_start.py": 6686,
     "test_dev_start_ps1_lastexitcode.py": 462,
@@ -912,6 +912,20 @@ _GUARD_LINES_REPIN_LOG: tuple[tuple[str, int, int, int, str], ...] = (
         "🔴 未調高任何門檻；planner 一度 750/750 滿載，是以壓縮接續行與 docstring 騰出空間"
         "（`count_loc` 排除空行與註解行，所以把註解搬進 ADR 一行都省不到——這一點也是實測得知）。",
     ),
+    (
+        "R79", 62821, 63056, 235,
+        "R79 **Auto Pilot 解鎖**（掌舵者拍板：「現在開，但禁止 commit/push」）。"
+        "解鎖的前提是兩個當回合探針：headless `claude -p` **完整跑本 repo 的 hooks**"
+        "（SessionStart 自己武裝了哨兵、PreToolUse 攔下 Bash 工具且中文指引無編碼降解）"
+        "——那正是 `--allow-resume` 此前不敢開的唯一理由，它今天被實測掉了。"
+        "成長即兩組鎖：①無人看管訊號的注入與傳遞（探測→續跑那一支 spawn 必須帶它）；"
+        "②commit/push 攔截的形態矩陣（真違規全擋、不設訊號全放行、無關指令全放行、"
+        "壞輸入與非 Windows 依既有退化契約），逐格皆以子行程真跑取證。"
+        "🔴 **判準刻意排在行內豁免之前**：無人看管的那個回合自己寫得出 `# ps-lint-ok:` 註解，"
+        "順序本身就是判準的一部分——這一條若被人「順手整理」成與其他規則同序，鎖就失效了。"
+        "🔴 未調高任何門檻；planner 由 749 壓到 748，手法是收掉 `main()` 內與 "
+        "`register_endurance()` 逐字相同的九行重複實作（抽 `_register_at_expr()`），不是刪理由。",
+    ),
 )
 
 
@@ -930,10 +944,10 @@ _GUARD_LINE_DRIFT_TOLERANCE = 0
 #: 追加當輪不必動指紋（一列寬限），下一輪要再追加就必須先把前一列納入前綴並重釘，
 #: 否則 `[前綴過期]` 轉紅。草稿兩個值都由 `--print-guard-lines` 印出
 #: （ARCH-02 的教訓：紅了卻沒有出路的鎖會被關掉）。
-_REPIN_LOG_FROZEN_PREFIX_LEN = 7
+_REPIN_LOG_FROZEN_PREFIX_LEN = 8
 _REPIN_LOG_MAX_UNFROZEN_TAIL = 1
 _REPIN_LOG_HISTORY_SHA256 = (
-    "9d140759e87e04579bd32d7ac4460ac47db5bd30fab1b89dd4db9285dd39c726")
+    "9d287bd398748114f348ecfede93fff5d2caa6db5966974e654c95047cdfbe9a")
 
 
 def repin_log_history_digest(

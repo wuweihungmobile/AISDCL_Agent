@@ -1423,5 +1423,108 @@ class SentinelWiringTest(unittest.TestCase):
         self.assertTrue((self.tmp / "p.md").is_file(), "任務書骨架沒被寫出來")
 
 
+# ══════════════════════════════════════════════════════════════════════════
+# R79 Auto Pilot：`--allow-resume` 預設翻成開，以及它必須付的代價
+# ══════════════════════════════════════════════════════════════════════════
+# 掌舵者逐字裁決：「現在開，但禁止 commit/push」。**兩件事必須綁在同一組鎖裡**——
+# 只鎖前者會讓「開了但護欄沒接上」全程綠，而那正是本 repo 判過三次的
+# 「機制蓋好沒接電」（R77 PKG-GUARD）。所以下面兩個 class 是一組：
+#   ① 預設真的是開，且兩個關閉出口都真的關得掉；
+#   ② 那一跑的 spawn **真的**帶著無人看管訊號（漏注入是靜默的——護欄不會出聲說
+#      自己沒被掛上，被守的那一跑也不會知道自己沒被守）。
+# hook 那一端讀同一個字面，由 `tools/tests/test_check_hooks_liveness.py` 自證。
+_UNATTENDED_ENV = "AUTOSDD_UNATTENDED"
+_RESUME_OFF_ENV = "AUTOSDD_RESUME_OFF"
+
+
+class AllowResumeDefaultTest(unittest.TestCase):
+    """`--allow-resume` 的預設與它的兩個關閉出口。"""
+
+    def _parse(self, argv: list[str], *, off: str | None) -> bool:
+        # 預設是在 `build_parser()` 當下讀環境變數算出來的 ⇒ 必須先改環境再建 parser。
+        before = os.environ.pop(_RESUME_OFF_ENV, None)
+        if off is not None:
+            os.environ[_RESUME_OFF_ENV] = off
+        try:
+            return bool(planner.build_parser().parse_args(argv).allow_resume)
+        finally:
+            os.environ.pop(_RESUME_OFF_ENV, None)
+            if before is not None:
+                os.environ[_RESUME_OFF_ENV] = before
+
+    def test_default_is_on(self) -> None:
+        self.assertTrue(
+            self._parse([], off=None),
+            "R79 拍板 Auto Pilot 預設開；關著的話哨兵等到額度回來也只會通知，"
+            "而『通知了但沒人在』正是這條協定要消滅的狀態")
+
+    def test_explicit_flag_still_turns_it_on(self) -> None:
+        self.assertTrue(self._parse(["--allow-resume"], off=None),
+                        "既有呼叫點（人手打的、文件抄的）不得因為改預設而失效")
+
+    def test_the_negated_flag_turns_it_off(self) -> None:
+        self.assertFalse(self._parse(["--no-allow-resume"], off=None),
+                         "沒有關閉出口的預設＝不可逆的決定")
+
+    def test_the_env_var_turns_it_off(self) -> None:
+        """🔴 環境變數才是實務上有用的那個出口：哨兵由 SessionStart hook 武裝，
+        沒有人會去改它的參數，但環境變數是模型改不到、人改得到的那一層。"""
+        self.assertFalse(self._parse([], off="1"),
+                         f"{_RESUME_OFF_ENV} 關不掉 ⇒ 排程／hook 路徑上沒有出口")
+
+    def test_the_explicit_flag_beats_the_env_var(self) -> None:
+        """顯式旗標壓過環境變數：那是 argparse 的既有語意，也是人當場的意圖。"""
+        self.assertTrue(self._parse(["--allow-resume"], off="1"))
+
+
+class ResumeSpawnCarriesTheUnattendedSignalTest(unittest.TestCase):
+    """續跑那一跑的 spawn 必須帶 `AUTOSDD_UNATTENDED=1`（掌舵者開 Auto Pilot 的條件）。
+
+    走 `subprocess.run` 的攔截而不是真的 spawn 一個 `claude`：這裡要證的是
+    **注入有沒有發生**，那是本檔這一端的責任；「訊號送到之後 hook 會不會擋」是另一端
+    的責任，由那一端自己的注入證明負責。兩端各證各的，中間靠共同的字面對上。
+    """
+
+    def setUp(self) -> None:
+        self.tmp = Path(tempfile.mkdtemp())
+        self.calls: list[dict] = []
+
+        class _Done:
+            returncode, stdout, stderr = 0, "ok", ""
+
+        def _fake_run(argv, **kwargs):
+            self.calls.append({"argv": argv, **kwargs})
+            return _Done()
+
+        real = planner.subprocess.run
+        planner.subprocess.run = _fake_run
+        self.addCleanup(setattr, planner.subprocess, "run", real)
+
+    def _run(self) -> dict:
+        args = planner.build_parser().parse_args(["--probe-command", "claude"])
+        state = {"plan_path": str(self.tmp / "p.md"), "session_id": "sid-1"}
+        planner._run_resume(args, state, self.tmp / "log.jsonl")
+        self.assertEqual(len(self.calls), 1, "續跑應該只 spawn 一次")
+        return self.calls[0]
+
+    def test_the_signal_is_injected(self) -> None:
+        env = self._run().get("env") or {}
+        self.assertEqual(
+            env.get(_UNATTENDED_ENV), "1",
+            "續跑那一跑沒有帶無人看管訊號 ⇒ PreToolUse 守衛在那一跑上整支靜默，"
+            "而它靜默的樣子與『有在守』一模一樣")
+
+    def test_the_rest_of_the_environment_survives(self) -> None:
+        """只加一個鍵，不換掉整個環境：`PATH`／`APPDATA` 沒了那一跑根本起不來。"""
+        env = self._run().get("env") or {}
+        missing = [k for k in os.environ if k not in env]
+        self.assertEqual(missing, [], f"spawn 環境掉了 {missing[:5]} 等鍵")
+
+    def test_it_still_resumes_the_right_session(self) -> None:
+        argv = self._run()["argv"]
+        self.assertEqual(argv[:4], ["claude", "-p", "-r", "sid-1"],
+                         f"續跑指令的形狀被改掉了：{argv[:4]}")
+
+
 if __name__ == "__main__":
     unittest.main()

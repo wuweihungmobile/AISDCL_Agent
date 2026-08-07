@@ -239,6 +239,33 @@ DEFAULT_TASK_NAME = "AutoSDD_SessionResume"
 #: 醒來要走哪一支的旗標字面。兩支 tick 的差別只有一件事：**要不要花額度**。
 RESUME_TICK = "--resume-tick"
 SENTINEL_TICK = "--sentinel-tick"
+
+# ─────────────────────────────── Auto Pilot（R79；掌舵者逐字裁決「現在開，但禁止 commit/push」）
+# 🔴 `--allow-resume` 的預設在本輪由**關**翻成**開**。關閉的唯一理由（headless
+# `claude -p` 到底跑不跑本 repo 的 hooks？若不跑，那個無人看管的回合會是全 repo 唯一
+# 沒有護欄的地方）已被兩個探針實證推翻：
+#   · SessionStart 會跑——探針前 `AutoSDD_*` 排程工作數 0，跑一次 `claude -p` 之後
+#     變 1（SessionStart hook 自己武裝了哨兵）。
+#   · PreToolUse 會跑——`claude -p ... --allowed-tools "Bash"` 的 Bash 呼叫在執行前
+#     被 `.claude/hooks/block_bash_on_windows.py` 攔下，`echo` 一次都沒跑到。
+# ⇒ 那一跑受禁 Bash／禁裸 cd／禁接管線讀 rc／context 阻斷等全部既有護欄保護。
+#
+# **怎麼關掉**（兩個出口，任一即可，都不需要改 code）：
+#   ① 手動路徑：`--no-allow-resume`（`BooleanOptionalAction` 自動產生的否定旗標）。
+#   ② 排程／hook 路徑：設環境變數 `AUTOSDD_RESUME_OFF=1`。這一個才是實務上有用的
+#      那一個——哨兵是由 SessionStart hook 武裝的，沒有人會去改它的參數，但環境變數
+#      是模型改不到、人改得到的那一層（同 `AUTOSDD_SENTINEL_OFF` 的形態）。
+#      🔴 射程誠實劃界：它只影響**武裝當下**寫進狀態塊的 `allow_resume`。已經武裝出去
+#      的排程讀的是任務書裡那一格，事後設這個變數不會改變它——要收回已武裝的那一支，
+#      改任務書狀態塊的 `allow_resume` 或直接 `--remove-schtasks`。
+#
+# 掌舵者開這一格的**條件**是「禁止 commit／push」，而那個條件不靠本檔自律：
+# `_run_resume()` spawn 時注入 `AUTOSDD_UNATTENDED=1`，由 PreToolUse 守衛
+# `.claude/hooks/lint_powershell_command.py` 在那一跑的每一次 PowerShell 呼叫上硬擋
+# （exit 2，且不吃行內豁免）。訊號名住在這裡是因為**注入端是這裡**；hook 那一側是
+# 消費者，兩邊的字面由 `tools/tests/test_check_hooks_liveness.py` 的注入證明綁在一起。
+UNATTENDED_ENV = "AUTOSDD_UNATTENDED"
+RESUME_OFF_ENV = "AUTOSDD_RESUME_OFF"
 #: 預設觸發時刻運算式。留成 PowerShell 運算式而不是寫死時間：使用者要改成 CLI 印的
 #: reset 時間時，改的是同一個字串，印出來的與真的註冊出去的**不會分岔**。
 #:
@@ -585,6 +612,16 @@ def sentinel_decide(event: dict | None, handled_through: object,
 
 # 哨兵是 **per-session** 的：共用一個工作名會讓新 session 靜默蓋掉舊 session 還在等的
 # 那一支。顯式給了 `--task-name` 就聽人的（測試與人工操作都要能指定）。
+#
+# 🔴 R79 已知設計問題（**本輪不修**，交棒下一輪）：per-session ＋ SessionStart **無條件**
+# 武裝＝每一次 headless `claude -p` 呼叫都會生出一支自己的哨兵（每個 headless session
+# 有自己的 session id）。本輪實測：跑兩次探針之後機器上有 3 支 `AutoSDD_Sentinel_*`。
+# 6 小時的 `SENTINEL_IDLE_SECONDS` 會讓它們自己下班，所以不會無限長；但 Auto Pilot
+# 開啟後短時間內的堆積是真的——續跑那一跑本身也是一個 headless session，它也會武裝
+# 一支。可能的處置（都需要先決定語意，故不在本輪射程）：同一個 repo 只留一支（以
+# repo 路徑而非 session id 命名，武裝時 `-Force` 覆蓋）；或 SessionStart 先數一次現有
+# 哨兵、超過 N 支就不再武裝；或對 headless session（`claude -p`）整個不武裝——但最後
+# 這條會把「續跑那一跑自己撞線」的續航能力一起關掉，是取捨不是純改善。
 def sentinel_task_name(session_id: str, given: str = DEFAULT_TASK_NAME) -> str:
     """哨兵的 schtasks 工作名。"""
     return given if given != DEFAULT_TASK_NAME else f"AutoSDD_Sentinel_{session_id}"
@@ -639,11 +676,12 @@ def endurance_schtasks_script(plan_path: str, task_name: str, at_expr: str,
     )
 
 
-def register_endurance(state: dict, at: datetime, tick: str = RESUME_TICK) -> tuple[int, str]:
-    """註冊／重排並取證。回 `(rc, next_run_time)`；拿不到憑證一律 rc=1。"""
-    at_expr = f"'{at.strftime('%Y-%m-%d %H:%M:%S')}'"
-    proc = run_powershell(endurance_schtasks_script(
-        state["plan_path"], state["task_name"], at_expr, tick))
+# 🔴 R79 Auto Pilot：`--register-schtasks` 那條手動路徑此前在 `main()` 裡另存一份
+# **逐字相同**的九行（跑腳本 → 取 `NextRunTime` → 拿不到就 rc=1）。同一份知識兩個家、
+# 改一個另一個不會紅，是本 repo 反覆判過的形態；收成一處順帶把本檔騰出 LOC 餘裕。
+def _register_at_expr(plan_path: str, task: str, at_expr: str, tick: str) -> tuple[int, str]:
+    """註冊排程並當場取證。回 `(rc, next_run_time)`；拿不到憑證一律 rc=1。"""
+    proc = run_powershell(endurance_schtasks_script(plan_path, task, at_expr, tick))
     print(proc.stdout, end="")
     moment = next_run_time(proc.stdout)
     if proc.returncode != 0 or not moment:
@@ -651,6 +689,12 @@ def register_endurance(state: dict, at: datetime, tick: str = RESUME_TICK) -> tu
               "本工具**不會**說它已排程。\n" + (proc.stderr or ""), file=sys.stderr)
         return 1, ""
     return 0, moment
+
+
+def register_endurance(state: dict, at: datetime, tick: str = RESUME_TICK) -> tuple[int, str]:
+    """註冊／重排並取證。回 `(rc, next_run_time)`；拿不到憑證一律 rc=1。"""
+    return _register_at_expr(state["plan_path"], state["task_name"],
+                             f"'{at.strftime('%Y-%m-%d %H:%M:%S')}'", tick)
 
 
 def write_relay(plan: Path, state: dict) -> None:
@@ -775,11 +819,12 @@ def build_parser() -> argparse.ArgumentParser:
                         help="**schtasks 叫起來的那一支**：留痕 → 探測 → 續跑或重排。"
                              "不該由人手動跑（除了驗證它）")
     parser.add_argument("--plan", help="--resume-tick／--sentinel-tick 要讀的任務書絕對路徑")
-    parser.add_argument("--allow-resume", action="store_true", dest="allow_resume",
-                        help="🔴 允許醒來那一跑真的執行 `claude -p -r` 續跑工作。**預設關閉**："
-                             "那一跑無人看管，而任務書的〈禁止事項〉是散文，對 print 模式的模型"
-                             "一樣零攔阻力。關閉時仍會完成「等到額度回來並留下痕跡」，"
-                             "只是最後那個模型回合要人自己來")
+    parser.add_argument("--allow-resume", action=argparse.BooleanOptionalAction,
+                        dest="allow_resume", default=os.environ.get(RESUME_OFF_ENV) is None,
+                        help="允許醒來那一跑真的執行 `claude -p -r` 續跑工作。**R79 起預設開啟**"
+                             f"（掌舵者拍板）。要關：`--no-allow-resume` 或設 {RESUME_OFF_ENV}=1"
+                             f"（排程／hook 路徑唯一有效的出口）。無人看管 ⇒ {UNATTENDED_ENV} 配 "
+                             "PreToolUse 守衛硬擋 commit／push")
     parser.add_argument("--probe-command", default="claude",
                         help="探針用的 claude 執行檔（測試注入用）")
     return parser
@@ -893,24 +938,27 @@ def _arm_endurance(args, transcript: Path, plan: Path) -> int:
     print(f"   觀測到的 reset：{reset_at}（來源：逐字稿原文，非推算）")
     print(f"   任務書＋狀態塊：{plan}")
     print(f"   稽核痕跡：{state['log_path']}（沒觸發＝這個檔不會長大，是可偵測的）")
-    if not args.allow_resume:
-        print("   ℹ️  未帶 --allow-resume ⇒ 醒來那一跑只會探測＋留痕＋通知，"
-              "不會自己執行工作（無人看管的模型回合是另一個風險層級）。")
+    print("   ℹ️  醒來那一跑會自動續跑（Auto Pilot 預設開；禁 commit／push，由 "
+          f"{UNATTENDED_ENV} 配 PreToolUse 守衛硬擋）。" if args.allow_resume else
+          f"   ℹ️  已關閉自動續跑（--no-allow-resume／{RESUME_OFF_ENV}）⇒ 醒來只探測＋留痕。")
     return 0
 
 
-# 真的開一個無人看管的模型回合（**預設關閉**，見 `--allow-resume` 的 WHY）。
-# 抽成函式是因為兩條路都會走到它：`--resume-tick` 的 resume 分支、以及哨兵探測到
-# 額度回來的那一支。同一份知識不留兩個家。
+# 真的開一個無人看管的模型回合（R79 起**預設開啟**，見上方 Auto Pilot 區塊的 WHY 與
+# 兩個關閉出口）。抽成函式是因為兩條路都會走到它：`--resume-tick` 的 resume 分支、
+# 以及哨兵探測到額度回來的那一支。同一份知識不留兩個家——**注入無人看管訊號的站點
+# 也因此只有一個**，這正是它抽出來的價值：漏注入是靜默的（護欄不會出聲說自己沒被
+# 掛上），而只有一個站點的東西才有辦法一次證完。
 def _run_resume(args, state: dict, log: Path) -> int:
-    """額度回來且已授權時，真的把工作續跑起來。"""
+    """額度回來且已授權時，真的把工作續跑起來（帶無人看管訊號）。"""
     prompt = (f"讀 {state['plan_path']}，照它第 3 節做。"
               "🔴 第一件事是重驗，不採信該檔任何「已通過」宣稱。"
-              "遵守第 4 節〈禁止事項〉。")
+              "遵守第 4 節〈禁止事項〉。🔴 本回合無人看管，禁止 commit／push"
+              "（已由 PreToolUse 守衛硬擋，不是請求）——改動留在工作樹讓人回來收。")
     proc = subprocess.run(
         [args.probe_command, "-p", "-r", state["session_id"], prompt],
         capture_output=True, encoding="utf-8", errors="replace",
-        timeout=3600, check=False,
+        timeout=3600, check=False, env={**os.environ, UNATTENDED_ENV: "1"},
     )
     append_log(log, "resumed", rc=proc.returncode, out=(proc.stdout or "")[:400])
     print((proc.stdout or "")[:2000])
@@ -976,8 +1024,9 @@ def _resume_tick(args) -> int:
     _schtasks_remove(state["task_name"])  # 同上：終態不留死工作
     if not state.get("allow_resume"):
         append_log(log, "quota_back_no_resume")
-        print("✅ 額度已恢復。未授權自動續跑（武裝時沒帶 --allow-resume）⇒ "
-              f"請人回來跑：claude -r {state['session_id']}")
+        print("✅ 額度已恢復。狀態塊記著 allow_resume=false（帶了 --no-allow-resume／"
+              f"{RESUME_OFF_ENV}，或它是 R79 之前武裝的）⇒ 人回來跑："
+              f"claude -r {state['session_id']}")
         return 0
     return _run_resume(args, state, log)
 
@@ -1127,24 +1176,19 @@ def main(argv: list[str]) -> int:
     print(f"✅ 可重啟點任務書骨架已寫到：{out}")
     print("   🔴 帶 TODO: 的欄位本工具不代填——它不知道你驗過什麼。")
     print(f"   重啟指令（可直接複製）：claude -r {data['session_id']}")
-    if args.arm_sentinel:
+    # 兩條武裝路的差別在被呼叫的那個函式，不在這個分派——合成一句是為了騰出 LOC
+    # 餘裕（本檔 `guardrail_cli` tier 上限 750，門檻一格都沒有調高），語意不變：
+    # `--arm-sentinel` 仍優先於 `--arm-endurance`。
+    if args.arm_sentinel or args.arm_endurance:
         print()
-        return _arm_sentinel(args, transcript, out)
-    if args.arm_endurance:
-        print()
-        return _arm_endurance(args, transcript, out)
+        arm = _arm_sentinel if args.arm_sentinel else _arm_endurance
+        return arm(args, transcript, out)
     if args.print_schtasks:
-        print()
-        print(schtasks_command(str(out), args.task_name, args.at), end="")
+        print("\n" + schtasks_command(str(out), args.task_name, args.at), end="")
     if args.register_schtasks:
         print()
-        proc = run_powershell(
-            endurance_schtasks_script(str(out), args.task_name, args.at))
-        print(proc.stdout, end="")
-        moment = next_run_time(proc.stdout)
-        if proc.returncode != 0 or not moment:
-            print(f"❌ 排程沒有成立（rc={proc.returncode}，NextRunTime 取不到）"
-                  "⇒ 本工具**不會**說它已排程。\n" + (proc.stderr or ""), file=sys.stderr)
+        rc, moment = _register_at_expr(str(out), args.task_name, args.at, RESUME_TICK)
+        if rc != 0:
             return 1
         print(f"✅ NextRunTime = {moment}　←（憑證；宣稱『已排程』時必須連它一起貼）")
     return 0

@@ -774,8 +774,16 @@ def _ps_payload(command: str) -> str:
     )
 
 
+#: 無人看管訊號的字面。**刻意在測試裡再寫一次而不 import 被測物**：這條的兩端是
+#: 「planner 注入什麼」與「hook 讀什麼」，鎖若從任一端 import 常數，兩端一起改名時
+#: 它會跟著改而全程綠——那正是這道鎖要抓的失效。planner 那一端由
+#: `tools/tests/test_context_budget_guard.py` 對同一個字面自證。
+_UNATTENDED_ENV = "AUTOSDD_UNATTENDED"
+
+
 def _run_lint_hook(
-    stdin_text: str, *, force_os_name: str | None = None
+    stdin_text: str, *, force_os_name: str | None = None,
+    env_extra: dict[str, str] | None = None,
 ) -> tuple[int, str]:
     """以子行程真跑 lint 守衛，回 `(rc, stderr)`（走子行程的理由同 `_run_hook`）。"""
     if force_os_name is None:
@@ -787,9 +795,14 @@ def _run_lint_hook(
             f"runpy.run_path({str(_LINT_HOOK)!r}, run_name='__main__')\n"
         )
         cmd = [sys.executable, "-c", bootstrap]
+    env = _child_env()
+    # 🔴 顯式剝除，理由同 `_child_env` 對 `PYTHONUTF8` 的既有註記：「沒有訊號時放行」
+    # 那幾條若讓外層環境供應綠燈，這道鎖量的就不是被測物的性質。
+    env.pop(_UNATTENDED_ENV, None)
+    env.update(env_extra or {})
     proc = subprocess.run(
         cmd, input=stdin_text, capture_output=True, text=True,
-        encoding="utf-8", errors="replace", timeout=60, env=_child_env(),
+        encoding="utf-8", errors="replace", timeout=60, env=env,
     )
     return proc.returncode, proc.stderr or ""
 
@@ -1063,6 +1076,111 @@ class TestLintPowerShellHookDoesNotHurtOtherPlatforms(unittest.TestCase):
     def test_posix_allows_a_violating_command(self) -> None:
         rc, err = _run_lint_hook(_ps_payload("cd x"), force_os_name="posix")
         self.assertEqual(rc, 0, f"非 Windows 上誤擋；rc={rc}\n{err}")
+
+
+# ══════════════════════════════════════════════════════════════════════════
+# R79 Auto Pilot：無人看管那一跑的 commit／push 阻斷
+# ══════════════════════════════════════════════════════════════════════════
+# 為何併進本檔：`tools/tests/` 檔數是 shrink-only 棘輪（禁新增鎖檔），而這條規則
+# 住在本檔已經在守的那支 hook 裡。
+#
+# 立案：掌舵者 R79 逐字裁決「現在開，但禁止 commit/push」——開的是 planner 的
+# `--allow-resume` 預設。條件不是建議，所以它必須有牙；而「那一跑要遵守任務書第 4 節」
+# 是散文，本 repo 對散文的攔阻力已有三次實證（都是 0）。
+#
+# 本鎖守四件事，**每一件都帶反向**（只帶一個方向的鎖必然在另一個方向恆綠）：
+#   ① 有訊號 × 會動 git 歷史 → 必須 exit 2；
+#   ② **沒有訊號** × 同一條指令 → 必須 exit 0（互動 session 零附帶面。這一條若壞掉，
+#      掌舵者自己的 commit 會被鎖死，而那會讓整個機制當場被關掉）；
+#   ③ 有訊號 × 無關指令（`git status`／`git log`）→ 必須 exit 0；
+#   ④ 行內豁免對本條**無效**（無人看管的那個回合可以自己寫豁免註解）。
+class TestUnattendedCommitPushBlock(unittest.TestCase):
+    """R79 Auto Pilot 的授權邊界（WHY 與四件事見上方區塊註記）。"""
+
+    def _lint(self, command: str, *, unattended: bool) -> tuple[int, str]:
+        return _run_lint_hook(
+            _ps_payload(command), force_os_name="nt",
+            env_extra={_UNATTENDED_ENV: "1"} if unattended else None)
+
+    #: 有訊號時**必須擋**。每一筆都是那一跑真的可能寫出來的形態。
+    MUST_BLOCK = (
+        ("git commit", 'git commit -m "wip"'),
+        ("git push", "git push origin main"),
+        ("git -C <path> commit（不在 cwd 上動手）", 'git -C /repo commit -m x'),
+        ("git -c 覆寫設定後 push", "git -c user.name=bot push"),
+        ("git.exe（字面換一個就繞過的老形態）", "git.exe push"),
+        ("帶路徑前綴的 git", "/tools/git/bin/git.exe commit -m x"),
+        ("呼叫運算子", "& git push"),
+        ("第二段指令（`;` 之後）", "Get-Date; git commit -m x"),
+        ("第二段指令（換行之後）", "Get-Date\ngit push"),
+        ("第二段指令（`&&` 之後）", "Get-Date && git push"),
+        ("gh pr create（把改動送出去的另一條路）", "gh pr create --fill"),
+        ("gh release create", "gh release create v1 --notes x"),
+        ("行內豁免對授權邊界無效（那一跑自己寫得出這行註解）",
+         "git push  # ps-lint-ok: 我覺得可以"),
+    )
+
+    #: 有訊號時**仍必須放行**。那一跑要做的事正是「把狀態寫下來然後停」，
+    #: 擋到它讀 git、寫任務書、留稽核痕跡，等於逼它什麼都不留就死掉。
+    MUST_PASS_UNATTENDED = (
+        ("git status（讀，不是寫）", "git status --short"),
+        ("git log", "git log --oneline -3"),
+        ("git diff", "git diff --stat"),
+        ("git rev-parse", "git rev-parse HEAD"),
+        ("`push` 只是 grep 的樣式，不是子指令", "git log | Select-String push"),
+        ("`commit` 出現在參數的值裡（`=` 後面沒有空白）", "git log --grep=commit"),
+        ("在字串裡提到 commit（寫任務書／留痕的日常）",
+         "$note = 'blocked: do not git commit here'"),
+        ("在註解裡提到 push", "Get-Date  # never git push from here"),
+        ("字尾巧合不算指令（`legit` 不是 `git`）", "legit commit -m x"),
+        ("完全無關的指令", "Get-ChildItem | Select-Object Name"),
+    )
+
+    def test_the_signal_blocks_git_history_writes(self) -> None:
+        for label, command in self.MUST_BLOCK:
+            with self.subTest(label):
+                rc, err = self._lint(command, unattended=True)
+                self.assertEqual(rc, 2, f"未擋（{label}）：{command!r}\n{err}")
+                self.assertIn(
+                    _UNATTENDED_ENV, err,
+                    f"擋了但沒說是哪個訊號造成的（{label}）——讀者無從得知怎麼關：{err}")
+
+    def test_without_the_signal_the_same_commands_are_untouched(self) -> None:
+        """🔴 反向：互動 session 必須零附帶面。這一條壞掉＝掌舵者的 commit 被鎖死。"""
+        for label, command in self.MUST_BLOCK:
+            with self.subTest(label):
+                rc, err = self._lint(command, unattended=False)
+                self.assertEqual(
+                    rc, 0, f"沒有無人看管訊號卻被擋（{label}）：{command!r}\n{err}")
+
+    def test_the_signal_does_not_block_unrelated_commands(self) -> None:
+        for label, command in self.MUST_PASS_UNATTENDED:
+            with self.subTest(label):
+                rc, err = self._lint(command, unattended=True)
+                self.assertEqual(rc, 0, f"誤擋（{label}）：{command!r}\n{err}")
+
+    def test_degraded_payload_keeps_the_existing_contract(self) -> None:
+        """退化 payload 的既有契約不因本條而改變（出聲、但不硬擋唯一的 shell 載具）。"""
+        for label, text in (("壞 JSON", "{ nope"), ("空 stdin", "")):
+            with self.subTest(label):
+                rc, err = _run_lint_hook(text, force_os_name="nt",
+                                         env_extra={_UNATTENDED_ENV: "1"})
+                self.assertEqual(rc, 1, f"{label}：退化契約被本條改掉了\n{err}")
+                self.assertTrue(err.strip(), f"{label} 必須出聲")
+
+    def test_non_windows_keeps_the_platform_contract(self) -> None:
+        """非 Windows 一律 exit 0。續航整條路是 schtasks ⇒ 只在 Windows 成立，
+        射程對齊；要在 mac/Linux 開 Auto Pilot 時這道鎖必須另外補（已寫進 hook 的
+        〈誠實劃界〉區塊註解，不是被忘記）。"""
+        rc, err = _run_lint_hook(_ps_payload("git push"), force_os_name="posix",
+                                 env_extra={_UNATTENDED_ENV: "1"})
+        self.assertEqual(rc, 0, f"非 Windows 上誤擋；rc={rc}\n{err}")
+
+    def test_the_message_names_the_boundary_not_just_the_rule(self) -> None:
+        """訊息要讓那一跑知道**該做什麼**，不是只知道被擋。"""
+        _rc, err = self._lint("git push", unattended=True)
+        self.assertIn("ps-lint-ok", err, "必須明說行內豁免對本條無效")
+        self.assertIn("工作樹", err, "必須告訴它替代動作（改動留著讓人回來收）")
 
 
 class TestLintPowerShellHookIsActuallyRegistered(unittest.TestCase):
