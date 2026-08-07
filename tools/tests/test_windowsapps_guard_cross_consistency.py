@@ -1496,6 +1496,15 @@ _ZERO_GUARD_BARE_PY_SITES = {
         "（`\"python -m pip install \" + …`）——本行程只 print 它、不 spawn。"
         "R68 新增：缺第三方相依時 runner fail-fast 並印出這行修法"
     ),
+    "tools/probe/xplat_injection_matrix.py": (
+        "非呼叫：`Gate.describe` 欄位的**人可讀說明字串**"
+        "（`\"python tools/run_root_unittests.py（根層護欄層全套）\"`），"
+        "只用於報表印出「這一格量的是哪道閘門」，本行程不 spawn 它——"
+        "真正跑閘門走的是 `sys.executable`。與同表 `tools/run_root_unittests.py` 同型。"
+        "🔴 R79 立此筆的成因本身值得記：該檔在 commit 前是 untracked，"
+        "本鎖的掃描面只看 git-tracked ⇒ 它在 commit 的那一刻才首次進入射程並當場轉紅。"
+        "「commit 改變 tracked 狀態使掃描面漂移」在本 repo 已是第二次（R78 收輪同型）"
+    ),
     "tools/lib/platform_utils.py": (
         "非呼叫：`venv_dir / \"bin\" / \"python\"` 的**路徑片段**（組出 venv 內絕對路徑），"
         "不經 PATH 解析。粗粒度判準看不出「字面值當路徑片段」與「當指令首 token」的差別，"

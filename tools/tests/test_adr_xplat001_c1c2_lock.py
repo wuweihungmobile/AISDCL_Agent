@@ -777,7 +777,7 @@ _FROZEN_GUARD_LINES: dict[str, int] = {
     "test_windows_nightly_anchor_parity.py": 135,
     "test_windows_smoke_heartbeat_doc_sync.py": 197,
     "test_windowsapps_guard_bash_parity.py": 956,
-    "test_windowsapps_guard_cross_consistency.py": 2213,
+    "test_windowsapps_guard_cross_consistency.py": 2222,
     "test_workflow_permission_concurrency_lock.py": 1357,
     "test_workflow_schedule_sync.py": 309,
     "test_workflow_timeout_coverage.py": 158,
@@ -883,7 +883,7 @@ _GUARD_LINES_REPIN_LOG: tuple[tuple[str, int, int, int, str], ...] = (
         "後者會讓表② 宣告的「出廠環境」語意在沒有人察覺的情況下換掉。",
     ),
     (
-        "R79", 62439, 62772, 333,
+        "R79", 62439, 62781, 342,
         "R79 **續航哨兵（預防性武裝）與其接電點**，由收尾者在所有 agent 停工後的"
         "單人窗口一次重釘。逐檔淨額現查 `--print-guard-lines` 的 DIFF 欄，本列不登載。"
         "成長歸因：哨兵在既有鎖檔內落地五分支判定（依觀測 reset 重排／探測／續巡／"
@@ -919,7 +919,7 @@ _GUARD_LINE_DRIFT_TOLERANCE = 0
 _REPIN_LOG_FROZEN_PREFIX_LEN = 6
 _REPIN_LOG_MAX_UNFROZEN_TAIL = 1
 _REPIN_LOG_HISTORY_SHA256 = (
-    "1e80abf9c6f51a27eb813889ec5624ad8d63a9a2e6f0d8d509a838890bc38b9e")
+    "84a11592992d753a5393a5e4b67b1f1a813dbb0a0fc84d28c2e2da20e1f5444d")
 
 
 def repin_log_history_digest(
