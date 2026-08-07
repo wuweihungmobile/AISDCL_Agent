@@ -507,3 +507,123 @@ def report_unresolved(ledger: dict[str, str | None]) -> int:
     for f in fails:
         print(f"❌ {f}")
     return 1 if fails else 0
+
+
+# --------------------------------------- 帳本逐列位元組上限（R79，`DEF-101-890`）
+#: 單列上限（UTF-8 bytes）。這條政策自 R76 起被連續三份交棒書寫進「禁止事項」，而 R79
+#: 開場實測**全 repo 零機械物**：120 列有 110 列違反、平均 2,089 bytes，主檔因此被推到
+#: 距 pre-push 硬閘僅 5,224 bytes（≈2 列）。「政策在、觀測者不在」正是本 repo 反覆診斷
+#: 出的頭號缺陷形態，只是這一次連鎖都沒有，而代價是整條 push 通道。
+#: 🔴 本值**不重新談**：700 是 R75 訂立、R76~R78 逐字沿用的既有政策，本輪只替它裝上
+#: 量測者。判準的意圖是「帳本列是**索引**不是報告」——詳情寫進 `_GOVERNANCE_DOCS` 那
+#: 一族具名證據檔（它們自己受 256KB 體積守門），列上只留一句話與檔名指針。
+#:
+#: 🔴 同一包同時改了消費端的**收斂位置**（`check_defect_log_crossref._CHECK_ORDER`）：
+#: 「缺陷帳本主檔體積」原本是 `main()` 的**第二道早退**，一超線就 `return _bail(...)`，
+#: 其後十來道（跨文件一致、孤兒承接、未結存量、逐列位元組…）一行都不跑，而讀者拿到的
+#: 畫面只是「輸出變短」——診斷與閘門在同一時刻一起消失，方向正是「看起來變乾淨」。
+#: 現改為累積到最後一道一起收斂：rc 語意完全不變（超線照樣 1），但體積紅的當回合其餘
+#: 判準照跑完。逐列位元組上限同屬「帳本體積」語意，故共用同一個名目、不另立第二種機制。
+#: 回歸鎖＝`TestR79RowByteCeiling::test_the_volume_check_no_longer_masks_the_later_checks`。
+ROW_MAX_BYTES = 700
+
+#: 表格列的 ID 抽取（與 `check_defect_log_crossref._ROW_RE` 同形，多一個捕獲群）。
+_ROW_ID_RE = re.compile(r"^\|\s*(DEF-\d+-\d+)\s*\|")
+
+
+def row_bytes(ledger_text: str) -> dict[str, int]:
+    """主檔逐列的 UTF-8 位元組數（鍵＝DEF-ID）。純函式，可構造輸入驗牙。"""
+    out: dict[str, int] = {}
+    for line in ledger_text.split("\n"):
+        m = _ROW_ID_RE.match(line)
+        if m:
+            out[m.group(1)] = len(line.encode("utf-8"))
+    return out
+
+
+#: 存量豁免（**具名**，不是計數）：R79 落地當下**仍**超過 `ROW_MAX_BYTES` 的列。
+#: 具名而非計數，是因為本鎖的核心設計要求就是「分得開新列與既有列」：
+#:   · 超標而**不在**本清單 ⇒ 紅（新列，或既有列被改寫到超標）。
+#:   · 在本清單而**已不超標**（或該 ID 已不在主檔）⇒ 紅，要求把它從清單刪掉。
+#:     缺這一向，清單會退化成永久額度（判例同 `stale_grandfather_problems()`）。
+#: 🔴 一次全紅不是選項：這 105 列是歷史事實，硬擋會讓本鎖上線即永紅，而永紅的鎖會被
+#: 整個關掉，比沒有鎖更糟（ARCH-R59-NB4 判例）。
+#: 取值紀律同 `_FROZEN_GUARD_LINES`：**當回合實測直接填入、零加減推算、不留成長緩衝**。
+OVERSIZE_ROW_GRANDFATHERED: frozenset[str] = frozenset("""
+DEF-01-007 DEF-01-009 DEF-100-002 DEF-101-018 DEF-101-055
+DEF-101-060 DEF-101-068 DEF-101-200 DEF-101-205 DEF-101-214
+DEF-101-217 DEF-101-233 DEF-101-235 DEF-101-238 DEF-101-242
+DEF-101-243 DEF-101-263 DEF-101-268 DEF-101-271 DEF-101-274
+DEF-101-278 DEF-101-296 DEF-101-297 DEF-101-308 DEF-101-309
+DEF-101-313 DEF-101-324 DEF-101-333 DEF-101-335 DEF-101-336
+DEF-101-338 DEF-101-348 DEF-101-351 DEF-101-358 DEF-101-377
+DEF-101-388 DEF-101-392 DEF-101-398 DEF-101-399 DEF-101-400
+DEF-101-401 DEF-101-402 DEF-101-412 DEF-101-415 DEF-101-418
+DEF-101-422 DEF-101-435 DEF-101-470 DEF-101-500 DEF-101-518
+DEF-101-550 DEF-101-557 DEF-101-559 DEF-101-560 DEF-101-561
+DEF-101-565 DEF-101-596 DEF-101-610 DEF-101-628 DEF-101-649
+DEF-101-675 DEF-101-676 DEF-101-680 DEF-101-693 DEF-101-701
+DEF-101-702 DEF-101-703 DEF-101-714 DEF-101-726 DEF-101-733
+DEF-101-736 DEF-101-739 DEF-101-740 DEF-101-746 DEF-101-747
+DEF-101-748 DEF-101-752 DEF-101-755 DEF-101-758 DEF-101-764
+DEF-101-769 DEF-101-790 DEF-101-792 DEF-101-794 DEF-101-795
+DEF-101-796 DEF-101-797 DEF-101-798 DEF-101-801 DEF-101-802
+DEF-101-803 DEF-101-810 DEF-101-856 DEF-101-866 DEF-101-867
+DEF-101-870 DEF-101-871 DEF-101-872 DEF-101-876 DEF-101-878
+DEF-101-880 DEF-101-886 DEF-101-887 DEF-101-888 DEF-101-889
+""".split())
+
+#: 具名清單的**筆數**上限（形狀照抄 `check_defect_log_crossref._UNPINNED_HANDOVER_CEILING`）。
+#: 上面兩向擋得住「悄悄膨脹」與「清單過時」，擋不住「膨脹了就順手把 ID 補進清單」——
+#: 本常數是那條縫的塞子。**只准往下改**；要往上調必須在缺陷帳本具名理由。
+OVERSIZE_ROW_CEILING = 105
+
+#: 存量列的**超標總量**（Σ max(0, 列 bytes − 上限)）上限。上面三條管的是「有幾列超標」，
+#: 這一條管的是「超標多少」——少了它，一列 800 bytes 的豁免列可以長到 8,000 bytes 而
+#: 前三條全綠，而主檔體積正是被這個量推上硬閘的。**只准往下改，零成長容忍**；合法出口
+#: 只有一個：把長列的詳情搬進具名證據檔，讓這個數字真的變小。
+#: 🔴 R79 兩度轉動本棘輪：① 補列作業 162282 → 147944（−14338），`DEF-101-263`／`358`／
+#: `628` 三列（皆已結案）的欄內長文逐字搬進 `CrossPlatform_R79_Debt_Audit.md`，只留索引；
+#: ② 收尾回收 `DEF-101-557`／`680`／`714`，狀態欄改索引 → 147455。兩次都走合法出口。
+#: 取值紀律同 `OVERSIZE_ROW_GRANDFATHERED`：**當回合實測直接填入、零加減推算、不留成長
+#: 緩衝**（`TestR79RowByteCeiling::test_the_real_ledger_baselines_are_exact_not_padded`
+#: 對本值是逐字相等斷言，留任何餘裕都會當場紅）。
+OVERSIZE_ROW_EXCESS_CEILING = 147455
+
+
+def oversize_row_problems(ledger_text: str) -> list[str]:
+    """單列位元組上限的四向判準（純函式，可構造輸入驗牙；回空＝全部合規）。
+
+    四向＝① 新超標列不在豁免清單、② 豁免清單過時、③ 清單筆數棘輪、④ 超標總量棘輪。
+    ①② 互為反向（缺任一向，清單不是變成永久額度就是讓鎖永紅）；③④ 各自堵住
+    「膨脹了就把 ID 補進清單」與「豁免列繼續長大」這兩條 ①② 結構上擋不住的繞道。
+    """
+    sizes = row_bytes(ledger_text)
+    over = {i: n for i, n in sizes.items() if n > ROW_MAX_BYTES}
+    problems = [
+        f"{i}：該列 {over[i]} bytes > 單列上限 {ROW_MAX_BYTES} 且不在存量豁免清單內。"
+        f"帳本列是**索引**：把「當回合查證」「解鎖條件」這類長文搬進 docs/06_quality/ "
+        f"的具名證據檔（受 _GOVERNANCE_DOCS 體積守門），列上只留一句話與檔名指針。"
+        f"🔴 不要把 ID 補進 OVERSIZE_ROW_GRANDFATHERED 來讓本道轉綠——那是砸溫度計，"
+        f"且 OVERSIZE_ROW_CEILING 會當場擋下"
+        for i in sorted(set(over) - OVERSIZE_ROW_GRANDFATHERED)
+    ]
+    problems += [
+        f"{i}：列在 OVERSIZE_ROW_GRANDFATHERED，但主檔實測"
+        + ("查無此 ID" if i not in sizes else f"{sizes[i]} bytes ≤ {ROW_MAX_BYTES}")
+        + "⇒ 豁免已過期，請把它從清單移除並同步下修 OVERSIZE_ROW_CEILING 與 "
+          "OVERSIZE_ROW_EXCESS_CEILING——留著就是日後無聲加回去的額度"
+        for i in sorted(OVERSIZE_ROW_GRANDFATHERED - set(over))
+    ]
+    if len(OVERSIZE_ROW_GRANDFATHERED) > OVERSIZE_ROW_CEILING:
+        problems.append(
+            f"存量豁免清單 {len(OVERSIZE_ROW_GRANDFATHERED)} 筆 > 棘輪上限 "
+            f"{OVERSIZE_ROW_CEILING}（只准往下改）：要新增豁免，先把等量的列真的瘦身")
+    excess = sum(n - ROW_MAX_BYTES for n in over.values())
+    if excess > OVERSIZE_ROW_EXCESS_CEILING:
+        problems.append(
+            f"存量列超標總量 {excess} bytes > 棘輪上限 {OVERSIZE_ROW_EXCESS_CEILING}"
+            f"（只准往下改、零成長容忍）：既有豁免列被改長了 "
+            f"{excess - OVERSIZE_ROW_EXCESS_CEILING} bytes。合法出口＝把該列詳情搬進"
+            f"具名證據檔，或在同一次變更內把別的列縮回等量以上")
+    return problems

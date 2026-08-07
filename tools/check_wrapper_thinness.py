@@ -423,6 +423,31 @@ _FORBIDDEN: dict[str, tuple[str, ...]] = {
         "ForEach-Object",
         ".ForEach(",
     ),
+    # 🔴 R79 ARCH：這兩支是 `_PINNED_SHA256` 16 鍵中僅有的兩個**沒有**第三訊號的鍵
+    # ——`_FORBIDDEN.get(rel, ())` 對缺鍵靜默回空 tuple，迴圈零次、零訊號，於是這兩支
+    # 只剩 hash 一道訊號，而 hash 的**合法維護動作就是更新 pin**（R60 Scan-E E-A-02
+    # 記載並修過的「串聯失效」原型）。並聯的第三訊號對它們從落地起就是空的，且
+    # `check_script_parity.py` 自陳「機制已接上、日後補字即生效」讀起來像已有覆蓋。
+    #
+    # 為何**不**照抄其他薄殼那套六字／九字：這兩支確實會迭代——run_tlc.sh 的
+    # `while [[ $# -gt 0 ]]` 是引數轉發、`for _cand in python3 python` 與 run_tlc.ps1 的
+    # `foreach ($cand in @("python3","python"))` 是直譯器候選鏈（行號刻意不寫死，
+    # 本檔另有一道鎖禁止行數／行號快照），
+    # 兩者正是「選直譯器／轉呼叫核心」這個薄殼職責本身。照抄整組會當場變成假紅，
+    # 而假紅的鎖最後一定被整道關掉。故只登記**與薄殼職責無關**的那一族：JSON 解析與
+    # 內嵌直譯器程式碼——那是 `LATEST/tools/fsm_runtime/tlc_runner.py` 的工作。
+    # 覆蓋完整性（每個釘選鍵都要有一筆、刻意留空者必須寫成顯式空 tuple ＋ WHY）由
+    # `tools/tests/test_check_wrapper_thinness.py::TestForbiddenKeywordsCoverEveryPin` 守。
+    "LATEST/tools/fsm_runtime/formal/run_tlc.sh": (
+        "jq ",
+        "python -c",
+        "python3 -c",
+    ),
+    "LATEST/tools/fsm_runtime/formal/run_tlc.ps1": (
+        "ConvertFrom-Json",
+        "ConvertTo-Json",
+        "[System.Text.Json",
+    ),
 }
 
 

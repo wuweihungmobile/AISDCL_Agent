@@ -542,65 +542,45 @@ if ($dirty) {
 
 try {
   # ── [1/9] PowerShell parse 檢查（四棵樹 active .ps1，唯讀）────────────────────
-  # R56 修正（Architect round 3）：本步驟原僅掃根層 tools/（8 支），而 R56 同輪已把
-  # macOS 對等品 tools/macos_smoke_local.sh [1/7] 由「根層 tools/」擴為與
-  # root-infra-ci.yml 第 1 道同一份清單。該擴面的立論正是「平台待遇不對稱」，結果
-  # 不對稱只是從 CI 層搬到本機層、方向恰好相反：CI 第 2 道掃四棵樹（21 支 active
-  # .ps1），Windows 本機側卻只掃根層 8 支，13 支（含 install_git_hooks.ps1／
-  # local_ci_gate.ps1 等 AutoClaude/AISDLC_SDD 側入口）在本機零語法訊號，只能燒 CI
-  # 額度才發現 parse error。故擴為與 root-infra-ci.yml 第 2 道同四棵樹、皆 -Recurse。
-  # 凍結版 AISDLC_SDD/AISDLC_SDD_v0.01~v0.(N-1) 依紀律不回改 → 排除；LATEST 一律
-  # 委派 AISDLC_SDD/scripts/sdd_version.py SSOT 解析（DEF-101-133，禁自行實作版本
-  # glob/regex），空值 Fail-Item 不靜默縮面（鏡射該 CI step 的 throw 語意）。
-  # per-tree 檔數下限釘選（防單棵樹目錄搬家/樣式改壞後靜默縮面）＝2026-07-27 實測
-  # 各樹支數，刻意刪減時同步下修（慣例對齊 tools/tests/test_bash32_compat.py）。
+  # 掃描面＝root-infra-ci.yml 第 2 道同四棵樹（tools/ + AutoClaude/tools/ +
+  # AISDLC_SDD/scripts/ + LATEST，皆遞迴，凍結版排除）。WHY 要掃四棵而非只掃根層
+  # tools/：R56 實測 13 支（含 install_git_hooks.ps1／local_ci_gate.ps1 等
+  # AutoClaude/AISDLC_SDD 側入口）在本機零語法訊號，只能燒 CI 額度才發現 parse error。
+  #
+  # 🔴 R79 ARCH：本區塊不再自持 $ps1Trees 名冊與 Get-ChildItem 列舉，一律向 Python
+  # SSOT tools/_script_scan_surface.py 取掃描面（該檔同時持有 per-tree 檔數下限
+  # PS1_TREE_FLOORS 與 LATEST 版解析，後者委派 sdd_version.py＝DEF-101-133）。
+  # WHY：本區塊曾是同一份掃描面的第 3 份獨立實作（CI 第 2 道是第 2 份），repo 為了
+  # 偵測三份是否同步養了 866 行對抗式正則錨（tools/tests/_ci_scan_anchors.py ＋
+  # test_ci_scan_anchors.py），而那組錨自承有三種已實測抓不到的逃逸形態。複本消失後
+  # 「三份不同步」在結構上不可能發生，該 866 行同輪退場。
+  # rc 一律接到變數再讀（禁接管線——pwsh 7.x 會保留前一個值＝真紅讀成綠）。
   Write-Host ''
-  Write-Host '--- [1/9] Parser 解析檢查（active .ps1 四棵樹：tools/ + AutoClaude/tools/ + AISDLC_SDD/scripts/ + LATEST，皆遞迴；對本 repo 直跑）---'
-  $sddRoot = Join-Path $RepoRoot 'AISDLC_SDD'
-  $latestName = ''
-  $resolver = Join-Path $sddRoot 'scripts\sdd_version.py'
-  if (Test-Path -LiteralPath $resolver) {
-    $latestName = (& python $resolver --sdd-root $sddRoot | Out-String).Trim()
-  }
-  $ps1Trees = @(
-    @{ Rel = 'tools'; Floor = 8 },
-    # R76：Floor 由 7 下修為 6（reschedule_g0_gatecheck.ps1 整支刪除，真孤兒——它要重排的
-    # AutoClaude_SD09_G0_GateCheck 於 R71 已從本機移除）。姊妹站點＝test_ps51_compat._TREE_FLOORS。
-    @{ Rel = 'AutoClaude\tools'; Floor = 6 },
-    @{ Rel = 'AISDLC_SDD\scripts'; Floor = 2 }
-  )
-  if ($latestName) {
-    Write-Host "    AISDLC_SDD LATEST 版：${latestName}（其餘凍結版排除）"
-    $ps1Trees += @{ Rel = (Join-Path 'AISDLC_SDD' $latestName); Floor = 4 }
-  } else {
-    Fail-Item 'AISDLC_SDD LATEST 解析失敗（scripts/sdd_version.py 無輸出）——掃描邊界不得靜默縮小'
-  }
-  $ps1Files = @()
+  Write-Host '--- [1/9] Parser 解析檢查（active .ps1 四棵樹，皆遞迴；掃描面取自 tools/_script_scan_surface.py SSOT）---'
+  $surfaceTool = Join-Path $RepoRoot 'tools\_script_scan_surface.py'
+  $ps1Files = @(& python $surfaceTool --list --suffix .ps1 --with-latest --check-floors --absolute --repo-root $RepoRoot)
+  $surfaceRc = $LASTEXITCODE
   $treeBad = 0
-  foreach ($tree in $ps1Trees) {
-    $treeFull = Join-Path $RepoRoot $tree.Rel
-    $found = @(Get-ChildItem -Path $treeFull -Recurse -Filter *.ps1 -File -ErrorAction SilentlyContinue)
-    Write-Host "    $($tree.Rel)：$($found.Count) 支（下限 $($tree.Floor)）"
-    if ($found.Count -lt $tree.Floor) {
-      Fail-Item "active .ps1 掃描面異常縮小：$($tree.Rel) 僅 $($found.Count) 支（現況應 >= $($tree.Floor)）——目錄搬家或 Get-ChildItem 樣式疑似被改壞"
-      $treeBad += 1
-    }
-    $ps1Files += $found
+  if ($surfaceRc -ne 0) {
+    Fail-Item "掃描面 SSOT 列舉失敗（tools/_script_scan_surface.py rc=${surfaceRc}）——per-tree 下限未達或 LATEST 解析失敗；掃描邊界不得靜默縮小"
+    $treeBad = 1
+  } else {
+    Write-Host "    掃描面：$($ps1Files.Count) 支（四棵樹，per-tree 下限已由 SSOT 檢查）"
   }
   $parseBad = 0
   foreach ($f in $ps1Files) {
     $tokens = $null
     $parseErrors = $null
-    [void][System.Management.Automation.Language.Parser]::ParseFile($f.FullName, [ref]$tokens, [ref]$parseErrors)
+    [void][System.Management.Automation.Language.Parser]::ParseFile($f, [ref]$tokens, [ref]$parseErrors)
     if ($parseErrors -and $parseErrors.Count -gt 0) {
       foreach ($e in $parseErrors) {
-        Write-Host "    $($f.FullName):$($e.Extent.StartLineNumber) $($e.Message)"
+        Write-Host "    ${f}:$($e.Extent.StartLineNumber) $($e.Message)"
       }
-      Fail-Item "Parser parse error：$($f.FullName)"
+      Fail-Item "Parser parse error：${f}"
       $parseBad += 1
     }
   }
-  if ($parseBad -eq 0 -and $treeBad -eq 0 -and $latestName) {
+  if ($parseBad -eq 0 -and $treeBad -eq 0) {
     Pass-Item "Parser 解析全數通過（$($ps1Files.Count) 檔／四棵樹）"
   }
 

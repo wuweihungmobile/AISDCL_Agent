@@ -4,14 +4,32 @@
 WHY
 ---
 掌舵者連續多輪指名要兩件事：「注意上下文是否超出 90%，進行 /compact，不要爆」與
-「注意 Token 限制，適當進行排程再喚醒繼續處理」。動工前實查三處，結論是這兩件事
-在**這一層**零機械物：
+「注意 Token 限制，適當進行排程再喚醒繼續處理」。實查**四處**：
+
   · 根 `.claude/settings.json`：SessionStart/PreToolUse/PostToolUse 全部條目裡
     沒有任何一支在看 token 或 context；
   · `AutoClaude` Kernel 的 Token Guard（≥80% `/compact`、≥90% checkpoint ＋
     `scheduled_resume_at`）活在 **playbook 執行迴圈**裡，對 Claude Code session
     本身一行都不生效——它守的是被驅動的那個東西，不是驅動者；
-  · 根 `CLAUDE.md`〈Token 將耗盡時的「無害暫停 → reset 後重啟」SOP〉是**純人工程序**。
+  · 根 `CLAUDE.md`〈Token 將耗盡時的「無害暫停 → reset 後重啟」SOP〉是**純人工程序**；
+  · 🔴 **第四處＝harness 自己**（R79 補上；R78 版的這段 docstring 逐字寫「實查三處」
+    而漏了它，等於在說「沒人在自動 compact」——與磁碟不符）。實測 `claude --version`
+    ＝2.1.223、`claude --help` 有 `--autocompact <auto|tokens>  Auto-compact window
+    size (auto, or 100k–1M tokens)`；二進位內的開關判定逐字是
+    `if(DISABLE_COMPACT)return!1; if(env.DISABLE_AUTO_COMPACT)return!1;
+    return config("autoCompactEnabled", true)` ⇒ **預設開啟**。
+
+🔴 因此本檔的角色被明確收斂（別讓一個東西假裝能做兩件事）
+--------------------------------------------------------
+「不要爆」這件事**主要由 harness 的 autocompact 做**，本檔做不到——hook 不能執行
+`/compact`，模型也不能自己打 slash 指令。本檔是那條線的**第二道**：
+  ① 把「現在幾 %」變成看得見的數字（harness 的 autocompact 不告訴你水位）；
+  ② 在 ≥90% 時**真的擋下展開型工具**（見下方〈PreToolUse 阻斷模式〉）——因為
+     autocompact 觸發時會丟掉舊訊息，而「丟掉什麼」不由使用者決定；在那之前把
+     戰場收斂掉，才是掌舵者要的「不要爆」。
+  ③ 產出「可重啟點任務書」骨架，供 token 用完後 `claude -r` 續跑。
+harness 那一半的姿態是**可現查的**：`python tools/session_resume_planner.py
+--check-autocompact`（autocompact 被關掉時 rc=1）。
 
 🔴 與 SDD `context_ledger` 的分工邊界（**先查過再寫，本檔不是重複造輪子**）
 ------------------------------------------------------------------------
@@ -63,33 +81,76 @@ Claude Code 的 hook payload 帶 `transcript_path`，指向本 session 的 jsonl
 （`output_tokens` 不算：它是這一則回覆吐出來的量，下一回合才會以 input 的形式回到
 context 裡，重複計會高估）。
 
-🔴 context window 判定：這是本檔唯一「無法從資料證出來」的一格，故刻意誠實劃界
+🔴 context window 判定（R79 重寫——R78 版在本機模型上結構性保證在真 90% 靜默）
 --------------------------------------------------------------------------------
-逐字稿的 `message.model` 實測是 `"claude-opus-5"`——**看不出是不是 1M context 變體**，
-而 200K 與 1M 差五倍，猜錯的代價完全不對稱：
+R78 版只有兩階（環境變數 → `peak > 200K` 推論 → 保守下界 200K）。它在**掌舵者自己
+這台機器**上的實測後果，是這支守衛存在的理由被完全抵銷掉：本機 user 層 settings
+的 `model` 欄是 `opus[1m]`（1,000,000），而守衛拿 200,000 當分母 ⇒ 真實 15%／18% 各
+誤喊一次 75%／90%，把兩個閂鎖同時燒掉；等 peak 越過 200K、window 翻成 1M 之後，
+**到 99.9% 都不會再出聲**。誤報那一半 `settings.json` 承認過，「誤報會把真報一起吃掉」
+那一半沒有。兩件事各自要修：分母要對（本段）、閂鎖要能重新武裝（見〈行為契約〉）。
+
+方向仍是不對稱的，這一點沒變：
   · 猜小（實際 1M、當成 200K）⇒ 提早喊。成本＝一次多餘的 `/compact`。
   · 猜大（實際 200K、當成 1M）⇒ 到 90% 才喊時真實水位已是 450%，**根本喊不到**。
-故判定順序刻意是「指定 → 可證的下界 → 保守值」，且**三種來源都必須印在訊息裡**，
-讓讀者知道那個分母是被指定的還是被推斷的（本 repo 的既有教訓：把推斷寫成已知，
-下一個人 grep 到它會以為是查過的事實）：
-  ① `AUTOSDD_CONTEXT_WINDOW` 環境變數（最高優先）＝**指定值**，唯一不含猜測的來源。
-  ② 本 session 歷來觀測到的 `used` 曾超過 200,000 ⇒ window **必然**大於 200K。
-     這一步是可證的；但「所以它是 1,000,000」不是——那是在已知變體裡取下一檔。
-     訊息因此標成「推斷值」並寫出推論依據，不寫成事實。
-  ③ 其餘一律 200,000（保守下界）。這個方向只會早喊，安全。
+判定順序（先可證、後推斷；**每一階的來源字串都會原樣印進使用者看到的訊息**，
+讓讀者知道分母是被指定的還是被推斷的——把推斷寫成已知是本 repo 的既有缺陷形態）：
+  ① `AUTOSDD_CONTEXT_WINDOW`：本檔自己的旗標，最高優先＝**指定值**。
+  ② `CLAUDE_CODE_AUTO_COMPACT_WINDOW`（環境變數）／`autoCompactWindow`（settings
+     鏈：`.claude/settings.local.json` → `.claude/settings.json` → `~/.claude/
+     settings.json`）＝**harness 自己的 window 旋鈕**。有設就用它——那正是 CC 用來
+     決定何時 autocompact 的那個數，本檔的分母與它一致才不會出現「同一份 repo 對
+     同一個數字兩種說法」。二進位內的 schema 逐字：`autoCompactWindow: number().
+     int().min(1e5).max(1e6)`，且大於模型上限時由 CC 自己 capped，方向安全。
+  ③ settings 鏈的 `model` 欄帶 `1m` 標記（本機實測 `opus[1m]`）⇒ 1,000,000。
+     🔴 這一階刻意帶**交叉否決**：逐字稿裡實際跑過的 `message.model` 若與該 hint
+     不同族（例：設定寫 opus、實際 `--model sonnet`），這一階**放棄發言**往下一階
+     走。少了這道否決，一次 `--model` 覆寫就會讓分母偏大＝往危險方向錯。
+  ④ 本 session 歷來 `used` 曾超過 200,000 ⇒ window **必然**大於 200K（可證的下界）；
+     但「所以它是 1,000,000」不是證出來的，是在已知變體裡取下一檔，故標為推斷。
+  ⑤ 其餘一律 200,000（保守下界）。這個方向只會早喊，安全。
+🔴 **⑤ 這一階不得用來硬擋**（見〈PreToolUse 阻斷模式〉）：它是「我不知道」的委婉說法，
+拿一個猜出來的分母去硬鎖工具，就是把本輪要修的那個缺陷換個方向再犯一次。
 
-行為契約
---------
-· payload 讀不出來／沒有 `transcript_path`／檔案不存在／掃不到任何 usage → exit 0。
+行為契約（PostToolUse＝觀測模式）
+--------------------------------
+· payload 讀不出來（壞 JSON／空 stdin）→ stderr 一行 ＋ **exit 1**（出聲但不阻斷）。
+  🔴 為何不是靜默 exit 0：`tools/tests/test_check_hooks_liveness.py` 的
+  `degraded_payload_verdict` 判過——讀不懂輸入時放行，等於讓「送壞 payload」成為
+  讓守衛整支消失的免費手段，而且失效時沒有人看得見。同一支判準也說「rc==1＝出聲
+  但不阻斷，爆炸半徑為零，合法」，所以這裡取 1 而不是 2。
+· 沒有 `transcript_path`／檔案不存在／掃不到任何 usage → exit 0 靜默。這與上一條
+  是**不同**的事：那是「輸入壞掉」，這是「量測暫時不可得」（session 剛開場一定會
+  走到這裡）。把兩者混同就會變成每次呼叫都出聲的守衛，然後整支被關掉。
 · `< 75%` → exit 0 且**完全靜默**（每次工具呼叫都出聲的守衛會被關掉）。
 · `>= 75%` → stderr 一行建議 `/compact`，exit 0。
 · `>= 90%` → stderr 強制指引（含 %、used/window 實數、下一步）＋ 呼叫
   `tools/session_resume_planner.py` 寫出「可重啟點任務書」骨架 ＋ **exit 2**。
   PostToolUse 的 exit 2 會把 stderr 回饋給模型，這正是要的效果；它**不**阻斷已經
   完成的那次工具呼叫（與 PreToolUse 的 exit 2 語意不同，別混淆）。
-· **同一門檻同一 session 只喊一次**（state 檔在系統暫存，檔名帶 session id）。
-  代價明說：模型若無視 90% 那一喊，本檔不會再喊第二次。刻意接受——每次工具呼叫
-  都 exit 2 的守衛會被整個關掉，而被關掉的守衛比沒有守衛更糟（它讓人以為有人在看）。
+· **同一門檻＋同一 window 只喊一次**（state 檔在系統暫存，檔名帶 session id）。
+  🔴 閂鎖鍵含 window 是 R79 修的那半個缺陷：R78 版只以 tier 為鍵，於是「用 200K
+  當分母誤喊一次 90%」之後，等分母修正成 1M、真的到 90% 時**閂鎖還鎖著** ⇒ 該喊
+  的那一次被前面那次誤報吃掉。分母一變就重新武裝，對 200K session 零行為改變。
+  代價仍明說：模型若無視同一組（門檻, window）的那一喊，本檔不會再喊第二次。
+
+🔴 PreToolUse 阻斷模式（R79 新增——把「不要爆」從散文變成真的擋得下來的東西）
+----------------------------------------------------------------------------
+R78 版的鏈條是「印一段話 → 模型自己記得去 compact」，而「純文件約束對當下的模型零
+攔阻力」在本 repo 已被實證兩次（`block_bash_on_windows.py` 的立案就是這樣來的）。
+故同一支腳本另有一個由 payload 的 `hook_event_name` 分派的模式：
+
+  · 只在 `>= 90%` 且 **window 不是保守下界猜測**時擋（`may_block()`）。分母是猜的
+    就只出聲不擋——否則今天這個缺陷（1M session 被當成 200K）會直接變成「真實 18%
+    就把工具鎖死」，比原缺陷更糟。
+  · 只擋**展開型**工具（`BLOCKING_TOOLS`＝Task／WebFetch／WebSearch），註冊面的
+    matcher 也只圈這三個。Read／Edit／PowerShell 一律放行——根 CLAUDE.md 那句是
+    「此後只做收斂，不做展開」，而收斂本身需要讀檔、寫任務書、跑 git。**擋到讓人
+    無法收斂的守衛會被整個關掉**，那是本 repo 反覆判過的形態。
+  · **不進閂鎖**：擋一次就放行的東西不是阻斷。它會一直擋到水位掉下來為止，而
+    `/compact` 之後 used 會真的掉 ⇒ 自動解除，不需要任何人來關掉它。
+  · 人為逃生口：環境變數 `AUTOSDD_CONTEXT_GUARD_OFF=1` 一律放行（供人在守衛誤判時
+    自救；模型改不到 hook 行程的環境）。這是對 P0 的第二道保險，不是給模型的後門。
 · **任何非預期例外 → exit 0（fail-open）**。`.claude/settings.json` 的 description
   記載過 P0：hook 誤觸會把所有工具硬鎖死。守衛自身絕不可成為故障源。
 
@@ -108,9 +169,11 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import subprocess
 import sys
 import tempfile
+from datetime import datetime, timedelta
 from pathlib import Path
 
 # 自己的 stdout/stderr 強制 UTF-8。缺這段時：locale 表達不了 CJK（en-US Windows
@@ -131,6 +194,28 @@ USAGE_FIELDS = ("input_tokens", "cache_creation_input_tokens", "cache_read_input
 #: 硬指定 context window 的環境變數（最高優先；唯一不含猜測的來源）。
 WINDOW_ENV = "AUTOSDD_CONTEXT_WINDOW"
 
+#: Claude Code 自己的 window 旋鈕（環境變數版）。二進位內與 `autoCompactWindow`
+#: 設定鍵同一條判定鏈；有設就代表使用者已經替 harness 釘死了那個數字。
+CC_WINDOW_ENV = "CLAUDE_CODE_AUTO_COMPACT_WINDOW"
+#: 同上的 settings 鍵。schema 逐字：`number().int().min(1e5).max(1e6)`。
+CC_WINDOW_KEY = "autoCompactWindow"
+#: settings 的模型欄。本機實測值 `opus[1m]`。
+CC_MODEL_KEY = "model"
+#: 逐字稿裡不代表真實模型的佔位值（本機實測會出現，混進交叉否決會誤殺）。
+SYNTHETIC_MODEL = "<synthetic>"
+
+#: 人為逃生口：守衛誤判時讓人一鍵放行（模型改不到 hook 行程的環境）。
+GUARD_OFF_ENV = "AUTOSDD_CONTEXT_GUARD_OFF"
+
+#: 哨兵的獨立逃生口。刻意**不**沿用上面那一個：兩者關掉的是不同的東西（一個是
+#: context 阻斷、一個是額度續航），共用一個開關會讓「我只是想暫時別被擋」順手把
+#: 續航保護一起關掉，而那件事沒有人會注意到。
+SENTINEL_OFF_ENV = "AUTOSDD_SENTINEL_OFF"
+
+#: PreToolUse 模式會擋下的「展開型」工具。刻意不含 Read／Edit／PowerShell：
+#: 收斂（讀檔、寫任務書、跑 git）必須還做得到，否則守衛會被整個關掉。
+BLOCKING_TOOLS = ("Task", "WebFetch", "WebSearch")
+
 #: 保守下界。實際是 1M 時只會早喊，方向安全。
 CONSERVATIVE_WINDOW = 200_000
 #: 已知的下一檔變體。觀測到 used > CONSERVATIVE_WINDOW 只證明「大於 200K」，
@@ -144,6 +229,12 @@ TIER_WARN = "warn"
 TIER_HARD = "hard"
 
 SOURCE_PINNED = f"指定值（環境變數 {WINDOW_ENV}）"
+SOURCE_PINNED_CC_ENV = f"指定值（Claude Code 自己的 {CC_WINDOW_ENV}）"
+SOURCE_PINNED_CC_SETTING = f"指定值（Claude Code settings 的 {CC_WINDOW_KEY}）"
+SOURCE_MODEL_MARKER = (
+    f"推斷值（settings 的 {CC_MODEL_KEY} 欄帶 1m 標記 ⇒ {WIDE_WINDOW:,}；"
+    "已與逐字稿實際跑過的 model 交叉核對同族，非單方面採信設定）"
+)
 SOURCE_INFERRED_WIDE = (
     f"推斷值（本 session 曾觀測到 used > {CONSERVATIVE_WINDOW:,} ⇒ window 必然大於它；"
     f"取 {WIDE_WINDOW:,} 是在已知變體裡選下一檔，**不是**證出來的值）"
@@ -192,7 +283,17 @@ def used_of(usage: object) -> int | None:
 
 
 def scan_usage(path: Path) -> tuple[int | None, int]:
-    """逐行掃 jsonl，回 `(最後一筆 used, 歷來最大 used)`；掃不到時回 `(None, 0)`。
+    """`scan_transcript` 的前兩格。既有呼叫端與回歸鎖用的仍是這個窄介面。"""
+    last, peak, _model = scan_transcript(path)
+    return last, peak
+
+
+def scan_transcript(path: Path) -> tuple[int | None, int, str | None]:
+    """逐行掃 jsonl，回 `(最後一筆 used, 歷來最大 used, 最後一個實際跑過的 model)`。
+
+    model 一起掃出來是為了 window 判定的**交叉否決**（見 `window_from_model`），
+    而且它必須與 usage 同一趟掃完——逐字稿會長到數十 MB，本檔每次工具呼叫都會跑。
+    `<synthetic>` 這類佔位值不採計：它認不出家族，留著只會稀釋否決的鑑別力。
 
     刻意**逐行覆寫 last** 而不是整檔 `json.loads` 後排序：逐字稿是會長到數十 MB
     的 append-only 檔，而本檔每次工具呼叫都會跑一次。三段省法：
@@ -204,6 +305,7 @@ def scan_usage(path: Path) -> tuple[int | None, int]:
     """
     last: int | None = None
     peak = 0
+    model: str | None = None
     try:
         with path.open(encoding="utf-8", errors="replace") as handle:
             for line in handle:
@@ -218,33 +320,233 @@ def scan_usage(path: Path) -> tuple[int | None, int]:
                 message = record.get("message")
                 if not isinstance(message, dict):
                     continue
+                seen_model = message.get("model")
+                if seen_model == SYNTHETIC_MODEL:
+                    # 🔴 R79：合成記錄整筆退出**用量累計**，不只是退出 model 判定。
+                    # harness 在額度耗盡時寫進逐字稿的那一筆長這樣：`type=assistant`、
+                    # `model=<synthetic>`、`isApiErrorMessage=true`，而它的 `usage` 三欄
+                    # **都在、且都是 0**（全庫實測 135 筆，無一例外）⇒ `used_of()` 依約回 0
+                    # 而不是 None（「欄位在」就算量到），於是 `last` 被它覆寫成 0。
+                    # 後果不是少算一點：水位在**額度耗盡的那一刻**由真值掉成 0.0%、tier 變
+                    # None、守衛整支靜默——而 90% 那一支正是負責寫「可重啟點任務書」的那一
+                    # 條路（`write_resume_plan`）。也就是說最需要任務書的那一刻，恰好是它
+                    # 結構上不會被產生的那一刻。這是「量不到 ≠ 量到零」在**上游**又犯一次：
+                    # 那筆記錄根本不是一次模型呼叫，它的 0 不是用量，是佔位。
+                    continue
+                if isinstance(seen_model, str):
+                    model = seen_model
                 value = used_of(message.get("usage"))
                 if value is None:
                     continue
                 last = value
                 peak = max(peak, value)
     except OSError:
-        return None, 0
-    return last, peak
+        return None, 0, None
+    return last, peak, model
 
 
-def resolve_window(peak_used: int, env_raw: str | None = None) -> tuple[int, str]:
-    """`(window, 來源說明)`。純函式——紅綠由注入自證，不讀環境（由呼叫端傳入）。
+# ─────────────────────────── 額度事件（**與 context 水位是兩件事**，見下方 WHY）
+# 🔴 這一段刻意**不接**任何阻斷行為，也不共用上面那條 75/90 的線。
+# context 水位＝單次請求的輸入長度（分母是 window）；額度＝計費週期內的用量上限
+# （分母是方案，harness 不告訴你）。兩者混為一談是本題最常見的錯誤，而它今天就會出錯：
+# 額度耗盡當下本 session 的水位只有 ~20%，`block_verdict` 的四道放行條件會全數放行。
+# 本段只提供**純函式的判讀**，由 `tools/session_resume_planner.py` 這個 CLI 消費者去決策。
+# 住在這裡而不是住在 planner，是因為「怎麼掃逐字稿」的實作已經在本檔（`scan_transcript`），
+# 而 planner 已經 import 本檔；反過來寫會讓逐字稿掃描這份知識有兩個家。
 
-    順序即優先序：指定 → 可證的下界推論 → 保守值。來源說明會原樣印進使用者看到的
-    訊息，所以它**必須**分得出「指定」與「推斷」；把推斷寫成已知是本 repo 的既有
-    缺陷形態，不是文風問題。
+#: 可等待——session 額度，錯誤訊息自帶 reset 時刻。
+LIMIT_SESSION = "quota_session"
+#: 🔴 **不可等待**——月度支出上限，等到天荒地老都不會自己回來，只有人去提額才行。
+#: 全庫實測：`session limit` 151 筆／`monthly spend limit` 71 筆（＝32%）。兩者的字面
+#: 前綴都是 `You've hit your `，只認前綴的分類器會把那 71 筆判成可等待，然後排一支
+#: 永遠不會成功的工作、每次觸發燒一次探測額度、而真正該做的事（叫人提額）一直沒發生。
+LIMIT_SPEND = "quota_spend"
+#: 伺服器暫時性錯誤，秒級退避即可，不進續航流程。
+LIMIT_TRANSIENT = "transient"
+#: 認不出來。**一律當不可等待處理**（fail-closed）：寧可叫人，也不要排一支永遠不成的工作。
+LIMIT_UNKNOWN = "unknown"
+
+#: 判讀順序即優先序。spend 必須排在 session 前面——見 `LIMIT_SPEND` 的 WHY。
+_LIMIT_MARKS: tuple[tuple[str, tuple[str, ...]], ...] = (
+    (LIMIT_SPEND, ("monthly spend limit",)),
+    (LIMIT_SESSION, ("session limit", "usage limit", "rate limit")),
+    (LIMIT_TRANSIENT, ("overloaded", "internal server error", "stalled mid-stream",
+                       "connection closed", "api error")),
+)
+
+#: `resets 9am` ／ `resets 12:20pm` 兩種格式都要吃。全庫實測到 7 個相異 reset 值
+#: （`3:50am` `4am` `9am` `11pm` `12:20pm` `12:30pm` `6pm`），**沒有一個落在 5 小時的
+#: 固定格點上** ⇒ reset 時刻是滾動視窗、錨在該區塊第一次用量，只能**觀測**不能算。
+#: 這就是 `session_resume_planner.DEFAULT_AT_EXPR` 那個 `AddHours(5)` 是缺陷的證據。
+_RESET_RE = re.compile(r"resets\s+(\d{1,2})(?::(\d{2}))?\s*(am|pm)", re.IGNORECASE)
+
+
+def classify_limit(text: object) -> str:
+    """把一則錯誤訊息分成四類之一。純函式，零 I/O。
+
+    `LIMIT_UNKNOWN` 是 fail-closed 的那一側：認不出來時呼叫端**不得**排程等待。
+    這與本檔其他地方「量不到就閉嘴」同一個方向——不確定時不要做有後果的事。
     """
-    if env_raw is not None:
-        try:
-            pinned = int(str(env_raw).strip())
-        except ValueError:
-            pinned = 0
+    low = str(text or "").lower()
+    for kind, marks in _LIMIT_MARKS:
+        if any(mark in low for mark in marks):
+            return kind
+    return LIMIT_UNKNOWN
+
+
+def parse_reset_at(text: object, now: datetime) -> datetime | None:
+    """從 `resets <hh[:mm]><am|pm>` 解出**下一個尚未發生的**該時刻；`None`＝解不出來。
+
+    🔴 「下一個尚未發生」不是文青措辭，是唯一正確的規則：那個字串**不帶日期也不帶年**。
+    天真地解成「今天的 9am」在下午跑會得到一個**已經過去**的時刻 ⇒ 觸發時刻算成負值 ⇒
+    立刻探測、立刻再撞、把剛回來的額度再吃光。實測值裡已經有 `11pm` 與 `3:50am`，
+    跨午夜這條路徑真的會走到。
+
+    `None` 時呼叫端**不准**退回「假設 5 小時」——那是猜的，猜出來的時刻拿去排程會得到
+    一個「憑證存在、但憑證不回答那個問題」的假綠（排程成立了，只是醒在錯的時間）。
+    """
+    match = _RESET_RE.search(str(text or ""))
+    if match is None:
+        return None
+    hour, minute, meridiem = int(match.group(1)), int(match.group(2) or 0), match.group(3)
+    if not (1 <= hour <= 12) or not (0 <= minute <= 59):
+        return None
+    hour = hour % 12 + (12 if meridiem.lower() == "pm" else 0)
+    target = now.replace(hour=hour, minute=minute, second=0, microsecond=0)
+    return target if target > now else target + timedelta(days=1)
+
+
+def latest_limit_event(path: Path) -> dict | None:
+    """逐字稿裡**最後一筆**額度／錯誤事件；`None`＝這支逐字稿沒有。
+
+    指紋是 `type=assistant` ＋ `message.model == "<synthetic>"`（全庫 135 筆皆然）。
+    刻意只認這個形狀而不是「訊息裡有 limit 字樣」：同一句話會被 `queue-operation`／
+    `user`／`attachment` 等記錄各複述一次（實測同一次撞線在 4 種記錄型別各留一份），
+    只有 assistant 合成記錄那一筆是 harness 自己寫的權威版本，其餘是回音。
+    """
+    found: dict | None = None
+    try:
+        with path.open(encoding="utf-8", errors="replace") as handle:
+            for line in handle:
+                if SYNTHETIC_MODEL not in line:
+                    continue
+                try:
+                    record = json.loads(line)
+                except ValueError:
+                    continue
+                if not isinstance(record, dict) or record.get("type") != "assistant":
+                    continue
+                message = record.get("message")
+                if not isinstance(message, dict) or message.get("model") != SYNTHETIC_MODEL:
+                    continue
+                content = message.get("content")
+                text = ""
+                if isinstance(content, list):
+                    text = " ".join(str(part.get("text") or "") for part in content
+                                    if isinstance(part, dict))
+                elif isinstance(content, str):
+                    text = content
+                found = {"text": text.strip(),
+                         "timestamp": str(record.get("timestamp") or ""),
+                         "kind": classify_limit(text)}
+    except OSError:
+        return None
+    return found
+
+
+def _positive_int(raw: object) -> int:
+    """能讀成正整數就回它，否則回 0。壞值一律 0——0 會讓 `tier_of` 永遠沉默，
+    所以它**不得**被當成 window 採用，只能是「這個來源說不出話」的表示。"""
+    try:
+        value = int(str(raw).strip())
+    except (TypeError, ValueError):
+        return 0
+    return value if value > 0 else 0
+
+
+def carries_wide_marker(model: object) -> bool:
+    """model 字串是否帶 1M context 標記（`opus[1m]`／`…-1m`）。
+
+    刻意只認這兩種寫法而不做模糊比對：`claude-opus-4-1` 這種尾碼帶 1 的模型名一旦
+    被誤判成 1M，分母就會偏大＝往「到 90% 才喊時真實水位已 450%」的危險方向錯。
+    """
+    text = str(model or "").strip().lower()
+    return "[1m]" in text or text.endswith("-1m")
+
+
+def model_family(model: object) -> str:
+    """取 model 字串裡的家族字（`opus[1m]` → `opus`；`claude-opus-5` → `opus`）。
+
+    只用來做**交叉否決**（設定寫的與逐字稿實際跑的是不是同一族），不用來判 window。
+    回空字串＝認不出來 ⇒ 呼叫端一律當「無法否決」處理（不敢否決就不否決）。
+    """
+    text = str(model or "").strip().lower()
+    for family in ("opus", "sonnet", "haiku", "fable"):
+        if family in text:
+            return family
+    return ""
+
+
+def window_from_model(hint: object, observed: object = None) -> int | None:
+    """設定層 model 欄推出的 window；`None`＝這一階說不出話（往下一階走）。
+
+    交叉否決：`observed`（逐字稿裡實際跑過的 model）認得出家族、且與 `hint` 的家族
+    不同 ⇒ 放棄。少了它，一次 `claude --model sonnet` 覆寫就會讓分母偏大五倍。
+    `<synthetic>` 這類佔位值認不出家族，會落在「無法否決」那一側，不誤殺。
+    """
+    if not carries_wide_marker(hint):
+        return None
+    want, got = model_family(hint), model_family(observed)
+    if want and got and want != got:
+        return None
+    return WIDE_WINDOW
+
+
+def resolve_window(
+    peak_used: int,
+    env_raw: str | None = None,
+    *,
+    cc_window_raw: object = None,
+    settings_window: object = None,
+    model_hint: object = None,
+    observed_model: object = None,
+) -> tuple[int, str]:
+    """`(window, 來源說明)`。純函式——紅綠由注入自證，不讀環境／不讀檔（呼叫端傳入）。
+
+    順序即優先序（詳細理由見模組 docstring 的〈context window 判定〉）：
+    本檔旗標 → harness 自己的旋鈕（環境變數／settings）→ model 標記（帶交叉否決）
+    → 可證的下界推論 → 保守值。來源說明會原樣印進使用者看到的訊息，所以它**必須**
+    分得出「指定」與「推斷」；把推斷寫成已知是本 repo 的既有缺陷形態，不是文風問題。
+
+    前兩個參數維持位置引數：既有呼叫端（`tools/session_resume_planner.py` 與回歸鎖）
+    不必改就仍是對的，新增的證據來源一律 keyword-only。
+    """
+    for raw, source in (
+        (env_raw, SOURCE_PINNED),
+        (cc_window_raw, SOURCE_PINNED_CC_ENV),
+        (settings_window, SOURCE_PINNED_CC_SETTING),
+    ):
+        if raw is None:
+            continue
+        pinned = _positive_int(raw)
         if pinned > 0:
-            return pinned, SOURCE_PINNED
+            return pinned, source
+    from_model = window_from_model(model_hint, observed_model)
+    if from_model is not None:
+        return from_model, SOURCE_MODEL_MARKER
     if peak_used > CONSERVATIVE_WINDOW:
         return WIDE_WINDOW, SOURCE_INFERRED_WIDE
     return CONSERVATIVE_WINDOW, SOURCE_INFERRED_FLOOR
+
+
+def may_block(source: str) -> bool:
+    """這個 window 來源夠不夠格用來**硬擋**工具。
+
+    只有保守下界（＝「我不知道，先給個安全的小數字」）不夠格：拿猜出來的分母去鎖
+    工具，正是本輪要修的那個缺陷換個方向再犯一次（1M session 會在真實 18% 被鎖死）。
+    `SOURCE_INFERRED_WIDE` 夠格——它猜大的方向只會讓阻斷**晚**發生，不會誤擋。
+    """
+    return source != SOURCE_INFERRED_FLOOR
 
 
 def tier_of(used: int, window: int) -> str | None:
@@ -272,8 +574,19 @@ def state_path(session_id: str, tmp_dir: str | None = None) -> Path:
     return Path(tmp_dir or tempfile.gettempdir()) / f"{STATE_PREFIX}{session_id}.json"
 
 
-def announced_tiers(state: Path) -> set[str]:
-    """已喊過的門檻集合。讀不出來一律回空集合（寧可多喊一次，也不要靜默失聲）。"""
+def latch_key(tier: str, window: int) -> str:
+    """閂鎖鍵＝(門檻, 分母)。
+
+    🔴 分母必須進鍵，這是 R79 修的半個缺陷：R78 版只以 tier 為鍵，於是「拿 200K 當
+    分母在真實 18% 誤喊一次 90%」之後，等分母修正成 1,000,000、真的到 90% 時閂鎖
+    **還鎖著** ⇒ 唯一該出聲的那一次被前面那次誤報吃掉。分母一變就重新武裝；分母
+    沒變的 session（例：真的 200K）行為完全不變。
+    """
+    return f"{tier}@{window}"
+
+
+def announced_latches(state: Path) -> set[str]:
+    """已喊過的 (門檻, 分母) 集合。讀不出來一律回空集合（寧可多喊一次，也不要靜默失聲）。"""
     try:
         data = json.loads(state.read_text(encoding="utf-8"))
     except (OSError, ValueError):
@@ -282,9 +595,9 @@ def announced_tiers(state: Path) -> set[str]:
     return {str(t) for t in tiers} if isinstance(tiers, list) else set()
 
 
-def remember_tier(state: Path, tier: str) -> None:
-    """把門檻記進 state 檔。寫失敗不得升級為守衛失敗——最壞情況是下次再喊一次。"""
-    tiers = sorted(announced_tiers(state) | {tier})
+def remember_latch(state: Path, key: str) -> None:
+    """把 (門檻, 分母) 記進 state 檔。寫失敗不得升級為守衛失敗——最壞情況是下次再喊一次。"""
+    tiers = sorted(announced_latches(state) | {key})
     try:
         state.write_text(
             json.dumps({"tiers": tiers}, ensure_ascii=False),
@@ -307,6 +620,45 @@ def repo_root() -> Path:
         if candidate.is_dir():
             return candidate
     return Path(__file__).resolve().parents[2]
+
+
+def settings_chain(root: Path | None = None) -> list[Path]:
+    """Claude Code settings 檔，**由高優先到低優先**。
+
+    刻意不含 enterprise policy 層：那一層的路徑隨 OS 而異、且本檔讀它也沒有意義
+    （它只會讓分母更小＝更早喊，而更早喊本來就是安全方向）。誠實劃界：`--settings`
+    旗標與 `/model` 的 session 內覆寫本檔看不到，這也正是 `window_from_model` 要用
+    逐字稿實跑 model 做交叉否決的原因。
+    """
+    base = root or repo_root()
+    return [
+        base / ".claude" / "settings.local.json",
+        base / ".claude" / "settings.json",
+        Path(os.path.expanduser("~")) / ".claude" / "settings.json",
+    ]
+
+
+def settings_value(key: str, paths: list[Path] | None = None) -> object:
+    """settings 鏈裡第一個有這個鍵的值；沒有就 `None`。任何讀檔／解析失敗一律跳過。"""
+    for path in paths if paths is not None else settings_chain():
+        try:
+            data = json.loads(path.read_text(encoding="utf-8-sig"))
+        except (OSError, ValueError):
+            continue
+        if isinstance(data, dict) and data.get(key) is not None:
+            return data[key]
+    return None
+
+
+def window_evidence(observed_model: str | None) -> dict:
+    """把 `resolve_window` 需要的四個證據來源一次收齊（I/O 都在這裡，判定仍是純函式）。"""
+    return {
+        "env_raw": os.environ.get(WINDOW_ENV),
+        "cc_window_raw": os.environ.get(CC_WINDOW_ENV),
+        "settings_window": settings_value(CC_WINDOW_KEY),
+        "model_hint": settings_value(CC_MODEL_KEY),
+        "observed_model": observed_model,
+    }
 
 
 def write_resume_plan(transcript: Path) -> str:
@@ -339,6 +691,47 @@ def write_resume_plan(transcript: Path) -> str:
     except Exception:  # noqa: BLE001 — 診斷輔助不得反過來變成守衛的故障源
         return ""
     return str(out) if out.is_file() else ""
+
+
+# ───────────────────────── SessionStart：預防性哨兵的**觸發層**（R79 補洞包）
+# 🔴 為什麼非得長在這裡不可（不是「順手掛一下」）：
+# `tools/session_resume_planner.py --arm-endurance` 是**手動**武裝的，而額度耗盡那一刻
+# 是 16 秒內全部 subagent 瞬間掛掉——那個時間點沒有任何人會去跑一行指令。更根本的是
+# **額度耗盡在 Claude Code 的 hook 體系裡沒有任何觸發點**：它是 API 層的失敗，不是工具
+# 呼叫失敗 ⇒ PreToolUse／PostToolUse 都不會被叫到，本檔那兩個模式一次都不會醒來。
+# ⇒ 唯一可行的形狀是**預防性武裝**：趁還能跑指令的時候先掛好，之後由 OS 排程器（不是
+# 這個 session、不是這個模型）去輪詢。SessionStart 是「還能跑指令的最早時刻」。
+# 這也是本 repo 已判過三次的同一個病的解藥：R77「PKG-GUARD 機制蓋好沒接電」——機制做完
+# 了但沒有任何東西會自動去按它。純文件約束（「開工前記得武裝」）對當下的模型零攔阻力。
+#
+# 三個刻意的取捨：
+#  ① **detached 子行程**，不同步等它跑完。註冊一支 schtasks 要外呼 powershell.exe，
+#     實測數秒；同步做等於每次開 session 都先卡幾秒。取證不因此消失——`--arm-sentinel`
+#     自己有 `NextRunTime` 憑證閘，成敗都寫進稽核 jsonl 與下面這支 boot log。
+#  ② **逐字稿檔案不存在也照樣武裝**。SessionStart 那一刻檔案往往還沒被建立；planner
+#     對這個入口特別放行（見該檔 `--arm-sentinel` 的 WHY），只把路徑記進狀態塊。
+#  ③ **一切例外吞掉**。`.claude/settings.json` 的 description 記載過 P0：hook 誤觸會把
+#     所有工具硬鎖死。武裝失敗最多是少一層保護，絕不可反過來變成故障源。
+def arm_sentinel(payload: dict) -> None:
+    """SessionStart：把預防性哨兵掛上去（背景、非阻塞、失敗一律靜默）。"""
+    if os.name != "nt" or os.environ.get(SENTINEL_OFF_ENV):
+        return  # schtasks 只在 Windows 成立（鐵律三）；人要關就關得掉
+    raw = payload.get("transcript_path")
+    planner = repo_root() / "tools" / "session_resume_planner.py"
+    if not isinstance(raw, str) or not raw.strip() or not planner.is_file():
+        return
+    tmp = Path(tempfile.gettempdir())
+    sid = session_id_of(Path(raw))
+    with (tmp / f"autosdd_sentinel_boot_{sid}.log").open(
+            "a", encoding="utf-8", errors="replace") as handle:
+        handle.write(f"\n=== arm {datetime.now().isoformat(timespec='seconds')} ===\n")
+        handle.flush()
+        subprocess.Popen(  # noqa: S603 — 參數全是本檔算出來的路徑，無 shell
+            [sys.executable, str(planner), "--transcript", raw,
+             "--out", str(tmp / f"{PLAN_PREFIX}{sid}.md"), "--arm-sentinel"],
+            stdout=handle, stderr=subprocess.STDOUT, stdin=subprocess.DEVNULL,
+            creationflags=(getattr(subprocess, "DETACHED_PROCESS", 0)
+                           | getattr(subprocess, "CREATE_NO_WINDOW", 0)))
 
 
 def _headline(used: int, window: int, source: str) -> str:
@@ -386,6 +779,25 @@ def hard_message(used: int, window: int, source: str, plan: str,
     )
 
 
+def block_message(used: int, window: int, source: str, tool: str) -> str:
+    """PreToolUse 阻斷訊息。必須逐字給出下一步，否則擋下來只是製造挫折。"""
+    return (
+        f"🔴 context 水位 {_headline(used, window, source)}——已越過 90% 硬線，"
+        f"`{tool}` 這類**展開型**工具已被擋下。\n"
+        "   根 CLAUDE.md〈Token 將耗盡時的「無害暫停 → reset 後重啟」SOP〉：此後"
+        "**只做收斂，不做展開**。Read／Edit／PowerShell 仍然放行，收斂做得完。\n"
+        "   下一步（照順序做）：\n"
+        "  1. `/compact`（本 session 的 harness autocompact 姿態現查："
+        "`python tools/session_resume_planner.py --check-autocompact`）。\n"
+        "     compact 之後 used 會真的掉下來，本阻斷**自動解除**，不需要任何人去關它。\n"
+        "  2. 把工作樹收到「可重啟點」：已 commit 且閘門全綠，或 `git stash create`"
+        " ＋ `git tag <輪次>-wip-preserved`。絕不留半套 edit 就走。\n"
+        "  3. 任務書：`python tools/session_resume_planner.py`（含重啟指令）。\n"
+        f"   誤判時的逃生口（給人用，不是給模型用）：設 {GUARD_OFF_ENV}=1 一律放行；"
+        f"分母不對就設 {WINDOW_ENV}=<真實 window>。本次分母來源已標在上面括號裡。\n"
+    )
+
+
 def read_payload() -> dict | None:
     """讀 stdin 的 hook payload；`None`＝退化（讀不出來）。
 
@@ -413,26 +825,42 @@ def main() -> int:
     try:
         payload = read_payload()
         if payload is None:
-            return 0  # 退化 payload：本檔是觀測者不是阻斷器，靜默略過這一次
+            # 退化 payload：出聲但不阻斷（rc=1）。靜默放行會讓「送壞 payload」成為
+            # 讓守衛整支消失的免費手段，且失效時沒有人看得見（判準見模組 docstring）。
+            sys.stderr.write(
+                "⚠️  context 水位守衛讀不出 hook payload（壞 JSON 或空 stdin）"
+                "——本次不做任何量測。守衛沒有靜默失效，但它這一次確實沒看到東西。\n"
+            )
+            return 1
+        event = str(payload.get("hook_event_name") or "")
+        if event == "SessionStart":
+            # 這一支不量水位、不出聲、恆 exit 0：它只負責「把哨兵接上電」。
+            arm_sentinel(payload)
+            return 0
+        blocking = event == "PreToolUse"
         raw_path = payload.get("transcript_path")
         if not isinstance(raw_path, str) or not raw_path.strip():
-            return 0
+            return 0  # 量測暫時不可得 ≠ 輸入壞掉，見模組 docstring 的行為契約
         transcript = Path(raw_path)
         if not transcript.is_file():
             return 0
 
-        used, peak = scan_usage(transcript)
+        used, peak, model = scan_transcript(transcript)
         if used is None:
             return 0  # 掃不到任何 usage：量不到 ≠ 量到零，不做任何宣稱
-        window, source = resolve_window(peak, os.environ.get(WINDOW_ENV))
+        window, source = resolve_window(peak, **window_evidence(model))
         tier = tier_of(used, window)
         if tier is None:
             return 0
 
+        if blocking:
+            return block_verdict(payload, used, window, source, tier)
+
         state = state_path(session_id_of(transcript))
-        if tier in announced_tiers(state):
+        key = latch_key(tier, window)
+        if key in announced_latches(state):
             return 0
-        remember_tier(state, tier)
+        remember_latch(state, key)
 
         if tier == TIER_WARN:
             sys.stderr.write(warn_message(used, window, source))
@@ -444,6 +872,25 @@ def main() -> int:
         return 2
     except Exception:  # noqa: BLE001 — fail-open 是刻意的，見模組 docstring 的 P0
         return 0
+
+
+def block_verdict(payload: dict, used: int, window: int, source: str, tier: str) -> int:
+    """PreToolUse 模式的判定。四道放行條件缺一，才會真的擋。
+
+    刻意抽成獨立函式：阻斷是本檔唯一有爆炸半徑的行為，它的每一個放行條件都要能被
+    逐條注入驗紅，而不是埋在 `main()` 的 try 裡跟量測邏輯混在一起。
+    """
+    if os.environ.get(GUARD_OFF_ENV):
+        return 0  # 人為逃生口（對 P0 的第二道保險）
+    if tier != TIER_HARD:
+        return 0
+    if not may_block(source):
+        return 0  # 分母是猜的就不擋——猜錯會在真實 18% 把工具鎖死
+    tool = str(payload.get("tool_name") or "")
+    if tool not in BLOCKING_TOOLS:
+        return 0  # 註冊面的 matcher 被改寬時的第二道限縮（同 block_bash_on_windows）
+    sys.stderr.write(block_message(used, window, source, tool))
+    return 2
 
 
 if __name__ == "__main__":

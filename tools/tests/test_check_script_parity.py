@@ -1884,5 +1884,90 @@ class TestR67LatestPinnedShebangCoverage(unittest.TestCase):
         self.assertGreaterEqual(checked, 1, "LATEST 釘選面內無 .sh，本鎖已空轉")
 
 
+class TestLatestThinnessRationaleIsFactual(unittest.TestCase):
+    """R79 ARCH：`_check_latest_thinness()` 上方那段「為何不刪這個呼叫點」的事實宣稱
+    必須與磁碟相符。
+
+    病灶（R79 實測）：原文寫「`check_wrapper_thinness.py` 只在 pre-push 與 root-infra-ci
+    有具名執行步驟，**macos/windows-compat-ci 與兩支 smoke 只跑本檔**」——compat-CI 那
+    一半是假的（兩支 workflow 各有一個 `run_root_unittests.py` step，而
+    `test_check_wrapper_thinness.test_real_wrappers_pass_today` 對真樹跑全部 16 鍵）。
+    那句話是「這段不可刪」的唯一論據，下一輪有人依它做架構決定就是拿失實前提在推理。
+
+    測意圖非僅行為：本鎖釘的不是那段散文的字面，而是**它所依賴的四個世界事實**。
+    任一事實翻轉（compat-CI 拿掉 unittest step、或 smoke 改跑 thinness）都會讓那段
+    訂正文變成新的假話，此時本鎖紅並指名要去改哪一段——這正是 R79 為「宣稱先於查證」
+    這個形態補的機械物。
+    """
+
+    _COMPAT_CI = ("macos-compat-ci.yml", "windows-compat-ci.yml")
+    _SMOKES = ("windows_smoke_local.ps1", "macos_smoke_local.sh")
+    _REPO = Path(__file__).resolve().parents[2]
+
+    def _wf(self, name: str) -> str:
+        return (self._REPO / ".github" / "workflows" / name).read_text(encoding="utf-8")
+
+    def _smoke(self, name: str) -> str:
+        return (self._REPO / "tools" / name).read_text(encoding="utf-8")
+
+    def test_compat_ci_really_runs_the_root_unittests(self) -> None:
+        """事實①：compat-CI 兩支都真的跑 run_root_unittests（⇒ 16 鍵已覆蓋）。"""
+        for name in self._COMPAT_CI:
+            with self.subTest(workflow=name):
+                self.assertRegex(
+                    self._wf(name), r"run:\s*python3?\s+tools/run_root_unittests\.py",
+                    f"{name} 已無 run_root_unittests step ⇒ check_script_parity.py 內"
+                    "「compat-CI 早已完整守到 16 鍵」那段訂正文已成假話，請同步改寫",
+                )
+
+    def test_the_root_unittests_really_cover_every_pin(self) -> None:
+        """事實②：那個 step 收得到的測試真的對**全部**釘選鍵跑（不是只 LATEST 2 鍵）。"""
+        import test_check_wrapper_thinness as _t  # 與 CI 同一支被收集的模組
+
+        import check_wrapper_thinness as _thinness
+
+        self.assertTrue(
+            hasattr(_t, "TestRealWrappers") or any(
+                "test_real_wrappers_pass_today" in dir(getattr(_t, n))
+                for n in dir(_t) if n.startswith("Test")
+            ),
+            "test_check_wrapper_thinness 內找不到對真樹跑全表的那支測試",
+        )
+        self.assertEqual(
+            _thinness.check_wrapper_thinness(), [],
+            "真樹全表守門本身已紅 ⇒ 上面那段覆蓋宣稱無從成立",
+        )
+        self.assertGreaterEqual(
+            len(_thinness._PINNED_SHA256), 16,
+            "釘選面少於 16 鍵 ⇒ 「16 鍵」這個數字已過時，請同步改寫該段訂正文",
+        )
+
+    def test_both_smokes_still_only_run_parity_not_thinness(self) -> None:
+        """事實③④：兩支 smoke 仍只跑 check_script_parity（沒跑 thinness）
+        ⇒ 「本呼叫點是 smoke 路徑上的唯一守門」與「其餘 14 支殼在 smoke 上無守門」
+        兩句都還為真。哪天有人把 smoke 改跑 thinness，這條紅，去把那段缺口描述刪掉。"""
+        # 🔴 判準要求「真的被 python 執行」而非裸檔名：注入實測（把 smoke 的
+        # `python …/check_script_parity.py` 換成別的檔）時，裸檔名比對會被同區塊的
+        # `echo "--- [N/M] … check_script_parity.py …"` 標題字串滿足而放行——本 repo
+        # 已在 sdd_version.py 那條鎖上踩過同款陷阱，這裡先把它堵掉。
+        for name in self._SMOKES:
+            with self.subTest(smoke=name):
+                code = "\n".join(
+                    ln for ln in self._smoke(name).splitlines()
+                    if not ln.lstrip().startswith("#")
+                ).replace("\\", "/")
+                self.assertRegex(
+                    code, r"python[^\n]*check_script_parity\.py",
+                    f"{name} 已不再實際執行 check_script_parity ⇒ LATEST 釘選在 smoke "
+                    "路徑上已無守門，check_script_parity.py 內那段理由整段失效",
+                )
+                self.assertNotRegex(
+                    code, r"python[^\n]*check_wrapper_thinness\.py",
+                    f"{name} 已改跑 check_wrapper_thinness ⇒ smoke 覆蓋由 2 鍵升到 16 鍵，"
+                    "check_script_parity.py 內那段「其餘 14 支殼在 smoke 上無 hash 守門」"
+                    "的缺口描述已成假話，請刪除該段並重新評估本呼叫點是否仍需保留",
+                )
+
+
 if __name__ == "__main__":
     unittest.main()

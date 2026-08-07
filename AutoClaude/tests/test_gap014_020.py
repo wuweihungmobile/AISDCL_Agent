@@ -51,10 +51,10 @@ from tests.helpers.kernel_fixtures import make_service
 #
 # DEF-101-089 補強（R4 Mac/Windows 複審主 agent 發現，親推 push 時實機重現）：本機裝有
 # `claude` CLI 且從「本身已是存活 Claude Code session」巢狀執行 pytest（不論本機開發驗證
-# 或 pre-push hook）時，這裡 spawn 的巢狀 `claude` 子行程會無限掛起（wexpect helper 行程
-# CPU delta=0 確定性死結，非負載慢）。`CLAUDECODE=1` 是 Claude Code 執行環境官方在啟動時
-# 就會設定的環境變數（非行程樹猜測），用它額外 skip 巢狀 session 情境是可靠訊號、非
-# heuristic 賭注——一般 CI runner／非巢狀本機開發環境不受影響（該變數不存在）。
+# 或 pre-push hook）時，這裡 spawn 的子行程會無限掛起。`CLAUDECODE=1` 是 Claude Code
+# 執行環境官方在啟動時就會設定的環境變數（非行程樹猜測），用它額外 skip 巢狀 session
+# 情境是可靠訊號、非 heuristic 賭注——一般 CI runner／非巢狀本機開發環境不受影響
+# （該變數不存在）。
 #
 # 🔴 本輪訂正分類（Rule 12 fail-loud：分類錯的方向是**悲觀**，後果一樣是資訊遺失）。
 # 前一份全庫 skip 盤點把這一批歸為「可辯護的永久不覆蓋」、並寫「在 Claude Code session
@@ -64,12 +64,27 @@ from tests.helpers.kernel_fixtures import make_service
 # 跑。當回合對帳：nightly log 與巢狀 session 同一棵樹 collected 相同，nightly 少了 15 支
 # skip、多了 15 支 passed，且其 `-rs` 清單對本檔零命中 ⇒ 它們跑了而且綠。
 # 代價是那條**真的可用的配方**從未進過任何文件；reason 因此改為寫得出配方。
+#
+# 🔴 R79 訂正本條的**因果敘述**（原文把掛起歸因到 `CLAUDECODE=1` 這個變數本身，該歸因
+# 已被對照組推翻，故此處不逐字複述原句）。當回合三次實測，載具＝直接驅動 `PtyWrapper`：
+#   · 繼承 `CLAUDECODE=1`：`start()` 180.16s 未回返（watchdog rc=99）
+#   · **剝除** `CLAUDECODE` 的對照組：180.05s 未回返，行為完全一樣
+#   · 行程樹快照：掛在 wexpect 自己的 host↔console-reader 交握，`claude.exe` 從未被啟動
+# ⇒ 真正掛住的是「巢狀 Claude Code session 這個執行環境 × `wexpect.spawn()`」這一組，
+# `CLAUDECODE` 只是該環境的**可靠標記**、不是成因。判準因此**維持不變**（在該環境內
+# skip 仍然是對的，拿掉這半個條件會讓這 11 支當場掛死整棵樹——已注入實證），只改寫
+# reason 讓它別再宣稱一個已被證偽的因果。另一半也要講清楚：DEF-101-089 的原結論在
+# `claude -p` 這種**非互動 subprocess** spawn 上確實已被推翻（rc=0／約 4s），但那條路
+# **不是**本檔走的路（本機 `claude` 解析為 `.EXE` 而非 `.cmd` shim ⇒ 進 `_start_wexpect`）。
+# 逐次量測見 `docs/06_quality/CrossPlatform_R79_Debt_Audit.md` 的 `## DEF-101-913` 節。
 requires_claude_cli = pytest.mark.skipif(
     shutil.which("claude") is None or os.environ.get("CLAUDECODE") == "1",
     reason="【未啟用，非缺件】需要 claude CLI binary 且非巢狀 Claude Code session"
-    "（CLAUDECODE=1 時真實 spawn 會死結，見 DEF-101-089）。跑法：在**非** Claude Code "
-    "session 的 PowerShell 執行 `python -m pytest tests/test_gap014_020.py`"
-    "（每日 nightly 排程即為此環境，實測會真的跑）",
+    "（巢狀 session 內 wexpect pty spawn 掛住不回，R79 實測 180s×2＋45s、claude.exe 從未"
+    "啟動；剝除 CLAUDECODE 的對照組行為相同 ⇒ 該變數是環境標記非成因。見 DEF-101-913）。"
+    "跑法：在**非** Claude Code session 的 PowerShell 執行 "
+    "`python -m pytest tests/test_gap014_020.py`"
+    "（每日 nightly 排程即為此環境，2026-08-06 nightly log 實測會真的跑）",
 )
 
 

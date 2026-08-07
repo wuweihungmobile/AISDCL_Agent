@@ -139,7 +139,13 @@ SHARED_PATTERN_SOURCE: dict[str, str] = {
     # 🔴 R78／SD-01：補上 `chdir`／`sl` 兩個內建別名；並**移除 `(?!-)`**——
     # `Set-Location -Path X` 與 `cd X` 是同一件事，上一版只因為下一個字元是 `-`
     # 就整條放行＝一步就繞過。
-    "naked-cd": r"(cd|chdir|sl|Set-Location)(?![\w-])\s+\S",
+    # 🔴 R79：參數改成**可選**。上一版尾巴硬性要求 `\s+\S`（至少一個參數），於是
+    # **不帶參數**的 `cd`／`sl`／`chdir`／`Set-Location` 整條放行——而那一種在
+    # PowerShell 語意上是切到 $HOME，鐵律二要防的「cwd 跨呼叫持續、之後每個相對路徑
+    # 都找錯地方」在它身上只會更嚴重（後續全部相對路徑一次全錯）。規則自己要求了
+    # 一個它不需要的東西。尾巴改成「有參數，或這一句到此為止（`;`／換行／管線／
+    # 鏈接／區塊結尾／字串結尾）」。
+    "naked-cd": r"(cd|chdir|sl|Set-Location)(?![\w-])(?:\s+\S|\s*(?=[;\n|&)}]|$))",
     # 裸 bash 的**指令字面**（`bash` / `bash.exe`）。刻意只到動詞為止：「跑的是不是
     # .sh」由兩邊各自補上（hook 要在遮蔽過的結構面找指令位置、回原文找 `.sh`，探針
     # 則就地把兩者接成一條），見各自的組裝處。
@@ -157,11 +163,39 @@ _PIPE_INTO_RE = re.compile(
     r"\|\s*(" + SHARED_PATTERN_SOURCE["pipe-cmdlets"] + r")", re.IGNORECASE
 )
 _RC_READ_RE = re.compile(r"\$LASTEXITCODE", re.IGNORECASE)
-#: 「rc 已被重新建立」——呼叫運算子 `&` 或一個 `.exe`。用途見 `_rc_after_pipe()`：
+#: 「rc 已被重新建立」——**真的發起了一次呼叫**。用途見 `_rc_after_pipe()`：
 #: 截斷管線造成的污染會**一直延續**，但 hint 教的正解 `& <exe> <args>; "rc=$LASTEXITCODE"`
-#: 本來就會重設 rc，不該被前面某一句的管線牽連。刻意窄（只認這兩種）＝寧可偏向擋，
-#: 因為「同一個指令字串裡既有截斷管線又要讀 rc」本身就是這條規則要消滅的混寫。
-_RC_RESET_RE = re.compile(r"(?<![&\w])&(?!&)\s*\S|\.exe(?![\w])", re.IGNORECASE)
+#: 本來就會重設 rc，不該被前面某一句的管線牽連。
+#:
+#: 🔴 R79：上一版把「重設」判太寬，而寬的方向正是這條規則存在的唯一理由的反面
+#: （放行一條會讓真 rc=7 被讀成 0 的指令）。兩個口子都是「提到」而非「執行」：
+#:   · 呼叫運算子的左邊界只排除 `&` 與英數字 ⇒ `2>&1`／`1>&2` 的那個 `&`（左邊是 `>`）
+#:     被當成呼叫。`2>&1` 在最近 12 支逐字稿的 547 條 unique 指令裡佔約一半，觸發面極大。
+#:   · `.exe` 出現在**任何位置**都算 ⇒ `Get-Command python.exe`、`Test-Path …\cmd.exe`
+#:     這種只是把路徑當資料的語句被當成執行。
+#: pwsh 7.6.4 真機實測：這三種語句一個都沒有重設 `$LASTEXITCODE`（前值原樣保留）。
+#: 修法是把兩個口子各自收到「命令位置」上：
+#:   ① 呼叫運算子的左邊界加上 `>`，把重導向合併排除；
+#:   ② `.exe`／`.cmd`／`.bat` 只在**語句的第一個 token** 才算數（`_NATIVE_HEAD_RE`）——
+#:      那才是「這一句在跑一支外部執行檔」，寫在參數位置的同一個字面只是資料。
+#: 仍然刻意窄：裸原生指令（`git status` 這種不帶 `&`、不帶副檔名者）**不算**重設，
+#: 於是判定偏向擋。這個方向是刻意的——「同一個指令字串裡既有截斷管線又要讀 rc」
+#: 本身就是這條規則要消滅的混寫，而行內豁免是它的出口。
+#: 誠實劃界：偏向擋的代價已在真實語料上量過（見 `tools/tests/test_check_hooks_liveness.py`
+#: 的 `TestLintPowerShellHookBehaviour` 兩向表），不是靠推測。
+_RC_RESET_RE = re.compile(r"(?<![&\w>])&(?!&)\s*\S", re.IGNORECASE)
+#: 語句**開頭**就是一支外部執行檔（`python.exe a.py`／`<venv>/bin/tool.cmd`）＝真的在跑東西。
+#: 錨在開頭是關鍵：`Get-Command python.exe` 的第一個 token 是 cmdlet，`.exe` 只是參數。
+_NATIVE_HEAD_RE = re.compile(r"^\s*[^\s;|&]*\.(?:exe|cmd|bat)(?![\w])", re.IGNORECASE)
+
+
+def _statement_resets_rc(statement: str) -> bool:
+    """這一句是否真的重新發起了一次呼叫（⇒ `$LASTEXITCODE` 被重寫）。
+
+    純函式、吃**一句**（不是整條指令）：`.exe` 的「必須在開頭」這個條件只有在語句
+    邊界上才判得準，用 `search(..., pos, endpos)` 是判不到的（`^` 不會錨在 `pos`）。
+    """
+    return bool(_RC_RESET_RE.search(statement) or _NATIVE_HEAD_RE.search(statement))
 _NAKED_CD_RE = re.compile(
     _CMD_START + SHARED_PATTERN_SOURCE["naked-cd"], re.IGNORECASE
 )
@@ -207,7 +241,8 @@ _FOOTER = (
 )
 
 
-def mask_regions(command: str, *, keep_expandable: bool) -> str:
+def mask_regions(command: str, *, keep_expandable: bool,
+                 keep_comments: bool = False) -> str:
     """把「不是可執行結構」的區段換成**等長**空白：引號字串、here-string、註解。
 
     等長是關鍵：遮蔽後與原字串**位置一一對應**，兩種遮蔽版本因此可以互相比位置
@@ -224,6 +259,11 @@ def mask_regions(command: str, *, keep_expandable: bool) -> str:
       `"…"`／`@"…"@`——PowerShell 在那裡面**真的會**展開 `$LASTEXITCODE`，
       `"rc=$LASTEXITCODE"` 是一次貨真價實的 rc 讀取。合成一面就必然在某個方向判錯：
       全遮則規則①的正典案例整個消失（漏擋），全不遮則 SD-02 回來（誤擋）。
+
+    `keep_comments=True`（R79 新增，只有行內豁免偵測在用）：註解**原樣保留**、字串
+    照樣遮。用途見 `lint_command()` 的豁免那一段——它要的正是「這個標記住在真註解裡
+    還是住在字串裡」，而那件事只有這一面分得開。掃描器仍然是**先看到 `#` 就跳到行尾**，
+    所以註解裡的撇號（`don't`）不會被誤判成字串起頭，這正是舊版比對原文的那個理由。
 
     這仍然不是 parser（不處理子運算式巢狀、不管 escape 以外的引號規則）；它只需要
     分得出「這段字元會被當成指令」還是「會被當成資料」。切錯的代價由行內豁免承擔。
@@ -252,7 +292,8 @@ def mask_regions(command: str, *, keep_expandable: bool) -> str:
         if head == "<#":  # 區塊註解
             close = command.find("#>", cursor + 2)
             end = length if close < 0 else close + 2
-            blank(cursor, end)
+            if not keep_comments:
+                blank(cursor, end)
             cursor = end
             continue
 
@@ -262,7 +303,8 @@ def mask_regions(command: str, *, keep_expandable: bool) -> str:
         if char == "#" and (cursor == 0 or command[cursor - 1] in " \t\r\n;|&({"):
             close = command.find("\n", cursor)
             end = length if close < 0 else close
-            blank(cursor, end)
+            if not keep_comments:
+                blank(cursor, end)
             cursor = end
             continue
 
@@ -314,6 +356,10 @@ def _rc_after_pipe(structural: str, expandable: str) -> bool:
     · 誤擋（QA-01）——`"rc=$LASTEXITCODE" | Out-File` 是先展開變數再進管線，
       rc 讀取發生在任何管線中斷**之前**，完全安全卻被硬擋，因為判準只問「同一句
       有沒有同時出現」不問先後。改成比位置：rc 在管線**之後**才算命中。
+
+    🔴 R79：污染的**解除**條件改由 `_statement_resets_rc()` 判（吃一句、不吃座標）。
+    上一版把「提到一支 exe」與「`2>&1` 裡的 `&`」都當成呼叫，於是一句話就能把污染
+    旗標清掉——而清掉之後放行的，正是這條規則唯一要防的那件事。
     """
     contaminated = False
     for start, end in statement_spans(structural):
@@ -324,7 +370,7 @@ def _rc_after_pipe(structural: str, expandable: str) -> bool:
                 return True
         if pipe_pos >= 0:
             contaminated = True
-        elif _RC_RESET_RE.search(structural, start, end):
+        elif _statement_resets_rc(structural[start:end]):
             contaminated = False
     return False
 
@@ -335,10 +381,15 @@ def lint_command(command: str) -> list[str]:
     **不早退**：三條檢查全部跑完再一次回報。早退會讓第二、三條的訊號被第一條
     遮蔽，而遮蔽的方向是「看起來變乾淨」。
     """
-    # 豁免刻意比對**原文**：豁免理由本來就可能含 `'`（例如「don't」），先遮蔽再找
-    # 會讓那半行被當成未閉合字串吞掉，一個合法的豁免就此靜默失效——而那個失效方向
-    # 是誤擋，正是本檔最不能發生的那一種。
-    if _EXEMPT_RE.search(command):
+    # 豁免只認**住在真註解裡**的標記（`keep_comments=True`：註解原樣留、字串照樣遮）。
+    # 🔴 R79：上一版比對原文，於是任何在字串裡「提到」這個標記的指令——寫文件、
+    # 寫探針、在訊息裡引述違規形態——會一次關掉全部三條檢查，且不留任何痕跡。
+    # 舊版選擇比對原文的理由（豁免理由本來就可能含撇號，例如「don't」；先遮蔽再找
+    # 會把那半行當成未閉合字串吞掉，讓合法豁免靜默失效＝誤擋方向）**仍然成立且已被
+    # 保住**：遮蔽器是先看到 `#` 就跳到行尾，註解內的撇號從頭到尾不會被當成字串起頭。
+    # 所以這不是拿誤擋換漏擋，是兩邊都拿到。
+    if _EXEMPT_RE.search(mask_regions(command, keep_expandable=False,
+                                      keep_comments=True)):
         return []
 
     structural = mask_regions(command, keep_expandable=False)

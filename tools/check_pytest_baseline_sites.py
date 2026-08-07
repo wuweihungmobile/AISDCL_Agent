@@ -37,6 +37,10 @@
     - 非 SSOT 掃描檔命中 → 紅（列 檔:行）。
     - SSOT 檔命中數 <1 → 紅（anchor 自檢：防 SSOT 自己被刪成零訊號後，
       本守門對全掃描面「零命中」空轉假綠）。
+    - 🔴 **R79 ARCH 新增前瞻發現鎖**：`_SCAN_FILES` 是人工白名單，擋不住「在一份
+      新文件裡多開一個家」。現另掃全部 tracked `.md`/`.py`（扣掉具名的日期性文物
+      樹），未納管的命中**檔數**以 shrink-only 棘輪凍結，新增即紅。判準與豁免表
+      見下方 `_DATED_ARTIFACT_PREFIXES`／`_UNMANAGED_HIT_FILES_RATCHET` 就地註解。
     - 掃描檔缺席 → 紅（fail-loud：檔案改名/搬移必須同步 _SCAN_FILES，
       防守門範圍靜默失守；_SCAN_FILES 清單本體另由
       tools/tests/test_check_pytest_baseline_sites.py 的真實清單釘選測試鎖住，
@@ -57,6 +61,7 @@
 from __future__ import annotations
 
 import re
+import subprocess
 import sys
 from pathlib import Path
 
@@ -102,11 +107,149 @@ _PAIR_RE = re.compile(r"(?<![\d/.])\d{3,5}/\d{1,3}(?![\d/])")
 _PAIR_CONTEXT_RE = re.compile(r"pytest|venv|直譯器|interpreter|passed|skipped", re.IGNORECASE)
 
 
+# ── 前瞻發現面（R79 ARCH）────────────────────────────────────────────────────
+# 🔴 缺陷：上面的 `_SCAN_FILES` 是**人工白名單**。它擋得住「把清單刪一行」，擋不住
+# 「在一份新文件裡寫下第九個基線數字」——而本工具的成功訊息（「N 份掃描檔中僅 SSOT
+# 載有基線數字」）容易被讀成全庫結論。R79 實測：掃描面外還有 1,430 支 tracked
+# `.md`/`.py`、4,495 行命中同一判準，命中最多的兩支還是**活文件**
+# （`AutoClaude/docs/05_development/sprint_history.md`、同目錄 `gate_audit.md`，兩者
+# 皆列在根 CLAUDE.md〈各專案權威文件快查〉表內）。同一個病本 repo 已有正確樣板：
+# `check_script_parity.py` 的 enrollment 發現鎖掃全庫 `.sh`/`.ps1`，未納管即 fail-loud
+# 列名——兩道鎖同源同病，只有一道用了發現式掃描面。
+#
+# 修法（比照 `_POSIX_TAG_RATCHET` 的形狀）：發現面＝全部 tracked `.md`/`.py`，扣掉
+# 下面這張**具名**的「日期性文物樹」豁免表，其餘一律受管轄；未納管的命中檔數以
+# shrink-only 棘輪凍結在今日實測值。新開一份文件寫下基線數字 ⇒ 計數上升 ⇒ 紅，
+# 必須當場二擇一（納入 `_SCAN_FILES`，或就地寫 `baseline-ok: WHY`）。
+# 誠實劃界（三條，都是實測過的邊界，不做全備宣稱）：
+#   ① 棘輪管的是**檔數**不是行數——同一支檔內多寫幾行不會紅。那支檔本來就已在債裡，
+#      這條的職責是「不再長出新的家」，不是替既有債逐行課責。
+#   ② 發現面＝`git ls-files`，**只寫在工作樹而未進 index 的新檔掃不到**（注入實測：
+#      同一支探針檔只寫檔時 rc=0、`git add -N` 之後 rc=1）。pre-commit／CI 上這不成
+#      問題（要 commit 就會進 index），但本機邊改邊跑時要知道這個時間差。
+#   ③ 豁免的三棵樹內部**完全不管**——那是刻意的（見下方 WHY），代價是史料樹裡的
+#      數字永遠不會被本鎖看見。
+#
+# 為何這幾棵樹是豁免而不是債：它們**按設計就是 dated snapshot**，寫下當時的量測值
+# 正是它們的用途，改成「指向 SSOT」會把歷史紀錄改成假話。每一筆都要有 WHY。
+_DATED_ARTIFACT_PREFIXES: tuple[tuple[str, str], ...] = (
+    ("AISDLC_SDD/AISDLC_SDD_v",
+     "Copy-on-Evolve 凍結／演化版樹：鐵律不回改歷史快照"),
+    ("docs/04_planning/",
+     "輪次計畫書／交棒書：逐輪封存的當時量測值，改寫即竄改史料"),
+    ("docs/06_quality/",
+     "缺陷帳本、歸檔與各輪證據檔：同上，且證據檔的價值就在於它記的是當時的數字"),
+)
+#: 活文件錨：這幾支是 R79 實測「未納管命中行數最多」且列在根 CLAUDE.md〈各專案權威
+#: 文件快查〉表內的**活文件**（讀者會當成現行事實）。它們永遠不得被上面的豁免表吃掉
+#: ——加一條 `AutoClaude/` 這種粗前綴就能一次讓 99 支活文件退出發現面，而檔數下限
+#: 對這種規模的縮面感覺不到。
+_LIVE_DOC_ANCHORS: tuple[str, ...] = (
+    "AutoClaude/docs/05_development/sprint_history.md",
+    "AutoClaude/docs/05_development/gate_audit.md",
+)
+#: 未納管命中**檔數**的 shrink-only 棘輪＝R79 實測值（當回合實跑填入、零成長緩衝）。
+#: 只准下修：把某支檔納入 `_SCAN_FILES`、或替它加行內豁免、或該檔消失，都會讓計數變小。
+#: 🔴 上修＝新增了一個「基線數字的家」，那正是 DEF-101-045／ARCH-R12-7／R13 三度漂移
+#: 的成因；要上修必須先說明為何這個新家是必要的，而不是把數字寫回 SSOT。
+_UNMANAGED_HIT_FILES_RATCHET = 114
+
+
 def _line_is_claim(line: str) -> bool:
     """行是否構成「pytest 基線數字宣稱」命中（兩種形態，判準見模組 docstring）。"""
     if _KEYWORD_RE.search(line) and _NUMBER_RE.search(line):
         return True
     return bool(_PAIR_RE.search(line) and _PAIR_CONTEXT_RE.search(line))
+
+
+def _tracked_docs_and_py(repo_root: Path) -> list[str]:
+    """全部 tracked `.md`／`.py` 的 repo 相對路徑（git 失敗即 fail-loud）。"""
+    proc = subprocess.run(
+        ["git", "-C", str(repo_root), "-c", "core.quotePath=false",
+         "ls-files", "--", "*.md", "*.py"],
+        capture_output=True, text=True, encoding="utf-8", errors="replace",
+    )
+    if proc.returncode != 0:
+        raise AssertionError(
+            f"git ls-files 失敗（rc={proc.returncode}；stderr={proc.stderr.strip()!r}）"
+            f"——發現面不得靜默縮小"
+        )
+    return sorted(line for line in proc.stdout.splitlines() if line)
+
+
+def is_dated_artifact(rel: str) -> bool:
+    """該路徑是否落在具名的「日期性文物樹」（豁免發現面，WHY 見該表）。"""
+    return any(rel.startswith(prefix) for prefix, _why in _DATED_ARTIFACT_PREFIXES)
+
+
+def discover_unmanaged_sites(repo_root: Path) -> list[tuple[str, int]]:
+    """發現面內、**不在** `_SCAN_FILES` 且非日期性文物、卻載有基線數字的檔。
+
+    回傳 `[(相對路徑, 命中行數)]`（排序）。這是「新站點永遠不會被納管」那個縫的
+    唯一觀測者——本函式回空集合時代表全庫只剩掃描面內有數字，那才是政策的終局。
+    """
+    managed = set(_SCAN_FILES)
+    out: list[tuple[str, int]] = []
+    for rel in _tracked_docs_and_py(repo_root):
+        if rel in managed or is_dated_artifact(rel):
+            continue
+        path = repo_root / rel
+        if not path.is_file():
+            continue  # index 內但工作樹不存在；缺席由別處管，不在本函式射程
+        hits = sum(
+            1 for line in path.read_text(encoding="utf-8-sig", errors="replace").splitlines()
+            if _line_is_claim(line)
+        )
+        if hits:
+            out.append((rel, hits))
+    return out
+
+
+def unmanaged_site_problems(repo_root: Path) -> list[str]:
+    """棘輪判準（單邊，只准下修）＋ 非空自錨（豁免表被撐大成蓋住全庫時要紅）。"""
+    problems: list[str] = []
+    all_tracked = _tracked_docs_and_py(repo_root)
+    scanned = [rel for rel in all_tracked if not is_dated_artifact(rel)]
+    # 自錨①：發現面檔數下限。擴大豁免表是讓棘輪變綠最省事的方式（計數自然變小、
+    # 棘輪照樣綠），故對發現面本身設下限。🔴 刻意**不**用「豁免佔比」當判準——實測
+    # 豁免面本來就佔 18,246/19,208（30 份 Copy-on-Evolve 版樹使然），佔比型判準在
+    # 落地當下就已為真，那種恆紅的自錨一定會被關掉。值＝R79 實測 962 打九折。
+    if len(scanned) < 900:
+        problems.append(
+            f"發現面只剩 {len(scanned)} 支（下限 900）——`_DATED_ARTIFACT_PREFIXES` "
+            f"疑似被擴大到吃掉活文件；刻意縮面請同步下修本下限並寫 WHY"
+        )
+    # 自錨②：活文件錨。加一條 `AutoClaude/` 之類的粗前綴就能一次豁免掉本鎖最該管的
+    # 那批活文件，而檔數下限對「只吃掉 99 支」是感覺不到的。故把「命中最多的活文件」
+    # 逐支釘住：它們永遠必須留在發現面內。
+    for anchor in _LIVE_DOC_ANCHORS:
+        if is_dated_artifact(anchor):
+            problems.append(
+                f"活文件 {anchor} 被 `_DATED_ARTIFACT_PREFIXES` 豁免掉了——它列在根 "
+                f"CLAUDE.md〈各專案權威文件快查〉表內，是本鎖最該管的對象，不是史料"
+            )
+        elif not (repo_root / anchor).is_file():
+            problems.append(
+                f"活文件錨 {anchor} 不存在於磁碟——錨名已過時，請同步更新 "
+                f"`_LIVE_DOC_ANCHORS`（錨若靜默消失，自錨②等於空轉）"
+            )
+    found = discover_unmanaged_sites(repo_root)
+    if len(found) > _UNMANAGED_HIT_FILES_RATCHET:
+        worst = sorted(found, key=lambda kv: -kv[1])[:5]
+        problems.append(
+            f"未納管的基線數字站點由 {_UNMANAGED_HIT_FILES_RATCHET} 增為 {len(found)} 支"
+            f"（棘輪只准下修）——新開的家：命中最多者 "
+            f"{', '.join(f'{r}({n})' for r, n in worst)}；請二擇一：把該檔加進 "
+            f"_SCAN_FILES 並把數字改為指向 {_SSOT_FILE} §7，或就地加行內 "
+            f"`<!-- {_EXEMPT_MARK} WHY -->`"
+        )
+    elif len(found) < _UNMANAGED_HIT_FILES_RATCHET:
+        problems.append(
+            f"未納管站點已降為 {len(found)} 支（棘輪值 {_UNMANAGED_HIT_FILES_RATCHET} "
+            f"已過時）——合法縮小後必須同步下修 _UNMANAGED_HIT_FILES_RATCHET，否則"
+            f"那個餘裕就是日後無聲加回去的破口"
+        )
+    return problems
 
 
 def _display(path: Path) -> str:
@@ -224,6 +367,7 @@ def main(argv: list[str] | None = None) -> int:
         print(f"⚠️  豁免行稽核（{_EXEMPT_MARK}）：{rec}", file=sys.stderr)
 
     problems = scan(files, ssot)
+    problems += unmanaged_site_problems(_REPO_ROOT)
     if problems:
         print(f"❌ pytest 基線站點守門失敗（{len(problems)} 筆）：", file=sys.stderr)
         for p in problems:
@@ -237,9 +381,13 @@ def main(argv: list[str] | None = None) -> int:
         return 1
 
     exempt_note = f"（另 {len(exemptions)} 筆豁免行，見 warning）" if exemptions else ""
+    # 🔴 訊息刻意把「納管面」與「未納管存量」並排印出：舊訊息只講掃描面，容易被讀成
+    # 全庫結論，而全庫實況是還有一批未納管站點（R79 ARCH）。
     print(
         f"✅ pytest 基線站點守門通過：{len(_SCAN_FILES)} 份掃描檔中僅 SSOT"
-        f"（{_SSOT_FILE}）載有基線數字{exempt_note}"
+        f"（{_SSOT_FILE}）載有基線數字{exempt_note}；"
+        f"發現面另有 {_UNMANAGED_HIT_FILES_RATCHET} 支未納管存量檔（shrink-only 棘輪，"
+        f"新增即紅；日期性文物樹依 _DATED_ARTIFACT_PREFIXES 豁免）"
     )
     return 0
 

@@ -786,6 +786,33 @@ $ grep -rn "eol|EOL" tools/git-hooks/pre-commit tools/git-hooks/pre-push  → �
 屬本機環境衛生、與 `DEF-101-377` 同族（該列已定調不由 agent 執行破壞性還原）；
 index 側（`i/lf`）正確，故不影響任何使用者 clone。
 
+### 🔴 R79 收尾結案（本節為帳本該列原狀態欄的逐字保全處）
+
+**帳本原狀態欄全文（一字未改）**：
+
+> open（已知缺口，具名不修——採 QA-R60-04【3】required_action 二選一之後者）：落地建議（給承接者，可直接執行）：在 `tools/tests/` 新增一支 unittest，以 `git ls-files --eol` 對 attr `eol=lf` 的路徑斷言工作樹非 crlf、對 attr `eol=crlf` 的路徑斷言工作樹非 lf，並**先以現況實測決定 fail 還是 warn**——現況即有 145+3 支違反，直接硬擋會讓本機 pre-push **永紅**（同 R59 ARCH-R59-NB4 對「永紅規則」的警告）；務實作法是釘選現況白名單＋只對新增檔硬擋。**本機三支 `.ps1` 漂移本輪不處理**：修法屬本機環境衛生、與 `DEF-101-377` 同族（該列已定調不由 agent 執行破壞性還原）
+
+**為何現在可以結**：本列自書的解鎖條件逐項對照，由**同輪**的 `DEF-101-916` 落地滿足——
+這是 `DEF-101-810` 那個形態的又一實例（**續改派只驗「上一輪做了沒」、不驗「有沒有別人順手做掉」**），
+故 R79 收尾逐項實查後就地結案，而不是再順延一輪。
+
+| 本列自書的要求 | 落地物（當回合實查） | 對照結果 |
+|---|---|---|
+| 在 `tools/tests/` 新增一支 unittest | `tools/tests/test_platform_neutral_paths.py::TestWorktreeEolMatchesPolicy` | ✅ 落在既有鎖檔內（受 `tools/tests` 檔數棘輪限制，不得新增 `.py`，故併入既有檔——比原文設想的「新增一支」更合規） |
+| 以 `git ls-files --eol` 取數 | `_ls_files_eol()` 逐字呼叫 `git ls-files --eol`，`parse_ls_files_eol()` 只讀 `w/` 欄 | ✅ 且附一支專測 `test_the_parser_reads_the_worktree_column_not_the_index_column`——讀錯欄位（`i/`）會讓整條閘門恆綠，那正是本列點名的失效形態 |
+| attr `eol=lf` → 工作樹非 crlf | `_WORKTREE_EOL_POLICY` 的 `.sh`／`.bash` ＝ `lf` | ✅ |
+| attr `eol=crlf` → 工作樹非 lf | 同表的 `.ps1`／`.psm1`／`.psd1` ＝ `crlf` | ✅ 雙向對稱，`test_an_lf_ps1_and_a_crlf_sh_both_turn_red` 逐格驗紅 |
+| 先以現況決定 fail 還是 warn | 落地為 **fail（硬擋）且零白名單** | ✅ **原文擔心的「永紅」前提已消滅**：145 支 `.sh` ＋ 3 支 `.ps1` 的存量不是被白名單釘住，而是由 `DEF-101-888`／`DEF-101-915` 在 R78／R79 **真的修掉了**（144 支 `.sh` ＋ 6 支 `.ps1`）。存量歸零之後，硬擋不會永紅——`worktree_eol_problems()` 全檔查無任何豁免清單 |
+
+**反空轉**：`_WORKTREE_EOL_FLOOR = 240`——掃描面被縮小（少列一個副檔名、或 `git ls-files`
+這條取數管道壞掉而回空字串）即當場紅，不會靜默「零違規」假綠。
+
+**當回合取證**：`python tools/run_root_unittests.py` rc=0（該類別隨全套執行）。逐項實查見上表。
+
+**誠實劃界（不得誤讀）**：本鎖只看 **tracked** 檔（`git ls-files` 的定義），未追蹤檔的行尾不在射程內；
+本列點名的原始缺口（ubuntu-only workflow 的兩條 `w/` 判準結構性恆綠）**本身沒有被修掉**——
+它今天仍然恆綠，只是不再是唯一的載具。`.ps1` 方向的**寫入端**強制另由 `DEF-101-915` 承接。
+
 ## DEF-101-558
 
 **（round 2 新增；round 1 SA-R60-05／SA-R60-06／QA-R60-09／ARCH-R60-01 之帳本側）**

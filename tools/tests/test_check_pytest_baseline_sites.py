@@ -17,6 +17,7 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import check_pytest_baseline_sites as m  # noqa: E402
@@ -220,6 +221,76 @@ class TestRealRepoConfigPinning(unittest.TestCase):
         )
         self.assertEqual(m._SSOT_FILE, "ONBOARDING.md")
         self.assertIn(m._SSOT_FILE, m._SCAN_FILES)
+
+
+class TestForwardLookingDiscovery(unittest.TestCase):
+    """R79 ARCH：前瞻發現鎖——「在一份**新**文件裡寫下第九個基線數字」必須會紅。
+
+    病灶：`_SCAN_FILES` 是人工白名單，擋得住「刪清單一行」（上一個 class 在守），
+    擋不住「多開一個家」。R79 實測掃描面外還有 1,430 支 tracked `.md`/`.py`、
+    4,495 行命中同一判準，其中命中最多的兩支是**活文件**而非史料。同一個病本 repo
+    早有正確樣板（`check_script_parity` 的 enrollment 發現鎖掃全庫 `.sh`/`.ps1`），
+    只有這一道沒用發現式掃描面。
+
+    測意圖非僅行為：本組不驗「今天是幾支」，而是驗**三件事會不會說話**——
+    ①新開的家會讓計數上升而紅；②合法收斂後棘輪值過時也會紅（否則餘裕就是破口）；
+    ③把活文件整批豁免掉（讓計數變小的最省事手段）也會紅。
+    """
+
+    _REPO = Path(__file__).resolve().parents[2]
+
+    def test_the_discovery_surface_is_not_vacuous(self) -> None:
+        """自錨：發現面收不到東西時，棘輪會恆綠——先確認它真的看得到活文件。"""
+        scanned = [
+            rel for rel in m._tracked_docs_and_py(self._REPO)
+            if not m.is_dated_artifact(rel)
+        ]
+        self.assertGreaterEqual(len(scanned), 900, "發現面異常縮小 ⇒ 豁免表疑似被擴大")
+        for anchor in m._LIVE_DOC_ANCHORS:
+            self.assertIn(anchor, scanned, f"活文件錨 {anchor} 不在發現面內")
+
+    def test_real_tree_is_at_the_ratchet(self) -> None:
+        """真樹現況必須恰等於棘輪值（零餘裕；上下任一方向皆紅）。"""
+        self.assertEqual(m.unmanaged_site_problems(self._REPO), [])
+        self.assertEqual(
+            len(m.discover_unmanaged_sites(self._REPO)),
+            m._UNMANAGED_HIT_FILES_RATCHET,
+            "未納管站點實測數與棘輪值不符——本鎖刻意零餘裕，兩個方向都要求同步",
+        )
+
+    def test_a_new_unmanaged_site_is_red(self) -> None:
+        """鑑別力①（注入）：把棘輪下修一格＝等價於「多出一個新的家」，必須紅。"""
+        with mock.patch.object(
+            m, "_UNMANAGED_HIT_FILES_RATCHET", m._UNMANAGED_HIT_FILES_RATCHET - 1
+        ):
+            problems = m.unmanaged_site_problems(self._REPO)
+        self.assertTrue(problems, "新增未納管站點被放行 ⇒ 前瞻發現鎖無鑑別力")
+        self.assertIn("棘輪只准下修", " ".join(problems))
+
+    def test_a_stale_ratchet_after_shrinking_is_red(self) -> None:
+        """鑑別力②（注入）：合法收斂後沒有下修棘輪，餘裕即破口 ⇒ 也要紅。"""
+        with mock.patch.object(
+            m, "_UNMANAGED_HIT_FILES_RATCHET", m._UNMANAGED_HIT_FILES_RATCHET + 1
+        ):
+            problems = m.unmanaged_site_problems(self._REPO)
+        self.assertTrue(problems, "棘輪值過時被放行 ⇒ 餘裕會被無聲用掉")
+        self.assertIn("已過時", " ".join(problems))
+
+    def test_swallowing_live_docs_with_a_coarse_prefix_is_red(self) -> None:
+        """鑑別力③（注入）：加一條 `AutoClaude/` 粗前綴一次豁免掉 99 支活文件——
+        這是讓棘輪變綠最省事的手段，檔數下限對它感覺不到，故另設活文件錨。"""
+        coarse = m._DATED_ARTIFACT_PREFIXES + (("AutoClaude/", "刻意的粗前綴（注入）"),)
+        with mock.patch.object(m, "_DATED_ARTIFACT_PREFIXES", coarse):
+            problems = m.unmanaged_site_problems(self._REPO)
+        self.assertTrue(problems, "粗前綴豁免掉活文件被放行 ⇒ 自錨②無鑑別力")
+        self.assertIn("被 `_DATED_ARTIFACT_PREFIXES` 豁免掉了", " ".join(problems))
+
+    def test_dated_artifact_prefixes_each_carry_a_why(self) -> None:
+        """豁免表的每一筆都要有非空 WHY——無 WHY 的豁免等於沒有判準。"""
+        for prefix, why in m._DATED_ARTIFACT_PREFIXES:
+            with self.subTest(prefix=prefix):
+                self.assertIn("/", prefix, f"{prefix!r} 不像路徑前綴（無分隔符）")
+                self.assertGreaterEqual(len(why.strip()), 8, f"{prefix!r} 的 WHY 過短")
 
 
 if __name__ == "__main__":

@@ -113,11 +113,40 @@ jobs:
           pip install -e ".[dev,sdk]"
 
       - name: Run pytest
+        # `-rs`：印出每支 skip 的理由（R59 ARCH-R59-NB1）。DEF-101-510 的原則是
+        # 「因平台/環境而失去的覆蓋不得只併成一個數字」，而本 job 是 3740 支那一套的
+        # push 主閘門——skip 理由只存在於 CI log，不印就永遠查不到。
+        #
+        # 🔴 R79 收輪（QA-R79／SA-R79）：**印出來 ≠ 有人管**。R79 落地的 skip 分群天花板
+        # 當時唯一的消費者是 `tools/local_ci_gate.py`，而它不在任何阻斷閘門上——pre-push
+        # 逐字寫「刻意直跑 pytest 不經 local_ci_gate」、本 job 也是裸 pytest、唯二呼叫
+        # local_ci_gate 的兩個 CI job 皆 `continue-on-error: true` ⇒ 新增未標籤 skip
+        # 今天不會被任何東西攔下。本步把天花板接上這條 push 硬閘：**不改「直跑 pytest」
+        # 這條紀律**（兩個訊號不得合流，R12 QA-2），只是把它已經產出的輸出多消費一次。
+        # 三態離開碼（見 local_ci_gate 檔頭）：1＝真問題、3＝這個平台的健康值從來沒人
+        # 量過（ubuntu 目前就是這一格）⇒ 印 warning 不擋，避免用一個沒有鑑別力的紅
+        # 誤擋整條 push；等有人把實測值填進 `_RUNTIME_SKIP_CEILING` 就自動升級為阻斷。
+        # 🔴 即使剖面未登記，**量測塌掉**（`-rs` 消失／摘要抓不到）仍然是 rc=1 硬擋——
+        # 那一向與平台無關，而 `-rs` 在這個 repo 真的靜默消失過（R59）。
+        # `set -o pipefail` 不可省：GHA 對未宣告 `shell:` 的 step 用 `bash -e {0}`（**無**
+        # pipefail），管線 rc 取最後一個元素（`tee`，恆 0）⇒ pytest 的真 rc 會被吞掉。
         run: |
-          # `-rs`：印出每支 skip 的理由（R59 ARCH-R59-NB1）。DEF-101-510 的原則是
-          # 「因平台/環境而失去的覆蓋不得只併成一個數字」，而本 job 是 3740 支那一套的
-          # push 主閘門——skip 理由只存在於 CI log，不印就永遠查不到。
-          python -m pytest tests/ -q -rs --tb=short
+          set -o pipefail
+          pytest_rc=0
+          python -m pytest tests/ -q -rs --tb=short \
+            | tee autoclaude-pytest.log || pytest_rc=$?
+          echo "AUTOCLAUDE-TEST-PYTEST-RC=$pytest_rc"
+          census_rc=0
+          python tools/local_ci_gate.py --census-only autoclaude-pytest.log || census_rc=$?
+          echo "AUTOCLAUDE-SKIP-CENSUS-RC=$census_rc"
+          if [ "$census_rc" = "3" ]; then
+            echo "::warning::skip census: this platform profile has no measured ceiling yet (advisory). Register it in tools/lib/skip_group_policy.py::_RUNTIME_SKIP_CEILING with the measured values printed above."
+            census_rc=0
+          fi
+          if [ "$pytest_rc" != "0" ] || [ "$census_rc" != "0" ]; then
+            echo "::error::pytest_rc=$pytest_rc census_rc=$census_rc"
+            exit 1
+          fi
 
       - name: Check LOC budget
         run: |
@@ -331,13 +360,30 @@ jobs:
         env:
           PG_CONTRACT_MIN_PASSED: "1100"
           PG_CONTRACT_MAX_SKIPPED: "80"
+        # 🔴 R79（D-skipped #1）：本步先前把 pytest 接進 `| tee`，而 GHA 對**未宣告
+        # `shell:`** 的 step 用 `bash -e {0}`（**無** pipefail，本 repo 自己記在
+        # windows-compat-ci.yml 的同一段註解裡）⇒ 管線 rc 取最後一個元素（`tee`，恆 0），
+        # pytest 的真 rc 被整個吞掉。而下方 census 只數 passed/skipped、**不看 failed**，
+        # 兩者疊起來的後果是：只要失敗支數讓 passed 仍 ≥ floor（健康 1241 ⇒ 約 141 支以內），
+        # 這個 CLAUDE.md 宣告的「硬閘」就完全不會亮紅。當回合以 Git Bash 重放實測：
+        # 一份 `3 failed, 1238 passed, 40 skipped` 的 tail 在修前判定為零問題、rc=0。
+        # 修法刻意**不**改 `shell:`（那會連帶把 pipefail 套到本檔其餘 step、改變既有失敗
+        # 語意），只在本步 run 本體首行 `set -o pipefail`，並把真 rc 顯式接出來交給 census：
+        #   · `|| pytest_rc=$?`：在 `set -e` 下，OR list 不會讓 step 提早中止 ⇒ census
+        #     一定跑得到（早退會遮蔽診斷資訊，同 run_root_unittests 對豁免表自檢的既有決策）。
+        #   · census 因此由 2 道變 4 道：passed 地板／skipped 天花板／**failed+error 必須為 0**
+        #     ／**pytest 真 rc 必須為 0**。後兩道互為備援：rc 那道抓得到 collection error、
+        #     internal error 這類 tail 上看不出來的形態；tail 那道抓得到 rc 又被某層吞掉的形態。
         # run 本體刻意全 ASCII：runner 把它寫成暫存腳本，中文訊息在部分 shell/codepage
         # 組合下會壞掉（同本 repo 對 `shell: powershell` 步驟立下的紀律）。中文 WHY 全在
         # 上方註解裡——註解不會被執行。
         run: |
+          set -o pipefail
+          pytest_rc=0
           python -m pytest tests/contract/ tests/integration/ tests/infra/ -q -rs --tb=short \
-            | tee pg-contract-pytest.log
-          python - <<'PY'
+            | tee pg-contract-pytest.log || pytest_rc=$?
+          echo "PG-CONTRACT-PYTEST-RC=$pytest_rc"
+          PG_CONTRACT_PYTEST_RC="$pytest_rc" python - <<'PY'
           import os, pathlib, re, sys
 
           log = pathlib.Path("pg-contract-pytest.log").read_text(
@@ -349,13 +395,30 @@ jobs:
               return int(hits[-1]) if hits else 0
 
           passed, skipped = count("passed"), count("skipped")
+          failed, errored = count("failed"), count("error")
+          pytest_rc = int(os.environ.get("PG_CONTRACT_PYTEST_RC", "0") or 0)
           floor = int(os.environ["PG_CONTRACT_MIN_PASSED"])
           ceiling = int(os.environ["PG_CONTRACT_MAX_SKIPPED"])
           print(f"PG-CONTRACT-CENSUS passed={passed} skipped={skipped} "
+                f"failed={failed} error={errored} pytest_rc={pytest_rc} "
                 f"floor={floor} ceiling={ceiling}")
 
-          # accumulate-then-report: report BOTH problems, never stop at the first one.
+          # accumulate-then-report: report ALL problems, never stop at the first one.
           problems = []
+          if failed or errored:
+              problems.append(
+                  f"::error::PG-CONTRACT-CENSUS failed={failed} error={errored} -- "
+                  "PG-gated assertions are RED. This job is a declared hard gate; a green "
+                  "rc here would mean up to ~141 assertions can turn red while passed "
+                  "stays above the floor. Fix the tests; do not relax the floor.")
+          if pytest_rc != 0:
+              problems.append(
+                  f"::error::PG-CONTRACT-CENSUS pytest exit code {pytest_rc} != 0 -- "
+                  "pytest itself failed (collection error / internal error / usage error "
+                  "may not show up in the summary tail at all). Before R79 this rc was "
+                  "swallowed by the `| tee` pipeline under GHA's default `bash -e` "
+                  "(no pipefail); the `set -o pipefail` on the first line of this run "
+                  "body is what makes it visible.")
           if passed < floor:
               problems.append(
                   f"::error::PG-CONTRACT-CENSUS passed={passed} < floor={floor} -- "
@@ -374,7 +437,7 @@ jobs:
               print(line)
           if problems:
               print("::error::PG-CONTRACT-CENSUS failed "
-                    f"({len(problems)} of 2 checks). Skip reasons are in the -rs section "
+                    f"({len(problems)} of 4 checks). Skip reasons are in the -rs section "
                     "above; do not raise these thresholds to make it green.")
               sys.exit(1)
           PY
@@ -413,6 +476,15 @@ jobs:
       AUTOCLAUDE_ALLOW_INSECURE_DB: "1"
       # SD_07 PM #2：opt-in flag — 啟用 tests/integration/test_pgvector_real_recall.py
       SD07_REAL_PG_E2E_ENABLED: "true"
+      # 🔴 R79（D-skipped #4）：`tests/perf/test_pgvector_recall_perf.py` 的第二道開關。
+      # 該檔代言 ADR-SD08-003 §2.2 場景 #4「p95 < 50ms」SLA，而在此之前**全 repo 沒有
+      # 任何地方設過這個變數**（當回合 Grep：11 支 workflow／run_local_nightly.{ps1,sh}／
+      # tools/*.ps1 全部零命中）⇒ 它從 2026-06-12 落地至今一次都沒被執行過。本 job 早就
+      # 備妥它需要的**全部**條件（service container ＋ DSN ＋ alembic head ＋ seed_kb），
+      # 缺的只有這一個變數與下方那一步。⚠️ 兩個變數缺一不可：`SD07_REAL_PG_E2E_ENABLED`
+      # 管 conftest 的 `pg_real` marker 閘、`PG_REAL_ENABLED` 管該檔自己的 skipif——
+      # 本輪實測只設後者仍會被前者 skip 掉。
+      PG_REAL_ENABLED: "1"
 
     steps:
       - name: Checkout
@@ -453,6 +525,84 @@ jobs:
           python -m pytest tests/integration/test_pgvector_real_recall.py \
             -v --tb=short -m pg_real \
             --junitxml=.ac4_junit.xml
+
+      # 🔴 R79（D-skipped #4）：ADR-SD08-003 §2.2 場景 #4 的 p95 SLA 首次接上通道。
+      # 前一步（seed）與本 job 的 service container 是它需要的全部前置；本步刻意排在
+      # `pgvector_run` **之後**，讓語料狀態與 recall 那支完全一致。
+      # ⚠️ 誠實劃界：本步在雲端**尚未執行過**（GitHub Actions 帳務問題，見 pg-contract
+      # 那一段的同款揭露）。本機 Windows 11 ＋ pgvector/pgvector:pg18 ＋同一份 fixture
+      # 實測：`1 passed in 4.87s`（p95 為每次 search 的值，100 個樣本）。若雲端首跑
+      # 落在門檻外，正確處置是查 HNSW 參數與 runner 規格，**不是**把門檻放寬。
+      # ⚠️ name 必須加引號：YAML 的 plain scalar 裡「空白＋#」開始註解，不加引號的話
+      #    `場景 #4)` 會被整段吃掉（當回合 `yaml.safe_load` 實測到步名被截斷才發現）。
+      # 🔴 R79 收輪（QA blocking）：上一版本步驟只有一行裸 pytest ⇒ **對 skip 是綠的**。
+      # 這支測試被結案的理由正是「從 2026-06-12 起一次都沒被執行過而沒有人發現」，補上的
+      # 通道若對 skip 回綠，同一個盲區就原封不動搬到上一層：seed 步驟半途失效、fixture
+      # 走樣、marker 改名，任何一種都會讓它再度靜默不跑而 job 全綠。QA 當回合以**逐字
+      # 相同**的指令實測：`PERF_RC=0`、輸出 `1 skipped`、理由是語料只有 0 列 embedding
+      # ——「SLA 量過且達標」與「這支又沒跑」共用同一個綠。
+      # 形態直接抄同檔 pg-contract 的 census 區塊（`set -o pipefail` ＋ tee 落檔 ＋ 四道
+      # 判準），不另發明第二種寫法。`set -o pipefail` 不可省：GHA 對未宣告 `shell:` 的
+      # step 用 `bash -e {0}`（**無** pipefail），管線 rc 取最後一個元素（`tee`，恆 0）。
+      # run 本體刻意全 ASCII（runner 會把它寫成暫存腳本；理由同 pg-contract 那一段）。
+      - name: "Run pgvector p95 SLA baseline (ADR-SD08-003 場景 #4)"
+        run: |
+          set -o pipefail
+          perf_rc=0
+          python -m pytest tests/perf/test_pgvector_recall_perf.py \
+            -q -rs --tb=short -m pg_real \
+            | tee pgvector-perf.log || perf_rc=$?
+          echo "PGVECTOR-PERF-PYTEST-RC=$perf_rc"
+          PGVECTOR_PERF_RC="$perf_rc" python - <<'PY'
+          import os, pathlib, re, sys
+
+          log = pathlib.Path("pgvector-perf.log").read_text(
+              encoding="utf-8", errors="replace")
+          tail = "\n".join(log.strip().splitlines()[-3:])
+
+          def count(word: str) -> int:
+              hits = re.findall(r"(\d+) " + word, tail)
+              return int(hits[-1]) if hits else 0
+
+          passed, skipped = count("passed"), count("skipped")
+          failed, errored = count("failed"), count("error")
+          pytest_rc = int(os.environ.get("PGVECTOR_PERF_RC", "0") or 0)
+          print(f"PGVECTOR-PERF-CENSUS passed={passed} skipped={skipped} "
+                f"failed={failed} error={errored} pytest_rc={pytest_rc}")
+
+          # accumulate-then-report: report ALL problems, never stop at the first one.
+          problems = []
+          if pytest_rc != 0:
+              problems.append(
+                  f"::error::PGVECTOR-PERF-CENSUS pytest exit code {pytest_rc} != 0 -- "
+                  "collection error / internal error / usage error may not show up in "
+                  "the summary tail at all.")
+          if failed or errored:
+              problems.append(
+                  f"::error::PGVECTOR-PERF-CENSUS failed={failed} error={errored} -- "
+                  "the p95 SLA assertion (ADR-SD08-003 section 2.2 scenario 4) is RED. "
+                  "Investigate HNSW params and runner spec; do NOT relax the threshold.")
+          if skipped:
+              problems.append(
+                  f"::error::PGVECTOR-PERF-CENSUS skipped={skipped} -- this test did NOT "
+                  "run. That is the exact blind spot this step was added to close: it had "
+                  "never executed once since 2026-06-12 and nobody noticed. Check the "
+                  "seed_kb step (knowledge_entries needs >= 100 rows with embeddings), "
+                  "PG_REAL_ENABLED / SD07_REAL_PG_E2E_ENABLED, and the pg_real marker.")
+          if passed != 1:
+              problems.append(
+                  f"::error::PGVECTOR-PERF-CENSUS passed={passed}, expected exactly 1 -- "
+                  "the file holds a single SLA test; any other number means the file was "
+                  "renamed, split, or is no longer being collected.")
+          for line in problems:
+              print(line)
+          if problems:
+              print("::error::PGVECTOR-PERF-CENSUS failed "
+                    f"({len(problems)} of 4 checks). Actual summary tail below.")
+              for line in tail.splitlines():
+                  print(f"::error::PGVECTOR-PERF-TAIL| {line}")
+              sys.exit(1)
+          PY
 
       # SD_08 W2 T2-C2：AC4 nightly metric collector（累計 14 天）
       - name: Collect AC4 metrics (SD_08 W2 T2-C2)

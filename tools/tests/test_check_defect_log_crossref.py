@@ -2638,5 +2638,133 @@ _LEDGER_MIN = (
 )
 
 
+#: 判準本體住 `tools/lib`（兩支工具共用），故本組鎖直接叩它——不經閘門再叩一次，
+#: 那會讓「純函式有沒有牙」與「閘門有沒有接線」兩件事混在同一個 assert 裡。
+_lib = m._ledger_index
+
+
+class TestR79RowByteCeiling(unittest.TestCase):
+    """帳本「單列 ≤700 bytes」的四向判準（`DEF-101-890`）。
+
+    意圖（Rule 9）：這條政策被連續三份交棒書寫進「禁止事項」，卻**沒有任何東西在看它**
+    ——實測 120 列有 110 列違反，主檔因此被推到距 pre-push 硬閘 ≈2 列。所以本組鎖守的
+    不是「列太長很難看」，而是**帳本主檔的可用容量**：長列吃掉的是下一輪能不能寫帳本。
+    四向缺任一向都會退化：缺① 新列可以隨便長；缺② 豁免清單變成永久額度；缺③ 「膨脹了
+    就把 ID 補進清單」是免費的；缺④ 一列 800 bytes 的豁免列可以長到 8,000 而全綠。
+    """
+
+    HEAD = ("| ID | 日期 | 發現情境 | 現象與證據 | 嚴重度 | 分流去向 | 狀態 |\n"
+            "|---|---|---|---|---|---|---|\n")
+
+    def _ledger(self, *rows: str) -> str:
+        return self.HEAD + "".join(rows)
+
+    def _row(self, def_id: str, nbytes: int) -> str:
+        head = f"| {def_id} | d | R75 | x | P3 | y | fixed "
+        pad = nbytes - len(head.encode("utf-8")) - 1  # 尾端一個 `|`
+        return head + "x" * pad + "|\n"
+
+    def test_row_bytes_measures_utf8_not_characters(self) -> None:
+        """量的是**位元組**：CJK 一字三位元組，用字元數量會低估三倍。"""
+        row = "| DEF-01-001 | 中文 | R75 | x | P3 | y | fixed |\n"
+        got = _lib.row_bytes(self._ledger(row))["DEF-01-001"]
+        self.assertEqual(got, len(row.rstrip("\n").encode("utf-8")))
+        self.assertGreater(got, len(row.rstrip("\n")))
+
+    def test_a_new_oversize_row_is_red(self) -> None:
+        """① 注入：不在豁免清單的列超標即紅，且訊息指名該 ID 與實測位元組。"""
+        text = self._ledger(self._row("DEF-99-901", 800))
+        with mock.patch.object(_lib, "OVERSIZE_ROW_GRANDFATHERED", frozenset()), \
+             mock.patch.object(_lib, "OVERSIZE_ROW_CEILING", 0), \
+             mock.patch.object(_lib, "OVERSIZE_ROW_EXCESS_CEILING", 10_000):
+            problems = _lib.oversize_row_problems(text)
+        self.assertEqual(len(problems), 1, problems)
+        self.assertIn("DEF-99-901", problems[0])
+        self.assertIn("800 bytes", problems[0])
+
+    def test_the_same_row_under_the_ceiling_is_green(self) -> None:
+        """① 還原：同一列縮到上限以下即綠（證明上面那個紅不是恆真）。"""
+        text = self._ledger(self._row("DEF-99-901", _lib.ROW_MAX_BYTES))
+        with mock.patch.object(_lib, "OVERSIZE_ROW_GRANDFATHERED", frozenset()), \
+             mock.patch.object(_lib, "OVERSIZE_ROW_CEILING", 0), \
+             mock.patch.object(_lib, "OVERSIZE_ROW_EXCESS_CEILING", 10_000):
+            self.assertEqual(_lib.oversize_row_problems(text), [])
+
+    def test_a_stale_grandfather_entry_is_red(self) -> None:
+        """② 反向：豁免清單列了一個已不超標（或已不存在）的 ID ⇒ 紅、要求刪除。"""
+        text = self._ledger(self._row("DEF-99-901", 400))
+        with mock.patch.object(_lib, "OVERSIZE_ROW_GRANDFATHERED",
+                               frozenset({"DEF-99-901", "DEF-99-902"})), \
+             mock.patch.object(_lib, "OVERSIZE_ROW_CEILING", 2), \
+             mock.patch.object(_lib, "OVERSIZE_ROW_EXCESS_CEILING", 10_000):
+            problems = _lib.oversize_row_problems(text)
+        self.assertEqual(len(problems), 2, problems)
+        self.assertIn("豁免已過期", problems[0])
+        self.assertIn("查無此 ID", problems[1])
+
+    def test_padding_the_grandfather_list_is_red_not_a_free_pass(self) -> None:
+        """③ 繞道封死：把新違規的 ID 補進豁免清單 ⇒ ① 轉綠，但筆數棘輪當場接手。"""
+        text = self._ledger(self._row("DEF-99-901", 800))
+        with mock.patch.object(_lib, "OVERSIZE_ROW_GRANDFATHERED",
+                               frozenset({"DEF-99-901"})), \
+             mock.patch.object(_lib, "OVERSIZE_ROW_CEILING", 0), \
+             mock.patch.object(_lib, "OVERSIZE_ROW_EXCESS_CEILING", 10_000):
+            problems = _lib.oversize_row_problems(text)
+        self.assertEqual(len(problems), 1, problems)
+        self.assertIn("棘輪上限", problems[0])
+
+    def test_growing_an_exempt_row_is_red(self) -> None:
+        """④ 繞道封死：豁免列繼續長大 ⇒ ①②③ 全綠，超標總量棘輪接手（零成長容忍）。"""
+        base = self._ledger(self._row("DEF-99-901", 900))
+        grown = self._ledger(self._row("DEF-99-901", 901))
+        with mock.patch.object(_lib, "OVERSIZE_ROW_GRANDFATHERED",
+                               frozenset({"DEF-99-901"})), \
+             mock.patch.object(_lib, "OVERSIZE_ROW_CEILING", 1), \
+             mock.patch.object(_lib, "OVERSIZE_ROW_EXCESS_CEILING", 200):
+            self.assertEqual(_lib.oversize_row_problems(base), [])
+            problems = _lib.oversize_row_problems(grown)
+        self.assertEqual(len(problems), 1, problems)
+        self.assertIn("超標總量", problems[0])
+        self.assertIn("被改長了 1 bytes", problems[0])
+
+    def test_the_real_ledger_baselines_are_exact_not_padded(self) -> None:
+        """🔴 基線零餘裕自檢：兩個棘輪常數必須**逐字等於**真實主檔的當下實測。
+
+        留餘裕就是日後無聲加回去的破口（同 `_FROZEN_GUARD_LINES` 的取值紀律）；
+        而基線比實況**小**則代表有人瘦身後忘了下修，兩個方向都要說話。
+        """
+        text = m._DEFAULT_DEFECT_LOG.read_text(encoding="utf-8-sig")
+        over = {i: n for i, n in _lib.row_bytes(text).items() if n > _lib.ROW_MAX_BYTES}
+        self.assertEqual(set(over), set(_lib.OVERSIZE_ROW_GRANDFATHERED))
+        self.assertEqual(len(over), _lib.OVERSIZE_ROW_CEILING)
+        self.assertEqual(sum(n - _lib.ROW_MAX_BYTES for n in over.values()),
+                         _lib.OVERSIZE_ROW_EXCESS_CEILING)
+
+    def test_the_real_ledger_is_green_today(self) -> None:
+        """端到端：真實主檔在本輪落地後必須零問題（否則上面全是空轉）。"""
+        text = m._DEFAULT_DEFECT_LOG.read_text(encoding="utf-8-sig")
+        self.assertEqual(_lib.oversize_row_problems(text), [])
+
+    def test_the_volume_check_no_longer_masks_the_later_checks(self) -> None:
+        """🔴 早退遮蔽的回歸鎖：主檔超線時，其後的檢查**必須**照跑完。
+
+        修復前 `main()` 在體積那一道 `return _bail(...)`，於是跨文件一致性等十來道
+        一行都不跑，而輸出只剩兩行——診斷與閘門同時消失，方向是「看起來變乾淨」。
+        判準取「體積名目排在 `_CHECK_ORDER` 最後一位」＋「超線時訊息不得宣稱有未執行
+        的檢查」，兩者合起來即「它不再遮蔽任何東西」。
+        """
+        self.assertEqual(m._CHECK_ORDER[-1], "帳本體積與逐列位元組上限")
+        ledger_text = _ledger_text(
+            "| DEF-01-001 | 2026-06-12 | 情境 | 現象 | P2 | 去向 | fixed@x |\n")
+        padded = ledger_text + "> pad\n" * ((m._LEDGER_FAIL_BYTES // 6) + 1)
+        with mock.patch.object(m, "_DEFECT_LOG", _write_tmp(padded)), \
+             mock.patch.object(m, "_CROSSREF_TARGETS", []), \
+             mock.patch("builtins.print") as fake:
+            self.assertEqual(m.main(), 1)
+        printed = " ".join(str(a) for c in fake.call_args_list for a in c.args)
+        self.assertIn("輪替上限", printed)
+        self.assertNotIn("尚有", printed)
+
+
 if __name__ == "__main__":
     unittest.main()

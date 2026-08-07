@@ -571,6 +571,56 @@ class UnregisteredSkipTagVocabularyTest(unittest.TestCase):
         self.assertEqual(len(problems), 1, problems)
         self.assertIn("_UNREGISTERED_TAG_DEBT", problems[0])
 
+    def test_nonliteral_reasons_are_recovered_for_the_vocabulary_lock(self) -> None:
+        """R79 的**非字面 reason** 抽取面（`nonliteral_skip_reason_prefixes`）。
+
+        WHY 這一支非補不可（QA-R79）：上面那道詞彙鎖的輸入原本只有 `literal_eval`
+        成功的站點，而 R76 指名的唯一已知違規實例（`self.skipTest(f"[TOOL-MISSING] …")`）
+        正好是 f-string ⇒「已知缺陷 → 建了鎖 → 鎖看不到那個已知缺陷」，隱形三輪。
+        R79 補上抽取面卻**零回歸鎖**，注入證明只活在會被丟掉的 scratchpad。
+        判準的核心是「標籤依契約住在 reason 最前面 ⇒ 取開頭常數片段就夠判，不需求值」，
+        兩種形態（f-string／`+` 串接）都要吃得下，而**字面值不得重複計**（那一批由
+        `skip_decorator_sites` 承接，兩面各自對自己的存量帳）。
+        """
+        source = textwrap.dedent(
+            """\
+            import unittest
+
+
+            class C(unittest.TestCase):
+                def test_a(self):
+                    self.skipTest(f"[TOOL-MISSING] {tool} 不在 PATH")
+
+                def test_b(self):
+                    self.skipTest("[PG-CORPUS-STALE] " + why)
+
+                def test_c(self):
+                    self.skipTest("[TOOL-ABSENCE] 字面值，由另一面承接")
+            """
+        )
+        got = windows_skip_tags.nonliteral_skip_reason_prefixes({"m.py": source})
+        self.assertEqual(
+            sorted(got), ["[PG-CORPUS-STALE] ", "[TOOL-MISSING] "],
+            "f-string／串接的開頭標籤沒被抽出來（或字面值被重複計入）——"
+            "前者讓已知違規繼續隱形，後者會污染另一面的對帳",
+        )
+
+    def test_the_two_populations_keep_separate_ledgers(self) -> None:
+        """非字面那一面用**自己的**存量帳；新的未登記標籤照樣當場紅。
+
+        WHY 分兩張帳：兩者是不同的量測母體，併表會讓其中一面的站點增減污染另一面的
+        對帳（落地當回合實測：併表當場弄紅本類上面那三支合成語料測試）。
+        """
+        self.assertEqual(
+            windows_skip_tags.unregistered_tag_problems(
+                ["[TOOL-MISSING] x"], debt={"[TOOL-MISSING]": 1}),
+            [],
+        )
+        problems = windows_skip_tags.unregistered_tag_problems(
+            ["[TOOL-MISSING] x", "[BRAND-NEW-TAG] y"], debt={"[TOOL-MISSING]": 1})
+        self.assertEqual(len(problems), 1, problems)
+        self.assertIn("[BRAND-NEW-TAG]", problems[0])
+
 
 class StaticWindowsSkipTagScanTest(unittest.TestCase):
     """R72：`[WINDOWS-NATIVE-ONLY]` 標籤完整性的**靜態、跨平台**鎖。

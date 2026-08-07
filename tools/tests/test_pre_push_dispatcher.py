@@ -310,6 +310,17 @@ class TestPrePushDispatcher(unittest.TestCase):
             "import sys\n"
             'raise SystemExit(0 if "--check-snapshot" in sys.argv else 4)\n',
         )
+        # R79：leg ③ 第 9 支＝`_script_scan_surface.py --list --suffix .ps1
+        # --with-latest --check-floors`（`.ps1` 掃描面 SSOT 的 per-tree 檔數下限，
+        # 對齊 root-infra-ci.yml 第 2 道——該道自 R79 起改向本 SSOT 取掃描面）。
+        # 同上以 argv 檢查當 stub，且這一支帶**四個**旗標：前兩支各只帶一個子指令，
+        # 證明不了「多旗標項目的分詞」，而那正是把長指令塞進迴圈時最容易壞掉的地方。
+        self._write(
+            "tools/_script_scan_surface.py",
+            "import sys\n"
+            'need = {"--list", "--suffix", ".ps1", "--with-latest", "--check-floors"}\n'
+            "raise SystemExit(0 if need <= set(sys.argv) else 5)\n",
+        )
         self._write(".claude/hooks/trivial_hook.py", "OK = True\n")
 
         # R67-C18：整合閘門 leg 的受測面。真薄殼→核心委派由
@@ -691,6 +702,14 @@ _COUNTERFACTUAL_CARRIER_REFS: dict[str, str] = {
     "test_windowsapps_verdict_parity.py":
         "WindowsApps guard 行為表 parity 的專屬鎖檔——同被 DEF-101-561③ 否決，判準併入 "
         "test_windowsapps_guard_cross_consistency.py，該處引用亦明說『原本寫成獨立檔…被擋下』",
+    "test_ci_scan_anchors.py":
+        "R79 ARCH **退場**的鎖檔（連同 tools/tests/_ci_scan_anchors.py 共 866 行）——"
+        "它偵測的是「.ps1 掃描面三份獨立實作是否同步」，而該輪讓兩個非 Python 站點改為"
+        "呼叫 tools/_script_scan_surface.py 的 --list CLI，複本消失後那件事在結構上"
+        "不可能發生。唯一引用在 test_script_scan_surface_ssot.py，逐字寫的是「舊形狀…"
+        "已退場」的沿革，不是承諾存在的容器。**沿革不可改寫成不提檔名**：那 866 行的"
+        "退場理由（含它自承的三種逃逸形態）是下一輪不要重啟軍備競賽的唯一依據。"
+        "stale 自檢照常生效：哪天有人把該檔建回來，本筆會紅並要求刪掉登記",
     "test_this_lock_was_never_created.py":
         "R74（DEF-101-787 家族）新增的『指路死信偵測』本身的 fixture 名——它是**刻意造的、"
         "永遠不該存在**的檔名，用來驗證該判準在遇到不存在的鎖檔時真的會紅。"

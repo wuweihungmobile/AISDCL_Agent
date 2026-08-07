@@ -1,5 +1,46 @@
 # 全庫 skipped 測試盤點（R76，2026-08-05，Windows 11 真機實測）
 
+> ## 🔴 R79 更新（2026-08-07）：本檔**不再是 skip 數的真相源**
+>
+> 掌舵者 S3 逐字：「為何會有 skipped？要如何才能測試到 skipped？**徹底解決 skipped，
+> 沒有 skipped，全部可測**」。R76 的答案是這份 754 行的人工盤點，而那正是問題本身——
+> R79 逐項實查確認：**全 repo 對「這次真的 skip 了幾支」零機械管轄**
+> （`PG_CONTRACT_MAX_SKIPPED` 是唯一天花板、只覆蓋 `pg-contract` 一個 CI job；
+> `AutoClaude/tools/local_ci_gate.py` 對 `skipped` 零字樣；根層 runner 只印不判；
+> ONBOARDING §7 自陳 `skipped=N` 刻意不在鎖內）。於是這個數字每輪由人重新盤點一次，
+> 而它可以在兩次盤點之間無聲上升——上升的樣子在摘要裡長得像「乾淨」。
+>
+> **R79 落地的三件事**（詳見 `AutoSDD_Defect_Log` 的 R79 D-skipped 列）：
+> 1. **skip 理由分群標籤化**：`tools/lib/skip_tag_policy.py` 由 4 個標籤擴為 7 個、
+>    歸成 6 群（platform／tool-absence／env-disabled／structural-pair／debt／untagged）。
+> 2. **逐群天花板 ＋ 雙單邊棘輪**：`_RUNTIME_SKIP_CEILING`（只准降，由
+>    `_RUNTIME_SKIP_CEILING_MAX` 守）× 群數只准增（誠實登記新群不會轉紅）。
+>    消費者＝`AutoClaude/tools/local_ci_gate.py::check_skip_census`，rc 真的被吃。
+> 3. **本機預設路徑自動注入 DSN**：`local_ci_gate.py::pg_autodetect` 探到 localhost:5432
+>    且該 DB 已被 migrate 就注入 ⇒ 「甲類 skip」預設就會跑，不再靠人記得。
+>
+> **R79 當回合實測（Windows 11 真機、repo `.venv`、`pytest tests/ -q -rs`）**：
+>
+> | 狀態 | 結果 | rc |
+> |---|---|---|
+> | 未設 DSN（R76 以來的本機預設） | 4069 passed／135 skipped／92.17s | 0 |
+> | 設好三個環境變數（＝R79 自動注入後的預設） | 4160 passed／44 skipped／91.80s | 0 |
+>
+> ⇒ **91 支由 skip 轉 passed，耗時零增加**。這 91 支裡沒有一支是缺件——PG 容器長駐
+> healthy、`.venv` 的 sqlalchemy/psycopg2/pgvector/asyncpg/alembic 全裝、DB 已在
+> `alembic upgrade head`。缺的只有三個環境變數。
+>
+> 🔴 **打開之後掉出來的東西才是重點**：`tests/perf/test_pgvector_recall_perf.py`
+> （ADR-SD08-003 §2.2「p95 < 50ms」SLA 在測試層的唯一代言人）自 2026-06-12 落地起
+> **一次都沒被執行過**——全 repo 沒有任何通道設 `PG_REAL_ENABLED`，而且首次真跑立刻
+> `TypeError`（建構子與 `search()` 兩處簽章都對不上），修好簽章後又量到單位錯誤
+> （每個樣本 100 次查詢 vs 每次查詢 50ms 的 SLA，差 100 倍）。R76 把它歸進「誠實劃界、
+> 補不了」那一格，理由「跑不到」——那句話對，但它讓後續三輪都以為問題只有一層。
+> **凡是被歸進「不可覆蓋」的格子，都可能藏著同型的第二層。**
+>
+> 本檔 §1 起的所有數字是 **R76 當時**的量測，保留為史料；要看現況請跑
+> `local_ci_gate.py`（會印 `[skip census]` 一行）或直接跑 `pytest tests/ -q -rs`。
+
 > **緣起**：掌舵者提問逐字——「請問測試的程式中為何會有 skipped 的部分？例如 AutoClaude
 > pytest 3900 passed / 224 skipped，要如何才能測試到 224 skipped 這個部分？」
 >
@@ -81,7 +122,7 @@
 | **(c)** | **環境旗標／DSN 未設** | **93** | 42% | `需設定 AUTOCLAUDE_DB_DSN 或 AUTOCLAUDE_TEST_PG_DSN 才能跑 00XX 契約測試`（16+15+12+10+10+8+5+2＝78）／`PG backend 契約測需 docker-compose postgres:17 + AUTOCLAUDE_TEST_PG_DSN`（11）／`SD_07 pg_real：未啟用 SD07_REAL_PG_E2E_ENABLED=true 或缺 DSN`（3）／`pgvector recall 性能僅在 perf machine 跑`（1） | 部分：**14 支有**（11 → `pg-contract` 硬閘、3 → `pg-e2e-nightly`）；**79 支零通道** |
 | **(e)** | **刻意永久 skip（技術債）** | **29** | 13% | `W0 scaffolding：對應 Wave 開工時將 skip 移除並挪到專屬測試檔` | 🔴 **結構上不可能**（無條件 `pytest.mark.skip`，函式體是 `pytest.fail()`） |
 | **(a)** | **平台條件（POSIX／macOS 專屬）** | **17** | 8% | `需要 POSIX bash 實跑本 .sh`（12）／`POSIX process group 專屬`（2）／`POSIX killpg 專屬行為`（1）／`POSIX process-group 孤兒防護僅適用於 POSIX`（1）／`macOS 真機專屬（非 Darwin 上 skip 而非恆綠）`（1） | ✅ **16 支有**（ubuntu `test` job 全跑）；1 支只在 `macos-nightly-full`（非阻斷排程軌） |
-| **(b)** | **外部依賴／權限缺席** | **16** | 7% | `需要 claude CLI binary 且非巢狀 Claude Code session（CLAUDECODE=1 時真實 spawn 會死結，見 DEF-101-089）`（11）／`PG CRUD 行為快照需 docker-compose postgres:17 + AUTOCLAUDE_TEST_PG_DSN env var`（4）／`本機無建立 symlink 權限（[WinError 1314]…）`（1） | 1 支有（symlink → ubuntu）；**15 支零通道** |
+| **(b)** | **外部依賴／權限缺席** | **16** | 7% | 🔴 **R79 收輪改判**：這 11 支的 reason 已在樹上改寫（本欄不再逐字複製，避免第二個家；現查 `Select-String -Path "$r\AutoClaude\tests\test_gap014_020.py" -Pattern 'requires_claude_cli' -Context 0,10`）。舊 reason 把 `CLAUDECODE=1` 講成**死結成因**，R79 實測證偽：剝除該變數的對照組行為完全相同 ⇒ 它是巢狀環境的**標記**不是成因，真正掛住的是「巢狀 session × `wexpect.spawn()`」這一組（見 `DEF-101-913`）。判準維持不變、只改寫 reason（11）／`PG CRUD 行為快照需 docker-compose postgres:17 + AUTOCLAUDE_TEST_PG_DSN env var`（4）／`本機無建立 symlink 權限（[WinError 1314]…）`（1） | 1 支有（symlink → ubuntu）；**15 支零通道** |
 | **(f)** | **無理由／理由空泛** | **0** | 0% | — | — |
 | | **合計** | **224** | 100% | | **192 支（86%）零通道，見 §5** |
 
@@ -170,7 +211,7 @@ skip 以維 SSOT**」——**reason 與 docstring 直接矛盾**：一個說會�
 | 6 個 posix-only 站點補標籤（5 檔 6 處；`test_perception_platform_honesty.py:84` 依其 `!= "darwin"` 條件用 `[MAC-NATIVE-ONLY]`，其餘用 `[POSIX-NATIVE-ONLY]`） | 0／6 | **6／6** |
 | `skip_tag_policy._POSIX_TAG_RATCHET['AutoClaude/tests']` | 6（凍結存量） | **0**（欠債清空） |
 | conftest 反方向摘要在 Windows 上的實際輸出 | **0 行**（結構性沉默） | **17 行**（§4.6 逐字） |
-| 反方向摘要的回歸鎖 | **零**（整段刪掉全綠） | 2 支（正向＋負向），併入既有 `tests/test_conftest_windows_native_skip_report.py`（`_FROZEN_GUARD_FILE_COUNT` 禁新增鎖檔） |
+| 反方向摘要的回歸鎖 | **零**（整段刪掉全綠） | 2 支（正向＋負向），併入既有 `tests/test_conftest_windows_native_skip_report.py`（R76 當時的理由是護欄層**檔數**棘輪「禁新增鎖檔」——🔴 **R79 訂正：那條裁決在 R77 就已被取代**，現行約束是護欄層**行數**棘輪 `tools/tests/test_adr_xplat001_c1c2_lock.py::TestGuardLayerRatchet`，語意逐字為「新增檔案本身不違規，**淨行數上升**才違規」。原文把已退場的檔數棘輪寫成**現行**約束，照著讀的人會以為新鎖一律不准開檔而把它塞進別的樹去；R79 實測這件事已經發生過一次） |
 
 另補一道 **shrink-only 天花板** `_POSIX_TAG_RATCHET_CEILING`：舊判準是「相等」，
 於是它的失敗訊息會誠實地把「把基線改成實測值」列為出口之一——**新增未標籤站點後把 6
@@ -662,8 +703,9 @@ test_pgvector_real_recall     -> autoclaude-ci.yml:289,328；autoclaude-pg-e2e-o
 **224 支 skip 裡，158 支（71%）是「該補的洞」——它們在 Windows、macOS、以及全部 11 支
 workflow 都沒有任何通道跑到；本輪兩行 CI recipe 修改把這 158 支全數補回，實測 rc=0，
 push 閘門總耗時只增加約 7.5 秒。剩下的 66 支中，34 支是真正健康的條件式跳過（另一個平台的
-push 阻斷軌真的在跑它們），11 支需付費的 `claude` CLI 且在巢狀 session 必死結（可辯護地
-永久不覆蓋，但必須明寫），29 支是無條件 `pytest.mark.skip` 的純技術債，另有 3 支
+push 阻斷軌真的在跑它們），11 支需付費的 `claude` CLI 且在巢狀 session 掛住不回（🔴 **R79 收輪
+改判：不是「永久不覆蓋」**——非巢狀環境的每日 nightly 真的在跑它們，見下表該列），29 支是無條件
+`pytest.mark.skip` 的純技術債，另有 3 支
 （2 支需 staging 環境、1 支 perf job 缺 service container）本輪誠實補不了。**
 
 > 🔴 **R76 複審後補充（§4.7）——上面那段回答的是「雲端有沒有通道」，不是「我現在跑不跑得到」。**
@@ -686,7 +728,7 @@ push 阻斷軌真的在跑它們），11 支需付費的 `claude` CLI 且在巢�
 | **健康：已有專屬 job 覆蓋** | **3** | `pg_real` → `pg-e2e-nightly`（設 `SD07_REAL_PG_E2E_ENABLED=true` ＋ `seed_kb.py`） |
 | **健康：結構上不可歸零** | **2** | absent／present 互斥成對，任何單次執行必有一支 skip |
 | **健康：darwin 專屬** | **1** | `[MAC-NATIVE-ONLY]`，`macos-nightly-full` 覆蓋（⚠️ 非阻斷排程軌，§5.2 已單獨列出）。🔴 **R76 複審 SD-03**：這句話在本輪寫下時因 `keyboard` 移出核心相依而**曾經為假**（§5.3 grep 同時寫著 `NONE`）；已由 nightly-full 安裝補 `hotkey` extra 修復。push 阻斷層仍零覆蓋 |
-| **可辯護的永久不覆蓋** | **11** | 需 `claude` CLI binary 且非巢狀 session（付費 binary；`CLAUDECODE=1` 時真實 spawn 必死結，DEF-101-089）。**現況已逐支寫明理由**，但尚無「永久不覆蓋」的正式標籤（見交棒） |
+| **健康：非巢狀 nightly 在跑**（🔴 R79 收輪由「可辯護的永久不覆蓋」改判） | **11** | 需 `claude` CLI binary 且**非巢狀** session。🔴 **改判的兩半**：①「永久不覆蓋」**為假**——非巢狀環境的每日 nightly 實測會真的跑（`AutoClaude/logs/nightly_2026-08-06_223002.log` 逐字 `4 failed, 4080 passed, 120 skipped in 107.28s`，其 `-rs` 清單對這兩支檔**零命中**＝那一跑裡它們沒有被 skip）；②「`CLAUDECODE=1` 必死結」**為假**——剝除該變數的對照組行為完全相同，掛住的是「巢狀 session × `wexpect.spawn()`」這一組（`DEF-101-913`）。**判準本身維持不變**（在巢狀環境內 skip 仍是對的，拿掉那半個條件會讓這 11 支當場掛死整棵樹，已注入實證），改的是 reason 與本表的分類 |
 | **仍補不了（誠實劃界）** | **3** | 2 支 `test_pgvector_hnsw_recall`（需 W3 G3 staging：1k seed ＋ BGE-M3 真實向量）／1 支 `test_pgvector_recall_perf`（`perf-baseline-nightly` 無 `services:`、未設 `PG_REAL_ENABLED`、只裝 `[dev]`） |
 | **純技術債** | **29** | `test_ac_matrix_scaffolding`——23/29 的 target 檔已存在（§2.2），reason 與 docstring 互相矛盾 |
 
@@ -729,7 +771,7 @@ push 阻斷軌真的在跑它們），11 支需付費的 `claude` CLI 且在巢�
 | (a) `zsh`（2） | 🔴 Windows 無 zsh | 預設 shell 即 zsh | — |
 | (a) 舊直譯器（2） | 🔴 無 `/usr/bin/python3` | macOS 必有 3.9.x | — |
 | (b) symlink 權限（2） | 以**管理者**開 shell，或開啟 Windows 開發人員模式 | 原生有權限 | 唯一「Windows 上可自救」的平台類 |
-| (b) `claude` CLI（11） | 需 `claude` 在 PATH **且** 非巢狀 session（`CLAUDECODE` 未設） | 同左 | 在 Claude Code session 內**永遠**跑不到（DEF-101-089） |
+| (b) `claude` CLI（11） | 需 `claude` 在 PATH **且** 非巢狀 session（`CLAUDECODE` 未設）。**每日 nightly 就是這個環境**，不必手動做什麼 | 同左 | 在 Claude Code session **內**確實跑不到（R79 實測：`wexpect` pty spawn 180/180/45s 未回返、`claude.exe` 從未被啟動；剝除 `CLAUDECODE` 的對照組相同 ⇒ 成因是巢狀執行環境，該變數只是標記。`DEF-101-913`）。🔴 但 session **外**跑得到——「永遠跑不到」只對巢狀環境成立，不是這 11 支的全稱結論 |
 | (e) AC matrix scaffolding（29） | 🔴 **無任何方法** | 🔴 同左 | 見 F4 |
 
 ---

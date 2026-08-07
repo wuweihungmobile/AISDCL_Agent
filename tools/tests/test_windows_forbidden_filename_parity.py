@@ -271,7 +271,7 @@ class TestReservedNameVsGitOracle(unittest.TestCase):
     def setUp(self) -> None:
         if self._oracle is None:
             self.skipTest(
-                "此 git 建置未啟用 NTFS 保留名檢查（`CON.txt` 被收下）——"
+                "[WINDOWS-NATIVE-ONLY] 此 git 建置未啟用 NTFS 保留名檢查（`CON.txt` 被收下）——"
                 "外接 oracle 不可用，對拍會產生整批假分歧"
             )
 

@@ -141,6 +141,7 @@ _OK_MARKER = "ps7-ok:"
 sys.path.insert(0, str(_REPO_ROOT / "tools"))
 from _script_scan_surface import (  # noqa: E402
     LATEST_TREE_KEY,
+    PS1_TREE_FLOORS,
     SCRIPT_SCAN_ROOTS,
 )
 
@@ -209,18 +210,12 @@ def _git_tracked_ps1(rel_prefix: str) -> list[str]:
     return sorted(line for line in proc.stdout.splitlines() if line)
 
 
-# per-tree 檔數下限＝2026-07-27 實掃數，刻意留在本檔（各鎖自己的靈敏度參數，非共用
-# 掃描面定義——見 `tools/_script_scan_surface.py` docstring「不收錄什麼」）。三棵固定樹
-# 的**樹名本體**自 R60 Scan-E E-A-01 起取自 SSOT；SSOT 新增一棵樹而本表未同步時
-# `_TREE_FLOORS[root]` 直接 KeyError＝fail-loud，不會靜默把新樹當 floor 0 放過。
-_TREE_FLOORS = {
-    "tools": 8,
-    # AutoClaude/tools：R76 由 7 下修為 6——reschedule_g0_gatecheck.ps1 整支刪除
-    # （真孤兒，它要重排的 AutoClaude_SD09_G0_GateCheck 於 R71 已從本機移除）。
-    "AutoClaude/tools": 6,
-    "AISDLC_SDD/scripts": 2,
-    LATEST_TREE_KEY: 4,
-}
+# per-tree 檔數下限。R79 ARCH：本表原為本檔自持的字面值（理由「各鎖自己的靈敏度
+# 參數」），已收進 `tools/_script_scan_surface.PS1_TREE_FLOORS` SSOT——原理由在
+# `windows_smoke_local.ps1` [1/9] 與 CI 第 2 道改為共用同一份列舉器之後不再成立：
+# 下限若分散兩處，就得再養一道「兩份下限同步」的鎖，正是 R79 要消滅的形態。
+# SSOT 新增一棵樹而下限表未同步時 `PS1_TREE_FLOORS[root]` 直接 KeyError＝fail-loud。
+_TREE_FLOORS = PS1_TREE_FLOORS
 
 
 def scan_trees() -> list[tuple[str, list[str], int]]:
@@ -321,19 +316,11 @@ def scan_source(source: str, rel: str) -> tuple[list[str], list[str]]:
     return offenders, stale
 
 
-# R56 round 6（QA B-1）：CI 第 2 道掃描樹抽取式。字元類必須容納 `.`／`-`，
-# 否則 `.github/scripts` 這類路徑被插進 CI 時本鎖靜默失效（實測 11 支全綠）。
-# R57 修正（A2）：抽取式與計數錨原本在本檔／test_ps1_bom／test_smoke_ci_sync 三份
-# 逐字複製且皆硬綁 `-Path` 具名參數，位置參數形態（`-Path` 省略）可完全繞過；
-# 已收斂進 `_ci_scan_anchors` SSOT（WHY 見該模組 docstring）。
-sys.path.insert(0, str(Path(__file__).resolve().parent))
-from _ci_scan_anchors import (  # noqa: E402
-    EXPECTED_CI_GCI_CALLS,
-    EXPECTED_CI_SCAN_STATEMENTS,
-    ci_fixed_trees,
-    ci_gci_call_count,
-    ci_scan_statement_count,
-)
+# R79 ARCH：本處原 import `_ci_scan_anchors` 的三條正則錨，用來比對「CI 第 2 道
+# 自己列舉的掃描樹」是否與本檔一致。CI 第 2 道已改為呼叫 `_script_scan_surface.py`
+# SSOT，複本消失 ⇒ 沒有東西可比對，那組錨（866 行）連同它自承的三種逃逸形態一併
+# 退場。剩下的唯一義務「兩個非 Python 站點真的呼叫 SSOT 且沒有自持第二份列舉」由
+# `test_script_scan_surface_ssot.TestNonPythonSitesCallTheSsot` 單點守住。
 
 
 class TestPs51Compat(unittest.TestCase):
@@ -482,68 +469,11 @@ class TestPs51ScanConfigPinning(unittest.TestCase):
             # R76：AutoClaude/tools 由 7 下修為 6（reschedule_g0_gatecheck.ps1 整支刪除，
             # 真孤兒）——第三份硬編實作在 tools/windows_smoke_local.ps1 [1/9] $ps1Trees，已同步。
             [("tools", 8), ("AutoClaude/tools", 6), ("AISDLC_SDD/scripts", 2), ("LATEST", 4)],
-            "掃描樹清單或 per-tree 檔數下限被改動——四棵樹必須與 root-infra-ci.yml "
-            "第 2 道 pwsh parse 的掃描面一致（該 step 是本鎖在 CI 上的姊妹守門），"
-            "下限值則與 tools/windows_smoke_local.ps1 [1/9] 的 $ps1Trees Floor 逐值"
-            "相同（見 tools/tests/test_smoke_ci_sync.py 的三向鎖）；刻意調整請同步四處樹清單站點（下限值僅本檔與 $ps1Trees 兩處持有，另見 test_ps1_bom._scan_prefixes()）",
-        )
-
-    def test_tree_set_matches_root_infra_ci_pwsh_step(self) -> None:
-        """與 root-infra-ci.yml 第 2 道的掃描面機械互鎖：該 step 以
-        `Get-ChildItem -Path <樹>` 列舉，本鎖的樹清單必須是同一組（LATEST 以
-        `sdd_version.py` 解析的動態路徑，比對時正規化為佔位符）。"""
-        ci = (_REPO_ROOT / ".github" / "workflows" / "root-infra-ci.yml").read_text(
-            encoding="utf-8"
-        )
-        step = re.search(
-            r"^ +- name: pwsh 語法解析.*?(?=^ +- name: )", ci, re.MULTILINE | re.DOTALL
-        )
-        self.assertIsNotNone(step, "root-infra-ci.yml 找不到 pwsh 語法解析 step——結構已變動")
-        # R56 round 6 修正（QA B-1）：字元類擴充納入 `.`／`-`，堵住「含點路徑的第 5
-        # 棵樹插進 CI 卻完全隱形」的 fail-open（下方等值斷言即為數量下限）。
-        paths = ci_fixed_trees(step.group(0))
-        # R60 Scan-E E-A-01：期望值改引 `_script_scan_surface.SCRIPT_SCAN_ROOTS` SSOT
-        # （原為本檔第三份硬編字面集合）。這一行同時是 E-A-01 要求的**形狀一致性鎖**
-        # ——`tools/check_script_parity.py` 的 enrollment 掃描面自此與 CI 第 2 道共用
-        # 同一份名冊，任一方增刪樹即在此翻紅。本鎖刻意放在本檔而非另立新檔：本檔已是
-        # `_ci_scan_anchors` 的登記呼叫端（`test_ci_scan_anchors._SSOT_CALLERS`）且已
-        # 接滿三條抽取錨，另立第 4 份呼叫端只會複製同一組錨、重演 R56 的三複本盲點。
-        self.assertEqual(
-            paths, set(SCRIPT_SCAN_ROOTS),
-            f"root-infra-ci.yml 第 2 道的固定掃描樹已變動：{sorted(paths)}"
-            f"（SSOT 名冊＝{sorted(SCRIPT_SCAN_ROOTS)}）——本鎖與該 step 自述同掃描面，"
-            f"且 check_script_parity 的 enrollment 面同源，任一方增刪必須同步",
-        )
-        # R56 round 7 修正（Architect F2 ／ QA ② 交叉發現）：上面的 `len(ci_trees)`
-        # 等值斷言只對「_CI_TREE_RE 抽得到的樹」有效，對「抽不到的形態」天生零訊號
-        # ——實測 `-Path "docs/scripts"`（引號界定）與 `-Path (Join-Path ".github"
-        # "scripts")`（計算式，該 step 第 4 棵樹就是這種寫法、照抄最自然）插入第 5 棵
-        # 樹時三支鎖全綠。故補一條**與字元類完全無關**的出現次數斷言。（round 6 宣稱
-        # 「補抽取數量下限堵 fail-open」不精確——QA 實證那條下限被既有 set-equality
-        # 涵蓋、是冗餘的，真正生效的只有字元類擴充。）
-        # R57 訂正（A2）：round 7 原文宣稱「不論路徑長什麼樣，多一棵樹必紅」是**假
-        # 宣稱**——舊錨硬綁 `-Path` 具名參數，而它是 PowerShell 位置參數可省略；實測
-        # 插入 `Get-ChildItem docs/scripts -Recurse -Filter *.ps1 -File` 時三份共 20 支
-        # 測試仍全綠。改錨 `-Recurse -Filter *.ps1 -File`：因尾巴不含路徑，故涵蓋
-        # 具名/位置/引號/Join-Path 計算式任一種路徑寫法；但 filter 自身加引號、改用
-        # -Include、三參數順序對調則抓不到（由下方 cmdlet 計數錨兜底）。
-        self.assertEqual(
-            ci_scan_statement_count(step.group(0)), EXPECTED_CI_SCAN_STATEMENTS,
-            "root-infra-ci.yml 第 2 道的 `.ps1` 遞迴掃描語句數已變動（預期 4＝三棵固定樹＋LATEST 計算式樹）——本斷言涵蓋具名/位置/引號/Join-Path 任一種路徑寫法，請同步四處樹清單站點",
-        )
-        # R57 四方複審 ARCH-01 訂正：上一版在此寫「任何參數形態的掃描樹增刪都會命中」
-        # 是假宣稱——實測 `-Filter "*.ps1"`／`-Include *.ps1`／`gci` 別名／`-Filter`
-        # 寫在 `-Recurse` 前，四種形態全部逃逸，其中三種還是 R56 舊錨抓得到的＝淨退化。
-        # R57 round 2 ARCH-01 再訂正：三條錨原本大小寫敏感，`get-childitem …
-        # -recurse -filter *.ps1 -file` 全小寫實測全綠逃逸；SSOT 已加 re.IGNORECASE。
-        self.assertEqual(
-            ci_gci_call_count(step.group(0)), EXPECTED_CI_GCI_CALLS,
-            "root-infra-ci.yml 第 2 道的 Get-ChildItem（含 gci/dir/ls 別名，皆不分大小寫）出現次數已變動（預期 4）——本斷言不解析參數，已實測涵蓋：引號 filter／-Include／參數重排／Join-Path 計算式路徑／全小寫或全大寫寫法；已實測不涵蓋（未窮舉）：[System.IO.Directory]::GetFiles、Get-Item、Resolve-Path 這三種非 Get-ChildItem 列舉途徑；整行 # 註解由 SSOT 統一剝除故不計入",
-        )
-        self.assertIn(
-            'Join-Path "AISDLC_SDD" $latestName', step.group(0),
-            "root-infra-ci.yml 第 2 道未見 LATEST 樹（Join-Path AISDLC_SDD $latestName）"
-            "——第 4 棵樹疑似被移除",
+            "掃描樹清單或 per-tree 檔數下限被改動——四棵樹與下限值自 R79 起只有一個"
+            "持有者（`tools/_script_scan_surface.py` 的 `SCRIPT_SCAN_ROOTS` ＋ "
+            "`PS1_TREE_FLOORS`），root-infra-ci.yml 第 2 道與 tools/windows_smoke_local.ps1 "
+            "[1/9] 皆呼叫該 SSOT 取得掃描面；本鎖釘的是 SSOT 值本身（刻意調整時改這一行），"
+            "「兩個非 Python 站點真的在呼叫 SSOT」則由 test_script_scan_surface_ssot 守",
         )
 
 

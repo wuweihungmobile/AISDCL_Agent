@@ -236,9 +236,9 @@ class StripPsCommentsBoundaryTest(unittest.TestCase):
 class TestPsCommentStripperSsotCallsiteLock(unittest.TestCase):
     """SSOT 呼叫端鎖（R57 SA-R57R2-03）。
 
-    本輪已學到的教訓：**SSOT 沒有呼叫端鎖等於沒有強制力**——R56 把
-    `_CI_TREE_RE` 抄三份、R57 又把註解剝除器抄兩份，兩次都是「同一個盲點抄 N 遍」，
-    而兩次都沒有任何機械訊號。故：(a) `tools/tests/` 內除 SSOT 模組外，任何檔案
+    本輪已學到的教訓：**SSOT 沒有呼叫端鎖等於沒有強制力**——R56 把 CI 掃描樹抽取式
+    抄三份、R57 又把註解剝除器抄兩份，兩次都是「同一個盲點抄 N 遍」，而兩次都沒有
+    任何機械訊號。故：(a) `tools/tests/` 內除 SSOT 模組外，任何檔案
     重新自帶同名函式定義即紅；(b) 已知消費端必須真的 import 且真的呼叫（只 import
     不呼叫＝死 import，鎖零訊號）。
 
@@ -246,8 +246,7 @@ class TestPsCommentStripperSsotCallsiteLock(unittest.TestCase):
     `def _strip_ps_comments` 複本、`def strip_ps_comments` 複本、只 import 不呼叫、
     完全不 import。**已知不涵蓋**（未窮舉，不做全備宣稱）：換一個名字重寫一份等價
     邏輯、以 `lambda`／賦值而非 `def` 提供同名物件、把複本放在 `tools/tests/` 以外
-    的目錄、以 `exec`／動態 import 迂迴（比照 A-R57R2-03 對 `_ci_scan_anchors`
-    呼叫端鎖量到的同類逃逸面）。
+    的目錄、以 `exec`／動態 import 迂迴。
     """
 
     _CONSUMERS = ("test_find_git_bash_parity.py", "test_windows_nightly_anchor_parity.py")
@@ -273,8 +272,8 @@ class TestPsCommentStripperSsotCallsiteLock(unittest.TestCase):
             offenders, [],
             f"tools/tests/ 內偵測到 PowerShell 註解剝除器的自帶複本：{offenders}——"
             f"唯一實作應在 {_PS_STRIPPER_SSOT_MODULE}.py，請改為 import。"
-            "理由與 _ci_scan_anchors.py 同一判準：複本無法互為交叉校驗（R57 已實證"
-            "兩份複本同時帶著同一個 here-string fail-open），只會把盲點抄 N 遍",
+            "理由：複本無法互為交叉校驗（R57 已實證兩份複本同時帶著同一個 "
+            "here-string fail-open），只會把盲點抄 N 遍",
         )
 
     def test_consumers_import_and_actually_call_the_ssot(self) -> None:

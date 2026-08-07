@@ -33,16 +33,31 @@ grep，唯一相關斷言是「`tools/lib` 有沒有在名冊裡」的成員存�
   - `tools/tests/test_ps51_compat.py`：`scan_trees()`
   - `tools/tests/test_ps1_bom.py`：`_scan_prefixes()`
   - `tools/tests/test_script_scan_surface_ssot.py`：本檔的守門（形狀一致性鎖）
-非 Python 的兩處（`root-infra-ci.yml` 第 2 道、`windows_smoke_local.ps1` 的
-`$ps1Trees`）無法 import 本檔，仍由 `tools/tests/_ci_scan_anchors.py` 的抽取錨與
-`test_smoke_ci_sync.py` 的三向鎖互鎖；本檔與 CI 那一處的一致性由上述 SSOT 鎖比對。
+  - `.github/workflows/root-infra-ci.yml` 第 2 道、`tools/windows_smoke_local.ps1`
+    [1/9]：**非 Python**，改走本檔的 `--list` CLI（見下）
 
-**不收錄什麼**（避免本檔變成雜物抽屜）：只收「掃描面的根與列舉方式」。per-tree
-檔數下限（`test_ps51_compat` 的 8/7/2/4、`test_ps1_bom` 的 `_MIN_FILES`）刻意留在
-各消費者——那是各鎖自己的靈敏度參數，不是共用的掃描面定義。
+🔴 R79 ARCH（本檔最後一次結構變更）：上面最後兩個站點原本各自持有一份
+`Get-ChildItem -Recurse -Filter *.ps1` 的**獨立列舉實作**（無法 import 本檔），
+於是 repo 為了偵測「三份複本是否同步」養了 866 行對抗式正則錨機械
+（`tools/tests/_ci_scan_anchors.py` 154 行 ＋ `tools/tests/test_ci_scan_anchors.py`
+712 行），而該錨自己的 docstring 逐條列出三種**已實測抓不到**的逃逸形態
+（`[System.IO.Directory]::GetFiles()`／`Get-Item`／`Resolve-Path`）——軍備競賽已
+翻車兩次（R56→R57）。改法不是再加一條錨，而是**讓複本消失**：兩個非 Python 站點
+改為呼叫本檔的 `--list` CLI 取得掃描面，於是「三份不同步」在結構上不可能發生，
+866 行連同那三種逃逸一起退場。殘餘鎖只剩「兩個站點真的呼叫本檔、且沒有自持第二份
+列舉」，落在 `tools/tests/test_script_scan_surface_ssot.py::TestNonPythonSitesCallTheSsot`。
+
+**收錄什麼**：掃描面的**根、列舉方式、per-tree 檔數下限、LATEST 樹解析**。
+per-tree 下限（`PS1_TREE_FLOORS`）自 R79 起收進本檔——它原本刻意留在各消費者
+（理由：「各鎖自己的靈敏度參數」），但那個理由在「列舉實作由所有站點共用」之後
+不再成立：下限一旦分散，`windows_smoke_local.ps1` 與 `test_ps51_compat` 兩份就得
+再養一道同步鎖，正是本次要消滅的形態。仍**不**收錄 `test_ps1_bom._MIN_FILES`
+（那是跨全部四棵樹的總數下限，語意不同、只有一個持有者，無複本問題）。
 """
 from __future__ import annotations
 
+import argparse
+import sys
 from pathlib import Path
 
 # 三棵固定掃描樹（一律**遞迴**列舉）。第 4 棵＝AISDLC_SDD LATEST 版樹，其路徑隨
@@ -69,11 +84,147 @@ def iter_tree_scripts(
     """
     found: set[str] = set()
     for rel_root in SCRIPT_SCAN_ROOTS:
-        root = repo_root / rel_root
-        if not root.is_dir():
-            continue
-        for suffix in suffixes:
-            for path in root.rglob(f"*{suffix}"):
-                if path.is_file():
-                    found.add(path.relative_to(repo_root).as_posix())
+        found.update(iter_one_tree(repo_root, rel_root, suffixes))
     return sorted(found)
+
+
+def iter_one_tree(
+    repo_root: Path, rel_root: str, suffixes: tuple[str, ...] = SCRIPT_SUFFIXES
+) -> list[str]:
+    """單一棵樹底下（**遞迴**）的腳本清單（repo 相對 posix 路徑，排序去重）。
+
+    `iter_tree_scripts()` 是本函式對 `SCRIPT_SCAN_ROOTS` 的聚合；per-tree 下限
+    要逐棵樹判定（`--check-floors`），故列舉實作切在這一層而非再抄一份。
+    """
+    root = repo_root / rel_root
+    if not root.is_dir():
+        return []
+    found: set[str] = set()
+    for suffix in suffixes:
+        for path in root.rglob(f"*{suffix}"):
+            if path.is_file():
+                found.add(path.relative_to(repo_root).as_posix())
+    return sorted(found)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# per-tree `.ps1` 檔數下限（掃描面靜默縮小＝樣式被改壞／目錄搬家時的唯一訊號）。
+# 值＝實測支數，刻意刪減腳本時同步下修（R76：AutoClaude/tools 由 7 下修為 6，
+# reschedule_g0_gatecheck.ps1 整支刪除、真孤兒）。鍵必須與
+# `SCRIPT_SCAN_ROOTS` ＋ `LATEST_TREE_KEY` 完全對齊——缺鍵即 KeyError fail-loud，
+# 不會靜默把新樹當 floor 0 放過（`test_script_scan_surface_ssot` 另有具名鎖）。
+# ─────────────────────────────────────────────────────────────────────────────
+PS1_TREE_FLOORS: dict[str, int] = {
+    "tools": 8,
+    "AutoClaude/tools": 6,
+    "AISDLC_SDD/scripts": 2,
+    LATEST_TREE_KEY: 4,
+}
+
+
+def latest_tree_rel(repo_root: Path) -> str:
+    """LATEST 版樹的 repo 相對路徑（`AISDLC_SDD/AISDLC_SDD_v0.NN`）。
+
+    一律委派 `AISDLC_SDD/scripts/sdd_version.py` SSOT（經 `tools/lib/sdd_latest.py`）
+    ——DEF-101-133 禁止任何站點內嵌第二份版本 glob/regex。解析失敗即 raise
+    （`AssertionError`），呼叫端不得靜默縮面。
+    """
+    sys.path.insert(0, str(Path(__file__).resolve().parent / "lib"))
+    import sdd_latest  # noqa: PLC0415  （延後 import：模組層 import 不該動 sys.path）
+
+    return f"AISDLC_SDD/{sdd_latest.resolve_latest_name(repo_root / 'AISDLC_SDD')}"
+
+
+def ps1_scan_trees(repo_root: Path, with_latest: bool) -> list[tuple[str, str]]:
+    """掃描樹清單 `[(樹 key, repo 相對前綴)]`；`with_latest` 時附上第 4 棵 LATEST 樹。"""
+    trees = [(root, root) for root in SCRIPT_SCAN_ROOTS]
+    if with_latest:
+        trees.append((LATEST_TREE_KEY, latest_tree_rel(repo_root)))
+    return trees
+
+
+def _main(argv: list[str] | None = None) -> int:
+    """`--list` CLI：給無法 import 本檔的非 Python 消費站點用（見模組 docstring）。
+
+    stdout 只印路徑（每行一支），診斷訊息一律走 stderr——呼叫端直接把 stdout
+    收成陣列即為掃描面，不需要再解析任何東西。
+    """
+    parser = argparse.ArgumentParser(
+        description="腳本掃描面 SSOT 列舉器（非 Python 站點的唯一取用途徑）"
+    )
+    parser.add_argument("--list", action="store_true", required=True,
+                        help="把掃描面逐行印到 stdout")
+    parser.add_argument("--suffix", default=".ps1",
+                        help="副檔名（預設 .ps1）")
+    parser.add_argument("--with-latest", action="store_true",
+                        help="含 AISDLC_SDD LATEST 版樹（凍結版一律排除）")
+    parser.add_argument("--check-floors", action="store_true",
+                        help="逐棵樹強制 PS1_TREE_FLOORS 下限，未達即 rc=1")
+    parser.add_argument("--absolute", action="store_true",
+                        help="印絕對路徑（執行站點用；預設印 repo 相對 posix 路徑）")
+    parser.add_argument("--repo-root", default=None,
+                        help="repo 根（預設＝本檔所在 tools/ 的上一層）")
+    args = parser.parse_args(argv)
+
+    repo_root = (
+        Path(args.repo_root).resolve() if args.repo_root
+        else Path(__file__).resolve().parents[1]
+    )
+    if args.check_floors and args.suffix != ".ps1":
+        print("--check-floors 目前只對 --suffix .ps1 有下限表", file=sys.stderr)
+        return 2
+    # 🔴 R79 複審（ARCH blocking）：`--check-floors` 但不帶 `--with-latest` ⇒ 拒跑。
+    # 判準的立論是「掃描面靜默縮小必須有訊號」，而 LATEST 版樹是 Copy-on-Evolve 每升
+    # 一版就換路徑的那一棵——少寫一個旗標，它整棵（連同它的 per-tree 下限）就靜默
+    # 退出掃描面，而 rc 仍是 0＝**縮面沒有任何訊號**，恰恰打掉那個立論。
+    # 「要檢查下限、卻刻意不含 LATEST」在本 repo 沒有任何合法用途（三個消費站點
+    # 全部同時帶兩個旗標，現查：Grep `--check-floors`），故這裡直接 fail-loud 而非警告。
+    # 用 rc=2（用法錯誤）而非 rc=1（掃描面異常），讓兩種紅在呼叫端可分辨。
+    if args.check_floors and not args.with_latest:
+        print(
+            "--check-floors 必須與 --with-latest 併用：少了它，AISDLC_SDD LATEST 版樹"
+            "整棵連同其下限一起靜默退出掃描面，而 rc 仍為 0——那正是本旗標要防的事",
+            file=sys.stderr,
+        )
+        return 2
+
+    try:
+        trees = ps1_scan_trees(repo_root, args.with_latest)
+    except AssertionError as exc:  # LATEST 解析失敗＝fail-loud，不得靜默縮面
+        print(f"掃描面 SSOT：{exc}", file=sys.stderr)
+        return 1
+    if args.with_latest:
+        print(f"AISDLC_SDD LATEST 版：{trees[-1][1]}（其餘凍結版排除）", file=sys.stderr)
+
+    rc = 0
+    out: list[str] = []
+    for key, prefix in trees:
+        rels = iter_one_tree(repo_root, prefix, (args.suffix,))
+        if args.check_floors:
+            floor = PS1_TREE_FLOORS[key]
+            print(f"  {prefix}：{len(rels)} 支（下限 {floor}）", file=sys.stderr)
+            if len(rels) < floor:
+                print(
+                    f"::error::active {args.suffix} 掃描面異常縮小：{prefix} 僅 "
+                    f"{len(rels)} 支（現況應 >= {floor}）——目錄搬家或樹清單疑似被改壞",
+                    file=sys.stderr,
+                )
+                rc = 1
+        out.extend(rels)
+
+    for rel in out:
+        print((repo_root / rel).as_posix() if args.absolute else rel)
+    return rc
+
+
+if __name__ == "__main__":
+    # 🔴 R79 收斂包：本檔自 R79 起是**入口點**（`--list` CLI，兩個非 Python 站點
+    # 與 pre-push root-infra leg 都直接跑它），而它印中文（`--check-floors` 的
+    # `::error::` 訊息與 LATEST 版提示）⇒ 非 UTF-8 locale 下 stdout 會 UnicodeEncodeError、
+    # stderr 降解成 \uXXXX（`tools/tests/test_subprocess_encoding_hygiene.py`
+    # ::TestEntryPointStdioProtection 在守這件事，實測轉紅過）。
+    # 刻意放在 `__main__` 內而非模組層：本檔同時被 4 支消費者 import 當函式庫，
+    # 那些情境不該付 stdio 手術的副作用（同 test_adr_xplat001_c1c2_lock.py 的既有取捨）。
+    import _stdio_utf8  # noqa: F401
+
+    raise SystemExit(_main())

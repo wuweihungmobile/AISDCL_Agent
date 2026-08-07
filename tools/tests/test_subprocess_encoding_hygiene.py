@@ -544,7 +544,7 @@ def scan_files_child_encoding(
 #: 🔴 R75：值改為當回合實測 27 × 0.95（`suggested_floor`），並**套同一條腐化上界**
 #: （`tree_count_verdict`）。原值 20 是落地當下 26 筆打八折——那個算法就是 per-tree
 #: 下限腐化成 18 vs 81 的同一個算法，差別只在它還沒漂夠久。上界讓它不必靠人記得。
-_CHILD_SITE_FLOOR = 26
+_CHILD_SITE_FLOOR = 35
 
 
 class TestSubprocessEncodingHygiene(unittest.TestCase):

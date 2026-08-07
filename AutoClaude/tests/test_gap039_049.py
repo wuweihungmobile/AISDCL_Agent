@@ -34,18 +34,27 @@ from autoclaude.utils.config import AppConfig
 # 本地有 claude 照常驗證；CI 無 binary → graceful skip（非掩蓋 code bug）。SD_10 P3-R56-2 重寫。
 #
 # DEF-101-089 補強：本機裝有 `claude` CLI 且從巢狀 Claude Code session 執行 pytest 時，這裡
-# spawn 的巢狀 `claude` 子行程會無限掛起（見 test_gap014_020.py 同款註解的完整根因說明）。
+# spawn 的子行程會無限掛起（見 test_gap014_020.py 同款註解的完整根因說明）。
 # `CLAUDECODE=1` 為 Claude Code 官方啟動時設定的環境變數，非行程樹猜測。
 #
 # 🔴 本輪訂正分類（完整推導見 test_gap014_020.py 同款註解）：這一批**不是**永久不覆蓋，
 # 而是「只在巢狀 Claude Code session 不可跑」；每日 nightly（非巢狀）實測會真的跑。
 # reason 因此改為寫得出那條真的可用的配方。
+#
+# 🔴 R79 訂正本條的**因果敘述**（原文把掛起歸因到 `CLAUDECODE=1` 這個變數本身，該歸因
+# 已被剝除該變數的對照組推翻，故此處不逐字複述原句）。掛住的是「巢狀 Claude Code
+# session 這個執行環境 × `wexpect.spawn()`」這一組，`CLAUDECODE` 只是該環境的可靠標記。
+# DEF-101-089 原結論在 `claude -p` 非互動 subprocess spawn 上確實已被推翻（rc=0／約 4s），
+# 但那條路不是本檔走的路。判準維持不變（拿掉這半個條件會當場掛死整棵樹，已注入實證）。
+# 三次量測與對照組見 `docs/06_quality/CrossPlatform_R79_Debt_Audit.md` 的 `## DEF-101-913` 節。
 requires_claude_cli = pytest.mark.skipif(
     shutil.which("claude") is None or os.environ.get("CLAUDECODE") == "1",
     reason="【未啟用，非缺件】需要 claude CLI binary 且非巢狀 Claude Code session"
-    "（CLAUDECODE=1 時真實 spawn 會死結，見 DEF-101-089）。跑法：在**非** Claude Code "
-    "session 的 PowerShell 執行 `python -m pytest tests/test_gap039_049.py`"
-    "（每日 nightly 排程即為此環境，實測會真的跑）",
+    "（巢狀 session 內 wexpect pty spawn 掛住不回，R79 實測 180s×2＋45s、claude.exe 從未"
+    "啟動；剝除 CLAUDECODE 的對照組行為相同 ⇒ 該變數是環境標記非成因。見 DEF-101-913）。"
+    "跑法：在**非** Claude Code session 的 PowerShell 執行 "
+    "`python -m pytest tests/test_gap039_049.py`"
+    "（每日 nightly 排程即為此環境，2026-08-06 nightly log 實測會真的跑）",
 )
 
 

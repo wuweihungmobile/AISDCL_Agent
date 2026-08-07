@@ -120,6 +120,7 @@ WHY（為何非得有這道鎖）：
 from __future__ import annotations
 
 import ast
+import hashlib
 import inspect
 import re
 import sys
@@ -723,54 +724,53 @@ _GUARD_LINE_STALE_SLACK = 0.02
 #: 寫出淨額與理由——讓方向在 diff 上一望即知。
 #: 🔴 本表含**本檔自己**，所以動本檔就會動到本表 ⇒ 改完必須重跑一次並用實測值收斂。
 _FROZEN_GUARD_LINES: dict[str, int] = {
-    "_ci_scan_anchors.py": 154,
     "_platform_helpers.py": 519,
     "_ps_engine.py": 115,
     "test_act_local_runner_image.py": 322,
-    "test_adr_xplat001_c1c2_lock.py": 3797,
+    "test_adr_xplat001_c1c2_lock.py": 4144,
     "test_archive_defect_log.py": 3786,
     "test_bash32_compat.py": 609,
     "test_bash_probe_spec_contract.py": 960,
     "test_bootstrap_core.py": 439,
     "test_bootstrap_ps1.py": 160,
-    "test_check_defect_log_crossref.py": 2642,
+    "test_check_defect_log_crossref.py": 2770,
     "test_check_gha_action_versions.py": 295,
-    "test_check_hooks_liveness.py": 1580,
-    "test_check_pytest_baseline_sites.py": 226,
-    "test_check_script_parity.py": 1888,
-    "test_check_wrapper_thinness.py": 1255,
-    "test_ci_scan_anchors.py": 712,
+    "test_check_hooks_liveness.py": 1930,
+    "test_check_pytest_baseline_sites.py": 297,
+    "test_check_script_parity.py": 1973,
+    "test_check_wrapper_thinness.py": 1316,
     "test_component_sanitizer_shared_layer_lock.py": 293,
-    "test_context_budget_guard.py": 360,
+    "test_context_budget_guard.py": 1401,
     "test_defect_id_reference_integrity.py": 261,
     "test_dev_start.py": 6686,
-    "test_dev_start_ps1_lastexitcode.py": 454,
+    "test_dev_start_ps1_lastexitcode.py": 462,
     "test_doc_env_prefix_platform_parity_r60.py": 332,
-    "test_doc_loc_baseline_freshness_r60.py": 5649,
+    "test_doc_loc_baseline_freshness_r60.py": 5896,
     "test_extras_quoting_zsh_safety.py": 402,
-    "test_find_git_bash_parity.py": 1226,
+    "test_find_git_bash_parity.py": 1225,
     "test_gha_action_versions.py": 703,
     "test_git_hooks_install_common.py": 521,
     "test_install_windows_nightly.py": 1469,
     "test_macos_smoke_skip_honesty.py": 225,
+    "test_maturity_criteria_r79.py": 427,
     "test_nightly_interpreter_determinism.py": 278,
     "test_no_invalid_escape_sequences.py": 329,
     "test_ntfs_trailing_space_device_name.py": 772,
     "test_onboarding_parity_interlock.py": 235,
-    "test_platform_neutral_paths.py": 3061,
-    "test_platform_utils_dedup.py": 1096,
+    "test_platform_neutral_paths.py": 4092,
+    "test_platform_utils_dedup.py": 1103,
     "test_pre_commit_dispatcher_sigpipe.py": 498,
-    "test_pre_push_dispatcher.py": 779,
-    "test_ps1_bom.py": 301,
-    "test_ps51_compat.py": 691,
+    "test_pre_push_dispatcher.py": 798,
+    "test_ps1_bom.py": 204,
+    "test_ps51_compat.py": 621,
     "test_ps_engine_ssot.py": 933,
     "test_python_c_percent_shim.py": 119,
     "test_root_infra_parity.py": 441,
-    "test_run_root_unittests.py": 1680,
+    "test_run_root_unittests.py": 1730,
     "test_sanitize_component_frozen_sdd_versions_lock.py": 375,
-    "test_schedule_capability_parity.py": 587,
-    "test_script_scan_surface_ssot.py": 226,
-    "test_smoke_ci_sync.py": 1526,
+    "test_schedule_capability_parity.py": 591,
+    "test_script_scan_surface_ssot.py": 391,
+    "test_smoke_ci_sync.py": 1355,
     "test_stdio_utf8.py": 76,
     "test_subprocess_encoding_hygiene.py": 1525,
     "test_windows_forbidden_filename_parity.py": 1043,
@@ -825,29 +825,179 @@ _GUARD_LINES_REPIN_LOG: tuple[tuple[str, int, int, int, str], ...] = (
         "成長全部是新判準，且每一道都附"
         "「改壞→紅→還原→驗乾淨」的注入證明。",
     ),
+    (
+        "R79", 59936, 61421, 1485,
+        "R79 十維掃描後的七個修復包，由收斂包在所有包停工後的單人窗口一次重釘。"
+        "本輪同時發生兩個相反方向的大額變動，故淨額不代表任何單一包的行為："
+        "**減**＝架構包讓 .ps1 掃描面的三份獨立實作收成一份（CI 的 pwsh 解析步驟與 "
+        "Windows smoke 改呼叫 Python SSOT），連帶讓「偵測三份是否同步」的對抗式正則錨整組退場；"
+        "**增**＝跨平台包在既有鎖檔內落地四個新機械物（工作樹行尾、git 索引 exec bit、"
+        "會改動目錄項的 Windows 鎖檔原語、站點級 AST 守衛）與其紅綠自證，"
+        "觀測者包把 PowerShell 攔截器與量測器的判別力鎖補齊，"
+        "context 水位包補上 window 交叉否決與 PreToolUse 阻斷的成對注入，"
+        "清債包補上帳本逐列位元組上限的四向注入，"
+        "收斂包補上重釘稽核痕跡的 append-only 兩款、逐檔漂移款、"
+        "幽靈符號鎖的 docs 引用面與豁免天花板、以及 hook 文件宣稱的第三向。"
+        "🔴 本輪未為了讓數字好看而調高任何門檻：唯一破線的 LOC 棘輪"
+        "（tools/check_script_parity.py）是以同一次變更內刪等量行收斂的，非重釘。",
+    ),
+    (
+        "R79", 61421, 61829, 408,
+        "R79 續航包（ADR-XPLAT-004）：Token 額度續航協定落地後的第二次重釘。"
+        "**淨額幾乎全部集中在單一支鎖檔**（現查 `--print-guard-lines` 的 DIFF 欄為準；"
+        "另一部分是本檔自己被這一列撐大的量），因為本包的硬約束是**新增檔案數＝零**："
+        "額度事件的判讀住既有的 context_budget_guard.py（逐字稿掃描的實作已經在那裡）、"
+        "CLI 與排程編排住既有的 session_resume_planner.py（run_powershell／schtasks／"
+        "next_run_time 取證閘已經在那裡），測試依 DEF-101-561③ 併進既有鎖檔。"
+        "成長內容＝新判準各自的成對注入："
+        "額度事件分類（session 額度 vs 月度支出上限——兩者的字面前綴相同，"
+        "只比對前綴會把「等待無效」那一類判成可等待，比例見 ADR-XPLAT-004 §2.2）；"
+        "reset 時刻算術（不帶日期不帶年 ⇒ 「下一個尚未發生的該時刻」，含跨午夜與 12am/12pm）；"
+        "續航狀態塊的體檢（缺鍵／無 NextRunTime 憑證卻宣稱已排程／猜出來的 reset 拿去武裝）；"
+        "醒來後的分支判定（續跑／硬停／短退避／依新觀測重排／拒絕猜測）；"
+        "以及水位計在額度耗盡當刻讀成 0% 的修復（合成記錄的 usage 欄全為零，"
+        "使「量不到」被讀成「量到零」，計數以 ADR-XPLAT-004 §5 的現查為準）。"
+        "🔴 本輪未刪任何行換取餘裕、未調高任何門檻；"
+        "tools/session_resume_planner.py 一度破 guardrail_cli 那一格，"
+        "是以**同一次變更內收掉重複實作**收斂的（schtasks 腳本產生器由兩份併成一份，"
+        "順帶修掉舊那份「把整份任務書內嵌進 -Command 當 prompt」的缺陷），非重釘。",
+    ),
+    (
+        "R79", 61829, 62439, 610,
+        "R79 **四方複審後的修復包**（四方皆 APPROVE_WITH_CONDITIONS），"
+        "由收斂包在四包停工後的單人窗口一次重釘。"
+        "🔴 本列刻意不逐檔登載數字——逐檔淨額現查 `--print-guard-lines` 的 DIFF 欄，"
+        "寫進理由欄就是再造一個沒有人會回頭改的量測站點（本檔通篇在治的病）。"
+        "成長歸因（各包自陳，可回查交件回報）："
+        "鎖的鑑別力包＝把掃描面 SSOT 的必要旗標補進判準、"
+        "成熟度 M1 由「二擇一」改成合取並補上判準本體的鎖、"
+        "工作樹行尾政策改由 .gitattributes 現查（除掉第二個家）；"
+        "skipped 機制包＝skip 分群普查接上兩條 push 通道，"
+        "並把「量測塌掉時印共零支而回綠」改成以 pytest 自己的摘要行對帳；"
+        "收斂包＝續航排程腳本五個內插點的單引號跳脫回歸鎖（判產出不判呼叫，"
+        "與真 tokenizer 兩地對照過）、交棒書鎖的巢狀標題射程修復與三向自檢。"
+        "🔴 本輪未刪任何行換取餘裕、未調高任何門檻、未放寬任何棘輪；"
+        "唯一因本輪變更而破線的是 ONBOARDING 表② 指紋，"
+        "處置是在**出廠乾淨 venv**（無 PG extras、無 sdk extra）重量後回填，"
+        "而不是用手上這支裝了 extras 的直譯器加旗標繞過那道拒跑守衛——"
+        "後者會讓表② 宣告的「出廠環境」語意在沒有人察覺的情況下換掉。",
+    ),
+    (
+        "R79", 62439, 62772, 333,
+        "R79 **續航哨兵（預防性武裝）與其接電點**，由收尾者在所有 agent 停工後的"
+        "單人窗口一次重釘。逐檔淨額現查 `--print-guard-lines` 的 DIFF 欄，本列不登載。"
+        "成長歸因：哨兵在既有鎖檔內落地五分支判定（依觀測 reset 重排／探測／續巡／"
+        "自我解除／月度上限硬停）的逐支注入鎖，以及兩個閾值的**量測依據**鎖——"
+        "巡邏間隔必須大於實測最短的「撞線到 reset」窗（否則「精確重排」那一支在最短窗下"
+        "結構上不可達），自我解除門檻必須大於一個完整額度視窗（否則等額度期間逐字稿"
+        "不更新，會被誤判成工作已結束而自拆）；收尾者另補一列 hook 註冊基準與其理由。"
+        "🔴 **為何本列不走「同一次變更內刪等量行」那個合法出口**："
+        "本包治的正是「機制蓋好沒接電」——同一輪內連撞兩次額度而續航協定零作用，"
+        "根因是它只有手動武裝入口，而額度耗盡是 API 層失敗、"
+        "在 hook 體系裡沒有任何觸發點 ⇒「撞到才反應」結構上不可能成立。"
+        "刪掉別處的判準來換這裡的額度，等於用一個已經守住的面換一個新開的面，"
+        "淨鑑別力不升反降。未調高任何門檻、未放寬任何棘輪、未動漂移容忍值。",
+    ),
 )
 
 
+#: 逐檔漂移的容忍筆數（R79 收斂包）。**釘 0，且沒有理由留餘裕**——重釘時
+#: `--print-guard-lines` 會把整張表逐檔照貼，餘裕只會替下一次「淨額為零的 A 減 B 增」
+#: 預先開門，而那個對調正是 R79 在乾淨 HEAD 上實測到的既成事實（三支檔失真、閘門全綠）。
+_GUARD_LINE_DRIFT_TOLERANCE = 0
+
+#: **凍結前綴**的長度與內容指紋——把 `_GUARD_LINES_REPIN_LOG` 檔頭那句「**append-only**」
+#: 由散文變成機械事實。前綴內的任何一列被改寫（改數字／改理由／兩列合併成一列／整段砍掉），
+#: 指紋當場不同；而**追加**新列不動前綴，指紋不變 ⇒ 正常的每輪重釘零額外維護。
+#:
+#: 為何是「固定長度的前綴」而不是「除最後一列外」：後者在追加時前綴會跟著長大，於是每一輪
+#: 都得改一次 sha 常數——那種鎖實務上一定被改寬（本 repo 對「維護成本過高的鎖」有判例）。
+#: 代價是**尾端最多一列不受指紋保護**，由 `_REPIN_LOG_MAX_UNFROZEN_TAIL` 把那個窗口釘死：
+#: 追加當輪不必動指紋（一列寬限），下一輪要再追加就必須先把前一列納入前綴並重釘，
+#: 否則 `[前綴過期]` 轉紅。草稿兩個值都由 `--print-guard-lines` 印出
+#: （ARCH-02 的教訓：紅了卻沒有出路的鎖會被關掉）。
+_REPIN_LOG_FROZEN_PREFIX_LEN = 6
+_REPIN_LOG_MAX_UNFROZEN_TAIL = 1
+_REPIN_LOG_HISTORY_SHA256 = (
+    "1e80abf9c6f51a27eb813889ec5624ad8d63a9a2e6f0d8d509a838890bc38b9e")
+
+
+def repin_log_history_digest(
+    log: Sequence[tuple[str, int, int, int, str]], prefix_len: int
+) -> str:
+    """稽核痕跡**前 `prefix_len` 列**內容的指紋（append-only 的機械面）。
+
+    **追加一列是每輪的正常動作，改寫既有列不是**——前綴長度固定，追加時本指紋不變
+    （零維護成本）；一旦有人動到前綴內任何一列的任何欄位（改數字、改理由、把兩列合併
+    成一列、把整段歷史刪掉只留一列），指紋當場不同。
+
+    用 `repr` 而不是自訂分隔字串：理由欄本身含全形標點與換行，任何自訂分隔符都可能
+    在未來某列的理由裡出現而讓兩張不同的表算出同一個指紋（本 repo 對「分隔符碰撞」
+    已有判例）。`repr` 對 `tuple[str, int, int, int, str]` 是無歧義且跨版本穩定的。
+    """
+    return hashlib.sha256(repr(tuple(log[:prefix_len])).encode("utf-8")).hexdigest()
+
+
 def repin_log_problems(
-    log: Sequence[tuple[str, int, int, int, str]], frozen_total: int
+    log: Sequence[tuple[str, int, int, int, str]],
+    frozen_total: int,
+    *,
+    history_digest: str | None = None,
+    prefix_len: int = 0,
+    max_unfrozen_tail: int | None = None,
 ) -> list[str]:
     """重釘稽核痕跡的違規清單（空＝通過）。純函式，紅綠由合成注入自證。
 
-    四款，各帶方括號標籤（本檔的零串音紀律）：
-      (1) `[空表]` 一列都沒有 —— 整張表被刪掉時，下面三條全部無事可判＝fail-open。
+    七款，各帶方括號標籤（本檔的零串音紀律）：
+      (1) `[空表]` 一列都沒有 —— 整張表被刪掉時，下面幾條全部無事可判＝fail-open。
       (2) `[淨額不符]` 某列的 `新總量 - 舊總量 != 淨額` —— 手抄淨額算錯。
       (3) `[斷鏈]` 某列的舊總量 != 前一列的新總量 —— 中間漏記了一次重釘。
       (4) `[未對帳]` 表尾的新總量 != `sum(_FROZEN_GUARD_LINES.values())` —— **本判準的主牙**：
           改了凍結表卻沒補一列理由（或補了列卻沒真的改表）。
       (5) `[無理由]` 理由欄過短 —— 「重釘」三個字不算理由；淨額要有人負責解釋。
+      (6) `[歷史變短]` 列數少於凍結前綴長度 —— 把兩列合併成一列、或整段砍掉。
+      (7) `[歷史被改寫]` 前綴指紋不符 —— 前綴內既有列的任何欄位被動過。
+      (8) `[前綴過期]` 未受指紋保護的尾端列數超過寬限 —— 追加了新列卻一直不把前一列
+          納入前綴，久了整段尾巴又回到「可自由改寫」的狀態。
 
-    誠實劃界：本判準保證「有一列、算術自洽、與凍結表對得上」，**不保證那個理由是好理由**
-    （那是人審責任，同 C2 只保證字樣在、不保證觸發條件寫得對）。
+    🔴 **(6)(7) 是 R79 收斂包補的，它們治的是這張表自己的假話**：檔頭逐字寫著
+    「**append-only**」，而 R79 掃描實測 append-only **零機械強制**——把 R77＋R78 兩列
+    壓成一列、把起點的舊總量從 54188 改成任意數字（實測 90000），(1)~(5) 全部沉默、
+    `rc=0`。而本表存在的唯一理由是「讓淨額在結構上不可能缺席」，壓平歷史比不補一列
+    更難看見（表上永遠都有一列）。**合併歷史與追加新列在機械上原本無法區分**——那正是
+    R78 ARCH-01 對「重釘 vs 順手更新一下」下過的同一句判詞，只是這次長在防它的機制上。
+
+    兩個參數刻意可傳（不讀模組常數）：注入測試要能拿合成表的指紋當基準，否則它們只在
+    「真表剛好等於常數」時才有鑑別力——同 `iron_law3_ratchet_problems()` 已寫過的理由。
+
+    誠實劃界：本判準保證「有一列、算術自洽、與凍結表對得上、既有列沒被動過」，
+    **不保證那個理由是好理由**（那是人審責任，同 C2 只保證字樣在、不保證觸發條件寫得對）。
     """
     problems: list[str] = []
     if not log:
         return ["[空表] _GUARD_LINES_REPIN_LOG 一列都沒有——重釘的淨額又回到「不出現在任何"
                 "地方」的狀態（R78 ARCH-01 的缺陷本體）。至少要有一列起點列。"]
+    if len(log) < prefix_len:
+        problems.append(
+            f"[歷史變短] 稽核痕跡只剩 {len(log)} 列，少於凍結前綴長度 {prefix_len}——"
+            "既有列只准被**追加**，不准被合併或刪除。檔頭逐字寫著 append-only，"
+            "而 R79 實測那句話在此之前零機械強制（整段壓成一列仍 rc=0）。"
+            "真的要縮短（例如把史前列搬進 ADR）時，請同時下修 _REPIN_LOG_FROZEN_PREFIX_LEN "
+            "並在交件回報寫出搬去哪裡")
+    elif history_digest is not None:
+        live = repin_log_history_digest(log, prefix_len)
+        if live != history_digest:
+            problems.append(
+                f"[歷史被改寫] 稽核痕跡前 {prefix_len} 列的指紋 {live[:12]} 不等於釘住的 "
+                f"{history_digest[:12]}——凍結前綴內某一列的內容被動過"
+                "（改數字／改理由／把兩列合併成一列）。正常的追加不會碰到前綴。"
+                "草稿：python tools/tests/test_adr_xplat001_c1c2_lock.py --print-guard-lines")
+    if max_unfrozen_tail is not None and len(log) - prefix_len > max_unfrozen_tail:
+        problems.append(
+            f"[前綴過期] 有 {len(log) - prefix_len} 列在凍結前綴之外（寬限 "
+            f"{max_unfrozen_tail}）——那幾列今天可以被自由改寫。追加新列時請把前一列"
+            f"納入前綴：_REPIN_LOG_FROZEN_PREFIX_LEN 調成 {len(log) - max_unfrozen_tail}"
+            " 並重釘 _REPIN_LOG_HISTORY_SHA256（`--print-guard-lines` 會印草稿）")
     for i, (rnd, old, new, delta, reason) in enumerate(log):
         if new - old != delta:
             problems.append(
@@ -942,14 +1092,31 @@ def glc_growth_problem(frozen_total: int, current_total: int) -> str | None:
     )
 
 
+def guard_line_drift(
+    frozen: Mapping[str, int], current: Mapping[str, int]
+) -> list[tuple[str, int, int]]:
+    """兩表**共同鍵**上值不同的逐筆清單 `(檔名, 基準值, 實況值)`（排序、可直接印）。
+
+    刻意只看共同鍵：新增／消失的鍵由 `[新增]`／`[基準過時]` 兩款各自負責，
+    在這裡重複收會讓同一筆違規印兩次（本檔的零串音紀律）。
+    """
+    return sorted(
+        (name, frozen[name], current[name])
+        for name in set(frozen) & set(current)
+        if frozen[name] != current[name]
+    )
+
+
 def guard_line_problems(
     frozen: Mapping[str, int],
     current: Mapping[str, int],
     escapes: Sequence[str] = (),
+    *,
+    drift_tolerance: int = 0,
 ) -> list[str]:
     """護欄層逐檔行數棘輪的違規清單（空＝通過）。純函式，紅綠由合成注入自證。
 
-    五款，各帶方括號標籤讓注入測試能斷言「紅的是對的那一款」（本檔的零串音紀律）：
+    六款，各帶方括號標籤讓注入測試能斷言「紅的是對的那一款」（本檔的零串音紀律）：
 
     (1) `[崩塌]` 量測面為空 —— glob 寫壞／目錄改名時，`sum({}) <= frozen` 在原語意下
         是通過，那正是 fail-open。空集合一律紅。
@@ -959,10 +1126,22 @@ def guard_line_problems(
     (4) `[成長]` 淨行數上升（`glc_growth_problem`）—— 本輪新增的牙。
     (5) `[基準過時]` 鍵集合改變、或總量比基準低超過 `_GUARD_LINE_STALE_SLACK` ——
         棘輪的餘裕就是它的破口，縮下來不重釘等於替日後的無聲加回開門。
+    (6) `[逐檔漂移]` 共同鍵上與磁碟不符的筆數 > `drift_tolerance` —— **R79 收斂包新增**。
 
-    誠實劃界（本判準抓不到的）：淨額為零的「A 減 B 增」對調——表上兩列同時失真而總量
-    不變時，(4)(5) 都不會說話。抓得到的是這一層**整體**的膨脹與基準腐化，不是每一列
-    在每個時點都與磁碟逐字相符。
+    🔴 **(6) 為何非補不可（它不是潔癖，是已發生的實況）**：本函式原本的誠實劃界段逐字
+    寫著「淨額為零的『A 減 B 增』對調…(4)(5) 都不會說話」——而 R79 掃描在**乾淨 HEAD**
+    上實測到那個盲區已經是現況：三支檔（−11／+7／+4，淨額 0）與磁碟不符，棘輪與
+    `--print-guard-lines` 雙雙印綠，照流程走的人只會看到「不需要重釘」。劃界不等於防護。
+    後果有兩層：①凍結表的逐檔數字不再能當基線用，「哪支檔長了多少」的歸因全錯；
+    ②在總量守恆的前提下，任一支護欄檔可以無限膨脹只要別支等量縮水——那正是**檔數棘輪
+    退場時列出的原始病灶**（「成長全部灌進既有巨檔」），換到行數面之後只是把巨檔換成整層。
+
+    容忍度是**參數**不是常數（同 `iron_law3_ratchet_problems()`）：注入測試拿現況當基準，
+    活體判準拿釘住的 `_GUARD_LINE_DRIFT_TOLERANCE` 當基準。現行釘 0——重釘時逐檔照貼，
+    容忍度就沒有存在的理由；留餘裕等於替下一次「淨額為零的對調」預先開門。
+
+    誠實劃界（本判準**仍**抓不到的）：本函式只讀兩張表，看不到「某支檔改了 10 行、
+    同一支檔又刪了 10 行」這種檔內互抵——那要 diff 才看得到，不在行數面的定義域內。
     """
     problems: list[str] = []
     if not current:
@@ -1004,6 +1183,17 @@ def guard_line_problems(
         problems.append(
             f"[基準過時] 實況 {current_total} 已低於基準 {frozen_total} 的容忍下界 {floor}"
             "——縮下來要同步重釘，否則這段餘裕日後可被無聲地加回去。"
+            "重釘：python tools/tests/test_adr_xplat001_c1c2_lock.py --print-guard-lines"
+        )
+    drift = guard_line_drift(frozen, current)
+    if len(drift) > drift_tolerance:
+        problems.append(
+            f"[逐檔漂移] {len(drift)} 支檔的基準值與磁碟不符（容忍 {drift_tolerance}）："
+            f"{[f'{n} {old}→{new}' for n, old, new in drift[:8]]}"
+            f"{' …' if len(drift) > 8 else ''}——**淨額可以是 0 而這一款照樣說話**，"
+            "那正是它存在的理由：R79 在乾淨 HEAD 上實測到三支檔（−11／+7／+4）"
+            "與磁碟不符而棘輪印綠。逐檔數字一旦失真，「哪支檔長了多少」的歸因全錯，"
+            "而在總量守恆下任一支護欄檔可以無限膨脹只要別支等量縮水。"
             "重釘：python tools/tests/test_adr_xplat001_c1c2_lock.py --print-guard-lines"
         )
     return problems
@@ -1947,7 +2137,8 @@ class TestShrinkOnlyRatchet(unittest.TestCase):
             # 上方區塊註解），此處改驗接手者同樣不碰外部行程。
             self.assertEqual(
                 guard_line_problems(
-                    _FROZEN_GUARD_LINES, guard_lines_in_worktree(), guard_surface_escapes()
+                    _FROZEN_GUARD_LINES, guard_lines_in_worktree(), guard_surface_escapes(),
+                    drift_tolerance=_GUARD_LINE_DRIFT_TOLERANCE,
                 ),
                 [],
             )
@@ -2049,7 +2240,8 @@ class TestGuardLayerRatchet(unittest.TestCase):
         """
         current = guard_lines_in_worktree()
         self.assertEqual(
-            guard_line_problems(_FROZEN_GUARD_LINES, current, guard_surface_escapes()),
+            guard_line_problems(_FROZEN_GUARD_LINES, current, guard_surface_escapes(),
+                                drift_tolerance=_GUARD_LINE_DRIFT_TOLERANCE),
             [],
             "行數棘輪對現況應為零違規（控制組）",
         )
@@ -2062,6 +2254,59 @@ class TestGuardLayerRatchet(unittest.TestCase):
             "檔數棘輪的退場就變成淨損一道防護",
         )
 
+    # ── R79 收斂包：淨額為零的「A 減 B 增」對調必須說話 ──────────────────────
+    def test_a_net_zero_swap_is_red(self) -> None:
+        """🔴 注入＝**乾淨 HEAD 上的實況重演**：兩支檔一增一減、總量不變 ⇒ `[逐檔漂移]` 必紅。
+
+        R79 掃描實測：乾淨 HEAD 的凍結表已有三支檔與磁碟不符（−11／+7／+4，淨額 0），
+        而 `(4) [成長]` 與 `(5) [基準過時]` 兩款結構上都不會說話——本函式原本的
+        「誠實劃界」段逐字寫著這個盲區，而那個盲區在鎖落地的同一輪就已經被踩進去且入庫。
+        用**真表**做注入基底：合成表證明不了「這道判準對 repo 現有的那張表有牙」。
+        """
+        current = dict(guard_lines_in_worktree())
+        names = sorted(set(_FROZEN_GUARD_LINES) & set(current))
+        self.assertGreaterEqual(len(names), 2, "共同鍵不足兩支，注入基底已失效")
+        swapped = dict(current)
+        swapped[names[0]] -= 7
+        swapped[names[1]] += 7
+        self.assertEqual(
+            sum(swapped.values()), sum(current.values()), "注入本身必須是淨額為零的對調")
+        problems = guard_line_problems(
+            _FROZEN_GUARD_LINES, swapped, drift_tolerance=_GUARD_LINE_DRIFT_TOLERANCE)
+        self.assertTrue(
+            any("[逐檔漂移]" in p for p in problems),
+            f"淨額為零的 A 減 B 增仍被放行 ⇒ 這就是 R79 抓到的既成事實；實得：{problems}")
+        self.assertFalse(
+            [p for p in problems if "[成長]" in p or "[基準過時]" in p],
+            "本注入不該驚動 (4)(5)，否則證明不了是新那一款在說話（零串音）")
+
+    def test_the_drift_criterion_does_not_fire_on_a_matching_table(self) -> None:
+        """對照組：表與磁碟逐檔相符時不得說話——否則新款只是恆紅（那種鎖會被整道關掉）。"""
+        current = guard_lines_in_worktree()
+        self.assertEqual(guard_line_drift(current, current), [])
+        self.assertEqual(
+            guard_line_problems(current, current, drift_tolerance=0), [])
+
+    def test_the_repin_command_shows_the_drift_even_at_net_zero(self) -> None:
+        """R79：重釘入口自己必須看得見那個盲區。
+
+        修前實況：三支檔失真而 `--print-guard-lines` 首行印 `(+0)`、尾行印 `+0` 的稽核列
+        草稿 ⇒ 照流程走的人只會看到「不需要重釘」。一個看不見自己盲區的入口，會讓盲區
+        永遠留在原地。這裡不真跑子行程（那由 `TestRepinCommandIsReal` 端到端驗），只斷言
+        輸出裡確實有那一行、且它的計數來自 `guard_line_drift`（同一份實作，非第二份）。
+        """
+        import io  # noqa: PLC0415
+        from contextlib import redirect_stdout  # noqa: PLC0415
+
+        buf = io.StringIO()
+        with redirect_stdout(buf):
+            _print_guard_lines()
+        body = buf.getvalue()
+        live = guard_line_drift(_FROZEN_GUARD_LINES, guard_lines_in_worktree())
+        self.assertIn(f"# 逐檔漂移 {len(live)} 支", body)
+        for name, before, after in live:
+            self.assertIn(f"#   DIFF {name} {before} -> {after}", body)
+
     # ── R78 ARCH-01：重釘必須留下淨額與理由 ────────────────────────────────
     def test_the_repin_log_accounts_for_the_frozen_table(self) -> None:
         """主牙：稽核痕跡表尾的新總量必須逐字等於凍結表實際總量。
@@ -2070,7 +2315,10 @@ class TestGuardLayerRatchet(unittest.TestCase):
         commit 內量測面 +3505 而閘門 rc=0）。要求對帳之後，重釘不寫理由＝紅。
         """
         problems = repin_log_problems(
-            _GUARD_LINES_REPIN_LOG, sum(_FROZEN_GUARD_LINES.values()))
+            _GUARD_LINES_REPIN_LOG, sum(_FROZEN_GUARD_LINES.values()),
+            history_digest=_REPIN_LOG_HISTORY_SHA256,
+            prefix_len=_REPIN_LOG_FROZEN_PREFIX_LEN,
+            max_unfrozen_tail=_REPIN_LOG_MAX_UNFROZEN_TAIL)
         self.assertEqual(problems, [], "重釘稽核痕跡不合規：\n  " + "\n  ".join(problems))
 
     def test_repinning_without_logging_a_reason_is_red(self) -> None:
@@ -2079,6 +2327,100 @@ class TestGuardLayerRatchet(unittest.TestCase):
         problems = repin_log_problems(_GUARD_LINES_REPIN_LOG, total + 1)
         self.assertTrue(problems, "改了凍結表而不補稽核列竟然放行 ⇒ ARCH-01 沒有被修")
         self.assertTrue(any("[未對帳]" in p for p in problems), problems)
+
+    # ── R79 收斂包：append-only 由散文變成機械事實 ────────────────────────────
+    def test_collapsing_the_whole_history_into_one_row_is_red(self) -> None:
+        """🔴 注入＝R79 掃描實測的繞道：把整段歷史壓成一列、起點改成任意數字。
+
+        修前實況（實測逐字）：`(("R79", 54188, 90000, 35812, 理由),)` ＋ frozen_total=90000
+        餵進本判準回 `[]`、`rc=0`——(1)~(5) 五款全部沉默。而本表存在的唯一理由就是
+        「讓淨額在結構上不可能缺席」；壓平歷史比不補一列更難看見，因為表上永遠有一列。
+        兩款各自獨立說話：`[歷史變短]`（列數）與 `[歷史被改寫]`（內容指紋）。
+        """
+        collapsed = (("R79", 54188, 90000, 35812,
+                      "把兩列合併成一列，順手把起點改成一個好看的數字"),)
+        problems = repin_log_problems(
+            collapsed, 90000,
+            history_digest=_REPIN_LOG_HISTORY_SHA256,
+            prefix_len=_REPIN_LOG_FROZEN_PREFIX_LEN,
+            max_unfrozen_tail=_REPIN_LOG_MAX_UNFROZEN_TAIL)
+        self.assertTrue(
+            any("[歷史變短]" in p for p in problems),
+            f"整段歷史被壓成一列仍未轉紅 ⇒ append-only 還是一句散文；實得：{problems}")
+
+    def test_editing_an_existing_row_in_place_is_red(self) -> None:
+        """注入：**只**改前綴內某一列的一個字（列數不變、算術仍自洽）⇒ 只有 `[歷史被改寫]` 說話。
+
+        這是「壓平歷史」的隱形版本：列數對、首尾相接、與凍結表也對得上，前五款全綠。
+        零串音斷言在此特別重要——若 `[歷史變短]` 也跟著響，就證明不了是指紋在說話。
+        """
+        rows = list(_GUARD_LINES_REPIN_LOG)
+        head = rows[0]
+        rows[0] = (head[0], head[1], head[2], head[3], head[4] + "（有人事後補了一句）")
+        problems = repin_log_problems(
+            tuple(rows), sum(_FROZEN_GUARD_LINES.values()),
+            history_digest=_REPIN_LOG_HISTORY_SHA256,
+            prefix_len=_REPIN_LOG_FROZEN_PREFIX_LEN,
+            max_unfrozen_tail=_REPIN_LOG_MAX_UNFROZEN_TAIL)
+        self.assertEqual(
+            [p for p in problems if "[歷史被改寫]" in p], problems,
+            f"應恰為 [歷史被改寫] 一款（零串音）；實得：{problems}")
+
+    def test_appending_one_row_keeps_the_history_digest_stable(self) -> None:
+        """對照組：**追加一列**是每輪的正常動作，指紋與判準都不得因此說話。
+
+        少了這一條，上面兩支「注入必紅」可能只是因為指紋對任何變動都紅——那樣的鎖
+        會讓每一輪的正常重釘都得改一個 sha 常數，實務上一定被改寬。
+        """
+        total = sum(_FROZEN_GUARD_LINES.values())
+        appended = (*_GUARD_LINES_REPIN_LOG,
+                    ("R99", total, total + 5, 5,
+                     "合成的下一輪重釘，理由長度足以通過 [無理由] 那一款"))
+        self.assertEqual(
+            repin_log_history_digest(appended, _REPIN_LOG_FROZEN_PREFIX_LEN),
+            _REPIN_LOG_HISTORY_SHA256,
+            "追加一列竟然改變了前綴指紋 ⇒ 每輪都要改 sha 常數，這道鎖會被關掉")
+        self.assertEqual(
+            repin_log_problems(
+                appended, total + 5,
+                history_digest=_REPIN_LOG_HISTORY_SHA256,
+                prefix_len=_REPIN_LOG_FROZEN_PREFIX_LEN,
+                max_unfrozen_tail=_REPIN_LOG_MAX_UNFROZEN_TAIL),
+            [], "追加一列是正常動作，不得有任何一款說話")
+
+    def test_letting_the_unfrozen_tail_grow_is_red(self) -> None:
+        """注入：連續追加兩輪而不把前一列納入前綴 ⇒ `[前綴過期]` 必紅。
+
+        這一款是「固定長度前綴」這個設計付出的代價的**上限器**：沒有它，尾巴會越長
+        越長，久了整段又回到可自由改寫的狀態——那正是本節要治的病換個速度重演。
+        """
+        total = sum(_FROZEN_GUARD_LINES.values())
+        reason = "合成列，理由長度足以通過 [無理由] 那一款的下限"
+        two = (*_GUARD_LINES_REPIN_LOG,
+               ("R98", total, total + 1, 1, reason),
+               ("R99", total + 1, total + 2, 1, reason))
+        problems = repin_log_problems(
+            two, total + 2,
+            history_digest=_REPIN_LOG_HISTORY_SHA256,
+            prefix_len=_REPIN_LOG_FROZEN_PREFIX_LEN,
+            max_unfrozen_tail=_REPIN_LOG_MAX_UNFROZEN_TAIL)
+        self.assertTrue(any("[前綴過期]" in p for p in problems), problems)
+        self.assertFalse(
+            [p for p in problems if "[歷史被改寫]" in p],
+            "追加不該驚動指紋那一款，否則證明不了是尾巴長度在說話（零串音）")
+
+    def test_the_frozen_prefix_covers_every_row_this_round(self) -> None:
+        """自緊：本輪落地時，凍結前綴必須**涵蓋現有全部列**。
+
+        寬限一列是給「追加當輪」用的，不是給收輪者用的：收輪者手上就有 `--print-guard-lines`
+        印出的草稿，沒有理由留一列不受保護。留餘裕就是替下一次改寫預先開門
+        （同 `_FROZEN_GUARD_LINES` 的 `[基準過時]`）。
+        """
+        self.assertEqual(
+            _REPIN_LOG_FROZEN_PREFIX_LEN, len(_GUARD_LINES_REPIN_LOG),
+            "凍結前綴沒有涵蓋全部稽核列——收輪時請把 _REPIN_LOG_FROZEN_PREFIX_LEN "
+            "調成現有列數並重釘 _REPIN_LOG_HISTORY_SHA256"
+            "（`--print-guard-lines` 會印出兩個值）")
 
     def test_a_miscomputed_net_or_a_broken_chain_is_red(self) -> None:
         """注入②③：淨額算錯／中間漏記一次重釘，各自必紅（且是對的那一款）。"""
@@ -3685,11 +4027,27 @@ def _print_guard_lines() -> None:
     current = guard_lines_in_worktree()
     old, new = sum(_FROZEN_GUARD_LINES.values()), sum(current.values())
     print(f"# 淨額 {old}→{new} ({new - old:+d})")
+    # 🔴 R79：逐檔漂移**一律印**，即使淨額為 0。修前實況：乾淨 HEAD 上有三支檔與磁碟
+    # 不符而淨額恰為 0，本工具首行印 `(+0)`、尾行印 `+0` 的稽核列草稿 ⇒ 照流程走的人
+    # 只會看到「不需要重釘」。一個看不見自己盲區的重釘入口，會讓盲區永遠留在原地。
+    drift = guard_line_drift(_FROZEN_GUARD_LINES, current)
+    print(f"# 逐檔漂移 {len(drift)} 支"
+          + ("（淨額為 0 時本行仍會說話——那正是 R79 補它的理由）" if new == old else ""))
+    for name, before, after in drift:
+        print(f"#   DIFF {name} {before} -> {after} ({after - before:+d})")
     print("_FROZEN_GUARD_LINES: dict[str, int] = {")
     for name, n in sorted(current.items()):
         print(f'    "{name}": {n},')
     print("}")
     print(f'# _GUARD_LINES_REPIN_LOG 新列：("R<n>", {old}, {new}, {new - old:+d}, "<理由>"),')
+    # append-only 的機械面（R79）：草稿一律以「追加那一列之後」的狀態算——
+    # 前綴涵蓋含新列在內的全部列，指紋即該張表的指紋。追加後照貼這兩行即可。
+    after = len(_GUARD_LINES_REPIN_LOG) + 1
+    print(f"# _REPIN_LOG_FROZEN_PREFIX_LEN = {after}  # 追加新列後的總列數")
+    print("#   （下面這個 sha 要在**貼上新列之後**重跑本指令才算得出來；"
+          "本次印的是尚未追加時的值）")
+    print(f'# _REPIN_LOG_HISTORY_SHA256 = "'
+          f'{repin_log_history_digest(_GUARD_LINES_REPIN_LOG, after)}"')
     for label, items in (("逃逸", guard_surface_escapes()), ("涵蓋缺口", guard_baseline_gaps())):
         if items:
             print(f"# [{label}] {items}")

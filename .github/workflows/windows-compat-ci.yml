@@ -232,6 +232,18 @@ on:
       # 把剩下這兩筆逐字點名出來的。
       - ".actrc"
       - "tools/session_resume_planner.py"
+      # R79（同一個形態的第三次：新增判準消費了根層檔卻沒補 paths，由
+      # AISDLC_SDD/scripts/tests/test_ci_paths_cover_root_consumers.py 逐字點名）。
+      # tools/tests/test_platform_neutral_paths.py 讀 .editorconfig 的 .ps1 區塊
+      # （驗它有沒有指名自己的執行者）；tools/tests/test_maturity_criteria_r79.py 讀
+      # 成熟度 SSOT 的 M5/M6 列——只改這兩個被讀的檔時，讀它們的鎖不會被觸發。
+      - ".editorconfig"
+      - "docs/06_quality/CrossPlatform_Maturity_Criteria.md"
+      # R79 收輪（同一形態的**第四次**，在單人窗口跑 ci-gate 時才顯形）：
+      # tools/tests/test_platform_neutral_paths.py 的 _WORKTREE_EOL_POLICY 本輪改成
+      # 從 .gitattributes 現查（不再寫死第二份表）——好處是新增 `*.xxx text eol=crlf`
+      # 會自動進射程，代價是**該檔本身成了判準輸入**：只改它時讀它的鎖不會被觸發。
+      - ".gitattributes"
       # R14：tools/tests/test_subprocess_encoding_hygiene.py 單檔掃描清單消費此檔
       #（樹外 tracked 零散 .py 納管）——只改該檔時其回歸鎖須跑（DEF-101-042 同構）
       # R10：tools/tests 內含讀取這兩支 workflow 的回歸鎖（test_root_infra_parity
@@ -468,6 +480,18 @@ on:
       # 把剩下這兩筆逐字點名出來的。
       - ".actrc"
       - "tools/session_resume_planner.py"
+      # R79（同一個形態的第三次：新增判準消費了根層檔卻沒補 paths，由
+      # AISDLC_SDD/scripts/tests/test_ci_paths_cover_root_consumers.py 逐字點名）。
+      # tools/tests/test_platform_neutral_paths.py 讀 .editorconfig 的 .ps1 區塊
+      # （驗它有沒有指名自己的執行者）；tools/tests/test_maturity_criteria_r79.py 讀
+      # 成熟度 SSOT 的 M5/M6 列——只改這兩個被讀的檔時，讀它們的鎖不會被觸發。
+      - ".editorconfig"
+      - "docs/06_quality/CrossPlatform_Maturity_Criteria.md"
+      # R79 收輪（同一形態的**第四次**，在單人窗口跑 ci-gate 時才顯形）：
+      # tools/tests/test_platform_neutral_paths.py 的 _WORKTREE_EOL_POLICY 本輪改成
+      # 從 .gitattributes 現查（不再寫死第二份表）——好處是新增 `*.xxx text eol=crlf`
+      # 會自動進射程，代價是**該檔本身成了判準輸入**：只改它時讀它的鎖不會被觸發。
+      - ".gitattributes"
       # R14：tools/tests/test_subprocess_encoding_hygiene.py 單檔掃描清單消費此檔
       #（樹外 tracked 零散 .py 納管）——只改該檔時其回歸鎖須跑（DEF-101-042 同構）
       # R10：tools/tests 內含讀取這兩支 workflow 的回歸鎖（test_root_infra_parity

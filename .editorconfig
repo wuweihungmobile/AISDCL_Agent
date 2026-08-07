@@ -26,6 +26,18 @@ trim_trailing_whitespace = false
 
 # PowerShell 腳本：Windows 原生 CRLF + UTF-8 BOM（對齊 .gitattributes 的 *.ps1 eol=crlf；
 # BOM 防 zh-TW Windows PS5.1 以 CP950 誤讀非 ASCII 而亂碼/破壞 parser）。
+#
+# 🔴 本區塊的**機械執行者**（R79 補上；在此之前這兩行是純裝飾——實測寫入端兩項
+#    都不遵守，`.editorconfig` 只有人與編輯器在讀）：
+#      · 寫入當下  AutoClaude/tools/hooks/check_ps1_encoding.py（PostToolUse，auto-fix
+#                  BOM ＋ CRLF；LF→CRLF 對 *.ps1 是 blob-neutral，證明見該檔 docstring）
+#      · 事後兜底  tools/tests/test_platform_neutral_paths.py::TestWorktreeEolMatchesPolicy
+#                  （讀 `git ls-files --eol` 的 w/ 欄；人工編輯器與 GitHub web 繞得過
+#                   hook，這一道才罩得到）
+#      · BOM 事後  tools/tests/test_ps1_bom.py
+#    上面三行「具名執行者」由 tools/tests/test_platform_neutral_paths.py::
+#    TestEditorconfigPs1BlockNamesItsEnforcers 逐支查核（檔案要存在、且內容真的在
+#    談這個主題）——把任一支改名或刪掉，這幾行就會當場轉紅而不是靜靜變回散文。
 [*.{ps1,psm1,psd1}]
 end_of_line = crlf
 charset = utf-8-bom

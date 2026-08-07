@@ -409,3 +409,64 @@ class TestStep3CheckConstraints:
         finally:
             c.rollback()
             c.close()
+
+
+# ── R79（D-skipped #5）：整條鏈完整性，不只 0010 那一支 ─────────────────────────
+#
+# 🔴 缺陷本體：「`alembic_version` 在 head ≠ 整條鏈真的跑過」這件事，全 repo 只有上面
+# `test_backfill_function_exists` 一支斷言在守，而它只驗 0010 的那一個 function，且它
+# **只跑在它結構上不可能失敗的環境**——雲端 `pg-contract` job 每次起一顆全新 service
+# container 再 `alembic upgrade head`，鏈必然完整。真正會壞的是長壽 DB（R76 就在本機
+# 撞到一顆），而那條軌上這批斷言全被 DSN 閘門 skip 掉。發現 R76 那顆壞 DB 的不是任何
+# 閘門，是有人手動把 DSN 設起來跑了一次。
+#
+# 本輪的修法有兩半，缺一不可：
+#   ① **判準加寬**（本 class）：把 oracle 由「0010 的一個 function」擴成「四支 revision
+#      各自的產物」，於是鏈在中段斷掉也看得見，不必等到剛好卡在 0010。
+#   ② **通道**（`AutoClaude/tools/local_ci_gate.py` 的 PG 自動偵測）：本機預設路徑一旦
+#      偵測到 PG 就把 DSN 注進去 ⇒ 這批斷言從此**預設對著那顆長壽 DB 跑**，也就是它
+#      唯一會壞的地方。實測：注入前本機 135 skipped、這批 16 支一支都沒跑；注入後
+#      44 skipped，本檔全數執行。
+#
+# ⚠️ 誠實劃界（這個 oracle 抓得到什麼、抓不到什麼）：
+#   · 抓得到 `alembic stamp <head>`（在沒真跑過 DDL 的 DB 上蓋章）——那是 R76 撞到的形態。
+#   · **抓不到**由 `pg_dump`/`pg_restore` 或 schema dump 建起的 DB：那條路會把 function
+#     一起帶過來。要抓那一種需要比對 DDL 內容而不是「東西在不在」，不在本輪射程。
+#   · 不驗 `alembic_version == heads`（那需要在測試裡跑 alembic CLI）；`alembic_head`
+#     fixture 已經在守「編號 ≥ 10」這一段。
+_CHAIN_FUNCTION_ORACLES: tuple[tuple[str, str], ...] = (
+    ("kb_ttl_cleanup", "0007_kb_unique_ttl_partition"),
+    ("kb_ttl_trigger_fn", "0007_kb_unique_ttl_partition"),
+    ("_three_tier_touch_updated_at", "0009_three_tier_schema"),
+    ("backfill_legacy_fk", "0010_link_legacy_to_tiers"),
+    ("try_acquire_import_lock", "0012_yaml_import_staging"),
+    ("has_active_import_for", "0012_yaml_import_staging"),
+)
+
+
+class TestMigrationChainIntegrity:
+    """整條 migration 鏈的「真的跑過」oracle（可對**任意** DSN 執行，含長壽 DB）。"""
+
+    def test_every_revision_left_its_function_behind(self, conn, alembic_head):
+        """每一支會建 function 的 revision，都必須在這顆 DB 留下它的產物。
+
+        判準刻意一次收斂全部缺項再報（accumulate-then-report）：只報第一個缺的那支，
+        會讓人以為「補完這一支就好」，而鏈斷掉時通常是一整段都沒跑。
+        """
+        with conn.cursor() as cur:
+            cur.execute(
+                "SELECT proname FROM pg_proc WHERE proname = ANY(%s);",
+                ([name for name, _ in _CHAIN_FUNCTION_ORACLES],),
+            )
+            present = {row[0] for row in cur.fetchall()}
+        missing = [(name, rev) for name, rev in _CHAIN_FUNCTION_ORACLES
+                   if name not in present]
+        assert not missing, (
+            "這顆 DB 的 alembic_version 顯示 "
+            f"{sorted(alembic_head)}，但下列 revision 的產物不存在："
+            + "；".join(f"{name}()（來自 {rev}）" for name, rev in missing)
+            + "。alembic_version 在 head **不代表**整條鏈真的跑過——`alembic stamp` 會讓"
+            "一顆沒跑過任何 DDL 的 DB 同樣顯示 head。處置：換一顆乾淨 DB 跑 "
+            "`alembic upgrade head` 再重跑本檔，或查這顆 DB 是怎麼建起來的；"
+            "**不要**改本斷言，它正確地抓到了環境問題。"
+        )

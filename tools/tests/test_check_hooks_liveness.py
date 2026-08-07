@@ -857,6 +857,55 @@ class TestLintPowerShellHookBehaviour(unittest.TestCase):
         ("管線後隔一句才讀 rc（`$x = 1` 不會重設 rc，上一版視窗只看緊鄰下一句）",
          '& git status | select -First 3\n$x = 1\n"rc=$LASTEXITCODE"',
          "LASTEXITCODE"),
+        # ── R79：`_RC_RESET_RE` 的三個「提到 ≠ 執行」漏擋（端到端重現過真紅讀成綠）──
+        ("管線後夾一句 2>&1（重導向的 `&` 不是呼叫運算子，上一版當成 rc 已重設）",
+         '& git status | select -First 3\nGet-Content log.txt 2>&1\n'
+         '"rc=$LASTEXITCODE"',
+         "LASTEXITCODE"),
+        ("管線後夾 Get-Command x.exe（只是查路徑，什麼都沒執行）",
+         '& git status | select -First 3\nGet-Command python.exe\n'
+         '"rc=$LASTEXITCODE"',
+         "LASTEXITCODE"),
+        ("管線後夾 Test-Path …/x.exe（`.exe` 在參數位置＝資料不是指令）",
+         '& git status | select -First 3\nTest-Path /repo/x/cmd.exe\n'
+         '"rc=$LASTEXITCODE"',
+         "LASTEXITCODE"),
+        # ── R79：不帶參數的 cd 家族（上一版尾巴硬性要求一個參數 ⇒ 整條放行）──
+        ("裸 cd 不帶參數（切到 $HOME，之後每個相對路徑一次全錯）", "cd",
+         "Push-Location"),
+        ("裸 Set-Location 不帶參數", "Set-Location", "Push-Location"),
+        ("裸 cd 後面還有別的指令", "cd; Get-ChildItem", "Push-Location"),
+        ("裸 chdir 在換行前", "chdir\nGet-Date", "Push-Location"),
+        # ── R79：豁免標記被「引述」在字串裡，不該關掉檢查 ──
+        ("字串裡引述豁免標記，句尾那個 cd 仍是貨真價實的違規",
+         "Write-Output 'never write # ps-lint-ok: like this'; cd AutoClaude",
+         "Push-Location"),
+        # ── R79：偏向擋的**代價**就地記錄（不是漏，是刻意）──
+        # 裸原生指令（`git`）確實會重設 rc，但本判準只認呼叫運算子與「語句開頭是
+        # 執行檔」，認不得它 ⇒ 這一條會被擋。全史 913 條真實指令實測只有 1 條落在
+        # 這一格（0.11%），出口是行內豁免（阻斷訊息第一行就寫著）。
+        # 🔴 若日後補上「裸原生指令也算重設」的判準，本列會轉紅——那是正確行為：
+        # 取捨變了就必須有人重新決定，不能靜默改掉。
+        ("偏向擋的代價：裸原生指令 git 其實會重設 rc，但本判準認不得（出口＝行內豁免）",
+         'git status | Measure-Object -Line\ngit commit -m x 2>&1\n'
+         '"rc=$LASTEXITCODE"',
+         "LASTEXITCODE"),
+    )
+
+    #: `(夾在管線與 rc 讀取中間的那一句, 它是否真的重設了 rc)`——其餘字元逐字相同。
+    #: 🔴 R79：這條軸上 R78 版**每一側只有一個樣本，而且都是教科書代表**（不重設側是
+    #: `$x = 1`、重設側是一個乾淨的 `& py a.py`）。中間那片灰色地帶——**看起來像**在
+    #: 呼叫、其實什麼都沒執行——一個樣本都沒有，於是一條真的會放行「真紅讀成綠」的
+    #: 規則，在 75 支測試全綠的情況下交付了。體例照 `PIPE_ALIAS_PAIRS`：只差一個 token
+    #: 的配對，不對稱本身就判紅，不必先知道哪一邊才對。
+    RC_RESET_PAIRS = (
+        ("$x = 1", False),
+        ("Get-Content log.txt 2>&1", False),
+        ("Get-Command python.exe", False),
+        ("Test-Path /repo/x/cmd.exe", False),
+        ("Write-Output 'py.exe'", False),          # `.exe` 只住在字串裡
+        ("& py a.py", True),                        # 呼叫運算子
+        ("/repo/v/python.exe a.py", True),          # 語句開頭就是執行檔
     )
 
     #: 誤擋方向：每一筆都是安全的、或是文件／探針的日常寫法。誤報會讓整個機制被
@@ -874,6 +923,12 @@ class TestLintPowerShellHookBehaviour(unittest.TestCase):
          '"rc=$LASTEXITCODE"\ngit log | select -First 1'),
         ("中間有新的 & 呼叫重設了 rc",
          'git log | select -First 1; & py a.py; "rc=$LASTEXITCODE"'),
+        ("中間那一句的開頭就是一支執行檔（真的跑了東西 ⇒ rc 已重設）",
+         'git log | select -First 1; /repo/v/python.exe a.py; "rc=$LASTEXITCODE"'),
+        ("`.exe` 只住在字串裡，不構成「已重設」也不構成違規",
+         "$note = 'python.exe'"),
+        ("行內豁免出現在真註解裡（理由含撇號），仍必須放行",
+         "cd x  # ps-lint-ok: don't touch this either"),
         ("違規形態只住在單引號內（SD-02：寫文件／重現缺陷的日常）",
          "$doc = 'never write cd AutoClaude here'"),
         ("違規形態只住在雙引號內", '$doc = "do not write bash tools/x.sh"'),
@@ -908,6 +963,30 @@ class TestLintPowerShellHookBehaviour(unittest.TestCase):
                     f"`| {alias}` rc={rc_alias} 但 `| {full}` rc={rc_full}——"
                     f"其餘字元逐字相同卻判不同，這道鎖只認得沒人會寫的那一半\n{err_a}",
                 )
+
+    def test_only_a_real_invocation_clears_the_rc_contamination(self) -> None:
+        """R79：污染的**解除**條件——「提到一支 exe」與「執行一支 exe」必須分得開。
+
+        七條變體其餘字元逐字相同，只差夾在管線與 rc 讀取之間的那一句。這一格就是
+        pwsh 7.6.4 真機量到的東西：`2>&1`／`Get-Command x.exe`／`Test-Path …x.exe`
+        三種語句**一個都沒有**重設 `$LASTEXITCODE`，而上一版三種全當成已重設。
+        """
+        for middle, resets in self.RC_RESET_PAIRS:
+            with self.subTest(middle=middle, resets=resets):
+                command = ('& git status | select -First 3\n'
+                           f'{middle}\n"rc=$LASTEXITCODE"')
+                rc, err = self._lint(command)
+                if resets:
+                    self.assertEqual(
+                        rc, 0,
+                        f"`{middle}` 真的重設了 rc，之後讀 rc 是安全的卻被誤擋——"
+                        f"誤擋會讓整個機制被關掉\n{err}")
+                else:
+                    self.assertEqual(
+                        rc, 2,
+                        f"`{middle}` 一行都沒執行、rc 仍是管線留下的髒值，卻被當成"
+                        f"「已重設」而放行——放行的正是這條規則唯一要防的"
+                        f"「真紅被讀成綠」\n{err}")
 
     def test_forms_that_slip_through_are_blocked(self) -> None:
         """漏擋方向：逐一注入「只差一步」的形態，每一筆都必須轉紅。"""
@@ -1206,6 +1285,145 @@ class TestSessionAuditProbeContract(unittest.TestCase):
             "前面就有對應輸出的宣稱不該被列（誤報會讓這份清單被忽略）",
         )
 
+    def test_the_two_loop_columns_are_separated(self) -> None:
+        """🔴 R79：慣用管線投影與「現寫的控制流」必須分欄。
+
+        上一版把兩者算進同一欄，實測那一欄三分之二的命中是 `| ForEach-Object { … }`
+        這種一行投影——與註解宣稱要抓的「沒有任何測試看過的現寫控制流」不是同一種
+        風險。混在同一個分子裡，那個百分比既不能解讀、也不能拿來判斷有沒有變好。
+        """
+        with tempfile.TemporaryDirectory() as tmp:
+            path = self._write(tmp, [
+                _tool_use("Get-ChildItem | ForEach-Object { $_.Name }"),
+                _tool_use("Get-ChildItem | % { $_.Name }"),
+                _tool_use("foreach ($f in $files) { Write-Output $f }"),
+            ])
+            rc, out = _run_audit_probe(["--transcript", path, "--json"])
+        self.assertEqual(rc, 0, out)
+        per_tool = json.loads(out)["summary"]["patterns"]["PowerShell"]
+        self.assertEqual(
+            per_tool["pipeline-foreach"], 2,
+            f"慣用管線投影沒有被獨立記成一欄：{per_tool}（`| %` 的別名形態也要算）")
+        self.assertEqual(
+            per_tool["inline-loop-statement"], 1,
+            f"真正的現寫控制流被稀釋掉了：{per_tool}")
+
+    def test_an_unrelated_decoration_is_not_evidence_for_a_claim(self) -> None:
+        """🔴 R79：佐證字樣曾包含 `✅` 與裸 `OK`／`ok`。
+
+        純裝飾字元與英文常用詞零鑑別力，於是「前面任何一個 tool_result 出現過它們」
+        就讓之後的宣稱自動獲得佐證 ⇒ 這個觀測者在本輪窗上判出率是 0%，而那個 0
+        讀起來就是「這一輪沒有失實宣稱」——正是探針自己 docstring 警告的
+        「看起來變乾淨」方向，比紅更危險，因為沒有人會去追一個 0。
+        """
+        deco = {"message": {"role": "user", "content": [
+            {"type": "tool_result", "content": "✅ 完成 OK 了"}]}}
+        real = {"message": {"role": "user", "content": [
+            {"type": "tool_result", "content": "3 passed in 1.2s"}]}}
+        say = {"message": {"role": "assistant", "content": [
+            {"type": "text", "text": "全部通過。"}]}}
+        with tempfile.TemporaryDirectory() as tmp:
+            decorated = self._write(tmp, [_tool_use("git status"), deco, say])
+            rc_deco, out_deco = _run_audit_probe(
+                ["--transcript", decorated, "--json"])
+            Path(decorated).unlink()
+            backed = self._write(tmp, [_tool_use("git status"), real, say])
+            rc_real, out_real = _run_audit_probe(["--transcript", backed, "--json"])
+        self.assertEqual((rc_deco, rc_real), (0, 0), out_deco + out_real)
+        self.assertEqual(
+            json.loads(out_deco)["summary"]["unsupported_claim_count"], 1,
+            "一個裝飾字元就替宣稱背書了——這條件近乎恆真，觀測者等於恆報乾淨")
+        self.assertEqual(
+            json.loads(out_real)["summary"]["unsupported_claim_count"], 0,
+            "真的有執行輸出（`3 passed`）的宣稱不該被列，否則清單會被整份忽略")
+
+    def test_the_claim_denominator_travels_with_the_numerator(self) -> None:
+        """只印分子時，「CLAIM_RE 自己失效」與「真的零違規」印出來一模一樣。"""
+        proof = {"message": {"role": "user", "content": [
+            {"type": "tool_result", "content": "3 passed in 1.2s"}]}}
+        backed = {"message": {"role": "assistant", "content": [
+            {"type": "text", "text": "全部通過。"}]}}
+        bare = {"message": {"role": "assistant", "content": [
+            {"type": "text", "text": "已驗證。"}]}}
+        # 三筆與執行無關的 tool_result 把那次 `3 passed` 推出窗外——這正是「佐證必須
+        # 是**這句話附近**那一次執行」的意思；沒有它，第二句宣稱會沿用前一次的證據。
+        noise = {"message": {"role": "user", "content": [
+            {"type": "tool_result", "content": "檔案第一行\n檔案第二行"}]}}
+        with tempfile.TemporaryDirectory() as tmp:
+            path = self._write(tmp, [_tool_use("git status"), proof, backed,
+                                     _tool_use("git log"), noise, noise, noise,
+                                     bare])
+            rc, out = _run_audit_probe(["--transcript", path, "--json"])
+        self.assertEqual(rc, 0, out)
+        summary = json.loads(out)["summary"]
+        self.assertEqual(summary["claim_sentences_total"], 2,
+                         f"分母（命中 CLAIM_RE 的句子數）沒有被記：{summary}")
+        self.assertEqual(summary["unsupported_claim_count"], 1, out)
+        self.assertEqual(summary["claim_window"], 3,
+                         "窗大小必須跟著數字走——換一個窗就是另一個百分比")
+
+    def test_the_report_names_every_transcript_in_the_window(self) -> None:
+        """🔴 R79：窗的定義本身是資料。
+
+        `--latest N` 由 mtime 排序決定，而每一支同期跑的 agent 都在同一個目錄開一支新
+        逐字稿 ⇒ **量測這個動作本身會改變下一次的量測值**（實測：同一條指令一小時內
+        三組數字、rc 由 0 翻 1）。窗不印出來，帳本記的數字就沒有人能回查。
+        """
+        with tempfile.TemporaryDirectory() as tmp:
+            _write_transcript(tmp, [_tool_use("git status")], "alpha.jsonl")
+            _write_transcript(tmp, [_tool_use("git log")], "beta.jsonl")
+            rc, out = _run_audit_probe(["--project-dir", tmp, "--json"])
+        self.assertEqual(rc, 0, out)
+        manifest = json.loads(out)["summary"]["window_manifest"]
+        self.assertEqual(
+            sorted(row["transcript"] for row in manifest),
+            ["alpha.jsonl", "beta.jsonl"],
+            f"量測窗清單沒有把納入的逐字稿逐支列出：{manifest}")
+        for row in manifest:
+            self.assertIn("mtime", row)
+            self.assertEqual(row["powershell_calls"], 1,
+                             f"清單沒有帶每一支自己的 PowerShell 呼叫數：{row}")
+
+    def test_exclude_takes_a_transcript_out_of_the_window(self) -> None:
+        """`--exclude` 必須在 `--latest` **之前**套用，否則被剔掉的那幾支仍會先把
+        別人擠出窗外——那正是本輪實測到「真正在做事的那支被擠出去」的機制。"""
+        with tempfile.TemporaryDirectory() as tmp:
+            for index, name in enumerate(("keep.jsonl", "agent_a.jsonl",
+                                          "agent_b.jsonl")):
+                path = Path(_write_transcript(
+                    tmp, [_tool_use("git status")], name))
+                os.utime(path, (1_700_000_000 + index * 86400,) * 2)
+            rc, out = _run_audit_probe(
+                ["--project-dir", tmp, "--json", "--latest", "1",
+                 "--exclude", "agent_"])
+        self.assertEqual(rc, 0, out)
+        picked = [s["transcript"] for s in json.loads(out)["sessions"]]
+        self.assertEqual(
+            picked, ["keep.jsonl"],
+            "被 --exclude 點名的逐字稿仍然把該留下的那一支擠出了窗外（順序錯了）")
+
+    def test_parity_mode_puts_both_ends_on_the_same_commands(self) -> None:
+        """R78 宣稱兩端「判定分歧 0 例」，而守那句話的鎖餵的是十來條手寫短指令。
+
+        `--parity` 讓那個宣稱變成可重跑的量測：語料是量測窗裡**真正出現過**的指令。
+        這裡用的樣本正是上一版兩端會分歧的那一族（管線與 rc 隔 ≥1 句）。
+        """
+        with tempfile.TemporaryDirectory() as tmp:
+            path = self._write(tmp, [
+                _tool_use('& git status | select -First 3\n$x = 1\n'
+                          '"rc=$LASTEXITCODE"'),
+                _tool_use('& git status | select -First 3\n$x = 1\n$y = 2\n'
+                          '"rc=$LASTEXITCODE"'),
+                _tool_use('git log | select -First 1; & py a.py; '
+                          '"rc=$LASTEXITCODE"'),
+            ])
+            rc, out = _run_audit_probe(["--transcript", path, "--json", "--parity"])
+        self.assertEqual(rc, 0, f"兩端在真實形態上判定分歧\n{out}")
+        payload = json.loads(out)
+        self.assertEqual(payload["parity"], [], "分歧清單非空")
+        self.assertEqual(payload["summary"]["parity_commands"], 3,
+                         "對拍語料塌了——空語料會讓分歧數恆為 0")
+
     def test_docstring_declares_the_not_a_gate_boundary(self) -> None:
         """邊界必須寫在被讀的地方：逐字稿是本機、untracked、會被清的資料。"""
         text = _AUDIT_PROBE.read_text(encoding="utf-8")
@@ -1232,6 +1450,86 @@ class TestSessionAuditProbeContract(unittest.TestCase):
 
 
 # ══════════════════════════════════════════════════════════════════════════
+# 失誤歸因分群器的契約鎖（R79 新增）
+# ══════════════════════════════════════════════════════════════════════════
+# 為何住在本檔：`tools/tests/` 不得新增鎖檔（DEF-101-561③），而這支分群器是同一組
+# 觀測者的第三件——攔截（hook）／量測（probe）／歸因（本項）。
+#
+# 🔴 它要守的那件事很窄但很關鍵：根 CLAUDE.md 逐字要求「每輪重跑一次，分群腳本與桶的
+# 判準要具名可重跑」，而 R77 那次分群**沒有留下任何產物**（來源清單不在 repo 內、
+# 全庫零分群腳本）⇒ 那條要求結構上永遠滿足不了，於是那組百分比變成不可稽核的常數，
+# 正是 R71 的 n=8 模型被當現行結論用五輪的同一個形態。
+
+_ATTRIBUTION = _REPO_ROOT / "tools" / "probe" / "misstep_attribution.py"
+
+
+class TestMisstepAttributionContract(unittest.TestCase):
+    """歸因分群器：語料抓得到、桶判得準、判準性質自己說出來。"""
+
+    def _run(self, args: list[str]) -> tuple[int, str]:
+        proc = subprocess.run(
+            [sys.executable, str(_ATTRIBUTION), *args],
+            capture_output=True, text=True, encoding="utf-8", errors="replace",
+            timeout=300, env=_child_env({"PYTHONUTF8": "1"}))
+        return proc.returncode, (proc.stdout or "") + (proc.stderr or "")
+
+    def test_the_ledger_corpus_is_actually_extracted(self) -> None:
+        """語料塌了必須 fail-loud：`n=0` 讀起來像「這一輪沒有失誤」。
+
+        這是本檔反覆記載的「看起來變乾淨」方向——比紅更危險，因為沒有人會去追一個 0。
+        帳本改格式／來源清單過期都會落在這裡。
+        """
+        rc, out = self._run(["--source", "ledger", "--json"])
+        self.assertEqual(rc, 0, out)
+        payload = json.loads(out)
+        self.assertGreater(
+            payload["n"], 100,
+            "缺陷帳本抽不到列了（列的格式變了？來源清單過期？）——"
+            f"抽到 {payload['n']} 筆；分群器的分母塌掉時，每一個桶都會是 0")
+
+    def test_buckets_are_named_and_each_item_says_why_it_landed_there(self) -> None:
+        rc, out = self._run(["--source", "ledger", "--json"])
+        self.assertEqual(rc, 0, out)
+        payload = json.loads(out)
+        self.assertEqual(
+            set(payload["counts"]),
+            {"LOCKBLIND", "CARRIER", "CLAIM-FIRST", "BADPIPE", "OTHER"},
+            "桶名變了——桶是判準本身，改名等於重新定義量測，歷史數字不再可比")
+        classified = [i for i in payload["items"] if i["bucket"] != "OTHER"]
+        self.assertTrue(classified, "沒有任何一筆被歸類 ⇒ 關鍵詞表失效")
+        for item in classified[:50]:
+            self.assertTrue(
+                item["matched"],
+                f"這一筆進了 {item['bucket']} 卻說不出是哪個關鍵詞讓它進去："
+                f"{item['origin']}——說不出理由的歸屬無法逐筆覆核")
+
+    def test_ties_and_misses_go_to_other_instead_of_a_preferred_bucket(self) -> None:
+        """平手與零命中一律 OTHER。把 OTHER 藏起來會讓其餘桶虛胖，而虛胖的方向
+        正好是「我們已經懂了」。"""
+        sys.path.insert(0, str(_REPO_ROOT / "tools" / "probe"))
+        try:
+            import misstep_attribution as attribution
+        finally:
+            sys.path.pop(0)
+        self.assertEqual(attribution.classify("今天天氣很好")[0], "OTHER")
+        self.assertEqual(
+            attribution.classify("這道鎖沒有鑑別力、射程也不對，恆綠")[0],
+            "LOCKBLIND")
+        self.assertEqual(
+            attribution.classify("裸 bash 走到 WSL，載具選錯了")[0], "CARRIER")
+        # 一邊一個關鍵詞＝平手 ⇒ 不准偏袒任何一桶
+        self.assertEqual(attribution.classify("恆綠 而且 裸 bash")[0], "OTHER")
+
+    def test_it_declares_its_own_heuristic_nature_in_the_output(self) -> None:
+        """判準性質必須由**腳本自己印**，不能只寫在散文裡：引用數字的人看到的是
+        輸出，不是原始碼註解。量級穩健、小數不穩健——這句話要跟著數字走。"""
+        rc, out = self._run(["--source", "ledger"])
+        self.assertEqual(rc, 0, out)
+        for needle in ("關鍵詞啟發式", "量級穩健", "不得"):
+            self.assertIn(needle, out, f"輸出沒有自陳判準性質，缺 {needle!r}")
+
+
+# ══════════════════════════════════════════════════════════════════════════
 # 攔截器 × 量測器：同一條規則的兩份複本必須綁在一起（R78／SA-02）
 # ══════════════════════════════════════════════════════════════════════════
 # 現象：`lint_powershell_command.py`（事中攔截）與 `tools/probe/audit_session.py`
@@ -1254,11 +1552,21 @@ _PARITY_HITS = (
     ("naked-cd", "cd AutoClaude"),
     ("naked-cd", "Set-Location -Path /repo/a"),
     ("naked-cd", "sl /repo/a"),
+    ("naked-cd", "cd"),  # R79：不帶參數，上一版兩邊都放行
     ("rc-after-pipe", "& git status | select -First 3\n$LASTEXITCODE"),
     ("rc-after-pipe", "& git status | Tee-Object out.txt\n$LASTEXITCODE"),
     ("bare-bash-sh", "bash tools/install_mac_nightly.sh"),
     ("bare-bash-sh", "bash.exe tools/install_mac_nightly.sh"),
 )
+#: 🔴 R79：這是 `_PARITY_HITS` 少掉的那一維。上面每一條 rc 樣本的管線與 rc 讀取之間
+#: 都只隔**一個**換行，而兩端當時的視窗長度根本不同——攔截端的污染會一路延續到某句
+#: 真的重設 rc 為止，量測端那條扁平正則只跨得過一個換行。於是「管線與 rc 之間隔 ≥1 行」
+#: 的多行指令**整類**在量測端隱形，而那是本 repo 最常寫的形狀。手寫短樣本結構上看不到
+#: 這件事，鎖因此永遠是綠的——這正是「鎖在、但沒有鑑別力」長在防它的機制上。
+#: 對策是把樣本**參數化**：每一條 rc 樣本自動長出間隔 0~4 句的變體，兩端的視窗差在
+#: 任何一格上都會轉紅。填充句刻意選不會重設 rc 的（`$x = 1`），否則測的就不是視窗了。
+_PARITY_GAP_FILLER = "$x = 1"
+_PARITY_GAP_RANGE = range(5)
 #: 兩邊都必須放行。誤報會讓機制被整個關掉，那比漏擋更糟——所以這一半和上一半同等重要。
 _PARITY_CLEAN = (
     "Push-Location /repo/a; & py a.py; $LASTEXITCODE; Pop-Location",
@@ -1331,6 +1639,33 @@ class TestHookAndProbeShareOneCriterion(unittest.TestCase):
                 self.assertEqual(hits, set(),
                                  f"量測器把合法形態 {command!r} 記成違規：{hits}")
 
+    def test_both_sides_agree_across_statement_gaps(self) -> None:
+        """R79：同一條 rc 樣本 × 間隔 0~4 句，兩端在**每一格**都必須判一樣。
+
+        這一維是上一版鎖缺的那個：字面同步、行為在 gap 0 也一致，但兩邊的**視窗**
+        長度不同 ⇒ gap≥1 的多行指令在量測端整類看不見。低報的方向看起來像「變乾淨」，
+        而那個數字是拿來寫進根 CLAUDE.md 下結論的。
+        """
+        for category, command in _PARITY_HITS:
+            if category != "rc-after-pipe" or "\n" not in command:
+                continue
+            head, _, tail = command.partition("\n")
+            for gap in _PARITY_GAP_RANGE:
+                variant = "\n".join([head] + [_PARITY_GAP_FILLER] * gap + [tail])
+                with self.subTest(gap=gap, command=command):
+                    rc, err = _run_lint_hook(
+                        _ps_payload(variant), force_os_name="nt")
+                    hits = self._probe_hits(variant)
+                    self.assertEqual(
+                        rc, 2,
+                        f"攔截器對間隔 {gap} 句的變體放行了：{variant!r}\n{err}")
+                    self.assertIn(
+                        category, hits,
+                        f"間隔 {gap} 句時攔截器擋得下、量測器卻記不到 "
+                        f"{variant!r}（量到 {hits}）——兩端的視窗長度不同，"
+                        "違規率會被系統性低估",
+                    )
+
 
 # ══════════════════════════════════════════════════════════════════════════
 # 註冊面棘輪：hook 的觸發射程只准擴大、不准縮小（R78／QA-03）
@@ -1391,6 +1726,14 @@ def registered_tool_scope(settings: dict) -> dict[tuple[str, str], set[str]]:
 #: 這是**下限**不是等式：值只准變大。要縮小或移除，就改這裡並在 commit 裡說明。
 _REGISTRATION_BASELINE: dict[tuple[str, str], frozenset[str]] = {
     ("SessionStart", ".claude/hooks/sdd_hook_router.py"): frozenset({"*"}),
+    # 🔴 R79 續航哨兵的**接電點**。為何非 SessionStart 不可：額度耗盡是 API 層失敗，
+    # 不是工具呼叫失敗 ⇒ 它在 hook 體系裡**沒有任何觸發點**，「撞到才反應」結構上
+    # 不可能成立，只能在還跑得動指令的最早時刻預防性武裝。本輪之前的續航協定是
+    # 手動武裝的，而那一刻沒有人會去武裝它——同輪連撞兩次額度、協定零作用即為實證。
+    # 契約（逐項見 .claude/settings.json 該條目的 _comment）：只在 Windows 動作／
+    # `AUTOSDD_SENTINEL_OFF` 可單獨關掉（刻意不與 `AUTOSDD_CONTEXT_GUARD_OFF` 共用）／
+    # 恆 exit 0 不出聲／detached 子行程故不阻塞開場／缺 planner 即 fail-open。
+    ("SessionStart", ".claude/hooks/context_budget_guard.py"): frozenset({"*"}),
     ("PreToolUse", ".claude/hooks/sdd_hook_router.py"): frozenset(
         {"Write", "Edit", "Read", "Bash", "NotebookEdit", "Task"}),
     ("PreToolUse", ".claude/hooks/lint_powershell_command.py"): frozenset(
@@ -1403,6 +1746,13 @@ _REGISTRATION_BASELINE: dict[tuple[str, str], frozenset[str]] = {
         {"Write", "Edit"}),
     ("PostToolUse", "AutoClaude/tools/hooks/check_sh_eol.py"): frozenset(
         {"Write", "Edit"}),
+    # 🔴 R79 由**並行的另一個包**新增的 PreToolUse 條目（`.claude/settings.json` 不在
+    # 本包的檔案所有權內，本包只負責讓帳對得上——同 `_SITE_CLASS_CENSUS` 的既有紀律）。
+    # 語意是「動手**之前**先看水位」，圈的是三個會一次吃掉大量 context 的工具。
+    # 收輪者請依當場實測重驗這一格：若那個包最後把條目撤掉，本列必須跟著撤，否則
+    # 棘輪會對著一個不存在的註冊喊紅。
+    ("PreToolUse", ".claude/hooks/context_budget_guard.py"): frozenset(
+        {"Task", "WebFetch", "WebSearch"}),
     # R78 context 水位觀測者。matcher 刻意不含 Write|Edit（那些內容在模型寫出時
     # 已在 context 內，對「還剩多少」沒有新資訊），也刻意不用 `*`（每次呼叫要付
     # 約 42ms 的 python 啟動成本；水位偵測漏掉某一次呼叫不會漏掉那個門檻）。

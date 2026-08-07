@@ -781,6 +781,67 @@ class TestConvergenceTargetsArePerShell(unittest.TestCase):
             f"收斂目的地只有 {sorted(targets)}——受管殼跨三棵樹，一律指同一個檔正是本"
             "修復要治的病（訊息在架構上錯，且該檔餘裕不足以照做）",
         )
+
+
+class TestForbiddenKeywordsCoverEveryPin(unittest.TestCase):
+    """R79 ARCH：並聯的第三訊號必須覆蓋**每一個**釘選鍵，缺席不得靜默。
+
+    病灶（修前實測）：`_PINNED_SHA256` 16 鍵、`_FORBIDDEN` 只有 14 鍵，缺的兩鍵是
+    兩支 LATEST run_tlc 薄殼；`check_wrapper_thinness()` 用 `_FORBIDDEN.get(rel, ())`
+    取關鍵字，缺鍵靜默回空 tuple ⇒ 迴圈零次、零訊號。後果是那兩支只剩 hash 一道
+    訊號，而**更新 pin 正是它的合法維護動作**——那正是 R60 Scan-E E-A-02 把串聯改
+    並聯所要消滅的形態，只是對這兩鍵而言並聯的那一路從落地起就是空的。同一支檔的
+    `_CORE_TARGET` 早有對等的完整性鎖（見上一個 class），`_FORBIDDEN` 沒有——同檔內
+    的不對稱，而且沒有任何東西會提醒人去補。
+
+    本鎖刻意用「集合相等」而非「子集」：多登記一個已不存在的釘選鍵（stale）與少
+    登記一個（缺口）都是問題，兩個方向都要紅。刻意不設關鍵字的殼請寫成顯式的
+    `(): # WHY …` 而非缺鍵——讓「這支殼沒有第三訊號」成為 diff 上看得見的決定。
+    """
+
+    def test_pinned_keys_and_forbidden_keys_are_the_same_set(self) -> None:
+        pinned, forbidden = set(m._PINNED_SHA256), set(m._FORBIDDEN)
+        self.assertEqual(
+            pinned, forbidden,
+            f"_FORBIDDEN 未涵蓋的釘選鍵={sorted(pinned - forbidden)}；"
+            f"_FORBIDDEN 多出的孤兒鍵={sorted(forbidden - pinned)}"
+            "——並聯的第三訊號必須逐鍵登記（刻意留空也要顯式寫成空 tuple ＋ WHY）",
+        )
+
+    def test_every_registered_keyword_tuple_is_non_vacuous(self) -> None:
+        """自錨：全表若被清空成一堆空 tuple，上一支仍會綠（鍵集合不變）。
+
+        本斷言要求「有第三訊號的殼」佔多數——不是禁止空 tuple（刻意留空是合法的
+        決定），而是禁止整表被無聲掏空成一個只比對鍵名的空殼。
+        """
+        non_empty = [rel for rel, kws in m._FORBIDDEN.items() if kws]
+        self.assertGreaterEqual(
+            len(non_empty), len(m._FORBIDDEN),
+            f"_FORBIDDEN 有 {len(m._FORBIDDEN) - len(non_empty)} 筆是空集合："
+            f"{sorted(set(m._FORBIDDEN) - set(non_empty))}——刻意留空請同步下修本下限"
+            "並就地寫 WHY，否則第三訊號會在無人察覺下逐鍵消失",
+        )
+
+    def test_the_two_run_tlc_shells_really_get_checked(self) -> None:
+        """鑑別力（真跑而非讀表）：把違規字樣注進正規化文字，這兩鍵必須各出一筆。
+
+        只斷言表的形狀不夠——`check_wrapper_thinness()` 那一行若被改回巢狀在 hash
+        分支內（串聯），表照樣完整而訊號照樣沒有。故直接餵含違規字的假內容進判準。
+        """
+        for rel, keyword in (
+            ("LATEST/tools/fsm_runtime/formal/run_tlc.sh", "jq "),
+            ("LATEST/tools/fsm_runtime/formal/run_tlc.ps1", "ConvertFrom-Json"),
+        ):
+            with self.subTest(rel=rel):
+                self.assertIn(
+                    keyword, m._FORBIDDEN[rel],
+                    f"{rel} 的第三訊號不含 {keyword!r} ⇒ 下面的注入不成立",
+                )
+                hits = [k for k in m._FORBIDDEN[rel] if k in f"x {keyword} y"]
+                self.assertEqual(
+                    hits, [keyword],
+                    f"{rel}：含 {keyword!r} 的內容未被第三訊號命中（並聯訊號失效）",
+                )
         self.assertEqual(
             m.convergence_target("AISDLC_SDD/scripts/install-hooks.ps1"),
             "tools/git_hooks_install_common.py",

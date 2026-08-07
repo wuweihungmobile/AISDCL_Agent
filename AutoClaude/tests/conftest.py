@@ -62,6 +62,71 @@ def pytest_addoption(parser):
     )
 
 
+# ──────────────────────────────────────────────────────────────
+# R79 收輪（掌舵者系統問題 S3／QA 實測）：PG 自動偵測掛到**本機預設路徑**上
+# ──────────────────────────────────────────────────────────────
+# 缺陷本體（QA 當回合親跑）：R79 落地的 `local_ci_gate.pg_autodetect()` 機制本身是好的
+# （直接呼叫它回 True），但它當時**只有 local_ci_gate 一個呼叫端**，而掌舵者實際在跑的
+# 那條路（`python -m pytest tests/ -q`，不設任何環境變數）根本不經過它 ⇒ 修完之後那個
+# 數字仍是 136 skipped，一支都沒少。「掛錯入口」對使用者而言與「沒做」是同一件事。
+# conftest 是 pytest **一定**會載的那一層，掛在這裡才會對每一個入口生效（本機直跑／
+# pre-push 的 AutoClaude leg／CI test job），而不是只對「有人記得跑 local_ci_gate」生效。
+#
+# 安全性——四條剎車全部沿用 `local_ci_gate.pg_autodetect()`，本檔**不複製任何一條判斷**
+# （同一份知識只有一個家；這是本 repo 最常復發的缺陷形態）：
+#   ① 使用者已顯式設過任一 DSN 變數 ⇒ 不碰（顯式優先）；② `CI` 有值 ⇒ 不跑；
+#   ③ 本行程已在跑某支測試 ⇒ 不跑；④ 那顆 DB 必須真的被 migrate 過才注入。
+#   偵測不到 PG 就**靜默不注入**——沒有 Docker／沒有 PG 的機器一切照舊，不會多一個紅字。
+#   整條關掉：`AUTOCLAUDE_NO_PG_AUTODETECT=1`。
+# 本檔另加第 ⑤ 條：載入或呼叫失敗一律吞掉並記下理由。這裡 fail-open 是對的——失敗時
+# 事情回到「沒有這個機制」的原狀，而不是讓一個為了方便而加的東西有能力弄垮整個 session。
+_LOCAL_CI_GATE_PATH = Path(__file__).resolve().parent.parent / "tools" / "local_ci_gate.py"
+
+#: `pytest_configure` 的量測結果，供 `pytest_terminal_summary` 印給人看。
+_PG_AUTODETECT_NOTE: str | None = None
+
+
+def _local_ci_gate():
+    """載入 `AutoClaude/tools/local_ci_gate.py`；失敗回 None。
+
+    刻意以檔案路徑載入而不是 `sys.path.insert(0, tools/)`：那會讓整個 session 的
+    top-level 匯入空間多出一整個目錄的模組名，而本檔是**最早**被載入的那一層，遮蔽
+    範圍最大。註冊回 `sys.modules["local_ci_gate"]` 是為了與
+    `tests/tools/test_local_ci_gate.py` 共用**同一個模組物件**——兩份副本會各有一份
+    模組級狀態，那正是「同一份知識兩個家」的執行期版本。
+    """
+    import importlib.util
+
+    cached = sys.modules.get("local_ci_gate")
+    if cached is not None:
+        return cached
+    spec = importlib.util.spec_from_file_location("local_ci_gate", _LOCAL_CI_GATE_PATH)
+    if spec is None or spec.loader is None:
+        return None
+    module = importlib.util.module_from_spec(spec)
+    sys.modules["local_ci_gate"] = module
+    try:
+        spec.loader.exec_module(module)
+    except Exception:
+        sys.modules.pop("local_ci_gate", None)
+        raise
+    return module
+
+
+def pytest_configure(config):  # noqa: ARG001
+    """在**收集之前**跑一次 PG 自動偵測（模組級 skipif 於收集時求值，晚一步就沒用了）。"""
+    global _PG_AUTODETECT_NOTE
+    try:
+        gate = _local_ci_gate()
+        if gate is None:
+            _PG_AUTODETECT_NOTE = f"跳過：載入不到 {_LOCAL_CI_GATE_PATH}"
+            return
+        _, why = gate.pg_autodetect()
+        _PG_AUTODETECT_NOTE = why
+    except Exception as exc:  # noqa: BLE001 — 見上方第 ⑤ 條
+        _PG_AUTODETECT_NOTE = f"跳過：自動偵測本身出錯（{type(exc).__name__}: {exc}）"
+
+
 # SD_09 W2 後續處理（2026-05-21）— pytest-randomly cross-test cwd state leak 防漏 fixture
 # 對應 SD_Improving_09.md §523 範圍外議題「pre-existing test isolation」。
 # 即便目前測試無顯式 os.chdir，pytest-randomly 隨機順序可能觸發 import-time side-effect 或
@@ -278,3 +343,17 @@ def pytest_terminal_summary(terminalreporter, exitstatus, config):  # noqa: ARG0
         )
         for node_id in posix_ids:
             terminalreporter.write_line(f"  - {node_id}")
+    # R79 收輪：**剖面標記**——把「這次是在有沒有 PG 的條件下跑的」寫進輸出本身。
+    # 消費者＝`local_ci_gate.py --census-only`（push 通道與 CI 用它判 skip 分群天花板）。
+    # 它讀的是別的行程留下的 log，而 conftest 注入的 DSN 只存在於 **pytest 這個行程**的
+    # env 裡，不會傳給任何父行程 ⇒ 只有這裡說得準，就必須由這裡寫下來。標記字串由
+    # local_ci_gate 產生（唯一真相源），本檔不自己拼；載不到就不印——`--census-only`
+    # 會因為找不到標記而 fail-loud，那正確：剖面量不到時任何天花板比較都沒有意義。
+    try:
+        gate = _local_ci_gate()
+    except Exception:  # noqa: BLE001 — 印摘要不得有能力弄垮 session（同 pytest_configure）
+        gate = None
+    if gate is not None:
+        terminalreporter.write_line(gate.pg_marker_line(gate.pg_dsn_in_effect()))
+    if _PG_AUTODETECT_NOTE:
+        terminalreporter.write_line(f"[PG autodetect] {_PG_AUTODETECT_NOTE}")

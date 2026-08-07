@@ -73,6 +73,7 @@ from skip_static_scan import (  # noqa: E402
 from skip_tag_policy import (  # noqa: E402
     _CACHE_DIR_NAMES,  # noqa: F401  ← 再匯出（既有引用：test_ps_engine_ssot 引為先例）
     _EXEMPT_HANDOVER_RE,  # noqa: F401  ← 再匯出（本輪：豁免格式面的判準本體）
+    _NONLITERAL_TAG_DEBT,  # R79：非字面 reason 那一面的獨立存量帳
     _POSIX_TAG_RATCHET,  # noqa: F401  ← 再匯出
     _SITE_CLASS_CENSUS,  # noqa: F401  ← 再匯出
     _TREE_FILE_FLOORS,  # noqa: F401  ← 再匯出
@@ -158,6 +159,71 @@ def report_windows_skip_tag_exemption_problems(result) -> list[str]:
     return problems
 
 
+# ── 詞彙鎖的輸入面加寬（R79／D-skipped #3）─────────────────────────────────────
+#
+# 🔴 缺陷本體：R77 為了防「發明一個新標籤是零成本的」而建了 `unregistered_tag_problems`，
+# 但它的輸入只有 `skip_decorator_sites()` 抽得到的**字面** reason；而該抽取器對 f-string
+# 一律 `literal_eval` 失敗 ⇒ 整個站點被丟掉。R76 指名的**唯一**已知違規實例
+# （`tools/tests/test_dev_start.py` 的 `self.skipTest(f"[TOOL-MISSING] …")`）正好長成那樣，
+# 於是「已知缺陷 → 建了鎖 → 鎖看不到那個已知缺陷」，隱形三輪。
+# 這是 R77／R78 自己診斷出的頭號病（鎖存在但沒有鑑別力）在 skip 治理面上的實例。
+#
+# 修法就是抽取器的一句話：標籤依契約一定在 reason 的**最前面**，而 f-string 的第一段
+# 若是常數就已經含住整個標籤（`ast.JoinedStr.values[0]`）⇒ 取那一段就夠判，不需要求值。
+# `+` 串接同理（取最左端）。
+#
+# 🔴 為何住在這支 facade 而不是 `skip_static_scan`（它才是 AST 那一面的家）：本輪有六個
+# 包並行改樹，`skip_static_scan.py` 不在本包的檔案所有權內，跨界改動＝互踩假紅。
+# 本函式只做「把既有詞彙鎖的輸入補齊」＝閘門編排，與本檔第三項職責同性質；搬家已列入交棒。
+_TAG_BEARING_SKIP_CALLS = frozenset({"skipIf", "skipif", "skipUnless", "skipTest", "skip"})
+
+
+def _leading_constant(node: object) -> str | None:
+    """reason 節點的**開頭常數片段**（f-string／`+` 串接皆可）；取不到回 None。"""
+    import ast
+
+    if isinstance(node, ast.Constant):
+        return node.value if isinstance(node.value, str) else None
+    if isinstance(node, ast.JoinedStr):
+        return _leading_constant(node.values[0]) if node.values else None
+    if isinstance(node, ast.BinOp) and isinstance(node.op, ast.Add):
+        return _leading_constant(node.left)
+    return None
+
+
+def nonliteral_skip_reason_prefixes(sources: Mapping[str, str]) -> list[str]:
+    """純函式：reason **不是**字面字串（f-string／串接）的 skip 站點，其開頭常數片段。
+
+    與 `skip_decorator_sites()` 互補、刻意不重疊：那一支已經處理得到字面值的站點，
+    這一支只補它結構上丟掉的那一批，兩者合起來才是「所有寫在原始碼裡的標籤」。
+    """
+    import ast
+
+    out: list[str] = []
+    for name, src in sorted(sources.items()):
+        for node in ast.walk(ast.parse(src, filename=name)):
+            if not isinstance(node, ast.Call) or not node.args:
+                continue
+            kind = str(getattr(node.func, "attr", None) or getattr(node.func, "id", None) or "")
+            if kind not in _TAG_BEARING_SKIP_CALLS:
+                continue
+            reason_node: object | None = None
+            for kw in node.keywords:
+                if kw.arg == "reason":
+                    reason_node = kw.value
+            if reason_node is None:
+                reason_node = node.args[1] if len(node.args) > 1 else node.args[0]
+            try:
+                if isinstance(ast.literal_eval(reason_node), str):  # type: ignore[arg-type]
+                    continue     # 字面值 ⇒ 已由 skip_decorator_sites 承接，不重複計
+            except Exception:  # noqa: BLE001 — 取不到字面值正是本函式的射程
+                pass
+            prefix = _leading_constant(reason_node)
+            if prefix:
+                out.append(prefix)
+    return out
+
+
 def _is_repo_main_tests_dir(tests_dir: Path) -> bool:
     """呼叫端傳進來的是不是**這個 repo 真正的** `tools/tests`。
 
@@ -210,8 +276,14 @@ def report_untagged_windows_skip_decorators(tests_dir: Path, pattern: str) -> li
     census_problems = site_class_census_problems(census) if repo_mode else []
     # 本輪：標籤詞彙表的成員檢查。射程與上面三道一致（只在 repo 模式），資料取自
     # **同一批** sources 抽出的字面 reason，不另掃一次磁碟。
-    vocab = unregistered_tag_problems(
-        [site.reason for site in skip_decorator_sites(sources)]) if repo_mode else []
+    # R79（D-skipped #3）：輸入面補上「reason 不是字面字串」的站點（f-string／串接）。
+    # 修前那一批對本鎖結構上隱形，而唯一已知的違規實例正好落在裡面。
+    # 兩面各自對自己的存量帳（WHY 見 `skip_tag_policy._NONLITERAL_TAG_DEBT`）。
+    vocab = (
+        unregistered_tag_problems([s.reason for s in skip_decorator_sites(sources)])
+        + unregistered_tag_problems(nonliteral_skip_reason_prefixes(sources),
+                                    debt=_NONLITERAL_TAG_DEBT)
+    ) if repo_mode else []
     problems += [f"反方向標籤棘輪：{msg}" for msg in ratchet]
     problems += [f"掃描面下限：{msg}" for msg in floors]
     problems += [f"站點分類普查：{msg}" for msg in census_problems]

@@ -22,6 +22,10 @@
 #   2. pwsh parse    — active .ps1（根層 tools/ + AutoClaude/tools/ + AISDLC_SDD/scripts/
 #                      + AISDLC_SDD LATEST 版；凍結版 v0.01~v0.(N-1) 有已知缺陷且依紀律
 #                      不回改 → 排除）以 Parser::ParseFile 解析，parse error 即 fail；
+#                      🔴 R79 起掃描面不再由本 step 自行列舉，一律向 Python SSOT
+#                      tools/_script_scan_surface.py（`--list --check-floors`）取，
+#                      per-tree 檔數下限與 LATEST 解析都在該 SSOT 內強制、rc=1 即 throw；
+#                      同一支工具亦已接進 pre-push root-infra leg 的快層守門迴圈
 #                      同 step 加 UTF-8 BOM 守門 — 含非 ASCII 的 active .ps1 必須有
 #                      EF BB BF（.editorconfig utf-8-bom 政策的 CI 機械複核；本機僅
 #                      Claude Code hook check_ps1_encoding.py 補 BOM，人工編輯器 /
@@ -305,46 +309,43 @@ jobs:
 
       - name: pwsh 語法解析 + UTF-8 BOM 守門（active .ps1）
         run: |
+          # 🔴 R79 ARCH：掃描面（三棵固定樹 ＋ AISDLC_SDD LATEST 版樹、皆遞迴、凍結版
+          # 排除）不再由本 step 自行 Get-ChildItem 列舉，一律向 Python SSOT
+          # tools/_script_scan_surface.py 取。WHY：本 step 與 tools/windows_smoke_local.ps1
+          # [1/9] 曾是同一份掃描面的第 2、第 3 份獨立實作，repo 因此養了 866 行對抗式
+          # 正則錨（tools/tests/_ci_scan_anchors.py ＋ test_ci_scan_anchors.py）只為偵測
+          # 三份是否同步，且那組錨自承有三種已實測抓不到的逃逸形態。複本消失後「不同步」
+          # 結構上不可能發生，該 866 行同輪退場。
+          # per-tree 檔數下限與 LATEST 解析（DEF-101-133 委派 sdd_version.py）都在 SSOT
+          # 內強制：掃描面靜默縮小或 LATEST 解析失敗 → 該 CLI rc=1 → 本 step throw。
           pwsh -NoProfile -Command '
-            # active .ps1 範圍：根層 tools/ + AutoClaude/tools/ + AISDLC_SDD/scripts/
-            # + AISDLC_SDD LATEST 版（凍結版依紀律不回改 → 排除；LATEST 偵測委派
-            # scripts/sdd_version.py 單一真相源——R10 DEF-101-133，不再內嵌 regex 重寫）
-            $files = @(Get-ChildItem -Path tools -Recurse -Filter *.ps1 -File)
-            $files += @(Get-ChildItem -Path AutoClaude/tools -Recurse -Filter *.ps1 -File)
-            # R13 CI-4：補 -Recurse 對齊上兩行——AISDLC_SDD/scripts/ 新增子目錄 .ps1
-            # 時不再逸出 parse＋BOM 掃描面（現況子目錄僅 tests/*.py，屬預防性收斂）
-            $files += @(Get-ChildItem -Path AISDLC_SDD/scripts -Recurse -Filter *.ps1 -File)
-            $latestName = (& python3 AISDLC_SDD/scripts/sdd_version.py --sdd-root AISDLC_SDD | Out-String).Trim()
-            # R10 二審 SD P3：解析失敗改 fail-loud（對齊 windows-compat-ci 同款遷移的
-            # throw 語意）——空值 silent skip 會讓 LATEST 版 .ps1 靜默逸出掃描面
-            if (-not $latestName) { throw "sdd_version.py SSOT 解析失敗 - 找不到 LATEST 版本目錄" }
-            Write-Host "AISDLC_SDD LATEST 版：$latestName（其餘凍結版排除）"
-            $files += @(Get-ChildItem -Path (Join-Path "AISDLC_SDD" $latestName) -Recurse -Filter *.ps1 -File)
+            $files = @(& python3 tools/_script_scan_surface.py --list --suffix .ps1 --with-latest --check-floors --absolute)
+            if ($LASTEXITCODE -ne 0) { throw "tools/_script_scan_surface.py 掃描面列舉失敗（rc=$LASTEXITCODE）- 掃描邊界不得靜默縮小" }
             Write-Host "待檢查 active .ps1 共 $($files.Count) 支"
             $errCount = 0
             foreach ($f in $files) {
               $tokens = $null; $parseErrors = $null
-              [void][System.Management.Automation.Language.Parser]::ParseFile($f.FullName, [ref]$tokens, [ref]$parseErrors)
+              [void][System.Management.Automation.Language.Parser]::ParseFile($f, [ref]$tokens, [ref]$parseErrors)
               if ($parseErrors -and $parseErrors.Count -gt 0) {
-                Write-Host "::error::$($f.FullName) parse error"
+                Write-Host "::error::$f parse error"
                 foreach ($e in $parseErrors) { Write-Host "  $($e.Extent.StartLineNumber): $($e.Message)" }
                 $errCount += 1
                 continue
               }
               # BOM 守門：含非 ASCII 的 .ps1 必須以 EF BB BF 開頭（.editorconfig
               # utf-8-bom 政策；無 BOM 時 zh-TW Windows PS5.1 以 CP950 誤讀）
-              $bytes = [System.IO.File]::ReadAllBytes($f.FullName)
+              $bytes = [System.IO.File]::ReadAllBytes($f)
               $hasBom = ($bytes.Length -ge 3 -and $bytes[0] -eq 0xEF -and $bytes[1] -eq 0xBB -and $bytes[2] -eq 0xBF)
               if (-not $hasBom) {
                 $nonAscii = $false
                 foreach ($b in $bytes) { if ($b -gt 0x7F) { $nonAscii = $true; break } }
                 if ($nonAscii) {
-                  Write-Host "::error::$($f.FullName) 含非 ASCII 字元但無 UTF-8 BOM（.editorconfig 要求 utf-8-bom；zh-TW PS5.1 會以 CP950 誤讀）"
+                  Write-Host "::error::$f 含非 ASCII 字元但無 UTF-8 BOM（.editorconfig 要求 utf-8-bom；zh-TW PS5.1 會以 CP950 誤讀）"
                   $errCount += 1
                   continue
                 }
               }
-              Write-Host "OK: $($f.FullName)"
+              Write-Host "OK: $f"
             }
             if ($errCount -gt 0) { exit 1 }
           '

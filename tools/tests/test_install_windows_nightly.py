@@ -1126,9 +1126,8 @@ class TestScheduledTaskDriftChecker(unittest.TestCase):
     def test_partial_absence_makes_main_exit_nonzero(self) -> None:
         """端到端（注入式）：main() 對部分缺席必須 rc=1。
 
-        意圖：evaluate() 判對了但 main() 的 rc 白名單沒跟上，對接線層而言等於沒修
-        ——nightly 讀的是 rc 與 `status=` 那一行，不是 report dict。
-        本 case 以注入 `export_task_xml` 取代真排程查詢，故任何平台都跑得到。
+        意圖：evaluate() 判對了但 main() 的 rc 白名單沒跟上等於沒修——nightly 讀的是 rc
+        與 `status=` 那一行。**兩條**查詢路徑都要注入，否則 Linux 上 rc 巧合也是 1。
         """
         tasks = list(self.expectations)
         absent = tasks[-1]
@@ -1139,6 +1138,7 @@ class TestScheduledTaskDriftChecker(unittest.TestCase):
         buf = io.StringIO()
         with mock.patch.object(self.mod.sys, "platform", "win32"), \
              mock.patch.object(self.mod, "export_task_xml", _fake_export), \
+             mock.patch.object(self.mod, "query_task_info", lambda _task: None), \
              mock.patch("sys.stdout", buf):
             rc = self.mod.main([])
         out = buf.getvalue()

@@ -31,8 +31,11 @@ R12 掃描面（ARCH-R12-4；DEF-101-149 病灶類別在其他測試樹此前零
 from __future__ import annotations
 
 import ast
+import functools
 import io
+import os
 import re
+import subprocess
 import sys
 import tempfile
 import tokenize
@@ -1911,8 +1914,19 @@ class TestSkipDirectionAndTagSymmetry(unittest.TestCase):
         )
         tree = next(iter(baseline))
         worse = {**baseline, tree: baseline[tree] + 1}
-        better = {**baseline, tree: max(0, baseline[tree] - 1)}
         self.assertTrue(_wst.posix_tag_ratchet_problems(worse), "新增未標籤站點沒被擋下")
+        # 🔴 R79：「已補標未下修」這一向必須挑一個**基線 > 0** 的樹來扣。原本寫的是
+        # `next(iter(baseline))` 再 `max(0, v - 1)`——當第一格剛好是 0 時，扣完等於沒扣，
+        # 這半題結構上恆綠。它在 R79 當回合真的發生了：另一個包把 `tools/tests` 由 1
+        # 下修為 0（一個正確的動作），這支鎖的鑑別力就在別人還債的那一刻靜默歸零。
+        # 判準因此不再依賴「哪一格排第一」這種偶然事實。
+        payable = [t for t, v in baseline.items() if v > 0]
+        self.assertTrue(
+            payable,
+            "基線全格為 0 ⇒ 「已補標未下修」這一向無從施測。欠債真的清乾淨是好事，"
+            "但這支鎖必須改成別的施測法（例如整格移除），不得留一題恆綠的斷言",
+        )
+        better = {**baseline, payable[0]: baseline[payable[0]] - 1}
         self.assertTrue(
             _wst.posix_tag_ratchet_problems(better),
             "補標後基線未下修卻放行——棘輪會就地腐化",
@@ -2719,42 +2733,201 @@ def _capability_probed(tree: ast.AST) -> set[str]:
     return probed
 
 
-def _foreign_api_uses(tree: ast.AST, probed: set[str]) -> list[tuple[int, str, str]]:
-    """(行號, 方向, 說明)——AST 上所有單平台專屬 symbol 的使用點。"""
-    found: list[tuple[int, str, str]] = []
+def _foreign_api_uses(
+    tree: ast.AST, probed: set[str]
+) -> list[tuple[ast.AST, int, str, str]]:
+    """(節點, 行號, 方向, 說明)——AST 上所有單平台專屬 symbol 的使用點。
+
+    🔴 R79：回傳**節點本體**而不只行號。站點級守衛判定必須沿 AST 祖先鏈往上走；
+    只有行號時，能做的最多是「整檔有沒有出現守衛字樣」那種檔案級近似——而那正是
+    本輪修掉的缺陷（同一組 5 筆注入只抓到 1 筆）。
+    """
+    found: list[tuple[ast.AST, int, str, str]] = []
     for node in ast.walk(tree):
         if isinstance(node, ast.Import):
             for alias in node.names:
                 top = alias.name.split(".")[0]
                 if top in _POSIX_ONLY_MODULES:
-                    found.append((node.lineno, "POSIX-only", f"import {top}"))
+                    found.append((node, node.lineno, "POSIX-only", f"import {top}"))
                 elif top in _WINDOWS_ONLY_MODULES:
-                    found.append((node.lineno, "Windows-only", f"import {top}"))
+                    found.append((node, node.lineno, "Windows-only", f"import {top}"))
         elif isinstance(node, ast.ImportFrom) and node.module:
             top = node.module.split(".")[0]
             if top in _POSIX_ONLY_MODULES:
-                found.append((node.lineno, "POSIX-only", f"from {top} import …"))
+                found.append((node, node.lineno, "POSIX-only", f"from {top} import …"))
             elif top in _WINDOWS_ONLY_MODULES:
-                found.append((node.lineno, "Windows-only", f"from {top} import …"))
+                found.append((node, node.lineno, "Windows-only", f"from {top} import …"))
         elif isinstance(node, ast.Attribute) and isinstance(node.value, ast.Name):
             owner, attr = node.value.id, node.attr
             if attr in probed:
                 continue
             if owner == "os" and attr in _POSIX_ONLY_OS_ATTRS:
-                found.append((node.lineno, "POSIX-only", f"os.{attr}"))
+                found.append((node, node.lineno, "POSIX-only", f"os.{attr}"))
             elif owner == "os" and attr in _WINDOWS_ONLY_OS_ATTRS:
-                found.append((node.lineno, "Windows-only", f"os.{attr}"))
+                found.append((node, node.lineno, "Windows-only", f"os.{attr}"))
             elif owner == "signal" and attr in _POSIX_ONLY_SIGNALS:
-                found.append((node.lineno, "POSIX-only", f"signal.{attr}"))
+                found.append((node, node.lineno, "POSIX-only", f"signal.{attr}"))
         elif isinstance(node, ast.keyword) and node.arg == "preexec_fn":
-            found.append((node.lineno, "POSIX-only", "preexec_fn=（Windows 不支援）"))
+            found.append((node, node.lineno, "POSIX-only", "preexec_fn=（Windows 不支援）"))
         elif (isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)
               and node.func.attr in {"set_start_method", "get_context"}
               and node.args and isinstance(node.args[0], ast.Constant)
               and node.args[0].value in {"fork", "forkserver"}):
-            found.append((node.lineno, "POSIX-only",
+            found.append((node, node.lineno, "POSIX-only",
                           f"{node.func.attr}('{node.args[0].value}')"))
     return found
+
+
+# ── 站點級守衛（R79 修 P1：檔案級＋純文字特赦的鑑別力只有 20%）─────────────────
+# 舊判準：「整檔第一個含守衛字樣的**行號** < 使用點行號 ⇒ 特赦」。三個結構性後果：
+#   ① 檔案級——任何一段與違規完全無關的守衛（隔壁函式、檔頭的一句 `if
+#      sys.platform == "win32"`）會把它後面**整檔**的違規全部赦免；
+#   ② 純文字——守衛字樣寫在字串常數或訊息裡即可開後門，而本 repo 的中文 WHY
+#      大量逐字提到 `sys.platform == "win32"` 這種字樣，開後門完全不像在繞過；
+#   ③ 只看「之前出現過」——連「同一個作用域」都不要求。
+# 新判準只問一句：**這個使用點在語法上被平台守衛罩住了嗎**。四種罩法（皆為
+# repo 內既存的真實寫法，不是發明出來的）：
+#   enclosing-if       祖先鏈上有 `If`/`IfExp`/`While`，其 test 在判平台
+#   early-return-guard 同一個 block 內、排在它**之前**的 `if <守衛>: … return`
+#                      （`platform_caps.kill_process_tree()` 就是這個形狀）
+#   guarded-decorator  所在 def/class（含**同檔基底類別**）帶平台守衛 decorator
+#                      （`@unittest.skipUnless(sys.platform == "darwin", …)`）
+#   try-capability     使用點在 `try:` 本體、而 handler 捕 ImportError／
+#                      ModuleNotFoundError／AttributeError＝作者明示這是可選能力
+# 🔴 刻意劃界：不做方向判定（`if is_windows():` 的 else 分支放 POSIX 碼是對的、
+#   body 放 POSIX 碼是錯的，兩者本判準都算「有守衛」）。方向那一半屬控制流語意，
+#   靜態誤判的代價是假紅，而假紅會逼下一輪把整條鎖關掉（本檔第五道判準同樣取捨）。
+#: 平台守衛在 **AST** 上的形狀：只認「決定平台的**程式碼符號**」。
+#: 為何不沿用 `_PLATFORM_GUARDS`（行文字 SSOT）做比對：那份清單是給**行掃描**用的，
+#: 在 AST 上照用會把 `if "IS_WINDOWS" in env:`／`if "OSTYPE" in line:` 這種**字串**
+#: 判成守衛——正是本輪要修的後門。兩者不得漂移這件事由
+#: `test_text_guard_ssot_is_fully_recognised_by_the_ast_predicate` 機械釘住。
+_PLATFORM_DECIDING_SYMBOLS: tuple[str, ...] = (
+    "sys.platform", "os.name", "platform.system", "os.uname",
+    "is_windows", "is_macos", "is_posix",
+    "IS_WINDOWS", "IS_MACOS", "_is_windows",
+)
+#: `_PLATFORM_GUARDS` 內「碰巧也是合法 Python 運算式、但語意屬別的語言」的項。
+#: 釘住它＝新增任何 Python 側守衛字樣而忘了教 AST 判準時，上面那支鎖會紅。
+_NON_PYTHON_GUARD_TOKENS: frozenset[str] = frozenset({"uname -s", "OSTYPE"})
+#: 「對面平台上這個 symbol 根本不存在」會拋的例外——捕它＝作者明示可選能力。
+_CAPABILITY_EXC_NAMES: frozenset[str] = frozenset(
+    {"ImportError", "ModuleNotFoundError", "AttributeError"})
+_BLOCK_FIELDS: tuple[str, ...] = ("body", "orelse", "finalbody")
+
+
+def _dotted_name(node: ast.AST) -> str | None:
+    """`a.b.c` 形態的節點還原成字串；不是 Name/Attribute 鏈則回 None。"""
+    if isinstance(node, ast.Name):
+        return node.id
+    if isinstance(node, ast.Attribute):
+        base = _dotted_name(node.value)
+        return f"{base}.{node.attr}" if base else node.attr
+    return None
+
+
+def is_platform_guard_expr(test: ast.AST) -> bool:
+    """這個運算式是不是在**判平台**？只認程式碼符號，字串／註解一律不算。"""
+    for sub in ast.walk(test):
+        dotted = _dotted_name(sub)
+        if dotted and any(
+            dotted == sym or dotted.endswith("." + sym)
+            for sym in _PLATFORM_DECIDING_SYMBOLS
+        ):
+            return True
+    return False
+
+
+def _flow_terminates(stmts: list[ast.stmt]) -> bool:
+    """這個 block 的尾巴有沒有把控制流帶走（早退守衛成立的前提）。"""
+    if not stmts:
+        return False
+    last = stmts[-1]
+    if isinstance(last, (ast.Return, ast.Raise, ast.Break, ast.Continue)):
+        return True
+    if isinstance(last, ast.Expr) and isinstance(last.value, ast.Call):
+        return _dotted_name(last.value.func) in {"sys.exit", "os._exit", "exit", "quit"}
+    return False
+
+
+def _try_catches_capability(node: ast.Try) -> bool:
+    for handler in node.handlers:
+        if handler.type is None:
+            continue
+        exprs = (handler.type.elts if isinstance(handler.type, ast.Tuple)
+                 else [handler.type])
+        for exc in exprs:
+            name = (_dotted_name(exc) or "").rsplit(".", 1)[-1]
+            if name in _CAPABILITY_EXC_NAMES:
+                return True
+    return False
+
+
+def _ast_scope_index(tree: ast.AST) -> tuple[dict, dict, dict]:
+    """回 (parent, slot, classes)：slot[child] = (owner, field, index)。"""
+    parent: dict = {}
+    slot: dict = {}
+    classes: dict[str, ast.ClassDef] = {}
+    for node in ast.walk(tree):
+        if isinstance(node, ast.ClassDef):
+            classes[node.name] = node
+        for field in _BLOCK_FIELDS:
+            seq = getattr(node, field, None)
+            if isinstance(seq, list):
+                for index, child in enumerate(seq):
+                    if isinstance(child, ast.AST):
+                        slot[child] = (node, field, index)
+        for child in ast.iter_child_nodes(node):
+            parent[child] = node
+    return parent, slot, classes
+
+
+def _decorated_by_platform_guard(
+    node: ast.AST, classes: dict[str, ast.ClassDef], seen: set | None = None
+) -> bool:
+    """def/class 自己或（同檔）任一祖先類別帶平台守衛 decorator。
+
+    基底類別要跟著看，否則 `@unittest.skipUnless(sys.platform == "darwin", …)`
+    放在共用夾具基底、子類別只寫測試（本 repo 的既有寫法）會被整批誤判。
+    """
+    if any(is_platform_guard_expr(dec) for dec in getattr(node, "decorator_list", [])):
+        return True
+    if not isinstance(node, ast.ClassDef):
+        return False
+    seen = set() if seen is None else seen
+    for base in node.bases:
+        dotted = _dotted_name(base)
+        base_node = classes.get(dotted.rsplit(".", 1)[-1]) if dotted else None
+        if base_node is not None and base_node not in seen:
+            seen.add(base_node)
+            if _decorated_by_platform_guard(base_node, classes, seen):
+                return True
+    return False
+
+
+def guard_scope_for(node: ast.AST, parent: dict, slot: dict, classes: dict) -> str | None:
+    """該使用點被哪一種**站點級**守衛罩住；None＝一種都沒有（＝違規）。"""
+    cur = node
+    while cur in parent:
+        owner = parent[cur]
+        if (isinstance(owner, (ast.If, ast.IfExp, ast.While))
+                and is_platform_guard_expr(owner.test)):
+            return "enclosing-if"
+        if (isinstance(owner, ast.Try) and any(cur is s for s in owner.body)
+                and _try_catches_capability(owner)):
+            return "try-capability"
+        if (isinstance(owner, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef))
+                and _decorated_by_platform_guard(owner, classes)):
+            return "guarded-decorator"
+        position = slot.get(cur)
+        if position is not None:
+            blk_owner, field, index = position
+            for prev in getattr(blk_owner, field)[:index]:
+                if (isinstance(prev, ast.If) and is_platform_guard_expr(prev.test)
+                        and (_flow_terminates(prev.body) or _flow_terminates(prev.orelse))):
+                    return "early-return-guard"
+        cur = owner
+    return None
 
 
 def scan_foreign_platform_api(source: str, rel: str) -> tuple[list[str], list[str]]:
@@ -2763,22 +2936,27 @@ def scan_foreign_platform_api(source: str, rel: str) -> tuple[list[str], list[st
         tree = ast.parse(source)
     except SyntaxError:
         return [], []
-    lines = source.splitlines()
     markers = _xplat_markers(source)
-    guard_first_at: int | None = next(
-        (n for n, line in enumerate(lines, 1) if any(g in line for g in _PLATFORM_GUARDS)),
-        None,
-    )
+    uses = _foreign_api_uses(tree, _capability_probed(tree))
+    grouped: dict[tuple[int, str, str], list[ast.AST]] = {}
+    for node, lineno, side, what in uses:
+        grouped.setdefault((lineno, side, what), []).append(node)
+    # 索引只在真有使用點時才建（掃描面 800+ 檔，絕大多數一個使用點都沒有）。
+    parent, slot, classes = _ast_scope_index(tree) if grouped else ({}, {}, {})
     offenders: list[str] = []
     used: set[int] = set()
-    for lineno, side, what in sorted(set(_foreign_api_uses(tree, _capability_probed(tree)))):
+    for (lineno, side, what), nodes in sorted(grouped.items()):
         if markers.get(lineno):
             used.add(lineno)
             continue
-        if guard_first_at is not None and guard_first_at < lineno:
+        # 同一 (行, 方向, 說明) 有多個節點時，只要**其中一個**沒被罩住就算違規——
+        # 取第一個判會讓「同行兩處、一處有守衛」把另一處免費藏起來。
+        if all(guard_scope_for(n, parent, slot, classes) for n in nodes):
             continue
         offenders.append(
-            f"{rel}:{lineno}: 使用 {side} 的 `{what}` 但該行之前全檔沒有任何平台守衛"
+            f"{rel}:{lineno}: 使用 {side} 的 `{what}`，但這個**使用點**不在任何平台"
+            "守衛的作用域內（可接受的四種：包住它的 if 判平台／同 block 排在它之前的"
+            "早退守衛／所在 def-class 帶平台守衛 decorator／try 捕 ImportError 類）"
             "——對面平台上它不是「行為不同」而是「直接炸掉」（缺屬性／ImportError）"
         )
     stale = [
@@ -2790,6 +2968,22 @@ def scan_foreign_platform_api(source: str, rel: str) -> tuple[list[str], list[st
     return offenders, stale
 
 
+#: 站點級判準上線當回合的**存量**：檔案級特赦收成作用域級之後，仍未被任何作用域
+#: 守衛罩住的使用點數，逐檔精確計數。
+#: 判準是**雙向精確比對**：多一筆紅（新增了未守衛的使用點）、少一筆也紅（債已還，
+#: 請把數字改小）——只准降不准升的單邊寫法會讓這張表變成一張永久保護傘。
+#: 合法出口只有兩條：① 把站點改成作用域內守衛；② 該行行尾加 `_XPLAT_OK_MARKER` 標記。
+#: （本註解刻意不寫出那個標記的字面值——本檔自己也在掃描面內，寫出來就會被
+#:   `_xplat_markers()` 當成一個真的豁免標記而判 stale。）
+#: 🔴 R79 誠實劃界：表內這支檔不屬 R79 XPLAT 包的所有權（`tools/dev_start.py` 的
+#:   `_forward_signal_to_bootstrap()` 是 POSIX-only 的訊號 handler，只在 POSIX 側
+#:   `signal.signal()` 註冊——那個註冊點在別的函式裡，靜態上罩不到它），故本輪只
+#:   登記不代改；處置已列入交棒（加行尾豁免標記即可歸零）。
+_FOREIGN_API_SCOPE_DEBT: dict[str, int] = {
+    "tools/dev_start.py": 4,
+}
+
+
 class TestForeignPlatformApiIsGuarded(unittest.TestCase):
     """對面平台專屬 API 必須帶平台守衛（見上方區段 WHY）。"""
 
@@ -2799,12 +2993,23 @@ class TestForeignPlatformApiIsGuarded(unittest.TestCase):
             parse_failures, [],
             "以下 .py 無法 parse——掃描面不得靜默縮小：\n" + "\n".join(parse_failures),
         )
+        actual: dict[str, int] = {}
+        for line in offenders:
+            rel = line.split(":", 1)[0]
+            actual[rel] = actual.get(rel, 0) + 1
+        unregistered = [o for o in offenders
+                        if o.split(":", 1)[0] not in _FOREIGN_API_SCOPE_DEBT]
         self.assertEqual(
-            offenders, [],
-            "發現未守衛的單平台專屬 API（落地當回合全庫存量為 0，故本判準是零容忍、"
-            "沒有棘輪可以躲）——請加平台守衛（見 `_PLATFORM_GUARDS`）、改用 "
-            f"`hasattr` 明示可選能力，或於該行行尾加 `# {_XPLAT_OK_MARKER} <WHY>`：\n"
-            + "\n".join(offenders),
+            unregistered, [],
+            "發現未守衛的單平台專屬 API——請加**作用域內**平台守衛、改用 `hasattr` "
+            f"明示可選能力，或於該行行尾加 `# {_XPLAT_OK_MARKER} <WHY>`：\n"
+            + "\n".join(unregistered),
+        )
+        self.assertEqual(
+            actual, dict(_FOREIGN_API_SCOPE_DEBT),
+            "`_FOREIGN_API_SCOPE_DEBT` 與實測不符。多一筆＝新增了未守衛的使用點；"
+            "少一筆＝債已還請把數字改小（不改的話這張表會變成永久保護傘，"
+            "下一筆新違規會被舊值遮住）：\n" + "\n".join(offenders),
         )
         self.assertEqual(
             stale, [],
@@ -2871,6 +3076,832 @@ class TestForeignPlatformApiIsGuarded(unittest.TestCase):
         self.assertEqual(len(stale), 1, "違規已消失的標記必須被指名刪除")
         off, stale = self._scan(f"def f():\n    return os.fork()  # {_XPLAT_OK_MARKER}\n")
         self.assertEqual(len(off), 1, "WHY 留空的標記不得生效")
+
+    # ── R79：站點級特赦的紅綠自證（舊判準在這幾題上的實測值逐題記在斷言訊息裡）──
+
+    #: 5 筆彼此獨立的違規，刻意分散在 4 個函式：`import pwd`／`os.killpg`／
+    #: `signal.SIGKILL`／`os.getuid`／`os.fork`。
+    _FIVE_VIOLATIONS = (
+        "import pwd\n"
+        "\n"
+        "\n"
+        "def kill(pgid):\n"
+        "    os.killpg(pgid, signal.SIGKILL)\n"
+        "\n"
+        "\n"
+        "def who():\n"
+        "    return os.getuid()\n"
+        "\n"
+        "\n"
+        "def spawn():\n"
+        "    return os.fork()\n"
+    )
+    #: 與那 5 筆違規**完全無關**的一段守衛（隔壁函式），舊判準會拿它特赦整檔。
+    _UNRELATED_GUARD = (
+        "def unrelated():\n"
+        '    if sys.platform == "win32":\n'
+        "        return 1\n"
+        "    return 0\n"
+        "\n"
+        "\n"
+    )
+
+    def test_an_unrelated_guard_elsewhere_no_longer_amnesties_the_whole_file(self) -> None:
+        """情境 A：隔壁函式的守衛不得赦免整檔（舊判準此題只抓到 1/5）。"""
+        head, _, tail = self._FIVE_VIOLATIONS.partition("\n\n\n")
+        sample = head + "\n\n\n" + self._UNRELATED_GUARD + tail
+        off, _ = self._scan(sample)
+        self.assertEqual(
+            len(off), 5,
+            "同一組 5 筆違規只抓到部分 ⇒ 檔案級特赦仍在（舊判準實測 1/5）：\n"
+            + "\n".join(off),
+        )
+
+    def test_the_same_five_violations_without_any_guard(self) -> None:
+        """情境 B：對照組——沒有那段無關守衛時本來就該是 5/5。"""
+        off, _ = self._scan(self._FIVE_VIOLATIONS)
+        self.assertEqual(len(off), 5, "\n".join(off))
+
+    def test_a_guard_phrase_inside_a_string_constant_is_not_a_guard(self) -> None:
+        """情境 C：守衛字樣只出現在字串常數裡（舊判準此題 0/1）。"""
+        off, _ = self._scan(
+            'MSG = "設定 os.name == \'nt\' 時走另一條路"\n'
+            "\n"
+            "\n"
+            "def spawn():\n"
+            "    return os.fork()\n"
+        )
+        self.assertEqual(len(off), 1, f"字串常數不得構成守衛：{off}")
+
+    def test_a_string_operand_inside_an_if_test_is_not_a_guard(self) -> None:
+        """`if "IS_WINDOWS" in env:` 不是在判平台——這是文字比對留下的最後一個後門。"""
+        off, _ = self._scan(
+            'def f(env):\n    if "IS_WINDOWS" in env:\n        return os.fork()\n'
+            "    return 0\n"
+        )
+        self.assertEqual(len(off), 1, f"字串運算元不得構成守衛：{off}")
+
+    def test_each_accepted_scope_form_is_green(self) -> None:
+        """四種罩法逐一必綠——任何一種掉了，repo 內既有的合法寫法會整批假紅。"""
+        for label, sample in (
+            ("enclosing-if",
+             'def f():\n    if os.name != "nt":\n        return os.fork()\n    return 0\n'),
+            ("early-return-guard",
+             "def f(pid):\n    if platform_utils.is_windows():\n        return None\n"
+             "    return os.getpgid(pid)\n"),
+            ("guarded-decorator",
+             '@unittest.skipIf(sys.platform == "win32", "POSIX only")\n'
+             "class T:\n    def t(self):\n        return os.fork()\n"),
+            ("inherited-decorator",
+             '@unittest.skipUnless(sys.platform == "darwin", "mac only")\n'
+             "class Base:\n    pass\n"
+             "\n"
+             "\n"
+             "class T(Base):\n    def t(self):\n        return os.getuid()\n"),
+            ("try-capability",
+             "try:\n    import pwd\nexcept ImportError:\n    pwd = None\n"),
+        ):
+            with self.subTest(scope=label):
+                off, _ = self._scan(sample)
+                self.assertEqual(off, [], f"{label} 誤報：{off}")
+
+    def test_a_terminating_guard_is_required_for_the_early_return_form(self) -> None:
+        """早退守衛必須真的早退：`if is_windows(): pass` 罩不住後面的 POSIX 碼。"""
+        off, _ = self._scan(
+            "def f(pid):\n    if platform_utils.is_windows():\n        pass\n"
+            "    return os.getpgid(pid)\n"
+        )
+        self.assertEqual(len(off), 1, f"沒有帶走控制流的 if 不算守衛：{off}")
+
+    def test_text_guard_ssot_is_fully_recognised_by_the_ast_predicate(self) -> None:
+        """鎖的鎖：`_PLATFORM_GUARDS` 的 Python 側每一項都必須被 AST 判準認得。
+
+        兩份知識（行文字 SSOT ／ AST 符號表）不得單向漂移——有人往
+        `_PLATFORM_GUARDS` 補一個新的 Python 守衛字樣卻忘了教 AST 判準時，
+        那個字樣在本判準上會靜默失效（＝合法寫法假紅）。這裡把「解析得動、
+        但 AST 判準不認」的集合精確釘死在已知的非 Python 項上。
+        """
+        unrecognised = set()
+        for token in _PLATFORM_GUARDS:
+            try:
+                expr = ast.parse(token, mode="eval").body
+            except SyntaxError:
+                continue          # PowerShell／shell 專屬字樣，本判準射程外
+            if not is_platform_guard_expr(expr):
+                unrecognised.add(token)
+        self.assertEqual(
+            unrecognised, set(_NON_PYTHON_GUARD_TOKENS),
+            "`_PLATFORM_GUARDS` 與 `_PLATFORM_DECIDING_SYMBOLS` 漂移了："
+            f"{sorted(unrecognised)}",
+        )
+
+    def test_the_debt_table_only_names_files_that_exist(self) -> None:
+        """存量債表不得指向幽靈檔（否則那一格永遠是 0，等同一張空白支票）。"""
+        missing = [rel for rel in _FOREIGN_API_SCOPE_DEBT
+                   if not (_REPO_ROOT / rel).is_file()]
+        self.assertEqual(missing, [], f"債表指向不存在的檔：{missing}")
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# R79（D-ps1eol）— **工作樹**行尾閘：`.ps1` 必為 CRLF、`.sh` 必為 LF
+# ══════════════════════════════════════════════════════════════════════════════
+# 缺陷本體：`.ps1` 要 CRLF 這件事在三處被宣告（`.gitattributes` 的
+# `*.ps1 text eol=crlf`、`.editorconfig`、`root-infra-ci.yml` 第 4 道 EOL 閘），
+# **寫入端零強制**——而 R79 已把寫入者溯源到 Claude Code 的 `Write` 工具（新建與
+# 覆寫既有 CRLF 檔都吐 LF）。R79 已為此把 PostToolUse 的 `check_ps1_encoding.py`
+# 擴成位元組正規化器（BOM ＋ CRLF），但 hook 只罩得住「經由工具寫入」這一條路：
+# 人工編輯器、GitHub web、外部腳本一律繞得過，所以必須另有一道**事後**閘。
+#
+# 🔴 方向不可照抄 `.sh` 那一道：`tools/git-hooks/pre-commit` 對 `.sh` 看的是
+#   **blob**（index 內容），而 `.ps1` 因 `eol=crlf` 的 checkin 正規化，其 blob
+#   **恆為 LF** ⇒ blob 判準對 `.ps1` 結構上恆綠。本閘因此讀 `git ls-files --eol`
+#   的 `w/`（working tree）欄。同一個理由讓 CI 也看不見這件事：`actions/checkout`
+#   必定重新 smudge，雲端的工作樹結構上永遠合規（R78 逐項實查的結論）。
+#
+# 為何連 `.sh` 一起看（射程刻意對稱）：`.sh` 方向今天乾淨，但乾淨的原因是三重
+# 覆蓋裡沒有一層在看工作樹——CRLF `.sh` 一旦被 `git add` 前的人工編輯造出來，
+# 本機同樣沒有訊號。一個判準覆蓋兩個方向，比兩個各自半殘的判準便宜。
+# 🔴 R79 四方複審（SD nonblocking）訂正：本表原是一份**手抄**的副檔名→行尾映射，
+#   也就是 `.gitattributes` 的第二個家——而它在落地當下就已經不完整（漏了同樣宣告
+#   `eol=crlf` 的 `.cmd`／`.bat`）。字面表天生看不出「漏了什麼」，因為漏掉的那一格
+#   在表裡不存在，任何只讀表的判準都掃不到它。改法不是補兩格，是**讓表變成量測值**：
+#   下面的映射從 `.gitattributes` 現查產生，`.gitattributes` 因此維持唯一真相源。
+_GITATTRIBUTES_PATH = _REPO_ROOT / ".gitattributes"
+#: `*.<suffix>  <attrs>` 形態的宣告行（`#` 註解行不匹配；`* text=auto eol=lf` 這種
+#: 無副檔名的兜底規則也不匹配——它涵蓋全庫，不是「腳本行尾」這個主題）。
+_EOL_DECL_RE = re.compile(r"^\s*\*(\.[A-Za-z0-9]+)\s+([^#\n]*)", re.M)
+#: LF 側刻意**不**全收（誠實劃界，不是漏看）：根 `.gitattributes` 對 `.py`／`.md`／
+#: `.yaml` 等也宣告 `eol=lf`，全收會把本閘的主題從「腳本行尾」擴成「全庫文字檔行尾」
+#: ——當回合實測全庫有五位數支檔案的工作樹行尾與宣告不符，絕大多數落在 AISDLC_SDD
+#: 凍結版樹（Copy-on-Evolve 禁改面）。本閘的主題是腳本，故 LF 側只收 shell 腳本族；
+#: 但**值仍向 `.gitattributes` 取**，本檔不寫死 `lf` 這兩個字。
+_EOL_LF_SCOPE: tuple[str, ...] = (".sh", ".bash")
+
+
+def declared_eol(gitattributes_text: str) -> dict[str, str]:
+    """`.gitattributes` 裡每一條 `*.<副檔名> … eol=<lf|crlf>` 宣告。純函式。"""
+    out: dict[str, str] = {}
+    for suffix, attrs in _EOL_DECL_RE.findall(gitattributes_text):
+        match = re.search(r"\beol=(lf|crlf)\b", attrs)
+        if match:
+            out[suffix.lower()] = match.group(1)
+    return out
+
+
+def worktree_eol_policy(declared: dict[str, str]) -> dict[str, str]:
+    """本閘的政策映射＝**現查值**（見上方 WHY）。
+
+    CRLF 側**全收**：`eol=crlf` 在本 repo 就是「Windows-only 腳本族」的同義詞，
+    新增一個（例如日後的 `.cmd`）自動進射程，不需要有人記得同步第二份表。
+    LF 側只收 `_EOL_LF_SCOPE`，理由見該常數。
+    """
+    policy = {suffix: eol for suffix, eol in declared.items() if eol == "crlf"}
+    policy.update({s: declared[s] for s in _EOL_LF_SCOPE if s in declared})
+    return policy
+
+
+if not _GITATTRIBUTES_PATH.is_file():                  # fail-loud：沒有 SSOT 就沒有政策
+    raise AssertionError(f"找不到 {_GITATTRIBUTES_PATH}——行尾政策的唯一真相源缺席")
+_WORKTREE_EOL_POLICY: dict[str, str] = worktree_eol_policy(
+    declared_eol(_GITATTRIBUTES_PATH.read_text(encoding="utf-8")))
+#: 反空轉下限（**逐副檔名**，R79 收輪實測 `.ps1` 136 支／`.sh` 168 支，取約八折）。
+#: 🔴 為何不是一個總數（R79 四方複審 SD nonblocking）：單一總數吃得下「某一個副檔名
+#: 整片消失」——`.ps1` 全滅而 `.sh` 還在時，總數照樣過關，而那正是這道閘要抓的形態。
+#: 只登記**現存母體夠大**的副檔名；`.psm1`／`.psd1`／`.cmd`／`.bat` 現況零支，
+#: 給它們一個 0 下限等於沒登記，故刻意不入表（入表與否由下面的判準機械對帳）。
+_WORKTREE_EOL_FLOORS: dict[str, int] = {".ps1": 108, ".sh": 134}
+
+
+def parse_ls_files_eol(stdout: str) -> list[tuple[str, str]]:
+    """`git ls-files --eol` 的輸出 → [(路徑, 工作樹行尾)]。純函式，供紅綠自證共用。
+
+    格式（當回合實測逐字）：`i/lf    w/crlf  attr/text eol=crlf    \t<path>`
+    ——三個欄位以**空白**右補、彼此不以 tab 分隔，整行只有**一個** tab 且它就在
+    路徑前面。`attr/` 欄本身含空白（`text eol=crlf`），所以不能用空白切欄。
+    """
+    rows: list[tuple[str, str]] = []
+    for line in stdout.splitlines():
+        head, sep, path = line.partition("\t")
+        if not sep or not path.strip():
+            continue
+        match = re.search(r"\bw/(\S*)", head)
+        rows.append((path.strip(), match.group(1) if match else ""))
+    return rows
+
+
+def path_suffix(path: str) -> str:
+    """repo 相對路徑的小寫副檔名（含點）。無副檔名回空字串。"""
+    name = path.rsplit("/", 1)[-1]
+    return "." + name.rsplit(".", 1)[-1].lower() if "." in name else ""
+
+
+def worktree_eol_problems(rows: list[tuple[str, str]]) -> list[str]:
+    """逐列過政策表；回問題清單，空＝合格。純函式（紅綠由合成注入自證）。"""
+    problems: list[str] = []
+    for path, worktree in rows:
+        want = _WORKTREE_EOL_POLICY.get(path_suffix(path))
+        if want is None:
+            continue
+        if worktree in {want, "none"}:   # none＝空檔／無換行，無從違反
+            continue
+        problems.append(
+            f"{path}: 工作樹行尾為 `{worktree or '未知'}`，政策要求 `{want}`"
+            f"（.gitattributes 已宣告；index 側因 checkin 正規化恆為 lf，"
+            "故只有工作樹這一欄看得到這種漂移）"
+        )
+    return problems
+
+
+class TestWorktreeEolMatchesPolicy(unittest.TestCase):
+    """工作樹行尾必須符合 `.gitattributes` 宣告（見上方區段 WHY）。"""
+
+    @staticmethod
+    def _ls_files_eol() -> str:
+        proc = subprocess.run(
+            ["git", "-C", str(_REPO_ROOT), "ls-files", "--eol", "--",
+             *(f"*{suffix}" for suffix in sorted(_WORKTREE_EOL_POLICY))],
+            capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=120,
+        )
+        if proc.returncode != 0:                      # 取數管道壞掉不得靜默變成「零違規」
+            raise AssertionError(
+                f"git ls-files --eol 失敗（rc={proc.returncode}；stderr="
+                f"{proc.stderr.strip()!r}）——本閘的輸入沒了，不是「沒有違規」"
+            )
+        return proc.stdout
+
+    def test_tracked_scripts_have_the_declared_worktree_eol(self) -> None:
+        rows = parse_ls_files_eol(self._ls_files_eol())
+        seen = {suffix: 0 for suffix in _WORKTREE_EOL_FLOORS}
+        for path, _worktree in rows:
+            suffix = path_suffix(path)
+            if suffix in seen:
+                seen[suffix] += 1
+        for suffix, floor in _WORKTREE_EOL_FLOORS.items():
+            self.assertGreaterEqual(
+                seen[suffix], floor,
+                f"`{suffix}` 的行尾掃描面只有 {seen[suffix]} 支（下限 {floor}）——該副檔名的"
+                "射程疑似被縮小。🔴 下限刻意**逐副檔名**：一個吃得下整體的總數，會讓"
+                "「某一個副檔名整片消失、另一個還在」照樣過關，而那正是本閘要抓的形態",
+            )
+        problems = worktree_eol_problems(rows)
+        self.assertEqual(
+            problems, [],
+            "工作樹行尾與政策不符。🔴 `git status` 對這種漂移**結構上看不見**"
+            "（兩側套同一份正規化規則），`git add` 之後連唯一的幽靈 `M` 列都會消失；"
+            "修法：讓 PostToolUse 的 `AutoClaude/tools/hooks/check_ps1_encoding.py` "
+            "再跑一次（`.ps1` 方向），或以正確行尾重存：\n" + "\n".join(problems),
+        )
+
+    # ── 紅綠自證（合成列，不動磁碟）────────────────────────────────────────────
+
+    def test_the_parser_reads_the_worktree_column_not_the_index_column(self) -> None:
+        """最關鍵的一題：讀錯欄位會讓整條閘門恆綠（index 側 `.ps1` 恆為 lf）。"""
+        line = "i/lf    w/crlf  attr/text eol=crlf    \ttools/x.ps1"
+        self.assertEqual(parse_ls_files_eol(line), [("tools/x.ps1", "crlf")])
+        self.assertEqual(worktree_eol_problems(parse_ls_files_eol(line)), [])
+
+    def test_an_lf_ps1_and_a_crlf_sh_both_turn_red(self) -> None:
+        for path, worktree in (("tools/a.ps1", "lf"), ("tools/b.psm1", "mixed"),
+                               ("tools/c.sh", "crlf"), ("tools/d.bash", "mixed")):
+            with self.subTest(path=path):
+                self.assertEqual(
+                    len(worktree_eol_problems([(path, worktree)])), 1,
+                    f"{path} 的 `w/{worktree}` 沒被判紅 ⇒ 該方向零鑑別力")
+
+    def test_out_of_scope_suffixes_and_empty_files_are_green(self) -> None:
+        """假紅會逼下一輪把整條閘關掉：政策外副檔名與空檔一律放行。"""
+        self.assertEqual(worktree_eol_problems([("docs/a.md", "lf")]), [])
+        self.assertEqual(worktree_eol_problems([("tools/a.py", "crlf")]), [])
+        self.assertEqual(worktree_eol_problems([("tools/empty.ps1", "none")]), [])
+
+    def test_the_policy_table_covers_both_directions(self) -> None:
+        """政策表不得只剩一個方向——單向表會讓「對稱」這個設計意圖靜默消失。"""
+        self.assertEqual(set(_WORKTREE_EOL_POLICY.values()), {"crlf", "lf"})
+        self.assertIn(".ps1", _WORKTREE_EOL_POLICY)
+        self.assertIn(".sh", _WORKTREE_EOL_POLICY)
+
+
+class TestWorktreeEolPolicyIsMeasuredFromGitattributes(unittest.TestCase):
+    """政策映射必須是 `.gitattributes` 的**現查值**，不是抄本（R79 四方複審 SD）。
+
+    被守的缺陷：R79 落地的版本是一份手抄表，且**在落地當下就已經不完整**——同樣宣告
+    `eol=crlf` 的 `.cmd`／`.bat` 不在表裡。這一類漏看用「再讀一次表」永遠找不出來，
+    因為漏掉的那一格在表裡不存在；唯一有效的判準是拿它去跟真正的持有者對帳。
+    """
+
+    def setUp(self) -> None:
+        self.declared = declared_eol(
+            _GITATTRIBUTES_PATH.read_text(encoding="utf-8"))
+
+    def test_the_parser_really_reads_the_current_gitattributes(self) -> None:
+        """自錨：解析器垮掉（正則寫壞／檔案改名）時，下面每一條都會變成「對空氣全綠」。"""
+        self.assertGreaterEqual(
+            len(self.declared), 10,
+            f"只解析出 {len(self.declared)} 條 eol 宣告 ⇒ 解析器疑似失效：{self.declared}")
+        for suffix, eol in ((".ps1", "crlf"), (".sh", "lf"), (".cmd", "crlf")):
+            self.assertEqual(self.declared.get(suffix), eol,
+                             f"`.gitattributes` 對 {suffix} 的宣告解析成 "
+                             f"{self.declared.get(suffix)!r}（預期 {eol!r}）")
+
+    def test_every_crlf_declaration_is_in_scope(self) -> None:
+        """缺陷本體那一向：`.gitattributes` 宣告 `eol=crlf` 的每一格都必須在射程內。
+
+        R79 落地時漏掉的 `.cmd`／`.bat` 就是被這一向抓到的。
+        """
+        crlf = {s for s, e in self.declared.items() if e == "crlf"}
+        self.assertEqual(
+            sorted(crlf - set(_WORKTREE_EOL_POLICY)), [],
+            "這些副檔名在 `.gitattributes` 宣告了 CRLF，卻不在本閘射程內 ⇒ 它們的工作樹"
+            "行尾漂移**沒有任何人看得見**（`git status` 對這種漂移結構上盲）",
+        )
+
+    def test_every_policy_cell_equals_the_declaration(self) -> None:
+        """反向：表內每一格的值都必須等於 `.gitattributes` 的宣告（不得自行改值）。"""
+        mismatched = {
+            suffix: (eol, self.declared.get(suffix))
+            for suffix, eol in _WORKTREE_EOL_POLICY.items()
+            if self.declared.get(suffix) != eol
+        }
+        self.assertEqual(mismatched, {}, f"政策與宣告不一致（本閘值, 宣告值）：{mismatched}")
+
+    def test_the_policy_follows_the_declaration_instead_of_a_copy(self) -> None:
+        """判準自證：換一份 `.gitattributes` 進去，映射必須跟著動。
+
+        少了這一支，上面兩條在「政策其實是寫死的、只是剛好與現況相符」時仍全綠——
+        那正是本 finding 的原始狀態（表與宣告當時對得上，只是少了兩格）。
+        """
+        fake = ("* text=auto eol=lf\n"
+                "# *.ignored text eol=crlf   ← 註解行不得被讀成宣告\n"
+                "*.sh   text eol=crlf\n"
+                "*.zzz  text eol=crlf\n"
+                "*.py   text eol=lf\n")
+        policy = worktree_eol_policy(declared_eol(fake))
+        self.assertEqual(policy.get(".sh"), "crlf",
+                         "LF 側的值也必須取自宣告，不得寫死 ⇒ 這一格證明它不是抄本")
+        self.assertEqual(policy.get(".zzz"), "crlf",
+                         "新宣告的 CRLF 副檔名沒有自動進射程 ⇒ 又需要有人記得同步第二份表")
+        self.assertNotIn(".ignored", policy, "註解行被讀成宣告")
+        self.assertNotIn(".py", policy,
+                         "LF 側不得全收（見 `_EOL_LF_SCOPE`：全收會把主題擴成全庫文字檔）")
+        # 反向的代價要說清楚：把 `.ps1` 宣告成 LF，它會整個**掉出**射程（不是變成 LF 政策）
+        # ——這正是上面 `test_the_two_p0_directions_are_pinned` 那道止血點在守的事。
+        dropped = worktree_eol_policy(declared_eol("*.ps1 text eol=lf\n"))
+        self.assertNotIn(".ps1", dropped)
+
+    def test_the_two_p0_directions_are_pinned(self) -> None:
+        """現查式 SSOT 的代價是「來源被改壞就跟著壞」——這一支是它的止血點。
+
+        `.sh` 被改成 CRLF 在 Docker／act 內會 `$'\\r': command not found`（取證紀律 #8），
+        `.ps1` 缺 CRLF 則是本閘立案的理由。這兩格無論 `.gitattributes` 怎麼寫都不准翻。
+        """
+        self.assertEqual(_WORKTREE_EOL_POLICY.get(".ps1"), "crlf")
+        self.assertEqual(_WORKTREE_EOL_POLICY.get(".sh"), "lf")
+
+    def test_every_floor_names_a_suffix_in_scope(self) -> None:
+        """逐副檔名下限不得指向射程外的副檔名（那種下限永遠是 0 支、等於沒有）。"""
+        orphan = sorted(set(_WORKTREE_EOL_FLOORS) - set(_WORKTREE_EOL_POLICY))
+        self.assertEqual(orphan, [], f"下限表指向射程外的副檔名：{orphan}")
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# R79（S-xplat）— 「別人開著這個檔」在 Windows 會炸掉的**目錄項原語**
+# ══════════════════════════════════════════════════════════════════════════════
+# 缺陷本體：本 repo 已經正確登記了「Windows 刪不掉被開著的檔」，卻把它記成一條
+# 關於 `unlink` 的知識，而不是一條關於「任何會改動目錄項的原語」的知識。換一個
+# 原語就整片失明——**連錯誤碼都換了**。當回合在本機實測（三個案例同一支探針）：
+#     os.replace 覆寫「被純讀者開著」的目的檔 → PermissionError winerror=5
+#     同一組但目的檔已關閉                    → OK
+#     os.unlink 一個被開著的檔                → PermissionError winerror=32
+# POSIX 上前者恆成功 ⇒ 這是一個只在 Windows、只在並行時發生、且不留痕跡的落差。
+# 本 repo 的常態作業型態正是它的觸發條件（多 agent 共用一棵工作樹，CONTEXT-LEDGER
+# 與 trajectory/drift 那幾份 YAML 同時被多方讀寫）。
+#
+# 🔴 誠實劃界（這一節買到的是什麼、買不到什麼）：
+#   · 買到：新增一個**未處置** `PermissionError/OSError` 的目錄項原語站點會轉紅。
+#   · 買不到：「捕了但吞掉」不算修好——`context_ledger_pre.py` 外層那個
+#     `except Exception` 會把它吞成靜默漏記（token 帳目變少，沒有人覺得不對）。
+#     靜態判準看得到「有沒有處置」，看不到「處置得對不對」。
+#   · 不代改：現存站點全在 `AISDLC_SDD/**`（Copy-on-Evolve 禁改凍結版；LATEST 的
+#     那批也不在 R79 XPLAT 包的檔案所有權內），故本輪只誠實登記、逐筆可查。
+#: 原語 → 本機實測到的 winerror（值為 None＝本輪未逐一實測，僅登記形態）。
+_WINDOWS_OPEN_FILE_HOSTILE_PRIMITIVES: dict[str, int | None] = {
+    "os.replace": 5,     # 覆寫「被開著」的目的檔（本節主角，R79 首次登記）
+    "os.unlink": 32,     # 既有知識（DEF-101 系列已登記的那一個）
+    "os.rename": None,
+    "os.renames": None,
+    "shutil.move": None,
+    "shutil.rmtree": None,
+}
+#: 走 AST 抓得到的**檔案系統**目錄項原語（`shutil.rmtree`／`os.unlink` 屬刪除語意，
+#: 已由既有知識覆蓋，本掃描只管「覆寫既有目的檔」這一族，避免與既有鎖射程重疊）。
+_DIRENT_PRIMITIVES: frozenset[str] = frozenset(
+    {"os.replace", "os.rename", "os.renames", "shutil.move"})
+#: `<x>.replace(<單一引數>)`／`<x>.rename(...)` 這種 Path 方法形態的**排除**清單：
+#: 這幾個模組的同名函式與檔案系統無關，納入即假紅（`dataclasses.replace(obj)` 實測
+#: 會被單純的「1 個引數」啟發式命中）。
+_NON_PATH_REPLACE_OWNERS: frozenset[str] = frozenset({"dataclasses", "attr", "attrs", "copy"})
+#: 存量：**live 樹**內未處置 `PermissionError`／`OSError` 的站點數。
+#: 判準是雙向精確比對（同本檔其餘欠債表的理由）。
+#: 🔴 掃描面刻意不含凍結版 v0.01~v0.29，兩個理由缺一不可：① Copy-on-Evolve 禁改
+#:   凍結版，那裡結構上不會出現「新寫的」違規，掃它得不到可行動的訊號；② 當回合
+#:   實測含凍結版時整支測試要 **133 秒**（凍結版 1,131 筆是同一批程式碼被複製 29 次），
+#:   而護欄層的執行時間本身已是本輪一筆獨立 finding。凍結版的那 1,131 筆是**已量到、
+#:   刻意不進帳**的事實，不是沒看見。
+_DIRENT_UNGUARDED_DEBT: dict[str, int] = {"live": 41}
+
+
+def dirent_primitive_sites(source: str, rel: str) -> list[tuple[str, int, str, bool]]:
+    """(檔, 行號, 原語, 是否已處置 PermissionError/OSError)。純函式，供紅綠自證共用。"""
+    try:
+        tree = ast.parse(source)
+    except SyntaxError:
+        return []
+    parent, _slot, _classes = _ast_scope_index(tree)
+    out: list[tuple[str, int, str, bool]] = []
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Call):
+            continue
+        name = _dotted_name(node.func)
+        if name is None:
+            continue
+        if name in _DIRENT_PRIMITIVES:
+            label = name
+        elif (name.rsplit(".", 1)[-1] in {"replace", "rename"}
+              and len(node.args) == 1 and not node.keywords
+              and name.rsplit(".", 1)[0] not in _NON_PATH_REPLACE_OWNERS
+              and "." in name):
+            label = f"Path.{name.rsplit('.', 1)[-1]}"
+        else:
+            continue
+        handled = False
+        cur: ast.AST = node
+        while cur in parent:
+            owner = parent[cur]
+            if isinstance(owner, ast.Try):
+                for handler in owner.handlers:
+                    text = ast.unparse(handler.type) if handler.type else ""
+                    if "PermissionError" in text or "OSError" in text:
+                        handled = True
+            cur = owner
+        out.append((rel, node.lineno, label, handled))
+    return out
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# R79（S-xplat）— exec bit：Windows 上唯一還看得見的那個管道＝**git 索引模式**
+# ══════════════════════════════════════════════════════════════════════════════
+# 缺陷本體（兩半，同源）：
+#  ① 索引模式在 Windows 上「不是沒人查，是 git 自己被設定成不看」——本機實測
+#     `core.filemode=false`，於是檔案模式從不出現在 `git status`／`git diff`／任何
+#     pre-commit 掃描裡。27,544 支 tracked 檔只有 7 支是 100755，而框架**給外部
+#     使用者的第一條指令**（30 個版本樹的 `tools/README.md`「方法 3 → Mac / Linux」）
+#     教人裸跑 `./…/init_project.sh`，該檔索引模式是 100644 ⇒ mac/Linux 使用者
+#     一 clone 就死在第一步（POSIX execve 對非 x 檔回 EACCES，shell 回 rc=126）。
+#     緊接的 Windows 欄用 `.\init_project.ps1` 照樣能跑 ⇒ 這份文件在 Windows 上
+#     永遠讀起來是對的。**製造端與觀測端都在 Windows，受害端只在 mac/Linux。**
+#  ② Windows 側那條 exec bit 治理鏈（`tools/git-hooks/post-commit` 的 `[ -x ]`
+#     守衛、它的回歸鎖、macos-compat-ci 的 `test -x`）**一格覆蓋都沒有**。當回合
+#     在 Git Bash（MINGW64）實測，比原判詞更糟：
+#         with_shebang.sh  [ -x ]=EXECUTABLE  ls=-rwxr-xr-x
+#         no_shebang.sh    [ -x ]=NOT-EXEC    ls=-rw-r--r--
+#         bom_shebang.sh   [ -x ]=NOT-EXEC    ls=-rw-r--r--   ← 檔首多 3 個位元組就翻
+#         no_shebang.sh 加 `chmod +x` 之後 → 仍然 NOT-EXEC
+#     也就是說 `[ -x ]` 在這裡是**對檔首兩個位元組的內容猜測**，不是權限位元，
+#     而且 `chmod` 動不了它 ⇒ 「加執行權限」在 Windows 側是一個做不到的動作。
+#     反向失效（檔首多任何位元組 → dispatcher 靜默 exit 0）全 repo 零判準。
+#
+# 本判準因此**只讀 `git ls-files -s` 的索引模式**：那是 Windows 上唯一不受
+# `core.filemode` 影響、也不依賴檔案系統權限位元的觀測管道，同一支判準在三個
+# 平台上都跑得動、都給同一個答案。
+_INDEX_MODE_EXEC = "100755"
+#: 文件裡「教人裸跑」的形態：行首或空白後的 `./<path>.sh`（反引號／程式碼區塊皆同）。
+_BARE_SH_INVOCATION_RE = re.compile(r"(?<![\w./-])\./([A-Za-z0-9_./-]+\.sh)\b")
+#: 存量欠債：**凍結版**（v0.01~v0.29）`tools/README.md` 內教人裸跑、而標的索引模式
+#: 不是 100755 的站點數。R79 實測 30 支 README × 3 行＝90，其中 LATEST 那一支
+#: （3 筆）於本輪修掉 ⇒ 29 × 3 = 87 留在凍結版。
+#: 🔴 為何只修 LATEST：Copy-on-Evolve 政策禁止改凍結版（歷來三次例外都經掌舵者
+#:   明文核准）。這 87 筆是**可見的欠債**，不是豁免。
+#: 判準是**雙向精確比對**：多一筆＝新增了同型缺陷；少一筆＝有人動了凍結版
+#: （那本身就是需要被看見的事件），兩向都必須有人回來改這個數字。
+_BARE_SH_DOC_DEBT_FROZEN = 87
+
+
+def index_modes(repo_root: Path) -> dict[str, str]:
+    """`git ls-files -s` → {repo 相對路徑: 模式}。空 dict ＝取數管道壞掉。"""
+    proc = subprocess.run(
+        ["git", "-C", str(repo_root), "ls-files", "-s"],
+        capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=180,
+    )
+    if proc.returncode != 0:
+        return {}
+    modes: dict[str, str] = {}
+    for line in proc.stdout.splitlines():
+        head, sep, path = line.partition("\t")
+        if sep and head.split():
+            modes[path.strip()] = head.split()[0]
+    return modes
+
+
+def resolve_doc_script(doc_rel: str, script_rel: str, tracked: set[str]) -> str | None:
+    """把文件裡的 `./x.sh` 對應到一支 tracked 檔；對應不到回 None（＝不判）。
+
+    刻意只判「對應得到 repo 內真實檔案」的站點：範本／情境樣稿裡大量出現的
+    `./scripts/deploy/xxx.sh` 講的是**讀者自己專案**的腳本，判它們是假紅，而假紅
+    會逼下一輪把整條鎖關掉（本檔既有判準一貫的取捨）。
+    """
+    parts = doc_rel.split("/")
+    candidates = ["/".join(parts[:-1] + [script_rel]) if len(parts) > 1 else script_rel,
+                  script_rel]
+    candidates += ["/".join(parts[:i]) + "/" + script_rel for i in range(len(parts) - 1, 0, -1)]
+    for cand in candidates:
+        cand = cand.replace("//", "/")
+        if cand in tracked:
+            return cand
+    return None
+
+
+def bare_sh_doc_offenders(
+    docs: dict[str, str], modes: dict[str, str]
+) -> list[tuple[str, int, str]]:
+    """(文件, 行號, 標的) —— 文件教人裸跑、而標的索引模式不是 100755 的站點。"""
+    tracked = set(modes)
+    out: list[tuple[str, int, str]] = []
+    for doc_rel, text in docs.items():
+        for lineno, line in enumerate(text.splitlines(), 1):
+            for match in _BARE_SH_INVOCATION_RE.finditer(line):
+                target = resolve_doc_script(doc_rel, match.group(1), tracked)
+                if target is not None and modes[target] != _INDEX_MODE_EXEC:
+                    out.append((doc_rel, lineno, target))
+    return out
+
+
+@functools.lru_cache(maxsize=1)
+def _live_sdd_prefix() -> str:
+    """`AISDLC_SDD/<LATEST>/`——**快取**：`_latest_root()` 走 subprocess 解析 SSOT，
+    逐檔呼叫會讓全庫掃描從數十秒暴增到數分鐘（本輪實測踩過一次）。"""
+    return f"AISDLC_SDD/{_latest_root().name}/"
+
+
+def _is_frozen_sdd_path(rel: str) -> bool:
+    """凍結版 SDD 樹（v0.01~v0.NN，LATEST 除外）——Copy-on-Evolve 禁改的那一批。"""
+    return rel.startswith("AISDLC_SDD/AISDLC_SDD_v0.") and not rel.startswith(
+        _live_sdd_prefix())
+
+
+class TestDirEntryPrimitivesAreAccountedFor(unittest.TestCase):
+    """目錄項原語在 Windows 的「檔案被開著」落差（見上方區段 WHY）。"""
+
+    def test_the_platform_gap_is_real_and_re_measurable(self) -> None:
+        """兩個平台各自斷言自己那一半——刻意**不用 skip**：這一題在 POSIX 上不是
+        「跳過」，而是「必須成功」，那正是落差本身。（用 skipUnless 會讓 POSIX 側
+        一格覆蓋都沒有，也會多一個 skip 站點要進別包的普查表。）
+        """
+        with tempfile.TemporaryDirectory() as tmpdir:
+            dst = Path(tmpdir) / "ledger.yaml"
+            src = Path(tmpdir) / "ledger.yaml.tmp"
+            dst.write_text("old\n", encoding="utf-8")
+            src.write_text("new\n", encoding="utf-8")
+            with open(dst, encoding="utf-8"):        # 第三方**純讀者**持有 handle
+                if sys.platform == "win32":
+                    with self.assertRaises(PermissionError) as ctx:
+                        os.replace(src, dst)
+                    self.assertEqual(
+                        ctx.exception.winerror,
+                        _WINDOWS_OPEN_FILE_HOSTILE_PRIMITIVES["os.replace"],
+                        "winerror 變了 ⇒ 上表登記的實測值已過期，請重新量並改表")
+                else:
+                    os.replace(src, dst)            # POSIX：恆成功，這就是落差
+                    self.assertEqual(dst.read_text(encoding="utf-8"), "new\n")
+
+    def test_the_primitive_inventory_covers_both_known_error_codes(self) -> None:
+        """「換一個原語連錯誤碼都換了」這句話必須留在可查的形態裡。"""
+        codes = {k: v for k, v in _WINDOWS_OPEN_FILE_HOSTILE_PRIMITIVES.items()
+                 if v is not None}
+        self.assertEqual(codes, {"os.replace": 5, "os.unlink": 32})
+        self.assertTrue(_DIRENT_PRIMITIVES <= set(_WINDOWS_OPEN_FILE_HOSTILE_PRIMITIVES),
+                        "掃描面出現了清單沒登記的原語 ⇒ 兩處會漂移")
+
+    def test_unguarded_site_census_matches_the_ledger(self) -> None:
+        skip_parts = {"__pycache__", ".git", ".venv", "venv", ".pytest_cache",
+                      ".ruff_cache", ".mypy_cache", "node_modules"}
+        # 🔴 R79 收斂包：**虛擬環境改以 `pyvenv.cfg` 這個標記偵測，不靠目錄名**。
+        # 修前實況（當回合實測）：本掃描面是檔案系統 rglob，而排除清單只列了 `.venv`／`venv`
+        # 兩個**我們剛好想得到的名字**；收斂包為了回填 ONBOARDING 快照建了一個叫
+        # `cleanvenv` 的乾淨環境（gitignored、政策上就是該建的），這道普查的實測值當場由
+        # 41 跳到 58 而閘門轉紅。也就是說這個數字是「這台機器上剛好有哪幾個 venv」的函數
+        # ——換一台機器、換一個名字就換一個答案，而它被拿來當**雙向精確比對**的基準。
+        # `pyvenv.cfg` 是 PEP 405 定義的 venv 根標記，與命名無關，也不必逐檔問 git。
+        skip_roots = {
+            cfg.parent for cfg in _REPO_ROOT.glob("*/pyvenv.cfg")
+        } | {cfg.parent for cfg in _REPO_ROOT.glob("*/*/pyvenv.cfg")}
+        census = {"live": 0}
+        scanned = 0
+        for py in _REPO_ROOT.rglob("*.py"):
+            if skip_parts & set(py.parts):
+                continue
+            if any(root in py.parents for root in skip_roots):
+                continue
+            if _is_frozen_sdd_path(py.relative_to(_REPO_ROOT).as_posix()):
+                continue
+            scanned += 1
+            data = py.read_bytes()
+            # 先以 bytes 快篩再 AST 解析：全庫 .py 一次全解析實測要數分鐘，而帶這幾個
+            # 名字的檔只有極少數。快篩的字面值是**必要條件**（AST 上的呼叫必然寫得出
+            # 這個名字），不會讓射程縮小。
+            if not any(tok in data for tok in (b"replace(", b"rename(", b"move(")):
+                continue
+            rel = py.relative_to(_REPO_ROOT).as_posix()
+            for _rel, _ln, _prim, handled in dirent_primitive_sites(
+                    data.decode("utf-8", errors="replace"), rel):
+                if not handled:
+                    census["live"] += 1
+        self.assertGreaterEqual(
+            scanned, 780,   # R79 實測 867 支 live `.py`（全庫 5,478 支裡其餘皆在凍結版）
+            f"掃描面只有 {scanned} 支 .py——射程疑似被縮小（凍結版排除是刻意的，"
+            "live 樹被排掉不是）")
+        self.assertEqual(
+            census, dict(_DIRENT_UNGUARDED_DEBT),
+            "未處置站點數與帳不符。多一筆＝新增了一個在 Windows 上會被『別人開著這個"
+            "檔』炸掉、且沒有任何處置的站點；少一筆＝有人修掉了，請把數字改小："
+            f"實測 {census}",
+        )
+
+    # ── 紅綠自證（合成樣本）────────────────────────────────────────────────────
+
+    def test_an_unhandled_replace_is_reported_and_a_handled_one_is_not(self) -> None:
+        bare = "def f(tmp, path):\n    os.replace(tmp, path)\n"
+        self.assertEqual(dirent_primitive_sites(bare, "x.py"),
+                         [("x.py", 2, "os.replace", False)])
+        handled = ("def f(tmp, path):\n    try:\n        os.replace(tmp, path)\n"
+                   "    except PermissionError:\n        pass\n")
+        self.assertEqual(dirent_primitive_sites(handled, "x.py"),
+                         [("x.py", 3, "os.replace", True)])
+
+    def test_a_timeouterror_only_handler_does_not_count_as_handling(self) -> None:
+        """實際站點的形狀：包住它的 try 只捕 file_lock 的 TimeoutError。"""
+        source = ("def f(tmp, path):\n    try:\n        os.replace(tmp, path)\n"
+                  "    except TimeoutError:\n        pass\n")
+        self.assertEqual(dirent_primitive_sites(source, "x.py")[0][3], False)
+
+    def test_non_filesystem_replace_lookalikes_are_not_counted(self) -> None:
+        """假紅會逼下一輪把整條鎖關掉：`dataclasses.replace(obj)` 與字串 replace 不算。"""
+        for source in ("import dataclasses\n\n\ndef f(o):\n    return dataclasses.replace(o)\n",
+                       'def f(s):\n    return s.replace("a", "b")\n'):
+            with self.subTest(source=source):
+                self.assertEqual(dirent_primitive_sites(source, "x.py"), [])
+
+    def test_path_method_form_is_in_scope(self) -> None:
+        """`tmp.replace(path)`（pathlib 形態）是本 repo 最常見的寫法，不得漏掃。"""
+        self.assertEqual(
+            dirent_primitive_sites("def f(tmp, path):\n    tmp.replace(path)\n", "x.py"),
+            [("x.py", 2, "Path.replace", False)])
+
+
+class TestExecBitIsGovernedViaTheGitIndex(unittest.TestCase):
+    """exec bit 治理：只讀 git 索引模式（見上方區段 WHY）。"""
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        cls.modes = index_modes(_REPO_ROOT)
+
+    def test_the_index_mode_channel_is_alive(self) -> None:
+        """取數管道自證：壞掉時回空 dict，而空 dict 會讓下面兩題結構上恆綠。"""
+        self.assertGreaterEqual(
+            len(self.modes), 20000,
+            f"`git ls-files -s` 只回 {len(self.modes)} 列——取數管道壞掉，"
+            "本節其餘判準全部失去意義")
+        self.assertIn(
+            _INDEX_MODE_EXEC, set(self.modes.values()),
+            "全 repo 一支 100755 都沒有 ⇒ 判準的『正例』側無從成立")
+
+    def test_docs_that_teach_bare_sh_invocation_point_at_executable_files(self) -> None:
+        docs: dict[str, str] = {}
+        for rel in self.modes:
+            if not rel.lower().endswith(".md"):
+                continue
+            path = _REPO_ROOT / rel
+            if not path.is_file():
+                continue
+            data = path.read_bytes()
+            if b"./" not in data or b".sh" not in data:  # 先以 bytes 快篩再解碼
+                continue
+            docs[rel] = data.decode("utf-8", errors="replace")
+        offenders = bare_sh_doc_offenders(docs, self.modes)
+        live = [o for o in offenders if not _is_frozen_sdd_path(o[0])]
+        frozen = [o for o in offenders if _is_frozen_sdd_path(o[0])]
+        self.assertEqual(
+            [f"{d}:{n} -> {t}" for d, n, t in live], [],
+            "文件教 mac/Linux 使用者裸跑一支索引模式不是 100755 的腳本 ⇒ 對方一 clone "
+            "就 `Permission denied`（rc=126），而 Windows 側因 core.filemode=false "
+            "永遠看不到這件事。修法：把 `./x.sh` 改寫成 `bash x.sh`（與同批文件其餘"
+            "各處一致），或以 `git update-index --chmod=+x` 把該檔改成 100755：\n"
+            + "\n".join(f"{d}:{n} -> {t}" for d, n, t in live),
+        )
+        self.assertEqual(
+            len(frozen), _BARE_SH_DOC_DEBT_FROZEN,
+            f"凍結版存量由 {_BARE_SH_DOC_DEBT_FROZEN} 變成 {len(frozen)}。"
+            "多一筆＝新增同型缺陷；少一筆＝有人動了 Copy-on-Evolve 禁改的凍結版"
+            "（那本身就是必須被看見的事件）。兩向都請回來改這個數字並說明理由。",
+        )
+
+    def test_executable_shell_scripts_start_with_a_shebang_and_carry_no_bom(self) -> None:
+        """`[ -x ]` 在 Windows 的 Git Bash 上是**檔首內容猜測**（當回合實測：加 BOM
+        即由 EXECUTABLE 翻成 NOT-EXEC，且 `chmod +x` 動不了它）⇒ 檔首多任何位元組，
+        dispatcher 那道 `if [ -x "$target" ]` 就靜默 exit 0，整條 hook 鏈無聲失效。
+        這是那條治理鏈在 Windows 側唯一還測得到的一半。
+        """
+        problems: list[str] = []
+        for rel, mode in sorted(self.modes.items()):
+            if mode != _INDEX_MODE_EXEC:
+                continue
+            path = _REPO_ROOT / rel
+            if not path.is_file():
+                continue
+            # 刻意不寫 `[:N]`：寫死的切片長度默默假設「我要看的東西一定在前 N 個
+            # 位元組內」，而 `startswith` 本來就只比對前綴、不需要那個假設
+            # （`test_archive_defect_log.py::TestNoAssertionSamplesALiveDocumentWholesale`
+            #  在守這條紀律，R79 收斂包實測它會對 `[:4]` 轉紅）。
+            head = path.read_bytes()
+            if head.startswith(b"\xef\xbb\xbf"):
+                problems.append(f"{rel}: 檔首有 UTF-8 BOM ⇒ Git Bash 的 `[ -x ]` 判為 NOT-EXEC")
+            elif not head.startswith(b"#!"):
+                problems.append(f"{rel}: 索引模式 100755 但檔首不是 `#!` ⇒ 同上")
+        self.assertEqual(problems, [], "\n".join(problems))
+
+    # ── 紅綠自證（合成輸入，不動磁碟）──────────────────────────────────────────
+
+    def test_a_doc_pointing_at_a_100644_script_is_flagged(self) -> None:
+        docs = {"tools/README.md": "跑 `./tools/x.sh -d ~/p` 即可\n"}
+        modes = {"tools/README.md": "100644", "tools/x.sh": "100644"}
+        self.assertEqual(bare_sh_doc_offenders(docs, modes),
+                         [("tools/README.md", 1, "tools/x.sh")])
+        modes["tools/x.sh"] = _INDEX_MODE_EXEC
+        self.assertEqual(bare_sh_doc_offenders(docs, modes), [])
+
+    def test_the_repo_approved_form_bash_x_sh_is_not_flagged(self) -> None:
+        """對照組：`bash x.sh` 不需要 exec bit，判它是假紅。"""
+        docs = {"a.md": "跑 `bash tools/x.sh` 即可\n"}
+        self.assertEqual(bare_sh_doc_offenders(docs, {"a.md": "100644",
+                                                      "tools/x.sh": "100644"}), [])
+
+    def test_scripts_outside_the_repo_are_not_judged(self) -> None:
+        """範本／樣稿講的是讀者自己專案的腳本，對應不到 tracked 檔 ⇒ 不判。"""
+        docs = {"a.md": "./scripts/deploy/deploy-all.sh production\n"}
+        self.assertEqual(bare_sh_doc_offenders(docs, {"a.md": "100644"}), [])
+
+    def test_the_frozen_predicate_actually_separates_the_two_groups(self) -> None:
+        latest = _latest_root().name
+        self.assertTrue(_is_frozen_sdd_path("AISDLC_SDD/AISDLC_SDD_v0.01/tools/README.md"))
+        self.assertFalse(_is_frozen_sdd_path(f"AISDLC_SDD/{latest}/tools/README.md"))
+        self.assertFalse(_is_frozen_sdd_path("tools/README.md"))
+
+
+#: `.editorconfig` 的 `.ps1` 區塊自述的機械執行者 → 它必須真的在談的主題關鍵詞。
+#: 只斷言「檔案存在」抓不到「檔案在、但守的是別的東西」（R75 判過的形態：當時
+#: 具名的是一支只管 BOM 的鎖，卻被寫在「行尾」那一列）。
+_EDITORCONFIG_PS1_ENFORCERS: dict[str, tuple[str, ...]] = {
+    "AutoClaude/tools/hooks/check_ps1_encoding.py": ("\\r\\n", "PS_SUFFIXES", "BOM"),
+    "tools/tests/test_platform_neutral_paths.py": ("ls-files", "--eol", "crlf"),
+    "tools/tests/test_ps1_bom.py": ("BOM", ".ps1"),
+}
+
+
+class TestEditorconfigPs1BlockNamesItsEnforcers(unittest.TestCase):
+    """`.editorconfig` 的 `.ps1` 區塊不得是純裝飾——它自述的執行者必須真的在。
+
+    缺陷本體（R79／D-ps1eol #32）：`end_of_line = crlf` 與 `charset = utf-8-bom`
+    這兩行被三份文件各自宣告，而實際寫檔的工具兩項都不遵守；讀到任何一份的人都會
+    合理推論「這件事有人在管」。R79 補上執行者之後，這支鎖負責讓那份自述**不能
+    無聲過期**：具名檔被改名／刪掉／換成守別的主題的東西，都會在這裡紅。
+    """
+
+    _EDITORCONFIG = _REPO_ROOT / ".editorconfig"
+
+    def test_the_ps1_block_declares_crlf_and_bom(self) -> None:
+        text = self._EDITORCONFIG.read_text(encoding="utf-8")
+        self.assertIn("[*.{ps1,psm1,psd1}]", text, "`.ps1` 區塊不見了")
+        block = text.split("[*.{ps1,psm1,psd1}]", 1)[1].split("\n[", 1)[0]
+        self.assertIn("end_of_line = crlf", block)
+        self.assertIn("charset = utf-8-bom", block)
+
+    def test_every_named_enforcer_exists_and_guards_its_topic(self) -> None:
+        text = self._EDITORCONFIG.read_text(encoding="utf-8")
+        problems: list[str] = []
+        for rel, keywords in _EDITORCONFIG_PS1_ENFORCERS.items():
+            if rel not in text:
+                problems.append(f"{rel}：`.editorconfig` 已不再指名它——兩邊必須同步")
+                continue
+            path = _REPO_ROOT / rel
+            if not path.is_file():
+                problems.append(f"{rel}：`.editorconfig` 指名了一個不存在的執行者（幽靈機械物）")
+                continue
+            body = path.read_text(encoding="utf-8", errors="replace")
+            missing = [k for k in keywords if k not in body]
+            if missing:
+                problems.append(
+                    f"{rel}：檔案在，但內容沒有在談它被指派的主題（缺 {missing}）"
+                    "——「檔案存在」是必要條件不是充分條件")
+        self.assertEqual(problems, [], "\n".join(problems))
 
 
 # ══════════════════════════════════════════════════════════════════════════════

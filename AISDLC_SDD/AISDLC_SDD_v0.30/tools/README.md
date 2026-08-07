@@ -142,9 +142,13 @@ cd AISDLC
 #### Mac / Linux
 
 ```bash
-./AISDLC_SDD_v0.01/tools/init_project.sh -d ~/my-project        # 公開倉庫
-./AISDLC_SDD_v0.01/tools/init_project.sh -d ~/my-project --ssh  # 私有倉庫 SSH
-./AISDLC_SDD_v0.01/tools/init_project.sh -h                     # 查看說明
+# 🔴 用 `bash <script>` 而非裸跑 `./<script>`（與本檔第 39 行一致）：該檔在 git 索引裡
+#    是 100644（非 100755），mac/Linux 上裸跑會得到 `Permission denied`（rc=126）。
+#    在 Windows 上這件事看不見——`core.filemode=false` 讓檔案模式從不出現在
+#    git status/diff 裡，所以這份文件在製造它的那台機器上永遠讀起來是對的。
+bash AISDLC_SDD_v0.01/tools/init_project.sh -d ~/my-project        # 公開倉庫
+bash AISDLC_SDD_v0.01/tools/init_project.sh -d ~/my-project --ssh  # 私有倉庫 SSH
+bash AISDLC_SDD_v0.01/tools/init_project.sh -h                     # 查看說明
 ```
 
 #### Windows (PowerShell)

@@ -233,10 +233,18 @@ _ZSH = _ds_shell_path("zsh")
 _SH_BASH = _ds_shell_path("bash")
 
 
+# 🔴 R79（D-skipped #6）：reason 前綴補 `[POSIX-NATIVE-ONLY]`。這個站點與同 repo 8 筆
+# 已標籤者**完全同形**（例 `test_dev_start.py:1362`），差別只在沒帶標籤，於是 runner 的
+# skip 明細把它底下的 6 支測試印成「未標籤」，與真正的環境性 skip（缺 zsh／缺舊直譯器／
+# 無 symlink 權限，共 5 筆）混在同一桶。後果不是美觀問題：S3「徹底消除 skipped」的分流
+# 者照那份輸出讀，會把「補環境就能救回」的工作量高估一倍，或反過來去修根本不該在
+# Windows 跑的測試。標上之後 `_POSIX_TAG_RATCHET["tools/tests"]` 由 1 降為 0（連同
+# shrink-only 天花板一起下修——天花板不跟著降＝把剛還掉的欠債額度留著日後無聲用回去）。
 @unittest.skipIf(
     os.name == "nt",
-    "tools/dev_start.sh 檔頭自陳為 macOS/Linux 專用（Windows 對等＝tools/dev_start.ps1，"
-    "由本檔第一部分覆蓋）——不在 Windows 上驗證非目標平台的殼",
+    "[POSIX-NATIVE-ONLY] tools/dev_start.sh 檔頭自陳為 macOS/Linux 專用"
+    "（Windows 對等＝tools/dev_start.ps1，由本檔第一部分覆蓋）"
+    "——不在 Windows 上驗證非目標平台的殼",
 )
 class TestDevStartShShellCarrier(unittest.TestCase):
     """在 tmp fake repo 內以真 shell 實跑真 dev_start.sh（stub 核心／stub activate）。"""

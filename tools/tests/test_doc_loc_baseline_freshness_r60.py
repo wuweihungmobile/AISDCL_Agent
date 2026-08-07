@@ -2789,13 +2789,16 @@ _SUBPROJECT_SCOPE_MARK = "僅 AutoClaude 子專案 session"
 #: 補了掃描器就把該列的機械物欄改掉，並把該項從此處刪除——兩邊由下方雙向判準綁住。
 _IRON_LAW3_UNCOVERED: tuple[str, ...] = (
     "`$env:*` 讀取", "副檔名判斷", "`Get-Command` 解析", "大小寫敏感度",
-    # R78 新登記的危害類：`.ps1` 方向的行尾。原本整類被「行尾」一個詞蓋住，而那一列
-    # 具名的兩個機械物射程**只有** `.sh`／`.bash`。逐項實查後確認 `.ps1` 方向零守門：
-    # BOM hook 是逐位元組保留、git hooks 零命中、唯一在管的 CI 判準因 checkout 必定
-    # 重新 smudge 而**結構上永遠綠**。本輪用 act 跑工作樹才讓 6 支檔顯形。
-    # 🔴 登記它會讓分母 +1 而分子不動——依本表的雙邊棘輪設計這是**綠**的，
-    #    誠實登記新發現的無守門危害類不再有代價（那正是 R77 改造這條棘輪的目的）。
-    "行尾（**`.ps1` 方向**",
+    # 🔴 R79：`.ps1` 方向的行尾**已補上機械物**（PostToolUse hook 寫入當下補回 CRLF ＋
+    # 根層 unittest 事後量工作樹），故從本清單移出、該列的機械物欄同步改寫 ⇒ 分子 +1。
+    # 這是本表雙單邊棘輪設計裡唯一合法的「分子上升」路徑：補了掃描器就改機械物欄，
+    # 不是把整列拿掉（拿掉會讓分母降而轉紅）。
+    #
+    # R79 新登記的危害類：`.py` 方向的行尾。`.gitattributes` 宣告 `text eol=lf`，
+    # 而工作樹實測 4176/5478 支是 CRLF，`.sh`／`.ps1` 兩向已歸零、唯獨 `.py` 從立帳
+    # 起一行未動（`DEF-101-377` 的另一半）。登記它讓分母 +1 而分子不動＝**綠**，
+    # 誠實登記新發現的無守門危害類不再有代價（那正是 R77 改造這條棘輪的目的）。
+    "行尾（**`.py` 方向**",
 )
 #: 鐵律三對照表的表頭（定位那**一張**表，不是 CLAUDE.md 內所有表格）。
 _IRON_LAW3_TABLE_HEAD = "| 觸發項 |"
@@ -2805,10 +2808,13 @@ _IRON_LAW3_NO_MECHANISM = "無機械物"
 #: `TestR74IronLawMechanismAccounting` 的
 #: `test_iron_law3_coverage_only_goes_up_and_the_denominator_may_grow`）。
 #: 分子＝**有機械物**的觸發項數，只准上升（拆掉掃描器即紅）。
-_IRON_LAW3_COVERED_FLOOR = 4
+#: R79：4 → 7（`.ps1` 行尾補上 hook＋事後兜底；另新增 exec bit 與目錄項原語兩列，
+#: 兩列都是「新增時就已經有掃描器」，分子分母同時 +1）。
+_IRON_LAW3_COVERED_FLOOR = 7
 #: 分母＝**已登記**的危害類數，只准上升（刪列來讓數字好看即紅）。未覆蓋數＝分母−分子，
 #: 刻意**不設上限**——那正是舊判準把「還有幾類沒人守」與「我們知道有幾類危害」綁死的地方。
-_IRON_LAW3_KNOWN_FLOOR = 8
+#: R79：8 → 12（`.py` 行尾、exec bit、目錄項原語三類新登記；`.ps1` 行尾那一列原本就在表上）。
+_IRON_LAW3_KNOWN_FLOOR = 12
 
 
 def hook_scripts_named_in(text: str, repo_root: Path) -> dict[str, list[str]]:
@@ -3032,6 +3038,88 @@ class TestR74RootClaudeMdHookClaimsMatchRegistration(unittest.TestCase):
         self.assertTrue(any("已註冊" in p for p in problems), problems)
 
 
+def unnamed_registered_hook_problems(
+    text: str, settings_text: str, repo_root: Path
+) -> list[str]:
+    """根 `.claude/settings.json` 註冊了、而根 CLAUDE.md 一行都沒提到的 hook（空＝通過）。
+
+    🔴 **這是 `hook_claim_problems()` 的第三向（R79 收斂包）**。前兩向的掃描面都是
+    `hook_scripts_named_in(CLAUDE.md, …)`——**只檢查文件裡有被點名的那幾支**。於是
+    「已註冊、但文件從頭到尾沒提」這個組合結構上落在兩向之外：兩向都不會觸及它。
+
+    代價已實測：`lint_powershell_command.py` 自 R77 上線起就在根層攔 PowerShell 指令
+    （鐵律二與「讀 rc 不接管線」的唯一機械物），而 R79 掃描時根 CLAUDE.md 全檔提到
+    hook 的地方只有鐵律一那一處 ⇒ 那兩節讀起來都像純自律。方向與慣見的相反但同樣是
+    假圖像：不是「宣稱一個不存在的機械物」，是**有機械物卻被記成沒有**，而下一輪很
+    可能為它們再蓋一支攔截器（同一份知識住兩個家，R73 `Find-GitBash` 的復發形態）。
+
+    分母刻意是 `settings.json` 現查出來的註冊集合（會變的量測值），不是寫死清單——
+    新增 hook 忘了寫文件會當場紅，而拿掉 hook 不會留下一筆要人回收的登記。
+    只要求**被點名一次**，不要求寫在哪一節：規定位置就會逼出應付式的一行。
+    """
+    registered = registered_hook_basenames(settings_text)
+    named = set(hook_scripts_named_in(text, repo_root))
+    return [
+        f"{name} 已註冊於根 .claude/settings.json（每個根 session 都會跑），"
+        f"但根 CLAUDE.md 一行都沒提到它 ⇒ 讀者照本檔推論會漏掉一支活的守衛，"
+        f"而下一輪很可能為同一件事再蓋一支（同一份知識住兩個家）。"
+        f"修法：在它守的那一節加一句「本條已有機械物」並具名該路徑"
+        for name in sorted(registered - named)
+    ]
+
+
+class TestR79EveryRegisteredHookIsNamedInClaudeMd(unittest.TestCase):
+    """第三向：根層註冊的每一支 hook 都必須在根 CLAUDE.md 至少被點名一次。"""
+
+    def test_current_claude_md_names_every_registered_hook(self) -> None:
+        problems = unnamed_registered_hook_problems(
+            _ROOT_CLAUDE_MD.read_text(encoding="utf-8-sig"),
+            _ROOT_SETTINGS.read_text(encoding="utf-8-sig"), _REPO_ROOT)
+        self.assertEqual(problems, [], "根層註冊了卻沒被文件點名的 hook：\n  "
+                                       + "\n  ".join(problems))
+
+    def test_an_unnamed_registered_hook_is_red(self) -> None:
+        """注入＝修前實況重演：文件只提鐵律一那一支，其餘註冊的 hook 一律該紅。
+
+        用**真的 settings.json** 當分母：合成 settings 證明不了「對 repo 現況有牙」，
+        而修前實況正是真 settings 裡有六支、文件只提得出其中幾支。
+        """
+        problems = unnamed_registered_hook_problems(
+            "🔴 本條已有機械物：`.claude/hooks/block_bash_on_windows.py`。",
+            _ROOT_SETTINGS.read_text(encoding="utf-8-sig"), _REPO_ROOT)
+        self.assertTrue(
+            any("lint_powershell_command.py" in p for p in problems),
+            f"已註冊但文件沒提的 hook 未被點名 ⇒ 第三向沒有牙；實得：{problems}")
+        self.assertFalse(
+            [p for p in problems if "block_bash_on_windows.py" in p],
+            "有被點名的那一支不該入列（否則本判準只是全都判紅）")
+
+    def test_the_denominator_is_measured_not_hardcoded(self) -> None:
+        """自錨：分母必須是解析出來的註冊集合，且真的非空。
+
+        解析一旦壞掉（回空集合），上一支對任何文件恆綠——靜默縮面正是本家族一再犯的病。
+        """
+        registered = registered_hook_basenames(
+            _ROOT_SETTINGS.read_text(encoding="utf-8-sig"))
+        self.assertGreaterEqual(
+            len(registered), 3, f"註冊面解析得異常少：{sorted(registered)}")
+        self.assertIn("lint_powershell_command.py", registered,
+                      "前提已變：該 hook 已不在根層註冊 ⇒ 請改用另一支已註冊的重寫本注入")
+
+    def test_a_registered_hook_named_anywhere_counts(self) -> None:
+        """對照組：只要文件某處點名就算數——規定寫在哪一節會逼出應付式的一行。"""
+        settings = json.dumps(
+            {"hooks": {"PreToolUse": [{"matcher": "Bash", "hooks": [{
+                "type": "command",
+                "command": "python .claude/hooks/block_bash_on_windows.py"}]}]}},
+            ensure_ascii=False)
+        self.assertEqual(
+            unnamed_registered_hook_problems(
+                "附錄：本 repo 的守衛之一是 block_bash_on_windows.py。",
+                settings, _REPO_ROOT),
+            [])
+
+
 # ── R75 訂正：具名機械物鎖的三面擴張（幽靈機械物 4 筆的逃逸路徑）─────────────
 #
 # 🔴 缺陷本體：原判準是「掃根 CLAUDE.md、要求反引號、副檔名只認 `.py`、只斷言檔案存在」。
@@ -3073,6 +3161,9 @@ _IRON_LAW3_TOPIC_KEYWORDS: dict[str, tuple[str, ...]] = {
     "行尾": ("crlf", "eol", r"\r\n", "行尾"),
     "$IsWindows": ("iswindows",),
     "Get-Command": ("get-command",),
+    # R79 新增兩列（補了掃描器就要同步本表，否則實質判準對新列零覆蓋）。
+    "exec bit": ("100755", "exec", "filemode", "chmod"),
+    "目錄項": ("os.replace", "rename", "winerror", "目錄項"),
 }
 
 
@@ -3541,10 +3632,41 @@ _SYMBOL_CLAIM_RE = re.compile(
 _SYMBOL_STDLIB_OK: frozenset[str] = frozenset(
     {"TestCase", "TestLoader", "TestResult", "TestSuite", "TestProgram"})
 #: 引用面（誰會寫出「指認機械物」的句子）。
-_SYMBOL_REF_GLOBS: tuple[str, ...] = ("tools/**/*.py", "AutoClaude/tools/*.py")
+#:
+#: 🔴 **R79 收斂包擴面（第二條逃逸縫）**：R78 把判準的**token 形狀**由「反引號路徑」擴到
+#: 「反引號 Python 識別字」，但引用面自始至終只有 `.py`。實測後果：引發整個 R78 C 包的
+#: 那個常數（護欄層檔數棘輪，全庫零定義）當時仍活在 10 支 `docs/` 檔共 14 處，其中
+#: `Skipped_Test_Inventory_R76.md` 把它當**現行**約束在陳述，而那個語意早已被推翻
+#: ——照著讀的人會把新鎖放到別的樹去（R79 實測這件事已經發生）。
+#: 「形狀對了、但那個形狀出現的地方不在掃描面內」＝同一個病的第二個住所。
+#:
+#: 為何是**活文件白名單**而不是整棵 `docs/`（誠實劃界，不是偷懶）：
+#:   · 收錄的四類都是**下一輪會被當指令讀**的檔——成熟度 SSOT、skip 盤點、交棒書、ADR。
+#:   · 刻意排除輪次凍結文件（`CrossPlatform_R*_*.md`、`AutoSDD_Defect_Log*`）：它們是
+#:     **史料**，寫下當時為真，把它們納入等於逼人竄改歷史記錄（同 `stale-premise-ok:`
+#:     豁免存在的理由）。史料裡的死符號改由「讀者看得到輪次號」自行判讀。
+_SYMBOL_REF_GLOBS: tuple[str, ...] = (
+    "tools/**/*.py", "AutoClaude/tools/*.py",
+    "docs/06_quality/CrossPlatform_Maturity_Criteria.md",
+    "docs/06_quality/Skipped_Test_Inventory*.md",
+    "docs/04_planning/*HANDOFF*.md",
+    "docs/04_planning/ADR/*.md",
+)
 #: 定義面（符號可能住在哪）。刻意比引用面寬：跨層引用（測試提生產碼的常數）是常態。
+#:
+#: 🔴 **R79 收斂包補三棵樹**（每一棵都是當回合實測抓到的偽陽性來源，不是預防性擴面）：
+#:   · `.claude/hooks/*.py`——**整個 hook 層的符號在本索引裡等於不存在**。實證：R79 的
+#:     觀測者包在鎖檔裡以反引號指名 `_RC_RESET_RE`（真的定義在
+#:     `.claude/hooks/lint_powershell_command.py`），主牙把它判成幽靈符號並讓根層閘門轉紅。
+#:     偽陽性比漏報更致命——它會逼下一個人把整道鎖關掉（本檔上方已為此付過學費）。
+#:   · `AutoClaude/tests/**/*.py`／`AISDLC_SDD/scripts/**/*.py`——skip 盤點與 ADR 大量以
+#:     **模組名**指認測試（`test_pgvector_recall_perf` 這種），那些模組真的存在、只是住在
+#:     這兩棵沒被收進來的樹裡。擴面後 20 個此類名字一次消失。
+#: 刻意**不**收整棵 `AISDLC_SDD/`：該樹底下有數千支 venv／快取 `.py`（姊妹鎖
+#: `test_platform_utils_dedup._scan_repo_py_for` 實測 4,829 支），全掃既慢又得養排除清單。
 _SYMBOL_DEF_GLOBS: tuple[str, ...] = (
-    "tools/**/*.py", "AutoClaude/tools/**/*.py", "AutoClaude/autoclaude/**/*.py")
+    "tools/**/*.py", "AutoClaude/tools/**/*.py", "AutoClaude/autoclaude/**/*.py",
+    ".claude/hooks/*.py", "AutoClaude/tests/**/*.py", "AISDLC_SDD/scripts/**/*.py")
 _SYMBOL_DEF_RE = re.compile(r"^\s*(?:class|def)\s+(\w+)", re.M)
 _SYMBOL_ASSIGN_RE = re.compile(r"^\s*(\w+)\s*(?::[^=\n]+)?=", re.M)
 
@@ -3561,33 +3683,43 @@ _SYMBOL_ASSIGN_RE = re.compile(r"^\s*(\w+)\s*(?::[^=\n]+)?=", re.M)
 #:   (b) **stale 自檢**：表上的名字若①現在解析得到了（有人把符號補回來／改對了），或
 #:       ②整個 repo 已經沒有任何一處引用它了，都必須把那一筆**刪掉**，否則紅。
 #:       豁免只能因為「還沒清乾淨」而存在，不能因為「沒人記得回收」而存在。
+#: 🔴 **R79 收斂包同一次變更的兩個方向**（兩個方向都必須做，只做一半會是假帳）：
+#:   · **刪 4 筆**（`_ADDITIONAL_RISKY_NAMES`／`_PG_REAL_ENABLED`／`_SDD_PRESENT`／
+#:     `test_enforce_docs_path_blocks_chinese_path_under_cp950`）——定義面擴到三棵新樹之後
+#:     它們**解析得到了**，(b) 那道 stale 自檢會直接判紅要求刪除。
+#:   · **加 5 筆**（下方標 `R79-docs` 者）——引用面擴到 `docs/` 活文件之後才**第一次看得見**
+#:     的存量。這不是「問題變多」而是「視野變大」，同 `_IRON_LAW3_KNOWN_FLOOR` 那條雙單邊
+#:     棘輪的立案理由；為了不讓這個藉口被重複使用，加筆的代價由下方
+#:     `_GHOST_SYMBOL_BASELINE_CEILING` 這道 shrink-only 天花板承擔（形狀抄
+#:     `test_subprocess_encoding_hygiene._ENTRY_WAIVER_CEILING`）。
 _GHOST_SYMBOL_BASELINE: frozenset[str] = frozenset({
     "TestDescendantWatcherFinalSyncSample",
+    "TestGuardFileCountShrinkOnlyRatchet",   # R79-docs：ADR-XPLAT-002 §8 item 12 的沿革
     "TestMultiGrandchildLockNotPrematurelyStale",
-    "_ADDITIONAL_RISKY_NAMES",
     "_CALL",
     "_CELL",
+    "_FROZEN_GUARD_FILE_COUNT",             # R79-docs：R77 退場的檔數棘輪（史料引用）
     "_FROZEN_SDD_VERSION_RE",
+    "_FROZEN_VERSION_DIR_RE",               # R79-docs：R66 併入 sdd_latest.py 前的舊名
     "_HAPPY_PATH",
     "_LATEST_PINNED_SHA256",
     "_LATEST_THINNESS_ENROLLED",
     "_LIVE_LOC_ANCHOR",
     "_MY_PIPE_RE",
     "_PENDING_MIGRATION_SITES",
-    "_PG_REAL_ENABLED",
     "_PROVENANCE_FIELDS",
     "_REASSIGN_RE",
     "_ROW_REOPENED_AFTER",
     "_ROW_STILL_OPEN",
-    "_SDD_PRESENT",
     "_SOURCE",
     "_SURVIVED_ID_PATTERNS",
     "_TLC_TRACK_ENROLLED",
+    "_TLC_TRACK_RE",                        # R79-docs：R65 Phase 2-A 退場的客製鎖
     "_TRACKED_ACTIONS",
     "_TREE_FLOOR_RATIO",
     "test_ac_matches_sum_of_seven_registries",
     "test_constants_never_increase_versus_head",
-    "test_enforce_docs_path_blocks_chinese_path_under_cp950",
+    "test_frozen_guard_count_matches_the_worktree",  # R79-docs：同檔數棘輪一併退場
     "test_is_windows_apps_stub_defined_exactly_once",
     "test_latest_install_post_commit_pins_utf8_before_reading_git_common_dir",
     "test_main_separates_vague_rows_from_valid_count_and_does_not_fail",
@@ -3595,6 +3727,13 @@ _GHOST_SYMBOL_BASELINE: frozenset[str] = frozenset({
     "test_the_header_boundary_excludes_a_row_that_legitimately_quotes_it",
     "test_untracked_action_is_ignored",
 })
+#: **shrink-only 天花板**：本表的筆數只准變少。
+#: 為何需要它（R79 立案理由）：上方那句「只准變少」在 R78~R79 之間**只是散文**——
+#: `test_the_baseline_is_not_stale` 只管「已解析得到／已無人引用」這兩種 stale，
+#: 對「順手多登記一筆新幽靈」零訊號，而那正是這道鎖最省力的關法。
+#: 擴掃描面而多看見存量時，重釘本值並在交件回報寫出前後值與理由（同 `_FROZEN_GUARD_LINES`
+#: 的重釘紀律）；**不得**為了讓一筆新寫下的懸空引用過關而調高它。
+_GHOST_SYMBOL_BASELINE_CEILING = 33
 
 _SYMBOL_INDEX_CACHE: dict[str, frozenset[str]] = {}
 
@@ -3706,13 +3845,69 @@ class TestR78GhostSymbolClaims(unittest.TestCase):
         self.assertEqual(problems, [], "基線豁免表已 stale：\n  " + "\n  ".join(problems))
 
     def test_the_reference_surface_is_not_vacuous(self) -> None:
-        """自錨：三個引用面每一面都必須真的收到東西（靜默縮面＝本家族一再犯的病）。"""
+        """自錨：每一個引用面都必須真的收到東西（靜默縮面＝本家族一再犯的病）。"""
         sources = {src for src, _n, _l in collect_symbol_claims(_REPO_ROOT)}
         self.assertIn("CLAUDE.md", sources)
         self.assertTrue([s for s in sources if s.startswith("tools/tests/")],
                         f"tools/tests 這一面收不到任何裸識別字引用：{sorted(sources)[:10]}")
         self.assertTrue([s for s in sources if s.startswith("tools/") and "/" not in s[6:]],
                         f"tools/ 頂層這一面收不到任何裸識別字引用：{sorted(sources)[:10]}")
+        # R79：docs 活文件面。**逐類**斷言而非只看「有沒有 docs/」——四個 glob 任一寫壞
+        # 時，其餘三個仍會讓籠統的斷言通過，那正是本家族一再踩到的靜默縮面。
+        for face in ("docs/06_quality/CrossPlatform_Maturity_Criteria.md",
+                     "docs/06_quality/Skipped_Test_Inventory",
+                     "docs/04_planning/ADR/"):
+            with self.subTest(face=face):
+                self.assertTrue(
+                    [s for s in sources if s.startswith(face)],
+                    f"{face} 這一面收不到任何裸識別字引用 ⇒ glob 寫壞或檔案改名："
+                    f"{sorted(s for s in sources if s.startswith('docs/'))[:10]}")
+
+    def test_the_baseline_never_grows(self) -> None:
+        """R79：具名基線的**筆數**只准變少（`_GHOST_SYMBOL_BASELINE_CEILING`）。
+
+        WHY 這一支非有不可：上方兩道 stale 自檢管的是「表上的筆該不該還在」，對
+        「表上又多了一筆」零訊號——而「把新寫下的懸空引用登記進豁免表」正是這道鎖
+        最省力、也最不像在繞過任何東西的關法。同型判例：`_ENTRY_WAIVER_CEILING`。
+        """
+        self.assertLessEqual(
+            len(_GHOST_SYMBOL_BASELINE), _GHOST_SYMBOL_BASELINE_CEILING,
+            f"幽靈符號豁免表由 {_GHOST_SYMBOL_BASELINE_CEILING} 筆長到 "
+            f"{len(_GHOST_SYMBOL_BASELINE)} 筆——豁免是欠債不是額度。"
+            "正解＝把那個引用改述成正確語意（或改指真的存在的符號）；"
+            "真的是「擴掃描面才看見的既有存量」時，重釘本天花板並在交件回報寫出前後值與理由",
+        )
+        self.assertEqual(
+            len(_GHOST_SYMBOL_BASELINE), _GHOST_SYMBOL_BASELINE_CEILING,
+            "表已縮短卻沒有同步下修天花板——餘裕就是日後無聲加回去的破口"
+            "（同 `_FROZEN_GUARD_LINES` 的 `[基準過時]`）",
+        )
+
+    def test_the_ceiling_has_teeth(self) -> None:
+        """鑑別力（注入）：多登記一筆 ⇒ 天花板必須說話；少一筆 ⇒ 也要說話（雙邊）。"""
+        self.assertGreater(
+            len(_GHOST_SYMBOL_BASELINE | {"_A_SYNTHETIC_GHOST_XYZ"}),
+            _GHOST_SYMBOL_BASELINE_CEILING,
+            "多登記一筆竟然沒有超過天花板 ⇒ 天花板留了餘裕，這道鎖是空的")
+        self.assertLess(
+            len(_GHOST_SYMBOL_BASELINE - {sorted(_GHOST_SYMBOL_BASELINE)[0]}),
+            _GHOST_SYMBOL_BASELINE_CEILING,
+            "少一筆竟然沒有低於天花板 ⇒ 下修那一向的相等斷言測不到東西")
+
+    def test_a_hooks_layer_symbol_resolves(self) -> None:
+        """R79 回歸鎖：`.claude/hooks/` 的符號必須在索引內（偽陽性＝鎖會被整道關掉）。
+
+        修前實況（當回合實測）：定義面只有三棵樹、不含 hook 層 ⇒ 鎖檔以反引號指名
+        `_RC_RESET_RE`（真的定義在 `lint_powershell_command.py`）被主牙判成幽靈符號，
+        根層閘門轉紅。用**真符號**而非合成名：合成名證明不了「對 repo 現有的那一支有牙」。
+        """
+        index = python_symbol_index(_REPO_ROOT)
+        self.assertIn(
+            "_RC_RESET_RE", index,
+            "hook 層的符號不在索引內 ⇒ 任何指名 hook 內常數的鎖檔都會被誤判成幽靈")
+        self.assertNotIn(
+            "_RC_RESET_RE", _GHOST_SYMBOL_BASELINE,
+            "它已解析得到，不該再掛在豁免表上")
 
     def test_the_symbol_index_is_not_vacuous(self) -> None:
         """自錨：索引垮掉（glob 寫壞／目錄改名）時，主牙會把**每一個**引用判成幽靈——
@@ -5535,7 +5730,7 @@ class TestR78MaturityCriteriaSsot(unittest.TestCase):
 
 # ── R78 SA-04／SA-05：交棒書的「尚未做」必須附現查指令 ──────────────────────────
 _HANDOFF_GLOB = "docs/04_planning/*HANDOFF*.md"
-_HANDOFF_SECTION_RE = re.compile(r"^#{2,}\s+(.*)$")
+_HANDOFF_SECTION_RE = re.compile(r"^(#{2,})\s+(.*)$")
 _HANDOFF_SECTION_WORDS = ("開場必讀", "還沒做", "未做", "待辦")
 _HANDOFF_ITEM_RE = re.compile(r"^\s*(?:\d+\.|[-*])\s+")
 _HANDOFF_STALE_WORDS = ("尚未", "還沒", "仍缺", "未執行", "沒跑", "未推送", "仍未")
@@ -5552,17 +5747,33 @@ def _handoff_claim_blocks(text: str) -> list[list[str]]:
 
     刻意**只看條目**、不看章節前言：前言是體例與訂正說明的住處，把它當成宣稱會逼人
     在規則本身上貼標記（噪音），而規則不會過期。
+
+    🔴 R79 複審（HANDOFF 包注入時當場量到）：**巢狀小標題繼承父節的射程**。
+    上一版對「任何 `##` 以上的標題」一律重設 `in_section`，包括 `###`——於是一個
+    住在「待辦」大節底下、但小標題本身不含觸發字的 `###` 區塊，整區條目會**靜默退出
+    射程**（實測：加了四個小標題之後，拿掉某一項的現查指令，這道鎖照樣印綠）。
+    當時的處置是「把觸發字寫進每一個小標題」＝繞過，不是修好；下一個人在 §4 底下
+    新增一個不含該字的小標題就會再踩一次，而且沒有任何東西會轉紅。
+    現行語意：只有**同級或更高級**（`#` 數不多於開啟該節的那一個）的標題才重設；
+    更深的標題沿用父節的 `in_section`。⇒ 觸發字只需寫在大節標題上一次。
     """
     out: list[list[str]] = []
     cur: list[str] = []
     in_section = False
+    section_level = 0  # 開啟當前射程的那個標題的 `#` 數（0＝目前不在射程內）
     for line in text.splitlines():
         heading = _HANDOFF_SECTION_RE.match(line)
         if heading:
             if cur:
                 out.append(cur)
             cur = []
-            in_section = any(w in heading.group(1) for w in _HANDOFF_SECTION_WORDS)
+            level = len(heading.group(1))
+            if any(w in heading.group(2) for w in _HANDOFF_SECTION_WORDS):
+                in_section, section_level = True, level
+            elif in_section and level > section_level:
+                pass  # 巢狀小標題：繼承父節射程，不重設
+            else:
+                in_section, section_level = False, 0
             continue
         if not in_section:
             continue
@@ -5643,6 +5854,42 @@ class TestR78HandoffClaimsCarryLiveCommands(unittest.TestCase):
         self.assertEqual(_handoff_problems("syn.md", with_mark)[0], [], "附標記被誤殺")
         self.assertEqual(_handoff_problems("syn.md", no_claim), ([], 0), "無 stale 字樣卻計入")
         self.assertEqual(_handoff_problems("syn.md", outside), ([], 0), "射程外的章節被誤收")
+
+    def test_a_subheading_without_the_trigger_word_stays_in_its_parents_scope(self) -> None:
+        """巢狀小標題繼承父節射程——這是 R79 複審點名、上一版**靜默放行**的那個縫。
+
+        上一版對任何 `##` 以上標題一律重設 `in_section`，於是「待辦」大節底下一個
+        普通 `###` 小標題就會把其下所有條目整區踢出射程；本輪 §4 的四個小標題正是
+        靠「把觸發字寫進每一個小標題」繞過的。這支測試把繞過換成判準：小標題**不含**
+        任何觸發字時，父節的裸宣稱仍必須被抓到。
+
+        另兩向一起釘住，避免修過頭：① `###` 在**射程外**的大節底下不得被吸進來；
+        ② 同級或更高級的標題仍必須關掉射程（否則一路吃到檔尾）。
+        """
+        nested = (
+            "## §4 交給 R80 的事（待辦清單）\n\n"
+            "### 4.2 收斂包點名的四項\n\n"      # 刻意不含任何 _HANDOFF_SECTION_WORDS
+            "- **攔阻矩陣尚未實跑**，沒有附指令。\n"
+        )
+        self.assertEqual(
+            len(_handoff_problems("syn.md", nested)[0]), 1,
+            "「待辦」大節底下的 `###` 小標題把整區條目踢出射程了（R79 複審點名的縫）",
+        )
+        outside_nested = (
+            "## §9 其他\n\n### 9.1 雜項\n\n- **尚未推送**，沒有附指令。\n"
+        )
+        self.assertEqual(
+            _handoff_problems("syn.md", outside_nested), ([], 0),
+            "射程外大節底下的小標題被誤收 ⇒ 繼承改過頭了",
+        )
+        closed_by_sibling = (
+            "## §4 待辦\n\n### 4.1 甲\n\n- 甲項，現查 `git status`。\n"
+            "## §5 禁止事項\n\n- **尚未推送**，沒有附指令。\n"
+        )
+        self.assertEqual(
+            _handoff_problems("syn.md", closed_by_sibling), ([], 0),
+            "同級標題沒有關掉射程 ⇒ 會一路吃到檔尾",
+        )
 
 
 if __name__ == "__main__":

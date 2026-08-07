@@ -52,8 +52,27 @@ NON_WINDOWS_SKIP_TAGS: tuple[str, ...] = (POSIX_NATIVE_SKIP_TAG, MAC_NATIVE_SKIP
 # 🔴 R75 新增（QA-R74-02）：第三種語意——**這支測試沒跑是因為機器缺工具／缺環境**，
 # 與平台無關。詳見 `skip_static_scan.site_class` 的 `tool-absence` 類別說明。
 TOOL_ABSENCE_SKIP_TAG = "[TOOL-ABSENCE]"
+
+# 🔴 R79 新增（D-skipped #2）：把「為什麼這支沒跑」由散文升格為**可分群的標籤**。
+# 掌舵者 S3 問的是「為何會有 skipped、如何徹底消除」，而在此之前那個數字沒有任何機械物
+# 在替它說話（`PG_CONTRACT_MAX_SKIPPED` 是全 repo 唯一天花板、只覆蓋一個 CI job）。逐支
+# 消除治不了復發——R76 把 224 壓到 158 之後，R77／R78 又各自新增 skip 站點，靠的全是人
+# 記得。分群的用途是讓「哪一類可以清到 0、哪一類結構上不可能」變成可稽核的量，而不是
+# 每輪由人重新盤點一次。
+#   `[ENV-DISABLED]`   ＝環境**未啟用**（不是缺件）。與 `[TOOL-ABSENCE]` 的分野是本 repo
+#                        既有的一條紀律：skip 理由寫「需要 X」不等於 X 缺席，多半只是環境
+#                        變數沒設或 extras 沒裝。這一群是**唯一應該清到 0** 的那群——本輪
+#                        實測：這台機器一件缺件都沒有，設好三個環境變數就消掉 92 支。
+#   `[STRUCTURAL-PAIR]`＝absent／present 互斥對這類「結構上必有一支 skip」者，不可能歸零。
+#   `[DEBT]`           ＝真欠債（斷言落點還沒建）。理由必須帶承接輪次，判準沿用
+#                        `_EXEMPT_HANDOVER_RE`——沒有承接者的欠債就是永久欠債。
+ENV_DISABLED_SKIP_TAG = "[ENV-DISABLED]"
+STRUCTURAL_PAIR_SKIP_TAG = "[STRUCTURAL-PAIR]"
+DEBT_SKIP_TAG = "[DEBT]"
+
 ALL_SKIP_TAGS: tuple[str, ...] = (
     WINDOWS_NATIVE_SKIP_TAG, *NON_WINDOWS_SKIP_TAGS, TOOL_ABSENCE_SKIP_TAG,
+    ENV_DISABLED_SKIP_TAG, STRUCTURAL_PAIR_SKIP_TAG, DEBT_SKIP_TAG,
 )
 
 # ── 關鍵詞面（標籤完整性的啟發式）───────────────────────────────────────────────
@@ -277,8 +296,13 @@ TREE_FLOOR_RATIO = 0.8
 # 在 Windows 上恆回空清單 ⇒ R74 為此新增的「本次跑在 Windows 上失去的覆蓋」摘要區塊
 # **結構性零輸出**，而本表把欠債凍結成 6 讓棘輪同時恆綠 ⇒ 一個為了看見覆蓋損失而建的
 # 機制，與看著它的鎖，兩者一起沉默。
+#
+# 🔴 R79（D-skipped #6）：`tools/tests` 由 1 下修為 **0**——最後一筆
+# （`test_dev_start_ps1_lastexitcode.py` 的 `TestDevStartShShellCarrier` 類別層裝飾器）
+# 已於本輪補標。**為何非補不可**：runner 的 skip 明細把它底下的 6 支測試印成「未標籤」，
+# 與 5 筆真環境性 skip 同桶，讓「徹底消除 skipped」的分流者把可救回的工作量高估一倍。
 _POSIX_TAG_RATCHET: dict[str, int] = {
-    "tools/tests": 1,
+    "tools/tests": 0,
     "AutoClaude/tests": 0,
     "AISDLC_SDD/scripts/tests": 1,
     # 本輪納入 LATEST fsm_runtime/tests：實測 1 筆未標籤（`test_post_commit_drift_
@@ -300,7 +324,7 @@ _POSIX_TAG_RATCHET: dict[str, int] = {
 #: （上修天花板是具名的、可被複審點名的），不是不可能性。真正的不可能性只有把欠債
 #: 清成 0（`AutoClaude/tests` 本輪已做到）。
 _POSIX_TAG_RATCHET_CEILING: dict[str, int] = {
-    "tools/tests": 1,
+    "tools/tests": 0,   # R79：連同基線一起下修（見 `_POSIX_TAG_RATCHET` 的 R79 註記）
     "AutoClaude/tests": 0,
     "AISDLC_SDD/scripts/tests": 1,
     LATEST_FSM_TESTS_TREE: 1,
@@ -328,12 +352,17 @@ _POSIX_TAG_RATCHET_CEILING: dict[str, int] = {
 #: 「此 git 建置未啟用 NTFS 保留名檢查」時以函式體內 `self.skipTest(...)` 退場——沒有
 #: 第三方裁判時對拍只會產生整批假分歧，跳過比假紅正確。定位方式：對每支 test 檔各以
 #: HEAD 版與工作樹版跑一次 `site_class_counts()` 相減（探針不寫死期望值，差異由兩次量測得出）。
+#: 🔴 R79 收尾重釘 `tools/tests` 的 `runtime-skipTest` 13 → 15：續航哨兵包在
+#: `test_context_budget_guard.py` 新增兩支只在 Windows 有行為的分支測試（schtasks 武裝、
+#: 以及與 context 阻斷刻意分開的那個逃生口），兩者都以函式體內 `self.skipTest(...)`
+#: 對非 Windows 退場——鐵律三「單平台判準不外推」的正確形態，非隱藏失敗。定位方式同
+#: 上一段：對每支 test 檔各以 HEAD 版與工作樹版跑一次 `site_class_counts()` 相減。
 _SITE_CLASS_CENSUS: dict[str, dict[str, int]] = {
     "tools/tests": {
         "windows-only": 13,
         "posix-only": 11,
         "tool-absence": 38,
-        "runtime-skipTest": 13,
+        "runtime-skipTest": 15,
         "unclassified": 0,
     },
     # 🔴 本輪 `windows-only` 由 8 重釘為 9：並行包在
@@ -380,24 +409,54 @@ _UNREGISTERED_TAG_DEBT: dict[str, int] = {
     "[CARRIER-NO-DISCRIMINATION]": 1,
 }
 
+#: 🔴 R79（D-skipped #3）：**非字面 reason**（f-string／`+` 串接）那一面的獨立存量帳。
+#:
+#: 為何獨立一張表而不是併進上表：兩者是**兩個不同的量測母體**。上表數的是
+#: `skip_decorator_sites()` 抽得到字面值的站點，下表數的是
+#: `windows_skip_tags.nonliteral_skip_reason_prefixes()` 補回來的那一批——後者此前對本鎖
+#: 結構上隱形（`literal_eval` 失敗即整個站點丟掉），R76 指名的唯一已知實例
+#: （`[TOOL-MISSING]`）正好長成那樣，於是「已知缺陷 → 建了鎖 → 鎖看不到那個已知缺陷」
+#: 隱形三輪。把兩批塞進同一張表，會讓其中一面的站點增減去污染另一面的對帳
+#: （落地當回合實測：併表當場弄紅 `test_run_root_unittests.UnregisteredSkipTagVocabularyTest`
+#: 的 3 支合成語料測試——那 3 支的語料只含上表那一筆，本來就不該為下表的存量負責）。
+#:
+#: 這 3 筆**不是新違規，是本輪才第一次被看見的舊違規**；站點都不在本包的檔案所有權內
+#: （跨界改動＝並行包互踩假紅），故誠實登記為可見欠債。判準是**相等**，所以任何**新的**
+#: 未登記標籤照樣當場紅。
+#:   · `[TOOL-MISSING]`       `tools/tests/test_dev_start.py`：語意就是 `[TOOL-ABSENCE]`，
+#:                            應由該檔的所有者改字面（改完把本列刪掉）。
+#:   · `[PG-CORPUS-MISSING]`  `AutoClaude/tests/integration/test_pgvector_real_recall.py`
+#:   · `[PG-CORPUS-STALE]`    同上。兩者語意皆為「語料缺件」，建議併入 `[TOOL-ABSENCE]`。
+_NONLITERAL_TAG_DEBT: dict[str, int] = {
+    "[TOOL-MISSING]": 1,
+    "[PG-CORPUS-MISSING]": 1,
+    "[PG-CORPUS-STALE]": 1,
+}
+
 #: reason 開頭的標籤形態：`[大寫段-大寫段…]`。刻意只認**開頭**——標籤的契約就是
 #: 「加在 reason 的最前面」，句中提到某個 `[XXX]` 字樣不是在標記這支 skip。
 _TAG_PREFIX_RE = re.compile(r"^\s*(\[[A-Z][A-Z0-9]*(?:-[A-Z0-9]+)+\])")
 
 
-def unregistered_tag_problems(reasons: Iterable[str]) -> list[str]:
+def unregistered_tag_problems(
+    reasons: Iterable[str], *, debt: Mapping[str, int] | None = None
+) -> list[str]:
     """純函式：reason 開頭用了不在 `ALL_SKIP_TAGS` 內的標籤 ⇒ 與棘輪對帳。
 
     回傳問題描述清單；空＝合格。判準對兩個方向都說話（見 `_UNREGISTERED_TAG_DEBT`）。
+
+    `debt` 預設是字面 reason 那一面的帳（`_UNREGISTERED_TAG_DEBT`）；非字面那一面請顯式
+    傳 `_NONLITERAL_TAG_DEBT`——兩批是不同的量測母體，混帳會互相污染對帳（見該常數 WHY）。
     """
+    ledger = _UNREGISTERED_TAG_DEBT if debt is None else debt
     seen: dict[str, int] = {}
     for reason in reasons:
         found = _TAG_PREFIX_RE.match(reason)
         if found and found.group(1) not in ALL_SKIP_TAGS:
             seen[found.group(1)] = seen.get(found.group(1), 0) + 1
     problems: list[str] = []
-    for tag in sorted(set(seen) | set(_UNREGISTERED_TAG_DEBT)):
-        got, want = seen.get(tag, 0), _UNREGISTERED_TAG_DEBT.get(tag, 0)
+    for tag in sorted(set(seen) | set(ledger)):
+        got, want = seen.get(tag, 0), ledger.get(tag, 0)
         if got == want:
             continue
         fix = (

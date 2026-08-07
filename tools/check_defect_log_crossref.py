@@ -1138,15 +1138,12 @@ _GOVERNANCE_DOCS = (
     _REPO_ROOT / "docs" / "06_quality" / "CrossPlatform_R60_Fix_Evidence.md",
     _REPO_ROOT / "docs" / "06_quality" / "CrossPlatform_R60_Fix_Evidence_r3.md",
     _REPO_ROOT / "docs" / "06_quality" / "CrossPlatform_Scan_Dimensions.md",
-    # R61 Architect 收輪證據（即刻登記，免重演 SA-R60R3-01「新建證據檔兩張清單都沒進」）。
+    # 下三支＝R61／R62 收輪證據：免重演 SA-R60R3-01「新建證據檔兩張清單都沒進」與 R61「插曲二」。
     _REPO_ROOT / "docs" / "06_quality" / "CrossPlatform_R61_Architect_Evidence.md",
-    # R61 SA/QA 收輪證據（同理即刻登記）。
     _REPO_ROOT / "docs" / "06_quality" / "CrossPlatform_R61_SAQA_Evidence.md",
-    # R62 Architect 收輪證據（同理即刻登記，免重演 R61「插曲二」：忘了登記而致本檔測試轉紅）。
     _REPO_ROOT / "docs" / "06_quality" / "CrossPlatform_R62_Architect_Evidence.md",
-    # R68 十二維掃描的 69 筆存活缺陷清單（帳本 DEF-101-702 的詳情面）。它承擔的正是
-    # 本清單所定義的那個資格：複審者要逐條重驗就得讀完它（⇒ 受體積守門），且它會寫出
-    # 「某缺陷現居何處／座標為何」的宣稱（⇒ 受指針稽核）。即刻登記，不等下一輪。
+    # R68 十二維掃描的 69 筆存活缺陷清單（帳本 DEF-101-702 的詳情面）。資格＝複審者要逐條
+    # 重驗就得讀完它（⇒ 體積守門）＋ 它會寫出「某缺陷現居何處」的宣稱（⇒ 指針稽核）。
     _REPO_ROOT / "docs" / "06_quality" / "CrossPlatform_R68_Scan_Findings.md",
     # R75 缺陷詳情面（即刻登記；本檔受 raw-line 棘輪零餘裕，上兩段註解各兩行併一行換出額度）。
     _REPO_ROOT / "docs" / "06_quality" / "CrossPlatform_R75_Review_Evidence.md",
@@ -1166,6 +1163,10 @@ _GOVERNANCE_DOCS = (
     _REPO_ROOT / "docs" / "06_quality" / "CrossPlatform_Maturity_Criteria.md",
     # R78 四方複審與五修復包的證據面（30 findings 逐筆、每道新判準的注入紅綠）。
     _REPO_ROOT / "docs" / "06_quality" / "CrossPlatform_R78_Review.md",
+    # R79 清債包：帳本瘦身的**接收端**（列＝索引 ≤700 bytes，長文一律搬去那裡）。資格同上。
+    _REPO_ROOT / "docs" / "06_quality" / "CrossPlatform_R79_Debt_Audit.md",
+    # R79 四方複審結論的轉錄（宣稱「某 DEF-ID 處置為何」⇒ 指針稽核；覆核就得讀完它 ⇒ 體積守門）。
+    _REPO_ROOT / "docs" / "06_quality" / "CrossPlatform_R79_Review.md",
 )
 
 # 姊妹治理文件的命名慣例：`docs/06_quality/CrossPlatform_*.md`。這**不是**把具名常數
@@ -1235,13 +1236,14 @@ _USAGE = (
 #: 全數靜默消失，讀者無從得知後面十來道根本沒跑。`_bail()` 依本序把「尚有幾道未執行」逐名
 #: 印出來，使早退**可見**而非隱形。新增／調動檢查時必須同步本序（兩邊由
 #: `tools/tests/test_check_defect_log_crossref.py::TestEarlyExitAnnouncesUnrunChecks` 綁定）。
+#: 🔴 R79：體積改為最後一道收斂、逐列位元組上限共用此名目（WHY 見 lib.ROW_MAX_BYTES）。
 _CHECK_ORDER: tuple[str, ...] = (
-    "缺陷帳本存在", "缺陷帳本主檔體積", "帳本歸檔體積",
+    "缺陷帳本存在", "帳本歸檔體積",
     "具名治理文件涵蓋面與磁碟脫節", "具名治理文件體積",
     "帳本表格欄位切分結構不合", "帳本解析結果非空", "合法首詞缺分類器對應",
     "帳本狀態欄首詞不合法", "孤兒承接輪次（硬規則②）",
     "未結列缺承接指派（硬規則② 後半句）", "存量豁免棘輪被撐大", "狀態欄非法狀態 token",
-    "掃描目標齊備", "缺陷帳本跨文件狀態不一致",
+    "掃描目標齊備", "缺陷帳本跨文件狀態不一致", "帳本體積與逐列位元組上限",
 )
 
 
@@ -1288,11 +1290,10 @@ def main() -> int:
     if not _DEFECT_LOG.exists():
         return _bail("缺陷帳本存在", detail=f"找不到缺陷帳本：{_DEFECT_LOG}")
     ledger_bytes = _DEFECT_LOG.stat().st_size
+    deferred: list[str] = []  # 末尾一起收斂（見 `_CHECK_ORDER` 上方 R79 段）
     if ledger_bytes >= _LEDGER_FAIL_BYTES:
-        return _bail("缺陷帳本主檔體積", detail=(
-            f"缺陷帳本主檔 {ledger_bytes} bytes ≥ 輪替上限 {_LEDGER_FAIL_BYTES}"
-            "（DEF-99-001 政策 <256KB）——請將已結列搬遷至下一個 "
-            "AutoSDD_Defect_Log_archive_NN.md（參照 DEF-101-123 之 R9 輪替程序）"))
+        deferred.append(f"缺陷帳本主檔 {ledger_bytes} bytes ≥ 輪替上限 {_LEDGER_FAIL_BYTES}"
+                        "（DEF-99-001 <256KB）——搬已結列至下個 archive_NN（R9 輪替程序）")
     if ledger_bytes >= _LEDGER_WARN_BYTES:
         print(f"⚠️  缺陷帳本主檔 {ledger_bytes} bytes 已逼近輪替上限 "
               f"{_LEDGER_FAIL_BYTES}（DEF-99-001 政策），請規劃已結列搬遷 archive",
@@ -1379,6 +1380,8 @@ def main() -> int:
         unpinned_problems += stale_grandfather_problems(ledger_text)
         unres_fails, unres_warns = _ledger_index.unresolved_ceiling_problems(ledger)
         unpinned_problems += unres_fails
+        # 逐列位元組上限同受本守衛（豁免清單綁真實主檔的 ID）；鑑別力見 TestR79RowByteCeiling。
+        deferred += _ledger_index.oversize_row_problems(ledger_text)
     if unpinned_problems:
         return _bail("未結列缺承接指派（硬規則② 後半句）", unpinned_problems)
 
@@ -1436,6 +1439,8 @@ def main() -> int:
 
     if all_problems:
         return _bail("缺陷帳本跨文件狀態不一致", all_problems)
+    if deferred:  # 體積與逐列位元組：最後一道，故不遮蔽任何診斷
+        return _bail("帳本體積與逐列位元組上限", deferred)
 
     vague_note = f"（另 {len(vague_ids)} 筆狀態含糊，見 warning）" if vague_ids else ""
     print(f"✅ 缺陷帳本跨文件狀態一致：帳本 {len(ledger) - len(vague_ids)} 筆有效狀態紀錄"

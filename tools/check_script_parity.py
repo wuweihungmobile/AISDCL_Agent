@@ -386,9 +386,9 @@ def _check_exit_code_contract(latest_tools: Path) -> bool:
 # Copy-on-Evolve 逐版變動的 LATEST 路徑」已由 `tools/lib/sdd_latest.py`（R66 落地）的
 # resolver 參數解消 ⇒ 依 ADR §4.2 rule 3 dominance test 逐條覆核（見
 # `_check_latest_thinness()` docstring），四表收兩表、兩檢查器收一支、兩份 cross-lock 收一份。
-# 仍留一個呼叫點而非整段刪掉的理由：`check_wrapper_thinness.py` 只在 pre-push 與
-# root-infra-ci 有具名執行步驟，**macos/windows-compat-ci 與兩支 smoke 只跑本檔**（逐行
-# 實查）——刪掉會讓 LATEST 釘選在那四條路徑失去守門＝覆蓋面退化，不是去重。
+# 仍留一個呼叫點而非整段刪掉的理由（🔴 R79 ARCH 訂正：原文「compat-CI 與兩支 smoke 只跑本檔」
+# 的 compat-CI 那半為假——兩支 workflow 各有 run_root_unittests step、16 鍵早已覆蓋）：smoke 那
+# 半為真 ⇒ 本呼叫點是 LATEST 釘選在 smoke 上的唯一守門，缺口＝其餘 14 支殼在 smoke 無 hash 守門。
 def _check_latest_thinness() -> bool:
     """LATEST 版薄殼 hash 釘選守門——**委派** `check_wrapper_thinness`（唯一實作）。
 
@@ -403,10 +403,10 @@ def _check_latest_thinness() -> bool:
       (e) 「stem 登記表 ↔ hash 釘選表鍵集合一致」→ `_check_thinness_cross_lock()`
           （LATEST 鍵併入 `_THINNESS_ENROLLED`／`_PINNED_SHA256` 後，原本要另立一支
           `_check_latest_thinness_cross_lock()` 的理由隨兩表合一而消失）；
-      (f) **新增覆蓋**（原第二套沒有的）：`_FORBIDDEN` 並聯關鍵字訊號現在對 LATEST 鍵
-          同樣生效——該表目前無 run_tlc 條目故實際為空集合，但機制已接上，日後補字即生效。
-    只挑 LATEST 鍵回報：其餘 14 支殼是 `check_wrapper_thinness` 自己那道閘門的職責，
-    在本檔重印一次只會讓同一筆違規在兩個地方各紅一次、卻不增加任何鑑別力。
+      (f) **新增覆蓋**：`_FORBIDDEN` 並聯關鍵字訊號對 LATEST 鍵同樣生效。🔴 R79 ARCH 訂正：
+          原文「該表無 run_tlc 條目故為空集合、日後補字即生效」讀起來像已有覆蓋，實為零訊號
+          （缺鍵靜默回空 tuple）；兩鍵已補，鍵集合相等由 `TestForbiddenKeywordsCoverEveryPin` 守。
+    只挑 LATEST 鍵回報：其餘 14 支殼歸 `check_wrapper_thinness` 那道閘門，重印只是同筆違規紅兩次。
     """
     problems = [
         p for p in _thinness.check_wrapper_thinness()

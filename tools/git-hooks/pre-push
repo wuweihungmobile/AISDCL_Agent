@@ -9,7 +9,7 @@
 #     - push 範圍變更含 AISDLC_SDD/ → 執行 AISDLC_SDD/.githooks/pre-push
 #     - root-infra leg（對齊 root-infra-ci.yml 的本地接線；R9 複審：原本純根層變更
 #       push 一個閘門都不跑，CI 停擺期間零防護）自 R69 起**快慢分層**：
-#         · 快層＝八支守門工具 ＋ `ruff check tools/`（R69 補：對齊 root-infra-ci.yml
+#         · 快層＝九支守門工具 ＋ `ruff check tools/`（R69 補：對齊 root-infra-ci.yml
 #           第 16 道；`tools/ruff.toml` 落地時全 repo 零執行者，同機實測冷 cache 0.02s／
 #           熱 cache 0.01s，比任一支守門都便宜），**任何 push 都跑**（含純子專案 push）。理由：這八支
 #           守的全是跨子專案不變式（腳本對等／NTFS 路徑／薄殼 hash／帳本互參…），
@@ -217,10 +217,58 @@ $ALL_FILES
 IGFILES_EOF
 fi
 
+# skip 分群天花板（S3）接線 — R79 收輪（QA-R79／SA-R79）
+# ---------------------------------------------------------------------------
+# 缺陷本體：R79 落地的「skip 分群天花板」唯一的消費者是 AutoClaude/tools/ 底下的本機
+# CI 閘門核心，而它**不在任何阻斷閘門上**——本 dispatcher 的 AutoClaude leg 逐字寫著
+# 「刻意直跑 pytest 不經該核心」（R12 QA-2 紀律，兩個訊號不得合流）、push CI 的 test
+# job 也是裸 pytest、唯二呼叫該核心的 CI job 皆 continue-on-error ⇒「skipped 數必須有
+# 人管」今天只有人工跑才會說話。
+#
+# 修法刻意**不動那條紀律**：不重跑 pytest、不改由核心代跑，只把 AutoClaude leg 已經
+# 產出的輸出多消費一次（`tee` 落檔 → 餵給該核心的 `--census-only` 入口）。
+# 三態離開碼（見該檔檔頭）：0 健康／1 真問題（量測塌掉或天花板被突破）／3 這個平台的
+# 健康值從來沒人量過。3 只印警告不擋——用一個沒有鑑別力的紅擋住 mac／Linux 開發者的
+# 第一次 push 是誤擋，不是嚴格；等有人把實測值入表就自動升級為阻斷。
+# 🔴 路徑刻意經由 `$_ac_gate_dir` 拼出、不寫成字面路徑形態：
+# tools/tests/test_root_infra_parity.py 對本檔非註解行出現的 `tools/*.py` 字面值有
+# 「必須在 root-infra-ci.yml 有對等守門」的雙向集合斷言（同本檔既有 `_core.py` 的註記）。
+# 🔴 log 以 **stdin 重導向**餵進去、不當成參數傳：`mktemp` 回的是 POSIX 路徑，而
+# Windows 側的 python 是原生 exe，路徑會經過 MSYS 參數轉換——重導向由 shell 自己做，
+# 完全繞開那一層。
 if [ "$run_autoclaude" -eq 1 ]; then
   if [ -f "$TOPLEVEL/AutoClaude/tools/git-hooks/pre-push" ]; then
     echo "[pre-push dispatcher] push 範圍含 AutoClaude/ → 執行 AutoClaude pre-push"
-    printf '%s\n' "$STDIN" | bash "$TOPLEVEL/AutoClaude/tools/git-hooks/pre-push" || rc=1
+    _ac_log="$(mktemp 2>/dev/null || echo '')"
+    if [ -z "$_ac_log" ]; then
+      # mktemp 不可用時退回原行為（少一道 advisory 判準，但絕不擋 push）
+      printf '%s\n' "$STDIN" | bash "$TOPLEVEL/AutoClaude/tools/git-hooks/pre-push" || rc=1
+      echo "[pre-push dispatcher] ⚠ mktemp 失敗 → 本次跳過 skip 分群普查" >&2
+    else
+      # PYTHONUNBUFFERED=1：接上 `tee` 之後 stdout 不再是 tty，python 預設改為區塊
+      # 緩衝 ⇒ 使用者會盯著空白等九十秒才一次看到全部輸出。這一個變數把即時性換回來。
+      printf '%s\n' "$STDIN" \
+        | PYTHONUNBUFFERED=1 bash "$TOPLEVEL/AutoClaude/tools/git-hooks/pre-push" \
+        | tee "$_ac_log" || rc=1
+      _ac_gate_dir="$TOPLEVEL/AutoClaude/tools"
+      if [ -n "${AUTOCLAUDE_PUSH_PYTEST_ARGS:-}" ]; then
+        echo "[pre-push dispatcher] ⚠ AUTOCLAUDE_PUSH_PYTEST_ARGS 已設 → 跳過 skip 分群普查（母體被縮限，拿去比全樹天花板必然沒有鑑別力）"
+      elif [ ! -f "$_ac_gate_dir/local_ci_gate.py" ]; then
+        echo "[pre-push dispatcher] ⚠ 找不到 $_ac_gate_dir/local_ci_gate.py → 跳過 skip 分群普查（本機 CI 閘門核心缺失）" >&2
+      elif ! is_real_python_candidate python; then
+        echo "[pre-push dispatcher] ⚠ 找不到 python → 跳過 skip 分群普查（AutoClaude leg 本身已因此判紅）" >&2
+      else
+        census_rc=0
+        PYTHONUTF8=1 python "$_ac_gate_dir/local_ci_gate.py" --census-only - < "$_ac_log" || census_rc=$?
+        if [ "$census_rc" -eq 3 ]; then
+          echo "[pre-push dispatcher] ⚠ skip 分群普查：本平台剖面未登記（advisory，不擋 push）"
+        elif [ "$census_rc" -ne 0 ]; then
+          echo "[pre-push dispatcher] ❌ AutoClaude skip 分群普查不合格（rc=${census_rc}；S3：skipped 數必須有人管）" >&2
+          rc=1
+        fi
+      fi
+      rm -f "$_ac_log"
+    fi
   else
     # 子 hook 應存在卻缺失＝hooks 體系損壞 → fail-loud，拒絕放行
     echo "[pre-push dispatcher] ❌ 子 hook 缺失：$TOPLEVEL/AutoClaude/tools/git-hooks/pre-push（hooks 體系損壞）" >&2
@@ -242,7 +290,7 @@ fi
 # root-infra leg（R9 複審接線）：純根層變更（tools/、docs/、workflows 等）原本
 # 一個閘門都不跑——root-infra-ci.yml 的守門在 CI 帳單停擺期間本地零接線。
 # 內容對齊 root-infra-ci.yml：py_compile 全 tools/*.py + tools/tests unittest +
-# 八支守門工具；失敗累積進 rc（不中斷其他 leg），python 缺席 fail-loud 不軟跳過。
+# 九支守門工具；失敗累積進 rc（不中斷其他 leg），python 缺席 fail-loud 不軟跳過。
 # （R56 訂正：R55 由五支增為六支時本行漏改，與 L12／L211 及實際迴圈不一致；
 #  三處計數宣稱現由 test_root_infra_parity.py::test_guard_count_claims_match_loop
 #  機械斷言與迴圈項數相等，不再靠人工同步。）
@@ -278,7 +326,10 @@ if [ "$run_rootinfra" -eq 1 ] || [ "$run_rootinfra_guards" -eq 1 ]; then
         leg_rc=1
       fi
       fi
-      # ③ 八支守門工具（**快層**，R69 起任何 push 皆跑，見檔頭）（逐支跑完累積，不因單支失敗提早退出；R13 增
+      # ③ 九支守門工具（**快層**，R69 起任何 push 皆跑，見檔頭）（R79 增
+      #    _script_scan_surface.py --check-floors——.ps1 掃描面 SSOT 的 per-tree 檔數
+      #    下限，對齊 root-infra-ci.yml 第 2 道；該道自 R79 起由 CI 呼叫本 SSOT 取得
+      #    掃描面，本地原本零接線）（逐支跑完累積，不因單支失敗提早退出；R13 增
       #    check_pytest_baseline_sites.py——pytest 基線數字站點鎖，對齊 CI 第 11 道；
       #    R55 增 check_gha_action_versions.py——GitHub Actions 版本一致性鎖，
       #    對齊 CI 第 12 道；R60 增 archive_defect_log.py --check——帳本保全稽核，
@@ -291,7 +342,8 @@ if [ "$run_rootinfra" -eq 1 ] || [ "$run_rootinfra_guards" -eq 1 ]; then
                    "tools/check_defect_log_crossref.py" "tools/check_wrapper_thinness.py" \
                    "tools/check_pytest_baseline_sites.py" "tools/check_gha_action_versions.py" \
                    "tools/archive_defect_log.py --check" \
-                   "tools/sync_onboarding_baselines.py --check-snapshot"; do
+                   "tools/sync_onboarding_baselines.py --check-snapshot" \
+                   "tools/_script_scan_surface.py --list --suffix .ps1 --with-latest --check-floors"; do
         # shellcheck disable=SC2086  # 刻意分詞：項目可帶子指令（archive_defect_log --check）
         if ! python $guard; then
           echo "[pre-push dispatcher] ❌ root-infra：$guard 失敗" >&2

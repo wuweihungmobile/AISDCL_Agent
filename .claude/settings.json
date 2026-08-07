@@ -14,6 +14,16 @@
             "timeout": 30
           }
         ]
+      },
+      {
+        "_comment": "R79 續航補洞包：把『預防性哨兵』接上電（掌舵者第 3 點『適當利用 AutoClaude 機制進行排程再喚醒繼續處理，這個請實際徹底做到』的機械化）。立案理由是本輪第二次撞同一個坑：續航協定（tools/session_resume_planner.py --arm-endurance）做完了，但它是**手動武裝**的，而額度耗盡那一刻是 16 秒內全部 subagent 瞬間掛掉——沒有人會去跑那行指令。更根本的是**額度耗盡在 hook 體系裡沒有任何觸發點**：它是 API 層失敗、不是工具呼叫失敗，PreToolUse／PostToolUse 都不會被叫到 ⇒ 只能預防性武裝，而 SessionStart 是『還能跑指令的最早時刻』。這與 R77『PKG-GUARD 機制蓋好沒接電』是同一個病的第三次復發，故這一次把電接上、不靠人記得。行為契約：只在 Windows 動作（schtasks 只在 Windows 成立，鐵律三）；環境變數 AUTOSDD_SENTINEL_OFF 有設一律 no-op（給人的逃生口，與 context 阻斷的 AUTOSDD_CONTEXT_GUARD_OFF 刻意分開——兩者關掉的是不同的東西）；**恆 exit 0、不出聲、不量水位**；註冊動作走 detached 子行程故不阻塞 session 開場（同步外呼 powershell.exe 註冊 schtasks 實測數秒，每次開 session 都卡是不可接受的代價）。取證沒有因為非同步而消失：--arm-sentinel 自己有 NextRunTime 憑證閘（拿不到即 rc=1、絕不宣稱已排程），成敗都寫進 %TEMP%\\autosdd_resume_log_*.jsonl 與 %TEMP%\\autosdd_sentinel_boot_*.log。無 matcher＝SessionStart 本來就沒有工具面。timeout 取 10：本模式只做一次 Popen 就返回。任何非預期例外 fail-open（見本檔 description 記載的 P0：hook 誤觸 deny 會把所有工具硬鎖死）。回歸鎖 tools/tests/test_context_budget_guard.py::SentinelWiringTest；設計理由見 docs/04_planning/ADR/ADR-XPLAT-004-token-endurance-protocol.md §2.6。",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python -c \"import os,sys,runpy; r=os.environ.get('CLAUDE_PROJECT_DIR') or os.getcwd(); p=os.path.join(r,*sys.argv[1].split('/')); os.path.isfile(p) or sys.exit(0); os.chdir(r); sys.argv=[p]+sys.argv[2:]; runpy.run_path(p,run_name='__main__')\" .claude/hooks/context_budget_guard.py",
+            "timeout": 10
+          }
+        ]
       }
     ],
     "PreToolUse": [
@@ -45,6 +55,17 @@
           {
             "type": "command",
             "command": "python -c \"import os,sys,runpy; r=os.environ.get('CLAUDE_PROJECT_DIR') or os.getcwd(); p=os.path.join(r,*sys.argv[1].split('/')); os.path.isfile(p) or sys.exit(0); os.chdir(r); sys.argv=[p]+sys.argv[2:]; runpy.run_path(p,run_name='__main__')\" .claude/hooks/block_bash_on_windows.py",
+            "timeout": 10
+          }
+        ]
+      },
+      {
+        "_comment": "R79：context 水位 ≥90% 時**真的擋下展開型工具**（掌舵者第 2 點『不要爆』的機械化第二段；同一支腳本的 PostToolUse 條目只出聲不擋，兩者由 payload 的 hook_event_name 分派）。立案理由是本 repo 的實證：『純文件約束對當下的模型零攔阻力』——R78 版的鏈條是「hook 印一段話 → 模型自己記得去 /compact」，而 block_bash_on_windows.py 的立案正是同一形態失敗過兩次。四道放行條件（缺一才會真的擋，逐條在 tools/tests/test_context_budget_guard.py::PreToolUseBlockTest 有成對注入）：①環境變數 AUTOSDD_CONTEXT_GUARD_OFF 有設一律放行（給人的逃生口，模型改不到 hook 行程的環境；對 settings.json description 記載的那個 P0 的第二道保險）；②水位未達 90% 放行；③**window 來源是保守下界猜測時一律放行**——分母是猜的就不准硬擋，否則 1M session 會在真實 18% 被鎖死，那正是本輪要修的缺陷換個方向再犯；④tool_name 不在腳本自己的 BLOCKING_TOOLS 內放行（matcher 被改寬時的第二道限縮，同 block_bash_on_windows.py 的形態）。matcher 刻意只圈 Task|WebFetch|WebSearch＝『展開型』：根 CLAUDE.md 那句是『此後只做收斂，不做展開』，而收斂本身需要 Read／Edit／PowerShell（讀檔、寫任務書、跑 git）——擋到讓人無法收斂的守衛會被整個關掉，比沒有守衛更糟。阻斷**不進閂鎖**（擋一次就放行的東西不是阻斷），且 /compact 之後 used 會真的掉下來 ⇒ 自動解除，不需要任何人去關它。退化 payload 走 rc=1（出聲但不阻斷），符合 tools/tests/test_check_hooks_liveness.py::degraded_payload_verdict 的『不得靜默放行、硬擋才要配窄 matcher』；任何非預期例外一律 exit 0（fail-open）。timeout 取 10（本模式不產任務書、不起子行程，實測遠低於此）。",
+        "matcher": "Task|WebFetch|WebSearch",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python -c \"import os,sys,runpy; r=os.environ.get('CLAUDE_PROJECT_DIR') or os.getcwd(); p=os.path.join(r,*sys.argv[1].split('/')); os.path.isfile(p) or sys.exit(0); os.chdir(r); sys.argv=[p]+sys.argv[2:]; runpy.run_path(p,run_name='__main__')\" .claude/hooks/context_budget_guard.py",
             "timeout": 10
           }
         ]
