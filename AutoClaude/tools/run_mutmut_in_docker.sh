@@ -163,12 +163,23 @@ HEADER_RC=$?
 # SD_09 W2 audit P0-AUDIT-01 修復：改 `>>` append（保留前段 pip/cache 訊息）
 # SD_09 W2 audit P0-AUDIT-04 修復：明確 marker（`--- mutmut full counts ---`），
 #   baseline_lock 必須認 marker 之後 5 行為單一真相（不再「取最後一筆」）。
+# R80 S8-03 修復（shellcheck SC2320 實測命中本行下方的 `RESULTS_RC=$?`）：
+# `$?` 只保存**上一個**指令的 rc。原寫法 `} >> "${LOG_FILE}"` 之後才讀 `$?`，
+# 讀到的是複合區塊裡**最後一個** `echo "--- mutmut full counts (end) ---"`
+# ⇒ 恆為 0；`mutmut results` 真的失敗時完全不會反映在 `log written exit=` 那行。
+# 這與 PowerShell 側「讀 rc 不接管線」是同一種缺陷（那一側已有 PreToolUse hook 硬擋，
+# POSIX 側原本沒有）。修法：在**緊接**受測指令的下一行落地它的 rc，
+# 區塊本身的 rc（重導向失敗才會非零）另存，最後取「先非零者」。
+# `set -u` 生效中，故兩個變數都先初始化，避免區塊提前結束時展開未設變數。
+MUTMUT_RESULTS_RC=0
+BLOCK_RC=0
 {
   echo ""
   echo "--- mutmut results raw (begin) ---"
   # 先寫 mutmut results raw（保留 mutmut 原始 Survived 🙁 (N) + dash range 區段）
   # 讓 mutation_analysis.py 能正確 parse 第一個 Survived block 取出 mutant id。
   mutmut results 2>&1
+  MUTMUT_RESULTS_RC=$?   # 緊貼受測指令：中間不得插入任何指令（含 echo）
   echo "--- mutmut results raw (end) ---"
   echo ""
   # 末尾追加完整 counts header — baseline_lock / mutation_analysis 必須認 marker 後 5 行為單一真相
@@ -181,7 +192,18 @@ HEADER_RC=$?
   fi
   echo "--- mutmut full counts (end) ---"
 } >> "${LOG_FILE}"
-RESULTS_RC=$?
+# shellcheck disable=SC2320
+# ↑ 這一筆是**刻意**且已知：複合區塊的 rc 依定義就是最後一個指令（那個 echo）的 rc，
+#   本行要的正是「重導向本身有沒有失敗」這個唯一還測得到的訊號（開檔失敗時 bash
+#   讓整個複合指令非零且區塊不執行）。真正該取的 `mutmut results` rc 已在上方
+#   緊貼落地成 MUTMUT_RESULTS_RC。R80 起 shellcheck 真的會跑，本 disable 不是裝飾。
+BLOCK_RC=$?
+# 「先非零者」：`mutmut results` 失敗優先於重導向失敗被回報（前者才是內容缺失的成因）。
+if [ "${MUTMUT_RESULTS_RC}" -ne 0 ]; then
+  RESULTS_RC="${MUTMUT_RESULTS_RC}"
+else
+  RESULTS_RC="${BLOCK_RC}"
+fi
 # SD_09 W2 audit P1-AUDIT-20 修復：保留中介檔至 debug 目錄方便回查
 # 不在此清除中介檔；nightly cleanup 階段或下次 fresh baseline 時統一處理
 echo "[run_mutmut_in_docker] log written exit=${RESULTS_RC} log_bytes=$(wc -c < "${LOG_FILE}" 2>/dev/null || echo 0)" | tee -a "${LOG_FILE}"

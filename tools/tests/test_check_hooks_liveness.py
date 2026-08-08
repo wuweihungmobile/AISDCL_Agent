@@ -10,6 +10,7 @@ import ast
 import json
 import os
 import re
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -352,13 +353,25 @@ def matcher_tokens(matcher: str) -> set[str]:
 
 
 def matchers_for_script(settings: dict, needle: str) -> list[str]:
-    """`settings` 的 PreToolUse 內，command 指名 `needle` 的所有 matcher。"""
-    found: list[str] = []
-    for entry in settings.get("hooks", {}).get("PreToolUse", []) or []:
-        commands = [str(h.get("command", "")) for h in entry.get("hooks") or []]
-        if any(needle in command for command in commands):
-            found.append(str(entry.get("matcher", "")))
-    return found
+    """`settings` 的 PreToolUse 內，**實際會跑到** `needle` 的所有 matcher。
+
+    🔴 R80：此前的判準是 `needle in command`，而 exec form（治 Windows 閃窗的形態）
+    把腳本路徑從 `command` 搬進了 `args` ⇒ 那個寫法轉換後一律回空，於是
+    `degraded_payload_verdict()` 會改走「找不到它的註冊」那條路。解析改問唯一真相源
+    `tools/lib/hook_wiring.py`，兩種形態都認得。
+    """
+    return [
+        str(entry.get("matcher", ""))
+        for entry in _hook_wiring().entries_launching(settings, needle)
+    ]
+
+
+def _hook_wiring():
+    """延後 import 唯一真相源（同本檔其他延後 import 的理由：不進 import 期路徑）。"""
+    sys.path.insert(0, str(_REPO_ROOT / "tools" / "lib"))
+    import hook_wiring  # noqa: PLC0415
+
+    return hook_wiring
 
 
 def degraded_payload_verdict(
@@ -642,13 +655,12 @@ class TestBlockBashHookIsActuallyRegistered(unittest.TestCase):
         # matcher 是**正則交替**（實測本機為 `Bash|Task`），不是字面 "Bash"。
         # 故判準走 `re.search`：只要該 matcher 會命中 Bash 就算註冊到位。
         # 寫成 `== "Bash"` 是我第一版的錯——會在 matcher 合法擴充時假紅。
+        # 🔴 R80：`"block_bash_on_windows" in h["command"]` 這種寫法在 exec form 下
+        # 一律回空（腳本路徑搬進 args 了）。改問唯一真相源，兩種形態都認得。
+        launching = _hook_wiring().entries_launching(settings, "block_bash_on_windows")
         matched = [
-            entry for entry in pre
+            entry for entry in launching
             if re.search(r"(^|\|)Bash(\||$)", str(entry.get("matcher", "")))
-            and any(
-                "block_bash_on_windows" in str(h.get("command", ""))
-                for h in entry.get("hooks", [])
-            )
         ]
         self.assertTrue(
             matched,
@@ -1827,16 +1839,20 @@ def registered_tool_scope(settings: dict) -> dict[tuple[str, str], set[str]]:
     matcher 為空字串或缺席 → `{"*"}`（＝不限工具；`SessionStart` 這類無 matcher 的
     事件即此形）。同一支腳本在同一事件下註冊於多個條目時取**聯集**——它實際的觸發面
     就是那些 matcher 的聯集。
+
+    🔴 R80：解析面由「`command` 字串」改問唯一真相源 `tools/lib/hook_wiring.py`。
+    exec form（治 Windows 閃窗的形態）把腳本路徑搬進 `args`，只讀 `command` 的舊寫法
+    轉換後會回**空 dict** ⇒ `registration_shrink_problems()` 會把**每一支** hook 都
+    報成「註冊條目整個不見了」。射程判準必須跟著形態走，否則它守的是字串不是事實。
     """
+    wiring = _hook_wiring()
     scope: dict[tuple[str, str], set[str]] = {}
     for event, entries in (settings.get("hooks") or {}).items():
         for entry in entries or []:
             tools = matcher_tokens(str(entry.get("matcher", "")))
             for hook in entry.get("hooks") or []:
-                command = str(hook.get("command", ""))
-                for found in _HOOK_SCRIPT_RE.finditer(command):
-                    key = (str(event), found.group(0).replace("\\", "/"))
-                    scope.setdefault(key, set()).update(tools)
+                for rel in wiring.hook_entry_targets(hook):
+                    scope.setdefault((str(event), rel), set()).update(tools)
     return scope
 
 
@@ -1924,11 +1940,11 @@ class TestHookRegistrationScopeIsShrinkOnly(unittest.TestCase):
         本類別在「磁碟上的 matcher 被改過」時整組因前提不成立而錯亂報紅——而那正是
         本鎖要用來做鑑別力注入的場景，判準自己不該被注入弄瞎。
         """
-        hits = [
-            entry for entry in settings.get("hooks", {}).get("PostToolUse", []) or []
-            if any(self._M4_SCRIPT in str(h.get("command", ""))
-                   for h in entry.get("hooks") or [])
-        ]
+        # R80：定位面由 `command` 字串改問唯一真相源——exec form 把腳本路徑搬進
+        # `args`，只讀 command 會讓本類別的**前提**（找得到那個條目）先垮掉，
+        # 而它垮掉時的訊息會指向「註冊佈局已變」這個錯誤方向。
+        hits = _hook_wiring().entries_launching(
+            settings, self._M4_SCRIPT, event="PostToolUse")
         self.assertEqual(
             len(hits), 1,
             f"PostToolUse 底下承載 {self._M4_SCRIPT} 的條目有 {len(hits)} 個（預期 1）"
@@ -2042,6 +2058,520 @@ class TestHookRegistrationScopeIsShrinkOnly(unittest.TestCase):
             set(registered_tool_scope(real)),
             set(hygiene.hook_command_scripts(real)),
             "兩支枚舉器對同一份 settings.json 給出不同的 (事件, 腳本) 集合")
+
+
+# ══════════════════════════════════════════════════════════════════════════
+# R80：hook 條目形態（exec form）與載具存在性的回歸鎖
+# ══════════════════════════════════════════════════════════════════════════
+# 病：Windows 上 shell form 的 hook 經 Git Bash 的 `bash.exe -c` 起，而 `bash.exe`
+# 是 console 子系統程式 ⇒ **每觸發一次 hook 就閃一個 console 視窗**（實測：一個量測
+# 視窗內 39 支 bash.exe、其中 22 支自帶 conhost＝22 次閃窗）。exec form（條目帶
+# `args`）不經 shell、直接 spawn，指到 GUI 子系統的 `pythonw.exe` 即零視窗。
+#
+# 🔴 這道鎖真正在防的**不是**「有人把形態改回去」，是**修好與全毀的表徵相同**：
+# exec form 的載具解析不到時 CC 只記一行 ERROR、工具照跑（**fail-open**），螢幕上
+# 看起來就是「終於不閃窗了」。所以本節每一條判準的方向都是「少一半也要有人喊」，
+# 而不是「壞了會紅」。
+_LAUNCHER = _REPO_ROOT / ".claude" / "hooks" / "_hook_launcher.py"
+
+
+def _load_real_settings() -> dict:
+    return json.loads(_SETTINGS.read_text(encoding="utf-8"))
+
+
+def carrier_venv_dirs(carriers: set[str], placeholder: str) -> set[str]:
+    """這些載具字串各自落在 repo 底下哪個**頂層目錄**（不含目錄的一律不計）。"""
+    out: set[str] = set()
+    for carrier in carriers:
+        rel = carrier.replace(placeholder, "").lstrip("/")
+        if "/" in rel:
+            out.add(rel.split("/")[0])
+    return out
+
+
+class TestHookEntriesAreExecForm(unittest.TestCase):
+    """判準 A~F（實作在 `tools/lib/hook_wiring.hook_form_problems`）。"""
+
+    def test_real_settings_is_all_exec_form(self) -> None:
+        problems = _hook_wiring().hook_form_problems(_load_real_settings())
+        self.assertEqual(
+            problems, [],
+            "`.claude/settings.json` 的 hook 條目形態不合規（每筆都會讓某個平台閃窗"
+            "或靜默失去 hook）：\n  " + "\n  ".join(problems))
+
+    def test_the_shim_has_exactly_one_home(self) -> None:
+        """十份 `python -c` shim 複本收成一支檔之後，不得有第二個家。
+
+        🔴 取樣面刻意是**解析後的 argv**，不是整份檔案的文字。第一版寫成
+        `assertNotIn("runpy.run_path", _SETTINGS.read_text(...))`，當場被
+        `test_archive_defect_log.TestNoAssertionSamplesALiveDocumentWholesale` 抓到：
+        該檔有 6 個 `_comment` 在**合法地**敘述舊 shim 的設計理由，只要有人在註解裡
+        寫出那個字樣就假紅——而假紅的下場是有人回頭去改註解裡的歷史敘述（那正是
+        Pkg-P12 實際發生過的事）。判準要看的是「**會被執行的東西**裡有沒有 shim」。
+        """
+        self.assertTrue(_LAUNCHER.is_file(), f"找不到啟動器 {_LAUNCHER}")
+        wiring = _hook_wiring()
+        offenders = [
+            argv for _event, blocks in (_load_real_settings().get("hooks") or {}).items()
+            for block in blocks or []
+            for hook in block.get("hooks") or []
+            for argv in [" ".join(wiring.hook_entry_argv(hook))]
+            if "runpy.run_path" in argv or " -c " in argv
+        ]
+        self.assertEqual(
+            offenders, [],
+            "有 hook 條目的 argv 又內嵌了 shim 程式碼 ⇒ shim 有了第二個家（同一份知識"
+            "住兩個家、只有一個家會被改，是本 repo 的頭號病），而且那種條目在 Windows "
+            f"上會經 bash.exe 而閃視窗：{offenders}")
+
+    # ── 合成注入自證：五種弄壞法逐一必紅，還原必綠 ────────────────────────────
+    # WHY 用**真實 settings 的內容**在記憶體裡動手：合成 fixture 證明不了「這道判準
+    # 對 repo 現況有牙」；而真的改磁碟上那支檔會影響同一棵樹上每個 agent 的每一次
+    # 工具呼叫（該檔記載過 hook 誤觸 deny 把所有工具硬鎖死的 P0）。
+
+    def _mutated(self):
+        return json.loads(json.dumps(_load_real_settings()))
+
+    def test_injection_1_a_single_entry_falling_back_to_shell_form_is_red(self) -> None:
+        bad = self._mutated()
+        entry = bad["hooks"]["SessionStart"][0]["hooks"][0]
+        entry.pop("args")
+        entry["command"] = 'python -c "import runpy" .claude/hooks/sdd_hook_router.py'
+        self.assertTrue(_hook_wiring().hook_form_problems(bad),
+                        "一條退回 shell form（＝那條每次觸發都閃窗）竟被放行")
+
+    def test_injection_2_a_hardcoded_drive_path_is_red(self) -> None:
+        bad = self._mutated()
+        bad["hooks"]["SessionStart"][0]["hooks"][0]["args"][0] = (
+            chr(68) + ":/CursorProject/AISDCL_Agent/.claude/hooks/_hook_launcher.py")
+        self.assertTrue(_hook_wiring().hook_form_problems(bad),
+                        "寫死磁碟機路徑竟被放行（DEF-101-778 判例）")
+
+    def test_injection_3_dropping_the_posix_half_is_red(self) -> None:
+        """🔴 本鎖的核心：少一邊**不會有任何東西轉紅**，只會在該平台靜默失去 hook。"""
+        bad = self._mutated()
+        for entry in bad["hooks"]["PreToolUse"]:
+            hooks = entry.get("hooks") or []
+            if len(hooks) >= 2:
+                del hooks[1]  # 砍掉 POSIX 那一條 ⇒ mac/Linux 上這支 hook 消失
+                break
+        problems = _hook_wiring().hook_form_problems(bad)
+        self.assertTrue(problems, "載具配對被拆掉一半竟被放行")
+        self.assertTrue(any("未成對" in p for p in problems), problems)
+
+    def test_injection_4_a_command_with_whitespace_is_red(self) -> None:
+        """V4 陷阱：`args` 存在時整串 command 會被當成**一個**執行檔路徑（實測 ENOENT）。"""
+        bad = self._mutated()
+        bad["hooks"]["SessionStart"][0]["hooks"][0]["command"] = "pythonw.exe -X utf8"
+        self.assertTrue(_hook_wiring().hook_form_problems(bad),
+                        "command 含空白竟被放行——它「看起來像對的」，正是危險所在")
+
+    def test_injection_5_mixing_two_windows_carriers_is_red(self) -> None:
+        """混用＝一部分 hook 在某些 session 消失；『加第二個當備援』則會讓 hook 跑兩次。"""
+        bad = self._mutated()
+        wiring = _hook_wiring()
+        for entry in bad["hooks"]["SessionStart"]:
+            for hook in entry.get("hooks") or []:
+                if hook.get("command") == wiring.WIN_CARRIER_VENV:
+                    hook["command"] = wiring.WIN_CARRIER_PATH
+                    break
+            break
+        problems = wiring.hook_form_problems(bad)
+        self.assertTrue(any("混用" in p for p in problems), problems)
+
+    def test_injection_6_dropping_type_together_with_args_is_red(self) -> None:
+        """🔴 R80 ARCH-02／SD-02：退回 shell form **並順手省掉 `type`** 的組合。
+
+        判準此前寫成 `hook.get("type") != "command": continue`，而同檔 `hook_entry_argv`
+        用的是 `get("type", "command")` 且旁註逐字禁止「把沒寫當成不是」。兩個慣例的
+        差集就是一個**免費的逃逸口**：省掉一個欄位，A~F 六條（含它自稱的核心 E）一條
+        都不會說話。這一格在修復前必失敗，那正是它該有的行為。
+        """
+        wiring = _hook_wiring()
+        bad = self._mutated()
+        entry = bad["hooks"]["SessionStart"][0]["hooks"][0]
+        entry.pop("args")
+        entry.pop("type")
+        entry["command"] = 'python -c "import runpy" .claude/hooks/sdd_hook_router.py'
+        self.assertTrue(
+            any("shell form" in p for p in wiring.hook_form_problems(bad)),
+            "省掉 type 就能讓整條條目在形態鎖前隱形（而它在 CC 眼中照跑）")
+        self.assertTrue(
+            wiring.hook_entry_targets(entry),
+            "取數管道自證：解析器若也看不到這條，上面那句斷言就沒有意義")
+
+    def test_the_type_convention_is_one_criterion_across_the_whole_file(self) -> None:
+        """三個站點（argv 解析／形態鎖／載具宣告枚舉）必須用**同一個** type 判準。"""
+        wiring = _hook_wiring()
+        good = {"command": wiring.WIN_CARRIER_VENV,
+                "args": [wiring.POSIX_CARRIER, ".claude/hooks/x.py"]}
+        odd = dict(good, type="prompt")
+        self.assertTrue(wiring.is_command_hook(good), "沒寫 type ＝ CC 的預設 command")
+        self.assertFalse(wiring.is_command_hook(odd))
+        for hook, argv, carriers in ((good, 3, {wiring.WIN_CARRIER_VENV}), (odd, 0, set())):
+            wrapped = {"hooks": {"SessionStart": [{"hooks": [hook]}]}}
+            self.assertEqual(len(wiring.hook_entry_argv(hook)), argv)
+            self.assertEqual(wiring.declared_win_carriers(wrapped), carriers)
+            # 形態鎖：沒寫 type 的那筆必須進入判準（此處缺 POSIX 對半 ⇒ 應紅）；
+            # 明確標成別種 type 的那筆必須被排除（⇒ 應綠）。
+            self.assertEqual(bool(wiring.hook_form_problems(wrapped)), hook is good)
+
+    def test_restoring_the_real_content_is_green_again(self) -> None:
+        """反空轉：上面六格若是因為判準恆紅而通過，這一格會抓到。"""
+        self.assertEqual(_hook_wiring().hook_form_problems(self._mutated()), [])
+
+
+class TestParsersSurviveTheExecFormConversion(unittest.TestCase):
+    """🔴 轉換後**仍抓得到**的自證（本輪第一級交付）。
+
+    WHY：exec form 把腳本路徑從 `command` 搬進 `args`，於是全部「讀 command 找腳本名」
+    的解析器會掃出空集合 ⇒ 那些鎖**恆綠**，rc 與「正確地全部通過」一模一樣。
+    所以「轉換後閘門 rc=0」證明不了任何事，必須證明「轉換後製造違規仍會轉紅」。
+    """
+
+    def test_matchers_for_script_still_resolves_every_guard(self) -> None:
+        real = _load_real_settings()
+        for needle, expected_tool in (
+            ("block_bash_on_windows", "Bash"),
+            ("lint_powershell_command", "PowerShell"),
+            ("context_budget_guard", "Task"),
+        ):
+            with self.subTest(needle=needle):
+                matchers = matchers_for_script(real, needle)
+                self.assertTrue(
+                    matchers,
+                    f"{needle} 在轉換後的 settings 裡解析不到 matcher ⇒ "
+                    "`degraded_payload_verdict()` 會改走「找不到它的註冊」那條路，"
+                    "而那是靜默失效的樣子")
+                self.assertIn(
+                    expected_tool, {t for m in matchers for t in matcher_tokens(m)})
+
+    def test_removing_a_registration_still_turns_it_red(self) -> None:
+        """注入：把 Bash 守衛的註冊整條拿掉 ⇒ 解析器必須看得出來（不得仍回非空）。"""
+        stripped = json.loads(json.dumps(_load_real_settings()))
+        for entry in stripped["hooks"]["PreToolUse"]:
+            entry["hooks"] = [
+                h for h in entry.get("hooks") or []
+                if "block_bash_on_windows" not in json.dumps(h, ensure_ascii=False)]
+        self.assertEqual(
+            matchers_for_script(stripped, "block_bash_on_windows"), [],
+            "註冊被拿掉了解析器卻還說找得到 ⇒ 判準與事實脫鉤")
+        self.assertTrue(
+            registration_shrink_problems(
+                registered_tool_scope(stripped), _REGISTRATION_BASELINE),
+            "註冊被拿掉之後 shrink-only 棘輪竟然沒說話 ⇒ 它已經恆綠")
+
+    def test_the_scope_enumerator_is_not_vacuous_after_conversion(self) -> None:
+        """取數管道自證：枚舉器回空 dict 會讓上面每一條斷言結構上恆真。"""
+        scope = registered_tool_scope(_load_real_settings())
+        self.assertGreaterEqual(
+            len(scope), len(_REGISTRATION_BASELINE),
+            f"註冊面枚舉器只回 {len(scope)} 筆（基準 {len(_REGISTRATION_BASELINE)} 筆）"
+            "——解析管道壞了，本節其餘判準全部失去意義")
+
+
+class TestHookLauncherContract(unittest.TestCase):
+    """啟動器是**全部 hook 的唯一入口**，改壞它等於一次弄壞六支守衛。
+
+    四種 payload 比 rc（形狀照本檔既有的 `_run_hook()`）：缺檔 fail-open／目標
+    `exit 2` 不得被吞掉／沒給目標不得亂擋／正常目標的 argv 與 cwd 契約。
+    """
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        cls.root = Path(tempfile.mkdtemp(prefix="r80_launcher_lock_"))
+        (cls.root / ".claude" / "hooks").mkdir(parents=True)
+        (cls.root / ".claude" / "hooks" / "deny.py").write_text(
+            "import sys\nsys.stderr.write('BLOCKED\\n')\nsys.exit(2)\n",
+            encoding="utf-8", newline="\n")
+        (cls.root / ".claude" / "hooks" / "ok.py").write_text(
+            "import json, os, sys\n"
+            "sys.stdout.write(json.dumps({'argv': sys.argv, 'cwd': os.getcwd(),\n"
+            "    'stdin': sys.stdin.read()}))\n",
+            encoding="utf-8", newline="\n")
+
+    @classmethod
+    def tearDownClass(cls) -> None:
+        shutil.rmtree(cls.root, ignore_errors=True)
+
+    def _launch(self, *args: str, stdin_text: str = "{}") -> tuple[int, str, str]:
+        env = _child_env({"CLAUDE_PROJECT_DIR": str(self.root), "PYTHONUTF8": "1"})
+        proc = subprocess.run(  # child-encoding-ok: 啟動器不是「會說話的那一層」——它只 runpy 目標腳本，輸出編碼由目標自己的 UTF-8 保護決定（判準四已逐支釘住六支目標）；本案的三支合成目標只印 ASCII
+            [sys.executable, str(_LAUNCHER), *args], input=stdin_text,
+            capture_output=True, text=True, encoding="utf-8", errors="replace",
+            timeout=60, env=env, cwd=str(_REPO_ROOT))
+        return proc.returncode, proc.stdout or "", proc.stderr or ""
+
+    def test_missing_target_is_fail_open(self) -> None:
+        """🔴 這條的方向是 P0：缺檔若回 2，PreToolUse 會把**所有工具**硬鎖死。"""
+        rc, out, err = self._launch(".claude/hooks/NOT_THERE.py")
+        self.assertEqual(rc, 0, f"缺檔必須 fail-open；實得 rc={rc} err={err[:200]!r}")
+        self.assertEqual((out, err), ("", ""), "fail-open 時不得有任何輸出")
+
+    def test_no_target_argument_never_denies(self) -> None:
+        rc, _out, _err = self._launch()
+        self.assertEqual(rc, 0, "沒給目標時絕不可回 2")
+
+    def test_exit_2_is_propagated_verbatim(self) -> None:
+        """deny 語意不能斷——六支守衛裡有三支靠 exit 2 硬擋。"""
+        rc, _out, err = self._launch(".claude/hooks/deny.py")
+        self.assertEqual(rc, 2, f"目標 exit 2 必須原樣傳遞；實得 rc={rc}")
+        self.assertIn("BLOCKED", err, "目標的 stderr 必須回得來（那是使用者唯一看得到的指引）")
+
+    def test_stdin_argv_and_cwd_match_the_old_shim(self) -> None:
+        payload = json.dumps({"hook_event_name": "PreToolUse", "tool_name": "Read"})
+        rc, out, err = self._launch(".claude/hooks/ok.py", "extra1", stdin_text=payload)
+        self.assertEqual(rc, 0, err[:300])
+        got = json.loads(out)
+        self.assertEqual(got["stdin"], payload, "stdin 的 hook JSON 必須原樣送達目標")
+        self.assertEqual(
+            Path(got["argv"][0]), self.root / ".claude" / "hooks" / "ok.py",
+            "argv[0] 必須是目標的絕對路徑（與舊 shim 逐項等價）")
+        self.assertEqual(got["argv"][1:], ["extra1"], "其餘引數順位不得改變")
+        self.assertEqual(Path(got["cwd"]), self.root,
+                         "cwd 必須被切到 CLAUDE_PROJECT_DIR（DEF cwd≠專案根的 P0）")
+
+
+class TestDeclaredWindowsCarrierExists(unittest.TestCase):
+    """🔴 方案書 §4.3 自陳「連 `.venv` 都沒有仍無機械物看守」那個缺口的補丁。
+
+    為什麼這個缺口比閃窗嚴重：載具解析不到 ⇒ 六支守衛**全部靜默失效**，而螢幕上的
+    表徵就是「終於不閃窗了」。把缺口寫下來卻不給判準，等於把它登記成「已知且已接受」。
+
+    判準的形狀是**宣告 ↔ 實況雙向綁定**（不是硬編一個路徑）：settings.json 宣告了
+    venv 載具 ⇒ 那個路徑必須存在。這樣「有人把載具改成別的東西」也會被同一條守到。
+
+    🔴 為何不用 `skipUnless`／不用「偵測到 CI 就跳過」：
+      · 判準本體 `carrier_liveness_problems()` 自帶 `on_windows` 參數，兩個平台方向
+        都在**同一台機器上**以注入驗到（`DEF-101-766`：單平台判準不可無條件外推）；
+        用 `skipUnless` 反而會讓另一個方向永遠沒人跑過。
+      · 非 Windows 不看 venv 載具是**語意上的**理由：`.venv/Scripts/pythonw.exe` 在
+        mac/Linux 本來就不存在，那條在該平台是設計上的 fail-open，不是缺陷。
+        （該平台自己那條載具另有 `TestPosixCarrierLiveness`。）
+      · CI 的豁免同樣是語意的、且不由本測試負責：hook 只在「Claude Code 會跑的地方」
+        有意義，CI 從不跑 hook——所以會出聲的那一層落在
+        `tools/check_hooks_liveness.py`（開發機的閘門會跑、CI 由呼叫端整段跳過），
+        本測試只負責證明那個判準有牙。
+
+    🔴 **R80 ARCH-01：本類刻意不再有「這台機器上載具在不在」那一格**。原本那一格是
+    `assertEqual(carrier_liveness_problems(real, repo_root), [])`，它量的是**機器狀態**
+    而不是 repo 內容，於是在兩種完全正常的情境下必紅：
+      · windows-compat-ci／windows-smoke：`python tools/run_root_unittests.py` 跑在
+        `./tools/bootstrap.ps1` **之前**，那時 `.venv` 還不存在；而且該 workflow 稍後
+        會把 `.venv` 更名為 `.venv-cache-windows`——所以「把測試挪到 bootstrap 之後」
+        只是換一種方式再紅一次，不是修法。
+      · 任何**尚未跑過 bootstrap 的全新 clone**（含開發者第一次 clone 後直接跑根層
+        unittest）。複驗實測：project_dir 指向無 `.venv` 的暫存目錄 → problems len = 1。
+    機器狀態的正確通報者是 `tools/check_hooks_liveness.py`（advisory：印警告、不阻擋，
+    四個呼叫端在 `$CI` 有值時整段跳過）。判準本體**一個字都沒有放寬**——牙由下面三格
+    注入自證；換上來的是一件機器無關、而且原本沒有任何人在守的事（見下一格）。
+    """
+
+    def test_the_declared_carrier_is_what_bootstrap_produces(self) -> None:
+        """宣告的 venv 型載具必須落在 bootstrap **真的會建出來**的那個目錄下。
+
+        這一格抓的是「宣告在每一台機器上都不可能成立」——例如寫成
+        `.venv311/Scripts/pythonw.exe`：hook 會在**所有**機器上靜默死掉，而被換掉的
+        那條舊判準只在「我這台剛好還沒 bootstrap」時才會出聲。SSOT 是
+        `tools/bootstrap_core.VENV_DIR`，不是本檔複寫的一個字面。
+        """
+        import bootstrap_core  # noqa: PLC0415
+
+        wiring = _hook_wiring()
+        declared = wiring.declared_win_carriers(_load_real_settings())
+        venv_declared = {c for c in declared if c != wiring.WIN_CARRIER_PATH}
+        dirs = carrier_venv_dirs(venv_declared, wiring.PROJECT_DIR_PLACEHOLDER)
+        self.assertTrue(
+            dirs,
+            "settings 未宣告任何 venv 型 Windows 載具 ⇒ 本判準與 carrier_liveness_"
+            "problems() 一起變成空轉（PATH 載具的實況靜態看不到，是它自陳的盲區）。"
+            f"實查宣告：{sorted(declared)}")
+        self.assertEqual(
+            dirs, {Path(bootstrap_core.VENV_DIR).name},
+            f"宣告的載具落在 {sorted(dirs)}，而 bootstrap 建的是 "
+            f"{Path(bootstrap_core.VENV_DIR).name} ⇒ 這個宣告在**每一台**機器上都不會成立，"
+            "全部 hook 靜默失效而表徵與『修好了』相同")
+
+    def test_the_bootstrap_binding_catches_a_carrier_that_is_never_produced(self) -> None:
+        """判準自證：換成 bootstrap 產不出來的目錄必須看得出差異（反空轉）。"""
+        placeholder = _hook_wiring().PROJECT_DIR_PLACEHOLDER
+        self.assertEqual(
+            carrier_venv_dirs({f"{placeholder}/.venv311/Scripts/pythonw.exe"}, placeholder),
+            {".venv311"})
+        self.assertEqual(carrier_venv_dirs({"pythonw.exe"}, placeholder), set())
+
+    def test_a_missing_carrier_is_red_on_windows(self) -> None:
+        """注入：同一份真實 settings ＋ 「那個檔不存在」的世界 ⇒ 必紅。"""
+        problems = _hook_wiring().carrier_liveness_problems(
+            _load_real_settings(), str(_REPO_ROOT),
+            exists=lambda _p: False, on_windows=True)
+        self.assertTrue(problems, "宣告了 venv 載具、實況卻不存在，判準竟不出聲")
+        self.assertIn("全部 hook 都不會跑", problems[0])
+
+    def test_the_windows_criterion_is_silent_on_posix(self) -> None:
+        """反向：mac/Linux 上不得對 **Windows 載具**發言（誤報會讓整道守衛被關掉）。
+
+        🔴 R80 SA-05 訂正本格的斷言對象：原文斷言整個回傳為空，而那把「這個平台沒有
+        Windows 載具問題」寫成了「這個平台沒有載具問題」——POSIX 自己那條同樣是單點
+        失效面。現在改斷言「訊息裡不得出現 Windows 載具」，原意（不誤報）保住，POSIX
+        那半的牙由 `TestPosixCarrierLiveness` 承接。
+        """
+        problems = _hook_wiring().carrier_liveness_problems(
+            _load_real_settings(), str(_REPO_ROOT),
+            exists=lambda _p: False, on_windows=False,
+            probe=lambda _p: ("/usr/bin/python3", (3, 12)))
+        self.assertEqual(
+            [p for p in problems if "pythonw.exe" in p], [],
+            "POSIX 上對 Windows 專屬載具發言＝誤報（DEF-101-766 同型）")
+
+    def test_changing_the_carrier_moves_the_criterion_with_it(self) -> None:
+        """雙向綁定自證：把宣告換成 PATH 載具 ⇒ 本判準不再對 venv 路徑發言。"""
+        wiring = _hook_wiring()
+        swapped = json.loads(
+            json.dumps(_load_real_settings()).replace(
+                wiring.WIN_CARRIER_VENV, wiring.WIN_CARRIER_PATH))
+        self.assertEqual(wiring.declared_win_carriers(swapped),
+                         {wiring.WIN_CARRIER_PATH})
+        self.assertEqual(
+            wiring.carrier_liveness_problems(
+                swapped, str(_REPO_ROOT), exists=lambda _p: False, on_windows=True),
+            [], "PATH 載具的實況取決於 session 的 PATH，靜態判準不得擅自判死")
+
+
+class TestPosixCarrierLiveness(unittest.TestCase):
+    """POSIX 側載具的存在性判準（R80 SA-05）。
+
+    🔴 立案理由（缺口與 Windows 側**不對稱**，所以不是「順手補對稱」）：Windows 條目
+    釘死一個確定的檔案，POSIX 條目吃的是 **`PATH` 上任意一個 `python3`**——macOS 內建
+    那支常年是 3.9，而本 repo 的 bootstrap 門檻是 3.11。此前 `carrier_liveness_problems()`
+    在非 Windows **一律回空**，等於把「這個平台沒有 Windows 載具」寫成「這個平台沒有
+    載具問題」。三種失效（檔不在／沒有執行位元／直譯器太舊）表徵完全相同：CC 只記一行
+    ERROR 就放行，六支守衛一起消失，螢幕上就是「終於不閃窗了」。
+
+    四格全部以注入驅動、`on_windows=False` 強制走 POSIX 分支——判準的方向不該取決於
+    這台機器剛好是什麼（同本檔 `TestBlockBashHookDoesNotHurtOtherPlatforms` 的理由）。
+    """
+
+    def _posix(self, **kwargs) -> list[str]:
+        base = {"exists": lambda _p: True, "is_exec": lambda _p: True,
+                "probe": lambda _p: ("/usr/bin/python3", (3, 12))}
+        base.update(kwargs)
+        return _hook_wiring().carrier_liveness_problems(
+            _load_real_settings(), str(_REPO_ROOT), on_windows=False, **base)
+
+    def test_a_healthy_posix_world_is_silent(self) -> None:
+        """反空轉：判準若恆紅，下面四格全部失去意義。"""
+        self.assertEqual(self._posix(), [])
+
+    def test_a_missing_launcher_is_red(self) -> None:
+        problems = self._posix(exists=lambda _p: False)
+        self.assertTrue(problems, "POSIX 載具不存在竟不出聲")
+        self.assertIn("全部 hook 都不會跑", problems[0])
+
+    def test_a_launcher_without_the_exec_bit_is_red(self) -> None:
+        """`git index 100755` 被洗掉時 spawn 回 EACCES，而 EACCES 是 fail-open。"""
+        problems = self._posix(is_exec=lambda _p: False)
+        self.assertTrue(any("執行位元" in p for p in problems), problems)
+
+    def test_an_unresolvable_shebang_is_red(self) -> None:
+        problems = self._posix(probe=lambda _p: (None, None))
+        self.assertTrue(any("shebang" in p for p in problems), problems)
+
+    def test_an_interpreter_below_the_floor_is_red(self) -> None:
+        """macOS 系統 python3 的**預設**狀態（3.9）——這不是假想情境。"""
+        problems = self._posix(probe=lambda _p: ("/usr/bin/python3", (3, 9)))
+        self.assertTrue(any("3.9" in p for p in problems), problems)
+        self.assertTrue(any("bootstrap_core" in p for p in problems), problems)
+
+    def test_the_floor_matches_the_bootstrap_ssot(self) -> None:
+        """`POSIX_MIN_PY` 與 bootstrap 挑直譯器的門檻必須是同一個數字。
+
+        兩處刻意各寫一份（`tools/lib/hook_wiring.py` 檔頭約定只依賴 stdlib，不 import
+        bootstrap）——**同一份知識允許住兩個家的唯一條件就是有東西在對帳**，本格就是
+        那個東西（R73 `Find-GitBash` 的教訓：兩個家、只有一個家被鎖）。
+        """
+        source = (_REPO_ROOT / "tools" / "bootstrap_core.py").read_text(encoding="utf-8")
+        major, minor = _hook_wiring().POSIX_MIN_PY
+        self.assertIn(
+            f"version_info[:2]>=({major},{minor})", source.replace(" ", ""),
+            f"hook_wiring.POSIX_MIN_PY={major}.{minor} 與 bootstrap_core 的門檻已脫鉤")
+
+    def test_the_real_launcher_carries_a_resolvable_shebang(self) -> None:
+        """機器無關的那一半：啟動器檔案本身必須帶 shebang（POSIX 直接 exec 的前提）。"""
+        first = _LAUNCHER.read_text(encoding="utf-8").splitlines()[0]
+        self.assertTrue(first.startswith("#!"), f"啟動器首行不是 shebang：{first!r}")
+        self.assertIn("python", first)
+
+
+class TestExecFormConversionScope(unittest.TestCase):
+    """exec form 轉換的**射程**——哪一份 settings 轉了、哪一份還沒（R80 QA-03）。
+
+    🔴 立案理由：R80 只轉了**根層**那一份，而根 `CLAUDE.md`〈鐵律一之二〉一度把它寫成
+    通則、形態判準的掃描面也只有根檔。兩個後果：①在 AutoClaude 子專案 session 下閃窗
+    一次都沒少；②「AutoClaude 那 6 條退回 shell form」**永遠不會轉紅**。
+    處置刻意**不是**把 `hook_form_problems()` 套到 AutoClaude（那會當場假紅、而那份檔
+    不在本輪的可動面內），而是把「還沒轉的有幾條」變成**可查的量測值**：掃描面現查磁碟，
+    判準是相等——多了＝退步、少了＝轉好了卻沒回來改表。凍結版（Copy-on-Evolve）具名排除。
+    """
+
+    def _counts(self) -> dict[str, int]:
+        wiring = _hook_wiring()
+        return {
+            rel: len(wiring.shell_form_entries(
+                json.loads((_REPO_ROOT / rel).read_text(encoding="utf-8"))))
+            for rel in wiring.discover_active_settings(_REPO_ROOT)
+        }
+
+    def test_the_census_matches_the_disk(self) -> None:
+        problems = _hook_wiring().shell_form_census_problems(self._counts())
+        self.assertEqual(problems, [], "\n".join(problems))
+
+    def test_the_scan_face_is_not_vacuous(self) -> None:
+        """取數管道自證：掃描面塌成空的話上面那格恆綠。"""
+        found = _hook_wiring().discover_active_settings(_REPO_ROOT)
+        self.assertIn(".claude/settings.json", found)
+        self.assertIn("AutoClaude/.claude/settings.json", found)
+
+    def test_frozen_sdd_versions_are_excluded_by_name(self) -> None:
+        """凍結版**確實存在於磁碟上**（30 份），排除是刻意的、不是掃不到。"""
+        wiring = _hook_wiring()
+        frozen = sorted(_REPO_ROOT.glob("AISDLC_SDD/AISDLC_SDD_v*/.claude/settings.json"))
+        self.assertTrue(frozen, "凍結版一份都掃不到 ⇒ 這條排除規則已經無事可做")
+        found = wiring.discover_active_settings(_REPO_ROOT)
+        self.assertEqual(
+            [rel for rel in found if rel.startswith(wiring.FROZEN_SETTINGS_PREFIX)], [])
+
+    def test_a_regression_to_shell_form_is_red(self) -> None:
+        """注入：根層多一條 shell form ⇒ 必紅（那一份的閃窗回來了）。"""
+        wiring = _hook_wiring()
+        counts = self._counts()
+        counts[".claude/settings.json"] += 1
+        problems = wiring.shell_form_census_problems(counts)
+        self.assertTrue(any("退回 shell form" in p for p in problems), problems)
+
+    def test_converting_without_updating_the_census_is_also_red(self) -> None:
+        """另一向：AutoClaude 那 6 條轉好了卻沒下修基準 ⇒ 餘裕＝日後無聲加回的破口。"""
+        wiring = _hook_wiring()
+        counts = self._counts()
+        counts["AutoClaude/.claude/settings.json"] = 0
+        problems = wiring.shell_form_census_problems(counts)
+        self.assertTrue(any("沒同步下修基準" in p for p in problems), problems)
+
+    def test_an_unregistered_active_settings_file_is_red(self) -> None:
+        """注入：新開一份活躍 settings 卻不入表 ⇒ 「這份轉了沒有」對所有機械物隱形。"""
+        counts = dict(self._counts(), **{"ConsoleUI/.claude/settings.json": 3})
+        problems = _hook_wiring().shell_form_census_problems(counts)
+        self.assertTrue(any("必須顯式入表" in p for p in problems), problems)
+
+    def test_shell_form_entries_counts_the_type_less_ones_too(self) -> None:
+        """與 ARCH-02 同一條 type 慣例：省掉 `type` 的 shell form 條目一樣要被數到。"""
+        wiring = _hook_wiring()
+        settings = {"hooks": {"PreToolUse": [{"hooks": [
+            {"command": "python -c ... a.py"},
+            {"type": "command", "command": "python -c ... b.py"},
+            {"type": "prompt", "command": "not a command hook"},
+        ]}]}}
+        self.assertEqual(len(wiring.shell_form_entries(settings)), 2)
 
 
 if __name__ == "__main__":

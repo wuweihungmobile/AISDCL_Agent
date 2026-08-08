@@ -357,9 +357,17 @@ _POSIX_TAG_RATCHET_CEILING: dict[str, int] = {
 #: 以及與 context 阻斷刻意分開的那個逃生口），兩者都以函式體內 `self.skipTest(...)`
 #: 對非 Windows 退場——鐵律三「單平台判準不外推」的正確形態，非隱藏失敗。定位方式同
 #: 上一段：對每支 test 檔各以 HEAD 版與工作樹版跑一次 `site_class_counts()` 相減。
+#: 🔴 R80 重釘 `tools/tests` 的 `windows-only` 13 → 14（**非放寬**，這張表的判準是「相等」，
+#: 任一格變動都必須有人回來改；失敗訊息自己會印出該填的數字，重釘是設計好的流程）。
+#: 新站點＝`test_context_budget_guard.py::NoWindowBehaviourTest` 的類別層
+#: `@unittest.skipUnless(os.name == "nt", "[WINDOWS-NATIVE-ONLY] …")`：那是「無 console 父行程
+#: 下 spawn 不得彈視窗」的**行為**鎖（靜態掃描只證得到「旗標有寫」，證不到「旗標有效」，而
+#: R80 的缺陷本體正是旗標有寫但被 `DETACHED_PROCESS` 抵銷掉）。console 配置是 Windows 專屬
+#: 概念、POSIX 上 `creationflags` 恆為 0 ⇒ 帶標籤的 skipUnless 是鐵律三要求的正確形態，
+#: 不是隱藏失敗。同輪 `_POSIX_TAG_RATCHET`／其天花板皆**未動**（該站點已帶標籤 ⇒ 不計欠債）。
 _SITE_CLASS_CENSUS: dict[str, dict[str, int]] = {
     "tools/tests": {
-        "windows-only": 13,
+        "windows-only": 14,
         "posix-only": 11,
         "tool-absence": 38,
         "runtime-skipTest": 15,

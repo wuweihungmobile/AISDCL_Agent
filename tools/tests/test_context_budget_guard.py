@@ -71,6 +71,42 @@ def _write_jsonl(path: Path, useds: list[int], *, junk: bool = False) -> Path:
     return path
 
 
+def _hook_invocations(event: str) -> list[tuple[str, str]]:
+    """根 `.claude/settings.json` 內某事件的 `(matcher, 這個 hook 的完整呼叫字串)`。
+
+    🔴 呼叫字串＝`command` **加上** `args` 全部串起來，不是只看 `command`。
+    立案（R80 當回合實測）：並行的另一包把註冊面改成經 `_hook_launcher.py` 轉呼叫，
+    於是實體腳本路徑從 `command` 搬到了 `args` ⇒ 只看 `command` 的判準當場回空清單，
+    兩支既有接線鎖同時紅。**那是判準太脆，不是接線壞了**——被鎖的性質是「這支 hook
+    有沒有被註冊在這個事件上」，而它與「是誰去啟動它」無關。這裡把兩處重複的讀法
+    收成一份，順帶讓它對未來再換一次啟動器免疫。
+
+    🔴 R80 收尾：上一段的判斷完全正確，但那份讀法**同一輪內長出了第二個家**——
+    另一包為同一件事建了唯一真相源 `tools/lib/hook_wiring.py`（該包實測：repo 內原有的
+    「只讀 command 找腳本名」解析器會在 exec form 下**全部**掃出空集合而恆綠。🔴 R80
+    二審 `NEW-ARCH-R80B-07`：此處原本寫死支數，而同一個數字在三個家有兩個值——支數是
+    量測值不是常數，現查指令見 `hook_wiring.py` 檔頭）。
+    兩個家各自正確、卻只有一個會被下一次形態變更改到，那正是本 repo 的頭號病。
+    這裡改為委派，回傳形狀逐字不變（呼叫端不受影響）。
+    """
+    return [(str(entry.get("matcher", "")), " ".join(_wiring().hook_entry_argv(hook)))
+            for entry in _root_settings().get("hooks", {}).get(event, []) or []
+            for hook in entry.get("hooks") or []]
+
+
+def _root_settings() -> dict:
+    return json.loads(
+        (_REPO_ROOT / ".claude" / "settings.json").read_text(encoding="utf-8-sig"))
+
+
+def _wiring():
+    """hook 佈線解析的唯一真相源（延後 import，不進本檔 import 期路徑）。"""
+    sys.path.insert(0, str(_REPO_ROOT / "tools" / "lib"))
+    import hook_wiring  # noqa: PLC0415
+
+    return hook_wiring
+
+
 def _isolated_env(tmp: Path) -> dict[str, str]:
     """乾淨的子行程環境：暫存、settings 鏈、旗標全部由本測試決定。
 
@@ -609,20 +645,79 @@ class PreToolUseBlockTest(unittest.TestCase):
 
         兩個方向都會出事：matcher 比射程寬 ⇒ 付了 python 啟動成本卻什麼也沒做；
         比射程窄 ⇒ 腳本自以為在守某個工具，實際上根本不會被觸發（靜默失效）。
+
+        🔴 R80 訂正計數面（**條目數 ≠ 註冊數**）：exec form 之後，每個邏輯 hook 佔
+        **兩個條目**——「Windows 載具（pythonw.exe）」與「POSIX 載具（帶 shebang 的
+        啟動器）」各一，各平台恰好一條 spawn 得起來、另一條必定失敗，而 CC 對 spawn
+        失敗是 **fail-open**（只記一行 ERROR、工具照跑）。所以那**不是重複註冊、也
+        不會雙跑**；production 實測佐證：一次 Bash 呼叫命中兩個 PreToolUse block，
+        `EFTYPE`（POSIX 半邊）出現 2 次，而 `Hook denied tool use for Bash` 只有 **1** 次。
+        🔴 反過來說，把其中一條刪掉才是真缺陷：那會讓該 hook 在**另一個平台**整支
+        消失，而且因為 fail-open，不會有任何東西轉紅（`tools/lib/hook_wiring.py` 的
+        判準 E 就是為這件事存在的）。
+        故本案改數**註冊（block）數**而不是條目數——被鎖的性質是「這個 matcher 底下
+        有沒有註冊到這支腳本」，與「有幾個載具去啟動它」無關。
         """
-        settings = json.loads(
-            (_REPO_ROOT / ".claude" / "settings.json").read_text(encoding="utf-8-sig"))
-        matchers = [
-            str(entry.get("matcher", ""))
-            for entry in settings.get("hooks", {}).get("PreToolUse", []) or []
-            if any("context_budget_guard" in str(h.get("command", ""))
-                   for h in entry.get("hooks") or [])
-        ]
-        self.assertEqual(len(matchers), 1, f"PreToolUse 註冊條目數不是 1：{matchers}")
+        entries = _wiring().entries_launching(
+            _root_settings(), "context_budget_guard", event="PreToolUse")
+        matchers = [str(e.get("matcher", "")) for e in entries]
+        self.assertEqual(len(matchers), 1, f"PreToolUse 註冊 block 數不是 1：{matchers}")
         self.assertEqual(
             set(matchers[0].split("|")), set(guard.BLOCKING_TOOLS),
             f"註冊 matcher {matchers[0]!r} 與腳本射程 {guard.BLOCKING_TOOLS} 不一致",
         )
+
+    # 🔴 SA-R80-02：上面那條把 matcher 與射程釘成**相等**，於是它保證的是「兩個都寫錯
+    # 時也一致」——鑑別力的方向錯了。掃描 S7-02 實測：`Task`／`WebFetch`／`WebSearch`
+    # 這三個名字在本 harness 的 **8,106 次 tool_use 裡出現 0 次**（派子代理叫 `Agent`、
+    # 批次編排叫 `Workflow`）⇒ S1「不要爆」的阻斷臂命中面是 0，蓋好了卻永遠不會觸發。
+    # 下面三條補的是**有效性**那一向：圈了一組永遠不出現的名字必須當場轉紅。
+    def test_the_expanding_tools_this_harness_actually_uses_are_blocked(self) -> None:
+        """本 harness 真正在用的兩個展開型工具名必須真的被擋（端到端，不是看常數）。"""
+        for tool in ("Agent", "Workflow"):
+            with self.subTest(tool=tool):
+                rc, err = _run_hook(
+                    self._payload(900_001, f"reach-{tool}.jsonl", tool), self.tmp)
+                self.assertEqual(rc, 2, f"`{tool}` 沒被擋下。stderr={err[:200]}")
+
+    def test_a_blocking_set_that_never_occurs_is_caught(self) -> None:
+        """注入自證（純函式，不依賴這台機器有沒有逐字稿）：圈一組不存在的名字必須紅，
+        圈得到的必須綠，而**量不到**（空集合）時不得判紅——「量不到 ≠ 量到零」。"""
+        observed = {"Read", "Edit", "Agent", "Workflow", "PowerShell"}
+        self.assertTrue(guard.blocking_reach_problems(
+            ("Task", "WebFetch", "WebSearch"), observed),
+            "命中面為 0 的阻斷組沒有被抓出來（這就是 SA-R80-02 的本體）")
+        self.assertEqual(guard.blocking_reach_problems(guard.BLOCKING_TOOLS, observed), [])
+        self.assertEqual(guard.blocking_reach_problems(("Nope",), set()), [],
+                         "量不到就判紅 ⇒ 這條鎖在沒有逐字稿的機器上是恆紅的噪音")
+
+    def test_the_shipped_blocking_set_reaches_this_machines_real_traffic(self) -> None:
+        """接到真語料：本機逐字稿裡出現過的工具名，必須與 `BLOCKING_TOOLS` 有交集。
+
+        沒有逐字稿的環境（CI／fresh clone）量不到 ⇒ 依上一條的契約不判紅，但**分母會
+        被印出來**，讓「這次其實沒量到」與「量到而且有交集」在輸出上分得開。
+        """
+        names: set[str] = set()
+        base = planner.project_transcript_dir(_REPO_ROOT)
+        paths = sorted((p for p in base.glob("*.jsonl") if p.is_file()),
+                       key=lambda p: p.stat().st_mtime, reverse=True)[:6] \
+            if base.is_dir() else []
+        for path in paths:
+            with path.open(encoding="utf-8", errors="replace") as handle:
+                for line in handle:
+                    if '"tool_use"' not in line:
+                        continue
+                    try:
+                        rec = json.loads(line)
+                    except ValueError:
+                        continue
+                    message = rec.get("message")
+                    for block in (message or {}).get("content") or []:
+                        if isinstance(block, dict) and block.get("type") == "tool_use":
+                            names.add(str(block.get("name") or ""))
+        self.assertEqual(
+            guard.blocking_reach_problems(guard.BLOCKING_TOOLS, names), [],
+            f"實測 {len(paths)} 支逐字稿共 {len(names)} 種工具名：{sorted(names)}")
 
 
 # ═══════════════════════════════════════ R79 續航協定（ADR-XPLAT-004）的回歸鎖
@@ -1069,9 +1164,30 @@ class EnduranceWiringTest(unittest.TestCase):
         ... -LogonType S4U` 在非提權下回「存取被拒」且工作根本沒建立。在那條路上唯一
         還成立的「不彈視窗」保證就是載具：`python.exe` 是 console 子系統、Interactive
         下必定配一個視窗；`pythonw.exe` 是同一個直譯器的 GUI 子系統版本，不配置 console。
-        把它改回 `python.exe` 就是那個缺陷本身，故本條必須紅。"""
+
+        🔴 **R80 訂正判準（act 在 Linux 容器實跑抓到的紅；本機 Windows 結構上看不見）**：
+        原判準逐字斷言字面 `pythonw.exe`，而 **POSIX 上根本沒有 `pythonw`**——
+        `guard.quiet_python()` 在那裡依約回 `sys.executable`，於是這條在容器裡必紅
+        （逐字：`'pythonw.exe' not found in '... -Execute '/opt/.../bin/python3' ...'`）。
+        這正是鐵律三「這在另一個平台是什麼值」，而它被寫成了一個平台常數。
+        改法**不是**加平台守衛（那會多一個 skip 站點、也讓 POSIX 上零判準），而是把問題
+        換成兩平台同一條：**Action 的載具必須是「本 repo 唯一那支不配置 console 的解析器」**
+        ——即 `guard.quiet_python()`，而不是某個字面。三格判準各自獨立：
+          ① 產生的腳本裡真的用了那個值（行為面，兩平台皆成立）；
+          ② 來源面：planner 必須**呼叫**那支唯一真相源，不得自己算一份（同一份知識三個家
+             正是 R80 收掉的缺陷之一）——這一格讓「改回 `sys.executable`」在 POSIX 上
+             （兩者恰好同值、行為面看不出來）照樣紅；
+          ③ Windows 上那支解析器必須真的解析到 `pythonw.exe`（缺陷本體所在的平台）。
+        `if os.name == "nt"` 是**平台條件斷言**、不是 skip 站點：本條在兩個平台都會跑、
+        都有判準，只是第三格的斷言只在 Windows 上有意義。
+        """
         script = planner.endurance_schtasks_script(_A_PLAN, "T", "'09:00'")
-        self.assertIn("pythonw.exe", script)
+        self.assertIn(planner._ps_single_quote(guard.quiet_python()), script)
+        self.assertIn("guard.quiet_python()", _PLANNER.read_text(encoding="utf-8"),
+                      "載具解析必須委派給唯一真相源 guard.quiet_python()，不得自己算一份")
+        if os.name == "nt":
+            self.assertTrue(guard.quiet_python().lower().endswith("pythonw.exe"),
+                            f"Windows 上的無 console 載具解析錯了：{guard.quiet_python()}")
 
     def test_the_principal_is_s4u_first_with_a_non_elevated_fallback(self) -> None:
         """與 `tools/install_windows_nightly.ps1` 的兩支既有工作對齊（該檔 R69 S-5 段）：
@@ -1173,11 +1289,20 @@ class SentinelDecisionTest(unittest.TestCase):
         self.assertIsNone(decision["at"])
 
     def test_an_already_handled_hit_is_never_reacted_to_twice(self) -> None:
-        """🔴 沒有這一條，哨兵會**每次醒來都探測一次**同一筆早就解決掉的撞線。
+        """🔴 **R80 訂正：這是一支「保留舊介面」的相容性測試，不是現行語意的判準。**
 
-        成本是實的：15 分鐘一次 × 每次約 32K tokens。判準＝事件時間戳嚴格大於狀態塊裡
-        的 `handled_through`；武裝當下把「現存最後一筆」記成已處理，理由是可證的——
-        我們此刻跑得動武裝指令，就證明額度是通的。
+        原 docstring 逐字保留了那句已被本輪判定為假的立案理由（「武裝當下把現存最後一筆
+        記成已處理，因為我們此刻跑得動武裝指令就證明額度是通的」）。武裝是**純本機
+        subprocess、零 API 呼叫**，證明不了額度——那句話正是哨兵整晚失明的 P0 根因，
+        而它同輪只在 planner 的一處被改掉、在這裡原文留著 ⇒ 讀這支測試的人會拿到已被
+        推翻的規格，而綠燈替那句假話背書。同一份知識三個家只改一個，是本 repo 的頭號病。
+
+        現行語意：`handled_through` **已降為稽核欄位**，`_sentinel_tick` 一律傳空字串
+        ⇒ 本條走的是 production 走不到的那條分支，它「不可能因為業務邏輯改變而失敗」
+        （Rule 9）。留著它只為了兩件事：①舊狀態塊仍帶該欄位、讀得回來時語意不得漂移；
+        ②若有人把它改回「唯一的已處理判準」，這支的斷言仍描述它該有的行為。
+        **真正守現行語意的判準在 `UnhandledLimitDetectionTest`**（事件晚於全域最後一次
+        成功 API 回應 ⇒ 未處理；早於 ⇒ 已處理），那一組才是接在 production 路徑上的。
         """
         event = _sentinel_event(guard.LIMIT_SESSION, _REAL_SESSION_LIMIT)
         decision = planner.sentinel_decide(event, event["timestamp"], 10.0, self._now(7))
@@ -1224,17 +1349,29 @@ class SentinelDecisionTest(unittest.TestCase):
         self.assertEqual(decision["action"], "escalate")
         self.assertIn("拒絕用猜的", decision["reason"])
 
-    def test_the_patrol_interval_fits_inside_the_shortest_observed_window(self) -> None:
-        """🔴 巡邏間隔是**量出來的常數**，這一條就是它的量測。
+    def test_the_patrol_interval_bounds_the_post_reset_dead_time(self) -> None:
+        """🔴 R80 訂正：這一條原名／原文宣稱「間隔小於**最短觀測窗**」，那句話已被證偽。
 
-        全庫實測那次真實撞線：08:44 撞、訊息逐字 `resets 9am` ⇒ hit→reset 只有 16 分鐘。
-        間隔一旦大於它，「reset 未到 ⇒ 精確重排」那一支在最短窗下**結構上不可達**，
-        整個機制退化成只會事後補救。把 `SENTINEL_INTERVAL_SECONDS` 調到 16 分鐘以上即紅。
+        原文的依據是單一事件（08:44 撞、`resets 9am` ⇒ 16 分鐘）。R80 以全庫 1,433 支
+        逐字稿重量（`tools/probe/reset_window_distribution.py`，14 個相異 episode）：
+        最短窗是 **0.5 分鐘**，4/14 個 episode ≤16 分 ⇒ 900 秒**並不**小於最短觀測窗，
+        原本的測試名是一句假話。**留著一句假話比沒有測試更糟**（本 repo 反覆判過的形態），
+        所以這裡改成釘住那個真正成立的性質。
+
+        真正的性質：間隔決定「reset 之後最壞多久才會有人動作」。窗比間隔短時，那一次走的
+        是 `probe` 而不是 `arm_reset` ⇒ **代價是一次探測（~32K tokens），不是失效**。
+        故判準是**上界＋shrink-only 方向**：調大即紅（死等變長），調小照樣綠（巡邏零 token，
+        這一側沒有需要權衡的量）。取捨全文見 ADR-XPLAT-004 §2.7。
         """
+        self.assertLessEqual(
+            planner.SENTINEL_INTERVAL_SECONDS, 900,
+            "巡邏間隔被調大 ⇒ reset 之後的最壞死等時間跟著變長，而巡邏本身零 token、"
+            "調大換不到任何東西。特別是**不得**改成 50 分鐘：那個數字是 ScheduleWakeup "
+            "`delaySeconds` 上限外溢出來的，schtasks 沒有那個上限（ADR §2.7）")
+        # 語料自檢保留：那一筆真實事件的算術仍必須成立，否則上面引的量測失去出處。
         hit = datetime(2026, 8, 7, 0, 44, tzinfo=UTC).astimezone(_TAIPEI)
-        shortest = (guard.parse_reset_at(_REAL_SESSION_LIMIT, hit) - hit).total_seconds()
-        self.assertEqual(shortest, 16 * 60, "語料變了 ⇒ 這個常數的立案量測要重做")
-        self.assertLess(planner.SENTINEL_INTERVAL_SECONDS, shortest)
+        window = (guard.parse_reset_at(_REAL_SESSION_LIMIT, hit) - hit).total_seconds()
+        self.assertEqual(window, 16 * 60, "語料變了 ⇒ 這個常數的立案量測要重做")
 
     def test_the_audit_timestamp_cannot_be_overwritten_by_a_caller(self) -> None:
         """🔴 R79 補洞包端到端實測抓到的真缺陷（既有 `_resume_tick` 也中招）。
@@ -1324,11 +1461,7 @@ class SentinelWiringTest(unittest.TestCase):
         """🔴 本包的重點不是工具、是**接電**。沒有這個註冊條目，哨兵就永遠只是一支
         「要人記得去按」的指令——而那正是 R77『機制蓋好沒接電』的第三次復發。
         """
-        settings = json.loads(
-            (_REPO_ROOT / ".claude" / "settings.json").read_text(encoding="utf-8-sig"))
-        commands = [str(h.get("command", ""))
-                    for entry in settings.get("hooks", {}).get("SessionStart", []) or []
-                    for h in entry.get("hooks") or []]
+        commands = [argv for _, argv in _hook_invocations("SessionStart")]
         # 比對**完整路徑**而不是裸檔名：`tools/tests/test_context_budget_guard.py`
         # 也含後者，裸檔名判準會被一個不相干的字串滿足（本輪注入實測踩到這一格）。
         self.assertTrue(
@@ -1368,7 +1501,7 @@ class SentinelWiringTest(unittest.TestCase):
         替身被執行後留下的 argv。這一條在把 `arm_sentinel()` 從 `main()` 拿掉時會紅。
         """
         if os.name != "nt":
-            self.skipTest("schtasks 武裝只在 Windows 成立（鐵律三：單平台判準不外推）")
+            self.skipTest("[WINDOWS-NATIVE-ONLY] schtasks 武裝只在 Windows 成立（鐵律三：單平台判準不外推）")
         marker = self.tmp / "argv.json"
         proc = self._sessionstart(self._fake_repo(marker))
         self.assertEqual((proc.returncode, proc.stderr), (0, ""),
@@ -1383,7 +1516,7 @@ class SentinelWiringTest(unittest.TestCase):
     def test_the_off_switch_really_stops_it(self) -> None:
         """人的逃生口。與 context 阻斷那一個刻意分開：兩者關掉的是不同的東西。"""
         if os.name != "nt":
-            self.skipTest("同上：本分支只在 Windows 有行為")
+            self.skipTest("[WINDOWS-NATIVE-ONLY] 同上：本分支只在 Windows 有行為")
         marker = self.tmp / "argv_off.json"
         proc = self._sessionstart(self._fake_repo(marker),
                                   {"AUTOSDD_SENTINEL_OFF": "1"})
@@ -1524,6 +1657,625 @@ class ResumeSpawnCarriesTheUnattendedSignalTest(unittest.TestCase):
         argv = self._run()["argv"]
         self.assertEqual(argv[:4], ["claude", "-p", "-r", "sid-1"],
                          f"續跑指令的形狀被改掉了：{argv[:4]}")
+
+    def test_the_resumed_run_lands_in_the_repo_not_system32(self) -> None:
+        """🔴 R80 P0。沒有這一格時，續跑那一跑的 cwd 繼承排程行程＝`C:\\Windows\\System32`，
+        而 Claude Code 用 cwd 決定「本 session 允許的工作目錄」⇒ 那一跑**結構上做不了任何
+        事**。實測逐字（今天 01:55 那一跑自己的回報）：`Read` 任務書 → 權限未授予；
+        `Get-Content` 同一份 → 「本 session 允許的工作目錄只有 C:\\WINDOWS\\system32」。
+
+        五段流程（巡邏→偵測→重排→探測→續跑）全部觸發成功、稽核痕跡齊備，最後一步空轉
+        ——所以這一條斷言的是**能不能做事**，不是「有沒有被叫起來」。
+        """
+        self.assertEqual(
+            self._run().get("cwd"), str(_REPO_ROOT),
+            "續跑 spawn 沒有帶 cwd ⇒ 它會落在排程行程的 cwd（system32），"
+            "而那一跑對 repo 的每一個檔都是「不在允許的工作目錄內」")
+
+    def test_the_resumed_run_can_reach_the_plan_outside_the_repo(self) -> None:
+        """任務書住 `%TEMP%`（刻意不進 repo），所以光有 cwo=repo 根還讀不到它。
+
+        `--add-dir` 是實查 `claude --help` 得到的旗標（`Additional directories to allow
+        tool access to`），不是憑印象。判準要求它指向**任務書所在的那個目錄**——傳別的
+        目錄照樣讓那一跑讀不到自己該讀的東西，而失敗的樣子與「沒帶」一模一樣。
+        """
+        argv = self._run()["argv"]
+        self.assertIn("--add-dir", argv, "續跑沒有把任務書所在目錄加進允許目錄")
+        self.assertEqual(argv[argv.index("--add-dir") + 1], str(self.tmp),
+                         f"--add-dir 指到了別的地方：{argv}")
+
+    def test_the_variadic_add_dir_does_not_swallow_the_prompt(self) -> None:
+        """🔴 R80 端到端實測踩到的真缺陷，不是理論風險。
+
+        `--add-dir <directories...>` 的值是**變長的**：把它排在 prompt 前面時，它會把
+        prompt 也吃進去當成一個目錄 ⇒ `claude` 認為這一跑根本沒有 prompt。實測逐字
+        `Error: No deferred tool marker found in the resumed session. …Provide a prompt
+        to continue the conversation.`（rc=1、stdout 全空）；把 prompt 移到前面同一條
+        指令 rc=0。
+
+        失效方式最惡劣的地方：**五段流程與稽核痕跡全都是綠的**——woken／probed／resumed
+        三筆齊備、`quota_open=true`、排程也被正確收掉，只有那一跑什麼都沒做。所以這一條
+        鎖的是 argv 的**順序**，而順序在既有的「有沒有帶這個旗標」判準下是隱形的。
+        """
+        argv = self._run()["argv"]
+        idx = argv.index("--add-dir")
+        prompt_at = [i for i, a in enumerate(argv) if "第 3 節" in a]
+        self.assertTrue(prompt_at, f"argv 裡找不到 prompt：{argv}")
+        self.assertLess(
+            prompt_at[0], idx,
+            "prompt 排在 --add-dir 後面 ⇒ 會被那個變長參數吃掉，那一跑會拿不到 prompt")
+        self.assertEqual(
+            len(argv) - idx, 2,
+            f"--add-dir 後面必須**只有**一個目錄值，否則多出來的東西會被它吃掉：{argv}")
+
+    def test_the_resumed_run_does_not_pop_a_console_window(self) -> None:
+        """無人看管的那一跑不該在使用者桌面上開一個視窗（旗標語意見 guard.NO_WINDOW）。"""
+        self.assertEqual(self._run().get("creationflags"), guard.NO_WINDOW)
+
+
+# ────────────────── R80：無 console 父行程下的 spawn（類級機械物，不是逐站點補丁）
+# 🔴 為何是**類級**而不是「把漏掉的兩站補上就好」：R79 治這件事時只改了排程 Action 的
+# 載具（python.exe → pythonw.exe），而同一條路上還有三個 spawn 站點沒帶旗標——本 repo
+# 已反覆判過「同一份知識住多個家、只鎖一個」的形態（R73 `Find-GitBash`、R79 的 3 站鎖 1
+# 站）。所以這裡鎖的是**一整類檔案的一整類呼叫**：宣告集合內每一個 subprocess spawn 都
+# 必須顯式帶 no-window 旗標，漏掉任何一站當場紅，不靠人記得。
+#
+# 集合語意＝「這支檔可能在**無 console 的父行程**下被執行」：
+#   · `.claude/hooks/*.py`      由 Claude Code 起（實測其 hook 子行程會自帶 conhost）
+#   · `tools/session_resume_planner.py`  由 schtasks 以 `pythonw.exe` 起（無 console）
+# 在那個條件下 spawn 一個 console 子系統應用（`python.exe`／`powershell.exe`／
+# `claude.exe`）時，Windows 必定新配置一個 console ＝跳到使用者臉上的視窗。
+#
+# 🔴 分母是**覆蓋率棘輪**（鐵律三的體例）：`_CONSOLE_FREE_FLOOR` 只准升。新增一支 hook
+# 卻沒進掃描面時，掃描面會縮到下限以下而轉紅——「射程靜默縮小」是本 repo 記載過的
+# 失效方式（`MIN_TESTS` 腐化 11 輪），不能只靠 glob 看起來會自己長大。
+_SPAWN_FUNCS = frozenset({"run", "Popen", "call", "check_call", "check_output"})
+
+#: 掃描面檔數下限。現值＝R80 實測（1 支 planner ＋ 4 支 hook）。只准上修。
+_CONSOLE_FREE_FLOOR = 5
+
+
+def _spawn_calls(tree: ast.AST) -> list[ast.Call]:
+    """`subprocess.<run|Popen|…>(...)` 的呼叫節點。"""
+    found = []
+    for node in ast.walk(tree):
+        func = getattr(node, "func", None)
+        if (isinstance(node, ast.Call) and isinstance(func, ast.Attribute)
+                and func.attr in _SPAWN_FUNCS
+                and isinstance(func.value, ast.Name) and func.value.id == "subprocess"):
+            found.append(node)
+    return found
+
+
+def _creationflags_text(call: ast.Call) -> str | None:
+    """該呼叫的 `creationflags=` 原始表達式（沒帶回 `None`）。"""
+    for keyword in call.keywords:
+        if keyword.arg == "creationflags":
+            return ast.unparse(keyword.value)
+    return None
+
+
+def no_window_problems(sources: dict[str, str]) -> list[str]:
+    """宣告集合內每一個 spawn 站點都必須顯式帶 no-window 旗標。純函式（紅綠可注入）。
+
+    判準刻意只認**字面出現 `NO_WINDOW`**（涵蓋 `guard.NO_WINDOW` 與
+    `getattr(subprocess, "CREATE_NO_WINDOW", 0)` 兩種寫法），不去解析數值：
+    數值解析要跟著 Windows 常數表跑，而這裡要問的只是「作者有沒有顯式表態」。
+    解析失敗一律計為違規——掃不到的檔靜默放行，正是本 repo 通篇在防的 fail-open。
+    """
+    problems: list[str] = []
+    for name, src in sorted(sources.items()):
+        try:
+            tree = ast.parse(src)
+        except SyntaxError as exc:
+            problems.append(f"{name}：AST 解析失敗（{exc}）——掃不到的檔不得靜默放行")
+            continue
+        for call in _spawn_calls(tree):
+            text = _creationflags_text(call)
+            where = f"{name}:{call.lineno}"
+            if text is None:
+                problems.append(
+                    f"{where}：subprocess spawn 沒有 `creationflags=`。本檔可能在無 console"
+                    " 的父行程下執行 ⇒ console 子行程會替使用者開一個視窗。"
+                    "修法：`creationflags=guard.NO_WINDOW`（受零相依契約的 hook 寫"
+                    ' `getattr(subprocess, "CREATE_NO_WINDOW", 0)`）')
+            elif "NO_WINDOW" not in text:
+                problems.append(
+                    f"{where}：`creationflags={text}` 不含任何 no-window 旗標")
+    return problems
+
+
+def detached_conflict_problems(sources: dict[str, str]) -> list[str]:
+    """全庫規則：`DETACHED_PROCESS` 不得與 `CREATE_NO_WINDOW` 同時出現在一個 creationflags。
+
+    🔴 **R80 訂正本條的理由**（原文逐字宣稱「`DETACHED_PROCESS` 會把 `CREATE_NO_WINDOW`
+    抵銷掉」，那句話同輪已被重量證偽，故不複述它——本 repo 判過「訂正註記逐字引述假話
+    ＝製造新假話」，而這一段假話原本就住在**未來工程師唯一會讀到的那段文字**裡：紅燈訊息）。
+
+    真正成立的理由是**載具效應，不是旗標語意**。重量矩陣（pythonw 當無 console 父行程、
+    子行程自報 `GetConsoleWindow()`；`0`＝沒有 console）：
+      · **真直譯器**（base `python.exe`）那一列，`DET|CNW` 是 **0** ⇒ 旗標本身沒有互斥。
+      · 本 repo 的 venv 由 **uv** 建立（`pyvenv.cfg` 有 `uv = 0.8.22`），其 `python.exe`
+        是 **trampoline**（274,712 bytes vs 真直譯器 103,192 bytes）：它 re-spawn 真的
+        直譯器，而**不把 creationflags 轉傳下去** ⇒ 穿過它時 `DET|CNW` 才翻成「可見」。
+      · `CNW` 與 `NEWGRP|CNW` 是**唯二在四種載具上全部為 0** 的組合。
+    ⇒ 本規則守的是「在**本 repo 的載具上**這個組合實測會彈視窗」，不是「這兩個旗標語意
+    互斥」。要脫離父行程請用 `CREATE_NEW_PROCESS_GROUP`。
+
+    射程誠實劃界：上述重現依賴「venv 由 uv 建立」。走 `python -m venv` 回退路徑的 venv
+    是否同樣翻面，**未驗**——所以這條是本 repo 的載具規則，不得寫成平台常數。
+    """
+    problems: list[str] = []
+    for name, src in sorted(sources.items()):
+        if "DETACHED_PROCESS" not in src:
+            continue
+        try:
+            tree = ast.parse(src)
+        except SyntaxError:
+            continue
+        for call in _spawn_calls(tree):
+            text = _creationflags_text(call) or ""
+            if "DETACHED_PROCESS" in text and "CREATE_NO_WINDOW" in text:
+                problems.append(
+                    f"{name}:{call.lineno}：`creationflags={text}` 同時帶 DETACHED_PROCESS"
+                    " 與 CREATE_NO_WINDOW——在**本 repo 的載具上**實測會彈視窗（uv 建的"
+                    " venv `python.exe` 是 trampoline，不轉傳 creationflags；這是載具效應，"
+                    "不是旗標語意——真直譯器那一列 `DET|CNW` 是 0）。`CNW` 與 `NEWGRP|CNW`"
+                    " 是唯二四載具全 0 的組合，要脫離父行程請改用 CREATE_NEW_PROCESS_GROUP")
+    return problems
+
+
+class ConsoleFreeSpawnTest(unittest.TestCase):
+    """宣告集合內每一個 spawn 都帶 no-window 旗標 ＋ 全庫禁 `DETACHED|CNW`。"""
+
+    @staticmethod
+    def _sources() -> dict[str, str]:
+        paths = {"tools/session_resume_planner.py": _PLANNER}
+        for hook in sorted((_REPO_ROOT / ".claude" / "hooks").glob("*.py")):
+            paths[f".claude/hooks/{hook.name}"] = hook
+        return {rel: path.read_text(encoding="utf-8") for rel, path in paths.items()}
+
+    @staticmethod
+    def _live_python_sources() -> dict[str, str]:
+        """全庫規則的掃描面：活的 Python 樹（不含凍結版、快取、venv）。
+
+        以**文字預篩**（`DETACHED_PROCESS` 不在檔內就跳過）換掉全樹 AST——那條規則要抓的
+        東西必然帶這個字面，預篩不會漏，而全樹 parse 會讓這支鎖慢到有人想關掉它。
+        """
+        skip = {"__pycache__", ".venv", "venv", "node_modules", ".git",
+                ".pytest_cache", ".ruff_cache", ".mypy_cache"}
+        out: dict[str, str] = {}
+        for tree in ("tools", ".claude", "AutoClaude/autoclaude", "AutoClaude/tools"):
+            base = _REPO_ROOT / tree
+            if not base.is_dir():
+                continue
+            for path in base.rglob("*.py"):
+                if skip & set(path.relative_to(base).parts):
+                    continue
+                try:
+                    text = path.read_text(encoding="utf-8", errors="replace")
+                except OSError:
+                    continue
+                if "DETACHED_PROCESS" in text:
+                    out[path.relative_to(_REPO_ROOT).as_posix()] = text
+        return out
+
+    def test_the_scan_surface_has_not_silently_shrunk(self) -> None:
+        """分母棘輪。新增一支 hook 而沒進掃描面 ⇒ 它的 spawn 站點對本鎖隱形。"""
+        sources = self._sources()
+        self.assertGreaterEqual(
+            len(sources), _CONSOLE_FREE_FLOOR,
+            f"掃描面只有 {len(sources)} 支 < 下限 {_CONSOLE_FREE_FLOOR}（射程疑似縮小）："
+            f"{sorted(sources)}")
+        self.assertIn("tools/session_resume_planner.py", sources)
+        self.assertIn(".claude/hooks/context_budget_guard.py", sources)
+
+    def test_every_declared_spawn_site_carries_the_flag(self) -> None:
+        """現況控制組。R80 修前這一條會列出三站：planner 的 probe_quota／續跑、
+        以及 `sdd_hook_router` 的轉交（三者都由無 console 的父行程起）。"""
+        self.assertEqual(no_window_problems(self._sources()), [])
+
+    def test_a_missing_flag_is_actually_caught(self) -> None:
+        """注入自證①：拿掉旗標必須紅。少了這一條，上一條在判準被改壞時照樣綠。"""
+        self.assertTrue(no_window_problems(
+            {"x.py": "import subprocess\nsubprocess.run(['a'], check=False)\n"}))
+
+    def test_a_flag_that_is_not_a_no_window_flag_is_caught(self) -> None:
+        """注入自證②：帶了 `creationflags=` 但內容無關 ⇒ 仍然紅（「有設」≠「設對」）。"""
+        self.assertTrue(no_window_problems(
+            {"x.py": "import subprocess\nsubprocess.run(['a'], "
+                     "creationflags=subprocess.HIGH_PRIORITY_CLASS)\n"}))
+
+    def test_an_unparsable_file_is_not_silently_skipped(self) -> None:
+        """注入自證③：解析失敗算違規（fail-closed），不是「掃不到就算過」。"""
+        self.assertTrue(no_window_problems({"x.py": "def broken(:\n"}))
+
+    def test_a_correct_spawn_is_accepted(self) -> None:
+        """反向控制組：本鎖要人改成的那個樣子必須綠，否則它會逼人繞過。"""
+        self.assertEqual(no_window_problems(
+            {"x.py": "import subprocess\nsubprocess.run(['a'], check=False,\n"
+                     "               creationflags=guard.NO_WINDOW)\n"}), [])
+
+    def test_no_live_file_cancels_no_window_with_detached(self) -> None:
+        """全庫規則的現況控制組（R80 修前 `context_budget_guard.py` 會在這裡紅）。"""
+        self.assertEqual(detached_conflict_problems(self._live_python_sources()), [])
+
+    def test_the_detached_conflict_is_actually_caught(self) -> None:
+        """注入自證④：把「在本 repo 載具上實測會彈視窗」的那個組合寫回去，必須紅。
+
+        （措辭已隨 `detached_conflict_problems` 的理由一起訂正：被證偽的是「旗標語意
+        互斥」那個說法，不是這個組合會彈視窗這件事——後者仍是實測值。）"""
+        self.assertTrue(detached_conflict_problems(
+            {"x.py": "import subprocess\nsubprocess.Popen(['a'], creationflags=("
+                     'getattr(subprocess, "DETACHED_PROCESS", 0)\n'
+                     '    | getattr(subprocess, "CREATE_NO_WINDOW", 0)))\n'}))
+
+    def test_the_recommended_replacement_is_accepted(self) -> None:
+        """`CREATE_NEW_PROCESS_GROUP | CREATE_NO_WINDOW` 必須放行（實測 hwnd=0）。"""
+        self.assertEqual(detached_conflict_problems(
+            {"x.py": "import subprocess\nsubprocess.Popen(['a'], creationflags=("
+                     'getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)\n'
+                     '    | getattr(subprocess, "CREATE_NO_WINDOW", 0)))\n'}), [])
+
+
+#: 行為鎖的內層腳本。由 `pythonw.exe` 執行 ⇒ 本行程**沒有 console**，這正是 production
+#: 的條件（schtasks 的 Action 載具、以及 Claude Code 起 hook 的那一層）。
+#: 子行程**自報** `GetConsoleWindow()`。
+#: 🔴 刻意**不用 conhost 行程計數當判準**：那個判準在沒有桌面的環境（雲端／CI）上恆為
+#: 「沒有視窗」＝假綠，而假綠的方向剛好是「看起來已經修好了」。
+_BEHAVIOUR_PROBE = '''import ctypes, json, subprocess, sys
+from pathlib import Path
+CHILD = "import ctypes,sys;sys.stdout.write(str(ctypes.windll.kernel32.GetConsoleWindow()))"
+out, combos = Path(sys.argv[1]), json.loads(sys.argv[2])
+# argv[3]＝被測載具（省略時用 console 子系統的 python.exe——那是唯一「不帶旗標會真的
+# 開視窗」的載具，也就是唯一驗得出旗標效果的被測對象）。
+exe = sys.argv[3] if len(sys.argv) > 3 else str(Path(sys.executable).with_name("python.exe"))
+res = {"parent_has_no_console": ctypes.windll.kernel32.GetConsoleWindow() == 0, "cases": {}}
+for name, flags in combos.items():
+    p = subprocess.run([exe, "-c", CHILD], capture_output=True, encoding="utf-8",
+                       errors="replace", timeout=120, check=False, creationflags=flags)
+    res["cases"][name] = {"hwnd": (p.stdout or "").strip(), "rc": p.returncode,
+                          "stderr": (p.stderr or "")[:200]}
+out.write_text(json.dumps(res), encoding="utf-8")
+'''
+
+
+@unittest.skipUnless(
+    os.name == "nt",
+    "[WINDOWS-NATIVE-ONLY] console 配置是 Windows 專屬概念（POSIX 上 creationflags 恆為 0，"
+    "本鎖的判準在那裡沒有標的）——鐵律三：單平台判準不外推")
+class NoWindowBehaviourTest(unittest.TestCase):
+    """🔴 **行為**鎖，不是靜態掃描：真的從無 console 父行程 spawn，看子行程有沒有 console。
+
+    為何靜態掃描不夠：`ConsoleFreeSpawnTest` 只證「作者寫了那個旗標」，證不到「那個旗標
+    真的有效」。而 R80 的缺陷本體恰恰是**旗標有寫但被抵銷掉**（`DETACHED|CNW`）——那個
+    形態對任何「有沒有寫」的判準都是綠的。所以這一層量的是結果，不是意圖。
+    """
+
+    def setUp(self) -> None:
+        self.tmp = Path(tempfile.mkdtemp(prefix="nowin-behaviour-"))
+        self.pythonw = Path(sys.executable).with_name("pythonw.exe")
+        if not self.pythonw.is_file():
+            self.skipTest(f"[TOOL-ABSENCE] 這個直譯器旁沒有 pythonw.exe（{self.pythonw}）"
+                          "——無 console 父行程這個實驗條件建不起來，跳過比假綠正確")
+
+    def _measure(self, combos: dict[str, int]) -> dict:
+        out = self.tmp / "r.json"
+        script = self.tmp / "probe.py"
+        script.write_text(_BEHAVIOUR_PROBE, encoding="utf-8", newline="\n")
+        proc = subprocess.run(
+            [str(self.pythonw), str(script), str(out), json.dumps(combos)],
+            capture_output=True, encoding="utf-8", errors="replace",
+            timeout=300, check=False, creationflags=guard.NO_WINDOW)
+        self.assertTrue(out.is_file(),
+                        f"內層探針沒有產出結果（rc={proc.returncode}）：{proc.stderr[:300]}")
+        data = json.loads(out.read_text(encoding="utf-8"))
+        self.assertTrue(data["parent_has_no_console"],
+                        "父行程竟然有 console ⇒ 整個實驗條件不成立，這一組數字沒有意義")
+        return data["cases"]
+
+    def test_the_shipped_flag_really_suppresses_the_console(self) -> None:
+        """本體：`guard.NO_WINDOW` 之下子行程 `GetConsoleWindow()` 必須是 0。
+
+        控制組（不帶旗標）必須**有** console，否則本載具量不到這個缺陷，上一條斷言
+        就沒有鑑別力——一個永遠回 0 的壞載具看起來與修好一模一樣。
+
+        🔴 **子行程刻意用 `python.exe` 而不是 `pythonw.exe`**：後者是 GUI 子系統，在
+        六種旗標下**全部**都是 0（見 `guard.NO_WINDOW` 的矩陣第三、四列）⇒ 拿它當被測
+        對象，控制組也會是 0，整條測試恆綠。要驗「旗標那一層」就必須挑一個沒有旗標
+        時**真的會開視窗**的載具。
+        """
+        cases = self._measure({"shipped": guard.NO_WINDOW, "none": 0})
+        self.assertEqual(
+            cases["shipped"]["hwnd"], "0",
+            f"帶了 guard.NO_WINDOW 的子行程仍有 console（{cases['shipped']}）⇒ 會彈視窗")
+        self.assertNotEqual(
+            cases["none"]["hwnd"], "0",
+            f"控制組（不帶旗標）竟然也沒有 console：{cases['none']}——那表示本載具"
+            "量不到這個缺陷，上一條斷言沒有鑑別力")
+
+    def test_the_quiet_carrier_needs_no_flags_at_all(self) -> None:
+        """第二層（載具）**獨立於**第一層（旗標）成立：`pythonw.exe` 不帶任何旗標也是 0。
+
+        兩層各自成立才是本修復的設計：任一層被未來的人改掉，另一層仍撐得住。
+        🔴 這一條同時是 R80 訂正的憑據——我第一版把「`DETACHED_PROCESS` 抵銷
+        `CREATE_NO_WINDOW`」寫成旗標語意，實際上翻面的是**載具**（uv trampoline），
+        真直譯器那一列 `DET|CNW` 是 0。
+        """
+        quiet = Path(guard.quiet_python())
+        if quiet.name.lower() != "pythonw.exe":
+            self.skipTest(f"[TOOL-ABSENCE] 這個直譯器旁沒有 pythonw.exe（解析到 {quiet}）")
+        out = self.tmp / "q.json"
+        script = self.tmp / "probe_q.py"
+        script.write_text(_BEHAVIOUR_PROBE, encoding="utf-8", newline="\n")
+        proc = subprocess.run(
+            [str(self.pythonw), str(script), str(out), json.dumps({"bare": 0}),
+             str(quiet)],
+            capture_output=True, encoding="utf-8", errors="replace",
+            timeout=300, check=False, creationflags=guard.NO_WINDOW)
+        self.assertTrue(out.is_file(), f"探針沒有產出（rc={proc.returncode}）{proc.stderr[:200]}")
+        data = json.loads(out.read_text(encoding="utf-8"))
+        self.assertEqual(data["cases"]["bare"]["hwnd"], "0",
+                         f"安靜載具在零旗標下仍有 console：{data['cases']['bare']}")
+
+    def test_suppressing_the_window_does_not_cost_observability(self) -> None:
+        """抑制視窗不得以「拿不到 rc／stderr」為代價——否則排程那一跑會變成黑箱。"""
+        cases = self._measure({"shipped": guard.NO_WINDOW})
+        self.assertEqual(cases["shipped"]["rc"], 0)
+
+
+class UnhandledLimitDetectionTest(unittest.TestCase):
+    """🔴 R80 P0：哨兵整晚失明那一格的回歸鎖（事故見 `unhandled_limit_event` 上方 WHY）。
+
+    被守的性質有三條，每一條都對應一個**已實際發生過**的失效：
+      ① 「已處理」必須是**證據**（事後真的有成功 API 回應），不是推論。舊判準的推論
+         逐字是「我跑得動武裝指令 ⇒ 額度是通的」，而武裝是零 API 呼叫的本機 subprocess
+         ⇒ 那句話恆真、與額度無關。實證：撞線後 2 分鐘就被標成已解決。
+      ② 偵測面必須含 subagent（扇出模式下撞線主要打在那裡）。
+      ③ 必須看**所有**未處理事件，不是只看最後一筆——本次事故裡最後一筆是 `quota_spend`，
+         把更早、仍未解決的 `quota_session` 整個蓋掉。
+    """
+
+    def setUp(self) -> None:
+        self.tmp = Path(tempfile.mkdtemp(prefix="unhandled-"))
+        self.main = self.tmp / "sid.jsonl"
+
+    @staticmethod
+    def _limit(ts: str, text: str) -> str:
+        return json.dumps({"type": "assistant", "timestamp": ts,
+                           "message": {"model": guard.SYNTHETIC_MODEL,
+                                       "content": [{"text": text}]}})
+
+    @staticmethod
+    def _ok(ts: str) -> str:
+        """一則成功回應＝真 model ＋ 有 usage（伺服器真的計費回來的證據）。"""
+        return json.dumps({"type": "assistant", "timestamp": ts,
+                           "message": {"model": "claude-opus-5",
+                                       "usage": {"input_tokens": 5}}})
+
+    def _write(self, path: Path, lines: list[str]) -> None:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text("\n".join(lines) + "\n", encoding="utf-8", newline="\n")
+
+    def test_an_event_with_no_later_success_is_unhandled(self) -> None:
+        """基本方向：撞線之後再也沒有成功回應 ⇒ 未處理。"""
+        self._write(self.main, [self._ok("2026-08-07T18:00:00Z"),
+                                self._limit("2026-08-07T18:36:53Z", _REAL_SESSION_LIMIT)])
+        event = guard.unhandled_limit_event(self.main)
+        self.assertIsNotNone(event, "撞線後零成功回應，卻判成已處理")
+        self.assertEqual(event["kind"], guard.LIMIT_SESSION)
+
+    def test_a_later_success_marks_it_handled(self) -> None:
+        """反向：撞線之後有成功回應 ⇒ 已解決，不得再叫醒任何人。
+        這一條就是 0% 假陽性的來源（歷史 257 筆事件全數落在這一格）。"""
+        self._write(self.main, [self._limit("2026-08-07T18:36:53Z", _REAL_SESSION_LIMIT),
+                                self._ok("2026-08-07T19:00:00Z")])
+        self.assertIsNone(guard.unhandled_limit_event(self.main))
+
+    def test_a_subagent_transcript_is_in_scope(self) -> None:
+        """②：撞線只打在 subagent 身上時也要看得見。
+
+        `latest_limit_event`（舊來源）只吃主逐字稿一支檔 ⇒ 這一條在它身上必然失敗。
+        """
+        self._write(self.main, [self._ok("2026-08-07T18:00:00Z")])
+        self._write(self.main.with_suffix("") / "subagents" / "workflows" / "wf_1"
+                    / "agent-x.jsonl",
+                    [self._limit("2026-08-07T18:36:53Z", _REAL_SESSION_LIMIT)])
+        event = guard.unhandled_limit_event(self.main)
+        self.assertIsNotNone(event, "subagent 逐字稿裡的撞線沒被看見（扇出模式全盲）")
+        self.assertEqual(event["source"], "agent-x.jsonl")
+        self.assertIsNone(guard.latest_limit_event(self.main),
+                          "控制組：舊來源理應看不到它——看得到就表示本測試沒有鑑別力")
+
+    def test_a_spend_event_does_not_mask_an_earlier_session_event(self) -> None:
+        """③：本次事故的逐字重建。主逐字稿最後一筆是月度上限，而更早那筆 session
+        額度仍未解決；只看最後一筆會回 spend ⇒ 走 escalate，而真正該做的是等 6:50am。"""
+        self._write(self.main, [
+            self._ok("2026-08-07T18:30:00Z"),
+            self._limit("2026-08-07T18:36:53Z", _REAL_SESSION_LIMIT),
+            self._limit("2026-08-07T18:40:00Z", _REAL_SPEND_LIMIT)])
+        event = guard.unhandled_limit_event(self.main)
+        self.assertEqual(event["kind"], guard.LIMIT_SESSION,
+                         "取到的是最後一筆（spend）而不是最早那筆未處理的 session 額度")
+        self.assertEqual(guard.latest_limit_event(self.main)["kind"], guard.LIMIT_SPEND,
+                         "控制組：舊來源確實會被 spend 蓋掉（這就是事故本體）")
+
+    def test_success_evidence_requires_real_usage_not_just_a_record(self) -> None:
+        """①的鑑別力：合成錯誤訊息本身**不算**成功回應，否則撞線會自己證明自己已解決。"""
+        self._write(self.main, [
+            self._limit("2026-08-07T18:36:53Z", _REAL_SESSION_LIMIT),
+            self._limit("2026-08-07T18:40:00Z", _REAL_SESSION_LIMIT)])
+        self.assertEqual(guard.latest_success_at([self.main]), "",
+                         "把合成記錄當成功證據 ⇒ 每次撞線都會立刻自我標記為已解決")
+        self.assertIsNotNone(guard.unhandled_limit_event(self.main))
+
+    def test_liveness_looks_at_subagent_activity_too(self) -> None:
+        """存活判準：扇出時主逐字稿可能很久沒被寫，只看它會把狂跑中的 session 誤判成
+        閒置，而閒置到門檻就會**自我解除**（哨兵在最忙的時候把自己拆掉）。"""
+        self._write(self.main, [self._ok("2026-08-07T18:00:00Z")])
+        sub = self.main.with_suffix("") / "subagents" / "agent-y.jsonl"
+        self._write(sub, [self._ok("2026-08-07T18:10:00Z")])
+        old = time.time() - 5000
+        os.utime(self.main, (old, old))
+        paths = guard.session_transcripts(self.main)
+        self.assertIn(sub, paths, "subagent 檔沒進掃描面")
+        self.assertGreater(guard.newest_activity_at(paths), old + 1,
+                           "存活判準只看主逐字稿 ⇒ 忙碌的 session 會被判成閒置")
+
+    def test_the_age_gate_is_a_cost_gate_not_a_judgement(self) -> None:
+        """成本閘的雙邊帶：預設窗（24h）遠大於一個額度視窗（實測最長 3.6h），所以它
+        不會濾掉真的未處理事件；但把窗縮到 0 就該濾掉——證明那個參數真的在作用。"""
+        self._write(self.main, [self._limit("2026-08-07T18:36:53Z", _REAL_SESSION_LIMIT)])
+        self.assertIsNotNone(guard.unhandled_limit_event(self.main))
+        far = time.time() + 10 * 86400
+        self.assertEqual(guard.session_transcripts(self.main, 1.0, far), [self.main],
+                         "成本閘對主逐字稿不生效（它一律納入，否則整條鏈沒有地板）")
+
+    # 🔴 R80-SD-01：P0 修復自己引入的**反向**靜默自毀。
+    # `<synthetic>` 是 harness 對**所有**合成訊息的共同標記，不是額度事件的指紋——
+    # `API Error` 與 `[Request interrupted by user]` 都長這樣。第一版把任何沒有後續成功
+    # 回應的合成記錄都登記成候選 ⇒ 一個以中斷／API 錯誤收尾的 session（常態，不是例外）
+    # 會被判成未處理撞線 → `sentinel_decide` 解不出 reset → `escalate` → **哨兵自我刪除**。
+    # 舊病是「該醒不醒」，新病是「不該死卻自我刪除」，兩者同樣靜默：痕跡只多一行
+    # `sentinel_escalate`，`Get-ScheduledTask` 查不到那支工作，與正常下班外觀相同。
+    # 註解裡那個 0.0% 假陽性是**橫斷面**（單一時點 257 支檔），量不到這個**縱向**情境。
+    def test_a_non_quota_synthetic_message_is_not_a_hit(self) -> None:
+        """注入自證：整支逐字稿只有 API 錯誤／使用者中斷 ⇒ 必須回 `None`。
+
+        把 `unhandled_limit_event` 裡的 kind 篩選拿掉，這一條當場紅（實測：拿掉後
+        回傳 kind=`transient` 的候選，`_sentinel_tick` 隨即走 escalate 並刪掉哨兵）。
+        """
+        self._write(self.main, [
+            self._ok("2026-08-07T18:00:00Z"),
+            self._limit("2026-08-07T18:36:53Z", "API Error: Connection error."),
+            self._limit("2026-08-07T18:40:00Z", "[Request interrupted by user]")])
+        self.assertIsNone(
+            guard.unhandled_limit_event(self.main),
+            "非額度的合成訊息被當成撞線 ⇒ 哨兵會走 escalate 把自己刪掉（反向自毀）")
+
+    def test_that_corpus_makes_the_sentinel_patrol_not_escalate(self) -> None:
+        """把上一條接到**決策**那一層：同一份語料下哨兵必須續巡，而不是自我解除。
+
+        只鎖偵測層不夠——SD-01 的傷害發生在 `sentinel_decide` 之後（`escalate` 會
+        `_schtasks_remove`）。這一條釘住那條路徑整條不得被走到。
+        """
+        self._write(self.main, [
+            self._ok("2026-08-07T18:00:00Z"),
+            self._limit("2026-08-07T18:40:00Z", "[Request interrupted by user]")])
+        decision = planner.sentinel_decide(
+            guard.unhandled_limit_event(self.main), "", 10.0,
+            datetime(2026, 8, 7, 19, 0, tzinfo=UTC).astimezone(_TAIPEI))
+        self.assertEqual(decision["action"], "patrol",
+                         f"一則中斷訊息就讓哨兵下班了：{decision['reason']}")
+
+    def test_a_real_quota_hit_in_the_same_shape_still_fires(self) -> None:
+        """鑑別力反證：篩選不是靠「一律回 None」拿到上面兩條的綠。
+
+        同一個形狀、只把文字換成真實的 session limit 語料 ⇒ 必須抓得到。
+        """
+        self._write(self.main, [
+            self._ok("2026-08-07T18:00:00Z"),
+            self._limit("2026-08-07T18:36:53Z", "API Error: Connection error."),
+            self._limit("2026-08-07T18:40:00Z", _REAL_SESSION_LIMIT)])
+        event = guard.unhandled_limit_event(self.main)
+        self.assertIsNotNone(event, "篩選把真的撞線一起濾掉了（過度修正）")
+        self.assertEqual(event["kind"], guard.LIMIT_SESSION)
+        self.assertEqual(event["timestamp"], "2026-08-07T18:40:00Z",
+                         "取到的是被濾掉的那筆 transient，而不是真的撞線")
+
+
+# ════════════════════ R80：時區框架（act 在 Linux 容器抓到、Windows 本機看不見的兩個紅）
+# 缺陷本體：`resets 9am` 是一個**牆上時刻**，舊實作拿**機器的**本地時區去解它，而
+# `now` 由呼叫端給 ⇒ 同一份語料有兩個框架。act 實跑逐字：
+#   FAIL: SentinelDecisionTest.test_a_pending_hit_whose_reset_already_passed_spends_one_probe
+#         AssertionError: 'arm_reset' != 'probe'
+# 容器是 UTC、本機是 UTC+8，「reset 過了沒」整個翻面。修法是把框架收成**一個**，
+# 且優先採用**訊息自報**的時區（`… (Asia/Taipei)`）——那是資料自己回答的，與機器無關。
+class ResetFrameIsNotTheMachineClockTest(unittest.TestCase):
+    """同一份語料 ＋ 同一個**絕對時刻** ⇒ 判定必須一致，不論它被表示成哪個時區。"""
+
+    #: 三個框架（同一個瞬間的三種寫法）。production 傳的是
+    #: `datetime.now().astimezone()`＝機器時區的那一種寫法，所以「換一台時區不同的機器」
+    #: 在這一層就等於「換一個 tzinfo 來表示同一個瞬間」。
+    _FRAMES = (UTC, timezone(timedelta(hours=8)), timezone(timedelta(hours=-4)))
+
+    #: 語料固定：事件錨在 `2026-08-07T00:44:01Z`、訊息說 `resets 9am (Asia/Taipei)`。
+    #: 觀測時刻刻意取得夠早（Aug 6 中午 UTC），讓三個框架**都**落在 `arm_reset` 那一支
+    #: ——這樣 `reset_at` 在每一格都存在，判準才比得到「框架是誰」而不是撞上 KeyError。
+    _INSTANT = datetime(2026, 8, 6, 12, 0, tzinfo=UTC)
+
+    def _decisions(self) -> list[dict]:
+        event = _sentinel_event(guard.LIMIT_SESSION, _REAL_SESSION_LIMIT)
+        return [planner.sentinel_decide(event, "", 10.0, self._INSTANT.astimezone(frame))
+                for frame in self._FRAMES]
+
+    def test_the_frame_is_a_function_of_the_message_and_now_only(self) -> None:
+        """🔴 核心判準（兩平台都有牙）：`reset_at` 的框架只能來自①訊息自報的時區，
+        或②`now` 的時區——**絕不能**來自這台機器的時鐘。
+
+        優先序在兩個平台上會走到不同的那一格，所以期望值也照著算，而不是寫死一個數字：
+          · 有 tz 資料庫（Linux／macOS 容器）⇒ 三格都該是 `Asia/Taipei`；
+          · 沒有（Windows，本機實測 `ZoneInfoNotFoundError`，且不得為此新增 `tzdata`
+            相依）⇒ 每一格該是**該格 `now` 的時區**。
+        注入自證：把 `sentinel_decide` 裡的 `local_time(event["timestamp"], now.tzinfo)`
+        改回 `local_time(event["timestamp"])`（＝讀機器時區），本機（UTC+8）的 UTC 那一格
+        會由 `09:00+00:00` 變回 `09:00+08:00` ⇒ 當場紅。這就是 act 在 UTC 容器抓到、
+        而本機結構上看不見的那個缺陷。
+        """
+        declared = guard.declared_zone(_REAL_SESSION_LIMIT)
+        for frame, decision in zip(self._FRAMES, self._decisions(), strict=True):
+            with self.subTest(frame=str(frame)):
+                self.assertEqual(decision["action"], "arm_reset")
+                want = self._INSTANT.astimezone(declared or frame).utcoffset()
+                self.assertEqual(
+                    decision["reset_at"].utcoffset(), want,
+                    "reset 的時區框架不是「訊息自報／now」而是機器時鐘——同一份語料"
+                    "換一台機器就會得到不同的絕對時刻（act 逐字：'arm_reset' != 'probe'）")
+
+    def test_the_declared_zone_makes_three_machines_agree(self) -> None:
+        """訊息自報時區可解析時，三個框架必須給出**完全相同的絕對時刻**（機器無關）。
+
+        🔴 誠實劃界（不粉飾）：Windows 上沒有 tz 資料庫，這一條走 else 分支，斷言的是
+        **已載明的退路**——框架退回 `now` 的時區（那正是 harness 算繪那個字串時用的時區），
+        於是三格本來就不會一致。兩個分支都有斷言、都會跑，沒有一格是靜默放行；
+        上一條測試才是在兩個平台都咬得住的那一支。
+        """
+        moments = {d["reset_at"] for d in self._decisions()}
+        if guard.declared_zone(_REAL_SESSION_LIMIT) is not None:
+            self.assertEqual(len(moments), 1,
+                             f"同一個瞬間換個時區寫法就得到不同的 reset：{moments}")
+        else:
+            self.assertEqual(len(moments), 3,
+                             "無 tz 資料庫時三格本該各自落在自己的框架——若已一致，"
+                             "代表框架其實來自別的地方（很可能又是機器時鐘）")
+
+    def test_the_returned_moment_always_carries_an_offset(self) -> None:
+        """「讓時刻一律帶 offset」：naive 進來也必須 aware 出去。
+
+        naive 的牆上時刻一旦被 `isoformat()` 持久化就再也分不出它屬於哪個框架，讀回來
+        相減會在 DST 跳點上整整差 3600 秒（掃描 S4-07）。這裡連 naive 入口一起堵住。
+        """
+        naive = datetime(2026, 8, 7, 8, 44)
+        self.assertIsNotNone(guard.parse_reset_at(_REAL_SESSION_LIMIT, naive).tzinfo,
+                             "naive 進 naive 出 ⇒ 持久化之後框架就永久遺失了")
+
+    def test_the_schedule_string_is_converted_before_the_offset_is_dropped(self) -> None:
+        """`strftime` 會無聲丟掉 offset，而 schtasks 一律以**機器本地**解讀那個字串。
+
+        所以送出去之前必須先換算到本機框架。注入自證：拿掉 `at.astimezone()`，
+        以非本機時區的 `at` 呼叫時註冊出去的牆上時刻會差掉時差（排程醒在錯的時刻，
+        而 `NextRunTime` 照樣拿得到＝取證規則全綠的假綠）。
+        """
+        seen: list[str] = []
+        original = planner._register_at_expr
+        planner._register_at_expr = lambda *a: (seen.append(a[2]), (0, "x"))[1]
+        try:
+            at = datetime(2026, 8, 7, 1, 0, tzinfo=UTC)
+            planner.register_endurance({"plan_path": "p", "task_name": "t"}, at)
+        finally:
+            planner._register_at_expr = original
+        self.assertEqual(seen, [f"'{at.astimezone().strftime('%Y-%m-%d %H:%M:%S')}'"],
+                         "註冊出去的牆上時刻不是本機框架的 ⇒ 排程會醒在錯的時刻")
 
 
 if __name__ == "__main__":

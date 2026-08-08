@@ -31,23 +31,28 @@ R37 抽出 `tools/lib/WindowsAppsGuard.ps1::Test-IsRealPython` 共用函式（�
 from __future__ import annotations
 
 import ast
-import functools
 import os
 import re
-import shutil
 import subprocess
 import sys
 import tempfile
 import unittest
-from pathlib import Path, PureWindowsPath
+from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+# 🔴 R80 S5-03：`_bash_exe()` 原本在本檔獨立寫一份，docstring 逐字宣稱那是「各消費者
+# 獨立重寫」的架構慣例。實測：本檔那份與 `test_windowsapps_guard_bash_parity.py` 的
+# 同名函式是同一段程式碼的兩份手抄，且**已經漂移**——本檔寫 `except OSError`、對面寫
+# `except Exception`。`subprocess.TimeoutExpired` 繼承 `SubprocessError` 而不是
+# `OSError` ⇒ 候選一旦卡住，本檔那份會讓例外逸出、module import 期就炸，對面那份會
+# 安靜換下一個候選。兩份的行為分歧沒有任何一支測試在比對，也就是說「獨立重寫」在這裡
+# 只買到兩種失敗模式。兩份收斂至既有 SSOT。
+from _platform_helpers import usable_bash_for_fixture as _bash_exe  # noqa: E402
 from _ps_engine import production_engine  # noqa: E402  # R60 DEF-101-548：引擎述詞 SSOT
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 
 sys.path.insert(0, str(_REPO_ROOT / "tools" / "lib"))
-import bash_probe_spec as _spec  # noqa: E402  # R32 驗活探測「參數」SSOT
 import sdd_latest  # noqa: E402
 
 _BOOTSTRAP_PS1 = _REPO_ROOT / "tools" / "bootstrap.ps1"
@@ -1793,49 +1798,6 @@ def _write_verdict_samples(td: str) -> Path:
     path = Path(td) / "verdict_cases.txt"
     path.write_bytes(("\n".join(_case_inputs()) + "\n").encode("ascii"))
     return path
-
-
-@functools.lru_cache(maxsize=1)
-def _bash_exe() -> str | None:
-    """本機一個「真正可用」的 bash（無則 None ⇒ bash 側誠實 skip）。
-
-    候選蒐集與驗活邏輯比照 `tools/tests/test_windowsapps_guard_bash_parity.py::
-    _bash_exe()` **獨立重寫**（`tools/lib/bash_probe_spec.py` 檔頭載明的架構慣例：
-    各消費者只共用資料規格常數、執行邏輯各自獨立寫，以免共用函式壞掉時所有回歸鎖
-    同時失效；R64／DEF-101-618 (b)）。必須排除 System32 佔位版：那是 WSL 啟動器，
-    不是 Git Bash。
-    """
-    candidates: list[str] = []
-    git = shutil.which("git")
-    if git:
-        for up in list(Path(git).resolve().parents)[:4]:
-            for sub in ("usr/bin/bash.exe", "bin/bash.exe"):
-                cand = up / sub
-                if cand.exists():
-                    candidates.append(str(cand))
-    bare = shutil.which("bash")
-    if bare and not any(
-        part.lower() == _spec.SYSTEM32_SEGMENT for part in PureWindowsPath(bare).parts
-    ):
-        candidates.append(bare)
-    for cand in candidates:
-        try:
-            result = subprocess.run(
-                [cand, "-c", _spec.PROBE_CMD],
-                capture_output=True, text=True, encoding="utf-8",
-                errors="replace", timeout=15,
-            )
-        except OSError:
-            continue
-        lines = result.stdout.splitlines()
-        if (
-            result.returncode == 0
-            and len(lines) >= 2
-            and lines[0].strip() == _spec.PROBE_EXPECT_ECHO
-            and lines[1].strip() == _spec.PROBE_EXPECT_DIRNAME
-        ):
-            return cand
-    return None
 
 
 def _run_verdict_driver(argv: list[str], timeout: int) -> subprocess.CompletedProcess[str]:

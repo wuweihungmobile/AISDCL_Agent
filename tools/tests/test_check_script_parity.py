@@ -12,6 +12,7 @@
 from __future__ import annotations
 
 import atexit
+import contextlib
 import re
 import shutil
 import sys
@@ -129,7 +130,6 @@ class TestSingleSidedEnrollment(unittest.TestCase):
         latest_tools.mkdir(parents=True, exist_ok=True)
         return (
             mock.patch.object(m, "_REPO_ROOT", fake_root),
-            mock.patch.object(m, "_MARKER_PAIRS", []),
             mock.patch.object(m, "_THINNESS_ENROLLED", set()),
             mock.patch.object(m, "_EXEMPT_PAIRS", {}),
             mock.patch.object(m, "_SINGLE_SIDED_EXEMPT", single_exempt),
@@ -137,9 +137,14 @@ class TestSingleSidedEnrollment(unittest.TestCase):
         )
 
     def _run_enrollment(self, fake_root: Path, single_exempt: dict[str, str]):
-        patches = self._patched(fake_root, single_exempt)
-        with patches[0], patches[1], patches[2], patches[3], patches[4], patches[5], \
-             mock.patch("builtins.print") as fake_print:
+        # 🔴 R80 S5-05：原本逐一寫 `patches[0]…patches[5]` 六個索引。`_patched()` 少回一個
+        # 元素（本輪刪掉已死的 _MARKER_PAIRS 名冊）時，這裡是 IndexError 而不是有意義的
+        # 紅燈——索引數字是這個 helper 與它的生產者之間第二個必須手動同步的家。改用
+        # ExitStack 依實際長度展開，數量從此只有一個家。
+        with contextlib.ExitStack() as stack:
+            for patch in self._patched(fake_root, single_exempt):
+                stack.enter_context(patch)
+            fake_print = stack.enter_context(mock.patch("builtins.print"))
             ok = m._check_pair_enrollment()
         printed = " ".join(
             str(arg) for call in fake_print.call_args_list for arg in call.args
@@ -277,7 +282,6 @@ class TestLatestToolsEnrollment(unittest.TestCase):
         (deep / "rogue.sh").write_text("#!/bin/sh\n", encoding="utf-8")
         (deep / "rogue.ps1").write_text("# x\n", encoding="utf-8")
         with mock.patch.object(m, "_REPO_ROOT", fake_root), \
-             mock.patch.object(m, "_MARKER_PAIRS", []), \
              mock.patch.object(m, "_THINNESS_ENROLLED", set()), \
              mock.patch.object(m, "_EXEMPT_PAIRS", {}), \
              mock.patch.object(m, "_SINGLE_SIDED_EXEMPT", {}), \

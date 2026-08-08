@@ -59,7 +59,7 @@ class FakeSdkClient:
         self.interrupt_called = False
         self.query_prompts: list[str] = []
 
-    async def __aenter__(self) -> "FakeSdkClient":
+    async def __aenter__(self) -> FakeSdkClient:
         return self
 
     async def __aexit__(self, *exc) -> bool:
@@ -180,8 +180,35 @@ def test_result_message_is_error_maps_exit_code_1():
 # ─────────────────────────────────────────────────────────────────────
 # R-68-3：can_use_tool 接注入 allowlist（安全閘不繞過、fail-closed）
 # ─────────────────────────────────────────────────────────────────────
+# 🔴 R80 包 A（S3-05）：下面三支需要**真** `PermissionResult` 型別，故無法以假物件替代
+# （用假型別就等於不驗那個 isinstance 斷言，而那正是它們的全部價值）。
+# 它們此前用裸 `pytest.importorskip("claude_agent_sdk")`，產出的 skip 理由是 pytest 自動
+# 生成的 `could not import 'claude_agent_sdk': …` ⇒ **不帶任何標籤**，落進 `untagged` 群，
+# 而 `untagged` 的意思是「還沒有人說得出這支為什麼不跑」。實際上說得出來，而且說得很精確：
+# 這個套件住在 `[sdk]` extra 裡，而 `tools/bootstrap_core.py` 的安裝 target 逐字是
+# `.[dev,notifications,lint]` ⇒ **走 bootstrap 建立的環境結構上永遠拿不到它**，
+# 不是「這台機器剛好沒裝」。改成具名 skipif ＋ `[TOOL-ABSENCE]` 標籤 ＋ 可直接複製的
+# 安裝指令：分群從 untagged 移到 tool-absence（可歸零的那一半），理由本身也變成配方。
+# 🔴 載具刻意仍是 `pytest.importorskip`（帶 `reason=`）而**不是**改寫成 `skipif` 裝飾器：
+# 後者在 `skip_tag_policy._SITE_CLASS_CENSUS` 那張站點普查表上是**新的一個站點**
+# （tool-absence 16→17），而那張表住在本包持有面之外的檔案裡 ⇒ 一個純粹的訊息改善會
+# 連帶要求改別人的檔，並在改到之前讓根層閘門紅。`importorskip(..., reason=…)` 拿到
+# 一模一樣的 runtime 效果、站點形態零變動——**選載具時要先問它會不會動到別人的判準面**。
+_SDK_SKIP_REASON = (
+    "[TOOL-ABSENCE] 需要 claude-agent-sdk（選配 `[sdk]` extra；本測試要真的 "
+    "PermissionResultAllow／Deny 型別，換成假物件等於不驗那個 isinstance 斷言）。"
+    "🔴 這不是「這台機器剛好沒裝」——tools/bootstrap_core.py 的安裝 target 是 "
+    "`.[dev,notifications,lint]`，不含 sdk ⇒ 走 bootstrap 的環境一律拿不到。"
+    "跑法：在 AutoClaude/ 執行 `uv pip install -e '.[sdk]'` 後重跑本檔"
+)
+
+
+def _require_sdk() -> None:
+    pytest.importorskip("claude_agent_sdk", reason=_SDK_SKIP_REASON)
+
+
 def test_can_use_tool_predicate_wired_and_consulted():
-    pytest.importorskip("claude_agent_sdk")  # 需真 PermissionResult 型別
+    _require_sdk()
     consulted: list = []
 
     def predicate(tool_name: str, tool_input: dict) -> bool:
@@ -211,7 +238,7 @@ def test_can_use_tool_predicate_wired_and_consulted():
 
 
 def test_can_use_tool_predicate_exception_fail_closed():
-    pytest.importorskip("claude_agent_sdk")
+    _require_sdk()
 
     def boom(tool_name: str, tool_input: dict) -> bool:
         raise RuntimeError("predicate 故障")
@@ -266,7 +293,7 @@ def test_build_predicate_empty_list_denies_all():
 
 def test_build_predicate_injected_denies_unlisted_via_sdk_hook():
     """整合：注入 builder 產的 predicate → SDK hook 對清單外工具回 Deny（fail-closed 一致）。"""
-    pytest.importorskip("claude_agent_sdk")
+    _require_sdk()
     pred = build_tool_allowlist_predicate(["Read"])  # 僅放行 Read
     fake = FakeSdkClient(messages=[ResultMessage()])
     captured: dict = {}

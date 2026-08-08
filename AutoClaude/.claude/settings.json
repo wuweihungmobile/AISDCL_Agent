@@ -1,6 +1,6 @@
 {
   "$schema": "https://json.schemastore.org/claude-code-settings.json",
-  "_comment": "SD_09 W0 三次 zero-trust audit 後建立的 Hook 治理；哲學：Hook 僅補強 LLM 行為，不替代 CLAUDE.md prompt 規範。env.PYTHONUTF8=1 為 zh-TW Windows（cp950）防禦縱深：強制 hook 子行程 stdin/stdout/stderr 一律 UTF-8，跨平台無副作用。hook command 以 python -c shim 錨定專案根（python 自行讀 CLAUDE_PROJECT_DIR，不經 shell 展開故 Windows cmd 亦可用；缺檔 fail-open exit 0）——修復 cwd≠專案根時 python 缺檔 exit 2 誤觸 PreToolUse deny 之 P0（四方複審第四輪）。",
+  "_comment": "🔴 R80 QA-03 射程告示：本檔的 6 條 hook **仍是 shell form**（只有 `command`、沒有 `args`）。R80 把 hook 條目轉成 exec form 以治「Windows 上每觸發一次 hook 就閃一個 console 視窗」，但**只轉了 monorepo 根層那一份 `.claude/settings.json`**——所以在 AutoClaude 子專案 session 下，閃窗一次都沒少。這不是被遺忘的事：`tools/lib/hook_wiring.py` 的 `SHELL_FORM_CENSUS` 把本檔登記為「6 條未轉」，判準是相等（多一條＝退步、轉好了卻沒下修基準也紅），回歸鎖 `tools/tests/test_check_hooks_liveness.py::TestExecFormConversionScope`。轉換本檔留給下一輪；轉換時要連同根層那套一起走：exec form 的 command 只能是一個執行檔路徑（塞不進 `python -c` 那段程式碼），故必須改用 `.claude/hooks/_hook_launcher.py`，且每個邏輯 hook 要成對宣告「Windows 載具 + POSIX 載具」（少一邊會在該平台靜默失去 hook，而 spawn 失敗是 fail-open、不會有任何東西轉紅）。SD_09 W0 三次 zero-trust audit 後建立的 Hook 治理；哲學：Hook 僅補強 LLM 行為，不替代 CLAUDE.md prompt 規範。env.PYTHONUTF8=1 為 zh-TW Windows（cp950）防禦縱深：強制 hook 子行程 stdin/stdout/stderr 一律 UTF-8，跨平台無副作用。hook command 以 python -c shim 錨定專案根（python 自行讀 CLAUDE_PROJECT_DIR，不經 shell 展開故 Windows cmd 亦可用；缺檔 fail-open exit 0）——修復 cwd≠專案根時 python 缺檔 exit 2 誤觸 PreToolUse deny 之 P0（四方複審第四輪）。",
   "env": {
     "PYTHONUTF8": "1"
   },

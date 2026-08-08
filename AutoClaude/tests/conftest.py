@@ -113,9 +113,79 @@ def _local_ci_gate():
     return module
 
 
+# ── R80 包 A（S3-06）：`AUTOCLAUDE_TEST_PG_DSN` 的形態驗證 ─────────────────────
+#
+# 🔴 缺陷本體（當回合逐檔實查）：這一個環境變數有**兩類驅動需求互斥**的消費端，而全 repo
+# 對它零驗證：
+#   · 非同步端（`tests/contract/test_pg_state_repository_contract.py:47`、
+#     `test_pg_existing_schema_lock.py` 的 CRUD 快照）把它原封不動餵給
+#     `sqlalchemy.ext.asyncio.create_async_engine` ⇒ **必須**帶 async driver（`+asyncpg`）；
+#   · 同步端（`tests/contract/test_alembic_00*.py`、conftest 的 `_resolve_real_pg_dsn`）
+#     一律先 `re.sub(r"\+asyncpg", "", raw)` 再交給 psycopg2 ⇒ 帶不帶都能跑。
+# ⇒ 兩端的交集只有「帶 `+asyncpg`」這一種寫法，而那件事只寫在文件裡、沒有任何東西在驗。
+# 照文件以外的**合法** DSN 形態設值（`postgresql://user:pass@host/db`，psycopg2 與
+# libpq 都吃得下）時，非同步端那一批會在 fixture setup 硬炸，訊息由 SQLAlchemy 發出、
+# 指向 driver 選型，**完全不提這個環境變數或這個 repo** ⇒ 使用者要自己從 SQLAlchemy 的
+# 錯誤反推回「原來是我 export 的字串少了四個字」。
+# 本函式把那個反推變成一句話，並且在**收集之前**就講（晚一步就變成 N 支 error 而不是一則指引）。
+_ASYNC_DRIVERS = ("+asyncpg", "+psycopg", "+aiopg")
+
+
+def pg_dsn_problems(dsn: str | None, *, require_async: bool = True) -> list[str]:
+    """純函式（無 I/O、無副作用）：這個 DSN 形態會不會讓非同步消費端在 setup 硬炸。
+
+    回空 list ＝可用。刻意只驗「非同步端一定會踩到」的那一點，不做通用 URL 驗證——
+    多驗一點就會開始誤擋合法寫法，而誤擋的成本比漏擋高（沒設 DSN 本來就只是 skip）。
+    """
+    if not dsn:
+        return []
+    if not dsn.startswith(("postgresql", "postgres")):
+        return [
+            f"AUTOCLAUDE_TEST_PG_DSN／AUTOCLAUDE_DB_DSN 的 scheme 不是 postgresql：{dsn!r}"
+        ]
+    if require_async and not any(drv in dsn for drv in _ASYNC_DRIVERS):
+        return [
+            f"AUTOCLAUDE_TEST_PG_DSN／AUTOCLAUDE_DB_DSN 少了 async driver：{dsn!r}\n"
+            "   這個變數同時餵給兩類消費端，而它們的驅動需求互斥：\n"
+            "     · 非同步端（tests/contract/test_pg_state_repository_contract.py 等）"
+            "直接把它交給 sqlalchemy create_async_engine，**必須**帶 async driver；\n"
+            "     · 同步端（tests/contract/test_alembic_00*.py）會自己 strip 掉 `+asyncpg`，"
+            "帶不帶都能跑。\n"
+            "   ⇒ 兩端的交集只有一種寫法。修法（把 `postgresql://` 改成 `postgresql+asyncpg://`）：\n"
+            f"     $env:AUTOCLAUDE_TEST_PG_DSN = '{_with_asyncpg(dsn)}'\n"
+            "   不修的話那一批會在 fixture setup 硬炸，而 SQLAlchemy 的錯誤訊息不會提到"
+            "這個環境變數，也不會提到這個 repo。"
+        ]
+    return []
+
+
+def _with_asyncpg(dsn: str) -> str:
+    """把 `postgresql://…` 改寫成 `postgresql+asyncpg://…`（只動 scheme，其餘原封不動）。"""
+    scheme, sep, rest = dsn.partition("://")
+    return f"{scheme}+asyncpg{sep}{rest}" if sep else dsn
+
+
+def _check_pg_dsn_shape() -> None:
+    """顯式設過 DSN 時驗一次形態；不合格一律 fail-loud（`pytest.UsageError`）。
+
+    🔴 為何是 fail-loud 而不是 skip：skip 的意思是「這次不驗這件事」，而這裡的實況是
+    「你**要求**驗這件事、但你給的字串會讓它以看不懂的方式炸掉」——兩者不是同一件事，
+    把後者降級成 skip 正是本包在治的那個病（真問題長得像已經被管好了）。
+    自動偵測注入的 DSN 不會走到這裡出問題（它自己帶 `+asyncpg`），所以這道只會對
+    「人自己 export 了一個合法但不相容的字串」說話。
+    """
+    # `require_async` 只對 `AUTOCLAUDE_TEST_PG_DSN` 為真——它才是那個「兩類消費端互斥」
+    # 的變數；`AUTOCLAUDE_DB_DSN` 的消費端全部會自己 strip driver，對它要求 async
+    # 就是誤擋（誠實劃界：這一條界線是逐檔查過消費端才畫的，不是憑對稱猜的）。
+    for key, need_async in (("AUTOCLAUDE_TEST_PG_DSN", True), ("AUTOCLAUDE_DB_DSN", False)):
+        for problem in pg_dsn_problems(os.environ.get(key), require_async=need_async):
+            raise pytest.UsageError(f"[{key}] {problem}")
+
+
 def pytest_configure(config):  # noqa: ARG001
     """在**收集之前**跑一次 PG 自動偵測（模組級 skipif 於收集時求值，晚一步就沒用了）。"""
     global _PG_AUTODETECT_NOTE
+    _check_pg_dsn_shape()
     try:
         gate = _local_ci_gate()
         if gate is None:

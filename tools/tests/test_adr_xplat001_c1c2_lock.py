@@ -724,32 +724,32 @@ _GUARD_LINE_STALE_SLACK = 0.02
 #: 寫出淨額與理由——讓方向在 diff 上一望即知。
 #: 🔴 本表含**本檔自己**，所以動本檔就會動到本表 ⇒ 改完必須重跑一次並用實測值收斂。
 _FROZEN_GUARD_LINES: dict[str, int] = {
-    "_platform_helpers.py": 519,
+    "_platform_helpers.py": 539,
     "_ps_engine.py": 115,
     "test_act_local_runner_image.py": 322,
-    "test_adr_xplat001_c1c2_lock.py": 4172,
+    "test_adr_xplat001_c1c2_lock.py": 4521,
     "test_archive_defect_log.py": 3786,
     "test_bash32_compat.py": 609,
-    "test_bash_probe_spec_contract.py": 960,
+    "test_bash_probe_spec_contract.py": 983,
     "test_bootstrap_core.py": 439,
     "test_bootstrap_ps1.py": 160,
     "test_check_defect_log_crossref.py": 2770,
     "test_check_gha_action_versions.py": 295,
-    "test_check_hooks_liveness.py": 2048,
+    "test_check_hooks_liveness.py": 2578,
     "test_check_pytest_baseline_sites.py": 297,
-    "test_check_script_parity.py": 1973,
+    "test_check_script_parity.py": 1977,
     "test_check_wrapper_thinness.py": 1316,
     "test_component_sanitizer_shared_layer_lock.py": 293,
-    "test_context_budget_guard.py": 1530,
+    "test_context_budget_guard.py": 2282,
     "test_defect_id_reference_integrity.py": 261,
     "test_dev_start.py": 6686,
     "test_dev_start_ps1_lastexitcode.py": 462,
     "test_doc_env_prefix_platform_parity_r60.py": 332,
-    "test_doc_loc_baseline_freshness_r60.py": 5896,
+    "test_doc_loc_baseline_freshness_r60.py": 5927,
     "test_extras_quoting_zsh_safety.py": 402,
-    "test_find_git_bash_parity.py": 1225,
+    "test_find_git_bash_parity.py": 1228,
     "test_gha_action_versions.py": 703,
-    "test_git_hooks_install_common.py": 521,
+    "test_git_hooks_install_common.py": 393,
     "test_install_windows_nightly.py": 1469,
     "test_macos_smoke_skip_honesty.py": 225,
     "test_maturity_criteria_r79.py": 427,
@@ -757,10 +757,10 @@ _FROZEN_GUARD_LINES: dict[str, int] = {
     "test_no_invalid_escape_sequences.py": 329,
     "test_ntfs_trailing_space_device_name.py": 772,
     "test_onboarding_parity_interlock.py": 235,
-    "test_platform_neutral_paths.py": 4092,
+    "test_platform_neutral_paths.py": 5033,
     "test_platform_utils_dedup.py": 1103,
     "test_pre_commit_dispatcher_sigpipe.py": 498,
-    "test_pre_push_dispatcher.py": 798,
+    "test_pre_push_dispatcher.py": 686,
     "test_ps1_bom.py": 204,
     "test_ps51_compat.py": 621,
     "test_ps_engine_ssot.py": 933,
@@ -772,12 +772,12 @@ _FROZEN_GUARD_LINES: dict[str, int] = {
     "test_script_scan_surface_ssot.py": 391,
     "test_smoke_ci_sync.py": 1355,
     "test_stdio_utf8.py": 76,
-    "test_subprocess_encoding_hygiene.py": 1525,
-    "test_windows_forbidden_filename_parity.py": 1043,
+    "test_subprocess_encoding_hygiene.py": 1575,
+    "test_windows_forbidden_filename_parity.py": 1005,
     "test_windows_nightly_anchor_parity.py": 135,
     "test_windows_smoke_heartbeat_doc_sync.py": 197,
-    "test_windowsapps_guard_bash_parity.py": 956,
-    "test_windowsapps_guard_cross_consistency.py": 2222,
+    "test_windowsapps_guard_bash_parity.py": 903,
+    "test_windowsapps_guard_cross_consistency.py": 2184,
     "test_workflow_permission_concurrency_lock.py": 1357,
     "test_workflow_schedule_sync.py": 309,
     "test_workflow_timeout_coverage.py": 158,
@@ -926,8 +926,96 @@ _GUARD_LINES_REPIN_LOG: tuple[tuple[str, int, int, int, str], ...] = (
         "🔴 未調高任何門檻；planner 由 749 壓到 748，手法是收掉 `main()` 內與 "
         "`register_endurance()` 逐字相同的九行重複實作（抽 `_register_at_expr()`），不是刪理由。",
     ),
+    (
+        "R80", 63056, 64584, 1528,
+        "R80 **六個修復包＋舵手＋兩支收工包**，由收尾包在所有包停工後的單人窗口一次重釘。"
+        "🔴 本輪與前幾輪最大的不同：**六個包全部在額度上限被半途打斷**，"
+        "所以這個淨額不是任何一個包的「交件量」，是八條並行變更被截斷後的殘留和；"
+        "逐檔淨額現查 `--print-guard-lines` 的 DIFF 欄，本列不登載（同 R79 起的體例）。"
+        "成長歸因（可回查各包交件回報與兩份具名證據檔）："
+        "context 水位包補 `quiet_python()` 第二層防線（無 console 父行程下 spawn 的 "
+        "creationflags）與其注入鎖；hook exec-form 包把 `.claude/settings.json` 的每一條 hook "
+        "由 shell form 轉 exec form，並補上「對陣列形態失明」的那批解析器（名單現查 "
+        "`tools/lib/hook_wiring.py` 的消費端）與其成對注入；跨平台包補行尾與 exec bit 兩面的判準；"
+        "架構減法包在 `tools/tests/` 這一面是**淨減**（`_usable_bash()` 的手抄本收成一份、"
+        "刪掉已死的成對標籤錨點比對名冊、WindowsApps 行為電池去掉被行為表嚴格覆蓋的那些案例）。"
+        "🔴 **本輪未調高任何門檻、未放寬任何棘輪、未刪任何判準換額度。**"
+        "三支破線的 LOC 棘輪（`check_defect_log_crossref.py`／`check_script_parity.py`／"
+        "`probe/audit_session.py`）全部以**抽共用模組**收斂，不是重釘："
+        "登記面與兩道新判準的本體分別下沉 `tools/lib/governance_docs.py`、"
+        "`tools/lib/self_help_exec_parity.py`、`tools/lib/rc_after_pipe_real.py`，"
+        "行為以 `check_script_parity` rc=0 與 `audit_session --selftest` 10/10 綠取證。"
+        "帳本兩個棘輪（`OVERSIZE_ROW_CEILING`／`OVERSIZE_ROW_EXCESS_CEILING`）"
+        "同輪**往下**重釘（105→101、147455→146210），方向是收緊。",
+    ),
+    (
+        "R80", 64584, 65179, 595,
+        "R80 **四方複審後的三個收斂包**，由收尾包在三包停工後的單人窗口一次重釘"
+        "（上一列是同輪修復包停工時的第一次重釘，本列是複審修復後的第二次）。"
+        "🔴 **[非淨減法輪]** —— 逐檔清單與逐項必要性辯護落在 "
+        "docs/06_quality/CrossPlatform_R80_Scan_Findings.md 的 §B-2，"
+        "與上一列的 §B 同一個家（同一件事只有一個家；刻意不受理 `--print-guard-lines`，"
+        "它讀工作樹＝並行改樹時每個人讀到不同的數字，是查詢入口不是紀錄）。"
+        "成長歸因（三支檔，逐檔數字見 §B-2）："
+        "hook 載具包＝exec form 轉換的**射程**與**載具存在性**兩面"
+        "（ARCH-01 抓到「這台機器上載具在不在」被寫成平台無關的斷言、"
+        "SA-05 補上 POSIX 側載具的 shebang／exec bit／直譯器下限，"
+        "QA-03 抓到只有根層那一份 settings 轉了 exec form 而文件寫成全數已轉）；"
+        "context 水位包＝哨兵整晚失明那一格的 P0 回歸鎖"
+        "（「已處理」必須是事後真有成功 API 回應的**證據**而非「我跑得動武裝指令」這個恆真推論、"
+        "偵測面必須含 subagent、必須看所有未處理事件而不是只看最後一筆），"
+        "以及 reset 框架不得來自機器時鐘那一條（act 在 UTC 容器抓到、本機結構上看不見）；"
+        "收尾包＝本檔款(9)`[未附刪除清單]` 的射程修復（合成語料不受「必須指名真實 .md」約束）"
+        "與其注入證明。"
+        "🔴 本輪未刪任何行換取餘裕、未調高任何門檻、未放寬任何棘輪、未動漂移容忍值。",
+    ),
+    (
+        "R80", 65179, 65390, 211,
+        "R80 **二審五筆 blocking 的收斂包**（單人窗口，無任何 agent 在跑 ⇒ rc 可歸因）。"
+        "🔴 **[非淨減法輪]** —— 逐檔清單與必要性辯護落在 "
+        "docs/06_quality/CrossPlatform_R80_Scan_Findings.md 的 §B-3（與 §B／§B-2 同一個家）。"
+        "成長集中在本檔（另一支 +2 是同輪訂正一句已過期註解的行數代價），內容是"
+        "二審 NEW-SA2-01＝QA2-N2 的落地物："
+        "`doc_guard_total_problems()` 把「文件側引用的累積總量必須等於 "
+        "sum(_FROZEN_GUARD_LINES.values())」由**人記得**升為判準，形狀照款(4)`[未對帳]`，"
+        "掃描面換成計畫書與掃描發現文件兩份 .md，並以帶輪號的標記區分「現行宣稱」與「史料」"
+        "（否則那兩份文件本來就會逐次記載每一次重釘的分段淨額，全掃會把正確的史料判成違規）。"
+        "🔴 **為何這一段非長不可**：二審實測三個文件站點同時寫錯——兩處只記了第一次重釘、"
+        "漏掉第二次，第三處把兩次相加算錯 94——而在此之前**沒有任何判準看得到 `.md`** ⇒ "
+        "款(4) 那顆主牙只咬得到稽核痕跡，讀者實際引用的那個數字整條線上零觀測者。"
+        "注入自證五格：真文件總量寫錯 → `[總量不符]`；同一行算術加錯 → `[淨額不符]`；"
+        "拿掉標記 → `[未登記]`；只留舊輪號標記 → `[未登記]`（證明輪號真的在分史料）；"
+        "正確形態 → 空清單（證明非恆紅）。"
+        "🔴 本輪未刪任何行換取餘裕、未調高任何門檻、未放寬任何棘輪、未動漂移容忍值。",
+    ),
 )
 
+
+#: 🔴 R80 包 C（SA-R80-03）：款(9) 的生效輪次。**刻意不追溯到 R80 自己**——現存每一列都
+#: 落在款(7) 的凍結前綴內（列數以 `_REPIN_LOG_FROZEN_PREFIX_LEN` 現查），改寫任何一列會先撞
+#: append-only 指紋，而那道鎖比本款更根本。R80 自己那筆 +1528 的承認與逐檔清單改落在
+#: `docs/04_planning/AutoSDD_improving_104.md` §1 Q2 與 `CrossPlatform_R80_Scan_Findings.md`
+#: 附錄 B（同一件事只有一個家）。生效點寫成常數而不是散文——散文式的「從今以後」沒人在讀。
+_NET_DELTA_ACCOUNTING_SINCE = 81
+_DELETION_CLAIM_RE = re.compile(r"刪(?:除|掉)?\s*(\d+)\s*行")
+_NOT_NET_SUBTRACTION_TOKEN = "[非淨減法輪]"
+_PER_FILE_LIST_RE = re.compile(r"CrossPlatform_R\d+_\w+\.md")
+
+#: 🔴 R80 二審（NEW-SA2-01＝QA2-N2）：文件側累積總量對帳的三個常數與掃描面。
+#: 判準本體與立案量測見 `doc_guard_total_problems()` 的 docstring。標記刻意做成
+#: 「冒號後綴 ＋ 輪號」的形態（同 repo 既有的 `handoff-claim-verified:`／
+#: `xplat-rate-history:`），而**不用反引號包**——反引號在本 repo 是幽靈符號鎖的掃描面，
+#: 一個帶連字號與冒號的字串放進去只會製造一筆看起來像懸空引用的噪音。
+_GUARD_TOTAL_DOC_MARK = "guard-total:"
+_GUARD_TOTAL_MARK_RE = re.compile(r"(?<![\w-])guard-total:(R\d+)\b")  # 前綴不得被黏住
+_GUARD_TOTAL_TRIPLE_RE = re.compile(r"(\d{4,6})\s*→\s*(\d{4,6})\D{0,16}\+\s*(\d{1,6})")
+#: 兩份：計畫書（人讀的結論）與掃描發現文件（逐檔清單的家）。**兩邊都要有**——
+#: 只有一邊時，刪掉那一邊就等於關掉本判準。
+_GUARD_TOTAL_DOC_MIN_SITES = 2
+_GUARD_TOTAL_DOC_GLOBS = (
+    "docs/04_planning/AutoSDD_improving_*.md",
+    "docs/06_quality/CrossPlatform_R*_Scan_Findings.md",
+)
 
 #: 逐檔漂移的容忍筆數（R79 收斂包）。**釘 0，且沒有理由留餘裕**——重釘時
 #: `--print-guard-lines` 會把整張表逐檔照貼，餘裕只會替下一次「淨額為零的 A 減 B 增」
@@ -944,10 +1032,10 @@ _GUARD_LINE_DRIFT_TOLERANCE = 0
 #: 追加當輪不必動指紋（一列寬限），下一輪要再追加就必須先把前一列納入前綴並重釘，
 #: 否則 `[前綴過期]` 轉紅。草稿兩個值都由 `--print-guard-lines` 印出
 #: （ARCH-02 的教訓：紅了卻沒有出路的鎖會被關掉）。
-_REPIN_LOG_FROZEN_PREFIX_LEN = 8
+_REPIN_LOG_FROZEN_PREFIX_LEN = 11
 _REPIN_LOG_MAX_UNFROZEN_TAIL = 1
 _REPIN_LOG_HISTORY_SHA256 = (
-    "9d287bd398748114f348ecfede93fff5d2caa6db5966974e654c95047cdfbe9a")
+    "cb499dfb4ae41b85f5222305fbed209160b3d2fde5bb68ced883e66c0b246d42")
 
 
 def repin_log_history_digest(
@@ -987,6 +1075,8 @@ def repin_log_problems(
       (7) `[歷史被改寫]` 前綴指紋不符 —— 前綴內既有列的任何欄位被動過。
       (8) `[前綴過期]` 未受指紋保護的尾端列數超過寬限 —— 追加了新列卻一直不把前一列
           納入前綴，久了整段尾巴又回到「可自由改寫」的狀態。
+      (9) `[未附刪除清單]` 淨額為正、卻沒有量化刪除交代／沒有明文承認不是淨減法輪／
+          沒有指名逐檔清單住哪 —— **本款把「調高基線要附刪除清單」由訊息文字升為判準**。
 
     🔴 **(6)(7) 是 R79 收斂包補的，它們治的是這張表自己的假話**：檔頭逐字寫著
     「**append-only**」，而 R79 掃描實測 append-only **零機械強制**——把 R77＋R78 兩列
@@ -1038,6 +1128,17 @@ def repin_log_problems(
             problems.append(
                 f"[無理由] {rnd} 那一列的理由欄只有 {len(reason.strip())} 字——"
                 "淨額要有人負責解釋，「重釘」兩個字不是理由")
+        if delta > 0 and rnd[1:].isdigit() and int(rnd[1:]) >= _NET_DELTA_ACCOUNTING_SINCE:
+            claim = _DELETION_CLAIM_RE.search(reason)
+            deleted_enough = claim is not None and int(claim.group(1)) >= delta
+            if not (deleted_enough or _NOT_NET_SUBTRACTION_TOKEN in reason) \
+                    or not _PER_FILE_LIST_RE.search(reason):
+                problems.append(
+                    f"[未附刪除清單] {rnd} 那一列淨額 +{delta}：理由欄必須①有量化的刪除交代"
+                    f"（`刪 N 行`，且 N ≥ {delta}）或明文標記 `{_NOT_NET_SUBTRACTION_TOKEN}`，"
+                    "**且**②指名一份 `CrossPlatform_R<輪號>_*.md` 當逐檔清單的家。"
+                    "在 R80 之前這件事只是印在 glc_growth_problem() 失敗訊息裡的建議——"
+                    "訊息沒有牙，於是同一輪內可以反覆自助放行（掃描 S5-02：收費站不是棘輪）")
     if log[-1][2] != frozen_total:
         problems.append(
             f"[未對帳] 稽核痕跡表尾的新總量 {log[-1][2]} 不等於 _FROZEN_GUARD_LINES 實際總量 "
@@ -1046,6 +1147,86 @@ def repin_log_problems(
             "少了這條，整張表同時變而淨額不出現在任何地方（R78 ARCH-01）。"
             "草稿：python tools/tests/test_adr_xplat001_c1c2_lock.py --print-guard-lines")
     return problems
+
+
+def doc_guard_total_problems(
+    docs: Mapping[str, str],
+    frozen_total: int,
+    latest_round: str,
+    *,
+    min_sites: int = _GUARD_TOTAL_DOC_MIN_SITES,
+) -> list[str]:
+    """文件側引用的護欄層**累積總量**對帳（空＝通過）。純函式，紅綠由注入自證。
+
+    四款，形狀照款(4)`[未對帳]`（那一款守的是稽核痕跡 ↔ 凍結表，本款守的是
+    **人讀的那個數字** ↔ 凍結表）：
+      (1) `[未登記]` 本輪的標記站點少於 `min_sites` —— 沒有站點就沒有東西可判，
+          而「把那一行刪掉」正是最省力的滿足方式（同款(1)`[空表]` 的理由）。
+      (2) `[形態不符]` 標記行上讀不出 `<起點> → <總量>（+<淨額>` 三元組。
+      (3) `[總量不符]` 標記行引用的總量 != `sum(_FROZEN_GUARD_LINES.values())`。
+      (4) `[淨額不符]` 該行自己的算術不自洽（終點 − 起點 != 行上宣告的淨額）。
+
+    🔴 **立案（R80 二審 NEW-SA2-01＝QA2-N2，實測三處全錯）**：款(4) 只守稽核痕跡那一條
+    線，而讀者實際會引用的數字住在計畫書與掃描發現文件裡。二審實查：兩處只記了第一次
+    重釘、漏掉第二次；第三處把兩次相加寫成一個既不等於總量、也不等於兩者之和的數。
+    三個站點沒有一個會轉紅，因為在此之前**沒有任何判準看得到 `.md`**。
+
+    為何靠「帶輪號的標記」而不是掃全部箭頭：那兩份文件本來就會逐次記載**每一次**重釘的
+    分段淨額，那些是史料、本來就不等於總量，全掃會把正確的史料判成違規。輪號還有第二個
+    作用——下一輪只要在自己的文件裡寫一行，舊輪那幾行自動退位成史料，**零回頭維護成本**
+    （本 repo 判過：維護成本過高的鎖實務上一定會被改寬）。
+
+    誠實劃界：本判準保證「被標出來的那一行講的是今天的數字、且算術自洽」，
+    **不保證作者把每一個該標的地方都標到了**——與款(4) 只保證有一列、不保證理由是好理由
+    同型。要涵蓋「漏標」得先有「哪些句子算引用」的判準，那是關鍵詞啟發式，會誤殺史料。
+    """
+    problems: list[str] = []
+    sites = 0
+    for rel in sorted(docs):
+        for lineno, line in enumerate(docs[rel].splitlines(), 1):
+            mark = _GUARD_TOTAL_MARK_RE.search(line)
+            if mark is None or mark.group(1) != latest_round:
+                continue
+            sites += 1
+            triple = _GUARD_TOTAL_TRIPLE_RE.search(line)
+            if triple is None:
+                problems.append(
+                    f"[形態不符] {rel}:{lineno} 帶著 {_GUARD_TOTAL_DOC_MARK}{latest_round} "
+                    "標記，卻讀不出「<起點> → <總量>（+<淨額>」三元組——這個標記的意思就是"
+                    "「本行引用的是現行累積總量」，讀不出來就無從對帳（等同沒有標）")
+                continue
+            start, total, delta = (int(g) for g in triple.groups())
+            if total != frozen_total:
+                problems.append(
+                    f"[總量不符] {rel}:{lineno} 引用的護欄層總量 {total} 不等於 "
+                    f"_FROZEN_GUARD_LINES 實際總量 {frozen_total}——重釘之後文件沒跟上。"
+                    "草稿：python tools/tests/test_adr_xplat001_c1c2_lock.py "
+                    "--print-guard-lines")
+            if total - start != delta:
+                problems.append(
+                    f"[淨額不符] {rel}:{lineno} 的 {start} → {total} 淨額應為 "
+                    f"{total - start}，行上寫 {delta}——三個數字擺在同一行卻對不起來，"
+                    "正是 R80 二審抓到的那個形態（兩次重釘相加算錯）")
+    if sites < min_sites:
+        problems.append(
+            f"[未登記] 帶 `{_GUARD_TOTAL_DOC_MARK}{latest_round}` 標記的行只有 {sites} 處，"
+            f"少於 {min_sites} —— 本輪的累積淨額必須在計畫書與掃描發現文件**兩邊**都寫得"
+            f"出來。掃描面：{'、'.join(_GUARD_TOTAL_DOC_GLOBS)}")
+    return problems
+
+
+def guard_total_docs_in_worktree() -> dict[str, str]:
+    """文件側對帳的掃描面現查：`{repo 相對路徑: 全文}`。
+
+    刻意用 glob 而不是寫死輪號檔名：寫死的那一刻它就綁在 R80 上，而輪號每輪會變——
+    本 repo 對「把當下機器的偶然事實寫成常數」已有多次判例。掃不到檔時回空 dict，
+    由 `[未登記]` 那一款 fail-loud（不是靜默放行）。
+    """
+    return {
+        p.relative_to(_REPO).as_posix(): p.read_text(encoding="utf-8-sig")
+        for pattern in _GUARD_TOTAL_DOC_GLOBS
+        for p in sorted(_REPO.glob(pattern))
+    }
 
 
 def guard_baseline_gaps() -> list[str]:
@@ -2356,6 +2537,173 @@ class TestGuardLayerRatchet(unittest.TestCase):
         self.assertTrue(problems, "改了凍結表而不補稽核列竟然放行 ⇒ ARCH-01 沒有被修")
         self.assertTrue(any("[未對帳]" in p for p in problems), problems)
 
+    # ── R80 收尾包：款(9) 的紅側自證（落地當輪只有綠側對照組，等於沒有牙）────────
+    def test_a_positive_repin_without_a_deletion_account_is_red(self) -> None:
+        """🔴 注入＝款(9) 的**紅側**：淨額為正卻沒交代刪了什麼 ⇒ `[未附刪除清單]` 必紅。
+
+        WHY 這一格非補不可：款(9) 落地當輪（R80 包 C）全檔只有一個綠側對照組
+        （`test_appending_one_row_keeps_the_history_digest_stable` 的合成列剛好帶著兩個
+        記號），紅側零注入 ⇒ 判準寫成恆綠（例如條件寫反、或 regex 永不命中）不會有任何
+        東西說話。本 repo 對「只測會過的那幾種寫法」已有判例（R78 A-lint）。
+
+        三種**半套**形態各自注入一次——半套比全缺更危險，因為它看起來像已經照做了：
+          · 兩個記號都沒有 ⇒ 紅
+          · 承認了是 `[非淨減法輪]`、卻沒指名逐檔清單住哪 ⇒ 紅（清單無家＝沒有清單）
+          · 指名了清單、卻既沒承認也沒有足量刪除交代（`刪 3 行` < 淨額）⇒ 紅
+        另兩格證明它不是恆紅：足量刪除交代＋指名清單 ⇒ 綠；淨額為負 ⇒ 本款不說話。
+        """
+        def _judge(rnd: str, delta: int, reason: str) -> list[str]:
+            row = (rnd, 1000, 1000 + delta, delta, reason)
+            return [p for p in repin_log_problems((row,), 1000 + delta)
+                    if "[未附刪除清單]" in p]
+
+        home = "CrossPlatform_R81_Scan_Findings.md"
+        long_enough = "理由夠長夠長夠長夠長夠長夠長夠長夠長，"
+        self.assertTrue(_judge("R81", 500, long_enough), "兩個記號都沒有竟然放行")
+        self.assertTrue(
+            _judge("R81", 500, long_enough + _NOT_NET_SUBTRACTION_TOKEN),
+            "承認了是非淨減法輪、卻沒指名逐檔清單的家竟然放行——清單無家＝沒有清單")
+        self.assertTrue(
+            _judge("R81", 500, f"{long_enough}刪 3 行，清單見 {home}"),
+            "刪除交代（3 行）遠少於淨額（500）竟然放行 ⇒ 數量比較沒有真的在做")
+        self.assertFalse(
+            _judge("R81", 500, f"{long_enough}刪 500 行，逐檔清單見 {home}"),
+            "足量刪除交代＋指名清單是本款指定的合法形態，判紅就是恆紅（那種鎖會被關掉）")
+        self.assertFalse(
+            _judge("R81", -5, long_enough), "淨額為負仍被本款判紅 ⇒ 它在懲罰正確方向")
+
+    # ── R80 二審（NEW-SA2-01＝QA2-N2）：文件側引用的累積總量也要對帳 ────────────
+    def _latest_round(self) -> str:
+        return _GUARD_LINES_REPIN_LOG[-1][0]
+
+    def _marked_docs(self, rewrite: Callable[[str], str]) -> dict[str, str]:
+        """真文件、記憶體內改字：只動本輪標記行，其餘位元組不動。
+
+        刻意**不寫磁碟**：注入載體若要還原就有崩潰安全問題（本 repo 已有判例——
+        `git checkout --` 型的還原會連未提交工作一起抹）。純函式吃字串，注入零副作用。
+        """
+        docs = guard_total_docs_in_worktree()
+        latest, touched, out = self._latest_round(), 0, {}
+        for rel, text in docs.items():
+            lines = text.splitlines()
+            for i, line in enumerate(lines):
+                mark = _GUARD_TOTAL_MARK_RE.search(line)
+                if mark is not None and mark.group(1) == latest:
+                    lines[i], touched = rewrite(line), touched + 1
+            out[rel] = "\n".join(lines)
+        self.assertGreaterEqual(
+            touched, _GUARD_TOTAL_DOC_MIN_SITES,
+            f"掃描面上找不到 {_GUARD_TOTAL_DOC_MARK}{latest} 的標記行 ⇒ 注入在對空氣做，"
+            "下面那幾個 assert 會恆綠")
+        return out
+
+    def test_the_docs_cite_the_live_guard_total(self) -> None:
+        """真表＋真文件（**綠側**）：本輪標記行引用的總量必須等於凍結表實際總量。"""
+        problems = doc_guard_total_problems(
+            guard_total_docs_in_worktree(), sum(_FROZEN_GUARD_LINES.values()),
+            self._latest_round())
+        self.assertEqual(problems, [], "文件側累積總量不合規：\n  " + "\n  ".join(problems))
+
+    def test_a_stale_total_in_the_real_docs_is_red(self) -> None:
+        """注入①（**紅側**，真文件）：把總量寫錯一位 ⇒ `[總量不符]` 必紅。
+
+        這正是 R80 二審抓到的形態：重釘了、文件沒跟上，而在本款之前**沒有任何東西**
+        看得到 `.md` ⇒ 三個站點同時錯了一整輪都沒有轉紅。
+        """
+        bad = self._marked_docs(lambda line: _GUARD_TOTAL_TRIPLE_RE.sub(
+            lambda m: f"{m.group(1)} → {int(m.group(2)) + 1}（+{m.group(3)}", line, count=1))
+        problems = doc_guard_total_problems(
+            bad, sum(_FROZEN_GUARD_LINES.values()), self._latest_round())
+        self.assertTrue(any("[總量不符]" in p for p in problems),
+                        f"文件把總量寫錯竟然放行：{problems}")
+
+    def test_a_broken_arithmetic_in_the_real_docs_is_red(self) -> None:
+        """注入②（真文件）：總量對、但「+淨額」那一格加錯 ⇒ `[淨額不符]` 必紅。
+
+        與注入① 分開是因為它們是**不同的錯**：① 是「文件沒跟上重釘」，
+        ② 是「同一行的三個數字自己對不起來」——R80 二審實測的 `+2029` 就是後者
+        （兩次重釘 1528＋595＝2123，差 94）。只測 ① 的話 ② 會整類漏掉。
+        """
+        bad = self._marked_docs(lambda line: _GUARD_TOTAL_TRIPLE_RE.sub(
+            lambda m: f"{m.group(1)} → {m.group(2)}（+{int(m.group(3)) + 94}", line, count=1))
+        problems = doc_guard_total_problems(
+            bad, sum(_FROZEN_GUARD_LINES.values()), self._latest_round())
+        self.assertTrue(any("[淨額不符]" in p for p in problems),
+                        f"同一行的算術對不起來竟然放行：{problems}")
+
+    def test_removing_the_marker_is_red_and_history_rounds_do_not_count(self) -> None:
+        """注入③④：拿掉標記 ⇒ `[未登記]`；把標記改成**舊輪號** ⇒ 同樣 `[未登記]`。
+
+        ③ 擋的是「最省力的滿足方式」（刪掉那一行，判準就沒有東西可判＝fail-open）。
+        ④ 證明輪號真的在分**史料 vs 現行宣稱**：舊輪的行不該讓本輪過關，否則
+        下一輪只要不寫，就自動繼承上一輪的綠。
+        """
+        total, latest = sum(_FROZEN_GUARD_LINES.values()), self._latest_round()
+        gone = self._marked_docs(
+            lambda line: line.replace(_GUARD_TOTAL_DOC_MARK, "was-guard-total:"))
+        self.assertTrue(
+            any("[未登記]" in p for p in doc_guard_total_problems(gone, total, latest)),
+            "把標記整個拿掉竟然放行 ⇒ 本判準可以靠刪一行關掉")
+        aged = self._marked_docs(
+            lambda line: _GUARD_TOTAL_MARK_RE.sub("guard-total:R01", line))
+        self.assertTrue(
+            any("[未登記]" in p for p in doc_guard_total_problems(aged, total, latest)),
+            "只有舊輪號的標記竟然算本輪達標 ⇒ 綠會被上一輪繼承下去")
+
+    def test_a_marked_line_without_the_triple_is_red_and_the_judgment_is_not_always_red(
+            self) -> None:
+        """合成語料：標了卻讀不出三元組 ⇒ `[形態不符]`；正確形態 ⇒ 空清單（證明非恆紅）。
+
+        合成而非真文件的理由與款(9) 那一格相同——要造「標記在、三元組不在」這種半套形態，
+        在真文件上就得先把正確的那一行弄壞，而那正是上面兩支已經在做的事。
+        """
+        good = {"a.md": "x <!-- guard-total:R99 --> 1000 → 1500（**+500**）",
+                "b.md": "y <!-- guard-total:R99 --> 1000 → 1500（+500 兩次重釘）"}
+        self.assertEqual(doc_guard_total_problems(good, 1500, "R99"), [],
+                         "本款對正確形態判紅 ⇒ 恆紅的鎖會被關掉")
+        vague = dict(good, **{"a.md": "x <!-- guard-total:R99 --> 淨額請見附錄"})
+        self.assertTrue(
+            any("[形態不符]" in p for p in doc_guard_total_problems(vague, 1500, "R99")),
+            "標了卻讀不出三元組竟然放行 ⇒ 標記變成一句不必兌現的宣告")
+
+    def test_the_criterion_is_deliberately_not_retroactive(self) -> None:
+        """射程鎖：`_NET_DELTA_ACCOUNTING_SINCE` 之前的輪次不受款(9) 管，**這是刻意的**。
+
+        理由不是寬容，是**兩道鎖的合法動作互為對方違規**（R76 Scan-H⑥ 的同型）：現存每一
+        列都落在款(7) 的凍結前綴內，替它們補上記號＝改寫既有列＝先撞 `[歷史被改寫]`，
+        而 append-only 比款(9) 更根本。少了這一格，下一個人會把「舊列沒有記號」讀成漏洞
+        並回頭補寫，當場踩爆指紋。
+        """
+        bare = "理由夠長夠長夠長夠長夠長夠長夠長夠長，沒有任何記號"
+        old = (f"R{_NET_DELTA_ACCOUNTING_SINCE - 1}", 1000, 1500, 500, bare)
+        new = (f"R{_NET_DELTA_ACCOUNTING_SINCE}", 1000, 1500, 500, bare)
+        self.assertFalse(
+            [p for p in repin_log_problems((old,), 1500) if "[未附刪除清單]" in p],
+            "生效輪次之前的列被追溯判紅 ⇒ 補救動作會先撞 append-only 指紋，死路一條")
+        self.assertTrue(
+            [p for p in repin_log_problems((new,), 1500) if "[未附刪除清單]" in p],
+            "生效輪次當輪就該有牙，否則這個常數只是把判準無限期延後")
+
+    def test_every_per_file_list_named_by_a_real_row_exists_on_disk(self) -> None:
+        """🔴 款(9) 的**射程另一半**：判準本身只看檔名形狀，真實性由本格對磁碟驗。
+
+        為何分成兩處而不是把存在性塞進 `repin_log_problems()`：那支是**純函式**，合成注入
+        （上面那幾格與 `[前綴過期]` 那一格）都拿虛構的 `CrossPlatform_R9x_*.md` 當語料；
+        要求檔案存在會讓合成語料全部翻紅，於是判準的紅綠自證就得先在磁碟上造檔——測試
+        造出真檔來滿足自己的判準，那是本 repo 最不想要的形狀。
+        ⇒ 形狀歸純函式、存在性歸這一格（只掃**真表**）。少了這一格，款(9) 可以用一個
+        從來不存在的檔名滿足——那正是本 repo 反覆在治的幽靈引用。
+        """
+        named = sorted({
+            m.group(0) for _rnd, _o, _n, _d, reason in _GUARD_LINES_REPIN_LOG
+            for m in _PER_FILE_LIST_RE.finditer(reason)})
+        self.assertTrue(named, "真表裡一份逐檔清單都沒指名——款(9) 從未真的被滿足過？")
+        missing = [n for n in named if not (_REPO / "docs" / "06_quality" / n).is_file()]
+        self.assertEqual(
+            missing, [],
+            f"稽核列指名的逐檔清單在 docs/06_quality/ 找不到：{missing}——"
+            "款(9) 被一個不存在的檔名滿足了（幽靈引用），逐檔淨額實際上沒有家")
+
     # ── R79 收斂包：append-only 由散文變成機械事實 ────────────────────────────
     def test_collapsing_the_whole_history_into_one_row_is_red(self) -> None:
         """🔴 注入＝R79 掃描實測的繞道：把整段歷史壓成一列、起點改成任意數字。
@@ -2403,7 +2751,8 @@ class TestGuardLayerRatchet(unittest.TestCase):
         total = sum(_FROZEN_GUARD_LINES.values())
         appended = (*_GUARD_LINES_REPIN_LOG,
                     ("R99", total, total + 5, 5,
-                     "合成的下一輪重釘，理由長度足以通過 [無理由] 那一款"))
+                     "合成的下一輪重釘，理由長度足以通過 [無理由] 與 [未附刪除清單] 兩款"
+                     "[非淨減法輪] CrossPlatform_R99_Scan_Findings.md"))
         self.assertEqual(
             repin_log_history_digest(appended, _REPIN_LOG_FROZEN_PREFIX_LEN),
             _REPIN_LOG_HISTORY_SHA256,

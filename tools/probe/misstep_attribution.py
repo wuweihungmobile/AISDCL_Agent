@@ -36,6 +36,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import random
 import re
 import sys
 from pathlib import Path
@@ -62,11 +63,79 @@ _LEDGER_GLOBS = (
 #: 帳本列＝以 `DEF-<輪>-<序>` 開頭的表格列。這是帳本自己的格式定義（見該檔檔頭）。
 _LEDGER_ROW_RE = re.compile(r"^\|\s*(DEF-\d+-\d+)\b(.*)$")
 
-#: 逐字稿裡的「自陳失誤」：助理自己說某件事做錯／判錯／寫錯／要訂正的句子。
-#: 刻意不含「缺陷」「bug」這類**描述別人的東西**的詞——那會把「我在報告一個發現」
-#: 混進「我自己搞砸了」，兩者的歸因意義完全不同。
-_MISSTEP_RE = re.compile(
-    r"(我(?:剛剛|之前|上面|當時)?(?:做|判|寫|抓|查|念|указ)?錯"
+# ══════════════════════════════════════════════════════════════════════════
+# 🔴 R80／S7-04：「自陳失誤」的偵測器此前**沒有鑑別力**，先前的 n 是被灌水的
+# ══════════════════════════════════════════════════════════════════════════
+# 全庫 73 支逐字稿實測（母體＝3,177 個 assistant text 區塊）：舊判準（今名
+# `_LEGACY_MISSTEP_RE`，保留在下方當對照組）命中
+# 188 筆，其中 **93 筆（49.5%）是只由「訂正」這一個字觸發的**，第二名「誤判」只有
+# 14 筆。逐筆抽樣看那 93 筆長什麼樣：
+#
+#   · 「訂正了 ADR 一筆過期宣稱（BOM 修復其實 R60 就做完了）」   ← 在報告修好了什麼
+#   · 「六包全部落地……＋三筆訂正＋EVOLUTION_LOG」               ← 收輪清單的項目名
+#   · 「這個 repo 有明文規則：訂正註記逐字引述假話等於……」        ← 在引述 CLAUDE.md
+#   · 「已逐一用實測數字訂正，第二輪複審四方確認數字完全吻合」    ← 在講流程走完了
+#
+# 這些是**在討論失誤**，不是自陳失誤。歸因分群的單位若混進「我在報告一個發現」，
+# 那個分佈量到的是「這個 repo 的文件在談什麼」，不是「我犯了什麼錯」——而後者才是
+# 舵手訴求 4 問的東西。方向也很糟：一輪的收尾摘要愈完整、討論訂正的句子就愈多，
+# 於是**做得愈仔細、量到的失誤愈多**。
+#
+# 修法不是把「訂正」刪掉（真的自陳「我訂正一下，剛才那句是錯的」也用這個字），
+# 而是把詞分成兩類，**弱詞要求同一句裡有第一人稱歸屬**：
+#: 🔴 中間**必須留有界的間隙**：實測「我上面那句寫錯了」被固定詞綴版整條漏掉
+#: （`我` 與 `寫錯` 之間隔了「上面那句」）。間隙上界刻意小且不得跨句讀點，否則
+#: 「我要去查一下，那份文件寫錯了」這種兩件事會被黏成一件。
+_GAP = r"[^。！？!?；;\n]{0,8}"
+_STRONG_MISSTEP_RE = re.compile(
+    r"(我" + _GAP + r"(?:做|判|寫|抓|查|念|搞|弄|看|記)錯"
+    r"|低級錯誤|搞錯|弄錯|看錯|記錯|誤植|誤以為|漏看|漏掉了"
+    r"|我的錯|不好意思，?我|抱歉，?我)"
+)
+#: 弱詞：真的自陳失誤時會用，但**更常**出現在「報告我修好了什麼／引述規則／列清單」。
+#: 單獨出現不算數，要同一句裡有第一人稱歸屬才算。
+_WEAK_CORRECTION_RE = re.compile(r"(訂正|更正|失誤|誤判|誤用)")
+#: 第一人稱歸屬：這件事是**我**做的／**我**身上發生的。刻意不收裸「我」——
+#: 「我來看一下」「我先跑」滿場都是，收了等於沒收。
+#: 第一人稱歸屬＝這件事是**我**做的／**我**身上發生的。用「有界鄰近共現」而不是
+#: 固定詞綴：實測固定詞綴會漏掉「我照實訂正」「訂正**了**我三個前提」這兩種最常見的
+#: 寫法（自證第 2、3 組），而它們正是真的自陳失誤。
+#: 誠實劃界：這條會把「我來訂正這份文件的一個過期記載」也算進來（我在修別人的東西，
+#: 不是我犯的錯）——方向是**高報**。選它是因為另一個方向（漏掉真的自陳）在本檔的用途
+#: 上更糟：歸因分群漏掉真失誤時，剩下的分佈會偏向「還沒被漏掉的那幾類」。
+_SELF_ATTRIB_RE = re.compile(
+    r"(?:我|自己)" + _GAP +
+    r"(?:錯|失誤|誤判|誤用|誤植|漏|沒有?查|沒跑|未查|說法|宣稱|判斷|理解|前提|結論"
+    r"|訂正|更正)"
+    r"|(?:訂正|更正|打臉)" + _GAP + r"(?:我|自己)"
+)
+
+#: 句子切割（與 `audit_session._sentences` 同形，但本檔要的是「弱詞與第一人稱是否
+#: **同一句**」，所以不能只看整段）。
+_SENTENCE_SPLIT_RE = re.compile(r"(?<=[。！？!?\n])")
+
+
+def misstep_hit(text: str) -> str | None:
+    """`None`＝不是自陳失誤；否則回傳觸發的那一句（供逐筆覆核）。
+
+    強詞：整段任一句命中即可。
+    弱詞：必須與第一人稱歸屬**同一句**——這一條就是 S7-04 的修正本體。
+    """
+    for sentence in _SENTENCE_SPLIT_RE.split(text):
+        stripped = sentence.strip()
+        if not stripped:
+            continue
+        if _STRONG_MISSTEP_RE.search(stripped):
+            return stripped
+        if (_WEAK_CORRECTION_RE.search(stripped)
+                and _SELF_ATTRIB_RE.search(stripped)):
+            return stripped
+    return None
+
+
+#: 舊判準保留為**對照用**（`--selftest` 要印出它錯在哪；拿掉它自證就沒有紅的一半）。
+_LEGACY_MISSTEP_RE = re.compile(
+    r"(我(?:剛剛|之前|上面|當時)?(?:做|判|寫|抓|查|念)?錯"
     r"|低級錯誤|失誤|搞錯|弄錯|看錯|記錯|誤判|誤用|誤植|誤以為|漏看|漏掉了"
     r"|訂正|更正|我的錯|不好意思，?我|抱歉，?我)"
 )
@@ -134,8 +203,14 @@ def ledger_items() -> list[dict]:
 _BLOCK_CHARS = 1200
 
 
-def transcript_items(project_dir: Path | None = None) -> list[dict]:
-    """逐字稿裡助理**自陳失誤**的段落（本機資料，缺席時回空清單並在報表說明）。"""
+def transcript_items(project_dir: Path | None = None,
+                     control: bool = False) -> list[dict]:
+    """逐字稿裡助理**自陳失誤**的段落（本機資料，缺席時回空清單並在報表說明）。
+
+    `control=True` 時回傳的是**對照組**：同一批 assistant text 區塊裡**沒有**自陳
+    失誤的那些。用途見 `control_lift()`——沒有對照組，「最大的桶是 X」這句話就無法
+    與「這個 repo 平常就常講 X」分開。
+    """
     base = project_dir or project_transcript_dir(_REPO_ROOT)
     if not base.is_dir():
         return []
@@ -149,14 +224,17 @@ def transcript_items(project_dir: Path | None = None) -> list[dict]:
                 if not isinstance(block, dict) or block.get("type") != "text":
                     continue
                 text = str(block.get("text") or "")
-                hit = _MISSTEP_RE.search(text)
-                if not hit:
+                if not text.strip():
                     continue
-                sentence = next(
-                    (s.strip() for s in re.split(r"(?<=[。！？!?\n])", text)
-                     if s.strip() and _MISSTEP_RE.search(s)), text[:120])
+                sentence = misstep_hit(text)
+                if control:
+                    if sentence is not None:
+                        continue
+                    sentence = " ".join(text.split())[:120]
+                elif sentence is None:
+                    continue
                 items.append({
-                    "source": "transcript",
+                    "source": "control" if control else "transcript",
                     "origin": f"{path.name}#{index}",
                     "key": sentence[:200],
                     "text": text[:_BLOCK_CHARS],
@@ -199,6 +277,36 @@ def tally(items: list[dict]) -> dict[str, int]:
     return counts
 
 
+# ══════════════════════════════════════════════════════════════════════════
+# 🔴 R80／S7-03：沒有對照組的「最大的桶是 X」是一句不可證偽的話
+# ══════════════════════════════════════════════════════════════════════════
+# 上一版只印處理組（自陳失誤那些段落）的桶分佈，於是「最大的桶是 X」這個結論
+# **無法**與「這個 repo 的文字平常就常出現 X 的關鍵詞」分開。桶的判準是關鍵詞計數，
+# 而關鍵詞的**基底出現率**在這份語料裡差異極大（`棘輪`／`射程`／`鑑別力` 是本 repo
+# 的日常詞彙，`WSL`／`PATHEXT` 不是）⇒ 一個完全不含失誤資訊的段落照樣會被分進某個桶。
+#
+# 修法是任何觀測研究都會做的那一件：拿**同一個分類器**去跑一組已知「不是失誤」的
+# 語料（＝同一批 assistant 段落裡沒有自陳失誤的那些），把兩邊的百分比相減。
+#   lift > 0：這個桶在失誤語料裡確實過度出現 ⇒ 結論有依據
+#   lift ≈ 0：這個桶只是反映語料的基底詞頻 ⇒ **不得**拿它下結論
+# 對照組的抽樣倍率固定寫在報表上；抽樣用固定 seed，重跑會得到同一組數字。
+_CONTROL_RATIO = 3
+_CONTROL_SEED = 80
+
+
+def control_lift(treated: list[dict], control: list[dict]) -> dict[str, dict]:
+    """`桶 -> {treated_pct, control_pct, lift_pp}`（純函式，供 `--selftest`）。"""
+    t_counts, c_counts = tally(treated), tally(control)
+    out: dict[str, dict] = {}
+    for bucket in t_counts:
+        t_pct = 100.0 * t_counts[bucket] / len(treated) if treated else 0.0
+        c_pct = 100.0 * c_counts[bucket] / len(control) if control else 0.0
+        out[bucket] = {"treated_n": t_counts[bucket], "control_n": c_counts[bucket],
+                       "treated_pct": t_pct, "control_pct": c_pct,
+                       "lift_pp": t_pct - c_pct}
+    return out
+
+
 _DISCLAIMER = (
     "🔴 判準性質（本行由腳本自己印，不是散文）：分群是**關鍵詞啟發式**。\n"
     "   量級穩健（桶與桶的大小關係可引用）、小數不穩健（確切百分比**不得**引用為常數）。\n"
@@ -207,7 +315,7 @@ _DISCLAIMER = (
 
 
 def _print_report(items: list[dict], counts: dict[str, int], sources: list[str],
-                  show: str | None) -> None:
+                  show: str | None, lift: dict[str, dict] | None = None) -> None:
     total = len(items)
     print(f"### 失誤歸因分群（來源：{'＋'.join(sources)}；n={total}）")
     print(_DISCLAIMER)
@@ -231,12 +339,79 @@ def _print_report(items: list[dict], counts: dict[str, int], sources: list[str],
     for item in items:
         by_source[item["source"]] = by_source.get(item["source"], 0) + 1
     print(f"\n  逐來源筆數：{by_source or '（無）'}")
+    if lift:
+        treated_n = sum(row["treated_n"] for row in lift.values())
+        control_n = sum(row["control_n"] for row in lift.values())
+        print(f"\n### 對照組（同一個分類器 × 已知**不是**自陳失誤的段落；"
+              f"處理組 n={treated_n}〔僅逐字稿〕、對照組 n={control_n}，"
+              f"抽樣倍率 {_CONTROL_RATIO}×、seed={_CONTROL_SEED}）")
+        print("  🔴 沒有這一段，『最大的桶是 X』無法與『這個 repo 平常就常講 X』分開。")
+        print("  🔴 兩個桶的 lift 都為正且筆數相近時，**不得**挑其中一個當「最大宗」"
+              "——這把尺分不開它們。")
+        print(f"  {'桶':12s} {'處理%':>8s} {'對照%':>8s} {'lift(pp)':>10s}  判讀")
+        for bucket, row in lift.items():
+            verdict = ("有正 lift，可下結論" if row["lift_pp"] >= 5
+                       else "lift 太小 ⇒ 只是基底詞頻，**不得**據此下結論")
+            print(f"  {bucket:12s} {row['treated_pct']:7.1f}% "
+                  f"{row['control_pct']:7.1f}% {row['lift_pp']:+9.1f}  {verdict}")
+        print("  （lift 的門檻 5pp 是判讀輔助，不是統計檢定；n 小時請直接看絕對筆數）")
     if show:
         print(f"\n### 桶 `{show}` 的全部原文（供逐筆覆核）")
         for item in items:
             if item["bucket"] == show:
                 print(f"  · [{item['origin']}] {item['matched']}")
                 print(f"      {item['text'][:220]}")
+
+
+#: 🔴 自陳失誤偵測器的紅綠自證語料（`--selftest`，可重跑）。
+#: **每一句都是從本機逐字稿真的抄下來的**（origin 記在括號裡），不是我編出來的
+#: 樣本——編出來的樣本會不自覺地照著判準寫，那種自證恆綠。
+_MISSTEP_SELFTEST: tuple[tuple[str, bool, str], ...] = (
+    # ── 已知**是**自陳失誤 ──────────────────────────────────────────────
+    ("我誤稱「本機沒有 PostgreSQL」，被掌舵者點名為低級錯誤。", True,
+     "自陳＋低級錯誤（強詞）"),
+    ("這條歸因我照實訂正，不編一個來源出來。", True, "弱詞「訂正」＋第一人稱歸屬"),
+    ("agent 訂正了我三個前提，其中一個是我的清單漏了一整包。", True,
+     "弱詞＋「訂正我」＝被別人指出我的錯"),
+    ("我先前的說法有兩處要訂正：現行是 10 個 hook 條目，不是 8。", True,
+     "弱詞＋「我先前的說法」"),
+    ("我上面那句寫錯了，實測值是 7 不是 0。", True, "強詞「我…寫錯」"),
+    # ── 已知**不是**自陳失誤（只是在討論／報告訂正這件事） ──────────────
+    ("訂正了 ADR 一筆過期宣稱（BOM 修復其實 R60 就做完了）、真跑補齊了驗證缺口。",
+     False, "在報告修好了什麼——舊判準會把它算成一次失誤"),
+    ("六包全部落地，收尾包已派出（帳本歸檔 + 立帳 + 三筆訂正 + ONBOARDING §9）。",
+     False, "收輪清單的項目名"),
+    ("這個 repo 有明文規則：訂正註記逐字引述假話等於製造新假話。", False,
+     "在引述 CLAUDE.md 的規則"),
+    ("已逐一用實測數字訂正，第二輪複審四方確認數字完全吻合、機械閘門全綠。", False,
+     "在講流程走完了"),
+    ("四方審查抓到幾處行號描述漂移，第二輪因訂正順序又冒出 2 處連鎖偏移。", False,
+     "在描述別人的審查結果與流程"),
+)
+
+
+def _selftest() -> int:
+    """紅綠自證：新判準要全對，且**舊判準必須有錯**，否則自證證明不了任何事。"""
+    print(f"### 自陳失誤偵測器紅綠自證（{len(_MISSTEP_SELFTEST)} 句，"
+          "全部抄自本機逐字稿）")
+    print("  🔴 綠：新判準每一句都要判對。")
+    print("  🔴 紅：同一批句子餵給**舊判準**（`_LEGACY_MISSTEP_RE`）看它錯在哪。")
+    wrong_new = wrong_old = 0
+    for sentence, expected, why in _MISSTEP_SELFTEST:
+        new_verdict = misstep_hit(sentence) is not None
+        old_verdict = bool(_LEGACY_MISSTEP_RE.search(sentence))
+        wrong_new += int(new_verdict is not expected)
+        wrong_old += int(old_verdict is not expected)
+        print(f"  {'✅' if new_verdict is expected else '❌'} "
+              f"應判={str(expected):5s} 新={str(new_verdict):5s} "
+              f"舊={str(old_verdict):5s}  {why}")
+        print(f"       {sentence[:90]}")
+    print(f"\n  新判準判錯 {wrong_new} / {len(_MISSTEP_SELFTEST)}；"
+          f"舊判準判錯 {wrong_old} / {len(_MISSTEP_SELFTEST)}")
+    if wrong_old == 0:
+        print("  ⚠️ 舊判準一句都沒判錯 ⇒ 這批語料對「修了什麼」沒有鑑別力，"
+              "自證是空的。", file=sys.stderr)
+    return 1 if (wrong_new or wrong_old == 0) else 0
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -246,8 +421,18 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--project-dir", help="逐字稿目錄（覆寫 slug 推導）")
     parser.add_argument("--jsonl", help="把逐筆歸屬寫成 .jsonl 供下一輪 diff")
     parser.add_argument("--show", help="印出某一桶的全部原文（桶名）")
+    parser.add_argument("--control", action="store_true",
+                        help="加跑對照組（同一個分類器 × 已知**不是**自陳失誤的段落）"
+                             "並印出逐桶 lift。沒有它，『最大的桶是 X』無法與"
+                             "『這份語料平常就常講 X』分開")
+    parser.add_argument("--selftest", action="store_true",
+                        help="對已知自陳失誤／已知只是討論失誤的句子各數組跑偵測器，"
+                             "並印出舊判準對同一批語料的判定當作紅的那一半")
     parser.add_argument("--json", action="store_true", dest="as_json")
     args = parser.parse_args(argv)
+
+    if args.selftest:
+        return _selftest()
 
     items: list[dict] = []
     sources: list[str] = []
@@ -264,17 +449,39 @@ def main(argv: list[str] | None = None) -> int:
     attribute(items)
     counts = tally(items)
 
+    lift: dict[str, dict] | None = None
+    if args.control:
+        # 🔴 只拿逐字稿那一半來比：對照組是「同一批 assistant 段落裡沒有自陳失誤的
+        # 那些」，帳本列**不是同一種文本**（別人寫的缺陷描述，句法與詞頻都不同）。
+        # 把兩者混進同一個處理組，lift 量到的會是「帳本與逐字稿的文體差異」。
+        treated = [i for i in items if i["source"] == "transcript"]
+        base = Path(args.project_dir) if args.project_dir else None
+        pool = transcript_items(base, control=True)
+        if not treated or not pool:
+            print("⚠️ --control：處理組或對照組是空的 ⇒ lift 無意義，本次不算。"
+                  "（逐字稿目錄不在本機？--source 排除了 transcript？）",
+                  file=sys.stderr)
+        else:
+            random.seed(_CONTROL_SEED)
+            sample = random.sample(
+                pool, min(len(treated) * _CONTROL_RATIO, len(pool)))
+            attribute(sample)
+            lift = control_lift(treated, sample)
+
     if args.jsonl:
         with open(args.jsonl, "w", encoding="utf-8", newline="\n") as handle:
             for item in items:
                 handle.write(json.dumps(item, ensure_ascii=False) + "\n")
 
     if args.as_json:
-        print(json.dumps({"n": len(items), "counts": counts,
-                          "sources": sources, "disclaimer": _DISCLAIMER,
-                          "items": items}, ensure_ascii=False, indent=2))
+        payload = {"n": len(items), "counts": counts,
+                   "sources": sources, "disclaimer": _DISCLAIMER,
+                   "items": items}
+        if lift is not None:
+            payload["control_lift"] = lift
+        print(json.dumps(payload, ensure_ascii=False, indent=2))
     else:
-        _print_report(items, counts, sources, args.show)
+        _print_report(items, counts, sources, args.show, lift)
 
     # 🔴 語料塌了要 fail-loud：`n=0` 讀起來像「這一輪沒有失誤」，而那個方向
     # 正是本 repo 反覆記載的「看起來變乾淨」——比紅更危險。

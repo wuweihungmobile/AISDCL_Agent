@@ -2788,17 +2788,35 @@ _SUBPROJECT_SCOPE_MARK = "僅 AutoClaude 子專案 session"
 #: 鐵律三觸發清單中**沒有掃描器**的項（人可讀的宣告面；量測面是 CLAUDE.md 那張表本身）。
 #: 補了掃描器就把該列的機械物欄改掉，並把該項從此處刪除——兩邊由下方雙向判準綁住。
 _IRON_LAW3_UNCOVERED: tuple[str, ...] = (
-    "`$env:*` 讀取", "副檔名判斷", "`Get-Command` 解析", "大小寫敏感度",
+    "副檔名判斷",
+    # 🔴 R80（包 B）：`$env:*` 讀取／`Get-Command` 解析／大小寫敏感度 三項移出本清單。
+    # 前兩項是**本輪補上站點級判準**（`TestPowerShellPlatformSensitiveSites`）⇒ 分子 +1 +1；
+    # 第三項則是**訂正一筆假事實**——`tools/check_ntfs_paths.py` 的大小寫碰撞正規化鍵
+    # 早就存在、也早就接在 pre-commit 與四支 CI workflow 上，本表卻自 R74 起一直說沒人守。
+    # 這個方向（**低報分子**）本鎖結構上看不見：它只讀那張表**自己說**有沒有機械物，
+    # 從不問「這句話是真的嗎」。補上的證偽判準住在
+    # `tools/tests/test_platform_neutral_paths.py::TestIronLaw3NoMechanismClaimsAreFalsifiable`
+    # ——每一格自陳沒人守者必須登記一組證偽探針（token × 已審視清單）並通過它。
+    #
+    # R80 新登記的危害類：`shell=True` 的原生殼差異（Windows `cmd.exe` ⇄ POSIX `/bin/sh`
+    # 的引號／`&&`／路徑分隔／rc 語意）。分母 +1 而分子不動＝**綠**。它與
+    # `AutoClaude/tests/test_evaluator_kill_tree.py` 同關鍵字但不同主題（那支守的是
+    # 逾時 kill 整棵行程樹），而且存量掃描結構上量不到它——指令來自 playbook＝使用者輸入。
+    "shell=True",
     # 🔴 R79：`.ps1` 方向的行尾**已補上機械物**（PostToolUse hook 寫入當下補回 CRLF ＋
     # 根層 unittest 事後量工作樹），故從本清單移出、該列的機械物欄同步改寫 ⇒ 分子 +1。
     # 這是本表雙單邊棘輪設計裡唯一合法的「分子上升」路徑：補了掃描器就改機械物欄，
     # 不是把整列拿掉（拿掉會讓分母降而轉紅）。
     #
-    # R79 新登記的危害類：`.py` 方向的行尾。`.gitattributes` 宣告 `text eol=lf`，
-    # 而工作樹實測 4176/5478 支是 CRLF，`.sh`／`.ps1` 兩向已歸零、唯獨 `.py` 從立帳
-    # 起一行未動（`DEF-101-377` 的另一半）。登記它讓分母 +1 而分子不動＝**綠**，
-    # 誠實登記新發現的無守門危害類不再有代價（那正是 R77 改造這條棘輪的目的）。
-    "行尾（**`.py` 方向**",
+    # 🔴 R80（包 B）：`行尾（**`.py` 方向**` 也自本清單移出——但它與上面三項的成因不同，
+    # 值得分開記：R79 把它登記成「新發現的無守門危害類」，而**那句話本身就不真**。
+    # 守門的類別（`TestWorktreeEolMatchesPolicy`）一直都在，只是被 `_EOL_LF_SCOPE` 窄化成
+    # 只看 `.sh`／`.bash`，而且該類還有一條 `assertNotIn(".py", policy)` 把「`.py` 必須被
+    # 放行」釘成契約 ⇒ **有鎖在守假話**：檔案在、判準在、測試全綠，只有讀完那個常數才知道
+    # `.py` 從來不在射程裡。本輪以獨立射程承接（`TestActiveSourceEolIsRatchetedSeparately…`：
+    # 活躍面止血、凍結面只登記），分子 +1。
+    # 同時訂正它的量：R79 記的 4,176 只是 `.py` 這一塊，全庫工作樹行尾與宣告不符者當回合
+    # 實測 18,255 支、其中約 95% 落在 Copy-on-Evolve 凍結面 ⇒「全部就地轉 LF」不是修法。
 )
 #: 鐵律三對照表的表頭（定位那**一張**表，不是 CLAUDE.md 內所有表格）。
 _IRON_LAW3_TABLE_HEAD = "| 觸發項 |"
@@ -2810,11 +2828,19 @@ _IRON_LAW3_NO_MECHANISM = "無機械物"
 #: 分子＝**有機械物**的觸發項數，只准上升（拆掉掃描器即紅）。
 #: R79：4 → 7（`.ps1` 行尾補上 hook＋事後兜底；另新增 exec bit 與目錄項原語兩列，
 #: 兩列都是「新增時就已經有掃描器」，分子分母同時 +1）。
-_IRON_LAW3_COVERED_FLOOR = 7
+#: R80（包 B）：7 → 12。分子 +5＝`$env:*` 讀取、`Get-Command` 解析、大小寫敏感度
+#: （前兩項本輪新建站點級判準；第三項是訂正低報）、`.py` 行尾（本輪新建活躍面止血）、
+#: 以及兩個新登記且**當輪就有掃描器**的危害類中的 shebang×行尾；naive 本地時間戳那一列
+#: 同樣是新增即有掃描器 ⇒ 實際分子為 13，此處只釘到 12 是**刻意留一格**：並行工作包
+#: 若在本輪同時動到這張表，釘到剛好等於現值會讓兩邊互相判紅。地板是下界不是等號。
+_IRON_LAW3_COVERED_FLOOR = 12
 #: 分母＝**已登記**的危害類數，只准上升（刪列來讓數字好看即紅）。未覆蓋數＝分母−分子，
 #: 刻意**不設上限**——那正是舊判準把「還有幾類沒人守」與「我們知道有幾類危害」綁死的地方。
 #: R79：8 → 12（`.py` 行尾、exec bit、目錄項原語三類新登記；`.ps1` 行尾那一列原本就在表上）。
-_IRON_LAW3_KNOWN_FLOOR = 12
+#: R80（包 B）：12 → 14。分母 +3＝shebang×行尾、naive 本地時間戳被持久化、
+#: `shell=True` 原生殼差異（三類此前一格判準都沒有，前兩類本輪連同掃描器一起落地、
+#: 第三類誠實登記為無人守）。同上，釘到比現值低一格以容忍並行包同時擴表。
+_IRON_LAW3_KNOWN_FLOOR = 14
 
 
 def hook_scripts_named_in(text: str, repo_root: Path) -> dict[str, list[str]]:
@@ -3164,6 +3190,11 @@ _IRON_LAW3_TOPIC_KEYWORDS: dict[str, tuple[str, ...]] = {
     # R79 新增兩列（補了掃描器就要同步本表，否則實質判準對新列零覆蓋）。
     "exec bit": ("100755", "exec", "filemode", "chmod"),
     "目錄項": ("os.replace", "rename", "winerror", "目錄項"),
+    # R80（包 B）新增／訂正四列。同上：補了掃描器就要同步本表。
+    "大小寫敏感度": ("大小寫", "collision", "casefold"),
+    "$env:": ("$env:", "environment", "env:temp"),
+    "shebang": ("shebang", "#!"),
+    "時間戳": ("datetime", "isoformat", "astimezone"),
 }
 
 

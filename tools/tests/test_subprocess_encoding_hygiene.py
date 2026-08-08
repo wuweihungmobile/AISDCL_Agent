@@ -132,7 +132,11 @@ def _scan_roots() -> list[tuple[Path, int]]:
     ——下限與實測拉開太遠時它自己會紅，所以這一串數字不會再默默腐化。"""
     latest = _latest_root()
     return [
-        (_REPO_ROOT / "tools", 77),
+        # 🔴 R80 收尾單人窗口重釘 77 → 92（**方向是收緊**：下限拉高＝要求更大的掃描面）。
+        # 觸發＝本輪三支護欄層檔的判準本體下沉 `tools/lib/`（DEF-101-957／958），`tools` 樹
+        # 由 95 支長到 97 支，而 77 這個下限只還守得住 79% 的掃描面 ⇒ `tree_count_verdict()`
+        # 的腐化上界當場紅並直接給出該填的數字（92 ＝ 97 × 0.95），本列照填、不做加減推算。
+        (_REPO_ROOT / "tools", 92),
         (_REPO_ROOT / "AutoClaude" / "tools", 41),
         (_REPO_ROOT / "AutoClaude" / "autoclaude", 194),
         (_REPO_ROOT / "AutoClaude" / "tests", 268),
@@ -1089,21 +1093,25 @@ class TestEntryPointStdioProtection(unittest.TestCase):
 # 試裡怎麼起它完全無關。
 _SETTINGS_JSON = _REPO_ROOT / ".claude" / "settings.json"
 
-#: hook command 字串裡的腳本路徑（正／反斜線皆收）。刻意不去解析 `-c` 那段
-#: Python 程式碼：shim 本體不含任何 `.py` 字面，路徑一律以引數形式出現在尾端。
-_PY_ARG_RE = re.compile(r"[\w./\\-]+\.py")
-
-
 def hook_command_scripts(settings: dict) -> list[tuple[str, str]]:
-    """`settings` 內每個 hook command 指名的腳本 → [(事件名, repo 相對 posix 路徑)]。"""
-    out: list[tuple[str, str]] = []
-    for event, entries in (settings.get("hooks") or {}).items():
-        for entry in entries or []:
-            for hook in entry.get("hooks") or []:
-                command = str(hook.get("command", ""))
-                for found in _PY_ARG_RE.finditer(command):
-                    out.append((event, found.group(0).replace("\\", "/")))
-    return out
+    """`settings` 內每個 hook 條目**實際會跑到**的腳本 → [(事件名, repo 相對 posix 路徑)]。
+
+    🔴 **R80：本函式此前只讀 `command` 字串，而那個假設已經被推翻。** Claude Code 的
+    hook 條目有兩種形態，腳本路徑住在不同欄位：shell form 在 `command` 裡，exec form
+    （帶 `args`，Windows 上不經 `bash.exe`＝不閃 console 視窗）則**結構性地搬到
+    `args`**。R80 把根 `.claude/settings.json` 轉成 exec form 之後實測：本函式掃出來的
+    腳本集合由 6 支變成 1 支（只剩啟動器自己）。
+
+    後果**不是**「這道鎖會紅」，是它會**恆綠**——分母掃出 0 支 ⇒ 沒有東西可違反，
+    rc 與「正確地全部通過」一模一樣。本檔判準四、
+    `test_doc_loc_baseline_freshness_r60.registered_hook_basenames`（經本函式）
+    都建立在這個分母上。⇒ 解析邏輯已收進唯一真相源 `tools/lib/hook_wiring.py`，
+    兩種形態都認得；本函式只保留呼叫端介面（回傳形狀逐字不變）。
+    """
+    sys.path.insert(0, str(_REPO_ROOT / "tools" / "lib"))
+    import hook_wiring  # noqa: PLC0415
+
+    return hook_wiring.settings_targets(settings)
 
 
 def scan_hook_command_children(
@@ -1180,9 +1188,43 @@ class TestRegisteredHookScriptsAreInChildEncodingScope(unittest.TestCase):
         scripts = {rel for _event, rel in hook_command_scripts(self._real_settings())}
         self.assertIn(
             _R74_P0_HOOK_REL, scripts,
-            f"{_R74_P0_HOOK_REL} 不在 settings.json 的 hook command 掃描結果內 ⇒ "
-            "判準四對 R74 P0 站點失去射程（hook 被拔掉，或 command 形態變了而 "
-            "_PY_ARG_RE 撈不到路徑）。實得：" + repr(sorted(scripts)),
+            f"{_R74_P0_HOOK_REL} 不在 settings.json 的 hook 佈線掃描結果內 ⇒ "
+            "判準四對 R74 P0 站點失去射程（hook 被拔掉，或條目形態變了而 "
+            "`tools/lib/hook_wiring.hook_entry_targets()` 撈不到路徑——R80 實測過"
+            "後者：shell form 轉 exec form 時腳本路徑會從 command 搬進 args）。"
+            "實得：" + repr(sorted(scripts)),
+        )
+
+    def test_the_scan_survives_the_exec_form_conversion(self) -> None:
+        """🔴 R80 注入自證：**在轉換後的 settings 上**，這道鎖必須仍然抓得到違規。
+
+        WHY 這條非有不可：exec form 把腳本路徑從 `command` 搬進 `args`，而失明的
+        表徵是**恆綠**（分母掃出 0 支 ⇒ 沒有東西可違反），與「正確地全部通過」在 rc
+        上無法區分。所以「轉換後 rc=0」證明不了任何事——必須證明「轉換後把註冊拿掉
+        會轉紅」。
+
+        注入用**真實檔案的內容**在記憶體裡動手（不寫磁碟）：合成 settings 證明不了
+        判準對 repo 現況有牙，而真的改磁碟上的 settings.json 會影響同一棵樹上其他
+        agent 的每一次工具呼叫（該檔記載過 hook 誤觸 deny 的 P0）。
+        """
+        real = self._real_settings()
+        self.assertIn(
+            _R74_P0_HOOK_REL,
+            {rel for _e, rel in hook_command_scripts(real)},
+            "控制組：真實 settings 應該掃得到那支 hook",
+        )
+        stripped = json.loads(json.dumps(real))
+        for _event, entries in (stripped.get("hooks") or {}).items():
+            for entry in entries or []:
+                entry["hooks"] = [
+                    hook for hook in entry.get("hooks") or []
+                    if _R74_P0_HOOK_REL not in json.dumps(hook, ensure_ascii=False)
+                ]
+        self.assertNotIn(
+            _R74_P0_HOOK_REL,
+            {rel for _e, rel in hook_command_scripts(stripped)},
+            "把該 hook 的註冊整條拿掉之後掃描結果竟然沒變 ⇒ 這道鎖是空轉的"
+            "（正是 exec form 轉換若沒同步解析面時的樣子）",
         )
         self.assertTrue(
             has_utf8_stdio_protection(
@@ -1194,26 +1236,34 @@ class TestRegisteredHookScriptsAreInChildEncodingScope(unittest.TestCase):
     # ── 判準紅綠自證：用**真實 production command 字樣**驅動，不用簡化版 ──────
 
     def _settings_with(self, script_rel: str) -> dict:
-        """把真實 settings.json 裡起 R74 P0 那支 hook 的 command 原字串取來，
-        只把腳本路徑換掉——這樣 fixture 驗的就是 production 的 `-c` ＋ runpy
-        形態本身，而不是一個我自己寫得比較好認的簡化字串。"""
+        """把真實 settings.json 裡起 R74 P0 那支 hook 的**整個條目**取來，只把腳本
+        路徑換掉——這樣 fixture 驗的就是 production 當下的佈線形態本身，而不是一個
+        我自己寫得比較好認的簡化字串。
+
+        🔴 R80 訂正：此處原本硬斷言 production 是 `-c` ＋ runpy 形態（shell form）。
+        那兩行斷言把 fixture 綁死在**一種**形態上，於是 exec form 轉換會讓這支自證
+        直接 fail——而它要證的東西（判準能不能認出無保護的腳本）與形態無關。改成
+        逐字搬真實條目、只換路徑，並以 `hook_entry_targets()` 回頭驗「真的換成功了」，
+        形態變更不再需要動這裡。
+        """
+        sys.path.insert(0, str(_REPO_ROOT / "tools" / "lib"))
+        import hook_wiring  # noqa: PLC0415
+
         real = json.loads(_SETTINGS_JSON.read_text(encoding="utf-8"))
         for _event, entries in (real.get("hooks") or {}).items():
             for entry in entries:
                 for hook in entry.get("hooks") or []:
-                    command = str(hook.get("command", ""))
-                    if _R74_P0_HOOK_REL in command:
-                        self.assertIn("runpy.run_path", command,
-                                      "production command 已不是 runpy 形態，"
-                                      "本 fixture 的前提要重新確認")
-                        self.assertIn(" -c ", command,
-                                      "production command 已不是 -c 形態")
-                        return {"hooks": {"PreToolUse": [{
-                            "matcher": "Bash",
-                            "hooks": [{"command": command.replace(
-                                _R74_P0_HOOK_REL, script_rel)}],
-                        }]}}
-        self.fail(f"真實 settings.json 內找不到起 {_R74_P0_HOOK_REL} 的 command")
+                    if _R74_P0_HOOK_REL not in hook_wiring.hook_entry_targets(hook):
+                        continue
+                    swapped = json.loads(
+                        json.dumps(hook, ensure_ascii=False).replace(
+                            _R74_P0_HOOK_REL, script_rel))
+                    self.assertIn(
+                        script_rel, hook_wiring.hook_entry_targets(swapped),
+                        "fixture 換路徑後解析不到新路徑 ⇒ 這個 fixture 本身壞掉了")
+                    return {"hooks": {"PreToolUse": [{
+                        "matcher": "Bash", "hooks": [swapped]}]}}
+        self.fail(f"真實 settings.json 內找不到會跑到 {_R74_P0_HOOK_REL} 的條目")
 
     def test_criterion_red_green_on_the_real_production_command_form(self) -> None:
         with tempfile.TemporaryDirectory() as td:

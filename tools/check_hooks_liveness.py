@@ -32,6 +32,7 @@ Exit code：0 = hooks 已生效（或不在 git repo 內、無法判定）；
 """
 from __future__ import annotations
 
+import json
 import subprocess
 import sys
 from collections.abc import Callable
@@ -152,6 +153,49 @@ def evaluate(
     )
 
 
+def check_claude_hook_carriers(repo_root: Path) -> bool:
+    """**Claude Code** hook 載具的 liveness（R80 新增；git hooks 那半在下面）。
+
+    WHY 這半非有不可：R80 把根 `.claude/settings.json` 的 hook 條目轉成 **exec form**
+    （不經 `bash.exe` ⇒ 不再每觸發一次就閃一個 console 視窗），而 exec form 的
+    `command` 是一個**執行檔路徑**：`${CLAUDE_PROJECT_DIR}/.venv/Scripts/pythonw.exe`。
+    那個檔不在時（沒跑過 bootstrap／venv 被砍掉／被重建到別處），CC 只記一行 ERROR
+    就放行——**六支守衛全部靜默失效，而螢幕上的表徵就是「終於不閃窗了」**。
+
+    🔴 為何落在本檔而不是 CI 或 hook 自己：
+      · 不能放在 hook 裡——載具沒了那支 hook 也跑不了（雞生蛋）。
+      · 不能只靠 CI——**CI 從不跑 Claude Code hook**，在那裡這個檢查沒有意義（不是
+        「會誤紅所以跳過」，是語意上不適用）；而本檔的四個呼叫端（local_ci_gate.{ps1,sh}
+        ／integration_gate.{ps1,sh}）本來就在 `$CI` 有值時整段跳過，這個豁免是既有的、
+        語意的，不是為了讓紅變綠新加的。
+      · 判準本身（`tools/lib/hook_wiring.carrier_liveness_problems`）是**宣告 ↔ 實況
+        雙向綁定**：settings.json 宣告了哪個載具，就要求那個載具存在 ⇒ 有人把載具
+        換掉時同一條規則跟著移動，不會退化成守著一個過時的硬編路徑。
+
+    與本檔既有那半一樣是 **advisory**：印警告、回 False，不阻擋呼叫端閘門。
+    """
+    try:
+        sys.path.insert(0, str(Path(__file__).resolve().parent / "lib"))
+        import hook_wiring  # noqa: PLC0415
+
+        settings_path = repo_root / ".claude" / "settings.json"
+        if not settings_path.is_file():
+            return True  # 沒有 settings＝沒有宣告，無從判定
+        settings = json.loads(settings_path.read_text(encoding="utf-8"))
+        problems = hook_wiring.carrier_liveness_problems(settings, str(repo_root))
+    except Exception:
+        return True  # 判不出來一律不出聲（同本檔既有的 advisory 語氣）
+    if not problems:
+        return True
+    print("")
+    print("[hooks liveness] Claude Code hook 載具不存在 — 這台機器上**全部 hook 都不會跑**！")
+    for problem in problems:
+        print(f"    {problem}")
+    print("    （本檢查僅警告、不阻擋閘門執行；CI 環境由呼叫端整段跳過——"
+          "CI 從不執行 Claude Code hook）")
+    return False
+
+
 def check_hooks_liveness() -> bool:
     """CLI advisory 入口：自行取得 git 輸入、交給 `evaluate()` 判定，僅印警告不阻擋。
 
@@ -167,8 +211,11 @@ def check_hooks_liveness() -> bool:
     raw = _run(["git", "-C", str(top_path), "config", "--get", "core.hooksPath"])
 
     result = evaluate(top_path, git_dir, git_common_dir, raw)
+    # 兩個 liveness 是**獨立**的失效面（git hooks 閘門 vs Claude Code hook 載具），
+    # 兩邊都要出聲——只回報其中一個會讓另一個的失效變成靜默。
+    carriers_ok = check_claude_hook_carriers(top_path)
     if result.ok:
-        return True
+        return carriers_ok
 
     shown = result.current_value if result.current_value else "（未設定）"
     print("")

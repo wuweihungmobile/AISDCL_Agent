@@ -86,6 +86,51 @@ def skip_group_census(reasons: Iterable[str]) -> dict[str, int]:
     return census
 
 
+# ── 應然值（目標）：「歸零」的正確定義 ────────────────────────────────────────────
+#
+# 🔴 R80 包 A（掌舵者驗收問題②「歸零可不可能」）：**skip 總數歸零在單一平台上結構性
+# 不可能**——`platform` 群的意思正是「這支測試在**別的**平台才有驗證價值」，在 Windows
+# 上把它跑起來不是覆蓋變好、是斷言變假（R72 判過的「守衛 `if on_windows: return []`」
+# 就是那個錯誤的極端形）。所以「skipped=0」是一個**永遠達不到、且不該達到**的目標，
+# 而一個達不到的目標與沒有目標等價：它不會出現在任何判準裡，於是實務上沒有人在瞄準它。
+#
+# 正確的目標必須把「結構性不可跑」與「還沒有人去修」分開，本表就是那條線：
+#   · ZERO 群（tool-absence／env-disabled／debt／untagged）＝**欠債**，可歸零且應歸零。
+#     R79 已實證 `env-disabled` 的可歸零性：那台機器一件缺件都沒有，設三個環境變數就
+#     消掉 92 支。`untagged` 更是定義上可歸零——它只代表「這支 skip 還沒人說得出它屬於
+#     哪一類」，補一句標籤就結案。
+#   · STRUCTURAL 群（platform／structural-pair）＝**結構性**，目標**不是** 0，而是
+#     「互補剖面上有人真的跑到它」：一支 `[POSIX-NATIVE-ONLY]` 在 win32 剖面 skip 是
+#     對的，但如果 linux 剖面根本沒有人量過，那它就是**全世界都沒跑過**——那才是缺陷，
+#     而它跟「skip 數是多少」完全無關，量 skip 數永遠看不到它。
+#
+# ⇒ 可被機械檢核的目標＝ `open_debt(census)`（ZERO 群之和）只准降、目標值 0；
+#    加上 `skip_target_report()` 把 STRUCTURAL 群的互補剖面缺口逐條列出來。
+SKIP_TARGET_ZERO = "zero"
+SKIP_TARGET_STRUCTURAL = "structural"
+_SKIP_GROUP_TARGET: dict[str, str] = {
+    SKIP_GROUP_PLATFORM: SKIP_TARGET_STRUCTURAL,
+    SKIP_GROUP_STRUCTURAL: SKIP_TARGET_STRUCTURAL,
+    SKIP_GROUP_TOOL_ABSENCE: SKIP_TARGET_ZERO,
+    SKIP_GROUP_ENV_DISABLED: SKIP_TARGET_ZERO,
+    SKIP_GROUP_DEBT: SKIP_TARGET_ZERO,
+    SKIP_GROUP_UNTAGGED: SKIP_TARGET_ZERO,
+}
+#: 目標為 0 的群（＝真正的「欠債」面）。順序沿用 `SKIP_GROUPS` 以利輸出穩定。
+ZERO_TARGET_GROUPS: tuple[str, ...] = tuple(
+    g for g in SKIP_GROUPS if _SKIP_GROUP_TARGET[g] == SKIP_TARGET_ZERO
+)
+
+
+def open_debt(census: Mapping[str, int]) -> int:
+    """純函式：這次執行的**欠債型** skip 支數（ZERO 群之和）——即「歸零」的標的。
+
+    刻意不是 `len(reasons)`：把結構性不可跑的那一群算進去，會讓這個數字永遠不可能到 0，
+    而永遠到不了的目標等於沒有目標。
+    """
+    return sum(census.get(g, 0) for g in ZERO_TARGET_GROUPS)
+
+
 # ── 量測面：`-rs` 區塊的解析 ＋ **量測完整性** ─────────────────────────────────
 #
 # 🔴 為何這兩件事住在政策模組而不是消費端（R79 收輪／QA blocking）：解析器與判準本來
@@ -187,6 +232,16 @@ def skip_measurement_problems(pytest_output: str, parsed_skips: int) -> list[str
 #     當場是綠的）。沒有這一邊，最省力的滿足方式會變成「不要記錄新發現」——R72~R76 五類
 #     新危害一項都沒進表，就是被單邊判準逼出來的。
 #
+#: 🔴 R80 包 A（S3-09）：剖面鍵**必須編碼「巢狀 Claude Code session」這個維度**。
+#: 缺陷本體（當回合實查）：`AutoClaude/tests` 有一族 skip 的述詞是
+#: `shutil.which("claude") is None or os.environ.get("CLAUDECODE") == "1"`
+#: （`tests/test_gap014_020.py`／`tests/test_gap039_049.py`，本次實測 11 支），於是
+#: 「在 Claude Code session 裡跑」與「schtasks nightly 跑」是**兩個不同的母體**，同一棵樹
+#: 的健康值天生差一整族。剖面鍵不編碼它，天花板就在比不同的東西——而差異的方向是
+#: 巢狀時 skip 較多，也就是「拿寬鬆的上限去管嚴格的環境」，失效方向仍是看起來很健康。
+#: 對照組（誠實劃界）：`tools/tests` 那一棵**不受**這個維度影響——當回合以 Grep 對
+#: `tools/tests` 全樹搜 `CLAUDECODE` 命中 0 ⇒ 該剖面鍵刻意不帶這一段，不是漏寫。
+#:
 #: 剖面鍵 ＝ `<樹>@<平台>+<能力>`。剖面是必要的：同一棵樹在「本機 PG 可用」與「沒有 PG」
 #: 兩種狀態下的健康值差 92 支，用同一個數字管必然一邊沒有鑑別力、另一邊恆假紅；平台同理。
 #: 剖面由呼叫端**實測**決定（local_ci_gate 探測完 PG 才知道自己在哪一格），不是由人宣告。
@@ -205,7 +260,7 @@ def skip_measurement_problems(pytest_output: str, parsed_skips: int) -> list[str
 #: 🔴 `untagged` 這一格是本鎖唯一真正有牙的地方，也是它最脆弱的地方：R79 有六個包並行改樹
 #: （量測期間樹已由 135 長到 136 支 skip），**收輪者必須以停工後的單人窗口重跑一次並重釘**。
 _RUNTIME_SKIP_CEILING: dict[str, dict[str, int]] = {
-    "AutoClaude/tests@win32+nopg": {
+    "AutoClaude/tests@win32+nopg+nested": {
         SKIP_GROUP_PLATFORM: 17,
         SKIP_GROUP_TOOL_ABSENCE: 0,
         SKIP_GROUP_ENV_DISABLED: 1,
@@ -213,13 +268,39 @@ _RUNTIME_SKIP_CEILING: dict[str, dict[str, int]] = {
         SKIP_GROUP_DEBT: 0,
         SKIP_GROUP_UNTAGGED: 118,
     },
-    "AutoClaude/tests@win32+pg": {
+    "AutoClaude/tests@win32+pg+nested": {
         SKIP_GROUP_PLATFORM: 17,
-        SKIP_GROUP_TOOL_ABSENCE: 0,
+        SKIP_GROUP_TOOL_ABSENCE: 3,
         SKIP_GROUP_ENV_DISABLED: 1,
         SKIP_GROUP_STRUCTURAL: 0,
         SKIP_GROUP_DEBT: 0,
-        SKIP_GROUP_UNTAGGED: 26,
+        SKIP_GROUP_UNTAGGED: 23,
+    },
+    # 🔴 R80 包 A（S3-04）：根層 `tools/tests` 那一棵此前**完全不在任何天花板管轄內**
+    # （43 支 skip，`run_root_unittests.py` 只印不判、rc 與它無關）。本列即那道管轄的入表。
+    # 值＝R80 當回合以 `python tools/run_root_unittests.py` 實跑後、由本模組對其
+    # `all_skips()` 逐支分群所得（取得方式見 run_root_unittests.report_skip_census）。
+    "tools/tests@win32": {
+        SKIP_GROUP_PLATFORM: 38,
+        SKIP_GROUP_TOOL_ABSENCE: 0,
+        SKIP_GROUP_ENV_DISABLED: 0,
+        SKIP_GROUP_STRUCTURAL: 0,
+        SKIP_GROUP_DEBT: 0,
+        SKIP_GROUP_UNTAGGED: 5,
+    },
+    # 🔴 R80 包 C（QA-R80-01）：Linux 剖面的**實測值今天有了**——`act` 在 Linux 容器實跑
+    # root-infra 那支 job，`run_root_unittests.py` 自己印出
+    # `[skip census] tools/tests@linux 共 72 支：platform=63／untagged=9／欠債型 9 支（目標 0）`
+    # 並附「⚠️ 剖面未登記——量測正常，但這個平台從來沒有人量過健康值」。工具訊息逐字寫著
+    # 「把上面那行實測值填進 skip_group_policy 兩張表即升級為阻斷」，本列就是照做。
+    # 值是**量出來的**不是推算的（上方 win32 兩列的同一條紀律）；未列出的群實測即 0。
+    "tools/tests@linux": {
+        SKIP_GROUP_PLATFORM: 63,
+        SKIP_GROUP_TOOL_ABSENCE: 0,
+        SKIP_GROUP_ENV_DISABLED: 0,
+        SKIP_GROUP_STRUCTURAL: 0,
+        SKIP_GROUP_DEBT: 0,
+        SKIP_GROUP_UNTAGGED: 9,
     },
 }
 
@@ -229,7 +310,7 @@ _RUNTIME_SKIP_CEILING: dict[str, dict[str, int]] = {
 #: 恆等，「上限高於天花板」這一向結構上永遠不可能觸發＝又一道沒有鑑別力的鎖（第一版就是
 #: 那樣寫的，當回合自查發現）。兩張表必須是兩份獨立的字面值，diff 才看得見有人在加大額度。
 _RUNTIME_SKIP_CEILING_MAX: dict[str, dict[str, int]] = {
-    "AutoClaude/tests@win32+nopg": {
+    "AutoClaude/tests@win32+nopg+nested": {
         SKIP_GROUP_PLATFORM: 17,
         SKIP_GROUP_TOOL_ABSENCE: 0,
         SKIP_GROUP_ENV_DISABLED: 1,
@@ -237,15 +318,133 @@ _RUNTIME_SKIP_CEILING_MAX: dict[str, dict[str, int]] = {
         SKIP_GROUP_DEBT: 0,
         SKIP_GROUP_UNTAGGED: 118,
     },
-    "AutoClaude/tests@win32+pg": {
+    "AutoClaude/tests@win32+pg+nested": {
         SKIP_GROUP_PLATFORM: 17,
-        SKIP_GROUP_TOOL_ABSENCE: 0,
+        SKIP_GROUP_TOOL_ABSENCE: 3,
         SKIP_GROUP_ENV_DISABLED: 1,
         SKIP_GROUP_STRUCTURAL: 0,
         SKIP_GROUP_DEBT: 0,
-        SKIP_GROUP_UNTAGGED: 26,
+        SKIP_GROUP_UNTAGGED: 23,
+    },
+    "tools/tests@win32": {
+        SKIP_GROUP_PLATFORM: 38,
+        SKIP_GROUP_TOOL_ABSENCE: 0,
+        SKIP_GROUP_ENV_DISABLED: 0,
+        SKIP_GROUP_STRUCTURAL: 0,
+        SKIP_GROUP_DEBT: 0,
+        SKIP_GROUP_UNTAGGED: 5,
+    },
+    "tools/tests@linux": {
+        SKIP_GROUP_PLATFORM: 63,
+        SKIP_GROUP_TOOL_ABSENCE: 0,
+        SKIP_GROUP_ENV_DISABLED: 0,
+        SKIP_GROUP_STRUCTURAL: 0,
+        SKIP_GROUP_DEBT: 0,
+        SKIP_GROUP_UNTAGGED: 9,
     },
 }
+
+# ── S3-02 ／🔴 QA-R80-01：分母是**執行者剖面**，不是平台 ────────────────────────
+#
+# 原始缺陷（S3-02）：唯一會跑整套 AutoClaude/tests 的 CI job 在 ubuntu，而天花板表一個
+# linux 剖面都沒有 ⇒ 那道棘輪**在雲端零阻斷力**（`--census-only` 對未登記剖面回 advisory）。
+#
+# 🔴 R80 包 C（QA-R80-01）把分母由「平台」換成「剖面」，因為 R80 自己給剖面鍵加了第三個
+# 維度（`+nested`／`+solo`）之後，平台粒度就不再等於「一個會真的跑完整棵樹的執行者」：
+# `AutoClaude/tests@win32+nopg+nested`（pre-push，在 Claude Code session 內）已登記，但
+# **同一棵樹、同一個平台**的 `…+solo`（nightly／schtasks）從來沒有人量過；平台層的判準看到
+# 「win32 已登記」就整格放行 ⇒ nightly 那一路的天花板由「有牙」退化成 advisory
+# （`profile_registered()` 為 False ⇒ 消費端只印不判）。R79 立這道棘輪的理由逐字是
+# 「skip 可以無聲從 43 長到 143 而閘門全綠」——nightly 今天正好回到那個狀態，而缺口帳
+# 只記平台 ⇒ 這件事既不會被修，也不會被想起來（本 repo 判過的第 10 號形態：劃界不等於防護，
+# 所以它**不能**只寫成一句註解）。
+#
+# 判準形狀＝雙單邊（同 `TestR74IronLawMechanismAccounting`），刻意**不是** shrink-only 上限：
+#   · 分母 `_FULL_SUITE_RUNNERS` 只准增（少一列＝有人把一個執行者從帳上抹掉）；
+#   · 分子「已登記天花板的執行者數」只准增；
+#   · 未量測數＝分母−分子，**刻意不設上限**——舊版的 `_UNMEASURED_CI_PLATFORMS_MAX = 1`
+#     正是「誠實登記一個新缺口要付代價」的那個代價：本輪誠實補上 nightly solo 就會當場撞
+#     線，而最省力的滿足方式會變成不要登記（R74 已為同一個病寫過整段判詞）。
+#   · 代價由另一邊補回來：每一筆未量測**必須具名寫出承接輪次**（大寫 R 加輪號），否則紅。
+_FULL_SUITE_RUNNERS: dict[str, str] = {
+    "AutoClaude/tests@linux+nopg+solo": "autoclaude-ci.yml 的 test job（ubuntu-latest）",
+    "AutoClaude/tests@win32+nopg+nested": "pre-push 的 AutoClaude leg（在 CC session 內）",
+    "AutoClaude/tests@win32+nopg+solo": "run_local_nightly.ps1／schtasks nightly（非巢狀）",
+    "tools/tests@linux": "root-infra-ci.yml（ubuntu-latest）＋本機 act 跑的同一支 job",
+    "tools/tests@win32": "pre-push 的 root leg／直跑 tools/run_root_unittests.py",
+}
+_UNMEASURED_RUNNER_PROFILES: dict[str, str] = {
+    "AutoClaude/tests@linux+nopg+solo":
+        "R80 包 A 交棒：本機沒有 Linux runner，憑空填數字就是憑空造出沒有鑑別力的門檻。"
+        "取得＝ubuntu job 內跑 `local_ci_gate.py --census-only` 並逐格入表。帳本 DEF-101-960",
+    "AutoClaude/tests@win32+nopg+solo":
+        "QA-R80-01：nightly（非巢狀）與 pre-push 是兩個母體——一族 skip 的述詞含 "
+        "`CLAUDECODE == '1'`，巢狀多 skip ⇒ 拿 nested 的上限管 solo 是拿寬鬆的管嚴格的。"
+        "取得＝對 nightly 的 pytest log 跑 `--census-only`。帳本 DEF-101-960",
+}
+#: 雙單邊的兩個**下限**（取代舊的 shrink-only 上限，理由見上方）：分母與分子都只准增。
+_FULL_SUITE_RUNNERS_MIN = 5
+_MEASURED_RUNNERS_MIN = 3
+#: 未量測列必須指名一個**帳本列**當承接處。刻意要 DEF-ID 而不是「R<下一輪>」字面：後者
+#: 是在程式碼裡宣稱一個還沒發生的輪號（本 repo 另有一道全樹掃描在擋這件事），而承接輪次
+#: 本來就該只有帳本一個家——註解裡寫「還沒量」則是判過的第 10 號形態（劃界不等於防護）。
+_HANDOVER_POINTER_RE = re.compile(r"DEF-\d+-\d+")
+
+#: 平台層是由上面兩張表**派生**的視圖，不是第二個家——保留這兩個名字是因為既有消費端與
+#: 既有回歸鎖讀的是它們（`AutoClaude/tests/tools/test_local_ci_gate.py`）。派生規則：一個
+#: 平台上任一執行者未量測，該平台即算「未量測」。
+def _platform_of(profile: str) -> str:
+    return profile.split("@", 1)[1].split("+", 1)[0]
+
+
+_CI_FULL_SUITE_PLATFORMS: dict[str, str] = {
+    _platform_of(p): w for p, w in _FULL_SUITE_RUNNERS.items()}
+_UNMEASURED_CI_PLATFORMS: dict[str, str] = {
+    _platform_of(p): w for p, w in _UNMEASURED_RUNNER_PROFILES.items()}
+
+
+def ci_platform_coverage_problems() -> list[str]:
+    """純函式：會跑整棵樹、卻沒有登記健康值的**執行者剖面**。回空 list ＝帳算得清。
+
+    五向：①分母縮水 ②分子縮水 ③未登記又未具名豁免 ④已登記卻還掛在豁免表（把有人守的
+    寫成沒人守，與反向同樣是假事實）⑤具名豁免卻沒指名承接帳本列（＝沒有承接者的永久缺口）。
+    另保留平台層那一向：一個**整個平台**都沒有任何執行者入帳時仍要紅（例：日後新增 macOS
+    full-suite job），那是派生視圖唯一還有鑑別力的地方。
+    """
+    problems: list[str] = []
+    measured = [p for p in _FULL_SUITE_RUNNERS if profile_registered(p)]
+    if len(_FULL_SUITE_RUNNERS) < _FULL_SUITE_RUNNERS_MIN:
+        problems.append(
+            f"會跑整棵樹的執行者只剩 {len(_FULL_SUITE_RUNNERS)} 筆 < 下限 "
+            f"{_FULL_SUITE_RUNNERS_MIN}——這張表是**分母**，只准增。少一列代表有人把一個"
+            "執行者從帳上抹掉，而缺口會跟著從視野裡消失")
+    if len(measured) < _MEASURED_RUNNERS_MIN:
+        problems.append(
+            f"已量測的執行者只剩 {len(measured)} 筆 < 下限 {_MEASURED_RUNNERS_MIN}"
+            "——這是**分子**，只准增。拆掉一個已登記的剖面就是把它退回 advisory")
+    for profile, where in _FULL_SUITE_RUNNERS.items():
+        exempt = _UNMEASURED_RUNNER_PROFILES.get(profile)
+        if profile_registered(profile):
+            if exempt is not None:
+                problems.append(
+                    f"執行者 `{profile}` 已經登記天花板了，卻還留在 _UNMEASURED_RUNNER_"
+                    "PROFILES 裡——把已經有人守的東西寫成沒人守，與反向一樣是假事實，請刪掉")
+        elif exempt is None:
+            problems.append(
+                f"執行者 `{profile}`（{where}）會跑完整棵樹，但 _RUNTIME_SKIP_CEILING 沒有"
+                "它的剖面、_UNMEASURED_RUNNER_PROFILES 也沒有具名豁免 ⇒ 這道棘輪在那一路"
+                "上零阻斷力（消費端只印不判），而且沒有任何地方登記過這件事")
+        elif not _HANDOVER_POINTER_RE.search(exempt):
+            problems.append(
+                f"執行者 `{profile}` 具名豁免了，但豁免理由沒有指名承接的帳本列（形態 "
+                "`DEF-x-y`）——沒有承接者的缺口就是永久缺口，而它今天長得像已經登記好了")
+    accounted = {_platform_of(p) for p in _FULL_SUITE_RUNNERS}
+    for platform in _CI_FULL_SUITE_PLATFORMS:
+        if platform not in accounted:
+            problems.append(
+                f"平台 `{platform}` 上有 job 會跑整棵樹，但 _FULL_SUITE_RUNNERS 一個執行者"
+                "剖面都沒有 ⇒ 它連分母都沒進去，上面每一向都判不到它")
+    return problems
 
 
 def profile_registered(profile: str) -> bool:
@@ -260,6 +459,26 @@ def profile_registered(profile: str) -> bool:
     return profile in _RUNTIME_SKIP_CEILING and profile in _RUNTIME_SKIP_CEILING_MAX
 
 
+def retag_budget(profile: str, census: Mapping[str, int]) -> int:
+    """純函式：這次執行從 `untagged` **搬出去**了幾支（＝補標籤的額度）。
+
+    🔴 R80 包 A（S3-03）存在理由——舊判準的形狀是錯的，而且錯在它自己宣傳的出口上：
+    舊訊息逐字寫著「合法出口只有『把那些測試變成真的會跑』或『**補上正確的分群標籤**』」，
+    但「補標籤」做的事就是把一支 skip 從 `untagged` 搬進某個具名群，那一群的計數必然 +1
+    ⇒ 該群當場超過上限 ⇒ **照著失敗訊息做，就會被同一道判準判紅**。
+    當回合注入實測（三組，逐字見包 A 回報）：
+      · untagged 118→0、env-disabled 1→119（純補標籤，總量一支沒變）⇒ 舊判準回 1 筆問題；
+      · untagged 118→112、platform 17→20（總量 136→133，**樹變健康了**）⇒ 舊判準回 1 筆問題；
+      · untagged 118→115（單純變少）⇒ 綠。
+    也就是說：**唯一不會被罰的改善方式是「skip 憑空消失」**，而那正是本 repo 最不該鼓勵的
+    那一種（R76 記過的「看起來變乾淨」）。分群天花板必須對「群間位移」保持中立，
+    只對「總量上升」與「未分類的欠債上升」說話。
+    """
+    ceilings = _RUNTIME_SKIP_CEILING.get(profile) or {}
+    return max(0, ceilings.get(SKIP_GROUP_UNTAGGED, 0)
+               - census.get(SKIP_GROUP_UNTAGGED, 0))
+
+
 def skip_group_census_problems(
     profile: str,
     census: Mapping[str, int],
@@ -268,8 +487,13 @@ def skip_group_census_problems(
 ) -> list[str]:
     """分群天花板的判準（純函式）。回空 list ＝合格。
 
-    五向：①剖面未登記 ②某群超過上限 ③上限高於 shrink-only 天花板 ④census 出現未登記
-    的群 ⑤`[DEBT]` 的 reason 沒寫承接輪次（沒有承接者的欠債＝永久欠債）。
+    六向：①剖面未登記 ②**總量**超過上限 ③某群超過「上限＋補標籤額度」 ④上限高於
+    shrink-only 天花板 ⑤census 出現未登記的群 ⑥`[DEBT]` 的 reason 沒寫承接輪次。
+
+    ②③ 的分工就是 S3-03 的修法：總量那一道是真正有牙的（skip 變多一定紅），分群那一道
+    只在「這一群變多、而且**不是**從 untagged 搬過來的」時候才紅。誠實劃界：兩支 untagged
+    被修好、同時新增兩支 env-disabled，在本判準下是綠的（總量不變、額度剛好抵銷）——
+    要抓那一種，靠的是 `skip_tag_policy` 的靜態站點面，不是這裡的計數面。
     """
     problems: list[str] = []
     ceilings = _RUNTIME_SKIP_CEILING.get(profile)
@@ -280,6 +504,14 @@ def skip_group_census_problems(
             f"／_RUNTIME_SKIP_CEILING_MAX（實測 {dict(census)}）——新剖面必須顯式入表，"
             "否則它的 skip 數靜默不受管轄"
         ]
+    budget = retag_budget(profile, census)
+    total_got = sum(census.get(g, 0) for g in set(census) | set(ceilings))
+    total_cap = sum(ceilings.values())
+    if total_got > total_cap:
+        problems.append(
+            f"{profile}／**總量**：實測 {total_got} 支 > 上限 {total_cap}——skip 真的變多了。"
+            "🔴 合法出口只有「把那些測試變成真的會跑」，不是把上限調大"
+        )
     for group in sorted(set(census) | set(ceilings) | set(ceiling_max)):
         got = census.get(group)
         ceiling = ceilings.get(group)
@@ -297,11 +529,14 @@ def skip_group_census_problems(
                 "——skip 額度只准變少。要真的加大，必須在同一個 commit 顯式上修 "
                 f"skip_group_policy._RUNTIME_SKIP_CEILING_MAX['{profile}']['{group}'] 並說明理由"
             )
-        if got is not None and got > ceiling:
+        # `untagged` 不吃額度（額度就是它自己讓出來的），其餘各群可吃。
+        allowance = ceiling if group == SKIP_GROUP_UNTAGGED else ceiling + budget
+        if got is not None and got > allowance:
             problems.append(
-                f"{profile}／群 `{group}`：實測 {got} 支 > 上限 {ceiling}——"
-                "這一群的 skip 變多了。🔴 合法出口只有「把那些測試變成真的會跑」或"
-                "「補上正確的分群標籤」，**不是**把上限調大（見本表上方的雙單邊設計）"
+                f"{profile}／群 `{group}`：實測 {got} 支 > 上限 {ceiling}"
+                f"（本次補標籤額度 {budget}，可用 {allowance}）——這一群多出來的 skip"
+                "**不是**從 untagged 搬過來的，是真的新增。🔴 合法出口只有「把那些測試"
+                "變成真的會跑」，不是把上限調大（見本表上方的雙單邊設計）"
             )
     for reason in reasons:
         if (skip_group(reason) == SKIP_GROUP_DEBT
@@ -311,3 +546,46 @@ def skip_group_census_problems(
                 f"——沒有承接者的欠債就是永久欠債：{reason[:120]}"
             )
     return problems
+
+
+# ── 目標報告（掌舵者驗收問題②的可機械檢核形式）────────────────────────────────
+#
+#: 每個剖面的**互補剖面**：`platform` 群那些「在這裡 skip 是對的」的測試，究竟在哪個
+#: 剖面上真的被跑到。宣告成資料而不是散文，才有辦法被查——R80 之前這件事零機械證明
+#: （S3-08），手驗過但那個過程不可重跑，於是等同沒驗。
+_COMPLEMENTARY_PROFILE: dict[str, str] = {
+    "AutoClaude/tests@win32+nopg+nested": "AutoClaude/tests@linux+nopg+solo",
+    "AutoClaude/tests@win32+pg+nested": "AutoClaude/tests@linux+pg+solo",
+    "tools/tests@win32": "tools/tests@linux",
+}
+
+
+def skip_target_report(profile: str, census: Mapping[str, int]) -> list[str]:
+    """純函式：這個剖面**距離目標還有多遠**（不是「有沒有違規」）。回空 list ＝已達標。
+
+    與 `skip_group_census_problems` 刻意分開、且刻意**不接任何閘門的 rc**：
+      · 天花板判準回答「有沒有退步」——它必須能擋 push，所以只能問已經量得到的事；
+      · 本函式回答「還差多少才到位」——它問的是**還沒量過**的事（互補剖面），
+        今天必然有缺口，把它接上 rc 只會製造一個所有人都學會忽略的常紅。
+    兩者混在一起，就會變成「為了讓閘門綠而把目標訂低」，那正是 S3-03 的病根。
+    """
+    out: list[str] = []
+    debt = open_debt(census)
+    if debt:
+        detail = "／".join(f"{g}={census.get(g, 0)}" for g in ZERO_TARGET_GROUPS)
+        out.append(
+            f"{profile}：欠債型 skip 還有 {debt} 支（目標 0）——{detail}。"
+            "這四群是**可歸零**的那一半：untagged 補一句標籤就結案、env-disabled 設環境"
+            "變數就會跑（R79 實證一次消 92 支）、tool-absence 裝上該裝的東西、debt 有承接輪次"
+        )
+    structural = sum(census.get(g, 0) for g in SKIP_GROUPS
+                     if _SKIP_GROUP_TARGET[g] == SKIP_TARGET_STRUCTURAL)
+    counterpart = _COMPLEMENTARY_PROFILE.get(profile)
+    if structural and (counterpart is None or not profile_registered(counterpart)):
+        out.append(
+            f"{profile}：結構性 skip {structural} 支，它們的目標**不是** 0，而是"
+            f"「在互補剖面 `{counterpart or '（未宣告）'}` 上真的被跑到」——而該剖面"
+            "至今沒有人量過 ⇒ 這些測試目前**沒有任何機械證據**顯示它們在世界上任何一處"
+            "跑過。這是量 skip 數永遠看不見的那一半缺口（S3-08）"
+        )
+    return out

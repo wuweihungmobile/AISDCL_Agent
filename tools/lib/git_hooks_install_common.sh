@@ -1,3 +1,6 @@
+# shellcheck shell=bash
+# ↑ R80 S8-06：本檔**刻意沒有 shebang**（只被 source，加了會誤示它可直呼），但少了它 shellcheck
+#   不知道方言 ⇒ 報 SC2148 並把本檔其餘所有判準一併降級（＝實質落在 lint 盲區）；`shell=bash` 兩者同治。
 # git_hooks_install_common.sh — 共用 git hooks 安裝流程（bash 版薄殼層，對應
 # tools/lib/GitHooksInstallCommon.ps1 的 bash 版；獨立複審 finding 後改為薄殼層）。
 #

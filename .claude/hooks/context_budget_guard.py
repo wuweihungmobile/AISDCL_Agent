@@ -143,8 +143,9 @@ R78 版的鏈條是「印一段話 → 模型自己記得去 compact」，而「
   · 只在 `>= 90%` 且 **window 不是保守下界猜測**時擋（`may_block()`）。分母是猜的
     就只出聲不擋——否則今天這個缺陷（1M session 被當成 200K）會直接變成「真實 18%
     就把工具鎖死」，比原缺陷更糟。
-  · 只擋**展開型**工具（`BLOCKING_TOOLS`＝Task／WebFetch／WebSearch），註冊面的
-    matcher 也只圈這三個。Read／Edit／PowerShell 一律放行——根 CLAUDE.md 那句是
+  · 只擋**展開型**工具（`BLOCKING_TOOLS`；R80 起含本 harness 真正在用的 `Agent`／
+    `Workflow`，見該常數旁的 WHY），註冊面的 matcher 與它逐名對齊。
+    Read／Edit／PowerShell 一律放行——根 CLAUDE.md 那句是
     「此後只做收斂，不做展開」，而收斂本身需要讀檔、寫任務書、跑 git。**擋到讓人
     無法收斂的守衛會被整個關掉**，那是本 repo 反覆判過的形態。
   · **不進閂鎖**：擋一次就放行的東西不是阻斷。它會一直擋到水位掉下來為止，而
@@ -173,6 +174,8 @@ import re
 import subprocess
 import sys
 import tempfile
+import time
+import zoneinfo
 from datetime import datetime, timedelta
 from pathlib import Path
 
@@ -212,9 +215,93 @@ GUARD_OFF_ENV = "AUTOSDD_CONTEXT_GUARD_OFF"
 #: 續航保護一起關掉，而那件事沒有人會注意到。
 SENTINEL_OFF_ENV = "AUTOSDD_SENTINEL_OFF"
 
+#: 🔴 R80：在**無 console 的父行程**下 spawn console 子行程時必帶的 creationflags。
+#:
+#: 立案（掌舵者當場回報「哨兵每 15 分鐘彈一個視窗」，R79 只治了排程 Action 那一層）：
+#: hook 行程與 schtasks 的 `pythonw.exe` 都**沒有 console**，而 `python.exe`／
+#: `powershell.exe`／`claude.exe` 全是 console 子系統應用 ⇒ Windows 必定替子行程新配置
+#: 一個 console，那就是跳到使用者臉上的那個視窗。
+#:
+#: 🔴 **R80 訂正本段（我自己的第一版在這裡寫了一句過度一般化的假話，照實留下訂正）**。
+#: 第一版逐字宣稱「`DETACHED_PROCESS` 會把 `CREATE_NO_WINDOW` 抵銷掉」，依據是一張**只用
+#: venv 的 `python.exe` 當子行程**量出來的表。複驗者指出本 venv 由 **uv** 建立
+#: （`pyvenv.cfg` 有 `uv = 0.8.22`），其 `python.exe` 是 **trampoline**（274,712 bytes，
+#: 對照真直譯器 103,192 bytes）：它會 re-spawn 真的直譯器，而**不把 creationflags 傳下去**
+#: ⇒ 那張表量到的是 trampoline 的行為，不是旗標語意。
+#:
+#: 重量後的完整矩陣（pythonw 當無 console 父行程；子行程自報 `GetConsoleWindow()`／
+#: `IsWindowVisible`。`0`＝沒有 console＝不會有視窗）：
+#:
+#:   子行程載具            none    CNW   DET|CNW   DET    NEWGRP|CNW   NEWGRP
+#:   base python.exe      可見     0       0        0         0        可見
+#:   venv python.exe      可見     0     可見      可見        0        可見   ← trampoline
+#:   base pythonw.exe       0      0       0        0         0          0
+#:   venv pythonw.exe       0      0       0        0         0          0
+#:
+#: 三個結論，方向都與第一版不同：
+#:  ① `DET|CNW` 在**真直譯器**上是好的，只有穿過 trampoline 時才翻面 ⇒ 那句「抵銷」是
+#:     載具效應，不是旗標語意。**射程誠實劃界**：本重現依賴「venv 由 uv 建立」；走
+#:     `python -m venv` 回退路徑的 venv 是否同樣翻面，**未驗**。不得寫成平台常數。
+#:  ② `CNW` 與 `NEWGRP|CNW` 是**唯二在四種載具上全部為 0** 的組合 ⇒ 本常數取後者。
+#:  ③ **pythonw 那兩列全 0，與旗標無關** ⇒ 載具本身就足以抑制視窗。
+#: ⇒ 故本檔採**兩層各自獨立成立**（缺一層仍安全）：載具走 `quiet_python()`、旗標走本常數。
+#: 六組的 stderr／rc 都完整回得來 ⇒ 抑制視窗不以可觀測性為代價。
+#:
+#: 為什麼用 `CREATE_NEW_PROCESS_GROUP` 而不是 `DETACHED_PROCESS`：舊寫法想要的是「子行程
+#: 不受父行程生死牽連」。實測那件事**不需要** `DETACHED_PROCESS`——本常數的組合下，父行程
+#: （pythonw）退場後 8 秒，子行程仍自己把痕跡檔寫了出來（父死 02:02:50、子寫檔 02:02:58）。
+#: `CREATE_NEW_PROCESS_GROUP` 保留了真正有用的那一半（Ctrl-C／Ctrl-Break 不會沿著父行程的
+#: 行程群組傳進來），而且它在 trampoline 上不像 `DETACHED_PROCESS` 那樣翻面。
+#:
+#: `getattr` 而不是直接取屬性：這三個常數在 POSIX 的 `subprocess` 上**不存在**（鐵律三
+#: 「這在另一個平台是什麼值」）。取 0 ＝不加任何旗標，正是 POSIX 上正確的值。
+NO_WINDOW = (getattr(subprocess, "CREATE_NO_WINDOW", 0)
+             | getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0))
+
+
+def quiet_python() -> str:
+    """回本檔 spawn 子行程該用的直譯器路徑——**兩層防線的第二層**。
+
+    上表第三、四列：`pythonw.exe`（GUI 子系統）在**全部六種旗標組合下**都是 0，
+    連 trampoline 那一列也是 ⇒ 換掉載具這件事本身就足以抑制視窗，與旗標無關。
+    故本函式與 `NO_WINDOW` **各自獨立成立**：任一層被未來的人改掉，另一層仍撐得住。
+
+    🔴 為什麼是 `with_name` 而不是靠 PATH：實測本機**兩個 session 的 `python` 解析到不同
+    東西**（互動 session → venv；schtasks 起的 headless → pyenv shim，後者沒有
+    `pythonw.exe`）。取「與當前直譯器同目錄」才與 session 怎麼被啟動無關。
+    找不到就退回 `sys.executable`——少一層防線，不是壞掉（旗標那層仍在）。
+    """
+    if os.name != "nt":
+        return sys.executable  # POSIX 沒有 console 這回事，也沒有 pythonw（鐵律三）
+    quiet = Path(sys.executable).with_name("pythonw.exe")
+    return str(quiet) if quiet.is_file() else sys.executable
+
 #: PreToolUse 模式會擋下的「展開型」工具。刻意不含 Read／Edit／PowerShell：
 #: 收斂（讀檔、寫任務書、跑 git）必須還做得到，否則守衛會被整個關掉。
-BLOCKING_TOOLS = ("Task", "WebFetch", "WebSearch")
+#:
+#: 🔴 **R80：這一組名字在本 harness 上的命中面原本是 0**（掃描 S7-02 實測：8,106 次
+#: `tool_use` 裡 `Task`／`WebFetch`／`WebSearch` 出現 **0 次**）。本 harness 派子代理叫
+#: `Agent`、批次編排叫 `Workflow` ⇒ 阻斷臂蓋好了但一次都不會被觸發，而 R79 為它新增的
+#: 那道鎖只把「matcher ↔ 本常數」釘成**相等**，保證的是「兩個都寫錯時也一致」——鑑別力
+#: 的方向錯了（同 R77「鎖無鑑別力」那一桶）。修法是兩件事一起做：把真的會出現的名字補
+#: 進來，並補一條**有效性**判準（本常數必須與最近若干支逐字稿的 `tool_use` 名稱集合有
+#: 非空交集，見 `blocking_reach_problems`），讓「圈了一組永遠不出現的工具名」當場轉紅。
+#:
+#: `Task`／`WebFetch`／`WebSearch` **保留不刪**：它們是 Claude Code 上游的標準工具名，
+#: 換一個 harness 就會回來，刪掉只是把同一個缺口移到另一台機器上。
+BLOCKING_TOOLS = ("Task", "WebFetch", "WebSearch", "Agent", "Workflow")
+
+
+def blocking_reach_problems(blocking: tuple[str, ...], observed: set[str]) -> list[str]:
+    """阻斷臂的**有效性**判準（純函式）：圈到的名字必須真的會出現。回空 list ＝合格。
+
+    `observed`＝實測逐字稿裡出現過的 `tool_use` 名稱集合。空集合時**不判**——那代表
+    「這台機器上量不到」，不代表「命中面是 0」，而「量不到 ≠ 量到零」是本檔通篇的紀律。
+    """
+    if not observed or set(blocking) & observed:
+        return []
+    return [f"BLOCKING_TOOLS={blocking} 與實測出現過的工具名毫無交集"
+            f"（實測看到 {len(observed)} 種）⇒ 阻斷臂命中面為 0，蓋好了但永遠不會觸發"]
 
 #: 保守下界。實際是 1M 時只會早喊，方向安全。
 CONSERVATIVE_WINDOW = 200_000
@@ -380,6 +467,37 @@ _LIMIT_MARKS: tuple[tuple[str, tuple[str, ...]], ...] = (
 #: 這就是 `session_resume_planner.DEFAULT_AT_EXPR` 那個 `AddHours(5)` 是缺陷的證據。
 _RESET_RE = re.compile(r"resets\s+(\d{1,2})(?::(\d{2}))?\s*(am|pm)", re.IGNORECASE)
 
+#: 訊息自報的 IANA 時區，例：`… resets 9am (Asia/Taipei)`。全庫語料實測**每一筆**
+#: session limit 訊息都帶這個括號，所以「9am 是哪個時區的 9am」是**資料自己回答的**，
+#: 不需要去問機器。
+_ZONE_RE = re.compile(r"\(([A-Za-z]+(?:/[A-Za-z0-9_+-]+)+)\)")
+
+
+def declared_zone(text: object):
+    """訊息自報的時區物件；`None`＝沒寫、或這台機器沒有 tz 資料庫可以解析它。
+
+    🔴 **R80 立案（act 在 Linux 容器抓到、Windows 本機結構上看不見的兩個紅）**：
+    `sentinel_decide` 的兩支分支判定實測在 UTC 容器與 UTC+8 本機**翻面**
+    （`arm_reset` vs `probe`）。根因是 `resets 9am` 這個牆上時刻**沒有被綁在任何時區
+    上**：舊實作拿機器的本地時區去解它，於是同一份語料在不同機器上是不同的絕對時刻。
+    訊息括號裡就寫著答案，只是沒有人去讀。
+
+    🔴 誠實劃界（本函式會回 `None` 的第二種情況，不粉飾）：`zoneinfo` 需要 tz 資料庫。
+    Linux／macOS 由系統提供；**Windows 沒有**，且本 repo 不得為此新增相依
+    （`tzdata` 是 PyPI 套件）。本機實測 `ZoneInfo("Asia/Taipei")` →
+    `ZoneInfoNotFoundError` ⇒ 這條路在 Windows 上回 `None`，呼叫端退回「`now` 的時區」。
+    那個退路在實務上是對的（訊息本來就是 harness 在**同一台機器**上以本地時區算繪的），
+    但它不是機器無關的——所以退路成立與否會被 `parse_reset_at` 的呼叫端看見，
+    而不是藏起來。
+    """
+    match = _ZONE_RE.search(str(text or ""))
+    if match is None:
+        return None
+    try:
+        return zoneinfo.ZoneInfo(match.group(1))
+    except Exception:  # noqa: BLE001 — 無 tz 資料庫／未知地名一律退回呼叫端的框架
+        return None
+
 
 def classify_limit(text: object) -> str:
     """把一則錯誤訊息分成四類之一。純函式，零 I/O。
@@ -404,6 +522,12 @@ def parse_reset_at(text: object, now: datetime) -> datetime | None:
 
     `None` 時呼叫端**不准**退回「假設 5 小時」——那是猜的，猜出來的時刻拿去排程會得到
     一個「憑證存在、但憑證不回答那個問題」的假綠（排程成立了，只是醒在錯的時間）。
+
+    🔴 **R80：回傳值一律帶 offset（aware），且時區框架有明確的優先序**——
+    ① 訊息自報的時區（`declared_zone`，機器無關）；② `now` 自己的時區；
+    ③ `now` 是 naive 時先補上機器本地時區。
+    ③ 那一格是「讓時刻一律帶 offset」的最後一道：naive 的牆上時刻被 `isoformat()`
+    持久化之後就再也分不出它是哪個框架的，讀回來相減會在 DST 跳點上整整差 3600 秒。
     """
     match = _RESET_RE.search(str(text or ""))
     if match is None:
@@ -412,6 +536,9 @@ def parse_reset_at(text: object, now: datetime) -> datetime | None:
     if not (1 <= hour <= 12) or not (0 <= minute <= 59):
         return None
     hour = hour % 12 + (12 if meridiem.lower() == "pm" else 0)
+    if now.tzinfo is None:
+        now = now.astimezone()
+    now = now.astimezone(declared_zone(text) or now.tzinfo)
     target = now.replace(hour=hour, minute=minute, second=0, microsecond=0)
     return target if target > now else target + timedelta(days=1)
 
@@ -452,6 +579,162 @@ def latest_limit_event(path: Path) -> dict | None:
     except OSError:
         return None
     return found
+
+
+# ───────────────── R80 P0：哨兵整晚失明的真正成因，與「已處理」的可證判準
+# 事故（掌舵者實證）：2026-08-08 02:00~06:50 真的撞線、兩個修復 agent 與 9 個 verify
+# agent 全部死在 `You've hit your session limit · resets 6:50am`，而哨兵那三次巡邏
+# （08:37／08:52／09:07）**每一次都判「無未處理撞線」**。
+#
+# 🔴 三個候選歸因，只有第三個經得起實查（前兩個是推測，當回合逐一證偽）：
+#  ① 「主逐字稿裡沒有那個字串」——**證偽**。Grep 實證主逐字稿含 `resets 6:50am`，
+#     而且其中 3 筆正是 `type=assistant` ＋ `model=<synthetic>` 的權威形狀。
+#  ② 「偵測面沒有涵蓋 subagent」——**成立但不是主因**。同 session 下 263 支 subagent
+#     逐字稿中有 109 支抓得到限額事件；擴面是對的，但擴了也救不了本次。
+#  ③ **真正的主因：`handled_through` 的立案理由是一句假話。** `_arm_sentinel` 把武裝
+#     當下的最後一筆事件記為「已處理」，理由逐字是「我們此刻跑得動這支指令，就證明
+#     額度是通的」。**那個推論不成立**——武裝是一個**純本機 subprocess，零 API 呼叫**，
+#     額度早就見底時它照樣跑得動、照樣把撞線標成已處理。實證：狀態塊
+#     `handled_through = 2026-08-07T18:38:56.348Z`，而那次撞線的事件是
+#     `18:36:53.465Z`／`18:36:58.074Z` ⇒ **撞線發生兩分鐘後就被標記成「已解決」**，
+#     此後每一次巡邏都合法地判 patrol。機制全程「正常運作」，只是守著一個假前提。
+#
+# 🔴 正解：把「已處理」從**推論**換成**可證的證據**——額度是帳號層級的資源，所以
+# 「額度在某時刻之後是通的」的唯一硬證據，就是那之後**真的有一則成功的 API 回應**
+# （`type=assistant` ＋ 真 model ＋ 有 `message.usage`）。這件事寫在逐字稿裡，讀檔
+# 即可、**成本為零**，與哨兵「巡邏不花 token」的前提相容。
+#
+# 誤判率是**量出來的，不是挑的**（掃描面擴大必然放大假陽性，故先量再定判準）：
+#   判準 B（擴面、只看每支檔最後一筆、無復原證據）  → 假陽性 14.8%（224/1513 支檔）
+#   判準 C（擴面＋**同檔**復原證據）                 → 假陽性 **81.3%**（209/257）
+#     ⇒ **被自己的量測否決**，而且成因是結構性的：被額度打死的 subagent 在它自己的
+#       檔裡永遠不會再有下一則成功回應（它死了）⇒ 同檔證據對 subagent 恆為 False。
+#   判準 D（擴面＋**全域**復原證據）                 → 假陽性 **0.0%**（0/257）✅
+# 鑑別力反證（同一支量測腳本，把觀測時點倒推到停機進行中的 18:40:00Z）：判準 D 當時
+# 會抓到 **4 筆** `quota_session`／`resets 6:50am` ⇒ 它不是靠「全部判已處理」拿到 0%。
+def session_transcripts(transcript: Path, max_age_seconds: float = 86400.0,
+                        now: float | None = None) -> list[Path]:
+    """本 session 的主逐字稿 ＋ 它底下的 subagent 逐字稿（近期修改過的）。
+
+    佈局是**觀察到的**（非官方契約，故 fail-soft）：`<sid>.jsonl` 旁有一個同名目錄
+    `<sid>/`，subagent 落在 `<sid>/subagents/*.jsonl` 與
+    `<sid>/subagents/workflows/<wf>/*.jsonl`。這裡用 `rglob` 收整棵，不寫死那兩層——
+    多一層 workflow 目錄就漏掉一批，正是本次失明的形態之一。
+
+    `max_age_seconds` 是**成本閘**不是判準：一筆「比全域最後成功回應還新」的事件不可能
+    出現在很久沒被寫過的檔裡，而哨兵每 15 分鐘跑一次、母體已有 1,500+ 支檔。預設 24h
+    遠大於一個額度視窗（實測最長 3.6h），所以它不會把真的未處理事件濾掉。
+    """
+    now = now if now is not None else time.time()
+    found = [transcript] if transcript.is_file() else []
+    folder = transcript.with_suffix("")
+    if folder.is_dir():
+        for path in folder.rglob("*.jsonl"):
+            try:
+                if now - path.stat().st_mtime <= max_age_seconds:
+                    found.append(path)
+            except OSError:
+                continue
+    return found
+
+
+def _assistant_records(path: Path):
+    """該檔裡的 assistant 記錄 `(timestamp, message)`。壞行跳過（逐字稿常有半截尾行）。"""
+    try:
+        with path.open(encoding="utf-8", errors="replace") as handle:
+            for line in handle:
+                if '"assistant"' not in line:
+                    continue
+                try:
+                    record = json.loads(line)
+                except ValueError:
+                    continue
+                if not isinstance(record, dict) or record.get("type") != "assistant":
+                    continue
+                message = record.get("message")
+                if isinstance(message, dict):
+                    yield str(record.get("timestamp") or ""), message
+    except OSError:
+        return
+
+
+def latest_success_at(paths: list[Path]) -> str:
+    """這批逐字稿裡**最後一次成功 API 回應**的 ISO 時間戳（沒有就回空字串）。
+
+    「成功」＝ `type=assistant` ＋ **真的 model**（不是 `<synthetic>`）＋ 有 `message.usage`。
+    `usage` 是關鍵：那是伺服器真的計費回來的證據，harness 自己合成的錯誤訊息沒有它。
+
+    這一個字串就是「額度在何時之前確定是通的」的硬證據，取代了原本那句**假的**推論
+    （「我跑得動武裝指令 ⇒ 額度是通的」——武裝零 API 呼叫，證明不了任何事）。
+    """
+    best = ""
+    for path in paths:
+        for stamp, message in _assistant_records(path):
+            if (stamp > best and message.get("model") != SYNTHETIC_MODEL
+                    and message.get("model") and isinstance(message.get("usage"), dict)):
+                best = stamp
+    return best
+
+
+def unhandled_limit_event(transcript: Path, max_age_seconds: float = 86400.0,
+                          now: float | None = None) -> dict | None:
+    """**還沒被解決的**限額事件裡最早的那一筆；`None`＝沒有（正常情況）。
+
+    判準 D：事件的時間戳 > 全域最後一次成功回應 ⇒ 那之後 API 再也沒通過 ⇒ 未處理。
+    取**最早**一筆而不是最後一筆，是因為要拿它的 reset 時刻去排程——同一次停機裡
+    每個 subagent 都會留一筆，最早那筆才是真正的撞線時刻（其餘離 reset 更近）。
+
+    🔴 為何不沿用 `latest_limit_event`：那支只看**最後一筆**，而本次事故裡主逐字稿的
+    最後一筆是 `quota_spend`（月度上限），把更早、仍未解決的 `quota_session` 整個蓋掉。
+
+    🔴 **R80 補洞（P0 修復自己引入的反向缺陷）**：第一版把**任何**沒有後續成功回應的
+    `<synthetic>` 記錄都登記成候選，而 `<synthetic>` 是 harness 對**所有**合成訊息的
+    共同標記——`API Error`、`[Request interrupted by user]` 都長這樣。於是一個以中斷
+    或一次 API 錯誤收尾的 session（那是常態，不是例外）會被判成「未處理的撞線」，
+    走到 `sentinel_decide` 解不出 reset ⇒ `escalate` ⇒ **哨兵把自己刪掉**。
+    舊病是「該醒不醒」，新病是「不該死卻自我刪除」，兩者同樣靜默：痕跡只多一行
+    `sentinel_escalate`，而 `Get-ScheduledTask` 查不到那支工作，與「正常下班」外觀相同。
+    註解裡那個 0.0% 假陽性是**單一時點對 257 支檔的橫斷面**量測，量不到「session 以
+    一則 API 錯誤／中斷收尾」這個**縱向**情境 ⇒ 它背書不了這條路徑。
+    修法是把 kind 篩選提前到登記候選那一步：只有真的額度類（`LIMIT_SESSION`／
+    `LIMIT_SPEND`）才算撞線，`transient`／`unknown` 一律略過。**這不是把 fail-closed
+    翻成 fail-open**——被略過的那些本來就不是額度事件，對它們「什麼都不做」才是正解。
+    """
+    paths = session_transcripts(transcript, max_age_seconds, now)
+    if not paths:
+        return None
+    recovered_at = latest_success_at(paths)
+    best: dict | None = None
+    for path in paths:
+        for stamp, message in _assistant_records(path):
+            if message.get("model") != SYNTHETIC_MODEL or not stamp > recovered_at:
+                continue
+            content = message.get("content")
+            text = (content if isinstance(content, str) else
+                    " ".join(str(part.get("text") or "") for part in content or []
+                             if isinstance(part, dict))).strip()
+            kind = classify_limit(text)
+            if kind not in (LIMIT_SESSION, LIMIT_SPEND):
+                continue
+            if best is None or stamp < best["timestamp"]:
+                best = {"text": text, "timestamp": stamp, "kind": kind,
+                        "source": path.name, "recovered_at": recovered_at}
+    return best
+
+
+def newest_activity_at(paths: list[Path]) -> float:
+    """這批逐字稿裡最新的 mtime（給存活判準用）；空清單回 0.0。
+
+    🔴 為何不只看主逐字稿：扇出模式下主逐字稿可能好一陣子沒被寫，而 subagent 正在狂跑
+    ⇒ 只看主檔會把一個很忙的 session 誤判成閒置，而閒置到門檻就會**自我解除**。
+    """
+    stamps = []
+    for path in paths:
+        try:
+            stamps.append(path.stat().st_mtime)
+        except OSError:
+            continue
+    return max(stamps) if stamps else 0.0
 
 
 def _positive_int(raw: object) -> int:
@@ -676,7 +959,7 @@ def write_resume_plan(transcript: Path) -> str:
     out = Path(tempfile.gettempdir()) / f"{PLAN_PREFIX}{session_id_of(transcript)}.md"
     try:
         subprocess.run(
-            [sys.executable, str(planner), "--transcript", str(transcript),
+            [quiet_python(), str(planner), "--transcript", str(transcript),
              "--out", str(out)],
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
@@ -687,6 +970,9 @@ def write_resume_plan(transcript: Path) -> str:
             # ——為了寫任務書而弄丟指引，方向剛好相反。建議註冊 timeout 取 30。
             timeout=15,
             check=False,
+            # 本 hook 行程沒有 console，而 planner 是 console 子系統的 python.exe
+            # ⇒ 不帶這個旗標時每次越過 90% 都會彈一個視窗（見 NO_WINDOW 的實測表）。
+            creationflags=NO_WINDOW,
         )
     except Exception:  # noqa: BLE001 — 診斷輔助不得反過來變成守衛的故障源
         return ""
@@ -727,11 +1013,17 @@ def arm_sentinel(payload: dict) -> None:
         handle.write(f"\n=== arm {datetime.now().isoformat(timespec='seconds')} ===\n")
         handle.flush()
         subprocess.Popen(  # noqa: S603 — 參數全是本檔算出來的路徑，無 shell
-            [sys.executable, str(planner), "--transcript", raw,
+            [quiet_python(), str(planner), "--transcript", raw,
              "--out", str(tmp / f"{PLAN_PREFIX}{sid}.md"), "--arm-sentinel"],
             stdout=handle, stderr=subprocess.STDOUT, stdin=subprocess.DEVNULL,
-            creationflags=(getattr(subprocess, "DETACHED_PROCESS", 0)
-                           | getattr(subprocess, "CREATE_NO_WINDOW", 0)))
+            # 🔴 R80：舊寫法帶了 `DETACHED_PROCESS`，而它在**本 venv 的 trampoline 載具**
+            # 上會讓視窗回來（矩陣見 NO_WINDOW 第二列：`DET` 與 `DET|CNW` 兩格皆「可見」）
+            # ——上面取捨①宣稱的「不彈視窗」在寫下的當回合就不成立，且失效是靜默的
+            # （旗標有設、視窗照彈）。**不要把這句讀成「DETACHED 會抵銷 CNW」**：那是本檔
+            # 第一版的過度一般化，真直譯器那一列 `DET|CNW` 是 0，翻面的是載具不是旗標語意。
+            # 取捨①要的「不同步等它跑完」由「不呼叫 wait()」提供，與旗標無關；子行程活過
+            # 父行程退場這件事也已實測不需要 DETACHED_PROCESS（父死 8 秒後子仍寫出痕跡）。
+            creationflags=NO_WINDOW)
 
 
 def _headline(used: int, window: int, source: str) -> str:

@@ -14,27 +14,23 @@ dev_start 對子行數上限，降低變更風險）。
 from __future__ import annotations
 
 import os
-import shutil
 import subprocess
 import sys
 import tempfile
 import unittest
-from pathlib import Path, PureWindowsPath
-from unittest import mock
+from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import git_hooks_install_common as m  # noqa: E402
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 
-# R32 Architect 架構最佳化：驗活探測「參數」（指令/期望輸出/System32 排除段）
-# 抽為共用資料規格（tools/lib/bash_probe_spec.py），三份獨立實作各自 import 取得
-# 同一份規則資料；驗活的 subprocess 執行邏輯本檔仍獨立寫死，不共用函式（見下方
-# `_usable_bash()` docstring）。
-sys.path.insert(0, str(_REPO_ROOT / "tools" / "lib"))
-import bash_probe_spec as _spec  # noqa: E402
-
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+# 🔴 R80 S5-03：本檔原本自帶一份與 `test_pre_push_dispatcher.py`／
+# `test_windows_forbidden_filename_parity.py` **剝 docstring 後 AST 逐字相同**的
+# `_usable_bash()`（正規化雜湊皆 `9797b0251822`）。收斂理由與量測見
+# `docs/06_quality/CrossPlatform_R80_Subtraction_Evidence.md` S5-03／S5-04 節。
+from _platform_helpers import usable_bash_for_fixture  # noqa: E402
 from _ps_engine import any_engine_available, production_engine  # noqa: E402  # R60 E-A-03
 
 _LIB_DIR = _REPO_ROOT / "tools" / "lib"
@@ -252,131 +248,7 @@ class TestWrapperThinnessGuard(unittest.TestCase):
         self.assertLessEqual(len(text.splitlines()), self._SH_MAX_LINES)
 
 
-def _usable_bash() -> str | None:
-    """回傳可跑 repo bash 腳本的 bash 路徑；只有 WSL 佔位 bash、缺 coreutils 的
-    殘缺 bash、或無 bash → None。
-
-    邏輯鏡自 AISDLC_SDD/scripts/bash_probe.py（該檔是子專案 scripts/tests 的
-    SSOT，tools/tests/test_pre_push_dispatcher.py 已有同款鏡）；根層 tools/tests
-    刻意不跨子專案 import 該檔的執行邏輯——子專案檔案搬移不應弄壞根層閘門。
-    驗活探測「參數」（指令/期望輸出/System32 排除段）改為共用
-    `tools/lib/bash_probe_spec.py`（R32 Architect 架構最佳化），三處讀同一份
-    規則資料，但本檔的 subprocess 執行邏輯仍獨立寫死；若執行邏輯本身更新，
-    請三處同步。裸 `shutil.which("bash")` 在本機常誤中 Windows CreateProcess
-    搜尋順序優先於 PATH 的 `C:\\Windows\\System32\\bash.exe`（WSL 佔位，完全不同
-    的檔案系統視角，會讓本檔案案 Windows 側路徑一律「找不到檔案」而非真失敗）。
-
-    R31 Scan-B 修復：System32 排除改用 `PureWindowsPath` 逐段精確比對（對齊
-    `tools/integration_gate_core.py::_has_system32_segment()`，DEF-101-236），
-    不再用任意子字串命中即排除（會誤傷路徑含 "system32" 子字串但非該目錄段的
-    合法候選）。
-
-    R32 修復 DEF-101-275（R27 開出、連續 5 輪未收斂）：原本只用 `echo ok` 驗活，
-    未驗 coreutils（如 `dirname`），精簡版 Git Bash 會誤判為可用。改用
-    `_spec.PROBE_CMD`（echo + dirname 兩段串接）驗活。
-    """
-    candidates: list[str] = []
-    git = shutil.which("git")
-    if git:
-        gp = Path(git).resolve()
-        for up in list(gp.parents)[:4]:
-            for sub in ("usr/bin/bash.exe", "bin/bash.exe"):
-                c = up / sub
-                if c.exists():
-                    candidates.append(str(c))
-    bare = shutil.which("bash")
-    if bare and not any(
-        part.lower() == _spec.SYSTEM32_SEGMENT for part in PureWindowsPath(bare).parts
-    ):
-        candidates.append(bare)
-    for cand in candidates:
-        try:
-            r = subprocess.run(
-                [cand, "-c", _spec.PROBE_CMD],
-                capture_output=True, text=True, encoding="utf-8",
-                errors="replace", timeout=15,
-            )
-            lines = r.stdout.splitlines()
-            if (
-                r.returncode == 0
-                and len(lines) >= 2
-                and lines[0].strip() == _spec.PROBE_EXPECT_ECHO
-                and lines[1].strip() == _spec.PROBE_EXPECT_DIRNAME
-            ):
-                return cand
-        except Exception:
-            continue
-    return None
-
-
-class TestUsableBashSystem32Guard(unittest.TestCase):
-    """R31 QA 一審必修條件 2：`_usable_bash()` 是本檔鏡射自 `bash_probe.py` 的獨立
-    副本，先前只被當成 `skipif` 用的基礎設施函式呼叫，沒有任何 case 直接斷言其
-    System32 排除邏輯本身——QA 親驗證實把 guard 改回舊版寬鬆判斷時，本檔既有
-    20 個測試全數依然通過（因為它們都走 `skipif`，guard 壞掉只會讓更多測試被
-    跳過而非變紅）。本類別補上直接呼叫點回歸鎖，比照
-    `AISDLC_SDD/scripts/tests/test_bash_probe.py::TestUsableBashSystem32Guard`
-    既有慣例。"""
-
-    def test_skips_wsl_system32_placeholder(self) -> None:
-        """`_usable_bash()` 呼叫點層級回歸鎖：PATH 上的 bash 是 WSL System32
-        佔位（完整路徑段）時必須被排除、不得進入 subprocess.run 探測。"""
-        with (
-            mock.patch.object(shutil, "which") as mock_which,
-            mock.patch.object(subprocess, "run") as mock_run,
-        ):
-            mock_which.side_effect = lambda name: (
-                r"C:\Windows\System32\bash.exe" if name == "bash" else None  # platform-ok: mock 回傳值
-            )
-            result = _usable_bash()
-        mock_run.assert_not_called()
-        self.assertIsNone(result, "WSL System32 佔位 bash 應被排除、不應嘗試 subprocess.run")
-
-    def test_does_not_reject_substring_false_positive_path(self) -> None:
-        """R31 bug-injection 標的：路徑含 'system32' 子字串但非完整路徑段的合法
-        候選（如 `C:\\MySystem32Tools\\bash.exe`）不應被誤排除——若退化回舊版
-        `"system32" not in bare.lower()` 寬鬆判斷，本測試須變紅。"""
-        legit_path = r"C:\MySystem32Tools\bash.exe"  # platform-ok: mock 回傳值，非真實檔案路徑
-        with (
-            mock.patch.object(shutil, "which") as mock_which,
-            mock.patch.object(subprocess, "run") as mock_run,
-        ):
-            mock_which.side_effect = lambda name: legit_path if name == "bash" else None
-            mock_run.return_value = mock.Mock(returncode=0, stdout="probe_ok\n/tmp/probe_dir\n")
-            result = _usable_bash()
-        self.assertEqual(result, legit_path)
-
-    def test_rejects_bash_missing_coreutils_dirname(self) -> None:
-        """R32 bug-injection 標的（DEF-101-275，R27 開出、連續 5 輪未收斂）：
-        精簡版 Git Bash 只有 `echo` 可用、缺 `dirname` 這類 coreutils 時，
-        `&&` 串接的第二段會以非 0 回傳碼失敗——必須被拒絕，不能只驗 echo 就
-        誤判為可用。若退化回舊版只驗 `echo ok`，本測試須變紅。"""
-        legit_path = r"C:\Program Files\Git\usr\bin\bash.exe"  # platform-ok: mock 回傳值
-        with (
-            mock.patch.object(shutil, "which") as mock_which,
-            mock.patch.object(subprocess, "run") as mock_run,
-        ):
-            mock_which.side_effect = lambda name: legit_path if name == "bash" else None
-            # bash: dirname: command not found → echo 段已輸出，但整串 && 鏈
-            # 因第二段找不到指令而以 rc=127 失敗。
-            mock_run.return_value = mock.Mock(returncode=127, stdout="probe_ok\n")
-            result = _usable_bash()
-        self.assertIsNone(result, "缺 coreutils（dirname）的殘缺 bash 應被拒絕")
-
-    def test_accepts_bash_with_working_coreutils(self) -> None:
-        """正向案例：echo 與 dirname 皆正確輸出、rc=0 時應被接受。"""
-        legit_path = r"C:\Program Files\Git\usr\bin\bash.exe"  # platform-ok: mock 回傳值
-        with (
-            mock.patch.object(shutil, "which") as mock_which,
-            mock.patch.object(subprocess, "run") as mock_run,
-        ):
-            mock_which.side_effect = lambda name: legit_path if name == "bash" else None
-            mock_run.return_value = mock.Mock(returncode=0, stdout="probe_ok\n/tmp/probe_dir\n")
-            result = _usable_bash()
-        self.assertEqual(result, legit_path)
-
-
-_USABLE_BASH = _usable_bash()
+_USABLE_BASH = usable_bash_for_fixture()
 
 
 class TestDotSourceTrapSafety(unittest.TestCase):

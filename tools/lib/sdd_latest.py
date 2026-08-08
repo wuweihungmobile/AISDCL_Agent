@@ -31,9 +31,13 @@ from pathlib import Path
 # 'AISDLC_SDD_v0.30\n')` 會誤判命中；`.fullmatch()` 要求輸入從頭到尾整段對齊
 # pattern，同一輸入下正確地不命中）。
 #
-# 🔴 既知缺口（DEF-101-500 third item／DEF-101-521，未隨本次收斂修復，仍 open）：
-# `\d+\.\d+` 抓不到三段版號（如 v1.0.1），非本次收斂範圍——本次只收斂「重複定義」
-# 與「.match()/.fullmatch() 缺口」，不變更版號 pattern 本身。
+# 🔴 既知缺口：`\d+\.\d+` 抓不到三段版號（如 v1.0.1），非當時收斂範圍——那次只收斂
+# 「重複定義」與「.match()/.fullmatch() 缺口」，不變更版號 pattern 本身。
+# 🔴 R80 訂正本段原有的狀態宣稱（DEF-101-870 ①）：原文逐字寫「DEF-101-500 third item／
+# DEF-101-521，未隨本次收斂修復，仍 open」，而當回合實查兩列**都不是 open**——
+# `DEF-101-500` 在主檔為 `fixed@R57 round 3`、`DEF-101-521` 為 `fixed@R59` 且已搬進
+# `AutoSDD_Defect_Log_archive_50.md` ⇒ 這句話指的那個「open 載體」在帳本裡不存在，
+# 於是這個缺口在帳本上零登記、靠一行註解獨自撐著。現行唯一載體＝`DEF-101-870`。
 FROZEN_VERSION_DIR_RE = re.compile(r"^AISDLC_SDD_v\d+\.\d+$")
 
 # 凍結版本「路徑前綴」比對——呼叫端一律用 `.match()`（非 `.fullmatch()`）：比對

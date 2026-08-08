@@ -53,24 +53,28 @@ from __future__ import annotations
 
 import functools
 import re
-import shutil
 import subprocess
 import sys
 import unittest
-from pathlib import Path, PurePosixPath, PureWindowsPath
+from pathlib import Path, PurePosixPath
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 _GUARD_SH = _REPO_ROOT / "tools" / "lib" / "windowsapps_guard.sh"
 
-# 驗活探測「參數」（指令/期望輸出/System32 排除段）共用 tools/lib/bash_probe_spec.py
-# （R32 Architect 架構最佳化的單一真相源）；本檔的 subprocess 執行邏輯（見下方
-# `_bash_exe()`）仍獨立寫死，不共用函式，比照既有消費者
-# `tools/tests/test_git_hooks_install_common.py::_usable_bash()`／
-# `tools/tests/test_bash_probe_spec_contract.py::_probe_a_real_usable_bash_for_fixture()`
-# 同款「各消費者獨立重寫」架構慣例（R64／DEF-101-618 (b)）。
 sys.path.insert(0, str(_REPO_ROOT / "tools" / "lib"))
-import bash_probe_spec as _spec  # noqa: E402
 import sdd_latest  # noqa: E402
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+# 🔴 R80 S5-03：本檔原有一份 `_bash_exe()`，檔頭逐字宣稱它是「各消費者獨立重寫執行
+# 邏輯」的架構慣例。當回合實測推翻該慣例對本站點的適用性：全庫七份「找可用 bash」
+# 中，本檔這份與 `test_windowsapps_guard_cross_consistency.py` 那份是同一段程式碼的
+# 兩份手抄，而**兩份已經漂移**——本檔寫 `except Exception`、對面寫 `except OSError`。
+# 差別不是風格：`subprocess.TimeoutExpired` 繼承 `SubprocessError` 而**不是** `OSError`，
+# 所以候選一旦卡住，`except OSError` 那份會讓例外逸出、整個 module import 期炸掉，
+# 另一份則會安靜換下一個候選。也就是說「獨立重寫」在這裡沒有換到任何鑑別力，
+# 換到的是兩種不同的失敗模式，而且沒有任何一支測試在比對它們。
+# 量測見 `docs/06_quality/CrossPlatform_R80_Subtraction_Evidence.md` S5-03 節。
+from _platform_helpers import usable_bash_for_fixture as _bash_exe  # noqa: E402
 
 
 def _latest_sdd_version_name() -> str:
@@ -446,61 +450,6 @@ def _has_zero_guard_python_call(text: str) -> bool:
     return _invokes_python_bare(text)
 
 
-@functools.lru_cache(maxsize=1)
-def _bash_exe() -> str | None:
-    """探測本機一個「真正可用」的 bash 路徑，供本檔案的 shell 行為驗證使用。
-
-    WHY（R64／DEF-101-618 (b)）：舊版 `shutil.which("bash")` 在「PATH 上 `bash`
-    解析到 WSL System32 佔位版、真正的 Git Bash 未直接掛在 PATH、只能透過
-    `git.exe` 相對路徑找到」這種真實可重現的 Windows 開發機設定下，會把該被
-    排除的佔位版錯當成可用 bash——與 `test_bash_probe_spec_contract.py`（同輪
-    DEF-101-617）完全同一形狀的缺陷。比照該檔
-    `_probe_a_real_usable_bash_for_fixture()` 的候選蒐集與驗活邏輯**獨立重寫**
-    （不 import 該測試檔或生產端 `AISDLC_SDD/scripts/bash_probe.py`，只共用
-    `tools/lib/bash_probe_spec.py` 的資料規格常數，維持本檔頭常數區註解所述
-    「各消費者獨立重寫執行邏輯」架構慣例）：先蒐集候選（git.exe 往上最多 4 層
-    parent 找 `usr/bin/bash.exe`／`bin/bash.exe`，以及非 System32 路徑段的
-    `shutil.which("bash")`），再對每個候選實際跑一次 `_spec.PROBE_CMD` 驗活，
-    第一個驗活成功的候選才接受；全部候選都失敗（或無候選）才回傳 `None`
-    （維持既有 `@unittest.skipUnless(_bash_exe(), ...)` 語意）。以
-    `functools.lru_cache` 快取結果：本函式在同一個 process 內會被類別層級
-    `skipUnless` 裝飾器與每個測試方法各呼叫一次，環境在單次測試執行期間不會
-    變動，快取避免重複探測開銷，呼叫端簽名／回傳型別與呼叫慣例不變。
-    """
-    candidates: list[str] = []
-    git = shutil.which("git")
-    if git:
-        git_path = Path(git).resolve()
-        for up in list(git_path.parents)[:4]:
-            for sub in ("usr/bin/bash.exe", "bin/bash.exe"):
-                cand = up / sub
-                if cand.exists():
-                    candidates.append(str(cand))
-    bare = shutil.which("bash")
-    if bare and not any(
-        part.lower() == _spec.SYSTEM32_SEGMENT for part in PureWindowsPath(bare).parts
-    ):
-        candidates.append(bare)
-    for cand in candidates:
-        try:
-            result = subprocess.run(
-                [cand, "-c", _spec.PROBE_CMD],
-                capture_output=True, text=True, encoding="utf-8",
-                errors="replace", timeout=15,
-            )
-        except Exception:
-            continue
-        lines = result.stdout.splitlines()
-        if (
-            result.returncode == 0
-            and len(lines) >= 2
-            and lines[0].strip() == _spec.PROBE_EXPECT_ECHO
-            and lines[1].strip() == _spec.PROBE_EXPECT_DIRNAME
-        ):
-            return cand
-    return None
-
-
 @unittest.skipUnless(_bash_exe(), "本機找不到 bash，略過 shell 行為驗證")
 class TestSharedGuardShellFunctionBehavior(unittest.TestCase):
     """實際以 subprocess 執行共用函式，驗證三種情境判斷正確。
@@ -536,28 +485,26 @@ class TestSharedGuardShellFunctionBehavior(unittest.TestCase):
         )
         return r.returncode == 0
 
-    def test_real_candidate_accepted(self) -> None:
-        self.assertTrue(self._run("real"))
-
-    def test_windowsapps_stub_rejected(self) -> None:
-        self.assertFalse(self._run("WindowsApps"))
-
     def test_missing_candidate_rejected(self) -> None:
+        """候選名稱在 PATH 上根本不存在 → 必須判否。
+
+        🔴 R80 S5-07：本類原有 5 支，其餘 4 支（真候選接受／`WindowsApps` 空殼拒絕／
+        `WINDOWSAPPS` 大小寫變體拒絕／`MyWindowsAppsBackup` 子字串誘餌接受）已刪——
+        它們問的都是**路徑段判準**，而那件事已被
+        `test_windowsapps_guard_cross_consistency.py::_VERDICT_CASES` 這張 11 列樣本表
+        **嚴格覆蓋且更嚴**：該表把同一個暫存樣本檔同時餵給四份實作（`windowsapps_guard.sh`
+        即本檔測的那一份、`WindowsAppsGuard.ps1`、`bootstrap_core.py`、以及 PS 呼叫端），
+        逐列比對四方判定是否一致。逐案對照——
+          · 「真直譯器路徑」`C:\\Python311\\python.exe`（expected_stub=False）承接「真候選接受」；
+          · 反斜線／正斜線／混用分隔符／MSYS 掛載路徑共 6 列（expected_stub=True）承接
+            「`WindowsApps` 空殼拒絕」，且多守住本類**從未測過**的分隔符變體；
+          · 「大小寫變體」`…\\WINDOWSAPPS\\python.exe` 承接大小寫那支；
+          · 「誘餌：子字串非完整段」`C:\\Users\\me\\MyWindowsAppsBackup\\python.exe` 承接誘餌
+            那支，樣本連目錄名都逐字相同。
+        本支**不刪**，因為它問的是另一件事：`command -v` 找不到候選時的行為。那條路徑
+        一次都沒有被 `_VERDICT_CASES` 走到（那張表餵的是既有路徑字串，不做 PATH 查找）。
+        """
         self.assertFalse(self._run("real", candidate="totally_nonexistent_xyz"))
-
-    def test_mixed_case_windowsapps_stub_rejected(self) -> None:
-        """R43 二審 Architect/SD 各自獨立揪出：一審初版 `case *WindowsApps*)` 對
-        bash 而言預設大小寫敏感，`WINDOWSAPPS`（或其他大小寫變體）會漏放——與
-        `WindowsAppsGuard.ps1`（`-notlike` 本身大小寫不敏感）／`bootstrap_core.py`
-        （逐片段 `.lower()`）兩份姊妹 SSOT 不對稱。"""
-        self.assertFalse(self._run("WINDOWSAPPS"))
-
-    def test_legit_dir_merely_containing_substring_is_accepted(self) -> None:
-        """R43 二審 Architect/SD 各自獨立揪出：一審初版裸子字串比對會誤傷路徑僅
-        「含有」WindowsApps 字面值、但並非該路徑片段本身的合法目錄（如
-        `MyWindowsAppsBackup/python`），對 pre-push 這類阻斷式 hook 而言等同誤報
-        「找不到 python」。"""
-        self.assertTrue(self._run("MyWindowsAppsBackup"))
 
 
 class TestHasUnmigratedRawCheck(unittest.TestCase):

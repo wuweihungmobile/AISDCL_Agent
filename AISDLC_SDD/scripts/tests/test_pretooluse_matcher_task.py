@@ -44,7 +44,7 @@ ACT020_CARRIER_MARKERS = ("context_ledger_pre", "sdd_hook_router")
 
 _MISSING_CARRIER = (
     "PreToolUse 內找不到任何承載 ACT-020 子代理注入的條目"
-    f"（command 需指名 {' 或 '.join(ACT020_CARRIER_MARKERS)}）"
+    f"（條目需真的會跑到 {' 或 '.join(ACT020_CARRIER_MARKERS)}）"
     " — 注入分支變成 dead code，且本鎖會退化成恆綠（DEF-CLDREV-017）"
 )
 
@@ -65,10 +65,18 @@ def _load(settings_path: str) -> dict:
 
 
 def is_act020_carrier(entry: dict) -> bool:
-    """該 PreToolUse 條目是否承載 ACT-020 注入（依 hook command 內的腳本名判定）。"""
+    """該 PreToolUse 條目是否承載 ACT-020 注入（依它**實際會跑到**的腳本名判定）。
+
+    🔴 R80：原判準是 `marker in hook["command"]`。exec form（治 Windows 閃窗）把腳本
+    路徑從 `command` 搬進 `args` ⇒ 轉換後這裡一律回 False，`act020_task_matcher_verdict`
+    會改報 `_MISSING_CARRIER`（「注入變 dead code」）——訊息指向一個不存在的病因。
+    解析改問唯一真相源 `<monorepo>/tools/lib/hook_wiring.py`；`command` 字串仍納入
+    （該函式兩種形態都認），所以本檔既有的合成 fixture（純 command 形態）照樣成立。
+    """
+    wiring = lint._hook_wiring()
     for hook in entry.get("hooks") or []:
-        command = str(hook.get("command", ""))
-        if any(marker in command for marker in ACT020_CARRIER_MARKERS):
+        targets = wiring.hook_entry_targets(hook, include_launcher=True)
+        if any(marker in rel for marker in ACT020_CARRIER_MARKERS for rel in targets):
             return True
     return False
 

@@ -43,8 +43,10 @@ dev_start.py。R12（DEF-101-070 ② 收斂案）AutoClaude/tools/local_ci_gate 
 職責邊界（R56 補述，DEF-101-433 兩輪誤判為缺口的根因＝兩支工具的分工從未互相標註）：
   本檔只負責「**已註冊**薄殼不退化」（_PINNED_SHA256 內的對子）。
   「**新增**薄殼是否被註冊」由 tools/check_script_parity.py 反向驗證——它掃描全庫成對
-  腳本，未納管者即 fail-loud 並列出三條納管途徑（_MARKER_PAIRS／掛本檔 hash 釘選／
-  _EXEMPT_PAIRS 附帳本依據），另有「thinness 交叉鎖」比對雙清單鍵集合一致。
+  腳本，未納管者即 fail-loud 並列出**兩條**納管途徑（掛本檔 hash 釘選／_EXEMPT_PAIRS
+  附帳本依據），另有「thinness 交叉鎖」比對雙清單鍵集合一致。
+  🔴 R80 S5-05：此處原本列三條、第一條是 _MARKER_PAIRS 標籤比對——該名冊自 R16 起
+  即為空清單、比對迴圈跑零次，已於 R80 刪除；照著填不會有任何東西在讀。
   兩者互補，缺一即出現前瞻盲區；修改任一支的納管邏輯時請同步檢視另一支。
 
 讀檔編碼（R60 P10-1，BOM 盲區）：全檔一律走 `_read_source()`（`utf-8-sig`）——WHY 與
@@ -171,8 +173,9 @@ _PINNED_SHA256: dict[str, str] = {
     ),
     # R16（Architect 建議 B）：bootstrap/integration_gate/run_act 收斂為薄殼＋
     # 各自 Python 核心（bootstrap_core.py／integration_gate_core.py／
-    # run_act_core.py）後，由 check_script_parity.py 的 _MARKER_PAIRS 標籤比對
-    # 遷移至此 hash 釘選（同 R12 local_ci_gate 先例；gate-call 抽取比對隨之退場）
+    # run_act_core.py）後，由 check_script_parity.py 的標籤比對名冊遷移至此 hash
+    # 釘選（同 R12 local_ci_gate 先例；gate-call 抽取比對隨之退場。該名冊本身已於
+    # R80 S5-05 刪除——空了 60 餘輪卻仍被三處寫成第一條納管途徑）
     # R43：補上 WindowsApps guard dot-source（同上 DEF-101-353）
     "tools/bootstrap.sh": (
         "5d73047f1f81e81ed0b47a8147dbe69801640ee77f727ecc953c51d9eb865857"

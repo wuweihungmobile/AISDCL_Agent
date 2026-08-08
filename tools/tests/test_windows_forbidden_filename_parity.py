@@ -40,7 +40,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
-from pathlib import Path, PureWindowsPath
+from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 _TOOLS_DIR = REPO_ROOT / "tools"
@@ -49,8 +49,13 @@ if str(_TOOLS_DIR) not in sys.path:
 import check_ntfs_paths  # noqa: E402
 
 sys.path.insert(0, str(_TOOLS_DIR / "lib"))
-import bash_probe_spec as _spec  # noqa: E402
 import sdd_latest  # noqa: E402
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+# 🔴 R80 S5-03：本檔原本自帶一份與另兩支鎖檔 AST 逐字相同的 `_usable_bash()`
+# （雜湊 `9797b0251822`），收斂至既有 SSOT。理由與量測見
+# `docs/06_quality/CrossPlatform_R80_Subtraction_Evidence.md` S5-03／S5-04 節。
+from _platform_helpers import usable_bash_for_fixture  # noqa: E402
 
 _AUTOCLAUDE_DIR = REPO_ROOT / "AutoClaude"
 if str(_AUTOCLAUDE_DIR) not in sys.path:
@@ -79,53 +84,7 @@ NON_RESERVED_NAMES = [
 ]
 
 
-def _usable_bash() -> str | None:
-    """回傳可跑 repo bash 腳本的 bash 路徑；只有 WSL 佔位 bash、缺 coreutils 的
-    殘缺 bash、或無 bash → None。
-
-    邏輯鏡自 `tools/tests/test_pre_push_dispatcher.py::_usable_bash()`（根層
-    tools/tests 的既有慣例，本身又鏡自 AISDLC_SDD/scripts/bash_probe.py）——R34
-    Scan-B 發現本檔（R33 DEF-101-295 新增）直接無條件呼叫
-    `subprocess.run(["bash", ...])`，未比照既有慣例做 skipIf 守門，在 bash 不可用
-    或為 WSL 佔位版的環境會拋出未攔截的 FileNotFoundError（ERROR 而非優雅
-    SKIP）。刻意獨立複製一份而非跨檔 import 執行邏輯，維持本 repo「共用資料規格
-    改走 tools/lib/bash_probe_spec.py，執行邏輯各自獨立」的既有架構決策。
-    """
-    candidates: list[str] = []
-    git = shutil.which("git")
-    if git:
-        gp = Path(git).resolve()
-        for up in list(gp.parents)[:4]:
-            for sub in ("usr/bin/bash.exe", "bin/bash.exe"):
-                c = up / sub
-                if c.exists():
-                    candidates.append(str(c))
-    bare = shutil.which("bash")
-    if bare and not any(
-        part.lower() == _spec.SYSTEM32_SEGMENT for part in PureWindowsPath(bare).parts
-    ):
-        candidates.append(bare)
-    for cand in candidates:
-        try:
-            r = subprocess.run(
-                [cand, "-c", _spec.PROBE_CMD],
-                capture_output=True, text=True, encoding="utf-8",
-                errors="replace", timeout=15,
-            )
-            lines = r.stdout.splitlines()
-            if (
-                r.returncode == 0
-                and len(lines) >= 2
-                and lines[0].strip() == _spec.PROBE_EXPECT_ECHO
-                and lines[1].strip() == _spec.PROBE_EXPECT_DIRNAME
-            ):
-                return cand
-        except Exception:
-            continue
-    return None
-
-
-_BASH = _usable_bash()
+_BASH = usable_bash_for_fixture()
 _SKIP_REASON = "本測試需可用 bash（非 WSL 佔位）驗活 pre-commit 的 _ntfs_seg_bad()"
 
 
@@ -726,9 +685,12 @@ _NTFS_HOOK_DIRS = ("tools/git-hooks", "AutoClaude/tools/git-hooks", "AISDLC_SDD/
 # `sys.path.insert(0, tools/lib)` 後 `import <module>`），不是測試檔互相 import，
 # 故不觸及該限制（R66 Architect 確認）。
 #
-# 🔴 DEF-101-500 third item（ARCH-R57R3-04）指出 `\d+\.\d+` 抓不到三段版號（如
-# v1.0.1）時「N 份會同時靜默誤分類」——這個既知缺口**未隨本次收斂修復**，只是換
-# 成「1 份會誤分類」（帳本 DEF-101-521，仍 open，非本輪範圍）。
+# 🔴 ARCH-R57R3-04 指出 `\d+\.\d+` 抓不到三段版號（如 v1.0.1）時「N 份會同時靜默
+# 誤分類」——這個既知缺口未隨當時的收斂修復，只是換成「1 份會誤分類」。
+# 🔴 R80 訂正本段原有的狀態宣稱（DEF-101-870 ①）：原文逐字寫「帳本 DEF-101-521，仍
+# open」，而當回合實查該列是 `fixed@R59` 且已搬進 `AutoSDD_Defect_Log_archive_50.md`
+# （`DEF-101-500` 亦為 `fixed@R57 round 3`）⇒ 被指名的 open 載體在帳本裡不存在。
+# 現行唯一載體＝`DEF-101-870`（三段版號漏抓本身仍未修，只是不再假裝有人在追）。
 
 # 錨①保留裝置名清單字面值：要求 CON→PRN→AUX→NUL 依序出現，之間只隔少量引號／逗號／
 # 分隔符，故 regex 交替（`CON|PRN|...`）、Python set、PowerShell 陣列、bash case pattern

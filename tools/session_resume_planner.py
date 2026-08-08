@@ -289,10 +289,16 @@ RESET_SKEW_SECONDS = 120
 #: 暫時性錯誤的重排間隔（不計入 `MAX_PROBE_ATTEMPTS`——壞的是別的東西，不是額度）。
 TRANSIENT_RETRY_SECONDS = 300
 
-#: 哨兵巡邏間隔。**這個值是量出來的，不是挑的**：全庫實測那一次真實撞線是 08:44 撞、
-#: 訊息逐字 `resets 9am` ⇒ hit→reset 之間只有 **16 分鐘**。巡邏間隔必須小於它，才保證
-#: 即使在**已觀測到的最短窗**裡也至少醒一次、走得到「reset 未到 ⇒ 精確重排」那一支；
-#: 間隔一旦大於 16 分鐘，那一支在最短窗下**結構上不可達**，只能退化成事後補救的探測。
+#: 哨兵巡邏間隔。
+#: 🔴 **R80 訂正本格的立案理由（結論不變、理由過期，照實寫）**。原文寫的是「全庫實測那
+#: 一次真實撞線 08:44 撞、`resets 9am` ⇒ hit→reset 只有 16 分鐘，巡邏間隔必須小於它，
+#: 才保證即使在**已觀測到的最短窗**裡也至少醒一次」。那句話的依據是**單一事件**；R80 以
+#: 全庫 1,433 支逐字稿重量（`tools/probe/reset_window_distribution.py`，14 個相異 episode）
+#: 得到最短窗是 **0.5 分鐘**、4/14 個 episode ≤16 分 ⇒ 900 秒**並不**小於最短觀測窗，
+#: 原文在字面上已不成立，不能留著當現行說法。
+#: 真正成立的性質：間隔決定「reset 之後最壞多久才會有人動作」。窗比間隔短時那一次走的是
+#: `probe` 而非 `arm_reset` ⇒ **代價是一次探測，不是失效**。方向仍是「愈小愈好」，取捨與
+#: 「為何不改成 50 分鐘」見 ADR-XPLAT-004 §2.7。
 #: 為什麼可以取這麼密：每次巡邏是**讀檔，零 token**（`latest_limit_event` 掃逐字稿 ＋
 #: 一次 `stat`），成本只有排程器喚醒與一次 python 啟動 ⇒ 這一側沒有需要權衡的東西。
 #: 對照被否決的 `ScheduleWakeup` 接力：那個方案每醒一次要花一個模型回合（實測約 20.7 萬
@@ -390,8 +396,12 @@ def run_powershell(script: str) -> subprocess.CompletedProcess[str]:
             capture_output=True, encoding="utf-8", errors="replace",
             # 父行程若是 pythonw（排程 Action 的載具，見 endurance_schtasks_script）
             # 就沒有 console，此時開一個 console 子行程會**新配置一個視窗**＝彈窗又
-            # 回來了。CREATE_NO_WINDOW 讓這一層獨立成立，不依賴 LogonType。
-            timeout=120, check=False, creationflags=subprocess.CREATE_NO_WINDOW)
+            # 回來了。旗標讓這一層獨立成立，不依賴 LogonType。
+            # 🔴 R80：改取 `guard.NO_WINDOW`（唯一真相源住 hook 那一側，理由同本檔頂端
+            # 「依賴方向刻意是 tools → .claude/hooks」那段——hook 結構上不能 import，
+            # 只能是被 import 的那一方）。它比原本的裸 CREATE_NO_WINDOW 多帶
+            # CREATE_NEW_PROCESS_GROUP，實測不影響 rc／stdout／stderr。
+            timeout=120, check=False, creationflags=guard.NO_WINDOW)
     finally:
         try:
             holder.unlink()
@@ -516,7 +526,9 @@ def probe_quota(claude: str = "claude", model: str = "haiku") -> dict:
         proc = subprocess.run(
             [claude, "-p", "ok", "--model", model, "--output-format", "json"],
             cwd=str(workdir), capture_output=True, encoding="utf-8",
-            errors="replace", timeout=180, check=False)
+            # 🔴 R80：這一站此前漏帶旗標。它由哨兵那一跑（pythonw ⇒ 無 console）呼叫，
+            # 而 `claude.exe` 是 console 子系統應用 ⇒ 每一次真撞線後的探測都會彈一個視窗。
+            errors="replace", timeout=180, check=False, creationflags=guard.NO_WINDOW)
         text = (proc.stdout or "") + "\n" + (proc.stderr or "")
         rc = proc.returncode
     except (OSError, subprocess.SubprocessError) as exc:
@@ -572,12 +584,27 @@ def tick_plan(state: dict, verdict: dict, now: datetime) -> dict:
 # 額度耗盡在 Claude Code 的 hook 體系裡**沒有任何觸發點**（它是 API 層的失敗，不是
 # 工具呼叫失敗，PreToolUse／PostToolUse 都不會被叫到）⇒ 預防性武裝是唯一的路。
 #
-# 「未處理」的判準＝事件時間戳 **嚴格大於** 狀態塊裡的 `handled_through`。
-# 武裝當下把逐字稿裡最後一筆事件的時間戳記成 `handled_through`，理由是**可證的**：
-# 我們此刻跑得動這支指令，就證明額度是通的 ⇒ 已經在逐字稿裡的那些撞線必然都已解決。
-# 誠實劃界：比較是 ISO-8601-Z 字串的字典序（harness 寫的格式固定，故等價於時序）；
-# 兩邊都是空字串時判為「已處理」——那是 fail-open 的一格，但 harness 實測從不省略
-# 時間戳，且下一次巡邏只要有任何新事件就會抓到。
+# 🔴 **R80 訂正本段規格**：原規格把 `handled_through` 的立案理由掛在一個**恆真且與額度
+# 無關**的推論上。原句只保存在 ADR-XPLAT-004 §2.6（那裡它是 P0 的根因原件），本處刻意
+# **不複製**它——本 repo 判過「訂正註記逐字引述假話＝製造新假話」。
+# 🔴 而本段自己就是那條紀律的又一個實例：R80 二審（NEW-ARCH-R80B-06）實測本註記的上一版
+# 寫著「故不複述它」，緊接四行卻把整句抄了出來 ⇒ **自稱不複述本身變成一句假話，而被複述
+# 的那句仍留在樹裡**，下一個 grep 到它的人會以為那是現行規格。
+# 它為什麼不成立：武裝是一個純本機 subprocess、零 API 呼叫，額度早就見底時它照樣跑得動、
+# 照樣把撞線標成已處理（實證：撞線後兩分鐘就被標成已解決，此後每次巡邏都合法地判 patrol，
+# 哨兵整晚失明）。
+# 那正是本輪 P0 的根因，而修法已經落地在別處：**「已處理」現在由 `guard.
+# unhandled_limit_event()` 以「事件之後有沒有一則真的成功 API 回應」這個復原證據判定**
+# （`type=assistant` ＋ 真 model ＋ 有 `message.usage`，讀檔即可、成本為零）。
+# ⇒ `handled_through` 這個參數**已降為稽核欄位**：`_sentinel_tick` 傳空字串，
+# production 走不到「被它擋下」那條分支。它保留在簽名裡只為了①狀態塊的可讀性、
+# ②讓舊狀態塊仍能被讀。誰要是把它改回「唯一的已處理判準」，就是把 P0 裝回去。
+# 誠實劃界：這個參數若真的被傳非空值，比較是 ISO-8601-Z 字串的字典序（harness 的格式
+# 固定，故等價於時序）；兩邊都是空字串時走「未處理」那一側，交由復原證據那一層裁決。
+#
+# 🔴 R80 時區框架：`now` 的時區就是解讀 `resets 9am` 的框架（訊息自報時區時以它優先，
+# 見 `guard.declared_zone`）。本函式**不讀機器的本地時區**——讀了就會讓同一份語料在
+# 容器（UTC）與本機（UTC+8）給出相反的答案，那是 act 實跑抓到的兩個紅。
 def sentinel_decide(event: dict | None, handled_through: object,
                     idle_seconds: float, now: datetime) -> dict:
     """哨兵醒來後的四分支判定。純函式——預防鏈的大腦，每一支都要能單獨注入。"""
@@ -586,7 +613,7 @@ def sentinel_decide(event: dict | None, handled_through: object,
             return {"action": "escalate", "at": None,
                     "reason": "月度支出上限——等待無效，只有人去 claude.ai 提額才會回來"}
         reset_at = guard.parse_reset_at(
-            event["text"], local_time(event["timestamp"]) or now)
+            event["text"], local_time(event["timestamp"], now.tzinfo) or now)
         if reset_at is None:
             return {"action": "escalate", "at": None,
                     "reason": "偵測到撞線但訊息裡解不出 reset 時刻 ⇒ 拒絕用猜的重排"
@@ -654,16 +681,29 @@ def endurance_schtasks_script(plan_path: str, task_name: str, at_expr: str,
     # 代價已查證：`sys.stdout`／`sys.stderr` 為 `None`。CPython 的 `print()` 對
     # `stdout is None` 是靜默 no-op（不拋例外），`_stdio_utf8` 亦已明文處理該情境；
     # 而本檔的稽核痕跡一律 `append_log()` 寫檔、不靠 stdout ⇒ 可觀測性零損失。
-    quiet = Path(sys.executable).resolve().with_name("pythonw.exe")
-    python = _ps_single_quote(str(quiet if quiet.is_file() else Path(sys.executable).resolve()))
+    # 🔴 R80：載具解析收斂到 `guard.quiet_python()`（唯一真相源住 hook 那一側，同本檔
+    # 頂端「依賴方向刻意是 tools → .claude/hooks」那段）。此前這裡自己算一份 pythonw，
+    # 與 hook 內兩處 spawn 各算各的＝同一份知識三個家。
+    python = _ps_single_quote(guard.quiet_python())
     plan_q = _ps_single_quote(plan_path)
     task_q = _ps_single_quote(task_name)
     argument = _ps_single_quote(runner_action_argument(plan_path, task_name, tick))
     return (
         "$ErrorActionPreference = 'Stop'\n"
         f"if (-not (Test-Path '{plan_q}')) {{ throw '任務書不存在，拒絕註冊：{plan_q}' }}\n"
+        # 🔴 R80 P0 的第一層。`New-ScheduledTaskAction` 不給 `-WorkingDirectory` 時，
+        # 排程起的行程 cwd ＝ `C:\\Windows\\System32`（實測：本機哨兵的 Action 那一格是
+        # **空字串**）。後果不是「路徑不方便」而是**續跑那一跑結構上做不了任何事**：
+        # 它起的 `claude -p -r` 把「本 session 允許的工作目錄」鎖在 system32，於是連
+        # 任務書都讀不到（實測逐字：Read → 權限未授予；Get-Content → 「本 session 允許
+        # 的工作目錄只有 C:\\WINDOWS\\system32」）。五段流程全部觸發成功，卻在最後一步
+        # 空轉——正是本 repo 反覆判過的「機制蓋好沒接電」的下一個變體：接了電但踩空。
+        # 值刻意由 `_REPO_ROOT`（＝`Path(__file__).resolve().parents[1]`）推導而**不寫死**：
+        # 把一台機器的 checkout 路徑寫成常數是 DEF-101-778 的判例，`tools/tests/
+        # test_platform_neutral_paths.py` 會逐行掃出來判紅。Action 的 Arguments 帶的是
+        # 本檔的絕對路徑，所以這個推導在排程行程裡同樣成立（端到端已實證）。
         f"$action  = New-ScheduledTaskAction -Execute '{python}' "
-        f"-Argument '{argument}'\n"
+        f"-Argument '{argument}' -WorkingDirectory '{_ps_single_quote(str(_REPO_ROOT))}'\n"
         f"$trigger = New-ScheduledTaskTrigger -Once -At {at_expr}\n"
         f"$settings = {_SCHTASKS_SETTINGS}\n"
         f"$principal = {_SCHTASKS_PRINCIPAL}\n"
@@ -691,10 +731,15 @@ def _register_at_expr(plan_path: str, task: str, at_expr: str, tick: str) -> tup
     return 0, moment
 
 
+# 🔴 R80：`at.astimezone()` 不是裝飾。`strftime` 會把 offset **無聲丟掉**，而
+# `New-ScheduledTaskTrigger -At '<字串>'` 一律以**機器本地時區**解讀它 ⇒ `at` 若帶的是
+# 別的時區（本輪的 reset 時刻現在可能來自訊息自報的時區），排程就會醒在錯的時刻，
+# 而 `NextRunTime` 照樣拿得到＝取證規則全綠的假綠。先換算到本機框架再丟 offset，
+# 才是「丟掉的那個資訊本來就已經被用掉了」。
 def register_endurance(state: dict, at: datetime, tick: str = RESUME_TICK) -> tuple[int, str]:
     """註冊／重排並取證。回 `(rc, next_run_time)`；拿不到憑證一律 rc=1。"""
     return _register_at_expr(state["plan_path"], state["task_name"],
-                             f"'{at.strftime('%Y-%m-%d %H:%M:%S')}'", tick)
+                             f"'{at.astimezone().strftime('%Y-%m-%d %H:%M:%S')}'", tick)
 
 
 def write_relay(plan: Path, state: dict) -> None:
@@ -857,12 +902,16 @@ def _schtasks_remove(task_name: str) -> int:
     return 0
 
 
-# 必須換到**本機時區**：`resets 9am` 那個字串是本地時刻（括號裡就寫著 `Asia/Taipei`），
-# 拿 UTC 的「現在」去解「下一個 9am」會整整差掉時差。
-def local_time(stamp: str) -> datetime | None:
-    """逐字稿的 ISO-8601（UTC，`Z` 結尾）→ 本機時區的 datetime；壞值回 `None`。"""
+# 必須換到「解讀 `resets 9am` 的那個框架」：那個字串是牆上時刻（括號裡就寫著
+# `Asia/Taipei`），拿 UTC 的「現在」去解「下一個 9am」會整整差掉時差。
+# 🔴 R80：`tz` 由參數傳入，**不再無條件讀機器的本地時區**。act 在 Linux 容器實跑抓到
+# 的兩個紅（`arm_reset` != `probe`）根因就在這裡：錨點取機器時區、`now` 由呼叫端給，
+# 同一份語料因此有**兩個框架**，容器（UTC）與本機（UTC+8）判定翻面。`tz=None` 沿用
+# `datetime.astimezone()` 的既有語意（機器本地），所以既有呼叫端行為一字未變。
+def local_time(stamp: str, tz: object = None) -> datetime | None:
+    """逐字稿的 ISO-8601（UTC，`Z` 結尾）→ 指定時區（預設機器本地）；壞值回 `None`。"""
     try:
-        return datetime.fromisoformat(stamp.replace("Z", "+00:00")).astimezone()
+        return datetime.fromisoformat(stamp.replace("Z", "+00:00")).astimezone(tz)
     except (TypeError, ValueError):
         return None
 
@@ -952,15 +1001,40 @@ def _arm_endurance(args, transcript: Path, plan: Path) -> int:
 def _run_resume(args, state: dict, log: Path) -> int:
     """額度回來且已授權時，真的把工作續跑起來（帶無人看管訊號）。"""
     prompt = (f"讀 {state['plan_path']}，照它第 3 節做。"
-              "🔴 第一件事是重驗，不採信該檔任何「已通過」宣稱。"
-              "遵守第 4 節〈禁止事項〉。🔴 本回合無人看管，禁止 commit／push"
+              "🔴 第一件事是重驗，不採信該檔任何「已通過」宣稱。遵守第 4 節〈禁止事項〉。"
+              "🔴 本回合無人看管，禁止 commit／push"
               "（已由 PreToolUse 守衛硬擋，不是請求）——改動留在工作樹讓人回來收。")
+    # 🔴 R80 P0 的第二層（兩層都補才算修好，缺任一層續跑那一跑都做不了事）。
+    # · `cwd=_REPO_ROOT`：沒有它時 cwd 繼承自排程行程＝system32，而 Claude Code 用 cwd
+    #   決定「本 session 允許的工作目錄」⇒ 續跑碰不到 repo 一個檔。**排程 Action 的
+    #   `-WorkingDirectory` 不能取代它**：那一層管的是 planner 自己的 cwd，這一層管的是
+    #   被 spawn 的 `claude` 的 cwd；今天兩層剛好同值，但只補上層等於把正確性寄託在
+    #   「planner 從不改自己的 cwd」這個沒有人在守的假設上。cwd 同時也是 `-r` 找得到
+    #   session 的條件（逐字稿住 `~/.claude/projects/<由 cwd 推出的 slug>/`）。
+    # · `--add-dir`：任務書落在 `%TEMP%`（刻意不進 repo——repo 內不得有可寫暫存目錄，
+    #   且未追蹤檔會漂進好幾道以 `git status`／`git ls-files` 為掃描面的鎖）。cwd 改成
+    #   repo 根之後 `%TEMP%` 仍在允許目錄之外，所以必須顯式把它加進去。旗標實查
+    #   `claude --help`：`--add-dir <directories...>  Additional directories to allow
+    #   tool access to`（非憑印象）。傳**任務書所在目錄**而不是整個 `%TEMP%` 的父層，
+    #   射程剛好一個目錄。
+    #   🔴 **`prompt` 必須排在 `--add-dir` 前面**，這是 R80 端到端實測踩到的真缺陷：
+    #   該旗標的值是**變長的**（`<directories...>`），放在 prompt 前面時它會把 prompt
+    #   一起吃掉當成目錄 ⇒ `claude` 認為這一跑沒有 prompt，rc=1、stdout 全空、逐字
+    #   `Error: No deferred tool marker found in the resumed session...Provide a prompt
+    #   to continue the conversation.`。修前修後各實測一次（prompt 在後 rc=1／prompt
+    #   在前 rc=0），順序由 `ConsoleFreeSpawnTest` 的姊妹鎖釘住。
+    # · `creationflags`：見 `guard.NO_WINDOW`。少了它，無人看管的續跑會彈一個視窗。
     proc = subprocess.run(
-        [args.probe_command, "-p", "-r", state["session_id"], prompt],
-        capture_output=True, encoding="utf-8", errors="replace",
-        timeout=3600, check=False, env={**os.environ, UNATTENDED_ENV: "1"},
-    )
-    append_log(log, "resumed", rc=proc.returncode, out=(proc.stdout or "")[:400])
+        [args.probe_command, "-p", "-r", state["session_id"], prompt,
+         "--add-dir", str(Path(state["plan_path"]).parent)],
+        capture_output=True, encoding="utf-8", errors="replace", timeout=3600,
+        check=False, creationflags=guard.NO_WINDOW, cwd=str(_REPO_ROOT),
+        env={**os.environ, UNATTENDED_ENV: "1"})
+    # 🔴 `err=` 是 R80 補的：此前只記 stdout，而上面那個 argv 缺陷的表現正好是
+    # 「rc=1、stdout 全空」⇒ 稽核痕跡看得到「失敗了」卻看不到**為什麼**，我是靠手工
+    # 重跑一次才找出原因的。無人看管的那一跑沒有人在看 stderr，它只有這一個家。
+    append_log(log, "resumed", rc=proc.returncode, err=(proc.stderr or "")[:300],
+               out=(proc.stdout or "")[:400])
     print((proc.stdout or "")[:2000])
     return proc.returncode
 
@@ -1038,11 +1112,14 @@ def _resume_tick(args) -> int:
 def _arm_sentinel(args, transcript: Path, plan: Path) -> int:
     """哨兵武裝：註冊一支一次性 schtasks，到點只讀檔（零 token）。"""
     session_id = guard.session_id_of(transcript)
-    seen = guard.latest_limit_event(transcript) if transcript.is_file() else None
+    # 🔴 R80：`handled_through` 改記「全域最後一次成功 API 回應」，不再記「最後一筆撞線」。
+    # 舊寫法的立案理由是「我此刻跑得動武裝指令 ⇒ 額度是通的 ⇒ 既有撞線必然都已解決」——
+    # 那句話**是假的**（武裝零 API 呼叫），而它正是哨兵整晚失明的主因。本欄現在只作稽核，
+    # 真正的「已處理」判定在 `guard.unhandled_limit_event` 內以復原證據做。
     state = _base_state(session_id, plan, args, "sentinel",
                         sentinel_task_name(session_id, args.task_name))
-    state.update(transcript=str(transcript),
-                 handled_through=str((seen or {}).get("timestamp") or ""))
+    state.update(transcript=str(transcript), handled_through=guard.latest_success_at(
+        guard.session_transcripts(transcript)) if transcript.is_file() else "")
     at = datetime.now().astimezone() + timedelta(seconds=SENTINEL_INTERVAL_SECONDS)
     rc, moment = _register_and_record(plan, state, at, SENTINEL_TICK)
     append_log(endurance_log_path(plan), "sentinel_armed" if rc == 0 else "arm_failed",
@@ -1077,9 +1154,20 @@ def _sentinel_tick(args) -> int:
     now = datetime.now().astimezone()
     # 逐字稿不見了＝哨兵瞎了。刻意 fail-loud＋自我解除，而不是靜默當成「工作結束」
     # ——後者會讓一個瞎掉的哨兵與一個正常下班的哨兵留下完全相同的痕跡。
+    # 🔴 R80 P0 修復點（哨兵整晚失明的那一格）。三處都換掉，理由全文在
+    # `context_budget_guard.unhandled_limit_event` 上方那段：
+    #  · 事件來源 `latest_limit_event` → `unhandled_limit_event`：前者只看**主逐字稿的
+    #    最後一筆**，本次事故裡那一筆是 `quota_spend`，把更早、仍未解決的 `quota_session`
+    #    整個蓋掉；後者掃主檔＋subagent，並以「全域復原證據」判未處理（實測假陽性 0.0%）。
+    #  · `handled_through` 傳 `""`：那個欄位的立案理由（「我跑得動武裝指令 ⇒ 額度是通的」）
+    #    **是假的**——武裝是零 API 呼叫的本機 subprocess。實證它把撞線後兩分鐘就標成已解決。
+    #    「已處理」現在由復原證據判定，不再由一個推論判定。欄位保留只作稽核用。
+    #  · 閒置秒數改用**全 session 最新** mtime：扇出時主逐字稿可能很久沒被寫，只看它會把
+    #    正在狂跑的 session 誤判成閒置，而閒置到門檻就會自我解除。
     decision = sentinel_decide(
-        guard.latest_limit_event(transcript), state.get("handled_through"),
-        now.timestamp() - transcript.stat().st_mtime, now) if transcript.is_file() else {
+        guard.unhandled_limit_event(transcript), "",
+        now.timestamp() - guard.newest_activity_at(guard.session_transcripts(transcript)),
+        now) if transcript.is_file() else {
         "action": "escalate", "at": None,
         "reason": f"狀態塊指的逐字稿不存在（{transcript}）⇒ 哨兵已瞎，自我解除並叫人"}
     append_log(log, "sentinel_decided", action=decision["action"],

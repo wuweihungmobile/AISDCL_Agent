@@ -1499,28 +1499,28 @@ class TestOrphanBacklogAgainstTheRealLedger(unittest.TestCase):
             )
 
     def test_the_naive_whole_row_rule_would_have_burned_most_of_the_ledger(self) -> None:
-        """量化「為何只認承接語境」：把掃描員建議的『列內任一 R\\d+』跑一次做對照組。
+        """量化「為何只認承接語境」：拿『列內任一 R\\d+』當稻草人跑一次（數字現查，Scan-H #3）。
 
-        數字一律現查、不寫死（Scan-H 必跑項 #3）。斷言採比例而非絕對值：narrow 規則命中
-        的列必須遠少於 naive 規則，否則就表示 narrow 化沒有實際收斂效果、設計理由不成立。
+        🔴 兩側來源刻意**不對稱**（DEF-101-959）：`narrow` 直接數 production 的判決、
+        `naive` 稻草人在本測試內獨立寫——鑑別力來自兩者的對比，兩側都取自 production 就
+        退化成「真規則等於自己」的恆真式。反向（`narrow` 也獨立寫）是本列的原始缺陷：只
+        重寫了 production 的一半、漏掉「狀態欄載明改派即放行」那兩個出口，於是合法改派的
+        歷史列全被算進 narrow 且只增不減，帳本時鐘一前進就撞線（實測半套版 20 筆全屬此類）。
         """
         cur = m.current_round(self.text)
-        naive, narrow = 0, 0
+        self.assertIsInstance(cur, int, "推不出當前輪 ⇒ 兩側都沒有比較基準，本測試無意義")
+        naive = 0
         for _lineno, cells, line in self.rows:
             if m._classify(cells[self.status_idx]) not in m._UNRESOLVED_CLASSES:
                 continue
-            rounds = [int(x) for x in m._ROUND_RE.findall(line)]
+            rounds = [int(x) for x in re.findall(r"R(\d+)", line)]
             if rounds and max(rounds) < cur:
                 naive += 1
-            handovers = m._handover_rounds(line)
-            if handovers and max(n for _, n, _ in handovers) < cur:
-                narrow += 1
+        narrow = len(m.orphan_backlog_problems(self.text))
         self.assertGreater(naive, 0, "對照組零命中 ⇒ 本測試失去對照意義")
-        self.assertLess(
-            narrow * 5, naive,
-            f"承接語境窄化沒有收斂效果（naive={naive}／narrow={narrow}）——"
-            "請重新檢視 _HANDOVER_ROUND_RES 是否又退回『列內任一 R\\d+』",
-        )
+        self.assertLess(narrow * 5, naive,
+                        f"承接語境窄化沒有收斂效果（naive={naive}／narrow={narrow}）——"
+                        "請重新檢視 _HANDOVER_ROUND_RES 是否又退回『列內任一 R\\d+』")
 
     def test_real_ledger_has_zero_orphan_backlog_rows(self) -> None:
         """真實帳本不得有孤兒承接輪次（硬規則②）。

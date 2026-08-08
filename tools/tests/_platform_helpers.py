@@ -220,11 +220,31 @@ def usable_bash_for_fixture() -> str | None:
     ⚠️ 同型的舊敘述另有一份留在 `test_macos_smoke_skip_honesty.py`（該檔開頭
     「fail-closed 的僥倖」註解），R71 本輪射程外未訂正，下輪一併處理。
 
-    **刻意不收斂的兩份**：`test_pre_push_dispatcher._usable_bash()` 與
-    `test_git_hooks_install_common._usable_bash()` 是**生產端探針的獨立重寫回歸鎖**
-    （見 `tools/lib/bash_probe_spec.py` docstring），其獨立性本身就是鑑別力來源
-    ——共用函式會讓它們與被測對象同時失效。本函式與它們的差別是**用途**：本函式
-    要的是「給我一支能跑的 bash」，它們要的是「驗證探測規則本身」。
+    🔴 **R80 S5-03：原本「刻意不收斂的兩份」已經收斂進本函式**（連同第三份）。
+    原文的理由是「它們是生產端探針的**獨立重寫**回歸鎖，獨立性本身就是鑑別力來源」。
+    當回合實測推翻了那個前提：`test_pre_push_dispatcher._usable_bash()`、
+    `test_git_hooks_install_common._usable_bash()`、
+    `test_windows_forbidden_filename_parity._usable_bash()` 三份在**剝除 docstring 後的
+    AST 逐字相同**（正規化雜湊皆 `9797b0251822`；量法與輸出見
+    `docs/06_quality/CrossPlatform_R80_Subtraction_Evidence.md`）。**複製貼上不是獨立
+    重寫**——逐字相同的三份共享 100% 盲點，沒有任何一份會在另外兩份漏掉時轉紅，
+    所以它們付的是三份維護成本、換到的鑑別力是零。
+
+    真正的「獨立重寫」仍然在，而且是本 repo 唯一守得住的那一份：
+    `AISDLC_SDD/scripts/bash_probe.py::usable_bash()`（生產端，跨**子專案邊界**故不可
+    import 本檔）與 `tools/integration_gate_core.py::find_git_bash()`——兩者的正規化
+    雜湊與本函式**互不相同**（`91fa22dca19e`／`bd83a4f6bb68`／`ed3d027ac8d8`），是真的
+    各自寫成的。生產端那一份的行為鎖仍在
+    `AISDLC_SDD/scripts/tests/test_bash_probe.py::TestUsableBashSystem32Guard`，不受本次
+    收斂影響。⇒ 「獨立重寫維持鑑別力」的正當射程是**硬邊界隔開的真獨立實作**
+    （語言邊界、子專案邊界），不是同一棵樹裡的純函式複本。
+
+    收斂後本函式的覆蓋由 `test_bash_probe_spec_contract.py` 承接且**更硬**（活 stub
+    真解析，非 mock 手填回傳值）：System32 整段排除＝`TestWslStubIsNeverAcceptedAsReal
+    Bash::test_system32_stub_is_rejected`；子字串不得誤排＝同類的
+    `test_substring_system32_is_not_a_segment_and_must_be_accepted`；缺 coreutils 必須拒絕
+    ＝`TestProbeCmdRealSubprocessBehavior` 與 `TestUsableBashRejectsCoreutilsLessBinBash
+    Clone`；正向接受＝`test_stub_is_live_so_only_the_path_rule_can_reject_it`。
     """
     for cand in _bash_candidates():
         try:

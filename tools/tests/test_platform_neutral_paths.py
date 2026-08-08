@@ -3620,6 +3620,82 @@ def resolve_doc_script(doc_rel: str, script_rel: str, tracked: set[str]) -> str 
     return None
 
 
+#: 🔴 DEF-101-205（R80 落地）：ONBOARDING §6「執行權限政策」那句散文即 SSOT，本正則把
+#: 「755 入庫」範圍的那一段切出來。刻意**不**在程式裡另寫一份清單——那就是本 repo 反覆在
+#: 治的「同一份知識住兩個家、只有一個家被改」（判例 DEF-101-778）。切段而非掃全句是必要的：
+#: 同一句後半段還寫著「其他 `.sh` 工具…索引 644」，把整句的反引號都收進來會把 644 那一組
+#: 也算成 755 白名單，判準當場失去鑑別力。錨定在 `範圍＝**…**` 這個**粗體跨度**而不是
+#: 「到下一個『；其他』為止」：落地時實測後者會多吃到緊接在後的 rationale 括號，把
+#: `/bin/bash`（那裡在解釋 plist 以誰為執行檔）誤收成一個 755 白名單項。
+_EXEC_SCOPE_PROSE_RE = re.compile(r"「755 入庫」範圍＝\*\*(?P<scope>.*?)\*\*")
+
+
+def exec_bit_prose_scope(onboarding_text: str) -> tuple[tuple[str, ...], str | None]:
+    """從 ONBOARDING §6 政策句抽出「允許 100755」的路徑 token；抽不到回 `((), 說明)`。
+
+    抽不到一律 fail-loud：靜默退回空集合會讓下面的雙向比對變成「每一支 755 都違規」
+    （一次全紅），靜默放行則讓整道鎖蒸發——兩種都是壞的失敗模式（手法比照
+    `tools/check_defect_log_crossref.py::_prose_status_first_words`）。
+
+    🔴 反引號一律以**成對切分**取（`split("`")[1::2]`）而不是用正則抓
+    `` `([^`]*/[^`]*)` ``：後者落地時實測會把「上一個 code span 的收尾反引號」跟
+    「下一個的起始反引號」配成一對，於是兩個 token 之間那段散文（只要含一個 `/`）
+    被當成一個路徑 token 收進白名單。奇數個反引號＝散文寫壞，同樣 fail-loud。
+    """
+    m = _EXEC_SCOPE_PROSE_RE.search(onboarding_text)
+    if m is None:
+        return (), (
+            "ONBOARDING.md 抽不到「「755 入庫」範圍＝**…**」那個粗體跨度 —— exec bit 政策"
+            "的權威散文不存在或被改寫，本判準便無從綁定。請在 §6「執行權限政策」條目補回"
+            "該句式，或同步 _EXEC_SCOPE_PROSE_RE 的抽取樣式"
+        )
+    parts = m.group("scope").split("`")
+    if len(parts) % 2 == 0:
+        return (), (
+            "ONBOARDING §6「755 入庫」範圍那段的反引號**數量為奇數**（未成對）⇒ 無法"
+            "可靠切出 code span。請把該段的反引號補成對"
+        )
+    return tuple(dict.fromkeys(t for t in parts[1::2] if "/" in t)), None
+
+
+def exec_bit_scope_problems(
+    modes: dict[str, str], scope: tuple[str, ...]
+) -> list[str]:
+    """雙向比對：索引 100755 的集合 ↔ 散文具名的 755 範圍（純函式，可構造輸入驗牙）。
+
+    兩向缺一都不成鎖：
+      · 只判①（每支 755 都落在範圍內）⇒ 散文可以無限放寬，多寫幾個目錄就永遠綠。
+      · 只判②（每個 token 都真的有 755）⇒ 範圍外冒出一支新 755 一句話都不會說，
+        而那正是 `DEF-101-205` 原本擔心的「漂移無訊號」。
+    """
+    execs = sorted(p for p, mode in modes.items() if mode == _INDEX_MODE_EXEC)
+    problems: list[str] = []
+
+    def _covered(path: str) -> bool:
+        return any(
+            path.startswith(tok) if tok.endswith("/") else path == tok for tok in scope
+        )
+
+    for path in execs:
+        if not _covered(path):
+            problems.append(
+                f"{path}：索引模式 100755，但不落在 ONBOARDING §6 政策句具名的範圍內"
+                f"（現行範圍＝{list(scope)}）。二擇一：① 這支本來就不該帶 exec bit ⇒ "
+                f"`git update-index --chmod=-x {path}`；② 它確實需要 exec bit ⇒ 先去改"
+                f"**散文**（ONBOARDING §6 那一句才是 SSOT），本判準會自動跟上"
+            )
+    for tok in scope:
+        if not any(
+            (p.startswith(tok) if tok.endswith("/") else p == tok) for p in execs
+        ):
+            problems.append(
+                f"{tok}：ONBOARDING §6 政策句把它列進「755 入庫」範圍，但索引裡該處"
+                f"**一支 100755 都沒有** ⇒ 散文已過期。請把它從政策句移除"
+                f"（留著就是日後無聲把 755 加回去的額度）"
+            )
+    return problems
+
+
 def bare_sh_doc_offenders(
     docs: dict[str, str], modes: dict[str, str]
 ) -> list[tuple[str, int, str]]:
@@ -3773,6 +3849,67 @@ class TestExecBitIsGovernedViaTheGitIndex(unittest.TestCase):
         self.assertIn(
             _INDEX_MODE_EXEC, set(self.modes.values()),
             "全 repo 一支 100755 都沒有 ⇒ 判準的『正例』側無從成立")
+
+    def test_the_index_exec_set_matches_the_onboarding_policy_sentence(self) -> None:
+        """🔴 DEF-101-205 自訂的解鎖條件本體（R80 落地）。
+
+        該列自 R14 起 open 逾五十輪，逐字寫著解鎖條件＝「以 `git ls-files -s` 取出 mode
+        `100755` 的檔案集合，與 `ONBOARDING.md` §6 執行權限政策句具名的 755 清單逐項互比
+        （散文即 SSOT），不符即 rc=1」。**取數管道早就有了**（本類別 R79 落地時就在讀
+        `git ls-files -s`），缺的一直是這一項比對——所以政策句與索引之間的漂移到今天為止
+        一個訊號都沒有。
+
+        Rule 9（為何這件事重要，而不只是「模式好看」）：exec bit 這一維在 Windows 上
+        **結構性不可見**（本機 `core.filemode=false`，模式從不出現在 `git status`／
+        `git diff`／任何 pre-commit 掃描裡），於是「哪支檔可以帶 755」這件事在本平台上
+        只剩散文在守。散文不會轉紅。
+        """
+        scope, problem = exec_bit_prose_scope(
+            (_REPO_ROOT / "ONBOARDING.md").read_text(encoding="utf-8")
+        )
+        self.assertIsNone(problem, problem)
+        self.assertGreaterEqual(
+            len(scope), 2,
+            f"政策句只抽到 {list(scope)} —— 少於兩個 token 幾乎必然是抽取樣式壞掉，"
+            "而不是政策真的縮到這麼小")
+        self.assertEqual(exec_bit_scope_problems(self.modes, scope), [],
+                         "\n".join(exec_bit_scope_problems(self.modes, scope)))
+
+    def test_the_exec_scope_criterion_is_red_in_both_directions(self) -> None:
+        """紅綠自證（合成輸入，不碰磁碟）：兩向各證一次，缺一向就不是雙向鎖。"""
+        scope = ("tools/git-hooks/", "AutoClaude/tools/run_local_nightly.sh")
+        green = {
+            "tools/git-hooks/pre-push": _INDEX_MODE_EXEC,
+            "AutoClaude/tools/run_local_nightly.sh": _INDEX_MODE_EXEC,
+            "tools/x.sh": "100644",
+        }
+        self.assertEqual(exec_bit_scope_problems(green, scope), [])
+        # 向①：範圍外冒出一支新的 100755。
+        rogue = dict(green, **{"tools/x.sh": _INDEX_MODE_EXEC})
+        self.assertEqual(len(exec_bit_scope_problems(rogue, scope)), 1)
+        # 向②：散文列了一個「已經沒有任何 755」的住所 ⇒ 過期，必須被要求刪掉。
+        self.assertEqual(
+            len(exec_bit_scope_problems(green, (*scope, "AISDLC_SDD/.githooks/"))), 1)
+
+    def test_the_prose_extractor_fails_loud_instead_of_silently_allowing(self) -> None:
+        """散文被改寫時必須 fail-loud——靜默回空集合＝整道鎖蒸發（軟出口）。"""
+        scope, problem = exec_bit_prose_scope("完全沒有那句政策的文件內容")
+        self.assertEqual(scope, ())
+        self.assertIsNotNone(problem)
+        # 切段是必要的：不切段就會把同一句後半「其他 `.sh` 工具…索引 644」也收進白名單。
+        scope, problem = exec_bit_prose_scope(
+            "「755 入庫」範圍＝**`a/b/`**；其他 `c/d.sh` 工具一律索引 644")
+        self.assertIsNone(problem)
+        self.assertEqual(scope, ("a/b/",))
+        # 成對切分：兩個 token 之間那段含 `/` 的散文**不得**被配成第三個 token。
+        scope, problem = exec_bit_prose_scope(
+            "「755 入庫」範圍＝**`a/b/` 由 x 執行、`bash` 呼叫 e/f 者除外＋`c/d.sh`**")
+        self.assertIsNone(problem)
+        self.assertEqual(scope, ("a/b/", "c/d.sh"))
+        # 反引號未成對 ⇒ fail-loud，不得靜默給出一組看似合理的 token。
+        scope, problem = exec_bit_prose_scope("「755 入庫」範圍＝**`a/b/ 忘了收尾**")
+        self.assertEqual(scope, ())
+        self.assertIsNotNone(problem)
 
     def test_docs_that_teach_bare_sh_invocation_point_at_executable_files(self) -> None:
         docs: dict[str, str] = {}
@@ -4078,6 +4215,810 @@ class TestXplatInjectionMatrix(unittest.TestCase):
         self.assertEqual(
             _encoding_markers(f"x = 1  # {_ENCODING_OK_MARKER} 自家 WHY\n"),
             {1: "自家 WHY"}, "本判準認不出自己的標記 ⇒ 上一條變成恆真的假綠")
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# R80（包 B / S4）— 跨平台危害類：訂正兩筆假事實 ＋ 三個新家族上鎖
+# ══════════════════════════════════════════════════════════════════════════════
+# 本段一次處理四件同源的事，全部長在「鐵律三對照表」這個治理面上：
+#
+#  ① **低報分子**（S4-01，判準在本檔最後一節）。表上「大小寫敏感度」列自陳無機械物，
+#     而 NTFS 大小寫碰撞判準 `tools/check_ntfs_paths.py` 的正規化鍵早就存在、且接在
+#     pre-commit 與四支 CI workflow 上。舊的覆蓋率棘輪只讀那張表本身，於是「表說沒有、
+#     實際有」這個方向**結構上失明**。
+#
+#  ② **有鎖在守假話**（S4-02）。表上「行尾（`.py` 方向）」列自陳無機械物——不真。
+#     機械物在（`TestWorktreeEolMatchesPolicy`），只是被 `_EOL_LF_SCOPE` 這個常數窄化
+#     成只看 `.sh`／`.bash`，而且 `test_the_policy_follows_the_declaration_instead_of_a_copy`
+#     還有一條 `assertNotIn(".py", policy)` **釘死它必須放行**。這比沒有鎖更難看見：
+#     檔案在、判準在、測試全綠，只有讀完那個常數才知道 `.py` 從來不在射程裡。
+#
+#  ③ **修法方向被規模否決**（S4-03）。全庫工作樹行尾與 `.gitattributes` 宣告不符者
+#     **18,255 支**（不是表上那個只講 `.py` 的 4,176），其中**絕大多數**落在
+#     Copy-on-Evolve 凍結面 ⇒「全部就地轉 LF」不是修法，是打破凍結政策。正解是把
+#     凍結面與活躍面**分開處置**：活躍面止血（新漂移必紅）、凍結面誠實登記為欠債。
+#
+#  ④ 兩個此前零判準的新危害家族：**shebang ＋ 非 LF 行尾**（S4-08）與
+#     **naive 本地時間戳被持久化**（S4-07），加上 PowerShell 側的**站點級**判準
+#     （S4-04／S4-05）。三者共同的性質是「今天幾乎沒有存量，缺的是寫入面的門」。
+#
+# 🔴 本段所有數字都是**當回合實測**、不是常數：欠債釘子旁邊寫的就是那份實測，
+#    判準失效時失敗訊息會把現值印出來（同本檔 `_scan_roots()` 的既有慣例）。
+
+
+# ── 共用：tracked 檔案的工作樹行尾（現查一次）─────────────────────────────────
+@functools.lru_cache(maxsize=1)
+def tracked_eol_rows() -> tuple[tuple[str, str], ...]:
+    """全庫 tracked 檔的 `(路徑, 工作樹行尾)`。取數管道壞掉即 fail-loud。
+
+    與 `TestWorktreeEolMatchesPolicy._ls_files_eol()` 的差別：那一支只問政策表內那幾個
+    副檔名（`--` pathspec 過濾），本支要**全庫**——③ 的規模判斷不能只看腳本族。
+    """
+    proc = subprocess.run(
+        ["git", "-C", str(_REPO_ROOT), "ls-files", "--eol"],
+        capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=180,
+    )
+    if proc.returncode != 0:
+        raise AssertionError(
+            f"git ls-files --eol 失敗（rc={proc.returncode}；stderr={proc.stderr.strip()!r}）"
+            "——本段每一道判準的輸入沒了，不是「沒有違規」")
+    return tuple(parse_ls_files_eol(proc.stdout))
+
+
+def eol_drift_rows(
+    rows: tuple[tuple[str, str], ...], declared: dict[str, str]
+) -> tuple[list[str], list[str]]:
+    """`(凍結面漂移, 活躍面漂移)`——工作樹行尾 ≠ `.gitattributes` 宣告的 tracked 檔。
+
+    `none`（空檔／無換行）不算漂移：無從違反。分帳用本檔既有的 `_is_frozen_sdd_path`
+    （LATEST **不算**凍結——它是活躍面，Copy-on-Evolve 只凍結歷史版）。
+    """
+    frozen_side: list[str] = []
+    active_side: list[str] = []
+    for path, worktree in rows:
+        want = declared.get(path_suffix(path))
+        if want is None or worktree in (want, "none", ""):
+            continue
+        (frozen_side if _is_frozen_sdd_path(path) else active_side).append(path)
+    return frozen_side, active_side
+
+
+def debt_band_verdict(label: str, actual: int, ceiling: int) -> str | None:
+    """欠債的**雙邊帶**：超過上限＝新增漂移；掉太多＝該重釘。`None`＝在帶內。
+
+    🔴 為何不用「雙向精確比對」（本檔其餘欠債釘子的慣例）：那個慣例成立的前提是欠債面
+    **只有登記者會動**（凍結版文件、具名站點集合）。本判準的欠債面是數百支活躍原始碼的
+    行尾，任何一個並行工作包用工具覆寫一支檔就會讓它 -1 ⇒ 精確比對會把「別人順手修好
+    一支」判成紅燈，而假紅的下場一律是整道鎖被關掉。下界因此帶 slack；但 slack 是
+    **有界**的（≥8 或上限的七分之一），大規模清理仍必須回來重釘，欠債不會靜靜地停在
+    一個早就過期的數字上。
+    """
+    if actual > ceiling:
+        return (f"{label}：實測 {actual} 超過欠債上限 {ceiling} ⇒ **新增**了行尾漂移。"
+                "修法不是把上限調高——以宣告的行尾重存那幾支檔（`.py` 是 LF）")
+    floor = ceiling - max(8, ceiling // 7)
+    if actual < floor:
+        return (f"{label}：實測 {actual} 已低於重釘下界 {floor}（上限 {ceiling}）⇒ 欠債"
+                f"已清掉一大截，請把上限重釘為 {actual}，否則下一次退化會被舊值遮住")
+    return None
+
+
+# ── ②③ 活躍面原始碼行尾止血 ───────────────────────────────────────────────────
+#: 本判準的射程：**活躍面**（非凍結 SDD 版）的 `.py`。
+#: 刻意不擴到 `.md`／`.yaml`：本表這一列的主題是「原始碼行尾」，而 `.md` 的 CRLF 不會
+#: 讓任何東西跑不起來——擴大主題會讓欠債數字失去可讀性，也讓止血點失焦。
+_ACTIVE_SOURCE_EOL_SUFFIX = ".py"
+#: 活躍面 `.py` 行尾漂移的欠債上限（落地當回合實測值；雙邊帶見 `debt_band_verdict`）。
+_ACTIVE_PY_EOL_DEBT_CEILING = 220
+#: 凍結面（v0.01~v0.29）`.py` 行尾漂移數——**不判、只登記**。Copy-on-Evolve 禁改；
+#: 這個數字的用途是讓「為什麼不一次全轉 LF」變成可查的量，而不是散文。
+_FROZEN_PY_EOL_DEBT_CEILING = 3956
+
+
+class TestActiveSourceEolIsRatchetedSeparatelyFromTheFrozenSurface(unittest.TestCase):
+    """活躍面 `.py` 行尾止血 ＋ 凍結面誠實登記（見本段 WHY ②③）。
+
+    這一列此前在鐵律三對照表上寫「無機械物」——**不真**。機械物一直都在
+    （`TestWorktreeEolMatchesPolicy`），只是 `_EOL_LF_SCOPE` 把射程窄化成 `.sh`／`.bash`，
+    而且該類的 `test_the_policy_follows_the_declaration_instead_of_a_copy` 還有一條
+    `assertNotIn(".py", policy)` 把「`.py` 必須被放行」釘成契約。本類別是那一格的牙齒：
+    **不動那道腳本閘的射程**（擴進去會讓它一上線就吃四千筆凍結面欠債而必被關掉），
+    改以獨立射程承接 `.py`，並把凍結／活躍分開記帳。
+    """
+
+    def _declared(self) -> dict[str, str]:
+        return declared_eol(_GITATTRIBUTES_PATH.read_text(encoding="utf-8"))
+
+    def test_active_surface_python_eol_does_not_grow(self) -> None:
+        rows = tracked_eol_rows()
+        self.assertGreater(len(rows), 20000,
+                           f"tracked 列數異常少（{len(rows)}）⇒ 取數管道疑似壞掉")
+        declared = self._declared()
+        self.assertEqual(declared.get(_ACTIVE_SOURCE_EOL_SUFFIX), "lf",
+                         "`.gitattributes` 對 .py 的宣告變了 ⇒ 本判準的前提要重新確認")
+        frozen_side, active_side = eol_drift_rows(rows, declared)
+        active_py = [p for p in active_side if p.endswith(_ACTIVE_SOURCE_EOL_SUFFIX)]
+        frozen_py = [p for p in frozen_side if p.endswith(_ACTIVE_SOURCE_EOL_SUFFIX)]
+        problems = [
+            v for v in (
+                debt_band_verdict("活躍面 .py 行尾漂移", len(active_py),
+                                  _ACTIVE_PY_EOL_DEBT_CEILING),
+                debt_band_verdict("凍結面 .py 行尾漂移", len(frozen_py),
+                                  _FROZEN_PY_EOL_DEBT_CEILING),
+            ) if v is not None
+        ]
+        self.assertEqual(
+            problems, [],
+            "🔴 `git status` 對這種漂移**結構上看不見**（checkin 正規化只作用於 index，"
+            "兩側套同一份規則）；CI 也看不見（`actions/checkout` 必定重新 smudge）。"
+            "唯一看得見的是本機工作樹這一欄：\n" + "\n".join(problems)
+            + f"\n（現值：活躍 {len(active_py)} 支、凍結 {len(frozen_py)} 支）",
+        )
+
+    def test_the_repo_wide_scale_is_measured_not_quoted(self) -> None:
+        """③：規模是量出來的。全庫漂移的**絕大多數**必須落在凍結面。
+
+        這一條守的是一個修法方向：只要凍結面仍是大宗，「全部就地轉 LF」就不是修法而是
+        打破 Copy-on-Evolve。哪天這個比例反轉（活躍面成為大宗），本測試會紅，而那個紅燈
+        的意思是「該重新決定修法了」，不是「有人弄壞了什麼」。
+        """
+        frozen_side, active_side = eol_drift_rows(tracked_eol_rows(), self._declared())
+        total = len(frozen_side) + len(active_side)
+        self.assertGreater(total, 0, "全庫零漂移？請確認取數管道（本判準不該恆綠）")
+        ratio = len(frozen_side) / total
+        self.assertGreater(
+            ratio, 0.8,
+            f"凍結面佔比掉到 {ratio:.2%}（凍結 {len(frozen_side)}／活躍 {len(active_side)}"
+            f"／全庫 {total}）⇒ 主要漂移已在可改的活躍面，"
+            "「分開處置」這個修法前提不再成立，請重新裁決",
+        )
+
+    def test_the_narrowing_constant_is_still_the_reason_this_class_exists(self) -> None:
+        """自錨：哪天有人把 `.py` 補進 `_EOL_LF_SCOPE`，本類別就重複了、該被刪。
+
+        沒有這一條，兩道射程會靜靜地重疊，而重疊的鎖只有在其中一道紅的時候才會被發現。
+        """
+        self.assertNotIn(
+            _ACTIVE_SOURCE_EOL_SUFFIX, _EOL_LF_SCOPE,
+            "`.py` 已進入 `_EOL_LF_SCOPE` ⇒ 腳本閘已承接這個副檔名，"
+            "請刪掉本類別（並確認它承接時有處理凍結面約四千支欠債）")
+
+    def test_the_band_has_teeth_in_both_directions(self) -> None:
+        """判準自證（合成值，不動磁碟）：兩個方向都要判得出來。"""
+        self.assertIsNone(debt_band_verdict("x", 220, 220))
+        self.assertIn("新增", debt_band_verdict("x", 221, 220) or "")
+        self.assertIn("重釘", debt_band_verdict("x", 100, 220) or "")
+        # slack 有下界：小欠債面掉 1 支不該逼人重釘（否則並行工作包一動就紅）
+        self.assertIsNone(debt_band_verdict("x", 9, 10))
+
+
+# ── ④-a shebang ⇒ 必須是 LF ──────────────────────────────────────────────────
+# 缺陷本體：`#!/usr/bin/env python3` 加上 CRLF 行尾，POSIX kernel 會把 `\r` 一起當成
+# 直譯器名的一部分 ⇒ `env: 'python3\r': No such file or directory`。本 repo 今天
+# **30 支 `.py` 已同時成立**（shebang ＋ CRLF），沒有炸掉純粹是因為它們的 git 索引模式
+# 都不是 100755 ⇒ 沒有人真的去 `./x.py` 執行它。**那是偶然，不是設計**：
+# `TestExecBitIsGovernedViaTheGitIndex` 那一節記載的正是「文件教人裸跑、索引模式卻是
+# 100644」這個家族——哪天有人把 exec bit 補對（那是**正確**的修法），這 30 支就會在
+# mac/Linux 上一起變成 rc=127，而修 exec bit 的人完全看不到行尾這一半。
+#
+# 🔴 判準刻意是**shebang × 行尾**的交集而不是各自一半：單看行尾，凍結面上萬支要判
+# （不可能）；單看 exec bit，今天零違規（已有鎖）。交集才是「一補另一半就炸」的那一組，
+# 而它小到可以逐檔具名。
+#: 活躍面（含 LATEST）今天仍成立的站點——**具名、雙向精確**：多一筆＝新增同型缺陷，
+#: 少一筆＝已修好（請連同本集合一起刪，那是寫下來的動作）。
+_SHEBANG_NON_LF_ACTIVE_DEBT: dict[str, str] = {
+    "AISDLC_SDD/AISDLC_SDD_v0.30/tools/arch_fitness/arch_fitness.py": (
+        "LATEST 版（非凍結、可改）。修法＝以 LF 重存該檔；未於本輪動手的理由是它不在"
+        "本包的檔案所有權內，已列入交棒"
+    ),
+}
+#: 凍結面（v0.01~v0.29）同型站點數——Copy-on-Evolve 禁改，只登記不判。
+_SHEBANG_NON_LF_FROZEN_DEBT = 29
+
+
+def shebang_non_lf_sites(
+    rows: tuple[tuple[str, str], ...], repo_root: Path
+) -> tuple[list[str], list[str]]:
+    """`(凍結面, 活躍面)`——首行是 `#!` 而工作樹行尾不是 LF 的 tracked 檔。
+
+    讀**位元組**而非文字：這一題問的就是位元組（`\\r` 有沒有黏在直譯器名後面），
+    以 text mode 讀會被 universal newlines 就地吃掉，判準會恆綠。
+    """
+    frozen_side: list[str] = []
+    active_side: list[str] = []
+    for path, worktree in rows:
+        if worktree in ("lf", "none", ""):
+            continue
+        try:
+            with (repo_root / path).open("rb") as handle:
+                head = handle.readline(256)
+        except OSError:
+            continue
+        if not head.startswith(b"#!"):
+            continue
+        (frozen_side if _is_frozen_sdd_path(path) else active_side).append(path)
+    return frozen_side, active_side
+
+
+class TestShebangImpliesLfLineEndings(unittest.TestCase):
+    """`#!` ＋ 非 LF ＝ POSIX 上 `env: '…\\r': No such file or directory`（見上方 WHY）。"""
+
+    def test_no_new_shebang_file_carries_a_non_lf_line_ending(self) -> None:
+        frozen_side, active_side = shebang_non_lf_sites(tracked_eol_rows(), _REPO_ROOT)
+        self.assertEqual(
+            sorted(active_side), sorted(_SHEBANG_NON_LF_ACTIVE_DEBT),
+            "活躍面 shebang×非 LF 站點集合與登記不符。多出來的是**新增**的同型缺陷"
+            "（請以 LF 重存該檔）；少掉的是已修好（請自 `_SHEBANG_NON_LF_ACTIVE_DEBT` "
+            "刪除——欠債清單不得靠慣性活著）",
+        )
+        self.assertEqual(
+            len(frozen_side), _SHEBANG_NON_LF_FROZEN_DEBT,
+            f"凍結面同型站點由 {_SHEBANG_NON_LF_FROZEN_DEBT} 變成 {len(frozen_side)}"
+            "——凍結面理應不動；若是 LATEST 版號推進造成整批位移，請重釘這個數字",
+        )
+
+    def test_the_criterion_reads_bytes_not_decoded_text(self) -> None:
+        """判準自證：真的寫一支 CRLF shebang 檔，確認在位元組層看得到 `\\r`。
+
+        不是為了測作業系統，是為了證明**這個判準讀的是位元組**——以 text mode 讀會被
+        universal newlines 吃掉 `\\r`，判準會恆綠而沒有任何人發現。
+        """
+        with tempfile.TemporaryDirectory() as td:
+            probe = Path(td) / "probe.py"
+            probe.write_bytes(b"#!/usr/bin/env python3\r\nprint(1)\r\n")
+            with probe.open("rb") as handle:
+                raw = handle.readline(256)
+            text_head = probe.read_text(encoding="utf-8").splitlines()[0]
+        self.assertTrue(raw.startswith(b"#!"))
+        self.assertTrue(raw.rstrip(b"\n").endswith(b"\r"),
+                        "位元組層看不到 \\r ⇒ 本判準讀錯了層，會對整類缺陷恆綠")
+        self.assertFalse(text_head.endswith("\r"),
+                         "text mode 竟然留住了 \\r？那本註記的理由要重寫")
+
+    def test_the_exec_bit_coincidence_is_named_not_relied_on(self) -> None:
+        """今天沒炸的理由（索引模式不是 100755）必須是**可查的量**，不是口頭安慰。
+
+        哪天 exec bit 被補對——那是正確的修法——這一條會紅，而它紅的意思是「另一半還沒
+        修」。這正是本判準存在的理由：兩個各自正確的動作合起來會炸。
+        """
+        modes = index_modes(_REPO_ROOT)
+        self.assertTrue(modes, "git ls-files -s 取數失敗 ⇒ 本條無從判定")
+        frozen_side, active_side = shebang_non_lf_sites(tracked_eol_rows(), _REPO_ROOT)
+        executable = [p for p in frozen_side + active_side
+                      if modes.get(p) == _INDEX_MODE_EXEC]
+        self.assertEqual(
+            executable, [],
+            "以下檔案同時具備 shebang、非 LF 行尾、100755 索引模式 ⇒ 三個條件到齊，"
+            "mac/Linux 上 `./<檔>` 必 rc=127（`env: '…\\r'`）。行尾與 exec bit 兩半"
+            "任一半修好都不夠：\n" + "\n".join(executable),
+        )
+
+
+# ── ④-b naive 本地時間戳被持久化 ─────────────────────────────────────────────
+# 缺陷本體：`datetime.now()`（無 tz）產生的是**沒有 offset 的本地時間**，`.isoformat()`
+# 之後寫進 checkpoint／YAML／JSON，讀回來再與另一個 naive `datetime.now()` 相減。那個
+# 減法在**同一個 offset 內**是對的，跨 DST 切換就整整差一小時——而且是**靜默**的：
+# 沒有例外、沒有 log，只是恢復時間錯一小時。AutoClaude Kernel 的 Token Guard 正是這個
+# 形態（checkpoint 存 naive ISO、`auto_resume` 以 `resume_at - datetime.now()` 算還要等
+# 幾秒）⇒ DST 那一天會**提早一小時**恢復。
+#
+# 🔴 為何本 repo 至今沒撞到：開發機時區是 Asia/Taipei（**不實施 DST**）。也就是說這個
+# 缺陷在本機**結構上重現不了**——與 DEF-101-778「把一台機器的偶然事實寫成常數」同型，
+# 只是這次的偶然事實是「我們的時區沒有夏令時間」。下面的自證測試因此**不動系統時區、
+# 不動環境變數**，改以 `zoneinfo` 直接構造切換點：那是唯一在本機也跑得動、且對並行工作
+# 包零副作用的重現方式。
+#
+# 判準（AST）：`datetime.now()`／`datetime.datetime.now()`／`utcnow()` **不帶任何引數**
+# 且結果直接串 `.isoformat(...)` ⇒ 產出不帶 offset 的 ISO 字串。修法慣例＝
+# `datetime.now().astimezone().isoformat()`（帶上 offset，字串自我描述）或
+# `datetime.now(UTC).isoformat()`。
+#
+# 🔴 誠實劃界：
+#   ❌ 測試檔不判（路徑含 `tests` 段或檔名 `test_*.py`）：測試造時間戳當 fixture，不進
+#      持久層；納入會製造十餘筆需要逐一辯護的假紅。
+#   ❌ 「存了 naive 再讀回來相減」的**讀**側不判——靜態追不到跨檔案的值流。本判準守的是
+#      **產出端**，把不帶 offset 的字串擋在寫入之前；讀側今天由 `_NAIVE_TS_PERSIST_DEBT`
+#      的具名站點承接（每一筆都寫明它餵給誰）。
+_NAIVE_TS_OK_MARKER = "naive-ts-ok:"
+_NAIVE_NOW_FUNCS = frozenset({"now", "utcnow"})
+
+
+def _is_naive_now_call(node: ast.AST) -> bool:
+    """`datetime.now()`／`datetime.datetime.now()`／`utcnow()`，且**未傳任何 tz**。"""
+    if not (isinstance(node, ast.Call) and not node.args and not node.keywords):
+        return False
+    func = node.func
+    if isinstance(func, ast.Attribute) and func.attr in _NAIVE_NOW_FUNCS:
+        return True
+    return isinstance(func, ast.Name) and func.id in _NAIVE_NOW_FUNCS
+
+
+def _naive_ts_markers(source: str) -> dict[int, str]:
+    """{行號: WHY}——僅認 COMMENT token（字串字面值內的同形文字不當豁免）。"""
+    markers: dict[int, str] = {}
+    for tok in tokenize.generate_tokens(io.StringIO(source).readline):
+        if tok.type == tokenize.COMMENT and _NAIVE_TS_OK_MARKER in tok.string:
+            markers[tok.start[0]] = tok.string.split(_NAIVE_TS_OK_MARKER, 1)[1].strip()
+    return markers
+
+
+def scan_naive_timestamp_persist(source: str, rel: str) -> tuple[list[str], list[str]]:
+    """純函式核心：回傳 (offenders, stale_markers)。"""
+    tree = ast.parse(source)
+    markers = _naive_ts_markers(source)
+    offenders: dict[int, str] = {}
+    used: set[int] = set()
+    for node in ast.walk(tree):
+        if not (isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)):
+            continue
+        if node.func.attr != "isoformat" or not _is_naive_now_call(node.func.value):
+            continue
+        if markers.get(node.lineno):
+            used.add(node.lineno)
+            continue
+        offenders[node.lineno] = (
+            f"{rel}:{node.lineno}: `now().isoformat()` 產出**不帶 offset** 的本地時間字串"
+            "（存進 checkpoint／YAML 後讀回相減，跨 DST 切換整整差 3600 秒且完全靜默）"
+            "——請改 `datetime.now().astimezone().isoformat()` 或 `datetime.now(UTC)`"
+        )
+    stale = [
+        f"{rel}:{lineno}: {_NAIVE_TS_OK_MARKER} 標記 stale"
+        f"（{'WHY 留空' if not why else '該行無被壓下的違規'}）"
+        for lineno, why in sorted(markers.items())
+        if lineno not in used or not why
+    ]
+    return [offenders[k] for k in sorted(offenders)], stale
+
+
+def _is_test_file(rel: str) -> bool:
+    parts = rel.split("/")
+    return "tests" in parts or parts[-1].startswith("test_")
+
+
+#: 具名欠債：今天仍在產出 naive ISO 字串的**生產**站點。逐筆寫明它餵給誰，讓「這一筆
+#: 到底會不會害到人」是可讀的，而不是一個數字。雙向精確比對。
+_NAIVE_TS_PERSIST_DEBT: dict[str, str] = {
+    "AutoClaude/autoclaude/infra/repositories/file_state_repository.py": (
+        "checkpoint.saved_at；讀側 auto_resume 以 `resume_at - datetime.now()` 相減 ⇒ "
+        "這一筆就是 Kernel 會提早一小時恢復的那條路。不在本包所有權內，已交棒"
+    ),
+    "AutoClaude/autoclaude/infra/repositories/file_playbook_repository.py": (
+        "playbook 快照時間戳；目前只做顯示與排序，同 offset 內排序不受影響"
+    ),
+    "AutoClaude/tools/pg_dump_to_yaml.py": (
+        "dump metadata 的 started_at／finished_at（兩筆），只做人讀"
+    ),
+    "AISDLC_SDD/AISDLC_SDD_v0.30/tools/arch_fitness/arch_fitness.py": (
+        "arch-fitness 報告的 timestamp 欄，只做人讀"
+    ),
+    ".claude/hooks/context_budget_guard.py": (
+        "額度哨兵的武裝 log 行，只做人讀取證；但它是**跨時區可攜性**最差的一種"
+        "——log 的讀者不一定在同一個 offset 下"
+    ),
+    # 🔴 以下七筆的處置說明刻意**不逐筆宣稱讀側行為**：本輪只逐檔確認了「產出端確實是
+    # naive ISO」，沒有逐筆追讀側的消費者。寫「只做顯示」而沒真的追過，就是憑推測寫下
+    # 一個看起來像結論的東西——那正是本 repo 反覆記載的失誤形態。逐筆追讀側列為交棒。
+    "AutoClaude/autoclaude/infra/repositories/in_memory_playbook_repository.py":
+        "與 file_playbook_repository 同形（記憶體後端）；讀側未逐一追，見上方註記",
+    "AutoClaude/autoclaude/infra/repositories/in_memory_state_repository.py":
+        "與 file_state_repository 同形（記憶體後端）；讀側未逐一追，見上方註記",
+    "AutoClaude/autoclaude/models/escalation.py":
+        "ESCALATION 事件時間戳；讀側未逐一追，見上方註記",
+    "AutoClaude/autoclaude/plugins/sdd_governance_plugin.py":
+        "SDD 治理事件時間戳；讀側未逐一追，見上方註記",
+    "AutoClaude/autoclaude/utils/checkpoint_manager.py":
+        "checkpoint 時間戳——與 file_state_repository 同一條恢復路徑，優先度同高",
+    "AutoClaude/autoclaude/utils/notifier.py":
+        "通知訊息時間戳；讀側未逐一追，見上方註記",
+    "AutoClaude/autoclaude/utils/token_tracker.py":
+        "token 用量紀錄時間戳；讀側未逐一追，見上方註記",
+}
+
+
+class TestNaiveLocalTimestampsAreNotPersisted(unittest.TestCase):
+    """不帶 offset 的本地時間戳不得進持久層（見上方 WHY）。"""
+
+    def test_no_new_site_persists_a_naive_local_timestamp(self) -> None:
+        offenders: list[str] = []
+        stale: list[str] = []
+        parse_failures: list[str] = []
+        hit_files: set[str] = set()
+        scanned = 0
+        for _label, files, _floor in _scan_units():
+            for py in files:
+                rel = py.relative_to(_REPO_ROOT).as_posix()
+                if _is_test_file(rel):
+                    continue
+                try:
+                    off, st = scan_naive_timestamp_persist(
+                        py.read_text(encoding="utf-8"), rel)
+                except (SyntaxError, UnicodeDecodeError, ValueError) as exc:
+                    parse_failures.append(f"{rel}: {type(exc).__name__}: {exc}")
+                    continue
+                scanned += 1
+                stale.extend(st)
+                if off:
+                    hit_files.add(rel)
+                    if rel not in _NAIVE_TS_PERSIST_DEBT:
+                        offenders.extend(off)
+        self.assertEqual(
+            parse_failures, [],
+            "以下 .py 無法 parse——掃描面不得靜默縮小：\n" + "\n".join(parse_failures))
+        self.assertGreater(scanned, 300, f"只掃到 {scanned} 支非測試 .py ⇒ 掃描面疑似縮小")
+        self.assertEqual(
+            offenders, [],
+            "新增了 naive 本地時間戳持久化站點（現行欠債見 `_NAIVE_TS_PERSIST_DEBT`）：\n"
+            + "\n".join(offenders),
+        )
+        self.assertEqual(
+            sorted(hit_files), sorted(_NAIVE_TS_PERSIST_DEBT),
+            "欠債清單與實況不符：少掉的表示已修好（請自清單刪除，欠債不得靠慣性活著），"
+            "多出來的表示新增了同型站點",
+        )
+        self.assertEqual(stale, [],
+                         f"{_NAIVE_TS_OK_MARKER} 標記 stale：\n" + "\n".join(stale))
+
+    def test_the_dst_gap_is_reproducible_without_touching_the_system_clock(self) -> None:
+        """🔴 這一條是本判準的**理由本身**：跨 DST 的 naive 相減會差整整 3600 秒。
+
+        本機時區 Asia/Taipei 不實施 DST ⇒ 這個缺陷在本機結構上重現不了。
+
+        🔴 **不用 `zoneinfo.ZoneInfo("America/New_York")`**（第一版就是那樣寫的，當回合
+        實測 `ZoneInfoNotFoundError`）：Windows 沒有系統 tz 資料庫，`zoneinfo` 要靠
+        `tzdata` 這個**選配**套件，而本 repo 沒有裝它 ⇒ 那種寫法會讓這條在 Windows 上
+        變成 ERROR、在 mac/Linux 上通過。本判準在守的就是「單平台判準不可無條件外推」，
+        它自己第一版卻正是那個形態。改用固定 offset 直接構造 fall-back 的兩個瞬間：
+        EDT(-04:00) 的 01:30 與 EST(-05:00) 的 01:30 相差正好一小時，而**丟掉 offset
+        之後兩者完全相同**——這就是 DST 落回那一小時的全部語意，且零外部相依。
+        """
+        from datetime import datetime as _dt  # noqa: PLC0415
+        from datetime import timedelta as _td  # noqa: PLC0415
+        from datetime import timezone as _tz  # noqa: PLC0415
+
+        # 2024-11-03 美東 fall back：01:30 出現兩次，先 EDT(-4) 後 EST(-5)。
+        before = _dt(2024, 11, 3, 1, 30, tzinfo=_tz(-_td(hours=4)))
+        after = _dt(2024, 11, 3, 1, 30, tzinfo=_tz(-_td(hours=5)))
+        self.assertEqual((after - before).total_seconds(), 3600.0,
+                         "帶 tz 的兩個時刻相減應為 3600 秒（真實經過的時間）")
+        # 這就是 `.isoformat()` 沒有 offset 時，存檔／讀回之後剩下的東西：
+        naive_before = before.replace(tzinfo=None)
+        naive_after = after.replace(tzinfo=None)
+        self.assertEqual(naive_before.isoformat(), naive_after.isoformat(),
+                         "兩個相差一小時的時刻，naive ISO 字串**完全相同** ⇒ 資訊已遺失")
+        self.assertEqual(
+            (naive_after - naive_before).total_seconds(), 0.0,
+            "naive 相減得到 0 秒（真實是 3600 秒）——Kernel 會據此提早一小時恢復")
+        # 反向自證：修法慣例（帶 offset）把資訊留住，round-trip 後仍算得出 3600 秒
+        self.assertNotEqual(before.isoformat(), after.isoformat())
+        self.assertEqual(
+            (_dt.fromisoformat(after.isoformat())
+             - _dt.fromisoformat(before.isoformat())).total_seconds(),
+            3600.0, "帶 offset 的 ISO 字串 round-trip 後仍算得出 3600 秒 ⇒ 修法真的有效")
+
+    def test_the_criterion_has_teeth_and_does_not_overreach(self) -> None:
+        """判準紅綠自證（合成字串，不留違規樣本於 repo）。"""
+        red, stale = scan_naive_timestamp_persist(
+            "from datetime import datetime\n"
+            "def f():\n"
+            "    return datetime.now().isoformat(timespec='seconds')\n", "fixture.py")
+        self.assertEqual(len(red), 1, red)
+        self.assertEqual(stale, [])
+        for green in (
+            "from datetime import datetime\n"
+            "def f():\n    return datetime.now().astimezone().isoformat()\n",
+            "from datetime import datetime, UTC\n"
+            "def f():\n    return datetime.now(UTC).isoformat()\n",
+            "from datetime import datetime\n"
+            "def f():\n    return datetime.now()\n",
+        ):
+            with self.subTest(green=green.splitlines()[-1].strip()):
+                self.assertEqual(scan_naive_timestamp_persist(green, "fixture.py")[0], [])
+        marked, stale = scan_naive_timestamp_persist(
+            "from datetime import datetime\n"
+            "def f():\n"
+            f"    return datetime.now().isoformat()  # {_NAIVE_TS_OK_MARKER} 純顯示\n",
+            "fixture.py")
+        self.assertEqual((marked, stale), ([], []))
+        blank, stale = scan_naive_timestamp_persist(
+            "from datetime import datetime\n"
+            "def f():\n"
+            f"    return datetime.now().isoformat()  # {_NAIVE_TS_OK_MARKER}\n",
+            "fixture.py")
+        self.assertEqual(len(blank), 1, "WHY 留空的標記不得生效")
+        self.assertEqual(len(stale), 1, stale)
+
+
+# ── ④-c PowerShell 站點級：Windows 專屬 `$env:` 與 `bash` 解析 ────────────────
+# 缺陷本體（S4-04）：`$env:TEMP`／`$env:TMP` 在 Windows 一定有值，在 macOS/Linux 的
+# PowerShell Core 上**不存在** ⇒ `Join-Path $env:TEMP '…'` 會直接
+# `Cannot bind argument to parameter 'Path' because it is null` 拋例外（不是回空字串、
+# 不是走 fallback，是整支腳本當場死掉）。命中的站點裡有一支是
+# `AISDLC_SDD/<LATEST>/tools/init_project.ps1`——**框架發給使用者的安裝腳本**，也就是
+# 別人第一次用這個框架跑的第一支程式。正解＝`[System.IO.Path]::GetTempPath()`
+# （.NET API，三平台皆回真值）。
+#
+# 缺陷本體（S4-05）：`Get-Command bash` 在本機解析到 `C:\WINDOWS\system32\bash.exe`
+# （WSL 佔位／真 WSL），repo 已為此立 SSOT `tools/lib/Find-GitBash.ps1`（含 system32
+# 逐段排除）。今天**零違規**——所以這一格缺的不是存量掃描，是**站點級**的門：判準的
+# 價值全部在「下一個人寫出裸解析時當場紅」，而不是在今天數出幾筆。
+#
+# 🔴 誠實劃界：
+#   ❌ 只判 `$env:TEMP`／`$env:TMP` 這**兩個**變數，不判整個 `$env:*`。理由是「粗數」
+#      本身就是這一格此前失真的原因：活躍 `.ps1` 剝註解後 `$env:` 粗抓 48 筆，其中
+#      22 筆是**賦值**（`$env:X = …` 是設定不是讀取，任何平台都成立），剩下 26 筆讀取
+#      分屬 11 個變數，而真正「在 POSIX 上會拋例外」的只有 TEMP／TMP 這一族。把 11 個
+#      變數一起判會製造 20 餘筆需要逐一辯護的假紅，那種鎖活不過一輪。
+#   ❌ 不判「這支腳本是不是 Windows 專用」——那件事沒有可靠的機械信號（檔名、路徑、
+#      檔頭措辭都可以繞過）。改以具名欠債逐檔寫明「它是不是真的只在 Windows 跑」，讓那個
+#      判斷是**寫下來的**而不是推斷出來的。
+_PS_SITE_OK_MARKER = "ps-xplat-ok:"
+#: 讀取（非賦值）Windows 專屬暫存目錄變數。`(?!\s*=)` 排除 `$env:TEMP = …` 的設定形態。
+_WINDOWS_ONLY_ENV_READ_RE = re.compile(r"\$env:(TEMP|TMP)\b(?!\s*=)", re.IGNORECASE)
+#: 裸解析 `bash`。唯一合法的家是下面那支 SSOT。
+_BASH_RESOLUTION_RE = re.compile(
+    r"Get-Command\s+['\"]?bash(?:\.exe)?['\"]?(?![\w.-])", re.IGNORECASE)
+_BASH_RESOLUTION_SSOT = "tools/lib/Find-GitBash.ps1"
+#: 具名欠債：今天仍直接讀 `$env:TEMP`／`$env:TMP` 的活躍 PowerShell 腳本。雙向精確比對。
+_WINDOWS_ONLY_ENV_DEBT: dict[str, str] = {
+    "tools/windows_smoke_local.ps1": (
+        "Windows 專用（檔內自帶 MSYS 守衛與 PS 5.1 引擎守衛，在 POSIX 上本來就不執行）"
+        "——保留現狀，但仍登記，避免它被當成「這種寫法沒問題」的樣板"
+    ),
+    "AISDLC_SDD/AISDLC_SDD_v0.30/tools/init_project.ps1": (
+        "🔴 真曝險：框架發給使用者的安裝腳本，在 macOS/Linux 的 PS Core 上 "
+        "`Join-Path $env:TEMP …` 直接拋 null 綁定例外。修法＝"
+        "`[System.IO.Path]::GetTempPath()`。不在本包的檔案所有權內，已列入交棒"
+    ),
+}
+
+
+def _active_ps_scripts() -> list[str]:
+    """活躍面（非凍結 SDD 版）tracked PowerShell 腳本的 repo 相對路徑。"""
+    return sorted(
+        path for path, _eol in tracked_eol_rows()
+        if path.lower().endswith((".ps1", ".psm1", ".psd1"))
+        and not _is_frozen_sdd_path(path)
+    )
+
+
+def scan_ps_platform_sites(source: str, rel: str) -> tuple[list[str], list[str]]:
+    """`(env 讀取站點, bash 裸解析站點)`——皆為 `rel:行號: 原行`。
+
+    逐行剝 `#` 註解尾再判（與本檔第一道判準同一個 heuristic 與同一組取捨）；
+    行尾 `# ps-xplat-ok: <WHY>` 豁免。
+    """
+    env_sites: list[str] = []
+    bash_sites: list[str] = []
+    for lineno, line in enumerate(source.splitlines(), start=1):
+        if _PS_SITE_OK_MARKER in line:
+            continue
+        code = line.split("#", 1)[0]
+        if _WINDOWS_ONLY_ENV_READ_RE.search(code):
+            env_sites.append(f"{rel}:{lineno}: {line.strip()[:110]}")
+        if _BASH_RESOLUTION_RE.search(code):
+            bash_sites.append(f"{rel}:{lineno}: {line.strip()[:110]}")
+    return env_sites, bash_sites
+
+
+class TestPowerShellPlatformSensitiveSites(unittest.TestCase):
+    """PowerShell 側的站點級跨平台判準（見上方 WHY）。"""
+
+    def _scan_all(self) -> tuple[dict[str, list[str]], dict[str, list[str]]]:
+        env_by_file: dict[str, list[str]] = {}
+        bash_by_file: dict[str, list[str]] = {}
+        scripts = _active_ps_scripts()
+        # 下限＝落地當回合實測 20 支的八折。全庫 `.ps1` 有一百多支，但絕大多數住在凍結版
+        # SDD 樹（本判準刻意不掃：Copy-on-Evolve 禁改，判了也只能開白名單）。
+        self.assertGreater(len(scripts), 15,
+                           f"活躍 PowerShell 腳本只掃到 {len(scripts)} 支 ⇒ 掃描面疑似縮小")
+        for rel in scripts:
+            source = (_REPO_ROOT / rel).read_text(encoding="utf-8-sig", errors="replace")
+            env_sites, bash_sites = scan_ps_platform_sites(source, rel)
+            if env_sites:
+                env_by_file[rel] = env_sites
+            if bash_sites:
+                bash_by_file[rel] = bash_sites
+        return env_by_file, bash_by_file
+
+    def test_windows_only_temp_env_reads_are_all_accounted_for(self) -> None:
+        env_by_file, _bash = self._scan_all()
+        self.assertEqual(
+            sorted(env_by_file), sorted(_WINDOWS_ONLY_ENV_DEBT),
+            "`$env:TEMP`／`$env:TMP` 讀取站點與登記不符。多出來的是**新增**曝險"
+            "（macOS/Linux 的 PS Core 上這兩個變數不存在，`Join-Path $env:TEMP …` 會直接"
+            "拋 null 綁定例外）——請改用 `[System.IO.Path]::GetTempPath()`；少掉的表示"
+            "已修好，請自 `_WINDOWS_ONLY_ENV_DEBT` 刪除。\n"
+            + "\n".join(s for sites in env_by_file.values() for s in sites),
+        )
+
+    def test_bash_is_only_resolved_through_the_ssot(self) -> None:
+        _env, bash_by_file = self._scan_all()
+        offenders = {rel: sites for rel, sites in bash_by_file.items()
+                     if rel != _BASH_RESOLUTION_SSOT}
+        self.assertEqual(
+            offenders, {},
+            f"裸 `Get-Command bash` 只能出現在 `{_BASH_RESOLUTION_SSOT}`（唯一 SSOT，含"
+            " system32／WSL 佔位版逐段排除）。本機實測裸解析拿到的是 WSL 佔位版，且反斜線"
+            "路徑的分隔符會被吃掉（DEF-101-617/618）。請改用該 SSOT：\n"
+            + "\n".join(f"{rel}: {sites}" for rel, sites in offenders.items()),
+        )
+
+    def test_the_ssot_itself_is_still_the_one_doing_the_resolution(self) -> None:
+        """反空轉：SSOT 自己必須仍然命中，否則上一條是在對空集合宣布勝利。"""
+        _env, bash_by_file = self._scan_all()
+        self.assertIn(
+            _BASH_RESOLUTION_SSOT, bash_by_file,
+            f"{_BASH_RESOLUTION_SSOT} 內找不到 `Get-Command bash` ⇒ 要嘛 SSOT 換了實作"
+            "（請把本判準的錨改掉），要嘛正則失效而整條判準已對全庫恆綠")
+
+    def test_the_two_criteria_have_teeth(self) -> None:
+        """判準紅綠自證（合成字串）。"""
+        env_sites, bash_sites = scan_ps_platform_sites(
+            "$tmp = Join-Path $env:TEMP 'x'\n"
+            "$b = Get-Command bash -ErrorAction SilentlyContinue\n", "fixture.ps1")
+        self.assertEqual((len(env_sites), len(bash_sites)), (1, 1))
+        # 賦值不是讀取；`$env:TEMPDIR` 不是 TEMP；註解行與豁免標記行都不算
+        clean, clean_bash = scan_ps_platform_sites(
+            "$env:TEMP = 'tmpdir'\n"
+            "$v = $env:TEMPDIR\n"
+            "# $tmp = Join-Path $env:TEMP 'x'\n"
+            f"$t = $env:TEMP  # {_PS_SITE_OK_MARKER} 合成豁免樣本\n"
+            "$g = Get-Command bashful\n", "fixture.ps1")
+        self.assertEqual((clean, clean_bash), ([], []))
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# R80（包 B / S4-01）— 鐵律三對照表：「無機械物」必須是**可證偽**的宣稱
+# ══════════════════════════════════════════════════════════════════════════════
+# 缺陷本體：覆蓋率棘輪（`test_doc_loc_baseline_freshness_r60.py` 的鐵律三對帳鎖）的分子
+# 只讀那張表**自己說**有沒有機械物。於是它抓得到「有人把機械物欄改回無機械物」（分子
+# 下降），也抓得到「指名一支不存在／守錯主題的檔」（過報分子），**唯獨抓不到一格從一
+# 開始就填錯**——「表說沒有、實際有」這個方向結構上失明。
+# 實例：「大小寫敏感度」列自陳無機械物，而 `tools/check_ntfs_paths.py` 的大小寫碰撞
+# 正規化鍵早就存在（NFC → lowercase；`README.MD` 與 `README.md` 在 NTFS 上互相覆蓋），
+# 且接在 pre-commit 與四支 CI workflow 上。低報分子的代價與過報一樣大：它讓下一輪有人
+# 「補一支已經存在的鎖」，也讓「還有幾類沒人守」這個治理數字是假的。
+#
+# 判準：每一列自陳「無機械物」者，必須登記一組**證偽探針**——一組 token，凡在機械物的
+# **已知住所**內出現於 `def`／`class` 定義行或模組層常數名，就是反證。命中落在「已審視
+# 並判定不算」的檔案內時放行，但那個判定必須寫下來（考察軌跡本身就是產物）。
+#
+# 🔴 為何掃「定義名」而不是全文：全文比對對散文（註解裡順口提到主題）零抵抗力，而本檔
+#    與 CLAUDE.md 自己就滿是這些詞——那種鎖第一天就會被假紅淹掉然後被整道關掉。機械物是
+#    **被命名的東西**：它一定有 `def scan_*`／`class Test*`／`_DIRENT_UNGUARDED_DEBT`
+#    這種識別字。
+#    掃識別字是必要條件不是充分條件（抓得到「其實有人在守」，抓不到「守得很弱」），
+#    與本 repo 既有的實質判準同一種誠實度。
+_IRON_LAW3_MECHANISM_HOMES: tuple[str, ...] = (
+    "tools/*.py", "tools/lib/*.py", "tools/tests/*.py", "tools/probe/*.py",
+    ".claude/hooks/*.py", "AutoClaude/tools/hooks/*.py", "AutoClaude/tests/*.py",
+)
+#: 定義行／模組層常數名（機械物的識別字住所）。
+_MECHANISM_DEF_RE = re.compile(
+    r"^\s*(?:async\s+)?(?:def|class)\s+(\w+)|^(_?[A-Z][A-Z0-9_]{2,})\s*[:=]")
+#: {表上的觸發項關鍵字: (證偽 token, {已審視並判定不算的檔案: 為什麼不算})}
+#: 🔴 這張表與 CLAUDE.md 那張表**雙向**綁死（見下方兩條判準）：表上多一列「無機械物」
+#: 卻沒登記探針 → 紅（不得靠新增一列來閃過證偽）；登記了探針而表上那列已補上機械物
+#: → 紅（stale，考察軌跡不得靠慣性活著）。
+_IRON_LAW3_UNCOVERED_EVIDENCE: dict[str, tuple[tuple[str, ...], dict[str, str]]] = {
+    "副檔名判斷": (("副檔名", "file_extension", "extension_branch", "exe_suffix"), {}),
+    "shell=True": (
+        ("shell_true", "native_shell", "原生殼"),
+        {"AutoClaude/tests/test_evaluator_kill_tree.py":
+         "該鎖守的是「shell=True 逾時要 kill 整棵行程樹」，對 cmd.exe ⇄ /bin/sh 的"
+         "**語意差異**（引號、`&&`、路徑分隔、rc 語意）零判準——同一個關鍵字、不同主題"},
+    ),
+}
+#: 已知正例：本判準若對它失明，整條就是裝飾品。這組 token 指向的正是 S4-01 那一格
+#: 被填錯的機械物本體（NTFS 大小寫碰撞鍵）。
+_IRON_LAW3_KNOWN_POSITIVE_TOKENS: tuple[str, ...] = ("collision", "casefold", "大小寫")
+_IRON_LAW3_KNOWN_POSITIVE_FILE = "tools/check_ntfs_paths.py"
+
+
+def mechanism_definition_names(repo_root: Path) -> list[tuple[str, int, str]]:
+    """機械物住所內所有 `(檔案, 行號, 識別字)`。現查，不寫死清單。"""
+    out: list[tuple[str, int, str]] = []
+    for glob in _IRON_LAW3_MECHANISM_HOMES:
+        for path in sorted(repo_root.glob(glob)):
+            rel = path.relative_to(repo_root).as_posix()
+            text = path.read_text(encoding="utf-8", errors="replace")
+            for lineno, line in enumerate(text.splitlines(), start=1):
+                match = _MECHANISM_DEF_RE.match(line)
+                if match:
+                    out.append((rel, lineno, match.group(1) or match.group(2)))
+    return out
+
+
+def falsifying_hits(
+    names: list[tuple[str, int, str]], tokens: tuple[str, ...], considered: dict[str, str]
+) -> list[str]:
+    """回傳「反證」清單：命中 token 且不在已審視檔案內的識別字。"""
+    lowered = tuple(t.lower() for t in tokens)
+    return [
+        f"{rel}:{lineno}: `{name}`"
+        for rel, lineno, name in names
+        if rel not in considered and any(t in name.lower() for t in lowered)
+    ]
+
+
+class TestIronLaw3NoMechanismClaimsAreFalsifiable(unittest.TestCase):
+    """鐵律三對照表的每一格「無機械物」都必須經得起證偽（見上方 WHY）。"""
+
+    @staticmethod
+    def _table_rows() -> list[list[str]]:
+        import test_doc_loc_baseline_freshness_r60 as _acct  # noqa: PLC0415
+        return _acct.iron_law3_trigger_rows(
+            (_REPO_ROOT / "CLAUDE.md").read_text(encoding="utf-8-sig"))
+
+    def _uncovered_first_cells(self) -> list[str]:
+        return [cells[0] for cells in self._table_rows() if "無機械物" in cells[1]]
+
+    def test_the_probe_has_discriminating_power_on_a_known_positive(self) -> None:
+        """自錨（先看這一條）：拿 S4-01 那格真實存在的機械物餵進去，必須被找出來。
+
+        少了這一條，下面兩條在「識別字掃描其實壞掉、永遠回空」時仍然全綠——而那正是
+        本檔一貫在防的「靜默縮面」。
+        """
+        names = mechanism_definition_names(_REPO_ROOT)
+        self.assertGreater(len(names), 800,
+                           f"機械物住所只抽到 {len(names)} 個識別字 ⇒ 掃描面疑似壞掉")
+        hits = falsifying_hits(names, _IRON_LAW3_KNOWN_POSITIVE_TOKENS, {})
+        self.assertTrue(
+            any(h.startswith(_IRON_LAW3_KNOWN_POSITIVE_FILE + ":") for h in hits),
+            f"已知正例（{_IRON_LAW3_KNOWN_POSITIVE_FILE} 的大小寫碰撞鍵）沒被找出來 ⇒ "
+            f"本判準對「表說沒有、實際有」這個方向是裝飾品。現有命中：{hits[:10]}")
+
+    def test_every_no_mechanism_row_survives_its_own_falsification_probe(self) -> None:
+        """缺陷本體那一向：宣稱「無機械物」而其實有 ⇒ 紅。"""
+        names = mechanism_definition_names(_REPO_ROOT)
+        problems: list[str] = []
+        for cell in self._uncovered_first_cells():
+            keys = [k for k in _IRON_LAW3_UNCOVERED_EVIDENCE if k in cell]
+            if not keys:
+                problems.append(
+                    f"「{cell}」列自陳無機械物，卻沒有登記證偽探針 ⇒ 這一格的宣稱不可被"
+                    "反駁。請在 `_IRON_LAW3_UNCOVERED_EVIDENCE` 補一組 token"
+                    "（新增一列來閃過證偽是本判準第一個要擋的動作）")
+                continue
+            for key in keys:
+                tokens, considered = _IRON_LAW3_UNCOVERED_EVIDENCE[key]
+                hits = falsifying_hits(names, tokens, considered)
+                if hits:
+                    problems.append(
+                        f"「{cell}」列自陳無機械物，但機械物住所裡有識別字命中 {tokens}："
+                        f"{hits[:6]} ⇒ 要嘛它其實有人在守（請改機械物欄，分子 +1），"
+                        "要嘛那幾支守的是別的主題（請寫進 "
+                        "`_IRON_LAW3_UNCOVERED_EVIDENCE` 的已審視清單並寫明為什麼不算）")
+        self.assertEqual(problems, [], "\n".join(problems))
+
+    def test_the_evidence_registry_does_not_rot(self) -> None:
+        """反向：登記了探針、表上那列卻已經有機械物（或整列不見了）⇒ stale。"""
+        uncovered = self._uncovered_first_cells()
+        self.assertTrue(uncovered, "表上一列『無機械物』都沒有？請確認表頭與解析仍相符")
+        stale = [key for key in _IRON_LAW3_UNCOVERED_EVIDENCE
+                 if not any(key in cell for cell in uncovered)]
+        self.assertEqual(
+            stale, [],
+            f"這些證偽探針已 stale（表上對應列已補機械物或已被刪）：{stale}"
+            "——請一併刪除，考察軌跡不得靠慣性活著")
+        for key, (tokens, considered) in _IRON_LAW3_UNCOVERED_EVIDENCE.items():
+            self.assertTrue(tokens, f"「{key}」的 token 是空的 ⇒ 探針恆不命中＝假綠")
+            for rel, why in considered.items():
+                self.assertTrue(
+                    (_REPO_ROOT / rel).is_file(),
+                    f"「{key}」的已審視檔案 {rel} 已不存在（WHY={why}）⇒ 請自清單移除")
+                self.assertGreater(len(why), 10, f"{rel} 的『為什麼不算』寫得太短")
+
+    def test_the_probe_would_catch_a_freshly_planted_mechanism(self) -> None:
+        """注入自證：合成一個「表說沒有、其實有」的狀態，必須紅。"""
+        names = [("tools/pretend_scanner.py", 12, "scan_file_extension_platform_branch")]
+        self.assertTrue(
+            falsifying_hits(names, ("file_extension",), {}),
+            "新植入的機械物沒被找出來 ⇒ 低報分子那一向仍然失明")
+        self.assertEqual(
+            falsifying_hits(names, ("file_extension",),
+                            {"tools/pretend_scanner.py": "已審視：守的是別的主題"}),
+            [], "已審視清單沒有生效 ⇒ 這道鎖無法容納「同關鍵字、不同主題」而必被關掉")
 
 
 if __name__ == "__main__":

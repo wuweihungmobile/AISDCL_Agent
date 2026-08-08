@@ -84,13 +84,27 @@ cwd 跨呼叫持續」、`$LASTEXITCODE` 是 PS 概念、「不要寫裸 bash」
     （`isSidechain`／`entrypoint`／`origin`／`userType`／`promptSource` 本輪逐欄實查，
     兩者取值相同），所以本檔不猜——它只把資訊攤開讓人一眼認得。
 
-「觀測者上線前 vs 上線後」的分期量測（Q4；每輪重跑，確切百分比不得引為常數）——
-把界線換成該觀測者落地那個 commit 的 author time（`git log --diff-filter=A --format=%aI
--- <hook 路徑>`），就得到可重跑的三期：
+🔴 「觀測者上線前 vs 上線後」的分期：**兩個坑，都要繞開**（R80／S7-08）
+------------------------------------------------------------------
+上一版在這裡逐字給出三期的現查指令，讀起來像是照著跑就得到答案。它有兩個獨立的
+結構性問題，兩個都會讓那組數字比它看起來的更沒有意義：
 
-    --until 2026-08-03T16:26:15                              # 兩面皆無觀測者
-    --since 2026-08-03T16:26:15 --until 2026-08-07T00:05:53  # 只有 Bash 工具被擋
-    --since 2026-08-07T00:05:53                              # PowerShell 面也有觀測者
+**① 切片單位是「檔案」而不是「記錄」，誤差是兩個數量級。** `--since`／`--until` 篩
+的是檔案 mtime（＝**最後**寫入時間），於是一支橫跨分界點的長 session 會**整支**落在
+後段。本輪實測這件事的量級：以檔案 mtime 切「Bash 阻斷上線後」得到 **3,284** 次 Bash
+呼叫，以每一筆記錄自己的 `timestamp` 切得到 **7** 次——前者把該工具整個歷史都算進了
+「上線後」，而結論正是要從那個分母算出來的。⇒ 分期一律用 `--record-since`／
+`--record-until`（逐筆 `timestamp`），`--since`／`--until` 只適合「挑本輪那幾支檔」。
+
+**② 判準是向 live hook 借的，而那支 hook 的判準改過 4 次**（`a7a3080` 建立、
+`cf11cd9`、`60904df`、`b07432c`）。所以分期比較答得出來的是「**同一把今天的尺**量
+不同時期的行為有沒有變」，答**不**出「當時那個觀測者實際擋下了什麼」——當時在崗的
+是另一個版本的判準。這兩個問題不同，先前的寫法把它們混成同一句話。報表因此固定印出
+**判準指紋**（借來那支 hook 的內容雜湊）：換了指紋的兩組數字不可以放在一起比。
+
+    --record-until 2026-08-03T16:26:15                             # 兩面皆無觀測者
+    --record-since 2026-08-03T16:26:15 --record-until 2026-08-07T00:05:53
+    --record-since 2026-08-07T00:05:53                             # PowerShell 面也有
 """
 from __future__ import annotations
 
@@ -107,6 +121,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 import _stdio_utf8  # noqa: E402,F401  （side effect：強制 stdout/stderr 為 UTF-8）
+from lib import rc_after_pipe_real as _rc_real  # noqa: E402  # R80 S7-01 判準本體
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 
@@ -186,6 +201,25 @@ def _rc_after_pipe(command: str) -> bool:
     ))
 
 
+# ══════════════════════════════════════════════════════════════════════════
+# 🔴 R80／S7-01＋S7-09：把「攔截端會擋什麼」與「真的會量到假 rc 幾次」拆成兩欄
+# ══════════════════════════════════════════════════════════════════════════
+# 判準本體、pwsh 7.6.4 逐形態實測表與紅綠自證語料住 `tools/lib/rc_after_pipe_real.py`
+# （R80 收尾包移出：本檔受根層 `guardrail_cli<=750` LOC 分級管，該分級的合法出口逐字
+# 寫著「先拆職責／抽共用模組」——不得為了讓它留在原地而調高上限）。下面兩支是**薄殼**，
+# 只負責把已載入的 hook 模組餵進去（hook 只能是被借的一方，理由見上方 _HOOK_PATH 段）。
+
+
+def _rc_after_pipe_real(command: str) -> bool:
+    """上游原生 × 截斷型管線 × 之後讀 rc ＝ 真的會量到假 rc 的那一種。"""
+    return _rc_real.rc_after_pipe_real(command, _lint_ps_hook)
+
+
+def rc_selftest() -> list[str]:
+    """`--selftest`：跑那張實測語料表，回傳失敗訊息清單（空＝全綠）。"""
+    return _rc_real.selftest(_lint_ps_hook)
+
+
 #: PowerShell 工具面的形態偵測器。鍵即報表欄名。值是 `str -> truthy/falsy` 的**可呼叫**
 #: （正則就用它的 `.search`）——規則①借的是攔截端的函式，不是正則，所以型別必須放寬。
 #:
@@ -195,9 +229,14 @@ def _rc_after_pipe(command: str) -> bool:
 #: 百分比既不能解讀也不能拿來判斷有沒有變好。舊名沿用新語意才是真正的陷阱（同一個
 #: 名字兩種意思），所以直接改名：帳本上的舊 `inline-loop` 數字與新兩欄**不可比較**。
 _POWERSHELL_PATTERNS: dict[str, object] = {
-    # 讀 rc 時接了管線：pwsh 7.x 提前中斷管線時不更新 $LASTEXITCODE（保留前值），
-    # PS 5.1 則寫入 -1 —— 兩個方向都讓 rc 不可信，且「真紅被讀成綠」是其中一種。
+    # 🔴 **對拍錨，不是違規次數**（R80／S7-01）：這一欄逐字等於攔截端會擋的那件事，
+    # 存在的理由是讓 `--parity` 與字面／行為一致鎖證明兩端沒漂移。攔截端刻意偏擋，
+    # 所以這個數字**不得**被引用成「違規了幾次」——全母體實測 91.4% 是誤報。
     "rc-after-pipe": _rc_after_pipe,
+    # 🔴 **唯一可引用為「量到幾次真風險」的那一欄**（R80／S7-01＋S7-09）：三個條件
+    # 同時成立才算（上游原生指令 × 實測會提前結束的管線元素 × 之後才讀 rc）。
+    # 逐形態實測依據見上方 `_TRUNCATING_PIPE_RE` 之前的區塊註解。
+    "rc-after-pipe-real": _rc_after_pipe_real,
     # 現寫的控制流：沒有任何測試看過這段碼，寫錯了只會表現成「數字怪怪的」。
     "inline-loop-statement": re.compile(
         r"\b(foreach\s*\(|for\s*\(\s*\$)", re.IGNORECASE
@@ -227,7 +266,8 @@ _POWERSHELL_PATTERNS: dict[str, object] = {
 #: 有**事中攔截端**的形態（＝`lint_powershell_command.py` 真的會擋的那三條）。
 #: 其餘只有量測、沒有攔截 ⇒ 它們結構上不可能被壓到 0，報表必須就地標明；否則一個
 #: 永遠非零的數字會被讀成「一直沒人處理的違規」，而其實根本沒有人在擋它。
-_INTERCEPTED_KEYS = frozenset({"rc-after-pipe", "naked-cd", "bare-bash-sh"})
+_INTERCEPTED_KEYS = frozenset({"rc-after-pipe", "rc-after-pipe-real",
+                               "naked-cd", "bare-bash-sh"})
 
 #: `{工具名: {形態: 正則}}`。逐工具是刻意的——見檔頭〈為何計數必須逐工具〉：
 #: 這四個形態全部只約束 PowerShell 工具，混進 Bash 的指令會得到 97.7%／100% 的假陽性，
@@ -241,6 +281,11 @@ COMMAND_PATTERNS: dict[str, dict[str, re.Pattern[str]]] = {
 
 #: 帶 `command` 欄、會落進本稽核射程的工具（由上表推導，不另立第二個家）。
 SHELL_TOOLS = tuple(COMMAND_PATTERNS)
+
+#: Claude Code 對 PreToolUse exit 2 的固定措辭。用它（而不是「blocked」「permission」
+#: 這種泛詞）判「這一次 Bash 嘗試有沒有真的被擋下」——本輪實測泛詞會把一份提到
+#: 「blocked」的 agent 回報誤判成攔截，攔阻率因此虛高。
+_BASH_BLOCK_NEEDLE = "PreToolUse:Bash hook error"
 
 #: 助理訊息裡「我已經驗過了」形態的句子。
 CLAIM_RE = re.compile(r"(全綠|已驗證|全部通過|rc\s*=\s*0|\bpassed\b|\bPASS\b)")
@@ -315,6 +360,8 @@ def comparison_surfaces(command: str) -> dict[str, str]:
     structural = mask_regions(command, keep_expandable=False)
     return {
         "rc-after-pipe": command,
+        # 同上：它自己要同時看結構面與展開面比位置，所以只能拿到原文。
+        "rc-after-pipe-real": command,
         "inline-loop-statement": structural,
         "pipeline-foreach": structural,
         "naked-cd": structural,
@@ -458,8 +505,41 @@ def powershell_commands(paths: list[Path]) -> list[str]:
     return list(seen)
 
 
-def scan_transcript(path: Path, window_size: int = DEFAULT_WINDOW) -> dict:
-    """單支逐字稿的量測結果（純資料，報表與 rc 由呼叫端決定）。"""
+def criterion_fingerprint() -> str:
+    """借來那支攔截端 hook 的內容雜湊（前 12 碼）。
+
+    🔴 為何必印（R80／S7-08）：本檔規則①的判準**不是自己的**，是 import 進來的
+    live hook 函式，而那支檔的判準已經改過 4 次。於是「上一輪量到 X、這一輪量到 Y」
+    可能整個來自判準換版，而不是行為變了。指紋讓那件事**看得見**：指紋不同的兩組
+    數字不可以放在一起比較，指紋相同才是同一把尺。
+    """
+    import hashlib
+    try:
+        return hashlib.sha256(_HOOK_PATH.read_bytes()).hexdigest()[:12]
+    except OSError:
+        return "unreadable"
+
+
+def _record_time(rec: dict) -> datetime | None:
+    """記錄自己的 `timestamp`（ISO，帶時區）。`None`＝這一筆沒有時戳。"""
+    raw = rec.get("timestamp")
+    if not isinstance(raw, str) or not raw:
+        return None
+    try:
+        return datetime.fromisoformat(raw.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+
+
+def scan_transcript(path: Path, window_size: int = DEFAULT_WINDOW,
+                    record_since: datetime | None = None,
+                    record_until: datetime | None = None) -> dict:
+    """單支逐字稿的量測結果（純資料，報表與 rc 由呼叫端決定）。
+
+    `record_since`／`record_until` 是**逐筆**時間切片，見檔頭〈分期〉①：以檔案 mtime
+    切片會把跨越分界點的長 session 整支算進後段，本輪實測誤差達兩個數量級。沒有
+    時戳的記錄在有切片時**一律排除**（不猜；把來歷不明的記錄算進某一期正是要防的事）。
+    """
     counts = {tool: dict.fromkeys(pats, 0) for tool, pats in COMMAND_PATTERNS.items()}
     shell_by_tool = dict.fromkeys(COMMAND_PATTERNS, 0)
     exempted = 0
@@ -468,10 +548,27 @@ def scan_transcript(path: Path, window_size: int = DEFAULT_WINDOW) -> dict:
     window: deque[str] = deque(maxlen=max(1, window_size))
     unsupported: list[str] = []
     claims_total = 0
+    # 🔴 R80／S7-07：Bash 嘗試要**逐筆攤開**，不能只留一個總數。
+    # 本輪實測：阻斷落地後全庫只有 7 次 Bash 嘗試、7 次全被擋（攔阻率 100%），
+    # 但其中 5 次的 description 逐字是「Verify bash-block hook is live」「Confirm
+    # Bash tool is blocked」「Probe hook execution marker」——**是這道鎖自己的探針**。
+    # 一個以自己的探針當分子的攔阻率是自我實現的：只要多驗幾次就會更好看，而那與
+    # 「有沒有人真的誤用」無關。分子攤開才看得出這件事，所以本欄記的是清單不是計數。
+    bash_attempts: list[dict] = []
+    pending_bash: dict[str, dict] = {}
     session_id = ""
     first_prompt = ""
 
+    sliced = record_since is not None or record_until is not None
     for rec in iter_records(path):
+        if sliced:
+            when = _record_time(rec)
+            if when is None:
+                continue
+            if record_since is not None and when < record_since:
+                continue
+            if record_until is not None and when >= record_until:
+                continue
         records_total += 1
         if not session_id:
             session_id = str(rec.get("sessionId") or "")
@@ -487,6 +584,18 @@ def scan_transcript(path: Path, window_size: int = DEFAULT_WINDOW) -> dict:
                 tool_totals[name] = tool_totals.get(name, 0) + 1
                 inp = block.get("input")
                 cmd = inp.get("command") if isinstance(inp, dict) else None
+                if name == "Bash":
+                    entry = {
+                        "command": " ".join(str(cmd or "").split())[:120],
+                        # description 是分辨「這道鎖自己的探針」與「真的誤用」的
+                        # 唯一線索（本輪 5/7 的 description 逐字寫著在驗這道鎖）。
+                        "description": str((inp or {}).get("description") or "")[:80]
+                        if isinstance(inp, dict) else "",
+                        "blocked": None,
+                    }
+                    bash_attempts.append(entry)
+                    if block.get("id"):
+                        pending_bash[str(block["id"])] = entry
                 if name not in COMMAND_PATTERNS or not isinstance(cmd, str) or not cmd:
                     continue
                 shell_by_tool[name] += 1
@@ -496,7 +605,12 @@ def scan_transcript(path: Path, window_size: int = DEFAULT_WINDOW) -> dict:
                 for key in detector_hits(cmd, COMMAND_PATTERNS[name]):
                     counts[name][key] += 1
             elif kind == "tool_result":
-                window.append(_result_text(block))
+                text = _result_text(block)
+                entry = pending_bash.pop(str(block.get("tool_use_id") or ""), None)
+                if entry is not None:
+                    # 唯一確定的攔截字樣（Claude Code 對 exit 2 的固定措辭）。
+                    entry["blocked"] = _BASH_BLOCK_NEEDLE in text
+                window.append(text)
             elif kind == "text" and role == "assistant":
                 corpus = "\n".join(window)
                 for sentence in _sentences(str(block.get("text") or "")):
@@ -508,6 +622,9 @@ def scan_transcript(path: Path, window_size: int = DEFAULT_WINDOW) -> dict:
                         unsupported.append(sentence[:200])
 
     shell_calls = sum(shell_by_tool.values())
+    #: 被叫過幾次「本來就帶 command 的工具」——與 `shell_calls`（真的抽到指令的次數）
+    #: 相減即「叫了但抽不到」，那是格式變更唯一乾淨的訊號。
+    shell_tool_calls = sum(v for k, v in tool_totals.items() if k in COMMAND_PATTERNS)
     return {
         "transcript": path.name,
         # 🔴 窗的可回查性（R79）：帳本記的每一個數字都必須能指回「是哪幾支、什麼時候、
@@ -526,12 +643,27 @@ def scan_transcript(path: Path, window_size: int = DEFAULT_WINDOW) -> dict:
         "shell_calls_by_tool": shell_by_tool,
         "exempted_calls": exempted,
         "bash_tool_attempts": tool_totals.get("Bash", 0),
+        # 分子攤開（見 `bash_attempts` 旁的區塊註解）：只留總數時，「攔阻率 100%」
+        # 與「那個 100% 幾乎全是這道鎖自己的探針」印出來一模一樣。
+        "bash_attempt_details": bash_attempts,
         "patterns": counts,
         # 逐支崩塌訊號（見檔頭〈為何崩塌判準必須是 per-session〉）：**有記錄**卻
         # 一支帶 command 的 shell 呼叫都抽不到。用 `records` 而不是 `tool_use_total`
         # 當前提，是因為「連 tool_use 都認不出來」正是最徹底的那種格式變更——
         # 拿它當前提會讓最該紅的情形自己把判準關掉。
-        "collapsed": records_total > 0 and shell_calls == 0,
+        # 🔴 逐筆切片下前提要換（R80／S7-08）：切片是使用者自選的子窗，「這一段時間
+        # 內這支 session 根本沒跑 shell」是**正常**狀態而不是掃描面崩塌。沿用
+        # `records>0` 當前提會讓這個 fail-loud 在分期用法下幾乎必然觸發（本輪實測
+        # 73 支裡 14 支中招），而一個永遠在響的警報等於沒有警報——那正是本檔自己
+        # 反覆記載的「恆紅的閘門會被整個關掉」。切片時改用「tool_use 認得出來、
+        # 卻一條指令都抽不到」＝格式真的變了的那個訊號。
+        # 切片下的前提＝「**shell 工具真的被叫過**、卻一條指令都抽不到」，那正是
+        # 「欄位改名／格式變更」的長相，也只有它在子窗裡仍然是異常。用「有任何
+        # tool_use」當前提還是太寬（只用 Read／Grep／Agent 的窗會照樣中招，實測 2 支）。
+        # 誠實劃界：切片下若連工具名都認不出來（`PowerShell` 被改名），本判準看不到；
+        # 那個最徹底的失效仍由合計面的 `shell_calls == 0` 與非切片用法兜底。
+        "collapsed": (shell_tool_calls > 0 if sliced else records_total > 0)
+        and shell_calls == 0,
         "unsupported_claims": unsupported,
         # 分母（命中 CLAIM_RE 的句子總數）。只印分子時，「CLAIM_RE 失效」與「真的
         # 零違規」長得一模一樣，而後者是沒有人會去追的那一種。
@@ -546,11 +678,13 @@ def aggregate(results: list[dict]) -> dict:
     totals = {tool: dict.fromkeys(pats, 0) for tool, pats in COMMAND_PATTERNS.items()}
     shell_by_tool = dict.fromkeys(COMMAND_PATTERNS, 0)
     bash_attempts = 0
+    bash_details: list[dict] = []
     exempted = 0
     claims = 0
     claims_total = 0
     for res in results:
         bash_attempts += res["bash_tool_attempts"]
+        bash_details += res.get("bash_attempt_details") or []
         exempted += res["exempted_calls"]
         claims += len(res["unsupported_claims"])
         claims_total += res["claims_total"]
@@ -565,6 +699,7 @@ def aggregate(results: list[dict]) -> dict:
         "shell_calls_by_tool": shell_by_tool,
         "exempted_calls": exempted,
         "bash_tool_attempts": bash_attempts,
+        "bash_attempt_details": bash_details,
         "patterns": totals,
         "collapsed_sessions": [r["transcript"] for r in results if r["collapsed"]],
         "unsupported_claim_count": claims,
@@ -637,6 +772,14 @@ def _print_window_manifest(summary: dict) -> None:
     """
     manifest = summary.get("window_manifest") or []
     print(f"### 量測窗（{len(manifest)} 支；引用任何數字時請連本段一起記）")
+    # 🔴 判準指紋與逐筆切片同屬「這個數字是用哪一把尺、量哪一段」的定義，必須跟著
+    # 數字走（R80／S7-08）：規則①的判準是向 live hook 借的，那支檔改過 4 次。
+    slice_lo, slice_hi = (summary.get("record_slice") or [None, None])
+    print(f"  判準指紋（借來的攔截端 hook 內容雜湊）: "
+          f"{summary.get('criterion_fingerprint', '?')}"
+          "  ← 指紋不同的兩組數字不可放在一起比")
+    print(f"  逐筆時間切片: {slice_lo or '（無）'} ~ {slice_hi or '（無）'}"
+          f"{'' if (slice_lo or slice_hi) else '  ← 未切片＝這是歷史總量，不是本輪'}")
     for row in manifest:
         print(f"  · {row['transcript']}  mtime={row['mtime']}  "
               f"記錄={row['records']}  PowerShell={row['powershell_calls']}")
@@ -663,7 +806,22 @@ def _print_report(results: list[dict], summary: dict, max_claims: int) -> None:
     print(f"\n### 合計（{summary['sessions']} 支逐字稿；帳本要記的數字）")
     print("  🔴 逐工具分開記——不同工具的指令不共用分母（見檔頭 SD-04）")
     _print_pattern_block(summary["patterns"], summary["shell_calls_by_tool"], "  ")
-    print(f"  Bash 工具嘗試數（鐵律一違規本身）  {summary['bash_tool_attempts']}")
+    details = summary.get("bash_attempt_details") or []
+    blocked = sum(1 for d in details if d.get("blocked"))
+    print(f"  Bash 工具嘗試數（鐵律一違規本身）  {summary['bash_tool_attempts']}"
+          f"（其中被擋下 {blocked}）")
+    if details:
+        # 🔴 逐筆印出（R80／S7-07）：攔阻率的分子若幾乎全是這道鎖自己的探針，
+        # 那個 100% 是自我實現的。只有把分子攤開，讀的人才分得出「真的有人誤用」
+        # 與「我們自己去驗了幾次它還活著」。分辨的線索是 description。
+        print("  🔴 分子攤開——請自行判讀哪幾筆是「驗這道鎖還活著」的探針："
+              "以自己的探針當分子時，攔阻率是自我實現的")
+        for detail in details[:20]:
+            mark = {True: "擋下", False: "未擋", None: "無結果"}[detail.get("blocked")]
+            print(f"      [{mark}] {detail.get('description') or '（無描述）'}"
+                  f"  ||  {detail.get('command', '')[:70]}")
+        if len(details) > 20:
+            print(f"      …另有 {len(details) - 20} 筆（--json 可取全部）")
     print(f"  行內豁免而未計形態的呼叫           {summary['exempted_calls']}")
     # 🔴 分子與分母**與窗**一起印：只印分子時，「CLAIM_RE 自己失效（分母崩了）」與
     # 「真的零違規」印出來一模一樣，而後者沒有人會去追；不印窗則換個窗就是另一個數字。
@@ -719,6 +877,12 @@ def main(argv: list[str] | None = None) -> int:
                                         "（2026-08-07 或 2026-08-07T00:05:53）")
     parser.add_argument("--until", help="只掃 mtime < 此 ISO 時刻的逐字稿"
                                         "（與 --since 併用即『觀測者上線前／後』分期）")
+    parser.add_argument("--record-since", dest="record_since",
+                        help="**逐筆**時間切片下界（ISO）。分期比較一律用這個，"
+                             "不要用 --since：後者切的是檔案 mtime，跨越分界點的長 "
+                             "session 會整支落在後段（本輪實測誤差 3,284 vs 7）")
+    parser.add_argument("--record-until", dest="record_until",
+                        help="**逐筆**時間切片上界（ISO，不含）")
     parser.add_argument("--latest", type=int,
                         help="只掃最近改動的 N 支（每輪量測建議搭配它或 --since）")
     parser.add_argument("--window", type=int, default=DEFAULT_WINDOW,
@@ -731,11 +895,40 @@ def main(argv: list[str] | None = None) -> int:
                              "CLAUDE_CODE_SESSION_ID）。量測者把自己算進分母時，"
                              "跑量測這個動作本身就會改變量測值")
     parser.add_argument("--max-claims", type=int, default=10)
+    parser.add_argument("--selftest", action="store_true",
+                        help="對已知正解／已知違規各數組跑 `rc-after-pipe-real`"
+                             "（答案來自 pwsh 真機實測），並同時印出舊判準對同一批"
+                             "語料的判定當作紅的那一半。有任何一組不符即 rc=1")
     parser.add_argument("--parity", action="store_true",
                         help="把量測窗裡每一條 unique PowerShell 指令同時餵給攔截端與"
                              "量測端，列出判定分歧（有分歧即 rc=1）")
     parser.add_argument("--json", action="store_true", dest="as_json")
     args = parser.parse_args(argv)
+
+    if args.selftest:
+        failures = rc_selftest()
+        print("### `rc-after-pipe-real` 紅綠自證"
+              f"（{len(_rc_real._RC_SELFTEST)} 組，答案＝pwsh 7.6.4 真機實測值）")
+        print("  🔴 綠的那一半：修正後的判準對每一組都要判對。")
+        print("  🔴 紅的那一半：同一批語料餵給**舊判準**（＝攔截端那支借來的函式），"
+              "看它錯在哪——\n     判準沒有鑑別力時，兩欄會一模一樣。")
+        old_wrong = 0
+        for command, expected, measured, why in _rc_real._RC_SELFTEST:
+            new_verdict = _rc_after_pipe_real(command)
+            old_verdict = _rc_after_pipe(command)
+            old_wrong += int(old_verdict is not expected)
+            print(f"  {'✅' if new_verdict is expected else '❌'} "
+                  f"實測{measured:9s} 應判={str(expected):5s} "
+                  f"新={str(new_verdict):5s} 舊={str(old_verdict):5s}  {why}")
+        print(f"\n  新判準判錯 {len(failures)} / {len(_rc_real._RC_SELFTEST)}；"
+              f"舊判準判錯 {old_wrong} / {len(_rc_real._RC_SELFTEST)}")
+        if old_wrong == 0:
+            print("  ⚠️ 舊判準一組都沒判錯 ⇒ 這批語料對「修了什麼」沒有鑑別力，"
+                  "自證是空的；請補進真的會分開兩者的形態。", file=sys.stderr)
+        for line in failures:
+            print(f"  ❌ {line}", file=sys.stderr)
+        # 舊判準零錯誤也算紅：那表示這份語料證明不了本輪修了任何東西。
+        return 1 if (failures or old_wrong == 0) else 0
 
     exclude = list(args.exclude)
     if args.exclude_self:
@@ -755,8 +948,19 @@ def main(argv: list[str] | None = None) -> int:
         candidates = sorted(base.glob("*.jsonl")) if base.is_dir() else []
 
     paths = select_paths(candidates, args.since, args.until, args.latest, exclude)
-    results = [scan_transcript(p, args.window) for p in paths]
+
+    def _iso(value: str | None) -> datetime | None:
+        if not value:
+            return None
+        parsed = datetime.fromisoformat(value)
+        # naive 視為本機時區，否則與逐字稿的帶時區時戳無法比較（TypeError）。
+        return parsed if parsed.tzinfo else parsed.astimezone()
+
+    rec_since, rec_until = _iso(args.record_since), _iso(args.record_until)
+    results = [scan_transcript(p, args.window, rec_since, rec_until) for p in paths]
     summary = aggregate(results)
+    summary["criterion_fingerprint"] = criterion_fingerprint()
+    summary["record_slice"] = [args.record_since, args.record_until]
     verdict = collapse_verdict(summary)
 
     commands = powershell_commands(paths) if args.parity else []

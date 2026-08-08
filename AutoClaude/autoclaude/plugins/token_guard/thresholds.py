@@ -44,11 +44,20 @@ def should_compact_decision(
     *, token_pct: float, threshold: float,
     in_correction_loop: bool, correction_history_len: int,
 ) -> bool:
-    """對齊 PlaybookRunner._should_compact_now 邏輯。"""
+    """對齊 PlaybookRunner._should_compact_now 邏輯。
+
+    🔴 DEF-100-002（R80 收掉，improving_100 已備妥等價性鎖）：此處原有一個死分支
+    `if in_correction_loop and correction_history_len <= 1: return token_pct >= threshold`
+    ——走到那一行時上面的 `token_pct < threshold` 已把 `<` 全部 return 掉，故
+    `token_pct >= threshold` 恆為 True ⇒ 該分支 ≡ `return True` ≡ 下方的 `return True`。
+    兩個參數因此對結果零影響（簽章保留：呼叫端與 `_should_compact_now` 契約不變）。
+    移除後 `.mutmut-cache` #122-124（`and`→`or`、`<=`→`<`、`1`→`2`）那三個等價變異
+    連變異點都不存在了。等價性由
+    `tests/plugins/token_guard/test_thresholds_mutation.py::
+    TestShouldCompactL49DeadBranchEquivalence`（in_loop × hist 全組合）釘住。
+    """
     if token_pct < threshold:
         return False
-    if in_correction_loop and correction_history_len <= 1:
-        return token_pct >= threshold
     return True
 
 

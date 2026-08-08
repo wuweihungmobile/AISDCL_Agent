@@ -97,6 +97,9 @@ def _pin_registered_profile(monkeypatch: pytest.MonkeyPatch) -> None:
     ——本輪由 act（ubuntu 容器）實跑抓到。釘住剖面才問得到本組真正要問的那件事。
     """
     monkeypatch.setattr(m.sys, "platform", "win32")
+    # R80 包 A（S3-09）：剖面多了「巢狀 session」這一維，同樣要釘——否則本組斷言的
+    # 綠紅會跟著「跑測試的人剛好在不在 Claude Code session 裡」翻面，那是最難查的假紅。
+    monkeypatch.setattr(m, "nested_session", lambda: True)
 
 
 # --- (a) gate 清單與順序 ---
@@ -436,10 +439,13 @@ def test_help_flag_anywhere_in_argv_is_honoured(
 #: 數字站點（棘輪只准下修），而基線數字的 SSOT 是 ONBOARDING.md §7——測試 fixture 沒有
 #: 理由在別處再開一個「看起來像基線」的家（落地當回合被那道守門當場擋下，非假想）。
 _HEALTHY_TAIL = "12 passed, 3 skipped, 1 warning in 91.39s (0:01:31)"
+#: 剖面標記行。R80 起兩個維度同住一行（PG × 巢狀 session）——少任一維，`--census-only`
+#: 都會 fail-loud，理由相同：剖面量不到時任何天花板比較都沒有意義。
+_MARKER_LINE = "AUTOCLAUDE-PG-DSN-IN-EFFECT=0 AUTOCLAUDE-NESTED-SESSION=1"
 _HEALTHY_LOG = (
     "SKIPPED [2] tests\\a.py:10: [POSIX-NATIVE-ONLY] 只在 POSIX 上有意義\n"
     "SKIPPED [1] tests\\b.py: [ENV-DISABLED] 沒設 DSN\n"
-    "AUTOCLAUDE-PG-DSN-IN-EFFECT=0\n"
+    + _MARKER_LINE + "\n"
     + _HEALTHY_TAIL + "\n"
 )
 
@@ -519,7 +525,7 @@ def test_profile_key_follows_the_dsn_not_the_injection(
     assert m.pg_dsn_in_effect() is False
     monkeypatch.setenv("AUTOCLAUDE_TEST_PG_DSN", "postgresql://x/y")
     assert m.pg_dsn_in_effect() is True
-    assert m._skip_profile(m.pg_dsn_in_effect()).endswith("+pg")
+    assert m._skip_profile(m.pg_dsn_in_effect(), nested=True).endswith("+pg+nested")
 
 
 def test_pg_profile_marker_round_trips_and_absence_is_not_false() -> None:
@@ -607,9 +613,9 @@ def test_census_only_returns_three_states_and_runs_no_gate(
     _pin_registered_profile(monkeypatch)
 
     assert m.main(["--census-only", _write_log(tmp_path, _HEALTHY_LOG)]) == m.CENSUS_OK
-    collapsed = "AUTOCLAUDE-PG-DSN-IN-EFFECT=0\n12 passed, 136 skipped in 9.0s\n"
+    collapsed = _MARKER_LINE + "\n12 passed, 136 skipped in 9.0s\n"
     assert m.main(["--census-only", _write_log(tmp_path, collapsed)]) == m.CENSUS_FAIL
-    no_marker = _HEALTHY_LOG.replace("AUTOCLAUDE-PG-DSN-IN-EFFECT=0\n", "")
+    no_marker = _HEALTHY_LOG.replace(_MARKER_LINE + "\n", "")
     assert m.main(["--census-only", _write_log(tmp_path, no_marker)]) == m.CENSUS_FAIL
     assert "剖面標記" in capsys.readouterr().out
     assert m.main(["--census-only", str(tmp_path / "nope.log")]) == m.CENSUS_FAIL
@@ -653,9 +659,15 @@ def test_pre_push_dispatcher_actually_invokes_the_census() -> None:
     assert dispatcher.is_file(), dispatcher
     text = dispatcher.read_text(encoding="utf-8")
     leg = text.split('if [ "$run_autoclaude" -eq 1 ]')[1].split('if [ "$run_sdd" -eq 1 ]')[0]
+    # 🔴 R80 包 A 訂正判準的比較對象：原判準要求該行**字面**出現 `python`，於是 R80 另一包
+    # 把 dispatcher 裡寫死的直譯器改成 `"$PY"` 變數（一個純粹正確的重構）之後，這道鎖當場
+    # 轉紅——它其實在守「直譯器怎麼拼」，而它宣稱要守的是「census 有沒有真的被執行」。
+    # 改成認 `local_ci_gate`：那才是這道鎖真正的標的，而且比原判準更精確（原判準對
+    # 「用 python 跑了別的東西」是放行的）。同 R75 頭號教訓：判準的比較對象不得隨
+    # 「被它所判的動作」而改變。
     invocations = [
         ln for ln in _uncommented(leg)
-        if "--census-only" in ln and "python" in ln and "echo" not in ln
+        if "--census-only" in ln and "local_ci_gate" in ln and "echo" not in ln
     ]
     assert invocations, (
         "pre-push 的 AutoClaude leg 找不到**執行** `--census-only` 的語句（註解與 echo "
@@ -738,3 +750,152 @@ def test_conftest_terminal_summary_emits_the_profile_marker() -> None:
     markers = [ln for ln in written if ln.startswith(m.PG_PROFILE_MARKER)]
     assert len(markers) == 1, written
     assert m.pg_in_effect_from_log("\n".join(written)) is m.pg_dsn_in_effect()
+    # R80 包 A（S3-09）：第二維也必須被印出來，否則 `--census-only` 同樣 fail-loud。
+    assert m.nested_from_log("\n".join(written)) is m.nested_session()
+
+
+# =====================================================================
+# (l) R80 包 A：skip 天花板的**判準形狀**（S3-03）、剖面第三維（S3-09）、
+#     CI 平台涵蓋帳（S3-02）、DSN 形態驗證（S3-06）
+# =====================================================================
+
+_POLICY_ROOT = Path(__file__).resolve().parents[3] / "tools" / "lib"
+if str(_POLICY_ROOT) not in sys.path:
+    sys.path.insert(0, str(_POLICY_ROOT))
+import skip_group_policy as P  # noqa: E402
+
+_PROF = "AutoClaude/tests@win32+nopg+nested"
+
+
+def _base_census() -> dict[str, int]:
+    return dict(P._RUNTIME_SKIP_CEILING[_PROF])
+
+
+def test_retagging_is_not_punished_by_the_group_ceiling() -> None:
+    """🔴 本組是 S3-03 的回歸鎖，也是本包最重要的一支。
+
+    修前實測（注入，逐字見包 A 回報）：舊判準的失敗訊息逐字寫著「合法出口只有
+    『把那些測試變成真的會跑』或『**補上正確的分群標籤**』」，而**照著第二個出口做就會
+    被同一道判準判紅**——補標籤必然讓某個具名群 +1。一道判準宣傳的出口自己是違規，
+    等於它其實只接受一種改善方式（skip 憑空消失），而那正是本 repo 記過的
+    「看起來變乾淨」那一種。
+
+    這裡的 census：118 支 untagged 全部補上 `[ENV-DISABLED]` 標籤，總量一支沒變。
+    """
+    retagged = _base_census()
+    retagged[P.SKIP_GROUP_UNTAGGED] = 0
+    retagged[P.SKIP_GROUP_ENV_DISABLED] += 118
+    assert sum(retagged.values()) == sum(_base_census().values())  # 總量真的沒變
+    assert P.skip_group_census_problems(_PROF, retagged) == []
+
+
+def test_a_healthier_tree_is_not_red_even_when_a_group_grew() -> None:
+    """總量**下降**（樹變健康）卻有一群上升 ⇒ 必須綠。
+
+    修前實測：untagged 118→112、platform 17→20（總量 136→133）舊判準回 1 筆問題。
+    「skip 少 3 支反而判不合格」是判準形狀錯誤，不是嚴格。
+    """
+    healthier = _base_census()
+    healthier[P.SKIP_GROUP_UNTAGGED] -= 6
+    healthier[P.SKIP_GROUP_PLATFORM] += 3
+    assert sum(healthier.values()) < sum(_base_census().values())
+    assert P.skip_group_census_problems(_PROF, healthier) == []
+
+
+def test_a_real_regression_is_still_red() -> None:
+    """反向鑑別力：沒有從 untagged 搬出任何一支、卻多出 skip ⇒ 兩道都要說話。
+
+    沒有這一支，上面兩支「放寬」的修改就可能把整道判準改成永遠綠——本 repo 對
+    「鎖還在但沒有鑑別力」已有多次判例，放寬與鑑別力必須同一個 commit 內一起驗。
+    """
+    worse = _base_census()
+    worse[P.SKIP_GROUP_PLATFORM] += 1
+    problems = P.skip_group_census_problems(_PROF, worse)
+    assert any("總量" in p for p in problems), problems
+    assert any("群 `platform`" in p for p in problems), problems
+
+
+def test_open_debt_is_the_zeroable_half_and_platform_is_not_in_it() -> None:
+    """「歸零」的標的＝欠債型 skip，**不含** platform。
+
+    WHY（掌舵者驗收問題②）：skip 總數在單一平台上結構性不可能歸零——`platform` 群的
+    意思正是「這支在別的平台才有驗證價值」。把它算進目標，目標就永遠達不到，而永遠
+    達不到的目標不會出現在任何判準裡。分開之後「歸零」變成一個真的可以瞄準的數字。
+    """
+    census = _base_census()
+    assert P.open_debt(census) == sum(
+        census[g] for g in (P.SKIP_GROUP_TOOL_ABSENCE, P.SKIP_GROUP_ENV_DISABLED,
+                            P.SKIP_GROUP_DEBT, P.SKIP_GROUP_UNTAGGED))
+    assert P.SKIP_GROUP_PLATFORM not in P.ZERO_TARGET_GROUPS
+    # 欠債歸零、只剩結構性 skip ⇒ 目標報告不再抱怨欠債（但仍會點出互補剖面缺口）
+    cleared = dict.fromkeys(P.SKIP_GROUPS, 0)
+    cleared[P.SKIP_GROUP_PLATFORM] = census[P.SKIP_GROUP_PLATFORM]
+    assert not any("欠債型" in line for line in P.skip_target_report(_PROF, cleared))
+
+
+def test_platform_skips_have_no_mechanical_proof_of_the_other_half_today() -> None:
+    """S3-08：`platform` 群的正確目標是「互補剖面上真的有人跑到」，而今天沒有。
+
+    這一支**刻意斷言缺口存在**：互補剖面（linux）至今沒人量過，所以那些測試目前沒有
+    任何機械證據顯示它們在世界上任何一處跑過。等有人把 linux 剖面量出來入表，本支會
+    紅——那正是它該有的行為（提醒把這句話改掉），而不是靜默通過。
+    """
+    lines = P.skip_target_report(_PROF, _base_census())
+    assert any("互補剖面" in line for line in lines), lines
+    assert not P.profile_registered(P._COMPLEMENTARY_PROFILE[_PROF])
+
+
+def test_ci_platform_coverage_is_accounted_for() -> None:
+    """S3-02：唯一跑整棵樹的 CI job 在 ubuntu，而剖面表一個 linux 都沒有。
+
+    這件事此前零登記 ⇒ 既不會被修也不會被想起來。帳算得清（登記或具名豁免）才算合格；
+    豁免表另有 shrink-only 上限，加一個「跑得到卻沒人量」的平台必須顯式上修常數。
+    """
+    assert P.ci_platform_coverage_problems() == []
+    assert "linux" in P._UNMEASURED_CI_PLATFORMS  # 缺口是**被登記**的，不是被消滅的
+
+
+def test_ci_platform_coverage_is_red_when_a_platform_is_neither_measured_nor_named(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """反向鑑別力：新增一個會跑整棵樹的 CI 平台、又不具名豁免 ⇒ 紅。"""
+    monkeypatch.setitem(P._CI_FULL_SUITE_PLATFORMS, "darwin", "假想的 macOS full-suite job")
+    problems = P.ci_platform_coverage_problems()
+    assert any("darwin" in p for p in problems), problems
+
+
+def test_profile_key_encodes_the_nested_session_dimension() -> None:
+    """S3-09：同一棵樹在巢狀 session 內外是兩個母體（本次實測差一整族），
+    剖面鍵不編碼它，天花板就永遠在比不同的東西。"""
+    assert m._skip_profile(True, nested=True) != m._skip_profile(True, nested=False)
+    assert m._skip_profile(True, nested=False).endswith("+solo")
+    assert m.nested_from_log(m.pg_marker_line(True, nested=False)) is False
+    assert m.nested_from_log("完全沒有標記的一份輸出") is None
+
+
+def test_census_only_is_red_when_the_nested_marker_is_missing(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """只有 PG 標記、沒有巢狀標記 ⇒ 剖面量不到 ⇒ fail-loud（同「量不到 ≠ 量到零」）。"""
+    _pin_registered_profile(monkeypatch)
+    half = _HEALTHY_LOG.replace(_MARKER_LINE, "AUTOCLAUDE-PG-DSN-IN-EFFECT=0")
+    assert m.census_only(_write_log(tmp_path, half)) == m.CENSUS_FAIL
+    assert "AUTOCLAUDE-NESTED-SESSION" in capsys.readouterr().out
+
+
+def test_pg_dsn_shape_is_validated_with_a_message_that_points_at_this_repo() -> None:
+    """S3-06：`AUTOCLAUDE_TEST_PG_DSN` 有兩類驅動需求互斥的消費端，卻零驗證。
+
+    修前實測：照文件以外的**合法** DSN 形態（`postgresql://…`，psycopg2 吃得下）設值，
+    非同步端那一批會在 fixture setup 硬炸，訊息由 SQLAlchemy 發出、指向 driver 選型，
+    完全不提這個環境變數也不提這個 repo。判準要把那個反推變成一句話 ＋ 一條可貼上的指令。
+    """
+    conftest = _loaded_conftest()
+    assert conftest is not None
+    assert conftest.pg_dsn_problems(None) == []
+    assert conftest.pg_dsn_problems("postgresql+asyncpg://a:b@h/db") == []
+    problems = conftest.pg_dsn_problems("postgresql://a:b@h/db")
+    assert len(problems) == 1
+    assert "postgresql+asyncpg://a:b@h/db" in problems[0]  # 可直接複製的修法
+    # `AUTOCLAUDE_DB_DSN` 的消費端全部自己 strip driver ⇒ 對它要求 async 是誤擋
+    assert conftest.pg_dsn_problems("postgresql://a:b@h/db", require_async=False) == []

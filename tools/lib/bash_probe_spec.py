@@ -1,13 +1,21 @@
 """可用 bash 探測規則的共用資料規格（單一真相源，R32 Architect 架構最佳化）。
 
-WHY：本 repo 有三份各自獨立實作的「找可用 Git Bash、排除 WSL System32 佔位版」
-邏輯——`AISDLC_SDD/scripts/bash_probe.py::usable_bash()`（生產用）、
-`tools/tests/test_pre_push_dispatcher.py::_usable_bash()`、
-`tools/tests/test_git_hooks_install_common.py::_usable_bash()`（後兩者是測試檔內
-獨立重寫的回歸鎖，刻意不 import 生產程式碼、獨立重新實作驗活/排除邏輯，以便
-「即使生產程式碼本身有共同盲點，測試也能因為獨立重寫而抓到」）。
+WHY：本 repo 有數份「找可用 Git Bash、排除 WSL System32 佔位版」的實作，被**硬邊界**
+隔開而無法互相 import——`AISDLC_SDD/scripts/bash_probe.py::usable_bash()`（生產用，
+子專案邊界）、`tools/integration_gate_core.py::find_git_bash()`、
+`tools/tests/_platform_helpers.py::usable_bash_for_fixture()`（根層測試樹的 SSOT），
+以及 PS1 側的 `tools/lib/Find-GitBash.ps1`（語言邊界）。
 
-三份原本各自寫死同一組「參數」（驗活探測指令、期望輸出、System32 排除段），
+🔴 **R80 S5-03 訂正本段原文**：原文把 `test_pre_push_dispatcher.py::_usable_bash()` 與
+`test_git_hooks_install_common.py::_usable_bash()` 列為「測試檔內**獨立重寫**的回歸鎖，
+其獨立性讓生產程式碼的共同盲點也抓得到」。當回合以 AST 正規化實測，那兩份加上
+`test_windows_forbidden_filename_parity.py` 的第三份，**剝除 docstring 後逐字相同**
+（雜湊皆 `9797b0251822`）＝複製貼上，不是獨立重寫；逐字相同的複本共享 100% 盲點，
+提供的額外鑑別力是零。三份已收斂進 `_platform_helpers.usable_bash_for_fixture()`
+（量測、覆蓋承接對照見 `docs/06_quality/CrossPlatform_R80_Subtraction_Evidence.md`）。
+上面列的那幾份雜湊互不相同，是真的各自寫成的，故保留。
+
+各份原本各自寫死同一組「參數」（驗活探測指令、期望輸出、System32 排除段），
 導致 DEF-101-275（R27 開出）「僅用 `echo` 驗活、未驗 coreutils，精簡版 Git Bash
 會誤判為可用」這個缺口連續 5 輪（R27~R31）都沒有任何一份補上——本檔把這些
 「資料」抽成單一真相源，三份程式各自 import 取得同一份規則資料，但驗活的

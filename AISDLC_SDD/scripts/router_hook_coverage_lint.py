@@ -37,6 +37,27 @@ from rfc_lifecycle_lint import discover_frozen_versions, latest_version
 _ROUTER_BASENAME = "sdd_hook_router.py"
 
 
+def _hook_wiring():
+    """monorepo 根的 hook 佈線解析唯一真相源（``<monorepo>/tools/lib/hook_wiring.py``）。
+
+    🔴 R80：本檔原本以 ``_ROUTER_BASENAME in h["command"]`` 判「經 router 可達」。
+    Claude Code 的 hook 條目有兩種形態，而 **exec form**（帶 ``args``；Windows 上不經
+    ``bash.exe`` 故不閃 console 視窗）會把腳本路徑從 ``command`` 搬進 ``args`` ⇒ 舊寫法
+    在轉換後一律回**空集**，於是 ``unreachable_events()`` 會把**每一個** event 都判成
+    不可達（硬閘、fail-loud）。這是本 lint 的解析面被形態變更打穿，不是治理事實變了。
+
+    刻意**不做靜默 fallback**：解析不到就讓它炸（Rule 12 fail-loud）。本檔的 docstring
+    早已載明它需要 monorepo 根，而 ``tools/lib/`` 與根 ``.claude/`` 是同一層的鄰居。
+    """
+    root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+    lib = os.path.join(root, "tools", "lib")
+    if lib not in sys.path:
+        sys.path.insert(0, lib)
+    import hook_wiring  # noqa: PLC0415
+
+    return hook_wiring
+
+
 # ── 純邏輯（可測，不碰 IO）─────────────────────────────────────────────────
 def unreachable_events(
     version_events: set[str], router_events: set[str], root_settings_events: set[str]
@@ -74,13 +95,16 @@ def router_wired_events(settings_path: str) -> set[str]:
         return set()
     with open(settings_path, encoding="utf-8") as f:
         data = json.load(f)
+    wiring = _hook_wiring()
     out: set[str] = set()
     for event, groups in (data.get("hooks") or {}).items():
         for group in groups or []:
             if not isinstance(group, dict):
                 continue
             if any(
-                isinstance(h, dict) and _ROUTER_BASENAME in (h.get("command") or "")
+                isinstance(h, dict)
+                and any(_ROUTER_BASENAME in rel
+                        for rel in wiring.hook_entry_targets(h, include_launcher=True))
                 for h in (group.get("hooks") or [])
             ):
                 out.add(event)

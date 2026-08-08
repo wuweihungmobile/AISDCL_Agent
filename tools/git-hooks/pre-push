@@ -59,6 +59,19 @@ rc=0
 # shellcheck disable=SC1091
 . "$TOPLEVEL/tools/lib/windowsapps_guard.sh"
 
+# 🔴 DEF-101-740（R80）：直譯器候選由 `python` 一支擴為 `python → python3`，與姊妹
+# hook AutoClaude/tools/git-hooks/pre-push 的既有候選鏈**逐字同形**，並維持 fail-loud
+# （軟跳過會讓整條 leg 退回「宣告有、執行者無」）。
+# 為何非補不可：R69 把 root-infra 快層改成「任何 push 皆跑」之後，只認 `python` 使得
+# **未啟用 venv 的 macOS**（系統只有 `python3`）下的每一次 push——含純文件、純子專案
+# ——都被硬擋，而該次 push 真正要跑的子專案 hook 自己跑得動。
+# `PY` 為空＝一個候選都沒有；四處 leg 各自以 `[ -z "$PY" ]` fail-loud，語意與原本的
+# `! is_real_python_candidate python` 完全相同，只是候選集合大了一個。
+PY=""
+for _py_cand in python python3; do
+  if is_real_python_candidate "$_py_cand"; then PY="$_py_cand"; break; fi
+done
+
 ZERO_SHA='0000000000000000000000000000000000000000'
 STDIN="$(cat)"
 
@@ -255,11 +268,11 @@ if [ "$run_autoclaude" -eq 1 ]; then
         echo "[pre-push dispatcher] ⚠ AUTOCLAUDE_PUSH_PYTEST_ARGS 已設 → 跳過 skip 分群普查（母體被縮限，拿去比全樹天花板必然沒有鑑別力）"
       elif [ ! -f "$_ac_gate_dir/local_ci_gate.py" ]; then
         echo "[pre-push dispatcher] ⚠ 找不到 $_ac_gate_dir/local_ci_gate.py → 跳過 skip 分群普查（本機 CI 閘門核心缺失）" >&2
-      elif ! is_real_python_candidate python; then
-        echo "[pre-push dispatcher] ⚠ 找不到 python → 跳過 skip 分群普查（AutoClaude leg 本身已因此判紅）" >&2
+      elif [ -z "$PY" ]; then
+        echo "[pre-push dispatcher] ⚠ 找不到 python／python3 → 跳過 skip 分群普查（AutoClaude leg 本身已因此判紅）" >&2
       else
         census_rc=0
-        PYTHONUTF8=1 python "$_ac_gate_dir/local_ci_gate.py" --census-only - < "$_ac_log" || census_rc=$?
+        PYTHONUTF8=1 "$PY" "$_ac_gate_dir/local_ci_gate.py" --census-only - < "$_ac_log" || census_rc=$?
         if [ "$census_rc" -eq 3 ]; then
           echo "[pre-push dispatcher] ⚠ skip 分群普查：本平台剖面未登記（advisory，不擋 push）"
         elif [ "$census_rc" -ne 0 ]; then
@@ -300,8 +313,8 @@ if [ "$run_rootinfra" -eq 1 ] || [ "$run_rootinfra_guards" -eq 1 ]; then
   else
     echo "[pre-push dispatcher] root-infra 快層守門（跨子專案不變式，任何 push 皆跑）"
   fi
-  if ! is_real_python_candidate python; then
-    echo "[pre-push dispatcher] ❌ 找不到 python — root-infra 閘門無法執行；請先啟用 venv（Windows: .venv/Scripts/activate；macOS/Linux: source .venv/bin/activate，見 ONBOARDING.md §3）" >&2
+  if [ -z "$PY" ]; then
+    echo "[pre-push dispatcher] ❌ 找不到 python／python3 — root-infra 閘門無法執行；請先啟用 venv（Windows: .venv/Scripts/activate；macOS/Linux: source .venv/bin/activate，見 ONBOARDING.md §3）" >&2
     rc=1
   else
     (
@@ -315,13 +328,13 @@ if [ "$run_rootinfra" -eq 1 ] || [ "$run_rootinfra_guards" -eq 1 ]; then
       #    逐一編譯、任一失敗即非零）
       pydirs="tools"
       [ -d .claude/hooks ] && pydirs="$pydirs .claude/hooks"
-      if ! find $pydirs -name '*.py' -not -path '*/__pycache__/*' -exec python -m py_compile {} +; then
+      if ! find $pydirs -name '*.py' -not -path '*/__pycache__/*' -exec "$PY" -m py_compile {} +; then
         echo "[pre-push dispatcher] ❌ root-infra：根層 Python py_compile 失敗" >&2
         leg_rc=1
       fi
       # ② tools/tests 單元測試（R10 QA-2：改走 run_root_unittests.py——裸 discover
       #    對「發現 0 個測試」回 rc=0，數量下限釘選堵住此 fail-open）
-      if ! python tools/run_root_unittests.py; then
+      if ! "$PY" tools/run_root_unittests.py; then
         echo "[pre-push dispatcher] ❌ root-infra：tools/tests unittest 失敗" >&2
         leg_rc=1
       fi
@@ -337,7 +350,7 @@ if [ "$run_rootinfra" -eq 1 ] || [ "$run_rootinfra_guards" -eq 1 ]; then
       #    **體積**硬閘（check_defect_log_crossref.py）本來就在這個迴圈裡，而同一份
       #    帳本的**保全**稽核卻零接線——「可重跑但沒有任何閘門看它的 rc」與「不可
       #    重跑」是同一個病的兩種形狀，故本輪把 rc 真正接上。）
-      #    迴圈項改為「指令字串」（可帶子指令參數），故 python 後刻意不加引號以分詞。
+      #    迴圈項改為「指令字串」（可帶子指令參數），故 $PY 後刻意不加引號以分詞。
       for guard in "tools/check_script_parity.py" "tools/check_ntfs_paths.py" \
                    "tools/check_defect_log_crossref.py" "tools/check_wrapper_thinness.py" \
                    "tools/check_pytest_baseline_sites.py" "tools/check_gha_action_versions.py" \
@@ -345,7 +358,7 @@ if [ "$run_rootinfra" -eq 1 ] || [ "$run_rootinfra_guards" -eq 1 ]; then
                    "tools/sync_onboarding_baselines.py --check-snapshot" \
                    "tools/_script_scan_surface.py --list --suffix .ps1 --with-latest --check-floors"; do
         # shellcheck disable=SC2086  # 刻意分詞：項目可帶子指令（archive_defect_log --check）
-        if ! python $guard; then
+        if ! "$PY" $guard; then
           echo "[pre-push dispatcher] ❌ root-infra：$guard 失敗" >&2
           leg_rc=1
         fi
@@ -395,12 +408,12 @@ fi
 # 安全、router 家族等回歸鎖的唯一住址）。
 if [ "$run_sdd_consumer" -eq 1 ]; then
   echo "[pre-push dispatcher] push 涉根層消費檔（aisdlc-sdd-ci.yml paths）→ 執行 AISDLC_SDD/scripts/tests 回歸鎖"
-  if ! is_real_python_candidate python; then
-    echo "[pre-push dispatcher] ❌ 找不到 python — 消費檔回歸鎖無法執行；請先啟用 venv（見 ONBOARDING.md §3）" >&2
+  if [ -z "$PY" ]; then
+    echo "[pre-push dispatcher] ❌ 找不到 python／python3 — 消費檔回歸鎖無法執行；請先啟用 venv（見 ONBOARDING.md §3）" >&2
     rc=1
   # `-rs`（R59 ARCH-R59-NB1）：與 AISDLC_SDD/scripts/ci-gate.sh 跑的是**同一套**
   # scripts/tests，本輪若只補 ci-gate.sh 那一邊，就是本輪自己在抓的「N 份複本只改 1 份」。
-  elif ! (cd "$TOPLEVEL/AISDLC_SDD" && python -m pytest scripts/tests -q -rs); then
+  elif ! (cd "$TOPLEVEL/AISDLC_SDD" && "$PY" -m pytest scripts/tests -q -rs); then
     echo "[pre-push dispatcher] ❌ 根層消費檔回歸鎖失敗（AISDLC_SDD/scripts/tests）" >&2
     rc=1
   fi
@@ -415,8 +428,8 @@ if [ "$run_integration_gate" -eq 1 ]; then
   if [ ! -f "$TOPLEVEL/tools/integration_gate.sh" ]; then
     echo "[pre-push dispatcher] ❌ 整合閘門缺失：$TOPLEVEL/tools/integration_gate.sh（閘門體系損壞）" >&2
     rc=1
-  elif ! is_real_python_candidate python; then
-    echo "[pre-push dispatcher] ❌ 找不到 python — 整合閘門無法執行；請先啟用 venv（見 ONBOARDING.md §3）" >&2
+  elif [ -z "$PY" ]; then
+    echo "[pre-push dispatcher] ❌ 找不到 python／python3 — 整合閘門無法執行；請先啟用 venv（見 ONBOARDING.md §3）" >&2
     rc=1
   elif ! (cd "$TOPLEVEL" && bash tools/integration_gate.sh --skip-full); then
     echo "[pre-push dispatcher] ❌ 整合閘門未通過（tools/integration_gate.sh --skip-full）" >&2

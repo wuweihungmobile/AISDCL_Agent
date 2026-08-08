@@ -139,6 +139,13 @@ _PG_ENV_KEYS = ("AUTOCLAUDE_DB_DSN", "AUTOCLAUDE_TEST_PG_DSN")
 PG_PROFILE_MARKER = "AUTOCLAUDE-PG-DSN-IN-EFFECT="
 _PG_MARKER_RE = re.compile(re.escape(PG_PROFILE_MARKER) + r"([01])")
 
+#: 剖面的第三個維度也必須寫進 log，理由與 PG 那個標記**逐字相同**：`--census-only`
+#: 讀的是別的行程留下的輸出，而「那個行程是不是巢狀 session」只有它自己說得準
+#: （父行程與後續行程的 env 可以完全不同）。兩個標記刻意同住一行，讓既有的
+#: `_PG_MARKER_RE` 與 `scripts/pytest_passed_count.sh` 的取值都不受影響。
+NESTED_PROFILE_MARKER = "AUTOCLAUDE-NESTED-SESSION="
+_NESTED_MARKER_RE = re.compile(re.escape(NESTED_PROFILE_MARKER) + r"([01])")
+
 #: `--census-only` 的三態離開碼（WHY 見檔頭用法段）。
 CENSUS_OK = 0
 CENSUS_FAIL = 1
@@ -205,14 +212,27 @@ def pg_dsn_in_effect() -> bool:
     return any(os.environ.get(k) for k in _PG_ENV_KEYS)
 
 
-def pg_marker_line(in_effect: bool) -> str:
-    """產出剖面標記行（唯一產生者；消費者＝`pg_in_effect_from_log`）。"""
-    return f"{PG_PROFILE_MARKER}{1 if in_effect else 0}"
+def pg_marker_line(in_effect: bool, nested: bool | None = None) -> str:
+    """產出剖面標記行（唯一產生者；消費者＝`pg_in_effect_from_log`／`nested_from_log`）。
+
+    兩個維度同住一行：呼叫端（conftest 的 `pytest_terminal_summary`）只寫一行，
+    而剖面要三個維度才拼得出來（平台由消費端的 `sys.platform` 提供）。
+    """
+    if nested is None:
+        nested = nested_session()
+    return (f"{PG_PROFILE_MARKER}{1 if in_effect else 0} "
+            f"{NESTED_PROFILE_MARKER}{1 if nested else 0}")
 
 
 def pg_in_effect_from_log(text: str) -> bool | None:
     """從 pytest 輸出讀回剖面標記；找不到回 `None`（＝剖面量不到，不是「沒有 PG」）。"""
     hits = _PG_MARKER_RE.findall(text or "")
+    return bool(int(hits[-1])) if hits else None
+
+
+def nested_from_log(text: str) -> bool | None:
+    """同上，讀回「巢狀 session」那一維；找不到回 `None`（量不到 ≠ 量到 solo）。"""
+    hits = _NESTED_MARKER_RE.findall(text or "")
     return bool(int(hits[-1])) if hits else None
 
 
@@ -232,11 +252,33 @@ def pg_in_effect_from_log(text: str) -> bool | None:
 # 判準與它所依賴的解析器同住一個家，才有辦法讓「量不到」在進到天花板之前就先轉紅。
 
 
-def _skip_profile(pg: bool) -> str:
+#: 巢狀 Claude Code session 的可靠標記（該環境啟動時自己設的變數，非行程樹猜測；
+#: 逐字理由見 `tests/test_gap014_020.py` 檔頭的 DEF-101-089／DEF-101-913 沿革）。
+_NESTED_SESSION_ENV = "CLAUDECODE"
+
+
+def nested_session() -> bool:
+    """這次 pytest 是不是在巢狀 Claude Code session 裡跑的。
+
+    🔴 R80 包 A（S3-09）：這是剖面的**第三個維度**，而它此前不在剖面鍵裡。
+    `tests/test_gap014_020.py`／`tests/test_gap039_049.py` 有一族 skip 的述詞逐字是
+    `shutil.which("claude") is None or os.environ.get("CLAUDECODE") == "1"`
+    ⇒ 同一棵樹在「Claude Code session 內」與「schtasks nightly」是兩個不同的母體
+    （本次實測該族 11 支）。不編碼它，天花板就永遠在比不同的東西，而且方向是
+    「拿巢狀時較寬鬆的上限去管 nightly」＝沒有鑑別力。
+    """
+    return os.environ.get(_NESTED_SESSION_ENV) == "1"
+
+
+def _skip_profile(pg: bool, *, nested: bool | None = None) -> str:
     """剖面鍵：同一棵樹在「有 PG」與「沒 PG」下的健康值差 92 支，用同一個數字管必然
-    一邊沒鑑別力、另一邊恆假紅；平台同理（Windows 上 POSIX-only 全 skip，mac 反過來）。
+    一邊沒鑑別力、另一邊恆假紅；平台同理（Windows 上 POSIX-only 全 skip，mac 反過來）；
+    巢狀 session 同理（見 `nested_session`）。
     剖面由**實測**決定，不是由人宣告。未登記的剖面會被判準點名並要求以實測值入表。"""
-    return f"AutoClaude/tests@{sys.platform}+{'pg' if pg else 'nopg'}"
+    if nested is None:
+        nested = nested_session()
+    return (f"AutoClaude/tests@{sys.platform}"
+            f"+{'pg' if pg else 'nopg'}+{'nested' if nested else 'solo'}")
 
 
 def skipped_reasons(pytest_output: str) -> list[str]:
@@ -244,17 +286,19 @@ def skipped_reasons(pytest_output: str) -> list[str]:
     return skip_group_policy.skipped_reasons(pytest_output)
 
 
-def census_verdict(pytest_output: str, *, pg: bool) -> tuple[int, list[str]]:
+def census_verdict(pytest_output: str, *, pg: bool,
+                   nested: bool | None = None) -> tuple[int, list[str]]:
     """純函式：回 `(離開碼, 要印的行)`。離開碼三態見 `CENSUS_*`。
 
     順序是判準的一部分：**量測完整性先於天花板**。反過來寫的話，塌掉的量測會先拿到
     「每一格都沒超過上限」這個綠章，而那正是 QA 抓到的原形態。
     """
     reasons = skip_group_policy.skipped_reasons(pytest_output)
-    profile = _skip_profile(pg)
+    profile = _skip_profile(pg, nested=nested)
     census = skip_group_policy.skip_group_census(reasons)
     lines = [f"[skip census] {profile} 共 {len(reasons)} 支："
-             + "／".join(f"{g}={n}" for g, n in census.items())]
+             + "／".join(f"{g}={n}" for g, n in census.items())
+             + f"／欠債型 {skip_group_policy.open_debt(census)} 支（目標 0）"]
     collapsed = skip_group_policy.skip_measurement_problems(pytest_output, len(reasons))
     if collapsed:
         lines.append("❌ skip 量測塌掉——這一份輸出量不到 skip 數，上面那行普查不可信：")
@@ -263,6 +307,8 @@ def census_verdict(pytest_output: str, *, pg: bool) -> tuple[int, list[str]]:
     problems = skip_group_policy.skip_group_census_problems(
         profile, census, reasons=reasons)
     if not problems:
+        lines += [f"ℹ️ [skip target] {line}"
+                  for line in skip_group_policy.skip_target_report(profile, census)]
         return CENSUS_OK, lines
     if not skip_group_policy.profile_registered(profile):
         lines.append(
@@ -326,13 +372,20 @@ def census_only(log_path: str) -> int:
 def _census_from_text(text: str) -> int:
     """已取得輸出之後的共同尾段（剖面標記 → 判準 → 印出）。"""
     pg = pg_in_effect_from_log(text)
+    nested = nested_from_log(text)
+    if pg is not None and nested is None:
+        print(f"❌ [skip census] 這份輸出有 `{PG_PROFILE_MARKER}` 卻沒有 "
+              f"`{NESTED_PROFILE_MARKER}`——剖面少了「巢狀 session」那一維（S3-09），"
+              "此時拿任何一組天花板來比都是在比不同的母體（該維度實測差一整族測試）。"
+              "產生端＝AutoClaude/tests/conftest.py 的 pytest_terminal_summary。")
+        return CENSUS_FAIL
     if pg is None:
         print(f"❌ [skip census] 這份輸出裡找不到剖面標記 `{PG_PROFILE_MARKER}`"
               "——它由 AutoClaude/tests/conftest.py 的 pytest_terminal_summary 印出。"
               "標記不在＝要嘛這不是 AutoClaude 測試樹的輸出、要嘛那段被拿掉了；"
               "兩種都代表**剖面量不到**，此時任何一組天花板的比較結果都沒有意義。")
         return CENSUS_FAIL
-    rc, lines = census_verdict(text, pg=pg)
+    rc, lines = census_verdict(text, pg=pg, nested=nested)
     print("\n".join(lines))
     return rc
 

@@ -92,13 +92,13 @@ matcher 刻意不含 `Read`／`Edit`／`PowerShell`：上表 90% 那格要的是
 
 本輪（R79）在同一件事上撞了**兩次**，三條教訓都是實測得來的：
 
-1. **reset 時刻只能觀測，不能算。** 全庫 1,180 支逐字稿掃出 **7 個相異** reset 值（`3:50am` `4am` `9am` `11pm` `12:20pm` `12:30pm` `6pm`），**沒有一個落在 5 小時的固定格點上** ⇒ 它是滾動視窗、錨在該區塊第一次用量。⇒ 解不出時刻時一律**拒絕武裝**，不准退回「假設 5 小時」。猜出來的時刻最難看見：排程會成立、`NextRunTime` 也拿得到、取證規則照樣綠，只是它**醒在錯的時間**。
+1. **reset 時刻只能觀測，不能算。** R79 當時全庫 1,180 支逐字稿掃出 **7 個相異** reset 值（`3:50am` `4am` `9am` `11pm` `12:20pm` `12:30pm` `6pm`），**沒有一個落在 5 小時的固定格點上** ⇒ 它是滾動視窗、錨在該區塊第一次用量。🔴 **括號裡那兩個數字是 R79 那一刻的量測值，不是常數**（R80 重量已是另一組）——結論（滾動視窗）不變，**數字一律現查**：`python tools/probe/reset_window_distribution.py`（印母體、相異字面、episode 分佈）。⇒ 解不出時刻時一律**拒絕武裝**，不准退回「假設 5 小時」。猜出來的時刻最難看見：排程會成立、`NextRunTime` 也拿得到、取證規則照樣綠，只是它**醒在錯的時間**。
 2. **「額度耗盡」在 Claude Code 的 hook 體系裡沒有任何觸發點。** 它是 **API 層**的失敗，不是工具呼叫失敗 ⇒ PreToolUse／PostToolUse 一次都不會被叫到，任何「撞到才反應」的 hook 設計結構上都不可能成立。而撞線那一刻是 16 秒內全部 subagent 瞬間掛掉，**沒有人還在跑指令**去手動武裝。⇒ 唯一可行的形狀是**趁還能跑指令時先掛好**，之後由 OS 排程器（不是這個 session、不是這個模型）去輪詢。這就是 `--arm-sentinel`：SessionStart 自動武裝一支 schtasks，每 15 分鐘醒來**只讀逐字稿**（零 token）；讀到未處理的撞線才轉成續航排程，reset 已過的那一次才花一次探測（約 32K tokens）。
    > 為什麼可以只讀檔就知道：**探測是為了知道「額度回來了沒」——那件事只能問伺服器；但「撞了沒」寫在逐字稿裡，讀檔即可、成本是零。** 這個不對稱是整個哨兵成立的原因。
-   > 間隔 15 分鐘是**量出來的**不是挑的：實測那次真實撞線是 08:44 撞、訊息說 `resets 9am`，hit→reset 只有 16 分鐘；間隔大於它，「精確重排到 reset」那一支在最短窗下就結構上不可達。
+   > 🔴 **間隔 15 分鐘決定的是「reset 之後最壞多久才有人動作」（R80 訂正，結論不變、理由換掉）。** 本格 R79 版把它掛在「必須小於已觀測到的最短窗」上，依據是**單一事件**（08:44 撞、`resets 9am` ⇒ 16 分）；R80 以全庫逐字稿重量（`python tools/probe/reset_window_distribution.py`，逐 episode 的 hit→reset 分佈），最短窗**遠小於 900 秒** ⇒ 那句話在字面上已不成立，故不留著當現行說法。真正成立的性質：窗比間隔短的那一次走的是 `probe` 而不是 `arm_reset`，**代價是一次探測（約 32K tokens），不是失效**。方向仍是愈小愈好（巡邏零 token，這一側沒有需要權衡的量），所以判準是**上界＋只准調小**。取捨與「為何不改成 50 分鐘」見 ADR-XPLAT-004 §2.7。
 3. **`ScheduleWakeup` 沒有任何憑證。** 它不寫磁碟、沒有可查詢的登錄、拿不到 `NextRunTime` ⇒ 事後**無從得知它排到了沒有**，而那正是 R59 事故的形狀。**憑證是 `NextRunTime` 這個「值」，不是指令的 rc**——`Get-ScheduledTask` 對不存在的工作回 **rc=0**（非終止錯誤），只讀 rc 是假綠。離線排程只有 `schtasks` 一條路。
 
-機械物：`tools/session_resume_planner.py` 的 `--arm-sentinel`／`--sentinel-tick`；SessionStart 註冊面與四分支判定由 `tools/tests/test_context_budget_guard.py::SentinelWiringTest` 與 `tools/tests/test_context_budget_guard.py::SentinelDecisionTest` 釘住（含「巡邏間隔必須小於最短觀測窗」「自我解除門檻必須大於一個完整額度視窗」兩條閾值的方向鎖）。
+機械物：`tools/session_resume_planner.py` 的 `--arm-sentinel`／`--sentinel-tick`；SessionStart 註冊面與四分支判定由 `tools/tests/test_context_budget_guard.py::SentinelWiringTest` 與 `tools/tests/test_context_budget_guard.py::SentinelDecisionTest` 釘住。**兩條閾值的方向鎖各由一支具名測試守，語意以現行測試名為準**（R80 訂正：本行 R79 版寫的「巡邏間隔必須小於最短觀測窗」已隨上一格一併證偽，該測試同輪改名改判準）——巡邏間隔那一條現在是 `test_the_patrol_interval_bounds_the_post_reset_dead_time`（上界＋只准調小，守的是 reset 之後的最壞死等時間）；自我解除門檻那一條是 `test_the_idle_threshold_outlives_a_whole_quota_window`（必須大於一個完整額度視窗）。
 現查哨兵：`Get-ScheduledTask | Where-Object TaskName -like 'AutoSDD_Sentinel_*' | Get-ScheduledTaskInfo`；痕跡在 `%TEMP%\autosdd_resume_log_*.jsonl`（**沒觸發＝這個檔不會長大，是可偵測的**）。
 
 > 對照：`autoclaude/` Kernel 的 Token Guard 是 ≥80% `/compact`、≥90% 存 checkpoint 並排程恢復（`scheduled_resume_at`）——**同一個形狀，只是這次套在自己身上**。
@@ -188,6 +188,32 @@ Get-ScheduledTask -TaskName '<名稱>' | Get-ScheduledTaskInfo |
 任何非預期例外 fail-open（`settings.json` 記載過的 P0：hook 誤觸 deny 會把所有工具硬鎖死）。
 端到端實證：故意呼叫 Bash → `PreToolUse:Bash hook error` 攔下。
 
+### 🔴 鐵律一之二：hook 自己也有載具，而它壞掉時「看起來像修好了」（R80）
+
+**病**：Windows 上 Claude Code 的 **shell form** hook（條目只有 `command`、沒有 `args`）是用 Git Bash 的 `bash.exe -c` 起的，而 `bash.exe` 是 console 子系統程式 ⇒ **每觸發一次 hook 就閃一個 console 視窗**（實測一個量測視窗內 39 支 `bash.exe`、其中 22 支自帶 conhost）。**解**＝**exec form**：條目帶 `args`，`command` 指向 GUI 子系統的 `pythonw.exe`，不經 shell、零視窗。根 `.claude/settings.json` 已全面轉成這個形態（10 條 → 20 條，每個邏輯 hook 一組「Windows 載具 ＋ POSIX 載具」，各平台恰好一條成立、另一條 spawn 失敗）。
+
+🔴 **本節真正要你記住的不是形態，是這個不對稱**：exec form 的載具解析不到時，CC 只記一行 ERROR 就放行（**fail-open**）——於是**六支守衛全部靜默失效，而螢幕上的表徵就是「終於不閃窗了」**，與修好完全相同。所以「不閃窗了」永遠不算驗收通過，正負兩面要一起看。
+
+**一行現查（載具還在不在）**——守的是「settings.json 宣告的 Windows hook 載具是否真的存在」：
+
+```powershell
+Test-Path (Join-Path $env:CLAUDE_PROJECT_DIR '.venv\Scripts\pythonw.exe')   # 必須是 True
+```
+
+**正面現查（hook 真的還在跑）**——`--debug hooks` 是唯一權威通道，行程表看不到那麼快的東西：
+
+```powershell
+claude -p --model haiku --debug hooks --debug-file h.log "ok"
+Select-String -Path h.log -Pattern 'Hook SessionStart.*success'   # 有 success 才算活著
+```
+
+🔴 **射程只有根層那一份 `.claude/settings.json`**（R80 QA-03 訂正——上一段原本讀起來像通則）：`AutoClaude/.claude/settings.json` 的 **6 條** hook 仍是 shell form，所以在 **AutoClaude 子專案 session 下閃窗一次都沒少**；`AISDLC_SDD/AISDLC_SDD_v*/` 各版依 Copy-on-Evolve 不動。這件事**不是靠這段散文記住的**：`tools/lib/hook_wiring.py` 的 `SHELL_FORM_CENSUS` 把「哪一份還剩幾條沒轉」登記成**現查磁碟的量測值**，判準是相等——退回 shell form 會紅，轉好了卻沒回來改表也會紅。轉換 AutoClaude 那份留給下一輪。
+
+機械物（三層，都不靠自律）：
+- `tools/lib/hook_wiring.py` — hook 佈線解析的**唯一真相源**。🔴 立案理由：腳本路徑在兩種形態下住不同欄位，而 repo 內原有**八個**「只讀 `command` 找腳本名」的解析器，轉換後全部掃出空集合 ⇒ 那批鎖會**恆綠**（分母 0＝沒有東西可違反），rc 與「正確地全部通過」一模一樣。🔴 R80 補記：本檔一度對 `type` 有**三種**慣例，其中形態鎖那一種讓「退回 shell form 時順手省掉 `type`」可以靜默逃過全部判準——已收斂成單一 `is_command_hook()`。
+- `tools/tests/test_check_hooks_liveness.py` — 形態判準 A~F（退回 shell form／載具字串／command 含空白／機器專屬絕對路徑／**跨平台配對少一邊**／混用兩種 Windows 載具）＋ 啟動器行為契約 ＋ 兩個平台**各自**的載具存在性，皆含合成注入紅綠自證。🔴 這裡**不放**「這台機器上載具在不在」的斷言：那是機器狀態不是 repo 內容，會讓 CI 與任何還沒跑過 bootstrap 的全新 clone 必紅；單元測試改守「宣告的載具必須是 bootstrap 產得出來的那一個」（機器無關）。
+- `tools/check_hooks_liveness.py` — 開發機上**會出聲**的那一層（CI 由呼叫端整段跳過，理由是語意的：**CI 從不執行 Claude Code hook**）。機器狀態的通報者是它，不是單元測試。🔴 R80 起它在 mac/Linux 也真的會說話：POSIX 那條載具吃的是 `PATH` 上任意 `python3`（macOS 內建常年 3.9、本 repo 下限 3.11），檔不在／沒有執行位元／直譯器太舊三種失效表徵完全相同。
+
 ### 鐵律二：**一律絕對路徑，禁用裸 `cd`**
 
 PowerShell 工具的 cwd **會跨呼叫持續**（工具說明明載），但人容易假設它會重置。R71 單輪就因此失誤 **3 次**（`cd AutoClaude` 之後的指令全部找錯路徑，其中一次還誤判成「檔案不存在」）。
@@ -222,14 +248,17 @@ R71 最諷刺的一筆：在修一個 Windows 專屬缺陷（DEF-101-759）時�
 | console 編碼 | `tools/tests/test_subprocess_encoding_hygiene.py` | 同上 |
 | 行尾（`.sh`／`.bash` 方向） | `tools/tests/test_pre_commit_dispatcher_sigpipe.py::TestPreCommitBlocksCrOnShellScripts` ＋ `AutoClaude/tools/hooks/check_sh_eol.py`（🔴 R78 訂正欄名：這兩者的射程**只有** `.sh`／`.bash`，後者檔頭逐字寫「非 `.sh`／`.bash` → exit 0」。原欄名寫「行尾」讓人以為整類有人守） | 同上 ＋ PostToolUse hook |
 | 行尾（**`.ps1` 方向**，政策要求工作樹為 CRLF） | `AutoClaude/tools/hooks/check_ps1_encoding.py`（PostToolUse，寫入當下就地補回 CRLF）＋ `tools/tests/test_platform_neutral_paths.py::TestWorktreeEolMatchesPolicy`（事後兜底，直接量工作樹）。🔴 R79 落地；R78 版此格自陳沒人在守，成因是寫入端預設就錯（Claude Code 的 `Write` 工具一律寫 LF、連覆寫既有 CRLF 檔也就地轉掉）而零守門 | 同上 ＋ PostToolUse hook。CI 那道（`root-infra-ci.yml` 第 4 道）**結構上永遠綠**——`actions/checkout` 必定重新 smudge，雲端天生看不到本機工作樹漂移 |
-| 行尾（**`.py` 方向**，`.gitattributes` 宣告 `text eol=lf`） | **無機械物** | 沒有東西會紅。R79 實測工作樹 4176/5478 支 `.py` 為 CRLF、與宣告的政策相反，而 `git status` 全乾淨（正規化只作用於 index）⇒ 現查配方見 `docs/06_quality/CrossPlatform_R79_Debt_Audit.md` 的 DEF-101-377 節 |
+| 行尾（**`.py` 方向**，`.gitattributes` 宣告 `text eol=lf`） | `tools/tests/test_platform_neutral_paths.py::TestActiveSourceEolIsRatchetedSeparatelyFromTheFrozenSurface`（活躍面止血：新漂移必紅；凍結面只登記不判）。🔴 **R80 訂正此格 R79 版的兩筆假事實**：①它自陳沒人守——不真。守門的類別（`TestWorktreeEolMatchesPolicy`）一直都在，只是被 `_EOL_LF_SCOPE` 這個常數窄化成只看 `.sh`／`.bash`，而且該類還有一條 `assertNotIn(".py", policy)` 把「`.py` 必須被放行」**釘成契約**——「有鎖在守假話」比沒有鎖更難看見：檔案在、判準在、測試全綠。②規模記錯了母體：`.py` 的 4,176 只是其中一塊，全庫工作樹行尾與宣告不符者當回合實測 **18,255 支**，其中約 95% 落在 Copy-on-Evolve 凍結面 ⇒「全部就地轉 LF」不是修法，是打破凍結政策；正解是凍結面與活躍面分開處置 | 根層 unittest 閘門。`git status` 對這種漂移結構上看不見（正規化只作用於 index），CI 也看不見（`actions/checkout` 必定重新 smudge）⇒ 只有本機工作樹那一欄看得到 |
+| `#!` shebang ＋ 非 LF 行尾（`\r` 會黏進直譯器名） | `tools/tests/test_platform_neutral_paths.py::TestShebangImpliesLfLineEndings` | 根層 unittest 閘門。當回合實測 30 支 `.py` **已同時**具備 shebang 與 CRLF，今天沒炸只因它們的 git 索引模式都不是 100755——**把 exec bit 補對（那是正確的修法）會讓這 30 支一起在 mac/Linux 變成 rc=127**（`env: 'python3\r'`）。兩個各自正確的動作合起來才炸，所以判準取的是兩者的交集 |
+| naive 本地時間戳被持久化（不帶 offset 的 ISO 字串） | `tools/tests/test_platform_neutral_paths.py::TestNaiveLocalTimestampsAreNotPersisted` | 根層 unittest 閘門。跨 DST 的 naive 相減當回合實測差 **3600 秒**且完全靜默（沒有例外、沒有 log，只是時間錯一小時）；AutoClaude Kernel 的 checkpoint 恢復正走這條路 ⇒ DST 那一天會提早一小時恢復。本機時區 Asia/Taipei 不實施 DST ⇒ 這個缺陷在本機**結構上重現不了**，自證測試因此以固定 offset 構造 fall-back（不依賴 `tzdata`，Windows 上沒有它） |
+| `shell=True` 的原生殼差異（Windows 走 `cmd.exe`、POSIX 走 `/bin/sh`） | **無機械物**（`AutoClaude/tests/test_evaluator_kill_tree.py` 守的是「逾時要 kill 整棵行程樹」，對引號、`&&`、路徑分隔、rc 語意這些**語意差異**零判準——同一個關鍵字、不同的主題） | 沒有東西會紅。且存量掃描**結構上量不到**真實危害面：真正被送進殼的指令來自 playbook＝使用者輸入，根本不在 repo 裡 ⇒ 這一格要的是執行期契約或輸入面正規化，不是靜態掃描 |
 | exec bit／git 索引檔案模式 | `tools/tests/test_platform_neutral_paths.py::TestExecBitIsGovernedViaTheGitIndex` | 根層 unittest 閘門。🔴 誠實劃界：Windows 的 Git Bash 上 `[ -x ]` 是**檔首內容猜測**（實測：加 UTF-8 BOM 即由 EXECUTABLE 翻成 NOT-EXEC），該判準只守得住「tracked 100755 檔的檔首形態」，安裝**產物**那一半仍無人守 |
 | Windows 檔案鎖：會改動目錄項的原語（`os.replace`／`rename`／`move`） | `tools/tests/test_platform_neutral_paths.py::TestDirEntryPrimitivesAreAccountedFor` | 同上。此前 repo 登記的 Windows 鎖檔知識只涵蓋 `unlink`／WinError 32，換一個原語（`os.replace` 覆寫被開著的目的檔 → WinError 5）就整片失明 |
 | `$IsWindows` 等 PS 6+ 專屬 | `tools/tests/test_ps51_compat.py` | 同上 |
-| `$env:*` 讀取 | **無機械物**（唯一例外：`PATHEXT` 這一個變數已由 `tools/tests/test_platform_neutral_paths.py::TestPathextReadsAreePlatformGuarded` 覆蓋——🔴 R76 訂正：該掃描器與本表這句「無機械物」是**同一個 commit**（R74 `a371068`）落地的，也就是說本表在寫下的當回合就把一個已經有人在守的形態記成沒人守，撐了兩輪沒被發現） | 其餘 `$env:*` 沒有東西會紅 |
-| 副檔名判斷 | **無機械物** | 同上（DEF-101-766 的另一半） |
-| `Get-Command` 解析 | **無機械物**（`tools/tests/test_find_git_bash_parity.py` 只守 `Find-GitBash` 這一個消費者，不是判準本身；🔴 R75 訂正：此格原先只寫裸檔名，任何以路徑為單位的鎖都解析不到它） | 只有那一個站點會紅 |
-| 大小寫敏感度 | **無機械物** | 沒有東西會紅 |
+| `$env:*` 讀取 | `tools/tests/test_platform_neutral_paths.py::TestPowerShellPlatformSensitiveSites`（**站點級**：`$env:TEMP`／`$env:TMP` 的讀取逐檔登記，新增即紅）＋ `tools/tests/test_platform_neutral_paths.py::TestPathextReadsAreePlatformGuarded`（`PATHEXT` 專屬） | 根層 unittest 閘門。🔴 **R80 訂正此格的量**：舊版把整類記成沒人守，而「粗數」正是它失真的原因——活躍 `.ps1` 剝註解後 `$env:` 粗抓 48 筆，其中 **22 筆是賦值**（設定不是讀取，任何平台都成立），26 筆讀取分屬 11 個變數，真正「在 POSIX 上會拋例外」的只有 `TEMP`／`TMP` 這一族（macOS/Linux 的 PS Core 上不存在 ⇒ `Join-Path $env:TEMP …` 直接拋 null 綁定例外，整支腳本死掉）。命中的其中一支是**框架發給使用者的安裝腳本** `AISDLC_SDD/<LATEST>/tools/init_project.ps1`。判準刻意只判這兩個變數：把 11 個一起判會製造 20 餘筆要逐一辯護的假紅，那種鎖活不過一輪 |
+| 副檔名判斷 | **無機械物** | 同上（DEF-101-766 的另一半）。🔴 R80 補記診斷：production 存量已近乎清空 ⇒ 這一格缺的是**寫入面**判準，不是存量掃描——今天蓋一支存量掃描會回 0 命中而給出假的安心。本輪只登記診斷，未建機械物（分母不動、分子不動） |
+| `Get-Command` 解析 | `tools/tests/test_platform_neutral_paths.py::TestPowerShellPlatformSensitiveSites`（**站點級**：裸 `Get-Command bash` 只能出現在 SSOT `tools/lib/Find-GitBash.ps1`，別處寫出即紅）＋ `tools/tests/test_find_git_bash_parity.py`（只守 `Find-GitBash` 這一個消費者，不是判準本身） | 根層 unittest 閘門。🔴 R80：今天的存量違規是 **0**——所以這一格缺的一直是「下一個人寫出裸解析時當場紅」的門，而不是數今天有幾筆。裸解析的代價已實測：`Get-Command bash` 拿到 system32 的 WSL 佔位版，且反斜線路徑的分隔符會被整批吃掉（DEF-101-617/618） |
+| 大小寫敏感度 | `tools/check_ntfs_paths.py`（tracked 路徑正規化鍵 NFC→lowercase 的大小寫碰撞判準）＋ `tools/git-hooks/pre-commit`（同一判準的 commit 期版本） | pre-commit hook ＋ 四支 CI workflow（`root-infra-ci`／`windows-compat-ci`／`macos-compat-ci`／`aisdlc-sdd-ci` 皆呼叫該腳本）。🔴 **R80 訂正：此格自 R74 起一直自陳沒人守，而那個判準早就存在、也早就接上了上述閘門**——這是**低報分子**，舊棘輪對它結構上失明（它只讀這張表自己說什麼，從不問「這句話是真的嗎」）。代價與過報一樣大：它會讓下一輪有人去補一支已經存在的鎖，也讓「還有幾類沒人守」這個治理數字是假的。修法＝`tools/tests/test_platform_neutral_paths.py::TestIronLaw3NoMechanismClaimsAreFalsifiable`：每一格自陳沒人守的宣稱都必須登記一組**證偽探針**並通過它 |
 
 上表由 `tools/tests/test_doc_loc_baseline_freshness_r60.py::TestR74IronLawMechanismAccounting` 釘住，判準是**覆蓋率棘輪**：**分子（有機械物的列數）只准上升、分母（已登記的危害類數）也只准上升**，而「還有幾類沒人守」＝分母−分子，**刻意不設上限**。補了掃描器就把該列的機械物欄改掉（不是把整列拿掉），而且表內每一個具名檔案都必須真的存在——**本檔不得宣稱一個不存在的機械物**。
 

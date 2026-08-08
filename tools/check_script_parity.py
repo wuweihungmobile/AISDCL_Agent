@@ -12,9 +12,9 @@ E-A-01 收斂為 SSOT 名冊＋遞迴**）：掃描根一律取自 `tools/_scrip
 LATEST 以 scripts/sdd_version.py SSOT 動態解析，解析失敗 fail-loud——parity 只在 repo
 內跑，git 必在；凍結版 v0.01~v0.2X 依鐵律不掃）下的每支 .sh/.ps1 必屬五類之一，否則
 fail-loud 列出未納管檔名：
-  (1) 成對納管（_MARKER_PAIRS 標籤比對）；(2) 薄殼 hash 釘選（_THINNESS_ENROLLED，
-  **含 LATEST-relative 鍵**）；(3) 成對豁免（_EXEMPT_PAIRS，附 (tier, reason)）；
-  (4) 單邊豁免（_SINGLE_SIDED_EXEMPT，附 (tier, reason)）。LATEST 下的納管
+  (1) 薄殼 hash 釘選（_THINNESS_ENROLLED，**含 LATEST-relative 鍵**）；
+  (2) 成對豁免（_EXEMPT_PAIRS，附 (tier, reason)）；
+  (3) 單邊豁免（_SINGLE_SIDED_EXEMPT，附 (tier, reason)）。LATEST 下的納管
   登記一律用「LATEST/tools/…」相對 key（版本升版 copy-on-evolve 時登記不失效）。
   各清單另有 stale 反向檢查（防清單腐化），詳見 _check_pair_enrollment 區塊註解。
 
@@ -69,8 +69,9 @@ check_wrapper_thinness.py hash 釘選守門，gate 清單漂移面已物理消�
 / run_act 三對雙原生實作收斂為「Python 單核心（bootstrap_core.py /
 integration_gate_core.py / run_act_core.py）＋兩薄殼」，三對業務邏輯漂移面同樣
 物理消滅，改由 check_wrapper_thinness.py hash 釘選守門，_MARKER_PAIRS 標籤比對
-隨之退場——`_MARKER_PAIRS` 目前為空清單，保留作為未來若有新對「雙原生實作」腳本
-需要標籤比對納管時的既有機制，非死碼。）
+隨之退場。🔴 **R80 S5-05：_MARKER_PAIRS 已刪除**（原文寫它「保留作為未來機制、非
+死碼」，而它空了 60 餘輪、迴圈跑零次，卻被三個檔案寫成新腳本的第一條納管途徑）；
+標籤比對的實作（`_extract_markers`／`_compare`／`_check_extract_floor`）沒有刪。）
 
 覆蓋範圍與侷限（docstring 即契約）：
   - `[n/m]` 標籤先剝除註解行（.sh/.ps1 整行 `#` 註解 + .ps1 `<# … #>` 區塊），再以
@@ -98,7 +99,7 @@ R61 結束：兩對已改掛 `_THINNESS_ENROLLED`（hash 釘選，見 `check_wra
 hash 釘選、不選 `[n/m]` 標籤」這個判斷的史料依據（該判斷本身未變，只是治理類別從
 「豁免」升級為「釘選」）：
 
-已評估但暫緩納入 `_MARKER_PAIRS` 標籤比對的候選（R4 複審 QA P3）：
+已評估但暫緩納入標籤比對的候選（R4 複審 QA P3；該名冊已於 R80 S5-05 刪除，本段留為史料）：
 AutoClaude/tools/install_git_hooks.{sh,ps1}、AISDLC_SDD/scripts/install-hooks.{sh,ps1}
 四支腳本。評估結論：這四支腳本本質是「單一動作、無多階段」的線性流程（assert worktree
 → 取 hooks dir → 驗證存在 → git config → 驗證安裝結果），並非像 run_act 那樣有六個語意
@@ -107,7 +108,7 @@ AutoClaude/tools/install_git_hooks.{sh,ps1}、AISDLC_SDD/scripts/install-hooks.{
 呈現層（見 DEF-101-070/080/082），對這四支腳本加 `[n/m]` 標籤會是為了湊格式而做的
 形式主義。行為層已由 windows/macos-compat-ci.yml 的安裝/解除/worktree 拒絕三情境實測
 覆蓋（QA 判定風險低）。決策記事見缺陷帳本 DEF-101-088（closed-by-decision：不排入
-`_MARKER_PAIRS`；R61 起改掛 hash 釘選，見上）。
+標籤比對；R61 起改掛 hash 釘選，見上）。
 
 使用：
   python3 tools/check_script_parity.py   # 於 repo 內任意 cwd；不一致印 diff 並 exit 1
@@ -131,6 +132,7 @@ import _cli_flags  # noqa: E402  # 未知旗標 rc=2 fail-loud 的 SSOT（見該
 import _stdio_utf8  # noqa: E402,F401  # Windows 非 UTF-8 終端 print(✅/❌/⚠) 防崩潰保護
 import check_wrapper_thinness as _thinness  # noqa: E402  # 薄殼釘選唯一實作（本輪併表）
 from _script_scan_surface import SCRIPT_SCAN_ROOTS, iter_tree_scripts  # noqa: E402
+from lib import self_help_exec_parity as _self_help  # noqa: E402  # R80 S8-01 判準本體
 
 _REPO_ROOT = Path(__file__).resolve().parents[1]
 
@@ -673,7 +675,11 @@ _EQUIVALENCE_GROUPS: dict[str, tuple[str, str]] = {
 }
 
 
-_MARKER_PAIRS: list[tuple[str, str, str]] = []
+# 🔴 R80 S5-05（DEF-101-945）：成對「標籤錨點比對」的名冊已刪除（符號名刻意不再以反引號
+# 寫出——它已不存在，寫成 code span 就是幽靈引用）——空清單自 R16、比對迴圈跑
+# 零次，卻被三個檔案寫成新腳本的**第一條**納管途徑（＝錯誤指路，而閘門照樣全綠）。
+# 保留的是真正在跑的兩條（薄殼 hash 釘選／決策豁免）。逐項取證見
+# `docs/06_quality/CrossPlatform_R80_Subtraction_Evidence.md` S5-05 節。
 # R60 Scan-E E-A-01：掃描根不再由本檔自持名冊，一律取 SSOT
 # （`tools/_script_scan_surface.py`）——與 root-infra-ci.yml 第 2 道的 `-Recurse`
 # 掃描面同形狀（三棵樹、遞迴）。名稱保留 `_PAIR_SCAN_DIRS` 以免既有訊息／測試錨點
@@ -902,8 +908,7 @@ if _zombie_exempt:
 
 
 def _enrolled_pairs() -> set[str]:
-    parity = {sh_rel[: -len(".sh")] for _label, sh_rel, _ps1 in _MARKER_PAIRS}
-    return parity | _THINNESS_ENROLLED | set(_EXEMPT_PAIRS)
+    return _THINNESS_ENROLLED | set(_EXEMPT_PAIRS)
 
 
 def _registered_path(rel: str, latest_tools: Path | None) -> Path | None:
@@ -968,8 +973,10 @@ def _check_pair_enrollment(latest_tools: Path | None = None) -> bool:
     for p in unknown:
         _fail(
             f"❌ 未註冊的成對腳本：{p}.sh / {p}.ps1 —— 新增成對腳本必須擇一納管："
-            f"(1) 有標籤錨點 → 加入 _MARKER_PAIRS；(2) 薄殼 → 掛 check_wrapper_thinness "
-            f"hash 釘選；(3) 決策豁免 → 加入 _EXEMPT_PAIRS 並附缺陷帳本依據")
+            f"(1) 薄殼（業務邏輯下沉 Python 單核心）→ 掛 check_wrapper_thinness hash "
+            f"釘選；(2) 決策豁免 → 加入 _EXEMPT_PAIRS 並附缺陷帳本依據。"
+            f"🔴 R80 S5-05：此處原本把「加入 _MARKER_PAIRS 標籤錨點比對」列為第一條，"
+            f"而那個機制自 R16 起就是空清單、比對迴圈跑零次 ⇒ 照著填不會有任何東西在讀")
         ok = False
     for p in stale:
         _fail(
@@ -1563,17 +1570,8 @@ def _print_collapse() -> int:
 def main() -> int:
     ok = True
 
-    for label, sh_rel, ps1_rel in _MARKER_PAIRS:
-        sh_items = _extract_markers(_REPO_ROOT / sh_rel)
-        ps1_items = _extract_markers(_REPO_ROOT / ps1_rel)
-        if not sh_items or not ps1_items:
-            _fail(f"❌ {label}：抽取到空標籤清單（.sh {len(sh_items)} / .ps1 "
-                  f"{len(ps1_items)}）— 宣告 pattern 可能已改，請同步本腳本")
-            ok = False
-            continue
-        ok = _check_extract_floor(label, sh_items, ps1_items) and ok
-        ok = _compare(label, sh_items, ps1_items) and ok
-
+    # 🔴 R80 S5-05：此處原有一個 `for … in _MARKER_PAIRS` 迴圈（清單自 R16 為空 ⇒ 跑零次）。
+    # `_extract_markers`／`_check_extract_floor`／`_compare` 不隨之退場：仍是 run_tlc 鎖的實作。
     # local_ci_gate 的 gate-call 抽取比對已於 R12 退場（薄殼化收斂，見檔頭）——
     # 該對現由 _THINNESS_ENROLLED 登記、check_wrapper_thinness.py hash 釘選守門。
 
@@ -1591,6 +1589,7 @@ def main() -> int:
 
     ok = _check_pytest_pin() and ok
     ok = _check_git_longpaths_flag_parity() and ok
+    ok = _self_help.check(_REPO_ROOT, _find_latest_sdd_version, _fail) and ok
     ok = _check_thinness_cross_lock() and ok
     ok = _check_pair_enrollment(latest_tools) and ok
     ok = _check_tier_classification() and ok
@@ -1600,11 +1599,11 @@ def main() -> int:
     if not ok:
         _fail("\n❌ 雙平台腳本對等檢查未通過 — .sh/.ps1 必須同步修改（見上列 diff）")
         return 1
-    print(f"\n✅ 雙平台腳本對等檢查通過（{len(_MARKER_PAIRS)} 對標籤腳本 + "
+    print("\n✅ 雙平台腳本對等檢查通過（"
           "LATEST run_tlc 委派引數鎖 + "
           "LATEST 薄殼釘選（委派 check_wrapper_thinness）+ 薄殼交叉鎖 + "
           "run_self_evolution 退出碼契約三方鎖 + "
-          "pytest 釘選 + git longpaths 旗標內容鎖 + "
+          "pytest 釘選 + git longpaths 旗標內容鎖 + 自述用法↔exec bit 鎖 + "
           "成對/單邊註冊完整性；薄殼對子另由 check_wrapper_thinness 釘選）")
     return 0
 

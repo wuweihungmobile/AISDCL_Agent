@@ -230,7 +230,7 @@ class TestRunActShellFlagParity(unittest.TestCase):
       · `check_wrapper_thinness` 是**逐檔** hash 釘選 —— 它問「這份檔案有沒有變」，
         兩側各自更新各自的 pin 就都是綠的，它從不把兩側拿來互相比較；
       · `check_script_parity` 對 hash 釘選類的對子只做「有沒有納管」與鍵集合交叉鎖，
-        `_MARKER_PAIRS`（唯一會比對兩側內容的機制）對這一對是空的。
+        _MARKER_PAIRS（唯一會比對兩側內容的機制）對這一對是空的。
     ⇒ 專門守對等的鎖看不見對等落差。只補旗標而不補判準，同型缺陷會再來一次。
 
     判準刻意**由核心的 argparse 現查**（`parse_args([])` 的 Namespace 欄位），不是在這裡

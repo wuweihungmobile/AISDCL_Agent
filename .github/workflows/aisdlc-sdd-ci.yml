@@ -64,6 +64,11 @@ on:
       # 該鎖必須跟著跑，否則 DEF-101-042 同構假綠。由
       # test_ci_paths_cover_root_consumers.py 當場攔下並要求補列。
       - "AutoClaude/autoclaude/utils/logger.py"
+      # R80 收尾：scripts/tests/test_hook_wiring_cwd_safety.py 與
+      # test_pretooluse_matcher_task.py 跨樹 import 本檔（hook wiring 解析 SSOT）並對它
+      # 做行為斷言 ⇒ 只改本檔時該兩支鎖必須跟著跑，否則 DEF-101-042 同構假綠。
+      # 由 test_ci_paths_cover_root_consumers.py 當場攔下並要求補列。
+      - "tools/lib/hook_wiring.py"
   pull_request:
     paths:
       - "AISDLC_SDD/**"
@@ -81,6 +86,11 @@ on:
       # 該鎖必須跟著跑，否則 DEF-101-042 同構假綠。由
       # test_ci_paths_cover_root_consumers.py 當場攔下並要求補列。
       - "AutoClaude/autoclaude/utils/logger.py"
+      # R80 收尾：scripts/tests/test_hook_wiring_cwd_safety.py 與
+      # test_pretooluse_matcher_task.py 跨樹 import 本檔（hook wiring 解析 SSOT）並對它
+      # 做行為斷言 ⇒ 只改本檔時該兩支鎖必須跟著跑，否則 DEF-101-042 同構假綠。
+      # 由 test_ci_paths_cover_root_consumers.py 當場攔下並要求補列。
+      - "tools/lib/hook_wiring.py"
   workflow_dispatch:
 
 # 🔴 group 必須含 `github.event_name`（本輪 R77-55）：本 workflow 由 push(main)＋

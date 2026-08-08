@@ -683,6 +683,29 @@ class TestWslStubIsNeverAcceptedAsRealBash(unittest.TestCase):
             f"（DEF-101-753；stub={stub}）",
         )
 
+    def test_substring_system32_is_not_a_segment_and_must_be_accepted(self) -> None:
+        """反向：路徑**含** `system32` 子字串但不是完整路徑段者不得被誤排除。
+
+        🔴 R80 S5-03 承接：這一案原本只存在於 `test_pre_push_dispatcher.py` 與
+        `test_git_hooks_install_common.py` 兩份 AST 逐字相同的 `_usable_bash()` 複本各自
+        帶的 mock 版斷言裡（`C:\\MySystem32Tools\\bash.exe`）。那兩份連同其鎖一併收斂後，
+        `usable_bash_for_fixture()` 這個 SSOT 在**接受**方向就只剩 `harmless_dir` 一個樣本
+        ——擋得住「整段排除退化成 `"system32" in path.lower()`」的判準會一起消失，
+        DEF-101-236 的修復可被悄悄撤回。本案以**活 stub**（會通過驗活）重建它，
+        比原先的 mock 版更硬：mock 版只證明「比對邏輯這樣寫」，本案證明「真的解析得到」。
+
+        鑑別力（缺陷注入實測）：把 `bash_probe_spec.SYSTEM32_SEGMENT` 的消費端改回
+        任意子字串命中即排除，本案即紅、`test_system32_stub_is_rejected` 仍綠
+        ——兩案方向相反，缺任一邊都留一個可退化的方向。
+        """
+        stub = self._make_stub("MySystem32Tools")
+        resolved = self._resolve_with_only(stub)
+        self.assertEqual(
+            os.path.normcase(resolved or "<未解析到任何 bash>"), os.path.normcase(str(stub)),
+            "路徑含 'system32' **子字串**但非完整路徑段的合法候選被誤排除——"
+            f"整段比對退化回舊版寬鬆判斷（DEF-101-236；stub={stub}）",
+        )
+
 
 class TestStubFormIsLaunchableOnItsOwnPlatform(unittest.TestCase):
     """meta 鎖：`_STUB_FORMS` 每一種形態都必須真的被**該平台**的行程建立語意啟動。

@@ -1,6 +1,6 @@
 {
   "$schema": "https://json.schemastore.org/claude-code-settings.json",
-  "description": "monorepo 整合層 — 守衛式 SDD hook 橋接（AutoSDD_improving）。以 SDD_ACTIVE_VERSION 為守衛路由到 AISDLC_SDD/AISDLC_SDD_v0.0X 的實體 hooks；未設則 no-op，純 AutoClaude session 零污染。詳見 .claude/hooks/sdd_hook_router.py。hook command 以 python -c shim 錨定專案根：python 自行讀 CLAUDE_PROJECT_DIR 環境變數（CC 注入、不經 shell 變數展開，Windows cmd 亦可用），未設時回退 cwd；目標腳本缺檔＝fail-open exit 0（靜默失效）——修復「cwd≠專案根時 python 缺檔 exit 2 誤觸 PreToolUse deny、全工具硬鎖死」P0（四方複審第四輪；舊版勿用 ${VAR} 之限制不再適用，因變數由 python 讀非 shell 展開）。env.PYTHONUTF8=1 為 zh-TW Windows（cp950）防禦縱深：強制 hook 子行程 stdin/stdout/stderr 一律 UTF-8，跨平台無副作用。",
+  "description": "monorepo 整合層 — 守衛式 SDD hook 橋接（AutoSDD_improving）。以 SDD_ACTIVE_VERSION 為守衛路由到 AISDLC_SDD/AISDLC_SDD_v0.0X 的實體 hooks；未設則 no-op，純 AutoClaude session 零污染。詳見 .claude/hooks/sdd_hook_router.py。🔴 R80：hook 條目已全面由 shell form 轉成 **exec form**（帶 `args`），10 條 → 20 條。病：Windows 上 shell form 是用 Git Bash 的 `bash.exe -c` 起的，而 `bash.exe` 是 console 子系統程式 ⇒ 每觸發一次 hook 就閃一個 console 視窗（實測一個量測視窗內 39 支 bash.exe、22 支自帶 conhost）。exec form 不經 shell、直接 spawn，`command` 指向 GUI 子系統的 pythonw.exe 即零視窗（實測 conhost 0）。每個邏輯 hook 兩條＝「Windows 載具 + POSIX 載具」，**各平台恰好一條成立、另一條 spawn 失敗**（Windows 上 .py 直接 spawn 回 EFTYPE、POSIX 上 .venv/Scripts/pythonw.exe 回 ENOENT），而 CC 對 spawn 失敗是 **fail-open**（只記一行 ERROR、工具照跑）⇒ 兩條**不會**雙跑（production 實測：PreToolUse 對 Bash 命中兩個 block、EFTYPE 2 次，而 `Hook denied tool use for Bash` 只有 1 次）。這也是本形態最大的風險：載具解析不到時六支守衛會**全部靜默失效，而表徵與『修好了』完全相同**，故驗收必須正負兩面一起看（見根 CLAUDE.md〈鐵律一之二〉）。舊 shim 的十份複本已收進 `.claude/hooks/_hook_launcher.py` 一個家（exec form 的 command 塞不進 -c 程式碼）；錨定與 fail-open 語意逐項不變：啟動器自行讀 CLAUDE_PROJECT_DIR（CC 注入、不經 shell 展開；實測 command 與 args 元素裡的 ${CLAUDE_PROJECT_DIR} 都會被展開），未設時回退 cwd；目標腳本缺檔＝fail-open exit 0——修復「cwd≠專案根時 python 缺檔 exit 2 誤觸 PreToolUse deny、全工具硬鎖死」P0（四方複審第四輪）。解析這份檔的唯一真相源＝`tools/lib/hook_wiring.py`（**只讀 command 找腳本名的解析器在 exec form 下會全部掃出空集合而恆綠**，repo 內原有 8 支已全部改為問它）。env.PYTHONUTF8=1 為 zh-TW Windows（cp950）防禦縱深：強制 hook 子行程 stdin/stdout/stderr 一律 UTF-8，跨平台無副作用。",
   "env": {
     "PYTHONUTF8": "1"
   },
@@ -10,7 +10,21 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python -c \"import os,sys,runpy; r=os.environ.get('CLAUDE_PROJECT_DIR') or os.getcwd(); p=os.path.join(r,*sys.argv[1].split('/')); os.path.isfile(p) or sys.exit(0); os.chdir(r); sys.argv=[p]+sys.argv[2:]; runpy.run_path(p,run_name='__main__')\" .claude/hooks/sdd_hook_router.py session_start",
+            "command": "${CLAUDE_PROJECT_DIR}/.venv/Scripts/pythonw.exe",
+            "args": [
+              "${CLAUDE_PROJECT_DIR}/.claude/hooks/_hook_launcher.py",
+              ".claude/hooks/sdd_hook_router.py",
+              "session_start"
+            ],
+            "timeout": 30
+          },
+          {
+            "type": "command",
+            "command": "${CLAUDE_PROJECT_DIR}/.claude/hooks/_hook_launcher.py",
+            "args": [
+              ".claude/hooks/sdd_hook_router.py",
+              "session_start"
+            ],
             "timeout": 30
           }
         ]
@@ -20,7 +34,19 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python -c \"import os,sys,runpy; r=os.environ.get('CLAUDE_PROJECT_DIR') or os.getcwd(); p=os.path.join(r,*sys.argv[1].split('/')); os.path.isfile(p) or sys.exit(0); os.chdir(r); sys.argv=[p]+sys.argv[2:]; runpy.run_path(p,run_name='__main__')\" .claude/hooks/context_budget_guard.py",
+            "command": "${CLAUDE_PROJECT_DIR}/.venv/Scripts/pythonw.exe",
+            "args": [
+              "${CLAUDE_PROJECT_DIR}/.claude/hooks/_hook_launcher.py",
+              ".claude/hooks/context_budget_guard.py"
+            ],
+            "timeout": 10
+          },
+          {
+            "type": "command",
+            "command": "${CLAUDE_PROJECT_DIR}/.claude/hooks/_hook_launcher.py",
+            "args": [
+              ".claude/hooks/context_budget_guard.py"
+            ],
             "timeout": 10
           }
         ]
@@ -32,7 +58,21 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python -c \"import os,sys,runpy; r=os.environ.get('CLAUDE_PROJECT_DIR') or os.getcwd(); p=os.path.join(r,*sys.argv[1].split('/')); os.path.isfile(p) or sys.exit(0); os.chdir(r); sys.argv=[p]+sys.argv[2:]; runpy.run_path(p,run_name='__main__')\" .claude/hooks/sdd_hook_router.py context_ledger_pre",
+            "command": "${CLAUDE_PROJECT_DIR}/.venv/Scripts/pythonw.exe",
+            "args": [
+              "${CLAUDE_PROJECT_DIR}/.claude/hooks/_hook_launcher.py",
+              ".claude/hooks/sdd_hook_router.py",
+              "context_ledger_pre"
+            ],
+            "timeout": 10
+          },
+          {
+            "type": "command",
+            "command": "${CLAUDE_PROJECT_DIR}/.claude/hooks/_hook_launcher.py",
+            "args": [
+              ".claude/hooks/sdd_hook_router.py",
+              "context_ledger_pre"
+            ],
             "timeout": 10
           }
         ]
@@ -43,7 +83,19 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python -c \"import os,sys,runpy; r=os.environ.get('CLAUDE_PROJECT_DIR') or os.getcwd(); p=os.path.join(r,*sys.argv[1].split('/')); os.path.isfile(p) or sys.exit(0); os.chdir(r); sys.argv=[p]+sys.argv[2:]; runpy.run_path(p,run_name='__main__')\" .claude/hooks/lint_powershell_command.py",
+            "command": "${CLAUDE_PROJECT_DIR}/.venv/Scripts/pythonw.exe",
+            "args": [
+              "${CLAUDE_PROJECT_DIR}/.claude/hooks/_hook_launcher.py",
+              ".claude/hooks/lint_powershell_command.py"
+            ],
+            "timeout": 10
+          },
+          {
+            "type": "command",
+            "command": "${CLAUDE_PROJECT_DIR}/.claude/hooks/_hook_launcher.py",
+            "args": [
+              ".claude/hooks/lint_powershell_command.py"
+            ],
             "timeout": 10
           }
         ]
@@ -54,18 +106,42 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python -c \"import os,sys,runpy; r=os.environ.get('CLAUDE_PROJECT_DIR') or os.getcwd(); p=os.path.join(r,*sys.argv[1].split('/')); os.path.isfile(p) or sys.exit(0); os.chdir(r); sys.argv=[p]+sys.argv[2:]; runpy.run_path(p,run_name='__main__')\" .claude/hooks/block_bash_on_windows.py",
+            "command": "${CLAUDE_PROJECT_DIR}/.venv/Scripts/pythonw.exe",
+            "args": [
+              "${CLAUDE_PROJECT_DIR}/.claude/hooks/_hook_launcher.py",
+              ".claude/hooks/block_bash_on_windows.py"
+            ],
+            "timeout": 10
+          },
+          {
+            "type": "command",
+            "command": "${CLAUDE_PROJECT_DIR}/.claude/hooks/_hook_launcher.py",
+            "args": [
+              ".claude/hooks/block_bash_on_windows.py"
+            ],
             "timeout": 10
           }
         ]
       },
       {
-        "_comment": "R79：context 水位 ≥90% 時**真的擋下展開型工具**（掌舵者第 2 點『不要爆』的機械化第二段；同一支腳本的 PostToolUse 條目只出聲不擋，兩者由 payload 的 hook_event_name 分派）。立案理由是本 repo 的實證：『純文件約束對當下的模型零攔阻力』——R78 版的鏈條是「hook 印一段話 → 模型自己記得去 /compact」，而 block_bash_on_windows.py 的立案正是同一形態失敗過兩次。四道放行條件（缺一才會真的擋，逐條在 tools/tests/test_context_budget_guard.py::PreToolUseBlockTest 有成對注入）：①環境變數 AUTOSDD_CONTEXT_GUARD_OFF 有設一律放行（給人的逃生口，模型改不到 hook 行程的環境；對 settings.json description 記載的那個 P0 的第二道保險）；②水位未達 90% 放行；③**window 來源是保守下界猜測時一律放行**——分母是猜的就不准硬擋，否則 1M session 會在真實 18% 被鎖死，那正是本輪要修的缺陷換個方向再犯；④tool_name 不在腳本自己的 BLOCKING_TOOLS 內放行（matcher 被改寬時的第二道限縮，同 block_bash_on_windows.py 的形態）。matcher 刻意只圈 Task|WebFetch|WebSearch＝『展開型』：根 CLAUDE.md 那句是『此後只做收斂，不做展開』，而收斂本身需要 Read／Edit／PowerShell（讀檔、寫任務書、跑 git）——擋到讓人無法收斂的守衛會被整個關掉，比沒有守衛更糟。阻斷**不進閂鎖**（擋一次就放行的東西不是阻斷），且 /compact 之後 used 會真的掉下來 ⇒ 自動解除，不需要任何人去關它。退化 payload 走 rc=1（出聲但不阻斷），符合 tools/tests/test_check_hooks_liveness.py::degraded_payload_verdict 的『不得靜默放行、硬擋才要配窄 matcher』；任何非預期例外一律 exit 0（fail-open）。timeout 取 10（本模式不產任務書、不起子行程，實測遠低於此）。",
-        "matcher": "Task|WebFetch|WebSearch",
+        "_comment": "R79：context 水位 ≥90% 時**真的擋下展開型工具**（掌舵者第 2 點『不要爆』的機械化第二段；同一支腳本的 PostToolUse 條目只出聲不擋，兩者由 payload 的 hook_event_name 分派）。立案理由是本 repo 的實證：『純文件約束對當下的模型零攔阻力』——R78 版的鏈條是「hook 印一段話 → 模型自己記得去 /compact」，而 block_bash_on_windows.py 的立案正是同一形態失敗過兩次。四道放行條件（缺一才會真的擋，逐條在 tools/tests/test_context_budget_guard.py::PreToolUseBlockTest 有成對注入）：①環境變數 AUTOSDD_CONTEXT_GUARD_OFF 有設一律放行（給人的逃生口，模型改不到 hook 行程的環境；對 settings.json description 記載的那個 P0 的第二道保險）；②水位未達 90% 放行；③**window 來源是保守下界猜測時一律放行**——分母是猜的就不准硬擋，否則 1M session 會在真實 18% 被鎖死，那正是本輪要修的缺陷換個方向再犯；④tool_name 不在腳本自己的 BLOCKING_TOOLS 內放行（matcher 被改寬時的第二道限縮，同 block_bash_on_windows.py 的形態）。🔴 R80：matcher 補上 Agent|Workflow。立案是掃描 S7-02 的實測——原本圈的 Task|WebFetch|WebSearch 這三個名字在本 harness 的 8,106 次 tool_use 裡出現 **0 次**（本 harness 派子代理叫 Agent、批次編排叫 Workflow）⇒ 阻斷臂蓋好了卻永遠不會被觸發，而 R79 為它建的那道鎖只把 matcher 與腳本射程釘成『相等』，保證的是『兩個都寫錯時也一致』＝鑑別力方向錯了。三個舊名保留不刪（那是 Claude Code 上游的標準工具名，換一個 harness 就會回來）。有效性判準見 context_budget_guard.blocking_reach_problems：BLOCKING_TOOLS 必須與實測逐字稿的 tool_use 名稱集合有非空交集，圈一組永遠不出現的名字當場轉紅。matcher 圈的一律是『展開型』：根 CLAUDE.md 那句是『此後只做收斂，不做展開』，而收斂本身需要 Read／Edit／PowerShell（讀檔、寫任務書、跑 git）——擋到讓人無法收斂的守衛會被整個關掉，比沒有守衛更糟。阻斷**不進閂鎖**（擋一次就放行的東西不是阻斷），且 /compact 之後 used 會真的掉下來 ⇒ 自動解除，不需要任何人去關它。退化 payload 走 rc=1（出聲但不阻斷），符合 tools/tests/test_check_hooks_liveness.py::degraded_payload_verdict 的『不得靜默放行、硬擋才要配窄 matcher』；任何非預期例外一律 exit 0（fail-open）。timeout 取 10（本模式不產任務書、不起子行程，實測遠低於此）。",
+        "matcher": "Task|WebFetch|WebSearch|Agent|Workflow",
         "hooks": [
           {
             "type": "command",
-            "command": "python -c \"import os,sys,runpy; r=os.environ.get('CLAUDE_PROJECT_DIR') or os.getcwd(); p=os.path.join(r,*sys.argv[1].split('/')); os.path.isfile(p) or sys.exit(0); os.chdir(r); sys.argv=[p]+sys.argv[2:]; runpy.run_path(p,run_name='__main__')\" .claude/hooks/context_budget_guard.py",
+            "command": "${CLAUDE_PROJECT_DIR}/.venv/Scripts/pythonw.exe",
+            "args": [
+              "${CLAUDE_PROJECT_DIR}/.claude/hooks/_hook_launcher.py",
+              ".claude/hooks/context_budget_guard.py"
+            ],
+            "timeout": 10
+          },
+          {
+            "type": "command",
+            "command": "${CLAUDE_PROJECT_DIR}/.claude/hooks/_hook_launcher.py",
+            "args": [
+              ".claude/hooks/context_budget_guard.py"
+            ],
             "timeout": 10
           }
         ]
@@ -77,7 +153,21 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python -c \"import os,sys,runpy; r=os.environ.get('CLAUDE_PROJECT_DIR') or os.getcwd(); p=os.path.join(r,*sys.argv[1].split('/')); os.path.isfile(p) or sys.exit(0); os.chdir(r); sys.argv=[p]+sys.argv[2:]; runpy.run_path(p,run_name='__main__')\" .claude/hooks/sdd_hook_router.py context_ledger_post",
+            "command": "${CLAUDE_PROJECT_DIR}/.venv/Scripts/pythonw.exe",
+            "args": [
+              "${CLAUDE_PROJECT_DIR}/.claude/hooks/_hook_launcher.py",
+              ".claude/hooks/sdd_hook_router.py",
+              "context_ledger_post"
+            ],
+            "timeout": 10
+          },
+          {
+            "type": "command",
+            "command": "${CLAUDE_PROJECT_DIR}/.claude/hooks/_hook_launcher.py",
+            "args": [
+              ".claude/hooks/sdd_hook_router.py",
+              "context_ledger_post"
+            ],
             "timeout": 10
           }
         ]
@@ -88,12 +178,36 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python -c \"import os,sys,runpy; r=os.environ.get('CLAUDE_PROJECT_DIR') or os.getcwd(); p=os.path.join(r,*sys.argv[1].split('/')); os.path.isfile(p) or sys.exit(0); os.chdir(r); sys.argv=[p]+sys.argv[2:]; runpy.run_path(p,run_name='__main__')\" AutoClaude/tools/hooks/check_ps1_encoding.py",
+            "command": "${CLAUDE_PROJECT_DIR}/.venv/Scripts/pythonw.exe",
+            "args": [
+              "${CLAUDE_PROJECT_DIR}/.claude/hooks/_hook_launcher.py",
+              "AutoClaude/tools/hooks/check_ps1_encoding.py"
+            ],
             "timeout": 10
           },
           {
             "type": "command",
-            "command": "python -c \"import os,sys,runpy; r=os.environ.get('CLAUDE_PROJECT_DIR') or os.getcwd(); p=os.path.join(r,*sys.argv[1].split('/')); os.path.isfile(p) or sys.exit(0); os.chdir(r); sys.argv=[p]+sys.argv[2:]; runpy.run_path(p,run_name='__main__')\" AutoClaude/tools/hooks/check_sh_eol.py",
+            "command": "${CLAUDE_PROJECT_DIR}/.claude/hooks/_hook_launcher.py",
+            "args": [
+              "AutoClaude/tools/hooks/check_ps1_encoding.py"
+            ],
+            "timeout": 10
+          },
+          {
+            "type": "command",
+            "command": "${CLAUDE_PROJECT_DIR}/.venv/Scripts/pythonw.exe",
+            "args": [
+              "${CLAUDE_PROJECT_DIR}/.claude/hooks/_hook_launcher.py",
+              "AutoClaude/tools/hooks/check_sh_eol.py"
+            ],
+            "timeout": 10
+          },
+          {
+            "type": "command",
+            "command": "${CLAUDE_PROJECT_DIR}/.claude/hooks/_hook_launcher.py",
+            "args": [
+              "AutoClaude/tools/hooks/check_sh_eol.py"
+            ],
             "timeout": 10
           }
         ]
@@ -104,7 +218,19 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python -c \"import os,sys,runpy; r=os.environ.get('CLAUDE_PROJECT_DIR') or os.getcwd(); p=os.path.join(r,*sys.argv[1].split('/')); os.path.isfile(p) or sys.exit(0); os.chdir(r); sys.argv=[p]+sys.argv[2:]; runpy.run_path(p,run_name='__main__')\" .claude/hooks/context_budget_guard.py",
+            "command": "${CLAUDE_PROJECT_DIR}/.venv/Scripts/pythonw.exe",
+            "args": [
+              "${CLAUDE_PROJECT_DIR}/.claude/hooks/_hook_launcher.py",
+              ".claude/hooks/context_budget_guard.py"
+            ],
+            "timeout": 30
+          },
+          {
+            "type": "command",
+            "command": "${CLAUDE_PROJECT_DIR}/.claude/hooks/_hook_launcher.py",
+            "args": [
+              ".claude/hooks/context_budget_guard.py"
+            ],
             "timeout": 30
           }
         ]

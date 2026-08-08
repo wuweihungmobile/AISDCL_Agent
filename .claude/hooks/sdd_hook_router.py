@@ -225,6 +225,16 @@ def main(argv: list[str]) -> int:
             env=child_env,
             cwd=str(REPO_ROOT),
             timeout=_CHILD_TIMEOUT.get(event_name, 8.0),  # DEF-43-005：child 硬上限，逾時 kill+放行
+            # 🔴 R80：本 router 由 Claude Code 起，那個父行程**沒有 console**，而 child 是
+            # console 子系統的 python.exe ⇒ 不帶這個旗標時每一次 SDD hook 轉交都會替使用者
+            # 開一個視窗。旗標語意與實測表見 `.claude/hooks/context_budget_guard.py` 的
+            # `NO_WINDOW`；此處**刻意內聯**而不 import 那支——本檔同受零相依契約（hook 由
+            # `runpy.run_path` 起，`.claude/hooks/` 不在 `sys.path` 上）。內聯的是一個 stdlib
+            # 常數名、不是判準；「hook 不得彈視窗」這條判準的唯一家是
+            # `tools/tests/test_context_budget_guard.py::ConsoleFreeSpawnTest`，它掃本目錄
+            # 每一個 spawn 站點，所以漏掉任何一站都會紅，不靠人記得。
+            # POSIX 上 `getattr` 取 0 ＝不加旗標（鐵律三）。
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
         )
     except subprocess.TimeoutExpired:
         # 實體 hook 卡住：subprocess.run 已 kill 並 wait child（不留孤兒），router 放行不擋。

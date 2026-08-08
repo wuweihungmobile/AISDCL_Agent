@@ -99,13 +99,25 @@ def test_goal_freeze_gate_rejects_each_deny_char(bad_char):
     R56 QA 發現：收斂前後都只有字元集比對，若哪天 `_DENY` 的消費點（evaluate()
     內的 tainted 掃描）被拿掉或條件寫反，字元集測試仍會全綠。本測試逐一餵入每個
     黑名單字元，斷言一律 fail-closed 拒絕自動 signoff。
+
+    🔴 DEF-101-470：本測試原本只餵**一筆** prompt，於是把 `goal_freeze_gate.py` 的
+    `for i, prompt in enumerate(prompts)` 改成 `enumerate(prompts[:1])` 仍全綠——
+    而 gate 的意義正是對「多步驟拆解」**逐步**掃描，只掃第 0 筆等於步驟 1~11 的
+    注入字元一律自動放行。改成髒字元放在**第二筆**，並斷言 reason 逐字指名
+    `步驟 1`（`enumerate` 為 0-based ⇒ 第二筆＝索引 1），讓上述退化當場轉紅。
     """
     gate = BoundedGoalFreezeGate()
     verdict = gate.evaluate(
-        goal_hash="h1", step_count=1, prompts=(f"build the thing {bad_char} now",)
+        goal_hash="h1",
+        step_count=2,
+        prompts=("clean step", f"build the thing {bad_char} now"),
     )
     assert verdict.auto_approved is False, f"含注入嫌疑字元 {bad_char!r} 不應自動放行"
     assert "注入嫌疑字元" in verdict.reason
+    assert "步驟 1" in verdict.reason, (
+        f"gate 必須指名是**第二筆** prompt 觸發（reason={verdict.reason!r}）——"
+        "只掃第 0 筆的退化就是 DEF-101-470 的形狀"
+    )
 
 
 def test_goal_freeze_gate_approves_clean_prompt():

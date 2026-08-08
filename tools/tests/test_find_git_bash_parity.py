@@ -55,17 +55,20 @@ _PS1_PATH = _REPO_ROOT / "tools" / "lib" / "Find-GitBash.ps1"
 _PY_PATH = _REPO_ROOT / "tools" / "integration_gate_core.py"
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from _platform_helpers import cut_ps_inline_comment, strip_ps_comments  # noqa: E402
+from _platform_helpers import (  # noqa: E402
+    cut_ps_inline_comment,
+    strip_ps_comments,
+    usable_bash_for_fixture,
+)
 from _ps_engine import any_engine_available, production_engine  # noqa: E402
-
-# bash 驗活探測：刻意 import test_pre_push_dispatcher 既有的 `_usable_bash()`，不在本檔
-# 再寫一份副本——該函式 docstring 已載明它是 AISDLC_SDD/scripts/bash_probe.py 的鏡射，
-# 再抄一份就是把同一個盲點多抄一遍（R57 Scan-E 判例）。
-from test_pre_push_dispatcher import _usable_bash  # noqa: E402
 
 import integration_gate_core  # noqa: E402
 
-_BASH = _usable_bash()
+# bash 驗活探測：走 `_platform_helpers` 的 SSOT，不在本檔再寫一份副本——再抄一份就是把
+# 同一個盲點多抄一遍（R57 Scan-E 判例）。🔴 R80 S5-03：此處原本 `from
+# test_pre_push_dispatcher import _usable_bash`，那既是複本鏈的第 4 個消費點，也讓本檔
+# 每次 collect 都連帶 import 另一支鎖檔（其 module 層還會真的去探測一次 bash）。
+_BASH = usable_bash_for_fixture()
 
 _TESTS_DIR = Path(__file__).resolve().parent
 # PowerShell 註解剝除的 SSOT 模組與符號（呼叫端鎖 `TestPsCommentStripperSsotCallsiteLock`

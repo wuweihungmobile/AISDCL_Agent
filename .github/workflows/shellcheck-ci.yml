@@ -1,0 +1,71 @@
+# shellcheck 閘門（R80 包 F／S8-02）——POSIX 側靜態分析的**第一個**執行者。
+#
+# 🔴 為何需要這支 workflow（缺陷本體，不是預防性建設）：
+#   落地前實測：全庫 19 支腳本裡散著 23 處 `# shellcheck disable=` 指令——作者們
+#   **相信 shellcheck 在跑**並為它寫了豁免——而 `.github/` 對 `shellcheck` 這個字的
+#   命中數是 **0**。它從來沒有被執行過一次，那些 disable 全是裝飾品。同型形態本 repo
+#   已判過多次：「政策有宣告、卻沒有任何機械物在執行它」。
+#
+# 🔴 接電當回合就抓到真缺陷（這才是它值得存在的證據）：
+#   `AutoClaude/tools/run_mutmut_in_docker.sh` 的 `RESULTS_RC=$?` 被 **SC2320** 逐字
+#   指出「This $? refers to echo/printf, not a previous command」⇒ 那個 rc 恆為 0，
+#   `mutmut results` 真的失敗時完全不會反映到 log 的 `log written exit=` 那行。
+#   PowerShell 側的同型缺陷（讀 rc 前接管線）早有 PreToolUse hook 硬擋，POSIX 側零守門。
+#
+# 為何**不**併進 root-infra-ci.yml 的 root-infra job（誠實劃界，非疏忽）：
+#   那支 job 受 `tools/tests/test_root_infra_parity.py` 的雙向鎖管——凡在該 workflow 內
+#   以 `python3 tools/*.py` 形態出現的守門，都必須同時接進 `tools/git-hooks/pre-push`
+#   的**快層**守門迴圈（任何 push 皆跑）。而本閘門的載具是 shellcheck 或 docker，
+#   把它放進每一次 push 的必經路徑，等於讓沒有這兩者的機器一律 push 不了。
+#   ⇒ 本輪的選擇是「先接電、先看得見」，本機接線列為交棒項（需與 pre-push 持有者
+#   一起決定是快層、慢層、還是 opt-in）。**這不是宣稱本地已有對等防線——本地沒有。**
+#
+# 誠實劃界（本檔的結論能推廣到哪）：
+#   shellcheck 是純靜態分析、與平台無關 ⇒ **在 ubuntu 綠 ⇒ 在 macOS 亦綠**（這一點與
+#   `bash -n`／執行期行為不同，後者的 Linux 結論不能外推到 mac）。但它看不到
+#   BSD vs GNU coreutils 的執行期差異（`sed -i ''`／`readlink -f`／`stat` 旗標…）——
+#   那一類的機械物是 `tools/tests/test_bash32_compat.py` 的 `_PATTERNS`，不是本檔。
+name: shellcheck-ci
+
+on:
+  push:
+    paths:
+      - '**/*.sh'
+      - 'tools/git-hooks/**'
+      - 'AutoClaude/tools/git-hooks/**'
+      - 'AISDLC_SDD/.githooks/**'
+      - 'tools/run_shellcheck.py'
+      - '.github/workflows/shellcheck-ci.yml'
+  pull_request:
+    paths:
+      - '**/*.sh'
+      - 'tools/git-hooks/**'
+      - 'AutoClaude/tools/git-hooks/**'
+      - 'AISDLC_SDD/.githooks/**'
+      - 'tools/run_shellcheck.py'
+      - '.github/workflows/shellcheck-ci.yml'
+  workflow_dispatch:
+
+concurrency:
+  group: shellcheck-ci-${{ github.ref }}-${{ github.event_name }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  shellcheck:
+    name: shellcheck (active shell scripts, two-way baseline ratchet)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v5
+
+      # 把載具與版本留在 log 上供事後對帳。ubuntu-latest 映像內建 shellcheck；
+      # 萬一哪天不再內建，下一步的工具會自己改走 docker，故這一行不得讓 step 提前失敗
+      # （真正的判決在下一步，而它**找不到任何載具時回 rc=2**，不會靜默放行）。
+      - name: 載具版本（取證）
+        run: shellcheck --version || echo "PATH 上無 shellcheck ⇒ 工具會改走 docker"
+
+      - name: shellcheck 判決（基線雙向棘輪，見 tools/run_shellcheck.py 檔頭）
+        run: python3 tools/run_shellcheck.py

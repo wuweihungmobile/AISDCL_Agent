@@ -324,6 +324,17 @@ on:
       - "tools/lib/skip_static_scan.py"
       - "tools/lib/skip_source_io.py"
       - "tools/lib/skip_runtime_report.py"
+      # R80 收尾：本輪新增／新被消費的 tools/lib/ 共用層——由
+      # test_ci_paths_cover_root_consumers.py 當場攔下並要求三支 workflow 補列
+      # （DEF-101-042 同構；本輪落地時漏登記，收尾實跑 ci-gate 才顯形）。
+      # skip_group_policy.py 是 skip 分群天花板 SSOT（既有檔、本輪起被 tools/tests/ 消費）；
+      # 其餘四支為本輪新建：治理文件名冊／hook wiring 解析／rc-after-pipe 真值量測／
+      # self-help 執行對等性。
+      - "tools/lib/skip_group_policy.py"
+      - "tools/lib/governance_docs.py"
+      - "tools/lib/hook_wiring.py"
+      - "tools/lib/rc_after_pipe_real.py"
+      - "tools/lib/self_help_exec_parity.py"
       - "tools/_cli_flags.py"
       - "tools/check_scheduled_task_drift.py"
       - "tools/scheduled_task_expectations.json"
@@ -564,6 +575,17 @@ on:
       - "tools/lib/skip_static_scan.py"
       - "tools/lib/skip_source_io.py"
       - "tools/lib/skip_runtime_report.py"
+      # R80 收尾：本輪新增／新被消費的 tools/lib/ 共用層——由
+      # test_ci_paths_cover_root_consumers.py 當場攔下並要求三支 workflow 補列
+      # （DEF-101-042 同構；本輪落地時漏登記，收尾實跑 ci-gate 才顯形）。
+      # skip_group_policy.py 是 skip 分群天花板 SSOT（既有檔、本輪起被 tools/tests/ 消費）；
+      # 其餘四支為本輪新建：治理文件名冊／hook wiring 解析／rc-after-pipe 真值量測／
+      # self-help 執行對等性。
+      - "tools/lib/skip_group_policy.py"
+      - "tools/lib/governance_docs.py"
+      - "tools/lib/hook_wiring.py"
+      - "tools/lib/rc_after_pipe_real.py"
+      - "tools/lib/self_help_exec_parity.py"
       - "tools/_cli_flags.py"
       - "tools/check_scheduled_task_drift.py"
       - "tools/scheduled_task_expectations.json"
