@@ -14,6 +14,7 @@ from pathlib import Path
 from ...core.ports.state_repository import StateRepositoryError
 from ...utils.checkpoint_manager import PlaybookCheckpoint
 from ...utils.logger import _sanitize_log_filename
+from ...utils.resume_clock import seconds_until as resume_clock_seconds_until
 from ._deprecation import warn_load_checkpoint_deprecated
 
 logger = logging.getLogger("autoclaude.infra.file_state")
@@ -121,15 +122,11 @@ class FileStateRepository:
         self.save_checkpoint(playbook_id, cp)
         return resume_at
 
+    # R81（HLM-S1-02）：委派 SSOT。此處原本自帶一份只算得了 naive 的複本，
+    # 與 PgStateRepository 產出的 aware 字串相減會拋 TypeError。
     @staticmethod
     def seconds_until_resume(checkpoint: PlaybookCheckpoint) -> float:
-        if not checkpoint.scheduled_resume_at:
-            return 0.0
-        try:
-            resume_at = datetime.fromisoformat(checkpoint.scheduled_resume_at)
-            return max(0.0, (resume_at - datetime.now()).total_seconds())
-        except ValueError:
-            return 0.0
+        return resume_clock_seconds_until(checkpoint.scheduled_resume_at)
 
     def list_recent_checkpoints(
         self, since: datetime | None = None, limit: int = 50

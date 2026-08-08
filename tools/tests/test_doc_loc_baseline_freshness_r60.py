@@ -88,6 +88,7 @@ import sync_onboarding_baselines as SYNC  # noqa: E402
 from lib import baseline_origin as BO  # noqa: E402  # nightly 探針的解析契約（DEF-101-759）
 from lib import ci_liveness as _CI_LIVENESS  # noqa: E402  # job 層 fail-open 正則 SSOT
 from lib import defect_ledger_index as _LEDGER_INDEX  # noqa: E402  # 改派判定的生產 SSOT
+from lib import sdd_latest as _SDD_LATEST  # noqa: E402  # LATEST 版名解析 SSOT
 
 hook_command_scripts = _HYGIENE.hook_command_scripts
 
@@ -1233,7 +1234,10 @@ class TestFingerprintIsLineEndingAgnostic(unittest.TestCase):
         for name, rel, pat in SYNC._FINGERPRINT_TREES:
             root = SYNC._REPO_ROOT / rel
             digest_lf, digest_crlf = hashlib.sha256(), hashlib.sha256()
-            for path in sorted(root.glob(pat)):
+            # key= 對齊 `SYNC.tree_fingerprint`（R81 XPL-S1-06）：這一支兩側同序故
+            # 順序本來就抵銷，但判準不做「這裡剛好抵銷得掉」這種豁免——形態一致才不會
+            # 讓下一個複製這段的人繼承一個平台相依的排序。
+            for path in sorted(root.glob(pat), key=lambda p: p.relative_to(root).as_posix()):
                 if not path.is_file():
                     continue
                 key = path.relative_to(root).as_posix().encode("utf-8")
@@ -2833,14 +2837,21 @@ _IRON_LAW3_NO_MECHANISM = "無機械物"
 #: 以及兩個新登記且**當輪就有掃描器**的危害類中的 shebang×行尾；naive 本地時間戳那一列
 #: 同樣是新增即有掃描器 ⇒ 實際分子為 13，此處只釘到 12 是**刻意留一格**：並行工作包
 #: 若在本輪同時動到這張表，釘到剛好等於現值會讓兩邊互相判紅。地板是下界不是等號。
-_IRON_LAW3_COVERED_FLOOR = 12
+#: R81（包 G）：12 → 17。分子 +5＝git 路徑列舉的非 ASCII 引號化、BSD/GNU coreutils
+#: （`.sh` 那面本來就有掃描器，本輪補上 workflow inline `run:` 這第二個掃描面）、
+#: 單平台專屬 API 詞彙表（表驅動＋後設鎖）、排序鍵影響雜湊、文字模式檔案 I/O 編碼
+#: （最後一項是**訂正低報分子**：判準與逐檔棘輪早就在，R81 掃描路把它讀成「無人守」）。
+#: 實際分子為 18，仍照既有慣例留一格給並行包。
+_IRON_LAW3_COVERED_FLOOR = 17
 #: 分母＝**已登記**的危害類數，只准上升（刪列來讓數字好看即紅）。未覆蓋數＝分母−分子，
 #: 刻意**不設上限**——那正是舊判準把「還有幾類沒人守」與「我們知道有幾類危害」綁死的地方。
 #: R79：8 → 12（`.py` 行尾、exec bit、目錄項原語三類新登記；`.ps1` 行尾那一列原本就在表上）。
 #: R80（包 B）：12 → 14。分母 +3＝shebang×行尾、naive 本地時間戳被持久化、
 #: `shell=True` 原生殼差異（三類此前一格判準都沒有，前兩類本輪連同掃描器一起落地、
 #: 第三類誠實登記為無人守）。同上，釘到比現值低一格以容忍並行包同時擴表。
-_IRON_LAW3_KNOWN_FLOOR = 14
+#: R81（包 G）：14 → 19。分母 +5＝與上面同五列（五類此前一格都不在這張表上，
+#: 其中四類本輪連同掃描器一起落地、一類是訂正低報）。實際分母為 20，同樣留一格。
+_IRON_LAW3_KNOWN_FLOOR = 19
 
 
 def hook_scripts_named_in(text: str, repo_root: Path) -> dict[str, list[str]]:
@@ -3195,6 +3206,13 @@ _IRON_LAW3_TOPIC_KEYWORDS: dict[str, tuple[str, ...]] = {
     "$env:": ("$env:", "environment", "env:temp"),
     "shebang": ("shebang", "#!"),
     "時間戳": ("datetime", "isoformat", "astimezone"),
+    # R81（包 G）新增五列。同上：補了掃描器就要同步本表，否則新列在實質判準上零覆蓋
+    # ——而那正是 R75 立這道判準時要治的「檔案在、但守的是別的東西」。
+    "git 路徑列舉": ("quotepath", "ls-files"),
+    "coreutils": ("readlink -f", "date -d", "bsd", "gnu"),
+    "單平台專屬 API": ("preexec_fn", "creationflags", "ctypes", "sigalrm"),
+    "排序鍵": ("sorted", "as_posix"),
+    "文字模式檔案 I/O": ("read_text", "write_text", "encoding"),
 }
 
 
@@ -3989,6 +4007,374 @@ class TestR78GhostSymbolClaims(unittest.TestCase):
         problems = stale_ghost_baseline_problems(
             [], frozenset(), frozenset({"_NO_LONGER_REFERENCED_XYZ"}))
         self.assertTrue(any("沒有任何一處" in p for p in problems), problems)
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# R81：幽靈**路徑**宣稱——證據錨的第三面（CLAIM-FIRST 桶的第一個通用機械物）
+# ══════════════════════════════════════════════════════════════════════════════
+# 立案理由（量測值，不是印象）：`tools/probe/misstep_attribution.py` 現跑的桶分佈裡
+# 「宣稱先於查證」是**最大的具名桶**，而它今天一個機械物都沒有；相對地最小的那個桶
+# （選錯載具）正是唯一上了機械阻斷的。⇒ 這一桶缺的是門，不是更多自律。
+#
+# 本面補的是**證據錨可解析性**這條線上缺席的那一半：符號那半已有
+# `TestR78GhostSymbolClaims`、具名機械物那半已有 `mechanism_claim_problems`，缺的是
+# 「治理文件裡**任何**以反引號寫出的 repo 路徑」。這個縫有判例——R75 訂正逐字記載
+# 「此格原先寫的 `AutoClaude/` 前綴在磁碟上不存在，而當時的具名機械物鎖只認 `.py`
+# 副檔名故照樣放行」：讀者照著走必定撲空，而全 repo 沒有任何東西會轉紅。
+#
+# 兩顆牙，第二顆是跨平台那顆：① 路徑必須在解析基準之一底下找得到（檔或目錄皆可）；
+# ② **大小寫必須逐段相符**——Windows 與 macOS 的預設檔案系統大小寫**不敏感**，
+# `Path.exists()` 對 `Tools/Foo.ps1` 回 True，Linux（root-infra-ci 的 ubuntu runner）
+# 回 False。只用 `exists()` 的判準在本機與 mac 放行、只在雲端翻紅＝本 repo 記載過的
+# 「Windows 看不見的紅」。逐段比對目錄項名稱後三個平台得出**同一個**結論（本檔的
+# sys.platform 中立性鎖也才過得了）。
+#
+# 🔴 掃描面刻意只有**治理活文件**（.md），程式碼面整片排除——這是實測不是偷懶：
+# `tools/**/*.py` ＋ `.claude/hooks/*.py` ＋ `AutoClaude/tools/*.py` 面上 757 筆宣稱有
+# 49 筆解析不到，而它們幾乎全是合成範例與注入 fixture（`a/b/c.md`、`A/x.sh`、以及既有
+# 機械物鎖自己用來驗紅的假路徑）；判準分不開它們與真宣稱 ⇒ 納入等於製造 49 筆要逐一
+# 辯護的假紅，那種鎖活不過一輪。同理排除輪次凍結史料（`CrossPlatform_R*_*.md`、缺陷
+# 帳本）：它們寫下當時為真，納入等於逼人竄改歷史記錄（同 `_SYMBOL_REF_GLOBS` 的理由）。
+_PATH_CLAIM_EXTS = "py|ps1|sh|json|yml|yaml|md|toml|cfg|ini|tla|bat|sql"
+#: 形狀：整段反引號內容就是「**至少兩段**的相對路徑 ＋ 已知副檔名」。
+#: 刻意要求兩段以上——裸檔名（`` `check_lang.py` ``）在本 repo 是**提及**不是路徑宣稱，
+#: 實測收進來會多出數百筆全是誤報。開頭的 `./` 排除掉：那是文件用來講「某支腳本」的
+#: 泛稱佔位（`./x.sh`），不指向任何一支真的檔。
+_PATH_CLAIM_RE = re.compile(
+    r"^(?!\./)([\w.@-]+(?:/[\w.@-]+)+\.(?:" + _PATH_CLAIM_EXTS + r"))$")
+#: 模板佔位：`AutoSDD_improving_NN.md` 這種是體例說明，不是宣稱。
+#: （`<N>`／`*`／`{sh,ps1}` 等形態的字元本來就不在上面的字元集裡，結構上已排除。）
+_PATH_CLAIM_PLACEHOLDER_RE = re.compile(r"NN")
+#: 引用面：會被下一個人**當指令讀**的活文件。含根 `CLAUDE.md`（在收集器裡另外處理）。
+_PATH_CLAIM_GLOBS: tuple[str, ...] = (
+    "ONBOARDING.md",
+    "docs/06_quality/CrossPlatform_Maturity_Criteria.md",
+    "docs/06_quality/CrossPlatform_Scan_Dimensions.md",
+    "docs/04_planning/*HANDOFF*.md",
+    "docs/04_planning/ADR/*.md",
+    # 🔴 R81 QA B-3：軌道① 的**唯一驅動器**（根 CLAUDE.md 明定），每輪最多人照著讀的
+    # 活文件——卻是本面上線時整片失明的一角。注入實測：同一句假路徑放進交棒書兩顆牙都
+    # 咬，放進 `AutoSDD_improving_105.md` 則 13 tests OK 直接放行，而四項誠實劃界一句
+    # 都沒提到它（「有鎖在守，但那一面不在射程」比沒有鎖更難看見）。收進來的存量成本
+    # 實測僅 3 筆（全在最新一份、且全是該檔自己聲明「本輪尚未建立」的產出目標），
+    # 遠低於程式碼面那 49 筆 ⇒ 沒有「製造大批假紅」的顧慮。
+    "docs/04_planning/AutoSDD_improving_*.md",
+)
+#: 解析基準的快取（`path_claim_bases` 要跑一次 subprocess，而本檔的平台中立性鎖會把
+#: 全檔重跑 3 次）。
+_PATH_CLAIM_BASES_CACHE: list[tuple[str, ...]] = []
+
+
+def path_claim_bases(repo_root: Path) -> tuple[str, ...]:
+    """解析基準。**衍生自** `_MECHANISM_PATH_BASES`，不另開一份清單——那份常數已寫明
+    「子專案段落的相對路徑相對於該子專案目錄」的理由，本面適用同一條。多的兩個都是
+    實測逼出來的，不是預防性擴面：
+      · 套件根 `AutoClaude/autoclaude`——CLAUDE.md 架構大圖以 `execution/playbook_runner.py`
+        這種**套件內**相對路徑指認模組（實測 7 筆），少了它會整批誤報。
+      · SDD LATEST 版根——ADR 與 ONBOARDING 以 `tools/fsm_runtime/state_loader.py`、
+        `cicd/SDD_CICD_BASE_LAYER.md` 這種**版內**相對路徑指路（實測 6 筆）。版名走既有
+        SSOT `tools/lib/sdd_latest.py`，**不在本檔再寫一份版號 regex**（R73 判例）。
+    LATEST 解析失敗即 `AssertionError`（fail-loud，同 `read_adr_docs`：掃描邊界不得
+    靜默縮小——縮小的方向永遠是「看起來變乾淨」）。
+    """
+    if not _PATH_CLAIM_BASES_CACHE:
+        latest = _SDD_LATEST.resolve_latest_name(repo_root / "AISDLC_SDD")
+        _PATH_CLAIM_BASES_CACHE.append(
+            _MECHANISM_PATH_BASES
+            + ("AutoClaude/autoclaude", f"AISDLC_SDD/{latest}"))
+    return _PATH_CLAIM_BASES_CACHE[0]
+
+
+#: 具名基線（grandfathered）。形狀與理由逐字沿用 `_GHOST_SYMBOL_BASELINE`：舊列具名
+#: 登記、新列一律硬擋。**本表今天一筆真缺陷都沒有**，全是可辯護的形態，三類：
+#:   · 縮寫體例（`a/b_pre/post.py` 一段字表示兩支檔）；
+#:   · 刻意不存在的宣稱（已 gitignore 出庫、workflow 上移前的舊路徑對照欄、已刪除的
+#:     孤兒腳本、「建議抽成 X」的提案）；
+#:   · 比解析基準更深一層的版內路徑（實查：`formal/SDD_FSM.tla` 真身住在
+#:     `<SDD LATEST>/tools/fsm_runtime/formal/` 底下，再加一個基準就會過寬）。
+#: 🔴 存量全是誤報**不代表這道鎖沒有價值**：它缺的一直是「下一個人寫錯時當場紅」的門，
+#: 不是清存量（同 CLAUDE.md 鐵律三 `Get-Command` 那一列的裁決措辭）。順帶的收穫是這些
+#: 「刻意不存在」從此是**登記過的**事實，而不是每個讀者各自撲空一次才知道。
+#: 筆數不寫進本段散文——`_GHOST_PATH_BASELINE_CEILING` 就是那個數字的唯一住所。
+_GHOST_PATH_BASELINE: frozenset[str] = frozenset({
+    ".claude/loop.md",
+    "AISDLC_SDD/.claude/settings.local.json",
+    "AISDLC_SDD/.github/workflows/arch-fitness.yml",
+    "AISDLC_SDD/.github/workflows/artifact-cleanup.yml",
+    "AISDLC_SDD/.github/workflows/ci.yml",
+    "AISDLC_SDD/.github/workflows/drift-daily.yml",
+    "AISDLC_SDD/.github/workflows/fsm-chaos-nightly.yml",
+    "AutoClaude/.github/workflows/ci.yml",
+    "AutoClaude/.github/workflows/mutation-on-change.yml",
+    "AutoClaude/.github/workflows/pg-e2e-on-label.yml",
+    "AutoClaude/tools/reschedule_g0_gatecheck.ps1",
+    "context_ledger_pre/post.py",
+    # ── R81 SA-B3：上一格曾登記 `docs/06_quality/CrossPlatform_R81_Review.md`（計畫書 §6
+    # 把本輪產出目標逐份列出，而該檔在寫下那一行時尚未建立）。**該檔已於本輪建立**，
+    # `stale_path_baseline_problems()` 的第一款當場轉紅並要求刪除該筆登記 ⇒ 已刪，天花板
+    # 同步下修。留這段註解是為了記下**這道鎖的自清機制真的動作過一次**：豁免不會永久化，
+    # 不是因為有人記得回來清，是因為清不掉就會紅。
+    "formal/README.md",
+    "formal/SDD_FSM.tla",
+    "install_hooks/install_post_commit.ps1",
+    "tools/session_endurance.py",
+    "tools/tests/_ci_scan_anchors.py",
+    "tools/tests/_source_strip.py",
+})
+#: shrink-only 天花板（同 `_GHOST_SYMBOL_BASELINE_CEILING` 的立案理由）：上面那句
+#: 「只准變少」若只是散文，這道鎖最省力的關法就是把新寫下的壞路徑登記進表。
+#: 🔴 R81 QA B-3 重釘：18 → 19（擴掃描面才看見的既有存量，本常數紅燈訊息明文指定的
+#: 那條合法路徑）。🔴 R81 SA-B3 再下修：19 → **18**——那一筆豁免的標的（四方複審轉錄檔）
+#: 已於本輪建立、解析得到，自清機制當場要求刪除該筆登記。**下修方向本來就是這道鎖要的**：
+#: 天花板是欠債上限，不是額度。
+_GHOST_PATH_BASELINE_CEILING = 18
+
+#: 目錄項快取：本檔的平台中立性鎖會把全檔重跑 3 次，逐段列目錄不快取會慢一個量級。
+_DIR_ENTRY_CACHE: dict[str, frozenset[str]] = {}
+
+
+def _entries(directory: Path) -> frozenset[str]:
+    key = str(directory)
+    if key not in _DIR_ENTRY_CACHE:
+        try:
+            _DIR_ENTRY_CACHE[key] = frozenset(p.name for p in directory.iterdir())
+        except OSError:
+            _DIR_ENTRY_CACHE[key] = frozenset()
+    return _DIR_ENTRY_CACHE[key]
+
+
+def resolve_doc_path(rel: str, repo_root: Path) -> str | None:
+    """`None`＝解析得到；否則回傳失敗原因（`"missing"`／`"case"`）。
+
+    與 `resolve_named_path` 的差別（刻意分開，不是重複實作）：
+      · 本函式**逐段比對目錄項名稱**，所以在大小寫不敏感的檔案系統上仍判得出
+        「拼法不對」；那一支用 `Path.is_file()`，在 Windows／macOS 上大小寫不敏感。
+      · 本函式接受**目錄**（文件常以 `docs/06_quality/` 這類形態指路），那一支只認檔案。
+    """
+    saw_loose = False
+    for base in path_claim_bases(repo_root):
+        current = repo_root if base == "." else repo_root / base
+        exact = True
+        for part in rel.split("/"):
+            if part not in _entries(current):
+                exact = False
+            current = current / part
+        if not current.exists():
+            continue
+        if exact:
+            return None
+        saw_loose = True
+    return "case" if saw_loose else "missing"
+
+
+def path_claims(text: str, source: str) -> list[tuple[str, str, str]]:
+    """`(來源, 相對路徑, 原行)`；`::Symbol` 後綴交給既有的符號面判，此處先切掉。"""
+    out: list[tuple[str, str, str]] = []
+    for line in text.splitlines():
+        for match in re.finditer(r"`([^`\n]{1,200})`", line):
+            rel = match.group(1).strip().split("::", 1)[0]
+            if _PATH_CLAIM_RE.match(rel) and not _PATH_CLAIM_PLACEHOLDER_RE.search(rel):
+                out.append((source, rel, line.strip()))
+    return out
+
+
+def collect_path_claims(repo_root: Path) -> list[tuple[str, str, str]]:
+    """引用面全部的反引號路徑宣稱（現查，不寫死清單）。含根 `CLAUDE.md`。"""
+    claims = path_claims(
+        (repo_root / "CLAUDE.md").read_text(encoding="utf-8-sig"), "CLAUDE.md")
+    for glob in _PATH_CLAIM_GLOBS:
+        for path in sorted(repo_root.glob(glob)):
+            claims += path_claims(
+                path.read_text(encoding="utf-8-sig", errors="replace"),
+                path.relative_to(repo_root).as_posix())
+    return claims
+
+
+def ghost_path_problems(
+    claims: list[tuple[str, str, str]], repo_root: Path, baseline: frozenset[str]
+) -> list[str]:
+    """解析不到、且不在具名基線內的路徑宣稱（空＝通過）。"""
+    problems: list[str] = []
+    for source, rel, line in claims:
+        verdict = resolve_doc_path(rel, repo_root)
+        if verdict is None or rel in baseline:
+            continue
+        if verdict == "case":
+            problems.append(
+                f"{source} 指名 `{rel}`，磁碟上只有**拼法不同**的同名項 ⇒ 這在 Windows／"
+                f"macOS（大小寫不敏感 FS）看起來是對的，在 Linux 上是不存在的路徑。"
+                f"出處：{line[:100]}")
+        else:
+            problems.append(
+                f"{source} 指名一個不存在的路徑 `{rel}`（解析基準 "
+                f"{path_claim_bases(repo_root)} 皆找不到）⇒ 讀者照著走必定撲空，而這份"
+                f"文件是寫給未來照抄重跑的。出處：{line[:100]}")
+    return problems
+
+
+def stale_path_baseline_problems(
+    claims: list[tuple[str, str, str]], repo_root: Path, baseline: frozenset[str]
+) -> list[str]:
+    """具名基線的兩款 stale：已解析得到／已無人引用。皆須刪除該筆登記。"""
+    referenced = {rel for _src, rel, _ln in claims}
+    problems = [
+        f"`{rel}` 已在基線豁免表上，但它現在**解析得到**了——請把這一筆從 "
+        f"_GHOST_PATH_BASELINE 刪掉，否則餘裕會變成日後的破口"
+        for rel in sorted(baseline)
+        if resolve_doc_path(rel, repo_root) is None
+    ]
+    problems += [
+        f"`{rel}` 在基線豁免表上，但引用面已經**沒有任何一處**提到它"
+        f"——請把這一筆刪掉（豁免只能因為「還沒清」而存在）"
+        for rel in sorted(baseline - referenced)
+        if resolve_doc_path(rel, repo_root) is not None
+    ]
+    return problems
+
+
+class TestR81GhostPathClaims(unittest.TestCase):
+    """第五面：治理活文件以反引號指名一個 repo 路徑時，那個路徑必須真的在。
+
+    這是「宣稱先於查證」這個最大缺陷桶的第一個通用機械物。它不宣稱涵蓋整桶——
+    誠實劃界見 `test_the_criterion_states_what_it_cannot_see`。
+    """
+
+    def test_no_ghost_path_claims(self) -> None:
+        """主牙：引用面不得出現基線之外的幽靈路徑。"""
+        problems = ghost_path_problems(
+            collect_path_claims(_REPO_ROOT), _REPO_ROOT, _GHOST_PATH_BASELINE)
+        self.assertEqual(problems, [], "發現幽靈路徑宣稱：\n  " + "\n  ".join(problems))
+
+    def test_the_baseline_is_not_stale(self) -> None:
+        """兩款 stale 自檢：解析得到了／已無人引用，都必須把登記刪掉。"""
+        problems = stale_path_baseline_problems(
+            collect_path_claims(_REPO_ROOT), _REPO_ROOT, _GHOST_PATH_BASELINE)
+        self.assertEqual(problems, [], "基線豁免表已 stale：\n  " + "\n  ".join(problems))
+
+    def test_the_baseline_never_grows(self) -> None:
+        """雙邊相等：長大＝把壞路徑登記掉（最省力的關法）；縮短不下修＝留餘裕。"""
+        self.assertEqual(
+            len(_GHOST_PATH_BASELINE), _GHOST_PATH_BASELINE_CEILING,
+            f"路徑豁免表 {len(_GHOST_PATH_BASELINE)} 筆 ≠ 天花板 "
+            f"{_GHOST_PATH_BASELINE_CEILING}——豁免是欠債不是額度。正解＝把那個引用改指"
+            "真的存在的路徑；真的是「擴掃描面才看見的既有存量」時，重釘天花板並在交件"
+            "回報寫出前後值與理由",
+        )
+
+    def test_the_ceiling_has_teeth(self) -> None:
+        """鑑別力（注入）：多一筆／少一筆都必須偏離天花板，否則相等斷言測不到東西。"""
+        self.assertNotEqual(
+            len(_GHOST_PATH_BASELINE | {"a/synthetic_ghost_xyz.py"}),
+            _GHOST_PATH_BASELINE_CEILING, "多登記一筆竟然沒偏離天花板 ⇒ 這道鎖是空的")
+        self.assertNotEqual(
+            len(_GHOST_PATH_BASELINE - {sorted(_GHOST_PATH_BASELINE)[0]}),
+            _GHOST_PATH_BASELINE_CEILING, "少一筆竟然沒偏離天花板")
+
+    def test_the_reference_surface_is_not_vacuous(self) -> None:
+        """自錨：掃描面崩塌（glob 寫壞／檔案改名）必須先被自己抓到。
+
+        分母為零時主牙會靜默通過，而那個方向正是本 repo 反覆記載的「看起來變乾淨」。
+        逐面斷言而非只看總數——任一 glob 寫壞時其餘幾面仍會讓籠統的斷言通過。
+
+        🔴 R81 QA B-3：面的清單**衍生自 `_PATH_CLAIM_GLOBS` 本身**，不再手寫。舊版拿
+        `"docs/06_quality/"` 這種**目錄前綴**當一個面，讀起來像整個目錄都在掃，實際上
+        那一面只有兩支手列檔——而目錄前綴的斷言在「兩支只剩一支」時照樣綠。更嚴重的是
+        手寫清單會與真實 glob 脫鉤：新增一個 glob 卻沒加進來，那一面崩塌時不會有人知道
+        （本輪新增的驅動器面若沿用舊寫法，正是這個下場）。現在**每一個 glob 各自**要收
+        得到宣稱，漏加一個面在結構上不可能。
+        """
+        claims = collect_path_claims(_REPO_ROOT)
+        self.assertGreater(len(claims), 100, f"路徑宣稱只掃到 {len(claims)} 筆 ⇒ 擷取器失效")
+        sources = {src for src, _rel, _ln in claims}
+        # CLAUDE.md 不走 glob（收集器裡另外處理），故單獨列一面。
+        for face in ("CLAUDE.md", *_PATH_CLAIM_GLOBS):
+            with self.subTest(face=face):
+                self.assertTrue(
+                    [s for s in sources if PurePosixPath(s).match(face)],
+                    f"glob `{face}` 這一面收不到任何路徑宣稱 ⇒ glob 寫壞、檔案改名，"
+                    "或那一面的檔全部不再帶路徑宣稱（三種都要人來看一眼）")
+
+    # ── 以下以合成文本自證判準紅綠（純函式，不落 repo 樹、不碰真實文件）──
+    @staticmethod
+    def _line(rel: str) -> list[tuple[str, str, str]]:
+        tick = "`"
+        return path_claims(f"現查指令：python {tick}{rel}{tick}", "syn.md")
+
+    def test_a_nonexistent_path_is_red(self) -> None:
+        """鑑別力（注入）：R75 判例的形態——把根層工具寫成帶子專案前綴。"""
+        claims = self._line("AutoClaude/tools/install_windows_nightly.ps1")
+        self.assertTrue(claims, "擷取器抓不到路徑宣稱 ⇒ 判準沒被考到")
+        problems = ghost_path_problems(claims, _REPO_ROOT, frozenset())
+        self.assertTrue(problems, "幽靈路徑被放行 ⇒ 這正是 R75 那筆逃出去的縫")
+        self.assertIn("不存在的路徑", problems[0])
+
+    def test_the_real_path_of_that_same_tool_is_green(self) -> None:
+        """對照組：同一支工具的**正確**路徑不得被判紅（否則本鎖只是全都判紅）。"""
+        self.assertEqual(
+            ghost_path_problems(self._line("tools/install_windows_nightly.ps1"),
+                                _REPO_ROOT, frozenset()), [])
+
+    def test_a_case_mismatched_path_is_red(self) -> None:
+        """跨平台牙（注入）：只有大小寫不同 ⇒ 必紅，且訊息要說出它只在 Linux 上壞。
+
+        本機（Windows）與 macOS 的 `Path.exists()` 對這個字串回 True ⇒ 只用 `exists()`
+        的判準在這裡是**假綠**，紅燈要等到 ubuntu runner 才出現。
+        """
+        problems = ghost_path_problems(
+            self._line("Tools/Install_Windows_Nightly.ps1"), _REPO_ROOT, frozenset())
+        self.assertTrue(problems, "大小寫不符被放行 ⇒ 這是只在 Linux 翻紅的假綠")
+        self.assertIn("拼法不同", problems[0])
+
+    def test_a_directory_claim_is_accepted(self) -> None:
+        """目錄形態不得被誤判：文件常以目錄指路，判成幽靈就是假紅。"""
+        self.assertEqual(resolve_doc_path("docs/06_quality", _REPO_ROOT), None)
+
+    def test_bare_filenames_and_placeholders_are_out_of_scope(self) -> None:
+        """縮面判準的三個出口——收進來實測會多出數百筆全是誤報的宣稱。"""
+        for rel in ("check_lang.py", "./x.sh", "docs/AutoSDD_improving_NN.md"):
+            with self.subTest(rel=rel):
+                self.assertEqual(self._line(rel), [], f"`{rel}` 不該進射程")
+
+    def test_a_stale_baseline_entry_is_red(self) -> None:
+        """鑑別力（注入）：把一個**真的存在**的路徑放進基線 ⇒ stale 自檢必紅。"""
+        problems = stale_path_baseline_problems(
+            [], _REPO_ROOT, frozenset({"tools/run_root_unittests.py"}))
+        self.assertTrue(any("解析得到" in p for p in problems), problems)
+
+    def test_an_unreferenced_baseline_entry_is_red(self) -> None:
+        """鑑別力（注入）：幽靈已清乾淨卻沒把登記刪掉 ⇒ 必紅（豁免不得永久化）。"""
+        problems = stale_path_baseline_problems(
+            [], _REPO_ROOT, frozenset({"nowhere/at/all_xyz.py"}))
+        self.assertTrue(any("沒有任何一處" in p for p in problems), problems)
+
+    def test_the_criterion_states_what_it_cannot_see(self) -> None:
+        """🔴 誠實劃界（本 repo 的「有鎖在守假話」教訓：鎖綠不等於那件事被保證）。
+
+        抓得到：治理活文件裡「點名一個不存在／拼法不對的 repo 路徑」。
+        抓不到（逐項明列，不粉飾）：
+          ① **路徑存在不代表宣稱為真**——同 `mechanism_claim_problems` 已劃的邊界，
+             「檔案在、但守的是別的東西」本面零判準。
+          ② **散文式狀態宣稱**（「已驗證」「全綠」）有沒有帶錨：實測分母僅 22 筆而
+             無錨的 4 筆**全是誤報**（那些句子在**討論**宣稱，不是在**做出**宣稱），
+             故本輪刻意不做——判準沒有鑑別力時，蓋一道鎖只會製造要逐一辯護的假紅。
+          ③ **程式碼面**（`tools/**/*.py` 等）：合成範例與注入 fixture 住在那裡，
+             實測 49/757 解析不到而幾乎全部可辯護 ⇒ 整面排除。
+          ④ **寫死的數字**是否新鮮：那條線由 `adr_measurement_problems` 與 §7 表①
+             的 live 格負責，本面不重複收。
+        本測試是**可執行的**劃界：上面每一句「抓不到」都必須真的抓不到，否則這段
+        散文就是在描述另一個不存在的判準（那正是本檔通篇在治的病）。
+        """
+        # ① 路徑存在但主題不符 ⇒ 本面放行（是人審責任，不是本鎖的射程）
+        self.assertEqual(
+            ghost_path_problems(self._line("tools/tests/test_ps1_bom.py"),
+                                _REPO_ROOT, frozenset()), [])
+        # ② 純散文的狀態宣稱不帶路徑 ⇒ 本面根本看不到它
+        self.assertEqual(path_claims("本輪閘門全綠、已驗證、rc=0。", "syn.md"), [])
+        # ③ 程式碼面不在引用面內
+        self.assertNotIn("tools/tests/test_doc_loc_baseline_freshness_r60.py",
+                         {src for src, _r, _l in collect_path_claims(_REPO_ROOT)})
+        # ④ 數字 token 不在射程
+        self.assertEqual(path_claims("`total=20436` 與 `3923 passed`", "syn.md"), [])
 
 
 # ══════════════════════════════════════════════════════════════════════════════

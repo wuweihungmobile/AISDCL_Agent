@@ -180,10 +180,15 @@ _NO_AUTOMATED_CHANNEL = (
 @pg_required
 def test_pgvector_recall_at_10_ge_095():
     """T1 真實 pgvector HNSW recall@10 ≥ 0.95（AC4-5 上線基線）。"""
-    pytest.skip(f"需 W3 G3 staging 資料集：1k seed + BGE-M3 真實向量。{_NO_AUTOMATED_CHANNEL}")
+    pytest.skip(
+        f"[DEBT] 需 W3 G3 staging 資料集：1k seed + BGE-M3 真實向量。承接輪次 R82"
+        f"（該輪必須先決定保留或顯式廢止：保留就得同時建自動通道，"
+        f"否則寫好也不會被跑）。{_NO_AUTOMATED_CHANNEL}")
 
 
 @pg_required
 def test_pgvector_p95_latency_under_50ms():
     """T2 真實 pgvector HNSW p95 latency < 50ms。"""
-    pytest.skip(f"需 W3 G3 staging 資料集（同 T1）。{_NO_AUTOMATED_CHANNEL}")
+    pytest.skip(
+        f"[DEBT] 需 W3 G3 staging 資料集（同 T1）。承接輪次 R82"
+        f"（保留或顯式廢止的決定與 T1 同一筆）。{_NO_AUTOMATED_CHANNEL}")

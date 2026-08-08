@@ -2506,12 +2506,12 @@ class TestPosixCarrierLiveness(unittest.TestCase):
 class TestExecFormConversionScope(unittest.TestCase):
     """exec form 轉換的**射程**——哪一份 settings 轉了、哪一份還沒（R80 QA-03）。
 
-    🔴 立案理由：R80 只轉了**根層**那一份，而根 `CLAUDE.md`〈鐵律一之二〉一度把它寫成
-    通則、形態判準的掃描面也只有根檔。兩個後果：①在 AutoClaude 子專案 session 下閃窗
-    一次都沒少；②「AutoClaude 那 6 條退回 shell form」**永遠不會轉紅**。
-    處置刻意**不是**把 `hook_form_problems()` 套到 AutoClaude（那會當場假紅、而那份檔
-    不在本輪的可動面內），而是把「還沒轉的有幾條」變成**可查的量測值**：掃描面現查磁碟，
+    🔴 立案理由（史實）：R80 只轉了**根層**那一份，根 `CLAUDE.md`〈鐵律一之二〉一度寫成
+    通則。兩個後果：①AutoClaude 子專案 session 下閃窗一次都沒少；②「那 6 條退回 shell
+    form」永遠不會轉紅。處置＝把「還沒轉的有幾條」變成**可查的量測值**：掃描面現查磁碟，
     判準是相等——多了＝退步、少了＝轉好了卻沒回來改表。凍結版（Copy-on-Evolve）具名排除。
+    R81 已把 AutoClaude 那份轉完（普查表兩格皆 0）⇒ 本類職責由「登記還沒轉的」變成
+    「不准有人退回去」；形態判準 A~F 的掃描面**仍只有根檔**，那是已知且未關的缺口。
     """
 
     def _counts(self) -> dict[str, int]:
@@ -2550,11 +2550,11 @@ class TestExecFormConversionScope(unittest.TestCase):
         self.assertTrue(any("退回 shell form" in p for p in problems), problems)
 
     def test_converting_without_updating_the_census_is_also_red(self) -> None:
-        """另一向：AutoClaude 那 6 條轉好了卻沒下修基準 ⇒ 餘裕＝日後無聲加回的破口。"""
-        wiring = _hook_wiring()
-        counts = self._counts()
-        counts["AutoClaude/.claude/settings.json"] = 0
-        problems = wiring.shell_form_census_problems(counts)
+        """另一向：轉好了卻沒下修基準 ⇒ 餘裕＝日後無聲加回的破口。R81 把表歸零之後，
+        磁碟上再也造不出 `counts < baseline`，故改由**合成基準**驅動（判準與牙不變）。"""
+        problems = _hook_wiring().shell_form_census_problems(
+            {"AutoClaude/.claude/settings.json": 0},
+            {"AutoClaude/.claude/settings.json": 6})
         self.assertTrue(any("沒同步下修基準" in p for p in problems), problems)
 
     def test_an_unregistered_active_settings_file_is_red(self) -> None:

@@ -298,7 +298,10 @@ class TestDDLSnapshot:
         """SD_05 W0 SD-M9：_PGVECTOR_AVAILABLE = True 時 embedding 必為 nullable Vector。"""
         from autoclaude.infra.repositories import _pg_models
         if not getattr(_pg_models, "_PGVECTOR_AVAILABLE", False):
-            pytest.skip("pgvector 未安裝；測 absent case 改由另一 test")
+            pytest.skip(
+                "[STRUCTURAL-PAIR] pgvector 未安裝；測 absent case 改由 "
+                "test_embedding_absent_when_pgvector_unavailable。互斥對的另一半"
+            )
         kb_table = metadata.tables["knowledge_entries"]
         embedding_col = kb_table.columns.get("embedding")
         assert embedding_col is not None, (
@@ -315,7 +318,11 @@ class TestDDLSnapshot:
         """SD_05 W0 SD-M9：_PGVECTOR_AVAILABLE = False 時 embedding 不出現於 columns。"""
         from autoclaude.infra.repositories import _pg_models
         if getattr(_pg_models, "_PGVECTOR_AVAILABLE", False):
-            pytest.skip("pgvector 已安裝；測 present case 改由 _present test")
+            pytest.skip(
+            "[STRUCTURAL-PAIR] pgvector 已安裝；測 present case 改由 _present test。"
+            "本 case 與 test_embedding_present_when_pgvector_available 是**互斥對**："
+            "同一次執行必有一支 skip，結構上不可能兩支同時跑 ⇒ 目標不是 0"
+        )
         kb_table = metadata.tables["knowledge_entries"]
         assert "embedding" not in {c.name for c in kb_table.columns}, (
             "pgvector 未安裝時 embedding 不應出現於 columns（_pg_models.py:110 守則）"

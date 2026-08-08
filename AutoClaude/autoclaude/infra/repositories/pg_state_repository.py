@@ -486,8 +486,18 @@ class PgStateRepository:
         SD_06 W5-T5-7：補 run_id 欄位回填至 PlaybookCheckpoint.run_id。
         """
         c = r.counters or {}
+        # R81：`checkpoints` 沒有 playbook_path 欄位，所以這裡**不能**拿 playbook_id
+        # 冒充路徑。R69 的續跑守衛（auto_resume._checkpoint_matches_playbook）第一條
+        # 判準逐字寫著「checkpoint 沒記路徑（舊檔／PG 後端缺欄）→ 無從判定即放行」，
+        # 但 adapter 把 id 填進那個欄位後，那條放行永遠走不到，守衛改判「屬於別支
+        # playbook」⇒ **db_only 模式下 checkpoint 永遠續不回來、每次都從頭跑**。
+        # 端到端實測逐字：`checkpoint 屬於別支 playbook（id 撞名），視為無 checkpoint
+        # 從頭：ck='b017f2c31e2dfd86'，本次='…\r81_playbook.yaml'`。
+        # 留空不是資訊損失——那份資訊本來就沒有被存過；填 id 只是把「不知道」寫成
+        # 一個看起來像答案的假值。db_only 的 playbook_id＝sha256(絕對路徑)，載入時
+        # 已經以 id 綁死該 playbook，R69 要防的 stem 撞名在此結構上不存在。
         return PlaybookCheckpoint(
-            playbook_path=r.playbook_id,
+            playbook_path="",
             step_idx=r.step_idx,
             step_id=r.step_id,
             total_steps=r.total_steps,

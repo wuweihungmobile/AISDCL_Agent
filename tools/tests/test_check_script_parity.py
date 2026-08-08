@@ -1973,5 +1973,139 @@ class TestLatestThinnessRationaleIsFactual(unittest.TestCase):
                 )
 
 
+class TestR81ScriptInterfaceParity(unittest.TestCase):
+    """`.sh` ↔ `.ps1` 可觀察介面對等鎖（R81／S8-05）的鑑別力與邊界。
+
+    🔴 這一組守的是 R80 掃描 S8-05 留下的缺口：`check_script_parity` 此前驗的是
+    「存在性 ＋ 位元組釘選 ＋ 幾道具名內容鎖」，**沒有任何一般性行為判準** ⇒ 一對
+    腳本可以做不同的事而零訊號。判準本體＝`tools/lib/script_interface_parity.py`
+    （住 lib 的理由見該檔檔頭：消費端受零餘裕 raw-line 棘輪管）。
+
+    本組刻意同時釘住兩個方向：**會紅**（新分歧、既有分歧消失、掃描面崩塌）與
+    **不會誤紅**（散文裡的 git 字樣、薄殼／tier4／委派對出局）。只驗前者的鎖
+    活不過一輪——本 repo 已判過那個形態。
+    """
+
+    def test_a_divergent_exit_code_is_detected(self) -> None:
+        """核心鑑別力：一側能回而另一側回不出的退出碼必須被抓到。
+
+        這正是 `run_self_evolution` 的真實形狀——既有的退出碼契約三方鎖看不到它，
+        因為那道鎖是拿**每一側各自**去比 SSOT 那個超集，兩側都是子集 ⇒ 兩邊都綠。
+        """
+        got = m._iface.divergences('exit 0\nexit 64\n', 'exit 0\nexit 8\n')
+        self.assertEqual(got.get("exit_codes"), (("64",), ("8",)))
+
+    def test_identical_interfaces_yield_no_divergence(self) -> None:
+        """對照組：同介面必須是空 dict（否則整道鎖是恆紅的，一樣沒有用）。"""
+        text = 'exit 0\nexit 1\ngit rev-parse --show-toplevel\npython x.py\n'
+        self.assertEqual(m._iface.divergences(text, text), {})
+
+    def test_prose_mentioning_git_is_not_read_as_a_subcommand(self) -> None:
+        """假紅防線（實測回歸）：白名單過濾前，`install_post_commit.ps1` 訊息字串裡的
+        `git repository`／`git would silently ignore…` 會被當成三個 git 子指令。
+        假紅是這類判準最主要的死因，故把它釘成契約。"""
+        prose = 'Write-Error "找不到 git repository"\n# git would silently ignore\n'
+        self.assertEqual(m._iface.facet_sets(prose)["git_subcommands"], frozenset())
+        real = 'git rev-parse --git-common-dir\n'
+        self.assertEqual(m._iface.facet_sets(real)["git_subcommands"], frozenset({"rev-parse"}))
+
+    def test_a_new_divergence_is_red_against_the_baseline(self) -> None:
+        """紅燈自證：基準沒登記的分歧＝新分歧＝紅，且訊息要教人怎麼處置。"""
+        problems = m._iface.baseline_problems(
+            {"p": {"exit_codes": (("7",), ())}}, baseline={"p": {}})
+        self.assertEqual(len(problems), 1)
+        self.assertIn("新的介面分歧", problems[0])
+
+    def test_a_converged_divergence_must_be_deregistered(self) -> None:
+        """反方向（棘輪的另一半）：分歧修好了卻沒回來除帳也要紅——留著就是餘裕，
+        而餘裕正是日後無聲把分歧加回去的破口（同 `_SELF_HELP_DEBT_FROZEN` 體例）。"""
+        problems = m._iface.baseline_problems(
+            {"p": {}}, baseline={"p": {"exit_codes": (("7",), (), "理由")}})
+        self.assertEqual(len(problems), 1)
+        self.assertIn("已消失", problems[0])
+
+    def test_an_unregistered_pair_entering_scope_is_red(self) -> None:
+        """新的雙原生對子進到掃描面而基準沒有它 ⇒ 紅（擋「悄悄多一對沒人看」）。"""
+        problems = m._iface.baseline_problems({"newpair": {}}, baseline={})
+        self.assertEqual(len(problems), 1)
+        self.assertIn("不在凍結基準內", problems[0])
+
+    def test_scope_excludes_thin_shells_tier4_and_cross_delegators(self) -> None:
+        """掃描面三類排除各自有理由，逐類釘住（見 `select_pairs` docstring）。
+
+        混進任一類都會製造必然的假紅：薄殼兩側委派同一 Python 核心、tier4 是 ADR
+        明文「刻意不同」、委派對根本只有一個實作。
+        """
+        texts = {
+            "shell/a.sh": "exit 0", "shell/a.ps1": "exit 1",          # 薄殼
+            "t4/b.sh": "exit 0", "t4/b.ps1": "exit 2",                # tier4
+            "d/c.sh": "exit 0", "d/c.ps1": "bash c.sh",               # 委派
+            "real/d.sh": "exit 0", "real/d.ps1": "exit 0",            # 留下
+        }
+        scope = m._iface.select_pairs(
+            ["shell/a", "t4/b", "d/c", "real/d"], texts.get,
+            {"shell/a"}, {"t4/b": "tier4_forbidden"})
+        self.assertEqual(scope, ["real/d"])
+
+    def test_a_collapsed_scope_is_red_not_silently_green(self) -> None:
+        """零迴圈恆綠是本 repo 的累犯形態（rc 與『正確地全部通過』一模一樣）⇒
+        掃描面掉到下限以下必須紅。"""
+        msgs: list[str] = []
+        self.assertFalse(
+            m._iface.check([], lambda _r: None, set(), {}, msgs.append))
+        self.assertIn("掃描面只剩 0 對", " ".join(msgs))
+
+    def test_the_live_repo_agrees_with_the_frozen_baseline(self) -> None:
+        """production 路徑（真 repo、非合成）必須綠——基準是當回合實測填入的。"""
+        latest = m._resolve_latest_tools()
+        self.assertIsNotNone(latest, "LATEST 解析失敗 ⇒ 本判準無法對真 repo 求值")
+        msgs: list[str] = []
+        with mock.patch("builtins.print"):
+            ok = m._iface.check(
+                m._discover_scripts(latest)[0],
+                m._iface.side_reader(m._registered_path, m._strip_comments, latest),
+                m._THINNESS_ENROLLED,
+                {k: v[0] for k, v in m._EXEMPT_PAIRS.items()},
+                msgs.append)
+        self.assertTrue(ok, "\n".join(msgs))
+
+    def test_injecting_a_divergence_into_the_live_repo_turns_it_red(self) -> None:
+        """🔴 端到端紅燈自證：對**真實**掃描面的某一側注入一個新退出碼 ⇒ 整道鎖必須紅。
+
+        合成注入（不寫磁碟，改包 reader），證明綠燈不是因為判準沒在讀真檔。
+        """
+        latest = m._resolve_latest_tools()
+        self.assertIsNotNone(latest)
+        base = m._iface.side_reader(m._registered_path, m._strip_comments, latest)
+        target = "LATEST/tools/install_hooks/install_post_commit.sh"
+
+        def poisoned(rel: str) -> str | None:
+            text = base(rel)
+            return None if text is None else (
+                text + "\nexit 123\n" if rel == target else text)
+
+        msgs: list[str] = []
+        with mock.patch("builtins.print"):
+            ok = m._iface.check(
+                m._discover_scripts(latest)[0], poisoned, m._THINNESS_ENROLLED,
+                {k: v[0] for k, v in m._EXEMPT_PAIRS.items()}, msgs.append)
+        joined = " ".join(msgs)
+        self.assertFalse(ok, "注入了單側退出碼 123，整道鎖卻仍是綠的")
+        self.assertIn("新的介面分歧", joined)
+        self.assertIn("123", joined)
+
+    def test_the_boundary_is_documented_not_overclaimed(self) -> None:
+        """🔴 誠實劃界必須留在原始碼裡：行為等價不可判定，本模組只比對介面表面集合。
+
+        本 repo 判過「有鎖在守假話」比沒有鎖更難看見——若哪天有人把檔頭改寫成
+        『驗證行為等價』，這條就會紅。
+        """
+        src = Path(m._iface.__file__).resolve().read_text(encoding="utf-8")
+        head = src.split('"""')[1]
+        self.assertIn("不可判定", head)
+        self.assertIn("抓不到", head)
+        self.assertIn("**不宣稱**驗證行為等價", head)
+
+
 if __name__ == "__main__":
     unittest.main()

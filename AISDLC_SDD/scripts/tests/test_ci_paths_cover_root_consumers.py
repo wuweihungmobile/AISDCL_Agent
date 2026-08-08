@@ -1210,7 +1210,9 @@ _ROOT_INFRA_SCAN_EXEMPT_PREFIXES = ("AutoClaude/", "AISDLC_SDD/", ".claude/", "t
 
 def _git_ls_files(pathspec: str) -> list[str]:
     result = subprocess.run(
-        ["git", "ls-files", "--", pathspec],
+        # `-c core.quotepath=false`（R81 XPL-S1-01）：非 ASCII 路徑預設回 C-quoted 形態，
+        # 會讓「CI paths 是否涵蓋這個消費檔」的比對憑空少掉那些檔。
+        ["git", "-c", "core.quotepath=false", "ls-files", "--", pathspec],
         cwd=_monorepo_root(),
         capture_output=True,
         text=True,
@@ -1475,7 +1477,8 @@ def _git_enumerate(pathspec: str) -> list[str]:
     """
     tracked = _git_ls_files(pathspec)
     result = subprocess.run(
-        ["git", "ls-files", "--others", "--exclude-standard", "--", pathspec],
+        ["git", "-c", "core.quotepath=false",
+         "ls-files", "--others", "--exclude-standard", "--", pathspec],
         cwd=_monorepo_root(),
         capture_output=True,
         text=True,

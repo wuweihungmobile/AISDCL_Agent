@@ -209,6 +209,13 @@ SPECIAL_FILES: dict[str, int] = {
     # 解析器一起搬（那會製造第二份表格語意＝本檔一直在治的病）。
     "../tools/sync_onboarding_baselines.py": 1499,
     "../tools/run_root_unittests.py": 754,
+    # 🔴 R81（Architect-B3）：`.claude/hooks/` 納入治理面（見 `ROOT_GUARD_ROOTS` 的 WHY）。
+    # 這一支超過 tier 的 750，走與上面那批同一條路：門檻＝**納管當下的實際 raw 行數**、
+    # 只准往下改。納管當下＝1,634（見下方 `ROOT_GUARD_ROOTS` 那段的立案量測）。
+    # 🔴 R81 收尾包**下釘**：額度撞線判讀整個主題已搬進 `tools/lib/quota_limits.py`，
+    # 該檔實測降到 1,451 ⇒ 依本表「合法縮小後必須同步下修」的紀律把門檻跟著往下走。
+    # 不下修的話那 183 行餘裕就是日後無聲加回去的破口（零餘裕是本棘輪的設計，不是意外）。
+    "../.claude/hooks/context_budget_guard.py": 1451,
 }
 
 #: 上面那批根層 tools/ 棘輪的共同違規理由（`_SPECIAL_REASONS` 逐檔複寫一份就是複本型缺陷）。
@@ -228,7 +235,8 @@ _SPECIAL_REASONS: dict[str, str] = {
     **{
         rel: _ROOT_TOOLS_RATCHET_REASON
         for rel in SPECIAL_FILES
-        if rel.startswith("../tools/") and rel != "../tools/dev_start.py"
+        if rel.startswith(("../tools/", "../.claude/hooks/"))
+        and rel != "../tools/dev_start.py"
     },
 }
 
@@ -266,9 +274,20 @@ _SPECIAL_REASONS: dict[str, str] = {
 #     棘輪即可。反過來說，**沒被 `SPECIAL_FILES` 收錄又超過 tier 預算的檔一律紅** ⇒
 #     這道機制會自己補完收錄面（要嘛瘦身、要嘛具名入表附理由），不再是一次性快照。
 ROOT_TOOLS_ROOT = PROJECT_ROOT.parent / "tools"
+#: 🔴 R81（Architect-B3）：`.claude/hooks/` 也是 monorepo 根層護欄層，卻**不在任何 LOC
+#: 治理面內**——`SCAN_ROOT = "autoclaude"` 掃不到它，`ROOT_TOOLS_ROOT` 只有 `tools/`，
+#: 而且**沒有任何一行明文豁免**（⇒ 這不是取捨，是缺口）。代價是量出來的：納管當下
+#: `context_budget_guard.py` ＝ 1,634 raw 行，是絕對紅線 750 的 **2.18 倍**；而 R81 那一輪
+#: +421 行全部灌進這一支，同一套 LOC 政策卻正是該輪**新開兩支檔**的立案理由
+#: ⇒ **壓力只作用在已經被量的那一層**，於是新檔被推出去、真正在長的巨檔繼續長。
+#: 🔴 **誠實：納管當下不會讓任何東西變小。** 門檻取納管當下的實際行數（見 `SPECIAL_FILES`
+#: 那一列），買到的是「下一個人再往裡面塞就會紅」。這不是減法，別包裝成減法；把那 1,634
+#: 行拆開是另一件事，本輪未做。
+ROOT_GUARD_ROOTS: tuple[Path, ...] = (
+    ROOT_TOOLS_ROOT, PROJECT_ROOT.parent / ".claude" / "hooks")
 ROOT_TOOLS_TIERS: dict[str, dict] = {
     "guardrail_lib": {"budget": 400, "patterns": ["tools/lib/"]},
-    "guardrail_cli": {"budget": ABSOLUTE_LIMIT, "patterns": ["tools/"]},
+    "guardrail_cli": {"budget": ABSOLUTE_LIMIT, "patterns": ["tools/", ".claude/hooks/"]},
 }
 #: 不納管的子目錄（相對 `tools/`）——理由見上方第二條判準。
 ROOT_TOOLS_EXCLUDED_DIRS: frozenset[str] = frozenset({"tests"})
@@ -409,14 +428,20 @@ def iter_source_files() -> Iterable[Path]:
 
 
 def iter_root_tools_files() -> Iterable[Path]:
-    """monorepo 根層 `tools/` 底下納管的 `.py`（排除 `tests/` 與快取目錄）。"""
-    if not ROOT_TOOLS_ROOT.is_dir():  # pragma: no cover - 非 monorepo checkout
-        return
-    for p in ROOT_TOOLS_ROOT.rglob("*.py"):
-        parts = set(p.relative_to(ROOT_TOOLS_ROOT).parts[:-1])
-        if "__pycache__" in parts or parts & ROOT_TOOLS_EXCLUDED_DIRS:
+    """monorepo 根層護欄層納管的 `.py`：`tools/` ＋ `.claude/hooks/`（見 `ROOT_GUARD_ROOTS`）。
+
+    排除 `tests/` 與快取目錄。射程刻意**只有根層那一份** `.claude/hooks/`：
+    `AutoClaude/.claude/hooks/` 由該子專案自己的閘門管，`AISDLC_SDD/**` 各版依
+    Copy-on-Evolve 凍結不動。
+    """
+    for root in ROOT_GUARD_ROOTS:
+        if not root.is_dir():  # pragma: no cover - 非 monorepo checkout
             continue
-        yield p
+        for p in root.rglob("*.py"):
+            parts = set(p.relative_to(root).parts[:-1])
+            if "__pycache__" in parts or parts & ROOT_TOOLS_EXCLUDED_DIRS:
+                continue
+            yield p
 
 
 def classify_root_tools_file(rel_posix: str) -> tuple[str, int]:

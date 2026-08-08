@@ -19,6 +19,7 @@ from abc import ABC, abstractmethod
 from datetime import datetime
 from pathlib import Path
 
+from autoclaude.core.services.auto_resume import seconds_until_resume
 from autoclaude.infra.repositories import (
     FileStateRepository,
     InMemoryStateRepository,
@@ -120,6 +121,25 @@ class IStateRepositoryContract(ABC):
         assert loaded.scheduled_resume_at is not None
         # 確認可被解析為 ISO 8601
         datetime.fromisoformat(loaded.scheduled_resume_at)
+
+    def test_scheduled_resume_is_readable_by_the_consumer(self, tmp_path: Path):
+        """R81（HLM-S1-02）：本後端寫下的 `scheduled_resume_at`，消費端必須算得出正數秒。
+
+        為何要這一條而不是再加一支掃描器：既有 6 條契約只驗「欄位存在且解析得出
+        datetime」，於是「產出 aware、消費端只吃 naive → 靜默回 0.0」這個組合在
+        每一個後端上都是綠的。0.0 的語意是「立刻續跑」——`resume_delay_minutes: 30`
+        會變成 0 秒，`max_auto_resumes` 有幾次就連燒幾次，而且只留一行 warning。
+        本條刻意跨後端對稱，因為缺陷只在**某一個**後端上長出來。
+        """
+        repo = self._make_repo(tmp_path)
+        repo.save_checkpoint("pb_006", _make_sample_checkpoint())
+        repo.schedule_resume("pb_006", delay_minutes=30)
+        loaded = repo.load_checkpoint("pb_006")
+        secs = seconds_until_resume(loaded.scheduled_resume_at)
+        assert 0 < secs <= 1800, (
+            f"{type(repo).__name__} 寫下 {loaded.scheduled_resume_at!r}，"
+            f"消費端卻算出 {secs}s（0.0＝不等就續跑）"
+        )
 
     def test_overwrite_preserves_atomicity(self, tmp_path: Path):
         """先 save 一次，再 save 一次（不同內容），讀取應為最新版。"""

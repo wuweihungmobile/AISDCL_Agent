@@ -612,20 +612,31 @@ _UNASSIGNED_LITERAL = "未指派"
 #: 🔴 輪號刻意不寫進本檔散文：程式碼檔的輪號標籤受
 #: `TestR71CodeRoundLabelsNeverExceedLedgerCurrentRound` 管，不得超前帳本「發現情境」欄
 #: 推得的當前輪——而帳本時鐘在本輪第一列落地前仍停在上一輪，本次即實測當場轉紅。
+#: 🔴 第四次轉動：34 → 28（R80 包 C，見上一段）。
+#: 🔴 第五次轉動：28 → 18。刪掉的 10 筆分兩類，都是判準訊息**自己指名**的動作：
+#:   · **已結案 2 筆**——`DEF-42-001`（凍結版 v0.17 的 flaky，`closed-by-decision`）與
+#:     `DEF-53-001`（`hub_merge._read_yaml` 讀取上限已補，`fixed`）。
+#:   · **已補標承接輪號 8 筆**——`DEF-101-018`／`060`／`243`／`268`／`296`／`398`／
+#:     `399`／`402` 各自就地寫上「改派，承接輪次：<下一輪>」＋一句「為什麼本輪做不完」，
+#:     於是它們滿足了硬規則② 後半句的二擇一，不再需要豁免。
+#: 🔴 具體輪號刻意不寫進本檔散文：程式碼檔的輪號標籤受
+#: `TestR71CodeRoundLabelsNeverExceedLedgerCurrentRound` 管，不得超前帳本「發現情境」欄
+#: 推得的當前輪，而「交棒給下一輪」的輪號依定義就是當前輪＋1 ⇒ 寫進來即當場轉紅
+#: （本輪實測撞到）。輪號的唯一真相源是帳本那八列自己。
+#: 逐筆理由與當回合實查證據見 `docs/06_quality/CrossPlatform_R81_Ledger_Triage.md` §5。
 _UNPINNED_HANDOVER_GRANDFATHERED = frozenset({
-    "DEF-42-001", "DEF-53-001", "DEF-101-018",
-    "DEF-101-055", "DEF-101-060",
+    "DEF-101-055",
     "DEF-101-206", "DEF-101-214", "DEF-101-217", "DEF-101-234", "DEF-101-235",
-    "DEF-101-238", "DEF-101-243", "DEF-101-268", "DEF-101-296",
+    "DEF-101-238",
     "DEF-101-308", "DEF-101-309", "DEF-101-313", "DEF-101-324",
-    "DEF-101-335", "DEF-101-348", "DEF-101-377", "DEF-101-392", "DEF-101-398",
-    "DEF-101-399", "DEF-101-400", "DEF-101-401", "DEF-101-402", "DEF-101-412",
+    "DEF-101-335", "DEF-101-348", "DEF-101-377", "DEF-101-392",
+    "DEF-101-400", "DEF-101-401", "DEF-101-412",
 })
 #: shrink-only 棘輪上限（形狀比照 `tools/tests/` 的檔數棘輪）。只能往小改。
 #: 🔴 R80 包 C 下修 34 → 28：`DEF-01-007`／`DEF-100-002`／`DEF-101-021`／`022`／`025`／
 #: `418` 六筆已結案（逐筆實查見 `CrossPlatform_R80_Scan_Findings.md` §C），不再需要豁免。
 #: 是判準自己指名的動作（訊息逐字要求刪除並下修為 28），不是放寬。
-_UNPINNED_HANDOVER_CEILING = 28
+_UNPINNED_HANDOVER_CEILING = 18
 
 
 def unpinned_handover_problems(ledger_text: str) -> list[str]:

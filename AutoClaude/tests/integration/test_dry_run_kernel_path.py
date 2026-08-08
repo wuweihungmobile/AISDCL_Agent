@@ -239,3 +239,28 @@ class TestAutoResumeHelpers:
 
     def test_seconds_until_resume_invalid(self):
         assert seconds_until_resume("not-a-date") == 0.0
+
+    # ── R81（HLM-S1-02）：aware 形態零覆蓋是這個 P0 潛伏的原因 ──────────────
+    # 上面 4 支全部餵 naive `datetime.now()`，於是「Pg 後端產出 aware → 消費端
+    # 相減拋 TypeError → 被吞掉回 0.0」在測試庫裡是**正確通過**的。0.0 的語意
+    # 是「立刻續跑」，失效方向是最壞那一邊。
+
+    def test_seconds_until_resume_accepts_utc_aware(self):
+        from datetime import UTC, datetime, timedelta
+        future = (datetime.now(UTC) + timedelta(minutes=30)).isoformat(timespec="seconds")
+        secs = seconds_until_resume(future)
+        assert 1700 < secs <= 1800, f"aware 形態被算成 {secs}s"
+
+    def test_seconds_until_resume_accepts_a_non_utc_offset(self):
+        # 判準不能只認 UTC：任何帶 offset 的字串都要算得對，否則換一個
+        # 產出端的時區寫法就又失明一次。
+        from datetime import datetime, timedelta, timezone
+        tz = timezone(timedelta(hours=8))
+        future = (datetime.now(tz) + timedelta(minutes=30)).isoformat(timespec="seconds")
+        secs = seconds_until_resume(future)
+        assert 1700 < secs <= 1800, f"非 UTC offset 形態被算成 {secs}s"
+
+    def test_seconds_until_resume_past_aware_is_zero_not_negative(self):
+        from datetime import UTC, datetime, timedelta
+        past = (datetime.now(UTC) - timedelta(minutes=5)).isoformat(timespec="seconds")
+        assert seconds_until_resume(past) == 0.0

@@ -29,6 +29,14 @@ core.hooksPath 目前值是否等於該目錄、三支 hook 檔是否齊備）�
 
 Exit code：0 = hooks 已生效（或不在 git repo 內、無法判定）；
            1 = 偵測到未生效（已印出警告；advisory，呼叫端不應據此中止）。
+
+🔴 射程（QA-R81 N-3；照實寫在檔頭，因為誤用已經真的發生過）：本工具驗的是
+**載具存在性**（git hooks 的 core.hooksPath ＋ Claude Code hook 的 exec form 載具），
+**不驗 hook 的形態**。把一條 shell form 條目注回 `AutoClaude/.claude/settings.json`
+（＝退掉 R81 P7 的一部分）後本工具仍回 rc=0，而同一棵樹上
+`python -m unittest test_check_hooks_liveness`（於 tools/tests/）當場 FAILED 並指名
+「shell form 條目實測 1、基準 0」。⇒ 拿本工具的 rc 當「exec form 轉換沒有被退回」
+的憑證是**假綠**；形態那一面的唯一憑證是那支 unittest。
 """
 from __future__ import annotations
 
@@ -233,5 +241,15 @@ def check_hooks_liveness() -> bool:
     return False
 
 
+#: CLI 恆印的射程告示（檔頭 WHY 的一行版）。刻意印在 `__main__` 而不是函式裡：
+#: 誤用發生在**讀 rc 的人**身上，而讀 rc 的人一定是走 CLI 這條路。
+SCOPE_NOTICE = (
+    "[hooks liveness] 射程＝git hooks 生效性 ＋ Claude Code hook 載具存在性。"
+    "**形態判準（exec form / shell form 普查）不在本工具射程內**，"
+    "本工具 rc=0 不代表沒有人把 hook 退回 shell form——"
+    "那一面請跑：python -m unittest test_check_hooks_liveness（於 tools/tests/）"
+)
+
 if __name__ == "__main__":
+    print(SCOPE_NOTICE)
     sys.exit(0 if check_hooks_liveness() else 1)

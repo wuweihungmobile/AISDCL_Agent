@@ -1,6 +1,6 @@
 {
   "$schema": "https://json.schemastore.org/claude-code-settings.json",
-  "_comment": "🔴 R80 QA-03 射程告示：本檔的 6 條 hook **仍是 shell form**（只有 `command`、沒有 `args`）。R80 把 hook 條目轉成 exec form 以治「Windows 上每觸發一次 hook 就閃一個 console 視窗」，但**只轉了 monorepo 根層那一份 `.claude/settings.json`**——所以在 AutoClaude 子專案 session 下，閃窗一次都沒少。這不是被遺忘的事：`tools/lib/hook_wiring.py` 的 `SHELL_FORM_CENSUS` 把本檔登記為「6 條未轉」，判準是相等（多一條＝退步、轉好了卻沒下修基準也紅），回歸鎖 `tools/tests/test_check_hooks_liveness.py::TestExecFormConversionScope`。轉換本檔留給下一輪；轉換時要連同根層那套一起走：exec form 的 command 只能是一個執行檔路徑（塞不進 `python -c` 那段程式碼），故必須改用 `.claude/hooks/_hook_launcher.py`，且每個邏輯 hook 要成對宣告「Windows 載具 + POSIX 載具」（少一邊會在該平台靜默失去 hook，而 spawn 失敗是 fail-open、不會有任何東西轉紅）。SD_09 W0 三次 zero-trust audit 後建立的 Hook 治理；哲學：Hook 僅補強 LLM 行為，不替代 CLAUDE.md prompt 規範。env.PYTHONUTF8=1 為 zh-TW Windows（cp950）防禦縱深：強制 hook 子行程 stdin/stdout/stderr 一律 UTF-8，跨平台無副作用。hook command 以 python -c shim 錨定專案根（python 自行讀 CLAUDE_PROJECT_DIR，不經 shell 展開故 Windows cmd 亦可用；缺檔 fail-open exit 0）——修復 cwd≠專案根時 python 缺檔 exit 2 誤觸 PreToolUse deny 之 P0（四方複審第四輪）。",
+  "_comment": "🔴 R81：本檔的 6 條 hook 已由 shell form 轉成 **exec form**（帶 `args`），6 條 → 12 條。病（R80 定案，勿重推導）：Windows 上 shell form 的 hook 是用 Git Bash 的 `bash.exe -c` 起的，而 `bash.exe` 是 console 子系統程式 ⇒ 每觸發一次 hook 就閃一個 console 視窗。exec form 不經 shell、直接 spawn，`command` 指向 GUI 子系統的 `pythonw.exe` 即零視窗。R80 只轉了 monorepo 根層那一份 `.claude/settings.json`，本檔留到 R81；在此之前 AutoClaude 子專案 session 下閃窗一次都沒少。每個邏輯 hook 兩條＝「Windows 載具 + POSIX 載具」，**各平台恰好一條成立、另一條 spawn 失敗**（Windows 上 `.py` 直接 spawn 回 EFTYPE、POSIX 上 `.venv/Scripts/pythonw.exe` 回 ENOENT），而 CC 對 spawn 失敗是 **fail-open**（只記一行 ERROR、工具照跑）⇒ 兩條不會雙跑。🔴 這也是本形態最大的風險：載具解析不到時**六支守衛會全部靜默失效，而螢幕上的表徵就是「終於不閃窗了」，與修好完全相同** ⇒ 驗收必須正負兩面一起看（正面證據＝`claude -p --debug hooks` 的 `Hook … success`；見根 CLAUDE.md〈鐵律一之二〉）。載具兩件事刻意如此：①Windows 側走 `${CLAUDE_PROJECT_DIR}/.venv/Scripts/pythonw.exe`——AutoClaude 子專案 session 的 `CLAUDE_PROJECT_DIR` 就是 `AutoClaude/`（本檔舊 shim 以 `os.path.join(CLAUDE_PROJECT_DIR, 'tools/hooks/…')` 定位目標腳本，已隱含同一前提），所以那是 AutoClaude 自己的 venv，由 `AutoClaude/tools/bootstrap.*` 建出；②`args[0]`／POSIX 側的啟動器走 `${CLAUDE_PROJECT_DIR}/../.claude/hooks/_hook_launcher.py`——啟動器**只有一個家**（monorepo 根層），刻意不複製第二份到本子專案：同一份知識住兩個家、只有一個家會被改，是本 repo 的頭號病（DEF-101-778 判例）。`../` 只依賴「AutoClaude 是 monorepo 根的直屬子目錄」這個 repo 結構事實，不含任何機器專屬絕對路徑。啟動器行為與舊 `python -c` shim **逐項等價**：自行讀 `CLAUDE_PROJECT_DIR`（CC 注入、不經 shell 展開）、未設時回退 cwd、`os.chdir(root)`、`sys.argv=[目標絕對路徑]+其餘引數`、**目標腳本缺檔＝fail-open exit 0**——修復「cwd≠專案根時 python 缺檔 exit 2 誤觸 PreToolUse deny、全工具硬鎖死」P0（四方複審第四輪）。解析本檔的唯一真相源＝`tools/lib/hook_wiring.py`（**只讀 `command` 找腳本名的解析器在 exec form 下會掃出空集合而恆綠**）；「本檔還剩幾條 shell form」由 `hook_wiring.SHELL_FORM_CENSUS` 以**相等**判準登記（現為 0），回歸鎖 `tools/tests/test_check_hooks_liveness.py::TestExecFormConversionScope`。SD_09 W0 三次 zero-trust audit 後建立的 Hook 治理；哲學：Hook 僅補強 LLM 行為，不替代 CLAUDE.md prompt 規範。env.PYTHONUTF8=1 為 zh-TW Windows（cp950）防禦縱深：強制 hook 子行程 stdin/stdout/stderr 一律 UTF-8，跨平台無副作用。",
   "env": {
     "PYTHONUTF8": "1"
   },
@@ -11,7 +11,18 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python -c \"import os,sys,runpy; r=os.environ.get('CLAUDE_PROJECT_DIR') or os.getcwd(); p=os.path.join(r,*sys.argv[1].split('/')); os.path.isfile(p) or sys.exit(0); os.chdir(r); sys.argv=[p]+sys.argv[2:]; runpy.run_path(p,run_name='__main__')\" tools/hooks/enforce_docs_path.py"
+            "command": "${CLAUDE_PROJECT_DIR}/.venv/Scripts/pythonw.exe",
+            "args": [
+              "${CLAUDE_PROJECT_DIR}/../.claude/hooks/_hook_launcher.py",
+              "tools/hooks/enforce_docs_path.py"
+            ]
+          },
+          {
+            "type": "command",
+            "command": "${CLAUDE_PROJECT_DIR}/../.claude/hooks/_hook_launcher.py",
+            "args": [
+              "tools/hooks/enforce_docs_path.py"
+            ]
           }
         ]
       }
@@ -22,15 +33,49 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python -c \"import os,sys,runpy; r=os.environ.get('CLAUDE_PROJECT_DIR') or os.getcwd(); p=os.path.join(r,*sys.argv[1].split('/')); os.path.isfile(p) or sys.exit(0); os.chdir(r); sys.argv=[p]+sys.argv[2:]; runpy.run_path(p,run_name='__main__')\" tools/hooks/loc_budget_check.py"
+            "command": "${CLAUDE_PROJECT_DIR}/.venv/Scripts/pythonw.exe",
+            "args": [
+              "${CLAUDE_PROJECT_DIR}/../.claude/hooks/_hook_launcher.py",
+              "tools/hooks/loc_budget_check.py"
+            ]
           },
           {
             "type": "command",
-            "command": "python -c \"import os,sys,runpy; r=os.environ.get('CLAUDE_PROJECT_DIR') or os.getcwd(); p=os.path.join(r,*sys.argv[1].split('/')); os.path.isfile(p) or sys.exit(0); os.chdir(r); sys.argv=[p]+sys.argv[2:]; runpy.run_path(p,run_name='__main__')\" tools/hooks/check_sh_eol.py"
+            "command": "${CLAUDE_PROJECT_DIR}/../.claude/hooks/_hook_launcher.py",
+            "args": [
+              "tools/hooks/loc_budget_check.py"
+            ]
           },
           {
             "type": "command",
-            "command": "python -c \"import os,sys,runpy; r=os.environ.get('CLAUDE_PROJECT_DIR') or os.getcwd(); p=os.path.join(r,*sys.argv[1].split('/')); os.path.isfile(p) or sys.exit(0); os.chdir(r); sys.argv=[p]+sys.argv[2:]; runpy.run_path(p,run_name='__main__')\" tools/hooks/check_ps1_encoding.py",
+            "command": "${CLAUDE_PROJECT_DIR}/.venv/Scripts/pythonw.exe",
+            "args": [
+              "${CLAUDE_PROJECT_DIR}/../.claude/hooks/_hook_launcher.py",
+              "tools/hooks/check_sh_eol.py"
+            ]
+          },
+          {
+            "type": "command",
+            "command": "${CLAUDE_PROJECT_DIR}/../.claude/hooks/_hook_launcher.py",
+            "args": [
+              "tools/hooks/check_sh_eol.py"
+            ]
+          },
+          {
+            "type": "command",
+            "command": "${CLAUDE_PROJECT_DIR}/.venv/Scripts/pythonw.exe",
+            "args": [
+              "${CLAUDE_PROJECT_DIR}/../.claude/hooks/_hook_launcher.py",
+              "tools/hooks/check_ps1_encoding.py"
+            ],
+            "timeout": 10
+          },
+          {
+            "type": "command",
+            "command": "${CLAUDE_PROJECT_DIR}/../.claude/hooks/_hook_launcher.py",
+            "args": [
+              "tools/hooks/check_ps1_encoding.py"
+            ],
             "timeout": 10
           }
         ]
@@ -41,11 +86,33 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python -c \"import os,sys,runpy; r=os.environ.get('CLAUDE_PROJECT_DIR') or os.getcwd(); p=os.path.join(r,*sys.argv[1].split('/')); os.path.isfile(p) or sys.exit(0); os.chdir(r); sys.argv=[p]+sys.argv[2:]; runpy.run_path(p,run_name='__main__')\" tools/hooks/check_lang.py"
+            "command": "${CLAUDE_PROJECT_DIR}/.venv/Scripts/pythonw.exe",
+            "args": [
+              "${CLAUDE_PROJECT_DIR}/../.claude/hooks/_hook_launcher.py",
+              "tools/hooks/check_lang.py"
+            ]
           },
           {
             "type": "command",
-            "command": "python -c \"import os,sys,runpy; r=os.environ.get('CLAUDE_PROJECT_DIR') or os.getcwd(); p=os.path.join(r,*sys.argv[1].split('/')); os.path.isfile(p) or sys.exit(0); os.chdir(r); sys.argv=[p]+sys.argv[2:]; runpy.run_path(p,run_name='__main__')\" tools/hooks/claude_md_freshness.py"
+            "command": "${CLAUDE_PROJECT_DIR}/../.claude/hooks/_hook_launcher.py",
+            "args": [
+              "tools/hooks/check_lang.py"
+            ]
+          },
+          {
+            "type": "command",
+            "command": "${CLAUDE_PROJECT_DIR}/.venv/Scripts/pythonw.exe",
+            "args": [
+              "${CLAUDE_PROJECT_DIR}/../.claude/hooks/_hook_launcher.py",
+              "tools/hooks/claude_md_freshness.py"
+            ]
+          },
+          {
+            "type": "command",
+            "command": "${CLAUDE_PROJECT_DIR}/../.claude/hooks/_hook_launcher.py",
+            "args": [
+              "tools/hooks/claude_md_freshness.py"
+            ]
           }
         ]
       }

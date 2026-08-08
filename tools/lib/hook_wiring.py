@@ -1,50 +1,57 @@
 #!/usr/bin/env python3
-"""`.claude/settings.json` 的 hook 佈線解析 — **唯一真相源**（R80）。
-
-WHY 這支檔非有不可（立案量測，不是預防性設計）
-================================================
-Claude Code 的 hook 條目有兩種形態，而**腳本路徑住在不同的欄位**：
-
-  · **shell form**（舊）：`{"command": "python -c \"…runpy…\" .claude/hooks/x.py"}`
-    → 腳本名在 `command` 字串裡。Windows 上這種形態經 Git Bash 的 `bash.exe -c` 起，
-      而 `bash.exe` 是 console 子系統程式 ⇒ **每觸發一次就閃一個 console 視窗**。
-  · **exec form**（新）：`{"command": "<執行檔>", "args": ["…/_hook_launcher.py",
-    ".claude/hooks/x.py", …]}` → 不經 shell、零視窗，但腳本名**結構性地搬到 `args`**。
-
-R80 實測：轉成 exec form 之後，repo 內「只讀 `command` 字串去找 hook 腳本名」的解析器
-**全部當場失明**——掃出來的腳本集合由 6 支變成 0~1 支。而那批解析器正是用來守
-「文件宣稱 ↔ 實際註冊」「hook 註冊面只准縮」「根 CLAUDE.md 必須提到每一支已註冊
-hook」「已註冊腳本必須有 UTF-8 stdio 保護」的判準。
-
-🔴 **本段刻意不寫死「有幾個」**（R80 二審 `NEW-ARCH-R80B-07`＝`QA2-N1`）：那個數字原本
-寫在**三個家**（本段一處、下方 WHY 一處、`tools/tests/test_context_budget_guard.py` 的
-委派註解一處）而只有**兩個值**（七／八），且下方清單第 7 項在落地當輪就已過期。
-消費端會增減，是量測值不是常數 ⇒ 現查：
-`Grep pattern:"import hook_wiring" path:<repo 根>`（或 `hook_entry_argv|settings_targets|
-entries_launching` 這幾個入口名）。
-
-🔴 **失明的後果比彈窗嚴重、而且方向是「看起來變乾淨」**：分母掃出 0 支 ⇒ 沒有東西
-可違反 ⇒ 那幾道鎖安靜地變成恆綠，rc 與「正確地全部通過」一模一樣。這正是本 repo
-反覆判過的兩個形態（「檔案在、但守的是別的東西」／「早退遮蔽訊號」）。
-
-所以本檔的存在理由不是「抽共用層比較漂亮」，是：**同一份『這個 hook 條目到底會跑
-哪支腳本』的知識，先前散住在好幾個家裡，改一種形態就要同時改每一處，而漏掉任何一處
-都不會有任何東西轉紅。** 只依賴 stdlib（hook／護欄層執行環境不保證有第三方套件，
-同 `tools/lib/platform_utils.py` 檔頭的約定）。
-
-消費者（改動本檔的判準前先確認每一處仍成立；**清單是導覽，權威是上面那條現查指令**）
---------------------------------------------------------------------------------
-  · `tools/tests/test_subprocess_encoding_hygiene.py::hook_command_scripts`
-  · `tools/tests/test_check_hooks_liveness.py::matchers_for_script`
-  · `tools/tests/test_doc_loc_baseline_freshness_r60.py::registered_hook_basenames`（經上一項）
-  · `tools/tests/test_context_budget_guard.py`（R80 二審訂正：此處 R80 落地當輪就已改為
-    委派本檔的 `hook_entry_argv`，而清單卻寫著「仍是 command-only」——**落地當輪即過期**）
-  · `tools/check_hooks_liveness.py`（延後 import，呼叫 `carrier_liveness_problems`；
-    R80 二審補列，先前整支漏在清單外）
-  · `AISDLC_SDD/scripts/router_hook_coverage_lint.py::router_wired_events`
-  · `AISDLC_SDD/scripts/tests/test_pretooluse_matcher_task.py::is_act020_carrier`
-  · `AISDLC_SDD/scripts/tests/test_hook_wiring_cwd_safety.py`（用 `hook_entry_argv`）
-"""
+"""`.claude/settings.json` 的 hook 佈線解析 — **唯一真相源**（R80）。"""
+#
+# 🔴 為何以下 WHY 是 `#` 註解而不是 docstring（R81；**一個字都沒刪，只換承載形式**）：
+# 本檔受 `guardrail_lib<=400` 分級管，而 `AutoClaude/tools/check_loc_budget.count_loc()`
+# **把 docstring 行計入、`#` 行排除**——該閘門的 TIER-WARN 訊息逐字這樣指路。同層級的
+# 姊妹模組全是這個體例（`ci_liveness.py` 544 raw/379 loc、`skip_tag_policy.py` 596/309、
+# `defect_ledger_index.py` 661/386）；本檔一度是唯一把 WHY essay 放進 docstring 的例外
+# （註解佔比 12%，全 `tools/lib/` 最低），於是**同樣的散文量**讓它在同為 544 raw 時撞到
+# 407/400。⇒ 要加 WHY 請往下寫 `#`；把這段搬回 docstring 會直接讓 LOC 閘門再紅一次。
+#
+# WHY 這支檔非有不可（立案量測，不是預防性設計）
+# ================================================
+# Claude Code 的 hook 條目有兩種形態，而**腳本路徑住在不同的欄位**：
+#
+#   · **shell form**（舊）：`{"command": "python -c \"…runpy…\" .claude/hooks/x.py"}`
+#     → 腳本名在 `command` 字串裡。Windows 上這種形態經 Git Bash 的 `bash.exe -c` 起，
+#       而 `bash.exe` 是 console 子系統程式 ⇒ **每觸發一次就閃一個 console 視窗**。
+#   · **exec form**（新）：`{"command": "<執行檔>", "args": ["…/_hook_launcher.py",
+#     ".claude/hooks/x.py", …]}` → 不經 shell、零視窗，但腳本名**結構性地搬到 `args`**。
+#
+# R80 實測：轉成 exec form 之後，repo 內「只讀 `command` 字串去找 hook 腳本名」的解析器
+# **全部當場失明**——掃出來的腳本集合由 6 支變成 0~1 支。而那批解析器正是用來守
+# 「文件宣稱 ↔ 實際註冊」「hook 註冊面只准縮」「根 CLAUDE.md 必須提到每一支已註冊
+# hook」「已註冊腳本必須有 UTF-8 stdio 保護」的判準。
+#
+# 🔴 **本段刻意不寫死「有幾個」**（R80 二審 `NEW-ARCH-R80B-07`＝`QA2-N1`）：那個數字原本
+# 寫在**三個家**（本段一處、下方 WHY 一處、`tools/tests/test_context_budget_guard.py` 的
+# 委派註解一處）而只有**兩個值**（七／八），且下方清單第 7 項在落地當輪就已過期。
+# 消費端會增減，是量測值不是常數 ⇒ 現查：
+# `Grep pattern:"import hook_wiring" path:<repo 根>`（或 `hook_entry_argv|settings_targets|
+# entries_launching` 這幾個入口名）。
+#
+# 🔴 **失明的後果比彈窗嚴重、而且方向是「看起來變乾淨」**：分母掃出 0 支 ⇒ 沒有東西
+# 可違反 ⇒ 那幾道鎖安靜地變成恆綠，rc 與「正確地全部通過」一模一樣。這正是本 repo
+# 反覆判過的兩個形態（「檔案在、但守的是別的東西」／「早退遮蔽訊號」）。
+#
+# 所以本檔的存在理由不是「抽共用層比較漂亮」，是：**同一份『這個 hook 條目到底會跑
+# 哪支腳本』的知識，先前散住在好幾個家裡，改一種形態就要同時改每一處，而漏掉任何一處
+# 都不會有任何東西轉紅。** 只依賴 stdlib（hook／護欄層執行環境不保證有第三方套件，
+# 同 `tools/lib/platform_utils.py` 檔頭的約定）。
+#
+# 消費者（改動本檔的判準前先確認每一處仍成立；**清單是導覽，權威是上面那條現查指令**）
+# --------------------------------------------------------------------------------
+#   · `tools/tests/test_subprocess_encoding_hygiene.py::hook_command_scripts`
+#   · `tools/tests/test_check_hooks_liveness.py::matchers_for_script`
+#   · `tools/tests/test_doc_loc_baseline_freshness_r60.py::registered_hook_basenames`（經上一項）
+#   · `tools/tests/test_context_budget_guard.py`（R80 二審訂正：此處 R80 落地當輪就已改為
+#     委派本檔的 `hook_entry_argv`，而清單卻寫著「仍是 command-only」——**落地當輪即過期**）
+#   · `tools/check_hooks_liveness.py`（延後 import，呼叫 `carrier_liveness_problems`；
+#     R80 二審補列，先前整支漏在清單外）
+#   · `AISDLC_SDD/scripts/router_hook_coverage_lint.py::router_wired_events`
+#   · `AISDLC_SDD/scripts/tests/test_pretooluse_matcher_task.py::is_act020_carrier`
+#   · `AISDLC_SDD/scripts/tests/test_hook_wiring_cwd_safety.py`（用 `hook_entry_argv`）
 from __future__ import annotations
 
 import os
@@ -78,6 +85,12 @@ _PY_TOKEN_RE = re.compile(r"[\w./\\${}-]*\.py")
 
 #: 機器專屬絕對路徑：磁碟機代號、UNC、POSIX 家目錄、WSL 掛載（DEF-101-778 判例）。
 _ABS_RE = re.compile(r"(?i)(^[a-z]:[\\/])|(^\\\\)|(^/users/)|(^/home/)|(^/mnt/[a-z]/)")
+
+#: 一段或多段前導 `../`。**子專案 session 的 `CLAUDE_PROJECT_DIR` 是子專案目錄**，
+#: 而啟動器只有一個家（monorepo 根層）⇒ 子專案的條目寫成
+#: `${CLAUDE_PROJECT_DIR}/../.claude/hooks/_hook_launcher.py`（R81 轉換 AutoClaude 那份
+#: 時採用；刻意不複製第二份啟動器——同一份知識住兩個家是本 repo 的頭號病）。
+_PARENT_PREFIX_RE = re.compile(r"^(?:\.\./)+")
 
 
 def is_exec_form(hook: dict) -> bool:
@@ -153,10 +166,27 @@ def carrier_available(hook: dict, project_dir: str, *, exists=os.path.exists) ->
 
 
 def _normalise(token: str) -> str:
-    """把一個路徑 token 正規化成 repo 相對的 posix 路徑（無佔位符、無前導斜線）。"""
+    """把一個路徑 token 正規化成專案相對的 posix 路徑（無佔位符、無前導斜線／`../`）。
+
+    🔴 前導 `../` 一併剝掉（R81）：不剝的話，子專案條目裡的
+    `${CLAUDE_PROJECT_DIR}/../.claude/hooks/_hook_launcher.py` 與 `LAUNCHER_REL`
+    比不相等 ⇒ `hook_entry_targets()` 會把**載具**當成一支「已註冊的 hook 腳本」算進去，
+    而「載具不是守衛」正是那個函式特意要區分的事（見其 docstring）。
+    """
     rel = token.replace("\\", "/")
     rel = rel.replace(PROJECT_DIR_PLACEHOLDER, "")
-    return rel.lstrip("/")
+    return _PARENT_PREFIX_RE.sub("", rel.lstrip("/"))
+
+
+def is_posix_carrier(command: str) -> bool:
+    """`command` 是不是 POSIX 載具（＝啟動器本身），`../` 前綴視為同一個載具。
+
+    為何不是 `== POSIX_CARRIER` 的字面比對：子專案（AutoClaude）的
+    `CLAUDE_PROJECT_DIR` 指向子專案目錄，而啟動器只有一個家 ⇒ 那些條目以 `../` 回到
+    monorepo 根層取用**同一支檔**。字面比對會把它們判成「沒有宣告 POSIX 載具」，於是
+    `posix_carrier_problems()` 對整個子專案靜默失明——而那一側的失效同樣是 fail-open。
+    """
+    return _normalise(str(command)) == LAUNCHER_REL
 
 
 def hook_entry_targets(hook: dict, *, include_launcher: bool = False) -> list[str]:
@@ -306,7 +336,7 @@ def declared_posix_carriers(settings: dict) -> set[str]:
         for block in blocks or []
         for hook in block.get("hooks") or []
         if is_command_hook(hook) and is_exec_form(hook)
-        and str(hook.get("command", "")) == POSIX_CARRIER
+        and is_posix_carrier(hook.get("command", ""))
     }
 
 
@@ -457,18 +487,20 @@ FROZEN_SETTINGS_PREFIX = "AISDLC_SDD/AISDLC_SDD_v"
 
 #: **活躍**（真的會被 Claude Code 載入）的 settings 檔 → 該檔目前殘留的 shell form 條目數。
 #:
-#: 🔴 誠實劃界，這正是本表的存在理由：R80 的 exec form 只轉了**根層那一份**。
-#: AutoClaude 子專案那 6 條仍是 shell form ⇒ 在 AutoClaude 子專案 session 下閃窗一次
-#: 都沒少，而根 `CLAUDE.md` 一度把它寫成通則。把這件事寫成散文的代價是「另外那 6 條
-#: 退回 shell form」永遠不會轉紅；寫成 0 則當場假紅。所以它是**登記在案的量測值**。
+#: 🔴 本表的存在理由（史實，不是現況）：R80 的 exec form 只轉了**根層那一份**，
+#: AutoClaude 子專案那 6 條當時仍是 shell form ⇒ 在 AutoClaude 子專案 session 下閃窗
+#: 一次都沒少，而根 `CLAUDE.md` 一度把它寫成通則。把「哪一份轉了」寫成散文的代價是
+#: 「某一份退回 shell form」永遠不會轉紅，所以它被登記成**量測值**。
+#: R81 把 AutoClaude 那 6 條轉完（12 條 exec form 條目），故本表**兩格皆為 0**——
+#: 表歸零不代表可以拆掉：它現在守的是「不准有人再退回去」。
 #:
 #: 判準是**相等**（形狀同 `tools/lib/skip_tag_policy._SITE_CLASS_CENSUS`）：
 #: 多了＝有人退回 shell form（那一份的閃窗回來了）；少了＝有人轉好了卻沒回來改這張表，
 #: 而餘裕就是日後無聲加回去的破口。掃描面是**現查磁碟**，不是寫死清單——新開一份活躍
-#: settings 卻不入表也會紅。轉換 AutoClaude 那一份留給下一輪（輪號不在此寫死）。
+#: settings 卻不入表也會紅。
 SHELL_FORM_CENSUS: dict[str, int] = {
     ".claude/settings.json": 0,
-    "AutoClaude/.claude/settings.json": 6,
+    "AutoClaude/.claude/settings.json": 0,
 }
 
 

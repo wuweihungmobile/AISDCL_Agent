@@ -95,7 +95,9 @@ mkdir -p "$TO"
 # 的敵意工作樹 .gitattributes 做注入，旗標一旦回來即紅）。
 git -C "$TOP" archive "HEAD:$FROM_REL" | tar -x -C "$TO"
 
-_N="$(git -C "$TOP" ls-tree -r --name-only "HEAD:$FROM_REL" | wc -l | tr -d ' ')"
+# -c core.quotepath=false（R81 XPL-S1-01）：這裡今天只 `wc -l` 故引號化不改數字，但
+# 慣例統一比「逐站點判斷這次要不要」便宜——下一個人把 `wc -l` 換成逐檔處理時不會踩到。
+_N="$(git -C "$TOP" -c core.quotepath=false ls-tree -r --name-only "HEAD:$FROM_REL" | wc -l | tr -d ' ')"
 # `$VAR` 後緊跟全形字元必須用 `${VAR}`——macOS bash 3.2 UTF-8 locale 會把全形字元
 # 首位元組吃進變數名，配 set -u 直接 unbound variable 崩潰。
 echo "✅ Copy-on-Evolve（git archive，純 tracked）: ${FROM} → ${TO}（匯出 ${_N} tracked 檔；結構性排除所有 untracked/gitignored runtime 產物，含 build/reports/ 與 formal/states/，DEF-38-001）"

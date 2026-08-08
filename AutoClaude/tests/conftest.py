@@ -193,8 +193,29 @@ def pytest_configure(config):  # noqa: ARG001
             return
         _, why = gate.pg_autodetect()
         _PG_AUTODETECT_NOTE = why
+        _autoenable_real_pg_e2e()
     except Exception as exc:  # noqa: BLE001 — 見上方第 ⑤ 條
         _PG_AUTODETECT_NOTE = f"跳過：自動偵測本身出錯（{type(exc).__name__}: {exc}）"
+
+
+def _autoenable_real_pg_e2e() -> None:
+    """PG 偵測到了就把 `SD07_REAL_PG_E2E_ENABLED` 一起打開（R81 包 F）。
+
+    🔴 立案理由（掌舵者訴求 S3「徹底解決 skipped」）：本 repo 的紀律逐字寫著
+    「skip 理由寫『需要 X』≠ X 缺席」——`pg_real` 這一族的真相是**未啟用**，不是缺件：
+    同一個 `pytest_configure` 上一行才剛把一顆健康的 PG 的 DSN 注進環境變數，下一秒卻
+    因為另一個旗標沒設而把 3 支測試整組 skip 掉。兩件事的判準來源必須一致，否則
+    「本機有 PG」與「本機的 pg_real 有在跑」會永遠是兩個答案。
+
+    刻意只在**沒有人顯式設過**時才動：顯式設 `false` 是一個決定（perf machine／CI 想關掉
+    它），自動偵測不得覆寫人的決定。也刻意只在 DSN 真的就位後才開——開了旗標卻沒有 DSN
+    只會把 skip 從一句話換成另一句話。
+    """
+    if os.environ.get("SD07_REAL_PG_E2E_ENABLED"):
+        return
+    if not (os.environ.get("AUTOCLAUDE_TEST_PG_DSN") or os.environ.get("AUTOCLAUDE_DB_DSN")):
+        return
+    os.environ["SD07_REAL_PG_E2E_ENABLED"] = "true"
 
 
 # SD_09 W2 後續處理（2026-05-21）— pytest-randomly cross-test cwd state leak 防漏 fixture
@@ -300,7 +321,11 @@ def pytest_collection_modifyitems(config, items):  # noqa: ARG001
     if _resolve_real_pg_dsn() is not None:
         return  # 啟用條件滿足 — 不需 skip
     skip_marker = pytest.mark.skip(
-        reason="SD_07 pg_real：未啟用 SD07_REAL_PG_E2E_ENABLED=true 或缺 DSN（PM #2）"
+        reason="[ENV-DISABLED] SD_07 pg_real：未啟用 SD07_REAL_PG_E2E_ENABLED=true 或缺 "
+               "DSN（PM #2）。【未啟用，非缺件】本機配方（R81 包 F 實測有效）："
+               "$env:SD07_REAL_PG_E2E_ENABLED='true'（DSN 由本 conftest 的 PG autodetect "
+               "自動注入，通常不必手設）；再跑 `python tools/seed_kb.py --mock-pg-seed "
+               "--pg-dsn <同一個 DSN>` 備妥語料，否則會換到更深的語料缺件閘"
     )
     for item in items:
         if "pg_real" in item.keywords:

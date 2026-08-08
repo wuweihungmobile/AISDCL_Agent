@@ -1515,6 +1515,18 @@ _ZERO_GUARD_BARE_PY_SITES = {
         "不經 PATH 解析。粗粒度判準看不出「字面值當路徑片段」與「當指令首 token」的差別，"
         "此筆即該取捨的成本"
     ),
+    "tools/lib/script_interface_parity.py": (
+        "非呼叫：`_EXTERNAL_BINS` 是「兩平台同名外部執行檔」的**比對用白名單資料**"
+        "（`\"python\", \"python3\"` 與 act／docker／ruff 等並列），供 .sh／.ps1 介面等價"
+        "判準辨識指令首 token 用；本檔一次都不 spawn 它們。與同表 "
+        "`tools/check_wrapper_thinness.py`（禁用子字串樣式字面值）同型。"
+        "🔴 立此筆的成因與 `tools/probe/xplat_injection_matrix.py` 那筆**逐字同型**："
+        "該檔 commit 前是 untracked、本鎖掃描面只看 git-tracked ⇒ 它在 commit 的那一刻"
+        "才首次進入射程並當場轉紅（收尾跑的是 commit 前的樹，所以當時是綠的）。"
+        "「commit 改變 tracked 狀態使掃描面漂移」至此已是**第三次**（R78 收輪、R79 那筆、"
+        "本筆）——前兩次都只把個案登記掉，沒有人去改「收尾在 commit 前跑」這個順序，"
+        "所以它必然再來一次。"
+    ),
     "tools/sync_onboarding_baselines.py": (
         "非呼叫：`argparse.ArgumentParser(prog=\"python tools/sync_onboarding_baselines.py\")`"
         "——只用於 usage/help 輸出，與上面 `AutoClaude/autoclaude/tools/sdd_compile.py` 同型。"

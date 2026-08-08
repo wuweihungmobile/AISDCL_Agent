@@ -168,11 +168,20 @@ def test_claude_project_dir_anchors_autoclaude_deny_semantics():
                for rel in wiring.hook_entry_targets(h, include_launcher=True))
     ]
     assert hooks, "AutoClaude settings.json 找不到 enforce_docs_path 佈線"
+    # 🔴 R81：本檔轉成 exec form 之後，這裡不能再拿 `hooks[0]` 就跑——那是**Windows 載具**
+    # 那一條（`.venv/Scripts/pythonw.exe`），在 mac/Linux 上 spawn 直接 FileNotFoundError，
+    # 而跨平台配對的另一半本來就是刻意 fail-open、不是缺陷。與同檔 root router 那個 case
+    # 用同一個 `_viable()` 篩選；篩完為空要出聲（不得靜默跳過＝本平台整支失去 hook）。
+    runnable = [h for h in hooks if _viable(h, ac_root)]
+    assert runnable, (
+        "AutoClaude settings.json 有 enforce_docs_path 佈線，但**本平台一條都跑不起來** ⇒ "
+        f"這台機器上該守衛整支靜默失效。條目：{[_describe(h) for h in hooks]}"
+    )
     payload = json.dumps(
         {"tool_name": "Write", "tool_input": {"file_path": "evil_probe.md", "content": "x"}}
     )
     with tempfile.TemporaryDirectory() as tmp:
-        res = _run(hooks[0], cwd=tmp, extra_env={"CLAUDE_PROJECT_DIR": ac_root},
+        res = _run(runnable[0], cwd=tmp, extra_env={"CLAUDE_PROJECT_DIR": ac_root},
                    stdin_payload=payload)
         assert res.returncode == 2, (
             f"錨定情境下 enforce_docs_path 未保留阻斷語意（rc={res.returncode}）——"

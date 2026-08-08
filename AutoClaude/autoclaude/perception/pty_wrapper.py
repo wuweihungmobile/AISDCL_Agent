@@ -13,6 +13,8 @@ import os
 import re
 import shutil
 import subprocess
+import sys
+from functools import lru_cache
 from pathlib import Path
 
 from ..utils.logger import RawStreamLogger
@@ -53,6 +55,55 @@ def _resolve_command(command: str) -> list[str]:
 def _is_cmd_shim(resolved: list[str]) -> bool:
     """判斷 `_resolve_command()` 的回傳值是否為 .cmd/.bat shim 解析結果。"""
     return len(resolved) == 3 and resolved[0] == "cmd" and resolved[1] == "/c"
+
+
+# R81（HLM-S1-01）：wexpect 的 console-reader 交握，在「`sys.executable` 是會 re-exec
+# 的啟動器」時**結構上不可能完成**。
+#   · host 端以 `CreateProcess` 回報的 PID 組 pipe 名（wexpect/host.py:871
+#     `wexpect_{console_pid}`）；
+#   · console-reader 端卻以自己的 `os.getpid()` 組名（wexpect/console_reader.py:510）。
+#   · venv 的 `Scripts/python.exe` 是 trampoline：它把真正的直譯器再 spawn 成子行程，
+#     於是上面兩個 PID 是**不同的兩個行程**⇒ host 的 `connect_to_child()` 是一個
+#     **沒有逾時**的 `while True`（wexpect/host.py:874-894），永遠在等一個不會出現的
+#     pipe。表徵是 `start()` 靜默不回返——不是例外、不是逾時，連
+#     `step_timeout_seconds` 都管不到（那個判斷在 `start()` 之後的迴圈裡）。
+#
+# 當回合實測（同一台機器、同一支 wexpect 4.0.0、同一個 target `cmd.exe`）：
+#   · 經 venv 啟動器 → `spawn()` 45s / 25s / 25s 三次皆未回返；wexpect debug log 逐字：
+#     host 等 `\\.\pipe\wexpect_37904`、reader 開的是 `\\.\pipe\wexpect_32100`
+#   · 經 base 直譯器 → `SPAWN_RETURNED in 0.4s`（rc=0）
+#
+# 判準刻意**不是**「是不是 venv／是不是 uv」——那是猜出來的代理量，換一種
+# 打包方式就失明。這裡直接量那個真正決定成敗的性質本身：**父行程看到的 PID
+# 是否等於子行程自報的 PID**。量不到（例外／逾時／輸出不是數字）一律當成
+# 「不可信」，因為失效方向必須偏向那條**已知會回返**的路（subprocess）。
+_PID_PROBE_TIMEOUT_SECONDS = 15.0
+
+
+@lru_cache(maxsize=1)
+def _launcher_reports_consistent_pid() -> bool:
+    """量測 `sys.executable` 是否為 re-exec 啟動器（wexpect pipe 命名的前提）。"""
+    if not sys.executable:
+        return False
+    try:
+        proc = subprocess.Popen(
+            [sys.executable, "-c", "import os; print(os.getpid())"],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL,
+        )
+        out, _ = proc.communicate(timeout=_PID_PROBE_TIMEOUT_SECONDS)
+    except Exception as exc:
+        logger.warning("PID 一致性探針失敗（視為不可信，改走 subprocess）：%s", exc)
+        return False
+    reported = out.decode("ascii", errors="replace").strip()
+    if reported != str(proc.pid):
+        logger.info(
+            "偵測到 re-exec 啟動器（父看到 PID=%s、子自報 PID=%r）："
+            "wexpect 的 pipe 交握在此形態下無法完成，改走 subprocess 模式",
+            proc.pid, reported,
+        )
+        return False
+    return True
 
 
 def _quote_cmd_shim_argv(shim_path: str, args: list[str]) -> str:
@@ -160,7 +211,17 @@ class PtyWrapper:
         # subprocess（字串型 argv，已用 CPython _execute_child 原始碼驗證正確）
         # 是目前唯一確認可行的方案，代價是此情境下失去 PTY 模擬（互動提示仍可
         # 靠 _auto_respond 的 stdin pipe 機制正常運作，見 _readline_subprocess）。
-        if _WEXPECT_AVAILABLE and not _is_cmd_shim(_resolve_command(self._command)):
+        # R81（HLM-S1-01）：第二個守門＝`_launcher_reports_consistent_pid()`。
+        # 它擋的不是 shim，而是「wexpect 的 pipe 交握在這個直譯器形態下永遠完成不了」
+        # 這件事（見該函式上方的實測與逐字 log）。短路順序刻意把 `_WEXPECT_AVAILABLE`
+        # 排最前：非 Windows 上該旗標恆 False，探針一次都不會被跑到。
+        # 順序有意義：便宜且純粹的判準排前面，會 spawn 探針行程的排最後——
+        # 非 Windows 與 .cmd/.bat shim 兩種情形因此一次探針都不會跑。
+        if (
+            _WEXPECT_AVAILABLE
+            and not _is_cmd_shim(_resolve_command(self._command))
+            and _launcher_reports_consistent_pid()
+        ):
             self._start_wexpect()
         else:
             self._start_subprocess()

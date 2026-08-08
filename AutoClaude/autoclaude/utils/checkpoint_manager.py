@@ -19,6 +19,7 @@ from datetime import datetime, timedelta
 from pathlib import Path
 
 from .logger import _sanitize_log_filename
+from .resume_clock import seconds_until as resume_clock_seconds_until
 
 logger = logging.getLogger("autoclaude.utils.checkpoint")
 
@@ -161,13 +162,9 @@ class CheckpointManager:
         logger.info("排程繼續執行: %s", resume_at.strftime("%Y-%m-%d %H:%M:%S"))
         return resume_at
 
+    # R81（HLM-S1-02）：委派 SSOT（見 utils/resume_clock.py）。此處原本自帶一份
+    # 只算得了 naive 的複本——這是同一份邏輯的第三個家。
     @staticmethod
     def seconds_until_resume(checkpoint: PlaybookCheckpoint) -> float:
         """回傳距 scheduled_resume_at 的剩餘秒數；已過期或未設定則回傳 0.0。"""
-        if not checkpoint.scheduled_resume_at:
-            return 0.0
-        try:
-            resume_at = datetime.fromisoformat(checkpoint.scheduled_resume_at)
-            return max(0.0, (resume_at - datetime.now()).total_seconds())
-        except ValueError:
-            return 0.0
+        return resume_clock_seconds_until(checkpoint.scheduled_resume_at)

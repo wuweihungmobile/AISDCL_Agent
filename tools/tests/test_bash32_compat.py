@@ -605,5 +605,215 @@ class TestUnsetSafeArrayExpansion(unittest.TestCase):
         self.assertEqual(unset_safe_array_problems(code, "x.sh"), [])
 
 
+# ══════════════════════════════════════════════════════════════════════════════
+# R81 包 G（XPL-S1-02）— 同一套判準，第二個掃描面：workflow 的 inline `run:`
+# ══════════════════════════════════════════════════════════════════════════════
+# 缺陷本體：本檔的知識寫得很完整（連 `tools/macos_smoke_local.sh` 檔頭都逐字複述一遍），
+# 但**同一份知識住兩個家、只有 `.sh` 那個家被鎖**——`_scan_trees()` 實測回傳 6 棵、
+# 合計 29 支檔，副檔名集合是 `['.sh', '<none>']`，`.yml` **一支都不看**。
+#
+# 危害面是不對稱的：Windows 開發機的 Git Bash 帶 GNU userland、ubuntu CI 也是 GNU，
+# 兩邊都會給出「這樣寫沒問題」的假訊號；只有 macos-latest 的 BSD userland 會炸，而
+# `macos-compat-ci.yml` 的 inline `run:` 剛好就是唯一跑在那裡的東西，也剛好一個觀測者
+# 都沒有。落地當回合實測：用**本檔自己的 `_PATTERNS`** 掃 12 支 workflow 的 inline
+# `run:`，命中 3 筆 `date -d`（GNU-only），全在 `root-infra-ci.yml`。
+#
+# 判準把 `runs-on` 當**輸入**而不是寫死：
+#   · 檔內任一 `runs-on:` 提到 macos ⇒ 該檔全部 `run:` 命中判**紅**（今天 0 筆，零成本）；
+#   · 其餘（ubuntu／windows only）⇒ 進 shrink-only 存量棘輪，只登記不阻塞。
+# 🔴 刻意做成**檔級**而非 job 級的過度涵蓋：同一支檔裡把一段 step 複製到 macos job，
+#   是這條路徑上最可能發生的事，而 job 級判準對它結構上失明。代價是 macos 檔裡的
+#   ubuntu-only job 也被判——實測 0 筆，且那本來就該收斂。
+_WF_DIR = _REPO_ROOT / ".github" / "workflows"
+_RUN_KEY_RE = re.compile(r"^(\s*)(?:-\s+)?run:\s*(\|[-+]?|>[-+]?)?\s*(.*)$")
+_SHELL_KEY_RE = re.compile(r"^(\s*)shell:\s*(\S+)")
+_RUNS_ON_RE = re.compile(r"^\s*runs-on:\s*(.*)$")
+_LIST_ITEM_RE = re.compile(r"^(\s*)-\s")
+#: 走 bash/sh 的 `shell:` 值（GitHub 預設在 Linux/macOS 上就是 bash）。其餘
+#: （pwsh／powershell／cmd／python）**不是本判準的語言**，掃了只會製造假紅。
+_BASH_SHELLS = ("bash", "sh")
+
+
+def workflow_is_macos_capable(text: str) -> bool:
+    """檔內任一 `runs-on:` 提到 macos ⇒ 這支 workflow 會踩到 BSD userland。"""
+    return any("macos" in m.group(1).lower() for m in
+               (_RUNS_ON_RE.match(line) for line in text.splitlines()) if m)
+
+
+def _step_shell(lines: list[str], run_idx: int, indent: int) -> str | None:
+    """該 `run:` 所屬 step 的 `shell:` 值（同縮排的兄弟鍵）；沒宣告回 None。
+
+    啟發式邊界（刻意寫明）：以「同縮排或更淺的 `- ` 清單項」當 step 邊界。GitHub
+    Actions 的 step 是 `- name:／uses:／run:／shell:` 這種平鋪結構，故同縮排的
+    `shell:` 就是它的兄弟。job 級 `defaults.run.shell` 不追（本 repo 零使用）。
+    """
+    start = 0
+    for idx in range(run_idx, -1, -1):
+        item = _LIST_ITEM_RE.match(lines[idx])
+        if item and len(item.group(1)) <= indent:
+            start = idx
+            break
+    for idx in range(start, len(lines)):
+        if idx != start:
+            item = _LIST_ITEM_RE.match(lines[idx])
+            if item and len(item.group(1)) <= indent:
+                break
+        found = _SHELL_KEY_RE.match(lines[idx])
+        if found and len(found.group(1)) == indent:
+            return found.group(2).strip("\"'")
+    return None
+
+
+def workflow_run_offenders(text: str, rel: str) -> tuple[list[str], list[str]]:
+    """回傳 (offenders, stale)。判準與掃描機制**全部複用** `.sh` 那一側，不另立規則表。"""
+    lines = text.splitlines()
+    offenders: list[str] = []
+    stale: list[str] = []
+    idx = 0
+    while idx < len(lines):
+        found = _RUN_KEY_RE.match(lines[idx])
+        if not found:
+            idx += 1
+            continue
+        indent, block, inline = found.group(1), found.group(2), found.group(3)
+        shell = _step_shell(lines, idx, len(indent))
+        body: list[tuple[int, str]] = []
+        if block:
+            base = len(indent) + 2
+            cursor = idx + 1
+            while cursor < len(lines):
+                line = lines[cursor]
+                if line.strip() and (len(line) - len(line.lstrip())) < base:
+                    break
+                body.append((cursor + 1, line))
+                cursor += 1
+            idx = cursor
+        else:
+            body.append((idx + 1, inline))
+            idx += 1
+        if shell is not None and not shell.startswith(_BASH_SHELLS):
+            continue                                   # pwsh／cmd 不是本判準的語言
+        for lineno, line in body:
+            code, comment = _split_code_comment(line)
+            why: str | None = None
+            if _OK_MARKER in comment:
+                why = comment.split(_OK_MARKER, 1)[1].strip()
+            hits = [desc for pattern, desc in _PATTERNS if pattern.search(code)]
+            if hits:
+                if why:
+                    continue
+                offenders.extend(f"{rel}:{lineno}: {desc}（inline run:）" for desc in hits)
+                if why is not None:
+                    stale.append(f"{rel}:{lineno}: {_OK_MARKER} 標記 stale（WHY 留空）")
+            elif why is not None:
+                stale.append(f"{rel}:{lineno}: {_OK_MARKER} 標記 stale（該行無被壓下的違規）")
+    return offenders, stale
+
+
+#: 🔴 shrink-only 存量棘輪：**只跑在 ubuntu／windows 的 workflow** 今天有幾筆 GNU-only
+#: 用法。落地當回合實測 3 筆，全是 `root-infra-ci.yml` 的 `date -d`。
+#: 兩個方向都會響：多一筆＝有人在非 macos job 新寫了 GNU-only 用法（那支檔與
+#: `macos-compat-ci.yml` 是同一個目錄下的姊妹檔，複製一段 step 過去就會炸）；
+#: 少一筆＝債還了請把數字改小，不改的話下一筆新違規會被舊值遮住。
+#: **macos-capable 的 workflow 不進本表**——它們是零容忍。
+_WORKFLOW_GNU_DEBT: dict[str, int] = {
+    "root-infra-ci.yml": 3,
+}
+
+
+class TestWorkflowInlineRunIsBsdSafe(unittest.TestCase):
+    """workflow 的 inline `run:` 與 `.sh` 受同一套判準（見上方區段 WHY）。"""
+
+    @staticmethod
+    def _scan() -> tuple[dict[str, int], dict[str, int], list[str], list[str], int]:
+        macos_hits: dict[str, int] = {}
+        other_hits: dict[str, int] = {}
+        detail: list[str] = []
+        stale: list[str] = []
+        files = sorted(_WF_DIR.glob("*.yml")) + sorted(_WF_DIR.glob("*.yaml"))
+        for path in files:
+            text = path.read_text(encoding="utf-8")
+            off, st = workflow_run_offenders(text, path.name)
+            stale.extend(st)
+            if not off:
+                continue
+            detail.extend(off)
+            bucket = macos_hits if workflow_is_macos_capable(text) else other_hits
+            bucket[path.name] = len(off)
+        return macos_hits, other_hits, detail, stale, len(files)
+
+    def test_macos_capable_workflows_have_no_gnu_only_usage(self) -> None:
+        macos_hits, other_hits, detail, stale, scanned = self._scan()
+        self.assertGreaterEqual(
+            scanned, 10,
+            f"workflow 掃描面只有 {scanned} 支 ⇒ 疑似縮面（落地當回合實測 12 支）")
+        self.assertEqual(
+            macos_hits, {},
+            "跑在 macos-latest 上的 workflow 出現 bash 3.2／BSD 不相容用法——CI 的 ubuntu "
+            "與 Windows 的 Git Bash 都是 GNU userland，兩邊都攔不到，只有 macOS runner "
+            f"會炸。請改寫，或於該行行尾加 `# {_OK_MARKER} <WHY>`：\n" + "\n".join(detail))
+        self.assertEqual(
+            other_hits, dict(_WORKFLOW_GNU_DEBT),
+            "非 macos workflow 的 GNU-only 存量與棘輪不符。多一筆＝新增（**不得調高**）；"
+            "少一筆＝債已還請把數字改小：\n" + "\n".join(detail))
+        self.assertEqual(
+            stale, [],
+            f"{_OK_MARKER} 豁免標記 stale（防清單腐化）：\n" + "\n".join(stale))
+
+    # ── 紅綠自證：合成 workflow 片段（不落檔於 repo）────────────────────────────
+
+    def test_injected_gnu_only_usage_in_a_run_block_is_detected(self) -> None:
+        off, stale = workflow_run_offenders(
+            "jobs:\n  x:\n    runs-on: macos-latest\n    steps:\n"
+            "      - name: probe\n        run: |\n"
+            "          readlink -f /tmp/x\n"
+            "          declare -A m\n", "fixture.yml")
+        self.assertEqual(len(off), 2, off)
+        self.assertIn("readlink -f", off[0])
+        self.assertIn("declare -A", off[1])
+        self.assertEqual(stale, [])
+
+    def test_a_single_line_run_is_also_scanned(self) -> None:
+        off, _ = workflow_run_offenders(
+            "      - run: sed -i 's/a/b/' f\n", "fixture.yml")
+        self.assertEqual(len(off), 1, off)
+
+    def test_powershell_steps_are_out_of_scope(self) -> None:
+        """`shell: pwsh` 的 run: 不是 bash ⇒ 掃了只會製造假紅（windows-compat-ci 實況）。"""
+        off, stale = workflow_run_offenders(
+            "      - name: p\n        shell: pwsh\n        run: |\n"
+            "          Get-Date -Format o   # timeout 5 cmd\n", "fixture.yml")
+        self.assertEqual((off, stale), ([], []))
+
+    def test_yaml_outside_run_blocks_is_not_scanned(self) -> None:
+        """只有 `run:` 的內文是 shell；別的 YAML 鍵值不得被當程式碼掃。"""
+        off, stale = workflow_run_offenders(
+            "env:\n  NOTE: 'timeout 5 cmd 這串只是說明文字'\n"
+            "      - uses: actions/checkout@v5\n", "fixture.yml")
+        self.assertEqual((off, stale), ([], []))
+
+    def test_runs_on_is_an_input_not_a_hardcoded_verdict(self) -> None:
+        macos = "jobs:\n  a:\n    runs-on: macos-latest\n"
+        ubuntu = "jobs:\n  a:\n    runs-on: ubuntu-latest\n"
+        matrix = "jobs:\n  a:\n    runs-on: [ubuntu-latest, macos-latest]\n"
+        self.assertTrue(workflow_is_macos_capable(macos))
+        self.assertTrue(workflow_is_macos_capable(matrix))
+        self.assertFalse(workflow_is_macos_capable(ubuntu))
+
+    def test_the_marker_suppresses_and_rots_loudly(self) -> None:
+        suppressed = ("      - run: date -d @1  # " + _OK_MARKER
+                      + " 僅跑於 ubuntu job\n")
+        self.assertEqual(workflow_run_offenders(suppressed, "fixture.yml"), ([], []))
+        orphan = "      - run: echo ok  # " + _OK_MARKER + " 已改寫後忘了拆標記\n"
+        self.assertTrue(workflow_run_offenders(orphan, "fixture.yml")[1])
+
+    def test_the_pattern_table_is_shared_with_the_sh_side(self) -> None:
+        """反漂移：本掃描面**不得**長出第二份規則表（那是本輪立案的病本身）。"""
+        sample = "declare -A m"
+        self.assertTrue(any(pat.search(sample) for pat, _d in _PATTERNS))
+        off, _ = workflow_run_offenders(f"      - run: {sample}\n", "fixture.yml")
+        self.assertTrue(off, "workflow 側沒有共用 `_PATTERNS` ⇒ 兩個家又要開始漂移")
+
+
 if __name__ == "__main__":
     unittest.main()

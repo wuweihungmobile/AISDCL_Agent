@@ -15,6 +15,7 @@ buffering 行為（TextIOWrapper 預設非 line-buffered）、丟棄原始 strea
 from __future__ import annotations
 
 import importlib.util
+import json
 import sys
 from pathlib import Path
 
@@ -136,3 +137,53 @@ def init_utf8_streams() -> None:
     impl = _stdio_utf8_impl()
     if impl is not None:
         impl()
+
+
+# ── hook 的 stdin payload 讀取：**單一實作**（R81／SUB-S1-04）─────────────────────
+#
+# 🔴 為何併進本檔而不另開 `tools/lib/hook_payload.py`（初稿真的開過，當回合被兩件事
+# 打回）：① 本檔的立案理由與本節逐字同型——「`init_utf8_streams()` 曾被複製貼上到至少
+# 8 個檔案、其中 6 份漏了守衛」，而 payload 讀取器是同一個病的下一層，兩者同屬「hook
+# 腳本 I/O」這個主題，不是硬塞；② `tools/lib/` 有一道掃描面下限帶，新開第 21 支檔當場
+# 讓 6 支 `test_platform_neutral_paths.py` 的判準轉紅（實測），而在一個以架構減法為
+# 目標的輪次裡，靠重釘別人的鎖來容納自己新增的檔是反方向的動作。消費端零額外成本：
+# 那 5 支 AutoClaude hook 本來就 `from platform_utils import …`。
+#
+# 病本身：這份讀取器此前以手抄本住在 **7 支** hook 裡，實測已漂移成 **3 種**行為
+# （4 份原樣回傳 `json.loads` 的結果／1 份回 `{}`／2 份回 `None`）。代價不是抽象的：
+# `enforce_docs_path.py` 是**阻斷級** PreToolUse hook，餵它 `[1,2,3]` 或 `null` 會
+# rc=1 AttributeError ⇒ 守衛還在、判定卻沒產出，而全 repo 零判準會轉紅。
+#
+# 兩個公開函式**不是**重複，是兩種各有消費者的契約——刻意保留而非硬統一，因為差別是
+# 載重的：`lint_powershell_command` 對「讀不出來」與「讀到一個沒有 tool_name 的
+# payload」印不同訊息、走不同 rc 分支（實測兩者 stderr 逐字不同）。
+#
+# 行為契約：**任何輸入都不得拋例外**（hook 崩潰會讓阻斷級守衛的判定靜默消失；
+# `.claude/settings.json` 記載過的 P0 是「hook 誤觸 deny 會把所有工具硬鎖死」）。
+# 合法 JSON object → 該 dict；空／壞 JSON／頂層非 object／stdin 讀取失敗 → 退化。
+# 跨平台：純 stdlib、**零平台分支**（鐵律三）。
+# 回歸鎖：`tools/tests/test_pre_commit_dispatcher_sigpipe.py::TestHookPayloadSingleHome`
+
+
+def read_payload() -> dict | None:
+    """讀 stdin 的 hook payload；`None`＝退化。契約見上方區塊註解。
+
+    走 **bytes 端**再 UTF-8+replace 解碼：zh-TW Windows 的 pipe 預設 cp950，文字端
+    read 遇含中文的 UTF-8 payload 會拋 UnicodeDecodeError（那次修復的回歸鎖＝
+    `AutoClaude/tests/tools/hooks/test_hooks_stdin_utf8.py`）。無 `.buffer`（測試以
+    StringIO 當替身）時回退文字端。
+    """
+    try:
+        buffer = getattr(sys.stdin, "buffer", None)
+        raw = (buffer.read().decode("utf-8", "replace") if buffer is not None
+               else sys.stdin.read())
+        # 空輸入借道 `"null"`：與「頂層非 object」走同一個出口，少一條會漂移的分支。
+        payload = json.loads((raw or "").strip() or "null")
+    except Exception:  # noqa: BLE001 — 任何失敗都是退化，不是崩潰（見上方的 P0）
+        return None
+    return payload if isinstance(payload, dict) else None
+
+
+def read_hook_payload() -> dict:
+    """同 `read_payload()`，但退化回 `{}`——給「拿不到就放行」的消費者。"""
+    return read_payload() or {}

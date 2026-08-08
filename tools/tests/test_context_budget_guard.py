@@ -30,8 +30,10 @@ WHY 這支鎖必須有鑑別力（而不只是「有測試」）
 from __future__ import annotations
 
 import ast
+import io
 import json
 import os
+import re
 import subprocess
 import sys
 import tempfile
@@ -126,9 +128,13 @@ def _isolated_env(tmp: Path) -> dict[str, str]:
         "USERPROFILE": str(tmp), "HOME": str(tmp), "HOMEPATH": str(tmp),
         "CLAUDE_PROJECT_DIR": str(_REPO_ROOT),
     })
+    # 🔴 R81：額度那兩個旗標也要清。少清它們時，開發者自己機器上設過 `AUTOSDD_QUOTA_
+    # GUARD_OFF=1` 就會讓下面所有 quota e2e **靜默轉綠**（守衛整支被關掉，rc 一律 0），
+    # 而在 CI 上又是紅的——「污染的方向正好是看起來通過」同一條紀律。
     for flag in ("AUTOSDD_CONTEXT_WINDOW", "SDD_ACTIVE_VERSION",
                  "CLAUDE_CODE_AUTO_COMPACT_WINDOW", "AUTOSDD_CONTEXT_GUARD_OFF",
-                 "AUTOSDD_SENTINEL_OFF"):
+                 "AUTOSDD_SENTINEL_OFF", "AUTOSDD_QUOTA_GUARD_OFF",
+                 "AUTOSDD_QUOTA_FANOUT_CAP"):
         env.pop(flag, None)
     return env
 
@@ -591,6 +597,12 @@ class PreToolUseBlockTest(unittest.TestCase):
 
     def setUp(self) -> None:
         self.tmp = Path(tempfile.mkdtemp(prefix="ctxguard-block-"))
+        # 🔴 R81 收斂：種一份**新鮮且健康**的額度快取。本類量的是 context 那把尺，而
+        # 額度那把尺現在會在「量不到」時出聲（SD-B2 的修法本體）——沙箱裡沒有憑證檔
+        # ⇒ 不種的話每一條 `Task` e2e 都會多收到一行額度降級告警，而下面好幾條的判準是
+        # `stderr == ""`。用「關掉額度守衛」來擺平會讓這幾條連帶失去對額度誤擋的鑑別力，
+        # 所以這裡是把額度**量得到而且很寬鬆**，不是把它關掉。
+        _quota_cache(self.tmp, 10.0)
 
     def _payload(self, used: int, name: str, tool: str) -> dict:
         return {"hook_event_name": "PreToolUse", "tool_name": tool,
@@ -727,6 +739,7 @@ class PreToolUseBlockTest(unittest.TestCase):
 
 sys.path.insert(0, str(_REPO_ROOT / "tools"))
 import session_resume_planner as planner  # noqa: E402
+from lib import quota_escalation as escalation  # noqa: E402  # R81 缺口 A／B 的落地處
 
 #: 全庫逐字稿實測到的**真實字面**（1,180 支檔掃出：session limit 151 筆／
 #: monthly spend limit 71 筆）。語料是鎖的地基：判準改壞時要靠它轉紅。
@@ -1228,9 +1241,38 @@ class EnduranceWiringTest(unittest.TestCase):
         假裝能做兩件事。這一條釘住「沒有掛上去」。"""
         source = _HOOK.read_text(encoding="utf-8")
         body = source[source.index("def block_verdict"):]
-        for name in ("classify_limit", "parse_reset_at", "latest_limit_event"):
+        # 🔴 R81 擴一組：額度那條路徑**也**不得從 `block_verdict()` 內被觸發。
+        # 立案是本包當回合的注入實測——把 `quota_gate(payload)` 塞進 `block_verdict()` 的
+        # 早退分支時，這條鎖與新增那條**都判綠**（注入 rc=0）。而那個形態正是 SA-B1 描述的
+        # 死碼：`block_verdict()` 只在 context ≥90% 才到得了，額度耗盡時 context 只有 ~18%。
+        # 「額度看起來有人守，實際上那段程式跑不到」比沒有機制更糟。
+        for name in ("classify_limit", "parse_reset_at", "latest_limit_event",
+                     "quota_gate", "read_quota", "quota_tier_of"):
             with self.subTest(name=name):
                 self.assertNotIn(name, body, f"`{name}` 被接進阻斷路徑了")
+
+    def test_the_quota_axis_is_a_separate_path_not_a_missing_one(self) -> None:
+        """🔴 R81 補上這條鎖**反向的那一半**（SA-B1 抓到的形態）。
+
+        上一條只釘住「額度沒有被掛進 context 阻斷路徑」，於是「額度根本沒有人在守」
+        與「額度有自己的路徑」兩種狀態它**都判綠**——分母 0 的鎖恆綠，正是本 repo
+        判過四成的那一桶。這一條要求 quota 必須有一條**存在且獨立**的路徑：
+        `quota_gate()` 存在、被 `main()` 呼叫、且它自己不碰 context 那三個早退符號。
+        """
+        source = _HOOK.read_text(encoding="utf-8")
+        self.assertIn("def quota_gate(", source, "額度軸連一條路徑都沒有")
+        gate = source[source.index("def quota_gate("):]
+        gate = gate[:gate.index("\ndef ", 1)] if "\ndef " in gate[1:] else gate
+        # 剝註解 ＋ 用詞界比對：不剝時「解釋為什麼不用 may_block」的那行註解自己會命中；
+        # 不用詞界時 `quota_tier_of(` 會被 `tier_of(` 掃到。兩個都是掃描器把文字當程式碼。
+        gate = "\n".join(ln for ln in gate.splitlines() if not ln.lstrip().startswith("#"))
+        for name in (r"\btier_of\(", r"\bmay_block\(", r"\bscan_transcript\("):
+            with self.subTest(name=name):
+                self.assertIsNone(re.search(name, gate),
+                                  f"`{name}` 被接進額度路徑了 ⇒ 兩把尺又共用早退條件")
+        self.assertLess(source.index("def quota_gate("), source.index("def block_verdict"),
+                        "額度那一段落在 block_verdict 之後 ⇒ 上一條鎖的切片會掃到它，"
+                        "那會讓兩條鎖互相打架（本 repo 判過的『兩道鎖的合法動作互為對方違規』）")
 
 
 # ══════════════════════════ R79 補洞包：預防性哨兵（ADR-XPLAT-004 §2.6）的回歸鎖
@@ -1830,7 +1872,11 @@ class ConsoleFreeSpawnTest(unittest.TestCase):
 
     @staticmethod
     def _sources() -> dict[str, str]:
-        paths = {"tools/session_resume_planner.py": _PLANNER}
+        paths = {"tools/session_resume_planner.py": _PLANNER,
+                 # 🔴 R81：新的 spawn 站點（桌面通知）住在這裡。不補進掃描面的話，它對
+                 # 本鎖隱形——而本類 docstring 自己就寫著那正是要防的事。
+                 "tools/lib/quota_escalation.py":
+                     _REPO_ROOT / "tools" / "lib" / "quota_escalation.py"}
         for hook in sorted((_REPO_ROOT / ".claude" / "hooks").glob("*.py")):
             paths[f".claude/hooks/{hook.name}"] = hook
         return {rel: path.read_text(encoding="utf-8") for rel, path in paths.items()}
@@ -2184,6 +2230,271 @@ class UnhandledLimitDetectionTest(unittest.TestCase):
                          "取到的是被濾掉的那筆 transient，而不是真的撞線")
 
 
+# ═══════ R81：續航協定的兩個**設計缺口**（R80 四次真實撞線的驗屍，improving_104 §4.5）
+# 兩個都不是 bug——機制照著規格跑，而規格漏了一種情況。鎖也照這條界線寫：守的是
+# 「規格現在涵蓋了那一種情況」，不是「某支函式回傳什麼」。
+#   缺口 A：額度有兩條線（`session limit` 等得到、`monthly spend limit` 等不到），
+#           而下游動作只有一種。R80 第 3 次撞線就是這一類，協定全程零反應。
+#   缺口 B：協定救的單位是 session，而四次撞線裡主迴圈**一次都沒死**——死的是扇出。
+
+
+class SpendLimitReachesAHumanTest(unittest.TestCase):
+    """缺口 A。🔴 注意：`escalate`／`stop` 這兩個判定**本來就不排程**，缺的不是那個。
+
+    缺的是「通知」有沒有載體：兩支的理由逐字寫著「只有人去 claude.ai 提額才會回來」
+    「硬停並通知人」，而全部的反應是 `print(..., file=sys.stderr)`——這兩支都由
+    schtasks 以 `pythonw.exe`（GUI 子系統、**沒有 console**）起，那行 stderr 沒有任何
+    終端收得到。⇒ 「不排程」成立、「叫人」結構上不可能成立，而兩者留下的痕跡完全同形
+    （狀態 abandoned、工作被刪、jsonl 多一行）。**最難發現的失效形態**正是這一種。
+    """
+
+    def setUp(self) -> None:
+        self.tmp = Path(tempfile.mkdtemp(prefix="r81-alert-"))
+        self.plan = self.tmp / "plan.md"
+        self.plan.write_text("# 可重啟點任務書\n", encoding="utf-8", newline="\n")
+        self.note = self.tmp / "AUTOSDD_ATTENTION.md"
+        self.log = self.tmp / "trail.jsonl"
+        self.removed: list[str] = []
+        self.notified: list[tuple[str, str]] = []
+        self.registered: list[str] = []
+        self._swap(escalation, "note_path", lambda: self.note)
+        self._swap(escalation, "fanout_path", lambda sid: self.tmp / f"fanout_{sid}.json")
+        self._swap(escalation, "notify", self._notify)
+        self._swap(planner, "endurance_log_path", lambda plan: self.log)
+        self._swap(planner, "_schtasks_remove", self._remove)
+        # 🔴 排程註冊必須被攔下來：這一組測試若真的去建 schtasks，它就成了一支會在
+        # 開發者機器上留下垃圾工作、且在 CI（Linux）上必紅的測試。攔下來同時也讓
+        # 「有沒有排程」變成一個**可斷言的值**——這正是缺口 A 要分辨的那件事。
+        self._swap(planner, "_register_and_record", self._register)
+
+    def _swap(self, module: object, name: str, value: object) -> None:
+        old = getattr(module, name)
+        setattr(module, name, value)
+        self.addCleanup(setattr, module, name, old)
+
+    def _notify(self, title: str, body: str) -> int:
+        self.notified.append((title, body))
+        return 0
+
+    def _remove(self, task: str) -> int:
+        self.removed.append(task)
+        return 0
+
+    def _register(self, plan: Path, state: dict, at: object, tick: str) -> tuple[int, str]:
+        self.registered.append(str(at))
+        state["next_run_time"] = "FAKE-NEXT-RUN"
+        return 0, "FAKE-NEXT-RUN"
+
+    def _tick(self, transcript: Path) -> int:
+        planner.write_relay(self.plan, {
+            **RelayStateTest.GOOD, "kind": "sentinel", "reset_source": "operator",
+            "reset_at": "", "plan_path": str(self.plan), "task_name": "T_R81",
+            "session_id": transcript.stem, "transcript": str(transcript),
+            "log_path": str(self.log)})
+        return planner._sentinel_tick(planner.build_parser().parse_args(
+            ["--sentinel-tick", "--plan", str(self.plan)]))
+
+    def _rows(self) -> list[dict]:
+        return [json.loads(line) for line
+                in self.log.read_text(encoding="utf-8").splitlines() if line.strip()]
+
+    def test_a_monthly_spend_limit_alerts_a_human_and_never_schedules(self) -> None:
+        """等不到的那一條線：**不排程**（等到天亮它還是滿的）＋ 真的把人叫來。"""
+        rc = self._tick(_quota_transcript(self.tmp / "sid_spend.jsonl", _REAL_SPEND_LIMIT))
+        self.assertEqual(rc, 1)
+        self.assertEqual(self.registered, [],
+                         "月度支出上限被排了一支永遠不會成功的工作 ⇒ 協定在一個永遠不會"
+                         "變的狀態上空轉，而痕跡看起來一切正常")
+        self.assertTrue(self.note.is_file(), "「叫人」沒有留下任何人看得到的載體")
+        body = self.note.read_text(encoding="utf-8")
+        self.assertIn(escalation.USAGE_URL, body, "紙上沒寫唯一能讓額度回來的那個動作")
+        self.assertIn("排程等待對它無效", body, "紙上沒說清楚「等」對這一類是錯的動作")
+        self.assertEqual(len(self.notified), 1, "只寫了紙、沒有敲人——人不在電腦前就永遠不知道")
+        self.assertEqual(self.removed, ["T_R81"], "終態沒有把排程收掉（會留下過期事實）")
+
+    def test_the_audit_trail_can_tell_alerted_from_never_alerted(self) -> None:
+        """🔴 通知的失效是**靜默**的：沒有人會因為「沒收到通知」而去查。
+
+        所以 rc 必須落在稽核痕跡上——這是本協定「觸發了但失敗 vs 根本沒觸發」那條
+        既有紀律在通知這一層的形態。少了它，`notify` 回 127（這台機器上沒有那條管道）
+        與「通知成功」在事後完全分不出來。
+        """
+        self._tick(_quota_transcript(self.tmp / "sid_spend.jsonl", _REAL_SPEND_LIMIT))
+        told = [row for row in self._rows() if "notify_rc" in row]
+        self.assertTrue(told, "痕跡裡看不出叫過人沒有")
+        self.assertEqual(told[-1]["note"], str(self.note))
+        self.assertTrue(told[-1]["note_written"], "紙沒寫成功卻沒有留下這個事實")
+
+    def test_the_hit_path_really_records_the_fanout_casualties(self) -> None:
+        """🔴 缺口 B 的**接線**（判定層綠不代表接上了電——R77『機制蓋好沒接電』第三次
+        復發就是這個形態）。這一條走真的 `_sentinel_tick`，證明扇出清單是在**撞線的那
+        一次醒來**被寫出來的，而不是只有直接呼叫函式庫時才會發生。
+        """
+        transcript = self.tmp / "sid_spend.jsonl"
+        _quota_transcript(transcript, _REAL_SPEND_LIMIT)
+        agent = (transcript.with_suffix("") / "subagents" / "workflows" / "wf_zzz"
+                 / "agent-dead.jsonl")
+        agent.parent.mkdir(parents=True, exist_ok=True)
+        agent.write_text(UnhandledLimitDetectionTest._limit(
+            "2026-08-07T00:44:01.000Z", _REAL_SESSION_LIMIT) + "\n",
+            encoding="utf-8", newline="\n")
+        self._tick(transcript)
+        decided = [row for row in self._rows() if row.get("event") == "sentinel_decided"]
+        self.assertEqual(decided[-1]["runs"], ["wf_zzz"],
+                         "撞線那一次醒來沒有把扇出死者記下來 ⇒ 清單只存在於單元測試裡")
+        self.assertEqual(decided[-1]["dead_agents"], 1)
+        self.assertTrue(Path(decided[-1]["fanout"]).is_file())
+
+    def test_a_session_limit_still_takes_the_scheduling_branch(self) -> None:
+        """🔴 控制組（不得回歸）：等得到的那一條線必須**還是**排程，而且不打擾人。
+
+        判準的價值全在這裡——一個「把兩類都叫人」的實作會讓上面兩條全綠，卻把每一次
+        普通的 session 撞線都變成一次騷擾，於是護欄很快就會被關掉。
+
+        語料刻意**不帶** `(Asia/Taipei)` 後綴：帶了的話 `declared_zone` 在有 tz 資料庫的
+        機器（Linux／macOS）上會把時刻換到台北框架、在 Windows 上回 `None` 而沿用機器
+        時區 ⇒ 同一份語料在兩種機器上落在不同分支。這是本 repo act 實跑抓過的形態。
+        """
+        soon = datetime.now().astimezone() + timedelta(minutes=45)
+        hour = soon.hour % 12 or 12
+        text = (f"You've hit your session limit · resets "
+                f"{hour}:{soon.minute:02d}{'pm' if soon.hour >= 12 else 'am'}")
+        transcript = self.tmp / "sid_session.jsonl"
+        transcript.write_text(
+            UnhandledLimitDetectionTest._ok("2000-01-01T00:00:00Z") + "\n"
+            + json.dumps({"type": "assistant",
+                          "timestamp": datetime.now(UTC).isoformat(
+                              timespec="milliseconds").replace("+00:00", "Z"),
+                          "message": {"model": guard.SYNTHETIC_MODEL,
+                                      "content": [{"text": text}]}}) + "\n",
+            encoding="utf-8", newline="\n")
+        self.assertEqual(self._tick(transcript), 0)
+        self.assertEqual(len(self.registered), 1, "可等待的撞線沒有被排程 ⇒ 協定的主線壞了")
+        self.assertFalse(self.note.is_file(), "普通的 session 撞線也去騷擾人")
+        self.assertEqual(self.notified, [], "普通的 session 撞線也敲了桌面通知")
+
+
+class FanoutCasualtyRecordTest(unittest.TestCase):
+    """缺口 B：可續跑的工作單位從 session **降到 workflow run**。
+
+    R80 四次撞線主迴圈一次都沒死，死的是 subagent（42／55／1 個）⇒ 續跑那一段永遠不會
+    觸發、也**不該**觸發（session 還活著時再起一個 headless 回合只會互相干擾）。真正
+    需要被記下來的是「哪一個 run、哪幾個 agent 被打死」，而那件事讀檔就知道、成本為零。
+    """
+
+    def setUp(self) -> None:
+        self.tmp = Path(tempfile.mkdtemp(prefix="r81-fanout-"))
+        self.main = self.tmp / "sid.jsonl"
+        self.main.write_text(UnhandledLimitDetectionTest._ok("2026-08-07T18:00:00Z") + "\n",
+                             encoding="utf-8", newline="\n")
+        self.out = self.tmp / "fanout.json"
+        old = escalation.fanout_path
+        escalation.fanout_path = lambda sid: self.out
+        self.addCleanup(setattr, escalation, "fanout_path", old)
+
+    def _agent(self, run: str, name: str, lines: list[str]) -> Path:
+        path = self.main.with_suffix("") / "subagents" / "workflows" / run / f"{name}.jsonl"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text("\n".join(lines) + "\n", encoding="utf-8", newline="\n")
+        return path
+
+    def _script(self, run: str, workflow: str) -> None:
+        folder = self.main.with_suffix("") / "workflows" / "scripts"
+        folder.mkdir(parents=True, exist_ok=True)
+        (folder / f"{workflow}-{run}.js").write_text("//", encoding="utf-8", newline="\n")
+
+    @staticmethod
+    def _hit() -> dict:
+        return {"kind": guard.LIMIT_SESSION, "timestamp": "2026-08-07T18:36:53Z",
+                "text": _REAL_SESSION_LIMIT}
+
+    def test_a_dead_agent_is_attributed_to_its_run_and_workflow(self) -> None:
+        """核心：撞線那一刻，`runId` 與未完成的 agent 集合真的被寫到磁碟上。"""
+        self._agent("wf_abc", "agent-dead",
+                    [UnhandledLimitDetectionTest._limit("2026-08-07T18:36:53Z",
+                                                        _REAL_SESSION_LIMIT)])
+        self._script("wf_abc", "r81-scan")
+        audit = escalation.snapshot_fanout(self.main, self._hit())
+        self.assertEqual(audit["runs"], ["wf_abc"])
+        self.assertEqual(audit["dead_agents"], 1)
+        record = json.loads(self.out.read_text(encoding="utf-8"))
+        self.assertEqual(record["runs"][0]["workflow"], "r81-scan",
+                         "只記了 runId 沒記 workflow 名 ⇒ 人拿到一串亂碼，重派不了")
+        self.assertEqual(record["runs"][0]["dead"][0]["agent"], "agent-dead")
+
+    def test_a_finished_agent_is_not_listed(self) -> None:
+        """鑑別力：不是「把整個 run 都算成死者」拿到上面那條綠。
+
+        撞線之後**自己這支檔裡**還有成功回應 ⇒ 它活過來了，不該進重派清單。
+        """
+        self._agent("wf_abc", "agent-alive",
+                    [UnhandledLimitDetectionTest._limit("2026-08-07T18:36:53Z",
+                                                        _REAL_SESSION_LIMIT),
+                     UnhandledLimitDetectionTest._ok("2026-08-07T18:40:00Z")])
+        self.assertEqual(escalation.snapshot_fanout(self.main, self._hit()), {})
+        self.assertFalse(self.out.exists(), "沒有死者卻仍寫出一份空清單")
+
+    def test_the_same_file_criterion_is_deliberate_not_a_copy_of_the_global_one(self) -> None:
+        """🔴 這一條釘住的是「為什麼判準不一樣」，不是行為（Rule 9）。
+
+        `guard.unhandled_limit_event` 用**全域**復原證據，本模組用**同檔**證據——因為
+        它們問的是不同的問題。R80 量到同檔證據對「帳號額度通不通」假陽性 81.3%，成因
+        是「被打死的 subagent 在自己的檔裡永遠不會再有下一則成功回應」；而對「這一個
+        agent 死了沒」，那個性質正是唯一正確的判準。把本模組改成沿用全域判準，這一條
+        會紅：整個 session 已經復原（主逐字稿有更晚的成功回應），死掉的 agent 仍必須
+        留在重派清單上——它不會因為別人活過來就自己活過來。
+        """
+        self._agent("wf_abc", "agent-dead",
+                    [UnhandledLimitDetectionTest._limit("2026-08-07T18:36:53Z",
+                                                        _REAL_SESSION_LIMIT)])
+        self.main.write_text(
+            UnhandledLimitDetectionTest._ok("2026-08-07T18:00:00Z") + "\n"
+            + UnhandledLimitDetectionTest._ok("2026-08-07T23:00:00Z") + "\n",
+            encoding="utf-8", newline="\n")
+        self.assertIsNone(guard.unhandled_limit_event(self.main),
+                          "控制組：以全域證據看，這個 session 已經復原了")
+        self.assertEqual(escalation.snapshot_fanout(self.main, self._hit())["dead_agents"], 1,
+                         "session 復原就把死掉的扇出從清單上抹掉 ⇒ 沒有人會再去重派它們")
+
+    def test_the_run_is_found_from_the_live_layout_not_the_end_of_run_summary(self) -> None:
+        """🔴 R81 當回合實查：`<sid>/workflows/wf_<runId>.json`（run 的總結）**只有跑完
+        才寫**——活體 run 的 `workflows/` 底下只有 `scripts/`。撞線發生在**跑到一半**，
+        所以判準若走那支 json，在唯一需要它的時刻永遠是空的。本條釘住「沒有那支 json
+        也找得到 run」。
+        """
+        self._agent("wf_live", "agent-dead",
+                    [UnhandledLimitDetectionTest._limit("2026-08-07T18:36:53Z",
+                                                        _REAL_SESSION_LIMIT)])
+        self.assertFalse((self.main.with_suffix("") / "workflows" / "wf_live.json").exists())
+        self.assertEqual(escalation.snapshot_fanout(self.main, self._hit())["runs"],
+                         ["wf_live"])
+
+    def test_the_patrol_path_touches_nothing(self) -> None:
+        """成本閘：沒有撞線就零 I/O。哨兵 99% 的醒來走這一支，它必須比免費還便宜。"""
+        self._agent("wf_abc", "agent-dead",
+                    [UnhandledLimitDetectionTest._limit("2026-08-07T18:36:53Z",
+                                                        _REAL_SESSION_LIMIT)])
+        self.assertEqual(escalation.snapshot_fanout(self.main, None), {})
+        self.assertFalse(self.out.exists())
+
+    def test_the_record_admits_the_same_session_only_constraint(self) -> None:
+        """🔴 誠實劃界寫進**產物本身**，不是只寫在註解裡。
+
+        `resumeFromRunId` 是同 session only，而排程器是一個 OS 行程、沒有任何管道把
+        工具呼叫注入進一個活著的 session ⇒ 「自動續跑」在結構上不成立。讀這份檔的人
+        （或 AutoClaude）必須當場看到這件事，否則它會被當成一個沒被按下的按鈕，而
+        「宣稱全自動卻不會動」比沒有功能更糟。
+        """
+        self._agent("wf_abc", "agent-dead",
+                    [UnhandledLimitDetectionTest._limit("2026-08-07T18:36:53Z",
+                                                        _REAL_SESSION_LIMIT)])
+        escalation.snapshot_fanout(self.main, self._hit())
+        hint = " ".join(json.loads(self.out.read_text(encoding="utf-8"))["how_to_resume"])
+        self.assertIn("resumeFromRunId", hint)
+        self.assertIn("同 session only", hint, "沒把那條硬約束寫進產物 ⇒ 讀的人會以為它會自己跑")
+        self.assertIn("不會", hint, "沒說清楚它不會自動發生 ⇒ 會被當成一個壞掉的按鈕")
+
+
 # ════════════════════ R80：時區框架（act 在 Linux 容器抓到、Windows 本機看不見的兩個紅）
 # 缺陷本體：`resets 9am` 是一個**牆上時刻**，舊實作拿**機器的**本地時區去解它，而
 # `now` 由呼叫端給 ⇒ 同一份語料有兩個框架。act 實跑逐字：
@@ -2276,6 +2587,1044 @@ class ResetFrameIsNotTheMachineClockTest(unittest.TestCase):
             planner._register_at_expr = original
         self.assertEqual(seen, [f"'{at.astimezone().strftime('%Y-%m-%d %H:%M:%S')}'"],
                          "註冊出去的牆上時刻不是本機框架的 ⇒ 排程會醒在錯的時刻")
+
+
+# ════════════════════ R81 額度軸（訴求 a／b）：quota 是第二把尺，不是 context 的分支
+# 🔴 本段每一條都對著一筆**已被獨立審查者實測坐實**的失效，而不是對著實作細節：
+#   SA-B1 quota 分支掛在 `block_verdict()` 內 ⇒ 低 context × 高 quota 那個唯一場景到不了
+#   SA-B2 分母不是散文，payload 自己帶 `*_dollars`
+#   SA-B3 有真值卻不在 `limits[]` 的桶（實測 `nimbus_quill`）
+#   SA-B4 utilization 非單調（視窗翻頁驟降 48pp）⇒ 過期快取不得被判為 normal
+#   SA-B6 被擋下的呼叫若留在帳上 ⇒ 永久過度節流
+#   SA-B7 mac/Linux 上「不排程」與「排不了」外觀相同
+#   SD-B1 `Workflow` 在扇出開始前就返回 ⇒ in-flight 恆讀 ≈0
+_QUOTA_SCHEMA = "autosdd.quota/1"
+
+
+def _quota_cache(tmp: Path, pct: float | None, kind: str = "session",
+                 resets_in: float = 3600.0, age: float = 0.0) -> Path:
+    """種一份合成快取。`resets_in`＝距 reset 幾秒；`age`＝這份讀數幾秒前量的。"""
+    now = datetime.now(UTC).astimezone()
+    body = {"schema": _QUOTA_SCHEMA, "pct": pct, "kind": kind,
+            "resets_at": (now + timedelta(seconds=resets_in)).isoformat(),
+            "measured_at": (now - timedelta(seconds=age)).isoformat(timespec="seconds"),
+            "source": "endpoint", "via": "limits[].percent"}
+    path = tmp / "autosdd_quota.json"
+    path.write_text(json.dumps(body, ensure_ascii=False), encoding="utf-8", newline="\n")
+    return path
+
+
+def _meter():
+    """`tools/lib/quota_meter.py`（延後 import，與 `_wiring()` 同一形態）。"""
+    sys.path.insert(0, str(_REPO_ROOT / "tools" / "lib"))
+    import quota_meter  # noqa: PLC0415
+
+    return quota_meter
+
+
+def _ledger():
+    """`tools/lib/quota_ledger.py`（跨行程原語的唯一的家）。"""
+    sys.path.insert(0, str(_REPO_ROOT / "tools" / "lib"))
+    import quota_ledger  # noqa: PLC0415
+
+    return quota_ledger
+
+
+def _capture_stderr(call, tmp: Path) -> str:
+    """跑 `call()`，回它寫進 stderr 的東西；順便把降級閂鎖與痕跡導進 `tmp`。
+
+    🔴 導進 tmp 不是裝飾：`note_degraded()` 的 per-source 閂鎖住在系統暫存、TTL 180 秒
+    ⇒ 不隔離的話「上一次跑測試留下的 stamp」會讓這一次**靜默**，而靜默的方向正好是綠。
+    """
+    buf = io.StringIO()
+    saved = (sys.stderr, guard.degraded_stamp_path, guard.quota_trace_path)
+    sys.stderr = buf
+    guard.degraded_stamp_path = lambda source: tmp / f"stamp-{source}"
+    guard.quota_trace_path = lambda: tmp / "trace.jsonl"
+    try:
+        call()
+    finally:
+        sys.stderr, guard.degraded_stamp_path, guard.quota_trace_path = saved
+    return buf.getvalue()
+
+
+class QuotaUnitNormalizationTest(unittest.TestCase):
+    """M1：四種寫法必須產出**同一個**內部值。這是唯一抓得到「差 100 倍」的東西。
+
+    `0.3` 拿去比 `80` 永遠不觸發（閘門恆綠）、`30.0` 拿去比 `0.8` 永遠觸發（閘門恆紅），
+    兩個方向都在 rc=0 的外觀下失效，沒有任何東西會轉紅——所以它必須被單獨釘住。
+    """
+
+    def test_four_channels_agree_on_one_internal_value(self) -> None:
+        meter = _meter()
+        for label, raw, scale in (
+                ("REST utilization(float 0..100)", 56.0, meter.SCALE_PERCENT),
+                ("limits[].percent(int 0..100)", 56, meter.SCALE_PERCENT),
+                ("stream-json utilization(0..1)", 0.56, meter.SCALE_FRACTION),
+                ("statusLine used_percentage(0..100)", 56, meter.SCALE_PERCENT)):
+            with self.subTest(label):
+                self.assertAlmostEqual(meter.normalize_pct(raw, scale), 56.0, places=6)
+
+    def test_reading_a_fraction_channel_as_percent_is_caught(self) -> None:
+        """反向自證：故意把 0..1 那條通道當 0..100 讀 ⇒ 值差 100 倍，且會落在 normal 帶。"""
+        meter = _meter()
+        wrong = meter.normalize_pct(0.96, meter.SCALE_PERCENT)
+        self.assertAlmostEqual(wrong, 0.96, places=6)
+        self.assertEqual(guard.quota_tier_of(wrong), guard.QUOTA_NORMAL,
+                         "單位讀錯的後果就是：真實 96% 被判成 normal ⇒ 閘門恆綠")
+        self.assertEqual(guard.quota_tier_of(
+            meter.normalize_pct(0.96, meter.SCALE_FRACTION)), guard.QUOTA_HALT)
+
+    def test_non_numbers_and_negatives_are_unmeasurable(self) -> None:
+        meter = _meter()
+        for raw in (None, "56", True, float("nan"), -1.0, {}):
+            with self.subTest(raw=raw):
+                self.assertIsNone(meter.normalize_pct(raw, meter.SCALE_PERCENT))
+
+
+class QuotaUnmeasurableTest(unittest.TestCase):
+    """M2：**量不到 ≠ 量到零**。四種失敗輸入都必須是 `None`，且都不得節流。"""
+
+    def test_measure_returns_none_on_every_failure_shape(self) -> None:
+        meter = _meter()
+        original = meter.fetch_usage
+        shapes = {"HTTP 401": (401, None), "HTTP 429": (429, None),
+                  "連線層失敗": (0, None), "200 但不是 dict": (200, "nope"),
+                  "200 但沒有任何桶": (200, {"limits": [], "five_hour": {}})}
+        try:
+            for label, result in shapes.items():
+                meter.fetch_usage = lambda *a, _r=result, **k: _r
+                with self.subTest(label):
+                    reading = meter.measure()
+                    self.assertIsNone(reading, f"{label} 竟然回了讀數：{reading!r}")
+        finally:
+            meter.fetch_usage = original
+
+    def test_unmeasurable_does_not_throttle_and_is_not_normal(self) -> None:
+        # 行為上不節流（L4：斷網時自動降併發會讓「網路壞了」與「額度滿了」外觀相同），
+        # 但**狀態字必須分得開**，否則沒有人看得出來守衛這一次其實什麼都沒看到。
+        self.assertIsNone(guard.fanout_cap(None))
+        self.assertEqual(guard.quota_tier_of(None), guard.QUOTA_UNMEASURABLE)
+        self.assertNotEqual(guard.quota_tier_of(None), guard.QUOTA_NORMAL)
+
+    def test_a_missing_or_corrupt_cache_reads_as_none_not_zero(self) -> None:
+        now = datetime.now(UTC).astimezone()
+        tmp = Path(tempfile.mkdtemp())
+        self.assertIsNone(guard.read_quota(now, tmp / "nope.json")["pct"])
+        bad = tmp / "bad.json"
+        for text in ("{", '{"schema":"other","pct":99}', '{"schema":"autosdd.quota/1"}'):
+            bad.write_text(text, encoding="utf-8", newline="\n")
+            with self.subTest(text=text):
+                self.assertIsNone(guard.read_quota(now, bad)["pct"])
+
+
+class FanoutCapLadderTest(unittest.TestCase):
+    """M3：cap 的**方向**（不是數值）——隨 quota 單調不增，且 q≥95 必須恰為 0。"""
+
+    def _cap(self, pct: float) -> float:
+        cap = guard.fanout_cap(pct)
+        return float("inf") if cap is None else float(cap)  # None＝不設限
+
+    def test_cap_never_rises_as_quota_rises(self) -> None:
+        sweep = [self._cap(p / 2) for p in range(0, 201)]
+        for lower, upper in zip(sweep, sweep[1:]):
+            self.assertGreaterEqual(lower, upper, "cap 隨水位上升了 ⇒ 方向反了")
+
+    def test_halt_band_is_exactly_zero_and_ignores_overrides(self) -> None:
+        original = os.environ.get(guard.QUOTA_CAP_ENV)
+        os.environ[guard.QUOTA_CAP_ENV] = "99"
+        try:
+            self.assertEqual(guard.fanout_cap(95.0), 0)
+            self.assertEqual(guard.fanout_cap(100.0), 0)
+            self.assertEqual(guard.fanout_cap(85.0), 99, "節流帶的覆寫應該生效")
+            os.environ[guard.QUOTA_CAP_ENV] = "-5"
+            self.assertEqual(guard.fanout_cap(85.0), 0, "覆寫不得小於 0")
+        finally:
+            os.environ.pop(guard.QUOTA_CAP_ENV, None)
+            if original is not None:
+                os.environ[guard.QUOTA_CAP_ENV] = original
+
+    def test_the_two_thresholds_are_the_ones_the_helm_asked_for(self) -> None:
+        # 掌舵者訴求 b 的兩個數字是規格，不是可調參數：80 少派、95 停止。
+        self.assertEqual((guard.QUOTA_THROTTLE_PCT, guard.QUOTA_HALT_PCT), (80.0, 95.0))
+        self.assertLess(guard.QUOTA_THROTTLE_PCT, guard.QUOTA_HALT_PCT)
+
+    def test_quota_thresholds_are_not_the_context_thresholds(self) -> None:
+        """M10 的同構：同名不同義是本 repo 反覆判過的形態，**數字接近才更危險**。"""
+        self.assertNotEqual(guard.QUOTA_THROTTLE_PCT / 100, guard.WARN_RATIO)
+        self.assertNotEqual(guard.QUOTA_HALT_PCT / 100, guard.HARD_RATIO)
+
+
+class QuotaBucketUnionTest(unittest.TestCase):
+    """M7＋SA-B3：桶名一律動態列舉，且判定取**兩個來源的聯集**。"""
+
+    def test_a_bucket_with_a_real_value_outside_limits_can_win(self) -> None:
+        """本包實測：`nimbus_quill` 有 `utilization` 真值卻不在 `limits[]` 裡。
+
+        只讀 `limits[]` 時這一條當場紅——那正是它存在的理由：哪天是代號桶先滿，
+        取 `max(limits[].percent)` 會讀到一個低值而**永不節流**，且沒有東西轉紅。
+        """
+        meter = _meter()
+        payload = {"limits": [{"kind": "session", "percent": 12},
+                              {"kind": "weekly_all", "percent": 30}],
+                   "five_hour": {"utilization": 12.0},
+                   "nimbus_quill": {"utilization": 97.0},   # ← 不在 limits[] 裡
+                   "seven_day": {"utilization": 30.0}}
+        top = meter.worst(meter.bucket_readings(payload))
+        self.assertEqual((top["kind"], top["pct"]), ("nimbus_quill", 97.0))
+
+    def test_an_unknown_codename_bucket_does_not_raise(self) -> None:
+        meter = _meter()
+        payload = {"limits": [{"kind": "session", "percent": 5}],
+                   "brand_new_bucket_2027": {"utilization": 42.0},
+                   "member_dashboard_available": False, "seven_day_opus": None}
+        kinds = {r["kind"] for r in meter.bucket_readings(payload)}
+        self.assertIn("brand_new_bucket_2027", kinds)
+
+    def test_the_source_carries_no_hardcoded_bucket_roster(self) -> None:
+        """禁止寫死桶名清單：live payload 當回合 17 個頂層鍵，二進位內嵌名單只有 8 個。"""
+        source = (_REPO_ROOT / "tools" / "lib" / "quota_meter.py").read_text(
+            encoding="utf-8")
+        code = "\n".join(ln for ln in source.splitlines() if not ln.lstrip().startswith("#"))
+        for name in ("nimbus_quill", "amber_ladder", "seven_day_opus", "cinder_cove"):
+            with self.subTest(name=name):
+                self.assertNotIn(name, code, "桶名被寫死進**程式碼**了（註解裡舉例可以）")
+
+    def test_spend_is_reachable_because_it_only_has_percent(self) -> None:
+        """`spend` 沒有 `utilization` 只有 `percent` ⇒ 少了第三條規則它整條線失明。"""
+        meter = _meter()
+        readings = meter.bucket_readings({"limits": [], "spend": {"percent": 96}})
+        self.assertEqual([(r["kind"], r["pct"]) for r in readings], [("spend", 96.0)])
+
+
+class QuotaKindBranchTest(unittest.TestCase):
+    """M6＋SA-B7：三條線走不同分支，而分支由**資料**（reset 有多遠）決定、不由桶名決定。"""
+
+    def _now(self) -> datetime:
+        return datetime(2026, 8, 8, 22, 0, tzinfo=UTC)
+
+    def test_a_near_reset_may_be_armed(self) -> None:
+        soon = (self._now() + timedelta(hours=4)).isoformat()
+        self.assertEqual(guard.reset_branch(soon, self._now()), guard.QUOTA_BRANCH_ARM)
+
+    def test_a_weekly_reset_must_not_be_armed(self) -> None:
+        """七天後才響的排程＋全綠的痕跡＝R59 事故同形，所以這一條是硬斷言。"""
+        far = (self._now() + timedelta(days=6)).isoformat()
+        self.assertEqual(guard.reset_branch(far, self._now()), guard.QUOTA_BRANCH_NOTIFY)
+
+    def test_no_reset_at_all_escalates(self) -> None:
+        for raw in (None, "", "not-a-time", 12345):
+            with self.subTest(raw=raw):
+                self.assertEqual(guard.reset_branch(raw, self._now()),
+                                 guard.QUOTA_BRANCH_ESCALATE)
+
+    def test_a_naive_timestamp_is_refused(self) -> None:
+        """不帶 offset 的字串不得被當成時刻（跨 DST 相減會靜默差 3600 秒）。"""
+        self.assertEqual(guard.reset_branch("2026-08-08T23:00:00", self._now()),
+                         guard.QUOTA_BRANCH_ESCALATE)
+
+    def test_each_branch_says_something_different(self) -> None:
+        """三支分支＋兩種「沒武裝」的訊息必須**互不相同**。
+
+        SA-B7 的射程：mac/Linux 上武裝入口本身就有 `os.name != 'nt'` 早退 ⇒ 沿用
+        weekly 那支靜默的「不排程」路徑時，「不排程」與「排不了」長得一模一樣，
+        而合成注入的判準在 mac 上照樣全綠。
+        """
+        reading = {"pct": 96.0, "kind": "session", "resets_at": "2026-08-08T23:00:00+00:00"}
+        base = {"plan": "P", "kind": "session", "sentinel_off": False, "posix": False}
+        texts = {
+            "armed": guard.quota_halt_message(
+                reading, {**base, "branch": guard.QUOTA_BRANCH_ARM, "armed": True}),
+            "weekly": guard.quota_halt_message(
+                reading, {**base, "branch": guard.QUOTA_BRANCH_NOTIFY, "armed": False}),
+            "spend": guard.quota_halt_message(
+                reading, {**base, "branch": guard.QUOTA_BRANCH_ESCALATE, "armed": False}),
+            "posix": guard.quota_halt_message(
+                reading, {**base, "branch": guard.QUOTA_BRANCH_ARM, "armed": False,
+                          "posix": True}),
+            "sentinel_off": guard.quota_halt_message(
+                reading, {**base, "branch": guard.QUOTA_BRANCH_ARM, "armed": False,
+                          "sentinel_off": True}),
+        }
+        self.assertEqual(len(set(texts.values())), len(texts),
+                         "有兩支分支的訊息一樣 ⇒ 讀者分不出「沒排」與「排不了」")
+        self.assertIn("沒有排程載具", texts["posix"])
+        self.assertIn("提額", texts["spend"])
+
+
+class QuotaStaleCacheTest(unittest.TestCase):
+    """SA-B4：過期的舊值**不得**被直接採信為 normal。"""
+
+    def test_a_stale_78_is_not_normal(self) -> None:
+        """注入 SA 指名的那一組：快取值 78、stale 超 TTL ⇒ 不得判 normal。
+
+        方向刻意選 L4（量不到）而不是「上調一個安全邊際」：這個量非單調（視窗翻頁時
+        實測驟降 48pp）也非等速，任何邊際都是猜的。
+        """
+        tmp = Path(tempfile.mkdtemp())
+        now = datetime.now(UTC).astimezone()
+        path = _quota_cache(tmp, 78.0, age=guard.QUOTA_CACHE_TTL_SECONDS + 60)
+        reading = guard.read_quota(now, path)
+        self.assertIsNone(reading["pct"])
+        self.assertEqual(reading["source"], "stale-cache")
+        self.assertNotEqual(guard.quota_tier_of(reading["pct"]), guard.QUOTA_NORMAL)
+
+    def test_a_fresh_78_is_normal(self) -> None:
+        """控制組：只測「過期不採信」而不測「新鮮的照用」的鎖沒有鑑別力。"""
+        tmp = Path(tempfile.mkdtemp())
+        reading = guard.read_quota(datetime.now(UTC).astimezone(),
+                                   _quota_cache(tmp, 78.0, age=1))
+        self.assertEqual(reading["pct"], 78.0)
+        self.assertEqual(guard.quota_tier_of(reading["pct"]), guard.QUOTA_NORMAL)
+
+    def test_a_stale_high_value_also_stops_throttling(self) -> None:
+        """誠實劃界的反面：過期就是量不到，**連 96% 都不例外**。
+
+        這是刻意的取捨，不是漏洞：斷網時保留一個舊的高值會讓守衛在網路壞掉時
+        無限期停機，而那與「額度真的滿了」外觀完全相同。地板由逐字稿撞線偵測提供。
+        """
+        tmp = Path(tempfile.mkdtemp())
+        reading = guard.read_quota(datetime.now(UTC).astimezone(),
+                                   _quota_cache(tmp, 96.0, age=99_999))
+        self.assertIsNone(reading["pct"])
+
+
+class QuotaCacheContractHomeTest(unittest.TestCase):
+    """🔴 R81 收斂（Architect-B2）：快取的檔案契約（檔名＋schema）只能有**一個家**。
+
+    立案的形狀不是「兩處現在不一致」，而是**那個綁定從來沒有被測過**：meter 是唯一寫者、
+    hook 是唯一讀者，而所有既有快取測試都傳明確 `path` 給 `read_quota()` ⇒ 改掉 meter 的
+    `CACHE_NAME`，meter 寫新檔、hook 讀不到 → `pct=None` → **永遠不節流**，而全套照綠。
+    """
+
+    def test_the_hook_follows_the_meter_instead_of_copying_it(self) -> None:
+        """紅綠自證：把 meter 的兩個常數改掉，hook 必須**跟著動**；持有複本者當場紅。"""
+        meter = _meter()
+        self.assertEqual(guard.quota_cache_path(), meter.cache_path())
+        self.assertEqual(guard.quota_schema(), meter.SCHEMA)
+        old_name, old_schema = meter.CACHE_NAME, meter.SCHEMA
+        try:
+            meter.CACHE_NAME, meter.SCHEMA = "autosdd_q_INJ.json", "autosdd.quota/INJ"
+            self.assertEqual(guard.quota_cache_path().name, meter.CACHE_NAME,
+                             "hook 持有一份檔名複本 ⇒ meter 改名後兩邊寫讀不同檔，"
+                             "而 pct=None 的淨效果是永遠不節流（且全套測試照綠）")
+            self.assertEqual(guard.quota_schema(), meter.SCHEMA)
+            # 同一次注入下，hook 必須認得 meter **現在**會寫出來的 schema。
+            tmp = Path(tempfile.mkdtemp())
+            path = _quota_cache(tmp, 91.0)
+            path.write_text(json.dumps({
+                "schema": meter.SCHEMA, "pct": 91.0, "kind": "session",
+                "measured_at": datetime.now(UTC).astimezone().isoformat(timespec="seconds"),
+            }), encoding="utf-8", newline="\n")
+            self.assertEqual(
+                guard.read_quota(datetime.now(UTC).astimezone(), path)["pct"], 91.0)
+        finally:
+            meter.CACHE_NAME, meter.SCHEMA = old_name, old_schema
+
+    def test_the_hook_source_carries_no_second_copy(self) -> None:
+        """靜態那一半：hook 的**程式碼**裡不得再出現契約字面（註解裡舉例可以）。"""
+        code = "\n".join(ln for ln in _HOOK.read_text(encoding="utf-8").splitlines()
+                         if not ln.lstrip().startswith("#"))
+        for literal in (_meter().CACHE_NAME, _meter().SCHEMA):
+            with self.subTest(literal=literal):
+                self.assertNotIn(literal, code, "契約字面又長出第二個家")
+
+
+class QuotaUnmeasurableFanoutTest(unittest.TestCase):
+    """🔴 R81 收斂（Architect-B1）：「量不到」時**不得**對任意規模的扇出全數放行。
+
+    複審探針實測的缺口（跑 `quota_gate()` 真碼、沙箱 cache/ledger）：快取過期 600s／
+    額度 99% ⇒ 42 次 `Agent` 派發**放行 42、擋下 0**；完全沒有快取亦然。成因是唯一的
+    刷新呼叫點就在這條「已經量不到」的支線上、且 fire-and-forget 不等它 ⇒ 本次仍判
+    「量不到」⇒ 放行。而「過期」是**常態**不是罕見：哨兵巡邏一次都不刷快取、TTL 只有
+    180 秒 ⇒ 任何 ≥3 分鐘的非扇出工作之後，下一波扇出整批通過。
+
+    本類的四條刻意涵蓋**兩個方向**：量得到就要擋（前三條），真的量不到又沒有任何證據
+    時仍然放行（最後一條）。只鎖前者會讓下一個人用「一律 fail-closed」滿足它，而那正是
+    L4 當初被否決的形態（斷網與額度滿了外觀相同）。
+    """
+
+    def setUp(self) -> None:
+        self.tmp = Path(tempfile.mkdtemp(prefix="quota-gate-"))
+        self.calls: list[int] = []
+        for name, value in (("quota_cache_path", lambda: self.tmp / "c.json"),
+                            ("fanout_ledger_path", lambda: self.tmp / "l.jsonl"),
+                            ("quota_latch_path", lambda: self.tmp / "latch.json"),
+                            ("claim_refresh_slot", lambda: True)):
+            self._swap(guard, name, value)
+        sink = open(os.devnull, "w", encoding="utf-8")
+        self.addCleanup(sink.close)
+        self._swap(sys, "stderr", sink)
+
+    def _swap(self, obj: object, name: str, value: object) -> None:
+        old = getattr(obj, name)
+        setattr(obj, name, value)
+        self.addCleanup(setattr, obj, name, old)
+
+    def _endpoint(self, pct: float | None) -> None:
+        """假端點：不碰網路，但把真取數器會做的事做完（寫進 `quota_cache_path()`）。"""
+        def fake(timeout: int = guard.QUOTA_SYNC_TIMEOUT_SECONDS) -> bool:
+            self.calls.append(timeout)
+            if pct is None:
+                return False
+            _quota_cache(self.tmp, pct).replace(guard.quota_cache_path())
+            return True
+        self._swap(guard, "refresh_quota_blocking", fake)
+
+    def _burst(self, n: int = 42, transcript: str = "") -> int:
+        """回「被擋下幾次」。"""
+        return sum(guard.quota_gate({"hook_event_name": "PreToolUse", "tool_name": "Agent",
+                                     "transcript_path": transcript}) == 2 for _ in range(n))
+
+    def test_a_stale_cache_is_not_a_blanket_allow(self) -> None:
+        _quota_cache(self.tmp, 99.0, age=600).replace(guard.quota_cache_path())
+        self._endpoint(99.0)
+        self.assertEqual(self._burst(), 42, "快取過期 ⇒ 42 個扇出整批通過（缺口原形）")
+        self.assertEqual(len(self.calls), 1,
+                         "成本必須是「一次呼叫」不是「每次派發一次」——量測是有代價的，"
+                         "而 42 次同步網路呼叫會讓這道閘自己被關掉")
+
+    def test_a_missing_cache_is_not_a_blanket_allow(self) -> None:
+        self._endpoint(99.0)
+        self.assertEqual(self._burst(), 42, "沒有快取 ⇒ 42 個扇出整批通過（缺口原形）")
+
+    def test_a_fresh_cache_never_reaches_for_the_network(self) -> None:
+        """控制組：新鮮就直接判，一次都不准碰端點（否則 TTL 這個概念就沒有意義了）。"""
+        _quota_cache(self.tmp, 99.0, age=1).replace(guard.quota_cache_path())
+        self._endpoint(99.0)
+        self.assertEqual((self._burst(), self.calls), (42, []))
+
+    def test_a_dead_endpoint_falls_through_to_the_transcript_floor(self) -> None:
+        """L3 地板：ADR §2.1 與 Quota_Review D03 都拿它替 L4 不節流辯護，而
+        `quota_gate()` **一次都沒呼叫過** `unhandled_limit_event()` ⇒ 那層地板當時只
+        存在於文件裡。這一條是它真的接上的憑證。"""
+        main = self.tmp / "sid.jsonl"
+        main.write_text("\n".join([
+            json.dumps({"type": "assistant", "timestamp": "2026-08-07T18:00:00Z",
+                        "message": {"model": "claude-opus-5", "usage": {"input_tokens": 5}}}),
+            json.dumps({"type": "assistant", "timestamp": "2026-08-07T18:36:53Z",
+                        "message": {"model": guard.SYNTHETIC_MODEL,
+                                    "content": [{"text": _REAL_SESSION_LIMIT}]}}),
+        ]) + "\n", encoding="utf-8", newline="\n")
+        self._endpoint(None)
+        self.assertEqual(self._burst(transcript=str(main)), 42)
+
+    def test_a_dead_endpoint_with_no_evidence_still_allows(self) -> None:
+        """反向的誠實劃界：真的量不到、又沒有任何撞線證據 ⇒ 仍然放行。
+
+        這一條是刻意留下的**不節流**方向：斷網時自動降併發會讓「網路壞了」與「額度真的
+        滿了」外觀完全相同且靜默（同 `may_block()`「分母是猜的就不擋」判例）。
+        """
+        self._endpoint(None)
+        self.assertEqual(self._burst(), 0)
+
+
+# ═══════════ R81 收斂：**多行程** barrier 回歸鎖（B1／B3）——為什麼不是 Pool.map
+# 這一段每一條都 spawn 真的獨立行程，並用**壁鐘 barrier** 把它們對齊到同一瞬間。
+# 這不是講究，是量出來的判準差異：
+#   · `Pool.map` 的 worker 是**依序**被啟動的（本機實測彼此錯開數十毫秒）⇒「同時碰同
+#     一個檔」那件事根本沒發生。SD 對 `claim_refresh_slot` 兩種量法：Pool.map 得到
+#     CLAIM=1（看起來完全正確），壁鐘 barrier 得到 **CLAIM=16**（設計意圖 1）。
+#     同一支程式、兩個相反的結論——量法選錯就是一條恆綠的鎖。
+#   · 執行緒也不行：這兩個缺陷的本體是**跨行程**的檔案語意（Windows CRT 的 append 是
+#     使用者態的 seek＋write），同一個行程內的執行緒共用檔案物件，結構上量不到。
+#   · 本檔原本的 `FanoutLedgerTest` 是單行程序列呼叫 ⇒ 對這兩個缺陷零鑑別力，而它全綠。
+_BARRIER_WORKER = '''\
+import json, sys, time
+from datetime import datetime
+from pathlib import Path
+sys.path.insert(0, sys.argv[1])
+sys.path.insert(0, sys.argv[2])
+import context_budget_guard as guard
+job, target, start, count = sys.argv[3], sys.argv[4], float(sys.argv[5]), int(sys.argv[6])
+while time.time() < start:      # 壁鐘 barrier：所有行程在同一瞬間被放行
+    pass
+if job == "dispatch":
+    now = datetime.now().astimezone()
+    made = sum(guard.claim_dispatch(Path(target), now) is not None for _ in range(count))
+    print(made)
+elif job == "claim":
+    print("CLAIM" if guard.claim_refresh_slot() else "SKIP")
+elif job == "gate":
+    print(guard.quota_gate({"hook_event_name": "PreToolUse", "tool_name": "Agent",
+                            "transcript_path": target}))
+'''
+
+
+def _barrier_run(tmp: Path, job: str, target: str, procs: int, each: int = 1,
+                 lead: float = 2.0) -> list[str]:
+    """`procs` 個獨立行程、壁鐘對齊，回每一個的 stdout（已 strip）。"""
+    worker = tmp / "_barrier_worker.py"
+    worker.write_text(_BARRIER_WORKER, encoding="utf-8", newline="\n")
+    env = _isolated_env(tmp)
+    start = str(time.time() + lead)
+    argv = [sys.executable, str(worker), str(_HOOK.parent),
+            str(_REPO_ROOT / "tools" / "lib"), job, target, start, str(each)]
+    running = [subprocess.Popen(argv, env=env, stdout=subprocess.PIPE,
+                                stderr=subprocess.DEVNULL, encoding="utf-8",
+                                errors="replace") for _ in range(procs)]
+    return [proc.communicate(timeout=180)[0].strip() for proc in running]
+
+
+class FanoutLedgerConcurrencyTest(unittest.TestCase):
+    """🔴 SD-B1：派發帳在併發下掉行／撕行 ⇒ 節流器兩個方向都會錯。
+
+    落地前以同一支 barrier 探針實測（8 行程 × 40 筆＝320）：
+      · 舊實作 `path.open("a")`             lines=221 **LOST=99（30.9%）**
+      · `os.open` 帶 `os.O_APPEND` ＋單次 `os.write`   lines=281 **LOST=39（12.2%）**
+        （SD 建議的修法本身治不好——Windows 的 CRT 把那個旗標實作成使用者態的 seek＋write）
+      · `msvcrt.locking(LK_LOCK)`           N=8 時 0，**N=20 時 10 個行程直接死在
+        `OSError: Resource deadlock avoided`**（它只重試 10×1 秒）⇒ 鎖自己變成故障源
+      · 現行（目錄項＋`O_CREAT|O_EXCL`）     8×40／20×40／42×10 三組皆 **LOST=0 torn=0**
+    """
+
+    def setUp(self) -> None:
+        self.tmp = Path(tempfile.mkdtemp(prefix="ledger-mp-"))
+        self.root = self.tmp / "dispatch.d"
+        self.now = datetime.now(UTC).astimezone()
+
+    def test_a_barrier_aligned_burst_loses_nothing(self) -> None:
+        """本鎖的主牙：8 行程 × 40 筆同時寫，一筆都不准掉、一筆都不准撕。"""
+        made = sum(int(line) for line in
+                   _barrier_run(self.tmp, "dispatch", str(self.root), 8, 40))
+        live, unreadable = _ledger().count_dispatches(self.root, 0.0)
+        self.assertEqual((made, live, unreadable), (320, 320, 0),
+                         f"併發下掉帳／撕帳（記了 {made}、讀回 {live}、讀不懂 {unreadable}）")
+
+    def test_the_counter_is_actually_sensitive_to_a_lost_record(self) -> None:
+        """注入組：證明上一條不是恆綠——真的掉了 K 筆時，計數必須跟著少 K。
+
+        刻意用「刪掉 K 個目錄項」而不是「跑一次舊實作看它掉多少」：舊實作的掉行率是
+        **平台相依**的（POSIX 的 `O_APPEND` 是核心層原子的，同一段程式在 Linux 上
+        LOST=0）⇒ 拿它當注入組會讓這支鎖在 CI 上必紅。判準要綁被守的性質，不要綁一台
+        機器的偶然行為（鐵律三）。
+        """
+        for _ in range(10):
+            _ledger().claim_dispatch(self.root, self.now.timestamp())
+        for entry in sorted(self.root.iterdir())[:3]:
+            entry.unlink()
+        self.assertEqual(_ledger().count_dispatches(self.root, 0.0)[0], 7)
+
+    def test_an_unreadable_entry_is_counted_and_announced(self) -> None:
+        """SD-B1 required_change ②：讀不懂的記錄不得被靜默跳過。
+
+        舊版 `live_dispatches` 對解析失敗的行 `except ValueError: continue` ⇒ 撕行被
+        丟掉、帳目變小，而變小的方向正好是「看起來還有預算」。
+        """
+        _ledger().claim_dispatch(self.root, self.now.timestamp())
+        (self.root / "not-one-of-ours.txt").write_text("x", encoding="utf-8", newline="\n")
+        self.assertEqual(_ledger().count_dispatches(self.root, 0.0), (1, 1))
+        spoken = _capture_stderr(
+            lambda: guard.live_dispatches(self.root, self.now), self.tmp)
+        self.assertIn("讀不懂", spoken, "撕帳被靜默吞掉了")
+
+    def test_a_denied_call_hands_its_budget_straight_back(self) -> None:
+        """SA-B6 的新形態：撤銷是 `unlink` 自己那一個目錄項，不是第二次 append。"""
+        kept = [_ledger().claim_dispatch(self.root, self.now.timestamp())
+                for _ in range(2)]
+        for _ in range(20):
+            entry = _ledger().claim_dispatch(self.root, self.now.timestamp())
+            self.assertTrue(_ledger().release_dispatch(entry))
+        self.assertEqual(guard.live_dispatches(self.root, self.now), len(kept))
+
+    def test_the_window_rolls_and_prunes(self) -> None:
+        old = self.now.timestamp() - guard.FANOUT_WINDOW_SECONDS - 10
+        for _ in range(9):
+            _ledger().claim_dispatch(self.root, old)
+        self.assertEqual(guard.live_dispatches(self.root, self.now), 0)
+        self.assertEqual(list(self.root.iterdir()), [],
+                         "滾出視窗的目錄項沒有被清掉 ⇒ append-only 會永遠長大")
+
+
+class PhantomCountNoLongerBlocksTest(unittest.TestCase):
+    """🔴 SD-B1 的**端到端**那一半：幽靈計數會把遠低於 cap 的一次派發擋下來。
+
+    SD 實測（合成 90% 快取、20 個平行 Agent）：帳本 `try=20 undo=17`（各應為 20）⇒
+    `live_dispatches()` 讀回 **3**，而 cap=2、設計意圖 0 ⇒ 接著單獨派 1 個 Agent
+    （遠低於 cap）拿到 **rc=2**。這正是 SA-B6 要治的永久過度節流換了成因復發。
+    """
+
+    def setUp(self) -> None:
+        self.tmp = Path(tempfile.mkdtemp(prefix="phantom-"))
+        self.transcript = str(_write_jsonl(self.tmp / "s.jsonl", [36_000]))
+        _quota_cache(self.tmp, 90.0)
+
+    def test_the_ledger_matches_exactly_what_got_through(self) -> None:
+        codes = [int(x) for x in
+                 _barrier_run(self.tmp, "gate", self.transcript, 20)]
+        allowed = codes.count(0)
+        self.assertEqual(len(codes), 20)
+        live = guard.live_dispatches(self.tmp / guard.FANOUT_LEDGER_NAME,
+                                     datetime.now(UTC).astimezone())
+        self.assertEqual(live, allowed,
+                         f"帳上 {live} 筆、實際放行 {allowed} 次 ⇒ 幽靈計數／掉帳")
+        lone = int(_barrier_run(self.tmp, "gate", self.transcript, 1)[0])
+        cap = guard.THROTTLE_FANOUT_CAP
+        self.assertEqual(lone == 0, live + 1 <= cap,
+                         "單獨派 1 個 Agent 的判定與帳上實數不一致 ⇒ 被幽靈計數擋下")
+
+
+class RefreshSlotConcurrencyTest(unittest.TestCase):
+    """🔴 SD-B3：成本節流器在它**唯一要治的情境**下完全失效。
+
+    落地前實測（16 個獨立行程、壁鐘 barrier）：**CLAIM=16 SKIP=0**，設計意圖 1
+    ⇒ 一則訊息平行派 42 個 Agent、快取剛過期時，42 個 hook 各自同步打一次端點。
+    根因是 check-then-act（先 `is_file()`＋比 mtime，再 `write_text`），零原子性。
+    """
+
+    def setUp(self) -> None:
+        self.tmp = Path(tempfile.mkdtemp(prefix="claim-mp-"))
+
+    def test_exactly_one_of_sixteen_wins_the_ttl_slot(self) -> None:
+        out = _barrier_run(self.tmp, "claim", str(self.tmp / "unused"), 16)
+        self.assertEqual((out.count("CLAIM"), out.count("SKIP")), (1, 15),
+                         f"同一個 TTL 視窗內有 {out.count('CLAIM')} 個行程同時打端點")
+
+    def test_the_slot_reopens_after_the_ttl(self) -> None:
+        """反向對照：只鎖「搶不到」不鎖「到期換屆」，會做出一個永遠不再刷新的節流器。"""
+        stamp = self.tmp / "s.stamp"
+        self.assertTrue(_ledger().claim_once(stamp, 60.0, now=1000.0))
+        self.assertFalse(_ledger().claim_once(stamp, 60.0, now=1000.0))
+        self.assertTrue(_ledger().claim_once(stamp, 60.0, now=1e12),
+                        "TTL 過了還搶不到 ⇒ 這個節流器會把刷新永久關掉")
+
+
+class FanoutLedgerTest(unittest.TestCase):
+    """SA-B6：帳是 per-account 的一份，且壞掉的帳不得被讀成「擋下來」。"""
+
+    def setUp(self) -> None:
+        self.tmp = Path(tempfile.mkdtemp())
+        self.ledger = self.tmp / "ledger.jsonl"
+        self.now = datetime.now(UTC).astimezone()
+
+    def test_the_ledger_has_no_session_id_in_it(self) -> None:
+        """額度是 per-account 的單一池；per-sid 的帳等於 N 個載體各拿一份 cap。"""
+        self.assertEqual(guard.fanout_ledger_path().name, guard.FANOUT_LEDGER_NAME)
+        self.assertNotIn("{", guard.FANOUT_LEDGER_NAME)
+        source = _HOOK.read_text(encoding="utf-8")
+        body = source[source.index("def fanout_ledger_path"):]
+        body = body[:body.index("\ndef ", 1)]
+        self.assertNotIn("session_id", body, "帳檔名帶了 session id ⇒ 單位與額度不匹配")
+
+    def test_a_corrupt_ledger_reads_as_zero_not_as_a_block(self) -> None:
+        self.ledger.write_text("{\nnot json\n", encoding="utf-8", newline="\n")
+        self.assertEqual(guard.live_dispatches(self.ledger, self.now), 0)
+
+
+class QuotaGateIsIndependentOfContextTest(unittest.TestCase):
+    """🔴 SA-B1：本包唯一存在理由的那個場景——**低 context × 高 quota**。
+
+    ADR 原設計把 quota 分支放進 `block_verdict()`，而 `main()` 在呼叫它之前有五道
+    context 語意的早退（`tier_of` 在 context <75% 回 `None` ⇒ `return 0`）。撞額度那
+    一刻 context 只有 ~18~20% ⇒ 那段程式**永遠跑不到**。沒有下面這組低-context 注入，
+    任何「80% 擋得住」的判準在真實故障場景下都恆綠。
+    """
+
+    def setUp(self) -> None:
+        self.tmp = Path(tempfile.mkdtemp())
+        # 18% context：遠低於 WARN_RATIO(0.75) ⇒ 走 context 那條路一定 `return 0`。
+        self.transcript = _write_jsonl(self.tmp / "s.jsonl", [36_000])
+
+    def _call(self, tool: str = "Agent") -> tuple[int, str]:
+        return _run_hook({"hook_event_name": "PreToolUse", "tool_name": tool,
+                          "transcript_path": str(self.transcript)}, self.tmp)
+
+    def test_the_context_axis_alone_would_let_this_through(self) -> None:
+        """控制組：先證明這份逐字稿在 context 那把尺下確實是「什麼都不做」。"""
+        used, peak, _ = guard.scan_transcript(self.transcript)
+        self.assertLess(used / guard.CONSERVATIVE_WINDOW, guard.WARN_RATIO)
+        self.assertIsNone(guard.tier_of(used, guard.CONSERVATIVE_WINDOW))
+        _quota_cache(self.tmp, 50.0)
+        self.assertEqual(self._call()[0], 0)
+
+    def test_quota_85_blocks_a_fanout_call_at_18_percent_context(self) -> None:
+        _quota_cache(self.tmp, 85.0)
+        for _ in range(guard.THROTTLE_FANOUT_CAP):
+            self.assertEqual(self._call()[0], 0, "節流帶的前幾次派發應該放行")
+        rc, err = self._call()
+        self.assertEqual(rc, 2, "quota=85 × 超出預算 ⇒ 那次工具呼叫必須不發生")
+        self.assertIn("少派 agent", err)
+
+    def test_quota_50_never_blocks_however_many_times(self) -> None:
+        """反向對照：只測「擋得住」不測「不亂擋」的鎖沒有鑑別力。"""
+        _quota_cache(self.tmp, 50.0)
+        for i in range(guard.THROTTLE_FANOUT_CAP + 4):
+            self.assertEqual(self._call()[0], 0, f"第 {i + 1} 次被誤擋了")
+
+    def test_quota_96_blocks_the_very_first_call(self) -> None:
+        _quota_cache(self.tmp, 96.0, kind="weekly_all", resets_in=6 * 86400)
+        rc, err = self._call()
+        self.assertEqual(rc, 2)
+        self.assertIn("停止派發", err)
+        self.assertIn("刻意不排程", err, "週額度那一條被排程了 ⇒ 七天後才響")
+
+    def test_halt_writes_a_resume_plan_to_disk(self) -> None:
+        """95% 的動作要**真的發生**：任務書落磁碟，不是印一行字給模型看。"""
+        _quota_cache(self.tmp, 97.0, kind="weekly_all", resets_in=6 * 86400)
+        self.assertEqual(self._call()[0], 2)
+        plans = list(self.tmp.glob(f"{guard.PLAN_PREFIX}*.md"))
+        self.assertTrue(plans, "95% 閂鎖沒有把任務書寫到磁碟上")
+        self.assertIn("可重啟點任務書", plans[0].read_text(encoding="utf-8"))
+
+    def test_denied_calls_do_not_leak_into_the_real_ledger(self) -> None:
+        """🔴 SA-B6 的**端到端**版（純函式版對這個缺陷零鑑別力，本包注入實測坐實）。
+
+        `FanoutLedgerTest` 那幾條是自己呼叫 `append_dispatch` 造帳，所以把 deny 路徑上
+        那一行 `undo` 拿掉時它們照樣全綠——鎖在守的是輔助函式，不是**真的走過的那條路**。
+        這一條改成真跑 hook：節流帶裡先用滿預算、再被擋 K 次，然後直接量真實帳檔。
+        洩漏時它會讀到 cap+K（＝一旦到 cap 就永遠回不來，即使 quota 掉回 50）。
+        """
+        _quota_cache(self.tmp, 85.0)
+        for _ in range(guard.THROTTLE_FANOUT_CAP):
+            self.assertEqual(self._call()[0], 0)
+        denied = 5
+        for _ in range(denied):
+            self.assertEqual(self._call()[0], 2)
+        live = guard.live_dispatches(self.tmp / guard.FANOUT_LEDGER_NAME,
+                                     datetime.now(UTC).astimezone())
+        self.assertEqual(live, guard.THROTTLE_FANOUT_CAP,
+                         f"被擋下的 {denied} 次留在帳上了（讀到 {live}）⇒ 永久過度節流")
+
+    def test_non_fanout_tools_are_never_touched(self) -> None:
+        """收斂（讀檔／寫檔／跑 git）必須還做得到——擋到讓人無法收斂的守衛會被整個關掉。"""
+        _quota_cache(self.tmp, 99.0)
+        for tool in ("Read", "Edit", "PowerShell", "Write"):
+            with self.subTest(tool=tool):
+                self.assertEqual(self._call(tool)[0], 0)
+
+    def test_the_escape_hatch_is_its_own_switch(self) -> None:
+        """三個逃生口關掉的是三件不同的事，共用一個會讓人順手關掉另外兩層。"""
+        self.assertNotIn(guard.QUOTA_OFF_ENV, (guard.GUARD_OFF_ENV, guard.SENTINEL_OFF_ENV))
+        _quota_cache(self.tmp, 99.0)
+        env_payload = {"hook_event_name": "PreToolUse", "tool_name": "Agent",
+                       "transcript_path": str(self.transcript)}
+        env = _isolated_env(self.tmp)
+        env[guard.QUOTA_OFF_ENV] = "1"
+        proc = subprocess.run([sys.executable, str(_HOOK)],
+                              input=json.dumps(env_payload), env=env, capture_output=True,
+                              encoding="utf-8", errors="replace", timeout=180, check=False)
+        self.assertEqual(proc.returncode, 0)
+
+    def test_the_gate_is_evaluated_before_the_context_early_returns(self) -> None:
+        """原始碼級的釘子：`quota_gate` 的呼叫必須排在那五道早退**之前**。
+
+        沒有這一條時，未來有人把它往下搬一行就會讓整段變成死碼，而所有 e2e 仍然綠
+        （因為合成逐字稿可以剛好走得到）——那正是 SA-B1 抓到的形態。
+        """
+        source = _HOOK.read_text(encoding="utf-8")
+        body = source[source.index("def main()"):source.index("def block_verdict")]
+        # 🔴 先剝掉註解行再找位置。第一版沒剝，於是**我自己寫在那一行上方解釋這件事的
+        # 註解**（裡面逐字提到 `tier_of()`）就成了第一個命中點，判準當場誤紅。
+        # 這正是本 repo 反覆判過的「掃描器把說明文字當程式碼」——只是這次它抓到的是我。
+        body = "\n".join(ln for ln in body.splitlines() if not ln.lstrip().startswith("#"))
+        self.assertLess(body.index("quota_gate("), body.index("transcript_path"),
+                        "quota_gate 被排到 context 早退之後了 ⇒ 低 context 時是死碼")
+        # `may_block(` 刻意不在這一組：它住在 `block_verdict()` 裡、根本不在 `main()` 的
+        # 射程內，硬塞進來只會讓判準因為「找不到子字串」而 ValueError（＝一條分母為 0 的鎖）。
+        for marker in (r"\btier_of\(", r"\bused is None"):
+            with self.subTest(marker=marker):
+                hit = re.search(marker, body)
+                self.assertIsNotNone(hit, f"main() 裡找不到 context 早退標記 {marker}")
+                self.assertLess(body.index("quota_gate("), hit.start())
+
+
+class QuotaDenominatorTest(unittest.TestCase):
+    """SA-B2：口徑**從 payload 推導**，不得是一句對所有帳號都宣稱為真的散文。"""
+
+    def test_the_denominator_is_read_out_of_the_payload(self) -> None:
+        meter = _meter()
+        disclosed = meter.denominator_of(
+            {"five_hour": {"limit_dollars": 200.0, "used_dollars": 50.0,
+                           "utilization": 25.0}})
+        self.assertEqual(disclosed["kind"], "usd")
+        self.assertIn("200.0", disclosed["text"])
+        self.assertTrue(disclosed["cross_check"]["agrees"])
+
+    def test_a_null_denominator_says_so_instead_of_claiming_none_exists(self) -> None:
+        meter = _meter()
+        undisclosed = meter.denominator_of(
+            {"five_hour": {"limit_dollars": None, "used_dollars": None}})
+        self.assertEqual(undisclosed["kind"], "undisclosed")
+        self.assertIsNone(undisclosed["cross_check"])
+
+    def test_a_disagreeing_utilization_is_detectable(self) -> None:
+        """交叉核對存在的理由：讓 utilization 壞掉／過期變成**可偵測**而非靜默採信。"""
+        meter = _meter()
+        checked = meter.denominator_of(
+            {"five_hour": {"limit_dollars": 100.0, "used_dollars": 90.0,
+                           "utilization": 12.0}})
+        self.assertFalse(checked["cross_check"]["agrees"])
+
+    def test_schema_drift_is_recorded(self) -> None:
+        """SA-N09：新桶滿了而我們看不到是靜默的 ⇒ 頂層鍵集合的變動必須被記下來。"""
+        meter = _meter()
+        self.assertEqual(
+            meter.drift_against({"schema_keys": ["a", "b"]}, {"schema_keys": ["a", "b", "z"]}),
+            ["z"])
+        self.assertEqual(meter.drift_against(None, {"schema_keys": ["a"]}), [])
+
+
+class WorkflowFanoutIsOutOfReachTest(unittest.TestCase):
+    """🔴 SD-B1：把量到的失明面釘成政策，而不是留一句「擋得住」的假話。
+
+    本包當回合實測（`~/.claude/projects/d--CursorProject-AISDCL-Agent/`）：
+      · `Workflow` 的 tool_result **47/47** 是「Workflow launched in background」
+        ⇒ 那次呼叫在內部 agent 生出來之前就結束，用 Pre/Post 配對算 in-flight 恆讀 ≈0；
+      · `%TEMP%` 的 19 支 `autosdd_sentinel_boot_*.log` **沒有一支**的 sid 長得像 subagent
+        ⇒ SessionStart 對 workflow 內部 agent 一次都沒觸發過；
+      · 但 subagent 逐字稿裡 `PreToolUse:` 命中 136 次 ⇒ 那些 agent **自己的**工具呼叫會跑本 hook。
+    ⇒ 一次 `Workflow` 啟動是事後界不住的扇出，節流帶唯一誠實的處置是不讓它啟動。
+    """
+
+    def setUp(self) -> None:
+        self.tmp = Path(tempfile.mkdtemp())
+        self.transcript = _write_jsonl(self.tmp / "s.jsonl", [36_000])
+
+    def test_workflow_is_denied_in_the_throttle_band_even_on_the_first_call(self) -> None:
+        _quota_cache(self.tmp, 85.0)
+        rc, err = _run_hook({"hook_event_name": "PreToolUse", "tool_name": "Workflow",
+                             "transcript_path": str(self.transcript)}, self.tmp)
+        self.assertEqual(rc, 2)
+        self.assertIn("數不到", err, "訊息必須說出理由是『界不住』而不是『太多』")
+
+    def test_agent_is_still_allowed_up_to_the_cap(self) -> None:
+        """對照組：政策只針對**界不住**的那一個，不是把節流帶變成全面停機。"""
+        _quota_cache(self.tmp, 85.0)
+        rc, _ = _run_hook({"hook_event_name": "PreToolUse", "tool_name": "Agent",
+                           "transcript_path": str(self.transcript)}, self.tmp)
+        self.assertEqual(rc, 0)
+
+    def test_the_unbounded_set_is_a_subset_of_the_blocking_set(self) -> None:
+        self.assertTrue(set(guard.UNBOUNDED_FANOUT_TOOLS) <= set(guard.BLOCKING_TOOLS))
+
+
+class _FakeMeter:
+    """`quota_meter` 的替身：只回答 `measure_detail`，不碰網路。"""
+
+    SCHEMA = _QUOTA_SCHEMA
+
+    def __init__(self, reason: str, reading: dict | None = None) -> None:
+        self.reason, self.reading, self.cache = reason, reading, Path()
+
+    def measure_detail(self, timeout: int = 4) -> tuple[dict | None, str]:
+        return self.reading, self.reason
+
+    def write_cache(self, reading: dict, path: Path) -> bool:
+        path.write_text(json.dumps(reading), encoding="utf-8", newline="\n")
+        return True
+
+    def cache_path(self) -> Path:
+        return self.cache
+
+
+class QuotaDegradationIsAudibleTest(unittest.TestCase):
+    """🔴 SD-B2：額度軸「量不到」時**完全靜默**，`QUOTA_UNMEASURABLE` 在 production 是死碼。
+
+    落地前實測（同一支注入探針，四種失效各注入一次；控制組在第一列）：
+        (a) 99% 快取 ＋ meter 正常          → rc=2  stderr 173b   痕跡 —
+        (b) meter 不可達                    → rc=0  stderr **0b**  痕跡 **無**
+        (c) schema 被 bump                  → rc=0  stderr **0b**  痕跡 **無**
+        (d) 快取過期 600s                   → rc=0  stderr **0b**  痕跡 **無**
+        (e) 完全沒有快取                    → rc=0  stderr **0b**  痕跡 **無**
+    根因：`quota_gate()` 在 `pct is None` 且無地板時直接 `return 0`，**而且是在
+    `quota_tier_of()` 被呼叫之前** ⇒ 全 repo `QUOTA_UNMEASURABLE` 只出現在常數定義／
+    `quota_tier_of`／測試三處，production 一次都到不了。四種失效與「額度很健康」外觀
+    完全一致 ⇒ B3／B4 都變成不可偵測。
+
+    🔴 本類**兩個方向都鎖**：量不到要出聲（前幾條），量得到就不准吵（最後兩條）。
+    只鎖前者的話，下一個人用「每次都印一行」滿足它，而每次都出聲的守衛會被整個關掉。
+    """
+
+    def setUp(self) -> None:
+        self.tmp = Path(tempfile.mkdtemp(prefix="degraded-"))
+        self.trace = self.tmp / "trace.jsonl"
+        for name, value in (("quota_cache_path", lambda: self.tmp / "c.json"),
+                            ("fanout_ledger_path", lambda: self.tmp / "l.d"),
+                            ("quota_latch_path", lambda: self.tmp / "latch.json"),
+                            ("claim_refresh_slot", lambda: True),
+                            ("quota_trace_path", lambda: self.trace),
+                            ("degraded_stamp_path",
+                             lambda source: self.tmp / f"stamp-{source}")):
+            self._swap(guard, name, value)
+
+    def _swap(self, obj: object, name: str, value: object) -> None:
+        old = getattr(obj, name)
+        setattr(obj, name, value)
+        self.addCleanup(setattr, obj, name, old)
+
+    def _gate(self, reason: str = "meter-unreachable") -> tuple[int, str, list[dict]]:
+        """跑真的 `quota_gate()`，回 `(rc, stderr, 這次新增的痕跡列)`。"""
+        self._swap(guard, "quota_meter", _FakeMeter(reason))
+        before = len(self._trace_lines())
+        buf = io.StringIO()
+        saved, sys.stderr = sys.stderr, buf
+        try:
+            rc = guard.quota_gate({"hook_event_name": "PreToolUse",
+                                   "tool_name": "Agent", "transcript_path": ""})
+        finally:
+            sys.stderr = saved
+        return rc, buf.getvalue(), self._trace_lines()[before:]
+
+    def _trace_lines(self) -> list[dict]:
+        if not self.trace.is_file():
+            return []
+        return [json.loads(ln) for ln in
+                self.trace.read_text(encoding="utf-8").splitlines() if ln.strip()]
+
+    def test_a_dead_meter_with_no_cache_says_so(self) -> None:
+        rc, err, trace = self._gate()
+        self.assertEqual(rc, 0, "L4 的方向沒有變：真的量不到仍然不節流")
+        self.assertIn("量不到", err, "斷網與「額度很寬鬆」外觀相同 ⇒ B3/B4 不可偵測")
+        self.assertTrue(trace, "沒有留下任何可稽核的痕跡")
+        self.assertEqual({r["state"] for r in trace}, {guard.QUOTA_UNMEASURABLE},
+                         "狀態字沒有進到 production 的痕跡裡 ⇒ 它仍然是死碼")
+
+    def test_each_failure_shape_names_itself(self) -> None:
+        """四種失效必須**分得開**——混成一句話等於沒說（ADR §6.3 要求留 `source`）。"""
+        cases = {
+            "no-cache": (None, "meter-unreachable"),
+            "bad-cache": ('{"schema": "autosdd.quota/1", "pct": "x"}', "http-401"),
+            "stale-cache": ("stale", "http-500"),
+        }
+        for expect, (seed, reason) in cases.items():
+            with self.subTest(source=expect):
+                cache = self.tmp / "c.json"
+                cache.unlink(missing_ok=True)
+                if seed == "stale":
+                    _quota_cache(self.tmp, 99.0, age=600).replace(cache)
+                elif seed:
+                    cache.write_text(seed, encoding="utf-8", newline="\n")
+                _, err, trace = self._gate(reason)
+                sources = {r["source"] for r in trace}
+                self.assertIn(expect, sources, f"沒說出快取那一端的理由（{sources}）")
+                self.assertIn(reason, sources, f"沒說出取數那一端的理由（{sources}）")
+                self.assertIn(reason, err)
+
+    def test_a_bumped_schema_is_not_mistaken_for_a_healthy_account(self) -> None:
+        """schema 升版時舊快取整份作廢——那是對的，但它必須**說出來**。"""
+        (self.tmp / "c.json").write_text(
+            json.dumps({"schema": "autosdd.quota/999", "pct": 99.0,
+                        "measured_at": datetime.now(UTC).astimezone().isoformat()}),
+            encoding="utf-8", newline="\n")
+        rc, err, trace = self._gate("no-buckets")
+        self.assertEqual(rc, 0)
+        self.assertTrue(trace and err, "schema 升版與『額度很健康』外觀完全相同")
+
+    def test_a_healthy_reading_never_speaks(self) -> None:
+        """控制組①：量得到就一個字都不准吵，否則這道守衛會被整個關掉。"""
+        _quota_cache(self.tmp, 40.0).replace(self.tmp / "c.json")
+        rc, err, trace = self._gate()
+        self.assertEqual((rc, err, trace), (0, "", []))
+
+    def test_the_throttle_message_is_not_the_degraded_message(self) -> None:
+        """控制組②：真的滿了要走節流那條路（有 pct 的訊息），不是降級那條。"""
+        _quota_cache(self.tmp, 99.0).replace(self.tmp / "c.json")
+        rc, err, trace = self._gate()
+        self.assertEqual((rc, trace), (2, []))
+        self.assertIn("停止派發", err)
+        self.assertNotIn("量不到", err)
+
+    def test_the_same_source_does_not_shout_on_every_call(self) -> None:
+        """出聲要有閂鎖：每次工具呼叫都吵的守衛會被關掉（同 90% 那道的既有判例）。"""
+        first, _, _ = self._gate()[0], None, None
+        spoken = [self._gate()[1] for _ in range(3)]
+        self.assertEqual(first, 0)
+        self.assertEqual([s for s in spoken if s], [], "同一個 source 每次都在吵")
+
+
+class MeterFailureShapesTest(unittest.TestCase):
+    """🔴 SD-B4：`fetch_usage()` 分得出 401 與斷網，而它唯一的呼叫端把 status 丟掉了。
+
+    `quota_meter` 檔頭 §S1-08 逐字要求「401 與『額度真的沒回來』必須在痕跡裡分得開」，
+    理由是 OAuth token 4 小時到期、而無人看管那條路上沒有人在 refresh ⇒ 混在一起會讓
+    排程器把認證失敗誤判成額度未恢復而一直等下去（R80 哨兵整晚失明同形）。
+    落地前實測：憑證讀不到 → `None`；HTTP 401（真連線、0.30s）→ `None`。**同一個答案。**
+
+    🔴 誠實劃界（本輪**沒有**做的那一半）：`CREDENTIALS` 仍然只有一個來源、零平台分支。
+    我手上沒有 mac 真機，寫一個驗不了的分支正是 `DEF-101-766` 的形狀。可驗的是結構——
+    這一組 `REASON_*` 讓「假設不成立」變成**說得出來**的，而不是整條額度軸靜默 no-op。
+    非 Windows 的憑證來源未驗，已登記交由下一輪承接（輪號寫在帳本那一列）。
+    """
+
+    def _with_fetch(self, status: int, payload: object):
+        meter = _meter()
+        old = meter.fetch_usage
+        meter.fetch_usage = lambda token, timeout=10: (status, payload)
+        self.addCleanup(setattr, meter, "fetch_usage", old)
+        old_creds = meter.CREDENTIALS
+        tmp = Path(tempfile.mkdtemp(prefix="creds-")) / "c.json"
+        tmp.write_text(json.dumps({"claudeAiOauth": {"accessToken": "t"}}),
+                       encoding="utf-8", newline="\n")
+        meter.CREDENTIALS = tmp
+        self.addCleanup(setattr, meter, "CREDENTIALS", old_creds)
+        return meter
+
+    def test_unreadable_credentials_and_http_401_are_different_answers(self) -> None:
+        meter = self._with_fetch(401, None)
+        self.assertEqual(meter.measure_detail(4), (None, "http-401"))
+        missing = Path(tempfile.mkdtemp(prefix="nocreds-")) / "nope.json"
+        old, meter.CREDENTIALS = meter.CREDENTIALS, missing
+        try:
+            self.assertEqual(meter.measure_detail(4),
+                             (None, meter.REASON_NO_CREDENTIALS))
+        finally:
+            meter.CREDENTIALS = old
+        self.assertNotEqual(meter.REASON_NO_CREDENTIALS, "http-401")
+
+    def test_a_connection_failure_is_not_an_http_code(self) -> None:
+        """`fetch_usage` 用 status 0 表示「連線層就失敗」⇒ 不得被印成 `http-0`。"""
+        meter = self._with_fetch(0, None)
+        self.assertEqual(meter.measure_detail(4), (None, meter.REASON_UNREACHABLE))
+
+    def test_every_http_code_survives_into_the_reason(self) -> None:
+        for status in (403, 429, 500, 503):
+            with self.subTest(status=status):
+                meter = self._with_fetch(status, None)
+                self.assertEqual(meter.measure_detail(4)[1], f"http-{status}")
+
+    def test_a_200_with_no_readable_bucket_is_its_own_shape(self) -> None:
+        """200 但一個桶都讀不到，與 401 是不同的病（一個是認證、一個是 schema）。"""
+        meter = self._with_fetch(200, {"five_hour": {}})
+        self.assertEqual(meter.measure_detail(4), (None, meter.REASON_NO_BUCKETS))
+
+    def test_a_good_reading_carries_ok_and_the_narrow_measure_is_unchanged(self) -> None:
+        """既有呼叫端的窄介面不得被改壞——`measure()` 仍然回 dict／None。"""
+        payload = {"five_hour": {"utilization": 61.0, "resets_at": None}}
+        meter = self._with_fetch(200, payload)
+        reading, reason = meter.measure_detail(4)
+        self.assertEqual((reason, reading["pct"]), ("ok", 61.0))
+        self.assertEqual(meter.measure(4)["pct"], 61.0)
+
+
+class ThrottleBandSaysHowLongItLastsTest(unittest.TestCase):
+    """SD 非 blocking ①：halt 帶用 `reset_branch` 分得出三支，**throttle 帶完全不分**。
+
+    週額度越 80% 時 cap 會連續套用**好幾天**，與 five_hour 80%（最多 5 小時）代價差一個
+    數量級，而訊息裡讀不出差別。本輪只把差別說出來，**不動 cap 的階梯**（那是掌舵者訂的
+    政策，挑一個數字塞進來就是本檔一路在治的「挑的不是量出來的」）——已登記交由下一輪
+    承接（輪號寫在帳本那一列）。
+    """
+
+    def _msg(self, resets_in: float | None) -> str:
+        now = datetime.now(UTC).astimezone()
+        resets = None if resets_in is None else (
+            now + timedelta(seconds=resets_in)).isoformat()
+        return guard.quota_throttle_message(
+            {"pct": 85.0, "kind": "weekly_all", "resets_at": resets},
+            "Agent", 2, 2, now)
+
+    def test_the_three_horizons_read_differently(self) -> None:
+        near, far, none_at_all = self._msg(3600), self._msg(5 * 86400), self._msg(None)
+        self.assertNotEqual({near, far, none_at_all}, {near},
+                            "三種 reset 距離的訊息一模一樣 ⇒ 讀者分不出代價差一個數量級")
+        self.assertIn("好幾天", far)
+        self.assertIn("很快就會自己解除", near)
+        self.assertIn("沒有 reset 可以等", none_at_all)
+
+    def test_the_cap_ladder_itself_is_untouched(self) -> None:
+        """本輪刻意**沒有**改階梯：訊息變了、政策沒變，兩件事不要混在一起收。"""
+        self.assertEqual(guard.fanout_cap(85.0), guard.THROTTLE_FANOUT_CAP)
+        self.assertEqual(guard.fanout_cap(96.0), 0)
 
 
 if __name__ == "__main__":

@@ -205,10 +205,18 @@ Select-String -Path "$r\docs\06_quality\AutoSDD_Defect_Log.md" -Pattern 'R81' -E
 其中**方向性最強**的幾類（每一類都用上面那條指令查出當下的 ID，本檔不寫死清單）：
 - **mac／POSIX 落差**（包 F 那一族）：Linux 容器永遠是 GNU coreutils，掃不到不等於 BSD 跑得過。
 - **exec form 的射程**：`AutoClaude/.claude/settings.json` 的 6 條仍是 shell form。
+  🔴 **R81 已處置**（`DEF-101-967` 結案）：該檔轉成 12 條 exec form、`SHELL_FORM_CENSUS` 兩格皆 0。
+  **剩餘面**＝形態判準 A~F 與載具存在性判準的掃描面仍只有根檔（見 `CLAUDE.md`〈鐵律一之二〉末段誠實劃界）。
 - **skip 的兩半**：`untagged` 那一群補一句標籤就結案；`platform` 那一群的目標**不是 0**，
   而是「互補剖面上真的有人跑到」——而 `AutoClaude/tests@linux+pg+solo` 至今沒有人量過。
 - **對等性的行為面**（掃描 S8-05，**未落地**）：`tools/check_script_parity.py` 驗的是「存在性＋位元組釘選＋
   幾道具名鎖」，**不驗 13 對 `.sh`／`.ps1` 的一般行為等價**。
+  🔴 **R81 已處置（本列的「未落地」是 R80 收輪狀態，非今日狀態）**：`tools/lib/script_interface_parity.py` 落地，
+  補的是**可觀察介面**的表面集合比對（退出碼／外部執行檔／git 子指令），判準形狀＝與凍結基準**雙向相等**
+  （新分歧紅、既有分歧修好卻沒除帳也紅）。**射程要照著讀，別當成它不是的東西**：行為等價不可判定（停機問題），
+  該模組明文**不宣稱**驗行為等價；同碼不同條件、順序、訊息文字、動態構造的指令名一律抓不到。
+  另外那 13 對裡**只有 3 對**是真的兩份獨立實作（`_BASELINE`／`_SCOPE_FLOOR` 現查皆為 3），
+  其餘已收斂成「薄殼＋Python 單核心」⇒ 那些對根本沒有第二份實作可比，由 thinness hash 釘選守。
   ```powershell
   & $p "$r\tools\check_script_parity.py"      # 讀它印出的鎖清單，那就是它真正涵蓋的範圍
   Select-String -Path "$r\docs\06_quality\CrossPlatform_R80_Scan_Findings.md" -Pattern 'S8-05' -Encoding utf8

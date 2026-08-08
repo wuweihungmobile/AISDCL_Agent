@@ -786,7 +786,9 @@ class TestFindGitBashCallSites(unittest.TestCase):
         import subprocess
 
         out = subprocess.run(
-            ["git", "ls-files", "*.ps1"],
+            # `-c core.quotepath=false`（R81 XPL-S1-01）：非 ASCII 路徑的 C-quoted 形態
+            # 會讓下方逐檔讀取拿到打不開的字串（`is_file()` 實測回 False）。
+            ["git", "-c", "core.quotepath=false", "ls-files", "*.ps1"],
             cwd=_REPO_ROOT, capture_output=True, text=True,
             encoding="utf-8", errors="replace", check=True,  # 非 UTF-8 終端下的 mojibake 防護
         ).stdout

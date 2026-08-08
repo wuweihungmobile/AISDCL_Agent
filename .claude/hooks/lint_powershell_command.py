@@ -78,7 +78,6 @@ R78：三條規則的鑑別力修復（四方複審 SA-01／SD-01／QA-01／SD-0
 
 from __future__ import annotations
 
-import json
 import os
 import re
 import sys
@@ -104,6 +103,25 @@ for _stream in (sys.stdout, sys.stderr):
         _stream.reconfigure(encoding="utf-8", errors="replace")  # type: ignore[union-attr]
     except Exception:  # noqa: BLE001 — 見上
         pass
+
+# payload 讀取住共用層 `tools/lib/platform_utils.py`（R81／SUB-S1-04）：此前 7 支 hook
+# 各帶一份手抄本，實測已漂移成 **3 種**行為，其中 3 支在頂層非 object 的合法 JSON
+# （`[1,2,3]`／`null`）上 rc=1 AttributeError ⇒ 阻斷級守衛的判定根本沒產出。
+#
+# 🔴 這與上面那條「就地重做一次、零外部相依」**不衝突**，因為那條要的是 fail-open
+# 而不是「不准 import」：共用層不可達時，下面的 except 讓它退化成
+# `read_payload() -> None`，正好走本檔既有的「payload 讀不出來 → rc=1 出聲不阻斷」
+# 分支。模組層不會爆掉，也**不留第二份 JSON 解析實作**（那才是本輪在治的病）。
+# 對照：`SHARED_PATTERN_SOURCE` 那一處複本仍留著——它的兩端是「攔截 vs 量測」的
+# 判準字面，由具名鎖對帳；本處是純粹的手抄本，沒有任何理由留第二份。
+sys.path.insert(0, os.path.join(
+    os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))),
+    "tools", "lib"))
+try:
+    from platform_utils import read_payload  # type: ignore[import-not-found]
+except Exception:  # noqa: BLE001 — 共用層不可達＝退化，不是崩潰（fail-open 是 P0）
+    def read_payload() -> dict | None:  # type: ignore[misc]
+        return None
 
 #: 本守衛只認這一個工具名（本輪以拋棄式 dump hook 實測 PreToolUse payload 確認）。
 OWN_TOOL = "PowerShell"
@@ -489,29 +507,6 @@ def unattended_hits(command: str) -> list[str]:
     if _GH_WRITE_RE.search(structural):
         hits.append("  · gh pr create／pr merge／release create（把改動送出去的另一條路）")
     return hits
-
-
-def read_payload() -> dict | None:
-    """讀 stdin 的 hook payload；`None`＝退化（讀不出來）。
-
-    走 **bytes 端**再以 UTF-8+replace 解碼：zh-TW Windows 的 pipe 預設 cp950，
-    裸文字端 read 遇到含中文的 UTF-8 payload 會拋 UnicodeDecodeError，讓阻斷級
-    hook 靜默失效。姊妹 hook 早有這道防線，本檔照抄同一形態。
-    """
-    try:
-        buffer = getattr(sys.stdin, "buffer", None)
-        raw = (buffer.read().decode("utf-8", "replace") if buffer is not None
-               else sys.stdin.read())
-    except Exception:  # noqa: BLE001 — 讀不到就是退化，不是崩潰
-        return None
-    raw = (raw or "").strip()
-    if not raw:
-        return None
-    try:
-        payload = json.loads(raw)
-    except ValueError:
-        return None
-    return payload if isinstance(payload, dict) else None
 
 
 def main() -> int:

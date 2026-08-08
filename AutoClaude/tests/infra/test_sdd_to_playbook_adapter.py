@@ -166,20 +166,27 @@ class TestParsing:
         """
         import shutil
         import subprocess
+        from pathlib import Path
 
         pytest_path = shutil.which("pytest")
         assert pytest_path, "本機測試環境需有 pytest 可用（CI 基本假設）"
         isolated_bin = tmp_path / "isolated_bin"
         isolated_bin.mkdir()
-        # 比照 tools/tests/_platform_helpers.py 的 create_symlink_or_skip()
-        # 邏輯（見 conftest.py「跨平台測試 fixture 撰寫紀律（四方複審 S21）」，
-        # DEF-101-064／DEF-101-069）：Windows 非管理者/未開發者模式建立 symlink
-        # 會拋 OSError（WinError 1314），此為測試 fixture 前置條件本身做不到，
-        # skip 而非算失敗。
+        # 🔴 R81 包 F：本 fixture 此前在 Windows 上**必定** skip（未開發者模式 ⇒
+        # symlink_to 拋 WinError 1314），而 skip 掉的是本測試唯一有鑑別力的部分。
+        # 兩個修正，都不動斷言：
+        #   ① 檔名沿用來源的 basename——Windows 上 `shutil.which("pytest")` 回的是
+        #      `pytest.exe`，原本寫死的 `pytest`（無副檔名）就算 symlink 建得起來，
+        #      cmd.exe 也依 PATHEXT 找不到它 ⇒ 那條路在 Windows 上本來就是死的。
+        #   ② 建不了 symlink 就改用**複本**。本測試要的性質是「PATH 上只有 pytest、
+        #      沒有任何 python*」，symlink 只是達成它的手段之一；複本同樣滿足該性質
+        #      （console script launcher 內嵌直譯器絕對路徑，不靠 PATH 找 python）。
+        #      POSIX 仍走 symlink，行為與原本完全相同。
+        staged = isolated_bin / Path(pytest_path).name
         try:
-            (isolated_bin / "pytest").symlink_to(pytest_path)
-        except OSError as e:
-            pytest.skip(f"本機無建立 symlink 權限（{e}），略過 symlink 情境")
+            staged.symlink_to(pytest_path)
+        except OSError:
+            shutil.copy2(pytest_path, staged)
 
         c = spec.contracts[0]
         result = subprocess.run(

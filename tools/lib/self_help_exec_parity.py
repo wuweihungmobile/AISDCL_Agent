@@ -27,9 +27,16 @@
 from __future__ import annotations
 
 import re
-import subprocess
+import sys
 from collections.abc import Callable
 from pathlib import Path
+
+# 本檔住 `<repo>/tools/lib/`，但既有消費端是 `from lib import self_help_exec_parity`
+# （＝sys.path 上的是 `tools/`，不是 `tools/lib/`）⇒ 同層 import 必須自己把本目錄放上去。
+# 慣例逐字同 `tools/lib/windows_skip_tags.py:40`。
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+
+import git_paths  # noqa: E402
 
 _SELF_HELP_DOT_SLASH_RE = re.compile(r"(?<![\w./-])\./([A-Za-z0-9_./-]+\.sh)\b")
 _INDEX_MODE_EXEC = "100755"
@@ -43,11 +50,15 @@ _SELF_HELP_DEBT_FROZEN = 116
 
 
 def index_modes(repo_root: Path) -> dict[str, str]:
-    """`git ls-files -s` → {repo 相對路徑: 模式}。空 dict ＝取數管道壞掉。"""
-    proc = subprocess.run(
-        ["git", "-C", str(repo_root), "ls-files", "-s"],
-        capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=180,
-    )
+    """`git ls-files -s` → {repo 相對路徑: 模式}。空 dict ＝取數管道壞掉。
+
+    🔴 R81（XPL-S1-01）：取數改走 `git_paths`——原本這裡是裸的
+    `["git","-C",…,"ls-files","-s"]`，非 ASCII 路徑會被 git 以 C-quoted 形態吐出來
+    （本機今天沒事只因未追蹤的 `.git/config` 帶著 `core.quotepath=false`）。630 條
+    非 ASCII tracked 路徑會因此**靜默掉出**本判準的掃描面，而 `_SELF_HELP_DEBT_FROZEN`
+    是雙向精確比對 ⇒ 掃描面一漂移就是「別台紅、本機綠」。
+    """
+    proc = git_paths.run(repo_root, "ls-files", "-s")
     if proc.returncode != 0:
         return {}
     modes: dict[str, str] = {}

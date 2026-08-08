@@ -1091,7 +1091,11 @@ class TestMacSmokeCliContract(unittest.TestCase):
         zsh 不存在時 skip（本判準是 macOS 預設 shell 專屬）。
         """
         if shutil.which("zsh") is None:
-            self.skipTest("本機無 zsh")
+            self.skipTest(
+                "[MAC-NATIVE-ONLY] 本機無 zsh——本判準是 macOS 預設 shell 專屬"
+                "（`${BASH_SOURCE[0]}` 在 zsh 未定義所致的誤導訊息）⇒ 在 Windows 上"
+                "把 zsh 裝起來也不是這道鎖的主場，這不是「缺件」。互補剖面＝macOS runner"
+                "（🔴 誠實劃界：本 repo 今天沒有任何 macOS 剖面被 census 過）")
         proc = self._run([], shell="zsh")
         combined = proc.stdout + proc.stderr
         self.assertNotEqual(proc.returncode, 0, combined)

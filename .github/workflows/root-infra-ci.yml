@@ -388,7 +388,10 @@ jobs:
           # 屬於「政策本身回歸」的機械複核，而非本機漂移的偵測（結構上不可能做到，
           # 只能靠開發者本機自行 renormalize；本檢查是防線之一，非唯一防線）。
           # 另補 Architect 發現：w/mixed（部分行 CRLF、部分行仍 LF）先前遺漏，一併涵蓋。
-          viol="$(git ls-files --eol -- '*.ps1' | awk -F'\t' '$1 ~ /w\/(lf|mixed)/')"
+          # -c core.quotePath=false：同上一步（367 行）的理由——非 ASCII 檔名預設輸出
+          # 為引號包裹＋八進位逸出形，`$2` 的 `.ps1` 錨定不匹配而靜默漏掃。R81 XPL-S1-01
+          # 揪到「同一檔內 367 行有、391 行沒有」＝旗標靠每個站點各自記得的必然結果。
+          viol="$(git -c core.quotePath=false ls-files --eol -- '*.ps1' | awk -F'\t' '$1 ~ /w\/(lf|mixed)/')"
           if [ -n "$viol" ]; then
             echo "$viol"
             echo "::error::上列 .ps1 檔案工作樹非 CRLF（.gitattributes *.ps1 eol=crlf 規則可能已被破壞）"

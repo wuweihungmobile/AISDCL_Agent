@@ -24,12 +24,14 @@ from __future__ import annotations
 
 import ast
 import importlib.util
+import io
 import os
 import shutil
 import subprocess
 import tempfile
 import unittest
 from pathlib import Path, PurePosixPath, PureWindowsPath
+from unittest import mock
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 DISPATCHER = REPO_ROOT / "tools" / "git-hooks" / "pre-commit"
@@ -492,6 +494,87 @@ class TestBlockingHooksShareOnePathNormalizer(unittest.TestCase):
                     f"{name} 又自帶了一份 relative_to 正規化（行 "
                     f"{[n.lineno for n in hits]}）：那正是本鎖要擋的第二個家",
                 )
+
+
+#: 准許自己碰 `sys.stdin` 的 hook。**每一筆都要有結構理由**（「還沒改到」不算）：
+#: block_bash＝fail-closed 且 docstring 明載零外部相依（退化分支不能依賴 import）；
+#: sdd_hook_router＝原樣轉發 stdin、不解析 payload；_hook_launcher＝pythonw 無管線時
+#: 補 devnull。
+#: 🔴 收尾者移除 `context_budget_guard.py`：該筆的理由逐字是「R81 包 A 正在改，本包
+#: 不得動 ⇒ 交棒收尾接上共用層」——那是**排程理由不是結構理由**，而本表檔頭要求每筆
+#: 都要有結構理由。收尾窗口既然獨佔整棵樹，交棒條件就已滿足：該檔已改走
+#: `from platform_utils import read_payload`（退化分支同 `lint_powershell_command.py`），
+#: 本地那份 21 行手抄本已刪除 ⇒ 它不再碰 `sys.stdin`，排除自然到期。留著會讓射程
+#: 悄悄比宣稱小一格，而反向 stale 判準只抓「指向不存在的檔」、抓不到「已不需要」。
+_STDIN_OWN_READER_ALLOWED = (
+    "block_bash_on_windows.py", "sdd_hook_router.py", "_hook_launcher.py",
+)
+
+
+class TestHookPayloadSingleHome(unittest.TestCase):
+    """R81／SUB-S1-04：hook 的 stdin payload 讀取只能有**一個家**。
+
+    WHY：這 7 份「逐字相同」的手抄本實測已漂移成 3 種行為（4 份原樣回傳
+    `json.loads` 的結果／1 份回 `{}`／2 份回 `None`）。代價是 `enforce_docs_path.py`
+    （**阻斷級** PreToolUse）餵 `[1,2,3]` 或 `null` 時 rc=1 AttributeError——守衛還在，
+    判定卻沒產出。全 repo 零判準會因為這種漂移轉紅。
+    """
+
+    _SSOT = REPO_ROOT / "tools" / "lib" / "platform_utils.py"
+    _DIRS = (_BLOCKING_HOOKS_DIR, REPO_ROOT / ".claude" / "hooks")
+
+    def _ssot(self):
+        spec = importlib.util.spec_from_file_location("hook_payload_ssot", self._SSOT)
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+        return mod
+
+    def test_no_hook_reads_stdin_itself(self) -> None:
+        """長出第二個家的**唯一入口**就是自己碰 stdin ⇒ 掃它，具名排除須有理由。"""
+        offenders = []
+        for directory in self._DIRS:
+            scanned = sorted(directory.glob("*.py"))
+            self.assertTrue(scanned, f"{directory} 掃不到 hook ⇒ 本鎖恆綠")
+            offenders += [
+                p.name for p in scanned
+                if p.name not in _STDIN_OWN_READER_ALLOWED
+                and any(isinstance(n, ast.Attribute) and n.attr == "stdin"
+                        for n in ast.walk(ast.parse(p.read_text(encoding="utf-8"))))
+            ]
+        self.assertEqual(
+            offenders, [],
+            f"這些 hook 又自己讀起 stdin：{offenders}——payload 讀取的唯一家是 "
+            f"{self._SSOT.name}；真有結構理由請登記進 _STDIN_OWN_READER_ALLOWED 並寫明",
+        )
+
+    def test_the_exclusion_table_is_not_stale(self) -> None:
+        """反向 stale：排除表指向已不存在的 hook ⇒ 紅（防清單腐化後悄悄放寬射程）。"""
+        on_disk = {p.name for d in self._DIRS for p in d.glob("*.py")}
+        self.assertEqual(sorted(set(_STDIN_OWN_READER_ALLOWED) - on_disk), [])
+
+    def test_both_contracts_survive_and_the_reader_never_raises(self) -> None:
+        """兩個回傳型別**都要在**（`lint_powershell_command` 靠 `None` vs `{}` 分流出
+
+        兩種不同的 stderr 與 rc 分支），且任何輸入都不得拋例外——hook 崩潰會讓阻斷級
+        守衛的判定靜默消失（`.claude/settings.json` 記載過的 P0）。
+        """
+        mod = self._ssot()
+
+        class Exploding(io.StringIO):
+            def read(self, *_a: object) -> str:
+                raise OSError("stdin 壞了")
+
+        cases = [('{"a": 1}', {"a": 1}), ("[1,2,3]", None), ("null", None),
+                 ("", None), ("{oops", None), ("{}", {}), (Exploding, None)]
+        for raw, expected in cases:
+            with self.subTest(raw=raw):
+                # 每次呼叫都要一份**新的** stdin：串流讀完就空了，共用一份會讓第二個
+                # 斷言變成在測「空輸入」——恰好是恆綠的方向（初稿實測踩到過）。
+                for fn, want in ((mod.read_payload, expected),
+                                 (mod.read_hook_payload, expected or {})):
+                    stub = raw() if raw is Exploding else io.StringIO(raw)
+                    with mock.patch.object(mod.sys, "stdin", stub):
+                        self.assertEqual(fn(), want)
 
 
 if __name__ == "__main__":

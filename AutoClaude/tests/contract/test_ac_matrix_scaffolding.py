@@ -327,8 +327,8 @@ def test_ac_scaffolding_placeholder(ac_id: str, meta: dict[str, str]) -> None:
     target = meta["target_test_file"]
     if not (_AC_ROOT / target).exists():
         pytest.skip(
-            f"AC {ac_id}（{meta['topic']}，{meta['wave']}）的真斷言落點尚未建立："
-            f"AutoClaude/{target}。門檻＝{meta['threshold']}。"
+            f"[DEBT] AC {ac_id}（{meta['topic']}，{meta['wave']}）的真斷言落點尚未建立："
+            f"AutoClaude/{target}。門檻＝{meta['threshold']}。承接輪次 R82。"
             f"建好該檔後本 case 自動轉綠，並依 test_pending_targets_match_the_ratchet "
             f"的訊息下修 _AC_TARGET_PENDING／_AC_TARGET_PENDING_CEILING"
         )

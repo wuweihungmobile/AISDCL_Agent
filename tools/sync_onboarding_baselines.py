@@ -744,7 +744,9 @@ def tree_fingerprint(rel_dir: str, pattern: str, extra_files: tuple[str, ...] = 
             f"故此處 fail-loud 而非靜默回傳空指紋"
         )
     digest = hashlib.sha256()
-    for path in sorted(root.glob(pattern)):
+    # 🔴 R81 XPL-S1-06：`key=` 不可省，裸 `sorted(Path)` 是平台相依序；WHY 與紅綠自證見
+    # test_platform_neutral_paths.py::TestDigestSortKeyIsPlatformNeutral（本行不動既有指紋）
+    for path in sorted(root.glob(pattern), key=lambda p: p.relative_to(root).as_posix()):
         if not path.is_file():
             continue
         digest.update(path.relative_to(root).as_posix().encode("utf-8"))

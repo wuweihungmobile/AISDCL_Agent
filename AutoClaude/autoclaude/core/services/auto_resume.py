@@ -21,13 +21,13 @@ from __future__ import annotations
 import logging
 import os
 import time
-from datetime import datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 import yaml
 
 from ...models.playbook import Playbook
+from ...utils.resume_clock import seconds_until as resume_clock_seconds_until
 from ..kernel_state import KernelResult
 from ._auto_resume_metrics import AutoResumeMetrics, record_wake_and_emit
 
@@ -239,8 +239,11 @@ class AutoResumeService:
             # Kernel 為純 DAG 不持有 path，故持久化落在握 path 的本協調層。
             # 🔴 僅對「本輪新接線的 token-observer halt 路徑」生效（必帶 halt_step_idx）；
             # halt_step_idx is None（既有/其他 halt 路徑已自存 checkpoint）→ 不覆蓋（防退化）。
+            halt_sched: str | None = None
             if result.halted and result.halt_step_idx is not None:
-                self._persist_halt_checkpoint(_current_path, playbook, result)
+                halt_sched = self._persist_halt_checkpoint(
+                    _current_path, playbook, result
+                )
 
             # Token HALT → 等待排程時間後自動恢復
             if (
@@ -249,15 +252,16 @@ class AutoResumeService:
                 and auto_resume_count < max_resumes
             ):
                 auto_resume_count += 1
-                wait_secs = seconds_until_resume(result.scheduled_resume_at)
+                # R81：`result.scheduled_resume_at` 在 Kernel 路徑上恆為 None（見
+                # _persist_halt_checkpoint 內的說明與實測），故以本輪剛排定的時刻兜底。
+                sched = result.scheduled_resume_at or halt_sched
+                wait_secs = seconds_until_resume(sched)
                 logger.info(
                     "AutoResumeService | AUTO_RESUME #%d/%d | 等待 %.0fs 後繼續",
                     auto_resume_count, max_resumes, wait_secs,
                 )
                 # SD_05 W5 / M-9：halt resume metrics + ON_AUTO_RESUME_WAKE
-                self._emit_auto_resume_wake(
-                    result.scheduled_resume_at, "halt", wait_secs,
-                )
+                self._emit_auto_resume_wake(sched, "halt", wait_secs)
                 if wait_secs > 0:
                     time.sleep(wait_secs)
                 # halt 後不重設 _fresh；下輪 _resolve_start 會讀新 checkpoint
@@ -267,7 +271,7 @@ class AutoResumeService:
 
     def _persist_halt_checkpoint(
         self, playbook_path: str, playbook: Playbook, result: KernelResult,
-    ) -> None:
+    ) -> str | None:
         """improving_78 W-78-1（DEF-78-001）：存最小 token HALT checkpoint。
 
         resume 點 = ``result.halt_step_idx``（Kernel HALT 當下步驟）。Kernel 為純 DAG
@@ -308,6 +312,27 @@ class AutoResumeService:
             )
         except (OSError, ValueError) as exc:
             logger.warning("AutoResumeService | 存 HALT checkpoint 失敗: %s", exc)
+            return None
+        # R81（HLM-S1-02 端到端實測）：`token_guard.resume_delay_minutes` 在 Kernel 路徑上
+        # 從未被套用過。CheckpointPlugin 的 `save_token_halt` 確實會呼叫 schedule_resume，
+        # 但它第一行就要 `payload["request_halt"]`，而 Kernel emit ON_TOKEN_USAGE 時
+        # 送的 payload 只有 token_pct / step_id / max_retries ⇒ 那支 handler 在 Kernel
+        # 路徑上直接 return None（「機制蓋好沒接電」）。於是 `result.scheduled_resume_at`
+        # 恆為 None、`seconds_until_resume(None)` 恆回 0.0。
+        # 端到端實測（PG 後端、halt 門檻 90%、設定 resume_delay_minutes: 2）：
+        #   `AUTO_RESUME #7/10 | 等待 0s 後繼續` … `#10/10`，10 次全部發生在**同一秒**，
+        #   然後整場 run 以 halted 結束——正是「不等就續跑、連燒 max_auto_resumes 次」。
+        # 排程交給 state repo 自己做：各後端的時間形態（File naive／Pg aware）由它決定，
+        # 消費端已收斂成單一時鐘（utils/resume_clock.py），兩種形態都算得對。
+        delay = self._cfg.token_guard.resume_delay_minutes
+        if delay <= 0:
+            return None
+        try:
+            resume_at = self._state_repo.schedule_resume(playbook_id, delay)
+        except (OSError, ValueError) as exc:
+            logger.warning("AutoResumeService | 排程 HALT 恢復時間失敗: %s", exc)
+            return None
+        return resume_at.isoformat(timespec="seconds")
 
 
 def load_playbook(path: str) -> Playbook:
@@ -320,22 +345,11 @@ def load_playbook(path: str) -> Playbook:
     return Playbook(**data)
 
 
+# 例外處理沿革：SD_04 W2 三方審查 Arch-W2-Min-1 把 except 擴大到
+# ValueError + TypeError（後者涵蓋外部傳入 list / dict / int 等無 fromisoformat
+# 介面的型別），統一回退 0.0 並 warning——該行為由 `resume_clock.seconds_until`
+# 原樣承接。R81（HLM-S1-02）改為委派：這段邏輯原有三份複本，而三份都只會算
+# naive，切到 Pg 後端（產出 aware）時會靜默回 0.0＝不等就續跑。
 def seconds_until_resume(scheduled_resume_at: str | None) -> float:
-    """回傳距排程恢復的剩餘秒數；未設定或已過期則回傳 0.0。
-
-    例外處理：
-        SD_04 W2 三方審查 Arch-W2-Min-1：將 except 範圍擴大至
-        ValueError + TypeError（後者涵蓋外部傳入 list / dict / int 等
-        無 fromisoformat 介面的型別），統一回退至 0.0 並 warning。
-    """
-    if not scheduled_resume_at:
-        return 0.0
-    try:
-        resume_at = datetime.fromisoformat(scheduled_resume_at)
-        return max(0.0, (resume_at - datetime.now()).total_seconds())
-    except (ValueError, TypeError) as exc:
-        logger.warning(
-            "seconds_until_resume | 無法解析 scheduled_resume_at=%r: %s",
-            scheduled_resume_at, exc,
-        )
-        return 0.0
+    """回傳距排程恢復的剩餘秒數；未設定或已過期則回傳 0.0。"""
+    return resume_clock_seconds_until(scheduled_resume_at)

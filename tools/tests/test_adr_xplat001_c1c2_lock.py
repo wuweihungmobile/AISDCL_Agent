@@ -724,12 +724,12 @@ _GUARD_LINE_STALE_SLACK = 0.02
 #: 寫出淨額與理由——讓方向在 diff 上一望即知。
 #: 🔴 本表含**本檔自己**，所以動本檔就會動到本表 ⇒ 改完必須重跑一次並用實測值收斂。
 _FROZEN_GUARD_LINES: dict[str, int] = {
-    "_platform_helpers.py": 539,
+    "_platform_helpers.py": 549,
     "_ps_engine.py": 115,
     "test_act_local_runner_image.py": 322,
-    "test_adr_xplat001_c1c2_lock.py": 4521,
-    "test_archive_defect_log.py": 3786,
-    "test_bash32_compat.py": 609,
+    "test_adr_xplat001_c1c2_lock.py": 4623,
+    "test_archive_defect_log.py": 3791,
+    "test_bash32_compat.py": 819,
     "test_bash_probe_spec_contract.py": 983,
     "test_bootstrap_core.py": 439,
     "test_bootstrap_ps1.py": 160,
@@ -737,17 +737,17 @@ _FROZEN_GUARD_LINES: dict[str, int] = {
     "test_check_gha_action_versions.py": 295,
     "test_check_hooks_liveness.py": 2578,
     "test_check_pytest_baseline_sites.py": 297,
-    "test_check_script_parity.py": 1977,
+    "test_check_script_parity.py": 2111,
     "test_check_wrapper_thinness.py": 1316,
     "test_component_sanitizer_shared_layer_lock.py": 293,
-    "test_context_budget_guard.py": 2282,
+    "test_context_budget_guard.py": 3631,
     "test_defect_id_reference_integrity.py": 261,
-    "test_dev_start.py": 6686,
+    "test_dev_start.py": 6774,
     "test_dev_start_ps1_lastexitcode.py": 462,
     "test_doc_env_prefix_platform_parity_r60.py": 332,
-    "test_doc_loc_baseline_freshness_r60.py": 5927,
+    "test_doc_loc_baseline_freshness_r60.py": 6313,
     "test_extras_quoting_zsh_safety.py": 402,
-    "test_find_git_bash_parity.py": 1228,
+    "test_find_git_bash_parity.py": 1230,
     "test_gha_action_versions.py": 703,
     "test_git_hooks_install_common.py": 393,
     "test_install_windows_nightly.py": 1469,
@@ -757,9 +757,9 @@ _FROZEN_GUARD_LINES: dict[str, int] = {
     "test_no_invalid_escape_sequences.py": 329,
     "test_ntfs_trailing_space_device_name.py": 772,
     "test_onboarding_parity_interlock.py": 235,
-    "test_platform_neutral_paths.py": 5033,
+    "test_platform_neutral_paths.py": 5678,
     "test_platform_utils_dedup.py": 1103,
-    "test_pre_commit_dispatcher_sigpipe.py": 498,
+    "test_pre_commit_dispatcher_sigpipe.py": 581,
     "test_pre_push_dispatcher.py": 686,
     "test_ps1_bom.py": 204,
     "test_ps51_compat.py": 621,
@@ -770,15 +770,15 @@ _FROZEN_GUARD_LINES: dict[str, int] = {
     "test_sanitize_component_frozen_sdd_versions_lock.py": 375,
     "test_schedule_capability_parity.py": 591,
     "test_script_scan_surface_ssot.py": 391,
-    "test_smoke_ci_sync.py": 1355,
+    "test_smoke_ci_sync.py": 1359,
     "test_stdio_utf8.py": 76,
     "test_subprocess_encoding_hygiene.py": 1575,
     "test_windows_forbidden_filename_parity.py": 1005,
     "test_windows_nightly_anchor_parity.py": 135,
     "test_windows_smoke_heartbeat_doc_sync.py": 197,
     "test_windowsapps_guard_bash_parity.py": 903,
-    "test_windowsapps_guard_cross_consistency.py": 2184,
-    "test_workflow_permission_concurrency_lock.py": 1357,
+    "test_windowsapps_guard_cross_consistency.py": 2196,
+    "test_workflow_permission_concurrency_lock.py": 1360,
     "test_workflow_schedule_sync.py": 309,
     "test_workflow_timeout_coverage.py": 158,
 }
@@ -988,6 +988,108 @@ _GUARD_LINES_REPIN_LOG: tuple[tuple[str, int, int, int, str], ...] = (
         "正確形態 → 空清單（證明非恆紅）。"
         "🔴 本輪未刪任何行換取餘裕、未調高任何門檻、未放寬任何棘輪、未動漂移容忍值。",
     ),
+    (
+        "R81", 65390, 67759, 2369,
+        "R81 **十一個並行包的一次性重釘**，由收尾者在全部包停工後的單人窗口做 ⇒ rc 可歸因。"
+        "🔴 **[非淨減法輪]** —— 逐檔清單與逐項必要性辯護落在 "
+        "docs/06_quality/CrossPlatform_R81_Scan_Findings.md 的 §B（沿用 R80 §B 系列的體例："
+        "同一件事只有一個家；本列刻意不逐檔登載數字，那會再造一個沒有人會回頭改的量測站點）。"
+        "🔴 **誠實歸因：成長全在護欄層（測試），而生產碼是淨減的**——hook payload 的"
+        "手抄本全數收斂進共用層（`tools/lib/platform_utils.py`）在生產側淨 −39 行，其中收尾者"
+        "本人刪掉 `context_budget_guard.py` 的 21 行。護欄層之所以只增不減，是因為本輪"
+        "新開的判準面此前**一個觀測者都沒有**，沒有等量的舊判準可以退場去換："
+        "額度節流的 80/95 兩道門（額度與 context 是兩個分母，撞額度那刻水位可能僅 ~18%，"
+        "每一道 context 守衛都會放行）；跨平台 5 類新登記危害的門（`$env:TEMP`／`TMP` 站點級、"
+        "`Get-Command` 裸解析只准住 SSOT、bash 3.2 語法面、以及**自陳沒人守的證偽探針**——"
+        "後者治的是低報分子，它與過報同樣讓「還有幾類沒人守」這個治理數字失真）；"
+        "Q4 的首道宣稱對帳機械物（本輪重跑失誤分群後最大桶＝宣稱先於查證，而那一桶"
+        "此前完全沒有機械物：它發生在 inline 指令字串與 rc 讀數上，永遠不會變成 repo 裡的"
+        "檔案，所有靜態掃描器結構上看不到）；`.sh`／`.ps1` 行為等價；"
+        "以及 hook payload SSOT 的回歸鎖（各檔手抄本實測已彼此漂移，其中阻斷級"
+        "`enforce_docs_path.py` 餵頂層非 object 的合法 JSON 時 rc=1 AttributeError＝"
+        "守衛還在、判定沒產出）。"
+        "🔴 本輪未刪任何行換取餘裕、未調高任何門檻、未放寬任何棘輪、未動漂移容忍值。"
+        "唯一往**下**釘的是 `OVERSIZE_ROW_EXCESS_CEILING`（138938→138936，−2），"
+        "來源是收尾者訂正 `DEF-101-870` 一列的兩處措辭，理由見同一份文件的 §C。",
+    ),
+    (
+        "R81", 67759, 67908, 149,
+        "R81 **Architect 複審四筆 blocking 的收斂包**（單人窗口，無任何 agent 在跑 ⇒ rc 可歸因；"
+        "上一列是同輪十一包停工後的第一次重釘，本列是複審收斂後的第二次）。"
+        "🔴 **[非淨減法輪]** —— 逐檔清單與必要性辯護落在 "
+        "docs/06_quality/CrossPlatform_R81_Scan_Findings.md 的 §B-2（與 §B 同一個家）。"
+        "成長全在 `test_context_budget_guard.py`（+130）與本檔（+19＝本列自身的稽核痕跡）。"
+        "內容是 B1／B2 兩筆 blocking 的回歸鎖：**額度節流閘在「快取過期／不存在」時對任意"
+        "規模的扇出全數放行**（複審探針實測：快取過期且額度 99% 時，一整批 `Agent` 派發"
+        "**全數放行、零筆擋下**），以及**快取的檔案契約有兩個家、而生產綁定零覆蓋**"
+        "（改掉取數器的 `CACHE_NAME` ⇒ 寫者與讀者走不同檔 ⇒ 永遠不節流，全套測試照綠）。"
+        "🔴 為何沒有等量的舊判準可以退場：這兩條守的性質此前**一個觀測者都沒有**——"
+        "既有的快取測試全部傳明確 `path`，結構上量不到「hook 讀的正好是 meter 寫的那一支」；"
+        "而「量不到就不節流」那條路徑上此前只有正向控制組，沒有任何一條在問"
+        "「量不到的時候到底放行了多少」。新增的兩類全部成對（控制組 ＋ 注入組），"
+        "且**刻意保留反向**（真的量不到又無撞線證據時仍放行）——只鎖單向會讓下一個人用"
+        "「一律 fail-closed」滿足它，而那正是 L4 當初被否決的形態。"
+        "🔴 本輪未刪任何行換取餘裕、未調高任何門檻、未放寬任何棘輪、未動漂移容忍值。",
+    ),
+    (
+        "R81", 67908, 67950, 42,
+        "R81 **QA 複審三筆 blocking 的收斂包**（本輪第三次重釘；前兩列分別是十一包停工後、"
+        "Architect 複審收斂後）。🔴 **本列不是在單人窗口取得的**——SA／SD 兩位複審者"
+        "同時在唯讀審查同一棵樹，照本 repo 紀律必須標出來，不得寫成 rc 完全可歸因。"
+        "🔴 **[非淨減法輪]** —— 逐檔清單與必要性辯護落在 "
+        "docs/06_quality/CrossPlatform_R81_Scan_Findings.md（與 §B／§B-2 同一個家）。"
+        "成長只有兩支檔：`test_doc_loc_baseline_freshness_r60.py` 與本檔（本列自身的稽核痕跡）。"
+        "內容是 QA B-3：**幽靈路徑判準的掃描面漏掉軌道① 的驅動器**——那一面是根 CLAUDE.md "
+        "明定的唯一驅動器、每輪最多人照著讀的活文件。注入實測：同一句假路徑放進交棒書"
+        "兩顆牙都咬，放進驅動器則整批 OK 直接放行，而該判準的四項誠實劃界一句都沒提到它 ⇒ "
+        "「有鎖在守、但那一面不在射程」比沒有鎖更難看見。同一包另把 vacuity 自錨由**手寫的"
+        "目錄前綴**改成**衍生自 glob 本身**：舊寫法把兩支手列檔的目錄前綴當成一個「面」，"
+        "既讀起來像整個目錄都在掃，又讓「新增一個 glob 卻忘了加進面清單」在結構上無法被發現。"
+        "🔴 本列未刪任何行換取餘裕、未放寬任何棘輪、未動漂移容忍值；"
+        "`_GHOST_PATH_BASELINE_CEILING` 由 18 重釘為 19 是**擴掃描面才看見的既有存量**，"
+        "走的正是該常數紅燈訊息自己指定的那條路，且那筆登記會在對應檔案建立時被 stale "
+        "自檢當場清掉（豁免不可能永久化）。",
+    ),
+    (
+        "R81", 67950, 68393, 443,
+        "R81 **收尾包**（本輪第四次、也是最後一次重釘；前三次分別是十一包停工後、"
+        "Architect 複審收斂後、QA 複審收斂後）。**單人窗口**：四方複審的 blocking 全數"
+        "收斂到最後一筆時所有包已停工，樹上只有收尾者 ⇒ rc 可歸因。"
+        "🔴 **[非淨減法輪]** —— 逐檔清單與必要性辯護落在 "
+        "docs/06_quality/CrossPlatform_R81_Scan_Findings.md 的 §B-3（與 §B／§B-2 同一個家）。"
+        "成長集中在 `test_context_budget_guard.py`（+416），內容是 SD 複審四筆 blocking 的"
+        "回歸鎖：額度取數器的**失效形態逐一具名**（憑證讀不到／HTTP 狀態碼／連線失敗／"
+        "200 但讀不出額度桶——此前全部塌成同一句「量不到」，而「量不到」正是放行的理由）；"
+        "降級必須**出聲**且同一來源不重複喊；節流訊息與降級訊息不得互相冒充；扇出帳本"
+        "不得含 session id、壞掉時讀成 0 而不是讀成封鎖；TTL 更新槽十六路並行只准一個贏；"
+        "節流帶訊息要說出這條帶還會持續多久。"
+        "🔴 **誠實歸因：本段的生產側是「搬家」不是淨減**——額度撞線判讀整個主題自 "
+        "`.claude/hooks/context_budget_guard.py` 搬進 `tools/lib/quota_limits.py`，"
+        "該 hook 由納管當下的 1634 raw 行降到 1451（−183），但搬進去的那一支自己是 341 行"
+        "的新檔 ⇒ 生產側合計仍為正。**不得把 −183 單獨引用成「生產碼淨減」**（交棒稿曾如此"
+        "記載，收尾者現查後訂正）。收尾者同時把 `AutoClaude/tools/check_loc_budget.py` 的 "
+        "shrink-only 棘輪門檻由 1634 下釘到 1451——合法縮小後不下修，那 183 行餘裕就是"
+        "日後無聲加回去的破口（該棘輪自己逐字寫著這句話）。"
+        "🔴 本列未刪任何行換取餘裕、未調高任何門檻、未放寬任何棘輪、未動漂移容忍值。",
+    ),
+    (
+        "R81", 68393, 68423, 30,
+        "R81 **pre-push 攔下後的補包**（本輪第五次重釘；前四次分別是十一包停工後、"
+        "Architect 複審收斂後、QA 複審收斂後、收尾包）。**單人窗口**：commit 已落地、"
+        "所有包停工，樹上只有補包者 ⇒ rc 可歸因。"
+        "🔴 **[非淨減法輪]** —— 逐檔清單與必要性辯護落在 "
+        "docs/06_quality/CrossPlatform_R81_Scan_Findings.md 的 §B-4（與 §B／§B-2／§B-3 "
+        "同一個家）。成長只有一支檔：`test_windowsapps_guard_cross_consistency.py`（+12），"
+        "內容是 `_ZERO_GUARD_BARE_PY_SITES` 新登記 `tools/lib/script_interface_parity.py` "
+        "一筆（`_EXTERNAL_BINS` 白名單資料，非呼叫）；其餘 +18 是本檔——即本列自身的"
+        "稽核痕跡（同第四次那一列的 +22，登記手續本身要付的代價）。"
+        "🔴 **本列存在的理由本身是一筆判例，不是雜務**：那一筆之所以現在才紅，是因為該檔"
+        "在收尾跑閘門的當下還是 untracked，而該鎖的掃描面只看 git-tracked ⇒ **commit 這個"
+        "動作自己改變了掃描面**，閘門在 commit 前全綠、commit 後才轉紅。這在本 repo 已是"
+        "**第三次**（R78 收輪、R79 `xplat_injection_matrix.py`、本筆），前兩次都只登記個案、"
+        "沒有人動「收尾在 commit 前跑」這個順序，所以它必然再來。"
+        "🔴 本列未刪任何行換取餘裕、未調高任何門檻、未放寬任何棘輪、未動漂移容忍值。",
+    ),
 )
 
 
@@ -1032,10 +1134,10 @@ _GUARD_LINE_DRIFT_TOLERANCE = 0
 #: 追加當輪不必動指紋（一列寬限），下一輪要再追加就必須先把前一列納入前綴並重釘，
 #: 否則 `[前綴過期]` 轉紅。草稿兩個值都由 `--print-guard-lines` 印出
 #: （ARCH-02 的教訓：紅了卻沒有出路的鎖會被關掉）。
-_REPIN_LOG_FROZEN_PREFIX_LEN = 11
+_REPIN_LOG_FROZEN_PREFIX_LEN = 16
 _REPIN_LOG_MAX_UNFROZEN_TAIL = 1
 _REPIN_LOG_HISTORY_SHA256 = (
-    "cb499dfb4ae41b85f5222305fbed209160b3d2fde5bb68ced883e66c0b246d42")
+    "e4e2123bba9ca4c8bfe8cfd02db05adf5cb0cbe60ffdb699d23fda698f54bbbe")
 
 
 def repin_log_history_digest(

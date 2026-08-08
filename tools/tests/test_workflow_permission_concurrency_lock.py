@@ -1034,7 +1034,10 @@ def _gh_filter_pattern_to_re(pattern: str) -> re.Pattern[str]:
 
 def _tracked_scripts() -> list[str]:
     proc = subprocess.run(
-        ["git", "-C", str(_REPO_ROOT), "ls-files", "--", "*.sh", "*.ps1"],
+        # `-c core.quotepath=false`（R81 XPL-S1-01）：否則非 ASCII 路徑以 C-quoted
+        # 形態回來，下方的下限釘選會把「靜默縮面」讀成「檔案變少」。
+        ["git", "-C", str(_REPO_ROOT), "-c", "core.quotepath=false",
+         "ls-files", "--", "*.sh", "*.ps1"],
         capture_output=True, text=True, encoding="utf-8", errors="replace",
     )
     if proc.returncode != 0:

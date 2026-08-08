@@ -335,6 +335,21 @@ on:
       - "tools/lib/hook_wiring.py"
       - "tools/lib/rc_after_pipe_real.py"
       - "tools/lib/self_help_exec_parity.py"
+      # R81 收尾：本輪六支新建 tools/lib/ 共用層，同樣由
+      # test_ci_paths_cover_root_consumers.py 當場攔下（與 R80 同一形態、同一支判準）：
+      # git_paths.py＝git quotepath SSOT；quota_meter.py＝額度水位取數；
+      # quota_escalation.py＝撞線後的叫人與扇出快照；script_interface_parity.py＝
+      # .sh／.ps1 介面等價判準；quota_limits.py＝額度撞線判讀（主題自 hook 外移）；
+      # quota_ledger.py＝派發帳（一次派發＝一次目錄項）。
+      # 🔴 後兩支是同一輪內**分兩批**補的：前四支補列完成之後才新增，於是同一支判準
+      # 在同一輪的 push 又攔一次。補列這個動作只覆蓋當下已存在的檔，不會讓之後新增
+      # 的共用層自動跟上——所以「這一輪已經補過了」不是可以少查一次的理由。
+      - "tools/lib/git_paths.py"
+      - "tools/lib/quota_meter.py"
+      - "tools/lib/quota_escalation.py"
+      - "tools/lib/script_interface_parity.py"
+      - "tools/lib/quota_limits.py"
+      - "tools/lib/quota_ledger.py"
       - "tools/_cli_flags.py"
       - "tools/check_scheduled_task_drift.py"
       - "tools/scheduled_task_expectations.json"
@@ -586,6 +601,21 @@ on:
       - "tools/lib/hook_wiring.py"
       - "tools/lib/rc_after_pipe_real.py"
       - "tools/lib/self_help_exec_parity.py"
+      # R81 收尾：本輪六支新建 tools/lib/ 共用層，同樣由
+      # test_ci_paths_cover_root_consumers.py 當場攔下（與 R80 同一形態、同一支判準）：
+      # git_paths.py＝git quotepath SSOT；quota_meter.py＝額度水位取數；
+      # quota_escalation.py＝撞線後的叫人與扇出快照；script_interface_parity.py＝
+      # .sh／.ps1 介面等價判準；quota_limits.py＝額度撞線判讀（主題自 hook 外移）；
+      # quota_ledger.py＝派發帳（一次派發＝一次目錄項）。
+      # 🔴 後兩支是同一輪內**分兩批**補的：前四支補列完成之後才新增，於是同一支判準
+      # 在同一輪的 push 又攔一次。補列這個動作只覆蓋當下已存在的檔，不會讓之後新增
+      # 的共用層自動跟上——所以「這一輪已經補過了」不是可以少查一次的理由。
+      - "tools/lib/git_paths.py"
+      - "tools/lib/quota_meter.py"
+      - "tools/lib/quota_escalation.py"
+      - "tools/lib/script_interface_parity.py"
+      - "tools/lib/quota_limits.py"
+      - "tools/lib/quota_ledger.py"
       - "tools/_cli_flags.py"
       - "tools/check_scheduled_task_drift.py"
       - "tools/scheduled_task_expectations.json"

@@ -17,6 +17,7 @@
 from __future__ import annotations
 
 import os
+import subprocess
 import sys
 import threading
 from unittest.mock import MagicMock, patch
@@ -24,12 +25,16 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from autoclaude.perception import hotkey_handler
+from autoclaude.perception import pty_wrapper as pw
 from autoclaude.perception.hotkey_handler import HotkeyHandler
 from autoclaude.perception.pty_wrapper import (
     _CMD_LINE_MAX_CHARS,
     CmdLineTooLongError,
+    PtyWrapper,
     _build_cmd_shim_line,
 )
+
+_REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 # ──────────────────────────────────────────────
 # [A] Hotkey：背景執行緒已死 → 不得宣稱已註冊
@@ -235,3 +240,109 @@ class TestOversizedPromptDoesNotKillTheWholeRun:
             )
         assert "7800" in out.text and "prompt" in out.text, out.text
         assert out.triggered_halt is False and out.triggered_compact is False
+
+
+# ──────────────────────────────────────────────
+# [C] R81（HLM-S1-01）：PtyWrapper.start() 必須回返
+#
+# 缺陷：wexpect 的 host 以 `CreateProcess` 回報的 PID 組 pipe 名，console-reader
+# 卻以自己的 `os.getpid()` 組名。venv 的 python.exe 是 trampoline（會把真直譯器
+# 再 spawn 成子行程）⇒ 兩個 PID 不同 ⇒ host 的 `connect_to_child()` 那個**沒有
+# 逾時**的 `while True` 永遠等不到 pipe，`start()` 靜默不回返。
+#
+# 為何這一組鎖必須存在：`start()` 的回返性此前**零覆蓋**，所以這個 P0 可以潛伏
+# 四輪——它不報錯、不逾時（逾時判斷在 start() 之後的迴圈裡），表徵只有「整場
+# run 不動」。下面第一組驗判準本身（含失效方向），第二組在 Windows 真機上把
+# 「不回返」變成一個會紅的量測值。
+# ──────────────────────────────────────────────
+
+class TestWexpectPidHandshakeProbe:
+    """探針量的是『父看到的 PID == 子自報的 PID』，不是『是不是 venv』。"""
+
+    def setup_method(self):
+        pw._launcher_reports_consistent_pid.cache_clear()
+
+    def teardown_method(self):
+        pw._launcher_reports_consistent_pid.cache_clear()
+
+    def test_mismatched_pid_means_the_pipe_handshake_can_never_complete(self):
+        fake = MagicMock()
+        fake.pid = 111
+        fake.communicate.return_value = (b"222\n", b"")
+        with patch("subprocess.Popen", return_value=fake):
+            assert pw._launcher_reports_consistent_pid() is False
+
+    def test_matching_pid_keeps_wexpect_available(self):
+        # 反向鎖：判準若退化成「一律回 False」，PTY 模擬會在所有平台被靜默廢掉，
+        # 而表徵（程式跑得動）與修好完全相同。
+        fake = MagicMock()
+        fake.pid = 4242
+        fake.communicate.return_value = (b"4242\n", b"")
+        with patch("subprocess.Popen", return_value=fake):
+            assert pw._launcher_reports_consistent_pid() is True
+
+    def test_unmeasurable_falls_back_to_the_path_known_to_return(self):
+        # 量不到時必須偏向 subprocess——那是唯一已實證會回返的路。
+        with patch("subprocess.Popen", side_effect=OSError("boom")):
+            assert pw._launcher_reports_consistent_pid() is False
+
+
+class TestStartBranchHonoursTheProbe:
+    def _wrapper(self):
+        return PtyWrapper(
+            command="claude", args=["--version"], auth_patterns=[], auth_response="",
+        )
+
+    def test_unusable_wexpect_routes_to_subprocess(self):
+        w = self._wrapper()
+        with patch.object(pw, "_WEXPECT_AVAILABLE", True), \
+             patch.object(pw, "_launcher_reports_consistent_pid", return_value=False), \
+             patch.object(pw, "_resolve_command", return_value=[r"C:\bin\claude.exe"]), \
+             patch.object(w, "_start_wexpect") as wex, \
+             patch.object(w, "_start_subprocess") as sub:
+            w.start()
+        assert wex.call_count == 0, "wexpect 在此形態下會永久卡住，不得被呼叫"
+        assert sub.call_count == 1
+
+    def test_usable_wexpect_is_still_preferred(self):
+        w = self._wrapper()
+        with patch.object(pw, "_WEXPECT_AVAILABLE", True), \
+             patch.object(pw, "_launcher_reports_consistent_pid", return_value=True), \
+             patch.object(pw, "_resolve_command", return_value=[r"C:\bin\claude.exe"]), \
+             patch.object(w, "_start_wexpect") as wex, \
+             patch.object(w, "_start_subprocess") as sub:
+            w.start()
+        assert wex.call_count == 1, "PTY 模擬不得被無條件廢掉（那與修好長得一樣）"
+        assert sub.call_count == 0
+
+
+_START_BOUNDEDNESS_CHILD = """
+import sys, time
+from autoclaude.perception.pty_wrapper import PtyWrapper
+w = PtyWrapper(command="cmd", args=["/c", "echo", "hi"], auth_patterns=[], auth_response="")
+t0 = time.time()
+w.start()
+print("ELAPSED=%.2f" % (time.time() - t0))
+w.close()
+"""
+
+
+@pytest.mark.skipif(
+    sys.platform != "win32",
+    reason="[WINDOWS-NATIVE-ONLY] wexpect 僅 Windows 可用；"
+           "非 Windows 上 start() 本來就只有 subprocess 一條路",
+)
+def test_start_returns_within_a_bound_on_windows(tmp_path):
+    """`start()` 必須在有界時間內回返（修復前本機實測 25s／45s 皆不回返）。"""
+    proc = subprocess.run(
+        [sys.executable, "-c", _START_BOUNDEDNESS_CHILD],
+        capture_output=True, text=True, timeout=90,
+        cwd=str(_REPO_ROOT), encoding="utf-8", errors="replace",
+    )
+    assert proc.returncode == 0, f"stdout={proc.stdout!r} stderr={proc.stderr[-2000:]!r}"
+    elapsed = [
+        float(ln.split("=", 1)[1])
+        for ln in proc.stdout.splitlines() if ln.startswith("ELAPSED=")
+    ]
+    assert elapsed, f"子行程沒印出量測值：stdout={proc.stdout!r}"
+    assert elapsed[0] < 15.0, f"start() 花了 {elapsed[0]}s，回返性已退化"

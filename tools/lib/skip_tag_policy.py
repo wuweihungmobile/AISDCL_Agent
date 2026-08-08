@@ -373,13 +373,15 @@ _SITE_CLASS_CENSUS: dict[str, dict[str, int]] = {
         "runtime-skipTest": 15,
         "unclassified": 0,
     },
-    # 🔴 本輪 `windows-only` 由 8 重釘為 9：並行包在
-    # `AutoClaude/tests/tools/test_run_local_nightly_static.py` 新增了一個
-    # windows-only 站點（該檔不在本包的檔案所有權內，本包只負責讓帳對得上）。
+    # 🔴 R81 包 F 重釘 `windows-only` 9→10：並行包在
+    # `AutoClaude/tests/test_perception_platform_honesty.py:330` 新增了一個
+    # `skipif(sys.platform != "win32")` 站點（該檔的 skip reason 同輪由本包補上
+    # `[WINDOWS-NATIVE-ONLY]`）。前一輪（R80）的重釘理由是另一個檔案
+    # （`AutoClaude/tests/tools/test_run_local_nightly_static.py`，8→9）。
     # 這正是「相等」判準的設計意圖生效——新站點在落地當回合就被逼進帳。
-    # 若該包後續再動該檔，收輪者必須依當場實測重釘（同 `MIN_TESTS` 的紀律）。
+    # 若後續再有包動這些檔，收輪者必須依當場實測重釘（同 `MIN_TESTS` 的紀律）。
     "AutoClaude/tests": {
-        "windows-only": 9,
+        "windows-only": 10,
         "posix-only": 6,
         "tool-absence": 16,
         "runtime-skipTest": 0,
@@ -428,18 +430,14 @@ _UNREGISTERED_TAG_DEBT: dict[str, int] = {
 #: （落地當回合實測：併表當場弄紅 `test_run_root_unittests.UnregisteredSkipTagVocabularyTest`
 #: 的 3 支合成語料測試——那 3 支的語料只含上表那一筆，本來就不該為下表的存量負責）。
 #:
-#: 這 3 筆**不是新違規，是本輪才第一次被看見的舊違規**；站點都不在本包的檔案所有權內
-#: （跨界改動＝並行包互踩假紅），故誠實登記為可見欠債。判準是**相等**，所以任何**新的**
-#: 未登記標籤照樣當場紅。
-#:   · `[TOOL-MISSING]`       `tools/tests/test_dev_start.py`：語意就是 `[TOOL-ABSENCE]`，
-#:                            應由該檔的所有者改字面（改完把本列刪掉）。
-#:   · `[PG-CORPUS-MISSING]`  `AutoClaude/tests/integration/test_pgvector_real_recall.py`
-#:   · `[PG-CORPUS-STALE]`    同上。兩者語意皆為「語料缺件」，建議併入 `[TOOL-ABSENCE]`。
-_NONLITERAL_TAG_DEBT: dict[str, int] = {
-    "[TOOL-MISSING]": 1,
-    "[PG-CORPUS-MISSING]": 1,
-    "[PG-CORPUS-STALE]": 1,
-}
+#: 🔴 R81 包 F：這張表**已清空**（三筆全部改成 `[TOOL-ABSENCE]`，純字串替換、零邏輯改動）：
+#:   · `[TOOL-MISSING]`       `tools/tests/test_dev_start.py` 的 setUp（該站點同輪另有更大的
+#:                            修正：它宣稱的「找不到舊直譯器」是假診斷，見 `_find_sub_min_
+#:                            interpreter` 的 WHY；今天這兩支已經真的在跑，連 skip 都沒了）
+#:   · `[PG-CORPUS-MISSING]`／`[PG-CORPUS-STALE]`
+#:                            `AutoClaude/tests/integration/test_pgvector_real_recall.py`
+#: 表空掉即**升級為零容忍**：任何新的未登記標籤（含把這三個字面寫回去）當場紅。
+_NONLITERAL_TAG_DEBT: dict[str, int] = {}
 
 #: reason 開頭的標籤形態：`[大寫段-大寫段…]`。刻意只認**開頭**——標籤的契約就是
 #: 「加在 reason 的最前面」，句中提到某個 `[XXX]` 字樣不是在標記這支 skip。

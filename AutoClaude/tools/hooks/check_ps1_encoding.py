@@ -46,7 +46,6 @@ root session 不遞迴載子目錄 hook，故本 script 同時 wire 於根 .clau
 """
 from __future__ import annotations
 
-import json
 import sys
 from pathlib import Path
 
@@ -54,27 +53,10 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[3] / "tools" / "lib"))
 from platform_utils import (  # noqa: E402
     init_utf8_streams as _init_utf8_streams,  # type: ignore[import-not-found]
 )
+from platform_utils import read_hook_payload  # noqa: E402,F401
 
 PS_SUFFIXES = {".ps1", ".psm1", ".psd1"}
 UTF8_BOM = b"\xef\xbb\xbf"
-
-
-def read_hook_payload() -> dict:
-    # zh-TW Windows pipe 預設 cp950：裸 sys.stdin.read() 遇含中文的 UTF-8 payload 會拋
-    # UnicodeDecodeError → 阻斷級 hook 靜默失效。改讀 bytes 端以 UTF-8+replace 解碼；
-    # 無 buffer（如測試以 StringIO 替身）時回退文字端。
-    stdin_buffer = getattr(sys.stdin, "buffer", None)
-    if stdin_buffer is not None:
-        raw = stdin_buffer.read().decode("utf-8", "replace").strip()
-    else:
-        raw = sys.stdin.read().strip()
-    if not raw:
-        return {}
-    try:
-        obj = json.loads(raw)
-    except json.JSONDecodeError:
-        return {}
-    return obj if isinstance(obj, dict) else {}  # 頂層非 dict（array/number/str）→ 視為空
 
 
 def resolve_path(file_path: str) -> Path | None:

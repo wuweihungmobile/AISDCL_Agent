@@ -87,8 +87,10 @@ def shell_targets(repo_root: Path) -> list[str]:
 
     空清單＝取數管道壞掉，呼叫端必須當成失敗（不是「沒有東西要檢查」）。
     """
+    # 🔴 R81 XPL-S1-01：`-c core.quotepath=false` 不可省——非 ASCII 路徑會被 git 以
+    # C-quoted 形態吐出，`_FROZEN_RE`／副檔名判斷全部錯位而**靜默縮小**掃描面。
     proc = subprocess.run(
-        ["git", "-C", str(repo_root), "ls-files"],
+        ["git", "-C", str(repo_root), "-c", "core.quotepath=false", "ls-files"],
         capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=180,
     )
     if proc.returncode != 0:

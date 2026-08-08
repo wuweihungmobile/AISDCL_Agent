@@ -1,4 +1,6 @@
-"""AutoResumeService token HALT checkpoint 持久化測試（improving_78 W-78-1 / DEF-78-001 / RTM-78-3）。
+"""AutoResumeService token HALT checkpoint 持久化測試。
+
+（improving_78 W-78-1 / DEF-78-001 / RTM-78-3）
 
 驗證意圖（Rule 9）：DEF-78-001 修復後，Kernel 會以 result.halted + halt_step_idx 表達 token
 HALT；但 Kernel 純 DAG 不持有 path，故 halt checkpoint 必須由握 path 的 AutoResumeService 存。
@@ -110,3 +112,70 @@ def test_halt_without_halt_step_idx_does_not_clobber_existing_checkpoint():
 
     ck = repo.load_checkpoint(pid)
     assert ck.step_idx == 1  # 未被覆蓋為 0
+
+
+# ──────────────────────────────────────────────────────────────────────
+# R81（HLM-S1-02 端到端實測）：`token_guard.resume_delay_minutes` 在 Kernel
+# 路徑上從未被套用過。CheckpointPlugin 的 `save_token_halt` 會呼叫
+# schedule_resume，但它第一行就要 `payload["request_halt"]`，而 Kernel emit
+# ON_TOKEN_USAGE 時只送 token_pct / step_id / max_retries ⇒ 該 handler 在
+# Kernel 路徑上直接 return None。於是 `result.scheduled_resume_at` 恆為 None、
+# 倒數恆為 0.0。
+#
+# 端到端實測（PG 後端、halt 門檻 90%、`resume_delay_minutes: 2`）：
+#   `AUTO_RESUME #7/10 | 等待 0s 後繼續` … `#10/10` 十次全發生在**同一秒**，
+#   然後整場 run 以 halted 結束＝「不等就續跑、連燒 max_auto_resumes 次」。
+# 這正是「AutoClaude 當舵手能撐過額度 reset」這個能力失效的形狀，而它全程
+# rc 全綠、只有一行 INFO。
+# ──────────────────────────────────────────────────────────────────────
+
+def _cfg_with_delay(delay_minutes: int, auto_resume: bool = False) -> AppConfig:
+    cfg = AppConfig()
+    cfg.token_guard.auto_resume = auto_resume
+    cfg.token_guard.resume_delay_minutes = delay_minutes
+    return cfg
+
+
+def test_halt_schedules_the_configured_resume_delay():
+    from autoclaude.core.services.auto_resume import seconds_until_resume
+    cfg = _cfg_with_delay(30)
+    repo = InMemoryStateRepository()
+    svc = AutoResumeService(_HaltOnceKernel(_halted_result()), cfg, state_repository=repo)
+
+    svc.run(SIMPLE_PB, fresh=True)
+
+    ck = repo.load_checkpoint(_playbook_id_for(SIMPLE_PB, cfg))
+    assert ck.scheduled_resume_at is not None, (
+        "halt 後沒有排定恢復時刻 ⇒ resume_delay_minutes 是死設定"
+    )
+    secs = seconds_until_resume(ck.scheduled_resume_at)
+    assert 0 < secs <= 1800, f"排定的恢復時刻算出 {secs}s"
+
+
+def test_zero_delay_stays_immediate():
+    """delay=0 的語意是「立即繼續」——不得被本修復改成硬等。"""
+    cfg = _cfg_with_delay(0)
+    repo = InMemoryStateRepository()
+    svc = AutoResumeService(_HaltOnceKernel(_halted_result()), cfg, state_repository=repo)
+    svc.run(SIMPLE_PB, fresh=True)
+    ck = repo.load_checkpoint(_playbook_id_for(SIMPLE_PB, cfg))
+    assert ck.scheduled_resume_at is None
+
+
+def test_auto_resume_loop_waits_instead_of_burning_every_retry_at_once():
+    """每一次自動恢復都必須真的等；否則 max_auto_resumes 會在一秒內被燒光。"""
+    from unittest.mock import patch
+
+    cfg = _cfg_with_delay(30, auto_resume=True)
+    cfg.token_guard.max_auto_resumes = 3
+    repo = InMemoryStateRepository()
+    svc = AutoResumeService(_HaltOnceKernel(_halted_result()), cfg, state_repository=repo)
+
+    slept: list[float] = []
+    with patch("autoclaude.core.services.auto_resume.time.sleep", slept.append):
+        svc.run(SIMPLE_PB, fresh=True)
+
+    assert len(slept) >= 3, f"只睡了 {len(slept)} 次，恢復次數卻用掉 3 次"
+    assert all(s > 1000 for s in slept), (
+        f"有恢復未等待即重試（0s＝立刻重燒一次額度）：{slept}"
+    )

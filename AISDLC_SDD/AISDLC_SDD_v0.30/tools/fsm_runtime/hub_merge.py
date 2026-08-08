@@ -36,6 +36,12 @@ except ImportError as exc:  # pragma: no cover
     raise SystemExit("PyYAML required: pip install pyyaml") from exc
 
 from .state_loader import REPO_ROOT, _sanitize_component
+# DEF-53-001: the read-size ceiling is **one** piece of knowledge — reuse
+# hub_sync's SSOT constant/exception instead of declaring a second copy here
+# (two homes for one constant is the failure mode this repo keeps paying for).
+# Import direction is safe: hub_sync does not import hub_merge (only mentions it
+# in a comment), so there is no cycle.
+from .hub_sync import HubContentTooLarge, MAX_HUB_FILE_BYTES
 
 
 DEFAULT_CONFLICTS_DIR = REPO_ROOT / "knowledge" / "hub" / "CONFLICTS"
@@ -65,8 +71,22 @@ class ConflictReport:
 
 
 def _read_yaml(path: Optional[Path]) -> Optional[dict]:
+    """Read a merge input under the same size cap hub_sync applies (DEF-53-001).
+
+    WHY the cap matters even though today's call sites are latent: the three
+    merge inputs (local / base / remote) include the **cached remote** copy of
+    an external hub rule — exactly the untrusted class `MAX_HUB_FILE_BYTES`
+    exists for. `yaml.safe_load` blocks RCE but has no document-size limit, so
+    an oversized/alias-bombed document is parsed into memory before any check.
+    Capping on `st_size` refuses it *before* the read, not after.
+    """
     if path is None or not path.exists():
         return None
+    size = path.stat().st_size
+    if size > MAX_HUB_FILE_BYTES:
+        raise HubContentTooLarge(
+            f"merge input exceeds max read size "
+            f"({size} > {MAX_HUB_FILE_BYTES} bytes): {path}")
     return yaml.safe_load(path.read_text(encoding="utf-8")) or {}
 
 

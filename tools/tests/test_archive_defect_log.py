@@ -3177,9 +3177,14 @@ class TestUnlockConditionIsMechanicallyChecked(unittest.TestCase):
 #: 73 行。合法出口只剩「調高棘輪」，而那是本輪明令禁止的方向（棘輪只准變少），
 #: 且該棘輪住在別包持有的檔。⇒ 判準改以測試側落地：射程由「pre-push 守門迴圈＋
 #: root-infra-ci 的 --check step」縮為「根層 unittest 樹」，**誠實記載這個縮小**。
+#: 🔴 R81 帳本清債包轉動一格（4 → 3）：`("…archive_01.md", "DEF-42-001")` 移除。
+#: 該列在主檔與 archive 各有一份，主檔那份本輪結為 `closed-by-decision`（凍結版 v0.17
+#: 依 Copy-on-Evolve 不修、原文自記隔離 3/3 全綠＝非回歸 flaky），archive 那份同批訂正
+#: 首詞、原文逐字接於後 ⇒ 已不再是未結列。**這一格是被本鎖自己逼出來的**：只改主檔的
+#: 那一刻 `test_archive_ids_are_disjoint_from_or_consistent_with_main` 立刻紅並指名
+#: 「兩邊各說各話，只讀主檔者會誤判」——正是它存在的理由。
 _ARCHIVE_UNRESOLVED_BASELINE: frozenset[tuple[str, str]] = frozenset({
     ("AutoSDD_Defect_Log_archive_01.md", "DEF-24-001"),
-    ("AutoSDD_Defect_Log_archive_01.md", "DEF-42-001"),
     ("AutoSDD_Defect_Log_archive_16.md", "DEF-101-089"),
     ("AutoSDD_Defect_Log_archive_18.md", "DEF-13-002"),
 })

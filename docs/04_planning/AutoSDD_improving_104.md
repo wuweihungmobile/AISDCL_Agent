@@ -49,7 +49,7 @@ C 柱（指揮官 AutoClaude）的跨平台基礎設施**，A 柱（雙向協作
 | **S3** | pytest skipped 徹底解決、全部可測 | 逐筆 skip 分五類；(a) 環境未啟用類**歸零**；孤兒測試（兩平台皆不跑）列出並處置 |
 | ↳ **S3 結論** | 🔴 **未達成**——本輪交付的是**治理**不是解決 | 逐類現況：**(1) platform**（結構性，目標**不是** 0，而是「互補剖面上真的有人跑到」）——`tools/tests@win32` 38 支的互補面本輪首次有證據（act 實測 `tools/tests@linux` 72 支入表）；`AutoClaude/tests` 那 17 支的 linux 剖面**仍無人量過**。**(2) env-disabled**：R79 已證一次可消 92 支（設三個環境變數），本輪未再推進。**(3) tool-absence／(4) debt**：小量，未動。**(5) untagged**：`win32+pg+nested` 仍 23 支、`win32+nopg+nested` 118 支——這一格才是欠債主體，本輪**一支都沒補標籤**。本輪實際做的三件事：①把根層 43 支首次納入天花板管轄；②消滅 `[sdk]` extra 那一族（唯一真正消滅的）；③P7 修復又**新增一個永久 POSIX skip 站點**。🔴 **可查量測入口（下一輪不必重新發明量法）**：根層＝`python tools/run_root_unittests.py` 會印 `[skip census] <剖面> 共 N 支：…／欠債型 M 支（目標 0）`；AutoClaude 樹＝`python AutoClaude/tools/local_ci_gate.py --census-only <pytest log>`（pre-push 與 CI 都已接這條線）。刻意**不另建第三個入口**——同一份知識再開一個家正是本 repo 反覆在治的病。帳本 `DEF-101-960` |
 | **P7** | 🔴 **哨兵仍會彈 console 視窗**（舵手當輪回報） | 法醫級定案：窮盡列出 spawn 站點、實測取證（conhost 子行程為代理）、**類級**修法＋掃描器 |
-| ↳ **P7 結論** | ✅ **類級修法已落地並有掃描器**；⚠️ 代價是**新增一個永久 POSIX skip 站點**（已誠實登記，見 S3 結論） | 三件事分開看：①**載具面**——`.claude/settings.json` 的 hook 由 shell form 轉 exec form（shell form 每觸發一次就經 `bash.exe` 起一個 console 視窗），根層 20 條已轉；②**直譯器面**——`quiet_python()` 補上第二層防線（無 console 父行程下 spawn 的 `creationflags`），註解此前宣稱兩層而實作只有一層（`DEF-101-956`）；③**掃描器**——`hook_form_problems()` 判準 A~F ＋ `is_command_hook()` 收斂（`DEF-101-965`：`type` 欄有三種慣例，省掉 `type` 就能逃過全部判準）。現查 `& $p "$r\tools\check_hooks_liveness.py"`；注入 `& $p -m unittest test_check_hooks_liveness`（於 `tools/tests/`）。🔴 **射程誠實劃界**：`AutoClaude/.claude/settings.json` 的 6 條**仍是 shell form**（`DEF-101-967` open，承接 R81），現況由 `SHELL_FORM_CENSUS` 相等棘輪登記為 `root=0／AutoClaude=6` ⇒ 那 6 條在 AutoClaude 子專案 session 下仍會閃窗 |
+| ↳ **P7 結論** | ✅ **類級修法已落地並有掃描器**；⚠️ 代價是**新增一個永久 POSIX skip 站點**（已誠實登記，見 S3 結論） | 三件事分開看：①**載具面**——`.claude/settings.json` 的 hook 由 shell form 轉 exec form（shell form 每觸發一次就經 `bash.exe` 起一個 console 視窗），根層 20 條已轉；②**直譯器面**——`quiet_python()` 補上第二層防線（無 console 父行程下 spawn 的 `creationflags`），註解此前宣稱兩層而實作只有一層（`DEF-101-956`）；③**掃描器**——`hook_form_problems()` 判準 A~F ＋ `is_command_hook()` 收斂（`DEF-101-965`：`type` 欄有三種慣例，省掉 `type` 就能逃過全部判準）。現查 `& $p "$r\tools\check_hooks_liveness.py"`；注入 `& $p -m unittest test_check_hooks_liveness`（於 `tools/tests/`）。🔴 **射程誠實劃界**：`AutoClaude/.claude/settings.json` 的 6 條**仍是 shell form**（`DEF-101-967` open，承接 R81），現況由 `SHELL_FORM_CENSUS` 相等棘輪登記為 `root=0／AutoClaude=6` ⇒ 那 6 條在 AutoClaude 子專案 session 下仍會閃窗。<br>🔴 **R81 附記（本格的「現況」欄位已過期，勿當今日狀態讀）**：上句描述的是 R80 收輪當下；R81 已把子專案那份轉完，`SHELL_FORM_CENSUS` 現查**兩格皆為 0**，`AutoClaude/.claude/settings.json` 現為 12 條 exec form（載具與根層同形，啟動器以 `../` 回根層取用同一支檔）。**仍未關的缺口**：形態判準 A~F 與載具存在性判準的掃描面只有根檔，子專案那份目前只被「shell form 條目數＝0」這一條守著。承接狀態以帳本 `DEF-101-967` 為準（本輪未動帳本）。 |
 | **a** | 🔴 **掌舵者本輪新提**：額度水位一律用 **%**，不是固定量（啟動帳號不同 ⇒ 絕對量在兩台機器之間不可比） | 驗收判準＝**分母的取數管道**必須是可重跑的程式，且要能說出它取的是哪一種計費口徑。🔴 **單一校準點解不開「口徑」與「分母」兩個未知數**：舵手當輪回報 UI 真值 `Current session / 78% used / Resets in 1 hr 35 min`，同窗口 3,015 筆 usage（`input=27,969`／`cache_creation=33,952,076`／`cache_read=358,166,157`／`output=1,248,761`）依四種口徑各給一個候選分母（**1.64M／45.2M／504M／91.1M**）——四個都能「湊出 78%」。⇒ 判準必須要求**多點校準**或權威來源，不得挑一個看起來合理的填進去（同 R79「猜出來的 reset 時刻」判例：門檻會成立、百分比印得出來，只是它在錯的水位上動作） |
 | **b** | 🔴 **掌舵者本輪新提**：**80%** 少派 agent、準備下一次 reset；**95%** 停止、準備喚醒 | 驗收判準＝兩道各自的**動作**要真的發生，不是印一行字給模型看（同 S1 對 90% 那道的判準，實測 0/70 session 到得了 90%、3 次壓縮全是人手打的）。80% 那道要能真的降低併發（少派 agent），95% 那道要能真的收斂並武裝喚醒（`NextRunTime` 為憑證）。🔴 **本輪零交付**：三方設計（Architect／SA／SD）已完成，但 ADR 合成與實作兩階段都在額度上限陣亡 ⇒ 它一度**既不在計畫書、也不在 ADR、也不在任何程式碼與帳本列裡**，唯一載體是 session 級暫存。本兩列＋帳本 `DEF-101-961` 就是它今天的家（本 repo 判過：記憶會遺漏 ⇒ 延後＝技術債永久消失）。**承接 R81** |
 
@@ -128,7 +128,7 @@ Antigravity／Claude Code 這條路徑上，**必須把互動 session 喚醒回�
 |---|---|---|---|---|---|
 | 1 | 01:23~01:40 | session limit | **五段全中**（偵測→觀測 reset→重排→探測→續跑） | 續跑那一跑 **cwd＝`C:\Windows\System32`** ⇒ 讀不到任務書、碰不到 repo，什麼都做不了 | ✅ **已修並端到端證實**（Action 補 `-WorkingDirectory`＋`_run_resume` 補 `cwd=`；續跑自報 `CWD=repo 根`）。另抓到第二個 P0：`--add-dir` 是變長參數，排在 prompt 前會**吞掉 prompt** ⇒ rc=1 而**五段痕跡全綠** |
 | 2 | 02:00~06:50 | session limit | **整晚每 15 分鐘巡邏，每次都判「無未處理撞線」** | `handled_through` 的立案理由「我此刻跑得動武裝指令 ⇒ 額度是通的」**是假話**——武裝是**零 API 呼叫的本機 subprocess**。實證 `handled_through=18:38:56Z` vs 撞線 `18:36:53Z` ⇒ **撞線後 2 分鐘就被標成已解決** | ✅ **已修**：偵測面改用**全域復原證據**（誤判率先量後定判準：擴 subagent 面 14.8%／同檔證據 **81.3%**／全域證據 **0.0%**） |
-| 3 | 約 12:00 | **monthly spend limit** | 無 | 🔴 **結構上無解**：它**沒有 reset 可以等**，只有掌舵者到 `claude.ai/settings/usage` 調高上限才會回來。「排程等待」對這一類是**錯的動作**——等到天亮它還是滿的 | ❌ **未處置**（見 R81-0-a） |
+| 3 | 約 12:00 | **monthly spend limit** | 無 | 🔴 **結構上無解**：它**沒有 reset 可以等**，只有掌舵者到 `claude.ai/settings/usage` 調高上限才會回來。「排程等待」對這一類是**錯的動作**——等到天亮它還是滿的 | ❌ **未處置**（見 R81-0-a）<br>✅ **R81 已處置**（`escalate` 分支＋`alert()` 叫人；本格的 ❌ 是 R80 收輪當下的狀態，非今日狀態） |
 | 4 | 16:27~16:40 | session limit | **偵測 ✅ 觀測 reset ✅ 重排 ✅**（`arm_reset`「觀測 reset=16:40:00 尚未到 ⇒ 重排到那個時刻」），16:42 醒來判「session 還活著」→ 續巡 | **它做對了，但沒救到任何東西** | 🔴 **這一次暴露的是設計缺口，不是 bug**（見 R81-0-b） |
 
 #### R81-0-a｜額度有兩條線，協定只認得一條
@@ -136,6 +136,10 @@ Antigravity／Claude Code 這條路徑上，**必須把互動 session 喚醒回�
 現行 `classify_limit()` 雖有 `LIMIT_SPEND` 分類，但下游動作只有一種（排到 reset）。
 ⇒ **R81 要做**：對 `LIMIT_SPEND` 走**不同的分支**——不排程、改成**通知人**（它需要的是人的動作，不是時間）。
 🔴 判準要能區分「等得到的」與「等不到的」，否則協定會在一個永遠不會變的狀態上空轉，而痕跡看起來一切正常。
+
+> ✅ **R81 附記：本節交棒的事已處置（上方「R81 要做」勿再當待辦領走）**。落地形態與原文的差別要看清楚：分支**不由桶名／類型字串決定，而由「reset 有多遠」這個資料決定**（`context_budget_guard.reset_branch()`，門檻 `RESET_ARM_HORIZON_SECONDS = 6h`）——拿不到／不可解析／naive 無 offset ⇒ `escalate`；> 6h（週線）⇒ `notify`；≤ 6h ⇒ `arm`。改走資料是因為桶名清單會長（live payload 當回合 17 個頂層鍵，內嵌名單只有 8 個），寫死名單會在新桶上失明。
+> 「通知人」那一半：`tools/lib/quota_escalation.py` 的 `alert()` — 固定路徑的一張紙 `%TEMP%\AUTOSDD_ATTENTION.md` ＋原生桌面通知，`notify_rc` 進稽核痕跡（**通知送出去了沒**本身要可稽核，否則「叫了人」與「以為叫了人」外觀相同）。
+> 判準：`tools/tests/test_context_budget_guard.py::QuotaKindBranchTest`（三支分支的訊息**必須互不相同**，含「沒排程」vs「排不了」）＋ `SpendLimitReachesAHumanTest`。
 
 #### R81-0-b｜🔴 **協定救的單位錯了：它救「session」，而死的是「扇出」**
 本輪四次撞線，**主迴圈一次都沒死**——死的是 subagent（第一次 42 個、第二次 55 個、第四次 1 個）。
@@ -149,6 +153,11 @@ Antigravity／Claude Code 這條路徑上，**必須把互動 session 喚醒回�
    （80% 少派、95% 停止）——而那一項本輪**零交付**（見 §1 的 a/b 兩列）。
    🔴 **兩件事其實是同一件事**：本輪四次撞線全部是「扇出開太大」造成的，而不是「session 跑太久」。
 3. **無人看管時把舵手交給 AutoClaude**（見 R81-1／R81-2）——因為扇出的重派需要判斷，而 headless 續跑那一跑做不了判斷。
+
+> **R81 附記：本節三項的處置狀態分歧，逐項看（勿整節當已完成或整節當待辦）**。設計依據＝[ADR-XPLAT-005](ADR/ADR-XPLAT-005-quota-aware-throttling-and-fanout-resume.md)。
+> - 第 2 項（**預設動作改 throttle**）✅ **已落地**：80%／95% 兩道真的接上電（`context_budget_guard.py` 的 `quota_gate()`，PreToolUse `exit 2` 是機械阻斷不是提示字）。🔴 **射程要記住**：擋得到「主迴圈派發」與「被派出去的人再往下派」，**擋不到「一個已啟動的 Workflow 在內部生出 42 個 agent」**——那一刻沒有任何 hook 會被叫到。故節流帶對 `Workflow` 的處置是**不讓它啟動**。
+> - 第 1 項（**可續跑單位降到 workflow run**）⚠️ **只落地了「記下來」那一半**：`quota_escalation.snapshot_fanout()` 在撞線當下寫 `%TEMP%\autosdd_fanout_<sid>.json`（哪個 run、哪幾個 agent 被打死）。**「額度回來時自動 `resumeFromRunId`」那一半結構上做不到**——該參數是 **same-session only**（工具說明逐字，已向掌舵者確認），而撞線正是把 session 打死的那件事；`runId` 在 PreToolUse 的 payload 裡也拿不到（故改掃 session 目錄）。⇒ 死者清單是**給人／給 AutoClaude 讀的交棒單**，不是可直接回放的 handle。**不要把它記成「自動 resume 已做到」。**
+> - 第 3 項（**舵手交給 AutoClaude**）❌ **未落地**：ADR-XPLAT-005 §2.4「載體二」整段零交付（現查全庫無 `quota_throttle_pct`／`QuotaMeterPort`／`file_quota_meter_adapter`）。且上一項的限制在此仍然成立——載體二落地也按不到 `resumeFromRunId`，只能重新派一次新的 run。
 
 #### R81-0-c｜誠實記下：本輪修好的兩筆，是真的修好了
 不要因為「整體仍沒救到」就把已驗證的成果一起否定：
@@ -178,8 +187,10 @@ Grep checkpoint|scheduled_resume_at 於 AutoClaude/autoclaude/infra/repositories
 ⇒ R81 的 PG 相關動作：
 - **查對連線參數**（角色名／DB 名／port）並寫進 ONBOARDING，本輪實測「猜 `postgres` 是錯的」。
 - 把 Playbook 跑在 **Pg 後端**（不是 File／InMemory）——否則舵手狀態不落地，等於沒有續航能力。
-- ⚠️ 連動 S3-06（本輪掃描確認）：`AUTOCLAUDE_TEST_PG_DSN` **有兩個驅動需求互斥的消費端且零驗證**，
-  照文件以外的合法 DSN 形態設值會讓 15 支測試在 setup 硬炸、訊息指向 SQLAlchemy 而非 repo。**先修這個再談跑 Playbook**。
+- ~~⚠️ 連動 S3-06（本輪掃描確認）：`AUTOCLAUDE_TEST_PG_DSN` **有兩個驅動需求互斥的消費端且零驗證**，
+  照文件以外的合法 DSN 形態設值會讓 15 支測試在 setup 硬炸、訊息指向 SQLAlchemy 而非 repo。**先修這個再談跑 Playbook**。~~
+  🔴 **R81 訂正：這個前置封鎖條件不成立，已撤銷（`HLM-S1-04`）**。它建立在 R80 掃描表對 S3-06 的落地欄判讀上，而**那一格與磁碟不符**——S3-06 其實早已落地且有效：實作在 `AutoClaude/tests/conftest.py`（`pg_dsn_problems()` ＋ `_check_pg_dsn_shape()`，掛在 `pytest_configure`），該檔第 116 行逐字帶著 `S3-06` 這個 ID，行為已從「15 支在 setup 硬炸」升級為**收集前一則可執行指引**。⇒ **不必先修任何東西**，直接用 `postgresql+asyncpg://…` 形態即可（R81 包 C 已照此跑通端到端）。訂正詳情見 `docs/06_quality/CrossPlatform_R80_Scan_Findings.md` 的〈§A 訂正 · S3-06〉。
+  ⚠️ **連帶提醒（射程誠實劃界）**：R80 掃描表**其餘標「未落地」的列都由同一個判準產出** ⇒ 同樣可能是「已修但沒留帳本痕跡」。本節只撤銷 S3-06 這一條封鎖，不對其他列作結論。
 - ⚠️ 版本漂移（既有已知）：**本機 pg18 vs CI pg17**。Playbook 若依賴 PG 行為差異，兩邊會不一致。
 - 順帶：設 DSN ＋ 裝 `postgres` extras 可讓 AutoClaude 的 skip 大幅下降並**暴露數支從未執行過的真 failed**（既有實測），
   與本輪包 A（skipped 歸零）同一條線。

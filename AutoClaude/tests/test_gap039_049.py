@@ -49,9 +49,9 @@ from autoclaude.utils.config import AppConfig
 # 三次量測與對照組見 `docs/06_quality/CrossPlatform_R79_Debt_Audit.md` 的 `## DEF-101-913` 節。
 requires_claude_cli = pytest.mark.skipif(
     shutil.which("claude") is None or os.environ.get("CLAUDECODE") == "1",
-    reason="【未啟用，非缺件】需要 claude CLI binary 且非巢狀 Claude Code session"
-    "（巢狀 session 內 wexpect pty spawn 掛住不回，R79 實測 180s×2＋45s、claude.exe 從未"
-    "啟動；剝除 CLAUDECODE 的對照組行為相同 ⇒ 該變數是環境標記非成因。見 DEF-101-913）。"
+    reason="[ENV-DISABLED] 【未啟用，非缺件】需要 claude CLI binary 且非巢狀 Claude Code "
+    "session（巢狀 session 內 wexpect pty spawn 掛住不回，R79 實測 180s×2＋45s、claude.exe "
+    "從未啟動；剝除 CLAUDECODE 的對照組行為相同 ⇒ 該變數是環境標記非成因。見 DEF-101-913）。"
     "跑法：在**非** Claude Code session 的 PowerShell 執行 "
     "`python -m pytest tests/test_gap039_049.py`"
     "（每日 nightly 排程即為此環境，2026-08-06 nightly log 實測會真的跑）",

@@ -324,7 +324,17 @@ def create_symlink_or_skip(
     try:
         link_path.symlink_to(target, target_is_directory=target_is_directory)
     except OSError as e:
-        test_case.skipTest(f"本機無建立 symlink 權限（{e}），略過 symlink 情境")
+        test_case.skipTest(
+            f"[ENV-DISABLED] 本機無建立 symlink 權限（{e}），略過 symlink 情境。"
+            "🔴 R81 包 F 實查（不是推測）：Developer Mode 未開啟"
+            "（HKLM:\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\AppModelUnlock 的 "
+            "AllowDevelopmentWithoutDevLicense 為空）、token 內無 "
+            "SeCreateSymbolicLinkPrivilege ⇒ 這是**未啟用**不是缺件。"
+            "開法：設定 → 系統 → 開發人員專用 → 開發人員模式（需系統管理員；"
+            "本輪執行環境 IsAdmin=False，故未代開），開完重開 session 本 skip 即消失。"
+            "🔴 junction 不是替代品：本機實測 `_winapi.CreateJunction` 建得起來，但 "
+            "`Path.is_symlink()` 對它回 False ⇒ 拿它頂替會讓斷言測到別的東西"
+        )
 
 
 # PowerShell 子行程輸出編碼的 UTF-8 前置（DEF-101-350／DEF-101-760 同一修法）。

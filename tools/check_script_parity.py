@@ -132,6 +132,7 @@ import _cli_flags  # noqa: E402  # 未知旗標 rc=2 fail-loud 的 SSOT（見該
 import _stdio_utf8  # noqa: E402,F401  # Windows 非 UTF-8 終端 print(✅/❌/⚠) 防崩潰保護
 import check_wrapper_thinness as _thinness  # noqa: E402  # 薄殼釘選唯一實作（本輪併表）
 from _script_scan_surface import SCRIPT_SCAN_ROOTS, iter_tree_scripts  # noqa: E402
+from lib import script_interface_parity as _iface  # noqa: E402  # R81 S8-05 判準本體
 from lib import self_help_exec_parity as _self_help  # noqa: E402  # R80 S8-01 判準本體
 
 _REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -463,8 +464,6 @@ def _check_thinness_cross_lock() -> bool:
     獨立字面清單——同一 commit 雙邊各刪一行即雙工具全綠（hash 值不可測，但**鍵集合
     可測**）。此鎖斷言每個 thinness 登記 stem 的 .sh 與 .ps1 都在 pin 表，反向多餘
     pin（表內出現未登記 stem）亦紅，杜絕「登記與釘選各自腐化」的零訊號窗。"""
-    import check_wrapper_thinness as _thinness  # 同目錄，頂部已 sys.path 注入
-
     return _cross_lock("thinness 交叉鎖", _THINNESS_ENROLLED, _thinness._PINNED_SHA256,
                        "_THINNESS_ENROLLED", "check_wrapper_thinness._PINNED_SHA256")
 
@@ -1520,8 +1519,6 @@ def ac_registries() -> dict[tuple[str, str], object]:
 
     `_print_collapse()` 對本函式求值產生 AC；測試以 AST 掃描交叉比對涵蓋面完整性。
     """
-    import check_wrapper_thinness as _thinness  # 同目錄，頂部已 sys.path 注入
-
     mods = {"parity": sys.modules[__name__], "thinness": _thinness}
     return {(mod, name): getattr(mods[mod], name) for mod, name in _AC_REGISTRY_NAMES}
 
@@ -1533,8 +1530,6 @@ def _print_collapse() -> int:
     在本 ADR 之前，這兩個判準只能靠手跑一支 scratchpad 腳本現查（§2.1）——本函式
     把它變成本工具的第一等公民輸出，供未來棘輪化沿用同一份計算，不必再各自重寫。
     """
-    import check_wrapper_thinness as _thinness  # 同目錄，頂部已 sys.path 注入
-
     # R65：_TLC_TRACK_ENROLLED 已退場（見檔頭 R65 說明）——UEP 不再含該項；
     # AC 改含 _LATEST_PINNED_SHA256／_LATEST_THINNESS_ENROLLED 兩張新表接手其
     # 「描述性常數登記」角色（§4.2）。
@@ -1586,6 +1581,10 @@ def main() -> int:
         ok = _check_run_tlc_invocation_parity(latest_tools) and ok
         ok = _check_latest_thinness() and ok
         ok = _check_exit_code_contract(latest_tools) and ok
+        ok = _iface.check(_discover_scripts(latest_tools)[0],
+                          _iface.side_reader(_registered_path, _strip_comments, latest_tools),
+                          _THINNESS_ENROLLED, {k: v[0] for k, v in _EXEMPT_PAIRS.items()},
+                          _fail) and ok
 
     ok = _check_pytest_pin() and ok
     ok = _check_git_longpaths_flag_parity() and ok

@@ -36,6 +36,7 @@ class TestPgStateRepositoryContract:
     def _setup(self, tmp_path: Path):
         from sqlalchemy.ext.asyncio import create_async_engine
         from sqlalchemy.pool import NullPool
+
         from autoclaude.infra.repositories.pg_state_repository import PgStateRepository
 
         # SD_09 R56 P0-1f 修復：每個契約測為 sync 方法，內部經 repo._run_async → 各自
@@ -99,10 +100,52 @@ class TestPgStateRepositoryContract:
 
     def test_schedule_resume_sets_iso_timestamp(self):
         from datetime import datetime
+
         from .test_state_repository_contract import _make_sample_checkpoint
         self.repo.save_checkpoint("pb_pg_005", _make_sample_checkpoint())
         resume_at = self.repo.schedule_resume("pb_pg_005", delay_minutes=5)
         assert isinstance(resume_at, datetime)
+
+    def test_scheduled_resume_is_readable_by_the_consumer(self):
+        """R81（HLM-S1-02）：Pg 產出的是 **aware** 字串，這正是缺陷長出來的那個後端。
+
+        修復前實測：`schedule_resume(delay_minutes=30)` → 讀回
+        `2026-08-08T13:50:19+00:00`，`seconds_until_resume()` 印
+        「can't subtract offset-naive and offset-aware datetimes」並回 **0.0**
+        （同一支函式對 File 形態回 1799.5）⇒ token-halt 的等待被靜默廢掉。
+        """
+        from autoclaude.core.services.auto_resume import seconds_until_resume
+
+        from .test_state_repository_contract import _make_sample_checkpoint
+        self.repo.save_checkpoint("pb_pg_007", _make_sample_checkpoint())
+        self.repo.schedule_resume("pb_pg_007", delay_minutes=30)
+        loaded = self.repo.load_checkpoint("pb_pg_007")
+        secs = seconds_until_resume(loaded.scheduled_resume_at)
+        assert 0 < secs <= 1800, (
+            f"PgStateRepository 寫下 {loaded.scheduled_resume_at!r}，"
+            f"消費端卻算出 {secs}s（0.0＝不等就續跑）"
+        )
+
+    def test_loaded_checkpoint_never_masquerades_an_id_as_a_path(self):
+        """R81：`checkpoints` 沒有 playbook_path 欄位 ⇒ 載回時不得拿 playbook_id 冒充。
+
+        R69 的續跑守衛（`_checkpoint_matches_playbook`）明文放行「checkpoint 沒記
+        路徑（PG 後端缺欄）」，但 adapter 把 id 填進該欄後那條放行永遠走不到，
+        守衛改判「屬於別支 playbook」⇒ db_only 模式下 checkpoint 永遠續不回來。
+        端到端實測逐字：`checkpoint 屬於別支 playbook（id 撞名），視為無 checkpoint
+        從頭：ck='b017f2c31e2dfd86'，本次='…\\r81_playbook.yaml'`。
+        """
+        from autoclaude.core.services.auto_resume import _checkpoint_matches_playbook
+
+        from .test_state_repository_contract import _make_sample_checkpoint
+        self.repo.save_checkpoint("pb_pg_008", _make_sample_checkpoint())
+        loaded = self.repo.load_checkpoint("pb_pg_008")
+        assert not loaded.playbook_path, (
+            f"PG 沒有這個欄位卻回了 {loaded.playbook_path!r}——那是假值不是資料"
+        )
+        assert _checkpoint_matches_playbook(loaded, __file__) is True, (
+            "R69 守衛把 PG checkpoint 判成別支 playbook ⇒ 續跑鏈斷掉"
+        )
 
     def test_overwrite_preserves_atomicity(self):
         from .test_state_repository_contract import _make_sample_checkpoint
@@ -116,7 +159,9 @@ class TestPgStateRepositoryContract:
     def test_playbook_run_record_created_on_first_save(self):
         """M4：save_checkpoint 首次呼叫時應自動建立 playbook_runs 記錄。"""
         import asyncio
+
         from sqlalchemy import text
+
         from .test_state_repository_contract import _make_sample_checkpoint
         cp = _make_sample_checkpoint()
         self.repo.save_checkpoint("pb_pg_m4_001", cp)
@@ -150,7 +195,9 @@ class TestPgStateRepositoryContract:
         判別欄非裝飾——three_tier 分支確實由資料驅動、被真實流程走到。
         """
         import asyncio
+
         from sqlalchemy import text
+
         from .test_state_repository_contract import _make_sample_checkpoint
 
         async def _seed_goal_task():
@@ -191,7 +238,9 @@ class TestPgStateRepositoryContract:
         而非讓 `uuid.UUID(...)` raise ValueError 使整筆 save_checkpoint 失敗。
         """
         import asyncio
+
         from sqlalchemy import text
+
         from .test_state_repository_contract import _make_sample_checkpoint
 
         cp = _make_sample_checkpoint(goal_task_id="GT-001-A")  # 非 UUID（canonical fixture 格式）
@@ -214,16 +263,25 @@ class TestPgStateRepositoryContract:
 # ──────────────────────────────────────────────
 class TestPgRepositoryImportSafety:
     def test_pg_state_repository_raises_import_error_when_no_sqlalchemy(self):
-        """當 sqlalchemy 未安裝時 PgStateRepository(...) 應拋 ImportError。"""
-        try:
-            import sqlalchemy  # noqa
-            pytest.skip("sqlalchemy 已安裝，無法測試 ImportError 路徑")
-        except ImportError:
-            pass
+        """當 sqlalchemy 未安裝時 PgStateRepository(...) 應拋 ImportError。
 
-        from autoclaude.infra.repositories.pg_state_repository import PgStateRepository
-        with pytest.raises(ImportError, match="sqlalchemy"):
-            PgStateRepository(engine=object())
+        🔴 R81 包 F：原寫法是「本機**裝了** sqlalchemy ⇒ skip」，於是這條缺件路徑只在
+        「沒裝 sqlalchemy 的機器」上才會被驗證——而那種機器結構上不存在（sqlalchemy 是
+        `[dev]`/`[postgres]` extra 的一部分，每一台照 bootstrap SOP 建起來的環境都有，
+        CI 亦然）⇒ 這支測試在世界上任何一處都沒跑過，帳面上卻長得像「環境剛好不合」。
+
+        缺席的其實不是套件，是「模組認為它缺席」這個**狀態**，而該狀態就寫在模組層旗標
+        `_SQLALCHEMY_AVAILABLE` 裡（唯一消費點：pg_state_repository.py:161 的 `__init__`）。
+        patch 它即可讓這條路徑真的被執行，斷言完全不變（仍是「拋 ImportError 且訊息帶
+        sqlalchemy」）——這是把 skip 換成真跑，不是把斷言改鬆。
+        """
+        from unittest.mock import patch
+
+        from autoclaude.infra.repositories import pg_state_repository as mod
+
+        with patch.object(mod, "_SQLALCHEMY_AVAILABLE", False), \
+                pytest.raises(ImportError, match="sqlalchemy"):
+            mod.PgStateRepository(engine=object())
 
     def test_migrate_script_exists(self):
         path = Path(__file__).resolve().parents[2] / "scripts" / "migrate_file_to_pg.py"

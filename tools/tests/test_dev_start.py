@@ -5428,7 +5428,14 @@ class TestPickPythonGeMin(unittest.TestCase):
         )
         self.assertIn("usage: dev_start.py", r.stdout)
 
-    @unittest.skipIf(shutil.which("zsh") is None, "需要 zsh")
+    @unittest.skipIf(
+        shutil.which("zsh") is None,
+        "[MAC-NATIVE-ONLY] 需要 zsh——本鎖驗的是 **macOS 預設 shell** 的字詞切分語意"
+        "（SH_WORD_SPLIT off），且本 case 自帶 POSIX 形態的 PATH（/usr/bin:/bin）"
+        "⇒ 在 Windows 上把 zsh 裝起來也跑不出有意義的結果，這不是「缺件」。"
+        "互補剖面＝macOS runner（🔴 誠實劃界：本 repo 今天沒有任何 macOS 剖面被 census 過，"
+        "`tools/tests@win32` 的互補剖面只指向 linux ⇒ 這一支目前仍無覆蓋證據）",
+    )
     def test_candidate_chain_word_splits_under_zsh(self) -> None:
         """🔴 zsh 迴歸鎖（R69 P2 自身修復過程中真的踩到）：候選鏈初版寫成空白
         分隔字串 + `for c in $LIST`，在 bash 下正確、在 **zsh** 下整條清單被當成
@@ -5795,25 +5802,94 @@ _POST_39_FROM_NAMES = {
 }
 
 
-def _find_sub_min_interpreter() -> tuple[str | None, tuple[int, ...] | None]:
-    """找一支版本**低於** `dev_start._MIN_PY` 的真直譯器（macOS 主場：/usr/bin/python3）。"""
-    for cand in ("/usr/bin/python3", "python3.9", "python3.10", "python3.8", "python3.7"):
-        exe = cand if os.path.isabs(cand) else shutil.which(cand)
+def _sub_min_interpreter_candidates() -> list[list[str]]:
+    """候選直譯器的 argv（順序＝先便宜後昂貴）。
+
+    🔴 R81 包 F（S3-06）：原本只有一串 PATH 名稱，而那串在 Windows 上**結構上**
+    找不到任何可用的東西——pyenv-win 放進 PATH 的是 shim（`python3.10.BAT`），該
+    shim 只有在 pyenv 把該版設成 global/local 時才轉得過去，否則它自己 rc=1
+    （本機實測 stderr 逐字：`'python3.10' is not recognized as an internal or
+    external command`）。真的直譯器住在 `<PYENV_ROOT>/versions/<ver>/python.exe`，
+    PATH 上沒有它 ⇒ 只掃 PATH 等於在一台**裝了** 3.10 的機器上宣稱「找不到」。
+
+    三種發現路徑並存，缺一都會在某類機器上失明：
+      · `/usr/bin/python3`：macOS 主場（3.9.x），POSIX 上第一順位就命中。
+      · pyenv：win 佈局 `<root>/versions/<ver>/python.exe` 與 posix 佈局
+        `<root>/versions/<ver>/bin/python3` 兩種都掃，不存在的那一種自然掃不到東西
+        （鐵律三：判準不得只在一個平台成立）。
+      · Windows Python Launcher `py -3.X`：本機今天 `Get-Command py` 為空，所以它
+        **不能**是唯一依靠，但別的 Windows 機器上常常只有它。
+      · PATH 上的 `python3.X` 名稱：保留原行為（它在 CI 的 Linux 映像上就是主場）。
+    """
+    out: list[list[str]] = [["/usr/bin/python3"]]
+
+    roots: list[Path] = []
+    env_root = os.environ.get("PYENV_ROOT") or os.environ.get("PYENV")
+    if env_root:
+        roots.append(Path(env_root))
+    roots.append(Path.home() / ".pyenv" / "pyenv-win")   # pyenv-win 佈局
+    roots.append(Path.home() / ".pyenv")                 # pyenv（POSIX）佈局
+    seen: set[str] = set()
+    for root in roots:
+        versions = root / "versions"
+        if not versions.is_dir():
+            continue
+        for ver_dir in sorted(versions.iterdir()):
+            for rel in ("python.exe", "bin/python3", "bin/python"):
+                exe = ver_dir / rel
+                if exe.is_file() and str(exe) not in seen:
+                    seen.add(str(exe))
+                    out.append([str(exe)])
+
+    launcher = shutil.which("py")
+    if launcher:
+        out.extend([launcher, f"-3.{minor}"] for minor in (10, 9, 8, 7))
+
+    out.extend([name] for name in ("python3.9", "python3.10", "python3.8", "python3.7"))
+    return out
+
+
+def _find_sub_min_interpreter() -> tuple[list[str] | None, tuple[int, ...] | None,
+                                         list[str]]:
+    """找一支版本**低於** `dev_start._MIN_PY` 的真直譯器（macOS 主場：/usr/bin/python3）。
+
+    回傳 `(argv, (major, minor), broken)`。第三個值是**本輪的重點**：那些「找到了、
+    跑了、但它自己壞掉」的候選，逐支帶 rc 與 stderr 首行。
+
+    🔴 為何不能像原本那樣 `if probe.returncode != 0: continue`（S3-06）：那樣一來
+    「根本沒找到」與「找到了但載具壞掉」會塌成同一個結果，而 skip reason 只說得出
+    前者——於是帳面上是「這台機器缺件」（一個永遠不會有人去修的理由），實況是一支
+    壞掉的 shim。本 repo 紀律〔斷言環境缺件前必先實查〕防的正是這個形態。
+    """
+    broken: list[str] = []
+    for argv in _sub_min_interpreter_candidates():
+        head = argv[0]
+        exe = head if os.path.isabs(head) else shutil.which(head)
         if not exe or not Path(exe).exists():
             continue
-        probe = subprocess.run(
-            [exe, "-c", "import sys;print('%d.%d' % sys.version_info[:2])"],
-            capture_output=True, encoding="utf-8", errors="replace", timeout=60,
-        )
+        resolved = [exe, *argv[1:]]
+        try:
+            probe = subprocess.run(
+                [*resolved, "-c", "import sys;print('%d.%d' % sys.version_info[:2])"],
+                capture_output=True, encoding="utf-8", errors="replace", timeout=60,
+            )
+        except OSError as e:                       # 載具存在但起不來（權限／格式）
+            broken.append(f"{' '.join(resolved)} → OSError {e}")
+            continue
         if probe.returncode != 0:
+            first = (probe.stderr or probe.stdout or "").strip().splitlines()
+            broken.append(
+                f"{' '.join(resolved)} → rc={probe.returncode} "
+                f"stderr={first[0] if first else '(空)'}")
             continue
         try:
             mm = tuple(int(x) for x in probe.stdout.strip().split("."))
         except ValueError:
+            broken.append(f"{' '.join(resolved)} → 版本輸出無法解析：{probe.stdout!r}")
             continue
         if mm < dev_start._MIN_PY:
-            return exe, mm
-    return None, None
+            return resolved, mm, broken
+    return None, None, broken
 
 
 class TestRealSubMinInterpreterPrelude(unittest.TestCase):
@@ -5828,22 +5904,34 @@ class TestRealSubMinInterpreterPrelude(unittest.TestCase):
 
     @classmethod
     def setUpClass(cls) -> None:
-        cls.py, cls.mm = _find_sub_min_interpreter()
+        cls.py, cls.mm, cls.broken = _find_sub_min_interpreter()
 
     def setUp(self) -> None:
         if self.py is None:
             # 🔴 fail loud，不靜默綠：這支鎖的價值全在「真的用舊直譯器跑一次」，
-            # 環境湊不出舊直譯器時必須讓 skip 訊息自己喊出來（`[TOOL-MISSING]`），
+            # 環境湊不出舊直譯器時必須讓 skip 訊息自己喊出來（`[TOOL-ABSENCE]`），
             # 讓 CI log 上「這道鎖沒跑」是可被搜尋的事實，而不是一片綠裡的沉默。
+            #
+            # 🔴 R81 包 F（S3-06）：**兩種失效必須分得開**。原訊息只說得出「找不到」，
+            # 而本機的實況是「找到了 pyenv 的 3.10.11、跑它、它自己 rc=1」——把後者
+            # 印成前者，等於在帳面上宣稱一件與磁碟相反的事（而且是一個永遠不會有人
+            # 去修的理由：「這台機器缺件」）。
+            if self.broken:
+                self.skipTest(
+                    f"[TOOL-ABSENCE] 找得到候選直譯器，但**每一支都跑不起來**"
+                    f"（不是缺件，是載具壞掉）：{'；'.join(self.broken)}"
+                    "⇒ 修好其中任一支即可讓本鎖真跑；不要把這句讀成「這台機器沒有舊直譯器」"
+                )
             self.skipTest(
-                f"[TOOL-MISSING] 找不到版本 < {dev_start._MIN_PY} 的真直譯器"
-                "（試過 /usr/bin/python3, python3.9, python3.10, python3.8, python3.7）"
+                f"[TOOL-ABSENCE] 找不到版本 < {dev_start._MIN_PY} 的真直譯器"
+                "（掃過 /usr/bin/python3、pyenv 的 versions/ 目錄（win 與 posix 兩種佈局）、"
+                "Windows Python Launcher `py -3.X`、PATH 上的 python3.7~3.10）"
                 "⇒ 本機無法真跑 prelude 相容性鎖；macOS 真機必有 /usr/bin/python3（3.9.x）"
             )
 
     def _run(self, argv: list[str]):
         return subprocess.run(
-            [self.py, *argv], cwd=str(_TOOLS_DIR.parent), capture_output=True,
+            [*self.py, *argv], cwd=str(_TOOLS_DIR.parent), capture_output=True,
             encoding="utf-8", errors="replace", timeout=120,
             env={**os.environ, "PYTHONIOENCODING": "utf-8"},
         )
@@ -5854,7 +5942,7 @@ class TestRealSubMinInterpreterPrelude(unittest.TestCase):
         self.assertNotIn(
             "Traceback", combined,
             f"版本閘**之前**的 prelude 在 Python {'.'.join(map(str, self.mm))} 上炸了"
-            f"（{self.py}）——DEF-101-628 的友善訊息又被 traceback 取代。"
+            f"（{' '.join(self.py)}）——DEF-101-628 的友善訊息又被 traceback 取代。"
             f"修法：把 3.11+ 專屬 import 移到版本閘之後或函式內。\n{combined}",
         )
         self.assertEqual(

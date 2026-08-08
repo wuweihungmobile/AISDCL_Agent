@@ -1026,6 +1026,54 @@ class TestHubFileSizeCap:
 
 
 # ─────────────────────────────────────────────
+# DEF-53-001 — the 3-way merge reader is under the same cap
+# ─────────────────────────────────────────────
+class TestMergeReaderFileSizeCap:
+    """DEF-53-001: `hub_merge._read_yaml()` had no size ceiling.
+
+    WHY this matters rather than being cosmetic: one of the three merge inputs
+    is the **cached remote** copy of an external hub rule — the same untrusted
+    class `MAX_HUB_FILE_BYTES` was introduced for on the sync side. Without a
+    cap the document is fully parsed into memory before anything looks at it,
+    so an oversized / alias-bombed file is a memory DoS that `safe_load` does
+    not address. The sibling half of this family (`hub_sync`) was fixed at
+    v0.20; this is the half that was left open.
+
+    The cap deliberately reads the **same** constant rather than declaring a
+    second one — a duplicated constant is the failure mode (`one piece of
+    knowledge, two homes`) that this repo has repeatedly paid for.
+    """
+
+    def test_the_cap_is_the_same_knowledge_not_a_second_copy(self):
+        """If someone later re-declares a private constant here, this fails."""
+        assert merge_mod.MAX_HUB_FILE_BYTES is sync_mod.MAX_HUB_FILE_BYTES
+        assert merge_mod.HubContentTooLarge is sync_mod.HubContentTooLarge
+
+    def test_oversize_merge_input_is_refused_before_parsing(self, tmp_path,
+                                                            monkeypatch):
+        """Red before the fix: this file used to be parsed and returned."""
+        monkeypatch.setattr(merge_mod, "MAX_HUB_FILE_BYTES", 1024)
+        big = tmp_path / "SLV-999.yaml"
+        big.write_text("id: SLV-999\npad: " + "x" * 2000 + "\n", encoding="utf-8")
+        with pytest.raises(sync_mod.HubContentTooLarge):
+            merge_mod._read_yaml(big)
+
+    def test_normal_sized_input_still_reads(self, tmp_path, monkeypatch):
+        """Control group — the cap must not break the legitimate path."""
+        monkeypatch.setattr(merge_mod, "MAX_HUB_FILE_BYTES", 1024)
+        small = tmp_path / "SLV-998.yaml"
+        small.write_text("id: SLV-998\ntrust_level: external\n", encoding="utf-8")
+        assert merge_mod._read_yaml(small) == {
+            "id": "SLV-998", "trust_level": "external"}
+
+    def test_missing_path_is_still_none(self, tmp_path, monkeypatch):
+        """The cap must not swallow the `absent input` branch (base missing)."""
+        monkeypatch.setattr(merge_mod, "MAX_HUB_FILE_BYTES", 1024)
+        assert merge_mod._read_yaml(None) is None
+        assert merge_mod._read_yaml(tmp_path / "nope.yaml") is None
+
+
+# ─────────────────────────────────────────────
 # R60 A-04 — _mirror_local() Windows resilience
 # ─────────────────────────────────────────────
 class TestMirrorLocalWindowsResilience:

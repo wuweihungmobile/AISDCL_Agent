@@ -74,7 +74,10 @@ def tracked_version_dirs(sdd_root: Path) -> set[str] | None:
     """
     try:
         proc = subprocess.run(
-            ["git", "-C", str(sdd_root), "ls-files", "--", "AISDLC_SDD_v*"],
+            # `-c core.quotepath=false`（R81 XPL-S1-01）：非 ASCII 路徑預設被 git 以
+            # C-quoted 形態吐出，`rel.split("/")[0]` 會拿到帶引號的假目錄名。
+            ["git", "-C", str(sdd_root), "-c", "core.quotepath=false",
+             "ls-files", "--", "AISDLC_SDD_v*"],
             capture_output=True,
             text=True,
             encoding="utf-8",

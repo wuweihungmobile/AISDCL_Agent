@@ -37,7 +37,6 @@ LATEST 版本一律問共用層 `tools/lib/sdd_latest.py`（→ SSOT
 """
 from __future__ import annotations
 
-import json
 import subprocess
 import sys
 from pathlib import Path
@@ -81,6 +80,7 @@ from hook_path_scope import (  # noqa: E402
 from platform_utils import (  # noqa: E402
     init_utf8_streams as _init_utf8_streams,  # type: ignore[import-not-found]
 )
+from platform_utils import read_hook_payload  # noqa: E402,F401
 
 SHELL_SUFFIXES = {".sh", ".bash"}
 
@@ -92,23 +92,6 @@ GIT_TIMEOUT_SEC = 15
 def _warn(message: str) -> None:
     """放行類訊息一律進 stderr（exit 0 不阻斷，但不可靜默——漏擋要看得見）。"""
     print(f"[check_sh_eol] {message}", file=sys.stderr)
-
-
-def read_hook_payload() -> dict:
-    # zh-TW Windows pipe 預設 cp950：裸 sys.stdin.read() 遇含中文的 UTF-8 payload 會拋
-    # UnicodeDecodeError → 阻斷級 hook 靜默失效。改讀 bytes 端以 UTF-8+replace 解碼；
-    # 無 buffer（如測試以 StringIO 替身）時回退文字端。
-    stdin_buffer = getattr(sys.stdin, "buffer", None)
-    if stdin_buffer is not None:
-        raw = stdin_buffer.read().decode("utf-8", "replace").strip()
-    else:
-        raw = sys.stdin.read().strip()
-    if not raw:
-        return {}
-    try:
-        return json.loads(raw)
-    except json.JSONDecodeError:
-        return {}
 
 
 def normalize_rel_path(file_path: str) -> Path | None:

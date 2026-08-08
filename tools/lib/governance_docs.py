@@ -88,6 +88,17 @@ _GOVERNANCE_DOCS = (
     # R80 四方複審（一審＋二審）結論的轉錄。資格同 R79 同名檔：它逐筆寫出「某 finding 的
     # 處置落在某 DEF-ID」的座標宣稱（⇒ 指針稽核），覆核者要重驗處置就得讀完它（⇒ 體積守門）。
     _REPO_ROOT / "docs" / "06_quality" / "CrossPlatform_R80_Review.md",
+    # R81 第一批九路掃描的唯一居所，**三份姊妹檔**（第一版合成單檔實測 253,373 bytes 已越
+    # warn 線 245,760，故照 `DEF-101-587` 體例拆分；三份各自維護同一張對照表的 `__SELF__`
+    # 指向）。資格同 R80 同名檔：複審者要判「R81 還有哪些缺口開著」就得讀完（⇒ 體積守門），
+    # 且三份都逐筆寫出「某發現／某 DEF-ID 的座標在某檔某行」的宣稱（⇒ 指針稽核）。即刻登記。
+    _REPO_ROOT / "docs" / "06_quality" / "CrossPlatform_R81_Scan_Findings.md",
+    _REPO_ROOT / "docs" / "06_quality" / "CrossPlatform_R81_Quota_Review.md",
+    _REPO_ROOT / "docs" / "06_quality" / "CrossPlatform_R81_Ledger_Triage.md",
+    # R81 四方複審裁決與 17 筆 blocking 的逐筆轉錄。資格同 R79／R80 同名檔：它逐筆寫出
+    # 「某 finding 的處置落在某檔某節」的座標宣稱（⇒ 指針稽核），覆核者要重驗處置就得
+    # 讀完它（⇒ 體積守門）。即刻登記。
+    _REPO_ROOT / "docs" / "06_quality" / "CrossPlatform_R81_Review.md",
 )
 
 # 姊妹治理文件的命名慣例：`docs/06_quality/CrossPlatform_*.md`。這**不是**把具名常數

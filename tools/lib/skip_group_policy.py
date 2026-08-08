@@ -268,25 +268,35 @@ _RUNTIME_SKIP_CEILING: dict[str, dict[str, int]] = {
         SKIP_GROUP_DEBT: 0,
         SKIP_GROUP_UNTAGGED: 118,
     },
+    # 🔴 R81 包 F（掌舵者訴求 S3「徹底解決 skipped」）重釘：44 → 37，`untagged` 23 → **0**。
+    # 位移的部分是補標籤（env-disabled 1→12／structural-pair 0→1／debt 0→7），
+    # 真正消掉的 7 支是**變成真的會跑**：sdk extra 裝起來（3）、sqlalchemy 缺件路徑改 patch
+    # 模組旗標（1）、symlink fixture 在 Windows 改用複本（1）、pg_real 隨 PG autodetect
+    # 一併自動啟用且語料改為就地 seed（2）。
     "AutoClaude/tests@win32+pg+nested": {
         SKIP_GROUP_PLATFORM: 17,
-        SKIP_GROUP_TOOL_ABSENCE: 3,
-        SKIP_GROUP_ENV_DISABLED: 1,
-        SKIP_GROUP_STRUCTURAL: 0,
-        SKIP_GROUP_DEBT: 0,
-        SKIP_GROUP_UNTAGGED: 23,
+        SKIP_GROUP_TOOL_ABSENCE: 0,
+        SKIP_GROUP_ENV_DISABLED: 12,
+        SKIP_GROUP_STRUCTURAL: 1,
+        SKIP_GROUP_DEBT: 7,
+        SKIP_GROUP_UNTAGGED: 0,
     },
     # 🔴 R80 包 A（S3-04）：根層 `tools/tests` 那一棵此前**完全不在任何天花板管轄內**
     # （43 支 skip，`run_root_unittests.py` 只印不判、rc 與它無關）。本列即那道管轄的入表。
     # 值＝R80 當回合以 `python tools/run_root_unittests.py` 實跑後、由本模組對其
     # `all_skips()` 逐支分群所得（取得方式見 run_root_unittests.report_skip_census）。
+    # 🔴 R81 包 F 重釘：43 → 41，`untagged` 5 → **0**。消掉的 2 支是
+    # `TestRealSubMinInterpreterPrelude`——它的 skip 理由「找不到 < 3.11 的直譯器」是**假診斷**
+    # （本機 pyenv 有 3.10.11，壞的是 pyenv-win 的 `.BAT` shim 且 rc!=0 被靜默 `continue` 吞掉），
+    # 修好發現路徑後兩支都真的跑起來了。其餘為位移：zsh 兩支補 `[MAC-NATIVE-ONLY]`
+    # （platform 38→40）、symlink 一支補 `[ENV-DISABLED]`（0→1）。
     "tools/tests@win32": {
-        SKIP_GROUP_PLATFORM: 38,
+        SKIP_GROUP_PLATFORM: 40,
         SKIP_GROUP_TOOL_ABSENCE: 0,
-        SKIP_GROUP_ENV_DISABLED: 0,
+        SKIP_GROUP_ENV_DISABLED: 1,
         SKIP_GROUP_STRUCTURAL: 0,
         SKIP_GROUP_DEBT: 0,
-        SKIP_GROUP_UNTAGGED: 5,
+        SKIP_GROUP_UNTAGGED: 0,
     },
     # 🔴 R80 包 C（QA-R80-01）：Linux 剖面的**實測值今天有了**——`act` 在 Linux 容器實跑
     # root-infra 那支 job，`run_root_unittests.py` 自己印出
@@ -320,19 +330,19 @@ _RUNTIME_SKIP_CEILING_MAX: dict[str, dict[str, int]] = {
     },
     "AutoClaude/tests@win32+pg+nested": {
         SKIP_GROUP_PLATFORM: 17,
-        SKIP_GROUP_TOOL_ABSENCE: 3,
+        SKIP_GROUP_TOOL_ABSENCE: 0,
+        SKIP_GROUP_ENV_DISABLED: 12,
+        SKIP_GROUP_STRUCTURAL: 1,
+        SKIP_GROUP_DEBT: 7,
+        SKIP_GROUP_UNTAGGED: 0,
+    },
+    "tools/tests@win32": {
+        SKIP_GROUP_PLATFORM: 40,
+        SKIP_GROUP_TOOL_ABSENCE: 0,
         SKIP_GROUP_ENV_DISABLED: 1,
         SKIP_GROUP_STRUCTURAL: 0,
         SKIP_GROUP_DEBT: 0,
-        SKIP_GROUP_UNTAGGED: 23,
-    },
-    "tools/tests@win32": {
-        SKIP_GROUP_PLATFORM: 38,
-        SKIP_GROUP_TOOL_ABSENCE: 0,
-        SKIP_GROUP_ENV_DISABLED: 0,
-        SKIP_GROUP_STRUCTURAL: 0,
-        SKIP_GROUP_DEBT: 0,
-        SKIP_GROUP_UNTAGGED: 5,
+        SKIP_GROUP_UNTAGGED: 0,
     },
     "tools/tests@linux": {
         SKIP_GROUP_PLATFORM: 63,

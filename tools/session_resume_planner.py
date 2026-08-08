@@ -90,6 +90,7 @@ sys.path.insert(0, str(_REPO_ROOT / ".claude" / "hooks"))
 import context_budget_guard as guard  # noqa: E402  # 水位判定唯一實作（見上方 WHY）
 
 import _stdio_utf8  # noqa: E402,F401  # Windows 非 UTF-8 終端印中文／emoji 防崩潰
+from lib import quota_escalation as escalation  # noqa: E402  # R81：叫人＋扇出清單
 from probe.audit_session import project_transcript_dir  # noqa: E402
 
 #: 任務書預設落點＝系統暫存。刻意不落在 repo 內：`tools/tests/test_platform_neutral_paths.py`
@@ -519,6 +520,14 @@ def append_log(path: Path, event: str, **fields: object) -> None:
 # 失敗方向刻意 fail-closed：rc 非零而又分類不出來時回 `LIMIT_UNKNOWN` 且 `open=False`
 # ——「不確定額度回來了沒」時當成沒回來，只會多等一輪；反過來會在沒額度時去跑續跑，
 # 白燒一次主 session 的成本。
+# 🔴 R81 收斂／`DEF-101-990`：**ADR-XPLAT-005 §3.3 要求「先讀零成本快取、讀不到才付費
+# 探測」，這一項至今未做**，而在 SD 複審點出來之前，repo 內沒有任何一處標注它未做（對照
+# ADR 的 M10／M11 都誠實標了「🔴 待建」）。現況：本檔全檔零 `quota_meter` 引用。
+# 不做的理由是量出來的，不是忘了：本檔實測 **749／750**（`guardrail_cli` tier），而那個
+# 改動要落地一個「快取命中就 return」的分支，一行塞不下；ADR 自己開的解鎖程序是先做
+# `tools/session_endurance.py` 抽離（R79_HANDOFF §4.3）＝獨立包。且它改的是**無人看管**
+# 的續航決策，判錯的代價是白燒一次主 session。⇒ 已登記交由下一輪承接（承接輪號寫在帳本
+# 那一列，不寫進程式碼檔——程式碼裡的輪號會超前帳本時鐘）。
 def probe_quota(claude: str = "claude", model: str = "haiku") -> dict:
     """花**一次**最便宜的呼叫問「額度回來了沒」。回 `{open, kind, rc, text}`。"""
     workdir = Path(tempfile.mkdtemp(prefix="autosdd_probe_"))
@@ -1076,9 +1085,12 @@ def _resume_tick(args) -> int:
         # 終態要把排程收掉。`-Once` 觸發器不會再響，但留著一支死工作會讓下一個人
         # 用 `Get-ScheduledTask` 查現況時看到一支「還在」的續航工作——而它其實已經
         # 放棄了。本 repo 對「查詢載具給出過期事實」有判例，這裡不留那個坑。
+        # 🔴 R81 缺口 A 的另一半（`tick_plan` 的 stop 理由逐字寫著「硬停並**通知人**」／
+        # 「只有人去提額才會回來」，而此前的「通知」只是一行 stderr——這一支由 schtasks
+        # 以無 console 的 pythonw 起，那一行沒有任何終端收得到）。載體見 `escalation.alert`。
         append_log(log, "stopped", why=decision["reason"],
-                   unregister_rc=_schtasks_remove(state["task_name"]))
-        print(f"🔴 {decision['reason']}", file=sys.stderr)
+                   unregister_rc=_schtasks_remove(state["task_name"]),
+                   **escalation.alert(decision["reason"], state))
         return 1
     if decision["action"] == "rearm":
         state["state"] = decision["state"]
@@ -1164,14 +1176,19 @@ def _sentinel_tick(args) -> int:
     #    「已處理」現在由復原證據判定，不再由一個推論判定。欄位保留只作稽核用。
     #  · 閒置秒數改用**全 session 最新** mtime：扇出時主逐字稿可能很久沒被寫，只看它會把
     #    正在狂跑的 session 誤判成閒置，而閒置到門檻就會自我解除。
+    # 🔴 R81 缺口 B：`event` 此前是內嵌實參、用完即棄，於是「哪一個 workflow run、哪幾個
+    # agent 被這次撞線打死」這件**寫在磁碟上、讀檔即知、成本為零**的事從來沒有被記下來。
+    # 記在這裡而不是各分支內，是因為三支會反應撞線的分支（arm_reset／probe／escalate）
+    # 都要記——R80 四次撞線裡有三次走的是前兩支，只在 escalate 記等於漏掉主要情境。
+    event = guard.unhandled_limit_event(transcript) if transcript.is_file() else None
     decision = sentinel_decide(
-        guard.unhandled_limit_event(transcript), "",
+        event, "",
         now.timestamp() - guard.newest_activity_at(guard.session_transcripts(transcript)),
         now) if transcript.is_file() else {
         "action": "escalate", "at": None,
         "reason": f"狀態塊指的逐字稿不存在（{transcript}）⇒ 哨兵已瞎，自我解除並叫人"}
-    append_log(log, "sentinel_decided", action=decision["action"],
-               reason=decision["reason"])
+    append_log(log, "sentinel_decided", action=decision["action"], reason=decision["reason"],
+               **escalation.snapshot_fanout(transcript, event))
     print(f"哨兵判定 {decision['action']}：{decision['reason']}")
     if decision["action"] == "probe":
         # 🔴 交棒給既有的續航機器，不另寫一份：`--resume-tick` 已經有探測、`tick_plan`
@@ -1179,16 +1196,17 @@ def _sentinel_tick(args) -> int:
         # 那正確——一旦進入「等額度」模式，醒來就該探測而不是巡邏。
         return _resume_tick(args)
     if decision["action"] in ("disarm", "escalate"):
-        state["state"] = "disarmed" if decision["action"] == "disarm" else "abandoned"
-        state["next_run_time"] = ""
+        # 🔴 R81 缺口 A：兩支終態的差別**不是**要不要排程（兩支都不排），而是**要不要
+        # 叫人**——`disarm` 是工作做完了正常下班，`escalate` 是「只有人做得到的事」。
+        # 此前兩者的差別只有一行沒有人收得到的 stderr ⇒ 痕跡上完全同形。
+        loud = decision["action"] == "escalate"
+        state.update(state="abandoned" if loud else "disarmed", next_run_time="")
         write_relay(plan, state)
         rc = _schtasks_remove(state["task_name"])
+        told = escalation.alert(decision["reason"], state) if loud else {}
         append_log(log, "sentinel_" + decision["action"], unregister_rc=rc,
-                   why=decision["reason"])
-        if decision["action"] == "escalate":
-            print(f"🔴 {decision['reason']}", file=sys.stderr)
-            return 1
-        return rc
+                   why=decision["reason"], **told)
+        return 1 if loud else rc
     if decision["action"] == "arm_reset":
         state.update(state="waiting", reset_source=decision["reset_source"],
                      reset_at=decision["reset_at"].isoformat())

@@ -14,7 +14,6 @@
 """
 from __future__ import annotations
 
-import json
 import sys
 from pathlib import Path
 
@@ -30,6 +29,7 @@ from hook_path_scope import (  # noqa: E402
 from platform_utils import (  # noqa: E402
     init_utf8_streams as _init_utf8_streams,  # type: ignore[import-not-found]
 )
+from platform_utils import read_hook_payload  # noqa: E402,F401
 
 # 對齊 tests/contract/test_claude_md_no_long_lines.py（MAX_LINE_CHARS=800，codepoint 計）
 MAX_CLAUDE_MD_LINE_CHARS = 800
@@ -45,23 +45,6 @@ try:
 except ImportError as exc:  # pragma: no cover — 安全 fallback
     print(f"[loc_budget_check] 無法 import check_loc_budget：{exc}", file=sys.stderr)
     sys.exit(0)
-
-
-def read_hook_payload() -> dict:
-    # zh-TW Windows pipe 預設 cp950：裸 sys.stdin.read() 遇含中文的 UTF-8 payload 會拋
-    # UnicodeDecodeError → 阻斷級 hook 靜默失效。改讀 bytes 端以 UTF-8+replace 解碼；
-    # 無 buffer（如測試以 StringIO 替身）時回退文字端。
-    stdin_buffer = getattr(sys.stdin, "buffer", None)
-    if stdin_buffer is not None:
-        raw = stdin_buffer.read().decode("utf-8", "replace").strip()
-    else:
-        raw = sys.stdin.read().strip()
-    if not raw:
-        return {}
-    try:
-        return json.loads(raw)
-    except json.JSONDecodeError:
-        return {}
 
 
 def normalize_rel_path(file_path: str) -> Path | None:

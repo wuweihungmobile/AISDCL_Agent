@@ -23,6 +23,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[3] / "tools" / "lib"))
 from platform_utils import (  # noqa: E402
     init_utf8_streams as _init_utf8_streams,  # type: ignore[import-not-found]
 )
+from platform_utils import read_hook_payload  # noqa: E402,F401
 
 # 偵測目標字元集：
 #   韓文音節：U+AC00 ~ U+D7A3
@@ -35,23 +36,6 @@ KATAKANA_RE = re.compile(r"[゠-ヿ]")
 # 簡體 vs 繁體分歧高頻字（僅簡體版本；繁體不會出現）
 SIMPLIFIED_HIGH_FREQ = "这个为应实专业无与从让书车马门问题国发对会时间还没"
 SIMPLIFIED_RE = re.compile(f"[{re.escape(SIMPLIFIED_HIGH_FREQ)}]")
-
-
-def read_hook_payload() -> dict:
-    # zh-TW Windows pipe 預設 cp950：裸 sys.stdin.read() 遇含中文的 UTF-8 payload 會拋
-    # UnicodeDecodeError → 阻斷級 hook 靜默失效。改讀 bytes 端以 UTF-8+replace 解碼；
-    # 無 buffer（如測試以 StringIO 替身）時回退文字端。
-    stdin_buffer = getattr(sys.stdin, "buffer", None)
-    if stdin_buffer is not None:
-        raw = stdin_buffer.read().decode("utf-8", "replace").strip()
-    else:
-        raw = sys.stdin.read().strip()
-    if not raw:
-        return {}
-    try:
-        return json.loads(raw)
-    except json.JSONDecodeError:
-        return {}
 
 
 def extract_last_assistant_text(transcript_path: str) -> str:

@@ -5,6 +5,13 @@
   - NonBlockingStreamReader：背景 thread + Queue 非阻塞讀取
   - strip_ansi：ANSI 控制序列移除
   - PtyWrapper：subprocess 模式的 readline / send / 自動授權
+
+R81（HLM-S1-01）：走 wexpect 分支的測試現在必須**同時**把
+`_launcher_reports_consistent_pid` patch 成 True。原因是 `start()` 多了一道守門——
+wexpect 的 pipe 交握在「`sys.executable` 是會 re-exec 的啟動器」（venv 的
+python.exe 即是）下結構上完成不了，`start()` 會靜默不回返。這些測試驗的是
+wexpect 分支**本身**的行為，所以要顯式宣告「假設載具是健全的」，而不是讓
+斷言隨開發機的直譯器形態飄動。
 """
 from __future__ import annotations
 
@@ -281,6 +288,8 @@ class TestResolveCommand:
         proc = _make_mock_proc([])
         fake_wexpect = MagicMock()
         with patch("autoclaude.perception.pty_wrapper._WEXPECT_AVAILABLE", True), \
+             patch("autoclaude.perception.pty_wrapper._launcher_reports_consistent_pid",
+                   return_value=True), \
              patch("autoclaude.perception.pty_wrapper.wexpect", fake_wexpect, create=True), \
              patch("autoclaude.utils.platform_caps.sys.platform", "win32"), \
              patch("autoclaude.perception.pty_wrapper.shutil.which",
@@ -305,6 +314,8 @@ class TestResolveCommand:
         fake_wexpect = MagicMock()
         fake_wexpect.spawn.return_value = MagicMock()
         with patch("autoclaude.perception.pty_wrapper._WEXPECT_AVAILABLE", True), \
+             patch("autoclaude.perception.pty_wrapper._launcher_reports_consistent_pid",
+                   return_value=True), \
              patch("autoclaude.perception.pty_wrapper.wexpect", fake_wexpect, create=True), \
              patch("autoclaude.utils.platform_caps.sys.platform", "win32"), \
              patch("autoclaude.perception.pty_wrapper.shutil.which",
@@ -600,6 +611,8 @@ class TestPtyWrapper:
         # shell-join 成單一字串」，command 本身是否已被解析為絕對路徑無關，故明確
         # patch shutil.which 回傳 None，固定為「找不到→原樣回傳 command」分支。
         with patch("autoclaude.perception.pty_wrapper._WEXPECT_AVAILABLE", True), \
+             patch("autoclaude.perception.pty_wrapper._launcher_reports_consistent_pid",
+                   return_value=True), \
              patch("autoclaude.perception.pty_wrapper.wexpect", fake_wexpect, create=True), \
              patch("autoclaude.perception.pty_wrapper.shutil.which", return_value=None):
             pty = _make_pty(command="claude", args=["-p", complex_prompt])
@@ -623,6 +636,8 @@ class TestPtyWrapper:
         fake_wexpect.EOF = object()
         fake_wexpect.spawn.return_value = fake_child
         with patch("autoclaude.perception.pty_wrapper._WEXPECT_AVAILABLE", True), \
+             patch("autoclaude.perception.pty_wrapper._launcher_reports_consistent_pid",
+                   return_value=True), \
              patch("autoclaude.perception.pty_wrapper.wexpect", fake_wexpect, create=True):
             pty = _make_pty(raw_log_path=raw_path)
             pty.start()
@@ -643,6 +658,8 @@ class TestPtyWrapper:
         fake_wexpect.EOF = object()
         fake_wexpect.spawn.return_value = fake_child
         with patch("autoclaude.perception.pty_wrapper._WEXPECT_AVAILABLE", True), \
+             patch("autoclaude.perception.pty_wrapper._launcher_reports_consistent_pid",
+                   return_value=True), \
              patch("autoclaude.perception.pty_wrapper.wexpect", fake_wexpect, create=True):
             pty = _make_pty(raw_log_path=raw_path)
             pty.start()
@@ -667,6 +684,8 @@ class TestPtyWrapper:
         fake_wexpect.EOF = object()
         fake_wexpect.spawn.return_value = fake_child
         with patch("autoclaude.perception.pty_wrapper._WEXPECT_AVAILABLE", True), \
+             patch("autoclaude.perception.pty_wrapper._launcher_reports_consistent_pid",
+                   return_value=True), \
              patch("autoclaude.perception.pty_wrapper.wexpect", fake_wexpect, create=True):
             pty = _make_pty(raw_log_path=raw_path)
             pty.start()
@@ -691,6 +710,8 @@ class TestPtyWrapper:
         fake_wexpect.EOF = object()
         fake_wexpect.spawn.return_value = fake_child
         with patch("autoclaude.perception.pty_wrapper._WEXPECT_AVAILABLE", True), \
+             patch("autoclaude.perception.pty_wrapper._launcher_reports_consistent_pid",
+                   return_value=True), \
              patch("autoclaude.perception.pty_wrapper.wexpect", fake_wexpect, create=True):
             pty = _make_pty(raw_log_path=raw_path)
             pty.start()
@@ -713,6 +734,8 @@ class TestPtyWrapper:
         fake_wexpect.EOF = object()
         fake_wexpect.spawn.return_value = fake_child
         with patch("autoclaude.perception.pty_wrapper._WEXPECT_AVAILABLE", True), \
+             patch("autoclaude.perception.pty_wrapper._launcher_reports_consistent_pid",
+                   return_value=True), \
              patch("autoclaude.perception.pty_wrapper.wexpect", fake_wexpect, create=True):
             pty = _make_pty(auth_patterns=[r"Proceed\?\s*\(Y/n\)"], auth_response="y")
             pty.start()
@@ -730,6 +753,8 @@ class TestPtyWrapper:
         fake_wexpect.EOF = object()
         fake_wexpect.spawn.return_value = fake_child
         with patch("autoclaude.perception.pty_wrapper._WEXPECT_AVAILABLE", True), \
+             patch("autoclaude.perception.pty_wrapper._launcher_reports_consistent_pid",
+                   return_value=True), \
              patch("autoclaude.perception.pty_wrapper.wexpect", fake_wexpect, create=True):
             pty = _make_pty(auth_patterns=[r"Proceed\?\s*\(Y/n\)"], auth_response="y")
             pty.start()
@@ -753,6 +778,8 @@ class TestPtyWrapper:
         fake_wexpect.EOF = object()
         fake_wexpect.spawn.return_value = fake_child
         with patch("autoclaude.perception.pty_wrapper._WEXPECT_AVAILABLE", True), \
+             patch("autoclaude.perception.pty_wrapper._launcher_reports_consistent_pid",
+                   return_value=True), \
              patch("autoclaude.perception.pty_wrapper.wexpect", fake_wexpect, create=True):
             pty = _make_pty()
             pty.start()
