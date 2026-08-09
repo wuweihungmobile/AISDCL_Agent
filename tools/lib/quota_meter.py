@@ -43,6 +43,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import subprocess
 import sys
 import tempfile
 import time
@@ -56,24 +57,47 @@ from pathlib import Path
 USAGE_URL = "https://api.anthropic.com/api/oauth/usage"
 
 #: 憑證檔（Claude Code 自己維護；互動 session 活著時它會自己 refresh 並回寫）。
-#:
-#: 🔴 **R81 收斂／SD-B4：這條路只有一個假設、沒有替代來源，且它在本輪之前是靜默的。**
-#: 本包新增／改動的 production 碼裡，平台敏感構件全部帶分支（`os.name != "nt"` 早退、
-#: `NO_WINDOW` 走 `getattr`、`notify()` 三分支），**只有這一行沒有**；而全 repo 對
-#: 「另一個平台的憑證存在哪」零次討論。
-#:
-#: 本輪**刻意不加平台分支**，理由是誠實而不是省事：我手上沒有 mac 真機，寫一個驗不了的
-#: 分支正是 `DEF-101-766` 的形狀（在 Windows 語境裡寫出只在 Windows 成立的判準）。
-#: 改成可觀測的那一半——`measure_detail()` 把「憑證讀不到」與「HTTP 非 200／哪個碼」
-#: 分開回報（見 `REASON_*`），於是假設不成立時它會**說出來**而不是整條額度軸靜默 no-op。
-#: 非 Windows 的憑證來源**未驗**，已登記在 ADR-XPLAT-005 與缺陷帳本，交由下一輪承接
-#: （承接輪號寫在帳本那一列，不寫進程式碼檔）。
+#: Windows／Linux／WSL 走這一條；macOS 見 `_keychain_token()`。
 CREDENTIALS = Path(os.path.expanduser("~")) / ".claude" / ".credentials.json"
+
+#: 🔴 **R82／L4-03：macOS 的憑證不在檔案系統上，在 login Keychain。**
+#: R81 版**刻意不加平台分支**，理由是「沒有 mac 真機，寫一個驗不了的分支正是 DEF-101-766
+#: 的形狀」——那個理由對「寫一個猜出來的判準」成立，但它同時買下了一個更大的代價：
+#: 切到 mac 之後 `CREDENTIALS` 恆不存在 ⇒ `measure_detail()` 一律回 `no-credentials`
+#: ⇒ 整條額度軸永久 `unmeasurable` ⇒ R81 落地的 80%／95% 兩道門**結構上一次都到不了**，
+#: 而外觀與「額度水位很低、很健康」完全相同（本輪 Windows 模擬實測：`quota_gate` rc=0、
+#: `fanout_cap(None) is None`）。⇒ 「無法驗證」不是「不做」的理由，是「做成可被單元測試
+#: 注入、並把未驗的那一半明說」的理由。
+#:
+#: 🔴 **誠實劃界（本輪 Windows 真機，mac 路徑未實測）**：下面這個 service 名與 `-w`
+#: 取值形態是依 Claude Code 已知行為寫的，**沒有在 mac 真機上跑過**。判定邏輯可注入
+#: （`_keychain_token` 的 `runner` 參數），所以「找不到就明確 degraded」這一半今天就
+#: 驗得了；真機驗證交 R83，確切指令：  round-label-ok（交棒必須指名承接輪；改寫成 R82
+#: 就把「還沒在 mac 上驗過」講成「本輪驗過了」，那正是本段在防的假宣稱）
+#:     security find-generic-password -s 'Claude Code-credentials' -w
+#:     python tools/lib/quota_meter.py --json     # 期望 pct 有值，而不是 no-credentials
+KEYCHAIN_SERVICE = "Claude Code-credentials"
+KEYCHAIN_TIMEOUT_SECONDS = 5
+
+#: 無視窗旗標。語意（為何是 `CNW|NEWGRP` 而不是 `DETACHED`、四種載具的實測矩陣）唯一的
+#: 家＝`.claude/hooks/context_budget_guard.NO_WINDOW`；本行是**同一個表達式的第二份字面**。
+#: 🔴 為什麼不 import 過來（同一份知識住兩個家是本 repo 判過的形態，所以要辯護）：那條路
+#: 是**死的**——`context_budget_guard` → `quota_gate` → 本檔（該檔第 52 行 `import
+#: quota_meter`），反向 import 直接成環。既然只能複製，就必須有東西守著兩份不漂開：
+#: `tools/tests/test_context_budget_guard.py::ConsoleFreeSpawnTest
+#: ::test_the_duplicated_no_window_expression_still_equals_the_ssot`（相等鎖，漂開即紅）。
+#: `getattr` 而不是直接取屬性：這兩個常數在 POSIX 的 `subprocess` 上**不存在**（鐵律三
+#: 「這在另一個平台是什麼值」），取 0 ＝不加任何旗標，正是 POSIX 上正確的值。
+NO_WINDOW = (getattr(subprocess, "CREATE_NO_WINDOW", 0)
+             | getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0))
 
 #: `measure_detail()` 的失效字面。**它們就是 B4 要的那個可觀測面**：token 過期、
 #: 斷網、schema 升版、憑證檔不在，四種情況在本輪之前與「額度很健康」外觀完全一致。
 REASON_OK = "ok"
 REASON_NO_CREDENTIALS = "no-credentials"
+#: 🔴 mac 專屬：與上一個刻意分開。混成同一個字面時，「這台 mac 的 Keychain 沒接上」
+#: 與「token 真的過期了」在痕跡裡讀起來一模一樣，而兩者要做的事完全不同。
+REASON_NO_CREDENTIALS_DARWIN = "no-credentials-darwin"
 REASON_UNREACHABLE = "meter-unreachable"
 REASON_NO_BUCKETS = "no-buckets"
 
@@ -93,7 +117,17 @@ SCALE_FRACTION = 100.0     # headless stream-json `rate_limit_event.utilization`
 #: 15 分鐘一次的巡邏與 fire-and-forget 刷新，沒有人在等這個值。
 HTTP_TIMEOUT_SECONDS = 10
 
-SCHEMA = "autosdd.quota/1"
+#: 🔴 `/2` 改的不是版號而是**形狀**（R82 接線階段；缺陷本體就在這一格）：頂層不再有
+#: `pct`／`kind`／`resets_at`／`via` 這組投影，改吐 `axes[]`，**每一格自帶自己的
+#: `resets_at` 與 `group`**。舊形態先用 `worst()` 挑出 pct 最大的一桶、再把它的
+#: 三個欄位投影到頂層 ⇒ 其餘每一桶的 reset 期程在**那兩行**被丟掉，於是下游拿到的是
+#: 一個純量，「30 分鐘後 reset」與「5 天後 reset」在程式裡變成同一件事。
+#: 判讀層要的是 (pct, 距 reset 幾分鐘) 這個**二元組**（見 `tools/lib/quota_policy.py`
+#: 檔頭），取數層少給一半，判讀層再聰明也補不回來。
+#: 升版的雙向鎖：`tools/tests/test_quota_policy.py::TestM8SchemaStaysInSync`
+#: （AutoClaude 的 adapter 必須**同一次**跟著改；只升一邊時 adapter 會回 `None`＝
+#: 「量不到」，而那個 `None` 被它自己的測試釘成正確行為 ⇒ 失效全綠、完全靜默）。
+SCHEMA = "autosdd.quota/2"
 
 
 def cache_path() -> Path:
@@ -103,16 +137,69 @@ def cache_path() -> Path:
     return Path(tempfile.gettempdir()) / CACHE_NAME
 
 
-def access_token() -> str:
+def _token_of(blob: object) -> str:
+    """從已解析的憑證 payload 取 `claudeAiOauth.accessToken`；取不到回空字串。
+    檔案與 Keychain 兩條路的**內容**是同一份 JSON，所以解析只有一個家。"""
+    oauth = blob.get("claudeAiOauth") if isinstance(blob, dict) else None
+    token = oauth.get("accessToken") if isinstance(oauth, dict) else None
+    return token if isinstance(token, str) else ""
+
+
+def _keychain_token(runner: object = None) -> str:
+    """macOS：從 login Keychain 取憑證（見 `KEYCHAIN_SERVICE` 的誠實劃界）。
+
+    `runner` 是為了讓這條路**在沒有 mac 的機器上也測得到**而存在的注入點：它必須是一個
+    `(argv) -> (rc, stdout)` 的可呼叫物。預設值走真的 `security`。
+    """
+    call = runner or _run_security
+    try:
+        rc, out = call(["security", "find-generic-password",
+                        "-s", KEYCHAIN_SERVICE, "-w"])
+    except Exception:  # noqa: BLE001 — 取不到憑證最多是量不到，不得變成故障源
+        return ""
+    if rc != 0:
+        return ""
+    try:
+        return _token_of(json.loads(out))
+    except ValueError:
+        # Keychain 也可能存的是裸 token 而不是 JSON（形態未在 mac 真機驗證）⇒ 兩種都收，
+        # 但**不得**把一段錯誤訊息當成 token 送出去（那會變成一個永遠 401 的假綠：取數
+        # 看起來有在跑，只是每一次都失敗）。判準取「不含任何空白且夠長」——`security`
+        # 的失敗訊息一定帶空白（`security: ... not found`），OAuth token 一定不帶。
+        stripped = out.strip()
+        return stripped if len(stripped) >= 20 and not any(
+            ch.isspace() for ch in stripped) else ""
+
+
+def _run_security(argv: list[str]) -> tuple[int, str]:
+    # `text=True` 不指名 encoding ⇒ 走 locale 預設。本檔在 mac 上讀的是 Keychain 吐的
+    # token，非 ASCII 的錯誤訊息在非 UTF-8 locale 下會 UnicodeDecodeError 或降解，而降解
+    # 後的字串仍可能通過下方「不含空白且夠長」的判準 ⇒ 送出一個永遠 401 的假 token。
+    # 🔴 `creationflags`：本檔的呼叫端一路是 hook（`context_budget_guard` → `quota_gate`
+    # → 本檔）與 schtasks 的 `pythonw.exe`，兩者都是**無 console 的父行程** ⇒ 在那個條件下
+    # spawn 一個 console 子系統應用，Windows 必定新配置一個 console＝跳到使用者臉上的視窗。
+    # 🔴 誠實劃界（不要把這一行讀成「治好了掌舵者看到的黑框」）：本函式只在
+    # `sys.platform == "darwin"` 那條路上被呼叫（`access_token()` 的平台分支），而 macOS
+    # 上這兩個常數不存在、`NO_WINDOW` 恆為 0 ⇒ **這一行在今天的 Windows 上一次都不會執行**。
+    # 補它的理由是「顯式表態」與「平台分支哪天挪動時不會靜默漏掉」，不是它現在有效果。
+    proc = subprocess.run(argv, capture_output=True, text=True, check=False,
+                          encoding="utf-8", errors="replace",
+                          timeout=KEYCHAIN_TIMEOUT_SECONDS, creationflags=NO_WINDOW)
+    return proc.returncode, proc.stdout
+
+
+def access_token(platform: str | None = None, runner: object = None) -> str:
     # 🔴 token 值**永遠不回傳給呼叫端以外的任何地方**：不進 log、不進痕跡、不進任務書
     # （調研 S1-08 的逐字要求）。讀不出來一律回空字串，由呼叫端判「量不到」。
+    # `platform` 是注入點（預設讀 `sys.platform`）：mac 分支必須在 Windows 上也驗得到，
+    # 否則這一格就是「寫了但沒有任何東西在守」——本 repo 判過的最貴形態。
+    if (platform or sys.platform) == "darwin":
+        return _keychain_token(runner)
     try:
         data = json.loads(CREDENTIALS.read_text(encoding="utf-8"))
     except (OSError, ValueError):
         return ""
-    oauth = data.get("claudeAiOauth") if isinstance(data, dict) else None
-    token = oauth.get("accessToken") if isinstance(oauth, dict) else None
-    return token if isinstance(token, str) else ""
+    return _token_of(data)
 
 
 def normalize_pct(value: object, scale: float) -> float | None:
@@ -138,7 +225,14 @@ def normalize_pct(value: object, scale: float) -> float | None:
 # 第三條規則（頂層 dict 的 `percent`）是為了把 `spend` 收進來——它沒有 `utilization`
 # 只有 `percent`，而它是「沒有 reset 可以等」的那一條線（見 `reset_branch`）。
 def bucket_readings(payload: object) -> list[dict]:
-    """payload 裡每一個看得到水位的桶：`{kind, pct, resets_at, via}`。"""
+    """payload 裡每一個看得到水位的桶：`{kind, pct, resets_at, group, via}`。
+
+    🔴 `resets_at` 與 `group` **逐桶保留**（R82）：判讀層的分類只由 `resets_at` 導出，
+    而 `group` 是伺服器自己的分組欄（實測多數桶沒有它 ⇒ 一律允許 `None`，
+    **不得**拿它當分類依據，那會對沒有 group 的桶整片失明）。
+    `resets_at` 一律是**伺服器原字串**：不轉本地、不重新格式化（naive 本地時間戳跨
+    DST 相減實測差 3600 秒且完全靜默，本 repo 已有具名機械物禁止持久化它）。
+    """
     if not isinstance(payload, dict):
         return []
     out: list[dict] = []
@@ -148,7 +242,8 @@ def bucket_readings(payload: object) -> list[dict]:
         pct = normalize_pct(item.get("percent"), SCALE_PERCENT)
         if pct is not None:
             out.append({"kind": str(item.get("kind") or "?"), "pct": pct,
-                        "resets_at": item.get("resets_at"), "via": "limits[].percent"})
+                        "resets_at": item.get("resets_at"),
+                        "group": item.get("group"), "via": "limits[].percent"})
     for key, val in payload.items():
         if key == "limits" or not isinstance(val, dict):
             continue
@@ -156,17 +251,22 @@ def bucket_readings(payload: object) -> list[dict]:
             pct = normalize_pct(val.get(field), scale)
             if pct is not None:
                 out.append({"kind": key, "pct": pct, "resets_at": val.get("resets_at"),
-                            "via": f"{key}.{field}"})
+                            "group": val.get("group"), "via": f"{key}.{field}"})
                 break
     return out
 
 
-def worst(readings: list[dict]) -> dict | None:
-    """最緊的那一桶。空清單回 `None`（量不到 ≠ 量到零）。"""
-    # 🔴 刻意**不用 `is_active` 篩**：兩次獨立觀測（ADR 那次 session=True、本包這次
-    # weekly_all=True）都顯示它只是在追蹤 max ⇒ 取 max 與它一致，且不依賴一個沒有
-    # 契約的欄位語意。取 max 的錯誤方向是「太早節流」，那是可接受的方向。
-    return max(readings, key=lambda r: r["pct"]) if readings else None
+# 🔴 `worst()` 的墓碑（R82，**刻意不留 deprecated 版本**）。它回的是 pct 數值最大的那
+# 一桶，**與該桶的 reset 期程無關**，然後把那一桶的三個欄位投影到快取頂層——其餘每一桶
+# 的 `resets_at` 就是在那裡被丟掉的。留一個「暫時沒人叫」的版本等於把缺陷留在原地等
+# 下一個呼叫端；判讀改由 `tools/lib/quota_policy.decide()` 對**全部軸**做，取數層不再
+# 挑桶。回歸鎖：`tools/tests/test_quota_policy.py::TestM5EveryScanSurfaceIsGatedHard`
+# （定義與呼叫兩邊都算——只認 `def worst` 會漏掉「別處定義、這裡呼叫」的版本）。
+# 🔴 R82／C4 訂正：本行原先指向 `tools/tests/test_quota_gate_wiring.py::
+# TestWorstIsGoneFromEveryQuotaFile`，而**那支檔全庫不存在**（grep 只命中這一行註解自己）。
+# 幽靈引用比沒有引用更糟：它讓下一個人以為查過了。複審鏡以沙箱注入實測，把 `worst()`
+# 放回本檔、放回 `quota_gate.py`，把 `fanout_cap(pct)` 放回 hook 與 AutoClaude adapter，
+# **五組全部 rc=0 GREEN**——因為當時的斷言只套在 `quota_policy.py` 自己身上。
 
 
 # 🔴 SA-B2 的修法：分母**從 payload 推導**，不寫死一句散文。
@@ -222,24 +322,26 @@ def measure_detail(timeout: int = HTTP_TIMEOUT_SECONDS) -> tuple[dict | None, st
     # （靜默失明），回 100 ＝永遠 halt。兩個方向都不可接受，所以只能回 `None`。
     token = access_token()
     if not token:
-        return None, REASON_NO_CREDENTIALS
+        # 🔴 R82／L4-03：mac 用**自己的**字面。兩者混成一個時，「這台 mac 的 Keychain
+        # 沒接上」與「憑證檔不在」讀起來一樣，而後者在 mac 上恆真、前者才是真正的原因。
+        return None, (REASON_NO_CREDENTIALS_DARWIN if sys.platform == "darwin"
+                      else REASON_NO_CREDENTIALS)
     status, payload = fetch_usage(token, timeout)
     if status == 0:
         return None, REASON_UNREACHABLE
     if status != 200 or not isinstance(payload, dict):
         return None, f"http-{status}"
-    readings = bucket_readings(payload)
-    top = worst(readings)
-    if top is None:
+    axes = bucket_readings(payload)
+    if not axes:
         return None, REASON_NO_BUCKETS
+    # 🔴 **不排序、不挑桶、不投影**：軸的順序照伺服器給的，判讀層自己會對全部軸求值。
+    # 舊版另有一個 `buckets`（只帶 kind/pct 的排序摘要）——那是同一份知識的第二個家，
+    # 且它正是「把二元組壓成純量」的那個形狀的縮影，故一併刪除而不是留著相容。
     return {
-        "schema": SCHEMA, "pct": top["pct"], "kind": top["kind"],
-        "resets_at": top["resets_at"], "via": top["via"], "source": "endpoint",
+        "schema": SCHEMA, "axes": axes, "source": "endpoint",
         "http_status": status,
         "measured_at": datetime.now(UTC).astimezone().isoformat(timespec="seconds"),
         "denominator": denominator_of(payload),
-        "buckets": sorted(({"kind": r["kind"], "pct": r["pct"]} for r in readings),
-                          key=lambda r: -r["pct"]),
         "schema_keys": sorted(payload),
     }, REASON_OK
 
@@ -302,14 +404,16 @@ def refresh(timeout: int = HTTP_TIMEOUT_SECONDS) -> dict | None:
 
 
 def _report(reading: dict) -> str:
+    # 🔴 逐軸一行，而且**每一個百分比自己帶 `kind=` 與自己的 `resets_at`**。裸的
+    # 「54%」正是掌舵者當場誤讀的那個形狀——它之所以會被誤讀，就是因為那個數字沒有
+    # 說自己是哪一桶、什麼時候 reset。本函式不挑桶也不排序：挑桶是判讀層的事。
     den = reading["denominator"]
-    lines = [f"pct={reading['pct']:.1f}%  kind={reading['kind']}  via={reading['via']}",
-             f"resets_at={reading['resets_at']}  measured_at={reading['measured_at']}",
-             f"denominator[{den['kind']}]={den['text']}"]
+    lines = [f"measured_at={reading['measured_at']}  axes={len(reading['axes'])}"]
+    lines += [f"  kind={a['kind']} {a['pct']:.1f}%  resets_at={a['resets_at']}"
+              f"  group={a['group']}  via={a['via']}" for a in reading["axes"]]
+    lines.append(f"denominator[{den['kind']}]={den['text']}")
     if den["cross_check"]:
         lines.append(f"cross_check={den['cross_check']}")
-    lines.append("buckets=" + ", ".join(
-        f"{b['kind']}:{b['pct']:.1f}" for b in reading["buckets"]))
     return "\n".join(lines)
 
 
@@ -332,7 +436,8 @@ def main(argv: list[str]) -> int:
         while True:
             reading = refresh()
             print(f"{datetime.now().astimezone().isoformat(timespec='seconds')} "
-                  + (f"{reading['pct']:.1f}% {reading['kind']}" if reading else "量不到"),
+                  + ("  ".join(f"kind={a['kind']} {a['pct']:.1f}%"
+                               for a in reading["axes"]) if reading else "量不到"),
                   flush=True)
             time.sleep(max(1, args.watch))
 

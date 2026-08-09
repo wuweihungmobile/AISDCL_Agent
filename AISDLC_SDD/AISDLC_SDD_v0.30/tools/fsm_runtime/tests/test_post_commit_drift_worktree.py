@@ -80,7 +80,7 @@ _REAL_CLOSURE_EVIDENCE = _V030_ROOT / "tools" / "fsm_runtime" / "closure_evidenc
 
 pytestmark = pytest.mark.skipif(
     sys.platform.startswith("win"),
-    reason="hook chain installed here as a POSIX shell shebang script; Windows "
+    reason="[POSIX-NATIVE-ONLY] hook chain installed here as a POSIX shell shebang script; Windows "
     "post-commit wiring is exercised separately via install_post_commit.ps1 (out of scope)",
 )
 

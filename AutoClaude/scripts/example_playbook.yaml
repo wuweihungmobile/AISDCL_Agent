@@ -1,9 +1,17 @@
 # AutoClaude Playbook 範例：AISDLC_SDD Auth Module
 # 對應 AISDLC_SDD 工作流程的 TDD 開發循環
 #
-# 執行方式：
+# 執行方式（cwd＝AutoClaude/）：
 #   python -m autoclaude scripts/example_playbook.yaml
 #   autoclaude scripts/example_playbook.yaml
+#
+# 🔴 R82（ACB-02）：本 playbook 已改為**自足**。修前兩個問題：
+#   ① T01 要求讀 `docs/sdd_auth_spec.md`，該檔全庫不存在（Glob 逐字「No files found」）
+#      ⇒ 第一步沒有真的規格可讀，「規格先行」是空轉的。
+#   ② T02/T03 寫 `tests/test_auth.py` 並以 `pytest tests/test_auth.py` 驗收，而該相對路徑
+#      落在 AutoClaude **自己的** tests/（引擎本身數千支測試就住那裡）⇒ 真跑會污染引擎測試樹。
+# 修法：規格 fixture 與所有產物一律落在 scripts/example_workspace/ 底下；
+#      該目錄除 docs/sdd_auth_spec.md 外由 .gitignore 排除（見 AutoClaude/.gitignore）。
 
 version: "1.0"
 project: "AISDLC_SDD_Auth_Module"
@@ -25,7 +33,7 @@ tasks:
   - step_id: "T01"
     name: "閱讀並理解 SDD 規格"
     prompt: |
-      請讀取 `docs/sdd_auth_spec.md`。
+      請讀取 `scripts/example_workspace/docs/sdd_auth_spec.md`。
       了解我們將使用 FastAPI 實作 JWT 登入模組。
       請列出你理解到的核心需求與將要建立的檔案清單。
       完成後請嚴格輸出 Keyword: `[INIT_DONE]`。
@@ -35,13 +43,14 @@ tasks:
   - step_id: "T02"
     name: "撰寫測試案例 (TDD First)"
     prompt: |
-      根據 SDD 規格，請撰寫 `tests/test_auth.py`。
+      根據 SDD 規格，請撰寫 `scripts/example_workspace/tests/test_auth.py`。
+      🔴 請勿在 AutoClaude 自己的 tests/ 目錄下建立任何檔案。
       涵蓋以下測試案例：
         1. POST /auth/login 正確憑證返回 JWT
         2. POST /auth/login 錯誤密碼返回 401
         3. GET /auth/me 有效 token 返回使用者資料
         4. GET /auth/me 無效 token 返回 401
-      暫時不要實作 auth.py，先完成測試骨架。
+      暫時不要實作 `scripts/example_workspace/auth.py`，先完成測試骨架。
       完成後請輸出 Keyword: `[TEST_CREATED]`。
     expected_output_regex: "\\[TEST_CREATED\\]"
     maintain_context: true
@@ -49,21 +58,23 @@ tasks:
   - step_id: "T03"
     name: "實作核心代碼並自我修復"
     prompt: |
-      請實作 `auth.py`（FastAPI router + JWT 邏輯）以通過 `tests/test_auth.py`。
-      完成後請執行 `pytest tests/test_auth.py -v` 確認結果。
+      請實作 `scripts/example_workspace/auth.py`（FastAPI router + JWT 邏輯），
+      以通過 `scripts/example_workspace/tests/test_auth.py`。
+      完成後請執行 `pytest scripts/example_workspace/tests/test_auth.py -v` 確認結果。
       若測試失敗，請自我修正直到全部通過。
       確認所有測試通過後，輸出 Keyword: `[TASK_COMPLETE]`。
     expected_output_regex: "\\[TASK_COMPLETE\\]"
     # AutoClaude 雙重驗證：AI 說完成不算，Evaluator 親自跑 pytest
-    evaluator_command: "pytest tests/test_auth.py -v --tb=short"
+    evaluator_command: "pytest scripts/example_workspace/tests/test_auth.py -v --tb=short"
     evaluator_timeout_seconds: 60
     maintain_context: true
 
   - step_id: "T04"
     name: "撰寫 API 文件"
     prompt: |
-      請為 auth.py 中的所有 API endpoint 補充完整的 docstring 與 OpenAPI 描述。
-      確保 `docs/api_auth.md` 已更新。
+      請為 `scripts/example_workspace/auth.py` 中的所有 API endpoint 補充完整的
+      docstring 與 OpenAPI 描述。
+      確保 `scripts/example_workspace/docs/api_auth.md` 已更新。
       完成後輸出 Keyword: `[DOCS_DONE]`。
     expected_output_regex: "\\[DOCS_DONE\\]"
     maintain_context: true

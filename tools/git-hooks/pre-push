@@ -252,11 +252,14 @@ fi
 if [ "$run_autoclaude" -eq 1 ]; then
   if [ -f "$TOPLEVEL/AutoClaude/tools/git-hooks/pre-push" ]; then
     echo "[pre-push dispatcher] push 範圍含 AutoClaude/ → 執行 AutoClaude pre-push"
-    _ac_log="$(mktemp 2>/dev/null || echo '')"
+    # 🔴 模板不可省（R82 MAC-01）：BSD/macOS 的 mktemp 沒有預設模板，裸 `mktemp` 是
+    #   usage error ⇒ 在 mac 上這條 advisory 分支**每次**都會退回下面的 fail-soft 路徑，
+    #   而那條路徑一個字都不會說出真因（訊息只寫「失敗」）。
+    _ac_log="$(mktemp "${TMPDIR:-/tmp}/prepush_ac.XXXXXX" 2>/dev/null || echo '')"
     if [ -z "$_ac_log" ]; then
       # mktemp 不可用時退回原行為（少一道 advisory 判準，但絕不擋 push）
       printf '%s\n' "$STDIN" | bash "$TOPLEVEL/AutoClaude/tools/git-hooks/pre-push" || rc=1
-      echo "[pre-push dispatcher] ⚠ mktemp 失敗 → 本次跳過 skip 分群普查" >&2
+      echo "[pre-push dispatcher] ⚠ 無法建立暫存檔（mktemp '${TMPDIR:-/tmp}/prepush_ac.XXXXXX' 失敗；真因在暫存目錄不是 git）→ 本次跳過 skip 分群普查" >&2
     else
       # PYTHONUNBUFFERED=1：接上 `tee` 之後 stdout 不再是 tty，python 預設改為區塊
       # 緩衝 ⇒ 使用者會盯著空白等九十秒才一次看到全部輸出。這一個變數把即時性換回來。
@@ -384,8 +387,16 @@ if [ "$run_rootinfra" -eq 1 ] || [ "$run_rootinfra_guards" -eq 1 ]; then
         echo "[pre-push dispatcher] ❌ root-infra：找不到 ruff — 根層護欄層 lint 無法執行；請先啟用 .venv 並安裝開發相依（cd AutoClaude && uv pip install -e '.[dev,notifications]'）" >&2
         leg_rc=1
       else
-        _ruff_err="$(mktemp)"
-        if ! ruff check tools/ --no-cache 2>"$_ruff_err"; then
+        # 🔴 模板不可省（R82 MAC-01）：BSD/macOS 裸 mktemp＝usage error ⇒ `$_ruff_err`
+        #   為空、`2>""` 重導向失敗、ruff 被判成非零 ⇒ 印出「ruff check tools/ 失敗」
+        #   並擋下 push。那句診斷確定為假（ruff 根本沒跑），且 mac 開發者無從自 log
+        #   看出真因。故先建檔、建不出來就指名真因。
+        _ruff_err="$(mktemp "${TMPDIR:-/tmp}/prepush_ruff.XXXXXX")" || _ruff_err=""
+        if [ -z "$_ruff_err" ]; then
+          echo "[pre-push dispatcher] ❌ root-infra：無法建立暫存檔（mktemp '${TMPDIR:-/tmp}/prepush_ruff.XXXXXX' 失敗）→ ruff 的 stderr 無處落地，本道無法驗證，擋下" >&2
+          echo "                        真因在暫存目錄不是 ruff：請確認 TMPDIR（現值 '${TMPDIR:-/tmp}'）存在且可寫" >&2
+          leg_rc=1
+        elif ! ruff check tools/ --no-cache 2>"$_ruff_err"; then
           cat "$_ruff_err" >&2
           echo "[pre-push dispatcher] ❌ root-infra：ruff check tools/ 失敗（設定＝tools/ruff.toml）" >&2
           leg_rc=1
@@ -396,7 +407,7 @@ if [ "$run_rootinfra" -eq 1 ] || [ "$run_rootinfra_guards" -eq 1 ]; then
         else
           cat "$_ruff_err" >&2
         fi
-        rm -f "$_ruff_err"
+        [ -n "$_ruff_err" ] && rm -f "$_ruff_err"
       fi
       exit $leg_rc
     ) || rc=1

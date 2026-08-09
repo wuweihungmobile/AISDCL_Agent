@@ -235,8 +235,11 @@ AC_MATRIX: dict[str, dict[str, str]] = {
 #: 一個方向的表會就地腐化（`MIN_TESTS` 腐化 11 輪是本 repo 已付過的學費）。等值判準的
 #: 代價是「清掉一筆時也會紅一次」——本輪刻意接受這個代價，但把訊息寫成**逐字說出要改
 #: 哪一個常數、改成什麼值**：有路可走的紅與死路一條的紅是兩件事，後者才是自鎖。
+#: 🔴 R82 包 A2（DEBT-01）：4 → 3。AC2-2 已清——它的門檻逐字是
+#: 「`_runner_internals.py` / `_runner_compat.py` 皆不存在」，而那兩支檔早在 SD_06 W6
+#: （2026-05-18）就物理刪除了 ⇒ **受測條件多輪前就滿足，缺的只有那支斷言檔**。
+#: 建 `tests/contract/test_w6_deletion.py` 即轉綠，零風險。
 _AC_TARGET_PENDING: frozenset[str] = frozenset({
-    "AC2-2",   # tests/contract/test_w6_deletion.py        — W6 尚未開工
     "AC3-4",   # tests/integration/test_concurrent_runs.py — W3 多 run 並存
     "AC5-4",   # tests/integration/test_sigint_checkpoint.py
     "AC6-3",   # tests/integration/test_config_schema_api.py
@@ -246,7 +249,21 @@ _AC_TARGET_PENDING: frozenset[str] = frozenset({
 #: 沒有它，等值判準的合法出口之一就是「把新的欠債加進上表」——鎖當場全綠，而欠債
 #: 悄悄變大且看起來像在維護基線。要真的加大欠債，必須在**同一個 commit** 顯式上修
 #: 本常數並在 PR 說明理由；那是一個會出現在 diff 裡、可被複審點名的決定。
-_AC_TARGET_PENDING_CEILING = 4
+#: 🔴 R82：4 → 3（跟著上表一起下修——天花板不跟著降＝把剛還掉的欠債額度留著，
+#: 日後可無聲用回去；這句話是本檔 `test_pending_targets_match_the_ratchet` 自己寫的）。
+_AC_TARGET_PENDING_CEILING = 3
+
+#: 🔴 R82 包 A2（DEBT-01）：剩下三筆 `[DEBT]` 的**承接輪次**單一真相源。
+#:
+#: 缺陷本體（R82 掃描實測）：這三筆的 skip reason 逐字寫著「承接輪次 R82」——而 R82
+#: 就是**現在**。一個承接輪次寫著本輪的欠債，讀起來像「有人負責」，實際上沒有任何東西
+#: 會在那一輪到來時說話：`_EXEMPT_HANDOVER_RE`（`R\d{2,}`）只問「有沒有寫輪號」，
+#: 對「那個輪號已經過期了」結構上失明。於是它可以永遠寫著同一個數字。
+#:
+#: 修法是把輪號抽成常數，並由 `test_the_debt_handover_round_is_still_in_the_future`
+#: 拿帳本推得的**當前輪次**去比：承接輪一旦追平當前輪，這支就紅，逼出一個顯式決定
+#: （做掉它，或在 diff 裡把承接輪往後推並說明理由）。兩者都是決定，而現況兩者皆非。
+_AC_DEBT_HANDOVER_ROUND = 83
 
 
 def _pending_targets() -> set[str]:
@@ -328,8 +345,54 @@ def test_ac_scaffolding_placeholder(ac_id: str, meta: dict[str, str]) -> None:
     if not (_AC_ROOT / target).exists():
         pytest.skip(
             f"[DEBT] AC {ac_id}（{meta['topic']}，{meta['wave']}）的真斷言落點尚未建立："
-            f"AutoClaude/{target}。門檻＝{meta['threshold']}。承接輪次 R82。"
+            f"AutoClaude/{target}。門檻＝{meta['threshold']}。"
+            f"承接輪次 R{_AC_DEBT_HANDOVER_ROUND}（帳本 DEF-101-960；輪號由本檔常數 "
+            f"_AC_DEBT_HANDOVER_ROUND 統一供給，追平當前輪即由 "
+            f"test_the_debt_handover_round_is_still_in_the_future 轉紅）。"
             f"建好該檔後本 case 自動轉綠，並依 test_pending_targets_match_the_ratchet "
             f"的訊息下修 _AC_TARGET_PENDING／_AC_TARGET_PENDING_CEILING"
         )
     assert (_AC_ROOT / target).exists()
+
+
+def test_the_debt_handover_round_is_still_in_the_future() -> None:
+    """🔴 R82 包 A2（DEBT-01）：承接輪次不得是**已經到了**的那一輪。
+
+    WHY（Rule 9 — 這條規則要守的不是格式，是「有沒有人真的會接手」）：
+    修前三筆 `[DEBT]` 的 reason 逐字寫著「承接輪次 R82」，而 R82 就是本輪。
+    既有的格式判準 `skip_tag_policy._EXEMPT_HANDOVER_RE`（`R\\d{2,}`）只問「有沒有
+    寫輪號」，對「這個輪號已經到了、而且什麼都沒發生」結構上失明 ⇒ 同一個數字可以
+    掛在那裡無限久，而每一輪讀到它的人都會以為下一輪有人負責。
+
+    判準：`_AC_DEBT_HANDOVER_ROUND` 必須 **>** 帳本推得的當前輪次
+    （`tools/check_defect_log_crossref.current_round()`，本 repo 對「現在是第幾輪」的
+    既有唯一真相源——刻意不寫死另一個常數，那正是它在治的病）。
+    追平的那一輪本支轉紅，逼出一個顯式決定：做掉它，或在 diff 裡把輪號往後推。
+
+    誠實劃界：帳本推不出輪次時（欄位改名／檔案搬走）本支 **skip 而非放行**——
+    「量不到」不等於「量到合格」，但也不該在別人改帳本格式時假紅。
+    """
+    import sys  # noqa: PLC0415 — 只有本支需要動 sys.path
+
+    tools_dir = _AC_ROOT.parent / "tools"
+    if str(tools_dir) not in sys.path:
+        sys.path.insert(0, str(tools_dir))
+    import check_defect_log_crossref as crossref  # noqa: PLC0415
+
+    ledger = _AC_ROOT.parent / "docs" / "06_quality" / "AutoSDD_Defect_Log.md"
+    if not ledger.is_file():
+        pytest.skip(f"[TOOL-ABSENCE] 缺陷帳本不存在：{ledger}——當前輪次量不到")
+    now = crossref.current_round(ledger.read_text(encoding="utf-8"))
+    if now is None:
+        pytest.skip(
+            "[TOOL-ABSENCE] 從缺陷帳本推不出當前輪次（「發現情境」欄格式已變？）"
+            "——量不到 ≠ 量到合格，本支不在此情形下放行"
+        )
+    assert _AC_DEBT_HANDOVER_ROUND > now, (
+        f"`[DEBT]` 的承接輪次 R{_AC_DEBT_HANDOVER_ROUND} 已經追平／落後於當前輪 R{now}"
+        "——承接輪次到了卻什麼都沒發生，就是「有人負責」的假象。"
+        f"兩條合法出口：①把剩下的 target 檔建起來（{sorted(_AC_TARGET_PENDING)}，"
+        "門檻寫在 AC_MATRIX 的 threshold 欄）；②在同一個 commit 顯式上修 "
+        "_AC_DEBT_HANDOVER_ROUND 並在 PR 說明為什麼又推遲一輪。"
+        "🔴 不接受的第三條：把本支刪掉或改成不比較——那會讓輪號退回一個裝飾字串"
+    )

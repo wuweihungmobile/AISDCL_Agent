@@ -1,7 +1,12 @@
 claude:
   command: claude
-  extra_args:
-    - "--yes"
+  # 🔴 R82（ACB-01，P0）：此處原本是 `- "--yes"`，而 `--yes` 不是 Claude Code 的旗標
+  #    （實測 `claude --yes mcp list` → rc=1 `error: unknown option '--yes'`）⇒ 出廠設定下
+  #    每個步驟都在第一秒失敗。空清單＝不多送旗標。
+  #    要讓 `claude -p` 非互動模式能真的寫檔（loop.auth_patterns 在 -p 下沒有提示可答），
+  #    請自行改成實測存在的旗標，例如：extra_args: ["--permission-mode", "bypassPermissions"]
+  #    （安全決策，故不設為出廠預設；既有範例見 scripts/ab_configs/ab_pty_config.yaml）
+  extra_args: []
   continue_flag: "--continue"       # 傳遞給 claude 以維持多步驟對話脈絡
   encoding: utf-8
 
@@ -66,12 +71,14 @@ token_guard:
   auto_resume: true
   # 單次 Playbook 執行最多允許幾次自動恢復（防止無限迴圈）
   max_auto_resumes: 10
-  # 從 Claude Code 輸出中偵測 context 使用率的 regex patterns（可自訂）
-  context_patterns:
-    - "(\\d+(?:\\.\\d+)?)\\s*%\\s*(?:context|token)"
-    - "(?:context|token)\\w*[\\s:]+(\\d+(?:\\.\\d+)?)\\s*%"
-    - "(\\d+)\\s*/\\s*(\\d+)\\s*tokens?"
-    - "\\[CONTEXT_USAGE:\\s*(\\d+(?:\\.\\d+)?)%\\]"
+  # 🔴 R82（ACC-02）：`context_patterns` 刻意**不寫在這裡**。
+  #    此處原本列 4 條，而 autoclaude/utils/config.py::TokenGuardConfig 的預設是 7 條——
+  #    出廠 config 一提供這個鍵就整份覆蓋掉程式碼預設，於是 `[STATS: usage 92%]` 與
+  #    `Token usage: N tokens / max M` 兩種 Claude Code 輸出格式的 context% 靜默偵測不到，
+  #    Token Guard 的 compact/halt 兩道門在那些行上永遠不觸發（實測 shipped=None／default=92.0）。
+  #    同一份知識住兩個家、只有一個家會被改 ⇒ 直接刪掉這個鍵，讓 pydantic 用程式碼預設（單一 SSOT）。
+  #    真的要自訂時：這裡列的集合必須是程式碼那 7 條的**超集**，否則
+  #    tests/test_config_shipped_yaml_ssot.py 會紅。
 
 alert_ladder:
   # F-B1 / ADR-AGT-004：漸進式告警階梯（WARNING→HINT→ESCALATE）。
@@ -79,7 +86,12 @@ alert_ladder:
   no_improve_escalate_threshold: 2  # 同 error signature 連續 N 次無改善即提前升級（1~5）
 
 notification:
-  enabled: true                     # 完成或需要人工介入時彈出桌面通知
+  # 🔴 R82（ACC-01）：預設 false＝**不彈**桌面通知。原預設 true 會在 POST_RUN（＝跑完之後）
+  #    才冒出彈窗，並把行程多吊住 duration 秒（plyer 的非 daemon 執行緒 sleep）。
+  #    臨時想看通知：設 true，或 env AUTOCLAUDE_DESKTOP_NOTIFY=1（不必改本入庫檔）。
+  #    ⚠️ 關掉的只有「彈窗」——ESCALATION 仍永遠寫 checkpoints/escalation_alert.log（刻意）。
+  enabled: false
+  duration_seconds: 3               # 彈窗停留秒數；直接決定行程結束時被吊住多久（原硬編 10）
   # webhook_url（選配）：通知 webhook 端點。🔑 若為含 token 的私密 URL（如 Slack incoming
   #   webhook），視為機密、請改用環境變數注入、勿填入本入庫檔；留空＝僅桌面通知。
   # webhook_url: ""

@@ -727,48 +727,51 @@ _FROZEN_GUARD_LINES: dict[str, int] = {
     "_platform_helpers.py": 549,
     "_ps_engine.py": 115,
     "test_act_local_runner_image.py": 322,
-    "test_adr_xplat001_c1c2_lock.py": 4623,
-    "test_archive_defect_log.py": 3791,
-    "test_bash32_compat.py": 819,
+    "test_adr_xplat001_c1c2_lock.py": 4768,
+    "test_archive_defect_log.py": 3878,
+    "test_bash32_compat.py": 946,
     "test_bash_probe_spec_contract.py": 983,
     "test_bootstrap_core.py": 439,
     "test_bootstrap_ps1.py": 160,
-    "test_check_defect_log_crossref.py": 2770,
+    "test_check_defect_log_crossref.py": 3058,
     "test_check_gha_action_versions.py": 295,
     "test_check_hooks_liveness.py": 2578,
     "test_check_pytest_baseline_sites.py": 297,
     "test_check_script_parity.py": 2111,
     "test_check_wrapper_thinness.py": 1316,
     "test_component_sanitizer_shared_layer_lock.py": 293,
-    "test_context_budget_guard.py": 3631,
+    "test_context_budget_guard.py": 5066,
     "test_defect_id_reference_integrity.py": 261,
     "test_dev_start.py": 6774,
-    "test_dev_start_ps1_lastexitcode.py": 462,
+    "test_dev_start_ps1_lastexitcode.py": 548,
     "test_doc_env_prefix_platform_parity_r60.py": 332,
-    "test_doc_loc_baseline_freshness_r60.py": 6313,
+    "test_doc_loc_baseline_freshness_r60.py": 6472,
     "test_extras_quoting_zsh_safety.py": 402,
     "test_find_git_bash_parity.py": 1230,
     "test_gha_action_versions.py": 703,
     "test_git_hooks_install_common.py": 393,
     "test_install_windows_nightly.py": 1469,
+    "test_mac_readiness_r82.py": 621,
     "test_macos_smoke_skip_honesty.py": 225,
     "test_maturity_criteria_r79.py": 427,
+    "test_negative_existence_claims_r82.py": 380,
     "test_nightly_interpreter_determinism.py": 278,
     "test_no_invalid_escape_sequences.py": 329,
     "test_ntfs_trailing_space_device_name.py": 772,
     "test_onboarding_parity_interlock.py": 235,
-    "test_platform_neutral_paths.py": 5678,
+    "test_platform_neutral_paths.py": 5683,
     "test_platform_utils_dedup.py": 1103,
-    "test_pre_commit_dispatcher_sigpipe.py": 581,
+    "test_pre_commit_dispatcher_sigpipe.py": 965,
     "test_pre_push_dispatcher.py": 686,
     "test_ps1_bom.py": 204,
     "test_ps51_compat.py": 621,
     "test_ps_engine_ssot.py": 933,
     "test_python_c_percent_shim.py": 119,
+    "test_quota_policy.py": 1416,
     "test_root_infra_parity.py": 441,
-    "test_run_root_unittests.py": 1730,
+    "test_run_root_unittests.py": 1975,
     "test_sanitize_component_frozen_sdd_versions_lock.py": 375,
-    "test_schedule_capability_parity.py": 591,
+    "test_schedule_capability_parity.py": 595,
     "test_script_scan_surface_ssot.py": 391,
     "test_smoke_ci_sync.py": 1359,
     "test_stdio_utf8.py": 76,
@@ -776,8 +779,8 @@ _FROZEN_GUARD_LINES: dict[str, int] = {
     "test_windows_forbidden_filename_parity.py": 1005,
     "test_windows_nightly_anchor_parity.py": 135,
     "test_windows_smoke_heartbeat_doc_sync.py": 197,
-    "test_windowsapps_guard_bash_parity.py": 903,
-    "test_windowsapps_guard_cross_consistency.py": 2196,
+    "test_windowsapps_guard_bash_parity.py": 907,
+    "test_windowsapps_guard_cross_consistency.py": 2210,
     "test_workflow_permission_concurrency_lock.py": 1360,
     "test_workflow_schedule_sync.py": 309,
     "test_workflow_timeout_coverage.py": 158,
@@ -1090,6 +1093,51 @@ _GUARD_LINES_REPIN_LOG: tuple[tuple[str, int, int, int, str], ...] = (
         "沒有人動「收尾在 commit 前跑」這個順序，所以它必然再來。"
         "🔴 本列未刪任何行換取餘裕、未調高任何門檻、未放寬任何棘輪、未動漂移容忍值。",
     ),
+    (
+        "R82", 68423, 72098, 3675,
+        "R82 **全輪唯一一次重釘**（掃描／額度／帳本／mac 就緒度／文件面五包全數停工後，"
+        "由程式面收尾者在單人窗口做 ⇒ rc 可歸因）。"
+        "🔴 **[非淨減法輪]** —— 逐檔清單與逐項必要性辯護落在 "
+        "docs/06_quality/CrossPlatform_R82_Scan_Findings.md 的 §B（沿用 R80／R81 §B 體例："
+        "同一件事只有一個家；本列刻意不逐檔登載數字）。"
+        "成長集中在三個「此前一個觀測者都沒有」的面，沒有等量舊判準可退場去換："
+        "額度水位那把尺搬進 `tools/lib/quota_gate.py` 之後的判定面；"
+        "下一輪切 mac 真機前的三筆宣稱自洽鎖；**否定存在宣稱**的第一個機械物"
+        "（既有三面 CLAIM-FIRST 判準全部只判正向存在）。"
+        "收尾者另補 `sealed_prefix_problems()`（`DEF-101-995`——同輪剛補上的方向鎖"
+        "自己對「改寫史料」與「整段砍短」兩種繞道全綠）。"
+        "🔴 本輪未刪任何行換取餘裕、未調高任何門檻、未放寬任何棘輪、未動漂移容忍值。",
+    ),
+    (
+        "R82", 72098, 73766, 1668,
+        "R82 **最終收尾者的第二次重釘**（上一列是程式面收尾者的第一次；本列是四方複審"
+        "收斂包與帳本清債包全部停工後，由最終收尾者在單人窗口做 ⇒ rc 可歸因）。"
+        "🔴 **[非淨減法輪]** —— 逐檔清單的家仍是 "
+        "docs/06_quality/CrossPlatform_R82_Scan_Findings.md 的 §B（同一件事只有一個家；"
+        "逐檔淨額現查 `--print-guard-lines` 的 DIFF 欄，本列不登載）。"
+        "成長來自上一次重釘之後才落地的收斂包，以及本次收尾自己的修復："
+        "① 被引用卻從未立帳的 `DEF-101-996`／`DEF-101-997` 補進帳本主檔"
+        "（懸空引用清單現查 `test_defect_id_reference_integrity`）；"
+        "② WMI 逐字語料集中成常數並帶 `platform-ok` 具名豁免"
+        "（磁碟機字面值在那裡是被測資料，不是假路徑）；"
+        "③ 鐵律三證偽探針的已審視清單補一筆——命中的那幾支守的是 console 視窗與歸因分格，"
+        "不是 cmd.exe ⇄ /bin/sh 的語意差異。"
+        "🔴 本輪未刪任何行換取餘裕、未調高任何門檻、未放寬任何棘輪、未動漂移容忍值。",
+    ),
+    (
+        "R82", 73766, 73823, 57,
+        "R82 **最終收尾者的第三次重釘**（機密清理包收尾；前兩列見上）。"
+        "🔴 **[非淨減法輪]** —— 逐檔清單與逐項辯護的家仍是 "
+        "docs/06_quality/CrossPlatform_R82_Scan_Findings.md 的 §B（同一件事只有一個家）。"
+        "成長全部來自兩筆**自陳缺陷的修復**，不是新判準："
+        "① 否定存在宣稱鎖的綠側對照組把證偽標的寫成連續字面，而該檔自己是 tracked ⇒ "
+        "`git grep` 命中自己、那條前提結構上永遠成立不了、對照組恆紅；改成臨時 repo 內"
+        "就地構造，並補一條同 repo 的取數管道自檢（空集合是「真的沒有」還是「grep 壞了」，"
+        "回傳值與 rc 完全相同）。"
+        "② `_ZERO_GUARD_BARE_PY_SITES` 補登 `tools/probe/console_spawn_watch.py`"
+        "（分診：`startswith` 的比對字面，字串來自 WMI 讀回的映像名，不交給 OS 解析）。"
+        "🔴 本輪未刪任何行換取餘裕、未調高任何門檻、未放寬任何棘輪、未動漂移容忍值。",
+    ),
 )
 
 
@@ -1134,10 +1182,10 @@ _GUARD_LINE_DRIFT_TOLERANCE = 0
 #: 追加當輪不必動指紋（一列寬限），下一輪要再追加就必須先把前一列納入前綴並重釘，
 #: 否則 `[前綴過期]` 轉紅。草稿兩個值都由 `--print-guard-lines` 印出
 #: （ARCH-02 的教訓：紅了卻沒有出路的鎖會被關掉）。
-_REPIN_LOG_FROZEN_PREFIX_LEN = 16
+_REPIN_LOG_FROZEN_PREFIX_LEN = 19
 _REPIN_LOG_MAX_UNFROZEN_TAIL = 1
 _REPIN_LOG_HISTORY_SHA256 = (
-    "e4e2123bba9ca4c8bfe8cfd02db05adf5cb0cbe60ffdb699d23fda698f54bbbe")
+    "5c88a211154ba66884dc61d7d0357487de08f2d83aa78fb260f5f4afb8124e7d")
 
 
 def repin_log_history_digest(
@@ -4603,6 +4651,103 @@ class TestRepinCommandIsReal(unittest.TestCase):
         self.assertEqual(
             table, guard_lines_in_worktree(),
             "印出來的表與現況不符 ⇒ 貼回去也還是錯的")
+
+
+#: 🔴 R82／Q2-06：根 CLAUDE.md 不得**逐字複寫** LOC 分級表。這個形態在本 repo 已判過兩次
+#: （R77 的 ruff 規則集複本、R73 的 `Find-GitBash` 路徑常數），兩次的成因都一樣：同一份知識
+#: 住兩個家，而只有一個家會被人改。判準刻意只認「tier 名 ＋ 比較號 ＋ 數字」這個複寫形態，
+#: 不認 tier 名本身（`infra/adapters/` 這種目錄名滿篇都是，判它就是整片假紅）。
+_LOC_TIER_COPY_RE = re.compile(
+    r"(?:data|plugin_entry|strategy|adapter|contract|service|絕對紅線)\s*(?:≤|<=)\s*\d+")
+_LOC_BUDGET_SSOT_REL = "AutoClaude/tools/check_loc_budget.py"
+
+
+def _loc_tier_ssot() -> tuple[dict, int]:
+    """自 SSOT 檔讀 `LOC_TIERS`／`ABSOLUTE_LIMIT`（AST，不執行那支檔）。"""
+    tree = ast.parse((_REPO / _LOC_BUDGET_SSOT_REL).read_text(encoding="utf-8"))
+    tiers, limit = {}, 0
+    for node in tree.body:
+        target = None
+        if isinstance(node, ast.AnnAssign) and isinstance(node.target, ast.Name):
+            target = node.target.id
+        elif isinstance(node, ast.Assign) and len(node.targets) == 1 and isinstance(
+                node.targets[0], ast.Name):
+            target = node.targets[0].id
+        if target == "LOC_TIERS" and node.value is not None:
+            tiers = ast.literal_eval(node.value)
+        elif target == "ABSOLUTE_LIMIT" and node.value is not None:
+            limit = ast.literal_eval(node.value)
+    return tiers, limit
+
+
+class TestLocTierTableHasOnlyOneHome(unittest.TestCase):
+    """LOC 分級表在根 CLAUDE.md 只准是**指標**，不准是複本（R82／Q2-06）。"""
+
+    def test_the_ssot_really_defines_the_table(self) -> None:
+        """反 vacuity：判準掃的東西必須真的存在，否則它只是一條恆綠的正則。"""
+        tiers, limit = _loc_tier_ssot()
+        self.assertGreaterEqual(len(tiers), 5, "SSOT 讀不到分級表 ⇒ 本鎖失去比較對象")
+        self.assertGreater(limit, 0, "SSOT 讀不到絕對紅線")
+        for name, spec in tiers.items():
+            with self.subTest(tier=name):
+                self.assertIsInstance(spec.get("budget"), int)
+
+    def test_the_root_claude_md_points_at_the_ssot_instead_of_restating_it(self) -> None:
+        text = (_REPO / "CLAUDE.md").read_text(encoding="utf-8")
+        hits = _LOC_TIER_COPY_RE.findall(text)
+        self.assertEqual(hits, [], "根 CLAUDE.md 又把 LOC 分級表逐字複寫了一份"
+                                   f"（命中 {hits}）⇒ 同一份知識兩個家，"
+                                   f"唯一真相源是 {_LOC_BUDGET_SSOT_REL}")
+        # 光是「沒有複本」還不夠：整段被刪掉時上面那條也會綠。指標必須真的在。
+        self.assertIn(_LOC_BUDGET_SSOT_REL, text,
+                      "複本刪了、指標也沒留 ⇒ 讀者連去哪裡查都不知道")
+
+
+#: 🔴 R82／Q2-04：重釘稽核列**是索引不是報告**。缺陷本體：這張 log 住在它自己在量的那支
+#: 檔裡，而每一輪至少要 append 一列 ⇒ 量測器每輪把自己量的數字推高（現查：
+#: `_GUARD_LINES_REPIN_LOG` 的 AST 起訖行）。**本鎖不改寫任何既有列**——那張表由
+#: `_REPIN_LOG_FROZEN_PREFIX_LEN` 的
+#: append-only 指紋守著，改寫歷史正是它存在的理由；本鎖只約束**新列**，讓成長從這裡停住。
+#: 上限沿用本 repo 既有的同型判例（缺陷帳本「列是索引不是報告」＝700 bytes，詳情進具名
+#: 證據檔），不另發明一個數字；逐檔清單與必要性辯護的家仍是 `CrossPlatform_R*_*.md`。
+_REPIN_REASON_CAP_SINCE = 82
+_REPIN_REASON_MAX_CHARS = 700
+
+
+class TestRepinReasonStaysAnIndexNotAReport(unittest.TestCase):
+    """新的重釘列不得再夾帶整段敘事（R82／Q2-04 的**可做的那一半**）。"""
+
+    def _new_rows(self) -> list[tuple]:
+        return [r for r in _GUARD_LINES_REPIN_LOG
+                if int(str(r[0]).lstrip("Rr") or 0) >= _REPIN_REASON_CAP_SINCE]
+
+    def test_new_rows_are_bounded_and_point_at_the_findings_doc(self) -> None:
+        for row in self._new_rows():
+            with self.subTest(round=row[0]):
+                reason = str(row[4])
+                self.assertLessEqual(
+                    len(reason), _REPIN_REASON_MAX_CHARS,
+                    f"R{row[0]} 的重釘理由 {len(reason)} 字元 > "
+                    f"{_REPIN_REASON_MAX_CHARS} ⇒ 量測器又在推高自己量的數字；"
+                    "逐檔清單與必要性辯護請落在 CrossPlatform_R*_Scan_Findings.md")
+                self.assertRegex(reason, _PER_FILE_LIST_RE,
+                                 "縮短了但沒有指向逐檔清單的家 ⇒ 資訊真的掉了，"
+                                 "那不是減法是刪證據")
+
+    def test_the_cap_only_binds_forward_and_grandfathers_the_frozen_prefix(self) -> None:
+        """反 vacuity 的另一半：舊列**刻意**不受本鎖約束，且那不是漏看。
+
+        既有列全部落在 append-only 指紋的凍結前綴內，改寫其中任何一列會先撞那道更根本的
+        鎖。本測試把「舊列超標是已知且被接受的」釘成事實——否則下一個人會以為本鎖恆綠。
+        """
+        old = [r for r in _GUARD_LINES_REPIN_LOG
+               if int(str(r[0]).lstrip("Rr") or 0) < _REPIN_REASON_CAP_SINCE]
+        self.assertTrue(old, "凍結前綴空了 ⇒ 有人改寫了歷史")
+        self.assertTrue(any(len(str(r[4])) > _REPIN_REASON_MAX_CHARS for r in old),
+                        "舊列全都在上限之內 ⇒ 本鎖的立案前提（敘事把量測器撐大）已不成立，"
+                        "該重新談這條規則而不是留著一條沒有分母的鎖")
+        self.assertLessEqual(_REPIN_REASON_CAP_SINCE, 82,
+                             "生效輪次被往後推 ⇒ 等於把已經該受約束的列放出去")
 
 
 if __name__ == "__main__":  # pragma: no cover

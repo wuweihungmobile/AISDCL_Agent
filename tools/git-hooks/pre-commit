@@ -13,19 +13,114 @@
 # ---------------------------------------------------------------------------
 set -uo pipefail
 
-if [ "${AUTOCLAUDE_SKIP_HOOKS:-0}" = "1" ]; then
-  echo "[pre-commit dispatcher] AUTOCLAUDE_SKIP_HOOKS=1 → 跳過所有檢查"
-  exit 0
-fi
-
 # 定位 repo 根：git 執行 hooks 時 cwd＝該工作樹頂層，故以 --show-toplevel 為第一優先
 # （linked worktree 內 commit 時才會對「該 worktree 的樹」跑檢查，而非安裝時的主 checkout）；
 # 取不到才 fallback BASH_SOURCE 自我定位（並印警告）。
+# 🔴 R82：本段由「SKIP 判定之後」上移到「之前」——下方機密外洩閘需要 TOPLEVEL，
+# 而那道閘刻意**不受 AUTOCLAUDE_SKIP_HOOKS 管**（理由見該段）。
 TOPLEVEL="$(git rev-parse --show-toplevel 2>/dev/null)"
 if [ -z "${TOPLEVEL:-}" ]; then
   echo "[pre-commit dispatcher] ⚠ git rev-parse --show-toplevel 失敗 → fallback BASH_SOURCE 自我定位（linked worktree 下可能指向主 checkout）" >&2
   TOPLEVEL="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 fi
+
+# ── 機密外洩閘（R82）：`.env` 形態的檔一律不得進 index ──────────────────────
+# 🔴 掌舵者當場下的安全紅線：「`.env` 有私密 KEY，請不要推上 GitHub」。
+#
+# 🔴 為何這道閘在 `AUTOCLAUDE_SKIP_HOOKS` 判定**之前**（本檔唯一一道這樣的閘）：
+#   其餘閘門擋的是「會壞掉但可以修」的東西（語法錯、檔名不相容、CRLF）——那類東西
+#   留了緊急出口是合理的，改壞了再改回來即可。機密外洩**不可逆**：key 一旦進了
+#   commit，即使下一秒 `git rm --cached`，它仍留在 reflog／object store 裡，push 出去
+#   之後更是要當作已洩漏、只能去供應商後台輪替。對一個不可逆的後果留一個「順手就
+#   按得到」的出口，等於沒有這道閘。故 SKIP 對它無效，`--no-verify` 的缺口另由
+#   pre-push 與回歸鎖兜（誠實劃界見下方 `.env` 訊息與 tools/lib/secret_scan.py 檔頭）。
+#
+# 🔴 為何讀**暫存區**而不是工作樹：`.gitignore` 對「已明示暫存」完全不生效——
+#   `git add -f AutoClaude/.env` 一行就繞過忽略規則，而工作樹視角看不出任何異常。
+#   決定「GitHub 上會出現什麼」的是 index，不是工作樹。
+#
+# 🔴 `.env.example` 必須放行：它是範本、本來就該入庫（根 .gitignore 的 `!.env.example`
+#   即此意）。把它一起擋掉會讓每個人第一次 commit 就撞紅 → 守衛被整個關掉，那才是
+#   真正的零防護（本 repo 判例：誤報比漏擋更糟）。
+# --diff-filter=ACM：刪除（D）不看——`git rm --cached .env` 正是本閘教人做的修法，
+#   把它也擋下等於沒有人能執行修法。
+secret_rc=0
+if env_staged="$(git -c core.quotepath=false diff --cached --name-only --no-renames --diff-filter=ACM)"; then
+  while IFS= read -r f; do
+    [ -z "$f" ] && continue
+    hit=0
+    case "${f##*/}" in
+      .env.example) ;;          # 範本：放行（必須在下一條之前，先命中先贏）
+      .env|.env.*) hit=1 ;;     # .env / .env.local / .env.<任何後綴>
+    esac
+    # 目錄形態：`.env/` 底下的任何檔（basename 比對看不到它）
+    case "/$f" in */.env/*) hit=1 ;; esac
+    [ "$hit" -eq 1 ] || continue
+    echo "[pre-commit dispatcher] ❌❌ 你正在把機密推上 GitHub：${f} 已進入暫存區" >&2
+    echo "                        .env 內含真實憑證（API key／DB 密碼），一旦入庫就是不可逆的外洩——" >&2
+    echo "                        即使之後刪掉，它仍留在 git object store 與 reflog 裡。" >&2
+    echo "                        修法：git rm --cached -- '${f}'   （檔案留在磁碟上，只退出暫存區）" >&2
+    echo "                        範本請放 .env.example（佔位符，不含真值）；真值只留在被 .gitignore 排除的 .env。" >&2
+    secret_rc=1
+  done <<EOF_ENV
+$env_staged
+EOF_ENV
+else
+  echo "[pre-commit dispatcher] ❌ 無法取得暫存清單（git diff --cached 失敗）→ 機密外洩閘無法驗證，擋下" >&2
+  secret_rc=1
+fi
+
+# ── 機密外洩閘 第二層：內容掃描（R82）────────────────────────────────────────
+# 上一段只看**檔名**，於是對「把真 key 貼進**已被追蹤**的 .env.example」結構上失明
+# ——而那正是最容易發生、也最不會被發現的一種外洩（範本本來就該入庫，沒有任何以
+# 檔名為判準的守衛會看它）。判準本體在 tools/lib/secret_scan.py（含射程與假紅實測）。
+# 缺件時**出聲**而非靜默跳過：這一層需要 python，而「守衛沒跑」與「守衛通過」外觀
+# 完全相同，正是本 repo 反覆在治的失效模式。第一層是純 bash、不受此影響。
+_ss_scanner="$TOPLEVEL/tools/lib/secret_scan.py"
+_ss_guard="$TOPLEVEL/tools/lib/windowsapps_guard.sh"
+if [ -f "$_ss_scanner" ] && [ -f "$_ss_guard" ]; then
+  # shellcheck disable=SC1091
+  . "$_ss_guard"
+  _ss_py=""
+  for _ss_cand in python python3; do
+    if is_real_python_candidate "$_ss_cand"; then _ss_py="$_ss_cand"; break; fi
+  done
+  if [ -z "$_ss_py" ]; then
+    echo "[pre-commit dispatcher] ⚠ 找不到可用的 python → 機密**內容**掃描這一層未執行（檔名層已跑）" >&2
+  else
+    # 🔴 rc 要**分流**，不可一律讀成「發現機密」（落地當回合被回歸鎖抓到的實況）：
+    #   掃描器崩掉時也是非零，而把那個非零印成「暫存內容含疑似真實機密」是一句**確定
+    #   為假**的診斷——使用者會去翻自己的 diff 找不存在的 key，真因（掃描器自己壞了）
+    #   卻一個字都沒說。本 repo 一路在治的「錯的診斷比沒有診斷更貴」。
+    #   契約見 tools/lib/secret_scan.py 檔頭：0＝乾淨／1＝有命中／2＝取數管道壞掉。
+    #   刻意不接管線：本檔檔頭記載過 pipefail ＋ 早退讀端的 SIGPIPE 陷阱，而且讀 rc
+    #   接管線本身就是本 repo 明令禁止的形態。
+    PYTHONUTF8=1 "$_ss_py" "$_ss_scanner" --staged --repo-root "$TOPLEVEL"
+    _ss_rc=$?
+    if [ "$_ss_rc" -eq 1 ]; then
+      echo "[pre-commit dispatcher] ❌❌ 暫存內容含疑似真實機密（見上方逐筆位置）" >&2
+      echo "                        確定是誤判時，於該**行尾**加 '# secret-scan-ok: <理由>'" >&2
+      secret_rc=1
+    elif [ "$_ss_rc" -ne 0 ]; then
+      echo "[pre-commit dispatcher] ❌ 機密內容掃描器自身失敗（rc=${_ss_rc}）→ 無法驗證，擋下" >&2
+      echo "                        這**不是**「發現機密」：真因在掃描器／取數管道，見上方 traceback" >&2
+      secret_rc=1
+    fi
+  fi
+elif [ ! -f "$_ss_scanner" ]; then
+  echo "[pre-commit dispatcher] ⚠ 找不到 ${_ss_scanner} → 機密**內容**掃描這一層未執行（檔名層已跑）" >&2
+fi
+
+if [ "$secret_rc" -ne 0 ]; then
+  echo "[pre-commit dispatcher] 🔴 機密外洩閘擋下本次 commit（本閘不受 AUTOCLAUDE_SKIP_HOOKS／逃生口影響）" >&2
+  exit 1
+fi
+
+if [ "${AUTOCLAUDE_SKIP_HOOKS:-0}" = "1" ]; then
+  echo "[pre-commit dispatcher] AUTOCLAUDE_SKIP_HOOKS=1 → 跳過所有檢查（🔴 機密外洩閘除外，已於上方執行完畢）"
+  exit 0
+fi
+
 rc=0
 
 # 分流判定：純 bash case 前綴比對（不可用 printf | grep -q —— 變更清單 >64KB 且命中在
@@ -327,8 +422,24 @@ if eol_files="$(git -c core.quotepath=false diff --cached --name-only --no-renam
         case "${f##*/}" in *.*) : ;; *) do_eol=1 ;; esac ;;
     esac
     [ "$do_eol" -eq 1 ] || continue
-    _blob="$(mktemp)"
-    _blob_nocr="$(mktemp)"
+    # 🔴 mktemp **必須帶模板**（R82 MAC-01）：BSD/macOS 的 mktemp 沒有 GNU 那個
+    #   「省略模板就用預設 tmp.XXXXXXXXXX」的行為，裸 `mktemp` 直接是 usage error
+    #   （rc=1、什麼都不建）。repo 內既有的正確體例＝tools/macos_smoke_local.sh:135。
+    # 🔴 失敗必須當場 fail-loud **指名真因**：本檔是 `set -uo pipefail`（刻意無 -e），
+    #   所以 mktemp 失敗不會中止腳本，只會讓 `$_blob` 是空字串 ⇒ 下面的
+    #   `git show ":$f" >"$_blob"` 重導向失敗 ⇒ 走 else 分支印出「無法讀取暫存區內容」。
+    #   那句診斷**與真因無關**（讀者會去查 git／暫存區，而問題在 TMPDIR 不可寫或
+    #   平台不吃裸 mktemp），是本 repo 一路在治的「錯的診斷比沒有診斷更貴」。
+    _blob="$(mktemp "${TMPDIR:-/tmp}/precommit_blob.XXXXXX")" || _blob=""
+    _blob_nocr="$(mktemp "${TMPDIR:-/tmp}/precommit_nocr.XXXXXX")" || _blob_nocr=""
+    if [ -z "$_blob" ] || [ -z "$_blob_nocr" ]; then
+      echo "[pre-commit dispatcher] ❌ 無法建立暫存檔（mktemp '${TMPDIR:-/tmp}/precommit_*.XXXXXX' 失敗）→ 行尾閘無法驗證，擋下" >&2
+      echo "                        真因在暫存目錄不是 git：請確認 TMPDIR（現值 '${TMPDIR:-/tmp}'）存在且可寫" >&2
+      rc=1
+      [ -n "$_blob" ] && rm -f "$_blob"
+      [ -n "$_blob_nocr" ] && rm -f "$_blob_nocr"
+      continue
+    fi
     if git show ":$f" >"$_blob" 2>/dev/null; then
       LC_ALL=C tr -d '\r' <"$_blob" >"$_blob_nocr"
       if ! cmp -s "$_blob" "$_blob_nocr"; then

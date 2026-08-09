@@ -210,12 +210,27 @@ def _autoenable_real_pg_e2e() -> None:
     刻意只在**沒有人顯式設過**時才動：顯式設 `false` 是一個決定（perf machine／CI 想關掉
     它），自動偵測不得覆寫人的決定。也刻意只在 DSN 真的就位後才開——開了旗標卻沒有 DSN
     只會把 skip 從一句話換成另一句話。
+
+    🔴 R82 包 A2（ENV-01）**刻意不擴充到 `PG_REAL_ENABLED`**——這一格是本輪自己動手做了
+    再量出來的反例，不是沿用前人結論：
+
+      · 掃描結論是「只設一個環境變數就 `1 passed in 5.12s` ⇒ 那是欠債型，不是設計型」，
+        本輪照做（在本函式一併打開第二個旗標）並實跑，**第一次確實綠**。
+      · 但同一支測試在機器同時跑別的東西時實測
+        `AssertionError: pgvector recall p95=51.703ms ≥ 50.0ms`（同一份語料、同一顆 PG，
+        只差機器忙不忙）。它量的是**延遲 SLA**，而延遲對機器負載敏感 ⇒ 預設打開等於把一支
+        會隨鄰居行為翻紅的測試塞進每一個開發者的預設迴圈。
+      · ⇒ 原始設計「只在 perf machine 跑」在**這一點上是對的**（錯的是它的措辭，見該檔的
+        reason 訂正）。把它自動打開會用一個真缺陷（flaky 閘門）換掉一個假缺陷（誤導文案）。
+
+    保留為顯式 opt-in，配方寫在該檔 reason 裡（一行可貼）。這一格由
+    `tests/tools/test_local_ci_gate.py` 的三支 ENV-01 判準釘住，避免下一個人照著掃描結論
+    再做一次同樣的事。
     """
-    if os.environ.get("SD07_REAL_PG_E2E_ENABLED"):
-        return
     if not (os.environ.get("AUTOCLAUDE_TEST_PG_DSN") or os.environ.get("AUTOCLAUDE_DB_DSN")):
         return
-    os.environ["SD07_REAL_PG_E2E_ENABLED"] = "true"
+    if not os.environ.get("SD07_REAL_PG_E2E_ENABLED"):
+        os.environ["SD07_REAL_PG_E2E_ENABLED"] = "true"
 
 
 # SD_09 W2 後續處理（2026-05-21）— pytest-randomly cross-test cwd state leak 防漏 fixture
@@ -430,10 +445,15 @@ def pytest_terminal_summary(terminalreporter, exitstatus, config):  # noqa: ARG0
             terminalreporter.write_line(f"  - {node_id}")
     posix_ids = non_windows_native_skips(terminalreporter)
     if posix_ids:
+        # 🔴 R82 包 A2（DOC-01）：平台名由 `sys.platform` 動態組字，不得寫死。
+        # 修前逐字是「本次跑在 Windows 上失去的覆蓋」，而 2026-08-05 那次真的執行過的
+        # macOS CI 輸出裡照樣印著這句話（`gh run view 31021778241 --log` 實測）——
+        # 標題騙人與「機制沉默」是同一族失效，只是方向相反：它讓 macOS 上的讀者以為
+        # 這一段與自己無關，於是那一側的覆蓋損失同樣沒有人看。
         terminalreporter.write_sep(
-            "=", "POSIX/MAC-NATIVE-ONLY SKIPS (本次跑在 Windows 上失去的覆蓋)")
+            "=", f"POSIX/MAC-NATIVE-ONLY SKIPS (本次跑在 {sys.platform} 上失去的覆蓋)")
         terminalreporter.write_line(
-            f"{len(posix_ids)} 個非 Windows 專屬測試本次「因為跑在 Windows 上而沒跑」"
+            f"{len(posix_ids)} 個他平台專屬測試本次「因為跑在 {sys.platform} 上而沒跑」"
             f"（R74／PKG-4 E：反方向的覆蓋損失此前無任何標籤／摘要／計數）："
         )
         for node_id in posix_ids:

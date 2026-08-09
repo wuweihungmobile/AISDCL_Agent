@@ -66,11 +66,22 @@ def _sync_dsn() -> str | None:
 
 @pytest.mark.skipif(
     not _PG_REAL_ENABLED,
-    reason="[ENV-DISABLED] pgvector recall 性能僅在 perf machine 跑"
-           "（R-SD08-G-1 / set PG_REAL_ENABLED=1）——未啟用，非缺件",
+    # 🔴 R82 包 A2（ENV-01）：訂正**措辭**，保留 opt-in。原字串前半逐字寫「僅在 perf
+    # machine 跑」，讀起來像「你得先弄一台專用機器」——那句話讓分流者把它歸進「做不到」。
+    # 實測：本機不是 perf machine，設一個環境變數就跑得完（`1 passed in 5.12s`）。
+    # 但同一支在機器忙的時候實測 `p95=51.703ms ≥ 50.0ms` ⇒ 它量的是**延遲 SLA**、對負載
+    # 敏感。所以正確的說法不是「需要 perf machine」也不是「其實隨時可以跑」，而是
+    # **「隨時跑得起來，但只有在機器閒著時量出來的數字才算數」**——這也是它必須維持
+    # opt-in 的理由（本輪一度把它接進 conftest 自動打開，被上面那次 51.7ms 打回來）。
+    reason="[ENV-DISABLED] pgvector recall 延遲 SLA 未啟用——**未啟用，非缺件**（本機實測"
+           "設一個環境變數即跑完，5.12s）。維持 opt-in 的理由是它量的是延遲、對機器負載"
+           "敏感：R82 在忙碌時量到 p95=51.703ms ≥ 50ms，預設打開會變成 flaky 閘門。"
+           "配方（機器閒置時跑）：`$env:PG_REAL_ENABLED='1'; python -m pytest "
+           "tests/perf/test_pgvector_recall_perf.py`（DSN 由 conftest 的 PG autodetect "
+           "自動注入）。R-SD08-G-1",
 )
 def test_pgvector_recall_baseline_perf_machine_only():
-    """perf machine 季度量測；CI runner 強制 skip。
+    """真實 pgvector recall 量測（有 PG 就跑；`-m perf` 才是「只在 perf machine 跑」的載具）。
 
     SD_09 B-07：100 query × adapter.search(top_k=10) 真實負載。
     fixture 缺失時 skip（X1 路徑 tests/fixtures/pgvector_real_queries.json）。

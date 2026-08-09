@@ -180,7 +180,7 @@ fold 預設 OFF＝v0.13 逐位元行為（零退化）；chaos VISUALIZATION_FOL
 AISLDC_SDD v0.14	1593 passed / 0 failed（v0.13 1580+13）
 chaos	34 passed，bounded_ratio==1.0（含新 FOLD_DRIFT）
 ci-gate 雙軌	v0.01:1478 / v0.14:1593 / scripts:27，arch_fitness fail=0，FF-17 自證入閘
-AutoClaude	3112 passed / 0 failed（持平基線） + lint 8 kept
+AutoClaude	3112 passed / 0 failed（持平基線） + lint 全 kept（契約條數 SSOT＝AutoClaude/.importlinter；本列其餘數字是**該輪的量測值，不是現況**）
 五軌 TLC	免觸發（formal *.tla/*.cfg 逐位元零差異）
 潔淨度	git add -A -n 853 零 runtime 漏網
 審查閉環（三鏡全 OVERALL PASS）

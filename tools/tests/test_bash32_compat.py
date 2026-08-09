@@ -96,6 +96,17 @@ _PATTERNS: list[tuple[re.Pattern[str], str]] = [
      "timeout（GNU coreutils；macOS 預設不存在，命令直接 not found）"),
     (re.compile(r"\bxargs\s+(?:-[a-zA-Z]+\s+)*-r\b"), "xargs -r（GNU；BSD xargs 無此旗標）"),
     (re.compile(r"\bfind\b[^\n|;]*\s-printf\b"), "find -printf（GNU；BSD find 無此述詞）"),
+    # R82（MAC-01）：**裸 mktemp**（不帶模板）。GNU coreutils 省略模板時會用預設的
+    # `tmp.XXXXXXXXXX`；BSD/macOS 沒有這個預設，裸 `mktemp` 直接是 usage error（rc=1、
+    # 什麼都不建）。危害不是「少一個暫存檔」——本 repo 的三個站點全都住在 `set -uo
+    # pipefail`（**無 -e**）的 git hook 裡，於是失敗只讓變數變空字串，接著的重導向失敗
+    # 被上層讀成**別的**失敗，印出「無法讀取暫存區內容」「ruff check tools/ 失敗」這種
+    # 與真因無關的診斷 ⇒ mac 開發者拿到的是確定為假的因果。
+    # 判準形狀：`mktemp` 之後（可跨若干短旗標）第一個非旗標 token 必須以引號／`$`／`/`
+    # 起頭＝有模板。**刻意不判「模板是否含 XXXXXX」**——那要理解變數展開，不是行級 regex
+    # 能可靠判定的東西，寫進來只會製造要逐筆辯護的假紅。
+    (re.compile(r"\bmktemp(?!\s+(?:-[a-zA-Z]+\s+)*[\"'$/])"),
+     "裸 mktemp（BSD 無預設模板，必須帶 \"${TMPDIR:-/tmp}/x.XXXXXX\"）"),
 ]
 
 # 散文側禁令 token ↔ 上表判準的綁定用樣本：每個 token 配一段**應被判違規**的最小 bash。
@@ -117,6 +128,7 @@ _BAN_TOKEN_SAMPLES: dict[str, str] = {
     "timeout": "timeout 5 cmd",
     "xargs -r": "xargs -r rm",
     "find -printf": "find . -printf '%p'",
+    "mktemp": "x=$(mktemp)",
 }
 
 
@@ -338,6 +350,30 @@ class TestBash32Compat(unittest.TestCase):
         self.assertIn("sed -i", off[2])
         self.assertEqual(stale, [])
 
+    def test_injected_bare_mktemp_is_detected_and_templates_are_not(self) -> None:
+        """R82 MAC-01：注入三個站點**修前**的逐字形態必紅；repo 既有的帶模板寫法必綠。
+
+        兩個方向都要——只驗紅的那一半會漏掉「判準太寬、把正解一起判違規」，而那種鎖
+        的下場是被整個關掉（本檔 `timeout` 那條當初就差點如此）。
+        """
+        off, stale = self._scan_fixture(
+            '_blob="$(mktemp)"\n'                       # pre-commit:330 修前
+            "_ac_log=\"$(mktemp 2>/dev/null || echo '')\"\n"   # pre-push:255 修前
+            '_ruff_err="$(mktemp)"\n'                   # pre-push:387 修前
+        )
+        self.assertEqual(len(off), 3, off)
+        for i in (0, 1, 2):
+            self.assertIn("裸 mktemp", off[i])
+        self.assertEqual(stale, [])
+        # 帶模板的三種既有正確體例（含 `-d`、含中間旗標）一律不得誤紅
+        ok, ok_stale = self._scan_fixture(
+            'WORK="$(mktemp -d "${TMPDIR:-/tmp}/x.XXXXXX")"\n'
+            'LOG="$(mktemp "${TMPDIR:-/tmp}/y.XXXXXX")"\n'
+            "T=\"$(mktemp '/tmp/z.XXXXXX')\"\n"
+            'echo "無法建立暫存檔（mktemp \'${TMPDIR:-/tmp}/y.XXXXXX\' 失敗）"\n'
+        )
+        self.assertEqual((ok, ok_stale), ([], []))
+
     def test_comment_hits_are_ignored(self) -> None:
         """整行/行內註解中的 pattern 文字不判違規（六樹實況命中全在註解內）。"""
         off, stale = self._scan_fixture(
@@ -440,8 +476,11 @@ class TestProseBanListIsFullyMechanised(unittest.TestCase):
 
     def test_every_prose_ban_has_a_pattern_that_fires(self) -> None:
         tokens = self._prose_tokens()
+        # 🔴 R82：下限由 8 重釘為 12（**收緊**，方向與棘輪紀律一致）。8 是 R69 落地當時
+        # 的值，而該段散文早已列到 11 項；下限停在舊值＝保護逐輪稀釋（同 `_SCAN_FLOOR`
+        # 在 R75 被抓到的病）。本輪新增「裸 mktemp」⇒ 實測 12。
         self.assertGreaterEqual(
-            len(tokens), 8, f"檔頭禁令 token 只抽到 {sorted(tokens)}——抽取樣式或散文漂移"
+            len(tokens), 12, f"檔頭禁令 token 只抽到 {sorted(tokens)}——抽取樣式或散文漂移"
         )
         uncovered = sorted(
             tok for tok in tokens
@@ -603,6 +642,94 @@ class TestUnsetSafeArrayExpansion(unittest.TestCase):
         """沒有 `set -u` 就沒有這個缺陷類別——不得對一般腳本製造噪音。"""
         code = 'A=()\nrun "${A[@]}"\n'
         self.assertEqual(unset_safe_array_problems(code, "x.sh"), [])
+
+
+# ── R82（MAC-05）：`date +…%N` 奈秒 —— BSD strftime 無此格式字元 ─────────────────
+#: `date` 的格式字串裡出現 `%N`。判準刻意只認「`date` 之後、同一個 simple command 內、
+#: 以 `+` 起頭的格式字串裡帶 `%N`」——只判 `%N` 三個字元會把註解外的一般文字也掃進來。
+_GNU_DATE_NANOS_RE = re.compile(r"\bdate\s+[^|;&]*\+[^\s|;&)\"']*%N")
+
+#: 存量債（shrink-only）：今天有幾行在用它。落地當回合實測＝
+#: `AutoClaude/tools/sd06_w3_staging_dryrun.sh` 16 行（剝註解後）。
+#:
+#: 🔴 為何走**債表**而不是併進 `_PATTERNS`：`_PATTERNS` 是零容忍面（`TestProseBanList
+#: IsFullyMechanised::test_the_real_trees_stay_green_after_widening` 要求擴充判準後六樹
+#: 不得冒出任何違規），而這 16 個站點住在 `AutoClaude/**`——本包（R82 A3）在檔案所有權
+#: 上不得動那棵樹。把它塞進零容忍面只會製造一個「必須立刻繞過」的紅，那種鎖活不過一輪。
+#: 債表的張力方向與 `_WORKFLOW_GNU_DEBT` 逐字相同：多一筆＝有人新寫（紅）；少一筆＝債還
+#: 了請把數字改小（也紅，否則下一筆新違規會被舊值遮住）；出現**不在表上的檔**＝紅。
+_DATE_NANOS_DEBT: dict[str, int] = {
+    "AutoClaude/tools/sd06_w3_staging_dryrun.sh": 16,
+}
+
+
+def gnu_date_nanos_problems(code: str, rel: str) -> list[str]:
+    """回傳「`date` 格式字串帶 `%N`」的違規清單（純函式，可構造輸入測鑑別力）。
+
+    WHY（R82 MAC-05）：`%N`（奈秒）是 **GNU coreutils 的擴充**，不在 BSD `strftime(3)`
+    的格式字元表內；macOS 的 `date` 就是 BSD date。BSD 對不認得的轉換是**原樣輸出**，
+    於是 `date +%s%N` 回的是 `1754…N` 這種尾巴帶字母 N 的字串，接著的
+    `$(( END - START ))` 直接算術崩——而 `bash -n` 攔不到（語法完全合法）、ubuntu CI
+    也攔不到（GNU date 支援）、Windows 的 Git Bash 同樣是 GNU userland ⇒ **三個平時
+    在跑的環境全部給假綠，只有 mac 會炸**。
+
+    跨平台寫法（兩者皆不需要 GNU）：
+      · 只要秒級 → `date +%s`（POSIX，兩邊都對）；
+      · 真的要次秒解析度 → `python3 -c 'import time; print(time.time_ns())'`
+        （本 repo 的腳本本來就都要求 python3 在場）。
+
+    🔴 本 repo 內那 16 個站點所在的檔案，其**檔頭自陳與自己下一句矛盾**（逐字同時斷言
+    「現代 macOS BSD date 皆支援」與「嚴格 BSD 會輸出字面 N」），且那句「R11 真 Mac 實測」
+    在 repo 內找不到可重跑的取證位置。本判準不去裁決那句話，只把「有幾個站點押在它上面」
+    變成一個會說話的數字。
+    """
+    problems: list[str] = []
+    for lineno, line in enumerate(code.splitlines(), start=1):
+        if _GNU_DATE_NANOS_RE.search(line):
+            problems.append(
+                f"{rel}:{lineno}: `date` 格式字串帶 %N 奈秒（GNU 擴充）——BSD/macOS 的 "
+                "strftime 無此格式字元、會原樣輸出字面 N，後續整數運算當場崩；"
+                "請改 `date +%s`（秒級）或 "
+                "`python3 -c 'import time; print(time.time_ns())'`"
+            )
+    return problems
+
+
+class TestGnuDateNanoseconds(unittest.TestCase):
+    """R82 MAC-05：`date +%N` 的存量債棘輪與判準鑑別力。"""
+
+    def test_real_trees_match_the_debt_ratchet(self) -> None:
+        counts: dict[str, int] = {}
+        for _key, files, _floor in _scan_trees():
+            for rel in files:
+                source = (_REPO_ROOT / rel).read_text(encoding="utf-8")
+                code = "\n".join(_split_code_comment(line)[0] for line in source.splitlines())
+                hits = gnu_date_nanos_problems(code, rel)
+                if hits:
+                    counts[rel] = len(hits)
+        self.assertEqual(
+            counts, dict(_DATE_NANOS_DEBT),
+            "`date +…%N` 存量與棘輪不符。多一筆／多一個檔＝新寫了 GNU-only 用法"
+            "（**不得調高**債表）；少一筆＝債已還請把數字改小。"
+            "跨平台寫法見 `gnu_date_nanos_problems` docstring",
+        )
+
+    def test_detector_catches_the_staging_dryrun_shape(self) -> None:
+        """注入實際站點的逐字形態，必須命中並給出跨平台寫法。"""
+        hits = gnu_date_nanos_problems("START=$(date +%s%N)\nEND=$(date +%s%N)\n", "x.sh")
+        self.assertEqual(len(hits), 2, hits)
+        self.assertIn("x.sh:1", hits[0])
+        self.assertIn("time.time_ns()", hits[0])
+
+    def test_detector_accepts_portable_forms(self) -> None:
+        """POSIX 寫法與 python 取代方案不得誤紅（否則整批正解會被判違規）。"""
+        for safe in (
+            "START=$(date +%s)\n",
+            'echo "$(date -u +%Y%m%d_%H%M%S)"\n',
+            "START=$(python3 -c 'import time; print(time.time_ns())')\n",
+            "date +%Y-%m-%dT%H:%M:%S%z\n",
+        ):
+            self.assertEqual(gnu_date_nanos_problems(safe, "x.sh"), [], safe)
 
 
 # ══════════════════════════════════════════════════════════════════════════════

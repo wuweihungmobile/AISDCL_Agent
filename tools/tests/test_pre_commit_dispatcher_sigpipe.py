@@ -28,6 +28,7 @@ import io
 import os
 import shutil
 import subprocess
+import sys
 import tempfile
 import unittest
 from pathlib import Path, PurePosixPath, PureWindowsPath
@@ -575,6 +576,389 @@ class TestHookPayloadSingleHome(unittest.TestCase):
                     stub = raw() if raw is Exploding else io.StringIO(raw)
                     with mock.patch.object(mod.sys, "stdin", stub):
                         self.assertEqual(fn(), want)
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# R82 機密外洩防線（三層）的回歸鎖
+#
+# 🔴 掌舵者當場下的安全紅線：「`.env` 有私密 KEY，請不要推上 GitHub」。
+# 三層各自守不同的失效形態，缺一層就有一條實際可走的外洩路徑：
+#   ① `tools/git-hooks/pre-commit` 的路徑形態閘 —— 擋 `git add -f .env`；
+#   ② `tools/lib/secret_scan.py` 的內容判準 —— 擋「真 key 被貼進**已追蹤**的
+#      `.env.example`」（檔名層對它結構上失明）；
+#   ③ 本節的不變式 —— 擋「哪天有人把上面兩層拆了 / 忽略規則被改壞」。
+#
+# 為何併進本檔而非另開新檔：`tools/tests/` 有 shrink-only 淨行數棘輪
+# （`test_adr_xplat001_c1c2_lock.py::TestGuardLayerRatchet`），且本檔已備好
+# 「真 git repo ＋ 真 commit 觸發 dispatcher」那套沙盒——層 ① 唯一能被行為級驗證
+# 的方式就是真的 commit 一次，抄第二份 fixture 沒有意義。
+# ═══════════════════════════════════════════════════════════════════════════
+
+sys.path.insert(0, str(REPO_ROOT / "tools" / "lib"))
+import secret_scan  # noqa: E402  # 內容判準的 SSOT（見該檔檔頭的射程與假紅實測）
+
+_LIB_DIR = REPO_ROOT / "tools" / "lib"
+
+
+class TestEnvFilesAreNeverTracked(unittest.TestCase):
+    """不變式①：tracked 清單裡永遠沒有 `.env`（`.env.example` 除外）。
+
+    WHY 這條要現查 `git ls-files` 而不是讀 `.gitignore`：忽略規則寫得再對，都擋不住
+    一個**已經被追蹤**的檔案——`.gitignore` 對 tracked 檔完全不生效。真正要斷言的
+    不變式是「index 裡沒有那種東西」，而那只能問 index。
+    """
+
+    def _tracked(self) -> list[str]:
+        proc = subprocess.run(
+            ["git", "-C", str(REPO_ROOT), "-c", "core.quotepath=false", "ls-files"],
+            capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=180,
+        )
+        self.assertEqual(proc.returncode, 0, f"git ls-files 失敗：{proc.stderr}")
+        return [line for line in proc.stdout.splitlines() if line]
+
+    def test_no_env_shaped_path_is_tracked_except_the_template(self) -> None:
+        tracked = self._tracked()
+        # 反空轉：清單塌成空集合時，下面的「零命中」會恆真通過＝靜默失效。
+        self.assertGreater(
+            len(tracked), 1000,
+            f"tracked 清單只有 {len(tracked)} 條 ⇒ 取數管道壞了，本鎖恆綠",
+        )
+        offenders = [
+            rel for rel in tracked
+            if secret_scan.is_env_shaped(rel) and PurePosixPath(rel).name != ".env.example"
+        ]
+        self.assertEqual(
+            offenders, [],
+            f"這些 .env 形態的檔已被 git 追蹤：{offenders}\n"
+            "一旦 push 就是不可逆的外洩。修法：git rm --cached -- <檔>，"
+            "並確認該路徑真的被 .gitignore 排除（見同類的 check-ignore 測試）",
+        )
+
+    def test_the_template_itself_is_tracked(self) -> None:
+        """反向對照：`.env.example` **必須**在追蹤清單裡。
+
+        少了這條，把 `.env.example` 一起刪掉／一起忽略掉也能讓上一條全綠——那是把
+        缺陷修成另一個缺陷（使用者拿不到範本，只好自己憑空造 .env）。
+        """
+        self.assertIn(
+            "AutoClaude/.env.example", self._tracked(),
+            "範本 AutoClaude/.env.example 不在追蹤清單 ⇒ 上一條的「零命中」失去鑑別力",
+        )
+
+
+class TestGitignoreActuallyIgnoresEnvFiles(unittest.TestCase):
+    """不變式②：忽略規則**實際生效**——憑證是 `git check-ignore` 的 rc，不是規則字面。
+
+    WHY 不讀 `.gitignore` 的文字：本 repo 的既有紀律是「憑證是那個『值』，不是規則
+    長什麼樣」。`.env` 這一族的規則橫跨根層與子專案兩份 `.gitignore`、還帶一條
+    `!.env.example` 反向規則，規則字面對不對與「git 到底怎麼判」是兩件事——順序、
+    negation、子目錄覆寫任一個寫錯，字面掃描都看不出來，而 rc 一定看得出來。
+    """
+
+    def _check_ignore(self, rel: str) -> int:
+        return subprocess.run(
+            ["git", "-C", str(REPO_ROOT), "check-ignore", "-q", "--", rel],
+            capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=60,
+        ).returncode
+
+    def test_env_shapes_are_ignored(self) -> None:
+        """rc=0＝真的被忽略。涵蓋根層、子專案、任意深度子目錄與帶後綴的變體。"""
+        for rel in (
+            ".env", ".env.local", ".env.production", ".env.anything",
+            "AutoClaude/.env", "AutoClaude/.env.local",
+            "some/deep/nested/dir/.env", "tools/.env.staging",
+        ):
+            with self.subTest(rel):
+                self.assertEqual(
+                    self._check_ignore(rel), 0,
+                    f"{rel} **沒有**被 .gitignore 排除 ⇒ 它會出現在 git status 裡，"
+                    "而下一個 `git add -A` 就會把真實憑證帶進 index",
+                )
+
+    def test_the_template_is_not_ignored(self) -> None:
+        """🔴 鑑別力對照組：`.env.example` 必須 **不** 被忽略（rc≠0）。
+
+        少了這條，把 `.gitignore` 寫成「連 .env.example 一起吃掉」也能讓上一條全綠，
+        而那會讓範本永遠進不了 repo——正是本 repo 反覆記載的「把缺陷修成更嚴重的缺陷」。
+        """
+        for rel in (".env.example", "AutoClaude/.env.example"):
+            with self.subTest(rel):
+                self.assertNotEqual(
+                    self._check_ignore(rel), 0,
+                    f"{rel} 被 .gitignore 排除了——範本本來就該入庫"
+                    "（根 .gitignore 的 `!.env.example`）",
+                )
+
+
+class TestSecretScanCriterion(unittest.TestCase):
+    """層②的判準紅綠自證（純函式，餵合成語料——不在 repo 內留下任何違規樣本）。
+
+    WHY 每一條綠側都寫出來：這道判準的**設計方向是寧可漏報也不要假報**，因為一道
+    天天假紅的守衛會被整個關掉＝零防護。綠側就是那個方向的規格，少了它，下一個人
+    「順手把判準收嚴一點」就會讓守衛在第一天被關掉，而沒有任何東西會轉紅。
+    """
+
+    #: (語料, 是否應命中, 這一條在守什麼)
+    CASES = (
+        ("MINIMAX_API_KEY=sk-abcdefghij0123456789ABCDEFGHIJ0123456789",  # secret-scan-ok: 合成語料
+         True, "真 key 形態（sk- ＋ 長字串）"),
+        ("MINIMAX_API_KEY=your_minimax_api_key_here", False, "佔位符必須放行"),
+        ("POSTGRES_PASSWORD=autoclaude", False, "本機 dev 容器密碼（短、單字）必須放行"),
+        ("#   國際版 key（sk-... from platform.minimax.io）", False,
+         "註解裡的格式說明（sk- 後面是刪節號）必須放行"),
+        ("#   中國版 key（sk-cp... from platform.minimaxi.com）", False,
+         "同上，帶區域前綴的格式說明"),
+        ("AUTOCLAUDE_DB_DSN=postgresql+asyncpg://autoclaude:autoclaude@localhost:5432/ac",
+         False, "指向 localhost 的 DSN＝本機 dev，不是會外洩的憑證"),
+        ("DSN=postgresql://admin:hunter2@db.prod.acme-corp.net/app",  # secret-scan-ok: 合成語料
+         True, "指向外部主機且帶密碼的 DSN"),
+        ("DSN=postgresql://admin:your_password_here@db.prod.acme-corp.net/app", False,
+         "外部主機但密碼是佔位符 → 放行"),
+        ("DSN=postgresql://admin:whatever@db.prod.example.com/app", False,
+         "example.com 是 RFC 2606 保留的文件用網域 → 視為佔位符放行"),
+        ("url = postgres://user:pass@postgres:5432/db", False,
+         "裸主機名＝docker-compose 服務名，不是 production 端點"),
+        ("token: ghp_0123456789abcdefghij0123456789abcdef",  # secret-scan-ok: 合成語料
+         True, "GitHub token 前綴"),
+        ("AWS_ACCESS_KEY_ID=AKIAIOSFODNN7EXAMPLE", False,
+         "AWS 官方文件的示範 key，字面含 EXAMPLE → 佔位符放行"),
+        ("MY_TOKEN=<your-token>", False, "角括號佔位符"),
+        ("SECRET_KEY=${SECRET_FROM_VAULT}", False, "shell/CI 插值不是機密本身"),
+        ("PASSWORD=", False, "空值＝還沒填"),
+    )
+
+    def test_each_case_lands_on_the_intended_side(self) -> None:
+        for line, should_hit, why in self.CASES:
+            with self.subTest(why):
+                hits = secret_scan.scan_line(line, env_shaped=True)
+                self.assertEqual(
+                    bool(hits), should_hit,
+                    f"{why}：期望{'命中' if should_hit else '放行'}，實得 {hits}",
+                )
+
+    def test_the_high_entropy_rule_is_scoped_to_env_shaped_files(self) -> None:
+        """🔴 射程鎖：`NAME=<高熵值>` 這一條**只**在 `.env` 形態的檔上生效。
+
+        WHY（落地當回合的實測，不是假設）：把它套在全 repo 27,541 支檔上得到 **1,525 筆**
+        命中，壓倒性多數是**文件裡的範例程式碼**（Markdown code block 裡的 `password=`／
+        `token=`／`apiKey=`），再被 30 個凍結版本樹各複製一份放大。那種守衛第一天就會被
+        關掉。收窄後全 repo 剩 158 筆、收斂到 5 個相異站點形態，且**活躍開發面零命中**。
+        這一條就是那個收窄的規格：拿掉 `env_shaped` 條件會讓它當場紅。
+        """
+        line = "hashedPassword = a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6"
+        self.assertEqual(
+            secret_scan.scan_line(line, env_shaped=False), [],
+            "非 .env 檔的高熵賦值不得命中——那是文件範例程式碼的形態，判紅即假紅海嘯",
+        )
+        self.assertTrue(
+            secret_scan.scan_line(line, env_shaped=True),
+            "同一行在 .env 形態的檔裡必須命中，否則收窄過頭＝這條判準等於不存在",
+        )
+
+    def test_a_pem_header_alone_is_not_a_private_key(self) -> None:
+        """標頭不等於私鑰：安全基線**模板**裡的示意字串不得判紅（實測 30 個凍結樹各一次）。"""
+        template = "-----BEGIN PRIVATE KEY-----\n<在此貼上你的私鑰>\n"
+        self.assertEqual(
+            secret_scan.scan_text(template, "doc.md"), [],
+            "只有 PEM 標頭、沒有 key material ⇒ 是模板示意，不是私鑰",
+        )
+        body = "MIIEvQIBADANBgkqhkiG9w0BAQEFAASCBKcwggSjAgEAAoIBAQ" * 2
+        real = f"-----BEGIN PRIVATE KEY-----\n{body}\n"
+        self.assertTrue(
+            secret_scan.scan_text(real, "leaked.pem"),
+            "標頭 ＋ 真的 key material ⇒ 必須命中",
+        )
+
+    def test_the_exemption_marker_is_line_end_only(self) -> None:
+        """行尾豁免出口存在（否則本檔自己的合成語料無法入庫），但只認同一行。"""
+        leaked = "KEY=sk-abcdefghij0123456789ABCDEFGHIJ"  # secret-scan-ok: 合成語料
+        self.assertTrue(secret_scan.scan_line(leaked, env_shaped=True))
+        exempted = f"{leaked}  # {secret_scan.EXEMPT_MARKER} 測試語料"
+        self.assertEqual(secret_scan.scan_line(exempted, env_shaped=True), [])
+
+    def test_findings_never_echo_the_secret_itself(self) -> None:
+        """🔴 診斷訊息不得成為第二個外洩管道。
+
+        WHY：這道守衛的失敗會被寫進 hook 輸出、CI log 與終端 scrollback。若訊息逐字印出
+        命中的字串，守衛自己就把 key 又抄了一份到別的地方——而使用者以為自己被保護了。
+        """
+        secret = "sk-abcdefghij0123456789ABCDEFGHIJ0123456789"  # secret-scan-ok: 合成語料
+        findings = secret_scan.scan_line(f"KEY={secret}", env_shaped=True)
+        self.assertTrue(findings)
+        for _rule, excerpt in findings:
+            self.assertNotIn(secret, excerpt, "命中摘要逐字印出了機密本身")
+            self.assertLess(len(excerpt), len(secret), "摘要沒有被遮蔽")
+
+
+class TestRealTemplatesAreClean(unittest.TestCase):
+    """層②套在**真檔案**上：repo 內每一支 tracked 的 `.env.example` 都必須是乾淨的。
+
+    WHY 這條分開寫：上面那組是合成語料（證明判準有牙），這一條才是「今天這個 repo
+    真的沒有把 key 貼進範本」。兩者不能互相取代——判準有牙不蘊含現況乾淨。
+    """
+
+    def test_every_tracked_env_template_has_no_secret(self) -> None:
+        result = secret_scan.scan_tracked(REPO_ROOT, ".env.example", "*/.env.example")
+        self.assertIsNone(result.error, f"取數管道壞掉：{result.error}")
+        # 反空轉：一支都沒掃到時「零命中」沒有鑑別力。
+        self.assertGreater(
+            result.scanned, 0,
+            "一支 .env.example 都沒進到掃描面 ⇒ pathspec 寫壞了，本鎖恆綠",
+        )
+        self.assertEqual(
+            [f.render() for f in result.findings], [],
+            "被追蹤的 .env 範本裡出現疑似真實機密——範本只能放佔位符",
+        )
+
+
+class TestPreCommitBlocksEnvFiles(unittest.TestCase):
+    """層①的**行為級**證明：真 repo、真 `git add -f`、真 commit。
+
+    WHY 一定要行為級：判準寫在 bash 裡，任何「讀 hook 原始碼找關鍵字」的測試都證明
+    不了它真的會擋（本 repo 判例：`test_ps1_bom.py` 曾被指名為行尾守衛，實際零判準）。
+    唯一算數的證據是 commit 真的失敗、且訊息指名了那支檔。
+    """
+
+    def setUp(self) -> None:
+        self.assertTrue(DISPATCHER.is_file(), f"dispatcher 不存在：{DISPATCHER}")
+        self.tmp = Path(tempfile.mkdtemp(prefix="pc_dispatcher_env_"))
+        self.addCleanup(shutil.rmtree, self.tmp, ignore_errors=True)
+        self.repo = self.tmp / "repo"
+        self.repo.mkdir()
+        self.assertEqual(_git("init", "-q", cwd=self.repo).returncode, 0)
+
+        hooks_dir = self.repo / "tools" / "git-hooks"
+        hooks_dir.mkdir(parents=True)
+        shutil.copy(DISPATCHER, hooks_dir / "pre-commit")
+        os.chmod(hooks_dir / "pre-commit", 0o755)
+
+        # 層②的機械物一併搬進沙盒，讓 hook 內的內容掃描這一段也真的被執行到
+        # （不搬的話 hook 會走「缺件 → 出聲跳過」那條路，本類就只驗到層①）。
+        lib_dir = self.repo / "tools" / "lib"
+        lib_dir.mkdir(parents=True)
+        for name in ("secret_scan.py", "windowsapps_guard.sh"):
+            shutil.copy(_LIB_DIR / name, lib_dir / name)
+
+        # AutoClaude 子 hook 存根：巢狀路徑的對照組需要它，否則 commit 會因為
+        # 「子 hook 缺失」而失敗，測到的就不是本閘。
+        sub_dir = self.repo / "AutoClaude" / "tools" / "git-hooks"
+        sub_dir.mkdir(parents=True)
+        (sub_dir / "pre-commit").write_text(
+            "#!/usr/bin/env bash\nexit 0\n", encoding="utf-8", newline="\n")
+        os.chmod(sub_dir / "pre-commit", 0o755)
+
+        _git("config", "core.hooksPath", str(hooks_dir), cwd=self.repo)
+        _git("config", "user.email", "test@example.com", cwd=self.repo)
+        _git("config", "user.name", "Test", cwd=self.repo)
+
+    def _stage(self, rel: str, text: str, force: bool = True) -> None:
+        target = self.repo / rel
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(text, encoding="utf-8", newline="\n")
+        args = ["add", "-f", "--", rel] if force else ["add", "--", rel]
+        add = _git(*args, cwd=self.repo)
+        self.assertEqual(add.returncode, 0, add.stderr)
+
+    def _commit(self, message: str, env: dict | None = None) -> subprocess.CompletedProcess:
+        return subprocess.run(
+            ["git", "commit", "-q", "-m", message],
+            cwd=str(self.repo), capture_output=True, text=True,
+            encoding="utf-8", errors="replace",
+            env=dict(os.environ, **(env or {})), timeout=120,
+        )
+
+    def test_force_added_env_file_is_blocked(self) -> None:
+        """🔴 主判準：`git add -f .env` 硬塞進 index 也要擋得住。
+
+        `-f` 正是繞過 `.gitignore` 的那條路——忽略規則對「已明示暫存」完全不生效，
+        所以只有讀 index 的守衛看得到它。
+        """
+        leak = "MINIMAX_API_KEY=sk-realkey0123456789abcdefghij\n"  # secret-scan-ok: 合成語料
+        self._stage(".env", leak)
+        commit = self._commit("try to leak .env")
+        self.assertNotEqual(
+            commit.returncode, 0,
+            f"`.env` 進了 commit：\n{commit.stdout}\n{commit.stderr}",
+        )
+        blob = commit.stdout + commit.stderr
+        self.assertIn(".env", blob, "擋下時必須指名是哪一支檔")
+        self.assertIn("git rm --cached", blob, "訊息必須教人怎麼修，不能只說被擋下")
+
+    def test_nested_env_file_is_blocked(self) -> None:
+        """任意深度的子目錄同樣要守——真正住著憑證的就是 `AutoClaude/.env`。"""
+        self._stage("AutoClaude/.env", "POSTGRES_PASSWORD=whatever\n")
+        commit = self._commit("try to leak nested .env")
+        self.assertNotEqual(commit.returncode, 0, f"巢狀 .env 進了 commit：\n{commit.stderr}")
+        self.assertIn("AutoClaude/.env", commit.stdout + commit.stderr)
+
+    def test_suffixed_env_variants_are_blocked(self) -> None:
+        for rel in (".env.local", ".env.production", "sub/dir/.env.staging"):
+            with self.subTest(rel):
+                self._stage(rel, "SECRET=whatever\n")
+                commit = self._commit(f"try {rel}")
+                self.assertNotEqual(commit.returncode, 0, f"{rel} 進了 commit")
+                _git("reset", "-q", "HEAD", "--", rel, cwd=self.repo)
+
+    def test_the_skip_hooks_escape_hatch_does_not_bypass_this_gate(self) -> None:
+        """🔴 這一條是本閘與其他閘門的**分界**。
+
+        WHY：`AUTOCLAUDE_SKIP_HOOKS=1` 對其餘閘門是合理的緊急出口——那些擋的是
+        「會壞掉但可以修」的東西。機密外洩不可逆：key 進了 object store 就再也拿不
+        回來，push 出去更是只能去供應商後台輪替。對不可逆的後果留一個順手按得到的
+        出口，等於沒有這道閘。故本閘刻意排在 SKIP 判定**之前**。
+        """
+        leak = "MINIMAX_API_KEY=sk-realkey0123456789abcdefghij\n"  # secret-scan-ok: 合成語料
+        self._stage(".env", leak)
+        commit = self._commit("skip hooks and leak", env={"AUTOCLAUDE_SKIP_HOOKS": "1"})
+        self.assertNotEqual(
+            commit.returncode, 0,
+            f"AUTOCLAUDE_SKIP_HOOKS=1 繞過了機密外洩閘：\n{commit.stdout}\n{commit.stderr}",
+        )
+
+    def test_env_example_still_commits(self) -> None:
+        """🔴 鑑別力對照組：把閘門寫成「一律擋含 .env 字樣的檔」也能讓上面全綠——
+
+        那會讓範本永遠進不了 repo，使用者第一次 commit 就撞紅，守衛隨即被整個關掉。
+        `.env.example` 必須通行無阻。
+        """
+        self._stage(".env.example", "MINIMAX_API_KEY=your_minimax_api_key_here\n", force=False)
+        commit = self._commit("add template")
+        self.assertEqual(
+            commit.returncode, 0,
+            f".env.example 被誤擋（守衛過度攔截）：\n{commit.stdout}\n{commit.stderr}",
+        )
+
+    def test_removing_a_tracked_env_file_is_allowed(self) -> None:
+        """對照組：`git rm --cached` 正是本閘教人做的修法——它自己必須跑得過。
+
+        少了這條，訊息教的修法會在執行時被同一道閘再擋一次，使用者無路可走。
+        """
+        self._stage(".env", "SECRET=whatever\n")
+        # 先繞過閘門把它弄進歷史（模擬「已經被追蹤」的既成狀態）
+        subprocess.run(["git", "commit", "-q", "-m", "seed", "--no-verify"],
+                       cwd=str(self.repo), capture_output=True, timeout=120)
+        rm = _git("rm", "-q", "--cached", "--", ".env", cwd=self.repo)
+        self.assertEqual(rm.returncode, 0, rm.stderr)
+        commit = self._commit("untrack .env")
+        self.assertEqual(
+            commit.returncode, 0,
+            "`git rm --cached .env` 之後的 commit 被擋下——本閘教的修法自己走不通："
+            f"\n{commit.stderr}",
+        )
+
+    def test_a_secret_pasted_into_a_tracked_template_is_blocked(self) -> None:
+        """層②的端到端證明：檔名合法（`.env.example`）、內容是真 key ⇒ 仍須擋下。
+
+        這是層①結構上看不到的那條路——範本本來就該入庫，任何以檔名為判準的守衛
+        對它完全失明。
+        """
+        pasted = "MINIMAX_API_KEY=sk-abcdefghij0123456789ABCDEFGHIJ01\n"  # secret-scan-ok: 合成語料
+        self._stage(".env.example", pasted, force=False)
+        commit = self._commit("paste real key into template")
+        self.assertNotEqual(
+            commit.returncode, 0,
+            f"真 key 被貼進 .env.example 卻放行了：\n{commit.stdout}\n{commit.stderr}",
+        )
 
 
 if __name__ == "__main__":

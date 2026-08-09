@@ -194,7 +194,9 @@ cp config.local.yaml.example config.local.yaml
 ```yaml
 claude:
   command: claude                 # CLI 名稱
-  extra_args: ["--yes"]           # 預設旗標
+  extra_args: []                  # 預設不多送旗標（R82 ACB-01：`--yes` 不是 Claude Code 旗標，
+                                  # 實測 rc=1 `error: unknown option '--yes'`；需免權限提示時改
+                                  # ["--permission-mode", "bypassPermissions"]）
   continue_flag: "--continue"     # 維持對話脈絡
   encoding: utf-8
 
@@ -611,7 +613,7 @@ netsh advfirewall firewall add rule name="PostgreSQL 5432" dir=in action=allow p
 
 ```powershell
 docker run -d --name pgvector-db -p 5432:5432 `
-    -e POSTGRES_USER=koala -e POSTGRES_PASSWORD=koala5 -e POSTGRES_DB=aisdlc `
+    -e POSTGRES_USER=koala -e POSTGRES_PASSWORD=your_password_here -e POSTGRES_DB=aisdlc `
     pgvector/pgvector:pg17
 ```
 
@@ -619,7 +621,7 @@ docker run -d --name pgvector-db -p 5432:5432 `
 
 ```sql
 CREATE DATABASE aisdlc;
-CREATE USER koala WITH PASSWORD 'koala5';
+CREATE USER koala WITH PASSWORD 'your_password_here';
 GRANT ALL ON DATABASE aisdlc TO koala;
 \c aisdlc
 CREATE EXTENSION IF NOT EXISTS vector;
@@ -631,7 +633,7 @@ CREATE EXTENSION IF NOT EXISTS vector;
 # config.local.yaml（gitignored）
 storage:
   mode: "both"
-  db_dsn: "postgresql+asyncpg://koala:koala5@192.168.1.133/aisdlc"
+  db_dsn: "postgresql+asyncpg://koala:your_password_here@192.168.1.133/aisdlc"
   dual_write_strict: true
   dual_read_resolution: "fail_loud"
 ```
@@ -646,7 +648,7 @@ $env:AUTOCLAUDE_ALLOW_INSECURE_DB = "1"      # PowerShell
 ### 15.5 執行 alembic migrations
 
 ```bash
-export AUTOCLAUDE_MIGRATE_DSN="postgresql://koala:koala5@192.168.1.133/aisdlc"
+export AUTOCLAUDE_MIGRATE_DSN="postgresql://koala:your_password_here@192.168.1.133/aisdlc"
 export AUTOCLAUDE_ALLOW_INSECURE_DB=1
 alembic upgrade head
 alembic current   # 應顯示 0016_agt_phase1_memory（Improving_012 Phase 1：kb_metrics / user_preferences / goal_progress 三新表）

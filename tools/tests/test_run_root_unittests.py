@@ -7,6 +7,7 @@ WHY（測意圖非僅行為）：`python -m unittest discover` 對 0 個測試�
 """
 from __future__ import annotations
 
+import ast
 import contextlib
 import functools
 import inspect
@@ -342,9 +343,12 @@ class UntaggedWindowsLikeSkipsTest(unittest.TestCase):
         result = self._result_with_skips(("m.C.test_x", "PATHEXT 語意僅在 Windows 成立"))
         buf = io.StringIO()
         # R72：`untagged_windows_like_skips` 已隨 skip 標籤家族搬進
-        # `tools/lib/windows_skip_tags.py`（見該檔頭），平台閘讀的是**該模組**的
-        # `os.name`；patch 目標跟著搬，否則這道對照組會靜默失去鑑別力。
-        with mock.patch.object(windows_skip_tags.os, "name", "posix"):
+        # `tools/lib/windows_skip_tags.py`（見該檔頭），平台閘讀的是**該模組**的判定。
+        # 🔴 R82（SA B-1）：patch 目標由 `windows_skip_tags.os` 的 `name` 屬性改為
+        # 模組層函式 `running_on_windows`——前者改的是**行程全域**的 `os.name`，會讓
+        # `pathlib.Path()` 在 Windows 上整段拋 `PosixPath` 例外，於是同一份判準在
+        # pytest 與 unittest 兩個載具下給出相反判決（WHY 全文見 `running_on_windows`）。
+        with mock.patch.object(windows_skip_tags, "running_on_windows", lambda: False):
             with contextlib.redirect_stderr(buf):
                 offenders = run_root_unittests.report_untagged_windows_like_skips(result)
         out = buf.getvalue()
@@ -395,9 +399,13 @@ class UntaggedWindowsLikeSkipsTest(unittest.TestCase):
             template.replace("__REASON__", untagged), encoding="utf-8"
         )
         # R72：`untagged_windows_like_skips` 已隨 skip 標籤家族搬進
-        # `tools/lib/windows_skip_tags.py`（見該檔頭），平台閘讀的是**該模組**的
-        # `os.name`；patch 目標跟著搬，否則這道對照組會靜默失去鑑別力。
-        with mock.patch.object(windows_skip_tags.os, "name", "posix"):
+        # `tools/lib/windows_skip_tags.py`（見該檔頭），平台閘讀的是**該模組**的判定。
+        # 🔴 R82（SA B-1）：這裡原本 patch 的是 `windows_skip_tags.os` 的 `name` ＝
+        # **行程全域**的 `os.name`。pytest 載具下 `AssertionRewritingHook` 會對每一支
+        # 新 import 的模組呼叫 `Path()`，patch 期間那必定拋 `PosixPath` 例外 ⇒ 下面
+        # 合成出來的樹 import 失敗、塌成 `_FailedTest`、收集數低於下限 ⇒ **兩次**
+        # `run_with_floor` 都回 1：紅的那一半理由是錯的，綠的那一半永遠綠不了。
+        with mock.patch.object(windows_skip_tags, "running_on_windows", lambda: False):
             with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
                 rc_untagged = run_root_unittests.run_with_floor(base, min_tests=2)
             sys.modules.pop(mod, None)
@@ -493,7 +501,7 @@ class WindowsSkipTagExemptionSelfCheckTest(unittest.TestCase):
         """
         result = self._result_with_skips(("m.C.test_x", "一般性 skip，與平台無關"))
         buf = io.StringIO()
-        with mock.patch.object(windows_skip_tags.os, "name", "posix"), \
+        with mock.patch.object(windows_skip_tags, "running_on_windows", lambda: False), \
              mock.patch.dict(run_root_unittests._WINDOWS_SKIP_TAG_EXEMPT,
                              {"m.C.test_gone": "R70 暫時豁免"}, clear=False), \
              contextlib.redirect_stdout(buf), contextlib.redirect_stderr(buf):
@@ -1723,6 +1731,243 @@ class ExternalToolPrereqDeclarationTest(unittest.TestCase):
             _EXTERNAL_TOOL_PREREQS, (),
             "_EXTERNAL_TOOL_PREREQS 為空 ⇒ 兩道鎖同時失去鑑別力；要移除最後一項前，"
             "請先確認 tools/tests 真的不再需要任何外部執行檔（含 pre-push 快層那條路）",
+        )
+
+
+# ── 載具一致性（R82／複審 SA B-1）─────────────────────────────────────────────
+#: 兩個載具子行程的逾時上限。刻意與本檔零相依探針同值：`DEF-101-803` 的事故正是
+#: 「逾時被放寬」把 823s 放大成 3813s，故這個數字只准往下、不准再加。
+_CARRIER_TIMEOUT_S = 300
+
+
+def _is_mock_patch_call(func: ast.expr) -> bool:
+    """被呼叫端是不是 `mock.patch` 家族（`patch`／`patch.object`／`patch.dict`）。"""
+    parts: list[str] = []
+    node: ast.AST = func
+    while isinstance(node, ast.Attribute):
+        parts.append(node.attr)
+        node = node.value
+    if isinstance(node, ast.Name):
+        parts.append(node.id)
+    parts.reverse()
+    return len(parts) >= 2 and parts[0] == "mock" and parts[1] == "patch"
+
+
+def classes_that_monkeypatch(source: str) -> list[str]:
+    """純函式：原始碼裡會 monkeypatch 模組屬性的**頂層測試類別**名（排序、去重）。
+
+    這是「這一類鎖」的**機械定義**，不是一份手寫清單——日後任何人新寫一個會 patch
+    模組屬性的類別，就自動落進載具一致性的射程，不必有人記得把它加進某張表。
+    """
+    out: set[str] = set()
+    for node in ast.parse(source).body:
+        if isinstance(node, ast.ClassDef) and any(
+            isinstance(sub, ast.Call) and _is_mock_patch_call(sub.func)
+            for sub in ast.walk(node)
+        ):
+            out.add(node.name)
+    return sorted(out)
+
+
+def carrier_parity_problems(label: str, rc_unittest: int, rc_pytest: int) -> list[str]:
+    """純函式：同一組測試在兩個載具下的**判決**不一致即紅（回空＝一致）。
+
+    判的是判決（rc 是否為 0）而不是 rc 的字面值：`1` 與 `2` 都是「紅」，那不是分歧；
+    `0` 對上 `5`（pytest 的「一支都沒收到」）則是分歧，而且是最該被抓的那一種。
+    """
+    if (rc_unittest != 0) == (rc_pytest != 0):
+        return []
+    return [
+        f"[載具分歧] {label}：unittest rc={rc_unittest}、pytest rc={rc_pytest}"
+        "——同一份原始碼、同一棵樹，兩個載具給出相反的判決。"
+        "🔴 這比單純的紅更危險：push 閘門走的是 unittest，所以**只有 unittest 那一側**"
+        "的判決會被人看見；另一側是紅是綠沒有人知道。已知成因（`DEF-101-996`）＝測試把"
+        "行程全域的東西 monkeypatch 掉（例：`mock.patch.object(<任何模組>.os, \"name\", …)`"
+        "改的是 stdlib 那一個 `os` 模組物件），而兩個載具在那段期間跑的程式碼並不相同"
+        "（pytest 的 `AssertionRewritingHook` 會對每一支新 import 的模組呼叫 `Path()`）。"
+        "修法是把注入接縫收回**自己模組層的名字**，不要動行程全域。"
+    ]
+
+
+class CarrierVerdictParityTest(unittest.TestCase):
+    """🔴 同一組測試在 `unittest` 與 `pytest` 兩個載具下的判決必須一致（R82／SA B-1）。
+
+    WHY（實測，不是理論）：`UntaggedWindowsLikeSkipsTest::test_real_run_with_floor_reds_
+    on_an_untagged_windows_skip` 自稱是本 repo 的**常駐缺陷注入對照組**，而複審者當回合
+    量到它在 `pytest tools/tests` 下 FAIL、在 `python -m unittest` 下 OK。根因是那支測試
+    用 `mock.patch.object(windows_skip_tags.os, "name", "posix")` 改掉**行程全域**的
+    `os.name`（再匯出的 `os` 就是 stdlib 那一個模組物件），而 CPython 3.11 的
+    `pathlib.Path.__new__` 靠它挑 flavour ⇒ patch 期間任何 `Path()` 都會拋
+    `NotImplementedError`。unittest 載具下沒有人在那段期間呼叫 `Path()`，pytest 載具下
+    `AssertionRewritingHook.find_spec()` 對每一支新 import 的模組都會呼叫 ⇒ 合成樹
+    import 失敗、塌成 `_FailedTest`、收集數低於下限：**該紅的那一半紅得理由是錯的
+    （不是漏標，是 import 炸了），該綠的那一半永遠綠不了。**
+
+    為何非有這道鎖不可：push 閘門（`tools/run_root_unittests.py`／pre-push／三支
+    compat-CI）走的**只有 unittest**，所以 pytest 那一側是紅是綠沒有任何人會看到。
+    「有鎖在守假話」＋「驗證載具本身要被驗證」——本 repo 已判過的兩條，這次同時發生。
+
+    射程（誠實劃界）：本鎖只覆蓋**會 monkeypatch 模組屬性**的類別（由
+    `classes_that_monkeypatch()` 自原始碼機械抽出，不是手寫清單），因為那是已知會製造
+    載具分歧的那一類動作。全檔逐類跑兩個載具在時間上不划算，且分母會隨檔案成長而漂移。
+    """
+
+    _SELF = "CarrierVerdictParityTest"
+
+    def _carrier_rc(self, argv: list[str], cwd: Path) -> tuple[int, str]:
+        """跑一個載具子行程，回 `(rc, 合併輸出)`。"""
+        proc = subprocess.run(
+            [sys.executable, *argv], cwd=str(cwd),
+            env={**os.environ, "PYTHONUTF8": "1", "PYTHONIOENCODING": "utf-8"},
+            capture_output=True, text=True, encoding="utf-8", errors="replace",
+            timeout=_CARRIER_TIMEOUT_S, check=False,
+        )
+        return proc.returncode, proc.stdout + proc.stderr
+
+    def _both_carriers(self, tests_dir: Path, module: str,
+                       classes: list[str]) -> tuple[int, int, str]:
+        """同一組類別各跑一次 unittest 與 pytest，回 `(rc_u, rc_p, 診斷文字)`。"""
+        rc_u, out_u = self._carrier_rc(
+            ["-m", "unittest", *(f"{module}.{c}" for c in classes)], tests_dir)
+        rc_p, out_p = self._carrier_rc(
+            ["-m", "pytest", "-q", "-p", "no:cacheprovider",
+             *(f"{module}.py::{c}" for c in classes)], tests_dir)
+        return rc_u, rc_p, f"--- unittest ---\n{out_u[-2000:]}\n--- pytest ---\n{out_p[-2000:]}"
+
+    def test_the_parity_judgment_is_red_only_on_divergence(self) -> None:
+        """判準本體的紅綠（純函式、構造輸入）：只有「一邊綠一邊紅」才算分歧。"""
+        self.assertEqual(carrier_parity_problems("X", 0, 0), [])
+        self.assertEqual(carrier_parity_problems("X", 1, 1), [],
+                         "兩邊都紅是同一個判決，不是載具分歧——判紅會製造假紅")
+        self.assertEqual(carrier_parity_problems("X", 1, 2), [],
+                         "rc 字面值不同但判決相同 ⇒ 不是分歧")
+        for pair in ((0, 1), (1, 0), (0, 5)):
+            with self.subTest(pair=pair):
+                problems = carrier_parity_problems("X", *pair)
+                self.assertEqual(len(problems), 1, problems)
+                self.assertIn(str(pair[0]), problems[0])
+                self.assertIn(str(pair[1]), problems[0])
+
+    def test_the_scope_extractor_discriminates(self) -> None:
+        """射程抽取器必須真的在分辨，而不是「全抓」或「全不抓」（否則鎖是空轉的）。"""
+        source = textwrap.dedent(
+            """\
+            class PatchesAModuleAttr(unittest.TestCase):
+                def test_a(self):
+                    with mock.patch.object(mod, "flag", False):
+                        pass
+
+
+            class PatchesADict(unittest.TestCase):
+                def test_b(self):
+                    with mock.patch.dict(mod.TABLE, {}):
+                        pass
+
+
+            class TouchesNothing(unittest.TestCase):
+                def test_c(self):
+                    self.assertTrue(True)
+            """
+        )
+        self.assertEqual(classes_that_monkeypatch(source),
+                         ["PatchesADict", "PatchesAModuleAttr"])
+
+    def test_the_live_scope_is_not_empty_and_excludes_this_class(self) -> None:
+        """對本檔實跑抽取器：射程非空（空＝下面那道恆真），且**不含本類**。
+
+        排除本類不是潔癖：本類會 spawn 子行程去跑射程內的每一個類別，把自己算進去
+        就是無限遞迴。它沒有用 `mock.patch`，所以今天本來就不在射程內——這條斷言
+        是把「今天剛好不在」升級成「不准進來」。
+        """
+        live = classes_that_monkeypatch(Path(__file__).read_text(encoding="utf-8"))
+        self.assertGreaterEqual(len(live), 2, f"射程只有 {live}——抽取器疑似壞了")
+        self.assertNotIn(self._SELF, live,
+                         "本類進入自己的射程 ⇒ 子行程會再 spawn 子行程（無限遞迴）")
+        self.assertIn("UntaggedWindowsLikeSkipsTest", live,
+                      "本鎖的立案標的不在射程內 ⇒ 它守不到讓它誕生的那個缺陷")
+
+    def _synth(self, prefix: str, module: str, body: str) -> tuple[int, int, str]:
+        """把一支合成測試模組落到暫存樹，兩個載具各跑一次。"""
+        base = Path(tempfile.mkdtemp(prefix=prefix))
+        self.addCleanup(lambda: shutil.rmtree(base, ignore_errors=True))
+        (base / f"{module}.py").write_text(
+            textwrap.dedent(body), encoding="utf-8", newline="\n")
+        return self._both_carriers(base, module, ["Synth"])
+
+    def test_a_synthesized_carrier_divergence_is_caught(self) -> None:
+        """🔴 合成注入（**紅**這一半）：判決取決於「誰在跑」的模組必須被抓出來。
+
+        注入體刻意是**平台中立且決定性**的（斷言「跑我的人不是 pytest」）：unittest 下綠、
+        pytest 下紅，在三個平台都成立。不用讓本鎖誕生的那個真實形態當注入體，是實測後的
+        決定，不是偷懶——那個形態（`mock.patch.object(<模組>.os, "name", …)` ＋ 期間 import
+        新模組）的**觸發**是 Windows 專屬的：pytest 的 `fnmatch_ex` 在 `PurePosixPath`
+        誤解析反斜線路徑後才落到 `absolutepath()` → `Path()` 而爆炸；POSIX 上
+        `PureWindowsPath` 認得 `/`，同一條路走得通、不會分歧（當回合實測：Windows 上
+        rc 0/1 分歧，改用非 `test_*.py` 的目標模組名則 0/0 不分歧）。拿一個只在單一平台
+        成立的注入體當紅綠自證，等於在另外兩個平台上讓這支測試恆綠——鐵律三。
+        真實形態由 `test_the_live_monkeypatching_locks_agree_across_carriers` 承接
+        （它跑的是活體類別，缺陷一旦被寫回去，在 Windows 上當場分歧）。
+        """
+        rc_u, rc_p, diag = self._synth(
+            "carrier_parity_red_", "test_carrier_injected",
+            """\
+            import sys
+            import unittest
+
+
+            class Synth(unittest.TestCase):
+                def test_the_verdict_depends_on_who_is_running_it(self):
+                    # 合成分歧：判決取決於載具而不是被判的東西——那正是載具分歧的定義。
+                    self.assertNotIn("pytest", sys.modules)
+            """,
+        )
+        self.assertEqual(
+            len(carrier_parity_problems("injected", rc_u, rc_p)), 1,
+            f"合成注入沒有製造出載具分歧（rc_u={rc_u} rc_p={rc_p}）"
+            f"——本鎖已失去鑑別力：\n{diag}",
+        )
+
+    def test_a_synthesized_clean_module_agrees_and_is_green(self) -> None:
+        """合成注入（**綠**這一半）：同一份形狀、判決不依賴載具 ⇒ 判準必須回空。
+
+        沒有這一條，上面那支只證明了「本判準會說話」，沒證明「它不是恆紅」。
+        """
+        rc_u, rc_p, diag = self._synth(
+            "carrier_parity_green_", "test_carrier_clean",
+            """\
+            import sys
+            import unittest
+
+            ON_WINDOWS = True
+
+
+            class Synth(unittest.TestCase):
+                def test_a_module_local_seam_is_carrier_neutral(self):
+                    me = sys.modules[__name__]
+                    from unittest import mock
+                    with mock.patch.object(me, "ON_WINDOWS", False):
+                        self.assertFalse(me.ON_WINDOWS)
+                    self.assertTrue(me.ON_WINDOWS)
+            """,
+        )
+        self.assertEqual(rc_u, 0, f"對照組在 unittest 下就不是綠的：\n{diag}")
+        self.assertEqual(rc_p, 0, f"對照組在 pytest 下就不是綠的：\n{diag}")
+        self.assertEqual(carrier_parity_problems("clean", rc_u, rc_p), [])
+
+    def test_the_live_monkeypatching_locks_agree_across_carriers(self) -> None:
+        """活體：本檔所有會 monkeypatch 的類別，兩個載具的判決必須一致。
+
+        刻意判「一致」而不是「都綠」：別的並行包把樹弄紅時兩邊會一起紅，那不是本鎖
+        要說的事（判成紅就是把別人的紅記到本鎖頭上，這種鎖活不過一輪）。
+        """
+        tests_dir = Path(__file__).resolve().parent
+        module = Path(__file__).stem
+        targets = [c for c in classes_that_monkeypatch(
+            Path(__file__).read_text(encoding="utf-8")) if c != self._SELF]
+        rc_u, rc_p, diag = self._both_carriers(tests_dir, module, targets)
+        self.assertEqual(
+            carrier_parity_problems("／".join(targets), rc_u, rc_p), [],
+            f"{diag}",
         )
 
 

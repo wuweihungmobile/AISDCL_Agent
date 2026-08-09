@@ -58,14 +58,31 @@ class TestDarwinOsascriptFallback:
     @patch(f"{_MOD}._try_win10toast", return_value=False)
     @patch(f"{_MOD}._try_plyer", return_value=False)
     @patch(_PLATFORM_MOD + ".sys.platform", "linux")
-    def test_non_darwin_skips_osascript(self, mock_plyer, mock_toast, mock_run):
-        """R4 複審主 agent 發現：先前未 mock `_try_win10toast`。`notify()` 對
-        `_try_win10toast()` 的呼叫本身沒有平台守門（見 notifier.py 第 65 行），
-        `sys.platform` 被 mock 成 "linux" 不影響它在真實 Windows 機器上真的執行——
-        在裝有 win10toast 的機器上會彈出一個 threaded=True 的背景視窗訊息迴圈
-        執行緒，測試結束未等其收尾，直譯器退出時噴出
-        `WNDPROC return value cannot be converted to LRESULT` 錯誤（不影響 pytest
-        exit code，但污染 stderr 且是真實副作用洩漏，非測試隔離本意）。"""
+    def test_non_darwin_non_windows_skips_both_platform_backends(
+        self, mock_plyer, mock_toast, mock_run,
+    ):
+        """linux 上兩條平台專屬後端都不該被叫到，只降級為 log。
+
+        🔴 R82（ACC-01）本測試**期望值翻面**，原因是被測行為被修正了，不是判準放鬆：
+        本測試的 R4 版逐字記載「`notify()` 對 `_try_win10toast()` 的呼叫本身沒有平台
+        守門…在裝有 win10toast 的機器上會彈出一個 threaded=True 的背景視窗訊息迴圈
+        執行緒…是真實副作用洩漏」——也就是它當時**斷言的正是那個缺陷**（缺守門 ⇒ 非
+        Windows 也照呼叫，只靠 import 失敗兜底）。R82 在 notifier.notify() 補上
+        `is_windows()` 守門後，正確行為就是這裡的 `assert_not_called()`。
+        """
+        notify("T", "M")
+        mock_run.assert_not_called()
+        mock_toast.assert_not_called()
+
+    @patch(f"{_MOD}.subprocess.run")
+    @patch(f"{_MOD}._try_win10toast", return_value=False)
+    @patch(f"{_MOD}._try_plyer", return_value=False)
+    @patch(_PLATFORM_MOD + ".sys.platform", "win32")
+    def test_windows_still_reaches_win10toast(self, mock_plyer, mock_toast, mock_run):
+        """反向對照：守門不得把 Windows 上該走的 fallback 也一併擋掉。
+
+        只斷言「非 Windows 不呼叫」的鎖沒有鑑別力——把 `_try_win10toast` 整支刪掉也會綠。
+        """
         notify("T", "M")
         mock_run.assert_not_called()
         mock_toast.assert_called_once()

@@ -91,3 +91,12 @@ perf_results.json
 
 # perf_regression_check.py PR comment 輸出（CI workflow 產生，本機殘留 artifact）
 perf_regression_comment.md
+
+# 🔴 R82（ACB-02）：scripts/example_playbook.yaml 真跑時，Claude Code 會在工作樹寫檔
+# （auth.py / tests/test_auth.py / docs/api_auth.md）。這些是**執行產物**，不是原始碼，
+# 一律排除；唯一入庫的是輸入 fixture 規格 `docs/sdd_auth_spec.md`。
+# 修前那支 playbook 的相對路徑落在 AutoClaude 自己的 tests/ ⇒ 真跑會污染引擎測試樹。
+scripts/example_workspace/*
+!scripts/example_workspace/docs/
+scripts/example_workspace/docs/*
+!scripts/example_workspace/docs/sdd_auth_spec.md

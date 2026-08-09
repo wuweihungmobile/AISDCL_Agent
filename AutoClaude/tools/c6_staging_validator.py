@@ -26,7 +26,7 @@ import signal
 import sys
 import time
 import uuid
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 os.environ.setdefault("AUTOCLAUDE_ALLOW_INSECURE_DB", "1")
@@ -34,10 +34,11 @@ os.environ.setdefault("AUTOCLAUDE_ALLOW_INSECURE_DB", "1")
 _REPO_ROOT = Path(__file__).parent.parent
 sys.path.insert(0, str(_REPO_ROOT))
 
-DEFAULT_DSN = (
-    "postgresql+asyncpg://autoclaude_runtime:runtime_autoclaude_2026"
-    "@192.168.1.133/aisdlc"
-)
+#: 🔴 DSN 一律由 `--dsn` 或 `AUTOCLAUDE_DB_DSN` 提供，**檔內不留 baked-in 憑證**（R82）。
+#: 原版把 `autoclaude_runtime` 的密碼寫死在這裡，且刻意拆成兩段字串——於是
+#: `user:pass@host` 不在同一行，`tools/lib/secret_scan.py` 的 DSN 判準（單行 regex）
+#: 對它結構上失明：commit 過得了，不等於憑證沒有入庫。
+DEFAULT_DSN = os.environ.get("AUTOCLAUDE_DB_DSN")
 _TEST_DIR = str(_REPO_ROOT / ".autoclaude_c6_staging")
 
 logging.basicConfig(
@@ -47,10 +48,11 @@ logging.basicConfig(
 )
 logger = logging.getLogger("c6_validator")
 
-from autoclaude.utils.config import StorageConfig
-from autoclaude.infra.repositories.factory import build_state_repository
-from autoclaude.utils.checkpoint_manager import PlaybookCheckpoint
-
+# E402 逐行豁免（非整檔）：這三個 import 必須晚於上方兩個副作用——sys.path.insert 把
+# repo 根接上 sys.path，AUTOCLAUDE_ALLOW_INSECURE_DB 須在 config 被 import 前就位。
+from autoclaude.infra.repositories.factory import build_state_repository  # noqa: E402
+from autoclaude.utils.checkpoint_manager import PlaybookCheckpoint  # noqa: E402
+from autoclaude.utils.config import StorageConfig  # noqa: E402
 
 # ── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -198,8 +200,9 @@ def phase_E_pg_failure_degradation() -> PhaseResult:
     try:
         from sqlalchemy.ext.asyncio import create_async_engine
         from sqlalchemy.pool import NullPool
-        from autoclaude.infra.repositories.file_state_repository import FileStateRepository
+
         from autoclaude.infra.repositories.dual_state_repository import DualStateRepository
+        from autoclaude.infra.repositories.file_state_repository import FileStateRepository
         from autoclaude.infra.repositories.pg_state_repository import PgStateRepository
 
         bad_engine = create_async_engine(
@@ -309,7 +312,7 @@ class C6Validator:
                 return
 
     def run(self) -> bool:
-        start_ts = datetime.now(timezone.utc)
+        start_ts = datetime.now(UTC)
         logger.info("C6 Validator 啟動")
         logger.info("  DB  : %s", self.dsn.split("@")[-1])
         logger.info("  時長: %.1fh  |  quick=%s", self.duration_hours, self.quick)
@@ -374,7 +377,7 @@ class C6Validator:
         report = {
             "c6_gate": "PASS" if success else "FAIL",
             "start_time": start_ts.isoformat(),
-            "end_time": datetime.now(timezone.utc).isoformat(),
+            "end_time": datetime.now(UTC).isoformat(),
             "duration_hours": self.duration_hours,
             "total_passed": total_p,
             "total_failed": total_f,
@@ -384,7 +387,6 @@ class C6Validator:
         path.write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8")
 
         gate_str = "[PASS]" if success else "[FAIL]"
-        bar = "=" * 60
         logger.info("=" * 60)
         logger.info("  C6 Gate : %s", gate_str)
         logger.info("  總計    : %d passed / %d failed", total_p, total_f)
@@ -404,8 +406,13 @@ def main():
     ap = argparse.ArgumentParser(description="C6 Staging Validator — 24h dual-write 自動驗證")
     ap.add_argument("--duration", type=float, default=24.0, help="執行時長（小時，預設 24）")
     ap.add_argument("--quick", action="store_true", help="快速模式（~5 分鐘，用於功能驗證）")
-    ap.add_argument("--dsn", default=DEFAULT_DSN, help="PostgreSQL DSN（覆寫預設值）")
+    ap.add_argument("--dsn", default=DEFAULT_DSN,
+                    help="PostgreSQL DSN（未給時取自 $AUTOCLAUDE_DB_DSN；無預設值）")
     args = ap.parse_args()
+
+    if not args.dsn:
+        ap.error("未提供 DSN：請給 --dsn，或設定環境變數 AUTOCLAUDE_DB_DSN。"
+                 "本腳本刻意不內建憑證預設值。")
 
     if args.quick:
         args.duration = 5 / 60  # 5 minutes

@@ -89,7 +89,7 @@ Push-Location "$r\tools\tests"; & $p test_adr_xplat001_c1c2_lock.py --print-guar
 
 ---
 
-## §2 本輪已落地與未落地的訴求
+## §2 本輪各訴求的達成判定
 
 🔴 **本節只給判定與指針，不複製數字**——十二條（Q1~Q6／S1~S3／P7／a／b）的逐條結論寫在
 `docs/04_planning/AutoSDD_improving_105.md` §1 那張表，**那是唯一的家**；本輪三份掃描證據檔
@@ -114,8 +114,16 @@ Select-String -Path "$r\docs\04_planning\AutoSDD_improving_105.md" -Pattern '結
 
 ### 3.1 `context_budget_guard.py` 的體積：本輪只納入治理，**當下沒有任何東西變小**
 
-本輪把它收進 shrink-only 的治理面，但那是「不准再長大」，**不是「已經拆好了」**——
-今天它仍是單檔 1,634 行（當回合實測），拆分工作**尚未執行**。
+R81 把它收進 shrink-only 的治理面，但那是「不准再長大」，**不是「已經拆好了」**——
+R81 收輪那一刻它仍是單檔 1,634 行。
+
+🔴 **R82 訂正**：本節原句斷言拆分還沒有動工（原措辭不逐字複述），並登記 `tools/lib/quota_gate.py` 當證偽
+標的——而 R82 的 Q2-02 就把額度水位那一整段拆了出去，該檔今天在磁碟上（當回合實測：
+`quota_gate.py` 615 行、`context_budget_guard.py` 由 1,634 降到 **952** 行）。
+原句不逐字留著當現行說法（複述假話等於製造新假話）。**這一筆是判準自己抓到的**：
+`test_negative_existence_claims_r82` 用它自己登記的 `absent-if:` 標的打了自己的臉——
+那正是那道判準存在的理由，也是本節不再需要 `absent-if:` 標記的原因（宣稱已經沒有了）。
+**尚未做完的那一半**：952 行仍是絕對紅線 750 的 1.27 倍，還要再拆。
 
 ```powershell
 & $p -c "from pathlib import Path; print(len(Path(r'$r\.claude\hooks\context_budget_guard.py').read_text(encoding='utf-8').splitlines()))"
@@ -124,24 +132,75 @@ Select-String -Path "$r\docs\04_planning\AutoSDD_improving_105.md" -Pattern '結
 🔴 拆的時候注意：`.claude/hooks/` 是 hook 的家，拆出去的模組若被 hook 直接 import，
 **載具解析失敗時 CC 是 fail-open**（只記一行 ERROR 就放行）⇒ 拆錯的表徵與「修好了」一模一樣。
 
-### 3.2 L4「真的量不到」仍**靜默放行**，不出聲
+### 3.2 L4「真的量不到」：閂鎖**已落地**，未關的是**出聲通道**與**跨平台憑證來源**
 
-ADR 設計的 `degraded` 閂鎖**尚未落地**：取數管道拿不到數時，節流守衛今天走的是「放行且不出聲」，
-與「量到了、水位很低」在螢幕上無法區分。
+🔴 **本節連續兩輪自我打臉，兩層的成因不同，所以兩層都記**（原句一律不逐字複述當現行說法
+——複述假話等於製造新假話）。
+
+**第一層（R82 訂正，L4-01）**：本節最初斷言那道降級閂鎖還沒被寫出來，而它在**寫下它的
+同一個 commit**（`692753e`）裡就已落地。逃得掉的原因是原附的現查指令 grep 的是 **ADR**，
+而 ADR 只證明「設計存在」，不證明「實作不存在」——錨與宣稱不同軸，於是永遠打不臉。
+代價與根 CLAUDE.md 判過的「低報分子」同型：它會讓下一輪去補一支**已經存在**的鎖。
+
+**第二層（R82 收尾二次訂正）**：修第一層的那次重寫，把現查指令的錨釘死在
+`.claude/hooks/context_budget_guard.py` 這**一個檔名**上；而同一輪的另一包把
+`note_degraded()` 與出聲通道整段搬進 `tools/lib/quota_gate.py`（＝ Q2 帳上那筆
+「hook 1451→952 是搬家不是減法」的同一次搬家）⇒ **訂正文在同一輪內把自己變成假話**。
+收尾當回合實測（2026-08-09）：對 `context_budget_guard.py` 下 `def note_degraded`
+與 `additionalContext` 兩個 pattern 皆 **0 命中**；同回合對照組
+（`quota_meter.py` 的 `KEYCHAIN_SERVICE|REASON_NO_CREDENTIALS_DARWIN`）**5 命中**
+⇒ 不是指令寫壞，是錨釘錯地方。
+
+🔴 **這一次換掉的是錨的形狀，不只是錨的值**：現查改成掃「hook ＋ `tools/` 整個活躍
+Python 面」找**符號**，不指名任何一個檔——檔案在 repo 內搬家不會讓它變假，只有符號真的
+消失才會。單檔錨在版面上與整面錨長得一模一樣，這正是它兩輪都逃掉的原因。
+
+現查指令（錨在**符號**不在檔案；跑不出命中就是本節在說謊）：
 
 ```powershell
-Select-String -Path "$r\docs\04_planning\ADR\ADR-XPLAT-005-quota-aware-throttling-and-fanout-resume.md" -Pattern 'degraded' -Encoding utf8
+$r = 'D:\CursorProject\AISDCL_Agent'
+Get-ChildItem -Path "$r\.claude\hooks","$r\tools" -Recurse -Filter *.py |
+  Select-String -Pattern 'def note_degraded|hookSpecificOutput' -Encoding utf8 |
+  ForEach-Object { "$($_.Path.Substring($r.Length+1)):$($_.LineNumber)" }
+Select-String -Path "$r\tools\lib\quota_meter.py" -Pattern 'KEYCHAIN_SERVICE|REASON_NO_CREDENTIALS_DARWIN' -Encoding utf8
 ```
+
+🔴 **`git grep` 不可以拿來當本節的現查管道**：`tools/lib/quota_gate.py` 目前 untracked，
+`git grep -F 'def note_degraded'` 當回合只命中**本檔自己這段指令文字**——取數管道回的是
+文件自己的迴音而不是實作，那與 0 命中同樣沒有鑑別力。同一個陷阱在
+`tools/tests/test_negative_existence_claims_r82.py` 的合成注入自證上也發生過一次
+（已改為在臨時 git repo 內就地構造證據，見該檔該測的 docstring）。
+
+🔴 **上面那段指令刻意排在現況清單「之前」**：本節的每一個小節都受
+`test_doc_loc_baseline_freshness_r60.py::TestR78HandoffClaimsCarryLiveCommands` 管，
+而它的區塊語意是「標題到第一個條目為止算一塊」——把現查指令寫在條目**之後**，
+標題那一塊就等於沒附指令（實測轉紅）。順序在這裡是語意，不是排版偏好。
+
+現況（R82 收尾當回合逐條實查，2026-08-09）：
+- **已落地，但住在 `tools/lib/quota_gate.py`**（不在 hook 檔裡）：`note_degraded()`（`:354`）
+  ＋ per-source TTL 閂鎖／痕跡檔／`unmeasurable` 狀態字，以及 L4-02 補的
+  `hookSpecificOutput` → `additionalContext` 出聲通道（`:386-387`；exit 0 下唯一送得進
+  模型上下文的通道，不動 rc）。hook 端以 `import quota_gate` 消費
+  （`context_budget_guard.py:227`），能力不可達時該軸退化成「量不到」。
+- **L4-03 的 mac 分支已落地**：`quota_meter.py` 的 `KEYCHAIN_SERVICE`（`:79`）／
+  `REASON_NO_CREDENTIALS_DARWIN`（`:100`）／`darwin` → login Keychain（`:149`、`:157`、`:327`）。
+  🔴 **mac 真機仍零覆蓋**：判定邏輯可注入且已測，`security` 的 service 名與輸出形態
+  未在 mac 上驗過，交 R83（指令見 `quota_meter.KEYCHAIN_SERVICE` 註解）。
+  <!-- handoff-claim-verified: 「有沒有在 mac 真機上跑過」不落磁碟，repo 內零載體可現查；能查的只有「有沒有 mac 專屬的判定分支」，而那不是同一件事 -->
 
 ### 3.3 ADR §2.4 的**載體二**（AutoClaude 側 quota 軸）本輪**零交付**
 
 設計在 ADR 裡，repo 內**沒跑**過任何一行對應實作。
+<!-- absent-if: QuotaAwarePlugin -->
+🔴 R82 補：上面那個 `absent-if:` 標的是**交付時必然出現的類名**，不是完整涵蓋——
+換個類名交付它就抓不到。標記的用途是「這句話有辦法被打臉」，不是「窮舉所有交付形態」。
 
 ```powershell
 Select-String -Path "$r\docs\04_planning\ADR\ADR-XPLAT-005-quota-aware-throttling-and-fanout-resume.md" -Pattern '載體二' -Encoding utf8
 ```
 
 ### 3.4 mac 真機**零覆蓋**（本輪一次都沒跑過）
+<!-- handoff-claim-verified: 「有沒有在 mac 真機上跑過」不落磁碟，repo 內零載體可現查——CI 沒有 macOS runner 的執行痕跡進 repo，本機也沒有 -->
 
 R81 全部量測都在 Windows 11 真機取得（工具側＝pwsh 7.x Core）。launchd 家族／bash 3.2／zsh／
 mac smoke 的**實際執行行為**本輪**沒跑**。act 的 ubuntu 容器**不是** mac 的替代品。
@@ -172,11 +231,16 @@ for rel in ['AutoClaude/.perf_baseline.toml','AutoClaude/tests/integration/test_
 🔴 這種漂移 `git status` 結構上看不見（正規化只作用於 index），雲端也看不見
 （`actions/checkout` 必定重新 smudge）⇒ 只有本機工作樹那一欄看得到。
 
-### 3.6 四方複審轉錄檔 `docs/06_quality/CrossPlatform_R81_Review.md` **尚未建立**
+### 3.6 四方複審轉錄檔 `docs/06_quality/CrossPlatform_R81_Review.md`：**已建立**（R82 訂正）
 
-它是 `AutoSDD_improving_105.md` §6 明訂的收輪產物之一。本輪把它登記進幽靈路徑判準的具名基線
-（形態＝「刻意不存在的宣稱」），**而那筆登記會自己清掉自己**：檔案一旦建立，基線的 stale 自檢
-當場轉紅並要求刪掉該筆登記 ⇒ 豁免不可能永久化。
+🔴 **R82 訂正（Q4-02 的第二個真實案例）**：本節原本斷言該檔還沒有被建出來。R82 開場實查
+`git ls-files` 命中它、`Test-Path` 為 True ⇒ 那句話已為假。它逃得掉的原因與 §3.2 同型：
+本節附的現查指令跑的是**幽靈路徑判準那支測試**，而該判準只回答「基線登記得對不對」，
+不回答「這個檔今天在不在」——又一次錨與宣稱不同軸。
+
+它是 `AutoSDD_improving_105.md` §6 明訂的收輪產物之一。原設計把它登記進幽靈路徑判準的具名
+基線（形態＝「刻意不存在的宣稱」），**而那筆登記會自己清掉自己**：檔案一旦建立，基線的
+stale 自檢當場轉紅並要求刪掉該筆登記 ⇒ 交棒給 R82 的動作是**去把那筆登記刪掉**。
 
 ```powershell
 Push-Location "$r\tools\tests"; & $p -m unittest test_doc_loc_baseline_freshness_r60.TestR81GhostPathClaims; Pop-Location

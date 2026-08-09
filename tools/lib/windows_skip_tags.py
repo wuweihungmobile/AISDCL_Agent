@@ -30,7 +30,7 @@
 """
 from __future__ import annotations
 
-import os  # noqa: F401  ← 既有 patch 目標 `windows_skip_tags.os`（見 test_run_root_unittests）
+import os  # 只由 `running_on_windows()` 讀（唯一站點）；**不再**是 patch 目標，WHY 見該函式
 import sys
 from collections.abc import Mapping
 from pathlib import Path
@@ -99,18 +99,48 @@ _REPO_ROOT = Path(__file__).resolve().parents[2]
 _REPO_TESTS_DIR = _REPO_ROOT / "tools" / "tests"
 
 
+def running_on_windows() -> bool:
+    """本家族唯一的「現在跑在哪個平台」讀取點，同時是測試注入的**唯一**接縫。
+
+    🔴 立案（`DEF-101-996`，R82 複審 SA B-1 當回合實測）：在它之前，唯一的注入手法是
+    `mock.patch.object(windows_skip_tags.os, "name", "posix")`——而 `windows_skip_tags.os`
+    **就是** stdlib 那一個 `os` 模組物件（本檔再匯出的一律是同一個物件，見檔頭），所以那
+    一行改的是**整個行程**的 `os.name`，射程遠遠超出這個家族。CPython 3.11 的
+    `pathlib.Path.__new__` 正是靠 `os.name == "nt"` 決定生 `WindowsPath` 還是 `PosixPath`
+    ⇒ patch 生效期間，在 Windows 上**任何**一次 `Path(...)` 都會拋
+    `NotImplementedError: cannot instantiate 'PosixPath' on your system`。
+
+    代價不是「有點髒」，是**同一份判準依載具給出相反判決**（實測）：
+      · `python -m unittest` 下沒有人在那段期間呼叫 `Path()` ⇒ 看起來完全無害、9 支全過；
+      · `pytest` 下 `AssertionRewritingHook.find_spec()` 對**每一支新 import 的模組**都會走
+        `_should_rewrite() → absolutepath() → Path()` ⇒ 常駐缺陷注入對照組合成出來的那棵樹
+        import 失敗、塌成 `_FailedTest`、收集數低於下限 ⇒ **兩次** `run_with_floor` 都回 1：
+        該紅的那一半紅得**理由是錯的**（是 import 炸掉，不是漏標），該綠的那一半永遠綠不了。
+    ⇒ 「現在跑在哪個平台」必須有一個**模組層的名字**可以 patch；patch 它不會動到行程全域，
+    兩個載具因此看到同一份行為。載具一致性本身已由
+    `tools/tests/test_run_root_unittests.py::CarrierVerdictParityTest` 機械看守。
+    """
+    return os.name == "nt"
+
+
 # ── 常數注入用的薄包裝（WHY 見檔頭第二點）─────────────────────────────────────────
 def untagged_windows_like_skips(result, *, on_windows: bool | None = None):
-    """runtime 面漏標檢查；把**本檔**的關鍵詞／豁免／標籤面傳進實作。"""
+    """runtime 面漏標檢查；把**本檔**的關鍵詞／豁免／標籤面傳進實作。
+
+    `on_windows=None` 時取本檔的 `running_on_windows()`（**不是**實作模組自己的
+    `os.name` 預設）：平台這一軸的注入接縫只能有一個，兩個家就會各自漂移。
+    """
     return _untagged_windows_like_skips(
-        result, on_windows=on_windows, hints=_WINDOWS_LIKE_SKIP_HINTS,
+        result,
+        on_windows=running_on_windows() if on_windows is None else on_windows,
+        hints=_WINDOWS_LIKE_SKIP_HINTS,
         exempt=_WINDOWS_SKIP_TAG_EXEMPT, tag=WINDOWS_NATIVE_SKIP_TAG,
     )
 
 
 def report_untagged_windows_like_skips(result):
     return _report_untagged_windows_like_skips(
-        result, hints=_WINDOWS_LIKE_SKIP_HINTS,
+        result, on_windows=running_on_windows(), hints=_WINDOWS_LIKE_SKIP_HINTS,
         exempt=_WINDOWS_SKIP_TAG_EXEMPT, tag=WINDOWS_NATIVE_SKIP_TAG,
     )
 
@@ -136,7 +166,7 @@ def report_windows_skip_tag_exemption_problems(result) -> list[str]:
     它在 Windows 上整組早退（見 `untagged_windows_like_skips`），故那一面只在
     非 Windows 上啟用；格式面不分平台。
     """
-    on_windows = os.name == "nt"
+    on_windows = running_on_windows()
     flagged = None
     if not on_windows:
         flagged = {
@@ -358,7 +388,7 @@ __all__ = [
     "read_test_sources", "report_all_skips",
     "report_untagged_windows_like_skips", "report_untagged_windows_skip_decorators",
     "report_windows_native_skips", "report_windows_skip_tag_exemption_problems",
-    "scan_tree_sources", "site_class",
+    "running_on_windows", "scan_tree_sources", "site_class",
     "site_class_census_problems", "site_class_counts", "skip_decorator_sites",
     "skipped_platform", "tree_floor_problems", "unclassified_sites",
     "untagged_non_windows_skip_decorators", "untagged_tool_absence_sites",

@@ -124,7 +124,7 @@ storage:
 ```bash
 # 在 AutoClaude/ 目錄下
 python -m pytest tests/ -q          # 全套測試（🔴 基線 passed/skipped 數字唯一出處＝根層 ONBOARDING.md §7，本檔不重複數字）
-PYTHONUTF8=1 lint-imports           # 架構約束：8 kept / 0 broken（需先裝 [lint]）
+PYTHONUTF8=1 lint-imports           # 架構約束（契約條數 SSOT＝AutoClaude/.importlinter；rc=0 即全 kept，需先裝 [lint]）
 ruff check .                        # lint（line-length=100, py311）
 ```
 
@@ -133,7 +133,7 @@ ruff check .                        # lint（line-length=100, py311）
 ```powershell
 # 在 AutoClaude\ 目錄下
 python -m pytest tests/ -q          # 全套測試（基線數字同上，見 ONBOARDING.md §7）
-$env:PYTHONUTF8=1; lint-imports     # 架構約束：8 kept / 0 broken（需先裝 [lint]）
+$env:PYTHONUTF8=1; lint-imports     # 架構約束（契約條數 SSOT＝AutoClaude\.importlinter；rc=0 即全 kept，需先裝 [lint]）
 ruff check .                        # lint（line-length=100, py311）
 ```
 

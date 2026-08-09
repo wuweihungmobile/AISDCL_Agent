@@ -37,9 +37,11 @@
 from __future__ import annotations
 
 import json
+import os
 import subprocess
 import sys
 import tempfile
+import time
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -55,6 +57,42 @@ NOTE_NAME = "AUTOSDD_ATTENTION.md"
 
 #: 月度支出上限唯一會回來的路徑（本檔不猜、不等，只把人帶到這裡）。
 USAGE_URL = "https://claude.ai/settings/usage"
+
+#: 🔴 R82／HELM-01：桌面通知**預設關閉**，而這是使用者的直接指令（2026-08-09 逐字：
+#: 「請確認並修正**無彈窗**執行」）。R81 版在 Windows 走的是一個**模態**對話框，會奪走
+#: 焦點並杵在螢幕上十分鐘；而使用者三度收到它的那幾次，觸發原因是「開了沒做事就結束的
+#: session 沒有留下逐字稿」——一個正常且常見的情形。⇒ 模態管道整條移除（見 `notify`），
+#: 剩下的非模態管道也改成 opt-in：要它回來就設這個環境變數，模型改不到、人改得到。
+NOTIFY_ENV = "AUTOSDD_DESKTOP_NOTIFY"
+
+#: 「沒有敲」的兩個 rc，與 127（這台機器上沒有那條管道）刻意三者分開：稽核痕跡必須
+#: 分得出「開關關著」「不值得打斷人」「敲了但失敗」，否則通知的失效仍然是靜默的。
+NOTIFY_OFF_RC = -1
+NOTIFY_NO_RESCUE_RC = -2
+
+#: 任務書殘骸的回收年齡。取值理由：一支**還在等**的哨兵，其任務書可能整整一個額度視窗
+#: （5 小時）都不會被寫到，所以門檻必須遠大於它；7 天則遠小於「這些檔已經在 %TEMP% 躺了
+#: 好幾輪」的實況（R82 開場實測 26 份，含三份測試殘骸）。
+PLAN_GC_AGE_SECONDS = 7 * 24 * 3600
+
+#: Windows 的**非模態**桌面管道。托盤氣球：不奪焦、不要求點擊、自己會消失。
+#: 🔴 刻意外呼 `powershell.exe`（5.1）而不是本行程手上的 pwsh 7：`System.Windows.Forms`
+#: 在 PS Core 上不保證載得起來，而這條路的失敗方式是「靜默不出現」。落地當回合實測 rc=0。
+_WIN_TOAST = (
+    "Add-Type -AssemblyName System.Windows.Forms;"
+    "Add-Type -AssemblyName System.Drawing;"
+    "$n = New-Object System.Windows.Forms.NotifyIcon;"
+    "$n.Icon = [System.Drawing.SystemIcons]::Information;"
+    "$n.Visible = $true;"
+    "$n.ShowBalloonTip(10000, {title}, {body}, 'Info');"
+    "Start-Sleep -Milliseconds 1500;"
+    "$n.Dispose()"
+)
+
+
+def _ps_literal(text: str) -> str:
+    """PowerShell 單引號字串字面（內部單引號要寫成兩個，那是唯一的跳脫方式）。"""
+    return "'" + " ".join(text.split()).replace("'", "''") + "'"
 
 
 def note_path() -> Path:
@@ -156,13 +194,19 @@ def snapshot_fanout(transcript: Path, event: object) -> dict:
 # 🔴 rc 一定要被記進稽核痕跡：通知的失效是**靜默**的——沒有人會因為「沒收到通知」而
 # 去查。記下 rc 才讓「叫了人但沒叫到」與「根本沒叫」分得開（同本協定「觸發了但失敗
 # vs 沒觸發」那條紀律）。回什麼都**不影響**流程：紙已經寫好了，通知只是把人帶過去。
-# 跨平台：三個平台各一條原生管道，都不新增相依。Windows 的 `msg.exe` 落地當回合實測
-# rc=0；macOS 走 `osascript`；其餘走 `notify-send`。任一台機器上不存在就回 127 並照實記。
+#
+# 🔴 R82／HELM-01 換掉了本函式的 Windows 管道，理由不逐字複述舊說法（本 repo 判過
+# 「訂正註記引述假話等於製造新假話」），只寫現行判準：**這條管道一律不得奪焦、不得
+# 要求點擊、不得留在螢幕上等人**。Windows 因此走托盤氣球（`_WIN_TOAST`），macOS 走
+# `osascript display notification`，其餘走 `notify-send`——三者都是非模態的。
+# 而且整條管道**預設關閉**（`NOTIFY_ENV`）：預設就不敲，是使用者的直接指令。
 def notify(title: str, body: str) -> int:
-    """盡力而為的桌面通知；回 rc（127＝這台機器上沒有這條管道）。"""
-    text = " ".join(f"{title}：{body}".split())[:250]
+    """盡力而為的**非模態**桌面通知；預設不敲。回 rc（見三個 `NOTIFY_*_RC` 與 127）。"""
+    if not os.environ.get(NOTIFY_ENV):
+        return NOTIFY_OFF_RC
     if sys.platform == "win32":
-        argv = ["msg.exe", "*", "/TIME:600", text]
+        argv = ["powershell.exe", "-NoProfile", "-NonInteractive", "-WindowStyle", "Hidden",
+                "-Command", _WIN_TOAST.format(title=_ps_literal(title), body=_ps_literal(body))]
     elif sys.platform == "darwin":
         argv = ["osascript", "-e",
                 f"display notification {json.dumps(body)} with title {json.dumps(title)}"]
@@ -175,11 +219,57 @@ def notify(title: str, body: str) -> int:
         return 127
 
 
+# 🔴 R82／HELM-01 的第三面（殘骸）。前兩面（判定面、載具面）治的是「不該叫人的時候
+# 叫了人」；本面治的是它留下的東西：`%TEMP%` 開場實測 26 份 `autosdd_resume_plan_*.md`，
+# 其中三份是測試殘骸。每一份都對應一支已經下班（或從來沒開始）的哨兵，而沒有任何一段
+# 程式碼負責把它們收掉 ⇒ 下一個人用 `Get-ChildItem` 看 `%TEMP%` 時拿到的是一堆過期事實
+# （本 repo 對「查詢載具給出過期事實」有判例）。
+# 判準刻意是**年齡**而不是「這支哨兵還在不在」：後者要問排程器，那是一次外部行程呼叫，
+# 而這裡跑在終態路徑上、失敗不得升級為故障。年齡門檻的取值理由見 `PLAN_GC_AGE_SECONDS`。
+def gc_plans(current: object = None, age: float = PLAN_GC_AGE_SECONDS,
+             root: object = None) -> dict:
+    """收掉任務書殘骸：`current` 這一份（終態了）＋ 所有超齡的。回稽核欄位。
+
+    `root` 是注入點：預設掃系統暫存（production 唯一的落點），測試把它指到沙箱——
+    一支會真的去刪開發者 `%TEMP%` 的單元測試，是把驗證載具做成了副作用來源。
+    """
+    victims = [Path(str(current))] if current else []
+    cutoff = time.time() - age
+    for stale in Path(str(root) if root else tempfile.gettempdir()).glob(
+            f"{guard.PLAN_PREFIX}*.md"):
+        try:
+            if stale.stat().st_mtime < cutoff:
+                victims.append(stale)
+        except OSError:  # pragma: no cover - 檔在列舉與 stat 之間消失
+            continue
+    gone = 0
+    for path in victims:
+        try:
+            path.unlink()
+            gone += 1
+        except OSError:
+            continue  # 刪不掉最多是留著，不得反過來變成故障源（同 `_write` 的紀律）
+    return {"gc_plans": gone}
+
+
 # 終態的「叫人」。兩個呼叫端（哨兵的 `escalate`、續航探測的 `stop`）共用同一份——
 # 這兩處此前各自寫了一行 `print(..., file=sys.stderr)`，而**兩處都跑在無 console 的
 # 行程裡**：同一個缺口有兩個家，修一個等於沒修。
-def alert(reason: str, state: dict) -> dict:
-    """把「只有人做得到的那件事」寫成紙 ＋ 敲一次桌面通知；回稽核欄位。"""
+#
+# 🔴 R82／HELM-01 的判定面在這裡收口成**三層，一層比一層吵**，而每一層的門檻都寫死在
+# 參數上（不是靠呼叫端記得）：
+#   · `loud=False`（＝哨兵正常下班／這個 session 根本沒開始）：**一個字都不留給人**，
+#     只把殘骸收掉。這一層就是 HELM-01 的本體——它此前會走到最吵的那一層。
+#   · `loud=True` 但 `dead_agents == 0`：寫紙（零打擾、人回來看得到），**不敲桌面**。
+#   · `loud=True` 且 `dead_agents > 0`：這才是「有未處理撞線 **且** 有扇出待救」那個
+#     合取——唯一值得主動打斷人的情形，因為只有人按得下 `resumeFromRunId`。
+# `**_` 吃掉 `snapshot_fanout()` 回的其餘稽核欄位（`fanout`／`runs`／`fanout_written`），
+# 讓呼叫端可以直接 `**fan` 攤進來而不必逐格挑——挑格子是下一個漏接的地方。
+def alert(reason: str, state: dict, *, loud: bool = True, plan: object = None,
+          dead_agents: int = 0, **_: object) -> dict:
+    """終態處置：不吵時收殘骸；要吵時寫紙，且只有真的有東西要救才敲人。回稽核欄位。"""
+    if not loud:
+        return gc_plans(plan)
     fanout = fanout_path(str(state.get("session_id") or ""))
     note = note_path()
     ok = _write(note, "\n".join([
@@ -202,6 +292,34 @@ def alert(reason: str, state: dict) -> dict:
         "",
         f"## 重啟指令\n```\nclaude -r {state.get('session_id')}\n```",
     ]) + "\n")
-    rc = notify("AutoSDD 需要你", reason)
+    rc = notify("AutoSDD 需要你", reason) if dead_agents else NOTIFY_NO_RESCUE_RC
     print(f"🔴 {reason}\n   ⚠️ 只有人做得到的動作 → {note}", file=sys.stderr)
     return {"note": str(note) if ok else "", "note_written": ok, "notify_rc": rc}
+
+
+def main(argv: list[str]) -> int:
+    """可重跑的殘骸清理入口：`python tools/lib/quota_escalation.py --gc-plans`。
+
+    刻意做成本檔的 CLI 而不是 planner 的旗標：planner 的 `guardrail_cli` 餘裕實測只剩
+    個位數行，而殘骸清理與「叫人／扇出清單」是同一個主題（都是寫在 `%TEMP%` 上、給人
+    看的產物）。多開一支 CLI 檔才是本 repo 判過的護欄層自我增殖。
+    """
+    if "--gc-plans" not in argv:
+        print("用法：python tools/lib/quota_escalation.py --gc-plans", file=sys.stderr)
+        return 2
+    print(f"已回收任務書殘骸 {gc_plans()['gc_plans']} 份"
+          f"（門檻：{PLAN_GC_AGE_SECONDS // 86400} 天未更新）")
+    return 0
+
+
+if __name__ == "__main__":  # pragma: no cover
+    # 🔴 本檔的 CLI 與升級路徑都印中文（用法字串、`已回收任務書殘骸 …`、`relay_problems`
+    # 的 `🔴 {reason}`），而非 UTF-8 locale 下 stdout 直接 UnicodeEncodeError、stderr 降解
+    # 成 \uXXXX（DEF-101-789 同型）。保護只掛在 `__main__`：本檔被 planner 與測試以模組
+    # import，import 期換串流會污染載具。走 SSOT 而非就地 reconfigure，理由見
+    # `tools/lib/platform_utils.py` 檔頭（那段實作曾被複製 8 份、6 份漏分支），且就地寫
+    # 會撞 `test_platform_utils_dedup.py` 的 shrink-only 行內複本棘輪。
+    from platform_utils import init_utf8_streams
+
+    init_utf8_streams()
+    sys.exit(main(sys.argv[1:]))

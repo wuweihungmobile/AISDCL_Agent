@@ -40,8 +40,12 @@
 #      查的是**磁碟上已安裝的 plist**，不是本檔 heredoc——R15 之前安裝過的機器其
 #      plist 至今無 RunAtLoad，而 --status 過去只做 [ -f ] 存在性判斷，恆報綠。
 #   ② 覆蓋連續性（R67-F29）：心跳只看「最後一次距今幾天」，看不見中間漏跑，且任何
-#      補跑會把空窗蓋掉；改掃 RunId log 檔名時間戳列出近 N 天的缺口。這同時是 mac
-#      側對 Windows `NextRunTime` 前瞻憑證的替代——launchd 不提供 next-run。
+#      補跑會把空窗蓋掉；改掃 RunId log 檔名時間戳列出近 N 天的缺口。
+#      🔴 R82 MAC-04 訂正：本格原本寫「這同時是 mac 側對 Windows NextRunTime **前瞻**
+#      憑證的替代——launchd 不提供 next-run」。前提為真（launchd 確實不提供），結論卻
+#      把一個回顧量當成前瞻量的替代品。前瞻那一半自本輪起由 `pmset -g sched` 的下次
+#      喚醒時刻承接（見 report_plist_capabilities 的 NextRunTime 對等列）；覆蓋連續性
+#      只承接**回顧**那一半，兩者並列、不互相取代。
 #
 # Exit codes：0＝成功（--status 時＝launchd 已載入）；1＝失敗（--status 時＝未載入
 # 或 plist 缺席）。心跳三態／FAIL 計數／上述兩段報表**皆屬 advisory**，不影響
@@ -227,6 +231,56 @@ _plist_raw() {
 
 # $1=能力名 $2=實際值 $3=期望值 $4=補充說明（可省略）。不符即累計 _cap_bad。
 # `${4:-}` 而非 `$4`：本檔 set -u，省略第四參數時裸 $4 會直接 unbound 中止 --status。
+# ── WakeToRun／NextRunTime 的 mac 對等物（R82 MAC-04）──────────────────────────
+# Windows `WakeToRun=True` 的語意是「到點把睡著的機器叫醒」；launchd 的語意是「機器
+# 醒來之後補跑錯過的那一次」（coalescing）。兩者對「02:00 到底有沒有跑」的答案**不同**：
+# 一台闔蓋過夜的 MacBook，nightly 會延到早上開蓋才跑（與使用者搶 CPU），而 --status
+# 的心跳仍印「✅ 新鮮」——空窗在唯一的每日回饋通道上結構性不可見。
+# macOS 真正的對等物是 `pmset repeat wakeorpoweron`，它**同時**補上 Windows `NextRunTime`
+# 的對等憑證：`pmset -g sched` 印出下一次排定的喚醒時刻，而根 CLAUDE.md 反「事後諸葛」
+# 取證規則要的正是那個「值」，不是某個指令的 rc。
+# 🔴 需提權（sudo）⇒ 本腳本**只偵測、只印出逐字可執行的指令，不代跑**（同
+#   install_windows_nightly.ps1 對四項排程設定的處置精神，差別在這一項要人工確認）。
+# 🔴 未在 mac 實測（R82 在 Windows 完成）：R83 的落實指令＝`pmset -g sched` 與  round-label-ok
+#   （具名豁免：這是**交棒**，不是自稱本批屬於下一輪；交棒必須指名承接輪，改寫成 R82
+#    就把「還沒驗」講成「已經驗」，那是本檔真正要避免的假宣稱）
+#   `launchctl print gui/$(id -u)/com.autoclaude.nightly` 各跑一次。
+PMSET_WAKE_TIME="01:55:00"
+PMSET_WAKE_CMD="sudo pmset repeat wakeorpoweron MTWRFSU ${PMSET_WAKE_TIME}"
+# `pmset -g sched` 對「排程喚醒」那一列的固定字樣（man pmset）。
+PMSET_WAKE_MARK="wake or poweron"
+
+# `pmset -g sched` 全文；pmset 缺席或失敗一律回空字串（advisory 面絕不得中斷 --status）。
+_pmset_sched() {
+  command -v pmset >/dev/null 2>&1 || { echo ""; return 0; }
+  pmset -g sched 2>/dev/null || echo ""
+}
+
+_pmset_repeat_state() {
+  _sched="$(_pmset_sched)"
+  if [ -z "${_sched}" ]; then echo "無 pmset"; return 0; fi
+  case "${_sched}" in
+    *"${PMSET_WAKE_MARK}"*) echo "已排定" ;;
+    *) echo "未排定" ;;
+  esac
+}
+
+# NextRunTime 對等的**值**（憑證本身）。無則回 "(無)"。
+_pmset_next_wake_line() {
+  _sched="$(_pmset_sched)"
+  if [ -z "${_sched}" ]; then echo "(無 pmset)"; return 0; fi
+  _line="$(printf '%s\n' "${_sched}" | grep -i "${PMSET_WAKE_MARK}" | head -1 || true)"
+  _line="$(printf '%s' "${_line}" | tr -s ' ' | sed 's/^ //;s/ $//')"
+  if [ -z "${_line}" ]; then echo "(無)"; else echo "${_line}"; fi
+}
+
+_pmset_next_wake_present() {
+  case "$(_pmset_next_wake_line)" in
+    "(無)"|"(無 pmset)") echo "無" ;;
+    *) echo "有" ;;
+  esac
+}
+
 _cap_line() {
   if [ "$2" = "$3" ]; then
     echo "  ✅ $1 = $2   (expected $3)${4:-}"
@@ -267,11 +321,17 @@ report_plist_capabilities() {
   esac
   _cap_line "StandardErrorPath 位於 AutoClaude/logs" "${_err_ok}" "是" \
     "；路徑 ${_err}（同 StandardOutPath：導 /tmp 會被 macOS 週期清理，且失敗訊息優先落此）"
-  # 以下三項 Windows 有、launchd 結構上沒有對應鍵——誠實列出「無從檢查」而不是
-  # 靜默略過，讓兩側能力表能逐列對照（不列＝讀者無從得知這裡是缺口還是遺漏）。
-  echo "  －  WakeToRun 對等：launchd 原生（睡眠期間錯過的觸發於喚醒時合併補跑，man launchd.plist），無對應 plist 鍵可查"
+  # 🔴 R82 MAC-04 訂正：這三項原本一起被判成「launchd 結構上沒有對應鍵、無從檢查」。
+  #   前半句對（plist 確實沒有這些鍵），**WakeToRun／NextRunTime 的後半句是假的**——
+  #   這兩件事在 macOS 上的對等物不住在 plist 裡，住在 `pmset`，可安裝、可現查。
+  #   把「這個 plist 鍵不存在」寫成「這件事沒辦法查」，等於把一個**真缺口**（睡著的 Mac
+  #   02:00 不會醒）記成一個不存在的缺口，而 --status 照樣全綠。電池那一項維持「無對應
+  #   物」——LaunchAgent 確實不受電池阻擋，那是差異不是缺口。
+  _cap_line "WakeToRun 對等（pmset repeat 排程喚醒）" "$(_pmset_repeat_state)" "已排定" \
+    "；launchd 只在機器**醒著**時才補跑錯過的一輪，不會把睡著的 Mac 叫醒（man launchd.plist）⇒ 闔蓋過夜時 02:00 那一輪會延到開蓋才跑。未排定時執行（需提權，本腳本刻意不代跑）：${PMSET_WAKE_CMD}"
   echo "  －  電池策略對等：LaunchAgent 無 DisallowStartIfOnBatteries／StopIfGoingOnBatteries 對應鍵（不受電池阻擋）"
-  echo "  －  NextRunTime 對等：launchd 不提供 next-run 憑證——改以上方「覆蓋連續性」回填此缺口"
+  _cap_line "NextRunTime 對等（pmset -g sched 前瞻憑證）" "$(_pmset_next_wake_present)" "有" \
+    "；憑證值＝$(_pmset_next_wake_line)。回顧憑證另見上方「覆蓋連續性」——兩者並列，前瞻那一半不得再以回顧那一半頂替（反「事後諸葛」取證規則要的是這個時刻值，不是某個指令的 rc）"
   # R72：Windows -Status 有 LogonType S4U 一列，mac 側原本連「無對應鍵」的誠實列都沒有
   # ⇒ 兩側能力表深度差 1。**這不是湊數**：LaunchAgent 綁 GUI session，使用者未登入時
   # 整輪不跑，與 Windows S4U 是同一個真實限制，讀者有權在 --status 就看到它。
@@ -343,6 +403,23 @@ cmd_install() {
   fi
   echo "✅ 已安裝並載入 launchd 排程：${LABEL}（每日 02:00 → ${NIGHTLY_SH}）"
   echo "   另含 RunAtLoad：開機/載入時補跑當日錯過的一輪（載體自帶當日去重，不重複跑）"
+  # R82 MAC-04：Windows 四項排程設定的 mac 對等，逐項指出（缺哪一項就是漏跑的成因）：
+  #   StartWhenAvailable          ≙ plist RunAtLoad                （已寫入，見上一行）
+  #   DisallowStartIfOnBatteries  ≙ LaunchAgent 無對應鍵           （結構上不受電池阻擋）
+  #   StopIfGoingOnBatteries      ≙ 同上
+  #   WakeToRun                   ≙ pmset repeat wakeorpoweron     ← **不在 plist 裡**
+  # 只有最後一項需要人工動作，所以它必須出現在 install 的輸出裡，而不是只躲在 --status。
+  echo "   ── WakeToRun 對等（四項排程設定裡唯一還缺的一項）──"
+  if command -v pmset >/dev/null 2>&1; then
+    echo "   launchd 不會把睡著的 Mac 叫醒（它只在機器醒著時補跑），故 02:00 那一輪在闔蓋過夜時會延到開蓋才跑。"
+    echo "   目前 pmset 排程："
+    pmset -g sched 2>/dev/null | sed 's/^/     /' || true
+    echo "   若上面沒有『${PMSET_WAKE_MARK}』那一列，請以提權身分執行（需 sudo，本腳本刻意不代跑）："
+    echo "     ${PMSET_WAKE_CMD}"
+    echo "   （${PMSET_WAKE_TIME} 比 02:00 早 5 分鐘，讓機器醒穩再觸發；設定後的憑證＝pmset -g sched 印出的時刻值）"
+  else
+    echo "   ⚠️ 找不到 pmset ⇒ 無法設定 WakeToRun 對等：睡眠中的 Mac 到 02:00 不會醒，該輪 nightly 會延到開蓋後才補跑"
+  fi
   echo "   驗證：bash tools/install_mac_nightly.sh --status"
 }
 

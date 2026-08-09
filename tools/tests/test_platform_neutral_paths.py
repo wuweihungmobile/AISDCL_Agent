@@ -5156,7 +5156,12 @@ _IRON_LAW3_UNCOVERED_EVIDENCE: dict[str, tuple[tuple[str, ...], dict[str, str]]]
         ("shell_true", "native_shell", "原生殼"),
         {"AutoClaude/tests/test_evaluator_kill_tree.py":
          "該鎖守的是「shell=True 逾時要 kill 整棵行程樹」，對 cmd.exe ⇄ /bin/sh 的"
-         "**語意差異**（引號、`&&`、路徑分隔、rc 語意）零判準——同一個關鍵字、不同主題"},
+         "**語意差異**（引號、`&&`、路徑分隔、rc 語意）零判準——同一個關鍵字、不同主題",
+         "tools/tests/test_context_budget_guard.py":
+         "兩支命中（`test_autoclaude_shell_true_does_not_pop_a_cmd_window`／"
+         "`test_the_measured_shell_true_cmd_is_not_written_off_as_foreign`）守的是"
+         "**Windows 上會不會彈出 console 視窗**與量測器的歸因分格，對 cmd.exe ⇄ /bin/sh "
+         "的語意差異同樣零判準——與上一筆同型：同一個關鍵字、不同主題"},
     ),
 }
 #: 已知正例：本判準若對它失明，整條就是裝飾品。這組 token 指向的正是 S4-01 那一格

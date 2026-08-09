@@ -294,7 +294,7 @@ R-W6-15 已登記至 risk_log；SD_06 W0W4 估算 21 PD，與原 SD_06 PG 三層
 Architect / QA / PM
 對應簽核：DBA / Infra / SRE / Security 四方
 
-我有準備DB的環境如下, host IP:192.168.1.133, DB: aisdlc, account:koala pwd:koala5
+我有準備DB的環境如下, host IP:192.168.1.133, DB: aisdlc, account:koala pwd:your_password_here
 準備徹底執行以下, 請問我該如何進行?
 1. 請幫我確認目前的PostgreSQL的規劃, 是否有全面支援向量查詢? 若沒有請派出04.sa-analyst-zh.yaml,05.sd-architect-zh.yaml,06.dev-developer-zh.yaml幫我修正規劃執行, QA驗證!
 2. 中期	db_only production 切換	需您在 staging 跑 ≥ 24h dual_write_strict=true，監控 repo.metrics.as_dict() 全零後，PM + Stakeholder 簽核 → 更新 config.yaml: storage.mode = "db_only"。完整 SOP 見 DB_Only_Switch_Runbook.md

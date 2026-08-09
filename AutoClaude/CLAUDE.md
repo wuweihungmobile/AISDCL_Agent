@@ -1,6 +1,6 @@
 # CLAUDE.md — Claude Code Project Guidance
 
-**Last Updated**: 2026-07-19（權威以 git log 為準） | **AISDLC Version**: v0.09 | **Status**: **Improving_012 完成（三能力 A/B/C 全交付）**。Phase 3 F-A1 GoalDecomposer 收尾：`IBrain.decide_decomposition` + `supports_decomposition`（additive，capability 守門不靜默降級）+ `execution/goal_decomposer.py`（三道有界閘 ≤24 硬上限／Kahn 無環／非空 prompt，超限拒絕不重試、1 次 Brain 呼叫非遞迴）+ 🔴 signoff 硬閘 + `wiring.build_goal_decomposer` 注入 F-A2 ToolInvocationAdapter（消費 allowlist）。三方 zero-trust audit OVERALL PASS（P0=0/P1=0）。full pytest 🔴 基線數字唯一出處＝根層 ONBOARDING.md §7（出廠環境定義、選配與巢狀 session 變因、歷史校正記事均收斂該節，本檔不重複數字——R13 收斂＋`tools/check_pytest_baseline_sites.py` 機械鎖）、coverage 100%、importlinter 8 kept、LOC=0。詳見 [AutoClaude_Improving_012.md](docs/04_planning/AutoClaude_Improving_012.md) §5 Phase 3。
+**Last Updated**: 2026-07-19（權威以 git log 為準） | **AISDLC Version**: v0.09 | **Status**: **Improving_012 完成（三能力 A/B/C 全交付）**。Phase 3 F-A1 GoalDecomposer 收尾：`IBrain.decide_decomposition` + `supports_decomposition`（additive，capability 守門不靜默降級）+ `execution/goal_decomposer.py`（三道有界閘 ≤24 硬上限／Kahn 無環／非空 prompt，超限拒絕不重試、1 次 Brain 呼叫非遞迴）+ 🔴 signoff 硬閘 + `wiring.build_goal_decomposer` 注入 F-A2 ToolInvocationAdapter（消費 allowlist）。三方 zero-trust audit OVERALL PASS（P0=0/P1=0）。full pytest 🔴 基線數字唯一出處＝根層 ONBOARDING.md §7（出廠環境定義、選配與巢狀 session 變因、歷史校正記事均收斂該節，本檔不重複數字——R13 收斂＋`tools/check_pytest_baseline_sites.py` 機械鎖）、coverage 100%、importlinter kept 數以下方 Snapshot 為準（R82 新增 no-harness-import）、LOC=0。詳見 [AutoClaude_Improving_012.md](docs/04_planning/AutoClaude_Improving_012.md) §5 Phase 3。
 
 > **🔴 Important Notice 🔴** This file provides critical guidance for Claude Code (claude.ai/code). All instructions here OVERRIDE default behavior and must be followed exactly.
 
@@ -40,9 +40,7 @@
 
 **絕對禁止**：(1) 累積開發多支才編譯；(2) 編譯失敗繼續開發；(3) 跳過單元測試；(4) 測試失敗後註解掉測試。
 
-詳見：[Development_Build_Test_Cycle.md](AISDLC_v0.09/guides/user/process/Development_Build_Test_Cycle.md)。
-
-> **自動化**：CLAUDE.md §開發-編譯-測試循環為 prompt 層規範，由 LLM 自律執行；Hook 層補強規劃中（`tools/hooks/build_test_cycle.py` 為 backlog；當前由人類紀律執行）。
+詳見：[Development_Build_Test_Cycle.md](AISDLC_v0.09/guides/user/process/Development_Build_Test_Cycle.md)。本節為 prompt 層規範由 LLM 自律執行；Hook 層補強仍在下方〈Hook 治理〉的 Backlog（`build_test_cycle.py`）——R82 併行以讓出 Snapshot 增列所需行數（同一件事原本寫在兩處）。
 
 ---
 
@@ -339,7 +337,7 @@ tasks:
 | absolute_limit | ≤ 750 | 全域絕對紅線（任何層級不得超）|
 | special: CLAUDE.md | ≤ 400 | ADR-SD08-001 文件治理 |
 
-### importlinter Rules（目前 8 kept）
+### importlinter Rules（目前 9 kept）
 1. Plugins must not import other plugins (use EventBus instead)
 2. autoclaude.core (excl. wiring) must not depend on execution or infra layers
 3. _runner_internals must not be imported by core or plugins
@@ -348,6 +346,7 @@ tasks:
 6. playbook_runner / strategy modules must not import checkpoint internal modules (use CheckpointPlugin public API)
 7. Plugins must not directly import utils.observability helpers (use IObservabilityPort)
 8. Plugin must not directly import IKbMetricStore (use FailureKnowledgeBase routing)
+9. autoclaude must not import monorepo harness modules (consume the file contract instead)
 
 ### Plugin 列表（18 個 active / 19 個靜態，按 wiring._REGISTER_ORDER）
 1. pre_run_validator
@@ -370,7 +369,7 @@ tasks:
 18. goto_counter
 19. checkpoint
 
-### Port 列表（18 個，autoclaude/core/ports/）
+### Port 列表（19 個，autoclaude/core/ports/）
 - brain
 - embedder
 - evaluator
@@ -381,6 +380,7 @@ tasks:
 - observability
 - playbook_repository
 - preference_store
+- quota_meter
 - rtm_feedback
 - rtm_sink
 - spec_source

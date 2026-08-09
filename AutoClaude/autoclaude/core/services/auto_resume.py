@@ -68,6 +68,7 @@ class AutoResumeService:
         config: AppConfig,
         *,
         state_repository: Any | None = None,
+        quota_meter: Any | None = None,
     ):
         """初始化 AutoResumeService。
 
@@ -81,6 +82,8 @@ class AutoResumeService:
         self._kernel = kernel
         self._cfg = config
         self._state_repo = state_repository
+        # R82（ACQ-05）：QuotaMeterPort（可選）。None＝額度那一軸不存在，行為與修前相同。
+        self._quota = quota_meter
         # SD_05 W5 批3-C / M-9：metrics observability
         self._metrics = AutoResumeMetrics()
 
@@ -255,7 +258,7 @@ class AutoResumeService:
                 # R81：`result.scheduled_resume_at` 在 Kernel 路徑上恆為 None（見
                 # _persist_halt_checkpoint 內的說明與實測），故以本輪剛排定的時刻兜底。
                 sched = result.scheduled_resume_at or halt_sched
-                wait_secs = seconds_until_resume(sched)
+                wait_secs = self._halt_wait_seconds(sched)
                 logger.info(
                     "AutoResumeService | AUTO_RESUME #%d/%d | 等待 %.0fs 後繼續",
                     auto_resume_count, max_resumes, wait_secs,
@@ -269,18 +272,52 @@ class AutoResumeService:
 
             return result
 
+    # 🔴 R82（ACQ-05／ACA-01）：halt 之後「等多久」。
+    # 修前一律讀寫死的 `resume_delay_minutes=30`，而實測額度視窗 min 0.5 分／max 253 分
+    # ——**沒有一段等於 30 分**。reset 時刻只能觀測不能算（R79 全庫逐字稿掃出 7 個相異值、
+    # 沒有一個落在 5 小時格點上＝滾動視窗），所以這裡只採信量測到的 `resets_at`。
+    # 三分支（ADR-XPLAT-005 §2.3）：
+    #   session / five_hour → 等到 resets_at（+ 已由 resume_wait_seconds 夾 0 下界）
+    #   weekly / spend      → resume_wait_seconds 回 None ⇒ 落回既有 context 路徑的排程；
+    #                         那類「沒有 reset 可等」，排程是錯的動作（見下方 WARNING）
+    #   量不到               → 同上，行為與修前位元級相同
+    # 🔴 誠實劃界：這一段只在**行程還活著**時成立。行程一死（Ctrl+C／關機／額度撞線把
+    # subagent 全殺）就沒有人會回來——那一半屬於 OS 級喚醒，由 monorepo 根層的哨兵
+    # （tools/session_resume_planner.py --arm-sentinel）負責，AutoClaude 刻意不自己再蓋
+    # 一支排程器（兩支排程器＝同一份知識住兩個家）。
+    # 🔴 水位低於 quota_throttle_pct 時**完全不碰**額度那一軸：這一支同時服務 context halt，
+    # 而 context halt 與額度無關——不設這道門的話，每一次 context halt 都會印一行
+    # 「額度 kind=weekly_all 沒有等得到的 reset」，那是與本次 halt 無關的假訊號。
+    def _halt_wait_seconds(self, sched: str | None) -> float:
+        reading = self._quota.read() if self._quota is not None else None
+        if reading is None or reading.pct < self._cfg.token_guard.quota_throttle_pct:
+            return seconds_until_resume(sched)
+        from ..ports.quota_meter import resume_wait_seconds
+        quota_wait = resume_wait_seconds(reading)
+        if quota_wait is None:
+            logger.warning(
+                "AutoResumeService | 額度 kind=%s 沒有等得到的 reset（resets_at=%s）"
+                "——不以額度時刻排程，落回既有排程；請人工決定何時重啟",
+                reading.kind, reading.resets_at,
+            )
+            return seconds_until_resume(sched)
+        logger.info(
+            "AutoResumeService | 依觀測到的額度 reset 排程：kind=%s resets_at=%s 等待 %.0fs",
+            reading.kind, reading.resets_at, quota_wait,
+        )
+        return quota_wait
+
+    # improving_78 W-78-1（DEF-78-001）：存最小 token HALT checkpoint。
+    # resume 點 = `result.halt_step_idx`（Kernel HALT 當下步驟）。Kernel 為純 DAG 不持有
+    # path，故 path-aware 持久化落在本協調層（握 _current_path）。
+    # state_repository=None（dry-run / 舊測試）→ no-op，維持向後相容。
+    # 🔴 誠實限制：跨 session 計數器（goto/inject/skip/evolution）不隨此最小 checkpoint
+    # 持久化（預設空 dict）；核心 resume 資料（step_idx/peak/已完成）齊備。
+    # 🔴 R82：本段由 docstring 改 `#` 註解，**一字未刪**——理由同 policy.py 內同型註記
+    # （check_loc_budget 自己印的指引：說明寫 # 註解，docstring 會被 count_loc 計入）。
     def _persist_halt_checkpoint(
         self, playbook_path: str, playbook: Playbook, result: KernelResult,
     ) -> str | None:
-        """improving_78 W-78-1（DEF-78-001）：存最小 token HALT checkpoint。
-
-        resume 點 = ``result.halt_step_idx``（Kernel HALT 當下步驟）。Kernel 為純 DAG
-        不持有 path，故 path-aware 持久化落在本協調層（握 _current_path）。
-
-        state_repository=None（dry-run / 舊測試）→ no-op，維持向後相容。
-        🔴 誠實限制：跨 session 計數器（goto/inject/skip/evolution）本輪不隨此最小
-        checkpoint 持久化（預設空 dict）；核心 resume 資料（step_idx/peak/已完成）齊備。
-        """
         if self._state_repo is None:
             return
         step_idx = result.halt_step_idx if result.halt_step_idx is not None else 0

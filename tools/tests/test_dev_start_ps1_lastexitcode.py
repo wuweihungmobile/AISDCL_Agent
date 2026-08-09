@@ -67,6 +67,7 @@ import unittest
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+from _platform_helpers import usable_bash_for_fixture  # noqa: E402  # R82 CARRIER-02
 from _ps_engine import any_engine_available, production_engine  # noqa: E402  # R60 E-A-03
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -221,7 +222,10 @@ _DS_UNSET = "__UNSET__"
 
 
 def _ds_shell_path(name: str) -> str | None:
-    """回傳可用的 shell 路徑（`shutil.which` 找不到時退回 /bin/<name>，macOS 系統 zsh）。"""
+    """回傳可用的 shell 路徑（`shutil.which` 找不到時退回 /bin/<name>，macOS 系統 zsh）。
+
+    🔴 R82 CARRIER-02：`bash` **不走這條路**——見下方 `_SH_BASH`。本函式只服務 zsh。
+    """
     found = shutil.which(name)
     if found:
         return found
@@ -230,7 +234,19 @@ def _ds_shell_path(name: str) -> str | None:
 
 
 _ZSH = _ds_shell_path("zsh")
-_SH_BASH = _ds_shell_path("bash")
+# 🔴 R82 CARRIER-02：bash 走 `_platform_helpers.usable_bash_for_fixture()`（本樹取得
+# 「真的能跑 .sh 的 bash」的唯一真相源，含 System32 整段排除＋驗活探測），不用
+# `shutil.which("bash")`——後者在本機實測回 `C:\WINDOWS\system32\bash.EXE`（WSL 佔位版）。
+_SH_BASH = usable_bash_for_fixture()
+# 🔴 zsh 三支的 skip 理由（R82 CARRIER-02 補標籤）：class 級 skip 被收窄之後，這三支的
+# 理由第一次真的會被 census 讀到，而它原本沒有標籤 ⇒ 會直接讓 `untagged` 由 0 變 3。
+# 標 `[MAC-NATIVE-ONLY]` 而非 `[TOOL-ABSENCE]`：本輪實測 Windows 與 act 的 Linux 映像
+# **都沒有 zsh**（`which zsh` 兩邊皆空），這三支守的是 macOS 預設殼下 `ZSH_EVAL_CONTEXT`
+# ／`${(%):-%x}` 的語意，唯一跑得到的家就是 darwin ⇒ 它是平台結構性、不是裝一下就好。
+_ZSH_SKIP_REASON = (
+    "[MAC-NATIVE-ONLY] 本機無 zsh（macOS 預設殼）——zsh 專屬語意（ZSH_EVAL_CONTEXT／"
+    "${(%):-%x}）只有 darwin 剖面跑得到；Windows 與 act 的 ubuntu 映像實測皆無 zsh"
+)
 
 
 # 🔴 R79（D-skipped #6）：reason 前綴補 `[POSIX-NATIVE-ONLY]`。這個站點與同 repo 8 筆
@@ -240,11 +256,19 @@ _SH_BASH = _ds_shell_path("bash")
 # 者照那份輸出讀，會把「補環境就能救回」的工作量高估一倍，或反過來去修根本不該在
 # Windows 跑的測試。標上之後 `_POSIX_TAG_RATCHET["tools/tests"]` 由 1 降為 0（連同
 # shrink-only 天花板一起下修——天花板不跟著降＝把剛還掉的欠債額度留著日後無聲用回去）。
+# 🔴 R82 CARRIER-02：class 級述詞由 `os.name == "nt"` 改成「兩支殼都解不到」。
+#
+# 舊述詞把 6 支整組判成 `[POSIX-NATIVE-ONLY]`，理由是「不在 Windows 上驗證非目標平台
+# 的殼」。R82 逐支實跑推翻了那個歸類：Windows 上 **Git Bash 是真的 bash**（不是模擬層），
+# 上面七項契約（sourced 偵測、`${BASH_SOURCE[0]}` 路徑解析、rc 透傳、venv 啟用、零殘留）
+# 走的就是 `.sh` 那條程式碼路徑，一項都沒有依賴 POSIX 專屬語意。實測：只把 `_SH_BASH`
+# 換成 Git Bash 絕對路徑，bash 三支立刻 2 綠 1 紅，而唯一那個紅是斷言把 `/` 與 `\` 當成
+# 不同字串（Git Bash 回報的 `VIRTUAL_ENV` 用正斜線），不是受測物的行為缺陷。
+# ⇒ 這 6 支裡真正 mac-only 的只有 zsh 那 3 支（見各自的 method 級 skip）。
 @unittest.skipIf(
-    os.name == "nt",
-    "[POSIX-NATIVE-ONLY] tools/dev_start.sh 檔頭自陳為 macOS/Linux 專用"
-    "（Windows 對等＝tools/dev_start.ps1，由本檔第一部分覆蓋）"
-    "——不在 Windows 上驗證非目標平台的殼",
+    _ZSH is None and _SH_BASH is None,
+    "[TOOL-ABSENCE] 本機 zsh 與 bash 都解不到——`tools/dev_start.sh` 的兩條殼路徑"
+    "一條都跑不起來（缺的是直譯器，不是平台語意）",
 )
 class TestDevStartShShellCarrier(unittest.TestCase):
     """在 tmp fake repo 內以真 shell 實跑真 dev_start.sh（stub 核心／stub activate）。"""
@@ -351,10 +375,18 @@ class TestDevStartShShellCarrier(unittest.TestCase):
         self.assertEqual(rc, 0, f"stdout={out}\nstderr={err}")
         post = self._post()
         self.assertEqual(post["RC"], "0", f"source 的 rc 非 0：{post}")
+        # 🔴 R82 CARRIER-02：比 `Path` 而不是比字串。本斷言問的是「有沒有啟用 .venv」，
+        # 不是「用哪個分隔符拼路徑」——Git Bash 回報的 `VIRTUAL_ENV` 是正斜線形態
+        # （`C:/Users/.../repo/.venv`），字串比對會把一次**成功**的啟用判成失敗。
+        # 這不是放寬：`_DS_UNSET`（沒啟用）與別的目錄都仍然會紅，見下方對照斷言。
+        self.assertNotEqual(
+            post["VENV"], _DS_UNSET,
+            "被 source 時必須自動啟用 .venv（VIRTUAL_ENV），實得未設定——"
+            "這是 ONBOARDING §2.1 對使用者承諾的唯一可觀測效果",
+        )
         self.assertEqual(
-            post["VENV"], str(self.root / ".venv"),
-            f"被 source 時必須自動啟用 .venv（VIRTUAL_ENV），實得 {post['VENV']!r}——"
-            f"這是 ONBOARDING §2.1 對使用者承諾的唯一可觀測效果",
+            Path(post["VENV"]), self.root / ".venv",
+            f"VIRTUAL_ENV 指向的不是受測樹的 .venv：{post['VENV']!r}",
         )
         self.assertEqual(
             (post["DSSOURCED"], post["DSRC"]), (_DS_UNSET, _DS_UNSET),
@@ -404,7 +436,7 @@ class TestDevStartShShellCarrier(unittest.TestCase):
 
     # -------------------------------------------------------------------- zsh
 
-    @unittest.skipIf(_ZSH is None, "本機無 zsh（macOS 預設 shell）——zsh 分支無法實跑")
+    @unittest.skipIf(_ZSH is None, _ZSH_SKIP_REASON)
     def test_zsh_sourced_happy_path(self) -> None:
         """zsh source：不殺 shell、路徑解析正確、參數透傳、自動啟用 venv、零殘留。
 
@@ -412,11 +444,11 @@ class TestDevStartShShellCarrier(unittest.TestCase):
         """
         self._assert_sourced_happy_path(_ZSH)
 
-    @unittest.skipIf(_ZSH is None, "本機無 zsh（macOS 預設 shell）——zsh 分支無法實跑")
+    @unittest.skipIf(_ZSH is None, _ZSH_SKIP_REASON)
     def test_zsh_core_failure_propagates_and_does_not_activate(self) -> None:
         self._assert_core_failure_propagates(_ZSH)
 
-    @unittest.skipIf(_ZSH is None, "本機無 zsh（macOS 預設 shell）——zsh 分支無法實跑")
+    @unittest.skipIf(_ZSH is None, _ZSH_SKIP_REASON)
     def test_zsh_executed_not_sourced(self) -> None:
         self._assert_executed_not_sourced(_ZSH)
 
@@ -455,6 +487,60 @@ class TestDevStartShProbeStructure(unittest.TestCase):
         self.assertIn(
             "self.assertTrue(\n            self.post_marker.exists(),", src,
             "缺少「證物檔必須存在」的斷言——那正是把 in-process 失明轉成紅燈的那一行",
+        )
+
+    def test_the_bash_leg_is_gated_on_the_carrier_not_on_the_host_platform(self) -> None:
+        """🔴 R82 CARRIER-02 回歸鎖：class 級 skip 述詞不得再問「這台機器是不是 Windows」。
+
+        WHY（Rule 9 — 鎖意圖）：bash 那 3 支在 Windows 上是**真的跑得起來**的（本輪實測
+        `OK (skipped=3)`，skip 的全是 zsh）。把它們判成 `[POSIX-NATIVE-ONLY]` 不只是少跑
+        3 支，而是把一個**載具故障**（`shutil.which("bash")` 解到 System32 的 WSL 佔位版）
+        永久登記成「平台語意」——分類寫錯之後，S3 的分流者就再也不會回頭看它。
+        退回舊述詞（`os.name == "nt"`／`sys.platform`）在 pytest 摘要上是綠的、rc 是 0，
+        沒有這一支就零訊號。
+        """
+        import ast  # noqa: PLC0415  — 只有本支需要，不進模組 import 期
+
+        src = Path(__file__).read_text(encoding="utf-8")
+        tree = ast.parse(src)
+        decorator_src: str | None = None
+        for node in ast.walk(tree):
+            if isinstance(node, ast.ClassDef) and node.name == "TestDevStartShShellCarrier":
+                for deco in node.decorator_list:
+                    decorator_src = ast.get_source_segment(src, deco)
+        self.assertIsNotNone(
+            decorator_src,
+            "抓不到 TestDevStartShShellCarrier 的 class 級 decorator——結構已變動，"
+            "請同步本鎖（抽不到時 fail-loud，不得靜默放行）",
+        )
+        for banned in ("os.name", "sys.platform", "platform.system"):
+            self.assertNotIn(
+                banned, decorator_src,
+                f"class 級 skip 述詞又出現平台判斷 `{banned}`：{decorator_src!r}"
+                "——CARRIER-02 迴歸；述詞只准問「解不解得到 zsh／bash」",
+            )
+        self.assertIn(
+            "_SH_BASH", decorator_src,
+            f"class 級 skip 述詞不再依賴 `_SH_BASH`：{decorator_src!r}",
+        )
+
+    def test_the_bash_carrier_comes_from_the_shared_ssot(self) -> None:
+        """`_SH_BASH` 必須由 `_platform_helpers.usable_bash_for_fixture()` 供給。
+
+        上一支只驗「述詞問的是 `_SH_BASH`」——把 `_SH_BASH` 改回
+        `shutil.which("bash")` 仍然全綠，而本機實測那會拿到
+        `C:\\WINDOWS\\system32\\bash.EXE`（WSL 啟動器，DEF-101-753 的原坑）。
+        兩支合起來才把「述詞形狀」與「載具來源」都釘住。
+        """
+        if _SH_BASH is None:
+            self.skipTest("[TOOL-ABSENCE] 本機解不到任何可用 bash——載具判準無標的可驗")
+        self.assertNotIn(
+            "system32", [p.lower() for p in Path(_SH_BASH).parts],
+            f"_SH_BASH 解析到 System32：{_SH_BASH!r}——那是 WSL 啟動器，不是真 bash",
+        )
+        self.assertEqual(
+            _SH_BASH, usable_bash_for_fixture(),
+            "_SH_BASH 與共用 SSOT 的結果不一致——本檔疑似又自帶了一份解析邏輯",
         )
 
 

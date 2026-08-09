@@ -74,6 +74,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _stdio_utf8  # noqa: E402,F401  # Windows 非 UTF-8 終端 print(✅/❌) 防崩潰保護
 from lib import defect_ledger_index as _ledger_index  # noqa: E402
 from lib import governance_docs as _gov_docs  # noqa: E402
+from lib import ledger_rotation as _rotation  # noqa: E402
 
 _REPO_ROOT = Path(__file__).resolve().parents[1]
 _DEFECT_LOG = _REPO_ROOT / "docs" / "06_quality" / "AutoSDD_Defect_Log.md"
@@ -624,19 +625,29 @@ _UNASSIGNED_LITERAL = "未指派"
 #: 推得的當前輪，而「交棒給下一輪」的輪號依定義就是當前輪＋1 ⇒ 寫進來即當場轉紅
 #: （本輪實測撞到）。輪號的唯一真相源是帳本那八列自己。
 #: 逐筆理由與當回合實查證據見 `docs/06_quality/CrossPlatform_R81_Ledger_Triage.md` §5。
+#: 🔴 第六次轉動：18 → 17。刪掉 `DEF-101-234`——該列自述為 touch-it-fix-it watch、
+#: 無獨立行動項也無 owner，帳本清債包實查其前提（`check_script_parity._EXEMPT_PAIRS`
+#: 兩對皆仍帶文件化豁免與決策依據，且 `run_self_evolution` 另已補上退出碼契約三方鎖）
+#: 後改為 `closed-by-decision`，依「已結案」條款不再需要豁免。刪除＋同步下修正是
+#: `stale_grandfather_problems()` 訊息**自己指名**的動作，不是放寬。
+#: 🔴 第七次轉動：17 → 6。R82 帳本清債包一次結掉 11 筆（`DEF-101-055`／`214`／`217`／
+#: `308`／`309`／`313`／`335`／`348`／`400`／`401`／`412`），逐筆的當回合複驗證據與
+#: 原列逐字原文見 `CrossPlatform_R82_Ledger_Closure.md` §8。已結案 ⇒ 依「三選一即算不再
+#: 需要豁免」不得留在表內；刪除＋同步下修正是 `stale_grandfather_problems()` 訊息
+#: **自己指名**的動作，不是放寬。
 _UNPINNED_HANDOVER_GRANDFATHERED = frozenset({
-    "DEF-101-055",
-    "DEF-101-206", "DEF-101-214", "DEF-101-217", "DEF-101-234", "DEF-101-235",
-    "DEF-101-238",
-    "DEF-101-308", "DEF-101-309", "DEF-101-313", "DEF-101-324",
-    "DEF-101-335", "DEF-101-348", "DEF-101-377", "DEF-101-392",
-    "DEF-101-400", "DEF-101-401", "DEF-101-412",
+    "DEF-101-206", "DEF-101-235", "DEF-101-238",
+    "DEF-101-324", "DEF-101-377", "DEF-101-392",
 })
 #: shrink-only 棘輪上限（形狀比照 `tools/tests/` 的檔數棘輪）。只能往小改。
 #: 🔴 R80 包 C 下修 34 → 28：`DEF-01-007`／`DEF-100-002`／`DEF-101-021`／`022`／`025`／
 #: `418` 六筆已結案（逐筆實查見 `CrossPlatform_R80_Scan_Findings.md` §C），不再需要豁免。
 #: 是判準自己指名的動作（訊息逐字要求刪除並下修為 28），不是放寬。
-_UNPINNED_HANDOVER_CEILING = 18
+_UNPINNED_HANDOVER_CEILING = 6
+
+#: 🔴 本天花板的**方向鎖**（`DEF-101-993`）：`grandfather_ceiling_problems()` 判的是
+#: 「清單筆數 ≤ 天花板」，對「把天花板往上搬」零判準。判準、重釘史與 WHY 皆住
+#: `tools/lib/ledger_rotation.py`（單一實作、單一史料家）。
 
 
 def unpinned_handover_problems(ledger_text: str) -> list[str]:
@@ -744,6 +755,11 @@ def grandfather_ceiling_problems() -> list[str]:
         f"若你確實刪了名單裡的存量而只是忘了同步下修天花板，請把 "
         f"{Path(__file__).name} 的 _UNPINNED_HANDOVER_CEILING 改成 {actual} 或更小。"
     ]
+
+
+def ratchet_direction_problems() -> list[str]:
+    """三條 shrink-only 棘輪的方向鎖（薄轉呼；判準與史料的家＝`lib/ledger_rotation.py`）。"""
+    return _rotation.ratchet_direction_problems(_UNPINNED_HANDOVER_CEILING)
 
 
 def lagging_clock_notes(ledger_text: str) -> list[str]:
@@ -1354,6 +1370,10 @@ def main() -> int:
     # 繞過棘輪」。R68 只寫了註解與常數、零比較，白名單因此可無聲膨脹（見函式 docstring
     # 的實測復現）。
     ceiling_problems = grandfather_ceiling_problems()
+    # 🔴 同一個名目下的另一半（R82，`DEF-101-993`）：上面那道判「清單有沒有超過天花板」，
+    # 這一道判「天花板自己有沒有被往上搬」。少了它，三條棘輪都只是收費站——把常數調高到
+    # 新實測值即可全綠（實測，見 ratchet_direction_problems docstring）。同樣**無條件**跑。
+    ceiling_problems += ratchet_direction_problems()
     if ceiling_problems:
         return _bail("存量豁免棘輪被撐大", ceiling_problems)
 

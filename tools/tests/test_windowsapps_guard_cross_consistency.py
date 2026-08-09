@@ -1501,6 +1501,20 @@ _ZERO_GUARD_BARE_PY_SITES = {
         "（`\"python -m pip install \" + …`）——本行程只 print 它、不 spawn。"
         "R68 新增：缺第三方相依時 runner fail-fast 並印出這行修法"
     ),
+    "tools/probe/console_spawn_watch.py": (
+        "非呼叫：`str(record.get(\"ParentName\") or \"\").lower().startswith(\"python\")` "
+        "的**比對字面**。那個字串是 WMI 從 OS **讀回來**的行程映像名，判準只拿它分類"
+        "（`cmd.exe` 的父行程是不是 Python ⇒ `shell=True` 的形狀），一次都不交給 "
+        "subprocess／shell／`shutil.which` 去解析 ⇒ 沒有 PATH 撞 WindowsApps 的暴露面。"
+        "與同表 `tools/check_wrapper_thinness.py`（禁用子字串樣式字面值）、"
+        "`tools/lib/script_interface_parity.py`（外部執行檔白名單資料）同型：都是**資料**"
+        "而非指令。同檔 L71 的 `\"python.exe\"` 不匹配 `_BARE_PY_COMMAND_RE`（後接 `.`）。"
+        "🔴 立此筆的成因與上一筆 `tools/probe/xplat_injection_matrix.py`、"
+        "`tools/lib/script_interface_parity.py` **逐字同型，至此第四次**："
+        "該檔是 R82 新增、`git add` 的那一刻才進入本鎖射程（掃描面只看 git-tracked）。"
+        "前三次都只把個案登記掉，沒有人動「收尾在 tracked 狀態改變前跑」這個順序，"
+        "所以它必然再來——這一次至少是在 commit **之前**被抓到的。"
+    ),
     "tools/probe/xplat_injection_matrix.py": (
         "非呼叫：`Gate.describe` 欄位的**人可讀說明字串**"
         "（`\"python tools/run_root_unittests.py（根層護欄層全套）\"`），"

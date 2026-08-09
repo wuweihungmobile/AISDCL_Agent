@@ -10,7 +10,9 @@
 # ── Claude Code CLI 設定 ─────────────────────────────────────────
 claude:
   command: "claude"
-  extra_args: ["--yes"]
+  # R82 ACB-01：`--yes` 不是 Claude Code 旗標（實測 rc=1 unknown option），已移除。
+  # 需免權限提示時改：["--permission-mode", "bypassPermissions"]
+  extra_args: []
   continue_flag: "--continue"   # 維持對話脈絡
   encoding: "utf-8"
 
@@ -65,7 +67,10 @@ token_guard:
 
 # ── 桌面通知 ─────────────────────────────────────────────────────
 notification:
-  enabled: true
+  # R82 ACC-01：預設 false＝不彈桌面通知（彈窗是 POST_RUN 才發、會把行程多吊住 duration 秒）。
+  # 臨時想看：設 true，或 env AUTOCLAUDE_DESKTOP_NOTIFY=1（雙向開關，見 .env.example）。
+  enabled: false
+  duration_seconds: 3                # 彈窗停留秒數＝行程結束時被吊住的上界
   webhook_url: null                  # 選填：Slack/Teams webhook
 
 # ── 儲存後端（Phase 6 三段開關） ──────────────────────────────────

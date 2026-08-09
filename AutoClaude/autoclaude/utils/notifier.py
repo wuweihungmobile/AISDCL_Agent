@@ -14,7 +14,18 @@ from datetime import datetime
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from .platform_caps import is_macos
+from .platform_caps import is_macos, is_windows
+
+# 🔴 R82（ACC-01）：彈窗預設停留秒數由 10 降到 3。
+# WHY：plyer 的 Windows 後端把 balloon_tip 丟進一個**非 daemon** 執行緒並 `time.sleep(timeout)`，
+# 非 daemon 執行緒會拖住 process exit ⇒ 這個數字就是「跑完之後行程還要多活多久」。
+# 獨立實測（未觸發任何彈窗）：主程式印完 `main_done daemon= False` 後，外層碼錶仍量到
+# wall_ms=3038（sleep 3s 的非 daemon 執行緒）——行程確實等滿。
+# 這裡刻意**不**把 plyer 的呼叫包進自己的 daemon thread：plyer 內部那個非 daemon 執行緒還在，
+# 外層 daemon 化解決不了，只會多一層假象。真正有效的兩件事是「預設不彈」＋「縮短 timeout」。
+# `duration=0` 未採用：balloontip.py 的 `if timeout:` 會跳過 sleep，但物件隨即可能被 GC 而
+# `__del__` 立刻移除氣泡＝使用者根本看不到——該行為未實測，不照抄。
+DEFAULT_DURATION_SECONDS = 3
 
 if TYPE_CHECKING:
     from autoclaude.utils.config import AppConfig
@@ -49,7 +60,10 @@ def notify_escalation(title: str, message: str, dump_path: str, cfg: AppConfig) 
         )
 
 
-def notify(title: str, message: str, duration: int = 10, enabled: bool = True) -> None:
+def notify(
+    title: str, message: str,
+    duration: int = DEFAULT_DURATION_SECONDS, enabled: bool = True,
+) -> None:
     """
     在桌面右下角彈出通知泡泡。失敗時靜默降級為 log。
 
@@ -63,24 +77,17 @@ def notify(title: str, message: str, duration: int = 10, enabled: bool = True) -
         return
     if is_macos() and _try_osascript(title, message):
         return
-    if _try_win10toast(title, message, duration):
+    # R82（ACC-01）：補平台守門。win10toast 是 Windows 專屬（內部拉 win32 API），
+    # 此前對非 Windows 也會呼叫、只靠 import 失敗兜底——那是「靠例外當控制流」。
+    if is_windows() and _try_win10toast(title, message, duration):
         return
     logger.info("[NOTIFY] %s | %s", title, message)
 
 
-class Notifier:
-    """
-    通知器物件包裝，由 PlaybookRunner 在初始化時注入。
-    可從 AppConfig 統一讀取 enabled 狀態，避免每個呼叫端各自判斷。
-    """
-
-    def __init__(self, enabled: bool = True):
-        self.enabled = enabled
-
-    def __call__(self, title: str, message: str, duration: int = 10) -> None:
-        notify(title, message, duration=duration, enabled=self.enabled)
-
-
+# 🔴 R82（ACQ-03 的等量減法之一）：此處原有一個 `Notifier` 類別，docstring 寫「由
+# PlaybookRunner 在初始化時注入」——實查全庫**零建構點、零 import**（`Notifier(` 只命中
+# 測試裡的 `_SpyNotifier` 與 win10toast 的 `ToastNotifier`，是同名子字串不是它）。
+# 它是死碼；`notify()` 這個模組級函式才是所有呼叫端真正在用的入口。刪除以讓出 LOC 預算。
 def _try_plyer(title: str, message: str, duration: int) -> bool:
     try:
         from plyer import notification  # type: ignore

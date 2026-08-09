@@ -157,7 +157,7 @@ Stop-Service -Name "postgresql-x64-18"
 # 啟動 pgvector 官方映像（PostgreSQL 18 版）
 docker run -d --name pgvector-db -p 5432:5432 `
     -e POSTGRES_USER=koala `
-    -e POSTGRES_PASSWORD=koala5 `
+    -e POSTGRES_PASSWORD=your_password_here `
     -e POSTGRES_DB=aisdlc `
     pgvector/pgvector:pg18
 ```
@@ -169,7 +169,7 @@ docker run -d --name pgvector-db -p 5432:5432 `
 ```sql
 -- 在 DB 主機執行：psql -U postgres
 CREATE DATABASE aisdlc;
-CREATE USER koala WITH PASSWORD 'koala5';
+CREATE USER koala WITH PASSWORD 'your_password_here';
 GRANT ALL ON DATABASE aisdlc TO koala;
 
 -- 在 aisdlc DB 安裝 pgvector extension
@@ -182,7 +182,7 @@ CREATE EXTENSION IF NOT EXISTS vector;
 ```bash
 python -c "
 import psycopg2
-conn = psycopg2.connect(host='192.168.1.133', dbname='aisdlc', user='koala', password='koala5')
+conn = psycopg2.connect(host='192.168.1.133', dbname='aisdlc', user='koala', password='your_password_here')
 cur = conn.cursor()
 cur.execute('SELECT version()')
 print(cur.fetchone()[0])
@@ -236,7 +236,7 @@ from autoclaude.utils.config import StorageConfig
 import os; os.environ["AUTOCLAUDE_ALLOW_INSECURE_DB"] = "1"
 cfg = StorageConfig(
     mode="both",
-    db_dsn="postgresql+asyncpg://autoclaude_runtime:runtime_autoclaude_2026@192.168.1.133/aisdlc",
+    db_dsn="postgresql+asyncpg://autoclaude_runtime:your_password_here@192.168.1.133/aisdlc",
     dual_write_strict=True, dual_read_resolution="fail_loud",
 )
 repo = build_state_repository(".autoclaude_checkpoints", cfg)
@@ -271,7 +271,7 @@ cp -r .autoclaude_checkpoints .autoclaude_checkpoints.backup_$(date +%Y%m%d)
 
 ```bash
 # 確認 AUTOCLAUDE_MIGRATE_DSN 指向 migrate role
-export AUTOCLAUDE_MIGRATE_DSN="postgresql://koala:koala5@192.168.1.133/aisdlc"
+export AUTOCLAUDE_MIGRATE_DSN="postgresql://koala:your_password_here@192.168.1.133/aisdlc"
 export AUTOCLAUDE_ALLOW_INSECURE_DB=1  # 本地網路暫時跳過 TLS（production 應移除）
 
 # 執行所有 migrations（0001 → 0002 → 0004_pgvector）

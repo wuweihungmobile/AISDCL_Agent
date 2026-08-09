@@ -9,8 +9,16 @@
 ;   PYTHONUTF8=1 lint-imports
 
 [importlinter]
+; 🔴 R82（ACQ-02）：`tools` 加入 root_packages。
+; WHY：修前只有 `autoclaude` 一個根 ⇒ `import tools.lib.quota_meter` 這種「套件反過來
+; 依賴 monorepo harness 內臟」的方向，對 grimp 而言是**套件外 external import**、根本
+; 不進依賴圖，於是八條 contract 全部照樣 KEPT（實測 `Analyzed 205 files ... 8 kept,
+; 0 broken`，而那 205 支全在 autoclaude/ 內）。ADR §5 M11 自己記過「假機械物比沒有
+; 機械物更糟」——這就是那個假機械物。
+; 把 tools 拉進圖之後，下方 Rule 9 才真的看得見這個方向。
 root_packages =
     autoclaude
+    tools
 
 ; Rule 1: plugin-to-plugin imports are forbidden (use EventBus instead)
 [importlinter:contract:plugin-isolation]
@@ -246,3 +254,38 @@ ignore_imports =
     autoclaude.infra.repositories.factory -> autoclaude.infra.adapters.local_kb_metric_store
     autoclaude.infra.repositories.factory -> autoclaude.infra.adapters.pg_kb_metric_store
     autoclaude.infra.adapters.local_kb_metric_store -> autoclaude.core.ports.kb_metric_store
+
+; ─────────────────────────────────────────────────────────────
+; Rule 9（R82 / ACQ-02 — ADR-XPLAT-005 §5 M11）：套件不得反向依賴 monorepo harness。
+;
+; 設計動機：
+;   R82 落地「額度水位」載體二時，最省事的寫法是讓 adapter 直接
+;   `import tools.lib.quota_meter`（根層那支已經算好 %）。那違反 ADR-XPLAT-004 §4
+;   「套件不得依賴 harness 內臟」——AutoClaude 是可安裝的套件，harness 只是它此刻
+;   所在的 monorepo，pip install 之後 `tools` 根本不存在。
+;   而修這條之前**沒有任何閘門擋得住它**：`root_packages` 只有 `autoclaude` 一個根，
+;   `tools.*` 是套件外 external import、不進 grimp 的圖，八條 contract 全綠。
+;   （對照實測：加 `tools` 進 root_packages 後 Analyzed 由 205 → 252 files。）
+;
+; 唯一合規路徑：走**檔案契約**——adapter 只讀 `%TEMP%/autosdd_quota.json`
+;   （純 stdlib json + tempfile），檔不在／schema 不符／過期一律回「量不到」。
+;   見 autoclaude/infra/adapters/file_quota_meter.py 與 core/ports/quota_meter.py。
+;
+; 方向刻意只鎖 autoclaude → tools 這一向：反向（tools 讀 autoclaude，例如
+;   tools/snapshot_sync.py）是 harness 對套件的合法消費，不在此契約射程內。
+;
+; 🔴 誠實劃界（實測，不是推測）：本 contract 只抓得到 **grimp 解析得出來** 的 tools 模組。
+;   注入 `import tools.check_loc_budget`（AutoClaude/tools/ 下真的有這支）→ rc=1、
+;     逐字 `Contracts: 8 kept, 1 broken.` ✅
+;   注入 `import tools.lib.quota_limits`（那是 **monorepo 根層** 的 tools/，cwd=AutoClaude
+;     時解析不到）→ rc=0、`9 kept, 0 broken.` ❌ —— importlinter 對「解析不到的模組」是沉默的。
+;   那個缺口由純語法判準補：tests/test_r82_quota_axis_and_shipped_defaults.py::TestNoHarnessImport
+;   （ast.walk 掃 autoclaude/**/*.py，模組名首段落在 {tools,_claude} 或字面含 .claude 即紅；
+;    該判準自帶合成注入自證，不依賴模組是否 import 得到）。兩者是互補不是重複。
+[importlinter:contract:no-harness-import]
+name = autoclaude must not import monorepo harness modules (consume the file contract instead)
+type = forbidden
+source_modules =
+    autoclaude
+forbidden_modules =
+    tools

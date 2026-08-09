@@ -455,7 +455,7 @@ powershell -ExecutionPolicy Bypass -File tools/run_local_nightly.ps1
 uv pip install -e '.[postgres]'
 
 # 2. 設定環境變數
-export AUTOCLAUDE_DB_DSN="postgresql+asyncpg://koala:koala5@192.168.1.133/aisdlc?sslmode=require"
+export AUTOCLAUDE_DB_DSN="postgresql+asyncpg://koala:your_password_here@192.168.1.133/aisdlc?sslmode=require"
 # 本地 LAN 無 SSL 時暫用：export AUTOCLAUDE_ALLOW_INSECURE_DB=1
 
 # 3. 執行 migrations（0001 → 0015）

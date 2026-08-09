@@ -10,27 +10,27 @@ AutoClaude 入口點。
 僅支援 Playbook 模式（YAML 須包含 `tasks:` 陣列）。
 """
 from __future__ import annotations
+
 import argparse
+import logging
 import os
 import sys
-import logging
 
 # SD_Improving_06 W6（T6-6）：_runner_compat.py 已物理刪除，DeprecationWarning
 # filter 一併拔除（不再有下游間接 import 觸發噪音）。
 # 詳見 docs/08_deployment/SD06_Migration_Guide.md。
-
 import yaml
 
-from .utils.config import load_config
-from .utils.logger import setup_logger
-from .perception.hotkey_handler import HotkeyHandler
-from .decision.minimax_client import MinimaxClient, MinimaxError
-from .core.wiring import build_kernel
 from .core.services.auto_resume import AutoResumeService
+from .core.wiring import build_kernel, build_quota_meter
+from .decision.minimax_client import MinimaxClient, MinimaxError
 from .infra.adapters.minimax_brain import MinimaxBrainAdapter
 from .infra.adapters.pty_executor import PtyExecutor
 from .infra.adapters.shell_evaluator import ShellEvaluator
 from .infra.repositories import build_state_repository
+from .perception.hotkey_handler import HotkeyHandler
+from .utils.config import load_config
+from .utils.logger import setup_logger
 
 
 def _validate_playbook_format(path: str) -> None:
@@ -44,11 +44,11 @@ def _validate_playbook_format(path: str) -> None:
         raise SystemExit(f"❌ Playbook YAML 解析失敗：{exc}")
 
     if not isinstance(raw, dict):
-        raise SystemExit(f"❌ Playbook 格式錯誤：根節點必須是物件（dict），實際為 {type(raw).__name__}")
+        raise SystemExit(f"❌ Playbook 格式錯誤：根節點必須是物件（dict），實際為 {type(raw).__name__}")  # noqa: E501
     if "tasks" not in raw:
         raise SystemExit(
             f"❌ {path} 不是合法的 Playbook（缺少 `tasks:` 欄位）。\n"
-            "   AutoClaude 0.2+ 已僅支援 Playbook 多步驟模式，請參考 scripts/example_playbook.yaml。"
+            "   AutoClaude 0.2+ 已僅支援 Playbook 多步驟模式，請參考 scripts/example_playbook.yaml。"  # noqa: E501
         )
 
 
@@ -134,7 +134,10 @@ def main() -> int:
     kernel = build_kernel(cfg, executor=executor, evaluator=evaluator,
                           hotkey=hotkey, minimax_client=minimax, brain=brain,
                           state_repository=state_repo)
-    service = AutoResumeService(kernel, cfg, state_repository=state_repo)
+    # R82（ACQ-05）：注入額度水位量測器，讓 halt 後的等待時間由**觀測到的 resets_at** 決定，
+    # 而不是寫死的 resume_delay_minutes（實測額度視窗 min 0.5 分／max 253 分，30 分沒有一段對）。
+    service = AutoResumeService(kernel, cfg, state_repository=state_repo,
+                                quota_meter=build_quota_meter())
     result = service.run(args.playbook, fresh=args.fresh)
 
     logger.info("Playbook 結束 | %s", result)

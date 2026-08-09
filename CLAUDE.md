@@ -309,7 +309,7 @@ python -m pytest tests/ -q                       # 全套（🔴 基線數字唯
 python -m pytest tests/test_playbook_runner.py -v # 單檔
 python -m pytest tests/ -k <substring> -v         # 單一測試
 python -m pytest tests/ -m pg_real                # 需 SD07_REAL_PG_E2E_ENABLED=true + PG DSN
-PYTHONUTF8=1 lint-imports                          # import-linter（8 kept / 0 broken）
+PYTHONUTF8=1 lint-imports                          # import-linter（契約條數的 SSOT＝AutoClaude/.importlinter，本檔不寫死；rc=0 即全 kept）
 ruff check <改到的檔>                              # lint（規則集 SSOT＝AutoClaude/pyproject.toml 的 [tool.ruff]，本檔不複寫清單）
 ```
 - 🔴 上列為 **bash 形態**。PowerShell **沒有** `VAR=value <指令>` 前綴語法，`PYTHONUTF8=1 lint-imports` 照抄會得到 `The term 'PYTHONUTF8=1' is not recognized`；Windows 須寫 `$env:PYTHONUTF8=1; lint-imports`（雙平台完整對照見 [ONBOARDING.md](ONBOARDING.md) §7；DEF-101-513）。
@@ -335,7 +335,7 @@ docker compose -f docker-compose.ci.yml up -d                          # CI 對�
 
 **狀態機閉環**：INIT → PRE_RUN_VALIDATE → EXECUTE(step) →（Token Guard：≥80% `/compact`、≥90% checkpoint）→ EVALUATE →（失敗則 Minimax CORRECTION / 超限則 ESCALATION → MinimaxEvolver→PlaybookEvolver 自演化）→ DONE → GOAL_SYNTHESIS。
 
-**架構約束以 `.importlinter` 8 條 contract 機械強制 + LOC 分級政策**（data ≤150 / plugin_entry ≤250 / strategy ≤300 / adapter ≤400 / contract ≤400 / service ≤500 / 絕對紅線 ≤750；`tools/check_loc_budget.py` 強制）。`CLAUDE.md` 內含自動生成的 `[Architecture Snapshot]` 區段（由 `tools/snapshot_sync.py` 產生，**勿手動編輯**）。
+**架構約束以 `.importlinter` 的 contract 機械強制 + LOC 分級政策**（🔴 **R82 訂正②：本行原本寫死「8 條 contract」，而 R82 落地 `no-harness-import` 後實測為 9**——`lint-imports` 當回合 rc=0、逐字 `Contracts: 9 kept, 0 broken.`。條數同樣改為指向 SSOT `AutoClaude/.importlinter`（現查＝數該檔的 `name =` 行），理由與同一行下面那條 tier 表訂正逐字同構：**寫死的數字必過期，而條數正是可現查的量**。🔴 R82／Q2-06 訂正：本行原本把分級表與絕對紅線逐字複寫一份、零機械綁定——與 R77 已訂正的 ruff 規則集複本同形，今天恰好相符只是運氣，下一次改 tier 就是兩個家只有一個被改。**分級表與絕對紅線的唯一真相源＝`AutoClaude/tools/check_loc_budget.py` 的 `LOC_TIERS`／`ABSOLUTE_LIMIT`**，現查 `python AutoClaude/tools/check_loc_budget.py --json`；體例同本檔既有的「數字指向 Architecture Snapshot／FRAMEWORK_STATUS.md」兩條政策。機械物＝`tools/tests/test_adr_xplat001_c1c2_lock.py::TestLocTierTableHasOnlyOneHome`）。`CLAUDE.md` 內含自動生成的 `[Architecture Snapshot]` 區段（由 `tools/snapshot_sync.py` 產生，**勿手動編輯**）。
 
 ### 新增 Plugin 的 SOP
 1. 建 `autoclaude/plugins/<feature>_plugin.py`（繼承 HookSpec，PascalCase 類別）；2. 實作對應 hook；3. 加入 `wiring._REGISTER_ORDER`，相依走 constructor 注入 ports（**禁止直接 import infra**）；4. 寫 `tests/plugins/test_<feature>.py`（coverage ≥ 90%）；5. 遵守 LOC 分級；6. Plugin 間禁止互相 import（走 EventBus）。

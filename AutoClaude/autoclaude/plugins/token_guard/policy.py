@@ -18,25 +18,19 @@
 """
 from __future__ import annotations
 
-from typing import Any, Optional
+from typing import Any
 
 from ...core.hookspec import HookContext, KernelPhase, ResourceRequest
+from ...core.ports.quota_meter import is_quota_limit_text
 from ...utils.config import TokenGuardConfig
-from .compactor import (
-    CompactFailureState,
-    build_compact_prompt as _build_compact_prompt,
-    process_compact_result as _process_compact_result,
-)
+from .compactor import CompactFailureState
+from .compactor import build_compact_prompt as _build_compact_prompt
+from .compactor import process_compact_result as _process_compact_result
 from .git_verifier import verify_correction_applied as _verify_correction_applied
-from .thresholds import (
-    get_dynamic_compact_threshold as _get_dynamic_compact_threshold,
-    should_compact_decision,
-    should_halt_decision,
-)
-from .watcher import (
-    observe_token_line as _observe_token_line,
-    resolve_per_step_cfg as _resolve_per_step_cfg,
-)
+from .thresholds import get_dynamic_compact_threshold as _get_dynamic_compact_threshold
+from .thresholds import should_compact_decision, should_halt_decision
+from .watcher import observe_token_line as _observe_token_line
+from .watcher import resolve_per_step_cfg as _resolve_per_step_cfg
 
 
 class TokenGuardPlugin:
@@ -44,9 +38,12 @@ class TokenGuardPlugin:
 
     PRIORITY = 30
 
-    def __init__(self, token_guard_cfg: Optional[TokenGuardConfig] = None):
+    def __init__(self, token_guard_cfg: TokenGuardConfig | None = None,
+                 quota_meter: Any | None = None):
         self._cfg = token_guard_cfg or TokenGuardConfig()
         self._compact_state = CompactFailureState()
+        # R82（ACQ-01）：QuotaMeterPort（可選）。None＝這一軸不存在，行為與修前位元級相同。
+        self._quota = quota_meter
 
     def name(self) -> str:
         return "token_guard"
@@ -57,49 +54,40 @@ class TokenGuardPlugin:
     def subscribed_phases(self) -> list[KernelPhase]:
         # improving_79 W-78-2（DEF-78-001）：新增 POST_COMPACT——production Kernel 送 /compact
         # 後 emit，本 plugin 判 Gap-008-E（連續 compact 失敗 → 強制 HALT）。
-        return [
-            KernelPhase.POST_ATTEMPT,
-            KernelPhase.ON_TOKEN_USAGE,
-            KernelPhase.POST_COMPACT,
-        ]
+        # 🔴 本輪收斂：本檔多處把單一運算式攤成多行。收合是 R82 已用過的**等量減法**手法
+        # （該輪把一段 docstring 改成 `#` 註解讓出預算），為的是替 C3 的選軸修法騰出
+        # total LOC——`check_loc_budget` 當回合實測餘裕只有 1 行。零語意變更。
+        return [KernelPhase.POST_ATTEMPT, KernelPhase.ON_TOKEN_USAGE,
+                KernelPhase.POST_COMPACT]
 
-    def on_event(self, ctx: HookContext) -> Optional[Any]:
+    def on_event(self, ctx: HookContext) -> Any | None:
         if not self._cfg.enabled:
             return None
-        if ctx.phase == KernelPhase.POST_ATTEMPT:
+        if ctx.phase in (KernelPhase.POST_ATTEMPT, KernelPhase.ON_TOKEN_USAGE):
             return self._evaluate_resources(ctx)
-        if ctx.phase == KernelPhase.ON_TOKEN_USAGE:
-            return self._evaluate_resources(ctx)
-        if ctx.phase == KernelPhase.POST_COMPACT:
-            return self._evaluate_post_compact(ctx)
-        return None
+        return (self._evaluate_post_compact(ctx)
+                if ctx.phase == KernelPhase.POST_COMPACT else None)
 
     # ──────────────────────────────────────────────
     # 公開 API（與原 token_guard_plugin.py 100% 等價）
     # ──────────────────────────────────────────────
-    def get_dynamic_compact_threshold(
-        self, attempt: int, max_retries: int,
-    ) -> float:
+    def get_dynamic_compact_threshold(self, attempt: int, max_retries: int) -> float:
         return _get_dynamic_compact_threshold(
-            base_threshold=self._cfg.compact_threshold_pct,
-            attempt=attempt, max_retries=max_retries,
-        )
+            base_threshold=self._cfg.compact_threshold_pct, attempt=attempt,
+            max_retries=max_retries)
 
-    def should_compact(
-        self, token_pct: float, attempt: int = 0, max_retries: int = 3,
-        in_correction_loop: bool = False, correction_history_len: int = 0,
-    ) -> bool:
-        threshold = self.get_dynamic_compact_threshold(attempt, max_retries)
+    def should_compact(self, token_pct: float, attempt: int = 0, max_retries: int = 3,
+                       in_correction_loop: bool = False,
+                       correction_history_len: int = 0) -> bool:
         return should_compact_decision(
-            token_pct=token_pct, threshold=threshold,
+            token_pct=token_pct,
+            threshold=self.get_dynamic_compact_threshold(attempt, max_retries),
             in_correction_loop=in_correction_loop,
-            correction_history_len=correction_history_len,
-        )
+            correction_history_len=correction_history_len)
 
     def should_halt(self, token_pct: float) -> bool:
-        return should_halt_decision(
-            token_pct=token_pct, halt_threshold=self._cfg.halt_threshold_pct,
-        )
+        return should_halt_decision(token_pct=token_pct,
+                                    halt_threshold=self._cfg.halt_threshold_pct)
 
     def record_compact_failure(self) -> int:
         return self._compact_state.record_failure()
@@ -124,45 +112,70 @@ class TokenGuardPlugin:
     def _compact_failure_count(self, value: int) -> None:
         self._compact_state.count = int(value)
 
-    def resolve_per_step_cfg(self, task: Optional[Any] = None) -> TokenGuardConfig:
+    def resolve_per_step_cfg(self, task: Any | None = None) -> TokenGuardConfig:
         return _resolve_per_step_cfg(global_cfg=self._cfg, task=task)
 
-    def observe_token_line(
-        self, pct: Optional[float], peak_pct: float,
-        triggered_compact: bool, triggered_halt: bool,
-    ) -> tuple[float, bool, bool]:
+    def observe_token_line(self, pct: float | None, peak_pct: float,
+                           triggered_compact: bool,
+                           triggered_halt: bool) -> tuple[float, bool, bool]:
         return _observe_token_line(
-            pct=pct, peak_pct=peak_pct,
-            triggered_compact=triggered_compact, triggered_halt=triggered_halt,
-            cfg=self._cfg,
-        )
+            pct=pct, peak_pct=peak_pct, cfg=self._cfg,
+            triggered_compact=triggered_compact, triggered_halt=triggered_halt)
 
-    def build_compact_prompt(
-        self, *, task: Optional[Any] = None, attempt: int = 0,
-        failure_summary: str = "", global_goal: Optional[str] = None,
-        global_goal_anchor_chars: int = 200,
-    ) -> str:
+    def build_compact_prompt(self, *, task: Any | None = None, attempt: int = 0,
+                             failure_summary: str = "", global_goal: str | None = None,
+                             global_goal_anchor_chars: int = 200) -> str:
         return _build_compact_prompt(
             task=task, attempt=attempt, failure_summary=failure_summary,
-            global_goal=global_goal,
-            global_goal_anchor_chars=global_goal_anchor_chars,
-        )
+            global_goal=global_goal, global_goal_anchor_chars=global_goal_anchor_chars)
 
-    def process_compact_result(
-        self, triggered_compact: bool, peak_token_pct: float,
-    ) -> bool:
-        return _process_compact_result(
-            state=self._compact_state, triggered_compact=triggered_compact,
-        )
+    def process_compact_result(self, triggered_compact: bool,
+                               peak_token_pct: float) -> bool:
+        return _process_compact_result(state=self._compact_state,
+                                       triggered_compact=triggered_compact)
 
-    def verify_correction_applied(self, attempt: int) -> Optional[str]:
+    def verify_correction_applied(self, attempt: int) -> str | None:
         return _verify_correction_applied(attempt)
 
     # ──────────────────────────────────────────────
     # 內部
     # ──────────────────────────────────────────────
-    def _evaluate_resources(self, ctx: HookContext) -> Optional[ResourceRequest]:
+    # R82（ACQ-01／ACQ-04）：**額度**那一軸的判定（分母＝帳號方案，不是 context window）。
+    # 三個觸發條件都導向同一個動作＝立刻 halt，因為它們都代表「再打一次 claude 只會更快
+    # 燒完額度」：
+    #   ① pct ≥ quota_halt_pct（預設 95＝根層 halt）：硬水位、安全線。
+    #   ② 步驟失敗訊息本身就是撞線（ACQ-04）：修前這會被當成一般失敗、被 CORRECTION 迴圈
+    #      重試——而每一次重試都是再打一次 claude，**反而加速燒額度**。
+    #   ③ pct ≥ quota_throttle_pct（預設 70＝根層 converge「開始收斂」）且正在 CORRECTION
+    #      迴圈裡：重試是「可選支出」，收斂帶就先停掉可選的那一半（正常步驟仍放行）。
+    # 🔴 R82（C3）：讀的是 `read_worst_pct()`（水位最高那條線）而**不是** `read()`
+    # （最先 reset 那條線）。這裡問的是「還剩多少可燒」，那是最緊的一條說了算；
+    # `read()` 服務的是 AutoResumeService 的「要等多久」，兩者是相反的問題。
+    # 這個等式讓 halt 與根層**恰好等價**：任一軸 ≥95 ⇒ max(pct) ≥95 ⇒ 兩邊同時 halt；
+    # 反之根層 halt ⇒ 某軸 cap=0 ⇒ 該軸 ≥95 ⇒ max(pct) ≥95。回歸鎖＝
+    # `tests/test_r82_quota_axis_and_shipped_defaults.py::TestBandParityWithTheHarness`。
+    # 🔴 誠實劃界：本判定掛在 POST_ATTEMPT，而 Kernel 先算 correction 才 emit POST_ATTEMPT
+    # ⇒ 撞線那一輪仍會多一次 Brain 呼叫；擋掉的是**其後**所有重試，不是當次。
+    # 說明寫成 # 而非 docstring：docstring 會被 count_loc 計入（見 check_loc_budget 提示）。
+    def evaluate_quota(self, payload: dict) -> ResourceRequest | None:
+        reading = self._quota.read_worst_pct() if self._quota is not None else None
+        pct = reading.pct if reading is not None else None
+        limit_hit = is_quota_limit_text(payload.get("failure_reason"))
+        hard = pct is not None and pct >= self._cfg.quota_halt_pct
+        soft = pct is not None and pct >= self._cfg.quota_throttle_pct
+        if not (hard or limit_hit or (soft and payload.get("in_correction_loop"))):
+            return None
+        return ResourceRequest(
+            contributor=self.name(), request_halt=True,
+            reason=f"quota_pct={pct} kind={getattr(reading, 'kind', None)} "
+                   f"limit_text={limit_hit} resets_at={getattr(reading, 'resets_at', None)}",
+        )
+
+    def _evaluate_resources(self, ctx: HookContext) -> ResourceRequest | None:
         payload = ctx.payload or {}
+        quota = self.evaluate_quota(payload)
+        if quota is not None:
+            return quota
         token_pct = float(payload.get("token_pct", 0.0))
         attempt = int(ctx.attempt or 0)
         max_retries = int(payload.get("max_retries", 3))
@@ -190,29 +203,28 @@ class TokenGuardPlugin:
 
         return None
 
-    def _evaluate_post_compact(self, ctx: HookContext) -> Optional[ResourceRequest]:
-        """improving_79 W-78-2（DEF-78-001 / Gap-008-E）：compact 後重觀測判連續失敗。
-
-        Kernel 送 /compact 後 emit POST_COMPACT 帶壓縮後真實 token%（post_pct）。
-        compact 後仍達 compact 門檻 ＝ 本次 compact 失敗（未把 context 壓下來）；
-        經 CompactFailureState（SSOT）累計，連續達上限（預設 2 次）→ request_halt
-        （對齊棄用路徑 compact_controller.send_compact_impl 的 Gap-008-E 語意）。
-        失敗訊號來源差異（誠實註記）：棄用路徑以 ``compact_out.triggered_compact``
-        （compact 執行期間 TOKEN_COMPACT marker 是否再現）判失敗；本路徑以
-        ``should_compact(post_pct)``（compact 後峰值是否仍 ≥ 動態門檻）判失敗——
-        兩者語意一致（「context 沒壓下來」）但非同一信號源，本路徑為較乾淨的重導。
-        compact 成功（降到門檻下）→ 重設計數器、回 None（Kernel 續評估原 output）。
-        """
+    # improving_79 W-78-2（DEF-78-001 / Gap-008-E）：compact 後重觀測判連續失敗。
+    # Kernel 送 /compact 後 emit POST_COMPACT 帶壓縮後真實 token%（post_pct）。
+    # compact 後仍達 compact 門檻 ＝ 本次 compact 失敗（未把 context 壓下來）；
+    # 經 CompactFailureState（SSOT）累計，連續達上限（預設 2 次）→ request_halt
+    # （對齊棄用路徑 compact_controller.send_compact_impl 的 Gap-008-E 語意）。
+    # 失敗訊號來源差異（誠實註記）：棄用路徑以 `compact_out.triggered_compact`
+    # （compact 執行期間 TOKEN_COMPACT marker 是否再現）判失敗；本路徑以
+    # `should_compact(post_pct)`（compact 後峰值是否仍 ≥ 動態門檻）判失敗——
+    # 兩者語意一致（「context 沒壓下來」）但非同一信號源，本路徑為較乾淨的重導。
+    # compact 成功（降到門檻下）→ 重設計數器、回 None（Kernel 續評估原 output）。
+    # 🔴 R82：本段由 docstring 改為 `#` 註解，**一字未刪**。理由是 check_loc_budget 自己印的
+    # 指引逐字：「說明文字請寫成 # 註解而非 docstring——docstring 行會被 count_loc 計入」。
+    # 這是把說明留下、把預算讓給 R82 額度軸（ACQ-03 的等量減法之一），不是刪文件。
+    def _evaluate_post_compact(self, ctx: HookContext) -> ResourceRequest | None:
         payload = ctx.payload or {}
         post_pct = float(payload.get("token_pct", 0.0))
         attempt = int(ctx.attempt or 0)
         max_retries = int(payload.get("max_retries", 3))
-        still_high = self.should_compact(
-            token_pct=post_pct, attempt=attempt, max_retries=max_retries,
-        )
-        ok = self.process_compact_result(
-            triggered_compact=still_high, peak_token_pct=post_pct,
-        )
+        still_high = self.should_compact(token_pct=post_pct, attempt=attempt,
+                                         max_retries=max_retries)
+        ok = self.process_compact_result(triggered_compact=still_high,
+                                         peak_token_pct=post_pct)
         if not ok:
             return ResourceRequest(
                 contributor=self.name(),

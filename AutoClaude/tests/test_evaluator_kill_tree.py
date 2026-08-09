@@ -300,8 +300,19 @@ def test_kill_tree_call_sites_are_reachable_from_timeout_handling():
 
 
 def test_evaluator_uses_new_session_on_posix():
+    """POSIX：`start_new_session`（killpg 的前提）。Windows：無視窗旗標。
+
+    🔴 Windows 那一格由 `{}` 改成 `{"creationflags": CREATE_NO_WINDOW}` 是**實測歸因**
+    的結果，不是清理：`shell=True` 在 Windows 上就是 `cmd.exe /c`，父行程沒有 console
+    時（schtasks 的 pythonw、GUI 啟動器）Windows 必定替它新配置一個 console＝黑框，
+    而且是**每個 playbook 步驟一次**。根層 17 分鐘行程建立量測窗抓到 3 筆實例
+    （`cmd.exe /c "pytest tests -k …"`，父行程 `python -m pytest tests/ -q`）。
+    判準仍是**逐平台精確相等**：POSIX 那一格若混進 `creationflags`，POSIX 的 Popen
+    會 TypeError ⇒ evaluator 在 mac/Linux 整個炸掉（鐵律三：單平台判準不外推）。
+    """
     from autoclaude.execution import evaluator as ev
-    expected = {} if sys.platform == "win32" else {"start_new_session": True}
+    expected = ({"creationflags": subprocess.CREATE_NO_WINDOW}
+                if sys.platform == "win32" else {"start_new_session": True})
     assert ev._NEW_SESSION_KWARGS == expected
 
 

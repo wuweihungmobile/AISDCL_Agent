@@ -35,13 +35,30 @@ def is_macos() -> bool:
     return sys.platform == "darwin"
 
 
+#: 無視窗旗標。POSIX 的 `subprocess` 上這個常數**不存在**，`getattr` 取 0 ＝不加任何旗標，
+#: 正是 POSIX 上正確的值（根 CLAUDE.md 鐵律三「這在另一個平台是什麼值」）。
+_NO_WINDOW = getattr(subprocess, "CREATE_NO_WINDOW", 0)
+
+
 def new_session_kwargs() -> dict:
-    """`subprocess.Popen` 的行程組隔離參數。"""
+    # `subprocess.Popen` 的行程組隔離參數（＋Windows 的無視窗旗標）。
     # POSIX 要整棵殺，子行程須先成為新 session 的 process group leader（PID 即
     # pgid），`kill_process_tree()` 的 killpg 才打得到整棵樹而不是打到呼叫者自己
     # 所在的 group（自殺級退化，見 tests/test_evaluator_kill_tree.py 1b 節）。
-    # start_new_session 為 POSIX only，Windows 上不支援故回空 dict。
-    return {} if is_windows() else {"start_new_session": True}
+    # start_new_session 為 POSIX only，Windows 上不支援。
+    #
+    # 🔴 Windows 那一格由 `{}` 改成帶 `creationflags`（掌舵者回報「cmd 不定時彈跳」的
+    # **實測歸因**）：本函式的兩個消費者都是 `shell=True`（`execution/evaluator.py`／
+    # `mutation_applier/_conditional.py`），而 `shell=True` 在 Windows 上就是
+    # `cmd.exe /c <指令>`。父行程若沒有 console（schtasks 的 pythonw、GUI 啟動器），
+    # Windows 必定替那個 cmd 新配置一個 console ＝跳到使用者臉上的黑框，**每一個
+    # playbook 步驟一次**。實測憑證（`tools/probe/console_spawn_watch.py`，17 分鐘窗）：
+    #   cmd.exe ← python.exe :: cmd.exe /c "pytest tests -k "AT_001_1_1" -q"
+    #   cmd.exe ← python.exe :: cmd.exe /c "python -c "import time; time.sleep(5)""
+    # 收在這一格而不是逐一改兩個呼叫端：兩者都已 splat `**_NEW_SESSION_KWARGS`，
+    # 改這裡零新增站點，且 `test_evaluator_kill_tree.py` 那條 splat 的 AST 鎖原樣成立。
+    # 對 `kill_process_tree()` 零影響：Windows 側走 `taskkill /T`，不靠 process group。
+    return {"creationflags": _NO_WINDOW} if is_windows() else {"start_new_session": True}
 
 
 def kill_process_tree(proc: subprocess.Popen) -> None:
@@ -58,8 +75,11 @@ def kill_process_tree(proc: subprocess.Popen) -> None:
     # best-effort 的清理路徑，不該讓呼叫端的錯誤處理再被二次例外蓋掉。
     if is_windows():
         try:
+            # `taskkill` 也是 console 應用：收殺路徑常在無 console 的父行程下觸發
+            # （逾時 → kill），少了旗標就是「逾時的時候順便閃一個框」。
             subprocess.run(["taskkill", "/T", "/F", "/PID", str(pid)], timeout=5,
-                           stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                           creationflags=_NO_WINDOW, stdout=subprocess.DEVNULL,
+                           stderr=subprocess.DEVNULL)
         except Exception:
             pass
         return

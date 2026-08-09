@@ -51,12 +51,24 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 _HERE = Path(__file__).resolve()
 _REPO = _HERE.parents[2]
 sys.path.insert(0, str(_REPO / "tools"))
 
 import archive_defect_log as ADL  # noqa: E402
+
+_ROT = ADL._rotation   # 輪替副作用判準的家（tools/lib/ledger_rotation.py）
+
+#: 合成列的 ID 家族號。🔴 這裡原本寫死 `101-`＝**真實帳本正在使用的那個家族**，於是合成
+#: 列的號碼（992／993／996／997）與真實帳本的號碼在同一個空間裡賽跑：帳本一路加到 992，
+#: `test_apply_auto_registers_exactly_one_bullet` 就在沙箱裡造出**與主檔重複**的
+#: `DEF-101-993`，`--check` 判準當場紅，而失敗訊息長得像「bullet 樣式不被解析」——與真正的
+#: 原因（ID 撞號）毫無關聯。改用一個真實帳本結構上不會用到的家族號，讓合成與真實不再共用
+#: 號碼空間。字串仍刻意分段串接：本檔內出現完整的 `DEF-xxx-yyy` 字面會被跨文件狀態稽核
+#: 當成真實宣稱去比對（既有體例，勿合併成單一字面）。
+_SYNTH_FAMILY = "9" + "99-"
 
 _QUALITY = _REPO / "docs" / "06_quality"
 _MAIN_LEDGER = _QUALITY / "AutoSDD_Defect_Log.md"
@@ -1511,7 +1523,7 @@ class TestConservationGuardsAreExplicitNotAssert(unittest.TestCase):
         但紅的是 stderr 訊息比對，而且**保全那段根本沒被執行到**，測試等於零鑑別力。
         """
         with _ledger_sandbox():
-            synth_id = "DEF-" + "101-" + "9" + "96"
+            synth_id = "DEF-" + _SYNTH_FAMILY + "9" + "96"
             _append_to(
                 ADL._LEDGER,
                 f"| {synth_id} | 2026-07-29 | 注入組合成列 | 合成現象 | P4 "
@@ -1562,7 +1574,7 @@ class TestConservationGuardsAreExplicitNotAssert(unittest.TestCase):
         """
         with _ledger_sandbox():
             # 合成兩列必然可搬的列（ID 執行期組出，原始碼零 ID 字面——避開全庫 ID 追溯鏈掃描）
-            synth_ids = ["DEF-" + "101-" + "9" + "97", "DEF-" + "101-" + "9" + "96"]
+            synth_ids = ["DEF-" + _SYNTH_FAMILY + "9" + "97", "DEF-" + _SYNTH_FAMILY + "9" + "96"]
             for n, synth_id in enumerate(synth_ids):
                 _append_to(
                     ADL._LEDGER,
@@ -1691,7 +1703,7 @@ class TestArchiveIndexCoverage(unittest.TestCase):
         ——那正是本輪要消滅的「靠人記得」機制。
         """
         with _ledger_sandbox():
-            synth_id = "DEF-" + "101-" + "9" + "93"
+            synth_id = "DEF-" + _SYNTH_FAMILY + "9" + "93"
             _append_to(
                 ADL._LEDGER,
                 f"| {synth_id} | 2026-07-29 | 判準⑤ 自動註冊測試 | 合成 | P4 "
@@ -1719,7 +1731,7 @@ class TestArchiveIndexCoverage(unittest.TestCase):
         史料」這個**不可逆**動作，實務觸發面是 `--apply --archive-num N` 打錯號碼重跑。
         """
         with _ledger_sandbox():
-            synth_id = "DEF-" + "101-" + "9" + "92"
+            synth_id = "DEF-" + _SYNTH_FAMILY + "9" + "92"
             _append_to(
                 ADL._LEDGER,
                 f"| {synth_id} | 2026-07-29 | 覆寫守門測試 | 合成 | P4 "
@@ -3458,7 +3470,7 @@ class TestArchiveIndexDocIsExternalized(unittest.TestCase):
             "主檔那份腐化零訊號",
         )
         with _ledger_sandbox():
-            synth_id = "DEF-" + "101-" + "9" + "92"
+            synth_id = "DEF-" + _SYNTH_FAMILY + "9" + "92"
             _append_to(
                 ADL._LEDGER,
                 f"| {synth_id} | 2026-08-02 | 外移落點測試 | 合成 | P4 "
@@ -3482,6 +3494,81 @@ class TestArchiveIndexDocIsExternalized(unittest.TestCase):
         )
         self.assertIn("AutoSDD_Defect_Log_archive_92.md", index_names,
                       "新 archive 未登記進索引檔")
+
+
+class TestR82RotationSideEffectsAreAnnounced(unittest.TestCase):
+    """輪替的兩個副作用必須由**造成它的人**印出來（`DEF-101-977` ＋ `DEF-101-676`）。
+
+    意圖（Rule 9）：這兩筆是同一種病的兩面——歸檔器改變了下游判準的輸入，卻讓下游的人
+    去發現後果。977 的實際發生形態：`--archive-num 64` 搬走 3 列，`OVERSIZE_ROW_GRANDFATHERED`
+    的那 3 筆當場過期、`check_defect_log_crossref.py` 判準②轉紅，而歸檔器對此**零輸出**
+    ⇒ 每輪歸檔都復發、每輪都手動修。676 的形態：每次 `--apply` 都把一條索引 bullet 寫回
+    主檔家族，於是釋出與新增同時發生，而**只有釋出那一半被印出來**，讀者因此以為餘裕買到了。
+
+    兩者都刻意是**純讀計算**：不改判準、不寫檔，因此不可能製造新的紅。
+    """
+
+    _HEAD = ("| ID | 日期 | 發現情境 | 現象與證據 | 嚴重度 | 分流去向 | 狀態 |\n"
+             "|---|---|---|---|---|---|---|\n")
+
+    def _row(self, def_id: str, nbytes: int) -> str:
+        head = f"| {def_id} | d | R75 | x | P3 | y | fixed "
+        return head + "x" * (nbytes - len(head.encode("utf-8")) - 1) + "|\n"
+
+    def test_moving_a_waived_row_is_announced_with_the_three_new_values(self):
+        """注入（正向）：搬走一筆仍在豁免清單的超長列 ⇒ 逐字預告它會過期＋三個新值。"""
+        keep, go = "DEF-99-901", "DEF-99-902"
+        text = self._HEAD + self._row(keep, 900) + self._row(go, 800)
+        with mock.patch.object(_ROT._idx, "OVERSIZE_ROW_GRANDFATHERED",
+                               frozenset({keep, go})):
+            got = _ROT.expiring_oversize_waivers([go], text)
+        self.assertEqual(got["expiring"], [go])
+        self.assertEqual(got["new_ceiling"], 1)          # 只剩 keep 還超標
+        self.assertEqual(got["new_excess"], 900 - _ROT._idx.ROW_MAX_BYTES)
+
+    def test_moving_an_unwaived_row_announces_nothing(self):
+        """還原（反向）：搬走的列不在豁免清單 ⇒ 零預告（證明上面那個紅不是恆真）。"""
+        keep, go = "DEF-99-901", "DEF-99-903"
+        text = self._HEAD + self._row(keep, 900) + self._row(go, 400)
+        with mock.patch.object(_ROT._idx, "OVERSIZE_ROW_GRANDFATHERED",
+                               frozenset({keep})):
+            got = _ROT.expiring_oversize_waivers([go], text)
+        self.assertEqual(got["expiring"], [])
+        self.assertEqual(got["new_ceiling"], 1)
+
+    def test_the_net_triple_is_an_identity_not_a_stored_number(self):
+        """676 只要求算式關係成立（Z＝Y−X），刻意不斷言任何具體數值。
+
+        斷言具體數值會讓這支測試變成「帳本今天多大」的快照，下一輪必假紅。
+        """
+        for released, index_bytes in ((10_000, 1_200), (0, 900), (900, 900)):
+            x, y, z = _ROT.net_volume_triple(released, index_bytes)
+            with self.subTest(released=released):
+                self.assertEqual((x, y), (released, index_bytes))
+                self.assertEqual(z, y - x)
+
+    def test_the_sign_is_bound_to_the_ledger_rows_own_wording_not_to_the_formula(self):
+        """🔴 符號鎖（本組最重要的一支）：`DEF-101-676` 逐字寫「淨值長期為負才是真的解」。
+
+        本測試把那句**定性宣稱**綁上算式：搬走的比寫回去的多 ⇒ Z 必須為負且報告說
+        「真的釋出了容量」；反過來 ⇒ Z 必須為正且報告說「沒有真的釋出容量」。
+        沒有這一支，`X−Y` 與 `Y−X` 兩種寫法都能讓「Z＝X−Y」那種自我一致的測試全綠
+        ——而本函式第一版正是寫反的，由這支當場抓到（同 R79「量測器指標可能符號相反」）。
+        """
+        good = _ROT.rotation_effect_report(
+            {"index_bullet_bytes": 900, "waiver_expiry": {"expiring": []}}, 5_000)
+        self.assertIn("主檔淨變化 -4100 bytes", good)
+        self.assertIn("真的釋出了容量", good)
+        bad = _ROT.rotation_effect_report(
+            {"index_bullet_bytes": 5_000, "waiver_expiry": {"expiring": []}}, 900)
+        self.assertIn("主檔淨變化 4100 bytes", bad)
+        self.assertIn("沒有真的釋出容量", bad)
+
+    def test_the_report_is_actually_wired_into_the_plan_output(self):
+        """接線鎖：判準再對，沒有被 `--plan` 呼叫就等於不存在（本 repo 反覆的形態）。"""
+        src = Path(ADL.__file__).read_text(encoding="utf-8")
+        self.assertIn("print(_rotation.rotation_effect_report(p, total))", src)
+        self.assertIn('"waiver_expiry": _rotation.expiring_oversize_waivers(', src)
 
 
 class TestCriterion2VerbatimQuoteTailMask(unittest.TestCase):

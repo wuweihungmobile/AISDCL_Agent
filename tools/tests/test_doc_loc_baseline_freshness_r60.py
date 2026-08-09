@@ -6160,10 +6160,21 @@ _HANDOFF_MARK = "handoff-claim-verified:"
 
 
 def _handoff_claim_blocks(text: str) -> list[list[str]]:
-    """把「開場必讀／還沒做」類章節切成逐條目的區塊（含其下的引言續行）。
+    """把「開場必讀／還沒做」類章節切成區塊：**每個標題一塊、每個條目一塊**。
 
-    刻意**只看條目**、不看章節前言：前言是體例與訂正說明的住處，把它當成宣稱會逼人
-    在規則本身上貼標記（噪音），而規則不會過期。
+    🔴 R82 Q4-01（本輪改的就是這一段）：上一版**只看條目**——`_HANDOFF_ITEM_RE` 不命中
+    就不開區塊，於是整段散文連同它底下的 fenced code 一律被丟掉。當時寫下的理由是
+    「前言是體例與訂正說明的住處，把它當成宣稱會逼人在規則本身上貼標記（噪音）」，
+    而 R81 的交棒書把那個理由的前提打掉了：它的 §3「交給 R82 的待辦」七個小節**一條
+    list item 都沒有**，全是段落散文＋fenced code ⇒ 整節不進分母，該份交棒書當回合
+    實測**整份 0 命中**（探針：直接 import 本模組呼叫 `_handoff_problems`）。
+    也就是說「用散文寫」變成一個免費的逃逸口，而且是**無聲**的——鎖照跑、照綠。
+    現行語意：射程內的**標題行自己也開一塊**（標題文字計入該塊，因為「尚未建立」這類
+    宣稱常常就寫在小節標題上），塊身延伸到下一個標題或下一個條目為止。
+
+    刻意保留的一條分界：**只有標題行、底下沒有任何內文的塊不算宣稱**（見
+    `_handoff_problems`）。章節名（例：R74 的 `## 2. 還沒做什麼`）是這一節的名字，
+    不是對某件事的狀態宣稱；要它附現查指令是噪音，而噪音會讓鎖被整個關掉。
 
     🔴 R79 複審（HANDOFF 包注入時當場量到）：**巢狀小標題繼承父節的射程**。
     上一版對「任何 `##` 以上的標題」一律重設 `in_section`，包括 `###`——於是一個
@@ -6191,6 +6202,8 @@ def _handoff_claim_blocks(text: str) -> list[list[str]]:
                 pass  # 巢狀小標題：繼承父節射程，不重設
             else:
                 in_section, section_level = False, 0
+            if in_section:
+                cur = [line]  # R82 Q4-01：標題行自己開一塊，散文小節不再是免費逃逸口
             continue
         if not in_section:
             continue
@@ -6209,6 +6222,8 @@ def _handoff_problems(rel: str, text: str) -> tuple[list[str], int]:
     problems: list[str] = []
     claims = 0
     for block in _handoff_claim_blocks(text):
+        if _HANDOFF_SECTION_RE.match(block[0]) and not any(ln.strip() for ln in block[1:]):
+            continue  # 純標題塊：章節名不是狀態宣稱（見 `_handoff_claim_blocks` docstring）
         body = "\n".join(block)
         if not any(w in body for w in _HANDOFF_STALE_WORDS):
             continue
@@ -6220,6 +6235,67 @@ def _handoff_problems(rel: str, text: str) -> tuple[list[str], int]:
             f"也沒有 `<!-- {_HANDOFF_MARK} WHY -->` 說明它為何無法現查"
         )
     return problems, claims
+
+
+_HANDOFF_ROUND_RE = re.compile(r"R(\d+)_HANDOFF", re.IGNORECASE)
+
+#: 本鎖目前**一筆宣稱都收不到**的交棒書——具名登記，不是放行。
+#:
+#: 🔴 為何需要這張表（R82 Q4-01 的誠實劃界）：反崩塌斷言由「跨文件加總 ≥1」改成
+#: 「逐文件 ≥1」之後，這三份當回合實測就是 0。成因**不是**它們沒有待辦，而是取材面
+#: 還有**第二個縫**，在 `_HANDOFF_SECTION_WORDS`（章節觸發字）那一軸：
+#:   · R75／R76 的待辦大節叫「交給 R76／R77 的事」，不含任何觸發字 ⇒ 整份 blocks=0；
+#:   · R78 的「交給 R79 的事」同理，其條目用「未溯源／未指派」這類不在
+#:     `_HANDOFF_STALE_WORDS` 的措辭 ⇒ 收到了區塊也命中 0。
+#: 本輪刻意不動那一軸：把「交給」加進觸發字，R76 §5-1 會當場轉紅（實測 1 筆），
+#: 而那三份檔不在本包的檔案所有權內，並行輪次動它們會與別包互踩。⇒ 登記＋交棒。
+#:
+#: 🔴 三道牙讓這筆登記不可能永久化，也不可能被拿來當「下一輪的關法」：
+#:   ① **自清**：登記在案的檔一旦收得到宣稱，本鎖立刻紅並要求把它刪掉（只准縮）；
+#:   ② **最新一份交棒書永遠不得登記在此**——否則下一輪只要把自己加進來，就原地重演
+#:      R81 那次崩塌（`test_the_newest_handoff_carries_its_own_lower_bound` 在守）；
+#:   ③ 每一筆都必須真的落在掃描面上，打錯字＝靜默擴大豁免面，同樣紅。
+_HANDOFF_CLAIMLESS_BASELINE = frozenset(
+    {
+        "docs/04_planning/R75_HANDOFF.md",
+        "docs/04_planning/R76_HANDOFF.md",
+        "docs/04_planning/R78_HANDOFF.md",
+    }
+)
+
+
+def _handoff_round(rel: str) -> int:
+    m = _HANDOFF_ROUND_RE.search(rel)
+    return int(m.group(1)) if m else -1
+
+
+def _handoff_perdoc_problems(
+    docs: list[tuple[str, str]],
+    baseline: frozenset[str] = _HANDOFF_CLAIMLESS_BASELINE,
+) -> list[str]:
+    """逐文件判定——**刻意不跨文件加總**。
+
+    🔴 R82 Q4-01 的另一半：上一版把每一份交棒書的命中數加總後才判 `>=1`，於是 R79
+    那 7 筆讓總量永遠 ≥1，**最新一份掉到 0 在結構上打不出來**（R81 交棒書就是這樣
+    整份 0 命中而全綠的）。這正是本檔 docstring 自己記載過的 R78 SD-03 錯誤——判準
+    建在只會單調增長的歷史總量上——在**同一支檔案內復發**。
+    """
+    problems: list[str] = []
+    for rel, text in docs:
+        found, claims = _handoff_problems(rel, text)
+        problems += found
+        if claims == 0 and rel not in baseline:
+            problems.append(
+                f"{rel} 整份掃不到任何 stale 宣稱 ⇒ 本鎖對這一份**零射程**（章節標題、"
+                "觸發字或體例改了）。這正是它要防的形態：舊輪的命中數把跨文件加總撐綠，"
+                "最新一份一句都沒守到卻沒有任何東西轉紅"
+            )
+        elif claims and rel in baseline:
+            problems.append(
+                f"{rel} 現在收得到 {claims} 筆宣稱了，請把它從 "
+                "_HANDOFF_CLAIMLESS_BASELINE 刪掉——那張表只准縮"
+            )
+    return problems
 
 
 class TestR78HandoffClaimsCarryLiveCommands(unittest.TestCase):
@@ -6234,6 +6310,12 @@ class TestR78HandoffClaimsCarryLiveCommands(unittest.TestCase):
 
     逃生口是 `handoff-claim-verified:`（WHY 必填）：有些事（例如「這一輪有沒有做複審」）
     真的沒有機械現查管道，逼人編一個指令比誠實說沒有更糟。
+
+    🔴 R82 Q4-01 修的兩個縫（兩個都讓本鎖在**看起來全綠**的狀態下失去射程）：
+      ① 取材面只收 list item ⇒ R81 交棒書（§3 全是散文＋fenced code）整份 **0 命中**；
+      ② 反崩塌斷言跨文件加總 ⇒ R79 那 7 筆把總量永久撐 ≥1，最新一份掉到 0 打不出來。
+    現行形狀：取材面加收**標題塊／散文塊**（見 `_handoff_claim_blocks`），反崩塌改成
+    **逐文件**（見 `_handoff_perdoc_problems`），並對「最新一份」再加一道不得豁免的牙。
     """
 
     def _docs(self) -> list[tuple[str, str]]:
@@ -6245,17 +6327,94 @@ class TestR78HandoffClaimsCarryLiveCommands(unittest.TestCase):
     def test_every_not_yet_done_claim_is_checkable(self) -> None:
         docs = self._docs()
         self.assertTrue(docs, f"掃不到任何交棒書（{_HANDOFF_GLOB}）⇒ 本鎖在對空氣空轉")
-        problems: list[str] = []
-        claims = 0
-        for rel, text in docs:
-            found, n = _handoff_problems(rel, text)
-            problems += found
-            claims += n
+        problems = _handoff_perdoc_problems(docs)
         self.assertEqual(problems, [], "\n".join(problems))
+
+    def test_the_claimless_baseline_only_names_documents_that_exist(self) -> None:
+        """豁免面不得靠打錯字擴大——登記的每一筆都必須真的在掃描面上（第③道牙）。"""
+        scanned = {rel for rel, _ in self._docs()}
+        ghosts = sorted(_HANDOFF_CLAIMLESS_BASELINE - scanned)
+        self.assertEqual(
+            ghosts, [],
+            f"_HANDOFF_CLAIMLESS_BASELINE 登記了掃描面上不存在的檔：{ghosts}"
+            "（檔名打錯／檔被改名 ⇒ 該筆豁免對不上任何東西，而真正的那一份會靜默落回受判面外）",
+        )
+
+    def test_the_newest_handoff_carries_its_own_lower_bound(self) -> None:
+        """最新一份交棒書必須**自己**收得到宣稱，不准靠舊輪的命中數補貼（第②道牙）。
+
+        🔴 這一條就是 R82 Q4-01 的驗收：R81 交棒書當時整份 0 命中，而跨文件加總被
+        R79 的 7 筆永久撐綠。逐文件判準補上之後，還必須擋住「把最新一份加進豁免表」
+        這條最省力的關法——否則崩塌只是換個位置重演。
+        """
+        docs = self._docs()
+        rel, text = max(docs, key=lambda pair: _handoff_round(pair[0]))
+        self.assertNotIn(
+            rel, _HANDOFF_CLAIMLESS_BASELINE,
+            f"最新一份交棒書 {rel} 被登記進 _HANDOFF_CLAIMLESS_BASELINE ⇒ 這正是 R81 那次"
+            "崩塌的換位重演，不受理",
+        )
+        claims = _handoff_problems(rel, text)[1]
+        self.assertGreater(
+            claims, 0,
+            f"最新一份交棒書 {rel} 一筆 stale 宣稱都收不到 ⇒ 本鎖對它零射程"
+            "（R81 就是這個形態：§3 全用散文＋fenced code，一條 list item 都沒有）",
+        )
+
+    def test_a_claimless_newcomer_cannot_hide_behind_older_documents(self) -> None:
+        """合成注入自證：假交棒書必須紅、正常交棒書必須綠（雙向）。
+
+        同時把「舊判準會放行」這件事寫成**前提斷言**——注入語料的跨文件總量必須 ≥1，
+        否則這支測試證明不了任何東西（它會變成「兩種判準都紅」的無鑑別力測試）。
+        """
+        older = (
+            "docs/04_planning/R98_HANDOFF.md",
+            "## §3 交給 R99 的待辦\n\n### 3.1 甲**尚未執行**\n\n說明一句。\n\n"
+            "```powershell\ngit status\n```\n",
+        )
+        silent = ("docs/04_planning/R99_HANDOFF.md", "## §3 交給 R99 的待辦\n\n### 3.1 全數完成\n\n沒有待辦。\n")
+        bare = (
+            "docs/04_planning/R99_HANDOFF.md",
+            "## §3 交給 R99 的待辦\n\n### 3.2 乙**尚未執行**\n\n這一段沒有附任何現查指令。\n",
+        )
+        total = sum(_handoff_problems(rel, text)[1] for rel, text in (older, silent))
         self.assertGreaterEqual(
-            claims, 1,
-            "所有交棒書的「還沒做」章節裡一句 stale 宣稱都掃不到 ⇒ 章節標題或觸發字改了，"
-            "本鎖已失去射程（這正是它要防的形態）",
+            total, 1, "前提不成立：注入語料的跨文件總量必須 ≥1，否則證明不了舊判準會放行"
+        )
+        silent_probs = _handoff_perdoc_problems([older, silent], frozenset())
+        self.assertTrue(
+            any("R99_HANDOFF" in p and "零射程" in p for p in silent_probs),
+            f"零命中的新交棒書躲過了逐文件判準：{silent_probs}",
+        )
+        self.assertTrue(
+            any("R99_HANDOFF" in p for p in _handoff_perdoc_problems([older, bare], frozenset())),
+            "有宣稱但零現查指令的假交棒書沒被抓到",
+        )
+        self.assertEqual(
+            _handoff_perdoc_problems([older], frozenset()), [], "正常交棒書被誤殺"
+        )
+        self.assertTrue(
+            any("只准縮" in p for p in _handoff_perdoc_problems([older], frozenset({older[0]}))),
+            "已經收得到宣稱的檔還留在豁免表裡，自清那一道牙沒有咬合",
+        )
+
+    def test_a_prose_only_section_is_no_longer_a_free_pass(self) -> None:
+        """散文體例的待辦小節必須進分母——R81 交棒書整份 0 命中的直接成因（R82 Q4-01）。"""
+        prose = (
+            "## §3 交給 R82 的待辦\n\n"
+            "### 3.2 L4「真的量不到」仍靜默放行\n\n"
+            "ADR 設計的閂鎖**尚未落地**：拿不到數時走的是「放行且不出聲」。\n"
+        )
+        self.assertEqual(
+            len(_handoff_problems("syn.md", prose)[0]), 1,
+            "散文段落仍是免費逃逸口（上一版只收 list item，整節不進分母）",
+        )
+        with_cmd = prose + "\n```powershell\nSelect-String -Path x -Pattern degraded\n```\n"
+        self.assertEqual(_handoff_problems("syn.md", with_cmd), ([], 1), "附了現查指令的散文小節被誤殺")
+        title_only = "## §2 還沒做什麼\n\n1. 甲項，現查 `git status`。\n"
+        self.assertEqual(
+            _handoff_problems("syn.md", title_only), ([], 0),
+            "純章節標題被當成狀態宣稱（R74 §2 就是這個形態）⇒ 噪音，而噪音會讓鎖被整個關掉",
         )
 
     def test_the_scanner_can_tell_a_bare_claim_from_a_checkable_one(self) -> None:

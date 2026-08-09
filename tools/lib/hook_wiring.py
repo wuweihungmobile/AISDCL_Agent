@@ -471,9 +471,18 @@ def posix_carrier_problems(
             got = ".".join(str(n) for n in version)
             problems.append(
                 f"POSIX hook 載具的 shebang 解析到 {interp}（Python {got}），低於本 repo "
-                f"的下限 {want}（SSOT：tools/bootstrap_core.py）⇒ 目標 hook 腳本一 import "
-                "就炸，而炸掉是 fail-open。這在 macOS 上是**預設**狀態（系統 python3 常"
-                f"年 3.9）。修法：讓 PATH 上的 python3 指向 >= {want}，或把 POSIX 條目的 "
+                f"的下限 {want}（SSOT：tools/bootstrap_core.py）。這在 macOS 上是**預設**"
+                "狀態（系統 python3 常年 3.9），所以這行話在 mac 上 day 1 就會響——"
+                "正因如此它必須說真話，否則只是在訓練你忽略它。\n"
+                "    實測後果（R82 MAC-03；`tools/tests/test_mac_readiness_r82.py` 現查）："
+                "現行 hook 集**載入得起來**，但 `.claude/hooks/context_budget_guard.py` 依賴的 "
+                "`tools/lib/quota_meter.py` 帶 3.11+ 構造，會走該檔的 try/except 退化成 "
+                "`None` ⇒ **額度軸整條靜默消失**（hook 仍回 rc=0，螢幕表徵與健康完全相同）。\n"
+                "    真正的風險面：hook 鏈上**沒有 try/except 保護**的那幾格（例如同檔的 "
+                "`from quota_limits import …`，該處刻意不給 fallback）一旦被加進任何 3.11 "
+                "專屬 import，六支守衛會一起靜默消失——而 spawn／import 失敗是 fail-open"
+                "（CC 只記一行 ERROR、工具照跑）。\n"
+                f"    修法：讓 PATH 上的 python3 指向 >= {want}，或把 POSIX 條目的 "
                 "command 釘到 venv 內的直譯器（後者要一併處理「全新 clone 還沒有 venv」）")
     return problems
 

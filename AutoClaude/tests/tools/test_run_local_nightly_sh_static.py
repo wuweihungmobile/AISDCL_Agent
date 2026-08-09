@@ -17,13 +17,14 @@ lock／trigger 歸因欄位）的偵測靈敏度，與本 repo「驗證鏡子自
 """
 from __future__ import annotations
 
+import ast
 import fnmatch
 import os
 import re
 import shutil
 import subprocess
 import sys
-from pathlib import Path
+from pathlib import Path, PureWindowsPath
 
 import pytest
 
@@ -32,6 +33,13 @@ _NIGHTLY_SH = _REPO_ROOT / "tools" / "run_local_nightly.sh"
 # monorepo 根（AutoClaude/ 的上一層）——跨檔字面一致性鎖要讀根層安裝器。
 _MONOREPO_ROOT = _REPO_ROOT.parent
 _MAC_INSTALLER = _MONOREPO_ROOT / "tools" / "install_mac_nightly.sh"
+
+# 🔴 R82 包 A2（CARRIER-01）：Git Bash 解析走 monorepo 根層既有 SSOT，不在本檔重寫第二份。
+# `test_bash_probe_spec_contract.py::TestNoBareBashInvocationInToolsTests` 的失敗訊息逐字
+# 指定「AutoClaude 樹用 integration_gate_core.find_git_bash()」，本行即照做。
+if str(_MONOREPO_ROOT / "tools") not in sys.path:
+    sys.path.insert(0, str(_MONOREPO_ROOT / "tools"))
+from integration_gate_core import find_git_bash  # noqa: E402
 
 
 @pytest.fixture(scope="module")
@@ -183,11 +191,125 @@ def test_heartbeat_three_site_contract_lines(sh_content: str) -> None:
 # nightly 去重，事後從 log 看不出使用者輸錯了旗標。`--forse`／`-f`／`--Force`／
 # `--FORCE`／裸位置參數七種變體實測 rc 全為 0，無一被拒。
 
+# 🔴 R82 包 A2（CARRIER-01）：述詞由「平台」改成「解不解得到一支能跑 .sh 的 bash」。
+#
+# 舊述詞是 `sys.platform == "win32" or shutil.which("bash") is None`，於是這 25 支在
+# Windows 上**恆 skip**、被歸類成 `[POSIX-NATIVE-ONLY]`（＝「這支測試在別的平台才有
+# 驗證價值」）。R82 掃描實測推翻了那個分類：把 skip 拿掉、只把載具換成 Git Bash 絕對
+# 路徑並將腳本路徑轉正斜線，25 支**在 Windows 上全綠**。也就是說它們驗的是 `.sh` 的
+# CLI 契約（`--help` 不開跑 stage、未知旗標 rc=2…），那件事**與宿主平台無關**——真正
+# 壞掉的是載具：`shutil.which("bash")` 在本機回 `C:\WINDOWS\system32\bash.EXE`（WSL
+# 佔位版），argv 又給反斜線路徑，於是 `/bin/bash: D:CursorProject...: No such file`
+# （分隔符被整批吃掉，rc=127）——一個純粹的載具故障被寫成了平台語意。
+#
+# 舊註解逐字宣稱「Windows 上恆 skip ⇒ 無 WSL 佔位版劫持面」，那正是這條 skip 賴以
+# 存在的理由，而該理由已被上述實測推翻，故連同 `# bash-ok:` 豁免一併刪除。
+_BASH = find_git_bash() if sys.platform == "win32" else shutil.which("bash")
 _POSIX_ONLY = pytest.mark.skipif(
-    sys.platform == "win32" or shutil.which("bash") is None,
-    reason="[POSIX-NATIVE-ONLY] 需要 POSIX bash 實跑本 .sh（Windows 側對等品為 "
-           "run_local_nightly.ps1，其 CLI 契約缺口另案處理）",
+    _BASH is None,
+    reason="[TOOL-ABSENCE] 本機解不到任何可用的 bash（Windows 上＝Git for Windows 未安裝；"
+           "POSIX 上＝PATH 無 bash）——受測物是 .sh 的 CLI 契約，與宿主平台無關，"
+           "缺的只是能把它跑起來的直譯器",
 )
+
+
+def _bash_argv(script: Path, *args: str) -> list[str]:
+    """argv[0] 一律是**絕對路徑**的 bash，腳本路徑一律 `as_posix()`。
+
+    🔴 兩者的份量**不相等**，別把它們寫成同一件事（R82 當回合逐項注入實測）：
+      · argv[0] 給裸名 ⇒ `CreateProcess` 先搜 System32、必定命中 WSL 啟動器
+        （DEF-101-753）。**這一項是致命的**：本機注入後 12 支當場 skip／WSL 路徑下
+        受測腳本一行都沒被執行。
+      · argv[1] 給反斜線 ⇒ 注入實測 **25 支仍全綠**（`27 passed, 1 failed`，唯一的
+        紅是下方那支正規化鎖自己）。也就是說 **Git Bash 吃得下反斜線**；掃描期看到的
+        `/bin/bash: D:CursorProjectAISDCL_Agent...`（分隔符整批消失）是 **WSL 啟動器**
+        造成的，不是 Git Bash。把它記成「Git Bash 會吃掉反斜線」就是製造一句假話。
+        保留正規化的理由因此不是「不改會壞」，而是根 CLAUDE.md 鐵律一對「執行一支
+        .sh」明文要求正斜線腳本路徑（跨機器／跨殼一致），屬**慣例一致性**。
+    """
+    assert _BASH is not None, "呼叫端必須掛 _POSIX_ONLY"
+    return [_BASH, Path(script).as_posix(), *args]
+
+
+# --- R82 包 A2：CARRIER-01 的回歸鎖（三支，缺一都有實證盲區）--------------------
+#
+# 🔴 為何非有這組不可：上面把 25 支 skip 變成 25 支真跑，**「真跑」這件事本身沒有任何
+# 東西在守**——把述詞改回 `sys.platform == "win32"` 就會靜默退回 25 支 skip，而 25 支
+# skip 的 pytest 摘要行是綠的、rc 是 0，失效方向正是本 repo 反覆記過的「看起來很乾淨」。
+# 分群天花板（`skip_group_policy._RUNTIME_SKIP_CEILING`）會抓到總量上升，但那是**收輪
+# 者跑整棵樹**才看得到的訊號；本檔自己被單獨跑時（開發迴圈、`-k` 篩選）零訊號。
+
+def test_the_bash_gate_is_carrier_availability_not_host_platform() -> None:
+    """`_POSIX_ONLY` 的述詞不得再出現任何平台判斷——那正是 CARRIER-01 的病灶本體。
+
+    Rule 9（鎖意圖）：這條規則要守的不是「別寫 sys.platform」這個字面，而是
+    「**分類必須對應真實原因**」。25 支測的是 `.sh` 的 CLI 契約（rc、usage 文字、
+    有沒有落 log），沒有一支碰到 POSIX 專屬語意；把它們標成 `[POSIX-NATIVE-ONLY]`
+    等於宣稱「這件事只有在別的平台驗才有意義」，而實測證明那句話是假的。
+    分類寫錯的代價不是美觀：S3「徹底解決 skipped」的分流者照標籤讀，會把「換個載具
+    就會跑」的 25 支歸進「結構上不可能跑」那一桶，於是永遠沒有人去修它。
+    """
+    src = Path(__file__).read_text(encoding="utf-8")
+    tree = ast.parse(src)
+    predicate: str | None = None
+    for node in ast.walk(tree):
+        if (
+            isinstance(node, ast.Assign)
+            and any(isinstance(t, ast.Name) and t.id == "_POSIX_ONLY" for t in node.targets)
+            and isinstance(node.value, ast.Call)
+            and node.value.args
+        ):
+            predicate = ast.get_source_segment(src, node.value.args[0])
+    assert predicate is not None, (
+        "找不到 `_POSIX_ONLY = pytest.mark.skipif(<述詞>, …)`——結構已變動，"
+        "請同步本鎖（結構抽不到時必須 fail-loud，不得靜默放行）"
+    )
+    for banned in ("sys.platform", "os.name", "platform.system", "platform.machine"):
+        assert banned not in predicate, (
+            f"skip 述詞又出現平台判斷 `{banned}`：{predicate!r}——CARRIER-01 迴歸。"
+            "這 25 支在 Windows 上實測全綠（R82），述詞只准問「解不解得到 bash」"
+        )
+    assert "_BASH" in predicate, (
+        f"skip 述詞不再依賴 `_BASH`（載具解析結果）：{predicate!r}——"
+        "述詞若改問別的東西，載具與 skip 的對應關係就斷了"
+    )
+
+
+def test_the_resolved_interpreter_is_absolute_and_never_the_wsl_stub() -> None:
+    """載具本身的判準：絕對路徑 ＋ 不得落在 System32（WSL 啟動器）。
+
+    沒有這一支，把 `_BASH` 改回 `shutil.which("bash")` 仍能讓上一支綠（述詞照樣只問
+    `_BASH`），而本機實測 `shutil.which("bash")` 回的就是 `C:\\WINDOWS\\system32\\
+    bash.EXE`——DEF-101-753 的原坑，且它在裝了 WSL 發行版的機器上不會紅，只會把 repo
+    的腳本丟進 Linux 真的跑起來（沒有錯誤訊息、沒有非零 rc，只有語意換了一個作業系統）。
+    """
+    if _BASH is None:
+        pytest.skip("[TOOL-ABSENCE] 本機解不到 bash——載具判準無標的可驗")
+    assert Path(_BASH).is_absolute(), (
+        f"argv[0] 必須是絕對路徑，實得 {_BASH!r}——裸名在 Windows 上必定先命中 "
+        "System32 的 WSL 啟動器（CreateProcess 搜尋順序把 System32 排在 PATH 之前）"
+    )
+    parts = [p.lower() for p in PureWindowsPath(_BASH).parts]
+    assert "system32" not in parts, (
+        f"解析到的 bash 落在 System32：{_BASH!r}——那是 WSL 啟動器，不是 Git Bash"
+    )
+
+
+def test_bash_argv_normalises_the_script_path_to_forward_slashes(tmp_path: Path) -> None:
+    """argv[1] 必須是正斜線（根 CLAUDE.md 鐵律一對「執行一支 .sh」的明文慣例）。
+
+    🔴 **誠實劃界**：這一支守的是慣例，不是「不這樣寫就會壞」。當回合把
+    `as_posix()` 換回 `str(script)` 實測 `27 passed, 1 failed`——25 支受測物**全綠**，
+    唯一的紅就是本支。所以它的價值是「讓 argv 形態在任何機器／任何殼上都一樣」，
+    以及擋住有人把 argv[1] 換成別的東西（末段兩條斷言）；把它宣傳成「反斜線會讓
+    Git Bash 壞掉」則是假話（那個現象出自 WSL 啟動器）。
+    """
+    if _BASH is None:
+        pytest.skip("[TOOL-ABSENCE] 本機解不到 bash——載具判準無標的可驗")
+    argv = _bash_argv(tmp_path / "a b" / "run.sh", "--force")
+    assert "\\" not in argv[1], f"argv[1] 仍帶反斜線：{argv[1]!r}"
+    assert argv[1].endswith("/a b/run.sh"), f"路徑正規化把內容改掉了：{argv[1]!r}"
+    assert argv[2:] == ["--force"], f"位置參數未原樣附加：{argv!r}"
 
 
 def _sandbox_nightly(tmp_path: Path) -> Path:
@@ -210,9 +332,7 @@ def _run_sh(
     if env is not None:
         full_env.update(env)
     return subprocess.run(
-        # bash-ok: 呼叫端全掛 _POSIX_ONLY（含 `sys.platform == "win32"` 短路），
-        # Windows 上恆 skip ⇒ 無 WSL 佔位版劫持面（DEF-101-753）。
-        ["bash", str(script), *args],
+        _bash_argv(script, *args),
         capture_output=True, text=True, encoding="utf-8", errors="replace",
         timeout=120, env=full_env,
     )
@@ -292,15 +412,17 @@ def _trigger_for(tmp_path: Path, code: str, *, xpc: str | None, args: tuple[str,
     probe = tmp_path / "trigger_probe.sh"
     probe.write_text(
         "set -u\n" + _extract_trigger_block(code) + 'printf "%s" "${TRIGGER_SRC}"\n',
-        encoding="utf-8",
+        # 🔴 `newline="\n"`（R82 包 A2）：Windows 上 `write_text` 預設會把 `\n` 轉成
+        # `\r\n`，而 bash 會把行尾的 `\r` 當成指令的一部分（`then\r` 之類的語法錯）。
+        # 這一行在「Windows 恆 skip」的年代永遠沒被執行過，故從未顯形。
+        encoding="utf-8", newline="\n",
     )
     env = dict(os.environ)
     env.pop("XPC_SERVICE_NAME", None)
     if xpc is not None:
         env["XPC_SERVICE_NAME"] = xpc
     return subprocess.run(
-        # bash-ok: 同上，呼叫端全掛 _POSIX_ONLY（DEF-101-753）。
-        ["bash", str(probe), *args],
+        _bash_argv(probe, *args),
         capture_output=True, text=True, encoding="utf-8", errors="replace",
         timeout=30, env=env,
     ).stdout

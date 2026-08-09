@@ -499,10 +499,15 @@ def test_steersman_render_trajectory():
 def test_composition_fsm_tlc_full_verification_opt_in():
     """完整 TLC 窮舉 COMPOSITION_FSM（5 safety + 1 liveness）。需 SDD_RUN_TLC=1 + java + jar。"""
     if os.environ.get("SDD_RUN_TLC") != "1":
-        pytest.skip("set SDD_RUN_TLC=1 to run full TLC（離線可達性不變量已常駐守門）")
+        pytest.skip("[ENV-DISABLED] 未啟用五軌 TLA+/TLC 窮舉（set SDD_RUN_TLC=1）——**未啟用，非缺件**："
+            "本機實查 java 與 tools/fsm_runtime/formal/lib/tla2tools.jar 都在，接上後實跑 "
+            "`33 passed in 304.36s`（R82 實測）。304 秒不該進 PR fast gate，而本 repo **目前**"
+            "沒有任何自動通道跑它（實查 .github/workflows 與 run_local_nightly.* 對 SDD_RUN_TLC "
+            "零命中）⇒ 這是誠實的零覆蓋，不是「等 nightly」。承接輪次 R83：建 nightly 的 "
+            "sdd-tlc stage（比照既有 sdd-chaos stage 的接法）。離線可達性不變量仍常駐守門")
     from tools.fsm_runtime import tlc_runner as T
     if T.find_java() is None or not T.jar_path().exists():
-        pytest.skip("java 或 tla2tools.jar 不存在")
+        pytest.skip("[TOOL-ABSENCE] java 或 tla2tools.jar 不存在——這一條是真缺件（與上面那條 ENV-DISABLED 不同軸）：裝 JDK 或跑 tools/fsm_runtime/formal/run_tlc.sh 讓它自動下載 jar")
     res = T.run_tlc(depth=50, tla="COMPOSITION_FSM.tla", cfg="COMPOSITION_FSM.cfg")
     assert res["ok"], f"COMPOSITION_FSM TLC 驗證失敗：{res.get('log_tail') or res.get('error')}"
     assert res["distinct"] > 0

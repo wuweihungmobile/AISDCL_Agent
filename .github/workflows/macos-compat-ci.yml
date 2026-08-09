@@ -604,6 +604,18 @@ jobs:
     steps:
       - uses: actions/checkout@v5
 
+      # 🔴 R82 MAC-03 —— 這一步**遮住**了 mac 真機第一次開 session 的預設態，明文登記：
+      #   setup-python 之後，本 job 全程的 `python3` 是 3.11；而 R83 在真機上開 session 時，
+      #   PATH 上的 `python3` 是系統那支（macOS 常年 3.9）。POSIX hook 載具（`.claude/
+      #   hooks/_hook_launcher.py` 的 `#!/usr/bin/env python3`）解析到的就是後者 ⇒
+      #   `tools/lib/hook_wiring.posix_carrier_problems` 的版本告警在真機 day 1 必響，
+      #   而本 job **結構上永遠走不到那條路**（同 root-infra-ci 對工作樹行尾恆綠的形狀：
+      #   雲端天生看不到本機的預設環境）。
+      #   ⇒ 本 job 的綠**不蘊含**「mac 真機上那道告警不會響／內容正確」。
+      #   真的量到預設態的那條剖面刻意放在 `macos-nightly-full`（見該 job 第一個 step），
+      #   不放在這裡：本 job 的每一個 step 都受
+      #   `tools/tests/test_smoke_ci_sync.py::_CI_STEP_LOCAL_CARRIER`「必須登記本地承載」
+      #   的雙向鎖管轄，而「預設態現查」在本機沒有對應的 smoke 情境可登記。
       - name: Set up Python 3.11
         uses: actions/setup-python@v6
         with:
@@ -978,6 +990,23 @@ jobs:
 
     steps:
       - uses: actions/checkout@v5
+
+      # 🔴 R82 MAC-03 —— **唯一一條不經 setup-python 的剖面**（advisory，永不阻斷）。
+      # WHY：`macos-smoke` 第一步就 setup-python 3.11，於是 repo 對「macOS 預設 python3
+      # 是 3.9」這件事的全部宣稱，在雲端從來沒有被任何一步量到過——包含
+      # `hook_wiring.posix_carrier_problems` 那道「day 1 必響」的版本告警：它宣稱什麼、
+      # 響出來對不對，兩者都無人觀測。這一步把它變成**可觀測**（印版本＋真的跑一次
+      # liveness 檢查），刻意不改任何判準、不擋任何東西。
+      # 誠實劃界：runner 的系統 python3 版本會隨 macos-latest 映像漂移，所以本步只**印**
+      # 不判；判準那一半在 `tools/tests/test_mac_readiness_r82.py`（機器無關）。
+      - name: 【R82】runner 預設態現查：系統 python3 版本 + hook 載具 liveness（不經 setup-python）
+        continue-on-error: true
+        run: |
+          echo "PATH 上的 python3 ＝ $(command -v python3 || echo '(找不到)')"
+          python3 -c 'import sys; print("PATH python3 ->", sys.version_info[:2])' || true
+          /usr/bin/python3 -c 'import sys; print("系統 /usr/bin/python3 ->", sys.version_info[:2])' || true
+          echo "── 以系統直譯器跑 hook 載具 liveness（advisory；rc 不被消費）──"
+          /usr/bin/python3 tools/check_hooks_liveness.py || true
 
       - name: Set up Python 3.11
         uses: actions/setup-python@v6

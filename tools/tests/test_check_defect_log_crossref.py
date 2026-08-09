@@ -2641,6 +2641,7 @@ _LEDGER_MIN = (
 #: 判準本體住 `tools/lib`（兩支工具共用），故本組鎖直接叩它——不經閘門再叩一次，
 #: 那會讓「純函式有沒有牙」與「閘門有沒有接線」兩件事混在同一個 assert 裡。
 _lib = m._ledger_index
+_rot = m._rotation
 
 
 class TestR79RowByteCeiling(unittest.TestCase):
@@ -2764,6 +2765,293 @@ class TestR79RowByteCeiling(unittest.TestCase):
         printed = " ".join(str(a) for c in fake.call_args_list for a in c.args)
         self.assertIn("輪替上限", printed)
         self.assertNotIn("尚有", printed)
+
+
+class TestR82RatchetDirectionLock(unittest.TestCase):
+    """三條 shrink-only 棘輪的**方向鎖**（`DEF-101-993`）。
+
+    意圖（Rule 9）：`OVERSIZE_ROW_CEILING`／`OVERSIZE_ROW_EXCESS_CEILING`／
+    `_UNPINNED_HANDOVER_CEILING` 三者的散文自 R68／R79 起逐輪自稱「只准往下改、零成長
+    容忍」，而那句話**沒有任何觀測者**——當回合實測：把某一列改長 85 bytes ⇒
+    `oversize_row_problems()` 紅；**接著把常數調高到新實測值** ⇒ 四向全綠，且唯一釘住
+    常數的 `test_the_real_ledger_baselines_are_exact_not_padded` 是「常數 == 當回合實測」
+    的相等斷言 ⇒ 帳本一長，那支測試**要求**你把常數調高。相等自檢在這件事上是幫兇不是守衛。
+
+    所以本組守的不是「常數對不對」，是**常數相對它自己上一個值的方向**。缺了它，
+    這三條棘輪擋得住「忘了重釘」，擋不住「往上重釘」——而後者正是砸溫度計的那個動作。
+    """
+
+    def test_shrinking_is_green(self) -> None:
+        """方向鎖的反向（證明它不是恆紅）：一路往下釘＝合法。"""
+        self.assertEqual(
+            _rot.ratchet_history_problems("X", (100, 80, 55), 55), [])
+
+    def test_a_flat_repin_is_green_because_a_quiet_round_is_legal(self) -> None:
+        """判「不增」而非「嚴格遞減」：沒動到帳本的一輪重釘成同一個數是正確動作。
+
+        判成紅會逼人去製造假的下降，那比沒有鎖更糟。
+        """
+        self.assertEqual(
+            _rot.ratchet_history_problems("X", (100, 80, 80), 80), [])
+
+    def test_raising_the_ceiling_is_red_and_names_the_segment(self) -> None:
+        """注入（正向）：把上限往上釘 ⇒ 紅，且逐字指名是哪一段、升了多少。"""
+        problems = _rot.ratchet_history_problems("X", (100, 80, 96), 96)
+        self.assertEqual(len(problems), 1, problems)
+        self.assertIn("由 80 **上升**到 96", problems[0])
+        self.assertIn("+16", problems[0])
+
+    def test_editing_the_constant_without_recording_it_is_red(self) -> None:
+        """第三向：改了常數卻不追加史料 ⇒ 紅（否則史料是裝飾品、方向判準等於不存在）。"""
+        problems = _rot.ratchet_history_problems("X", (100, 80), 96)
+        self.assertEqual(len(problems), 1, problems)
+        self.assertIn("與重釘史末元素 80 不符", problems[0])
+
+    def test_an_empty_history_fails_loud_instead_of_passing(self) -> None:
+        """空序列＝沒有起算錨，必須說話而不是默認合規（fail-closed）。"""
+        self.assertTrue(_rot.ratchet_history_problems("X", (), 5))
+
+    def test_the_three_shipped_ratchets_are_all_wired_and_green_today(self) -> None:
+        """端到端：出廠的三條史料本身必須合規（否則上面全是空轉）。"""
+        self.assertEqual(m.ratchet_direction_problems(), [])
+        self.assertEqual(_rot.OVERSIZE_ROW_CEILING_HISTORY[-1],
+                         _lib.OVERSIZE_ROW_CEILING)
+        self.assertEqual(_rot.OVERSIZE_ROW_EXCESS_CEILING_HISTORY[-1],
+                         _lib.OVERSIZE_ROW_EXCESS_CEILING)
+        self.assertEqual(_rot.UNPINNED_HANDOVER_CEILING_HISTORY[-1],
+                         m._UNPINNED_HANDOVER_CEILING)
+
+    def test_the_direction_lock_runs_unconditionally_in_main(self) -> None:
+        """呼叫點必須在 `main()` 且**不在**真實主檔守衛內——否則換一本帳本即可繞過。
+
+        判準形狀逐字沿用同檔既有的 `test_ceiling_gate_runs_unconditionally_in_main`：
+        這兩道守的是同一件事的兩半（清單有沒有超過天花板／天花板有沒有被往上搬）。
+        """
+        src = Path(m.__file__).read_text(encoding="utf-8")
+        self.assertIn("    ceiling_problems += ratchet_direction_problems()", src,
+                      "main() 未呼叫方向鎖 ⇒ 三條棘輪又退回只擋『忘了重釘』的收費站")
+
+    def test_the_lock_would_have_caught_the_real_bypass_that_motivated_it(self) -> None:
+        """回歸鎖：重演立案當時那個「調高到新實測值就全綠」的實際繞道。
+
+        場景＝有人把一列改長，`oversize_row_problems()` 轉紅，於是把
+        `OVERSIZE_ROW_EXCESS_CEILING` 調高到新實測值。舊世界：全綠。新世界：方向鎖接手。
+        """
+        grown = _lib.OVERSIZE_ROW_EXCESS_CEILING + 85
+        with mock.patch.object(_lib, "OVERSIZE_ROW_EXCESS_CEILING", grown):
+            # 舊世界的兩道守衛對這個動作都沒有意見（分別是「常數 vs 帳本」與「清單筆數」）
+            self.assertEqual(m.grandfather_ceiling_problems(), [])
+            problems = m.ratchet_direction_problems()
+        self.assertEqual(len(problems), 1, problems)
+        self.assertIn("OVERSIZE_ROW_EXCESS_CEILING", problems[0])
+
+
+class TestR82SealedHistoryPrefix(unittest.TestCase):
+    """史料前綴不可變（`DEF-101-995`）。
+
+    意圖（Rule 9）：上一組（`DEF-101-993`）補的方向鎖只判「相鄰段不上升 ＋ 末元素對得上
+    現值」，於是 R82 掃描 §F 以四組實跑對照量到它自己留的縫——`REWRITE-last`
+    `(105,101,98,85)→(105,101,98,90)` 與 `truncate` `(999,)` **兩組都是綠的**。
+    也就是說：一條專門用來擋「砸溫度計」的鎖，擋得住老實追加一個更大的數，擋不住把
+    溫度計的刻度表整張換掉。同一輪、同一個主題、第二次。
+
+    所以本組守的不是方向，是**已經寫下來的那幾個值還在不在**。缺了它，
+    `ledger_rotation.py` 檔頭那句「歷史不得回填、不得改寫」與它所治的病同型：
+    規則寫在註解裡，觀測者一個都沒有。
+
+    🔴 R82 複審 QA B1（`DEF-101-997`）訂正本組自己的兩個病：
+      ① `_SEAL` 原本是硬編的第三份複本 `(105, 101, 98, 85)`，**從不與
+         `_SEALED_HISTORY_PREFIXES` 對帳** ⇒ 封印被改動時本組 7 支全過。現改為讀活體表，
+         下面每一條注入體與斷言都由它機械推導：封印一動，注入跟著動。
+      ② 本組只驗 `sealed_prefix_problems()`，而那支對「封印**比上一次短**」零判準
+         ⇒ 把封印砍掉一格（一行的差別）就能讓超長列上限的放寬整個變綠。那一向由
+         `seal_table_problems()` 接手，下面四支是它的紅綠自證。
+    """
+
+    #: 活體封印（**不是**快照）：本組每一條注入體都由它推導，見類別 docstring ①。
+    _SEAL = _rot._SEALED_HISTORY_PREFIXES["OVERSIZE_ROW_CEILING"]
+
+    def _relaxed(self) -> int:
+        """比封印末元素「放寬」一格、但仍不破壞遞減的值（注入用；不寫死數字）。"""
+        return (self._SEAL[-1] + self._SEAL[-2]) // 2
+
+    def test_appending_needs_no_seal_change_which_is_the_whole_point(self) -> None:
+        """只准延長：尾端追加一個新值 ⇒ 綠，且**不必動封印**。
+
+        這一條就是本判準與 `DEF-101-993` 幫兇形態的分界——那種「常數 == 當回合實測」的
+        相等斷言會**要求**你把常數改成新測到的值；前綴斷言不會，它只拒絕改寫。
+        """
+        self.assertEqual(
+            _rot.sealed_prefix_problems("X", self._SEAL, (*self._SEAL, 70)), [])
+        self.assertEqual(
+            _rot.sealed_prefix_problems("X", self._SEAL, self._SEAL), [])
+
+    def test_rewriting_a_sealed_value_is_red_and_names_the_position(self) -> None:
+        """稽核者報的那條繞道（`REWRITE-last`）：舊判準給綠，本判準必須紅。"""
+        relaxed = self._relaxed()
+        self.assertNotEqual(
+            relaxed, self._SEAL[-1],
+            "前提：封印末兩項之間必須放得下一個中間值，否則這條注入是 no-op")
+        rewritten = (*self._SEAL[:-1], relaxed)
+        self.assertEqual(
+            _rot.ratchet_history_problems("X", rewritten, relaxed), [],
+            "前提檢查：舊判準對這組確實是綠的（否則本判準在證明一件不存在的事）")
+        problems = _rot.sealed_prefix_problems("X", self._SEAL, rewritten)
+        self.assertEqual(len(problems), 1, problems)
+        self.assertIn(f"第 {len(self._SEAL) - 1} 項", problems[0])
+        self.assertIn(str(self._SEAL[-1]), problems[0])
+        self.assertIn(str(relaxed), problems[0])
+
+    def test_truncating_the_whole_history_is_red(self) -> None:
+        """本包在同一次探測中找到的、更寬的那一條：整段砍成單一高值元素也是綠的。"""
+        high = (self._SEAL[0] + 100,)
+        self.assertEqual(_rot.ratchet_history_problems("X", high, high[0]), [],
+                         "前提檢查：舊判準對 truncate 確實是綠的")
+        problems = _rot.sealed_prefix_problems("X", self._SEAL, high)
+        self.assertEqual(len(problems), 1, problems)
+        self.assertIn("被砍短", problems[0])
+        self.assertIn("把封印砍短", problems[0])
+
+    def test_an_unsealed_tail_longer_than_one_is_red_so_the_seal_cannot_rot(self) -> None:
+        """封印不跟著長 ⇒ 它只罩得住落地當下那幾筆，往後每一輪追加的值又回到無人看守。
+
+        訊息必須直接給出「該把哪幾個值封進去」，否則下一個人會去猜。
+        """
+        tail = (self._SEAL[-1] - 1, self._SEAL[-1] - 2)
+        problems = _rot.sealed_prefix_problems("X", self._SEAL, (*self._SEAL, *tail))
+        self.assertEqual(len(problems), 1, problems)
+        self.assertIn("2 項未封印", problems[0])
+        self.assertIn(f"({tail[0]},)", problems[0])
+
+    def test_deleting_a_seal_entry_fails_closed(self) -> None:
+        """把整筆封印從表裡刪掉 ⇒ 空封印 ⇒ 尾巴超長而紅（不是靜默放行）。"""
+        self.assertTrue(_rot.sealed_prefix_problems("X", (), self._SEAL))
+
+    def test_the_three_shipped_seals_cover_the_shipped_histories(self) -> None:
+        """端到端：出廠的三條史料現況必須通過封印（否則上面全是空轉）。"""
+        self.assertEqual(m.ratchet_direction_problems(), [])
+        for name, history in (
+            ("OVERSIZE_ROW_CEILING", _rot.OVERSIZE_ROW_CEILING_HISTORY),
+            ("OVERSIZE_ROW_EXCESS_CEILING",
+             _rot.OVERSIZE_ROW_EXCESS_CEILING_HISTORY),
+            ("_UNPINNED_HANDOVER_CEILING",
+             _rot.UNPINNED_HANDOVER_CEILING_HISTORY),
+        ):
+            with self.subTest(name=name):
+                seal = _rot._SEALED_HISTORY_PREFIXES[name]
+                self.assertEqual(history[:len(seal)], seal)
+
+    def test_the_seal_is_wired_into_the_direction_lock_not_left_dangling(self) -> None:
+        """接電檢查：純函式寫好卻沒被 `ratchet_direction_problems()` 呼叫＝零觀測者，
+        而那正是 `DEF-101-995` 本身的形態。以實際注入驗，不是讀原始碼字串。"""
+        broken = dict(_rot._SEALED_HISTORY_PREFIXES)
+        broken["OVERSIZE_ROW_CEILING"] = (*self._SEAL[:-1], self._SEAL[0] + 100)
+        with mock.patch.object(_rot, "_SEALED_HISTORY_PREFIXES", broken):
+            problems = m.ratchet_direction_problems()
+        self.assertTrue(problems, "封印被改動卻沒有任何東西轉紅 ⇒ 判準沒接電")
+        self.assertTrue(any("OVERSIZE_ROW_CEILING" in p for p in problems), problems)
+
+
+class TestR82ComplexReviewSealTableIntegrity(unittest.TestCase):
+    """封印表**自己**的完整性（`DEF-101-997`；R82 複審 QA B1）。
+
+    意圖（Rule 9）：上一組（`DEF-101-995`）把「史料被改寫／被砍短」補上了觀測者，但它
+    只從**史料**那一側看——判準是 `history[:len(seal)] == seal` ＋「封印不得比史料長」。
+    稽核者以 `mock.patch` 記憶體內注入實測到它自己留的縫：
+
+      · A（只改史料＋常數 `(105,101,98,85)→(105,101,98,90)`，封印完整）→ 1 筆 → 紅 ✅
+      · B（**同時把封印砍成 `(105,101,98)`**，一行的差別）        → 0 筆 → **綠** ❌
+
+    也就是說：把超長列上限 85 放寬成 90 這種事，改兩行就全綠。`_SEAL_TAIL_MAX = 1`
+    剛好讓砍一格之後的尾巴合法，於是「封印比上一次短」這一向從頭到尾沒有人在看。
+    更難看見的是守它的那組測試把封印硬編成第三份複本、從不與活體表對帳 ⇒ 封印被改動時
+    7 支全過；而 `sealed_prefix_problems()` 的紅燈訊息逐字寫著「若你正打算改
+    `_SEALED_HISTORY_PREFIXES` 讓它變綠：那正是本判準要擋的動作」——**那句話零觀測者**，
+    與它所治的 `DEF-101-993` 同型。同一個主題，第三次。
+
+    本組是 `seal_table_problems()` 的紅綠自證：三個方向各一支紅、出廠現況一支綠、
+    合法動作（尾端追加＋同步重釘）一支綠，另加一支以實際注入驗的接電鎖。
+    """
+
+    _SEAL = _rot._SEALED_HISTORY_PREFIXES["OVERSIZE_ROW_CEILING"]
+
+    def _seals_with(self, ceiling: tuple[int, ...]) -> dict[str, tuple[int, ...]]:
+        table = dict(_rot._SEALED_HISTORY_PREFIXES)
+        table["OVERSIZE_ROW_CEILING"] = ceiling
+        return table
+
+    def test_the_shipped_table_passes_its_own_pins(self) -> None:
+        """出廠自檢：現況必須合格，否則下面每一支注入都是在空轉。"""
+        self.assertEqual(_rot.seal_table_problems(), [])
+
+    def test_cutting_a_seal_short_is_red_which_is_the_reported_bypass(self) -> None:
+        """🔴 B 組繞道本體：砍掉封印最後一格。舊判準綠，本判準必須紅。"""
+        short = self._SEAL[:-1]
+        relaxed = (self._SEAL[-1] + self._SEAL[-2]) // 2
+        self.assertEqual(
+            _rot.sealed_prefix_problems(
+                "OVERSIZE_ROW_CEILING", short, (*short, relaxed)), [],
+            "前提檢查：舊判準對砍短後的組合確實是綠的（否則本判準在證明不存在的事）")
+        problems = _rot.seal_table_problems(self._seals_with(short))
+        self.assertEqual(len(problems), 2, problems)
+        self.assertTrue(any("[封印變短]" in p for p in problems), problems)
+        self.assertTrue(any("[封印被改寫]" in p for p in problems), problems)
+
+    def test_rewriting_a_seal_in_place_is_red_even_though_the_length_is_unchanged(self) -> None:
+        """長度那一向沉默的情形：內容被改寫、長度不變 ⇒ 只有摘要那一向會說話。"""
+        relaxed = (self._SEAL[-1] + self._SEAL[-2]) // 2
+        problems = _rot.seal_table_problems(
+            self._seals_with((*self._SEAL[:-1], relaxed)))
+        self.assertEqual(len(problems), 1, problems)
+        self.assertIn("[封印被改寫]", problems[0])
+
+    def test_growing_a_seal_is_red_until_both_pins_are_repinned_then_green(self) -> None:
+        """合法動作也必須留痕：追加不重釘 ⇒ 紅；同一次變更內重釘兩個常數 ⇒ 綠。
+
+        後半是本鎖的**可被滿足性**：只會紅不會綠的鎖，第一個撞上的人就會把它拔掉。
+        """
+        grown = self._seals_with((*self._SEAL, self._SEAL[-1] - 5))
+        self.assertTrue(_rot.seal_table_problems(grown),
+                        "追加了卻沒重釘 ⇒ 必須紅，否則『改封印』又變成無聲的")
+        self.assertEqual(
+            _rot.seal_table_problems(
+                grown,
+                total_min_len=sum(len(v) for v in grown.values()),
+                digest=_rot.seal_table_digest(grown)),
+            [], "同一次變更內重釘兩個常數之後必須轉綠——否則本鎖無法被滿足")
+
+    def test_a_stale_length_pin_is_red_so_the_slack_cannot_be_left_open(self) -> None:
+        """封印長大了卻只重釘摘要 ⇒ 長度下限留下的餘裕就是日後無聲砍回去的破口。"""
+        grown = self._seals_with((*self._SEAL, self._SEAL[-1] - 5))
+        problems = _rot.seal_table_problems(
+            grown, digest=_rot.seal_table_digest(grown))
+        self.assertEqual(len(problems), 1, problems)
+        self.assertIn("[基準過時]", problems[0])
+
+    def test_the_digest_is_order_independent_but_content_sensitive(self) -> None:
+        """摘要必須只看內容不看 dict 建立順序（否則重排鍵就是一次假紅）。"""
+        table = dict(_rot._SEALED_HISTORY_PREFIXES)
+        reordered = {k: table[k] for k in reversed(list(table))}
+        self.assertEqual(_rot.seal_table_digest(table),
+                         _rot.seal_table_digest(reordered))
+        self.assertNotEqual(
+            _rot.seal_table_digest(table),
+            _rot.seal_table_digest(self._seals_with(self._SEAL[:-1])))
+
+    def test_the_table_check_is_wired_into_the_direction_lock(self) -> None:
+        """接電鎖：重演稽核者的 B 組（史料＋常數＋封印三者同時動）。
+
+        以實際注入驗而不是讀原始碼字串——「有呼叫但回傳值被丟掉」讀字串抓不到。
+        """
+        relaxed = (self._SEAL[-1] + self._SEAL[-2]) // 2
+        with mock.patch.object(_rot, "OVERSIZE_ROW_CEILING_HISTORY",
+                               (*self._SEAL[:-1], relaxed)), \
+             mock.patch.object(_lib, "OVERSIZE_ROW_CEILING", relaxed), \
+             mock.patch.object(_rot, "_SEALED_HISTORY_PREFIXES",
+                               self._seals_with(self._SEAL[:-1])):
+            problems = m.ratchet_direction_problems()
+        self.assertTrue(problems, "B 組繞道仍然成立 ⇒ 封印表判準沒接進方向鎖")
+        self.assertTrue(any("[封印變短]" in p for p in problems), problems)
 
 
 if __name__ == "__main__":

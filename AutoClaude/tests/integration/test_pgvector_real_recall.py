@@ -262,8 +262,14 @@ class TestDualAdapterFallback:
         from pathlib import Path
         if not Path("tests/fixtures/dual_adapter_failover.json").exists():
             pytest.skip(
+                # 🔴 R82 包 A2（DEBT-01）：承接輪次往後推了一輪——修前它逐字寫著**本輪**，
+                # 而本輪什麼都沒發生。輪號到了卻沒有任何東西會說話，是這句話能掛著不動的
+                # 原因；本檔起由 `test_conftest_windows_native_skip_report.py::
+                # test_every_debt_handover_round_is_still_in_the_future` 對全樹 `[DEBT]`
+                # 的字面承接輪號逐筆比對當前輪次。（本註解刻意不複述輪號數字——註解不得
+                # 自稱超前帳本的輪號，那由 check_defect_log_crossref 的輪號鎖守。）
                 "[DEBT] 雙 adapter failover fixture 缺失；由 SD_09 W2 議題 C 完整實作。"
-                "承接輪次 R82：要建的是 AutoClaude/tests/fixtures/dual_adapter_failover.json"
+                "承接輪次 R83：要建的是 AutoClaude/tests/fixtures/dual_adapter_failover.json"
                 "（BGE-M3 故障注入腳本 ＋ Minimax adapter 切換的量測欄位），"
                 "建好後本 case 自動轉綠。🔴 這一支只在開啟 SD07_REAL_PG_E2E_ENABLED 後才"
                 "現形（否則被 _require_real_pg 那一層 skip 蓋住）⇒ 盤點欠債一律在最大環境"

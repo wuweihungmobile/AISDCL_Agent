@@ -113,13 +113,13 @@ from __future__ import annotations
 import argparse
 import re
 import sys
-from datetime import date as _date
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _stdio_utf8  # noqa: E402,F401  # Windows 非 UTF-8 終端 print(✅/❌) 防崩潰保護
 import check_defect_log_crossref as gate  # noqa: E402  # 判準 SSOT：不自己另寫一份正則
 from lib import defect_ledger_index as _ledger_index  # noqa: E402
+from lib import ledger_rotation as _rotation  # noqa: E402
 
 _REPO_ROOT = Path(__file__).resolve().parents[1]
 _QUALITY_DIR = _REPO_ROOT / "docs" / "06_quality"
@@ -636,6 +636,15 @@ def plan(ack: frozenset[str] = frozenset(), only: frozenset[str] = frozenset(),
         "excluded": excluded,
         "selection_problems": sel_problems,
         "ledger_bytes": _LEDGER.stat().st_size,
+        # DEF-101-977／DEF-101-676：兩者都是**純讀計算**，掛在 plan 上讓 `--plan` 與
+        # `--apply` 共用同一份數字（`_print_plan` 維持純格式化，不自己再讀一次磁碟）。
+        "waiver_expiry": _rotation.expiring_oversize_waivers(
+            [v["id"] for v in movable], text),
+        "index_bullet_bytes": len(_index_bullet(
+            Path("AutoSDD_Defect_Log_archive_NN.md"),
+            [v["id"] for v in movable], _LEDGER.stat().st_size,
+            sum(v["bytes"] for v in movable), sum(v["bytes"] for v in movable),
+            needs_ack, "（--plan 估算）", excluded).encode("utf-8")),
     }
 
 
@@ -668,6 +677,8 @@ def _print_plan(p: dict) -> None:
     if p["excluded"]:
         print(f"\nℹ️  以 --only／--keep 排除（仍留在主檔，下次 --plan 照樣報成可搬）："
               f"{'、'.join(v['id'] for v in p['excluded'])}")
+    # 🔴 DEF-101-977 ＋ DEF-101-676：輪替改變了下游判準的輸入，卻讓下游的人去發現後果。
+    print(_rotation.rotation_effect_report(p, total))
     # 🔴 第二條天花板：未結列數。歸檔對它零效果，而歸檔會讓 bytes 訊號往**相反**方向動
     #    ——剛跑完 `--apply` 的人最容易誤以為餘裕買到了（WHY 見 lib 該函式）。
     for note in _ledger_index.unresolved_advisory_notes(gate._load_ledger_status()):
@@ -1321,33 +1332,10 @@ def conservation_problems(orig_text: str, new_main: str, move_lines: list[str],
     return problems
 
 
-def _index_bullet(dest: Path, move_ids: list[str], orig_bytes: int, released: int,
-                  archive_bytes: int, needs_ack: list[dict], note: str,
-                  excluded: list[dict] = ()) -> str:
-    """組出該次歸檔的索引 bullet（體例照 archive_30 那條；R69 起寫進歸檔索引檔）。
-
-    載明：建立時點／筆數／ID 清單／bytes 變化／判準④ 攔下哪幾筆／操作備註。
-
-    🔴 刻意**不寫「搬後主檔 N bytes」**：本 bullet 自己就要寫進主檔，寫上去之前算不出
-    搬後實數（循環依賴），而用「先算再插」湊一個數字必然差在 bullet 自身長度上。
-    故只寫「搬前」與「釋出」（兩者在此刻皆為確定值），搬後實數指向工具實跑——這與帳本
-    「不對餘裕做定性宣稱／不快照可漂移數字」的既有紀律同向（R59 SA-R59-P2-1）。
-    """
-    held = "、".join(f"`{v['id']}`" for v in needs_ack) or "（無）"
-    # DEF-101-811：`--only`／`--keep` 的排除必須**留痕**，否則它就是一個無聲的少搬入口。
-    skipped = "、".join(f"`{v['id']}`" for v in excluded) or "（無）"
-    return (
-        f"> - **`{dest.name}`**（`tools/archive_defect_log.py --apply` 於 "
-        f"{_date.today().isoformat()} 建立，{archive_bytes} bytes）："
-        f"**{len(move_ids)} 筆已結列**逐字搬移"
-        f"（{'／'.join(move_ids)}）。"
-        f"**位元組變化**：搬前主檔 {orig_bytes} bytes、本次釋出 {released} bytes"
-        f"（搬後實數以 `python tools/check_defect_log_crossref.py` 實跑為權威——本 bullet"
-        f"自身的寫入也計入主檔體積，故不在此寫死搬後數字）。"
-        f"**判準④ 攔下、刻意未加 `--ack-handoff` 而留在主檔者**：{held}。"
-        f"**判準全過但以 `--only`／`--keep` 具名排除、刻意留在主檔者**：{skipped}。"
-        f"**本次操作備註**：{note}"
-    )
+#: 索引 bullet 的組裝已下沉 `tools/lib/ledger_rotation.py`（純字串組裝，與本檔的 I/O 無關），
+#: 理由＝本檔的 raw-line 棘輪餘裕近乎零而該棘輪自己指定「先抽共用模組」。此處保留同名薄轉呼，
+#: 讓既有呼叫端與測試的座標不變。
+_index_bullet = _rotation.index_bullet
 
 
 def apply(archive_num: int, ack: frozenset[str], header_note: str,

@@ -97,6 +97,10 @@ _LATEST_SDD_ROOT = _REPO_ROOT / "AISDLC_SDD" / _latest_sdd_version_name()
 # 差集要求同步）。
 _CALLER_FILES = [
     _REPO_ROOT / "tools" / "git-hooks" / "pre-push",
+    # R82 新增：根層 pre-commit 的**機密外洩閘第二層**（內容掃描）需要一個真 python
+    # 去跑 tools/lib/secret_scan.py，故它也成了本 SSOT 的呼叫端。此前根層 pre-commit
+    # 完全不碰 python（純 bash），是本輪才長出來的呼叫點。
+    _REPO_ROOT / "tools" / "git-hooks" / "pre-commit",
     _REPO_ROOT / "tools" / "lib" / "git_hooks_install_common.sh",
     _REPO_ROOT / "tools" / "dev_start.sh",
     _REPO_ROOT / "tools" / "bootstrap.sh",

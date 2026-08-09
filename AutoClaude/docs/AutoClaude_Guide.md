@@ -94,7 +94,9 @@ cp config.local.yaml.example config.local.yaml
 ```yaml
 claude:
   command: claude               # CLI 名稱
-  extra_args: ["--yes"]         # 預設旗標
+  extra_args: []                # 預設不多送旗標（R82 ACB-01：`--yes` 不是 Claude Code 旗標，
+                                # 實測 rc=1 `error: unknown option '--yes'`；需免權限提示時改
+                                # ["--permission-mode", "bypassPermissions"]）
   continue_flag: "--continue"   # 維持對話脈絡
   encoding: utf-8
 
@@ -529,7 +531,7 @@ netsh advfirewall firewall add rule `
 ```powershell
 docker run -d --name pgvector-db -p 5432:5432 `
     -e POSTGRES_USER=koala `
-    -e POSTGRES_PASSWORD=koala5 `
+    -e POSTGRES_PASSWORD=your_password_here `
     -e POSTGRES_DB=aisdlc `
     pgvector/pgvector:pg17
 ```
@@ -553,7 +555,7 @@ Restart-Service -Name $svcName
 ```sql
 -- psql -U postgres
 CREATE DATABASE aisdlc;
-CREATE USER koala WITH PASSWORD 'koala5';
+CREATE USER koala WITH PASSWORD 'your_password_here';
 GRANT ALL ON DATABASE aisdlc TO koala;
 \c aisdlc
 CREATE EXTENSION IF NOT EXISTS vector;
@@ -564,7 +566,7 @@ CREATE EXTENSION IF NOT EXISTS vector;
 ```bash
 python -c "
 import psycopg2
-conn = psycopg2.connect(host='192.168.1.133', dbname='aisdlc', user='koala', password='koala5')
+conn = psycopg2.connect(host='192.168.1.133', dbname='aisdlc', user='koala', password='your_password_here')
 cur = conn.cursor()
 cur.execute('SELECT version()')
 print(cur.fetchone()[0])
@@ -582,7 +584,7 @@ print('OK')
 ```yaml
 storage:
   mode: "both"
-  db_dsn: "postgresql+asyncpg://koala:koala5@192.168.1.133/aisdlc"
+  db_dsn: "postgresql+asyncpg://koala:your_password_here@192.168.1.133/aisdlc"
   dual_write_strict: true
   dual_read_resolution: "fail_loud"
 workflow_search_paths:
@@ -602,7 +604,7 @@ $env:AUTOCLAUDE_ALLOW_INSECURE_DB = "1"
 ### 14.5 執行 alembic migrations
 
 ```bash
-export AUTOCLAUDE_MIGRATE_DSN="postgresql://koala:koala5@192.168.1.133/aisdlc"
+export AUTOCLAUDE_MIGRATE_DSN="postgresql://koala:your_password_here@192.168.1.133/aisdlc"
 export AUTOCLAUDE_ALLOW_INSECURE_DB=1
 
 alembic upgrade head

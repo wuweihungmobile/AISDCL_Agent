@@ -270,8 +270,20 @@ _EXTRA_SCAN_TREES: tuple[str, ...] = (
 #: 44 對 54 與 55 兩個檔數皆成立（`int(54 × 0.8) = 43 < 44`），故與同期並行的另一包
 #: 是否落地無關——刻意選這個值，避免兩包互相把對方的閘門弄紅。
 _TREE_FILE_FLOORS: dict[str, int] = {
-    "tools/tests": 44,
-    "AutoClaude/tests": 204,
+    # 🔴 R82：44 → 45。**非本包造成**——`tools/tests` 由 56 支長到 57（並行包新增
+    # `test_mac_readiness_r82.py`），下限只剩實測的 77% ⇒ 觸發 `TREE_FLOOR_RATIO` 的防腐
+    # 那一向。這是**下限**（只准往上＝判準變嚴），不是上限放寬；不跟著調，對縮面的鑑別力
+    # 就會愈來愈鬆而沒有任何東西說話。🔴 收輪者請以停工後的單人窗口重量一次再定案。
+    # 🔴 R82 收輪重釘 45 → 46（本列上一段那句「收輪者請以停工後的單人窗口重量一次再定案」
+    # 就是這個動作）：所有包停工後實測 `tools/tests` 已是 58 支（45 只剩實測的 78%，低於
+    # `TREE_FLOOR_RATIO` 的 80%），判準逐字指示重釘為 46 ⇒ 本行照填，不做加減推算。
+    # 成長來源全是並行包新增的鎖檔（`test_mac_readiness_r82.py`／
+    # `test_negative_existence_claims_r82.py`／`test_quota_policy.py`），非本包。
+    "tools/tests": 46,
+    # 🔴 R82 包 A2（DEBT-01）：204 → 205。新增 `AutoClaude/tests/contract/test_w6_deletion.py`
+    # （AC2-2 的真斷言落點）後掃描面變 257，下限只剩實測的 79% ⇒ 依 `TREE_FLOOR_RATIO` 的
+    # 防腐那一向轉紅。這正是它的設計意圖：下限不跟著長就會愈來愈鬆而沒有任何東西說話。
+    "AutoClaude/tests": 205,
     "AISDLC_SDD/scripts/tests": 23,
     LATEST_FSM_TESTS_TREE: 60,   # 本輪納入；實測 76 × 0.8
 }
@@ -305,10 +317,12 @@ _POSIX_TAG_RATCHET: dict[str, int] = {
     "tools/tests": 0,
     "AutoClaude/tests": 0,
     "AISDLC_SDD/scripts/tests": 1,
-    # 本輪納入 LATEST fsm_runtime/tests：實測 1 筆未標籤（`test_post_commit_drift_
-    # worktree.py` 的模組級 pytestmark）。以棘輪凍結而不當場補標——該檔不在本包的
-    # 檔案所有權內，跨界改動＝並行包互踩假紅（同本表其餘各列的既有理由）。
-    LATEST_FSM_TESTS_TREE: 1,
+    # 🔴 R82 包 A2（SDD-01）：1 → **0**。那一筆（`test_post_commit_drift_worktree.py`
+    # 的模組級 pytestmark）本輪已補上 `[POSIX-NATIVE-ONLY]`——連同該樹另外 4 支 TLC
+    # opt-in（補 `[ENV-DISABLED]`）與 2 支 jar 缺件（補 `[TOOL-ABSENCE]`），這棵樹的
+    # 6 支 skip 首次全部帶標籤。R79 立此列時寫「不當場補標，因為該檔不在本包所有權內」，
+    # 本輪 SDD-01 的射程就是這棵樹，所以那個理由不再成立。
+    LATEST_FSM_TESTS_TREE: 0,
 }
 
 #: 🔴 R76（R76-15 ①）：上表各格的 **shrink-only 天花板**（基線只准下修）。
@@ -327,7 +341,7 @@ _POSIX_TAG_RATCHET_CEILING: dict[str, int] = {
     "tools/tests": 0,   # R79：連同基線一起下修（見 `_POSIX_TAG_RATCHET` 的 R79 註記）
     "AutoClaude/tests": 0,
     "AISDLC_SDD/scripts/tests": 1,
-    LATEST_FSM_TESTS_TREE: 1,
+    LATEST_FSM_TESTS_TREE: 0,   # R82 SDD-01：連同基線一起下修（天花板不跟著降＝欠債額度留著）
 }
 
 #: 🔴 R75 新增（QA-R74-02）：**站點分類普查**的棘輪基線 `{樹: {類別: 站點數}}`。
@@ -366,11 +380,30 @@ _POSIX_TAG_RATCHET_CEILING: dict[str, int] = {
 #: 概念、POSIX 上 `creationflags` 恆為 0 ⇒ 帶標籤的 skipUnless 是鐵律三要求的正確形態，
 #: 不是隱藏失敗。同輪 `_POSIX_TAG_RATCHET`／其天花板皆**未動**（該站點已帶標籤 ⇒ 不計欠債）。
 _SITE_CLASS_CENSUS: dict[str, dict[str, int]] = {
+    # 🔴 R82 包 A2（CARRIER-02）重釘 `posix-only` 11→10／`tool-absence` 38→36／
+    # `runtime-skipTest` 15→16：`test_dev_start_ps1_lastexitcode.py` 的
+    # `TestDevStartShShellCarrier` class 級述詞由 `os.name == "nt"`（posix-only）改成
+    # 「zsh 與 bash 都解不到」（tool-absence），三支 zsh method 級 skip 的理由改由一個
+    # 模組常數供給（站點抽取形態隨之改變），並新增一支函式體內 `self.skipTest(...)`
+    # 的載具判準（runtime-skipTest +1）。位移不是放寬——`unclassified` 仍是 0，
+    # 而 bash 那 3 支由「永遠 skip」變成「在 Windows 上真的跑」。
+    # 🔴 R82／HELM-02 重釘 `runtime-skipTest` 16→18（**非放寬**：本表判準是「相等」，
+    # 任一格變動都必須有人回來改，而失敗訊息自己會印出該填的數字 ⇒ 重釘是設計好的流程）。
+    # 哨兵武裝時機由 SessionStart 改到 PostToolUse，該包把
+    # `test_context_budget_guard.py::SentinelWiringTest` 原本 2 支端到端分支測試拆成 4 支
+    # （SessionStart 不武裝／夠格才武裝／短命不武裝／逃生口），四支都以函式體內
+    # `self.skipTest("[WINDOWS-NATIVE-ONLY] …")` 對非 Windows 退場——schtasks 只在 Windows
+    # 成立，是鐵律三要求的正確形態，不是隱藏失敗。定位方式同上：對每支 test 檔各以
+    # HEAD 版與工作樹版跑一次 `site_class_counts()` 相減。
+    # 🔴 同包再 +2（18→20）：`PS_UTF8_PRELUDE` 的**行為**鎖（哨兵取證憑證裡的「下午」被
+    # cp950 降解成 `?`）帶兩個函式體內 `self.skipTest(...)`——① 非 Windows 退場
+    # （powershell.exe 5.1 的主控台 codepage 行為只在 Windows 成立）；② 本機 codepage
+    # 已是 UTF-8 時**缺陷重現不了**就明說跳過，而不是把「重現不了」讀成「已修好」。
     "tools/tests": {
         "windows-only": 14,
-        "posix-only": 11,
-        "tool-absence": 38,
-        "runtime-skipTest": 15,
+        "posix-only": 10,
+        "tool-absence": 36,
+        "runtime-skipTest": 20,
         "unclassified": 0,
     },
     # 🔴 R81 包 F 重釘 `windows-only` 9→10：並行包在
@@ -380,10 +413,15 @@ _SITE_CLASS_CENSUS: dict[str, dict[str, int]] = {
     # （`AutoClaude/tests/tools/test_run_local_nightly_static.py`，8→9）。
     # 這正是「相等」判準的設計意圖生效——新站點在落地當回合就被逼進帳。
     # 若後續再有包動這些檔，收輪者必須依當場實測重釘（同 `MIN_TESTS` 的紀律）。
+    # 🔴 R82 包 A2（CARRIER-01）重釘 `posix-only` 6→5／`tool-absence` 16→17：
+    # `tools/test_run_local_nightly_sh_static.py` 的 `_POSIX_ONLY` 由
+    # `sys.platform == "win32" or shutil.which("bash") is None`（posix-only）改成
+    # 「解不到可用 bash」（tool-absence）。這是**分類訂正**不是額度位移：那 12 支被
+    # 標成「別的平台才有驗證價值」，而它們在 Windows 上實測全綠（25 passed）。
     "AutoClaude/tests": {
         "windows-only": 10,
-        "posix-only": 6,
-        "tool-absence": 16,
+        "posix-only": 5,
+        "tool-absence": 17,
         "runtime-skipTest": 0,
         "unclassified": 0,
     },

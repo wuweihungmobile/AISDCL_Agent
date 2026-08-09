@@ -37,7 +37,11 @@
 #
 # 相容性：嚴格 bash 3.2（macOS /bin/bash，2007 凍結版；禁 declare -A / mapfile /
 # ${var,,}）+ BSD 工具（禁 sed -i 無 ''、readlink -f、grep -P、stat -c、date -d、
-# timeout、xargs -r、find -printf）。相容手法參照 tools/git-hooks/pre-commit。
+# timeout、xargs -r、find -printf、裸 mktemp〔BSD 無預設模板，必須帶 XXXXXX〕）。
+# 另禁 date 的 %N 奈秒（GNU 擴充；BSD strftime 無此格式字元，會原樣輸出字面 N 使
+# `$(( END - START ))` 算術崩）——該項的判準是 tools/tests/test_bash32_compat.py 的
+# `gnu_date_nanos_problems`（**不在** `_PATTERNS` 內：存量債走 shrink-only 棘輪登記，
+# 見該函式 docstring）。相容手法參照 tools/git-hooks/pre-commit。
 #
 # 用法：bash tools/macos_smoke_local.sh
 # Exit：0＝無 FAIL；1＝任一 FAIL（結尾彙總）。

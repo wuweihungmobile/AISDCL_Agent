@@ -12,10 +12,10 @@
 """
 from __future__ import annotations
 
-from typing import Any, Optional
+from typing import Any
 
-from ..core.hookspec import HookContext, IHook, KernelPhase, ScheduleResumeResult
-from ..utils.notifier import notify, notify_escalation
+from ..core.hookspec import HookContext, KernelPhase, ScheduleResumeResult
+from ..utils.notifier import DEFAULT_DURATION_SECONDS, notify, notify_escalation
 
 
 class NotificationPlugin:
@@ -23,9 +23,15 @@ class NotificationPlugin:
 
     PRIORITY = 50
 
-    def __init__(self, enabled: bool = True, app_config: Optional[Any] = None):
+    def __init__(self, enabled: bool = True, app_config: Any | None = None):
         self._enabled = enabled
         self._cfg = app_config  # 可選：notify_escalation 需要 AppConfig
+        # R82（ACC-01）：彈窗停留秒數＝行程結束時被 plyer 非 daemon 執行緒吊住的上界。
+        # 由 config 決定而非硬編，且 app_config 缺席時回落模組預設（不新增幽靈鍵）。
+        self._duration = int(getattr(
+            getattr(app_config, "notification", None),
+            "duration_seconds", DEFAULT_DURATION_SECONDS,
+        ))
 
     def name(self) -> str:
         return "notification"
@@ -41,7 +47,7 @@ class NotificationPlugin:
             KernelPhase.ON_AUTO_RESUME_WAKE,  # W5 / M-9 / SA-M3
         ]
 
-    def on_event(self, ctx: HookContext) -> Optional[Any]:
+    def on_event(self, ctx: HookContext) -> Any | None:
         if not self._enabled:
             return None
 
@@ -68,9 +74,9 @@ class NotificationPlugin:
                 notify_escalation(title, message, dump_path, self._cfg)
             except (TypeError, AttributeError):
                 # 簽章不符或缺 cfg → fallback 至一般 notify
-                notify(title, message, enabled=self._enabled)
+                notify(title, message, duration=self._duration, enabled=self._enabled)
         else:
-            notify(title, message, enabled=self._enabled)
+            notify(title, message, duration=self._duration, enabled=self._enabled)
 
     def _on_evolution(self, ctx: HookContext) -> None:
         payload = ctx.payload or {}
@@ -78,7 +84,7 @@ class NotificationPlugin:
         path = payload.get("evolved_playbook_path", "")
         title = f"AutoClaude — 自動演化（第 {evo_count} 次）"
         message = f"演化版: {path}" if path else "Playbook 已自動演化"
-        notify(title, message, enabled=self._enabled)
+        notify(title, message, duration=self._duration, enabled=self._enabled)
 
     def _on_post_run(self, ctx: HookContext) -> None:
         payload = ctx.payload or {}
@@ -88,7 +94,7 @@ class NotificationPlugin:
             "message",
             f"Playbook {ctx.playbook.project} 已結束",
         )
-        notify(title, message, enabled=self._enabled)
+        notify(title, message, duration=self._duration, enabled=self._enabled)
 
     def _on_auto_resume_wake(self, ctx: HookContext) -> ScheduleResumeResult:
         """W5 / M-9 / SA-M3：訂閱 ON_AUTO_RESUME_WAKE 並回傳 ScheduleResumeResult。
@@ -111,7 +117,7 @@ class NotificationPlugin:
             message = f"等待 {wait_seconds:.0f} 秒後繼續"
         else:
             message = "立即繼續執行"
-        notify(title, message, enabled=self._enabled)
+        notify(title, message, duration=self._duration, enabled=self._enabled)
         return ScheduleResumeResult(
             contributor="notification", scheduled_at=scheduled_at,
         )

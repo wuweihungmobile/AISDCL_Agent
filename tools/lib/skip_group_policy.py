@@ -273,12 +273,20 @@ _RUNTIME_SKIP_CEILING: dict[str, dict[str, int]] = {
     # 真正消掉的 7 支是**變成真的會跑**：sdk extra 裝起來（3）、sqlalchemy 缺件路徑改 patch
     # 模組旗標（1）、symlink fixture 在 Windows 改用複本（1）、pg_real 隨 PG autodetect
     # 一併自動啟用且語料改為就地 seed（2）。
+    # 🔴 R82 包 A2 重釘：37 → 24。`platform` 17 → **5**（CARRIER-01：12 支
+    # `[POSIX-NATIVE-ONLY]` 其實是載具解錯，換 Git Bash 絕對路徑後在 Windows 上 25 支全綠）、
+    # `debt` 7 → **6**（DEBT-01：AC2-2 的門檻早就滿足，補上 `tests/contract/test_w6_deletion.py`
+    # 即轉綠）。`env-disabled` 維持 12——本輪一度把 `PG_REAL_ENABLED` 接進 conftest 自動打開，
+    # 實跑 `p95=51.703ms ≥ 50ms` 後判定那會製造 flaky 閘門，故回退為 opt-in（見該檔 reason）。
+    # 值取自當回合 `pytest tests/ -q -rs` 實跑後對其 `skipped_reasons()` 逐支分群所得、
+    # 非推算。🔴 該次的全套計數刻意不在此重述——基線數字唯一出處＝ONBOARDING.md §7
+    # （本列六格之和即該次量到的 skip 總數，不需要第二個家）。
     "AutoClaude/tests@win32+pg+nested": {
-        SKIP_GROUP_PLATFORM: 17,
+        SKIP_GROUP_PLATFORM: 5,
         SKIP_GROUP_TOOL_ABSENCE: 0,
         SKIP_GROUP_ENV_DISABLED: 12,
         SKIP_GROUP_STRUCTURAL: 1,
-        SKIP_GROUP_DEBT: 7,
+        SKIP_GROUP_DEBT: 6,
         SKIP_GROUP_UNTAGGED: 0,
     },
     # 🔴 R80 包 A（S3-04）：根層 `tools/tests` 那一棵此前**完全不在任何天花板管轄內**
@@ -290,8 +298,15 @@ _RUNTIME_SKIP_CEILING: dict[str, dict[str, int]] = {
     # （本機 pyenv 有 3.10.11，壞的是 pyenv-win 的 `.BAT` shim 且 rc!=0 被靜默 `continue` 吞掉），
     # 修好發現路徑後兩支都真的跑起來了。其餘為位移：zsh 兩支補 `[MAC-NATIVE-ONLY]`
     # （platform 38→40）、symlink 一支補 `[ENV-DISABLED]`（0→1）。
+    # 🔴 R82 包 A2（CARRIER-02）重釘：41 → 38，`platform` 40 → **37**。消掉的 3 支是
+    # `TestDevStartShShellCarrier` 的 bash 三支——它們的 skip 理由（`[POSIX-NATIVE-ONLY]`
+    # 「不在 Windows 上驗證非目標平台的殼」）被實測推翻：Windows 上的 Git Bash 是真 bash，
+    # 那七項契約走的就是 `.sh` 那條程式碼路徑。只把載具由 `shutil.which("bash")`
+    # （回 System32 的 WSL 佔位版）換成 `usable_bash_for_fixture()` 就真的跑起來了。
+    # 當回合實測：`[skip census] tools/tests@win32 共 38 支：platform=37／env-disabled=1
+    # ／其餘 0／欠債型 1 支`。
     "tools/tests@win32": {
-        SKIP_GROUP_PLATFORM: 40,
+        SKIP_GROUP_PLATFORM: 37,
         SKIP_GROUP_TOOL_ABSENCE: 0,
         SKIP_GROUP_ENV_DISABLED: 1,
         SKIP_GROUP_STRUCTURAL: 0,
@@ -328,16 +343,19 @@ _RUNTIME_SKIP_CEILING_MAX: dict[str, dict[str, int]] = {
         SKIP_GROUP_DEBT: 0,
         SKIP_GROUP_UNTAGGED: 118,
     },
+    # 🔴 R82：連同基線一起下修（platform 17→5、debt 7→6；理由見 _RUNTIME_SKIP_CEILING）。
     "AutoClaude/tests@win32+pg+nested": {
-        SKIP_GROUP_PLATFORM: 17,
+        SKIP_GROUP_PLATFORM: 5,
         SKIP_GROUP_TOOL_ABSENCE: 0,
         SKIP_GROUP_ENV_DISABLED: 12,
         SKIP_GROUP_STRUCTURAL: 1,
-        SKIP_GROUP_DEBT: 7,
+        SKIP_GROUP_DEBT: 6,
         SKIP_GROUP_UNTAGGED: 0,
     },
+    # 🔴 R82（CARRIER-02）：連同基線一起下修 40 → 37（天花板不跟著降＝把剛還掉的
+    # 欠債額度留著，日後可無聲用回去——這句話是本表自己的既有紀律）。
     "tools/tests@win32": {
-        SKIP_GROUP_PLATFORM: 40,
+        SKIP_GROUP_PLATFORM: 37,
         SKIP_GROUP_TOOL_ABSENCE: 0,
         SKIP_GROUP_ENV_DISABLED: 1,
         SKIP_GROUP_STRUCTURAL: 0,
@@ -379,21 +397,59 @@ _RUNTIME_SKIP_CEILING_MAX: dict[str, dict[str, int]] = {
 _FULL_SUITE_RUNNERS: dict[str, str] = {
     "AutoClaude/tests@linux+nopg+solo": "autoclaude-ci.yml 的 test job（ubuntu-latest）",
     "AutoClaude/tests@win32+nopg+nested": "pre-push 的 AutoClaude leg（在 CC session 內）",
-    "AutoClaude/tests@win32+nopg+solo": "run_local_nightly.ps1／schtasks nightly（非巢狀）",
+    # 🔴 R82 包 A2（RUNNER-01）改鍵：`+nopg+solo` → `+pg+solo`。舊鍵**結構上永遠量不到**
+    # ——PG 容器長駐（`docker ps` → `autoclaude_pg | Up | pgvector/pgvector:pg18`），而
+    # `tests/conftest.py::pytest_configure` 在收集之前就 autodetect 並注入 DSN ⇒ nightly
+    # 一定落在 `+pg+solo`。實證：`AutoClaude/logs/nightly_latest.log` 第 173~175 行逐字印著
+    # `[skip census] AutoClaude/tests@win32+pg+solo …` ＋「⚠️ 剖面未登記」。也就是說帳上
+    # 那個「已登記的執行者」指的是一個不存在的執行者，而每天真的在跑的那一個一格判準都沒有
+    # ——這正是 R79 立這道棘輪時寫的「skip 可以無聲從 43 長到 143 而閘門全綠」。
+    "AutoClaude/tests@win32+pg+solo": "run_local_nightly.ps1／schtasks nightly（非巢狀）",
+    # 🔴 R82 包 A2（MAC-01）新登記：`macos-compat-ci.yml` 的 macOS smoke job 逐字
+    # `run: python3 tools/run_root_unittests.py`＝一個貨真價實的 full-suite darwin 執行者，
+    # 卻從來不在這張分母表裡 ⇒ 26 支 `[MAC-NATIVE-ONLY]` 的互補剖面連「有沒有人量過」
+    # 都問不出來。誠實登記＝分母升、分子不動，本判準刻意不因此轉紅（雙單邊設計）。
+    "tools/tests@darwin": "macos-compat-ci.yml 的 macOS smoke job（run_root_unittests.py）",
     "tools/tests@linux": "root-infra-ci.yml（ubuntu-latest）＋本機 act 跑的同一支 job",
     "tools/tests@win32": "pre-push 的 root leg／直跑 tools/run_root_unittests.py",
+    # 🔴 R82 包 A2（SDD-01）新登記：第三棵樹此前**完全不在 skip 治理射程內**。
+    # 實測 `AISDLC_SDD_v0.30` 下 `pytest tools/fsm_runtime/tests -m "not chaos"` 的
+    # skip 共 6 支（該樹的全套計數見 ONBOARDING.md §7 表②，此處不重述一份基線數字），
+    # 而 `AISDLC_SDD/scripts/ci-gate.sh` 全檔對 census 零命中、
+    # 上面五個鍵沒有一個屬於這棵樹 ⇒ 它的 skip 可以無聲從 6 長到 60 而所有閘門全綠
+    # （R79 立這道棘輪時寫的原話）。誠實登記＝分母升、分子不動。
+    "AISDLC_SDD/fsm_runtime@win32": "AISDLC_SDD/scripts/ci-gate.sh（LATEST 版 fsm_runtime 全套）",
 }
+#
+# 🔴 每一列的值＝「怎麼把它量出來」的可貼指令 ＋ 帳本列。散文寫在**註解**裡（註解不計
+# `count_loc`，而本檔已貼著 guardrail_lib 的 400 行分級——把 WHY 塞進字串會直接撞線）。
+#
+# · `AutoClaude/tests@linux+nopg+solo`：R80 原理由逐字是「本機沒有 Linux runner」，R82 訂正
+#   ——本機**有**，`docker images` 內的 `aisdcl-act/ubuntu:act-latest` 就是 root-infra-ci／
+#   autoclaude-ci 用的同一顆映像（R82 已用它實跑 `73 passed, 1 skipped`）。雲端那條路今天走
+#   不通（macOS/ubuntu job 自 2026-08-05 起 8 連跑 `steps=0`＝帳務未付、一個 step 都沒開始）。
+# · `AutoClaude/tests@win32+pg+solo`：nightly（非巢狀）與 pre-push 是兩個母體——一族 skip 的
+#   述詞含 `CLAUDECODE == '1'`，巢狀多 skip ⇒ 拿 nested 的上限管 solo 是拿寬鬆的管嚴格的。
+#   本輪只改了鍵（`+nopg` → 實際量得到的 `+pg`），值刻意**不填**：nightly log 現有那組數字取
+#   自 R82 補標籤之前的樹，照抄會把已經還掉的欠債重新寫成合法額度。
+# · `tools/tests@darwin`：本輪沒有 mac 真機，macOS CI 又是 `steps=0` ⇒ 健康值今天無論如何取
+#   不到。憑空填數字＝憑空造出一個沒有鑑別力的門檻，故只登記缺口。
+# · `AISDLC_SDD/fsm_runtime@win32`：本輪首次進帳（6 支 skip 已全數補標），但 census 還沒接上
+#   它的閘門 ⇒ 數字量得到、卻沒有任何東西在讀。🔴 先接閘門再入表，順序不可顛倒——先填數字
+#   只會得到一個沒有消費者的常數。
 _UNMEASURED_RUNNER_PROFILES: dict[str, str] = {
     "AutoClaude/tests@linux+nopg+solo":
-        "R80 包 A 交棒：本機沒有 Linux runner，憑空填數字就是憑空造出沒有鑑別力的門檻。"
-        "取得＝ubuntu job 內跑 `local_ci_gate.py --census-only` 並逐格入表。帳本 DEF-101-960",
-    "AutoClaude/tests@win32+nopg+solo":
-        "QA-R80-01：nightly（非巢狀）與 pre-push 是兩個母體——一族 skip 的述詞含 "
-        "`CLAUDECODE == '1'`，巢狀多 skip ⇒ 拿 nested 的上限管 solo 是拿寬鬆的管嚴格的。"
-        "取得＝對 nightly 的 pytest log 跑 `--census-only`。帳本 DEF-101-960",
+        "取得＝act 映像跑 pytest，輸出餵 `local_ci_gate.py --census-only`。DEF-101-960",
+    "AutoClaude/tests@win32+pg+solo":
+        "取得＝跑 run_local_nightly.ps1 後抄 nightly_latest.log 的 `[skip census]`。DEF-101-960",
+    "tools/tests@darwin": "取得＝mac 真機跑 run_root_unittests.py 抄 `[skip census]`。DEF-101-960",
+    "AISDLC_SDD/fsm_runtime@win32": "取得＝ci-gate.sh 接 `--census-only` census。DEF-101-960",
 }
 #: 雙單邊的兩個**下限**（取代舊的 shrink-only 上限，理由見上方）：分母與分子都只准增。
-_FULL_SUITE_RUNNERS_MIN = 5
+#: 🔴 R82：5 → 7（新增 `tools/tests@darwin`＝MAC-01、`AISDLC_SDD/fsm_runtime@win32`＝SDD-01）。
+#: 分子（`_MEASURED_RUNNERS_MIN`）不動——這兩筆都是**登記缺口**，不是量到的值；
+#: 把分子一起提高就是在鼓勵「憑空填數字」，而那正是這張表存在的理由所反對的事。
+_FULL_SUITE_RUNNERS_MIN = 7
 _MEASURED_RUNNERS_MIN = 3
 #: 未量測列必須指名一個**帳本列**當承接處。刻意要 DEF-ID 而不是「R<下一輪>」字面：後者
 #: 是在程式碼裡宣稱一個還沒發生的輪號（本 repo 另有一道全樹掃描在擋這件事），而承接輪次
@@ -563,10 +619,24 @@ def skip_group_census_problems(
 #: 每個剖面的**互補剖面**：`platform` 群那些「在這裡 skip 是對的」的測試，究竟在哪個
 #: 剖面上真的被跑到。宣告成資料而不是散文，才有辦法被查——R80 之前這件事零機械證明
 #: （S3-08），手驗過但那個過程不可重跑，於是等同沒驗。
-_COMPLEMENTARY_PROFILE: dict[str, str] = {
-    "AutoClaude/tests@win32+nopg+nested": "AutoClaude/tests@linux+nopg+solo",
-    "AutoClaude/tests@win32+pg+nested": "AutoClaude/tests@linux+pg+solo",
-    "tools/tests@win32": "tools/tests@linux",
+#:
+#: 🔴 R82 包 A2（MAC-01）：值由 `str` 改成 `tuple[str, ...]`，判準由「有沒有互補剖面」
+#: 改成「**每一個**互補剖面都要有人量過」。
+#:
+#: 缺陷本體（當回合實測）：`platform` 這一群在 win32 上其實是**兩個互斥子母體**——
+#: `[POSIX-NATIVE-ONLY]`（linux 跑得到）與 `[MAC-NATIVE-ONLY]`（只有 darwin 跑得到，
+#: 本輪 census 實測 26 支）。舊表是 1:1，只要 linux 那一格登記了，整組判準就短路 ⇒
+#: `skip_target_report('tools/tests@win32', …)` 實測只印欠債那一行，**結構性缺口那一行
+#: 一次都沒印過**，帳面讀起來像「已覆蓋」。而 linux 結構上跑不到那 26 支：
+#: `install_mac_nightly.sh` 自帶 `uname != Darwin` fail-loud，act 映像內 `which zsh` 也回空。
+#: ⇒ 1:1 的形狀本身就是那個假綠的來源，不是資料填錯。
+_COMPLEMENTARY_PROFILE: dict[str, tuple[str, ...]] = {
+    "AutoClaude/tests@win32+nopg+nested": ("AutoClaude/tests@linux+nopg+solo",),
+    "AutoClaude/tests@win32+pg+nested": ("AutoClaude/tests@linux+pg+solo",),
+    # POSIX-generic 那一半的家是 linux，mac-only 那一半的家只有 darwin——兩個都要。
+    "tools/tests@win32": ("tools/tests@linux", "tools/tests@darwin"),
+    # 反方向：darwin 上 skip 掉的 `[WINDOWS-NATIVE-ONLY]`／POSIX-generic 由 linux 承接。
+    "tools/tests@darwin": ("tools/tests@linux",),
 }
 
 
@@ -590,12 +660,18 @@ def skip_target_report(profile: str, census: Mapping[str, int]) -> list[str]:
         )
     structural = sum(census.get(g, 0) for g in SKIP_GROUPS
                      if _SKIP_GROUP_TARGET[g] == SKIP_TARGET_STRUCTURAL)
-    counterpart = _COMPLEMENTARY_PROFILE.get(profile)
-    if structural and (counterpart is None or not profile_registered(counterpart)):
+    counterparts = _COMPLEMENTARY_PROFILE.get(profile, ())
+    # 🔴 R82（MAC-01）：`any` → `all`。舊寫法是「宣告了一個互補剖面且它已登記 ⇒ 收工」，
+    # 而 `platform` 群在 win32 上是兩個互斥子母體（POSIX-generic vs mac-only），
+    # 只要其中一個的家登記了，另一個（26 支只有 darwin 跑得到）就整組被短路掉。
+    missing = [c for c in counterparts if not profile_registered(c)]
+    if structural and (missing or not counterparts):
+        where = "／".join(f"`{c}`" for c in missing) or "（未宣告）"
         out.append(
             f"{profile}：結構性 skip {structural} 支，它們的目標**不是** 0，而是"
-            f"「在互補剖面 `{counterpart or '（未宣告）'}` 上真的被跑到」——而該剖面"
-            "至今沒有人量過 ⇒ 這些測試目前**沒有任何機械證據**顯示它們在世界上任何一處"
-            "跑過。這是量 skip 數永遠看不見的那一半缺口（S3-08）"
+            f"「在互補剖面上真的被跑到」——而 {where} 至今沒有人量過 ⇒ 這些測試"
+            "目前**沒有任何機械證據**顯示它們在世界上任何一處跑過。這是量 skip 數永遠看不見"
+            "的那一半缺口（S3-08）。🔴 互補剖面是**多對一**：一個剖面登記了不代表整群有著落"
+            "（R82／MAC-01：linux 結構上跑不到 mac-only 那 26 支）"
         )
     return out

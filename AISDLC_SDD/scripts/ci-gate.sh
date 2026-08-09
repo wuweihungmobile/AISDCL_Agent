@@ -167,7 +167,12 @@ run_gate_for_version() {
   # tee 保留串流到 console；set -o pipefail 確保 pytest 失敗（非零）時此處即中止，
   # 收斂彙總絕不會在任一軌紅燈時印出（硬閘語意不變）。
   local PYTEST_LOG
-  # mktemp 帶模板（R11）：repo 對 BSD mktemp 是否需模板存在兩套假設（實測現代 macOS 皆可，統一帶模板為最保守跨平台寫法）
+  # mktemp 一律帶模板：BSD/macOS 的 mktemp **沒有**預設模板，裸 mktemp 即 usage error。
+  # 🔴 R82 MAC-01 訂正：本行原本寫「repo 對 BSD mktemp 是否需模板存在兩套假設（實測現代
+  #   macOS 皆可…）」，而 tools/macos_smoke_local.sh:133-134 逐字宣告的是「BSD mktemp
+  #   必須帶模板」——同一件事在 repo 內有兩份**互斥**宣稱，真值只有一個。那句「實測」在
+  #   repo 內找不到任何可重跑的取證位置（無輪號、無指令、無 log），故不予保留；收斂成
+  #   「一律帶模板」——它在兩種假設下都正確，且已是 repo 內其餘站點的既有寫法。
   PYTEST_LOG="$(mktemp "${TMPDIR:-/tmp}/ci_gate_pytest.XXXXXX")"
   # `-rs`（R59 ARCH-R59-01）：skip 理由必須可見，不得只併成一個數字。DEF-101-510 只把
   # 這件事補在根層 unittest runner；pytest 面本來就內建 `-rs`，本 repo 卻從未開。
@@ -246,7 +251,7 @@ unset SDD_FW_VERSION
 # set -o pipefail + set -e：scripts/tests 任一紅燈 → 管線非零 → 此處即中止，硬閘語意一致。
 echo "############## CI 閘門：共享 infra scripts/tests/ ##############"
 cd "${REPO_ROOT}"
-# mktemp 帶模板（R11）：同上，統一帶模板為最保守跨平台寫法
+# mktemp 一律帶模板：理由同上（R82 MAC-01 訂正處）——BSD/macOS 無預設模板。
 INFRA_LOG="$(mktemp "${TMPDIR:-/tmp}/ci_gate_infra.XXXXXX")"
 # `-rs` 理由同上（R59 ARCH-R59-01）。
 python -m pytest scripts/tests/ -q -rs 2>&1 | tee "${INFRA_LOG}"

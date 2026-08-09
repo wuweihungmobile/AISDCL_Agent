@@ -16,10 +16,13 @@
 """
 from __future__ import annotations
 
+import ast
 import os
+import re
 import subprocess
 import sys
 import threading
+from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -86,6 +89,80 @@ class TestHotkeyRegisterHonesty:
             live.join(timeout=2)
 
 
+# --- R82 包 A2（MAC-02）：skip reason 的宣稱必須對得上 workflow 實際佈線 -----------
+#
+# 🔴 這一支守的病，與「幽靈機械物」同型：一句 skip reason 宣稱「macOS CI 已裝」，
+# 讀起來像「這支有人在跑」，實際上一次都沒跑過。假事實比缺口更貴——缺口會被列進
+# 待辦，假事實會讓人把它從待辦裡劃掉。判準因此不是「字串長什麼樣」，而是
+# 「reason 點名的那個承接者，在 workflow 裡真的存在、而且真的裝了那個 extra」。
+
+_MONOREPO_ROOT = Path(__file__).resolve().parents[2]
+_MACOS_CI = _MONOREPO_ROOT / ".github" / "workflows" / "macos-compat-ci.yml"
+_HOTKEY_HANDOVER_JOB = "macos-nightly-full"
+
+
+def _hotkey_skip_reason() -> str:
+    """從本檔原始碼抽出「keyboard 未安裝」那一層 skipif 的 reason 字面值。"""
+    src = Path(__file__).read_text(encoding="utf-8")
+    tree = ast.parse(src)
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Call):
+            continue
+        for kw in node.keywords:
+            if kw.arg != "reason" or not isinstance(kw.value, ast.Constant):
+                continue
+            if "hotkey" in str(kw.value.value):
+                return str(kw.value.value)
+    raise AssertionError(
+        "抽不到帶 `hotkey` 字樣的 skip reason——結構已變動，請同步本鎖"
+        "（抽不到時 fail-loud，不得靜默放行）"
+    )
+
+
+def test_the_hotkey_skip_reason_does_not_claim_an_install_that_never_happened() -> None:
+    """reason 不得再宣稱 push 閘門會裝 `[hotkey]`。
+
+    實查（R82）：`macos-smoke`（push 閘門）只 `pip install` 基本相依；唯一 `pip
+    install -e ".[dev,lint,hotkey]"` 的是 `macos-nightly-full`（週一 schedule）。
+    """
+    reason = _hotkey_skip_reason()
+    assert "macOS CI 已裝" not in reason, (
+        f"skip reason 又寫回「macOS CI 已裝」：{reason!r}——那是 R82 訂正掉的假事實"
+        "（push 閘門的 macos-smoke job 不裝 `[hotkey]`）"
+    )
+    assert _HOTKEY_HANDOVER_JOB in reason, (
+        f"skip reason 沒有指名承接的 job（`{_HOTKEY_HANDOVER_JOB}`）：{reason!r}"
+        "——沒有承接者的缺口就是永久缺口，而它今天長得像已經有人在跑"
+    )
+
+
+def test_the_named_handover_job_really_installs_the_hotkey_extra() -> None:
+    """承接者必須真的存在、且真的裝那個 extra——否則 reason 只是換一句好聽的假話。
+
+    鑑別力：把 workflow 裡的 `hotkey` extra 拿掉、或把 job 改名，本支即紅。
+    """
+    assert _MACOS_CI.is_file(), f"workflow 不存在：{_MACOS_CI}"
+    text = _MACOS_CI.read_text(encoding="utf-8")
+    assert re.search(rf"^  {re.escape(_HOTKEY_HANDOVER_JOB)}:", text, re.M), (
+        f"workflow 裡找不到 job `{_HOTKEY_HANDOVER_JOB}`——skip reason 指向了一個"
+        "不存在的承接者"
+    )
+    installers = [
+        ln.strip() for ln in text.splitlines()
+        if "pip install" in ln and "hotkey" in ln
+    ]
+    assert installers, (
+        "整支 macos-compat-ci.yml 沒有任何一行安裝 `[hotkey]` extra——"
+        "那支測試在 macOS 上也不會跑，reason 的承接宣稱失效"
+    )
+    # 承接者是**唯一**裝它的 job：這一句是 reason 裡「push 閘門不裝」那半句的憑證。
+    smoke_block = text.split(f"  {_HOTKEY_HANDOVER_JOB}:")[0]
+    assert not [ln for ln in installers if ln in smoke_block], (
+        "push 閘門那一段也出現了 `[hotkey]` 安裝——實況已改善，請同步把 skip reason "
+        "裡「macos-smoke 不裝 ⇒ 零實際執行紀錄」那句話改掉（過期的悲觀宣稱同樣是假事實）"
+    )
+
+
 @pytest.mark.skipif(
     sys.platform != "darwin",
     reason="[MAC-NATIVE-ONLY] macOS 真機專屬（非 Darwin 上 skip 而非恆綠）",
@@ -96,7 +173,15 @@ class TestHotkeyRegisterHonesty:
     # 層命中的那個 reason，而 R76 把 `keyboard` 移進 `[hotkey]` extra 之後，實際命中的
     # 就是這一層（不是上面那個 darwin 層）。沒有標籤 ⇒ 這支從 skip 盤點的反方向摘要裡
     # 整個消失，「本輪唯一一筆淨覆蓋損失」會靜默發生。
-    reason="[MAC-NATIVE-ONLY] keyboard 套件未安裝（需 `.[hotkey]` extra；macOS CI 已裝）",
+    # 🔴 R82 包 A2（MAC-02）：原字串逐字寫「macOS CI 已裝」，那是**假事實**。實查：
+    # push 閘門的 `macos-smoke` job 只 `pip install` 基本相依（它的 `-k` 篩選確實會
+    # 選中本檔）；唯一裝 `[hotkey]` 的是週一排程的 `macos-nightly-full`，而那一行
+    # 2026-08-05 才進 repo、該 workflow 最後一次真的跑起來的 schedule 是 2026-08-03
+    # ⇒ 這支測試在世界上任何一處都還沒被執行過。留著那五個字，下一輪讀到的人會以為
+    # 它「在 macOS CI 上有人跑」而把它從缺口清單裡劃掉。
+    reason="[MAC-NATIVE-ONLY] keyboard 套件未安裝（需 `.[hotkey]` extra）。承接者＝"
+           "macos-compat-ci.yml 的 macos-nightly-full（週一 schedule，唯一裝該 extra 的 "
+           "job）；push 閘門的 macos-smoke **不裝** ⇒ 本支目前零實際執行紀錄（DEF-101-960）",
 )
 @pytest.mark.skipif(
     hasattr(os, "geteuid") and os.geteuid() == 0, reason="root 下 keyboard 可正常監聽"

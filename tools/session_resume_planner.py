@@ -78,11 +78,15 @@ sys.path.insert(0, str(_REPO_ROOT / "tools"))
 sys.path.insert(0, str(_REPO_ROOT / ".claude" / "hooks"))
 
 # 🔴 依賴方向刻意是「tools → .claude/hooks」而不是反過來（本 repo 對「同一份知識住
-# 兩個家」有反覆的判例，其中一次就長在專門防它的那一節自己身上）：那支 hook 由
-# `runpy.run_path` 起，`sys.path` 既不含 `.claude/hooks/` 也不含 `tools/` ⇒ 它**不能**
-# import 任何東西，只能是被 import 的那一方。於是「怎麼算水位／怎麼判 window」的唯一
-# 實作住在 hook 裡，本檔是它的消費者。反過來寫的話那份判準會有兩個家，而其中一個
-# （hook 那個）在結構上無法委派出去。
+# 兩個家」有反覆的判例，其中一次就長在專門防它的那一節自己身上）：「怎麼算水位／怎麼判
+# window」的唯一實作住在 hook 裡，本檔是它的消費者。
+# 🔴 R82（Q2-01）訂正本段的**理由**（方向不變，理由已為假故不逐字複述舊說法）：舊理由
+# 掛在「那支 hook 不能 import 任何東西」上，而 R81 起 hook 自己就先 `sys.path.insert`
+# 再 import 了 `tools/lib` 的三支模組——也就是說整條依賴方向的唯一論證，在它自己那一檔
+# 裡有現成的反證。現行理由是**模組身分**：`tools/lib/*` 一律以裸名 import（hook 那一側
+# 只有這條路走得通），本檔若改寫成 `from lib import quota_limits`，同一份原始碼在同一個
+# 行程裡會有兩個模組物件，於是測試 monkeypatch 其中一個不會影響另一個＝假綠。
+# 這條不變式由 `tools/tests/test_context_budget_guard.py::ModuleIdentityIsSingleTest` 守。
 # 同理 `project_transcript_dir`（逐字稿目錄的 slug 推導）已有唯一實作在
 # `tools/probe/audit_session.py`，本檔取用而不抄一份。
 # （下面兩段被 ruff 的 isort 判為不同 section：`.claude/hooks` 不在其 src 內 ⇒ 視為
@@ -389,7 +393,9 @@ def run_powershell(script: str) -> subprocess.CompletedProcess[str]:
     holder = Path(tempfile.mkdtemp(prefix="autosdd_schtasks_")) / "run.ps1"
     # BOM ＋ CRLF：PS 5.1 對無 BOM 的 UTF-8 會以 ANSI codepage 誤讀（本 repo 的
     # check_ps1_encoding.py 立案理由），`.ps1` 行尾政策亦為 CRLF。
-    holder.write_text(script, encoding="utf-8-sig", newline="\r\n")
+    # 🔴 前置 `guard.PS_UTF8_PRELUDE`：少了它，`NextRunTime` 裡的「下午」會以 cp950 寫出、
+    # 被本函式的 `encoding="utf-8"` 讀成 `?`，而降解過的憑證**仍然非空** ⇒ 取證閘照樣判綠。
+    holder.write_text(guard.PS_UTF8_PRELUDE + script, encoding="utf-8-sig", newline="\r\n")
     try:
         return subprocess.run(
             ["powershell.exe", "-NoProfile", "-ExecutionPolicy", "Bypass",
@@ -614,8 +620,16 @@ def tick_plan(state: dict, verdict: dict, now: datetime) -> dict:
 # 🔴 R80 時區框架：`now` 的時區就是解讀 `resets 9am` 的框架（訊息自報時區時以它優先，
 # 見 `guard.declared_zone`）。本函式**不讀機器的本地時區**——讀了就會讓同一份語料在
 # 容器（UTC）與本機（UTC+8）給出相反的答案，那是 act 實跑抓到的兩個紅。
+#
+# 🔴 R82／HELM-01：`idle_seconds=None` 是**新的一種輸入**，語意是「狀態塊指的逐字稿
+# 根本不存在」。它此前在 `_sentinel_tick` 那一側被硬編成 `escalate`（理由逐字是「哨兵
+# 已瞎，自我解除並叫人」），而使用者三度收到的那個模態彈窗就是它——因為「開了沒做事
+# 就結束的 session 不會產生 `.jsonl`」是**正常且常見**的情形，不是哨兵失明。
+# ⇒ 它現在與「工作已結束」同樣走 `disarm`（靜默），只是**理由句子不同**：兩者在稽核
+# 痕跡上仍分得開，而分得開本來就是當初把它做成 fail-loud 的唯一正當理由。
+# 「叫人」的門檻同輪收緊成「有未處理撞線 **且** 有扇出待救」，落在 `escalation.alert`。
 def sentinel_decide(event: dict | None, handled_through: object,
-                    idle_seconds: float, now: datetime) -> dict:
+                    idle_seconds: float | None, now: datetime) -> dict:
     """哨兵醒來後的四分支判定。純函式——預防鏈的大腦，每一支都要能單獨注入。"""
     if event and str(event.get("timestamp") or "") > str(handled_through or ""):
         if event["kind"] == guard.LIMIT_SPEND:
@@ -636,14 +650,16 @@ def sentinel_decide(event: dict | None, handled_through: object,
         return {"action": "probe", "at": None,
                 "reason": f"偵測到未處理的撞線；觀測 reset={reset_at} 已過 ⇒ "
                           "花一次探測確認額度回來了沒"}
-    if idle_seconds < SENTINEL_IDLE_SECONDS:
+    if idle_seconds is not None and idle_seconds < SENTINEL_IDLE_SECONDS:
         return {"action": "patrol",
                 "at": now + timedelta(seconds=SENTINEL_INTERVAL_SECONDS),
                 "reason": f"無未處理撞線；逐字稿 {idle_seconds:.0f}s 前仍有更新 ⇒ "
                           "session 還活著，續巡（本次零 token）"}
+    why = ("從來沒有被建立出來（開了沒做事就結束的 session 是常態，不是哨兵失明）"
+           if idle_seconds is None else
+           f"已靜止 {idle_seconds:.0f}s（≥{SENTINEL_IDLE_SECONDS}s）⇒ 工作已結束")
     return {"action": "disarm", "at": None,
-            "reason": f"無未處理撞線，且逐字稿已靜止 {idle_seconds:.0f}s "
-                      f"（≥{SENTINEL_IDLE_SECONDS}s）⇒ 工作已結束，自我解除"}
+            "reason": f"無未處理撞線，且逐字稿{why} ⇒ 靜默解除，不叫人"}
 
 
 # 哨兵是 **per-session** 的：共用一個工作名會讓新 session 靜默蓋掉舊 session 還在等的
@@ -1180,15 +1196,17 @@ def _sentinel_tick(args) -> int:
     # agent 被這次撞線打死」這件**寫在磁碟上、讀檔即知、成本為零**的事從來沒有被記下來。
     # 記在這裡而不是各分支內，是因為三支會反應撞線的分支（arm_reset／probe／escalate）
     # 都要記——R80 四次撞線裡有三次走的是前兩支，只在 escalate 記等於漏掉主要情境。
+    # 🔴 R82／HELM-01：`transcript.is_file()` 為 False 時此前硬編 `escalate`（＝叫人）。
+    # 現在它只是把 `idle` 傳成 `None`，由 `sentinel_decide` 判成靜默 `disarm`——**唯一**
+    # 還會叫人的路徑是「有未處理撞線」那三支，而敲不敲桌面再由扇出死者數決定（見
+    # `escalation.alert` 的三層）。扇出快照提前到判定之前算，因為死者數現在是叫人的門檻。
     event = guard.unhandled_limit_event(transcript) if transcript.is_file() else None
-    decision = sentinel_decide(
-        event, "",
-        now.timestamp() - guard.newest_activity_at(guard.session_transcripts(transcript)),
-        now) if transcript.is_file() else {
-        "action": "escalate", "at": None,
-        "reason": f"狀態塊指的逐字稿不存在（{transcript}）⇒ 哨兵已瞎，自我解除並叫人"}
-    append_log(log, "sentinel_decided", action=decision["action"], reason=decision["reason"],
-               **escalation.snapshot_fanout(transcript, event))
+    fan = escalation.snapshot_fanout(transcript, event)
+    idle = (now.timestamp() - guard.newest_activity_at(guard.session_transcripts(transcript))
+            if transcript.is_file() else None)
+    decision = sentinel_decide(event, "", idle, now)
+    append_log(log, "sentinel_decided", action=decision["action"],
+               reason=decision["reason"], **fan)
     print(f"哨兵判定 {decision['action']}：{decision['reason']}")
     if decision["action"] == "probe":
         # 🔴 交棒給既有的續航機器，不另寫一份：`--resume-tick` 已經有探測、`tick_plan`
@@ -1199,11 +1217,14 @@ def _sentinel_tick(args) -> int:
         # 🔴 R81 缺口 A：兩支終態的差別**不是**要不要排程（兩支都不排），而是**要不要
         # 叫人**——`disarm` 是工作做完了正常下班，`escalate` 是「只有人做得到的事」。
         # 此前兩者的差別只有一行沒有人收得到的 stderr ⇒ 痕跡上完全同形。
+        # 🔴 R82：`if loud else {}` 換成把 `loud` 傳進去——不吵的那一支現在有事情要做
+        # （收掉自己的任務書殘骸，見 `escalation.gc_plans`），而「什麼都不做」正是
+        # `%TEMP%` 累積 26 份任務書的原因。`**fan` 把扇出死者數帶進叫人的門檻。
         loud = decision["action"] == "escalate"
         state.update(state="abandoned" if loud else "disarmed", next_run_time="")
         write_relay(plan, state)
         rc = _schtasks_remove(state["task_name"])
-        told = escalation.alert(decision["reason"], state) if loud else {}
+        told = escalation.alert(decision["reason"], state, loud=loud, plan=plan, **fan)
         append_log(log, "sentinel_" + decision["action"], unregister_rc=rc,
                    why=decision["reason"], **told)
         return 1 if loud else rc

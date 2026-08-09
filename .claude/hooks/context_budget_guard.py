@@ -155,13 +155,24 @@ R78 版的鏈條是「印一段話 → 模型自己記得去 compact」，而「
 · **任何非預期例外 → exit 0（fail-open）**。`.claude/settings.json` 的 description
   記載過 P0：hook 誤觸會把所有工具硬鎖死。守衛自身絕不可成為故障源。
 
-零外部相依（與兩支姊妹 hook 同一組理由，非偷懶）
-------------------------------------------------
-hook 由 `.claude/settings.json` 的 shim 以 `runpy.run_path(...)` 起，而 `run_path`
-**不會**把腳本所在目錄加進 `sys.path`；`tools/` 也不在路徑上。⇒ 本檔只用 stdlib，
-UTF-8 串流手術就地重做一次。反向依賴是允許的：`tools/session_resume_planner.py`
-**import 本檔**取用下面這幾支純函式，讓「怎麼算水位」只有一個家（本 repo 對
-「同一份知識住兩個家」有反覆的判例，其中一次就長在專門防它的那一節自己身上）。
+相依規則（R82／Q2-01 訂正：此前寫「本檔只用 stdlib」，而下面幾行就 import 了四支 tools/lib）
+------------------------------------------------------------------------------------
+①能力提供者（quota_gate／platform_utils）一律 try/except，不可達時該軸退化成「量不到」；
+②判讀原語（quota_limits）hard import，給 stub 等於讓同一份字面有第二個家；
+③`tools/lib/*` **只准裸名 import**——`from lib import X` 會讓同一份原始碼在同一行程裡
+有兩個模組物件（`ModuleIdentityIsSingleTest` 在守）。反向依賴仍允許：planner import 本檔。
+
+🔴 R82／Q2-02：本檔的**職責邊界**（額度軸已經不在這裡了）
+--------------------------------------------------------
+本檔只剩一把尺——**context 水位**：量它、判 window、越線時出聲／擋展開型工具／寫任務書，
+外加哨兵武裝的**觸發面**（R82／HELM-02 起：SessionStart 只清閂鎖，真正註冊延後到
+PostToolUse 且要通過 `tools/lib/sentinel_lifecycle` 的雙門檻——立案是掌舵者當場截圖的
+「排程器裡三支哨兵，兩支屬於活 5 秒／12 秒的 session」）。**額度水位那把尺整條住 `tools/lib/quota_gate.py`**，本檔對
+它只有兩件事：①`main()` 在五道 context 早退**之前**呼叫它一次（撞額度那刻 context 水位
+可能只有 ~18%，掛在早退之後的分支一次都不會被執行——那是 SA-B1 判過的死碼）；
+②把它需要的四個 hook 端能力注入進去（阻斷名單／閂鎖讀寫／任務書／喚醒武裝）。
+兩把尺不共用早退條件、也不共用模組，就是那個設計。既有架構鎖
+`test_quota_is_not_wired_into_the_context_blocking_path` 的射程零改變且更容易成立。
 
 回歸鎖：`tools/tests/test_context_budget_guard.py`（合成 jsonl 注入，逐條驗紅）。
 """
@@ -207,20 +218,24 @@ except Exception:  # noqa: BLE001 — 共用層不可達＝退化，不是崩潰
     def read_payload() -> dict | None:  # type: ignore[misc]
         return None
 
-# 額度快取的**檔案契約**（檔名＋schema）與**取數**唯一的家＝`tools/lib/quota_meter.py`。
-# 形態與上一格逐字相同（同一條 sys.path、同一種 fail-open）：meter 不可達時本符號為
-# `None`，額度軸整條退化成「量不到」＝不節流，而不是崩潰。
+# 額度水位節流閘（80/95 兩道）整條的家＝`tools/lib/quota_gate.py`（R82／Q2-02）。搬走的
+# 是一個完整主題：輸入是額度快取／逐字稿撞線，輸出是「這次扇出准不准」，與 context 水位
+# 零交集。形態與上一格逐字相同（同一條 sys.path、同一種 fail-open）：不可達時本符號為
+# `None`，額度軸整條退化成「量不到」＝不節流，而**不會**把 context 阻斷也一起帶走
+# ——那是拆分的硬安全條件（見該檔檔頭），不是風格偏好。
 try:
-    import quota_meter  # type: ignore[import-not-found]
+    import quota_gate  # type: ignore[import-not-found]
 except Exception:  # noqa: BLE001 — 見上
-    quota_meter = None  # type: ignore[assignment]
+    quota_gate = None  # type: ignore[assignment]
 
-# 跨行程原語（派發帳／TTL 名額／痕跡）唯一的家＝`tools/lib/quota_ledger.py`。同一條
-# sys.path、同一種 fail-open：不可達時本符號為 `None`，扇出節流整條退化成「不記帳」。
+# 哨兵的**生命週期判準**（值不值得一支 schtasks、什麼時候收）整條的家＝
+# `tools/lib/sentinel_lifecycle.py`。形態同上一格：不可達時本符號為 `None`，
+# 武裝整條退化成「不武裝」——那個方向安全（少一層續航保護），反過來（不可達就無條件
+# 武裝）才是 R82 之前那個會在排程器裡增生的形狀。
 try:
-    import quota_ledger  # type: ignore[import-not-found]
+    import sentinel_lifecycle  # type: ignore[import-not-found]
 except Exception:  # noqa: BLE001 — 見上
-    quota_ledger = None  # type: ignore[assignment]
+    sentinel_lifecycle = None  # type: ignore[assignment]
 
 # 額度**撞線判讀**（`SYNTHETIC_MODEL`／`LIMIT_*`／`classify_limit`／`parse_reset_at`／
 # `unhandled_limit_event` …）唯一的家＝`tools/lib/quota_limits.py`。它是 R81 收斂把本檔
@@ -230,20 +245,14 @@ except Exception:  # noqa: BLE001 — 見上
 # 給它 fallback stub 等於讓同一份字面有第二個家，而且會用錯的答案靜默通過。
 # `tools/session_resume_planner.py` 以 `guard.<name>` 取用這些符號 ⇒ 這裡把它們 import
 # 回本檔的命名空間，呼叫端與既有回歸鎖一個字都不必改。
-from quota_limits import (  # noqa: E402
+# 🔴 下面 10 個在本檔內一次都不會被呼叫：它們是給 planner 的純再匯出（`guard.
+# classify_limit` 這種取法），刪掉任一個 planner 會在無人看管的排程路徑上 AttributeError。
+# R82（Q2-01）刪掉了此前替它們背書的 15 行 tuple 常數——它零消費者（全 repo 只命中定義
+# 那一行），真正在做事的只有 lint 那一半，而那件事下一行的 F401 抑制一個字就說得完。
+from quota_limits import (  # noqa: E402,F401
     LIMIT_SESSION, LIMIT_SPEND, LIMIT_TRANSIENT, LIMIT_UNKNOWN, SYNTHETIC_MODEL,
     classify_limit, declared_zone, latest_limit_event, latest_success_at,
     newest_activity_at, parse_reset_at, session_transcripts, unhandled_limit_event)
-
-#: 🔴 上面那批裡有 10 個在本檔內**一次都不會被呼叫**——它們是純再匯出，消費者是
-#: `tools/session_resume_planner.py`（`guard.classify_limit` 這種取法）。這一行讓
-#: 「本檔沒有呼叫它」不等於「沒有人用」：刪掉任一個，planner 會在執行期 AttributeError，
-#: 而那是排程起的無人看管路徑——最不容易被看見的那一條。順帶讓 lint 說得出話
-#: （沒有它，`ruff` 的 F401 會建議把 planner 的相依整批刪掉）。
-_REEXPORTED_FOR_PLANNER = (
-    LIMIT_SESSION, LIMIT_SPEND, LIMIT_TRANSIENT, LIMIT_UNKNOWN, classify_limit,
-    declared_zone, latest_limit_event, latest_success_at, newest_activity_at,
-    session_transcripts)
 
 #: 佔用當前 context 的三個 usage 欄。`output_tokens` 刻意不在內，理由見模組 docstring。
 USAGE_FIELDS = ("input_tokens", "cache_creation_input_tokens", "cache_read_input_tokens")
@@ -327,6 +336,19 @@ def quiet_python() -> str:
         return sys.executable  # POSIX 沒有 console 這回事，也沒有 pythonw（鐵律三）
     quiet = Path(sys.executable).with_name("pythonw.exe")
     return str(quiet) if quiet.is_file() else sys.executable
+
+#: 🔴 送進 `powershell.exe`（5.1）的每一段腳本都要以這一行開頭。
+#: 立案（掌舵者當回合實測，哨兵稽核 jsonl 逐字）：`"next_run_time": "2026/8/9 �U�� 07:14:19"`
+#: ——`Get-ScheduledTaskInfo` 的 `NextRunTime` 由 `Format-List` 以**當前文化** zh-TW 算繪成
+#: 「下午」，PS 5.1 把它以主控台 codepage（本機 cp950）寫進 stdout，而 Python 這一側以
+#: `encoding="utf-8"` 讀 ⇒ 逐位元組降解成 `?`。後果不只難看：那個字串是**取證憑證**
+#: （`next_run_time`），而降解過的憑證仍然非空 ⇒ 取證規則照樣判綠，只是它記下來的時刻
+#: 人再也讀不出來。同族問題本 repo 已有 `init_utf8_streams()`（Python 那一側）；這一格是
+#: **PowerShell 那一側**缺的那一半。
+#: 放在本檔而不是各自為政：`session_resume_planner`／`sentinel_lifecycle`／`console_spawn_watch`
+#: 三個消費者，前兩者已經在向本檔取 `NO_WINDOW`／`quiet_python()`，同一族知識同一個家。
+PS_UTF8_PRELUDE = ("$OutputEncoding = [Console]::OutputEncoding = "
+                   "[Text.UTF8Encoding]::new($false)\n")
 
 #: PreToolUse 模式會擋下的「展開型」工具。刻意不含 Read／Edit／PowerShell：
 #: 收斂（讀檔、寫任務書、跑 git）必須還做得到，否則守衛會被整個關掉。
@@ -419,12 +441,6 @@ def used_of(usage: object) -> int | None:
             total += value
             seen = True
     return total if seen else None
-
-
-def scan_usage(path: Path) -> tuple[int | None, int]:
-    """`scan_transcript` 的前兩格。既有呼叫端與回歸鎖用的仍是這個窄介面。"""
-    last, peak, _model = scan_transcript(path)
-    return last, peak
 
 
 def scan_transcript(path: Path) -> tuple[int | None, int, str | None]:
@@ -728,8 +744,20 @@ def write_resume_plan(transcript: Path) -> str:
     return str(out) if out.is_file() else ""
 
 
-# ───────────────────────── SessionStart：預防性哨兵的**觸發層**（R79 補洞包）
-# 🔴 為什麼非得長在這裡不可（不是「順手掛一下」）：
+# ───────────────────────── 預防性哨兵的**觸發層**（R79 補洞包；R82／HELM-02 改觸發時機）
+# 🔴 R82／HELM-02 訂正本段的**時機**（方向不變、理由不變，改的是「在哪一刻按下去」）：
+# 下面整段論證的是「非預防性武裝不可」，那一半今天仍然成立、一個字都沒被推翻。被推翻的是
+# 它的實作把「預防性」等同於「SessionStart 就註冊」——掌舵者當場截圖回報排程器裡三支
+# `AutoSDD_Sentinel_*`，實測其中兩支屬於**活了 5 秒與 12 秒**的短命 session。
+# 現行形狀：SessionStart 只**清閂鎖**（見 `arm_sentinel`），真正的註冊延後到 PostToolUse
+# 且要通過 `tools/lib/sentinel_lifecycle.should_arm()`（回合數＋存活跨度雙門檻，門檻取值
+# 是量出來的，見該檔 docstring）。延後的代價已界定：一個 8 分鐘就結束的 session 拿不到
+# 續航；而它換掉的是「每一支 5 秒探針都留一支每 15 分鐘醒來的排程」。
+# 🔴 為什麼判準不能寫在 SessionStart 那一刻：見取捨②——那一刻逐字稿往往還不存在，
+# 手上沒有任何可以量的東西；而 payload 欄位分不出主 session 與探針（實測六支短命逐字稿
+# 與主 session 結構同形，差別只在規模）。
+#
+# 🔴 為什麼非得預防性不可（不是「順手掛一下」）：
 # `tools/session_resume_planner.py --arm-endurance` 是**手動**武裝的，而額度耗盡那一刻
 # 是 16 秒內全部 subagent 瞬間掛掉——那個時間點沒有任何人會去跑一行指令。更根本的是
 # **額度耗盡在 Claude Code 的 hook 體系裡沒有任何觸發點**：它是 API 層的失敗，不是工具
@@ -747,24 +775,23 @@ def write_resume_plan(transcript: Path) -> str:
 #     對這個入口特別放行（見該檔 `--arm-sentinel` 的 WHY），只把路徑記進狀態塊。
 #  ③ **一切例外吞掉**。`.claude/settings.json` 的 description 記載過 P0：hook 誤觸會把
 #     所有工具硬鎖死。武裝失敗最多是少一層保護，絕不可反過來變成故障源。
-def arm_sentinel(payload: dict) -> None:
-    """SessionStart：把預防性哨兵掛上去（背景、非阻塞、失敗一律靜默）。"""
-    if os.name != "nt" or os.environ.get(SENTINEL_OFF_ENV):
-        return  # schtasks 只在 Windows 成立（鐵律三）；人要關就關得掉
-    raw = payload.get("transcript_path")
+def spawn_sentinel(transcript_raw: str, out: str, log: object = None) -> bool:
+    """Detached 起 planner 的 `--arm-sentinel`；回「有沒有真的 spawn 出去」。
+
+    🔴 R82／Q2-02 的減法：SessionStart 武裝與額度 95% 喚醒武裝此前是**兩份逐字相同的
+    `Popen`**（同一支 planner、同一組旗標、同一個 `creationflags`），差別只有「要不要寫
+    boot log」。兩份各自演化的代價已經看得到：R80 修「`DETACHED_PROCESS` 讓視窗回來」
+    那一次只改了其中一份。收成一份之後那個漂移在結構上不存在。
+    """
     planner = repo_root() / "tools" / "session_resume_planner.py"
-    if not isinstance(raw, str) or not raw.strip() or not planner.is_file():
-        return
-    tmp = Path(tempfile.gettempdir())
-    sid = session_id_of(Path(raw))
-    with (tmp / f"autosdd_sentinel_boot_{sid}.log").open(
-            "a", encoding="utf-8", errors="replace") as handle:
-        handle.write(f"\n=== arm {datetime.now().isoformat(timespec='seconds')} ===\n")
-        handle.flush()
+    if os.name != "nt" or not planner.is_file() or not transcript_raw or not out:
+        return False
+    try:
         subprocess.Popen(  # noqa: S603 — 參數全是本檔算出來的路徑，無 shell
-            [quiet_python(), str(planner), "--transcript", raw,
-             "--out", str(tmp / f"{PLAN_PREFIX}{sid}.md"), "--arm-sentinel"],
-            stdout=handle, stderr=subprocess.STDOUT, stdin=subprocess.DEVNULL,
+            [quiet_python(), str(planner), "--transcript", transcript_raw,
+             "--out", out, "--arm-sentinel"],
+            stdout=log if log is not None else subprocess.DEVNULL,
+            stderr=subprocess.STDOUT, stdin=subprocess.DEVNULL,
             # 🔴 R80：舊寫法帶了 `DETACHED_PROCESS`，而它在**本 venv 的 trampoline 載具**
             # 上會讓視窗回來（矩陣見 NO_WINDOW 第二列：`DET` 與 `DET|CNW` 兩格皆「可見」）
             # ——上面取捨①宣稱的「不彈視窗」在寫下的當回合就不成立，且失效是靜默的
@@ -773,536 +800,68 @@ def arm_sentinel(payload: dict) -> None:
             # 取捨①要的「不同步等它跑完」由「不呼叫 wait()」提供，與旗標無關；子行程活過
             # 父行程退場這件事也已實測不需要 DETACHED_PROCESS（父死 8 秒後子仍寫出痕跡）。
             creationflags=NO_WINDOW)
-
-
-# ═══════════════════ 額度水位（訴求 a／b）：**與 context 完全分開的第二把尺**
-# 🔴 為什麼是另一條路徑，而不是 `block_verdict()` 裡多一個分支（SA-B1，本包實測複驗）：
-# `main()` 在呼叫 `block_verdict()` 之前有**五道早退**，五道全部是 context 語意
-# （`transcript_path` 缺／檔不存在／`used is None`／`tier_of(...) is None`），而
-# `tier_of` 在 context < 75% 一律回 `None`。撞額度那一刻 context 水位只有 ~18~20%
-# ⇒ 掛在那裡的 quota 分支**一次都不會被執行**，那就是本 repo 判過三次的「機制蓋好沒接電」。
-# ⇒ 本節的入口 `quota_gate()` 由 `main()` 在**那五道早退之前**呼叫，且它不讀逐字稿、
-#   不算 context、不問 `may_block()`。兩把尺共用早退條件就是讓一個東西假裝能做兩件事。
-#
-# 🔴 既有架構界線**維持不變且被加嚴**：`tools/tests/test_context_budget_guard.py::
-# test_quota_is_not_wired_into_the_context_blocking_path` 禁止把逐字稿撞線判讀
-# （`classify_limit`／`parse_reset_at`／`latest_limit_event`）接進 `block_verdict()`。
-# 本節整段住在 `block_verdict` **之前**、且一個字都沒有動它 ⇒ 那條鎖的射程零改變。
-# 本包同時替它補了反向那一半（quota 分支必須**真的**在早退之前求值），見該檔同名類別。
-#
-# ── 兩道的分工（掌舵者訴求 b 逐字）────────────────────────────────────────
-#   80% ⇒ 少派 agent：扇出型工具受**滾動視窗派發預算**節制，超出即 `exit 2`（那次呼叫
-#         不會發生）。這是機械的併發下降，不是印一行字給模型看。
-#   95% ⇒ 停止並準備喚醒：扇出全擋（cap=0）＋ 一次性閂鎖（寫任務書 → 依 reset 距離分三支）。
-QUOTA_THROTTLE_PCT = 80.0
-QUOTA_HALT_PCT = 95.0
-
-QUOTA_NORMAL = "normal"
-QUOTA_THROTTLE = "throttle"
-QUOTA_HALT = "halt"
-#: 🔴 第四個狀態，刻意與 `normal` **分開**：「量不到」與「量到 0」混同正是本檔通篇在防的
-#: fail-open 形狀。兩者在**行為**上都不節流（見下方 L4 的 WHY），但在**訊息與痕跡**上必須
-#: 分得開，否則「網路壞了」與「額度很寬鬆」外觀完全相同。
-QUOTA_UNMEASURABLE = "unmeasurable"
-
-#: 節流帶的扇出預算：每個滾動視窗最多幾次派發。
-#: 🔴 **這個數字是挑的，不是量出來的**——照實寫。它的**上界**才是量出來的：R80 撞線當下
-#: 的扇出規模實測 42／55／1，cap 必須遠小於它們，2 落在極寬鬆的一側。
-#: 機械物守的是**方向不是數值**：cap 必須隨 quota 單調不增，且 q≥95 時必須恰為 0。
-THROTTLE_FANOUT_CAP = 2
-#: 滾動視窗長度。同樣是挑的：它決定「節流帶裡每小時最多派幾個」（2/5min ≈ 24/hr）。
-#: 取滾動視窗而不是併發計數，理由是結構性的，見 `live_dispatches` 上方那段。
-FANOUT_WINDOW_SECONDS = 300
-#: 快取新鮮度上限。🔴 **不是**由「1.2pp/min 線性外推」推導的——那個推導已被第三個量測點
-#: 證偽（視窗翻頁時 utilization 會**驟降** 48pp，這個量非單調、在邊界不連續）。它就是挑的，
-#: 重量入口＝`python tools/lib/quota_meter.py --watch <秒>`，不另開探針檔。
-QUOTA_CACHE_TTL_SECONDS = 180
-#: 同步刷新的逾時上界（R81 收斂新增，見 `refresh_quota_blocking`）。取 4 秒的依據是量出來的
-#: ——端點 RTT 本包當回合三次實測 0.33／0.36／0.41 秒，4 秒約 10 倍餘裕；逾時的正確方向是
-#: 「量不到」而不是「慢慢等」，因為這一格**在 hook 的關鍵路徑上**（那是本輪刻意的取捨）。
-QUOTA_SYNC_TIMEOUT_SECONDS = 4
-#: reset 多遠以內才值得「排程等它」。5 小時視窗最遠 5h、週視窗最遠 7 天，中間這個
-#: 缺口大到不需要精確：取 6 小時。方向鎖守的是「七天後才 reset 的線不得被排程」。
-RESET_ARM_HORIZON_SECONDS = 6 * 3600
-
-#: 額度守衛的**第三個**逃生口。刻意不沿用 `GUARD_OFF_ENV`／`SENTINEL_OFF_ENV`：三者關掉的
-#: 是三件不同的事（context 阻斷／續航哨兵／額度節流），共用一個開關會讓「我只是想暫時
-#: 別被擋」順手把另外兩層一起關掉，而那件事沒有人會注意到（同 `SENTINEL_OFF_ENV` 的 WHY）。
-QUOTA_OFF_ENV = "AUTOSDD_QUOTA_GUARD_OFF"
-#: 節流帶的 cap 覆寫（一樣受方向鎖：halt 帶恆為 0，覆寫不到）。
-QUOTA_CAP_ENV = "AUTOSDD_QUOTA_FANOUT_CAP"
-
-#: 🔴 **本包量到的失明面，寫成政策而不是寫成藉口**（SD-B1）。本包當回合實測：
-#:  · `Workflow` 的 tool_result **47/47** 是「launched in background」⇒ 那次工具呼叫在
-#:    內部 agent 生出來**之前**就結束了；
-#:  · `%TEMP%` 的 `autosdd_sentinel_boot_*.log` 19 支，**沒有一支**的 sid 長得像 subagent
-#:    ⇒ SessionStart hook 對 workflow 內部 agent **一次都沒有觸發過**；
-#:  · 但 subagent 逐字稿裡 `PreToolUse:` 命中 136 次（Bash 105／PowerShell 25／Read 6）
-#:    ⇒ 那些 agent **自己的每一次工具呼叫**都會跑本 hook。
-#: 合起來的結論：我們攔得到「派發」與「被派出去的人再往下派」，但攔不到「一個已經啟動的
-#: workflow 在內部生出 42 個 agent」那一刻——**那一刻沒有任何 hook 會被叫到**。
-#: ⇒ 既然一次 `Workflow` 啟動是一個**事後無法界住**的扇出，節流帶唯一誠實的處置就是
-#: 不讓它啟動。這不是「擋不到所以放棄」，是把量到的失明面換成一條擋得住的政策。
-UNBOUNDED_FANOUT_TOOLS = ("Workflow",)
-
-#: 派發帳。🔴 **刻意不帶 session id**（SA-B5／SD-B1）：額度是 per-account 的單一池，而
-#: 每個 subagent／每一次 headless 跑都有自己的 sid ⇒ per-sid 的帳等於 N 個載體各拿一份
-#: cap，根本沒有界住帳號層級的燒用量。一個帳號、一份帳。
-#: 🔴 R81 收斂：它現在是**一個目錄**（一次派發＝一個目錄項），不再是一個 JSONL 檔。
-#: 換形態的理由是量出來的，見 `tools/lib/quota_ledger.py` 的 docstring（舊形態在 8 行程
-#: × 40 筆的 barrier 探針下實測掉 30.9%、且撕行被靜默丟棄）。
-FANOUT_LEDGER_NAME = "autosdd_quota_dispatch.d"
-#: 降級痕跡（B2：「量不到」不得是靜默的）。per-account，同上不帶 sid。
-QUOTA_TRACE_NAME = "autosdd_quota_degraded.jsonl"
-#: 降級出聲的 per-source 閂鎖檔前綴。用 TTL 名額而不是 state 檔：後者是 read-modify-write，
-#: 在 42 個平行 hook 下自己就會掉紀錄（＝本輪 B1 那個病的縮小版）。
-DEGRADED_STAMP_PREFIX = "autosdd_quota_degraded_"
-#: 95% 閂鎖的家（同樣 per-account）。
-QUOTA_LATCH_NAME = "autosdd_quota_latch.json"
-
-QUOTA_BRANCH_ARM = "arm"
-QUOTA_BRANCH_NOTIFY = "notify"
-QUOTA_BRANCH_ESCALATE = "escalate"
-
-
-def quota_tier_of(pct: float | None) -> str:
-    """水位 → 四個狀態之一。`pct is None` ⇒ `unmeasurable`（**不是** normal）。"""
-    if pct is None:
-        return QUOTA_UNMEASURABLE
-    if pct >= QUOTA_HALT_PCT:
-        return QUOTA_HALT
-    if pct >= QUOTA_THROTTLE_PCT:
-        return QUOTA_THROTTLE
-    return QUOTA_NORMAL
-
-
-def fanout_cap(pct: float | None) -> int | None:
-    """該水位下每個滾動視窗准許幾次扇出派發。`None`＝不設限（normal／量不到）。"""
-    tier = quota_tier_of(pct)
-    if tier == QUOTA_HALT:
-        return 0  # 🔴 這一格不吃任何覆寫：95% 那道的語意就是「停止」
-    if tier != QUOTA_THROTTLE:
-        return None
-    raw = os.environ.get(QUOTA_CAP_ENV)
-    try:
-        override = int(str(raw)) if raw is not None else None
-    except ValueError:
-        override = None
-    # 🔴 R81 收斂訂正本行原本的註解（不逐字複述當現行說法）：它宣稱覆寫「不得讓節流帶
-    # 比 normal 寬鬆」，而 normal ＝ `None` ＝**不設限** ⇒ 那句話對任何有限的覆寫值都
-    # 恆真，是一句空話；實作端也確實沒有上界（`max(0, override)`）。
-    # 真正成立的不變量只有一條，而它是刻意的：**覆寫只能低到 0，不能低到負數**（負數會
-    # 與 halt 的「恰為 0」混淆）；至於把它調大——那是**給人的逃生口**，語意與
-    # `AUTOSDD_QUOTA_GUARD_OFF=1`（整條關掉）同級，只是粒度細一點。模型改不到 hook
-    # 行程的環境，所以它不是模型的後門。halt 帶不吃任何覆寫（上面那一格已經 return）。
-    return THROTTLE_FANOUT_CAP if override is None else max(0, override)
-
-
-def quota_cache_path() -> Path:
-    """`tools/lib/quota_meter.py` 寫的那一份。
-
-    🔴 R81 收斂（Architect-B2）：**檔名與 schema 都不在本檔了**。此前這兩個字面在
-    meter（唯一寫者）、本檔（唯一讀者）、測試檔各有一份**互不相關**的複本，而所有既有
-    快取測試都傳明確 `path` 給 `read_quota()` ⇒ 「hook 讀的正好是 meter 寫的那一支」
-    這個**生產綁定零覆蓋**：改掉 meter 的 `CACHE_NAME`，meter 寫新檔、hook 讀不到 →
-    `pct=None` → 永遠不節流，而全套測試照綠。改成委派之後那個 desync 結構上不存在。
-    meter 不可達時刻意回**目錄**本身（讀出來必是 OSError）⇒ 額度軸整條退化成「量不到」。
-    """
-    return (quota_meter.cache_path() if quota_meter is not None
-            else Path(tempfile.gettempdir()))
-
-
-def quota_schema() -> str:
-    """快取 schema 字串；唯一的家在 meter。meter 不可達時回 `""`（⇒ 每份快取都判無效）。"""
-    return quota_meter.SCHEMA if quota_meter is not None else ""
-
-
-def fanout_ledger_path() -> Path:
-    return Path(tempfile.gettempdir()) / FANOUT_LEDGER_NAME
-
-
-def quota_latch_path() -> Path:
-    return Path(tempfile.gettempdir()) / QUOTA_LATCH_NAME
-
-
-def _aware(raw: object) -> datetime | None:
-    """ISO 字串 → aware datetime；解不出來回 `None`。"""
-    # 🔴 aware 是硬要求（R80 判準「naive 本地時間戳不得被持久化」）：naive 相減跨 DST
-    # 會靜默差 3600 秒。本機時區不實施 DST ⇒ 這個缺陷在本機結構上重現不了。
-    try:
-        moment = datetime.fromisoformat(str(raw))
-    except (TypeError, ValueError):
-        return None
-    return moment if moment.tzinfo is not None else None
-
-
-def read_quota(now: datetime, path: Path | None = None) -> dict:
-    """讀快取並判新鮮度。回 `{pct, kind, resets_at, stale, source}`；`pct is None`＝量不到。"""
-    blank = {"pct": None, "kind": "", "resets_at": None, "stale": None, "source": "no-cache"}
-    try:
-        data = json.loads((path or quota_cache_path()).read_text(encoding="utf-8"))
-    except (OSError, ValueError):
-        return blank
-    if not isinstance(data, dict):
-        return dict(blank, source="bad-cache")
-    if data.get("schema") != quota_schema():
-        # 🔴 「schema 升版了」與「根本沒有快取」是兩件事，而它們在 R81 之前共用 `no-cache`
-        # 這一個字面 ⇒ 痕跡讀起來一樣。schema 升版是**會發生**的（meter 自己記載過端點
-        # 的頂層鍵正在長），而它的正確處置是去看 meter，不是去看網路。
-        return dict(blank, source="schema-mismatch")
-    pct, measured = data.get("pct"), _aware(data.get("measured_at"))
-    if isinstance(pct, bool) or not isinstance(pct, (int, float)) or measured is None:
-        return dict(blank, source="bad-cache")
-    stale = (now - measured).total_seconds()
-    reading = {"pct": float(pct), "kind": str(data.get("kind") or ""),
-               "resets_at": data.get("resets_at"), "stale": stale, "source": "cache"}
-    if stale > QUOTA_CACHE_TTL_SECONDS:
-        # 🔴 SA-B4：過期的舊值**不得直接被採信為 normal**。這個量非單調（視窗翻頁會驟降）
-        # 也非等速（率完全取決於當下在做什麼），所以「上調一個安全邊際」同樣是猜。
-        # ⇒ 降級到 L4「量不到」：行為上不節流，但**狀態字與訊息說得出來它為什麼不節流**。
-        # 🔴 R81 收斂：上一句在 R81 之前是**假的**——狀態字有（`source`），訊息一個字都
-        # 沒有（SD-B2 四支注入探針實測 rc=0／stderr 0 bytes／零痕跡）。出聲那一半現在
-        # 真的存在了，落點是 `note_degraded()`，由 `quota_gate()` 在 L4 分支呼叫。
-        return dict(reading, pct=None, source="stale-cache")
-    return reading
-
-
-def reset_branch(resets_at: object, now: datetime) -> str:
-    """95% 那道該做什麼：`arm`（排程等它）／`notify`（等沒有意義）／`escalate`（沒有 reset）。"""
-    # 🔴 分支由**資料**決定，不由桶名決定（禁止寫死桶名清單：live payload 當回合 17 個
-    # 頂層鍵，`claude.exe` 內嵌名單只有 8 個 ⇒ schema 正在長）。三條線的差別本來就是
-    # 「reset 有多遠」：five_hour ≤5h、weekly 最長 7 天、spend **根本沒有 reset**。
-    # 這一條是設計洞不是細節：把「95% ⇒ 排程等 reset」寫成無條件，會在週額度上排一支
-    # 七天後才響的工作，而痕跡全綠——那與 R59 事故同形。
-    moment = _aware(resets_at)
-    if moment is None:
-        return QUOTA_BRANCH_ESCALATE
-    delta = (moment - now).total_seconds()
-    return QUOTA_BRANCH_NOTIFY if delta > RESET_ARM_HORIZON_SECONDS else QUOTA_BRANCH_ARM
-
-
-# 🔴 為什麼是「滾動視窗的派發率」而不是「in-flight 併發數」（SD-B1 的正面答覆）：
-# 用 PreToolUse 記 dispatched、PostToolUse 記 completed 去算 in-flight，在這個 harness 上
-# **恆讀 ≈0**——`Workflow` 47/47 是「launched in background」，那次呼叫在扇出開始前就結束、
-# PostToolUse 當場觸發、completed 立刻追平 dispatched ⇒ cap 永遠綁不到。
-# 而且那個形狀還自帶一個 SA-B6 的洩漏：被擋下的呼叫留下永遠不會有 completed 的 dispatched
-# ⇒ 計數器只增不減、永久過度節流，外觀卻像「額度一直很緊」。
-# 改記派發率之後兩個病一起消失：不需要 completed（不必動 PostToolUse 的註冊面）、
-# 視窗一滾就自癒。而且**它更貼近被限制的資源**：額度是燒用量，不是併發數。
-def claim_dispatch(root: Path, now: datetime) -> Path | None:
-    """記一筆派發，回自己那一個目錄項。委派共用層，本檔不留第二份實作。"""
-    return (quota_ledger.claim_dispatch(root, now.timestamp())
-            if quota_ledger is not None else None)
-
-
-def release_dispatch(entry: Path | None) -> bool:
-    """把自己那一筆撤掉（`unlink` 自己 `O_EXCL` 建出來的目錄項，不是第二次 append）。"""
-    return quota_ledger.release_dispatch(entry) if quota_ledger is not None else False
-
-
-def live_dispatches(root: Path, now: datetime, window: int = FANOUT_WINDOW_SECONDS) -> int:
-    """視窗內還算數的派發數。讀不到一律回 0（量不到 ≠ 節流）。
-
-    🔴 R81 收斂（SD-B1 required_change ②）：**讀不懂的目錄項要出聲，不得靜默跳過**。
-    舊版對解析失敗的行 `except ValueError: continue`，於是撕行被丟掉、帳目變小，
-    而變小的方向正好是「看起來還有預算」——一個只會往放行方向錯的計數器。
-    """
-    if quota_ledger is None:
-        return 0
-    floor = now.timestamp() - window
-    live, unreadable = quota_ledger.count_dispatches(root, floor)
-    if unreadable:
-        note_degraded("ledger-unreadable", f"派發帳裡有 {unreadable} 個讀不懂的目錄項")
-    quota_ledger.prune_dispatches(root, floor)
-    return live
-
-
-def claim_refresh_slot() -> bool:
-    """本 TTL 視窗內還沒有人量過 ⇒ 佔住這個位子回 `True`。這是**成本節流器**。
-
-    用一支獨立的嘗試痕跡（不是快取本身）當節流器，因為要記的是「試過了」不是「成功了」：
-    端點掛掉時不會寫快取 ⇒ 沒有這一格，每一次扇出呼叫都會再去打一次端點。
-
-    🔴 R81 收斂（SD-B3）：舊實作是 check-then-act，零原子性 ⇒ 16 個壁鐘 barrier 對齊的
-    行程實測 **CLAIM=16 SKIP=0**（設計意圖 1），也就是這個成本節流器在它唯一要治的
-    情境下完全失效。原子性住在共用層的 `claim_once()`（`O_CREAT|O_EXCL`）。
-    """
-    if quota_ledger is None:
+    except Exception:  # noqa: BLE001 — 見上方取捨③：武裝失敗不得反過來變成故障源
         return False
-    mark = Path(tempfile.gettempdir()) / "autosdd_quota_refresh.stamp"
-    return quota_ledger.claim_once(mark, QUOTA_CACHE_TTL_SECONDS)
+    return True
 
 
-def quota_trace_path() -> Path:
-    return Path(tempfile.gettempdir()) / QUOTA_TRACE_NAME
+def arm_sentinel(payload: dict) -> None:
+    """SessionStart：**不再直接武裝**，只把上一輪的武裝閂鎖清掉並留一行痕跡。
 
-
-def degraded_stamp_path(source: str) -> Path:
-    safe = "".join(ch if ch.isalnum() or ch in "-_" else "-" for ch in source)
-    return Path(tempfile.gettempdir()) / f"{DEGRADED_STAMP_PREFIX}{safe}.stamp"
-
-
-def note_degraded(source: str, detail: str) -> None:
-    """額度軸降級時**出一次聲 ＋ 留一行痕跡**。這是 B2 的修法本體。
-
-    🔴 立案（SD-B2 四支注入探針，落地前實測全部 rc=0／stderr 0 bytes／零痕跡）：
-    `quota_gate()` 在 `pct is None` 且無地板時直接 `return 0`，**而且是在
-    `quota_tier_of()` 被呼叫之前** ⇒ `QUOTA_UNMEASURABLE` 這個狀態字在 production
-    一次都到不了（全 repo 只出現在常數定義／`quota_tier_of`／測試三處）。
-    後果：token 過期、斷網、schema 升版、meter import 失敗，四種情況與「額度很健康」
-    外觀完全一致 ⇒ B3／B4 都變成不可偵測。
-
-    出聲帶 per-source TTL 閂鎖（不是每次都吵）：每次工具呼叫都出聲的守衛會被整個關掉，
-    那是本 repo 反覆判過的形態。閂鎖用的是**原子的** `claim_once()`——42 個平行 hook
-    同時降級時恰好一個說話，而不是 42 個一起說（或因為 state 檔互踩而說得沒有規律）。
+    🔴 為什麼還要清閂鎖（不是「什麼都不做就好」）：`claude -r` 續接一個已經下班（6 小時
+    閒置自我解除）的 session 時，閂鎖若留著就再也不會重新武裝＝續航被靜默弄丟。清掉之後
+    下一次工具呼叫會重新評估，而那時逐字稿早就過門檻 ⇒ 立刻補上。
+    boot log 保留：它是「SessionStart 有沒有被叫到」唯一的痕跡，而本輪正是靠它才發現
+    有四支短命 session 根本沒觸發過這支 hook（沒有 boot log）。
     """
-    if quota_ledger is None:
-        return
-    if not quota_ledger.claim_once(degraded_stamp_path(source), QUOTA_CACHE_TTL_SECONDS):
-        return
-    trace = quota_trace_path()
-    quota_ledger.append_record(trace, {
-        "at": datetime.now().astimezone().isoformat(timespec="seconds"),
-        "source": source, "detail": detail, "pid": os.getpid(),
-        "state": QUOTA_UNMEASURABLE})
-    sys.stderr.write(
-        f"⚠️  額度水位**量不到**（source={source}）⇒ 本次不節流，扇出照常放行。\n"
-        f"   這不是「額度很寬鬆」：{detail}。\n"
-        f"   現查：`python tools/lib/quota_meter.py --json`（失敗時會印 reason）；"
-        f"痕跡：{trace}\n"
-        f"   （同一個 source 每 {QUOTA_CACHE_TTL_SECONDS} 秒只說一次）\n")
-
-
-def refresh_quota_blocking(timeout: int = QUOTA_SYNC_TIMEOUT_SECONDS) -> bool:
-    """**同步**量一次並寫進 `quota_cache_path()`；回「有沒有拿到新讀數」。
-
-    🔴 R81 收斂（Architect-B1）**推翻了本節原本那條「網路呼叫永遠不在 hook 的關鍵路徑
-    上」的設計取捨**，理由照實記下（不逐字複述原說法當現行說法）：舊形態是快取過期時
-    fire-and-forget 起一支刷新器、**本次仍用舊值判定**，而舊值被 `read_quota()` 正確地
-    降級成「量不到」⇒ 淨效果是**過期就對任意規模的扇出全數放行**（複審探針實測：快取
-    過期 600s／額度 99% 時，42 次 `Agent` 派發放行 42、擋下 0）。
-    而「過期」是常態不是罕見：唯一的刷新呼叫點就在這條「已經量不到」的支線上、
-    哨兵巡邏一次都不刷快取、TTL 又只有 180 秒 ⇒ 任何 ≥3 分鐘的非扇出工作之後，
-    下一波扇出整批通過（本機佐證：刷新痕跡與快取 `measured_at` 之間 69 分鐘零自動刷新）。
-
-    代價量過了，不是猜的：端點 RTT 實測 **0.33／0.36／0.41 秒**（本包當回合三次），
-    逾時上界 4 秒；且它**只在扇出型工具**上、每 TTL 至多一次（`claim_refresh_slot`）
-    ⇒ 不是「給每一次工具呼叫加上網路延遲」那個被否決的形態。收斂型工具（讀檔、寫檔、
-    跑 git）在上游 `tool not in BLOCKING_TOOLS` 就返回了，一次都碰不到這裡。
-    """
-    if quota_meter is None:
-        note_degraded("meter-missing", "取數器 import 不到（共用層不可達）")
-        return False
-    try:
-        # 🔴 R81 收斂（SD-B2/B4）：走 `measure_detail` 而不是 `measure`。舊版把失效理由
-        # 丟掉，四種失效在這裡外觀相同 ⇒ 連要寫進痕跡的東西都不存在。
-        reading, reason = quota_meter.measure_detail(timeout)
-        if reading is None:
-            note_degraded(reason, "同步取數失敗（本 TTL 視窗唯一的一次嘗試）")
-            return False
-        return quota_meter.write_cache(reading, quota_cache_path())
-    except Exception:  # noqa: BLE001 — 取數失敗最多是仍然量不到，不得變成故障源
-        note_degraded("meter-crashed", "取數器自己拋了例外（已吞掉，不阻斷）")
-        return False
-
-
-def quota_floor_reading(payload: dict, now: datetime) -> dict | None:
-    """L3 地板：逐字稿裡有**未復原**的撞線 ⇒ 水位下界 100%。`None`＝連地板都沒有。
-
-    🔴 R81 收斂（Architect-B1 的另一半）：ADR-XPLAT-005 §2.1 與 Quota_Review D03 都用
-    「逐字稿那層地板永遠在」替 L4 不節流辯護，而實作端 `quota_gate()` **一次都沒有呼叫過**
-    `unhandled_limit_event()`（它的消費者只有哨兵與測試）⇒ 那層地板當時只存在於文件裡。
-    這裡把它真的接上：離線、零 token、不依賴網路，正是 meter 全死時唯一還算數的證據。
-    """
+    if os.name != "nt" or os.environ.get(SENTINEL_OFF_ENV):
+        return  # schtasks 只在 Windows 成立（鐵律三）；人要關就關得掉
     raw = payload.get("transcript_path")
-    transcript = Path(raw) if isinstance(raw, str) and raw.strip() else None
-    if transcript is None or not transcript.is_file():
-        return None
-    event = unhandled_limit_event(transcript)
-    if event is None:
-        return None
-    reset = parse_reset_at(event.get("text"), now)
-    return {"pct": 100.0, "kind": str(event.get("kind") or ""), "stale": None,
-            "resets_at": reset.isoformat() if reset else None, "source": "transcript-floor"}
-
-
-def arm_quota_wakeup(transcript: Path, plan: str) -> None:
-    """95%／`arm` 分支：把喚醒掛上去（detached）。憑證＝planner 自己的 `NextRunTime` 閘。"""
-    # 走既有的 `--arm-sentinel`：它是**唯一**不需要「已觀測 reset 時刻」就能武裝的入口，
-    # 而 95% 這一刻**還沒撞線**（這正是本包的重點：不要走到撞線）。planner 內建的取證閘
-    # （`relay_problems()` 禁止在 `next_run_time` 為空時把狀態寫成 armed）原封不動生效。
-    # 🔴 planner 實測 749／750 行（餘裕 1 行）⇒ 本包**一行都沒有動它**，只當消費者。
-    planner = repo_root() / "tools" / "session_resume_planner.py"
-    if os.name != "nt" or not planner.is_file() or not plan:
+    if not isinstance(raw, str) or not raw.strip():
         return
+    sid = session_id_of(Path(raw))
+    if sentinel_lifecycle is not None:
+        sentinel_lifecycle.clear_arm_latch(sid)
+    with (Path(tempfile.gettempdir()) / f"autosdd_sentinel_boot_{sid}.log").open(
+            "a", encoding="utf-8", errors="replace") as handle:
+        handle.write(f"\n=== session-start {datetime.now().isoformat(timespec='seconds')}"
+                     " （閂鎖已清；武裝延後到累積夠工作量的那一刻）===\n")
+
+
+def arm_when_earned(transcript: Path) -> str:
+    """PostToolUse：夠格才武裝。回理由字串（呼叫端不讀，留給測試與未來的痕跡）。
+
+    一切例外吞掉：`.claude/settings.json` 的 description 記載過 P0（hook 誤觸會把所有
+    工具硬鎖死），而武裝失敗最多是少一層保護，絕不可反過來變成故障源。
+    """
+    if (os.name != "nt" or os.environ.get(SENTINEL_OFF_ENV)
+            or sentinel_lifecycle is None):
+        return "disabled"
+    sid = session_id_of(transcript)
     try:
-        subprocess.Popen(  # noqa: S603 — 同上
-            [quiet_python(), str(planner), "--transcript", str(transcript),
-             "--out", plan, "--arm-sentinel"],
-            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-            stdin=subprocess.DEVNULL, creationflags=NO_WINDOW)
+        return sentinel_lifecycle.maybe_arm(
+            transcript, sid, spawn=spawn_sentinel,
+            plan_path=str(Path(tempfile.gettempdir()) / f"{PLAN_PREFIX}{sid}.md"))
     except Exception:  # noqa: BLE001 — 見上
-        pass
+        return "error"
 
 
-def quota_halt_actions(payload: dict, reading: dict, now: datetime) -> dict:
-    """95% 閂鎖那一刻真的做的事。回稽核欄位（給訊息與測試讀）。"""
-    branch = reset_branch(reading.get("resets_at"), now)
-    raw = payload.get("transcript_path")
-    transcript = Path(raw) if isinstance(raw, str) and raw.strip() else None
-    plan = write_resume_plan(transcript) if transcript and transcript.is_file() else ""
-    # 🔴 哨兵的既有逃生口在這裡也算數：`AUTOSDD_SENTINEL_OFF` 的語意就是「不要替我武裝
-    # 任何喚醒」。關掉時**必須在訊息裡說出來**——「關掉了所以沒武裝」與「武裝了」外觀
-    # 相同就是假綠（同 M13「哨兵關掉時快取也會過期，且說得出來」的形狀）。
-    off = bool(os.environ.get(SENTINEL_OFF_ENV))
-    armed = (branch == QUOTA_BRANCH_ARM and os.name == "nt"
-             and transcript is not None and not off)
-    if armed:
-        arm_quota_wakeup(transcript, plan)
-    return {"branch": branch, "plan": plan, "armed": armed, "sentinel_off": off,
-            "posix": os.name != "nt", "kind": reading.get("kind", "")}
+def arm_quota_wakeup(transcript: Path | None, plan: str) -> dict:
+    """額度 95%／`arm` 分支的喚醒武裝；回 `{armed, sentinel_off, posix}` 給訊息用。
 
-
-def quota_halt_message(reading: dict, act: dict) -> str:
-    """95% 的一次性訊息。三支分支**字串必須不同**，否則「不排程」與「排不了」外觀相同。"""
-    head = (f"🔴 額度水位 {reading['pct']:.1f}%（≥{QUOTA_HALT_PCT:.0f}%，最緊的一條＝"
-            f"{act['kind'] or '未知'}）⇒ **停止派發**：所有扇出型工具本次一律不執行。\n"
-            f"   任務書：{act['plan'] or '（寫不出來——逐字稿路徑不可得）'}\n")
-    if act["posix"]:
-        # 🔴 SA-B7：mac/Linux 上武裝入口本身就有 `os.name != 'nt'` 早退 ⇒ 若沿用
-        # weekly 那支「不排程」的靜默路徑，「不排程」與「排不了」會長得一模一樣。
-        return head + ("   ⚠️ 本平台**沒有排程載具**（schtasks 只在 Windows 成立）"
-                       "⇒ 已寫任務書，但**沒有武裝任何喚醒**。mac/Linux 請自行以 "
-                       "launchd／cron 掛，或留在這裡等人回來。\n")
-    if act["branch"] == QUOTA_BRANCH_ARM and act["armed"]:
-        return head + (f"   ✅ 已武裝喚醒（reset 在 {reading['resets_at']}）。憑證是 "
-                       "`NextRunTime` 這個**值**，不是 rc：\n"
-                       "      Get-ScheduledTask | Where-Object TaskName -like "
-                       "'AutoSDD_Sentinel_*' | Get-ScheduledTaskInfo\n")
-    if act["branch"] == QUOTA_BRANCH_ARM:
-        return head + ("   ⚠️ 這一條的 reset 近在眼前、本來該武裝喚醒，但**這次沒有武裝**："
-                       + ("哨兵逃生口 " + SENTINEL_OFF_ENV + " 有設。\n" if act["sentinel_off"]
-                          else "拿不到逐字稿路徑 ⇒ 沒有可以掛的任務書。\n"))
-    if act["branch"] == QUOTA_BRANCH_NOTIFY:
-        return head + (f"   🔴 這一條的 reset 在 {reading['resets_at']}（**遠超 "
-                       f"{RESET_ARM_HORIZON_SECONDS // 3600} 小時**）⇒ 「等」幾乎沒有意義，"
-                       "本次**刻意不排程**（排一支七天後才響的工作而痕跡全綠＝R59 事故同形）。"
-                       "改做不吃額度的工作，或降扇出／切小模型。\n")
-    return head + ("   🔴 這一條**沒有 reset 可以等**（例：月度支出上限）⇒ 排程是錯的動作。"
-                   "只有人去提額才會回來：https://claude.ai/settings/usage\n")
-
-
-def throttle_horizon_line(reading: dict, now: datetime) -> str:
-    """節流帶要說出「這道限制會套多久」。🔴 R81 收斂（SD 非 blocking ①）。
-
-    halt 帶用 `reset_branch()` 分得出 arm／notify／escalate，**throttle 帶完全不分** ⇒
-    週額度越 80% 時 cap 會連續套用好幾天，與 five_hour 80%（最多 5 小時）代價差一個
-    數量級，而訊息裡讀不出差別。本行**只把差別說出來，不動 cap 的階梯**：那個階梯的
-    數值是掌舵者訂的政策（80 少派／95 停止），要按 reset 距離分檔是政策決定不是實作
-    細節，已登記進缺陷帳本交由下一輪承接（輪號寫在帳本，不寫進程式碼檔——程式碼裡的
-    輪號會超前帳本時鐘，`check_defect_log_crossref` 有專屬判準）。
+    🔴 平台判斷與逃生口刻意留在 hook 這一側：`tools/lib/quota_gate.py` 只讀這份回報，
+    自己不去問 `os.name`、也不去讀哨兵的環境變數——那會讓同一份平台知識有第二個家。
+    🔴 `armed` 是**真的 spawn 出去了**，不是「我走到了那個分支」：舊實作把兩者混同
+    （Popen 拋例外時照樣回報 armed），而那正是本 repo 反覆判過的「真紅讀成綠」。
+    憑證仍是 planner 自己的 `NextRunTime` 閘（`relay_problems()` 禁止在 `next_run_time`
+    為空時把狀態寫成 armed），本函式一行都沒有動它，只當消費者。
     """
-    branch = reset_branch(reading.get("resets_at"), now)
-    if branch == QUOTA_BRANCH_ESCALATE:
-        return ("   ⏳ 這一條**沒有 reset 可以等**（例：月度支出上限）⇒ 這道節流不會自己"
-                "解除，只有人去提額：https://claude.ai/settings/usage\n")
-    if branch == QUOTA_BRANCH_NOTIFY:
-        return (f"   ⏳ 這一條的 reset 在 {reading.get('resets_at')}（**遠超 "
-                f"{RESET_ARM_HORIZON_SECONDS // 3600} 小時**）⇒ 這道節流會**連續套用好"
-                "幾天**，不是等一下就好。改做不吃額度的工作，或降扇出／切小模型。\n")
-    return (f"   ⏳ 這一條的 reset 在 {reading.get('resets_at')}（{RESET_ARM_HORIZON_SECONDS // 3600}"
-            " 小時內）⇒ 這道節流很快就會自己解除。\n")
-
-
-def quota_throttle_message(reading: dict, tool: str, cap: int, live: int,
-                           now: datetime) -> str:
-    if tool in UNBOUNDED_FANOUT_TOOLS:
-        return (f"⚠️  額度水位 {reading['pct']:.1f}%（≥{QUOTA_THROTTLE_PCT:.0f}%，最緊的一條＝"
-                f"{reading['kind'] or '未知'}）⇒ `{tool}` 本次不執行。\n"
-                "   理由不是「太多」而是「數不到」：一次 Workflow 啟動會在背景生出未知數量的"
-                "agent，而那一刻**沒有任何 hook 會被叫到**（本包實測：tool_result 47/47 是"
-                "「launched in background」）⇒ 事後界不住。節流帶請改逐個派 `Agent`"
-                f"（每 {FANOUT_WINDOW_SECONDS}s 最多 {cap} 個）。\n"
-                + throttle_horizon_line(reading, now))
-    return (f"⚠️  額度水位 {reading['pct']:.1f}%（≥{QUOTA_THROTTLE_PCT:.0f}%，最緊的一條＝"
-            f"{reading['kind'] or '未知'}）⇒ 少派 agent：每 {FANOUT_WINDOW_SECONDS}s 最多 "
-            f"{cap} 次扇出，本視窗已用 {live} 次 ⇒ `{tool}` 本次不執行。\n"
-            "   等一下再派，或改做不需要扇出的收斂工作（讀檔／寫檔／跑測試都沒有被擋）。\n"
-            + throttle_horizon_line(reading, now)
-            + f"   逃生口：設 {QUOTA_OFF_ENV}=1（關掉整條額度節流）或 {QUOTA_CAP_ENV}=<n>。\n")
-
-
-def quota_gate(payload: dict) -> int:
-    """額度軸的**獨立**判定入口。回 0＝放行、2＝擋下。不讀 context、不碰網路。"""
-    if os.environ.get(QUOTA_OFF_ENV):
-        return 0
-    tool = str(payload.get("tool_name") or "")
-    if tool not in BLOCKING_TOOLS:
-        return 0  # 收斂（讀檔、寫任務書、跑 git）永遠不受額度節流影響
-    now = datetime.now().astimezone()
-    reading = read_quota(now)
-    if reading["pct"] is None and claim_refresh_slot():
-        # 🔴 唯一會碰網路的一格，三個條件同時成立才到得了：扇出型工具 ＋ 已經量不到 ＋
-        # 本 TTL 視窗還沒有人量過。理由與實測代價見 `refresh_quota_blocking` 的 WHY。
-        refresh_quota_blocking()
-        now = datetime.now().astimezone()
-        reading = read_quota(now)
-    if reading["pct"] is None:
-        floor = quota_floor_reading(payload, now)
-        if floor is None:
-            # L4：**真的**量不到（同步量過了、也沒有未復原的撞線）才不節流。斷網時自動把
-            # 併發降到 2 會讓「網路壞了」與「額度真的滿了」外觀完全相同且靜默——同
-            # `may_block()` 既有判例「分母是猜的就不擋」。
-            # 🔴 但**不節流 ≠ 不出聲**（SD-B2）：這條路在 R81 之前是零 stderr、零痕跡，
-            # 與「額度很健康」外觀一模一樣，於是 B3／B4 全部變成不可偵測。
-            note_degraded(str(reading.get("source") or "unknown"),
-                          "取數失敗，且逐字稿裡沒有未復原的撞線可以當地板"
-                          f"（狀態＝{quota_tier_of(None)}）")
-            return 0
-        reading = floor  # L3 地板：撞線且未復原 ⇒ 下界 100% ⇒ 落進 halt
-    tier = quota_tier_of(reading["pct"])
-    if tier == QUOTA_NORMAL:
-        return 0
-    if tier == QUOTA_HALT:
-        latch = quota_latch_path()
-        # 閂鎖鍵帶 (kind, reset 分鐘)：新的視窗＝重新武裝一次。截到分鐘是因為 `resets_at`
-        # 有次秒級抖動（它是 now+剩餘算出來的），字串相等比較會每次都判「reset 變了」。
-        key = f"halt@{reading['kind']}@{str(reading['resets_at'])[:16]}"
-        if key not in announced_latches(latch):
-            remember_latch(latch, key)
-            sys.stderr.write(quota_halt_message(
-                reading, quota_halt_actions(payload, reading, now)))
-        else:
-            sys.stderr.write(f"🔴 額度 {reading['pct']:.1f}% ≥ {QUOTA_HALT_PCT:.0f}%"
-                             f"：`{tool}` 仍然不執行（閂鎖已觸發過，任務書已在磁碟上）。\n")
-        return 2
-    cap = fanout_cap(reading["pct"]) or 0
-    if tool in UNBOUNDED_FANOUT_TOOLS:
-        sys.stderr.write(quota_throttle_message(reading, tool, cap, 0, now))
-        return 2
-    root = fanout_ledger_path()
-    # 🔴 先記帳再數（含自己這一筆），而不是先數再記：42 個 `Agent` 在同一則 assistant
-    # message 裡平行派發時 PreToolUse 是平行觸發的 ⇒ 先數再記會讓它們全部讀到 live<cap
-    # 而全數放行。先記再數之後，**目錄項的建立順序**替我們排了序，後到的看得到前面的。
-    #
-    # 🔴 R81 收斂訂正本段原本那句「極端競態下可能全部讀到超額而全數擋下——那是安全方向，
-    # 且 `undo` 會把預算還回去」（不逐字複述當現行說法）：後半句實測不成立。舊實作的
-    # `undo` 是**第二次 append**，而 append 在 Windows 上跨行程不是原子的 ⇒ 20 個平行
-    # Agent 的探針量到 `try=20 undo=17`（各應為 20），`live_dispatches()` 讀回 3、cap=2，
-    # 於是接著單獨派 1 個 Agent（遠低於 cap）**被幽靈計數擋下**（rc=2）。也就是說「安全
-    # 方向」那句話掩蓋掉的正是 SA-B6 要治的永久過度節流，只是換了成因復發。
-    # 現在記帳與撤銷各自是**一次原子的目錄項變動**（建立／刪除自己那一個），兩個方向的
-    # 掉帳都不存在——實測見 `tools/lib/quota_ledger.py` docstring 的三組 barrier 探針。
-    entry = claim_dispatch(root, now)
-    live = live_dispatches(root, now)
-    if live <= cap:
-        return 0
-    # 🔴 SA-B6：被擋下的呼叫**不得**在帳上留下永久佔位，否則節流期間計數器只增不減，
-    # 一旦到 cap 就永遠回不來（即使 quota 已經掉回 50），而失效方向是永久過度節流、
-    # 外觀像「額度好像一直很緊」。
-    release_dispatch(entry)
-    sys.stderr.write(quota_throttle_message(reading, tool, cap, live - 1, now))
-    return 2
+    if os.name != "nt":
+        return {"armed": False, "sentinel_off": False, "posix": True}
+    if os.environ.get(SENTINEL_OFF_ENV):
+        return {"armed": False, "sentinel_off": True, "posix": False}
+    return {"armed": transcript is not None and spawn_sentinel(str(transcript), plan),
+            "sentinel_off": False, "posix": False}
 
 
 def _headline(used: int, window: int, source: str) -> str:
@@ -1371,6 +930,16 @@ def block_message(used: int, window: int, source: str, tool: str) -> str:
 
 def main() -> int:
     try:
+        # 🔴 R82／C2：`.env` 裡的逃生口必須真的算數。本檔的三個開關（`GUARD_OFF_ENV`／
+        # `SENTINEL_OFF_ENV` 兩處）與 `quota_gate` 的那一個此前全讀 `os.environ` ⇒ 使用者
+        # 照 `.env.example` 抄一份 `.env` 把守衛關掉，守衛照擋，而「關掉了」與「沒關掉」
+        # 外觀完全相同。這一行把 `.env` 裡**我們自己宣告過的鍵**（`ENV_SPEC` 白名單，
+        # 不是整份檔——`.env` 也放機密，整份灌進 env 會隨 Popen 繼承到子行程）填成行程級
+        # 預設，缺席才填 ⇒ 真環境變數仍然贏。放在 `main()` 而不是模組層：模組層副作用會
+        # 讓「import 本檔的測試」被開發機上的 `.env` 影響。
+        # 回歸鎖：`tools/tests/test_context_budget_guard.py::EnvFileReachesEveryEscapeHatchTest`。
+        if quota_gate is not None:
+            quota_gate.apply_env_defaults(os.environ)
         payload = read_payload()
         if payload is None:
             # 退化 payload：出聲但不阻斷（rc=1）。靜默放行會讓「送壞 payload」成為
@@ -1382,7 +951,8 @@ def main() -> int:
             return 1
         event = str(payload.get("hook_event_name") or "")
         if event == "SessionStart":
-            # 這一支不量水位、不出聲、恆 exit 0：它只負責「把哨兵接上電」。
+            # 這一支不量水位、不出聲、恆 exit 0：它只負責把上一輪的武裝閂鎖清掉
+            # （R82／HELM-02：真正的武裝已延後到 PostToolUse，見 `arm_when_earned`）。
             arm_sentinel(payload)
             return 0
         blocking = event == "PreToolUse"
@@ -1390,7 +960,10 @@ def main() -> int:
         # 全是 context 語意，而 `tier_of()` 在 context <75% 一律回 `None` ⇒ 撞額度那一刻
         # （實測水位只有 ~18~20%）任何掛在 `block_verdict()` 裡的 quota 分支都到不了。
         # 兩把尺不共用早退條件，這一行的位置就是那個設計。
-        if blocking and (quota_stop := quota_gate(payload)):
+        if blocking and quota_gate is not None and (quota_stop := quota_gate.quota_gate(
+                payload, blocking=BLOCKING_TOOLS, latch_read=announced_latches,
+                latch_write=remember_latch, plan_writer=write_resume_plan,
+                waker=arm_quota_wakeup)):
             return quota_stop
         raw_path = payload.get("transcript_path")
         if not isinstance(raw_path, str) or not raw_path.strip():
@@ -1398,6 +971,12 @@ def main() -> int:
         transcript = Path(raw_path)
         if not transcript.is_file():
             return 0
+        # 🔴 哨兵武裝掛在這裡（不是 SessionStart，理由見 `arm_when_earned` 上方那段），而且
+        # **必須在下面五道 context 早退之前**：`tier_of()` 在水位 <75% 一律回 `None`，掛在
+        # 後面等於永遠不會被執行（同 SA-B1 判過的死碼形狀，只是換一把尺）。閂鎖已設時它只
+        # 做一次 `Path.exists()`，所以放在每次工具呼叫都會經過的路徑上是付得起的。
+        if not blocking:
+            arm_when_earned(transcript)
 
         used, peak, model = scan_transcript(transcript)
         if used is None:

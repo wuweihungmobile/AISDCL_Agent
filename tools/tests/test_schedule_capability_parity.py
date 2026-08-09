@@ -54,7 +54,11 @@ from skip_tag_policy import TREE_FLOOR_RATIO as _TREE_FLOOR_RATIO  # noqa: E402
 #: `test_context_budget_guard.py` 兩支鎖檔，實測檔數上升，鎖自己印出「下限只剩實測的 76%、
 #: 低於 80%」並指名要重釘為 44。下限型判準的意義是「掃描面不得靜默縮小」，
 #: 故它必須跟著實測往上走——停在舊值等於讓保護逐輪稀釋。
-_SCAN_FLOOR = 44
+# R82 收輪重釘 44→46（收緊，非放寬；與 `tools/lib/skip_tag_policy.py` 的
+# `_TREE_FILE_FLOORS['tools/tests']` 同一趟、同一個理由）：所有包停工後的單人窗口實測
+# `tools/tests/` 已是 58 支，44 只剩實測的 76% ⇒ 下方第二個方向的斷言逐字指名要重釘為 46。
+# 值照填、不做加減推算。成長來源是本輪並行包新增的三支鎖檔，非本包。
+_SCAN_FLOOR = 46
 
 
 def _mac_source() -> str:

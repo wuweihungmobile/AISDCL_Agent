@@ -8,6 +8,39 @@ from typing import Literal
 import yaml
 from pydantic import BaseModel, Field, field_validator, model_validator
 
+# 🔴 R82（C3／C6，掌舵者訴求 b+c）：**額度門檻的名字與出廠預設不在這裡發明**。
+# 唯一的家＝monorepo 根層 `tools/lib/quota_policy.py` 的 `ENV_SPEC`（50/70/85/95 四個錨點）。
+# AutoClaude **不能** import 它（`.importlinter` 的 autoclaude ↛ tools forbidden contract；
+# ADR-XPLAT-004 §4：套件不得依賴 harness 內臟）⇒ 兩側靠**同一組環境變數名**接線，而
+# 「預設值必須相等」由 `tests/test_r82_quota_axis_and_shipped_defaults.py` 讀根層原始碼
+# 比對（同 SCHEMA 那條既有鎖的體例）。這不是第二份常數表，是同一份宣告的鏡像，鏡子破了會紅。
+#
+# 🔴 兩份 `.env` 的關係（掌舵者點名要講清楚，判準守住）＝**繼承 ＋ 覆寫**：
+#   os.environ  >  AutoClaude/.env  >  <repo 根>/.env  >  出廠預設
+#   · 根 `.env` 是兩側共用的基底（harness 的 hook 也讀它）⇒ 只寫一次就兩邊一致；
+#   · `AutoClaude/.env` 只在「引擎要與 harness 不同」時才寫，它贏。
+# 為什麼是就地讀檔而不是引入 python-dotenv：本專案明文沒有 dotenv 載入器
+# （`.env.example` 檔頭逐字），而 `.env` 裡放的是機密（MINIMAX_API_KEY／DB DSN）——
+# 全域載入等於把機密灌進行程並隨 subprocess 繼承，那是另一個授權面的決定。
+# 這裡只替**這一族鍵**查檔，白名單就是呼叫點寫死的那兩個名字。
+# 行內註解一律剝掉：`.env.example` 的手寫版會帶 ` # 說明`，不剝就等於把說明餵給 float()。
+_ENV_FILES = (Path(__file__).resolve().parents[2] / ".env",
+              Path(__file__).resolve().parents[3] / ".env")
+
+
+def _quota_env(name: str, fallback: float) -> float:
+    raw = os.environ.get(name, "").split("#")[0].strip()
+    for path in _ENV_FILES:
+        if raw or not path.is_file():
+            continue
+        raw = next((ln.split("=", 1)[1].split("#")[0].strip()
+                    for ln in path.read_text(encoding="utf-8", errors="replace").splitlines()
+                    if ln.split("=", 1)[0].strip() == name), "")
+    try:
+        return min(100.0, max(0.0, float(raw)))
+    except ValueError:
+        return fallback   # 壞值不得變成故障源，也不得靜默放寬——退回出廠預設
+
 
 class MinimaxConfig(BaseModel):
     api_key: str = ""
@@ -57,7 +90,17 @@ class EmbedderConfig(BaseModel):
 
 class ClaudeConfig(BaseModel):
     command: str = "claude"
-    extra_args: list[str] = Field(default_factory=lambda: ["--yes"])
+    # 🔴 R82（ACB-01，P0）：此欄預設值曾是 `["--yes"]`，而 `--yes` **從來就不是**
+    # Claude Code CLI 的旗標——實測 `claude --yes mcp list` → rc=1、逐字
+    # `error: unknown option '--yes'`（本機 claude 2.1.223）。兩條執行路徑
+    # （pty_executor.py / prompt_dispatcher.py）都會把它原樣送出 ⇒ 出廠設定下
+    # 每一個步驟都在第一秒失敗。它能活這麼久是因為「用 --version 驗過了」是假綠：
+    # `claude --definitelynotaflag --version` 也回 rc=0（--version 短路旗標檢查）。
+    # 預設改空清單＝不多送任何旗標。若需要非互動免權限提示，用實測存在的
+    # `--permission-mode bypassPermissions` 或 `--dangerously-skip-permissions`
+    # （見 scripts/ab_configs/*.yaml 既有用法）——那是安全決策，故不設為出廠預設。
+    # 機械物：tests/test_claude_cli_flags.py（拿 `claude --help` 當 fixture 逐旗標比對）。
+    extra_args: list[str] = Field(default_factory=list)
     continue_flag: str = "--continue"   # 傳遞給 claude 以維持對話脈絡
     encoding: str = "utf-8"
     # W-82-1 / DEF-81-001 PTY 支根因修復：PtyExecutor 以 `--output-format <fmt>` 啟動 claude -p。
@@ -139,7 +182,23 @@ class TokenGuardConfig(BaseModel):
     compact_threshold_pct: float = Field(default=80.0, ge=0.0, le=100.0)
     # 觸發儲存檢查點並暫停的 context 使用百分比門檻
     halt_threshold_pct: float = Field(default=90.0, ge=0.0, le=100.0)
+    # 🔴 R82（ACQ-01 / ADR-XPLAT-005 §2.4 載體二）：**帳號額度**水位的兩道門。
+    # 與上面兩欄**絕對不共用**——上面兩欄的分母是 context window，這兩欄的分母是帳號方案。
+    # 數字接近反而更危險：名字像有人守，其實守的是別的東西。
+    # 🔴 R82（C3）：門檻改由**根層 ENV_SPEC 的同名環境變數**驅動（見檔頭 `_quota_env`）。
+    # throttle 由 80 下修到 **70**＝根層階梯的 `converge`（「開始收斂」）：AutoClaude 這一側
+    # 唯一的「可選支出」是 CORRECTION 重試，而每一次重試都是再打一次 claude ⇒ 在收斂帶就
+    # 停掉它是嚴格更安全的方向（此處只准往下調，**不得**因為好看而往上放）。
+    # halt 維持 95＝根層的 `halt`，那是安全線，出廠預設不放寬。
+    # 刻意**不**映射 notice(50)／prepare(85)：AutoClaude 沒有扇出可降、也還沒有「提前準備
+    # 下一次 reset」的動作 ⇒ 映射過來就是幽靈鍵。缺口誠實登記在 .env.example，不假裝有。
+    quota_throttle_pct: float = Field(ge=0.0, le=100.0, default_factory=lambda: _quota_env(
+        "AUTOSDD_QUOTA_CONVERGE_PCT", 70.0))
+    quota_halt_pct: float = Field(ge=0.0, le=100.0, default_factory=lambda: _quota_env(
+        "AUTOSDD_QUOTA_HALT_PCT", 95.0))
     # 儲存檢查點後等待多少分鐘再自動繼續（0 = 立即繼續）
+    # 🔴 R82：**額度**路徑不讀這一欄（改讀觀測到的 resets_at，見 core/services/auto_resume.py）；
+    # context 路徑原樣保留——實測額度視窗 min 0.5 分／max 253 分，沒有一段等於固定 30 分。
     resume_delay_minutes: int = Field(default=30, ge=0, le=1440)
     # True = 等待後自動繼續；False = 儲存檢查點後退出，讓人類決定何時重啟
     auto_resume: bool = True
@@ -172,6 +231,12 @@ class TokenGuardConfig(BaseModel):
                 f"halt_threshold_pct({self.halt_threshold_pct}%) 必須 > "
                 f"compact_threshold_pct({self.compact_threshold_pct}%)"
             )
+        # R82（ACQ-01 / ADR M10）：額度那一軸照抄同一條不變量（quota_halt > quota_throttle）。
+        if self.quota_halt_pct <= self.quota_throttle_pct:
+            raise ValueError(
+                f"quota_halt_pct({self.quota_halt_pct}%) 必須 > "
+                f"quota_throttle_pct({self.quota_throttle_pct}%)"
+            )
         return self
 
     @field_validator("context_patterns")
@@ -203,8 +268,26 @@ class AlertLadderConfig(BaseModel):
 
 
 class NotificationConfig(BaseModel):
-    enabled: bool = True
+    # 🔴 R82（ACC-01）：預設由 True 改 False——桌面彈窗是 NotificationPlugin 在 POST_RUN 發的，
+    # 而 plyer 的 Windows 後端把 balloon_tip 丟進一個**非 daemon** 執行緒並 sleep(timeout)，
+    # 於是彈窗在「跑完之後」才冒出來、還把行程多吊住 duration 秒。使用者要的是不要彈。
+    # 反向證據：本 repo 自己的測試有 6 處逐行寫 `cfg.notification.enabled = False`
+    # 並註明「測試不應觸發真實桌面通知」——出廠預設與所有消費端的期望相反。
+    enabled: bool = False
     webhook_url: str | None = None
+    # 桌面通知泡泡停留秒數。plyer 內部會 sleep 這麼久，直接決定行程被吊住多久（原硬編 10）。
+    duration_seconds: int = Field(default=3, ge=1, le=60)
+
+    @model_validator(mode="after")
+    def apply_env_switch(self) -> NotificationConfig:
+        # opt-in / opt-out 開關（見 .env.example）。刻意雙向：想臨時開來看一次通知的人
+        # 不必改入庫的 config.yaml，而 CI／無人看管跑批也能明文關掉。
+        raw = os.environ.get("AUTOCLAUDE_DESKTOP_NOTIFY", "").strip().lower()
+        if raw in ("1", "true", "yes", "on"):
+            self.enabled = True
+        elif raw in ("0", "false", "no", "off"):
+            self.enabled = False
+        return self
 
 
 class ToolInvocationConfig(BaseModel):

@@ -168,8 +168,12 @@ pg_required = pytest.mark.skipif(
 # 現況（寫現在為真的事）：本檔 T1/T2 需要一組本 repo 尚未建置的 staging 資料
 # （1k 列真實 BGE-M3 向量 ＋ HNSW index），**任何自動通道都不跑它**。在該資料集
 # 與對應 job 落地之前，這兩支是誠實的零覆蓋，不是「等 nightly」。
-# 看著這一段不再退化的機械物：`AutoClaude/tests/test_conftest_windows_native_skip_
-# report.py` 的 `SkipReasonChannelClaimTest`（無條件 skip ＋ 通道宣稱 ⇒ 紅）。
+# 🔴 R82 包 A2 訂正：本段原本具名的機械物 `SkipReasonChannelClaimTest` **全 repo 不存在**
+# （當回合以 Grep 全庫搜該符號，唯一命中就是這一行自己）——那是一筆幽靈機械物，比沒有
+# 機械物更難看見：它讓下一個人以為「有人在守通道宣稱」而不再追查。實際存在的是
+# `AutoClaude/tests/test_conftest_windows_native_skip_report.py::
+# test_every_debt_handover_round_is_still_in_the_future`（R82 落地），它守的是**承接輪次
+# 不得過期**，不是通道宣稱。⇒ 「通道宣稱必須可解析」這一面**目前仍無機械物**（誠實劃界）。
 _NO_AUTOMATED_CHANNEL = (
     "本 repo 目前沒有任何自動通道會跑這兩支（當回合實查 .github/workflows 對本檔零命中）。"
     "要在本機跑：備妥 1k 列真實 BGE-M3 向量 ＋ HNSW index 的 staging DB，"
@@ -180,8 +184,14 @@ _NO_AUTOMATED_CHANNEL = (
 @pg_required
 def test_pgvector_recall_at_10_ge_095():
     """T1 真實 pgvector HNSW recall@10 ≥ 0.95（AC4-5 上線基線）。"""
+    # 🔴 R82 包 A2（DEBT-01）：承接輪次往後推了一輪——修前它逐字寫著**本輪**，而本輪
+    # 到來時沒有任何東西會說話，輪號因此可以永遠停在原地。實際輪號只寫在下面那句
+    # reason 裡（本註解刻意不複述數字：程式碼註解不得自稱超前帳本的輪號，
+    # `test_check_defect_log_crossref.py::TestR71CodeRoundLabelsNeverExceedLedgerCurrentRound`
+    # 會當場紅）。全樹逐筆比對見 `test_conftest_windows_native_skip_report.py::
+    # test_every_debt_handover_round_is_still_in_the_future`。
     pytest.skip(
-        f"[DEBT] 需 W3 G3 staging 資料集：1k seed + BGE-M3 真實向量。承接輪次 R82"
+        f"[DEBT] 需 W3 G3 staging 資料集：1k seed + BGE-M3 真實向量。承接輪次 R83"
         f"（該輪必須先決定保留或顯式廢止：保留就得同時建自動通道，"
         f"否則寫好也不會被跑）。{_NO_AUTOMATED_CHANNEL}")
 
@@ -190,5 +200,5 @@ def test_pgvector_recall_at_10_ge_095():
 def test_pgvector_p95_latency_under_50ms():
     """T2 真實 pgvector HNSW p95 latency < 50ms。"""
     pytest.skip(
-        f"[DEBT] 需 W3 G3 staging 資料集（同 T1）。承接輪次 R82"
+        f"[DEBT] 需 W3 G3 staging 資料集（同 T1）。承接輪次 R83"
         f"（保留或顯式廢止的決定與 T1 同一筆）。{_NO_AUTOMATED_CHANNEL}")

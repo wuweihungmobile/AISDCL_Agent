@@ -842,7 +842,42 @@ def test_platform_skips_have_no_mechanical_proof_of_the_other_half_today() -> No
     """
     lines = P.skip_target_report(_PROF, _base_census())
     assert any("互補剖面" in line for line in lines), lines
-    assert not P.profile_registered(P._COMPLEMENTARY_PROFILE[_PROF])
+    # 🔴 R82（MAC-01）：值已由單一字串改成 tuple——互補剖面是**多對一**。
+    assert not all(P.profile_registered(c) for c in P._COMPLEMENTARY_PROFILE[_PROF])
+
+
+def test_a_partially_registered_complementary_set_is_still_a_gap() -> None:
+    """🔴 R82（MAC-01）：一個互補剖面登記了，**不代表**整群結構性 skip 有著落。
+
+    WHY（Rule 9）：`platform` 群在 win32 上是兩個互斥子母體——`[POSIX-NATIVE-ONLY]`
+    的家是 linux，`[MAC-NATIVE-ONLY]`（本輪 census 實測 26 支）的家只有 darwin，而
+    linux 結構上跑不到它們（`install_mac_nightly.sh` 自帶 `uname != Darwin` fail-loud、
+    act 映像內 `which zsh` 回空）。舊判準是 1:1 且用「有沒有登記」短路，於是
+    `tools/tests@win32` 的結構性缺口那一行**一次都沒印過**——帳面讀起來像已覆蓋。
+
+    本支用真表做注入基底（合成表證明不了對 repo 現有那張表有牙）：把 `tools/tests@win32`
+    的互補集合裡**已登記**的那一個留著、未登記的留著，仍必須報缺口。
+    """
+    prof = "tools/tests@win32"
+    counterparts = P._COMPLEMENTARY_PROFILE[prof]
+    assert len(counterparts) >= 2, f"注入基底已失效（互補集合退回 1:1）：{counterparts}"
+    registered = [c for c in counterparts if P.profile_registered(c)]
+    unregistered = [c for c in counterparts if not P.profile_registered(c)]
+    assert registered and unregistered, (
+        f"本支要的是「一半登記一半沒有」的狀態；實得 registered={registered} "
+        f"unregistered={unregistered}——若 darwin 已經量出來入表了，請改寫本支"
+    )
+    census = dict.fromkeys(P.SKIP_GROUPS, 0)
+    census[P.SKIP_GROUP_PLATFORM] = 40
+    lines = P.skip_target_report(prof, census)
+    assert any("互補剖面" in ln for ln in lines), (
+        f"一半互補剖面沒人量過卻整組放行 ⇒ MAC-01 迴歸（1:1 短路）。實得：{lines}"
+    )
+    # 訊息必須指名**還缺哪一個**，不能只說「有缺口」——指不出來就沒有人知道要去量什麼
+    assert all(any(c in ln for ln in lines) for c in unregistered), lines
+    assert not any(c in ln for ln in lines for c in registered), (
+        f"已登記的剖面被列進缺口清單 ⇒ 反向假事實：{lines}"
+    )
 
 
 def test_ci_platform_coverage_is_accounted_for() -> None:
@@ -858,10 +893,76 @@ def test_ci_platform_coverage_is_accounted_for() -> None:
 def test_ci_platform_coverage_is_red_when_a_platform_is_neither_measured_nor_named(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """反向鑑別力：新增一個會跑整棵樹的 CI 平台、又不具名豁免 ⇒ 紅。"""
-    monkeypatch.setitem(P._CI_FULL_SUITE_PLATFORMS, "darwin", "假想的 macOS full-suite job")
+    """反向鑑別力：新增一個會跑整棵樹的 CI 平台、又不具名豁免 ⇒ 紅。
+
+    🔴 R82：注入的平台由 `darwin` 換成 `freebsd`——darwin 已經**真的**進了
+    `_FULL_SUITE_RUNNERS`（MAC-01），拿它當注入標的會讓本支恆綠（分母裡已經有它）。
+    這正是「注入基底腐化」的典型：判準沒壞，但它注入的東西不再是缺口。
+    """
+    monkeypatch.setitem(P._CI_FULL_SUITE_PLATFORMS, "freebsd", "假想的 FreeBSD full-suite job")
     problems = P.ci_platform_coverage_problems()
-    assert any("darwin" in p for p in problems), problems
+    assert any("freebsd" in p for p in problems), problems
+
+
+def test_the_nightly_runner_profile_is_the_one_that_can_actually_be_measured() -> None:
+    """🔴 R82（RUNNER-01）：nightly 那一路登記的剖面鍵必須是**量得到**的那一個。
+
+    WHY（Rule 9）：舊鍵 `AutoClaude/tests@win32+nopg+solo` 結構上永遠量不到——PG 容器
+    長駐，而 `tests/conftest.py::pytest_configure` 在收集前就 autodetect 注入 DSN ⇒
+    nightly 必然落在 `+pg+solo`。帳上寫著「已登記一個執行者」，指的卻是一個不存在的
+    執行者；每天真的在跑的那一個一格判準都沒有（實測 nightly log 逐字印
+    `⚠️ 剖面未登記`）。這種失效不會有紅燈，只會有一行 advisory。
+    """
+    assert "AutoClaude/tests@win32+pg+solo" in P._FULL_SUITE_RUNNERS
+    assert "AutoClaude/tests@win32+nopg+solo" not in P._FULL_SUITE_RUNNERS, (
+        "量不到的舊鍵又回來了——它會讓 nightly 那一路的天花板永遠停在 advisory"
+    )
+    # 豁免理由必須指名承接帳本列（既有判準），且必須寫得出「怎麼量」——否則交棒等於沒交
+    exempt = P._UNMEASURED_RUNNER_PROFILES["AutoClaude/tests@win32+pg+solo"]
+    assert "nightly_latest.log" in exempt, f"豁免理由沒寫出取得管道：{exempt!r}"
+
+
+def test_the_darwin_full_suite_runner_is_on_the_books_with_a_recipe() -> None:
+    """🔴 R82（MAC-01）：darwin 有一個真的會跑整棵樹的 job，它必須進分母。
+
+    `macos-compat-ci.yml` 的 macOS smoke job 逐字 `run: python3 tools/run_root_unittests.py`
+    ——一個貨真價實的 full-suite darwin 執行者，卻從來不在 `_FULL_SUITE_RUNNERS` 裡 ⇒
+    26 支 `[MAC-NATIVE-ONLY]` 連「有沒有人量過」都問不出來。誠實登記＝分母升、分子不動
+    （雙單邊設計，登記缺口本身不得有代價）。
+    """
+    assert "tools/tests@darwin" in P._FULL_SUITE_RUNNERS
+    assert "tools/tests@darwin" in P._UNMEASURED_RUNNER_PROFILES, (
+        "darwin 進了分母卻沒有具名豁免 ⇒ `ci_platform_coverage_problems()` 會紅"
+    )
+    exempt = P._UNMEASURED_RUNNER_PROFILES["tools/tests@darwin"]
+    assert "run_root_unittests.py" in exempt, (
+        f"豁免理由沒寫出 R83 該跑什麼指令：{exempt!r}——沒有配方的交棒等於沒交"
+    )
+    assert "skip census" in exempt, f"豁免理由沒寫出該抄哪一行：{exempt!r}"
+    assert P.ci_platform_coverage_problems() == []
+
+
+def test_the_third_tree_is_inside_the_skip_governance_frame() -> None:
+    """🔴 R82（SDD-01）：`AISDLC_SDD` 那一棵樹必須在分母裡。
+
+    WHY：本 repo 有三棵測試樹，而 skip 治理此前只看兩棵——`AISDLC_SDD/scripts/ci-gate.sh`
+    全檔對 census 零命中，`_FULL_SUITE_RUNNERS` 五個鍵沒有一個屬於它。實測那棵樹的
+    skip 共 6 支（該樹的全套計數刻意不在此重述一份——基線數字唯一出處＝ONBOARDING.md
+    §7 表②，同本檔 `_HEALTHY_TAIL` 上方的理由），六支**一支都沒有標籤** ⇒ 它的 skip
+    可以無聲從 6 長到 60 而所有閘門全綠（R79 立這道棘輪時寫的原話，只是當時沒有人把
+    第三棵樹算進來）。
+
+    誠實劃界：本輪只做到「進帳 ＋ 補標籤」，census **還沒有**接上它的閘門——所以它是
+    具名豁免而不是已量測；豁免理由必須寫出接線順序（先接閘門再入表）。
+    """
+    key = "AISDLC_SDD/fsm_runtime@win32"
+    assert key in P._FULL_SUITE_RUNNERS, (
+        "第三棵樹又從分母裡消失了——它消失的時候不會有任何紅燈，那正是本支存在的理由"
+    )
+    assert key in P._UNMEASURED_RUNNER_PROFILES
+    exempt = P._UNMEASURED_RUNNER_PROFILES[key]
+    assert "ci-gate.sh" in exempt, f"豁免理由沒寫出該改哪一支閘門：{exempt!r}"
+    assert "--census-only" in exempt, f"豁免理由沒寫出接法：{exempt!r}"
 
 
 def test_profile_key_encodes_the_nested_session_dimension() -> None:
@@ -899,3 +1000,96 @@ def test_pg_dsn_shape_is_validated_with_a_message_that_points_at_this_repo() -> 
     assert "postgresql+asyncpg://a:b@h/db" in problems[0]  # 可直接複製的修法
     # `AUTOCLAUDE_DB_DSN` 的消費端全部自己 strip driver ⇒ 對它要求 async 是誤擋
     assert conftest.pg_dsn_problems("postgresql://a:b@h/db", require_async=False) == []
+
+
+# =====================================================================
+# (m) R82 包 A2（ENV-01）：延遲 SLA 不得被自動打開——這是本輪**做了才量出來**的反例
+# =====================================================================
+#
+# 🔴 事情的經過（三步，缺任一步結論就會相反）：
+#   ① 掃描結論：`tests/perf/test_pgvector_recall_perf.py` 的 reason 逐字寫「僅在 perf
+#      machine 跑」，而實測「只設 `PG_REAL_ENABLED=1`、一個檔都沒改」即 `1 passed in
+#      5.12s` ⇒ 看起來是**欠債型**（沒人記得設旗標），該接進 conftest 自動打開。
+#   ② 本輪照做並實跑：第一次確實綠。
+#   ③ 同一支在機器同時跑別的東西時實測
+#      `AssertionError: pgvector recall p95=51.703ms ≥ 50.0ms`——同一份語料、同一顆 PG，
+#      只差機器忙不忙。它量的是**延遲**，而延遲對負載敏感。
+#
+# ⇒ 自動打開會用一個**真缺陷**（每個開發者的預設迴圈多一支 flaky 閘門）換掉一個**假缺陷**
+# （誤導文案）。正解是措辭訂正 ＋ 維持 opt-in。本組把這個結論釘住，讓下一個人照著同一份
+# 掃描結論再做一次時當場紅——「照掃描建議做」與「做了之後量一次」是兩件事。
+
+_PG_AUTO_FLAGS = ("SD07_REAL_PG_E2E_ENABLED", "PG_REAL_ENABLED")
+
+
+def _run_autoenable(monkeypatch: pytest.MonkeyPatch, env: dict[str, str]) -> dict[str, str]:
+    """在乾淨環境上跑一次 `_autoenable_real_pg_e2e()`，回傳它動過的旗標。"""
+    conftest = _loaded_conftest()
+    assert conftest is not None, "載不到 AutoClaude/tests/conftest.py——本鎖失效"
+    for key in (*_PG_AUTO_FLAGS, "AUTOCLAUDE_TEST_PG_DSN", "AUTOCLAUDE_DB_DSN"):
+        monkeypatch.delenv(key, raising=False)
+    for key, value in env.items():
+        monkeypatch.setenv(key, value)
+    conftest._autoenable_real_pg_e2e()
+    return {k: conftest.os.environ.get(k) for k in _PG_AUTO_FLAGS}
+
+
+def test_the_correctness_flag_opens_but_the_latency_flag_stays_opt_in(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """DSN 就位 ⇒ 只開**正確性**那一個旗標，`PG_REAL_ENABLED`（延遲 SLA）維持關閉。
+
+    意圖（Rule 9）：這條分界不是潔癖，是量出來的——`SD07_REAL_PG_E2E_ENABLED` 管的是
+    「這顆 PG 上跑得起來嗎」（確定性，有 PG 就該跑），`PG_REAL_ENABLED` 管的是
+    「p95 有沒有低於 50ms」（對機器負載敏感，R82 實測同一支在忙碌時 51.703ms）。
+    把後者接上自動偵測 ⇒ 每個開發者的預設迴圈多一支會隨鄰居行為翻紅的測試。
+    """
+    got = _run_autoenable(
+        monkeypatch, {"AUTOCLAUDE_DB_DSN": "postgresql+asyncpg://a:b@h/db"})
+    assert got["SD07_REAL_PG_E2E_ENABLED"] == "true", got
+    assert got["PG_REAL_ENABLED"] is None, (
+        f"延遲 SLA 旗標被自動打開了：{got}——R82 實測那會讓 "
+        "`tests/perf/test_pgvector_recall_perf.py` 在機器忙碌時翻紅（p95=51.703ms ≥ 50ms）。"
+        "reason 的措辭可以訂正，但 opt-in 這件事本身是對的"
+    )
+
+
+def test_no_dsn_means_no_flag_is_opened(monkeypatch: pytest.MonkeyPatch) -> None:
+    """沒有 DSN ⇒ 一個旗標都不開（開了只是把 skip 換成一句更深的缺件訊息）。"""
+    got = _run_autoenable(monkeypatch, {})
+    assert got == {"SD07_REAL_PG_E2E_ENABLED": None, "PG_REAL_ENABLED": None}, got
+
+
+def test_an_explicit_setting_is_never_overwritten(monkeypatch: pytest.MonkeyPatch) -> None:
+    """顯式關掉是一個**決定**（CI 要隔離），自動偵測不得覆寫它。
+
+    沒有這一支，最省力的實作是無條件 `os.environ[...] = ...`，那會在刻意設
+    `SD07_REAL_PG_E2E_ENABLED=false` 的環境上跑出一批沒有人要求的 e2e。
+    """
+    got = _run_autoenable(monkeypatch, {
+        "AUTOCLAUDE_DB_DSN": "postgresql+asyncpg://a:b@h/db",
+        "SD07_REAL_PG_E2E_ENABLED": "false",
+    })
+    assert got["SD07_REAL_PG_E2E_ENABLED"] == "false", f"顯式值被覆寫了：{got}"
+
+
+def test_the_perf_skip_reason_states_the_measured_reason_for_staying_opt_in() -> None:
+    """reason 必須把「為什麼還是 opt-in」寫成**量到的數字**，不是「需要 perf machine」。
+
+    修前那句話讓分流者以為要準備一台專用機器（實測不必：5.12s 就跑完）；但反過來寫成
+    「其實隨時可以跑」也是假的（忙碌時 51.703ms）。兩種錯法都會讓下一輪做出錯的決定，
+    所以判準同時擋住兩邊。
+    """
+    src = (
+        Path(__file__).resolve().parents[1] / "perf" / "test_pgvector_recall_perf.py"
+    ).read_text(encoding="utf-8")
+    reason_start = src.index('reason="[ENV-DISABLED]')
+    reason = src[reason_start:src.index("\n)", reason_start)]
+    assert "僅在 perf machine 跑" not in reason, (
+        f"又寫回「僅在 perf machine 跑」：{reason!r}——本機實測 5.12s 就跑完，那是假門檻"
+    )
+    assert "51.703ms" in reason, (
+        f"reason 沒有寫出「維持 opt-in」的量測依據：{reason!r}"
+        "——沒有數字的理由，下一輪會被當成可以拿掉的保守作風"
+    )
+    assert "PG_REAL_ENABLED" in reason, f"reason 沒有給出可貼的啟用配方：{reason!r}"

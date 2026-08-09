@@ -47,6 +47,14 @@ from .ports.executor import IExecutor
 from .ports.observability import IObservabilityPort
 from .services.mutation.service import MutationApplyService
 
+
+# R82（ACQ-01）：額度水位量測器的唯一建構點。抽成函式而非 inline，是為了讓
+# AutoResumeService（core/，不得 import infra）也能經由 main.py 拿到**同一種**實作，
+# 而不是各自 new 一個（同一份知識住兩個家正是本 repo 反覆在治的形態）。
+def build_quota_meter() -> Any:
+    from ..infra.adapters.file_quota_meter import FileQuotaMeterAdapter
+    return FileQuotaMeterAdapter()
+
 # Plugin 註冊順序（SSOT — 兩條組裝路徑共用，避免 M-3 漂移）
 #
 # EventBus 排序規則：
@@ -155,7 +163,11 @@ def _build_plugin_set(
     plugins: dict[str, Any] = {
         "pre_run_validator": PreRunValidatorPlugin(),
         "cross_step_validator": CrossStepValidatorPlugin(),
-        "token_guard": TokenGuardPlugin(token_guard_cfg=cfg.token_guard),
+        # R82（ACQ-01）：注入 QuotaMeterPort 的檔案契約實作。wiring 是 core-purity contract
+        # 的唯一豁免點，import infra adapter 合法；plugin 自己拿到的只是一個 port。
+        "token_guard": TokenGuardPlugin(
+            token_guard_cfg=cfg.token_guard, quota_meter=build_quota_meter(),
+        ),
         "global_goal_anchor": GlobalGoalAnchorPlugin(playbook_cfg=cfg.playbook),
         # SD_Improving_05 W4-3：PlaybookPersistencePlugin（ON_EVOLUTION_APPLY phase）
         "playbook_persistence": PlaybookPersistencePlugin(
