@@ -4631,8 +4631,8 @@ class ModuleIdentityIsSingleTest(unittest.TestCase):
         """
         # 🔴 `F401` 與 `\n` 之間那個空白不是排版：`test_no_invalid_escape_sequences.py::
         # TestNoqaDirectivesAreWellFormed` 判「規則碼後緊接非空白字元」＝ruff 眼中的非法
-        # noqa（該行實際完全沒被豁免）。本行是**注入用的合成模組原始碼**，少那個空白就會
-        # 被那道鎖抓到——判準看的是本檔的字面，不管它是不是字串常數。
+        # 豁免指令（該行實際完全沒被豁免）。本行是注入用的合成模組原始碼，少那個空白就會
+        # 被那道鎖抓到。另注意本段刻意不讓指令名落在井號後第一個 token——ruff 會讀成指令。
         split = self._modules("from lib import quota_limits  # noqa: F401 \n")
         problems = dual_identity_problems(split)
         self.assertTrue(problems, f"雙身分注入竟然放行：{split}")
