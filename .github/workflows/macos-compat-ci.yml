@@ -226,6 +226,26 @@ on:
       - "tools/lib/script_interface_parity.py"
       - "tools/lib/quota_limits.py"
       - "tools/lib/quota_ledger.py"
+      # R82 收尾：本輪五支新建 tools/lib/ 共用層 ＋ 一份被回歸鎖逐字讀取的範本檔，
+      # 同樣由 test_ci_paths_cover_root_consumers.py 當場攔下——這已是 R80／R81／R82
+      # **連續第三輪**同一形態、同一支判準，上面那段「這一輪已經補過了不是可以少查一次
+      # 的理由」在下一輪就再度應驗。ledger_rotation.py＝帳本輪替判準與史料的家；
+      # quota_gate.py＝額度節流閘；quota_policy.py＝額度門檻／階梯的唯一的家（亦是
+      # `.env.example` 的生成器）；secret_scan.py＝已追蹤檔的內容層 key 判準；
+      # sentinel_lifecycle.py＝哨兵生命週期判準。
+      # 🔴 `.env.example` 是範本不是程式碼，仍**必須**列入：判準問的是「有沒有鎖在讀
+      # 它」而不是「它是不是程式碼」。tools/tests/test_quota_policy.py::
+      # test_the_disk_copy_is_in_sync 與 test_context_budget_guard.py::
+      # test_the_shipped_example_is_the_generated_one 都逐字斷言磁碟上那一份等於
+      # quota_policy.render_env_example() 的生成物（防「手寫一份＝同一份知識住兩個家」）。
+      # 手改該檔而本 workflow 不觸發，那兩道鎖在雲端就永遠不跑——與下方 README.md／
+      # useMacWin.md／docs/AISDLC_Agent_UserGuide.md 三份**文件**列入的理由同構（盲區 H）。
+      - "tools/lib/ledger_rotation.py"
+      - "tools/lib/quota_gate.py"
+      - "tools/lib/quota_policy.py"
+      - "tools/lib/secret_scan.py"
+      - "tools/lib/sentinel_lifecycle.py"
+      - ".env.example"
       - "tools/_cli_flags.py"
       - "tools/check_scheduled_task_drift.py"
       - "tools/scheduled_task_expectations.json"
@@ -491,6 +511,26 @@ on:
       - "tools/lib/script_interface_parity.py"
       - "tools/lib/quota_limits.py"
       - "tools/lib/quota_ledger.py"
+      # R82 收尾：本輪五支新建 tools/lib/ 共用層 ＋ 一份被回歸鎖逐字讀取的範本檔，
+      # 同樣由 test_ci_paths_cover_root_consumers.py 當場攔下——這已是 R80／R81／R82
+      # **連續第三輪**同一形態、同一支判準，上面那段「這一輪已經補過了不是可以少查一次
+      # 的理由」在下一輪就再度應驗。ledger_rotation.py＝帳本輪替判準與史料的家；
+      # quota_gate.py＝額度節流閘；quota_policy.py＝額度門檻／階梯的唯一的家（亦是
+      # `.env.example` 的生成器）；secret_scan.py＝已追蹤檔的內容層 key 判準；
+      # sentinel_lifecycle.py＝哨兵生命週期判準。
+      # 🔴 `.env.example` 是範本不是程式碼，仍**必須**列入：判準問的是「有沒有鎖在讀
+      # 它」而不是「它是不是程式碼」。tools/tests/test_quota_policy.py::
+      # test_the_disk_copy_is_in_sync 與 test_context_budget_guard.py::
+      # test_the_shipped_example_is_the_generated_one 都逐字斷言磁碟上那一份等於
+      # quota_policy.render_env_example() 的生成物（防「手寫一份＝同一份知識住兩個家」）。
+      # 手改該檔而本 workflow 不觸發，那兩道鎖在雲端就永遠不跑——與下方 README.md／
+      # useMacWin.md／docs/AISDLC_Agent_UserGuide.md 三份**文件**列入的理由同構（盲區 H）。
+      - "tools/lib/ledger_rotation.py"
+      - "tools/lib/quota_gate.py"
+      - "tools/lib/quota_policy.py"
+      - "tools/lib/secret_scan.py"
+      - "tools/lib/sentinel_lifecycle.py"
+      - ".env.example"
       - "tools/_cli_flags.py"
       - "tools/check_scheduled_task_drift.py"
       - "tools/scheduled_task_expectations.json"
