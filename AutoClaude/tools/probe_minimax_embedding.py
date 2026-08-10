@@ -10,9 +10,10 @@
   方式 A（從 .env 讀，推薦）：
       python tools/probe_minimax_embedding.py
 
-  方式 B（從環境變數讀）：
-      export MINIMAX_API_KEY=sk-...
-      python tools/probe_minimax_embedding.py
+  方式 B（從環境變數讀）——🔴 R83 補齊 PowerShell 那一半，原文只有 POSIX 形態：
+      bash / zsh：   export MINIMAX_API_KEY='sk-...'
+      PowerShell：   $env:MINIMAX_API_KEY = 'sk-...'
+      （兩者擇一設完後）python tools/probe_minimax_embedding.py
 
   方式 C（手動指定）：
       python tools/probe_minimax_embedding.py --api-key sk-... --text "測試文字"

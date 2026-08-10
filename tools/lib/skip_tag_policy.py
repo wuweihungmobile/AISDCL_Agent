@@ -279,11 +279,29 @@ _TREE_FILE_FLOORS: dict[str, int] = {
     # `TREE_FLOOR_RATIO` 的 80%），判準逐字指示重釘為 46 ⇒ 本行照填，不做加減推算。
     # 成長來源全是並行包新增的鎖檔（`test_mac_readiness_r82.py`／
     # `test_negative_existence_claims_r82.py`／`test_quota_policy.py`），非本包。
-    "tools/tests": 46,
+    # 🔴 R83 收輪重釘 46 → 48（同上一段的機制，第三向「下限已過期」判紅並逐字指示重釘為
+    # 48 ⇒ 本行照填，零加減推算）。成長來源全是並行包新增的鎖檔，非任一單包：
+    # `test_block_destructive_git_r83.py`（毀滅性 git 指令阻斷器的回歸鎖）／
+    # `test_mac_endurance_r83.py`（mac launchd 續航後端）／`test_skip_discoverability_r83.py`
+    # （單平台指引掃描器）三支皆為本輪新增。
+    # 🔴 **本值對 60 與 61 兩個檔數皆成立**（`int(60×0.8)=48`、`int(61×0.8)=48`，而
+    # `int(62×0.8)=49`）——刻意選這個值，理由與上方 R75 那段相同：避免並行包是否落地
+    # 決定本閘門的顏色。方向是**上修**（下限愈高、對「掃描面靜默縮小」的鑑別力愈強）。
+    "tools/tests": 48,
     # 🔴 R82 包 A2（DEBT-01）：204 → 205。新增 `AutoClaude/tests/contract/test_w6_deletion.py`
     # （AC2-2 的真斷言落點）後掃描面變 257，下限只剩實測的 79% ⇒ 依 `TREE_FLOOR_RATIO` 的
     # 防腐那一向轉紅。這正是它的設計意圖：下限不跟著長就會愈來愈鬆而沒有任何東西說話。
-    "AutoClaude/tests": 205,
+    # 🔴 本輪 205 → 208（同一個機制第三度生效，方向同為**上修＝判準更嚴**，不是放寬）。
+    # 成長來源逐檔具名，全部是 AC_MATRIX 剩下三筆欠債的真斷言落點（走出口①「把 target
+    # 檔建起來」而非再推一輪）：`tests/integration/test_concurrent_runs.py`（AC3-4）／
+    # `tests/integration/test_sigint_checkpoint.py`（AC5-4）／
+    # `tests/integration/test_config_schema_api.py`（AC6-3）。實測掃描面 257 → 260，
+    # 判準逐字指示「重釘為 208」⇒ 本行照填，零加減推算。
+    # 🔴 **本值對 208~261 支皆成立**（`int(261×0.8)=208`、`int(262×0.8)=209`）——刻意記下
+    # 這個區間，理由同上方 `tools/tests` 那段：本輪尚有並行包在跑，不讓「別的包有沒有再
+    # 新增一支測試檔」決定本閘門的顏色。並行包合計再新增 ≥2 支就會再次過期 ⇒
+    # 🔴 收輪者請在所有包停工後的單人窗口重量一次再定案（同 R82／R83 的既有紀律）。
+    "AutoClaude/tests": 208,
     "AISDLC_SDD/scripts/tests": 23,
     LATEST_FSM_TESTS_TREE: 60,   # 本輪納入；實測 76 × 0.8
 }

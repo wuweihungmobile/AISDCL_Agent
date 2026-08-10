@@ -58,7 +58,15 @@ from skip_tag_policy import TREE_FLOOR_RATIO as _TREE_FLOOR_RATIO  # noqa: E402
 # `_TREE_FILE_FLOORS['tools/tests']` 同一趟、同一個理由）：所有包停工後的單人窗口實測
 # `tools/tests/` 已是 58 支，44 只剩實測的 76% ⇒ 下方第二個方向的斷言逐字指名要重釘為 46。
 # 值照填、不做加減推算。成長來源是本輪並行包新增的三支鎖檔，非本包。
-_SCAN_FLOOR = 46
+#: 🔴 R83 收輪單人窗口重釘 46 → 48（**方向是收緊**：下限拉高＝要求更大的掃描面）。
+#: 觸發＝判準自己的防腐那一向（`floor < int(actual × _TREE_FLOOR_RATIO)`）逐字指示
+#: 「請把 _SCAN_FLOOR 重釘為 48」，本行照填、不做加減推算。成長來源是本輪三支新增的
+#: 鎖檔（launchd 續航後端／毀滅性 git 指令阻斷器／單平台指引掃描器），非任一單包。
+#: 🔴 本值刻意與 `skip_tag_policy._TREE_FILE_FLOORS['tools/tests']` 取同一個數字：
+#: 兩者量的是**同一棵樹的同一件事**（`tools/tests/test_*.py` 的份數），兩個下限各自漂移
+#: 才是真正的問題形態。**但刻意不 import 對方**——那會讓兩道獨立的鎖共用一個失效點，
+#: 而「兩處必須相等」這件事本身沒有任何機械物在守（誠實劃界，列入交棒）。
+_SCAN_FLOOR = 48
 
 
 def _mac_source() -> str:
@@ -507,11 +515,39 @@ class TestUnittestDiscoverConformance(unittest.TestCase):
                 if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and \
                         node.name.startswith("test"):
                     module_level.append(f"{path.name}::{node.name}")
+            # 🔴 R83：先把**同一份檔案內**「基底鏈最終抵達 TestCase」的類別名收成一個
+            # 集合，再拿它當第二種合格基底。
+            # 立案是實測到的假陽性：`test_block_destructive_git_r83.py` 有一個共用夾具
+            # `class _ForeignTreeCase(unittest.TestCase)`，其三個子類別
+            # （`class TestStashIsBlockedInEveryTree(_ForeignTreeCase)` 等）被本鎖判為
+            # 「未繼承 TestCase」——而 unittest discover **確實收得到它們**（當回合實測那三類
+            # 貢獻 16 支真的在跑的測試）。⇒ 舊判準只比基底的**字面**，解析不了本地基底鏈。
+            # 為何非修不可、不能叫人把階層攤平：本鎖的立論是「unittest 不收 ⇒ 覆蓋靜默消失」，
+            # 而這裡覆蓋沒有消失 ⇒ 它報的不是那件事。逼人為了過鎖去複製共用夾具，等於用假紅
+            # 換來三份手抄夾具，正是本 repo 反覆判過的「同一份知識住多個家」。
+            # 🔴 刻意只解析**一份檔案內**的基底鏈（不跨檔）：跨檔要 import 解析，那會讓本鎖
+            # 從純 AST 掃描變成半個 import 系統，失效模式遠比它擋的東西更難看見。跨檔繼承的
+            # 測試基底在本 repo 目前是 0 個站點；真的出現時它會以假紅的形態被看見（fail-loud
+            # 方向），而不是靜默放行。
+            local_testcase_names: set[str] = set()
+            for _ in range(8):  # 迭代到不動點：基底鏈深度上限，防病態自我繼承時無限迴圈
+                grew = False
+                for node in ast.walk(tree):
+                    if not isinstance(node, ast.ClassDef) or node.name in local_testcase_names:
+                        continue
+                    if any("TestCase" in ast.unparse(b)
+                           or ast.unparse(b) in local_testcase_names for b in node.bases):
+                        local_testcase_names.add(node.name)
+                        grew = True
+                if not grew:
+                    break
             for node in ast.walk(tree):
                 if not isinstance(node, ast.ClassDef):
                     continue
                 has_testcase_base = any(
-                    "TestCase" in ast.unparse(base) for base in node.bases
+                    "TestCase" in ast.unparse(base)
+                    or ast.unparse(base) in local_testcase_names
+                    for base in node.bases
                 )
                 has_test_methods = any(
                     isinstance(m, (ast.FunctionDef, ast.AsyncFunctionDef))

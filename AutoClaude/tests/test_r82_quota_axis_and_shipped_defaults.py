@@ -674,10 +674,12 @@ class TestTheQuotaAxisHasNoEngineSideRefresher:
     """🔴 這一組**不是**在測「功能正確」，是在把一個缺口釘住，讓它不會被靜默改寫。
 
     缺口：全 repo 唯一的快取寫入者住在 harness（`tools/lib/quota_gate.py::
-    refresh_quota_blocking`），而它唯一的到達路徑是 Claude Code 的 PreToolUse ＋扇出型
-    工具。AutoClaude 獨立跑時沒有任何東西刷新它 ⇒ TTL 一過就永久 `None`＝量不到，而
-    「量不到」在引擎側是**不擋**。缺口的完整理由（以及為什麼本輪不補）見
-    `autoclaude/core/ports/quota_meter.py` 檔頭那段。
+    refresh_quota_blocking`）。🔴 R83 訂正原先那句射程（原文：「而它唯一的到達路徑是
+    Claude Code 的 PreToolUse ＋扇出型工具」——接電之後為假）：它現在**也**由 PostToolUse
+    到達（matcher 覆蓋 `Read|Bash|Grep|Glob|…`）⇒ 有 Claude Code session 在跑時，每 180 秒
+    就會有人刷新。缺口**縮小但沒有消失**：AutoClaude 獨立跑（無 session）時仍然沒有任何
+    東西刷新它 ⇒ TTL 一過就永久 `None`＝量不到，而「量不到」在引擎側是**不擋**。
+    完整理由（以及為什麼仍不補）見 `autoclaude/core/ports/quota_meter.py` 檔頭那段。
     """
 
     def test_no_module_under_autoclaude_writes_the_quota_cache(self):

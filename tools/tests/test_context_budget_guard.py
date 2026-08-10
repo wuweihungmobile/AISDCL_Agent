@@ -59,10 +59,11 @@ sys.path.insert(0, str(_REPO_ROOT / "tools" / "lib"))
 import quota_gate as qg  # noqa: E402
 import quota_meter  # noqa: E402  # R82／HELM-02：`NO_WINDOW` 相等鎖的另一端
 import quota_policy  # noqa: E402  # R82：門檻／階梯的唯一的家，本檔不再持有任何數字
+import schedule_backend as sb  # noqa: E402  # R83：取證指引的家（見 halt 訊息接線鎖）
 import sentinel_lifecycle  # noqa: E402  # R82／HELM-02：哨兵生命週期判準
 
 
-def _gate(payload: dict) -> int:
+def _gate(payload: dict, event: str = "PreToolUse") -> int:
     """跑額度閘，且**注入的是 hook 端真正會傳的那五個能力**。
 
     🔴 R82／Q2-02：閘搬出 hook 之後，「hook 有沒有把正確的東西接上去」變成一個可以
@@ -73,7 +74,7 @@ def _gate(payload: dict) -> int:
                          latch_read=guard.announced_latches,
                          latch_write=guard.remember_latch,
                          plan_writer=guard.write_resume_plan,
-                         waker=guard.arm_quota_wakeup)
+                         waker=guard.arm_quota_wakeup, event=event)
 
 
 def _usage(inp: int, creation: int, read: int, out: int = 999_999) -> dict:
@@ -311,6 +312,14 @@ class HookExitContractTest(unittest.TestCase):
 
     def setUp(self) -> None:
         self.tmp = Path(tempfile.mkdtemp(prefix="ctxguard-e2e-"))
+        # 🔴 R83：本類量的是 **context** 那把尺，而接電讓額度那把尺也跑在 PostToolUse 上 ⇒
+        # 不種快取時額度軸會在這裡回報「量不到」並出聲，三條「必須完全靜默」當場紅，而**紅的
+        # 原因與被測性質無關**：`_isolated_env` 把 `HOME` 指到沙箱、Keychain 讀不到憑證
+        # （source=no-credentials-darwin）＝fixture 產物，不是 production 狀態（本機真跑
+        # `quota_meter.py --json` 為 session 42%／rc=0）。種一份 free 帶健康快取把被測世界
+        # 收斂回「額度正常時，低 context 必須靜默」；斷言一個字都沒放寬（`err == ""` 仍逐字
+        # 成立，額度軸若誤出聲照樣紅）。
+        _quota_cache(self.tmp, 20.0)
 
     def _payload(self, used: int, name: str) -> dict:
         return {"hook_event_name": "PostToolUse", "tool_name": "Read",
@@ -2101,11 +2110,16 @@ class ConsoleFreeSpawnTest(unittest.TestCase):
 
         🔴 為什麼是**值**相等而不是文字比對：兩份的意義是「同一組 Windows 旗標」，
         而那件事只有值說得準；文字比對會在有人換個等價寫法時給出假紅。
+
+        🔴 **`sentinel_lifecycle` 已於 R83／PD 由兩份名冊移除**（不是鎖被放寬）：該檔那兩個
+        常數的唯一消費者（`_powershell`）在 A-01 收斂時整支刪掉 ⇒ 常數成了零消費者的死碼，
+        本輪連同它們一起刪除（該檔留有墓碑段記載沿革與判準）。名冊是**複製品清單**，複製品
+        不存在了就必須離開清單——留著會 `AttributeError`，而那是假紅不是牙。仍在守的兩端
+        （`quota_meter`／`console_spawn_watch`）逐一具名，射程縮小時會指名道姓地紅。
         """
         sys.path.insert(0, str(_REPO_ROOT / "tools" / "probe"))
         import console_spawn_watch  # noqa: PLC0415 — probe 不在 import 面，隨用隨載
         for name, mod in (("quota_meter", quota_meter),
-                          ("sentinel_lifecycle", sentinel_lifecycle),
                           ("console_spawn_watch", console_spawn_watch)):
             self.assertEqual(
                 mod.NO_WINDOW, guard.NO_WINDOW,
@@ -2113,10 +2127,14 @@ class ConsoleFreeSpawnTest(unittest.TestCase):
                 "「有東西守著它們相等」，這一條紅就代表那個條件不再成立")
         # 🔴 同一族的第二個複製面：送進 powershell.exe(5.1) 的 UTF-8 前置行。它守的是
         # 「取證憑證不會降解成 `?`」——而降解過的憑證仍然非空，取證閘照樣判綠（假綠）。
-        for name, mod in (("sentinel_lifecycle", sentinel_lifecycle),
-                          ("console_spawn_watch", console_spawn_watch)):
-            self.assertEqual(mod.PS_UTF8_PRELUDE, guard.PS_UTF8_PRELUDE,
-                             f"{name}.PS_UTF8_PRELUDE 與 guard 漂開了")
+        self.assertEqual(console_spawn_watch.PS_UTF8_PRELUDE, guard.PS_UTF8_PRELUDE,
+                         "console_spawn_watch.PS_UTF8_PRELUDE 與 guard 漂開了")
+        # 🔴 反向釘：死碼刪掉之後，**不准有人把它加回來而不進名冊**（那正是這道鎖的分母
+        # 靜默縮小的方式——複本在、沒人守它相等）。加回來就必須連同名冊一起加。
+        for gone in ("NO_WINDOW", "PS_UTF8_PRELUDE"):
+            self.assertFalse(
+                hasattr(sentinel_lifecycle, gone),
+                f"sentinel_lifecycle.{gone} 又出現了，卻沒有進上面的名冊 ⇒ 一份無人守的複本")
 
     def test_the_planner_actually_prepends_the_utf8_prelude(self) -> None:
         """接線鎖：常數存在 ≠ 有人用它（本 repo 判過三次的「機制蓋好沒接電」）。
@@ -3292,6 +3310,83 @@ class QuotaKindBranchTest(unittest.TestCase):
         self.assertIn("提額", texts["spend"])
 
 
+# ═══════════════════════════════════════════════════════════════════════════
+# R83／F2-② 的**接線面**：使用者看到的那則 halt 訊息，指的是本機那個載具的指令
+# ═══════════════════════════════════════════════════════════════════════════
+# 🔴 立案（獨立複驗補的那一半）：F2-② 把取證指引下沉到 `schedule_backend.<後端>.
+# evidence_hint()`，而「三句話彼此不同、mac 那句不含 Windows cmdlet」已由
+# `test_mac_endurance_r83.BackendInterfaceIsSymmetricTest` 在**後端層**守住。但那是
+# 判定層——「那三句話真的出現在使用者讀到的那則訊息裡」是另一件事，而本 repo 的
+# 「機制蓋好沒接電」已三度復發。複驗當回合實測：把 cmdlet 字面貼回 `quota_halt_message`
+# （＝本輪修掉的缺陷原形，且 `evidence_hint()` 仍留在原處被別人叫）時，全庫**沒有任何
+# 東西會轉紅**——後端那三句仍然正確，只是沒有人在讀它。缺陷 ② 的本體是「訊息說了假話」,
+# 所以判準必須讀訊息本身。
+def halt_hint_problems(text: str, must: str, forbidden: str) -> list[str]:
+    """halt 訊息必須帶本機載具的取證指令，且不得帶別的平台的。純函式，紅綠由注入自證。"""
+    problems = []
+    if must not in text:
+        problems.append(f"halt 訊息沒有本機載具的取證指令（缺 `{must}`）"
+                        "⇒ 讀者拿不到憑證的查法")
+    if forbidden in text:
+        problems.append(f"halt 訊息印了本平台不存在的 `{forbidden}`"
+                        "⇒ 武裝是真的、憑證是真的，**指路是假的**")
+    return problems
+
+
+class QuotaHaltMessagePointsAtThisPlatformTest(unittest.TestCase):
+    """halt／armed 那一支的取證指令必須來自 `select()` 選中的那個後端。"""
+
+    #: 兩欄都在**任何**主機上跑（注入 `select()`，不讀本機平台）——單平台判準不可外推，
+    #: 而這個缺陷的方向正是「在另一個平台印了一句不存在的指令」。
+    _COLUMNS = ((sb.SchtasksBackend, "Get-ScheduledTask", "launchctl"),
+                (sb.LaunchdBackend, "launchctl", "Get-ScheduledTask"))
+
+    def _armed_message(self, backend: type) -> str:
+        stub = unittest.mock.Mock()
+        stub.select.return_value = backend()
+        old = qg.schedule_backend
+        qg.schedule_backend = stub
+        self.addCleanup(setattr, qg, "schedule_backend", old)
+        return qg.quota_halt_message(
+            _decision((("session", 96.0, 600.0),)),
+            {"plan": "P", "kind": "session", "branch": qg.QUOTA_BRANCH_ARM,
+             "armed": True, "sentinel_off": False, "posix": False})
+
+    def test_each_carrier_gets_its_own_evidence_command(self) -> None:
+        for backend, must, forbidden in self._COLUMNS:
+            with self.subTest(carrier=backend.name):
+                self.assertEqual(
+                    halt_hint_problems(self._armed_message(backend), must, forbidden), [])
+
+    def test_red_the_hardcoded_windows_cmdlet_would_be_caught(self) -> None:
+        """注入＝修前原形（mac 那條路印 Windows cmdlet）⇒ 兩個方向都必須紅。"""
+        problems = halt_hint_problems(
+            "   ✅ 已武裝喚醒。憑證是 `NextRunTime` 這個**值**：Get-ScheduledTask "
+            "| Where-Object TaskName -like 'AutoSDD_Sentinel_*' | Get-ScheduledTaskInfo\n",
+            "launchctl", "Get-ScheduledTask")
+        self.assertEqual(len(problems), 2, problems)
+
+    def test_a_correct_mac_message_is_not_flagged(self) -> None:
+        """控制組：對的訊息不得被判紅（假紅的鎖活不過一輪）。"""
+        self.assertEqual(halt_hint_problems(
+            "   ✅ 已武裝喚醒。launchctl print gui/501/<label>\n",
+            "launchctl", "Get-ScheduledTask"), [])
+
+    def test_the_import_failure_fallback_never_invents_a_command(self) -> None:
+        """`schedule_backend` 不可達時只能說「說不出取證指令」，不得印任何一個平台的指令。
+
+        fail-open 的方向必須是「少說一句話」而不是「說一句本平台不存在的話」——後者
+        與這個缺陷同型（憑證真、指路假），只是成因換成 import 失敗。
+        """
+        old = qg.schedule_backend
+        qg.schedule_backend = None
+        self.addCleanup(setattr, qg, "schedule_backend", old)
+        hint = qg.evidence_hint()
+        for command in ("Get-ScheduledTask", "launchctl", "schtasks"):
+            self.assertNotIn(command, hint)
+        self.assertIn("說不出", hint)
+
+
 class QuotaStaleCacheTest(unittest.TestCase):
     """SA-B4：過期的舊值**不得**被直接採信為 normal。"""
 
@@ -3370,6 +3465,112 @@ class QuotaCacheContractHomeTest(unittest.TestCase):
                 self.assertNotIn(literal, code, "契約字面又長出第二個家")
 
 
+# ═══════════════════════════════════════════════════════════════════════════
+# R83／F2-①：跑測試不得寫進**生產的**降級觀測面
+# ═══════════════════════════════════════════════════════════════════════════
+# 🔴 立案是實測，不是衛生偏好。本輪在 mac 真機的 `%TMPDIR%` 撈到
+# `autosdd_quota_degraded.jsonl` 有 **17 列** `source=no-cache`，逐列時間戳與
+# `mkdtemp(prefix="degraded-")`／`"quota-gate-"` 這些**測試自己**的暫存目錄一一對上；
+# 二分定位（逐類別跑、量該檔行數增減）得到逐字證據：
+#     QuotaUnmeasurableFanoutTest: trace +1  新 stamp=1
+#     其餘四個 quota 類別:          trace +0  新 stamp=0
+# 成因：上面那兩個類別把 `quota_cache_path`／`fanout_ledger_path`／`quota_latch_path`
+# 換成沙箱，卻**沒有換** `quota_trace_path`／`degraded_stamp_path` ⇒ `note_degraded()`
+# 寫的是真的那兩個檔。
+#
+# 為什麼這比「檔案變髒」嚴重得多，兩層：
+#   ① 那個 jsonl **就是** SD-B2 要的那個觀測面——人要靠它回答「額度軸是不是正在靜默地
+#      不節流」。17/17 是假的，於是真事件在裡面讀不出來（訊噪比被測試自己毀掉）。
+#   ② 更硬的一層：`note_degraded()` 出聲帶 per-source TTL 閂鎖，而測試**消耗掉了真的那個
+#      閂鎖**。跑完測試後的 180 秒內，production 真的降級時 `note_degraded()` 回 `""`
+#      ——一聲都不出。「不節流 ≠ 不出聲」這條不變量在那個視窗裡是假的，而它完全靜默。
+#      這正是任務書 F2-① 觀察到的症狀（no-cache ⇒ 量不到 ⇒ 不節流且無聲），只是成因
+#      不是它推測的 `TMPDIR` 分裂（該推測已被三組實測否證，見交付報告）。
+def _TRACE_ISOLATION(test: unittest.TestCase) -> tuple:  # noqa: N802 — 與同檔 setUp 表對齊
+    """要接在 `setUp` 那張 swap 表後面的兩格：把降級痕跡與閂鎖也關進沙箱。
+
+    做成**共用的一格**而不是各類別自己抄一份：抄的那個形態正是這個缺陷的成因（兩個
+    類別各抄了四格、各漏了同樣的兩格）。漏用它會被下面那道鎖抓到。
+    """
+    return (("quota_trace_path", lambda: test.tmp / "trace.jsonl"),
+            ("degraded_stamp_path", lambda source: test.tmp / f"stamp-{source}"))
+
+
+def trace_isolation_problems(source: str) -> list[str]:
+    """哪些 TestCase 把額度快取關進沙箱、卻把降級痕跡留在生產路徑上。純函式判準。
+
+    判準取「同一個類別裡有沒有提到這幾個名字」而不是解析 swap 呼叫的形狀：後者會隨
+    `setUp` 的寫法（for 迴圈／逐行 patch／`mock.patch.object`）漂移，而漂移的方向是
+    **漏抓**。名字有出現就算數——`_TRACE_ISOLATION` 這個間接層也算（它的 body 裡有）。
+    """
+    needed = ("quota_trace_path", "degraded_stamp_path")
+    helper = "_TRACE_ISOLATION"
+    problems = []
+    for cls in [n for n in ast.parse(source).body if isinstance(n, ast.ClassDef)]:
+        seen = {c.value for c in ast.walk(cls)
+                if isinstance(c, ast.Constant) and isinstance(c.value, str)}
+        seen |= {c.id for c in ast.walk(cls) if isinstance(c, ast.Name)}
+        if "quota_cache_path" not in seen or helper in seen:
+            continue
+        missing = sorted(n for n in needed if n not in seen)
+        if missing:
+            problems.append(
+                f"{cls.name}（第 {cls.lineno} 行）把快取關進沙箱卻沒關 {missing}"
+                " ⇒ 跑一次測試就往生產的 autosdd_quota_degraded.jsonl 寫一列假紀錄，"
+                "並吃掉真的那個 180 秒閂鎖（此後真降級一聲不出）")
+    return problems
+
+
+class TraceIsolationTest(unittest.TestCase):
+    """本檔自己的隔離不變量：**測試不得寫進生產的降級觀測面**（見上方 WHY）。"""
+
+    def test_no_quota_test_leaks_into_the_production_trace(self) -> None:
+        self.assertEqual(trace_isolation_problems(
+            Path(__file__).read_text(encoding="utf-8")), [])
+
+    def test_red_the_two_classes_this_round_fixed_would_be_caught(self) -> None:
+        """注入＝修前的 `setUp` 原形（四格 swap、漏兩格）⇒ 必紅。"""
+        injected = ("class Leaky(unittest.TestCase):\n"
+                    "    def setUp(self):\n"
+                    "        for name, value in (('quota_cache_path', None),\n"
+                    "                            ('quota_latch_path', None)):\n"
+                    "            self._swap(qg, name, value)\n")
+        problems = trace_isolation_problems(injected)
+        self.assertEqual(len(problems), 1, problems)
+        self.assertIn("quota_trace_path", problems[0])
+
+    def test_the_shared_helper_counts_as_isolation(self) -> None:
+        """對照組：走 `_TRACE_ISOLATION` 的類別必須放行，否則沒有人會用那個共用格。"""
+        self.assertEqual(trace_isolation_problems(
+            "class Fine(unittest.TestCase):\n"
+            "    def setUp(self):\n"
+            "        for n, v in (('quota_cache_path', None), *_TRACE_ISOLATION(self)):\n"
+            "            self._swap(qg, n, v)\n"), [])
+
+    def test_a_class_that_never_touches_the_cache_is_out_of_scope(self) -> None:
+        """射程控制組：沒有碰額度快取的類別不得被這道鎖波及（假紅會讓它被關掉）。"""
+        self.assertEqual(trace_isolation_problems(
+            "class Unrelated(unittest.TestCase):\n"
+            "    def test_x(self):\n        pass\n"), [])
+
+    def test_the_real_production_trace_is_untouched_by_this_module(self) -> None:
+        """行為面（靜態判準之外的那一半）：現在跑一遍那兩個類別，真檔一行都不准長。
+
+        🔴 這一條刻意讀**真的**路徑（不是沙箱）——它問的正是「生產那一份有沒有被寫到」，
+        而那件事只有真路徑回答得出來。它只讀不寫。
+        """
+        real = qg.quota_trace_path()
+        before = real.read_bytes() if real.exists() else b""
+        suite = unittest.TestLoader().loadTestsFromNames(
+            [f"{__name__}.QuotaUnmeasurableFanoutTest",
+             f"{__name__}.QuotaDecisionEntryIsSingleTest"])
+        unittest.TextTestRunner(stream=io.StringIO(), verbosity=0).run(suite)
+        after = real.read_bytes() if real.exists() else b""
+        self.assertEqual(after, before,
+                         f"跑測試把紀錄寫進了生產痕跡 {real}（多了 "
+                         f"{len(after) - len(before)} bytes）")
+
+
 class QuotaUnmeasurableFanoutTest(unittest.TestCase):
     """🔴 R81 收斂（Architect-B1）：「量不到」時**不得**對任意規模的扇出全數放行。
 
@@ -3390,7 +3591,8 @@ class QuotaUnmeasurableFanoutTest(unittest.TestCase):
         for name, value in (("quota_cache_path", lambda: self.tmp / "c.json"),
                             ("fanout_ledger_path", lambda: self.tmp / "l.jsonl"),
                             ("quota_latch_path", lambda: self.tmp / "latch.json"),
-                            ("claim_refresh_slot", lambda: True)):
+                            ("claim_refresh_slot", lambda: True),
+                            *_TRACE_ISOLATION(self)):
             self._swap(qg, name, value)
         sink = open(os.devnull, "w", encoding="utf-8")
         self.addCleanup(sink.close)
@@ -3403,7 +3605,9 @@ class QuotaUnmeasurableFanoutTest(unittest.TestCase):
 
     def _endpoint(self, pct: float | None) -> None:
         """假端點：不碰網路，但把真取數器會做的事做完（寫進 `quota_cache_path()`）。"""
-        def fake(timeout: int = qg.QUOTA_SYNC_TIMEOUT_SECONDS) -> bool:
+        # R83：簽章要跟著 production 走（多了 `event`）。假的比真的窄時，**受測碼會 TypeError
+        # 而不是回答錯**，而那個紅的原因與被測性質無關（同 `_quota_cache` 的 schema 教訓）。
+        def fake(timeout: int = qg.QUOTA_SYNC_TIMEOUT_SECONDS, *, event: str = "") -> bool:
             self.calls.append(timeout)
             if pct is None:
                 return False
@@ -3879,7 +4083,8 @@ class QuotaDecisionEntryIsSingleTest(unittest.TestCase):
         for name, value in (("quota_cache_path", lambda: self.tmp / "c.json"),
                             ("fanout_ledger_path", lambda: self.tmp / "l.d"),
                             ("quota_latch_path", lambda: self.tmp / "latch.json"),
-                            ("claim_refresh_slot", lambda: False)):
+                            ("claim_refresh_slot", lambda: False),
+                            *_TRACE_ISOLATION(self)):
             self._swap(qg, name, value)
         sink = open(os.devnull, "w", encoding="utf-8")
         self.addCleanup(sink.close)
@@ -4231,6 +4436,66 @@ class QuotaDegradationIsAudibleTest(unittest.TestCase):
         self.assertEqual([s for s in spoken if s], [], "同一個 source 每次都在吵")
 
 
+#: 憑證來源的**雙欄登記表**（R83）。ONBOARDING §7 那兩欄基線是同一個體例：不把「這台
+#: 機器上憑證住哪裡」寫成常數，而是把**每個平台各自的答案**登記下來，兩欄在**任何**主機
+#: 上都跑。`platform` 是 `sys.platform` 的字面（`quota_meter.access_token` 的分支讀它）。
+#:
+#: 🔴 為什麼不是「在 mac 上跳過檔案欄／在 Windows 上跳過 Keychain 欄」：那等於那個平台
+#: 的憑證來源永遠沒有覆蓋，而本組要守的性質（「憑證讀不到」與「憑證讀得到但 401」是兩個
+#: 分得開的答案）**兩個平台都必須成立**——它正是排程器判斷「要不要繼續等額度回來」的
+#: 依據，一邊沒守住就等於那半邊的節流演算法建立在假數字上。
+_CRED_COLUMNS = ("win32", "darwin")
+
+#: 形態像真 OAuth token（base64url、無空白、>=20 字元）⇒ 通過 `_keychain_token` 的
+#: 裸 token 判準。刻意不是 `"t"`：那個長度連判準的門檻都到不了，會讓 Keychain 欄
+#: 「讀得到」那一格其實在測「讀不到」。
+_FAKE_TOKEN = "sk-ant-oat01-" + "R82fake" * 5
+
+
+def _cred_kwargs(test: unittest.TestCase, meter: object, platform: str,
+                 readable: bool) -> dict:
+    """把 `platform` 那一欄的憑證鋪成「讀得到／讀不到」，回 `measure_detail` 的注入參數。
+
+    兩欄都**不碰主機真正的憑證**：檔案欄一律指到 `mkdtemp` 下的路徑，Keychain 欄一律
+    走注入的 runner。這不只是衛生問題——R83 修這一組之前，`darwin` 主機上這組測試每跑
+    一次就真的 `security find-generic-password` 讀一次使用者的 login Keychain，於是
+    「401 這條臂綠不綠」取決於這台機器有沒有登入過 Claude Code（本機實測：Keychain
+    rc=0、有真 token ⇒ 401 那條臂僥倖是綠的；換一台沒登入的 mac 就會紅在
+    `no-credentials-darwin`）。判準去讀一個會隨機器變的外部狀態，本身就是缺陷。
+    """
+    old_creds = meter.CREDENTIALS
+    test.addCleanup(setattr, meter, "CREDENTIALS", old_creds)
+    missing = Path(tempfile.mkdtemp(prefix="nocreds-")) / "nope.json"
+
+    def trap(argv: list) -> tuple:
+        raise AssertionError(f"非 darwin 平台不得去問 Keychain：{argv}")
+
+    if platform == "darwin":
+        # 🔴 檔案一律指到不存在的路徑，這**不是佈景而是控制組**：哪天 darwin 分支被改
+        # 成（或退回成）讀檔，這一欄的「讀得到」那一格會當場翻成 no-credentials-darwin。
+        meter.CREDENTIALS = missing
+        blob = json.dumps({"claudeAiOauth": {"accessToken": _FAKE_TOKEN}})
+        return {"platform": "darwin",
+                "runner": (lambda argv: (0, blob)) if readable
+                else (lambda argv: (1, ""))}
+    if readable:
+        tmp = Path(tempfile.mkdtemp(prefix="creds-")) / "c.json"
+        tmp.write_text(json.dumps({"claudeAiOauth": {"accessToken": _FAKE_TOKEN}}),
+                       encoding="utf-8", newline="\n")
+        meter.CREDENTIALS = tmp
+    else:
+        meter.CREDENTIALS = missing
+    # runner 是**陷阱**：非 mac 那條路一個外部行程都不准起。踩到就是「每次取數多一次
+    # subprocess」，而且在沒有 `security` 的機器上那會變成一個只在 CI 上出現的失效。
+    return {"platform": "win32", "runner": trap}
+
+
+def _expected_missing_reason(meter: object, platform: str) -> str:
+    """該欄「憑證讀不到」時**應該**叫什麼名字。兩個字面刻意不同，見 `REASON_*` 的 WHY。"""
+    return (meter.REASON_NO_CREDENTIALS_DARWIN if platform == "darwin"
+            else meter.REASON_NO_CREDENTIALS)
+
+
 class MeterFailureShapesTest(unittest.TestCase):
     """🔴 SD-B4：`fetch_usage()` 分得出 401 與斷網，而它唯一的呼叫端把 status 丟掉了。
 
@@ -4239,69 +4504,120 @@ class MeterFailureShapesTest(unittest.TestCase):
     排程器把認證失敗誤判成額度未恢復而一直等下去（R80 哨兵整晚失明同形）。
     落地前實測：憑證讀不到 → `None`；HTTP 401（真連線、0.30s）→ `None`。**同一個答案。**
 
-    🔴 誠實劃界（本輪**沒有**做的那一半）：`CREDENTIALS` 仍然只有一個來源、零平台分支。
-    我手上沒有 mac 真機，寫一個驗不了的分支正是 `DEF-101-766` 的形狀。可驗的是結構——
-    這一組 `REASON_*` 讓「假設不成立」變成**說得出來**的，而不是整條額度軸靜默 no-op。
-    非 Windows 的憑證來源未驗，已登記交由下一輪承接（輪號寫在帳本那一列）。
+    🔴 **R83 訂正本 docstring 原本的「誠實劃界」段（不逐字留著當現行說法）**：那段寫
+    「`CREDENTIALS` 仍然只有一個來源、零平台分支」，而 R82 同輪就把 darwin 分支落地了
+    （`access_token()` 的平台分支，見 `git show HEAD:tools/lib/quota_meter.py`）
+    ⇒ 這段自陳從落地當回合起就是假的，且它假在**會讓人以為這裡已經沒有平台問題**的方向。
+    真正的缺口是另一件事、而且沒有任何東西在守：`measure_detail()` 當時**沒有憑證來源的
+    注入點** ⇒ 本組只能靠改主機自己的憑證存放處來構造那兩條臂，於是每條臂只在一個平台
+    成立。mac 真機實測（**R83**＝mac 真機首輪）：把 `CREDENTIALS` 指到不存在的檔，
+    darwin 完全不讀它 ⇒ 期望 `no-credentials`、實得 `http-401`，該臂在 mac 上結構性量不到。
+    現在改成**雙欄矩陣**（見 `_CRED_COLUMNS`）：兩個平台的憑證來源在任何一台機器上都跑。
+
+    🔴 **上一段的輪號本身被獨立驗證者訂正過一次（R83／PD 複驗，此段留為判例）**：它原本
+    把訂正與 mac 真機實測都署名 **R82**，而 R82 收輪 commit（`7975140`）裡這支檔的同一段
+    逐字寫著「**我手上沒有 mac 真機**…」，  # stale-premise-ok: R82 原話
+    （原話全文：「…非 Windows 的憑證來源未驗，已登記交由下一輪承接」）
+    且 `_CRED_COLUMNS`／`_cred_kwargs`／`_FAKE_TOKEN` 在該 commit 內 grep 命中皆為 **0**
+    ⇒ 雙欄矩陣與真機實測**都是 R83 的產出**，署名 R82 是把「還沒驗」講成「上一輪驗過了」。
+    最難看見的一點：`quota_meter.KEYCHAIN_SERVICE` 上方在 R82 就留了一句預先警告，逐字寫
+    「改寫成 R82 就把『還沒在 mac 上驗過』講成『本輪驗過了』，那正是本段在防的假宣稱」
+    ——而它預言的事在**下一輪**就真的發生了，只是發生在**另一支檔**，於是那個警告的射程
+    （它只寫在 quota_meter 那一行的括號裡）看不到這裡。守輪號的既有鎖
+    （`TestR71CodeRoundLabelsNeverExceedLedgerCurrentRound`）判準是 `> current_round()`
+    ⇒ **落後方向零覆蓋**，把 R83 的工作署名 R82 一行都不會紅（QA／F-5 同一筆）。
     """
 
-    def _with_fetch(self, status: int, payload: object):
+    def _with_fetch(self, status: int, payload: object,
+                    platform: str = "win32", readable: bool = True):
+        """回 `(meter, kwargs)`；`kwargs` 直接展進 `measure_detail(4, **kwargs)`。"""
         meter = _meter()
         old = meter.fetch_usage
         meter.fetch_usage = lambda token, timeout=10: (status, payload)
         self.addCleanup(setattr, meter, "fetch_usage", old)
-        old_creds = meter.CREDENTIALS
-        tmp = Path(tempfile.mkdtemp(prefix="creds-")) / "c.json"
-        tmp.write_text(json.dumps({"claudeAiOauth": {"accessToken": "t"}}),
-                       encoding="utf-8", newline="\n")
-        meter.CREDENTIALS = tmp
-        self.addCleanup(setattr, meter, "CREDENTIALS", old_creds)
-        return meter
+        return meter, _cred_kwargs(self, meter, platform, readable)
 
     def test_unreadable_credentials_and_http_401_are_different_answers(self) -> None:
-        meter = self._with_fetch(401, None)
-        self.assertEqual(meter.measure_detail(4), (None, "http-401"))
-        missing = Path(tempfile.mkdtemp(prefix="nocreds-")) / "nope.json"
-        old, meter.CREDENTIALS = meter.CREDENTIALS, missing
-        try:
-            self.assertEqual(meter.measure_detail(4),
-                             (None, meter.REASON_NO_CREDENTIALS))
-        finally:
-            meter.CREDENTIALS = old
-        self.assertNotEqual(meter.REASON_NO_CREDENTIALS, "http-401")
+        """**兩欄都跑**：每個平台各自的憑證來源，兩條臂都要真的量到（見類 docstring）。"""
+        for platform in _CRED_COLUMNS:
+            with self.subTest(platform=platform):
+                meter, creds = self._with_fetch(401, None, platform, readable=True)
+                self.assertEqual(meter.measure_detail(4, **creds), (None, "http-401"),
+                                 "憑證讀得到卻沒走到 HTTP ⇒ 這一欄的 401 臂量不到")
+                _, gone = self._with_fetch(401, None, platform, readable=False)
+                missing = _expected_missing_reason(meter, platform)
+                self.assertEqual(meter.measure_detail(4, **gone), (None, missing))
+                self.assertNotEqual(missing, "http-401")
 
     def test_a_connection_failure_is_not_an_http_code(self) -> None:
         """`fetch_usage` 用 status 0 表示「連線層就失敗」⇒ 不得被印成 `http-0`。"""
-        meter = self._with_fetch(0, None)
-        self.assertEqual(meter.measure_detail(4), (None, meter.REASON_UNREACHABLE))
+        for platform in _CRED_COLUMNS:
+            with self.subTest(platform=platform):
+                meter, creds = self._with_fetch(0, None, platform)
+                self.assertEqual(meter.measure_detail(4, **creds),
+                                 (None, meter.REASON_UNREACHABLE))
 
     def test_every_http_code_survives_into_the_reason(self) -> None:
-        for status in (403, 429, 500, 503):
-            with self.subTest(status=status):
-                meter = self._with_fetch(status, None)
-                self.assertEqual(meter.measure_detail(4)[1], f"http-{status}")
+        for platform in _CRED_COLUMNS:
+            for status in (403, 429, 500, 503):
+                with self.subTest(platform=platform, status=status):
+                    meter, creds = self._with_fetch(status, None, platform)
+                    self.assertEqual(meter.measure_detail(4, **creds)[1],
+                                     f"http-{status}")
 
     def test_a_200_with_no_readable_bucket_is_its_own_shape(self) -> None:
         """200 但一個桶都讀不到，與 401 是不同的病（一個是認證、一個是 schema）。"""
-        meter = self._with_fetch(200, {"five_hour": {}})
-        self.assertEqual(meter.measure_detail(4), (None, meter.REASON_NO_BUCKETS))
+        for platform in _CRED_COLUMNS:
+            with self.subTest(platform=platform):
+                meter, creds = self._with_fetch(200, {"five_hour": {}}, platform)
+                self.assertEqual(meter.measure_detail(4, **creds),
+                                 (None, meter.REASON_NO_BUCKETS))
 
     def test_a_good_reading_carries_ok_and_the_narrow_measure_is_unchanged(self) -> None:
         """既有呼叫端的窄介面不得被改壞——`measure()` 仍然回 dict／None。
 
         🔴 R82：讀數形狀由頂層 `pct` 純量換成 `axes[]`，斷言跟著換到**每一軸自帶**
-        `resets_at` 那一層——那正是本輪的缺陷本體（舊形狀在投影時把它丟掉）。
+        `resets_at` 那一層——那正是該輪的缺陷本體（舊形狀在投影時把它丟掉）。
+        🔴 R82：最後那一行驗的是**窄介面**（`measure()` 只吃 timeout、仍回 dict／None，
+        新參數沒有改掉它）。它刻意把 `access_token` 換成替身而不是走預設路徑：預設路徑
+        在 darwin 上會去讀主機真正的 login Keychain，而判準不得依賴一台機器的登入狀態
+        （憑證來源本身的覆蓋在上面的雙欄矩陣，不在這一行）。
         """
         payload = {"five_hour": {"utilization": 61.0, "resets_at": None},
                    "limits": [{"kind": "session", "percent": 61,
                                "resets_at": "2026-08-09T04:59:59+00:00"}]}
-        meter = self._with_fetch(200, payload)
-        reading, reason = meter.measure_detail(4)
-        self.assertEqual(reason, "ok")
-        self.assertEqual({(a["kind"], a["pct"], a["resets_at"]) for a in reading["axes"]},
-                         {("session", 61.0, "2026-08-09T04:59:59+00:00"),
-                          ("five_hour", 61.0, None)})
+        for platform in _CRED_COLUMNS:
+            with self.subTest(platform=platform):
+                meter, creds = self._with_fetch(200, payload, platform)
+                reading, reason = meter.measure_detail(4, **creds)
+                self.assertEqual(reason, "ok")
+                self.assertEqual(
+                    {(a["kind"], a["pct"], a["resets_at"]) for a in reading["axes"]},
+                    {("session", 61.0, "2026-08-09T04:59:59+00:00"),
+                     ("five_hour", 61.0, None)})
+        old_token = meter.access_token
+        meter.access_token = lambda *a, **k: _FAKE_TOKEN
+        self.addCleanup(setattr, meter, "access_token", old_token)
         self.assertEqual(len(meter.measure(4)["axes"]), 2)
+
+    def test_the_two_platform_columns_are_not_the_same_column(self) -> None:
+        """後設鎖：把矩陣退化成「兩欄其實走同一條路」時必紅。
+
+        沒有這一條，上面那些 `for platform in _CRED_COLUMNS` 可以在**兩欄都走檔案**
+        （例如有人把 `platform` 參數接掉、或 `_cred_kwargs` 兩欄回同一份 kwargs）
+        的情況下全部照樣綠——迴圈跑了兩次、判準沒有鑑別力，這是本 repo 判過的假綠形態。
+        """
+        meter = _meter()
+        mac = _cred_kwargs(self, meter, "darwin", readable=True)
+        pc = _cred_kwargs(self, meter, "win32", readable=True)
+        self.assertNotEqual(mac["platform"], pc["platform"])
+        # Keychain 欄真的會呼叫 runner（拿得到 token）；檔案欄的 runner 是會炸的陷阱，
+        # 所以「檔案欄沒有炸」本身就是「它一次都沒去問 Keychain」的證據。
+        self.assertEqual(meter.access_token(**mac), _FAKE_TOKEN)
+        self.assertEqual(meter.access_token(**pc), _FAKE_TOKEN)
+        # 兩欄的「讀不到」必須叫不同的名字，否則 mac 上真正的原因永遠說不出口。
+        self.assertNotEqual(_expected_missing_reason(meter, "darwin"),
+                            _expected_missing_reason(meter, "win32"))
 
 
 class ThrottleBandSaysHowLongItLastsTest(unittest.TestCase):
@@ -4514,6 +4830,17 @@ class QuotaDegradationReachesTheModelTest(unittest.TestCase):
         self.assertTrue(qg.note_degraded("no-credentials", "憑證讀不到"))
         self.assertEqual(qg.note_degraded("no-credentials", "憑證讀不到"), "")
 
+    def test_the_notice_declares_the_event_it_was_actually_called_from(self) -> None:
+        """🔴 R83／D3：事件名此前**硬寫** `"PreToolUse"`，靠的是「本閘只由 PreToolUse 呼叫」
+        那句射程宣稱；接上 PostToolUse 的那一刻它就是假的。失效外觀與「額度很健康」相同：
+        `hookEventName` 不符時 CC 丟掉整個 `additionalContext` ⇒ 降級通報靜默失效。"""
+        for event in ("PreToolUse", "PostToolUse"):
+            with self.subTest(event=event):
+                qg.note_degraded(f"src-{event}", "同步取數失敗", event=event)
+                emitted = [json.loads(ln)["hookSpecificOutput"]["hookEventName"]
+                           for ln in self.buf.getvalue().splitlines() if ln.startswith("{")]
+                self.assertEqual(emitted[-1], event, "事件名又被寫死 ⇒ 通報進不了模型上下文")
+
 
 class MacCredentialSourceTest(unittest.TestCase):
     """🔴 L4-03：mac 的 Claude Code 憑證在 login Keychain，不在檔案系統上。
@@ -4524,10 +4851,29 @@ class MacCredentialSourceTest(unittest.TestCase):
     整條額度軸永久 `unmeasurable`，R81 落地的 80%／95% 兩道門**結構上一次都到不了**，
     而外觀與「水位很低、很健康」完全相同。
 
-    🔴 **誠實劃界**：本組**沒有 mac 真機**。它守得住的是「判定邏輯」——平台分支選對了
-    路、取不到時回一個**分得出來的**理由字面；它守不住的是「`security` 的 service 名與
-    輸出形態在真 mac 上對不對」。那一半交 R83，確切指令寫在 `quota_meter.KEYCHAIN_SERVICE`  round-label-ok（交棒指名承接輪，非自稱本批輪號）
-    的註解裡（`security find-generic-password -s 'Claude Code-credentials' -w`）。
+    🔴 **獨立複驗訂正本段的「誠實劃界」（原文今天起是假的，故不留著當現行說法）**：
+    原文寫「本組**沒有 mac 真機**」，並把「`security` 的 service 名與輸出形態在真 mac
+    上對不對」列為交棒項——而 **R83（mac 真機首輪）**已在真機上把那一半驗完。
+    🔴 這一行的輪號由獨立驗證者訂正過（原文署名 **R82**）：R82 收輪 commit 內這支檔逐字
+    寫著「我手上沒有 mac 真機…交由下一輪承接」⇒ 署名 R82 等於把交棒項講成上一輪已結清，
+    而那正是 `quota_meter.KEYCHAIN_SERVICE` 上方 R82 就寫下的那句預先警告在防的形態。
+    實測值的**唯一的家**
+    是 `quota_meter.KEYCHAIN_SERVICE` 的註解；本段刻意**不複寫**那幾個數字，複寫一份
+    就是再開一個會漂移的第二個家（R73 `Find-GitBash` 把一台機器的事實寫成常數，同型）。
+    這一段之所以會變假，正是「同一份知識住兩個家、只有一個家被改」：訂正落在 quota_meter
+    那一份，這一份留在原地說反話，而假在**會讓人以為這條路仍未驗**的方向。
+
+    🔴 順帶訂正這一行的輪號：原文把交棒輪號從承接輪改寫成**本批輪號**，而該行自己的
+    括號逐字寫著「交棒指名承接輪，非自稱本批輪號」⇒ 句子與它自己的判準相矛盾。而且那次
+    改寫**不必要**：該行同行本來就帶著 `round-label-ok` 具名豁免，輪號超前鎖
+    （`test_check_defect_log_crossref.TestR71CodeRoundLabelsNeverExceedLedgerCurrentRound`）
+    對它從來不成立（本回合實掃：違規清單裡沒有本檔）。交棒項既已結清，整個輪號標籤連同
+    那個豁免一併移除——留著一個沒有標的的豁免，下一個人只會再花一次力氣去讀它。
+
+    本組今天守得住的仍然是「判定邏輯」：平台分支選對了路、取不到時回一個**分得出來的**
+    理由字面、`security` 吐出來的垃圾不得變成 token。**仍然守不住**的是「一台**沒有**
+    Keychain 條目的 mac」——本機構造不出來（清掉條目等於把使用者登出），那一半只由
+    `_runner` 注入覆蓋，屬於模擬而非真機。
     """
 
     def setUp(self) -> None:
@@ -4564,25 +4910,80 @@ class MacCredentialSourceTest(unittest.TestCase):
                             self.meter.REASON_NO_CREDENTIALS)
 
     def test_the_darwin_reason_really_reaches_measure_detail(self) -> None:
-        """接線（判定層綠不代表接上了電——本 repo『機制蓋好沒接電』已三度復發）。"""
-        old_platform, old_token = self.meter.sys.platform, self.meter.access_token
-        self.meter.sys.platform = "darwin"
-        self.meter.access_token = lambda *a, **k: ""
-        try:
-            self.assertEqual(self.meter.measure_detail(1)[1],
-                             self.meter.REASON_NO_CREDENTIALS_DARWIN)
-        finally:
-            self.meter.sys.platform, self.meter.access_token = old_platform, old_token
+        """接線（判定層綠不代表接上了電——本 repo『機制蓋好沒接電』已三度復發）。
+
+        🔴 R83／F2-③ 改寫載具：原版把 `meter.access_token` 換成替身、並改寫
+        `meter.sys.platform`。那個形態在本輪的重構下**失去了鑑別力**——平台分支收斂進
+        `_fetch_token()` 之後，`access_token` 不再在 `measure_detail` 的路徑上，於是替身
+        換了也不影響結果（實測：本測試當場紅在 `http-401`，因為它其實走到了真網路）。
+        改走兩個**生產注入點**（`platform`／`runner`）：不改任何模組狀態、走的就是
+        production 那條路，而且順帶不再需要碰 `meter.sys`。
+        🔴 輪號訂正（原文寫「R82 就為此加的」）：`access_token(platform, runner)` 那一組
+        確實是 R82 加的，但本斷言走的是 **`measure_detail(timeout, platform, runner)`**
+        ——它在 R82 收輪 commit 內的簽章只有 `timeout` 一個參數（`_fetch_token` 那時整支
+        還不存在）⇒ 這裡用到的那兩個注入點是 R83 加的。同一組名字掛在兩支函式上，
+        署名錯的代價是下一個人會去 R82 的 diff 裡找一個不在那裡的東西。
+        """
+        self.assertEqual(
+            self.meter.measure_detail(1, platform="darwin", runner=self._runner(1, ""))[1],
+            self.meter.REASON_NO_CREDENTIALS_DARWIN)
+
+    def test_a_keychain_prompt_nobody_answers_is_not_a_missing_entry(self) -> None:
+        """🔴 R83／F2-③：**逾時與「沒有條目」必須是兩個字面。**
+
+        兩者要做的事完全相反：沒有條目＝這台 mac 沒登入過（人要 `claude login`，等下去
+        沒有意義）；逾時＝Keychain 跳了鎖定／授權提示而沒有人在螢幕前按（`security` 阻塞
+        到 `KEYCHAIN_TIMEOUT_SECONDS`），憑證其實在、解鎖後下一次就量得到。修前兩者都回
+        `no-credentials-darwin` ⇒ 痕跡讀起來一模一樣，而「量不到」在本 repo 的語意是
+        **不節流** ⇒ 一個無人看管的排程會在「其實只要解鎖」的情況下永久不節流且完全靜默。
+        """
+        def blocked(argv: list[str]) -> tuple[int, str]:
+            raise subprocess.TimeoutExpired(argv, self.meter.KEYCHAIN_TIMEOUT_SECONDS)
+
+        timed_out = self.meter.measure_detail(1, platform="darwin", runner=blocked)[1]
+        absent = self.meter.measure_detail(
+            1, platform="darwin", runner=self._runner(1, ""))[1]
+        self.assertEqual(timed_out, self.meter.REASON_KEYCHAIN_TIMEOUT)
+        self.assertNotEqual(timed_out, absent)
+        # 逾時**不得**被寬的那條 `except Exception` 吃掉（`TimeoutExpired` 是
+        # `SubprocessError` 的子類，攔截順序寫反就會靜默退回修前的行為，且全套照綠）。
+        self.assertEqual(self.meter.token_detail("darwin", blocked),
+                         ("", self.meter.REASON_KEYCHAIN_TIMEOUT))
+        # 控制組：其他例外仍然是「沒有條目」，不得被一起升級成逾時（那是反方向的假話）。
+        def boom(argv: list[str]) -> tuple[int, str]:
+            raise OSError("security 不在這台機器上")
+
+        self.assertEqual(self.meter.token_detail("darwin", boom)[1], absent)
 
     def test_garbage_from_the_keychain_never_becomes_a_token(self) -> None:
         """`security` 可能吐錯誤訊息而不是 JSON ⇒ 不得把它當 token 送出去。
 
         送出去的話會變成一個**永遠 401** 的假綠：取數看起來有在跑，只是永遠失敗。
+
+        🔴 R83 補第三種形態（輪號經獨立驗證者訂正：原文署名 R82，而該形態在 R82 收輪
+        commit 內 grep「第三種形態」命中 **0**——被守的 `_run_security` 是 R82 的，
+        這一條斷言不是）：`_run_security` 帶 `errors="replace"`，所以**非 UTF-8
+        位元組會降解成一串 U+FFFD**，而那串東西不含任何空白、長度也遠超過 20
+        ⇒ 舊判準（只看「夠長且不含空白」）照樣放行（實測 `True`）。守衛與它自己上一段
+        註解宣稱要防的東西之間差一個字，而後果正是那句話寫的「永遠 401 的假 token」：
+        額度軸從此恆為 `unmeasurable`，80%／95% 兩道門一次都到不了。
         """
         self.assertEqual(self.meter.access_token(
             "darwin", self._runner(0, "security: SecKeychainSearchCopyNext: not found\n")),
             "")
         self.assertEqual(self.meter.access_token("darwin", self._runner(0, "  ")), "")
+        self.assertEqual(self.meter.access_token(
+            "darwin", self._runner(0, "�" * 40)), "",
+            "降解成 U+FFFD 的位元組被當成 token ⇒ 每一次取數都是永遠 401 的假綠")
+        self.assertEqual(self.meter.access_token(
+            "darwin", self._runner(0, "abcdefghij\x00klmnopqrstuvwxyz")), "",
+            "控制字元不算 isspace()，只靠空白判準擋不掉它")
+        # 控制組：真 token 形態（base64url、純 ASCII 可列印）**必須**通得過，否則這道
+        # 收緊會把整條 mac 取數路變成恆空——那是把假綠換成假紅，同樣是靜默失能。
+        # 取 `_FAKE_TOKEN` 而不是在這裡再拼一份同樣的字面：那個常數上方寫著「為什麼必須
+        # 長成這樣」（要通得過裸 token 判準的長度門檻），複寫一份就是第二個會漂開的家。
+        self.assertEqual(
+            self.meter.access_token("darwin", self._runner(0, _FAKE_TOKEN)), _FAKE_TOKEN)
 
 
 def dual_identity_problems(modules: object) -> list[str]:
@@ -4950,6 +5351,65 @@ class SentinelReapVerdictTest(unittest.TestCase):
                            func.args.kw_defaults))["apply"]
         self.assertIs(default.value, False)
 
+    def _apply_once(self, sid: str):  # noqa: ANN202
+        """跑一次真的 `gc(apply=True)`，但**不碰排程器**（`_remove_task` 換替身）。
+
+        逐字稿目錄刻意「定位得到、那支檔不存在」＝可收那一條路；殘骸也真的落在磁碟上，
+        所以掃殘骸與寫痕跡的先後順序是被真的走過一次的，不是靠讀原始碼推論的。
+        """
+        tmp = Path(tempfile.mkdtemp(prefix="gc-trace-"))
+        plan = tmp / f"autosdd_resume_plan_{sid}.md"
+        plan.write_text("state: disarmed\n", encoding="utf-8", newline="\n")
+        trace = planner.endurance_log_path(plan)
+        self.addCleanup(lambda: trace.unlink(missing_ok=True))
+        with unittest.mock.patch.object(
+                sentinel_lifecycle, "sentinel_task_names",
+                return_value=[sentinel_lifecycle.TASK_PREFIX + sid]), \
+             unittest.mock.patch.object(
+                sentinel_lifecycle, "_transcript_dir",
+                return_value=Path(tempfile.mkdtemp(prefix="gc-tx-"))), \
+             unittest.mock.patch.object(sentinel_lifecycle, "_remove_task",
+                                        return_value=0):
+            return sentinel_lifecycle.gc(apply=True, tmp_dir=str(tmp))[0], trace
+
+    def test_reaping_a_sentinel_leaves_an_audit_trace(self) -> None:
+        """🔴 回收**不得靜默**——這是本輪實機觀測到的那個病徵的另一半。
+
+        `_sweep_artifacts` 把任務書／閂鎖／boot log／水位 state 四件全刪、`_remove_task`
+        又把排程本體拆掉 ⇒ 少了這一行痕跡，`--apply` 跑完之後的磁碟狀態與「哨兵自己靜默
+        消失」（判過四次 `arm_reset`、log 某刻起空白、`launchctl` 零命中）**完全同形**，
+        事後連「是被收掉還是自己死了」都分不出來。根 CLAUDE.md〈反事後諸葛取證規則〉要的
+        是「沒觸發＝可偵測」，而回收是排程生命週期的另一半——武裝那半一直有痕跡，這半沒有。
+        斷言逐項對應那個歸因問題：誰（`task`／`session_id`）、為什麼（`why`）、
+        排程真的拆掉了嗎（`unregister_rc`）、殘骸掃了幾件（`swept`）、何時（`at`）。
+        """
+        row, trace = self._apply_once("r83-gc-trace")
+        self.assertTrue(row["reap"], row)
+        self.assertEqual(row["trace"], str(trace), "回收沒有回報痕跡落在哪裡")
+        self.assertTrue(trace.is_file(), f"痕跡檔根本沒生出來：{trace}")
+        record = json.loads(trace.read_text(encoding="utf-8").splitlines()[-1])
+        self.assertEqual(record["event"], "gc_reaped")
+        self.assertEqual(record["session_id"], "r83-gc-trace")
+        self.assertEqual(record["task"], sentinel_lifecycle.TASK_PREFIX + "r83-gc-trace")
+        self.assertEqual(record["unregister_rc"], 0)
+        for key in ("why", "swept", "at"):
+            self.assertIn(key, record, record)
+
+    def test_a_trace_that_never_landed_is_not_reported_as_landed(self) -> None:
+        """🔴 上一條的**牙**：判準是「那個檔變大了」，不是「寫入沒有拋例外」。
+
+        注入的是真實形態而不是合成例外：`planner.append_log` 對寫不進去是**刻意吞掉**的
+        （留不下痕跡不得升級成回收失敗），所以「靜默沒寫成」是這條路上真的會發生的事。
+        少了這條斷言，`_record_reap` 可以無條件回傳路徑字串而全綠——那就變成「回報說留了
+        痕跡，磁碟上沒有」，比完全不留痕跡更難看見（本 repo 對「憑證裡混一句假話」的判例）。
+        """
+        with unittest.mock.patch.object(planner, "append_log",
+                                        lambda *a, **k: None):
+            row, trace = self._apply_once("r83-gc-trace-mute")
+        self.assertTrue(row["reap"], row)
+        self.assertEqual(row["trace"], "", "痕跡沒寫成，卻回報成寫好了")
+        self.assertFalse(trace.is_file(), f"對照組本身壞了：{trace} 竟然存在")
+
 
 # ═══════════════════════════════════════════════════════════════════════════
 # R82／C2：`.env` 裡設的逃生口必須真的算數
@@ -5060,6 +5520,125 @@ class EnvFileReachesEveryEscapeHatchTest(unittest.TestCase):
         self.assertTrue(armed, "main() 找不到 arm_sentinel 呼叫 ⇒ 這條鎖的錨已經漂掉")
         self.assertLess(prefill[0], min(armed),
                         "前置填充必須在 arm_sentinel 之前，否則那個讀取點仍然看不到 .env")
+
+
+class QuotaGateIsWiredToTheBurnPathTest(unittest.TestCase):
+    """🔴 R83：額度那把尺造好了，卻接在一條**幾乎不通電**的線上——本類守的就是那條線。
+
+    呼叫點條件此前是 `if blocking and …`，而 `blocking` 只在 PreToolUse 為真 ⇒ 額度只在
+    「我要扇出」那一刻被問一次。R83 實測：配額 5%→90% 的整段，主 session 派完最後一波之後
+    再也沒呼叫任何扇出型工具（後續全是全樹跑、agent 回傳、大量讀檔）⇒ 本閘一次都沒被叫到。
+    它守的是「我要不要多派人」，燒掉額度的卻是「我自己在做事」。
+    紅端（接電前實跑）：PostToolUse×{Read,Bash,Grep,Glob,Task} 一律 rc=0、stderr 0 位元組、
+    零任務書、`decide()` 呼叫 0 次。⇒ 判例 #3「機制蓋好沒接電」已復發三次，故本類不驗
+    「程式碼在不在」，只驗「它真的做了動作」。
+    """
+
+    def setUp(self) -> None:
+        self.tmp = Path(tempfile.mkdtemp(prefix="wired-burn-"))
+        # 18% context：遠低於 WARN_RATIO ⇒ context 那把尺全程靜默，rc 只可能來自額度軸。
+        self.transcript = _write_jsonl(self.tmp / "s.jsonl", [36_000])
+        for name, value in (("quota_cache_path", lambda: self.tmp / quota_meter.CACHE_NAME),
+                            ("fanout_ledger_path", lambda: self.tmp / "l.jsonl"),
+                            ("quota_latch_path", lambda: self.tmp / "latch.json"),
+                            *_TRACE_ISOLATION(self)):
+            old = getattr(qg, name)
+            setattr(qg, name, value)
+            self.addCleanup(setattr, qg, name, old)
+
+    def _post(self, tool: str) -> dict:
+        return {"hook_event_name": "PostToolUse", "tool_name": tool,
+                "transcript_path": str(self.transcript)}
+
+    def test_the_post_tool_use_matcher_covers_the_burn_path(self) -> None:
+        matchers = [m for m, argv in _hook_invocations("PostToolUse")
+                    if ".claude/hooks/context_budget_guard.py" in argv]
+        self.assertTrue(matchers, "PostToolUse 上沒有本守衛 ⇒ 燒額度那條路零觀測者")
+        for matcher in matchers:
+            for tool in ("Read", "Bash"):
+                self.assertIn(tool, matcher.split("|"),
+                              f"matcher 被改窄、少了 {tool}：{matcher}")
+
+    def test_the_quota_call_is_no_longer_gated_on_the_fanout_edge(self) -> None:
+        """AST：呼叫點不得再被 `blocking` 罩住（那是紅端），且必須把 `event` 傳下去。"""
+        main = next(n for n in ast.walk(ast.parse(_HOOK.read_text(encoding="utf-8")))
+                    if isinstance(n, ast.FunctionDef) and n.name == "main")
+        holders = [n for n in ast.walk(main) if isinstance(n, ast.If) and any(
+            isinstance(c, ast.Call) and getattr(c.func, "attr", "") == "quota_gate"
+            for c in ast.walk(n.test))]
+        self.assertEqual(len(holders), 1, "額度判定入口不是恰好一個 ⇒ 這條鎖的錨漂掉了")
+        self.assertNotIn("blocking", {n.id for n in ast.walk(holders[0].test)
+                                      if isinstance(n, ast.Name)},
+                         "呼叫點又被 `blocking` 罩住 ⇒ 額度回到只在扇出邊緣被問一次")
+        call = next(c for c in ast.walk(holders[0].test) if isinstance(c, ast.Call)
+                    and getattr(c.func, "attr", "") == "quota_gate")
+        self.assertIn("event", [kw.arg for kw in call.keywords],
+                      "沒把事件名傳下去 ⇒ 射程與 D3 的事件名兩者同時失效")
+
+    def test_post_tool_use_at_halt_writes_a_plan_and_says_so(self) -> None:
+        """紅端這裡是 rc=0／stderr 0B／零任務書——那正是訴求 6c 至今沒生效的那一格。"""
+        _quota_cache(self.tmp, 96.0)
+        rc, err = _run_hook(self._post("Read"), self.tmp)
+        self.assertEqual(rc, 2, "PostToolUse 在 halt 帶沒出聲 ⇒ stderr 到不了模型")
+        self.assertIn("停止派發", err)
+        self.assertTrue(list(self.tmp.glob(f"{guard.PLAN_PREFIX}*.md")),
+                        "halt 帶沒把任務書寫到磁碟上（訴求 6c 的「記錄所有狀態」）")
+
+    def test_the_halt_side_effects_run_exactly_once_per_reset_window(self) -> None:
+        """副作用（寫任務書＋spawn 武裝）必須在閂鎖**之內**：否則 95% 之後每一次
+        Read／Bash 都 spawn 一支 planner，而那會一直持續到 reset。"""
+        _quota_cache(self.tmp, 96.0).replace(qg.quota_cache_path())
+        calls, real = [], qg.quota_halt_actions
+
+        def counted(*a: object, **k: object) -> dict:
+            calls.append(1)
+            return real(*a, **k)
+
+        qg.quota_halt_actions = counted
+        self.addCleanup(setattr, qg, "quota_halt_actions", real)
+        sink = open(os.devnull, "w", encoding="utf-8")
+        self.addCleanup(sink.close)
+        old_err, sys.stderr = sys.stderr, sink
+        self.addCleanup(setattr, sys, "stderr", old_err)
+        rcs = {_gate(self._post("Read"), event="PostToolUse") for _ in range(20)}
+        self.assertEqual(rcs, {2}, "halt 帶有幾次沒回 2 ⇒ 訊號斷斷續續")
+        self.assertEqual(len(calls), 1, f"halt 副作用跑了 {len(calls)} 次 ⇒ spawn 風暴")
+
+    def test_quota_halt_does_not_preempt_the_context_sentinel(self) -> None:
+        """Δ13＝接電**引入**的新缺陷（不是既有債）：halt 帶每次都回 2 ⇒ hook 提早 return ⇒
+        整個 halt 期間 `arm_when_earned` 一次都不執行；而額度那層的喚醒武裝只在閂鎖第一次
+        觸發時試一次、失敗不重試 ⇒ 兩層續航都沒了。紅端實測：武裝次數由 5 掉到 0。"""
+        _quota_cache(self.tmp, 96.0).replace(qg.quota_cache_path())
+        armed: list[object] = []
+        for name, value in (("read_payload", lambda: self._post("Read")),
+                            ("arm_when_earned", armed.append),
+                            ("write_resume_plan", lambda t: str(self.tmp / "p.md")),
+                            ("arm_quota_wakeup", lambda t, p: {"armed": True})):
+            old = getattr(guard, name)
+            setattr(guard, name, value)
+            self.addCleanup(setattr, guard, name, old)
+        sink = open(os.devnull, "w", encoding="utf-8")
+        self.addCleanup(sink.close)
+        old_err, sys.stderr = sys.stderr, sink
+        self.addCleanup(setattr, sys, "stderr", old_err)
+        self.assertEqual(guard.main(), 2, "halt 帶沒回 2 ⇒ 這條測的前提就不成立")
+        self.assertTrue(armed, "halt 帶下 context 哨兵一次都沒被武裝（Δ13 復發）")
+        self.assertEqual(guard.main(), 2)
+        self.assertEqual(len(armed), 2,
+                         "只有閂鎖那一次武裝 ⇒ halt 期間其餘每一次呼叫都沒有續航保護")
+
+    def test_post_tool_use_never_charges_the_dispatch_ledger(self) -> None:
+        """同一個 `Task` 會先觸發 Pre 再觸發 Post；兩邊都記帳＝一次派發記兩次，滾動視窗
+        預算當場少一半。對照組在同一條測試裡：Pre 必須記到 1。"""
+        _quota_cache(self.tmp, 60.0).replace(qg.quota_cache_path())
+        now = datetime.now(UTC).astimezone()
+        self.assertEqual(_gate(self._post("Task"), event="PostToolUse"), 0)
+        self.assertEqual(qg.live_dispatches(qg.fanout_ledger_path(), now), 0,
+                         "PostToolUse 記了派發帳 ⇒ 同一次派發被記兩次")
+        self.assertEqual(_gate({"hook_event_name": "PreToolUse", "tool_name": "Task",
+                                "transcript_path": str(self.transcript)}), 0)
+        self.assertEqual(qg.live_dispatches(qg.fanout_ledger_path(), now), 1,
+                         "對照組也沒記帳 ⇒ 上一條的 0 是恆 0，沒有鑑別力")
 
 
 if __name__ == "__main__":

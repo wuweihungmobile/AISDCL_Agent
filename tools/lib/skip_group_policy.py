@@ -319,6 +319,25 @@ _RUNTIME_SKIP_CEILING: dict[str, dict[str, int]] = {
     # 並附「⚠️ 剖面未登記——量測正常，但這個平台從來沒有人量過健康值」。工具訊息逐字寫著
     # 「把上面那行實測值填進 skip_group_policy 兩張表即升級為阻斷」，本列就是照做。
     # 值是**量出來的**不是推算的（上方 win32 兩列的同一條紀律）；未列出的群實測即 0。
+    # 🔴 R83（mac 真機首輪）新登記：`tools/tests@darwin` 此前只在 `_UNMEASURED_RUNNER_PROFILES`
+    # 內，而那一格的註解逐字寫著「本輪沒有 mac 真機，macOS CI 又是 `steps=0` ⇒ 健康值今天
+    # 無論如何取不到。憑空填數字＝憑空造出一個沒有鑑別力的門檻，故只登記缺口」。
+    # **今天取得到了**：本輪在 macOS 真機上跑完 `python tools/run_root_unittests.py`，值取自
+    # 它當場印出的 `[skip census] tools/tests@darwin` 那一行、逐格照填、零加減推算。
+    # 🔴 這一筆使 darwin 的 skip 剖面由 **advisory 升為阻斷**——升級前 runner 對這棵樹印的是
+    # 「⚠️ 剖面未登記——量測正常，但這個平台從來沒有人量過健康值，沒有天花板可比」，
+    # 也就是 darwin 上的 skip 可以無聲從現值長到任意數字而所有閘門全綠。
+    # 六格的形狀本身就是本輪主結論的證據：`platform` 獨大而其餘五格皆 0 ⇒ mac 側的 skip
+    # **全部**是「在這個平台沒有標的」（`schtasks`／具名 Mutex／PS 5.1 原生 argv 語意…），
+    # 零欠債、零未標籤 ⇒ 單機零 skip 結構上不可能，可達成的是**兩平台聯集**零 skip。
+    "tools/tests@darwin": {
+        SKIP_GROUP_PLATFORM: 44,
+        SKIP_GROUP_TOOL_ABSENCE: 0,
+        SKIP_GROUP_ENV_DISABLED: 0,
+        SKIP_GROUP_STRUCTURAL: 0,
+        SKIP_GROUP_DEBT: 0,
+        SKIP_GROUP_UNTAGGED: 0,
+    },
     "tools/tests@linux": {
         SKIP_GROUP_PLATFORM: 63,
         SKIP_GROUP_TOOL_ABSENCE: 0,
@@ -358,6 +377,16 @@ _RUNTIME_SKIP_CEILING_MAX: dict[str, dict[str, int]] = {
         SKIP_GROUP_PLATFORM: 37,
         SKIP_GROUP_TOOL_ABSENCE: 0,
         SKIP_GROUP_ENV_DISABLED: 1,
+        SKIP_GROUP_STRUCTURAL: 0,
+        SKIP_GROUP_DEBT: 0,
+        SKIP_GROUP_UNTAGGED: 0,
+    },
+    # 🔴 R83：與基線同時入表、同一組值（新登記的剖面沒有「已還掉的欠債額度」需要保留，
+    # 天花板刻意不留餘裕——留餘裕等於一上線就給它一個可以無聲成長的窗口）。
+    "tools/tests@darwin": {
+        SKIP_GROUP_PLATFORM: 44,
+        SKIP_GROUP_TOOL_ABSENCE: 0,
+        SKIP_GROUP_ENV_DISABLED: 0,
         SKIP_GROUP_STRUCTURAL: 0,
         SKIP_GROUP_DEBT: 0,
         SKIP_GROUP_UNTAGGED: 0,
@@ -432,8 +461,15 @@ _FULL_SUITE_RUNNERS: dict[str, str] = {
 #   述詞含 `CLAUDECODE == '1'`，巢狀多 skip ⇒ 拿 nested 的上限管 solo 是拿寬鬆的管嚴格的。
 #   本輪只改了鍵（`+nopg` → 實際量得到的 `+pg`），值刻意**不填**：nightly log 現有那組數字取
 #   自 R82 補標籤之前的樹，照抄會把已經還掉的欠債重新寫成合法額度。
-# · `tools/tests@darwin`：本輪沒有 mac 真機，macOS CI 又是 `steps=0` ⇒ 健康值今天無論如何取
-#   不到。憑空填數字＝憑空造出一個沒有鑑別力的門檻，故只登記缺口。
+# · `tools/tests@darwin`：🔴 **R83 已畢業、不再是本表成員**（本段保留為沿革，因為它記錄的是
+#   R82 當時為真的判斷）。R82 的原話是「本輪沒有 mac 真機，macOS CI 又是 steps=0 ⇒ 健康值今天
+#   無論如何取不到。憑空填數字＝憑空造出一個沒有鑑別力的門檻，故只登記缺口」——那個判斷在
+#   當時正確，而 R83 是**第一輪有 mac 真機**，值取自 runner 當場印出的 `[skip census]` 逐格照填。
+#   ⇒ 該剖面已移入 `_RUNTIME_SKIP_CEILING` 與 `_RUNTIME_SKIP_CEILING_MAX`（由 advisory 升為
+#   阻斷式天花板），並使 `_MEASURED_RUNNERS_MIN` 由 3 上修為 4。
+#   🔴 **本段之所以需要就地訂正**：它在 R83 的同一個變更內被自己的改動證偽，而
+#   「註解裡的反向假事實」與「把有人守的寫成沒人守」同型——本 repo 對這一類有大量判例，
+#   且這一族散文**沒有任何機械物在守**（由 W8 的獨立驗證者點名交棒，非自己發現）。
 # · `AISDLC_SDD/fsm_runtime@win32`：本輪首次進帳（6 支 skip 已全數補標），但 census 還沒接上
 #   它的閘門 ⇒ 數字量得到、卻沒有任何東西在讀。🔴 先接閘門再入表，順序不可顛倒——先填數字
 #   只會得到一個沒有消費者的常數。
@@ -442,15 +478,21 @@ _UNMEASURED_RUNNER_PROFILES: dict[str, str] = {
         "取得＝act 映像跑 pytest，輸出餵 `local_ci_gate.py --census-only`。DEF-101-960",
     "AutoClaude/tests@win32+pg+solo":
         "取得＝跑 run_local_nightly.ps1 後抄 nightly_latest.log 的 `[skip census]`。DEF-101-960",
-    "tools/tests@darwin": "取得＝mac 真機跑 run_root_unittests.py 抄 `[skip census]`。DEF-101-960",
     "AISDLC_SDD/fsm_runtime@win32": "取得＝ci-gate.sh 接 `--census-only` census。DEF-101-960",
 }
 #: 雙單邊的兩個**下限**（取代舊的 shrink-only 上限，理由見上方）：分母與分子都只准增。
 #: 🔴 R82：5 → 7（新增 `tools/tests@darwin`＝MAC-01、`AISDLC_SDD/fsm_runtime@win32`＝SDD-01）。
-#: 分子（`_MEASURED_RUNNERS_MIN`）不動——這兩筆都是**登記缺口**，不是量到的值；
-#: 把分子一起提高就是在鼓勵「憑空填數字」，而那正是這張表存在的理由所反對的事。
+#: R82 當時分子（`_MEASURED_RUNNERS_MIN`）**刻意不動**，理由是那兩筆都是登記缺口而非量到的值，
+#: 把分子一起提高等於鼓勵「憑空填數字」——那個理由在 R82 成立，且**至今仍是唯一合法的上修條件**。
+#: 🔴 **R83 訂正：分子已由 3 上修為 4，因為條件真的被滿足了**（不是放寬）。
+#: 上修的唯一依據是 `tools/tests@darwin` **真的被量到**：R83 是第一輪有 mac 真機，值取自
+#: `tools/run_root_unittests.py` 當場印出的 `[skip census]` 那一行、逐格照填、零加減推算，
+#: 並同時寫進 `_RUNTIME_SKIP_CEILING`（基線）與 `_RUNTIME_SKIP_CEILING_MAX`（天花板，無餘裕）。
+#: ⇒ 分母 7 不動、分子 3 → 4，語意是「已量測的剖面又多一個」，**與「憑空填數字」方向相反**。
+#: 🔴 **本段原本只有 R82 那句「分子不動」，而下一行已是 4**——同一個變更內自相矛盾，
+#: 由 W8 的獨立驗證者點名（不是自己發現的），故就地訂正並保留 R82 原判斷的沿革。
 _FULL_SUITE_RUNNERS_MIN = 7
-_MEASURED_RUNNERS_MIN = 3
+_MEASURED_RUNNERS_MIN = 4
 #: 未量測列必須指名一個**帳本列**當承接處。刻意要 DEF-ID 而不是「R<下一輪>」字面：後者
 #: 是在程式碼裡宣稱一個還沒發生的輪號（本 repo 另有一道全樹掃描在擋這件事），而承接輪次
 #: 本來就該只有帳本一個家——註解裡寫「還沒量」則是判過的第 10 號形態（劃界不等於防護）。
@@ -513,33 +555,36 @@ def ci_platform_coverage_problems() -> list[str]:
     return problems
 
 
+# 🔴 存在理由（R79 收輪）：「剖面未登記」與「天花板被突破」在 `skip_group_census_problems`
+# 裡是同一種回傳值，但它們對呼叫端是**兩件不同的事**——前者代表這台機器／這個平台從來
+# 沒有人量過（mac、Linux runner 第一次跑到這裡就是這一格），後者代表 skip 真的變多了。
+# push 通道要能擋住後者、又不能因為前者就把一個沒人量過的平台整個擋在門外（那是誤擋，
+# 不是鑑別力）。分開才有辦法讓兩者各自對應到正確的處置，而不是二選一。
+#
+# 🔴 R83／G2：本段由 docstring 改為 `#` 註解，**一字未刪、語意零變更**。理由是
+# `check_loc_budget.py` 自己印的指引逐字寫著「說明文字請寫成 `#` 註解而非 docstring
+# ——docstring 行會被 count_loc 計入」；本檔在 R83 登記 `tools/tests@darwin` 兩張天花板
+# 之後 count_loc 由 400 漲到 415，破了 `guardrail_lib<=400`（同輪先例：
+# `AutoClaude/autoclaude/plugins/token_guard/policy.py` R82 同款處置）。
 def profile_registered(profile: str) -> bool:
-    """這個剖面有沒有登記過天花板。
-
-    🔴 存在理由（R79 收輪）：「剖面未登記」與「天花板被突破」在 `skip_group_census_problems`
-    裡是同一種回傳值，但它們對呼叫端是**兩件不同的事**——前者代表這台機器／這個平台從來
-    沒有人量過（mac、Linux runner 第一次跑到這裡就是這一格），後者代表 skip 真的變多了。
-    push 通道要能擋住後者、又不能因為前者就把一個沒人量過的平台整個擋在門外（那是誤擋，
-    不是鑑別力）。分開才有辦法讓兩者各自對應到正確的處置，而不是二選一。
-    """
+    """這個剖面有沒有登記過天花板。"""
     return profile in _RUNTIME_SKIP_CEILING and profile in _RUNTIME_SKIP_CEILING_MAX
 
 
+# 🔴 R80 包 A（S3-03）存在理由——舊判準的形狀是錯的，而且錯在它自己宣傳的出口上：
+# 舊訊息逐字寫著「合法出口只有『把那些測試變成真的會跑』或『**補上正確的分群標籤**』」，
+# 但「補標籤」做的事就是把一支 skip 從 `untagged` 搬進某個具名群，那一群的計數必然 +1
+# ⇒ 該群當場超過上限 ⇒ **照著失敗訊息做，就會被同一道判準判紅**。
+# 當回合注入實測（三組，逐字見包 A 回報）：
+#   · untagged 118→0、env-disabled 1→119（純補標籤，總量一支沒變）⇒ 舊判準回 1 筆問題；
+#   · untagged 118→112、platform 17→20（總量 136→133，**樹變健康了**）⇒ 舊判準回 1 筆問題；
+#   · untagged 118→115（單純變少）⇒ 綠。
+# 也就是說：**唯一不會被罰的改善方式是「skip 憑空消失」**，而那正是本 repo 最不該鼓勵的
+# 那一種（R76 記過的「看起來變乾淨」）。分群天花板必須對「群間位移」保持中立，
+# 只對「總量上升」與「未分類的欠債上升」說話。
+# （R83／G2：docstring → `#` 註解，一字未刪，理由見 `profile_registered` 上方那段。）
 def retag_budget(profile: str, census: Mapping[str, int]) -> int:
-    """純函式：這次執行從 `untagged` **搬出去**了幾支（＝補標籤的額度）。
-
-    🔴 R80 包 A（S3-03）存在理由——舊判準的形狀是錯的，而且錯在它自己宣傳的出口上：
-    舊訊息逐字寫著「合法出口只有『把那些測試變成真的會跑』或『**補上正確的分群標籤**』」，
-    但「補標籤」做的事就是把一支 skip 從 `untagged` 搬進某個具名群，那一群的計數必然 +1
-    ⇒ 該群當場超過上限 ⇒ **照著失敗訊息做，就會被同一道判準判紅**。
-    當回合注入實測（三組，逐字見包 A 回報）：
-      · untagged 118→0、env-disabled 1→119（純補標籤，總量一支沒變）⇒ 舊判準回 1 筆問題；
-      · untagged 118→112、platform 17→20（總量 136→133，**樹變健康了**）⇒ 舊判準回 1 筆問題；
-      · untagged 118→115（單純變少）⇒ 綠。
-    也就是說：**唯一不會被罰的改善方式是「skip 憑空消失」**，而那正是本 repo 最不該鼓勵的
-    那一種（R76 記過的「看起來變乾淨」）。分群天花板必須對「群間位移」保持中立，
-    只對「總量上升」與「未分類的欠債上升」說話。
-    """
+    """純函式：這次執行從 `untagged` **搬出去**了幾支（＝補標籤的額度）。"""
     ceilings = _RUNTIME_SKIP_CEILING.get(profile) or {}
     return max(0, ceilings.get(SKIP_GROUP_UNTAGGED, 0)
                - census.get(SKIP_GROUP_UNTAGGED, 0))
@@ -630,25 +675,90 @@ def skip_group_census_problems(
 #: 一次都沒印過**，帳面讀起來像「已覆蓋」。而 linux 結構上跑不到那 26 支：
 #: `install_mac_nightly.sh` 自帶 `uname != Darwin` fail-loud，act 映像內 `which zsh` 也回空。
 #: ⇒ 1:1 的形狀本身就是那個假綠的來源，不是資料填錯。
+#
+# 🔴 R83 四方複審收斂（SA-02 blocking／SA falsified #1）：**「已登記」不等於「跑得到」**，
+# 而 R82 之後的判準只問前者 ⇒ 同一個假綠換方向復發。R83 把 darwin 的互補剖面宣告成
+# `tools/tests@linux`，註解逐字寫「由 linux 承接」；但 mac 上被 skip 的那一族**全部**是
+# `[WINDOWS-NATIVE-ONLY]`（本輪實測 44/44：`pytest` 對含該標籤的 12 支檔實跑得到
+# 讀數見 ONBOARDING.md §7 表②（此處不複寫）；44 行 SKIPPED 理由無一例外，逐檔 dev_start 12／
+# context_budget_guard 8／check_hooks_liveness 5／install_windows_nightly 5／
+# bash_probe_spec_contract 4／ps51_compat 3／windows_forbidden_filename_parity 3／
+# bootstrap_ps1 2／nightly_interpreter_determinism 1／windowsapps_guard 1），其述詞是
+# `os.name != "nt"`（實測站點 test_context_budget_guard.py:1629/1647/1662/1675/2150 等）
+# ⇒ linux 上 `os.name == "posix"`，**一樣 skip**。宣告的承接者結構上一支都跑不到，而
+# `skip_target_report('tools/tests@darwin', …)` 因此回**空 list＝已達標**——唯一能為
+# 「兩平台聯集才是零」作證的報告者，被這一筆登記親手關掉（複審者實測）。
+#
+# 🔴 修法刻意不只是「把資料改對」（下一輪照樣可以再填錯一次，而且填錯一樣是靜默的）：
+# 標籤字面本身已經指名了唯一跑得到它的平台，所以「平台 X 上的 `platform` 群需要哪些平台
+# 才承接得住」＝**那些「家」不含 X 的標籤，其家的聯集**——可由標籤 SSOT 推導，不需要任何
+# 人手寫。手寫的那張表從此只負責「該平台上的哪一個**具體剖面鍵**」（`+pg+nested` 這種帶
+# 能力維度的鍵無從推導），並被推導出來的需求逐格對帳：宣告的承接者若在**平台層**根本不
+# 可能跑到，`skip_target_report` 當場說話而不是回空。
+#
+# 🔴 誠實劃界（本輪未關的那一半，明文登記為缺口，不得讀成已關）：本判準的粒度是**剖面**
+# 不是**測試**——它證明得了「win32 這個剖面有人量過健康值」，證明不了「那 44 支逐一在
+# win32 真的執行過」（win32 當回合的 `platform=37` 支 skip 裡有沒有混進其中幾支，分群
+# 粒度看不出來）。要真正回答，需要 runner 逐剖面吐出**執行過的 test id 集合**、由聯集減
+# 全集算出「全世界都沒跑過」的那一批；達成判準＝兩個以上剖面各自留下可 diff 的 id 清單
+# 檔，且判準讀清單而不是讀計數。本輪只關「宣告錯誤」這一向。
+# 形狀＝`dict[str, tuple[str, ...]]`：標籤字面 → 唯一跑得到它的平台（標籤語意的直接編碼）。
+# 刻意寫成兩行而非逐條一行：本檔緊貼 `guardrail_lib<=400`，而註解不計 `count_loc`。
+_TAG_HOME_PLATFORMS = {WINDOWS_NATIVE_SKIP_TAG: ("win32",), MAC_NATIVE_SKIP_TAG: ("darwin",),
+                       POSIX_NATIVE_SKIP_TAG: ("darwin", "linux")}
+
+
+# 純函式：`platform` 上的 `platform` 群 skip，需要哪些平台才承接得住（由標籤語意推導）。
+# 例：darwin ⇒ {win32}（mac-only／POSIX-generic 在 mac 上本來就會跑，不需要別人承接）；
+# win32 ⇒ {darwin, linux}；linux ⇒ {win32, darwin}。
+# 🔴 兩件事的精度不同，別把回傳值當同一種答案用（R83 獨立驗證輪補記）：
+#   · 拿它做**成員判定**（「平台 P 對剖面 X 有沒有用」）是**充要**的——P ∈ 回傳集合
+#     ⟺ 存在某標籤在 X 上會 skip、在 P 上跑得到。`test_local_ci_gate.py` 的
+#     `_counterparts_that_cannot_run_them()` 用的正是這一向。
+#   · 拿它做**覆蓋判定**（下方 `homeless` 的差集）則是**偏嚴**的：`[POSIX-NATIVE-ONLY]`
+#     的家是 (darwin, linux)＝「兩者任一即可跑到」，而集合聯集會把兩者都列成需求。
+#     今天兩者都已宣告 ⇒ 差集為空、無影響；日後若 linux 執行者退場，win32 那一列會多印
+#     一個其實已被 darwin 覆蓋的平台。方向是**多報而非漏報**（本函式只餵 advisory 訊息、
+#     不接任何閘門的 rc），故本輪刻意不為此加一層 per-tag 的「任一即可」邏輯——那要把
+#     差集改成「逐標籤各自求交集是否非空」，成本落在本檔僅剩 1 行的 tier 餘裕上。
+#     要做的判準：`homeless` 改為「對每一個在 X 上會 skip 的標籤，其家與已宣告平台的交集
+#     為空者，才回報該標籤的家」，並在測試側補一組「linux 退場後 win32 不得多報」的注入。
+# （說明寫成 `#` 而非 docstring 的理由同 `profile_registered` 上方那段：docstring 行計入
+# `count_loc`，而本檔貼著 `guardrail_lib<=400`。）
+def required_home_platforms(platform: str) -> set[str]:
+    return {h for hs in _TAG_HOME_PLATFORMS.values() if platform not in hs for h in hs}
+
+
 _COMPLEMENTARY_PROFILE: dict[str, tuple[str, ...]] = {
     "AutoClaude/tests@win32+nopg+nested": ("AutoClaude/tests@linux+nopg+solo",),
     "AutoClaude/tests@win32+pg+nested": ("AutoClaude/tests@linux+pg+solo",),
     # POSIX-generic 那一半的家是 linux，mac-only 那一半的家只有 darwin——兩個都要。
     "tools/tests@win32": ("tools/tests@linux", "tools/tests@darwin"),
-    # 反方向：darwin 上 skip 掉的 `[WINDOWS-NATIVE-ONLY]`／POSIX-generic 由 linux 承接。
-    "tools/tests@darwin": ("tools/tests@linux",),
+    # 🔴 反方向（R83 收斂訂正）：darwin 上 skip 掉的那 44 支**全部**是
+    # `[WINDOWS-NATIVE-ONLY]` ⇒ 唯一承接得住的是**真 Windows** 剖面 `tools/tests@win32`
+    # （R82 已量測入表）。linux 承接不了任何一支（`os.name != "nt"` 在那裡同樣成立），
+    # 故已自本列移除——它在 R83 原版是這一格的唯一值，也就是本列當時整格是假的。
+    "tools/tests@darwin": ("tools/tests@win32",),
+    # 🔴 R83 收斂新增（此前整列缺席 ⇒ 判準走 `not counterparts` 那一支、印「（未宣告）」）：
+    # linux 上被 skip 的 `platform` 群＝`[WINDOWS-NATIVE-ONLY]`（家＝win32）＋
+    # `[MAC-NATIVE-ONLY]`（家＝darwin），兩個家都已量測入表 ⇒ 這一列補上之後這個剖面的
+    # 結構性缺口才是**算得出來**的 0，而不是「沒人填過所以不知道」。
+    "tools/tests@linux": ("tools/tests@win32", "tools/tests@darwin"),
 }
 
 
+# 與 `skip_group_census_problems` 刻意分開、且刻意**不接任何閘門的 rc**：
+#   · 天花板判準回答「有沒有退步」——它必須能擋 push，所以只能問已經量得到的事；
+#   · 本函式回答「還差多少才到位」——它問的是**還沒量過**的事（互補剖面），
+#     今天必然有缺口，把它接上 rc 只會製造一個所有人都學會忽略的常紅。
+# 兩者混在一起，就會變成「為了讓閘門綠而把目標訂低」，那正是 S3-03 的病根。
+# （R83／G2：docstring → `#` 註解，一字未刪，理由見 `profile_registered` 上方那段。）
+# 純函式：這個剖面**距離目標還有多遠**（不是「有沒有違規」）。回空 list ＝已達標。
+# （🔴 上面這一句原本是本函式的 docstring，R83 複審收斂時就地改為 `#`——同一輪對
+#  `profile_registered`／`retag_budget` 已做過同款處置，理由逐字相同：`check_loc_budget`
+#  自己印的指引寫著「說明文字請寫成 `#` 註解而非 docstring」，而本檔緊貼 400 行分級。
+#  一字未刪，語意零變更。）
 def skip_target_report(profile: str, census: Mapping[str, int]) -> list[str]:
-    """純函式：這個剖面**距離目標還有多遠**（不是「有沒有違規」）。回空 list ＝已達標。
-
-    與 `skip_group_census_problems` 刻意分開、且刻意**不接任何閘門的 rc**：
-      · 天花板判準回答「有沒有退步」——它必須能擋 push，所以只能問已經量得到的事；
-      · 本函式回答「還差多少才到位」——它問的是**還沒量過**的事（互補剖面），
-        今天必然有缺口，把它接上 rc 只會製造一個所有人都學會忽略的常紅。
-    兩者混在一起，就會變成「為了讓閘門綠而把目標訂低」，那正是 S3-03 的病根。
-    """
     out: list[str] = []
     debt = open_debt(census)
     if debt:
@@ -665,13 +775,32 @@ def skip_target_report(profile: str, census: Mapping[str, int]) -> list[str]:
     # 而 `platform` 群在 win32 上是兩個互斥子母體（POSIX-generic vs mac-only），
     # 只要其中一個的家登記了，另一個（26 支只有 darwin 跑得到）就整組被短路掉。
     missing = [c for c in counterparts if not profile_registered(c)]
-    if structural and (missing or not counterparts):
-        where = "／".join(f"`{c}`" for c in missing) or "（未宣告）"
+    # 🔴 R83 收斂（SA-02）：第二向——**宣告的承接者可能結構上跑不到**，而上一行只問「量過
+    # 沒有」。把 darwin 的家填成 linux（那裡 `os.name != "nt"` 同樣成立、44 支一支都跑不到）
+    # 時整組回空＝已達標。這一行改由標籤語意算出「非得有哪些平台」，再減掉這一列**真的宣告
+    # 到**的平台；差集非空 ⇒ 該平台連一個候選都沒被宣告 ⇒ 照樣要說話。刻意減「宣告到的」而
+    # 不是「已量測的」：後者會讓同一個平台同時以兩種措辭出現兩次（宣告了但未量＝上一行已經
+    # 指名它了），而重複的清單會讓人以為是兩個不同的缺口。
+    # 🔴 這個差集只抓「**少**宣告」，結構上抓不到「**多**宣告」——把 linux 與 win32 並列
+    # （SA-02 原本開的處方）差集是空的，於是那句今天為假的話可以住回表裡而本函式回空。
+    # 那一向的判準是**資料表的不變量**、不需要在執行期存在，且本函式刻意不接任何閘門的 rc
+    # （加在這裡只會多印一行 advisory、不會紅），故落在
+    # `AutoClaude/tests/tools/test_local_ci_gate.py::test_a_counterpart_that_cannot_run_them
+    # _may_not_sit_in_the_table_either`（含並列版與自我承接兩種紅向自證）。
+    homeless = sorted(required_home_platforms(_platform_of(profile))
+                      - {_platform_of(c) for c in counterparts})
+    if structural and (missing or homeless or not counterparts):
+        # 🔴 兩種缺口刻意用不同措辭（R83）：「宣告了但沒人量」與「這個平台上一個候選都沒宣告」
+        # 是兩件不同的事，混成一句「至今沒有人量過」會對後者說出假事實——被點名的平台可能
+        # 明明有人量過，只是這一列沒宣告到它（linux 那一列在本輪補上之前正是這個形態）。
+        where = "／".join([f"`{c}`（未量測）" for c in missing]
+                         + [f"（平台 {p} 未宣告承接剖面）" for p in homeless]) or "（未宣告）"
         out.append(
             f"{profile}：結構性 skip {structural} 支，它們的目標**不是** 0，而是"
-            f"「在互補剖面上真的被跑到」——而 {where} 至今沒有人量過 ⇒ 這些測試"
+            f"「在互補剖面上真的被跑到」——而 {where} ⇒ 這些測試"
             "目前**沒有任何機械證據**顯示它們在世界上任何一處跑過。這是量 skip 數永遠看不見"
             "的那一半缺口（S3-08）。🔴 互補剖面是**多對一**：一個剖面登記了不代表整群有著落"
-            "（R82／MAC-01：linux 結構上跑不到 mac-only 那 26 支）"
+            "（R82／MAC-01：linux 結構上跑不到 mac-only 那 26 支）；且**登記≠跑得到**"
+            "（R83／SA-02：linux 也跑不到 mac 上那 44 支 `[WINDOWS-NATIVE-ONLY]`）"
         )
     return out

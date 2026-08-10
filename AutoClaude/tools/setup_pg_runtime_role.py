@@ -17,9 +17,15 @@ DB: aisdlc @ 192.168.1.133
   PG_FALLBACK_USER / PG_FALLBACK_PASSWORD   第二組候選登入（兩者都設定時才嘗試）
   PG_HOST                 DB 主機，預設 192.168.1.133
 
-用法（PowerShell）：
-  $env:RUNTIME_PASS='...'; $env:PG_SUPERUSER_PASSWORD='...'
-  python tools/setup_pg_runtime_role.py
+用法（🔴 R83 補齊 bash/zsh 那一半——原文只有 PowerShell 形態，而這段是整支腳本唯一告訴
+使用者「怎麼把必填變數餵進來」的地方；標了「（PowerShell）」不代表 mac/Linux 讀者就有路可走）：
+
+  PowerShell：
+    $env:RUNTIME_PASS = '...'; $env:PG_SUPERUSER_PASSWORD = '...'
+    python tools/setup_pg_runtime_role.py
+  bash / zsh：
+    export RUNTIME_PASS='...'; export PG_SUPERUSER_PASSWORD='...'
+    python tools/setup_pg_runtime_role.py
 """
 import os
 import sys

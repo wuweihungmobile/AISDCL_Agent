@@ -269,9 +269,17 @@ class TestDualAdapterFallback:
                 # 的字面承接輪號逐筆比對當前輪次。（本註解刻意不複述輪號數字——註解不得
                 # 自稱超前帳本的輪號，那由 check_defect_log_crossref 的輪號鎖守。）
                 "[DEBT] 雙 adapter failover fixture 缺失；由 SD_09 W2 議題 C 完整實作。"
-                "承接輪次 R83：要建的是 AutoClaude/tests/fixtures/dual_adapter_failover.json"
+                "承接輪次 R84：要建的是 AutoClaude/tests/fixtures/dual_adapter_failover.json"
                 "（BGE-M3 故障注入腳本 ＋ Minimax adapter 切換的量測欄位），"
-                "建好後本 case 自動轉綠。🔴 這一支只在開啟 SD07_REAL_PG_E2E_ENABLED 後才"
+                "🔴 但**只建 fixture 會把這支從 skip 變成假綠**——本 case 在 fixture 存在時"
+                "落到的是下面那句 `assert True`，那是一個恆真斷言，量不到任何 RTO。"
+                "⇒ 解除條件（兩項必須在同一個變更內完成）："
+                "①建出上述 fixture（含可重跑的故障注入步驟與 RTO 量測欄位）；"
+                "②同時把下面那句 `assert True` 改成對 <60s RTO 的真實量測斷言。"
+                "🔴 本輪再推一輪的理由（非「下輪處理」）：本輪是 macOS 本機輪，"
+                "BGE-M3 權重、真實 PG staging、Minimax 憑證三者皆不在本機 ⇒ 故障注入無法"
+                "重現，寫出來的量測只會是編造的數字（那比 skip 更糟）。"
+                "🔴 這一支只在開啟 SD07_REAL_PG_E2E_ENABLED 後才"
                 "現形（否則被 _require_real_pg 那一層 skip 蓋住）⇒ 盤點欠債一律在最大環境"
                 "剖面下跑"
             )

@@ -190,15 +190,34 @@ def test_pgvector_recall_at_10_ge_095():
     # `test_check_defect_log_crossref.py::TestR71CodeRoundLabelsNeverExceedLedgerCurrentRound`
     # 會當場紅）。全樹逐筆比對見 `test_conftest_windows_native_skip_report.py::
     # test_every_debt_handover_round_is_still_in_the_future`。
+    # 🔴 本輪（承接輪次到期的那一輪）：走出口②再推一輪，理由與**可執行的解除條件**
+    # 逐字寫在下面那句 reason 裡（不是「下輪處理」）。同輪 AC3-4／AC5-4／AC6-3 三筆走的
+    # 是出口①（target 檔已建），本筆之所以不同：它缺的不是斷言，是受測對象本身。
     pytest.skip(
-        f"[DEBT] 需 W3 G3 staging 資料集：1k seed + BGE-M3 真實向量。承接輪次 R83"
+        f"[DEBT] 需 W3 G3 staging 資料集：1k seed + BGE-M3 真實向量。承接輪次 R84"
         f"（該輪必須先決定保留或顯式廢止：保留就得同時建自動通道，"
-        f"否則寫好也不會被跑）。{_NO_AUTOMATED_CHANNEL}")
+        f"否則寫好也不會被跑）。"
+        f"🔴 本輪再推一輪的理由（非「下輪處理」）：本輪是 macOS 本機輪，缺件是**受測對象**"
+        f"而非斷言——BGE-M3 權重與 1k 列 staging 資料集在本機都不存在，"
+        f"而在沒有自動通道的前提下把斷言先寫出來，只會把同一筆欠債換成"
+        f"「寫好了但永遠不會跑」的另一種假象（那正是本 case 已經付過的學費）。"
+        f"🔴 解除條件（三項全滿足才做得到，缺一即不得動工）："
+        f"①備妥 PG17+pgvector staging，內含 ≥1k 列真實 BGE-M3（1024 維）向量與"
+        f"per-table HNSW index（AC3-5 的三個 index）；"
+        f"②該環境上 SD07_REAL_PG_E2E_ENABLED=true 且 AUTOCLAUDE_TEST_PG_DSN 指向它；"
+        f"③同一個變更內落地會跑本檔的自動通道（CI job 或 nightly stage），"
+        f"並在 PR 貼出該通道真的跑過本檔的 log 行。"
+        f"🔴 「保留或廢止」是 SD_06 W3 G3 的門檻決定，屬 PM 層級，修復者不得自行拍板。"
+        f"{_NO_AUTOMATED_CHANNEL}")
 
 
 @pg_required
 def test_pgvector_p95_latency_under_50ms():
     """T2 真實 pgvector HNSW p95 latency < 50ms。"""
     pytest.skip(
-        f"[DEBT] 需 W3 G3 staging 資料集（同 T1）。承接輪次 R83"
-        f"（保留或顯式廢止的決定與 T1 同一筆）。{_NO_AUTOMATED_CHANNEL}")
+        f"[DEBT] 需 W3 G3 staging 資料集（同 T1）。承接輪次 R84"
+        f"（保留或顯式廢止的決定與 T1 同一筆）。"
+        f"🔴 本輪再推一輪的理由與解除條件與 T1 逐字同一份（見 "
+        f"test_pgvector_recall_at_10_ge_095 的 reason）：兩者共用同一個 staging 資料集與"
+        f"同一個自動通道，任一項缺件都同時擋住兩支，故刻意不分開推。"
+        f"{_NO_AUTOMATED_CHANNEL}")

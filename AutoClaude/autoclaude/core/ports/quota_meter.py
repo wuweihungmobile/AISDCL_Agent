@@ -14,8 +14,12 @@
 #
 # 🔴 R82／C6 的**誠實劃界：這一軸「已設計、未接線」，缺的是刷新者不是讀者。**
 #   全 repo 唯一會寫這份快取的地方是 harness 的 `tools/lib/quota_gate.py::
-#   refresh_quota_blocking()`，而它唯一的到達路徑是 **Claude Code PreToolUse ＋ 扇出型
-#   工具**。⇒ AutoClaude **獨立跑**（無 Claude Code session、或整場都沒有人派 agent）時，
+#   refresh_quota_blocking()`。🔴 R83 訂正本行原先那句射程（原文逐字：「而它唯一的到達
+#   路徑是 **Claude Code PreToolUse ＋ 扇出型工具**」——接電之後那句話已為假，故不留著當
+#   現行說法）：它現在**也**由 **PostToolUse** 到達，而那個事件的 matcher 覆蓋
+#   `Read|Bash|Grep|Glob|…` ⇒ 只要有人在用 Claude Code，每 180 秒（`QUOTA_CACHE_TTL_
+#   SECONDS`）就會有人刷新這份快取，不再需要「剛好有人派 agent」。
+#   ⇒ 下面那段劃界**縮小但沒有消失**：AutoClaude **獨立跑**（無 Claude Code session）時，
 #   沒有任何東西會讓那份快取變新；`DEFAULT_TTL_SECONDS` 一過，adapter 對每一次 read
 #   都回 `None`＝量不到，而「量不到」在引擎側的既有行為是**不擋**（見
 #   `TokenGuardPlugin.evaluate_quota`：`pct is None` ⇒ 兩道門都不成立）。

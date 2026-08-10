@@ -56,18 +56,32 @@ session **結構完全同形**（同樣 24 個 record key、第一筆同為 `que
 一行 `unlink`，而且它自己就是**可稽核痕跡**（裡面記了武裝當下量到的回合數與跨度，
 回答「這一支為什麼會存在」）。
 
-回歸鎖：`tools/tests/test_context_budget_guard.py`（判準的紅綠、GC 的保護面，皆合成注入）。
+🔴 R83 複審 A-01：本檔的「回收側」曾經一行都沒接上（武裝接通、回收沒接）
+--------------------------------------------------------------------
+落地當時本檔對 `tools/lib/schedule_backend.py` 的 import 數是 **0**：`sentinel_task_names()`
+與 `_remove_task()` 自己硬寫 `powershell.exe`，於是在 mac 上實測 `_powershell` rc=**127**、
+`sentinel_task_names()` 回 `[]`、`_remove_task()` 回 127，而同一刻 `launchctl list` 列著活著
+的哨兵（每 900s 巡邏、永不自我解除）。**最貴的一半是回報**：GC 逐字印「（沒有任何
+AutoSDD_Sentinel_* 工作…）」＝假陰性——專門用來發現增生的那支工具說一切正常。
+處置（本輪）：列舉與移除**一律問 `schedule_backend.select()`**，本檔一行平台知識都不留；
+並把「量不到」與「量到零」在列舉層分開（`None` vs `[]`），與下面 `reap_verdict` ② 同一條
+紀律。附帶的減法：本檔那支 `_powershell` 整支刪除——它本來就是 `planner.run_powershell`
+的第二個家（同一份知識：`powershell.exe` 5.1、`NO_WINDOW`、UTF-8 前置行、BOM+CRLF 落檔）。
+
+回歸鎖：`tools/tests/test_context_budget_guard.py`（判準的紅綠、GC 的保護面，皆合成注入）
+＋ `tools/tests/test_mac_endurance_r83.py`（回收臂真的接上 `select()`、列舉層的 None/[] 之別、
+以及「排程器原語只有宣告過的家」那道全庫判準）。
 """
 from __future__ import annotations
 
 import argparse
 import json
-import subprocess
 import sys
 import tempfile
 import time
 from pathlib import Path
 
+import schedule_backend
 from quota_limits import SYNTHETIC_MODEL
 
 #: 值得續航的最小 assistant 回合數。取值依據見模組 docstring（實測分佈，非拍腦袋）。
@@ -99,15 +113,23 @@ REAPABLE_WHEN_IDLE = TERMINAL_STATES | frozenset({"armed", "sentinel"})
 #: 哨兵工作名前綴（與 `session_resume_planner.sentinel_task_name` 同一個字面）。
 TASK_PREFIX = "AutoSDD_Sentinel_"
 
-#: 無視窗旗標。語意的唯一的家＝`.claude/hooks/context_budget_guard.NO_WINDOW`；本檔不能
-#: import 它（hook → quota_gate → …，反向會成環），故複製表達式並由相等鎖守著不漂開
-#: （見 `tools/lib/quota_meter.NO_WINDOW` 上方那段的同一組理由）。
-NO_WINDOW = (getattr(subprocess, "CREATE_NO_WINDOW", 0)
-             | getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0))
-
-#: 同上，理由與唯一的家見 `context_budget_guard.PS_UTF8_PRELUDE`（相等鎖守著兩份不漂開）。
-PS_UTF8_PRELUDE = ("$OutputEncoding = [Console]::OutputEncoding = "
-                   "[Text.UTF8Encoding]::new($false)\n")
+# 🔴 **本檔曾經持有 `NO_WINDOW` 與 `PS_UTF8_PRELUDE` 兩個字面複本，本輪整組刪除**（墓碑）。
+# 沿革：它們的唯一消費者是 R83 複審 A-01 收斂時整支刪掉的那個 `_powershell`（載具已交回
+# `schedule_backend`／`planner.run_powershell`）⇒ 常數自那一刻起零消費者。當時**沒有**一併
+# 刪掉，理由逐字寫著「相等鎖的另一端住 `tools/tests/test_context_budget_guard.py`，而那一檔
+# 不在本包的授權面」，並附了可執行的達成判準（把 `"sentinel_lifecycle"` 從該測試的兩份名冊
+# 移除、同輪刪掉兩個常數與 `subprocess` import）。
+# 🔴 那句「不在授權面」在**下一包**（R83／PD 獨立驗證）就不再成立——兩支檔同時在射程內，
+# 於是那段話從「誠實劃界」變成「一個會叫下一個人去繞路的過期約束」（與本輪 FC-1 判過的
+# `arm_quota_wakeup` docstring 逐字同型：宣稱一件已經可以做／已經做完的事還做不到）。
+# ⇒ 依它自己寫的判準結清。🔴 **判準本身也一併訂正**：原文寫的達成判準是
+# 「`grep -c "NO_WINDOW\|PS_UTF8_PRELUDE" tools/lib/sentinel_lifecycle.py` ＝ 0」，而那個
+# 數字在**任何**留有墓碑的世界裡都不是 0（本段自己就命中 3 次）⇒ 照抄它的人會判本輪沒做完。
+# 可機械重跑的判準改成具名測試：`tools/tests/test_context_budget_guard.py::ConsoleFreeSpawnTest
+# ::test_the_duplicated_no_window_expression_still_equals_the_ssot` 內的反向釘（兩個名字
+# `hasattr` 皆須為 False）——**加回來而不進相等鎖名冊就會紅**，這比數字元次數有鑑別力。
+# 相等鎖仍有 `quota_meter`／`console_spawn_watch` 兩端在守 `guard` 那份 SSOT；掃描面檔數
+# （`_CONSOLE_FREE_FLOOR`）不受影響——它由 glob 決定，與本檔 import 什麼無關。
 
 
 # ───────────────────────────────────────────────────────── 武裝側（hook 會呼叫這一段）
@@ -218,42 +240,17 @@ def maybe_arm(transcript: Path, session_id: str, *, plan_path: str, spawn,
 
 
 # ───────────────────────────────────────────────────────── 回收側（CLI，hook 不會呼叫）
-def _powershell(script: str, timeout: int = 120) -> tuple[int, str]:
-    """跑一段 PowerShell，回 `(rc, stdout)`。
+def sentinel_task_names() -> list[str] | None:
+    """現存的哨兵工作名；`None`＝**量不到**（載具不可達／列舉指令 rc 非 0）。
 
-    🔴 指名 `powershell.exe`（5.1）而不是 `pwsh`：schtasks 相關操作在本 repo 一律以它為準
-    （見 `session_resume_planner.run_powershell` 的同一段理由），而本機兩個引擎的預設編碼
-    不同。`creationflags`：本檔的 CLI 也可能被無 console 的父行程叫到，理由見 `NO_WINDOW`。
+    🔴 列舉原語由**排程後端**提供（`schedule_backend.select().list_jobs()`）——本檔一次都不問
+    `os.name`、也不自持任何 `powershell.exe`／`launchctl`。R83 複審 A-01 的病正是這裡：修前
+    它硬寫 `Get-ScheduledTask`，mac 上 rc=127 ⇒ 回 `[]`，而 `[]` 與「真的沒有哨兵」外觀相同
+    ⇒ GC 回報一切正常，同一刻排程器裡有活著的哨兵。
+    🔴 回 `None` 而不是 `[]` 是這一支的**全部價值所在**：假陰性在列舉層特別貴（查不到＝
+    「沒有東西要收」），與下面 `reap_verdict` ② 的判例逐字同型（量不到 ≠ 量到零）。
     """
-    holder = Path(tempfile.mkdtemp(prefix="autosdd_sentinel_gc_")) / "run.ps1"
-    # UTF-8 前置行：本檔會印出工作名與理由，而 PS 5.1 預設以主控台 codepage 寫 stdout
-    # ⇒ 非 ASCII 會降解（同 `guard.PS_UTF8_PRELUDE` 的立案）。本檔不能 import guard（成環），
-    # 故複製同一個字面，並由 `test_context_budget_guard.py` 的相等鎖守著不漂開。
-    holder.write_text(PS_UTF8_PRELUDE + script, encoding="utf-8-sig", newline="\r\n")
-    try:
-        proc = subprocess.run(
-            ["powershell.exe", "-NoProfile", "-ExecutionPolicy", "Bypass",
-             "-File", str(holder)],
-            capture_output=True, text=True, encoding="utf-8", errors="replace",
-            timeout=timeout, check=False, creationflags=NO_WINDOW)
-    except (OSError, subprocess.SubprocessError):
-        return 127, ""
-    return proc.returncode, proc.stdout
-
-
-def sentinel_task_names() -> list[str]:
-    """現存的哨兵工作名。
-
-    🔴 一律用 `Get-ScheduledTask`：`schtasks /query` 在本機實測會回空＝假陰性
-    （根 CLAUDE.md〈查詢載具自己也會騙人〉）。而假陰性在**這一支**特別危險——
-    查不到就等於「沒有東西要收」，GC 會回報一切正常。
-    """
-    rc, out = _powershell(
-        f"Get-ScheduledTask | Where-Object {{ $_.TaskName -like '{TASK_PREFIX}*' }} "
-        "| ForEach-Object { $_.TaskName }\n")
-    if rc != 0:
-        return []
-    return [line.strip() for line in out.splitlines() if line.strip().startswith(TASK_PREFIX)]
+    return schedule_backend.select().list_jobs(TASK_PREFIX)
 
 
 def session_of(task_name: str) -> str:
@@ -356,16 +353,30 @@ def _newest_session(base: Path | None) -> str:
 
 
 def _remove_task(task: str) -> int:
-    quoted = task.replace("'", "''")
-    rc, _ = _powershell(
-        f"Unregister-ScheduledTask -TaskName '{quoted}' -Confirm:$false\n"
-        f"if (Get-ScheduledTask -TaskName '{quoted}' -EA SilentlyContinue) "
-        "{ exit 1 } else { exit 0 }\n")
-    return rc
+    """移除一支哨兵；`0`＝**驗到它真的不見了**（rc 本身在兩個平台都不是憑證）。
+
+    載具的唯一的家＝`schedule_backend`（Windows→`Unregister-ScheduledTask` ＋ 回查字樣；
+    mac→先刪 plist 斷持久化、再 `bootout`、再 `launchctl print` 回讀）。本檔不留第二份。
+    🔴 這條路在 mac 上是**已經實測過走得通**的那一條（舵手手動 `--remove-schtasks
+    --task-name <label>` rc=0 收掉本輪孤兒走的正是它）⇒ 修前壞掉的只有「列舉」那一半，
+    而那使 GC 比整支壞掉更危險：移除得動、卻永遠找不到要移除的東西。
+    """
+    return schedule_backend.select().disarm(task)
 
 
 def _sweep_artifacts(session_id: str, tmp: Path) -> list[str]:
-    """把該 session 的哨兵痕跡一起收掉（任務書／閂鎖／boot log／水位 state）。"""
+    """把該 session 的哨兵痕跡一起收掉（任務書／閂鎖／boot log／水位 state）。
+
+    🔴 **誠實劃界（R83 複審 A-07，本輪未收，明文登記）**：「什麼時候可以刪任務書」現在有
+    **兩個家**——本函式按 **session** 刪四件（呼叫端是 GC，判準是 `reap_verdict`），而
+    `tools/lib/quota_escalation.gc_plans()` 按**齡**刪 `autosdd_resume_plan_*.md`（判準是
+    `PLAN_GC_AGE_SECONDS`）。兩者今天不衝突（一支按 id、一支按 mtime），但同一族檔有兩套
+    刪除時機，改了一邊不會有任何東西轉紅。收斂該往哪一邊、以及誰是唯一的家，**尚未決定**。
+    🔴 此處刻意**不寫承接輪號**（R83 訂正）：承接輪次的唯一的家是帳本
+    （`docs/06_quality/AutoSDD_Defect_Log.md` 的「狀態」欄），在程式碼裡寫一個還沒發生的
+    輪號正是本輪已修掉 14 處的那個病——`test_check_defect_log_crossref` 的
+    `TestR71CodeRoundLabelsNeverExceedLedgerCurrentRound` 會對它判紅，而它判得對。
+    """
     gone = []
     for name in (f"autosdd_resume_plan_{session_id}.md",
                  f"{ARM_MARKER_PREFIX}{session_id}.json",
@@ -380,26 +391,66 @@ def _sweep_artifacts(session_id: str, tmp: Path) -> list[str]:
     return gone
 
 
+# 🔴 R83 複審連帶（「哨兵靜默消失」同族，本輪實機觀測到的那個形態）
+# ----------------------------------------------------------------
+# 上面那支 `_sweep_artifacts` 把任務書／閂鎖／boot log／水位 state **四件全部刪掉**，而
+# `_remove_task` 又把排程本體拆掉 ⇒ `--apply` 跑完之後，「這支哨兵曾經存在、是誰收掉的、
+# 為什麼收」在磁碟上一個字都不剩。那個磁碟狀態與本輪實機觀測到的病徵**完全同形**：哨兵
+# 判過四次 `arm_reset`、log 某一刻起空白、`launchctl` 零命中——事後無從歸因，連「是被收掉
+# 還是自己死了」都分不出來。根 CLAUDE.md〈反事後諸葛取證規則〉要的是「沒觸發＝可偵測」，
+# 而回收是排程生命週期的另一半，同一條規則兩邊都得成立；此前只有武裝那一半有痕跡。
+# 🔴 稽核痕跡檔（`autosdd_resume_log_*.jsonl`）刻意**不在** `_sweep_artifacts` 的清單裡，
+# 就是為了留下這一行；它的路徑規則與格式的唯一的家＝planner（鍵是**任務書路徑**而不是
+# session id，理由見 `planner.endurance_log_path` 上方那段），本檔不抄第二份。
+def _record_reap(plan: Path, **fields: object) -> str:
+    """把「GC 收掉了這一支」append 進續航稽核痕跡；回落檔路徑，**沒寫成回空字串**。
+
+    🔴 回空字串而不是靜默成功：`planner.append_log` 對寫入失敗是刻意吞掉的（留不下痕跡
+    不得升級成回收失敗），所以「有沒有真的留下痕跡」必須由呼叫端自己驗——判準是那個檔
+    **變大了**，不是「指令沒有拋例外」（同本 repo 通篇「rc 不是憑證」那一條）。少了這半，
+    「痕跡寫不進去」與「痕跡寫好了」外觀相同，而這一支存在的全部理由就是要讓兩者分得開。
+    """
+    planner = _planner_module()
+    if planner is None:
+        return ""
+    try:
+        trace = planner.endurance_log_path(plan)
+        before = trace.stat().st_size if trace.is_file() else -1
+        planner.append_log(trace, "gc_reaped", **fields)
+        after = trace.stat().st_size if trace.is_file() else -1
+    except Exception:  # noqa: BLE001 — 留不下痕跡不得讓回收本身失敗，但必須回報得出來
+        return ""
+    return str(trace) if after > before else ""
+
+
 def gc(*, apply: bool = False, keep: tuple[str, ...] = (),
-       min_idle: float = GC_IDLE_SECONDS, tmp_dir: str | None = None) -> list[dict]:
-    """列出每支哨兵的處置；`apply=False`（預設）只看不動。
+       min_idle: float = GC_IDLE_SECONDS, tmp_dir: str | None = None) -> list[dict] | None:
+    """列出每支哨兵的處置；`apply=False`（預設）只看不動。`None`＝**列舉量不到**。
 
     🔴 預設 dry-run 是刻意的：這支工具的失手代價是不可逆的（拆掉別人正在等的續航），
     而它的**價值**在 dry-run 就已經全部兌現了——看清單本來就是掌舵者要的那件事。
+    🔴 回 `None` 而不是空清單（R83 複審 A-01）：修前列舉失敗與「排程器裡真的沒有哨兵」
+    塌成同一個 `[]`，於是 `main()` 印出「沒有任何工作」並 rc=0 ⇒ **假陰性被回報成成功**。
+    這一格與 `reap_verdict` ② 是同一條紀律，只是那一支守的是「哪一支可以收」、
+    這一支守的是「有沒有東西可收」——兩個問題各自都會把「量不到」讀成「量到零」。
     """
+    tasks = sentinel_task_names()
+    if tasks is None:
+        return None
     base = _transcript_dir()
     tmp = Path(tmp_dir or tempfile.gettempdir())
     protected_ids = set(keep) | {_newest_session(base)}
     now = time.time()
     rows: list[dict] = []
-    for task in sentinel_task_names():
+    for task in tasks:
         sid = session_of(task)
         # 🔴 `base is None` 一律傳 `None`（＝量不到），**不得**塌成 `False`：
         # 那個塌陷正是本檔第一版實跑 dry-run 時把三支哨兵全判成可收的原因。
         transcript = (base / f"{sid}.jsonl") if base is not None else None
         exists = None if base is None else bool(transcript and transcript.is_file())
         idle = (now - transcript.stat().st_mtime) if exists else None
-        state = plan_state(tmp / f"autosdd_resume_plan_{sid}.md") if exists else None
+        plan = tmp / f"autosdd_resume_plan_{sid}.md"
+        state = plan_state(plan) if exists else None
         reap, why = reap_verdict(transcript_exists=exists, idle_seconds=idle,
                                  state=state, protected=sid in protected_ids,
                                  min_idle=min_idle)
@@ -408,6 +459,11 @@ def gc(*, apply: bool = False, keep: tuple[str, ...] = (),
         if reap and apply:
             row["unregister_rc"] = _remove_task(task)
             row["swept"] = _sweep_artifacts(sid, tmp)
+            # 痕跡**最後**寫：這一行要能同時交代排程與殘骸兩件事的結果，而它的落檔路徑
+            # 只由任務書**路徑字串**推導（不讀那個檔）⇒ 殘骸已被刪掉不影響它。
+            row["trace"] = _record_reap(plan, task=task, session_id=sid, why=why,
+                                        unregister_rc=row["unregister_rc"],
+                                        swept=row["swept"])
         rows.append(row)
     return rows
 
@@ -425,17 +481,31 @@ def main(argv: list[str]) -> int:
 
     rows = gc(apply=args.apply, keep=tuple(args.keep),
               min_idle=args.min_idle_hours * 3600)
+    backend = schedule_backend.select()
+    # 🔴 兩個結局刻意分開，rc 也分開（R83 複審 A-01：修前它們是同一句話、同一個 rc=0）：
+    if rows is None:
+        print(f"❌ **量不到**：排程器（載具＝{backend.name}）的列舉失敗 ⇒ 這**不是**"
+              "「沒有東西要收」。在拿到一次成功的列舉之前，不要相信「哨兵沒有增生」。\n"
+              f"   現查指令：\n      {backend.evidence_hint()}", file=sys.stderr)
+        return 1
     if not rows:
-        print("（沒有任何 AutoSDD_Sentinel_* 工作；或 Get-ScheduledTask 取不到——"
-              "後者是假陰性，請自行現查一次）")
+        print(f"✅ 排程器（載具＝{backend.name}）裡沒有任何 {TASK_PREFIX}* 工作。"
+              "這是**量到的零**——量不到那一條走的是 rc=1 並印在 stderr。")
         return 0
     for row in rows:
         mark = "🗑 收" if row["reap"] else "✅ 留"
         if row["reap"] and args.apply:
-            mark += f"（rc={row.get('unregister_rc')}，殘骸 {len(row.get('swept') or [])} 件）"
+            # 🔴 痕跡那一格刻意印在使用者看得到的地方，且「沒留下」要明說：回收把殘骸全刪，
+            # 少了這一行，事後查「哨兵怎麼不見了」會完全查不到（見 `_record_reap` 的 WHY）。
+            mark += (f"（rc={row.get('unregister_rc')}，殘骸 "
+                     f"{len(row.get('swept') or [])} 件，痕跡＝"
+                     f"{row.get('trace') or '❌ 沒留下（回收已完成，但事後無從歸因）'}）")
         print(f"{mark}  {row['task']}\n      {row['why']}")
     if not args.apply and any(r["reap"] for r in rows):
-        print("\n以上是 dry-run。要真的收：加 --apply（會 Unregister-ScheduledTask 並刪殘骸）")
+        # 🔴 動詞取自後端而不是寫死 `Unregister-ScheduledTask`：後者在 mac 上不存在，而這一行
+        # 是使用者唯一會照著做的那一行（同 `quota_gate.evidence_hint()` 的 R83／F2-② 判例）。
+        print(f"\n以上是 dry-run。要真的收：加 --apply（載具＝{backend.name}，"
+              "會解除排程並刪殘骸；解除是否成立由後端自己回讀驗證，rc 不是憑證）")
     return 0
 
 

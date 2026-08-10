@@ -898,6 +898,208 @@ class StaticWindowsSkipTagScanTest(unittest.TestCase):
         self.assertIn("掃描面為空", problems[0])
 
 
+class ProblemReportItemizationTest(unittest.TestCase):
+    """R83：「表頭報 N 筆，明細只印其中兩類」的回歸鎖（舵手當回合實測到的 2 行輸出）。
+
+    修前實況：`report_untagged_windows_skip_decorators` 的 `problems` 是**七個類別的
+    總和**，總表頭印 `len(problems)`，而它後面的明細迴圈只涵蓋 `unregistered` 與
+    `offenders` ⇒ 唯一的問題落在別的類別時，讀者看到「發現 1 個問題：」之後一片空白，
+    於是去找一個根本不存在的第二筆。七類之中 `掃描面為空` 更是從頭到尾**沒有任何一段
+    程式碼印它**，而既有的 `test_empty_scan_surface_is_fail_closed` 只讀回傳值、把
+    stderr 丟進垃圾桶 ⇒ 結構上看不到這件事（一道鎖看得見缺陷的一半，就會讓人以為
+    整件事有人在守）。
+
+    本組鎖的是**不變量本身**，不是今天那一筆：
+      ① 進到 buckets 的每一筆明細都必須逐字出現在輸出裡——**含未登記的類別**；
+      ② 表頭數字必須等於印出來的明細行數（同一個來源，不得再各算一次而脫鉤）；
+      ③ 生產端的類別鍵 ↔ `_PROBLEM_CATEGORY_WHY` 必須**雙向**相等 ⇒ 「新增一類卻忘了
+         印」在寫出來的**當回合**就轉紅，不必等那一類真的觸發（`掃描面為空` 在真 repo
+         上永遠不觸發，靠「等它發生」等於永遠不會發現）。
+    """
+
+    @staticmethod
+    def _producer_keys() -> set[str]:
+        """以 AST 讀出生產端那個 dict literal 的鍵。
+
+        刻意用靜態讀取而非「跑一次掃描看回傳了哪些前綴」：後者只看得到**本次真的觸發**
+        的類別，而本鎖要抓的正是「原始碼裡多了一鍵、但那一鍵這次沒觸發」。
+        """
+        src = inspect.getsource(
+            windows_skip_tags.report_untagged_windows_skip_decorators)
+        calls = [
+            node for node in ast.walk(ast.parse(textwrap.dedent(src)))
+            if isinstance(node, ast.Call)
+            and getattr(node.func, "id", None) == "_ordered_buckets"
+        ]
+        assert len(calls) == 1, f"生產端入口不是恰好一個 `_ordered_buckets(...)`：{calls}"
+        literal = calls[0].args[0]
+        assert isinstance(literal, ast.Dict), "生產端必須是 dict literal，否則本鎖讀不到鍵"
+        return {k.value for k in literal.keys if isinstance(k, ast.Constant)}
+
+    def test_every_message_is_itemized_including_unregistered_categories(self) -> None:
+        """不變量①②：每一筆明細都被印出，且表頭數字＝明細行數。
+
+        合成的 `尚未登記的新類別` 就是「下一個人新增一類卻忘了登記」的注入對照組：
+        它必須**照印並被點名**，而不是靜默消失——靜默消失正是修前那個病的極端形。
+        """
+        buckets = {
+            name: [f"{name}-合成第一筆", f"{name}-合成第二筆"]
+            for name in windows_skip_tags._PROBLEM_CATEGORY_WHY
+        }
+        buckets["尚未登記的新類別"] = ["合成：未登記類別的唯一一筆"]
+        lines = windows_skip_tags.render_problem_report(buckets)
+        blob = "\n".join(lines)
+        for category, msgs in buckets.items():
+            for msg in msgs:
+                self.assertIn(
+                    msg, blob,
+                    f"類別 `{category}` 的明細沒有被印出來——讀者會看到一個報了 N 筆卻"
+                    f"列不出 N 筆的清單，然後去找一個不存在的問題（修前實況）",
+                )
+        self.assertIn(
+            "沒有登記在", blob,
+            "未登記的類別必須被點名（fail-loud）：漏登記本身是缺陷，但不得因此吃掉問題本文",
+        )
+        itemized = [line for line in lines if line.startswith("   - ")]
+        total = sum(len(msgs) for msgs in buckets.values())
+        self.assertEqual(
+            len(itemized), total,
+            f"印出 {len(itemized)} 行明細、實際有 {total} 筆問題——兩者一旦不等，"
+            f"表頭那個數字就是在替看不見的東西背書",
+        )
+        self.assertIn(
+            f"發現 {total} 個問題", lines[0],
+            "表頭數字必須與明細同源（修前是 len(總和) vs 只涵蓋兩類的迴圈）",
+        )
+
+    def test_extra_detail_is_never_silently_dropped(self) -> None:
+        """補充明細（逐站點理由／修法指路）自己也受同一條不變量管轄。
+
+        它沒有自己的計數，所以「鍵名打錯 ⇒ 整段消失」不會讓任何數字對不上——這正是
+        同型缺陷的第二個入口，故歸屬不到 bucket 的補充明細一律照印並點名。
+        """
+        lines = windows_skip_tags.render_problem_report(
+            {"漏標": ["合成：某支測試漏標"]},
+            {"漏標": ["       · 合成的逐站點理由"], "鍵名打錯了": ["       · 合成的孤兒明細"]},
+        )
+        blob = "\n".join(lines)
+        self.assertIn("合成的逐站點理由", blob)
+        self.assertIn(
+            "合成的孤兒明細", blob,
+            "歸屬不到任何類別的補充明細被靜默丟掉 ⇒ 沒有任何計數會對不上，永遠不會被發現",
+        )
+
+    def test_producer_keys_and_the_registry_are_the_same_set(self) -> None:
+        """不變量③：雙向相等。多一鍵沒登記＝紅；登記了卻沒有生產者（死類別）＝也紅。
+
+        單向（只查「登記的都有人生產」）擋不住本輪這個缺陷的復發形態——新增一鍵才是
+        危險的那個方向。反向也判是因為死類別會讓這張表變成「說了不算」的散文。
+        """
+        self.assertEqual(
+            self._producer_keys(), set(windows_skip_tags._PROBLEM_CATEGORY_WHY),
+            "生產端的類別鍵與 `_PROBLEM_CATEGORY_WHY` 不一致：多的那一鍵沒有 WHY 可印"
+            "（讀者只會看到一行「這個類別沒有登記」），少的那一鍵是死類別",
+        )
+
+    def test_the_returned_problems_are_derived_only_from_the_buckets(self) -> None:
+        """封住旁路：問題只能經 buckets 出去。
+
+        `render_problem_report` 只保證「進到 buckets 的一定被印」；若有人另攢一份扁平
+        清單再併進 return（修前正是那個形狀：`problems` 同時裝七類、印列面只走兩類），
+        不變量①②當場失效而本檔其他測試都看不到。故判三件**形態**：
+          ① 函式內沒有名為 `problems` 的累積器（修前那個名字，也是最可能的復發形）；
+          ② 每一條非空 return 都必須取自 `buckets`——這一條才是通則，換個變數名也擋得住；
+          ③ 非空 return 不得是**併接**（`A + B` 或多個 `*` 展開）。
+
+        🔴 ③ 是獨立複審實測補上的（R83 驗證者注入 case G）：只判 ②「dump 裡出現
+        `buckets`」時，`return [… for … in buckets …] + bypass` 這個形狀**照樣通過**
+        ——`buckets` 確實出現了，旁路那一半卻沒有任何人印它。該注入當時是靠兩支**行為**
+        鎖轉紅才被抓到，而那兩支只在旁路那一筆**恰好在本次觸發**時才有鑑別力（條件式的
+        旁路仍會靜默溜過）⇒ 形態面必須自己封住。今天的實作既非併接也無 `*` 展開，故 ③
+        是零成本；`return list(_flatten(buckets))` 這類正當重構仍然放行（不判「必須是
+        某個特定形狀」，只判「buckets 之外還有第二個來源」這一件事）。
+
+        🔴 刻意判 AST 而非 grep 字串：本函式的註解逐字提到 `problems.append` 以說明
+        修前形態，第一版用字串比對時被自己的散文判紅（實測），而守的標的是**程式碼**。
+        """
+        fn = ast.parse(textwrap.dedent(inspect.getsource(
+            windows_skip_tags.report_untagged_windows_skip_decorators))).body[0]
+        collectors: set[str] = set()
+        for node in ast.walk(fn):
+            if isinstance(node, ast.AugAssign) and isinstance(node.target, ast.Name):
+                collectors.add(node.target.id)
+            if (isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)
+                    and node.func.attr in {"append", "extend"}
+                    and isinstance(node.func.value, ast.Name)):
+                collectors.add(node.func.value.id)
+        self.assertNotIn(
+            "problems", collectors,
+            "reporter 又出現扁平的 `problems` 累積器 ⇒ 有問題不經 buckets ⇒ 印列面看不到它。"
+            "請改成在那個 dict literal 內多一鍵，並到 `_PROBLEM_CATEGORY_WHY` 登記",
+        )
+        returns = [node for node in ast.walk(fn) if isinstance(node, ast.Return)]
+        self.assertTrue(returns, "reporter 沒有 return——本鎖無從取值")
+        for node in returns:
+            if isinstance(node.value, ast.List) and not node.value.elts:
+                continue  # 「沒有問題」的那條路徑，回空 list 是對的
+            self.assertIn(
+                "buckets", ast.dump(node.value),
+                f"第 {node.lineno} 行的 return 不是從 `buckets` 展開的 ⇒ 回傳的問題可能"
+                f"從來沒有被印出來（表頭數字與明細再度脫鉤）",
+            )
+            merged = [n for n in ast.walk(node.value)
+                      if isinstance(n, ast.BinOp) and isinstance(n.op, ast.Add)]
+            starred = [n for n in ast.walk(node.value) if isinstance(n, ast.Starred)]
+            self.assertEqual(
+                (len(merged), len(starred) > 1), (0, False),
+                f"第 {node.lineno} 行的 return 把 buckets 展開的結果與**另一個來源**併接"
+                f"（`+` 或多個 `*` 展開）⇒ 那一半不經 `render_problem_report`、永遠不會被"
+                f"印出來，而 `buckets` 仍出現在同一條 return 裡故上一道判準放行（獨立複審"
+                f"注入 case G 實測）。新問題請進那個 dict literal，不要在 return 上併接",
+            )
+
+    def test_empty_scan_surface_is_itemized_not_merely_counted(self) -> None:
+        """端到端注入（**修前必紅**的那一支）：空掃描面是七類中唯一沒人印的那一類。
+
+        修前輸出＝只有一行「發現 1 個問題：」，之後空無一物（舵手實測形態）。
+        """
+        base = Path(tempfile.mkdtemp(prefix="rru_report_empty_"))
+        self.addCleanup(lambda: shutil.rmtree(base, ignore_errors=True))
+        buf = io.StringIO()
+        with contextlib.redirect_stderr(buf):
+            problems = windows_skip_tags.report_untagged_windows_skip_decorators(
+                base, run_root_unittests._PATTERN)
+        out = buf.getvalue()
+        self.assertEqual(len(problems), 1, f"空掃描面必須 fail-closed：{problems}")
+        self.assertIn("掃描面為空", out, "類別名必須出現，否則讀者不知道紅在哪一層")
+        for problem in problems:
+            self.assertIn(
+                problem.split("：", 1)[1], out,
+                "回傳了問題卻沒有印出它的明細——讀者只會看到一個空清單",
+            )
+
+    def test_the_live_gate_prints_every_problem_it_returns(self) -> None:
+        """活體鎖：真 repo 這一棵樹上，回傳的每一筆都必須印得出來。
+
+        兩個分支都有斷言（刻意不寫成「有問題才檢查」的空轉鎖）：有問題時驗逐筆覆蓋，
+        沒問題時驗「什麼都不該印」——後者是修前另一半的對稱風險（替空清單印表頭）。
+        """
+        buf = io.StringIO()
+        with contextlib.redirect_stderr(buf):
+            problems = windows_skip_tags.report_untagged_windows_skip_decorators(
+                run_root_unittests._TESTS_DIR, run_root_unittests._PATTERN)
+        out = buf.getvalue()
+        if not problems:
+            self.assertEqual(out, "", "沒有問題卻印了東西＝表頭在替一個空清單背書")
+            return
+        self.assertIn(f"發現 {len(problems)} 個問題", out, "表頭數字必須是回傳的筆數")
+        for problem in problems:
+            self.assertIn(
+                problem.split("：", 1)[1], out,
+                f"閘門回報了 `{problem}` 卻沒印出它的明細——讀者會去找一個看不到的問題",
+            )
+
+
 class DumpFailureDetailTest(unittest.TestCase):
     """R57 round 3 ARCH-R57R3-03：非決定性翻紅（1/14）當時無失敗明細可查，落檔補上。"""
 

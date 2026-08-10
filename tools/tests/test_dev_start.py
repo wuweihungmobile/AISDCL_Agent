@@ -3926,6 +3926,78 @@ class MacNightlyStatusTestCase(unittest.TestCase):
         )
         os.chmod(self.launchctl, 0o755)
 
+        # stub pmset：與 launchctl stub 同理由、同預設姿態（預設回報「健康」，讓
+        # 其餘維度的訊號不被機器狀態掩蓋）。
+        #
+        # 🔴 R82 這道縫為何非有不可：WakeToRun／NextRunTime 兩列的輸入是**這台機器的
+        # 電源排程狀態**（`pmset -g sched`），不是 plist 檔案內容。沒有這道縫，
+        # `install_healthy_plist()` 就只定義了「健康」的一半，而
+        # `test_healthy_plist_passes_every_capability_row` 那句「每列皆 ✅」實際上
+        # 隱含要求「跑測試這台 Mac 剛好排過 pmset repeat」——那需要 sudo、安裝器
+        # 刻意不代跑，是多數 Mac 的**非**常態 ⇒ 該鎖在真 mac 上結構性必紅。
+        # 實證：本輪之前這兩支測試從未在真 mac 上跑綠過（R82 及更早都在 Windows
+        # 完成，整組被 class 上的 @skipUnless(darwin) 跳掉），紅是第一次真的跑才浮出來的。
+        # 縫換掉的是**量測面的來源**，不是覆蓋：兩列仍在「每列皆 ✅」的斷言裡，
+        # 而且下面另有一組把它們打成 ⚠️ 的紅控制組，證明這裡不是橡皮圖章。
+        self.pmset = self.root / "stub_pmset.sh"
+        self.set_pmset(self.PMSET_HEALTHY)
+
+    #: stub pmset 對「已排定每日喚醒」的輸出。**逐字取自真 pmset 的行為**，不是猜的：
+    #: `strings /usr/bin/pmset` 內的輸出樣板是 `  %s at %s %s`、區段標題是
+    #: `Repeating power events:`，而 %s 是 com.apple.AutoWake.plist 的 `eventtype`
+    #: 原值（本機 `plutil -p` 實查該 plist 確認）；`pmset repeat wakeorpoweron` 的
+    #: eventtype 即 `wakepoweron`。R82 曾把判準字面值寫成 `wake or poweron`，而
+    #: `strings /usr/bin/pmset | grep -c "wake or poweron"` ＝ 0 ⇒ 那個判準恆不命中。
+    #: 本常數釘住的正是這件事：若安裝器再退回押那句散文，本 stub 的輸出會判不出來、
+    #: 健康控制組立刻轉紅。
+    PMSET_HEALTHY = (
+        'printf "Repeating power events:\\n'
+        '  wakepoweron at 1:55AM every day\\n"\n'
+        "exit 0\n"
+    )
+    #: pmset 存在、但一件排程都沒有——**本機實測的真實常態**（`pmset -g sched`
+    #: rc=0、stdout 0 bytes）。這正是修前讓兩支測試轉紅的那個狀態。
+    PMSET_NO_SCHEDULE = "exit 0\n"
+    #: 只有一次性事件（macOS 自己常年掛著 calaccessd／osanalytics 的 user-invisible
+    #: wake，本機 `plutil -p /Library/Preferences/SystemConfiguration/com.apple.AutoWake.plist`
+    #: 實查到兩則）。它撐不起「每天 02:00 前叫醒」的語意，不得被算成已排定。
+    PMSET_ONESHOT_ONLY = (
+        'printf "Scheduled power events:\\n'
+        ' [0]  wake at 08/11/2026 01:52:44 by \'com.apple.alarm.user-invisible\'\\n"\n'
+        "exit 0\n"
+    )
+    #: 一次性的 **wakeorpoweron**——這才是「全文子字串比對」那個舊形態真正會吃下去的
+    #: 假綠，而 `PMSET_ONESHOT_ONLY`（eventtype＝`wake`）**吃不到**：`wake` 不是詞彙表
+    #: `wakepoweron|wakeorpoweron|poweron` 的子字串，所以那一支即使拿全文比對去跑也照樣綠
+    #: （本輪實測：忠實還原全文比對 → 24 tests OK，rc=0）。⇒ 沒有這一支，
+    #: 「一次性事件不得算數」這件事在**歷史上真的出過錯的那個形態**上是零覆蓋的。
+    #:
+    #: 🔴 這不是虛構的 OS 行為，是反組譯實證：一次性段的顯示路徑（` [%ld]  %s at %s`）
+    #: 在印出前先把 eventtype 原值與 `wakepoweron` 逐位元組比對
+    #: （`x9=0x65776f70656b6177`＝"wakepowe" ＋ `w10=0x006e6f72`＝"ron"），**相等就把顯示
+    #: 字串換成字面值 `wakeorpoweron`**（`csel x24, x9, x8, ne`，x8 指向 0x15d53）。
+    #: 重複段則不做這個代換、直印原值 ⇒ 同一個 eventtype 在兩段的渲染**不同**。
+    #: 使用者把 `pmset repeat` 打成 `pmset schedule` 就會落在這一格：事件跑一次就沒了，
+    #: 撐不起「每天 02:00 前叫醒」，但全文比對會回報「已排定」。
+    PMSET_ONESHOT_WAKEORPOWERON = (
+        'printf "Scheduled power events:\\n'
+        " [0]  wakeorpoweron at 08/11/2026 01:55:00 by 'me'\\n\"\n"
+        "exit 0\n"
+    )
+
+    def set_pmset(self, body: str) -> None:
+        """換掉 stub pmset 的行為（body 為 shebang 之後的腳本本體）。"""
+        self.pmset.write_text("#!/bin/bash\n" + body, encoding="utf-8")
+        os.chmod(self.pmset, 0o755)
+
+    def remove_pmset(self) -> None:
+        """讓 `IMN_PMSET` 指向一個不存在的路徑＝模擬「這台機器沒有 pmset」。
+
+        與 `PMSET_NO_SCHEDULE` 是**兩個不同的狀態**，安裝器必須分辨得出來
+        （前者要人去裝／換機器，後者要人去跑那句 sudo 指令）。
+        """
+        self.pmset.unlink()
+
     def run_installer(self, *args: str) -> subprocess.CompletedProcess:
         """跑沙箱裡那份**真實的**安裝器（任意模式）。
 
@@ -3933,6 +4005,8 @@ class MacNightlyStatusTestCase(unittest.TestCase):
         改動機器狀態的路徑在測試側零行為覆蓋——「load 失敗仍宣稱成功」這種缺陷
         結構上不可能被任何既有鎖看到。fake HOME ＋ `IMN_LAUNCHCTL` stub 讓這兩條
         路徑可以在不觸碰真實 `~/Library/LaunchAgents`／真實 launchd 的前提下驗行為。
+        R82 補上 `IMN_PMSET`：兩個 stub 一起，本夾具才真的與「跑測試那台機器的
+        系統狀態」無關——否則報表裡仍有兩列的值是機器給的，測試對它零控制權。
         """
         return subprocess.run(
             # bash-ok: MacNightlyStatusTestCase 掛 @skipUnless(sys.platform == "darwin")
@@ -3941,7 +4015,8 @@ class MacNightlyStatusTestCase(unittest.TestCase):
             ["bash", str(self.root / "tools" / "install_mac_nightly.sh"), *args],
             capture_output=True, text=True, encoding="utf-8", errors="replace",
             env={**os.environ, "HOME": str(self.home),
-                 "IMN_LAUNCHCTL": str(self.launchctl)},
+                 "IMN_LAUNCHCTL": str(self.launchctl),
+                 "IMN_PMSET": str(self.pmset)},
         )
 
     def run_status(self) -> subprocess.CompletedProcess:
@@ -3999,9 +4074,18 @@ class TestMacNightlyPlistCapabilityTable(MacNightlyStatusTestCase):
     """R67-M37：`--status` 必須檢查**已安裝 plist 的內容**，不只檢查它存在。"""
 
     def test_healthy_plist_passes_every_capability_row(self) -> None:
-        """控制組：安裝器自己產的 plist 必須每列皆 ✅、且無「與期望不符」彙總行。
+        """控制組：健康 plist ＋ 健康機器狀態 ⇒ 每列皆 ✅、且無「與期望不符」彙總行。
 
         沒有這一組，「退化 plist 會噴 ⚠️」只證明載具會叫，不證明它會分辨。
+
+        🔴 R82：「健康」在本測試裡是**兩個自變數**，不是一個。能力表混了兩種輸入——
+        大多數列讀 plist **檔案內容**（`install_healthy_plist()` 全權控制），
+        WakeToRun／NextRunTime 兩列讀 `pmset -g sched` ＝ **這台機器的電源排程狀態**
+        （需 sudo 才排得起來，安裝器刻意不代跑）。修前只設了前者就斷言「每列皆 ✅」，
+        等於偷偷把「跑測試這台 Mac 剛好排過 pmset repeat」寫成前提；那是多數 Mac 的
+        **非**常態 ⇒ 本測試在真 mac 上結構性必紅，而在 Windows 上被 class 的
+        @skipUnless(darwin) 跳過所以沒有人看見。夾具的 pmset stub 把第二個自變數也
+        收進測試手裡，兩列因此**留在**斷言內（沒有被拿掉、沒有被放寬成允許 ⚠️）。
         """
         self.install_healthy_plist()
         self.write_heartbeat()
@@ -4010,6 +4094,12 @@ class TestMacNightlyPlistCapabilityTable(MacNightlyStatusTestCase):
         self.assertIn("補跑保護能力", proc.stdout, "能力表整段缺席")
         self.assertIn("✅ RunAtLoad = true   (expected true)", proc.stdout)
         self.assertIn("✅ plist 內容與現行安裝器產出逐位元組一致（無漂移）", proc.stdout)
+        self.assertIn("✅ WakeToRun 對等（pmset repeat 排程喚醒） = 已排定", proc.stdout,
+                      f"已排定的 repeat wakeorpoweron 沒被判讀出來：{proc.stdout!r}")
+        # 憑證是那個**值**，不是某個指令的 rc（根 CLAUDE.md 反「事後諸葛」取證規則）。
+        # 只斷言「有」不斷言值，等於允許安裝器印一句「有」而不印時刻——那正是該規則在防的。
+        self.assertIn("憑證值＝wakepoweron at 1:55AM every day", proc.stdout,
+                      f"NextRunTime 對等列沒把前瞻憑證的**值**印出來：{proc.stdout!r}")
         self.assertNotIn("項與期望不符", proc.stdout,
                          f"健康 plist 不該有任何能力列告警：{proc.stdout!r}")
 
@@ -4060,6 +4150,11 @@ class TestMacNightlyPlistCapabilityTable(MacNightlyStatusTestCase):
         安裝器的預測。③ 才是關鍵——靜態抽取器是那道跨平台鎖的量測面，而量測面本身
         必須被驗證（若它多算/少算，跨平台鎖會在 mac 以外的所有平台默默失準，
         而沒有任何人有辦法發現）。
+
+        🔴 R82：②「每一列都是 ✅」同樣吃兩個自變數（plist 檔案內容 ＋ 機器的 pmset
+        排程狀態），理由與 `test_healthy_plist_passes_every_capability_row` 逐字相同，
+        夾具的 pmset stub 已把後者收進測試手裡。③ 不受影響——它比的是列**數**，
+        兩列的值是 ✅ 還是 ⚠️ 都算一列。
         """
         static_rows = _cap_parity.mac_capability_rows(self.installer_source())
         self.install_healthy_plist()
@@ -4078,6 +4173,203 @@ class TestMacNightlyPlistCapabilityTable(MacNightlyStatusTestCase):
         self.assertTrue(
             all("⚠️" not in row for row in runtime_rows),
             f"健康 plist 的每一列能力都應為 ✅，實得：{runtime_rows}",
+        )
+
+
+class TestMacNightlyMachineStateCapabilities(MacNightlyStatusTestCase):
+    """R82：能力表裡**輸入是機器狀態而非 plist 內容**的那兩列（WakeToRun／NextRunTime）。
+
+    為何獨立成一類、而不是塞回上面那一類：上面那一類的自變數是「已安裝 plist 的內容」，
+    這裡的自變數是「這台 Mac 的電源排程」——兩者連要造出「壞掉的樣子」的手法都不同
+    （前者寫一份退化 plist，後者換掉 pmset）。混在一起的代價已經實證過一次：
+    `test_healthy_plist_passes_every_capability_row` 因此在真 mac 上結構性必紅。
+
+    這一類同時是上面那一類的**紅綠自證**：健康控制組會綠，只證明兩列**能**印 ✅；
+    要證明它們不是橡皮圖章，就得有輸入壞掉時真的轉 ⚠️ 的對照組。
+    """
+
+    def _cap_lines(self, out: str) -> str:
+        """只取那兩列，避免斷言被其他列的文字誤命中。"""
+        return "\n".join(
+            line for line in out.splitlines()
+            if "WakeToRun 對等" in line or "NextRunTime 對等" in line
+        )
+
+    def test_a_mac_with_no_power_schedule_at_all_flags_both_rows(self) -> None:
+        """缺陷本體（也是修前那兩支紅的真正成因）：pmset 在、但一件排程都沒有。
+
+        這是絕大多數 Mac 的**出廠常態**（本機實測 `pmset -g sched` rc=0、stdout 空），
+        而 `pmset repeat` 需要 sudo、安裝器刻意不代跑 ⇒ 使用者裝完 launchd 之後
+        本來就處於這個狀態。報表必須明白說出「未排定」並給出那句 sudo 指令，
+        因為那正是他還沒做、而且只有他做得到的那一件事。
+        """
+        self.set_pmset(self.PMSET_NO_SCHEDULE)
+        self.install_healthy_plist()
+        self.write_heartbeat()
+        proc = self.run_status()
+        rows = self._cap_lines(proc.stdout)
+        self.assertIn("⚠️ WakeToRun 對等（pmset repeat 排程喚醒） = 未排定", rows,
+                      f"沒有任何電源排程卻沒被標記：{rows!r}")
+        self.assertIn("⚠️ NextRunTime 對等（pmset -g sched 前瞻憑證） = 無", rows,
+                      f"拿不到前瞻憑證卻沒被標記：{rows!r}")
+        self.assertIn("sudo pmset repeat wakeorpoweron MTWRFSU", proc.stdout,
+                      "只說「未排定」不給逐字可執行的指令＝等於沒給（該項需提權，"
+                      f"腳本刻意不代跑）：{proc.stdout!r}")
+        self.assertNotIn(
+            "無 pmset", rows,
+            "「沒有排程」被講成「沒有 pmset」——後者是假話（本機 command -v pmset ＝ "
+            "/usr/bin/pmset），而且它指向一個假的成因：讀者會以為要去裝 pmset，"
+            f"實際要做的是跑那句 sudo 指令。實得：{rows!r}",
+        )
+        self.assertEqual(proc.returncode, 0,
+                         "本段是 advisory，不得改動 exit code")
+
+    def test_a_machine_without_pmset_is_reported_distinctly(self) -> None:
+        """「沒有 pmset」與「有 pmset 但沒排程」必須是兩句不同的話。
+
+        兩者的下一步動作完全不同（換機器／裝工具 vs. 跑一句 sudo），把兩者摺成同一句
+        就是把讀者導向錯誤的處置——修前的 `_pmset_sched` 正是把兩者都回成空字串。
+        """
+        self.remove_pmset()
+        self.install_healthy_plist()
+        self.write_heartbeat()
+        proc = self.run_status()
+        rows = self._cap_lines(proc.stdout)
+        self.assertIn("⚠️ WakeToRun 對等（pmset repeat 排程喚醒） = 無 pmset", rows,
+                      f"pmset 不存在時應如實說「無 pmset」：{rows!r}")
+        self.assertIn("憑證值＝(無 pmset)", rows,
+                      f"NextRunTime 對等列的憑證值欄應區分「查不了」與「查到沒有」：{rows!r}")
+        self.assertEqual(proc.returncode, 0,
+                         "本段是 advisory，不得改動 exit code")
+
+    def test_a_one_shot_wake_event_does_not_count_as_the_daily_repeat(self) -> None:
+        """假綠防線：一次性 wake 事件不得被算成「已排定」。
+
+        macOS 自己就常年掛著 user-invisible 的一次性 wake（本機
+        `plutil -p /Library/Preferences/SystemConfiguration/com.apple.AutoWake.plist`
+        實查到 calaccessd／osanalytics 兩則）。修前的判準對 `pmset -g sched` **全文**
+        做子字串比對 ⇒ 只要輸出裡出現那個字樣就算數，不分區段。一次性事件跑完就沒了，
+        撐不起「每天 02:00 前把機器叫醒」這個語意；把它算成已排定，等於在唯一的每日
+        回饋通道上宣告一個不存在的保護。
+
+        🔴 本鎖的鑑別力射程（**複審實測訂正**，不是推論）：本測試此前自陳「合成注入
+        『退回全文子字串比對』→ 轉紅（有鑑別力）」——**那句話是假的**。忠實還原該形態
+        （`pmset -g sched | grep -iE "(${PMSET_WAKE_EVENTTYPES})"`）實測 24 tests **OK、
+        rc=0**。原因：本 stub 的 eventtype 是 `wake`，而它不是詞彙表
+        `wakepoweron|wakeorpoweron|poweron` 裡任何一項的子字串 ⇒ 全文比對在這份輸入上
+        **本來就不會命中**，綠是白撿的，不是判準擋下來的。真正吃得下那個假綠的輸入是
+        一次性的 **wakeorpoweron**，已補成獨立一支
+        （`test_a_one_shot_wakeorpoweron_is_not_mistaken_for_the_daily_repeat`）。
+        ⇒ 本支保留的價值是「macOS 出廠常態（user-invisible wake）不得被誤判」這個
+        **情境**覆蓋，不是形態鑑別力；別再把它讀成全文比對的守門人。
+
+        🔴 仍然沒有測試在守的那一半（不變）：合成注入「只拿掉安裝器的區段錨定、保留
+        tolower($1) 欄位判準」→ 全綠。因為一次性段的 $1 結構上恆為 `[N]`
+        （樣板 ` [%ld]  %s at %s`），欄位判準單獨就排除了它。區段錨定是縱深防禦、
+        目前無鎖——寫在這裡是因為「以為有鎖在守」比「知道沒有」更貴。
+        """
+        self.set_pmset(self.PMSET_ONESHOT_ONLY)
+        self.install_healthy_plist()
+        self.write_heartbeat()
+        rows = self._cap_lines(self.run_status().stdout)
+        self.assertIn("⚠️ WakeToRun 對等（pmset repeat 排程喚醒） = 未排定", rows,
+                      f"一次性 wake 事件被誤判成每日重複喚醒（假綠）：{rows!r}")
+        self.assertIn("⚠️ NextRunTime 對等（pmset -g sched 前瞻憑證） = 無", rows,
+                      f"一次性事件被當成前瞻憑證（假綠）：{rows!r}")
+
+    def test_a_one_shot_wakeorpoweron_is_not_mistaken_for_the_daily_repeat(self) -> None:
+        """真正的假綠防線：一次性的 **wakeorpoweron** 不得被算成每日重複喚醒。
+
+        為何非要獨立一支（上一支不是已經測過一次性事件了嗎）：上一支的 eventtype 是
+        `wake`，**不是**詞彙表任何一項的子字串 ⇒ 連最爛的全文比對都不會在它身上出錯，
+        它證不了任何形態上的鑑別力（複審實測：忠實還原全文比對 → 24 tests OK）。
+        本支的輸入才會讓全文比對回報「已排定」，也就是修前那個判準真正的破口。
+
+        情境是真的會發生的：`pmset schedule`（一次性）與 `pmset repeat`（重複）只差一個
+        動詞，打錯就落在這一格。一次性事件跑完就沒了，撐不起「每天 02:00 前把機器叫醒」；
+        把它算成已排定，等於在唯一的每日回饋通道上宣告一個不存在的保護——而使用者會
+        因為看到 ✅ 而**停止**去做那件他其實還沒做的事。
+
+        輸入不是編的（見 `PMSET_ONESHOT_WAKEORPOWERON` 上方的反組譯證據鏈）：一次性段
+        會把 eventtype `wakepoweron` 代換成字面值 `wakeorpoweron` 再印，重複段則直印原值。
+        """
+        self.set_pmset(self.PMSET_ONESHOT_WAKEORPOWERON)
+        self.install_healthy_plist()
+        self.write_heartbeat()
+        rows = self._cap_lines(self.run_status().stdout)
+        self.assertIn(
+            "⚠️ WakeToRun 對等（pmset repeat 排程喚醒） = 未排定", rows,
+            "一次性的 wakeorpoweron 被誤判成每日重複喚醒（假綠）——這正是「對 -g sched "
+            f"全文做子字串比對」那個舊形態會吃下去的輸入：{rows!r}",
+        )
+        self.assertIn("⚠️ NextRunTime 對等（pmset -g sched 前瞻憑證） = 無", rows,
+                      f"一次性的 wakeorpoweron 被當成前瞻憑證（假綠）：{rows!r}")
+
+
+class TestMacNightlyPmsetMarkerIsNotProse(unittest.TestCase):
+    """R82：pmset 判準的字面值鎖——**純讀檔，刻意不掛 `@skipUnless(darwin)`**。
+
+    為何獨立成一個平台中立的類別，而不是塞進上面那個 darwin-only 類別：本判準只做
+    `read_text` ＋ 字串比對，一行 subprocess 都沒有，在任何平台都跑得起來。搭上
+    darwin 的車就會在 Windows／Linux 閘門上一律 SKIPPED——同 `_NightlyHeartbeat
+    DimensionMixin` 檔頭記載的那個「搭錯車造成覆蓋損失」形態（R72 已為
+    `test_capability_row_count_reaches_windows_side_parity` 處理過一次）。
+
+    這件事在本輪特別要緊：被撤回的那個字面值**就是在 Windows 上寫下的**（R82 全輪
+    在 Windows 完成，mac 側整組被 skip 掉所以零回饋）。把守它的鎖也做成 mac 才跑，
+    等於把守衛擺在錯的那一岸——下一個在 Windows 上動這支安裝器的人照樣看不到紅。
+    """
+
+    _INSTALLER = Path(dev_start.__file__).resolve().parents[1] / "tools" / "install_mac_nightly.sh"
+
+    def test_the_installer_does_not_pin_a_prose_marker_that_pmset_never_prints(self) -> None:
+        """R82 那個判準字面值不得回來：`pmset` 從不印「wake or poweron」。
+
+        真 mac 實測：`strings /usr/bin/pmset | grep -c "wake or poweron"` ＝ 0。
+        pmset 印的是 com.apple.AutoWake.plist 的 `eventtype` **原值**
+        （輸出樣板 `  %s at %s %s`），值域＝sleep/wake/poweron/shutdown/
+        wakepoweron/wakeorpoweron。押那句散文的後果不是報錯而是**恆不命中**：
+        使用者照著跑完 sudo 指令，這兩列照樣印 ⚠️，於是他會再排一次、再一次。
+
+        本斷言與那幾支行為測試不是重複——行為測試用的是 stub 的輸出，
+        stub 可以被改成配合任何字面值；這一支直接讀原始碼，釘的是
+        「判準不得押一個 OS 不會產出的字串」這件事本身。
+
+        🔴 判斷面刻意**剝掉註解行**（同 test_mac_readiness_r82.pmset_capability_rows
+        的既有慣例）：訂正紀錄本來就得逐字寫出被撤回的那個字面值，否則下一位讀者
+        無從知道當初錯在哪、也就會再錯一次。本判準要禁的是「拿它當判準／印給使用者
+        去找」，不是「提到它」。第一版沒剝，於是它把本檔自己的訂正註解判成違規——
+        那種鎖的下場是被人把註解刪掉來滿足它，等於用刪除歷史換綠燈。
+        """
+        code = "\n".join(
+            line for line in self._INSTALLER.read_text(encoding="utf-8").splitlines()
+            if not line.strip().startswith("#")
+        )
+        self.assertNotIn(
+            "wake or poweron", code,
+            "判準（或印給使用者的文案）又押回 `wake or poweron`——該字串在 pmset "
+            "二進位裡不存在，比對恆不命中 ⇒ 排好了也永遠印 ⚠️（假紅）",
+        )
+        self.assertIn(
+            "wakepoweron", code,
+            "判準必須認得 `pmset repeat wakeorpoweron` 實際寫進 AutoWake.plist 的 "
+            "eventtype 值 `wakepoweron`（那才是 `pmset -g sched` 會印出來的 token）",
+        )
+
+    def test_the_pmset_seam_exists_so_the_rows_are_not_read_off_the_host(self) -> None:
+        """兩列的量測面必須可注入——否則「健康 ⇒ 每列皆 ✅」又會偷偷要求機器狀態。
+
+        這一條同樣是平台中立的：它守的是安裝器**有沒有留那道縫**，而縫在不在
+        是原始碼事實。修前它不在，代價是 `test_healthy_plist_passes_every_
+        capability_row` 在真 mac 上結構性必紅（本輪合成注入實證：把
+        `PMSET="${IMN_PMSET:-pmset}"` 改回寫死 `pmset`，該測試立刻轉紅）。
+        """
+        src = self._INSTALLER.read_text(encoding="utf-8")
+        self.assertIn(
+            'PMSET="${IMN_PMSET:-pmset}"', src,
+            "IMN_PMSET 測試縫消失 ⇒ WakeToRun／NextRunTime 兩列的值又回去讀跑測試那台"
+            "機器的真實電源排程；`pmset repeat` 需 sudo、安裝器刻意不代跑 ⇒ "
+            "「健康 plist ⇒ 每列皆 ✅」在多數 Mac 上結構性必紅",
         )
 
 

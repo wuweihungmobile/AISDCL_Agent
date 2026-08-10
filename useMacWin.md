@@ -45,6 +45,7 @@
    - 若 ❌ 原因是「另一個 dev_start 正在整備 venv／無法取得互斥鎖」：先確認真的沒有另一個 dev_start 在跑（含前次被中斷遺留的行程），把狀況回報給我；殘留的陳舊鎖在相關行程結束後、下次執行時會自動清除，不要急著手動刪 .dev_start.lock。
    - 若只有 ⚠️ 警告（尤其是「工作樹不乾淨」「與 origin 分叉」「領先 origin 未 push」這類），簡短列給我看，讓我自己決定要不要處理，不要自動 commit/stash/push 幫我決定。
    - 若警告是「nightly 最近一輪有失敗」：**先判斷那輪紅是不是被同步撞出來的假紅**，再決定要不要追。作法＝比對 nightly log 裡失敗 stage 的起訖時間與 `git reflog --date=iso` 最近一次 merge/pull 的時間，時間區間重疊就高度可疑；接著把失敗的測試單獨重跑一次，全綠即為假紅。假紅要跟我說一聲，別默默當成迴歸去修。
+     🔴 **不是只有「假紅／真迴歸」兩態**：nightly 跑的是 **merge 前**的 code，它的紅綠對 merge 後的 HEAD **沒有推論力**，所以不論時間有無重疊，都必須**在當前 HEAD 上重跑一次**。實遇第三態（2026-08-10）＝時間不重疊（非假紅），但那輪的失敗已被 merge 進來的修復解掉，同時換上一批**全新**失敗；只回答「是不是假紅」就結案，會同時追錯舊紅、漏看新紅（DEF-101-999(d)）。
    - **沒看到「工作樹不乾淨」警告不等於工作樹是乾淨的**，有兩個獨立原因：① dev_start 只在「同時落後 origin、真的要 pull」時才會提這件事（不需要 pull 就沒有擋的必要）；② 它判斷髒污時用的是 `git status --porcelain --untracked-files=no`，**未追蹤檔完全不在它的視野內**（ff pull 對未追蹤檔安全，是刻意設計）。要確認請自己跑 `git status --porcelain --untracked-files=all`——理由見〈🔁 平台切換 SOP〉A 段。
 
 4. 由於 shell 狀態不會在你之後每次呼叫工具時持續生效（每次工具呼叫都是新行程，source 啟用的 .venv 只在那一次呼叫內有效），之後所有 Python 相關指令（pytest、ruff、pip 等）請直接使用 `.venv/bin/python`（或先確認 `which python` 真的指向這個路徑）執行，不要誤用系統 Python。
@@ -53,7 +54,7 @@
 
 6. 回覆一律使用繁體中文。
 
-7. **僅限「剛從 Windows 切換過來的第一次啟動」**（🔴 **判斷依據是機械判準，不是記憶、也不是 dev_start [1/7] 的輸出**——`[1/7]` 讀的是本機 `.dev_env_state.json`，**雙機各自 clone 的拓撲永遠印「無切換」**，用它判斷必然漏做；而「上一輪在哪台機器」沒有任何人或 AI 能可靠記得。**改跑這一條，每次啟動都適用**：`.venv/bin/python tools/sync_onboarding_baselines.py --check-snapshot`，讀 **macOS 欄**那一段——只要它是 `presumed stale`、或其 `baseline-origin` 不是 `self-recorded`，就代表本欄需要回填，**本點就要做**；三項都新鮮才可跳過。此判準與輪號、日期、HEAD 皆無關，故不會過期）：另外要做 useMacWin.md〈🔁 平台切換 SOP〉**B 段**的事，其中核心是**回填 macOS 那一欄的 ONBOARDING.md §7 表② dated snapshot**——`.venv/bin/python tools/sync_onboarding_baselines.py --write --with-slow`，只能在 macOS 本機做（跨平台代填＝假 provenance，工具會 rc=2 拒絕），且必須在**不含 postgres/pgvector 選配的出廠環境 venv** 上跑，**不准**加 `--allow-pg-extras` 繞過拒跑。動手前先把該節整段讀完，不要只照這一行做；做完把工具輸出貼給我。
+7. **僅限「剛從 Windows 切換過來的第一次啟動」**（🔴 **判斷依據是機械判準，不是記憶、也不是 dev_start [1/7] 的輸出**——`[1/7]` 讀的是本機 `.dev_env_state.json`，**雙機各自 clone 的拓撲永遠印「無切換」**，用它判斷必然漏做；而「上一輪在哪台機器」沒有任何人或 AI 能可靠記得。**改跑這一條，每次啟動都適用**：`.venv/bin/python tools/sync_onboarding_baselines.py --check-snapshot`，讀 **macOS 欄**那一段——只要它是 `presumed stale`、或其 `baseline-origin` 不是 `self-recorded`，就代表本欄需要回填，**本點就要做**；三項都新鮮才可跳過。此判準與輪號、日期、HEAD 皆無關，故不會過期）：另外要做 useMacWin.md〈🔁 平台切換 SOP〉**B 段**的事，其中核心是**回填 macOS 那一欄的 ONBOARDING.md §7 表② dated snapshot**——`.venv/bin/python tools/sync_onboarding_baselines.py --write --with-slow`，只能在 macOS 本機做（跨平台代填＝假 provenance，工具會 rc=2 拒絕），且必須在**不含 postgres/pgvector 選配的出廠環境 venv** 上跑，**不准**加 `--allow-pg-extras` 繞過拒跑。🔴 **那個 venv 不是本機 `.venv`**——本機 `.venv` 幾乎必然已被 pg extras 汙染（2026-08-10 實測 `psycopg2`／`sqlalchemy` 皆 PRESENT），工具會 rc=2 拒跑，所以這一步**必然**要另建臨時乾淨 venv（建法與污染探針見 B 段第 3 點；本機**沒有** `uv`，用 venv 自帶的 pip）。動手前先把該節整段讀完，不要只照這一行做；做完把工具輸出貼給我。
 
 完成以上準備後，跟我簡短回報目前環境狀態（是否首次執行、是否偵測到從 Windows 切換過來、GitHub 同步結果〔已同步/離線跳過/有分叉等警告〕、.venv 是否有重建、hooks 是否正常、有沒有需要我處理的警告），然後等我下達實際的開發任務，不要自己先開始做事。
 ```
@@ -104,6 +105,7 @@
    - 若只有 ⚠️ 警告（尤其是「工作樹不乾淨」「與 origin 分叉」「領先 origin 未 push」這類），簡短列給我看，讓我自己決定要不要處理，不要自動 commit/stash/push 幫我決定。
    - 若出現「偵測不到 Git Bash（bash.exe）」（這行來自第 [5/7] 步重跑 hooks 安裝腳本時，不是平台健檢，也不會進 dev_start 摘要的警告計數）：**不要把它當成無害雜訊帶過**。偵測共用實作 `tools/lib/Find-GitBash.ps1::Find-GitBash` 是「PATH 上找 bash（排除路徑含 `System32` 段的 WSL 佔位）→ 找不到再回退查 `%ProgramFiles%`／`%ProgramFiles(x86)%`／`%LocalAppData%\Programs` 底下的 `Git\bin\bash.exe`」，這個 fallback 存在的目的正是「標準安裝只把 `Git\cmd` 放進 PATH、`Git\bin\bash.exe` 本來就不在 PATH」——也就是說**連 fallback 都落空才會印這行**，多半是真的沒裝 Git for Windows 或裝在非常規位置。三支 dispatcher hooks 全是 `#!/usr/bin/env bash`，屆時 commit/push 會真的跑不起來。請先跑 `git --version` 與 `where.exe bash` 把實況列給我看，再由我決定怎麼處理。
    - 若警告是「nightly 最近一輪有失敗」：**先判斷那輪紅是不是被同步撞出來的假紅**，再決定要不要追。作法＝比對 nightly log 裡失敗 stage 的起訖時間與 `git reflog --date=iso` 最近一次 merge/pull 的時間，時間區間重疊就高度可疑；接著把失敗的測試單獨重跑一次，全綠即為假紅（2026-07-27 實測就是這樣：5 支假紅、單獨重跑全數通過）。假紅要跟我說一聲，別默默當成迴歸去修。
+     🔴 **不是只有「假紅／真迴歸」兩態**：nightly 跑的是 **merge 前**的 code，它的紅綠對 merge 後的 HEAD **沒有推論力**，所以不論時間有無重疊，都必須**在當前 HEAD 上重跑一次**。實遇第三態（2026-08-10 mac 側）＝時間不重疊（非假紅），但那輪的失敗已被 merge 進來的修復解掉，同時換上一批**全新**失敗；只回答「是不是假紅」就結案，會同時追錯舊紅、漏看新紅（DEF-101-999(d)）。
    - **沒看到「工作樹不乾淨」警告不等於工作樹是乾淨的**，有兩個獨立原因：① dev_start 只在「同時落後 origin、真的要 pull」時才會提這件事（不需要 pull 就沒有擋的必要）；② 它判斷髒污時用的是 `git status --porcelain --untracked-files=no`，**未追蹤檔完全不在它的視野內**（ff pull 對未追蹤檔安全，是刻意設計）。要確認請自己跑 `git status --porcelain --untracked-files=all`——理由見〈🔁 平台切換 SOP〉A 段。
 
 4. 之後所有 Python 相關指令（pytest、ruff、pip 等）請直接使用 `.venv\Scripts\python.exe`（Git Bash 載具下寫 `.venv/Scripts/python.exe`），不要誤用系統 Python。
@@ -112,7 +114,7 @@
 
 6. 回覆一律使用繁體中文。
 
-7. **僅限「剛從 mac 切換過來的第一次啟動」**（🔴 **判斷依據是機械判準，不是記憶、也不是 dev_start [1/7] 的輸出**——`[1/7]` 讀的是本機 `.dev_env_state.json`，**雙機各自 clone 的拓撲永遠印「無切換」**，用它判斷必然漏做；而「上一輪在哪台機器」沒有任何人或 AI 能可靠記得。**改跑這一條，每次啟動都適用**：`.venv\Scripts\python.exe tools/sync_onboarding_baselines.py --check-snapshot`，讀 **Windows 欄**那一段——只要它是 `presumed stale`、或其 `baseline-origin` 不是 `self-recorded`，就代表本欄需要回填，**本點就要做**；三項都新鮮才可跳過。此判準與輪號、日期、HEAD 皆無關，故不會過期）：另外要做 useMacWin.md〈🔁 平台切換 SOP〉**B 段**的事，其中核心是**回填 Windows 那一欄的 ONBOARDING.md §7 表② dated snapshot**——`.venv\Scripts\python.exe tools/sync_onboarding_baselines.py --write --with-slow`，只能在 Windows 本機做（跨平台代填＝假 provenance，工具會 rc=2 拒絕），且必須在**不含 postgres/pgvector 選配的出廠環境 venv** 上跑，**不准**加 `--allow-pg-extras` 繞過拒跑。動手前先把該節整段讀完，不要只照這一行做；做完把工具輸出貼給我。
+7. **僅限「剛從 mac 切換過來的第一次啟動」**（🔴 **判斷依據是機械判準，不是記憶、也不是 dev_start [1/7] 的輸出**——`[1/7]` 讀的是本機 `.dev_env_state.json`，**雙機各自 clone 的拓撲永遠印「無切換」**，用它判斷必然漏做；而「上一輪在哪台機器」沒有任何人或 AI 能可靠記得。**改跑這一條，每次啟動都適用**：`.venv\Scripts\python.exe tools/sync_onboarding_baselines.py --check-snapshot`，讀 **Windows 欄**那一段——只要它是 `presumed stale`、或其 `baseline-origin` 不是 `self-recorded`，就代表本欄需要回填，**本點就要做**；三項都新鮮才可跳過。此判準與輪號、日期、HEAD 皆無關，故不會過期）：另外要做 useMacWin.md〈🔁 平台切換 SOP〉**B 段**的事，其中核心是**回填 Windows 那一欄的 ONBOARDING.md §7 表② dated snapshot**——`.venv\Scripts\python.exe tools/sync_onboarding_baselines.py --write --with-slow`，只能在 Windows 本機做（跨平台代填＝假 provenance，工具會 rc=2 拒絕），且必須在**不含 postgres/pgvector 選配的出廠環境 venv** 上跑，**不准**加 `--allow-pg-extras` 繞過拒跑。🔴 **那個 venv 不是本機 `.venv`**——主 `.venv` 只要曾裝過 `[postgres,pgvector]` 就會讓工具 rc=2 拒跑（mac 側 2026-08-10 實測即是），這一步**必然**要另建臨時乾淨 venv（建法與污染探針見 B 段第 3 點）。動手前先把該節整段讀完，不要只照這一行做；做完把工具輸出貼給我。
 
 完成以上準備後，跟我簡短回報目前環境狀態（是否首次執行、是否偵測到從 mac 切換過來、GitHub 同步結果〔已同步/離線跳過/有分叉等警告〕、.venv 是否有重建、hooks 是否正常、有沒有需要我處理的警告），然後等我下達實際的開發任務，不要自己先開始做事。
 ```
@@ -149,22 +151,27 @@ gh run list --limit 10 --json workflowName,conclusion,event,createdAt,headSha
 
 ### B. 切換後 —— 做在「剛到」的那台機器上
 
+🔴 **三步的順序不可調換，尤其「閘門」必須排在「回填」之前**：回填寫的是 `ONBOARDING.md`＝**根層檔**，而 `tools/git-hooks/pre-push` 的慢層（`py_compile` ＋ `run_root_unittests.py`）**只在 push 範圍含根層檔時才跑**。先回填、後才發現那層有紅 ⇒ 回填成果 commit 過得去卻 **push 不出去**，被自己的紅鎖在本機（2026-08-10 mac 側實遇，DEF-101-999(e)）。
+
 1. **照上面對應平台的啟動提示詞跑一次**。全新 Windows 機器另有一次性前置：預設 `ExecutionPolicy=Restricted` 會擋掉所有 `.ps1`（**含 dot-source 與 `Activate.ps1`**），先跑 `Set-ExecutionPolicy RemoteSigned -Scope CurrentUser`（一般使用者權限即可，詳見 ONBOARDING §2.1／§5）。預期會看到 dev_start `[1/7]` 印出跨平台切換、`[3/7]` 清掉含絕對路徑的 `.pytest_cache`/`.ruff_cache`、`[4/7]` 把另一平台的 `.venv` 換手保留並換回本平台快取（共用工作目錄拓撲；雙機拓撲則是各自的 venv 各自新鮮）。
 
-2. 🔴 **回填該平台的 ONBOARDING §7 表② dated snapshot —— 這是整份 SOP 裡唯一「只能在目標平台做」的事**：
+2. **跑一次全套閘門確立新平台基線，紅燈在這一步清完**：指令清單以 ONBOARDING §7 與根 [CLAUDE.md](CLAUDE.md) 為準。**本文件刻意不重抄任何數字**——全 repo pytest 基線數字的唯一站點是 ONBOARDING §7（由 `tools/check_pytest_baseline_sites.py` 機械守門，本檔正在它的掃描面內）。剛從另一平台過來的第一輪最容易在這裡冒出跨平台缺口（對方平台結構上跑不到的路徑），**那是本步驟的目的、不是意外**。
+
+3. 🔴 **回填該平台的 ONBOARDING §7 表② dated snapshot —— 整份 SOP 裡唯一「只能在目標平台做」的事**：
 
    ```bash
-   python tools/sync_onboarding_baselines.py --write --with-slow
+   <乾淨 venv>/bin/python tools/sync_onboarding_baselines.py --write --with-slow
    ```
 
    - **為什麼只能在目標平台**：表② 是 dated snapshot（機器無法在根層閘門現場算出、無 live 鎖），逐平台記帳；跨平台代填＝假 provenance，工具對無對應欄的平台直接 rc=2 拒絕。
-   - 🔴 **必須在「出廠環境」venv 執行**：`import psycopg2` 與 `import sqlalchemy` 都要是 ModuleNotFoundError。污染探針用 ONBOARDING §7（R59 訂正）指定的寫法——它在乾淨與污染兩種情況下**都必定印出東西**，沒有「靜默零輸出」這個會被誤讀成乾淨的狀態（`python -m pip list` 在 uv 建的 venv 上零鑑別力，該 venv 內根本沒有 `pip` 模組）：
+   - 🔴 **前置①：乾淨 venv（不是本機 `.venv`——它幾乎必然已被汙染，工具會 rc=2 拒跑）**：`import psycopg2` 與 `import sqlalchemy` 都要是 ModuleNotFoundError。污染探針用 ONBOARDING §7（R59 訂正）指定的寫法——它在乾淨與污染兩種情況下**都必定印出東西**，沒有「靜默零輸出」這個會被誤讀成乾淨的狀態（`python -m pip list` 在 uv 建的 venv 上零鑑別力，該 venv 內根本沒有 `pip` 模組）：
 
      ```bash
      python -c "import importlib.util as u; [print(m, 'PRESENT' if u.find_spec(m) else 'ABSENT') for m in ('psycopg2','sqlalchemy')]"
      ```
 
-     兩行都必須是 `ABSENT` 才算乾淨；**任何一行印不出來就是探針壞了**，不是「乾淨」。乾淨 venv 的建法沿用 ONBOARDING §7 各輪校正註記寫過的既有作法（全新臨時目錄 + `python3.11 -m venv` + `uv pip install -e '.[dev,notifications]'`），**不要另編一套**。
+     兩行都必須是 `ABSENT` 才算乾淨；**任何一行印不出來就是探針壞了**，不是「乾淨」。乾淨 venv 的建法沿用 ONBOARDING §7 各輪校正註記寫過的既有作法（全新臨時目錄 + `python3.11 -m venv` + `uv pip install -e '.[dev,notifications]'`），**不要另編一套**；🔴 **但 `uv` 不一定在**——mac 側 2026-08-10 實測 `command -v uv` 為空（它只活在 shell profile 裡；`.venv/bin`、`~/.local/bin`、`~/.cargo/bin` 皆無），照抄該行只會得到 command not found。此時改用新 venv 自帶的 `python -m pip install -e '.[dev,notifications]'`——這正是 ONBOARDING §7 R55／R56 註記走的同一條路，不算另編一套。
+   - 🔴 **前置②：docker daemon 要開**：ci-gate 的逐軌計數對它敏感（§7 記載的 ±3），provenance 會如實記 `docker=up`／`down`。兩平台欄一個 `up` 一個 `down` 就是**不同條件**，依 §7 既定紀律**不可相減**——mac 側 2026-08-10 實遇：忘了開，兩欄從此不可比，只能等下次重量（DEF-101-999(e)）。
    - 🔴 **不准用 `--allow-pg-extras` 繞過拒跑**：那會讓 provenance 記成 `pgextras=present`，等於悄悄改掉「出廠環境」的定義，而且**沒有任何機械物會替你察覺這個語意變更**。工具拒跑是設計，不是障礙。
    - **`unrecorded` 的語意不要讀錯**：某欄 provenance 印 `unrecorded`，只代表「該欄數字量於逐平台 provenance 機制落地之前，或不是一次量完的同世代值」，**不等於那個平台沒有真機開發史**。要知道哪一欄新鮮、上次誰在哪台機器量的，一律看 live 來源，別看任何文件裡的結論句：
 
@@ -175,8 +182,6 @@ gh run list --limit 10 --json workflowName,conclusion,event,createdAt,headSha
 
      `--check-snapshot` 的 rc 反映的是「**本機平台那一欄**的指紋有沒有漂移」，不是「有沒有真機量測過」，兩者別混。非本機平台欄在單機交替下**結構上恆為 presumed stale**，那則 `ℹ️` 是常態而非事件。
 
-3. **跑一次全套閘門確立新平台基線**：指令清單以 ONBOARDING §7 與根 [CLAUDE.md](CLAUDE.md) 為準。**本文件刻意不重抄任何數字**——全 repo pytest 基線數字的唯一站點是 ONBOARDING §7（由 `tools/check_pytest_baseline_sites.py` 機械守門，本檔正在它的掃描面內）。
-
 ### C. 兩平台語法差異雷區（照抄另一平台的指令會出事的地方）
 
 以下四條都是實際踩過的；完整對照見 ONBOARDING §5（雷區表）、§6（雙平台腳本對照）、§7（雙平台驗證指令）。
@@ -186,9 +191,46 @@ gh run list --limit 10 --json workflowName,conclusion,event,createdAt,headSha
 | macOS 上安裝 extras 報 `zsh: no matches found`，訊息與套件完全無關 | macOS 預設 shell 是 zsh，`nomatch` 預設開啟：未加引號的 `.[...]` 會被當 glob 做 filename generation，repo 內無匹配即**在執行前中止整條指令**（uv／pip 根本沒被呼叫）。同一行在 bash 與 PowerShell 下正常 ⇒ Windows 開發者永遠不會遇到 | extras 一律加**單引號**：`uv pip install -e '.[dev,notifications]'`（三種 shell 皆正確）。具名套件形態同理：`'autoclaude[postgres]'`。機械鎖：`tools/tests/test_extras_quoting_zsh_safety.py` |
 | Windows 上照抄 `PYTHONUTF8=1 lint-imports` 得到 `The term 'PYTHONUTF8=1' is not recognized`，看起來像 lint-imports 沒裝 | PowerShell **沒有** `VAR=value <指令>` 這種行內環境變數前綴語法 | 改寫為 `$env:PYTHONUTF8=1; lint-imports`。機械鎖：`tools/tests/test_doc_env_prefix_platform_parity_r60.py`（活文件內 bash 前綴必須有同檔 PowerShell 對照） |
 | Windows 上呼叫 bash 腳本，拿到 UTF-16LE 亂碼 `Windows Subsystem for Linux has no installed distributions.`，而受測腳本**一行都沒執行**（歸因完全錯誤的紅燈） | Windows 的 `CreateProcess(lpApplicationName=NULL)` 解析裸名的順序是「應用程式目錄 → 當前目錄 → **System32** → Windows 目錄 → PATH」，System32 排在 PATH **之前** ⇒ 只要 argv[0] 是裸名 `"bash"`，`C:\Windows\System32\bash.exe`（WSL 啟動器）**必定**先命中，與 PATH 上有沒有 Git Bash、排多前面無關（`DEF-101-753`） | 一律解析成**絕對路徑**再呼叫：PowerShell 用 `tools/lib/Find-GitBash.ps1::Find-GitBash`、Python 測試用 `tools/tests/_platform_helpers.usable_bash_for_fixture()`、Python 工具用 `tools/integration_gate_core.py::find_git_bash()`；`shutil.which("bash")`（只查 PATH）是天然對照組。**禁止**把裸 `"bash"` 交給 `subprocess` |
+| macOS 上讀 `${PIPESTATUS[0]}` 拿到**空字串**，管線的 rc 靜默消失（`cmd \| tail` 之後判不出成敗，容易把紅讀成綠） | Claude Code 的 Bash 工具在 macOS 走 **zsh**，而 `PIPESTATUS` 是 bash 的陣列名；zsh 叫 `pipestatus` 且**下標從 1 起**（`$pipestatus[1]`）。兩平台的 `.ps1`／CI 都不受影響 ⇒ 只有在 mac 上用工具跑管線時才會踩到 | 別用管線判 rc：改成 `cmd > out.log 2>&1; rc=$?` 再讀檔；或整段包 `bash -c '…'`。2026-08-10 實遇（DEF-101-999(c)） |
+| macOS 上迴圈跑「帶子指令參數的守門」全報 `rc=2`，看起來像整批守門紅掉，實際上 `bash` 下全綠 | 同上 —— zsh **預設不對未加引號的變數做分詞**（no SH_WORD_SPLIT）：`for g in "x.py --check"; do $PY $g; done` 會把整串當**單一檔名**交給 python ⇒ `can't open file` 的 rc 恰好也是 2，與「守門判紅」無法從 rc 區分 | 需要分詞就顯式包 `bash -c '…'`（pre-push 本身是 bash，故 hook 內同樣寫法正確）；或改用陣列逐項傳參。2026-08-10 實遇並**一度誤報三支守門為紅**（DEF-101-999(c)） |
 | push 被 pre-push 擋下並印「找不到 ruff」 | root-infra 快層對齊 `root-infra-ci.yml`，會跑 `ruff check tools/ --no-cache`；**ruff 缺席＝fail-loud（rc=1），刻意不軟跳過**——軟跳過會退回「宣告有、執行者無」的假綠。另：ruff 的 `warning:`（如壞掉的 noqa 指令）走 stderr 且不改 rc，本層收下 stderr 後照樣判失敗 | 先啟用 `.venv` 並裝好開發相依（hook 訊息即指路：`cd AutoClaude && uv pip install -e '.[dev,notifications]'`）。`--no-cache` 不可省的理由見 `tools/git-hooks/pre-push` 該段註解 |
 
 > 兩平台**共通**的一條：shell 狀態不會跨工具呼叫存活（每次工具呼叫都是新行程），所以 `source`／dot-source 啟用的 venv 只在那一次呼叫內有效——之後一律用完整路徑 `.venv/bin/python`（mac）或 `.venv\Scripts\python.exe`（Windows）。
+
+### D. 跑全套測試前：先把 CI 對等 PG 容器拉起來（R83，兩平台共通）
+
+🔴 **這一條與 B 段第 2 步（「跑一次全套閘門確立新平台基線」）直接相關**：AutoClaude 全套 pytest 的 `skipped` 裡有**一整類**（PG 相依）**只是因為 docker daemon 沒開**——不是缺件、不是平台差、也不是退化。解法是**一行 `docker compose`，零程式改動、零環境變數**（`AutoClaude/tests/conftest.py` 的 PG autodetect 會自己偵測並注入 DSN）。它消掉幾支是**量測值**，本檔刻意不寫死；完整做法、憑證行、現查指令與三點誠實劃界一律見 **ONBOARDING.md §7.1**（唯一站點，本檔不重抄，避免第二個會漂的家）。
+
+最短路徑（切換後想立刻把基線量對時照這個順序）：
+
+```bash
+# macOS / Linux（Windows 版見下一塊）
+open -a Docker                                                   # 啟動 Docker Desktop
+docker info --format '{{.ServerVersion}}'                        # 印得出版本號才算 daemon 活著
+cd AutoClaude && docker compose -f docker-compose.ci.yml up -d
+# migrate 這一步必須自己給 DSN（alembic 是另一個行程，autodetect 只注入 pytest 那個行程）；
+# 刻意用行內前綴而非 export——export 出去會讓 pytest 走「顯式優先」剎車，憑證行改印
+# `[PG autodetect] 跳過：… 已由使用者顯式設定（顯式優先）`（PG 照樣接得上，但驗不到 autodetect 這條路）
+AUTOCLAUDE_DB_DSN='postgresql://autoclaude:autoclaude@localhost:5432/autoclaude' alembic upgrade head
+python -m pytest tests/ -q                                       # 尾端要出現 `[PG autodetect] 已注入 …`
+```
+
+```powershell
+# Windows：先用 GUI 啟動 Docker Desktop，再跑下面這幾行
+docker info --format '{{.ServerVersion}}'
+# 🔴 定位子專案一律走 git 頂層，**不要**寫 `$env:CLAUDE_PROJECT_DIR\AutoClaude`——那個變數
+# 只由 Claude Code 注入 hook 子行程，開發者自己開的終端機裡是空的，會展開成磁碟機根目錄
+# （實測逐字 `Cannot find path '/AutoClaude' because it does not exist.`）
+Push-Location (Join-Path (git rev-parse --show-toplevel) 'AutoClaude')
+docker compose -f docker-compose.ci.yml up -d
+$env:AUTOCLAUDE_DB_DSN = 'postgresql://autoclaude:autoclaude@localhost:5432/autoclaude'
+alembic upgrade head
+Remove-Item Env:\AUTOCLAUDE_DB_DSN     # 不清掉會讓下一行的 autodetect 被「顯式優先」剎車擋下
+python -m pytest tests/ -q
+Pop-Location
+```
+
+⚠️ **與 B 段第 3 步的關係別搞混**：那一步（回填 §7 表② dated snapshot）要的是**出廠環境乾淨 venv**，而本節是「日常開發時把 skip 降到最低」。兩者的 provenance 欄位會如實記下 `docker=up`／`down`，**不同條件的兩欄依 §7 既定紀律不可相減**。
 
 ---
 

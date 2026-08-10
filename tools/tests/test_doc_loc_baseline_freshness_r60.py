@@ -66,6 +66,7 @@ import sys
 import tempfile
 import textwrap
 import unittest
+from collections.abc import Iterable
 from contextlib import contextmanager
 from dataclasses import replace
 from pathlib import Path, PurePosixPath
@@ -88,6 +89,7 @@ import sync_onboarding_baselines as SYNC  # noqa: E402
 from lib import baseline_origin as BO  # noqa: E402  # nightly 探針的解析契約（DEF-101-759）
 from lib import ci_liveness as _CI_LIVENESS  # noqa: E402  # job 層 fail-open 正則 SSOT
 from lib import defect_ledger_index as _LEDGER_INDEX  # noqa: E402  # 改派判定的生產 SSOT
+from lib import git_paths as _GIT_PATHS  # noqa: E402  # git argv 的 quotepath SSOT
 from lib import sdd_latest as _SDD_LATEST  # noqa: E402  # LATEST 版名解析 SSOT
 
 hook_command_scripts = _HYGIENE.hook_command_scripts
@@ -4096,9 +4098,14 @@ def path_claim_bases(repo_root: Path) -> tuple[str, ...]:
 #: 不是清存量（同 CLAUDE.md 鐵律三 `Get-Command` 那一列的裁決措辭）。順帶的收穫是這些
 #: 「刻意不存在」從此是**登記過的**事實，而不是每個讀者各自撲空一次才知道。
 #: 筆數不寫進本段散文——`_GHOST_PATH_BASELINE_CEILING` 就是那個數字的唯一住所。
+#: 🔴 R82／P4 訂正上面第二類的措辭與內容：「已 gitignore 出庫」這一族**已經不該住在本表**
+#: ——它有專屬的第三態（`is_machine_local_artifact()`，理由見該函式）。逐筆豁免對它是錯的
+#: 修法：豁免表是「這台機器上解析不到」的登記，而 gitignored 生成物在**不同機器上解析
+#: 結果本來就不同**，於是同一筆登記在 A 機器是必要的、在 B 機器是 stale——兩邊都會紅，
+#: 只是紅的那一支不同。本輪據此移出 `AISDLC_SDD/.claude/settings.local.json`（唯一一筆
+#: 命中第三態的登記，實測；其餘 17 筆一筆都不是 gitignored）。
 _GHOST_PATH_BASELINE: frozenset[str] = frozenset({
     ".claude/loop.md",
-    "AISDLC_SDD/.claude/settings.local.json",
     "AISDLC_SDD/.github/workflows/arch-fitness.yml",
     "AISDLC_SDD/.github/workflows/artifact-cleanup.yml",
     "AISDLC_SDD/.github/workflows/ci.yml",
@@ -4127,7 +4134,10 @@ _GHOST_PATH_BASELINE: frozenset[str] = frozenset({
 #: 那條合法路徑）。🔴 R81 SA-B3 再下修：19 → **18**——那一筆豁免的標的（四方複審轉錄檔）
 #: 已於本輪建立、解析得到，自清機制當場要求刪除該筆登記。**下修方向本來就是這道鎖要的**：
 #: 天花板是欠債上限，不是額度。
-_GHOST_PATH_BASELINE_CEILING = 18
+#: 🔴 R82／P4 再下修：18 → **17**——`AISDLC_SDD/.claude/settings.local.json` 改由第三態
+#: 承接（見上方表頭與 `is_machine_local_artifact()`）。這一筆不是「清掉了」而是「搬家了」，
+#: 但天花板要的就是**本表**只准變小，搬走同樣算變小。
+_GHOST_PATH_BASELINE_CEILING = 17
 
 #: 目錄項快取：本檔的平台中立性鎖會把全檔重跑 3 次，逐段列目錄不快取會慢一個量級。
 _DIR_ENTRY_CACHE: dict[str, frozenset[str]] = {}
@@ -4143,14 +4153,233 @@ def _entries(directory: Path) -> frozenset[str]:
     return _DIR_ENTRY_CACHE[key]
 
 
+#: 「機器本地生成物」判定的快取（`rel` → bool）。理由同 `_DIR_ENTRY_CACHE`，只是更貴：
+#: 這一問要跑 subprocess，而本檔的平台中立性鎖會把全檔重跑 3 次。
+_MACHINE_LOCAL_CACHE: dict[str, bool] = {}
+
+#: git 取數失敗時的紅燈訊息。🔴 **為何這一條 fail-loud，而同檔的 `_git()` 對「git 不在」
+#: 是回 None**——兩種政策不衝突，因為 git 在兩處扮演的角色根本不同：
+#:   · `_git()` 拿 git 當**證據**（這個 sha 是不是真 commit）。驗不動時「未驗證」不等於
+#:     「宣稱為假」，硬判紅就是 `DEF-101-756` 那個誤讀（本機沒有心跳檔 ≠ 該平台沒跑）。
+#:   · 這裡的 git 是**判準本身的輸入**。沒有它就沒有第三態，而少了第三態的判準會靜默
+#:     退回舊行為——也就是「Windows 綠、mac 紅」那個本節正在治的缺陷本體。降級無聲、
+#:     失效方向又是假綠假紅各半（生成物在的機器假綠、不在的機器假紅）⇒ 只能出聲。
+_GIT_CHECK_IGNORE_UNAVAILABLE = (
+    "幽靈路徑判準的第三態需要 `git check-ignore`，而它取不到數（{reason}）。"
+    "本判準刻意不在此降級：少了第三態，gitignored 的機器本地生成物會依「這台機器跑過"
+    "什麼」而一半假綠一半假紅，正是本鎖要治的病。請在有 git 的環境跑，或修好取數管道。"
+)
+
+
+def _claim_candidates(rel: str, repo_root: Path) -> list[str]:
+    """一條宣稱在每個解析基準底下展開成的完整 repo 相對路徑。"""
+    return [rel if base == "." else f"{base}/{rel}"
+            for base in path_claim_bases(repo_root)]
+
+
+#: tracked 檔案清單的快取。**以 repo_root 為鍵**：本檔的自證測試會拿臨時 repo 當
+#: `repo_root` 呼叫下面的判準（那是唯一能在任何機器、任何平台上重現「機器本地 ignore
+#: 來源」的方式），單槽快取會把主 repo 的答案餵給臨時 repo。
+_TRACKED_FILES_CACHE: dict[str, frozenset[str]] = {}
+
+
+def tracked_files(repo_root: Path) -> frozenset[str]:
+    """`git ls-files` 的結果（＝index 裡的檔案），快取。"""
+    key = str(repo_root)
+    if key not in _TRACKED_FILES_CACHE:
+        _TRACKED_FILES_CACHE[key] = frozenset(_GIT_PATHS.ls_files(repo_root))
+    return _TRACKED_FILES_CACHE[key]
+
+
+def _run_check_ignore(
+    repo_root: Path,
+    paths: list[str],
+    *extra_args: str,
+    extra_config: tuple[str, ...] = (),
+) -> frozenset[str]:
+    """批次問 git：這批路徑裡，哪幾條被**追蹤中的 `.gitignore`** 宣告為忽略。
+
+    🔴 **「追蹤中的」不是修辭，是本函式最重要的一道過濾**（R82／P4 複驗補洞）。
+    `git check-ignore` 讀的 ignore 來源有三種，其中**兩種不隨 repo 走**：
+      · repo 內的 `.gitignore`（tracked ⇒ 每台機器逐字相同）✅
+      · `$GIT_DIR/info/exclude`（由 `git clone` 就地新建、**untracked**）❌
+      · `core.excludesFile`（使用者家目錄的全域 ignore，例 `~/.config/git/ignore`）❌
+    只問「被不被 ignore」而不問「**是誰宣告的**」，等於把第三態的答案接回機器本地狀態
+    ——也就是本節正在治的那個缺陷，只是從「檔案系統上有沒有這個檔」換成了「這台機器的
+    git 設定裡有沒有這條規則」。複驗當回合在本機實測到它**已經活著**：
+    `.git/info/exclude` 有 10 條 repo 完全沒宣告的 `**/.claude/*` 規則，於是
+    `resolve_doc_path('AutoClaude/.claude/agent-registry.json')` 在本機回 `'ignored'`、
+    在沒有那個區塊的 checkout 上會回 `'missing'` ⇒ 紅照樣會在兩台機器間漂移。
+    修法＝改用 `-v` 拿到**規則出處**，只採信出處是 tracked 檔的那些命中。形狀與
+    `tools/lib/git_paths.py` 檔頭記載的 `core.quotepath` 同型：真正的守門員不可以是
+    「這台機器的偶然事實」。
+
+    🔴 用 `-v` 的代價與其處置：`-v` 會把**否定規則**（`!pattern` 重新納入）也印出來，
+    而非 verbose 輸出不會。實測（臨時 repo）：`.gitignore` 有 `*.log` ＋ `!keep.log` 時，
+    非 verbose 只印 `a.log`，`-v` 卻多印一行 `.gitignore:2:!keep.log\tkeep.log`。照單全收
+    就會把「repo 明文重新納入」的檔判成第三態 ⇒ 故以 `pattern` 欄開頭是否為 `!` 濾掉。
+
+    🔴 **刻意不加 `--no-index`**（這不是省略，是判準的一部分）：預設行為會把 **tracked**
+    的路徑一律回報為「未忽略」，而那正是本判準要的語意——tracked ＝ repo 的事實，結構上
+    不可能是機器本地生成物。落地當回合實測：把全庫 27,600 條 tracked 路徑餵進去，預設命中
+    **0** 條、加上 `--no-index` 命中 **341** 條（多為 `AISDLC_SDD/**/build/reports/**` 這類
+    被凍結面 ignore 規則涵蓋、卻確實 tracked 的檔）。也就是說加了那個旗標會讓 341 個**真的
+    在 repo 裡**的檔被誤判成第三態 ⇒ 指向它們的錯字從此永遠不會紅，而且是靜默的。
+
+    argv 走既有 SSOT `tools/lib/git_paths.git_argv()`。輸出用 `-z`（欄位以 NUL 分隔、
+    四欄一組：出處／行號／pattern／路徑）而非預設的 `<出處>:<行號>:<pattern>\\t<路徑>`：
+    後者要靠切分冒號還原出處，而 pattern 裡本來就可以有冒號 ⇒ 無法無歧義還原。`-z` 同時
+    順帶關掉 C-quoted 路徑輸出（非 ASCII 路徑對不回原字串就等於靜默掉出第三態，全庫 630
+    條 tracked 路徑是非 ASCII，見 `git_paths` 檔頭）。
+
+    `extra_config` 只有自證測試在用：它是把「機器本地 ignore 來源」注入進來的唯一手段，
+    沒有它，上面那道過濾就沒有紅綠自證
+    （見 `test_a_machine_local_ignore_rule_never_grants_the_third_state`）。
+
+    rc 語意（實測）：0＝至少一條命中、1＝一條都沒命中、>1＝取數管道壞掉。
+    """
+    if not paths:
+        return frozenset()
+    try:
+        proc = subprocess.run(
+            _GIT_PATHS.git_argv(repo_root, *extra_config,
+                                "check-ignore", "-v", "-z", "--stdin", *extra_args),
+            input="".join(f"{p}\0" for p in paths), capture_output=True, text=True,
+            encoding="utf-8", errors="replace", timeout=180)
+    except (OSError, subprocess.SubprocessError) as exc:
+        raise AssertionError(
+            _GIT_CHECK_IGNORE_UNAVAILABLE.format(reason=exc)) from exc
+    if proc.returncode > 1:
+        raise AssertionError(_GIT_CHECK_IGNORE_UNAVAILABLE.format(
+            reason=f"rc={proc.returncode}: {proc.stderr.strip()[:200]}"))
+    fields = proc.stdout.split("\0")
+    known = tracked_files(repo_root)
+    return frozenset(
+        fields[i + 3]
+        for i in range(0, len(fields) - 3, 4)
+        if fields[i] in known and not fields[i + 2].startswith("!"))
+
+
+def _check_ignore(repo_root: Path, candidates: list[str]) -> frozenset[str]:
+    """正式判準用的那一問（不帶 `--no-index`，理由見 `_run_check_ignore`）。"""
+    return _run_check_ignore(repo_root, candidates)
+
+
+#: tracked 路徑（含其每一層祖先目錄）的快取——第三態的否決集，見下方 WHY。
+#: 鍵同 `_TRACKED_FILES_CACHE`，理由相同。
+_REPO_KNOWN_PATHS_CACHE: dict[str, frozenset[str]] = {}
+
+
+def repo_known_paths(repo_root: Path) -> frozenset[str]:
+    """tracked 的檔案，**外加**它們的每一層祖先目錄。
+
+    要祖先目錄是因為宣稱常以**目錄**形態指路（`docs/06_quality/`），而 `ls-files` 只
+    列檔案；少了這一層，目錄宣稱會整片掉出否決集。
+    """
+    key = str(repo_root)
+    if key not in _REPO_KNOWN_PATHS_CACHE:
+        known: set[str] = set()
+        for rel in tracked_files(repo_root):
+            known.add(rel)
+            known.update(str(p) for p in PurePosixPath(rel).parents if str(p) != ".")
+        _REPO_KNOWN_PATHS_CACHE[key] = frozenset(known)
+    return _REPO_KNOWN_PATHS_CACHE[key]
+
+
+def prime_machine_local_cache(rels: Iterable[str], repo_root: Path) -> None:
+    """批次預熱：一次 subprocess 問完整批宣稱，而不是每條各問一次。
+
+    落地當回合實測（macOS）：269 條相異宣稱**逐條**問 = 4.62s，**批次**一次 = 0.50s。
+    快取是模組級、平台中立性鎖的 3 次重跑只付一次；但逐條問連第一次都太貴。
+
+    🔴 判準是**合取**，兩款缺一不可（第二款是本函式的自證測試當場逼出來的，不是預想）：
+      ① 至少一個解析基準下的候選被 ignore 規則命中，且
+      ② **沒有**任何一個候選是 repo 已知路徑（tracked 檔或其祖先目錄）。
+    只有 ① 會過寬到危險：宣稱要逐一套上每個解析基準，而錯誤的基準會把一條真實路徑
+    前綴成一條**不存在**的路徑，那條路徑很容易命中某個廣義規則。落地當回合實測，
+    `AISDLC_SDD/AISDLC_SDD_v0.02/build/reports/…` 在基準 `.` 下 tracked、未被 ignore，
+    套上基準 `AutoClaude/` 之後卻命中 `AutoClaude/.gitignore:9: build/` ⇒ 只有 ① 時
+    這一族（實測 200+ 條）全被誤判成第三態，指向它們的錯字從此永遠不會紅。
+    ② 把它們擋掉的理由是語意的：**tracked ＝ repo 的事實，結構上不可能是機器本地生成物**。
+    """
+    pending = sorted({rel for rel in rels if rel not in _MACHINE_LOCAL_CACHE})
+    if not pending:
+        return
+    index = {rel: _claim_candidates(rel, repo_root) for rel in pending}
+    ignored = _check_ignore(repo_root, [c for cs in index.values() for c in cs])
+    known = repo_known_paths(repo_root)
+    for rel, cands in index.items():
+        _MACHINE_LOCAL_CACHE[rel] = (
+            not any(cand in known for cand in cands)
+            and any(cand in ignored for cand in cands))
+
+
+def is_machine_local_artifact(rel: str, repo_root: Path) -> bool:
+    """這條宣稱指的是不是「repo 自己宣告為忽略」的機器本地生成物？
+
+    🔴 這是幽靈路徑判準的**第三態**，不是豁免，兩者的差別是本函式存在的全部理由。
+    立案（R82／P4，mac 側實測 3 支紅）：
+      · `AutoClaude/.g0_readiness.json` 是每晚重生的量測檔且已 gitignore ⇒ 在跑過
+        nightly 的那台 Windows 上**檔在**、在剛 clone 的 mac 上**檔不在**。
+      · `AISDLC_SDD/.claude/settings.local.json` 是 Claude Code 的機器本地設定 ⇒ 方向
+        **恰好相反**（Windows 沒有、mac 有），於是它被登記進豁免表之後，在 mac 上被
+        `stale_path_baseline_problems()` 判成「已解析得到，請刪除登記」。
+    兩筆是同一個病的兩個方向：**判準的分母含機器本地狀態**。舊判準只問「這台機器的檔案
+    系統上現在有沒有這個檔」，所以同一棵樹在兩個平台上一個綠一個紅——而「幽靈與否」本該
+    是 repo 的性質，不是這台機器跑過什麼的性質。
+
+    正解是換掉量測面而不是換掉常數：問 **repo 自己**（`.gitignore` 是 tracked 內容，每台
+    機器逐字相同）「這條路徑是不是生成物」。答 True 的既不是幽靈也不是實體——它是**第三態**：
+    指向它的文件沒有寫錯（讀者在產出它的機器上真的找得到），但這棵樹不保證有它。
+    ⇒ 逐筆加豁免是錯的修法（同一筆登記在 A 機器必要、在 B 機器 stale，兩邊都紅）；
+    ⇒ 改成「mac 上量到的值」更錯（那只是把紅從 mac 搬去 Windows）。
+    """
+    if rel not in _MACHINE_LOCAL_CACHE:
+        prime_machine_local_cache([rel], repo_root)
+    return _MACHINE_LOCAL_CACHE[rel]
+
+
+#: `--no-index` 陷阱探針的快取（見 `test_a_tracked_path_is_never_the_third_state`）：
+#: 那一問要餵兩萬多條路徑跑兩次 git，而平台中立性鎖會把全檔重跑 3 次。
+_NO_INDEX_TRAP_CACHE: list[str] = []
+
+
+def tracked_paths_matching_an_ignore_rule(repo_root: Path) -> list[str]:
+    """**tracked 卻同時命中 ignore 規則**的路徑（＝`--no-index` 會誤判的那一族）。
+
+    這批路徑是本判準最重要的對照組：它們真的在 repo 裡，所以指向它們的錯字必須照樣紅。
+    落地當回合實測 341 條（多在 `AISDLC_SDD/**/build/reports/**` 凍結面）。
+    """
+    if not _NO_INDEX_TRAP_CACHE:
+        tracked = _GIT_PATHS.ls_files(repo_root)
+        _NO_INDEX_TRAP_CACHE.extend(sorted(_no_index_hits(repo_root, tracked)))
+    return list(_NO_INDEX_TRAP_CACHE)
+
+
+def _no_index_hits(repo_root: Path, tracked: list[str]) -> frozenset[str]:
+    """同 `_check_ignore` 但加上 `--no-index`（＝忽略 index，只看 ignore 規則）。
+
+    **只有這支測試用**：正式判準刻意不帶那個旗標，理由見 `_run_check_ignore`。
+    刻意共用同一支跑數層（含 tracked 出處過濾），對照組才與正式判準只差那一個旗標——
+    差兩處的對照組證明不了「差的是那一個旗標」。
+    """
+    return _run_check_ignore(repo_root, tracked, "--no-index")
+
+
 def resolve_doc_path(rel: str, repo_root: Path) -> str | None:
-    """`None`＝解析得到；否則回傳失敗原因（`"missing"`／`"case"`）。
+    """`None`＝解析得到；否則回傳失敗原因（`"missing"`／`"case"`／`"ignored"`）。
 
     與 `resolve_named_path` 的差別（刻意分開，不是重複實作）：
       · 本函式**逐段比對目錄項名稱**，所以在大小寫不敏感的檔案系統上仍判得出
         「拼法不對」；那一支用 `Path.is_file()`，在 Windows／macOS 上大小寫不敏感。
       · 本函式接受**目錄**（文件常以 `docs/06_quality/` 這類形態指路），那一支只認檔案。
+
+    🔴 `"ignored"`＝第三態（機器本地生成物），理由見 `is_machine_local_artifact()`。
+    **這一問刻意排在碰檔案系統之前**：先問磁碟，就會讓「這台機器跑過 nightly 沒有」
+    決定回傳值——而本函式的回傳值必須是 repo 的性質，在每個平台上逐字相同。
     """
+    if is_machine_local_artifact(rel, repo_root):
+        return "ignored"
     saw_loose = False
     for base in path_claim_bases(repo_root):
         current = repo_root if base == "." else repo_root / base
@@ -4193,11 +4422,17 @@ def collect_path_claims(repo_root: Path) -> list[tuple[str, str, str]]:
 def ghost_path_problems(
     claims: list[tuple[str, str, str]], repo_root: Path, baseline: frozenset[str]
 ) -> list[str]:
-    """解析不到、且不在具名基線內的路徑宣稱（空＝通過）。"""
+    """解析不到、且不在具名基線內的路徑宣稱（空＝通過）。
+
+    三種放行各有各的理由，刻意不合成一個條件：`None`＝真的解析得到；`"ignored"`＝第三態
+    （repo 自己宣告的機器本地生成物，見 `is_machine_local_artifact()`，**不佔豁免額度**，
+    因為它根本不是欠債）；`rel in baseline`＝具名欠債登記（只准變少）。
+    """
+    prime_machine_local_cache([rel for _src, rel, _ln in claims], repo_root)
     problems: list[str] = []
     for source, rel, line in claims:
         verdict = resolve_doc_path(rel, repo_root)
-        if verdict is None or rel in baseline:
+        if verdict is None or verdict == "ignored" or rel in baseline:
             continue
         if verdict == "case":
             problems.append(
@@ -4215,19 +4450,33 @@ def ghost_path_problems(
 def stale_path_baseline_problems(
     claims: list[tuple[str, str, str]], repo_root: Path, baseline: frozenset[str]
 ) -> list[str]:
-    """具名基線的兩款 stale：已解析得到／已無人引用。皆須刪除該筆登記。"""
+    """具名基線的三款 stale：已解析得到／已被第三態承接／已無人引用。皆須刪除該筆登記。"""
+    prime_machine_local_cache(
+        baseline | {rel for _src, rel, _ln in claims}, repo_root)
     referenced = {rel for _src, rel, _ln in claims}
+    verdicts = {rel: resolve_doc_path(rel, repo_root) for rel in sorted(baseline)}
     problems = [
         f"`{rel}` 已在基線豁免表上，但它現在**解析得到**了——請把這一筆從 "
         f"_GHOST_PATH_BASELINE 刪掉，否則餘裕會變成日後的破口"
-        for rel in sorted(baseline)
-        if resolve_doc_path(rel, repo_root) is None
+        for rel, verdict in verdicts.items()
+        if verdict is None
+    ]
+    # 🔴 第三款（R82／P4 新增）：gitignored 生成物**不該**用豁免表承接。理由是這種登記
+    # 在不同機器上會得出相反的判決——在沒有那個檔的機器上它是必要的豁免、在有的機器上它
+    # 是 stale ⇒ 兩邊都紅，只是紅的那一支不同。第三態才是它的家。少了這一款，下一個人
+    # 只要順手把 gitignored 路徑登記進表並調高天花板，這個病就會原地復發。
+    problems += [
+        f"`{rel}` 在基線豁免表上，但它是 repo 自己宣告忽略的**機器本地生成物**——那一族"
+        f"由第三態（`is_machine_local_artifact`）統一承接，逐筆豁免反而會讓這筆登記在"
+        f"「有那個檔的機器」上被判成 stale。請把這一筆刪掉並下修天花板"
+        for rel, verdict in verdicts.items()
+        if verdict == "ignored"
     ]
     problems += [
         f"`{rel}` 在基線豁免表上，但引用面已經**沒有任何一處**提到它"
         f"——請把這一筆刪掉（豁免只能因為「還沒清」而存在）"
         for rel in sorted(baseline - referenced)
-        if resolve_doc_path(rel, repo_root) is not None
+        if verdicts[rel] is not None
     ]
     return problems
 
@@ -4246,7 +4495,7 @@ class TestR81GhostPathClaims(unittest.TestCase):
         self.assertEqual(problems, [], "發現幽靈路徑宣稱：\n  " + "\n  ".join(problems))
 
     def test_the_baseline_is_not_stale(self) -> None:
-        """兩款 stale 自檢：解析得到了／已無人引用，都必須把登記刪掉。"""
+        """三款 stale 自檢：解析得到了／已被第三態承接／已無人引用，都必須刪掉登記。"""
         problems = stale_path_baseline_problems(
             collect_path_claims(_REPO_ROOT), _REPO_ROOT, _GHOST_PATH_BASELINE)
         self.assertEqual(problems, [], "基線豁免表已 stale：\n  " + "\n  ".join(problems))
@@ -4347,6 +4596,202 @@ class TestR81GhostPathClaims(unittest.TestCase):
             [], _REPO_ROOT, frozenset({"nowhere/at/all_xyz.py"}))
         self.assertTrue(any("沒有任何一處" in p for p in problems), problems)
 
+    # ── 第三態（機器本地生成物）的紅綠自證 ────────────────────────────────────
+    #: 探針落在 `AutoClaude/logs/`（`AutoClaude/.gitignore:26: logs/`）：該目錄整個
+    #: 被 ignore，所以這支暫存檔對 `git status` 結構上不可見，不會干擾同樹並行的作業。
+    _FLIP_PROBE = "AutoClaude/logs/_p4_third_state_probe.md"
+
+    def _verdict_uncached(self, rel: str) -> str | None:
+        """清掉兩層快取後重新判一次（快取會遮住我們正要量的那個變化）。"""
+        _MACHINE_LOCAL_CACHE.pop(rel, None)
+        _DIR_ENTRY_CACHE.clear()
+        return resolve_doc_path(rel, _REPO_ROOT)
+
+    def test_the_third_state_does_not_move_when_the_file_appears_or_disappears(
+        self,
+    ) -> None:
+        """🔴 本包的核心斷言：第三態不得隨「這台機器上這個檔在不在」而變。
+
+        缺陷本體（R82／P4）：`AutoClaude/.g0_readiness.json` 每晚重生且已 gitignore ⇒
+        跑過 nightly 的 Windows 機上檔在、剛 clone 的 mac 上檔不在，於是同一份交棒書
+        一台判綠一台判紅。**本測試把那個差異就地製造出來**：同一條 gitignored 路徑，
+        建檔前後各判一次，兩次必須逐字相同——不同就表示判準又把機器狀態吃進去了。
+        """
+        probe = _REPO_ROOT / self._FLIP_PROBE
+        self.assertFalse(probe.exists(), f"探針殘留：請先刪掉 {probe}")
+        probe.parent.mkdir(parents=True, exist_ok=True)
+        try:
+            absent = self._verdict_uncached(self._FLIP_PROBE)
+            probe.write_text("probe\n", encoding="utf-8")
+            present = self._verdict_uncached(self._FLIP_PROBE)
+        finally:
+            probe.unlink(missing_ok=True)
+            self._verdict_uncached(self._FLIP_PROBE)  # 快取復原成磁碟現況
+        self.assertEqual(
+            absent, present,
+            f"同一條 gitignored 路徑，檔不在時判 {absent!r}、檔在時判 {present!r}"
+            "——判準又把「這台機器跑過什麼」吃進去了，那正是本包在治的缺陷",
+        )
+        self.assertEqual(
+            absent, "ignored",
+            "gitignored 生成物必須落在第三態；判成 missing 就是把 mac 判紅、判成 None "
+            "就是靠這台機器剛好有那個檔",
+        )
+
+    def test_the_flip_probe_would_have_caught_the_old_criterion(self) -> None:
+        """對照組（證明上一支不是恆綠）：**非** gitignored 的路徑，檔在不在必須有差。
+
+        少了這一支，上一支就可能只是「第三態把所有東西都吞了」。這裡刻意不建檔——用
+        repo 內既有的一在一不在兩條路徑即可，零副作用。
+        """
+        self.assertEqual(
+            resolve_doc_path("tools/run_root_unittests.py", _REPO_ROOT), None)
+        self.assertEqual(
+            resolve_doc_path("tools/no_such_file_xyz_p4.py", _REPO_ROOT), "missing")
+
+    def test_a_tracked_path_is_never_the_third_state(self) -> None:
+        """🔴 **tracked 否決款**的紅綠自證：tracked 的檔永遠不是機器本地生成物。
+
+        🔴 R82／P4 複驗訂正本測試自陳的守備對象（原文寫「`--no-index` 陷阱的紅綠自證」，
+        而它對那件事**沒有鑑別力**——把 `--no-index` 加回正式判準，本測試照樣全綠）。實測
+        兩組對照：把該旗標加進判準後，341 條陷阱路徑的**最終判決一筆都沒變**（0/341），
+        因為 `--no-index` 多出來的命中一律落在 tracked 檔上，而那正好被合取的第二款
+        （`prime_machine_local_cache` 的 tracked 否決）整片吃掉 ⇒ **否決款嚴格支配該旗標
+        的差異**。真正有鑑別力的是否決款本身：把它拿掉，200 條取樣**全部 200 條**被誤判
+        成第三態。「測試名／訊息描述了一件它沒在守的事」正是本檔通篇在治的病，故就地改正
+        而不是留著當註腳。
+
+        `--no-index` 的選擇因此降級為**縱深防禦**（兩道各自獨立、失效模式不同）。它不是
+        沒有代價，只是代價被另一款擋住了；為免那句散文再度無錨，下面第二段斷言直接在
+        取數層量它：帶旗標時 tracked 路徑會被回報成 ignored、不帶時不會。
+        """
+        trapped = tracked_paths_matching_an_ignore_rule(_REPO_ROOT)
+        self.assertGreater(
+            len(trapped), 100,
+            f"對照組只有 {len(trapped)} 條 ⇒ 這支測試在空轉（ignore 規則或 index 變了，"
+            "要人來看一眼），不是通過")
+        # 取樣 200 條並**先批次預熱**：逐條問會退化成 200 次 subprocess（實測 3.7s，
+        # 佔本檔全部耗時的六分之一），批次一次 0.3s。取樣而非全量的理由是這一族同質
+        # （同一條 ignore 規則、同一片凍結面），全量只是把同一件事重複 341 次。
+        sample = trapped[:200]
+        prime_machine_local_cache(sample, _REPO_ROOT)
+        misjudged = [rel for rel in sample
+                     if is_machine_local_artifact(rel, _REPO_ROOT)]
+        self.assertEqual(
+            misjudged, [],
+            "這些路徑 tracked（＝repo 的事實）卻被判成機器本地生成物 ⇒ 合取的 tracked "
+            f"否決款失效了，指向它們的錯字會全部靜默放行：{misjudged[:5]}")
+        # 取數層的直接對照：`--no-index` 的危害是真的（只是被否決款擋住）。少了這一段，
+        # `_run_check_ignore` 裡那段「刻意不加 `--no-index`」的長註解就沒有任何機械錨點。
+        self.assertEqual(
+            _check_ignore(_REPO_ROOT, sample), frozenset(),
+            "正式判準（不帶 `--no-index`）竟把 tracked 路徑回報成 ignored")
+        self.assertTrue(
+            _run_check_ignore(_REPO_ROOT, sample, "--no-index"),
+            "帶上 `--no-index` 竟然一條都沒命中 ⇒ 這段對照在空轉，"
+            "那段「刻意不加該旗標」的理由就失去依據，要人來看一眼")
+
+    def test_a_gitignored_baseline_entry_is_red(self) -> None:
+        """鑑別力（注入）：把 gitignored 生成物登記進豁免表 ⇒ stale 自檢必紅。
+
+        守的是**復發**：這個病的原始形態就是「逐筆加豁免」，而那種登記在有那個檔的機器
+        上會被判成 stale、在沒有的機器上又是必要的——兩邊都紅，只是紅的那一支不同。
+        """
+        problems = stale_path_baseline_problems(
+            [], _REPO_ROOT, frozenset({"AutoClaude/.g0_readiness.json"}))
+        self.assertTrue(
+            any("機器本地生成物" in p for p in problems), problems)
+
+    def test_a_machine_local_claim_is_green_on_every_platform(self) -> None:
+        """端到端：交棒書指名 gitignored 量測檔 ⇒ 放行，且不佔任何豁免額度。
+
+        R75／R76 交棒書就是這個形態（該文件自己逐字寫「已 gitignored ⇒ 只存在於產出它
+        的機器」）。傳空豁免表＝證明放行來自第三態本身，不是來自基線。
+        """
+        for rel in ("AutoClaude/.g0_readiness.json",
+                    "AISDLC_SDD/.claude/settings.local.json"):
+            with self.subTest(rel=rel):
+                self.assertEqual(
+                    ghost_path_problems(self._line(rel), _REPO_ROOT, frozenset()), [])
+                self.assertNotIn(
+                    rel, _GHOST_PATH_BASELINE,
+                    "第三態承接的路徑不該同時佔一筆豁免登記（兩個家）")
+
+    def test_a_machine_local_ignore_rule_never_grants_the_third_state(self) -> None:
+        """🔴 第三態的來源本身也必須是 repo 事實（R82／P4 複驗補洞的紅綠自證）。
+
+        補洞前的缺陷：判準只問「被不被 ignore」而不問「**是誰宣告的**」，於是
+        `$GIT_DIR/info/exclude`（`git clone` 就地新建、untracked）與 `core.excludesFile`
+        （使用者家目錄的全域 ignore）也能授予第三態。那兩個檔都不隨 repo 走 ⇒ 同一條宣稱
+        在 A 機器判 `'ignored'`、在 B 機器判 `'missing'`，紅照樣在平台間漂移——與本包原本
+        要治的病同型，只是量測面從「檔案系統」換成「這台機器的 git 設定」。複驗當回合在
+        本機實測它已經活著：`.git/info/exclude` 有 10 條 repo 完全沒宣告的 `**/.claude/*`
+        規則，`AutoClaude/.claude/agent-registry.json` 因此被判成第三態。
+
+        本測試**自建一個臨時 repo**，而不是斷言本機那 10 條規則：那 10 條是機器狀態，拿它
+        當輸入的測試在別台機器上會空轉（＝那個平台從此沒有覆蓋）。臨時 repo 讓三種 ignore
+        來源在**任何機器、任何平台**上都逐字同構地存在。
+
+        🔴 `ignore_cleanup_errors=True` 是 **Windows 專屬**的必要處置，不是防禦性抄寫：
+        `git add` 會寫出 loose object，而 git 把它設成**唯讀**（本回合實測 `-r--r--r--`）。
+        Windows 的 `os.unlink` 拒絕刪唯讀檔 ⇒ `shutil.rmtree` 會拋 `PermissionError`，
+        於是這支測試會在 Windows 上以 ERROR 收場——那就是把紅從 mac 搬去 Windows，
+        正是本包在治的病。體例沿用 `test_git_hooks_install_common.py` 同款處置，同族知識
+        另見 `tools/dev_start.py::_rmtree_windows_safe`。
+        """
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as td:
+            root = Path(td).resolve()
+            subprocess.run(["git", "-C", str(root), "init", "-q"], check=True)
+            # 三種來源各宣告一條，路徑本身一律不存在於磁碟（第三態不看磁碟）
+            (root / ".gitignore").write_text(
+                "tracked_rule.md\nre_included.md\n!re_included.md\n", encoding="utf-8")
+            with (root / ".git" / "info" / "exclude").open("a", encoding="utf-8") as fh:
+                fh.write("\ninfo_exclude_rule.md\n")
+            global_ignore = root / "global_ignore"
+            global_ignore.write_text("global_rule.md\n", encoding="utf-8")
+            subprocess.run(["git", "-C", str(root), "add", ".gitignore"], check=True)
+            cfg = ("-c", f"core.excludesFile={global_ignore}")
+            probes = ["tracked_rule.md", "info_exclude_rule.md",
+                      "global_rule.md", "re_included.md"]
+
+            # 對照組：不做出處過濾時 git 認定「被忽略」的是哪些（＝補洞前的行為）
+            raw = subprocess.run(
+                _GIT_PATHS.git_argv(root, *cfg, "check-ignore", "-z", "--stdin"),
+                input="".join(f"{p}\0" for p in probes), capture_output=True,
+                text=True, encoding="utf-8", errors="replace", timeout=60)
+            unfiltered = {f for f in raw.stdout.split("\0") if f}
+            self.assertEqual(
+                unfiltered, {"tracked_rule.md", "info_exclude_rule.md", "global_rule.md"},
+                "注入沒生效 ⇒ 這支測試在空轉，不是通過（git 版本或 ignore 語意變了，"
+                f"要人來看一眼）：{sorted(unfiltered)}")
+
+            # 受測物：只有 tracked `.gitignore` 宣告的那一條才拿得到第三態
+            self.assertEqual(
+                _run_check_ignore(root, probes, extra_config=cfg), {"tracked_rule.md"},
+                "機器本地 ignore 來源（info/exclude、全域 excludesFile）授予了第三態 ⇒ "
+                "判準的答案又變成「這台機器怎麼設定」的函數，紅會在平台間漂移")
+
+    def test_a_re_included_path_is_never_the_third_state(self) -> None:
+        """`-v` 的副作用：它連**否定規則**（`!pattern`）的命中也印，非 verbose 不印。
+
+        本判準為了拿到規則出處只能用 `-v`（見 `_run_check_ignore`），於是必須自己把否定
+        規則濾掉；漏濾就會把「repo 明文**重新納入**」的檔判成機器本地生成物——那正好是
+        語意的反面，而且靜默。上一支測試的 `.gitignore` 已含 `re_included.md` ＋
+        `!re_included.md` 這一組，此處單獨再驗一次是為了讓失敗訊息指得準。
+
+        `ignore_cleanup_errors=True` 的理由同上一支（Windows 上唯讀 loose object）。
+        """
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as td:
+            root = Path(td).resolve()
+            subprocess.run(["git", "-C", str(root), "init", "-q"], check=True)
+            (root / ".gitignore").write_text(
+                "*.log\n!keep.log\n", encoding="utf-8")
+            subprocess.run(["git", "-C", str(root), "add", ".gitignore"], check=True)
+            self.assertEqual(
+                _run_check_ignore(root, ["drop.log", "keep.log"]), {"drop.log"},
+                "`!keep.log` 是 repo 明文重新納入 ⇒ 它不是機器本地生成物；"
+                "判成第三態等於指向它的錯字從此永遠不會紅")
+
     def test_the_criterion_states_what_it_cannot_see(self) -> None:
         """🔴 誠實劃界（本 repo 的「有鎖在守假話」教訓：鎖綠不等於那件事被保證）。
 
@@ -4361,6 +4806,10 @@ class TestR81GhostPathClaims(unittest.TestCase):
              實測 49/757 解析不到而幾乎全部可辯護 ⇒ 整面排除。
           ④ **寫死的數字**是否新鮮：那條線由 `adr_measurement_problems` 與 §7 表①
              的 live 格負責，本面不重複收。
+          ⑤ **第三態的內容真假**（R82／P4）：對 gitignored 的機器本地生成物，本面只
+             回答「這棵樹不保證有它」，**不**回答「產出它的那台機器上它是什麼內容」。
+             交棒書引用 `.g0_readiness.json` 的欄位值時，那個值有沒有被竄改、是不是
+             上一輪的舊值，本面零判準——它連檔都看不到。
         本測試是**可執行的**劃界：上面每一句「抓不到」都必須真的抓不到，否則這段
         散文就是在描述另一個不存在的判準（那正是本檔通篇在治的病）。
         """
@@ -4375,6 +4824,9 @@ class TestR81GhostPathClaims(unittest.TestCase):
                          {src for src, _r, _l in collect_path_claims(_REPO_ROOT)})
         # ④ 數字 token 不在射程
         self.assertEqual(path_claims("`total=20436` 與 `3923 passed`", "syn.md"), [])
+        # ⑤ 第三態只答「這棵樹不保證有它」——放行，且對內容零判準
+        self.assertEqual(
+            resolve_doc_path("AutoClaude/.g0_readiness.json", _REPO_ROOT), "ignored")
 
 
 # ══════════════════════════════════════════════════════════════════════════════

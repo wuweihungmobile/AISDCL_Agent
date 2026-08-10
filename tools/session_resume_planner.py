@@ -75,6 +75,12 @@ from pathlib import Path
 
 _REPO_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(_REPO_ROOT / "tools"))
+# 🔴 R83／W2-A：`tools/lib` 顯式進 sys.path，而**不是**靠 `context_budget_guard` 在它的
+# 模組層順手插的那一行。理由是模組身分（同本檔下面那段 Q2-01 的 WHY）：hook 那一側一律
+# 以裸名 import `tools/lib/*`，本檔若改走 `from lib import schedule_backend`，同一份原始碼
+# 在同一個行程裡會有兩個模組物件 ⇒ 測試 monkeypatch 其中一個不會影響另一個＝假綠。
+# 顯式而不是靠別人的副作用：那個副作用只要有人重排 import 順序就會消失，而消失是靜默的。
+sys.path.insert(0, str(_REPO_ROOT / "tools" / "lib"))
 sys.path.insert(0, str(_REPO_ROOT / ".claude" / "hooks"))
 
 # 🔴 依賴方向刻意是「tools → .claude/hooks」而不是反過來（本 repo 對「同一份知識住
@@ -92,6 +98,7 @@ sys.path.insert(0, str(_REPO_ROOT / ".claude" / "hooks"))
 # （下面兩段被 ruff 的 isort 判為不同 section：`.claude/hooks` 不在其 src 內 ⇒ 視為
 #   第三方；`tools/` 內的則是 first-party。分段是它要的形狀，不是隨手排的。）
 import context_budget_guard as guard  # noqa: E402  # 水位判定唯一實作（見上方 WHY）
+import schedule_backend  # noqa: E402  # R83：平台差異（schtasks／launchd）唯一收斂點
 
 import _stdio_utf8  # noqa: E402,F401  # Windows 非 UTF-8 終端印中文／emoji 防崩潰
 from lib import quota_escalation as escalation  # noqa: E402  # R81：叫人＋扇出清單
@@ -469,12 +476,23 @@ def relay_problems(state: object) -> list[str]:
     problems = [f"缺必填鍵 `{key}`" for key in RELAY_REQUIRED if key not in state]
     if state.get("schema") != RELAY_SCHEMA:
         problems.append(f"schema 不是 {RELAY_SCHEMA}（讀到 {state.get('schema')!r}）")
-    # 🔴 取證守衛：`next_run_time` 是空的就**不准**宣稱排程成立。這是「反事後諸葛」
-    # 那條規則在狀態檔這一層的形態——rc 不是憑證，`NextRunTime` 這個**值**才是
+    # 🔴 取證守衛：拿不到憑證就**不准**宣稱排程成立。這是「反事後諸葛」那條規則在狀態
+    # 檔這一層的形態——Windows 側 rc 不是憑證、`NextRunTime` 這個**值**才是
     # （`Get-ScheduledTask` 對不存在的工作回 rc=0，只讀 rc 會是假綠）。
+    # 🔴 R83／W2-A：mac 的憑證住**另一個鍵**（`schedule_credential`），不共用這一個。
+    # 理由是誠實：`next_run_time` 這個鍵名在 mac 上是假話——launchd 從不報「下次幾點跑」
+    # （`launchctl print` 的輸出裡 next／fire／due 全部不存在，本輪實測），把 launchd 憑證
+    # 塞進這個欄位就是把「我們推算的」偽裝成「排程器回報的」。守衛強度一格都沒放鬆：
+    # 判準是**兩鍵任一非空**，兩鍵皆空時 armed／waiting 一樣違規；而唯一會產出非空值的
+    # 路徑是各後端 `arm()` 裡那道「回讀相符才發憑證」的閘。
+    # 🔴 R83／F2-④：兩個鍵名一律走 `schedule_backend.CRED_KEY_*`。此處原先只有 mac 那一半
+    # 用常數、Windows 那一半寫字面 `"next_run_time"`——**同一個判準的兩邊採用不同來源**，
+    # 於是改鍵名時這一行會變成「只檢查得到一個鍵」，而它正是「沒有憑證不准宣稱已排程」
+    # 這條守衛的本體。修前這是本檔第 4 個字面複本（任務書只點出 3 個）。
     live = state.get("state") in ("armed", "waiting")
-    if live and not str(state.get("next_run_time") or "").strip():
-        problems.append("state 已是 armed/waiting，但 next_run_time 是空的"
+    if live and not (str(state.get(schedule_backend.CRED_KEY_SCHTASKS) or "").strip()
+                     or str(state.get(schedule_backend.CRED_KEY_LAUNCHD) or "").strip()):
+        problems.append("state 已是 armed/waiting，但排程憑證是空的"
                         "（＝沒有憑證卻宣稱已排程）")
     # 🔴 猜出來的 reset 不得用來武裝：排程會成立、NextRunTime 也拿得到，取證規則照樣
     # 綠——但它醒在錯的時間。「憑證存在、但憑證不回答那個問題」是最難看見的一種假綠。
@@ -643,10 +661,18 @@ def sentinel_decide(event: dict | None, handled_through: object,
                               f"（猜出來的會醒在錯的時間）。逐字：{event['text'][:80]}"}
         at = reset_at + timedelta(seconds=RESET_SKEW_SECONDS)
         if at > now:
+            # 🔴 R83-B：這句話原本逐字寫「⇒ **重排到那個時刻**（本次零 token）」，而它在
+            # mac 上是**假的**（`at_expr` 到不了 plist，四個相異值產出同一份 plist）。它的
+            # 代價已經發生：本輪真實撞線語料裡同一個判定連印四次、`fire_at` 每次都是同一個
+            # 時刻，掌舵者據此判「喚醒完全不 WORK」並開了一個 P0——**假話造成假診斷**。
+            # 現在它只陳述**決策**（一個純函式唯一有資格陳述的東西），載具真的做到什麼由
+            # 憑證講：同一筆 `sentinel_rearmed` 痕跡的 `credential` 欄就是那句話的家，而它
+            # 在 mac 上會明說「有 / 沒有 StartCalendarInterval」與「重載是否仍待完成」。
             return {"action": "arm_reset", "at": at, "reset_at": reset_at,
                     "reset_source": "transcript-verbatim",
                     "reason": f"偵測到未處理的撞線；觀測 reset={reset_at} 尚未到 ⇒ "
-                              "重排到那個時刻（本次零 token）"}
+                              "要求排程器改在那個時刻醒（本次零 token；載具實際做到什麼"
+                              "看同一筆痕跡的 credential 欄）"}
         return {"action": "probe", "at": None,
                 "reason": f"偵測到未處理的撞線；觀測 reset={reset_at} 已過 ⇒ "
                           "花一次探測確認額度回來了沒"}
@@ -744,16 +770,23 @@ def endurance_schtasks_script(plan_path: str, task_name: str, at_expr: str,
 # 🔴 R79 Auto Pilot：`--register-schtasks` 那條手動路徑此前在 `main()` 裡另存一份
 # **逐字相同**的九行（跑腳本 → 取 `NextRunTime` → 拿不到就 rc=1）。同一份知識兩個家、
 # 改一個另一個不會紅，是本 repo 反覆判過的形態；收成一處順帶把本檔騰出 LOC 餘裕。
-def _register_at_expr(plan_path: str, task: str, at_expr: str, tick: str) -> tuple[int, str]:
-    """註冊排程並當場取證。回 `(rc, next_run_time)`；拿不到憑證一律 rc=1。"""
-    proc = run_powershell(endurance_schtasks_script(plan_path, task, at_expr, tick))
-    print(proc.stdout, end="")
-    moment = next_run_time(proc.stdout)
-    if proc.returncode != 0 or not moment:
-        print(f"❌ 排程沒有成立（rc={proc.returncode}，NextRunTime 取不到）⇒ "
-              "本工具**不會**說它已排程。\n" + (proc.stderr or ""), file=sys.stderr)
-        return 1, ""
-    return 0, moment
+# 🔴 R83／W2-A：本支的 schtasks body 搬進 `schedule_backend.SchtasksBackend.arm`，逐字
+# 未改；這裡只剩分派。**seam 刻意選在這一層而不是上一層 `register_endurance`**：
+# `at_expr` 這個參數本來就是「觸發運算式，以各排程器自己的語言表達」（schtasks 吃
+# PowerShell 運算式；launchd 走重複觸發、根本不吃時刻，見該檔檔頭），而上一層做的
+# 「先 astimezone 再 strftime」是與載具無關的時區收斂。把 seam 放上一層會讓既有回歸鎖
+# `test_context_budget_guard.py::ResetFrameIsNotTheMachineClockTest` 在 mac 上失去落點
+# ——那條鎖守的性質（送出去之前必須先換到本機框架）在兩個平台上都仍然為真。
+# 🔴 R83-B：多帶一個**結構化**的 `at`。理由是實測出來的：`at_expr` 是「以排程器自己的語言
+# 寫成的字串」，而 launchd 的語言裡沒有那個字串——它吃 plist 裡的 `StartCalendarInterval`
+# ⇒ 那個引數在 mac 後端**結構上到不了 plist**（四個相異 `at_expr` 產出的 plist sha256 相同，
+# 相異指紋數 1），而決策層同時在印「重排到那個時刻」。時區收斂與 `strftime` 仍留在
+# `register_endurance`（見下方 R80 段與 `ResetFrameIsNotTheMachineClockTest` 的落點），
+# 這裡只是把「時刻」這個語意本身也一起傳下去，讓吃得動它的後端吃得到。
+def _register_at_expr(plan_path: str, task: str, at_expr: str, tick: str,
+                      at: datetime | None = None) -> tuple[int, str]:
+    """註冊排程並當場取證。回 `(rc, 憑證字串)`；拿不到憑證一律 rc=1。"""
+    return schedule_backend.select().arm(plan_path, task, at_expr, tick, at)
 
 
 # 🔴 R80：`at.astimezone()` 不是裝飾。`strftime` 會把 offset **無聲丟掉**，而
@@ -761,10 +794,14 @@ def _register_at_expr(plan_path: str, task: str, at_expr: str, tick: str) -> tup
 # 別的時區（本輪的 reset 時刻現在可能來自訊息自報的時區），排程就會醒在錯的時刻，
 # 而 `NextRunTime` 照樣拿得到＝取證規則全綠的假綠。先換算到本機框架再丟 offset，
 # 才是「丟掉的那個資訊本來就已經被用掉了」。
+# 🔴 R83：這一層與載具無關（時區收斂在哪個平台都要做），故**不**下沉到後端；下沉的是
+# 「把運算式變成一支真的排程」那一層（見 `_register_at_expr`）。launchd 不吃時刻，它會
+# 把這個字串忽略掉——那件事寫在後端檔頭，不是靜靜忽略。
 def register_endurance(state: dict, at: datetime, tick: str = RESUME_TICK) -> tuple[int, str]:
-    """註冊／重排並取證。回 `(rc, next_run_time)`；拿不到憑證一律 rc=1。"""
+    """註冊／重排並取證。回 `(rc, 憑證字串)`；拿不到憑證一律 rc=1。"""
     return _register_at_expr(state["plan_path"], state["task_name"],
-                             f"'{at.astimezone().strftime('%Y-%m-%d %H:%M:%S')}'", tick)
+                             f"'{at.astimezone().strftime('%Y-%m-%d %H:%M:%S')}'", tick,
+                             at.astimezone())
 
 
 def write_relay(plan: Path, state: dict) -> None:
@@ -900,31 +937,20 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
+# 🔴 R83／W2-A：這兩支的 body 搬到 `tools/lib/schedule_backend.py`，**逐字未改**，只是
+# 前面多了一層「這台機器用哪個排程器」的分派。搬家的理由不是潔癖：mac 上這條路整條
+# 缺席（`run_powershell` 在 posix 直接 fail-loud，而**整條指令 rc 仍是 0**），補 mac 支援
+# 的另外兩種寫法都更糟——① 在這裡長 `if os.name == "nt"`：本檔已有一處、hook 有六處，
+# 再補一個平台就是十幾處各自為政的平台判斷；② 另寫一支 mac 專用工具：那是同一份續航
+# 協定的第二個家，而狀態塊／判定／稽核痕跡全都得跟著複製一份。
+# 兩支旗標名保留 `--verify-schtasks`／`--remove-schtasks`（mac 上它們走 launchd）：改名
+# 會動到既有取證指令與交棒書裡的字串，而本包的驗收條件之一是 Windows 側零行為改變。
 def _schtasks_verify(task_name: str) -> int:
-    proc = run_powershell(_EVIDENCE_TEMPLATE.format(task=_ps_single_quote(task_name)) + "\n")
-    print(proc.stdout, end="")
-    moment = next_run_time(proc.stdout)
-    if proc.returncode != 0 or not moment:
-        print(f"❌ 取不到 `{task_name}` 的 NextRunTime（rc={proc.returncode}）"
-              "⇒ 不准宣稱它已排程。\n" + (proc.stderr or ""), file=sys.stderr)
-        return 1
-    print(f"✅ NextRunTime = {moment}　←（這一行就是憑證，宣稱『已排程』時必須連它一起貼）")
-    return 0
+    return schedule_backend.select().verify_cli(task_name)
 
 
 def _schtasks_remove(task_name: str) -> int:
-    task_q = _ps_single_quote(task_name)
-    proc = run_powershell(
-        f"Unregister-ScheduledTask -TaskName '{task_q}' -Confirm:$false\n"
-        f"if (Get-ScheduledTask -TaskName '{task_q}' "
-        "-ErrorAction SilentlyContinue) { Write-Output 'STILL-PRESENT' } "
-        "else { Write-Output 'REMOVED' }\n")
-    print(proc.stdout, end="")
-    if "REMOVED" not in proc.stdout:
-        print(f"❌ `{task_name}` 沒有真的被移除（rc={proc.returncode}）\n"
-              + (proc.stderr or ""), file=sys.stderr)
-        return 1
-    return 0
+    return schedule_backend.select().disarm(task_name)
 
 
 # 必須換到「解讀 `resets 9am` 的那個框架」：那個字串是牆上時刻（括號裡就寫著
@@ -941,6 +967,18 @@ def local_time(stamp: str, tz: object = None) -> datetime | None:
         return None
 
 
+# 🔴 R83／F2-④：憑證鍵名的唯一的家＝`schedule_backend.CRED_KEY_*`，本檔**不留字面複本**。
+# 修前這裡與三支終態路徑各自把 `next_run_time=""`／`schedule_credential=""` 當 kwarg 直接
+# 寫出來（共 4 處），於是改鍵名時只會改到一個家，而後果不是崩潰：後端把憑證寫進新鍵、
+# 終態清的是舊鍵 ⇒ 舊鍵殘留一個過期憑證，而 `relay_problems()` 判「兩鍵任一非空」
+# ⇒ 一支**已經放棄**的續航被判成 armed／waiting 而繼續被信任（R59 事故同形），且全套照綠。
+# 機械物：`tools/tests/test_mac_endurance_r83.py::CredentialKeyHasOneHomeTest`
+# （planner 的**程式碼**裡出現任一鍵字面即紅；註解裡點名兩個鍵仍放行）。
+def _cleared_credentials() -> dict:
+    """把**兩個**憑證鍵一起清空。只清一個＝留下一個過期憑證仍被判成有效。"""
+    return {schedule_backend.CRED_KEY_SCHTASKS: "", schedule_backend.CRED_KEY_LAUNCHD: ""}
+
+
 # 狀態塊的共同骨架。三條路（續航武裝／哨兵武裝／哨兵重排）共用同一份鍵集合，
 # 少一個鍵就會被 `relay_problems()` 判紅——那個判準只有在鍵真的來自同一個家時才對得上。
 def _base_state(session_id: str, plan: Path, args, kind: str, task: str) -> dict:
@@ -948,7 +986,8 @@ def _base_state(session_id: str, plan: Path, args, kind: str, task: str) -> dict
     return {"schema": RELAY_SCHEMA, "session_id": session_id, "plan_path": str(plan),
             "state": "armed", "kind": kind, "reset_at": "", "reset_source": "operator",
             "attempts": 0, "max_attempts": MAX_PROBE_ATTEMPTS, "task_name": task,
-            "allow_resume": bool(args.allow_resume), "next_run_time": "",
+            "allow_resume": bool(args.allow_resume), **_cleared_credentials(),
+            "carrier": schedule_backend.select().name,
             "log_path": str(endurance_log_path(plan))}
 
 
@@ -958,7 +997,9 @@ def _register_and_record(plan: Path, state: dict, at: datetime, tick: str) -> tu
     """寫狀態 → 註冊排程 → 取憑證 → 把憑證（或 abandoned）寫回狀態。"""
     write_relay(plan, state)
     rc, moment = register_endurance(state, at, tick)
-    state["next_run_time"] = moment
+    # 憑證寫進**該後端自己的鍵**（Windows＝next_run_time、mac＝schedule_credential）。
+    # 兩者語意不同，共用一個鍵會讓「推算值」與「排程器回報值」在狀態檔裡分不開。
+    state[schedule_backend.select().credential_key] = moment
     if rc != 0:
         state["state"] = "abandoned"
     write_relay(plan, state)
@@ -1007,8 +1048,8 @@ def _arm_endurance(args, transcript: Path, plan: Path) -> int:
     if rc != 0:
         return 1
     append_log(endurance_log_path(plan), "armed", reset_at=reset_at.isoformat(),
-               next_run_time=moment, allow_resume=bool(args.allow_resume))
-    print(f"✅ NextRunTime = {moment}　←（憑證；宣稱『已排程』時必須連它一起貼）")
+               credential=moment, allow_resume=bool(args.allow_resume))
+    print(schedule_backend.select().credential_line(moment))
     print(f"   觀測到的 reset：{reset_at}（來源：逐字稿原文，非推算）")
     print(f"   任務書＋狀態塊：{plan}")
     print(f"   稽核痕跡：{state['log_path']}（沒觸發＝這個檔不會長大，是可偵測的）")
@@ -1096,7 +1137,7 @@ def _resume_tick(args) -> int:
 
     if decision["action"] == "stop":
         state["state"] = decision["state"]
-        state["next_run_time"] = ""
+        state.update(_cleared_credentials())
         write_relay(plan, state)
         # 終態要把排程收掉。`-Once` 觸發器不會再響，但留著一支死工作會讓下一個人
         # 用 `Get-ScheduledTask` 查現況時看到一支「還在」的續航工作——而它其實已經
@@ -1117,11 +1158,11 @@ def _resume_tick(args) -> int:
                                  - timedelta(seconds=RESET_SKEW_SECONDS)).isoformat()
         rc, moment = _register_and_record(plan, state, decision["at"], RESUME_TICK)
         append_log(log, "rearmed", fire_at=decision["at"].isoformat(),
-                   next_run_time=moment, attempts=state["attempts"])
+                   credential=moment, attempts=state["attempts"])
         return rc
     # action == resume
     state["state"] = "resumed"
-    state["next_run_time"] = ""
+    state.update(_cleared_credentials())
     write_relay(plan, state)
     _schtasks_remove(state["task_name"])  # 同上：終態不留死工作
     if not state.get("allow_resume"):
@@ -1151,11 +1192,11 @@ def _arm_sentinel(args, transcript: Path, plan: Path) -> int:
     at = datetime.now().astimezone() + timedelta(seconds=SENTINEL_INTERVAL_SECONDS)
     rc, moment = _register_and_record(plan, state, at, SENTINEL_TICK)
     append_log(endurance_log_path(plan), "sentinel_armed" if rc == 0 else "arm_failed",
-               task=state["task_name"], next_run_time=moment,
+               task=state["task_name"], credential=moment,
                handled_through=state["handled_through"])
     if rc != 0:
         return 1
-    print(f"✅ NextRunTime = {moment}　←（憑證；宣稱『已排程』時必須連它一起貼）\n"
+    print(schedule_backend.select().credential_line(moment) + "\n"
           f"   哨兵 {state['task_name']}：每 {SENTINEL_INTERVAL_SECONDS}s 醒一次，"
           "平時只讀逐字稿＝零 token；只有真的撞線那一次才花一次探測。\n"
           f"   已處理到：{state['handled_through'] or '（本 session 尚無撞線事件）'}\n"
@@ -1221,7 +1262,8 @@ def _sentinel_tick(args) -> int:
         # （收掉自己的任務書殘骸，見 `escalation.gc_plans`），而「什麼都不做」正是
         # `%TEMP%` 累積 26 份任務書的原因。`**fan` 把扇出死者數帶進叫人的門檻。
         loud = decision["action"] == "escalate"
-        state.update(state="abandoned" if loud else "disarmed", next_run_time="")
+        state.update(state="abandoned" if loud else "disarmed",
+                     **_cleared_credentials())
         write_relay(plan, state)
         rc = _schtasks_remove(state["task_name"])
         told = escalation.alert(decision["reason"], state, loud=loud, plan=plan, **fan)
@@ -1233,7 +1275,7 @@ def _sentinel_tick(args) -> int:
                      reset_at=decision["reset_at"].isoformat())
     rc, moment = _register_and_record(plan, state, decision["at"], SENTINEL_TICK)
     append_log(log, "sentinel_rearmed", action=decision["action"],
-               fire_at=decision["at"].isoformat(), next_run_time=moment)
+               fire_at=decision["at"].isoformat(), credential=moment)
     return rc
 
 
@@ -1317,7 +1359,7 @@ def main(argv: list[str]) -> int:
         rc, moment = _register_at_expr(str(out), args.task_name, args.at, RESUME_TICK)
         if rc != 0:
             return 1
-        print(f"✅ NextRunTime = {moment}　←（憑證；宣稱『已排程』時必須連它一起貼）")
+        print(schedule_backend.select().credential_line(moment))
     return 0
 
 

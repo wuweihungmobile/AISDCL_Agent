@@ -271,6 +271,93 @@ def _is_repo_main_tests_dir(tests_dir: Path) -> bool:
         return False
 
 
+# ── 問題類別登記表：計數與明細的**唯一**共同來源（R83；缺陷本體與修法選型見下）──────
+#
+# 🔴 缺陷本體（舵手當回合實測：`python tools/run_root_unittests.py` 整份輸出只有 2 行）：
+# `problems` 是**七個類別的總和**，而總表頭印的是 `len(problems)`、它後面那個明細迴圈
+# 卻只涵蓋 `unregistered` 與 `offenders` 兩類 ⇒ 唯一的問題落在別的類別時，讀者看到
+# 「發現 1 個問題：」之後**一片空白**，於是去找一個根本不存在的第二筆。七類之中
+# `掃描面為空` 更是從頭到尾**沒有任何一段程式碼印它**（`test_empty_scan_surface_is_
+# fail_closed` 只讀回傳值，結構上看不見這件事）。
+#
+# 🔴 修法選型（為何不是「把漏掉的那幾類補進那個明細迴圈」）：那只修掉今天這一筆，並把
+# 同一個陷阱原封不動留給下一個新增類別的人——計數與明細各有一個家，而只有一個家會被改
+# （本 repo 反覆付過學費的「同一份知識住兩個家」）。故改成**單一資料結構驅動**：問題一律
+# 以 `{類別: [明細…]}` 累積、印列面**迭代它本身**，於是「新增一類卻忘了印」結構上不可能
+# 發生；表頭數字取 `sum(len(v))`，與印出來的 `   - ` 行同一個來源，兩者脫鉤不可能。
+# 剩下的唯一縫隙（新增類別卻沒在本表登記 WHY）由兩道鎖收口：
+#   · runtime——未登記的類別**照印**，另加一行點名（漏登記本身是缺陷，但不得因此吃掉
+#     問題本文：fail-loud，不是 fail-silent）；
+#   · 測試——`tools/tests/test_run_root_unittests.py::ProblemReportItemizationTest` 以 AST
+#     讀出生產端那個 dict literal 的鍵，與本表**雙向**比對（多一鍵沒登記＝紅、登記了卻
+#     沒有生產者＝紅），所以「忘了印」在**寫出來的當回合**就轉紅，不必等那一類真的觸發。
+#
+# 值＝該類別的 WHY（原本散在各自的表頭裡，逐句搬進來，資訊不減）。順序即輸出與回傳
+# 順序，刻意沿用修前的順序讓既有呼叫端與測試的字串比對不受影響。
+_PROBLEM_CATEGORY_WHY: dict[str, str] = {
+    "掃描面為空": "掃描面消失本身就是失敗（fail-closed）：讀到 0 份檔案時，"
+                  "「沒發現違規」與「根本沒去看」的外觀完全相同",
+    "未登記的 Windows 述詞": "述詞沒登記於 skip_tag_policy._WINDOWS_SKIP_PREDICATE_MARKERS "
+                             "⇒ 方向判不出來 ⇒ 該站點落進 `unclassified` 而靜默漏掉漏標，"
+                             "這是本掃描唯一的靜默失效路徑",
+    "漏標": "runtime 那道鎖在 Windows 上整組早退，Windows 側三道閘門若沒有本靜態掃描"
+            "就是同一個瞎點的三份複本（R72）",
+    "反方向標籤棘輪": f"`{WINDOWS_NATIVE_SKIP_TAG}` 只照亮「非 Windows 上沒跑到的 Windows "
+                      "專屬測試」，反方向（**因為跑在 Windows 而失去的覆蓋**）此前一個機械物"
+                      "都沒有，複審者無法分辨哪幾筆是真的覆蓋損失（R74／PKG-4 E‧F）",
+    "掃描面下限": "下限對「掃描面靜默縮小」的鑑別力會隨樹長大而單調衰減，過期即失去意義",
+    "站點分類普查": "方向判不出來的站點此前對**所有**機械物隱形（實測曾有 61% 的站點落在此），"
+                    "普查表的用途就是讓每一個站點都落在某一格、數字可被稽核（R75／QA-R74-02）",
+    "標籤詞彙表": "`ALL_SKIP_TAGS` 此前只被用來「比對已知標籤」，沒有任何機械物反向問"
+                  "「這個看起來像標籤的字面有沒有登記過」，於是**發明新標籤是零成本的**"
+                  "（人看起來有標籤、機器看起來沒標籤）",
+}
+
+
+def render_problem_report(
+    buckets: Mapping[str, list[str]],
+    extra: Mapping[str, list[str]] | None = None,
+) -> list[str]:
+    """純函式（無列印副作用）：把 `{類別: [明細…]}` 攤成要印出去的每一行。
+
+    🔴 本函式就是「每一筆問題都有人印」這個不變量的**唯一**擔保，故它刻意只迭代
+    `buckets` 自己：任何進得了 buckets 的類別必然被走到，表頭數字亦取自同一份資料。
+    `extra` 是各類別的補充明細（逐站點理由／修法指路），它自己也受同一條不變量管轄
+    ——歸屬不到任何 bucket 的 extra 一律照印並點名，不得靜默丟棄。
+    """
+    total = sum(len(msgs) for msgs in buckets.values())
+    # 這句「本掃描為何存在」修前掛在總表頭上、無條件印出，故仍留在無條件印出的這一行
+    # （移進某一類的 WHY 會讓它只在那一類觸發時才看得到）。
+    lines = [
+        f"❌ 靜態標籤掃描（不分平台）發現 {total} 個問題，分屬 {len(buckets)} 類"
+        f"（逐類明細如下，每一筆都在）——本掃描存在的理由是「runtime 那道鎖在 Windows 上"
+        f"整組早退」，Windows 側三道閘門若沒有它就是同一個瞎點的三份複本（R72）："
+    ]
+    extra = dict(extra or {})
+    for category, msgs in buckets.items():
+        why = _PROBLEM_CATEGORY_WHY.get(category)
+        if why is None:
+            why = ("🔴 這個類別沒有登記在 windows_skip_tags._PROBLEM_CATEGORY_WHY——"
+                   "漏登記本身是缺陷，請補上；問題本文照印於下，不因此被吃掉")
+        lines.append(f"  ▍{category}（{len(msgs)} 筆）——{why}：")
+        lines += [f"   - {msg}" for msg in msgs]
+        lines += extra.pop(category, [])
+    for category, msgs in extra.items():
+        lines.append(f"  ▍🔴 補充明細 `{category}` 找不到對應的問題類別（鍵名疑似打錯），照印：")
+        lines += list(msgs)
+    return lines
+
+
+def _ordered_buckets(raw: Mapping[str, list[str]]) -> dict[str, list[str]]:
+    """丟掉空類別並依 `_PROBLEM_CATEGORY_WHY` 定序；未登記的鍵**保留**並排在最後。
+
+    「未登記就丟掉」會讓漏登記變成靜默資訊損失——那正是本輪要修的病，故此處只排序。
+    """
+    out = {k: list(raw[k]) for k in _PROBLEM_CATEGORY_WHY if raw.get(k)}
+    out.update({k: list(v) for k, v in raw.items() if v and k not in _PROBLEM_CATEGORY_WHY})
+    return out
+
+
 def report_untagged_windows_skip_decorators(tests_dir: Path, pattern: str) -> list[str]:
     """跑靜態掃描並印出問題；回傳問題描述清單（非空 ⇒ 呼叫端須讓 rc 為 1）。
 
@@ -278,8 +365,10 @@ def report_untagged_windows_skip_decorators(tests_dir: Path, pattern: str) -> li
     R74：射程擴為三棵活測試樹、並同時跑**反方向**（POSIX 側）的標籤棘輪。
     R75：另跑**站點分類普查**棘輪——那是 QA-R74-02 的修法核心：讓每一個被抽到的站點都
     落在某一格，於是「方向判不出來」不再等於「對所有機械物隱形」。
+    R83：問題改以 `{類別: [明細…]}` 累積、交給 `render_problem_report` 逐類印出，
+    修掉「表頭報 N 筆、明細只涵蓋其中兩類」的低報（WHY 見 `_PROBLEM_CATEGORY_WHY`）。
     """
-    problems: list[str] = []
+    empty_trees: list[str] = []
     repo_mode = _is_repo_main_tests_dir(tests_dir)
     if repo_mode:
         trees = scan_tree_sources(_REPO_ROOT, tests_dir, pattern)
@@ -292,15 +381,13 @@ def report_untagged_windows_skip_decorators(tests_dir: Path, pattern: str) -> li
     census: dict[str, dict[str, int]] = {}
     for tree, tree_sources in trees.items():
         if not tree_sources:
-            problems.append(f"掃描面為空：{tree} 底下找不到任何 {pattern}")
+            empty_trees.append(f"{tree} 底下找不到任何 {pattern}")
         file_counts[tree] = len(tree_sources)
         sources.update({f"{tree}/{rel}": src for rel, src in tree_sources.items()})
         posix_counts[tree] = len(untagged_non_windows_skip_decorators(tree_sources))
         census[tree] = site_class_counts(tree_sources)
     unregistered = unregistered_windows_like_predicates(sources)
     offenders = untagged_windows_skip_decorators(sources)
-    problems += [f"未登記的 Windows 述詞：{label} 條件 {cond!r}" for label, cond in unregistered]
-    problems += [f"漏標：{label}（命中關鍵詞 {hit!r}）" for label, hit, _ in offenders]
     ratchet = posix_tag_ratchet_problems(posix_counts) if repo_mode else []
     floors = tree_floor_problems(file_counts) if repo_mode else []
     census_problems = site_class_census_problems(census) if repo_mode else []
@@ -314,70 +401,55 @@ def report_untagged_windows_skip_decorators(tests_dir: Path, pattern: str) -> li
         + unregistered_tag_problems(nonliteral_skip_reason_prefixes(sources),
                                     debt=_NONLITERAL_TAG_DEBT)
     ) if repo_mode else []
-    problems += [f"反方向標籤棘輪：{msg}" for msg in ratchet]
-    problems += [f"掃描面下限：{msg}" for msg in floors]
-    problems += [f"站點分類普查：{msg}" for msg in census_problems]
-    problems += [f"標籤詞彙表：{msg}" for msg in vocab]
-    if not problems:
+    # 🔴 這個 dict literal 是**生產端的唯一入口**（不再有 `problems.append`／`problems +=`
+    # 散在各處）：新增一類就是在這裡多一鍵，而少了 `_PROBLEM_CATEGORY_WHY` 的對應登記時，
+    # `ProblemReportItemizationTest` 的 AST 雙向比對當場轉紅。鍵即輸出前綴，故回傳字串
+    # 與修前逐字相同。
+    buckets = _ordered_buckets({
+        "掃描面為空": empty_trees,
+        "未登記的 Windows 述詞": [f"{label} 條件 {cond!r}" for label, cond in unregistered],
+        "漏標": [f"{label}（命中關鍵詞 {hit!r}）" for label, hit, _ in offenders],
+        "反方向標籤棘輪": ratchet,
+        "掃描面下限": floors,
+        "站點分類普查": census_problems,
+        "標籤詞彙表": vocab,
+    })
+    if not buckets:
         return []
+    for line in render_problem_report(buckets, _problem_extra_detail(
+            sources, unregistered, offenders, census_problems)):
+        print(line, file=sys.stderr)
+    return [f"{category}：{msg}" for category, msgs in buckets.items() for msg in msgs]
+
+
+def _problem_extra_detail(
+    sources: Mapping[str, str],
+    unregistered: list[tuple[str, str]],
+    offenders: list[tuple[str, str, str]],
+    census_problems: list[str],
+) -> dict[str, list[str]]:
+    """各類別的補充明細（逐站點理由／修法指路）——與一行式的問題本文分開。
+
+    🔴 只為**真的有問題**的類別生產（`census_problems` 為空時不去算 `unclassified`）：
+    補充明細沒有自己的計數，混進沒有問題的類別只會讓讀者以為那一類也紅了。
+    """
+    extra: dict[str, list[str]] = {}
+    if unregistered:
+        extra["未登記的 Windows 述詞"] = [
+            "       修法：把該述詞加進 skip_tag_policy._WINDOWS_SKIP_PREDICATE_MARKERS。"
+        ]
+    if offenders:
+        extra["漏標"] = [f"       · {label} 的理由：{reason}" for label, _, reason in offenders] + [
+            f"       修法：把 {WINDOWS_NATIVE_SKIP_TAG} 加在該 skip reason 的最前面"
+            "（判準：方向為「非 Windows 上才 skip」⇒ 正是本標籤的語意）。"
+        ]
     if census_problems:
-        print(
-            f"❌ 站點分類普查 {len(census_problems)} 筆（R75／QA-R74-02）——方向判不出來的"
-            f"站點此前對**所有**機械物隱形（實測曾有 61% 的站點落在此），普查表的用途就是"
-            f"讓每一個站點都落在某一格、數字可被稽核：",
-            file=sys.stderr,
-        )
-        for msg in census_problems:
-            print(f"   - {msg}", file=sys.stderr)
         unclassified = unclassified_sites(sources)
         if unclassified:
-            print(f"   `unclassified` 明細（共 {len(unclassified)} 筆）：", file=sys.stderr)
-            for label, deco, cond in unclassified:
-                print(f"     · {label} {deco}({cond!r})", file=sys.stderr)
-    if floors:
-        for msg in floors:
-            print(f"❌ 掃描面下限：{msg}", file=sys.stderr)
-    if vocab:
-        print(
-            f"❌ 標籤詞彙表 {len(vocab)} 筆——`ALL_SKIP_TAGS` 此前只被用來「比對已知"
-            f"標籤」，沒有任何機械物反向問「這個看起來像標籤的字面有沒有登記過」，"
-            f"於是**發明新標籤是零成本的**（人看起來有標籤、機器看起來沒標籤）：",
-            file=sys.stderr,
-        )
-        for msg in vocab:
-            print(f"   - {msg}", file=sys.stderr)
-    if ratchet:
-        print(
-            f"❌ 反方向（POSIX 側）標籤棘輪 {len(ratchet)} 筆——`{WINDOWS_NATIVE_SKIP_TAG}` "
-            f"只照亮「非 Windows 上沒跑到的 Windows 專屬測試」，反方向（**因為跑在 "
-            f"Windows 而失去的覆蓋**）此前一個機械物都沒有，複審者無法分辨哪幾筆是真的"
-            f"覆蓋損失（R74／PKG-4 E‧F）：",
-            file=sys.stderr,
-        )
-        for msg in ratchet:
-            print(f"   - {msg}", file=sys.stderr)
-    print(
-        f"❌ 靜態標籤掃描（不分平台）發現 {len(problems)} 個問題——本掃描存在的理由是"
-        f"「runtime 那道鎖在 Windows 上整組早退」，Windows 側三道閘門若沒有它就是同一個"
-        f"瞎點的三份複本（R72）：",
-        file=sys.stderr,
-    )
-    for label, condition in unregistered:
-        print(
-            f"   - {label}\n       條件 {condition!r} 看起來像 Windows 述詞、卻未登記於 "
-            f"skip_tag_policy._WINDOWS_SKIP_PREDICATE_MARKERS ⇒ 方向判不出來、該站點會"
-            f"落進 `unclassified`。修法：把該述詞加進登記表。",
-            file=sys.stderr,
-        )
-    for label, hit, reason in offenders:
-        print(f"   - {label}（命中關鍵詞 {hit!r}）\n       理由：{reason}", file=sys.stderr)
-    if offenders:
-        print(
-            f"   修法：把 {WINDOWS_NATIVE_SKIP_TAG} 加在該 skip reason 的最前面"
-            "（判準：方向為「非 Windows 上才 skip」⇒ 正是本標籤的語意）。",
-            file=sys.stderr,
-        )
-    return problems
+            extra["站點分類普查"] = [
+                f"       `unclassified` 明細（共 {len(unclassified)} 筆）："
+            ] + [f"         · {label} {deco}({cond!r})" for label, deco, cond in unclassified]
+    return extra
 
 
 __all__ = [
@@ -385,7 +457,7 @@ __all__ = [
     "POSIX_NATIVE_SKIP_TAG", "SITE_CLASSES", "SkipSite", "TOOL_ABSENCE_SKIP_TAG",
     "WINDOWS_NATIVE_SKIP_TAG", "all_skips", "is_tool_probe",
     "exemption_problems", "posix_tag_ratchet_problems",
-    "read_test_sources", "report_all_skips",
+    "read_test_sources", "render_problem_report", "report_all_skips",
     "report_untagged_windows_like_skips", "report_untagged_windows_skip_decorators",
     "report_windows_native_skips", "report_windows_skip_tag_exemption_problems",
     "running_on_windows", "scan_tree_sources", "site_class",

@@ -237,6 +237,24 @@ try:
 except Exception:  # noqa: BLE001 — 見上
     sentinel_lifecycle = None  # type: ignore[assignment]
 
+# 排程**載具**（schtasks／launchd／沒有）唯一的家＝`tools/lib/schedule_backend.py`。
+# 形態同上一格（同一條 sys.path、同一種 fail-open）：不可達時本符號為 `None`，
+# `_has_carrier()` 回 False ⇒ 武裝整條退化成「不武裝」，方向與上一格一致（少一層續航
+# 保護，而不是無條件武裝）。
+# 🔴 R83／W2-A：本檔此前用 `os.name != "nt"` 在**四個**武裝站點各判一次平台，於是
+# 「mac 上有沒有排程載具」這個問題有四個答案的家；補 mac 支援時只要漏改一個，那一臂
+# 就會靜默失明（而失明的表徵與「這台機器本來就沒有載具」完全相同）。現在四個站點一律
+# 問 `_has_carrier()`，而它只是把問題轉給那個唯一的提問點。
+try:
+    import schedule_backend  # type: ignore[import-not-found]
+except Exception:  # noqa: BLE001 — 見上
+    schedule_backend = None  # type: ignore[assignment]
+
+
+def _has_carrier() -> bool:
+    """這台機器上有沒有排程載具（Windows schtasks／macOS launchd）。"""
+    return schedule_backend is not None and schedule_backend.has_carrier()
+
 # 額度**撞線判讀**（`SYNTHETIC_MODEL`／`LIMIT_*`／`classify_limit`／`parse_reset_at`／
 # `unhandled_limit_event` …）唯一的家＝`tools/lib/quota_limits.py`。它是 R81 收斂把本檔
 # 從 1,730 行壓回棘輪之內的那一次減法：搬走的是一個完整主題（輸入是撞線訊息／逐字稿，
@@ -784,7 +802,7 @@ def spawn_sentinel(transcript_raw: str, out: str, log: object = None) -> bool:
     那一次只改了其中一份。收成一份之後那個漂移在結構上不存在。
     """
     planner = repo_root() / "tools" / "session_resume_planner.py"
-    if os.name != "nt" or not planner.is_file() or not transcript_raw or not out:
+    if not _has_carrier() or not planner.is_file() or not transcript_raw or not out:
         return False
     try:
         subprocess.Popen(  # noqa: S603 — 參數全是本檔算出來的路徑，無 shell
@@ -814,8 +832,8 @@ def arm_sentinel(payload: dict) -> None:
     boot log 保留：它是「SessionStart 有沒有被叫到」唯一的痕跡，而本輪正是靠它才發現
     有四支短命 session 根本沒觸發過這支 hook（沒有 boot log）。
     """
-    if os.name != "nt" or os.environ.get(SENTINEL_OFF_ENV):
-        return  # schtasks 只在 Windows 成立（鐵律三）；人要關就關得掉
+    if not _has_carrier() or os.environ.get(SENTINEL_OFF_ENV):
+        return  # 沒有排程載具就沒有續航可言（見 `_has_carrier`）；人要關就關得掉
     raw = payload.get("transcript_path")
     if not isinstance(raw, str) or not raw.strip():
         return
@@ -834,7 +852,7 @@ def arm_when_earned(transcript: Path) -> str:
     一切例外吞掉：`.claude/settings.json` 的 description 記載過 P0（hook 誤觸會把所有
     工具硬鎖死），而武裝失敗最多是少一層保護，絕不可反過來變成故障源。
     """
-    if (os.name != "nt" or os.environ.get(SENTINEL_OFF_ENV)
+    if (not _has_carrier() or os.environ.get(SENTINEL_OFF_ENV)
             or sentinel_lifecycle is None):
         return "disabled"
     sid = session_id_of(transcript)
@@ -853,10 +871,28 @@ def arm_quota_wakeup(transcript: Path | None, plan: str) -> dict:
     自己不去問 `os.name`、也不去讀哨兵的環境變數——那會讓同一份平台知識有第二個家。
     🔴 `armed` 是**真的 spawn 出去了**，不是「我走到了那個分支」：舊實作把兩者混同
     （Popen 拋例外時照樣回報 armed），而那正是本 repo 反覆判過的「真紅讀成綠」。
-    憑證仍是 planner 自己的 `NextRunTime` 閘（`relay_problems()` 禁止在 `next_run_time`
-    為空時把狀態寫成 armed），本函式一行都沒有動它，只當消費者。
+    憑證仍是 planner 自己的取證閘（`relay_problems()` 禁止在兩個憑證鍵皆空時把狀態寫成
+    armed），本函式一行都沒有動它，只當消費者。
+
+    🔴 R83／W2-A 的射程，以及**這一段自己在同一輪內就轉假的那兩句**（原文保留為沿革，
+    照本 repo 體例逐字訂正而不是靜默刪掉）：
+    `posix` 這個鍵的語意是「這台機器沒有排程載具」，它現在由 `_has_carrier()` 決定
+    ⇒ **mac 上它變成 False**，因為 mac 現在真的武裝得起來（launchd）。**這一句仍然為真。**
+    原文接著寫的是：`tools/lib/quota_gate.py::quota_halt_message` 在 `posix=False and armed`
+    那一支印的取證指令逐字是 `Get-ScheduledTask …`（mac 上不存在），而「那一檔不在本包的
+    授權範圍內…故只在這裡具名登記、**不偷改**：訊息會指錯路」。
+    🔴 **兩句在本輪內都已為假**（複審 SD／FC-1 逐字判過，我複驗）：同一棵工作樹的
+    `tools/lib/quota_gate.py` 已由 R83／F2-② 就地訂正——`evidence_hint()` 委派給
+    `schedule_backend.select().evidence_hint()`。收斂當回合實跑 `quota_gate.evidence_hint()`
+    在 darwin 上的輸出含 `launchctl print gui/501/<label>`，
+    `contains 'Get-ScheduledTask': False`／`contains 'launchctl': True`。
+    留著它的代價不是文字難看：**下一個人會照這段散文去修一個已經修好的東西**，
+    或反過來相信 mac 的取證指引還是壞的（與 R74 訂正文自己成假話、R80「`.py` 行尾那格
+    自陳沒人守而其實有鎖」同一族）。
+    ⇒ 現行事實：取證指令的唯一的家＝各後端的 `evidence_hint()`（`tools/lib/schedule_backend.py`）。
+    本函式只回報 `armed`／`sentinel_off`／`posix` 三個布林，一行取證字串都不產。
     """
-    if os.name != "nt":
+    if not _has_carrier():
         return {"armed": False, "sentinel_off": False, "posix": True}
     if os.environ.get(SENTINEL_OFF_ENV):
         return {"armed": False, "sentinel_off": True, "posix": False}
@@ -956,14 +992,37 @@ def main() -> int:
             arm_sentinel(payload)
             return 0
         blocking = event == "PreToolUse"
+        # 🔴 R83：額度軸只在**我們真的推理過的那兩個事件**上動作。少了這一格，接電會順手
+        # 把「事件名讀不出來」（壞 payload、未來新增的事件）也當成觀測點——本輪注入實測：
+        # 一份沒有 `hook_event_name` 的 payload 會走完整條額度判讀並出聲，而那類 payload
+        # 依本檔既有契約應該是「量測暫時不可得 ⇒ 靜默 rc=0」。射程要靠白名單而不是靠
+        # 「不是 PreToolUse 就當 PostToolUse」，後者是預設開啟、方向錯的。
+        measuring = event in ("PreToolUse", "PostToolUse")
         # 🔴 額度那把尺**必須在這裡**求值，不能往下擺（SA-B1 判過的死碼）。下面五道早退
         # 全是 context 語意，而 `tier_of()` 在 context <75% 一律回 `None` ⇒ 撞額度那一刻
         # （實測水位只有 ~18~20%）任何掛在 `block_verdict()` 裡的 quota 分支都到不了。
         # 兩把尺不共用早退條件，這一行的位置就是那個設計。
-        if blocking and quota_gate is not None and (quota_stop := quota_gate.quota_gate(
+        # 🔴 R83／接電：`blocking and` 這個前綴拿掉了，`event` 改為傳進去。立案是量出來的
+        # ——舊條件讓額度那把尺**只在「我要扇出」那一刻**被問一次，而 R83 實測配額 5%→90%
+        # 的整段，主 session 派完最後一波之後再也沒呼叫任何扇出型工具（後續全是全樹跑、
+        # agent 回傳、大量讀檔）⇒ 本閘從頭到尾一次都沒被叫到。燒額度的是「我自己在做事」
+        # 那條路，而 PostToolUse 的 matcher（`Read|Task|Grep|Glob|…|Bash|PowerShell`）
+        # **本來就覆蓋**那條路 ⇒ `settings.json` 一個字都不用改，缺的只有這裡的條件與參數。
+        # 射程的第二半在 `quota_gate()` 內（PostToolUse 不記派發帳、不擋節流帶），兩邊要一起讀。
+        if measuring and quota_gate is not None and (quota_stop := quota_gate.quota_gate(
                 payload, blocking=BLOCKING_TOOLS, latch_read=announced_latches,
                 latch_write=remember_latch, plan_writer=write_resume_plan,
-                waker=arm_quota_wakeup)):
+                waker=arm_quota_wakeup, event=event)):
+            # 🔴 R83／Δ13：**接電引入的新缺陷，必須在同一個 commit 處理。** halt 帶在
+            # PostToolUse 會**每一次**回 2 ⇒ 本 hook 在這裡提早 return ⇒ 下面那個
+            # `arm_when_earned()` 在整個 halt 期間（一直到 reset）一次都不會執行，
+            # context 續航哨兵靜默失去所有武裝機會。而額度那層的喚醒武裝只在 halt 閂鎖
+            # **第一次**觸發時試一次、失敗不重試（見 `quota_gate` 的 D2 重排）⇒ 兩層都沒了。
+            # 兩層續航是不同的東西（一次性 reset 喚醒 vs 900s 巡邏），不得因為額度那層
+            # 說了話就把 context 那層吃掉。`arm_when_earned` 自身有閂鎖與 fail-open。
+            raw = payload.get("transcript_path")
+            if not blocking and isinstance(raw, str) and Path(raw).is_file():
+                arm_when_earned(Path(raw))
             return quota_stop
         raw_path = payload.get("transcript_path")
         if not isinstance(raw_path, str) or not raw_path.strip():

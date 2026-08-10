@@ -69,13 +69,18 @@ CREDENTIALS = Path(os.path.expanduser("~")) / ".claude" / ".credentials.json"
 #: `fanout_cap(None) is None`）。⇒ 「無法驗證」不是「不做」的理由，是「做成可被單元測試
 #: 注入、並把未驗的那一半明說」的理由。
 #:
-#: 🔴 **誠實劃界（本輪 Windows 真機，mac 路徑未實測）**：下面這個 service 名與 `-w`
-#: 取值形態是依 Claude Code 已知行為寫的，**沒有在 mac 真機上跑過**。判定邏輯可注入
-#: （`_keychain_token` 的 `runner` 參數），所以「找不到就明確 degraded」這一半今天就
-#: 驗得了；真機驗證交 R83，確切指令：  round-label-ok（交棒必須指名承接輪；改寫成 R82
-#: 就把「還沒在 mac 上驗過」講成「本輪驗過了」，那正是本段在防的假宣稱）
+#: 🔴 **上面那段的「誠實劃界」已由 mac 真機實測結清**（原文寫「service 名與 `-w` 取值
+#: 形態是依已知行為寫的、沒有在 mac 真機上跑過」，並把真機驗證列為交棒項）。該段話今天
+#: 起是假的，故不留著當現行說法——它假在「會讓人以為這條路仍未驗」的方向，而下一個人
+#: 因此可能去重寫一條已經量得到的路。實測（darwin 25.5.0、本 repo `.venv` 3.11.15）：
 #:     security find-generic-password -s 'Claude Code-credentials' -w
-#:     python tools/lib/quota_meter.py --json     # 期望 pct 有值，而不是 no-credentials
+#:         → rc=0，stdout 568 bytes、首字元 `{`（JSON 形態，走 `_token_of` 那條）
+#:     python tools/lib/quota_meter.py
+#:         → rc=0，`axes=7`（session／weekly_all／weekly_scoped／five_hour／seven_day／
+#:           nimbus_quill／spend），而**不是** `no-credentials-darwin`
+#: ⇒ service 名正確、`-w` 吐的是 JSON 而非裸 token、整條 mac 額度軸真的量得到。
+#: 仍未驗的是**沒有 Keychain 條目的那台 mac**（本機無法構造：清掉條目就等於把使用者
+#: 登出）——那一半由 `_keychain_token` 的 `runner` 注入覆蓋，見 `MacCredentialSourceTest`。
 KEYCHAIN_SERVICE = "Claude Code-credentials"
 KEYCHAIN_TIMEOUT_SECONDS = 5
 
@@ -98,6 +103,15 @@ REASON_NO_CREDENTIALS = "no-credentials"
 #: 🔴 mac 專屬：與上一個刻意分開。混成同一個字面時，「這台 mac 的 Keychain 沒接上」
 #: 與「token 真的過期了」在痕跡裡讀起來一模一樣，而兩者要做的事完全不同。
 REASON_NO_CREDENTIALS_DARWIN = "no-credentials-darwin"
+#: 🔴 R83／F2-③：**逾時與「沒有條目」刻意是兩個字面。** 此前兩者都回
+#: `no-credentials-darwin`，而它們要做的事**完全相反**：
+#:   · 沒有條目 ⇒ 這台 mac 沒登入過 Claude Code，人要去 `claude login`，等下去沒有意義；
+#:   · 逾時 ⇒ Keychain 跳了鎖定／授權提示而**沒有人在螢幕前按它**（`security` 會阻塞到
+#:     `KEYCHAIN_TIMEOUT_SECONDS`），憑證其實在，解鎖後下一次就量得到 ⇒ 這一格該做的是
+#:     「解鎖 login keychain／改成 always-allow」，不是去重新登入。
+#: 混成一個字面時，痕跡裡讀起來一模一樣，而「量不到」在本 repo 的語意是**不節流**
+#: ⇒ 一個無人看管的排程會在「其實只要解鎖」的情況下永久不節流，且完全靜默。
+REASON_KEYCHAIN_TIMEOUT = "keychain-timeout"
 REASON_UNREACHABLE = "meter-unreachable"
 REASON_NO_BUCKETS = "no-buckets"
 
@@ -145,30 +159,51 @@ def _token_of(blob: object) -> str:
     return token if isinstance(token, str) else ""
 
 
-def _keychain_token(runner: object = None) -> str:
-    """macOS：從 login Keychain 取憑證（見 `KEYCHAIN_SERVICE` 的誠實劃界）。
+def _keychain_token(runner: object = None) -> tuple[str, str]:
+    """macOS：從 login Keychain 取憑證。回 `(token, 取不到時該叫什麼名字)`。
 
     `runner` 是為了讓這條路**在沒有 mac 的機器上也測得到**而存在的注入點：它必須是一個
-    `(argv) -> (rc, stdout)` 的可呼叫物。預設值走真的 `security`。
+    `(argv) -> (rc, stdout)` 的可呼叫物（**契約未變**，回二元組即可）。預設值走真的
+    `security`。要構造「Keychain 跳提示而沒有人按」那條臂，讓 runner 拋
+    `subprocess.TimeoutExpired`——那正是真 `_run_security` 逾時的形狀。
+
+    🔴 回二元組而不是只回 token（R83／F2-③）：逾時與「沒有條目」在本函式**內部**才分得
+    開（`security` 阻塞 vs `rc != 0`），一旦壓成 `""` 送出去就再也還原不回來——那正是
+    「取數層少給一半，判讀層再聰明也補不回來」（見 `SCHEMA` 那一段）的同一個形狀。
     """
     call = runner or _run_security
     try:
         rc, out = call(["security", "find-generic-password",
                         "-s", KEYCHAIN_SERVICE, "-w"])
+    except subprocess.TimeoutExpired:
+        # 🔴 這一條**必須排在 `except Exception` 前面**：`TimeoutExpired` 是
+        # `SubprocessError` 的子類，順序反過來就會被寬的那一條吃掉，而失效是靜默的
+        # （逾時退回 `no-credentials-darwin`＝回到本缺陷修前的行為，且全套測試照綠）。
+        return "", REASON_KEYCHAIN_TIMEOUT
     except Exception:  # noqa: BLE001 — 取不到憑證最多是量不到，不得變成故障源
-        return ""
+        return "", REASON_NO_CREDENTIALS_DARWIN
     if rc != 0:
-        return ""
+        return "", REASON_NO_CREDENTIALS_DARWIN
     try:
-        return _token_of(json.loads(out))
+        return _token_of(json.loads(out)), REASON_NO_CREDENTIALS_DARWIN
     except ValueError:
-        # Keychain 也可能存的是裸 token 而不是 JSON（形態未在 mac 真機驗證）⇒ 兩種都收，
+        # Keychain 也可能存的是裸 token 而不是 JSON（本機實測是 JSON，見 `KEYCHAIN_SERVICE`
+        # 的實測欄；但一台機器的形態不是常數，另一種形態的機器仍要收）⇒ 兩種都收，
         # 但**不得**把一段錯誤訊息當成 token 送出去（那會變成一個永遠 401 的假綠：取數
         # 看起來有在跑，只是每一次都失敗）。判準取「不含任何空白且夠長」——`security`
         # 的失敗訊息一定帶空白（`security: ... not found`），OAuth token 一定不帶。
         stripped = out.strip()
-        return stripped if len(stripped) >= 20 and not any(
-            ch.isspace() for ch in stripped) else ""
+        # 🔴 R82：`isascii()`／`isprintable()` 兩條是補上面那句話自己漏掉的洞。上方
+        # `_run_security` 的註解逐字說「降解後的字串仍可能通過『不含空白且夠長』的判準
+        # ⇒ 送出一個永遠 401 的假 token」，然後用 `encoding="utf-8"` 去治它——但它同時
+        # 帶了 `errors="replace"`，於是非 UTF-8 位元組會變成一串 U+FFFD，那串東西**不含
+        # 任何空白、長度也遠超過 20**，原判準照樣放行。⇒ 守衛與它自己宣稱要防的東西之間
+        # 差一個字。OAuth token 是 base64url 形態（純 ASCII 可列印），所以這兩條對真
+        # token 零假陽性；控制字元同理（`isprintable()` 擋 `\x00` 這種不算 `isspace()`
+        # 的東西）。空白那一條保留：空格是可列印的，`isprintable()` 擋不掉它。
+        ok = (len(stripped) >= 20 and not any(ch.isspace() for ch in stripped)
+              and stripped.isascii() and stripped.isprintable())
+        return (stripped if ok else ""), REASON_NO_CREDENTIALS_DARWIN
 
 
 def _run_security(argv: list[str]) -> tuple[int, str]:
@@ -182,10 +217,28 @@ def _run_security(argv: list[str]) -> tuple[int, str]:
     # `sys.platform == "darwin"` 那條路上被呼叫（`access_token()` 的平台分支），而 macOS
     # 上這兩個常數不存在、`NO_WINDOW` 恆為 0 ⇒ **這一行在今天的 Windows 上一次都不會執行**。
     # 補它的理由是「顯式表態」與「平台分支哪天挪動時不會靜默漏掉」，不是它現在有效果。
+    # 🔴 `TimeoutExpired` **刻意不在這裡吞掉**（R83／F2-③）：它是本檔唯一能區分
+    # 「Keychain 跳了提示而沒有人按」與「這台 mac 沒有條目」的訊號，吞掉就等於把兩件事
+    # 壓成同一個 `rc != 0`。呼叫端 `_keychain_token` 專門收它，並給它自己的理由字面。
     proc = subprocess.run(argv, capture_output=True, text=True, check=False,
                           encoding="utf-8", errors="replace",
                           timeout=KEYCHAIN_TIMEOUT_SECONDS, creationflags=NO_WINDOW)
     return proc.returncode, proc.stdout
+
+
+# 🔴 R83／F2-③：**平台分支只有這一個家。** 它回二元組是因為「去哪裡拿」與「拿不到時
+# 叫什麼名字」是同一個平台事實的兩面——分成兩個函式各讀一次 `plat`，就是 `token_detail`
+# 檔頭記載過的那個病（兩個家可以無聲分岔）。`access_token` 與 `token_detail` 現在都只是
+# 本函式的投影：前者丟掉理由、後者留著，**沒有第二次平台判斷**。
+def _fetch_token(plat: str, runner: object = None) -> tuple[str, str]:
+    """`(token, 取不到時的理由字面)`。理由只在 token 為空時有意義。"""
+    if plat == "darwin":
+        return _keychain_token(runner)
+    try:
+        data = json.loads(CREDENTIALS.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return "", REASON_NO_CREDENTIALS
+    return _token_of(data), REASON_NO_CREDENTIALS
 
 
 def access_token(platform: str | None = None, runner: object = None) -> str:
@@ -193,13 +246,42 @@ def access_token(platform: str | None = None, runner: object = None) -> str:
     # （調研 S1-08 的逐字要求）。讀不出來一律回空字串，由呼叫端判「量不到」。
     # `platform` 是注入點（預設讀 `sys.platform`）：mac 分支必須在 Windows 上也驗得到，
     # 否則這一格就是「寫了但沒有任何東西在守」——本 repo 判過的最貴形態。
-    if (platform or sys.platform) == "darwin":
-        return _keychain_token(runner)
-    try:
-        data = json.loads(CREDENTIALS.read_text(encoding="utf-8"))
-    except (OSError, ValueError):
-        return ""
-    return _token_of(data)
+    return _fetch_token(platform or sys.platform, runner)[0]
+
+
+def token_detail(platform: str | None = None,
+                 runner: object = None) -> tuple[str, str]:
+    """取 token，並在取不到時給出**該平台專屬**的失效字面。
+
+    回 `(token, reason)`；取到時 `reason` 是 `REASON_OK`（沿用既有字面，不另發明一個
+    只有這裡看得懂的 sentinel）。**token 值只回給呼叫端，不進 log／痕跡／任務書。**
+
+    🔴 R82 立案（本函式是純粹的減法：把同一個平台分支的**第二個家**併回來）。
+    分支原本住兩個地方——`access_token()` 決定「去哪裡拿」、`measure_detail()` 另外用
+    `sys.platform == "darwin"` 決定「取不到時叫什麼名字」。兩個家各自讀一次平台，於是
+    「拿的地方」與「說出來的名字」可以無聲地分岔：只要有人給 `access_token()` 傳了
+    `platform="darwin"` 而主機是 Windows，取數走 Keychain、理由卻印 `no-credentials`。
+    現在兩者讀同一個 `plat`，結構上不可能分岔。
+
+    `platform`／`runner` 是注入點，理由與 `access_token()` 同一條、但**更硬**：
+    `measure_detail()` 在本函式出現之前**沒有任何**憑證來源的注入點，於是它的每一條
+    臂（憑證讀得到 → 打得到 401／憑證讀不到 → no-credentials）只能靠改動**主機自己的**
+    憑證存放處來構造 ⇒ 每一條臂都只在一個平台上量得到，另一個平台靜默落到另一個 reason。
+    R82 mac 真機實測就是這個形狀：`MeterFailureShapesTest` 把 `CREDENTIALS` 指到不存在
+    的檔來構造「憑證讀不到」，而 darwin 根本不讀那個檔（本機 `~/.claude/.credentials.json`
+    實測不存在、Keychain 實測 rc=0 有真 token）⇒ 拿到的是 `http-401`，該臂在 mac 上
+    結構性量不到。**而且它更糟**：那條測試每跑一次就真的去讀一次使用者的 login Keychain，
+    綠不綠取決於這台機器有沒有登入過 Claude Code。
+
+    🔴 R83／F2-③ 訂正本段的實作宣稱（原文寫「現在兩者讀同一個 `plat`」——那句話對修前
+    的形狀為真，但它把「只有一次平台判斷」與「兩個函式各讀一次同名變數」混為一談，
+    而後者仍然是兩個家）。平台分支現在的唯一的家是 `_fetch_token()`；本函式與
+    `access_token()` 都只是它的投影，差別只在「留不留理由」。同一次修正也讓 mac 的
+    **逾時**能有自己的字面（`REASON_KEYCHAIN_TIMEOUT`）——那個區別在 `_keychain_token`
+    內部才存在，壓成 `""` 之後任何上層都還原不回來。
+    """
+    token, reason = _fetch_token(platform or sys.platform, runner)
+    return (token, REASON_OK) if token else ("", reason)
 
 
 def normalize_pct(value: object, scale: float) -> float | None:
@@ -310,22 +392,28 @@ def fetch_usage(token: str, timeout: int = HTTP_TIMEOUT_SECONDS) -> tuple[int, o
         return 0, None
 
 
-def measure_detail(timeout: int = HTTP_TIMEOUT_SECONDS) -> tuple[dict | None, str]:
+def measure_detail(timeout: int = HTTP_TIMEOUT_SECONDS,
+                   platform: str | None = None,
+                   runner: object = None) -> tuple[dict | None, str]:
     """量一次，回 `(讀數 dict 或 None, 失效字面)`。**這是 B4 的修法本體。**
 
     🔴 立案（SD-B4）：`fetch_usage()` 檔頭 §S1-08 逐字要求「401 與『額度真的沒回來』
     必須在痕跡裡分得開」，而它**做到了**——回 `(status, payload)`。真正掉東西的是它
     唯一的呼叫端：舊 `measure()` 把 status 丟掉、四種失效一律回同一個 `None`
     ⇒ token 過期（401）、斷網、憑證檔不在、schema 升版，在消費端外觀完全相同。
+
+    🔴 R82 新增的兩個參數**只有測試會傳**（production 三個呼叫端——`measure()`／
+    `refresh_detail()`／`quota_gate.refresh_quota_cache()`——全部照舊只傳 timeout，
+    行為逐字不變）。它們存在的理由不是「讓測試方便」，是**讓兩個平台的憑證來源在任何
+    一台機器上都量得到**：見 `token_detail()` 的 WHY。沒有它們時，判準只能去改主機
+    自己的憑證存放處，於是每一條臂只在一個平台成立、另一個平台靜默回別的 reason——
+    那正是「把一台機器上量到的值寫成常數」的同一個病，只是這次寫死的是「憑證住哪裡」。
     """
     # 🔴 「量不到 ≠ 量到零」是本 repo 通篇的紀律，在這裡尤其致命：回 0 ＝永遠正常
     # （靜默失明），回 100 ＝永遠 halt。兩個方向都不可接受，所以只能回 `None`。
-    token = access_token()
+    token, reason = token_detail(platform, runner)
     if not token:
-        # 🔴 R82／L4-03：mac 用**自己的**字面。兩者混成一個時，「這台 mac 的 Keychain
-        # 沒接上」與「憑證檔不在」讀起來一樣，而後者在 mac 上恆真、前者才是真正的原因。
-        return None, (REASON_NO_CREDENTIALS_DARWIN if sys.platform == "darwin"
-                      else REASON_NO_CREDENTIALS)
+        return None, reason
     status, payload = fetch_usage(token, timeout)
     if status == 0:
         return None, REASON_UNREACHABLE

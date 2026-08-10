@@ -113,6 +113,19 @@ _GOVERNANCE_DOCS = (
     # 自己提供了「改名避開命名慣例」這條出口，而上一列那支檔的檔頭正逐字記著上一次有人
     # 這樣做的判例——出口存在不等於它是合法動作。
     _REPO_ROOT / "docs" / "06_quality" / "CrossPlatform_R82_Scan_Findings.md",
+    # R82 成果首次在 macOS 真機啟動時，平台切換 SOP 自身的五處障礙（DEF-101-999）的唯一
+    # 居所。資格同上：它逐項寫出「某障礙的證據落在某檔某行／某實測輸出」的座標宣稱
+    # （⇒ 指針稽核），而該 DEF 列已依 ROW_MAX_BYTES 瘦身成索引 ⇒ 唯一還能重驗那五項
+    # 判讀的地方就是它（⇒ 體積守門）。它另承載三支待補機械鎖的 Next Action。
+    _REPO_ROOT / "docs" / "06_quality" / "CrossPlatform_R82_Mac_Switch_Obstacles.md",
+    # R83（mac 真機首輪）的掃描發現唯一居所。資格同 R80~R82 同名檔：它逐筆寫出「某發現／
+    # 某 DEF-ID 的座標在某檔某行」的宣稱（⇒ 指針稽核），而本輪帳本列已依 ROW_MAX_BYTES
+    # 瘦身成索引 ⇒ 唯一還能重驗那些判讀的地方就是它（⇒ 體積守門）。
+    # 它另承載兩件本輪特有的東西：① `repin_log_problems()` 款(9) 強制的護欄層淨額承認
+    # （`<!-- guard-total:R83 -->` 標記行，由 `doc_guard_total_problems()` 與
+    # `_GUARD_LINES_REPIN_LOG` 表尾雙向對帳，寫錯即紅）；② §E 的 Next Action（五項尚未
+    # 關的缺口，含「四方複審未執行 ⇒ 本輪全部修復皆屬作者自證」這一條）。
+    _REPO_ROOT / "docs" / "06_quality" / "CrossPlatform_R83_Scan_Findings.md",
 )
 
 # 姊妹治理文件的命名慣例：`docs/06_quality/CrossPlatform_*.md`。這**不是**把具名常數

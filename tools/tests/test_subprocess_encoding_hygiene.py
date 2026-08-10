@@ -136,7 +136,13 @@ def _scan_roots() -> list[tuple[Path, int]]:
         # 觸發＝本輪三支護欄層檔的判準本體下沉 `tools/lib/`（DEF-101-957／958），`tools` 樹
         # 由 95 支長到 97 支，而 77 這個下限只還守得住 79% 的掃描面 ⇒ `tree_count_verdict()`
         # 的腐化上界當場紅並直接給出該填的數字（92 ＝ 97 × 0.95），本列照填、不做加減推算。
-        (_REPO_ROOT / "tools", 92),
+        # 🔴 R83 收輪單人窗口重釘 92 → 110（**方向是收緊**，同上一段語意）。觸發＝本輪
+        # 並行包在 `tools` 樹下新增四支檔（`tools/lib/schedule_backend.py` ＋ 三支回歸鎖
+        # `tools/tests/test_block_destructive_git_r83.py`／`test_mac_endurance_r83.py`／
+        # `test_skip_discoverability_r83.py`），該樹由 112 支長到 116 支，92 這個下限只
+        # 還守得住 79% 的掃描面 ⇒ `tree_count_verdict()` 的腐化上界（115）當場紅並直接
+        # 給出該填的數字（110 ＝ 116 × 0.95），本列照填、不做加減推算。
+        (_REPO_ROOT / "tools", 110),
         (_REPO_ROOT / "AutoClaude" / "tools", 41),
         (_REPO_ROOT / "AutoClaude" / "autoclaude", 194),
         (_REPO_ROOT / "AutoClaude" / "tests", 268),

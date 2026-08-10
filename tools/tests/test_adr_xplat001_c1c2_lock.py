@@ -727,30 +727,32 @@ _FROZEN_GUARD_LINES: dict[str, int] = {
     "_platform_helpers.py": 549,
     "_ps_engine.py": 115,
     "test_act_local_runner_image.py": 322,
-    "test_adr_xplat001_c1c2_lock.py": 4768,
+    "test_adr_xplat001_c1c2_lock.py": 4787,
     "test_archive_defect_log.py": 3878,
     "test_bash32_compat.py": 946,
     "test_bash_probe_spec_contract.py": 983,
+    "test_block_destructive_git_r83.py": 818,
     "test_bootstrap_core.py": 439,
     "test_bootstrap_ps1.py": 160,
     "test_check_defect_log_crossref.py": 3058,
     "test_check_gha_action_versions.py": 295,
-    "test_check_hooks_liveness.py": 2578,
+    "test_check_hooks_liveness.py": 2829,
     "test_check_pytest_baseline_sites.py": 297,
     "test_check_script_parity.py": 2111,
     "test_check_wrapper_thinness.py": 1316,
     "test_component_sanitizer_shared_layer_lock.py": 293,
-    "test_context_budget_guard.py": 5066,
+    "test_context_budget_guard.py": 5645,
     "test_defect_id_reference_integrity.py": 261,
-    "test_dev_start.py": 6774,
+    "test_dev_start.py": 7066,
     "test_dev_start_ps1_lastexitcode.py": 548,
-    "test_doc_env_prefix_platform_parity_r60.py": 332,
-    "test_doc_loc_baseline_freshness_r60.py": 6472,
+    "test_doc_env_prefix_platform_parity_r60.py": 341,
+    "test_doc_loc_baseline_freshness_r60.py": 6924,
     "test_extras_quoting_zsh_safety.py": 402,
     "test_find_git_bash_parity.py": 1230,
     "test_gha_action_versions.py": 703,
     "test_git_hooks_install_common.py": 393,
     "test_install_windows_nightly.py": 1469,
+    "test_mac_endurance_r83.py": 1488,
     "test_mac_readiness_r82.py": 621,
     "test_macos_smoke_skip_honesty.py": 225,
     "test_maturity_criteria_r79.py": 427,
@@ -759,7 +761,7 @@ _FROZEN_GUARD_LINES: dict[str, int] = {
     "test_no_invalid_escape_sequences.py": 329,
     "test_ntfs_trailing_space_device_name.py": 772,
     "test_onboarding_parity_interlock.py": 235,
-    "test_platform_neutral_paths.py": 5683,
+    "test_platform_neutral_paths.py": 5959,
     "test_platform_utils_dedup.py": 1103,
     "test_pre_commit_dispatcher_sigpipe.py": 965,
     "test_pre_push_dispatcher.py": 686,
@@ -767,15 +769,16 @@ _FROZEN_GUARD_LINES: dict[str, int] = {
     "test_ps51_compat.py": 621,
     "test_ps_engine_ssot.py": 933,
     "test_python_c_percent_shim.py": 119,
-    "test_quota_policy.py": 1416,
+    "test_quota_policy.py": 1557,
     "test_root_infra_parity.py": 441,
-    "test_run_root_unittests.py": 1975,
+    "test_run_root_unittests.py": 2177,
     "test_sanitize_component_frozen_sdd_versions_lock.py": 375,
-    "test_schedule_capability_parity.py": 595,
+    "test_schedule_capability_parity.py": 631,
     "test_script_scan_surface_ssot.py": 391,
+    "test_skip_discoverability_r83.py": 691,
     "test_smoke_ci_sync.py": 1359,
     "test_stdio_utf8.py": 76,
-    "test_subprocess_encoding_hygiene.py": 1575,
+    "test_subprocess_encoding_hygiene.py": 1581,
     "test_windows_forbidden_filename_parity.py": 1005,
     "test_windows_nightly_anchor_parity.py": 135,
     "test_windows_smoke_heartbeat_doc_sync.py": 197,
@@ -1138,6 +1141,22 @@ _GUARD_LINES_REPIN_LOG: tuple[tuple[str, int, int, int, str], ...] = (
         "（分診：`startswith` 的比對字面，字串來自 WMI 讀回的映像名，不交給 OS 解析）。"
         "🔴 本輪未刪任何行換取餘裕、未調高任何門檻、未放寬任何棘輪、未動漂移容忍值。",
     ),
+    (
+        "R83", 73823, 79083, 5260,
+        "R83（mac 真機首輪）收尾單人窗口重釘；量測前後各取一次含內容的工作樹指紋並確認相同。"
+        "🔴 **[非淨減法輪]**，且淨額是本表歷來最大的一筆 —— 逐檔清單與逐項必要性辯護的家是 "
+        "docs/06_quality/CrossPlatform_R83_Scan_Findings.md 的 §B（同一件事只有一個家）。"
+        "成長全部來自「mac 真機第一次看得見的東西」：判準的量測面由機器本地狀態換成平台中立"
+        "（blob／samefile／repo 自己的宣告），或改成 win32／darwin 顯式雙欄矩陣。"
+        "🔴 **本列的誠實劃界（兩點，都對本輪不利，逐項見發現文件 §B-3）**："
+        "① 依成熟度 SSOT 的 M1 判準，達標條件是本表**總量連續三輪不上升** ⇒ 本輪是明確的"
+        "反方向，M1 因此比動工前更遠，這件事不因為「成長有正當理由」而改變；"
+        "② 針對本輪修復的第三方複審**在本列落地時尚未執行**（配額五小時桶觸及收斂帶，"
+        "四方複審依節流演算法延到 reset 後）⇒ 依 M3「作者自證不計分」，本值與 R74／R77／"
+        "R78／R81／R82 那幾次同型，屬**中途值**，複審收斂後必須再釘一次。"
+        "🔴 本輪未刪任何行換取餘裕、未調高任何門檻、未放寬任何棘輪、未動漂移容忍值；"
+        "同輪另外幾筆重釘（見發現文件 §B-4）方向皆為**收緊**，理由各自寫在其站點。",
+    ),
 )
 
 
@@ -1182,10 +1201,10 @@ _GUARD_LINE_DRIFT_TOLERANCE = 0
 #: 追加當輪不必動指紋（一列寬限），下一輪要再追加就必須先把前一列納入前綴並重釘，
 #: 否則 `[前綴過期]` 轉紅。草稿兩個值都由 `--print-guard-lines` 印出
 #: （ARCH-02 的教訓：紅了卻沒有出路的鎖會被關掉）。
-_REPIN_LOG_FROZEN_PREFIX_LEN = 19
+_REPIN_LOG_FROZEN_PREFIX_LEN = 20
 _REPIN_LOG_MAX_UNFROZEN_TAIL = 1
 _REPIN_LOG_HISTORY_SHA256 = (
-    "5c88a211154ba66884dc61d7d0357487de08f2d83aa78fb260f5f4afb8124e7d")
+    "e2cf7d8a43ee07ea667c5ed61ed413c76380b448b017e40887ff8f0d0112a2d6")
 
 
 def repin_log_history_digest(

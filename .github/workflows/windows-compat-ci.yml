@@ -323,6 +323,18 @@ on:
       - "tools/lib/skip_tag_policy.py"
       - "tools/lib/skip_static_scan.py"
       - "tools/lib/skip_source_io.py"
+      # 🔴 R83：本輪新增的第 N 支 tools/lib/ SSOT（`schedule_backend.py`＝「這台機器用哪個
+      # OS 排程器」的唯一提問點：Windows=schtasks／macOS=launchd／其餘明說做不到）。
+      # 為何必須列名：它是**兩個平台的取證憑證差異**的家——Windows 靠 `NextRunTime` 的值
+      # （`Get-ScheduledTask` 對不存在的工作回 rc=0＝假綠），macOS 靠 `launchctl print` 的
+      # rc（113 vs 0）＋回讀的 trigger descriptor（launchd 從不報 next-run）。只改它而不跑
+      # 兩支 compat-CI，等於讓「同一條紀律在兩平台需要相反實作」這件事失去回歸保護。
+      - "tools/lib/schedule_backend.py"
+      # 🔴 R83：PG skip 消除路徑的兩個載體。它們被 `tools/tests/test_skip_discoverability_r83.py`
+      # 消費（該鎖驗「文件與錯誤訊息裡的示範指令不得只在單一平台成立」，而 PG 容器那條
+      # 指令正是雙平台各給一份的主要案例）。只改這兩支而不跑 compat-CI，該鎖不會被觸發。
+      - "AutoClaude/docker-compose.ci.yml"
+      - "AutoClaude/tools/local_ci_gate.py"
       - "tools/lib/skip_runtime_report.py"
       # R80 收尾：本輪新增／新被消費的 tools/lib/ 共用層——由
       # test_ci_paths_cover_root_consumers.py 當場攔下並要求三支 workflow 補列
@@ -609,6 +621,18 @@ on:
       - "tools/lib/skip_tag_policy.py"
       - "tools/lib/skip_static_scan.py"
       - "tools/lib/skip_source_io.py"
+      # 🔴 R83：本輪新增的第 N 支 tools/lib/ SSOT（`schedule_backend.py`＝「這台機器用哪個
+      # OS 排程器」的唯一提問點：Windows=schtasks／macOS=launchd／其餘明說做不到）。
+      # 為何必須列名：它是**兩個平台的取證憑證差異**的家——Windows 靠 `NextRunTime` 的值
+      # （`Get-ScheduledTask` 對不存在的工作回 rc=0＝假綠），macOS 靠 `launchctl print` 的
+      # rc（113 vs 0）＋回讀的 trigger descriptor（launchd 從不報 next-run）。只改它而不跑
+      # 兩支 compat-CI，等於讓「同一條紀律在兩平台需要相反實作」這件事失去回歸保護。
+      - "tools/lib/schedule_backend.py"
+      # 🔴 R83：PG skip 消除路徑的兩個載體。它們被 `tools/tests/test_skip_discoverability_r83.py`
+      # 消費（該鎖驗「文件與錯誤訊息裡的示範指令不得只在單一平台成立」，而 PG 容器那條
+      # 指令正是雙平台各給一份的主要案例）。只改這兩支而不跑 compat-CI，該鎖不會被觸發。
+      - "AutoClaude/docker-compose.ci.yml"
+      - "AutoClaude/tools/local_ci_gate.py"
       - "tools/lib/skip_runtime_report.py"
       # R80 收尾：本輪新增／新被消費的 tools/lib/ 共用層——由
       # test_ci_paths_cover_root_consumers.py 當場攔下並要求三支 workflow 補列

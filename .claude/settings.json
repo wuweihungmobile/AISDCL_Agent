@@ -124,6 +124,29 @@
         ]
       },
       {
+        "_comment": "R83：擋下**會不可逆清掉工作樹內容**的 git 指令。立案是本輪的真實事故（不是假想）：一個 subagent 在六包並行**共用的工作樹**上跑 `git stash -q -u --keep-index`，16 個修改檔 + 4 個未追蹤檔瞬間消失（含其他包當時正在寫的 tools/lib/quota_meter.py、tools/tests/test_dev_start.py、tools/lib/schedule_backend.py）；它自己 `git stash pop` 還原、前後 `git diff --stat` 逐字相同 ⇒ **沒有偵測到資料遺失，但那是運氣不是設計**——當時若有 agent 正在寫檔，pop 會衝突或覆蓋。任務書當時**已經寫著**「不要 git add / commit / push」⇒ 禁令沒涵蓋到的那個動詞就是被踩的那個，而純文件約束對『當下的模型』零攔阻力（block_bash_on_windows.py 與 lint_powershell_command.py 的立案理由已各自實證一次）。judgement 面刻意極窄、且**列舉危害形態而不是列舉動詞**：擋 stash（create/list/show 除外）／checkout -- path／checkout -f／restore（--staged 單獨使用除外，只動 index）／reset --hard|--merge|--keep／clean（-n 除外）／switch -f|--discard-changes；**放行** `git stash create`（根 CLAUDE.md〈可重啟點四條件〉第 1 條指定的保全手法，擋掉它等於擋掉本 repo 的安全暫停 SOP）、`git reset`（mixed）與 --soft、純切分支、所有唯讀查詢。matcher 圈的是**這個 harness 真的會送出 shell 指令的那兩個工具**：mac 側逐字稿實測 Bash 4,083/7,189 次，Windows 側因鐵律一禁用 Bash ⇒ 一律走 PowerShell（R80 的教訓：圈一組永遠不出現的名字＝阻斷臂蓋好了卻永遠不觸發）；腳本內 `tool not in OWN_TOOLS → exit 0` 是 matcher 被改寬時的第二道限縮。🔴 **刻意不加平台閘**：姊妹檔 block_bash_on_windows.py 守的規則只在 Windows 成立，本檔相反——`git stash` 在 mac 上清掉的檔案和 Windows 一模一樣，而事故就發生在 macOS，照抄那個平台閘等於在事故現場關掉它（DEF-101-766 的鏡像版本）。退化 payload 走 rc=1（出聲但不阻斷）：Bash／PowerShell 是各自平台上唯一的 shell 載具，對讀不出內容的 payload 硬擋它等於換掉整個工作面；即便如此 matcher 仍**恰好等於**腳本射程，零附帶面（判準見 tools/tests/test_check_hooks_liveness.py::degraded_payload_verdict）。任何非預期例外 exit 0（fail-open，見本檔 description 記載的 P0）。兩個逃生口刻意分開且分層：環境變數 AUTOSDD_GIT_GUARD_OFF（**模型碰不到**——hook 讀的是自己行程的環境，在指令字串裡寫 `VAR=1 git stash` 對它無效）／行內豁免 `# git-guard-ok: <理由>`（理由必填，且 AUTOSDD_UNATTENDED 有設時無效——無人看管的回合可以自己寫豁免）。回歸鎖 tools/tests/test_block_destructive_git_r83.py。",
+        "matcher": "Bash|PowerShell",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "${CLAUDE_PROJECT_DIR}/.venv/Scripts/pythonw.exe",
+            "args": [
+              "${CLAUDE_PROJECT_DIR}/.claude/hooks/_hook_launcher.py",
+              ".claude/hooks/block_destructive_git.py"
+            ],
+            "timeout": 10
+          },
+          {
+            "type": "command",
+            "command": "${CLAUDE_PROJECT_DIR}/.claude/hooks/_hook_launcher.py",
+            "args": [
+              ".claude/hooks/block_destructive_git.py"
+            ],
+            "timeout": 10
+          }
+        ]
+      },
+      {
         "_comment": "R79：context 水位 ≥90% 時**真的擋下展開型工具**（掌舵者第 2 點『不要爆』的機械化第二段；同一支腳本的 PostToolUse 條目只出聲不擋，兩者由 payload 的 hook_event_name 分派）。立案理由是本 repo 的實證：『純文件約束對當下的模型零攔阻力』——R78 版的鏈條是「hook 印一段話 → 模型自己記得去 /compact」，而 block_bash_on_windows.py 的立案正是同一形態失敗過兩次。四道放行條件（缺一才會真的擋，逐條在 tools/tests/test_context_budget_guard.py::PreToolUseBlockTest 有成對注入）：①環境變數 AUTOSDD_CONTEXT_GUARD_OFF 有設一律放行（給人的逃生口，模型改不到 hook 行程的環境；對 settings.json description 記載的那個 P0 的第二道保險）；②水位未達 90% 放行；③**window 來源是保守下界猜測時一律放行**——分母是猜的就不准硬擋，否則 1M session 會在真實 18% 被鎖死，那正是本輪要修的缺陷換個方向再犯；④tool_name 不在腳本自己的 BLOCKING_TOOLS 內放行（matcher 被改寬時的第二道限縮，同 block_bash_on_windows.py 的形態）。🔴 R80：matcher 補上 Agent|Workflow。立案是掃描 S7-02 的實測——原本圈的 Task|WebFetch|WebSearch 這三個名字在本 harness 的 8,106 次 tool_use 裡出現 **0 次**（本 harness 派子代理叫 Agent、批次編排叫 Workflow）⇒ 阻斷臂蓋好了卻永遠不會被觸發，而 R79 為它建的那道鎖只把 matcher 與腳本射程釘成『相等』，保證的是『兩個都寫錯時也一致』＝鑑別力方向錯了。三個舊名保留不刪（那是 Claude Code 上游的標準工具名，換一個 harness 就會回來）。有效性判準見 context_budget_guard.blocking_reach_problems：BLOCKING_TOOLS 必須與實測逐字稿的 tool_use 名稱集合有非空交集，圈一組永遠不出現的名字當場轉紅。matcher 圈的一律是『展開型』：根 CLAUDE.md 那句是『此後只做收斂，不做展開』，而收斂本身需要 Read／Edit／PowerShell（讀檔、寫任務書、跑 git）——擋到讓人無法收斂的守衛會被整個關掉，比沒有守衛更糟。阻斷**不進閂鎖**（擋一次就放行的東西不是阻斷），且 /compact 之後 used 會真的掉下來 ⇒ 自動解除，不需要任何人去關它。退化 payload 走 rc=1（出聲但不阻斷），符合 tools/tests/test_check_hooks_liveness.py::degraded_payload_verdict 的『不得靜默放行、硬擋才要配窄 matcher』；任何非預期例外一律 exit 0（fail-open）。timeout 取 10（本模式不產任務書、不起子行程，實測遠低於此）。",
         "matcher": "Task|WebFetch|WebSearch|Agent|Workflow",
         "hooks": [

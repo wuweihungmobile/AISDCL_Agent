@@ -282,6 +282,45 @@ R71 最諷刺的一筆：在修一個 Windows 專屬缺陷（DEF-101-759）時�
 
 R71 實例：輪號 R70／R71 全程講錯（採信提示詞而未查 `current_round()` 權威源）／宣稱「資訊零損失」但帳本實際沒有該站點／豁免標記形態靠猜而未讀掃描器實作。**這三筆在 mac 側同樣會發生**，只是 Windows 的決策負荷讓它們更容易漏。對策不是「更小心」，而是套用既有紀律 [[no-fabricated-tool-output]]：**任何「已驗證／已達標／零損失」的宣稱，都要附當回合真跑的輸出**——貼不出來就改寫成「未驗證」。
 
+### 🔴 鐵律五：毀滅性 git 指令已由 PreToolUse 阻斷（R83 — 本節唯一一條**平台無關**的鐵律）
+
+> **為何住在這一節**：本節其餘四條都是「Windows 側的載具紀律」，而這一條的事故發生在 **macOS**。它放在這裡是因為**病因同構**——同一種「規則寫在散文裡、對當下的模型零攔阻力」的失效，只是換了一個動詞。
+
+**立案事實（本輪真實事故，不是假想）**：一個 subagent 在**六包並行共用的工作樹**上執行 `git stash -q -u --keep-index`，瞬間清空 **16 個修改檔 ＋ 4 個未追蹤檔**（含其他包當時正在寫的三支檔）。它自己發現後 `git stash pop` 還原，前後 `git diff --stat` 逐字相同（16 files / 1791 insertions / 215 deletions）⇒ **沒有偵測到資料遺失，但那是運氣不是設計**：當時若有 agent 正在寫檔，pop 會衝突或直接覆蓋。而那份任務書**已經寫著**「不要 git add / commit / push」——**禁令沒涵蓋到的那個動詞，就是被踩的那個**。
+
+⇒ 修法不是把動詞清單加長（下一個沒列到的動詞還是會被踩），而是**列舉會毀掉工作樹的形態**並上機械阻斷：`.claude/hooks/block_destructive_git.py`（PreToolUse／matcher `Bash|PowerShell`＝這個 harness 真的會送出 shell 指令的那兩個工具，在根 `.claude/settings.json` 註冊），回歸鎖 `tools/tests/test_block_destructive_git_r83.py`。
+
+| | 形態 |
+|---|---|
+| **擋** | `git stash`（含裸 stash＝push／`push`／`pop`／`apply`／`drop`／`clear`／`save`）／`git checkout -- <path>`／`git checkout -f`／`git restore <path>`／`git reset --hard`｜`--merge`｜`--keep`／`git clean`／`git switch -f`｜`--discard-changes` |
+| **放行** | 🔴 `git stash create`（〈可重啟點四條件〉第 1 條**指定**的保全手法——擋掉它等於擋掉本 repo 自己的安全暫停 SOP）／`git stash list`｜`show`／`git reset`（mixed）與 `--soft`／`git restore --staged`（只動 index，工作樹內容原封不動）／`git clean -n`／純切分支（`-b`／`-c`／不帶 `--` 路徑）／所有唯讀查詢 |
+
+**判準必須精準是設計約束不是客氣**：repo 已判過「擋到讓人無法工作的守衛會被整個關掉，而被關掉的守衛比沒有守衛更糟」。落地當回合對全庫 tracked 檔抽出的 **10,106 筆 git 指令片段**（去重 1,031 種）實跑該判準：命中 **30 種唯一字面／254 次**，逐筆人工判讀**全部是真陽性**（`git reset --hard` 家族、`git checkout -- <path>`、`git restore .`、`git clean -fd`、`git stash` 家族），**假陽性 0 筆**。
+
+兩個逃生口**刻意分層、且刻意不與既有變數共用**（repo 明文：共用一個會讓「我只是想暫時別被擋」順手把別的保護一起關掉）：
+- `AUTOSDD_GIT_GUARD_OFF`——**模型碰不到的那一個**。hook 讀的是它自己行程的環境，在指令字串裡寫 `VAR=1 git stash` 對它無效；要真的關掉，人必須在啟動 `claude` 之前設好。
+- 行內豁免 `# git-guard-ok: <理由>`（理由必填，須住在**真註解**裡）。已知弱點誠實寫在 hook 檔頭：無人看管的模型回合可以自己寫出這一行 ⇒ `AUTOSDD_UNATTENDED` 有設時該豁免**無效**（同 `lint_powershell_command.py` 對授權邊界的處置）。
+
+**擋不到什麼**（寫在這裡，因為會誤以為它完整的人正是讀到這條的人）：不經 shell 的路徑（Python `subprocess` 直接跑 git、MCP git 工具、用 `Write`／`Edit` 覆寫檔案）／別名與函式／heredoc body（刻意當資料遮掉，換掉「寫探針就被誤擋」那一整類）／執行檔路徑被引號包住時／`git rm`｜`branch -D`｜`push --force`（毀的不是未提交的工作樹內容，另案）。
+
+### 🔴 鐵律六：等待／確認的機制自己靜默壞掉 ⇒ 無做工空轉（R83 收輪 — 平台無關，立列 `DEF-200-044`）
+
+> **為何住在這一節**：同鐵律五——病因是「規則寫在散文裡、對當下的模型零攔阻力」；只是這次壞掉的不是某個動詞，而是**我用來判斷「它做完了沒」的那個機制本身**。
+
+**一句話的本體**：**我用來等待／確認的那個機制自己靜默壞掉，而失敗的表徵與「還在正常進行」完全相同。**
+
+🔴 **總則（掌舵者 2026-08-11 的直接要求）**：**除了「等額度 reset」與「等人介入」這兩種合法停等，任何停等都必須有一個會主動叫醒我的事件源；掛不掛得上那個事件源，是派工前就要決定的事，不是事後補救。** 掛不上就換一個掛得上的形態派工，不要先派再說。
+
+| | 形態 | 為什麼／本回合實測 |
+|---|---|---|
+| ✅ | `run_in_background: true` 搭一個**會阻塞到真的做完**的指令 | 這是**有契約的**事件源：Bash 工具說明逐字寫 `it keeps running across turns and re-invokes you when it exits` ⇒ 叫醒我的是**它啟動的那個行程**結束的那一刻。所以那個行程必須「一直活到工作真的做完」——前景阻塞才滿足這一點 |
+| ✅ | 掛 Monitor／until-loop，且**條件的比對面不含自己**（字元類自我否定）：`until ! pgrep -f 'run_root[_]unittests'; do …; done` | 同一 pattern 兩支並行實測：自我否定版兩支皆 **rc=1**（零命中），而對真標的仍 **rc=0**（命中 2 支）⇒ 只否定自己、不減損鑑別力 |
+| ❌ | `nohup <cmd> > log 2>&1 &` | 工作**脫離 harness 的完成追蹤**：實測外層 **rc=0、0 秒**就返回，而那個工作同一刻還活著 ⇒ 通知講的是外層殼。R83 收輪實帳：**00:39 → 01:27 共 48 分鐘零工作**，靠掌舵者來問才發現 |
+| ❌ | 裸 `pgrep -f <字面>`／`pgrep -f "python.*X"` | 兩支並行時**兄弟互匹**：實測各自 rc=0（各命中對方的 `sh` 與 `pgrep`）⇒ `until ! …` 永不退出。`man pgrep` 只排除自己與祖先（逐字 `the current pgrep or pkill process and all of its ancestors are excluded`）⇒ **單支不會死鎖**，所以它在單支試跑下永遠是綠的；`python.*X` 這種正則對自己的字面同樣成立，一樣死鎖 |
+| ❌ | 讀 rc 時接管線 | 實測 `sh -c 'exit 7'` 接 `tail -1` → **rc=0**（真 7 被吃掉），不接管線 → **rc=7**。mac 的工具殼是 zsh（實測 `ZSH_VERSION=5.9`）：`${PIPESTATUS[0]}` 回**空字串**、要寫 `${pipestatus[1]}`（實測 `7`）——機制與修法住 `useMacWin.md` §C，本節不複寫 |
+
+🔴 **本族的機械物現況（誠實劃界，不寫成「結構上不可能」）**：**零攔截器，今天只有本節這段散文在守。** 極窄 lint 是做得到的、也不必新開觀測面——`.claude/hooks/block_destructive_git.py` 已在 PreToolUse 讀 **Bash 指令字串**且平台中立（見鐵律五），加「`nohup` 與 `&` 同時出現」「`until`／`while` 條件內出現裸 `pgrep -f`」兩條判準即可。**但本族另一半真的沒有觀測點**：Monitor 掛沒掛、harness 的完成通知在講哪一個行程，都不在任何指令字串裡、也永不變成 repo 內的檔案（同本節上方 R77／R79 那段歸因的第 ② 層）⇒ 攔截器接得住「寫出壞形態」，接不住「該掛的沒掛」。承接與逐筆座標見 `docs/06_quality/AutoSDD_Defect_Log.md` 的 `DEF-200-044`／`DEF-200-045`。
+
 ---
 
 ## AutoClaude — 常用指令與架構

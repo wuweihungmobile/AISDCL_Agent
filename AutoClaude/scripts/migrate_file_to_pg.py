@@ -4,9 +4,18 @@
 對應 SD_Improving_02.md v1.1 §1.5 P-6 接入路線。
 P1 #9：新增 --skip-existing flag + KB 遷移迴圈 + transaction batch。
 
-使用：
-  pip install 'autoclaude[postgres]'
-  export AUTOCLAUDE_DB_DSN="postgresql+asyncpg://${PG_USER}:${PG_PASS}@host:5432/autoclaude?sslmode=require"
+使用（🔴 R83 補齊 PowerShell 那一半：原文只給 `export …` 這種 POSIX 專屬形態，而本段是
+整支腳本唯一告訴使用者「DSN 要怎麼餵進來」的地方，Windows 讀者照抄只會換來第二個錯誤——
+與 `alembic/env.py`／`tools/setup_pg_runtime_role.py` 同一族缺陷，同輪一併修）：
+
+  bash / zsh：
+    pip install 'autoclaude[postgres]'
+    export AUTOCLAUDE_DB_DSN="postgresql+asyncpg://${PG_USER}:${PG_PASS}@host:5432/autoclaude?sslmode=require"
+  PowerShell：
+    pip install 'autoclaude[postgres]'
+    $env:AUTOCLAUDE_DB_DSN = "postgresql+asyncpg://$($env:PG_USER):$($env:PG_PASS)@host:5432/autoclaude?sslmode=require"
+
+  兩平台共通（承接上面任一種寫法）：
   python scripts/migrate_file_to_pg.py --checkpoint-dir checkpoints/
   python scripts/migrate_file_to_pg.py --checkpoint-dir checkpoints/ --skip-existing
   python scripts/migrate_file_to_pg.py --checkpoint-dir checkpoints/ --batch-size 20

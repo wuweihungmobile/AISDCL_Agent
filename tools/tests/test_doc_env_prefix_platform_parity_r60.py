@@ -222,7 +222,12 @@ class TestLiveDocEnvPrefixPlatformParity(unittest.TestCase):
         )
 
     def test_known_sites_are_still_discovered(self) -> None:
-        """釘住已知的 4 個站點仍被 fence 解析器看到（防解析器壞掉導致全面假綠）。"""
+        """釘住已知站點仍被 fence 解析器看到（防解析器壞掉導致全面假綠）。
+
+        🔴 R83：`useMacWin.md` 加入本清單——該檔新增 ONBOARDING §7.1 的最短路徑
+        （`AUTOCLAUDE_DB_DSN=… alembic upgrade head`），同檔已附 PowerShell 對照，
+        故 `test_live_docs_have_powershell_counterpart` 仍綠；本清單只是庫存盤點。
+        """
         found = {
             rel: [s.lineno for s in iter_env_prefix_sites(
                 (_REPO_ROOT / rel).read_text(encoding="utf-8-sig")
@@ -238,6 +243,7 @@ class TestLiveDocEnvPrefixPlatformParity(unittest.TestCase):
                 "CLAUDE.md",
                 "ONBOARDING.md",
                 "docs/AISDLC_Agent_UserGuide.md",
+                "useMacWin.md",
             ],
             f"已知站點集合變動——新增活文件請確認已附 PowerShell 對照；"
             f"實測：{nonempty}",
@@ -324,7 +330,10 @@ class TestLiveDocEnvPrefixPlatformParity(unittest.TestCase):
 
     def test_min_site_floor_fails_loud(self) -> None:
         """抽取數量掉到下限以下 → fail-loud（fence 解析漂移的靜默縮面防護）。"""
-        problems = scan_live_docs(docs=["useMacWin.md"])  # 該檔本就 0 站點
+        # 單掃一份文件，其站點數必然遠低於全名冊下限（R83 訂正原註解「該檔本就 0 站點」
+        # ——useMacWin.md 自 R83 起有 1 個站點，下限判準靠的是 1 < `_MIN_PREFIX_SITES`，
+        # 不是「恰好是 0」）
+        problems = scan_live_docs(docs=["useMacWin.md"])
         self.assertTrue(any("下限" in p for p in problems), problems)
 
 

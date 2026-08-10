@@ -1299,14 +1299,155 @@ class TestM8SchemaStaysInSync(unittest.TestCase):
 
 
 # ═══════════════════════════════════════════════════════════════════════════
+# M8-b 檔案契約的**路徑**那一半（R83／F2-①：此前只有 SCHEMA 被鎖住）
+# ═══════════════════════════════════════════════════════════════════════════
+# 🔴 立案。檔案契約有兩個欄位（**路徑** ＋ schema），而 R82 只把 schema 綁起來。路徑那一半
+# 今天各自寫在兩支檔裡：meter 是 `cache_path()`、adapter 是 `__init__` 的預設值，兩者都
+# 自己算 `tempfile.gettempdir() / "autosdd_quota.json"`。adapter **不能** import meter
+# （importlinter contract #9「autoclaude must not import monorepo harness modules」），
+# 所以複本是設計上必要的——正因為必要，它才需要一道鎖。
+#
+# 為什麼這一格值得一道鎖，而不是「今天兩邊相符就算了」：R83 本輪的 F2-① 任務書提出的修法
+# 正是「把快取搬到不吃 TMPDIR 的固定家」。那個動作只改 meter 的話，adapter 會**靜默**讀不到
+# 任何檔 ⇒ `_pick()` 回 `None` ⇒ `resume_wait_seconds` 回落寫死延遲、`TokenGuardPlugin`
+# 的額度軸恆「量不到」，而 `None` 這個回傳值被 adapter 自己的測試釘成正確行為（同 SCHEMA
+# 那一格的判例：「失效全綠、完全靜默」）。⇒ 搬家是可以做的，但它必須是**同一次** commit
+# 動兩支檔，而這道鎖就是那個「同一次」的機械保證。
+#
+# 判準取「兩邊算路徑用的 token 序列相等」而不是「必須是 gettempdir」：後者會把家釘死在
+# 今天這個選擇上，於是將來真的要搬家時，這道鎖自己會變成阻力（本 repo 對「鎖住了實作而
+# 不是性質」有判例）。搬到 `~/.cache/autosdd/` 一樣綠——只要兩邊一起搬。
+#: 「家」只可能來自這幾個地方。刻意是白名單而不是「抓所有識別字」：後者會把
+#: `self._path`／`Path`／`if`／`else` 這種**寫法差異**也算進去，於是兩支檔明明用同一個
+#: 算法卻判紅（實測：第一版判準就是這樣假紅的）。假紅的鎖活不過一輪。
+_HOME_SOURCE_RE = re.compile(
+    r"tempfile\.gettempdir|Path\.home|os\.path\.expanduser|expanduser|"
+    r"os\.environ|os\.getenv")
+#: 檔名那一段由 `QuotaCacheContractHomeTest` 另一側守（meter↔hook 的 `CACHE_NAME` 間接
+#: 層）。本判準只問「**目錄**那一段是不是同一個算法」，所以在這兩個 token 處截斷。
+_FILENAME_TOKENS = ("CACHE_NAME", '"autosdd_quota.json"')
+
+
+def cache_home_tokens(source: str) -> list[str]:
+    """把一支檔算「快取住哪裡」的那個運算式抽成可比對的 token 序列（家 ＋ 目錄字面）。"""
+    tokens: list[str] = []
+    for line in source.splitlines():
+        text = line.strip()
+        # 註解裡照抄契約是允許的（adapter 檔頭就有一行）——它不是第二個實作。
+        if text.startswith("#") or not any(t in text for t in _FILENAME_TOKENS):
+            continue
+        head = text
+        for token in _FILENAME_TOKENS:
+            head = head.split(token)[0]
+        tokens += _HOME_SOURCE_RE.findall(head)
+        tokens += re.findall(r'"([^"]+)"', head)   # `.cache` / `autosdd` 這種目錄字面
+    return tokens
+
+
+def cache_home_sync_problems(meter_src: str, adapter_src: str) -> list[str]:
+    """兩支檔算出來的快取**目錄**必須來自同一個算法（純文字判準，可注入）。"""
+    a, b = cache_home_tokens(meter_src), cache_home_tokens(adapter_src)
+    if not a or not b:
+        return ["至少一側找不到快取路徑運算式 ⇒ 契約的路徑那一半沒有家"]
+    if a != b:
+        return [f"快取路徑算法不同步：meter={a} adapter={b}——adapter 對「檔不在」的反應是"
+                "回 None（＝量不到），而 None 被它自己的測試釘成正確行為 ⇒ 失效全綠、"
+                "完全靜默。搬家必須同一次 commit 動兩支檔"]
+    return []
+
+
+class TestM8bCacheHomeStaysInSync(unittest.TestCase):
+    _METER_LIKE = "    return Path(tempfile.gettempdir()) / CACHE_NAME\n"
+    _ADAPTER_LIKE = ('        self._path = Path(path) if path else '
+                     'Path(tempfile.gettempdir()) / "autosdd_quota.json"\n')
+
+    def test_green_two_matching_expressions(self) -> None:
+        self.assertEqual(cache_home_sync_problems(
+            self._METER_LIKE, self._ADAPTER_LIKE), [])
+
+    def test_red_only_the_meter_moves_home(self) -> None:
+        """注入①＝F2-① 提議的那個修法只做一半 ⇒ 必紅（這就是它存在的理由）。"""
+        moved = '    return Path.home() / ".cache" / "autosdd" / CACHE_NAME\n'
+        problems = cache_home_sync_problems(moved, self._ADAPTER_LIKE)
+        self.assertEqual(len(problems), 1, problems)
+        self.assertIn("完全靜默", problems[0])
+
+    def test_green_when_both_move_together(self) -> None:
+        """對稱的控制組：**一起**搬家必須放行，否則這道鎖鎖的是實作不是性質。"""
+        self.assertEqual(cache_home_sync_problems(
+            '    return Path.home() / ".cache" / "autosdd" / CACHE_NAME\n',
+            '        self._path = Path(path) if path else '
+            'Path.home() / ".cache" / "autosdd" / "autosdd_quota.json"\n'), [])
+
+    def test_red_a_missing_expression(self) -> None:
+        self.assertTrue(cache_home_sync_problems(self._METER_LIKE, "pass"))
+
+    def test_the_two_real_files_agree_today(self) -> None:
+        """對磁碟現況比對（adapter 不屬本包，故存在才判——同 M8 的體例）。"""
+        if _METER.exists() and _ADAPTER.exists():
+            self.assertEqual(cache_home_sync_problems(
+                _METER.read_text(encoding="utf-8"),
+                _ADAPTER.read_text(encoding="utf-8")), [])
+
+
+# ═══════════════════════════════════════════════════════════════════════════
 # M9 「量不到」不得等於「不設限」
 # ═══════════════════════════════════════════════════════════════════════════
-#: 規格 S7 的十種失效字面（`no-horizon` 那一列有桶，不在本表）。
+#: 規格 S7 的失效字面（`no-horizon` 那一列有桶，不在本表）。
+#: 🔴 R83／F2-③ 新增 `keychain-timeout`：mac 的 Keychain 跳鎖定提示而沒有人按時，
+#: `security` 會阻塞到逾時——那與「這台 mac 沒有條目」要做的事完全相反（解鎖 vs 重新登入），
+#: 故取數層給了它自己的字面。本表**不是**這批字面的家（家在 `quota_meter.REASON_*`），
+#: 而是「每一個字面都必須被 M9 那兩條不變量掃過」的登記處；兩者的同步由
+#: `TestMeterReasonsAreAllRegistered` 機械守（漏登記即紅）。
 _UNMEASURABLE_REASONS = (
-    "no-credentials", "no-credentials-darwin", "http-401", "http-5xx",
-    "meter-unreachable", "no-buckets", "stale-cache", "expired-cache",
-    "schema-mismatch", "no-cache",
+    "no-credentials", "no-credentials-darwin", "keychain-timeout",
+    "http-401", "http-5xx", "meter-unreachable", "no-buckets",
+    "stale-cache", "expired-cache", "schema-mismatch", "no-cache",
 )
+
+
+# 🔴 立案（R83／F2-③，形狀與 `TestM8SchemaStaysInSync` 同構）：取數層新增一個失效字面
+# 時，**沒有任何東西**會提醒你來這張表登記它。漏登記的後果不是崩潰而是失明——那個字面
+# 從此不在 M9 的分母裡，於是「它會不會被錯判成不設限／被錯判成 halt」這兩條不變量對它
+# 一次都沒有驗過，而 rc 與「正確地全部通過」一模一樣（分母少一項是看不見的）。
+# 判準的分母是**現查** meter 的 `REASON_*` 宣告集合（會變的量測值），不是寫死清單。
+_METER_REASON_RE = re.compile(r"^REASON_([A-Z0-9_]+)\s*=\s*\"([^\"]+)\"", re.MULTILINE)
+#: `REASON_OK` 是「量到了」，語意上不屬本表——唯一的例外，且必須具名而不是靠註解。
+_NOT_A_FAILURE = ("ok",)
+
+
+def reason_registry_problems(meter_src: str, registered: tuple[str, ...]) -> list[str]:
+    """meter 宣告的每一個失效字面都必須登記進 `_UNMEASURABLE_REASONS`（純文字判準）。"""
+    declared = {value for _, value in _METER_REASON_RE.findall(meter_src)}
+    missing = sorted(declared - set(registered) - set(_NOT_A_FAILURE))
+    return [f"`{name}` 是 quota_meter 宣告的失效字面，卻沒有登記進 _UNMEASURABLE_REASONS"
+            "⇒ M9 那兩條不變量對它零覆蓋，而分母少一項是靜默的" for name in missing]
+
+
+class TestMeterReasonsAreAllRegistered(unittest.TestCase):
+    def test_green_the_real_meter_is_fully_registered(self) -> None:
+        if _METER.exists():
+            self.assertEqual(reason_registry_problems(
+                _METER.read_text(encoding="utf-8"), _UNMEASURABLE_REASONS), [])
+
+    def test_red_a_newly_declared_reason_that_nobody_registered(self) -> None:
+        """注入①：取數層長出一個新字面而本表沒動 ⇒ 必紅。"""
+        problems = reason_registry_problems(
+            'REASON_FOO = "brand-new-failure"\n', _UNMEASURABLE_REASONS)
+        self.assertEqual(len(problems), 1, problems)
+        self.assertIn("brand-new-failure", problems[0])
+
+    def test_red_this_rounds_own_reason_would_have_been_caught(self) -> None:
+        """注入②：拿掉本輪新增的那一個 ⇒ 必紅（證明它不是事後補記的裝飾）。"""
+        without = tuple(r for r in _UNMEASURABLE_REASONS if r != "keychain-timeout")
+        self.assertTrue(reason_registry_problems(
+            'REASON_KEYCHAIN_TIMEOUT = "keychain-timeout"\n', without))
+
+    def test_ok_is_the_only_exemption_and_it_is_named(self) -> None:
+        """控制組：`REASON_OK` 不得因為這道鎖而被逼進失效表（它是「量到了」）。"""
+        self.assertEqual(reason_registry_problems(
+            'REASON_OK = "ok"\n', _UNMEASURABLE_REASONS), [])
+        self.assertNotIn("ok", _UNMEASURABLE_REASONS)
 
 
 def m9_problems(decide_fn) -> list[str]:

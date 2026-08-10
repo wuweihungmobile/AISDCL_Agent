@@ -23,6 +23,7 @@ from __future__ import annotations
 
 import io
 import os
+import re
 import sys
 from pathlib import Path
 from types import SimpleNamespace
@@ -846,38 +847,280 @@ def test_platform_skips_have_no_mechanical_proof_of_the_other_half_today() -> No
     assert not all(P.profile_registered(c) for c in P._COMPLEMENTARY_PROFILE[_PROF])
 
 
-def test_a_partially_registered_complementary_set_is_still_a_gap() -> None:
-    """🔴 R82（MAC-01）：一個互補剖面登記了，**不代表**整群結構性 skip 有著落。
-
-    WHY（Rule 9）：`platform` 群在 win32 上是兩個互斥子母體——`[POSIX-NATIVE-ONLY]`
-    的家是 linux，`[MAC-NATIVE-ONLY]`（本輪 census 實測 26 支）的家只有 darwin，而
-    linux 結構上跑不到它們（`install_mac_nightly.sh` 自帶 `uname != Darwin` fail-loud、
-    act 映像內 `which zsh` 回空）。舊判準是 1:1 且用「有沒有登記」短路，於是
-    `tools/tests@win32` 的結構性缺口那一行**一次都沒印過**——帳面讀起來像已覆蓋。
-
-    本支用真表做注入基底（合成表證明不了對 repo 現有那張表有牙）：把 `tools/tests@win32`
-    的互補集合裡**已登記**的那一個留著、未登記的留著，仍必須報缺口。
-    """
-    prof = "tools/tests@win32"
-    counterparts = P._COMPLEMENTARY_PROFILE[prof]
-    assert len(counterparts) >= 2, f"注入基底已失效（互補集合退回 1:1）：{counterparts}"
-    registered = [c for c in counterparts if P.profile_registered(c)]
-    unregistered = [c for c in counterparts if not P.profile_registered(c)]
-    assert registered and unregistered, (
-        f"本支要的是「一半登記一半沒有」的狀態；實得 registered={registered} "
-        f"unregistered={unregistered}——若 darwin 已經量出來入表了，請改寫本支"
-    )
+def _structural_only_census() -> dict[str, int]:
+    """只有結構性 skip、零欠債的 census：讓 `skip_target_report` 只可能吐互補剖面那一行。"""
     census = dict.fromkeys(P.SKIP_GROUPS, 0)
     census[P.SKIP_GROUP_PLATFORM] = 40
-    lines = P.skip_target_report(prof, census)
-    assert any("互補剖面" in ln for ln in lines), (
-        f"一半互補剖面沒人量過卻整組放行 ⇒ MAC-01 迴歸（1:1 短路）。實得：{lines}"
+    return census
+
+
+def _complementary_gap_lines(profile: str) -> list[str]:
+    return [ln for ln in P.skip_target_report(profile, _structural_only_census())
+            if "互補剖面" in ln]
+
+
+def test_the_complementary_gap_names_exactly_the_unmeasured_counterparts(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """🔴 R82（MAC-01）的判準本體，R83 改寫成不會隨磁碟狀態過期的形狀。
+
+    WHY（Rule 9）：`platform` 群在 win32 上是兩個互斥子母體——`[POSIX-NATIVE-ONLY]`
+    的家是 linux，`[MAC-NATIVE-ONLY]`（R82 census 實測 26 支）的家只有 darwin，而
+    linux 結構上跑不到它們（`install_mac_nightly.sh` 自帶 `uname != Darwin` fail-loud、
+    act 映像內 `which zsh` 回空）。舊判準是 1:1 且用「有沒有登記」**短路**（`any`），於是
+    `tools/tests@win32` 的結構性缺口那一行**一次都沒印過**——帳面讀起來像已覆蓋。
+
+    🔴 **為什麼要改寫（R83）**：本支 R82 版把「`tools/tests@win32` 的互補集合**現在**
+    一半登記一半沒有」當成注入基底，而那是一個**磁碟狀態**、不是一條性質。R83 於 mac
+    真機量出 `tools/tests@darwin` 並入 `_RUNTIME_SKIP_CEILING{,_MAX}` 之後，該集合變成
+    全登記 ⇒ 本支自己轉紅（它的訊息當初就寫了「若 darwin 已經量出來入表了，請改寫本支」）。
+    **判準沒壞，是它抓著的語料被正常的進度改掉了**——那就是 R82 自己在
+    `test_ci_platform_coverage_is_red_when…` 命名過的「注入基底腐化」，只是這次輪到它。
+
+    改寫後守的性質（都與哪一個剖面今天量到了無關）：
+      ① **真表 iff（漂移免疫）**：對 `_COMPLEMENTARY_PROFILE` 的**每一列**，缺口行
+         出現 ⟺ 該列至少有一個互補剖面沒人量過；出現時必須**恰好**指名沒量到的那些、
+         且**不得**把已量到的寫進缺口（反向假事實與漏報同樣貴）。
+         量化在整張表上 ⇒ 任一列畢業／新登記都不會讓本支過期。
+      ② **≥2 半登記那一支（合成語料）**：MAC-01 的病灶形態（多對一集合裡只有一半有家）
+         今天在磁碟上**已不存在**（唯一的 ≥2 集合 `tools/tests@win32` 兩格皆已登記）⇒
+         ①的「缺口出現」分支只被 1:1 的列走到，`all`→`any` 迴歸**測不出來**。故本支
+         合成一列來走那個分支。
+         🔴 為什麼合成不算脫離現實：受測物是**真的** `skip_target_report`／
+         `profile_registered`，登記狀態也是真的走那兩張天花板表決定的（`measured` 那一格
+         是真的被 setitem 進兩張表才算已登記）；合成的只有「剖面叫什麼名字、跟誰配對」
+         這兩格，而要鎖的是**判準的形狀**（`all` 不是 `any`）——那是程式碼的性質，不是
+         資料的性質。反過來說：把這一對繫回磁碟上「今天誰已量／誰未量」，就是 R82 版
+         之所以在這裡轉紅的原因（R83 獨立驗證輪實測：繫回去的版本等 linux 兩列畢業後
+         會以無訊息的 `StopIteration` 轉紅，比舊版更難接手，詳見 ② 段落內註解）。
+      ③ 真表**仍必須存在**一個 ≥2 的互補集合——MAC-01 的缺陷本體是「表是 1:1」，
+         退回 1:1（或值退回單一字串）會讓 mac-only 那一族再次失去家，這條沒有過期。
+    """
+    # ── ③ 缺陷本體之鎖：多對一的形狀不准退回 1:1 ────────────────────────────
+    multi = {p: cps for p, cps in P._COMPLEMENTARY_PROFILE.items() if len(cps) >= 2}
+    assert multi, (
+        "`_COMPLEMENTARY_PROFILE` 一個多對一集合都不剩 ⇒ MAC-01 缺陷本體迴歸："
+        f"mac-only 那一族又只能靠 linux 那一格短路放行。實得：{P._COMPLEMENTARY_PROFILE}"
     )
-    # 訊息必須指名**還缺哪一個**，不能只說「有缺口」——指不出來就沒有人知道要去量什麼
-    assert all(any(c in ln for ln in lines) for c in unregistered), lines
-    assert not any(c in ln for ln in lines for c in registered), (
-        f"已登記的剖面被列進缺口清單 ⇒ 反向假事實：{lines}"
+
+    # ── ① 真表 iff：對每一列，缺口行的有無與內容都必須與登記狀態逐格對上 ──────
+    # 🔴 R83 複審收斂（SA-02）：判準加上**第二種**成因後，本層的 iff 也必須跟著加寬。
+    # 原本的等式是「缺口行 ⟺ 有互補剖面未量測」，而 SA-02 證出的病灶是另一向：**宣告的
+    # 承接者已量測、卻在平台語意上一支都跑不到**（darwin 的家填成 linux）。那一向在舊等式
+    # 下會被判成「全量測卻仍報＝假缺口」——**一個真紅被這支鎖的訊息說成假紅**，而下一個人
+    # 最省力的處置就是把新判準拆掉。故等式改為「缺口行 ⟺ 有未量測 **或** 有某個非得有的
+    # 平台在這一列裡連候選都沒宣告」。
+    for prof, counterparts in P._COMPLEMENTARY_PROFILE.items():
+        registered = [c for c in counterparts if P.profile_registered(c)]
+        unregistered = [c for c in counterparts if not P.profile_registered(c)]
+        homeless = sorted(P.required_home_platforms(P._platform_of(prof))
+                          - {P._platform_of(c) for c in counterparts})
+        gap = _complementary_gap_lines(prof)
+        assert bool(gap) == bool(unregistered or homeless), (
+            f"{prof}：缺口行的有無與登記狀態不一致——unregistered={unregistered}、"
+            f"homeless={homeless}、gap={gap}。有未量測卻不報＝MAC-01 短路迴歸；"
+            "有平台完全未宣告卻不報＝SA-02 假綠迴歸；兩者皆無卻仍報＝假缺口"
+        )
+        for c in unregistered:
+            assert any(c in ln for ln in gap), (
+                f"{prof}：缺口行沒指名 `{c}`——只說「有缺口」而指不出要去量什麼，"
+                f"就沒有人接得住這個交棒。實得：{gap}"
+            )
+        for platform in homeless:
+            assert any(platform in ln for ln in gap), (
+                f"{prof}：缺口行沒指名平台 `{platform}`——它是標籤語意算出來「非得有人"
+                f"承接」的那一個，指不出來就沒有人接得住這個交棒。實得：{gap}"
+            )
+        for c in registered:
+            assert not any(c in ln for ln in gap), (
+                f"{prof}：已登記的 `{c}` 被列進缺口清單 ⇒ 反向假事實。實得：{gap}"
+            )
+
+    # ── ② 合成一列走「≥2 且半登記」那個分支（真表今天走不到它）────────────────
+    # 🔴 R83 獨立驗證輪加固：這一對互補剖面的**名字與登記狀態也是合成的**。
+    # 前一版是從真表裡 `next()` 挑「一個真的已量、一個真的未量」——理由是「不脫離現實」，
+    # 但那讓本層又繫回磁碟狀態：等 `AutoClaude/tests@linux+*` 那兩列被量出來（豁免表逐字
+    # 寫著取得配方＝act 映像跑 pytest，是排程中的下一步），表裡就再也挑不出「未量」的那一個，
+    # `next()` 直接拋 StopIteration ⇒ 本支轉紅**且訊息是空的**（實測逐字只有 `StopIteration`）。
+    # 那正是本支這一輪被改寫的原因（測試釘住磁碟狀態、過期時指不出路），不可以在修它的
+    # 同一支裡復發——尤其這一次連「請改寫本支」那句話都不會印出來。
+    # 受測物仍然是真的 `skip_target_report`／`profile_registered`：後者讀的就是下面被
+    # monkeypatch 的那兩張天花板表（與本檔 darwin 那一支的降級注入分支同一個手法），
+    # 合成的只有「剖面叫什麼名字」這一格，而判準的形狀（`all` 不是 `any`）與名字無關。
+    measured = "tools/tests@synth-with-ceiling"
+    unmeasured = "tools/tests@synth-without-ceiling"
+    zero_ceiling = dict.fromkeys(P.SKIP_GROUPS, 0)
+    monkeypatch.setitem(P._RUNTIME_SKIP_CEILING, measured, zero_ceiling)
+    monkeypatch.setitem(P._RUNTIME_SKIP_CEILING_MAX, measured, zero_ceiling)
+    assert P.profile_registered(measured), "合成基底壞了：`measured` 那一格應該算已登記"
+    assert not P.profile_registered(unmeasured), (
+        "合成基底壞了：`unmeasured` 那一格應該算未登記"
     )
+    synthetic = "tools/tests@freebsd"   # 刻意不在真表裡：不動任何現存列的語意
+    assert synthetic not in P._COMPLEMENTARY_PROFILE
+    monkeypatch.setitem(P._COMPLEMENTARY_PROFILE, synthetic, (measured, unmeasured))
+    gap = _complementary_gap_lines(synthetic)
+    assert gap, (
+        f"半登記的多對一集合（已量 `{measured}` ／未量 `{unmeasured}`）整組被放行 ⇒ "
+        "MAC-01 迴歸（判準退回 `any` 短路）"
+    )
+    assert any(unmeasured in ln for ln in gap), gap
+    assert not any(measured in ln for ln in gap), (
+        f"已登記的 `{measured}` 被列進缺口清單 ⇒ 反向假事實：{gap}"
+    )
+
+
+def test_a_measured_counterpart_that_cannot_run_them_is_still_a_gap(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """🔴 R83 四方複審（SA-02／SA falsified #1）的缺陷本體之鎖：**「已登記」≠「跑得到」**。
+
+    WHY（Rule 9：這一支要在什麼商業語意變動時紅）：R82／MAC-01 把判準從「有沒有宣告互補
+    剖面」改成「**每一個**宣告的互補剖面都有人量過」，於是判準只剩下**量測**這一個維度。
+    R83 在 mac 真機首次量到 `tools/tests@darwin` 並把它的互補剖面宣告成 `tools/tests@linux`
+    ——而 mac 上被 skip 的那 44 支**全部**是 `[WINDOWS-NATIVE-ONLY]`（本輪 12 支檔實跑
+    （讀數見 ONBOARDING.md §7 表②），述詞是 `os.name != "nt"`，linux 上
+    `os.name == "posix"` ⇒ **linux 一支都跑不到**。因為 linux 剖面「已登記」，
+    `skip_target_report('tools/tests@darwin', …)` 回空 list＝已達標 ⇒ 唯一能為「兩平台
+    聯集才是零」作證的報告者被那一筆登記親手關掉（與 MAC-01 修掉的短路同型、方向相反）。
+
+    修法不是把資料改對就算——下一輪照樣可以再填錯一次，而且填錯是靜默的。判準改為由
+    **標籤語意**（`_TAG_HOME_PLATFORMS`：`[WINDOWS-NATIVE-ONLY]` 的家只有 win32、
+    `[MAC-NATIVE-ONLY]` 只有 darwin、`[POSIX-NATIVE-ONLY]` 是 darwin 或 linux）算出
+    「這個平台非得有哪些平台來承接」，再與手寫表宣告到的平台對帳。本支釘住三件事：
+      ① 推導本身有鑑別力（三個平台各自算出來的需求不同，且不是空集合也不是全集）；
+      ② 今天 `tools/tests@darwin` 的答案是**真的且可稽核的**（宣告到 win32、該剖面已量測
+         ⇒ 回空 list 才是誠實的「已達標」，不是短路）；
+      ③ **注入 R83 原版的錯誤宣告（只有 linux）必須紅**——沒有這一半，判準是綠的還是沒有
+         鑑別力就分不出來（本 repo 對「鎖還在但恆綠」已有大量判例）。
+    """
+    # ── ① 推導的鑑別力：三個平台各自的需求都不同，且都不是 trivial 的空集合／全集 ──
+    assert P.required_home_platforms("darwin") == {"win32"}, (
+        "mac 上被 skip 的 platform 群只可能是 `[WINDOWS-NATIVE-ONLY]`（mac-only 與 "
+        "POSIX-generic 在 mac 上本來就會跑）⇒ 唯一承接得住的是真 Windows。"
+        f"實得：{P.required_home_platforms('darwin')}"
+    )
+    assert P.required_home_platforms("win32") == {"darwin", "linux"}
+    assert P.required_home_platforms("linux") == {"win32", "darwin"}
+
+    # ── ② 今天的答案為真且可稽核：darwin 宣告到一個**平台為 win32 且已量測**的剖面 ──
+    homes = P._COMPLEMENTARY_PROFILE["tools/tests@darwin"]
+    assert [c for c in homes if P._platform_of(c) == "win32" and P.profile_registered(c)], (
+        "`tools/tests@darwin` 的互補剖面裡沒有任何**已量測的 win32 剖面** ⇒ 那 44 支 "
+        f"`[WINDOWS-NATIVE-ONLY]` 今天沒有人承接，判準不得回空當已達標。實得：{homes}"
+    )
+    assert not _complementary_gap_lines("tools/tests@darwin"), (
+        "宣告已覆蓋 win32 且該剖面已量測，卻仍報缺口 ⇒ 假缺口（反向假事實一樣貴）"
+    )
+
+    # ── ③ 反向鑑別力：注入 R83 原版的錯誤宣告 ⇒ 必須紅，且必須指名缺的是 win32 ────
+    monkeypatch.setitem(P._COMPLEMENTARY_PROFILE, "tools/tests@darwin",
+                        ("tools/tests@linux",))
+    gap = _complementary_gap_lines("tools/tests@darwin")
+    assert gap, (
+        "把 darwin 的家填回 `tools/tests@linux`（已量測、但 `os.name != \"nt\"` 在那裡"
+        "同樣成立、44 支一支都跑不到）之後判準仍然回空 ⇒ SA-02 假綠迴歸：判準又只在問"
+        "「量過沒有」而不問「跑得到沒有」"
+    )
+    assert any("win32" in ln for ln in gap), (
+        f"缺口行沒指名 win32——指不出「該去哪裡承接」就沒有人接得住這個交棒。實得：{gap}"
+    )
+
+
+#: 「宣告的承接者在平台層根本跑不到」的機械形態。判準是**充要**的而不是保守估計：
+#: 互補剖面 `c` 對剖面 `prof` 有用 ⟺ 存在某個標籤，它的家不含 `prof` 的平台（所以在
+#: `prof` 上會被 skip）、卻含 `c` 的平台（所以在 `c` 上跑得到）⟺
+#: `_platform_of(c) ∈ required_home_platforms(_platform_of(prof))`。落在外面的那一格就是
+#: 一筆**今天為假的資料**，不是「多寫一格比較保險」。
+def _counterparts_that_cannot_run_them() -> list[str]:
+    """純函式：表裡有哪幾格宣告了跑不到的平台。回空 list ＝整張表的每一格今天都為真。"""
+    bad: list[str] = []
+    for prof, counterparts in P._COMPLEMENTARY_PROFILE.items():
+        needed = P.required_home_platforms(P._platform_of(prof))
+        bad += [f"{prof} → `{c}`（平台 {P._platform_of(c)} 不在需求 {sorted(needed)} 內）"
+                for c in counterparts if P._platform_of(c) not in needed]
+    return bad
+
+
+def test_a_counterpart_that_cannot_run_them_may_not_sit_in_the_table_either(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """🔴 R83 獨立驗證輪補洞：SA-02 的收斂版只抓「少宣告」，抓不到「多宣告」。
+
+    WHY（Rule 9：這一支要在什麼語意變動時紅）：SA-02 的缺陷本體是**表裡有一句今天為假的
+    話**——darwin 上那 44 支 `[WINDOWS-NATIVE-ONLY]` 被宣告成「由 linux 承接」，而
+    `os.name != "nt"` 在 linux 同樣成立、一支都跑不到；假話造成了假綠。收斂版把判準改成
+    「需求平台 − **已宣告**平台」的差集，於是把 win32 **替換**成 linux 會紅
+    （`test_a_measured_counterpart_that_cannot_run_them_is_still_a_gap` ③ 釘住那一向）。
+
+    但 SA 原本開的處方是**並列**（`("tools/tests@linux", "tools/tests@win32")`），差集在那個
+    狀態下是空的。本輪實測：並列版 `skip_target_report('tools/tests@darwin', census44)`
+    回 `[]` ⇒ **那句假話可以原封不動住回表裡而沒有任何東西轉紅**。這正是該模組自己的判例
+    逐字寫著的形態（「反向假事實與漏報同樣貴」），也正是收斂者用來駁回 SA 處方的那個理由
+    ——判準必須真的守得住那個理由，否則駁回的依據只存在於散文裡。
+
+    為什麼判準住在測試、不住在 `skip_target_report`：後者刻意**不接任何閘門的 rc**
+    （模組註解逐字：「今天必然有缺口，把它接上 rc 只會製造一個所有人都學會忽略的常紅」），
+    加在那裡只會多印一行 advisory、不會紅。另一半理由是這條規則是**資料表的不變量**、
+    不需要在執行期存在；而 `tools/lib/skip_group_policy.py` 現值 399／上限 400（餘裕 1 行），
+    把它塞進去會逼著再壓縮一次那個檔（本輪已因同一條線把 4 個 docstring 改成 `#`）。
+    """
+    assert _counterparts_that_cannot_run_them() == [], _counterparts_that_cannot_run_them()
+
+    # ── 紅向自證 (a)：SA 原處方（linux 與 win32 並列）——差集判準對它結構上失明 ─────
+    with monkeypatch.context() as mp:
+        mp.setitem(P._COMPLEMENTARY_PROFILE, "tools/tests@darwin",
+                   ("tools/tests@linux", "tools/tests@win32"))
+        assert not _complementary_gap_lines("tools/tests@darwin"), (
+            "本支存在的前提是「差集判準對並列版失明」。若它現在自己會報缺口，說明 "
+            "`skip_target_report` 已涵蓋這一向 ⇒ 請把本支併回去，不要讓同一件事有兩個家"
+        )
+        assert any("→ `tools/tests@linux`" in b for b in _counterparts_that_cannot_run_them()), (
+            "把 `tools/tests@linux` 並列進 darwin 的承接者，卻沒有任何東西轉紅 ⇒ 表裡可以"
+            f"住一句今天為假的話。實得：{_counterparts_that_cannot_run_them()}"
+        )
+    # ── 紅向自證 (b)：把剖面自己列為自己的承接者（`platform` 群在那裡本來就會 skip）──
+    with monkeypatch.context() as mp:
+        mp.setitem(P._COMPLEMENTARY_PROFILE, "tools/tests@win32",
+                   ("tools/tests@linux", "tools/tests@darwin", "tools/tests@win32"))
+        assert any("→ `tools/tests@win32`" in b for b in _counterparts_that_cannot_run_them()), (
+            "自我承接（`X` 的互補剖面填了 `X` 自己）是這一族最省力的假綠寫法，必須被抓到。"
+            f"實得：{_counterparts_that_cannot_run_them()}"
+        )
+
+
+def test_every_platform_group_tag_has_a_home_platform() -> None:
+    """🔴 R83 獨立驗證輪補洞：推導的**分母是手寫的**，而漏一個標籤是靜默的。
+
+    WHY（Rule 9）：SA-02 的收斂把「誰承接得住」從手寫改成由 `_TAG_HOME_PLATFORMS` 推導，
+    這是對的方向——但那張表的**鍵**仍然完全手寫，而 `platform` 群的權威成員住在
+    `_TAG_GROUP`（值＝`SKIP_GROUP_PLATFORM`）。兩邊不一致時**沒有任何東西會說話**：
+    `required_home_platforms()` 只是少算一族需求 ⇒ `homeless` 差集變小 ⇒ 缺口行少印一個
+    平台，而判準照樣回綠。這正是本 repo 一路在治的「分母是手寫清單、失明是靜默的」形態
+    （R71 起的判例：鎖還在、判準還在、測試全綠）。
+
+    判準取**相等**而不是包含，兩個方向各有代價：
+      · 少一個鍵 ⇒ 新增的平台族（日後若有 `[BSD-NATIVE-ONLY]` 之類）整片失明；
+      · 多一個鍵 ⇒ 把不屬於 `platform` 群的標籤（`[DEBT]`／`[ENV-DISABLED]` 這種**可歸零**
+        的）算成「非得由別的平台承接」，會憑空造出假需求、逼出永遠關不掉的假缺口。
+    """
+    platform_tags = {t for t, g in P._TAG_GROUP.items() if g == P.SKIP_GROUP_PLATFORM}
+    assert set(P._TAG_HOME_PLATFORMS) == platform_tags, (
+        "`_TAG_HOME_PLATFORMS` 的鍵與 `platform` 群的權威成員（`_TAG_GROUP`）不一致 ⇒ "
+        "`required_home_platforms()` 算出來的需求集合是錯的，而它錯的時候不會有人說話。"
+        f"缺：{platform_tags - set(P._TAG_HOME_PLATFORMS)}"
+        f"／多：{set(P._TAG_HOME_PLATFORMS) - platform_tags}"
+    )
+    # 每一個「家」都必須是真的有執行者的平台，否則「非得由它承接」是一句接不住的空話
+    accounted = {P._platform_of(p) for p in P._FULL_SUITE_RUNNERS}
+    for tag, homes in P._TAG_HOME_PLATFORMS.items():
+        assert homes, (
+            f"{tag} 一個家都沒有 ⇒ 它在每個平台上都會被 skip、卻永遠不會被任何一列要求承接"
+        )
+        assert set(homes) <= accounted, (
+            f"{tag} 的家 {homes} 含不在 `_FULL_SUITE_RUNNERS` 平台集合 {sorted(accounted)} "
+            "內的平台——推導出來的需求會指向一個沒有任何執行者的平台，那是接不住的交棒"
+        )
 
 
 def test_ci_platform_coverage_is_accounted_for() -> None:
@@ -922,24 +1165,97 @@ def test_the_nightly_runner_profile_is_the_one_that_can_actually_be_measured() -
     assert "nightly_latest.log" in exempt, f"豁免理由沒寫出取得管道：{exempt!r}"
 
 
-def test_the_darwin_full_suite_runner_is_on_the_books_with_a_recipe() -> None:
-    """🔴 R82（MAC-01）：darwin 有一個真的會跑整棵樹的 job，它必須進分母。
+#: 「可跑的配方」的機械形態：至少指名一支真的跑得起來的載具／可抄的產物。
+#: 只認這四種副檔名是刻意的——`_HANDOVER_POINTER_RE` 已經在管「有沒有承接帳本列」，
+#: 這裡管的是另一件事：**那一列到底要下什麼指令**。散文式的「以後再量」兩者都滿足不了。
+_RECIPE_ARTIFACT_RE = re.compile(r"[\w./-]+\.(?:py|ps1|sh|log)\b")
 
-    `macos-compat-ci.yml` 的 macOS smoke job 逐字 `run: python3 tools/run_root_unittests.py`
-    ——一個貨真價實的 full-suite darwin 執行者，卻從來不在 `_FULL_SUITE_RUNNERS` 裡 ⇒
-    26 支 `[MAC-NATIVE-ONLY]` 連「有沒有人量過」都問不出來。誠實登記＝分母升、分子不動
-    （雙單邊設計，登記缺口本身不得有代價）。
+
+def _recipeless_exemptions() -> list[str]:
+    """純函式：`_UNMEASURED_RUNNER_PROFILES` 裡哪幾列的豁免理由**不構成可跑的配方**。
+
+    回空 list ＝每一個還沒量到的剖面都寫出了「跑哪一支」＋「census 怎麼接」。
     """
-    assert "tools/tests@darwin" in P._FULL_SUITE_RUNNERS
-    assert "tools/tests@darwin" in P._UNMEASURED_RUNNER_PROFILES, (
-        "darwin 進了分母卻沒有具名豁免 ⇒ `ci_platform_coverage_problems()` 會紅"
+    bad: list[str] = []
+    for profile, why in P._UNMEASURED_RUNNER_PROFILES.items():
+        if not _RECIPE_ARTIFACT_RE.search(why):
+            bad.append(f"{profile}：沒指名任何可跑的載具／可抄的產物 → {why!r}")
+        elif "census" not in why:
+            bad.append(f"{profile}：沒寫出量到之後 census 怎麼接 → {why!r}")
+    return bad
+
+
+def test_the_darwin_runner_graduated_and_every_remaining_gap_still_has_a_recipe(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """🔴 R82（MAC-01）立案、R83 畢業：darwin 已由「登記的缺口」轉成「量到的天花板」。
+
+    R82 的原始缺陷：`macos-compat-ci.yml` 的 macOS smoke job 逐字
+    `run: python3 tools/run_root_unittests.py`＝一個貨真價實的 full-suite darwin 執行者，
+    卻不在 `_FULL_SUITE_RUNNERS` 裡 ⇒ 26 支 `[MAC-NATIVE-ONLY]` 連「有沒有人量過」都
+    問不出來。R82 只做到誠實登記（分母升、分子不動）；R83 在 mac 真機跑完
+    `python tools/run_root_unittests.py`、把它印出的 `[skip census]` 逐格填進
+    `_RUNTIME_SKIP_CEILING{,_MAX}`，darwin 自此**有阻斷式天花板**。
+
+    🔴 **為什麼要改寫（誠實劃界）**：本支 R82 版斷言的是 `tools/tests@darwin`
+    **在** `_UNMEASURED_RUNNER_PROFILES` 裡＝「darwin 還沒人量過」，那是**狀態**而非性質，
+    量到了就必然為假（它的訊息也已預告：「darwin 進了分母卻沒有具名豁免 ⇒ 會紅」）。
+    原始意圖「未量測的剖面不得只是一個空缺口，必須有具名配方」**沒有過期**——它只是
+    不再屬於 darwin，而該落到 `_UNMEASURED_RUNNER_PROFILES` 剩下的每一列身上。故改寫成：
+
+      ① **畢業是完整的、而且被棘輪扣住**：darwin 仍在分母、兩張天花板表都有它、
+         且**已從豁免表移除**（留著就是把有人守的寫成沒人守——`ci_platform_coverage_problems`
+         第④向管的正是這個反向假事實）。降級（拔掉天花板）必須當場紅，
+         這由本支的注入分支現地證明，不靠 `_MEASURED_RUNNERS_MIN` 這個常數被人記得改。
+      ② **配方規則量化到整張豁免表**（原意圖的新家）：每一列都要寫出「跑哪一支」
+         （可跑的 `.py`／`.ps1`／`.sh`／可抄的 `.log`）＋「census 怎麼接」。
+         🔴 刻意**不**斷言豁免表非空——全部畢業是好事，而「誠實登記缺口不得有代價」
+         的對偶是「把缺口清空也不得有代價」。表空掉時①與注入分支仍有鑑別力。
+      ③ 豁免表不得留下**不在分母裡**的殘列：`ci_platform_coverage_problems()` 是以分母
+         為迴圈的，一列豁免掛在沒人跑的剖面上會被它整格略過，於是那句「還沒量」永遠
+         沒有人來還——與 R82 抓到的 `+nopg+solo`（帳上有、世界上沒有）同型。
+    """
+    darwin = "tools/tests@darwin"
+    # ① 畢業完整性
+    assert darwin in P._FULL_SUITE_RUNNERS, (
+        "darwin 又從分母裡消失了——它消失時不會有任何紅燈（分母沒了，缺口也跟著看不見）"
     )
-    exempt = P._UNMEASURED_RUNNER_PROFILES["tools/tests@darwin"]
-    assert "run_root_unittests.py" in exempt, (
-        f"豁免理由沒寫出 R83 該跑什麼指令：{exempt!r}——沒有配方的交棒等於沒交"
+    assert darwin in P._RUNTIME_SKIP_CEILING, f"{darwin} 沒有基線天花板"
+    assert darwin in P._RUNTIME_SKIP_CEILING_MAX, (
+        f"{darwin} 只進了基線表、沒進 MAX 表 ⇒ `profile_registered()` 仍為 False，"
+        "天花板實際上停在 advisory。半套畢業不算畢業"
     )
-    assert "skip census" in exempt, f"豁免理由沒寫出該抄哪一行：{exempt!r}"
-    assert P.ci_platform_coverage_problems() == []
+    assert P.profile_registered(darwin)
+    assert darwin not in P._UNMEASURED_RUNNER_PROFILES, (
+        "darwin 已經量到天花板了，卻還掛在未量測豁免表裡——把有人守的寫成沒人守，"
+        "與反向一樣是假事實（`ci_platform_coverage_problems()` 第④向）"
+    )
+    # ② 配方規則的新家＝整張豁免表
+    assert _recipeless_exemptions() == [], _recipeless_exemptions()
+    # ③ 豁免表不得有不在分母裡的殘列
+    orphans = set(P._UNMEASURED_RUNNER_PROFILES) - set(P._FULL_SUITE_RUNNERS)
+    assert orphans == set(), (
+        "豁免表有剖面不在 `_FULL_SUITE_RUNNERS` 裡 ⇒ 以分母為迴圈的涵蓋帳會整格略過它，"
+        f"那句「還沒量」自此無人承接。殘列：{orphans}"
+    )
+
+    # ── 紅向自證（三種退步，每一種都必須當場被抓到）──────────────────────────
+    # (a) 把 darwin 的天花板拔掉（＝退回 advisory）：涵蓋帳必須紅，不能靜默降級
+    with monkeypatch.context() as mp:
+        mp.delitem(P._RUNTIME_SKIP_CEILING, darwin)
+        mp.delitem(P._RUNTIME_SKIP_CEILING_MAX, darwin)
+        assert not P.profile_registered(darwin)
+        assert any(darwin in prob for prob in P.ci_platform_coverage_problems()), (
+            "拔掉 darwin 的天花板卻沒有任何東西轉紅 ⇒ 這道棘輪對「悄悄降級」失明"
+        )
+    # (b) 只拔 MAX 表（半套降級，最像沒事的那一種）
+    with monkeypatch.context() as mp:
+        mp.delitem(P._RUNTIME_SKIP_CEILING_MAX, darwin)
+        assert any(darwin in prob for prob in P.ci_platform_coverage_problems())
+    # (c) 豁免理由退化成散文（沒有可跑的載具）：配方判準必須抓到
+    with monkeypatch.context() as mp:
+        mp.setitem(P._UNMEASURED_RUNNER_PROFILES, darwin, "以後再量。DEF-101-960")
+        assert any(darwin in b for b in _recipeless_exemptions()), _recipeless_exemptions()
 
 
 def test_the_third_tree_is_inside_the_skip_governance_frame() -> None:

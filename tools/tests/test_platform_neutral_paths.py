@@ -42,6 +42,7 @@ import tokenize
 import unittest
 from collections.abc import Callable
 from pathlib import Path, PurePosixPath, PureWindowsPath
+from typing import NamedTuple
 
 _TESTS_DIR = Path(__file__).resolve().parent
 _REPO_ROOT = _TESTS_DIR.parents[1]
@@ -3477,21 +3478,41 @@ _WORKTREE_EOL_POLICY: dict[str, str] = worktree_eol_policy(
 _WORKTREE_EOL_FLOORS: dict[str, int] = {".ps1": 108, ".sh": 134}
 
 
-def parse_ls_files_eol(stdout: str) -> list[tuple[str, str]]:
-    """`git ls-files --eol` 的輸出 → [(路徑, 工作樹行尾)]。純函式，供紅綠自證共用。
+class EolRecord(NamedTuple):
+    """`git ls-files --eol` 的一列。三欄分屬**兩個不同的平面**，別混用（R82）：
+
+    `index`＝blob 的行尾（content-addressed ⇒ 每台機器同一個值，**會跨平台傳染**）；
+    `worktree`＝這一棵 checkout 的位元組（機器狀態，隨 checkout 歷史走，不傳染）。
+    """
+
+    path: str
+    index: str
+    worktree: str
+    attr: str
+
+
+def parse_ls_files_eol_records(stdout: str) -> list[EolRecord]:
+    """`git ls-files --eol` 的輸出 → 逐列三欄。純函式，供紅綠自證共用。
 
     格式（當回合實測逐字）：`i/lf    w/crlf  attr/text eol=crlf    \t<path>`
     ——三個欄位以**空白**右補、彼此不以 tab 分隔，整行只有**一個** tab 且它就在
     路徑前面。`attr/` 欄本身含空白（`text eol=crlf`），所以不能用空白切欄。
     """
-    rows: list[tuple[str, str]] = []
+    rows: list[EolRecord] = []
     for line in stdout.splitlines():
         head, sep, path = line.partition("\t")
         if not sep or not path.strip():
             continue
-        match = re.search(r"\bw/(\S*)", head)
-        rows.append((path.strip(), match.group(1) if match else ""))
+        index, worktree = (re.search(rf"\b{col}/(\S*)", head) for col in "iw")
+        rows.append(EolRecord(path.strip(), index.group(1) if index else "",
+                              worktree.group(1) if worktree else "",
+                              head.partition("attr/")[2].strip()))
     return rows
+
+
+def parse_ls_files_eol(stdout: str) -> list[tuple[str, str]]:
+    """（工作樹欄的薄取用）`[(路徑, 工作樹行尾)]`——解析知識只有上面那**一個**家。"""
+    return [(r.path, r.worktree) for r in parse_ls_files_eol_records(stdout)]
 
 
 def path_suffix(path: str) -> str:
@@ -4492,10 +4513,35 @@ class TestXplatInjectionMatrix(unittest.TestCase):
 #    判準失效時失敗訊息會把現值印出來（同本檔 `_scan_roots()` 的既有慣例）。
 
 
-# ── 共用：tracked 檔案的工作樹行尾（現查一次）─────────────────────────────────
+# ── 共用：tracked 檔案的行尾三欄（現查一次）───────────────────────────────────
+# 🔴 **R82 訂正本段最要緊的一件事：量測面選錯了平面**（本段三支判準在 mac 上同時必紅）。
+# 原設計只量「本機工作樹的實際位元組」，並把某一台 Windows 機器上量到的 220／3956／30
+# 直接寫成常數 ⇒ 換一棵樹（換平台、或同平台重新 clone）結構上就對不起來。
+#
+# 當回合在 mac 上以兩個受控 repo 實測（scratchpad，非本 repo），把兩件事分開了：
+#   探針 A｜blob 內就帶 CRLF（`i/crlf`）：`git clone` 出來的新樹**照樣是 CRLF**，
+#     連 `-c core.autocrlf=true` 的 clone 也一樣（`xxd` 首行逐字 `…python3 0d0a`）。
+#     ⇒ 這一半**會跨機器、跨平台傳染**；POSIX 上 shebang 檔就是 rc=127。
+#   探針 B｜blob 是 LF、只有工作樹被就地改成 CRLF（`i/lf w/crlf`）：`git status` 空白
+#     （結構上看不見），而全新 clone 拿到的是 **LF**（`…python3 0a`）。
+#     ⇒ 這一半**不傳染**，它是「這一棵 checkout 的歷史」，不是平台常數。
+# 探針 B 的 `-c core.autocrlf=true` 對照組同時證偽了「Windows 就會這樣」：`.gitattributes`
+# 對 `.py` 明文宣告 `eol=lf`，而明文宣告**勝過** `core.autocrlf` ⇒ 今天在 Windows 全新
+# clone 一樣拿到 LF。Windows 那台的四千支是**陳舊 checkout 殘留**（那些檔在
+# `.gitattributes` 宣告它們之前就已 checkout，git 不會因為屬性改變而重新 smudge），
+# 把它寫成常數＝把一台機器的歷史寫成平台事實，與 `DEF-101-778` 同型。
+#
+# ⇒ 本段自 R82 起**分成兩個平面，各自有牙**（刻意不加 skip——skip 等於那個平台從此零
+#   覆蓋，而下面 ① 在兩個平台都真的在跑）：
+#   ① **blob（`i/` 欄）＝平台中立閘門**：blob 是 content-addressed，每台機器同一個值。
+#      零容忍、雙向精確，mac 與 Windows 讀到同一個答案 ⇒ 這才是「在 mac 開發不會給
+#      Windows 製造落差、反之亦然」真正要鎖的那一面。
+#   ② **工作樹（`w/` 欄）＝本機健康度**：機器狀態。判準改成「0（乾淨 checkout）或落在
+#      欠債帶內」——**0 在任何平台都達得到**，於是 mac 綠、Windows 帶著它的存量也綠，
+#      而任一側**新增**漂移都紅。上下界不再是「平台欄」，是「那台機器的存量上界」。
 @functools.lru_cache(maxsize=1)
-def tracked_eol_rows() -> tuple[tuple[str, str], ...]:
-    """全庫 tracked 檔的 `(路徑, 工作樹行尾)`。取數管道壞掉即 fail-loud。
+def tracked_eol_records() -> tuple[EolRecord, ...]:
+    """全庫 tracked 檔的行尾三欄。取數管道壞掉即 fail-loud。
 
     與 `TestWorktreeEolMatchesPolicy._ls_files_eol()` 的差別：那一支只問政策表內那幾個
     副檔名（`--` pathspec 過濾），本支要**全庫**——③ 的規模判斷不能只看腳本族。
@@ -4505,7 +4551,30 @@ def tracked_eol_rows() -> tuple[tuple[str, str], ...]:
         raise AssertionError(
             f"git ls-files --eol 失敗（rc={proc.returncode}；stderr={proc.stderr.strip()!r}）"
             "——本段每一道判準的輸入沒了，不是「沒有違規」")
-    return tuple(parse_ls_files_eol(proc.stdout))
+    return tuple(parse_ls_files_eol_records(proc.stdout))
+
+
+@functools.lru_cache(maxsize=1)
+def tracked_eol_rows() -> tuple[tuple[str, str], ...]:
+    """`(路徑, 工作樹行尾)`——`tracked_eol_records()` 的工作樹欄投影（平面②的輸入）。"""
+    return tuple((r.path, r.worktree) for r in tracked_eol_records())
+
+
+#: blob 側「已正規化」的合法值：`lf`＝checkin 正規化做過了；`none`＝無換行；
+#: `-text`＝二進位（git 不轉換，行尾無從談起）。其餘（`crlf`／`mixed`）＝正規化被繞過。
+#: 空字串**刻意不在**這一集合裡：那代表解析壞掉，而 fail-open 比違規本身更貴。
+_NORMALIZED_BLOB_EOL = frozenset({"lf", "none", "-text"})
+
+
+def blob_eol_offenders(records: tuple[EolRecord, ...]) -> list[str]:
+    """blob 內容仍帶 CR 的 tracked 檔——**會跨平台傳染**的那一半（見上方探針 A）。
+
+    為何 `eol=lf` 與 `eol=crlf` 兩族共用**同一條**判準（＝為何不需要平台欄）：`text`
+    屬性的 checkin 正規化一律把 blob 存成 LF，`eol=crlf` 只作用在 checkout（本 repo
+    136 支 `.ps1` 當回合實測正是 `i/lf w/crlf`）⇒「blob 必須已正規化」對兩族同時成立。
+    這也是它可以零容忍的原因：今天全庫 `i/crlf` 與 `i/mixed` 各 0 支，兩平台同值。
+    """
+    return sorted(r.path for r in records if r.index not in _NORMALIZED_BLOB_EOL)
 
 
 def eol_drift_rows(
@@ -4541,9 +4610,27 @@ def debt_band_verdict(label: str, actual: int, ceiling: int) -> str | None:
                 "修法不是把上限調高——以宣告的行尾重存那幾支檔（`.py` 是 LF）")
     floor = ceiling - max(8, ceiling // 7)
     if actual < floor:
-        return (f"{label}：實測 {actual} 已低於重釘下界 {floor}（上限 {ceiling}）⇒ 欠債"
-                f"已清掉一大截，請把上限重釘為 {actual}，否則下一次退化會被舊值遮住")
+        # R82 訂正訊息：本判準現在會在**乾淨的樹上**看到小數字（見 `checkout_local_debt_
+        # verdict`），舊訊息只寫「欠債已清掉」會把「新冒出來的漂移」誤導成「該重釘」。
+        return (f"{label}：實測 {actual} 落在 0 與重釘下界 {floor} 之間（上限 {ceiling}）"
+                f"⇒ 兩種讀法都要有人動作：(a) 本來乾淨的樹上冒出了 {actual} 支漂移，"
+                f"請以宣告的行尾重存它們；(b) 存量真的被清掉一大截，請把上限重釘為 "
+                f"{actual}，否則下一次退化會被舊值遮住")
     return None
+
+
+def checkout_local_debt_verdict(label: str, actual: int, ceiling: int) -> str | None:
+    """**機器狀態**版的欠債判準：`0` 一律綠，其餘走 `debt_band_verdict` 的雙邊帶。
+
+    🔴 0 為何要單獨開一格（R82；這正是本段判準在 mac 上必紅的成因）：工作樹行尾是
+    「這一棵 checkout 的歷史」，全新 clone 在**任何平台**都是 0（見上方探針 B 及其
+    `core.autocrlf=true` 對照組）。舊判準把某一台機器的存量當成**下界**，於是一棵乾淨
+    的樹被判成「欠債清掉了、請重釘為 0」——而照它的指示重釘，就是把紅原封不動搬到對面
+    平台。0 是這個量的**理想值**不是異常值，故不觸發重釘；0 以外的任何值仍要落在帶內
+    ⇒ 乾淨的樹上冒出 1 支漂移照樣紅（下界的 slack 是留給並行工作包順手改到存量的，
+    而 0 這一側沒有存量可被順手改，所以那裡不需要、也不該有 slack）。
+    """
+    return None if actual == 0 else debt_band_verdict(label, actual, ceiling)
 
 
 # ── ②③ 活躍面原始碼行尾止血 ───────────────────────────────────────────────────
@@ -4551,9 +4638,13 @@ def debt_band_verdict(label: str, actual: int, ceiling: int) -> str | None:
 #: 刻意不擴到 `.md`／`.yaml`：本表這一列的主題是「原始碼行尾」，而 `.md` 的 CRLF 不會
 #: 讓任何東西跑不起來——擴大主題會讓欠債數字失去可讀性，也讓止血點失焦。
 _ACTIVE_SOURCE_EOL_SUFFIX = ".py"
-#: 活躍面 `.py` 行尾漂移的欠債上限（落地當回合實測值；雙邊帶見 `debt_band_verdict`）。
+#: 🔴 下面兩個數字是**平面②（本機工作樹）**的上界，語意自 R82 起精確化為「R80 落地那台
+#: 機器上的陳舊 checkout 存量」——**不是**「Windows 欄的值」，也不是任何平台常數（同一
+#: 台 Windows 重新 clone 就是 0；見上方探針 B 的對照組）。因此它們只當**上界**用：
+#: 超過＝新增漂移（紅）；0＝乾淨 checkout（綠，任何平台都達得到）；兩者之間＝雙邊帶。
+#: 平台中立的那道零容忍閘門在平面①（`blob_eol_offenders`），兩平台讀到同一個答案。
 _ACTIVE_PY_EOL_DEBT_CEILING = 220
-#: 凍結面（v0.01~v0.29）`.py` 行尾漂移數——**不判、只登記**。Copy-on-Evolve 禁改；
+#: 凍結面（v0.01~v0.29）`.py` 工作樹行尾漂移的同款上界。Copy-on-Evolve 禁改；
 #: 這個數字的用途是讓「為什麼不一次全轉 LF」變成可查的量，而不是散文。
 _FROZEN_PY_EOL_DEBT_CEILING = 3956
 
@@ -4572,7 +4663,27 @@ class TestActiveSourceEolIsRatchetedSeparatelyFromTheFrozenSurface(unittest.Test
     def _declared(self) -> dict[str, str]:
         return declared_eol(_GITATTRIBUTES_PATH.read_text(encoding="utf-8"))
 
+    def test_no_tracked_blob_carries_a_carriage_return(self) -> None:
+        """①（R82 新增）：**平台中立**的那道閘門——每台機器讀到同一個答案。
+
+        這是三支判準裡唯一「在 mac 上做的判斷，對 Windows 也逐字成立」的一條：blob 是
+        content-addressed，`git clone` 不會改它。一支 blob 帶了 CR，**每一個** clone
+        （含 `core.autocrlf=true` 的 Windows clone）都會拿到 CR ⇒ POSIX 上 shebang 檔
+        rc=127、`.sh` 噴 `$'\\r'`。零容忍：今天全庫 0 支，沒有存量要辯護。
+        """
+        records = tracked_eol_records()
+        self.assertGreater(len(records), 20000,
+                           f"tracked 列數異常少（{len(records)}）⇒ 取數管道疑似壞掉")
+        offenders = blob_eol_offenders(records)
+        self.assertEqual(
+            offenders, [],
+            "以下 tracked 檔的 **blob** 行尾未正規化（`i/crlf`／`i/mixed`），"
+            "或 `i/` 欄根本解析不出來。前者會隨 clone 傳到每一台機器、每一個平台；"
+            "修法＝`git add --renormalize <檔>` 後 commit：\n" + "\n".join(offenders[:40]),
+        )
+
     def test_active_surface_python_eol_does_not_grow(self) -> None:
+        """②：本機工作樹的健康度。0 或帶內皆綠，新增漂移必紅（見上方平面②的 WHY）。"""
         rows = tracked_eol_rows()
         self.assertGreater(len(rows), 20000,
                            f"tracked 列數異常少（{len(rows)}）⇒ 取數管道疑似壞掉")
@@ -4584,10 +4695,10 @@ class TestActiveSourceEolIsRatchetedSeparatelyFromTheFrozenSurface(unittest.Test
         frozen_py = [p for p in frozen_side if p.endswith(_ACTIVE_SOURCE_EOL_SUFFIX)]
         problems = [
             v for v in (
-                debt_band_verdict("活躍面 .py 行尾漂移", len(active_py),
-                                  _ACTIVE_PY_EOL_DEBT_CEILING),
-                debt_band_verdict("凍結面 .py 行尾漂移", len(frozen_py),
-                                  _FROZEN_PY_EOL_DEBT_CEILING),
+                checkout_local_debt_verdict("活躍面 .py 工作樹行尾漂移", len(active_py),
+                                            _ACTIVE_PY_EOL_DEBT_CEILING),
+                checkout_local_debt_verdict("凍結面 .py 工作樹行尾漂移", len(frozen_py),
+                                            _FROZEN_PY_EOL_DEBT_CEILING),
             ) if v is not None
         ]
         self.assertEqual(
@@ -4599,15 +4710,32 @@ class TestActiveSourceEolIsRatchetedSeparatelyFromTheFrozenSurface(unittest.Test
         )
 
     def test_the_repo_wide_scale_is_measured_not_quoted(self) -> None:
-        """③：規模是量出來的。全庫漂移的**絕大多數**必須落在凍結面。
+        """③：規模是量出來的——而反空轉的載體換成了**在兩個平台都非零**的正控。
 
-        這一條守的是一個修法方向：只要凍結面仍是大宗，「全部就地轉 LF」就不是修法而是
-        打破 Copy-on-Evolve。哪天這個比例反轉（活躍面成為大宗），本測試會紅，而那個紅燈
-        的意思是「該重新決定修法了」，不是「有人弄壞了什麼」。
+        🔴 R82 訂正：原版斷言「全庫工作樹漂移 > 0」，那個斷言的前提是「跑它的機器帶著
+        陳舊 checkout」，在乾淨的樹（每一台 mac、每一個新 clone，含 Windows）上結構性
+        為 0 ⇒ 它量到的是機器，不是 repo。**意圖保留**（取數管道壞掉不得靜默回 0），
+        載體換成 `.ps1`：該族宣告 `eol=crlf`，任何平台 checkout 都是 CRLF，所以
+        「`w/` 欄讀不到任何 crlf」只可能是解析壞了。比例那一半只在真有漂移時才問。
         """
-        frozen_side, active_side = eol_drift_rows(tracked_eol_rows(), self._declared())
+        records = tracked_eol_records()
+        self.assertGreater(
+            sum(1 for r in records if r.worktree == "crlf"), 0,
+            "`w/` 欄一支 crlf 都讀不到 ⇒ 解析管道壞了（`.ps1` 族宣告 eol=crlf，"
+            "任何平台的 checkout 都必須是 CRLF），不是「沒有 CRLF」")
+        self.assertTrue(
+            all(r.index for r in records),
+            "`i/` 欄有列解析不出來 ⇒ 平面①的零容忍判準會對那幾列恆綠（fail-open）")
+        frozen_side, active_side = eol_drift_rows(
+            tuple((r.path, r.worktree) for r in records), self._declared())
         total = len(frozen_side) + len(active_side)
-        self.assertGreater(total, 0, "全庫零漂移？請確認取數管道（本判準不該恆綠）")
+        if total == 0:
+            # 乾淨 checkout：「凍結面該不該就地轉 LF」這個修法問題不存在。此時仍要問一件
+            # 平面②推導不出來的事——`eol=crlf` 那一族即使 blob 帶 CR 也不會算成工作樹
+            # 漂移（checkout 本來就給 CRLF），所以零漂移**不蘊含**零 blob 汙染。
+            self.assertEqual(blob_eol_offenders(records), [],
+                             "工作樹零漂移但 blob 仍帶 CR ⇒ 平面①才是這一輪的主戰場")
+            return
         ratio = len(frozen_side) / total
         self.assertGreater(
             ratio, 0.8,
@@ -4634,6 +4762,35 @@ class TestActiveSourceEolIsRatchetedSeparatelyFromTheFrozenSurface(unittest.Test
         # slack 有下界：小欠債面掉 1 支不該逼人重釘（否則並行工作包一動就紅）
         self.assertIsNone(debt_band_verdict("x", 9, 10))
 
+    def test_a_clean_checkout_is_green_but_one_stray_file_is_not(self) -> None:
+        """②的紅綠自證（R82 的修法本體）：0 綠、1 紅、上界內綠、上界外紅。
+
+        中間那一條是這次修法**不是**「把常數改成 mac 量到的 0」的證據：真的把下界重釘
+        成 0，Windows 那台帶著存量的樹會在 220 這一格轉紅；真的只放行 0，乾淨的樹上冒
+        出一支 CRLF 又會靜靜地過。四個點合起來才是「兩平台各自都有牙」。
+        """
+        self.assertIsNone(checkout_local_debt_verdict("x", 0, 220))     # 乾淨 checkout
+        self.assertIn("(a)", checkout_local_debt_verdict("x", 1, 220) or "")  # 乾淨樹冒新漂移
+        self.assertIsNone(checkout_local_debt_verdict("x", 220, 220))   # 陳舊樹的存量
+        self.assertIn("新增", checkout_local_debt_verdict("x", 221, 220) or "")
+
+    def test_the_blob_criterion_is_not_vacuous(self) -> None:
+        """①的紅綠自證（合成列，不動磁碟）：只放行已正規化的 blob。
+
+        含一條 fail-open 的反向釘：`i/` 欄解析不出來（空字串）必須算違規——否則哪天
+        `git ls-files --eol` 換了輸出格式，這道零容忍閘門會在「零命中」下全綠。
+        """
+        def rec(index: str) -> EolRecord:
+            return EolRecord("x.py", index, "lf", "text eol=lf")
+        self.assertEqual(blob_eol_offenders((rec("lf"), rec("none"), rec("-text"))), [])
+        for bad in ("crlf", "mixed", ""):
+            with self.subTest(index=bad):
+                self.assertEqual(blob_eol_offenders((rec(bad),)), ["x.py"])
+        # 解析層自證：`i/` 與 `w/` 不得互串（兩欄語意完全不同，串了就是量錯平面）
+        line = "i/crlf  w/lf    attr/text eol=lf      \ttools/x.py\n"
+        self.assertEqual(parse_ls_files_eol_records(line),
+                         [EolRecord("tools/x.py", "crlf", "lf", "text eol=lf")])
+
 
 # ── ④-a shebang ⇒ 必須是 LF ──────────────────────────────────────────────────
 # 缺陷本體：`#!/usr/bin/env python3` 加上 CRLF 行尾，POSIX kernel 會把 `\r` 一起當成
@@ -4647,16 +4804,68 @@ class TestActiveSourceEolIsRatchetedSeparatelyFromTheFrozenSurface(unittest.Test
 # 🔴 判準刻意是**shebang × 行尾**的交集而不是各自一半：單看行尾，凍結面上萬支要判
 # （不可能）；單看 exec bit，今天零違規（已有鎖）。交集才是「一補另一半就炸」的那一組，
 # 而它小到可以逐檔具名。
-#: 活躍面（含 LATEST）今天仍成立的站點——**具名、雙向精確**：多一筆＝新增同型缺陷，
-#: 少一筆＝已修好（請連同本集合一起刪，那是寫下來的動作）。
+#
+# 🔴 **R82 訂正本段的量測面**（同上方平面①／②的裁決，這裡是它的第二個消費者）：
+# 上面那 30 支是**某一台機器的工作樹**上量到的，換一棵 checkout 就不成立（mac 上 0 支），
+# 於是「雙向精確比對」這個原本正確的紀律，套在一個隨機器變的量上就變成必紅。分成兩層：
+#   ①-shebang｜**blob 側**（`shebang_blob_sites`）：零容忍、雙向精確、每台機器同值。
+#     這才是會傳染的那一半——blob 帶 CR 的 shebang 檔，clone 到哪台都是 rc=127。
+#   ②-shebang｜**工作樹側**（`shebang_non_lf_sites`）：機器狀態 ⇒ 改為**子集合**語意
+#     （不得多出登記外的站點；少掉不判，因為「少掉」在乾淨的樹上是常態而非成就）。
+#     子集合語意會讓清單腐爛，補救不是回頭用精確比對，而是
+#     `test_every_registered_debt_entry_still_has_a_platform_neutral_reason`：
+#     每一筆登記的**理由**必須仍然成立，而理由本身是機器中立的（仍是 tracked、
+#     仍宣告 eol=lf、首行仍是 shebang）。理由沒了就得刪，這樣清單不會靠慣性活著。
+#: 活躍面（含 LATEST）在**帶著陳舊 checkout 的那台機器**上仍成立的站點。上界語意見上。
 _SHEBANG_NON_LF_ACTIVE_DEBT: dict[str, str] = {
     "AISDLC_SDD/AISDLC_SDD_v0.30/tools/arch_fitness/arch_fitness.py": (
         "LATEST 版（非凍結、可改）。修法＝以 LF 重存該檔；未於本輪動手的理由是它不在"
         "本包的檔案所有權內，已列入交棒"
     ),
 }
-#: 凍結面（v0.01~v0.29）同型站點數——Copy-on-Evolve 禁改，只登記不判。
+#: 凍結面（v0.01~v0.29）同型站點數的**上界**——Copy-on-Evolve 禁改，只登記不判。
 _SHEBANG_NON_LF_FROZEN_DEBT = 29
+
+
+def _starts_with_shebang(path: Path) -> bool:
+    """**工作樹那一份**的首兩個位元組是不是 `#!`。
+
+    🔴 這一支只該用在「問題本身就問工作樹位元組」的地方（＝`shebang_non_lf_sites`：
+    行尾漂移是 checkout 的性質）。凡是要主張「這個答案換一台機器也成立」的judgement，
+    一律改問 `_blob_starts_with_shebang()`——本函式對「index 有、工作樹沒有」（稀疏
+    checkout／`GIT_INDEX_FILE` 注入）回 `False`，那是**機器狀態**而不是檔案的性質。
+    """
+    try:
+        with path.open("rb") as handle:
+            return handle.readline(256).startswith(b"#!")
+    except OSError:
+        return False
+
+
+def _blob_starts_with_shebang(repo_root: Path, rel: str) -> bool:
+    """**blob**（index 那一份）的首兩個位元組是不是 `#!`——機器中立的那個答案。
+
+    🔴 為何非得跟工作樹版分家（當回合注入實測抓到的 fail-open）：以 `GIT_INDEX_FILE`
+    注入一支汙染 blob、而工作樹沒有對應檔案時，讀工作樹的版本 `open()` 失敗 ⇒ 靜默
+    判成「不是 shebang 檔」而放行。稀疏 checkout 與 index 有／工作樹沒有的狀態都會走到
+    那一支，且失效是**無聲**的。blob 由 `git clone` 逐位元組複製 ⇒ 每台機器同一個答案。
+    """
+    proc = git_paths.run(repo_root, "cat-file", "blob", f":{rel}")
+    return proc.returncode == 0 and proc.stdout.startswith("#!")
+
+
+def shebang_blob_sites(records: tuple[EolRecord, ...], repo_root: Path) -> list[str]:
+    """blob 帶 CR **且**首行是 `#!` 的 tracked 檔——會跨平台傳染的那一半。
+
+    候選面先由 `i/` 欄收斂（今天 0 支）再逐支問 blob：全庫 27k 支都 `git cat-file`
+    是分鐘級，而帶 CR 的 blob 本來就是要判零的那一族，所以這個代價是有界的。
+    shebang 刻意向 **blob** 問而不是向工作樹那一份問，理由見 `_blob_starts_with_shebang`。
+    """
+    return sorted(
+        record.path for record in records
+        if record.index not in _NORMALIZED_BLOB_EOL
+        and _blob_starts_with_shebang(repo_root, record.path)
+    )
 
 
 def shebang_non_lf_sites(
@@ -4670,14 +4879,7 @@ def shebang_non_lf_sites(
     frozen_side: list[str] = []
     active_side: list[str] = []
     for path, worktree in rows:
-        if worktree in ("lf", "none", ""):
-            continue
-        try:
-            with (repo_root / path).open("rb") as handle:
-                head = handle.readline(256)
-        except OSError:
-            continue
-        if not head.startswith(b"#!"):
+        if worktree in ("lf", "none", "") or not _starts_with_shebang(repo_root / path):
             continue
         (frozen_side if _is_frozen_sdd_path(path) else active_side).append(path)
     return frozen_side, active_side
@@ -4686,19 +4888,89 @@ def shebang_non_lf_sites(
 class TestShebangImpliesLfLineEndings(unittest.TestCase):
     """`#!` ＋ 非 LF ＝ POSIX 上 `env: '…\\r': No such file or directory`（見上方 WHY）。"""
 
+    def test_no_tracked_blob_pairs_a_shebang_with_a_carriage_return(self) -> None:
+        """①-shebang（R82 新增）：平台中立、零容忍、雙向精確。
+
+        這一條在 mac 上判出來的結果對 Windows 逐字成立，反之亦然——因為它問的是 blob，
+        而 blob 不隨 checkout 變。它才是「exec bit 被補對那天會不會炸」真正的守門者。
+        """
+        self.assertEqual(
+            shebang_blob_sites(tracked_eol_records(), _REPO_ROOT), [],
+            "以下 tracked 檔的 blob 同時具備 `#!` 與 CR ⇒ 每一個 clone（含 Windows）"
+            "都會拿到它，POSIX 上 `./<檔>` 必 rc=127（`env: '…\\r'`）。"
+            "修法＝`git add --renormalize <檔>` 後 commit",
+        )
+
     def test_no_new_shebang_file_carries_a_non_lf_line_ending(self) -> None:
+        """②-shebang：本機工作樹側 ⇒ **子集合**語意（見上方 R82 訂正段）。"""
         frozen_side, active_side = shebang_non_lf_sites(tracked_eol_rows(), _REPO_ROOT)
         self.assertEqual(
-            sorted(active_side), sorted(_SHEBANG_NON_LF_ACTIVE_DEBT),
-            "活躍面 shebang×非 LF 站點集合與登記不符。多出來的是**新增**的同型缺陷"
-            "（請以 LF 重存該檔）；少掉的是已修好（請自 `_SHEBANG_NON_LF_ACTIVE_DEBT` "
-            "刪除——欠債清單不得靠慣性活著）",
+            sorted(set(active_side) - set(_SHEBANG_NON_LF_ACTIVE_DEBT)), [],
+            "活躍面冒出登記外的 shebang×非 LF 站點＝**新增**的同型缺陷，"
+            "請以 LF 重存該檔（`git add --renormalize` 只修 blob，修不了工作樹）",
         )
-        self.assertEqual(
+        self.assertLessEqual(
             len(frozen_side), _SHEBANG_NON_LF_FROZEN_DEBT,
-            f"凍結面同型站點由 {_SHEBANG_NON_LF_FROZEN_DEBT} 變成 {len(frozen_side)}"
-            "——凍結面理應不動；若是 LATEST 版號推進造成整批位移，請重釘這個數字",
+            f"凍結面同型站點由上界 {_SHEBANG_NON_LF_FROZEN_DEBT} 漲到 {len(frozen_side)}"
+            "——凍結面理應不動；若是 LATEST 版號推進造成整批位移，請重釘這個上界",
         )
+
+    def test_every_registered_debt_entry_still_has_a_platform_neutral_reason(self) -> None:
+        """子集合語意的補救：登記的每一筆，其**理由**必須仍然成立。
+
+        沒有這一條，`_SHEBANG_NON_LF_ACTIVE_DEBT` 就會靠慣性活著——檔案被刪、被改名、
+        或 shebang 被拿掉之後，子集合判準永遠不會說話。三個條件全部是**機器中立**的
+        （tracked／宣告 eol=lf／**blob** 首行 `#!`），所以這一條在 mac 與 Windows 上
+        同樣有牙。
+
+        🔴 第三個條件刻意向 **blob** 問而不是向工作樹問（R82 複驗補正）：本條的失敗訊息
+        叫人「把該筆自欠債表刪掉」，而工作樹版對「index 有、工作樹沒有」（稀疏 checkout）
+        回 `False` ⇒ 那會是一個**假紅，且它建議的動作會就地縮小掃描面**——被刪掉的那一筆
+        正是 Windows 那台仍然成立的欠債。縮面的表徵是「看起來更乾淨」，沒有人會發現。
+        """
+        tracked = {r.path: r for r in tracked_eol_records()}
+        declared = declared_eol(_GITATTRIBUTES_PATH.read_text(encoding="utf-8"))
+        stale: list[str] = []
+        for rel in _SHEBANG_NON_LF_ACTIVE_DEBT:
+            record = tracked.get(rel)
+            if record is None:
+                stale.append(f"{rel}：已不是 tracked 檔")
+            elif declared.get(path_suffix(rel)) != "lf":
+                stale.append(f"{rel}：`.gitattributes` 已不再對它宣告 eol=lf")
+            elif not _blob_starts_with_shebang(_REPO_ROOT, rel):
+                stale.append(f"{rel}：blob 首行已不是 `#!` ⇒ 這一族的危害對它不成立")
+        self.assertEqual(stale, [],
+                         "登記理由已消失，請把該筆自欠債表刪掉：\n" + "\n".join(stale))
+
+    def test_the_two_shebang_readers_diverge_exactly_on_the_machine_state_case(self) -> None:
+        """自證：`_blob_starts_with_shebang` 與 `_starts_with_shebang` 不是同義詞。
+
+        本檔把 shebang 的判讀拆成 blob 版與工作樹版，理由是「index 有、工作樹沒有」時
+        兩者答案不同——若哪天有人把其中一支改成轉呼另一支（看起來像去重），這條拆分就
+        白做了，而**兩個消費端都會靜默失去它要的那個語意**。所以在真的 git repo 上把
+        那個分歧點造出來：兩者必須一個 True、一個 False。
+
+        刻意用臨時 repo 而不是本 repo：本 repo 的工作樹是完整的，這個分歧點在這裡
+        造不出來——「在本機重現不了」不是跳過的理由，是換一個造得出來的量測面的理由。
+        """
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            for argv in (("init", "-q", "."), ("config", "user.email", "t@t"),
+                         ("config", "user.name", "t")):
+                self.assertEqual(git_paths.run(root, *argv).returncode, 0)
+            probe = root / "probe.py"
+            probe.write_bytes(b"#!/usr/bin/env python3\nprint(1)\n")
+            self.assertEqual(git_paths.run(root, "add", "probe.py").returncode, 0)
+            self.assertTrue(_starts_with_shebang(probe), "前提：工作樹版此刻看得到 shebang")
+            self.assertTrue(_blob_starts_with_shebang(root, "probe.py"),
+                            "前提：blob 版此刻也看得到 shebang")
+            probe.unlink()  # ＝稀疏 checkout／index 有而工作樹沒有的那個狀態
+            self.assertFalse(_starts_with_shebang(probe),
+                             "工作樹版在檔案不存在時必須回 False——那正是它的 fail-open")
+            self.assertTrue(
+                _blob_starts_with_shebang(root, "probe.py"),
+                "blob 版被工作樹的缺席影響到了 ⇒ 它已不是機器中立的答案，"
+                "而所有靠它主張『這一條在另一個平台同樣有牙』的判準都跟著變成假話")
 
     def test_the_criterion_reads_bytes_not_decoded_text(self) -> None:
         """判準自證：真的寫一支 CRLF shebang 檔，確認在位元組層看得到 `\\r`。
@@ -4727,7 +4999,11 @@ class TestShebangImpliesLfLineEndings(unittest.TestCase):
         modes = index_modes(_REPO_ROOT)
         self.assertTrue(modes, "git ls-files -s 取數失敗 ⇒ 本條無從判定")
         frozen_side, active_side = shebang_non_lf_sites(tracked_eol_rows(), _REPO_ROOT)
-        executable = [p for p in frozen_side + active_side
+        # R82：兩個平面一起收。只收工作樹側的話，這一條在乾淨的樹上（mac、任何新 clone）
+        # 掃描面是空集合＝恆綠；blob 側那一半才是換台機器也還在的那一組。
+        candidates = frozen_side + active_side + shebang_blob_sites(
+            tracked_eol_records(), _REPO_ROOT)
+        executable = [p for p in sorted(set(candidates))
                       if modes.get(p) == _INDEX_MODE_EXEC]
         self.assertEqual(
             executable, [],

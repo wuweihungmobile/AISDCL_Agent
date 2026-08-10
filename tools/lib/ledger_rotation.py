@@ -35,9 +35,10 @@ except ImportError:  # pragma: no cover - 另一種 sys.path 形態，兩者擇�
 #     **相等**斷言 ⇒ 帳本一長，那支測試**要求**你把常數調高。
 # ⇒ 相等自檢在這件事上是幫兇不是守衛；缺的不是「常數 vs 實測」，是「常數 vs 它自己的上一個值」。
 # 取值紀律：每個元素都是**當時的實測值**，歷史不得回填、不得改寫。
-OVERSIZE_ROW_CEILING_HISTORY: tuple[int, ...] = (105, 101, 98, 85)
+OVERSIZE_ROW_CEILING_HISTORY: tuple[int, ...] = (105, 101, 98, 85, 83)
 OVERSIZE_ROW_EXCESS_CEILING_HISTORY: tuple[int, ...] = (
     162282, 147944, 147455, 146210, 143303, 140957, 138938, 138936, 123867,
+    121758,
 )
 # 🔴 誠實劃界：本序列只收錄 `check_defect_log_crossref.py` 註解**自己留下證據**的那幾次
 # （34→28 見該檔 R80 包 C 段、17 見「第六次轉動」段、6 為 R82 實測）。第三～第五次轉動的
@@ -68,6 +69,7 @@ _SEALED_HISTORY_PREFIXES: dict[str, tuple[int, ...]] = {
     "OVERSIZE_ROW_CEILING": (105, 101, 98, 85),
     "OVERSIZE_ROW_EXCESS_CEILING": (
         162282, 147944, 147455, 146210, 143303, 140957, 138938, 138936, 123867,
+    121758,
     ),
     "_UNPINNED_HANDOVER_CEILING": (34, 28, 17, 6),
 }
@@ -109,12 +111,12 @@ def seal_table_digest(seals: Mapping[str, tuple[int, ...]]) -> str:
 
 #: 封印表的**總長度下限**（＝三條封印的元素數總和）。只准上升：史料長大時封印跟著長，
 #: 這個數字就跟著調上去；任何讓它變小的動作都是「把封印砍短」。
-_SEAL_TOTAL_MIN_LEN = 17
+_SEAL_TOTAL_MIN_LEN = 18
 
 #: 封印表的內容摘要（`seal_table_digest(_SEALED_HISTORY_PREFIXES)` 的當回合實測值）。
 #: 追加新值到某條封印是合法動作，但必須在**同一次變更內**把上面那個長度與這個摘要一起
 #: 重釘——不重釘即紅，故「改封印」在結構上不可能是無聲的。
-_SEAL_TABLE_SHA256 = "dc64893d149bd199"
+_SEAL_TABLE_SHA256 = "cf5d1708d31ea5cf"
 
 
 def seal_table_problems(

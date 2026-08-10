@@ -60,6 +60,11 @@
 # 測試縫（fake 環境驗證用；正常安裝不需理會）：IMN_LAUNCHCTL 可指向 stub 以驗證
 # launchctl 呼叫序列而不真載入（本 repo 紀律：真安裝屬使用者 ops，須另行核可；
 # install／--uninstall 路徑自 R68-M64 起亦以此縫受行為鎖覆蓋，不再只有 --status）；
+# IMN_PMSET 同理，指向 stub 以驗證 WakeToRun／NextRunTime 兩列的**判讀邏輯**而不依賴
+# 跑測試那台機器的電源排程狀態（R82：這兩列的輸入是**機器狀態**不是 plist 內容——
+# 沒有這道縫，「健康 plist ⇒ 每列皆 ✅」這個斷言就同時要求「這台 Mac 剛好排過
+# pmset repeat」，而那是多數 Mac 的**非**常態 ⇒ 該鎖在真 mac 上結構性必紅，
+# 且它從來沒在真 mac 上跑綠過——R82 之前每一輪都在 Windows，整組被 skipUnless 跳過）；
 # IMN_NOW 可凍結 report_heartbeat 的「現在」為指定 epoch 秒，供跨站等價鎖在 8.0 天
 # 整秒邊界做**確定性**比對（兩份實作各自呼叫 date/time.time 會落在不同秒，該邊界
 # 上會 flaky——R67-M40）。IMN_NOW 只影響心跳年齡，不影響覆蓋連續性的日期換算。
@@ -87,6 +92,7 @@ LABEL="com.autoclaude.nightly"
 PLIST_DIR="${HOME}/Library/LaunchAgents"
 PLIST_PATH="${PLIST_DIR}/${LABEL}.plist"
 LAUNCHCTL="${IMN_LAUNCHCTL:-launchctl}"
+PMSET="${IMN_PMSET:-pmset}"
 # 心跳過期門檻（天）：與 tools/dev_start.py _HEARTBEAT_MAX_AGE_DAYS 同值同語意。
 HEARTBEAT_MAX_AGE_DAYS=8
 # 覆蓋連續性回看天數（R67-F29）。刻意短於載體的 14 天 RunId log 輪替窗口
@@ -241,36 +247,69 @@ _plist_raw() {
 # 取證規則要的正是那個「值」，不是某個指令的 rc。
 # 🔴 需提權（sudo）⇒ 本腳本**只偵測、只印出逐字可執行的指令，不代跑**（同
 #   install_windows_nightly.ps1 對四項排程設定的處置精神，差別在這一項要人工確認）。
-# 🔴 未在 mac 實測（R82 在 Windows 完成）：R83 的落實指令＝`pmset -g sched` 與  round-label-ok
-#   （具名豁免：這是**交棒**，不是自稱本批屬於下一輪；交棒必須指名承接輪，改寫成 R82
-#    就把「還沒驗」講成「已經驗」，那是本檔真正要避免的假宣稱）
-#   `launchctl print gui/$(id -u)/com.autoclaude.nightly` 各跑一次。
+# 🔴 R82 本節首版在 Windows 上寫成、未在 mac 實測，當時交棒給下一輪補驗；**同一輪
+#   後段切到真 Mac 之後就地補驗完成**，並訂正了首版的兩處（交棒因此不再成立，
+#   故改寫成訂正紀錄而非待辦）：
+#   ① 判準字面值錯（見 PMSET_WAKE_EVENTTYPES 上方）；② 三態被摺成兩態（見 _pmset_available）。
 PMSET_WAKE_TIME="01:55:00"
 PMSET_WAKE_CMD="sudo pmset repeat wakeorpoweron MTWRFSU ${PMSET_WAKE_TIME}"
-# `pmset -g sched` 對「排程喚醒」那一列的固定字樣（man pmset）。
-PMSET_WAKE_MARK="wake or poweron"
+# `pmset -g sched` 把「重複性電源事件」印在這個標題下（pmset binary 內的字面值）。
+PMSET_REPEAT_HEADING="Repeating power events:"
+PMSET_ONESHOT_HEADING="Scheduled power events:"
+# 🔴 R82 訂正①（判準字面值）：R82 把字樣寫成 `wake or poweron` 並註明「man pmset」，
+#   但 man page 從頭到尾沒有 `-g sched` 的輸出範例，那是推測值。真 mac 實測：
+#     strings /usr/bin/pmset | grep -c "wake or poweron"   →  0
+#   ⇒ 那個字串在 pmset 裡根本不存在，子字串比對**恆不命中**：就算使用者真的照
+#   PMSET_WAKE_CMD 排了程，這兩列也會永遠印 ⚠️（假紅），而 --status 會叫他再排一次。
+#   pmset 實際印的是 com.apple.AutoWake.plist 裡 `eventtype` 的**原值**（binary 內的
+#   輸出樣板是 `  %s at %s %s`，本機 plutil -p 實查該 plist 確認 eventtype 就是那個 %s），
+#   其值域為 sleep／wake／poweron／shutdown／wakepoweron／wakeorpoweron。
+#   ⇒ 判準改押這個**詞彙表**（awk 逐 token 比對），不押任何一句推測出來的散文。
+PMSET_WAKE_EVENTTYPES="wakepoweron|wakeorpoweron|poweron"
 
-# `pmset -g sched` 全文；pmset 缺席或失敗一律回空字串（advisory 面絕不得中斷 --status）。
-_pmset_sched() {
-  command -v pmset >/dev/null 2>&1 || { echo ""; return 0; }
-  pmset -g sched 2>/dev/null || echo ""
+# 🔴 R82 訂正②（三態被摺成兩態）：舊版 `_pmset_sched` 把「pmset 不存在」與「pmset 在、
+#   但一件排程都沒有」都回成空字串，於是 `_pmset_repeat_state` 對後者印「無 pmset」。
+#   真 mac 實測：`command -v pmset` → /usr/bin/pmset，而 `pmset -g sched` 在無排程時的
+#   **正常**輸出就是 rc=0 ＋ 0 bytes ⇒ 那句「無 pmset」在絕大多數 Mac 上是一句假話，
+#   而且它指向一個假的成因（讀者會以為要去裝 pmset，實際要做的是跑 PMSET_WAKE_CMD）。
+#   三態必須各自可分辨：缺 pmset＝查不了／有 pmset 無排程＝未排定／有排程＝已排定。
+_pmset_available() {
+  command -v "${PMSET}" >/dev/null 2>&1
+}
+
+# 「重複性喚醒事件」那一行（＝ NextRunTime 對等憑證的值本身）；無則回空字串。
+# 🔴 只讀 PMSET_REPEAT_HEADING 那一段：舊版對 `-g sched` **全文**做比對，於是一則
+#   一次性的 wake 排程（住在 PMSET_ONESHOT_HEADING 段，macOS 自己就常年掛著幾則
+#   calaccessd／osanalytics 的 user-invisible wake）也會讓「已排定」為真 ⇒ 假綠。
+#   一次性事件跑完就沒了，撐不起「每天 02:00 前把機器叫醒」這個語意。
+# 🔴 誠實劃界（哪一道守衛在今天真的有鑑別力）：對「一次性事件不得算數」這件事，
+#   今天真正在擋的是 **tolower($1)** 這個**欄位位置**判準——重複段的輸出樣板是
+#   `  %s at %s %s`（$1＝eventtype），一次性段是 ` [%ld]  %s at %s`（$1＝`[0]`）
+#   ⇒ 一次性那行的 $1 結構上就不可能落在詞彙表裡。區段錨定是**縱深防禦**：拿掉它、
+#   只留欄位判準，測試仍會全綠（本輪實測過這個合成注入）。留著它的理由是意圖顯式化
+#   ＋ 萬一 pmset 改掉一次性那行的樣板（例如拿掉索引）時仍站得住；**但別把它當成
+#   有測試在守的東西**——會轉紅的是「退回全文子字串比對」那個形態，不是少了區段錨定。
+_pmset_repeat_wake_line() {
+  _pmset_available || { echo ""; return 0; }
+  "${PMSET}" -g sched 2>/dev/null | awk \
+    -v repeat_heading="${PMSET_REPEAT_HEADING}" \
+    -v oneshot_heading="${PMSET_ONESHOT_HEADING}" \
+    -v types="^(${PMSET_WAKE_EVENTTYPES})$" '
+      index($0, repeat_heading)  == 1 { section = "repeat"; next }
+      index($0, oneshot_heading) == 1 { section = "once";   next }
+      section == "repeat" && tolower($1) ~ types { print; exit }
+    ' || true
 }
 
 _pmset_repeat_state() {
-  _sched="$(_pmset_sched)"
-  if [ -z "${_sched}" ]; then echo "無 pmset"; return 0; fi
-  case "${_sched}" in
-    *"${PMSET_WAKE_MARK}"*) echo "已排定" ;;
-    *) echo "未排定" ;;
-  esac
+  if ! _pmset_available; then echo "無 pmset"; return 0; fi
+  if [ -n "$(_pmset_repeat_wake_line)" ]; then echo "已排定"; else echo "未排定"; fi
 }
 
 # NextRunTime 對等的**值**（憑證本身）。無則回 "(無)"。
 _pmset_next_wake_line() {
-  _sched="$(_pmset_sched)"
-  if [ -z "${_sched}" ]; then echo "(無 pmset)"; return 0; fi
-  _line="$(printf '%s\n' "${_sched}" | grep -i "${PMSET_WAKE_MARK}" | head -1 || true)"
-  _line="$(printf '%s' "${_line}" | tr -s ' ' | sed 's/^ //;s/ $//')"
+  if ! _pmset_available; then echo "(無 pmset)"; return 0; fi
+  _line="$(_pmset_repeat_wake_line | tr -s ' ' | sed 's/^ //;s/ $//')"
   if [ -z "${_line}" ]; then echo "(無)"; else echo "${_line}"; fi
 }
 
@@ -410,11 +449,16 @@ cmd_install() {
   #   WakeToRun                   ≙ pmset repeat wakeorpoweron     ← **不在 plist 裡**
   # 只有最後一項需要人工動作，所以它必須出現在 install 的輸出裡，而不是只躲在 --status。
   echo "   ── WakeToRun 對等（四項排程設定裡唯一還缺的一項）──"
-  if command -v pmset >/dev/null 2>&1; then
+  # R82：這裡改走同一道 ${PMSET} 測試縫（原本是裸 `pmset`）。理由不是潔癖——install
+  # 路徑自 R68-M64 起也受行為鎖覆蓋，留一支裸二進位就等於那條路徑仍會去讀跑測試那台
+  # 機器的真實電源排程，而那正是本輪要拆掉的「判準吃機器狀態」耦合。
+  if _pmset_available; then
     echo "   launchd 不會把睡著的 Mac 叫醒（它只在機器醒著時補跑），故 02:00 那一輪在闔蓋過夜時會延到開蓋才跑。"
     echo "   目前 pmset 排程："
-    pmset -g sched 2>/dev/null | sed 's/^/     /' || true
-    echo "   若上面沒有『${PMSET_WAKE_MARK}』那一列，請以提權身分執行（需 sudo，本腳本刻意不代跑）："
+    "${PMSET}" -g sched 2>/dev/null | sed 's/^/     /' || true
+    # R82：原文叫讀者去找『wake or poweron』那一列——那個字串在 pmset 裡不存在
+    # （見 PMSET_WAKE_EVENTTYPES 上方實測），照著找永遠找不到，於是每個人都會多排一次。
+    echo "   若上面的『${PMSET_REPEAT_HEADING}』段沒有 ${PMSET_WAKE_EVENTTYPES} 其中一種事件，請以提權身分執行（需 sudo，本腳本刻意不代跑）："
     echo "     ${PMSET_WAKE_CMD}"
     echo "   （${PMSET_WAKE_TIME} 比 02:00 早 5 分鐘，讓機器醒穩再觸發；設定後的憑證＝pmset -g sched 印出的時刻值）"
   else

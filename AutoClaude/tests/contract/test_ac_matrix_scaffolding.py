@@ -229,7 +229,9 @@ AC_MATRIX: dict[str, dict[str, str]] = {
 }
 
 
-#: 🔴 **存量債棘輪**：`target_test_file` 尚未在磁碟上存在的 AC 條目（本輪實測 4 筆）。
+#: 🔴 **存量債棘輪**：`target_test_file` 尚未在磁碟上存在的 AC 條目。
+#: （筆數刻意不寫在散文裡——那是會漂移的量測值，唯一量測入口是 `_pending_targets()`，
+#: 由 `test_pending_targets_match_the_ratchet` 逐筆比對；沿革見下方各輪註記。）
 #:
 #: 判準是**等值**而非「不得增加」，理由同 `tools/lib/skip_tag_policy.py` 各棘輪：只擋
 #: 一個方向的表會就地腐化（`MIN_TESTS` 腐化 11 輪是本 repo 已付過的學費）。等值判準的
@@ -239,11 +241,21 @@ AC_MATRIX: dict[str, dict[str, str]] = {
 #: 「`_runner_internals.py` / `_runner_compat.py` 皆不存在」，而那兩支檔早在 SD_06 W6
 #: （2026-05-18）就物理刪除了 ⇒ **受測條件多輪前就滿足，缺的只有那支斷言檔**。
 #: 建 `tests/contract/test_w6_deletion.py` 即轉綠，零風險。
-_AC_TARGET_PENDING: frozenset[str] = frozenset({
-    "AC3-4",   # tests/integration/test_concurrent_runs.py — W3 多 run 並存
-    "AC5-4",   # tests/integration/test_sigint_checkpoint.py
-    "AC6-3",   # tests/integration/test_config_schema_api.py
-})
+#:
+#: 🔴 本輪（承接輪次到期的那一輪）：3 → **0**，走的是出口①「把 target 檔建起來」，
+#: 不是出口②「再推一輪」。三筆各自的門檻在落地時都已經有可量測的受測對象，缺的同樣
+#: 只是那支斷言檔：
+#:   · AC3-4（5 run × abort 互不影響）→ `tests/integration/test_concurrent_runs.py`。
+#:     受測對象＝File 後端（`storage.mode` 預設值）的併發落盤與 abort 隔離。
+#:     既有的 `test_multi_run_resume_e2e.py::TestConcurrentRuns` 循序跑 InMemory 後端，
+#:     **結構上**表現不出這條 AC 要防的失效（互相覆寫／abort 後讀到別人的列）。
+#:   · AC5-4（≤ 2s 寫入完成）→ `tests/integration/test_sigint_checkpoint.py`。
+#:     受測對象＝真實 signal handler 內的持久化寫入。既有那支量的是 InMemory 的一次
+#:     dict 賦值 ⇒ 任何退化下都不可能超過 2s，那個「2s」是裝飾數字。
+#:   · AC6-3（openapi == 3.1.0 + ≥ 15 欄位）→ `tests/integration/test_config_schema_api.py`。
+#:     受測對象＝`ConfigResolver.openapi_schema()`（該端點的 HTTP 層尚不存在，
+#:     劃界寫在該檔檔頭，刻意不包成 skip——skip 只是把同一筆欠債換個地方掛著）。
+_AC_TARGET_PENDING: frozenset[str] = frozenset()
 
 #: 上表的 **shrink-only 天花板**（同 `_POSIX_TAG_RATCHET_CEILING` 的既有慣例）。
 #: 沒有它，等值判準的合法出口之一就是「把新的欠債加進上表」——鎖當場全綠，而欠債
@@ -251,11 +263,14 @@ _AC_TARGET_PENDING: frozenset[str] = frozenset({
 #: 本常數並在 PR 說明理由；那是一個會出現在 diff 裡、可被複審點名的決定。
 #: 🔴 R82：4 → 3（跟著上表一起下修——天花板不跟著降＝把剛還掉的欠債額度留著，
 #: 日後可無聲用回去；這句話是本檔 `test_pending_targets_match_the_ratchet` 自己寫的）。
-_AC_TARGET_PENDING_CEILING = 3
+#: 🔴 本輪：3 → **0**（同上，跟著上表一起下修）。天花板落到 0 之後，「新增一條指不到
+#: 檔的 AC」再也沒有任何額度可以無聲吸收——那正是 shrink-only 的終點狀態。
+_AC_TARGET_PENDING_CEILING = 0
 
-#: 🔴 R82 包 A2（DEBT-01）：剩下三筆 `[DEBT]` 的**承接輪次**單一真相源。
+#: 🔴 AC target `[DEBT]` 的**承接輪次**單一真相源（R82 包 A2／DEBT-01 立案；當時的分母是
+#: 剩下那三筆欠債，今天分母是 0——見本段末的本輪註記）。
 #:
-#: 缺陷本體（R82 掃描實測）：這三筆的 skip reason 逐字寫著「承接輪次 R82」——而 R82
+#: 缺陷本體（R82 掃描實測）：那三筆的 skip reason 逐字寫著「承接輪次 R82」——而 R82
 #: 就是**現在**。一個承接輪次寫著本輪的欠債，讀起來像「有人負責」，實際上沒有任何東西
 #: 會在那一輪到來時說話：`_EXEMPT_HANDOVER_RE`（`R\d{2,}`）只問「有沒有寫輪號」，
 #: 對「那個輪號已經過期了」結構上失明。於是它可以永遠寫著同一個數字。
@@ -263,7 +278,18 @@ _AC_TARGET_PENDING_CEILING = 3
 #: 修法是把輪號抽成常數，並由 `test_the_debt_handover_round_is_still_in_the_future`
 #: 拿帳本推得的**當前輪次**去比：承接輪一旦追平當前輪，這支就紅，逼出一個顯式決定
 #: （做掉它，或在 diff 裡把承接輪往後推並說明理由）。兩者都是決定，而現況兩者皆非。
-_AC_DEBT_HANDOVER_ROUND = 83
+#:
+#: 🔴 本輪把型別放寬成 `int | None`，並把「沒有欠債時必須是 `None`」做成**判準的第二個
+#: 方向**（不是豁免，見下）。理由是實測出來的：本輪走出口①把 `_AC_TARGET_PENDING`
+#: 清成 0 之後，這個常數的分母消失了，而原判準是無條件比較 ⇒ 只剩兩條路：
+#:   · 留一個數字在這裡 ⇒ 它管不到任何欠債，且**每一輪都會再度追平當前輪**，
+#:     於是每輪都要為零欠債做一次無意義的上修——那正是本常數 WHY 裡點名的
+#:     「裝飾字串」，只是換成由鎖每輪逼著人親手貼上去；
+#:   · 寫 `None`＝逐字說出「今天沒有任何 AC 欠債等人承接」。
+#: 後者才是真話，所以判準改成雙向：**有欠債 ⇒ 必須是還沒到的輪次（原斷言逐字保留）；
+#: 沒欠債 ⇒ 必須是 `None`**。同時多守住一個此前不存在的方向：新增一筆欠債卻沒有人
+#: 指定承接輪次（`None` ＋ 非空 pending）當場紅。三個方向都有紅綠自證，見該支 docstring。
+_AC_DEBT_HANDOVER_ROUND: int | None = None
 
 
 def _pending_targets() -> set[str]:
@@ -343,11 +369,16 @@ def test_ac_scaffolding_placeholder(ac_id: str, meta: dict[str, str]) -> None:
     """
     target = meta["target_test_file"]
     if not (_AC_ROOT / target).exists():
+        handover = (
+            f"承接輪次 R{_AC_DEBT_HANDOVER_ROUND}"
+            if _AC_DEBT_HANDOVER_ROUND is not None
+            else "承接輪次**尚未指定**（_AC_DEBT_HANDOVER_ROUND is None）"
+        )
         pytest.skip(
             f"[DEBT] AC {ac_id}（{meta['topic']}，{meta['wave']}）的真斷言落點尚未建立："
             f"AutoClaude/{target}。門檻＝{meta['threshold']}。"
-            f"承接輪次 R{_AC_DEBT_HANDOVER_ROUND}（帳本 DEF-101-960；輪號由本檔常數 "
-            f"_AC_DEBT_HANDOVER_ROUND 統一供給，追平當前輪即由 "
+            f"{handover}（帳本 DEF-101-960；輪號由本檔常數 "
+            f"_AC_DEBT_HANDOVER_ROUND 統一供給，追平當前輪或欠債無人承接即由 "
             f"test_the_debt_handover_round_is_still_in_the_future 轉紅）。"
             f"建好該檔後本 case 自動轉綠，並依 test_pending_targets_match_the_ratchet "
             f"的訊息下修 _AC_TARGET_PENDING／_AC_TARGET_PENDING_CEILING"
@@ -364,15 +395,36 @@ def test_the_debt_handover_round_is_still_in_the_future() -> None:
     寫輪號」，對「這個輪號已經到了、而且什麼都沒發生」結構上失明 ⇒ 同一個數字可以
     掛在那裡無限久，而每一輪讀到它的人都會以為下一輪有人負責。
 
-    判準：`_AC_DEBT_HANDOVER_ROUND` 必須 **>** 帳本推得的當前輪次
-    （`tools/check_defect_log_crossref.current_round()`，本 repo 對「現在是第幾輪」的
-    既有唯一真相源——刻意不寫死另一個常數，那正是它在治的病）。
-    追平的那一輪本支轉紅，逼出一個顯式決定：做掉它，或在 diff 裡把輪號往後推。
+    判準（本輪起**三個方向**，分母一律是 `_pending_targets()` 的磁碟實測，不是常數）：
+      ① 有欠債 ＋ 有指定輪號 ⇒ `_AC_DEBT_HANDOVER_ROUND` 必須 **>** 帳本推得的當前輪次
+         （`tools/check_defect_log_crossref.current_round()`，本 repo 對「現在是第幾輪」
+         的既有唯一真相源——刻意不寫死另一個常數，那正是它在治的病）。追平的那一輪
+         本支轉紅，逼出一個顯式決定：做掉它，或在 diff 裡把輪號往後推。**這一條的
+         斷言逐字未動**，它就是本支被寫下來的理由。
+      ② 有欠債 ＋ 輪號是 `None` ⇒ 紅。「有欠債而沒有人承接」此前結構上無人看得見
+         （原判準只比大小，`None` 這個狀態根本不存在），本輪連同 ③ 一起補上。
+      ③ **沒有欠債 ⇒ 輪號必須是 `None`**。這一條不是豁免而是收緊：欠債清空後，任何
+         留在這裡的數字都管不到任何東西，而且會**每一輪**再度追平當前輪 ⇒ 逼著人每輪
+         為零欠債做一次無意義的上修，那就是本檔一直在點名的「裝飾字串」，只是改成由
+         鎖親自逼著人貼上去。寫 `None` 是唯一的真話，而 ② 保證它不會被當成後門
+         （欠債一回來、沒人指定輪號就紅）。
 
     誠實劃界：帳本推不出輪次時（欄位改名／檔案搬走）本支 **skip 而非放行**——
-    「量不到」不等於「量到合格」，但也不該在別人改帳本格式時假紅。
+    「量不到」不等於「量到合格」，但也不該在別人改帳本格式時假紅。方向 ②／③ 不需要
+    帳本就判得出來，故刻意排在取帳本之前：載具壞掉時仍保有那兩個方向的鑑別力。
     """
     import sys  # noqa: PLC0415 — 只有本支需要動 sys.path
+
+    pending = _pending_targets()
+    if not pending:
+        assert _AC_DEBT_HANDOVER_ROUND is None, (
+            f"AC target 欠債實測為 0 筆，承接輪次卻還掛著 R{_AC_DEBT_HANDOVER_ROUND}"
+            "——沒有分母的輪號管不到任何東西，且每一輪都會再度追平當前輪，"
+            "於是每輪都得為零欠債做一次無意義的上修（＝本常數 WHY 點名的裝飾字串）。"
+            "正解：把 _AC_DEBT_HANDOVER_ROUND 設為 None，逐字說出「今天沒有欠債等人承接」。"
+            "欠債一旦回來，本支下面那個方向會要求你重新指定一個還沒到的輪次"
+        )
+        return
 
     tools_dir = _AC_ROOT.parent / "tools"
     if str(tools_dir) not in sys.path:
@@ -388,10 +440,17 @@ def test_the_debt_handover_round_is_still_in_the_future() -> None:
             "[TOOL-ABSENCE] 從缺陷帳本推不出當前輪次（「發現情境」欄格式已變？）"
             "——量不到 ≠ 量到合格，本支不在此情形下放行"
         )
+    assert _AC_DEBT_HANDOVER_ROUND is not None, (
+        f"AC target 欠債實測 {sorted(pending)} 筆，卻沒有任何人指定承接輪次"
+        "（_AC_DEBT_HANDOVER_ROUND is None）——「有欠債而沒有人承接」比"
+        "「承接輪次過期」更難看見：連一個會過期的數字都沒有。"
+        "正解：把它設成一個**還沒到**的輪次（當前輪 R"
+        f"{now}），並在同一個 commit 說明那筆欠債為什麼要留到那一輪"
+    )
     assert _AC_DEBT_HANDOVER_ROUND > now, (
         f"`[DEBT]` 的承接輪次 R{_AC_DEBT_HANDOVER_ROUND} 已經追平／落後於當前輪 R{now}"
         "——承接輪次到了卻什麼都沒發生，就是「有人負責」的假象。"
-        f"兩條合法出口：①把剩下的 target 檔建起來（{sorted(_AC_TARGET_PENDING)}，"
+        f"兩條合法出口：①把剩下的 target 檔建起來（{sorted(pending)}，"
         "門檻寫在 AC_MATRIX 的 threshold 欄）；②在同一個 commit 顯式上修 "
         "_AC_DEBT_HANDOVER_ROUND 並在 PR 說明為什麼又推遲一輪。"
         "🔴 不接受的第三條：把本支刪掉或改成不比較——那會讓輪號退回一個裝飾字串"

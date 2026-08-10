@@ -1873,6 +1873,23 @@ _REGISTRATION_BASELINE: dict[tuple[str, str], frozenset[str]] = {
     ("PreToolUse", ".claude/hooks/lint_powershell_command.py"): frozenset(
         {"PowerShell"}),
     ("PreToolUse", ".claude/hooks/block_bash_on_windows.py"): frozenset({"Bash"}),
+    # 🔴 R83 新增：毀滅性 git 指令阻斷器的**註冊面回填**（由並行的另一個包新增條目，
+    # `.claude/settings.json` 不在那個包的檔案所有權內時本表就會落後——同上方 R79 那格的
+    # 既有紀律，收輪者負責讓帳對得上）。
+    # 立案是本輪的真實事故：一個 subagent 在**六包並行共用的工作樹**上跑
+    # `git stash -q -u --keep-index`，瞬間清空 16 個修改檔 + 4 個未追蹤檔（含其他包正在
+    # 寫的檔），靠 `stash pop` 還原、未偵測到資料遺失——**但那是運氣不是設計**。
+    # 任務書當時已寫「不要 git add / commit / push」⇒ **禁令沒涵蓋到的那個動詞就是被踩的
+    # 那個**，而 R71 已實證純文件約束對「當下的模型」零攔阻力。
+    # matcher 取 `{Bash, PowerShell}` 的依據是**逐字稿實查**而非推測：本機 60 份逐字稿、
+    # 7,189 次 tool_use 中 Bash 4,083 次、PowerShell 0 次（Windows 側是另一個 project dir，
+    # 且該平台依鐵律一禁用 Bash ⇒ 一律走 PowerShell）。兩者相加＝腳本自己的 OWN_TOOLS，
+    # **matcher 與射程恰好相等、零附帶面**。
+    # 該守衛對退化 payload 走 rc=1（出聲不阻斷）故不受「rc==2 必須配窄 matcher」那條約束，
+    # 但仍取窄 matcher；且腳本內**刻意沒有 `os.name` 閘**——照抄
+    # `block_bash_on_windows.py` 的平台閘等於「在事故現場（macOS）把它關掉」。
+    ("PreToolUse", ".claude/hooks/block_destructive_git.py"): frozenset(
+        {"Bash", "PowerShell"}),
     ("PostToolUse", ".claude/hooks/sdd_hook_router.py"): frozenset(
         {"Write", "Edit", "Read", "Bash", "NotebookEdit"}),
     # 🔴 QA M4 打的就是下面這兩支共用的那個 `Write|Edit` 條目。
@@ -2075,6 +2092,66 @@ class TestHookRegistrationScopeIsShrinkOnly(unittest.TestCase):
 _LAUNCHER = _REPO_ROOT / ".claude" / "hooks" / "_hook_launcher.py"
 
 
+def _same_path(a: str | os.PathLike[str], b: str | os.PathLike[str]) -> bool:
+    """兩個路徑是否指向**同一個檔案系統實體**（比 inode，不比字面字串）。
+
+    🔴 **為什麼不能比字面**（R83 於真 Mac 首跑抓到，判準本身是跨平台缺陷）：
+    「我把 cwd 設成 X」與「子行程回報 cwd 是 X」之間隔著一層核心正規化，**兩個平台
+    各有一種讓字面不等、語意相同的機制**，而且兩種都出現在測試最常用的暫存目錄上：
+
+      · **macOS**：`/var` 是 `/private/var` 的 symlink。`tempfile.mkdtemp()` 回
+        `/var/folders/.../T/xxx`（未解析），而 POSIX `getcwd(3)` 依規格回**已解析**
+        的絕對路徑 ⇒ 子行程必然回 `/private/var/folders/.../T/xxx`。實測本機
+        `os.path.samefile()` 為 True、字串比較為 False。
+      · **Windows**：`%TEMP%` 在多數機器上是 `C:\\Users\\<user>\\AppData\\Local\\Temp`，
+        使用者名稱超過 8 字元時 API 之間會混用 8.3 短檔名（`RUNNE~1`）；再加上
+        NTFS 大小寫不敏感（`C:\\` vs `c:\\`）與 GitHub runner 的目錄 junction，
+        同樣是「語意相同、字面不等」。
+
+    ⇒ 本判準要問的事情從頭到尾都是**「是不是同一個目錄」**，那件事的平台中立量法
+    只有一種：問檔案系統，不要問字串。`os.path.samefile()` 兩個平台都走
+    `os.stat()` 的 `(st_dev, st_ino)`——POSIX 是 device+inode；**Windows 上 CPython
+    的 `os.stat()` 走 `GetFileInformationByHandle`**，`st_ino` 是檔案索引、`st_dev`
+    是磁碟區序號，兩者都是**開檔後由核心回報的實體身分**，所以 8.3 短檔名／大小寫／
+    junction 三種變形全部自動被吃掉，不需要為 Windows 另寫一欄。
+
+    🔴 **刻意不用 `Path.resolve()` 當正規化**：它在 Windows 上是「字串正規化 + 查詢」
+    的混合體，行為隨版本與路徑是否存在而變（不存在的路徑會 fallback 成純字串處理）；
+    而 `samefile` 的語意只有一種、且在路徑不存在時是**明確失敗**而不是悄悄退化——
+    後者正是本 repo 反覆判過的「判準悄悄變成恆綠」形態。
+
+    OSError（任一側不存在／權限不足）一律回 `False`＝**fail-closed**：測試寧可紅在
+    「兩個路徑對不起來」，也不要因為量測失敗而放行。
+
+    🔴 **`samefile` 唯一會 fail-OPEN 的那個縫，以及誰在守它**（獨立複驗 R83 補記）：
+    上面「比 inode」的前提是**檔案系統真的給得出檔案 ID**。MSDN 對
+    `BY_HANDLE_FILE_INFORMATION` 逐字載明「不支援 file ID 的檔案系統一律回 0」——
+    FAT／部分 SMB 網路磁碟即屬此類 ⇒ 那種機器上 `st_ino` 兩邊同為 0、`st_dev` 又是
+    同一個磁碟區序號，`samefile` 會把**兩個不同的檔案判成同一個**。方向是放行，
+    不是誤擋，所以它不會自己叫出來（本輪只有 darwin，這一段是 MSDN 文件語意，
+    **不是實測值**）。
+    ⇒ 守它的是 `TestSamePathIsNotVacuous.test_two_different_directories_are_not_the_same`：
+    那一格在**本機真正的暫存檔案系統**上建兩個貨真價實不同的目錄再問一次，
+    檔案 ID 退化時它就地轉紅。**所以那一格不是可有可無的形式主義，刪掉它等於把
+    Windows 側唯一的 fail-open 偵測器一起刪掉**（本 repo 反覆踩的「鎖還在、但沒人
+    知道它在守什麼，於是下一輪被當成廢話刪掉」）。
+    """
+    try:
+        return os.path.samefile(a, b)
+    except OSError:
+        return False
+
+
+def _path_mismatch(reported: str, expected: str | os.PathLike[str]) -> str:
+    """`_same_path()` 為 False 時的診斷字串：字面 ＋ realpath 兩層都印出來。
+
+    只印字面會讓「symlink／短檔名造成的假紅」與「真的切錯目錄」長得一模一樣，
+    下一個人得再花一輪才分得出是哪一種。
+    """
+    return (f"實得 {reported!r}（realpath={os.path.realpath(reported)!r}）"
+            f" != 期望 {str(expected)!r}（realpath={os.path.realpath(expected)!r}）")
+
+
 def _load_real_settings() -> dict:
     return json.loads(_SETTINGS.read_text(encoding="utf-8"))
 
@@ -2270,6 +2347,139 @@ class TestParsersSurviveTheExecFormConversion(unittest.TestCase):
             "——解析管道壞了，本節其餘判準全部失去意義")
 
 
+def _make_directory_link(target: Path, link: Path) -> str:
+    """在 `link` 建一個「走過去會抵達 `target` 同一個目錄」的連結，回傳所用機制名。
+
+    🔴 **為什麼要分平台，而不是兩邊都 `os.symlink`**（鐵律三「這在另一個平台是什麼
+    值？」）：`os.symlink` 在 Windows 上**存在**（不是 `AttributeError`），但底層的
+    `CreateSymbolicLinkW` 需要開發者模式或 `SeCreateSymbolicLinkPrivilege`，一般
+    Windows 機器與未開啟開發者模式的 runner 上必回 `OSError`（WinError 1314）。
+    ⇒ 只寫 `os.symlink` 的話，Windows 側的結果**恆為 skip**——而 skip 不是覆蓋，
+    它只是把「這台機器從來沒驗過」寫得比較好看（`DEF-101-343~345` 的形態：連續
+    5+ 輪全 APPROVE、卻一次都沒在原生 Windows 上跑過）。
+
+    Windows 上**不需要任何權限**、且語意等價的機制是**目錄 junction**：`_same_path`
+    的 docstring 逐字點名「GitHub runner 的目錄 junction」是讓字面比較失效的三種
+    Windows 變形之一 ⇒ junction 正是這一格要涵蓋的真實情境，不是為了繞過權限硬找的
+    替代品。junction 沒有 `os` 公開 API（`_winapi.CreateJunction` 是私有的），標準
+    建法是 cmd 內建的 `mklink /J`。
+
+    🔴 **誠實劃界**：Windows 那一支在本輪的開發機（darwin）上**只驗到分派**（見
+    `test_the_windows_branch_uses_a_junction_not_a_symlink`）；`mklink /J` 的實際 rc、
+    以及 `samefile(junction, target)` 是否為 True，**未在原生 Windows 上實測**
+    （junction 是 reparse point，開檔預設會跟隨 ⇒ `GetFileInformationByHandle` 應回
+    目標的檔案索引，這是文件語意推論，不是量測值）。
+    """
+    if os.name == "nt":
+        # `mklink` 是 cmd 的**內建**指令，不是獨立執行檔 ⇒ 必須經 `cmd /c`。
+        # 診斷字串以 utf-8/replace 解：cmd 實際吐的是 OEM codepage（cp950 等），
+        # 這裡只會讓例外訊息裡的中文降解，不影響 rc 判定（判準只讀 returncode）。
+        proc = subprocess.run(
+            ["cmd", "/c", "mklink", "/J", str(link), str(target)],
+            capture_output=True, text=True, encoding="utf-8", errors="replace",
+            timeout=60)
+        if proc.returncode != 0:
+            raise OSError(
+                f"mklink /J rc={proc.returncode}: "
+                f"{(proc.stderr or proc.stdout).strip()!r}")
+        return "junction"
+    os.symlink(target, link, target_is_directory=True)
+    return "symlink"
+
+
+class TestSamePathIsNotVacuous(unittest.TestCase):
+    """`_same_path()` 是把「字面相等」放寬成「同一個實體」的那一層——**放寬最常見的
+    失敗模式是寬過頭變成恆真**，所以它自己要有一組雙向判準。
+
+    這幾格**兩個平台都跑得到、也都在量同一件事**（沒有任何 `skipUnless`）：連結是
+    POSIX 與 Windows 都有的機制，只是**原語不同**——POSIX 是 symlink、Windows 是
+    目錄 junction（原語選擇與 WHY 見 `_make_directory_link`）。此前這裡兩邊都寫
+    `os.symlink`，於是 Windows 側恆為 skip；改成各走各的原語之後，Windows 不再需要
+    開發者模式就有真覆蓋。殘留的那一個 skip 只剩「這台機器的檔案系統根本建不起
+    連結」（FAT／某些網路磁碟）這一種機器能力問題，不是平台語意
+    （`DEF-101-766`：單平台判準不可無條件外推，反之亦然）。
+    """
+
+    def setUp(self) -> None:
+        self.box = Path(tempfile.mkdtemp(prefix="same_path_probe_"))
+        self.addCleanup(shutil.rmtree, self.box, ignore_errors=True)
+
+    def test_two_different_directories_are_not_the_same(self) -> None:
+        """反恆真：兩個貨真價實不同的目錄必須回 False。
+
+        🔴 **看起來像廢話，實際是 Windows 側唯一的 fail-open 偵測器**（勿刪，WHY 見
+        `_same_path` docstring 末段）：`samefile` 比的是檔案 ID，而不支援 file ID 的
+        檔案系統（FAT／部分 SMB）一律回 0 ⇒ 那種機器上任兩個檔都會被判成同一個。
+        本格刻意在**本機真正的暫存檔案系統**上量，退化時就地轉紅。
+        """
+        (self.box / "a").mkdir()
+        (self.box / "b").mkdir()
+        self.assertFalse(_same_path(self.box / "a", self.box / "b"),
+                         "不同目錄被判成同一個 ⇒ 判準已恆真，上面每一條斷言都失去意義")
+
+    def test_a_link_to_the_same_directory_is_the_same(self) -> None:
+        """正向：這正是 macOS `/var` → `/private/var`、以及 Windows runner 的目錄
+        junction 讓字面比較假紅的那個機制。原語由 `_make_directory_link()` 依平台選，
+        兩個平台**都真的建一個連結再問一次**，不是其中一邊靠 skip 混過去。"""
+        (self.box / "real").mkdir()
+        link = self.box / "link"
+        try:
+            mechanism = _make_directory_link(self.box / "real", link)
+        except OSError as exc:  # 檔案系統本身建不起連結（FAT／部分網路磁碟）
+            self.skipTest(f"本機檔案系統建不起目錄連結（機器能力，非平台語意）：{exc}")
+        self.assertTrue(_same_path(link, self.box / "real"),
+                        f"經{mechanism}抵達的同一個目錄被判成不同 ⇒ 判準回到了字面比較")
+
+    def test_the_windows_branch_uses_a_junction_not_a_symlink(self) -> None:
+        """🔴 這一格是「Windows 側真的有覆蓋」在 darwin 開發機上**唯一**的證據。
+
+        沒有它，把 `_make_directory_link()` 的 junction 分支刪掉會完全無聲：mac 上
+        每一格照樣綠（那條分支在 mac 上本來就不會執行），而 Windows 側悄悄退回
+        「恆 skip」——測試檔在、判準在、rc 是 0，與修好完全相同。
+        以注入 `os.name` 驗證而不是掛 `skipUnless`，是本檔既有慣例（見 `:481`／`:825`
+        兩處的同一理由：注入取得的覆蓋比「只在對的機器上才跑」更大）。
+        """
+        real, link = self.box / "real", self.box / "link"
+        real.mkdir()
+        calls: list[list[str]] = []
+
+        def fake_run(cmd: list[str], **_kw: object) -> subprocess.CompletedProcess:
+            calls.append(list(cmd))
+            return subprocess.CompletedProcess(cmd, 0, "", "")
+
+        with mock.patch.object(os, "name", "nt"), \
+             mock.patch.object(os, "symlink", side_effect=AssertionError(
+                 "Windows 分支呼叫了 os.symlink ⇒ 覆蓋又被押回開發者模式上")), \
+             mock.patch.object(subprocess, "run", side_effect=fake_run):
+            self.assertEqual(_make_directory_link(real, link), "junction")
+        self.assertEqual(len(calls), 1, f"Windows 分支應恰好外呼一次；實得 {calls}")
+        # 下一行的 `/c`／`/J` 是 **cmd 的參數開關**，不是路徑字面值 ⇒ 它們不由
+        # `Path`／`os.fspath` 算出，Windows 上也不會被渲染成反斜線。
+        #
+        # 🔴 **為何要比整個 argv、而不只是前四位**（獨立複驗 R83 補上的缺口）：
+        # `mklink` 的語法是 `/J <Link> <Target>`，而**順位寫反是只在 Windows 才成立的
+        # 語意錯誤**——`mklink /J <已存在的 real> <不存在的 link>` 回非零 rc ⇒
+        # `_make_directory_link` 拋 OSError ⇒ 呼叫端 skipTest，於是本包宣稱修掉的
+        # 那個「Windows 側恆 skip」原封不動地回來，而 darwin 上永遠走不到那一行。
+        # 缺口是實測的，不是設想：只比 `calls[0][:4]` 時把兩個位置對調，本類 4 格
+        # **照樣全綠**。前四位是「有沒有選對機制」，後兩位是「有沒有用對」，兩者都只有
+        # 這一格看得到（本檔既有慣例：注入取得的覆蓋 > 只在對的機器上才跑）。
+        # 🔴 這份期望值刻意**留在 assertEqual 的引數位置內**、不抽成區域變數：抽出去之後
+        # `/c`／`/J` 就不再是「assert 引數裡的字面值」，`scan_posix_abs_asserts` 整組看不到
+        # 它，行尾豁免當場變 stale（實測轉紅一次）——那等於用重構繞過掃描器，比留著誤報糟。
+        self.assertEqual(
+            calls[0],
+            ["cmd", "/c", "mklink", "/J",  # posix-abs-ok: cmd 開關非路徑
+             str(link), str(real)],
+            "junction 是 Windows 上唯一不需要提權的目錄連結機制，且 mklink 的順位必須是 "
+            f"`/J <Link> <Target>`（寫反即回非零 rc ⇒ 退回恆 skip）；實得 {calls[0]}")
+
+    def test_a_missing_path_is_fail_closed(self) -> None:
+        """量不到時必須回 False（不得因為 stat 失敗就放行）。"""
+        self.assertFalse(_same_path(self.box / "nope", self.box),
+                         "路徑不存在時竟回 True ⇒ fail-open，判準會在最需要它的時候噤聲")
+
+
 class TestHookLauncherContract(unittest.TestCase):
     """啟動器是**全部 hook 的唯一入口**，改壞它等於一次弄壞六支守衛。
 
@@ -2324,12 +2534,53 @@ class TestHookLauncherContract(unittest.TestCase):
         self.assertEqual(rc, 0, err[:300])
         got = json.loads(out)
         self.assertEqual(got["stdin"], payload, "stdin 的 hook JSON 必須原樣送達目標")
-        self.assertEqual(
-            Path(got["argv"][0]), self.root / ".claude" / "hooks" / "ok.py",
-            "argv[0] 必須是目標的絕對路徑（與舊 shim 逐項等價）")
+        # argv[0] 拆成兩問，各自問一件事（原本合併成一次字面相等，見 `_same_path` 的 WHY）：
+        #   ①「是絕對路徑嗎」——這是契約本身（相對路徑會隨 hook 被呼叫時的 cwd 漂移）；
+        #   ②「指到的是不是那支目標」——同一個檔案實體即可，字面不必逐字相同。
+        self.assertTrue(
+            os.path.isabs(got["argv"][0]),
+            f"argv[0] 必須是絕對路徑（與舊 shim 逐項等價）；實得 {got['argv'][0]!r}")
+        self.assertTrue(
+            _same_path(got["argv"][0], self.root / ".claude" / "hooks" / "ok.py"),
+            "argv[0] 必須指向目標腳本本身；"
+            + _path_mismatch(got["argv"][0], self.root / ".claude" / "hooks" / "ok.py"))
         self.assertEqual(got["argv"][1:], ["extra1"], "其餘引數順位不得改變")
-        self.assertEqual(Path(got["cwd"]), self.root,
-                         "cwd 必須被切到 CLAUDE_PROJECT_DIR（DEF cwd≠專案根的 P0）")
+        self.assertTrue(
+            _same_path(got["cwd"], self.root),
+            "cwd 必須被切到 CLAUDE_PROJECT_DIR（DEF cwd≠專案根的 P0）；"
+            + _path_mismatch(got["cwd"], self.root))
+
+    def test_the_cwd_criterion_still_catches_a_launcher_that_never_chdirs(self) -> None:
+        """反空轉自證：把 production 的 `os.chdir(root)` 拿掉，上一格的 cwd 判準必須轉紅。
+
+        🔴 **為什麼這一格非有不可**：上一格剛從「字面相等」換成「同一個實體」，而
+        放寬判準最常見的失敗模式就是**寬過頭變成恆真**。合成注入一支「忘記 chdir」
+        的啟動器（那正是它要防的 P0：hook 在錯的 cwd 下跑，所有相對路徑判準全歪），
+        證明新判準仍然說得出話。
+
+        注入的是 production 檔的**副本**（`_LAUNCHER` 一個字都沒動），跑完即丟。
+        """
+        broken = self.root / "broken_launcher.py"
+        src = _LAUNCHER.read_text(encoding="utf-8")
+        self.assertIn("os.chdir(root)", src,
+                      "production 啟動器已不再 chdir？那本注入失去對照意義，判準要重寫")
+        broken.write_text(src.replace("os.chdir(root)", "pass  # 注入：忘記 chdir"),
+                          encoding="utf-8", newline="\n")
+
+        env = _child_env({"CLAUDE_PROJECT_DIR": str(self.root), "PYTHONUTF8": "1"})
+        # 這裡刻意**不加** `child-encoding-ok`：子行程是 tmp 裡的合成副本，不是 repo
+        # 內的檔，編碼衛生掃描器解析不到它 ⇒ 加了會變成 stale 標記（實測當回合被
+        # `test_subprocess_encoding_hygiene.py` 抓到）。編碼由下面的 `encoding=` 顯式指定。
+        proc = subprocess.run(
+            [sys.executable, str(broken), ".claude/hooks/ok.py"], input="{}",
+            capture_output=True, text=True, encoding="utf-8", errors="replace",
+            timeout=60, env=env, cwd=str(_REPO_ROOT))
+        self.assertEqual(proc.returncode, 0, proc.stderr[:300])
+        got = json.loads(proc.stdout)
+        self.assertFalse(
+            _same_path(got["cwd"], self.root),
+            "啟動器沒有 chdir，cwd 判準卻仍然說『對得上』⇒ 它已經恆綠。"
+            f"實得 cwd={got['cwd']!r}")
 
 
 class TestDeclaredWindowsCarrierExists(unittest.TestCase):

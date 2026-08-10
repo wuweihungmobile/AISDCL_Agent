@@ -31,7 +31,11 @@ SD_09 W0 Pre-W0 audit B-07 修復（2026-05-20）：
 通道（R79 落地）：`pg-e2e-nightly` job 已備妥本檔所需的**全部**條件（pgvector service
 container ＋ postgres extras ＋ DSN ＋ `alembic upgrade head` ＋ `seed_kb.py` seed），
 缺的只是 `PG_REAL_ENABLED` 這一個環境變數與一行 pytest 呼叫——兩者本輪都補進該 job。
-本機跑法：`$env:PG_REAL_ENABLED='1'` ＋ DSN ＋ 先跑一次 `tools/seed_kb.py --mock-pg-seed`。
+本機跑法（🔴 R83 補齊 bash/zsh 那一半——原文只有 `$env:…` 這種 PowerShell 專屬形態，
+mac/Linux 讀者照抄無效）＋ DSN ＋ 先跑一次 `tools/seed_kb.py --mock-pg-seed`：
+
+  PowerShell：  $env:PG_REAL_ENABLED = '1'
+  bash / zsh：  export PG_REAL_ENABLED='1'
 """
 from __future__ import annotations
 
@@ -76,7 +80,11 @@ def _sync_dsn() -> str | None:
     reason="[ENV-DISABLED] pgvector recall 延遲 SLA 未啟用——**未啟用，非缺件**（本機實測"
            "設一個環境變數即跑完，5.12s）。維持 opt-in 的理由是它量的是延遲、對機器負載"
            "敏感：R82 在忙碌時量到 p95=51.703ms ≥ 50ms，預設打開會變成 flaky 閘門。"
-           "配方（機器閒置時跑）：`$env:PG_REAL_ENABLED='1'; python -m pytest "
+           # 🔴 R83：配方原本只有 PowerShell 形態，mac/Linux 讀者照抄無效——一則 reason 的
+           # 全部價值就是「照著做就能讓它跑起來」，只在一個平台成立等於對另一半讀者失效。
+           "配方（機器閒置時跑）——PowerShell：`$env:PG_REAL_ENABLED = '1'; python -m pytest "
+           "tests/perf/test_pgvector_recall_perf.py`；bash / zsh："
+           "`export PG_REAL_ENABLED='1'; python -m pytest "
            "tests/perf/test_pgvector_recall_perf.py`（DSN 由 conftest 的 PG autodetect "
            "自動注入）。R-SD08-G-1",
 )

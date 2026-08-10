@@ -6,9 +6,15 @@
   - 舊變數 AUTOCLAUDE_PG_DSN 保留作 deprecation alias（短期相容）
   - 缺 DSN 時 fail-loud（不再 fallback 至 alembic.ini 明文預設）
 
-使用方式：
-  export AUTOCLAUDE_DB_DSN=postgresql://user:pass@localhost:5432/autoclaude?sslmode=require
-  alembic upgrade head
+使用方式（🔴 R83 補齊 PowerShell 那一半：原文只給 bash/zsh 形態，而本檔的 fail-loud 訊息
+是使用者遇到「缺 DSN」時唯一的指路，Windows 讀者照抄 `export …` 只會得到第二個錯誤）：
+
+  bash / zsh：
+    export AUTOCLAUDE_DB_DSN='postgresql://user:pass@localhost:5432/autoclaude?sslmode=require'
+    alembic upgrade head
+  PowerShell：
+    $env:AUTOCLAUDE_DB_DSN = 'postgresql://user:pass@localhost:5432/autoclaude?sslmode=require'
+    alembic upgrade head
 """
 from __future__ import annotations
 
@@ -43,9 +49,14 @@ config = context.config
 # 從環境變數覆寫 sqlalchemy.url（優先 AUTOCLAUDE_DB_DSN，fallback AUTOCLAUDE_PG_DSN）
 dsn = os.environ.get("AUTOCLAUDE_DB_DSN") or os.environ.get("AUTOCLAUDE_PG_DSN")
 if not dsn:
+    # 🔴 R83：兩個平台的寫法都印。修前只印 `export …`（POSIX 專屬），而這則訊息是使用者
+    # 撞上「缺 DSN」時**唯一**的指路——在 Windows 上照抄只會換來第二個看不懂的錯誤。
     print(
         "❌ 缺少 PostgreSQL DSN。請設定環境變數 AUTOCLAUDE_DB_DSN：\n"
-        "   export AUTOCLAUDE_DB_DSN=postgresql://user:pass@host:5432/autoclaude?sslmode=require",
+        "   bash / zsh：  export AUTOCLAUDE_DB_DSN="
+        "'postgresql://user:pass@host:5432/autoclaude?sslmode=require'\n"
+        "   PowerShell：  $env:AUTOCLAUDE_DB_DSN = "
+        "'postgresql://user:pass@host:5432/autoclaude?sslmode=require'",
         file=sys.stderr,
     )
     sys.exit(2)

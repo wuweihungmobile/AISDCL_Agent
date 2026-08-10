@@ -16,13 +16,27 @@ AutoClaude 在不同情境下會讀取下列三個環境變數，請勿混用：
 - `AUTOCLAUDE_TEST_PG_DSN`：**契約測試專用**，避免污染本地正式 DB。
   讀取位置：`tests/contract/test_pg_state_repository_contract.py`。
 
-設定方式範例（PowerShell）：
+設定方式範例（🔴 R83：本段原本只有 PowerShell 一種形態。`$env:X = …` 是 PowerShell 專屬
+語法，mac/Linux 照抄會得到 `command not found`／參數解析錯誤，而這份說明的讀者一半在 mac
+上——單平台指引長在「專門用來把人導向正解」的地方，比沒有指引更糟）：
 
-  $env:AUTOCLAUDE_DB_DSN = "postgresql+asyncpg://user:pass@localhost:5432/autoclaude?sslmode=require"
-  $env:AUTOCLAUDE_TEST_PG_DSN = "postgresql+asyncpg://user:pass@localhost:5432/autoclaude_test?sslmode=disable"
+  PowerShell：
+    $env:AUTOCLAUDE_DB_DSN = 'postgresql+asyncpg://user:pass@localhost:5432/autoclaude?sslmode=require'
+    $env:AUTOCLAUDE_TEST_PG_DSN = 'postgresql+asyncpg://user:pass@localhost:5432/autoclaude_test?sslmode=disable'
+  bash / zsh：
+    export AUTOCLAUDE_DB_DSN='postgresql+asyncpg://user:pass@localhost:5432/autoclaude?sslmode=require'
+    export AUTOCLAUDE_TEST_PG_DSN='postgresql+asyncpg://user:pass@localhost:5432/autoclaude_test?sslmode=disable'
 
 未設定 `AUTOCLAUDE_TEST_PG_DSN` 時，PG 契約測會自動 skip — 這是預期行為，
-本機開發者 **不需** 安裝 PG 也能跑完所有 925+ 測試。
+本機開發者 **不需** 安裝 PG 也能跑完全套測試（🔴 R83 複驗訂正：本行原本寫死「925+ 測試」，
+而當回合實測早已是它的四倍餘。全 repo pytest 基線數字的**唯一站點**是根層 `ONBOARDING.md` §7，
+本行不再重複——那個數字每輪都在動，寫在這裡就是第二個沒人會去改的家。
+🔴 它此前**沒有任何鎖看得到**：`tools/check_pytest_baseline_sites.py` 的未納管站點發現面
+當回合實測 114 支，本檔不在其中——「測試」二字不構成該掃描器的關鍵詞命中）。
+
+🔴 想把上面那批 skip 一次消掉最大的一類：不必改程式、不必設環境變數，只要把 CI 對等 PG
+容器拉起來（`docker compose -f docker-compose.ci.yml up -d`，daemon 要先開），本檔的
+PG autodetect 會自動注入 DSN。完整做法／憑證行／現查指令見根層 `ONBOARDING.md` §7.1。
 
 ──────────────────────────────────────────────
 跨平台測試 fixture 撰寫紀律（四方複審 S21）
@@ -130,6 +144,36 @@ def _local_ci_gate():
 # 本函式把那個反推變成一句話，並且在**收集之前**就講（晚一步就變成 N 支 error 而不是一則指引）。
 _ASYNC_DRIVERS = ("+asyncpg", "+psycopg", "+aiopg")
 
+# 🔴 R83（掌舵者系統問題 #1／包 W2-B）：把「設一個環境變數」渲染成**兩個平台都能直接照抄**
+# 的兩行，而不是只印 PowerShell 那一行。
+#
+# 缺陷本體（當回合在 macOS 上實測）：本檔上一版的 DSN 修法逐字印
+# `$env:AUTOCLAUDE_TEST_PG_DSN = '…'`。`$env:` 是 **PowerShell 專屬**語法——bash/zsh 照抄會把
+# `$env:AUTOCLAUDE_TEST_PG_DSN` 展開成空字串再把 `=` 當成指令名，得到一個與 DSN 毫無關係的
+# 錯誤。這件事的難看之處在於**它長在一支專門用來「把人導向正解」的訊息上**：這則訊息存在的
+# 全部理由，就是省下使用者從 SQLAlchemy 的錯誤反推回「我 export 的字串少了四個字」那段路，
+# 而它自己在 mac 上又製造了一段同型的反推。
+#
+# 為何**兩行都印**而不是依 `sys.platform` 只印一行：這則訊息會被貼進缺陷帳本、CI log、
+# 交棒書，讀它的人常常不在產生它的那台機器上（本 repo 的 macOS↔Windows 雙機交替工作流即是）。
+# 只印一行的版本在那些場合會再一次變成單平台指引，而那正是本修法要根絕的形態。
+# 代價是多一行輸出，換掉的是「讀者在另一個平台上照抄失敗」。
+#
+# 機械物：`tools/tests/test_skip_discoverability_r83.py`（本 repo 活文件與使用者可見訊息裡的
+# 示範指令必須雙平台皆可照抄，零容忍＋行內豁免出口）。
+_ENV_RECIPE_TEMPLATE = (
+    "     PowerShell：  $env:{var} = '{value}'\n"
+    "     bash / zsh：  export {var}='{value}'"
+)
+
+
+def two_platform_env_recipe(var: str, value: str) -> str:
+    """回傳「設定環境變數 `var`＝`value`」的雙平台配方（兩行，各自標明平台）。
+
+    純函式（無 I/O、無平台偵測）——刻意**不**依 `sys.platform` 擇一，理由見上方註解。
+    """
+    return _ENV_RECIPE_TEMPLATE.format(var=var, value=value)
+
 
 def pg_dsn_problems(dsn: str | None, *, require_async: bool = True) -> list[str]:
     """純函式（無 I/O、無副作用）：這個 DSN 形態會不會讓非同步消費端在 setup 硬炸。
@@ -152,7 +196,8 @@ def pg_dsn_problems(dsn: str | None, *, require_async: bool = True) -> list[str]
             "     · 同步端（tests/contract/test_alembic_00*.py）會自己 strip 掉 `+asyncpg`，"
             "帶不帶都能跑。\n"
             "   ⇒ 兩端的交集只有一種寫法。修法（把 `postgresql://` 改成 `postgresql+asyncpg://`）：\n"
-            f"     $env:AUTOCLAUDE_TEST_PG_DSN = '{_with_asyncpg(dsn)}'\n"
+            + two_platform_env_recipe("AUTOCLAUDE_TEST_PG_DSN", _with_asyncpg(dsn))
+            + "\n"
             "   不修的話那一批會在 fixture setup 硬炸，而 SQLAlchemy 的錯誤訊息不會提到"
             "這個環境變數，也不會提到這個 repo。"
         ]
@@ -336,10 +381,14 @@ def pytest_collection_modifyitems(config, items):  # noqa: ARG001
     if _resolve_real_pg_dsn() is not None:
         return  # 啟用條件滿足 — 不需 skip
     skip_marker = pytest.mark.skip(
+        # 🔴 R83：本 reason 原本只給 PowerShell 形態的配方（`$env:…`），mac/Linux 讀者照抄無效。
+        # 這一則 reason 的**全部價值**就是「照著做就能讓它跑起來」，只在一個平台成立等於對另一
+        # 半讀者失效——與本檔 `two_platform_env_recipe` 同一個修法，故改用同一支渲染器。
         reason="[ENV-DISABLED] SD_07 pg_real：未啟用 SD07_REAL_PG_E2E_ENABLED=true 或缺 "
-               "DSN（PM #2）。【未啟用，非缺件】本機配方（R81 包 F 實測有效）："
-               "$env:SD07_REAL_PG_E2E_ENABLED='true'（DSN 由本 conftest 的 PG autodetect "
-               "自動注入，通常不必手設）；再跑 `python tools/seed_kb.py --mock-pg-seed "
+               "DSN（PM #2）。【未啟用，非缺件】本機配方（R81 包 F 實測有效）：\n"
+               + two_platform_env_recipe("SD07_REAL_PG_E2E_ENABLED", "true")
+               + "\n（DSN 由本 conftest 的 PG autodetect 自動注入，通常不必手設）；"
+               "再跑 `python tools/seed_kb.py --mock-pg-seed "
                "--pg-dsn <同一個 DSN>` 備妥語料，否則會換到更深的語料缺件閘"
     )
     for item in items:

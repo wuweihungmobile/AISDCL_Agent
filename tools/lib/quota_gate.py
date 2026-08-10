@@ -60,6 +60,14 @@ try:
 except Exception:  # noqa: BLE001 — 見上
     quota_ledger = None  # type: ignore[assignment]
 
+# 排程**載具**（schtasks／launchd／沒有）唯一的家。本檔只向它問一件事：「怎麼查它真的
+# 排進去了」——見 `evidence_hint()`。同一種 fail-open：不可達時退化成一句不指路的話，
+# 而不是印一個在本平台不存在的指令。
+try:
+    import schedule_backend  # type: ignore[import-not-found]
+except Exception:  # noqa: BLE001 — 見上
+    schedule_backend = None  # type: ignore[assignment]
+
 # 判讀原語。**刻意沒有 try/except**：能力提供者可以降級，判讀原語不行——給它
 # fallback stub 等於讓同一份字面有第二個家，而且會用錯的答案靜默通過。
 import quota_policy  # noqa: E402
@@ -351,7 +359,7 @@ def degraded_stamp_path(source: str) -> Path:
     return Path(tempfile.gettempdir()) / f"{DEGRADED_STAMP_PREFIX}{safe}.stamp"
 
 
-def note_degraded(source: str, detail: str) -> str:
+def note_degraded(source: str, detail: str, *, event: str = "PreToolUse") -> str:
     """額度軸降級時**出一次聲 ＋ 留一行痕跡**；回「這一次真的說出口的那段話」（`""`＝沒說）。
 
     🔴 立案（SD-B2 四支注入探針，落地前實測全部 rc=0／stderr 0 bytes／零痕跡）：
@@ -381,14 +389,21 @@ def note_degraded(source: str, detail: str) -> str:
         f"   （同一個 source 每 {QUOTA_CACHE_TTL_SECONDS} 秒只說一次）\n")
     sys.stderr.write(msg)
     # 🔴 R82／L4-02：stderr 在這條放行路上沒有讀者（契約自述：要 exit 2 才回饋給模型），
-    # 而 L4 依設計必須不節流 ⇒ 換通道不換 rc。射程：`quota_gate()` 只由 PreToolUse 分支
-    # 呼叫 ⇒ 事件名恆為真。完整立案與紅綠自證見 `QuotaDegradationReachesTheModelTest`。
+    # 而 L4 依設計必須不節流 ⇒ 換通道不換 rc。完整立案與紅綠自證見
+    # `QuotaDegradationReachesTheModelTest`。
+    # 🔴 R83／D3 訂正上一段那句已死的射程宣稱（原文逐字：「`quota_gate()` 只由 PreToolUse
+    # 分支呼叫 ⇒ 事件名恆為真」）。本輪把閘接上 PostToolUse 之後那句話就是假的，而它的
+    # 失效**外觀與「額度很健康」完全相同**：`hookSpecificOutput` 的 `hookEventName` 與
+    # 實際事件不符時，Claude Code 直接把整個 `additionalContext` 丟掉 ⇒ 降級通報靜默失效
+    # ——正是這支函式當初立案要治的那個病，只是改由接線引入。⇒ 事件名一律由呼叫端傳，
+    # 本檔不再假設自己被誰呼叫。預設留 `PreToolUse` 是為了既有呼叫端的行為逐字不變。
     print(json.dumps({"hookSpecificOutput": {
-        "hookEventName": "PreToolUse", "additionalContext": msg}}, ensure_ascii=False))
+        "hookEventName": event, "additionalContext": msg}}, ensure_ascii=False))
     return msg
 
 
-def refresh_quota_blocking(timeout: int = QUOTA_SYNC_TIMEOUT_SECONDS) -> bool:
+def refresh_quota_blocking(timeout: int = QUOTA_SYNC_TIMEOUT_SECONDS, *,
+                           event: str = "PreToolUse") -> bool:
     """**同步**量一次並寫進 `quota_cache_path()`；回「有沒有拿到新讀數」。
 
     🔴 這一格**推翻了**「網路呼叫永遠不在 hook 的關鍵路徑上」那條舊設計取捨，理由照實
@@ -406,18 +421,18 @@ def refresh_quota_blocking(timeout: int = QUOTA_SYNC_TIMEOUT_SECONDS) -> bool:
     `tool not in blocking` 就返回了，一次都碰不到這裡。
     """
     if quota_meter is None:
-        note_degraded("meter-missing", "取數器 import 不到（共用層不可達）")
+        note_degraded("meter-missing", "取數器 import 不到（共用層不可達）", event=event)
         return False
     try:
         # 🔴 走 `measure_detail` 而不是 `measure`：舊版把失效理由丟掉，四種失效在這裡
         # 外觀相同 ⇒ 連要寫進痕跡的東西都不存在。
         reading, reason = quota_meter.measure_detail(timeout)
         if reading is None:
-            note_degraded(reason, "同步取數失敗（本 TTL 視窗唯一的一次嘗試）")
+            note_degraded(reason, "同步取數失敗（本 TTL 視窗唯一的一次嘗試）", event=event)
             return False
         return quota_meter.write_cache(reading, quota_cache_path())
     except Exception:  # noqa: BLE001 — 取數失敗最多是仍然量不到，不得變成故障源
-        note_degraded("meter-crashed", "取數器自己拋了例外（已吞掉，不阻斷）")
+        note_degraded("meter-crashed", "取數器自己拋了例外（已吞掉，不阻斷）", event=event)
         return False
 
 
@@ -474,6 +489,21 @@ def quota_halt_actions(payload: dict, decision: quota_policy.Decision, now: date
             "kind": decision.binding.kind if decision.binding is not None else ""}
 
 
+# 🔴 R83／F2-② 立案（缺陷本體）：halt／armed 那一支原本硬寫「憑證是 `NextRunTime` 這個
+# **值**」＋ 一行 `Get-ScheduledTask …`。R83 把 mac 接上 launchd 之後那條路在 mac 上**走得
+# 到**（`posix` 由 `has_carrier()` 決定 ⇒ mac 是 False），於是 mac 使用者會拿到：武裝是真的、
+# 憑證是真的、**指路是假的**——那個 cmdlet 在 mac 不存在，而 `NextRunTime` 這個概念 launchd
+# 從不提供（`launchctl print` 輸出裡 next／fire／due 皆不存在，R83 實測）。同型判例：
+# 「憑證裡混一句假話，比沒有那一欄更難看見」（`schedule_backend._readback` 的 depth-1 訂正）。
+# 順帶收掉一個字面複本：`AutoSDD_Sentinel_*` 這個前綴此前在本檔有一份，而它的家在
+# `tools/lib/sentinel_lifecycle.TASK_PREFIX`。
+def evidence_hint() -> str:
+    """「怎麼查它真的排進去了」——唯一的家＝本機那個排程後端。"""
+    return (schedule_backend.select().evidence_hint() if schedule_backend is not None
+            else "排程載具不可達（import 失敗）⇒ 本工具**說不出**取證指令；"
+                 "在拿到憑證之前不要把它當成已排程。")
+
+
 def reset_horizon_phrase(branch: str, resets_at: object) -> str:
     """三支分支各自的「這條線的 reset 有多遠」——**唯一的家**（R82／Q2-07 的減法那一半）。
 
@@ -498,21 +528,21 @@ def reset_horizon_phrase(branch: str, resets_at: object) -> str:
 def quota_halt_message(decision: quota_policy.Decision, act: dict) -> str:
     """halt 的一次性訊息。三支分支**字串必須不同**，否則「不排程」與「排不了」外觀相同。"""
     head = (f"🔴 額度到達**停止**水位（最緊的一條＝{act['kind'] or '未知'}）⇒ **停止派發**："
-            "所有扇出型工具本次一律不執行。\n"
+            "扇出型工具一律不執行；收斂（讀檔／寫檔／跑 git）不受影響。\n"
             f"   {quota_policy.describe(decision)}\n"
             f"   任務書：{act['plan'] or '（寫不出來——逐字稿路徑不可得）'}\n")
     horizon = reset_horizon_phrase(act["branch"], binding_resets_at(decision))
     if act["posix"]:
-        # 🔴 SA-B7：mac/Linux 上武裝入口本身就有 `os.name != 'nt'` 早退 ⇒ 若沿用
-        # weekly 那支「不排程」的靜默路徑，「不排程」與「排不了」會長得一模一樣。
-        return head + ("   ⚠️ 本平台**沒有排程載具**（schtasks 只在 Windows 成立）"
-                       "⇒ 已寫任務書，但**沒有武裝任何喚醒**。mac/Linux 請自行以 "
-                       "launchd／cron 掛，或留在這裡等人回來。\n")
+        # 🔴 SA-B7：沒有排程載具的平台若沿用 weekly 那支「不排程」的靜默路徑，
+        # 「不排程」與「排不了」會長得一模一樣。
+        # 🔴 R83／F2-② 訂正本句的平台清單（原文寫「schtasks 只在 Windows 成立…mac/Linux
+        # 請自行以 launchd／cron 掛」——R83 已把 mac 接上 launchd ⇒ `posix` 這個鍵在 mac
+        # 上是 False，這一支**走不到** mac；把 mac 寫在這裡是拿過期事實當指引）。
+        return head + ("   ⚠️ 本平台**沒有排程載具**（Windows 走 schtasks、macOS 走 "
+                       "launchd，本平台兩者皆無）⇒ 已寫任務書，但**沒有武裝任何喚醒**。"
+                       "請自行以 cron／systemd-timer 掛，或留在這裡等人回來。\n")
     if act["branch"] == QUOTA_BRANCH_ARM and act["armed"]:
-        return head + (f"   ✅ 已武裝喚醒（{horizon}）。憑證是 "
-                       "`NextRunTime` 這個**值**，不是 rc：\n"
-                       "      Get-ScheduledTask | Where-Object TaskName -like "
-                       "'AutoSDD_Sentinel_*' | Get-ScheduledTaskInfo\n")
+        return head + f"   ✅ 已武裝喚醒（{horizon}）。{evidence_hint()}\n"
     if act["branch"] == QUOTA_BRANCH_ARM:
         return head + ("   ⚠️ 這一條的 reset 近在眼前、本來該武裝喚醒，但**這次沒有武裝**："
                        + ("哨兵逃生口有設（AUTOSDD_SENTINEL_OFF）。\n" if act["sentinel_off"]
@@ -563,17 +593,32 @@ def quota_throttle_message(decision: quota_policy.Decision, tool: str, live: int
             "`.env`（清單＝`python tools/lib/quota_policy.py --print-env-example`）。\n")
 
 
+# 🔴 R83：`event` 是本函式**唯一**的接線參數，它決定兩件不同的事——
+#   · **射程**：`PreToolUse` 只在扇出邊緣判（收斂型工具不受節流）；`PostToolUse` 則對
+#     註冊面上的每一個工具都判，因為那條路才是**真的在燒額度**的那條路。立案是量出來的
+#     （R83 實測）：配額 5%→90% 的整段，主 session 在派完最後一波 subagent 之後**再也沒有
+#     呼叫任何扇出型工具**（後續全是 6 分鐘全樹跑 ×4、24 個 agent 的回傳、大量讀檔），
+#     於是本閘從頭到尾**一次都沒有被叫到**。它守的是「我要不要多派人」，而燒掉額度的是
+#     「我自己在做事」——那條路上一個觀測者都沒有。
+#     ⇒ 這不是參數沒調對，是結構缺口；`event` 就是那個缺的端子。
+#   · **派發帳的歸屬**：只有 `PreToolUse` 那一次是「派發」。同一個 `Task` 會先觸發
+#     PreToolUse 再觸發 PostToolUse，兩邊都記帳就是同一次派發記兩次（滾動視窗預算當場
+#     少一半），所以 PostToolUse 在判讀完成後就返回，不進帳、不擋節流帶。
+# 🔴 說明寫成 `#` 而不是 docstring 是**被迫也是被指示的**：`count_loc` 排除純 `#` 行但
+# 計入 docstring 行，而本檔 tier 餘裕只有 2 行；`check_loc_budget.py` 自己的輸出逐字建議
+# 「說明文字請寫成 `#` 註解而非 docstring」。第一版把這段寫進 docstring ⇒ 當場 410>400 破閘。
 def quota_gate(payload: dict, *, blocking, latch_read, latch_write,
-               plan_writer, waker) -> int:
+               plan_writer, waker, event: str = "PreToolUse") -> int:
     """額度軸的**獨立**判定入口。回 0＝放行、2＝擋下。不讀 context、不碰網路以外的東西。
 
     五個注入依賴全部來自 hook 端（見檔頭的單向規則）：`blocking`＝阻斷工具名單、
     `latch_read`／`latch_write`＝一次性閂鎖的讀寫、`plan_writer`＝任務書產生器、
-    `waker`＝喚醒武裝（回 `{armed, sentinel_off, posix}`）。
+    `waker`＝喚醒武裝（回 `{armed, sentinel_off, posix}`）。`event`＝本次是哪個 hook
+    事件（射程與派發帳歸屬皆由它決定，見上方那段）。
     """
     tool = str(payload.get("tool_name") or "")
-    if tool not in blocking:
-        return 0  # 收斂（讀檔、寫任務書、跑 git）永遠不受額度節流影響
+    if event == "PreToolUse" and tool not in blocking:
+        return 0  # 扇出邊緣才看名單：收斂（讀檔、寫任務書、跑 git）不受額度節流影響
     # 🔴 R82／C2：逃生口與門檻讀**同一份**合併視圖（`.env` 當預設、真 env 覆寫）。
     # 舊版讀 `os.environ` ⇒ `.env` 裡設的那個開關是假話。判準往下挪一格是**行為等價**的
     # （非扇出型工具兩條路都回 0），換到的是「本檔只讀一次環境」。
@@ -584,13 +629,13 @@ def quota_gate(payload: dict, *, blocking, latch_read, latch_write,
     if problems:
         # 🔴 `.env` 設錯**必須出聲一次**：`load_policy` 已經退回整組預設，而「設了沒生效」
         # 與「設了而且生效」在行為上完全相同 ⇒ 不說就沒有人會知道（訴求 6c 的假交付面）。
-        note_degraded("policy-invalid", "；".join(problems))
+        note_degraded("policy-invalid", "；".join(problems), event=event)
     now = datetime.now().astimezone()
     state = read_quota(now)
     if not state.usable() and claim_refresh_slot():
         # 🔴 唯一會碰網路的一格，三個條件同時成立才到得了：扇出型工具 ＋ 已經量不到 ＋
         # 本 TTL 視窗還沒有人量過。理由與實測代價見 `refresh_quota_blocking` 的 WHY。
-        refresh_quota_blocking()
+        refresh_quota_blocking(event=event)
         now = datetime.now().astimezone()
         state = read_quota(now)
     if not state.usable():
@@ -599,29 +644,46 @@ def quota_gate(payload: dict, *, blocking, latch_read, latch_write,
             # 🔴 **不節流 ≠ 不出聲**（SD-B2）：這條路此前是零 stderr、零痕跡，與「額度
             # 很健康」外觀一模一樣。而「不節流」那一半已在 R82 被裁決推翻（見下方 cap）。
             note_degraded(state.source or "unknown",
-                          "取數失敗，且逐字稿裡沒有未復原的撞線可以當地板")
+                          "取數失敗，且逐字稿裡沒有未復原的撞線可以當地板", event=event)
         else:
             state = floor  # L3 地板：撞線且未復原 ⇒ 下界 100% ⇒ 落進 halt
     # 🔴 **整支 hook 唯一的判讀入口，恰好呼叫一次**（M10：「函式對了但沒人叫它」是本 repo
     # 反覆記載的『機制蓋好沒接電』）。量不到時 `decide()` 回 `degraded_cap`（不是不設限、
     # 也永不 halt）：R81 複審探針實測「快取過期 600s ＋ 額度 99%」時 42 次派發放行 42。
     decision = quota_policy.decide(state, now, policy)
-    if decision.cap is None:
-        return 0  # free 帶＝不設限（維持 shipped 行為：50% 以下無事可做）
     if decision.band == quota_policy.BAND_HALT:
         latch = quota_latch_path()
-        act = quota_halt_actions(payload, decision, now,
-                                 plan_writer=plan_writer, waker=waker)
         # 閂鎖鍵帶 (kind, reset 分鐘)：新的視窗＝重新武裝一次。截到分鐘是因為 `resets_at`
         # 有次秒級抖動（它是 now+剩餘算出來的），字串相等比較會每次都判「reset 變了」。
-        key = f"halt@{act['kind']}@{str(binding_resets_at(decision))[:16]}"
+        # 🔴 R83／D2：`kind` 改由 `decision` 直接算，好讓**副作用整段移進閂鎖之內**。
+        # 舊順序無條件先跑 `quota_halt_actions()`（它會寫一份任務書 ＋ spawn 一支
+        # planner），只有訊息受閂鎖節制。在只有 PreToolUse×扇出會呼叫本閘的年代那還撐得
+        # 住；接上 PostToolUse 之後，那就是「95% 之後每一次 Read／Bash 都 spawn 一支
+        # planner」＝ spawn 風暴，而它在 halt 帶會一直持續到 reset。⇒ 這一格是接電的
+        # **硬前置**，不是順手清理。`binding` 在 halt 帶結構上不可能是 `None`：`decide()`
+        # 是唯一的 `Decision` 產生者，而它回 `binding=None` 的那一支把 band 寫死成
+        # `BAND_UNMEASURED`（見該檔 `decide()`）。
+        key = f"halt@{decision.binding.kind}@{str(binding_resets_at(decision))[:16]}"
         if key not in latch_read(latch):
             latch_write(latch, key)
+            act = quota_halt_actions(payload, decision, now,
+                                     plan_writer=plan_writer, waker=waker)
             sys.stderr.write(quota_halt_message(decision, act))
         else:
+            # 🔴 R83：此句原本逐字說「`{tool}` 仍然不執行」——那在 PostToolUse 上是**假話**
+            # （那次 Read／Bash 已經執行完了，PostToolUse 的 exit 2 只回饋 stderr）。訊息裡
+            # 混一句假話比少一欄更難看見，故改成對兩個事件都為真的說法。
             sys.stderr.write(f"🔴 {quota_policy.describe(decision)}\n"
-                             f"   `{tool}` 仍然不執行（閂鎖已觸發過，任務書已在磁碟上）。\n")
+                             "   額度仍在停止水位：扇出一律不執行，任務書已在磁碟上。\n")
         return 2
+    # free 帶＝不設限（維持 shipped 行為：50% 以下無事可做）。
+    # 🔴 R83：這道早退**從 halt 之前移到 halt 之後**，且與「PostToolUse 只觀測」併成一道。
+    # 移動是行為等價的：`cap is None` ⟺ binding 落在 free 帶，而 halt 帶的 cap 恆為 0
+    # ⇒ 兩個條件互斥，先後不影響任何一條路。併成一道是為了不多佔 tier 餘裕（本檔只剩
+    # 2 行），而語意上它們確實是同一件事：**這一次不是「派發邊緣」，所以沒有帳要記、
+    # 也沒有節流要擋**——派發帳只屬於 PreToolUse 那一刻（見本函式 docstring）。
+    if decision.cap is None or event != "PreToolUse":
+        return 0
     cap = decision.cap
     # 🔴 R82 訂正判準（舊版是「只要不是 normal 帶就擋 Workflow」）：那條在新階梯下會讓
     # 55% 這種**還很寬鬆**的水位把 `Workflow` 整個鎖死。改成「cap 已收斂到 converge 檔

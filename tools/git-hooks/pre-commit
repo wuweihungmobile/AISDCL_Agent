@@ -79,7 +79,16 @@ fi
 _ss_scanner="$TOPLEVEL/tools/lib/secret_scan.py"
 _ss_guard="$TOPLEVEL/tools/lib/windowsapps_guard.sh"
 if [ -f "$_ss_scanner" ] && [ -f "$_ss_guard" ]; then
-  # shellcheck disable=SC1091
+  # 🔴 R83 訂正：此處原本只寫 `disable=SC1091`，而 shellcheck 對這一行實際報的是
+  # **SC1090**（「source 的路徑是變數 ⇒ 追不進去」），SC1091 是「沒把該檔當輸入」——
+  # R82 豁免了錯的那一個代碼，於是 SC1090 從未被壓下。它到 R83 才浮出來的原因是這道
+  # 閘門的載具是 **docker**，而雲端 CI 自 2026-08-05 起帳務停擺、R82 當輪在 Windows
+  # 上（docker 未必開著）⇒ 這支守衛的 rc 沒有人真的看過。
+  # 兩個代碼都留著：路徑是變數（SC1090），而被 source 的檔也不在 shellcheck 的輸入集
+  # 內（SC1091）——兩者都是**刻意**的動態 source，與 `_BASELINE` 內既有那兩筆同型。
+  # 🔴 修的是「豁免代碼寫錯」，**不是**把 `run_shellcheck.py` 的 `_BASELINE` 放寬
+  # （該表明訂只准變小，往上加一筆就是把還沒修的債寫成合法額度）。
+  # shellcheck disable=SC1090,SC1091
   . "$_ss_guard"
   _ss_py=""
   for _ss_cand in python python3; do
