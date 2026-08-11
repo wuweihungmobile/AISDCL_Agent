@@ -6,7 +6,7 @@ agent:
   id: "sdd-orchestrator"
   title: "SDD Closed-Loop Orchestrator"
   icon: "🎛️"
-  version: "v0.18"
+  version: "see FRAMEWORK_STATUS.md（框架 LATEST；本欄刻意不寫版號——寫死即過期）"
   whenToUse: |
     用於 Phase D「Test→Fix 自動閉環」。當 test-failure-analyzer 產出
     TFA 報告後，此 Agent 依 auto_dispatch_rules 查 FSM state、分派下游

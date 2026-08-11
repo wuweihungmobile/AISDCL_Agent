@@ -126,6 +126,14 @@ _GOVERNANCE_DOCS = (
     # `_GUARD_LINES_REPIN_LOG` 表尾雙向對帳，寫錯即紅）；② §E 的 Next Action（五項尚未
     # 關的缺口，含「四方複審未執行 ⇒ 本輪全部修復皆屬作者自證」這一條）。
     _REPO_ROOT / "docs" / "06_quality" / "CrossPlatform_R83_Scan_Findings.md",
+    # R84（mac 第二輪、九包並行）的掃描發現唯一居所。資格同 R80~R83 同名檔：逐筆寫出
+    # 「某發現／某 DEF-ID 的座標在某檔某節」的宣稱（⇒ 指針稽核），而本輪帳本列已依
+    # ROW_MAX_BYTES 瘦身成索引 ⇒ 唯一還能重驗那些判讀的地方就是它（⇒ 體積守門）。
+    # 它另承載兩件本輪特有的東西：① `repin_log_problems()` 款(9) 強制的護欄層淨額承認
+    # （`<!-- guard-total:R84 -->` 標記行，由 `doc_guard_total_problems()` 與
+    # `_GUARD_LINES_REPIN_LOG` 表尾雙向對帳，寫錯即紅）；② §D 的跨 session `git stash`
+    # 事故——`block_destructive_git.py` 已知射程缺口的第一個真實命中。
+    _REPO_ROOT / "docs" / "06_quality" / "CrossPlatform_R84_Scan_Findings.md",
 )
 
 # 姊妹治理文件的命名慣例：`docs/06_quality/CrossPlatform_*.md`。這**不是**把具名常數

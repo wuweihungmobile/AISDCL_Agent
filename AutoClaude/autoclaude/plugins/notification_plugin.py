@@ -23,7 +23,12 @@ class NotificationPlugin:
 
     PRIORITY = 50
 
-    def __init__(self, enabled: bool = True, app_config: Any | None = None):
+    # 🔴 R84（AC-(c)）：建構式預設由 True 改 **False**（fail-closed）。
+    # WHY：唯一的 production 建構點（core/wiring.py）本來就顯式傳 `cfg.notification.enabled`，
+    # 所以這個預設值在 production 從來沒被用到；它只在「有人新開建構點卻忘了傳」時生效，
+    # 而那一刻的表徵是**彈窗回來了**、沒有任何東西轉紅。出廠政策既是不彈（config.yaml
+    # `enabled: false`、`NotificationConfig.enabled=False`），預設值就不該是唯一的反例。
+    def __init__(self, enabled: bool = False, app_config: Any | None = None):
         self._enabled = enabled
         self._cfg = app_config  # 可選：notify_escalation 需要 AppConfig
         # R82（ACC-01）：彈窗停留秒數＝行程結束時被 plyer 非 daemon 執行緒吊住的上界。

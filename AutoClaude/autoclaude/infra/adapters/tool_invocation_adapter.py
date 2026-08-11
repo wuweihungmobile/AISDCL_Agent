@@ -40,12 +40,19 @@ class ToolInvocationAdapter:
         observability: IObservabilityPort | None = None,
         notifier: Callable[..., None] | None = None,
         handlers: Mapping[str, _Handler] | None = None,
+        notification_enabled: bool = True,
     ):
         # 防 Mock truthy：嚴格 is True（比照 alert_ladder.py:39）
         self._enabled = enabled is True
         self._allowlist = [a.strip().lower() for a in (allowlist or []) if a and a.strip()]
         self._obs = observability or NullObservability()
         self._notify = notifier or notify
+        # 🔴 R84（W9 交棒）：`notify()` 的 `enabled` 預設 True ⇒ 此前 `self._notify(title, message)`
+        # 漏傳它，本 adapter 這條路徑**結構上無視 `config.notification.enabled`**。今天沒被看見
+        # 只因上一層預設 deny（`tool_invocation.enabled=False`）把它整條遮住——遮住不等於修好，
+        # 開啟工具閘的那一刻兩個開關就會各說各話（使用者關掉通知，工具仍彈窗）。
+        # 預設保持 True＝維持既有呼叫端（未指定者）的行為不變；wiring 一律注入 cfg 值。
+        self._notification_enabled = notification_enabled is True
         self._handlers = dict(handlers or {})
 
     # ──────────────────────────────────────────────
@@ -117,7 +124,7 @@ class ToolInvocationAdapter:
         title = str(payload.get("title", "AutoClaude — 工具訊息"))
         message = str(payload.get("message", request.target))
         try:
-            self._notify(title, message)
+            self._notify(title, message, enabled=self._notification_enabled)
             return True
         except Exception:
             return False

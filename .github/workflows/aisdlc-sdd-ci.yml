@@ -69,6 +69,14 @@ on:
       # 做行為斷言 ⇒ 只改本檔時該兩支鎖必須跟著跑，否則 DEF-101-042 同構假綠。
       # 由 test_ci_paths_cover_root_consumers.py 當場攔下並要求補列。
       - "tools/lib/hook_wiring.py"
+      # R84 W3：hook_wiring 的 LATEST 版本解析改走既有 SSOT tools/lib/sdd_latest.py
+      # （不另開第二個 LATEST 解析家）⇒ 本樹的 hook wiring 鎖同樣跨樹依賴本檔，
+      # 只改它時該批鎖必須跟著跑。同上，由 test_ci_paths_cover_root_consumers.py 攔下。
+      - "tools/lib/sdd_latest.py"
+      # R84／C3：test_hook_wiring_cwd_safety.py 現在會**複製**這支啟動器來構造
+      # 「載具在、目標腳本缺」那個情境（exec form 之後那才是本鎖真正要測的形態）⇒
+      # 只改啟動器時該鎖必須跟著跑。同上，由 test_ci_paths_cover_root_consumers.py 攔下。
+      - ".claude/hooks/_hook_launcher.py"
   pull_request:
     paths:
       - "AISDLC_SDD/**"
@@ -91,6 +99,14 @@ on:
       # 做行為斷言 ⇒ 只改本檔時該兩支鎖必須跟著跑，否則 DEF-101-042 同構假綠。
       # 由 test_ci_paths_cover_root_consumers.py 當場攔下並要求補列。
       - "tools/lib/hook_wiring.py"
+      # R84 W3：hook_wiring 的 LATEST 版本解析改走既有 SSOT tools/lib/sdd_latest.py
+      # （不另開第二個 LATEST 解析家）⇒ 本樹的 hook wiring 鎖同樣跨樹依賴本檔，
+      # 只改它時該批鎖必須跟著跑。同上，由 test_ci_paths_cover_root_consumers.py 攔下。
+      - "tools/lib/sdd_latest.py"
+      # R84／C3：test_hook_wiring_cwd_safety.py 現在會**複製**這支啟動器來構造
+      # 「載具在、目標腳本缺」那個情境（exec form 之後那才是本鎖真正要測的形態）⇒
+      # 只改啟動器時該鎖必須跟著跑。同上，由 test_ci_paths_cover_root_consumers.py 攔下。
+      - ".claude/hooks/_hook_launcher.py"
   workflow_dispatch:
 
 # 🔴 group 必須含 `github.event_name`（本輪 R77-55）：本 workflow 由 push(main)＋

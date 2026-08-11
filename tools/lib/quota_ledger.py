@@ -5,11 +5,25 @@ WHY 新開這一支檔（本 repo 判過「護欄層自我增殖是最大缺陷�
 ① **消費端塞不下**。`.claude/hooks/context_budget_guard.py` 落地當回合 raw 1,634 行、
    `check_loc_budget.py` 的 `SPECIAL_FILES` 棘輪門檻也是 1,634（餘裕 0）⇒ 那是硬牆。
    本檔搬走的是**實作**（原地留委派），淨效果是消費端變短，不是變長。
+   🔴 R84／ARCH-03 訂正這兩個數字的**性質**（結論不變）：1,634 是**立案當時**的量測值，
+   本段此前把它寫成現況 ⇒ 已過期（R84 實測：該檔 raw 1,089、棘輪門檻同輪重釘為 1,089，
+   餘裕仍是 0 ⇒ 牆一樣硬，只是位置往下移了）。一律現查：
+   `python AutoClaude/tools/check_loc_budget.py --json` 的 `special_files` 那一格。
 ② **這一層的失效模式與消費端不同**。hook 的判讀要快、要確定性；本檔處理的是
    「N 個行程同時碰同一個檔」，它的失效是**機率性**的、只在併發下出現、而且靜默。
    兩種東西混在一個檔裡的代價已經量到了（見下方 R81 那段實測）。
-③ **它有第二個消費者**。`tools/session_resume_planner.py`（哨兵巡邏）與未來的
-   AutoClaude adapter 需要同一組原語；複製一份就是本 repo 的頭號病。
+③ ~~**它有第二個消費者**。`tools/session_resume_planner.py`（哨兵巡邏）與未來的
+   AutoClaude adapter 需要同一組原語；複製一份就是本 repo 的頭號病。~~
+   🔴 **R84／ARCH-03：這一條當時是預測，今天是假的，故劃掉而不是留著當理由。**
+   實測（`grep -rn "import quota_ledger" tools .claude AutoClaude`）唯一的生產消費者是
+   `tools/lib/quota_gate.py`；planner 一次都沒 import 它，AutoClaude adapter 也沒有
+   （它走的是**檔案契約**，見 `AutoClaude/.importlinter` 明文禁止引擎 import 根層護欄層
+   ⇒ 那個「第二個消費者」在架構上結構性地不會出現）。
+   ⇒ 本檔今天的存在理由**只剩 ①②**（消費端硬牆 ＋ 併發失效模式不同），而那兩條仍然成立
+   且各自有實測支撐。把一條已被證偽的理由留在檔頭的代價已經發生：R84 的架構複審據此
+   提出「合併 quota_ledger 進 planner」的選項 (ii)，而那個合併會製造一條新的跨層邊
+   （planner→ledger 今天不存在）＝以減法為名的加法。
+   誠實劃界：本條被證偽**不等於**本檔該被合併掉——① 那道牆今天仍在（現查上一格）。
 
 🔴 R81 收斂立案（SD-B1／SD-B3，兩支多行程 barrier 探針實測）
 -------------------------------------------------------------

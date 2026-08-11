@@ -98,10 +98,11 @@ sys.path.insert(0, str(_REPO_ROOT / ".claude" / "hooks"))
 # （下面兩段被 ruff 的 isort 判為不同 section：`.claude/hooks` 不在其 src 內 ⇒ 視為
 #   第三方；`tools/` 內的則是 first-party。分段是它要的形狀，不是隨手排的。）
 import context_budget_guard as guard  # noqa: E402  # 水位判定唯一實作（見上方 WHY）
+import quota_escalation as escalation  # noqa: E402  # R81：叫人＋扇出清單（R84／ARCH-10：改裸名）
+import quota_gate  # noqa: E402  # R84／SA-02：`--pace` 的內容產生者（額度判讀唯一入口）
 import schedule_backend  # noqa: E402  # R83：平台差異（schtasks／launchd）唯一收斂點
 
 import _stdio_utf8  # noqa: E402,F401  # Windows 非 UTF-8 終端印中文／emoji 防崩潰
-from lib import quota_escalation as escalation  # noqa: E402  # R81：叫人＋扇出清單
 from probe.audit_session import project_transcript_dir  # noqa: E402
 
 #: 任務書預設落點＝系統暫存。刻意不落在 repo 內：`tools/tests/test_platform_neutral_paths.py`
@@ -760,10 +761,25 @@ def endurance_schtasks_script(plan_path: str, task_name: str, at_expr: str,
         f"$principal = {_SCHTASKS_PRINCIPAL}\n"
         f"$common = @{{TaskName='{task_q}'; Action=$action; Trigger=$trigger; "
         "Settings=$settings; Force=$true}\n"
+        # 🔴 R84／C3-P1：回退分支**必須留痕跡**。S4U 註冊需提權而哨兵武裝路徑
+        # （SessionStart hook）一律非提權 ⇒ 這個 catch 每一次都可能吃到，而回退後的
+        # LogonType 是 InteractiveToken＝**有互動桌面**，載具那一層（pythonw）若同時
+        # 也退回 console 版就會彈窗。兩層都失效時原本**零痕跡**：`_EVIDENCE_TEMPLATE`
+        # 只印 TaskName/LastRunTime/LastTaskResult/NextRunTime，一個字都不提 Principal
+        # ⇒「S4U 生效」與「已回退」在憑證上長得一模一樣。這正是本 repo 反覆判過的
+        # 「失效與正常的表徵相同」。回退本身**合法**（不提權時它是唯一能成立的路），
+        # 所以這裡只出聲、不 throw；判紅會讓非提權機器一律武裝不了。
         "try { Register-ScheduledTask @common -Principal $principal -EA Stop | Out-Null }\n"
-        "catch { Register-ScheduledTask @common | Out-Null }\n"
+        "catch { Register-ScheduledTask @common | Out-Null"
+        "; Write-Output 'PRINCIPAL-FALLBACK=default-interactive' }\n"
         "\n"
         f"{_EVIDENCE_TEMPLATE.format(task=task_q)}\n"
+        # 🔴 憑證第二段：實際生效的 Principal。刻意接在取證段**之後**——`next_run_time()`
+        # 只認「行首是 nextruntime」的那一行，而 LogonType/RunLevel/UserId 三個欄名都不
+        # 以它開頭 ⇒ 新增輸出不會污染本 repo 的排程憑證判準（弄壞它比彈窗嚴重得多，
+        # 見根 CLAUDE.md〈反「事後諸葛」取證規則〉）。已由回歸鎖釘住。
+        f"Get-ScheduledTask -TaskName '{task_q}' | Select-Object -ExpandProperty Principal | "
+        "Format-List LogonType,RunLevel,UserId\n"
     )
 
 
@@ -915,6 +931,10 @@ def build_parser() -> argparse.ArgumentParser:
                              "註冊一次性 schtasks → 取證。月度支出上限一律拒絕武裝（等待無效）")
     parser.add_argument("--probe-quota", action="store_true", dest="probe_quota",
                         help="花一次最便宜的呼叫問「額度回來了沒」；額度通時 rc=0、耗盡時 rc=1")
+    parser.add_argument("--pace", action="store_true",
+                        help="**現在能派幾個 agent**（R84／6b）：一行印出 可派數／cap／band／"
+                             "最緊那一軸與它距 reset 幾分鐘。只讀額度快取＝零 token；"
+                             "快取不可用時每 TTL 至多補量一次（那個端點不是模型呼叫）")
     parser.add_argument("--arm-sentinel", action="store_true", dest="arm_sentinel",
                         help="**預防性**武裝：還沒撞線就掛一支哨兵。不需要已觀測的 reset 時刻，"
                              "到點只讀逐字稿（零 token），偵測到撞線才自動轉成續航排程。"
@@ -1105,28 +1125,42 @@ def _run_resume(args, state: dict, log: Path) -> int:
     return proc.returncode
 
 
+# 🔴 R84／C3-P4a（三支 abort 分支＋哨兵那一支，同一個病、同一個修法，故只有一份實作）：
+# abort 之前**必須先把自己的排程拆掉**。留著它＝一支永遠只會重跑這一段的排程，每個間隔
+# 醒來一次、每次都彈一個視窗，而且**沒有任何人會來收**（收拾殘骸的 `gc()` 只認得「逐字稿
+# 不見了」那一種孤兒，讀不出任務書的這一種它判不了）。這正是掌舵者看到的「黑框每 15 分鐘
+# 閃一次」的**存活條件**：治彈窗的兩層（載具、Principal）都只讓它安靜，只有這一格讓它停。
+# 🔴 工作名一律取 `args.task_name`（Action 自己帶進來的那一個），**不可**取
+# `state["task_name"]`——走到這裡的定義就是「狀態讀不出來」，那個欄位結構上不可用。
+def _abort_and_unregister(log: Path, task_name: str, why: str, event: str, message: str) -> int:
+    """自我解除排程後留痕並印訊息；恆回 1（呼叫端一律 `return` 它）。"""
+    rc = _schtasks_remove(task_name)
+    append_log(log, event, why=why, task_name=task_name, unregister_rc=rc)
+    print(f"{message}\n  已自我解除排程 {task_name}（rc={rc}）", file=sys.stderr)
+    return 1
+
+
 def _resume_tick(args) -> int:
     """**schtasks 叫起來的那一支**。第一件事就是留痕——讓「觸發了但失敗」與「沒觸發」分得開。"""
     plan = Path(args.plan or "unknown")
     log = endurance_log_path(plan)
     append_log(log, "woken", plan=str(plan))
     if not plan.is_file():
-        append_log(log, "aborted", why="任務書不存在")
-        print(f"❌ 任務書不存在：{plan}（地板沒了，無法續跑）", file=sys.stderr)
-        return 1
+        return _abort_and_unregister(
+            log, args.task_name, "任務書不存在", "aborted",
+            f"❌ 任務書不存在：{plan}（地板沒了，無法續跑）")
     text = plan.read_text(encoding="utf-8")
     state = parse_relay(text)
     if state is None:
         why = "狀態塊在但 JSON 壞掉" if has_relay(text) else "任務書裡沒有狀態塊"
-        append_log(log, "aborted", why=why)
-        print(f"❌ {why} ⇒ 拒絕動作。", file=sys.stderr)
-        return 1
+        return _abort_and_unregister(log, args.task_name, why, "aborted",
+                                     f"❌ {why} ⇒ 拒絕動作")
     log = Path(state.get("log_path") or log)
     problems = relay_problems(state)
     if problems:
-        append_log(log, "aborted", why="；".join(problems))
-        print("❌ 狀態塊體檢不過：\n  - " + "\n  - ".join(problems), file=sys.stderr)
-        return 1
+        return _abort_and_unregister(
+            log, args.task_name, "；".join(problems), "aborted",
+            "❌ 狀態塊體檢不過：\n  - " + "\n  - ".join(problems))
 
     verdict = probe_quota(args.probe_command)
     append_log(log, "probed", rc=verdict["rc"], kind=verdict["kind"],
@@ -1215,9 +1249,10 @@ def _sentinel_tick(args) -> int:
     state = parse_relay(plan.read_text(encoding="utf-8")) if plan.is_file() else None
     problems = relay_problems(state) if state is not None else ["任務書／狀態塊讀不出來"]
     if problems:
-        append_log(log, "sentinel_aborted", why="；".join(problems))
-        print("❌ 哨兵拒絕動作：\n  - " + "\n  - ".join(problems), file=sys.stderr)
-        return 1
+        # 見 `_abort_and_unregister`（同一個病、同一份實作）。
+        return _abort_and_unregister(
+            log, args.task_name, "；".join(problems), "sentinel_aborted",
+            "❌ 哨兵拒絕動作：\n  - " + "\n  - ".join(problems))
     log = Path(state.get("log_path") or log)
     transcript = Path(str(state.get("transcript") or ""))
     now = datetime.now().astimezone()
@@ -1291,6 +1326,12 @@ def main(argv: list[str]) -> int:
         print(f"quota_open={verdict['open']}  kind={verdict['kind']}  rc={verdict['rc']}")
         print(verdict["text"][:600])
         return 0 if verdict["open"] else 1
+    # 🔴 R84／SA-02：內容由 `tools/lib/quota_gate.py` 產（判讀與渲染同一個家），本檔只當
+    # 人機入口。放在最前面那幾道之後、逐字稿解析之前：它**不需要逐字稿**，掛在需要逐字稿
+    # 的路徑上會讓「這台機器上找不到 session」變成查不到額度（同 --check-autocompact 的理由）。
+    if args.pace:
+        print(quota_gate.pace_report(), end="")
+        return 0
 
     # 這三個模式不需要逐字稿，先處理（否則在找不到 session 的機器上連查姿態都做不到）。
     if args.check_autocompact:

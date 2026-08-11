@@ -135,10 +135,15 @@ import os
 import plistlib
 import subprocess
 import sys
-import tempfile
 import time
 from datetime import datetime, timedelta
 from pathlib import Path
+
+# 「這台機器」的兩個事實（痕跡的持久居所、電源姿態）唯一的家。**不是**第二個平台知識的家：
+# 本檔仍是排程載具唯一的提問點，那一檔一個 `launchctl`／`schtasks` 都不碰；它被抽出來的
+# 理由是本檔 `count_loc` 落地當回合為 395/400（餘裕 5），而那正是 ROOT-TOOLS
+# `override_reason` 指定的動作（「破線後不是調高預算，而是拆職責／抽共用模組」）。
+import endurance_env
 
 #: 兩個後端把憑證寫進續航狀態塊的**不同鍵**。刻意不共用 `next_run_time` 一個鍵：
 #: 那個鍵名在 mac 上是一句假話（launchd 不報 next-run），而把 launchd 憑證塞進一個叫
@@ -178,6 +183,18 @@ _CAL_KEYS = ("Month", "Day", "Hour", "Minute")
 #: bootout 晚一點（等到那個無關行程也退場或撞上界），不是失效。
 DEFER_WAIT_CAP_SECONDS = 3900
 
+#: 無視窗旗標。語意的唯一的家＝`.claude/hooks/context_budget_guard.NO_WINDOW`；本檔
+#: **複製同一個表達式**而不 import 它——依賴方向是 `tools → .claude/hooks`，而本檔正是
+#: 那一側 hook 的被 import 者（`session_resume_planner` 同時 import 兩者），直接反向
+#: import 會成環。相等由 `tools/tests/test_context_budget_guard.py` 的複製品名冊守著。
+#: 🔴 R84／C3-P2 為什麼補在本檔：本檔的兩個 spawn 站點是**哨兵路徑上僅存的裸 spawn**
+#: ——`_run()` 每個 tick 都會叫（schtasks 查詢／註冊），`_defer()` 起延後的 `/bin/sh`。
+#: Windows 上不帶旗標 spawn console 子系統程式，父行程是 pythonw（無 console）時會
+#: **新配置一個視窗**＝彈窗從這裡漏出來。POSIX 上 `getattr(..., 0)` 回 0＝不加旗標，
+#: 正是這個平台上正確的值（鐵律三「這在另一個平台是什麼值」）。
+NO_WINDOW = (getattr(subprocess, "CREATE_NO_WINDOW", 0)
+             | getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0))
+
 
 # 跑一個外部指令，回 `(rc, stdout+stderr)`。跑不起來一律 `(127, 訊息)`。
 def _run(argv: list[str], timeout: int = 60) -> tuple[int, str]:
@@ -185,7 +202,8 @@ def _run(argv: list[str], timeout: int = 60) -> tuple[int, str]:
     # 守的那一條（預設編碼在不同平台不同，非 ASCII 會靜默降解）。
     try:
         proc = subprocess.run(argv, capture_output=True, encoding="utf-8",
-                              errors="replace", timeout=timeout, check=False)
+                              errors="replace", timeout=timeout, check=False,
+                              creationflags=NO_WINDOW)
     except (OSError, subprocess.SubprocessError) as exc:
         return 127, str(exc)
     return proc.returncode, (proc.stdout or "") + (proc.stderr or "")
@@ -384,6 +402,12 @@ class LaunchdBackend:
             # 而不是任務書裡——任務書不存在時沒有人讀得到寫在它裡面的規則。
             print(f"❌ 任務書不存在，拒絕註冊：{plan_path}", file=sys.stderr)
             return 1, ""
+        # 🔴 R84／SA-05：訴求 6e 的**誠實化**（不是達成）。「睡著的 Mac 不會被 launchd
+        # 喚醒」此前只活在本檔檔頭一行註解裡，而武裝路徑對 `sleep != 0` **完全靜默** ⇒
+        # 憑證照樣印出一份看起來完全正常的三件式。出聲點放在這裡（拒絕註冊的兩條路之後、
+        # 真的要排程之前）：只有真的要武裝時才說，而那正是人會讀到訊息的那一刻。
+        # 落進痕跡的路徑是憑證字串（見 `_credential`），不另開第二個寫檔點。
+        endurance_env.warn_if_sleepy(_run)
         interval = int(planner.SENTINEL_INTERVAL_SECONDS)
         want = self._argv(planner, plan_path, task_name, tick)
         want_cal = _calendar_of(at, interval)
@@ -551,7 +575,11 @@ class LaunchdBackend:
                      calendar: dict | None = None) -> bool:
         planner = _planner()
         root = str(Path(planner.__file__).resolve().parents[1]) if planner else str(Path.cwd())
-        log = Path(tempfile.gettempdir()) / f"autosdd_sentinel_launchd_{task_name}.log"
+        # 🔴 R84／ZT-07：這支 log 收的是 job 自己的 stdout/stderr，也就是**這條鏈走過哪幾個
+        # 分支**（`哨兵判定 patrol／probe／arm_reset／disarm：…` 那一行）。它原本住在
+        # `$TMPDIR` ⇒ 重開機即消失，而複審實測到的病徵正是「交棒書引用的事件詞彙在痕跡檔
+        # 裡一個都查不到」。改用 `endurance_env.trace_dir()`（家目錄；理由見該檔 ①）。
+        log = endurance_env.trace_dir() / f"autosdd_sentinel_launchd_{task_name}.log"
         body = {
             "Label": task_name,
             "ProgramArguments": argv,
@@ -675,6 +703,12 @@ class LaunchdBackend:
                 f"｜{argv_piece}"
                 f"｜plist = {live['path']}〔launchd 自報，證明已持久化〕"
                 f"｜{cal_piece}"
+                # 🔴 R84／SA-05：**這一格與 `credential_line()` 的那一句不是同一句話**
+                # （上面那段刻意不重複的是「睡著不會醒」這個**通則**）。這一格是「**這台
+                # 機器**現在的 pmset 讀數」＝一次量測，而量測不能住在通則那一支：通則對
+                # 每台機器都成立，讀數每台不同。它也是這條鏈唯一會把電源姿態寫進續航痕跡
+                # 檔的路（憑證字串會被 `append_log(..., credential=…)` 原封不動記下來）。
+                f"｜{endurance_env.posture_note(_run)}"
                 f"｜state = {live['state'] or '(未報)'}")
 
     # 延後重載那一條路專屬的憑證。**它刻意與 `_credential` 不同形**：那一支的每一句都是
@@ -692,7 +726,11 @@ class LaunchdBackend:
     # 秒數**——原因與量測全文在 `DEFER_WAIT_CAP_SECONDS` 上方（R83-B 的 P0 根因）。
     # 回傳痕跡檔路徑：呼叫端要把它寫進憑證，好讓「沒觸發」是可偵測的而不是靜默假設。
     def _defer(self, task_name: str, cmds: str) -> Path:
-        trace = Path(tempfile.gettempdir()) / f"autosdd_sentinel_bootout_{task_name}.log"
+        # 🔴 R84／ZT-03：`parent-gone waited=Ns` 是 R83 那個 P0（等父行程退場才 bootout）的
+        # **唯一決定性憑證**，而它原本落在 `$TMPDIR` ⇒ 複審日實測整組檔已蒸發（`ls` 逐字
+        # `no matches found`、`grep -rl parent-gone "$TMPDIR"` rc=1）⇒ 修好了與沒修好在事後
+        # 外觀相同。持久居所與「為什麼它真的不會蒸發」的理由見 `endurance_env` ①。
+        trace = endurance_env.trace_dir() / f"autosdd_sentinel_bootout_{task_name}.log"
         script = (f'p={os.getpid()}; n=0; '
                   f'while kill -0 $p 2>/dev/null && [ $n -lt {DEFER_WAIT_CAP_SECONDS} ]; '
                   f'do sleep 1; n=$((n+1)); done; '
@@ -703,7 +741,7 @@ class LaunchdBackend:
             # job 時會把子行程一起收走，於是延後那一拆永遠不會發生（而且是靜默的）。
             subprocess.Popen(["/bin/sh", "-c", script], start_new_session=True,  # noqa: S603
                              stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-                             stdin=subprocess.DEVNULL)
+                             stdin=subprocess.DEVNULL, creationflags=NO_WINDOW)
         except (OSError, ValueError) as exc:
             _append_trace(trace, {"event": "defer_failed", "error": str(exc)})
         return trace

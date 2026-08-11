@@ -6,7 +6,7 @@ agent:
   id: "security-engineer"
   title: "Security Engineer"
   icon: "🔒"
-  version: "v0.18"
+  version: "see FRAMEWORK_STATUS.md（框架 LATEST；本欄刻意不寫版號——寫死即過期）"
   whenToUse: "用於安全架構設計、漏洞評估、威脅建模、安全測試、以及安全加固"
   customization: null
 

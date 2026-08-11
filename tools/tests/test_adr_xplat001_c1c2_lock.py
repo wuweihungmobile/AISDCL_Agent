@@ -727,32 +727,32 @@ _FROZEN_GUARD_LINES: dict[str, int] = {
     "_platform_helpers.py": 549,
     "_ps_engine.py": 115,
     "test_act_local_runner_image.py": 322,
-    "test_adr_xplat001_c1c2_lock.py": 4787,
+    "test_adr_xplat001_c1c2_lock.py": 5457,
     "test_archive_defect_log.py": 3878,
     "test_bash32_compat.py": 946,
     "test_bash_probe_spec_contract.py": 983,
-    "test_block_destructive_git_r83.py": 818,
+    "test_block_destructive_git_r83.py": 1889,
     "test_bootstrap_core.py": 439,
     "test_bootstrap_ps1.py": 160,
-    "test_check_defect_log_crossref.py": 3058,
+    "test_check_defect_log_crossref.py": 3269,
     "test_check_gha_action_versions.py": 295,
-    "test_check_hooks_liveness.py": 2829,
+    "test_check_hooks_liveness.py": 3366,
     "test_check_pytest_baseline_sites.py": 297,
     "test_check_script_parity.py": 2111,
     "test_check_wrapper_thinness.py": 1316,
     "test_component_sanitizer_shared_layer_lock.py": 293,
-    "test_context_budget_guard.py": 5645,
+    "test_context_budget_guard.py": 6354,
     "test_defect_id_reference_integrity.py": 261,
     "test_dev_start.py": 7066,
     "test_dev_start_ps1_lastexitcode.py": 548,
     "test_doc_env_prefix_platform_parity_r60.py": 341,
-    "test_doc_loc_baseline_freshness_r60.py": 6924,
+    "test_doc_loc_baseline_freshness_r60.py": 7025,
     "test_extras_quoting_zsh_safety.py": 402,
     "test_find_git_bash_parity.py": 1230,
     "test_gha_action_versions.py": 703,
     "test_git_hooks_install_common.py": 393,
-    "test_install_windows_nightly.py": 1469,
-    "test_mac_endurance_r83.py": 1488,
+    "test_install_windows_nightly.py": 1479,
+    "test_mac_endurance_r83.py": 1787,
     "test_mac_readiness_r82.py": 621,
     "test_macos_smoke_skip_honesty.py": 225,
     "test_maturity_criteria_r79.py": 427,
@@ -769,21 +769,21 @@ _FROZEN_GUARD_LINES: dict[str, int] = {
     "test_ps51_compat.py": 621,
     "test_ps_engine_ssot.py": 933,
     "test_python_c_percent_shim.py": 119,
-    "test_quota_policy.py": 1557,
+    "test_quota_policy.py": 1657,
     "test_root_infra_parity.py": 441,
     "test_run_root_unittests.py": 2177,
     "test_sanitize_component_frozen_sdd_versions_lock.py": 375,
     "test_schedule_capability_parity.py": 631,
     "test_script_scan_surface_ssot.py": 391,
-    "test_skip_discoverability_r83.py": 691,
+    "test_skip_discoverability_r83.py": 779,
     "test_smoke_ci_sync.py": 1359,
     "test_stdio_utf8.py": 76,
-    "test_subprocess_encoding_hygiene.py": 1581,
+    "test_subprocess_encoding_hygiene.py": 1594,
     "test_windows_forbidden_filename_parity.py": 1005,
     "test_windows_nightly_anchor_parity.py": 135,
     "test_windows_smoke_heartbeat_doc_sync.py": 197,
     "test_windowsapps_guard_bash_parity.py": 907,
-    "test_windowsapps_guard_cross_consistency.py": 2210,
+    "test_windowsapps_guard_cross_consistency.py": 2156,
     "test_workflow_permission_concurrency_lock.py": 1360,
     "test_workflow_schedule_sync.py": 309,
     "test_workflow_timeout_coverage.py": 158,
@@ -1157,6 +1157,37 @@ _GUARD_LINES_REPIN_LOG: tuple[tuple[str, int, int, int, str], ...] = (
         "🔴 本輪未刪任何行換取餘裕、未調高任何門檻、未放寬任何棘輪、未動漂移容忍值；"
         "同輪另外幾筆重釘（見發現文件 §B-4）方向皆為**收緊**，理由各自寫在其站點。",
     ),
+    (
+        "R84", 79083, 81738, 2655,
+        "R84（mac 第二輪；九包並行）收尾單人窗口重釘——**全輪唯一一次重釘**，"
+        "在九包全數停工後由單一窗口做 ⇒ rc 可歸因（同 R83 體例）。"
+        "🔴 **[非淨減法輪]** —— 逐檔清單、逐項必要性辯護與成長歸因的家是 "
+        "docs/06_quality/CrossPlatform_R84_Scan_Findings.md 的 §B（同一件事只有一個家；"
+        "逐檔淨額現查 `--print-guard-lines` 的 DIFF 欄，本列不登載）。"
+        "成長集中在三個本輪才第一次有觀測者的面：鐵律五守衛被真實事故命中後的雙向注入表；"
+        "訴求 7 兩層防護「失效時零痕跡」的可偵測判準；"
+        "mac 續航鏈 `--pace` 出口與 hub tier 解封後的雙向鎖。"
+        "🔴 誠實劃界：① 本輪是 `_REPIN_ROUND_CAP_SINCE` 生效後的上升輪 ⇒ M1 更遠，"
+        "款(11) 因此產生一筆到期義務，居所＝ADR-XPLAT-002 §8.1 回執表 item 15；"
+        "② 本輪 Windows 側零真機量測，凡與 Windows 有關者一律標「未驗證」。"
+        "🔴 本輪未刪任何行換取餘裕、未調高任何門檻、未放寬任何棘輪、未動漂移容忍值。",
+    ),
+    (
+        "R84", 81738, 82838, 1100,
+        "R84 的**第二次**重釘（本輪第二列）。🔴 上一列自陳「全輪唯一一次重釘」——"
+        "那句話在它落地的當下為真，但其後仍有四包交付落地（鐵律五守衛把 argv-list 與"
+        "殼包裝全族收進射程、額度哨兵 pin 的兩載具順序不變式、mac 續航鏈補測，"
+        "以及本收尾窗口自己的兩筆修復）⇒ 該句今天已是過期事實。**刻意不回頭改它**："
+        "本表是 append-only，改寫既有列會撞款(7) 指紋，而「就地把過期宣稱改成真話」"
+        "正是該款要防的形狀 ⇒ 更正寫在這裡，讓兩列並存即是稽核痕跡本身。"
+        "🔴 **[非淨減法輪]** —— 逐檔清單與逐項必要性辯護的家仍是 "
+        "docs/06_quality/CrossPlatform_R84_Scan_Findings.md 的 §B（同一件事只有一個家；"
+        "逐檔淨額現查 `--print-guard-lines` 的 DIFF 欄，本列不登載）。"
+        "🔴 誠實劃界：① 款(10) 判的是**逐輪加總**而非逐列 ⇒ 本輪淨額須把兩列相加才是真值，"
+        "交件回報與交棒書登載的都是那個加總值；② 本列所含的成長絕大多數不是本窗口寫的，"
+        "而是四包停工前落地、由本窗口一次量到——這是體例（收尾單人窗口重釘）不是歸因。"
+        "🔴 本列未刪任何行換取餘裕、未調高任何門檻、未放寬任何棘輪、未動漂移容忍值。",
+    ),
 )
 
 
@@ -1166,6 +1197,67 @@ _GUARD_LINES_REPIN_LOG: tuple[tuple[str, int, int, int, str], ...] = (
 #: `docs/04_planning/AutoSDD_improving_104.md` §1 Q2 與 `CrossPlatform_R80_Scan_Findings.md`
 #: 附錄 B（同一件事只有一個家）。生效點寫成常數而不是散文——散文式的「從今以後」沒人在讀。
 _NET_DELTA_ACCOUNTING_SINCE = 81
+
+#: 🔴 **R84 ARCH-01：重釘的「代價」**（本表歷來只有「補一列紀錄＋寫理由」這道成本≈零的
+#: 手續）。立案量測：`_GUARD_LINES_REPIN_LOG` **每一列都是上升、零列下降**，R77→R83 共
+#: +24,895（+46%）；逐輪淨額現查 `repin_round_nets()`，不寫死列數。檔頭與
+#: `AutoClaude/tools/check_loc_budget.py` 的註解都逐字寫著
+#: 「淨行數只准往下」，而那句話對這張表從未成立過。⇒ 它名義上是棘輪，實際是一本成長帳，
+#: 成熟度 M1（「總量連續三輪不上升」）**照現行機制永遠做不到**。
+#:
+#: 形狀選擇（兩案擇一，選 (b) 並說明為什麼）：
+#:   (a) **配對制**——每一列上升必須同輪配一列下降。**駁回**：本輪（R84）九包並行、
+#:       每包都在補判準，收尾那次重釘必然是正淨額；配對制會讓**本輪合法的重釘做不到**，
+#:       而一道紅了卻沒有出路的鎖，本 repo 已判過它一定會被整個關掉（ARCH-02）。
+#:   (b) **每輪淨額上限 ＋ 方向鎖**——採用。兩條各自單邊、且都可以在「本輪照常重釘」
+#:       的前提下成立，代價是**延後**而不是**封死**：本輪與下一輪可以照樣長大，但第三個
+#:       連續上升的輪次必須先出現一次淨額 ≤ 0 的重釘。這正是 M1 判準的形狀，
+#:       差別在於它從「一個沒人負責的指標」變成「會擋下 push 的閘門」。
+#:
+#: 🔴 **兩個常數的取值都是量測值、不是發明的**：
+#:   · `_REPIN_ROUND_NET_CAP = 5400`＝**歷來單輪淨額最大值**（R82 三次重釘合計；R83 的
+#:     R83 那一次略低）。取歷史最大值的意思是「今天零假紅、明天只准更緊」——它現在不擋任何
+#:     既有行為，擋的是「比史上最糟那一輪還糟」。刻意不取更小值：本輪九包的重釘量未知，
+#:     訂一個猜的數字會在收尾那一刻把閘門鎖死，而那時已經沒有人能改判準了。
+#:   · `_REPIN_MAX_CONSECUTIVE_RISING_ROUNDS = 2`＝M1 判準「連續三輪不上升」的機械面：
+#:     允許連兩輪上升，第三輪必須 ≤ 0。
+#: 兩者皆**只准下修**（`repin_cost_ratchet_problems()`，形狀照 `_shrink_only_problems`
+#: 的凍結基準版：簽入的字面常數 commit 不動它、CI 乾淨樹也不動它）。
+#:
+#: **不追溯**：只判輪號 ≥ `_REPIN_ROUND_CAP_SINCE` 的列。理由與款(9) 逐字同構——現存
+#: 現存每一列都落在款(7) 的凍結前綴內，回頭改它們會先撞 append-only 指紋；而一道「上線當天
+#: 就把整段歷史判紅、且沒有任何人補得回來」的閘門，等於要求下一個人先把它刪掉才能 push。
+#: 🔴 **R84 F3／B-1：起算錨也是門檻，而它原本是本組唯一沒有後設鎖的那一個**。
+#: 立案量測（當回合注入實測）：把 `_REPIN_ROUND_CAP_SINCE` 由 84 改成 99、其餘一字不動，
+#: `-k "cost_envelope or rising or net_cap or tightened"` 回 **rc=0／4 passed**；同一份合成
+#: 「R84~R87 四輪連升」語料  round-label-ok
+#: 在 `since=88` 下 `repin_growth_problems()` 回 `[]`（現行 84 回
+#: `[只升不降]`）⇒ **一行 diff 就能把款(10)(11) 整段關掉，而且沒有任何東西會轉紅**。
+#: 兩個門檻常數守得再嚴都沒有意義——把生效點推到未來，等於把判準的分母清空。
+#: 方向與另外兩個**相反但同義**：`net_cap`／`max_consecutive_rising` 只准調小（門檻更低），
+#: `SINCE` 也只准**調小**（生效點更早＝涵蓋更多輪＝判準更嚴）。三者一起由
+#: `repin_cost_ratchet_problems()` 看著。
+_REPIN_ROUND_CAP_SINCE = 84
+_REPIN_ROUND_NET_CAP = 5400
+_REPIN_MAX_CONSECUTIVE_RISING_ROUNDS = 2
+_FROZEN_REPIN_ROUND_CAP_SINCE = 84
+_FROZEN_REPIN_ROUND_NET_CAP = 5400
+_FROZEN_REPIN_MAX_CONSECUTIVE_RISING_ROUNDS = 2
+
+#: 🔴 **R84 F3／A-03：`_REPIN_ROUND_NET_CAP` 的到期義務**。上面那段自陳「取歷史最大值＝
+#: 今天零假紅」，代價是它**對現況零攔阻力**：逐輪淨額實測
+#: `[(77,3505),(78,2243),(79,3120),(80,2334),(81,3033),(82,5400),(83,5260),(84,2655)]`，
+#: 中位數 3076.5、本輪 2655 ⇒ 現行上限 5400 是本輪的 **2.03 倍**，任何一輪都碰不到它。
+#: 「下一輪把它下修到中位數帶」若只寫成散文，本 repo 已實證攔阻力為 0（鐵律一那一節的
+#: 歸因裡「宣稱先於查證」是最大桶）⇒ 做成**到期即紅**：一旦稽核痕跡出現輪號 ≥
+#: `_REPIN_NET_CAP_DUE_ROUND` 的列，而 `_REPIN_ROUND_NET_CAP` 還沒降到 `_..._DUE_TARGET`
+#: 以下，款(12) 當場轉紅。今天（最新列＝R84 < 85）為綠，所以它不是「現在就欠一筆」，
+#: 而是「下一輪動這張表時必須先付清」。
+#: 出口只有一個且與款(10)(11) 同向：**下修 `_REPIN_ROUND_NET_CAP`**（後設鎖本來就只准
+#: 往下，所以這個出口永遠開著）。刻意不留「延期」參數——可延期的到期日不是到期日。
+_REPIN_NET_CAP_DUE_ROUND = 85
+_REPIN_NET_CAP_DUE_TARGET = 3200
+
 _DELETION_CLAIM_RE = re.compile(r"刪(?:除|掉)?\s*(\d+)\s*行")
 _NOT_NET_SUBTRACTION_TOKEN = "[非淨減法輪]"
 _PER_FILE_LIST_RE = re.compile(r"CrossPlatform_R\d+_\w+\.md")
@@ -1175,16 +1267,54 @@ _PER_FILE_LIST_RE = re.compile(r"CrossPlatform_R\d+_\w+\.md")
 #: 「冒號後綴 ＋ 輪號」的形態（同 repo 既有的 `handoff-claim-verified:`／
 #: `xplat-rate-history:`），而**不用反引號包**——反引號在本 repo 是幽靈符號鎖的掃描面，
 #: 一個帶連字號與冒號的字串放進去只會製造一筆看起來像懸空引用的噪音。
+#
+#: 🔴 **R84 ZT-04：標記的形態由「行內出現這個字串」收窄為「住在 HTML 註解裡」**。
+#: 這不是潔癖，是擴掃描面（見下方 glob）的**前置條件**：擴面之前先量假紅，實測**全部命中
+#: 皆為偽陽性**——`ADR-XPLAT-006` 與 `R83_HANDOFF.md` 為了**指路**而逐字寫出了「這個標記
+#: ＋輪號」（其中一句正是 ADR 自己裁定「給 ADR 補一個標記會是誘餌標記」的那一句），
+#: 沒有一行是總量宣稱，卻會被判 `[形態不符]`。而假紅會逼下一輪的人去改
+#: 一段本來正確的散文，或直接把鎖關掉（本 repo 已為此付過學費）。
+#: 收窄的判準與現況零衝突：**每一個真正的宣稱站點自 R80 起都寫成 `<!-- 標記 -->`**
+#: （R80~R83 四輪八處實查皆是），而指路的散文一律是反引號包起來的行內文字 ⇒
+#: 兩者在形態上本來就分得開，收窄之後假紅由 4 降到 0、真站點一個不少。
 _GUARD_TOTAL_DOC_MARK = "guard-total:"
-_GUARD_TOTAL_MARK_RE = re.compile(r"(?<![\w-])guard-total:(R\d+)\b")  # 前綴不得被黏住
+_GUARD_TOTAL_MARK_RE = re.compile(r"<!--\s*guard-total:(R\d+)\s*-->")
 _GUARD_TOTAL_TRIPLE_RE = re.compile(r"(\d{4,6})\s*→\s*(\d{4,6})\D{0,16}\+\s*(\d{1,6})")
 #: 兩份：計畫書（人讀的結論）與掃描發現文件（逐檔清單的家）。**兩邊都要有**——
 #: 只有一邊時，刪掉那一邊就等於關掉本判準。
 _GUARD_TOTAL_DOC_MIN_SITES = 2
+#: 🔴 **R84 ZT-04 擴面（交棒書）**：立案事實是 `R83_HANDOFF.md` §2.3 自陳「護欄層三元組
+#: 是本輪唯一刻意寫死、且沒有機械物在守的數字」——實查為真：交棒書一份都不匹配舊的兩個
+#: glob，於是**交棒書呈給掌舵者的三個數字可以全錯而無一物轉紅**。
+#:
+#: 🔴 **R84 F3／B-2 訂正：ZT-04 那次「擴面」對它自己立案的缺陷零效果，而擴完之後
+#: 看起來像修好了**（本 repo 判過：有鎖在守假話，比沒有鎖更難看見）。實測兩件事——
+#:   ① 帶標記的站點**無一例外**都落在舊的兩個 glob 內，新掃描面一處都沒有 ⇒
+#:      Architect 注入「把 `R84_HANDOFF.md` 的護欄層三元組改成全錯值」，
+#:      `doc_guard_total_problems()` 回 `[]`。擴面擴到的是「檔案被讀進來了」，
+#:      不是「有東西被判到」。
+#:   ② `docs/04_planning/ADR/*.md` 這一面**結構上永遠咬不到**：`ADR-XPLAT-006` 已裁定
+#:      不得給 ADR 補標記（原話：那會是「誘餌標記」），而該檔內僅有的三組三元組
+#:      （ln 521／543／673，實查）是它**刻意寫壞、用來示範注入**的合成語料 ⇒ 任何
+#:      不靠標記的三元組判準一掃到它就是永久假紅。⇒ 該 glob 已移除；留著它只會讓下一個
+#:      讀者以為 ADR 有人對帳。要把 ADR 納回來，得先有一個不與 ADR-XPLAT-006 打架的
+#:      載體（例如 ADR 引用時一律指向計畫書的標記行，而不是自己複寫數字）。
+#: 交棒書那一半**改由不靠標記的款(5) 真正接手**（`handoff_guard_total_problems()`）：
+#: 以檔名輪號對上稽核痕跡的該輪合計，假紅存量實測 0（逐份見那支的 docstring）。
 _GUARD_TOTAL_DOC_GLOBS = (
     "docs/04_planning/AutoSDD_improving_*.md",
     "docs/06_quality/CrossPlatform_R*_Scan_Findings.md",
+    "docs/04_planning/R*_HANDOFF.md",
 )
+
+#: 交棒書檔名裡的輪號——款(5) 靠它把「這份文件在講哪一輪」變成可判的事實，
+#: 而不是靠人記得標記。`R84_HANDOFF.md` ⇒ 84。
+_HANDOFF_ROUND_RE = re.compile(r"(?:^|/)R(\d+)_HANDOFF\.md$")
+#: 款(5) 的生效輪次。**不追溯**，理由同款(9)(10)：實查 `R74`~`R82` 九份交棒書內
+#: 三元組數＝0（一個護欄層數字都沒寫過），追溯等於要求回頭替九份史料補寫一個當年
+#: 根本不存在的欄位；而 `R83` 是第一份自己寫出三元組的交棒書（也正是自陳「沒人在守」
+#: 的那一份）⇒ 生效點取 83，今天 R83／R84 兩份皆已相符，假紅存量 0。
+_HANDOFF_RECONCILE_SINCE = 83
 
 #: 逐檔漂移的容忍筆數（R79 收斂包）。**釘 0，且沒有理由留餘裕**——重釘時
 #: `--print-guard-lines` 會把整張表逐檔照貼，餘裕只會替下一次「淨額為零的 A 減 B 增」
@@ -1201,10 +1331,10 @@ _GUARD_LINE_DRIFT_TOLERANCE = 0
 #: 追加當輪不必動指紋（一列寬限），下一輪要再追加就必須先把前一列納入前綴並重釘，
 #: 否則 `[前綴過期]` 轉紅。草稿兩個值都由 `--print-guard-lines` 印出
 #: （ARCH-02 的教訓：紅了卻沒有出路的鎖會被關掉）。
-_REPIN_LOG_FROZEN_PREFIX_LEN = 20
+_REPIN_LOG_FROZEN_PREFIX_LEN = 22
 _REPIN_LOG_MAX_UNFROZEN_TAIL = 1
 _REPIN_LOG_HISTORY_SHA256 = (
-    "e2cf7d8a43ee07ea667c5ed61ed413c76380b448b017e40887ff8f0d0112a2d6")
+    "51db3d3691764db8c0eb089186c0e50c940f809cb0852c018fa7a1eb2f4102f7")
 
 
 def repin_log_history_digest(
@@ -1223,6 +1353,170 @@ def repin_log_history_digest(
     return hashlib.sha256(repr(tuple(log[:prefix_len])).encode("utf-8")).hexdigest()
 
 
+def repin_round_nets(
+    log: Sequence[tuple[str, int, int, int, str]]
+) -> list[tuple[int, int]]:
+    """`[(輪號, 該輪淨額合計)]`，順序保留、**同輪連續多列合併**。
+
+    為何以「輪」而不是以「列」為單位（這一點決定判準有沒有牙）：一輪可以有多次重釘
+    （實測 R79 六列、R81 五列、R82 三列），逐列判上限等於「拆成兩次就過了」，
+    而拆列的成本是零。輪號無法解析的列（合成注入用的 `Rx`／`Ry`）刻意跳過——
+    它們是純函式測試的語料，不是真實輪次。
+    """
+    out: list[tuple[int, int]] = []
+    for rnd, _old, _new, delta, _reason in log:
+        if not (rnd[:1] == "R" and rnd[1:].isdigit()):
+            continue
+        no = int(rnd[1:])
+        if out and out[-1][0] == no:
+            out[-1] = (no, out[-1][1] + delta)
+        else:
+            out.append((no, delta))
+    return out
+
+
+def repin_growth_problems(
+    log: Sequence[tuple[str, int, int, int, str]],
+    *,
+    since: int = _REPIN_ROUND_CAP_SINCE,
+    net_cap: int = _REPIN_ROUND_NET_CAP,
+    max_consecutive_rising: int = _REPIN_MAX_CONSECUTIVE_RISING_ROUNDS,
+) -> list[str]:
+    """R84 ARCH-01：重釘的**代價**（空＝通過）。純函式，紅綠由合成注入自證。
+
+    兩款，各帶方括號標籤（本檔的零串音紀律）：
+      (10) `[超出每輪上限]` 某一輪的淨額合計 > `net_cap`。
+      (11) `[只升不降]` 連續 `max_consecutive_rising + 1` 輪淨額為正 —— **本款是主牙**：
+           它把「淨行數只准往下」這句從 R77 起就寫在檔頭、卻每一列都在上升的話，
+           變成一件會擋下 push 的事。合法出口只有一個：讓某一輪的淨額 ≤ 0
+           （刪行／合併鎖檔／把散文搬進帳本），連續計數當場歸零。
+    款(12) `[到期未下修]`（`net_cap` 自己的到期義務）刻意**不住在這裡**，住在
+    `repin_cost_ratchet_problems()`：它判的是「常數該不該被下修了」，與傳進來的那張表
+    無關——放在本函式會讓每一份輪號較大的**合成語料**都跟著鳴叫
+    （實測：R99 的追加對照組  round-label-ok
+    當場轉紅），而那是串音，不是鑑別力。
+
+    只判輪號 ≥ `since` 的輪次（WHY 見常數區塊：追溯會讓整段歷史同時轉紅而無人補得回）。
+    🔴 `since` 本身也是門檻，且**只准調小**——把它推到未來就等於清空本判準的分母
+    （F3／B-1 注入實測：改成 99 之後四支測試照樣全綠）；看著它的是
+    `repin_cost_ratchet_problems()`，與另外兩個常數同一支後設鎖。
+    三個參數刻意可傳：注入測試要能用小值造出紅綠兩側，否則它們只在「真表剛好踩線」時
+    才有鑑別力（同 `repin_log_problems()` 對 digest 兩參數已寫過的理由）。
+
+    誠實劃界：本判準看的是**表上宣告的淨額**，不是磁碟。有人把成長挪到 `tools/tests/`
+    以外的樹（`AutoClaude/tests/`、`.claude/hooks/`）時本款一句話都不會說——那是量測面
+    的邊界，不是本款的漏洞；護欄層的定義住 `_GUARD_DIR_REL`／`_GUARD_LINE_PATTERN`。
+    """
+    problems: list[str] = []
+    nets = [(no, delta) for no, delta in repin_round_nets(log) if no >= since]
+    for no, delta in nets:
+        if delta > net_cap:
+            problems.append(
+                f"[超出每輪上限] R{no} 的重釘淨額合計 +{delta} 超過每輪上限 {net_cap}"
+                "——該上限是歷來單輪最大淨額的實測值、且只准下修"
+                f"（`repin_cost_ratchet_problems()` 看著）。出口不是調高它："
+                "同一輪內把等量以上的行刪掉／合併鎖檔／把史料搬進帳本，"
+                "或把這一輪的成長拆給下一輪（拆輪次不是拆列，同輪多列會被合併計算）")
+    run: list[int] = []
+    worst: list[int] = []
+    for no, delta in nets:
+        if delta > 0:
+            run.append(no)
+            if len(run) > len(worst):
+                worst = list(run)
+        else:
+            run = []
+    if len(worst) > max_consecutive_rising:
+        problems.append(
+            f"[只升不降] 連續 {len(worst)} 輪的重釘淨額都是正的"
+            f"（R{'／R'.join(str(n) for n in worst)}），上限是 {max_consecutive_rising} 輪"
+            "——這正是 R84 ARCH-01 的缺陷本體：本表自稱「淨行數只准往下」，"
+            "而立案當時表上每一列都是上升、零列下降（R77→R83 共 +24,895／+46%），"
+            "重釘的唯一成本是「補一列紀錄」。合法出口只有一個：讓某一輪的淨額 ≤ 0"
+            "（刪行／合併鎖檔／把 WHY 與史料搬進 `docs/06_quality/AutoSDD_Defect_Log.md`），"
+            "連續計數即歸零。**不要調高這兩個常數**——它們只准下修，"
+            "而放寬會讓成熟度 M1（總量連續三輪不上升）永遠只是一句話")
+    return problems
+
+
+def repin_cost_ratchet_problems(
+    current_cap: int | None = None,
+    current_run: int | None = None,
+    current_since: int | None = None,
+    *,
+    frozen_cap: int | None = None,
+    frozen_run: int | None = None,
+    frozen_since: int | None = None,
+    latest_round: int | None = None,
+    due_round: int = _REPIN_NET_CAP_DUE_ROUND,
+    due_target: int = _REPIN_NET_CAP_DUE_TARGET,
+) -> list[str]:
+    """R84 ARCH-01 的**後設鎖**：三個代價常數只准往「更嚴」的方向改（空＝通過）。
+
+    🔴 **R84 F3／B-1：`_REPIN_ROUND_CAP_SINCE` 是本組原本唯一沒被守的常數，而它的
+    威力最大**——另外兩個調的是門檻高低，它調的是**分母**：把生效輪次推到未來，款(10)(11)
+    就沒有任何一列可判。注入實測（當回合）：副本的 `SINCE` 由 84 改成 99 之後
+    `-k "cost_envelope or rising or net_cap or tightened"` 仍 **rc=0／4 passed**；
+    `repin_growth_problems(<R84~R87 四輪連升>, since=88)` 回 `[]`。  round-label-ok
+    ⇒ 「一行 diff 關掉整段判準且無一物轉紅」正是 ARCH-01 在治的那個病，只是這次長在
+    防它的機制上（同款(6)(7) 對稽核痕跡自己的假話所下的判詞）。
+    方向與另外兩個相反但同義：`SINCE` **只准調小**（更早生效＝涵蓋更多輪＝更嚴）。
+
+    🔴 **R84 F3／A-03：款(12) `[到期未下修]` 也住這裡**——它判的是「`net_cap` 這把尺自己
+    該不該被下修了」，而不是某一張表的內容，所以家在後設鎖而不是 `repin_growth_problems()`
+    （放在那邊會讓每一份輪號較大的合成語料一起鳴叫＝串音；R99 追加對照組實測轉紅）。  round-label-ok
+    `latest_round` 預設現查真表，注入測試可傳；`due_round`／`due_target` 同理。
+
+    形狀刻意照 `frozen_ratchet_problems()`（凍結基準版，非 git 導出版）：基準是簽入本檔的
+    字面常數，故 commit 不動它、`checkout` 不動它、CI 乾淨樹也不動它 ⇒ 比較在任何時點、
+    任何消費者身上都非退化。若改用 `git show HEAD:<本檔>`，commit 一落地基準就等於現值，
+    而每一個真正消費本鎖 rc 的閘門都跑在 commit 之後（SA-R67-08 的實證）。
+
+    殘餘面（誠實揭露，與 `_FROZEN_MAX_BASELINE_ENTRIES` 那一組同一句話）：同一個 commit
+    內**同時**改門檻與凍結基準仍可通過。這是所有釘選式棘輪共有的邊界；本組是純量，
+    調升在 diff 上就是兩個一起變大的數字，方向一望即知。
+    """
+    cap = _REPIN_ROUND_NET_CAP if current_cap is None else current_cap
+    run = (_REPIN_MAX_CONSECUTIVE_RISING_ROUNDS
+           if current_run is None else current_run)
+    base_cap = _FROZEN_REPIN_ROUND_NET_CAP if frozen_cap is None else frozen_cap
+    base_run = (_FROZEN_REPIN_MAX_CONSECUTIVE_RISING_ROUNDS
+                if frozen_run is None else frozen_run)
+    since = _REPIN_ROUND_CAP_SINCE if current_since is None else current_since
+    base_since = (_FROZEN_REPIN_ROUND_CAP_SINCE
+                  if frozen_since is None else frozen_since)
+    problems: list[str] = []
+    if since > base_since:
+        problems.append(
+            f"_REPIN_ROUND_CAP_SINCE 由 R{base_since} 推遲為 R{since}——本常數只准調小"
+            "（更早生效＝涵蓋更多輪＝判準更嚴）。它不是門檻而是**分母**：把生效點推到"
+            "未來，款(10)(11) 就沒有任何一列可判，等於一行 diff 關掉整段代價機制"
+            "（F3／B-1 注入實測：改成 R99 之後那四支測試仍全數通過）")
+    live_round = (max((no for no, _d in repin_round_nets(_GUARD_LINES_REPIN_LOG)),
+                      default=0) if latest_round is None else latest_round)
+    if live_round >= due_round and cap > due_target:
+        problems.append(
+            f"[到期未下修] 稽核痕跡已經走到 R{live_round}（到期輪＝R{due_round}），"
+            f"而 _REPIN_ROUND_NET_CAP 仍是 {cap}、高於到期目標 {due_target}——"
+            "該上限取的是**歷來單輪最大值**（R82 那一輪），常數註解自己就寫著「今天不擋"
+            "任何既有行為」：逐輪淨額中位數 3076.5、R84 實測 2655 ⇒ 尺是本輪的 2.03 倍，"
+            "沒有任何一輪碰得到它。款(10) 問「這一輪長太多了嗎」，本款問「**那把尺自己"
+            "是不是還是史上最寬的那一把**」。出口只有一個且永遠開著："
+            f"把 _REPIN_ROUND_NET_CAP 下修到 ≤ {due_target}"
+            "（本後設鎖只擋調升，下修不必動任何凍結基準）。"
+            "刻意沒有「延期」參數——可延期的到期日不是到期日")
+    if cap > base_cap:
+        problems.append(
+            f"_REPIN_ROUND_NET_CAP 由 {base_cap} 調升為 {cap}——本常數只准往下改。"
+            "調高它就是把「重釘要付代價」這件事本身取消掉（R84 ARCH-01）")
+    if run > base_run:
+        problems.append(
+            f"_REPIN_MAX_CONSECUTIVE_RISING_ROUNDS 由 {base_run} 調升為 {run}"
+            "——本常數只准往下改。它是成熟度 M1「連續三輪不上升」的機械面，"
+            "放寬等於把 M1 的達標條件改寫成一句永遠成立的話")
+    return problems
+
+
 def repin_log_problems(
     log: Sequence[tuple[str, int, int, int, str]],
     frozen_total: int,
@@ -1230,6 +1524,9 @@ def repin_log_problems(
     history_digest: str | None = None,
     prefix_len: int = 0,
     max_unfrozen_tail: int | None = None,
+    cost_since: int = _REPIN_ROUND_CAP_SINCE,
+    net_cap: int = _REPIN_ROUND_NET_CAP,
+    max_consecutive_rising: int = _REPIN_MAX_CONSECUTIVE_RISING_ROUNDS,
 ) -> list[str]:
     """重釘稽核痕跡的違規清單（空＝通過）。純函式，紅綠由合成注入自證。
 
@@ -1246,6 +1543,9 @@ def repin_log_problems(
           納入前綴，久了整段尾巴又回到「可自由改寫」的狀態。
       (9) `[未附刪除清單]` 淨額為正、卻沒有量化刪除交代／沒有明文承認不是淨減法輪／
           沒有指名逐檔清單住哪 —— **本款把「調高基線要附刪除清單」由訊息文字升為判準**。
+      (10)(11) `[超出每輪上限]`／`[只升不降]` —— R84 ARCH-01，實作在
+          `repin_growth_problems()`（那裡有完整立案量測與形狀取捨）。款(9) 強制的是
+          **承認**，不是不准成長；這兩款是第一次讓「不准無限成長」有機械面。
 
     🔴 **(6)(7) 是 R79 收斂包補的，它們治的是這張表自己的假話**：檔頭逐字寫著
     「**append-only**」，而 R79 掃描實測 append-only **零機械強制**——把 R77＋R78 兩列
@@ -1308,6 +1608,9 @@ def repin_log_problems(
                     "**且**②指名一份 `CrossPlatform_R<輪號>_*.md` 當逐檔清單的家。"
                     "在 R80 之前這件事只是印在 glc_growth_problem() 失敗訊息裡的建議——"
                     "訊息沒有牙，於是同一輪內可以反覆自助放行（掃描 S5-02：收費站不是棘輪）")
+    problems.extend(repin_growth_problems(
+        log, since=cost_since, net_cap=net_cap,
+        max_consecutive_rising=max_consecutive_rising))
     if log[-1][2] != frozen_total:
         problems.append(
             f"[未對帳] 稽核痕跡表尾的新總量 {log[-1][2]} 不等於 _FROZEN_GUARD_LINES 實際總量 "
@@ -1348,6 +1651,11 @@ def doc_guard_total_problems(
     誠實劃界：本判準保證「被標出來的那一行講的是今天的數字、且算術自洽」，
     **不保證作者把每一個該標的地方都標到了**——與款(4) 只保證有一列、不保證理由是好理由
     同型。要涵蓋「漏標」得先有「哪些句子算引用」的判準，那是關鍵詞啟發式，會誤殺史料。
+
+    🔴 **R84 F3／B-2：上一段那個劃界，正是 ZT-04 擴面失效的原因**——交棒書從來沒有人
+    標，於是「擴大掃描面」擴到的只是「檔案被讀進來了」。**漏標**那一半改由不靠標記的
+    款(5) `handoff_guard_total_problems()` 接手（錨＝檔名輪號 ↔ 稽核痕跡該輪合計）；
+    本函式維持只判「標了的行」，兩者刻意分開（不同的錨、不同的失效形態、零串音）。
     """
     problems: list[str] = []
     sites = 0
@@ -1381,6 +1689,74 @@ def doc_guard_total_problems(
             f"[未登記] 帶 `{_GUARD_TOTAL_DOC_MARK}{latest_round}` 標記的行只有 {sites} 處，"
             f"少於 {min_sites} —— 本輪的累積淨額必須在計畫書與掃描發現文件**兩邊**都寫得"
             f"出來。掃描面：{'、'.join(_GUARD_TOTAL_DOC_GLOBS)}")
+    return problems
+
+
+def handoff_guard_total_problems(
+    docs: Mapping[str, str],
+    log: Sequence[tuple[str, int, int, int, str]],
+    *,
+    since: int = _HANDOFF_RECONCILE_SINCE,
+) -> list[str]:
+    """款(5) `[交棒書未對帳]`：交棒書的護欄層三元組 ↔ 稽核痕跡（空＝通過）。純函式。
+
+    🔴 **立案（R84 F3／B-2，Architect 當回合注入實測）**：ZT-04 把掃描面擴到交棒書與
+    ADR，但**帶標記的站點全數落在舊的兩個 glob 內** ⇒ 新面一處都沒判到；把
+    `R84_HANDOFF.md` 的三元組改成全錯值，`doc_guard_total_problems()` 回 `[]`。
+    而該檔逐字寫著 `79083 → 81738（+2655）`、**零標記**——它是呈給掌舵者的那個數字，
+    卻是全庫唯一一個「寫在活文件上、沒有任何東西看得到」的護欄層宣稱。
+
+    **為何不能沿用標記機制**：標記要人記得寫，而「沒寫」正是這裡的失效形態本身
+    （R83／R84 兩份交棒書都沒寫）。⇒ 本款改用**檔名輪號**當錨：`R<N>_HANDOFF.md`
+    講的就是第 N 輪，第 N 輪的護欄層合計是稽核痕跡上算得出來的事實
+    （同輪多列合併，同 `repin_round_nets()` 的單位選擇）⇒ 對帳不需要任何人記得標。
+
+    **為何不是「掃到三元組就對帳」**（那是最先想到的形狀，量過之後駁回）：擴面後的掃描面
+    上三元組字面**遠多於真正的宣稱站點**，其中絕大多數是**史料與逐檔行數**——
+    `CrossPlatform_R81` 一份就佔了最大宗（`2282 → 3085（+803）` 這種是單一鎖檔的行數，
+    不是累積總量）、`ADR-XPLAT-006` 內的則是刻意寫壞的注入語料。全判等於製造大量假紅，
+    而假紅會逼下一個人把整道鎖關掉（本 repo 已為此付過學費，見 `_GUARD_TOTAL_MARK_RE`
+    上方的 ZT-04 收窄）。本款只問一句話：**該輪的交棒書裡，有沒有一組三元組逐字等於
+    稽核痕跡替該輪算出來的 (起點, 總量, 淨額)**——其餘三元組一律不管（它們是史料）。
+
+    假紅存量（落地當回合對 `R*_HANDOFF.md` **逐份**實測）：R74/R75/R76 無稽核列⇒跳過；
+    R77~R82 的三元組數**皆為零**（生效點 `since=83` 之外，且本來就沒寫過這個數字）；
+    R83 命中 `(73823, 79083, 5260)`＝該輪合計 ✅；R84 命中 `(79083, 81738, 2655)` ✅。
+    ⇒ **假紅存量為空**，同輪不需要修任何一份文件。逐份重跑見
+    `test_the_handoff_criterion_is_deliberately_not_retroactive`（第二段直接量磁碟）。
+
+    誠實劃界：① 本款保證「該輪交棒書寫得出正確的三元組」，**不保證它沒有同時寫出別的
+    錯數字**（那需要「哪些句子算引用」的判準，會誤殺史料——與款(4) 只保證有一列、
+    不保證理由是好理由同型）；② ADR 不在射程內，理由見 `_GUARD_TOTAL_DOC_GLOBS`
+    上方（ADR-XPLAT-006 已裁定不得補標記，且該檔的三元組是刻意寫壞的注入語料）。
+    """
+    agg: dict[int, tuple[int, int, int]] = {}
+    for rnd, old, new, delta, _reason in log:
+        if not (rnd[:1] == "R" and rnd[1:].isdigit()):
+            continue
+        no = int(rnd[1:])
+        agg[no] = ((agg[no][0], new, agg[no][2] + delta) if no in agg
+                   else (old, new, delta))
+    problems: list[str] = []
+    for rel in sorted(docs):
+        mo = _HANDOFF_ROUND_RE.search(rel)
+        if mo is None or int(mo.group(1)) < since:
+            continue
+        want = agg.get(int(mo.group(1)))
+        if want is None:
+            continue
+        found = [tuple(int(g) for g in t.groups())
+                 for t in _GUARD_TOTAL_TRIPLE_RE.finditer(docs[rel])]
+        if want in found:
+            continue
+        problems.append(
+            f"[交棒書未對帳] {rel} 讀不到本輪護欄層三元組 "
+            f"{want[0]} → {want[1]}（+{want[2]}）——那是稽核痕跡替 R{mo.group(1)} 算出來的"
+            f"合計（同輪多列已合併）。實得三元組：{found or '一組都沒有'}。"
+            "交棒書是呈給掌舵者的那個數字，而在本款之前它是全庫唯一「寫在活文件上、"
+            "沒有任何東西看得到」的護欄層宣稱（F3／B-2 立案：改成全錯值仍 rc=0）。"
+            "修法：重釘之後把交棒書那一行同步成上面的三個數字"
+            "（草稿：python tools/tests/test_adr_xplat001_c1c2_lock.py --print-guard-lines）")
     return problems
 
 
@@ -2741,6 +3117,161 @@ class TestGuardLayerRatchet(unittest.TestCase):
         self.assertFalse(
             _judge("R81", -5, long_enough), "淨額為負仍被本款判紅 ⇒ 它在懲罰正確方向")
 
+    # ── R84 ARCH-01：重釘要付代價（款(10)(11)＋後設鎖）────────────────────────
+    def _rising(self, no: int, delta: int = 100) -> tuple[str, int, int, int, str]:
+        """一列「淨額為正且已交代」的合成重釘（供款(10)(11) 的紅綠兩側共用）。"""
+        return (f"R{no}", 1000, 1000 + delta, delta,
+                f"合成列，理由夠長夠長夠長 {_NOT_NET_SUBTRACTION_TOKEN} "
+                f"CrossPlatform_R{no}_Scan_Findings.md")
+
+    def test_the_real_repin_log_stays_inside_the_cost_envelope(self) -> None:
+        """綠側（真表）：款(10)(11) 對現況零違規——**且這正是「不追溯」的證據**。
+
+        WHY 這一格非有不可：真表**每一列都在上升**（立案量測：R77→R83 +24,895／零列
+        下降）。若判準沒有 `_REPIN_ROUND_CAP_SINCE` 這道生效點，它上線的當回合就會把
+        整段歷史判紅，而那些列受款(7) 的 append-only 指紋保護、沒有任何人補得回來 ⇒
+        下一個人唯一的出路是把整道鎖刪掉（ARCH-02 已判過這個形狀）。
+        """
+        self.assertEqual(
+            repin_growth_problems(_GUARD_LINES_REPIN_LOG), [],
+            "款(10)(11) 對真表說話了——它們刻意不追溯到 "
+            f"R{_REPIN_ROUND_CAP_SINCE} 之前，請檢查生效點是否被改動")
+        nets = repin_round_nets(_GUARD_LINES_REPIN_LOG)
+        self.assertTrue(
+            nets and all(delta > 0 for _no, delta in nets),
+            f"立案量測已不成立（實得逐輪淨額 {nets}）——若真的出現了下降的輪次，"
+            "這是好事：請把本斷言改寫成新的實況，並考慮下修那兩個代價常數")
+
+    def test_a_third_consecutive_rising_round_is_red(self) -> None:
+        """🔴 注入＝款(11) 的主牙：連續三輪淨額為正 ⇒ `[只升不降]` 必紅。
+
+        這是 ARCH-01 的缺陷本體本身：立案時「重釘」的唯一成本是補一列紀錄，於是每一次
+        都通過。三格一組（兩輪綠／三輪紅／中間插一輪 ≤ 0 又綠）證明它既有牙、又不是
+        恆紅——出口存在且明確（讓某一輪淨額 ≤ 0），這是本 repo 對「紅了要有出路」的要求。
+        """
+        since = _REPIN_ROUND_CAP_SINCE
+        two = tuple(self._rising(since + i) for i in range(2))
+        self.assertEqual(
+            [p for p in repin_growth_problems(two) if "[只升不降]" in p], [],
+            f"連兩輪上升就判紅 ⇒ 比宣告的上限 {_REPIN_MAX_CONSECUTIVE_RISING_ROUNDS} 更嚴，"
+            "本輪合法的重釘會做不到")
+        three = (*two, self._rising(since + 2))
+        problems = repin_growth_problems(three)
+        self.assertTrue(
+            any("[只升不降]" in p for p in problems),
+            f"連續三輪只升不降竟然放行 ⇒ ARCH-01 沒有被修；實得：{problems}")
+        self.assertFalse(
+            [p for p in problems if "[超出每輪上限]" in p],
+            "本注入不該驚動款(10)，否則證明不了是方向那一款在說話（零串音）")
+        healed = (*two,
+                  (f"R{since + 2}", 1000, 900, -100, "合成列：把兩支鎖檔合併，淨額為負"),
+                  self._rising(since + 3))
+        self.assertEqual(
+            [p for p in repin_growth_problems(healed) if "[只升不降]" in p], [],
+            "中間插入一輪淨額 ≤ 0 之後仍紅 ⇒ 連續計數沒有歸零，那條出口是假的")
+
+    def test_a_round_that_exceeds_the_net_cap_is_red(self) -> None:
+        """注入＝款(10)：單輪淨額超過上限 ⇒ `[超出每輪上限]` 必紅（踩線那格為綠）。
+
+        另一格證明**同輪多列會被合併計算**：拆成兩列各半、合計仍超限 ⇒ 照樣紅。
+        少了這一格，繞過本款的成本是「多打一列」，而那正是款(4) 當年沒有守住的形狀。
+        """
+        since, cap = _REPIN_ROUND_CAP_SINCE, _REPIN_ROUND_NET_CAP
+        at_par = (self._rising(since, cap),)
+        self.assertEqual(
+            [p for p in repin_growth_problems(at_par) if "[超出每輪上限]" in p], [],
+            "淨額等於上限竟然判紅 ⇒ 上限的語意變成「嚴格小於」，與訊息文字不符")
+        over = (self._rising(since, cap + 1),)
+        self.assertTrue(
+            any("[超出每輪上限]" in p for p in repin_growth_problems(over)),
+            "淨額超過上限竟然放行 ⇒ 款(10) 沒有牙")
+        split = (self._rising(since, cap // 2 + 1), self._rising(since, cap // 2 + 1))
+        self.assertTrue(
+            any("[超出每輪上限]" in p for p in repin_growth_problems(split)),
+            "把一輪的成長拆成兩列就繞過上限 ⇒ 計數單位必須是「輪」而不是「列」")
+
+    def test_the_effective_round_anchor_is_the_widest_escape_hatch(self) -> None:
+        """🔴 F3／B-1 注入：`_REPIN_ROUND_CAP_SINCE` 一旦被推遲，款(10)(11) 整段失效。
+
+        本格先證明那個逃生口**是真的**（否則下一格的後設鎖是在守一件不存在的事），
+        再由下一格證明它已經被鎖住。分兩格而不是併成一格：一格證「病在」、一格證「藥有效」，
+        併起來的話藥失效時病那半仍會綠（本檔零串音紀律的同一句話）。
+        """
+        since = _REPIN_ROUND_CAP_SINCE
+        rising = tuple(self._rising(since + i) for i in range(4))
+        self.assertTrue(
+            any("[只升不降]" in p for p in repin_growth_problems(rising)),
+            "四輪連升在現行生效點下竟然放行 ⇒ 這一格的前提不成立，後面證不了逃生口")
+        self.assertEqual(
+            repin_growth_problems(rising, since=since + 4), [],
+            "把生效點推到那四輪之後竟然還判得到 ⇒ 本格對「分母被清空」這件事失明，"
+            "請確認 `since` 真的在過濾輪次")
+
+    def test_the_cost_constants_can_only_be_tightened(self) -> None:
+        """後設鎖：三個代價常數只准往更嚴的方向改（放寬即紅、收緊為綠）。
+
+        WHY：款(10)(11) 的門檻若可以順手調高，它們與「補一列紀錄」這道零成本手續就沒有
+        差別了——那正是 ARCH-01 在治的病。形狀照 `frozen_ratchet_problems()`（凍結基準版，
+        不走 git；理由見那支的 docstring）。
+
+        🔴 **R84 F3／B-1：第三個常數 `_REPIN_ROUND_CAP_SINCE` 原本不在本格射程內**，
+        而它是三者中威力最大的——另外兩個調門檻，它調**分母**。Architect 注入實測：
+        副本的 `SINCE` 由 84 改成 99，`-k "cost_envelope or rising or net_cap or
+        tightened"` 仍 rc=0／4 passed ⇒ 一行 diff 關掉整段代價機制、無一物轉紅。
+        """
+        self.assertEqual(
+            repin_cost_ratchet_problems(), [],
+            "現行代價常數已高於簽入的凍結基準——調升被禁止，請改回或連同基準一起下修")
+        self.assertTrue(
+            repin_cost_ratchet_problems(current_cap=_FROZEN_REPIN_ROUND_NET_CAP + 1),
+            "調高每輪淨額上限竟然放行 ⇒ 後設鎖沒有牙")
+        self.assertTrue(
+            repin_cost_ratchet_problems(
+                current_run=_FROZEN_REPIN_MAX_CONSECUTIVE_RISING_ROUNDS + 1),
+            "調高「連續上升輪數」上限竟然放行 ⇒ M1 的機械面可以被一行字取消掉")
+        self.assertTrue(
+            repin_cost_ratchet_problems(
+                current_since=_FROZEN_REPIN_ROUND_CAP_SINCE + 1),
+            "把生效輪次往後推竟然放行 ⇒ 上一格證明的那個逃生口仍然開著："
+            "門檻守得再嚴，判準的分母可以被一行 diff 清空")
+        self.assertEqual(
+            repin_cost_ratchet_problems(
+                current_cap=_FROZEN_REPIN_ROUND_NET_CAP - 1,
+                current_run=max(0, _FROZEN_REPIN_MAX_CONSECUTIVE_RISING_ROUNDS - 1),
+                current_since=_FROZEN_REPIN_ROUND_CAP_SINCE - 1),
+            [], "把三個常數都往更嚴的方向改竟然判紅 ⇒ 後設鎖在懲罰正確方向"
+                "（`SINCE` 的「更嚴」方向是**變小**——更早生效＝涵蓋更多輪）")
+
+    def test_the_net_cap_carries_a_due_date_that_turns_red_on_its_own(self) -> None:
+        """🔴 F3／A-03 款(12)：`_REPIN_ROUND_NET_CAP` 的到期義務是閘門，不是散文。
+
+        WHY 這一格非有不可：款(10) 的上限取的是**歷來單輪最大值**，逐輪淨額實測
+        `[(77,3505),(78,2243),(79,3120),(80,2334),(81,3033),(82,5400),(83,5260),(84,2655)]`
+        ⇒ 中位數 3076.5、R84 為 2655，上限 5400 是本輪的 2.03 倍，**今天不擋任何行為**。
+        常數註解自己也是這樣寫的。而「下一輪再下修」這種到期義務，本 repo 已實證
+        散文形態的攔阻力為 0（鐵律一那一節的失誤歸因：最大桶是「宣稱先於查證」）。
+
+        三格一組：今天為綠（未到期）／到期而未下修為紅／到期且已下修回綠——
+        第三格證明出口存在且不必動任何凍結基準（後設鎖只擋調升，下修永遠開著）。
+        """
+        self.assertEqual(
+            [p for p in repin_cost_ratchet_problems() if "[到期未下修]" in p], [],
+            "真表今天就被款(12) 判紅 ⇒ 到期輪設得太早，本輪自己付不出來；"
+            f"最新列＝{_GUARD_LINES_REPIN_LOG[-1][0]}、到期輪＝R{_REPIN_NET_CAP_DUE_ROUND}")
+        self.assertTrue(
+            any("[到期未下修]" in p for p in repin_cost_ratchet_problems(
+                latest_round=_REPIN_NET_CAP_DUE_ROUND)),
+            "稽核痕跡已走到到期輪、上限卻還是史上最寬的那一把，竟然放行 ⇒ "
+            "到期義務又退回散文")
+        self.assertEqual(
+            repin_cost_ratchet_problems(
+                current_cap=_REPIN_NET_CAP_DUE_TARGET,
+                latest_round=_REPIN_NET_CAP_DUE_ROUND), [],
+            "已經下修到目標值卻仍判紅 ⇒ 這道鎖沒有出口，實務上一定被整個關掉（ARCH-02）")
+        self.assertLess(
+            _REPIN_NET_CAP_DUE_TARGET, _REPIN_ROUND_NET_CAP,
+            "到期目標不低於現行上限 ⇒ 款(12) 是一句永遠成立的話")
+
     # ── R80 二審（NEW-SA2-01＝QA2-N2）：文件側引用的累積總量也要對帳 ────────────
     def _latest_round(self) -> str:
         return _GUARD_LINES_REPIN_LOG[-1][0]
@@ -2813,11 +3344,150 @@ class TestGuardLayerRatchet(unittest.TestCase):
         self.assertTrue(
             any("[未登記]" in p for p in doc_guard_total_problems(gone, total, latest)),
             "把標記整個拿掉竟然放行 ⇒ 本判準可以靠刪一行關掉")
+        # 🔴 R84：替換文字必須**保留 HTML 註解形態**（判準自 R84 起只認註解內的標記）。
+        # 寫成裸 `guard-total:R01` 會讓這一注入退化成「標記整個消失」＝與上一格同款，
+        # 而本格要驗的是「標記在、但輪號是舊的」這個**不同**的形態（零串音）。
         aged = self._marked_docs(
-            lambda line: _GUARD_TOTAL_MARK_RE.sub("guard-total:R01", line))
+            lambda line: _GUARD_TOTAL_MARK_RE.sub("<!-- guard-total:R01 -->", line))
         self.assertTrue(
             any("[未登記]" in p for p in doc_guard_total_problems(aged, total, latest)),
             "只有舊輪號的標記竟然算本輪達標 ⇒ 綠會被上一輪繼承下去")
+
+    def test_the_extended_doc_surface_covers_the_handoff_without_false_reds(
+            self) -> None:
+        """🔴 R84 ZT-04（F3／B-2 訂正版）：擴面必須**真的**含交棒書，且對現況零假紅。
+
+        立案（`R83_HANDOFF.md` §2.3 自陳「唯一刻意寫死、且沒有機械物在守」，實查為真）：
+        舊的兩個 glob 一份交棒書都不匹配 ⇒ 呈給掌舵者的三元組可以全錯而無一物轉紅。
+        本格把「擴面」與「零假紅」兩件事一起釘住，因為它們互為對方的前提：
+          · 擴面若沒生效（glob 寫壞／檔名慣例變了），下面那個「零假紅」會恆綠＝假的安心；
+          · 收窄若沒生效，擴面當回合的每一筆命中都是假紅（`R83_HANDOFF.md` 為了指路而
+            逐字寫出標記＋輪號），而假紅會逼下一輪關掉整道鎖。
+
+        🔴 **F3／B-2：本格原本還斷言掃描面含 `docs/04_planning/ADR/`，而那一面是空的**——
+        帶標記的站點全數落在舊的兩個 glob 內，ADR 一處都沒有，也永遠不會有
+        （`ADR-XPLAT-006` 已裁定不得給 ADR 補標記）。於是本格當時斷言的是「檔案被讀進來
+        了」，而不是「有東西被判到」，read 起來卻像後者。ADR glob 已移除，改由本格第一段
+        釘住「不准再加回來」——要加回來得先有一個不與該 ADR 打架的載體。
+        """
+        docs = guard_total_docs_in_worktree()
+        self.assertTrue(
+            [rel for rel in docs if "_HANDOFF.md" in rel],
+            "擴面沒生效：掃描面內找不到任何交棒書——glob 寫壞或檔名慣例變了；"
+            f"現行掃描面＝{_GUARD_TOTAL_DOC_GLOBS}")
+        self.assertEqual(
+            # 鍵由 guard_total_docs_in_worktree() 的 as_posix() 產生，非 os.sep
+            [rel for rel in docs if "/ADR/" in rel], [],  # posix-abs-ok: as_posix 鍵
+            "ADR 又被加回掃描面了——它在標記機制下結構上零站點（ADR-XPLAT-006 裁定不得補"
+            "標記），而該目錄內僅有的三元組是刻意寫壞的注入語料 ⇒ 加回來只會讓下一個讀者"
+            "以為 ADR 有人對帳（F3／B-2 立案的「有鎖在守假話」本體）。真的要納入，"
+            "請先給它一個不與 ADR-XPLAT-006 打架的載體，並在本格寫出那個載體是什麼")
+        self.assertEqual(
+            doc_guard_total_problems(
+                docs, sum(_FROZEN_GUARD_LINES.values()), self._latest_round()),
+            [],
+            "擴面後的文件側對帳出現違規——若是那幾行「為了指路而逐字寫出標記」的散文被算成"
+            "站點，請確認 `_GUARD_TOTAL_MARK_RE` 仍只認 HTML 註解形態（R84 ZT-04 的收窄）")
+        # 🔴 刻意**不綁本輪輪號**：那 4 行是 R83 的史料，會一直留在樹裡；綁本輪的話，
+        # 下一次收尾重釘（輪號一換）就會讓這一格因為「找不到本輪的散文」而紅，而那與
+        # 鑑別力毫無關係——一個會在正常流程下自己轉紅的鎖，實務上一定被關掉（ARCH-02）。
+        prose = [
+            (rel, lineno)
+            for rel, text in docs.items()
+            for lineno, line in enumerate(text.splitlines(), 1)
+            if re.search(rf"{_GUARD_TOTAL_DOC_MARK}R\d+", line)
+            and _GUARD_TOTAL_MARK_RE.search(line) is None
+        ]
+        self.assertTrue(
+            prose,
+            "掃描面內已經沒有任何「行內逐字提到標記＋輪號」的散文了——擴面當回合那些假紅的"
+            "來源消失，本格的第二段斷言退化為恆綠。請改以合成語料保住鑑別力，"
+            "或確認擴面是否已漂移")
+
+    # ── R84 F3／B-2：交棒書的三元組（款(5)，不靠標記） ──────────────────────────
+    def _live_handoff(self) -> tuple[str, tuple[int, int, int]]:
+        """掃描面上「輪號最大且稽核痕跡算得出合計」的那份交棒書 ＋ 它該寫的三元組。
+
+        刻意現查而不寫死 `R84_HANDOFF.md`：輪號每輪會變，寫死的那一刻本組注入就綁在
+        某一輪上（本 repo 對「把當下的偶然事實寫成常數」已有多次判例）。
+        """
+        docs = guard_total_docs_in_worktree()
+        agg: dict[int, tuple[int, int, int]] = {}
+        for rnd, old, new, delta, _r in _GUARD_LINES_REPIN_LOG:
+            if rnd[:1] == "R" and rnd[1:].isdigit():
+                no = int(rnd[1:])
+                agg[no] = ((agg[no][0], new, agg[no][2] + delta) if no in agg
+                           else (old, new, delta))
+        cands = [(int(m.group(1)), rel) for rel in docs
+                 if (m := _HANDOFF_ROUND_RE.search(rel))
+                 and int(m.group(1)) >= _HANDOFF_RECONCILE_SINCE
+                 and int(m.group(1)) in agg]
+        self.assertTrue(
+            cands,
+            "掃描面上找不到任何「輪號 ≥ 生效點且稽核痕跡有該輪列」的交棒書 ⇒ 款(5) 的"
+            f"分母是空的、綠側恆綠。現行生效點＝R{_HANDOFF_RECONCILE_SINCE}")
+        no, rel = max(cands)
+        return rel, agg[no]
+
+    def test_the_round_handoff_reconciles_its_guard_triplet(self) -> None:
+        """綠側（真交棒書＋真稽核痕跡）：款(5) 對現況零違規，且分母非空。
+
+        立案見 `handoff_guard_total_problems()` 的 docstring：ZT-04 把交棒書納入掃描面，
+        但判準只認標記，而交棒書從來沒有人標 ⇒ 擴面對它自己立案的缺陷零效果
+        （Architect 注入：把 `R84_HANDOFF.md` 三元組改成全錯值，舊判準回 `[]`）。
+        """
+        rel, want = self._live_handoff()
+        self.assertEqual(
+            handoff_guard_total_problems(
+                guard_total_docs_in_worktree(), _GUARD_LINES_REPIN_LOG), [],
+            f"交棒書側對帳不合規——最新一份是 {rel}，它該寫的是 "
+            f"{want[0]} → {want[1]}（+{want[2]}）")
+
+    def test_a_wrong_triplet_in_the_real_handoff_is_red(self) -> None:
+        """🔴 注入（真檔、記憶體內改字）＝款(5) 的主牙：三元組寫錯 ⇒ 必紅。
+
+        這正是 Architect 那筆 blocking 的複現：同一個注入在舊判準（`doc_guard_total_
+        problems()`）下回 `[]`，因為交棒書一個標記都沒有。本格改用檔名輪號當錨，
+        所以「沒人記得標」不再等於「沒有東西可判」。
+
+        注入刻意**只改數字、保留三元組形態**：真實失效形態是「重釘了、交棒書沒跟上」，
+        那時檔上仍有一組看起來很像的數字。把三元組整組刪掉是另一種形態（誠實劃界寫在
+        判準的 docstring 裡：那等於不再宣稱，本款不管）。
+        """
+        rel, want = self._live_handoff()
+        docs = guard_total_docs_in_worktree()
+        bad = dict(docs, **{rel: _GUARD_TOTAL_TRIPLE_RE.sub(
+            lambda m: f"{m.group(1)} → {int(m.group(2)) + 1}（+{m.group(3)}",
+            docs[rel])})
+        self.assertNotEqual(bad[rel], docs[rel],
+                            f"注入沒有改到任何位元組（{rel} 內讀不出三元組？）⇒ 下面恆綠")
+        problems = handoff_guard_total_problems(bad, _GUARD_LINES_REPIN_LOG)
+        self.assertTrue(
+            any("[交棒書未對帳]" in p and rel in p for p in problems),
+            f"交棒書把 {want[0]} → {want[1]}（+{want[2]}）寫錯竟然放行 ⇒ ZT-04 擴面依然"
+            f"只是「檔案被讀進來了」；實得：{problems}")
+
+    def test_the_handoff_criterion_is_deliberately_not_retroactive(self) -> None:
+        """射程鎖＋假紅實量：生效點之前的交棒書一律不判，且**它們確實一個三元組都沒有**。
+
+        兩段缺一不可：只驗「不判」的話，判準若寫錯成全不判也照樣綠；第二段直接量磁碟，
+        把「假紅存量 0」由交件宣稱升為可重跑的事實（同鐵律四：宣稱要附當回合的量測）。
+        """
+        docs = guard_total_docs_in_worktree()
+        old = {rel: text for rel, text in docs.items()
+               if (m := _HANDOFF_ROUND_RE.search(rel))
+               and int(m.group(1)) < _HANDOFF_RECONCILE_SINCE}
+        self.assertTrue(old, "掃描面上沒有任何生效點之前的交棒書 ⇒ 本格證不了不追溯")
+        self.assertEqual(
+            handoff_guard_total_problems(old, _GUARD_LINES_REPIN_LOG), [],
+            "款(5) 追溯到了生效點之前——那幾份交棒書當年根本沒有寫過這個數字，"
+            "回頭補寫等於改寫史料")
+        carriers = {rel: len(_GUARD_TOTAL_TRIPLE_RE.findall(text))
+                    for rel, text in old.items()}
+        self.assertEqual(
+            [rel for rel, n in carriers.items() if n], [],
+            f"生效點之前的交棒書已經出現三元組了（實得 {carriers}）——立案當回合實測全為 0，"
+            "若這是真的新增，請重新量一次假紅存量再決定要不要把生效點往前挪")
 
     def test_a_marked_line_without_the_triple_is_red_and_the_judgment_is_not_always_red(
             self) -> None:

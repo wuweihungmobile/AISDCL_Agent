@@ -30,6 +30,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -812,6 +813,1076 @@ class TestTheCriterionItselfCanFail(unittest.TestCase):
         finally:
             G._STASH_SAFE = original  # type: ignore[assignment]
         self.assertEqual(G.destructive_git_hits("git stash create"), [])
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# 鐵律六（R84／`DEF-200-044`／`045`）— `waitform_hits()` 的回歸鎖
+# ══════════════════════════════════════════════════════════════════════════════
+#: 該擋的：三條判準各自的真實形態。前兩筆逐字取自 R83 收輪的實帳指令。
+_WAITFORM_BLOCK: tuple[tuple[str, bool], ...] = (
+    # 判準①：立案那條 nightly（實帳 00:39 → 01:27 共 48 分鐘零工作）
+    ("nohup bash AutoClaude/tools/run_local_nightly.sh --force > /tmp/n.log 2>&1 &", False),
+    ("cd /Users/wuweihong/Antigravity/AISDCL_Agent; nohup .venv/bin/python "
+     "tools/run_root_unittests.py > /tmp/ru3.log 2>&1 & echo started", False),
+    ("setsid ./a.sh &", False),
+    ("./long_job.sh & disown", False),
+    # 判準②：兄弟互匹的四種寫法（引號／裸／雙引號正則／組合旗標）
+    ("until ! pgrep -f 'run_root_unittests'; do sleep 5; done", False),
+    ("until ! pgrep -f run_root_unittests; do sleep 5; done", False),
+    ('while pgrep -f "python.*run_root_unittests"; do sleep 3; done', False),
+    ("until ! pgrep -af 'sync_onboarding'; do sleep 10; done", False),
+    # 判準③：`run_in_background` 搭一個自己就會立刻返回的指令
+    ("python heavy.py &", True),
+    ("./a.sh & disown", True),
+)
+
+#: 不該擋的。每一筆都對應一個**實測到的**假紅來源或一個 CLAUDE.md 鐵律六 ✅ 的形態。
+_WAITFORM_ALLOW: tuple[tuple[str, bool], ...] = (
+    # SD-02 逐筆判讀出的唯一假陽性：`wait` 與 `nohup` **不同段**，而它是正確形態
+    ("nohup true; python heavy.py & BGPID=$!; wait $BGPID", False),
+    ("nohup ./a.sh > log 2>&1 & wait", False),
+    # CLAUDE.md 鐵律六 ✅：字元類自我否定（本判準的放行面）
+    ("until ! pgrep -f 'run_root[_]unittests'; do sleep 20; done", False),
+    ("until ! pgrep -f '[p]ython.*X'; do sleep 3; done", False),
+    # 逐字稿實測的真實 pgrep 用法：一次性檢查、`&&`／`||`、管線餵 while-read
+    ("pgrep -f run_root_unittests >/dev/null && echo running || echo done", False),
+    ("pgrep -f run_root_unittests | while read p; do ps -o command= -p $p; done", False),
+    ("pgrep -fl 'run_root_unittests' | head -3", False),
+    # `&` 的三種非背景用法（每一種都是實測會製造假紅的寫法）
+    ("make -j4 a && make b", False),
+    ("python x.py 2>&1 | tee /tmp/log", False),
+    ("bash tools/x.sh &> /tmp/log", False),
+    # 前景阻塞＋`run_in_background`＝鐵律六 ✅ 的第一格，絕不可擋
+    ("/Users/wuweihong/Antigravity/AISDCL_Agent/.venv/bin/python tools/run_root_unittests.py",
+     True),
+    ("python -m pytest tests/ -q > /tmp/p.log 2>&1; echo rc=$?", True),
+    # 惰性區段：字串／註解裡的壞形態不是指令
+    ("echo 'nohup foo &' >> notes.md", False),
+    ("# nohup foo &\necho hi", False),
+    # while 的其他用途（條件內沒有 pgrep）
+    ("while read -r line; do echo $line; done < f", False),
+    ("until pg_isready -h localhost; do sleep 1; done", False),
+)
+
+
+class TestIronLaw6BadFormsAreBlocked(unittest.TestCase):
+    """鐵律六：**等待／確認的機制自己靜默壞掉 ⇒ 無做工空轉**（`DEF-200-044`）。
+
+    WHY 這一族值得一道阻斷臂：失敗的表徵與「還在正常進行」**完全相同**——R83 收輪實帳
+    00:39 → 01:27 共 48 分鐘零工作，靠掌舵者來問才發現。而 `until ! pgrep -f <字面>`
+    的兄弟互匹在**單支試跑下永遠是綠的**（`man pgrep` 只排除自己與祖先），所以它連
+    「試一次就知道」都做不到。
+    """
+
+    def test_every_bad_form_is_blocked(self) -> None:
+        for command, background in _WAITFORM_BLOCK:
+            with self.subTest(command=command[:70]):
+                self.assertTrue(
+                    G.waitform_hits(command, run_in_background=background),
+                    "鐵律六壞形態未被擋下")
+
+    def test_every_good_form_is_allowed(self) -> None:
+        """假紅是這道鎖的生死線：擋到讓人無法工作的守衛會被整個關掉。"""
+        for command, background in _WAITFORM_ALLOW:
+            with self.subTest(command=command[:70]):
+                self.assertEqual(
+                    G.waitform_hits(command, run_in_background=background), [],
+                    "鐵律六判準誤擋了一個正確形態")
+
+    def test_all_three_criteria_report_separately(self) -> None:
+        """一條指令同時犯兩條時兩條都要列出來（不早退——早退的方向是「看起來變乾淨」）。"""
+        hits = G.waitform_hits(
+            "nohup ./a.sh & until ! pgrep -f 'a.sh'; do sleep 1; done")
+        self.assertGreaterEqual(len(hits), 2, hits)
+
+
+class TestIronLaw6EndToEnd(unittest.TestCase):
+    """真的起 child 行程量 rc ＋ 驗指引可讀（同本檔既有的 end-to-end 紀律）。"""
+
+    def test_the_accident_form_exits_two_with_guidance(self) -> None:
+        proc = run_hook(bash_payload(
+            "nohup bash AutoClaude/tools/run_local_nightly.sh > /tmp/n.log 2>&1 &"))
+        self.assertEqual(proc.returncode, 2, proc.stderr)
+        self.assertIn("48 分鐘零工作", proc.stderr)
+        self.assertIn("waitform-ok", proc.stderr)
+
+    def test_run_in_background_flag_is_read_from_the_payload(self) -> None:
+        """🔴 本輪**實測**過這個欄位（臨時 probe）：前景呼叫整個 key 不存在，
+        `run_in_background: true` 的呼叫帶得到 ⇒ 判準③ 不是靜態推論。"""
+        payload = {"tool_name": "Bash",
+                   "tool_input": {"command": "python heavy.py &",
+                                  "run_in_background": True}}
+        self.assertEqual(run_hook(payload).returncode, 2)
+        # 同一條指令、旗標不在 ⇒ 判準③不成立（判準①也不成立：沒有 nohup／disown）
+        self.assertEqual(
+            run_hook(bash_payload("python heavy.py &")).returncode, 0)
+
+    def test_the_blocking_foreground_form_really_passes(self) -> None:
+        proc = run_hook({"tool_name": "Bash",
+                         "tool_input": {"command": "python tools/run_root_unittests.py",
+                                        "run_in_background": True}})
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+
+    def test_pgrep_loop_exits_two(self) -> None:
+        proc = run_hook(bash_payload(
+            "until ! pgrep -f 'run_root_unittests'; do sleep 5; done"))
+        self.assertEqual(proc.returncode, 2, proc.stderr)
+        self.assertIn("兄弟", proc.stderr)
+
+
+class TestIronLaw6ExemptionIsItsOwnHatch(unittest.TestCase):
+    """兩族的逃生口**刻意不同字樣**：共用一個會讓「為了放行一個等待形態而寫的豁免」
+    順手把毀滅性 git 一起放行（同本檔既有的兩層逃生口論述）。"""
+
+    _BAD = "nohup ./a.sh > log 2>&1 &"
+
+    def test_waitform_exemption_needs_a_written_reason(self) -> None:
+        self.assertTrue(G.has_waitform_exemption(f"{self._BAD}  # waitform-ok: 探針"))
+        self.assertFalse(G.has_waitform_exemption(f"{self._BAD}  # waitform-ok:"))
+
+    def test_exemption_must_live_in_a_real_comment(self) -> None:
+        self.assertFalse(G.has_waitform_exemption(f"echo '# waitform-ok: 假的'; {self._BAD}"))
+
+    def test_the_two_families_do_not_share_a_hatch(self) -> None:
+        """🔴 交叉放行是這一條在守的東西，兩個方向都要成立。"""
+        self.assertEqual(
+            run_hook(bash_payload(f"{self._BAD}  # git-guard-ok: 不該放行等待形態"))
+            .returncode, 2)
+        self.assertEqual(
+            run_hook(bash_payload("git stash  # waitform-ok: 不該放行毀滅性 git"))
+            .returncode, 2)
+
+    def test_end_to_end_exemption_passes(self) -> None:
+        self.assertEqual(
+            run_hook(bash_payload(f"{self._BAD}  # waitform-ok: 刻意重現缺陷"))
+            .returncode, 0)
+
+    def test_exemption_is_void_when_unattended(self) -> None:
+        proc = run_hook(bash_payload(f"{self._BAD}  # waitform-ok: 刻意"),
+                        env={G.UNATTENDED_ENV: "1"})
+        self.assertEqual(proc.returncode, 2)
+        self.assertIn("無人看管", proc.stderr)
+
+
+class TestIronLaw6CriteriaHaveTeeth(unittest.TestCase):
+    """🔴 合成注入：每一個載重零件被拿掉時**判準必須失去鑑別力**。
+
+    這一族的存在理由是 R84 獨立驗證輪的實測（SD-01／SD-02）：兩條判準的第一版各自
+    「鎖存在、綠燈、零鑑別力」。所以本類逐一注入那些失效，並斷言它們真的會讓判準壞掉——
+    沒有這幾條，上面那兩張表只能證明「今天恰好對」，不能證明「是靠哪個零件對的」。
+    """
+
+    def test_taking_the_operand_from_the_masked_string_kills_criterion_two(self) -> None:
+        """SD-01 的缺陷逐字重現：判準②若建在 `mask_inert()` 之上，**好壞兩種形態都放行**。
+
+        原因是結構性的：判準②要判的東西（自我否定字元類 `run_root[_]unittests`）
+        **正好住在被遮掉的那個引號字串裡** ⇒ 遮蔽面上兩者完全同形。
+        """
+        bad = "until ! pgrep -f 'run_root_unittests'; do sleep 5; done"
+        good = "until ! pgrep -f 'run_root[_]unittests'; do sleep 5; done"
+        # 現行實作（operand 從**原字串**同 offset 取）：一擋一放，有鑑別力
+        self.assertTrue(G.waitform_hits(bad))
+        self.assertEqual(G.waitform_hits(good), [])
+        # 注入：把 operand 也從遮蔽字串取 ⇒ 兩邊都拿到空白 ⇒ 兩邊都放行（零鑑別力）
+        original = G._pgrep_full_operand
+        try:
+            G._pgrep_full_operand = (  # type: ignore[assignment]
+                lambda rest: original(G.mask_inert(rest)))
+            self.assertEqual(G.waitform_hits(bad), [],
+                             "遮蔽面版本竟然還擋得住 ⇒ 這條注入沒有重現 SD-01")
+            self.assertEqual(G.waitform_hits(good), [])
+        finally:
+            G._pgrep_full_operand = original  # type: ignore[assignment]
+        self.assertTrue(G.waitform_hits(bad), "注入沒有復原")
+
+    def test_the_char_class_allowance_is_load_bearing(self) -> None:
+        good = "until ! pgrep -f 'run_root[_]unittests'; do sleep 5; done"
+        original = G._self_negating
+        try:
+            G._self_negating = lambda pattern: False  # type: ignore[assignment]
+            self.assertTrue(G.waitform_hits(good),
+                            "拿掉自我否定判準後 ✅ 形態仍被放行 ⇒ 放行面不是靠它判的")
+        finally:
+            G._self_negating = original  # type: ignore[assignment]
+        self.assertEqual(G.waitform_hits(good), [])
+
+    def test_the_wait_carve_out_is_load_bearing(self) -> None:
+        """`wait` 豁免救的是**同一段**裡 nohup ＋ `&` ＋ `wait` 的形態。
+
+        🔴 探針選擇是本輪實測訂正過的：第一版拿 SD-02 那條唯一假陽性
+        （`nohup true; python … & BGPID=$!; wait $BGPID`）當探針，結果注入後**仍然放行**
+        ⇒ 那條假陽性其實是被**切段**收掉的，不是被 `wait` 豁免收掉的。兩道收窄各救哪一族
+        不能用直覺分配——注入測試當場把它量了出來（同 SD-02「需兩道收窄」的兩道各自成立）。
+        """
+        good = "nohup ./a.sh > /tmp/log 2>&1 & wait"
+        original = G._WAIT_RE
+        try:
+            G._WAIT_RE = re.compile(r"(?!x)x")  # type: ignore[assignment] — 永不匹配
+            self.assertTrue(G.waitform_hits(good),
+                            "拿掉 wait 豁免後這條仍被放行 ⇒ 那個假陽性不是靠豁免消掉的")
+        finally:
+            G._WAIT_RE = original  # type: ignore[assignment]
+        self.assertEqual(G.waitform_hits(good), [])
+
+    def test_the_statement_split_is_load_bearing(self) -> None:
+        """SD-02 的第二道收窄：`nohup` 與背景 `&` 必須在**同一個** statement。"""
+        good = "nohup make -v; python heavy.py > /tmp/x.log 2>/dev/null & BG=$!"
+        # 兩者不同段 ⇒ 現行放行
+        self.assertEqual(G.waitform_hits(good), [])
+        original = G._STMT_SEP_RE
+        try:
+            G._STMT_SEP_RE = re.compile(r"(?!x)x")  # type: ignore[assignment] — 不切段
+            self.assertTrue(G.waitform_hits(good),
+                            "不切段之後仍放行 ⇒ 同段判準不是載重件")
+        finally:
+            G._STMT_SEP_RE = original  # type: ignore[assignment]
+        self.assertEqual(G.waitform_hits(good), [])
+
+    def test_the_background_amp_exclusions_are_load_bearing(self) -> None:
+        """`&&`／`2>&1`／`&>`／`|&` 四種排除各自都是實測會製造假紅的寫法。"""
+        for good in ("nohup make a && make b", "nohup python x.py 2>&1 | tee log",
+                     "nohup bash x.sh &> /tmp/log"):
+            with self.subTest(good=good):
+                self.assertEqual(G.waitform_hits(good), [])
+        original = G._background_amps
+        try:
+            G._background_amps = lambda segment: "&" in segment  # type: ignore[assignment]
+            self.assertTrue(G.waitform_hits("nohup make a && make b"),
+                            "天真版 `'&' in seg` 竟未誤擋 ⇒ 排除清單不是載重件")
+        finally:
+            G._background_amps = original  # type: ignore[assignment]
+        self.assertEqual(G.waitform_hits("nohup make a && make b"), [])
+
+    def test_the_loop_condition_boundary_is_load_bearing(self) -> None:
+        """`pgrep` 必須在**條件內**才算——迴圈**體**裡的 pgrep 每一輪都會重跑並結束，
+        不是那個永不成立的退出條件。
+
+        🔴 探針同樣是實測訂正過的：第一版拿 `pgrep … | while read p` 當探針，注入後仍
+        放行——因為那條救它的是**位置順序**（pgrep 在 `while` 之前，本來就不在掃描區間內），
+        不是條件邊界。真正只有邊界救得了的是「pgrep 在 `do` **之後**」這一族。
+        """
+        good = "while read -r line; do pgrep -f run_root_unittests; done < hosts.txt"
+        self.assertEqual(G.waitform_hits(good), [])
+        original = G._COND_END_RE
+        try:
+            G._COND_END_RE = re.compile(r"(?!x)x")  # type: ignore[assignment] — 條件無邊界
+            self.assertTrue(G.waitform_hits(good),
+                            "條件邊界拿掉後仍放行 ⇒ 那個邊界不是載重件")
+        finally:
+            G._COND_END_RE = original  # type: ignore[assignment]
+        self.assertEqual(G.waitform_hits(good), [])
+
+
+class TestTheFalsePositiveCensusIsRerunnable(unittest.TestCase):
+    """🔴 假紅普查必須留下**可重跑**的產物（`DEF-200-046`／SD-04）。
+
+    立案事實：根 CLAUDE.md 鐵律五自陳「對全庫 tracked 檔抽出的 N 筆 git 指令片段實跑該
+    判準、假陽性 0」，而 R84 去找那份產物時 repo 裡**一支都沒有** ⇒ 交棒書要求後人
+    「用同樣的方法」結構上做不到（沒有共同母體、沒有去重規則、沒有逐筆歸屬理由）。
+    CLAUDE.md 自己已對 R77 的失誤分群下過同一個判決並以 probe 修好；這是同一個修法。
+    """
+
+    _PROBE = _REPO_ROOT / "tools" / "probe" / "shell_command_corpus.py"
+
+    def test_the_corpus_extractor_exists_and_is_importable(self) -> None:
+        self.assertTrue(self._PROBE.is_file(), f"{self._PROBE} 不存在")
+        sys.path.insert(0, str(_REPO_ROOT / "tools" / "probe"))
+        import shell_command_corpus as C  # noqa: PLC0415 — 刻意在測試內 import
+        for name in ("tracked_fragments", "transcript_commands", "build"):
+            self.assertTrue(callable(getattr(C, name, None)), name)
+
+    def test_the_anchor_covers_every_criterion_trigger_token(self) -> None:
+        """🔴 本輪自己踩過的假綠：第一版的 tracked 面錨**只有 git token**，於是
+        `waitform` 在那一面恆為 0 命中——而**零命中與「這一面很乾淨」在輸出上完全同形**。
+        判準集合長大時錨沒跟著長，普查就會靜默地量錯東西。
+        """
+        sys.path.insert(0, str(_REPO_ROOT / "tools" / "probe"))
+        import shell_command_corpus as C  # noqa: PLC0415
+        for token in ("git", "nohup", "disown", "setsid", "pgrep"):
+            with self.subTest(token=token):
+                self.assertTrue(C._ANCHOR_RE.search(f"foo {token} bar"),
+                                f"語料抽取器的錨看不到 `{token}` ⇒ 該判準的普查會恆為 0 命中")
+
+    def test_the_census_surface_is_the_transcripts_not_tracked_files(self) -> None:
+        """SD-02：R83 教的「tracked 檔普查」對鐵律六是**錯的量測面**。
+
+        實測（本輪）：tracked 面上 `waitform` 的命中**全部落在描述這兩種形態的 `.md`
+        散文與本判準自己的 docstring**，而 hook 結構上讀不到 `.md` ⇒ 照 tracked 面判會
+        得到「全是假紅」的錯誤結論並否決一個好判準。本條把那個知識釘進程式碼。
+        """
+        # 🔴 讀**原始碼**而不是 `__doc__`：那段 WHY 刻意住在 `#` 註解裡而不是 docstring，
+        # 因為 `count_loc` 排除純 `#` 行而計入 docstring ⇒ 同一份 WHY 寫成註解是 0 行成本，
+        # 而本包同輪把被守的那支 hook 推到 718/750（`guardrail_cli` tier）。
+        # 🔴 誠實劃界（本註解第一版寫錯過一次，故留在這裡）：根層 `tools/` 是**獨立帳**，
+        # `check_loc_budget.py` 逐字寫「不進 total／baseline cap」⇒ 那個「全庫 total 只剩
+        # 個位數餘裕」的預警**與本檔無關**，不可拿它當本檔的理由。真正咬人的是 tier。
+        source = self._PROBE.read_text(encoding="utf-8")
+        self.assertIn("假紅普查一律以", source)
+        self.assertIn("transcripts", source)
+
+    def test_the_transcript_extractor_reads_the_same_field_the_hook_reads(self) -> None:
+        """合成一份逐字稿，證明抽取器取的是 `tool_use` 的 `input.command`。
+
+        這是本檔唯一需要「真的抽一次」的地方，故用**合成語料**而不是掃全機逐字稿：
+        後者是分鐘級、且結果隨機器而異，那種測試在 CI 上不是綠就是慢，兩者都沒有鑑別力。
+        """
+        sys.path.insert(0, str(_REPO_ROOT / "tools" / "probe"))
+        import shell_command_corpus as C  # noqa: PLC0415
+        with tempfile.TemporaryDirectory(prefix="w8-corpus-") as tmp:
+            proj = Path(tmp) / "slug"
+            proj.mkdir()
+            events = [
+                {"message": {"content": [
+                    {"type": "tool_use", "name": "Bash",
+                     "input": {"command": "nohup ./a.sh & echo x"}}]}},
+                {"message": {"content": [
+                    {"type": "tool_use", "name": "Read",
+                     "input": {"file_path": "/x"}}]}},   # 非 shell 工具 ⇒ 不進語料
+                "{ 這一列是壞 JSON",                      # 尾列半截是常態，必須靜默跳過
+            ]
+            (proj / "s.jsonl").write_text(
+                "".join((e if isinstance(e, str) else
+                         json.dumps(e, ensure_ascii=False)) + "\n" for e in events),
+                encoding="utf-8")
+            rows = C.transcript_commands(Path(tmp))
+        self.assertEqual([r[0] for r in rows], ["nohup ./a.sh & echo x"])
+        self.assertIn("tool_input.command", rows[0][2])   # 逐筆歸屬理由必須寫出欄位來源
+
+
+class TestTheHookStaysInsideItsLocTier(unittest.TestCase):
+    """🔴 鐵律六那一族是加在**既有** hook 上的，而該檔的 tier 餘裕本來就窄。
+
+    立案理由：本包落地時該檔 `count_loc` 距 `guardrail_cli` tier 只剩兩位數餘裕。
+    把「還在預算內」寫成散文等於沒寫——下一個往這支 hook 加判準的人需要的是一個會紅的東西。
+    判準本身**不複寫預算數字**（現查 `check_loc_budget` 的 SSOT，同 CLAUDE.md 的既有政策）。
+    """
+
+    def test_the_hook_is_within_its_root_tools_tier(self) -> None:
+        sys.path.insert(0, str(_REPO_ROOT / "AutoClaude" / "tools"))
+        import check_loc_budget as B  # noqa: PLC0415
+        loc = B.count_loc(_HOOK)
+        budget = B.ROOT_TOOLS_TIERS["guardrail_cli"]["budget"]
+        self.assertLessEqual(
+            loc, budget,
+            f"{_HOOK.name} count_loc={loc} 超出 guardrail_cli tier {budget}。"
+            f"修法不是調高預算（本 repo 明文禁止放寬既有門檻），而是把判準族抽到 "
+            f"tools/lib/ 的共用模組")
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# R84：兩條**已知**缺口的第一個真實命中 — Python 層 git 呼叫 ＋ 殼 heredoc body
+# ══════════════════════════════════════════════════════════════════════════════
+# 立案事實（不是假想）：2026-08-12 00:21:13，一個 agent 送出的 Bash 指令裡有一行沒刪掉的
+# 草稿殘留，清空了 R84 全輪工作樹（91 檔、+4658/-508）。`capture_output=True` 把
+# `Saved working directory…` 吃掉 ⇒ rc=0、無 stderr、**看起來完全正常**；送出它的 agent
+# 事後自陳「我全程只跑唯讀指令」——它自己看不見。已用 `git stash apply` 全額還原
+# （`stash@{0}` ＝ `7b7ce22`），但那是運氣不是設計。
+#
+# 🔴 這一族的教訓不是「再加一條判準」，而是：**被守的那支 hook 自己的檔頭早就寫著這兩條
+# 缺口**（「不經 shell 的路徑」與「heredoc 內容」），而「已知並劃界」被當成了結案。
+# 本 repo 對這個形態已有判例（`DEF-101-757`：已知的鎖射程缺口不得只以劃界結案）。
+# ⇒ 下面兩張表就是那兩條劃界的**到期日**：它們現在會紅。
+_CULPRIT = (
+    "cd /Users/wuweihong/Antigravity/AISDCL_Agent; .venv/bin/python - <<'PY'\n"
+    "import sys, pathlib, subprocess, tempfile, os\n"
+    'sys.path.insert(0,"tools")\n'
+    "print(type(cur), len(cur))\n"
+    "# find which are not in HEAD\n"
+    'head = subprocess.run(["git","stash"],capture_output=True)  # NO\n'
+    "PY"
+)
+
+#: 鑑識當回合對**修訂前**的 hook 餵真 payload 量到的五種形態（exit 2＝擋、0＝放行）。
+#: 「修訂前」那一欄刻意留在表裡：它是這道鎖存在的理由，不是歷史註記——A/E/G 三種
+#: **各自單獨**就足以把工作樹清空，而三者當時全部放行。
+_FIVE_FORMS: tuple[tuple[str, str], ...] = (
+    ("A 原凶逐字（heredoc 內 argv-list）", _CULPRIT),
+    ("B 裸 git stash", "git stash"),
+    ("E heredoc 內以 os 模組 system() 起殼",
+     "python - <<'PY'\nimport os\nos.system('git stash')\nPY"),
+    ("G 無 heredoc、argv-list",
+     "python -c \"import subprocess; subprocess.run(['git','stash'])\""),
+    ("H 純 shell", "git stash push -u"),
+)
+
+
+class TestR84BothGapsAreClosed(unittest.TestCase):
+    """🔴 五種形態**全部**要擋——修訂前 A/E/G 是 0（放行）、B/H 是 2。
+
+    WHY 要五種一起釘、不能只釘原凶：鑑識實測 **兩條缺口各自單獨就足以放行**
+    （#6 heredoc body 被 `mask_inert()` 當資料遮掉；#1 不經殼的 Python 呼叫）
+    ⇒ 只補一條的修法會在另一條上靜默地繼續漏，而漏的表徵與修好完全相同（rc=0）。
+    """
+
+    def test_all_five_forensic_forms_are_blocked(self) -> None:
+        for name, command in _FIVE_FORMS:
+            with self.subTest(form=name):
+                self.assertTrue(
+                    G.destructive_git_hits(command, start_dir=str(_REPO_ROOT)),
+                    f"{name} 被放行——這正是 2026-08-12 那次清空工作樹的形狀")
+
+    def test_end_to_end_the_culprit_exits_two(self) -> None:
+        proc = run_hook({"tool_name": "Bash", "cwd": str(_REPO_ROOT),
+                         "tool_input": {"command": _CULPRIT}})
+        self.assertEqual(proc.returncode, 2, proc.stderr)
+        self.assertIn("git stash create", proc.stderr, "只擋不教的守衛會被拔掉")
+
+    def test_a_shell_fed_heredoc_body_really_executes_so_it_is_judged(self) -> None:
+        """`bash <<'EOF'` 的 body **會**執行 ⇒ 它是可執行結構，不是資料。"""
+        for command in ("bash <<'EOF'\ngit stash\nEOF",
+                        "/bin/bash <<EOF\ngit reset --hard\nEOF",
+                        "ssh host bash <<'EOF'\ngit clean -fdx\nEOF"):
+            with self.subTest(command=command):
+                self.assertTrue(G.destructive_git_hits(command,
+                                                       start_dir=str(_REPO_ROOT)))
+
+    def test_a_python_fed_heredoc_body_is_still_data(self) -> None:
+        """🔴 放行面：`python - <<'PY'` 是寫探針的標準寫法。整族判成可執行結構就是
+        一整類誤擋，而誤擋是這道鎖被關掉的路徑（repo 判例）。"""
+        for command in ("python - <<'PY'\nprint('git stash')\nPY",
+                        "cat <<'EOF' > /tmp/n.md\n執行 git stash 會清空工作樹\nEOF",
+                        "cat <<EOF\ngit reset --hard 很危險\nEOF"):
+            with self.subTest(command=command):
+                self.assertEqual(G.destructive_git_hits(command,
+                                                        start_dir=str(_REPO_ROOT)), [])
+
+
+class TestR84TheArgvPlaneDoesNotOverBlock(unittest.TestCase):
+    """假紅是這道鎖的生死線。本類逐條釘住普查裡**實測到**的假紅來源。
+
+    普查（可重跑）：母體＝`~/.claude/projects/**/*.jsonl` 的 `tool_use` 指令字串
+    **42,387 筆、去重 39,739 種**；新判準把命中由 252 → 257（新增 5），逐筆判讀
+    **1 筆真陽性（原凶本身）＋ 4 筆是本次鑑識自己寫的探針**（把危險形態當資料寫出來），
+    且**舊擋新放 0 筆**（沒有任何既有守備被這次改動換掉）。
+    """
+
+    ALLOWED = (
+        # 🔴 收窄前實測的 3 筆假紅：一串**命令字串**的 tuple（探針表），不是 argv
+        '("git checkout -p","git checkout -p -- tools/","git restore -p")',
+        'CASES = {"A": "git stash", "B": "git reset --hard"}',
+        'probes = [("行接續", "git stash -q -u"), ("清乾淨", "git clean -fdx")]',
+        # 具名呼叫者的錨：沒有它，下面兩條會變成假紅
+        "python -c \"print('git clean -fd')\"",
+        'python -c "print([1,2,3]); print(\'git reset --hard\')"',
+        # 殼陣列沒有逗號 ⇒ 不是 Python 序列字面
+        'FILES=("git" "stash"); echo ${FILES[@]}',
+        # 唯讀 git 的 argv-list 一樣要放行（射程是**動詞**不是「出現 git」）
+        'subprocess.run(["git","status","--porcelain"])',
+        "python -c \"import subprocess; subprocess.run(['git','stash','list'])\"",
+        # 安全暫停 SOP 的 argv 形態
+        'subprocess.run(["git","stash","create"])',
+    )
+
+    def test_none_of_the_measured_false_positive_shapes_is_blocked(self) -> None:
+        for command in self.ALLOWED:
+            with self.subTest(command=command):
+                self.assertEqual(
+                    G.destructive_git_hits(command, start_dir=str(_REPO_ROOT)), [],
+                    f"{command!r} 被誤擋——擋到讓人無法工作的守衛會被整個關掉")
+
+    def test_the_destructive_argv_forms_are_blocked(self) -> None:
+        for command in ('subprocess.run(["git","stash"])',
+                        "subprocess.run(['git','stash','pop'])",
+                        'subprocess.check_call(["git","reset","--hard","HEAD~1"])',
+                        'Popen(["git","clean","-fdx"])',
+                        'subprocess.run(["/usr/bin/git","checkout","--","CLAUDE.md"])',
+                        "os.system('git reset --hard')",
+                        'os.popen("git clean -fdx")'):
+            with self.subTest(command=command):
+                self.assertTrue(G.destructive_git_hits(command,
+                                                       start_dir=str(_REPO_ROOT)), command)
+
+    def test_the_argv_plane_is_fail_closed_about_where_it_lands(self) -> None:
+        """`cwd=` kwarg 本守衛看不見 ⇒ argv 面一律不套用換樹放寬（方向是 fail-closed）。"""
+        with tempfile.TemporaryDirectory(prefix="w-argv-") as foreign, \
+                mock.patch.dict(os.environ, {"CLAUDE_PROJECT_DIR": str(_REPO_ROOT)}):
+            self.assertTrue(G.destructive_git_hits(
+                f'subprocess.run(["git","clean","-fdx"], cwd="{foreign}")',
+                start_dir=str(_REPO_ROOT)))
+
+
+class TestR84TheNewCriteriaHaveTeeth(unittest.TestCase):
+    """🔴 合成注入：每個新零件被拿掉時，判準必須**當場失去鑑別力**。
+
+    反 vacuity 是本檔既有紀律（見 `TestTheCriterionItselfCanFail`）——沒有這幾條，
+    上面兩張表只能證明「今天恰好對」，不能證明「是靠哪個零件對的」。
+    """
+
+    def test_the_argv_plane_is_load_bearing(self) -> None:
+        """把 argv 正規化面關掉 ⇒ **原凶當場變回放行**（＝修訂前逐字的行為）。"""
+        self.assertTrue(G.destructive_git_hits(_CULPRIT, start_dir=str(_REPO_ROOT)))
+        with mock.patch.object(G, "argv_git_fragments", lambda _c: ""):
+            self.assertEqual(
+                G.destructive_git_hits(_CULPRIT, start_dir=str(_REPO_ROOT)), [],
+                "argv 面關掉後竟仍擋下 ⇒ 擋住原凶的不是這次的修法")
+        self.assertTrue(G.destructive_git_hits(_CULPRIT, start_dir=str(_REPO_ROOT)))
+
+    def test_masking_the_heredoc_body_is_what_hid_it(self) -> None:
+        """🔴 這一條把「兩條缺口各自單獨就足以放行」釘成事實。
+
+        單獨修 heredoc（＝讓 body 可見）對原凶**沒有用**：body 裡是 Python 的
+        argv list，不是殼形態。鑑識實測逐字「對原凶 body 單獨判 → 無命中」。
+        """
+        body = ('import sys, pathlib, subprocess, tempfile, os\n'
+                'head = subprocess.run(["git","stash"],capture_output=True)  # NO\n')
+        with mock.patch.object(G, "argv_git_fragments", lambda _c: ""):
+            self.assertEqual(
+                G.destructive_git_hits(body, start_dir=str(_REPO_ROOT)), [],
+                "只靠殼形態判準就擋得住 body ⇒ 那 A 修法單獨可行，本註記是假的")
+
+    def test_the_shell_owner_test_is_load_bearing(self) -> None:
+        """把 heredoc 擁有者判準弄成恆假 ⇒ `bash <<EOF` 的 body 回到「當資料遮掉」。"""
+        command = "bash <<'EOF'\ngit reset --hard\nEOF"
+        self.assertTrue(G.destructive_git_hits(command, start_dir=str(_REPO_ROOT)))
+        original = G._SHELL_EXE_RE
+        try:
+            G._SHELL_EXE_RE = re.compile(r"(?!x)x")  # type: ignore[assignment]
+            self.assertEqual(
+                G.destructive_git_hits(command, start_dir=str(_REPO_ROOT)), [],
+                "擁有者判準恆假時仍擋下 ⇒ 擋住殼 heredoc 的不是它")
+        finally:
+            G._SHELL_EXE_RE = original  # type: ignore[assignment]
+        self.assertTrue(G.destructive_git_hits(command, start_dir=str(_REPO_ROOT)))
+
+    def test_the_owner_test_must_not_be_widened_to_every_heredoc(self) -> None:
+        """反向：擁有者判準恆**真**時，`cat <<EOF` 的散文會變成假紅（實測 2 筆）。"""
+        prose = "cat <<'EOF' > /tmp/n.md\n執行 git reset --hard 會清空工作樹\nEOF"
+        self.assertEqual(G.destructive_git_hits(prose, start_dir=str(_REPO_ROOT)), [])
+        original = G._SHELL_EXE_RE
+        try:
+            G._SHELL_EXE_RE = re.compile(r"")  # type: ignore[assignment] — 恆真
+            self.assertTrue(
+                G.destructive_git_hits(prose, start_dir=str(_REPO_ROOT)),
+                "擁有者判準恆真竟沒有製造假紅 ⇒ 這條收窄沒有在守任何東西")
+        finally:
+            G._SHELL_EXE_RE = original  # type: ignore[assignment]
+
+    def test_the_first_literal_must_be_git_check_is_load_bearing(self) -> None:
+        """🔴 收窄「序列的第一個字面必須是 git 執行檔」——全語料實測它收掉 3 筆假紅。
+
+        拿掉它，一張**命令字串表**會被整串攤平成一段假指令而命中。逐字用普查裡真的
+        撞到的那一筆（一支探針在列舉 `-p` 家族要不要擋），不是好寫測試的簡化版。
+
+        🔴 注入形態是**收窄前的實作本體**，不是去戳 `_GIT_EXE_RE`：那個 regex 同時是
+        `git_invocations()` 找執行檔用的（改它會連掃描器一起弄壞，於是注入後反而不命中
+        ——本輪第一版就是這樣寫的，測試紅了才發現注的不是同一個零件）。
+        """
+        table = '("git checkout -p","git checkout -p -- tools/","git restore -p")'
+        self.assertEqual(G.destructive_git_hits(table, start_dir=str(_REPO_ROOT)), [])
+
+        def unnarrowed(command: str) -> str:      # 收窄前逐字的實作
+            return ";".join(
+                " ".join(t for _q, t in G._ARGV_LIT_RE.findall(m.group(0)))
+                for m in G._ARGV_SEQ_RE.finditer(command))
+
+        with mock.patch.object(G, "argv_git_fragments", unnarrowed):
+            self.assertTrue(
+                G.destructive_git_hits(table, start_dir=str(_REPO_ROOT)),
+                "收窄前的實作竟沒有製造那筆假紅 ⇒ 這條收窄沒有承重")
+        self.assertEqual(G.destructive_git_hits(table, start_dir=str(_REPO_ROOT)), [])
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# R84 偵測層：攔截器**結構上**接不到的那一半
+# ══════════════════════════════════════════════════════════════════════════════
+class TestR84StashRefSentinel(unittest.TestCase):
+    """🔴 誠實劃界要求的另一半：擋不到的必須**看得見**。
+
+    本守衛只讀指令字串 ⇒ 這四條路它結構上碰不到：MCP git 工具（不是 Bash 呼叫）、
+    別的 session、**寫在 `.py` 檔裡**的 `subprocess`（工具面只看得到 `python foo.py`）、
+    別名與殼函式。加判準對它們一行都沒用 ⇒ 只能改成「事後一定看得見」。
+
+    判準刻意只看 `refs/stash`：它**只會**因 stash push／pop／drop／clear 而變。
+    （第一版一起看 `logs/HEAD`，已否決——每次 `git commit` 都會變 ⇒ 常駐亮燈，
+      而常駐全亮的燈等於沒有燈。）
+    """
+
+    def setUp(self) -> None:
+        self.root = Path(tempfile.mkdtemp(prefix="w-sentinel-"))
+        self.addCleanup(shutil.rmtree, self.root, ignore_errors=True)
+        (self.root / ".git" / "refs").mkdir(parents=True)
+        self.ref = self.root / ".git" / "refs" / "stash"
+
+    def test_the_first_call_only_records_a_baseline(self) -> None:
+        """沒有基線就不可能有「變了」——第一次一律靜默（否則每個新 clone 都會噴一次）。"""
+        self.ref.write_text("aaaaaaaaaaaa\n", encoding="utf-8")
+        self.assertIsNone(G.stash_ref_sentinel(str(self.root)))
+
+    def test_a_change_nobody_declared_is_reported(self) -> None:
+        self.ref.write_text("aaaaaaaaaaaa\n", encoding="utf-8")
+        G.stash_ref_sentinel(str(self.root))
+        self.ref.write_text("bbbbbbbbbbbb\n", encoding="utf-8")
+        note = G.stash_ref_sentinel(str(self.root))
+        self.assertIsNotNone(note)
+        self.assertIn("refs/stash", note or "")
+
+    def test_a_stash_the_guard_already_saw_is_not_reported(self) -> None:
+        """🔴 假紅面為零就靠這個 ack 位元：上一次呼叫**真的帶著一次會改 `refs/stash` 的
+        呼叫、而且那次呼叫沒有被本守衛擋下** ⇒ 那次變動**不是隱形的路**。
+
+        🔴 R84／SD-04 訂正本 docstring 的兩處假事實：ack **不是**「指令字串裡出現 stash」
+        （子字串判定會被 `grep -rn stash docs/` 點亮 ⇒ 下一次真 drift 靜默、而且 head 已被
+        改寫成新 SHA ⇒ **永久吞掉**），也**不含**「被擋」與 `stash create` 這兩種——被擋的
+        指令根本不會跑、`stash create` 一個字節都不動那個 ref，兩者都解釋不了任何變動。
+        判準與紅綠自證見 `TestR84SentinelAckIsNotASubstring`。"""
+        self.ref.write_text("aaaaaaaaaaaa\n", encoding="utf-8")
+        G.stash_ref_sentinel(str(self.root), ack=True)
+        self.ref.write_text("bbbbbbbbbbbb\n", encoding="utf-8")
+        self.assertIsNone(G.stash_ref_sentinel(str(self.root)))
+
+    def test_no_change_is_silent(self) -> None:
+        self.ref.write_text("aaaaaaaaaaaa\n", encoding="utf-8")
+        G.stash_ref_sentinel(str(self.root))
+        self.assertIsNone(G.stash_ref_sentinel(str(self.root)))
+
+    def test_a_dropped_stash_counts_as_a_change(self) -> None:
+        """`git stash drop`／`clear` 會讓整個 ref 消失——那一向同樣是「有人動了它」。"""
+        self.ref.write_text("aaaaaaaaaaaa\n", encoding="utf-8")
+        G.stash_ref_sentinel(str(self.root))
+        self.ref.unlink()
+        self.assertIsNotNone(G.stash_ref_sentinel(str(self.root)))
+
+    def test_it_never_raises_on_a_missing_or_unwritable_git_dir(self) -> None:
+        """fail-open 是本檔的 P0：守衛自身絕不可成為故障源。"""
+        with tempfile.TemporaryDirectory(prefix="w-no-git-") as empty:
+            self.assertIsNone(G.stash_ref_sentinel(empty))
+
+    def test_end_to_end_the_note_is_loud_but_never_blocking(self) -> None:
+        """🔴 rc **必須是 1 不是 2**：它是偵測不是攔截。把它做成阻斷，等於用一個
+        「事後才知道」的訊號去擋一條與它無關的工具呼叫——那種守衛會被整個關掉。"""
+        self.ref.write_text("aaaaaaaaaaaa\n", encoding="utf-8")
+        payload = {"tool_name": "Bash", "cwd": str(self.root),
+                   "tool_input": {"command": "echo hi"}}
+        self.assertEqual(run_hook(payload).returncode, 0)
+        self.ref.write_text("bbbbbbbbbbbb\n", encoding="utf-8")
+        proc = run_hook(payload)
+        self.assertEqual(proc.returncode, 1, proc.stderr)
+        self.assertIn("refs/stash", proc.stderr)
+
+    def test_the_state_file_lives_next_to_the_thing_it_watches(self) -> None:
+        """狀態檔住 `.git/`（不是 tempdir）⇒ 天生逐 repo 隔離，兩個 checkout 不互相汙染。
+        寫進共用 tempdir 的版本會讓「換一個 repo 工作」每次都噴一則假警報。"""
+        self.ref.write_text("aaaaaaaaaaaa\n", encoding="utf-8")
+        G.stash_ref_sentinel(str(self.root))
+        self.assertTrue((self.root / ".git" / "autosdd_stash_sentinel").is_file())
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# R84 四方複審抓到的「載具類」漏擋（SD-01／02／04／06／07／08）— 每一條都是當回合實測
+# ══════════════════════════════════════════════════════════════════════════════
+# 🔴 這一批的共同形態：**同一件事，只因換了一個載具就一擋一放**。R84 第一版把
+# heredoc 那個載具修好了，卻沒有把「載具」抽象成一類 ⇒ `-c`／尾逗號／argv 前綴三個
+# 兄弟原封不動地留著。所以下面每一張表都刻意用**同一個毀滅性子指令**跑過所有載具：
+# 判準要守的是「不論走哪條路進來，都判同一個結果」，不是「這幾個字面有被列到」。
+_D_SUBS = ("git stash", "git reset --hard", "git clean -fdx", "git checkout -- CLAUDE.md")
+
+
+class TestR84TheDashCCarrierIsJudged(unittest.TestCase):
+    """SD-01（blocking）：`sh -c '<毀滅性 git>'` 修訂前實測 exit 0，而**同一件事**寫成
+    `bash <<'EOF'` 是 exit 2。成因與 heredoc 完全同構——`mask_inert()` 把引號內容當資料
+    遮掉 ⇒ `git_invocations("sh -c '…'")` 回 `[]`。修法也同構：operand 當獨立平面遞迴
+    餵回 `git_invocations()`，**不開第二套子指令判準**。"""
+
+    def test_every_shell_carrier_x_every_destructive_sub_is_blocked(self) -> None:
+        for carrier in ("sh -c '{}'", 'bash -c "{}"', "zsh -c '{}'", "ksh -c '{}'",
+                        'dash -c "{}"', "/bin/bash -c '{}'", "bash -lc '{}'",
+                        'pwsh -Command "{}"', 'eval "{}"', "eval '{}'",
+                        "xargs -I@ sh -c '{} @'"):
+            for sub in _D_SUBS:
+                command = carrier.format(sub)
+                with self.subTest(command=command):
+                    self.assertTrue(
+                        G.destructive_git_hits(command, start_dir=str(_REPO_ROOT)),
+                        f"{command!r} 被放行——換一個載具就繞過守衛")
+
+    def test_a_nested_carrier_is_still_reached(self) -> None:
+        """`sh -c "…sh -c '…'"`：operand 自己再包一層 ⇒ 遞迴必須跟得上。"""
+        self.assertTrue(G.destructive_git_hits(
+            """sh -c "cd /tmp && sh -c 'git stash pop'" """, start_dir=str(_REPO_ROOT)))
+
+    def test_the_carrier_plane_does_not_over_block(self) -> None:
+        """🔴 放行面：載具本身不是罪名，operand 的**動詞**才是。"""
+        for command in ("bash -c 'git status --porcelain'",
+                        "sh -c 'git stash create'",
+                        'bash -c "git stash list"',
+                        "sh -c 'git checkout -b feature/x'",
+                        "bash -c 'git clean -n'",
+                        "sh -c 'echo hi && ls'",
+                        # 非殼的 `-c` 不是本判準的錨（`python -c` 走 argv 面，見既有表）
+                        "python -c \"print('git clean -fd')\"",
+                        # 字內巧合不得命中（`_SHELLS` 兩側的字元邊界）
+                        "install_bash_helpers -c 'git stash'",
+                        "foo.sh -c 'git stash'"):
+            with self.subTest(command=command):
+                self.assertEqual(
+                    G.destructive_git_hits(command, start_dir=str(_REPO_ROOT)), [],
+                    f"{command!r} 被誤擋——誤擋是這道鎖被整個關掉的路徑")
+
+    def test_end_to_end_the_carrier_exits_two(self) -> None:
+        proc = run_hook({"tool_name": "Bash", "cwd": str(_REPO_ROOT),
+                         "tool_input": {"command": "sh -c 'git stash -q -u --keep-index'"}})
+        self.assertEqual(proc.returncode, 2, proc.stderr)
+        self.assertIn("git stash create", proc.stderr, "只擋不教的守衛會被拔掉")
+
+    def test_the_carrier_plane_is_load_bearing(self) -> None:
+        """合成注入：把 `-c` 平面關掉 ⇒ 當場變回修訂前逐字的行為（exit 0）。"""
+        command = "sh -c 'git reset --hard'"
+        self.assertTrue(G.destructive_git_hits(command, start_dir=str(_REPO_ROOT)))
+        original = G._CARRIER_RE
+        try:
+            G._CARRIER_RE = re.compile(r"(?!x)x")  # type: ignore[assignment]
+            self.assertEqual(
+                G.destructive_git_hits(command, start_dir=str(_REPO_ROOT)), [],
+                "`-c` 平面關掉後仍擋下 ⇒ 擋住它的不是這次的修法")
+        finally:
+            G._CARRIER_RE = original  # type: ignore[assignment]
+        self.assertTrue(G.destructive_git_hits(command, start_dir=str(_REPO_ROOT)))
+
+    def test_the_relaxation_killers_also_run_on_the_carrier_plane(self) -> None:
+        """🔴 這一條是落地當回合**自測抓到的洞**，不是事後補的裝飾。
+
+        `-c` 的 operand 住在引號裡 ⇒ 在殼文字那個遮蔽面上整段是空白，`_RELAX_KILLER_RE`
+        看不到它裡面的子殼括號。於是 `sh -c '(cd /wt); git clean -fdx'` 會被判成「落在
+        /wt」而**放行**——實際上 `)` 已經結束了 cd 的作用域、git 落在共用工作樹。
+        修法：放寬殺手在兩個平面上各跑一次。兩向都驗：老實的 `cd` 該放行、子殼該擋。
+        """
+        with tempfile.TemporaryDirectory(prefix="w-carrier-") as foreign, \
+                mock.patch.dict(os.environ, {"CLAUDE_PROJECT_DIR": str(_REPO_ROOT)}):
+            self.assertEqual(
+                G.destructive_git_hits(f"sh -c 'cd {foreign} && git clean -fdx'",
+                                       start_dir=str(_REPO_ROOT)), [],
+                "operand 內老實的 `cd` 到外樹被誤擋（那是真的會落在外樹）")
+            self.assertTrue(
+                G.destructive_git_hits(f"sh -c '(cd {foreign}); git clean -fdx'",
+                                       start_dir=str(_REPO_ROOT)),
+                "子殼括號讓 cd 的作用域在 `)` 就結束，git 其實落在共用工作樹 ⇒ 必須擋")
+
+
+class TestR84ATrailingCommaDoesNotSmuggleItPast(unittest.TestCase):
+    """SD-02（blocking）：`argv_git_fragments('x=([ "git","stash", ])')` 修訂前回 `''`。
+
+    🔴 嚴重性不在「少擋一種怪寫法」，而在 **`black` 的多行格式預設就會產生尾逗號** ⇒
+    R84 才剛關上的那條 P0（原凶 argv-list）**只要被格式化成多行就自動逃掉**。
+    """
+
+    def test_the_one_character_that_undid_the_p0(self) -> None:
+        self.assertEqual(G.argv_git_fragments('x=([ "git","stash" ])'), "git stash")
+        self.assertEqual(G.argv_git_fragments('x=([ "git","stash", ])'), "git stash")
+
+    def test_black_multiline_formatting_of_the_culprit_is_blocked(self) -> None:
+        """逐字用 `black` 會排出來的樣子（每個元素一行、尾逗號、右括號另起一行）。"""
+        formatted = (
+            "python - <<'PY'\n"
+            "head = subprocess.run(\n"
+            "    [\n"
+            '        "git",\n'
+            '        "stash",\n'
+            "    ],\n"
+            "    capture_output=True,\n"
+            ")\n"
+            "PY")
+        self.assertTrue(G.destructive_git_hits(formatted, start_dir=str(_REPO_ROOT)),
+                        "原凶被 black 排一下就逃掉了")
+
+    def test_the_optional_last_element_is_load_bearing(self) -> None:
+        """合成注入＝收窄前逐字的 regex（末元素必填）⇒ 尾逗號那條當場放行。"""
+        with_comma = 'subprocess.run(["git","stash",])'
+        self.assertTrue(G.destructive_git_hits(with_comma, start_dir=str(_REPO_ROOT)))
+        original = G._ARGV_SEQ_RE
+        try:
+            G._ARGV_SEQ_RE = re.compile(  # type: ignore[assignment] — 修訂前逐字
+                r"""[\[(]\s*(?:(['"])[^'"]*\1\s*,\s*)+(['"])[^'"]*\2\s*[\])]"""
+                r"""|(?:os\.(?:system|popen)|subprocess\.\w+|Popen)\s*\(\s*(['"])\s*"""
+                r"""(?:[^\s'"\\/]*[\\/])?git(?:\.exe)?\s[^'"]*\3""")
+            self.assertEqual(
+                G.destructive_git_hits(with_comma, start_dir=str(_REPO_ROOT)), [],
+                "修訂前的 regex 竟仍擋下 ⇒ 這條修法沒有承重")
+        finally:
+            G._ARGV_SEQ_RE = original  # type: ignore[assignment]
+
+    def test_it_does_not_widen_the_false_positive_surface(self) -> None:
+        """尾逗號放寬**不得**把既有那三筆假紅（命令字串表）換回來。"""
+        for command in ('("git checkout -p","git checkout -p -- tools/","git restore -p",)',
+                        'CASES = {"A": "git stash", "B": "git reset --hard",}',
+                        'FILES=("git" "stash"); echo ${FILES[@]}'):
+            with self.subTest(command=command):
+                self.assertEqual(
+                    G.destructive_git_hits(command, start_dir=str(_REPO_ROOT)), [], command)
+
+
+class TestR84TheHeredocOwnerIsTheNearestExecutable(unittest.TestCase):
+    """SD-06（medium）：擁有者判定掃「整行」⇒ 路徑裡一個 `/sh` 就把 python heredoc 判成殼。
+
+    🔴 方向是**誤擋**，而誤擋正是本 repo 明文說會讓守衛被整個拔掉的那一類——而且被擋死的
+    正好是「寫探針的人」，也就是修這道鎖的人自己。
+    """
+
+    def test_a_path_containing_sh_does_not_make_python_a_shell(self) -> None:
+        body = "cd {} && python - <<'PY'\nprint('x')\ngit reset --hard\nPY"
+        for prefix in ("/tmp/sh", "/opt/sh", "/private/tmp/sh"):
+            with self.subTest(prefix=prefix):
+                self.assertEqual(
+                    G.destructive_git_hits(body.format(prefix), start_dir=str(_REPO_ROOT)),
+                    [], f"{prefix} 讓 python 的 heredoc 被當成殼結構 ⇒ 誤擋")
+
+    def test_an_unrelated_mention_of_a_shell_name_does_not_either(self) -> None:
+        for command in ("grep -rn bash docs/ && python - <<'PY'\ngit clean -fdx\nPY",
+                        "echo zsh; cat <<'EOF' > /tmp/n.md\ngit reset --hard 很危險\nEOF"):
+            with self.subTest(command=command):
+                self.assertEqual(
+                    G.destructive_git_hits(command, start_dir=str(_REPO_ROOT)), [], command)
+
+    def test_the_nearest_token_rule_still_finds_the_real_shell(self) -> None:
+        """由右往左找**最近的非旗標 token**，所以前綴／遠端包裝都還是判得出來。"""
+        for command in ("ssh host bash <<'EOF'\ngit clean -fdx\nEOF",
+                        "sudo bash <<'EOF'\ngit reset --hard\nEOF",
+                        "env FOO=1 bash <<'EOF'\ngit stash\nEOF",
+                        "/bin/bash -s <<EOF\ngit reset --hard\nEOF",
+                        "cat /tmp/x | bash <<'EOF'\ngit stash pop\nEOF"):
+            with self.subTest(command=command):
+                self.assertTrue(
+                    G.destructive_git_hits(command, start_dir=str(_REPO_ROOT)), command)
+
+    def test_scanning_the_whole_line_is_what_caused_the_over_block(self) -> None:
+        """合成注入＝修訂前逐字的「整行 search」⇒ 上面那條 python heredoc 當場變假紅。"""
+        command = "cd /tmp/sh && python - <<'PY'\ngit reset --hard\nPY"
+        self.assertEqual(G.destructive_git_hits(command, start_dir=str(_REPO_ROOT)), [])
+        original = G.mask_inert
+        old_owner = re.compile(
+            r"(?<![\w.-])(?:sh|bash|zsh|ksh|dash|pwsh|powershell)(?![\w.-])", re.IGNORECASE)
+
+        def old_mask(text: str, *, keep_comments: bool = False) -> str:
+            # 修訂前的行為：擁有者＝「`<<` 所在那一行有沒有出現殼的名字」
+            with mock.patch.object(
+                    G, "_SHELL_EXE_RE",
+                    re.compile(r"") if old_owner.search(text) else re.compile(r"(?!x)x")):
+                return original(text, keep_comments=keep_comments)
+
+        with mock.patch.object(G, "mask_inert", old_mask):
+            self.assertTrue(
+                G.destructive_git_hits(command, start_dir=str(_REPO_ROOT)),
+                "整行 search 竟沒有製造那筆誤擋 ⇒ 這條收窄沒有在守任何東西")
+        self.assertEqual(G.destructive_git_hits(command, start_dir=str(_REPO_ROOT)), [])
+
+
+class TestR84WorktreeRemoveForce(unittest.TestCase):
+    """SD-07（medium）：`git worktree remove --force` 修訂前實測 exit 0。
+
+    🔴 但它的判準是**量出來的**：全語料 4,017 筆／去重 3,740 種上，新舊判準各跑一次，
+    新增命中 6 種**全部**是這個動詞，逐筆判讀 6/6 都是「拆自己的拋棄式樹」——一筆事故
+    形態都沒有。無差別擋＝拿一個從未發生的危害去換一個天天發生的誤擋。故收窄成
+    「被拆的是誰」：外樹放行、harness 自己的 `.claude/worktrees/` 沙盒放行，其餘照擋。
+    收窄後新增命中降到 4 種，且**舊擋新放 0 種**（沒有任何既有守備被換掉）。
+    """
+
+    def setUp(self) -> None:
+        self.env = mock.patch.dict(os.environ, {"CLAUDE_PROJECT_DIR": str(_REPO_ROOT)})
+        self.env.start()
+        self.addCleanup(self.env.stop)
+
+    def test_removing_a_tree_this_guard_cannot_vouch_for_is_blocked(self) -> None:
+        for command in ("git worktree remove --force /tmp/nope-wt",
+                        "git worktree remove -f /tmp/nope-wt",
+                        "git worktree remove /tmp/nope-wt --force",
+                        "sh -c 'git worktree remove --force /tmp/nope-wt'"):
+            with self.subTest(command=command):
+                self.assertTrue(
+                    G.destructive_git_hits(command, start_dir=str(_REPO_ROOT)), command)
+
+    def test_the_measured_routine_teardown_shapes_are_allowed(self) -> None:
+        """🔴 放行面＝語料裡真的撞到的那三類，逐字重建（不是好寫測試的簡化版）。"""
+        with tempfile.TemporaryDirectory(prefix="w-wt-") as foreign:
+            cases = (
+                f"git worktree remove --force {foreign}",
+                f"cd {os.path.dirname(foreign)} && "
+                f"git worktree remove --force {os.path.basename(foreign)}",
+                f"git worktree remove --force {_REPO_ROOT}/.claude/worktrees/agent-ac3ed",
+                f"git worktree remove {foreign}",          # 不帶 --force：git 自己會拒絕
+                "git worktree list",
+                f"git worktree add -q {foreign}/x HEAD",
+                "git worktree prune",
+            )
+            for command in cases:
+                with self.subTest(command=command):
+                    self.assertEqual(
+                        G.destructive_git_hits(command, start_dir=str(_REPO_ROOT)), [],
+                        f"{command!r} 被誤擋——全語料實測這一類佔新增命中的 100%")
+
+    def test_the_relaxation_is_load_bearing_in_both_directions(self) -> None:
+        """紅綠自證：拿掉放行條件 ⇒ 那三類 routine teardown 當場全變假紅。"""
+        with tempfile.TemporaryDirectory(prefix="w-wt2-") as foreign:
+            command = f"git worktree remove --force {foreign}"
+            self.assertEqual(G.destructive_git_hits(command, start_dir=str(_REPO_ROOT)), [])
+            with mock.patch.object(G, "is_foreign_tree", lambda _p: False), \
+                    mock.patch.object(G, "_DISPOSABLE_WT", "\0"):
+                self.assertTrue(
+                    G.destructive_git_hits(command, start_dir=str(_REPO_ROOT)),
+                    "放行條件拿掉後竟仍放行 ⇒ 這條收窄沒有承重")
+
+    def test_checkout_index_force_is_in_scope_but_apply_reverse_is_not(self) -> None:
+        """同族的另外兩個動詞，判斷結果與理由都釘在這裡（不是漏看）。
+
+        · `git checkout-index -f`：用 index 強制覆寫工作樹 ⇒ 收。全語料命中 0 ⇒ 假紅面為零。
+        · `git apply -R`：把剛套上的 patch **退回去**的正當手法，而且可逆（再套一次就回來）
+          ⇒ **刻意不收**。擋它是製造誤擋，方向與本檔的設計約束相反。
+        """
+        self.assertTrue(G.destructive_git_hits("git checkout-index -f -a",
+                                               start_dir=str(_REPO_ROOT)))
+        for allowed in ("git checkout-index -a", "git apply -R /tmp/p.patch",
+                        "git apply /tmp/p.patch"):
+            with self.subTest(command=allowed):
+                self.assertEqual(
+                    G.destructive_git_hits(allowed, start_dir=str(_REPO_ROOT)), [], allowed)
+
+
+class TestR84ArgvExecPrefix(unittest.TestCase):
+    """SD-08（low）：argv 序列的**第 0 格不一定是執行檔**。"""
+
+    def test_literal_prefixes_are_skipped(self) -> None:
+        for command in ('subprocess.run(["sudo","git","stash"])',
+                        'subprocess.run(["env","git","clean","-fdx"])',
+                        'subprocess.run(["env","GIT_DIR=/tmp/x","git","reset","--hard"])',
+                        'subprocess.run(["timeout","30","git","stash","pop"])'):
+            with self.subTest(command=command):
+                self.assertTrue(
+                    G.destructive_git_hits(command, start_dir=str(_REPO_ROOT)), command)
+
+    def test_the_narrowing_that_keeps_the_false_positives_out_still_holds(self) -> None:
+        """跳過前綴**不得**把「命令字串表」那三筆假紅換回來（第 0 格仍必須是 git）。"""
+        for command in ('("git checkout -p","git checkout -p -- tools/","git restore -p")',
+                        'subprocess.run(["git","status","--porcelain"])',
+                        'subprocess.run(["sudo","apt","install","git"])'):
+            with self.subTest(command=command):
+                self.assertEqual(
+                    G.destructive_git_hits(command, start_dir=str(_REPO_ROOT)), [], command)
+
+    def test_the_boundary_is_recorded_not_pretended_closed(self) -> None:
+        """🔴 誠實劃界＝**機械記錄**，不是散文：元素是變數／`$(which git)` 擋不住。
+
+        寫成會紅的斷言，是為了讓「哪天有人真的關掉了它」是可偵測的——而不是讓下一輪
+        的人以為這一族已經修好。對應 hook 檔頭〈誠實劃界〉的同一段。
+        """
+        for command in ('subprocess.run([GIT,"stash"])',
+                        'subprocess.run(["git","-C",wt,"stash"])',
+                        "$(which git) stash"):
+            with self.subTest(command=command):
+                self.assertEqual(
+                    G.destructive_git_hits(command, start_dir=str(_REPO_ROOT)), [],
+                    f"{command!r} 竟被擋下 ⇒ 檔頭的誠實劃界該改了（這是好消息，但要同步）")
+
+
+class TestR84SentinelAckIsNotASubstring(unittest.TestCase):
+    """SD-04（blocking）：ack 位元用**子字串**判 ⇒ 該出聲時不出聲，而且是**永久**的。
+
+    修訂前 `main()` 傳的是 `"stash" in command`：前一條指令只要「提到」stash
+    （`grep -rn stash docs/`、`ls .git/autosdd_stash_sentinel`）就把 ack 點亮 ⇒ 下一次
+    真 drift 靜默；而同一次已把 state 改寫成新 SHA ⇒ **之後再也不會報**，不是延後。
+    """
+
+    def setUp(self) -> None:
+        self.root = Path(tempfile.mkdtemp(prefix="w-ack-"))
+        self.addCleanup(shutil.rmtree, self.root, ignore_errors=True)
+        (self.root / ".git" / "refs").mkdir(parents=True)
+        self.ref = self.root / ".git" / "refs" / "stash"
+
+    def test_merely_mentioning_stash_is_not_an_acknowledgement(self) -> None:
+        for command in ("grep -rn stash docs/",
+                        "ls .git/autosdd_stash_sentinel",
+                        "echo 'git stash' > /tmp/x",
+                        "cat .claude/hooks/block_destructive_git.py | grep stash"):
+            with self.subTest(command=command):
+                self.assertFalse(G.stash_writer_seen(command),
+                                 f"{command!r} 點亮了 ack ⇒ 下一次真 drift 會被永久吞掉")
+
+    def test_only_the_subcommands_that_really_move_the_ref_acknowledge(self) -> None:
+        for command in ("git stash", "git stash push -u", "git stash pop",
+                        "git stash drop", "git stash clear", "git stash save wip",
+                        "sh -c 'git stash pop'",                  # 走 `-c` 平面
+                        'subprocess.run(["git","stash"])'):       # 走 argv 平面
+            with self.subTest(command=command):
+                self.assertTrue(G.stash_writer_seen(command), command)
+        for command in ("git stash create", "git stash list", "git stash show -p",
+                        "git stash apply stash@{0}", "git status"):
+            with self.subTest(command=command):
+                self.assertFalse(
+                    G.stash_writer_seen(command),
+                    f"{command!r} 一個字節都不動 refs/stash，不該解釋任何變動")
+
+    def test_a_bogus_ack_would_swallow_the_next_real_drift_forever(self) -> None:
+        """🔴 紅綠自證：把 ack 換回子字串判定 ⇒ 真 drift 被吞，而且**下一輪也不會報**。"""
+        self.ref.write_text("aaaaaaaaaaaa\n", encoding="utf-8")
+        G.stash_ref_sentinel(str(self.root), ack="stash" in "grep -rn stash docs/")
+        self.ref.write_text("bbbbbbbbbbbb\n", encoding="utf-8")
+        self.assertIsNone(G.stash_ref_sentinel(str(self.root)), "子字串 ack 沒有吞掉？")
+        self.assertIsNone(G.stash_ref_sentinel(str(self.root)),
+                          "吞掉是**永久**的（head 已被改寫）——這一條把嚴重性釘住")
+
+    def test_with_the_fix_the_same_drift_is_reported(self) -> None:
+        self.ref.write_text("aaaaaaaaaaaa\n", encoding="utf-8")
+        G.stash_ref_sentinel(str(self.root), ack=G.stash_writer_seen("grep -rn stash docs/"))
+        self.ref.write_text("bbbbbbbbbbbb\n", encoding="utf-8")
+        note = G.stash_ref_sentinel(str(self.root))
+        self.assertIsNotNone(note)
+        self.assertIn("refs/stash", note or "")
+
+    def test_a_blocked_command_never_acknowledges(self) -> None:
+        """🔴 被擋下的指令**根本不會跑** ⇒ 它解釋不了任何 ref 變動。端到端量 rc。
+
+        `main()` 現在在**豁免判定之後**才算 ack，所以「擋下」與「放行」兩向都對得上：
+        擋下 ⇒ ack=False（下一輪的隱形變動仍會被報）；帶豁免放行 ⇒ ack=True。
+        """
+        self.ref.write_text("aaaaaaaaaaaa\n", encoding="utf-8")
+        blocked = {"tool_name": "Bash", "cwd": str(self.root),
+                   "tool_input": {"command": "git stash push -u"}}
+        self.assertEqual(run_hook(blocked).returncode, 2)
+        self.ref.write_text("bbbbbbbbbbbb\n", encoding="utf-8")
+        proc = run_hook({"tool_name": "Bash", "cwd": str(self.root),
+                         "tool_input": {"command": "echo hi"}})
+        self.assertEqual(proc.returncode, 1, proc.stderr)
+        self.assertIn("refs/stash", proc.stderr,
+                      "被擋下的那條指令替一個它沒有造成的變動背了書")
+
+    def test_an_exempted_stash_does_acknowledge(self) -> None:
+        """反向：帶行內豁免而**真的會跑**的 stash ⇒ ack=True ⇒ 下一輪不吵。"""
+        self.ref.write_text("aaaaaaaaaaaa\n", encoding="utf-8")
+        allowed = {"tool_name": "Bash", "cwd": str(self.root),
+                   "tool_input": {"command": "git stash pop  # git-guard-ok: 還原事故"}}
+        self.assertEqual(run_hook(allowed).returncode, 0)
+        self.ref.write_text("bbbbbbbbbbbb\n", encoding="utf-8")
+        proc = run_hook({"tool_name": "Bash", "cwd": str(self.root),
+                         "tool_input": {"command": "echo hi"}})
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+
+
+class TestR84TheWaitformDocstringIsTheSingleHome(unittest.TestCase):
+    """QA-03：同一份知識三個家、三種內容（hook docstring 說三條、CLAUDE.md 鐵律六說兩條、
+    帳本的③ 又是第三種東西）。**SSOT ＝ `waitform_hits()` 的 docstring**（實作所在）。
+
+    這一條把「docstring 與實作逐字相符」做成機械物：docstring 自陳幾條，就必須真的有
+    幾條判準各自能單獨命中。只斷言「docstring 裡有 ① ② ③」會恆綠——那正是本 repo
+    反覆判紅的「鎖存在但沒有鑑別力」。
+    """
+
+    def test_the_docstring_declares_three_and_all_three_can_fire_alone(self) -> None:
+        doc = G.waitform_hits.__doc__ or ""
+        self.assertIn("**三條**判準", doc, "docstring 沒有明說幾條 ⇒ 讀者只能去猜")
+        for marker in ("· ①", "· ②", "· ③"):
+            self.assertIn(marker, doc)
+        # ①：nohup ＋ 背景 &（前景呼叫，旗標為 False）
+        self.assertTrue(G.waitform_hits("nohup python x.py > log 2>&1 &"))
+        # ②：until 條件內的裸 pgrep -f
+        self.assertTrue(G.waitform_hits("until ! pgrep -f 'run_root_unittests'; do :; done"))
+        # ③：只有旗標為真時才成立（同一條指令在前景是放行的）
+        self.assertEqual(G.waitform_hits("python x.py &"), [])
+        self.assertTrue(G.waitform_hits("python x.py &", run_in_background=True))
+
+    def test_the_wait_carve_out_asymmetry_is_documented_and_real(self) -> None:
+        """docstring 宣稱 `wait` 豁免**只罩 ①③、不罩 ②** ⇒ 兩向都實測。"""
+        self.assertIn("只罩 ①③、不罩 ②", G.waitform_hits.__doc__ or "")
+        self.assertEqual(G.waitform_hits("nohup python x.py & wait"), [])
+        self.assertTrue(
+            G.waitform_hits("until ! pgrep -f 'run_root_unittests'; do :; done; wait"),
+            "`wait` 竟然把判準② 也一起放行了 ⇒ docstring 的不對稱宣稱是假的")
 
 
 if __name__ == "__main__":  # pragma: no cover

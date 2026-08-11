@@ -411,6 +411,79 @@ def evaluate(
     return report
 
 
+#: 哨兵工作名的前綴（唯一的家＝`tools/lib/sentinel_lifecycle.TASK_PREFIX`；本檔不 import
+#: 它，因為那條相依會把本檔綁進哨兵的相依鏈，而本檔要能在只有 Task Scheduler 的環境下跑）。
+SENTINEL_PREFIX = "AutoSDD_Sentinel_"
+#: 哨兵 Action 的載具**必須**是 GUI 子系統的 `pythonw.exe`。這是防彈窗兩層裡的第二層，
+#: 而它失效時**零痕跡**：`quiet_python()` 找不到 pythonw 就靜默退回 console 版
+#: （R84／C3-P1b 已讓它出聲，但那一行只有武裝當下的人看得到，事後查不到）。
+SENTINEL_CARRIER_SUFFIX = "pythonw.exe"
+
+
+def sentinel_task_names() -> list[str]:
+    """排程器裡現存的哨兵工作名；量不到回空清單（呼叫端自己分辨，見 `--sentinels`）。"""
+    rc, out = _run_powershell(
+        "$ErrorActionPreference='SilentlyContinue'; "
+        f"Get-ScheduledTask | Where-Object {{ $_.TaskName -like '{SENTINEL_PREFIX}*' }} "
+        "| Select-Object -ExpandProperty TaskName")
+    if rc != 0:
+        return []
+    return [line.strip() for line in out.splitlines() if line.strip()]
+
+
+def sentinel_problems(actual: dict[str, str]) -> list[str]:
+    """單一哨兵的判準。**只判載具**，`LogonType` 只回報不判紅。
+
+    🔴 為什麼 `LogonType` 不判紅：S4U 註冊需要提權，而哨兵的武裝路徑（SessionStart／
+    PostToolUse hook）一律非提權 ⇒ 回退成 `InteractiveToken` 是**合法且常見**的結果。
+    把它判紅會讓每一台非提權機器的這道檢查永紅，而本 repo 已判過「擋到讓人無法工作的
+    守衛會被整個關掉，而被關掉的守衛比沒有守衛更糟」。載具那一層不同：它與提權無關，
+    只要 venv 裡有 `pythonw.exe` 就必然成立 ⇒ 它不成立就是真的有東西壞了。
+    """
+    carrier = actual.get("Actions/Exec/Command", "")
+    if not carrier:
+        return ["Actions/Exec/Command 讀不到 ⇒ 無法判斷載具（量不到 ≠ 量到零）"]
+    if not carrier.lower().rstrip('"\'').endswith(SENTINEL_CARRIER_SUFFIX):
+        return [f"Action 載具＝{carrier} ⇒ 不是 GUI 子系統的 {SENTINEL_CARRIER_SUFFIX}，"
+                "每次 tick 都會配置一個 console 視窗（掌舵者回報的「黑框一閃即消」）"]
+    return []
+
+
+def _report_sentinels() -> int:
+    """`--sentinels`：對每一支現存哨兵取 XML，判載具、印 Principal。回 rc。"""
+    names = sentinel_task_names()
+    if not names:
+        print(f"[sentinel-drift] 排程器裡沒有 {SENTINEL_PREFIX}* 工作（或列舉失敗）。"
+              "🔴 這一行**不區分**「量到零」與「量不到」——要確認請現查："
+              f"`Get-ScheduledTask | Where-Object TaskName -like '{SENTINEL_PREFIX}*'`")
+        return 0
+    bad = 0
+    for task in names:
+        try:
+            xml_text = export_task_xml(task)
+        except (RuntimeError, ValueError) as exc:
+            print(f"  ❌ {task}: 取 XML 失敗 ⇒ {exc}")
+            bad += 1
+            continue
+        if xml_text is None:
+            print(f"  • {task}: 列舉時在、取 XML 時不在（剛被收掉）")
+            continue
+        actual = parse_task_xml(xml_text)
+        problems = sentinel_problems(actual)
+        # Principal 一律印、一律不判紅（理由見 `sentinel_problems`）。
+        principal = ("Principals/Principal/LogonType", "Principals/Principal/RunLevel",
+                     "Principals/Principal/UserId")
+        detail = "／".join(f"{p.rsplit('/', 1)[-1]}={actual.get(p, 'n/a')}"
+                           for p in principal)
+        print(f"  {'❌' if problems else '✅'} {task}: {detail}")
+        for problem in problems:
+            print(f"      {problem}")
+        bad += bool(problems)
+    print(f"[sentinel-drift] status={'drift' if bad else 'ok'}"
+          f"（{len(names)} 支，{bad} 支載具不合格）")
+    return 1 if bad else 0
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="比對線上 schtasks 設定 vs 期望值 SSOT")
     parser.add_argument("--expectations", type=Path, default=_DEFAULT_EXPECTATIONS)
@@ -427,6 +500,12 @@ def main(argv: list[str] | None = None) -> int:
         "--stale-days", type=float, default=STALE_RUN_DAYS_DEFAULT,
         help=f"上次真的執行過超過幾天算漂移（預設 {STALE_RUN_DAYS_DEFAULT}；WHY 見該常數）",
     )
+    parser.add_argument(
+        "--sentinels", action="store_true",
+        help=("改判哨兵面（`AutoSDD_Sentinel_*`）：對每一支取 XML，**只判**"
+              "Action 載具必須以 pythonw.exe 結尾；LogonType 只回報不判紅"
+              "（非提權回退是合法的，判紅會製造永紅閘門而被整個關掉）"),
+    )
     args = parser.parse_args(argv)
 
     if sys.platform != "win32":
@@ -437,6 +516,11 @@ def main(argv: list[str] | None = None) -> int:
         print(json.dumps(payload, ensure_ascii=False) if args.json
               else f"[schedule-drift] SKIP — {payload['reason']}")
         return 0
+
+    if args.sentinels:
+        # 哨兵面與受管排程面是**兩個不同的受測對象**（前者由 session 動態生滅、名字帶
+        # session id，不可能寫進期望值 SSOT）⇒ 走自己的路徑，不共用 `evaluate()`。
+        return _report_sentinels()
 
     expectations = load_expectations(args.expectations)
     trigger_expectations = load_trigger_expectations(args.expectations)

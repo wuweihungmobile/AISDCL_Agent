@@ -435,10 +435,15 @@ def build_goal_decomposer(
     from ..infra.adapters.tool_invocation_adapter import (  # noqa: PLC0415
         ToolInvocationAdapter,
     )
+    # 🔴 R84（W9 交棒）：`notification_enabled` 必須在這裡注入——adapter 的 send_message 走
+    # `utils.notifier.notify`，而它的 `enabled` 預設 True ⇒ 不注入就等於這條路徑無視
+    # `config.notification.enabled`（兩個開關各說各話）。回歸鎖：
+    # `tests/test_tool_invocation.py::test_send_message_respects_notification_enabled_from_wiring`
     tool = ToolInvocationAdapter(
         enabled=cfg.tool_invocation.enabled,
         allowlist=list(cfg.tool_invocation.allowlist),
         observability=observability,
+        notification_enabled=cfg.notification.enabled,
     )
     # improving_57 A 軌 L4：有界自動凍結 signoff 閘（fail-closed 回退人工）
     freeze_gate = BoundedGoalFreezeGate()

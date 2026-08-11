@@ -6,13 +6,13 @@
 
 - **凍結基線（ci-gate FROZEN_BASELINE，恆測防回歸）**：`AISDLC_SDD_v0.01`
 - **最新演化版（ci-gate LATEST，語意由 `scripts/sdd_version.py` SSOT 定案：git tracked＋錨定 fullmatch＋數值排序取最高；可修改/承載演化）**：`AISDLC_SDD_v0.30`
-- 各版目錄結構同構；框架改動走 Copy-on-Evolve（複製 LATEST → 新版後於新版修改，不原地改凍結版）。
+- 各版目錄結構同構。**凍結基線與中間歷史版一律不可原地改；LATEST 可原地改（＝日常演化路徑）**。Copy-on-Evolve（`scripts/copy_on_evolve.sh`）只在需要保留可回歸對照快照時開新版（發布／破壞性重構／需逐版比對），不是每次改動都要開新版。邊界見 `CLAUDE.md`〈版本狀態〉。
 
 | 指標 | 凍結基線 `AISDLC_SDD_v0.01` | 最新演化版 `AISDLC_SDD_v0.30` |
 |------|------|------|
-| Agents 總數 | 25 | 27 |
-| — core / specialized | 7 / 18 | 7 / 20 |
-| — 其中 runtime（specialized/sdd-*） | 4 | 6 |
+| Agents 總數 | 25 | 28 |
+| — core / specialized | 7 / 18 | 7 / 21 |
+| — 其中 runtime（specialized/sdd-*） | 4 | 7 |
 | Scenarios | 10 | 10 |
 | Workflows（workflow/README.md 宣稱） | 23 | 23 |
 | docs_template/sdd 模板（md + yaml） | 59（56 md + 3 yaml） | 59（56 md + 3 yaml） |

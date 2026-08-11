@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
 import subprocess
 import tempfile
 
@@ -32,6 +33,10 @@ def _sdd_root() -> str:
 
 def _monorepo_root() -> str:
     return os.path.dirname(_sdd_root())
+
+
+# exec form 的 POSIX 載具只有一個家（`tools/lib/hook_wiring.LAUNCHER_REL`）。
+_LAUNCHER = os.path.join(_monorepo_root(), ".claude", "hooks", "_hook_launcher.py")
 
 
 def _settings_paths() -> list[str]:
@@ -102,15 +107,54 @@ def _viable(hook: dict, project_dir: str) -> bool:
     return lint._hook_wiring().carrier_available(hook, project_dir)
 
 
+def _fake_project_root(tmp: str) -> str:
+    """tmp 內一個**空的**假專案根，深度足夠讓 `../`／`../../` 載具仍落在 tmp 內。
+
+    🔴 R84 W3 收尾：本鎖轉 exec form 後在 mac 上 `checked==0`（反空轉斷言當場說話）。
+    成因是**構造情境本身失真**，不是判準太嚴——原構造把 `CLAUDE_PROJECT_DIR` 留空，
+    於是 `_run()` 把佔位符展開成 tmp，連**載具**（`_hook_launcher.py`）都被解析到
+    tmp 底下而不存在 ⇒ `_viable()` 正確地把每一條都判成「本平台跑不起來」，一條都沒驗。
+    但那不是本鎖要測的東西：真實情境裡 CC 一定會注入 CLAUDE_PROJECT_DIR，載具**一定
+    在**，會缺的是**目標腳本**（被刪／改名／子專案沒同步）。所以正確的構造是
+    「載具在、目標缺」——把載具照它自己宣告的相對位置擺好，專案根維持全空。
+    深度取 3 是因為現存條目最深的載具前綴是 `../../`（SDD LATEST 版目錄在 repo 第 2 層）；
+    不夠深時 normpath 會把路徑帶到 tmp 之外（＝往系統暫存區的父目錄寫檔）。
+    """
+    root = os.path.join(tmp, "lvl0", "lvl1", "lvl2")
+    os.makedirs(root, exist_ok=True)
+    return root
+
+
+def _materialise_carrier(hook: dict, project_root: str) -> None:
+    """把 POSIX 載具（啟動器）複製到這個條目宣告的位置——只造載具，不造任何目標腳本。
+
+    Windows 載具那一條**刻意不造**：跨平台配對本來就恰好一條成立，另一條在本平台
+    spawn 失敗而 CC fail-open ⇒ 造了它等於把「另一個平台的那條」當成本平台的真紅。
+    """
+    wiring = lint._hook_wiring()
+    argv = wiring.hook_entry_argv(hook)
+    if not argv or not wiring.is_exec_form(hook) or not wiring.is_posix_carrier(argv[0]):
+        return
+    exe = wiring.expand_tokens([argv[0]], project_root)[0]
+    os.makedirs(os.path.dirname(exe), exist_ok=True)
+    # copyfile 不帶權限位 ⇒ 複本沒有 exec bit，spawn 會拿到 EACCES 而不是我們要測的
+    # 「目標缺檔」路徑。用 copy（帶模式）並顯式補上 exec bit，兩層都不依賴來源的模式。
+    shutil.copy(_LAUNCHER, exe)
+    os.chmod(exe, 0o755)
+
+
 def test_missing_target_is_fail_open_not_deny():
-    """cwd=空目錄且無 CLAUDE_PROJECT_DIR → 目標腳本缺檔，必須 exit 0（絕不可 2=deny）。"""
+    """載具在、目標腳本缺，且 cwd≠專案根 → 必須 exit 0（絕不可 2=deny）。"""
     with tempfile.TemporaryDirectory() as tmp:
         checked = 0
+        project_root = _fake_project_root(tmp)
         for settings in _settings_paths():
             for hook in _all_hook_entries(settings):
-                if not _viable(hook, tmp):
+                _materialise_carrier(hook, project_root)
+                if not _viable(hook, project_root):
                     continue  # 跨平台配對的另一半：CC 對 spawn 失敗是 fail-open
-                res = _run(hook, cwd=tmp, stdin_payload="{}")
+                res = _run(hook, cwd=tmp, extra_env={"CLAUDE_PROJECT_DIR": project_root},
+                           stdin_payload="{}")
                 checked += 1
                 assert res.returncode == 0, (
                     f"hook 條目在 cwd≠專案根時未 fail-open（rc={res.returncode}，"
@@ -199,10 +243,19 @@ def test_claude_project_dir_anchors_latest_version_session_start():
         doc = json.load(f)
     hooks = [h for blk in doc["hooks"]["SessionStart"] for h in blk["hooks"]]
     assert hooks, f"{latest} settings.json 找不到 SessionStart 佈線"
+    # 🔴 R84 W3：本份 settings 轉 exec form 之後，`hooks[0]` 是 **Windows 載具**那一條
+    # （`../../.venv/Scripts/pythonw.exe`），在 mac/Linux 上 spawn 直接 FileNotFoundError。
+    # 跨平台配對的另一半是刻意 fail-open、不是缺陷 ⇒ 與同檔 root router／AutoClaude
+    # 兩個 case 用同一個 `_viable()` 篩選；篩完為空要出聲（不得靜默跳過＝本平台整支失去 hook）。
+    runnable = [h for h in hooks if _viable(h, v_root)]
+    assert runnable, (
+        f"{latest} settings.json 有 SessionStart 佈線，但**本平台一條都跑不起來** ⇒ "
+        f"這台機器上該版 session_start 整支靜默失效。條目：{[_describe(h) for h in hooks]}"
+    )
     with tempfile.TemporaryDirectory() as tmp:
         # SDD_HOOKS_DISABLE=1：disabled 分支仍輸出 hookSpecificOutput，足證 shim 真執行
         # 目標腳本，且不觸碰 v0.30 dogfooding FSM 狀態（bootstrap/reconcile 零副作用）
-        res = _run(hooks[0], cwd=tmp,
+        res = _run(runnable[0], cwd=tmp,
                    extra_env={"CLAUDE_PROJECT_DIR": v_root, "SDD_HOOKS_DISABLE": "1"})
         assert res.returncode == 0, (
             f"錨定情境下 {latest} session_start 執行失敗（rc={res.returncode}）\n{res.stderr[:400]}"

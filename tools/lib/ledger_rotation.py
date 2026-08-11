@@ -43,7 +43,8 @@ OVERSIZE_ROW_EXCESS_CEILING_HISTORY: tuple[int, ...] = (
 # 🔴 誠實劃界：本序列只收錄 `check_defect_log_crossref.py` 註解**自己留下證據**的那幾次
 # （34→28 見該檔 R80 包 C 段、17 見「第六次轉動」段、6 為 R82 實測）。第三～第五次轉動的
 # 中間值在該檔沒有留下數字，**刻意不回填猜測值**——靠猜的史料會讓方向判準判的是虛構的東西。
-UNPINNED_HANDOVER_CEILING_HISTORY: tuple[int, ...] = (34, 28, 17, 6)
+#: R84 追加 5：`DEF-101-206` 結為 wontfix ⇒ 白名單 6 → 5，天花板同步下修（收緊方向）。
+UNPINNED_HANDOVER_CEILING_HISTORY: tuple[int, ...] = (34, 28, 17, 6, 5)
 
 # ---------------------------------------------------------------- 史料前綴的封印
 # 🔴 立案（`DEF-101-995`，R82 掃描 §F 的四組實跑對照）：上面那條「歷史不得回填、不得

@@ -185,3 +185,68 @@ def test_injected_handler_used_when_allowed():
     res = adapter.invoke(ToolRequest("http_request", "https://example.com/ok"))
     assert res.allowed is True and res.ok is True
     assert res.data["status"] == 200
+
+
+# ── R84（W9 交棒）：send_message 必須尊重 notification.enabled ──────────────
+class _KwargSpyNotifier:
+    """連 kwargs 一起記的 spy——`_SpyNotifier` 只收 `(title, message)`，
+
+    對「有沒有傳 `enabled=`」結構上失明（漏傳時它照樣綠）。
+    """
+
+    def __init__(self):
+        self.calls: list[tuple[tuple, dict]] = []
+
+    def __call__(self, *a, **k):
+        self.calls.append((a, k))
+
+
+def test_send_message_forwards_notification_enabled_to_the_notifier():
+    """`notification_enabled=False` 必須逐字傳到 notifier 的 `enabled=`。
+
+    意圖（Rule 9）：`utils.notifier.notify` 的 `enabled` 預設 **True**，所以「不傳」與
+    「傳 True」在型別與 rc 上完全一樣——漏傳的表徵就是使用者關掉了通知卻還是會彈窗，
+    而沒有任何東西會說話。本支釘的是**那個 kwarg 真的被送出去**，不是 ok 旗標。
+    """
+    spy = _KwargSpyNotifier()
+    adapter = ToolInvocationAdapter(
+        enabled=True, allowlist=["alerts"], notifier=spy, notification_enabled=False
+    )
+    res = adapter.invoke(
+        ToolRequest("send_message", "alerts", {"title": "T", "message": "M"})
+    )
+    assert res.allowed is True and res.ok is True
+    assert len(spy.calls) == 1
+    assert spy.calls[0][1].get("enabled") is False, (
+        f"notifier 沒收到 enabled=False（實收 kwargs={spy.calls[0][1]}）"
+        "——這條路徑會無視 config.notification.enabled"
+    )
+
+
+def test_send_message_forwards_enabled_true_when_notifications_are_on():
+    """對稱控制組：開啟時必須傳 True，否則這道鎖鎖的是「永遠 False」而非「跟著 config」。"""
+    spy = _KwargSpyNotifier()
+    adapter = ToolInvocationAdapter(
+        enabled=True, allowlist=["alerts"], notifier=spy, notification_enabled=True
+    )
+    adapter.invoke(ToolRequest("send_message", "alerts", {"message": "x"}))
+    assert spy.calls[0][1].get("enabled") is True
+
+
+def test_wiring_injects_notification_enabled_into_the_adapter():
+    """站點級：wiring 不注入的話，adapter 的預設 True 會讓上面兩支恆綠而現實仍錯。
+
+    意圖：缺陷的家在**組裝點**——adapter 收得到參數不代表有人給它。本支直接組一次
+    真的 wiring，量 adapter 身上那個值是否等於 cfg 的值。
+    """
+    from autoclaude.core.wiring import build_goal_decomposer  # noqa: PLC0415
+
+    cfg = AppConfig()
+    cfg.notification.enabled = False
+    cfg.tool_invocation = ToolInvocationConfig(enabled=True, allowlist=["alerts"])
+    decomposer = build_goal_decomposer(cfg, brain=object())
+    assert decomposer._tool._notification_enabled is False
+
+    cfg.notification.enabled = True
+    decomposer2 = build_goal_decomposer(cfg, brain=object())
+    assert decomposer2._tool._notification_enabled is True

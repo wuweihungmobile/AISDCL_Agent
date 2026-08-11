@@ -2762,16 +2762,19 @@ class TestExecFormConversionScope(unittest.TestCase):
     form」永遠不會轉紅。處置＝把「還沒轉的有幾條」變成**可查的量測值**：掃描面現查磁碟，
     判準是相等——多了＝退步、少了＝轉好了卻沒回來改表。凍結版（Copy-on-Evolve）具名排除。
     R81 已把 AutoClaude 那份轉完（普查表兩格皆 0）⇒ 本類職責由「登記還沒轉的」變成
-    「不准有人退回去」；形態判準 A~F 的掃描面**仍只有根檔**，那是已知且未關的缺口。
+    「不准有人退回去」。
+
+    🔴 R84 訂正上一段那個「兩格皆 0」——**它是假的安心**（訴求 7「session 結束仍有彈跳
+    視窗」窮舉出來的第一名）：`FROZEN_SETTINGS_PREFIX` 把 `AISDLC_SDD/AISDLC_SDD_v*` 這
+    **30 份**全部結構性排除在掃描面之外，而其中一份是 **LATEST**——真的會被 Claude Code
+    載入的活躍檔（框架 skills 掛在版本目錄下，以它為 cwd 開 session 是常態）。實測那 30
+    份**全數仍是 shell form** ⇒ 對那種 session，R80／R81 的修法一次都沒生效，而普查表
+    照樣兩格全綠。處置分兩半：LATEST 進掃描面（以**版本中性鍵**登記，不把版號寫成常數）、
+    凍結歷史面登記成 shrink-only 的已知豁免（`TestFrozenShellFormIsAShrinkOnlyExemption`）。
     """
 
     def _counts(self) -> dict[str, int]:
-        wiring = _hook_wiring()
-        return {
-            rel: len(wiring.shell_form_entries(
-                json.loads((_REPO_ROOT / rel).read_text(encoding="utf-8"))))
-            for rel in wiring.discover_active_settings(_REPO_ROOT)
-        }
+        return _hook_wiring().census_counts(_REPO_ROOT)
 
     def test_the_census_matches_the_disk(self) -> None:
         problems = _hook_wiring().shell_form_census_problems(self._counts())
@@ -2779,18 +2782,56 @@ class TestExecFormConversionScope(unittest.TestCase):
 
     def test_the_scan_face_is_not_vacuous(self) -> None:
         """取數管道自證：掃描面塌成空的話上面那格恆綠。"""
-        found = _hook_wiring().discover_active_settings(_REPO_ROOT)
+        wiring = _hook_wiring()
+        found = wiring.discover_active_settings(_REPO_ROOT)
         self.assertIn(".claude/settings.json", found)
         self.assertIn("AutoClaude/.claude/settings.json", found)
+        self.assertIn(wiring.LATEST_SETTINGS_KEY, self._counts(),
+                      "LATEST 那一份沒進普查表 ⇒ 它退回／停在 shell form 不會有東西轉紅")
 
-    def test_frozen_sdd_versions_are_excluded_by_name(self) -> None:
-        """凍結版**確實存在於磁碟上**（30 份），排除是刻意的、不是掃不到。"""
+    def test_the_latest_sdd_settings_is_in_scope_under_its_real_path(self) -> None:
+        """LATEST 的**實際路徑**必須在掃描面內，且版號不得寫死在任何判準裡。"""
         wiring = _hook_wiring()
+        latest = wiring.latest_sdd_settings(_REPO_ROOT)
+        self.assertIsNotNone(latest, "LATEST 解析不到 ⇒ 這一族的判準全部空轉")
+        self.assertTrue((_REPO_ROOT / latest).is_file(), latest)
+        self.assertIn(latest, wiring.discover_active_settings(_REPO_ROOT))
+        self.assertEqual(wiring.census_key(latest, _REPO_ROOT), wiring.LATEST_SETTINGS_KEY)
+        # 版號中性自證：普查表的鍵裡不得出現任何 `v<數字>.<數字>` 字面。
+        self.assertEqual(
+            [k for k in wiring.SHELL_FORM_CENSUS if re.search(r"_v\d+\.\d+", k)], [],
+            "普查表把 LATEST 版號寫成常數 ⇒ Copy-on-Evolve 開新版時它就過期")
+
+    def test_reverting_the_latest_one_to_shell_form_is_red(self) -> None:
+        """🔴 本輪修法的紅綠自證（合成注入在**真實 LATEST 內容**上做）。
+
+        修法前這一格由磁碟直接證實：LATEST 實測 3 條 shell form、基準 0 ⇒ 普查判準紅。
+        轉成 exec form 之後磁碟造不出那個狀態，故改由記憶體注入驅動（牙不變）。
+        """
+        wiring = _hook_wiring()
+        latest = wiring.latest_sdd_settings(_REPO_ROOT)
+        settings = json.loads((_REPO_ROOT / latest).read_text(encoding="utf-8"))
+        before = len(wiring.shell_form_entries(settings))
+        hook = settings["hooks"]["SessionStart"][0]["hooks"][0]
+        hook.pop("args", None)
+        hook["command"] = 'python -c "import runpy" .claude/hooks/session_start.py'
+        after = len(wiring.shell_form_entries(settings))
+        self.assertEqual(after, before + 1, "注入本身沒生效 ⇒ 下面那句斷言沒有意義")
+        counts = dict(self._counts(), **{wiring.LATEST_SETTINGS_KEY: after})
+        problems = wiring.shell_form_census_problems(counts)
+        self.assertTrue(any("退回 shell form" in p for p in problems), problems)
+
+    def test_frozen_non_latest_versions_are_still_excluded(self) -> None:
+        """凍結版（非 LATEST）**確實存在於磁碟上**，排除是刻意的、不是掃不到。"""
+        wiring = _hook_wiring()
+        latest = wiring.latest_sdd_settings(_REPO_ROOT)
         frozen = sorted(_REPO_ROOT.glob("AISDLC_SDD/AISDLC_SDD_v*/.claude/settings.json"))
         self.assertTrue(frozen, "凍結版一份都掃不到 ⇒ 這條排除規則已經無事可做")
         found = wiring.discover_active_settings(_REPO_ROOT)
         self.assertEqual(
-            [rel for rel in found if rel.startswith(wiring.FROZEN_SETTINGS_PREFIX)], [])
+            [rel for rel in found
+             if rel.startswith(wiring.FROZEN_SETTINGS_PREFIX) and rel != latest], [],
+            "非 LATEST 的凍結版跑進了活躍掃描面 ⇒ Copy-on-Evolve 的歷史快照會被追殺")
 
     def test_a_regression_to_shell_form_is_red(self) -> None:
         """注入：根層多一條 shell form ⇒ 必紅（那一份的閃窗回來了）。"""
@@ -2814,6 +2855,44 @@ class TestExecFormConversionScope(unittest.TestCase):
         problems = _hook_wiring().shell_form_census_problems(counts)
         self.assertTrue(any("必須顯式入表" in p for p in problems), problems)
 
+    def test_every_active_settings_file_passes_the_form_criteria(self) -> None:
+        """🔴 R84：形態判準 A~F 的掃描面由「只有根檔」擴到**每一份活躍 settings**。
+
+        為何這一格此前不存在（而不是「不需要」）：`hook_form_problems()` 對
+        `AutoClaude/.claude/settings.json` 實測回 **12 筆假紅**（B／E 兩條做字面比對，
+        而那份檔的載具帶 `../`）⇒ 想擴面的人會先撞到一堵假牆，於是擴面一直沒發生，
+        而 SDD LATEST 那份 shell form 就一直沒有任何形態判準看著。假紅先修（見
+        `win_carrier_kind()`），再擴面——順序反了就會有人把判準關掉。
+        """
+        wiring = _hook_wiring()
+        for rel in wiring.discover_active_settings(_REPO_ROOT):
+            settings = json.loads((_REPO_ROOT / rel).read_text(encoding="utf-8"))
+            problems = wiring.hook_form_problems(settings)
+            self.assertEqual(problems, [], f"{rel}：\n  " + "\n  ".join(problems))
+
+    def test_a_parent_relative_carrier_is_not_a_false_positive(self) -> None:
+        """A2b 的正向自證：帶 `../` 的載具（子專案／SDD 各版唯一可行的寫法）必須放行。"""
+        wiring = _hook_wiring()
+        for depth in ("../", "../../"):
+            launcher = f"${{CLAUDE_PROJECT_DIR}}/{depth}.claude/hooks/_hook_launcher.py"
+            settings = {"hooks": {"SessionStart": [{"hooks": [
+                {"type": "command",
+                 "command": f"${{CLAUDE_PROJECT_DIR}}/{depth}.venv/Scripts/pythonw.exe",
+                 "args": [launcher, ".claude/hooks/x.py"]},
+                {"type": "command", "command": launcher, "args": [".claude/hooks/x.py"]},
+            ]}]}}
+            self.assertEqual(wiring.hook_form_problems(settings), [], depth)
+            self.assertEqual(wiring.win_carrier_kind(
+                f"${{CLAUDE_PROJECT_DIR}}/{depth}.venv/Scripts/pythonw.exe"), "venv")
+
+    def test_a_bogus_carrier_is_still_red_after_the_normalisation(self) -> None:
+        """反向自證：正規化不得寬到把任何 `pythonw.exe` 結尾的東西都當成載具。"""
+        wiring = _hook_wiring()
+        for bad in ("${CLAUDE_PROJECT_DIR}/../.venv/Scripts/python.exe",
+                    "${CLAUDE_PROJECT_DIR}/../tools/pythonw.exe",
+                    "/usr/bin/pythonw.exe"):
+            self.assertIsNone(wiring.win_carrier_kind(bad), bad)
+
     def test_shell_form_entries_counts_the_type_less_ones_too(self) -> None:
         """與 ARCH-02 同一條 type 慣例：省掉 `type` 的 shell form 條目一樣要被數到。"""
         wiring = _hook_wiring()
@@ -2823,6 +2902,464 @@ class TestExecFormConversionScope(unittest.TestCase):
             {"type": "prompt", "command": "not a command hook"},
         ]}]}}
         self.assertEqual(len(wiring.shell_form_entries(settings)), 2)
+
+
+class TestFrozenShellFormIsAShrinkOnlyExemption(unittest.TestCase):
+    """凍結歷史面（`AISDLC_SDD/AISDLC_SDD_v*` 裡**非 LATEST** 的那些）的 shell form 份數。
+
+    🔴 立案（R84 訴求 7）：這一族此前是**結構性豁免**——`FROZEN_SETTINGS_PREFIX` 一句話
+    就把 30 份全部踢出掃描面，於是「凍結面有沒有被人動過」與「LATEST 轉了沒有」兩件事
+    同時失明。凍結面依 Copy-on-Evolve 政策不改寫，所以正解不是把它們也轉掉（那才是打破
+    政策），而是把「還有幾份是 shell form」登記成**可查的量測值**、判準取相等、方向只准
+    變小。新開一版**不會**讓它上升：新版由已是 exec form 的 LATEST 複製而來。
+    """
+
+    def test_the_frozen_ratchet_matches_the_disk(self) -> None:
+        wiring = _hook_wiring()
+        problems = wiring.frozen_shell_form_problems(
+            wiring.frozen_shell_form_settings(_REPO_ROOT))
+        self.assertEqual(problems, [], "\n".join(problems))
+
+    def test_the_scan_face_is_not_vacuous(self) -> None:
+        """反空轉：這一族真的有東西在（份數塌成 0 時上一格會因基準不符而紅，不是恆綠）。"""
+        wiring = _hook_wiring()
+        found = wiring.frozen_shell_form_settings(_REPO_ROOT)
+        self.assertTrue(found, "凍結面掃不到任何 shell form ⇒ 判準已空轉")
+        latest = wiring.latest_sdd_settings(_REPO_ROOT)
+        self.assertNotIn(latest, found, "LATEST 被算進凍結面 ⇒ 它會被那條豁免遮住")
+
+    def test_touching_a_frozen_version_is_red(self) -> None:
+        """注入：份數上升（＝有人真的改了凍結面，或 LATEST 解析壞了把活躍那份算進來）。"""
+        wiring = _hook_wiring()
+        found = wiring.frozen_shell_form_settings(_REPO_ROOT)
+        problems = wiring.frozen_shell_form_problems(found + ["AISDLC_SDD/x/.claude/settings.json"])
+        self.assertTrue(any("上升" in p for p in problems), problems)
+
+    def test_shrinking_without_lowering_the_cap_is_also_red(self) -> None:
+        """另一向：真的轉掉一份卻沒下修基準 ⇒ 餘裕＝日後無聲加回去的破口。"""
+        wiring = _hook_wiring()
+        found = wiring.frozen_shell_form_settings(_REPO_ROOT)
+        problems = wiring.frozen_shell_form_problems(found[:-1])
+        self.assertTrue(any("下降" in p for p in problems), problems)
+
+
+#: 「hook 行程生出來的子行程不得配 console」判準的**第二個掃描面**。
+#: 第一個是 `tools/tests/test_context_budget_guard.py::ConsoleFreeSpawnTest`（掃
+#: `.claude/hooks/`）；本組掃 `AutoClaude/tools/hooks/`——那一整棵樹先前一個判準都沒有。
+_AC_HOOK_DIR = _REPO_ROOT / "AutoClaude" / "tools" / "hooks"
+_SPAWN_ATTRS = ("run", "Popen", "call", "check_output", "check_call")
+
+
+def _console_spawn_offenders() -> list[str]:
+    """`AutoClaude/tools/hooks/*.py` 內**會配 console 視窗**的 spawn 站點。
+
+    判準只判「argv[0] 不是 `sys.executable`」那些：本目錄的 hook 由 exec form 的
+    `pythonw.exe`（GUI 子系統、無 console）啟動，所以 `sys.executable` 本身也是
+    `pythonw.exe` ⇒ 拿它去 spawn 不會配視窗；但外部 console 執行檔（`git.exe`）會被
+    OS **配一個新 console**。刻意不判 `sys.executable` 那一族＝刻意不製造假紅。
+    """
+    offenders: list[str] = []
+    for path in sorted(_AC_HOOK_DIR.glob("*.py")):
+        for node in ast.walk(ast.parse(path.read_text(encoding="utf-8"))):
+            if not isinstance(node, ast.Call):
+                continue
+            func = node.func
+            if not (isinstance(func, ast.Attribute) and isinstance(func.value, ast.Name)
+                    and func.value.id == "subprocess" and func.attr in _SPAWN_ATTRS):
+                continue
+            argv = ast.unparse(node.args[0]) if node.args else ""
+            if "sys.executable" in argv:
+                continue
+            if not any(kw.arg == "creationflags" for kw in node.keywords):
+                offenders.append(f"{path.name}:{node.lineno} {func.attr}({argv[:60]})")
+    return offenders
+
+
+class TestAutoClaudeHookSpawnsAreConsoleFree(unittest.TestCase):
+    """🔴 R84 訴求 7／C1：exec form 治掉載具的彈窗之後，**載具生的孫子還在彈**。
+
+    立案事實：`AutoClaude/tools/hooks/check_sh_eol.py::_run_git` 對 `git.exe` 的
+    `subprocess.run` 沒有 `CREATE_NO_WINDOW`。父行程是 `pythonw.exe`（GUI 子系統、
+    **沒有 console**），Windows 在這種情況下會替 console 子系統的 child **配一個新
+    console 視窗** ⇒ 每次 Write／Edit 到 `.sh` 就閃一次。`.claude/hooks/` 那一棵樹早有
+    判準看著（`ConsoleFreeSpawnTest`），`AutoClaude/tools/hooks/` 這一棵**一個都沒有**。
+    """
+
+    def test_no_console_spawning_site_remains(self) -> None:
+        offenders = _console_spawn_offenders()
+        self.assertEqual(
+            offenders, [],
+            "這些 spawn 站點會在 Windows 上替 hook 配一個 console 視窗（父行程是 "
+            "pythonw.exe、無 console）——請加 "
+            "`creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0)`"
+            f"（POSIX 上兜底成 0，跨平台無副作用）：{offenders}")
+
+    def test_the_scan_face_is_not_vacuous(self) -> None:
+        """反空轉：掃描面塌成空的話上一格恆綠（R80 已實測過這個失明形態）。"""
+        self.assertTrue(list(_AC_HOOK_DIR.glob("*.py")), f"{_AC_HOOK_DIR} 掃不到任何 .py")
+        found = [
+            f"{p.name}:{n.lineno}"
+            for p in sorted(_AC_HOOK_DIR.glob("*.py"))
+            for n in ast.walk(ast.parse(p.read_text(encoding="utf-8")))
+            if isinstance(n, ast.Call) and isinstance(n.func, ast.Attribute)
+            and isinstance(n.func.value, ast.Name) and n.func.value.id == "subprocess"
+            and n.func.attr in _SPAWN_ATTRS
+        ]
+        self.assertTrue(found, "這棵樹一個 subprocess spawn 站點都掃不到 ⇒ 判準空轉")
+
+    def test_removing_the_flag_turns_it_red(self) -> None:
+        """合成注入（不動磁碟）：同一支判準函式餵一段拔掉 creationflags 的原始碼必紅。"""
+        source = (
+            "import subprocess\n"
+            "def f(args):\n"
+            "    return subprocess.run(['git', *args], capture_output=True)\n"
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            probe = Path(tmp) / "probe_hook.py"
+            probe.write_text(source, encoding="utf-8")
+            hits = [
+                node.lineno
+                for node in ast.walk(ast.parse(probe.read_text(encoding="utf-8")))
+                if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)
+                and isinstance(node.func.value, ast.Name)
+                and node.func.value.id == "subprocess"
+                and node.func.attr in _SPAWN_ATTRS
+                and not any(kw.arg == "creationflags" for kw in node.keywords)
+            ]
+            self.assertEqual(hits, [3], "判準對「拔掉旗標」這個形態沒有牙")
+        # 綠向：加回旗標之後同一段程式碼不再命中。
+        fixed = source.replace(
+            "capture_output=True",
+            "capture_output=True, creationflags=getattr(subprocess, 'X', 0)")
+        self.assertEqual(
+            [n.lineno for n in ast.walk(ast.parse(fixed))
+             if isinstance(n, ast.Call) and isinstance(n.func, ast.Attribute)
+             and isinstance(n.func.value, ast.Name) and n.func.value.id == "subprocess"
+             and n.func.attr in _SPAWN_ATTRS
+             and not any(kw.arg == "creationflags" for kw in n.keywords)], [])
+
+
+_NIGHTLY_INSTALLER = _REPO_ROOT / "tools" / "install_windows_nightly.ps1"
+#: schtasks Action 的載具行：`New-ScheduledTaskAction -Execute 'powershell.exe' … -Argument "…"`。
+#: 反引號續行 ⇒ 判準以「整支檔」為單位切出每一個 Action 的 `-Argument` 字串。
+_ACTION_RE = re.compile(
+    r"New-ScheduledTaskAction\s+-Execute\s+'powershell\.exe'\s*`?\s*\n?\s*"
+    r"-Argument\s+\"([^\"]*)\"")
+
+
+class TestSentinelDriftCriterion(unittest.TestCase):
+    """R84／C3-P5：`tools/check_scheduled_task_drift.py --sentinels` 的純函式判準。
+
+    🔴 只判載具、`LogonType` 只回報不判紅——理由寫在 `sentinel_problems()` 的 docstring
+    裡（S4U 需提權、哨兵武裝路徑一律非提權 ⇒ 判紅＝永紅閘門＝被整個關掉）。本類同時
+    釘住「不判」這一半：把它判紅是一種很容易被當成「更嚴格」而加進來的退化。
+    """
+
+    @staticmethod
+    def _drift():
+        sys.path.insert(0, str(_REPO_ROOT / "tools"))
+        import check_scheduled_task_drift  # noqa: PLC0415 — 工具不在 import 面，隨用隨載
+        return check_scheduled_task_drift
+
+    def test_a_gui_carrier_passes(self) -> None:
+        mod = self._drift()
+        self.assertEqual(mod.sentinel_problems(
+            {"Actions/Exec/Command": r"D:\repo\.venv\Scripts\pythonw.exe",  # platform-ok: XML 語料
+             "Principals/Principal/LogonType": "InteractiveToken"}), [])
+
+    def test_a_console_carrier_is_flagged(self) -> None:
+        """注入①：載具退回 console 版 ⇒ 必紅（這正是彈窗的來源）。"""
+        mod = self._drift()
+        self.assertTrue(mod.sentinel_problems(
+            {"Actions/Exec/Command": r"D:\repo\.venv\Scripts\python.exe"}))  # platform-ok: XML 語料
+
+    def test_an_unreadable_carrier_is_not_read_as_ok(self) -> None:
+        """注入②：欄位讀不到 ⇒ 必紅（量不到 ≠ 量到零）。"""
+        self.assertTrue(self._drift().sentinel_problems({}))
+
+    def test_an_interactive_logon_type_alone_is_never_a_failure(self) -> None:
+        """🔴 反向釘：非提權回退是合法的，只要載具對就不准紅。"""
+        mod = self._drift()
+        for logon in ("InteractiveToken", "S4U", "Password"):
+            with self.subTest(logon=logon):
+                # 載具字串是 Task XML 的**內容**（Windows 產出、原樣比對），不是由
+                # `Path` 算出來的路徑 ⇒ 這裡不會有「Windows 渲染成反斜線」那個問題。
+                self.assertEqual(mod.sentinel_problems(  # posix-abs-ok: Task XML 語料
+                    {"Actions/Exec/Command": "/x/.venv/Scripts/pythonw.exe",
+                     "Principals/Principal/LogonType": logon}), [])
+
+
+#: 全庫排程 Action 的載具行（`.ps1` 的 cmdlet 形態 ＋ `.py` 內插出那一行的字串形態）。
+_ANY_ACTION_RE = re.compile(r"New-ScheduledTaskAction\s+-Execute\s+(\S+)")
+#: 會**配置 console** 的載具。名單刻意只列這四個：它們是本 repo 真的會拿來當 Action 的
+#: 那幾支，把「所有 .exe」一起判會製造要逐一辯護的假紅（本 repo 判過那種鎖活不過一輪）。
+_CONSOLE_CARRIERS = ("powershell.exe", "pwsh.exe", "cmd.exe", "python.exe")
+#: GUI 子系統載具的**字面**形態。非字面（內插）那一半由 `quiet_python` 這個符號認證，
+#: 理由見 `test_the_repo_wide_criterion_knows_the_gui_carrier_symbol`。
+_GUI_CARRIER_LITERAL = "pythonw.exe"
+_GUI_CARRIER_SYMBOL = "quiet_python"
+_ACTION_EXEMPT_RE = re.compile(r"#\s*no-window-ok:\s*(\S.*)$")
+#: 掃描面：活躍的 `.ps1`／`.py`。`.md` 一律不掃——文件裡的指令是給人讀的說明，
+#: 判它就是要求文件與程式碼用同一組判準，而那會把「說明一個危險形態」也判成違規。
+_ACTION_SCAN_TREES = ("tools", ".claude", "AutoClaude/tools")
+#: 🔴 `tools/tests/` 排除在外，理由是**鑑別力**不是方便：上面那幾條合成注入自證的
+#: 語料本身就是「沒帶 Hidden 的 Action 字面」，把測試樹掃進來時本判準會抓到自己的
+#: 語料（實測 3 筆，全部來自本檔的注入 fixture）——一支會對自己的語料轉紅的掃描器
+#: 只有兩種下場：注入自證被拿掉，或整支鎖被關掉。同 `_decommented` 那一段的判例
+#: （掃描器把說明文字當程式碼），只是這次那段文字是測試資料。
+#: 誠實劃界：測試樹裡若真的有人寫出一個會註冊到真排程器的 console Action，本判準看不到；
+#: 那一族由 `test_context_budget_guard.setUpModule`（整模組禁真排程器）擋，不是靠本鎖。
+_ACTION_SCAN_EXCLUDE = ("tools/tests/",)
+
+
+def _decommented(text: str, suffix: str) -> str:
+    """把註解換成等長空白（行號與行結構不變，才對得回原始行）。
+
+    `.ps1` 的 `<# … #>` 區塊與 `#` 行註解都要剝：`AutoClaude/tools/run_local_nightly.ps1`
+    的 `.NOTES` 區塊裡就有一段**示範用**的 `schtasks /create`，不剝的話它是本判準唯一
+    的假紅——而它是一段給人看的說明，不是會被執行的東西。
+    """
+    if suffix == ".ps1":
+        text = re.sub(r"<#.*?#>", lambda m: re.sub(r"[^\n]", " ", m.group(0)),
+                      text, flags=re.S)
+    return "\n".join(line.split("#", 1)[0] if line.lstrip().startswith("#") else line
+                     for line in text.splitlines())
+
+
+def scheduled_action_sites(sources: dict[str, str] | None = None) -> list[tuple[str, str]]:
+    """全庫的排程 Action 站點 → `[(檔名, 那一行原文)]`（註解內的不算）。"""
+    if sources is None:
+        sources = _action_scan_sources()   # 掃描面只有一個家，兩個各自 rglob 會漂
+    out: list[tuple[str, str]] = []
+    for rel, text in sources.items():
+        suffix = ".ps1" if rel.endswith(".ps1") else ".py"
+        scrubbed = _decommented(text, suffix)
+        raw_lines = text.splitlines()
+        for idx, line in enumerate(scrubbed.splitlines()):
+            if _ANY_ACTION_RE.search(line):
+                out.append((rel, raw_lines[idx] if idx < len(raw_lines) else line))
+    return out
+
+
+#: 內插載具裡那個變數名：`{python}`（f-string）／`$var`／`$($var)`（PowerShell）。
+_CARRIER_NAME_RE = re.compile(r"[{$]\(?\$?\s*([A-Za-z_][A-Za-z0-9_]*)")
+
+
+def _certified_carrier_names(text: str, suffix: str) -> set[str]:
+    """該檔內**賦值來源含 `quiet_python`** 的變數名 ＝ 站點級白名單。
+
+    🔴 R84／SD-05：舊判準是 `_GUI_CARRIER_SYMBOL in text` ——那是**整檔通行證**，只要
+    檔案裡任何地方（連註解）出現過 `quiet_python` 這七個字，該檔所有內插載具一律放行。
+    實測注入：只在**註解**提到它 ＋ 一個內插出 `powershell.exe` 的 Action ⇒ **0 筆命中**，
+    而 `windowless_action_problems` 自己的 docstring 分支③ 逐字寫著「白名單不得變成
+    萬用通行證」⇒ 宣稱射程 ≠ 實作射程。這比沒有鎖更難看見：檔案在、判準在、測試全綠。
+
+    `.py` 走 AST：註解結構上不可能出現在 `ast.Assign.value` 裡 ⇒「註解不得認證」是
+    **性質**，不是靠剝註解的正則去逼近（`_decommented` 對 `.py` 只剝整行註解，行尾註解
+    照樣留著，用它會把同一個洞縮小而不是關掉）。`.ps1` 沒有現成 parser，退回「剝過註解
+    的行首賦值」比對。
+    誠實劃界：只追**一層**賦值——`x = _q(guard.quiet_python())` 認得，
+    `a = quiet_python(); x = a` 不認得（會判紅）。今日全庫唯一的內插站點是前者；
+    追賦值鏈要的是資料流分析，射程遠大於本輪，且假紅方向是安全的那一邊。
+    """
+    names: set[str] = set()
+    if suffix == ".py":
+        try:
+            tree = ast.parse(text)
+        except SyntaxError:
+            tree = None
+        if tree is not None:
+            for node in ast.walk(tree):
+                if not isinstance(node, (ast.Assign, ast.AnnAssign)) or node.value is None:
+                    continue
+                if _GUI_CARRIER_SYMBOL not in ast.unparse(node.value):
+                    continue
+                targets = (node.targets if isinstance(node, ast.Assign) else [node.target])
+                names |= {t.id for t in targets if isinstance(t, ast.Name)}
+            return names
+    for line in _decommented(text, suffix).splitlines():
+        assigned = re.match(r"\s*\$?([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.+)$", line)
+        if assigned and _GUI_CARRIER_SYMBOL in assigned.group(2):
+            names.add(assigned.group(1))
+    return names
+
+
+def windowless_action_problems(sources: dict[str, str] | None = None) -> list[str]:
+    """哪些排程 Action 起的是 console 載具卻沒有藏視窗。純函式判準。
+
+    判準三分支：① console 載具 → 必須有 `-WindowStyle Hidden`（同一行或緊接的續行）；
+    ② GUI 載具（字面 `pythonw.exe`，或內插自**該站點那個變數**、而它的賦值來源是
+    `quiet_python()`）→ 放行；③ 其他內插／來路不明 → **判紅**（白名單不得變成萬用
+    通行證——R84／SD-05 之前這句話只寫在這裡，實作放行的是整個檔案）。
+    行尾 `# no-window-ok: <理由>` 是逃生口，理由留空無效。
+    """
+    if sources is None:
+        sources = dict(_action_scan_sources())
+    problems: list[str] = []
+    for rel, text in sources.items():
+        suffix = ".ps1" if rel.endswith(".ps1") else ".py"
+        certified = _certified_carrier_names(text, suffix)
+        scrubbed = _decommented(text, suffix).splitlines()
+        raw = text.splitlines()
+        for idx, line in enumerate(scrubbed):
+            found = _ANY_ACTION_RE.search(line)
+            if not found:
+                continue
+            # Action 常以反引號／字串串接跨行 ⇒ 判準看「這一行起算的 4 行」這個窗。
+            window_raw = "\n".join(raw[idx:idx + 4])
+            excused = _ACTION_EXEMPT_RE.search(window_raw)
+            if excused:
+                continue
+            carrier = found.group(1)
+            if any(name in carrier for name in _CONSOLE_CARRIERS):
+                if "-WindowStyle Hidden" not in "\n".join(scrubbed[idx:idx + 4]):
+                    problems.append(
+                        f"{rel}:{idx + 1} 排程 Action 的載具是 console 的 {carrier}，"
+                        "S4U 漂成 InteractiveToken 時會畫出視窗 ⇒ 請補 -WindowStyle Hidden "
+                        "或行尾具名豁免 `# no-window-ok: <理由>`")
+            else:
+                # 站點級：這個載具是**哪個變數**內插出來的，那個變數的賦值來源才算數。
+                interpolated = set(_CARRIER_NAME_RE.findall(carrier))
+                if _GUI_CARRIER_LITERAL in carrier or (
+                        interpolated and interpolated <= certified):
+                    continue
+                problems.append(
+                    f"{rel}:{idx + 1} 排程 Action 的載具 {carrier} 既不是字面 "
+                    f"{_GUI_CARRIER_LITERAL}、也不是由 {_GUI_CARRIER_SYMBOL}() 算出來的 ⇒ "
+                    "無法判斷它會不會配置 console。請走載具 SSOT 或具名豁免")
+    return problems
+
+
+def _action_scan_sources() -> dict[str, str]:
+    """掃描面的實體（與 `scheduled_action_sites` 共用同一份 tree 清單）。"""
+    out: dict[str, str] = {}
+    for tree in _ACTION_SCAN_TREES:
+        base = _REPO_ROOT / tree
+        if not base.is_dir():
+            continue
+        for path in sorted(base.rglob("*")):
+            rel = str(path.relative_to(_REPO_ROOT)).replace("\\", "/")
+            if (path.suffix in (".ps1", ".py") and "__pycache__" not in path.parts
+                    and not rel.startswith(_ACTION_SCAN_EXCLUDE)):
+                out[rel] = path.read_text(encoding="utf-8", errors="replace")
+    return out
+
+
+class TestNightlyTaskActionsAreWindowless(unittest.TestCase):
+    """🔴 R84 訴求 7／B1-B2：schtasks 的兩支 Action 是 console 的 `powershell.exe`。
+
+    第一層防護是 `LogonType=S4U`（無互動桌面 ⇒ 本來就看不到），但那一層**已經被實測
+    證明會漂**：`tools/scheduled_task_expectations.json` 的 `_why` 逐字記載 smoke 任務的
+    LogonType 曾漂成 `InteractiveToken` **連三輪**，而漂掉的那三輪正是使用者會看到彈窗
+    的那三輪。`-WindowStyle Hidden` 是與它獨立的第二層。
+
+    🔴 誠實劃界：本輪**無 Windows 真機** ⇒ 本類守的是「這兩行寫進去了、而且不准有人拿
+    掉」，**不是**「彈窗真的消失了」。後者要真機才驗得到。
+    """
+
+    def setUp(self) -> None:
+        self.text = _NIGHTLY_INSTALLER.read_text(encoding="utf-8")
+        self.actions = _ACTION_RE.findall(self.text)
+
+    def test_the_scan_face_is_not_vacuous(self) -> None:
+        self.assertEqual(len(self.actions), 2,
+                         f"預期抓到 nightly／smoke 兩支 Action，實得 {self.actions}")
+
+    def test_every_action_hides_its_window(self) -> None:
+        missing = [a for a in self.actions if "-WindowStyle Hidden" not in a]
+        self.assertEqual(
+            missing, [],
+            "schtasks Action 起的是 console 子系統的 powershell.exe，S4U 漂成 "
+            f"InteractiveToken 時會畫出視窗（實測連三輪）——請補 -WindowStyle Hidden：{missing}")
+
+    def test_the_criterion_catches_a_stripped_flag(self) -> None:
+        """合成注入：把旗標拿掉 ⇒ 必紅（證明上一格不是因為 regex 抓不到而恆綠）。"""
+        stripped = _ACTION_RE.findall(self.text.replace(" -WindowStyle Hidden", ""))
+        self.assertEqual(len(stripped), 2, "注入後 regex 就抓不到了 ⇒ 判準沒有牙")
+        self.assertEqual([a for a in stripped if "-WindowStyle Hidden" in a], [])
+
+    # ── R84／C3-B：同一個性質，掃描面由「這一支安裝器」擴到全庫 ──────────────
+    # 🔴 立案：上面三格守的是 `tools/install_windows_nightly.ps1` **這一個檔**，而排程
+    # Action 是一個**任何人都可以再開一個**的東西——本輪就實測到第二個家
+    # （`tools/session_resume_planner.py` 的哨兵註冊腳本）。射程由一份手寫路徑決定時，
+    # 分母由記憶決定；這正是 R82 漏掉 `quota_meter.py` 的同一個形狀。
+    def test_every_scheduled_task_action_in_the_repo_is_windowless(self) -> None:
+        problems = windowless_action_problems()
+        self.assertEqual(problems, [], "；".join(problems))
+
+    def test_the_repo_wide_criterion_is_not_vacuous(self) -> None:
+        """反空轉：掃描面必須真的抓到站點，否則上一格是恆綠的。"""
+        self.assertGreaterEqual(len(scheduled_action_sites()), 3,
+                                "全庫排程 Action 站點少於 3 個 ⇒ 掃描面塌掉了")
+
+    def test_the_repo_wide_criterion_catches_a_console_carrier(self) -> None:
+        """合成注入①：console 載具沒帶 Hidden ⇒ 必紅。"""
+        bad = {"x.ps1": "$a = New-ScheduledTaskAction -Execute 'powershell.exe' "
+                        "-Argument \"-NoProfile -File x.ps1\"\n"}
+        self.assertTrue(windowless_action_problems(bad))
+        good = {"x.ps1": "$a = New-ScheduledTaskAction -Execute 'powershell.exe' "
+                         "-Argument \"-NoProfile -WindowStyle Hidden -File x.ps1\"\n"}
+        self.assertEqual(windowless_action_problems(good), [])
+
+    def test_the_repo_wide_criterion_knows_the_gui_carrier_symbol(self) -> None:
+        """🔴 合成注入②：非字面載具（`'{python}'`）必須認得 `quiet_python()` 這個**符號**。
+
+        只找字面 `pythonw.exe` 會讓 `tools/session_resume_planner.py` 成為**唯一一筆假紅**
+        ——它的 `-Execute` 是內插出來的，值來自 `guard.quiet_python()`（載具那一層的唯一
+        真相源）。而假紅不是「比較嚴格」：一筆要逐輪辯護的假紅足以讓這支鎖被關掉。
+        同時**不放行**任何其他來路不明的內插——那才是真的失明。
+        """
+        via_symbol = {"p.py": "python = _q(guard.quiet_python())\n"
+                              "s = f\"New-ScheduledTaskAction -Execute '{python}' \"\n"}
+        self.assertEqual(windowless_action_problems(via_symbol), [])
+        unknown = {"p.py": "s = f\"New-ScheduledTaskAction -Execute '{whatever}' \"\n"}
+        self.assertTrue(windowless_action_problems(unknown),
+                        "來路不明的內插載具被放行 ⇒ 白名單變成萬用通行證")
+
+    def test_the_gui_whitelist_is_per_site_not_a_whole_file_pass(self) -> None:
+        """🔴 R84／SD-05：白名單是**站點級**的——提到 `quiet_python` 不等於認證了它。
+
+        修前的判準是 `_GUI_CARRIER_SYMBOL in text`（整檔），實測注入：只在**註解**裡提到
+        它、另外寫一個內插出 `powershell.exe` 的 Action ⇒ **0 筆命中**。而 console 載具
+        混在內插裡正是這一族最難看見的形態（第一分支的字面比對看不到它）。
+        `.ps1` 一併驗：兩種副檔名走的是不同的認證路徑（AST／剝註解後的行首賦值），
+        只驗一種等於另一種沒有人守。
+        """
+        for label, only_comment, certified in (
+            (".py", {"p.py": "# 我們的做法是 quiet_python()\n"
+                             "ps = 'powershell.exe'\n"
+                             "s = f\"New-ScheduledTaskAction -Execute '{ps}' \"\n"},
+             {"p.py": "ps = _q(guard.quiet_python())\n"
+                      "s = f\"New-ScheduledTaskAction -Execute '{ps}' \"\n"}),
+            (".ps1", {"x.ps1": "# quiet_python\n$exe = 'powershell.exe'\n"
+                               "$a = New-ScheduledTaskAction -Execute $exe\n"},
+             {"x.ps1": "$exe = quiet_python\n"
+                       "$a = New-ScheduledTaskAction -Execute $exe\n"}),
+        ):
+            with self.subTest(kind=label):
+                self.assertTrue(windowless_action_problems(only_comment),
+                                "註解裡提一句就發了整檔通行證 ⇒ 宣稱射程 ≠ 實作射程")
+                self.assertEqual(windowless_action_problems(certified), [],
+                                 "真的由 quiet_python() 賦值的站點被判紅 ⇒ 這是假紅，"
+                                 "而一筆要逐輪辯護的假紅足以讓整支鎖被關掉")
+
+    def test_the_per_site_whitelist_does_not_manufacture_false_reds(self) -> None:
+        """假紅實量：全庫現存的排程 Action 站點在收窄之後必須仍是 0 problems。
+
+        收窄判準最貴的失敗方式不是漏抓，是把今天正確的東西判紅——本 repo 明文判過
+        「擋到讓人無法工作的守衛會被整個關掉」。故這一格與上面那格必須成對存在。
+        """
+        self.assertEqual(windowless_action_problems(), [])
+        self.assertGreaterEqual(len(scheduled_action_sites()), 3, "掃描面塌了 ⇒ 上一格恆綠")
+
+    def test_the_repo_wide_criterion_honours_a_named_exemption(self) -> None:
+        """行尾 `# no-window-ok: <理由>` 放行；**理由留空無效**（同 ConsoleFreeSpawn 體例）。"""
+        excused = {"x.ps1": "New-ScheduledTaskAction -Execute 'cmd.exe' "
+                            "-Argument \"/c z\"  # no-window-ok: 要給人看的 TUI\n"}
+        self.assertEqual(windowless_action_problems(excused), [])
+        bare = {"x.ps1": "New-ScheduledTaskAction -Execute 'cmd.exe' "
+                         "-Argument \"/c z\"  # no-window-ok:\n"}
+        self.assertTrue(windowless_action_problems(bare))
 
 
 if __name__ == "__main__":

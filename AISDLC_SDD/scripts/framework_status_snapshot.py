@@ -135,7 +135,13 @@ def render(repo_root: str) -> str:
         f"- **凍結基線（ci-gate FROZEN_BASELINE，恆測防回歸）**：`{baseline}`",
         f"- **最新演化版（ci-gate LATEST，語意由 `scripts/sdd_version.py` SSOT 定案："
         f"git tracked＋錨定 fullmatch＋數值排序取最高；可修改/承載演化）**：`{latest}`",
-        "- 各版目錄結構同構；框架改動走 Copy-on-Evolve（複製 LATEST → 新版後於新版修改，不原地改凍結版）。",
+        # 🔴 R84 訂正（本行原文逐字保留於此，訂正協議禁止靜默覆寫）：
+        #   「- 各版目錄結構同構；框架改動走 Copy-on-Evolve（複製 LATEST → 新版後於新版修改，不原地改凍結版）。」
+        # 為何是假話：同一份檔案的上一行已寫 LATEST「可修改/承載演化」，兩句互斥；而實務走的是
+        # 原地改 LATEST（R71~R83 多個 commit 直接改 v0.30）。掌舵者裁決：收斂到「原地改 LATEST」。
+        "- 各版目錄結構同構。**凍結基線與中間歷史版一律不可原地改；LATEST 可原地改（＝日常演化路徑）**。"
+        "Copy-on-Evolve（`scripts/copy_on_evolve.sh`）只在需要保留可回歸對照快照時開新版（發布／破壞性重構／需逐版比對），"
+        "不是每次改動都要開新版。邊界見 `CLAUDE.md`〈版本狀態〉。",
         "",
         f"| 指標 | 凍結基線 `{baseline}` | 最新演化版 `{latest}` |",
         "|------|------|------|",

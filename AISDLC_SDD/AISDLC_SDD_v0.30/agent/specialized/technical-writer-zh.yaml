@@ -6,7 +6,7 @@ agent:
   id: "technical-writer"
   title: "技術文檔專家"
   icon: "📚"
-  version: "v0.18"
+  version: "see FRAMEWORK_STATUS.md（框架 LATEST；本欄刻意不寫版號——寫死即過期）"
   whenToUse: "用於技術文檔創建、API文檔、用戶手冊、知識庫管理、文檔流程建立"
   customization: null
 

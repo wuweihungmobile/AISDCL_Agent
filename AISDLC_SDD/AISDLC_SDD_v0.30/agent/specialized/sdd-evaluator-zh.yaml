@@ -6,7 +6,7 @@ agent:
   id: "sdd-evaluator"
   title: "SDD Execution-Grounded Evaluator Agent"
   icon: "🧪"
-  version: "v0.18"
+  version: "see FRAMEWORK_STATUS.md（框架 LATEST；本欄刻意不寫版號——寫死即過期）"
   whenToUse: |
     用於 Phase H M1「執行接地層」。EXECUTION_EVALUATION 狀態觸發本 Agent，
     在獨立 context / git worktree 中啟動沙箱、用 Playwright/HTTP 實際操作應用、

@@ -521,10 +521,12 @@ def orphan_backlog_problems(ledger_text: str) -> list[str]:
         `closed-by-decision` 的歷史列一律不判（歷史檔逐字保全，見上方第一個坑）。
       · 該列**狀態欄**（或更後面提及本列 ID 的那一列的狀態欄）載明「改派」／「回執」
         即放行；判定走 `_reassign_hit()`（R74 起只判狀態欄、遮 code span、擋否定語意）。
+        🔴 R84（`DEF-200-088`）：**跨列**那一半此後同樣要比輪號——該回執列的狀態欄必須
+        指名一個 ≥ 當前輪的 `R\\d+`，否則不算出口（回執一寫就永久有效＝同一個洞的另一半）。
 
     **已實測不涵蓋**（逐項跑過，並釘成常駐斷言）：
       · **跨列**：更後面那一列的認定條件只是「該列提及本列 ID」這個弱條件；「哪一列才算
-        更新的紀錄、要不要接受它的改派」需要語意判斷，不在逐行正則的能力內。
+        更新的紀錄」需要語意判斷，不在逐行正則的能力內（輪號新鮮度已補，見上）。
       · **`status@Rnn` 形態**（`deferred@R59`）刻意不當承接者，理由見 `_REASSIGN_RE`
         上方註解。若未來有人真的用 `@Rnn` 表示指派對象，本鎖抓不到。
       · **散文式指派**（「留給下一輪某人」）無 `R\\d+` ⇒ 由後半句 `unpinned_...()` 接手。
@@ -554,7 +556,16 @@ def orphan_backlog_problems(ledger_text: str) -> list[str]:
         if _reassign_hit(cells[status_idx]):
             continue
         def_id = cells[id_idx]
-        if any(def_id in ln and _reassign_hit(c[status_idx]) for _, c, ln in rows[i + 1:]):
+        # 🔴 R84（`DEF-200-088`）：跨列出口先前只取布林 ⇒ 回執一寫就永久免比輪號。輪號從
+        # 回執列狀態欄以 `_ROUND_RE` **粗抓取最大值**（回執體例「一律改派 **R<n>**」不落在
+        # `_HANDOVER_ROUND_RES` 的承接樣式內），刻意偏寬＝漏抓而非假紅，同本檔既有方向。
+        # 回執寫字面「未指派」者照放——那是硬規則② 後半句自己給的二擇一，判它等於關掉出口。
+        floor = cur if cur is not None else -1
+        if any(def_id in ln and _reassign_hit(c[status_idx])
+               and (_UNASSIGNED_LITERAL in c[status_idx]
+                    or max((int(x.group(1)) for x in _ROUND_RE.finditer(c[status_idx])),
+                           default=-1) >= floor)
+               for _, c, ln in rows[i + 1:]):
             continue
         if cur is None:
             problems.append(
@@ -635,15 +646,20 @@ _UNASSIGNED_LITERAL = "未指派"
 #: 原列逐字原文見 `CrossPlatform_R82_Ledger_Closure.md` §8。已結案 ⇒ 依「三選一即算不再
 #: 需要豁免」不得留在表內；刪除＋同步下修正是 `stale_grandfather_problems()` 訊息
 #: **自己指名**的動作，不是放寬。
+#: 🔴 R84 收斂（帳本 `DEF-200-052`）：上一段記載的跨檔耦合**已解**——本檔與
+#: `tools/lib/ledger_rotation.py` 同屬帳本包持有面，於是「結案 → 刪豁免 → 下修天花板 →
+#: 追加重釘史」四步可在同一次變更內走完。`DEF-101-206`（P4、零行動項）本輪結為 wontfix，
+#: 本表 6 → 5、天花板 6 → 5、`UNPINNED_HANDOVER_CEILING_HISTORY` 追加 5（追加後未封印的
+#: 尾巴＝1，未逾 `_SEAL_TAIL_MAX`，故封印本身不必動）。這是判準訊息自己指名的動作，不是放寬。
 _UNPINNED_HANDOVER_GRANDFATHERED = frozenset({
-    "DEF-101-206", "DEF-101-235", "DEF-101-238",
+    "DEF-101-235", "DEF-101-238",
     "DEF-101-324", "DEF-101-377", "DEF-101-392",
 })
 #: shrink-only 棘輪上限（形狀比照 `tools/tests/` 的檔數棘輪）。只能往小改。
 #: 🔴 R80 包 C 下修 34 → 28：`DEF-01-007`／`DEF-100-002`／`DEF-101-021`／`022`／`025`／
 #: `418` 六筆已結案（逐筆實查見 `CrossPlatform_R80_Scan_Findings.md` §C），不再需要豁免。
 #: 是判準自己指名的動作（訊息逐字要求刪除並下修為 28），不是放寬。
-_UNPINNED_HANDOVER_CEILING = 6
+_UNPINNED_HANDOVER_CEILING = 5
 
 #: 🔴 本天花板的**方向鎖**（`DEF-101-993`）：`grandfather_ceiling_problems()` 判的是
 #: 「清單筆數 ≤ 天花板」，對「把天花板往上搬」零判準。判準、重釘史與 WHY 皆住

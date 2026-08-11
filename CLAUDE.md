@@ -25,6 +25,7 @@ monorepo 根目錄（`AISDCL_Agent/`，各機器 checkout 路徑不同）底下�
 - 它們文件內的相對路徑（如 `docs/05_development/...`、`autoclaude/core/...`）是**相對於該子專案目錄**，不是相對於本 monorepo 根。
 - AISDLC_SDD 的 CLAUDE.md 把根稱為 `d:/CursorProject/AISDLC_SDD/`，實際對應到本 repo 的 `AISDLC_SDD/` 子目錄。
 - 跑指令前要讓工作目錄落在正確的子專案。🔴 **但 Windows 側禁用裸 `cd`**（見下方〈鐵律二〉：PowerShell 工具的 cwd 會跨呼叫持續，R71 單輪因此失誤 3 次）——改用絕對路徑，或 `Push-Location <絕對路徑>` … `Pop-Location` 在**同一次呼叫內**成對。本節先前逐字寫「先 `cd`」，與鐵律二直接抵觸（R72 訂正）。
+- 🔴 **AISDLC_SDD 有數十個版本目錄，其中只有一個可以原地改**（R84 訂正，掌舵者裁決）：`AISDLC_SDD_v0.01`（ci-gate 凍結基線）與其後到 LATEST 之間的**中間歷史版**一律**不可原地改**（ci-gate 只測「凍結基線 + LATEST」兩軌，改中間版無人看得到）；**LATEST＝可原地改**，日常演化就走它。**LATEST 是哪一版一律現查** `python AISDLC_SDD/scripts/sdd_version.py`（本檔刻意不寫版號）。Copy-on-Evolve（`AISDLC_SDD/scripts/copy_on_evolve.sh`）**只**在需要保留可回歸對照快照時開新版，不是每次改動都開新版——「一律走 CoE、絕不原地改」那句話曾同時住在 `AISDLC_SDD/CLAUDE.md` 與 `AISDLC_SDD/FRAMEWORK_STATUS.md` 且互相矛盾，R84 已收斂到前者。
 
 ---
 
@@ -79,6 +80,8 @@ monorepo 根目錄（`AISDCL_Agent/`，各機器 checkout 路徑不同）底下�
 | ~90% | **停止開新戰場**，把狀態收斂到「可重啟點」（見下）並寫任務書。此後只做收斂，不做展開 |
 | 撞上限 | 記下 CLI 印出的 **reset 時間** ＋ **本 session ID**；等 reset 後 `claude -r <sessionId>`。🔴 這一格**已不再只靠人記得**——見下方〈額度耗盡：為什麼只能預防性武裝〉 |
 
+> 🔴 **這張表量的是 context 水位，額度那把尺是另一張表（R84 補記）**：額度側有四道門檻（注意／收斂／**準備**／停止，門檻與係數全部住 `tools/lib/quota_policy.py`，**百分比一律現查** `python tools/lib/quota_policy.py --print-env-example`，本檔不複寫數字）。兩者分母不同、守衛不同，**不要互相換算**。自 R84 起「準備」那一帶**真的會動作**——進帶後第一次工具呼叫就出聲一次、把可重啟點任務書寫到磁碟，一個 reset 視窗只做一次、**不改 rc**（在收斂帶擋下收斂型工作會讓人連收斂都做不完）。
+
 🔴 **本節已有機械物**（R78 上線、R79 兩度補強並補記於此）：`.claude/hooks/context_budget_guard.py`，在根 `.claude/settings.json` 註冊**三個**條目——
 PostToolUse（只出聲：≥75% 提示、≥90% 強制指引＋產出可重啟點任務書骨架）、**PreToolUse／matcher `Task|WebFetch|WebSearch`（真的擋下「展開型」工具）**、
 以及 **SessionStart（開場自動武裝額度哨兵，見下一小節）**。三個模式由 payload 的 `hook_event_name` 分派，共用同一支腳本。
@@ -99,7 +102,9 @@ matcher 刻意不含 `Read`／`Edit`／`PowerShell`：上表 90% 那格要的是
 3. **`ScheduleWakeup` 沒有任何憑證。** 它不寫磁碟、沒有可查詢的登錄、拿不到 `NextRunTime` ⇒ 事後**無從得知它排到了沒有**，而那正是 R59 事故的形狀。**憑證是 `NextRunTime` 這個「值」，不是指令的 rc**——`Get-ScheduledTask` 對不存在的工作回 **rc=0**（非終止錯誤），只讀 rc 是假綠。離線排程只有 `schtasks` 一條路。
 
 機械物：`tools/session_resume_planner.py` 的 `--arm-sentinel`／`--sentinel-tick`；SessionStart 註冊面與四分支判定由 `tools/tests/test_context_budget_guard.py::SentinelWiringTest` 與 `tools/tests/test_context_budget_guard.py::SentinelDecisionTest` 釘住。**兩條閾值的方向鎖各由一支具名測試守，語意以現行測試名為準**（R80 訂正：本行 R79 版寫的「巡邏間隔必須小於最短觀測窗」已隨上一格一併證偽，該測試同輪改名改判準）——巡邏間隔那一條現在是 `test_the_patrol_interval_bounds_the_post_reset_dead_time`（上界＋只准調小，守的是 reset 之後的最壞死等時間）；自我解除門檻那一條是 `test_the_idle_threshold_outlives_a_whole_quota_window`（必須大於一個完整額度視窗）。
-現查哨兵：`Get-ScheduledTask | Where-Object TaskName -like 'AutoSDD_Sentinel_*' | Get-ScheduledTaskInfo`；痕跡在 `%TEMP%\autosdd_resume_log_*.jsonl`（**沒觸發＝這個檔不會長大，是可偵測的**）。
+現查哨兵（**平台各一條，不要照抄另一邊**）：Windows `Get-ScheduledTask | Where-Object TaskName -like 'AutoSDD_Sentinel_*' | Get-ScheduledTaskInfo`；macOS `launchctl list | grep AutoSDD_Sentinel_`（**這一側的憑證是 rc，不是時間值**——launchd 從不報「下次幾點跑」）。痕跡分兩處，而**它們的壽命不同**（R84／ZT-03）：事件檔 `autosdd_resume_log_*.jsonl` 仍住系統暫存（`%TEMP%`／`$TMPDIR`）⇒ **重開機即消失，「事後查不到」不等於「沒發生」**；而 job 自己走過哪幾個分支、以及延後動作的等待痕跡，已改落**持久目錄** `~/.autosdd/traces`（逃生口 `AUTOSDD_TRACE_DIR`，唯讀時退回暫存；SSOT＝`tools/lib/endurance_env.py`）。兩處皆「沒觸發＝檔不會長大」，是可偵測的。
+
+🔴 **mac 側第四條教訓（R84／SA-05）：睡著的 Mac 不會被喚醒，而這是本專案的已知邊界、不是待修的 bug。** launchd 只在機器醒著時補跑錯過的一輪；Windows `WakeToRun` 的對等物住在 `pmset repeat`、需 sudo、**本專案刻意不碰**（改動掌舵者機器的電源行為已被否決）。⇒ 額度 reset 落在闔蓋期間時，續航要等到開蓋才會有人動作。**本輪交付的不是「Mac 會醒」，是「失效變成可偵測的」**：武裝路徑現查 `pmset -g custom`，任一電源段的睡眠設定不是「永不睡」（或 pmset 量不到）就在 stderr 出聲，並經憑證字串落進續航痕跡。機械物＝`tools/lib/endurance_env.py`（判準）＋ `tools/tests/test_mac_endurance_r83.py::MacSleepPostureIsSaidOutLoudTest`（含「非 darwin 連 spawn 都不做」的站點級判準，以及螢幕睡眠不得被誤判成系統睡眠的鑑別力）。一行現查：`pmset -g custom`——**這個值不在 repo 裡、不隨 clone 走，一律現查，不得寫成常數**（同 R73 把一台機器的安裝路徑寫成常數的判例）。
 
 > 對照：`autoclaude/` Kernel 的 Token Guard 是 ≥80% `/compact`、≥90% 存 checkpoint 並排程恢復（`scheduled_resume_at`）——**同一個形狀，只是這次套在自己身上**。
 
@@ -126,6 +131,7 @@ claude -c               # 續接最近一次對話
 | **Token reset 後重啟** | **磁碟任務書 ＋ `claude -r`** | 唯一不依賴 session 存活的路 ← **本節主線** |
 | session 開著、人離開一下要它自己做完 | `/loop`／`ScheduleWakeup` | 同 session、**同一個 Token 池**；`ScheduleWakeup` 單次上限 1 小時，要撐過數小時 reset 得靠多次醒來且終端全程不能關 → **不是 token reset 的方案**。🔴 更關鍵的一點（R79 補記，此格原先只寫時長與終端限制）：它**沒有任何憑證**——不寫磁碟、沒有可查詢的登錄、拿不到 `NextRunTime`，所以「排到了沒有」事後查不出來，失效是靜默的 |
 | **開工前就先掛好額度哨兵** | `python tools/session_resume_planner.py --arm-sentinel` | 已由 SessionStart hook 自動做掉（見上一小節），此列是手動補武裝／驗證用。憑證同為 `NextRunTime` |
+| **派工前問「現在能派幾個 agent」** | `python tools/session_resume_planner.py --pace` | R84 落地。一行印出：可派數／硬上限 cap／band／最緊那一軸具名＋它距 reset 幾分鐘。**零 token**（只讀額度快取；快取不可用時每 TTL 至多補量一次，而那個端點不是模型呼叫）⇒ 派工前查一次不會讓被查的數字變大。🔴 **這個數字是 (水位%, 距 reset) 的函式，不是水位的函式**——同一支指令在同一天的兩個時刻會印出不同的可派數（近 reset ⇒ 加速；剛 reset ⇒ 回到基準），所以**每次派工前現查一次，不得記住上次的值** |
 | 跨 session／機器會睡的定時工作 | `schtasks`（照 `tools/install_windows_nightly.ps1` 的 `New-ScheduledTaskSettingsSet` 建法；🔴 R75 訂正：該安裝器住**monorepo 根層** `tools/`，此格原先寫的 `AutoClaude/` 前綴在磁碟上不存在，而當時的具名機械物鎖只認 `.py` 副檔名故照樣放行） | 四項設定缺一即漏跑：`WakeToRun=True`／`StartWhenAvailable=True`／`DisallowStartIfOnBatteries=False`／`StopIfGoingOnBatteries=False`（建構 cmdlet 的參數名與物件屬性名**不同**，見該檔檔頭 DEF-101-249） |
 | ❌ 不要用 | `CronCreate` | `CronList` 印 `[session-only]`＝session 關掉就沒了，**不是離線排程** |
 
@@ -207,10 +213,12 @@ claude -p --model haiku --debug hooks --debug-file h.log "ok"
 Select-String -Path h.log -Pattern 'Hook SessionStart.*success'   # 有 success 才算活著
 ```
 
-🔴 **射程**（R80 QA-03 立此段，R81 轉換後訂正——此段 R80 版寫的是「射程只有根層那一份」，那句話今天已為假，故不留著當現行說法）：R80 只轉了根層那一份，`AutoClaude/.claude/settings.json` 的 6 條當時仍是 shell form，所以那段期間 **AutoClaude 子專案 session 下閃窗一次都沒少**；**R81 已把那份轉完**（6 條 → 12 條，載具與根層同形，唯啟動器以 `../` 回到 monorepo 根層取用**同一支檔**——啟動器只有一個家，刻意不複製第二份到子專案）。`AISDLC_SDD/AISDLC_SDD_v*/` 各版依 Copy-on-Evolve 不動。這件事**不是靠這段散文記住的**：`tools/lib/hook_wiring.py` 的 `SHELL_FORM_CENSUS` 把「哪一份還剩幾條沒轉」登記成**現查磁碟的量測值**，判準是相等——退回 shell form 會紅，轉好了卻沒回來改表也會紅；兩格現皆為 0，它守的是「不准有人退回去」。🔴 **仍未關的缺口（誠實劃界）**：形態判準 A~F（`hook_form_problems()`）與載具存在性判準的掃描面**只有根檔**，子專案那份目前只被「shell form 條目數＝0」這一條守著。
+🔴 **射程**（R80 QA-03 立此段，R81 轉換後訂正——此段 R80 版寫的是「射程只有根層那一份」，那句話今天已為假，故不留著當現行說法）：R80 只轉了根層那一份，`AutoClaude/.claude/settings.json` 的 6 條當時仍是 shell form，所以那段期間 **AutoClaude 子專案 session 下閃窗一次都沒少**；**R81 已把那份轉完**（6 條 → 12 條，載具與根層同形，唯啟動器以 `../` 回到 monorepo 根層取用**同一支檔**——啟動器只有一個家，刻意不複製第二份到子專案）。這件事**不是靠這段散文記住的**：`tools/lib/hook_wiring.py` 的 `SHELL_FORM_CENSUS` 把「哪一份還剩幾條沒轉」登記成**現查磁碟的量測值**，判準是相等——退回 shell form 會紅，轉好了卻沒回來改表也會紅；它守的是「不准有人退回去」。**格數與各格的值一律現查那支檔**，本段不複寫。
+
+🔴 **射程再訂正（R84）——上一版那句「`AISDLC_SDD/AISDLC_SDD_v*/` 各版依 Copy-on-Evolve 不動」讀起來像是那些檔不重要，而它其實是「session 結束仍有彈跳視窗」的第一名成因，故不留著當現行說法**：`AISDLC_SDD/AISDLC_SDD_v*/.claude/settings.json` 整族當時全數仍是 shell form，其中一份是 **LATEST**，也就是**真的會被 Claude Code 載入**的活躍檔（框架 skills 掛在版本目錄下，以它為 cwd 開 session 是常態）。更難看見的是：`tools/lib/hook_wiring.py` 的 `FROZEN_SETTINGS_PREFIX` 把整個家族**結構性排除**在 `SHELL_FORM_CENSUS` 之外 ⇒ R80／R81 宣稱的「全部為 0」對那種 session 是**假的安心**，而假綠與修好的表徵一模一樣。R84 處置分兩半：①**LATEST 轉 exec form**（載具與根層同形，啟動器仍以相對路徑回到 monorepo 根層取用**同一支檔**）並以**版本中性鍵** `AISDLC_SDD/<LATEST>/.claude/settings.json` 進普查表（鍵不寫版號，LATEST 走 SSOT `tools/lib/sdd_latest.py` 現查）；②**凍結歷史面**（LATEST 以外各版）登記成 shrink-only 的已知豁免 `FROZEN_SHELL_FORM_MAX`（相等判準：上升＝有人改了凍結面，下降＝有人轉好了卻沒回來改表）。🔴 **仍未關的缺口（誠實劃界）**：形態判準 A~F（`hook_form_problems()`）與載具存在性判準的掃描面**只有根檔**，其餘各份目前只被「shell form 條目數」那一條守著。
 
 機械物（三層，都不靠自律）：
-- `tools/lib/hook_wiring.py` — hook 佈線解析的**唯一真相源**。🔴 立案理由：腳本路徑在兩種形態下住不同欄位，而 repo 內原有**八個**「只讀 `command` 找腳本名」的解析器，轉換後全部掃出空集合 ⇒ 那批鎖會**恆綠**（分母 0＝沒有東西可違反），rc 與「正確地全部通過」一模一樣。🔴 R80 補記：本檔一度對 `type` 有**三種**慣例，其中形態鎖那一種讓「退回 shell form 時順手省掉 `type`」可以靜默逃過全部判準——已收斂成單一 `is_command_hook()`。
+- `tools/lib/hook_wiring.py` — hook 佈線解析的**唯一真相源**。🔴 立案理由：腳本路徑在兩種形態下住不同欄位，而 repo 內原有**八個**「只讀 `command` 找腳本名」的解析器，轉換後全部掃出空集合 ⇒ 那批鎖會**恆綠**（分母 0＝沒有東西可違反），rc 與「正確地全部通過」一模一樣。🔴 R80 補記：本檔一度對 `type` 有**三種**慣例，其中形態鎖那一種讓「退回 shell form 時順手省掉 `type`」可以靜默逃過全部判準——已收斂成單一 `is_command_hook()`。🔴 R84 補記：載具比對曾**只修一半**——`is_posix_carrier()` 在 R81 已改成剝相對前綴的**正規化**比對，而形態判準 B／E 仍在做字面比對 ⇒ 對子專案那份製造整批假紅。假紅的代價不是「比較嚴格」：它讓任何人想把 A~F 擴到子專案／SDD LATEST 都會先撞一堵假牆，於是那個擴面一直沒發生（SDD 整族停在 shell form 就是它的下游後果）。現統一走 `win_carrier_kind()`（回 kind 而非 bool，因判準 F 要的是「有沒有混用兩**種**載具」）。
 - `tools/tests/test_check_hooks_liveness.py` — 形態判準 A~F（退回 shell form／載具字串／command 含空白／機器專屬絕對路徑／**跨平台配對少一邊**／混用兩種 Windows 載具）＋ 啟動器行為契約 ＋ 兩個平台**各自**的載具存在性，皆含合成注入紅綠自證。🔴 這裡**不放**「這台機器上載具在不在」的斷言：那是機器狀態不是 repo 內容，會讓 CI 與任何還沒跑過 bootstrap 的全新 clone 必紅；單元測試改守「宣告的載具必須是 bootstrap 產得出來的那一個」（機器無關）。
 - `tools/check_hooks_liveness.py` — 開發機上**會出聲**的那一層（CI 由呼叫端整段跳過，理由是語意的：**CI 從不執行 Claude Code hook**）。機器狀態的通報者是它，不是單元測試。🔴 R80 起它在 mac/Linux 也真的會說話：POSIX 那條載具吃的是 `PATH` 上任意 `python3`（macOS 內建常年 3.9、本 repo 下限 3.11），檔不在／沒有執行位元／直譯器太舊三種失效表徵完全相同。
 
@@ -240,6 +248,8 @@ R71 最諷刺的一筆：在修一個 Windows 專屬缺陷（DEF-101-759）時�
 
 觸發清單（出現任一就必須自問）：`$env:*` 讀取／副檔名判斷／路徑分隔符／`Get-Command` 解析／console 編碼／行尾／大小寫敏感度／`$IsWindows` 這類 PS 6+ 專屬自動變數（5.1 恆 `$null`，需 `# ps7-ok: <WHY>` 行尾豁免，**獨立註解行無效**——掃描器只認行尾）。
 
+> 🔴 **這張表已有一個框架內的下游消費者（R84 落地）**：`AISDLC_SDD/<LATEST>/agent/core/05.sd-architect-zh.yaml` 的 ADR 自動觸發清單新增了「平台目標矩陣」與平台中立檢查項，其 provenance 欄逐字指向**本表**為單一真相源（刻意不複寫內容；兩支 Architect 變體 sd-web／sd-mobile 再指向 05）。⇒ **改動本表時要知道有人在引用它**；反之，SD agent 端不得自行維護第二份清單（那就是 R73 `Find-GitBash` 同型的「同一份知識住兩個家」）。
+
 🔴 **哪幾項有掃描器、哪幾項沒有，一律以下表為準——本段刻意不複寫那兩個數字**（R79 訂正：R74~R78 版在此寫死「8 項裡只有 4 項有掃描器」，而下表的列數與覆蓋數每輪都在變，複寫一份等於再開一個會漂移的家；判準讀的也是下表本身）。`DEF-101-766` 的「副檔名判斷」那一半仍落在沒有掃描器的格子裡（另一半 `$env:PATHEXT` 已有專屬掃描器，R74 同一個 commit 落地）。有掃描器的那幾項，缺陷在寫出來的當回合就被擋掉了，所以不會留到複審。
 
 | 觸發項 | 機械物 | 違反時什麼會紅 |
@@ -252,6 +262,7 @@ R71 最諷刺的一筆：在修一個 Windows 專屬缺陷（DEF-101-759）時�
 | `#!` shebang ＋ 非 LF 行尾（`\r` 會黏進直譯器名） | `tools/tests/test_platform_neutral_paths.py::TestShebangImpliesLfLineEndings` | 根層 unittest 閘門。當回合實測 30 支 `.py` **已同時**具備 shebang 與 CRLF，今天沒炸只因它們的 git 索引模式都不是 100755——**把 exec bit 補對（那是正確的修法）會讓這 30 支一起在 mac/Linux 變成 rc=127**（`env: 'python3\r'`）。兩個各自正確的動作合起來才炸，所以判準取的是兩者的交集 |
 | naive 本地時間戳被持久化（不帶 offset 的 ISO 字串） | `tools/tests/test_platform_neutral_paths.py::TestNaiveLocalTimestampsAreNotPersisted` | 根層 unittest 閘門。跨 DST 的 naive 相減當回合實測差 **3600 秒**且完全靜默（沒有例外、沒有 log，只是時間錯一小時）；AutoClaude Kernel 的 checkpoint 恢復正走這條路 ⇒ DST 那一天會提早一小時恢復。本機時區 Asia/Taipei 不實施 DST ⇒ 這個缺陷在本機**結構上重現不了**，自證測試因此以固定 offset 構造 fall-back（不依賴 `tzdata`，Windows 上沒有它） |
 | `shell=True` 的原生殼差異（Windows 走 `cmd.exe`、POSIX 走 `/bin/sh`） | **無機械物**（`AutoClaude/tests/test_evaluator_kill_tree.py` 守的是「逾時要 kill 整棵行程樹」，對引號、`&&`、路徑分隔、rc 語意這些**語意差異**零判準——同一個關鍵字、不同的主題） | 沒有東西會紅。且存量掃描**結構上量不到**真實危害面：真正被送進殼的指令來自 playbook＝使用者輸入，根本不在 repo 裡 ⇒ 這一格要的是執行期契約或輸入面正規化，不是靜態掃描 |
+| hook 行程生出來的子行程配到 console 視窗（`subprocess` spawn 外部 console 執行檔） | `tools/tests/test_context_budget_guard.py::ConsoleFreeSpawnTest`（掃 `.claude/hooks/`）＋ `tools/tests/test_check_hooks_liveness.py::TestAutoClaudeHookSpawnsAreConsoleFree`（R84 補第二個掃描面 `AutoClaude/tools/hooks/`，先前整棵樹一個判準都沒有） | 根層 unittest 閘門。🔴 這一類與「hook 條目形態」是**兩件事**：exec form 治掉的是載具自己（`bash.exe`）那個視窗，而載具（`pythonw.exe`，GUI 子系統、無 console）去 spawn `git.exe` 時 **OS 會替 child 另配一個新 console** ⇒ 形態修好之後彈窗仍在，且只在 Windows 成立（R84 實測真的漏了一支）。判準刻意只判「argv[0] 不是 `sys.executable`」那些（`sys.executable` 在 hook 行程裡就是 `pythonw.exe`＝不配視窗），否則會製造假紅 |
 | exec bit／git 索引檔案模式 | `tools/tests/test_platform_neutral_paths.py::TestExecBitIsGovernedViaTheGitIndex` | 根層 unittest 閘門。🔴 誠實劃界：Windows 的 Git Bash 上 `[ -x ]` 是**檔首內容猜測**（實測：加 UTF-8 BOM 即由 EXECUTABLE 翻成 NOT-EXEC），該判準只守得住「tracked 100755 檔的檔首形態」，安裝**產物**那一半仍無人守 |
 | Windows 檔案鎖：會改動目錄項的原語（`os.replace`／`rename`／`move`） | `tools/tests/test_platform_neutral_paths.py::TestDirEntryPrimitivesAreAccountedFor` | 同上。此前 repo 登記的 Windows 鎖檔知識只涵蓋 `unlink`／WinError 32，換一個原語（`os.replace` 覆寫被開著的目的檔 → WinError 5）就整片失明 |
 | `$IsWindows` 等 PS 6+ 專屬 | `tools/tests/test_ps51_compat.py` | 同上 |
@@ -266,6 +277,8 @@ R71 最諷刺的一筆：在修一個 Windows 專屬缺陷（DEF-101-759）時�
 | 文字模式檔案 I/O 的預設編碼（`open`／`read_text`／`write_text`） | `tools/tests/test_platform_neutral_paths.py::TestTextIoDeclaresEncoding`（AST 判準＋`_ENCODING_DEBT_RATCHET` shrink-only 存量棘輪） | 根層 unittest 閘門。🔴 R81 訂正**低報分子**：R81 掃描路把這一格判成「無人守、`open()` 純靠自律」，實查該判準早就存在，連它點名的那 9 個 `read_text`／`write_text` 站點都**逐檔登記在棘輪裡**（2/4/3）。低報與過報一樣貴：它會讓下一輪有人去補一支已經存在的鎖。此格與「console 編碼」列不同軸——那一列的射程是 subprocess 與 stdio |
 
 上表由 `tools/tests/test_doc_loc_baseline_freshness_r60.py::TestR74IronLawMechanismAccounting` 釘住，判準是**覆蓋率棘輪**：**分子（有機械物的列數）只准上升、分母（已登記的危害類數）也只准上升**，而「還有幾類沒人守」＝分母−分子，**刻意不設上限**。補了掃描器就把該列的機械物欄改掉（不是把整列拿掉），而且表內每一個具名檔案都必須真的存在——**本檔不得宣稱一個不存在的機械物**。
+
+🔴 **R84 補一條動這張表的成本事實：合併／刪除鎖檔有一筆「跨檔參照稅」，並行輪次結構上付不起。** 實測合併兩支鎖檔（判準零損失、合併後測試 rc=0）後刪掉其中一支，全樹十餘支測試轉紅——大半是「git-tracked 但磁碟不存在」的 fail-loud（**只有 `git rm`／stage 能消除，而並行包一律禁止 git 操作**），其餘是別人檔內的幽靈符號／幽靈路徑／dangling carrier／檔內具名錨。⇒ 「拿掉不合理機制」這類**淨減法只能由收尾單人窗口做**；派給並行包等於派一件做不完的事，而它的表徵是「半途留下一批紅測試給其他包與四方複審」。
 
 > 🔴 **本輪改的是這條棘輪的形狀，不是調高門檻**：原判準是單邊計數「未覆蓋項數 ≤ 一個常數」，它把兩件事綁成同一個數字——「還有幾類沒人守」（只准變少）與「我們知道有幾類危害」（每挖深一輪就會變多，而且變多是好事）。後果是**誠實登記一個新發現的無掃描器危害類會當場讓根層閘門轉紅**，於是最省力的滿足方式變成「不要記錄新發現」；R72~R76 五類已實證的新危害因此一項都沒進到這張表。拆成兩個各自單邊的量之後：新增一列「無機械物」＝分母升、分子不動 ⇒ 綠（誠實登記不再有代價）；拆掉一支掃描器 ⇒ 分子降 ⇒ 紅；把一列已知危害整列刪掉 ⇒ 分母降 ⇒ 紅——**這一招在舊判準下反而是綠的**。⇒ 上一段那兩個數字是**當下的量測值不是常數**：判準讀的是這張表本身，兩者不一致時以表為準。這一條的存在理由是 R71 的實證：純文件約束對「當下的模型」零攔阻力，所以「哪幾項其實沒人在守」必須是**可查的量測值**，不是散文。
 
@@ -295,13 +308,21 @@ R71 實例：輪號 R70／R71 全程講錯（採信提示詞而未查 `current_r
 | **擋** | `git stash`（含裸 stash＝push／`push`／`pop`／`apply`／`drop`／`clear`／`save`）／`git checkout -- <path>`／`git checkout -f`／`git restore <path>`／`git reset --hard`｜`--merge`｜`--keep`／`git clean`／`git switch -f`｜`--discard-changes` |
 | **放行** | 🔴 `git stash create`（〈可重啟點四條件〉第 1 條**指定**的保全手法——擋掉它等於擋掉本 repo 自己的安全暫停 SOP）／`git stash list`｜`show`／`git reset`（mixed）與 `--soft`／`git restore --staged`（只動 index，工作樹內容原封不動）／`git clean -n`／純切分支（`-b`／`-c`／不帶 `--` 路徑）／所有唯讀查詢 |
 
-**判準必須精準是設計約束不是客氣**：repo 已判過「擋到讓人無法工作的守衛會被整個關掉，而被關掉的守衛比沒有守衛更糟」。落地當回合對全庫 tracked 檔抽出的 **10,106 筆 git 指令片段**（去重 1,031 種）實跑該判準：命中 **30 種唯一字面／254 次**，逐筆人工判讀**全部是真陽性**（`git reset --hard` 家族、`git checkout -- <path>`、`git restore .`、`git clean -fd`、`git stash` 家族），**假陽性 0 筆**。
+**判準必須精準是設計約束不是客氣**：repo 已判過「擋到讓人無法工作的守衛會被整個關掉，而被關掉的守衛比沒有守衛更糟」。落地當回合對全庫 tracked 檔抽出的 git 指令片段實跑該判準，命中的每一筆逐筆人工判讀**全部是真陽性**（`git reset --hard` 家族、`git checkout -- <path>`、`git restore .`、`git clean -fd`、`git stash` 家族），**假陽性 0 筆**。
+
+🔴 **R84 訂正本段的可重跑性（`DEF-200-046`）**：本段原本引用四個寫死的數字（片段數／去重種數／命中種數／命中次數），而**那次普查在 repo 內沒有留下任何產物** ⇒ 交棒書要後人「用同樣的方法」為新判準做假紅普查，結構上做不到，而「假陽性 0」這個關鍵驗收條件也無法複驗。這與本檔對 R77 分群下過的判決（「沒有留下任何可重跑的產物，所以『每輪重跑』結構上做不到」）逐字同型。⇒ **那些數字一律視為量測值、現跑** `python tools/probe/shell_command_corpus.py --summary`（輸出可 diff 的 `.jsonl`）。🔴 **該工具最重要的一句是「兩個母體不能互相替代」**：`--corpus tracked`（寫進 repo 的指令：腳本、workflow、文件示範）回答的是「repo 內寫死的腳本會不會被這道 hook 擋到」；`--corpus transcripts`（逐字稿裡真的送出過的 `tool_input.command`）才是 **PreToolUse hook 的真實輸入面**。判準若是 hook，假紅普查**一律以 transcripts 為母體**——照 tracked 面判會把「只出現在描述它的散文裡」的命中讀成假紅，因而否決一個好判準（R84 實測）。
 
 兩個逃生口**刻意分層、且刻意不與既有變數共用**（repo 明文：共用一個會讓「我只是想暫時別被擋」順手把別的保護一起關掉）：
 - `AUTOSDD_GIT_GUARD_OFF`——**模型碰不到的那一個**。hook 讀的是它自己行程的環境，在指令字串裡寫 `VAR=1 git stash` 對它無效；要真的關掉，人必須在啟動 `claude` 之前設好。
 - 行內豁免 `# git-guard-ok: <理由>`（理由必填，須住在**真註解**裡）。已知弱點誠實寫在 hook 檔頭：無人看管的模型回合可以自己寫出這一行 ⇒ `AUTOSDD_UNATTENDED` 有設時該豁免**無效**（同 `lint_powershell_command.py` 對授權邊界的處置）。
 
-**擋不到什麼**（寫在這裡，因為會誤以為它完整的人正是讀到這條的人）：不經 shell 的路徑（Python `subprocess` 直接跑 git、MCP git 工具、用 `Write`／`Edit` 覆寫檔案）／別名與函式／heredoc body（刻意當資料遮掉，換掉「寫探針就被誤擋」那一整類）／執行檔路徑被引號包住時／`git rm`｜`branch -D`｜`push --force`（毀的不是未提交的工作樹內容，另案）。
+**擋不到什麼**（這一段會誤以為它完整的人，正是讀到這條的人）——🔴 **R84 訂正（`DEF-200-087`）：本段此前在這裡複寫了一份清單，而本輪同時修掉了其中兩項**（heredoc body 依擁有者分流、指令字串裡直接寫出的 `subprocess.run([...])`，兩者皆實測 exit 2）⇒ 那份複本在寫下它的同一輪就變成假話，且**同一份知識住兩個家、只有一個家會被改**正是本 repo 反覆踩的病（R73 `Find-GitBash`）。**唯一真相源＝該 hook 檔頭的〈誠實劃界（本檔擋不到什麼…）〉節**，判準改了就在同一支檔裡改。現查：
+
+```bash
+grep -n "擋不到" .claude/hooks/block_destructive_git.py   # 檔頭該節的起點
+```
+
+射程外、**刻意不歸本 hook 管**的另一類：`git rm`｜`branch -D`｜`push --force`（毀的不是未提交的工作樹內容，另案）。
 
 ### 🔴 鐵律六：等待／確認的機制自己靜默壞掉 ⇒ 無做工空轉（R83 收輪 — 平台無關，立列 `DEF-200-044`）
 
@@ -319,7 +340,26 @@ R71 實例：輪號 R70／R71 全程講錯（採信提示詞而未查 `current_r
 | ❌ | 裸 `pgrep -f <字面>`／`pgrep -f "python.*X"` | 兩支並行時**兄弟互匹**：實測各自 rc=0（各命中對方的 `sh` 與 `pgrep`）⇒ `until ! …` 永不退出。`man pgrep` 只排除自己與祖先（逐字 `the current pgrep or pkill process and all of its ancestors are excluded`）⇒ **單支不會死鎖**，所以它在單支試跑下永遠是綠的；`python.*X` 這種正則對自己的字面同樣成立，一樣死鎖 |
 | ❌ | 讀 rc 時接管線 | 實測 `sh -c 'exit 7'` 接 `tail -1` → **rc=0**（真 7 被吃掉），不接管線 → **rc=7**。mac 的工具殼是 zsh（實測 `ZSH_VERSION=5.9`）：`${PIPESTATUS[0]}` 回**空字串**、要寫 `${pipestatus[1]}`（實測 `7`）——機制與修法住 `useMacWin.md` §C，本節不複寫 |
 
-🔴 **本族的機械物現況（誠實劃界，不寫成「結構上不可能」）**：**零攔截器，今天只有本節這段散文在守。** 極窄 lint 是做得到的、也不必新開觀測面——`.claude/hooks/block_destructive_git.py` 已在 PreToolUse 讀 **Bash 指令字串**且平台中立（見鐵律五），加「`nohup` 與 `&` 同時出現」「`until`／`while` 條件內出現裸 `pgrep -f`」兩條判準即可。**但本族另一半真的沒有觀測點**：Monitor 掛沒掛、harness 的完成通知在講哪一個行程，都不在任何指令字串裡、也永不變成 repo 內的檔案（同本節上方 R77／R79 那段歸因的第 ② 層）⇒ 攔截器接得住「寫出壞形態」，接不住「該掛的沒掛」。承接與逐筆座標見 `docs/06_quality/AutoSDD_Defect_Log.md` 的 `DEF-200-044`／`DEF-200-045`。
+🔴 **本族的機械物現況（R84 訂正：上一版寫的「零攔截器，今天只有本節這段散文在守」已為假，故不留著當現行說法）**：判準已落地在 `.claude/hooks/block_destructive_git.py`（PreToolUse 讀指令字串、平台中立，見鐵律五）的 `waitform_hits()`，行內豁免出口 `# waitform-ok: <WHY>`；假紅普查的母體與載具見鐵律五那段（**一律 transcripts 面**）。
+
+🔴 **判準有哪幾條、各判什麼，唯一真相源＝`waitform_hits()` 的 docstring**（實作與說明同住一支檔）。本段**刻意不複寫一份條列**——R84 複審實測：同一份知識當時住三個家、三種內容（本節寫「兩條」、該 docstring 寫「三條」、帳本 `DEF-200-068` 的第三條又是另一件事），而三份都不會因為彼此不一致而轉紅（`DEF-200-087`）。現查：
+
+```bash
+sed -n "/^def waitform_hits/,/\"\"\"$/p" .claude/hooks/block_destructive_git.py
+```
+
+**本族另一半真的沒有觀測點**：Monitor 掛沒掛、harness 的完成通知在講哪一個行程，都不在任何指令字串裡、也永不變成 repo 內的檔案（同本節上方 R77／R79 那段歸因的第 ② 層）⇒ 攔截器接得住「寫出壞形態」，接不住「該掛的沒掛」。🔴 **上表「讀 rc 時接管線」那一列今天在 Bash／zsh 側零攔截器**（實測 `waitform_hits("sh -c 'exit 7' | tail -1; echo rc=$?")` → 0 命中；唯一守這個形態的 `lint_powershell_command.py` 其 matcher 實查為 `PowerShell`）⇒ 那一列仍然只有散文在守（`DEF-200-086`）。承接與逐筆座標見 `docs/06_quality/AutoSDD_Defect_Log.md` 的 `DEF-200-044`／`DEF-200-045`／`DEF-200-086`。
+
+### 🔴 鐵律七：並行派工前，先切「鎖的持有面」（R84 — 平台無關，`DEF-200-049`）
+
+**一句話的本體**：**一道機械鎖的「常數／史料／消費端」常住在不同檔；把它們切給不同的包，那件事就在任何單包手上都做不完，而該包唯一能回報的只有 `not_done`。**
+
+R84 並行波三個實例（都不是假想）：
+1. 結掉某一列缺陷需要同時動「豁免清單」「要求 ceiling 等於清單筆數的同檔測試」「重釘史末元素須等於現值的輪替模組」三支檔 ⇒ 切開後那一列在**任何**單包手上都結不掉。
+2. 帳本列的合法瘦身出口（結案 → 索引＋原文逐字進具名證據檔）需要同時下修帳本索引模組的兩條 ceiling、並到治理文件登記模組登記新證據檔（不登記即由另一支判準轉紅）⇒ 只持有帳本的包**結構上**只能回報做不到。這使「唯一出路是把列真的結掉」這句指示對它不可執行。
+3. 帳本時鐘一旦推進到當前輪，任何在程式碼註解寫下一輪輪號的包會被輪號鎖當場擋下——而那個 offender 往往落在**別包**的檔上。
+
+⇒ **派工紀律（與「並行修復波要先對配額做預算」並列，兩者都是派工前置檢查）**：任務書要對每個包列出「你要動的鎖，其**常數／史料／消費端**分別住在哪幾支檔」，而不是只列檔名；三者不在同一持有面時，該項不得派給並行包（見鐵律三下方「跨檔參照稅」那段的同型結論：淨減法只能由收尾單人窗口做）。
 
 ---
 
@@ -362,12 +402,13 @@ powershell -ExecutionPolicy Bypass -File tools/install_git_hooks.ps1   # 裝 git
 powershell -ExecutionPolicy Bypass -File tools/local_ci_gate.ps1       # 一鍵本機 CI 閘門（鏡像 autoclaude-ci.yml）
 powershell -ExecutionPolicy Bypass -File tools/run_act.ps1 -Job test   # act：Linux 容器跑真 CI（於 monorepo 根執行、讀根層 .actrc）
 powershell -ExecutionPolicy Bypass -File tools/run_local_nightly.ps1   # nightly 7 stage（local_ci_gate/mutation/pg-e2e/perf/drift/obs/sdd-chaos）
-docker compose -f docker-compose.ci.yml up -d                          # CI 對等 PG（pg17）
+docker compose -f docker-compose.ci.yml up -d                          # CI 對等 PG（pg17）＝第一步
+python -m alembic upgrade head                                         # 🔴 第二步，缺它等同沒起 PG
 ```
 - **macOS/Linux 對等腳本已存在**：AutoClaude 側 `tools/install_git_hooks.sh`、`tools/local_ci_gate.sh`、`tools/run_act.sh`、`tools/run_local_nightly.sh`（mac 薄聚合器，非 .ps1 對等移植）；monorepo 根層另有 `tools/bootstrap.sh` 與 `tools/integration_gate.sh`。完整雙平台對照表見根層 [ONBOARDING.md](ONBOARDING.md) §6。
 - git hooks 為**根層 dispatcher**（monorepo 根 `tools/git-hooks/`）：任一支安裝腳本（`.sh`/`.ps1`）執行後**兩子專案閘門同時生效**，裝一次即可（詳見 ONBOARDING.md §6）。
 - CI（**根層** `.github/workflows/autoclaude-ci.yml`；兩子專案 workflows 已全數上移 monorepo 根層並加子專案前綴，對照見 ONBOARDING.md §6.1）push 閘門 jobs（另有 nightly jobs 見 workflow 檔）：`test`（pytest + LOC budget + lint-imports）、`claude-md-budget`（**僅指 `AutoClaude/CLAUDE.md`**——ADR-SD08-001 射程，根層與 AISDLC_SDD 兩份不受此閘；≤ 400 行 + snapshot 新鮮度）、`equivalence`、`pg-contract`（**硬閘**；DEF-101-051 補完三層 goal_task_id 接線後由 continue-on-error 轉阻塞）。
-- DB migrations：`alembic upgrade head`（同步 DSN／psycopg2；PostgreSQL 17 + pgvector）。
+- DB migrations：`alembic upgrade head`（同步 DSN／psycopg2；PostgreSQL 17 + pgvector）。🔴 **容器 healthy ≠ DB 已 migrate**（R84）：容器是 tmpfs（取證紀律 #7 fresh），每次重建都必須再 migrate 一次；漏了它時 `AutoClaude/tests/conftest.py` 的 PG autodetect 剎車會拒絕注入 DSN，PG 那一族整批維持 skip，而**失敗表徵與「完全沒起 PG」幾乎相同**。**憑證是 `local_ci_gate.pg_autodetect()` 回出 DSN，不是 `docker ps` 的 healthy**。自 R84 起這一型失效會在 `pytest` 摘要印醒目段並附可貼指令（SSOT＝`AutoClaude/tools/local_ci_gate.py` 的 `PG_UNMIGRATED_HINT`）。
 
 ### 架構大圖
 **Hexagonal / 微核心**：`core/`（Kernel + EventBus + HookSpec + `ports/` 抽象介面）只依賴 ports；`infra/adapters/` 提供具體實作（MinimaxBrain / PtyExecutor / ShellEvaluator / LocalLogger）；`infra/repositories/` 是 DAL 三後端（File / InMemory / Pg + Dual）；`plugins/` 為橫切關注點，彼此**不可互 import**，協作一律走 EventBus。`execution/playbook_runner.py` 是無業務邏輯的 thin facade。**Plugin／Port 清單與計數一律見 AutoClaude/CLAUDE.md 的機械生成 `[Architecture Snapshot]`**（本檔不重複數字，免漂移——與 AISDLC_SDD 數字指向 FRAMEWORK_STATUS.md 同政策）。
@@ -375,6 +416,10 @@ docker compose -f docker-compose.ci.yml up -d                          # CI 對�
 **狀態機閉環**：INIT → PRE_RUN_VALIDATE → EXECUTE(step) →（Token Guard：≥80% `/compact`、≥90% checkpoint）→ EVALUATE →（失敗則 Minimax CORRECTION / 超限則 ESCALATION → MinimaxEvolver→PlaybookEvolver 自演化）→ DONE → GOAL_SYNTHESIS。
 
 **架構約束以 `.importlinter` 的 contract 機械強制 + LOC 分級政策**（🔴 **R82 訂正②：本行原本寫死「8 條 contract」，而 R82 落地 `no-harness-import` 後實測為 9**——`lint-imports` 當回合 rc=0、逐字 `Contracts: 9 kept, 0 broken.`。條數同樣改為指向 SSOT `AutoClaude/.importlinter`（現查＝數該檔的 `name =` 行），理由與同一行下面那條 tier 表訂正逐字同構：**寫死的數字必過期，而條數正是可現查的量**。🔴 R82／Q2-06 訂正：本行原本把分級表與絕對紅線逐字複寫一份、零機械綁定——與 R77 已訂正的 ruff 規則集複本同形，今天恰好相符只是運氣，下一次改 tier 就是兩個家只有一個被改。**分級表與絕對紅線的唯一真相源＝`AutoClaude/tools/check_loc_budget.py` 的 `LOC_TIERS`／`ABSOLUTE_LIMIT`**，現查 `python AutoClaude/tools/check_loc_budget.py --json`；體例同本檔既有的「數字指向 Architecture Snapshot／FRAMEWORK_STATUS.md」兩條政策。機械物＝`tools/tests/test_adr_xplat001_c1c2_lock.py::TestLocTierTableHasOnlyOneHome`）。`CLAUDE.md` 內含自動生成的 `[Architecture Snapshot]` 區段（由 `tools/snapshot_sync.py` 產生，**勿手動編輯**）。
+
+🔴 **monorepo 根層護欄層（`tools/` ＋ `.claude/hooks/`）另有自己一套分級**（R84 補記，先前根檔完全沒有指標，讀者會以為上面那套 `autoclaude/` 分級是唯一規則）：SSOT 同為 `AutoClaude/tools/check_loc_budget.py`（`ROOT_TOOLS_TIERS`／`SPECIAL_FILES`），與上面那套**不是同一張表、也不吃同一個 total cap**。R84 起該層多一格 **hub tier**——`tools/lib/` 內「把同族 leaf 組起來」的合成面適用較寬的既有數字，代價是**成員清單只准縮不准長、且成員身分由 AST fan-out 現查**（`ROOT_TOOLS_HUB_MEMBER_CAP`／`ROOT_TOOLS_HUB_MIN_FANOUT`；鎖＝`AutoClaude/tests/tools/test_check_loc_budget_hub_tier_and_special_stale.py`）。同輪起 `SPECIAL_FILES` 的 shrink-only 棘輪**雙邊咬人**：門檻明顯高於現值即阻塞並要求重釘為現值（`SPECIAL_STALE_SLACK`，只准調小）。**數字一律現查** `python AutoClaude/tools/check_loc_budget.py --json`，本檔不複寫。
+
+🔴 **護欄層（根層 `tools/tests/`）不受 LOC 分級管轄，但自 R84 起受「重釘要付代價」約束**：`tools/tests/test_adr_xplat001_c1c2_lock.py` 的 `repin_growth_problems()` 兩款——單輪淨額上限 ＋ 連續上升輪數上限（＝成熟度 M1「總量連續三輪不上升」的機械面）。此前該棘輪自稱「淨行數只准往下」，而重釘紀錄每一列都是上升、重釘的唯一成本是補一列紀錄。**兩個常數只准下修**（`repin_cost_ratchet_problems()`）；逐輪淨額現查 `repin_round_nets()`，具體數值一律現查那支檔、本檔不複寫。
 
 ### 新增 Plugin 的 SOP
 1. 建 `autoclaude/plugins/<feature>_plugin.py`（繼承 HookSpec，PascalCase 類別）；2. 實作對應 hook；3. 加入 `wiring._REGISTER_ORDER`，相依走 constructor 注入 ports（**禁止直接 import infra**）；4. 寫 `tests/plugins/test_<feature>.py`（coverage ≥ 90%）；5. 遵守 LOC 分級；6. Plugin 間禁止互相 import（走 EventBus）。

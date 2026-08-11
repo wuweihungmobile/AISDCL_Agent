@@ -69,8 +69,9 @@ token_guard:
 notification:
   # R82 ACC-01：預設 false＝不彈桌面通知（彈窗是 POST_RUN 才發、會把行程多吊住 duration 秒）。
   # 臨時想看：設 true，或 env AUTOCLAUDE_DESKTOP_NOTIFY=1（雙向開關，見 .env.example）。
+  # 🔴 R84（AC-(c)）：即使設 true 也不再拖住行程結束（後端改由 daemon 執行緒呼叫）。
   enabled: false
-  duration_seconds: 3                # 彈窗停留秒數＝行程結束時被吊住的上界
+  duration_seconds: 3                # 彈窗停留秒數（R84 起不再等同行程被吊住的秒數）
   webhook_url: null                  # 選填：Slack/Teams webhook
 
 # ── 儲存後端（Phase 6 三段開關） ──────────────────────────────────

@@ -1,17 +1,41 @@
-# AISDLC-SDD v0.01 檔案目錄維護與分類規則
+# AISDLC-SDD 檔案目錄維護與分類規則
 # File & Directory Maintenance Rules
 
-**版本**: v0.05
+**版本**: v0.06
 **建立日期**: 2026-04-12
-**最後更新**: 2026-04-17
+**最後更新**: 一律現查 `git log -1 --format='%h %ci' -- <本檔路徑>`
 **來源框架**: AISDLC v0.09
+
+---
+
+## 🔴 讀本檔之前：Copy-on-Evolve（本檔所有路徑一律相對於「當前版本目錄」）
+
+> **本節是 R84（DOC-01）補上的，因為缺了它會讓照本檔走的人把產出寫進凍結基線。**
+> 本檔被 `AISDLC_SDD/CLAUDE.md` 標為「寫檔前查閱」的權威，而在 R84 之前它
+> ①目錄樹根寫死 `AISDLC_SDD_v0.01/`、②全檔**零次**提到 Copy-on-Evolve／凍結基線／LATEST
+> ⇒ 任何照它走的 agent 都會把檔案寫到**不可修改**的 v0.01 去。
+
+| 這一類版本 | 可否原地修改 | 說明 |
+|-----------|-------------|------|
+| **凍結基線** `AISDLC_SDD_v0.01` | ❌ **絕不** | ci-gate 恆測的回歸防護面。改它＝打破凍結政策 |
+| **中間歷史版**（基線與 LATEST 之間的每一版） | ❌ **絕不** | 已凍結；ci-gate 只測「基線 + LATEST」兩軌，改中間版無人看得到 |
+| **LATEST**（＝當前最新演化版） | ✅ **可原地修改** | 它就是承載演化的那一版（`FRAMEWORK_STATUS.md` 逐字：「可修改/承載演化」） |
+
+* **LATEST 是哪一版：一律現查**，不看任何文件裡的快照數字 ——
+  `python AISDLC_SDD/scripts/sdd_version.py`（SSOT：git tracked ＋ 錨定 fullmatch ＋ 數值排序取最高）。
+* **本檔下方所有 `AISDLC_SDD_v0.01/` 前綴，一律讀作 `AISDLC_SDD_v<LATEST>/`**（各版目錄結構同構，
+  故版面本身仍然有效）。本檔刻意**不**把樹根改寫成某個具體版號——寫死一個版號就是下一輪的假話。
+* **何時才該開新版**（Copy-on-Evolve，`bash AISDLC_SDD/scripts/copy_on_evolve.sh <來源版> <新版>`）：
+  要**保留一個可回歸對照的快照**時（例：發布、破壞性重構、需要與舊版逐項比對）。
+  日常演化（改 agent／模板／規則／腳本）**直接改 LATEST**，不必也不應每次都開新版。
+  完整判準見 `AISDLC_SDD/CLAUDE.md`〈版本狀態〉。
 
 ---
 
 ## 目錄結構總覽
 
 ```
-AISDLC_SDD_v0.01/
+AISDLC_SDD_v<LATEST>/       # ← 讀作「當前最新演化版」；現查：python AISDLC_SDD/scripts/sdd_version.py
 │
 ├── 📄 AISDLC_SDD_INIT.md                 # 框架初始化配置（入口文件）
 ├── 📄 FILE_DIRECTORY_RULES.md            # 本文件 — 目錄結構規則
@@ -326,12 +350,12 @@ AISDLC_SDD_v0.01/
 
 #### GitHub Actions Workflows（`.github/workflows/`）
 
-GitHub Actions 僅讀 **repo 根目錄** `.github/workflows/`；巢狀 `AISDLC_SDD_v0.01/.github/workflows/` 不會被 GitHub 註冊。雙位置採用以下約定：
+GitHub Actions 僅讀 **repo 根目錄** `.github/workflows/`；巢狀 `AISDLC_SDD_v<LATEST>/.github/workflows/` 不會被 GitHub 註冊。雙位置採用以下約定：
 
 | 位置 | 性質 | 範例 |
 |------|------|------|
 | Repo root `.github/workflows/` | **Active**（framework 自我 dogfood） | `fsm-chaos-nightly.yml`（Rule 9.9.4）、`drift-daily.yml`（Rule 9.17.4） |
-| Nested `AISDLC_SDD_v0.01/.github/workflows/` | **Reference-only**（下游採用 SDD 時複製到自家 root） | `hub-push.yml`（為下游 Hub Registry repo 範本） |
+| Nested `AISDLC_SDD_v<LATEST>/.github/workflows/` | **Reference-only**（下游採用 SDD 時複製到自家 root） | `hub-push.yml`（為下游 Hub Registry repo 範本） |
 
 **規則**：
 - 凡 CLAUDE.md Rule 9.X 標註「framework dogfood」者必須位於 root（位置錯置等同停用該規則）

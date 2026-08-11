@@ -289,6 +289,31 @@ _RUNTIME_SKIP_CEILING: dict[str, dict[str, int]] = {
         SKIP_GROUP_DEBT: 6,
         SKIP_GROUP_UNTAGGED: 0,
     },
+    # 🔴 R84 包 W5（QA-03／QA-11）新登記：**mac 側的 AutoClaude 樹**此前一格判準都沒有
+    # ——它既不在本表、也不在 `_FULL_SUITE_RUNNERS` 這個分母裡 ⇒ `ci_platform_coverage_
+    # problems()` 對這一路回 `[]`（零問題）而不是回一筆缺口，也就是 mac 上這棵樹的 skip
+    # 可以無聲從現值長到任意數字而所有閘門全綠（R79 立這道棘輪時寫的原話）。
+    #
+    # 🔴 值的取得方式（兩步，缺第二步時失敗表徵與「完全沒起 PG」逐字相同——見
+    # `local_ci_gate.PG_UNMIGRATED_HINT` 與該檔剎車④）：
+    #   ① `docker compose -f AutoClaude/docker-compose.ci.yml up -d`
+    #   ② `cd AutoClaude && python -m alembic upgrade head`（rc=0）
+    #   ③ `python -m pytest tests -q -rs` → 全套通過數見 ONBOARDING.md §7（SSOT，本檔
+    #      刻意不複寫），skip 由 169 降為 73——差額 96 支全部是 PG 那一族，一支都沒掉
+    #   ④ 值逐格照抄 `local_ci_gate.py --census-only` 當場印出的 `[skip census]` 那一行。
+    #
+    # 六格形狀本身就是 QA-11（「徹底解決 skipped」）的答案：`platform` 53 支全部是
+    # `[WINDOWS-NATIVE-ONLY]`（mac 上沒有標的）；`env-disabled` 12 支裡有 11 支的述詞是
+    # 「非巢狀 session」⇒ 它們在 mac 上**有**標的，只是要在 `+solo` 剖面才跑得到（那個剖面
+    # 尚未量測，見 `_UNMEASURED_RUNNER_PROFILES`）；`tool-absence` 3 與 `structural-pair` 1
+    # 是選配 extra（`[sdk]`／`pgvector`）未裝，裝了就會跑——刻意**不在本輪裝**：那會就地改掉
+    # 本機 `.venv` 的母體，使這六格再也沒有人重量得出來（ONBOARDING 基線要求出廠環境）。
+    # `debt` 3 全部指名承接 R84 且需要真實 BGE-M3 語料，不是設一個旗標就能還。
+    "AutoClaude/tests@darwin+pg+nested": {
+        SKIP_GROUP_PLATFORM: 53, SKIP_GROUP_TOOL_ABSENCE: 3,
+        SKIP_GROUP_ENV_DISABLED: 12, SKIP_GROUP_STRUCTURAL: 1,
+        SKIP_GROUP_DEBT: 3, SKIP_GROUP_UNTAGGED: 1,
+    },
     # 🔴 R80 包 A（S3-04）：根層 `tools/tests` 那一棵此前**完全不在任何天花板管轄內**
     # （43 支 skip，`run_root_unittests.py` 只印不判、rc 與它無關）。本列即那道管轄的入表。
     # 值＝R80 當回合以 `python tools/run_root_unittests.py` 實跑後、由本模組對其
@@ -371,6 +396,14 @@ _RUNTIME_SKIP_CEILING_MAX: dict[str, dict[str, int]] = {
         SKIP_GROUP_DEBT: 6,
         SKIP_GROUP_UNTAGGED: 0,
     },
+    # 🔴 R84 包 W5：與基線同時入表、同一組值（沿用本表對新剖面的既有紀律：新登記的剖面
+    # 沒有「已還掉的欠債額度」需要保留，天花板刻意不留餘裕——留餘裕等於一上線就給它一個
+    # 可以無聲成長的窗口）。這兩份字面值刻意獨立寫死，不得由上表推導。
+    "AutoClaude/tests@darwin+pg+nested": {
+        SKIP_GROUP_PLATFORM: 53, SKIP_GROUP_TOOL_ABSENCE: 3,
+        SKIP_GROUP_ENV_DISABLED: 12, SKIP_GROUP_STRUCTURAL: 1,
+        SKIP_GROUP_DEBT: 3, SKIP_GROUP_UNTAGGED: 1,
+    },
     # 🔴 R82（CARRIER-02）：連同基線一起下修 40 → 37（天花板不跟著降＝把剛還掉的
     # 欠債額度留著，日後可無聲用回去——這句話是本表自己的既有紀律）。
     "tools/tests@win32": {
@@ -383,6 +416,14 @@ _RUNTIME_SKIP_CEILING_MAX: dict[str, dict[str, int]] = {
     },
     # 🔴 R83：與基線同時入表、同一組值（新登記的剖面沒有「已還掉的欠債額度」需要保留，
     # 天花板刻意不留餘裕——留餘裕等於一上線就給它一個可以無聲成長的窗口）。
+    #
+    # 🔴 R84 包 W5（QA-04）就地回答「零餘裕是不是刻意的」：**是**，判準與上一段逐字同一條，
+    # 本輪實測確認 `tools/tests@darwin` 兩張表同鍵皆 platform=44／其餘 0（`headroom` 0）。
+    # 代價要寫清楚，否則下一個人會照著失敗訊息把 MAX 調大：新增任何一支
+    # `[WINDOWS-NATIVE-ONLY]` 根層測試會讓根層閘門**當場紅**，而**唯一**合法處置是在同一個
+    # commit 把 `_RUNTIME_SKIP_CEILING` 與本表同鍵一起改成新的**實測值**（diff 要看得見兩份
+    # 獨立字面值都改了），不是只把本表調高——只調本表就是把「已還掉的欠債額度」重新開回去，
+    # 而那個窗口日後可以無聲被用掉。刻意不預留餘裕：本輪若給它 +N，那個 N 沒有任何量測依據。
     "tools/tests@darwin": {
         SKIP_GROUP_PLATFORM: 44,
         SKIP_GROUP_TOOL_ABSENCE: 0,
@@ -434,6 +475,11 @@ _FULL_SUITE_RUNNERS: dict[str, str] = {
     # 那個「已登記的執行者」指的是一個不存在的執行者，而每天真的在跑的那一個一格判準都沒有
     # ——這正是 R79 立這道棘輪時寫的「skip 可以無聲從 43 長到 143 而閘門全綠」。
     "AutoClaude/tests@win32+pg+solo": "run_local_nightly.ps1／schtasks nightly（非巢狀）",
+    # 🔴 R84 包 W5（QA-03）新登記：mac 真機上的 pre-push AutoClaude leg。此前**平台層與剖面層
+    # 都沒有它**——`_platform_of` 的派生視圖裡 darwin 已被 `tools/tests@darwin` 佔位，於是平台
+    # 那一向也看不到缺口 ⇒ 這一路是「回 [] 而不是回一筆缺口」，比未量測更難發現。
+    # 本列與天花板同輪入表（分母升、分子亦升，兩者都是只准增的方向）。
+    "AutoClaude/tests@darwin+pg+nested": "pre-push 的 AutoClaude leg（mac 真機，在 CC session 內）",
     # 🔴 R82 包 A2（MAC-01）新登記：`macos-compat-ci.yml` 的 macOS smoke job 逐字
     # `run: python3 tools/run_root_unittests.py`＝一個貨真價實的 full-suite darwin 執行者，
     # 卻從來不在這張分母表裡 ⇒ 26 支 `[MAC-NATIVE-ONLY]` 的互補剖面連「有沒有人量過」
@@ -491,8 +537,14 @@ _UNMEASURED_RUNNER_PROFILES: dict[str, str] = {
 #: ⇒ 分母 7 不動、分子 3 → 4，語意是「已量測的剖面又多一個」，**與「憑空填數字」方向相反**。
 #: 🔴 **本段原本只有 R82 那句「分子不動」，而下一行已是 4**——同一個變更內自相矛盾，
 #: 由 W8 的獨立驗證者點名（不是自己發現的），故就地訂正並保留 R82 原判斷的沿革。
-_FULL_SUITE_RUNNERS_MIN = 7
-_MEASURED_RUNNERS_MIN = 4
+#: 🔴 **R84 包 W5：分母 7 → 8、分子 4 → 5，兩者都是「條件真的被滿足了」而非放寬**
+#: （方向與 R83 那次上修逐字同源）。上修的唯一依據是 `AutoClaude/tests@darwin+pg+nested`
+#: **真的被量到**：值取自 `local_ci_gate.py --census-only` 當場印出的 `[skip census]` 那一行、
+#: 逐格照填、零加減推算（取得配方見 `_RUNTIME_SKIP_CEILING` 該列上方四步）。
+#: ⇒ 分母升是因為多認一個真的在跑整棵樹的執行者，分子升是因為它同輪就被量到，
+#: **與「憑空填數字」方向相反**（那種情況分子必須不動，見上一段 R82 的原判斷）。
+_FULL_SUITE_RUNNERS_MIN = 8
+_MEASURED_RUNNERS_MIN = 5
 #: 未量測列必須指名一個**帳本列**當承接處。刻意要 DEF-ID 而不是「R<下一輪>」字面：後者
 #: 是在程式碼裡宣稱一個還沒發生的輪號（本 repo 另有一道全樹掃描在擋這件事），而承接輪次
 #: 本來就該只有帳本一個家——註解裡寫「還沒量」則是判過的第 10 號形態（劃界不等於防護）。
@@ -511,14 +563,15 @@ _UNMEASURED_CI_PLATFORMS: dict[str, str] = {
     _platform_of(p): w for p, w in _UNMEASURED_RUNNER_PROFILES.items()}
 
 
+# 純函式：會跑整棵樹、卻沒有登記健康值的**執行者剖面**。回空 list ＝帳算得清。
+#
+# 五向：①分母縮水 ②分子縮水 ③未登記又未具名豁免 ④已登記卻還掛在豁免表（把有人守的
+# 寫成沒人守，與反向同樣是假事實）⑤具名豁免卻沒指名承接帳本列（＝沒有承接者的永久缺口）。
+# 另保留平台層那一向：一個**整個平台**都沒有任何執行者入帳時仍要紅（例：日後新增 macOS
+# full-suite job），那是派生視圖唯一還有鑑別力的地方。
+#
+# （R84／W5：docstring → `#` 註解，一字未刪，理由同 `skip_group_census_problems` 上方。）
 def ci_platform_coverage_problems() -> list[str]:
-    """純函式：會跑整棵樹、卻沒有登記健康值的**執行者剖面**。回空 list ＝帳算得清。
-
-    五向：①分母縮水 ②分子縮水 ③未登記又未具名豁免 ④已登記卻還掛在豁免表（把有人守的
-    寫成沒人守，與反向同樣是假事實）⑤具名豁免卻沒指名承接帳本列（＝沒有承接者的永久缺口）。
-    另保留平台層那一向：一個**整個平台**都沒有任何執行者入帳時仍要紅（例：日後新增 macOS
-    full-suite job），那是派生視圖唯一還有鑑別力的地方。
-    """
     problems: list[str] = []
     measured = [p for p in _FULL_SUITE_RUNNERS if profile_registered(p)]
     if len(_FULL_SUITE_RUNNERS) < _FULL_SUITE_RUNNERS_MIN:
@@ -590,22 +643,25 @@ def retag_budget(profile: str, census: Mapping[str, int]) -> int:
                - census.get(SKIP_GROUP_UNTAGGED, 0))
 
 
+# 分群天花板的判準（純函式）。回空 list ＝合格。
+#
+# 六向：①剖面未登記 ②**總量**超過上限 ③某群超過「上限＋補標籤額度」 ④上限高於
+# shrink-only 天花板 ⑤census 出現未登記的群 ⑥`[DEBT]` 的 reason 沒寫承接輪次。
+#
+# ②③ 的分工就是 S3-03 的修法：總量那一道是真正有牙的（skip 變多一定紅），分群那一道
+# 只在「這一群變多、而且**不是**從 untagged 搬過來的」時候才紅。誠實劃界：兩支 untagged
+# 被修好、同時新增兩支 env-disabled，在本判準下是綠的（總量不變、額度剛好抵銷）——
+# 要抓那一種，靠的是 `skip_tag_policy` 的靜態站點面，不是這裡的計數面。
+#
+# （R84／W5：本段由 docstring 改為 `#` 註解，**一字未刪、語意零變更**——與本檔
+# `profile_registered`／`retag_budget` 上方兩段在 R83 的同款處置逐字同源，理由亦同：
+# 要騰出 count_loc 額度登記 `AutoClaude/tests@darwin+pg+nested` 兩張天花板。）
 def skip_group_census_problems(
     profile: str,
     census: Mapping[str, int],
     *,
     reasons: Iterable[str] = (),
 ) -> list[str]:
-    """分群天花板的判準（純函式）。回空 list ＝合格。
-
-    六向：①剖面未登記 ②**總量**超過上限 ③某群超過「上限＋補標籤額度」 ④上限高於
-    shrink-only 天花板 ⑤census 出現未登記的群 ⑥`[DEBT]` 的 reason 沒寫承接輪次。
-
-    ②③ 的分工就是 S3-03 的修法：總量那一道是真正有牙的（skip 變多一定紅），分群那一道
-    只在「這一群變多、而且**不是**從 untagged 搬過來的」時候才紅。誠實劃界：兩支 untagged
-    被修好、同時新增兩支 env-disabled，在本判準下是綠的（總量不變、額度剛好抵銷）——
-    要抓那一種，靠的是 `skip_tag_policy` 的靜態站點面，不是這裡的計數面。
-    """
     problems: list[str] = []
     ceilings = _RUNTIME_SKIP_CEILING.get(profile)
     ceiling_max = _RUNTIME_SKIP_CEILING_MAX.get(profile)
@@ -732,6 +788,12 @@ def required_home_platforms(platform: str) -> set[str]:
 _COMPLEMENTARY_PROFILE: dict[str, tuple[str, ...]] = {
     "AutoClaude/tests@win32+nopg+nested": ("AutoClaude/tests@linux+nopg+solo",),
     "AutoClaude/tests@win32+pg+nested": ("AutoClaude/tests@linux+pg+solo",),
+    # 🔴 R84 包 W5：反方向（同 `tools/tests@darwin` 那一列的判準）。mac 上被 skip 的
+    # `platform` 群實測 53 支**全部**是 `[WINDOWS-NATIVE-ONLY]`（本輪逐支讀 reason 分群，
+    # 零 `[POSIX-NATIVE-ONLY]`／零 `[MAC-NATIVE-ONLY]`）⇒ 唯一承接得住的是真 Windows 剖面，
+    # 而 `AutoClaude/tests@win32+pg+nested` 已量測入表。不填這一列時判準走 `not counterparts`
+    # 那一支、印「（平台 win32 未宣告承接剖面）」＝把「有著落」誤報成「全世界都沒跑過」。
+    "AutoClaude/tests@darwin+pg+nested": ("AutoClaude/tests@win32+pg+nested",),
     # POSIX-generic 那一半的家是 linux，mac-only 那一半的家只有 darwin——兩個都要。
     "tools/tests@win32": ("tools/tests@linux", "tools/tests@darwin"),
     # 🔴 反方向（R83 收斂訂正）：darwin 上 skip 掉的那 44 支**全部**是

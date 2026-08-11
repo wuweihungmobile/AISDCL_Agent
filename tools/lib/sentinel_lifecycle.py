@@ -367,19 +367,20 @@ def _remove_task(task: str) -> int:
 def _sweep_artifacts(session_id: str, tmp: Path) -> list[str]:
     """把該 session 的哨兵痕跡一起收掉（任務書／閂鎖／boot log／水位 state）。
 
-    🔴 **誠實劃界（R83 複審 A-07，本輪未收，明文登記）**：「什麼時候可以刪任務書」現在有
-    **兩個家**——本函式按 **session** 刪四件（呼叫端是 GC，判準是 `reap_verdict`），而
-    `tools/lib/quota_escalation.gc_plans()` 按**齡**刪 `autosdd_resume_plan_*.md`（判準是
-    `PLAN_GC_AGE_SECONDS`）。兩者今天不衝突（一支按 id、一支按 mtime），但同一族檔有兩套
-    刪除時機，改了一邊不會有任何東西轉紅。收斂該往哪一邊、以及誰是唯一的家，**尚未決定**。
-    🔴 此處刻意**不寫承接輪號**（R83 訂正）：承接輪次的唯一的家是帳本
-    （`docs/06_quality/AutoSDD_Defect_Log.md` 的「狀態」欄），在程式碼裡寫一個還沒發生的
-    輪號正是本輪已修掉 14 處的那個病——`test_check_defect_log_crossref` 的
-    `TestR71CodeRoundLabelsNeverExceedLedgerCurrentRound` 會對它判紅，而它判得對。
+    🔴 **R84／ARCH-06 已收（此前是本函式自陳的「兩個家」）**：任務書那一件現在交給
+    `quota_escalation.reap_plans()`——「什麼時候可以刪任務書」的判準與 `unlink` 站點各自
+    只剩一個家，全庫判準見 `tools/tests/test_mac_endurance_r83.py::PlanReapHasOneHomeTest`。
+    本函式提供的**輸入**是「這個 session 已終態」（`session_id`），且刻意 `age=None`：GC 是
+    拿著 `reap_verdict` 的裁決來的，與齡無關——分歧留在輸入，不留在規則。
+    修前的自陳逐字寫著「改了一邊不會有任何東西轉紅」，那句話正是它自己的達成判準。
+
+    lazy import：`quota_escalation` 在模組層 import `context_budget_guard`，而那一支又在
+    模組層 import 本模組 ⇒ 放在檔頭會成環（形態與理由同 `_planner_module()`）。
     """
-    gone = []
-    for name in (f"autosdd_resume_plan_{session_id}.md",
-                 f"{ARM_MARKER_PREFIX}{session_id}.json",
+    from quota_escalation import reap_plans  # noqa: PLC0415 — 見 docstring（成環）
+
+    gone = list(reap_plans(session_id=session_id, root=tmp, age=None))
+    for name in (f"{ARM_MARKER_PREFIX}{session_id}.json",
                  f"autosdd_sentinel_boot_{session_id}.log",
                  f"autosdd_ctxguard_{session_id}.json"):
         path = tmp / name

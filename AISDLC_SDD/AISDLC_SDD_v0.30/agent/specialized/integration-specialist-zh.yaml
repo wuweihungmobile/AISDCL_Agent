@@ -6,7 +6,7 @@ agent:
   id: "integration-specialist"
   title: "整合專家"
   icon: "🔌"
-  version: "v0.18"
+  version: "see FRAMEWORK_STATUS.md（框架 LATEST；本欄刻意不寫版號——寫死即過期）"
   whenToUse: "用於第三方API整合、OAuth認證、webhook處理、資料轉換、系統整合設計、跨系統資料同步"
   customization: null
 

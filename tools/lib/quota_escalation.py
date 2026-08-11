@@ -42,8 +42,24 @@ import subprocess
 import sys
 import tempfile
 import time
-from datetime import UTC, datetime
 from pathlib import Path
+
+# 🔴 R84／ARCH-06 連帶：本檔**不得**再出現 `from datetime import UTC`（3.11+）。
+# 立案是量出來的，不是潔癖：ARCH-06 讓 `tools/lib/sentinel_lifecycle.py`（hook 鏈上的檔）
+# 靜態 import 本檔 ⇒ 本檔就進了 `test_mac_readiness_r82.hook_chain_py39_census()` 的射程，
+# 而那張債表是 **shrink-only**（多一筆＝macOS 內建 python3（常年 3.9）上又多一個會靜默失能
+# 的能力）。本輪實測：不改的話該鎖當場紅在 `{'tools/lib/quota_escalation.py':
+# ['from datetime import UTC']}`。三條路只有這一條不是把門檻放寬：
+#   ✗ 把自己加進那張債表 ⇒ 調高 shrink-only 門檻（而且那句話還是假的：本檔的 import 在
+#     函式層，hook 鏈的 import 期一次都不會執行它）。
+#   ✗ 改寫成 `timezone.utc` ⇒ 根層 ruff（`tools/ruff.toml`，`UP` 已選、target py311）當場
+#     `UP017 Use datetime.UTC alias`（本輪 `--stdin-filename` 實測命中）⇒ 換一個閘門紅。
+#   ✓ 這兩個時間戳本來就只是**給人看的稽核字串**（無人解析：全庫零斷言），改用
+#     `time.strftime("%Y-%m-%dT%H:%M:%S%z")`——與 `schedule_backend._append_trace`／
+#     `sentinel_lifecycle.maybe_arm` 逐字同一個既有慣例，3.9 相容，且仍帶 offset
+#     （`TestNaiveLocalTimestampsAreNotPersisted` 禁的是不帶 offset 的 naive 字串）。
+#: 稽核字串用的當地時間戳（帶 offset）。唯一的家在這裡，兩個消費者都取它。
+_STAMP = "%Y-%m-%dT%H:%M:%S%z"
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(_REPO_ROOT / ".claude" / "hooks"))
@@ -174,7 +190,7 @@ def snapshot_fanout(transcript: Path, event: object) -> dict:
     ok = _write(path, json.dumps({
         "schema": "autosdd.fanout.v1", "session_id": guard.session_id_of(transcript),
         "transcript": str(transcript), "hit": event, "runs": runs,
-        "at": datetime.now(UTC).astimezone().isoformat(timespec="seconds"),
+        "at": time.strftime(_STAMP),
         # 🔴 這一格是規格不是說明文字：讀這份檔的人（或 AutoClaude）必須知道「自動
         # 續跑」在什麼條件下**結構上不成立**，否則它會被當成一個沒被按下的按鈕。
         "how_to_resume": [
@@ -226,30 +242,89 @@ def notify(title: str, body: str) -> int:
 # （本 repo 對「查詢載具給出過期事實」有判例）。
 # 判準刻意是**年齡**而不是「這支哨兵還在不在」：後者要問排程器，那是一次外部行程呼叫，
 # 而這裡跑在終態路徑上、失敗不得升級為故障。年齡門檻的取值理由見 `PLAN_GC_AGE_SECONDS`。
+#
+# ══════════════════════════════════════════════════════════════════════════
+# 🔴 R84／ARCH-06：「什麼時候可以刪任務書」收成**一個判準 ＋ 一個 unlink 站點**
+# ══════════════════════════════════════════════════════════════════════════
+# 病（`sentinel_lifecycle._sweep_artifacts` 的既有註解**自陳**過，而自陳不是機械物）：同一族
+# 檔（`autosdd_resume_plan_*.md`）此前有**兩套刪除時機**——本檔按**齡**刪，`_sweep_artifacts`
+# 按 **session_id** 刪四件。兩者今天不衝突只因判準軸不同（mtime vs id），而那一行自陳逐字
+# 寫著「**改了一邊不會有任何東西轉紅**」⇒ 零機械物。任務書是〈可重啟點四條件〉第 2 條的
+# 載體：任一邊把窗口改動一次，就可能刪掉另一邊還在等的那一份，而失效是靜默的
+# （哨兵下一次醒來讀不到任務書 ⇒ `sentinel_aborted`，外觀與「正常下班」相近）。
+#
+# 收斂形狀（體例照 `Find-GitBash` 那條 SSOT 判例：知識只有一個家，消費者只提供輸入）：
+#   · `plan_reap_verdict(path, session_id, now, age)` ＝**唯一的判準**。兩條規則、各自對應
+#     一個呼叫端本來就有的輸入：**指名**（我知道這個 session 已終態）與**超齡**。
+#   · `reap_plans(...)` ＝**唯一會 `unlink` 任務書的地方**。判準守衛＝
+#     `tools/tests/test_mac_endurance_r83.py::PlanReapHasOneHomeTest`（全庫掃「同一個函式裡
+#     同時出現任務書身分與 unlink」的站點，第二個家一律紅，含合成注入自證）。
+# 🔴 `age=None` **不是**第二套政策，而是「這個呼叫端手上沒有年齡這個輸入」：GC 是拿著
+#   `reap_verdict` 的裁決（這支哨兵已結束）來的，它要刪的就是那一份，與齡無關。判準仍然
+#   只有一支——分歧留在**輸入**，不留在規則。
+def plan_reap_verdict(path: object, session_id: str = "", now: float | None = None,
+                      age: float | None = PLAN_GC_AGE_SECONDS, *, named: bool = False) -> str:
+    """可以收這一份任務書嗎；回**理由字串**，`""`＝不收。純函式（紅綠由注入自證）。
+
+    「指名」有兩種形態，因為兩個呼叫端手上的東西不同（**規則同一條，輸入不同**）：
+    `named=True`＝呼叫端直接把那一份的**路徑**遞過來（終態路徑上的 `alert`，檔名不必帶
+    前綴——它已經自己判過那是自己的任務書）；`session_id`＝呼叫端手上只有 **id**（GC 拿的
+    是 `reap_verdict` 的裁決）。刻意不讓後者去猜前者：`gc_plans` 的 `current` 在既有測試裡
+    就是一支叫 `plan.md` 的檔，用「名字必須帶前綴」去判它會**靜默少刪一份**（本輪實測：
+    `test_the_silent_disarm_takes_its_own_plan_file_with_it` 當場轉紅，收斂前的行為是無條件刪）。
+    """
+    target = Path(str(path))
+    if named:
+        return "指名（呼叫端遞來路徑，已自行判定終態）"
+    if session_id and target.name == f"{guard.PLAN_PREFIX}{session_id}.md":
+        return f"指名（session `{session_id}` 已終態）"
+    if age is None:
+        return ""  # 沒有年齡這個輸入 ⇒ 只有「指名」那一條可能成立
+    try:
+        idle = (time.time() if now is None else now) - target.stat().st_mtime
+    except OSError:  # 檔不在／stat 不動＝沒有可據以回收的事實，一律不收（量不到 ≠ 該刪）
+        return ""
+    return (f"超齡（{idle / 86400:.1f} 天未更新 ≥ {age / 86400:.0f} 天）"
+            if idle >= age else "")
+
+
+def reap_plans(*, session_id: str = "", root: object = None, now: float | None = None,
+               age: float | None = PLAN_GC_AGE_SECONDS,
+               extra: tuple = ()) -> list[str]:
+    """**唯一**會刪 `autosdd_resume_plan_*.md` 的地方。回實際刪掉的檔名（可直接稽核）。
+
+    `root` 是注入點：預設掃系統暫存（production 唯一的落點），測試把它指到沙箱——
+    一支會真的去刪開發者 `%TEMP%` 的單元測試，是把驗證載具做成了副作用來源。
+    `extra` 收「呼叫端手上那一份可能不在 `root` 底下」的情形（`gc_plans` 的 `current`）。
+    """
+    base = Path(str(root) if root else tempfile.gettempdir())
+    victims = dict.fromkeys(base.glob(f"{guard.PLAN_PREFIX}*.md"), False)
+    victims.update({Path(str(p)): True for p in extra})
+    gone = []
+    for path in sorted(victims):
+        if not plan_reap_verdict(path, session_id, now, age, named=victims[path]):
+            continue
+        try:
+            path.unlink()
+        except OSError:
+            continue  # 刪不掉最多是留著，不得反過來變成故障源（同 `_write` 的紀律）
+        gone.append(path.name)
+    return gone
+
+
 def gc_plans(current: object = None, age: float = PLAN_GC_AGE_SECONDS,
              root: object = None) -> dict:
     """收掉任務書殘骸：`current` 這一份（終態了）＋ 所有超齡的。回稽核欄位。
 
-    `root` 是注入點：預設掃系統暫存（production 唯一的落點），測試把它指到沙箱——
-    一支會真的去刪開發者 `%TEMP%` 的單元測試，是把驗證載具做成了副作用來源。
+    對外行為與簽名**逐字未變**（planner／`alert` 兩個呼叫端與既有測試都靠它）；改變的只有
+    內部：判準與 unlink 都轉交上面那兩支，本函式只負責「把 `current` 換算成一個 session id
+    這個輸入」。名字不帶前綴時換算出空字串 ⇒ 只剩超齡那一條，與修前對同一輸入同義。
     """
-    victims = [Path(str(current))] if current else []
-    cutoff = time.time() - age
-    for stale in Path(str(root) if root else tempfile.gettempdir()).glob(
-            f"{guard.PLAN_PREFIX}*.md"):
-        try:
-            if stale.stat().st_mtime < cutoff:
-                victims.append(stale)
-        except OSError:  # pragma: no cover - 檔在列舉與 stat 之間消失
-            continue
-    gone = 0
-    for path in victims:
-        try:
-            path.unlink()
-            gone += 1
-        except OSError:
-            continue  # 刪不掉最多是留著，不得反過來變成故障源（同 `_write` 的紀律）
-    return {"gc_plans": gone}
+    name = Path(str(current)).name if current else ""
+    sid = (name[len(guard.PLAN_PREFIX):-3]
+           if name.startswith(guard.PLAN_PREFIX) and name.endswith(".md") else "")
+    return {"gc_plans": len(reap_plans(session_id=sid, root=root, age=age,
+                                       extra=(current,) if current else ()))}
 
 
 # 終態的「叫人」。兩個呼叫端（哨兵的 `escalate`、續航探測的 `stop`）共用同一份——
@@ -274,7 +349,7 @@ def alert(reason: str, state: dict, *, loud: bool = True, plan: object = None,
     note = note_path()
     ok = _write(note, "\n".join([
         "# 🔴 AutoSDD 續航協定：需要你動手",
-        f"- 產生時間：{datetime.now(UTC).astimezone().isoformat(timespec='seconds')}",
+        f"- 產生時間：{time.strftime(_STAMP)}",
         f"- 原因：{reason}",
         f"- session：`{state.get('session_id')}`",
         f"- 任務書：`{state.get('plan_path')}`",

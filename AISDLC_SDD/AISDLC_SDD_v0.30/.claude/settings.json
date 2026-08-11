@@ -1,6 +1,6 @@
 {
   "$schema": "https://json.schemastore.org/claude-code-settings.json",
-  "description": "AISDLC-SDD SDD 治理 Hooks — SessionStart 注入 FSM bootstrap + 當前狀態規則；PreToolUse/PostToolUse 走 context-ledger 守門（版本中性，各版同構；DEF-43-008 起不再滯留 v0.01 標頭）。hook command 以 python -c shim 錨定專案根（python 自行讀 CLAUDE_PROJECT_DIR，不經 shell 展開故 Windows cmd 亦可用；缺檔 fail-open exit 0）——修復 cwd≠專案根時 python 缺檔 exit 2 誤觸 PreToolUse deny 之 P0（四方複審第四輪）。",
+  "description": "AISDLC-SDD SDD 治理 Hooks — SessionStart 注入 FSM bootstrap + 當前狀態規則；PreToolUse/PostToolUse 走 context-ledger 守門（版本中性，各版同構；DEF-43-008 起不再滯留 v0.01 標頭）。🔴 R84：本檔 3 條 hook 已由 shell form 轉成 **exec form**（帶 `args`），3 條 → 6 條。病（R80 定案，勿重推導）：Windows 上 shell form 的 hook 是用 Git Bash 的 `bash.exe -c` 起的，而 `bash.exe` 是 console 子系統程式 ⇒ 每觸發一次 hook 就閃一個 console 視窗。exec form 不經 shell、直接 spawn，`command` 指向 GUI 子系統的 `pythonw.exe` 即零視窗。**立案事實（訴求 7 窮舉）**：R80 轉了 monorepo 根層那份、R81 轉了 AutoClaude 那份，而 `AISDLC_SDD/AISDLC_SDD_v*/.claude/settings.json` 共 30 份**全數仍是 shell form**（含 LATEST 這一份）；更糟的是 `tools/lib/hook_wiring.FROZEN_SETTINGS_PREFIX` 把整個家族**結構性排除**在 `SHELL_FORM_CENSUS` 之外 ⇒ R80／R81 宣稱的「兩格皆 0」是**假的安心**，而框架 skills 正掛在版本目錄下、以它為 cwd 開 session 是常態 ⇒ 那兩輪的修法對那種 session 一次都沒生效。凍結面（v0.01~上一版）依 Copy-on-Evolve 不改寫，改由 `hook_wiring.FROZEN_SHELL_FORM_MAX` 這條 shrink-only 判準登記為已知豁免。每個邏輯 hook 兩條＝「Windows 載具 + POSIX 載具」，**各平台恰好一條成立、另一條 spawn 失敗**（Windows 上 `.py` 直接 spawn 回 EFTYPE、POSIX 上 `.venv/Scripts/pythonw.exe` 回 ENOENT），而 CC 對 spawn 失敗是 **fail-open**（只記一行 ERROR、工具照跑）⇒ 兩條不會雙跑。🔴 這也是本形態最大的風險：載具解析不到時**守衛會全部靜默失效，而螢幕上的表徵就是「終於不閃窗了」，與修好完全相同** ⇒ 驗收必須正負兩面一起看（正面證據＝`claude -p --debug hooks` 的 `Hook … success`；見根 CLAUDE.md〈鐵律一之二〉）。載具兩件事刻意如此：①本版目錄底下**沒有** `.venv`（實測），而 venv 只有一個家（monorepo 根層），故 Windows 側走 `${CLAUDE_PROJECT_DIR}/../../.venv/Scripts/pythonw.exe`；②`args[0]`／POSIX 側的啟動器走 `${CLAUDE_PROJECT_DIR}/../../.claude/hooks/_hook_launcher.py`——啟動器**只有一個家**，刻意不複製第二份進版本目錄（同一份知識住兩個家、只有一個家會被改，是本 repo 的頭號病，DEF-101-778 判例）。`../../` 只依賴「版本目錄是 `AISDLC_SDD/` 的直屬子目錄」這個 repo 結構事實，不含任何機器專屬絕對路徑。啟動器行為與舊 `python -c` shim **逐項等價**：自行讀 `CLAUDE_PROJECT_DIR`（CC 注入、不經 shell 展開）、未設時回退 cwd、`os.chdir(root)`、`sys.argv=[目標絕對路徑]+其餘引數`、**目標腳本缺檔＝fail-open exit 0**——修復「cwd≠專案根時 python 缺檔 exit 2 誤觸 PreToolUse deny、全工具硬鎖死」P0（四方複審第四輪）。解析本檔的唯一真相源＝`tools/lib/hook_wiring.py`；「本檔還剩幾條 shell form」由 `hook_wiring.SHELL_FORM_CENSUS` 以版本中性鍵 `AISDLC_SDD/<LATEST>/.claude/settings.json`、**相等**判準登記（現為 0），回歸鎖 `tools/tests/test_check_hooks_liveness.py::TestExecFormConversionScope`。",
   "env": {
     "PYTHONUTF8": "1",
     "SDD_SUBAGENT_CONTRACT": "soft",
@@ -13,7 +13,19 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python -c \"import os,sys,runpy; r=os.environ.get('CLAUDE_PROJECT_DIR') or os.getcwd(); p=os.path.join(r,*sys.argv[1].split('/')); os.path.isfile(p) or sys.exit(0); os.chdir(r); sys.argv=[p]+sys.argv[2:]; runpy.run_path(p,run_name='__main__')\" .claude/hooks/session_start.py",
+            "command": "${CLAUDE_PROJECT_DIR}/../../.venv/Scripts/pythonw.exe",
+            "args": [
+              "${CLAUDE_PROJECT_DIR}/../../.claude/hooks/_hook_launcher.py",
+              ".claude/hooks/session_start.py"
+            ],
+            "timeout": 30
+          },
+          {
+            "type": "command",
+            "command": "${CLAUDE_PROJECT_DIR}/../../.claude/hooks/_hook_launcher.py",
+            "args": [
+              ".claude/hooks/session_start.py"
+            ],
             "timeout": 30
           }
         ]
@@ -25,7 +37,19 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python -c \"import os,sys,runpy; r=os.environ.get('CLAUDE_PROJECT_DIR') or os.getcwd(); p=os.path.join(r,*sys.argv[1].split('/')); os.path.isfile(p) or sys.exit(0); os.chdir(r); sys.argv=[p]+sys.argv[2:]; runpy.run_path(p,run_name='__main__')\" .claude/hooks/context_ledger_pre.py",
+            "command": "${CLAUDE_PROJECT_DIR}/../../.venv/Scripts/pythonw.exe",
+            "args": [
+              "${CLAUDE_PROJECT_DIR}/../../.claude/hooks/_hook_launcher.py",
+              ".claude/hooks/context_ledger_pre.py"
+            ],
+            "timeout": 10
+          },
+          {
+            "type": "command",
+            "command": "${CLAUDE_PROJECT_DIR}/../../.claude/hooks/_hook_launcher.py",
+            "args": [
+              ".claude/hooks/context_ledger_pre.py"
+            ],
             "timeout": 10
           }
         ]
@@ -37,7 +61,19 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python -c \"import os,sys,runpy; r=os.environ.get('CLAUDE_PROJECT_DIR') or os.getcwd(); p=os.path.join(r,*sys.argv[1].split('/')); os.path.isfile(p) or sys.exit(0); os.chdir(r); sys.argv=[p]+sys.argv[2:]; runpy.run_path(p,run_name='__main__')\" .claude/hooks/context_ledger_post.py",
+            "command": "${CLAUDE_PROJECT_DIR}/../../.venv/Scripts/pythonw.exe",
+            "args": [
+              "${CLAUDE_PROJECT_DIR}/../../.claude/hooks/_hook_launcher.py",
+              ".claude/hooks/context_ledger_post.py"
+            ],
+            "timeout": 10
+          },
+          {
+            "type": "command",
+            "command": "${CLAUDE_PROJECT_DIR}/../../.claude/hooks/_hook_launcher.py",
+            "args": [
+              ".claude/hooks/context_ledger_post.py"
+            ],
             "timeout": 10
           }
         ]

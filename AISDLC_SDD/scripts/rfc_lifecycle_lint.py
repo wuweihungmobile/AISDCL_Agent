@@ -133,13 +133,24 @@ def missing_status(repo_root: str) -> list[str]:
     return find_active_rfcs_missing_status(active_dir)
 
 
-def main(argv: list[str] | None = None) -> int:
-    # Windows 主控台預設 cp950/cp1252 無法輸出 emoji / 中文 — 強制 UTF-8（對齊 arch_fitness）。
+def force_utf8_stdio() -> None:
+    """島內（`AISDLC_SDD/scripts/`）強制 stdio 為 UTF-8 的**共用入口**。
+
+    Windows 主控台預設 cp950/cp1252 無法輸出 emoji / 中文（對齊 arch_fitness）。
+    本島搆不到根層 `tools/_stdio_utf8.py`（跨子專案 import 隔離），故島內自留一份；
+    但**只留這一份**——島內姊妹模組一律 `from rfc_lifecycle_lint import
+    force_utf8_stdio` 呼叫它，不得再各自寫一次行內 `reconfigure`
+    （`tools/tests/test_platform_utils_dedup.py` 的 per-tree shrink-only 棘輪）。
+    """
     for stream in (sys.stdout, sys.stderr):
         try:
             stream.reconfigure(encoding="utf-8", errors="replace")  # type: ignore[attr-defined]
         except Exception:  # pragma: no cover - 舊版 / 非 TextIO
             pass
+
+
+def main(argv: list[str] | None = None) -> int:
+    force_utf8_stdio()
     argv = sys.argv[1:] if argv is None else argv
     repo_root = argv[0] if argv else os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     violations = lint(repo_root)

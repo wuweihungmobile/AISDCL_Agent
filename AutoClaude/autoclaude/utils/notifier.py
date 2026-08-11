@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import logging
 import subprocess
+import threading
 from datetime import datetime
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -17,14 +18,24 @@ from typing import TYPE_CHECKING
 from .platform_caps import is_macos, is_windows
 
 # 🔴 R82（ACC-01）：彈窗預設停留秒數由 10 降到 3。
-# WHY：plyer 的 Windows 後端把 balloon_tip 丟進一個**非 daemon** 執行緒並 `time.sleep(timeout)`，
-# 非 daemon 執行緒會拖住 process exit ⇒ 這個數字就是「跑完之後行程還要多活多久」。
-# 獨立實測（未觸發任何彈窗）：主程式印完 `main_done daemon= False` 後，外層碼錶仍量到
-# wall_ms=3038（sleep 3s 的非 daemon 執行緒）——行程確實等滿。
-# 這裡刻意**不**把 plyer 的呼叫包進自己的 daemon thread：plyer 內部那個非 daemon 執行緒還在，
-# 外層 daemon 化解決不了，只會多一層假象。真正有效的兩件事是「預設不彈」＋「縮短 timeout」。
+# WHY：plyer 的 Windows 後端把 balloon_tip 丟進一個**沒帶 daemon kwarg** 的執行緒並
+# `time.sleep(timeout)`（實查 plyer/platforms/win/notification.py：`thread(target=balloon_tip,
+# kwargs=kwargs).start()`；balloontip.py:141 `time.sleep(timeout)`）。
 # `duration=0` 未採用：balloontip.py 的 `if timeout:` 會跳過 sleep，但物件隨即可能被 GC 而
 # `__del__` 立刻移除氣泡＝使用者根本看不到——該行為未實測，不照抄。
+#
+# 🔴 R84（AC-(c)）**訂正 R82 在這裡寫下的因果與結論**（原文逐字斷言「這個數字就是『跑完之後
+# 行程還要多活多久』」，並斷言「外層 daemon 化解決不了，只會多一層假象」——兩句都已被實測
+# 推翻，故不留著當現行說法）：
+#   ① 那個內層執行緒**沒有**顯式 `daemon=`，而 CPython `Thread.__init__` 對未指定者
+#      逐字「inherited from the creating thread」⇒ 它的 daemon 值由**呼叫 plyer 的那個執行緒**
+#      決定，不是 plyer 決定的。
+#   ② 實測同構探針（把 balloon_tip 換成 sleep(3)，其餘結構逐行相同）：
+#      從主執行緒直接呼叫 → 內層 `daemon=False`、行程 wall=**3.049s**（等滿）；
+#      改從一個 `daemon=True` 的外層執行緒呼叫 → 內層 `daemon=True`、行程 wall=**0.247s**。
+#   ⇒ 外層 daemon 化是**有效**的，而且是唯一不必改 plyer 的治法。本模組因此把整條後端鏈
+#      放進 `_deliver()`，由 `notify()` 以 daemon 執行緒呼叫（見該處）。
+#   ⇒ 於是本常數**不再**是「行程結束後還要多活多久」，只剩它字面的意思＝彈窗停留秒數。
 DEFAULT_DURATION_SECONDS = 3
 
 if TYPE_CHECKING:
@@ -73,6 +84,20 @@ def notify(
     if not enabled:
         logger.debug("[NOTIFY-disabled] %s | %s", title, message)
         return
+    # 🔴 R84（AC-(c)）：平台後端一律在**我們自己的 daemon 執行緒**內呼叫，理由與實測見上方
+    # DEFAULT_DURATION_SECONDS 的 R84 訂正段。效果＝後端自己 spawn 的內層執行緒繼承
+    # daemon=True ⇒ 「session／playbook 結束」就真的是結束，不會被彈窗吊住 duration 秒。
+    # join 的上界刻意取 `duration` 而非另立一個魔術常數：後端最壞情況就是自己 sleep 完
+    # 那麼久，超過即視為卡住。逾時不算失敗、也不往下 fallback（那會讓同一則通知彈兩次），
+    # 而且因為外層是 daemon，逾時後行程結束一樣不會被吊住。
+    t = threading.Thread(target=_deliver, args=(title, message, duration), daemon=True)
+    t.start()
+    t.join(timeout=duration)
+
+
+def _deliver(title: str, message: str, duration: int) -> None:
+    # 三層 fallback 鏈（原 notify() 本體，R84 原封搬入）。呼叫端一律走 notify()：
+    # 直接呼叫本函式會跳過 enabled 守門**與** daemon 化，兩個保護一起失效。
     if _try_plyer(title, message, duration):
         return
     if is_macos() and _try_osascript(title, message):

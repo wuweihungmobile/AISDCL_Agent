@@ -174,7 +174,7 @@ class TestTheTableIsProducedByTheRuleNotByHand(unittest.TestCase):
                 readings = Q.axes_of(st, NOW, P)
                 cap = min(cap_num(r.cap) for r in readings)
                 base = min(Q._base_rec(r.band, P) for r in readings)
-                rec = Q._bound(Q._clamp(int(base * Q._pace_of(readings)), P),
+                rec = Q._bound(Q._clamp(int(base * Q._pace_of(readings, P)), P),
                                None if cap == _INF else int(cap))
                 self.assertEqual(cap, cap_num(want_cap), f"{label}: cap")
                 self.assertEqual(rec, want_rec, f"{label}: rec")
@@ -350,13 +350,64 @@ class TestM1bAccelerationSurvivesAggregation(unittest.TestCase):
                         self.assertLessEqual(
                             float(d.recommended_fanout), cap_num(d.cap))
 
-    def test_an_axis_with_no_horizon_blocks_acceleration(self) -> None:
-        """fail-closed：任一軸不知道何時 reset ⇒ pace 夾在 1.0，不得加速。"""
-        with_none = Q.decide(
-            state(("session", 0, 5), ("spend", 0, None)), NOW, P)
+    def test_an_axis_with_no_horizon_but_a_real_cap_blocks_acceleration(self) -> None:
+        """fail-closed 那一半**原封不動**：期程不明且**真的在煞車**的軸仍一票否決。
+
+        🔴 R84／SA-01 訂正本測試此前的形狀（原版拿 `spend 0%`＝free 帶當否決者，斷言
+        `rec == 8`）。那個斷言把「一個 cap=None、零煞車力的軸有完整否決權」釘成了契約，
+        於是掌舵者錨點①（低水位＋近 reset ⇒ 多派）在 production **任何**水位下都拿不到
+        ×2：live 快取 7 軸有 3 軸 `resets_at=null` 且全是 0% ⇒ 否決永遠成立。
+        現在的不變式是「**不參與 cap 的軸不得參與 pace**」，兩個方向各自被下面兩支釘住。
+        """
+        braking = Q.decide(state(("session", 75, 3), ("spend", 55, None)), NOW, P)
+        self.assertEqual(braking.recommended_fanout, 2, "期程不明的煞車軸必須仍能否決加速")
+        self.assertEqual(braking.cap, 4, "它的 cap 也必須真的在（否則它不是煞車軸）")
+
+    def test_red_dropping_the_conjunct_lets_a_braking_null_axis_be_overtaken(self) -> None:
+        """🔴 合成注入：拿掉 `r.cap is not None` 的**對偶**——把否決整條移除 ⇒ 上一支的
+        情境從 2 變 4 ⇒ fail-closed 那一半有牙齒，不是恆綠。"""
+        readings = Q.axes_of(state(("session", 75, 3), ("spend", 55, None)), NOW, P)
+        no_veto = max(Q._mult(r.horizon, P) for r in readings)      # ＝拿掉整個 if
+        base = min(Q._base_rec(r.band, P) for r in readings)
+        cap = min(cap_num(r.cap) for r in readings)
+        self.assertEqual(Q._pace_of(readings, P), 1.0)
+        self.assertEqual(no_veto, 2.0)
+        self.assertEqual(Q._bound(Q._clamp(int(base * no_veto), P), int(cap)), 4)
+
+    def test_a_toothless_null_axis_no_longer_vetoes_acceleration(self) -> None:
+        """治本那一半：`cap is None`（free 帶）的無期程軸**不得**否決加速。
+
+        數字是 live 快取的形狀（3 軸 `resets_at=null` 且 0%）：修前 8、修後 16。
+        """
+        with_none = Q.decide(state(("session", 0, 5), ("spend", 0, None)), NOW, P)
         without = Q.decide(state(("session", 0, 5), ("spend", 0, 8640)), NOW, P)
-        self.assertEqual(with_none.recommended_fanout, 8)
-        self.assertEqual(without.recommended_fanout, 16)
+        self.assertEqual(with_none.recommended_fanout, 16, "零煞車力的軸仍在從後門煞車")
+        self.assertEqual(without.recommended_fanout, 16, "對照組：沒有 null 軸時本來就 16")
+
+    def test_red_the_old_any_none_predicate_halves_the_recommendation(self) -> None:
+        """🔴 合成注入：把判準退回舊形態（`any(horizon == NONE)`）⇒ 上一支必紅（8 != 16）。"""
+        readings = Q.axes_of(state(("session", 0, 5), ("spend", 0, None)), NOW, P)
+        fastest = max(Q._mult(r.horizon, P) for r in readings)
+        old_pace = (min(1.0, fastest)
+                    if any(r.horizon == Q.AXIS_NONE for r in readings) else fastest)
+        base = min(Q._base_rec(r.band, P) for r in readings)
+        self.assertEqual(Q._clamp(int(base * old_pace), P), 8)
+        self.assertEqual(Q._clamp(int(base * Q._pace_of(readings, P)), P), 16)
+
+    def test_the_binding_axis_is_never_the_toothless_one(self) -> None:
+        """SA-06：cap 平手時 binding 必須落在**真的在消耗**的軸上，不是零消耗那一軸。
+
+        live 快取實測（修前）`binding=nimbus_quill`＝0%、reset 不明、cap=None：指著一個
+        完全不消耗的軸說它是最緊的一條，正是「裸百分比誤讀」的下一代形態。
+        """
+        d = Q.decide(state(("weekly_all", 35, 5976), ("nimbus_quill", 0, None),
+                           ("spend", 0, None)), NOW, P)
+        self.assertEqual(d.binding.kind, "weekly_all")
+        # 🔴 反向：halt／節流帶的無期程軸**必須**保留原優先權——否則 `reset_branch()` 會從
+        # `escalate`（只有人去提額）翻成 `arm`（排一支等 reset 的工作）＝R59 事故同形。
+        halting = Q.decide(state(("weekly_all", 96, 5976), ("spend", 96, None)), NOW, P)
+        self.assertEqual(halting.binding.kind, "spend")
+        self.assertIsNone(halting.binding.resets_at)
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -491,7 +542,7 @@ def _override_as_multiplicand(pct: float, minutes: float | None,
         return 0
     if Q._base_cap(band, P) is None:
         return None
-    return Q._clamp(int(override * Q._MULTIPLIER[Q.horizon_band(minutes, P)]), P)
+    return Q._clamp(int(override * Q._mult(Q.horizon_band(minutes, P), P)), P)
 
 
 def rec_over_cap_problems(cap_fn, rec_fn) -> list[str]:
@@ -552,7 +603,7 @@ class TestM3bImplementationDefects(unittest.TestCase):
         policy, _ = Q.load_policy({"AUTOSDD_QUOTA_FANOUT_CAP": "1"})
         unbounded = lambda pct, m: Q._clamp(  # noqa: E731
             int(Q._base_rec(Q.pct_band(pct, policy), policy)
-                * Q._MULTIPLIER[Q.horizon_band(m, policy)]), policy)
+                * Q._mult(Q.horizon_band(m, policy), policy)), policy)
         problems = rec_over_cap_problems(
             lambda pct, m: Q.axis_cap(pct, m, policy), unbounded)
         self.assertTrue(problems, "rec 超過 cap 卻沒轉紅＝零鑑別力")
@@ -1551,6 +1602,55 @@ class TestM10SingleDecisionEntry(unittest.TestCase):
                 imported.add(node.module.split(".")[0])
         self.assertEqual(imported & banned, set(), f"實得 {sorted(imported)}")
         self.assertNotIn("open(", _MODULE_SRC.replace("path.open(", ""))
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# R84／6b：pace 兩個係數必須可由 `.env` 調，而**方向**必須被機械守
+# ═══════════════════════════════════════════════════════════════════════════
+# 病：三檔乘數此前是模組層寫死的 dict（`_MULTIPLIER = {near: 2.0, …}`），而掌舵者訴求 6b
+# 逐字要求「係數必須可由 env 參數化」——寫死的字面結構上不可能被參數化。
+# 這一節同時守住開放之後**新長出來的**危害：兩個鍵各自合法（值域檢查看得到），但
+# 「near < far」這種**關係**錯誤只有跨鍵判準看得到，而它會讓「近 reset 加速」變成減速。
+class TestR84ThePaceCoefficientsAreTunableAndDirectional(unittest.TestCase):
+    def test_the_two_knobs_are_declared_and_reach_the_policy(self) -> None:
+        """`.env` 兩個鍵 → `Policy` 欄位 → 真的改變 rec（三段都要接上）。"""
+        names = [s.name for s in Q.ENV_SPEC]
+        self.assertIn("AUTOSDD_QUOTA_PACE_NEAR", names)
+        self.assertIn("AUTOSDD_QUOTA_PACE_FAR", names)
+        policy, problems = Q.load_policy({"AUTOSDD_QUOTA_PACE_NEAR": "4"})
+        self.assertEqual(problems, [])
+        self.assertEqual(policy.pace_near, 4.0)
+        # 0%＋5 分鐘後 reset：預設 ×2 ⇒ 16（撞 max_fanout）；把 max_fanout 一起放大才看得到 ×4
+        loose, _ = Q.load_policy({"AUTOSDD_QUOTA_PACE_NEAR": "4",
+                                  "AUTOSDD_QUOTA_MAX_FANOUT": "64"})
+        self.assertEqual(Q.decide(state(("session", 0, 5)), NOW, loose).recommended_fanout, 32)
+        self.assertEqual(Q.decide(state(("session", 0, 5)), NOW, P).recommended_fanout, 16)
+
+    def test_a_reversed_direction_is_reported_not_silently_applied(self) -> None:
+        """🔴 near<1 或 far>1 ＝「近 reset 就減速」⇒ 必須進 problems 並整組退回預設。"""
+        for env in ({"AUTOSDD_QUOTA_PACE_NEAR": "0.5"}, {"AUTOSDD_QUOTA_PACE_FAR": "2"}):
+            with self.subTest(env=env):
+                policy, problems = Q.load_policy(env)
+                self.assertTrue(problems, f"{env} 被靜默接受＝方向鎖恆綠")
+                self.assertEqual(policy, Q.DEFAULT_POLICY)
+
+    def test_red_removing_the_direction_check_makes_the_reversal_silent(self) -> None:
+        """🔴 合成注入：直接構造反向 `Policy`（繞過 env 值域）⇒ 方向判準必須自己抓到。
+
+        沒有這一支，上一支可能只是被 `ENV_SPEC` 的 lo／hi 擋掉——那守不到程式內構造。
+        """
+        reversed_policy = Q.Policy(pace_near=0.5, pace_far=2.0)
+        problems = Q.policy_monotonicity_problems(reversed_policy)
+        self.assertTrue([p for p in problems if "[方向]" in p], f"實得 {problems}")
+        self.assertEqual([p for p in Q.policy_monotonicity_problems(P) if "[方向]" in p], [])
+
+    def test_the_multiplier_has_exactly_one_home(self) -> None:
+        """乘數不得再有模組層寫死的第二個家（同 repo 判過的「同一份知識兩個家」）。"""
+        self.assertFalse(hasattr(Q, "_MULTIPLIER"), "舊的寫死 dict 又長回來了")
+        self.assertEqual(Q._mult(Q.AXIS_NEAR, P), P.pace_near)
+        self.assertEqual(Q._mult(Q.AXIS_FAR, P), P.pace_far)
+        self.assertEqual(Q._mult(Q.AXIS_NONE, P), P.pace_far)
+        self.assertEqual(Q._mult(Q.AXIS_MID, P), 1.0)
 
 
 if __name__ == "__main__":

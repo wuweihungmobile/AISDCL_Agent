@@ -174,6 +174,35 @@ TIER_WARN_MARGIN = 6
 # 現值一律現查 `python tools/check_loc_budget.py --json` 的 `special_warn_band`。
 SPECIAL_WARN_MARGIN = 5
 
+# 🔴 R84（ARCH-05）：`SPECIAL_FILES` raw-line 棘輪的**下界**咬人判準（阻塞）。
+# 缺陷本體：這批門檻自陳「＝納管當下實際行數，只准往下改」，買到的東西是「再往裡塞就
+# 會紅」——而 R84 逐鍵實測發現有列的門檻**遠高於現值**（`../.claude/hooks/
+# context_budget_guard.py` cap 1451 / raw 1089 ⇒ 陳舊餘裕 **362 行**），也就是那 362 行
+# 可以無聲地長回去而**沒有任何訊號**。上界（`SPECIAL_WARN_MARGIN`）與破線段都看不到這一側：
+# 它們量的是「快滿了」，這一格量的是「門檻自己過期了」。
+#
+# 體例照 repo 既有的同型判例（`tools/tests/test_adr_xplat001_c1c2_lock.py` 的
+# `_GUARD_LINE_STALE_SLACK` 雙邊帶，該檔逐字寫：「單邊棘輪只會腐化，縮下來卻不重釘的話，
+# 餘裕就是日後無聲加回去的破口」）——那一族是淨行數、這一族是 raw line，兩個度量面，
+# 故另立常數而不共用數字。
+#
+# 為什麼是 32（三個邊界各自可查，故這個數字不是載重件）：
+#   ① **下界**：必須 > `SPECIAL_WARN_MARGIN`(5)，否則「快滿了」與「太鬆了」兩個帶相鄰／
+#      重疊 ⇒ 每一列永遠落在其中一帶，常駐全亮的燈等於沒有燈。更硬的一條：
+#      `tools/tests/test_check_defect_log_crossref.py::TestActionableMessagesHaveLocHeadroom`
+#      要求「訊息教人加一筆的那些檔」餘裕 **≥ 5**（`_MIN_DIRECTIVE_HEADROOM`）⇒ K ≤ 5 會
+#      讓那道鎖與本判準**互相矛盾而無法同時滿足**（實測那兩支現值 22／6，皆落在 5..32 內）。
+#   ② **上界**：本輪實測，受本判準管的 7 列裡「例行縮小」那一群的陳舊餘裕是
+#      1／2／6／18／22／25，真正陳舊的那一列是 **362**——兩群之間差一個量級（362 ≈ 11×32），
+#      門檻落在空隙上而不是密集區 ⇒ 32 上下浮動不會改變任何一列的判定，不會製造邊界抖動。
+#   ③ **方向鎖**：只准調小（收緊），由鎖檔 `assertLessEqual` 釘住；調大＝把「預先發放的
+#      成長額度」再發回去，那正是本判準的立案理由。
+# **為什麼是阻塞而不是預警**：這一族已經有一個非阻塞預警帶（上界那個），而 R84 之所以要
+# 建這道鎖，就是因為「有訊號但沒人動作」在這一族已經是實況（那 362 行陳舊餘裕存在多輪、
+# 每次 `--json` 都印得出來卻沒有任何東西會紅）。修法是**重釘為現值**（一行 diff），
+# 不是調高——所以它擋得起。
+SPECIAL_STALE_SLACK = 32
+
 # ADR-SD08-001 §3.1：CLAUDE.md 文件治理（≤ 400 行強制）
 # SPECIAL_FILES 採 raw line count（wc -l 等價，含空行/註解，因 CLAUDE.md 為 Markdown）
 SPECIAL_FILES: dict[str, int] = {
@@ -215,7 +244,12 @@ SPECIAL_FILES: dict[str, int] = {
     # 🔴 R81 收尾包**下釘**：額度撞線判讀整個主題已搬進 `tools/lib/quota_limits.py`，
     # 該檔實測降到 1,451 ⇒ 依本表「合法縮小後必須同步下修」的紀律把門檻跟著往下走。
     # 不下修的話那 183 行餘裕就是日後無聲加回去的破口（零餘裕是本棘輪的設計，不是意外）。
-    "../.claude/hooks/context_budget_guard.py": 1451,
+    # 🔴 R84（ARCH-05）**再下釘 1451 → 1089**（當回合實測 raw＝1089，直接填入、零加減推算）：
+    # 上一行自己寫著「餘裕就是日後無聲加回去的破口」，而 R81~R83 之間該檔又縮了 362 行、
+    # 門檻沒有跟著走 ⇒ 那句話在同一份檔案裡被自己違反了三輪，因為**沒有任何東西在量它**。
+    # 本輪同時補上量測者（`SPECIAL_STALE_SLACK` ＋ `special_stale_reports()`，阻塞），
+    # 所以這次的下釘不是靠下一個人記得。
+    "../.claude/hooks/context_budget_guard.py": 1089,
 }
 
 #: 上面那批根層 tools/ 棘輪的共同違規理由（`_SPECIAL_REASONS` 逐檔複寫一份就是複本型缺陷）。
@@ -285,9 +319,67 @@ ROOT_TOOLS_ROOT = PROJECT_ROOT.parent / "tools"
 #: 行拆開是另一件事，本輪未做。
 ROOT_GUARD_ROOTS: tuple[Path, ...] = (
     ROOT_TOOLS_ROOT, PROJECT_ROOT.parent / ".claude" / "hooks")
+#: 🔴 R84（ARCH-04）：`guardrail_lib` 把 `tools/lib/` **整層**當成同一種東西，而那一層裡
+#: 有兩種形狀：**leaf helper**（只被人叫、自己幾乎不叫別人）與 **hub**（把同族的 leaf 組起來
+#: 對外只露一個決策面）。R84 實測 `tools/lib/quota_gate.py` ＝ `count_loc` **400／budget 400
+#: ／餘裕 0**，而它 fan-out 到 **5 支**同層 lib（`quota_ledger`／`quota_limits`／`quota_meter`
+#: ／`quota_policy`／`schedule_backend`），對外 production 消費者只有 1 支
+#: （`.claude/hooks/context_budget_guard.py`）⇒ 這是**分類錯誤**，不是「該檔太胖」：
+#: 一支組合 5 個下游的合成面，天生比 leaf helper 需要更多接線行，而
+#: `guardrail_lib=400` 的立案理由逐字寫的是「一支超過 400 行的**共用模組**按定義已不只
+#: 做一件事」——那句話對 leaf 成立，對合成面不成立（它做的**就是**「把 5 件事接起來」）。
+#:
+#: 三個判準，逐條寫下理由（免得下一輪把它讀成「開了一個誰都能進的後門」）：
+#:   · **預算不發明新數字，且刻意取 `service`(500) 而不是 `ABSOLUTE_LIMIT`(750)**：
+#:     hub 的語意就是 ADR-SD07-001 `service` tier（「把下游組起來的協調面」），直接**引用**
+#:     那一格的值而非複寫字面，改 SSOT 會同步跟著動。取 750 的話 `guardrail_hub` 與
+#:     `guardrail_cli` 逐字同值 ⇒ **一個等於絕對紅線的 tier 不是 tier**，等於只剩絕對紅線
+#:     在守；本輪刻意選最小的放寬幅度（+100 行），真的還不夠時的下一步是既有的合法出口
+#:     （拆職責／抽共用模組，不可壓縮才具名進 `SPECIAL_FILES` 的 raw-line 棘輪），不是再調高本格。
+#:   · **patterns 只收明文列舉的單檔，不得用寬 glob**：`tools/lib/*_gate.py` 這種寫法會讓
+#:     下一支取同樣名字的檔自動繼承 +100 行，而那正是「後門」的形狀。
+#:   · **代價：成員清單只准縮不准長，且每一支成員都要能被機械驗證是 hub**。
+#:     `ROOT_TOOLS_HUB_MEMBER_CAP`（成員數上界，只准調小）＋
+#:     `ROOT_TOOLS_HUB_MIN_FANOUT`（fan-out 下界）＋逐支 `override_reason`
+#:     由 `AutoClaude/tests/tools/test_check_loc_budget_hub_tier_and_special_stale.py` 釘住：
+#:     成員數變多、成員不存在、成員 fan-out 不足、預算不是既有數字、pattern 出現 glob，
+#:     任一項即紅。**「是不是 hub」由 AST 現查 fan-out 決定，不是靠自稱。**
+#:
+#: 🔴 誠實劃界（R84 現查，免得下一輪誤以為本格解了整層的問題）：同族 `skip_*` 六支裡
+#: **沒有一支**符合本格判準——`skip_group_policy.py` 實測 399／400（餘裕 1）但 fan-out 只有
+#: **1**（`skip_tag_policy`），它是被 3 個消費者叫的政策 leaf，不是合成面；該族真正的 hub 是
+#: `windows_skip_tags.py`（fan-out 4，實測 356／400 餘裕 44，**不需要**本格的放寬，故刻意
+#: 不收進成員清單——收一支不需要的進來只會稀釋這個 tier 的語意）。⇒ `skip_group_policy`
+#: 貼牆這件事**本格沒有解**，它的正解仍是既有那條路（六支收斂成三支），見缺陷帳本 ARCH-09。
+ROOT_TOOLS_HUB_TIER = "guardrail_hub"
+#: 成員數**上界**（只准調小）。今天 1 支：`quota_gate.py`。要加第二支＝先改這個數字，
+#: 那一行 diff 就是「有人在放寬單檔上限」的可見痕跡（同 `SPECIAL_FILES` 的解鎖紀律：
+#: 先拆職責／抽共用模組，確認不可壓縮後才具名調整並在缺陷帳本寫理由）。
+ROOT_TOOLS_HUB_MEMBER_CAP = 1
+#: fan-out 下界：至少 import 這麼多支**同層** `tools/lib/*.py` 才算 hub。取 3 的理由是
+#: 判別力：`tools/lib/` 現況逐支 AST 實查，fan-out ≥3 的只有 `quota_gate`(5) 與
+#: `windows_skip_tags`(4)，而 leaf 族全部是 0~1 ⇒ 門檻落在兩個族群之間的空隙上，
+#: 不是落在密集區（改成 2 會把 leaf 族的上緣掃進來，改成 5 則只剩今天這一支＝寫死現況）。
+ROOT_TOOLS_HUB_MIN_FANOUT = 3
 ROOT_TOOLS_TIERS: dict[str, dict] = {
+    # 順序敏感：hub 的單檔 pattern 必須排在 `tools/lib/` 目錄 pattern 之前。
+    ROOT_TOOLS_HUB_TIER: {
+        "budget": LOC_TIERS["service"]["budget"],
+        "patterns": ["tools/lib/quota_gate.py"],
+    },
     "guardrail_lib": {"budget": 400, "patterns": ["tools/lib/"]},
     "guardrail_cli": {"budget": ABSOLUTE_LIMIT, "patterns": ["tools/", ".claude/hooks/"]},
+}
+#: 逐 tier 的違規理由（未列者沿用下方 `root_tools_reports()` 的通用字串）。hub 那一格的
+#: 理由刻意寫成「本格是分類修正、不是額度」，因為看到紅字最省事的做法就是把自己加進
+#: 成員清單——訊息必須先擋住那個出口。
+_ROOT_TOOLS_TIER_REASONS: dict[str, str] = {
+    ROOT_TOOLS_HUB_TIER: (
+        "R84／ARCH-04 guardrail_hub：本 tier 是**分類修正**（合成面 ≠ leaf helper），"
+        "不是可申請的額度。破線後不是把自己加進成員清單、也不是調高本格——"
+        "先拆職責／抽共用模組（先例：tools/lib/ci_liveness.py），"
+        "確認為不可壓縮的真實接線後才具名加進 SPECIAL_FILES 的 raw-line 棘輪並在缺陷帳本寫理由"
+    ),
 }
 #: 不納管的子目錄（相對 `tools/`）——理由見上方第二條判準。
 ROOT_TOOLS_EXCLUDED_DIRS: frozenset[str] = frozenset({"tests"})
@@ -373,6 +465,31 @@ def check_special_files() -> list[FileReport]:
     `special_file_reports()` ＋ `warn_band()` 取得，兩者共用同一次掃描。
     """
     return [r for r in special_file_reports() if r.over_by > 0]
+
+
+def special_stale_reports() -> list[FileReport]:
+    """門檻**明顯高於現值**的 raw-line 棘輪列（＝預先發放的成長額度，R84／ARCH-05）。
+
+    射程刻意只有「有登記棘輪理由」的那些列（`_SPECIAL_REASONS`），**不含**
+    `CLAUDE.md`／`docs/**` 那三列——後者是**政策預算**（ADR-SD08-001 文件治理、
+    SD_09 Pre-W0 audit P0-06 的長文件預算），語意是「這份文件最多可以長到 N 行」，
+    留餘裕正是它的設計；`sprint_history.md` 更是滾動窗口文件（設計上就要被 append）。
+    把政策預算重釘成現值會與 ADR-SD08-001 的滾動窗口設計直接對撞，且下一次 sprint
+    收錄就必紅——那不是治本，是把一道對的閘門改成錯的。
+    判準取「provenance」而非路徑前綴：新加的棘輪列只要照體例寫上 `_SPECIAL_REASONS`
+    就自動被本判準覆蓋；反過來，想靠「不寫理由」逃出射程的話，豁免列數會超過鎖檔
+    釘住的上界而轉紅。
+    """
+    return sorted(
+        (
+            r
+            for r in special_file_reports()
+            if r.rel_path in _SPECIAL_REASONS
+            and r.over_by == 0
+            and r.budget - r.loc > SPECIAL_STALE_SLACK
+        ),
+        key=lambda r: (-(r.budget - r.loc), r.rel_path),
+    )
 
 
 def collect_total_loc(root: Path) -> int:
@@ -475,11 +592,12 @@ def root_tools_reports() -> list[FileReport]:
                 tier=tier_name,
                 budget=budget,
                 over_by=max(0, loc - budget),
-                override_reason=(
+                override_reason=_ROOT_TOOLS_TIER_REASONS.get(
+                    tier_name,
                     "R75 根層護欄層 LOC 分級：先拆職責／抽共用模組"
                     "（先例：tools/lib/ci_liveness.py），確認為不可壓縮的真實功能後，"
                     "才把該檔具名加進 check_loc_budget.SPECIAL_FILES 的 raw-line 棘輪"
-                    "並在缺陷帳本寫明理由"
+                    "並在缺陷帳本寫明理由",
                 ),
             )
         )
@@ -541,6 +659,8 @@ def check(update_baseline: bool = False, as_json: bool = False) -> int:
     # 那道鎖解包 ValueError；重掃的成本是幾十次 `count_loc`，換掉一次打紅既有鎖。
     special_warn = warn_band(special_file_reports(), SPECIAL_WARN_MARGIN)
     root_tools_warn = warn_band(root_tools_reports(), TIER_WARN_MARGIN)
+    # R84（ARCH-05）：棘輪門檻自己過期的那一側。**阻塞**（見 SPECIAL_STALE_SLACK 的 WHY）。
+    special_stale = special_stale_reports()
 
     total = sum(r.loc for r in reports)
     baseline = read_baseline()
@@ -586,6 +706,12 @@ def check(update_baseline: bool = False, as_json: bool = False) -> int:
             "special_warn_band": [
                 {**r.__dict__, "headroom": r.budget - r.loc} for r in special_warn
             ],
+            # R84（ARCH-05）：棘輪門檻過期側亦須機讀——`sync_onboarding_baselines` 這類
+            # 以 `--json` 取證的自動化只看 JSON，只印文字等於對它們不存在。
+            "special_stale_slack": SPECIAL_STALE_SLACK,
+            "special_stale": [
+                {**r.__dict__, "headroom": r.budget - r.loc} for r in special_stale
+            ],
             # R75：根層護欄層獨立一欄（不併進 tier_violations——兩者度量面不同：那邊是
             # `autoclaude/`＋baseline cap，這邊是跨子專案護欄層、無 cap）。
             "root_tools_violations": [r.__dict__ for r in root_tools_violations],
@@ -604,6 +730,7 @@ def check(update_baseline: bool = False, as_json: bool = False) -> int:
             len(absolute_violations)
             + len(tier_violations)
             + len(special_violations)
+            + len(special_stale)
             + len(root_tools_violations)
             + (1 if total_violation else 0)
         )
@@ -612,6 +739,7 @@ def check(update_baseline: bool = False, as_json: bool = False) -> int:
             f"cap={cap} violations={violations_count} "
             f"(absolute={len(absolute_violations)} tier={len(tier_violations)} "
             f"special={len(special_violations)} "
+            f"special_stale={len(special_stale)} "
             f"root_tools={len(root_tools_violations)} "
             f"total={'1' if total_violation else '0'})"
         )
@@ -667,6 +795,25 @@ def check(update_baseline: bool = False, as_json: bool = False) -> int:
                     f"  [{r.tier}<={r.budget}] {r.rel_path}: {r.loc} > {r.budget} "
                     f"(+{r.over_by}) — {r.override_reason}"
                 )
+        if special_stale:
+            print(
+                f"\n[SPECIAL-STALE] {len(special_stale)} 支 SPECIAL_FILES raw-line 棘輪的"
+                f"**門檻自己過期了**（陳舊餘裕 > {SPECIAL_STALE_SLACK} 行；阻塞）："
+            )
+            for r in special_stale:
+                print(
+                    f"  [{r.tier}<={r.budget}] {r.rel_path}: 現值 {r.loc} "
+                    f"⇒ 陳舊餘裕 {r.budget - r.loc} 行"
+                )
+            print(
+                "       這批門檻的語意是「＝納管當下實際行數，只准往下改」，買到的東西是"
+                "「再往裡塞就會紅」。"
+                "\n       門檻高於現值 ⇒ 那段差額可以無聲地長回去，該保證今天不成立。"
+                "\n       修法＝**把上面每一支的門檻重釘為現值**（一行 diff；"
+                "合法縮小後必須同步下修，這是本棘輪的維護紀律，不是新規定）。"
+                "\n       🔴 反向出口已封：不得改大 SPECIAL_STALE_SLACK 來讓紅字消失"
+                "（那等於把預先發放的成長額度再發回去，鎖檔的方向鎖只准調小）。"
+            )
         if special_warn:
             print(
                 f"\n[SPECIAL-WARN] {len(special_warn)} 支 SPECIAL_FILES raw-line 棘輪"
@@ -696,11 +843,11 @@ def check(update_baseline: bool = False, as_json: bool = False) -> int:
                 "具名加進 SPECIAL_FILES 的 raw-line 棘輪並在缺陷帳本寫明理由。"
             )
         if root_tools_violations:
-            print(
-                "\n[ROOT-TOOLS] monorepo 根層 tools/ 分級違規（R75；"
-                f"guardrail_lib<={ROOT_TOOLS_TIERS['guardrail_lib']['budget']} / "
-                f"guardrail_cli<={ROOT_TOOLS_TIERS['guardrail_cli']['budget']}）："
-            )
+            # R84：分級清單改由 `ROOT_TOOLS_TIERS` 現查（原本逐格寫死兩個 tier 名，新增
+            # `guardrail_hub` 之後那份複本就會靜默漏報一格——同一份知識兩個家的最小實例）。
+            _tier_list = " / ".join(
+                f"{k}<={v['budget']}" for k, v in ROOT_TOOLS_TIERS.items())
+            print(f"\n[ROOT-TOOLS] monorepo 根層 tools/ 分級違規（R75；{_tier_list}）：")
             for r in root_tools_violations:
                 print(
                     f"  [{r.tier}<={r.budget}] {r.rel_path}: {r.loc} > {r.budget} "
@@ -711,6 +858,9 @@ def check(update_baseline: bool = False, as_json: bool = False) -> int:
         bool(absolute_violations)
         or bool(tier_violations)
         or bool(special_violations)
+        # R84（ARCH-05）：門檻過期側與破線側**同級阻塞**——理由見 SPECIAL_STALE_SLACK 那段
+        # 的「為什麼是阻塞而不是預警」（這一族已經有非阻塞訊號，而它多輪未被行動）。
+        or bool(special_stale)
         or bool(root_tools_violations)
         or total_violation
     )

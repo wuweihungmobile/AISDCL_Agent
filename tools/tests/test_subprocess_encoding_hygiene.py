@@ -280,14 +280,27 @@ def scan_files(files: list[Path], repo_root: Path) -> tuple[list[str], list[str]
 #   - 該 `.py` 必須帶 UTF-8 stdio 保護，三種形態皆算（缺任一種都會誤判：
 #     `import _stdio_utf8`（根 tools/ 慣例）／`init_utf8_streams`
 #     （`AutoClaude/tools/hooks/*` 走 `from platform_utils import …` 的形態）／
-#     就地 `.reconfigure(encoding=`（AutoClaude/tools/ 與 .claude/hooks/ 慣例））。
+#     就地 `.reconfigure(encoding=`（AutoClaude/tools/ 與 .claude/hooks/ 慣例）／
+#     `force_utf8_stdio(`（`AISDLC_SDD/scripts/` 島的委派入口，住
+#     `rfc_lifecycle_lint.py`——該島因跨子專案 import 隔離搆不到根層
+#     `tools/_stdio_utf8.py`，故島內自留唯一一份實作））。
+#
+# 🔴 R84：第四種形態是**委派**而非新實作，與第二種（`init_utf8_streams`）同型——
+# 不加它，`test_platform_utils_dedup` 的 per-tree shrink-only 棘輪（島內行內複本
+# 只准變少）與本判準會互相抵觸：要收斂就必然要有人改成呼叫委派，而委派名不被認得
+# 就當場被本判準判成「無保護」。兩鎖同時成立的唯一形狀就是讓本表認得委派名。
+# 這不是放寬——被認的仍必須是**真的會 reconfigure** 的呼叫（未 import 即 NameError，
+# 失敗是響的），與第二種形態的強度逐字相同。
 #
 # 刻意的 heuristic 邊界（都是「不追」而非「放行」，且以下限釘選防靜默縮面）：
 #   - `-m pytest` / `-c <code>` 這類旗標形態不追：child 不是 repo 內某支 .py；
 #   - 路徑靜態解析不出來（函式參數、tempfile 產生的探針）不追；
 #   - 不看 parent 有沒有 `text=True`：child 對 stdout 的預設 errors 是 strict，
 #     parent 收 bytes 也一樣會撞上 child 端崩潰，所以要求與 parent 模式無關。
-_PROTECTION_MARKS = ("import _stdio_utf8", "init_utf8_streams", ".reconfigure(encoding=")
+_PROTECTION_MARKS = (
+    "import _stdio_utf8", "init_utf8_streams", ".reconfigure(encoding=",
+    "force_utf8_stdio(",
+)
 _CHILD_OK_MARKER = "child-encoding-ok:"
 
 #: 靜態路徑解析的跳數上限（`str(_HOOK)` → `_HOOK` → `_REPO_ROOT / …` →

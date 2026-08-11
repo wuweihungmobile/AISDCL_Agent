@@ -7,7 +7,7 @@ agent:
   id: "devops-engineer"
   title: "DevOps Engineer"
   icon: "🚀"
-  version: "v0.18"
+  version: "see FRAMEWORK_STATUS.md（框架 LATEST；本欄刻意不寫版號——寫死即過期）"
   whenToUse: "用於 CI/CD pipeline 設計、容器化、Infrastructure as Code、部署自動化、監控設置、以及 DevOps 流程優化"
   customization: null
 

@@ -307,15 +307,24 @@ function Set-MultipleInstancesStopExisting {
   }
 }
 
+# 🔴 `-WindowStyle Hidden` 是**第二層**（R84 訴求 7／B1-B2）：`powershell.exe` 是 console
+# 子系統程式，schtasks 起它時若該 session 有互動桌面就會**畫出一個視窗**。第一層是
+# LogonType=S4U（無互動桌面 ⇒ 本來就看不到），但那一層已經被實測證明會漂——
+# `tools/scheduled_task_expectations.json` 的 `_why` 逐字記載 smoke 任務的 LogonType
+# 曾漂成 `InteractiveToken` **連三輪**，而漂掉的那三輪正是使用者會看到彈窗的那三輪。
+# 兩層獨立：S4U 掉了還有 Hidden，Hidden 沒吃到還有 S4U。旗標只影響視窗、不影響 rc 與
+# stdout（Nightly 靠重導向到 log 檔取證，不靠視窗）。
+# 🔴 誠實劃界：本輪**沒有 Windows 真機**，只做到「已寫入且 `[Parser]::ParseFile` 語法
+# 檢查通過」，未驗證彈窗真的消失。
 $action = New-ScheduledTaskAction -Execute 'powershell.exe' `
-  -Argument "-NoProfile -ExecutionPolicy Bypass -File `"${NightlyPs1}`""
+  -Argument "-NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass -File `"${NightlyPs1}`""
 $trigger = New-ScheduledTaskTrigger -Daily -At $NightlyAt
 # smoke 任務：同款原生 powershell.exe 呼叫慣例。🔴 載具必須是原生 PowerShell——
 # windows_smoke_local.ps1 自 R59（DEF-101-511）起偵測到 $env:MSYSTEM 即 exit 1 拒跑，
 # 因為經 Git Bash 呼叫會在非 ASCII 路徑情境產生假紅（實測 PASS=11 FAIL=2 vs 原生
 # PASS=12 FAIL=0）。schtasks 直接起 powershell.exe，不經任何 msys 層，符合該要求。
 $smokeAction = New-ScheduledTaskAction -Execute 'powershell.exe' `
-  -Argument "-NoProfile -ExecutionPolicy Bypass -File `"${SmokePs1}`""
+  -Argument "-NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass -File `"${SmokePs1}`""
 $smokeTrigger = New-ScheduledTaskTrigger -Daily -At $SmokeAt
 # 補跑保護設定直接內建於建立時（語意對齊 AutoClaude/tools/fix_nightly_catchup.ps1
 # 的目標終態，省去新機器安裝後還要再手動跑一次 fix 腳本）：

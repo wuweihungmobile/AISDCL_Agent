@@ -9,7 +9,6 @@ playbook_id 設計：
 """
 from __future__ import annotations
 
-import hashlib
 from datetime import datetime
 from typing import Any
 
@@ -29,14 +28,12 @@ except ImportError:
     from .pg_async_utils import _run_async  # type: ignore[import]
 
 
-def _canonical_id(playbook: Playbook) -> str:
-    """sha256(canonical_yaml(playbook))[:16]，內容尋址避免重命名導致 checkpoint 遺失。"""
-    canonical = yaml.safe_dump(
-        playbook.model_dump(exclude_none=True), sort_keys=True, allow_unicode=True,
-    )
-    return hashlib.sha256(canonical.encode("utf-8")).hexdigest()[:16]
-
-
+# 🔴 R84（C4 / LOC 治本）：此處原有一個 module-private `_canonical_id(playbook)`，
+# docstring 寫「內容尋址避免重命名導致 checkpoint 遺失」——實查全庫（autoclaude/ ∪ tests/
+# ∪ tools/ ∪ docs/）對該名稱**零引用**，本檔自己也沒用它（真正在用的是下方 `save()` 內
+# 那段 `yaml.safe_dump`）。等量減法：連同只為它而 import 的 `hashlib` 一併移除。
+# 要恢復內容尋址請連同**呼叫點**一起加回來——只留一個沒有消費者的函式，會讓下一個人
+# 以為這件事已經有人做了。
 class PgPlaybookRepository:
     """PostgreSQL backend for IPlaybookRepository（playbook_versions 表）。"""
 

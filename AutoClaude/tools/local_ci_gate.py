@@ -161,6 +161,38 @@ def _pg_reachable(host: str = "localhost", port: int = 5432, timeout: float = 0.
         return sock.connect_ex((host, port)) == 0
 
 
+#: 🔴 R84 包 W5（QA-01）：剎車④ 觸發時**唯一可貼的修法**，逐字寫進理由裡。
+#:
+#: 缺陷本體（QA 當回合實測）：R83 交棒書把「起 PG」列為最便宜的一塊、預期削掉一大批 skip。
+#: 實測削掉 **0 支**——容器 `Up (healthy)`、psycopg2／asyncpg／alembic 全部已裝，缺的只是
+#: 沒有人跑過 `alembic upgrade head`，剎車④ 於是逐字擋下注入。照交棒書做的人拿到的是
+#: 「容器起了、skip 一支沒少」，而下一步該做什麼**沒有任何輸出說得出來**：原訊息只說
+#: 「注入只會把 skip 換成 UndefinedTable」＝解釋了為什麼不注入，沒有給出怎麼讓它能注入。
+#: ⇒ 本常數把「兩步而非一步」這件事變成輸出裡的一個事實（同 `PG_PROFILE_MARKER` 的立案理由）。
+#: 消費端：`pg_autodetect` 的理由字串（本檔）＋ `tests/conftest.py::pytest_terminal_summary`
+#: 的醒目段（它是使用者真的會看到的那一層）。
+PG_UNMIGRATED_HINT = (
+    "修法（兩步，缺第二步時表徵與「完全沒起 PG」幾乎相同）："
+    "① docker compose -f AutoClaude/docker-compose.ci.yml up -d"
+    "　② 在 AutoClaude/ 下跑 python -m alembic upgrade head"
+)
+#: 「這顆 DB 沒被 migrate 過」的兩種表徵：psycopg2 的 `relation \"alembic_version\" does not
+#: exist`（表不存在）與本檔自己那句「alembic_version 是空的」。刻意只認 `alembic_version`
+#: 這個字：連不上／認證失敗／psycopg2 未安裝都**不是**這條修法能治的，貼錯修法比不貼更糟。
+_UNMIGRATED_RE = re.compile(r"alembic_version")
+
+
+#: 剎車④ 的理由字首。**唯一產生者**是 `pg_autodetect`，唯一消費者是
+#: `profile_marker_contradiction`——兩邊共用同一個常數而不是各寫一次字面值，
+#: 否則哪天有人改一句訊息，那道互斥判準會靜默失去鑑別力（本 repo 判過的形態）。
+BRAKE4_REFUSED = "偵測到 PG 但拒絕注入"
+
+
+def pg_repair_hint(why: str) -> str:
+    """純函式：這一句「不能注入」的理由有沒有可貼的修法。有 ⇒ 回那一句；沒有 ⇒ 回空字串。"""
+    return PG_UNMIGRATED_HINT if _UNMIGRATED_RE.search(why or "") else ""
+
+
 def _pg_migrated(dsn: str) -> str | None:
     """`alembic_version` 有列 ⇒ 回 None（可注入）；否則回一句不能注入的理由。"""
     try:
@@ -193,23 +225,54 @@ def pg_autodetect(dsn: str = _PG_DSN) -> tuple[bool, str]:
         return False, "localhost:5432 沒有在聽 ⇒ 不注入（PG 相關測試維持 skip）"
     blocked = _pg_migrated(dsn)
     if blocked is not None:
-        return False, f"偵測到 PG 但拒絕注入（{blocked}）——注入只會把 skip 換成 UndefinedTable"
+        hint = pg_repair_hint(blocked)
+        return False, (f"{BRAKE4_REFUSED}（{blocked}）——注入只會把 skip 換成 UndefinedTable"
+                       + (f"。{hint}" if hint else ""))
     os.environ["AUTOCLAUDE_DB_DSN"] = dsn
     os.environ["AUTOCLAUDE_TEST_PG_DSN"] = dsn
     os.environ.setdefault("AUTOCLAUDE_ALLOW_INSECURE_DB", "1")
     return True, f"已注入 AUTOCLAUDE_DB_DSN／AUTOCLAUDE_TEST_PG_DSN = {dsn}"
 
 
+# 這次跑測試的行程**實際上**有沒有一顆用得動的 PG（自己注入的與使用者顯式設的都算）。
+#
+# 🔴 R79 收輪訂正（保留，因為它推翻的那一版更糟）：剖面此前取自 `pg_autodetect()` 的回傳值
+# （＝「我有沒有注入」），於是「使用者自己 export 過 DSN」那條路上它回 False、剖面判成
+# `nopg`——測試明明跑在有 PG 的條件下，卻拿 `nopg` 的寬鬆上限去比，永遠通過。
+#
+# 🔴 R84 包 W5（QA-02）訂正 R79 那一版**留下的判準**（不是訂正上面那個結論）：R79 把它寫成
+# 「要問的是『DSN 在不在』，不是『它是怎麼來的』」，而那句話是**假的立案理由**——`_pg_reachable`
+# 的原句問的是一個 port 在不在聽（一個關於世界的事實），這裡的 `os.environ.get` 問的卻是
+# 「這個行程裡有沒有人設過這個字串」（一個關於自己的事實）。兩者只是句型像。
+# 代價當回合量得到：`tests/tools/test_local_ci_gate.py` 那支守「只在 migrate 過才注入」的測試
+# 讓生產碼把真 DSN 寫進真 env 且沒登記還原點 ⇒ 汙染活到 `pytest_terminal_summary`，於是
+# 同一份 log 裡第 117 行寫著 `IN-EFFECT=1`、第 118 行寫著「拒絕注入」，兩行直接互斥，
+# 而 census 形狀（untagged=97＝DSN 缺席的形狀）站在第 118 行那一邊。
+# ⇒ 判準改成問**真實生效性**：DSN 在、而且那顆 DB 真的用得動（`_pg_migrated` 回 None）。
+# 這個方向不是放寬：DSN 設了卻用不動時，PG 那一族本來就會 skip，census 形狀就是 `nopg`，
+# 拿 `nopg` 的上限去比才是**對的歸屬**；反過來（用得動卻標 nopg）才是失去鑑別力。
+# 誠實劃界：`_pg_migrated` 沒裝 psycopg2 時一律回「未安裝」⇒ 本函式回 False，即使某些
+# 純 asyncpg 的測試其實跑得動。那是**偏保守**的一向，且與剎車④ 用同一個判準（同一份知識
+# 只有一個家）；要改就得先讓兩邊一起改。成本：每次 summary 多一次連線（實測毫秒級、一次）。
 def pg_dsn_in_effect() -> bool:
-    """這次跑測試的行程**實際上**有沒有 PG DSN（自己注入的與使用者顯式設的都算）。
+    return any(dsn and _pg_migrated(dsn) is None
+               for dsn in (os.environ.get(k) for k in _PG_ENV_KEYS))
 
-    🔴 R79 收輪訂正：剖面此前取自 `pg_autodetect()` 的回傳值（＝「我有沒有注入」），
-    於是「使用者自己 export 過 DSN」那條路上 `pg_autodetect` 回 False、剖面判成 `nopg`
-    ——測試明明跑在有 PG 的條件下（44 支 skip），卻拿 `nopg` 的 118 上限去比，永遠通過。
-    那不是紅，是**沒有鑑別力**，而且方向是「看起來很健康」。要問的是「DSN 在不在」，
-    不是「它是怎麼來的」（同 `_pg_reachable` 的既有理由）。
-    """
-    return any(os.environ.get(k) for k in _PG_ENV_KEYS)
+
+# 純函式（R84 包 W5／QA-02 的機械物）：剖面標記與 autodetect 理由**互斥**時回一句話。
+#
+# 為什麼這一向非有人守不可：QA 實測到的那份 log 裡，第 117 行是 `IN-EFFECT=1`、第 118 行是
+# 「拒絕注入」——兩件事同時為真在邏輯上不可能（剎車④ 只在「我們要用的那顆 DB 用不動」時
+# 觸發），但當時**沒有任何東西**會因此出聲，於是那份 log 被當成 `+pg` 剖面讀了一整輪。
+# 刻意只判這一個組合：剎車①（使用者顯式設過）之後 in_effect 為真是正常的；剎車②③ 同理；
+# 「沒有在聽」＋in_effect 為真也合法（使用者可能指向一顆遠端 PG）。判寬一點就是製造假紅。
+def profile_marker_contradiction(in_effect: bool, note: str | None) -> str:
+    if in_effect and note and BRAKE4_REFUSED in note:
+        return ("剖面標記與 autodetect 理由互斥：標記說這次跑在有 PG 的條件下"
+                f"（{PG_PROFILE_MARKER}1），理由卻說「{BRAKE4_REFUSED}」。兩者只可能有一個為真"
+                "——多半是有人把 DSN 寫進行程 env 卻沒登記還原點（測試汙染），"
+                "此時 census 的分群天花板會拿錯剖面比對。")
+    return ""
 
 
 def pg_marker_line(in_effect: bool, nested: bool | None = None) -> str:

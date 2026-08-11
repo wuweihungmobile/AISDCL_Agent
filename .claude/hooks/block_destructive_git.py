@@ -147,8 +147,9 @@ pathspec 逃出當前工作樹這條路由 git 自己關掉。本檔因此**不*
 
 誠實劃界（本檔擋不到什麼——寫在這裡，因為讀到這支 hook 的人才是會誤以為它完整的人）
 --------------------------------------------------------------------------------
-· **不經 shell 的路徑**：Python `subprocess.run(["git", "stash"])`、MCP git 工具、
-  用 `Write`／`Edit` 工具直接覆寫檔案或改 `.git/`。本檔只看 shell **指令字串**。
+· **不經 shell 的路徑**：MCP git 工具、`Write`／`Edit` 直接覆寫檔案、以及**寫在 `.py`
+  檔裡**的 `subprocess.run(["git","stash"])`（工具面只看得到 `python foo.py`）。指令字串裡
+  **直接寫出來**的那一種已在射程內（見下方 R84 記錄）；攔不到的改由 `stash_ref_sentinel()` 偵測。
 · **放寬只認「字面寫出來的目錄」**：`cd "$WT" && git checkout -- x` 裡的 `"$WT"` 會被
   `mask_inert()` 抹成空白（本檔看不到殼變數的值）⇒ 推導不出目錄 ⇒ **仍然擋**。
   同理，靠**上一次** Bash 呼叫留下的持久 cwd（主 agent 的殼會保留 `cd`）落在拋棄式
@@ -171,11 +172,21 @@ pathspec 逃出當前工作樹這條路由 git 自己關掉。本檔因此**不*
   （見 `_LINE_CONT_RE`），反引號那一種**刻意沒折**——理由與代價寫在該常數旁邊：
   一起折會把 bash 側 `` X=`git rev-parse HEAD` `` 的下一行併進同一段，而每段只取第一次
   git 呼叫 ⇒ 會把**已驗平台**原本擋得住的形態換成漏擋。Windows 側因此在這一點上有缺口。
-· **heredoc 內容**：`bash <<'EOF' … EOF` 裡的 git 指令**會**執行，但本檔把 heredoc
-  當資料遮掉（因為 `python - <<'PY' … PY` 這種寫探針的正當用法遠遠更常見，不遮就是
-  一整類誤擋）。取的是「寧可漏擋、不要誤擋」那一邊。
-· `git rm`／`git branch -D`／`git push --force`／`git filter-branch`：**不在射程內**。
-  它們毀的不是「未提交的工作樹內容」，另案；把射程一次撐大是誤擋的來源。
+· **heredoc 內容**：R84 起依**擁有者**分流——擁有者＝`<<` 左側**最近的那個非旗標 token**
+  （由右往左找；`ssh host bash <<'EOF'` 的擁有者是 bash）。餵給殼的 body 是可執行結構、
+  照常判；餵給別的直譯器的（`python - <<'PY'`）仍當資料遮掉（那是寫探針的標準寫法，
+  不遮就是一整類誤擋），其中的 Python 層 git 呼叫由 `argv_git_fragments()` 接住。
+  🔴 擁有者**不可用「整行有沒有出現殼的名字」判**：`cd /tmp/sh && python - <<'PY'` 實測
+  會被那種寫法誤擋（SD-06）。
+· **`-c` 載具**（`sh|bash|zsh|ksh|dash|pwsh|powershell -c`／`-Command`／`eval`）的**引號
+  operand** R84 起是獨立平面（SD-01，先前整族漏擋）。仍漏：operand 沒加引號、operand 是
+  變數（`sh -c "$CMD"`），且該平面**一律不套用換樹放寬**（看不到落在哪棵樹 ⇒ fail-closed）。
+· **argv 的執行檔不是字面**：`[GIT,"stash"]`／`["git","-C",wt,"stash"]`／`$(which git) stash`
+  **結構上擋不住**；`sudo`／`env`／`VAR=val` 這類**字面**前綴 R84 起會跳過（SD-08）。
+· `git rm`／`branch -D`／`push --force`／`filter-branch`／**`git apply -R`**：**不在射程內**
+  （前四者毀的不是未提交的工作樹內容；`apply -R` 是把剛套上的 patch 退回去的正當手法而且
+  可逆 ⇒ 擋它是製造誤擋）。R84 起**在**射程內的新成員：`git worktree remove --force`
+  （不帶 `--force` 時 git 自己會因樹是髒的而拒絕）與 `git checkout-index -f`。
 """
 
 from __future__ import annotations
@@ -183,6 +194,7 @@ from __future__ import annotations
 import os
 import re
 import sys
+from pathlib import Path
 from typing import NamedTuple
 
 # payload 讀取住共用層 `tools/lib/platform_utils.py`（R81／SUB-S1-04 的既有紀律，本檔
@@ -290,6 +302,106 @@ _CD_VERBS = frozenset({"cd", "chdir", "pushd", "push-location", "set-location", 
 _RELAX_KILLER_RE = re.compile(
     r"--work-tree|--git-dir|--namespace|\bpopd\b|\bpop-location\b|[(){}`]", re.IGNORECASE)
 
+# ══════════════════════════════════════════════════════════════════════════════
+# 🔴 R84：上面〈誠實劃界〉那兩條缺口的**第一個真實命中**（不是假想，是本輪的事故）
+# ══════════════════════════════════════════════════════════════════════════════
+# 2026-08-12 00:21:13，一個 agent 送出的 Bash 指令裡有一行沒刪掉的草稿殘留：
+#
+#     cd <repo>; .venv/bin/python - <<'PY'
+#     import sys, pathlib, subprocess, tempfile, os
+#     ...
+#     head = subprocess.run(["git","stash"],capture_output=True)  # NO
+#     PY
+#
+# 它清空了 R84 全輪工作樹（**91 檔、+4658/-508**），已用 `git stash apply` 全額還原
+# （`stash@{0}` ＝ `7b7ce22` 留作備份）。`capture_output=True` 把 `Saved working
+# directory…` 吃掉、前面的 print 照常回傳 ⇒ **rc=0、無 stderr、看起來完全正常**；
+# 送出它的 agent 事後誠實自陳「我全程只跑唯讀指令」——**它自己看不見**。
+#
+# 差分實測（對本檔餵真 payload，exit 2＝擋、0＝放行）：原凶逐字 **0**、裸 `git stash` 2、
+# heredoc 內以 `os` 模組的 `system()` 起 `git stash` **0**、無 heredoc 的
+# `subprocess.run(["git","stash"])` **0**、
+# 純 shell `git stash push -u` 2 ⇒ 兩條缺口（heredoc body 被當資料遮掉 ＋ 不經殼的
+# Python 呼叫）**各自單獨就足以放行**，所以只補一條沒有用。
+#
+# 修法刻意**不開第二個家**：不新寫一套子指令判準，而是把「Python 層的 git 呼叫」
+# **正規化成一段 shell 文字**（`argv_git_fragments()`），再餵回既有的 `git_invocations()`
+# ⇒ `_DISPATCH`／`_STASH_SAFE`／`-C` 落腳推導全部原封不動共用。同一份語意只有一個家。
+#
+# 🔴 為什麼要求「引號字面 ＋ 逗號」而不是看到 `git` 就抓：判準的精準度就是這道鎖的命。
+#   · 序列面（`["git","stash"]`）要求**至少一組逗號分隔的引號字面**——殼陣列 `("a" "b")`
+#     沒有逗號、`print("git stash")` 沒有第二個字面，兩者都不會命中。
+#   · 單字串面（`os` 模組的 `system('git stash')`）**必須有具名的呼叫者**（`os` 的
+#     `system`／`popen`、`subprocess.*`／`Popen`）。🔴 這兩個名字在本註解裡刻意
+#     **不寫成帶點的完整形態**：`test_the_hook_spawns_no_subprocess` 對本檔的**程式區**
+#     做子字串掃描（禁用清單見該測試，含 subprocess 的 import 形態、那兩個 os 呼叫、
+#     以及問 git 根目錄的那個旗標），它分不出
+#     「真的呼叫」與「註解裡提到」——寫回帶點形態會當場讓那道鎖轉紅。少了這個錨，
+#     `python -c "print('git clean -fd')"`
+#     會當場變成假紅——那條**本檔既有的放行測試就在守它**（`test_quoted_text_is_not_a_command`）。
+#: Python 層 git 呼叫的兩種形態（掃**未經 `mask_inert()` 的原始字串**——heredoc body 正是
+#: 被遮掉的那一段，遮完再掃就永遠是空的）。
+#: 🔴 R84／SD-02：序列的**最後一個元素可有可無**（`(?:…)?` 那一格）。少了它，**一個尾逗號
+#: 就足以整條漏擋**，而 `black` 的多行格式**預設就會產生尾逗號** ⇒ 原凶只要被格式化成多行
+#: 就自動逃掉。實測逐字：`x=([ "git","stash" ])` → `'git stash'`；多一個逗號 → `''`（exit 0）。
+_ARGV_SEQ_RE = re.compile(
+    r"""[\[(]\s*(?:(['"])[^'"]*\1\s*,\s*)+(?:(['"])[^'"]*\2\s*)?[\])]"""
+    r"""|(?:os\.(?:system|popen)|subprocess\.\w+|Popen)\s*\(\s*(['"])\s*(?:[^\s'"\\/]*[\\/])?git(?:\.exe)?\s[^'"]*\3""")
+_ARGV_LIT_RE = re.compile(r"""(['"])([^'"]*)\1""")
+
+#: 殼的名字只有**一個家**：heredoc 擁有者判定與 `-c` 載具判定都從這裡長出來（R73
+#: `Find-GitBash` 的判例：同一份知識住兩個家、只有一個家會被改）。
+_SHELLS = r"sh|bash|zsh|ksh|dash|pwsh|powershell"
+#: 一個 **token** 是不是殼執行檔（允許路徑前綴與 `.exe`，但整個 token 必須就是它）。
+#: 🔴 R84／SD-06：這裡是 `match` 對**單一 token**，不是 `search` 對整行——後者正是實測到的
+#: 誤擋：`cd /tmp/sh && python - <<'PY' … PY` → BLOCK，同一條去掉 `/tmp/sh` → allow，
+#: 路徑裡一個 `/sh` 就把 python 的 heredoc 判成殼結構。而**誤擋是這道鎖被整個關掉的路徑**。
+_SHELL_EXE_RE = re.compile(rf"^(?:[^\s]*[\\/])?(?:{_SHELLS})(?:\.exe)?$", re.IGNORECASE)
+#: 🔴 R84／SD-01：`-c` 載具＝**另一個獨立的指令平面**。`sh -c '<毀滅性 git>'` 的 operand
+#: 被 `mask_inert()` 當引號資料遮掉 ⇒ 實測 exit 0，而**同一件事**寫成 `bash <<'EOF'` 是
+#: exit 2——一擋一放，只因換了載具。成因與 heredoc 完全同構，故修法也同構：把 operand
+#: 當獨立平面遞迴餵回 `git_invocations()`，**不新開第二套子指令判準**。
+#: `eval "…"` 同族（裸 `eval git stash` 本來就擋得住——`git_invocations()` 掃每個 token 位置）。
+_CARRIER_RE = re.compile(
+    rf"""(?:(?<![-\w.])(?:[^\s'"]*[\\/])?(?:{_SHELLS})(?:\.exe)?(?:\s+-[\w-]+)*\s+-(?:[a-z]*c|command)(?![\w-])"""
+    rf"""|(?<![-\w./])eval)\s+(?P<q>['"])(?P<op>.*?)(?P=q)""", re.IGNORECASE | re.DOTALL)
+#: 🔴 R84／SD-08：argv 序列的**執行檔不一定在第 0 格**（`["sudo","git","stash"]`／
+#: `["env","GIT_DIR=x","git",…]`）⇒ 往後找第一個非前綴 token。誠實劃界：元素是變數
+#: （`[GIT,"stash"]`／`["git","-C",wt,"stash"]`）或 `$(which git) stash` **結構上擋不住**
+#: ——本檔只看得到字面，那一族改由 `stash_ref_sentinel()` 事後偵測。
+_EXEC_PREFIX = frozenset({"sudo", "env", "nice", "time", "timeout", "nohup", "exec", "command"})
+#: 真的會改動 `refs/stash` 的 stash 子指令（`""`＝裸 stash＝push）。`create`／`apply`／
+#: `list`／`show` 一個字節都不動那個 ref ⇒ 不該點亮哨兵的 ack 位元（R84／SD-04）。
+_STASH_REF_WRITERS = frozenset({"", "push", "save", "pop", "drop", "clear"})
+
+
+# 回傳值餵給既有的 `git_invocations()`＝零重寫共用同一份子指令語意。刻意**不**把結果
+# substitute 回原字串：那樣它會落在 heredoc body 內，接著被 `mask_inert()` 整段遮掉
+# （本輪實測過的順序陷阱），而分離成獨立平面就不受遮蔽影響。落腳目錄一律 `None`
+# （看不見 `cwd=` kwarg）⇒ 換樹放寬對這一面不生效，方向是 fail-closed。
+def argv_git_fragments(command: str) -> str:
+    """把指令字串裡**不經殼直接看得到的 git 呼叫**正規化成一段 shell 文字（`;` 分隔）。"""
+    out: list[str] = []
+    for m in _ARGV_SEQ_RE.finditer(command):
+        lits = [t for _q, t in _ARGV_LIT_RE.findall(m.group(0))]
+        # 🔴 SD-08：執行檔不一定在第 0 格（`sudo`／`env`／`VAR=val`／`timeout 30` 前綴），
+        # 往後找。純數字那一格是 `timeout`／`nice` 的**值**，不跳過就會停在它身上。
+        while len(lits) > 1 and (lits[0].lower() in _EXEC_PREFIX or "=" in lits[0]
+                                 or lits[0].isdigit()):
+            lits = lits[1:]
+        # 🔴 序列面必須是**真的 argv**：第一個字面就是 git 執行檔。缺這一條時，
+        # 「一串命令字串的 tuple」（`("git checkout -p", "git restore -p")` 這種探針表）
+        # 會被整串攤平成一段假的指令 ⇒ 全語料實測 3 筆假紅，全部由本條收掉。
+        # 單字面面（`os` 模組的 `system('git stash')`）不受此限——它的錨是呼叫者名稱。
+        if len(lits) > 1 and not _GIT_EXE_RE.match(lits[0]):
+            continue
+        out.append(" ".join(lits))
+    # 🔴 SD-01：殼 `-c`／`eval` 的 operand 也是這種「殼文字看不到、但真的會執行」的平面。
+    # operand 自己可能再包一層 ⇒ 遞迴；它是原字串的**真子字串**，所以一定會停。
+    out += [s for m in _CARRIER_RE.finditer(command)
+            for s in (m.group("op"), argv_git_fragments(m.group("op"))) if s]
+    return ";".join(out)
+
 
 def mask_inert(text: str, *, keep_comments: bool = False) -> str:
     """把「不是可執行結構」的區段換成**等長**空白：引號字串、here-string／heredoc、註解。
@@ -360,8 +472,19 @@ def mask_inert(text: str, *, keep_comments: bool = False) -> str:
                                           text[body:], re.MULTILINE):
                     end = body + line_m.end()
                     break
-                blank(i, end)
-                i = end
+                # 🔴 R84：body 是不是可執行結構，由 heredoc 的**擁有者**決定（見檔頭 R84
+                # 記錄）。餵給殼 ⇒ 只遮 `<<WORD` 本身、停在 `body` 讓主迴圈照常往下遮
+                # body 內的引號與註解；餵給別的直譯器 ⇒ 整段當資料遮掉（維持既有行為）。
+                # 🔴 SD-06：擁有者＝`<<` 左側**最近的那個非旗標 token**（由右往左找），
+                # 不是「整行有沒有出現殼的名字」——後者實測會被 `cd /tmp/sh`、
+                # `grep -rn bash docs/` 這種與 heredoc 無關的字面騙到而**誤擋**。
+                # 由右往左也順帶正確處理 `ssh host bash <<EOF`（擁有者是 bash 不是 ssh）
+                # 與 `sudo bash <<EOF`／`env FOO=1 bash <<EOF`（前綴自動被跳過）。
+                exe = next((t for t in reversed(text[:i].rsplit("\n", 1)[-1].split())
+                            if not t.startswith("-")), "")
+                stop = body if _SHELL_EXE_RE.match(exe) else end
+                blank(i, stop)
+                i = stop
                 continue
         # 註解：# 只在行首或前面是空白／分隔符時才是註解（`foo#bar` 不是）
         if ch == "#" and (i == 0 or text[i - 1] in " \t\n;&|(){}`"):
@@ -385,23 +508,27 @@ def _short_flags(token: str) -> set[str]:
     return set(token[1:]) if re.fullmatch(r"-[A-Za-z]+", token) else set()
 
 
-class GitCall(NamedTuple):
-    """一次 git 呼叫：子指令、子指令之後的參數、以及**它會落腳在哪個目錄**。
+# 🔴 抽出來的理由是 **LOC 預算**，不是整潔：本檔住在 `guardrail_cli` tier，R84 收窄
+# 前餘裕只剩兩位數，而下面四個 handler 各自抄了一份逐字相同的三行迴圈。純提取、
+# 零行為變更（`_short_flags` 的語意原封不動），既有的 handler 測試就是它的回歸鎖。
+def _all_shorts(args: list[str]) -> set[str]:
+    return {c for a in args for c in _short_flags(a)}
 
-    `target` 為 `None`＝從指令字串推導不出來 ⇒ 呼叫端一律不放寬（fail-closed）。
-    """
+
+# `target` 為 `None`＝從指令字串推導不出來 ⇒ 呼叫端一律不放寬（fail-closed）。
+# （docstring 改註解的理由同 `_all_shorts`：本檔的 LOC 預算把 docstring 也算成程式行。）
+class GitCall(NamedTuple):
+    """一次 git 呼叫：子指令、子指令之後的參數、以及**它會落腳在哪個目錄**。"""
 
     sub: str
     args: list[str]
     target: str | None
 
 
+# `None` 的語意是「不知道」而不是「安全」——呼叫端對 `None` 一律不放寬。`cd -`（回上一個
+# 目錄）與被 `mask_inert()` 抹成空白的殼變數都落在這一格。（docstring 改註解的理由同上。）
 def _resolve_dir(base: str | None, token: str) -> str | None:
-    """把 `cd <token>`／`git -C <token>` 的 token 解析成絕對目錄；解析不出回 `None`。
-
-    `None` 的語意是「不知道」而不是「安全」——呼叫端對 `None` 一律不放寬。
-    `cd -`（回上一個目錄）與被 `mask_inert()` 抹成空白的殼變數都落在這一格。
-    """
+    """把 `cd <token>`／`git -C <token>` 的 token 解析成絕對目錄；解析不出回 `None`。"""
     if not token or token.startswith("-"):
         return None
     token = os.path.expanduser(token)
@@ -459,13 +586,11 @@ def relaxation_blockers(command: str) -> list[str]:
     return sorted({m.group(0).lower() for m in _RELAX_KILLER_RE.finditer(masked)})
 
 
+# 存在理由是一個實測到的漏擋，不是整潔：直接寫 `path + os.sep` 在 `path` 已是檔案系統根
+# （`"/"`）時得到 `"//"`，而**沒有任何路徑以 `"//"` 開頭** ⇒ 包含判準在那一格恆假。
+# `rstrip` 先去掉既有的末端分隔符再補一個，根與非根走同一條路。（docstring 改註解同上。）
 def _dir_prefix(path: str) -> str:
-    """回「用來判包含關係」的目錄前綴（末端恰好一個分隔符）。
-
-    存在理由是一個實測到的漏擋，不是整潔：直接寫 `path + os.sep` 在 `path` 已是
-    檔案系統根（`"/"`）時得到 `"//"`，而**沒有任何路徑以 `"//"` 開頭** ⇒ 包含判準
-    在那一格恆假。`rstrip` 先去掉既有的末端分隔符再補一個，根與非根走同一條路。
-    """
+    """回「用來判包含關係」的目錄前綴（末端恰好一個分隔符）。"""
     return path.rstrip(os.sep) + os.sep
 
 
@@ -496,14 +621,14 @@ def is_foreign_tree(path: str | None) -> bool:
         return False
 
 
+# 這是**加在規格之外的一層**：`git checkout <path>`（不帶 `--`）與 `git checkout <branch>`
+# 在字面上分不開，而前者是最常見的毀滅形態之一（`git checkout .` 尤其）。用「工作樹裡
+# 存在同名檔案」當判準，是因為分支名與現存路徑同名在實務上罕見（真同名時 git 自己也會
+# 喊 ambiguous）。解析不出／任何 OSError 一律回 False（＝放行），誤擋成本高於漏擋。
+# （本段由 docstring 改成註解的理由與 `_all_shorts` 同一個：本檔的 `guardrail_cli` LOC
+#  預算把 docstring 也算成程式行，而 R84 這批治本要在**不調高預算**的前提下塞進來。）
 def _looks_like_worktree_path(token: str, base: str | None = None) -> bool:
-    """`git checkout <token>` 的 token 是不是工作樹裡真的存在的檔案／目錄。
-
-    這是**加在規格之外的一層**：`git checkout <path>`（不帶 `--`）與 `git checkout <branch>`
-    在字面上分不開，而前者是最常見的毀滅形態之一（`git checkout .` 尤其）。用「工作樹裡
-    存在同名檔案」當判準，是因為分支名與現存路徑同名在實務上罕見（真同名時 git 自己也會
-    喊 ambiguous）。解析不出／任何 OSError 一律回 False（＝放行），誤擋成本高於漏擋。
-    """
+    """`git checkout <token>` 的 token 是不是工作樹裡真的存在的檔案／目錄。"""
     if not token or token.startswith("-"):
         return False
     try:
@@ -515,9 +640,7 @@ def _looks_like_worktree_path(token: str, base: str | None = None) -> bool:
 
 def _checkout_hit(args: list[str], target: str | None = None) -> str | None:
     flags = {a for a in args if a.startswith("-")}
-    shorts: set[str] = set()
-    for a in args:
-        shorts |= _short_flags(a)
+    shorts = _all_shorts(args)
     if flags & {"--force", "--discard-changes"} or "f" in shorts:
         return "git checkout -f／--force／--discard-changes（強制切換會丟掉未提交的修改）"
     if "--" in args and args.index("--") + 1 < len(args):
@@ -535,52 +658,78 @@ def _checkout_hit(args: list[str], target: str | None = None) -> str | None:
 
 
 def _restore_hit(args: list[str], target: str | None = None) -> str | None:
-    shorts: set[str] = set()
-    for a in args:
-        shorts |= _short_flags(a)
-    staged = "--staged" in args or "S" in shorts
-    worktree = "--worktree" in args or "W" in shorts
-    if staged and not worktree:
+    shorts = _all_shorts(args)
+    if ("--staged" in args or "S" in shorts) and not ("--worktree" in args or "W" in shorts):
         return None  # 只動 index，工作樹內容原封不動——取捨理由見模組 docstring
     return "git restore（預設 --worktree：把工作樹的檔案還原，未提交的改動直接消失）"
 
 
 def _stash_hit(args: list[str], target: str | None = None) -> str | None:
-    if {"-h", "--help"} & set(args):
-        return None
     sub = next((a for a in args if not a.startswith("-")), "")
-    if sub.lower() in _STASH_SAFE:
+    if {"-h", "--help"} & set(args) or sub.lower() in _STASH_SAFE:
         return None
-    verb = sub or "(裸 stash＝push)"
-    return (f"git stash {verb}（把整個工作樹的改動搬走／搬回；在**多包並行共用工作樹**上"
-            "這一下會清掉別人正在寫的檔案——R83 實測 16 個修改檔 + 4 個未追蹤檔瞬間消失）")
+    return (f"git stash {sub or '(裸 stash＝push)'}（把整個工作樹的改動搬走／搬回；在**多包"
+            "並行共用工作樹**上這一下會清掉別人正在寫的檔案——R83 實測 16 個修改檔 + 4 個"
+            "未追蹤檔瞬間消失）")
 
 
 def _clean_hit(args: list[str], target: str | None = None) -> str | None:
-    shorts: set[str] = set()
-    for a in args:
-        shorts |= _short_flags(a)
-    if "--dry-run" in args or "n" in shorts:
+    if "--dry-run" in args or "n" in _all_shorts(args):
         return None  # -n／--dry-run 只印不刪
     return "git clean（直接刪除未追蹤檔案，且不進 stash、不進 reflog ⇒ 沒有還原路徑）"
 
 
 def _switch_hit(args: list[str], target: str | None = None) -> str | None:
-    flags = {a for a in args if a.startswith("-")}
-    shorts: set[str] = set()
-    for a in args:
-        shorts |= _short_flags(a)
-    if flags & {"--force", "--discard-changes"} or "f" in shorts:
-        return "git switch -f／--force／--discard-changes（強制切換會丟掉未提交的修改）"
-    return None
+    if not ({"--force", "--discard-changes"} & set(args) or "f" in _all_shorts(args)):
+        return None
+    return "git switch -f／--force／--discard-changes（強制切換會丟掉未提交的修改）"
+
+
+# 🔴 R84／SD-07：`git worktree remove --force` 毀的正是「未提交的工作樹內容」（不帶
+# `--force` 時 git 自己會因為樹是髒的而拒絕 ⇒ 那一半安全，本檔不擋）。它既不屬
+# `_WORKTREE_SCOPED`（危害在**參數**指的那棵樹，不是指令落腳的那棵）也不屬
+# `_SHARED_SCOPED`（不動 `refs/stash`）⇒ 兩個集合都不進，放寬寫在這個 handler 自己身上。
+#
+# 🔴 **放寬是量出來的，不是設計出來的**：本輪對逐字稿全語料（4,017 筆／去重 3,740 種）
+# 新舊判準各跑一次，新增命中 6 種**全部**是這個動詞，而逐筆判讀 6/6 都是「拆掉自己的
+# 拋棄式樹」（`.claude/worktrees/agent-*` 收工清理、scratchpad 沙盒 teardown、
+# `/private/tmp/...` 測試樹）——**一筆事故形態都沒有**。無差別擋它就是拿一個從未發生的
+# 危害，去換一個天天發生的誤擋，而 repo 已判過「誤擋是這道鎖被整個關掉的路徑」。
+# ⇒ 判準改成問**被拆的是誰**：目標樹落在共用專案樹之外（`is_foreign_tree`，含「路徑不存在
+# ⇒ 判不出來 ⇒ 不放寬」的 fail-closed）才放行；落在專案樹內（典型是**另一個 agent 還活著的**
+# `.claude/worktrees/agent-*`）照擋。順帶一提 `git worktree remove` 結構上碰不到主工作樹
+# （git 自己回 `fatal: … is a main working tree`）⇒ R83 立案那個形態它做不出來。
+#: harness 自己的 agent 沙盒樹（`isolation: "worktree"` 建在這裡、收工就拆）。它住在專案
+#: 根底下 ⇒ `is_foreign_tree()` 判它「不是外樹」而擋下，但那是**routine teardown**：全語料
+#: 6 筆新增命中裡有 3 筆就是它。放行的代價誠實寫在這裡——拆掉一棵**還有 agent 活著**的沙盒
+#: 樹會被放行；那個危害與 `rm -rf <該目錄>` 同級，而本檔本來就不守 `rm`。
+_DISPOSABLE_WT = os.path.join(".claude", "worktrees") + os.sep
+
+
+def _worktree_hit(args: list[str], target: str | None = None) -> str | None:
+    pos = [a for a in args if not a.startswith("-")]
+    victim = _resolve_dir(target, pos[1] if len(pos) > 1 else "") or ""
+    if pos[:1] != ["remove"] or not ("--force" in args or "f" in _all_shorts(args)) or \
+            is_foreign_tree(victim) or _DISPOSABLE_WT in victim:
+        return None
+    return ("git worktree remove --force（把整棵 linked worktree 連同裡面未提交的改動與"
+            "未追蹤檔一起刪掉；不進 stash、不進 reflog ⇒ 沒有還原路徑）")
+
+
+# 🔴 R84／SD-07 同族：`git checkout-index -f -a` 用 index 的內容強制覆寫工作樹。它是
+# plumbing、實務上幾乎沒有人手寫（全語料實測 0 筆）⇒ 假紅面為零，故收；但也別把它
+# 當成這一格的主力。**刻意不收的是 `git apply -R`**：那是「把剛套上的 patch 退回去」的
+# 正當手法、而且可逆（再套一次就回來），擋它是在製造誤擋，方向與本檔的設計約束相反。
+def _checkout_index_hit(args: list[str], target: str | None = None) -> str | None:
+    if not ("--force" in args or "f" in _all_shorts(args)):
+        return None
+    return "git checkout-index -f（用 index 的內容強制覆寫工作樹檔案，未提交的改動直接消失）"
 
 
 def _reset_hit(args: list[str], target: str | None = None) -> str | None:
-    hit = {"--hard", "--merge", "--keep"} & set(args)
-    if not hit:
-        return None  # 預設 mixed 與 --soft 都不動工作樹內容
+    hit = {"--hard", "--merge", "--keep"} & set(args)   # 預設 mixed 與 --soft 不動工作樹
     return (f"git reset {sorted(hit)[0]}（重寫工作樹內容；"
-            "`git reset` 預設的 mixed 與 --soft 不會，所以本檔只擋這三個）")
+            "`git reset` 預設的 mixed 與 --soft 不會，所以本檔只擋這三個）") if hit else None
 
 
 _DISPATCH = {
@@ -590,6 +739,8 @@ _DISPATCH = {
     "reset": _reset_hit,
     "clean": _clean_hit,
     "switch": _switch_hit,
+    "worktree": _worktree_hit,
+    "checkout-index": _checkout_index_hit,
 }
 
 
@@ -611,8 +762,17 @@ def destructive_git_hits(command: str, *, start_dir: str | None = None) -> list[
     （stash 全家）不論在哪一棵樹都擋——實測依據見模組 docstring。
     """
     hits: list[str] = []
-    blockers = relaxation_blockers(command)
-    for call in git_invocations(command, start_dir=start_dir):
+    # 🔴 R84：兩個平面。① 殼文字本身；② Python 層 argv ＋ 殼 `-c`／`eval` 的 operand（見
+    # `argv_git_fragments()`）。②**必須**是獨立平面而不是就地 substitute：原凶那條的
+    # argv 住在 heredoc body 裡，就地取代之後會連同 body 一起被遮掉（實測 exit 仍為 0）。
+    hidden = argv_git_fragments(command)
+    # 🔴 放寬殺手也**必須**在 ② 上跑一次（SD-01 落地時自測抓到的洞）：`sh -c '(cd /wt);
+    # git clean -fdx'` 的子殼括號住在引號裡，在 ① 的遮蔽面上是空白 ⇒ 只看 ① 會判成
+    # 「這條落在 /wt」而放行，實際上 `)` 已經結束了 cd 的作用域、git 落在共用工作樹。
+    blockers = relaxation_blockers(command) or relaxation_blockers(hidden)
+    calls = git_invocations(command, start_dir=start_dir)
+    calls += [c for c in git_invocations(hidden) if c not in calls]
+    for call in calls:
         handler = _DISPATCH.get(call.sub)
         if handler is None:
             continue
@@ -628,6 +788,294 @@ def destructive_git_hits(command: str, *, start_dir: str | None = None) -> list[
             hit += _BLOCKER_NOTE.format("／".join(f"`{b}`" for b in blockers))
         hits.append(hit)
     return hits
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# 🔴 R84 偵測層：攔截器**結構上**接不到的那一半（本 repo「失效必須可偵測」紀律）
+# ══════════════════════════════════════════════════════════════════════════════
+# 上面每一道判準都只看得到**指令字串**。真正動了 `refs/stash` 卻不經過這裡的路至少四條：
+# MCP git 工具（不是 Bash 呼叫）／別的 session（本行程看不到）／**寫在 `.py` 檔裡**的
+# `subprocess.run(["git","stash"])`（工具面只看得到 `python foo.py`，argv 在檔案裡）／
+# 別名與殼函式。這四條**不可能**靠加判準關掉 ⇒ 只能改成「事後一定看得見」。
+#
+# 判準刻意只看 `refs/stash` 這一個 ref：它**只會**因 stash push／pop／drop／clear 而變，
+# 而那正好是本檔守的那一族。（一起看 `logs/HEAD` 是第一版的寫法，已否決——它每次
+# `git commit` 都會變，那是天天發生的合法動作 ⇒ 常駐亮燈，而常駐全亮的燈等於沒有燈。）
+#
+# 🔴 假紅面為零的關鍵是那個 ack 位元：凡「上一次工具呼叫的指令字串裡出現過 stash」
+# （不論被擋、被豁免、還是 `stash create` 這種放行形態），本次就不出聲——那一次變動
+# **本守衛看見了**，不是隱形的路。只有「ref 變了、而上一次沒有任何 stash 經過」才報。
+#
+# 成本近零且平台中立：兩次讀檔＋一次寫檔，**不起子行程**（本檔的
+# `test_the_hook_spawns_no_subprocess` 明文禁止；PreToolUse 每次工具呼叫都會跑）。
+# 狀態檔住 `.git/`（不是 tempdir）⇒ 天生逐 repo 隔離、不會被別的 checkout 汙染，
+# 而且 git 自己不追蹤它。誠實劃界：`.git` 是**檔案**的 linked worktree 內寫入會失敗 ⇒
+# 該情境下哨兵靜默不作用（回 `None`），這是刻意的 fail-open，同本檔的 P0 契約。
+
+
+# 🔴 R84／SD-04：ack 位元**不可以用子字串判**。修訂前 `main()` 傳的是 `"stash" in command`
+# ⇒ 上一條指令只要「提到」stash（`grep -rn stash docs/`、`ls .git/autosdd_stash_sentinel`、
+# 甚至本檔自己的檔名出現在指令裡）就把 ack 點亮，下一次**真的** drift 便靜默；而它同一次
+# 已把 state 改寫成新 SHA ⇒ 之後再也不會報＝**永久吞掉**，不是延後。修法是重用
+# `git_invocations()`（含 argv／`-c` 兩個隱藏平面）而不是字串比對，並且只認真的會改動
+# `refs/stash` 的那幾個子指令。
+def stash_writer_seen(command: str) -> bool:
+    """這條指令裡真的有一次**會改動 `refs/stash`** 的 git 呼叫嗎？"""
+    calls = git_invocations(command) + git_invocations(argv_git_fragments(command))
+    return any(c.sub == "stash" and next((a for a in c.args if not a.startswith("-")), "").lower()
+               in _STASH_REF_WRITERS for c in calls)
+
+
+def stash_ref_sentinel(root: str | None = None, ack: bool = False) -> str | None:
+    """`refs/stash` 相對**上一次工具呼叫**有沒有在本守衛看不見的地方被動過。"""
+    git = Path(root or os.environ.get("CLAUDE_PROJECT_DIR") or os.getcwd()) / ".git"
+    ref, state = git / "refs" / "stash", git / "autosdd_stash_sentinel"
+    now = ref.read_text(encoding="utf-8").strip() if ref.is_file() else ""
+    head, _, seen = (state.read_text(encoding="utf-8") if state.is_file() else "").partition(" ")
+    try:
+        state.write_text(f"{now} {int(ack)}", encoding="utf-8")
+    except OSError:
+        return None
+    if not head or now == head or seen.strip() == "1":
+        return None
+    return (f"[block_destructive_git] 🔴 refs/stash {head[:12]} → {now[:12] or '(空)'}，而上一次"
+            "工具呼叫裡沒有任何 stash 經過本守衛 ⇒ 有一條它攔不到的路動了 stash（MCP git 工具／"
+            "別的 session／`.py` 檔內的 subprocess／別名）。"
+            "立刻查 `git stash list` 與 `git status`。\n")
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# 鐵律六（R84／`DEF-200-044`）：**等待／確認的機制自己靜默壞掉 ⇒ 無做工空轉**
+# ══════════════════════════════════════════════════════════════════════════════
+# WHY 這一族住在**這一支** hook 而不是新開一支
+# --------------------------------------------
+# 本檔已經是「PreToolUse × 讀 Bash／PowerShell 指令字串 × 平台中立」那個觀測面上
+# 唯一的住戶（見 `OWN_TOOLS` 與模組 docstring）。鐵律六要判的兩種形態**只住在指令
+# 字串裡**，需要的輸入與本檔逐字相同 ⇒ 另開一支等於把同一個 payload 解析、同一份
+# `mask_inert()`、同一套逃生口語意各再抄一份，而那正是本 repo 反覆判紅的
+# 「同一份知識住兩個家、只有一個家會被改」（R73 `Find-GitBash` 的形態）。
+# 代價誠實寫在這裡：本檔的檔名說的是 git，而它現在也守一族與 git 無關的東西。
+# 取「共用觀測面、不長第二個家」那一邊，並以本節標題把射程寫明。
+#
+# 立案事實（R83 收輪實帳，不是假想）
+# ----------------------------------
+# `nohup <cmd> > log 2>&1 &` 讓工作**脫離 harness 的完成追蹤**：實測外層 rc=0、0 秒
+# 就返回，而那個工作同一刻還活著 ⇒ harness 的完成通知講的是外層那個殼。實帳
+# **00:39 → 01:27 共 48 分鐘零工作**，靠掌舵者來問才發現。
+# 另一半：`until ! pgrep -f 'X'` 兩支並行時**兄弟互匹**（各自命中對方的 `sh` 與
+# `pgrep`）⇒ `until ! …` 永不退出。`man pgrep` 只排除**自己與祖先**，所以它在單支
+# 試跑下永遠是綠的——這正是「失敗表徵與正常進行完全相同」。
+#
+# 🔴 判準② **不得**建在 `mask_inert()` 之上（獨立驗證輪的實測，SD-01）
+# --------------------------------------------------------------------
+# 判準②要判的東西——自我否定字元類 `run_root[_]unittests`——**正好住在被遮掉的那個
+# 引號字串裡**。直觀實作（把 operand 也從遮蔽字串上取）會讓「壞形態」與「已修好的
+# 形態」在遮蔽面上完全同形 ⇒ 兩種都放行。實測逐字：
+#     FAIL "until ! pgrep -f 'run_root_unittests'; do sleep 5; done" -> []
+# ⇒ 本檔採**兩軌**：迴圈頭／`;`／`do`／`pgrep` 這些**結構**在遮蔽字串上定位（避免
+# 命中引號內的假結構），operand 則以**同一 offset 從原字串取**（`mask_inert()` 明文
+# 保證等長 ⇒ offset 一一對應）。
+#
+# 🔴 假紅普查的**量測面**（SD-02；R83 鐵律五那套「對全庫 tracked 檔普查」對本族是錯的）
+# ------------------------------------------------------------------------------------
+# 這兩種形態**不住在 repo 裡**——它們是模型當回合現寫、送進 Bash 工具的字串。實測：
+# tracked 檔上的命中**全部落在描述它們的 `.md` 散文**（根 CLAUDE.md、Defect_Log），
+# 而 hook 結構上讀不到 `.md` ⇒ 照 tracked-檔普查法會得到「全是假紅」的錯誤結論並
+# 否決一個好判準。正確母體＝逐字稿裡真的送出過的 `tool_input.command`，
+# 可重跑產物＝`tools/probe/shell_command_corpus.py`（同時也補上鐵律五缺的那一份）。
+
+#: 判準①的 `wait` 豁免（**指令全域**，不只同一段）。SD-02 逐筆判讀出的唯一假陽性是
+#: `nohup true; python … & BGPID=$!; wait $BGPID`——`wait` 與 `nohup` 段不同段，
+#: 而它是**正確**形態（外層殼真的阻塞到工作做完）⇒ 豁免必須跨段成立。
+_WAIT_RE = re.compile(r"(?<![\w./-])wait(?![\w.-])")
+#: 判準①的標的動詞。`disown`／`setsid` 與 `nohup` 同族：都把子行程從「外層殼結束時
+#: 會被追蹤到」的關係裡拆開。
+_NOHUP_RE = re.compile(r"(?<![\w./-])nohup(?![\w.-])")
+_DETACH_RE = re.compile(r"(?<![\w./-])(?:disown|setsid)(?![\w.-])")
+#: statement 邊界：**只切 `;` 與換行，刻意不切 `&`**——`&` 正是判準①要找的東西。
+#: 不切段的後果是假陽性（`nohup foo; bar &` 被判成同一件事）；切 `&` 的後果是漏擋
+#: （`nohup foo &` 自己被切成兩半）。
+_STMT_SEP_RE = re.compile(r"[;\n]+")
+#: 迴圈頭與 `pgrep`（判準②，在**遮蔽面**上定位）。
+_LOOP_HEAD_RE = re.compile(r"(?<![\w.-])(?:until|while)(?![\w.-])")
+_PGREP_RE = re.compile(r"(?<![\w./-])pgrep(?![\w.-])")
+#: 條件的結束邊界：第一個 `;`／換行／`do`／`then`。`docker` 這種含 `do` 的字元不會命中
+#: （右側 `\w` 邊界），引號內的 `do` 也不會（在遮蔽面上已是空白）。
+_COND_END_RE = re.compile(r"[;\n]|(?<![\w.-])(?:do|then)(?![\w.-])")
+#: `pgrep` 會**吃掉下一個 token** 的旗標（漏列 ⇒ 把旗標的值當 pattern ⇒ 誤判方向）。
+_PGREP_VALUE_SHORT = frozenset("uUGPsgtd")
+_PGREP_VALUE_LONG = frozenset({
+    "--uid", "--euid", "--group", "--parent", "--session", "--pgroup",
+    "--terminal", "--delimiter", "--ns", "--nslist", "--runstates",
+})
+#: 判準②的行內豁免。**刻意與 `# git-guard-ok:` 不同字樣**：共用一個標記會讓「為了
+#: 放行一個等待形態而寫的豁免」順手把毀滅性 git 一起放行（同本檔既有的兩層逃生口論述）。
+_WAITFORM_EXEMPT_RE = re.compile(r"#\s*waitform-ok:\s*\S")
+
+
+def _fold(command: str) -> str:
+    """遮蔽 ＋ 折回 bash 行接續，回**與原字串等長**的結構面（判準①②共用）。"""
+    return _LINE_CONT_RE.sub(lambda m: " " * len(m.group(0)), mask_inert(command))
+
+
+def _background_amps(segment: str) -> bool:
+    """這一段裡有沒有**真的背景化**的 `&`（排除 `&&`／`2>&1`／`&>`／`|&`）。
+
+    每一種排除都對應一個會製造假紅的真實寫法：`a && b`（邏輯與）、`cmd 2>&1`（重導，
+    與背景毫無語意關係）、`cmd &> log`（bash 的合併重導）、`cmd |& next`（管線含 stderr）。
+    """
+    for i, ch in enumerate(segment):
+        if ch != "&":
+            continue
+        if i + 1 < len(segment) and segment[i + 1] in "&>":
+            continue                                   # `&&` / `&>`
+        if i and segment[i - 1] in "&><|":
+            continue                                   # `&&` 的後半 / `2>&1` / `|&`
+        return True
+    return False
+
+
+# 引號感知的 token 切割唯一的家＝`tools/lib/shell_tokens.py`（R84／C8 的減法：它與
+# 「毀滅性 git 判準」零交集，是判準②取 operand 用的通用原語）。形態與上面
+# `read_hook_payload` 那一格逐字相同（同一條 sys.path、同一種 fail-open）：共用層不可達
+# 時退化成「切不出 token」⇒ `_pgrep_full_operand()` 回 `None` ⇒ 判準②不出手。**方向是
+# 對的**：少擋一種等待形態，而不是反過來憑一份殘缺的切割去誤擋（誤擋的守衛會被關掉）。
+try:
+    from shell_tokens import shell_tokens as _shell_tokens  # type: ignore[import-not-found]
+except Exception:  # noqa: BLE001 — 共用層不可達＝退化，不是崩潰（fail-open 是 P0）
+    def _shell_tokens(text: str) -> list[str]:  # type: ignore[misc]
+        return []
+
+
+def _pgrep_full_operand(rest: str) -> str | None:
+    """`pgrep` 之後的參數列 → 「`-f` 有帶時的那個 pattern」；否則 `None`。
+
+    `None` 有兩種來源，兩者都刻意**不擋**：① 沒有 `-f`（那樣 pgrep 只比對**行程名**，
+    兄弟的 `sh -c` 包裝與 `pgrep` 自己都不會命中 ⇒ 不是本判準的危害形態）；
+    ② 有 `-f` 但 pattern 缺漏（那是 usage error，擋它換不到任何東西）。
+    """
+    toks = _shell_tokens(rest)
+    full = False
+    i = 0
+    while i < len(toks):
+        tok = toks[i]
+        if tok.startswith("--"):
+            if tok in ("--full",):
+                full = True
+            if tok in _PGREP_VALUE_LONG:
+                i += 2
+                continue
+            i += 1
+            continue
+        if len(tok) > 1 and tok.startswith("-"):
+            if "f" in tok[1:]:
+                full = True
+            if tok[-1] in _PGREP_VALUE_SHORT:
+                i += 2
+                continue
+            i += 1
+            continue
+        return tok if full else None
+    return None
+
+
+def _self_negating(pattern: str) -> bool:
+    """pattern 是否用了**字元類自我否定**（`run_root[_]unittests`／`[p]ython.*X`）。
+
+    這是 CLAUDE.md 鐵律六 ✅ 那一格逐字指定的形態，也是本判準的**放行面**：
+    只要 pattern 裡有一段非空的 `[…]`，這條指令的字面就不再匹配它自己（兄弟的
+    `sh -c` 與 `pgrep` 自身都帶著原始字面）⇒ 鑑別力保住、死鎖消失。
+    實測（本輪，同一 pattern 兩支並行）：自我否定版兩支皆 rc=1（零命中），
+    對真標的仍 rc=0（命中 2 支）。
+    """
+    return bool(re.search(r"\[[^\]]+\]", pattern))
+
+
+def waitform_hits(command: str, *, run_in_background: bool = False) -> list[str]:
+    """鐵律六的命中理由（空 list＝通過）。**三條**判準，共用同一個遮蔽面。
+
+    · ① `nohup`／`disown`／`setsid` 與背景 `&` 同一 statement
+    · ② `until`／`while` 的**條件內**出現裸 `pgrep -f <非自我否定 pattern>`
+    · ③ `run_in_background=True` 搭一個**自己就會立刻返回**的指令（背景 `&`／`disown`）
+      — 本輪實測 payload 真的帶得到這個旗標（`tool_input.run_in_background: true`，
+        前景呼叫則整個 key 不存在）⇒ 這一條不是靜態推論。
+
+    🔴 `wait` 豁免（全指令任一處出現即成立）**只罩 ①③、不罩 ②**——`until ! pgrep …` 的
+    死鎖與有沒有 `wait` 無關。這個不對稱是實作逐字的形狀（①③ 住在 `if not waited:` 內、
+    ② 在它外面）。🔴 **本 docstring 是這一族「有幾條判準」的 SSOT**：實作住在這裡，而
+    CLAUDE.md 鐵律六與缺陷帳本各自另有一份不同版本（QA-03：同一份知識三個家、三種內容）。
+    """
+    masked = _fold(command)
+    hits: dict[str, None] = {}
+
+    waited = bool(_WAIT_RE.search(masked))
+    if not waited:
+        for segment in _STMT_SEP_RE.split(masked):
+            if not _background_amps(segment):
+                continue
+            if _NOHUP_RE.search(segment) or _DETACH_RE.search(segment):
+                hits["nohup／disown／setsid ＋ 背景 `&`：這個工作**脫離 harness 的完成追蹤**"
+                     "（實測外層 rc=0、0 秒返回，而工作同一刻還活著 ⇒ 完成通知講的是外層"
+                     "那個殼）。R83 收輪實帳：00:39 → 01:27 共 48 分鐘零工作"] = None
+            elif run_in_background:
+                hits["`run_in_background: true` 搭一個自己就會立刻返回的指令（段內有背景 "
+                     "`&`）：叫醒你的是**外層殼結束**的那一刻，而它 0 秒就結束 ⇒ 通知到達時"
+                     "工作還在跑"] = None
+        if run_in_background and _DETACH_RE.search(masked):
+            hits["`run_in_background: true` 搭 `disown`／`setsid`：同上，外層殼與真正的"
+                 "工作已經沒有父子關係 ⇒ harness 追蹤不到它結束"] = None
+
+    for head in _LOOP_HEAD_RE.finditer(masked):
+        start = head.end()
+        stop = _COND_END_RE.search(masked, start)
+        end = stop.start() if stop else len(masked)
+        for pg in _PGREP_RE.finditer(masked, start, end):
+            # 🔴 operand 從**原字串**同 offset 取（SD-01：遮蔽面上它是空白 ⇒ 好壞同形）
+            operand = _pgrep_full_operand(command[pg.end():end])
+            if operand is None or _self_negating(operand):
+                continue
+            hits[f"`{head.group(0)}` 的條件內用裸 `pgrep -f {operand}`：兩支並行時**兄弟"
+                 f"互匹**（各自命中對方的 `sh` 與 `pgrep`）⇒ `until ! …` 永不退出。"
+                 f"`man pgrep` 只排除**自己與祖先**，所以單支試跑永遠是綠的。"
+                 f"改成字元類自我否定：`{operand[:1]}[{operand[1:2] or '_'}]{operand[2:]}` "
+                 f"這種形態（只否定自己、不減損鑑別力）"] = None
+    return list(hits)
+
+
+def has_waitform_exemption(command: str) -> bool:
+    """判準①②③的行內豁免（只認住在**真註解**裡的 `# waitform-ok: <理由>`）。"""
+    return bool(_WAITFORM_EXEMPT_RE.search(mask_inert(command, keep_comments=True)))
+
+
+_WAITFORM_HEADER = (
+    "🔴 這條指令的**等待／確認機制自己會靜默壞掉**，已擋下（鐵律六／`DEF-200-044`）。\n"
+    "  一句話的本體：**我用來等待／確認的那個機制自己壞掉，而失敗的表徵與「還在正常"
+    "進行」完全相同。**\n"
+    "  本次命中：\n"
+)
+_WAITFORM_FOOTER = (
+    "\n"
+    "  改用**有契約的**事件源（照鐵律六的 ✅ 那兩格）：\n"
+    "   · `run_in_background: true` ＋ 一個**會阻塞到真的做完**的前景指令\n"
+    "     （Bash 工具說明逐字：`it keeps running across turns and re-invokes you when it"
+    " exits`\n"
+    "       ⇒ 叫醒你的是那個行程結束的那一刻，所以它必須一直活到工作真的做完）\n"
+    "   · 真的要自己輪詢 → 條件的比對面**不含自己**（字元類自我否定）：\n"
+    "        until ! pgrep -f 'run_root[_]unittests'; do sleep 20; done\n"
+    "   · 已經背景化、而你要等它 → 同段補 `wait`（本守衛對帶 `wait` 的指令整條放行）\n"
+    "\n"
+    "  🔴 只有「等額度 reset」與「等人介入」是合法的無事件源停等。其餘任何停等都必須有"
+    "一個\n"
+    "     會**主動叫醒你**的事件源；掛不掛得上，是派工前就要決定的事，不是事後補救。\n"
+    "\n"
+    "  真的確定要這樣寫？在指令內加行內豁免 `# waitform-ok: <理由>`（理由必填）。\n"
+)
+_WAITFORM_UNATTENDED_NOTE = (
+    "\n"
+    f"  🔴 這一跑是**被排程叫起來的無人看管回合**（環境變數 {UNATTENDED_ENV} 有設），\n"
+    "     行內豁免 `# waitform-ok:` 對本回合**無效**——而這一族的代價在無人看管時最大：\n"
+    "     沒有人會來問「它是不是空轉了 48 分鐘」。\n"
+)
 
 
 _HEADER = (
@@ -703,20 +1151,44 @@ def main() -> int:
         # payload 的 `cwd` 只是**起點**：實測它恆為專案根（即使指令自己 `cd` 去別處），
         # 所以真正的落腳目錄一律由指令字串推導（見模組 docstring）。傳它進去是為了讓
         # 相對路徑的 `cd` 有基準——而那個基準指向共用工作樹，方向正是 fail-closed。
-        start_dir = payload.get("cwd")
-        hits = destructive_git_hits(
-            command, start_dir=start_dir if isinstance(start_dir, str) else None)
-        if not hits:
-            return 0
+        raw_cwd = payload.get("cwd")
+        start_dir = raw_cwd if isinstance(raw_cwd, str) else None
+        hits = destructive_git_hits(command, start_dir=start_dir)
+        # 🔴 鐵律六那一族的旗標來源是 payload 自己（本輪實測：前景呼叫**沒有**這個 key、
+        # `run_in_background: true` 的呼叫有 ⇒ `bool(...)` 兩向都正確，不需要預設值特判）。
+        wait_hits = waitform_hits(
+            command, run_in_background=bool(tool_input.get("run_in_background")))
 
         unattended = bool(os.environ.get(UNATTENDED_ENV))
         # 🔴 順序本身就是判準的一部分：無人看管時**先於**行內豁免判定，因為那個回合
         # 可以自己寫出豁免註解（同 lint_powershell_command.py 對授權邊界的處置）。
-        if has_exemption(command) and not unattended:
-            return 0
+        # 🔴 兩族的豁免**各自獨立判**：一個 `# git-guard-ok:` 不得順手放行一個壞掉的
+        # 等待形態，反之亦然（同兩個標記字樣刻意不同的理由）。
+        if hits and has_exemption(command) and not unattended:
+            hits = []
+        if wait_hits and has_waitform_exemption(command) and not unattended:
+            wait_hits = []
 
-        sys.stderr.write(_HEADER + "".join(f"   · {h}\n" for h in hits)
-                         + (_UNATTENDED_NOTE if unattended else _FOOTER))
+        # 偵測層（見上方 R84 偵測層說明）：出聲但**絕不阻斷**。rc=1 是 Claude Code 對
+        # 「stderr 給人看、工具照跑」的那一格，與本檔既有的退化 payload 分支同一格。
+        # 🔴 R84／SD-04：ack 的語意是「**接下來真的會有**一次 stash 經過本守衛」⇒ 它必須
+        # ①用 `git_invocations()` 判而不是子字串（否則 `grep … stash` 就能把哨兵消音）、
+        # ②在本次要阻斷時為 False（被擋下的指令根本不會跑，它解釋不了任何 ref 變動）。
+        # 兩者缺一，下一輪真正隱形的那條路就會被靜默吞掉——而吞掉是**永久**的。
+        note = stash_ref_sentinel(
+            start_dir, stash_writer_seen(command) and not (hits or wait_hits))
+        sys.stderr.write(note or "")
+        if not hits and not wait_hits:
+            return 1 if note else 0
+
+        message = ""
+        if hits:
+            message += (_HEADER + "".join(f"   · {h}\n" for h in hits)
+                        + (_UNATTENDED_NOTE if unattended else _FOOTER))
+        if wait_hits:
+            message += (_WAITFORM_HEADER + "".join(f"   · {h}\n" for h in wait_hits)
+                        + (_WAITFORM_UNATTENDED_NOTE if unattended else _WAITFORM_FOOTER))
+        sys.stderr.write(message)
         return 2
     except Exception:  # noqa: BLE001 — fail-open 是刻意的，見模組 docstring 的 P0
         return 0

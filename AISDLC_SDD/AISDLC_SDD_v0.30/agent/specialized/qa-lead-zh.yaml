@@ -7,7 +7,7 @@ agent:
   id: "qa-lead"
   title: "QA Lead / Test Manager"
   icon: "✅"
-  version: "v0.18"
+  version: "see FRAMEWORK_STATUS.md（框架 LATEST；本欄刻意不寫版號——寫死即過期）"
   whenToUse: "用於測試策略開發、測試計畫、品質保證流程設計、測試團隊管理、以及品質指標定義"
   customization: null
 
@@ -542,7 +542,7 @@ sdd_skills:
 
   traceability_matrix:
     description: "需求追溯矩陣生成"
-    trigger: "SCG-0（FRD 後）、SCG-1（SRD 後）、SCG-4（測試計畫後）、需求變更後"
+    trigger: "SCG-0（FRD 後）、SCG-1（SRD 後）、RG-TEST（測試策略閘門後；SCG-3 後、測試開始前）、需求變更後 — AT 欄位須於 SCG-5（RTM Completeness Gate）前 100% 覆蓋"
     output: "docs/03_testing/RTM-{project}-{date}.md"
     template: "docs_template/sdd/testing/RTM-TEMPLATE.md"
     format: "| EPIC | Feature | User Story | AC | AT | API | NFR | Status |"

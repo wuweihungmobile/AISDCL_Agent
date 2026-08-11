@@ -6,6 +6,10 @@
 #  ① `tools/session_resume_planner.py` 塞不下：落地當回合 `check_loc_budget.py` 實測
 #     `[guardrail_cli<=750] tools/session_resume_planner.py: 749 （餘裕 1 行）`。
 #     這是硬牆不是偏好，本包因此**一行都沒有動它**。
+#     🔴 R84／ARCH-03 訂正這個數字的**性質**（不是訂正結論）：749／餘裕 1 是**立案當時的
+#     量測值**，本檔此前把它寫成現況 ⇒ 今天已過期（R84 實測 734）。牆仍然在（同一個
+#     tier、同一個 750），過期的是那個讀數。一律現查：
+#     `python AutoClaude/tools/check_loc_budget.py --json`（`root_tools_*` 那幾格）。
 #  ② 不能放進 `.claude/hooks/context_budget_guard.py` 的主路徑：那支 hook 在**每一次**
 #     PreToolUse／PostToolUse 都會跑。把 HTTP 呼叫放進去＝給每一次工具呼叫加上網路延遲，
 #     而該檔自己記載過 P0「hook 誤觸 deny 會把所有工具硬鎖死」。
@@ -14,9 +18,20 @@
 #     扇出。本檔管的是**撞線之前**：現在幾 %。兩者的輸入、失效模式、觸發時機都不同。
 #
 # 分工一句話：**本檔是唯一的取數者與唯一的寫者。**
-#   quota_meter（本檔） ──寫──▶ 快取檔（檔名的唯一的家＝下方 `CACHE_NAME`）
-#                                   ├──讀──▶ context_budget_guard（判讀＋動作）
-#                                   └──讀──▶ AutoClaude adapter（未落地，檔案契約）
+#   quota_meter（本檔） ──寫──▶ 快取檔（檔名有**兩個必要的家**，見下方 `CACHE_NAME`）
+#                                   ├──讀──▶ tools/lib/quota_gate.py（判讀＋動作）
+#                                   │         └─由 .claude/hooks/context_budget_guard.py
+#                                   │           try/except import（該 hook 本身**零**
+#                                   │           `import quota_meter`）
+#                                   └──讀──▶ AutoClaude adapter
+#                                             （`autoclaude/infra/adapters/file_quota_meter.py`，
+#                                              **已落地**，走檔案契約）
+# 🔴 R84／ARCH-03 訂正上圖（原圖把讀者寫成 `context_budget_guard`、把 adapter 標成
+# 「未落地」——兩者今天都為假，故不留著當現行說法）。改變的是**誰讀**：R82／Q2-02 把整條
+# 額度軸搬進 `quota_gate.py` 之後，hook 只 import `quota_gate`，本檔的消費者是 `quota_gate`。
+# 這種失真在本檔特別貴：分工圖就是「誰壞了要去看哪一支」的地圖。現查：
+#   grep -rn "import quota_meter" tools .claude AutoClaude
+#   grep -rn "autosdd_quota.json" AutoClaude
 #
 # 🔴 **R81 收斂訂正上面 ② 與本段原本的「消費端零網路」宣稱**（原說法不留著當現行說法）：
 # 那個形狀有一個沒被看見的淨效果——快取一過期，`read_quota()` 正確地降級成「量不到」，
@@ -119,6 +134,20 @@ REASON_NO_BUCKETS = "no-buckets"
 #: `%TEMP%` 實測有 20 個以上相異 session 各持一份自己的狀態檔。帶 sid 的快取會讓
 #: N 個併發載體各自量一份、各自判一次，那與「一個帳號一個池」在單位上就不匹配
 #: （SA-B5／SD-B1 的同一個病）。一個帳號、一份快取。
+#:
+#: 🔴 **R84／ARCH-07：這個字面有「兩個必要的家」，不是一個。** 本行此前自稱是檔名的唯一
+#: 的家，而實測 AutoClaude 側另有兩處硬編同一個字面（`autoclaude/infra/adapters/
+#: file_quota_meter.py` 的 `self._path` ＋同檔檔頭那張路徑表；另有 `.importlinter` 與
+#: port 檔的散文各一處）。那不是疏漏而是**契約所迫**：`AutoClaude/.importlinter` 明文
+#: 禁止引擎 import monorepo 根層護欄層，唯一合規路徑就是「adapter 只讀
+#: `%TEMP%/autosdd_quota.json`」這條**檔案契約** ⇒ 兩側必須各自持有字面。
+#: ⇒ 誠實的說法是：**字面兩個家、算法一個判準**。對齊由具名機械物守，不靠人記得：
+#:   `tools/tests/test_quota_policy.py::TestM8bCacheHomeStaysInSync`
+#:   （比的是**目錄運算式**：只有一側搬家即紅，兩側同一次 commit 一起搬才綠）
+#:   `tools/tests/test_quota_policy.py::TestM8SchemaStaysInSync`（schema 那一半）
+#: 搬家或改名時**必須同一次 commit 動兩支檔**；只改本行的人會讓 adapter 讀不到檔，
+#: 而它對「檔不在」的反應是回 `None`＝量不到，且那個 `None` 被它自己的測試釘成正確行為
+#: ⇒ 失效全綠、完全靜默。現查另一個家：`grep -rn "autosdd_quota.json" AutoClaude`
 CACHE_NAME = "autosdd_quota.json"
 
 #: 內部唯一表示：**0..100 的 float**。每個通道在自己的入口寫死該通道的單位。

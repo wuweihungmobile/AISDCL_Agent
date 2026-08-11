@@ -6,7 +6,7 @@ agent:
   id: "sdd-playbook-compiler"
   title: "SDD Playbook 編譯專家"
   icon: "🔁"
-  version: "v0.18"
+  version: "see FRAMEWORK_STATUS.md（框架 LATEST；本欄刻意不寫版號——寫死即過期）"
   whenToUse: "已凍結的 SDD 規格需編譯為 AutoClaude playbook 並交執行引擎自動實作時"
   customization: null
 

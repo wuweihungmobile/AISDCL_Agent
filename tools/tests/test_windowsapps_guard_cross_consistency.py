@@ -515,98 +515,44 @@ def _exclude_frozen_sdd_versions(paths: list[str], latest_name: str) -> list[str
 _WINDOWSAPPS_LITERAL = "WindowsApps"
 _SSOT_REL_PATH = "tools/lib/WindowsAppsGuard.ps1"
 
-# Python 側 WindowsApps 空殼判斷式的站點偵測＝**雙錨聯集**（函式名 ∪ 判斷式字面值）。
+# Python 側 WindowsApps 空殼判斷式的站點偵測＝**雙錨聯集**（函式名 ∪ 小寫引號字面值），
+# 兩錨皆帶 `re.I`。以下每一句都是「不准回頭改掉」的設計約束；逐輪沿革（R56 round 1~5 的
+# A~O 變體注入矩陣、三位審查員各自實測的紅綠對照、以及被證偽後刪掉的那條錯誤理由的完整
+# 經過）已搬進 `docs/06_quality/AutoSDD_Defect_Log.md` 的 R84「護欄層淨減法」列（本檔刻意
+# 不寫死 DEF 編號：編號由帳本持有者在收輪時配，寫死會在配號漂移時變成懸空引用）——那些
+# 表格記的是**當時**兩個候選錨各自的命中，而今天
+# 真正在守的是 `TestStubAnchorDiscriminatingPower`（常駐、逐變體注入），不是那些表格。
 #
-# 沿革與 WHY（R56 訂正）：R56 前一輪把判準由函式名錨
-# （`^\s*def _is_windows_apps_stub\b`）**取代**為判斷式運算式錨
-# （`part\.lower\(\)\s*==\s*["']windowsapps["']`），理由是「逐字相同但只改函式名的
-# 第二實作完整逃過」。本輪 Architect 與 SD 各自以進程內對照實測證明兩錨是**互補**
-# 而非包含關係，取代等於一邊補洞一邊新開洞：
-#   再發明變體                                            函式名錨  運算式錨
-#   A 同名 + `part.lower() == "windowsapps"`（現行實作）      HIT     HIT
-#   B 同名 + `"windowsapps" in [x.lower() for x in …parts]`  HIT     MISS ← 取代後新失守
-#   C 同名 + `"windowsapps" in p.lower()`                    HIT     MISS ← 取代後新失守
-#   D 改名 + 逐字同運算式                                     MISS    HIT  （前一輪修好的那格）
-#   E 改名 + 另一種寫法                                       MISS    MISS （兩錨皆盲）
-#   F 同名 + `"windowsapps" == part.lower()`（反向比較序）     HIT     MISS ← 取代後仍盲
-# 故本輪改為**聯集**，並把判斷式錨從「運算式形狀」降級為「不可能被改名的小寫引號
-# 字面值」——變體 B／C／F 都必然帶 `"windowsapps"` 字面值，一併收攏。
+#   · **聯集不是取代**：兩錨互補而非包含。實測過的四個象限都存在（同名改寫法／改名同
+#     寫法／同名反向比較序／改名另寫法），把函式名錨換成運算式錨等於「一邊補洞一邊新開
+#     洞」。第二錨刻意由「運算式形狀」降級為「不可能被改名的小寫引號字面值」——所有改寫
+#     法的變體都必然帶 `"windowsapps"` 字面值。
+#   · **`re.I` 不得拿掉**：姊妹語言 SSOT `tools/lib/WindowsAppsGuard.ps1:55` 逐字寫的是
+#     `-notlike '*\WindowsApps\*'`（**大寫**），仿照它在 Python 側新寫一份判斷式的人最
+#     自然就會打出大寫形態；旗標缺席時那一整組（含 camelCase 函式名）靜默逃逸。
+#     名錨須寫成 `re.MULTILINE | re.I`，**勿覆蓋掉**原有的 MULTILINE。
+#   · **引號界定必須保留**（精度取捨，2026-07-27 實測、round 5 在 re.I 下重驗仍成立）：
+#     改掃**裸**字面值會多命中只是提及 `tools/lib/windowsapps_guard.sh` 檔名的三支守門
+#     工具（check_script_parity.py／check_wrapper_thinness.py／check_gha_action_versions.py）
+#     ＝5 支，再加 re.I 還會多命中 boot_helper.py＝6 支；「引號界定 ＋ re.I」穩定維持 2 支。
+#     零偽陽性實測：候選集合（scoped prefix ∩ 非測試檔）378 支生產 `.py`，加旗標前後命中
+#     集合**完全相同**（`pre_run_validator.py` ＋ `tools/bootstrap_core.py`），新增偽陽性 0。
+#   · **不得回頭寫「大小寫敏感是刻意的」**（round 5 訂正、已被實測證偽的錯誤理由）：
+#     `pre_run_validator.py` 的使用者訊息是 `f"WindowsApps App Execution Alias 空殼（…"`，
+#     `WindowsApps` 後接**空白**，引號界定的 `["']windowsapps["']` 本來就不匹配（已實測，
+#     並由下方 negative case 常駐鎖住）；且該檔早已登記在 `_APPROVED_SECOND_IMPLS`。
 #
-# R56 修正（讀表勿誤解）：上表兩欄是**兩個候選錨各自**的命中，其中「運算式錨」欄
-# 描述的是**前一輪的**判準（`part\.lower\(\)\s*==\s*…`），**不是**本鎖最終部署的第二
-# 錨（部署的是上述小寫引號字面值）。下表才是本鎖（雙錨聯集）的實際鑑別力，由本輪
-# bug-injection 實測取得——把變體逐一注入一支生產 `.py`（`tools/check_hooks_liveness.py`），
-# 在「強化前＝僅舊運算式錨」與「強化後＝本鎖」兩種狀態下各跑一次本測試：
-#   變體                                                       強化前  強化後
-#   A 同名 + 逐字同運算式                                        RED     RED
-#   B 同名 + in 列表判斷                                        GREEN   RED
-#   C 同名 + 路徑子串                                           GREEN   RED
-#   D 改名 + 逐字同運算式                                        RED     RED
-#   E 改名 + 另一種寫法（變體 B 去掉權威函式名）                  GREEN   RED ← 字面值錨新收攏
-#   F 同名 + 反向比較序                                         GREEN   RED
-#   G 迴圈變數改名 `seg`／`p`（改名，SD 構造）                    GREEN   RED
-#   H `part.casefold() == "windowsapps"`（改名，SD 構造）        GREEN   RED
-#   I `part.lower() in ("windowsapps",)`（改名，SD 構造）        GREEN   RED
-#   K 改名 + 字面值嵌進更大字串（見下方「方法論邊界」）           GREEN   GREEN
-# 即：8 種原本靜默通過的再發明形狀因本次強化轉為紅燈。
-# 對照組（未注入任何變體）在兩種狀態下皆 GREEN，確認上述紅燈非環境雜訊。
-#
-# R56 round 5 修正（三位審查員互不知會、各自實測命中同一根因）：上表原本的結語寫
-# 「唯一仍逃得掉的是 K」，該宣稱已被注入證偽——兩個錨當時都**大小寫敏感**，只要把
-# 字面值或函式名寫成 repo 自己慣用的大寫 `WindowsApps` 就整組逃逸。本輪注入實測
-# （同款手法，標的同樣是 `tools/check_hooks_liveness.py`）：
-#   變體                                                        加旗標前  加旗標後
-#   L  改名 + **裸大寫**字面值                                    GREEN     RED
-#      `def _is_store_alias(p): return any(x == "WindowsApps" …)`
-#   L2 對照組：同 L 但字面值為 `"windowsapps"`                     RED       RED
-#   N  camelCase 函式名 `def isWindowsAppsStub(...)`（名錨側）     GREEN     RED
-#   O  改名 + `("windows"+"apps")` 字串串接                       GREEN     GREEN
-# L2 紅、L 綠即證明缺口就是 `re.I` 的缺席本身。觸發情境具體而非罕見：姊妹語言 SSOT
-# `tools/lib/WindowsAppsGuard.ps1:55` 正是 `-notlike '*\WindowsApps\*'`（**大寫**），
-# 仿照它在 Python 側新寫一份判斷式的人最自然就會打出變體 L 的形狀。故兩錨各補一個
-# `re.I` 旗標（見下方常數；鑑別力由 `TestStubAnchorDiscriminatingPower` 常駐鎖住，
-# 不必靠下一輪再做一次 bug-injection 才發現旗標被拿掉）。
-#
-# 零偽陽性實測（round 5 親自重跑本鎖自身的候選集合，非引用他人數字）：scoped prefix
-# ∩ 非測試檔＝**378 支**生產 `.py`，「加旗標前 vs 加旗標後」命中集合**完全相同**
-# （`pre_run_validator.py` ＋ `tools/bootstrap_core.py`），新增偽陽性 **0**。
-#
-# 已刪除的錯誤理由（round 5 訂正，勿再寫回）：本處原有一段「大小寫敏感（刻意）：
-# `pre_run_validator.py` 的使用者訊息文字寫 `WindowsApps`，不分大小寫會把純文字提及
-# 誤判為判斷式實作」。兩層皆不成立——該檔 L70/L98 是 `f"WindowsApps App Execution
-# Alias 空殼（…"`，`WindowsApps` 後接**空白**，引號界定的 `["']windowsapps["']` 本來
-# 就不匹配（已實測，且由下方 negative case 常駐鎖住）；且該檔早已登記在
-# `_APPROVED_SECOND_IMPLS`，即使命中也不會翻紅。
-#
-# 精度取捨（2026-07-27 實測；round 5 在 re.I 下重驗仍成立）：引號界定必須保留。若改掃
-# **裸**字面值，`windowsapps` 會多命中三支只是提及 `tools/lib/windowsapps_guard.sh`
-# 檔名的守門工具（check_script_parity.py／check_wrapper_thinness.py／
-# check_gha_action_versions.py）＝5 支；再加 re.I 還會多命中 boot_helper.py＝6 支。
-# 「引號界定 ＋ re.I」則穩定維持在 2 支。
-#
-# 方法論邊界（如實揭露，勿留「已涵蓋全類別」錯覺）：**兩錨同時避開**者仍逃得掉。
-# round 5 收攏 L／N 之後，既知邊界收斂為兩種——共同特徵是「字面值不以完整 token 形式
-# 出現在一對引號內，且函式名不含 windows/apps 字樣」：
-#   K 改名 + 把字面值嵌進更大字串（如
-#     `def _stub_path(p): return "\\windowsapps\\" in p.lower()`）
-#   O 改名 + 字串串接（如 `("windows"+"apps")`）
-# 這是正則/靜態掃描
-# 類防護的既知極限（同 DEF-101-333 對本測試家族殘留繞過向量的四方一致裁定：三方各自
-# 構造出不同類型繞過＝已觸及逐行正則相對於 AST 解析的結構性天花板，誠實記載而不追殺。
-# R56 訂正：本處原引 DEF-101-433，但該則的前提〔薄殼守門缺前瞻機制〕已於 R56 經
-# bug-injection 證偽〔反向驗證實存於 check_script_parity.py〕，其「比例原則裁定」建立在
-# 不成立的前提上，不宜作為判例；真正的判例是 DEF-101-333），
-# 非本鎖可解。放大因素（R56 SD 指出）：本鎖是 Python 側「實作站點／等價軸」的 repo-wide
-# 前瞻掃描——bash 側另有白名單斷言（`test_all_known_callers_source_shared_guard`／
-# `test_no_raw_unguarded_python_check_remains`）與 repo-wide 掃描兩層互相補位。
-# **R60 訂正**：本段原句寫「Python 側**只有這一層**，破了本鎖即零訊號」——該宣稱自本檔
-# 末段新增 `TestZeroGuardBarePythonSitesAreEnrolled`（B-01，零 guard 裸 python 名稱的
-# repo-wide AST 掃描）起已失實，兩層現互為補位：本鎖漏掉的「改名 ＋ 字面值拆開」若仍以裸
-# `python` 名稱交給 OS，會被那一層抓到；反之那一層豁免的檔案若哪天內嵌一份判斷式，會被
-# 本鎖抓到。**仍不宣稱兩層合併後涵蓋全類別**：兩者同時避開者（改名 ＋ 字面值拆開 ＋ 完全
-# 不出現裸名首 token，例如 `os.environ["PY"]`）依舊逃得掉，屬靜態掃描天花板。
-# R56 round 5 修正：兩錨皆補 `re.I`（名錨須寫成 `re.MULTILINE | re.I`，勿覆蓋掉
-# 原有的 MULTILINE）。理由與零偽陽性實測見上方註解。
+# 方法論邊界（如實揭露，勿留「已涵蓋全類別」錯覺）：**兩錨同時避開**者仍逃得掉，既知邊界
+# 收斂為兩種，共同特徵是「字面值不以完整 token 形式出現在一對引號內，且函式名不含
+# windows/apps 字樣」：把字面值嵌進更大字串（`"\\windowsapps\\" in p.lower()`）、
+# 字串串接（`("windows"+"apps")`）。這是逐行正則相對於 AST 解析的結構性天花板，同
+# `DEF-101-333` 的四方一致裁定（**不是** `DEF-101-433`——該則的前提已於 R56 由
+# bug-injection 證偽，不宜作為判例），非本鎖可解。
+# **R60 訂正**：本段原句寫「Python 側只有這一層，破了本鎖即零訊號」，該宣稱自本檔末段的
+# `TestZeroGuardBarePythonSitesAreEnrolled`（B-01）起已失實——兩層互為補位：本鎖漏掉的
+# 「改名 ＋ 字面值拆開」若仍以裸 `python` 名稱交給 OS 會被那一層抓到，反之那一層豁免的檔
+# 哪天內嵌一份判斷式會被本鎖抓到。**仍不宣稱兩層合併後涵蓋全類別**：兩者同時避開者
+# （例如 `os.environ["PY"]`）依舊逃得掉。
 _STUB_NAME_RE = re.compile(r"^\s*def\s+\w*windows_?apps\w*", re.MULTILINE | re.I)
 _STUB_PREDICATE_RE = re.compile(r"""["']windowsapps["']""", re.I)
 

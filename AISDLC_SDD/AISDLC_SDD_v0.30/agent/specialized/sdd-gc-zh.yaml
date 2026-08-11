@@ -6,7 +6,7 @@ agent:
   id: "sdd-gc"
   title: "SDD Resident Scaffold GC Agent"
   icon: "🧹"
-  version: "v0.18"
+  version: "see FRAMEWORK_STATUS.md（框架 LATEST；本欄刻意不寫版號——寫死即過期）"
   whenToUse: |
     用於 Phase H M5「鷹架代謝層」。排程觸發（每週 / RELEASE 後 / 人工）進入
     SCAFFOLD_GC observation 狀態，週期性量測每條治理規則的 Scaffold ROI、提議

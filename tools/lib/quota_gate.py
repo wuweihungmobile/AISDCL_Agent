@@ -24,6 +24,18 @@ R82／Q2-02 的落地物。此前這一整條軸住在 `.claude/hooks/context_bu
 退化成「量不到」；判讀原語（quota_limits／quota_policy）hard import，給 stub 等於讓同一份
 字面有第二個家。
 
+🔴 **R84／ARCH-10：上一段在寫下的當時是一句對磁碟為假的規則，本輪把磁碟改成真的。**
+`tools/lib/quota_escalation.py` 曾是**唯一**以 `from lib import …` 被載入的同層模組
+（兩個站點：`tools/session_resume_planner.py`、`tools/tests/test_context_budget_guard.py`），
+兩者本輪一起改成裸名。危害不是假想：同一份原始碼以兩種寫法載入時實測是**兩個相異物件**
+（`import quota_escalation` vs `from lib import quota_escalation` ⇒ `e1 is e2` → False），
+於是「測試 patch 了一個、production 用的是另一個」這種靜默失效隨時可以發生。
+🔴 射程誠實劃界：`from lib import …` 這個寫法在本 repo 別處仍大量存在（`check_script_parity`
+／`archive_defect_log`／`sync_onboarding_baselines` …），本規則**不**宣稱管得到它們——
+它管的是 quota 這一族，因為只有這一族同時被 hook 行程與 CLI 行程載入。
+現查（本行落地後應**零**命中）：
+`grep -rn "from lib import quota" tools .claude AutoClaude`
+
 🔴 **R82／HELM-04 接線：本檔不再擁有任何門檻與階梯**（合議裁決規格 S2／S9）。此前
 `QUOTA_THROTTLE_PCT=80`／`QUOTA_HALT_PCT=95`／`THROTTLE_FANOUT_CAP=2`／`quota_tier_of(pct)`
 ／`fanout_cap(pct)` 住在本檔，而它們**只吃一個純量**：`pct=79 @3 分鐘後 reset` 與
@@ -344,10 +356,17 @@ def claim_refresh_slot() -> bool:
     **CLAIM=16 SKIP=0**（設計意圖 1），也就是這個成本節流器在它唯一要治的情境下完全
     失效。原子性住在共用層的 `claim_once()`（`O_CREAT|O_EXCL`）。
     """
-    if quota_ledger is None:
-        return False
-    mark = Path(tempfile.gettempdir()) / "autosdd_quota_refresh.stamp"
-    return quota_ledger.claim_once(mark, QUOTA_CACHE_TTL_SECONDS)
+    return (quota_ledger.claim_once(refresh_stamp_path(), QUOTA_CACHE_TTL_SECONDS)
+            if quota_ledger is not None else False)
+
+
+# 🔴 R84：這一格從 `claim_refresh_slot()` 內的寫死路徑抽成一支可 swap 的函式，理由與
+# `quota_trace_path`／`degraded_stamp_path` **逐字同構**（見那道 `trace_isolation_problems`
+# 鎖的立案）：它是額度軸第三個落在生產暫存的檔，而唯一的差別是它此前**沒有注入點**
+# ⇒ 任何走到刷新路徑的測試都會吃掉真的那個 180 秒名額，此後真的需要補量時靜默不補。
+def refresh_stamp_path() -> Path:
+    """成本節流器的痕跡檔（本 TTL 視窗內「已經有人試過量」的那一格）。"""
+    return Path(tempfile.gettempdir()) / "autosdd_quota_refresh.stamp"
 
 
 def quota_trace_path() -> Path:
@@ -575,6 +594,92 @@ def throttle_horizon_line(decision: quota_policy.Decision, now: datetime) -> str
     return f"   ⏳ 這一條的 {horizon} ⇒ 這道節流很快就會自己解除。\n"
 
 
+# ── 6C：85~95%「準備下一次 reset」那一帶真的要做的事（R84／SA-03）────────────────
+# 🔴 立案（SA 合成 86% 快取走真閘實測，逐字）：`event=PostToolUse tool=Read rc=0
+# stderr_bytes=0 plan_writer_calls=0`；`event=PreToolUse tool=Read rc=0 stderr_bytes=0`。
+# 對照 96%：`PostToolUse rc=2 stderr_bytes=569 plan_writer_calls=1`。
+# 也就是說 prepare 帶今天唯一真的會發生的事，是 PreToolUse×`Workflow` 被擋
+# （`UNBOUNDED_FANOUT_TOOLS` 實測只有這一個成員）；`Task`／`Agent`／`Read` 在 86% 全部
+# 靜默放行，訴求 6C 要的「提前準備下一次 reset」**一份任務書都沒有**，而外觀與「額度
+# 很健康」完全相同。R83 交棒書把射程記成只有 PostToolUse，實測是兩個事件都靜默。
+# 🔴 為什麼**不**在這一帶回 2：85% 不是停止水位，擋下收斂型工作會讓人連收斂都做不完
+#   （本 repo 判過「擋到讓人無法工作的守衛會被整個關掉」）。這一帶要的是**出聲＋留下
+#   可重啟點**，節流本身仍由既有的 cap／派發帳承接（prepare 帶 cap=2 已經在擋 Workflow）。
+# 🔴 一個 reset 視窗只做一次：沿用 halt 那套閂鎖鍵（`kind@reset 截到分鐘`），否則 85%
+#   之後每一次 Read／Bash 都會 spawn 一支 planner ＝ spawn 風暴（R83／D2 的同一個病）。
+def quota_prepare_message(decision: quota_policy.Decision, plan: str, now: datetime) -> str:
+    """prepare 帶那一次性的訊息。**不擋任何東西**，只說話 ＋ 指向已落磁碟的任務書。"""
+    return (f"🟡 額度進入**準備**水位（85~95%）⇒ 現在就收斂，別開新戰場。\n"
+            f"   {quota_policy.describe(decision)}\n"
+            f"   可重啟點任務書：{plan or '（寫不出來——逐字稿路徑不可得）'}\n"
+            + throttle_horizon_line(decision, now)
+            + "   下一步：把手上的工作收到可重啟點（工作樹狀態確定／任務書落磁碟），"
+              "現查還能派幾個：`python tools/session_resume_planner.py --pace`。\n")
+
+
+def quota_prepare_actions(payload: dict, decision: quota_policy.Decision, now: datetime, *,
+                          latch_read, latch_write, plan_writer) -> str:
+    """真的做那三件事（出聲／寫任務書／一個視窗一次）。回「這次寫出來的任務書路徑」。"""
+    latch = quota_latch_path()
+    key = f"prepare@{decision.binding.kind}@{str(binding_resets_at(decision))[:16]}"
+    if key in latch_read(latch):
+        return ""
+    latch_write(latch, key)
+    raw = payload.get("transcript_path")
+    transcript = Path(raw) if isinstance(raw, str) and raw.strip() else None
+    plan = plan_writer(transcript) if transcript and transcript.is_file() else ""
+    sys.stderr.write(quota_prepare_message(decision, plan, now))
+    return plan
+
+
+# ── 6b 第二半：「我現在能派幾個 agent」的**人機出口**（R84／SA-02）─────────────────
+# 🔴 立案：全 repo 沒有任何出口能回答這個問題——band／cap／距 reset 只在**被擋下時**才
+# 現身（`describe()` 的唯一呼叫端是本檔三個 stderr 寫入點）。實測 `python
+# tools/lib/quota_policy.py` → rc=2 只印用法；`quota_meter.py --from-cache --json` → rc=0
+# 但全文無 band／cap／pace／recommended。也就是舵手每天派工前需要的那個數字，今天唯一
+# 的取得方式是先撞牆。CLI 掛在 `tools/session_resume_planner.py --pace`（那支是既有的
+# 人機入口），本檔只提供內容——渲染與判讀在同一個家，不另開第二份。
+# 🔴 **零 token**：只讀快取；快取不可用時每 TTL 至多補量一次（`claim_refresh_slot()`），
+#   而那一次打的是 `/api/oauth/usage`——**不是模型推論**（見 `quota_meter.USAGE_URL`），
+#   不吃額度、不進 5 小時視窗。派工前查一次不會讓被查的那個數字變大。
+def pace_state(now: datetime) -> quota_policy.QuotaState:
+    """讀快取；不可用且本 TTL 還沒人量過時補量一次。"""
+    state = read_quota(now)
+    if state.usable() or quota_meter is None or not claim_refresh_slot():
+        return state
+    reading = quota_meter.measure_detail(QUOTA_SYNC_TIMEOUT_SECONDS)[0]
+    if reading is not None:
+        quota_meter.write_cache(reading, quota_cache_path())
+    return read_quota(datetime.now().astimezone())
+
+
+# 🔴 binding 一律具名（SA-06）：此前它恆是資訊量最低的那一軸（cap 平手時期程不明的軸
+# 必勝，實測 live 快取 `binding=nimbus_quill`＝0%、reset 不明、完全不消耗），於是真正的
+# 約束（weekly 那一族）在訊息裡不具名。`_binding_key` 已同輪修好，這裡只負責呈現。
+def pace_line(decision: quota_policy.Decision) -> str:
+    """**一行**：能派幾個／cap／band／距 reset／binding 是哪一軸（SA-02 要的五項）。"""
+    head = (f"現在可派 {decision.recommended_fanout} 個 agent（硬上限 cap="
+            f"{'不設限' if decision.cap is None else decision.cap}）"
+            f"｜band={decision.band}")
+    axis = decision.binding
+    if axis is None:
+        return head + "｜**量不到任何一軸**（這不是「額度很寬鬆」）"
+    when = next((f"剩 {int(r.minutes)} 分鐘" for r in decision.per_axis
+                 if r.axis is axis and r.minutes is not None), "reset 距離不明")
+    return head + f"｜最緊的一條＝{axis.kind} {axis.pct:g}% {when}"
+
+
+def pace_report(now: datetime | None = None) -> str:
+    """`--pace` 的全文：第一行是那個數字，第二行起是逐軸明細（每個 % 都帶 kind 與分鐘）。"""
+    now = now or datetime.now().astimezone()
+    policy, problems = quota_policy.load_policy(policy_env())
+    state = pace_state(now)
+    decision = quota_policy.decide(state, now, policy)
+    tail = f"\n⚠️ .env 有設錯：{'；'.join(problems)}" if problems else ""
+    return (f"{pace_line(decision)}\n  {quota_policy.describe(decision)}\n"
+            f"  來源={state.source} 量測於={state.measured_at or '(無)'}{tail}\n")
+
+
 def quota_throttle_message(decision: quota_policy.Decision, tool: str, live: int,
                            now: datetime) -> str:
     """節流帶的訊息。同 halt：**一個裸百分比都不准出現**（M7），逐軸帶 kind 與剩餘分鐘。"""
@@ -676,6 +781,21 @@ def quota_gate(payload: dict, *, blocking, latch_read, latch_write,
             sys.stderr.write(f"🔴 {quota_policy.describe(decision)}\n"
                              "   額度仍在停止水位：扇出一律不執行，任務書已在磁碟上。\n")
         return 2
+    # 🔴 R84／6C（SA-03）：prepare 帶（85~95%）的準備動作。位置刻意在 halt **之後**、
+    # 在下面那道早退**之前**——早退對 `PostToolUse` 與 free 帶無條件 `return 0`，把這一段
+    # 放在它後面就等於一行都到不了（那正是本缺陷的形狀：函式對了但沒人叫它）。
+    # 🔴 R84／SA84-02 訂正本行的**射程**（原文逐字寫「兩個事件都走這裡」，那是假話）：
+    # `PostToolUse` 涵蓋註冊面上的每一個工具；`PreToolUse` 只在**扇出邊緣**到得了這裡
+    # ——本函式第一格對 `tool not in blocking` 就 `return 0`，收斂型工具連 `policy_env()`
+    # 都沒讀到。實測（86% 快取、`tool=Read`）：`PostToolUse rc=0 stderr=409B prepare=1`／
+    # `PreToolUse rc=0 stderr=0B prepare=0`（96% 同形，只是落在 halt 帶而更早返回）。
+    # 那不是缺陷而是設計：`test_pre_tool_use_on_a_convergent_tool_is_still_silent_by_design`
+    # 正是釘住「PreToolUse×收斂型工具必須靜默」這一格。上面 6C 立案段記的「兩個事件皆
+    # 靜默」講的是**接電前**的狀態，與本行講的「誰到得了這裡」是兩件事，別混讀。
+    # 本段不改任何 rc。
+    if decision.band == quota_policy.BAND_PREPARE:
+        quota_prepare_actions(payload, decision, now, latch_read=latch_read,
+                              latch_write=latch_write, plan_writer=plan_writer)
     # free 帶＝不設限（維持 shipped 行為：50% 以下無事可做）。
     # 🔴 R83：這道早退**從 halt 之前移到 halt 之後**，且與「PostToolUse 只觀測」併成一道。
     # 移動是行為等價的：`cap is None` ⟺ binding 落在 free 帶，而 halt 帶的 cap 恆為 0

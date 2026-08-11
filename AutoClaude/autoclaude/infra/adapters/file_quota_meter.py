@@ -3,6 +3,17 @@
 # 只讀一個 JSON 快取檔，**不做網路、不 import harness code**。那個檔今天已經存在於磁碟上
 # （由 monorepo 根層的額度量測器寫），AutoClaude 修前一行都沒讀。
 # 檔案契約（照抄，勿重新發明）：
+# 🔴 R84／ARCH-07（本檔這一半）：下面這行檔名與 `__init__` 內的 `self._path` 都是**照抄**，
+# 唯一真相源住在 monorepo 根層 `tools/lib/quota_meter.py` 的 `CACHE_NAME`。
+# 之所以必須兩個家而不是一個：`AutoClaude/.importlinter` 明文禁止引擎 import 根層護欄層，
+# 唯一合規的接法就是這條**檔案契約**，兩側只好各自持有字面。
+# ⇒ 字面兩個家、算法一個判準；對齊由具名機械物守，不靠人記得：
+#   `tools/tests/test_quota_policy.py::TestM8bCacheHomeStaysInSync`（比目錄運算式：
+#     只有一側搬家即紅，兩側同一次 commit 一起搬才綠——它讀的是這兩支檔的原始碼）
+#   `tools/tests/test_quota_policy.py::TestM8SchemaStaysInSync`（下面 SCHEMA 那一半）
+# 只改一側的人會讓本 adapter 讀不到檔，而它對「檔不在」的反應是回 None（＝量不到），
+# 且那個 None 被它自己的測試釘成正確行為 ⇒ 失效全綠、完全靜默。
+# 現查另一個家：`grep -n "CACHE_NAME" tools/lib/quota_meter.py`
 #   路徑    Path(tempfile.gettempdir()) / "autosdd_quota.json"
 #   schema  必須等於 "autosdd.quota/2"
 #   axes[]  每一格＝一條計費線：{kind, pct(0..100 float，**不是** 0..1), resets_at, group…}
@@ -32,6 +43,10 @@ DEFAULT_TTL_SECONDS = 1800.0
 
 class FileQuotaMeterAdapter:
     def __init__(self, path: str | None = None, ttl_seconds: float = DEFAULT_TTL_SECONDS):
+        # 🔴 R84／ARCH-07：本行是 ARCH-07 的第二處硬編字面（另一處在檔頭那張路徑表）。
+        # 搬家或改名必須與根層 `tools/lib/quota_meter.py::CACHE_NAME` **同一次 commit** 一起動，
+        # 否則 `tools/tests/test_quota_policy.py::TestM8bCacheHomeStaysInSync` 會紅——
+        # 那道鎖比的是本行的**目錄運算式**，不是檔名字串，所以改本行的寫法前先讀它。
         self._path = Path(path) if path else Path(tempfile.gettempdir()) / "autosdd_quota.json"
         self._ttl = float(ttl_seconds)
 

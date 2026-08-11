@@ -90,8 +90,10 @@ notification:
   #    才冒出彈窗，並把行程多吊住 duration 秒（plyer 的非 daemon 執行緒 sleep）。
   #    臨時想看通知：設 true，或 env AUTOCLAUDE_DESKTOP_NOTIFY=1（不必改本入庫檔）。
   #    ⚠️ 關掉的只有「彈窗」——ESCALATION 仍永遠寫 checkpoints/escalation_alert.log（刻意）。
+  # 🔴 R84（AC-(c)）：即使設 true 也不再拖住行程結束——通知後端改由 daemon 執行緒呼叫，
+  #    後端自己 spawn 的內層執行緒因而繼承 daemon（實測 3.049s → 0.247s）。
   enabled: false
-  duration_seconds: 3               # 彈窗停留秒數；直接決定行程結束時被吊住多久（原硬編 10）
+  duration_seconds: 3               # 彈窗停留秒數（原硬編 10）。R84 起**不再**等同行程被吊住的秒數
   # webhook_url（選配）：通知 webhook 端點。🔑 若為含 token 的私密 URL（如 Slack incoming
   #   webhook），視為機密、請改用環境變數注入、勿填入本入庫檔；留空＝僅桌面通知。
   # webhook_url: ""

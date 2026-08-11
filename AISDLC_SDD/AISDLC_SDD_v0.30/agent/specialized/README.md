@@ -1,11 +1,16 @@
 # Specialized Agents — 選用指引與 SDD 技能對應
 
-**框架版本**: AISDLC-SDD v0.18
-**最後更新**: v0.18
+**框架版本**: 見 `FRAMEWORK_STATUS.md`（框架 LATEST；本檔刻意不寫版號——寫死即過期，AGT-05／R84）
+**最後更新**: 一律現查 `git log -1 --format='%h %ci' -- <本檔路徑>`
 
 ---
 
-## 19 個 Specialized（14 persona/specialized + 5 系統級 runtime）
+## 21 個 Specialized（14 persona/specialized + 7 系統級 runtime）
+
+> 🔴 **R84 訂正（AGT-10 同輪）**：本標題原寫「19 個（14 + 5）」，而磁碟當時已有 20 支——
+> `sdd-prd-to-playbook-zh.yaml` 在 v0.29 加入後從未回填本表。**計數的唯一真相源是磁碟**
+> （`FRAMEWORK_STATUS.md` 由 `scripts/framework_status_snapshot.py` 實掃生成、ci-gate `--check`
+> 機械守新鮮）；本表是人讀用的導覽，與磁碟不符時以 FRAMEWORK_STATUS.md 為準。
 
 | 檔案 | Agent 角色 | 適用場景 | SDD 技能 |
 |------|-----------|---------|---------|
@@ -24,7 +29,7 @@
 | `security-engineer-zh.yaml` | 安全工程師 | Security | STRIDE 威脅模型、OWASP Top 10 |
 | `technical-writer-zh.yaml` | 技術寫作師 | Documentation | Living Doc 策略、ADR 維護 |
 
-### 系統級 Runtime Agent（5）
+### 系統級 Runtime Agent（7）
 
 | 檔案 | Agent 角色 | 觸發時機 |
 |------|-----------|---------|
@@ -33,6 +38,8 @@
 | `sdd-evaluator-zh.yaml` | 執行接地評估器 | EXECUTION_EVALUATION 時 |
 | `sdd-gc-zh.yaml` | 鷹架 GC Agent | 鷹架代謝週期 |
 | `sdd-playbook-compiler-zh.yaml` | Playbook 編譯器 | SDD→Playbook 編譯時 |
+| `sdd-prd-to-playbook-zh.yaml` | PRD→Playbook 轉譯器 | A 軌協作橋接（SDD→Playbook）時 |
+| `sdd-zero-trust-auditor-zh.yaml` | 文件級零信任稽核者（唯讀） | SCG-4／SCG-5 前的獨立複審 |
 
 > **系統級 runtime agent 採 runtime schema（responsibilities/inputs/workflow/outputs），刻意不遵 persona 模板**——其由 FSM Runtime 在對應事件觸發時載入，非情境式 persona 角色。
 

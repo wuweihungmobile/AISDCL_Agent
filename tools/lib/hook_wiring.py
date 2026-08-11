@@ -54,10 +54,12 @@
 #   · `AISDLC_SDD/scripts/tests/test_hook_wiring_cwd_safety.py`（用 `hook_entry_argv`）
 from __future__ import annotations
 
+import json
 import os
 import re
 import shutil
 import subprocess
+import sys
 from pathlib import Path
 
 #: 統一啟動器的 repo 相對路徑（exec form 的 `command` 塞不進 `-c` 程式碼，
@@ -75,7 +77,8 @@ POSIX_CARRIER = f"{PROJECT_DIR_PLACEHOLDER}/{LAUNCHER_REL}"
 #: 實測解析不到（那種 session 的 `python` 是 pyenv shim，沒有 `pythonw.exe`）⇒ 會
 #: 靜默失去全部 hook。混用兩種＝一部分 hook 在某些機器消失，且「加第二個當備援」會
 #: 導致 hook 跑兩次（deny 型守衛第二次被略過＝安全洞）。
-WIN_CARRIER_VENV = f"{PROJECT_DIR_PLACEHOLDER}/.venv/Scripts/pythonw.exe"
+WIN_CARRIER_REL = ".venv/Scripts/pythonw.exe"
+WIN_CARRIER_VENV = f"{PROJECT_DIR_PLACEHOLDER}/{WIN_CARRIER_REL}"
 WIN_CARRIER_PATH = "pythonw.exe"
 WIN_CARRIERS = (WIN_CARRIER_VENV, WIN_CARRIER_PATH)
 
@@ -93,13 +96,11 @@ _ABS_RE = re.compile(r"(?i)(^[a-z]:[\\/])|(^\\\\)|(^/users/)|(^/home/)|(^/mnt/[a
 _PARENT_PREFIX_RE = re.compile(r"^(?:\.\./)+")
 
 
+# 實測依據：`args: []` 會讓 CC 切到 exec form，於是整串 `python "…" x 0` 被當成
+# **一個執行檔路徑**去 spawn（`uv_spawn ENOENT`）——所以「有 args」是判準，
+# 「args 非空」不是。
 def is_exec_form(hook: dict) -> bool:
-    """條目是否為 exec form。判準＝**有沒有 `args` 欄位**（`args: []` 也算）。
-
-    實測依據：`args: []` 會讓 CC 切到 exec form，於是整串 `python "…" x 0` 被當成
-    **一個執行檔路徑**去 spawn（`uv_spawn ENOENT`）——所以「有 args」是判準，
-    「args 非空」不是。
-    """
+    """條目是否為 exec form。判準＝**有沒有 `args` 欄位**（`args: []` 也算）。"""
     return isinstance(hook, dict) and "args" in hook
 
 
@@ -142,14 +143,12 @@ def expand_tokens(tokens: list[str], project_dir: str) -> list[str]:
     return out
 
 
+# 實測依據（R80，Windows）：`.py` 直接 spawn 回 `EFTYPE`、缺檔回 `ENOENT`，
+# 兩者 CC 都只記一行 ERROR 就放行（**fail-open**）。所以「跑不起來」不是缺陷，
+# 是跨平台配對設計刻意的那一半——但驗證載具必須知道自己在哪一半，否則會把
+# 「另一個平台的那條」當成真紅。
 def carrier_available(hook: dict, project_dir: str, *, exists=os.path.exists) -> bool:
-    """這個條目的載具在**當前平台**跑不跑得起來（配對中恰好一條成立、另一條 fail-open）。
-
-    實測依據（R80，Windows）：`.py` 直接 spawn 回 `EFTYPE`、缺檔回 `ENOENT`，
-    兩者 CC 都只記一行 ERROR 就放行（**fail-open**）。所以「跑不起來」不是缺陷，
-    是跨平台配對設計刻意的那一半——但驗證載具必須知道自己在哪一半，否則會把
-    「另一個平台的那條」當成真紅。
-    """
+    """這個條目的載具在**當前平台**跑不跑得起來（配對中恰好一條成立、另一條 fail-open）。"""
     argv = hook_entry_argv(hook)
     if not argv:
         return False
@@ -165,39 +164,50 @@ def carrier_available(hook: dict, project_dir: str, *, exists=os.path.exists) ->
     return True
 
 
+# 🔴 前導 `../` 一併剝掉（R81）：不剝的話，子專案條目裡的
+# `${CLAUDE_PROJECT_DIR}/../.claude/hooks/_hook_launcher.py` 與 `LAUNCHER_REL`
+# 比不相等 ⇒ `hook_entry_targets()` 會把**載具**當成一支「已註冊的 hook 腳本」算進去，
+# 而「載具不是守衛」正是那個函式特意要區分的事（見其旁註）。
 def _normalise(token: str) -> str:
-    """把一個路徑 token 正規化成專案相對的 posix 路徑（無佔位符、無前導斜線／`../`）。
-
-    🔴 前導 `../` 一併剝掉（R81）：不剝的話，子專案條目裡的
-    `${CLAUDE_PROJECT_DIR}/../.claude/hooks/_hook_launcher.py` 與 `LAUNCHER_REL`
-    比不相等 ⇒ `hook_entry_targets()` 會把**載具**當成一支「已註冊的 hook 腳本」算進去，
-    而「載具不是守衛」正是那個函式特意要區分的事（見其 docstring）。
-    """
+    """把一個路徑 token 正規化成專案相對的 posix 路徑（無佔位符、無前導斜線／`../`）。"""
     rel = token.replace("\\", "/")
     rel = rel.replace(PROJECT_DIR_PLACEHOLDER, "")
     return _PARENT_PREFIX_RE.sub("", rel.lstrip("/"))
 
 
+# 為何不是 `== POSIX_CARRIER` 的字面比對：子專案（AutoClaude）與 SDD 各版的
+# `CLAUDE_PROJECT_DIR` 指向自己那個目錄，而啟動器只有一個家 ⇒ 那些條目以一段或多段
+# `../` 回到 monorepo 根層取用**同一支檔**。字面比對會把它們判成「沒有宣告 POSIX 載具」，
+# 於是 `posix_carrier_problems()` 對整個子專案靜默失明——而那一側的失效同樣是 fail-open。
 def is_posix_carrier(command: str) -> bool:
-    """`command` 是不是 POSIX 載具（＝啟動器本身），`../` 前綴視為同一個載具。
-
-    為何不是 `== POSIX_CARRIER` 的字面比對：子專案（AutoClaude）的
-    `CLAUDE_PROJECT_DIR` 指向子專案目錄，而啟動器只有一個家 ⇒ 那些條目以 `../` 回到
-    monorepo 根層取用**同一支檔**。字面比對會把它們判成「沒有宣告 POSIX 載具」，於是
-    `posix_carrier_problems()` 對整個子專案靜默失明——而那一側的失效同樣是 fail-open。
-    """
+    """`command` 是不是 POSIX 載具（＝啟動器本身），`../` 前綴視為同一個載具。"""
     return _normalise(str(command)) == LAUNCHER_REL
 
 
-def hook_entry_targets(hook: dict, *, include_launcher: bool = False) -> list[str]:
-    """這個 hook 條目**實際會跑到**的腳本（repo 相對 posix 路徑，保序去重）。
+# 🔴 R84（訴求 7／A2b）：Windows 載具也必須走**正規化**比對，理由與上面那段逐字同構，
+# 而代價已經量到了——`hook_form_problems()` 對 `AutoClaude/.claude/settings.json`
+# 回 **12 筆假紅**（6 筆「args[0] 必須是啟動器」＋ 6 筆「command 只准是…」），因為那份
+# 檔的載具帶 `../`。`is_posix_carrier()` 在 R81 已經修好這件事，B／E 兩條卻仍在做字面
+# 比對 ⇒ **同一個缺口只補了一半**。假紅的下場不是「比較嚴格」：這份檔的形態判準因此
+# 永遠回非空，任何人想把 A~F 的掃描面擴到子專案／SDD LATEST 都會先撞到一堵假牆，
+# 於是那個擴面一直沒有發生（本輪 SDD LATEST 30 份全是 shell form 就是它的下游後果）。
+# 回 kind（而不是 bool）是因為判準 F 要的是「有沒有混用兩**種**載具」——正規化之後
+# `../.venv/…` 與 `../../.venv/…` 是同一種，混用判準必須看種類而不是字面。
+def win_carrier_kind(command: str) -> str | None:
+    """Windows 載具的種類：`"venv"`／`"path"`；不是 Windows 載具回 `None`。"""
+    cmd = str(command)
+    if cmd == WIN_CARRIER_PATH:
+        return "path"
+    return "venv" if _normalise(cmd) == WIN_CARRIER_REL else None
 
-    兩種形態都認得——這就是本檔存在的全部理由。預設**不含啟動器本身**：啟動器是
-    載具不是守衛，它只是在同一個行程裡 `runpy` 目標腳本；把它算成「已註冊 hook 腳本」
-    會讓下游那些「每支已註冊腳本都要有 X」的判準把載具也算進去（例如 stdio 強制那道
-    per-tree shrink-only 棘輪會被迫 +1，而那是**調高棘輪**，本 repo 明文禁止）。
-    需要看載具本身時傳 `include_launcher=True`。
-    """
+
+# 兩種形態都認得——這就是本檔存在的全部理由。預設**不含啟動器本身**：啟動器是
+# 載具不是守衛，它只是在同一個行程裡 `runpy` 目標腳本；把它算成「已註冊 hook 腳本」
+# 會讓下游那些「每支已註冊腳本都要有 X」的判準把載具也算進去（例如 stdio 強制那道
+# per-tree shrink-only 棘輪會被迫 +1，而那是**調高棘輪**，本 repo 明文禁止）。
+# 需要看載具本身時傳 `include_launcher=True`。
+def hook_entry_targets(hook: dict, *, include_launcher: bool = False) -> list[str]:
+    """這個 hook 條目**實際會跑到**的腳本（repo 相對 posix 路徑，保序去重）。"""
     out: list[str] = []
     for token in _PY_TOKEN_RE.findall(" ".join(hook_entry_argv(hook))):
         rel = _normalise(token)
@@ -236,19 +246,19 @@ def entries_launching(settings: dict, needle: str, event: str = "PreToolUse") ->
 # 形態判準 A~F（回歸鎖用；純函式，回非空即紅）
 # ─────────────────────────────────────────────────────────────────────────────
 
+# 六條規則（任一違反即回一筆問題；空 list＝綠）：
+#   A 每個 `type=="command"` 條目必須有 `args`（沒有＝shell form＝Windows 上閃窗）
+#   B `command` 只准是兩種載具之一（防有人塞回 `python`／`sh -c`／`cmd /c`）；比對走
+#     `win_carrier_kind()`／`is_posix_carrier()` 的**正規化**版，不是字面（R84／A2b）
+#   C `command` 不得含空白（V4 陷阱：`args` 存在時整串會被當成一個執行檔路徑，
+#     實測 `uv_spawn ENOENT`，而它「看起來像對的」）
+#   D `command` 與所有 `args` 元素不得出現機器專屬絕對路徑（DEF-101-778）
+#   E 每個目標在同一 block 內必須恰好一個 Windows 條目 ＋ 恰好一個 POSIX 條目
+#     ⚠️ **這條是本鎖的核心**：exec form 的 spawn 失敗是 **fail-open**，少一邊
+#     不會有任何東西轉紅，只會在那個平台靜默失去這個 hook
+#   F 全檔不得混用兩**種** Windows 載具（venv／PATH，見 `WIN_CARRIERS` 旁註記）
 def hook_form_problems(settings: dict) -> list[str]:
-    """六條規則，任一違反即回一筆問題（空 list＝綠）。
-
-    A 每個 `type=="command"` 條目必須有 `args`（沒有＝shell form＝Windows 上閃窗）
-    B `command` 只准是兩個載具字串之一（防有人塞回 `python`／`sh -c`／`cmd /c`）
-    C `command` 不得含空白（V4 陷阱：`args` 存在時整串會被當成一個執行檔路徑，
-      實測 `uv_spawn ENOENT`，而它「看起來像對的」）
-    D `command` 與所有 `args` 元素不得出現機器專屬絕對路徑（DEF-101-778）
-    E 每個目標在同一 block 內必須恰好一個 Windows 條目 ＋ 恰好一個 POSIX 條目
-      ⚠️ **這條是本鎖的核心**：exec form 的 spawn 失敗是 **fail-open**，少一邊
-      不會有任何東西轉紅，只會在那個平台靜默失去這個 hook
-    F 全檔不得混用兩種 Windows 載具（見 `WIN_CARRIERS` 旁註記）
-    """
+    """形態判準 A~F（詳見上方註記）。"""
     problems: list[str] = []
     carriers_used: set[str] = set()
     for event, blocks in (settings.get("hooks") or {}).items():
@@ -279,9 +289,10 @@ def hook_form_problems(settings: dict) -> list[str]:
                     problems.append(
                         f"{where}: 出現機器專屬絕對路徑"
                         f"（只准 {PROJECT_DIR_PLACEHOLDER} 佔位）：{hits}")
-                if command in WIN_CARRIERS:
-                    carriers_used.add(command)
-                    if args[0] != POSIX_CARRIER:
+                kind = win_carrier_kind(command)
+                if kind:
+                    carriers_used.add(kind)
+                    if not is_posix_carrier(args[0]):
                         problems.append(
                             f"{where}: Windows 載具的 args[0] 必須是啟動器 "
                             f"{POSIX_CARRIER!r}，實得 {args[0]!r}")
@@ -289,7 +300,7 @@ def hook_form_problems(settings: dict) -> list[str]:
                     tail = tuple(args[1:])
                     pairs.setdefault(tail, {})
                     pairs[tail]["win"] = pairs[tail].get("win", 0) + 1
-                elif command == POSIX_CARRIER:
+                elif is_posix_carrier(command):
                     tail = tuple(args)
                     pairs.setdefault(tail, {})
                     pairs[tail]["posix"] = pairs[tail].get("posix", 0) + 1
@@ -323,7 +334,7 @@ def declared_win_carriers(settings: dict) -> set[str]:
         for block in blocks or []:
             for hook in block.get("hooks") or []:
                 command = str(hook.get("command", ""))
-                if is_command_hook(hook) and is_exec_form(hook) and command in WIN_CARRIERS:
+                if is_command_hook(hook) and is_exec_form(hook) and win_carrier_kind(command):
                     out.add(command)
     return out
 
@@ -340,6 +351,26 @@ def declared_posix_carriers(settings: dict) -> set[str]:
     }
 
 
+# 🔴 為什麼這道非有不可（方案書 §4.3 自己劃出的缺口）：載具解析不到時 CC 只記一行
+# ERROR、工具照跑（**fail-open**）⇒ 六支守衛會**全部靜默失效，而螢幕上的表徵就是
+# 「終於不閃窗了」**——與修好了一模一樣。把缺口寫下來卻不給判準，等於把它登記成
+# 「已知且已接受」。
+#
+# 🔴 為什麼判準綁「宣告」而不是硬編一個路徑：這樣「有人把載具改成別的東西」也會
+# 被同一條守到（改了宣告就要有對應的實況），而不是只守住今天這一種寫法。
+#
+# 非 Windows 不看 `.venv/Scripts/pythonw.exe`：它在 mac/Linux 本來就不存在，那條在
+# 該平台是**設計上的 fail-open**、不是缺陷（`DEF-101-766`：單平台判準不可無條件外推）。
+# `PATH` 載具同樣不在射程內——它的實況取決於 session 的 PATH，不是磁碟上的檔案，
+# 靜態判準看不到，硬判會變成誤報。
+#
+# 🔴 R80 SA-05：非 Windows **不再一律回空**，改判該平台自己的那條載具（見
+# `posix_carrier_problems`）。原本的「回空」把「這個平台沒有 Windows 載具」誤當成
+# 「這個平台沒有載具問題」——而 POSIX 那條同樣是單點失效面，失效同樣靜默。
+#
+# 🔴 誠實劃界（R84）：`project_dir` 是**單一** session 的專案根，而帶 `../` 的載具字串
+# 要用它自己那份 settings 所屬的專案根去展開才對得上 ⇒ 本函式不可拿 monorepo 根去跑
+# 子專案／SDD LATEST 那兩份（會 normpath 到 repo 之外而假紅）。呼叫端現況只餵根層那份。
 def carrier_liveness_problems(
     settings: dict,
     project_dir: str,
@@ -349,32 +380,14 @@ def carrier_liveness_problems(
     is_exec=None,
     probe=None,
 ) -> list[str]:
-    """**宣告 ↔ 實況**雙向綁定：settings 宣告了 venv 載具 ⇒ 那個路徑必須真的存在。
-
-    🔴 為什麼這道非有不可（方案書 §4.3 自己劃出的缺口）：載具解析不到時 CC 只記一行
-    ERROR、工具照跑（**fail-open**）⇒ 六支守衛會**全部靜默失效，而螢幕上的表徵就是
-    「終於不閃窗了」**——與修好了一模一樣。把缺口寫下來卻不給判準，等於把它登記成
-    「已知且已接受」。
-
-    🔴 為什麼判準綁「宣告」而不是硬編一個路徑：這樣「有人把載具改成別的東西」也會
-    被同一條守到（改了宣告就要有對應的實況），而不是只守住今天這一種寫法。
-
-    非 Windows 不看 `.venv/Scripts/pythonw.exe`：它在 mac/Linux 本來就不存在，那條在
-    該平台是**設計上的 fail-open**、不是缺陷（`DEF-101-766`：單平台判準不可無條件外推）。
-    `PATH` 載具同樣不在射程內——它的實況取決於 session 的 PATH，不是磁碟上的檔案，
-    靜態判準看不到，硬判會變成誤報。
-
-    🔴 R80 SA-05：非 Windows **不再一律回空**，改判該平台自己的那條載具（見
-    `posix_carrier_problems`）。原本的「回空」把「這個平台沒有 Windows 載具」誤當成
-    「這個平台沒有載具問題」——而 POSIX 那條同樣是單點失效面，失效同樣靜默。
-    """
+    """**宣告 ↔ 實況**雙向綁定：settings 宣告了 venv 載具 ⇒ 那個路徑必須真的存在。"""
     if not on_windows:
         return posix_carrier_problems(
             settings, project_dir, exists=exists, is_exec=is_exec, probe=probe)
     problems: list[str] = []
     for carrier in sorted(declared_win_carriers(settings)):
-        if carrier != WIN_CARRIER_VENV:
-            continue
+        if win_carrier_kind(carrier) != "venv":
+            continue  # PATH 版的實況取決於 session 的 PATH，靜態判不了（見上方 docstring）
         path = expand_tokens([carrier], project_dir)[0]
         if not exists(path):
             problems.append(
@@ -494,6 +507,53 @@ def posix_carrier_problems(
 #: 凍結版 settings 的路徑前綴（Copy-on-Evolve：各版目錄是歷史快照，不隨演化改寫）。
 FROZEN_SETTINGS_PREFIX = "AISDLC_SDD/AISDLC_SDD_v"
 
+#: LATEST SDD 版那一份 settings 在普查表裡的**版本中性**鍵。
+#: 刻意不用真實路徑當鍵：那會把「現在 LATEST 是哪一版」寫成常數，而 Copy-on-Evolve
+#: 每開一版就會讓它過期（同 `FRAMEWORK_STATUS.md` 為版號唯一真相源的既有政策）。
+LATEST_SETTINGS_KEY = "AISDLC_SDD/<LATEST>/.claude/settings.json"
+
+#: 凍結歷史面（各版目錄裡**非 LATEST** 的那些）仍是 shell form 的 settings **份數**。
+#: 判準是相等、方向是只准變小，理由與 `SHELL_FORM_CENSUS` 逐字同構。
+#:
+#: 🔴 為何不是 0（誠實劃界，不是放寬）：那 29 份是 Copy-on-Evolve 的歷史快照，依政策
+#: 不改寫（本 repo 明文：凍結面一律不動）。把它們登記成**已知豁免且只准變小**，是為了
+#: 讓「LATEST 那一份退回 shell form」與「凍結面被人動了」兩件事各有一條會轉紅的判準；
+#: 寫成散文（R80／R81 的做法）的代價已經實測到：`FROZEN_SETTINGS_PREFIX` 把 30 份全部
+#: 結構性排除在 `SHELL_FORM_CENSUS` 之外 ⇒ 那兩格「皆為 0」是**假的安心**，而只要掌舵者
+#: 曾以 SDD 版目錄為 cwd 開 session（框架 skills 正掛那裡），R80／R81 的修法一次都沒生效。
+#:
+#: 新開一版時這個數字**不會上升**：新版由已是 exec form 的 LATEST 複製而來，LATEST 前移
+#: 之後舊 LATEST 掉進凍結面時本身就是 exec form。上升＝有人真的改了凍結面。
+FROZEN_SHELL_FORM_MAX = 29
+
+#: `latest_sdd_settings()` 的 per-repo 快取（LATEST 解析走 subprocess SSOT，一次約 0.3s，
+#: 而本模組的判準會對同一個 repo root 反覆問它）。
+_LATEST_SETTINGS_CACHE: dict[str, str | None] = {}
+
+
+# LATEST 解析**不自己實作**：SSOT 是 `AISDLC_SDD/scripts/sdd_version.py`，而 repo 內
+# 已有唯一的 Python 轉接層 `tools/lib/sdd_latest.py`（R66 收斂掉 10 份逐字複本）。
+# 這裡刻意延後 import 並吞掉例外：本模組是 hook／護欄層的取數管道，LATEST 解析失敗
+# （非 git、tarball、SDD 樹不存在）不該讓整條判準爆掉——回 `None` 時 LATEST 那一份
+# 只是回到「不在射程內」，而它不在射程時普查表的缺鍵會由 `shell_form_census_problems()`
+# 的「在普查表內卻掃不到 ⇒ 射程疑似縮小」那一款出聲，不會靜默。
+def latest_sdd_settings(repo_root) -> str | None:
+    """LATEST SDD 版的 `.claude/settings.json`（repo 相對 posix）；解析不到回 `None`。"""
+    root = Path(repo_root)
+    key = str(root)
+    if key not in _LATEST_SETTINGS_CACHE:
+        rel = None
+        try:
+            sys.path.insert(0, str(Path(__file__).resolve().parent))
+            from sdd_latest import resolve_latest_name  # noqa: PLC0415
+
+            rel = (f"AISDLC_SDD/{resolve_latest_name(root / 'AISDLC_SDD')}"
+                   "/.claude/settings.json")
+        except Exception:
+            rel = None
+        _LATEST_SETTINGS_CACHE[key] = rel if rel and (root / rel).is_file() else None
+    return _LATEST_SETTINGS_CACHE[key]
+
 #: **活躍**（真的會被 Claude Code 載入）的 settings 檔 → 該檔目前殘留的 shell form 條目數。
 #:
 #: 🔴 本表的存在理由（史實，不是現況）：R80 的 exec form 只轉了**根層那一份**，
@@ -507,9 +567,13 @@ FROZEN_SETTINGS_PREFIX = "AISDLC_SDD/AISDLC_SDD_v"
 #: 多了＝有人退回 shell form（那一份的閃窗回來了）；少了＝有人轉好了卻沒回來改這張表，
 #: 而餘裕就是日後無聲加回去的破口。掃描面是**現查磁碟**，不是寫死清單——新開一份活躍
 #: settings 卻不入表也會紅。
+#: 🔴 R84 補第三格：`AISDLC_SDD/<LATEST>/.claude/settings.json`。它先前被
+#: `FROZEN_SETTINGS_PREFIX` **結構性排除**在掃描面之外 ⇒ 「兩格皆為 0」是假的安心
+#: （見 `FROZEN_SHELL_FORM_MAX` 旁那段立案事實）。鍵用版本中性佔位，見 `LATEST_SETTINGS_KEY`。
 SHELL_FORM_CENSUS: dict[str, int] = {
     ".claude/settings.json": 0,
     "AutoClaude/.claude/settings.json": 0,
+    LATEST_SETTINGS_KEY: 0,
 }
 
 
@@ -524,17 +588,67 @@ def shell_form_entries(settings: dict) -> list[str]:
     ]
 
 
+# 🔴 R84：排除規則由「整個 `AISDLC_SDD/AISDLC_SDD_v*` 家族」收窄成「**非 LATEST** 的那些」。
+# 舊版把 LATEST 也排掉，而 LATEST 是**真的會被 Claude Code 載入**的活躍檔（框架 skills
+# 掛在那個目錄，以它為 cwd 開 session 是常態）⇒ 它退回／停留在 shell form 時沒有任何
+# 東西轉紅。凍結歷史面另有 `frozen_shell_form_problems()` 這條 shrink-only 判準看著，
+# 所以這裡的收窄不會讓凍結面變成無人看管。
 def discover_active_settings(repo_root) -> list[str]:
-    """repo 內**活躍**的 `.claude/settings.json`（repo 相對 posix，排除凍結版）。"""
+    """repo 內**活躍**的 `.claude/settings.json`（repo 相對 posix；含 SDD LATEST 那一份）。"""
     root = Path(repo_root)
+    latest = latest_sdd_settings(root)
     found: list[str] = []
     for pattern in (".claude/settings.json", "*/.claude/settings.json",
                     "*/*/.claude/settings.json"):
         for path in root.glob(pattern):
             rel = path.relative_to(root).as_posix()
-            if not rel.startswith(FROZEN_SETTINGS_PREFIX) and rel not in found:
-                found.append(rel)
+            if rel in found or (rel.startswith(FROZEN_SETTINGS_PREFIX) and rel != latest):
+                continue
+            found.append(rel)
     return sorted(found)
+
+
+def census_key(rel: str, repo_root) -> str:
+    """實際路徑 → 普查鍵（LATEST 那一份換成版本中性鍵，其餘原樣）。"""
+    return LATEST_SETTINGS_KEY if rel == latest_sdd_settings(repo_root) else rel
+
+
+def census_counts(repo_root) -> dict[str, int]:
+    """現查磁碟 → `{普查鍵: 該份殘留的 shell form 條目數}`（取數管道只有一個家）。"""
+    return {
+        census_key(rel, repo_root):
+            len(shell_form_entries(json.loads(
+                (Path(repo_root) / rel).read_text(encoding="utf-8"))))
+        for rel in discover_active_settings(repo_root)
+    }
+
+
+def frozen_shell_form_settings(repo_root) -> list[str]:
+    """凍結面（各版目錄裡**非 LATEST** 的那些）仍殘留 shell form 條目的 settings 清單。"""
+    root = Path(repo_root)
+    latest = latest_sdd_settings(root)
+    out: list[str] = []
+    for path in sorted(root.glob(f"{FROZEN_SETTINGS_PREFIX}*/.claude/settings.json")):
+        rel = path.relative_to(root).as_posix()
+        if rel != latest and shell_form_entries(
+                json.loads(path.read_text(encoding="utf-8"))):
+            out.append(rel)
+    return out
+
+
+def frozen_shell_form_problems(found: list[str], cap: int | None = None) -> list[str]:
+    """凍結面 shell form 份數的相等判準（純函式；空＝通過）。"""
+    want = FROZEN_SHELL_FORM_MAX if cap is None else cap
+    if len(found) == want:
+        return []
+    verb = ("上升——新版一律由已是 exec form 的 LATEST 複製 ⇒ 這個數字不該變大，"
+            "上升代表有人真的改了凍結面（Copy-on-Evolve 明文禁止），或 LATEST 解析壞掉"
+            "把活躍那份算了進來"
+            if len(found) > want else
+            "下降——請同一次變更把 hook_wiring.FROZEN_SHELL_FORM_MAX 下修到實測值，"
+            "餘裕＝日後無聲加回去的破口")
+    return [f"凍結面（非 LATEST 各版）仍是 shell form 的 settings 實測 {len(found)} 份、"
+            f"基準 {want}——{verb}。清單：{found}"]
 
 
 def shell_form_census_problems(counts: dict[str, int],

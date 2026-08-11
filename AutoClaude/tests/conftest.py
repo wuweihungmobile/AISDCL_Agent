@@ -517,7 +517,23 @@ def pytest_terminal_summary(terminalreporter, exitstatus, config):  # noqa: ARG0
         gate = _local_ci_gate()
     except Exception:  # noqa: BLE001 — 印摘要不得有能力弄垮 session（同 pytest_configure）
         gate = None
+    in_effect = False
     if gate is not None:
-        terminalreporter.write_line(gate.pg_marker_line(gate.pg_dsn_in_effect()))
+        in_effect = gate.pg_dsn_in_effect()
+        terminalreporter.write_line(gate.pg_marker_line(in_effect))
     if _PG_AUTODETECT_NOTE:
         terminalreporter.write_line(f"[PG autodetect] {_PG_AUTODETECT_NOTE}")
+    # 🔴 R84 包 W5（QA-01／QA-02）：上面那一行 `[PG autodetect]` 是**一行 -q 摘要裡的一行**，
+    # 而它承載的是「這次為什麼有 97 支 PG 測試沒跑」這種等級的事實。兩種情況要醒目：
+    #   ① 剎車④（容器在、DB 沒 migrate）——修法可貼，但它與「完全沒起 PG」在使用者眼裡
+    #      幾乎一樣（都只是 skip 沒少），差別只寫在這一行裡 ⇒ 用 `write_sep` 讓它跳出來。
+    #   ② 標記與理由互斥——那代表剖面標記本身不可信，而下游 `--census-only` 會拿它挑天花板。
+    # 沿用本函式既有的「不用 emoji」紀律（DEF-101-069：非 UTF-8 終端印 emoji 會直接崩）。
+    if gate is not None and _PG_AUTODETECT_NOTE:
+        hint = gate.pg_repair_hint(_PG_AUTODETECT_NOTE)
+        clash = gate.profile_marker_contradiction(in_effect, _PG_AUTODETECT_NOTE)
+        for headline, body in (("PG NOT MIGRATED (container up is not enough)", hint),
+                               ("PG PROFILE MARKER CONTRADICTS AUTODETECT", clash)):
+            if body:
+                terminalreporter.write_sep("=", headline)
+                terminalreporter.write_line(body)

@@ -129,12 +129,22 @@ def _run_git(args: list[str]) -> tuple[int, bytes]:
     刻意**不解碼** stdout：blob 要逐 byte 驗 CR，任何文字層解碼都可能把行尾改寫掉
     （Windows 側「取數管道給假數字」同一類坑）。git 缺席／逾時直接讓例外往上拋，
     由 check_sh_eol() 統一 fail-open。
+
+    🔴 `creationflags` 非有不可（R84 訴求 7／C1；平台中立寫法，POSIX 上 `getattr`
+    兜底成 0）：本 hook 自 R80／R81 起由 **exec form** 的 `pythonw.exe` 啟動，而
+    `pythonw.exe` 是 GUI 子系統程式、**沒有 console**。Windows 上一個無 console 的父
+    行程去 spawn `git.exe`（console 子系統）時，OS 會**替它配一個新 console 視窗**
+    ⇒ 每次 Write／Edit 到 `.sh` 就閃一次。這正是 exec form 治掉 `bash.exe` 那個彈窗
+    之後**剩下的另一個彈窗來源**：載具不閃了，載具生的孫子還在閃。
+    `CREATE_NO_WINDOW` 只影響「有沒有配 console」，不影響 rc／stdout ⇒ 對本函式的
+    取數語意零副作用。
     """
     proc = subprocess.run(
         ["git", "-C", str(PROJECT_ROOT), *args],
         capture_output=True,
         timeout=GIT_TIMEOUT_SEC,
         check=False,
+        creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
     )
     return proc.returncode, proc.stdout
 

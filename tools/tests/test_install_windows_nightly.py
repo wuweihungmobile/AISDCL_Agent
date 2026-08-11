@@ -93,9 +93,13 @@ class TestInstallWindowsNightlyStructure(unittest.TestCase):
             f"{_SMOKE_PS1} 不存在——安裝器會註冊一個指向不存在腳本的排程任務",
         )
         self.assertIn(
-            '-Argument "-NoProfile -ExecutionPolicy Bypass -File `"${SmokePs1}`""', self.text,
+            '-Argument "-NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass -File '
+            '`"${SmokePs1}`""', self.text,
             "smoke 任務的 Action 須以原生 powershell.exe -File 呼叫（DEF-101-511："
-            "該腳本偵測到 $env:MSYSTEM 即拒跑，故不得經由任何 bash 包裝層觸發）",
+            "該腳本偵測到 $env:MSYSTEM 即拒跑，故不得經由任何 bash 包裝層觸發）；"
+            "且須帶 -WindowStyle Hidden（R84 訴求 7／B2 的第二層防彈窗——"
+            "第一層 LogonType=S4U 實測會漂成 InteractiveToken，見 "
+            "tools/scheduled_task_expectations.json 的 _why）",
         )
         # 兩支任務各自有自己的 ShouldProcess 守衛（否則 -WhatIf 只攔得住其中一支）。
         self.assertEqual(
@@ -238,7 +242,13 @@ class TestInstallWindowsNightlyStructure(unittest.TestCase):
             f"{_NIGHTLY_PS1.name} 檔頭 .NOTES 已不再記載既有排程慣例文字——結構已變動，需同步核對",
         )
         self.assertIn("-Execute 'powershell.exe'", self.text)
-        self.assertIn("-NoProfile -ExecutionPolicy Bypass -File", self.text)
+        # 🔴 R84：本檔的 Action 在 `-NoProfile` 與 `-ExecutionPolicy` 之間插入了
+        # `-WindowStyle Hidden`（訴求 7／B1-B2 的第二層防彈窗）⇒ 慣例字串**不再是
+        # 一段連續子字串**。逐字比對整段會把「補上防彈窗旗標」判成違規，故改為
+        # 逐旗標判在場：慣例要釘的是「用哪些旗標」，不是「它們中間不准插東西」。
+        for _flag in ("-NoProfile", "-ExecutionPolicy Bypass", "-File"):
+            self.assertIn(_flag, self.text)
+        self.assertIn("-WindowStyle Hidden", self.text)
         self.assertIn("run_local_nightly.ps1", self.text)
         self.assertIn("-Daily", self.text)
         # 🔴 R73（DEF-101-779）：原本斷言 help 區塊含某個時刻字面值，即把觸發時間**釘進鎖裡**

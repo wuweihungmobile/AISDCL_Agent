@@ -311,6 +311,17 @@ python scripts/scenario_frequency_lint.py "${REPO_ROOT}"
 # governance 規則由 34/35 漂到 38/39 無人察覺）。改以唯一真相源 FRAMEWORK_STATUS.md
 # （磁碟+權威源實算）+ CLAUDE.md version-agnostic 指向之。此 lint（版本無關 shared infra，
 # read-only 純觀察者）重生並比對，stale 即非零硬閘擋下 → 「人去記得改多處」從流程消失。
+# ── Agent 閘門錨點 ↔ SCG SSOT 一致性 lint（AGT-03／AGT-04／AGT-05，R84 機械防復發）────
+# agent prompt 內的 `SCG-N` 錨點與 SCG SSOT（workflow/sdd-spec-first-gate 閘門表）全靠人工
+# 對齊 → 曾有 16 個站點／14 支檔把 RTM 的 AT 欄位錨在「SCG-4（測試計畫後）」，而 SSOT 逐字
+# 寫著 SCG-4＝PR Review Gate、SCG-5＝RTM Completeness Gate，測試策略閘門是角色 sub-gate
+# RG-TEST ⇒ 照 agent 走會把閘門順序反轉（SCG-5 的把關者 qa-lead 在交付前拿不到覆蓋依據），
+# 且上方三支 agent lint 對此結構上失明（實測皆 rc=0）。本 lint（版本無關 shared infra、
+# read-only 純觀察者）另守：單一真相源引用可解析、agent.version 不得寫死版號（AGT-05）。
+# 標記表每次執行都對著 SSOT 自證（SSOT 變動而表沒跟上即 fail-loud），故不構成第三個家。
+echo "############## CI 閘門：Agent 閘門錨點 ↔ SCG SSOT lint（AGT-03/04/05）##############"
+python scripts/agent_scg_anchor_lint.py "${REPO_ROOT}"
+
 echo "############## CI 閘門：框架版本/計數 SSOT 新鮮度 lint（DEF-AGTREV 收尾）##############"
 python scripts/framework_status_snapshot.py --check --repo-root "${REPO_ROOT}"
 

@@ -13,7 +13,7 @@ agent:
   id: "sdd-prd-to-playbook"
   title: "SDD PRD→Playbook 規劃架構師"
   icon: "🗺️"
-  version: "v0.29"
+  version: "see FRAMEWORK_STATUS.md（框架 LATEST；本欄刻意不寫版號——寫死即過期）"
   whenToUse: |
     手上有一份 PRD（產品需求文件），想把它轉成「專案→目標→任務」三層 playbook，交由
     AutoClaude + AISDLC_SDD 進行端到端（規格先行）產品開發時。產出可被

@@ -180,17 +180,32 @@ def check_claude_hook_carriers(repo_root: Path) -> bool:
         雙向綁定**：settings.json 宣告了哪個載具，就要求那個載具存在 ⇒ 有人把載具
         換掉時同一條規則跟著移動，不會退化成守著一個過時的硬編路徑。
 
+    🔴 R84：掃描面由「只有根層那一份」擴到 `discover_active_settings()` 現查出來的
+    **每一份活躍 settings**（根層／AutoClaude／SDD LATEST）。立案理由是這半原本只問
+    根層，而另外兩份各自宣告**不同的** venv 載具——`AutoClaude/.claude/settings.json` 的
+    Windows 載具是 `AutoClaude/.venv/Scripts/pythonw.exe`（那是另一個 venv，由
+    `AutoClaude/tools/bootstrap.*` 建），它不存在時該子專案 session 的六支守衛全部靜默
+    失效，而本工具當時一個字都不會說。每一份用**它自己的專案根**展開佔位符（子專案
+    session 的 `CLAUDE_PROJECT_DIR` 就是那個子目錄；拿 monorepo 根去展開帶 `../` 的載具
+    會 normpath 到 repo 之外而假紅）。同一條載具被多份宣告時訊息去重。
+
     與本檔既有那半一樣是 **advisory**：印警告、回 False，不阻擋呼叫端閘門。
     """
     try:
         sys.path.insert(0, str(Path(__file__).resolve().parent / "lib"))
         import hook_wiring  # noqa: PLC0415
 
-        settings_path = repo_root / ".claude" / "settings.json"
-        if not settings_path.is_file():
-            return True  # 沒有 settings＝沒有宣告，無從判定
-        settings = json.loads(settings_path.read_text(encoding="utf-8"))
-        problems = hook_wiring.carrier_liveness_problems(settings, str(repo_root))
+        problems: list[str] = []
+        for rel in hook_wiring.discover_active_settings(repo_root):
+            settings_path = repo_root / rel
+            if not settings_path.is_file():
+                continue  # 沒有 settings＝沒有宣告，無從判定
+            settings = json.loads(settings_path.read_text(encoding="utf-8"))
+            project_dir = str(settings_path.parent.parent)
+            for problem in hook_wiring.carrier_liveness_problems(settings, project_dir):
+                entry = f"[{rel}] {problem}"
+                if entry not in problems:
+                    problems.append(entry)
     except Exception:
         return True  # 判不出來一律不出聲（同本檔既有的 advisory 語氣）
     if not problems:

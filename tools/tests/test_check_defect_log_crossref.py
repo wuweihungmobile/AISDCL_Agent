@@ -3054,5 +3054,216 @@ class TestR82ComplexReviewSealTableIntegrity(unittest.TestCase):
         self.assertTrue(any("[封印變短]" in p for p in problems), problems)
 
 
+
+# ------------------------------------------------- R84：`改派`／`回執` 出口的**過期**判準
+# 🔴 立案（帳本 `DEF-200-041`，R84 落地為 `DEF-200-047`）：`m._reassign_hit()` 是硬規則②
+# 的**無條件**出口——它只問狀態欄有沒有「改派」／「回執」字樣，**不問改派到第幾輪**。於是
+# 一列寫過一次改派附記之後，它的承接輪號此後永遠不再被比較：實測 `DEF-101-886`／`887`
+# 的出口寫的是 R81，而 HEAD 已是 R83 收輪，三輪零交付卻一次都沒轉紅。
+#
+# 🔴 **為何判準住在測試檔而不是 `check_defect_log_crossref.py`**（誠實劃界，不是偏好）：
+# 該工具受 `check_loc_budget.SPECIAL_FILES` 的 raw-line 棘輪管（門檻 1474），當回合實測
+# raw 餘裕 22 行，而 `TestActionableMessagesHaveLocHeadroom` 另要求它保留
+# `_MIN_DIRECTIVE_HEADROOM`(=5) 行 ⇒ 可用只有 17 行，塞不下「判準＋WHY＋逐列訊息」。
+# 代價已誠實記在帳本 `DEF-200-047`：閘門 `check_defect_log_crossref.py` 的 rc 不含本判準，
+# 咬人的是根層 unittest 閘門（CI 亦跑）。
+#
+#: **生效輪**：只判「發現情境」欄輪號 ≥ 本值的列（照 R59 判例「釘現況 ＋ 只硬擋新增列」）。
+#: 🔴 為何非得分軌：對全表硬上，當回合實測 26 列當場轉真紅（走該出口的未結列 49 筆，扣掉
+#: 狀態欄字面寫「未指派」的合法二擇一之後）——它們**都是真陽性**（出口指向 R79~R83 的
+#: 已過去輪次），但一次全紅的閘門會被整個關掉，而被關掉的閘門比沒有閘門更糟
+#: （ARCH-R59-NB4）；同輪把 42 列一律改派到當前輪則是另一種假話（本輪不會交付 42 件）。
+#: **只准調小**（調小＝把射程往回擴，是收緊）。
+_REASSIGN_FRESHNESS_FROM = 84
+#: 生效輪之外、**今天就已過期**的存量筆數——相等棘輪，只准變小（不是上限，是現值）。
+#: 它讓「還有幾筆躺在過期出口上」是可查的量測值而不是散文（同鐵律三對照表的判準形狀）。
+_EXPIRED_REASSIGN_LEGACY_CENSUS = 26
+#: 走該出口、但狀態欄**解析不出任何承接輪號**的筆數（同上，只准變小）。
+_UNPARSEABLE_REASSIGN_CENSUS = 3
+
+
+def _reassign_escape_rows(ledger_text: str, cur: int,
+                          from_round: int) -> tuple[list[str], list[str], list[str]]:
+    """把走 `改派`／`回執` 出口的**未結**列分成三堆（純函式，可構造輸入驗牙）。
+
+    回傳 `(in_scope, legacy, unparseable)`：
+      * `in_scope`＝「發現情境」輪號 ≥ `from_round` 且出口輪號 < `cur` ⇒ **阻斷**。
+      * `legacy`＝同樣過期但發現輪號 < `from_round` ⇒ 只計數（相等棘輪）。
+      * `unparseable`＝出口存在但狀態欄抽不出任何承接輪號 ⇒ 只計數。
+
+    出口輪號一律只從**狀態欄**抽（與 `m._reassign_hit()` 的判定面對齊：合法出口的體例是
+    閘門訊息逐字指定的「就地於**狀態欄**追加一筆」）。狀態欄字面寫「未指派」者全部放行
+    ——那是硬規則② 後半句自己承認的合法二擇一，判它就是把合法出口關掉。
+    """
+    hdr = m._header_cells(ledger_text)
+    if hdr is None or m._CONTEXT_HEADER not in hdr:
+        return ([], [], [])
+    ncols = len(hdr)
+    ii, si, ci = hdr.index(m._ID_HEADER), hdr.index(m._STATUS_HEADER), \
+        hdr.index(m._CONTEXT_HEADER)
+    in_scope: list[str] = []
+    legacy: list[str] = []
+    unparseable: list[str] = []
+    for lineno, line in enumerate(ledger_text.splitlines(), 1):
+        if not m._ROW_RE.match(line):
+            continue
+        cells = m._row_cells(line)
+        if len(cells) != ncols or not m._ID_RE.fullmatch(cells[ii]):
+            continue
+        status = cells[si]
+        if m._classify(status) not in m._UNRESOLVED_CLASSES:
+            continue
+        if not m._reassign_hit(status) or m._UNASSIGNED_LITERAL in status:
+            continue
+        targets = [n for _, n, _ in m._handover_rounds(status)]
+        born = max((int(x.group(1)) for x in m._ROUND_RE.finditer(cells[ci])), default=0)
+        tag = f":{lineno} {cells[ii]}"
+        if not targets:
+            unparseable.append(tag)
+        elif max(targets) >= cur:
+            continue
+        elif born >= from_round:
+            in_scope.append(f"{tag} 出口指向 R{max(targets)} < 當前輪 R{cur}")
+        else:
+            legacy.append(f"{tag}→R{max(targets)}")
+    return (in_scope, legacy, unparseable)
+
+
+class TestReassignEscapeMustNameAFreshRound(unittest.TestCase):
+    """`DEF-200-041` 的收緊：改派出口自己也得有到期日。"""
+
+    @staticmethod
+    def _row(def_id: str, born: int, status: str) -> str:
+        return (f"| {def_id} | 2026-08-11 | R{born} 情境 | 現象 | P2 | 去向 | "
+                f"{status} |\n")
+
+    def _scan(self, rows: str, cur: int = 84, frm: int = 84):
+        return _reassign_escape_rows(_ledger_text(rows), cur, frm)
+
+    def test_an_expired_escape_on_a_new_row_is_caught(self) -> None:
+        """合成注入（紅）：R84 才發現的列，改派出口卻指向已過去的 R83。"""
+        rows = self._row("DEF-9-001", 84, "open（**改派**，承接輪次：**R83**）")
+        in_scope, legacy, unparse = self._scan(rows)
+        self.assertEqual(len(in_scope), 1, f"注入未被抓到 ⇒ 判準無牙：{in_scope}")
+        self.assertEqual((legacy, unparse), ([], []))
+
+    def test_removing_the_injection_makes_it_green(self) -> None:
+        """移除注入（綠）：同一列把出口改指當前輪即放行——證明不是恆紅。"""
+        rows = self._row("DEF-9-001", 84, "open（**改派**，承接輪次：**R84**）")
+        self.assertEqual(self._scan(rows), ([], [], []))
+
+    def test_admitting_there_is_no_owner_stays_a_legal_exit(self) -> None:
+        """`未指派` 是硬規則② 後半句自己給的出口，判它等於把合法出口關掉。"""
+        rows = self._row("DEF-9-002", 84,
+                         "open（**改派**為：未指派 backlog，附解鎖條件）")
+        self.assertEqual(self._scan(rows), ([], [], []))
+
+    def test_a_closed_row_is_never_judged(self) -> None:
+        """已結列的歷史原文逐字保全，不得因為裡面有舊改派紀錄而轉紅。"""
+        rows = self._row("DEF-9-003", 84, "fixed@R84｜原 open（**改派** R83）")
+        self.assertEqual(self._scan(rows), ([], [], []))
+
+    def test_the_scope_is_what_keeps_the_backlog_green_and_it_is_a_knob(self) -> None:
+        """把生效輪往回搬，同一列就從 legacy 變成阻斷 ⇒ 兩堆的差別只有射程。"""
+        rows = self._row("DEF-9-004", 60, "open（**改派**，承接輪次：**R61**）")
+        in_scope, legacy, _ = self._scan(rows)
+        self.assertEqual(in_scope, [])
+        self.assertEqual(len(legacy), 1)
+        self.assertIn("DEF-9-004→R61", legacy[0])
+        in_scope, legacy, _ = self._scan(rows, frm=60)
+        self.assertEqual(len(in_scope), 1)
+        self.assertEqual(legacy, [])
+
+    def test_an_escape_without_any_round_is_counted_not_ignored(self) -> None:
+        """出口存在卻抽不出輪號＝無法驗證，必須進第三堆而不是靜默放行。"""
+        rows = self._row("DEF-9-005", 84, "open（**改派**：已請別人接）")
+        _, _, unparse = self._scan(rows)
+        self.assertEqual(len(unparse), 1)
+
+
+class TestRealLedgerReassignEscapes(unittest.TestCase):
+    """對真主檔實跑：生效輪內零過期出口，生效輪外的存量只准變小。"""
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        cls.text = m._DEFAULT_DEFECT_LOG.read_text(encoding="utf-8-sig")
+        cls.cur = m.current_round(cls.text)
+        cls.in_scope, cls.legacy, cls.unparse = _reassign_escape_rows(
+            cls.text, cls.cur, _REASSIGN_FRESHNESS_FROM)
+
+    def test_no_row_inside_the_freshness_scope_has_an_expired_escape(self) -> None:
+        self.assertEqual(
+            self.in_scope, [],
+            "生效輪之後才發現的列，其 `改派`／`回執` 出口指向一個已經過去的輪次 ⇒ "
+            "那個出口已到期。合法動作＝就地把承接輪次改成 ≥ 當前輪，或改寫成字面"
+            "「未指派」＋可執行的解鎖條件；**不是**把 _REASSIGN_FRESHNESS_FROM 往上調")
+
+    def test_the_legacy_population_only_shrinks(self) -> None:
+        self.assertLessEqual(
+            len(self.legacy), _EXPIRED_REASSIGN_LEGACY_CENSUS,
+            f"生效輪之外的過期出口由 {_EXPIRED_REASSIGN_LEGACY_CENSUS} 漲到 "
+            f"{len(self.legacy)}：{self.legacy}")
+        self.assertGreaterEqual(
+            _EXPIRED_REASSIGN_LEGACY_CENSUS, len(self.legacy),
+            "普查值只准往下釘")
+
+    def test_the_unparseable_population_only_shrinks(self) -> None:
+        self.assertLessEqual(
+            len(self.unparse), _UNPARSEABLE_REASSIGN_CENSUS,
+            f"抽不出承接輪號的出口由 {_UNPARSEABLE_REASSIGN_CENSUS} 漲到 "
+            f"{len(self.unparse)}：{self.unparse}")
+
+    def test_the_freshness_round_never_moves_forward(self) -> None:
+        """方向鎖：生效輪只准調小（往回擴射程）；調大＝把牙齒往後推。"""
+        self.assertLessEqual(_REASSIGN_FRESHNESS_FROM, self.cur,
+                             "生效輪不得超前帳本現查的當前輪")
+
+
+class TestCrossRowReassignMustAlsoNameAFreshRound(unittest.TestCase):
+    """`DEF-200-088`：`DEF-200-041` 的收緊只做了**自己這一列**那一半。
+
+    🔴 立案量測（QA 複審，cur=84／85／90 三組）：`orphan_backlog_problems()` 的跨列出口
+    `any(def_id in ln and _reassign_hit(...))` **只取布林、不比輪號** ⇒ 只要有任何一列
+    寫過「改派」並提到本列 ID，本列的承接輪號此後永遠不再被比較。實測 10 列
+    （`DEF-101-796`／`912`／`917`／`918`／`919`／`926`／`980`／`981`／`992`／`998`）
+    自身承接輪號已是 R80~R83（早於當前輪）卻永不轉紅——與 `DEF-200-041` 描述的病同型，
+    只是換了一個入口。修法＝把輪號比較同時套到跨列出口（真主檔實測**假紅 0 列**）。
+    """
+
+    @staticmethod
+    def _rows(donor_status: str) -> str:
+        return (
+            "| DEF-9-101 | 2026-08-11 | R84 情境 | 現象 | P2 | 去向 | "
+            "open（承接輪次：**R80**） |\n"
+            "| DEF-9-102 | 2026-08-11 | R84 情境 | DEF-9-101 的跨列回執 | P2 | 去向 | "
+            f"{donor_status} |\n"
+        )
+
+    def _scan(self, donor_status: str) -> list[str]:
+        return m.orphan_backlog_problems(_ledger_text(self._rows(donor_status)))
+
+    def test_a_stale_cross_row_receipt_no_longer_launders_an_expired_round(self) -> None:
+        """合成注入（紅）：回執列自己指向 R83 < 當前輪 R84 ⇒ 不再算出口。"""
+        problems = self._scan("closed-by-decision（**改派**）：改派 **R83**")
+        self.assertEqual(len(problems), 1, f"跨列出口仍在白拿豁免：{problems}")
+        self.assertIn("DEF-9-101", problems[0])
+
+    def test_a_fresh_cross_row_receipt_is_still_a_legal_exit(self) -> None:
+        """移除注入（綠）：回執輪號改成合成語料的下一輪即放行 ⇒ 不是恆紅。 round-label-ok"""
+        self.assertEqual(self._scan("closed-by-decision（**改派**）：改派 **R85**"), [])
+
+    def test_a_receipt_that_names_no_round_at_all_is_not_an_exit(self) -> None:
+        """回執抽不出任何輪號＝無從驗證新鮮度 ⇒ 走 fail-loud 那一邊，不靜默放行。"""
+        self.assertEqual(len(self._scan("closed-by-decision（**改派**）：已請人接")), 1)
+
+    def test_the_real_ledger_has_no_false_red_from_this_tightening(self) -> None:
+        """真主檔實跑：本次收緊的假紅實量必須是 0（上線前的實量，不是估計）。"""
+        text = m._DEFAULT_DEFECT_LOG.read_text(encoding="utf-8-sig")
+        self.assertEqual(
+            m.orphan_backlog_problems(text), [],
+            "跨列出口收緊後主檔轉紅 ⇒ 依 ARCH-R59-NB4 必須同輪把那幾列的承接輪號補正，"
+            "**不是**把判準放寬回布林")
+
+
 if __name__ == "__main__":
     unittest.main()

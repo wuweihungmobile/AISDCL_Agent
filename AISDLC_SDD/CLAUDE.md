@@ -7,7 +7,26 @@
 **最後更新**: 一律現查 `git log -1 --format='%h %ci' -- AISDLC_SDD/CLAUDE.md`（🔴 本輪 D-09：此處原寫死一個日期並自陳「易漂」，而它當回合實測就已落後真值一天。既然權威源已經指明，留一個會漂的數字沒有任何收益、只多一個假話站點 ⇒ 刪值留配方）
 **SDD 轉型狀態**: ✅ Phase 01~09 全部完成（Phase 01-06: SDD 核心轉型 2026-04-14；Phase 07-09: 完整性補強 2026-04-16）
 
-> **🔴 版本狀態（2026-06-22 校正，免再漂移）**：`AISDLC_SDD_v0.01/` 是 **ci-gate 凍結基線**（恆測、回歸防護，**不可在原地修改**），最新演化版＝ci-gate LATEST（由 `scripts/sdd_version.py` SSOT 解析——git tracked + 錨定 fullmatch + 數值排序取最高版，具體版本號見 `FRAMEWORK_STATUS.md`，免寫死於本檔再漂移）。**框架改動一律走 Copy-on-Evolve**（複製 LATEST → `v0.0(X+1)/` 後於新版修改，絕不原地改凍結版）。下方 Rule 2 目錄表以 `v0.01` 路徑書寫，因**各版目錄結構同構**故仍為有效的版面參考；實際寫入版本依當輪 Copy-on-Evolve 目標版而定。**各類資產數量與最新版本號一律見唯一真相源 [`FRAMEWORK_STATUS.md`](FRAMEWORK_STATUS.md)**（`scripts/framework_status_snapshot.py` 自磁碟+權威源生成、ci-gate `--check` 機械守新鮮）——本檔不重複數字，版本累積亦不再多檔漂移。
+> **🔴 版本狀態（R84 訂正 — 原文與 `FRAMEWORK_STATUS.md` 互斥，且與實務不符）**
+>
+> 🔴 **被訂正的原文逐字保留**（訂正協議：禁止靜默覆寫）：
+> 「**框架改動一律走 Copy-on-Evolve**（複製 LATEST → `v0.0(X+1)/` 後於新版修改，絕不原地改凍結版）」。
+> **為何是假話**：同一件事在 `FRAMEWORK_STATUS.md` 被寫成 LATEST「**可修改/承載演化**」（互斥的兩份權威源），
+> 而實務走的正是後者——R71~R83 期間多個 commit 直接原地改 LATEST（`git log --oneline -- AISDLC_SDD/AISDLC_SDD_v0.30/` 可查）。
+> 兩份權威源不一致時，一個必定是假的；本輪依掌舵者裁決收斂到「原地改 LATEST」。
+>
+> **現行規則（唯一版本，邊界明文）**：
+>
+> | 這一類版本 | 可否原地修改 | 說明 |
+> |-----------|-------------|------|
+> | **凍結基線** `AISDLC_SDD_v0.01` | ❌ **絕不** | ci-gate 恆測的回歸防護面 |
+> | **中間歷史版**（基線與 LATEST 之間每一版） | ❌ **絕不** | 已凍結；ci-gate 只測「基線 + LATEST」兩軌，改中間版無人看得到 |
+> | **LATEST**（當前最新演化版） | ✅ **可原地修改**（＝日常演化路徑） | 它就是承載演化的那一版 |
+>
+> - **LATEST 是哪一版一律現查**：`python scripts/sdd_version.py`（SSOT：git tracked ＋ 錨定 fullmatch ＋ 數值排序取最高）。本檔刻意不寫版號。
+> - **何時才開新版**（`bash scripts/copy_on_evolve.sh <來源版> <新版>`）：需要**保留一個可回歸對照的快照**時（發布、破壞性重構、需與舊版逐項比對）。日常改 agent／模板／規則／腳本**直接改 LATEST**，不必也不應每次開新版。
+> - 下方 Rule 2 目錄表與〈框架核心文件快速參考〉以 `AISDLC_SDD_v<LATEST>/` 書寫（各版目錄結構同構）；**看到 `v0.01` 字樣時，除了「凍結基線」那個語意，一律讀作 LATEST**。
+> - **各類資產數量與最新版本號一律見唯一真相源 [`FRAMEWORK_STATUS.md`](FRAMEWORK_STATUS.md)**（`scripts/framework_status_snapshot.py` 自磁碟+權威源生成、ci-gate `--check` 機械守新鮮）——本檔不重複數字。
 
 > **🔴 重要**：此文件中所有指令 **OVERRIDE** Claude Code 預設行為，必須嚴格遵守。
 
@@ -38,7 +57,7 @@
 ```
 d:/CursorProject/AISDLC_SDD/          ← 專案根目錄
 ├── CLAUDE.md                          ← 本文件
-├── AISDLC_SDD_v0.01/                  ← 🔴 SDD 框架目錄（ci-gate 凍結基線；最新演化版＝ci-gate LATEST，版本號見 FRAMEWORK_STATUS.md / 上方版本狀態）
+├── AISDLC_SDD_v<LATEST>/              ← 🔴 SDD 框架目錄（＝當前最新演化版，可原地改；另有凍結基線 AISDLC_SDD_v0.01 與中間歷史版，皆不可改。現查：python scripts/sdd_version.py）
 │   ├── AISDLC_SDD_INIT.md             ← 框架入口（使用前必讀）
 │   ├── FILE_DIRECTORY_RULES.md        ← 完整目錄規則
 │   ├── AISDLC_SDD_UPGRADE_SOP.md      ← 框架升版 SOP
@@ -63,21 +82,25 @@ d:/CursorProject/AISDLC_SDD/          ← 專案根目錄
 
 ### 🔴 寫檔前必須確認位置
 
-**框架層（Layer 2）— 寫入 `AISDLC_SDD_v0.01/` 子目錄**：
+> 🔴 **R84（DOC-01）訂正**：本節下方兩張表的路徑原以 `AISDLC_SDD_v0.01/` 書寫，而 v0.01 是**凍結基線**
+> ⇒ 照表寫檔會寫進不可修改的凍結面。`<LATEST>` 一律現查 `python scripts/sdd_version.py`；
+> 邊界（哪些版凍結／LATEST 何時才開新版）見本檔開頭〈版本狀態〉。
+
+**框架層（Layer 2）— 寫入 `AISDLC_SDD_v<LATEST>/` 子目錄**：
 
 | 要寫的內容 | 正確路徑 |
 |-----------|---------|
-| Agent 更新 | `AISDLC_SDD_v0.01/agent/core/` 或 `specialized/` |
-| Workflow | `AISDLC_SDD_v0.01/workflow/core/` 或 `scenario-specific/` |
-| 場景 SOP/Enhancement | `AISDLC_SDD_v0.01/scenarios/{scenario}/` |
-| SDD 框架模板 | `AISDLC_SDD_v0.01/docs_template/sdd/{category}/` |
-| CI/CD 規格 | `AISDLC_SDD_v0.01/cicd/` |
-| 分析報告 | `AISDLC_SDD_v0.01/build/reports/analysis/` |
-| 階段報告 | `AISDLC_SDD_v0.01/build/reports/phase/` |
-| 規劃文件 | `AISDLC_SDD_v0.01/build/planning/active/` |
-| 歸檔文件 | `AISDLC_SDD_v0.01/build/planning/archive/` |
+| Agent 更新 | `AISDLC_SDD_v<LATEST>/agent/core/` 或 `specialized/` |
+| Workflow | `AISDLC_SDD_v<LATEST>/workflow/core/` 或 `scenario-specific/` |
+| 場景 SOP/Enhancement | `AISDLC_SDD_v<LATEST>/scenarios/{scenario}/` |
+| SDD 框架模板 | `AISDLC_SDD_v<LATEST>/docs_template/sdd/{category}/` |
+| CI/CD 規格 | `AISDLC_SDD_v<LATEST>/cicd/` |
+| 分析報告 | `AISDLC_SDD_v<LATEST>/build/reports/analysis/` |
+| 階段報告 | `AISDLC_SDD_v<LATEST>/build/reports/phase/` |
+| 規劃文件 | `AISDLC_SDD_v<LATEST>/build/planning/active/` |
+| 歸檔文件 | `AISDLC_SDD_v<LATEST>/build/planning/archive/` |
 
-**專案層（Layer 3）— 寫入 `AISDLC_SDD_v0.01/docs/` 子目錄**：
+**專案層（Layer 3）— 寫入 `AISDLC_SDD_v<LATEST>/docs/` 子目錄**：
 
 | 文件類型 | 正確路徑 |
 |---------|---------|
@@ -99,7 +122,7 @@ d:/CursorProject/AISDLC_SDD/          ← 專案根目錄
 
 **❌ 絕對禁止**：
 - 寫入 `/tmp/`、`/var/`、系統目錄
-- 在框架版本根目錄（`AISDLC_SDD_v0.01/`）直接建立臨時檔案
+- 在框架版本根目錄（`AISDLC_SDD_v<LATEST>/`）直接建立臨時檔案
 - 修改 `AISDLC_v0.09/` 的任何檔案（該目錄未隨 monorepo 入庫，僅存於原始獨立 repo；在 monorepo 內本條天然滿足）
 
 ---
@@ -110,7 +133,7 @@ d:/CursorProject/AISDLC_SDD/          ← 專案根目錄
 
 使用任何 SDD 功能前，必須先讀取：
 ```
-AISDLC_SDD_v0.01/AISDLC_SDD_INIT.md
+AISDLC_SDD_v<LATEST>/AISDLC_SDD_INIT.md
 ```
 
 ### SDD 三大支柱（必須遵守）
@@ -153,8 +176,8 @@ AISDLC_SDD_v0.01/AISDLC_SDD_INIT.md
 使用 SDD 模板前，從 `docs_template/sdd/` 取得對應模板，**複製到 `docs/` 下填寫**，不可直接修改模板本身：
 
 ```
-框架模板（不修改）:  AISDLC_SDD_v0.01/docs_template/sdd/architecture/AS-IS-SRD-TEMPLATE.md
-產出文件（填寫）:   AISDLC_SDD_v0.01/docs/02_architecture/AS-IS-SRD-{SystemName}.md
+框架模板（不修改）:  AISDLC_SDD_v<LATEST>/docs_template/sdd/architecture/AS-IS-SRD-TEMPLATE.md
+產出文件（填寫）:   AISDLC_SDD_v<LATEST>/docs/02_architecture/AS-IS-SRD-{SystemName}.md
 ```
 
 ---
@@ -229,7 +252,7 @@ AISDLC_SDD_v0.01/AISDLC_SDD_INIT.md
 1. 使用前讀取 `AISDLC_SDD_INIT.md` 的 `auto_load_config`
 2. 根據場景自動載入 Primary Agents
 3. Supporting Agents 按需載入（不預先全部載入）
-4. 核心 Agent 文件：`AISDLC_SDD_v0.01/agent/core/*-zh.yaml`
+4. 核心 Agent 文件：`AISDLC_SDD_v<LATEST>/agent/core/*-zh.yaml`
 
 ---
 
@@ -265,7 +288,7 @@ AISDLC_SDD_v0.01/AISDLC_SDD_INIT.md
 
 ## 🔴 Rule 9：自動化閉環防護規則（憲法摘要）
 
-> **🔴 重要**：完整 Rule 9 細則已結構化於 `AISDLC_SDD_v0.01/governance/rules/R-*.yaml`，
+> **🔴 重要**：完整 Rule 9 細則已結構化於 `AISDLC_SDD_v<LATEST>/governance/rules/R-*.yaml`，
 > 由 `rule_loader.load_for_state()` 依當前 FSM 狀態 lazy-load；SessionStart hook
 > （`.claude/hooks/session_start.py`）會自動注入當前狀態命中的規則。完整地圖見
 > `governance/RULES_INDEX.md`（`R-*.yaml` 規則一覽＝R-9.x + R-SELF-STRIDE；條數見 FRAMEWORK_STATUS.md）。
@@ -340,18 +363,21 @@ AISDLC_SDD_v0.01/AISDLC_SDD_INIT.md
 
 ## 📁 框架核心文件快速參考
 
+> 🔴 **R84（DOC-01）訂正**：本表路徑原以 `AISDLC_SDD_v0.01/` 書寫，而 v0.01 是**凍結基線**（不可原地改）
+> ⇒ 照本表「寫檔前查閱」的人會把產出寫進凍結面。`<LATEST>` 一律現查 `python scripts/sdd_version.py`。
+
 | 文件 | 路徑 | 用途 |
 |------|------|------|
-| 框架入口 | `AISDLC_SDD_v0.01/AISDLC_SDD_INIT.md` | 使用框架必讀 |
-| 目錄規則 | `AISDLC_SDD_v0.01/FILE_DIRECTORY_RULES.md` | 寫檔前查閱 |
-| SDD 原則 | `AISDLC_SDD_v0.01/guides/system/sdd/SDD_Core_Principles.md` | SDD 核心原則 |
-| SDD 指引 | `AISDLC_SDD_v0.01/guides/system/sdd/SDD_GUIDE.md` | SDD 快速指引 |
-| Spec-First Gate | `AISDLC_SDD_v0.01/workflow/sdd-spec-first-gate/SDD_SPEC_FIRST_GATE.md` | SCG 閘門執行 |
-| Claude Rules | `AISDLC_SDD_v0.01/tools/AISDLC_CLAUDE_RULES.md` | 詳細規則參考 |
-| 升版 SOP | `AISDLC_SDD_v0.01/AISDLC_SDD_UPGRADE_SOP.md` | 框架升版流程 |
-| **🆕 FSM 狀態機** | `AISDLC_SDD_v0.01/workflow/sdd-fsm-engine/SDD_FSM_ENGINE.md` | 閉環狀態轉換與 retry 上限 |
-| **🆕 退場機制** | `AISDLC_SDD_v0.01/workflow/sdd-escalation/SDD_ESCALATION_PROTOCOL.md` | ESCALATION / TERMINATED |
-| **🆕 上下文管理** | `AISDLC_SDD_v0.01/workflow/sdd-context-governor/SDD_CONTEXT_GOVERNOR.md` | Token 預算監控 |
+| 框架入口 | `AISDLC_SDD_v<LATEST>/AISDLC_SDD_INIT.md` | 使用框架必讀 |
+| 目錄規則 | `AISDLC_SDD_v<LATEST>/FILE_DIRECTORY_RULES.md` | 寫檔前查閱 |
+| SDD 原則 | `AISDLC_SDD_v<LATEST>/guides/system/sdd/SDD_Core_Principles.md` | SDD 核心原則 |
+| SDD 指引 | `AISDLC_SDD_v<LATEST>/guides/system/sdd/SDD_GUIDE.md` | SDD 快速指引 |
+| Spec-First Gate | `AISDLC_SDD_v<LATEST>/workflow/sdd-spec-first-gate/SDD_SPEC_FIRST_GATE.md` | SCG 閘門執行 |
+| Claude Rules | `AISDLC_SDD_v<LATEST>/tools/AISDLC_CLAUDE_RULES.md` | 詳細規則參考 |
+| 升版 SOP | `AISDLC_SDD_v<LATEST>/AISDLC_SDD_UPGRADE_SOP.md` | 框架升版流程 |
+| **🆕 FSM 狀態機** | `AISDLC_SDD_v<LATEST>/workflow/sdd-fsm-engine/SDD_FSM_ENGINE.md` | 閉環狀態轉換與 retry 上限 |
+| **🆕 退場機制** | `AISDLC_SDD_v<LATEST>/workflow/sdd-escalation/SDD_ESCALATION_PROTOCOL.md` | ESCALATION / TERMINATED |
+| **🆕 上下文管理** | `AISDLC_SDD_v<LATEST>/workflow/sdd-context-governor/SDD_CONTEXT_GOVERNOR.md` | Token 預算監控 |
 
 ---
 
@@ -378,7 +404,7 @@ AISDLC_SDD_v0.01/AISDLC_SDD_INIT.md
 
 | 錯誤行為 | 正確做法 |
 |---------|---------|
-| 修改 `AISDLC_v0.09/` 的檔案 | 只修改 `AISDLC_SDD_v0.01/` |
+| 修改 `AISDLC_v0.09/` 的檔案 | 只修改 `AISDLC_SDD_v<LATEST>/` |
 | 將框架模板當作專案文件使用 | 複製到 `docs/` 後再填寫 |
 | 跳過 SCG 閘門直接開發 | 規格文件通過 SCG 後才開發 |
 | 先寫程式再補文件 | 規格先行，文件優先 |
@@ -388,7 +414,7 @@ AISDLC_SDD_v0.01/AISDLC_SDD_INIT.md
 | 安全設計前未做 STRIDE | STRIDE 威脅模型是安全實作前置文件 |
 | Integration 未做 ACL 設計 | 先建立 ADR-INTEGRATION-ACL，定義防腐層 |
 | Migration 未定義 Contract Map | 先產出 MIGRATION-CONTRACT-MAP，再執行切換 |
-| 直接在根目錄 `docs/` 寫框架產出 | 框架產出應寫入 `AISDLC_SDD_v0.01/docs/` |
+| 直接在根目錄 `docs/` 寫框架產出 | 框架產出應寫入 `AISDLC_SDD_v<LATEST>/docs/` |
 | SCG 失敗後無限繼續重試（Rule 9） | 超過 3 次進入 ESCALATION，等待人工介入 |
 | Token 超過 85% 仍繼續工作（Rule 9） | 執行 `/stage-compaction` 清理上下文 |
 | SCG-0/3 前未執行邏輯驗證（Rule 9） | 必須先執行 `/spec-logical-validator` |

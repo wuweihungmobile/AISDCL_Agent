@@ -2844,7 +2844,16 @@ _IRON_LAW3_NO_MECHANISM = "無機械物"
 #: 單平台專屬 API 詞彙表（表驅動＋後設鎖）、排序鍵影響雜湊、文字模式檔案 I/O 編碼
 #: （最後一項是**訂正低報分子**：判準與逐檔棘輪早就在，R81 掃描路把它讀成「無人守」）。
 #: 實際分子為 18，仍照既有慣例留一格給並行包。
-_IRON_LAW3_COVERED_FLOOR = 17
+#: 🔴 R84（W8／SD-08）：17 → **18**（＝當輪現值，緩衝歸零）。理由是實測的：
+#: `iron_law3_coverage()` 回 `(18, 20)` 而兩個 floor 是 `(17, 19)` ⇒ CLAUDE.md 該段逐字
+#: 承諾的「拆掉一支掃描器 ⇒ 分子降 ⇒ 紅」「刪掉一列已知危害 ⇒ 分母降 ⇒ 紅」**今天各有
+#: 一次免費額度**（18→17、20→19 皆靜默通過），而單向性正是這條棘輪唯一的存在理由。
+#: 落後的成因是結構性的、會反覆發生：補了掃描器的人只改表，沒有任何東西提醒他調 floor
+#: ⇒ 同輪一併補上「floor 自己過期」的上界判準（`_IRON_LAW3_FLOOR_STALE_SLACK`），
+#: 讓下一次忘記調 floor 當場轉紅，而不是又留一格給下一輪。
+#: 🔴 R84（C2 收斂）：18 → **19**（＝重釘為當輪現值）。分子 +1＝新登記的「hook 行程生出來
+#: 的子行程配到 console 視窗」那一列**連同兩支掃描器一起落地** ⇒ 分子與分母同步各 +1。
+_IRON_LAW3_COVERED_FLOOR = 19
 #: 分母＝**已登記**的危害類數，只准上升（刪列來讓數字好看即紅）。未覆蓋數＝分母−分子，
 #: 刻意**不設上限**——那正是舊判準把「還有幾類沒人守」與「我們知道有幾類危害」綁死的地方。
 #: R79：8 → 12（`.py` 行尾、exec bit、目錄項原語三類新登記；`.ps1` 行尾那一列原本就在表上）。
@@ -2853,7 +2862,30 @@ _IRON_LAW3_COVERED_FLOOR = 17
 #: 第三類誠實登記為無人守）。同上，釘到比現值低一格以容忍並行包同時擴表。
 #: R81（包 G）：14 → 19。分母 +5＝與上面同五列（五類此前一格都不在這張表上，
 #: 其中四類本輪連同掃描器一起落地、一類是訂正低報）。實際分母為 20，同樣留一格。
-_IRON_LAW3_KNOWN_FLOOR = 19
+#: 🔴 R84（W8／SD-08）：19 → **20**（＝當輪現值）。理由同上一個常數，不重複。
+#: 🔴 R84（C2 收斂）：20 → **21**。分母 +1＝上一個常數註解裡那一列（新危害類「hook 子行程
+#: 配到 console 視窗」），該列本輪連同掃描器一起落地，故分子分母同升。
+_IRON_LAW3_KNOWN_FLOOR = 21
+
+#: 🔴 R84（W8／SD-08）：兩個 floor **自己過期**的上界判準（阻塞）。
+#:
+#: 缺陷本體與 `SPECIAL_STALE_SLACK`／`_GUARD_LINE_STALE_SLACK` 逐字同型：單邊棘輪只會腐化
+#: ——現值往上跑而 floor 留在原地時，那段落差就是**預先發放的成長額度**，日後可以無聲地
+#: 用回去，而 CLAUDE.md 對外承諾的單向性在那段區間內是假的。R84 實測：落差各 1 格，
+#: 於是「拆掉一支掃描器就紅」需要拆**兩支**才會紅。
+#:
+#: 為什麼是 1（三個邊界都可查，故這個數字不是載重件）：
+#:   ① **下界**：必須 ≥ 1。本檔既有慣例明文「釘到比現值低一格以容忍並行包同時擴表」
+#:      （見上面兩個常數的 R80／R81 註記）——取 0 會讓「同輪另一個包新增一列已有掃描器
+#:      的危害」當場判紅**別人**，而那個新增是好事。1 就是那個慣例本身的數值化。
+#:   ② **上界**：不取 2 以上。落差 2 起，「拆掉一支掃描器」就需要拆兩支才紅，也就是這條
+#:      棘輪在它唯一的用途上失效——那正是本判準的立案理由，不能自己再犯一次。
+#:   ③ **方向鎖**：只准調小（收緊），由 `TestR84Iron Law3FloorsAreNotStale` 的
+#:      `assertLessEqual` 釘住。調大＝把免費額度發回去。
+#: **為什麼是阻塞而不是預警**：這一族已經有訊號（`--json` 一直印得出兩個數字），
+#: 而 R84 之所以要建這道鎖，就是因為「有訊號但沒人動作」在這一族已經是實況（落後了兩輪）。
+#: 修法是**重釘為現值**（兩行 diff），不是調高 slack——所以它擋得起。
+_IRON_LAW3_FLOOR_STALE_SLACK = 1
 
 
 def hook_scripts_named_in(text: str, repo_root: Path) -> dict[str, list[str]]:
@@ -3345,6 +3377,15 @@ def iron_law3_coverage(text: str) -> tuple[int, int]:
     return len(rows) - len(uncovered), len(rows)
 
 
+def iron_law3_floor_staleness(
+    text: str, *, covered_floor: int, known_floor: int
+) -> tuple[int, int]:
+    """兩個 floor 各自**落後現值幾格**（R84／SD-08）。負值不可能出現——那一側由
+    `iron_law3_ratchet_problems()` 判紅（現值低於 floor＝掃描器被拆／列被刪）。"""
+    covered, known = iron_law3_coverage(text)
+    return covered - covered_floor, known - known_floor
+
+
 def iron_law3_ratchet_problems(
     text: str, *, covered_floor: int, known_floor: int
 ) -> list[str]:
@@ -3477,6 +3518,66 @@ class TestR74IronLawMechanismAccounting(unittest.TestCase):
             text, covered_floor=_IRON_LAW3_COVERED_FLOOR,
             known_floor=_IRON_LAW3_KNOWN_FLOOR)
         self.assertEqual(problems, [], "\n  ".join(problems))
+
+    def test_the_two_floors_are_not_themselves_stale(self) -> None:
+        """🔴 R84（SD-08）：**floor 自己會過期**，而那讓上一條的承諾在落差區間內是假的。
+
+        上一條守的是「現值不得低於 floor」；這一條守的是**另一側**——floor 不得遠遠落後
+        現值。R84 實測：`iron_law3_coverage()` 回 `(18, 20)` 而兩個 floor 是 `(17, 19)`
+        ⇒ CLAUDE.md 逐字承諾的「拆掉一支掃描器 ⇒ 紅」實際需要拆**兩支**才紅，
+        「刪掉一列已知危害 ⇒ 紅」實際需要刪兩列。那一格落差就是預先發放的成長額度。
+
+        判準是 `落差 <= _IRON_LAW3_FLOOR_STALE_SLACK`（＝1，恰好等於本檔既有慣例
+        「留一格給並行包」的數值化）。體例與立案理由同 `SPECIAL_STALE_SLACK`
+        （`AutoClaude/tools/check_loc_budget.py`）與 `_GUARD_LINE_STALE_SLACK`
+        （`tools/tests/test_adr_xplat001_c1c2_lock.py`）——**單邊棘輪只會腐化**。
+        修法是把上面兩個常數重釘為現值（兩行 diff），不是調大 slack。
+        """
+        text = _ROOT_CLAUDE_MD.read_text(encoding="utf-8-sig")
+        covered_drift, known_drift = iron_law3_floor_staleness(
+            text, covered_floor=_IRON_LAW3_COVERED_FLOOR,
+            known_floor=_IRON_LAW3_KNOWN_FLOOR)
+        covered, known = iron_law3_coverage(text)
+        self.assertLessEqual(
+            covered_drift, _IRON_LAW3_FLOOR_STALE_SLACK,
+            f"_IRON_LAW3_COVERED_FLOOR={_IRON_LAW3_COVERED_FLOOR} 落後現值 {covered} "
+            f"共 {covered_drift} 格（上限 {_IRON_LAW3_FLOOR_STALE_SLACK}）⇒ 「拆掉一支"
+            f"掃描器就紅」需要拆 {covered_drift + 1} 支才紅。修法：把該常數重釘為 {covered}")
+        self.assertLessEqual(
+            known_drift, _IRON_LAW3_FLOOR_STALE_SLACK,
+            f"_IRON_LAW3_KNOWN_FLOOR={_IRON_LAW3_KNOWN_FLOOR} 落後現值 {known} "
+            f"共 {known_drift} 格（上限 {_IRON_LAW3_FLOOR_STALE_SLACK}）⇒ 「刪掉一列已知"
+            f"危害就紅」需要刪 {known_drift + 1} 列才紅。修法：把該常數重釘為 {known}")
+
+    def test_the_staleness_slack_may_only_be_tightened(self) -> None:
+        """方向鎖：slack 只准調小。調大＝把上一條剛收回來的免費額度再發回去。
+
+        下界 1 也一起釘：取 0 會讓「同輪另一個包誠實新增一列已有掃描器的危害」當場判紅
+        **別人**，而那個新增是好事——本檔既有慣例明文「留一格給並行包」，1 就是它的數值化。
+        """
+        self.assertLessEqual(_IRON_LAW3_FLOOR_STALE_SLACK, 1)
+        self.assertGreaterEqual(_IRON_LAW3_FLOOR_STALE_SLACK, 1)
+
+    def test_the_staleness_criterion_has_teeth(self) -> None:
+        """合成注入：floor 落後兩格時判準必須抓到（分子與分母各一次）。
+
+        沒有這一條，上面那兩個 `assertLessEqual` 只能證明「今天恰好貼齊」，
+        不能證明「落後時真的會紅」——而本判準要治的病正是「落後了兩輪都沒有東西轉紅」。
+        """
+        text = _ROOT_CLAUDE_MD.read_text(encoding="utf-8-sig")
+        covered, known = iron_law3_coverage(text)
+        # 綠：floor＝現值 ⇒ 落差 0
+        self.assertEqual(
+            iron_law3_floor_staleness(text, covered_floor=covered, known_floor=known),
+            (0, 0))
+        # 紅：floor 各落後 2 格 ⇒ 兩側都必須超過 slack
+        stale = iron_law3_floor_staleness(
+            text, covered_floor=covered - 2, known_floor=known - 2)
+        self.assertEqual(stale, (2, 2))
+        for drift in stale:
+            self.assertGreater(
+                drift, _IRON_LAW3_FLOOR_STALE_SLACK,
+                "落後兩格竟未超過 slack ⇒ 這條判準沒有牙（slack 被調大了？）")
 
     def test_uncovered_trigger_list_is_shrink_only_and_still_documented(self) -> None:
         """宣告面（常數）與量測面（CLAUDE.md 那張表）必須**雙向**對得上。

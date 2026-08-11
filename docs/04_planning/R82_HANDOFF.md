@@ -255,7 +255,7 @@ R82 動了不少 mac 相關的**程式碼**，但**沒有一行是在 mac 上跑
 `tools/lib/quota_policy.py:282` 的 `_MULTIPLIER = {near: 2.0, mid: 1.0, far: 0.5, none: 0.5}`
 是**模組層寫死的常數**，不像其他每一個門檻那樣有對應的環境變數
 （現查 `Select-String -Path "$r\tools\lib\quota_policy.py" -Pattern '_MULTIPLIER|EnvVar\('`
-——我實測 `_MULTIPLIER` 5 個站點、`EnvVar(` 13 列，而那 13 列裡**沒有任何一列**指向這三個乘數）。
+——我實測三檔乘數表（R84 已收斂為 `_mult()`）5 個站點、`EnvVar(` 13 列，而那 13 列裡**沒有任何一列**指向這三個乘數）。
 該檔自己的註解逐字寫「這三個數字是**挑的**，機械物守的是方向與單調性，不是數值」。
 ⇒ 訴求 6b 驗收的「(二) 最佳化」那一半，今天連可調的旋鈕都沒有。
 
@@ -396,7 +396,7 @@ Get-Content "$r\AutoClaude\.gitignore" -TotalCount 105 | Select-Object -Last 12
    我當回合直接呼叫 `quota_policy.decide()` 重量，**那已經不成立**——R82 已把聚合改成兩個角色
    （`cap` 逐軸取 min、`rec` 用最短期程那一軸的乘數），雙軸下 far 會把 `rec` 壓到 **2**。
    **仍然成立的是**：near 與 mid 在雙軸下被 `cap` 夾成同一個值（4）⇒ 加速那一半仍表達不出來。
-   ⇒ §4.1 已按實測改寫。**`_MULTIPLIER` 未參數化這一半是真的**，我逐行確認過沒有對應的 `EnvVar`。
+   ⇒ §4.1 已按實測改寫。**三檔乘數表（R84 已收斂為 `_mult()`）未參數化這一半是真的**，我逐行確認過沒有對應的 `EnvVar`。
 4. **`example_workspace` 的 ignore 規則**：交接說「真跑前要先給它 ignore 規則」。
    R82 已經給了（`AutoClaude/.gitignore:95-102`）。⇒ §5.4 改成「先確認它還在」。
 5. **`DEF-101-996`／`997`**：交接說四筆（995~998）都承接 R83。

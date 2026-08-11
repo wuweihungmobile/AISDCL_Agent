@@ -15,8 +15,12 @@
 #     必須寫成「**cap 必須是 (pct, horizon) 二元組的函式**」。
 #
 # 為何新開一支檔（三堵牆都是權威工具量出來的，不是偏好）：
-#   · `.claude/hooks/context_budget_guard.py` loc=1451 budget=1451 **headroom=0**（shrink-only）
-#   · `tools/session_resume_planner.py` loc=749 budget=750 **headroom=1**
+# 🔴 R84／ARCH-03 訂正下面兩個數字的**性質**：它們是 R82 立案當時的量測值，不是常數，
+#   而本檔此前把它們寫成現況 ⇒ 兩者今天都已過期（R84 實測 guard raw 已重釘 1089、
+#   planner loc 734）。牆還在（兩支都仍是 shrink-only／餘裕個位數），過期的是數字。
+#   一律現查：`python AutoClaude/tools/check_loc_budget.py --json`。
+#   · `.claude/hooks/context_budget_guard.py` loc=1451 budget=1451 **headroom=0**（立案當時值）
+#   · `tools/session_resume_planner.py` loc=749 budget=750 **headroom=1**（立案當時值）
 #   · `quota_meter.py` 是取數層（會失敗、會慢），判讀層必須快且確定性；
 #     `quota_limits.py` 吃的是逐字稿字串，本檔吃的是數值＋時刻，兩個主題。
 #   本檔落在 `tools/lib/` ＝ guardrail_lib tier **≤400 行**（不吃 AutoClaude total cap）。
@@ -165,6 +169,11 @@ class Policy:
     cap_prepare: int = 2
     max_fanout: int = 16
     degraded_cap: int = 4
+    # 🔴 R84／SA-01：三檔 horizon 乘數不再是模組層寫死的字面，而是 Policy 的一部分
+    # ⇒ 掌舵者要的「加速多積極／減速多保守」可由 `.env` 兩個鍵調（`ENV_SPEC` 同名項），
+    # 而**方向**（far ≤ 1 ≤ near）由 `policy_monotonicity_problems()` 機械守。
+    pace_near: float = 2.0
+    pace_far: float = 0.5
     fanout_cap_override: int | None = None
 
 
@@ -196,8 +205,8 @@ class Decision:
 
 
 # ── 時間：只把伺服器給的瞬時字串轉成「現在還剩幾分鐘」，不持久化任何時長 ──────────
+# 解析 ISO-8601；**naive 一律視為解不出**（不可與 aware 相減）。
 def _parse_aware(text: str) -> datetime | None:
-    """解析 ISO-8601；**naive 一律視為解不出**（不可與 aware 相減）。"""
     try:
         parsed = datetime.fromisoformat(text.strip().replace("Z", "+00:00"))
     except ValueError:
@@ -276,14 +285,19 @@ def pct_band(pct: float, p: Policy) -> str:
     return BAND_FREE
 
 
-#: horizon 三檔乘數。near ×2 ＝ 使用者原句「Token 剩 30Min 就 Reset，還有 100% 沒用，
-#: 就應該可以加速」；far／none ×0.5 ＝「反之則減速」。🔴 這三個數字是**挑的**，
-#: 機械物守的是方向與單調性，不是數值。
-_MULTIPLIER = {AXIS_NEAR: 2.0, AXIS_MID: 1.0, AXIS_FAR: 0.5, AXIS_NONE: 0.5}
+# horizon 三檔乘數。near ×2 ＝ 使用者原句「Token 剩 30Min 就 Reset，還有 100% 沒用，
+# 就應該可以加速」；far／none ×0.5 ＝「反之則減速」。🔴 這三個數字是**挑的**，
+# 機械物守的是方向與單調性，不是數值。
+# 🔴 R84／SA-01：由模組層 dict 改成吃 `Policy` 的函式——兩個係數要能由 `.env` 調
+# （掌舵者訴求 6b 逐字：「係數必須可由 env 參數化」），而寫死的字面不可能被參數化。
+# mid 恆為 1.0 刻意**不開放**：它是「既不加速也不減速」這個基準本身，不是一個旋鈕。
+def _mult(horizon: str, p: Policy) -> float:
+    return {AXIS_NEAR: p.pace_near, AXIS_MID: 1.0,
+            AXIS_FAR: p.pace_far, AXIS_NONE: p.pace_far}[horizon]
 
 
+# pct 階梯的第一段：硬上限（`None`＝free 帶不設限，維持 shipped 行為）。
 def _base_cap(band: str, p: Policy) -> int | None:
-    """pct 階梯的第一段：硬上限（`None`＝free 帶不設限，維持 shipped 行為）。"""
     return {
         BAND_FREE: None,
         BAND_NOTICE: p.cap_notice,
@@ -293,8 +307,8 @@ def _base_cap(band: str, p: Policy) -> int | None:
     }[band]
 
 
+# 建議值階梯＝上限階梯**往下錯開一格**（不新增常數，只有 prepare 的 1 是字面）。
 def _base_rec(band: str, p: Policy) -> int:
-    """建議值階梯＝上限階梯**往下錯開一格**（不新增常數，只有 prepare 的 1 是字面）。"""
     return {
         BAND_FREE: p.cap_notice,
         BAND_NOTICE: p.cap_converge,
@@ -304,13 +318,13 @@ def _base_rec(band: str, p: Policy) -> int:
     }[band]
 
 
+# 非 halt 一律 `>=1`：**禁止靜默鎖死**；上界 `max_fanout`。
 def _clamp(value: int, p: Policy) -> int:
-    """非 halt 一律 `>=1`：**禁止靜默鎖死**；上界 `max_fanout`。"""
     return max(1, min(value, p.max_fanout))
 
 
+# 🔴 `rec > cap` 是自相矛盾的建議（「建議派 4 個」而「上限只准 2 個」）。
 def _bound(rec: int, cap: int | None) -> int:
-    """🔴 `rec > cap` 是自相矛盾的建議（「建議派 4 個」而「上限只准 2 個」）。"""
     return rec if cap is None else min(rec, cap)
 
 
@@ -321,7 +335,7 @@ def _cap_for(band: str, horizon: str, p: Policy) -> int | None:
     base = _base_cap(band, p)
     if base is None:
         return None
-    cap = _clamp(int(base * _MULTIPLIER[horizon]), p)
+    cap = _clamp(int(base * _mult(horizon, p)), p)
     # 🔴 覆寫是**上限**，不是拿去參與乘法的 base。舊寫法 `base = override` 會被
     # horizon 乘數放大——`AUTOSDD_QUOTA_FANOUT_CAP=8` 在 near 檔實得 16，也就是一個
     # 名字叫 CAP 的旋鈕給出了**比使用者要求的還鬆**的值。只收緊、不放寬。
@@ -330,11 +344,11 @@ def _cap_for(band: str, horizon: str, p: Policy) -> int | None:
     return _clamp(min(cap, p.fanout_cap_override), p)
 
 
+# 單軸建議派工數；恆 `<=` 同軸 cap（見 `_bound`）。
 def _rec_for(band: str, horizon: str, p: Policy) -> int:
-    """單軸建議派工數；恆 `<=` 同軸 cap（見 `_bound`）。"""
     if band == BAND_HALT:
         return 0
-    return _bound(_clamp(int(_base_rec(band, p) * _MULTIPLIER[horizon]), p),
+    return _bound(_clamp(int(_base_rec(band, p) * _mult(horizon, p)), p),
                   _cap_for(band, horizon, p))
 
 
@@ -349,7 +363,7 @@ _BAND_LADDER = (BAND_FREE, BAND_NOTICE, BAND_CONVERGE, BAND_PREPARE, BAND_HALT)
 def policy_monotonicity_problems(p: Policy) -> list[str]:
     """不變式：任一 horizon 下，**pct 愈高 cap／rec 必須單調不增**。違反即出聲。"""
     problems = []
-    for horizon in _MULTIPLIER:
+    for horizon in (AXIS_NEAR, AXIS_MID, AXIS_FAR, AXIS_NONE):
         for label, fn in (("cap", _cap_for), ("rec", _rec_for)):
             seq = [_INF if (v := fn(b, horizon, p)) is None else float(v)
                    for b in _BAND_LADDER]
@@ -357,6 +371,12 @@ def policy_monotonicity_problems(p: Policy) -> list[str]:
                 f"[非單調] horizon={horizon} 的 {label}：{_BAND_LADDER[i]}={a}"
                 f" < {_BAND_LADDER[i + 1]}={b} ⇒ 水位愈高反而愈鬆"
                 for i, (a, b) in enumerate(zip(seq, seq[1:])) if b > a]
+    # 🔴 R84／SA-01：pace 兩個係數開放給 `.env` 之後，**方向**必須被守（`ENV_SPEC` 的
+    # lo／hi 只守單鍵值域，守不到「兩個鍵之間的關係」——同上面那段對區間檢查的判詞）。
+    # 反了會讓「近 reset ⇒ 加速」變成減速，而 `problems=[]` 讓它完全靜默。
+    if not p.pace_far <= 1.0 <= p.pace_near:
+        problems.append(f"[方向] pace 倍率必須 far({p.pace_far}) ≤ 1 ≤ near({p.pace_near})"
+                        "，否則「近 reset 加速／遠 reset 減速」是反的")
     return problems
 
 
@@ -370,12 +390,12 @@ def axis_recommended(pct: float, minutes: float | None, p: Policy) -> int:
     return _rec_for(pct_band(pct, p), horizon_band(minutes, p), p)
 
 
+# 🔴 時鐘偏移的方向鎖：`minutes < 0` ⇒ 夾 0 **且強制 mid**。偏移絕不允許把預算調高
+# ——一台快 6 小時的機器會讓「reset 就在眼前，衝」永遠成立。
+# （說明寫成 `#` 而非 docstring：`count_loc` 計 docstring 行、不計註解行，而本檔 tier
+#   餘裕個位數；同 `quota_gate.py`／`session_resume_planner.py` 既有作法，一字未刪。）
 def axes_of(state: QuotaState, now: datetime, p: Policy) -> tuple[AxisReading, ...]:
-    """逐軸解析的**唯一正規路徑**：`minutes` 只能從 `axis.resets_at` 導出。
-
-    🔴 時鐘偏移的方向鎖：`minutes < 0` ⇒ 夾 0 **且強制 mid**。偏移絕不允許把預算
-    調高——一台快 6 小時的機器會讓「reset 就在眼前，衝」永遠成立。
-    """
+    """逐軸解析的**唯一正規路徑**：`minutes` 只能從 `axis.resets_at` 導出。"""
     readings = []
     for axis in state.axes:
         raw, note = _delta_minutes(axis.resets_at, now)
@@ -389,21 +409,46 @@ def axes_of(state: QuotaState, now: datetime, p: Policy) -> tuple[AxisReading, .
     return tuple(readings)
 
 
-# 🔴 任一軸期程不明 ⇒ pace 上限夾在 1.0（不准加速）：不知道何時 reset 就沒有「不用會
+# 🔴 期程不明的軸 ⇒ pace 上限夾在 1.0（不准加速）：不知道何時 reset 就沒有「不用會
 # 浪費」這個理由，同 M4 的三道 fail-closed。
-def _pace_of(readings: tuple[AxisReading, ...]) -> float:
+#
+# 🔴 R84／SA-01 訂正**否決權的持有者**（原判準逐字是 `any(r.horizon == AXIS_NONE …)`，
+# 那句話在 production 讓「加速」結構上到不了，故不留著當現行說法）：
+#   live 快取 7 軸實測有 3 軸 `resets_at=null`（weekly_scoped／nimbus_quill／spend），
+#   而它們同時是 0%＝free 帶 ⇒ `cap is None`＝**對 cap 一格煞車力都沒有**。舊判準卻給了
+#   它們完整否決權：把 session／five_hour 的 reset 移到 20 分鐘（真 near）後實測
+#   `fastest=2.0` 而 `pace=1.0 rec=8`；同一組軸只把三支 null 軸移除 ⇒ `pace=2.0 rec=16`。
+#   也就是掌舵者錨點①「剩 30 分鐘就 reset、還有 100% 沒用 ⇒ 多派」在**任何**水位下都
+#   永遠少派一半，而否決來自一個零煞車力的軸——那是從後門煞車。
+#   ⇒ 不變式：**不參與 cap 的軸不得參與 pace**。判準加一個合取項 `r.cap is not None`。
+#   fail-closed 那一半原封不動保留：期程不明**而且真的在煞車**的軸（notice 帶以上）
+#   仍然一票否決，實測 `session 75%@3min ＋ spend 55%@None` 改前改後皆 rec=2（拿掉否決會變 4）。
+#   回歸鎖（`tools/tests/test_quota_policy.py` 的 `TestM1bAccelerationSurvivesAggregation`）：
+#   `test_a_toothless_null_axis_no_longer_vetoes_acceleration`（治本那一半）＋
+#   `test_an_axis_with_no_horizon_but_a_real_cap_blocks_acceleration`（fail-closed 那一半）＋
+#   `test_red_the_old_any_none_predicate_halves_the_recommendation`（合成注入自證）。
+def _pace_of(readings: tuple[AxisReading, ...], p: Policy) -> float:
     """此刻的節奏＝**最短期程**那一軸的乘數（見檔頭「兩個角色分開聚合」）。"""
-    fastest = max(_MULTIPLIER[r.horizon] for r in readings)
-    if any(r.horizon == AXIS_NONE for r in readings):
+    fastest = max(_mult(r.horizon, p) for r in readings)
+    if any(r.horizon == AXIS_NONE and r.cap is not None for r in readings):
         return min(1.0, fastest)
     return fastest
 
 
-def _binding_key(r: AxisReading) -> tuple[float, float, str]:
-    """argmin：cap 最小；平手取 horizon 較長（回報代價大者）；再平手取 kind 字典序。"""
+# 🔴 R84／SA-06 同一條不變式的第二面（回報面）：`remaining = _INF if minutes is None`
+# 讓 `-remaining = -inf` 恆為最小 ⇒ cap 平手時期程不明的軸**必勝**，而 cap 平手（七軸
+# 全 free）是常態。實測 live 快取 `binding=nimbus_quill`（0%、reset 不明、完全不消耗）
+# ——指著一個零消耗的軸說它 binding，正是「裸百分比誤讀」的下一代形態。
+# ⇒ 加一格 tie-break：`cap is None`（沒有煞車力）**且**期程不明的軸排到最後。
+# 🔴 刻意只降級「cap is None」那一種：halt／節流帶的 null 軸（例：spend 撞線、沒有
+# reset 可以等）**必須**保留原本的優先權，否則 `reset_branch()` 會從 `escalate`
+# （只有人去提額）翻成 `arm`（排一支等 reset 的工作）＝R59 事故同形。
+def _binding_key(r: AxisReading) -> tuple[float, float, float, str]:
+    """argmin：cap 最小；平手時零煞車力的無期程軸排最後；再取 horizon 較長；再 kind。"""
     cap = _INF if r.cap is None else float(r.cap)
     remaining = _INF if r.minutes is None else r.minutes
-    return (cap, -remaining, r.axis.kind)
+    toothless = 1.0 if (r.cap is None and r.minutes is None) else 0.0
+    return (cap, toothless, -remaining, r.axis.kind)
 
 
 # 🔴 為何 rec 不能也取 `min(逐軸 rec)`（那會讓本案要治的病原封不動復發）：weekly 這種
@@ -428,12 +473,12 @@ def decide(state: QuotaState, now: datetime, p: Policy) -> Decision:
     return Decision(
         cap=binding.cap,
         recommended_fanout=_bound(
-            _clamp(int(base * _pace_of(readings)), p), binding.cap),
+            _clamp(int(base * _pace_of(readings, p)), p), binding.cap),
         band=binding.band, binding=binding.axis, per_axis=readings, reason=reason)
 
 
+# M7：每一段只帶**一個** %，且同段必有 `kind=` 與剩餘分鐘（或明文不明）。
 def _axis_phrase(r: AxisReading) -> str:
-    """M7：每一段只帶**一個** %，且同段必有 `kind=` 與剩餘分鐘（或明文不明）。"""
     when = "reset 距離不明" if r.minutes is None else f"剩 {int(r.minutes)} 分鐘"
     note = f" note={r.note}" if r.note else ""
     return (f"kind={r.axis.kind} {r.axis.pct:g}% {when} "
@@ -482,6 +527,10 @@ ENV_SPEC: tuple[EnvVar, ...] = (
            "converge 帶的 base cap", "policy"),
     EnvVar("AUTOSDD_QUOTA_CAP_PREPARE", "cap_prepare", 2, "int", 1.0, None,
            "prepare 帶的 base cap", "policy"),
+    EnvVar("AUTOSDD_QUOTA_PACE_NEAR", "pace_near", 2.0, "float", 1.0, None,
+           "reset 近在眼前時的**加速**倍率（下界 1＝不加速；R84／6b）", "policy"),
+    EnvVar("AUTOSDD_QUOTA_PACE_FAR", "pace_far", 0.5, "float", 0.0, 1.0,
+           "reset 很遠／期程不明時的**減速**倍率（上界 1＝不減速；R84／6b）", "policy"),
     EnvVar("AUTOSDD_QUOTA_MAX_FANOUT", "max_fanout", 16, "int", 1.0, None,
            "加速後的絕對上界", "policy"),
     EnvVar("AUTOSDD_QUOTA_DEGRADED_CAP", "degraded_cap", 4, "int", 1.0, None,
@@ -515,8 +564,8 @@ _ENV_HEADER = (
 _ENV_ESCAPE_HEADER = "# ── 既有逃生口（此前只散落在 hook 註解裡，零使用者可讀清單）──"
 
 
+# `50.0` 印成 `50`；`None`／空字串印成空（＝未設定）。
 def _fmt_default(value: object) -> str:
-    """`50.0` 印成 `50`；`None`／空字串印成空（＝未設定）。"""
     if value is None or value == "":
         return ""
     if isinstance(value, float) and value.is_integer():
@@ -597,12 +646,10 @@ def _parse_env_number(raw: str, spec: EnvVar, problems: list[str]) -> float | in
     return int(value) if spec.kind == "int" else value
 
 
+# 🔴 `problems` 非空時呼叫端必須出聲一次（`note_degraded()`）——「設了沒生效而沒有人
+# 知道」正是 6c 最容易假交付的一格。
 def load_policy(env: Mapping[str, str]) -> tuple[Policy, list[str]]:
-    """從 mapping（**不是 os.environ**）讀門檻。回 `(policy, problems)`。
-
-    🔴 `problems` 非空時呼叫端必須出聲一次（`note_degraded()`）——「設了沒生效
-    而沒有人知道」正是 6c 最容易假交付的一格。
-    """
+    """從 mapping（**不是 os.environ**）讀門檻。回 `(policy, problems)`。"""
     problems: list[str] = []
     values: dict[str, object] = {}
     for spec in ENV_SPEC:

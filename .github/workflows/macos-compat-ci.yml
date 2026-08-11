@@ -257,6 +257,13 @@ on:
       - "tools/lib/quota_policy.py"
       - "tools/lib/secret_scan.py"
       - "tools/lib/sentinel_lifecycle.py"
+      # 🔴 R84 收尾：本輪兩支新建 tools/lib/ 共用層（同 R80~R83 連續四輪的同一形態、
+      # 同一支判準 test_ci_paths_cover_root_consumers）。endurance_env.py＝續航排程的
+      # 環境快照；win_spawn.py＝無 console 父行程下的防彈窗兩層防線（自 hook 外移，
+      # 見該檔檔頭：此前是 lib 反過來 import hook）。
+      - "tools/lib/endurance_env.py"
+      - "tools/lib/win_spawn.py"
+      - "tools/lib/shell_tokens.py"
       - ".env.example"
       - "tools/_cli_flags.py"
       - "tools/check_scheduled_task_drift.py"
@@ -554,6 +561,13 @@ on:
       - "tools/lib/quota_policy.py"
       - "tools/lib/secret_scan.py"
       - "tools/lib/sentinel_lifecycle.py"
+      # 🔴 R84 收尾：本輪兩支新建 tools/lib/ 共用層（同 R80~R83 連續四輪的同一形態、
+      # 同一支判準 test_ci_paths_cover_root_consumers）。endurance_env.py＝續航排程的
+      # 環境快照；win_spawn.py＝無 console 父行程下的防彈窗兩層防線（自 hook 外移，
+      # 見該檔檔頭：此前是 lib 反過來 import hook）。
+      - "tools/lib/endurance_env.py"
+      - "tools/lib/win_spawn.py"
+      - "tools/lib/shell_tokens.py"
       - ".env.example"
       - "tools/_cli_flags.py"
       - "tools/check_scheduled_task_drift.py"

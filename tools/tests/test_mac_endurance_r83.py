@@ -25,6 +25,7 @@ import re
 import subprocess
 import sys
 import tempfile
+import time
 import unittest
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -36,6 +37,8 @@ sys.path.insert(0, str(_REPO_ROOT / "tools" / "lib"))
 sys.path.insert(0, str(_REPO_ROOT / ".claude" / "hooks"))
 
 import context_budget_guard as guard  # noqa: E402
+import endurance_env  # noqa: E402
+import quota_escalation as escalation  # noqa: E402
 import schedule_backend as sb  # noqa: E402
 import sentinel_lifecycle  # noqa: E402
 
@@ -1482,6 +1485,302 @@ class HookWiringReachesThisPlatformTest(unittest.TestCase):
             self.assertTrue(carriers, f"{event} 完全沒有掛 context_budget_guard")
             posix = [c for c in carriers if "Scripts" not in c and "pythonw" not in c]
             self.assertTrue(posix, f"{event} 只有 Windows 載具 ⇒ mac 上整條續航鏈不會被叫到")
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# 🔴 R84／SA-05：訴求 6e 的**誠實化**——「睡著的 Mac 不會醒」不得只活在一行註解裡
+# ═══════════════════════════════════════════════════════════════════════════
+# 病（複審當回合實測）：`pmset -g sched` rc=0／**0 位元組**（零排程喚醒）、`pmset -g custom`
+# 的 AC 段逐字 `sleep 0`，而武裝路徑對 `sleep != 0` **完全靜默**——憑證會照樣印出一份看起來
+# 完全正常的三件式。⇒ 6e 今天在這台機器上成立的唯一原因是一個**不在 repo、不隨 clone 走**
+# 的機器設定（同 R73 把一台機器的安裝路徑寫成常數的判例）。
+# 🔴 本組鎖**不驗「Mac 會醒」**（那件事本專案不做：需 sudo 改動掌舵者機器的電源行為，已被
+# 否決）。它驗的是「失效變成可偵測的」：非 0 就出聲、量不到也出聲、而且不對非 mac 發言。
+_SLEEPY = "AC Power:\n displaysleep 10\n sleep 25\n disksleep 0\n"
+_AWAKE = "AC Power:\n displaysleep 10\n sleep 0\n standby 1\n"
+
+
+def _pm(rc: int, out: str, seen: list | None = None):
+    """`schedule_backend._run` 的替身，只回答 `pmset`（其餘一律 rc=0／空輸出）。"""
+    def _run(argv: list[str], timeout: int = 60) -> tuple[int, str]:
+        if seen is not None:
+            seen.append(list(argv))
+        return (rc, out) if argv and argv[0] == "pmset" else (0, "")
+    return _run
+
+
+class MacSleepPostureIsSaidOutLoudTest(unittest.TestCase):
+    """電源姿態的判準與它的**鑑別力**（每一條都附合成注入，不依賴這台機器的設定）。"""
+
+    def test_a_sleepy_machine_is_reported(self) -> None:
+        trouble = endurance_env.sleep_trouble(_pm(0, _SLEEPY), "darwin")
+        self.assertIn("sleep 25", trouble)
+        self.assertIn("launchd", trouble, "沒說出「為什麼這件事會弄壞續航」")
+
+    def test_green_a_machine_that_never_sleeps_says_nothing(self) -> None:
+        """對照組：`sleep 0` 必須完全安靜——會誤報的警告會被下一個人整個關掉。"""
+        self.assertEqual(endurance_env.sleep_trouble(_pm(0, _AWAKE), "darwin"), "")
+
+    def test_displaysleep_is_not_mistaken_for_system_sleep(self) -> None:
+        """鑑別力：`displaysleep 10` 與 `sleep 0` 同時存在是**本機實測的常態**。
+
+        螢幕關掉不等於系統睡著（launchd job 照跑）⇒ 子字串比對會把「不會睡的機器」判成
+        會睡，而那是一筆必然發生的假紅。`_AWAKE` 這份 fixture 逐字取自本機 `pmset -g custom`。
+        """
+        self.assertNotIn("displaysleep",
+                         endurance_env.posture_note(_pm(0, _AWAKE), "darwin"))
+
+    def test_unmeasurable_is_not_the_same_as_will_not_sleep(self) -> None:
+        """`量不到 ≠ 不會睡`（本 repo 通篇那條紀律，見 `reap_verdict` ②）。"""
+        trouble = endurance_env.sleep_trouble(_pm(127, "pmset: not found"), "darwin")
+        self.assertIn("量不到", trouble)
+        self.assertIn("127", trouble, "沒把 rc 寫進訊息 ⇒ 事後分不出是哪一種失效")
+
+    def test_the_probe_never_even_spawns_off_darwin(self) -> None:
+        """鐵律三（「這在另一個平台是什麼值」）：`pmset` 在 Windows／Linux **不存在**。
+
+        判準刻意是「連 spawn 都不做」而不是「跑了失敗再說」：後者會在每一次武裝多一個
+        必然失敗的子行程，而它的訊息（「這台機器量不到電源姿態」）對非 mac 機器毫無意義。
+        """
+        for platform_name in ("win32", "linux"):
+            with self.subTest(platform_name):
+                seen: list = []
+                self.assertEqual(
+                    endurance_env.sleep_trouble(_pm(0, _SLEEPY, seen), platform_name), "")
+                self.assertEqual(seen, [], "非 darwin 竟然去 spawn pmset")
+
+    def test_the_credential_slot_is_never_blank(self) -> None:
+        """留白會讓「現查過、不會睡」與「根本沒查」外觀相同（同 calendar 那一欄的處置）。"""
+        for platform_name in ("darwin", "linux"):
+            with self.subTest(platform_name):
+                self.assertTrue(
+                    endurance_env.posture_note(_pm(0, _AWAKE), platform_name).strip())
+
+    def test_the_arming_path_really_asks(self) -> None:
+        """🔴 接線鎖（「機制蓋好沒接電」是本 repo 反覆記載的形態）。
+
+        判準不是「程式碼裡有那個函式」，而是**武裝真的跑過一次之後 stderr 有那句話**：
+        SA-05 的病正是「函式不存在」的下一階——路徑在、但沒有人在那條路上出聲。
+        """
+        tmp = Path(tempfile.mkdtemp(prefix="r84_pm_"))
+        plan = tmp / "plan.md"
+        plan.write_text("# plan\n", encoding="utf-8", newline="\n")
+        self.addCleanup(setattr, sb, "LAUNCH_AGENTS_DIR", sb.LAUNCH_AGENTS_DIR)
+        self.addCleanup(setattr, sb, "_run", sb._run)
+        sb.LAUNCH_AGENTS_DIR = tmp / "LaunchAgents"
+        sb._run = _pm(0, _SLEEPY)          # print/bootstrap 皆回 (0, "") ⇒ 武裝必然失敗
+        err = io.StringIO()
+        with contextlib.redirect_stderr(err):
+            sb.LaunchdBackend().arm(str(plan), "AutoSDD_Sentinel_pm", "", "--sentinel-tick")
+        self.assertIn("sleep 25", err.getvalue(),
+                      "武裝路徑對「這台機器會睡著」仍然是靜默的（SA-05 的原病）")
+
+    def test_the_wording_has_exactly_one_home(self) -> None:
+        """同一句話兩個家是本 repo 反覆判過的形態：措辭只准住 `SLEEP_CAVEAT`。
+
+        🔴 取樣範圍刻意**結構收窄到字串常數**（`ast.Constant`），不拿整份檔當 haystack：
+        那兩支檔的**註解**本來就在解釋這件事（本輪新增的 WHY 段就是），而註解不是被測對象
+        ——先例＝`TestNoAssertionSamplesALiveDocumentWholesale` 記載的「取樣範圍畫錯」那一族，
+        本輪實測就先紅過一次（該鎖點名本測試逐字）。
+        """
+        needle = endurance_env.SLEEP_CAVEAT[:12]
+        for src in (_BACKEND_SRC, _SENTINEL_SRC):
+            literals = [node.value for node in ast.walk(ast.parse(src.read_text(
+                encoding="utf-8"))) if isinstance(node, ast.Constant)
+                and isinstance(node.value, str)]
+            self.assertEqual([s for s in literals if needle in s], [],
+                             f"{src.name} 自己抄了一份 SLEEP_CAVEAT 的措辭")
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# 🔴 R84／ZT-03＋ZT-07：續航鏈走過哪幾個分支，必須留下**不會蒸發**的憑證
+# ═══════════════════════════════════════════════════════════════════════════
+# 病（複審當回合實測，逐字）：R83 那個 P0（等父行程退場才 bootout）的唯一決定性憑證
+# `parent-gone waited=20s` 住在 `$TMPDIR` ⇒ `ls "$TMPDIR"/autosdd_sentinel_bootout_*.log`
+# 回 `no matches found`、`grep -rl "parent-gone" "$TMPDIR"` rc=1 ⇒ **修好與沒修好在事後外觀
+# 相同**；同一份實測還顯示交棒書引用的 `probed`／`gc_reaped` 在現存痕跡檔裡皆為 0。
+# 🔴 判準刻意**不**斷言「這台機器上那個檔存在」：那是機器狀態，會讓 CI 與任何全新 clone
+# 必紅（同 `test_check_hooks_liveness.py` 對載具存在性的既有分工）。它斷言的是**居所的性質**
+# ＋ 兩個寫檔點真的用了它。
+class DurableTraceHomeTest(unittest.TestCase):
+    """痕跡的居所：比 `$TMPDIR` 持久、比 repo 不具權威。"""
+
+    def setUp(self) -> None:
+        self.tmp = Path(tempfile.mkdtemp(prefix="r84_trace_"))
+        self.addCleanup(os.environ.pop, endurance_env.TRACE_DIR_ENV, None)
+
+    def test_the_override_is_honoured_and_created(self) -> None:
+        """逃生口：單元測試不得在開發者家目錄留下移動零件。"""
+        want = self.tmp / "sandbox" / "traces"
+        os.environ[endurance_env.TRACE_DIR_ENV] = str(want)
+        self.assertEqual(endurance_env.trace_dir(), want)
+        self.assertTrue(want.is_dir(), "逃生口指定的目錄沒有被建出來")
+
+    def test_the_default_home_is_not_the_volatile_tmpdir(self) -> None:
+        """本組鎖的**全部價值**：預設居所不得落在會被 OS 清掉的那一棵樹底下。"""
+        os.environ.pop(endurance_env.TRACE_DIR_ENV, None)
+        default = Path.home().joinpath(*endurance_env.TRACE_HOME_PARTS)
+        self.assertNotEqual(default.resolve(strict=False),
+                            Path(tempfile.gettempdir()).resolve(strict=False))
+        self.assertIn(Path.home(), default.parents, "預設居所不在家目錄底下")
+
+    def test_the_default_home_is_never_inside_the_repo(self) -> None:
+        """ZT-03 明文的邊界：痕跡是機器狀態，寫進版控就變成第二個假常數（R73 判例）。"""
+        default = Path.home().joinpath(*endurance_env.TRACE_HOME_PARTS)
+        self.assertNotIn(_REPO_ROOT.resolve(), [default.resolve(strict=False),
+                                                *default.resolve(strict=False).parents])
+
+    def test_an_unwritable_home_degrades_instead_of_raising(self) -> None:
+        """痕跡留不下來**絕不可**升級成續航本身的故障源（同 `append_log` 的既有紀律）。"""
+        blocked = self.tmp / "ro"
+        blocked.mkdir()
+        blocked.chmod(0o500)
+        self.addCleanup(blocked.chmod, 0o700)
+        os.environ[endurance_env.TRACE_DIR_ENV] = str(blocked / "traces")
+        self.assertEqual(endurance_env.trace_dir(),
+                         Path(tempfile.gettempdir()), "唯讀家目錄沒有退回 $TMPDIR")
+
+    def test_both_writers_really_use_the_durable_home(self) -> None:
+        """接線鎖：兩個寫檔點（job 自己的 stdout、延後動作的 rc 痕跡）都必須落在那裡。
+
+        `job stdout` 收的正是「這條鏈走過哪幾個分支」（`哨兵判定 <action>：…`），
+        而 `bootout log` 收的是 ZT-03 那個 `parent-gone waited=Ns`。
+        """
+        want = self.tmp / "durable"
+        os.environ[endurance_env.TRACE_DIR_ENV] = str(want)
+        self.addCleanup(setattr, sb, "LAUNCH_AGENTS_DIR", sb.LAUNCH_AGENTS_DIR)
+        sb.LAUNCH_AGENTS_DIR = self.tmp / "LaunchAgents"
+        backend = sb.LaunchdBackend()
+        trace = backend._defer("AutoSDD_Sentinel_probe", 'echo "noop";')
+        self.assertEqual(trace.parent, want, "延後動作的痕跡仍落在 $TMPDIR")
+        # argv 取 `sys.executable` 而不是一個 POSIX 絕對路徑字面值：後者會被
+        # `test_platform_neutral_paths` 判紅（Windows 上 Path 渲染成反斜線 ⇒ Mac 全綠、
+        # windows-compat-ci 假紅），本輪實測就是這樣紅了一次。
+        self.assertTrue(backend._write_plist("AutoSDD_Sentinel_probe", [sys.executable], 900))
+        body = plistlib.loads(backend.plist_path("AutoSDD_Sentinel_probe").read_bytes())
+        self.assertEqual(Path(body["StandardOutPath"]).parent, want,
+                         "job 自己的 stdout（＝分支歷程）仍落在 $TMPDIR")
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# 🔴 R84／ARCH-06：「什麼時候可以刪任務書」只准有一個判準、一個 unlink 站點
+# ═══════════════════════════════════════════════════════════════════════════
+# 病：`sentinel_lifecycle._sweep_artifacts` 的既有註解**自陳**「兩個家…改了一邊不會有任何
+# 東西轉紅」——而自陳不是機械物。任務書是〈可重啟點四條件〉第 2 條的載體，兩套刪除時機
+# 任一邊改動窗口，就可能刪掉另一邊還在等的那一份，且失效是靜默的。
+#: 任務書身分的判準（`unlink` 站點的辨識條件之一）。兩種寫法都算：常數引用與字面。
+_PLAN_IDENTITY = ("PLAN_PREFIX", "autosdd_resume_plan")
+_PLAN_REAPERS = frozenset({"unlink", "remove", "rmtree"})
+#: 唯一宣告過的家（`檔:函式`）。多一個就是多一套刪除時機。
+_PLAN_UNLINK_HOME = {"tools/lib/quota_escalation.py:reap_plans"}
+
+
+def plan_unlink_sites(sources: dict[str, str]) -> list[str]:
+    """「同一個函式裡既認得任務書、又會刪檔」的站點清單。純函式，紅綠由注入自證。
+
+    判準取**函式**為單位而不是檔案：同一支檔裡本來就會有別的 `unlink`
+    （`sentinel_lifecycle` 要刪閂鎖、`schedule_backend` 要刪 plist），以檔為單位會製造假紅。
+    解析失敗一律計為違規（掃不到的檔靜默放行正是本 repo 通篇在防的 fail-open）。
+    """
+    hits: list[str] = []
+    for rel, src in sorted(sources.items()):
+        try:
+            tree = ast.parse(src)
+        except SyntaxError as exc:
+            hits.append(f"{rel}:? AST 解析失敗（{exc}）——掃不到的檔不得靜默放行")
+            continue
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.FunctionDef):
+                continue
+            body = ast.dump(node)
+            names = {_call_name(c) for c in ast.walk(node) if isinstance(c, ast.Call)}
+            if names & _PLAN_REAPERS and any(tag in body for tag in _PLAN_IDENTITY):
+                hits.append(f"{rel}:{node.name}")
+    return hits
+
+
+class PlanReapHasOneHomeTest(unittest.TestCase):
+    """判準一個家、`unlink` 一個家，且兩個呼叫端只提供輸入。"""
+
+    def setUp(self) -> None:
+        self.tmp = Path(tempfile.mkdtemp(prefix="r84_reap_"))
+
+    def _plan(self, name: str, age_days: float) -> Path:
+        path = self.tmp / f"{guard.PLAN_PREFIX}{name}.md"
+        path.write_text("# 任務書\n", encoding="utf-8", newline="\n")
+        stamp = time.time() - age_days * 86400
+        os.utime(path, (stamp, stamp))
+        return path
+
+    def test_the_named_session_is_reaped_and_others_are_not(self) -> None:
+        mine, theirs = self._plan("mine", 0.0), self._plan("theirs", 0.0)
+        self.assertTrue(escalation.plan_reap_verdict(mine, "mine"))
+        self.assertEqual(escalation.plan_reap_verdict(theirs, "mine"), "",
+                         "🔴 收了別人那一份 ⇒ 另一個 session 的續航被靜默拆掉")
+
+    def test_age_none_means_the_age_rule_has_no_input(self) -> None:
+        """`age=None` **不是**第二套政策：GC 拿的是「這支哨兵已終態」這個裁決，與齡無關。"""
+        ancient = self._plan("ancient", 99.0)
+        self.assertTrue(escalation.plan_reap_verdict(ancient))
+        self.assertEqual(escalation.plan_reap_verdict(ancient, age=None), "")
+
+    def test_a_waiting_plan_survives_a_whole_quota_window(self) -> None:
+        """門檻的**方向**（原 `PlanGarbageCollectionTest` 那條紀律，判準搬家後仍成立）。"""
+        self.assertGreater(escalation.PLAN_GC_AGE_SECONDS, 5 * 3600)
+        self.assertEqual(escalation.plan_reap_verdict(self._plan("waiting", 0.2)), "")
+
+    def test_a_file_that_cannot_be_stat_ed_is_never_reaped(self) -> None:
+        """量不到 ≠ 該刪（`reap_verdict` ② 同一條紀律）。"""
+        self.assertEqual(escalation.plan_reap_verdict(self.tmp / "ghost.md"), "")
+
+    def test_the_gc_arm_delegates_instead_of_deleting_by_itself(self) -> None:
+        """接線鎖：`_sweep_artifacts` 必須真的把任務書那一件交出去。
+
+        判準看**行為**（那一份真的不見了、而別人的超齡檔沒被牽連），不是看 import：
+        「程式碼裡有那個呼叫」與「那條路真的走過」是本 repo 分開過的兩件事。
+        """
+        mine = self._plan("sid", 0.0)
+        ancient = self._plan("someone-else", 99.0)
+        (self.tmp / f"{sentinel_lifecycle.ARM_MARKER_PREFIX}sid.json").write_text(
+            "{}", encoding="utf-8", newline="\n")
+        swept = sentinel_lifecycle._sweep_artifacts("sid", self.tmp)
+        self.assertIn(mine.name, swept)
+        self.assertFalse(mine.is_file())
+        self.assertTrue(ancient.is_file(),
+                        "GC 順手把別人的超齡檔一起收了 ⇒ 那是把年齡政策偷渡進 GC")
+
+    def test_the_scan_surface_is_shared_and_has_not_shrunk(self) -> None:
+        """分母與載具那道鎖**共用同一份現查**（兩個家會各自漂移）。"""
+        surface = _carrier_scan_surface()
+        self.assertGreaterEqual(len(surface), _CARRIER_SURFACE_FLOOR)
+        for home in _PLAN_UNLINK_HOME:
+            self.assertIn(home.split(":")[0], surface, "宣告過的家不在掃描面內")
+
+    def test_no_second_home_deletes_a_plan(self) -> None:
+        sites = set(plan_unlink_sites(_carrier_scan_surface())) - _PLAN_UNLINK_HOME
+        self.assertEqual(sites, set(),
+                         "任務書的刪除時機又長出第二個家（改一邊不會有東西轉紅）："
+                         f"{sorted(sites)}")
+
+    def test_red_a_second_home_is_caught(self) -> None:
+        """合成注入（紅）＝修前 `_sweep_artifacts` 的原形逐字。"""
+        injected = ('def _sweep_artifacts(session_id, tmp):\n'
+                    '    for name in (f"autosdd_resume_plan_{session_id}.md",):\n'
+                    '        (tmp / name).unlink()\n')
+        self.assertEqual(plan_unlink_sites({"tools/lib/x.py": injected}),
+                         ["tools/lib/x.py:_sweep_artifacts"])
+
+    def test_green_reading_a_plan_without_deleting_is_not_a_site(self) -> None:
+        """對照組：讀任務書（`plan_state`／寫回狀態塊）的地方一律放行，否則滿場假紅。"""
+        innocent = ('def plan_state(sid, tmp):\n'
+                    '    return (tmp / f"autosdd_resume_plan_{sid}.md").read_text()\n')
+        self.assertEqual(plan_unlink_sites({"tools/lib/y.py": innocent}), [])
+
+    def test_green_deleting_something_that_is_not_a_plan_is_not_a_site(self) -> None:
+        """另一向對照組：刪 plist／閂鎖的既有站點不得被牽連。"""
+        innocent = ('def disarm(self, task):\n'
+                    '    self.plist_path(task).unlink()\n')
+        self.assertEqual(plan_unlink_sites({"tools/lib/z.py": innocent}), [])
 
 
 if __name__ == "__main__":

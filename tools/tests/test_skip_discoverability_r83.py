@@ -73,10 +73,15 @@ WHY（本檔為何存在——三筆當回合實測的缺陷，全部長在「�
   · 規則：單位內出現 `_WINDOWS_ONLY` 或 `_POSIX_ONLY` 時，該單位必須**同時**提到
     一個 Windows 平台標籤與一個 POSIX 平台標籤（`PowerShell`/`pwsh`/`Windows`
     ↔ `bash`/`zsh`/`macOS`/`Linux`/`POSIX`）。
-    **為何判「標籤」而不是「有沒有對面那一條指令」**：兩平台的對應寫法往往不是同一個
+    **為何預設判「標籤」而不是「有沒有對面那一條指令」**：兩平台的對應寫法往往不是同一個
     指令族（`open -a Docker` ↔ 「用 GUI 開 Docker Desktop」根本不是指令），硬要求
     token 級對照會逼人寫出假的對照。要求「說清楚這段是給誰用的、另一邊怎麼辦」
     才是真正要的東西。
+  · 🔴 **例外一軸（R84／SD-03）：`$env:X = v`（設環境變數）另加指令級配對**。這一軸的對面
+    **有**寫得出來的指令（`export X=…` 或行內 `VAR=value <指令>` 前綴），所以「提到了兩個
+    平台」不足以取代「寫出另一邊」——那正是 F-07 那個繞法（只加兩個平台字樣就過）的入口。
+    反向（POSIX 設值 ⇒ 要求 `$env:`）刻意**不判**：實測 28 筆全是假紅。判準與假紅實量見
+    `_INLINE_ENV_PREFIX_RE` 上方；`export`/`open -a` 仍只受「標籤」那一道管。
 
 **存量與門檻**：當回合實測，A 面（`_LIVE_DOCS` 10 份）與 B 面在本包修完後**存量皆為 0**
 ⇒ 採**零容忍**，不設棘輪。本 repo 已有判例：一次判 148 筆假紅的鎖活不過一輪，所以
@@ -140,6 +145,45 @@ _GNU_ONLY: list[tuple[re.Pattern[str], str]] = [
     (re.compile(r"(?<![\w-])xargs\s+-r\b"), "xargs -r（BSD xargs 無此旗標）"),
 ]
 
+#: 🔴 R84 包 W5（SD-03）：**環境變數設值**這一軸另加一道「對面平台的實際指令在不在」的配對。
+#:
+#: 缺陷本體（R83 交棒書開的處方 ＋ 本輪實測）：R83 建議把配對由「有沒有提到兩個平台標籤」
+#: 收緊成「有沒有對面平台的實際指令」。原話版（POSIX 側只認 `export X=`）**原樣落地＝5/5 假紅**
+#: ——CLAUDE.md:354／ONBOARDING.md:215／useMacWin.md:192／AutoClaude/README.md:367／
+#: docs/AISDLC_Agent_UserGuide.md:142，逐筆讀單位後五處**都已經**寫出了 bash 側的正確對照，
+#: 只是那個對照長成 `PYTHONUTF8=1 lint-imports`（行內 `VAR=value <cmd>` 前綴）而不是 `export`。
+#: ⇒ 根因不是「收緊太嚴」，是**對面詞彙表漏了 POSIX 真正的對應寫法**：`$env:X = v` 的對面是
+#: 行內前綴，`export` 只是它的另一種形態。補齊之後同一份掃描面實測 **.md 0 筆／.py 0 筆**。
+#:
+#: pattern 的 var/val 形狀**不抄第二份**：直接取姊妹鎖 `test_doc_env_prefix_platform_parity_r60`
+#: 的 `_PREFIX_RE`，只機械去掉行首／行尾錨（那支掃 fence 內的整行，本檔要在段落與字串裡找
+#: 同一個形態，常出現在反引號中間）。去錨失敗一律 fail-loud——悄悄留著 `^` 會讓這一軸只在
+#: 「前綴剛好獨佔一行」時才成立，那是靜默縮面（本 repo 判過的形態）。
+#:
+#: 🔴 射程刻意**單向**（`$env:X = v` ⇒ 要求 POSIX 側實際指令），反向不判。這是量出來的決定：
+#: 反向在同一份掃描面實測 **28 筆**（.md 6／.py 22），逐筆看過皆為假紅——POSIX 專屬的用法字串
+#: 與 `.py` 檔頭配方本來就沒有 `$env:` 對照可寫，而它們已經受「兩個平台標籤」那一道管。
+#: 一次判 28 筆假紅的鎖活不過一輪（本 repo 已有 148 筆的判例）。
+def _unanchored(pattern: str) -> re.Pattern[str]:
+    if not (pattern.startswith(r"^\s*") and pattern.endswith("$")):
+        raise AssertionError(
+            f"姊妹鎖 `_PREFIX_RE` 的形狀變了（{pattern!r}）——去錨失敗時若靜默放行，"
+            "本檔的行內前綴那一軸會退化成「只在前綴獨佔一行時成立」＝靜默縮面"
+        )
+    return re.compile(r"(?<![\w$:.-])" + pattern[len(r"^\s*"):-1])
+
+
+def _sister_inline_prefix_re() -> re.Pattern[str]:
+    sibling = _TESTS_DIR / "test_doc_env_prefix_platform_parity_r60.py"
+    spec = importlib.util.spec_from_file_location("_xplat_prefix_ssot", sibling)
+    assert spec is not None and spec.loader is not None, sibling
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return _unanchored(getattr(module, "_PREFIX_RE").pattern)
+
+
+_INLINE_ENV_PREFIX_RE = _sister_inline_prefix_re()
+
 _WIN_LABEL = re.compile(r"powershell|pwsh|windows", re.IGNORECASE)
 _POSIX_LABEL = re.compile(r"\bbash\b|\bzsh\b|macos|linux|posix|mac/linux", re.IGNORECASE)
 
@@ -189,6 +233,11 @@ def _mentions_both_platforms(unit: str) -> bool:
     return bool(_WIN_LABEL.search(unit)) and bool(_POSIX_LABEL.search(unit))
 
 
+def _posix_env_set(text: str) -> bool:
+    """POSIX 側「設一個環境變數給某個指令」的兩種實際寫法（`export X=` 或行內前綴）。"""
+    return bool(_POSIX_ONLY[0][0].search(text) or _INLINE_ENV_PREFIX_RE.search(text))
+
+
 def unit_problems(segment: str, unit: str, *, declared: str | None = None) -> list[str]:
     """判一個「示範指令片段」在其判定單位下有沒有問題。
 
@@ -212,6 +261,15 @@ def unit_problems(segment: str, unit: str, *, declared: str | None = None) -> li
                     f"{d} ⇒ 未宣告平台、且判定單位內沒有同時提到 Windows 與 POSIX 兩側"
                     "（照抄的人有一半在另一個平台上）"
                 )
+        elif win and not _posix_env_set(unit):
+            # 🔴 SD-03：F-07 那個繞法（只加兩個平台字樣就過）在這一軸被關掉了——設環境變數
+            # 這件事在 POSIX 側**有**一個可寫得出來的指令，所以「說了另一邊」不足以取代
+            # 「寫出另一邊」。射程與假紅實量見 `_INLINE_ENV_PREFIX_RE` 上方那段。
+            problems.append(
+                "$env:X = … ⇒ 判定單位提到了兩個平台，但沒有寫出 POSIX 側的**實際設值指令**"
+                "（`export X=…` 或行內 `VAR=value <指令>` 前綴）——設環境變數這一軸兩側都有"
+                "指令可寫，光說「另一邊也可以」不能讓人照抄"
+            )
     return problems
 
 
@@ -499,6 +557,36 @@ class TestDetectorRedGreenSelfProof(unittest.TestCase):
             "  bash / zsh：  export AUTOCLAUDE_TEST_PG_DSN='postgresql+asyncpg://x'"
         )
         self.assertEqual([], unit_problems(good, good))
+
+    def test_naming_both_platforms_no_longer_buys_a_pass_on_the_env_set_axis(self) -> None:
+        """🔴 R84／SD-03：F-07 的繞法——只加兩個平台字樣、不寫對面指令——在這一軸失效。
+
+        Rule 9（本支要在什麼語意變動時紅）：把 `_posix_env_set` 縮回只認 `export`，
+        或把這一軸整個拿掉，本支與下一支會分別從紅／綠翻面。
+        """
+        escape = ("修法（Windows PowerShell 這樣寫，bash / zsh 請自行比照）：\n"
+                  "  $env:AUTOCLAUDE_TEST_PG_DSN = 'postgresql+asyncpg://x'")
+        problems = unit_problems(escape, escape)
+        self.assertTrue(any("實際設值指令" in p for p in problems), problems)
+
+    def test_the_inline_prefix_is_a_valid_posix_counterpart(self) -> None:
+        """`PYTHONUTF8=1 lint-imports` 就是 `$env:PYTHONUTF8=1;` 的 POSIX 對應寫法。
+
+        WHY：R83 開的處方（POSIX 側只認 `export`）原樣落地會對**五份活文件**轉紅，而那五處
+        都已經寫對了——差別只在對照長成行內前綴。本支釘住「這種寫法算數」，否則下一個人
+        會照著失敗訊息把 5 份文件改成不自然的 `export`，或者把整道鎖拔掉。
+        """
+        good = ("修法：Windows 側 `$env:PYTHONUTF8=1; lint-imports`；"
+                "bash／zsh 側 `PYTHONUTF8=1 lint-imports`")
+        self.assertEqual([], unit_problems(good, good))
+
+    def test_the_inline_prefix_pattern_is_not_silently_line_anchored(self) -> None:
+        """去錨必須真的發生：`^` 留著會讓這一軸只在前綴獨佔一行時成立（靜默縮面）。"""
+        self.assertTrue(_INLINE_ENV_PREFIX_RE.search("bash 側 `PYTHONUTF8=1 lint-imports`"))
+        self.assertFalse(_INLINE_ENV_PREFIX_RE.search("$env:PYTHONUTF8=1; lint-imports"),
+                         "PowerShell 形態不得被認成 POSIX 對照（`$env:` 前綴要被排除）")
+        with self.assertRaises(AssertionError):
+            _unanchored(r"(?P<var>[A-Z]+)=(?P<val>\S*)")   # 形狀變了 ⇒ fail-loud
 
     def test_posix_only_recipe_is_caught_too(self) -> None:
         """反方向同樣要抓——只補一邊等於把缺陷換個方向留著。"""

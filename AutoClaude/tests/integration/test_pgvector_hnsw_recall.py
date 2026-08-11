@@ -194,13 +194,19 @@ def test_pgvector_recall_at_10_ge_095():
     # 逐字寫在下面那句 reason 裡（不是「下輪處理」）。同輪 AC3-4／AC5-4／AC6-3 三筆走的
     # 是出口①（target 檔已建），本筆之所以不同：它缺的不是斷言，是受測對象本身。
     pytest.skip(
-        f"[DEBT] 需 W3 G3 staging 資料集：1k seed + BGE-M3 真實向量。承接輪次 R84"
+        f"[DEBT] 需 W3 G3 staging 資料集：1k seed + BGE-M3 真實向量。承接輪次 R85"
         f"（該輪必須先決定保留或顯式廢止：保留就得同時建自動通道，"
         f"否則寫好也不會被跑）。"
         f"🔴 本輪再推一輪的理由（非「下輪處理」）：本輪是 macOS 本機輪，缺件是**受測對象**"
         f"而非斷言——BGE-M3 權重與 1k 列 staging 資料集在本機都不存在，"
         f"而在沒有自動通道的前提下把斷言先寫出來，只會把同一筆欠債換成"
         f"「寫好了但永遠不會跑」的另一種假象（那正是本 case 已經付過的學費）。"
+        f"🔴 承接輪到期的那一輪（R84）逐項實查後仍推一輪，理由是**解除條件三項全未滿足**、"
+        f"且該輪是收斂輪（把跨包干擾造成的紅收掉，不開新戰場）："
+        f"①本機無 BGE-M3（1024 維）權重與 ≥1k 列 staging 語料，PG 容器是 CI 對等的空庫；"
+        f"②`.github/workflows` 對本檔仍零命中（自動通道未建）；"
+        f"③「保留或廢止」是 SD_06 W3 G3 的 PM 層級門檻決定，收斂輪不得代為拍板。"
+        f"⇒ 走出口②：顯式推到下一輪，而不是把斷言寫成量不到東西的假綠。"
         f"🔴 解除條件（三項全滿足才做得到，缺一即不得動工）："
         f"①備妥 PG17+pgvector staging，內含 ≥1k 列真實 BGE-M3（1024 維）向量與"
         f"per-table HNSW index（AC3-5 的三個 index）；"
@@ -215,7 +221,7 @@ def test_pgvector_recall_at_10_ge_095():
 def test_pgvector_p95_latency_under_50ms():
     """T2 真實 pgvector HNSW p95 latency < 50ms。"""
     pytest.skip(
-        f"[DEBT] 需 W3 G3 staging 資料集（同 T1）。承接輪次 R84"
+        f"[DEBT] 需 W3 G3 staging 資料集（同 T1）。承接輪次 R85"
         f"（保留或顯式廢止的決定與 T1 同一筆）。"
         f"🔴 本輪再推一輪的理由與解除條件與 T1 逐字同一份（見 "
         f"test_pgvector_recall_at_10_ge_095 的 reason）：兩者共用同一個 staging 資料集與"

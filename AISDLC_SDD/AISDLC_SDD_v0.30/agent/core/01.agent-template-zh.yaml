@@ -11,7 +11,7 @@ agent:
   
   # Agent 的唯一識別ID（小寫，使用連字符）
   id: "[填入ID，如：frontend-dev, security-expert, data-analyst]"
-  version: "v0.18"
+  version: "see FRAMEWORK_STATUS.md（框架 LATEST；本欄刻意不寫版號——寫死即過期）"
 
   # Agent 的職位頭銜（顯示用）
   title: "[填入職位頭銜，如：Frontend Developer, Security Analyst, UX Designer]"

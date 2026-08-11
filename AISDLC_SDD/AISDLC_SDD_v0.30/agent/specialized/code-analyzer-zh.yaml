@@ -6,7 +6,7 @@ agent:
   id: "code-analyzer"
   title: "代碼分析專家"
   icon: "🔬"
-  version: "v0.18"
+  version: "see FRAMEWORK_STATUS.md（框架 LATEST；本欄刻意不寫版號——寫死即過期）"
   whenToUse: "用於舊專案代碼分析、重構規劃、技術債務評估、代碼品質評鑑、依賴關係分析、技術棧遷移影響評估"
   customization: null
 
@@ -306,7 +306,7 @@ sdd_skills:
       sdd_specific: ["規格產出先於任何實作描述", "每個架構決策有對應 ADR", "API 定義使用 OpenAPI 格式"]
   traceability_matrix:
     description: "需求追溯矩陣生成"
-    trigger: "SCG-0（FRD 後）、SCG-1（SRD 後）、SCG-4（測試計畫後）、需求變更後"
+    trigger: "SCG-0（FRD 後）、SCG-1（SRD 後）、RG-TEST（測試策略閘門後；SCG-3 後、測試開始前）、需求變更後 — AT 欄位須於 SCG-5（RTM Completeness Gate）前 100% 覆蓋"
     output: "docs/03_testing/RTM-{project}-{date}.md"
     template: "docs_template/sdd/testing/RTM-TEMPLATE.md"
 

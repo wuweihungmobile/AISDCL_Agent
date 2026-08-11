@@ -294,66 +294,15 @@ GUARD_OFF_ENV = "AUTOSDD_CONTEXT_GUARD_OFF"
 #: 續航保護一起關掉，而那件事沒有人會注意到。
 SENTINEL_OFF_ENV = "AUTOSDD_SENTINEL_OFF"
 
-#: 🔴 R80：在**無 console 的父行程**下 spawn console 子行程時必帶的 creationflags。
-#:
-#: 立案（掌舵者當場回報「哨兵每 15 分鐘彈一個視窗」，R79 只治了排程 Action 那一層）：
-#: hook 行程與 schtasks 的 `pythonw.exe` 都**沒有 console**，而 `python.exe`／
-#: `powershell.exe`／`claude.exe` 全是 console 子系統應用 ⇒ Windows 必定替子行程新配置
-#: 一個 console，那就是跳到使用者臉上的那個視窗。
-#:
-#: 🔴 **R80 訂正本段（我自己的第一版在這裡寫了一句過度一般化的假話，照實留下訂正）**。
-#: 第一版逐字宣稱「`DETACHED_PROCESS` 會把 `CREATE_NO_WINDOW` 抵銷掉」，依據是一張**只用
-#: venv 的 `python.exe` 當子行程**量出來的表。複驗者指出本 venv 由 **uv** 建立
-#: （`pyvenv.cfg` 有 `uv = 0.8.22`），其 `python.exe` 是 **trampoline**（274,712 bytes，
-#: 對照真直譯器 103,192 bytes）：它會 re-spawn 真的直譯器，而**不把 creationflags 傳下去**
-#: ⇒ 那張表量到的是 trampoline 的行為，不是旗標語意。
-#:
-#: 重量後的完整矩陣（pythonw 當無 console 父行程；子行程自報 `GetConsoleWindow()`／
-#: `IsWindowVisible`。`0`＝沒有 console＝不會有視窗）：
-#:
-#:   子行程載具            none    CNW   DET|CNW   DET    NEWGRP|CNW   NEWGRP
-#:   base python.exe      可見     0       0        0         0        可見
-#:   venv python.exe      可見     0     可見      可見        0        可見   ← trampoline
-#:   base pythonw.exe       0      0       0        0         0          0
-#:   venv pythonw.exe       0      0       0        0         0          0
-#:
-#: 三個結論，方向都與第一版不同：
-#:  ① `DET|CNW` 在**真直譯器**上是好的，只有穿過 trampoline 時才翻面 ⇒ 那句「抵銷」是
-#:     載具效應，不是旗標語意。**射程誠實劃界**：本重現依賴「venv 由 uv 建立」；走
-#:     `python -m venv` 回退路徑的 venv 是否同樣翻面，**未驗**。不得寫成平台常數。
-#:  ② `CNW` 與 `NEWGRP|CNW` 是**唯二在四種載具上全部為 0** 的組合 ⇒ 本常數取後者。
-#:  ③ **pythonw 那兩列全 0，與旗標無關** ⇒ 載具本身就足以抑制視窗。
-#: ⇒ 故本檔採**兩層各自獨立成立**（缺一層仍安全）：載具走 `quiet_python()`、旗標走本常數。
-#: 六組的 stderr／rc 都完整回得來 ⇒ 抑制視窗不以可觀測性為代價。
-#:
-#: 為什麼用 `CREATE_NEW_PROCESS_GROUP` 而不是 `DETACHED_PROCESS`：舊寫法想要的是「子行程
-#: 不受父行程生死牽連」。實測那件事**不需要** `DETACHED_PROCESS`——本常數的組合下，父行程
-#: （pythonw）退場後 8 秒，子行程仍自己把痕跡檔寫了出來（父死 02:02:50、子寫檔 02:02:58）。
-#: `CREATE_NEW_PROCESS_GROUP` 保留了真正有用的那一半（Ctrl-C／Ctrl-Break 不會沿著父行程的
-#: 行程群組傳進來），而且它在 trampoline 上不像 `DETACHED_PROCESS` 那樣翻面。
-#:
-#: `getattr` 而不是直接取屬性：這三個常數在 POSIX 的 `subprocess` 上**不存在**（鐵律三
-#: 「這在另一個平台是什麼值」）。取 0 ＝不加任何旗標，正是 POSIX 上正確的值。
-NO_WINDOW = (getattr(subprocess, "CREATE_NO_WINDOW", 0)
-             | getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0))
-
-
-def quiet_python() -> str:
-    """回本檔 spawn 子行程該用的直譯器路徑——**兩層防線的第二層**。
-
-    上表第三、四列：`pythonw.exe`（GUI 子系統）在**全部六種旗標組合下**都是 0，
-    連 trampoline 那一列也是 ⇒ 換掉載具這件事本身就足以抑制視窗，與旗標無關。
-    故本函式與 `NO_WINDOW` **各自獨立成立**：任一層被未來的人改掉，另一層仍撐得住。
-
-    🔴 為什麼是 `with_name` 而不是靠 PATH：實測本機**兩個 session 的 `python` 解析到不同
-    東西**（互動 session → venv；schtasks 起的 headless → pyenv shim，後者沒有
-    `pythonw.exe`）。取「與當前直譯器同目錄」才與 session 怎麼被啟動無關。
-    找不到就退回 `sys.executable`——少一層防線，不是壞掉（旗標那層仍在）。
-    """
-    if os.name != "nt":
-        return sys.executable  # POSIX 沒有 console 這回事，也沒有 pythonw（鐵律三）
-    quiet = Path(sys.executable).with_name("pythonw.exe")
-    return str(quiet) if quiet.is_file() else sys.executable
+#: 無 console 父行程下 spawn 子行程的**防彈窗**兩層防線（`NO_WINDOW` 旗標 ＋
+#: `quiet_python()` 載具）唯一的家＝`tools/lib/win_spawn.py`（R84／C8 的減法）。
+#: 搬走的理由與 `quota_limits` 那一格逐字同構：那是一個完整主題，且本檔此前是它的家
+#: 而 lib 反過來 import hook（方向倒了，`quota_meter.py` 因此留過第二份字面）。
+#: **刻意沒有 try/except**（同 `quota_limits` 判例）：原語不能有 fallback stub，
+#: 給 `NO_WINDOW` 一個 `0` 的備援等於在 Windows 上用錯的答案靜默通過（旗標沒帶、
+#: 視窗照彈）。`session_resume_planner` 以 `guard.NO_WINDOW`／`guard.quiet_python()`
+#: 取用 ⇒ 這裡 import 回本檔命名空間，呼叫端與既有回歸鎖一個字都不必改。
+from win_spawn import NO_WINDOW, quiet_python  # noqa: E402,F401
 
 #: 🔴 送進 `powershell.exe`（5.1）的每一段腳本都要以這一行開頭。
 #: 立案（掌舵者當回合實測，哨兵稽核 jsonl 逐字）：`"next_run_time": "2026/8/9 �U�� 07:14:19"`
@@ -840,10 +789,44 @@ def arm_sentinel(payload: dict) -> None:
     sid = session_id_of(Path(raw))
     if sentinel_lifecycle is not None:
         sentinel_lifecycle.clear_arm_latch(sid)
+    swept = spawn_sentinel_gc(sid)
     with (Path(tempfile.gettempdir()) / f"autosdd_sentinel_boot_{sid}.log").open(
             "a", encoding="utf-8", errors="replace") as handle:
         handle.write(f"\n=== session-start {datetime.now().isoformat(timespec='seconds')}"
-                     " （閂鎖已清；武裝延後到累積夠工作量的那一刻）===\n")
+                     " （閂鎖已清；武裝延後到累積夠工作量的那一刻）"
+                     f"｜孤兒回收 spawn={swept} ===\n")
+
+
+# 🔴 R84／C3-P4b：`sentinel_lifecycle.gc()` 此前**零自動呼叫端**——它只從 `main()` 的
+# CLI 走得到，而那條路要有人記得去跑。後果實測得到：本機留著一支 session 早就結束的
+# `AutoSDD_Sentinel_*`，每 15 分鐘照樣醒來一次（掌舵者看到的黑框就是它）。收拾別人的
+# 殘骸這件事**只能由後來的人做**（哨兵自己那一支若卡在讀不出狀態，見 `_sentinel_tick`
+# 的 abort 分支），所以呼叫點選在 SessionStart：那正好是「後來的人開工」的那一刻，
+# 也是本函式已經在清閂鎖的地方（同一族的清理，不另開第二個時機）。
+#
+# 三個刻意的取捨，與 `spawn_sentinel` 逐條同構（同一族的風險，同一組處置）：
+#  ① **detached 子行程**：`gc()` 要列舉排程器（外呼 `launchctl`／`schtasks`），同步做等於
+#     每次開 session 先卡幾秒。
+#  ② **`keep=(當前 sid,)`**：本 session 自己的哨兵絕不能被自己收掉。`gc()` 內另有一層
+#     「最新 session」保護，這一層是顯式的那一份——兩層獨立成立。
+#  ③ **一切例外吞掉**：`.claude/settings.json` 記載過的 P0（hook 誤觸會把所有工具硬鎖死）。
+#     回收失敗最多是殘骸多留一輪，絕不可反過來變成故障源。
+def spawn_sentinel_gc(keep_sid: str) -> bool:
+    """Detached 起 `sentinel_lifecycle --gc --apply`；回「有沒有真的 spawn 出去」。"""
+    lifecycle = repo_root() / "tools" / "lib" / "sentinel_lifecycle.py"
+    if not _has_carrier() or not lifecycle.is_file() or not keep_sid:
+        return False
+    try:
+        subprocess.Popen(  # noqa: S603 — 參數全是本檔算出來的路徑／本 session 的 id
+            # 🔴 沒有 `--gc` 這個旗標：回收**就是**這支 CLI 的唯一動作（`main()` 無子指令）。
+            # 多送一個不存在的旗標會讓 argparse 直接 rc=2 而什麼都不收，且因為 stdout 全丟
+            # DEVNULL，那個失敗**完全靜默**——正是本輪在治的那一族。
+            [quiet_python(), str(lifecycle), "--apply", "--keep", keep_sid],
+            stdout=subprocess.DEVNULL, stderr=subprocess.STDOUT,
+            stdin=subprocess.DEVNULL, creationflags=NO_WINDOW)
+    except Exception:  # noqa: BLE001 — 見上方取捨③
+        return False
+    return True
 
 
 def arm_when_earned(transcript: Path) -> str:

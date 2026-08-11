@@ -6,7 +6,7 @@ agent:
   id: "performance-engineer"
   title: "效能工程專家"
   icon: "⚡"
-  version: "v0.18"
+  version: "see FRAMEWORK_STATUS.md（框架 LATEST；本欄刻意不寫版號——寫死即過期）"
   whenToUse: "用於效能優化、瓶頸分析、負載測試、效能監控設置、可擴展性規劃"
   customization: null
 

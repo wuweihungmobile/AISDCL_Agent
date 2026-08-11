@@ -6,7 +6,7 @@ agent:
   id: "sdd-diagnostic"
   title: "SDD ESCALATION Diagnostic Agent"
   icon: "🩺"
-  version: "v0.18"
+  version: "see FRAMEWORK_STATUS.md（框架 LATEST；本欄刻意不寫版號——寫死即過期）"
   whenToUse: |
     用於 Phase G M1「Self-Healing Layer」。當 FSM 進入 ESCALATION 狀態，
     本 Agent 解析 escalation_reason，分類為 6 種 sub_type 並判斷

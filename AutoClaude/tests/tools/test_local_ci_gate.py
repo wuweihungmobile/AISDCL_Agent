@@ -511,20 +511,36 @@ def test_unregistered_profile_is_advisory_for_the_cli_but_red_for_the_gate(
     assert m.check_skip_census(_HEALTHY_LOG, pg=False) == 1  # 同一份輸入，閘門入口判紅
 
 
-def test_profile_key_follows_the_dsn_not_the_injection(
+def test_profile_key_follows_real_effectiveness_not_who_set_the_variable(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """剖面取決於「DSN 在不在」，不是「是不是我注入的」。
+    """剖面取決於「這次真的有一顆用得動的 PG」，既不是「是不是我注入的」，也不是
+    「有沒有人設過那個字串」。
 
-    WHY（R79 收輪訂正的實際缺陷）：剖面原本取自 `pg_autodetect()` 的回傳值，於是
-    「使用者自己 export 過 DSN」那條路上它回 False、剖面判成 nopg——測試明明跑在有
-    PG 的條件下（44 支），卻拿 nopg 的 118 上限去比，永遠通過。那不是紅，是沒有
-    鑑別力，而且方向是「看起來很健康」。
+    WHY ①（R79 收輪訂正的實際缺陷，保留）：剖面原本取自 `pg_autodetect()` 的回傳值，於是
+    「使用者自己 export 過 DSN」那條路上它回 False、剖面判成 nopg——測試明明跑在有 PG 的
+    條件下，卻拿 nopg 的寬鬆上限去比，永遠通過。那不是紅，是沒有鑑別力。
+
+    WHY ②（🔴 R84／QA-02，本支要守的新語意）：R79 的修法把判準寫成 `any(os.environ.get(k))`
+    ＝「這個行程裡有沒有人設過這個字串」，於是**任何**寫進 env 的字串都會讓剖面翻成 `+pg`
+    ——包含測試汙染（同檔 `_clear_brakes` 那個缺陷）與指向一顆沒 migrate 過的 DB。實測後果是
+    同一份 log 裡剖面標記與 autodetect 理由互斥，而 census 的天花板會照著假標記挑錯剖面。
+    ⇒ 判準改問真實生效性。本支的三段就是這個語意的邊界：**設了但用不動＝nopg**（第 2 段）
+    才是這次真正加上的鑑別力，把它改回舊寫法時第 2 段會紅。
     """
     for key in m._PG_ENV_KEYS:
         monkeypatch.delenv(key, raising=False)
     assert m.pg_dsn_in_effect() is False
+    # ② DSN 在、但那顆 DB 用不動（剎車④ 的世界）⇒ PG 那一族照樣 skip ⇒ 剖面必須是 nopg
     monkeypatch.setenv("AUTOCLAUDE_TEST_PG_DSN", "postgresql://x/y")
+    monkeypatch.setattr(m, "_pg_migrated", lambda dsn: "alembic_version 是空的")
+    assert m.pg_dsn_in_effect() is False, (
+        "DSN 設了卻用不動時剖面必須是 nopg——census 形狀就是 nopg，拿 pg 的緊上限去比是假紅，"
+        "而反過來（標成 pg）會讓下游拿錯天花板"
+    )
+    assert m._skip_profile(m.pg_dsn_in_effect(), nested=True).endswith("+nopg+nested")
+    # ③ DSN 在、DB 用得動 ⇒ +pg，且**不問是誰設的**（這裡沒有經過 pg_autodetect）
+    monkeypatch.setattr(m, "_pg_migrated", lambda dsn: None)
     assert m.pg_dsn_in_effect() is True
     assert m._skip_profile(m.pg_dsn_in_effect(), nested=True).endswith("+pg+nested")
 
@@ -539,9 +555,20 @@ def test_pg_profile_marker_round_trips_and_absence_is_not_false() -> None:
 def _clear_brakes(monkeypatch: pytest.MonkeyPatch) -> None:
     """把四條剎車全部放開。`AUTOCLAUDE_ALLOW_INSECURE_DB` 一併經 monkeypatch 走一遍：
     `pg_autodetect` 會 `setdefault` 它，沒登記還原點的話這幾支測試會把它留給整個
-    session（測試不得改寫別人看得到的狀態）。"""
+    session（測試不得改寫別人看得到的狀態）。
+
+    🔴 R84 包 W5（QA-02）修這個 helper 自己的缺陷：`monkeypatch.delenv(k, raising=False)`
+    對一個**原本就不存在**的 key **不會登記還原點**（沒有東西需要還原）——而本函式放開剎車
+    之後，被測的 `pg_autodetect()` 會 `os.environ[...] = dsn` 把真 DSN 寫進真 env，那個寫入
+    因此**活過整個 session**，一路活到 `pytest_terminal_summary` 印剖面標記。實測後果：
+    同一份 log 第 117 行 `AUTOCLAUDE-PG-DSN-IN-EFFECT=1`、第 118 行「拒絕注入」，互斥；
+    而 census 形狀（untagged=97）站在第 118 行那一邊 ⇒ 那一整輪的剖面鍵是假的。
+    「守『只在 migrate 過才注入』的那支測試自己製造了未 migrate 卻回報 in-effect」——
+    修法是先 `setenv(k, "")` 強迫 monkeypatch 記下「原本不存在」這件事，再 `delenv`。
+    """
     for key in ("CI", m._AUTODETECT_OPT_OUT, "PYTEST_CURRENT_TEST",
                 "AUTOCLAUDE_ALLOW_INSECURE_DB", *m._PG_ENV_KEYS):
+        monkeypatch.setenv(key, "")     # ← 登記還原點（原本不存在 ⇒ undo 時會刪掉）
         monkeypatch.delenv(key, raising=False)
 
 
@@ -589,6 +616,77 @@ def test_autodetect_is_silent_when_nothing_is_listening(
     monkeypatch.setattr(m, "_pg_reachable", lambda *a, **k: False)
     injected, why = m.pg_autodetect()
     assert injected is False and "沒有在聽" in why
+
+
+def test_brake_four_says_how_to_fix_it_and_stays_distinguishable_from_no_pg_at_all(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """🔴 R84 包 W5（QA-01）：剎車④ 的理由必須帶**可貼的修法**，且與「完全沒起 PG」可區分。
+
+    WHY（本支要在什麼語意變動時紅）：R83 交棒書把「起 PG」當成最便宜的一塊，而本輪實測那樣
+    做削掉 **0 支** skip——容器 healthy、套件全裝，缺的只是 `alembic upgrade head`。使用者眼裡
+    兩種失敗長得一樣（skip 都沒少），差別**只**寫在這一行理由裡；而原句只解釋了「為什麼不注入」
+    （會變成 UndefinedTable），沒有說「怎麼讓它能注入」。⇒ 判準有兩向：
+      ① 剎車④ 的理由必須逐字含 alembic 那條指令（照著訊息做就會好）；
+      ② 「沒有在聽」那條路**不得**帶這句修法——貼錯修法比不貼更糟（會叫人去 migrate 一顆
+         根本不存在的 DB），所以修法判準刻意只認 `alembic_version` 這個字。
+    """
+    _clear_brakes(monkeypatch)
+    monkeypatch.setattr(m, "_pg_reachable", lambda *a, **k: True)
+    monkeypatch.setattr(
+        m, "_pg_migrated",
+        lambda dsn: 'relation "alembic_version" does not exist',
+    )
+    injected, why = m.pg_autodetect()
+    assert injected is False
+    assert "alembic upgrade head" in why, f"剎車④ 沒有給出可貼的修法：{why}"
+    assert m.pg_repair_hint(why)
+
+    # ② 對照組：三種**不是**這條修法能治的理由，一律不得掛上它
+    for other in ("localhost:5432 沒有在聽 ⇒ 不注入（PG 相關測試維持 skip）",
+                  "psycopg2 未安裝（`uv pip install -e '.[postgres]'`）",
+                  "connection to server at \"localhost\" failed: FATAL: password authentication"):
+        assert m.pg_repair_hint(other) == "", f"對不該給修法的理由給了修法：{other}"
+
+
+def test_the_profile_marker_may_not_contradict_the_autodetect_note() -> None:
+    """🔴 R84 包 W5（QA-02）：標記說 `+pg`、理由說「拒絕注入」，兩者不可同時出現。
+
+    WHY：QA 實測到的那份 log 第 117 行是 `AUTOCLAUDE-PG-DSN-IN-EFFECT=1`、第 118 行是
+    「偵測到 PG 但拒絕注入」。剎車④ 只在「我們要用的那顆 DB 用不動」時觸發 ⇒ 兩件事同時為真
+    在邏輯上不可能，而當時**沒有任何東西**會因此出聲，於是那份 log 被當成 `+pg` 剖面讀了一輪
+    （census 的分群天花板因此拿錯剖面比對）。本支釘住那道判準的兩向鑑別力。
+    """
+    refused = m.BRAKE4_REFUSED + "（alembic_version 是空的）"
+    assert m.profile_marker_contradiction(True, refused)          # 紅向：互斥
+    assert m.profile_marker_contradiction(False, refused) == ""   # 標記說 nopg ⇒ 一致，不出聲
+    # 其餘剎車 ＋ in_effect=True 都是**合法**組合，判它們就是製造假紅：
+    for legit in ("跳過：AUTOCLAUDE_DB_DSN 已由使用者顯式設定（顯式優先）",
+                  "跳過：CI 環境（雲端 job 自己在 env: 區塊宣告 DSN）",
+                  "localhost:5432 沒有在聽 ⇒ 不注入（PG 相關測試維持 skip）",
+                  None, ""):
+        assert m.profile_marker_contradiction(True, legit) == "", legit
+
+
+def test_clearing_the_brakes_leaves_no_dsn_behind_after_undo() -> None:
+    """🔴 R84 包 W5（QA-02）：`_clear_brakes` 之後被測碼寫進 env 的 DSN 必須隨 undo 消失。
+
+    WHY（這是 QA-02 的**根因**那一半，與上一支的「標記說謊」是同一個缺陷的兩端）：
+    `monkeypatch.delenv(k, raising=False)` 對一個原本不存在的 key **不登記還原點**，而
+    `_clear_brakes` 放開剎車後 `pg_autodetect()` 會 `os.environ[...] = dsn` ⇒ 那個寫入活過
+    整個 session。本支用一個獨立的 `MonkeyPatch` 上下文把「還原之後」這件事變成可斷言的：
+    把 helper 改回舊寫法（只 delenv）時它會紅。
+    """
+    before = {k: os.environ.get(k) for k in m._PG_ENV_KEYS}
+    with pytest.MonkeyPatch.context() as mp:
+        _clear_brakes(mp)
+        mp.setattr(m, "_pg_reachable", lambda *a, **k: True)
+        mp.setattr(m, "_pg_migrated", lambda dsn: None)
+        assert m.pg_autodetect()[0] is True          # 真的寫進了 env（前提成立才有得還原）
+        assert os.environ.get("AUTOCLAUDE_DB_DSN")
+    assert {k: os.environ.get(k) for k in m._PG_ENV_KEYS} == before, (
+        "測試把 DSN 留給了整個 session ⇒ pytest_terminal_summary 的剖面標記會說謊"
+    )
 
 
 # --- (j) `--census-only` CLI：push 通道與 CI 的共同入口 ---
