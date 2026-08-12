@@ -1,4 +1,4 @@
-"""平台能力抽象層 —— autoclaude/ 內平台判斷與行程樹回收的唯一收斂點。"""
+# 平台能力抽象層 —— autoclaude/ 內平台判斷與行程樹回收的唯一收斂點。
 from __future__ import annotations
 
 import os
@@ -26,12 +26,12 @@ _KILL_POLL_INTERVAL_SECONDS = 0.05
 
 
 def is_windows() -> bool:
-    """目前直譯器是否跑在 Windows。"""
+    # 目前直譯器是否跑在 Windows。
     return sys.platform == "win32"
 
 
 def is_macos() -> bool:
-    """目前直譯器是否跑在 macOS。"""
+    # 目前直譯器是否跑在 macOS。
     return sys.platform == "darwin"
 
 
@@ -62,7 +62,7 @@ def new_session_kwargs() -> dict:
 
 
 def kill_process_tree(proc: subprocess.Popen) -> None:
-    """終結 proc 及其任意深度的孫行程（全樹唯一實作）。"""
+    # 終結 proc 及其任意深度的孫行程（全樹唯一實作）。
     # 為何需要：`subprocess.run(..., timeout=)` 或 `Popen.terminate()` 只處理直接
     # 子行程（POSIX 的 /bin/sh、Windows 的 cmd.exe）；該殼再 fork 出的孫行程會變
     # 孤兒（PPID→1）續跑並寫檔，使「已判失敗」的工作仍在背景產生副作用。

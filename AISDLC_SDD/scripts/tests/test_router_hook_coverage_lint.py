@@ -211,9 +211,21 @@ def test_main_unreachable_exits_one(tmp_path, capsys):
     assert "::error::" in err and "DEF-43-008" in err and "Stop" in err
 
 
-def test_main_no_version_exits_zero(tmp_path, capsys):
-    assert lint.main([str(tmp_path)]) == 0
-    assert "略過" in capsys.readouterr().out
+def test_main_no_version_exits_nonzero(tmp_path, capsys):
+    """AGT-12（R85）：定位不到任何演化版 ⇒ 硬閘非零。
+
+    🔴 被訂正的原意圖逐字保留（訂正協議：禁止靜默覆寫）——本 case 原名
+    ``test_main_no_version_exits_zero``，斷言 ``lint.main([str(tmp_path)]) == 0``
+    且輸出含「略過」，即**把 fail-open 釘成契約**。
+
+    為何原意圖是錯的：本 lint 守的是「LATEST 宣告的 CC hook event 是否可達」。定位不到
+    LATEST 時它一個 event 都沒看過，回 0 等於宣稱「全部可達」——而下一個 case
+    ``test_main_router_not_found_exits_one`` 的 docstring 逐字寫著「無法驗證＝不可放行，
+    fail-loud」。**同一支檔同時住著這條紀律與它的反例，相隔兩行**，而測試全綠：
+    有鎖在守假話，比沒有鎖更難看見。兩者是同一類「輸入不可用」，必須走同一個出口。
+    """
+    assert lint.main([str(tmp_path)]) == 1
+    assert "::error::" in capsys.readouterr().err
 
 
 def test_main_router_not_found_exits_one(tmp_path, capsys):

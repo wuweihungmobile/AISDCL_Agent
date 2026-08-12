@@ -269,7 +269,15 @@ class TestDualAdapterFallback:
                 # 的字面承接輪號逐筆比對當前輪次。（本註解刻意不複述輪號數字——註解不得
                 # 自稱超前帳本的輪號，那由 check_defect_log_crossref 的輪號鎖守。）
                 "[DEBT] 雙 adapter failover fixture 缺失；由 SD_09 W2 議題 C 完整實作。"
-                "承接輪次 R85：要建的是 AutoClaude/tests/fixtures/dual_adapter_failover.json"
+                # 🔴 R85（第 3 次順延，理由是可查證的持有面事實而非「下輪處理」）：本輪是
+                # 六包並行波，本包（P3）持有面只有 `AutoClaude/**`。本列解除條件②要求把下面
+                # 那句 `assert True` 換成 <60s RTO 的**真實量測**，而量測需要一個能被故障注入
+                # 的雙 adapter 環境——BGE-M3 權重／真實 PG staging／Minimax 憑證三者在本機
+                # 皆不存在（當回合實測：PG 容器是 CI 對等空庫、`MINIMAX_API_KEY` 未設定）。
+                # 只建 fixture 而讓 `assert True` 留著，正是本 reason 自己點名的假綠形態。
+                # ⇒ 同 test_pgvector_hnsw_recall.py 的兩列：R85 起不接受「再推一輪」，
+                #   承接者必須拿到 PM 決定（保留＋同輪建自動通道／顯式廢止）二擇一。
+                "承接輪次 R86：要建的是 AutoClaude/tests/fixtures/dual_adapter_failover.json"
                 "（BGE-M3 故障注入腳本 ＋ Minimax adapter 切換的量測欄位），"
                 "🔴 但**只建 fixture 會把這支從 skip 變成假綠**——本 case 在 fixture 存在時"
                 "落到的是下面那句 `assert True`，那是一個恆真斷言，量不到任何 RTO。"

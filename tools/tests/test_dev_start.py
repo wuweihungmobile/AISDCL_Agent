@@ -3179,88 +3179,87 @@ class TestWindowsHeartbeatFailSentinel(DevStartTestCase):
         self.assertEqual(dev_start.WARNINGS, [])
         self.assertEqual(note, "nightly 心跳新鮮")
 
-    def test_extra_space_after_colon_still_detected(self):
-        """R23 SD 點名假陰性 #1：`decision:` 後多一個空白（`exit=1` 前）。
-        修復前 `_WINDOWS_EXIT_DECISION_RE` 對空白數量零容忍 → findall 零命中 →
-        靜默回 None（即使 nightly 其實記錄失敗，也不發警告，違反 fail-loud）。"""
-        with tempfile.TemporaryDirectory() as td:
-            root = Path(td)
-            self._write_windows_log(
-                root,
-                "[2026-07-22 02:30:00][ERROR] END exit decision:  exit=1 "
-                "(failed stages: mutation=1)\n",
-            )
-            note = self._run(root)
-        self.assertIn("exit=1", note, "多一空白仍須偵測到 FAIL，不可假陰性")
-        self.assertIn("mutation=1", note)
+    #: R23 SD 點名的三種假陰性寫法（每列＝案例名／注入的收尾錨點行／期望出現在
+    #: summary 片段裡的 failed stage）。R85／訴求 2：三支測試的判準與鷹架逐字相同，
+    #: 只有注入字串不同 ⇒ 收斂成一張表；注入樣本與期望值一個不少，案例名改由 subTest
+    #: 逐案報出。修復前 `_WINDOWS_EXIT_DECISION_RE` 對這三種偏離零容忍 → findall 零命中
+    #: → 靜默回 None（即使 nightly 其實記錄失敗也不發警告，違反 fail-loud）。
+    _FALSE_NEGATIVE_CASES = (
+        ("decision: 後多一個空白",
+         "[2026-07-22 02:30:00][ERROR] END exit decision:  exit=1 "
+         "(failed stages: mutation=1)\n", "mutation=1"),
+        ("END 寫成小寫 end",
+         "[2026-07-22 02:30:00][ERROR] end exit decision: exit=1 "
+         "(failed stages: perf=1)\n", "perf=1"),
+        ("END 後多一個空白",
+         "[2026-07-22 02:30:00][ERROR] END  exit decision: exit=1 "
+         "(failed stages: drift=2)\n", "drift=2"),
+    )
 
-    def test_lowercase_end_still_detected(self):
-        """R23 SD 點名假陰性 #2：`END` 寫成小寫 `end`。"""
-        with tempfile.TemporaryDirectory() as td:
-            root = Path(td)
-            self._write_windows_log(
-                root,
-                "[2026-07-22 02:30:00][ERROR] end exit decision: exit=1 "
-                "(failed stages: perf=1)\n",
-            )
-            note = self._run(root)
-        self.assertIn("exit=1", note, "小寫 end 仍須偵測到 FAIL，不可假陰性")
-        self.assertIn("perf=1", note)
+    def test_r23_false_negative_variants_are_still_detected(self):
+        """R23 SD 點名的三種假陰性寫法今天都必須偵測得到（逐案，不聚合）。
 
-    def test_extra_space_after_end_still_detected(self):
-        """R23 SD 點名假陰性 #3：`END` 後多一個空白（`exit` 前）。"""
-        with tempfile.TemporaryDirectory() as td:
-            root = Path(td)
-            self._write_windows_log(
-                root,
-                "[2026-07-22 02:30:00][ERROR] END  exit decision: exit=1 "
-                "(failed stages: drift=2)\n",
-            )
-            note = self._run(root)
-        self.assertIn("exit=1", note, "END 後多一空白仍須偵測到 FAIL，不可假陰性")
-        self.assertIn("drift=2", note)
+        WHY 逐案而不是「任一命中即算過」：這三種偏離是**各自獨立**補進正則的，
+        聚合斷言下任一種被改掉都不會轉紅，而那正是本族在防的事。
 
-    def test_word_boundary_prevents_false_positive_on_end_suffixed_word(self):
-        """R25 DEF-101-263⑤：R23 為容忍大小寫/空白偏離把字面 `END` 改成
-        `re.IGNORECASE` 的 `end`，副作用是移除了原本字面 `END` 帶來的隱性單字
-        邊界——任何以 end 結尾的單字（backend/weekend/append…）緊接
-        `exit decision: exit=N` 字面文字會被誤判為真正的收尾錨點。本測試模擬
-        一行不是收尾錨點、只是巧合包含該字尾的雜訊行，驗證加 `\\b` 後不誤觸發
-        （修復前會誤判為 exit=1 並發出假警告）。"""
-        with tempfile.TemporaryDirectory() as td:
-            root = Path(td)
-            self._write_windows_log(
-                root,
-                "[2026-07-23 02:00:00][INFO] BEGIN nightly run\n"
-                "[2026-07-23 02:15:00][DEBUG] daemon backend exit decision: "
-                "exit=1 (failed stages: ghost=1)\n",
-            )
-            note = self._run(root)
+        🔴 R85／SD：樣本數鎖。表驅動化把三支測試方法收成一支 ⇒ unittest 的方法數少了 2，
+        而**「表裡剩幾列」不再有任何東西在看**：刪掉一列的表徵是「少跑一個 subTest」，
+        與正確地全部通過**逐字相同**。姊妹族 `test_check_wrapper_thinness` 的
+        `_FORBIDDEN_CASES` 早有這道鎖，本族與下一族在 P2 收斂時漏補（SD 實測指出）。
+        """
         self.assertEqual(
-            dev_start.WARNINGS, [],
-            "「backend」等 end 結尾單字不得誤觸發 END 收尾錨點警告",
-        )
-        self.assertEqual(note, "nightly 心跳新鮮")
+            len(self._FALSE_NEGATIVE_CASES), 3,
+            "注入樣本數變了——本族是史料回歸鎖（R23 SD 點名的三種假陰性寫法），"
+            "樣本只准增不准減；真的要退役某一列，請連同 `_WINDOWS_EXIT_DECISION_RE` "
+            "對應的那一段容忍一起談")
+        for label, line, stage in self._FALSE_NEGATIVE_CASES:
+            with self.subTest(case=label):
+                with tempfile.TemporaryDirectory() as td:
+                    root = Path(td)
+                    self._write_windows_log(root, line)
+                    note = self._run(root)
+                self.assertIn("exit=1", note, f"{label} 仍須偵測到 FAIL，不可假陰性")
+                self.assertIn(stage, note, f"{label}：summary 片段須附註 failed stages")
 
-    def test_hyphenated_end_word_prevents_false_positive(self):
-        """R25 DEF-101-263⑤ 四方一審 SA 二審複核追加：純 `\\b` 仍留一個縫——
-        連字號結尾單字（high-end/front-end，`-` 不是 `\\w`，`\\b` 在字母與 `-`
-        之間仍算邊界）緊接 `exit decision: exit=N` 字面文字一樣會誤觸發。改用
-        負向後顧 `(?<![\\w-])` 後一併收斂，本測試驗證不誤觸發。"""
-        with tempfile.TemporaryDirectory() as td:
-            root = Path(td)
-            self._write_windows_log(
-                root,
-                "[2026-07-23 02:00:00][INFO] BEGIN nightly run\n"
-                "[2026-07-23 02:15:00][DEBUG] high-end exit decision: "
-                "exit=1 (failed stages: ghost=1)\n",
-            )
-            note = self._run(root)
+    #: R25 DEF-101-263⑤ 的兩種**假陽性**語料（案例名／雜訊行）。R23 為容忍大小寫與空白偏離
+    #: 把字面 `END` 改成 `re.IGNORECASE`，副作用是移除了隱性單字邊界：任何以 end 結尾的單字
+    #: 緊接 `exit decision: exit=N` 就會被誤判成收尾錨點（修復前會發假警告）。單字邊界斷言
+    #: 仍留一個縫（連字號結尾），故改用負向後顧一併收斂。R85／訴求 2：兩支測試判準與鷹架
+    #: 逐字相同、只有雜訊行不同 ⇒ 收斂成一張表。
+    _FALSE_POSITIVE_CASES = (
+        ("backend（純字尾）", "daemon backend exit decision: "),
+        ("high-end（連字號字尾）", "high-end exit decision: "),
+    )
+
+    def test_r25_end_suffixed_words_do_not_false_trigger(self):
+        """兩種 end 結尾單字都不得誤觸發 END 收尾錨點警告（逐案，不聚合）。
+
+        WHY 逐案：單字邊界斷言與「排除單字字元／連字號」的負向後顧是**兩次**分開的收斂
+        （後者是一審 SA 二審複核追加），
+        聚合斷言下把後者改回 `\b` 不會轉紅，而那正是這一族在防的事。
+
+        🔴 R85／SD：樣本數鎖，立案理由同上一族（表驅動化之後「表裡剩幾列」無人在看，
+        刪一列與全數通過的表徵逐字相同）。本族只有兩列，少一列就是**半個判準**——
+        純字尾與連字號字尾分屬兩次收斂，砍掉任一列都會讓另一次收斂變成無人守。
+        """
         self.assertEqual(
-            dev_start.WARNINGS, [],
-            "「high-end」等連字號結尾單字不得誤觸發 END 收尾錨點警告",
-        )
-        self.assertEqual(note, "nightly 心跳新鮮")
+            len(self._FALSE_POSITIVE_CASES), 2,
+            "注入樣本數變了——本族是 DEF-101-263⑤ 的史料回歸鎖，樣本只准增不准減")
+        for label, noise in self._FALSE_POSITIVE_CASES:
+            with self.subTest(case=label):
+                with tempfile.TemporaryDirectory() as td:
+                    root = Path(td)
+                    self._write_windows_log(
+                        root,
+                        "[2026-07-23 02:00:00][INFO] BEGIN nightly run\n"
+                        f"[2026-07-23 02:15:00][DEBUG] {noise}"
+                        "exit=1 (failed stages: ghost=1)\n",
+                    )
+                    note = self._run(root)
+                self.assertEqual(
+                    dev_start.WARNINGS, [],
+                    f"「{label}」不得誤觸發 END 收尾錨點警告")
+                self.assertEqual(note, "nightly 心跳新鮮")
 
     def test_ps1_literal_end_exit_decision_lines_present_and_matched(self):
         """R25 DEF-101-263②：`_WINDOWS_EXIT_DECISION_RE` 與

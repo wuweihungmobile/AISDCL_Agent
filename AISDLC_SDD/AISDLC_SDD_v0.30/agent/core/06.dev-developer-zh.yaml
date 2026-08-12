@@ -172,34 +172,25 @@ collaboration_rules:
       communication_protocols: "定期架構審查、技術討論會議"
 
 dependencies:
+  # ─── AGT-11（R85）幽靈依賴清除（判準與取數管道自證見 agent/core/05.sd-architect-zh.yaml 同節）───
+  # 本檔實測：`data`(5)／`tasks`(8)／`checklists`(5) 共 18 條為裸檔名，正規化後在本版磁碟上不可解析
+  #（根相對與 basename 兩種解析皆 0 命中），且在 agent/ 之外零引用。
+  # 被刪除的原文逐字保留（訂正協議：禁止靜默覆寫）：
+  #   data: coding-standards.md / development-best-practices.md / technology-guidelines.md /
+  #         security-guidelines.md / performance-benchmarks.md
+  #   tasks: create-doc.md / execute-checklist.md / code-implementation.md / unit-testing.md /
+  #          integration-testing.md / code-review.md / performance-optimization.md / refactoring.md
+  #   checklists: code-quality-checklist.md / testing-checklist.md / security-review-checklist.md /
+  #               deployment-readiness-checklist.md / code-review-checklist.md
+  # 🔴 保留（非幽靈，指向真實存在的檔）並修正為框架根相對：
+  #   ../guides/user/process/Development_Build_Test_Cycle.md → guides/user/process/Development_Build_Test_Cycle.md
+  # ─────────────────────────────────────────────────────────────────────
   data:
-    - coding-standards.md
-    - development-best-practices.md
-    - technology-guidelines.md
-    - security-guidelines.md
-    - performance-benchmarks.md
-    - ../guides/user/process/Development_Build_Test_Cycle.md
-  
-  tasks:
-    - create-doc.md
-    - execute-checklist.md
-    - code-implementation.md
-    - unit-testing.md
-    - integration-testing.md
-    - code-review.md
-    - performance-optimization.md
-    - refactoring.md
+    - guides/user/process/Development_Build_Test_Cycle.md
   
   templates:
     - docs_template/sdd/quality/CODE-QUALITY-BASELINE-TEMPLATE.md
   
-  checklists:
-    - code-quality-checklist.md
-    - testing-checklist.md
-    - security-review-checklist.md
-    - deployment-readiness-checklist.md
-    - code-review-checklist.md
-
 # 協作流程圖
 collaboration_flow: |
   ```mermaid

@@ -162,28 +162,19 @@ collaboration_rules:
       communication_protocols: "定期設計審查、技術約束討論"
 
 dependencies:
-  data:
-    - market-research.md
-    - user-personas.md
-    - business-requirements.md
-    - competitive-analysis.md
-  
-  tasks:
-    - create-doc.md
-    - execute-checklist.md
-    - stakeholder-interview.md
-    - user-research-analysis.md
-    - sprint-planning.md
-    - backlog-prioritization.md
-  
+  # ─── AGT-11（R85）幽靈依賴清除（判準與取數管道自證見 agent/core/05.sd-architect-zh.yaml 同節）───
+  # 本檔實測：`data`(4)／`tasks`(6)／`checklists`(3) 共 13 條為裸檔名，正規化後在本版磁碟上不可解析
+  #（根相對與 basename 兩種解析皆 0 命中），且在 agent/ 之外零引用。
+  # 被刪除的原文逐字保留（訂正協議：禁止靜默覆寫）：
+  #   data: market-research.md / user-personas.md / business-requirements.md / competitive-analysis.md
+  #   tasks: create-doc.md / execute-checklist.md / stakeholder-interview.md /
+  #          user-research-analysis.md / sprint-planning.md / backlog-prioritization.md
+  #   checklists: product-requirements-checklist.md / sprint-planning-checklist.md /
+  #               stakeholder-alignment-checklist.md
+  # ─────────────────────────────────────────────────────────────────────
   templates:
     - docs_template/core/prd/PRD_Universal_Template.md
   
-  checklists:
-    - product-requirements-checklist.md
-    - sprint-planning-checklist.md
-    - stakeholder-alignment-checklist.md
-
 # 協作流程圖
 collaboration_flow: |
   ```mermaid

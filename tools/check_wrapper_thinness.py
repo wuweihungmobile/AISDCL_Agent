@@ -289,143 +289,54 @@ def convergence_target(rel: str) -> str:
 
 # 業務邏輯樣板關鍵字（診斷輔助；權威判定為上方 hash 釘選）。歷史上三輪被繞的
 # 史料保留於此，作為 hash 紅燈時的定位提示。
+#: 🔴 R85／訴求 2：薄殼診斷關鍵字的**兩個唯一定義點**。立案事實不是推論——本表原本把
+#: 同一組 `.sh` 六字重複了 6 次、同一組 `.ps1` 九字重複了 6 次，而每一份複本旁邊的註解
+#: 自己就寫著「沿用同款診斷關鍵字（**複製非新增判準**）」。複製的代價已經可以量到：
+#: 三輪繞過史（DEF-101-083／DEF-101-095）每一次補字都要同時改多份複本，漏改的那一份
+#: 不會有任何東西轉紅——它只是對那支薄殼靜默少一道並聯訊號（`_FORBIDDEN.get(rel, ())`
+#: 對缺鍵回空 tuple，迴圈零次、零訊號，正是本檔下方 R79 ARCH 那段記載過的失效形態）。
+#: 新增薄殼時請**引用**這兩個名字，不要再貼一份。
+_SH_THIN_KEYWORDS: tuple[str, ...] = (
+    "while ",
+    "for ",
+    "for(",           # 無空格 C-style（第三輪繞過史料，DEF-101-095）
+    "jq ",
+    "python -c",
+    "python3 -c",     # 版本前綴不同、非 `python -c` 的子字串（DEF-101-083）
+)
+_PS1_THIN_KEYWORDS: tuple[str, ...] = (
+    "ConvertFrom-Json",
+    "ConvertTo-Json",
+    "[System.Text.Json",  # .NET JSON 反序列化（第三輪繞過史料）
+    "foreach (",
+    "foreach(",           # 無空格寫法（第三輪繞過史料）
+    "while (",
+    "for (",              # C-style 迴圈，與 `foreach (` 不同拼法（DEF-101-083）
+    "ForEach-Object",
+    ".ForEach(",          # 陣列方法呼叫（第三輪繞過史料）
+)
+
+
 _FORBIDDEN: dict[str, tuple[str, ...]] = {
-    "tools/dev_start.sh": (
-        "while ",       # 迴圈：wrapper 不該有迭代式業務邏輯
-        "for ",         # 迴圈（bash for）
-        "for(",         # C-style for 無空格寫法（2026-07-16 SD 第三輪繞過史料）
-        "jq ",          # JSON 解析（外部工具）
-        "python -c",    # 內嵌 Python 業務邏輯
-        "python3 -c",   # 同上（獨立複審發現的前綴繞過史料）
-    ),
-    "tools/dev_start.ps1": (
-        "ConvertFrom-Json",
-        "ConvertTo-Json",
-        "[System.Text.Json",  # .NET JSON 反序列化（第三輪繞過史料）
-        "foreach (",
-        "foreach(",           # 無空格寫法（第三輪繞過史料）
-        "while (",
-        "for (",
-        "ForEach-Object",
-        ".ForEach(",          # 陣列方法呼叫（第三輪繞過史料）
-    ),
+    # 這兩支是這組關鍵字的原生站點（其餘薄殼歷來都是「複製非新增判準」）；R85 起
+    # 三者共用上面那兩個定義，逐字註解隨定義走，不再各留一份。
+    "tools/dev_start.sh": _SH_THIN_KEYWORDS,
+    "tools/dev_start.ps1": _PS1_THIN_KEYWORDS,
     # local_ci_gate 薄殼沿用 dev_start 同款診斷關鍵字（R12 納入時複製，非新增判準）
-    "AutoClaude/tools/local_ci_gate.sh": (
-        "while ",
-        "for ",
-        "for(",
-        "jq ",
-        "python -c",
-        "python3 -c",
-    ),
-    "AutoClaude/tools/local_ci_gate.ps1": (
-        "ConvertFrom-Json",
-        "ConvertTo-Json",
-        "[System.Text.Json",
-        "foreach (",
-        "foreach(",
-        "while (",
-        "for (",
-        "ForEach-Object",
-        ".ForEach(",
-    ),
+    "AutoClaude/tools/local_ci_gate.sh": _SH_THIN_KEYWORDS,
+    "AutoClaude/tools/local_ci_gate.ps1": _PS1_THIN_KEYWORDS,
     # R16：bootstrap/integration_gate/run_act 薄殼沿用同款診斷關鍵字（複製非新增判準）
-    "tools/bootstrap.sh": (
-        "while ",
-        "for ",
-        "for(",
-        "jq ",
-        "python -c",
-        "python3 -c",
-    ),
-    "tools/bootstrap.ps1": (
-        "ConvertFrom-Json",
-        "ConvertTo-Json",
-        "[System.Text.Json",
-        "foreach (",
-        "foreach(",
-        "while (",
-        "for (",
-        "ForEach-Object",
-        ".ForEach(",
-    ),
-    "tools/integration_gate.sh": (
-        "while ",
-        "for ",
-        "for(",
-        "jq ",
-        "python -c",
-        "python3 -c",
-    ),
-    "tools/integration_gate.ps1": (
-        "ConvertFrom-Json",
-        "ConvertTo-Json",
-        "[System.Text.Json",
-        "foreach (",
-        "foreach(",
-        "while (",
-        "for (",
-        "ForEach-Object",
-        ".ForEach(",
-    ),
-    "AutoClaude/tools/run_act.sh": (
-        "while ",
-        "for ",
-        "for(",
-        "jq ",
-        "python -c",
-        "python3 -c",
-    ),
-    "AutoClaude/tools/run_act.ps1": (
-        "ConvertFrom-Json",
-        "ConvertTo-Json",
-        "[System.Text.Json",
-        "foreach (",
-        "foreach(",
-        "while (",
-        "for (",
-        "ForEach-Object",
-        ".ForEach(",
-    ),
+    "tools/bootstrap.sh": _SH_THIN_KEYWORDS,
+    "tools/bootstrap.ps1": _PS1_THIN_KEYWORDS,
+    "tools/integration_gate.sh": _SH_THIN_KEYWORDS,
+    "tools/integration_gate.ps1": _PS1_THIN_KEYWORDS,
+    "AutoClaude/tools/run_act.sh": _SH_THIN_KEYWORDS,
+    "AutoClaude/tools/run_act.ps1": _PS1_THIN_KEYWORDS,
     # R61（ADR-XPLAT-002 Phase 1-B）：沿用既有薄殼同款診斷關鍵字（複製非新增判準）。
-    "AutoClaude/tools/install_git_hooks.sh": (
-        "while ",
-        "for ",
-        "for(",
-        "jq ",
-        "python -c",
-        "python3 -c",
-    ),
-    "AutoClaude/tools/install_git_hooks.ps1": (
-        "ConvertFrom-Json",
-        "ConvertTo-Json",
-        "[System.Text.Json",
-        "foreach (",
-        "foreach(",
-        "while (",
-        "for (",
-        "ForEach-Object",
-        ".ForEach(",
-    ),
-    "AISDLC_SDD/scripts/install-hooks.sh": (
-        "while ",
-        "for ",
-        "for(",
-        "jq ",
-        "python -c",
-        "python3 -c",
-    ),
-    "AISDLC_SDD/scripts/install-hooks.ps1": (
-        "ConvertFrom-Json",
-        "ConvertTo-Json",
-        "[System.Text.Json",
-        "foreach (",
-        "foreach(",
-        "while (",
-        "for (",
-        "ForEach-Object",
-        ".ForEach(",
-    ),
+    "AutoClaude/tools/install_git_hooks.sh": _SH_THIN_KEYWORDS,
+    "AutoClaude/tools/install_git_hooks.ps1": _PS1_THIN_KEYWORDS,
+    "AISDLC_SDD/scripts/install-hooks.sh": _SH_THIN_KEYWORDS,
+    "AISDLC_SDD/scripts/install-hooks.ps1": _PS1_THIN_KEYWORDS,
     # 🔴 R79 ARCH：這兩支是 `_PINNED_SHA256` 16 鍵中僅有的兩個**沒有**第三訊號的鍵
     # ——`_FORBIDDEN.get(rel, ())` 對缺鍵靜默回空 tuple，迴圈零次、零訊號，於是這兩支
     # 只剩 hash 一道訊號，而 hash 的**合法維護動作就是更新 pin**（R60 Scan-E E-A-02

@@ -103,6 +103,21 @@ def declared_zone(text: object):
         return None
 
 
+def reset_literal(text: object) -> str | None:
+    """訊息裡 `resets <hh[:mm]><am|pm>` 那一段的**字面**（小寫）；`None`＝沒有。
+
+    🔴 立案（R85／C5，`_RESET_RE` 的第二個消費者踩到的那個洞）：
+    `tools/probe/reset_window_distribution.py` 要數「相異 reset 字面有幾個」，本來直接
+    伸手拿 `guard._RESET_RE`——而 R81 把判讀原語搬進本檔時，hook 那一側是**具名 import
+    清單**，私有符號結構上進不了那份清單 ⇒ 該 probe 從此 `AttributeError` rc=1，
+    而根 CLAUDE.md 有兩處要求「reset 分佈的數字一律現查」正是靠它。
+    ⇒ 跨模組要用的東西就得有公開出口；把私有正則當公開 API 借用，壞掉時是靜默的
+    （沒有人在跑它，直到有人照著文件跑一次）。
+    """
+    match = _RESET_RE.search(str(text or ""))
+    return match.group(0).lower() if match else None
+
+
 def classify_limit(text: object) -> str:
     """把一則錯誤訊息分成四類之一。純函式，零 I/O。
 

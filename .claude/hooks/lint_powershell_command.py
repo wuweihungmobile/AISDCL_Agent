@@ -123,6 +123,22 @@ except Exception:  # noqa: BLE001 — 共用層不可達＝退化，不是崩潰
     def read_payload() -> dict | None:  # type: ignore[misc]
         return None
 
+# 🔴 這一支**刻意不包 try/except**（與上面那一格不同），理由與 `context_budget_guard.py`
+# 對 `quota_limits` 的處置逐字同構：上面那支是**能力提供者**（不可達＝退化成「讀不出
+# payload」，那是設計好的降級路徑）；本支是**授權邊界**。給它 fallback stub 等於讓一個
+# 無人看管的回合在共用層不可達時靜默取得 commit／push 權限——而那正是本條要防的事。
+# 硬 import 失敗時本 hook 以 traceback ＋ 非 0/2 的 rc 收場，在 Claude Code 是「出聲但
+# 不阻斷」＝**看得見**的失效，比靜默放行好。
+from unattended_authz import (  # type: ignore[import-not-found] # noqa: E402
+    UNATTENDED_ENV, authz_header, authz_hits)
+
+# 🔴 R85／SD-B3：「引號包住的執行檔絕對路徑」正規化，唯一的家＝`tools/lib/shell_tokens.py`
+# （姊妹 hook 消費同一支）。它必須跑在 `mask_regions()` **之前**——鐵律二明訂的
+# `& '<Git 安裝目錄的絕對路徑>\git.exe' push` 整段會被遮蔽抹掉，於是本檔的授權邊界
+# 對**本 repo 自己規定的寫法**漏擋（本輪實測）。硬 import，姿態同上一格：正規化失效
+# 等於授權邊界對那一族靜默放行，而那正是這兩格 import 刻意不給 fallback 的理由。
+from shell_tokens import unquote_exe_paths  # type: ignore[import-not-found] # noqa: E402
+
 #: 本守衛只認這一個工具名（本輪以拋棄式 dump hook 實測 PreToolUse payload 確認）。
 OWN_TOOL = "PowerShell"
 
@@ -289,32 +305,11 @@ _FOOTER = (
 #     定義，解析不出來。
 #   · 不經 shell 的路徑：MCP git 工具、Write 工具直接改 `.git/`、`Agent` 子代理若走
 #     非 PowerShell 載具（Windows 上 Bash 已被姊妹 hook 擋死，故實務上只剩前兩者）。
-#   · 非 Windows：本檔 `os.name != 'nt'` 一律 exit 0。續航整條路是 schtasks ⇒ 只在
-#     Windows 成立，射程對齊；mac/Linux 要開 Auto Pilot 時這道鎖必須另外補。
+#   · 非 Windows：本檔 `os.name != 'nt'` 一律 exit 0。續航整條路曾經只有 schtasks ⇒
+#     當時射程對齊。**R85 訂正：mac 側那半已經補上了**，補在
+#     `.claude/hooks/block_destructive_git.py`（matcher `Bash|PowerShell`、平台中立），
+#     判準與訊息兩邊共用 `tools/lib/unattended_authz.py` 這一個家。本檔仍只管 Windows。
 # 這些寫在這裡而不是只寫在交棒文件裡，是因為讀到這支 hook 的人才是會誤以為它完整的人。
-UNATTENDED_ENV = "AUTOSDD_UNATTENDED"
-
-#: `git`／`gh` 的**指令位置**：允許帶路徑前綴（`<某處>/git.exe`），但前綴必須以路徑
-#: 分隔符結尾——否則 `legit commit`／`weigh pr create` 這種字尾巧合會被誤判。
-_EXE_HEAD = r"(?:[^\s;|&]*[\\/])?"
-#: 動詞與子指令之間允許夾參數（`git -C <path> commit`／`git -c user.name=x push`），
-#: 但**不得跨越管線**（`git log | Select-String push` 不是在 push）。子指令前要求一個
-#: 空白，於是 `--grep=push` 這種「push 只是參數的值」不會命中。
-_ARGS = r"[^;\n|]*?\s"
-_GIT_WRITE_RE = re.compile(
-    _CMD_START + _EXE_HEAD + r"git(?:\.exe)?(?![\w.-])" + _ARGS
-    + r"(?:commit|push)(?![\w-])", re.IGNORECASE)
-_GH_WRITE_RE = re.compile(
-    _CMD_START + _EXE_HEAD + r"gh(?:\.exe)?(?![\w.-])" + _ARGS
-    + r"(?:pr|release)\s+(?:create|merge)(?![\w-])", re.IGNORECASE)
-
-_UNATTENDED_HEADER = (
-    f"🔴 這一跑是**被排程叫起來的無人看管回合**（環境變數 {UNATTENDED_ENV} 有設），"
-    "禁止動 git 歷史。這是掌舵者開啟 Auto Pilot 時的**條件**，不是可以商量的建議，"
-    "行內豁免 `# ps-lint-ok:` 對本條**無效**（豁免是給窄 lint 的出口，不是給授權邊界的）。\n"
-    "  該做的事：把改動留在工作樹、把狀態寫進任務書／稽核痕跡，然後停下來讓人回來收。\n"
-    "  本次命中：\n"
-)
 
 
 def mask_regions(command: str, *, keep_expandable: bool,
@@ -494,19 +489,12 @@ def lint_command(command: str) -> list[str]:
 def unattended_hits(command: str) -> list[str]:
     """無人看管那一跑的 commit／push 命中清單（空＝放行）。純函式，紅綠由注入自證。
 
-    只讀**結構面**（引號／here-string／註解已遮蔽）：訊息文字裡提到「git commit」
-    不是在 commit，硬擋它會讓那一跑連留下狀態都做不到——而「把狀態寫下來然後停」
-    正是本條要它做的事。指令位置的判準與三條 lint 規則共用同一組邊界（`_CMD_START`），
-    不自創第二套「什麼算一個指令的起頭」。
+    只讀**結構面**（引號／here-string／註解已遮蔽）；判準本身住
+    `tools/lib/unattended_authz.py`（唯一的家，見該檔 docstring）。本檔沒有 git 解析器
+    ⇒ 走它的正則路徑。`unquote_exe_paths()` 先跑（見該檔 import 處的 R85／SD-B3）。
     """
-    structural = mask_regions(command, keep_expandable=False)
-    hits: list[str] = []
-    if _GIT_WRITE_RE.search(structural):
-        hits.append("  · git commit／git push（含 `git -C <path> …`、`git.exe`、"
-                    "`;`／換行／`&&`／`|` 之後的第二段指令）")
-    if _GH_WRITE_RE.search(structural):
-        hits.append("  · gh pr create／pr merge／release create（把改動送出去的另一條路）")
-    return hits
+    return authz_hits(
+        mask_regions(unquote_exe_paths(command), keep_expandable=False))
 
 
 def main() -> int:
@@ -545,7 +533,7 @@ def main() -> int:
         if os.environ.get(UNATTENDED_ENV):
             blocked = unattended_hits(command)
             if blocked:
-                sys.stderr.write(_UNATTENDED_HEADER + "\n".join(blocked) + "\n")
+                sys.stderr.write(authz_header("ps-lint-ok") + "\n".join(blocked) + "\n")
                 return 2
 
         hits = lint_command(command)

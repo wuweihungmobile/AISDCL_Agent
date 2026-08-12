@@ -398,35 +398,20 @@ collaboration_rules:
       communication_protocols: "安全設計審查、威脅模型協調"
 
 dependencies:
-  tools:
-    - web-frameworks.md
-    - performance-tools.md
-    - seo-tools.md
-    - accessibility-tools.md
-    - build-tools.md
-
-  data:
-    - browser-support-matrix.md
-    - performance-budgets.md
-    - design-system.md
-    - web-standards.md
-
-  tasks:
-    - frontend-architecture.md
-    - performance-optimization.md
-    - seo-setup.md
-    - accessibility-audit.md
-
+  # ─── AGT-11（R85）幽靈依賴清除（判準與取數管道自證見 agent/core/05.sd-architect-zh.yaml 同節）───
+  # 本檔實測：`tools`(5)／`data`(4)／`tasks`(4)／`checklists`(5) 共 18 條裸檔名，磁碟上一支都不存在，
+  # 且在 agent/ 之外零引用。`agent_template_lint.py` 只驗 `templates` 桶 ⇒ 這四桶結構上不會轉紅。
+  # 被刪除的原文逐字保留（訂正協議：禁止靜默覆寫）：
+  #   tools: web-frameworks.md / performance-tools.md / seo-tools.md / accessibility-tools.md / build-tools.md
+  #   data: browser-support-matrix.md / performance-budgets.md / design-system.md / web-standards.md
+  #   tasks: frontend-architecture.md / performance-optimization.md / seo-setup.md / accessibility-audit.md
+  #   checklists: web-architecture-checklist.md / web-performance-checklist.md / seo-checklist.md /
+  #               accessibility-checklist.md / pwa-checklist.md
+  # 真正會被載入的資產清單住框架入口 `AISDLC_SDD_INIT.md` 的 `auto_load_config`（唯一真相源）。
+  # ─────────────────────────────────────────────────────────────────────
   templates:
     - docs_template/core/srd/SRD_Module_Template.md
     - docs_template/sdd/testing/PERFORMANCE-BASELINE-SPEC-TEMPLATE.md
-
-  checklists:
-    - web-architecture-checklist.md
-    - web-performance-checklist.md
-    - seo-checklist.md
-    - accessibility-checklist.md
-    - pwa-checklist.md
 
 scenario_applications:
   greenfield_web:
@@ -492,6 +477,19 @@ web_architecture_best_practices:
 # ─────────────────────────────────────────────────────────
 # SDD Phase 01 Skill 升級（2026-04-12）
 # ─────────────────────────────────────────────────────────
+# ─────────────────────────────────────────────────────────
+# AGT-20（R85）實測憑證紀律 — 引用唯一真相源，刻意不複寫條文
+# 立案事實：R84 把憑證紀律回填進 04／05／07 三支 core agent，但**兩支 Architect 變體
+# 與整個 QA 家族一條都沒有**（實測：R84 版全 agent 樹只有 4 支命中 `EVIDENCE_DISCIPLINE`）。
+# `agent.extends: "sd-architect"` 只是一個字串，沒有任何 runtime 會去解析它並繼承欄位
+# ⇒ 靠 extends「自動繼承」是假的；R84 對 platform_neutrality 已選擇明文引用，本節同體例。
+# ─────────────────────────────────────────────────────────
+evidence_discipline:
+  inherits_from: "agent/EVIDENCE_DISCIPLINE.md"
+  applies_to: "Web SRD／前端架構決策／Web Vitals 與效能預算宣稱"
+  enforcement: "貼不出憑證的宣稱一律降級為『未驗證（靜態推論）』，不得刪除宣稱以規避"
+  measurement_note: "Web Vitals／Lighthouse 分數是量測值：須附量測工具版本、裝置/網路節流設定與當回合輸出；缺任一項即記『未驗證』"
+
 sdd_skills:
   generate_adr:
     description: "Architecture Decision Record 生成"
@@ -510,6 +508,8 @@ sdd_skills:
       format: ["文件命名符合規範", "目錄位置正確", "Markdown 格式通過 Lint"]
       cross_reference: ["上游文件引用正確", "下游文件連結已預留", "ID 格式統一"]
       sdd_specific: ["規格產出先於任何實作描述", "每個架構決策有對應 ADR", "API 定義使用 OpenAPI 格式"]
+      # AGT-20（R85）補：R84 只把訂正協議加進 04／05／07，兩支 Architect 變體漏掉。
+      correction_protocol: ["見 agent/EVIDENCE_DISCIPLINE.md〈四、訂正協議〉（單一真相源，本處刻意不複寫條文）"]
   traceability_matrix:
     description: "需求追溯矩陣生成"
     trigger: "SCG-0（FRD 後）、SCG-1（SRD 後）、RG-TEST（測試策略閘門後；SCG-3 後、測試開始前）、需求變更後 — AT 欄位須於 SCG-5（RTM Completeness Gate）前 100% 覆蓋"

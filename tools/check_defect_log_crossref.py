@@ -819,13 +819,11 @@ def lagging_clock_notes(ledger_text: str) -> list[str]:
 
 # ------------------------ 已結列殘留待辦 ＋ 狀態訂正 token（R68，DEF-101-709／710）
 # 🔴 (一) 已結列的殘留待辦：`_UNRESOLVED_CLASSES` 明確排除 `fixed`，所以一列只要首詞是
-# `fixed`，它狀態／分流欄裡寫的「承接輪次：未指派」「留待下一輪」就**在結構上永遠進不了
-# 承接稽核**。R68 實測主檔 17 筆已結列帶這類殘留字樣。`archive_defect_log.py --plan` 的
-# needs_ack 區塊確實會列出其中一部分，但那張清單**只在有人要歸檔時才被看到**；本函式把
-# 它接進每次都跑的閘門輸出（warning，不 fail——已結列的殘留待辦是提示，不是矛盾）。
-_RESIDUAL_TODO_RE = re.compile(
-    r"未指派|改派|擇機|留待|下一輪|下輪|尚未|待辦|backlog|承接"
-)
+# `fixed`，它**狀態／分流欄**裡寫的「承接輪次：未指派」「留待下一輪」就**在結構上永遠進
+# 不了承接稽核**。`archive_defect_log.py --plan` 的 needs_ack 區塊只列其中一部分、且**只在
+# 有人要歸檔時才被看到**；本函式把它接進每次都跑的閘門輸出（warning 不 fail）。
+# 🔴 鑑別力訂正見 CrossPlatform_R85_Ledger_Closure.md §17（零資訊字移除、掃描面收窄；34→13）
+_RESIDUAL_TODO_RE = re.compile(r"未指派|擇機|留待|下一輪|下輪|尚未|待辦|backlog")
 # 🔴 (二) 狀態訂正 token：`_classify()` 取**最早出現**的關鍵字，於是
 # `open watch（R55）→ **closed-by-verification@R56**` 這種「先寫舊狀態、箭頭後寫訂正」
 # 的寫法會被判成 `open`——一筆已結列被長期計入未結存量（DEF-101-433 實例）。而
@@ -858,6 +856,8 @@ def residual_todo_notes(ledger_text: str) -> list[str]:
     if layout is None:
         return []
     ncols, id_idx, status_idx = layout
+    route = next((i for i, h in enumerate(_header_cells(ledger_text) or [])
+                  if h == "分流去向"), status_idx)
     notes: list[str] = []
     for lineno, line in enumerate(ledger_text.splitlines(), 1):
         if not _ROW_RE.match(line):
@@ -868,7 +868,8 @@ def residual_todo_notes(ledger_text: str) -> list[str]:
         cls = _classify(cells[status_idx])
         if cls in _UNRESOLVED_CLASSES:
             continue
-        markers = sorted(set(_RESIDUAL_TODO_RE.findall(line)))
+        markers = sorted(set(_RESIDUAL_TODO_RE.findall(
+            _CODE_SPAN_RE.sub("", f"{cells[status_idx]} {cells[route]}"))))
         if markers:
             notes.append(f":{lineno} {cells[id_idx]}({cls})={'/'.join(markers)}")
     return notes

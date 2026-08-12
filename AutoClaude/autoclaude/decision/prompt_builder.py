@@ -50,7 +50,7 @@ _MUTATION_SCHEMA_SECTION = """
     "new_step_id": "<例如 T02_FIX>",
     "new_step_name": "<新步驟名稱>",
     "new_step_prompt": "<新步驟的完整 prompt>",
-    "new_step_evaluator_command": "<驗證注入步驟成功的 shell 指令，例如 pytest tests/test_foo.py>",
+    "new_step_evaluator_command": "<驗證注入步驟成功的 shell 指令，例如 pytest tests/test_foo.py。🔴 必須可攜：本欄最終交給平台原生殼（Windows 是 cmd.exe、POSIX 是 /bin/sh）執行，請用 pytest／python -c \"...\" 這類跨平台指令；不得用 test/grep/sed/awk/ls/pgrep 等單平台專屬指令，否則在另一平台上會是「找不到指令」而被誤判成步驟失敗>",
     "new_step_expected_regex": "<輸出應符合的 regex，選填>",
     "new_step_max_retries": null,
     "reasoning": "<為何需要插入輔助步驟>"
@@ -63,7 +63,7 @@ _MUTATION_SCHEMA_SECTION = """
     "new_step_id": "<例如 T01_PRE>",
     "new_step_name": "<前置步驟名稱>",
     "new_step_prompt": "<前置步驟的完整 prompt>",
-    "new_step_evaluator_command": "<驗證前置步驟成功的 shell 指令，例如 pip show fastapi>",
+    "new_step_evaluator_command": "<驗證前置步驟成功的 shell 指令，例如 pip show fastapi。🔴 必須可攜：本欄最終交給平台原生殼（Windows 是 cmd.exe、POSIX 是 /bin/sh）執行，請用 pip／python -c \"...\" 這類跨平台指令；不得用 test/grep/sed/awk/ls/pgrep 等單平台專屬指令，否則在另一平台上會是「找不到指令」而被誤判成步驟失敗>",
     "new_step_expected_regex": "<輸出應符合的 regex，選填>",
     "new_step_max_retries": null,
     "reasoning": "<為何需要前置步驟>"
@@ -100,7 +100,7 @@ _MUTATION_SCHEMA_SECTION = """
 {
   "step_mutation": {
     "mutation_type": "CONDITIONAL",
-    "condition_evaluator": "<shell 指令，exit 0 = 條件成立，exit 非0 = 條件不成立>",
+    "condition_evaluator": "<shell 指令，exit 0 = 條件成立，exit 非0 = 條件不成立。🔴 必須可攜：本欄交給平台原生殼（Windows 是 cmd.exe、POSIX 是 /bin/sh），請用 `exit 0`/`exit 1` 或 `python -c \"...\"`；不得用 test/grep/sed/awk/ls/pgrep 等單平台專屬指令，否則在另一平台上會是「找不到指令」而被靜默當成條件不成立>",
     "true_mutation": { <條件成立時執行的突變，支援除 CONDITIONAL 外所有類型> },
     "false_mutation": { <條件不成立時執行的突變，可為 null> },
     "reasoning": "<為何需要依條件分支>"

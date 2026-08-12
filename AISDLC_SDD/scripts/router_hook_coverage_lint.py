@@ -176,8 +176,16 @@ def main(argv: list[str] | None = None) -> int:
     repo_root = argv[0] if argv else os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     res = analyze(repo_root)
     if res["latest"] is None:
-        print("✅ router hook 覆蓋 lint：無演化版目錄，略過")
-        return 0
+        # 🔴 AGT-12（R85）fail-closed：此處原本印 ✅ 綠勾並回 0。本 lint 守的是
+        # 「LATEST 宣告的 CC hook event 是否可達」——定位不到 LATEST 時它一個 event
+        # 都沒看過，回 0 等於宣稱「全部可達」。同檔下方對「找不到 router」已是 rc=1，
+        # 兩者是同一類輸入失效，卻曾走兩條相反的出口。
+        print(
+            "::error:: router hook 覆蓋 lint：找不到任何演化版目錄"
+            f"（repo_root={repo_root!r}）——輸入不可信，一律 fail-closed",
+            file=sys.stderr,
+        )
+        return 1
     if res.get("error"):
         print(f"::error:: router hook 覆蓋 lint：{res['error']}", file=sys.stderr)
         return 1

@@ -103,6 +103,14 @@ class TestDestructiveFormsAreBlocked(unittest.TestCase):
         "git checkout -f main",
         "git switch -f main",
         "git switch --discard-changes main",
+        # 🔴 R85／SD-B3：**引號包住的執行檔絕對路徑**——根 CLAUDE.md 鐵律二對 Windows
+        # 明訂的正是這個寫法（`& '<絕對路徑>' …`），而兩支守衛都先把引號區段遮成空白
+        # 才判 ⇒ 連 `git.exe` 一起消失。實測本族修前**一條都不擋**（同一條去掉引號則
+        # 全部命中）＝本 repo 自己規定的寫法恰好落在射程外。
+        r"""& 'C:\Program Files\Git\bin\git.exe' stash""",  # platform-ok: 被測指令字面
+        r"""& "C:\Program Files\Git\bin\git.exe" reset --hard""",  # platform-ok: 同上
+        r"""'/usr/bin/git' stash""",          # mac 側同形（引號才是成因，不是碟符）
+        r"""'/usr/local/bin/git' clean -fd""",
     )
 
     def test_every_destructive_form_is_blocked(self) -> None:
@@ -1883,6 +1891,115 @@ class TestR84TheWaitformDocstringIsTheSingleHome(unittest.TestCase):
         self.assertTrue(
             G.waitform_hits("until ! pgrep -f 'run_root_unittests'; do :; done; wait"),
             "`wait` 竟然把判準② 也一起放行了 ⇒ docstring 的不對稱宣稱是假的")
+
+
+# ── ⑧ 授權邊界：無人看管回合禁動 git 歷史（R85／P12，**mac 側先前零機械物**）──────
+class TestUnattendedAuthzHasTeethOnEveryPlatform(unittest.TestCase):
+    """R79 立的 Auto Pilot 條件，在 macOS 上到 R85 為止**一行都不會跑**。
+
+    🔴 立案（本輪 P3 實測，不是假想）：唯一擋 commit／push 的是
+    `.claude/hooks/lint_powershell_command.py`，而它 matcher 是 `PowerShell`
+    （mac 的 shell 載具是 `Bash`，連 matcher 都對不上）、且第一件事是
+    `os.name != 'nt' → exit 0`。兩道各自都足以讓那條規則在 mac 上不存在
+    ⇒ 無人看管代理在 mac 可自由 commit／push。該 hook 檔頭自己已把這個缺口寫成
+    〈誠實劃界〉——**登記了卻一直沒補**，而訴求 6d（reset 後自動喚醒續跑）回來的
+    正是那種 headless 代理。
+
+    本類與姊妹鎖 `test_check_hooks_liveness.TestUnattendedCommitPushBlock` 守**同一條
+    規則的另一個平台**，四件事逐一對齊（每一件都帶反向，只帶一個方向必在另一向恆綠）：
+    ①有訊號×動 git 歷史→exit 2；②**沒有訊號**×同一批→exit 0（互動 session 零附帶面，
+    這一條壞掉＝掌舵者自己的 commit 被鎖死）；③有訊號×無關指令→放行；④行內豁免無效。
+
+    🔴 假紅普查（母體＝逐字稿裡**真的送出過**的指令字串＝PreToolUse 的真實輸入面，
+    不是 tracked 面——照 tracked 面判會把「只出現在描述它的散文裡」的命中讀成假紅）：
+    3,804 條相異指令 → 命中 136 條，逐條回查「解析器或正則指不指得出一次真的
+    git/gh write」＝ **0 條指不出** ⇒ 假陽性 0。數字一律現查，見報告的普查腳本。
+    """
+
+    #: 有訊號時**必須擋**。前 5 筆是 mac 專有形態（Windows 那支姊妹鎖沒有的）。
+    MUST_BLOCK = (
+        ("sudo 前綴", "sudo git push"),
+        ("殼 -c operand（字串內，殼文字看不到）", "bash -c 'git push origin main'"),
+        ("argv 序列（不經殼）", 'python -c \'subprocess.run(["git","push"])\''),
+        ("帶路徑前綴的 git", "/usr/bin/git commit -m x"),
+        ("第二段指令（換行之後）", "date\ngit push"),
+        ("git commit", 'git commit -m "wip"'),
+        ("git push", "git push origin main"),
+        ("git -C <path> commit（不在 cwd 上動手）", "git -C /repo commit -m x"),
+        ("git -c 覆寫設定後 push", "git -c user.name=bot push"),
+        ("gh pr create", "gh pr create --fill"),
+        ("gh release create", "gh release create v1 --notes x"),
+        ("行內豁免對授權邊界無效（那一跑自己寫得出這行）",
+         "git push  # git-guard-ok: 我覺得可以"),
+        # 🔴 R85／SD-B3：鐵律二**明訂**的 Windows 寫法（絕對路徑外呼），修前不擋。
+        ("引號包住的 Windows 絕對路徑（鐵律二明訂形態）",
+         r"""& 'C:\Program Files\Git\bin\git.exe' push"""),  # platform-ok: 被測指令字面
+        ("同上但雙引號",
+         r"""& "C:\Program Files\Git\bin\git.exe" commit -m x"""),  # platform-ok: 同上
+        ("引號包住的 POSIX 絕對路徑（引號才是成因，不是碟符）", "& '/usr/bin/git' push"),
+        ("引號包住的 gh（另一條把改動送出去的路）",
+         r"""& 'C:\tools\gh.exe' pr create"""),  # platform-ok: 被測指令字面
+    )
+
+    #: 有訊號時**仍必須放行**。那一跑要做的事正是「把狀態寫下來然後停」，
+    #: 擋到它讀 git、寫任務書、留稽核痕跡，等於逼它什麼都不留就死掉。
+    MUST_PASS = (
+        ("git status（讀，不是寫）", "git status --short"),
+        ("git log", "git log --oneline -3"),
+        ("git diff", "git diff --stat"),
+        ("`push` 只是 grep 的樣式", "git log | grep push"),
+        ("`commit` 出現在參數的值裡", "git log --grep=commit"),
+        ("在字串裡提到 commit（寫任務書／留痕的日常）",
+         "echo 'blocked: do not git commit here'"),
+        ("在註解裡提到 push", "date  # never git push from here"),
+        ("字尾巧合不算指令（`legit` 不是 `git`）", "legit commit -m x"),
+        ("🔴 `git stash create`＝〈可重啟點四條件〉第 1 條指定的保全手法",
+         "git stash create"),
+        # 🔴 R85／SD-B3 的另一半：假紅同樣是缺陷。git 的**設定鍵天生以子指令名開頭**
+        # （`push.*`／`commit.*`），修前 `git config push.default` 這種唯讀查詢被判成
+        # push；而 `&` 之後是**下一個**指令，跨過去等於把別人的參數算到 git 頭上。
+        ("設定鍵以子指令名開頭的唯讀查詢", "git config push.default"),
+        ("同上，帶 --get", "git config --get push.default"),
+        ("`-c` 覆寫設定但實際動作是 status", "git -c push.default=simple status"),
+        ("`push` 是 `&&` 之後另一個指令的參數", "git log && echo push"),
+        ("引號裡的路徑是被當資料用的（pgrep 的樣式）", "pgrep -f '/usr/bin/git'"),
+    )
+
+    def test_the_signal_blocks_git_history_writes(self) -> None:
+        for label, command in self.MUST_BLOCK:
+            with self.subTest(label):
+                proc = run_hook(bash_payload(command), env={G.UNATTENDED_ENV: "1"})
+                self.assertEqual(proc.returncode, 2, f"未擋（{label}）\n{proc.stderr}")
+                self.assertIn(G.UNATTENDED_ENV, proc.stderr,
+                              f"擋了卻沒說是哪個訊號造成的（{label}）——讀者無從得知怎麼關")
+
+    def test_without_the_signal_the_same_commands_are_untouched(self) -> None:
+        """🔴 反向：互動 session 零附帶面。壞掉＝掌舵者自己的 commit 被鎖死。"""
+        for label, command in self.MUST_BLOCK:
+            with self.subTest(label):
+                self.assertIn(
+                    run_hook(bash_payload(command)).returncode, (0, 1),
+                    f"沒有無人看管訊號卻被擋（{label}）：{command!r}")
+
+    def test_the_signal_does_not_block_what_that_run_still_needs(self) -> None:
+        for label, command in self.MUST_PASS:
+            with self.subTest(label):
+                proc = run_hook(bash_payload(command), env={G.UNATTENDED_ENV: "1"})
+                self.assertIn(proc.returncode, (0, 1), f"誤擋（{label}）\n{proc.stderr}")
+
+    def test_the_message_names_the_boundary_not_just_the_rule(self) -> None:
+        """訊息要讓那一跑知道**該做什麼**，不是只知道被擋（同姊妹鎖的第四件事）。"""
+        err = run_hook(bash_payload("git push"), env={G.UNATTENDED_ENV: "1"}).stderr
+        self.assertIn("git-guard-ok", err, "必須明說行內豁免對本條無效")
+        self.assertIn("工作樹", err, "必須告訴它替代動作（改動留著讓人回來收）")
+
+    def test_the_criterion_lives_in_exactly_one_home(self) -> None:
+        """🔴 兩支 hook 必須讀同一份判準——本 repo 的頭號病是同一份知識住兩個家。"""
+        import unattended_authz as A
+        self.assertIs(G.authz_hits, A.authz_hits)
+        self.assertEqual(G.UNATTENDED_ENV, A.UNATTENDED_ENV)
+        for name in ("_GIT_WRITE_RE", "_GH_WRITE_RE"):
+            self.assertFalse(hasattr(G, name), f"{name} 在 hook 內長出了第二份")
 
 
 if __name__ == "__main__":  # pragma: no cover

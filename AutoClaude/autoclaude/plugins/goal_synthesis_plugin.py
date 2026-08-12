@@ -17,10 +17,9 @@ SD_Improving_05 W4-4：吸收以下 4 個 mixin 方法（與既有 POST_RUN 訂�
 from __future__ import annotations
 
 import logging
-from typing import Any, Optional
+from typing import Any
 
 from ..core.hookspec import HookContext, KernelPhase, MutationProposal
-from ..models.playbook import PlaybookTask
 from ..models.step_mutation import StepMutation, StepMutationType
 
 logger = logging.getLogger("autoclaude.plugins.goal_synthesis")
@@ -33,14 +32,22 @@ class GoalSynthesisPlugin:
 
     def __init__(
         self,
-        minimax_client: Optional[Any] = None,
+        minimax_client: Any | None = None,
         enabled: bool = True,
         max_summary_recent: int = 10,
+        fail_closed: bool = False,
     ):
         self._client = minimax_client
         self._enabled = enabled
         self._max_recent = max_summary_recent
         self._latest_decision = None  # 供測試 / 觀察
+        # R85：Brain 諮詢失敗時的姿態。預設 False＝維持既有 fail-open（零行為變更）；
+        # True＝改為注入一個「請人工複核目標達成」的補完步驟，不讓「問不到」長得像「已達成」。
+        self._fail_closed = fail_closed
+        # R85：**可觀測性**才是這次的重點。舊碼在 except 裡直接 `return None`，於是
+        # 「API 掛了」與「目標真的達成」回傳值完全相同、log 只有一行 WARNING ⇒ 失效表徵
+        # 與成功一致，正是本 repo 最忌諱的形態。這個旗標讓「其實沒驗證成功」變成可查的事實。
+        self.validation_failed = False
 
     def name(self) -> str:
         return "goal_synthesis"
@@ -51,7 +58,7 @@ class GoalSynthesisPlugin:
     def subscribed_phases(self) -> list[KernelPhase]:
         return [KernelPhase.POST_RUN]
 
-    def on_event(self, ctx: HookContext) -> Optional[Any]:
+    def on_event(self, ctx: HookContext) -> Any | None:
         if not self._enabled or self._client is None:
             return None
         playbook = ctx.playbook
@@ -103,7 +110,7 @@ class GoalSynthesisPlugin:
         return earlier_summary + "\n" + "\n".join(recent)
 
     @staticmethod
-    def prepend_global_goal(prompt: str, global_goal: Optional[str]) -> str:
+    def prepend_global_goal(prompt: str, global_goal: str | None) -> str:
         """Gap-013-F：完整版 global_goal 前置注入（首次 Prompt）。
 
         SD_05 W4-4：吸收原 `PlaybookRunner._prepend_global_goal`。
@@ -120,7 +127,7 @@ class GoalSynthesisPlugin:
 
     @staticmethod
     def prepend_global_goal_brief(
-        prompt: str, global_goal: Optional[str], cfg: Optional[Any] = None,
+        prompt: str, global_goal: str | None, cfg: Any | None = None,
     ) -> str:
         """Gap-015-A：精簡版 global_goal 前置（最大 global_goal_brief_chars 字元）。
 
@@ -140,10 +147,10 @@ class GoalSynthesisPlugin:
         self,
         playbook,
         step_log: list[str],
-        global_goal: Optional[str] = None,
+        global_goal: str | None = None,
         *,
         code_state_snapshot: str = "",
-    ) -> Optional[tuple[str, Optional[str]]]:
+    ) -> tuple[str, str | None] | None:
         """諮詢 Minimax 判斷 global_goal 是否達成（公開 API）。
 
         SD_05 W4-4：吸收原 `PlaybookRunner._validate_global_goal_achievement`。
@@ -165,10 +172,23 @@ class GoalSynthesisPlugin:
                 code_state_snapshot=code_state_snapshot,
             )
         except Exception as exc:
-            # API 失敗 → 傾向視為達成（避免假陽性阻斷）
-            logger.warning(
-                "GoalSynthesisPlugin: validate_goal_achievement 失敗，視為達成: %s", exc,
+            # R85：原本這裡逐字「視為達成」＝fail-open，且 log 只有 WARNING ⇒ 一次沒問到
+            # Brain 就會讓整支 playbook 以「目標已達成」收尾，而那與真的達成無法區分。
+            # 現在：①標記 validation_failed（可查的事實，不只是一行 log）；②升級為 ERROR；
+            # ③fail_closed=True 時改注入人工複核步驟。預設仍 fail-open，行為零變更——
+            # 把預設翻成 fail-closed 會讓「Brain 暫時抽風」升級為「整支 playbook 停擺」，
+            # 那是另一個方向的傷害，需由掌舵者決定，不在本包射程內。
+            self.validation_failed = True
+            logger.error(
+                "GoalSynthesisPlugin: validate_goal_achievement 失敗，"
+                "**未能驗證目標是否達成**（fail_closed=%s）: %s", self._fail_closed, exc,
             )
+            if self._fail_closed:
+                return (
+                    "⚠️ 無法向 Brain 確認 global_goal 是否達成（諮詢失敗）。"
+                    "請人工複核上述步驟輸出是否真的滿足總目標；確認後輸出 [GOAL_VERIFIED]。",
+                    None,
+                )
             return None
         self._latest_decision = decision
         if getattr(decision, "is_achieved", True):
@@ -183,5 +203,5 @@ class GoalSynthesisPlugin:
     # ──────────────────────────────────────────────
     def _validate(
         self, playbook, step_log: list[str],
-    ) -> Optional[tuple[str, Optional[str]]]:
+    ) -> tuple[str, str | None] | None:
         return self.validate_global_goal_achievement(playbook, step_log)

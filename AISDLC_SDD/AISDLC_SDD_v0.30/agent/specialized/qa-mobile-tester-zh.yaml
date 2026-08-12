@@ -549,34 +549,23 @@ collaboration_rules:
       communication_protocols: "跨平台品質同步、測試覆蓋協調"
 
 dependencies:
-  tools:
-    - mobile-automation-tools.md
-    - device-testing-platforms.md
-    - mobile-performance-tools.md
-    - app-store-tools.md
-
-  data:
-    - device-support-matrix.md
-    - os-version-requirements.md
-    - mobile-performance-benchmarks.md
-    - app-store-guidelines.md
-
-  tasks:
-    - device-testing.md
-    - mobile-automation.md
-    - app-store-validation.md
-    - performance-testing.md
-
+  # ─── AGT-11（R85）幽靈依賴清除（判準與取數管道自證見 agent/core/05.sd-architect-zh.yaml 同節）───
+  # 本檔實測：`data`(4)／`tasks`(4)／`checklists`(4)／`tools`(4) 共 16 條為裸檔名，正規化後在本版磁碟上不可解析
+  #（根相對與 basename 兩種解析皆 0 命中），且在 agent/ 之外零引用。
+  # 被刪除的原文逐字保留（訂正協議：禁止靜默覆寫）：
+  #   data: device-support-matrix.md / os-version-requirements.md / mobile-performance-benchmarks.md /
+  #         app-store-guidelines.md
+  #   tasks: device-testing.md / mobile-automation.md / app-store-validation.md /
+  #          performance-testing.md
+  #   checklists: mobile-testing-checklist.md / device-testing-checklist.md /
+  #               app-store-submission-checklist.md / mobile-performance-checklist.md
+  #   tools: mobile-automation-tools.md / device-testing-platforms.md / mobile-performance-tools.md /
+  #          app-store-tools.md
+  # ─────────────────────────────────────────────────────────────────────
   templates:
     - docs_template/core/tests/AT_Module_Template.md
     - docs_template/core/tests/Test_Report_Template.md
     - docs_template/core/tests/Performance_Test_Plan_Template.md
-
-  checklists:
-    - mobile-testing-checklist.md
-    - device-testing-checklist.md
-    - app-store-submission-checklist.md
-    - mobile-performance-checklist.md
 
 scenario_applications:
   greenfield_mobile:

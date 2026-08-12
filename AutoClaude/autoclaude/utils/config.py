@@ -146,6 +146,9 @@ class PlaybookConfig(BaseModel):
     # 自動套用」紅線 + enable_kernel_brain flag-gate 前例）。
     goal_synthesis_enabled: bool = True
     # Gap-014：是否啟用 DONE 前的全局目標驗證（預設啟用）
+    # R85：Brain 諮詢**失敗**時的姿態。False（預設，零行為變更）＝沿用 fail-open；
+    # True＝改注入人工複核步驟，讓「問不到」不再與「已達成」同一個表徵。
+    goal_synthesis_fail_closed: bool = False
     global_goal_brief_chars: int = Field(default=150, ge=50, le=500)
     # Gap-015：非首個步驟的精簡 global_goal 字元數（50~500，預設 150）
     conditional_evaluator_timeout_seconds: int = 5

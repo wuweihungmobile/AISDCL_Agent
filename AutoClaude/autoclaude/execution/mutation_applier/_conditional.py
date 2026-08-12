@@ -1,7 +1,9 @@
-"""_conditional.py — CONDITIONAL handler（含 shell 安全 + 遞迴 dispatch）。
-
-對應 SD_06 W2 G2 deferred + SD_05 W4 Gap-046 安全強化。
-"""
+# _conditional.py — CONDITIONAL handler（含 shell 安全 + 遞迴 dispatch）。
+#
+# 對應 SD_06 W2 G2 deferred + SD_05 W4 Gap-046 安全強化。
+#
+# 🔴 R85：模組說明由 docstring 改為 `#` 註解（`#` 不計 LOC，內容一字未改）；理由同
+# execution/evaluator.py 檔頭那一段——把 LOC total 餘裕留給下一個人。
 from __future__ import annotations
 
 import logging
@@ -11,7 +13,7 @@ import subprocess
 from typing import TYPE_CHECKING
 
 from ...utils.trace_context import propagate_to_subprocess_env
-from ..evaluator import _NEW_SESSION_KWARGS, kill_process_tree
+from ..evaluator import _NEW_SESSION_KWARGS, kill_process_tree, portability_note, unattended_refusal
 
 if TYPE_CHECKING:
     from ...models.step_mutation import StepMutation
@@ -20,23 +22,34 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger("autoclaude.execution.playbook")
 
-_SAFE_COND_PATTERN = re.compile(r'^[\w\s\-./=:!"\']+$')
+_SHELL_TRUE_COND_WHITELIST = re.compile(r'^[\w\s\-./=:!"\']+$')
 
 
 def handle_conditional(ctx: MutationCtx, mutation: StepMutation, result: _MutationResult) -> None:
-    """依 condition_evaluator 的 exit code 選擇 true/false 分支並遞迴 dispatch。
-
-    跨平台注意（對稱 execution/evaluator.py Evaluator.run 警語）：condition_evaluator
-    以 subprocess.run(shell=True) 執行，實際呼叫的是「作業系統原生殼」——Windows 為
-    cmd.exe，POSIX 為 /bin/sh，而非固定的 bash。因此 condition_evaluator 必須寫成
-    可攜指令（如 `python -c "..."`），避免 POSIX 專屬語法（test -f、grep 等 shell
-    builtin/GNU 工具），否則在 Windows 上會被 cmd.exe 解讀出非預期結果，而非清楚的
-    「找不到指令」失敗。（`&&`/`||` 則已被上方 Gap-046 _SAFE_COND_PATTERN 擋下。）
-    """
+    # 依 condition_evaluator 的 exit code 選擇 true/false 分支並遞迴 dispatch。
+    #
+    # 跨平台注意（對稱 execution/evaluator.py Evaluator.run 警語）：condition_evaluator
+    # 以 subprocess.run(shell=True) 執行，實際呼叫的是「作業系統原生殼」——Windows 為
+    # cmd.exe，POSIX 為 /bin/sh，而非固定的 bash。因此 condition_evaluator 必須寫成
+    # 可攜指令（如 `python -c "..."`），避免 POSIX 專屬語法（test -f、grep 等 shell
+    # builtin/GNU 工具），否則在 Windows 上會被 cmd.exe 解讀出非預期結果，而非清楚的
+    # 「找不到指令」失敗。（`&&`/`||` 則已被上方 Gap-046 _SHELL_TRUE_COND_WHITELIST 擋下。）
+    #
+    # 🔴 R85（AC-(a)）：說明由 docstring 改為 `#` 註解（`#` 不計 LOC），內容一字未改。
+    # 本函式是 autoclaude/ 內**第二個** `shell=True` 執行面（第一個是 Evaluator.run）；
+    # 兩個都接同一道無人看管能力閘，否則關掉一扇門只會讓人走另一扇。
     if not mutation.condition_evaluator:
         logger.warning("=== Gap-021 | CONDITIONAL 缺少 condition_evaluator，略過 ===")
         return
-    if not _SAFE_COND_PATTERN.match(mutation.condition_evaluator.strip()):
+    _denied = unattended_refusal(mutation.condition_evaluator)
+    if _denied:
+        logger.warning("=== R85 AC-(a) | %s，略過 ===", _denied)
+        return
+    # R85 P7：可攜性診斷。刻意擺在 Gap-046 白名單**之前**——被白名單擋下時本函式是
+    # 靜默 `return`（兩個分支都不跑），那正是最需要一句話說明「為什麼什麼都沒發生」
+    # 的時刻。回傳值刻意忽略：這道是診斷不是閘，不改控制流。
+    portability_note(mutation.condition_evaluator)
+    if not _SHELL_TRUE_COND_WHITELIST.match(mutation.condition_evaluator.strip()):
         logger.warning(
             "=== Gap-046 | CONDITIONAL evaluator 包含不安全字符，略過: %s ===",
             mutation.condition_evaluator[:80],

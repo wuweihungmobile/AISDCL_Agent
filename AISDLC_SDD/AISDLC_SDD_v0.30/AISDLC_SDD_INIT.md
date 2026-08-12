@@ -329,6 +329,19 @@ auto_load_config:
   system_wide_supporting_agents:
     - path: "agent/specialized/sdd-diagnostic-zh.yaml"
       load_at: "ESCALATION 觸發時（Phase G M1 self-healing diagnostic agent）"
+    # DEF-200-081①（R85 接線）：本條之前，`sdd-zero-trust-auditor-zh.yaml` 在全框架的
+    # 消費者只有 `agent/specialized/README.md` 的一列說明（實測；對照組 `sdd-orchestrator`
+    # 同一次掃描命中 18 檔 ⇒ 命中 1 是「真的沒有」不是「查不到」）。
+    # 🔴 為何判定是「漏接線」而非「設計上就不該自動載入」：另 6 支缺席 auto_load_config 的
+    #    agent 都有**另一條**消費路徑——`sdd-orchestrator`／`sdd-evaluator`／`sdd-gc` 住
+    #    `tools/fsm_runtime/subagent_contract.py` 的 REGISTERED 派工註冊表，
+    #    `sdd-playbook-compiler`／`sdd-prd-to-playbook` 有 10／5 處引用，
+    #    `01.agent-template-zh.yaml` 是模板不是可載入 agent。
+    #    唯獨本支**兩條路都不在**，是全樹唯一真正的孤兒。
+    # load_at 逐字沿用 `agent/specialized/README.md` 既有記載（該處是此意圖的既存出處），
+    # 刻意不自行發明新時機——否則就是同一份知識的第二個家。
+    - path: "agent/specialized/sdd-zero-trust-auditor-zh.yaml"
+      load_at: "SCG-4／SCG-5 前的獨立複審（文件級零信任稽核者，唯讀）"
 
   greenfield:
     primary_agents:
@@ -558,9 +571,16 @@ auto_load_config:
 | 06 | `agent/core/06.dev-developer-zh.yaml` | 開發工程師 |
 | 07 | `agent/core/07.qa-tester-zh.yaml` | QA 測試師（SDD 核心）|
 
-### Specialized Agents（20 個）（v0.02 +sdd-playbook-compiler；v0.28 +sdd-prd-to-playbook）
+### Specialized Agents（21 個）（v0.02 +sdd-playbook-compiler；v0.28 +sdd-prd-to-playbook；R85 +sdd-zero-trust-auditor 補列）
 
-> 含 14 個場景專屬 + 4 個系統級 runtime agent（Phase D~H 自動化閉環產出，由 Runtime 在對應 observation 狀態觸發，非場景載入）+ 2 個橋接 agent（v0.02 Phase Z / ACT-163：sdd-playbook-compiler〔末端：凍結契約→測試 playbook〕；AutoSDD_improving_94：sdd-prd-to-playbook〔前端：PRD→三層 playbook〕）。
+> 含 14 個場景專屬 + 5 個系統級 runtime agent（Phase D~H 自動化閉環產出，由 Runtime 在對應 observation 狀態觸發，非場景載入）+ 2 個橋接 agent（v0.02 Phase Z / ACT-163：sdd-playbook-compiler〔末端：凍結契約→測試 playbook〕；AutoSDD_improving_94：sdd-prd-to-playbook〔前端：PRD→三層 playbook〕）。
+>
+> 🔴 **R85／DEF-200-081① 訂正（被訂正的原文逐字保留：「Specialized Agents（20 個）」「含 14 個場景專屬 + 4 個系統級 runtime agent」）**：
+> `sdd-zero-trust-auditor-zh.yaml` 早已在磁碟上（隨 R84 入庫），但本節的**計數、下方清單表、
+> 以及 `auto_load_config` 三處全部不知道它存在** ⇒ 全框架對它的引用只剩
+> `agent/specialized/README.md` 一列（實測；對照組 `sdd-orchestrator` 同掃描命中 18 檔）。
+> `arch_fitness` 的 FF-7 一直在 advisory 面喊「INIT 宣稱 20、磁碟 21」，但 advisory 不阻擋
+> ⇒ 這個漂移**被看見了卻沒有被處理**，這是與「假綠」不同、但代價相同的一種失效。
 
 | Agent 檔案 | 角色 | 適用場景 |
 |-----------|------|---------|
@@ -582,6 +602,7 @@ auto_load_config:
 | `agent/specialized/sdd-diagnostic-zh.yaml` | 自癒診斷師（ESCALATION 分類 / auto_recoverable 判定） | Runtime / 系統級（Phase G M1） |
 | `agent/specialized/sdd-evaluator-zh.yaml` | 執行接地評估器（沙箱運行 App、生成-評估分離對抗） | Runtime / 系統級（Phase H M1） |
 | `agent/specialized/sdd-gc-zh.yaml` | 鷹架代謝 GC（規則 Scaffold ROI、退役過時鷹架） | Runtime / 系統級（Phase H M5） |
+| `agent/specialized/sdd-zero-trust-auditor-zh.yaml` | 文件級零信任稽核者（唯讀；SCG-4／SCG-5 前的獨立複審） | Runtime / 系統級（R85 補列，DEF-200-081①） |
 | `agent/specialized/sdd-playbook-compiler-zh.yaml` | SDD→AutoClaude Playbook 編譯者（凍結規格 → playbook YAML，R-9.38 保真） | Bridge / 系統級（v0.02 Phase Z / ACT-163） |
 | `agent/specialized/sdd-prd-to-playbook-zh.yaml` | PRD→Playbook 規劃架構師（PRD → 專案→目標→任務 three_tier YAML，交 tools/three_tier_to_playbook.py 攤平為可執行 playbook） | Bridge / 前端（AutoSDD_improving_94 A 軌） |
 

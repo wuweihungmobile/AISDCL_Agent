@@ -106,16 +106,37 @@ def main() -> int:
     base_url = os.environ.get("MINIMAX_BASE_URL") or cfg.minimax.base_url
     model = os.environ.get("MINIMAX_MODEL") or cfg.minimax.model
 
-    try:
-        minimax = MinimaxClient(
-            api_key=api_key,
-            base_url=base_url,
-            model=model,
-            timeout=cfg.minimax.timeout_seconds,
+    # R85 AC-(b)：Brain 是**選配**能力，缺金鑰不得阻斷整支 playbook。
+    # 舊行為無條件建 MinimaxClient，空金鑰即 raise → 沒有 Minimax 帳號的人一步都跑不了
+    # 任何 playbook（連 enable_kernel_brain=False 這個「本來就不用 Brain」的預設組態也一樣）。
+    # 新行為分兩路，且**顯式要求 Brain 時仍 fail-closed**（不靜默降級）：
+    #   有金鑰            → 照舊建 client
+    #   無金鑰 + 要 Brain → rc=1 停機（要什麼就必須拿到什麼）
+    #   無金鑰 + 不要 Brain → minimax=None，warn 一次後照常跑
+    # 下游三個消費者皆已具 None 守衛：GoalSynthesisPlugin（:55/:157）、
+    # EvolutionPlugin（:213）、wiring 簽名本身即 `Any | None = None`。
+    minimax = None
+    if api_key:
+        try:
+            minimax = MinimaxClient(
+                api_key=api_key,
+                base_url=base_url,
+                model=model,
+                timeout=cfg.minimax.timeout_seconds,
+            )
+        except MinimaxError as exc:
+            logger.error("初始化失敗: %s", exc)
+            return 1
+    elif cfg.minimax.enable_kernel_brain:
+        logger.error(
+            "初始化失敗: enable_kernel_brain=True 但未設定 MINIMAX_API_KEY／config.minimax.api_key"
         )
-    except MinimaxError as exc:
-        logger.error("初始化失敗: %s", exc)
         return 1
+    else:
+        logger.warning(
+            "未設定 MINIMAX_API_KEY：Brain 相關能力（步驟 correction／goal synthesis／"
+            "自演化提案）本次停用，playbook 仍會照常執行"
+        )
 
     hotkey = HotkeyHandler()
     logger.info("Playbook 模式啟動 (fresh=%s) | %s", args.fresh, args.playbook)

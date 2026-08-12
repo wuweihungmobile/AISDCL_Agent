@@ -10,10 +10,16 @@
 # 🔴 本檔產出的每一個數字都是**量測值，不是常數**。ADR §2.7 明文寫了「不得被引用為常數」；
 # 要對照就重跑，別抄。
 #
-# 判準一律**沿用** `.claude/hooks/context_budget_guard.py` 的既有實作
-# （`SYNTHETIC_MODEL` 指紋／`classify_limit`／`parse_reset_at`），不在這裡另寫一份：
-# 「同一份知識住兩個家」是本 repo 反覆判過的形態，而撞線偵測的權威實作住在那支 hook
-# （它結構上不能 import 別人，只能是被 import 的那一方）。
+# 判準一律**沿用**撞線判讀的唯一真相源 `tools/lib/quota_limits.py`
+# （`SYNTHETIC_MODEL` 指紋／`classify_limit`／`reset_literal`／`parse_reset_at`），
+# 不在這裡另寫一份：「同一份知識住兩個家」是本 repo 反覆判過的形態。
+#
+# 🔴 R85／C5 訂正（本段前一版寫的是「沿用 `.claude/hooks/context_budget_guard.py` 的
+# 既有實作」，而那句話自 R81 起就已不成立，故不留著當現行說法）：R81 把判讀原語整個
+# 搬進 `quota_limits.py`，hook 那一側改成**具名 import 清單**的再匯出。本檔當時仍隔著
+# 那層 shim 取用，於是清單裡沒有的 `_RESET_RE` 讓本檔 `AttributeError` rc=1 —— 而
+# 根 CLAUDE.md 有兩處要求「reset 分佈的數字一律現查」正是靠本檔。⇒ 改為直接向 SSOT
+# 取用：少一層會漏名字的轉手，且 hook 那一側的再匯出清單再怎麼變都影響不到本檔。
 #
 # 為什麼要 episode 級的數字，而不是只報事件筆數：一次撞線會在 16 秒內讓**每個 subagent**
 # 各留一筆合成記錄（實測最大一群 46 筆）。直接對事件取中位數會被扇出規模主導 ⇒ 那是
@@ -36,33 +42,33 @@ from pathlib import Path
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(_REPO_ROOT / "tools"))
-sys.path.insert(0, str(_REPO_ROOT / ".claude" / "hooks"))
+sys.path.insert(0, str(_REPO_ROOT / "tools" / "lib"))
+
+import quota_limits as limits  # noqa: E402
 
 # 🔴 本檔整份輸出都是中文 ⇒ 非 UTF-8 locale 下 stdout 會直接 UnicodeEncodeError、
 # stderr 會降解成 `\uXXXX`（R74 的 P0 同源，且本機 UTF-8 環境**結構上重現不了**，
 # 不得以「我這裡中文是好的」當通過依據）。同 `probe/audit_session.py` 的既有作法。
-import context_budget_guard as guard  # noqa: E402
-
 import _stdio_utf8  # noqa: E402,F401  （side effect：強制 stdout/stderr 為 UTF-8）
 
 
 def limit_events(path: Path):
     """該逐字稿裡**每一筆** harness 合成的額度／錯誤事件 `(timestamp, text)`。
 
-    `guard.latest_limit_event()` 只回最後一筆（它的呼叫端只需要那一筆），這裡需要全部，
+    `limits.latest_limit_event()` 只回最後一筆（它的呼叫端只需要那一筆），這裡需要全部，
     故就地沿用它的**指紋定義**（`type=assistant` ＋ `model == SYNTHETIC_MODEL`）掃全檔。
     """
     try:
         with path.open(encoding="utf-8", errors="replace") as handle:
             for line in handle:
-                if guard.SYNTHETIC_MODEL not in line:
+                if limits.SYNTHETIC_MODEL not in line:
                     continue
                 try:
                     rec = json.loads(line)
                 except ValueError:
                     continue
                 msg = rec.get("message") or {}
-                if rec.get("type") != "assistant" or msg.get("model") != guard.SYNTHETIC_MODEL:
+                if rec.get("type") != "assistant" or msg.get("model") != limits.SYNTHETIC_MODEL:
                     continue
                 body = msg.get("content")
                 text = body if isinstance(body, str) else " ".join(
@@ -87,15 +93,15 @@ def scan(base: Path) -> tuple[list[dict], Counter, Counter]:
     literals: Counter = Counter()
     for path in sorted(base.rglob("*.jsonl")):
         for stamp, text in limit_events(path):
-            kind = guard.classify_limit(text)
+            kind = limits.classify_limit(text)
             kinds[kind] += 1
-            if kind != guard.LIMIT_SESSION:
+            if kind != limits.LIMIT_SESSION:
                 continue
             anchor = local_time(stamp)
-            match = guard._RESET_RE.search(text)
-            if match:
-                literals[match.group(0).lower()] += 1
-            reset = guard.parse_reset_at(text, anchor) if anchor else None
+            literal = limits.reset_literal(text)
+            if literal:
+                literals[literal] += 1
+            reset = limits.parse_reset_at(text, anchor) if anchor else None
             rows.append({
                 "file": path.name,
                 "hit": anchor.isoformat(timespec="seconds") if anchor else None,

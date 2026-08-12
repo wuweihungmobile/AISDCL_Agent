@@ -157,31 +157,37 @@ collaboration_rules:
 # =============================================================================
 # 根據Agent需要的功能，配置相關的依賴項目
 dependencies:
-  # 數據文件（如果需要）
-  data:
-    # - technical-preferences.md  # 技術偏好設定
-    # - best-practices.md  # 最佳實踐指南
-    # - domain-knowledge.md  # 領域知識庫
-  
-  # 任務文件（如果需要）
-  tasks:
-    # - create-doc.md  # 創建文檔任務
-    # - execute-checklist.md  # 執行檢查清單
-    # - requirements-analysis.md  # 需求分析任務
-    # - stakeholder-interview.md  # 利害關係人訪談任務
-  
-  # 模板文件（對應 document_responsibilities）
+  # ─── AGT-21（R85）本節即「幽靈依賴」的源頭，故在源頭改掉 ─────────────────
+  # 立案事實：R85 實測全 agent 樹 `dependencies` 的 data／tasks／checklists 三桶共 301 條
+  # 裸檔名，磁碟上一支都不存在（對照組 `SDD_GUIDE.md` 同次掃描命中 20 檔 ⇒ 取數管道活著）。
+  # 而它們長得都一樣，因為都是照抄本模板下面這幾行示範抄出來的。
+  # 只修下游 agent 而不修本模板 = 下一支新 agent 照樣長出同一批幽靈。
+  # 被替換的示範原文逐字保留（訂正協議：禁止靜默覆寫）：
+  #   data:       `- technical-preferences.md` / `- best-practices.md` / `- domain-knowledge.md`
+  #   tasks:      `- create-doc.md` / `- execute-checklist.md` / `- requirements-analysis.md` /
+  #               `- stakeholder-interview.md`
+  #   templates:  `- docs_template/core/prd/PRD_Universal_Template.md` /
+  #               `- docs_template/core/frd/FRD_Universal_Template.md` /
+  #               `- docs_template/core/srd/SRD_Module_Template.md` /
+  #               `- ../docs_template/tests/AT_Module_Template.md`（🔴 這一條還是 `../` 相對路徑，
+  #               而 `agent_template_lint.py` 要求框架根相對——示範自己就違反了現行判準）
+  #   checklists: `- document-quality-checklist.md` / `- requirements-review-checklist.md` /
+  #               `- acceptance-criteria-checklist.md`
+  #
+  # 🔴 新 agent 撰寫規則（取代上面的示範）：
+  #   1. **只保留 `templates:` 這一桶**。它是唯一有機械物在守的（`scripts/agent_template_lint.py`
+  #      逐條解析），其餘三桶結構上永遠不會轉紅 ⇒ 寫進去的東西沒有人會發現它不存在。
+  #   2. `templates:` 每一條都必須是**框架根相對**且**磁碟上真的存在**的 `docs_template/...` 路徑；
+  #      不得用裸檔名，不得用 `../`。
+  #   3. 「這支 agent 什麼時候被誰載入」的唯一真相源是框架入口 `AISDLC_SDD_INIT.md` 的
+  #      `auto_load_config`，**不是本欄**。新 agent 要能被叫到，就去那裡登記；
+  #      在本欄多寫一份清單只會多一個沒人維護、也沒人會發現它壞掉的家。
+  #   4. 需要引用權威源（閘門／規則／紀律）時，用**指路**而非複寫，例如
+  #      `agent/EVIDENCE_DISCIPLINE.md`、`workflow/sdd-spec-first-gate/SDD_SPEC_FIRST_GATE.md`。
+  # ─────────────────────────────────────────────────────────────────────
   templates:
-    # - docs_template/core/prd/PRD_Universal_Template.md  # PRD 模板
-    # - docs_template/core/frd/FRD_Universal_Template.md  # FRD 模板
-    # - docs_template/core/srd/SRD_Module_Template.md  # SRD 模板
-    # - ../docs_template/tests/AT_Module_Template.md  # AT 模板
-  
-  # 檢查清單（如果需要）
-  checklists:
-    # - document-quality-checklist.md  # 文檔品質檢查
-    # - requirements-review-checklist.md  # 需求審查檢查清單
-    # - acceptance-criteria-checklist.md  # 驗收標準檢查清單
+    # - docs_template/core/frd/FRD_Universal_Template.md  # 範例：框架根相對且真的存在
+
 
 # =============================================================================
 # 使用說明

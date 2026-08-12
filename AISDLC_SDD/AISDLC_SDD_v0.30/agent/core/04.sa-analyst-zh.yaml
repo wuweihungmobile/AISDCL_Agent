@@ -93,6 +93,16 @@ evidence_discipline:
   inherits_from: "agent/EVIDENCE_DISCIPLINE.md"
   applies_to: "FRD／User Stories／RTM／As-Is SRD／Migration 完整性清單"
   enforcement: "貼不出憑證的宣稱一律降級為『未驗證（靜態推論）』，不得刪除宣稱以規避"
+  # AGT-14（R85）：本 agent 是全框架最常做「掃描 → 列舉 → 宣稱窮盡」的角色
+  # （見 sdd_phase03_brownfield.as_is_srd_reverse 的 step_2 掃描路由層／step_3 分析資料模型／
+  # step_4 提取業務規則，以及 gap_analysis 的缺口清單）。那些步驟今天沒有任何一條要求
+  # 「先證明掃描管道活著」——而漏掉的端點與「這個系統沒有這種端點」在 FRD 版面上長得一模一樣，
+  # 且下游 SD／QA 會把它當成已凍結的邊界繼續往下做。紀律總覽見 EVIDENCE_DISCIPLINE〈二、4〉，
+  # 本處是**逆向提取產出面**的判準所在。
+  extraction_pipeline_liveness:
+    rule: "任何『已窮盡／無此類／零缺口』的列舉宣稱，必須同時附上一個已知一定命中的對照 pattern 及其命中數"
+    fail_condition: "命中 0 且無對照證明者，一律在 As-Is FRD／Gap Analysis 記為 `UNMEASURED`，不得記為 `NONE`"
+    handoff_note: "UNMEASURED 的項目必須逐項出現在交付給 SD 的交接清單，不得靜默收斂成『已完成盤點』"
 
 document_responsibilities:
   primary_documents:
@@ -199,30 +209,21 @@ collaboration_rules:
       communication_protocols: "定期精煉會議、實作可行性討論"
 
 dependencies:
-  data:
-    - business-processes.md
-    - user-personas.md
-    - domain-knowledge.md
-    - stakeholder-directory.md
-    - business-rules.md
-  
-  tasks:
-    - create-doc.md
-    - execute-checklist.md
-    - requirements-analysis.md
-    - stakeholder-interview.md
-    - user-story-mapping.md
-    - acceptance-criteria-definition.md
-    - requirements-validation.md
-  
+  # ─── AGT-11（R85）幽靈依賴清除（判準與取數管道自證見 05.sd-architect 同節，不複寫）───
+  # 本檔實測：`data`(5)／`tasks`(7)／`checklists`(4) 共 16 條裸檔名，磁碟上一支都不存在，
+  # 且在 agent/ 之外零引用。`agent_template_lint.py` 只驗 `templates` 桶 ⇒ 這三桶結構上不會轉紅。
+  # 被刪除的原文逐字保留（訂正協議：禁止靜默覆寫）：
+  #   data: business-processes.md / user-personas.md / domain-knowledge.md /
+  #         stakeholder-directory.md / business-rules.md
+  #   tasks: create-doc.md / execute-checklist.md / requirements-analysis.md /
+  #          stakeholder-interview.md / user-story-mapping.md /
+  #          acceptance-criteria-definition.md / requirements-validation.md
+  #   checklists: requirements-review-checklist.md / user-story-checklist.md /
+  #               acceptance-criteria-checklist.md / stakeholder-validation-checklist.md
+  # 真正會被載入的資產清單住框架入口 `AISDLC_SDD_INIT.md` 的 `auto_load_config`（唯一真相源）。
+  # ─────────────────────────────────────────────────────────────────────
   templates:
     - docs_template/core/frd/FRD_Universal_Template.md
-  
-  checklists:
-    - requirements-review-checklist.md
-    - user-story-checklist.md
-    - acceptance-criteria-checklist.md
-    - stakeholder-validation-checklist.md
 
 # 協作流程圖
 collaboration_flow: |
@@ -271,7 +272,9 @@ sdd_skills:
     steps:
       - "讀取 FRD 所有 User Stories 與 AC"
       - "識別系統邊界與模組劃分"
-      - "定義非功能性需求（NFR）"
+      # AGT-15（R85）：NFR 是平台差異第一次有機會被寫下來的地方。原步驟只寫「定義 NFR」，
+      # 於是平台軸一路留白到 SD 的 ADR-004 才被問，而那時 FRD 已凍結、補問要退回 SCG-0。
+      - "定義非功能性需求（NFR）— 平台軸須在此就位：逐項回答見 agent/core/05.sd-architect-zh.yaml::sdd_phase02_greenfield.platform_neutrality_checklist（單一真相源，本處不複寫觸發項清單）"
       - "產出 To-Be SRD 草稿交 SD 審查"
 
   # ── 共通 Skills（全 Agent 適用）──

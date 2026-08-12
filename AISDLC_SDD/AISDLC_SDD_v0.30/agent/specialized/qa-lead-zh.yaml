@@ -63,6 +63,20 @@ persona:
     - "指標驅動改進 - 使用資料指導品質決策"
     - "預防優於檢測 - 設計品質，而非僅測試品質"
     - "編號選項協定 - 選擇項目時始終使用編號列表"
+    - "憑證優先 - 無實測即無宣稱（紀律見 agent/EVIDENCE_DISCIPLINE.md，本處不複寫條文）"
+
+# ─────────────────────────────────────────────────────────
+# AGT-20（R85）實測憑證紀律 — 引用唯一真相源，刻意不複寫條文
+# 立案事實：本檔是 SCG-5（RTM Completeness Gate）的主責把關者（SCG SSOT 閘門表逐字指名
+# qa-lead），而 R84 只把憑證紀律回填進 04／05／07 ⇒ **做最終放行裁決的那一支反而沒有**。
+# ─────────────────────────────────────────────────────────
+evidence_discipline:
+  inherits_from: "agent/EVIDENCE_DISCIPLINE.md"
+  applies_to: "Test_Strategy／Test_Plan／品質指標與 SCG-5 放行裁決"
+  enforcement: "貼不出憑證的宣稱一律降級為『未驗證（靜態推論）』，不得刪除宣稱以規避"
+  gate_verdict_rule: "SCG-5 放行是一則 pass 聲明 ⇒ 適用 EVIDENCE_DISCIPLINE〈二、5〉：須經獨立 skeptic 對抗複審，refute 成立即翻 FAIL"
+  metric_provenance: "任何品質指標（覆蓋率／缺陷密度／通過率）都要附產生它的指令與當回合 rc；讀 rc 絕不接管線"
+  platform_scope: "多平台專案的放行裁決須逐平台各一則，判準見 agent/core/07.qa-tester-zh.yaml::evidence_discipline.platform_scoped_verdict（單一真相源，本處不複寫）"
 
 document_responsibilities:
   primary_documents:
@@ -395,35 +409,25 @@ tools_and_frameworks:
     - "Sentry / Rollbar - 生產錯誤監控"
 
 dependencies:
-  tools:
-    - test-management-tools.md
-    - test-automation-tools.md
-    - quality-monitoring-tools.md
-    - defect-tracking-tools.md
-
-  data:
-    - requirements-documentation.md
-    - test-environment-specs.md
-    - quality-standards.md
-    - historical-defect-data.md
-
-  tasks:
-    - test-strategy-development.md
-    - test-planning.md
-    - test-case-design.md
-    - automation-planning.md
-    - quality-metrics-definition.md
-
+  # ─── AGT-11（R85）幽靈依賴清除（判準與取數管道自證見 agent/core/05.sd-architect-zh.yaml 同節）───
+  # 本檔實測：`tools`(4)／`data`(4)／`tasks`(5)／`checklists`(4) 共 17 條裸檔名，磁碟上一支都不存在，
+  # 且在 agent/ 之外零引用。`agent_template_lint.py` 只驗 `templates` 桶 ⇒ 這四桶結構上不會轉紅。
+  # 🔴 本檔是 SCG-5（RTM Completeness Gate）的**主責把關者**（SCG SSOT 閘門表逐字指名 qa-lead），
+  #    而它宣稱依賴的 `quality-gate-checklist.md`／`release-readiness-checklist.md` 都不存在
+  #    ⇒ 交付前的把關讀起來像有清單在守，實際上一條都沒有。這正是「宣稱有守衛」而非「有守衛」。
+  # 被刪除的原文逐字保留（訂正協議：禁止靜默覆寫）：
+  #   tools: test-management-tools.md / test-automation-tools.md / quality-monitoring-tools.md / defect-tracking-tools.md
+  #   data: requirements-documentation.md / test-environment-specs.md / quality-standards.md / historical-defect-data.md
+  #   tasks: test-strategy-development.md / test-planning.md / test-case-design.md /
+  #          automation-planning.md / quality-metrics-definition.md
+  #   checklists: test-strategy-checklist.md / test-planning-checklist.md /
+  #               quality-gate-checklist.md / release-readiness-checklist.md
+  # 真正在守交付的是 SCG-5，其檢核清單住 `workflow/sdd-spec-first-gate/SDD_SPEC_FIRST_GATE.md`（唯一真相源）。
+  # ─────────────────────────────────────────────────────────────────────
   templates:
     - docs_template/core/tests/AT_Module_Template.md
     - docs_template/core/tests/Test_Report_Template.md
     - docs_template/sdd/testing/TEST-STRATEGY-SPEC-TEMPLATE.md  # planned
-
-  checklists:
-    - test-strategy-checklist.md
-    - test-planning-checklist.md
-    - quality-gate-checklist.md
-    - release-readiness-checklist.md
 
 scenario_applications:
   testing_scenario:

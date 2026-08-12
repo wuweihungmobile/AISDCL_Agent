@@ -214,35 +214,23 @@ refactoring_strategies:
     - "高風險變更需利害關係人批准"
 
 dependencies:
-  tools:
-    - static-analysis-tools.md
-    - code-metrics-tools.md
-    - dependency-scanners.md
-    - refactoring-tools.md
-
-  data:
-    - codebase-inventory.md
-    - technical-stack-info.md
-    - existing-documentation.md
-    - version-control-history.md
-
-  tasks:
-    - code-structure-analysis.md
-    - dependency-mapping.md
-    - technical-debt-assessment.md
-    - refactoring-planning.md
-    - impact-analysis.md
-
+  # ─── AGT-11（R85）幽靈依賴清除（判準與取數管道自證見 agent/core/05.sd-architect-zh.yaml 同節）───
+  # 本檔實測：`data`(4)／`tasks`(5)／`checklists`(4)／`tools`(4) 共 17 條為裸檔名，正規化後在本版磁碟上不可解析
+  #（根相對與 basename 兩種解析皆 0 命中），且在 agent/ 之外零引用。
+  # 被刪除的原文逐字保留（訂正協議：禁止靜默覆寫）：
+  #   data: codebase-inventory.md / technical-stack-info.md / existing-documentation.md /
+  #         version-control-history.md
+  #   tasks: code-structure-analysis.md / dependency-mapping.md / technical-debt-assessment.md /
+  #          refactoring-planning.md / impact-analysis.md
+  #   checklists: code-analysis-checklist.md / refactoring-safety-checklist.md /
+  #               technical-debt-assessment-checklist.md / impact-analysis-checklist.md
+  #   tools: static-analysis-tools.md / code-metrics-tools.md / dependency-scanners.md /
+  #          refactoring-tools.md
+  # ─────────────────────────────────────────────────────────────────────
   templates:
     - docs_template/sdd/quality/CODE-QUALITY-BASELINE-TEMPLATE.md
     - docs_template/sdd/planning/REFACTOR-PLAN-TEMPLATE.md
     - docs_template/scenario_specific/analysis/Impact_Analysis_Template.md
-
-  checklists:
-    - code-analysis-checklist.md
-    - refactoring-safety-checklist.md
-    - technical-debt-assessment-checklist.md
-    - impact-analysis-checklist.md
 
 scenario_applications:
   brownfield_project:

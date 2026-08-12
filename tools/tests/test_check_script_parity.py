@@ -693,6 +693,24 @@ class TestLatestThinnessPin(unittest.TestCase):
         self.assertNotIn("dev_start", printed)
 
 
+def _assert_cross_lock_red(case: unittest.TestCase, pins: dict, *expect: str) -> None:
+    """以 `pins` 取代釘選表跑一次合併後的 cross-lock，斷言它**紅**且訊息點名 `expect`。
+
+    R85／訴求 2：這段鷹架原本在 5 支測試裡各寫一遍（patch 兩處 → assertFalse →
+    把 print 的 args 串起來 → assertIn），逐字相同、只有注入的釘選表與期望字串不同。
+    被拿掉的是鷹架，注入樣本與期望字串一個不少（各測試自己那一行）。
+    """
+    import check_wrapper_thinness as t
+    with mock.patch.object(t, "_PINNED_SHA256", pins), \
+         mock.patch("builtins.print") as fake_print:
+        case.assertFalse(m._check_thinness_cross_lock())
+    printed = " ".join(
+        str(arg) for call in fake_print.call_args_list for arg in call.args
+    )
+    for token in expect:
+        case.assertIn(token, printed)
+
+
 class TestThinnessCrossLock(unittest.TestCase):
     """parity↔thinness 鍵集合交叉鎖（R12 QA 一審 QA-1）。
 
@@ -705,27 +723,15 @@ class TestThinnessCrossLock(unittest.TestCase):
 
     def test_missing_pin_key_is_red(self) -> None:
         import check_wrapper_thinness as t
-        pins = {k: v for k, v in t._PINNED_SHA256.items()
-                if k != "AutoClaude/tools/local_ci_gate.ps1"}
-        with mock.patch.object(t, "_PINNED_SHA256", pins), \
-             mock.patch("builtins.print") as fake_print:
-            self.assertFalse(m._check_thinness_cross_lock())
-        printed = " ".join(
-            str(arg) for call in fake_print.call_args_list for arg in call.args
-        )
-        self.assertIn("local_ci_gate.ps1", printed)
+        _assert_cross_lock_red(self, {
+            k: v for k, v in t._PINNED_SHA256.items()
+            if k != "AutoClaude/tools/local_ci_gate.ps1"}, "local_ci_gate.ps1")
 
     def test_extra_pin_without_enrollment_is_red(self) -> None:
         import check_wrapper_thinness as t
-        pins = dict(t._PINNED_SHA256)
-        pins["tools/rogue_wrapper.sh"] = "0" * 64
-        with mock.patch.object(t, "_PINNED_SHA256", pins), \
-             mock.patch("builtins.print") as fake_print:
-            self.assertFalse(m._check_thinness_cross_lock())
-        printed = " ".join(
-            str(arg) for call in fake_print.call_args_list for arg in call.args
-        )
-        self.assertIn("rogue_wrapper.sh", printed)
+        _assert_cross_lock_red(
+            self, {**t._PINNED_SHA256, "tools/rogue_wrapper.sh": "0" * 64},
+            "rogue_wrapper.sh")
 
 
 class TestLatestKeysAreCoveredByTheSingleCrossLock(unittest.TestCase):
@@ -741,42 +747,23 @@ class TestLatestKeysAreCoveredByTheSingleCrossLock(unittest.TestCase):
     def test_missing_latest_pin_key_is_red(self) -> None:
         """紅：LATEST 的 .ps1 釘選被刪、stem 登記還在 → 合併後的 cross-lock 須攔下。"""
         import check_wrapper_thinness as t
-        pins = {k: v for k, v in t._PINNED_SHA256.items()
-                if k != "LATEST/tools/fsm_runtime/formal/run_tlc.ps1"}
-        with mock.patch.object(t, "_PINNED_SHA256", pins), \
-             mock.patch("builtins.print") as fake_print:
-            self.assertFalse(m._check_thinness_cross_lock())
-        printed = " ".join(
-            str(arg) for call in fake_print.call_args_list for arg in call.args
-        )
-        self.assertIn("run_tlc.ps1", printed)
+        _assert_cross_lock_red(self, {
+            k: v for k, v in t._PINNED_SHA256.items()
+            if k != "LATEST/tools/fsm_runtime/formal/run_tlc.ps1"}, "run_tlc.ps1")
 
     def test_cleared_latest_pins_still_enrolled_is_red(self) -> None:
         """紅：LATEST 兩支釘選整組清空、stem 登記不動——缺陷描述裡實測過的自相矛盾情境。"""
         import check_wrapper_thinness as t
-        pins = {k: v for k, v in t._PINNED_SHA256.items()
-                if not k.startswith(m._LATEST_PREFIX)}
-        with mock.patch.object(t, "_PINNED_SHA256", pins), \
-             mock.patch("builtins.print") as fake_print:
-            self.assertFalse(m._check_thinness_cross_lock())
-        printed = " ".join(
-            str(arg) for call in fake_print.call_args_list for arg in call.args
-        )
-        self.assertIn("run_tlc.sh", printed)
-        self.assertIn("run_tlc.ps1", printed)
+        _assert_cross_lock_red(self, {
+            k: v for k, v in t._PINNED_SHA256.items()
+            if not k.startswith(m._LATEST_PREFIX)}, "run_tlc.sh", "run_tlc.ps1")
 
     def test_extra_latest_pin_without_enrollment_is_red(self) -> None:
         """紅（反向）：多一支沒人登記 stem 的 LATEST 釘選。"""
         import check_wrapper_thinness as t
-        pins = dict(t._PINNED_SHA256)
-        pins["LATEST/tools/rogue_wrapper.sh"] = "0" * 64
-        with mock.patch.object(t, "_PINNED_SHA256", pins), \
-             mock.patch("builtins.print") as fake_print:
-            self.assertFalse(m._check_thinness_cross_lock())
-        printed = " ".join(
-            str(arg) for call in fake_print.call_args_list for arg in call.args
-        )
-        self.assertIn("rogue_wrapper.sh", printed)
+        _assert_cross_lock_red(
+            self, {**t._PINNED_SHA256, "LATEST/tools/rogue_wrapper.sh": "0" * 64},
+            "rogue_wrapper.sh")
 
     def test_the_retired_second_cross_lock_is_really_gone(self) -> None:
         """反殘留：第二份 cross-lock 不得以任何形式留在原始碼裡。

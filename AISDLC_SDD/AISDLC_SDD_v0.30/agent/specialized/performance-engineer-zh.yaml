@@ -274,35 +274,25 @@ testing_strategies:
     - "顯著降級時發出警報"
 
 dependencies:
-  tools:
-    - profiling-tools.md  # Chrome DevTools, New Relic, DataDog
-    - load-testing-tools.md  # JMeter, K6, Gatling, Artillery
-    - monitoring-tools.md  # Prometheus, Grafana, CloudWatch
-    - apm-tools.md  # Application Performance Monitoring
-
-  data:
-    - baseline-metrics.md
-    - production-traffic-patterns.md
-    - infrastructure-specs.md
-    - sla-requirements.md
-
-  tasks:
-    - performance-profiling.md
-    - bottleneck-analysis.md
-    - optimization-implementation.md
-    - load-test-execution.md
-    - monitoring-setup.md
-
+  # ─── AGT-11（R85）幽靈依賴清除（判準與取數管道自證見 agent/core/05.sd-architect-zh.yaml 同節）───
+  # 本檔實測：`data`(4)／`tasks`(5)／`checklists`(4)／`tools`(4) 共 17 條為裸檔名，正規化後在本版磁碟上不可解析
+  #（根相對與 basename 兩種解析皆 0 命中），且在 agent/ 之外零引用。
+  # 被刪除的原文逐字保留（訂正協議：禁止靜默覆寫）：
+  #   data: baseline-metrics.md / production-traffic-patterns.md / infrastructure-specs.md /
+  #         sla-requirements.md
+  #   tasks: performance-profiling.md / bottleneck-analysis.md / optimization-implementation.md /
+  #          load-test-execution.md / monitoring-setup.md
+  #   checklists: performance-analysis-checklist.md / optimization-validation-checklist.md /
+  #               load-testing-checklist.md / monitoring-setup-checklist.md
+  #   tools: profiling-tools.md  # Chrome DevTools, New Relic, DataDog /
+  #          load-testing-tools.md  # JMeter, K6, Gatling, Artillery /
+  #          monitoring-tools.md  # Prometheus, Grafana, CloudWatch /
+  #          apm-tools.md  # Application Performance Monitoring
+  # ─────────────────────────────────────────────────────────────────────
   templates:
     - docs_template/sdd/testing/BASELINE-PERFORMANCE-REPORT-TEMPLATE.md
     - docs_template/sdd/adr/PERFORMANCE-OPTIMIZATION-ADR-TEMPLATE.md
     - docs_template/core/tests/Performance_Test_Plan_Template.md
-
-  checklists:
-    - performance-analysis-checklist.md
-    - optimization-validation-checklist.md
-    - load-testing-checklist.md
-    - monitoring-setup-checklist.md
 
 scenario_applications:
   performance_optimization:

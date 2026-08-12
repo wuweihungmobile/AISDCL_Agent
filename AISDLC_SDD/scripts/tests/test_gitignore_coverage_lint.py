@@ -155,11 +155,22 @@ def test_main_clean_exits_zero(tmp_path, capsys):
     assert "齊備" in out and "::warning::" not in out
 
 
-def test_main_no_version_exits_zero(tmp_path, capsys):
-    """無演化版 → exit 0 + 略過訊息。"""
+def test_main_no_version_exits_nonzero(tmp_path, capsys):
+    """AGT-12（R85）：定位不到任何演化版 ⇒ 硬閘非零（advisory 的射程不含「找不到標的」）。
+
+    🔴 被訂正的原意圖逐字保留（訂正協議：禁止靜默覆寫）——本 case 原名
+    ``test_main_no_version_exits_zero``，docstring 為「無演化版 → exit 0 + 略過訊息」，
+    斷言 ``lint.main([repo]) == 0`` 且輸出含「略過」，即**把 fail-open 釘成契約**。
+
+    為何原意圖是錯的：本 lint 是 advisory（DEF-37-001 P3：缺 block 只 warn 不阻擋），
+    但 **advisory 講的是「發現」的處置，不是「找不到標的」的處置**。一個版本目錄都定位
+    不到時，它什麼都沒檢查過；此時回 0、且畫面上印的還是 **✅ 綠勾**，與「檢查通過」
+    逐字同形 ⇒ 路徑判斷漂掉時失效是靜默的。下方 ``test_main_missing_*`` 系列守的
+    advisory 語意（發現 → warn + rc 0）不受本次訂正影響，仍然成立。
+    """
     repo = _mk_repo(tmp_path, [], "")
-    assert lint.main([repo]) == 0
-    assert "略過" in capsys.readouterr().out
+    assert lint.main([repo]) == 1
+    assert "::error::" in capsys.readouterr().err
 
 
 # ── 真實 repo 回歸鎖 ─────────────────────────────────────────────────────────

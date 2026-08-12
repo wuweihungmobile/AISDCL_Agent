@@ -431,33 +431,22 @@ collaboration_rules:
       communication_protocols: "安全設計審查、威脅模型協調"
 
 dependencies:
-  tools:
-    - mobile-frameworks.md
-    - mobile-testing-tools.md
-    - mobile-ci-cd-tools.md
-    - mobile-monitoring-tools.md
-
-  data:
-    - device-support-matrix.md
-    - app-store-requirements.md
-    - performance-benchmarks.md
-    - mobile-design-systems.md
-
-  tasks:
-    - mobile-architecture-design.md
-    - platform-selection.md
-    - offline-strategy.md
-    - app-store-preparation.md
-
+  # ─── AGT-11（R85）幽靈依賴清除（判準與取數管道自證見 agent/core/05.sd-architect-zh.yaml 同節）───
+  # 本檔實測：`tools`(4)／`data`(4)／`tasks`(4)／`checklists`(4) 共 16 條裸檔名，磁碟上一支都不存在，
+  # 且在 agent/ 之外零引用。`agent_template_lint.py` 只驗 `templates` 桶 ⇒ 這四桶結構上不會轉紅。
+  # 被刪除的原文逐字保留（訂正協議：禁止靜默覆寫）：
+  #   tools: mobile-frameworks.md / mobile-testing-tools.md / mobile-ci-cd-tools.md / mobile-monitoring-tools.md
+  #   data: device-support-matrix.md / app-store-requirements.md / performance-benchmarks.md / mobile-design-systems.md
+  #   tasks: mobile-architecture-design.md / platform-selection.md / offline-strategy.md / app-store-preparation.md
+  #   checklists: mobile-architecture-checklist.md / mobile-performance-checklist.md /
+  #               app-store-submission-checklist.md / mobile-security-checklist.md
+  # 🔴 `device-support-matrix.md`／`platform-selection.md` 這兩個名字尤其誤導：讀起來像是
+  #    「裝置／平台矩陣已有一份權威清單」，而它從來不存在；平台軸的真家是
+  #    agent/core/05.sd-architect-zh.yaml::sdd_phase02_greenfield.platform_neutrality_checklist（見下方 platform_neutrality）。
+  # ─────────────────────────────────────────────────────────────────────
   templates:
     - docs_template/core/srd/SRD_Module_Template.md
     - docs_template/sdd/testing/PERFORMANCE-BASELINE-SPEC-TEMPLATE.md
-
-  checklists:
-    - mobile-architecture-checklist.md
-    - mobile-performance-checklist.md
-    - app-store-submission-checklist.md
-    - mobile-security-checklist.md
 
 scenario_applications:
   greenfield_mobile:
@@ -525,6 +514,14 @@ mobile_architecture_best_practices:
 # ─────────────────────────────────────────────────────────
 # SDD Phase 01 Skill 升級（2026-04-12）
 # ─────────────────────────────────────────────────────────
+evidence_discipline:
+  # AGT-20（R85）：立案事實與「extends 不是繼承機制」的理由見
+  # agent/specialized/sd-web-architect-zh.yaml 同節（單一真相源，本處不複寫）。
+  inherits_from: "agent/EVIDENCE_DISCIPLINE.md"
+  applies_to: "Mobile SRD／平台選型決策／裝置相容性與啟動效能宣稱"
+  enforcement: "貼不出憑證的宣稱一律降級為『未驗證（靜態推論）』，不得刪除宣稱以規避"
+  device_matrix_note: "『支援哪些裝置／OS 版本』是量測值不是宣告：未在該機型/版本上真跑過就寫『未量測』。模擬器結果不得記為實機結果——兩者是不同的量測面"
+
 sdd_skills:
   generate_adr:
     description: "Architecture Decision Record 生成"
@@ -543,6 +540,8 @@ sdd_skills:
       format: ["文件命名符合規範", "目錄位置正確", "Markdown 格式通過 Lint"]
       cross_reference: ["上游文件引用正確", "下游文件連結已預留", "ID 格式統一"]
       sdd_specific: ["規格產出先於任何實作描述", "每個架構決策有對應 ADR", "API 定義使用 OpenAPI 格式"]
+      # AGT-20（R85）補：R84 只把訂正協議加進 04／05／07，兩支 Architect 變體漏掉。
+      correction_protocol: ["見 agent/EVIDENCE_DISCIPLINE.md〈四、訂正協議〉（單一真相源，本處刻意不複寫條文）"]
   traceability_matrix:
     description: "需求追溯矩陣生成"
     trigger: "SCG-0（FRD 後）、SCG-1（SRD 後）、RG-TEST（測試策略閘門後；SCG-3 後、測試開始前）、需求變更後 — AT 欄位須於 SCG-5（RTM Completeness Gate）前 100% 覆蓋"

@@ -428,36 +428,23 @@ performance_testing_automation:
     - "耐久 - 長時間持續負載"
 
 dependencies:
-  tools:
-    - test-automation-tools.md
-    - browser-automation-tools.md
-    - api-testing-tools.md
-    - performance-testing-tools.md
-    - ci-cd-integration-tools.md
-
-  data:
-    - test-scenarios.md
-    - test-data-requirements.md
-    - environment-specifications.md
-    - automation-priorities.md
-
-  tasks:
-    - framework-setup.md
-    - test-script-development.md
-    - ci-cd-integration.md
-    - test-maintenance.md
-    - flakiness-reduction.md
-
+  # ─── AGT-11（R85）幽靈依賴清除（判準與取數管道自證見 agent/core/05.sd-architect-zh.yaml 同節）───
+  # 本檔實測：`data`(4)／`tasks`(5)／`checklists`(4)／`tools`(5) 共 18 條為裸檔名，正規化後在本版磁碟上不可解析
+  #（根相對與 basename 兩種解析皆 0 命中），且在 agent/ 之外零引用。
+  # 被刪除的原文逐字保留（訂正協議：禁止靜默覆寫）：
+  #   data: test-scenarios.md / test-data-requirements.md / environment-specifications.md /
+  #         automation-priorities.md
+  #   tasks: framework-setup.md / test-script-development.md / ci-cd-integration.md /
+  #          test-maintenance.md / flakiness-reduction.md
+  #   checklists: automation-framework-checklist.md / test-reliability-checklist.md /
+  #               ci-cd-integration-checklist.md / code-review-checklist.md
+  #   tools: test-automation-tools.md / browser-automation-tools.md / api-testing-tools.md /
+  #          performance-testing-tools.md / ci-cd-integration-tools.md
+  # ─────────────────────────────────────────────────────────────────────
   templates:
     - docs_template/sdd/adr/AUTOMATION-FRAMEWORK-ADR-TEMPLATE.md  # planned
     - docs_template/core/tests/AT_Module_Template.md
     - docs_template/core/tests/Test_Report_Template.md
-
-  checklists:
-    - automation-framework-checklist.md
-    - test-reliability-checklist.md
-    - ci-cd-integration-checklist.md
-    - code-review-checklist.md
 
 scenario_applications:
   testing_scenario:

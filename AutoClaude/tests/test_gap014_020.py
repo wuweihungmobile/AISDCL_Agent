@@ -77,14 +77,38 @@ from tests.helpers.kernel_fixtures import make_service
 # `claude -p` 這種**非互動 subprocess** spawn 上確實已被推翻（rc=0／約 4s），但那條路
 # **不是**本檔走的路（本機 `claude` 解析為 `.EXE` 而非 `.cmd` shim ⇒ 進 `_start_wexpect`）。
 # 逐次量測見 `docs/06_quality/CrossPlatform_R79_Debt_Audit.md` 的 `## DEF-101-913` 節。
+#
+# 🔴 R85（macOS 本機輪）訂正本條 reason 的**射程**（判準一個字都沒改，改的是它給的理由）。
+# 上面整段因果（`wexpect.spawn()` 的 host↔console-reader 交握掛住）是 **Windows 專屬**的：
+#   · 當回合 mac 實測 `importlib.util.find_spec('wexpect')` → **None**（未安裝）
+#     ⇒ `PtyWrapper.start()` 的 `_WEXPECT_AVAILABLE` 短路恆 False
+#     ⇒ `_start_wexpect()` 在 macOS 上**結構上到不了**，它不可能是這裡的成因。
+#   · 同回合 AC-(b) 端到端實跑的 log 逐字印 `wexpect 未安裝，改用 subprocess 模式`，
+#     且該路徑（`claude -p` 非互動 subprocess）在巢狀 session 內 rc=0 正常回返。
+# ⇒ 把一個 Windows 專屬機制寫成無平台限定的 reason，正是本 repo 反覆判過的
+#   「有鎖在守，但它給的理由是假的」——鎖照樣綠，讀的人拿到假知識。
+#
+# 🔴 但**判準維持不變**，因為 mac 上的實測不支持「拿掉就能跑」：當回合以
+# `env -u CLAUDECODE pytest tests/test_gap039_049.py -q` 實跑，**逾 600 秒未完成**
+# （外層 timeout 砍掉，rc=143；砍後 `pgrep` 對 `claude -p` 命中 0 ⇒ 行程樹有收乾淨）。
+# ⇒ macOS 上這一批**仍然跑不完**，只是**成因未知、且確定不是 wexpect**。
+#   誠實劃界：這裡登記的是「還沒查出來」，不是「已歸因」。在查清楚之前拿掉
+#   `CLAUDECODE` 那半個條件，會讓每一次 `pytest tests -q` 都掛 10 分鐘以上。
+# 承接：需要一輪專門的歸因（候選：真 `claude -p` 的 agentic turn 本來就很久／
+#   stdin pipe 沒有 EOF 而子行程在等輸入／`--continue` 在巢狀 session 內的行為），
+#   正解方向是本檔上方已登記的 SD_10 P3-R56-2「改用 make_service fake-executor 重寫」
+#   ——那才會讓這 11 支變成**兩平台都跑得到**的 hermetic 測試，而不是換一個 skip 理由。
 requires_claude_cli = pytest.mark.skipif(
     shutil.which("claude") is None or os.environ.get("CLAUDECODE") == "1",
     reason="[ENV-DISABLED] 【未啟用，非缺件】需要 claude CLI binary 且非巢狀 Claude Code "
-    "session（巢狀 session 內 wexpect pty spawn 掛住不回，R79 實測 180s×2＋45s、claude.exe "
-    "從未啟動；剝除 CLAUDECODE 的對照組行為相同 ⇒ 該變數是環境標記非成因。見 DEF-101-913）。"
+    "session。🔴 成因**因平台而異**：Windows 上是 wexpect pty spawn 掛住不回（R79 實測 "
+    "180s×2＋45s、claude.exe 從未啟動，見 DEF-101-913）；macOS 上 wexpect 根本沒安裝、"
+    "該機制結構上到不了，但 R85 實測 `env -u CLAUDECODE pytest` 仍逾 600s 未完成 ⇒ "
+    "mac 側成因**未知且未歸因**（不得寫成已歸因）。"
     "跑法：在**非** Claude Code session 的 PowerShell 執行 "
     "`python -m pytest tests/test_gap014_020.py`"
-    "（每日 nightly 排程即為此環境，2026-08-06 nightly log 實測會真的跑）",
+    "（每日 nightly 排程即為此環境，2026-08-06 nightly log 實測會真的跑）。"
+    "治本方向＝SD_10 P3-R56-2 改用 fake-executor 重寫，使兩平台都跑得到",
 )
 
 

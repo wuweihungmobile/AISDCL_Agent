@@ -189,6 +189,7 @@ def _build_plugin_set(
         "goal_synthesis": GoalSynthesisPlugin(
             minimax_client=minimax_client,
             enabled=cfg.playbook.goal_synthesis_enabled,
+            fail_closed=cfg.playbook.goal_synthesis_fail_closed,
         ),
         # Improving_012 Phase 1：F-C1 偏好注入（PRE_CORRECTION）/ F-C2 進度 ledger（POST_RUN）
         "preference_memory": PreferenceMemoryPlugin(preference_store=preference_store),

@@ -447,35 +447,23 @@ testing_expertise:
     - "實際可行時優先使用 fakes"
 
 dependencies:
-  tools:
-    - development-tools.md
-    - code-quality-tools.md
-    - testing-frameworks.md
-    - refactoring-tools.md
-
-  data:
-    - coding-standards.md
-    - architecture-documentation.md
-    - team-agreements.md
-    - technical-constraints.md
-
-  tasks:
-    - code-review.md
-    - implementation-planning.md
-    - refactoring-execution.md
-    - technical-decision-making.md
-    - mentoring.md
-
+  # ─── AGT-11（R85）幽靈依賴清除（判準與取數管道自證見 agent/core/05.sd-architect-zh.yaml 同節）───
+  # 本檔實測：`data`(4)／`tasks`(5)／`checklists`(4)／`tools`(4) 共 17 條為裸檔名，正規化後在本版磁碟上不可解析
+  #（根相對與 basename 兩種解析皆 0 命中），且在 agent/ 之外零引用。
+  # 被刪除的原文逐字保留（訂正協議：禁止靜默覆寫）：
+  #   data: coding-standards.md / architecture-documentation.md / team-agreements.md /
+  #         technical-constraints.md
+  #   tasks: code-review.md / implementation-planning.md / refactoring-execution.md /
+  #          technical-decision-making.md / mentoring.md
+  #   checklists: code-review-checklist.md / implementation-checklist.md /
+  #               refactoring-safety-checklist.md / security-checklist.md
+  #   tools: development-tools.md / code-quality-tools.md / testing-frameworks.md /
+  #          refactoring-tools.md
+  # ─────────────────────────────────────────────────────────────────────
   templates:
     - docs_template/sdd/planning/REFACTOR-PLAN-TEMPLATE.md
     - docs_template/sdd/quality/CODE-QUALITY-BASELINE-TEMPLATE.md
     - docs_template/sdd/adr/ADR-TEMPLATE.md
-
-  checklists:
-    - code-review-checklist.md
-    - implementation-checklist.md
-    - refactoring-safety-checklist.md
-    - security-checklist.md
 
 scenario_applications:
   brownfield_project:

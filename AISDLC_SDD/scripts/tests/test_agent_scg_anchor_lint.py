@@ -169,3 +169,72 @@ def test_mutation_flips_green_to_red(tmp_path):
     with open(fp, "w", encoding="utf-8") as f:
         f.write(s.replace("RG-TEST（測試策略閘門後）", "SCG-4（測試計畫後）"))
     assert lint.main([repo]) == 1
+
+
+# ── (10) AGT-12（R85）fail-closed：輸入不可用時不得靜默放行 ────────────────────
+
+def test_main_no_version_dir_exits_nonzero(tmp_path, capsys):
+    """定位不到任何版本目錄 ⇒ 硬閘非零（改前實測 rc=0，印「⚠️ 略過」）。
+
+    為何此行為重要（Rule 9）：本 lint 的四條判準（主題歸屬／標記表自證／單一真相源
+    引用可解析／version 不得寫死）**全部**以「解析得到 LATEST」為前提。前提不成立時
+    它一個站點都沒看過，卻回報與「全部一致」相同的 rc ⇒ 路徑判斷一旦漂掉，這支 lint
+    靜默全綠，**失效表徵與通過完全相同**。這與本檔判準 2（SSOT 表解析失敗即 fail-loud）
+    是同一條紀律——判準的輸入不可信時，寧可整支紅，不可靜默放行。
+    """
+    assert lint.main([str(tmp_path)]) == 1
+    assert "::error::" in capsys.readouterr().err
+
+
+# ── (11) AGT-13（R85）判準 5：SCG 閘門英文名跨檔一致 ──────────────────────────
+#
+# 為何此行為重要（Rule 9）：`SDD_SPEC_FIRST_GATE.md`（SCG SSOT）與 `SDD_GUIDE.md` 各自
+# 帶一張 SCG 閘門表，當回合實測有 **4 支**閘門名互斥（SCG-2/3/4/6）——而**兩份都是本 lint
+# 早就在讀的檔**（判準 2 拿前者自證、`RG_SSOT` 檢查後者存在），卻從不比對兩者的名稱。
+# 「同一份知識住兩個家、只有一個家會被改」是本 repo 反覆踩的病；把第二個家對齊之後若沒有
+# 判準守著，下一次改名就會再漂開，而漂開是靜默的。
+
+def _guide_with_scg_table(repo: str, rows: list[str]) -> None:
+    guide = os.path.join(repo, _VER, "guides", "system", "sdd", "SDD_GUIDE.md")
+    with open(guide, "a", encoding="utf-8") as f:
+        f.write("\n| Gate | 名稱 | 觸發時機 |\n|--|--|--|\n" + "\n".join(rows) + "\n")
+
+
+def test_gate_name_parity_passes_when_guide_matches_ssot(tmp_path):
+    repo = _mk_repo(tmp_path)
+    _guide_with_scg_table(repo, [
+        "| SCG-4 | PR Review Gate | PR Review |",
+        "| SCG-6 | Release Gate | 發布前 |",
+    ])
+    _write_agent(repo, '  note: "無錨點"\n')
+    assert lint.main([repo]) == 0
+
+
+def test_gate_name_drift_in_guide_is_red(tmp_path):
+    """SDD_GUIDE 的 SCG-4 名與 SSOT 不符 → 非零（這正是 DEF-200-081② 的實況）。"""
+    repo = _mk_repo(tmp_path)
+    _guide_with_scg_table(repo, ["| SCG-4 | Implementation Compliance Gate | PR Review |"])
+    _write_agent(repo, '  note: "無錨點"\n')
+    assert lint.main([repo]) == 1
+
+
+def test_gate_absent_from_guide_is_not_a_false_red(tmp_path):
+    """SDD_GUIDE 是快速指引、不必然全列 ⇒ 沒列到的閘門不判。
+    判準要收窄而不是硬上：逼它全列會製造要逐一辯護的假紅，那種鎖活不過一輪。"""
+    repo = _mk_repo(tmp_path)
+    _guide_with_scg_table(repo, ["| SCG-0 | Requirement Spec Gate | 需求凍結前 |"])
+    _write_agent(repo, '  note: "無錨點"\n')
+    assert lint.main([repo]) == 0
+
+
+def test_correction_protocol_quote_block_is_not_read_as_a_table_row(tmp_path):
+    """訂正協議要求把被訂正的舊名逐字保留；那些原文住在 `>` 引言塊裡。
+    若判準把引言塊讀成表列，履行訂正協議這件事本身就會讓閘門轉紅——
+    修好的檔會因為「誠實記錄自己修好了什麼」而被擋下。"""
+    repo = _mk_repo(tmp_path)
+    guide = os.path.join(repo, _VER, "guides", "system", "sdd", "SDD_GUIDE.md")
+    with open(guide, "a", encoding="utf-8") as f:
+        f.write("\n> 被訂正的原文逐字保留：`| SCG-4 | Implementation Compliance Gate |`\n")
+    _guide_with_scg_table(repo, ["| SCG-4 | PR Review Gate | PR Review |"])
+    _write_agent(repo, '  note: "無錨點"\n')
+    assert lint.main([repo]) == 0

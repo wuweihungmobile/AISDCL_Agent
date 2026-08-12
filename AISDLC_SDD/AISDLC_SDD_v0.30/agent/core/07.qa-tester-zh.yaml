@@ -91,6 +91,24 @@ evidence_discipline:
   applies_to: "AT／Test_Plan／Test_Report／Defect_Report 與品質裁決"
   enforcement: "貼不出憑證的宣稱一律降級為『未驗證（靜態推論）』，不得刪除宣稱以規避"
 
+  # AGT-17（R85）：測試結論是**有平台射程的**，而本檔原先一個字都沒提平台
+  # （實測：R84 版全檔對「平台」零命中，而同框架 05.sd-architect 已有 ADR-004 平台目標矩陣）。
+  # ⇒ QA 是唯一真的把程式跑起來的角色，卻是最沒有平台意識的那一支；
+  #   單平台綠燈被寫成「已驗證」之後，另一個平台的紅是在交付後才出現的。
+  platform_scoped_verdict:
+    rule: "每一則 Pass/Fail 裁決都必須標明**在哪個平台量到**：OS 版本 ／ shell ／ 直譯器絕對路徑"
+    no_extrapolation: "單一平台的綠不得外推成跨平台的綠。未在某平台跑過就寫『該平台未量測』，不得留白也不得寫 Pass"
+    axis_source: "要涵蓋哪些平台軸，見 agent/core/05.sd-architect-zh.yaml::sdd_phase02_greenfield.platform_neutrality_checklist（其 provenance 再指向根層 CLAUDE.md〈鐵律三〉危害表為唯一真相源）。本處刻意不複寫觸發項清單"
+    rtm_note: "RTM 的 AT 狀態欄若只有一個值，等於默認所有平台同結果；多平台專案須逐平台各一欄"
+
+  # AGT-18（R85）：QA 是唯一會長時間等一件事跑完的角色，而「等待機制自己靜默壞掉」
+  # 的失敗表徵與「還在正常進行」完全相同——本 repo 有實帳：一次 48 分鐘零工作。
+  long_run_execution:
+    provenance: "等待／確認形態的判準（哪些形態可用、哪些會靜默失效）單一真相源＝monorepo 根層 CLAUDE.md〈鐵律六〉。本處刻意不複寫那張表——複寫一份就是第二個家，而只有一個家會被改"
+    required: "長跑測試必須掛一個**會主動叫醒你**的事件源；掛不上就換一個掛得上的形態再開跑，不要先跑再說"
+    rc_hygiene: "讀 rc 絕不接管線（見 EVIDENCE_DISCIPLINE〈二、2〉）——測試套件的真 rc 被管線吃掉時，紅會被讀成綠"
+    forbidden_claim: "『應該跑完了』不是憑證。沒有結束事件與 rc 就記『未完成』，不得以耗時長短推定結果"
+
 document_responsibilities:
   primary_documents:
     - document_type: "AT"
@@ -209,33 +227,25 @@ collaboration_rules:
       communication_protocols: "業務驗證對齊、利害關係人驗收標準審查"
 
 dependencies:
-  data:
-    - testing-standards.md
-    - quality-metrics.md
-    - test-data-management.md
-    - defect-categories.md
-    - testing-best-practices.md
-  
-  tasks:
-    - create-doc.md
-    - execute-checklist.md
-    - test-planning.md
-    - test-execution.md
-    - defect-management.md
-    - test-automation.md
-    - quality-assessment.md
-    - acceptance-validation.md
-  
+  # ─── AGT-11（R85）幽靈依賴清除（判準與取數管道自證見 05.sd-architect 同節，不複寫）───
+  # 本檔實測：`data`(5)／`tasks`(8)／`checklists`(5) 共 18 條裸檔名，磁碟上一支都不存在，
+  # 且在 agent/ 之外零引用。`agent_template_lint.py` 只驗 `templates` 桶 ⇒ 這三桶結構上不會轉紅。
+  # 🔴 這一條對 QA 特別貴：`release-readiness-checklist.md` 這種名字讀起來像「交付前有清單在守」，
+  # 而它從來不存在 ⇒ 是「宣稱有守衛」而非「有守衛」，與只斷言檔案存在的鎖同型。
+  # 被刪除的原文逐字保留（訂正協議：禁止靜默覆寫）：
+  #   data: testing-standards.md / quality-metrics.md / test-data-management.md /
+  #         defect-categories.md / testing-best-practices.md
+  #   tasks: create-doc.md / execute-checklist.md / test-planning.md / test-execution.md /
+  #          defect-management.md / test-automation.md / quality-assessment.md / acceptance-validation.md
+  #   checklists: test-planning-checklist.md / acceptance-testing-checklist.md /
+  #               quality-validation-checklist.md / defect-resolution-checklist.md /
+  #               release-readiness-checklist.md
+  # 交付前真正在守的是 SCG-5（RTM Completeness Gate），其檢核清單住
+  # `workflow/sdd-spec-first-gate/SDD_SPEC_FIRST_GATE.md`（唯一真相源）。
+  # ─────────────────────────────────────────────────────────────────────
   templates:
     - docs_template/core/tests/AT_Module_Template.md
     - docs_template/core/tests/Test_Report_Template.md
-  
-  checklists:
-    - test-planning-checklist.md
-    - acceptance-testing-checklist.md
-    - quality-validation-checklist.md
-    - defect-resolution-checklist.md
-    - release-readiness-checklist.md
 
 # 協作流程圖
 collaboration_flow: |
@@ -313,11 +323,20 @@ sdd_phase02_greenfield:
         content: "版本號與關聯 AC ID"
     rtm_completion:
       trigger: "Stage 5 所有 Test Contract 完成後"
-      requirement: "RTM 的 AT 欄位 100% 填入"
-      coverage_target: "P0/P1 功能 AC 覆蓋率 ≥ 90%"
+      # 🔴 AGT-16（R85）訂正：同一個閘門的覆蓋率門檻原本住四個家、三個不同的值。
+      # 被訂正的原文逐字保留（訂正協議：禁止靜默覆寫）：
+      #   requirement:     `RTM 的 AT 欄位 100% 填入`
+      #   coverage_target: `P0/P1 功能 AC 覆蓋率 ≥ 90%`
+      #   review_checklist:`AC → AT 映射完整（覆蓋率 ≥ 90%）`
+      # 而 SCG SSOT（workflow/sdd-spec-first-gate/SDD_SPEC_FIRST_GATE.md）自己也不一致：
+      # 閘門表那一列寫「RTM 100% 覆蓋」、SCG-5 檢核清單卻寫「AT 覆蓋率 ≥ 80%」。
+      # ⇒ 本 agent 不再自帶任何數字（多一個家就多一個會漂的值），一律指向 SSOT；
+      #    SSOT 自身互斥屬 workflow/ 持有面，已列為跨包事項，不在此擅自選一個數字收斂。
+      requirement: "AT 欄位的覆蓋門檻以 SCG-5（RTM Completeness Gate）為準，逐條現查 `workflow/sdd-spec-first-gate/SDD_SPEC_FIRST_GATE.md`；本檔刻意不複寫數字"
+      unmeasured_rule: "覆蓋率是量測值：附上計算指令與當回合 rc，貼不出來就寫『未驗證』——不得以估計值填 RTM"
     review_participants: ["qa", "dev"]
     review_checklist:
-      - "AC → AT 映射完整（覆蓋率 ≥ 90%）"
+      - "AC → AT 映射完整＝每一條 AC 都查得到對應 AT（逐條比對，不以百分比代替；門檻見 SCG-5 SSOT）"
       - "測試退出標準明確"
       - "自動化測試範圍已定義"
 
@@ -476,3 +495,11 @@ sdd_phase05_qa_tester:
       provenance_required: "每份夾具必須註明母本來源：擷取指令逐字 + 擷取時間 + 執行環境；改寫過的欄位需逐項標註改了什麼與為什麼"
       shape_parity: "夾具的形狀（巢狀深度／欄位基數／重複值分佈）須與母本一致；為了好寫而攤平＝判準失效"
       negative_control: "每條斷言須附一次合成注入的紅燈紀錄（注入 → 紅、移除注入 → 綠，兩個 rc 都要留）"
+      # AGT-19（R85）：上一行只要求「有轉紅」，而**任何**錯誤都會讓測試轉紅。
+      # 本 repo 已判過的形態：一道只斷言「檔案存在」的鎖，對「檔案在、但守的是別的東西」照樣放行——
+      # 它有紅有綠、rc 也對，只是紅的原因與它宣稱在守的主題無關。
+      discrimination_proof:
+        rule: "合成注入必須改動**該斷言宣稱在守的那一件事**本身，且注入後的失敗訊息要指得出那一件事"
+        anti_pattern: "❌ 用『把檔案刪掉／改壞語法／讓程式無法啟動』當注入 → 那證明的是『程式會壞』，不是『這條斷言有鑑別力』"
+        scope_probe: "另需一組**不該被判紅**的對照（正常但長得很像的輸入）：若它也轉紅，代表判準射程過寬，假紅會讓這道檢查被整個關掉"
+        record: "兩組（真陽性注入／假陽性對照）的指令與 rc 都要留在 Test_Report，缺一則該斷言記為『鑑別力未驗證』"

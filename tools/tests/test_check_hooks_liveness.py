@@ -1181,9 +1181,15 @@ class TestUnattendedCommitPushBlock(unittest.TestCase):
                 self.assertTrue(err.strip(), f"{label} 必須出聲")
 
     def test_non_windows_keeps_the_platform_contract(self) -> None:
-        """非 Windows 一律 exit 0。續航整條路是 schtasks ⇒ 只在 Windows 成立，
-        射程對齊；要在 mac/Linux 開 Auto Pilot 時這道鎖必須另外補（已寫進 hook 的
-        〈誠實劃界〉區塊註解，不是被忘記）。"""
+        """非 Windows 一律 exit 0——**但那不再代表 mac 上沒有這道鎖**（R85／P12 訂正）。
+
+        本 docstring 的前一版寫「mac/Linux 開 Auto Pilot 時這道鎖必須另外補」，那句話
+        自 R85 起已為假：mac 側補在 `.claude/hooks/block_destructive_git.py`
+        （matcher `Bash|PowerShell`、平台中立），判準與訊息兩支共用
+        `tools/lib/unattended_authz.py` 這一個家，回歸鎖是該檔的姊妹鎖
+        `test_block_destructive_git_r83.TestUnattendedAuthzHasTeethOnEveryPlatform`。
+        本條仍然成立、也仍然該守：它守的是**本支 hook 的射程不外溢**。
+        """
         rc, err = _run_lint_hook(_ps_payload("git push"), force_os_name="posix",
                                  env_extra={_UNATTENDED_ENV: "1"})
         self.assertEqual(rc, 0, f"非 Windows 上誤擋；rc={rc}\n{err}")

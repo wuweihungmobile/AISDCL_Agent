@@ -243,10 +243,17 @@ except Exception:  # noqa: BLE001 — 共用層不可達＝退化，不是崩潰
 OWN_TOOLS = frozenset({"Bash", "PowerShell"})
 
 GUARD_OFF_ENV = "AUTOSDD_GIT_GUARD_OFF"
-#: 與 `lint_powershell_command.py` 共用的「這一跑沒有人在看」訊號（由 planner 在
-#: spawn `claude -p -r <sid>` 時注入）。共用是刻意的：它描述的是**回合的性質**，
-#: 不是某一支守衛的開關；兩支守衛對同一個性質做出同方向的處置才是一致的。
-UNATTENDED_ENV = "AUTOSDD_UNATTENDED"
+
+# 「這一跑沒有人在看」訊號 ＋ 授權邊界判準 ＋ 兩族的訊息，唯一的家＝
+# `tools/lib/unattended_authz.py`。R85／P12 前它們散在兩支 hook 內（訊號名兩份、
+# 「豁免在本回合無效」的補述兩份、判準只有 Windows 那一份有）——而 mac 上那一份
+# 結構上跑不到（matcher `PowerShell` ＋ `os.name != 'nt'` 兩道都對不上），
+# 於是無人看管代理在 mac 可自由 commit／push（本輪 P3 實測）。
+# 🔴 **刻意不包 try/except**：理由與 `context_budget_guard.py` 對 `quota_limits` 的
+# 處置逐字同構——授權邊界不是能力提供者，給它 fallback stub 等於在共用層不可達時
+# 靜默放行。硬 import 失敗＝traceback ＋ 非 0/2 的 rc＝出聲但不阻斷（看得見的失效）。
+from unattended_authz import (  # type: ignore[import-not-found] # noqa: E402
+    UNATTENDED_ENV, authz_header, authz_hits, waiver_void_note)
 
 #: 行內豁免：`# git-guard-ok: <WHY>`，WHY 必填（空白理由不算豁免，讓「刻意這樣寫」
 #: 與「沒注意」分得開）。
@@ -551,7 +558,13 @@ def git_invocations(command: str, *, start_dir: str | None = None) -> list[GitCa
     那一族由 `_RELAX_KILLER_RE` 整條關掉放寬，不在這裡處理。
     """
     found: list[GitCall] = []
-    masked = _LINE_CONT_RE.sub(lambda m: " " * len(m.group(0)), mask_inert(command))
+    # 🔴 R85／SD-B3：`unquote_exe_paths()` 必須在 `mask_inert()` **之前**跑——鐵律二明訂的
+    # `& '<絕對路徑>\git.exe' <sub>` 寫法整段會被遮蔽抹掉（實測：帶引號的絕對路徑寫法
+    # 回空 list，同一條去掉引號則正常命中）。它長度逐字元不變，下面的
+    # 等長不變式與位置比對照舊成立。（docstring 改註解的理由同 `_all_shorts`：本檔的
+    # `guardrail_cli` LOC 預算把 docstring 也算成程式行。）
+    masked = _LINE_CONT_RE.sub(lambda m: " " * len(m.group(0)),
+                               mask_inert(unquote_exe_paths(command)))
     cur = start_dir
     for segment in _SEP_RE.split(masked):
         tokens = segment.split()
@@ -935,16 +948,20 @@ def _background_amps(segment: str) -> bool:
     return False
 
 
-# 引號感知的 token 切割唯一的家＝`tools/lib/shell_tokens.py`（R84／C8 的減法：它與
-# 「毀滅性 git 判準」零交集，是判準②取 operand 用的通用原語）。形態與上面
-# `read_hook_payload` 那一格逐字相同（同一條 sys.path、同一種 fail-open）：共用層不可達
-# 時退化成「切不出 token」⇒ `_pgrep_full_operand()` 回 `None` ⇒ 判準②不出手。**方向是
-# 對的**：少擋一種等待形態，而不是反過來憑一份殘缺的切割去誤擋（誤擋的守衛會被關掉）。
+# `tools/lib/shell_tokens.py` 的兩個原語，唯一的家在那裡（R84／C8 的減法：兩者都與
+# 「毀滅性 git 判準」零交集）。形態與上面 `read_hook_payload` 那一格逐字相同（同一條
+# sys.path、同一種 fail-open），退化方向都是**少擋**而不是憑殘缺資料誤擋：
+#   · `shell_tokens`（判準②取 operand）不可達 ⇒ 切不出 token ⇒ 判準②不出手。
+#   · `unquote_exe_paths`（R85／SD-B3，把引號包住的執行檔絕對路徑還原成 basename；
+#     必須跑在 `mask_inert()` **之前**，否則遮蔽會把整段連 `git.exe` 一起抹掉）
+#     不可達 ⇒ 恆等 ⇒ 退回 R85 之前的行為。這裡不必再蓋硬 import：`unattended_authz`
+#     與它同目錄共用同一條 sys.path，真的不可達時那一行會先炸 ⇒ 姿態已是 fail-loud。
 try:
-    from shell_tokens import shell_tokens as _shell_tokens  # type: ignore[import-not-found]
+    import shell_tokens as _st  # type: ignore[import-not-found]
 except Exception:  # noqa: BLE001 — 共用層不可達＝退化，不是崩潰（fail-open 是 P0）
-    def _shell_tokens(text: str) -> list[str]:  # type: ignore[misc]
-        return []
+    _st = None  # type: ignore[assignment]
+_shell_tokens = getattr(_st, "shell_tokens", lambda text: [])
+unquote_exe_paths = getattr(_st, "unquote_exe_paths", lambda text: text)
 
 
 def _pgrep_full_operand(rest: str) -> str | None:
@@ -1070,12 +1087,9 @@ _WAITFORM_FOOTER = (
     "\n"
     "  真的確定要這樣寫？在指令內加行內豁免 `# waitform-ok: <理由>`（理由必填）。\n"
 )
-_WAITFORM_UNATTENDED_NOTE = (
-    "\n"
-    f"  🔴 這一跑是**被排程叫起來的無人看管回合**（環境變數 {UNATTENDED_ENV} 有設），\n"
-    "     行內豁免 `# waitform-ok:` 對本回合**無效**——而這一族的代價在無人看管時最大：\n"
-    "     沒有人會來問「它是不是空轉了 48 分鐘」。\n"
-)
+_WAITFORM_UNATTENDED_NOTE = waiver_void_note(
+    "waitform-ok",
+    "而這一族的代價在無人看管時最大：\n     沒有人會來問「它是不是空轉了 48 分鐘」。")
 
 
 _HEADER = (
@@ -1107,13 +1121,10 @@ _FOOTER = (
     "\n"
     "  真的確定要這樣寫？在指令內加行內豁免 `# git-guard-ok: <理由>`（理由必填）。\n"
 )
-_UNATTENDED_NOTE = (
-    "\n"
-    f"  🔴 這一跑是**被排程叫起來的無人看管回合**（環境變數 {UNATTENDED_ENV} 有設），\n"
-    "     行內豁免 `# git-guard-ok:` 對本回合**無效**——出口是給人的，不是給\n"
-    "     一個沒有人在看的模型回合自己寫給自己的。請把改動留在工作樹、把狀態寫進\n"
-    "     任務書，然後停下來讓人回來收。\n"
-)
+_UNATTENDED_NOTE = waiver_void_note(
+    "git-guard-ok",
+    "出口是給人的，不是給\n     一個沒有人在看的模型回合自己寫給自己的。請把改動留在"
+    "工作樹、把狀態寫進\n     任務書，然後停下來讓人回來收。")
 
 
 def main() -> int:
@@ -1160,6 +1171,14 @@ def main() -> int:
             command, run_in_background=bool(tool_input.get("run_in_background")))
 
         unattended = bool(os.environ.get(UNATTENDED_ENV))
+        # 🔴 R85／P12：授權邊界（無人看管 ⇒ 禁動 git 歷史）。此前只有 Windows 那支
+        # 姊妹 hook 有，而它 matcher 是 `PowerShell`、且 `os.name != 'nt'` 就 exit 0
+        # ⇒ mac 上一行都不跑。git 那一半餵**本檔解析器**的結果（`sudo git`／`git -C`／
+        # argv 序列／殼 `-c` operand 四個平面都認得，體例同 `destructive_git_hits()`），
+        # 比正則精準；`gh` 那一半沒有第二個解析器，兩支 hook 共用同一條正則。
+        authz = authz_hits(mask_inert(unquote_exe_paths(command)), [
+            c.sub for text in (command, argv_git_fragments(command))
+            for c in git_invocations(text)]) if unattended else []
         # 🔴 順序本身就是判準的一部分：無人看管時**先於**行內豁免判定，因為那個回合
         # 可以自己寫出豁免註解（同 lint_powershell_command.py 對授權邊界的處置）。
         # 🔴 兩族的豁免**各自獨立判**：一個 `# git-guard-ok:` 不得順手放行一個壞掉的
@@ -1178,10 +1197,14 @@ def main() -> int:
         note = stash_ref_sentinel(
             start_dir, stash_writer_seen(command) and not (hits or wait_hits))
         sys.stderr.write(note or "")
-        if not hits and not wait_hits:
+        if not hits and not wait_hits and not authz:
             return 1 if note else 0
 
         message = ""
+        # 授權邊界排在最前面：它回答的是「你這一跑有沒有權限做這件事」，而其餘兩族
+        # 回答的是「這個寫法對不對」。權限不足時先講權限，讀者才不會去修寫法。
+        if authz:
+            message += authz_header("git-guard-ok") + "".join(f"{h}\n" for h in authz)
         if hits:
             message += (_HEADER + "".join(f"   · {h}\n" for h in hits)
                         + (_UNATTENDED_NOTE if unattended else _FOOTER))

@@ -13,7 +13,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Any, Optional, Protocol, TypedDict, runtime_checkable
+from typing import Any, Protocol, runtime_checkable
 
 from ..models.playbook import Playbook, PlaybookTask
 from ..models.step_mutation import StepMutation
@@ -22,7 +22,7 @@ from ..models.step_mutation import StepMutation
 # ──────────────────────────────────────────────────────────────
 # 1. KernelPhase（27 phase：17 原始 + 2 W4-T17/M-11 + 8 SD_05 W0）
 # ──────────────────────────────────────────────────────────────
-class KernelPhase(str, Enum):
+class KernelPhase(str, Enum):  # noqa: UP042  # str+Enum 是既有公開 API，改 StrEnum 屬行為面重構、不在 lint 射程
     PRE_RUN = "pre_run"
     POST_RUN = "post_run"
     PRE_STEP = "pre_step"
@@ -73,29 +73,14 @@ class KernelPhase(str, Enum):
 # ──────────────────────────────────────────────────────────────
 # 2. Per-phase TypedDict payload schemas（QA 必要修改 #2）
 # ──────────────────────────────────────────────────────────────
-class TokenUsagePayload(TypedDict, total=False):
-    token_pct: float
-    raw_match: str
-    consecutive_compact_failures: int
-
-
-class FailurePayload(TypedDict, total=False):
-    error_class: str
-    error_signature: str
-    failed_output: str
-    convergence_trend: str
-
-
-class CorrectionPayload(TypedDict, total=False):
-    decision: dict
-    correction_prompt: str
-    minimax_latency_ms: int
-
-
-class EvolutionPayload(TypedDict, total=False):
-    proposal: dict
-    evolution_metadata: dict
-    escalated_step_ids: list[str]
+# 🔴 R85（訴求 2）：此處原有 4 支 TypedDict（TokenUsagePayload／FailurePayload／
+# CorrectionPayload／EvolutionPayload），實測**全庫零消費者**（對照組同法量測：
+# HookContext 365 refs、KernelPhase 683 refs ⇒ 取數管道本身會命中，0 是真的 0）。
+# 它們既沒有被任何 annotation 引用，就不會被任何型別檢查器比對 ⇒ 一旦真實 payload
+# 改形狀，這四支不會有任何東西轉紅，只是靜靜地變成假的文件。「沒人看的規格會腐化成
+# 假話」正是本 repo 反覆判過的形態，故整段移除而非留著當註解；真實 payload 形狀的
+# 唯一真相源是各 phase 的 emit 站點與訂閱它的 plugin。
+# 連帶：本檔 TypedDict 的最後一個使用者也隨之消失，typing import 一併收斂。
 
 
 # ──────────────────────────────────────────────────────────────
@@ -106,9 +91,9 @@ class HookContext:
     """所有 hook 共用的執行上下文，frozen 避免互改。"""
     phase: KernelPhase
     playbook: Playbook
-    task: Optional[PlaybookTask] = None
-    step_idx: Optional[int] = None
-    attempt: Optional[int] = None
+    task: PlaybookTask | None = None
+    step_idx: int | None = None
+    attempt: int | None = None
     payload: dict = field(default_factory=dict)
 
 
@@ -223,7 +208,7 @@ class IHook(Protocol):
     def name(self) -> str: ...
     def priority(self) -> int: ...
     def subscribed_phases(self) -> list[KernelPhase]: ...
-    def on_event(self, ctx: HookContext) -> Optional[Any]: ...
+    def on_event(self, ctx: HookContext) -> Any | None: ...
 
 
 # ──────────────────────────────────────────────────────────────
@@ -262,7 +247,7 @@ PHASE_RESULT_CONTRACT: dict[KernelPhase, set[type]] = {
     #   DECIDE       ：Brain 主導；Plugin 可回 MutationProposal（如建議 step_mutation）
     #   BEFORE_EXEC  ：Plugin 可 VetoResult（如 FastPathPlugin 短路）或 ResourceRequest（compact）
     #   EXEC         ：Executor 主導；不開放 Plugin 直接訂閱（避免 race）
-    #   ON_EVENT     ：ExecutionEvent 廣播；Plugin 可 ResourceRequest（如 token_pct > 80 觸發 compact）
+    #   ON_EVENT     ：ExecutionEvent 廣播；Plugin 可 ResourceRequest（如 token_pct > 80 觸發 compact）  # noqa: E501
     #   AFTER_EXEC   ：Plugin 可 MutationProposal / ResourceRequest（如 escalation）
     KernelPhase.BEFORE_DECIDE:          {VetoResult, PromptInjectionResult},
     KernelPhase.DECIDE:                 {MutationProposal},
@@ -283,7 +268,7 @@ class IResolutionPolicy(Protocol):
         self,
         phase: KernelPhase,
         results: list[Any],
-    ) -> "MergedResult":  # noqa: F821 - forward ref to event_bus.MergedResult
+    ) -> MergedResult:  # noqa: F821 - forward ref to event_bus.MergedResult
         ...
 
 

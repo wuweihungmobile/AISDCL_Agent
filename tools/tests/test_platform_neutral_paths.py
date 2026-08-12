@@ -52,9 +52,14 @@ _REPO_ROOT = _TESTS_DIR.parents[1]
 # 會漂移的真相——本輪立案的形態正是「藥已開好，卻只餵給兩個病人中的一個」。
 sys.path.insert(0, str(_TESTS_DIR))
 sys.path.insert(0, str(_REPO_ROOT / "tools" / "lib"))
+sys.path.insert(0, str(_REPO_ROOT / "tools" / "probe"))
 import git_paths  # noqa: E402  ← R81 XPL-S1-01：git 路徑列舉的唯一取數層
 import sdd_latest  # noqa: E402
 import test_subprocess_encoding_hygiene as _sister  # noqa: E402
+
+# R85／A-3：單平台專屬外部執行檔的**詞彙表**是量測本身，唯一的家在這支 probe
+# （檔內逐字：「這兩張表是判準本身。改它就是重新定義量測」）。本檔只當「門」，不留第二份。
+import xplat_hazard_census as _CENSUS  # noqa: E402
 from test_subprocess_encoding_hygiene import (  # noqa: E402
     repin_ceiling,
     suggested_floor,
@@ -147,13 +152,19 @@ def _scan_roots() -> list[tuple[Path, bool, int]]:
         (_REPO_ROOT / "AutoClaude" / "alembic", True, 18),
         # `tools` 與 `.claude/hooks` 兩棵的下限刻意只認並行包動工前就存在的那些檔：
         # 把一個當下還在變動的量寫成常數，下一輪必然對不上。
-        (_REPO_ROOT / "tools", True, 17),
+        # 🔴 R85／F1 重釘 17 → 27（**方向是收緊**，由 `TestScanRootFloorBand` 的腐化
+        # 上界逐字要求：舊下限只還守得住 61% 的掃描面）。觸發是本輪新增
+        # `tools/probe/guard_layer_dedup_census.py` 讓實際檔數越過該上界。
+        (_REPO_ROOT / "tools", True, 27),
         (_REPO_ROOT / ".claude" / "hooks", True, 2),
         (_REPO_ROOT / "AISDLC_SDD" / "scripts", True, 13),
         # 🔴 R81 收斂重釘 10 → 21（依失敗訊息開的藥，`suggested_floor()` 算出來的值）：
         # 額度軸的兩支共用模組（`quota_ledger.py`／`quota_limits.py`）落地後本樹 22 支，
         # 舊下限只還守得住 45% 的掃描面。重釘理由與淨額寫在交件回報。
-        (_REPO_ROOT / "tools" / "lib", True, 21),
+        # 🔴 R85／P12 再重釘 21 → 30（同樣是失敗訊息自己開的藥）：授權邊界的共用模組
+        # `unattended_authz.py` 落地後本樹 32 支，舊下限只還守得住 66%。重釘方向是
+        # **往上**＝掃描面守得更緊，不是放寬。
+        (_REPO_ROOT / "tools" / "lib", True, 30),
         (latest / "tools" / "arch_fitness", True, 2),
         (latest / ".claude" / "hooks", True, 5),
     ]
@@ -2943,6 +2954,17 @@ def is_platform_guard_expr(test: ast.AST) -> bool:
     return False
 
 
+#: 「呼叫它＝控制流離開這個 block」的呼叫。R85 補上 skip 家族：`self.skipTest()` 與
+#: `pytest.skip()` 內部就是 `raise SkipTest`，控制流**真的**離開——舊判準只認語法上的
+#: `Return`／`Raise`，於是 `if os.name != "nt": self.skipTest(…)` 這個 repo 內的標準
+#: 測試守衛形態被判成「沒有早退」。那是**述詞與現實不符**，不是放寬（實測：補上後
+#: `_FOREIGN_API_SCOPE_DEBT` 一格都沒動，5 → 5）。
+_FLOW_EXIT_CALLS = frozenset({
+    "sys.exit", "os._exit", "exit", "quit",
+    "self.skipTest", "skipTest", "pytest.skip", "unittest.skip",
+})
+
+
 def _flow_terminates(stmts: list[ast.stmt]) -> bool:
     """這個 block 的尾巴有沒有把控制流帶走（早退守衛成立的前提）。"""
     if not stmts:
@@ -2951,7 +2973,7 @@ def _flow_terminates(stmts: list[ast.stmt]) -> bool:
     if isinstance(last, (ast.Return, ast.Raise, ast.Break, ast.Continue)):
         return True
     if isinstance(last, ast.Expr) and isinstance(last.value, ast.Call):
-        return _dotted_name(last.value.func) in {"sys.exit", "os._exit", "exit", "quit"}
+        return _dotted_name(last.value.func) in _FLOW_EXIT_CALLS
     return False
 
 
@@ -2987,16 +3009,38 @@ def _ast_scope_index(tree: ast.AST) -> tuple[dict, dict, dict]:
     return parent, slot, classes
 
 
+def guard_alias_names(tree: ast.AST) -> frozenset[str]:
+    """模組層 `NAME = <帶平台判定的運算式>` 的那些 NAME（R85）。
+
+    🔴 立案是實測的假紅：`AutoClaude/tests/tools/test_run_local_nightly_static.py` 把
+    `_WIN_NATIVE_ONLY = pytest.mark.skipif(platform.system() != "Windows", …)` 綁在模組層，
+    測試只寫 `@_WIN_NATIVE_ONLY`。decorator 節點是一個裸 `Name`，`is_platform_guard_expr`
+    在它身上看不到任何平台符號 ⇒ 整批被判成沒守衛。這是**述詞看不見一層間接**，
+    不是那些檔真的沒守衛。
+    """
+    return frozenset(
+        target.id
+        for node in getattr(tree, "body", [])
+        if isinstance(node, ast.Assign) and is_platform_guard_expr(node.value)
+        for target in node.targets if isinstance(target, ast.Name))
+
+
 def _decorated_by_platform_guard(
-    node: ast.AST, classes: dict[str, ast.ClassDef], seen: set | None = None
+    node: ast.AST, classes: dict[str, ast.ClassDef], seen: set | None = None,
+    aliases: frozenset[str] = frozenset(),
 ) -> bool:
     """def/class 自己或（同檔）任一祖先類別帶平台守衛 decorator。
 
     基底類別要跟著看，否則 `@unittest.skipUnless(sys.platform == "darwin", …)`
     放在共用夾具基底、子類別只寫測試（本 repo 的既有寫法）會被整批誤判。
+    `aliases`＝`guard_alias_names()` 的結果（預設空 ⇒ 既有呼叫端行為逐字不變）。
     """
-    if any(is_platform_guard_expr(dec) for dec in getattr(node, "decorator_list", [])):
-        return True
+    for dec in getattr(node, "decorator_list", []):
+        if is_platform_guard_expr(dec):
+            return True
+        dotted = _dotted_name(dec) or ""
+        if aliases and (dotted in aliases or dotted.split(".")[0] in aliases):
+            return True
     if not isinstance(node, ast.ClassDef):
         return False
     seen = set() if seen is None else seen
@@ -3005,7 +3049,7 @@ def _decorated_by_platform_guard(
         base_node = classes.get(dotted.rsplit(".", 1)[-1]) if dotted else None
         if base_node is not None and base_node not in seen:
             seen.add(base_node)
-            if _decorated_by_platform_guard(base_node, classes, seen):
+            if _decorated_by_platform_guard(base_node, classes, seen, aliases):
                 return True
     return False
 
@@ -3018,6 +3062,7 @@ def _references_capability_flag(test: ast.AST, flags: frozenset[str] | set[str])
 def guard_scope_for(
     node: ast.AST, parent: dict, slot: dict, classes: dict,
     capability_flags: frozenset[str] | set[str] = frozenset(),
+    aliases: frozenset[str] = frozenset(),
 ) -> str | None:
     """該使用點被哪一種**站點級**守衛罩住；None＝一種都沒有（＝違規）。
 
@@ -3037,7 +3082,7 @@ def guard_scope_for(
                 and _try_catches_capability(owner)):
             return "try-capability"
         if (isinstance(owner, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef))
-                and _decorated_by_platform_guard(owner, classes)):
+                and _decorated_by_platform_guard(owner, classes, aliases=aliases)):
             return "guarded-decorator"
         position = slot.get(cur)
         if position is not None:
@@ -3048,6 +3093,102 @@ def guard_scope_for(
                     return "early-return-guard"
         cur = owner
     return None
+
+
+# ── R85／A-3：單平台專屬**外部執行檔**的 argv[0] 字面 ────────────────────────
+# 上面那個判準結構上看不到這一族：它的詞彙表收的是 **Python 符號**，而「送給 OS 的外部
+# 程式名」不是符號——AST 看到的只是一個 `ast.Constant` 字串 ⇒ 那一族從來不在分母裡
+# （與 R81 訂正的 `ctypes.*` 失明逐字同型；失明是靜默的：掃描器照跑照綠照回報命中數）。
+#
+# 🔴 **詞彙表刻意不在這裡再寫一份**：它是量測本身，唯一的家＝
+# `tools/probe/xplat_hazard_census.py`。本檔只提供「門」，不提供第二份詞彙。
+#
+# 🔴 **transitive 可達性是本族的必要條件，不是加值**（P7 逐筆查完 AutoClaude 那一棵的
+# 實測結論）：守衛有四種形狀，其中一種是**跨 1~3 層的 helper**——`_run_ps1`／
+# `_run_powershell`／`_try_osascript` 自己一個守衛都沒有，安全性完全寄託在呼叫端。
+# 只認站點級守衛的判準對全庫 24 筆噴 **3 筆假紅**（實測），而假紅到需要逐一辯護的鎖
+# 活不過一輪。深度上界 3 是量出來的：`check_scheduled_task_drift._run_powershell` 的
+# 真實鏈是 `main`（帶 `sys.platform != "win32"` 早退）→ 三個中介 → 它，恰好 3 層。
+#
+# 🔴 transitive **只**用在本族，不回頭套到上面那個符號判準：那張債表
+# （`_FOREIGN_API_SCOPE_DEBT`）是**雙向精確比對**，而它登記的 `dev_start.py:1051`
+# 正好就是這個形狀 ⇒ 套過去會把一筆**有人登記過的**債靜默抹掉。要不要抹是那筆債的
+# 所有者的決定，不是本判準的副作用。
+_EXE_ARGV_TRANSITIVE_DEPTH = 3
+
+
+def _enclosing_func(node: ast.AST, parent: dict) -> ast.AST | None:
+    cur = node
+    while cur in parent:
+        cur = parent[cur]
+        if isinstance(cur, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            return cur
+    return None
+
+
+def _call_sites(tree: ast.AST, name: str, inside: ast.AST) -> list[ast.Call]:
+    """全檔對 `name` 的呼叫節點，**排除** `inside` 自己體內的（遞迴呼叫不算外部呼叫端）。"""
+    banned = set(ast.walk(inside))
+    return [n for n in ast.walk(tree)
+            if isinstance(n, ast.Call) and n not in banned
+            and ((isinstance(n.func, ast.Name) and n.func.id == name)
+                 or (isinstance(n.func, ast.Attribute) and n.func.attr == name))]
+
+
+def guard_scope_transitive(node, tree, parent, slot, classes, flags, aliases,
+                           depth: int = _EXE_ARGV_TRANSITIVE_DEPTH,
+                           seen: frozenset = frozenset()) -> str | None:
+    """站點級守衛，找不到時再問「包住它的函式的**每一個**呼叫端是不是都被守住」。
+
+    `all(...)` 而不是 `any(...)` 是關鍵：只要有一個呼叫端沒被守住，那條路就會在對面
+    平台上真的走到 ⇒ 不成立。沒有任何呼叫端（`sites` 為空）也不成立——那代表它是別處
+    import 進去用的，靜態上證不出來，而「證不出來」必須落在紅的那一側。
+    """
+    direct = guard_scope_for(node, parent, slot, classes, flags, aliases)
+    if direct or depth <= 0:
+        return direct
+    func = _enclosing_func(node, parent)
+    if func is None or func in seen:
+        return None
+    sites = _call_sites(tree, func.name, func)
+    return (f"transitive-callsite-guard(via {func.name})" if sites and all(
+        guard_scope_transitive(s, tree, parent, slot, classes, flags, aliases,
+                               depth - 1, seen | {func}) for s in sites) else None)
+
+
+def scan_foreign_exe_argv(source: str, rel: str) -> tuple[list[str], list[str]]:
+    """純函式核心：回 (offenders, stale_markers)，元素皆為 `rel:行號: 說明`。"""
+    try:
+        tree = ast.parse(source)
+    except SyntaxError:
+        return [], []
+    uses: list[tuple[ast.Call, int, str, str]] = []
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Call) or not _CENSUS._is_subprocess_call(node):
+            continue
+        for exe in _CENSUS._argv0_literals(node):
+            base = PurePosixPath(exe.replace("\\", "/")).name.lower()
+            side = ("Windows-only" if base in _CENSUS._WIN_ONLY_EXE
+                    else "POSIX-only" if base in _CENSUS._POSIX_ONLY_EXE else None)
+            if side:
+                uses.append((node, node.lineno, side, base))
+    if not uses:
+        return [], []
+    markers = _xplat_markers(source)
+    parent, slot, classes = _ast_scope_index(tree)
+    flags, aliases = _capability_flag_names(tree), guard_alias_names(tree)
+    offenders = []
+    for node, lineno, side, token in sorted(uses, key=lambda u: (u[1], u[3])):
+        if markers.get(lineno) or guard_scope_transitive(
+                node, tree, parent, slot, classes, flags, aliases):
+            continue
+        offenders.append(
+            f"{rel}:{lineno}: argv[0] 是 {side} 的外部執行檔 `{token}`，而這個**使用點**"
+            "既不在任何平台守衛的作用域內，包住它的函式也不是「每一個呼叫端都被守住」"
+            "——對面平台上它不是「行為不同」而是 FileNotFoundError（Windows 側為 "
+            "WinError 2/193）。修法：加作用域內守衛、讓呼叫端全數帶守衛，"
+            f"或於該行行尾加 `# {_XPLAT_OK_MARKER} <WHY>`")
+    return offenders, []
 
 
 def scan_foreign_platform_api(source: str, rel: str) -> tuple[list[str], list[str]]:
@@ -3111,6 +3252,95 @@ def scan_foreign_platform_api(source: str, rel: str) -> tuple[list[str], list[st
 _FOREIGN_API_SCOPE_DEBT: dict[str, int] = {
     "tools/dev_start.py": 5,
 }
+
+
+#: 本判準上線當回合的**存量**：全庫 24 筆 exe-argv 命中，逐筆比對五種站點級罩法
+#: ＋ transitive 可達性後，未被罩住者 **0 筆**（假紅 0、存量 0）⇒ 這是一支**純寫入面**
+#: 判準（與大表「`Get-Command` 解析」那一格同形：存量 0 時缺的一直是「下一個人寫出來時
+#: 當場紅」的門，而不是數今天有幾筆）。判準與上面那張債表相同是**雙向精確比對**。
+_FOREIGN_EXE_ARGV_DEBT: dict[str, int] = {}
+
+
+class TestForeignExecutableArgvIsGuarded(unittest.TestCase):
+    """單平台專屬**外部執行檔** argv[0]（R85／A-3，見上方區段 WHY）。"""
+
+    def test_no_unguarded_foreign_executable(self) -> None:
+        offenders, _stale, parse_failures, band = run_unit_scan(scan_foreign_exe_argv)
+        self.assertEqual(parse_failures, [], "掃描面不得靜默縮小：\n" + "\n".join(parse_failures))
+        actual: dict[str, int] = {}
+        for line in offenders:
+            rel = line.split(":", 1)[0]
+            actual[rel] = actual.get(rel, 0) + 1
+        self.assertEqual(
+            actual, dict(_FOREIGN_EXE_ARGV_DEBT),
+            "多一筆＝新增了未守衛的單平台外部執行檔；少一筆＝債已還請把數字改小：\n"
+            + "\n".join(offenders))
+        self.assertEqual(band, [], "掃描面下限帶：\n" + "\n".join(band))
+
+    def _scan(self, source: str) -> list[str]:
+        return scan_foreign_exe_argv(source, _INJECTION_TARGET_REL)[0]
+
+    def test_the_criterion_detects_both_directions(self) -> None:
+        """紅：兩個方向的裸站點都要抓到（只抓一邊＝另一邊恆綠）。"""
+        for sample, side in (
+            ('def f():\n    subprocess.run(["powershell.exe", "-c", "x"])\n', "Windows-only"),
+            ('def f():\n    subprocess.run(["osascript", "-e", "x"])\n', "POSIX-only"),
+            ('def f():\n    subprocess.Popen("taskkill")\n', "Windows-only"),
+        ):
+            with self.subTest(sample=sample):
+                off = self._scan(sample)
+                self.assertTrue(off, f"{sample!r} 漏抓 ⇒ 這一族仍失明")
+                self.assertIn(side, off[0])
+
+    def test_two_sided_executables_are_not_flagged(self) -> None:
+        """綠：兩個平台都有的執行檔一律不判——判它就是滿螢幕假紅。"""
+        for exe in ("git", "python", "node", "docker"):
+            with self.subTest(exe=exe):
+                self.assertEqual(self._scan(f'def f():\n    subprocess.run(["{exe}"])\n'), [])
+
+    def test_every_site_level_guard_shape_is_accepted(self) -> None:
+        """綠：repo 內既存的四種站點級寫法（誤紅任一種，這道鎖活不過一輪）。"""
+        for label, sample in (
+            ("enclosing-if", 'def f():\n    if os.name == "nt":\n'
+                             '        subprocess.run(["taskkill"])\n'),
+            ("early-return-guard", 'def f():\n    if os.name != "nt":\n        return\n'
+                                   '    subprocess.run(["taskkill"])\n'),
+            ("early-return-guard/skipTest", 'def f(self):\n    if os.name != "nt":\n'
+                                            '        self.skipTest("win only")\n'
+                                            '    subprocess.run(["taskkill"])\n'),
+            ("decorator alias（模組層綁定）",
+             'W = pytest.mark.skipif(platform.system() != "Windows", reason="x")\n\n'
+             '@W\ndef f():\n    subprocess.run(["taskkill"])\n'),
+        ):
+            with self.subTest(label):
+                self.assertEqual(self._scan(sample), [], f"{label} 被誤判成沒守衛")
+
+    def test_transitive_reachability_is_all_not_any(self) -> None:
+        """🔴 本族的核心：跨層 helper 的守衛在**呼叫端**，而判準必須是 all 不是 any。
+
+        三向都驗——只驗綠的那一向時，把 `all` 寫成 `any`（或乾脆恆真）照樣全綠。
+        """
+        helper = 'def _run():\n    subprocess.run(["powershell.exe"])\n\n'
+        self.assertEqual(
+            self._scan(helper + 'def a():\n    if os.name == "nt":\n        _run()\n'),
+            [], "唯一呼叫端有守衛，卻仍判紅 ⇒ transitive 可達性沒有生效")
+        self.assertTrue(
+            self._scan(helper + 'def a():\n    if os.name == "nt":\n        _run()\n\n'
+                       "def b():\n    _run()\n"),
+            "有一個呼叫端**沒有**守衛卻放行 ⇒ 判準是 any 不是 all，那條路在對面平台會真的走到")
+        self.assertTrue(
+            self._scan(helper), "一個呼叫端都沒有（別處 import 去用）卻放行 ⇒ "
+                                "「證不出來」被讀成了「安全」")
+
+    def test_depth_is_bounded_and_the_bound_is_honest(self) -> None:
+        """深度上界必須真的是上界：超過它就不再放行（否則「上界」只是註解）。"""
+        chain = 'def h0():\n    subprocess.run(["powershell.exe"])\n\n'
+        for i in range(1, _EXE_ARGV_TRANSITIVE_DEPTH + 2):
+            chain += f"def h{i}():\n    h{i - 1}()\n\n"
+        top = _EXE_ARGV_TRANSITIVE_DEPTH + 1
+        self.assertTrue(
+            self._scan(chain + f'def top():\n    if os.name == "nt":\n        h{top}()\n'),
+            f"鏈長 {top} > 上界 {_EXE_ARGV_TRANSITIVE_DEPTH} 卻放行 ⇒ 上界沒有生效")
 
 
 class TestForeignPlatformApiIsGuarded(unittest.TestCase):
@@ -4330,7 +4560,16 @@ _PATHEXT_FRAG = "PATH" + "EXT"
 
 
 def _injection_criteria() -> dict[str, Callable[[str, str], tuple[list[str], list[str]]]]:
-    """本檔全部判準的統一入口——語料逐題過**每一道**，不是只過一道。"""
+    """本檔全部判準的統一入口——語料逐題過**每一道**，不是只過一道。
+
+    🔴 R85／ARCH-02：這句話在 R85-P12 之後有一段時間是**假的**。當時 AST 對帳實測
+    「12 定義 / 8 接線」——`scan_foreign_exe_argv`（P12 同輪新增）與另外三道從未被接進來。
+    後果不是「少擋一點」而是**方向相反**：M5 注入矩陣量到的攔截率會低報，而低報會讓
+    下一輪去補一道已經存在的判準（同 R80 對「大小寫敏感度」那一格低報分子的判決）。
+    實測直呼 `scan_foreign_exe_argv` 對 b8／b11 兩題 HIT，而表上兩題都記著 False。
+    本輪把**全部 12 道**接齊；另三道對現行語料零命中（實測），接進來是為了讓上面那句
+    宣稱不再需要人記得去維護——分母由函式定義本身決定，不是由這張手抄清單決定。
+    """
     return {
         "drive-literal": scan_drive_literal,
         "intree-tmpdir": scan_intree_tmpdir,
@@ -4340,6 +4579,10 @@ def _injection_criteria() -> dict[str, Callable[[str, str], tuple[list[str], lis
         "pathext-guard": scan_unguarded_pathext,
         "text-io-encoding": scan_missing_encoding,
         "foreign-platform-api": scan_foreign_platform_api,
+        "foreign-exe-argv": scan_foreign_exe_argv,
+        "naive-timestamp": scan_naive_timestamp_persist,
+        "ps-platform-sites": scan_ps_platform_sites,
+        "git-path-enumeration": scan_git_path_enumeration,
     }
 
 
@@ -4380,14 +4623,15 @@ _XPLAT_INJECTION_CORPUS: tuple[tuple[str, str, str, bool], ...] = (
      "def f(p):\n    return p.read_text()\n", True),
     ("b7-winreg", "Win→mac",
      "import winreg\n\n\ndef f():\n    return winreg.HKEY_LOCAL_MACHINE\n", True),
+    # b8／b11 由 False 轉 True＝R85／ARCH-02 把 `scan_foreign_exe_argv` 接進統一入口。
     ("b8-schtasks", "Win→mac",
-     'def f(sub):\n    return sub.run(["schtasks", "/query"], check=False)\n', False),
+     'def f(sub):\n    return sub.run(["schtasks", "/query"], check=False)\n', True),
     ("b9-startfile", "Win→mac", "def f(p):\n    os.startfile(p)\n", True),
     ("b10-case-insensitive", "Win→mac",
      'def f(a, b):\n    return a.lower() == b.lower()\n', False),
     ("b11-powershell-shell", "Win→mac",
      'def f(sub, c):\n    return sub.run(["powershell.exe", "-Command", c],\n'
-     "                   capture_output=True, text=True)\n", False),
+     "                   capture_output=True, text=True)\n", True),
     ("b12-msvcrt", "Win→mac",
      "import msvcrt\n\n\ndef f():\n    return msvcrt.getch()\n", True),
 )
@@ -4466,7 +4710,7 @@ class TestXplatInjectionMatrix(unittest.TestCase):
         停在修復前的值）。想知道現值就跑本測試——`setUpClass` 會印 `[Xplat injection
         matrix]`。R77 動工前 mac→Win 那一格是零：整類對面平台專屬 API 此前無任何判準。
         """
-        floors = {"mac→Win": 5, "Win→mac": 6}
+        floors = {"mac→Win": 5, "Win→mac": 8}   # R85／ARCH-02：6→8（exe-argv 判準接線）
         caught = {d: hit for d, (hit, _total) in live_interception().items()}
         for direction, floor in floors.items():
             with self.subTest(direction=direction):
@@ -5428,17 +5672,11 @@ _MECHANISM_DEF_RE = re.compile(
 #: → 紅（stale，考察軌跡不得靠慣性活著）。
 _IRON_LAW3_UNCOVERED_EVIDENCE: dict[str, tuple[tuple[str, ...], dict[str, str]]] = {
     "副檔名判斷": (("副檔名", "file_extension", "extension_branch", "exe_suffix"), {}),
-    "shell=True": (
-        ("shell_true", "native_shell", "原生殼"),
-        {"AutoClaude/tests/test_evaluator_kill_tree.py":
-         "該鎖守的是「shell=True 逾時要 kill 整棵行程樹」，對 cmd.exe ⇄ /bin/sh 的"
-         "**語意差異**（引號、`&&`、路徑分隔、rc 語意）零判準——同一個關鍵字、不同主題",
-         "tools/tests/test_context_budget_guard.py":
-         "兩支命中（`test_autoclaude_shell_true_does_not_pop_a_cmd_window`／"
-         "`test_the_measured_shell_true_cmd_is_not_written_off_as_foreign`）守的是"
-         "**Windows 上會不會彈出 console 視窗**與量測器的歸因分格，對 cmd.exe ⇄ /bin/sh "
-         "的語意差異同樣零判準——與上一筆同型：同一個關鍵字、不同主題"},
-    ),
+    # 🔴 R85：`shell=True` 那一格**已補上機械物**（`AutoClaude/tests/execution/
+    # test_shell_portability_contract_r85.py`），依本表下方的 stale 判準，探針必須隨之移除
+    # ——「考察軌跡不得靠慣性活著」。它原本登記的兩筆「已審視並判定不算」（kill-tree 那支
+    # 守逾時回收、console-spawn 那兩支守 Windows 彈窗）判讀**至今仍成立**，移除的理由不是
+    # 它們被推翻，而是本表只服務「自陳沒有掃描器」的列。
 }
 #: 已知正例：本判準若對它失明，整條就是裝飾品。這組 token 指向的正是 S4-01 那一格
 #: 被填錯的機械物本體（NTFS 大小寫碰撞鍵）。

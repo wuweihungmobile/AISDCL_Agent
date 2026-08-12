@@ -262,6 +262,7 @@ on:
       # 環境快照；win_spawn.py＝無 console 父行程下的防彈窗兩層防線（自 hook 外移，
       # 見該檔檔頭：此前是 lib 反過來 import hook）。
       - "tools/lib/endurance_env.py"
+      - "tools/lib/unattended_authz.py"
       - "tools/lib/win_spawn.py"
       - "tools/lib/shell_tokens.py"
       - ".env.example"
@@ -566,6 +567,7 @@ on:
       # 環境快照；win_spawn.py＝無 console 父行程下的防彈窗兩層防線（自 hook 外移，
       # 見該檔檔頭：此前是 lib 反過來 import hook）。
       - "tools/lib/endurance_env.py"
+      - "tools/lib/unattended_authz.py"
       - "tools/lib/win_spawn.py"
       - "tools/lib/shell_tokens.py"
       - ".env.example"

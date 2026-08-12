@@ -8,9 +8,9 @@ R10（DEF-101-134）守門改制：權威判定＝正規化內容 sha256 釘選�
 
 R60 Scan-E E-A-02：關鍵字偵測原本整段巢狀在「hash 已紅」分支內（＝兩道防線
 串聯，更新 pin 即整組失效），已改為**並聯**。本檔下方 `TestKeywordDetectionParallel`
-是該修復的回歸鎖（含「pin 已更新」的紅燈斷言＋兩個正控），既有 10 支
-`test_forbidden_*` 全部走 `_make_fake_root()`＝必然 hash 紅燈態，對「pin 已更新」
-這條路徑天生零訊號，故必須另立。
+是該修復的回歸鎖（含「pin 已更新」的紅燈斷言＋兩個正控），10 個 forbidden 注入樣本
+（R85 起收斂成單一表驅動判準，見 TestCheckWrapperThinness 內的注入表）全部走
+`_make_fake_root()`＝必然 hash 紅燈態，對「pin 已更新」這條路徑天生零訊號，故必須另立。
 
 執行：python3 -m unittest discover -s tools/tests -p "test_*.py" -v
 """
@@ -100,159 +100,77 @@ class TestCheckWrapperThinness(unittest.TestCase):
         ps1_line_problems = [p for p in problems if "dev_start.ps1" in p and "超過薄殼上限" in p]
         self.assertEqual(ps1_line_problems, [])
 
-    def test_forbidden_keyword_in_sh_detected(self) -> None:
+    #: 10 支史料回歸鎖的**單一判準表**（R85／訴求 2）。立案事實：同一個判準原本被寫了
+    #: 10 遍，每一遍只有「注入什麼」與「期望診斷裡出現哪個 token」不同，其餘 12 行鷹架
+    #: （tempfile → _make_fake_root → mock ROOT → check_wrapper_thinness）逐字相同。
+    #: 🔴 **被拿掉的是那 10 份一模一樣的鷹架，不是覆蓋**：10 個注入樣本一個不少、期望
+    #: token 一個不變，案例名與立案史料改由 subTest 的 case／why 逐案報出（哪一列紅的
+    #: 在失敗訊息裡看得到）。判準本身（注入 → 必須被診斷命中）一個字都沒動。
+    _FORBIDDEN_CASES: tuple[tuple[str, str, str, str, str], ...] = (
+        ("sh:while", "while true; do echo x; done\n", "# fine\n",
+         "'while '", "S20 原始黑名單"),
+        ("sh:for-loop",
+         'for f in "$@"; do\n  case "$f" in\n'
+         "    --extra-flag) echo handling extra business logic ;;\n"
+         "  esac\ndone\n", "# fine\n", "'for '",
+         "P1 回歸防護：bash for 迴圈需與 .ps1 側 foreach ( 對稱收錄，"
+         "否則迭代式業務邏輯（含 case 分支）外溢回 wrapper 會 false green"),
+        ("sh:python3-dash-c",
+         'result=$(python3 -c "import sys; print(sys.argv)")\n', "# fine\n",
+         "'python3 -c'",
+         "DEF-101-083 獨立複審：黑名單原本只收 python -c，python3 版本前綴不同、"
+         "非其子字串，可完全繞過偵測"),
+        ("ps1:c-style-for", "# fine\n",
+         "for ($i=0; $i -lt 5; $i++) { Write-Host $i }\n", "'for ('",
+         "DEF-101-083 獨立複審：.ps1 側原本只收 foreach (，C-style for (...) 是"
+         "不同拼法、非其子字串"),
+        ("ps1:foreach-object", "# fine\n",
+         "Get-Content x.json | ForEach-Object { $_ }\n", "ForEach-Object",
+         "DEF-101-083 獨立複審：ForEach-Object 管線 cmdlet 迭代語意等同迴圈，"
+         "原黑名單完全未收錄"),
+        ("ps1:convertfrom-json", "# fine\n", "$data = ConvertFrom-Json $raw\n",
+         "ConvertFrom-Json", "S20 原始黑名單"),
+        ("sh:for-no-space", 'for((i=0;i<3;i++)); do echo "$i"; done\n', "# fine\n",
+         "'for('",
+         "DEF-101-095 四方複審 SD 第三輪繞過：for((i=0;i<3;i++)) 的 for 緊接 (( 無空格，"
+         "原黑名單只收含空格的 for "),
+        ("ps1:foreach-no-space", "# fine\n",
+         "foreach($x in @(1,2,3)){ Write-Host $x }\n", "'foreach('",
+         "DEF-101-095 四方複審 SD 第三輪繞過：foreach($x in $y){...} 無空格，"
+         "原黑名單只收含空格的 foreach ("),
+        ("ps1:system-text-json", "# fine\n",
+         "$o = [System.Text.Json.JsonSerializer]::Deserialize('{}', [object])\n",
+         "[System.Text.Json",
+         "DEF-101-095 四方複審 SD 第三輪繞過：.NET JsonSerializer 語意等同 "
+         "ConvertFrom-Json/ConvertTo-Json，但完全不含這兩個 cmdlet 字串"),
+        ("ps1:array-foreach-method", "# fine\n",
+         "(1,2,3).ForEach({ Write-Host $_ })\n", "'.ForEach('",
+         "DEF-101-095 四方複審 SD 第三輪繞過：(1,2,3).ForEach({...}) 是陣列型別的 "
+         ".ForEach() 方法而非 ForEach-Object cmdlet"),
+    )
+
+    def test_forbidden_patterns_are_detected(self) -> None:
+        """史料回歸鎖：每一個曾經繞過黑名單的寫法，今天都必須被診斷命中。
+
+        WHY 逐案而不是「有任何一筆命中就算過」：本族的立案史料是**三輪繞過**，每一輪
+        補的是不同拼法；用聚合斷言的話，任一拼法被刪掉都不會轉紅（而那正是這族在防的）。
+        """
         import tempfile
 
-        with tempfile.TemporaryDirectory() as td:
-            fake_root = self._make_fake_root(
-                Path(td),
-                sh_text="while true; do echo x; done\n",
-                ps1_text="# fine\n",
-            )
-            with mock.patch.object(m, "ROOT", fake_root):
-                problems = m.check_wrapper_thinness()
-        self.assertTrue(any("'while '" in p for p in problems))
-
-    def test_forbidden_for_loop_in_sh_detected(self) -> None:
-        """P1 回歸防護：bash for 迴圈需與 .ps1 側 foreach ( 對稱收錄，
-        否則迭代式業務邏輯（含 case 分支）外溢回 wrapper 會 false green。"""
-        import tempfile
-
-        with tempfile.TemporaryDirectory() as td:
-            fake_root = self._make_fake_root(
-                Path(td),
-                sh_text=(
-                    "for f in \"$@\"; do\n"
-                    "  case \"$f\" in\n"
-                    "    --extra-flag) echo handling extra business logic ;;\n"
-                    "  esac\n"
-                    "done\n"
-                ),
-                ps1_text="# fine\n",
-            )
-            with mock.patch.object(m, "ROOT", fake_root):
-                problems = m.check_wrapper_thinness()
-        self.assertTrue(any("'for '" in p for p in problems))
-
-    def test_forbidden_python3_dash_c_in_sh_detected(self) -> None:
-        """獨立複審回歸鎖：黑名單原本只收 "python -c"，"python3 -c" 版本前綴不同、
-        非其子字串，可完全繞過偵測——內嵌 Python 業務邏輯改用 python3 仍應被攔下。"""
-        import tempfile
-
-        with tempfile.TemporaryDirectory() as td:
-            fake_root = self._make_fake_root(
-                Path(td),
-                sh_text='result=$(python3 -c "import sys; print(sys.argv)")\n',
-                ps1_text="# fine\n",
-            )
-            with mock.patch.object(m, "ROOT", fake_root):
-                problems = m.check_wrapper_thinness()
-        self.assertTrue(any("'python3 -c'" in p for p in problems))
-
-    def test_forbidden_c_style_for_loop_in_ps1_detected(self) -> None:
-        """獨立複審回歸鎖：.ps1 側原本只收 "foreach ("，C-style `for (...)` 迴圈是
-        不同拼法、非其子字串，可完全繞過偵測。"""
-        import tempfile
-
-        with tempfile.TemporaryDirectory() as td:
-            fake_root = self._make_fake_root(
-                Path(td),
-                sh_text="# fine\n",
-                ps1_text="for ($i=0; $i -lt 5; $i++) { Write-Host $i }\n",
-            )
-            with mock.patch.object(m, "ROOT", fake_root):
-                problems = m.check_wrapper_thinness()
-        self.assertTrue(any("'for ('" in p for p in problems))
-
-    def test_forbidden_foreach_object_cmdlet_in_ps1_detected(self) -> None:
-        """獨立複審回歸鎖：ForEach-Object 管線 cmdlet 迭代語意等同迴圈，原黑名單
-        完全未收錄，可讓迭代式業務邏輯（含 JSON 解析）繞過偵測。"""
-        import tempfile
-
-        with tempfile.TemporaryDirectory() as td:
-            fake_root = self._make_fake_root(
-                Path(td),
-                sh_text="# fine\n",
-                ps1_text="Get-Content x.json | ForEach-Object { $_ }\n",
-            )
-            with mock.patch.object(m, "ROOT", fake_root):
-                problems = m.check_wrapper_thinness()
-        self.assertTrue(any("ForEach-Object" in p for p in problems))
-
-    def test_forbidden_keyword_in_ps1_detected(self) -> None:
-        import tempfile
-
-        with tempfile.TemporaryDirectory() as td:
-            fake_root = self._make_fake_root(
-                Path(td),
-                sh_text="# fine\n",
-                ps1_text="$data = ConvertFrom-Json $raw\n",
-            )
-            with mock.patch.object(m, "ROOT", fake_root):
-                problems = m.check_wrapper_thinness()
-        self.assertTrue(any("ConvertFrom-Json" in p for p in problems))
-
-    def test_forbidden_c_style_for_no_space_in_sh_detected(self) -> None:
-        """2026-07-16 四方複審 SD 發現第三輪繞過：`for((i=0;i<3;i++))` 的 "for"
-        緊接 "((" 無空格，原黑名單只收 "for "（含空格）完全不命中。"""
-        import tempfile
-
-        with tempfile.TemporaryDirectory() as td:
-            fake_root = self._make_fake_root(
-                Path(td),
-                sh_text="for((i=0;i<3;i++)); do echo \"$i\"; done\n",
-                ps1_text="# fine\n",
-            )
-            with mock.patch.object(m, "ROOT", fake_root):
-                problems = m.check_wrapper_thinness()
-        self.assertTrue(any("'for('" in p for p in problems))
-
-    def test_forbidden_foreach_no_space_in_ps1_detected(self) -> None:
-        """2026-07-16 四方複審 SD 發現第三輪繞過：`foreach($x in $y){...}` 無空格，
-        原黑名單只收 "foreach ("（含空格）完全不命中。"""
-        import tempfile
-
-        with tempfile.TemporaryDirectory() as td:
-            fake_root = self._make_fake_root(
-                Path(td),
-                sh_text="# fine\n",
-                ps1_text="foreach($x in @(1,2,3)){ Write-Host $x }\n",
-            )
-            with mock.patch.object(m, "ROOT", fake_root):
-                problems = m.check_wrapper_thinness()
-        self.assertTrue(any("'foreach('" in p for p in problems))
-
-    def test_forbidden_system_text_json_in_ps1_detected(self) -> None:
-        """2026-07-16 四方複審 SD 發現第三輪繞過：.NET
-        `[System.Text.Json.JsonSerializer]::Deserialize(...)` 語意等同
-        ConvertFrom-Json/ConvertTo-Json，但完全不含這兩個 cmdlet 字串。"""
-        import tempfile
-
-        with tempfile.TemporaryDirectory() as td:
-            fake_root = self._make_fake_root(
-                Path(td),
-                sh_text="# fine\n",
-                ps1_text="$o = [System.Text.Json.JsonSerializer]::Deserialize('{}', [object])\n",
-            )
-            with mock.patch.object(m, "ROOT", fake_root):
-                problems = m.check_wrapper_thinness()
-        self.assertTrue(any("[System.Text.Json" in p for p in problems))
-
-    def test_forbidden_array_foreach_method_in_ps1_detected(self) -> None:
-        """2026-07-16 四方複審 SD 發現第三輪繞過：`(1,2,3).ForEach({...})` 是陣列
-        型別的 .ForEach() 方法而非 ForEach-Object cmdlet，語意等同迴圈但完全不含
-        該 cmdlet 字串。"""
-        import tempfile
-
-        with tempfile.TemporaryDirectory() as td:
-            fake_root = self._make_fake_root(
-                Path(td),
-                sh_text="# fine\n",
-                ps1_text="(1,2,3).ForEach({ Write-Host $_ })\n",
-            )
-            with mock.patch.object(m, "ROOT", fake_root):
-                problems = m.check_wrapper_thinness()
-        self.assertTrue(any("'.ForEach('" in p for p in problems))
+        self.assertEqual(
+            len(self._FORBIDDEN_CASES), 10,
+            "注入樣本數變了——本族是史料回歸鎖，樣本只准增不准減；"
+            "真的要退役某一列，請連同 _FORBIDDEN 內對應關鍵字一起談")
+        for name, sh_text, ps1_text, token, why in self._FORBIDDEN_CASES:
+            with self.subTest(case=name, why=why):
+                with tempfile.TemporaryDirectory() as td:
+                    fake_root = self._make_fake_root(
+                        Path(td), sh_text=sh_text, ps1_text=ps1_text)
+                    with mock.patch.object(m, "ROOT", fake_root):
+                        problems = m.check_wrapper_thinness()
+                self.assertTrue(
+                    any(token in p for p in problems),
+                    f"{name} 注入後診斷未出現 {token}（立案：{why}）；實得：{problems}")
 
     def test_hash_catches_novel_pattern_blacklist_misses(self) -> None:
         """R10 拍板案(a) 核心意圖鎖：黑名單「沒收錄」的新樣板（如網路呼叫

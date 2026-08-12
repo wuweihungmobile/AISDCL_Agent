@@ -79,8 +79,17 @@ def main(argv: list[str] | None = None) -> int:
     repo_root = argv[0] if argv else os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     latest, missing = missing_artifact_tokens(repo_root)
     if latest is None:
-        print("✅ gitignore 覆蓋 lint：無演化版目錄，略過")
-        return 0
+        # 🔴 AGT-12（R85）fail-closed：此處原本印 **✅ 綠勾** 並回 0——比 ⚠️ 更難看見，
+        # 因為畫面上它與「檢查通過」逐字同形。**advisory 的射程是「發現」不是「找不到標的」**：
+        # 缺 .gitignore block 是發現（warn、不阻擋，DEF-37-001 P3 原意，下方維持不變）；
+        # 「一個版本目錄都定位不到」是**輸入壞掉**，此時本 lint 什麼都沒檢查過，
+        # 回 0 就是把「沒看」講成「看過且沒事」。
+        print(
+            "::error:: gitignore 覆蓋 lint：找不到任何演化版目錄"
+            f"（repo_root={repo_root!r}）——輸入不可信，一律 fail-closed",
+            file=sys.stderr,
+        )
+        return 1
     if not missing:
         print(f"✅ gitignore 覆蓋 lint：最新版 {latest} runtime 產物排除 block 齊備")
         return 0

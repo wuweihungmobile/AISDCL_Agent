@@ -24,24 +24,13 @@ import os
 import re
 import subprocess
 import sys
-from typing import Callable, Optional
+from collections.abc import Callable
 
 from ..core.hookspec import (
     HookContext,
     KernelPhase,
     PromptInjectionResult,
 )
-
-
-def _propagate_trace_env() -> dict[str, str]:
-    """SD_09 W0 M-04: 將當前 AUTOCLAUDE_TRACE_ID（若存在於 env）傳遞至 subprocess。
-
-    Plugin 邊界限制（importlinter Rule 7 / ADR-SD08-004 §2.1）：禁止直接
-    import `autoclaude.utils.trace_context`。本 helper 僅讀 os.environ 中
-    已存在的 AUTOCLAUDE_TRACE_ID（由上層 caller 經 propagate_to_subprocess_env
-    或 with_trace_id() 注入），不直接讀取 ContextVar。
-    """
-    return dict(os.environ)
 
 logger = logging.getLogger(__name__)
 
@@ -69,7 +58,14 @@ def _default_compiler(test_file: str, timeout: int) -> tuple[int, str]:
             [sys.executable, "-m", "py_compile", test_file],
             capture_output=True, text=True, timeout=timeout,
             encoding="utf-8", errors="replace",
-            env=_propagate_trace_env(),
+            # R85（訴求 2）：原為本檔私有 helper `_propagate_trace_env()`，函式體就是
+            # `return dict(os.environ)`——名字說「傳遞 trace」，實際什麼都沒傳（真正會寫
+            # TRACEPARENT 的是 utils.trace_context.propagate_to_subprocess_env，而 plugin
+            # 受 importlinter Rule 7 禁止直接 import 它）。留著一個與名字不符的空殼、又在
+            # token_guard/git_verifier.py 有一份逐字副本，是「同一份知識住兩個家」的形態。
+            # 就地展開為它真正的語意，零行為變更；git_verifier 那份因有 mutation 測試綁定
+            # 未動，已列入交棒。
+            env=dict(os.environ),
         )
         return result.returncode, result.stderr or ""
     except FileNotFoundError as exc:
@@ -98,7 +94,7 @@ class FastPathPlugin:
 
     def __init__(
         self,
-        compiler: Optional[Callable[[str, int], tuple[int, str]]] = None,
+        compiler: Callable[[str, int], tuple[int, str]] | None = None,
         timeout_seconds: int = _DEFAULT_COMPILE_TIMEOUT,
     ):
         self._compile = compiler or _default_compiler
@@ -113,7 +109,7 @@ class FastPathPlugin:
     def subscribed_phases(self) -> list[KernelPhase]:
         return [KernelPhase.PRE_ATTEMPT]
 
-    def on_event(self, ctx: HookContext) -> Optional[PromptInjectionResult]:
+    def on_event(self, ctx: HookContext) -> PromptInjectionResult | None:
         if ctx.phase is not KernelPhase.PRE_ATTEMPT:
             return None
         # 僅在 attempt == 0 觸發（首次嘗試前，後續由 strategy 路徑接手）
@@ -129,7 +125,7 @@ class FastPathPlugin:
             contributor=self.name(), prefix=hint, position="top",
         )
 
-    def _check(self, eval_output: str) -> Optional[str]:
+    def _check(self, eval_output: str) -> str | None:
         m = _PRIMARY_PATTERN.search(eval_output) or _FALLBACK_PATTERN.search(eval_output)
         if not m:
             return None

@@ -406,35 +406,25 @@ common_integration_scenarios:
       - "資料品質驗證"
 
 dependencies:
-  tools:
-    - api-testing-tools.md  # Postman, Insomnia, HTTPie
-    - mock-servers.md  # WireMock, MockServer, Prism
-    - api-documentation-tools.md  # Swagger, Redoc, Postman Collections
-    - monitoring-tools.md  # Datadog, New Relic, Grafana
-
-  data:
-    - api-documentation.md  # 第三方API文檔
-    - authentication-credentials.md  # API keys, OAuth配置
-    - data-mapping-requirements.md  # 欄位映射
-    - sla-requirements.md  # 效能與可靠性需求
-
-  tasks:
-    - api-analysis.md
-    - integration-design.md
-    - authentication-implementation.md
-    - webhook-handler-setup.md
-    - integration-testing.md
-
+  # ─── AGT-11（R85）幽靈依賴清除（判準與取數管道自證見 agent/core/05.sd-architect-zh.yaml 同節）───
+  # 本檔實測：`data`(4)／`tasks`(5)／`checklists`(4)／`tools`(4) 共 17 條為裸檔名，正規化後在本版磁碟上不可解析
+  #（根相對與 basename 兩種解析皆 0 命中），且在 agent/ 之外零引用。
+  # 被刪除的原文逐字保留（訂正協議：禁止靜默覆寫）：
+  #   data: api-documentation.md  # 第三方API文檔 / authentication-credentials.md  # API keys, OAuth配置 /
+  #         data-mapping-requirements.md  # 欄位映射 / sla-requirements.md  # 效能與可靠性需求
+  #   tasks: api-analysis.md / integration-design.md / authentication-implementation.md /
+  #          webhook-handler-setup.md / integration-testing.md
+  #   checklists: integration-planning-checklist.md / security-review-checklist.md /
+  #               go-live-checklist.md / monitoring-setup-checklist.md
+  #   tools: api-testing-tools.md  # Postman, Insomnia, HTTPie /
+  #          mock-servers.md  # WireMock, MockServer, Prism /
+  #          api-documentation-tools.md  # Swagger, Redoc, Postman Collections /
+  #          monitoring-tools.md  # Datadog, New Relic, Grafana
+  # ─────────────────────────────────────────────────────────────────────
   templates:
     - docs_template/sdd/api/PROVIDER-API-SPEC-TEMPLATE.yaml
     - docs_template/sdd/requirements/THIRD-PARTY-API-RESEARCH-TEMPLATE.md
     - docs_template/sdd/testing/CONTRACT-TEST-SPEC-INTEGRATION-TEMPLATE.md
-
-  checklists:
-    - integration-planning-checklist.md
-    - security-review-checklist.md
-    - go-live-checklist.md
-    - monitoring-setup-checklist.md
 
 scenario_applications:
   integration_scenario:

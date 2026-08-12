@@ -207,33 +207,40 @@ collaboration_rules:
       communication_protocols: "定期品質審查、測試方法討論"
 
 dependencies:
-  data:
-    - technical-standards.md
-    - architecture-patterns.md
-    - technology-stack.md
-    - security-requirements.md
-    - performance-requirements.md
-    - integration-standards.md
-  
-  tasks:
-    - create-doc.md
-    - execute-checklist.md
-    - system-architecture-design.md
-    - api-specification.md
-    - database-design.md
-    - technology-evaluation.md
-    - technical-review.md
-  
+  # ─── AGT-11（R85）幽靈依賴清除 ───────────────────────────────────────────
+  # 立案事實（實測）：`data`／`tasks`／`checklists` 三桶共 18 條全是裸檔名，
+  # 在本版磁碟上**一支都不存在**；且它們在 agent/ 之外**零引用**（取數管道自證：
+  # 對照組 `SDD_GUIDE.md` 在同一次掃描命中 20 檔 ⇒ 命中 0 是「真的沒有」不是「查不到」）。
+  # 為何一直沒人發現：`scripts/agent_template_lint.py` 只驗 `dependencies.templates`
+  # 這**一個**桶，另外三桶結構上永遠不會轉紅
+  # ——「鎖在、但只守四分之一」，與只斷言檔案存在的鎖同型。
+  # 🔴 P6 訂正本段一筆假數字（同輪，尚未 commit ⇒ 就地改）：原文寫「該桶 161 條全數可解析」。
+  #    實測 161 是**行級 TOK regex 對整個 agent 樹所有 `docs_template/` token 的命中總數**，
+  #    而 `dependencies.templates` 桶實測是 **42 條**（兩個不同的量被寫成同一個）。
+  #    此處刪值不補值：兩個數字都是會漂的量測值，判準讀的是磁碟不是這行註解。
+  # 🔴 P6 同時訂正「一支都不存在」的射程：那句話對本檔 18 條為真，但對整個 agent 樹不成立
+  #    ——四桶 302 條中有 1 條（`06.dev-developer-zh.yaml` 的
+  #    `../guides/user/process/Development_Build_Test_Cycle.md`）指向真實存在的檔，
+  #    只是帶了違反「框架根相對」慣例的 `../`。該條已修正前綴保留，未刪。
+  # 🔴 F2 複審訂正上一行的數字（訂正協議：禁止靜默覆寫）：原文寫「四桶 **199** 條」，
+  #    實測是 **302** 條（data 79／tasks 97／checklists 75／tools 51）。同一個假數字當輪
+  #    住三個家（本檔、`scripts/agent_template_lint.py` 檔頭、其測試檔區塊註解），
+  #    三份彼此不一致也不會有任何東西轉紅。判準、取數管道與四桶今日活分母（＝1）
+  #    的唯一真相源＝`scripts/agent_template_lint.py` 檔頭判準 4 節，本檔不複寫。
+  # 被刪除的原文逐字保留（訂正協議：禁止靜默覆寫）：
+  #   data: technical-standards.md / architecture-patterns.md / technology-stack.md /
+  #         security-requirements.md / performance-requirements.md / integration-standards.md
+  #   tasks: create-doc.md / execute-checklist.md / system-architecture-design.md /
+  #          api-specification.md / database-design.md / technology-evaluation.md / technical-review.md
+  #   checklists: architecture-review-checklist.md / api-design-checklist.md /
+  #               database-design-checklist.md / security-review-checklist.md /
+  #               performance-review-checklist.md
+  # 修法選「刪掉」而非「補建 18 支檔」：真正會被載入的資產清單由框架入口
+  # `AISDLC_SDD_INIT.md` 的 `auto_load_config` 決定（唯一真相源），本檔不自帶第二份。
+  # ─────────────────────────────────────────────────────────────────────
   templates:
     - docs_template/core/srd/SRD_Module_Template.md
     - docs_template/sdd/quality/CODE-QUALITY-BASELINE-TEMPLATE.md
-  
-  checklists:
-    - architecture-review-checklist.md
-    - api-design-checklist.md
-    - database-design-checklist.md
-    - security-review-checklist.md
-    - performance-review-checklist.md
 
 # 協作流程圖
 collaboration_flow: |
@@ -349,6 +356,18 @@ sdd_phase02_greenfield:
       - "安全機制選擇（Auth/Encryption）"
       - "快取策略（Redis/Memory/CDN）"
       - "資料庫選型（SQL/NoSQL/Search）"
+      # AGT-13（R85）：本清單原本只涵蓋「選什麼技術」，對「加一道守衛／閘門／棘輪」
+      # 這一類決策零觸發——而那正是本專案最常做、也最常做壞的一類架構決策。
+      - "引入任一機械守衛（hook／閘門／棘輪／lint／CI job）— 觸發下方 guard_design_checklist"
+    guard_design_checklist:
+      description: "AGT-13（R85）：架構決策若產出一道『會擋人』的機械守衛，ADR 必須逐項回答本清單"
+      provenance: "設計判準的單一真相源＝monorepo 根層 CLAUDE.md〈鐵律五〉（守衛的判準必須精準）與〈鐵律七〉（鎖的持有面）。本處刻意不複寫其內容——複寫一份就是第二個家，而只有一個家會被改"
+      required_answers:
+        - "持有面：這道守衛的**常數／史料／消費端**分別住哪幾支檔？三者不同檔時，改它就不是單一包能完成的工作"
+        - "假紅代價：對真實輸入面做過一次普查了嗎？逐筆判讀後假陽性幾筆？（普查母體必須是該守衛真正的輸入面，不是描述它的散文）"
+        - "逃生口與授權邊界：怎麼關掉它？誰關得掉？被守的那一方自己寫得出豁免嗎？"
+        - "失效表徵：它靜默失效時螢幕上長什麼樣？若與『修好了』長得一樣，必須另立一個正面憑證"
+      fail_condition: "四問任一未答，或以『加了就會比較安全』作答 ⇒ SCG-2 不予通過。判準不精準的守衛會被整個關掉，而被關掉的守衛比沒有守衛更糟"
     srd_adr_reference: "SRD 必須在架構決策章節引用對應 ADR 編號"
 
   c4_mandatory_output:
@@ -378,7 +397,11 @@ sdd_phase02_greenfield:
       output_location: "SRD 非功能需求章節 + PBS 文件"
     review_participants: ["sd", "dev", "qa"]
     review_checklist:
-      - "ADR 清單完整（至少 3 個）"
+      # 🔴 AGT-12（R85）訂正。被訂正的原文逐字保留：`ADR 清單完整（至少 3 個）`。
+      # 為何是假話：同檔 `adr_auto_trigger.mandatory_adrs` 現有 4 條 required:true
+      # （R84 補 ADR-004 平台目標矩陣時漏改本行）⇒ 交出 3 個 ADR 也能勾過這一格，
+      # 而 ADR-004 恰好是最新、最容易被漏掉的那一條。數字寫死必過期，改成指向同檔 SSOT。
+      - "ADR 清單完整＝`adr_auto_trigger.mandatory_adrs` 中每一條 required:true 都有對應檔（清單為準，不記數字）"
       - "C4 圖（L1 + L2）已產出"
       - "NFR 已規格化（數值明確）"
 

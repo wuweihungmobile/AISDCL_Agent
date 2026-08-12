@@ -53,6 +53,7 @@ from _ps_engine import production_engine  # noqa: E402  # R60 DEF-101-548：引�
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 
 sys.path.insert(0, str(_REPO_ROOT / "tools" / "lib"))
+import git_paths  # noqa: E402  ← git 路徑列舉唯一取數層
 import sdd_latest  # noqa: E402
 
 _BOOTSTRAP_PS1 = _REPO_ROOT / "tools" / "bootstrap.ps1"
@@ -485,20 +486,15 @@ def _tracked_files(pattern: str) -> list[str]:
     """git tracked 且符合 glob pattern 的 repo-relative 路徑清單（fail-loud）。
 
     用 `git ls-files` 而非 `Path.rglob`：天然排除 `.git`／`.venv`／
-    `__pycache__`／`node_modules`（只要未被 commit），且與同目錄下
-    test_ps1_bom.py／test_bash32_compat.py 等既有測試同款慣例。
+    `__pycache__`／`node_modules`（只要未被 commit）。
+
+    🔴 R85／訴求 2：取數本體改委派 `tools/lib/git_paths.py`（根 CLAUDE.md 鐵律三表
+    逐字指定的唯一取數層）——「每個站點各自記得帶 quotepath 旗標」正是該 SSOT 立案時
+    要消滅的形態。fail-loud 留在本層（該 SSOT 刻意不代呼叫端決定 rc≠0 怎麼處置）。
     """
-    proc = subprocess.run(
-        ["git", "-C", str(_REPO_ROOT), "-c", "core.quotePath=false",
-         "ls-files", "--", pattern],
-        capture_output=True, text=True, encoding="utf-8", errors="replace",
-    )
-    if proc.returncode != 0:
-        raise AssertionError(
-            f"git ls-files 失敗（rc={proc.returncode}；stderr="
-            f"{proc.stderr.strip()!r}）——掃描邊界不得靜默縮小"
-        )
-    return [line for line in proc.stdout.splitlines() if line]
+    rels = git_paths.ls_files(_REPO_ROOT, "--", pattern)
+    assert rels, f"git ls-files -- {pattern} 回空 ⇒ 掃描邊界不得靜默縮小"
+    return rels
 
 
 # R66 ADR-XPLAT-002 Phase 2-D 收斂（DEF-101-624）：`_FROZEN_SDD_VERSION_RE` 與

@@ -62,6 +62,7 @@ _REPO_ROOT = Path(__file__).resolve().parents[2]
 _GUARD_SH = _REPO_ROOT / "tools" / "lib" / "windowsapps_guard.sh"
 
 sys.path.insert(0, str(_REPO_ROOT / "tools" / "lib"))
+import git_paths  # noqa: E402  ← git 路徑列舉唯一取數層
 import sdd_latest  # noqa: E402
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
@@ -244,17 +245,16 @@ _KNOWN_HOOK_DIRS: frozenset[str] = frozenset({
 
 @functools.lru_cache(maxsize=1)
 def _tracked_files() -> tuple[str, ...]:
-    """git tracked 的**全部**檔案（repo-relative）。快取一次供全庫推導使用。"""
-    proc = subprocess.run(
-        ["git", "-C", str(_REPO_ROOT), "-c", "core.quotePath=false", "ls-files"],
-        capture_output=True, text=True, encoding="utf-8", errors="replace",
-    )
-    if proc.returncode != 0:
-        raise AssertionError(
-            f"git ls-files 失敗（rc={proc.returncode}；stderr={proc.stderr.strip()!r}）"
-            "——掃描邊界不得靜默縮小"
-        )
-    return tuple(line for line in proc.stdout.splitlines() if line)
+    """git tracked 的**全部**檔案（repo-relative）。快取一次供全庫推導使用。
+
+    🔴 R85／訴求 2：本體改委派 `tools/lib/git_paths.py`（根 CLAUDE.md 鐵律三表逐字指定
+    的「git 路徑列舉唯一取數層」）。原本這裡自己起一次 subprocess 並自己記得帶
+    `core.quotepath` 旗標——而「每個站點各自記得」正是該 SSOT 立案時要消滅的形態
+    （漏帶的那一個不會有任何東西轉紅，630 條非 ASCII 路徑會靜默掉出掃描面）。
+    """
+    rels = git_paths.ls_files(_REPO_ROOT)
+    assert rels, "git ls-files 回空 ⇒ 取數管道壞掉，掃描邊界不得靜默縮小"
+    return tuple(rels)
 
 
 @functools.lru_cache(maxsize=1)

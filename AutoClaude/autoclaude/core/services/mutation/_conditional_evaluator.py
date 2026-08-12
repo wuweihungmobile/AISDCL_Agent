@@ -1,7 +1,7 @@
 """ConditionalStrategy 的 shell 安全層 helpers（SD_05 W4 三方審查拆檔）。
 
 職責：
-  - ``_SAFE_COND_PATTERN``：白名單字元 regex（Gap-046）
+  - ``_SHELL_FALSE_COND_WHITELIST``：白名單字元 regex（Gap-046）
   - ``_DENY_CHARS``：黑名單字元集合（縱深防禦，即便落入白名單也必拒）
   - ``_default_evaluator``：subprocess.run shell=False + shlex.split 預設 evaluator
 
@@ -25,7 +25,7 @@ logger = logging.getLogger(__name__)
 # → `['C:Usersdevx.py', ...]`，路徑被靜默破壞而非清楚拒絕），故放寬前必須先把
 # _default_evaluator 改用 `shlex.split(cmd, posix=False)` 或等效正規化，兩者需同動；
 # 見 conditional.py 模組 docstring「跨平台注意」— 使用者應改寫正斜線路徑。
-_SAFE_COND_PATTERN = re.compile(r"^[\w\s\-./=:'\"]+$")
+_SHELL_FALSE_COND_WHITELIST = re.compile(r"^[\w\s\-./=:'\"]+$")
 # 黑名單：縱深防禦，即便落入白名單也必拒
 _DENY_CHARS = frozenset("!`$~><|&;()*?\\\n\r\t")
 

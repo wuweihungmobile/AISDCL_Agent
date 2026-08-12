@@ -553,27 +553,31 @@ def row_bytes(ledger_text: str) -> dict[str, int]:
 #: `308`／`309`／`313`／`333`／`335`／`348`／`400`／`401`／`412` 全數**結案並瘦身成索引**
 #: （逐列 −294 ~ −2896 bytes，原文逐字保全於 `CrossPlatform_R82_Ledger_Closure.md` §8），
 #: 瘦身後皆 ≤700 bytes ⇒ 依②向訊息**自己指名**的動作移除，不是放寬。
+#: 🔴 帳本洩壓包一次移出 **17 筆**（83 → 66）：15 筆已結超長列（`DEF-01-009`／`101-068`／
+#: `200`／`242`／`278`／`297`／`351`／`435`／`500`／`550`／`560`／`561`／`565`／`726`／`792`）
+#: 的欄內長文**逐字搬進** `CrossPlatform_R85_Ledger_Closure.md`，列上只留「結案字＋一句實查
+#: 結論＋檔名指針」；另兩筆（`101-676`／`101-870`）是**結案＋瘦身同一個動作**（見該兩列）。
+#: 十七筆瘦身後皆 ≤700 bytes ⇒ 依②向訊息**自己指名**的動作移除，不是放寬。
 OVERSIZE_ROW_GRANDFATHERED: frozenset[str] = frozenset("""
-DEF-01-009 DEF-100-002 DEF-101-018
-DEF-101-060 DEF-101-068 DEF-101-200 DEF-101-205
-DEF-101-233 DEF-101-235 DEF-101-238 DEF-101-242
+DEF-100-002 DEF-101-018
+DEF-101-060 DEF-101-205
+DEF-101-233 DEF-101-235 DEF-101-238
 DEF-101-243 DEF-101-263 DEF-101-268
-DEF-101-278 DEF-101-297
 DEF-101-324 DEF-101-336
-DEF-101-338 DEF-101-351 DEF-101-377
+DEF-101-338 DEF-101-377
 DEF-101-388 DEF-101-392 DEF-101-398 DEF-101-399
 DEF-101-402 DEF-101-415 DEF-101-418
-DEF-101-435 DEF-101-500 DEF-101-518
-DEF-101-550 DEF-101-557 DEF-101-559 DEF-101-560 DEF-101-561
-DEF-101-565 DEF-101-596 DEF-101-610 DEF-101-649
-DEF-101-675 DEF-101-676 DEF-101-693 DEF-101-701
-DEF-101-702 DEF-101-703 DEF-101-726 DEF-101-733
+DEF-101-518
+DEF-101-557 DEF-101-559
+DEF-101-596 DEF-101-610 DEF-101-649
+DEF-101-675 DEF-101-693 DEF-101-701
+DEF-101-702 DEF-101-703 DEF-101-733
 DEF-101-736 DEF-101-739 DEF-101-740 DEF-101-746 DEF-101-747
 DEF-101-748 DEF-101-752 DEF-101-755 DEF-101-758 DEF-101-764
-DEF-101-769 DEF-101-790 DEF-101-792 DEF-101-794 DEF-101-795
+DEF-101-769 DEF-101-790 DEF-101-794 DEF-101-795
 DEF-101-796 DEF-101-797 DEF-101-798 DEF-101-801 DEF-101-802
 DEF-101-803 DEF-101-810 DEF-101-856 DEF-101-866 DEF-101-867
-DEF-101-870 DEF-101-871 DEF-101-872 DEF-101-876 DEF-101-878
+DEF-101-871 DEF-101-872 DEF-101-876 DEF-101-878
 DEF-101-880 DEF-101-886 DEF-101-887 DEF-101-888 DEF-101-889
 """.split())
 
@@ -595,7 +599,11 @@ DEF-101-880 DEF-101-886 DEF-101-887 DEF-101-888 DEF-101-889
 #: 即實測當場轉紅。請勿「順手補回輪號」。
 #: 🔴 R82 帳本清債包重釘 **98 → 85**（往下改）：13 列結案並瘦身到 700 bytes 以下，見上方
 #: 清單的 R82 段。本值＝當回合實測超標列數，零加減推算。
-OVERSIZE_ROW_CEILING = 83
+#: 🔴 帳本洩壓包重釘 **83 → 66**（往下改）：17 筆瘦身成索引後 ≤700 bytes ⇒ 豁免過期，
+#: 依②向訊息自己指名的動作移除並同步下修。本值＝當回合實測超標列數，零加減推算。
+#: 輪號不寫進本段散文，理由同上一段（程式碼檔的輪號標籤不得超前帳本時鐘）；錨＝磁碟上
+#: 查得到的 `CrossPlatform_R85_Ledger_Closure.md`（那 15 列原文的居所）。
+OVERSIZE_ROW_CEILING = 66
 
 #: 存量列的**超標總量**（Σ max(0, 列 bytes − 上限)）上限。上面三條管的是「有幾列超標」，
 #: 這一條管的是「超標多少」——少了它，一列 800 bytes 的豁免列可以長到 8,000 bytes 而
@@ -664,7 +672,15 @@ OVERSIZE_ROW_CEILING = 83
 #: `tools/lib/ledger_rotation.py`：那句話從 R79 起逐輪寫在這裡，而當回合實測它零觀測者
 #: （`DEF-101-993`）。分家的理由不是整齊，是本檔的 LOC 棘輪餘裕近乎零，而該棘輪自己指定
 #: 的第一順位處置就是抽共用模組。
-OVERSIZE_ROW_EXCESS_CEILING = 121758
+#: 🔴 帳本洩壓包重釘 **121758 → 82896**（−38862，當回合實測值直接填入、零推算）。
+#: 淨額**只有降沒有升**，因為本次的兩個動作都是同一個方向：17 列的欄內長文逐字搬進
+#: `CrossPlatform_R85_Ledger_Closure.md`（列上只留索引），瘦身後全部 ≤700 bytes ⇒ 它們
+#: 連同各自的超標量一起離開分子。這是 R84 交棒書 §5.4 對「帳本 bytes 死結」明載的**出路①**
+#: （另一條是把天花板改成「現查值 ≤ 史料末元素」，未做，由 `DEF-200-053` 承接）。
+#: 🔴 **仍未關的那一半，誠實寫在這裡**：本值受 `test_the_real_ledger_baselines_are_exact_not_padded`
+#: 的**相等**斷言釘住 ⇒ 餘裕在結構上恆為 0，「在豁免列上追加一個位元組即紅」這件事沒有
+#: 因為本次下修而改變，只是分母變小了。
+OVERSIZE_ROW_EXCESS_CEILING = 82896
 
 
 def oversize_row_problems(ledger_text: str) -> list[str]:
@@ -690,13 +706,29 @@ def oversize_row_problems(ledger_text: str) -> list[str]:
         f"且 OVERSIZE_ROW_CEILING 會當場擋下"
         for i in sorted(set(over) - OVERSIZE_ROW_GRANDFATHERED)
     ]
+    stale = sorted(OVERSIZE_ROW_GRANDFATHERED - set(over))
     problems += [
         f"{i}：列在 OVERSIZE_ROW_GRANDFATHERED，但主檔實測"
         + ("查無此 ID" if i not in sizes else f"{sizes[i]} bytes ≤ {ROW_MAX_BYTES}")
         + "⇒ 豁免已過期，請把它從清單移除並同步下修 OVERSIZE_ROW_CEILING 與 "
           "OVERSIZE_ROW_EXCESS_CEILING——留著就是日後無聲加回去的額度"
-        for i in sorted(OVERSIZE_ROW_GRANDFATHERED - set(over))
+        for i in stale
     ]
+    if stale:
+        # 🔴 就地提示（`DEF-101-992`／`DEF-200-049` 指名的出口，形態同 `DEF-101-977` 的
+        # `expiring_oversize_waivers()`）：上面那一串只說「請同步下修」，**沒說下修到多少**
+        # ⇒ 每個瘦身列的人都得自己重算一次三個數字，而算錯的表徵與算對完全相同（相等斷言
+        # 會紅，但紅在別的地方）。這裡把當回合現算的值直接印出來，照著貼即可。
+        # 🔴 刻意**接在最後一筆過期訊息的字串裡、不另開一個 problem 元素**：本函式的回傳
+        # **長度**是既有注入測試的斷言對象（`len(problems) == 2` 這種），多一個元素會讓
+        # 一則純提示把那些測試打紅——而那些測試量的是「判準抓到幾筆違規」，提示不是違規。
+        problems[-1] += (
+            f"\n  ↑ 上列 {len(stale)} 筆過期豁免的**就地處置值**（當回合現算，直接照貼）："
+            f"① 從 OVERSIZE_ROW_GRANDFATHERED 移除：{' '.join(stale)}；"
+            f"② OVERSIZE_ROW_CEILING 改成 {len(over)}；③ OVERSIZE_ROW_EXCESS_CEILING 改成"
+            f" {sum(n - ROW_MAX_BYTES for n in over.values())}。兩個新值都要同時追加進"
+            f" ledger_rotation 的對應 *_HISTORY（末元素必須等於現值），否則方向鎖會說"
+            f"「史料是裝飾品」")
     if len(OVERSIZE_ROW_GRANDFATHERED) > OVERSIZE_ROW_CEILING:
         problems.append(
             f"存量豁免清單 {len(OVERSIZE_ROW_GRANDFATHERED)} 筆 > 棘輪上限 "

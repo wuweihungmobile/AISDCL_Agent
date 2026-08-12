@@ -446,34 +446,23 @@ collaboration_rules:
       communication_protocols: "跨平台品質同步、測試覆蓋協調"
 
 dependencies:
-  tools:
-    - web-automation-tools.md
-    - browser-testing-platforms.md
-    - web-performance-tools.md
-    - accessibility-testing-tools.md
-
-  data:
-    - browser-support-matrix.md
-    - responsive-breakpoints.md
-    - web-vitals-targets.md
-    - accessibility-standards.md
-
-  tasks:
-    - cross-browser-testing.md
-    - responsive-testing.md
-    - web-performance-testing.md
-    - accessibility-testing.md
-
+  # ─── AGT-11（R85）幽靈依賴清除（判準與取數管道自證見 agent/core/05.sd-architect-zh.yaml 同節）───
+  # 本檔實測：`data`(4)／`tasks`(4)／`checklists`(4)／`tools`(4) 共 16 條為裸檔名，正規化後在本版磁碟上不可解析
+  #（根相對與 basename 兩種解析皆 0 命中），且在 agent/ 之外零引用。
+  # 被刪除的原文逐字保留（訂正協議：禁止靜默覆寫）：
+  #   data: browser-support-matrix.md / responsive-breakpoints.md / web-vitals-targets.md /
+  #         accessibility-standards.md
+  #   tasks: cross-browser-testing.md / responsive-testing.md / web-performance-testing.md /
+  #          accessibility-testing.md
+  #   checklists: web-testing-checklist.md / cross-browser-checklist.md / accessibility-checklist.md /
+  #               web-performance-checklist.md
+  #   tools: web-automation-tools.md / browser-testing-platforms.md / web-performance-tools.md /
+  #          accessibility-testing-tools.md
+  # ─────────────────────────────────────────────────────────────────────
   templates:
     - docs_template/core/tests/AT_Module_Template.md
     - docs_template/core/tests/Test_Report_Template.md
     - docs_template/core/tests/Security_Test_Plan_Template.md
-
-  checklists:
-    - web-testing-checklist.md
-    - cross-browser-checklist.md
-    - accessibility-checklist.md
-    - web-performance-checklist.md
 
 scenario_applications:
   greenfield_web:

@@ -8,7 +8,6 @@ from __future__ import annotations
 
 import os
 
-import pytest
 
 from scripts import rfc_lifecycle_lint as lint
 
@@ -205,3 +204,22 @@ def test_main_missing_status_warns_but_exits_zero(tmp_path, capsys):
     assert lint.main([repo]) == 0
     out = capsys.readouterr().out
     assert "::warning::" in out and "DEF-30-001" in out and "RFC_W.md" in out
+
+
+# ── (AGT-12 / R85) fail-closed：輸入不可用時不得靜默放行 ──────────────────────
+
+def test_main_no_version_dir_exits_nonzero(tmp_path, capsys):
+    """定位不到任何演化版 ⇒ 硬閘非零。
+
+    立案事實（R85 實測）：本檔此前對這個情境**一個 case 都沒有**，而實作走的是
+    `_latest_active_dir()` 回 None → `lint()` 回 `[]` → main 印
+    「✅ RFC 生命週期 lint：最新版 active/ 無已決 RFC 滯留」→ rc 0。
+    那是對一個**從未找到、更未掃過**的目錄做正面斷言——四支同型 fail-open 中最嚴重的
+    一種（其餘三支至少講了「略過」，這支連略過都沒說，畫面與真正通過完全無法分辨）。
+
+    為何此行為重要（Rule 9）：本 lint 的價值＝「已決 RFC 滯留 active/」會被擋下。
+    若 repo_root 解析漂掉（呼叫端傳錯、目錄命名改動、Copy-on-Evolve 開版失敗），
+    fail-open 會讓這道硬閘在**無人察覺**的情況下整支失效，而 ci-gate 照樣全綠。
+    """
+    assert lint.main([str(tmp_path)]) == 1
+    assert "::error::" in capsys.readouterr().err

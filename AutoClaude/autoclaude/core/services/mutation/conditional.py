@@ -10,7 +10,7 @@
   - 巢狀 CONDITIONAL 上限：遞迴深度 > 4 直接拒絕，防 IO 風暴（SD_05 W4 SD-M1）
 
 跨平台注意（R16 P2；比照 execution/evaluator.py Evaluator.run 的可攜指令慣例）：
-``_SAFE_COND_PATTERN`` 白名單刻意不含反斜線，Windows 風格路徑（如
+``_SHELL_FALSE_COND_WHITELIST`` 白名單刻意不含反斜線，Windows 風格路徑（如
 ``C:\\path\\to\\check.py``）會被拒絕並記警告（見 ``apply()``）。condition_evaluator
 若需寫路徑，請一律用正斜線（``C:/path/to/check.py``，Windows API 原生接受）；
 不要放寬白名單去接受反斜線 —— ``_default_evaluator`` 用 POSIX 模式
@@ -34,7 +34,7 @@ from ....models.playbook import Playbook
 from ....models.step_mutation import StepMutation, StepMutationType
 from ._conditional_evaluator import (
     _DENY_CHARS,
-    _SAFE_COND_PATTERN,
+    _SHELL_FALSE_COND_WHITELIST,
     _default_evaluator,
 )
 
@@ -90,7 +90,7 @@ class ConditionalStrategy:
         if not mutation.condition_evaluator:
             return False
         cmd = mutation.condition_evaluator.strip()
-        if not cmd or not _SAFE_COND_PATTERN.match(cmd):
+        if not cmd or not _SHELL_FALSE_COND_WHITELIST.match(cmd):
             # R16 P2：對齊姊妹實作 execution/mutation_applier/_conditional.py 的
             # 警告訊息（原本靜默拒絕，Windows 路徑如 C:\path\to\check.py 因白名單
             # 不含反斜線被拒時完全無跡可尋，難以除錯）。

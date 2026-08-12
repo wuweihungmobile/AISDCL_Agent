@@ -179,31 +179,21 @@ collaboration_rules:
       communication_protocols: "業務驗證對齊、利害關係人驗收標準審查"
 
 dependencies:
-  data:
-    - stakeholder-directory.md
-    - business-objectives.md
-    - validation-criteria.md
-    - human-interaction-logs.md
-    - consensus-records.md
-  
-  tasks:
-    - stakeholder-interview.md
-    - requirements-validation.md
-    - human-confirmation.md
-    - business-process-validation.md
-    - consensus-building.md
-    - validation-reporting.md
-  
+  # ─── AGT-11（R85）幽靈依賴清除（判準與取數管道自證見 agent/core/05.sd-architect-zh.yaml 同節）───
+  # 本檔實測：`data`(5)／`tasks`(6)／`checklists`(4) 共 15 條為裸檔名，正規化後在本版磁碟上不可解析
+  #（根相對與 basename 兩種解析皆 0 命中），且在 agent/ 之外零引用。
+  # 被刪除的原文逐字保留（訂正協議：禁止靜默覆寫）：
+  #   data: stakeholder-directory.md / business-objectives.md / validation-criteria.md /
+  #         human-interaction-logs.md / consensus-records.md
+  #   tasks: stakeholder-interview.md / requirements-validation.md / human-confirmation.md /
+  #          business-process-validation.md / consensus-building.md / validation-reporting.md
+  #   checklists: stakeholder-coverage-checklist.md / requirements-validation-checklist.md /
+  #               human-confirmation-checklist.md / business-process-validation-checklist.md
+  # ─────────────────────────────────────────────────────────────────────
   templates:
     - docs_template/support/Requirement_Extraction_Report_Template.md
     - docs_template/support/Collaboration_Log_Template.md
   
-  checklists:
-    - stakeholder-coverage-checklist.md
-    - requirements-validation-checklist.md
-    - human-confirmation-checklist.md
-    - business-process-validation-checklist.md
-
 # 協作流程圖
 collaboration_flow: |
   ```mermaid

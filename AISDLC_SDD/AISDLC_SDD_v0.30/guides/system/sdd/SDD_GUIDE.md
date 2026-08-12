@@ -28,15 +28,28 @@ SDD（Spec-First Design-Driven Development）是 AISDLC 框架的品質強化層
 
 > **版本說明**：SCG 閘門採用 SCG-0 ~ SCG-6 標準體系（與 `AISDLC_SDD_INIT.md`、`CLAUDE.md` 一致）。
 
+> 🔴 **R85／DEF-200-081② 訂正：本表的英文閘門名原本與 SCG SSOT 互斥，四支不一致。**
+> **被訂正的原文逐字保留（訂正協議：禁止靜默覆寫）**：
+> `SCG-2 | Architecture Review Gate`／`SCG-3 | Contract Freeze Gate`／
+> `SCG-4 | Implementation Compliance Gate`／`SCG-6 | Release Readiness Gate`。
+> （SCG-0／1／5 本來就一致，未動。）
+>
+> **為何以 `workflow/sdd-spec-first-gate/SDD_SPEC_FIRST_GATE.md` 為準**：那份閘門表是
+> `scripts/agent_scg_anchor_lint.py` **機械消費**的 SCG SSOT（該檔 `SCG_SSOT` 常數逐字指向它，
+> 判準 2 每次執行都拿它自證主題歸屬）；本檔在同一支 lint 裡的角色是 **RG-\* 補充閘門**的 SSOT
+> （`RG_SSOT`）。兩份各有其權威射程，而 SCG-N 的英文名不在本檔的射程內。
+> 🔴 本表**不再是第二個家**：名稱一致性自 R85 起由該 lint 的**判準 5** 機械守住
+> （任一支名稱與 SSOT 不符即紅），不靠人記得同步。
+
 | Gate | 名稱 | 觸發時機 | 主責 Agent | 強制文件 |
 |------|------|---------|-----------|---------|
 | SCG-0 | Requirement Spec Gate | 需求凍結前 | sa-analyst | PRD + FRD 完整性 |
 | SCG-1 | Design Spec Gate | 設計凍結前 | sd-architect | SRD + API Spec |
-| SCG-2 | Architecture Review Gate | 架構凍結前 | sd-architect | C4 圖 + ADR |
-| SCG-3 | Contract Freeze Gate | 開發啟動前 | sd-architect | OpenAPI 3.1 凍結 |
-| SCG-4 | Implementation Compliance Gate | PR Review | dev-senior | 實作與規格一致性 |
+| SCG-2 | Architecture Spec Gate | 架構凍結前 | sd-architect | C4 圖 + ADR |
+| SCG-3 | API Contract Gate（Contract Freeze） | 開發啟動前 | sd-architect | OpenAPI 3.1 凍結 |
+| SCG-4 | PR Review Gate | PR Review | dev-senior | 實作與規格一致性 |
 | SCG-5 | RTM Completeness Gate | 交付前 | qa-lead | RTM 100% 覆蓋 |
-| SCG-6 | Release Readiness Gate | 發布前 | technical-writer | 所有閘門通過 |
+| SCG-6 | Release Gate | 發布前 | technical-writer | 所有閘門通過 |
 
 > **場景專屬補充閘門**（不取代標準 SCG）：
 >

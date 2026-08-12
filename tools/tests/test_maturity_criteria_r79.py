@@ -111,7 +111,11 @@ _R79_KNOWN_UNCAUGHT: frozenset[str] = frozenset({
     "a1-posix-sep-concat", "a2-tmp-hardcode", "a5-chmod-exec",
     "a8-shebang-exec", "a9-lf-only-write",
     "b2-backslash-join", "b4-exe-suffix", "b5-cp950-encoding",
-    "b8-schtasks", "b10-case-insensitive", "b11-powershell-shell",
+    "b10-case-insensitive",
+    # 🔴 R85／ARCH-02 移除 `b8-schtasks` 與 `b11-powershell-shell`：把
+    # `scan_foreign_exe_argv` 接進 `_injection_criteria()` 之後這兩題**攔得到了**
+    # （語料表那一格已同步改成 True、Win→mac 攔截下限由 6 上修為 8）。
+    # 本表留著它們的話，這張釘選表就會與現場脫節而守不到任何東西。
 })
 
 

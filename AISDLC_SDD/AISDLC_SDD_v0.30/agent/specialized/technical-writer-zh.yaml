@@ -431,34 +431,22 @@ documentation_metrics:
     - "搜尋未命中率（無結果的查詢）"
 
 dependencies:
-  tools:
-    - documentation-tools.md
-    - diagramming-tools.md
-    - screenshot-tools.md
-    - api-doc-tools.md
-
-  data:
-    - technical-specifications.md
-    - user-research.md
-    - support-ticket-trends.md
-    - product-roadmap.md
-
-  tasks:
-    - content-planning.md
-    - technical-writing.md
-    - doc-review-process.md
-    - knowledge-base-curation.md
-
+  # ─── AGT-11（R85）幽靈依賴清除（判準與取數管道自證見 agent/core/05.sd-architect-zh.yaml 同節）───
+  # 本檔實測：`data`(4)／`tasks`(4)／`checklists`(4)／`tools`(4) 共 16 條為裸檔名，正規化後在本版磁碟上不可解析
+  #（根相對與 basename 兩種解析皆 0 命中），且在 agent/ 之外零引用。
+  # 被刪除的原文逐字保留（訂正協議：禁止靜默覆寫）：
+  #   data: technical-specifications.md / user-research.md / support-ticket-trends.md /
+  #         product-roadmap.md
+  #   tasks: content-planning.md / technical-writing.md / doc-review-process.md /
+  #          knowledge-base-curation.md
+  #   checklists: documentation-quality-checklist.md / api-docs-checklist.md /
+  #               user-docs-checklist.md / documentation-launch-checklist.md
+  #   tools: documentation-tools.md / diagramming-tools.md / screenshot-tools.md / api-doc-tools.md
+  # ─────────────────────────────────────────────────────────────────────
   templates:
     - docs_template/sdd/development/LIVING-DOC-STRATEGY-TEMPLATE.md
     - docs_template/core/api/API_Specification_Template.md
     - docs_template/sdd/development/LIVING-DOC-STRATEGY-TEMPLATE.md
-
-  checklists:
-    - documentation-quality-checklist.md
-    - api-docs-checklist.md
-    - user-docs-checklist.md
-    - documentation-launch-checklist.md
 
 scenario_applications:
   documentation_scenario:

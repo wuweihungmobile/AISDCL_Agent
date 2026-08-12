@@ -134,6 +134,28 @@ _GOVERNANCE_DOCS = (
     # `_GUARD_LINES_REPIN_LOG` 表尾雙向對帳，寫錯即紅）；② §D 的跨 session `git stash`
     # 事故——`block_destructive_git.py` 已知射程缺口的第一個真實命中。
     _REPO_ROOT / "docs" / "06_quality" / "CrossPlatform_R84_Scan_Findings.md",
+    # 帳本洩壓包（bytes 死結出路①）搬出來的 15 列**已結超長列原文**的唯一居所。資格同
+    # `CrossPlatform_R82_Ledger_Closure.md`（同一個動作的上一次先例）：主檔那些列已依
+    # `ROW_MAX_BYTES` 瘦身成索引 ⇒ **唯一還能重驗那些結案是否為真的地方就是它**（⇒ 體積
+    # 守門），且它逐節寫出「某 DEF-ID 的原文現居本檔某節」的座標宣稱（⇒ 指針稽核）。
+    # 🔴 即刻登記而非改名避開：紅燈訊息自己提供了「改名」這條出口，而
+    # `CrossPlatform_R82_Ledger_Closure.md` 那一列的註解正逐字記著上一次有人這樣做的判例。
+    _REPO_ROOT / "docs" / "06_quality" / "CrossPlatform_R85_Ledger_Closure.md",
+    # 本輪掃描發現的唯一居所（由掃描包產出、由帳本包代為登記——登記面住 `tools/lib/`，
+    # 不在掃描包的持有面內，同 `CrossPlatform_R82_Ledger_Closure.md` 那一列記載的形態）。
+    # 資格同 R80~R84 同名檔：逐筆寫出座標宣稱（⇒ 指針稽核），複審者要判「還有哪些缺口
+    # 開著」就得讀完它（⇒ 體積守門）。
+    _REPO_ROOT / "docs" / "06_quality" / "CrossPlatform_R85_Scan_Findings.md",
+    # R85 收尾單人窗口：護欄層重釘稽核列（`_GUARD_LINES_REPIN_LOG` R85 第二列）指名的
+    # 「逐檔清單的家」——款(10) 要求淨額為正的重釘必須指名一份 `CrossPlatform_R<n>_*.md`。
+    _REPO_ROOT / "docs" / "06_quality" / "CrossPlatform_R85_Guard_Repin_Evidence.md",
+    # R85 四方複審：發現面（`CrossPlatform_R85_*.md` glob）與登記面本來就是雙向核對，
+    # 而複審**每多落一份 findings 檔就多一筆紅**——SA 當場預測並驗證（落檔前 1 筆、
+    # 落檔後 3 筆）。四份一次登齊，避免下一輪重蹈。
+    _REPO_ROOT / "docs" / "06_quality" / "CrossPlatform_R85_Review_Architect.md",
+    _REPO_ROOT / "docs" / "06_quality" / "CrossPlatform_R85_Review_SA.md",
+    _REPO_ROOT / "docs" / "06_quality" / "CrossPlatform_R85_Review_SD.md",
+    _REPO_ROOT / "docs" / "06_quality" / "CrossPlatform_R85_Review_QA.md",
 )
 
 # 姊妹治理文件的命名慣例：`docs/06_quality/CrossPlatform_*.md`。這**不是**把具名常數

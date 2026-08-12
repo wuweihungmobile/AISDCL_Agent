@@ -30,19 +30,11 @@ except ImportError:
     from ..repositories.pg_async_utils import _run_async  # type: ignore[import]
 
 # fallback import 模式後置（與 pg_memory_store 同款結構）
+# R85（訴求 2）：_p95／_HISTOGRAM_WINDOW 原為本檔私有定義，與 local_kb_metric_store
+# 逐字重複；已收斂至 ports SSOT，這裡只保留原私有名以免動到呼叫端與既有測試。
+from ...core.ports.kb_metric_store import HISTOGRAM_WINDOW as _HISTOGRAM_WINDOW  # noqa: E402, I001
 from ...core.ports.kb_metric_store import MetricValue  # noqa: E402, I001
-
-_HISTOGRAM_WINDOW = 200
-
-
-def _p95(samples: list[float]) -> float:
-    if not samples:
-        return 0.0
-    s = sorted(samples)
-    n = len(s)
-    if n < 20:
-        return float(s[-1])
-    return float(s[max(0, int(0.95 * n) - 1)])
+from ...core.ports.kb_metric_store import p95 as _p95  # noqa: E402, I001
 
 
 class PgKbMetricStore:

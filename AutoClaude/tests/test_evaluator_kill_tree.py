@@ -80,7 +80,7 @@ def test_timeout_kills_grandchild_spawned_via_shell_compound_command(tmp_path):
 # ──────────────────────────────────────────────
 
 #: 探針：把自己的 pgid 寫進檔案。刻意寫成**獨立檔案**而非 `python -c`，因為
-#: `_conditional.py` 的 Gap-046 白名單 `_SAFE_COND_PATTERN` 擋掉 `(`/`;`/`,`，
+#: `_conditional.py` 的 Gap-046 白名單 `_SHELL_TRUE_COND_WHITELIST` 擋掉 `(`/`;`/`,`，
 #: inline 程式碼過不了那道；兩個站點共用同一支探針才能用同一組斷言。
 _PGID_PROBE = "import os,pathlib,sys\npathlib.Path(sys.argv[1]).write_text(str(os.getpgid(0)))\n"
 
@@ -134,7 +134,7 @@ def test_conditional_evaluator_child_runs_in_its_own_process_group(tmp_path):
     _conditional.handle_conditional(ctx, mutation, MagicMock())
 
     assert out.exists(), (
-        "CONDITIONAL 探針未執行 —— 多半是被 Gap-046 `_SAFE_COND_PATTERN` 擋下"
+        "CONDITIONAL 探針未執行 —— 多半是被 Gap-046 `_SHELL_TRUE_COND_WHITELIST` 擋下"
         "（本測試的 tmp_path 含該白名單不允許的字元），此時本鎖無鑑別力，須修測試而非放寬白名單"
     )
     child_pgid = int(out.read_text().strip())

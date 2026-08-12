@@ -46,27 +46,31 @@ _TESTS_DIR = Path(__file__).resolve().parent
 # 掃描面下限的政策（比例）與 `tools/lib/skip_tag_policy.py` 的逐樹下限共用同一份常數
 # ——本檔若自己再寫一個 0.8，就是同一份知識的第二個家（R75 主題）。
 sys.path.insert(0, str(_REPO_ROOT / "tools" / "lib"))
-from skip_tag_policy import TREE_FLOOR_RATIO as _TREE_FLOOR_RATIO  # noqa: E402
+# 🔴 兩個 import **必須連在一起、中間不得夾註解**（R85／F1 訂正）：原本第二個 import 被
+# 一段 15 行的 `#:` 說明隔開，ruff 的 I001 因此判定「import 區塊未排序」⇒
+# `ruff check tools/` rc=1，而那道 lint 是 root-infra-ci 第 16 道與 pre-push 快層第 ④ 段
+# 的閘門。排列順序由 `ruff --select I --fix` 產生，不是手排——手排下一次還是會被判紅。
+# 那段 `#:` 說明一字未改，移到下方 `_SCAN_FLOOR` 的正上方（它本來就是在說明那個常數）。
+from skip_tag_policy import (  # noqa: E402
+    _TREE_FILE_FLOORS as _SKIP_TREE_FLOORS,
+)
+from skip_tag_policy import (  # noqa: E402
+    TREE_FLOOR_RATIO as _TREE_FLOOR_RATIO,
+)
 
-#: `tools/tests/` 頂層 `test_*.py` 的檔數下限＝重釘當回合實測 53 × `_TREE_FLOOR_RATIO`。
-#: 兩個方向都有斷言，見 `test_scan_surface_is_not_silently_empty`。
-#: R78 重釘 42→44（收緊，非放寬）：本輪新增 `test_act_local_runner_image.py` 與
-#: `test_context_budget_guard.py` 兩支鎖檔，實測檔數上升，鎖自己印出「下限只剩實測的 76%、
-#: 低於 80%」並指名要重釘為 44。下限型判準的意義是「掃描面不得靜默縮小」，
-#: 故它必須跟著實測往上走——停在舊值等於讓保護逐輪稀釋。
-# R82 收輪重釘 44→46（收緊，非放寬；與 `tools/lib/skip_tag_policy.py` 的
-# `_TREE_FILE_FLOORS['tools/tests']` 同一趟、同一個理由）：所有包停工後的單人窗口實測
-# `tools/tests/` 已是 58 支，44 只剩實測的 76% ⇒ 下方第二個方向的斷言逐字指名要重釘為 46。
-# 值照填、不做加減推算。成長來源是本輪並行包新增的三支鎖檔，非本包。
-#: 🔴 R83 收輪單人窗口重釘 46 → 48（**方向是收緊**：下限拉高＝要求更大的掃描面）。
-#: 觸發＝判準自己的防腐那一向（`floor < int(actual × _TREE_FLOOR_RATIO)`）逐字指示
-#: 「請把 _SCAN_FLOOR 重釘為 48」，本行照填、不做加減推算。成長來源是本輪三支新增的
-#: 鎖檔（launchd 續航後端／毀滅性 git 指令阻斷器／單平台指引掃描器），非任一單包。
-#: 🔴 本值刻意與 `skip_tag_policy._TREE_FILE_FLOORS['tools/tests']` 取同一個數字：
-#: 兩者量的是**同一棵樹的同一件事**（`tools/tests/test_*.py` 的份數），兩個下限各自漂移
-#: 才是真正的問題形態。**但刻意不 import 對方**——那會讓兩道獨立的鎖共用一個失效點，
-#: 而「兩處必須相等」這件事本身沒有任何機械物在守（誠實劃界，列入交棒）。
-_SCAN_FLOOR = 48
+#: `tools/tests/` 頂層 `test_*.py` 的檔數下限。**不是本檔的常數——直接取自 SSOT**
+#: `tools/lib/skip_tag_policy.py` 的 `_TREE_FILE_FLOORS['tools/tests']`。
+#:
+#: 🔴 R85／訴求 2：這裡原本自己寫一份 `_SCAN_FLOOR = <數字>`，並附著逐輪重釘的敘事；
+#: 而該常數的註記自己就寫著「兩者量的是**同一棵樹的同一件事**，兩個下限各自漂移才是
+#: 真正的問題形態」，同時承認「兩處必須相等這件事沒有任何機械物在守」（列入交棒）。
+#: 那道缺口本輪以**取消第二個家**收掉：兩處不可能不相等，因為只剩一處。
+#: 原先「刻意不 import 對方、避免兩道獨立的鎖共用失效點」的顧慮**不成立**——共用的是
+#: 一個純資料常數，不是判準；兩支測試的判準（本檔的兩向斷言、對方的三向斷言）各自獨立，
+#: 而讓兩個下限各自漂移的代價已經在 R78／R82／R83 連三輪的手動同步裡付過。
+#: 重釘方式不變：由下方 `test_scan_surface_is_not_silently_empty` 的第二向斷言逐字指示，
+#: 改在 SSOT 那一處填值（本檔不再需要跟著改）。
+_SCAN_FLOOR = _SKIP_TREE_FLOORS["tools/tests"]
 
 
 def _mac_source() -> str:

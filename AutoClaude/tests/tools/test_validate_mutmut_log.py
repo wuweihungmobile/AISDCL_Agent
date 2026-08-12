@@ -192,7 +192,24 @@ def test_real_existing_repo_log_is_real_run() -> None:
         / "mutation_token_guard.log"
     )
     if not repo_log.exists():
-        pytest.skip("mutation_token_guard.log not present in repo root")
+        # 🔴 R85／S1：本行原本是全 AutoClaude 樹**唯一**一支無標籤 skip（census 的
+        # `untagged=1` 就是它）。無標籤的代價不是美觀：`--census-only` 分不出它屬於
+        # 「可歸零」還是「結構上不可能」，於是它既進不了欠債清單、也拿不到承接輪次，
+        # 靜靜地留在總數裡。
+        #
+        # 分類＝[ENV-DISABLED]【未啟用，非缺件】而**不是** [DEBT]：本斷言的受測對象
+        # 刻意是**活體產物**（nightly 真的跑出來的那一份 log），不是 fixture。
+        # 用 fixture 餵它會讓它恆綠而量不到任何東西——它要抓的正是「nightly 那一跑其實
+        # 退化成 help text」這種**只有真產物看得見**的失效，那也是本檔立案的理由。
+        # ⇒ 這一支沒有承接輪次，因為它不是欠債；它是「產物在才驗得到」的環境閘。
+        pytest.skip(
+            "[ENV-DISABLED] 【未啟用，非缺件】repo 根層無 mutation_token_guard.log。"
+            "本斷言的受測對象刻意是 nightly 的**活體產物**（非 fixture）——它要抓的是"
+            "「該跑那一次其實退化成 help text」，而那只有真產物看得見，餵 fixture 會讓它"
+            "恆綠。跑法：先產出該 log（`tools/run_local_nightly.sh` 的 mutation stage，"
+            "或 `tools/run_local_nightly.ps1 -Stage mutation`），log 落在 repo 根層後"
+            "重跑本檔即會真的驗。"
+        )
     # P1-R10-1：partial state 偵測 — wrapper preamble 已寫但 mutmut 仍在跑（end marker 未到）
     text = repo_log.read_text(encoding="utf-8", errors="replace")
     has_wrapper_preamble = "[run_mutmut_in_docker]" in text

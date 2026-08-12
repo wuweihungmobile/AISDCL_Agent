@@ -107,7 +107,7 @@ Architect 給出 **5 列減法清單**（每列附三段論：當初為何存在
 > 修復前的值。方向是低報自己的成果，但代價落在下一輪：R78 一跑載具會拿到明顯較高的數字，
 > 與這裡一比像「一輪暴衝」，於是去找一個不存在的原因。
 > **前後對照**（這一輪到底動了多少）：動工前 mac→Win 0/10、Win→mac 4/12 <!-- xplat-rate-history: 動工前量測 -->
-> ；R78 現查 mac→Win 5/10、Win→mac 6/12。
+> ；**現查**（本行刻意追隨活值，不是某一輪的快照）mac→Win 5/10、Win→mac 8/12——R85／ARCH-02 把 `scan_foreign_exe_argv` 等四道判準接進 `_injection_criteria()` 後，Win→mac 由 6/12 <!-- xplat-rate-history: R78~R84 的 Win→mac 舊值，R85／ARCH-02 接線後已升，保留為沿革 --> 升到 8/12（b8-schtasks、b11-powershell-shell 兩題）。
 > ⬆ 上面那一行**刻意不帶歷史標記**：它會被 `TestR78MaturityCriteriaSsot` 拿去與現場活值
 > 逐字比對，一漂就紅——這是全樹唯一可以安心寫死攔截率的地方，因為它寫死不了。
 > 其餘各處一律現跑：

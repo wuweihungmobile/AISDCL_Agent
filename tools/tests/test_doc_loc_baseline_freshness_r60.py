@@ -2176,6 +2176,21 @@ class TestR67SlowMeasurementWindowIsFingerprintBracketed(unittest.TestCase):
 _ADR_DIR = _REPO_ROOT / "docs" / "04_planning" / "ADR"
 _ADR_WAIVER = "adr-measurement-historical:"
 _ADR_LOC_TOKEN_RE = re.compile(r"\b(total|baseline|cap|violations)=(\d+)")
+#: 🔴 R85：`cap=` 這個字面在本 repo 有**兩個領域**——LOC 預算（`check_loc_budget`，五位數）
+#: 與額度派發上限（`--pace` 的可派數，個位數）。原判準 domain-blind，於是 `ADR-XPLAT-007`
+#: 逐字引用 `--pace` 實測輸出時噴 17 筆假紅，而訊息逐字要求「重跑 `check_loc_budget.py`
+#: 取當下值填回」——那句指示對一個**與 LOC 無關**的數字是錯的。假紅會逼下一輪的人去改一段
+#: 本來正確的散文，或直接把鎖關掉（本 repo 已為此付過學費）⇒ **收窄判準，不是掛豁免**：
+#: 掛豁免會讓錯誤診斷留在原地，下一份引用 `--pace` 的 ADR 再撞一次。
+#: 判準＝**量級**，不是行內關鍵詞。先試過關鍵詞（`band=`／`binding=`／`--pace`…）：
+#: 它①要不斷加詞才追得上散文（`pace_near` 那行就漏掉了）②每加一個詞就多開一條
+#: 「同行寫上那個字就能躲掉 LOC 比對」的逃逸口。量級沒有這兩個問題——**你無法把一個
+#: 真的 LOC cap 縮成兩位數來躲過比對，因為那個數字本身就是被比對的對象**。
+#: 額度派發上限的上界是 `AUTOSDD_QUOTA_MAX_FANOUT`（現查其 SSOT `tools/lib/quota_policy.py`，
+#: 出廠 16）；LOC 預算全專案史上一直是五位數。取 1000 當分界，兩邊各差一個數量級以上。
+#: 🔴 刻意**只對 `cap=` 生效**：`total=`／`baseline=`／`violations=` 在額度領域根本不存在，
+#: 連它們一起放行就是真的開逃逸口。`violations=0`／`violations=1` 本來就不參與比對。
+_ADR_LOC_CAP_MIN = 1000
 # 三位數起跳；容許 markdown 粗體與全形空白夾在數字與 `passed` 之間（ADR 內實際寫法）。
 _ADR_PYTEST_TOKEN_RE = re.compile(r"(?<![\d,.])(\d{1,3}(?:,\d{3})+|\d{3,})[\s*　]*passed", re.I)
 
@@ -2243,6 +2258,9 @@ def adr_measurement_problems(
     for label, text in docs:
         for lineno, line in enumerate(text.splitlines(), 1):
             loc_hits = _ADR_LOC_TOKEN_RE.findall(line)
+            # R85：兩位數的 `cap=` 講的是額度可派數不是 LOC 預算（判準理由見常數處）。
+            loc_hits = [(k, v) for k, v in loc_hits
+                        if not (k == "cap" and int(v) < _ADR_LOC_CAP_MIN)]
             py_hits = _ADR_PYTEST_TOKEN_RE.findall(line)
             if not loc_hits and not py_hits:
                 continue
@@ -2368,6 +2386,21 @@ class TestR69AdrMeasurementTokensAreLive(unittest.TestCase):
         problems = self._run("total=20436 violations=0\n")
         self.assertEqual(len(problems), 1, problems)
         self.assertIn("不得登載", problems[0])
+
+    def test_quota_domain_cap_is_told_apart_from_the_loc_cap(self) -> None:
+        """R85 鑑別力：兩位數的 `cap=` 是額度可派數，五位數的才是 LOC 預算。
+
+        🔴 **兩個方向都要證**。只證「小的放行」不算數——那樣把判準改成無條件放行
+        `cap=` 也會通過。所以同時釘住「大的、且與現查不符的仍然轉紅」。
+        """
+        # 額度領域：`--pace` 的實測輸出逐字進 ADR，不得被讀成 LOC 預算而誤導作者
+        # 去「重跑 check_loc_budget 取當下值填回」（那句指示對這個數字是錯的）。
+        self.assertEqual(self._run("total=20436\n可派 4（硬上限 cap=4）band=notice\n"), [])
+        self.assertEqual(self._run("total=20436\n該軸 `cap=16`（＝8 × pace_near 2.0）\n"), [])
+        # 反向：LOC 量級且與現查不符 ⇒ 判準不得因為本次收窄而失去牙。
+        stale = self._run("cap=19999\n")
+        self.assertEqual(len(stale), 1, stale)
+        self.assertIn("cap=19999", stale[0])
 
     def test_hardcoded_pytest_baseline_is_caught(self) -> None:
         problems = self._run("total=20436\n3923 passed, 146 skipped\n")
@@ -2804,11 +2837,17 @@ _IRON_LAW3_UNCOVERED: tuple[str, ...] = (
     # `tools/tests/test_platform_neutral_paths.py::TestIronLaw3NoMechanismClaimsAreFalsifiable`
     # ——每一格自陳沒人守者必須登記一組證偽探針（token × 已審視清單）並通過它。
     #
-    # R80 新登記的危害類：`shell=True` 的原生殼差異（Windows `cmd.exe` ⇄ POSIX `/bin/sh`
-    # 的引號／`&&`／路徑分隔／rc 語意）。分母 +1 而分子不動＝**綠**。它與
-    # `AutoClaude/tests/test_evaluator_kill_tree.py` 同關鍵字但不同主題（那支守的是
-    # 逾時 kill 整棵行程樹），而且存量掃描結構上量不到它——指令來自 playbook＝使用者輸入。
-    "shell=True",
+    # 🔴 R85：`shell=True` 的原生殼差異**已補上機械物**，故自本清單移出 ⇒ 分子 +1
+    # （合法路徑：補了掃描器就改該列的機械物欄，不是把整列拿掉——拿掉會讓分母降而轉紅）。
+    # 機械物＝`AutoClaude/tests/execution/test_shell_portability_contract_r85.py`
+    # （執行期診斷 `portability_note()` ＋ 兩個執行面的射程普查 ＋ 以真實 playbook 為母體
+    # 的假紅普查）。同時訂正 R80 登記時寫下的兩句話：①「存量掃描**結構上**量不到它」
+    # 過寬——指令內容確實不在 repo 裡，但**入口只有 2 個、可列舉**，且 `evaluator_command`
+    # 的真實母體就在 repo 裡（實測 9 支 playbook／19 值）；真正不在 repo 裡的只有
+    # `condition_evaluator`（全庫 YAML 內 0 次，唯一產生者是 LLM 突變 schema），已由該段
+    # prompt 的正規化涵蓋。②與 `test_evaluator_kill_tree.py` 的「同關鍵字不同主題」判讀
+    # 仍然成立，故那筆留在證偽探針的「已審視並判定不算」清單裡——**不是**因為它被推翻，
+    # 而是那張清單隨本列一起移除（見 `_IRON_LAW3_UNCOVERED_EVIDENCE` 的 stale 判準）。
     # 🔴 R79：`.ps1` 方向的行尾**已補上機械物**（PostToolUse hook 寫入當下補回 CRLF ＋
     # 根層 unittest 事後量工作樹），故從本清單移出、該列的機械物欄同步改寫 ⇒ 分子 +1。
     # 這是本表雙單邊棘輪設計裡唯一合法的「分子上升」路徑：補了掃描器就改機械物欄，
@@ -2853,7 +2892,15 @@ _IRON_LAW3_NO_MECHANISM = "無機械物"
 #: 讓下一次忘記調 floor 當場轉紅，而不是又留一格給下一輪。
 #: 🔴 R84（C2 收斂）：18 → **19**（＝重釘為當輪現值）。分子 +1＝新登記的「hook 行程生出來
 #: 的子行程配到 console 視窗」那一列**連同兩支掃描器一起落地** ⇒ 分子與分母同步各 +1。
-_IRON_LAW3_COVERED_FLOOR = 19
+#: 🔴 R85 收尾單人窗口：19 → **21**（＝當輪現值，`_IRON_LAW3_FLOOR_STALE_SLACK` 逐字指示）。
+#: 分子 +2，兩筆成因不同，刻意分開記：
+#:   ① `shell=True` 原生殼差異——R80 誠實登記為無人守（分母 +1 分子不動），**R85 補上機械物**
+#:      （`AutoClaude/tests/execution/test_shell_portability_contract_r85.py`）
+#:      ⇒ 分子 +1 而分母不動。
+#:      這是本表雙單邊棘輪唯一合法的「只有分子上升」路徑。
+#:   ② 新登記的危害類「單平台專屬**外部執行檔的 argv[0] 字面**」**連同掃描器一起落地**
+#:      ⇒ 分子分母同步 +1（同 R84 console 視窗那一列的形狀）。
+_IRON_LAW3_COVERED_FLOOR = 21
 #: 分母＝**已登記**的危害類數，只准上升（刪列來讓數字好看即紅）。未覆蓋數＝分母−分子，
 #: 刻意**不設上限**——那正是舊判準把「還有幾類沒人守」與「我們知道有幾類危害」綁死的地方。
 #: R79：8 → 12（`.py` 行尾、exec bit、目錄項原語三類新登記；`.ps1` 行尾那一列原本就在表上）。
@@ -2865,7 +2912,10 @@ _IRON_LAW3_COVERED_FLOOR = 19
 #: 🔴 R84（W8／SD-08）：19 → **20**（＝當輪現值）。理由同上一個常數，不重複。
 #: 🔴 R84（C2 收斂）：20 → **21**。分母 +1＝上一個常數註解裡那一列（新危害類「hook 子行程
 #: 配到 console 視窗」），該列本輪連同掃描器一起落地，故分子分母同升。
-_IRON_LAW3_KNOWN_FLOOR = 21
+#: 🔴 R85 收尾單人窗口：21 → **22**。分母 +1＝新危害類「單平台專屬外部執行檔的 argv[0]
+#: 字面」（見上一個常數的 ② 條）。**注意分子本輪 +2 而分母只 +1**——差額來自 `shell=True`
+#: 那一列由「已登記但無人守」轉為「已登記且有人守」，那一列早在 R80 就進了分母。
+_IRON_LAW3_KNOWN_FLOOR = 22
 
 #: 🔴 R84（W8／SD-08）：兩個 floor **自己過期**的上界判準（阻塞）。
 #:
@@ -3868,7 +3918,7 @@ _GHOST_SYMBOL_BASELINE: frozenset[str] = frozenset({
     "_TLC_TRACK_ENROLLED",
     "_TLC_TRACK_RE",                        # R79-docs：R65 Phase 2-A 退場的客製鎖
     "_TRACKED_ACTIONS",
-    "_TREE_FLOOR_RATIO",
+
     "test_ac_matches_sum_of_seven_registries",
     "test_constants_never_increase_versus_head",
     "test_frozen_guard_count_matches_the_worktree",  # R79-docs：同檔數棘輪一併退場
@@ -3885,7 +3935,9 @@ _GHOST_SYMBOL_BASELINE: frozenset[str] = frozenset({
 #: 對「順手多登記一筆新幽靈」零訊號，而那正是這道鎖最省力的關法。
 #: 擴掃描面而多看見存量時，重釘本值並在交件回報寫出前後值與理由（同 `_FROZEN_GUARD_LINES`
 #: 的重釘紀律）；**不得**為了讓一筆新寫下的懸空引用過關而調高它。
-_GHOST_SYMBOL_BASELINE_CEILING = 33
+#: 🔴 R85 P2：33→32（**收緊**）。TREE_FLOOR_RATIO 那一筆已無引用（本輪把 schedule
+#: parity 的下限第二個家改成直取 SSOT）⇒ 依 stale 向的指示刪除，天花板同步降到現值。
+_GHOST_SYMBOL_BASELINE_CEILING = 32
 
 _SYMBOL_INDEX_CACHE: dict[str, frozenset[str]] = {}
 
@@ -7019,6 +7071,105 @@ class TestR78HandoffClaimsCarryLiveCommands(unittest.TestCase):
             _handoff_problems("syn.md", closed_by_sibling), ([], 0),
             "同級標題沒有關掉射程 ⇒ 會一路吃到檔尾",
         )
+
+
+# ── R85／C5：根 CLAUDE.md 以「現查」指名的載具，必須真的跑得起來 ──────────────
+#: 反引號片段裡「`python <repo 相對路徑>.py`」這個形態＝本檔指名的現查入口。
+_LIVE_ENTRY_RE = re.compile(
+    r"\b(?:python|python3)\s+((?:tools|scripts|AISDLC_SDD|AutoClaude|\.claude)[\w/.-]*\.py)")
+
+
+def live_check_entries(text: str) -> list[str]:
+    """根 CLAUDE.md 指名為「現查入口」的 `.py` 腳本（repo 相對路徑，去重排序）。"""
+    return sorted({m.group(1) for span in re.findall(r"`([^`\n]+)`", text)
+                   for m in [_LIVE_ENTRY_RE.search(span)] if m})
+
+
+class TestR85DocNamedLiveCheckEntriesActuallyRun(unittest.TestCase):
+    """本檔指名的現查入口壞掉時，今天**完全靜默**——沒有人在跑它，直到有人照文件跑一次。
+
+    🔴 立案（R85／C5，不是假想）：根 CLAUDE.md 有**兩處**寫「reset 分佈的數字一律現查
+    `python tools/probe/reset_window_distribution.py`」，而該指令當時 rc=1
+    （`AttributeError: _RESET_RE`——R81 把判讀原語搬家、hook 那側改成具名 import 清單，
+    私有符號結構上進不了清單）。⇒ 那條紀律**結構上執行不了**，而它正是本 repo 反覆強調的
+    「數字是量測值不是常數」的載具。三支 probe 當時一支 smoke 測試都沒有。
+
+    🔴 **判準刻意不判 rc**（假紅普查的直接結果，不是客氣）：以本輪落地當回合的入口集合
+    逐支實跑 `--help`，**6 支裡 2 支合法回非 0**——`AutoClaude/tools/check_loc_budget.py`
+    不吃 `--help`、會真的去跑預算檢查並以「超標」回 rc=1（那是真實預算狀態，不是壞掉）；
+    `tools/lib/quota_policy.py` 對未知引數印用法回 rc=2。判 rc=0 就是 2/6 假紅，而
+    「擋到讓人無法工作的守衛會被整個關掉」。⇒ 改判**有沒有噴 Python traceback**：
+    import 期腐爛（模組搬家／符號改名／語法錯）一律以它現形，而合法的用法錯誤不會。
+
+    🔴 誠實劃界：`--help` 這一層抓得到 **import 期**腐爛，抓不到 C5 那種**執行期**
+    AttributeError（argparse 在走到那段之前就退出了）。所以下面第二支測試對 C5 的
+    那支 probe 做**合成語料端到端**——那才是會抓到 C5 的那一條。其餘入口今天沒有同級
+    的行為測試，這裡不假裝有。
+    """
+
+    #: 端到端那一支的合成撞線語料（一次 episode：兩個觀測者、同一個 reset）。
+    _EVENTS = (("2026-01-02T00:10:00.000Z", "Claude usage limit reached — resets 9am "
+                "(Asia/Taipei)"),
+               ("2026-01-02T00:40:00.000Z", "Claude usage limit reached — resets 9am "
+                "(Asia/Taipei)"))
+
+    def _entries(self) -> list[str]:
+        entries = live_check_entries(
+            (_REPO_ROOT / "CLAUDE.md").read_text(encoding="utf-8"))
+        self.assertTrue(entries, "一支現查入口都抓不到 ⇒ 取數管道自己壞了（分母 0＝恆綠）")
+        return entries
+
+    def test_every_named_entry_exists_on_disk(self) -> None:
+        missing = [rel for rel in self._entries() if not (_REPO_ROOT / rel).is_file()]
+        self.assertEqual(missing, [], "根 CLAUDE.md 指名的現查入口在磁碟上不存在")
+
+    def test_no_named_entry_dies_before_it_can_do_anything(self) -> None:
+        """每一支入口都必須至少能走到 argparse；rc 不判（見類 docstring 的假紅普查）。"""
+        broken = []
+        for rel in self._entries():
+            proc = subprocess.run(  # noqa: S603
+                [sys.executable, str(_REPO_ROOT / rel), "--help"],
+                capture_output=True, text=True, encoding="utf-8", errors="replace",
+                cwd=str(_REPO_ROOT), timeout=180)
+            if "Traceback (most recent call last)" in (proc.stderr or ""):
+                broken.append(f"{rel}: {(proc.stderr or '').strip().splitlines()[-1]}")
+        self.assertEqual(broken, [], "根 CLAUDE.md 指名的現查入口一啟動就爆掉")
+
+    def test_the_traceback_criterion_has_teeth(self) -> None:
+        """合成注入：判準必須真的抓得到一支 import 期就爆掉的腳本（取數管道自證）。"""
+        with tempfile.TemporaryDirectory() as tmp:
+            bad = Path(tmp) / "rotten.py"
+            bad.write_text("import definitely_not_a_module_r85\n", encoding="utf-8")
+            proc = subprocess.run(  # noqa: S603
+                [sys.executable, str(bad), "--help"], capture_output=True, text=True,
+                encoding="utf-8", errors="replace", timeout=60)
+        self.assertIn("Traceback (most recent call last)", proc.stderr)
+
+    def test_the_reset_window_probe_survives_real_input(self) -> None:
+        """C5 的那一條：`--help` 過得去、掃到真語料才爆 ⇒ 端到端才是會轉紅的那一支。"""
+        with tempfile.TemporaryDirectory() as tmp:
+            base = Path(tmp) / "projects"
+            base.mkdir()
+            # 🔴 ADR-XPLAT-007 §「合成語料」的硬紅線，且必須是本測試的第一條斷言：
+            # fixture 一旦落在真實逐字稿目錄底下，就會把合成撞線注入**所有**歷史分析，
+            # 而那是不可逆的語料污染。
+            real = (Path.home() / ".claude" / "projects").resolve()
+            self.assertNotIn(real, base.resolve().parents,
+                             "合成語料落在真實逐字稿目錄底下＝不可逆的語料污染")
+            (base / "syn.jsonl").write_text("\n".join(
+                json.dumps({"type": "assistant", "timestamp": ts,
+                            "message": {"model": "<synthetic>", "content": body}})
+                for ts, body in self._EVENTS) + "\n", encoding="utf-8")
+            proc = subprocess.run(  # noqa: S603
+                [sys.executable, str(_REPO_ROOT / "tools" / "probe"
+                                     / "reset_window_distribution.py"),
+                 "--base", str(base), "--out", str(Path(tmp) / "out.jsonl")],
+                capture_output=True, text=True, encoding="utf-8", errors="replace",
+                cwd=str(_REPO_ROOT), timeout=180)
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        self.assertIn("相異撞線 episode    1 個", proc.stdout)
+        self.assertIn("reset 相異字面      1 個", proc.stdout,
+                      "字面統計那一路（C5 就爆在這裡）沒有被走到 ⇒ 這支測試沒有鑑別力")
 
 
 if __name__ == "__main__":

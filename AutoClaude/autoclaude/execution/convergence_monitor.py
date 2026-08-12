@@ -4,11 +4,18 @@ ConvergenceMonitor — 統一收斂評估，整合 FailureTracker 三個偵測�
 """
 from __future__ import annotations
 
-import re
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Optional
+from typing import TYPE_CHECKING
 
-from .error_classifier import ErrorClassifier, ErrorClass
+from .error_classifier import ErrorClass, ErrorClassifier
+
+# R85（訴求 2）：本檔原持有一份與 failure_tracker 逐字相同的 _FAIL_COUNT_PATTERNS，
+# 該檔註解自陳理由是「各自持有副本避免循環 import」——實查該理由今天不成立：
+# failure_tracker.py 的 import 只有 __future__／re／dataclasses／typing，**零** repo 內
+# 模組，故 convergence_monitor → failure_tracker 這個方向不可能成環。收斂為單向 import；
+# `convergence_monitor._FAIL_COUNT_PATTERNS` 這個名字仍可解析，呼叫端與測試不需改動。
+# 同輪連帶拔掉本檔已無消費者的 `import re`（原本只為那份副本而存在）。
+from .failure_tracker import _FAIL_COUNT_PATTERNS
 
 if TYPE_CHECKING:
     from .failure_tracker import FailureTracker
@@ -18,21 +25,12 @@ if TYPE_CHECKING:
 class ConvergenceReport:
     score: float                            # 0.0 = 完全卡死, 1.0 = 完全收斂
     trend: str                              # "improving" | "stuck" | "diverging" | "unknown"
-    failed_tests_history: list[Optional[int]] = field(default_factory=list)
+    failed_tests_history: list[int | None] = field(default_factory=list)
     recommendation: str = "continue"        # "continue" | "escalate" | "change_strategy"
     reasoning: str = ""
 
 
 _classifier = ErrorClassifier()
-
-_FAIL_COUNT_PATTERNS = [
-    re.compile(r'(\d+) failed', re.I),                          # pytest: "3 failed"
-    re.compile(r'failures[=:]\s*(\d+)', re.I),                  # unittest/JUnit: "failures=2"
-    re.compile(r'(\d+) tests? failed', re.I),                   # go test: "1 test failed"
-    re.compile(r'FAIL\s*:\s*(\d+)', re.I),                      # 通用: "FAIL: 3"
-    re.compile(r'Tests run: \d+, Failures: (\d+)', re.I),       # JUnit: "Tests run: 5, Failures: 2"
-]
-
 
 class ConvergenceMonitor:
     """
@@ -40,7 +38,7 @@ class ConvergenceMonitor:
     優先級順序：environment > suspect_test_file > is_stuck > is_diverging > 趨勢分析
     """
 
-    def evaluate(self, tracker: "FailureTracker") -> ConvergenceReport:
+    def evaluate(self, tracker: FailureTracker) -> ConvergenceReport:
         history = tracker.history
         if not history:
             return ConvergenceReport(0.5, "unknown", [], "continue", "無歷史記錄")
@@ -125,7 +123,7 @@ class ConvergenceMonitor:
         return ConvergenceReport(0.5, "unknown", fail_counts, "continue", "無法判定趨勢，繼續重試")
 
     @staticmethod
-    def _extract_fail_count(eval_output: str) -> Optional[int]:
+    def _extract_fail_count(eval_output: str) -> int | None:
         for pattern in _FAIL_COUNT_PATTERNS:
             m = pattern.search(eval_output)
             if m:
@@ -133,7 +131,7 @@ class ConvergenceMonitor:
         return None
 
     @staticmethod
-    def _is_count_improving(counts: list[Optional[int]]) -> bool:
+    def _is_count_improving(counts: list[int | None]) -> bool:
         valid = [c for c in counts if c is not None]
         if len(valid) < 2:
             return False

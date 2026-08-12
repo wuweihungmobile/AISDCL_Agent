@@ -33,6 +33,16 @@
    ``correction_protocol:`` 指向的框架根相對 ``.md`` 路徑（本輪＝
    ``agent/EVIDENCE_DISCIPLINE.md``）必須在同版磁碟上存在。引用一個不存在的家＝
    把「只有一個家」寫成假話，而它不會有任何其他東西轉紅。
+5. **SCG 閘門英文名跨檔一致（AGT-13／DEF-200-081②，R85）**：``SDD_GUIDE.md`` 的 SCG 閘門表
+   若列出某個 ``SCG-N``，其**英文名稱欄**必須與 SCG SSOT（``SDD_SPEC_FIRST_GATE.md``）該列逐字相同。
+   🔴 立案事實：兩表當回合實測有 **4 支**閘門名互斥（SCG-2 ``Architecture Spec`` vs
+   ``Architecture Review``、SCG-3 ``API Contract`` vs ``Contract Freeze``、SCG-4 ``PR Review``
+   vs ``Implementation Compliance``、SCG-6 ``Release`` vs ``Release Readiness``），而**兩份都是
+   本 lint 已經在讀的檔**——判準 2 拿 SSOT 自證主題歸屬、``RG_SSOT`` 檢查補充閘門表是否存在，
+   卻從不比對兩者的 SCG-N 名稱 ⇒ 「同一份知識住兩個家」在這支 lint 的眼皮底下漂了很久。
+   本判準只比對 SSOT 有列出的閘門碼；``SDD_GUIDE.md`` 沒列到的不判（它是快速指引，
+   不必然全列——判準要收窄而不是硬上）。
+
 4. **version 欄不得寫死版號**：``agent.version`` 一律指向 SSOT
    （``see FRAMEWORK_STATUS.md`` 字樣），不得是 ``vX.YY`` 字面。
    🔴 立案事實（AGT-05）：27 支 agent 的 version 在框架走到 v0.30 時全部還寫著 v0.18，
@@ -149,6 +159,36 @@ def validate_topic_map(version_path: str) -> list[str]:
     return problems
 
 
+def _gate_names(fp: str) -> dict[str, str]:
+    """從一份閘門表抽出 {gate: 英文名稱欄}。名稱欄＝閘門碼之後的第一個欄位。"""
+    names: dict[str, str] = {}
+    if not os.path.isfile(fp):
+        return names
+    with open(fp, encoding="utf-8") as f:
+        for line in f:
+            if line.lstrip().startswith(">"):
+                continue  # 引言塊（含訂正協議保留的原文）不是表列
+            m = _SSOT_ROW.match(line)
+            if m and "|" in m.group(2):
+                names.setdefault("SCG-" + m.group(1), m.group(2).split("|")[0].strip())
+    return names
+
+
+def check_gate_name_parity(version_path: str) -> list[str]:
+    """判準 5：SDD_GUIDE 的 SCG 閘門名必須與 SCG SSOT 逐字相同。"""
+    ssot = _gate_names(os.path.join(version_path, SCG_SSOT))
+    guide = _gate_names(os.path.join(version_path, RG_SSOT))
+    problems: list[str] = []
+    for gate, name in sorted(ssot.items()):
+        other = guide.get(gate)
+        if other is not None and other != name:
+            problems.append(
+                f"{RG_SSOT}：{gate} 的英文閘門名 {other!r} 與 SCG SSOT（{SCG_SSOT}）的 "
+                f"{name!r} 不符——同一份知識住兩個家，只有一個家會被改"
+            )
+    return problems
+
+
 def _label(line: str, end: int) -> str:
     tail = line[end:end + _LABEL_MAX]
     m = _LABEL_STOP.search(tail)
@@ -225,14 +265,25 @@ def main(argv: list[str] | None = None) -> int:
     versions = discover_frozen_versions(repo_root)
     latest = latest_version(versions)
     if not latest:
-        print("⚠️ 找不到任何版本目錄，略過 agent 閘門錨點 lint")
-        return 0
+        # 🔴 AGT-12（R85）fail-closed：此處原本印「⚠️ 略過」並回 **0**。
+        # 為何那是假綠：本 lint 的全部判準都以「解析得到 LATEST」為前提，前提不成立時它
+        # 一個站點都沒看過，卻回報與「全部一致」相同的 rc ⇒ 路徑判斷一旦漂掉（改目錄命名、
+        # 呼叫端傳錯 repo_root、Copy-on-Evolve 開版失敗），這支 lint 靜默全綠，
+        # **失效表徵與通過完全相同**。判準的輸入不可信時一律 fail-loud，
+        # 與本檔判準 2（SSOT 表解析失敗即紅）同一條紀律。
+        print(
+            "::error:: agent 閘門錨點 lint：找不到任何 AISDLC_SDD_v0.* 版本目錄"
+            f"（repo_root={repo_root!r}）——判準的輸入不可信，一律 fail-closed，不得靜默放行",
+            file=sys.stderr,
+        )
+        return 1
     version_path = os.path.join(repo_root, latest)
 
     problems = validate_topic_map(version_path)
     problems += check_anchors(version_path)
     problems += check_single_home_refs(version_path)
     problems += check_version_pointer(version_path)
+    problems += check_gate_name_parity(version_path)
 
     if problems:
         print(f"❌ Agent 閘門錨點 lint 失敗（{latest}）：{len(problems)} 筆")

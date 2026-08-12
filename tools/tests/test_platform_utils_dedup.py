@@ -170,26 +170,32 @@ _SDD_LATEST_DEF_RES = {
 }
 
 
-def _git_py_paths(*extra_args: str) -> set[str]:
-    """`git ls-files [extra_args] -z -- "*.py"` 的相對路徑集合（rc 非零即硬錯）。"""
+def _git_py_paths(*extra_args: str, root: Path | None = None) -> set[str]:
+    """`git ls-files [extra_args] -z -- "*.py"` 的相對路徑集合（rc 非零即硬錯）。
+
+    🔴 `root` 存在的唯一理由（R85／QA-06）：`TestScanSurfaceCoversUntrackedFiles` 要造
+    一支**真的 untracked 且違規**的 `.py` 才證明得了盲區已封，而此前它造在**共用 repo
+    根**上 ⇒ 多包／多行程並行時互相看見對方的探針（QA 實測 traceback 裡的 pid 不是自己
+    的行程）。探針改造在測試專屬的拋棄式 git repo 內，共用工作樹零足跡。
+    """
     out = subprocess.run(
         ["git", "ls-files", *extra_args, "-z", "--", "*.py"],
-        cwd=_REPO_ROOT, capture_output=True, text=True,
+        cwd=root or _REPO_ROOT, capture_output=True, text=True,
         encoding="utf-8", errors="replace", check=True,  # 非 UTF-8 終端下的 mojibake 防護
     ).stdout
     # `-z`：NUL 分隔，git 不做八進位 quote ⇒ 非 ASCII 路徑不需 core.quotepath 處理。
     return {p for p in out.split("\0") if p}
 
 
-def _tracked_only_py_files() -> list[str]:
+def _tracked_only_py_files(root: Path | None = None) -> list[str]:
     """R70 修**前**的掃描面（只認 tracked）。保留為具名函式的唯一理由：讓
     `TestScanSurfaceCoversUntrackedFiles` 能對「舊掃描面看不到／新掃描面看得到」
     做**同一支測試內的對照實測**，把盲區封閉這件事變成可驗證的斷言，而不是
     改完就沒人再證明的宣稱。除該對照組外，任何斷言都不得用它當掃描面。"""
-    return sorted(_git_py_paths())
+    return sorted(_git_py_paths(root=root))
 
 
-def _repo_py_files() -> list[str]:
+def _repo_py_files(root: Path | None = None) -> list[str]:
     """掃描面＝**tracked ∪ untracked-not-ignored** 的 `.py`（R70／`DEF-101-752`）。
 
     為何要納入 untracked：見檔頭②。`git ls-files` 的 tracked-only 語意讓「還沒
@@ -200,10 +206,11 @@ def _repo_py_files() -> list[str]:
     一個都沒少——實測本 repo untracked-not-ignored 的 `.py` 現為 0 支，
     即本次擴面對**耗時**同樣近乎零代價。
     """
-    return sorted(_git_py_paths() | _git_py_paths("-o", "--exclude-standard"))
+    return sorted(_git_py_paths(root=root)
+                  | _git_py_paths("-o", "--exclude-standard", root=root))
 
 
-def _scan_repo_py_for(pattern: re.Pattern[str]) -> list[str]:
+def _scan_repo_py_for(pattern: re.Pattern[str], root: Path | None = None) -> list[str]:
     """全 repo（tracked ∪ untracked-not-ignored 的 `.py`）機械掃描，回傳命中檔案的
     repo 相對路徑清單。
 
@@ -234,9 +241,9 @@ def _scan_repo_py_for(pattern: re.Pattern[str]) -> list[str]:
     """
     offenders: list[str] = []
     unreadable: list[str] = []
-    for rel in _repo_py_files():
+    for rel in _repo_py_files(root):
         try:
-            text = (_REPO_ROOT / rel).read_text(encoding="utf-8", errors="replace")
+            text = ((root or _REPO_ROOT) / rel).read_text(encoding="utf-8", errors="replace")
         except OSError as exc:
             unreadable.append(f"{rel}（{type(exc).__name__}）")
             continue
@@ -582,41 +589,54 @@ class TestScanSurfaceCoversUntrackedFiles(unittest.TestCase):
     本鎖造一支真的 untracked（且非 ignored）的違規 `.py`，同一支測試內對照兩個
     掃描面：修前的 tracked-only 看不到它／修後的看得到且判紅。缺任一半都證明不了
     「盲區已封」——只證明「現在掃得到」的話，掃描面被改回去時本鎖不會說話。
+
+    🔴 R85／QA-06：探針改造在**測試專屬的拋棄式 git repo** 內，共用工作樹零足跡。
+    此前它造在 repo 根（`_scan_surface_probe_<pid>/`）——pid 只讓**自己**的目錄唯一，
+    擋不住「別的行程掃到我的探針」：探針依定義是一支違規檔，而本檔的掃描面是全 repo
+    ⇒ 並行時互相污染（QA 實測 traceback 裡的 pid 不屬於報錯的那個行程，兩種載具的
+    失敗支數因此對不起來）。拋棄式 repo 讓污染在**結構上**不可能，不是靠清理得夠快。
     """
 
     def test_untracked_offender_is_invisible_to_old_surface_and_caught_by_new(self) -> None:
-        probe_dir = _REPO_ROOT / f"_scan_surface_probe_{os.getpid()}"
-        self.assertFalse(probe_dir.exists(), f"探針目錄殘留：{probe_dir}（上次執行未清乾淨）")
-        probe = probe_dir / "probe_platform_helper.py"
-        rel = f"{probe_dir.name}/{probe.name}"
-        probe_dir.mkdir()
-        try:
-            probe.write_text(
-                "# R70 掃描面盲區探針（測試建立、測試刪除；殘留即為異常）\n"
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            subprocess.run(["git", "init", "-q"], cwd=root, check=True)
+            # 需要一支 tracked 檔，tracked-only 那一面才不是「空集合當然看不到」的假綠。
+            (root / "tracked_noise.py").write_text("x = 1\n", encoding="utf-8")
+            subprocess.run(["git", "add", "tracked_noise.py"], cwd=root, check=True)
+
+            rel = "probe_pkg/probe_platform_helper.py"
+            (root / "probe_pkg").mkdir()
+            (root / rel).write_text(
+                "# R70 掃描面盲區探針（拋棄式 repo 內，共用工作樹零足跡）\n"
                 "def is_windows():\n"
                 "    return False\n",
                 encoding="utf-8",
             )
             # 前置條件：探針確實是 untracked 且未被 .gitignore 排除，否則本測試
             # 證明的東西與事故形態不同（fail-loud，不靜默 skip）。
-            self.assertIn(rel, _git_py_paths("-o", "--exclude-standard"),
+            self.assertIn(rel, _git_py_paths("-o", "--exclude-standard", root=root),
                           f"{rel} 未被 git 視為 untracked-not-ignored——探針失效")
 
             # ① 修**前**的掃描面：看不到它 ＝ 盲區的實測憑證
+            old = _tracked_only_py_files(root)
+            self.assertIn("tracked_noise.py", old,
+                          "tracked-only 掃描面連 tracked 檔都看不到 ⇒ 下一條會是假綠")
             self.assertNotIn(
-                rel, _tracked_only_py_files(),
+                rel, old,
                 "tracked-only 掃描面竟看得到未追蹤檔——本鎖賴以成立的前提不成立",
             )
             # ② 修**後**的掃描面：看得到，且被孤島不變量判為違規（根層第二個定義點）
-            hits = _scan_repo_py_for(_EXTRA_DEF_RES["is_windows"])
+            hits = _scan_repo_py_for(_EXTRA_DEF_RES["is_windows"], root)
             self.assertIn(rel, hits, "擴面後仍掃不到未追蹤的違規檔——盲區未封")
             self.assertIn(
                 rel, island_violations("is_windows", hits),
                 "未追蹤的違規檔進了掃描面卻沒被判違規——擴面白做",
             )
-        finally:
-            shutil.rmtree(probe_dir, ignore_errors=True)
-        self.assertFalse(probe_dir.exists(), f"探針目錄未清除：{probe_dir}")
+        # 🔴 共用工作樹零足跡：本測試不得在 repo 根留下任何 `_scan_surface_probe_*`。
+        self.assertEqual(
+            sorted(p.name for p in _REPO_ROOT.glob("_scan_surface_probe_*")), [],
+            "repo 根出現探針目錄——本測試已改為拋棄式 repo，這代表舊形態被改回去了")
 
 
 # ══════════════════════════════════════════════════════════════════════════════

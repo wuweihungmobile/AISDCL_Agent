@@ -414,4 +414,18 @@ class PlaybookKernel:
             ))
         elif mt == StepMutationType.REVISE_CURRENT and mut.revised_prompt:
             task.prompt = mut.revised_prompt
+        # 🔴 R85 F3／ARCH-03 階段 0（fail-loud，零控制流變更）。
+        # 本函式是 production 唯一的突變套用點（main.py → AutoResumeService → Kernel；
+        # PlaybookRunner 那條路今天**零建構點**，本輪 AST 普查實測 24 個建構點全在
+        # tests/，對照組 PlaybookTask 同一支掃描器抓得到 17 個 production 建構點
+        # ⇒「零」是真的沒有，不是掃不到）。而它只認上面四種：DELETE_STEP／SKIP_TO／
+        # CONDITIONAL，以及「型別對但 payload 缺」，在本輪之前是**完全靜默**地被丟掉
+        # （本輪實測：logging 開到 DEBUG，三種型別一行 log 都沒有、playbook 零變化）
+        # ⇒ 失效表徵與「突變已成功套用」完全相同，正是本 repo 最忌諱的那一型。
+        # 為何只出聲不 raise：raise 會把「模型提了一個 Kernel 不支援的突變」升級成整輪
+        # 中止＝行為變更，需另案裁決；階段 0 的目標是讓失效**可被偵測**，不是改語意。
+        else:
+            logger.error("=== R85 ARCH-03 | Kernel 路徑未套用突變 %s（欄位=%s）："
+                         "production 靜默丟棄，此突變對 playbook 零效果 ===",
+                         mt, sorted(mut.model_dump(exclude_none=True)))
         return None

@@ -153,6 +153,18 @@ def main(argv: list[str] | None = None) -> int:
     force_utf8_stdio()
     argv = sys.argv[1:] if argv is None else argv
     repo_root = argv[0] if argv else os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    # 🔴 AGT-12（R85）fail-closed：本檔原本沒有這一段，於是 `_latest_active_dir()` 回 None 時
+    # `lint()` 回空 list，main 直接印「✅ 最新版 active/ 無已決 RFC 滯留」並回 0——
+    # 對一個它**從未找到、更未掃過**的目錄做正面斷言（四支 fail-open 中最嚴重的一種：
+    # 其餘三支至少講了「略過」，這支連略過都沒說）。無版本目錄與無違規在 rc 上必須分得開。
+    if _latest_active_dir(repo_root) is None:
+        print(
+            "::error:: RFC 生命週期 lint：找不到任何演化版目錄"
+            f"（repo_root={repo_root!r}）——輸入不可信，一律 fail-closed，"
+            "不得對未掃過的 active/ 做「無滯留」的正面宣稱",
+            file=sys.stderr,
+        )
+        return 1
     violations = lint(repo_root)
     # W-33-2（DEF-30-001）：advisory 缺標準狀態欄 warn（不影響 exit code，僅促慣例採納）。
     for name in missing_status(repo_root):
