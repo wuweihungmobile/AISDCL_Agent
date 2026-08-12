@@ -1917,6 +1917,16 @@ _REGISTRATION_BASELINE: dict[tuple[str, str], frozenset[str]] = {
     ("PostToolUse", ".claude/hooks/context_budget_guard.py"): frozenset(
         {"Read", "Task", "Grep", "Glob", "WebFetch", "WebSearch", "Bash",
          "PowerShell"}),
+    # 🔴 `DEF-200-103` 落地：「宣稱先於查證」最大失誤桶的**輸出面**觀測者（此前該桶零攔截器）。
+    # Stop 事件無 matcher（它不是工具呼叫）⇒ 射程恆為 `*`，與兩支 SessionStart 同形。
+    # 為何非 Stop 不可：該桶發生的平面是「宣稱本身」，永不變成 repo 檔案 ⇒ 靜態掃描器
+    # 結構上看不見；而 Stop payload 是唯一同時給得到宣稱（`last_assistant_message`）與
+    # 證據面（`transcript_path`）的地方（本批以拋棄式 dump hook 實測兩欄皆在）。
+    # 契約（逐項見 `.claude/settings.json` 該條目的 _comment）：一律 exit 0**只出聲、
+    # 永不阻斷**（不用 Stop 的 `decision:block`）／逃生口 `AUTOSDD_CLAIM_GUARD_OFF`
+    # 刻意不與其他守衛共用／`AUTOSDD_UNATTENDED` 有設時抑制詞表縮到只認方括號標記／
+    # payload 退化與任何例外 fail-open（截斷證據面偏向假紅，故超 byte cap 一律放行）。
+    ("Stop", ".claude/hooks/check_claim_provenance.py"): frozenset({"*"}),
 }
 
 

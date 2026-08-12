@@ -203,18 +203,18 @@ class TestRealRepoConfigPinning(unittest.TestCase):
         self.assertEqual(
             set(m._SCAN_FILES),
             {
+                ".claude/hooks/check_claim_provenance.py",
+                "tools/tests/test_claim_provenance_r86.py",
                 "CLAUDE.md",
                 "ONBOARDING.md",
                 "useMacWin.md",
                 "AutoClaude/CLAUDE.md",
                 "AutoClaude/README.md",
-                # R59（DEF-101-514）：使用者最先讀的入門文件，其 §1.4 標「強制」驗證
-                # 步驟卻自 R13 收斂以來一直在掃描面外——實測其寫死的舊數字已落後
-                # 數百支且從未翻紅。本鎖同步擴充（否則加了掃描面卻沒有 roster 鎖，
-                # 等於把新加的那一項留在「刪掉也沒訊號」的狀態）。
+                # R59（DEF-101-514）：使用者最先讀的入門文件，§1.4 標「強制」卻自 R13 起
+                # 在掃描面外（舊數字落後數百支從未翻紅）。本鎖同步擴充，否則新加的那一項
+                # 會留在「刪掉也沒訊號」的狀態。
                 "docs/AISDLC_Agent_UserGuide.md",
-                # R78（QA-02）：掃描面此前清一色 `.md`，而量測值最會被就地寫下的地方是
-                # 讀寫基線的那一層工具原始碼。兩支一起收（只收被抓到的那一支＝個案修法）。
+                # R78（QA-02）：量測值最會被就地寫下的是讀寫基線那層工具原始碼，兩支一起收。
                 "tools/lib/baseline_origin.py",
                 "tools/sync_onboarding_baselines.py",
             },

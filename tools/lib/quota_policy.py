@@ -92,8 +92,14 @@ from dataclasses import dataclass, replace
 from datetime import datetime
 from typing import NamedTuple
 
-#: 時間視野檔位（由 `resets_at` 導出，**不由桶名**）。
-AXIS_NEAR, AXIS_MID, AXIS_FAR, AXIS_NONE = "near", "mid", "far", "none"
+import quota_pace as W
+
+#: 時間視野檔位（由 `resets_at` 導出，**不由桶名**）。🔴 R86：常數與判定門檻一起搬到
+#: `quota_pace`（判定的程式在那裡，常數留在這裡就是同一份知識兩個家）；這裡再匯出，
+#: 消費端（`Q.AXIS_MID` 等）一行都不必改。bare import 的前提與 `quota_gate` 相同：
+#: 每一個消費者都是把 `tools/lib` 放進 `sys.path` 之後 `import quota_policy`（實查全庫
+#: 無 `lib.quota_policy` 形態、`tools/lib/` 也沒有 `__init__.py`）。
+AXIS_NEAR, AXIS_MID, AXIS_FAR, AXIS_NONE = W.AXIS_NEAR, W.AXIS_MID, W.AXIS_FAR, W.AXIS_NONE
 
 #: 水位帶。四個錨點逐字取自使用者原文：50 開始少派／70 開始收斂／85 準備下一次
 #: reset／95 停止並喚醒下一輪。
@@ -202,6 +208,10 @@ class Decision:
     binding: Axis | None
     per_axis: tuple[AxisReading, ...]
     reason: str
+    # 🔴 R86／缺陷 C：跨窗攤提的中間量（`quota_pace.Amort`，`None`＝條件不足）。它必須
+    # 隨決策一起走，因為舵手的直接要求是「畫面一行內要能回答為什麼空著也不能衝」——
+    # 把它留在 `axes_of` 裡算完就丟，那句話就答不出來（R85 教訓 5 的同型）。
+    amort: object = None
 
 
 # ── 時間：只把伺服器給的瞬時字串轉成「現在還剩幾分鐘」，不持久化任何時長 ──────────
@@ -231,6 +241,13 @@ def _delta_minutes(resets_at: str | None, now: datetime) -> tuple[float | None, 
     return minutes, (NOTE_SKEW if minutes < 0 else NOTE_OK)
 
 
+# 🔴 R86：`quota_pace.resolve()`／`amort_for()` 的輸入形狀只有一個家。`pct_note` 由本檔
+# 的 `_sane_pct` 產生（水位壞掉的字面判準住這裡，判讀層不重寫第二份）。
+def _rows(state: QuotaState) -> tuple:
+    """`[(kind, pct, resets_at, pct_note)]`——餵給判定層的逐軸事實。"""
+    return tuple((a.kind, a.pct, a.resets_at, _sane_pct(a.pct)[1]) for a in state.axes)
+
+
 def minutes_to_reset(resets_at: str | None, now: datetime) -> float | None:
     """距 reset 幾分鐘；缺席／解不出回 `None`（**不是 0**），時鐘偏移回 `0.0`。"""
     raw = _delta_minutes(resets_at, now)[0]
@@ -239,17 +256,16 @@ def minutes_to_reset(resets_at: str | None, now: datetime) -> float | None:
 
 # 負值分支是**生產路徑**（`axes_of` 直接餵帶號分鐘進來）：一台快 6 小時的機器會讓
 # 「reset 就在眼前，衝」永遠成立，所以偏移一律當 mid、不當 near。
-def horizon_band(minutes: float | None, p: Policy) -> str:
-    """由「還剩幾分鐘」導出時間視野。🔴 `None` 與負值一律**不得加速**。"""
-    if minutes is None:
-        return AXIS_NONE
-    if minutes < 0:
-        return AXIS_MID
-    if minutes <= p.accel_window_minutes:
-        return AXIS_NEAR
-    if minutes <= p.far_horizon_minutes:
-        return AXIS_MID
-    return AXIS_FAR
+# 🔴 R86／缺陷 A：門檻本體搬到 `quota_pace.horizon()`，因為它現在要吃**第三個**輸入
+# （該軸的窗長），而 `360` 這個絕對分鐘數在 300 分窗上是 120%（far 結構上不可達）、在
+# 10080 分窗上是 3.6%（96.4% 的時間恆為 far）——同一個常數在兩類軸上造成相反的極端。
+# 本函式的簽章刻意**不變**（`window_minutes` 是選配、預設 `None`＝沿用兩個絕對門檻）：
+# 既有呼叫點與既有測試逐格同值，向後相容是機械的、不是宣稱的。
+def horizon_band(minutes: float | None, p: Policy,
+                 window_minutes: float | None = None) -> str:
+    """由「還剩幾分鐘」（＋窗長）導出時間視野。🔴 `None` 與負值一律**不得加速**。"""
+    return W.horizon(minutes, window_minutes, p.accel_window_minutes,
+                     p.far_horizon_minutes)
 
 
 def _sane_pct(pct: object) -> tuple[float | None, str]:
@@ -394,18 +410,23 @@ def axis_recommended(pct: float, minutes: float | None, p: Policy) -> int:
 # ——一台快 6 小時的機器會讓「reset 就在眼前，衝」永遠成立。
 # （說明寫成 `#` 而非 docstring：`count_loc` 計 docstring 行、不計註解行，而本檔 tier
 #   餘裕個位數；同 `quota_gate.py`／`session_resume_planner.py` 既有作法，一字未刪。）
-def axes_of(state: QuotaState, now: datetime, p: Policy) -> tuple[AxisReading, ...]:
+# 🔴 R86：這裡多了兩個 `quota_pace` 呼叫，兩者治的是**不同**的缺陷，不要混讀：
+#   · `effective_horizon`（缺陷 A＋B）＝逐軸的事：相對窗長的門檻 ＋ 燃燒率，並帶
+#     「無節省證據時不得比絕對門檻鬆」的夾層 ⇒ 窗長解不出的軸逐格等於今天的行為。
+#   · `band_inputs`（缺陷 C）＝**跨軸**的事：把長窗（總量）配額攤提到本個短窗（速率），
+#     只調高餵給 `pct_band` 的水位、永不調低 ⇒ 結構上不可能放寬。
+#   `axis.pct` 仍是伺服器給的原值（事實不得被改寫）；被攤提調高過的軸在 note 裡具名。
+def axes_of(state: QuotaState, now: datetime, p: Policy,
+            ratio: float | None = None, ratio_note: str = "") -> tuple[AxisReading, ...]:
     """逐軸解析的**唯一正規路徑**：`minutes` 只能從 `axis.resets_at` 導出。"""
+    resolved = W.resolve(  # 🔴 帶號分鐘進去：負值的 mid 強制在 `horizon()`，不在這裡
+        _rows(state), tuple(_delta_minutes(a.resets_at, now) for a in state.axes),
+        ratio, ratio_note, p.accel_window_minutes, p.far_horizon_minutes, p.halt_pct)
     readings = []
-    for axis in state.axes:
-        raw, note = _delta_minutes(axis.resets_at, now)
-        horizon = horizon_band(raw, p)   # 🔴 帶號進去：負值的 mid 強制在那裡，不在這裡
-        band = pct_band(axis.pct, p)
-        note = "+".join(x for x in (_sane_pct(axis.pct)[1], note) if x)
-        readings.append(AxisReading(
-            axis, band, horizon, _cap_for(band, horizon, p),
-            _rec_for(band, horizon, p),
-            None if raw is None else max(0.0, raw), note))
+    for axis, (pct, horizon, minutes, note) in zip(state.axes, resolved):
+        band = pct_band(pct, p)
+        readings.append(AxisReading(axis, band, horizon, _cap_for(band, horizon, p),
+                                   _rec_for(band, horizon, p), minutes, note))
     return tuple(readings)
 
 
@@ -458,9 +479,13 @@ def _binding_key(r: AxisReading) -> tuple[float, float, float, str]:
 # 而 `rec <= cap` 讓它**只能在最緊那一軸允許的空間內**發生（weekly 撞線 ⇒ cap=0 ⇒ 0）。
 # 🔴 `axes == ()`（量不到）⇒ `cap = degraded_cap`，不是 `None`／不設限：R81 複審探針
 # 實測「快取過期 600s ＋ 額度 99%」時 42 次派發放行 42。同時**永不 halt**。
-def decide(state: QuotaState, now: datetime, p: Policy) -> Decision:
+def decide(state: QuotaState, now: datetime, p: Policy,
+           ratio: float | None = None, ratio_note: str = "") -> Decision:
+    # 🔴 `ratio`＝短窗 pp／長窗 pp 的換算比（R86／缺陷 C）。它是**觀測值不是門檻**，所以
+    # 刻意不進 `Policy`（那裡是「全部門檻的唯一的家」）：由呼叫端從落款推估後注入，
+    # 缺席 ⇒ 攤提整段不套用（不偽造一個 r）。
     """跨軸聚合：`cap = min(逐軸 cap)`＝煞車；`rec = min(base×pace, cap)`＝加速。"""
-    readings = axes_of(state, now, p)
+    readings = axes_of(state, now, p, ratio, ratio_note)
     if not readings:
         return Decision(
             cap=max(1, p.degraded_cap), recommended_fanout=max(1, p.degraded_cap),
@@ -474,7 +499,12 @@ def decide(state: QuotaState, now: datetime, p: Policy) -> Decision:
         cap=binding.cap,
         recommended_fanout=_bound(
             _clamp(int(base * _pace_of(readings, p)), p), binding.cap),
-        band=binding.band, binding=binding.axis, per_axis=readings, reason=reason)
+        band=binding.band, binding=binding.axis, per_axis=readings, reason=reason,
+        # 🔴 餵**帶號**分鐘（不是 `minutes_to_reset` 那個夾 0 的版本）：時鐘偏移的軸必須
+        # 被攤提整個排除。夾 0 之後長窗軸會變成「窗數 1、配額＝全部剩餘」＝**放寬**，
+        # 而放寬是本案唯一不准無證據發生的方向（同 `horizon_band` 負值分支的判詞）。
+        amort=W.amort_for(_rows(state), tuple(_delta_minutes(a.resets_at, now)
+                                              for a in state.axes), ratio, ratio_note))
 
 
 # M7：每一段只帶**一個** %，且同段必有 `kind=` 與剩餘分鐘（或明文不明）。

@@ -1,16 +1,19 @@
-"""build_kernel — Kernel + 15 Plugin + MutationApplyService 組裝工廠（Phase 4）。
-
-對應：
-  - SD_Improving_01.md v1.1 §3.6 Layer 4 CLI 圖
-  - SD_Improving_02.md v1.1 §1.4「main.py 的 DI 組裝為唯一決定後端的位置」
-  - SD_Improving_05 W0 T0-2：抽 `_build_plugin_set()` + `_register_in_order()`
-    解決 wire_plugins_with_registry / build_kernel 兩條路徑的 SSOT 漂移（M-3）
-
-職責：
-  - 接受 AppConfig + 必要相依，組裝完整可運行的 PlaybookKernel
-  - 註冊全部 15 個 Plugin（按 priority 自動排序）
-  - 整合 GotoCounterPlugin + CheckpointPlugin（Gap-042/048/049 計數器持久化）
-"""
+# build_kernel — Kernel + 15 Plugin + MutationApplyService 組裝工廠（Phase 4）。
+#
+# 🔴 R86：本段由 docstring 改為 `#` 註解，**一字未刪**（`check_loc_budget` 自己印的指引：
+# docstring 行會被 count_loc 計入、`#` 不會）。本輪要把配速契約的 degraded cap 從 `.env`
+# 接到 `build_quota_meter`，而 total LOC 餘裕當回合實測只有 12 行 ⇒ 等量減法（R82 先例）。
+#
+# 對應：
+#   - SD_Improving_01.md v1.1 §3.6 Layer 4 CLI 圖
+#   - SD_Improving_02.md v1.1 §1.4「main.py 的 DI 組裝為唯一決定後端的位置」
+#   - SD_Improving_05 W0 T0-2：抽 `_build_plugin_set()` + `_register_in_order()`
+#     解決 wire_plugins_with_registry / build_kernel 兩條路徑的 SSOT 漂移（M-3）
+#
+# 職責：
+#   - 接受 AppConfig + 必要相依，組裝完整可運行的 PlaybookKernel
+#   - 註冊全部 15 個 Plugin（按 priority 自動排序）
+#   - 整合 GotoCounterPlugin + CheckpointPlugin（Gap-042/048/049 計數器持久化）
 from __future__ import annotations
 
 from typing import Any
@@ -45,15 +48,19 @@ from .ports.brain import IBrain
 from .ports.evaluator import IEvaluator
 from .ports.executor import IExecutor
 from .ports.observability import IObservabilityPort
+from .ports.quota_meter import DEGRADED_CAP
 from .services.mutation.service import MutationApplyService
 
 
 # R82（ACQ-01）：額度水位量測器的唯一建構點。抽成函式而非 inline，是為了讓
 # AutoResumeService（core/，不得 import infra）也能經由 main.py 拿到**同一種**實作，
 # 而不是各自 new 一個（同一份知識住兩個家正是本 repo 反覆在治的形態）。
-def build_quota_meter() -> Any:
+# R86：`degraded_cap`＝配速契約量不到時的併發地板（**不是**不設限）。預設值就是 port 那一份
+# 鏡射常數，所以 main.py 既有的無參呼叫行為零變化；`_build_plugin_set` 那一個呼叫點把
+# `.env` 讀出來的值（`AUTOSDD_QUOTA_DEGRADED_CAP`）傳進來，讓那個鍵真的有讀者。
+def build_quota_meter(degraded_cap: int = DEGRADED_CAP) -> Any:
     from ..infra.adapters.file_quota_meter import FileQuotaMeterAdapter
-    return FileQuotaMeterAdapter()
+    return FileQuotaMeterAdapter(degraded_cap=degraded_cap)
 
 # Plugin 註冊順序（SSOT — 兩條組裝路徑共用，避免 M-3 漂移）
 #
@@ -112,19 +119,19 @@ def _build_plugin_set(
     observability: IObservabilityPort | None = None,
     brain: IBrain | None = None,
 ) -> dict[str, Any]:
-    """組裝完整的 Plugin 集合（含 MutationApplyService），回傳以 name 為 key 的 dict。
-
-    SD_Improving_05 W0 T0-2：SSOT 抽出，wire_plugins_with_registry 與 build_kernel
-    皆改呼叫此函式，避免兩條路徑漂移（M-3）。
-
-    回傳 key（與 _REGISTER_ORDER 對應 + 兩個非註冊項）：
-      註冊：pre_run_validator, hotkey?, cross_step_validator, token_guard,
-            global_goal_anchor, playbook_persistence, sdd_governance, fast_path,
-            notification, knowledge_base, preference_memory, goal_synthesis,
-            goal_progress, rtm_writeback, translation_learner, convergence,
-            evolution, goto_counter, checkpoint
-      非註冊：mutation_service（注入 PlaybookKernel）
-    """
+    # 組裝完整的 Plugin 集合（含 MutationApplyService），回傳以 name 為 key 的 dict。
+    # （R86 等量減法：docstring → 註解，一字未刪；理由見檔頭。）
+    #
+    # SD_Improving_05 W0 T0-2：SSOT 抽出，wire_plugins_with_registry 與 build_kernel
+    # 皆改呼叫此函式，避免兩條路徑漂移（M-3）。
+    #
+    # 回傳 key（與 _REGISTER_ORDER 對應 + 兩個非註冊項）：
+    #   註冊：pre_run_validator, hotkey?, cross_step_validator, token_guard,
+    #         global_goal_anchor, playbook_persistence, sdd_governance, fast_path,
+    #         notification, knowledge_base, preference_memory, goal_synthesis,
+    #         goal_progress, rtm_writeback, translation_learner, convergence,
+    #         evolution, goto_counter, checkpoint
+    #   非註冊：mutation_service（注入 PlaybookKernel）
     # SD_04 W2 三方審查 Dev-W2-Crit-1 / Arch-W2-Maj-1：id_resolver SSOT
     # （確保 db_only / both 模式下 CheckpointPlugin 與 AutoResumeService 使用一致 ID）
     from ..infra.repositories.factory import (  # noqa: PLC0415
@@ -166,7 +173,8 @@ def _build_plugin_set(
         # R82（ACQ-01）：注入 QuotaMeterPort 的檔案契約實作。wiring 是 core-purity contract
         # 的唯一豁免點，import infra adapter 合法；plugin 自己拿到的只是一個 port。
         "token_guard": TokenGuardPlugin(
-            token_guard_cfg=cfg.token_guard, quota_meter=build_quota_meter(),
+            token_guard_cfg=cfg.token_guard,
+            quota_meter=build_quota_meter(cfg.token_guard.quota_degraded_cap),
         ),
         "global_goal_anchor": GlobalGoalAnchorPlugin(playbook_cfg=cfg.playbook),
         # SD_Improving_05 W4-3：PlaybookPersistencePlugin（ON_EVOLUTION_APPLY phase）
@@ -364,30 +372,29 @@ def build_kernel(
     state_repository: Any | None = None,
     observability: IObservabilityPort | None = None,
 ) -> PlaybookKernel:
-    """組裝完整的 PlaybookKernel。
-
-    註冊所有 15 個 Plugin 並注入相應依賴。Plugin 的 priority 由各 Plugin 類別
-    本身的 ``PRIORITY`` 常數決定（W4-T15 m-6），EventBus 在 register 時透過
-    ``hook.priority()`` 自動排序，此處不再硬編碼數值。
-
-    SD_Improving_05 W0 T0-2：改呼叫 _build_plugin_set + _register_in_order，
-    與 wire_plugins_with_registry 共用唯一 SSOT 來源，杜絕 M-3 漂移。
-
-    PRIORITY 對照表（來源：各 plugins/*.py 內 `PRIORITY` 常數，僅供讀者參考）：
-      5  PreRunValidatorPlugin
-      10 HotkeyPlugin
-      15 CrossStepValidatorPlugin
-      30 TokenGuardPlugin
-      35 GlobalGoalAnchorPlugin
-      40 PlaybookPersistencePlugin（SD_05 W4-3）
-      45 SddGovernancePlugin（AutoSDD W6）
-      50 FastPathPlugin / NotificationPlugin / KnowledgeBasePlugin / GoalSynthesisPlugin
-         （SD_05 W4-2：FastPathPlugin tie-breaker register 在 notification 前）
-      65 ConvergencePlugin
-      70 EvolutionPlugin
-      85 GotoCounterPlugin
-      90 CheckpointPlugin
-    """
+    # 組裝完整的 PlaybookKernel。（R86 等量減法：docstring → 註解，一字未刪；理由見檔頭。）
+    #
+    # 註冊所有 15 個 Plugin 並注入相應依賴。Plugin 的 priority 由各 Plugin 類別
+    # 本身的 ``PRIORITY`` 常數決定（W4-T15 m-6），EventBus 在 register 時透過
+    # ``hook.priority()`` 自動排序，此處不再硬編碼數值。
+    #
+    # SD_Improving_05 W0 T0-2：改呼叫 _build_plugin_set + _register_in_order，
+    # 與 wire_plugins_with_registry 共用唯一 SSOT 來源，杜絕 M-3 漂移。
+    #
+    # PRIORITY 對照表（來源：各 plugins/*.py 內 `PRIORITY` 常數，僅供讀者參考）：
+    #   5  PreRunValidatorPlugin
+    #   10 HotkeyPlugin
+    #   15 CrossStepValidatorPlugin
+    #   30 TokenGuardPlugin
+    #   35 GlobalGoalAnchorPlugin
+    #   40 PlaybookPersistencePlugin（SD_05 W4-3）
+    #   45 SddGovernancePlugin（AutoSDD W6）
+    #   50 FastPathPlugin / NotificationPlugin / KnowledgeBasePlugin / GoalSynthesisPlugin
+    #      （SD_05 W4-2：FastPathPlugin tie-breaker register 在 notification 前）
+    #   65 ConvergencePlugin
+    #   70 EvolutionPlugin
+    #   85 GotoCounterPlugin
+    #   90 CheckpointPlugin
     # SD_08 W4 / ADR-SD08-004 §2.1：build_kernel 預設注入 LocalLogger
     # （唯一 W4 Adapter；caller 可顯式傳 observability 覆寫，例如 NullObservability for tests）
     if observability is None:

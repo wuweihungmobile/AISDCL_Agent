@@ -1,29 +1,34 @@
-"""OrchestrationCoordinator — Layer 1.5 協調層（SD_Improving_06 W1 T1-3）。
-
-對應：
-  - ADR-SD06-001 §2 雙層架構圖（Layer 1.5 in / Layer 2 out）
-  - ADR-SD06-001 §6.1 6 phase 序保證（內部狀態機強制；違反 raise PhaseOrderViolation）
-  - ADR-SD06-001 §6.4 send_interrupt 走 EventBus（ON_INTERRUPT_REQUEST event）
-  - PM #8（W2-T2-15 預埋）MAX_ACTIVE_RUNS_PER_GOAL=5 guard
-
-職責：
-  BEFORE_DECIDE → DECIDE → BEFORE_EXEC → EXEC → ON_EVENT → AFTER_EXEC
-
-邊界規則（ADR R1~R5）：不可呼叫 AutoResumeService；不可訂閱 Layer 2 phase；
-Brain ↔ Executor 互通必須走 EventBus。
-
-LOC 預算：≤ 250 行
-"""
+# OrchestrationCoordinator — Layer 1.5 協調層（SD_Improving_06 W1 T1-3）。
+#
+# 🔴 R86：本段由 docstring 改為 `#` 註解，**一字未刪**。理由是 `check_loc_budget` 自己印的
+# 指引逐字：「說明文字請寫成 # 註解而非 docstring——docstring 行會被 count_loc 計入」，而
+# 本輪要把配速機制接進 `run_step` 的 guard，total LOC 餘裕當回合實測只有 12 行。這是 R82
+# 用過的**等量減法**（該輪為 R82 額度軸讓出預算），不是刪文件。
+#
+# 對應：
+#   - ADR-SD06-001 §2 雙層架構圖（Layer 1.5 in / Layer 2 out）
+#   - ADR-SD06-001 §6.1 6 phase 序保證（內部狀態機強制；違反 raise PhaseOrderViolation）
+#   - ADR-SD06-001 §6.4 send_interrupt 走 EventBus（ON_INTERRUPT_REQUEST event）
+#   - PM #8（W2-T2-15 預埋）MAX_ACTIVE_RUNS_PER_GOAL=5 guard
+#
+# 職責：
+#   BEFORE_DECIDE → DECIDE → BEFORE_EXEC → EXEC → ON_EVENT → AFTER_EXEC
+#
+# 邊界規則（ADR R1~R5）：不可呼叫 AutoResumeService；不可訂閱 Layer 2 phase；
+# Brain ↔ Executor 互通必須走 EventBus。
+#
+# LOC 預算：≤ 250 行
 from __future__ import annotations
 
 import os
 from dataclasses import dataclass, field
-from typing import Any, Optional
+from typing import Any
 
 from ..event_bus import EventBus
 from ..hookspec import HookContext, KernelPhase
 from ..ports.brain import BrainCapabilities, IBrain
 from ..ports.executor import ExecutionEvent, ExecutionOutput, IExecutor
+from ..ports.quota_meter import effective_fanout
 
 
 # ──────────────────────────────────────────────────────────────
@@ -44,7 +49,7 @@ class CoordinatorResult:
     capabilities: BrainCapabilities
     event_count: int
     interrupted: bool = False
-    veto_reason: Optional[str] = None
+    veto_reason: str | None = None
     extra: dict = field(default_factory=dict)
 
 
@@ -63,10 +68,10 @@ _PHASE_ORDER: tuple[KernelPhase, ...] = (
 # OrchestrationCoordinator
 # ──────────────────────────────────────────────────────────────
 class OrchestrationCoordinator:
-    """Layer 1.5 — 單一 step 內 Brain / Executor 協調。
-
-    一個實例綁定一個 EventBus + Brain + Executor；每次 run_step 跑一輪 6 phase。
-    """
+    # Layer 1.5 — 單一 step 內 Brain / Executor 協調。
+    #
+    # 一個實例綁定一個 EventBus + Brain + Executor；每次 run_step 跑一輪 6 phase。
+    # （R86 等量減法：docstring → 註解，一字未刪；理由見檔頭。）
 
     _DEFAULT_MAX_ACTIVE_RUNS = 5  # PM #8
 
@@ -76,11 +81,15 @@ class OrchestrationCoordinator:
         bus: EventBus,
         brain: IBrain,
         executor: IExecutor,
-        max_active_runs_per_goal: Optional[int] = None,
+        max_active_runs_per_goal: int | None = None,
+        pace_meter: Any | None = None,
     ):
         self._bus = bus
         self._brain = brain
         self._executor = executor
+        # R86：QuotaMeterPort（可選，只用它的 `read_pace()`）。None＝配速這一軸沒接，
+        # 行為與修前位元級相同（同本 repo 既有慣例 `quota_meter=None ⇒ 零行為變化`）。
+        self._pace = pace_meter
         # PM #8 解析優先級：env > 建構子 > 預設
         env_val = os.environ.get("MAX_ACTIVE_RUNS_PER_GOAL")
         if env_val and env_val.isdigit():
@@ -104,6 +113,17 @@ class OrchestrationCoordinator:
     def max_active_runs_per_goal(self) -> int:
         return self._max_active_runs
 
+    # 🔴 R86：這是本輪把「配速演算法」接到引擎的那一個決策點——修前 guard 讀的是一個
+    # **靜態常數**（env > 建構子 > 5），對帳號額度、對距 reset 幾分鐘全部失明。
+    # 現在它是 `min(靜態上限, 根層算出來的 cap)`：`min` 讓它在任何情境下都不可能比修前
+    # 更寬鬆（見 `effective_fanout` 檔內那段 WHY），而放寬只可能來自「調高靜態上限」，
+    # 也就是仍然握在 operator 手裡。`max_active_runs_per_goal` 刻意保留原語意（靜態值），
+    # 既有 4 支測試讀它；新語意另開一個名字，讀呼叫點就看得出問的是哪一個。
+    @property
+    def effective_max_active_runs(self) -> int:
+        pace = self._pace.read_pace() if self._pace is not None else None
+        return effective_fanout(self._max_active_runs, pace)
+
     def run_step(
         self,
         *,
@@ -113,20 +133,20 @@ class OrchestrationCoordinator:
         attempt: int = 0,
         active_runs_for_goal: int = 0,
     ) -> CoordinatorResult:
-        """執行單一 step 的 6 phase 協調序。
-
-        Raises:
-            MaxActiveRunsExceeded：active_runs_for_goal >= max_active_runs（PM #8）
-            PhaseOrderViolation：內部 bug；外部 caller 不應觸發
-        """
+        # 執行單一 step 的 6 phase 協調序。（R86 等量減法：docstring → 註解，一字未刪。）
+        #
+        # Raises:
+        #     MaxActiveRunsExceeded：active_runs_for_goal >= max_active_runs（PM #8）
+        #     PhaseOrderViolation：內部 bug；外部 caller 不應觸發
         self.reset()
 
         # Phase 1：BEFORE_DECIDE — guard + 讀 capabilities
         self._enter_phase(KernelPhase.BEFORE_DECIDE)
-        if active_runs_for_goal >= self._max_active_runs:
+        limit = self.effective_max_active_runs
+        if active_runs_for_goal >= limit:
             raise MaxActiveRunsExceeded(
                 f"active_runs_for_goal={active_runs_for_goal} >= "
-                f"MAX_ACTIVE_RUNS_PER_GOAL={self._max_active_runs}"
+                f"MAX_ACTIVE_RUNS_PER_GOAL={limit}"
             )
         capabilities = self._brain.capabilities()
         self._dispatch_phase(KernelPhase.BEFORE_DECIDE, playbook, task, step_idx, attempt,
@@ -180,7 +200,10 @@ class OrchestrationCoordinator:
         )
 
     def request_interrupt(self, reason: str = "") -> bool:
-        """走 EventBus 發送 ON_INTERRUPT_REQUEST（ADR §6.4）+ 直接呼叫 executor（Phase 1 雙保險）。"""
+        # 走 EventBus 發送 ON_INTERRUPT_REQUEST（ADR §6.4）+ 直接呼叫 executor（Phase 1 雙保險）。
+        # （R86：本行原為 docstring 且長 102 字元＝**HEAD 版就已存在**的 E501 存量債。之所以
+        #  必須在本輪處理：pre-commit 的 ruff 是**整檔**檢查，不是 diff-only ⇒ 只要這一輪碰了
+        #  本檔，這個舊債就會擋住 commit。改 `#` 同時治 E501 與 LOC 兩件事，一字未刪。）
         return self._executor.send_interrupt(reason)
 
     # ──────────────────────────────────────────────
@@ -224,7 +247,7 @@ class OrchestrationCoordinator:
         self._captured_events.append(event)
 
     @staticmethod
-    def _extract_veto_reason(merged: Any) -> Optional[str]:
+    def _extract_veto_reason(merged: Any) -> str | None:
         """從 MergedResult 抽取 veto 原因（merged.veto: bool + veto_reasons: list[str]）。"""
         if merged is None or not getattr(merged, "veto", False):
             return None

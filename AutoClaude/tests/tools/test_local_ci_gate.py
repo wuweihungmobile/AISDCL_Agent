@@ -1507,3 +1507,124 @@ def test_the_perf_skip_reason_states_the_measured_reason_for_staying_opt_in() ->
         "——沒有數字的理由，下一輪會被當成可以拿掉的保守作風"
     )
     assert "PG_REAL_ENABLED" in reason, f"reason 沒有給出可貼的啟用配方：{reason!r}"
+
+
+# =====================================================================
+# (m) M6 的**test-id 集合**面：判準粒度由「剖面／計數」升為「測試」
+#     判準與落款：`tools/lib/skip_runtime_report.py` ＋ docs/06_quality/skip_id_ledger.json
+# =====================================================================
+
+import skip_runtime_report as M  # noqa: E402
+
+_ROOT_TESTS = Path(__file__).resolve().parents[3] / "tools" / "tests"
+_M6_PROF = "tools/tests@darwin"
+_M6_COUNTERPART = "tools/tests@win32"
+
+
+def _tracked_ledger() -> dict:
+    return M.load_skip_id_ledger()
+
+
+def _live_ids() -> list[str]:
+    """本機落款裡的 id 當作 live 集合的替身。
+
+    刻意**不**在這裡真跑根層 3000+ 支測試（那要 400 秒、且會讓本檔的每一次收集都付那個
+    代價）。真正的「live vs 落款」對帳由 `tools/run_root_unittests.py` 每次執行時做，
+    本組守的是**判準本身的鑑別力**——注入是合成的，受測物是真的 `m6_id_set_problems`。
+    """
+    ids = M.ledger_ids(_tracked_ledger(), _M6_PROF)
+    assert ids is not None, f"落款檔缺 `{_M6_PROF}` 那一格——本組的合成注入沒有基底可用"
+    return sorted(ids)
+
+
+def _judge(ledger: dict, live: list[str]) -> tuple[str, list[str]]:
+    return M.m6_id_set_problems(
+        _M6_PROF, live, (_M6_COUNTERPART,), ledger, tests_dir=_ROOT_TESTS)
+
+
+def test_swapping_one_test_id_at_a_constant_count_is_red_but_the_count_ceiling_is_green() -> None:
+    """🔴 本組最重要的一支：**這正是計數粒度結構上抓不到的那件事。**
+
+    立案（R85 QA）：`skip_group_policy` 的判準比的是每群幾支，所以把一支 skip 換成另一支
+    測試（計數一動也不動）時，分群普查的六格完全相同 ⇒ 恆綠。而 M6 問的是「每一支測試
+    都在某條軌上跑過嗎」，那個問題的定義域是**集合**，不是計數 ⇒ 舊粒度答不了它，
+    上 Windows 真機重量也一樣答不了（缺口在判準，不在量測）。
+
+    本支同時對兩個判準餵同一個注入，斷言**新紅舊綠**——不附對照組的話，「新判準會紅」
+    無法證明它比舊的多抓到什麼。
+    """
+    live = _live_ids()
+    swapped = [f"{live[0].rsplit('.', 1)[0]}.test_name_that_does_not_exist", *live[1:]]
+    assert len(swapped) == len(live), "注入必須保持計數不變，否則證明不了粒度差異"
+
+    status, problems = _judge(
+        {**_tracked_ledger(), _M6_PROF: {"skipped": swapped},
+         _M6_COUNTERPART: {"skipped": []}}, live)
+    assert status == M.M6_VIOLATION, f"換掉一支 id 竟沒轉紅：{status}／{problems}"
+    assert any(p.startswith("[漂移]") for p in problems), problems
+
+    # 對照組：舊判準（計數面）對同一件事。census 由 reason 分群而來，換 id 不改任何一格。
+    census = P.skip_group_census([f"{P.WINDOWS_NATIVE_SKIP_TAG} x"] * len(live))
+    assert P.skip_group_census_problems(_M6_PROF, census) == [], (
+        "計數面居然也紅了——那本支的對照組就不成立，請重新確認注入是否真的保持計數不變"
+    )
+
+
+def test_a_missing_counterpart_ledger_is_unevaluable_and_never_green() -> None:
+    """mac 上永遠拿不到 Windows 的 id 集合 ⇒ 「缺一邊」是本判準的常態起點。
+
+    它必須與通過**分得開**：fail-open 的表徵與修好完全相同（本 repo 對這一類有大量判例），
+    所以回傳的是三態而不是布林，且訊息逐字說「這不是通過」。
+    """
+    live = _live_ids()
+    status, problems = _judge({_M6_PROF: {"skipped": live}}, live)
+    assert status == M.M6_UNEVALUABLE, f"缺互補落款卻不是「不可求值」：{status}"
+    assert status != M.M6_OK
+    assert any("這不是通過" in p for p in problems), problems
+
+
+def test_a_legitimate_platform_only_skip_is_not_a_false_red() -> None:
+    """假紅普查：兩邊落款齊備、且互不相交（＝現實形狀）時必須綠。
+
+    現行 44 支 `[WINDOWS-NATIVE-ONLY]` 在真 Windows 上**跑得到** ⇒ 它們不會出現在 win32
+    的 skip 落款裡 ⇒ 交集為空 ⇒ 綠。判準若在這裡紅，它就是一道會被關掉的守衛。
+    """
+    live = _live_ids()
+    win_only = ["test_bash32_compat.TestX.test_bsd_only", "test_mac_endurance_r83.T.test_mac"]
+    status, problems = _judge(
+        {_M6_PROF: {"skipped": live}, _M6_COUNTERPART: {"skipped": win_only}}, live)
+    assert status == M.M6_OK, f"合法的平台專屬 skip 被誤判：{problems}"
+
+
+def test_a_test_skipped_on_both_profiles_is_reported_as_never_run_anywhere() -> None:
+    """M6 的本體：`skip(A) ∩ skip(B) − 豁免` 非空 ⇒ 那幾支全世界都沒跑過。"""
+    live = _live_ids()
+    status, problems = _judge(
+        {_M6_PROF: {"skipped": live}, _M6_COUNTERPART: {"skipped": live[:2]}}, live)
+    assert status == M.M6_VIOLATION, f"兩邊都 skip 竟沒轉紅：{status}"
+    hit = [p for p in problems if p.startswith("[全世界沒跑過]")]
+    assert hit and live[0] in hit[0], problems
+
+
+def test_a_counterpart_ledger_whose_module_is_gone_is_red_from_either_platform() -> None:
+    """互補落款腐化（測試被改名／刪掉）**可以從 mac 驗證**——這是本判準唯一不需要對面
+    平台就能守住對面落款的一向。少了它，win32 落款可以在無人察覺下指向一批不存在的 id，
+    而交集會因此低報（假綠的方向）。"""
+    live = _live_ids()
+    status, problems = _judge(
+        {_M6_PROF: {"skipped": live},
+         _M6_COUNTERPART: {"skipped": ["test_module_long_gone.T.test_x"]}}, live)
+    assert status == M.M6_VIOLATION, f"落款指向不存在的模組竟沒轉紅：{status}"
+    assert any(p.startswith("[落款過時]") for p in problems), problems
+
+
+def test_the_tracked_ledger_only_names_test_modules_that_still_exist() -> None:
+    """對 tracked 落款自己做上一支的判準（平台中立：只問模組檔在不在）。
+
+    刻意不在本支斷言「44 支」之類的計數——那是量測值，它的家是落款檔本身；
+    這裡守的是「落款不得靜默腐化」。
+    """
+    ids = M.ledger_ids(_tracked_ledger(), _M6_PROF)
+    assert ids, f"落款檔缺 `{_M6_PROF}`"
+    missing = sorted(i for i in ids if not (_ROOT_TESTS / f"{i.split('.')[0]}.py").is_file())
+    assert missing == [], f"落款指向已不存在的測試模組：{missing}"

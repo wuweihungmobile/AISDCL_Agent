@@ -1,27 +1,36 @@
-"""policy.py — TokenGuardPlugin 主類（SD_06 W2-T2-13 拆 5 子模組組合層）。
-
-對應：
-  - SD_Improving_01.md v1.1 §3.5 表格第 1 列（priority=30）
-  - SD_Improving_06.md v1.2 §6.5 AC1-3（token_guard package 5 子模組）
-
-訂閱 phase：
-  - POST_ATTEMPT / ON_TOKEN_USAGE：策略決定（compact/halt）
-
-公開 API（與原 token_guard_plugin.py 100% 等價，30+ 既有測試 patch path 維持）：
-  - get_dynamic_compact_threshold / should_compact / should_halt
-  - record_compact_failure / reset_compact_failure / is_compact_failure_critical
-  - compact_failure_count（property）
-  - verify_correction_applied
-  - build_compact_prompt / process_compact_result
-  - observe_token_line
-  - resolve_per_step_cfg
-"""
+# policy.py — TokenGuardPlugin 主類（SD_06 W2-T2-13 拆 5 子模組組合層）。
+#
+# 🔴 R86：本段由 docstring 改為 `#` 註解，**一字未刪**（同本檔既有兩處相同處置，見
+# `subscribed_phases` 與 `_evaluate_post_compact` 上方的 R82 註記）。理由是
+# `check_loc_budget` 自己印的指引：docstring 行會被 count_loc 計入、`#` 不會，而本輪要把
+# 配速契約接進 `evaluate_quota`，total LOC 餘裕當回合實測只有 12 行。
+#
+# 對應：
+#   - SD_Improving_01.md v1.1 §3.5 表格第 1 列（priority=30）
+#   - SD_Improving_06.md v1.2 §6.5 AC1-3（token_guard package 5 子模組）
+#
+# 訂閱 phase：
+#   - POST_ATTEMPT / ON_TOKEN_USAGE：策略決定（compact/halt）
+#
+# 公開 API（與原 token_guard_plugin.py 100% 等價，30+ 既有測試 patch path 維持）：
+#   - get_dynamic_compact_threshold / should_compact / should_halt
+#   - record_compact_failure / reset_compact_failure / is_compact_failure_critical
+#   - compact_failure_count（property）
+#   - verify_correction_applied
+#   - build_compact_prompt / process_compact_result
+#   - observe_token_line
+#   - resolve_per_step_cfg
 from __future__ import annotations
 
 from typing import Any
 
 from ...core.hookspec import HookContext, KernelPhase, ResourceRequest
-from ...core.ports.quota_meter import is_quota_limit_text
+from ...core.ports.quota_meter import (
+    BAND_HALT,
+    BAND_PREPARE,
+    BAND_UNMEASURED,
+    is_quota_limit_text,
+)
 from ...utils.config import TokenGuardConfig
 from .compactor import CompactFailureState
 from .compactor import build_compact_prompt as _build_compact_prompt
@@ -157,17 +166,29 @@ class TokenGuardPlugin:
     # 🔴 誠實劃界：本判定掛在 POST_ATTEMPT，而 Kernel 先算 correction 才 emit POST_ATTEMPT
     # ⇒ 撞線那一輪仍會多一次 Brain 呼叫；擋掉的是**其後**所有重試，不是當次。
     # 說明寫成 # 而非 docstring：docstring 會被 count_loc 計入（見 check_loc_budget 提示）。
+    # 🔴 R86（第四個觸發條件）：`band` 來自**根層算好的配速契約**，不是引擎自己再算一次。
+    # 為什麼需要它——上面 ①③ 兩條只看 `max(pct)` 對兩個門檻，對「距 reset 幾分鐘」這一軸
+    # 結構上失明；根層的 `decide()` 才是完整演算法（逐軸帶別 × 期程帶 → cap，跨軸聚合，
+    # 單調性不變式）。引擎照抄一份就是本 repo 的頭號病，所以改成**讀它的結論**。
+    # 🔴 只可能更嚴，不可能更寬：這是在既有 `or` 鏈上**加項**，`hard`／`soft` 兩個布林只會
+    # 由 False 翻成 True，不會反向。而契約量不到時 band＝unmeasured ⇒ 兩項都不成立 ⇒
+    # 行為與修前完全相同（**不對一個沒量到的值 halt**，同根層「量不到永不 halt」）。
+    # `getattr` 而不是直接呼叫：既有測試與外部注入的 meter 只實作 read()/read_worst_pct()，
+    # 直接呼叫會讓一個少一支方法的 port 把整條額度軸炸掉（fail-closed 到不能跑）。
     def evaluate_quota(self, payload: dict) -> ResourceRequest | None:
         reading = self._quota.read_worst_pct() if self._quota is not None else None
         pct = reading.pct if reading is not None else None
+        read_pace = getattr(self._quota, "read_pace", None)
+        band = read_pace().band if read_pace is not None else BAND_UNMEASURED
         limit_hit = is_quota_limit_text(payload.get("failure_reason"))
-        hard = pct is not None and pct >= self._cfg.quota_halt_pct
-        soft = pct is not None and pct >= self._cfg.quota_throttle_pct
+        hard = (pct is not None and pct >= self._cfg.quota_halt_pct) or band == BAND_HALT
+        soft = ((pct is not None and pct >= self._cfg.quota_throttle_pct)
+                or band == BAND_PREPARE)
         if not (hard or limit_hit or (soft and payload.get("in_correction_loop"))):
             return None
         return ResourceRequest(
             contributor=self.name(), request_halt=True,
-            reason=f"quota_pct={pct} kind={getattr(reading, 'kind', None)} "
+            reason=f"quota_pct={pct} kind={getattr(reading, 'kind', None)} band={band} "
                    f"limit_text={limit_hit} resets_at={getattr(reading, 'resets_at', None)}",
         )
 

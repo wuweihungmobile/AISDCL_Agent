@@ -135,6 +135,7 @@ from lib.windows_skip_tags import (  # noqa: E402, I001
 
 sys.path.insert(0, str(Path(__file__).resolve().parent / "lib"))
 import skip_group_policy  # noqa: E402  ← R80 包 A（S3-04）：skip 分群天花板的政策 SSOT
+import skip_runtime_report  # noqa: E402  ← M6 的 id 集合面（計數面答不了「有沒有跑過」）
 
 _PATTERN = "test_*.py"
 
@@ -312,7 +313,7 @@ def skip_census_profile() -> str:
     return f"tools/tests@{sys.platform}"
 
 
-def report_skip_census(result: unittest.TestResult) -> int:
+def report_skip_census(result: unittest.TestResult, start_dir: Path | None = None) -> int:
     """印 skip 分群普查並判天花板；回 0／1（呼叫端併進 rc）。
 
     🔴 R80 包 A（S3-04）為何非有不可：本 runner 此前對 43 支 skip **只印不判**——
@@ -332,16 +333,29 @@ def report_skip_census(result: unittest.TestResult) -> int:
     print(f"[skip census] {profile} 共 {len(reasons)} 支："
           + "／".join(f"{g}={n}" for g, n in census.items())
           + f"／欠債型 {skip_group_policy.open_debt(census)} 支（目標 0）")
+    # M6 的**集合面**：計數面（下面那道天花板）對「換掉一支 test-id 而計數不變」恆綠，
+    # 所以它答不了「每一支測試都在某條軌上跑過」。兩者答不同的問題，rc 一起收斂——
+    # 「可重跑但沒有任何閘門看它的 rc」與「不可重跑」是同一個病（Scan-H 判準⑤）。
+    # 🔴 `start_dir` 閘刻意存在（落地當回合被既有鎖抓到，4 支合成樹測試轉紅）：
+    # `run_with_floor` 會被單元測試餵**合成樹**呼叫，而合成樹的 live 集合當然不等於真樹的
+    # 落款 ⇒ 不設閘就是整批假紅。同一條理由逐字寫在 `main()` 對靜態標籤掃描的註解裡。
+    # 計數面之所以不需要這道閘，是因為它比的是大小（合成樹 0 支 ≤ 任何上限，恆綠）——
+    # 也就是那道閘門對合成樹「本來就沒有鑑別力」，不是它比較聰明。
+    m6_rc = 0
+    if start_dir is not None and start_dir.resolve() == _TESTS_DIR:
+        m6_rc = skip_runtime_report.report_m6_id_sets(
+            profile, result, skip_group_policy.complementary_profiles(profile),
+            tests_dir=_TESTS_DIR)
     problems = skip_group_policy.skip_group_census_problems(
         profile, census, reasons=reasons)
     if not problems:
         for line in skip_group_policy.skip_target_report(profile, census):
             print(f"ℹ️  [skip target] {line}")
-        return 0
+        return m6_rc
     if not skip_group_policy.profile_registered(profile):
         print("⚠️  剖面未登記——量測正常，但這個平台從來沒有人量過健康值，沒有天花板可比"
               "（advisory；把上面那行實測值填進 skip_group_policy 兩張表即升級為阻斷）")
-        return 0
+        return m6_rc  # 計數面 advisory 不得吃掉集合面的紅（兩道判準各自獨立）
     print("❌ skip 分群天花板不合格（S3：skipped 數必須有人管）：", file=sys.stderr)
     for msg in problems:
         print(f"   - {msg}", file=sys.stderr)
@@ -514,7 +528,7 @@ def run_with_floor(start_dir: Path, min_tests: int) -> int:
     # 的執行落差與失敗明細，而遮蔽的方向是「看起來變乾淨」（Scan-H⑦）。
     exempt_problems = report_windows_skip_tag_exemption_problems(result)
     # R80 包 A（S3-04）：把這 43 支 skip 納入天花板管轄。同樣刻意不提早 return。
-    census_rc = report_skip_census(result)
+    census_rc = report_skip_census(result, start_dir)
     # 無法歸因的「收集了卻沒執行」＝量測不完整（例如 result.stop() 中途中止）。
     # 可歸因者（fixture 層 skip／error）只點名不判紅，理由見 report_execution_gap。
     unexplained_gap = report_execution_gap(count, result) > 0 and not fixture_level_entries(result)
@@ -669,18 +683,29 @@ def report_min_tests_note_stale_tokens() -> list[tuple[str, str]]:
     return offenders
 
 
+# 🔴 R86（R85 交棒書具名項）：四條早退路徑**一支測試都不會執行**，而修前畫面上只有該階段的
+# 紅字、沒有一行說出「本次零執行」⇒ 本輪實測有人只讀畫面（零 `FAIL:` 行）就宣稱全綠而 rc=1。
+# 「只要讀 rc」對機器成立、對**讀畫面的人**不成立，而「失敗表徵與成功長得一樣」是最貴的失效。
+# 只加輸出不動 rc（CI 位元級同）；寫 stderr 因 stdout 常被摺疊。🔴 本段受 754 行棘輪管，勿加長。
+def _bail(stage: str) -> int:
+    print(f"⛔ 本次在「{stage}」階段早退 ⇒ **一支測試都沒有執行**（rc=1）。"
+          "上面那段紅字是早退原因，不是測試結果；畫面上沒有 `FAIL:` 行**不代表**測試通過。",
+          file=sys.stderr)
+    return 1
+
+
 def main() -> int:
     if not _TESTS_DIR.is_dir():
         print(f"❌ 測試目錄不存在：{_TESTS_DIR}", file=sys.stderr)
-        return 1
+        return _bail("測試目錄存在性檢查")
     # 先於 110 秒的全套執行做這道自檢：釘選值的**取證敘述**若已失實，後面印出的
     # ✅ 只會替一個假前提背書；fail-fast 也讓注入實測不必等一整輪。
     if report_min_tests_note_stale_tokens():
-        return 1
+        return _bail("MIN_TESTS 取證敘述保鮮自檢")
     # 同理先於全套執行：相依不齊時收集數必然低於下限，讓它照跑只是把一個**環境
     # 問題**包裝成一則看起來像「測試消失」的紅字（R68：三支 CI 連續多輪的實況）。
     if report_missing_third_party_prereqs():
-        return 1
+        return _bail("第三方相依齊備性檢查")
     # R72：**不分平台**的靜態標籤掃描。刻意放在這裡而非 `run_with_floor` 內：
     #   ① `run_with_floor` 會被單元測試餵各種合成樹呼叫，把 repo 專屬的掃描綁進去
     #      會讓那些合成樹莫名其妙地受本判準管轄；
@@ -689,7 +714,7 @@ def main() -> int:
     #      同一個病（Scan-H 判準⑤）。本行的 return 1 即是那個消費者，經由
     #      `python tools/run_root_unittests.py` 傳到 pre-push root-infra leg 與三支 CI。
     if report_untagged_windows_skip_decorators(_TESTS_DIR, _PATTERN):
-        return 1
+        return _bail("靜態標籤掃描（不分平台）")
     return run_with_floor(_TESTS_DIR, MIN_TESTS)
 
 

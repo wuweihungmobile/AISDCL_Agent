@@ -852,12 +852,25 @@ class StaticWindowsSkipTagScanTest(unittest.TestCase):
             "report_untagged_windows_skip_decorators(_TESTS_DIR, _PATTERN)", src,
             "main() 未呼叫靜態標籤掃描——掃描器存在但沒接線，等於沒有",
         )
+        # 🔴 R86：判準由字面 `return 1` 放寬為 `return 1` 或 `return _bail(...)`，
+        # 而 rc 那一半改由**真的呼叫**來量（見下方 assert），不再靠字面推論。
+        # WHY：本鎖把「rc 有沒有被收斂」綁在一個字面上，於是本輪把四條早退
+        # 路徑改成 `_bail(<階段名>)`（同 rc=1，只多印一行「零執行」）時它判紅
+        # ——而那個改動**嚴格增強**了它要守的東西（修前 rc=1 但畫面零 FAIL
+        # 行，人會誤讀成通過；R85 已具名交棒）。字面鎖的代價正是這個：**它會
+        # 擋住讓它守的性質變強的修法**，而該鎖的是「rc 真的非零」這個行為。
         self.assertRegex(
             src,
             r"if report_untagged_windows_skip_decorators\(_TESTS_DIR, _PATTERN\):"
-            r"\s*\n\s*return 1",
+            r"\s*\n\s*return (?:1|_bail\()",
             "掃描結果必須真的參與 rc 收斂，否則印了紅字卻照樣 rc=0（fail-open）",
         )
+        # 牙齒沒放鬆：走 `_bail` 那條路時，實際回傳值必須仍是非零。
+        if "return _bail(" in src:
+            self.assertEqual(
+                run_root_unittests._bail("靜態標籤掃描（不分平台）"), 1,
+                "_bail() 必須回非零，否則早退靜默 fail-open（本鎖真正標的）",
+            )
 
     def test_reporter_reds_on_a_synthetic_offending_tree(self) -> None:
         """端到端：造一棵含漏標的合成樹 ⇒ reporter 回非空並印出指路；補上標籤後轉綠。

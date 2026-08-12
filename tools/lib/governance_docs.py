@@ -156,6 +156,30 @@ _GOVERNANCE_DOCS = (
     _REPO_ROOT / "docs" / "06_quality" / "CrossPlatform_R85_Review_SA.md",
     _REPO_ROOT / "docs" / "06_quality" / "CrossPlatform_R85_Review_SD.md",
     _REPO_ROOT / "docs" / "06_quality" / "CrossPlatform_R85_Review_QA.md",
+    # R86 配速最佳化的證據面。資格同上：它承載 repo 至今**唯一一筆外部獨立校準基準**
+    # （掌舵者的 CLI 畫面 vs 程式從 `axes[]` 算出的值），而訴求 6z 的調研結論是沒有任何
+    # 官方通道可問 ⇒ 那筆基準一旦只留在對話裡就等於沒發生（R85 教訓 5）；它另逐筆寫出
+    # 「某常數／某判準現居某檔某符號」的宣稱（⇒ 指針稽核）。
+    _REPO_ROOT / "docs" / "06_quality" / "CrossPlatform_R86_Pace_Calibration.md",
+    # R86 帳本改派的證據面（`ROW_MAX_BYTES` 洩壓的**接收端**，先例＝上方
+    # `CrossPlatform_R85_Ledger_Closure.md`）：26 列的**原**承接輪次被就地改寫成新輪號後，
+    # 主檔已不存在那個事實，而本輪 7 列孤兒列又依 700 bytes 上限瘦身成索引 ⇒ 唯一還能重驗
+    # 「改派是否為真、原承接輪次是誰」的地方就是它（⇒ 體積守門）；它逐節寫出「某 DEF-ID 的
+    # 原文現居本檔某節」的座標宣稱（⇒ 指針稽核）。
+    _REPO_ROOT / "docs" / "06_quality" / "CrossPlatform_R86_Ledger_Reassign_Evidence.md",
+    # 本輪收尾單人窗口（`DEF-200-103`）：`_GUARD_LINES_REPIN_LOG` 兌現 `_NET_SUBTRACTION_
+    # DUE_ROUND` 的到期義務（單輪淨額 ≤ 0）時，動用棘輪 `[歷史變短]` 那一款**自己指定**的
+    # 出口——「真的要縮短（例如把史前列搬進 ADR）時…並在交件回報寫出搬去哪裡」。本檔就是那個
+    # 「哪裡」：§A＝整列搬出的 R77~R80 共 11 列（逐列數字＋理由原文逐字）、§B＝理由欄搬出而
+    # 本體留在程式碼內的 R81~R85 共 14 列、§C＝宣稱判準鎖的模組層立案敘事。資格同 R85 同名檔：
+    # 它是那些史料**唯一還能重驗的地方**（⇒ 體積守門），且逐節寫出「某一列的原文現居本檔某節」
+    # 的座標宣稱（⇒ 指針稽核）。🔴 它另受 `test_every_per_file_list_named_by_a_real_row_
+    # exists_on_disk` 對磁碟驗——稽核列指名的清單不存在，款(9) 就是被幽靈檔名滿足的。
+    _REPO_ROOT / "docs" / "06_quality" / "CrossPlatform_R86_Guard_Repin_Evidence.md",
+    # 本輪掃描發現的居所（慣例位置，資格同 R80~R85 同名檔：逐筆寫出座標宣稱 ⇒ 指針稽核；
+    # 複審者要判「還有哪些缺口開著」就得讀完它 ⇒ 體積守門）。它同時是 `doc_guard_total_
+    # problems()` 款(1) 要求的兩個標記站點之一（另一處＝`AutoSDD_improving_110.md`）。
+    _REPO_ROOT / "docs" / "06_quality" / "CrossPlatform_R86_Scan_Findings.md",
 )
 
 # 姊妹治理文件的命名慣例：`docs/06_quality/CrossPlatform_*.md`。這**不是**把具名常數

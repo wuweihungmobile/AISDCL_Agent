@@ -29,26 +29,62 @@
 from __future__ import annotations
 
 import json
+import logging
 import tempfile
 import time
+from datetime import UTC, datetime
 from pathlib import Path
 
-from ...core.ports.quota_meter import NO_RESET, QuotaReading, reset_instant
+from ...core.ports.quota_meter import (
+    BAND_UNMEASURED,
+    DEGRADED_CAP,
+    NO_RESET,
+    PACE_SCHEMA,
+    PaceDecision,
+    QuotaReading,
+    reset_instant,
+)
+
+_LOG = logging.getLogger(__name__)
 
 SCHEMA = "autosdd.quota/2"
+# R86 配速契約的檔名。與 `autosdd_quota.json` **同目錄、不同檔**，刻意不擠進同一份：
+# 那份是「原始量測」（schema /2，有既有消費者與既有的兩處字面同步鎖），這份是「已算好的
+# 決策」。升 /3 塞進去要改根層量測器的 schema 字面 ⇒ 會與別包的工作面相撞，而兩份檔的
+# TTL 判準本來就不同（見下）⇒ 分開才是對的，不是為了省事。
+PACE_CACHE_NAME = "autosdd_pace.json"
+# 🔴 TTL 的判準不是「挑一個看起來合理的分鐘數」，是一條**結構性不變式**：
+#   衍生物的壽命不得超過它的輸入 ⇒ PACE_TTL_SECONDS 必須嚴格小於 DEFAULT_TTL_SECONDS
+#   （原始量測的 TTL）。反過來時，配速決策會在它所依據的快取都已作廢之後還被當成有效。
+# 這條關係由 `tests/test_r86_pace_contract.py::TestPaceTtlIsBoundedByItsInput` 守；
+# 數字只准往下調（往上調＝放寬，而放寬必須有證據）。
+# 900 這個值的來歷：harness 有 session 在跑時每 180 秒刷一次快取（`QUOTA_CACHE_TTL_
+# SECONDS`）⇒ 容忍連續漏 4 次刷新才降級。訂得比這更短會讓引擎在正常運作下大半時間都在
+# 降級帶，而「一直在擋」的守衛會被整個關掉——本 repo 判過那比沒有守衛更糟。
+PACE_TTL_SECONDS = 900.0
+# 未來時刻的容許量。時鐘偏移**絕不允許把預算調高**（同根層 `axes_of` 對負 minutes 的
+# 處置）：不夾的話，一台快 6 小時的機器寫出來的契約會永遠「剛量到」。
+PACE_FUTURE_SKEW_SECONDS = 60.0
 # TTL 用檔案 mtime 而非 payload 的 measured_at：量測器每次都整檔重寫，兩者等價，
 # 而 mtime 不需要解析時間字串（少一條會出錯的路）。30 分鐘＝比額度視窗短得多。
 DEFAULT_TTL_SECONDS = 1800.0
 
 
 class FileQuotaMeterAdapter:
-    def __init__(self, path: str | None = None, ttl_seconds: float = DEFAULT_TTL_SECONDS):
+    def __init__(self, path: str | None = None, ttl_seconds: float = DEFAULT_TTL_SECONDS,
+                 pace_ttl_seconds: float = PACE_TTL_SECONDS,
+                 degraded_cap: int = DEGRADED_CAP):
         # 🔴 R84／ARCH-07：本行是 ARCH-07 的第二處硬編字面（另一處在檔頭那張路徑表）。
         # 搬家或改名必須與根層 `tools/lib/quota_meter.py::CACHE_NAME` **同一次 commit** 一起動，
         # 否則 `tools/tests/test_quota_policy.py::TestM8bCacheHomeStaysInSync` 會紅——
         # 那道鎖比的是本行的**目錄運算式**，不是檔名字串，所以改本行的寫法前先讀它。
         self._path = Path(path) if path else Path(tempfile.gettempdir()) / "autosdd_quota.json"
         self._ttl = float(ttl_seconds)
+        # 配速契約住同一個目錄 ⇒ 測試把 `path` 指到 tmp_path 時兩份契約會一起搬過去，
+        # 不必再開第二個參數（少一個可以只設一半的旋鈕）。
+        self._pace_path = self._path.with_name(PACE_CACHE_NAME)
+        self._pace_ttl = float(pace_ttl_seconds)
+        self._pace_floor = max(1, int(degraded_cap))
 
     # 🔴 R82（C3）：**選軸依問題而定**，所以挑選準則是參數，不是寫死在唯一的 read() 裡。
     # 修前只有一個 read()（選 horizon 最短那一軸），而它有**兩個問相反問題的消費者**：
@@ -81,3 +117,29 @@ class FileQuotaMeterAdapter:
     # R82 的墓碑（它把整條軸投影成一個純量、丟掉每一桶的 reset 期程）；這裡回的是完整一條軸。
     def read_worst_pct(self) -> QuotaReading | None:
         return self._pick(lambda a: -float(a["pct"]))
+
+    # R86：配速契約的讀取端。**永不回 None**——「缺檔／過期／壞掉」一律回一則 band=
+    # unmeasured 的決策，cap 已經填成保守地板。這是與 `read()`／`read_worst_pct()` 刻意
+    # 相反的處置，理由是兩者被問的問題不同：
+    #   · 那兩支回 None＝「量不到」，而下游（halt 判定）對量不到的正確反應是**不開火**
+    #     （不對一個沒量到的值 halt，同根層 `decide()` 的「量不到時永不 halt」）。
+    #   · 本支的下游是**併發度**，而它對量不到的正確反應是**收緊**（本 repo 明文判過：
+    #     量不到時的上限絕不是不設限）。回 None 會讓 `effective_fanout` 走「功能沒開」
+    #     那一支＝fail-open，而 fail-open 的表徵與修好完全相同。
+    # 例外類型刻意收得寬（KeyError／TypeError／AttributeError 都在內）：本區塊只做解析，
+    # 任何形狀不符一律 fail-closed 到降級，而不是讓一個壞契約把引擎打掛。
+    def read_pace(self) -> PaceDecision:
+        try:
+            raw = json.loads(self._pace_path.read_text(encoding="utf-8"))
+            cap, band = raw["cap"], str(raw["band"])
+            age = (datetime.now(UTC) - reset_instant(raw["measured_at"])).total_seconds()
+            ok = raw["schema"] == PACE_SCHEMA and type(cap) is int and cap >= 0
+        except (OSError, ValueError, KeyError, TypeError, AttributeError) as exc:
+            ok, cap, band, age = False, -1, f"{type(exc).__name__}: {exc}"[:90], float("inf")
+        if not ok or not -PACE_FUTURE_SKEW_SECONDS <= age <= self._pace_ttl:
+            # 🔴 「失效必須可偵測」：契約沒被更新時這裡會出聲，而不是靜默沿用舊值／不設限。
+            _LOG.warning("[pace] 契約量不到（path=%s age=%.0fs why=%s）⇒ 走保守側 cap=%d"
+                         "（**不是**不設限）。刷新者住 harness；引擎獨立跑時不會有人刷。",
+                         self._pace_path, age, band, self._pace_floor)
+            return PaceDecision(self._pace_floor, BAND_UNMEASURED, "degraded")
+        return PaceDecision(cap, band, str(raw.get("source") or "unknown"))

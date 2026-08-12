@@ -727,7 +727,7 @@ _FROZEN_GUARD_LINES: dict[str, int] = {
     "_platform_helpers.py": 549,
     "_ps_engine.py": 115,
     "test_act_local_runner_image.py": 322,
-    "test_adr_xplat001_c1c2_lock.py": 5654,
+    "test_adr_xplat001_c1c2_lock.py": 5392,
     "test_archive_defect_log.py": 3878,
     "test_bash32_compat.py": 946,
     "test_bash_probe_spec_contract.py": 983,
@@ -736,12 +736,13 @@ _FROZEN_GUARD_LINES: dict[str, int] = {
     "test_bootstrap_ps1.py": 160,
     "test_check_defect_log_crossref.py": 3269,
     "test_check_gha_action_versions.py": 295,
-    "test_check_hooks_liveness.py": 3372,
+    "test_check_hooks_liveness.py": 3382,
     "test_check_pytest_baseline_sites.py": 297,
     "test_check_script_parity.py": 2098,
     "test_check_wrapper_thinness.py": 1234,
+    "test_claim_provenance_r86.py": 248,
     "test_component_sanitizer_shared_layer_lock.py": 293,
-    "test_context_budget_guard.py": 6354,
+    "test_context_budget_guard.py": 6382,
     "test_defect_id_reference_integrity.py": 261,
     "test_dev_start.py": 7065,
     "test_dev_start_ps1_lastexitcode.py": 548,
@@ -769,9 +770,9 @@ _FROZEN_GUARD_LINES: dict[str, int] = {
     "test_ps51_compat.py": 621,
     "test_ps_engine_ssot.py": 933,
     "test_python_c_percent_shim.py": 119,
-    "test_quota_policy.py": 1657,
+    "test_quota_policy.py": 1615,
     "test_root_infra_parity.py": 441,
-    "test_run_root_unittests.py": 2177,
+    "test_run_root_unittests.py": 2190,
     "test_sanitize_component_frozen_sdd_versions_lock.py": 375,
     "test_schedule_capability_parity.py": 635,
     "test_script_scan_surface_ssot.py": 391,
@@ -803,198 +804,6 @@ _FROZEN_GUARD_LINES: dict[str, int] = {
 #: 維護方式：`--print-guard-lines` 會連這一列的草稿一起印出來，照貼即可。
 _GUARD_LINES_REPIN_LOG: tuple[tuple[str, int, int, int, str], ...] = (
     (
-        "R77", 54188, 57693, 3505,
-        "PKG-GUARD／R77-24：檔數棘輪退場、逐檔行數表接手。本列是回填的**起點列**——"
-        "R77 當輪並沒有稽核痕跡這回事（那正是 R78 ARCH-01 的缺陷本體），"
-        "兩個數字取自 skeptic 對 a7a3080 的實測，非事後推算。",
-    ),
-    (
-        "R78", 57693, 59936, 2243,
-        "R78 四方複審後的五個修復包，加上兩支新機械物，"
-        "由收尾者在所有包停工後一次重釘。"
-        "淨額歸因（各包自陳，可回查各自交件回報）："
-        "A-lint +129（把「只測會過的那幾種寫法」的回歸鎖，"
-        "換成漏擋與誤擋兩個方向逐一注入的判準表，"
-        "另加別名與全名的對稱性判準）；"
-        "D-doc +315（成熟度 SSOT 新鮮度鎖、交棒書宣稱可查性鎖、"
-        "pytest 基線簡寫形態判準）；"
-        "E-posttooluse +237（PostToolUse 註冊面 shrink-only 鎖，"
-        "該面此前完全無人守；hook 路徑去重的納管面"
-        "由寫死名單改為目錄列舉減具名排除表）；"
-        "C-ghost（幽靈符號判準射程由「反引號路徑」"
-        "擴到「反引號 Python 識別字」——那正是懸空引用逃逸的縫；"
-        "另含本表本體與 guard_baseline_gaps 實作）；"
-        "B-audit（probe 逐工具計數與 per-session 崩塌判準的回歸鎖）。"
-        "另新增兩個鍵：act 自建映像的一致性與雙平台旗標對等鎖、"
-        "session context 水位守衛的回歸鎖（值見上方凍結表）。"
-        "🔴 本輪未刪任何行換取餘裕、未調高任何門檻；"
-        "成長全部是新判準，且每一道都附"
-        "「改壞→紅→還原→驗乾淨」的注入證明。",
-    ),
-    (
-        "R79", 59936, 61421, 1485,
-        "R79 十維掃描後的七個修復包，由收斂包在所有包停工後的單人窗口一次重釘。"
-        "本輪同時發生兩個相反方向的大額變動，故淨額不代表任何單一包的行為："
-        "**減**＝架構包讓 .ps1 掃描面的三份獨立實作收成一份（CI 的 pwsh 解析步驟與 "
-        "Windows smoke 改呼叫 Python SSOT），連帶讓「偵測三份是否同步」的對抗式正則錨整組退場；"
-        "**增**＝跨平台包在既有鎖檔內落地四個新機械物（工作樹行尾、git 索引 exec bit、"
-        "會改動目錄項的 Windows 鎖檔原語、站點級 AST 守衛）與其紅綠自證，"
-        "觀測者包把 PowerShell 攔截器與量測器的判別力鎖補齊，"
-        "context 水位包補上 window 交叉否決與 PreToolUse 阻斷的成對注入，"
-        "清債包補上帳本逐列位元組上限的四向注入，"
-        "收斂包補上重釘稽核痕跡的 append-only 兩款、逐檔漂移款、"
-        "幽靈符號鎖的 docs 引用面與豁免天花板、以及 hook 文件宣稱的第三向。"
-        "🔴 本輪未為了讓數字好看而調高任何門檻：唯一破線的 LOC 棘輪"
-        "（tools/check_script_parity.py）是以同一次變更內刪等量行收斂的，非重釘。",
-    ),
-    (
-        "R79", 61421, 61829, 408,
-        "R79 續航包（ADR-XPLAT-004）：Token 額度續航協定落地後的第二次重釘。"
-        "**淨額幾乎全部集中在單一支鎖檔**（現查 `--print-guard-lines` 的 DIFF 欄為準；"
-        "另一部分是本檔自己被這一列撐大的量），因為本包的硬約束是**新增檔案數＝零**："
-        "額度事件的判讀住既有的 context_budget_guard.py（逐字稿掃描的實作已經在那裡）、"
-        "CLI 與排程編排住既有的 session_resume_planner.py（run_powershell／schtasks／"
-        "next_run_time 取證閘已經在那裡），測試依 DEF-101-561③ 併進既有鎖檔。"
-        "成長內容＝新判準各自的成對注入："
-        "額度事件分類（session 額度 vs 月度支出上限——兩者的字面前綴相同，"
-        "只比對前綴會把「等待無效」那一類判成可等待，比例見 ADR-XPLAT-004 §2.2）；"
-        "reset 時刻算術（不帶日期不帶年 ⇒ 「下一個尚未發生的該時刻」，含跨午夜與 12am/12pm）；"
-        "續航狀態塊的體檢（缺鍵／無 NextRunTime 憑證卻宣稱已排程／猜出來的 reset 拿去武裝）；"
-        "醒來後的分支判定（續跑／硬停／短退避／依新觀測重排／拒絕猜測）；"
-        "以及水位計在額度耗盡當刻讀成 0% 的修復（合成記錄的 usage 欄全為零，"
-        "使「量不到」被讀成「量到零」，計數以 ADR-XPLAT-004 §5 的現查為準）。"
-        "🔴 本輪未刪任何行換取餘裕、未調高任何門檻；"
-        "tools/session_resume_planner.py 一度破 guardrail_cli 那一格，"
-        "是以**同一次變更內收掉重複實作**收斂的（schtasks 腳本產生器由兩份併成一份，"
-        "順帶修掉舊那份「把整份任務書內嵌進 -Command 當 prompt」的缺陷），非重釘。",
-    ),
-    (
-        "R79", 61829, 62439, 610,
-        "R79 **四方複審後的修復包**（四方皆 APPROVE_WITH_CONDITIONS），"
-        "由收斂包在四包停工後的單人窗口一次重釘。"
-        "🔴 本列刻意不逐檔登載數字——逐檔淨額現查 `--print-guard-lines` 的 DIFF 欄，"
-        "寫進理由欄就是再造一個沒有人會回頭改的量測站點（本檔通篇在治的病）。"
-        "成長歸因（各包自陳，可回查交件回報）："
-        "鎖的鑑別力包＝把掃描面 SSOT 的必要旗標補進判準、"
-        "成熟度 M1 由「二擇一」改成合取並補上判準本體的鎖、"
-        "工作樹行尾政策改由 .gitattributes 現查（除掉第二個家）；"
-        "skipped 機制包＝skip 分群普查接上兩條 push 通道，"
-        "並把「量測塌掉時印共零支而回綠」改成以 pytest 自己的摘要行對帳；"
-        "收斂包＝續航排程腳本五個內插點的單引號跳脫回歸鎖（判產出不判呼叫，"
-        "與真 tokenizer 兩地對照過）、交棒書鎖的巢狀標題射程修復與三向自檢。"
-        "🔴 本輪未刪任何行換取餘裕、未調高任何門檻、未放寬任何棘輪；"
-        "唯一因本輪變更而破線的是 ONBOARDING 表② 指紋，"
-        "處置是在**出廠乾淨 venv**（無 PG extras、無 sdk extra）重量後回填，"
-        "而不是用手上這支裝了 extras 的直譯器加旗標繞過那道拒跑守衛——"
-        "後者會讓表② 宣告的「出廠環境」語意在沒有人察覺的情況下換掉。",
-    ),
-    (
-        "R79", 62439, 62781, 342,
-        "R79 **續航哨兵（預防性武裝）與其接電點**，由收尾者在所有 agent 停工後的"
-        "單人窗口一次重釘。逐檔淨額現查 `--print-guard-lines` 的 DIFF 欄，本列不登載。"
-        "成長歸因：哨兵在既有鎖檔內落地五分支判定（依觀測 reset 重排／探測／續巡／"
-        "自我解除／月度上限硬停）的逐支注入鎖，以及兩個閾值的**量測依據**鎖——"
-        "巡邏間隔必須大於實測最短的「撞線到 reset」窗（否則「精確重排」那一支在最短窗下"
-        "結構上不可達），自我解除門檻必須大於一個完整額度視窗（否則等額度期間逐字稿"
-        "不更新，會被誤判成工作已結束而自拆）；收尾者另補一列 hook 註冊基準與其理由。"
-        "🔴 **為何本列不走「同一次變更內刪等量行」那個合法出口**："
-        "本包治的正是「機制蓋好沒接電」——同一輪內連撞兩次額度而續航協定零作用，"
-        "根因是它只有手動武裝入口，而額度耗盡是 API 層失敗、"
-        "在 hook 體系裡沒有任何觸發點 ⇒「撞到才反應」結構上不可能成立。"
-        "刪掉別處的判準來換這裡的額度，等於用一個已經守住的面換一個新開的面，"
-        "淨鑑別力不升反降。未調高任何門檻、未放寬任何棘輪、未動漂移容忍值。",
-    ),
-    (
-        "R79", 62781, 62821, 40,
-        "R79 收輪後的靜默修復（掌舵者當場回報：哨兵每 15 分鐘彈出一個 console 視窗）。"
-        "🔴 本列的價值在於**任務書給的根因是錯的**：舵手判定「LogonType 沒對齊既有兩支」，"
-        "而修復者當回合實測打掉了這個前提——註冊 S4U 需要提權，非提權下 Register-ScheduledTask "
-        "直接存取被拒、工作根本不會建立；而哨兵的主要武裝路徑是 SessionStart hook＝一律非提權，"
-        "只掛 S4U 會把「彈視窗」換成「整條武裝不起來」。真正的解在**載具**："
-        "python.exe 是 CONSOLE 子系統、pythonw.exe 是 GUI 子系統，後者 OS loader 不配置 console，"
-        "不論 LogonType 為何都不彈。成長即這兩條鎖（無 console 直譯器、S4U 先試非提權回退）"
-        "與其成對注入。同一趟另修掉一個同型缺陷：Register-ScheduledTask 失敗後仍印 REGISTER_OK"
-        "（非終止錯誤沒中斷 scriptblock）＝本 repo 反覆在治的「真紅讀成綠」。"
-        "🔴 未調高任何門檻；planner 一度 750/750 滿載，是以壓縮接續行與 docstring 騰出空間"
-        "（`count_loc` 排除空行與註解行，所以把註解搬進 ADR 一行都省不到——這一點也是實測得知）。",
-    ),
-    (
-        "R79", 62821, 63056, 235,
-        "R79 **Auto Pilot 解鎖**（掌舵者拍板：「現在開，但禁止 commit/push」）。"
-        "解鎖的前提是兩個當回合探針：headless `claude -p` **完整跑本 repo 的 hooks**"
-        "（SessionStart 自己武裝了哨兵、PreToolUse 攔下 Bash 工具且中文指引無編碼降解）"
-        "——那正是 `--allow-resume` 此前不敢開的唯一理由，它今天被實測掉了。"
-        "成長即兩組鎖：①無人看管訊號的注入與傳遞（探測→續跑那一支 spawn 必須帶它）；"
-        "②commit/push 攔截的形態矩陣（真違規全擋、不設訊號全放行、無關指令全放行、"
-        "壞輸入與非 Windows 依既有退化契約），逐格皆以子行程真跑取證。"
-        "🔴 **判準刻意排在行內豁免之前**：無人看管的那個回合自己寫得出 `# ps-lint-ok:` 註解，"
-        "順序本身就是判準的一部分——這一條若被人「順手整理」成與其他規則同序，鎖就失效了。"
-        "🔴 未調高任何門檻；planner 由 749 壓到 748，手法是收掉 `main()` 內與 "
-        "`register_endurance()` 逐字相同的九行重複實作（抽 `_register_at_expr()`），不是刪理由。",
-    ),
-    (
-        "R80", 63056, 64584, 1528,
-        "R80 **六個修復包＋舵手＋兩支收工包**，由收尾包在所有包停工後的單人窗口一次重釘。"
-        "🔴 本輪與前幾輪最大的不同：**六個包全部在額度上限被半途打斷**，"
-        "所以這個淨額不是任何一個包的「交件量」，是八條並行變更被截斷後的殘留和；"
-        "逐檔淨額現查 `--print-guard-lines` 的 DIFF 欄，本列不登載（同 R79 起的體例）。"
-        "成長歸因（可回查各包交件回報與兩份具名證據檔）："
-        "context 水位包補 `quiet_python()` 第二層防線（無 console 父行程下 spawn 的 "
-        "creationflags）與其注入鎖；hook exec-form 包把 `.claude/settings.json` 的每一條 hook "
-        "由 shell form 轉 exec form，並補上「對陣列形態失明」的那批解析器（名單現查 "
-        "`tools/lib/hook_wiring.py` 的消費端）與其成對注入；跨平台包補行尾與 exec bit 兩面的判準；"
-        "架構減法包在 `tools/tests/` 這一面是**淨減**（`_usable_bash()` 的手抄本收成一份、"
-        "刪掉已死的成對標籤錨點比對名冊、WindowsApps 行為電池去掉被行為表嚴格覆蓋的那些案例）。"
-        "🔴 **本輪未調高任何門檻、未放寬任何棘輪、未刪任何判準換額度。**"
-        "三支破線的 LOC 棘輪（`check_defect_log_crossref.py`／`check_script_parity.py`／"
-        "`probe/audit_session.py`）全部以**抽共用模組**收斂，不是重釘："
-        "登記面與兩道新判準的本體分別下沉 `tools/lib/governance_docs.py`、"
-        "`tools/lib/self_help_exec_parity.py`、`tools/lib/rc_after_pipe_real.py`，"
-        "行為以 `check_script_parity` rc=0 與 `audit_session --selftest` 10/10 綠取證。"
-        "帳本兩個棘輪（`OVERSIZE_ROW_CEILING`／`OVERSIZE_ROW_EXCESS_CEILING`）"
-        "同輪**往下**重釘（105→101、147455→146210），方向是收緊。",
-    ),
-    (
-        "R80", 64584, 65179, 595,
-        "R80 **四方複審後的三個收斂包**，由收尾包在三包停工後的單人窗口一次重釘"
-        "（上一列是同輪修復包停工時的第一次重釘，本列是複審修復後的第二次）。"
-        "🔴 **[非淨減法輪]** —— 逐檔清單與逐項必要性辯護落在 "
-        "docs/06_quality/CrossPlatform_R80_Scan_Findings.md 的 §B-2，"
-        "與上一列的 §B 同一個家（同一件事只有一個家；刻意不受理 `--print-guard-lines`，"
-        "它讀工作樹＝並行改樹時每個人讀到不同的數字，是查詢入口不是紀錄）。"
-        "成長歸因（三支檔，逐檔數字見 §B-2）："
-        "hook 載具包＝exec form 轉換的**射程**與**載具存在性**兩面"
-        "（ARCH-01 抓到「這台機器上載具在不在」被寫成平台無關的斷言、"
-        "SA-05 補上 POSIX 側載具的 shebang／exec bit／直譯器下限，"
-        "QA-03 抓到只有根層那一份 settings 轉了 exec form 而文件寫成全數已轉）；"
-        "context 水位包＝哨兵整晚失明那一格的 P0 回歸鎖"
-        "（「已處理」必須是事後真有成功 API 回應的**證據**而非「我跑得動武裝指令」這個恆真推論、"
-        "偵測面必須含 subagent、必須看所有未處理事件而不是只看最後一筆），"
-        "以及 reset 框架不得來自機器時鐘那一條（act 在 UTC 容器抓到、本機結構上看不見）；"
-        "收尾包＝本檔款(9)`[未附刪除清單]` 的射程修復（合成語料不受「必須指名真實 .md」約束）"
-        "與其注入證明。"
-        "🔴 本輪未刪任何行換取餘裕、未調高任何門檻、未放寬任何棘輪、未動漂移容忍值。",
-    ),
-    (
-        "R80", 65179, 65390, 211,
-        "R80 **二審五筆 blocking 的收斂包**（單人窗口，無任何 agent 在跑 ⇒ rc 可歸因）。"
-        "🔴 **[非淨減法輪]** —— 逐檔清單與必要性辯護落在 "
-        "docs/06_quality/CrossPlatform_R80_Scan_Findings.md 的 §B-3（與 §B／§B-2 同一個家）。"
-        "成長集中在本檔（另一支 +2 是同輪訂正一句已過期註解的行數代價），內容是"
-        "二審 NEW-SA2-01＝QA2-N2 的落地物："
-        "`doc_guard_total_problems()` 把「文件側引用的累積總量必須等於 "
-        "sum(_FROZEN_GUARD_LINES.values())」由**人記得**升為判準，形狀照款(4)`[未對帳]`，"
-        "掃描面換成計畫書與掃描發現文件兩份 .md，並以帶輪號的標記區分「現行宣稱」與「史料」"
-        "（否則那兩份文件本來就會逐次記載每一次重釘的分段淨額，全掃會把正確的史料判成違規）。"
-        "🔴 **為何這一段非長不可**：二審實測三個文件站點同時寫錯——兩處只記了第一次重釘、"
-        "漏掉第二次，第三處把兩次相加算錯 94——而在此之前**沒有任何判準看得到 `.md`** ⇒ "
-        "款(4) 那顆主牙只咬得到稽核痕跡，讀者實際引用的那個數字整條線上零觀測者。"
-        "注入自證五格：真文件總量寫錯 → `[總量不符]`；同一行算術加錯 → `[淨額不符]`；"
-        "拿掉標記 → `[未登記]`；只留舊輪號標記 → `[未登記]`（證明輪號真的在分史料）；"
-        "正確形態 → 空清單（證明非恆紅）。"
-        "🔴 本輪未刪任何行換取餘裕、未調高任何門檻、未放寬任何棘輪、未動漂移容忍值。",
-    ),
-    (
         "R81", 65390, 67759, 2369,
         "R81 **十一個並行包的一次性重釘**，由收尾者在全部包停工後的單人窗口做 ⇒ rc 可歸因。"
         "🔴 **[非淨減法輪]** —— 逐檔清單與逐項必要性辯護落在 "
@@ -1018,212 +827,38 @@ _GUARD_LINES_REPIN_LOG: tuple[tuple[str, int, int, int, str], ...] = (
         "唯一往**下**釘的是 `OVERSIZE_ROW_EXCESS_CEILING`（138938→138936，−2），"
         "來源是收尾者訂正 `DEF-101-870` 一列的兩處措辭，理由見同一份文件的 §C。",
     ),
-    (
-        "R81", 67759, 67908, 149,
-        "R81 **Architect 複審四筆 blocking 的收斂包**（單人窗口，無任何 agent 在跑 ⇒ rc 可歸因；"
-        "上一列是同輪十一包停工後的第一次重釘，本列是複審收斂後的第二次）。"
-        "🔴 **[非淨減法輪]** —— 逐檔清單與必要性辯護落在 "
-        "docs/06_quality/CrossPlatform_R81_Scan_Findings.md 的 §B-2（與 §B 同一個家）。"
-        "成長全在 `test_context_budget_guard.py`（+130）與本檔（+19＝本列自身的稽核痕跡）。"
-        "內容是 B1／B2 兩筆 blocking 的回歸鎖：**額度節流閘在「快取過期／不存在」時對任意"
-        "規模的扇出全數放行**（複審探針實測：快取過期且額度 99% 時，一整批 `Agent` 派發"
-        "**全數放行、零筆擋下**），以及**快取的檔案契約有兩個家、而生產綁定零覆蓋**"
-        "（改掉取數器的 `CACHE_NAME` ⇒ 寫者與讀者走不同檔 ⇒ 永遠不節流，全套測試照綠）。"
-        "🔴 為何沒有等量的舊判準可以退場：這兩條守的性質此前**一個觀測者都沒有**——"
-        "既有的快取測試全部傳明確 `path`，結構上量不到「hook 讀的正好是 meter 寫的那一支」；"
-        "而「量不到就不節流」那條路徑上此前只有正向控制組，沒有任何一條在問"
-        "「量不到的時候到底放行了多少」。新增的兩類全部成對（控制組 ＋ 注入組），"
-        "且**刻意保留反向**（真的量不到又無撞線證據時仍放行）——只鎖單向會讓下一個人用"
-        "「一律 fail-closed」滿足它，而那正是 L4 當初被否決的形態。"
-        "🔴 本輪未刪任何行換取餘裕、未調高任何門檻、未放寬任何棘輪、未動漂移容忍值。",
-    ),
-    (
-        "R81", 67908, 67950, 42,
-        "R81 **QA 複審三筆 blocking 的收斂包**（本輪第三次重釘；前兩列分別是十一包停工後、"
-        "Architect 複審收斂後）。🔴 **本列不是在單人窗口取得的**——SA／SD 兩位複審者"
-        "同時在唯讀審查同一棵樹，照本 repo 紀律必須標出來，不得寫成 rc 完全可歸因。"
-        "🔴 **[非淨減法輪]** —— 逐檔清單與必要性辯護落在 "
-        "docs/06_quality/CrossPlatform_R81_Scan_Findings.md（與 §B／§B-2 同一個家）。"
-        "成長只有兩支檔：`test_doc_loc_baseline_freshness_r60.py` 與本檔（本列自身的稽核痕跡）。"
-        "內容是 QA B-3：**幽靈路徑判準的掃描面漏掉軌道① 的驅動器**——那一面是根 CLAUDE.md "
-        "明定的唯一驅動器、每輪最多人照著讀的活文件。注入實測：同一句假路徑放進交棒書"
-        "兩顆牙都咬，放進驅動器則整批 OK 直接放行，而該判準的四項誠實劃界一句都沒提到它 ⇒ "
-        "「有鎖在守、但那一面不在射程」比沒有鎖更難看見。同一包另把 vacuity 自錨由**手寫的"
-        "目錄前綴**改成**衍生自 glob 本身**：舊寫法把兩支手列檔的目錄前綴當成一個「面」，"
-        "既讀起來像整個目錄都在掃，又讓「新增一個 glob 卻忘了加進面清單」在結構上無法被發現。"
-        "🔴 本列未刪任何行換取餘裕、未放寬任何棘輪、未動漂移容忍值；"
-        "`_GHOST_PATH_BASELINE_CEILING` 由 18 重釘為 19 是**擴掃描面才看見的既有存量**，"
-        "走的正是該常數紅燈訊息自己指定的那條路，且那筆登記會在對應檔案建立時被 stale "
-        "自檢當場清掉（豁免不可能永久化）。",
-    ),
-    (
-        "R81", 67950, 68393, 443,
-        "R81 **收尾包**（本輪第四次、也是最後一次重釘；前三次分別是十一包停工後、"
-        "Architect 複審收斂後、QA 複審收斂後）。**單人窗口**：四方複審的 blocking 全數"
-        "收斂到最後一筆時所有包已停工，樹上只有收尾者 ⇒ rc 可歸因。"
-        "🔴 **[非淨減法輪]** —— 逐檔清單與必要性辯護落在 "
-        "docs/06_quality/CrossPlatform_R81_Scan_Findings.md 的 §B-3（與 §B／§B-2 同一個家）。"
-        "成長集中在 `test_context_budget_guard.py`（+416），內容是 SD 複審四筆 blocking 的"
-        "回歸鎖：額度取數器的**失效形態逐一具名**（憑證讀不到／HTTP 狀態碼／連線失敗／"
-        "200 但讀不出額度桶——此前全部塌成同一句「量不到」，而「量不到」正是放行的理由）；"
-        "降級必須**出聲**且同一來源不重複喊；節流訊息與降級訊息不得互相冒充；扇出帳本"
-        "不得含 session id、壞掉時讀成 0 而不是讀成封鎖；TTL 更新槽十六路並行只准一個贏；"
-        "節流帶訊息要說出這條帶還會持續多久。"
-        "🔴 **誠實歸因：本段的生產側是「搬家」不是淨減**——額度撞線判讀整個主題自 "
-        "`.claude/hooks/context_budget_guard.py` 搬進 `tools/lib/quota_limits.py`，"
-        "該 hook 由納管當下的 1634 raw 行降到 1451（−183），但搬進去的那一支自己是 341 行"
-        "的新檔 ⇒ 生產側合計仍為正。**不得把 −183 單獨引用成「生產碼淨減」**（交棒稿曾如此"
-        "記載，收尾者現查後訂正）。收尾者同時把 `AutoClaude/tools/check_loc_budget.py` 的 "
-        "shrink-only 棘輪門檻由 1634 下釘到 1451——合法縮小後不下修，那 183 行餘裕就是"
-        "日後無聲加回去的破口（該棘輪自己逐字寫著這句話）。"
-        "🔴 本列未刪任何行換取餘裕、未調高任何門檻、未放寬任何棘輪、未動漂移容忍值。",
-    ),
-    (
-        "R81", 68393, 68423, 30,
-        "R81 **pre-push 攔下後的補包**（本輪第五次重釘；前四次分別是十一包停工後、"
-        "Architect 複審收斂後、QA 複審收斂後、收尾包）。**單人窗口**：commit 已落地、"
-        "所有包停工，樹上只有補包者 ⇒ rc 可歸因。"
-        "🔴 **[非淨減法輪]** —— 逐檔清單與必要性辯護落在 "
-        "docs/06_quality/CrossPlatform_R81_Scan_Findings.md 的 §B-4（與 §B／§B-2／§B-3 "
-        "同一個家）。成長只有一支檔：`test_windowsapps_guard_cross_consistency.py`（+12），"
-        "內容是 `_ZERO_GUARD_BARE_PY_SITES` 新登記 `tools/lib/script_interface_parity.py` "
-        "一筆（`_EXTERNAL_BINS` 白名單資料，非呼叫）；其餘 +18 是本檔——即本列自身的"
-        "稽核痕跡（同第四次那一列的 +22，登記手續本身要付的代價）。"
-        "🔴 **本列存在的理由本身是一筆判例，不是雜務**：那一筆之所以現在才紅，是因為該檔"
-        "在收尾跑閘門的當下還是 untracked，而該鎖的掃描面只看 git-tracked ⇒ **commit 這個"
-        "動作自己改變了掃描面**，閘門在 commit 前全綠、commit 後才轉紅。這在本 repo 已是"
-        "**第三次**（R78 收輪、R79 `xplat_injection_matrix.py`、本筆），前兩次都只登記個案、"
-        "沒有人動「收尾在 commit 前跑」這個順序，所以它必然再來。"
-        "🔴 本列未刪任何行換取餘裕、未調高任何門檻、未放寬任何棘輪、未動漂移容忍值。",
-    ),
-    (
-        "R82", 68423, 72098, 3675,
-        "R82 **全輪唯一一次重釘**（掃描／額度／帳本／mac 就緒度／文件面五包全數停工後，"
-        "由程式面收尾者在單人窗口做 ⇒ rc 可歸因）。"
-        "🔴 **[非淨減法輪]** —— 逐檔清單與逐項必要性辯護落在 "
-        "docs/06_quality/CrossPlatform_R82_Scan_Findings.md 的 §B（沿用 R80／R81 §B 體例："
-        "同一件事只有一個家；本列刻意不逐檔登載數字）。"
-        "成長集中在三個「此前一個觀測者都沒有」的面，沒有等量舊判準可退場去換："
-        "額度水位那把尺搬進 `tools/lib/quota_gate.py` 之後的判定面；"
-        "下一輪切 mac 真機前的三筆宣稱自洽鎖；**否定存在宣稱**的第一個機械物"
-        "（既有三面 CLAIM-FIRST 判準全部只判正向存在）。"
-        "收尾者另補 `sealed_prefix_problems()`（`DEF-101-995`——同輪剛補上的方向鎖"
-        "自己對「改寫史料」與「整段砍短」兩種繞道全綠）。"
-        "🔴 本輪未刪任何行換取餘裕、未調高任何門檻、未放寬任何棘輪、未動漂移容忍值。",
-    ),
-    (
-        "R82", 72098, 73766, 1668,
-        "R82 **最終收尾者的第二次重釘**（上一列是程式面收尾者的第一次；本列是四方複審"
-        "收斂包與帳本清債包全部停工後，由最終收尾者在單人窗口做 ⇒ rc 可歸因）。"
-        "🔴 **[非淨減法輪]** —— 逐檔清單的家仍是 "
-        "docs/06_quality/CrossPlatform_R82_Scan_Findings.md 的 §B（同一件事只有一個家；"
-        "逐檔淨額現查 `--print-guard-lines` 的 DIFF 欄，本列不登載）。"
-        "成長來自上一次重釘之後才落地的收斂包，以及本次收尾自己的修復："
-        "① 被引用卻從未立帳的 `DEF-101-996`／`DEF-101-997` 補進帳本主檔"
-        "（懸空引用清單現查 `test_defect_id_reference_integrity`）；"
-        "② WMI 逐字語料集中成常數並帶 `platform-ok` 具名豁免"
-        "（磁碟機字面值在那裡是被測資料，不是假路徑）；"
-        "③ 鐵律三證偽探針的已審視清單補一筆——命中的那幾支守的是 console 視窗與歸因分格，"
-        "不是 cmd.exe ⇄ /bin/sh 的語意差異。"
-        "🔴 本輪未刪任何行換取餘裕、未調高任何門檻、未放寬任何棘輪、未動漂移容忍值。",
-    ),
-    (
-        "R82", 73766, 73823, 57,
-        "R82 **最終收尾者的第三次重釘**（機密清理包收尾；前兩列見上）。"
-        "🔴 **[非淨減法輪]** —— 逐檔清單與逐項辯護的家仍是 "
-        "docs/06_quality/CrossPlatform_R82_Scan_Findings.md 的 §B（同一件事只有一個家）。"
-        "成長全部來自兩筆**自陳缺陷的修復**，不是新判準："
-        "① 否定存在宣稱鎖的綠側對照組把證偽標的寫成連續字面，而該檔自己是 tracked ⇒ "
-        "`git grep` 命中自己、那條前提結構上永遠成立不了、對照組恆紅；改成臨時 repo 內"
-        "就地構造，並補一條同 repo 的取數管道自檢（空集合是「真的沒有」還是「grep 壞了」，"
-        "回傳值與 rc 完全相同）。"
-        "② `_ZERO_GUARD_BARE_PY_SITES` 補登 `tools/probe/console_spawn_watch.py`"
-        "（分診：`startswith` 的比對字面，字串來自 WMI 讀回的映像名，不交給 OS 解析）。"
-        "🔴 本輪未刪任何行換取餘裕、未調高任何門檻、未放寬任何棘輪、未動漂移容忍值。",
-    ),
-    (
-        "R83", 73823, 79083, 5260,
-        "R83（mac 真機首輪）收尾單人窗口重釘；量測前後各取一次含內容的工作樹指紋並確認相同。"
-        "🔴 **[非淨減法輪]**，且淨額是本表歷來最大的一筆 —— 逐檔清單與逐項必要性辯護的家是 "
-        "docs/06_quality/CrossPlatform_R83_Scan_Findings.md 的 §B（同一件事只有一個家）。"
-        "成長全部來自「mac 真機第一次看得見的東西」：判準的量測面由機器本地狀態換成平台中立"
-        "（blob／samefile／repo 自己的宣告），或改成 win32／darwin 顯式雙欄矩陣。"
-        "🔴 **本列的誠實劃界（兩點，都對本輪不利，逐項見發現文件 §B-3）**："
-        "① 依成熟度 SSOT 的 M1 判準，達標條件是本表**總量連續三輪不上升** ⇒ 本輪是明確的"
-        "反方向，M1 因此比動工前更遠，這件事不因為「成長有正當理由」而改變；"
-        "② 針對本輪修復的第三方複審**在本列落地時尚未執行**（配額五小時桶觸及收斂帶，"
-        "四方複審依節流演算法延到 reset 後）⇒ 依 M3「作者自證不計分」，本值與 R74／R77／"
-        "R78／R81／R82 那幾次同型，屬**中途值**，複審收斂後必須再釘一次。"
-        "🔴 本輪未刪任何行換取餘裕、未調高任何門檻、未放寬任何棘輪、未動漂移容忍值；"
-        "同輪另外幾筆重釘（見發現文件 §B-4）方向皆為**收緊**，理由各自寫在其站點。",
-    ),
-    (
-        "R84", 79083, 81738, 2655,
-        "R84（mac 第二輪；九包並行）收尾單人窗口重釘——**全輪唯一一次重釘**，"
-        "在九包全數停工後由單一窗口做 ⇒ rc 可歸因（同 R83 體例）。"
-        "🔴 **[非淨減法輪]** —— 逐檔清單、逐項必要性辯護與成長歸因的家是 "
-        "docs/06_quality/CrossPlatform_R84_Scan_Findings.md 的 §B（同一件事只有一個家；"
-        "逐檔淨額現查 `--print-guard-lines` 的 DIFF 欄，本列不登載）。"
-        "成長集中在三個本輪才第一次有觀測者的面：鐵律五守衛被真實事故命中後的雙向注入表；"
-        "訴求 7 兩層防護「失效時零痕跡」的可偵測判準；"
-        "mac 續航鏈 `--pace` 出口與 hub tier 解封後的雙向鎖。"
-        "🔴 誠實劃界：① 本輪是 `_REPIN_ROUND_CAP_SINCE` 生效後的上升輪 ⇒ M1 更遠，"
-        "款(11) 因此產生一筆到期義務，居所＝ADR-XPLAT-002 §8.1 回執表 item 15；"
-        "② 本輪 Windows 側零真機量測，凡與 Windows 有關者一律標「未驗證」。"
-        "🔴 本輪未刪任何行換取餘裕、未調高任何門檻、未放寬任何棘輪、未動漂移容忍值。",
-    ),
-    (
-        "R84", 81738, 82838, 1100,
-        "R84 的**第二次**重釘（本輪第二列）。🔴 上一列自陳「全輪唯一一次重釘」——"
-        "那句話在它落地的當下為真，但其後仍有四包交付落地（鐵律五守衛把 argv-list 與"
-        "殼包裝全族收進射程、額度哨兵 pin 的兩載具順序不變式、mac 續航鏈補測，"
-        "以及本收尾窗口自己的兩筆修復）⇒ 該句今天已是過期事實。**刻意不回頭改它**："
-        "本表是 append-only，改寫既有列會撞款(7) 指紋，而「就地把過期宣稱改成真話」"
-        "正是該款要防的形狀 ⇒ 更正寫在這裡，讓兩列並存即是稽核痕跡本身。"
-        "🔴 **[非淨減法輪]** —— 逐檔清單與逐項必要性辯護的家仍是 "
-        "docs/06_quality/CrossPlatform_R84_Scan_Findings.md 的 §B（同一件事只有一個家；"
-        "逐檔淨額現查 `--print-guard-lines` 的 DIFF 欄，本列不登載）。"
-        "🔴 誠實劃界：① 款(10) 判的是**逐輪加總**而非逐列 ⇒ 本輪淨額須把兩列相加才是真值，"
-        "交件回報與交棒書登載的都是那個加總值；② 本列所含的成長絕大多數不是本窗口寫的，"
-        "而是四包停工前落地、由本窗口一次量到——這是體例（收尾單人窗口重釘）不是歸因。"
-        "🔴 本列未刪任何行換取餘裕、未調高任何門檻、未放寬任何棘輪、未動漂移容忍值。",
-    ),
-    (
-        "R85", 82838, 82838, 0,
-        "R85 P2：兌現款(12) 到期義務，單輪淨額上限 5400→3200，"
-        "並改為 _REPIN_NET_CAP_SCHEDULE 分段生效——解開「款(10) 對 R84 要求 ≥3755／"
-        "款(12) 要求 ≤3200」的互斥死結（下修不追溯）。減項是機制不是折行：四族"
-        "同鷹架測試併為表驅動判準、兩處第二個家改取 SSOT，注入樣本一個不少。"
-        "逐檔清單見 CrossPlatform_R85_Scan_Findings.md。",
-    ),
-    (
-        "R85", 82838, 83320, 482,
-        "[非淨減法輪] R85 收尾單人窗口（本輪第二列，append-only 不回頭改上一列）："
-        "十二包停工後一次量到。"
-        "成長來源逐檔＝test_platform_neutral_paths.py +221（P12 的 exe-argv transitive 判準）、"
-        "test_doc_loc_baseline_freshness_r60.py +148（P12 現查載具 smoke ＋ 收尾窗口的 ADR "
-        "量測 token 領域鑑別與鑑別力自證）、test_block_destructive_git_r83.py +93（P12 mac "
-        "側無人看管授權邊界回歸鎖）、test_check_hooks_liveness.py +6；"
-        "逐檔清單的家＝CrossPlatform_R85_Guard_Repin_Evidence.md。"
-        "🔴 誠實劃界：① 款(10) 判逐輪加總 ⇒ 本輪真值＝0 + 468 = 468，遠低於本輪上限 3200；"
-        "② 上一列（P2）淨額為 0 是那一列量到的事實，本列不追溯修改它——就地把過期宣稱改成"
-        "真話正是款(7) 指紋要防的形狀，兩列並存即稽核痕跡（同 R84 的判例）；"
-        "③ 本輪方向仍與 M1 相反（護欄層總量上升），但連續上升輪數已由 P2 那一列歸零。"
-        "🔴 本列未刪任何行換取餘裕、未調高任何門檻、未放寬任何棘輪、未動漂移容忍值。",
-    ),
-    (
-        "R85", 83320, 83475, 155,
-        "[非淨減法輪] R85 四方複審收斂包 F1（根層 `tools/`；本輪第三列，"
-        "append-only 不回頭改前兩列）。"
-        "成長全部來自複審點名的 blocking 修復（SD-B3／ARCH-02／SD 樣本數鎖／QA-06）。"
-        "逐檔清單、逐項必要性辯護，以及**訴求 2「單輪淨額 ≤ 0」本輪未達成**的差額與理由，"
-        "家在 docs/06_quality/CrossPlatform_R85_Guard_Repin_Evidence.md 的 §4"
-        "（同一件事只有一個家；逐檔淨額現查 `--print-guard-lines` 的 DIFF 欄，本列不登載）。"
-        "一句話的結論：兩份互相獨立的量測都指出可用的去重面在**量級上**就吃不掉本輪淨額"
-        "（載具＝`tools/probe/guard_layer_dedup_census.py`，本輪落地、可重跑）；"
-        "棘輪自己列的第三條出口（把 WHY 與史料搬出護欄層）未被動用，理由見該檔 §4.3。"
-        "🔴 本列未刪任何判準、未加任何 skip、未調高任何門檻、未放寬任何棘輪、未動漂移容忍值。",
-    ),
+    ("R81", 67759, 67908, 149,
+     "[非淨減法輪] 逐檔清單＝CrossPlatform_R81_Scan_Findings.md"),
+    ("R81", 67908, 67950, 42,
+     "[非淨減法輪] 逐檔清單＝CrossPlatform_R81_Scan_Findings.md"),
+    ("R81", 67950, 68393, 443,
+     "[非淨減法輪] 逐檔清單＝CrossPlatform_R81_Scan_Findings.md"),
+    ("R81", 68393, 68423, 30,
+     "[非淨減法輪] 逐檔清單＝CrossPlatform_R81_Scan_Findings.md"),
+    ("R82", 68423, 72098, 3675,
+     "[非淨減法輪] 逐檔清單＝CrossPlatform_R82_Scan_Findings.md"),
+    ("R82", 72098, 73766, 1668,
+     "[非淨減法輪] 逐檔清單＝CrossPlatform_R82_Scan_Findings.md"),
+    ("R82", 73766, 73823, 57,
+     "[非淨減法輪] 逐檔清單＝CrossPlatform_R82_Scan_Findings.md"),
+    ("R83", 73823, 79083, 5260,
+     "[非淨減法輪] 逐檔清單＝CrossPlatform_R83_Scan_Findings.md"),
+    ("R84", 79083, 81738, 2655,
+     "[非淨減法輪] 逐檔清單＝CrossPlatform_R84_Scan_Findings.md"),
+    ("R84", 81738, 82838, 1100,
+     "[非淨減法輪] 逐檔清單＝CrossPlatform_R84_Scan_Findings.md"),
+    ("R85", 82838, 82838, 0,
+     "逐檔清單＝CrossPlatform_R85_Scan_Findings.md"),
+    ("R85", 82838, 83320, 482,
+     "[非淨減法輪] 逐檔清單＝CrossPlatform_R85_Guard_Repin_Evidence.md"),
+    ("R85", 83320, 83475, 155,
+     "[非淨減法輪] 逐檔清單＝CrossPlatform_R85_Guard_Repin_Evidence.md"),
+    ("R86", 83475, 83470, -5,
+     "[到期兌現] `_NET_SUBTRACTION_DUE_ROUND` 的到期輪，且是本表歷來第一個淨額 < 0 的輪次。"
+     "動用的是棘輪 `[歷史變短]` 自己指定的出口（把史前列與史料搬出量測面）。逐項出口與行數、"
+     "以及「量測面內的減法 ≠ 總量的減法」這條劃界，"
+     "逐字見 CrossPlatform_R86_Guard_Repin_Evidence.md 與 CrossPlatform_R86_Scan_Findings.md §F-1。"
+     ""),
 )
 
 
@@ -1446,10 +1081,10 @@ _GUARD_LINE_DRIFT_TOLERANCE = 0
 #: 追加當輪不必動指紋（一列寬限），下一輪要再追加就必須先把前一列納入前綴並重釘，
 #: 否則 `[前綴過期]` 轉紅。草稿兩個值都由 `--print-guard-lines` 印出
 #: （ARCH-02 的教訓：紅了卻沒有出路的鎖會被關掉）。
-_REPIN_LOG_FROZEN_PREFIX_LEN = 25
+_REPIN_LOG_FROZEN_PREFIX_LEN = 15
 _REPIN_LOG_MAX_UNFROZEN_TAIL = 1
 _REPIN_LOG_HISTORY_SHA256 = (
-    "67ab310a6040481003a97fc1899a8a9744e15ee87d392c1f09be9769f9267882")
+    "18c6bd4a3f6f35f52ee06cc0ecaf8780823b5c1b1f60063546e77d3b76ec2074")
 
 
 def repin_log_history_digest(
@@ -5634,6 +5269,109 @@ class TestRepinReasonStaysAnIndexNotAReport(unittest.TestCase):
                         "該重新談這條規則而不是留著一條沒有分母的鎖")
         self.assertLessEqual(_REPIN_REASON_CAP_SINCE, 82,
                              "生效輪次被往後推 ⇒ 等於把已經該受約束的列放出去")
+
+
+class TestGuardBucketRatchet(unittest.TestCase):
+    """**分桶棘輪**——總量棘輪之外**額外加嚴**的第二道判準（`DEF-200-103`）。
+
+    立案：上一輪 Architect 的架構判讀是「單一總量棘輪讓最便宜的那一桶（守散文）永遠贏」，
+    因為「加一支守散文的鎖」與「加一支守生產碼的鎖」在單一總量下付**一樣**的代價。
+    本族讓兩者付不同的代價：守真程式碼那幾桶可以長，守散文／守自己那兩桶只准往下。
+
+    🔴 **本族不取代、不放寬總量棘輪**（掌舵者裁決）：`TestGuardLayerRatchet` 那一族與
+    淨額 ≤ 0 的到期義務一字未動 ⇒ 通過條件是兩道**同時**成立，淨效果只能更嚴。
+
+    🔴 判準／常數／桶定義**都不住本檔**，住 `tools/lib/guard_bucket_policy.py`。兩個理由：
+    ① probe 與棘輪必須讀同一份桶定義，否則「印的比例」與「判的比例」是兩個數；
+    ② `tools/tests/*.py` 就是被量的那個面，判準寫在這裡會讓本機制每長一行就把自己要管的
+       分子做大一行。本檔只留消費端（同 `test_schedule_capability_parity._SCAN_FLOOR`
+       取消第二個家的既有體例）。
+    """
+
+    @staticmethod
+    def _policy():
+        sys.path.insert(0, str(_REPO / "tools" / "lib"))
+        import guard_bucket_policy
+        return guard_bucket_policy
+
+    def test_shrink_only_buckets_did_not_grow(self) -> None:
+        """守散文／守自己兩桶只准往下（主牙）。"""
+        gbp = self._policy()
+        problems = gbp.bucket_ratchet_problems(gbp.measure_shrink_only(_REPO))
+        self.assertEqual(problems, [], "分桶棘輪：\n" + "\n".join(problems))
+
+    def test_the_ratchet_actually_bites_when_a_prose_bucket_grows(self) -> None:
+        """注入自證：合成一筆散文桶成長必須轉紅（否則本鎖是恆真的裝飾）。"""
+        gbp = self._policy()
+        base = dict(gbp._FROZEN_SHRINK_ONLY_BUCKET_LINES)
+        grown = {b: n + 1 for b, n in base.items()}
+        self.assertTrue(gbp.bucket_ratchet_problems(grown, frozen=base),
+                        "散文桶 +1 竟未轉紅 ⇒ 判準沒有鑑別力")
+        self.assertEqual(gbp.bucket_ratchet_problems(base, frozen=base), [],
+                         "實測等於基準竟轉紅 ⇒ 判準會製造假紅")
+        # 缺席那一向：拿掉一列不得靜默通過（少一列＝那一桶不受判準）。
+        short = {b: n for b, n in base.items() if b != gbp.SHRINK_ONLY_BUCKETS[0]}
+        self.assertTrue(gbp.bucket_ratchet_problems(short, frozen=short),
+                        "凍結表少一個 shrink-only 桶竟通過 ⇒ 桶可被靜默拿掉")
+
+    def test_the_classifier_discriminates_prose_growth_from_code_growth(self) -> None:
+        """端到端注入 ＋ **對照組**：真的長一支「只守散文」的鎖必須紅，「只守生產碼」必須綠。
+
+        WHY 上一向不夠：那一向注入的是**字典**，只證明比較運算會動；本向注入的是**檔案**，
+        證明分類器真的把兩種成長分開——沒有對照組的注入自證只能說明「會紅」，不能說明
+        「不該紅的時候不紅」，而後者才是這道鎖能不能活過一輪的條件。
+        """
+        import tempfile
+        gbp = self._policy()
+        stub = ('class T:\n    """守 {ref} 的合成鎖。"""\n'
+                + "".join(f"    # {{ref}} 第 {i} 條\n" for i in range(40)))
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            (root / "tools" / "tests").mkdir(parents=True)
+            base = gbp.measure_shrink_only(root)
+            for ref, expect_red in (("docs/06_quality/x.md", True),
+                                    ("AutoClaude/autoclaude/core/kernel.py", False)):
+                target = root / "tools" / "tests" / "test_injected.py"
+                target.write_text(stub.format(ref=ref), encoding="utf-8")
+                got = gbp.bucket_ratchet_problems(gbp.measure_shrink_only(root), frozen=base)
+                self.assertEqual(bool(got), expect_red,
+                                 f"注入只守 `{ref}` 的鎖：預期{'紅' if expect_red else '綠'}"
+                                 f"，實得 {got or '綠'} ⇒ 分類器沒有鑑別力")
+                target.unlink()
+
+    def test_growth_allowed_buckets_are_the_code_guarding_ones(self) -> None:
+        """方向鎖：允許成長的桶必須是**守真程式碼**那幾桶，且與 shrink-only 集合互斥。
+
+        沒有這一向，把 `prose` 搬進允許成長那一組就能讓紅變綠，而那與「為了讓紅變綠而改成
+        不比較」只有一線之隔（上一輪四方複審已對同型動作下過判決）。
+        """
+        gbp = self._policy()
+        self.assertEqual(gbp.GROWTH_ALLOWED_BUCKETS,
+                         frozenset({"production", "root_infra", "sdd"}))
+        self.assertFalse(gbp.GROWTH_ALLOWED_BUCKETS & set(gbp.SHRINK_ONLY_BUCKETS))
+        self.assertIn("prose", gbp.SHRINK_ONLY_BUCKETS)
+        self.assertIn("guard_self", gbp.SHRINK_ONLY_BUCKETS)
+        # 後設向：登記了卻抓不到的樹前綴＝該族被靜默排除在分母外（本輪實測發生過）。
+        self.assertEqual(gbp.dead_tree_prefixes(), [],
+                         "BUCKET_TREES 有樹前綴永遠抓不到 ⇒ 那一族不在任何桶的分母裡，"
+                         "而掃描器照跑照回數字，失明是靜默的")
+
+    def test_the_probe_default_grain_equals_the_ratchet_basis(self) -> None:
+        """probe 印的粒度必須等於棘輪判的粒度——否則兩邊講的是兩件事。
+
+        WHY 這一向非有不可：**檔級**的 `exclusive` 歸屬對 `prose` 桶實測回零——本層的鎖檔
+        絕大多數同時參照根層基礎設施、護欄層自己與散文三者，所以「只參照一棵樹」在檔級
+        幾乎不成立（比例一律現查 `python tools/probe/guard_layer_bucket_census.py --grain file`
+        的 `exclusive` 欄）。⇒ 若 probe 預設檔級而棘輪吃檔級，shrink-only 判準會是恆真的
+        裝飾。粒度是這道鎖有沒有牙的分水嶺，不是顯示選項。
+        """
+        gbp = self._policy()
+        src = (_REPO / "tools" / "probe" / "guard_layer_bucket_census.py").read_text(
+            encoding="utf-8")
+        grain, estimator = gbp.GUARD_BUCKET_RATCHET_BASIS
+        self.assertIn(f'choices=("chunk", "file"), default="{grain}"', src,
+                      f"probe 的 --grain 預設值必須是 {grain}（棘輪判的粒度）")
+        self.assertIn(estimator, ("exclusive", "firstmatch", "dominant", "any"))
 
 
 if __name__ == "__main__":  # pragma: no cover

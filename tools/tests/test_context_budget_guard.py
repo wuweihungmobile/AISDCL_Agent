@@ -58,6 +58,7 @@ import context_budget_guard as guard  # noqa: E402
 # 同一行程裡有兩個模組物件，於是 monkeypatch 打在其中一個上、受測碼讀的是另一個
 # （`ModuleIdentityIsSingleTest` 在守這一條）。
 sys.path.insert(0, str(_REPO_ROOT / "tools" / "lib"))
+import quota_criteria  # noqa: E402  # R86：判準本體的家（本檔只做斷言）
 import quota_gate as qg  # noqa: E402
 import quota_meter  # noqa: E402  # R82／HELM-02：`NO_WINDOW` 相等鎖的另一端
 import quota_policy  # noqa: E402  # R82：門檻／階梯的唯一的家，本檔不再持有任何數字
@@ -3650,9 +3651,15 @@ def _TRACE_ISOLATION(test: unittest.TestCase) -> tuple:  # noqa: N802 — 與同
     # 🔴 R84：第三格（`refresh_stamp_path`）。它與上面兩格同構——額度軸落在生產暫存的
     # 檔——而它此前在 `claim_refresh_slot()` 裡是寫死路徑、沒有注入點 ⇒ 任何走到刷新
     # 路徑的測試都會吃掉真的那個 180 秒名額，此後真的需要補量時靜默不補。
+    # 🔴 R86：第四格（`burn_ledger_path`）。它住**持久**目錄（`~/.autosdd/traces`）⇒ 漏關
+    # 的代價比前三格更大：合成讀數會被 `burn_ratio()` 當真觀測拿去推換算比，汙染的是
+    # **下一次真的派工決策**（理由全文見具名證據檔 `CrossPlatform_R86_Pace_Calibration.md`
+    # ——刻意不寫它的目錄前綴：分桶棘輪把「提到散文樹」的整塊歸進 shrink-only 的 `prose`
+    # 桶，而本塊守的是沙箱隔離、不是散文，寫全路徑會讓 61 行被誤記進那一桶）。
     return (("quota_trace_path", lambda: test.tmp / "trace.jsonl"),
             ("degraded_stamp_path", lambda source: test.tmp / f"stamp-{source}"),
-            ("refresh_stamp_path", lambda: test.tmp / "refresh.stamp"))
+            ("refresh_stamp_path", lambda: test.tmp / "refresh.stamp"),
+            ("burn_ledger_path", lambda: test.tmp / "burn.jsonl"))
 
 
 def trace_isolation_problems(source: str) -> list[str]:
@@ -4882,9 +4889,14 @@ class ThrottleBandSaysHowLongItLastsTest(unittest.TestCase):
         本輪的整件事就是把那個「無關」拿掉（訴求 6b）：同一個 85%，reset 在 1 小時後
         與在 5 天後拿到的 cap 必須不同，且方向是「近的比較寬鬆」。
         halt 帶仍然恰為 0（那一格沒有變，也不吃 horizon 乘數）。
+
+        🔴 **R86 只動中間那一個取樣點（1 小時 → 20 小時），斷言與方向一字未改**：對一個
+        **7 天**窗來說「1 小時前」與「10 分鐘前」是同一件事（都 <0.6% 窗長），它們此前被
+        讀成兩格只因門檻是絕對分鐘數——那正是缺陷 A。逐項實測與辯護見具名證據檔
+        `CrossPlatform_R86_Pace_Calibration.md` §七末段（同上：刻意不寫目錄前綴）。
         """
         near = _decision((("weekly_all", 85.0, 600.0),)).cap
-        mid = _decision((("weekly_all", 85.0, 3600.0),)).cap
+        mid = _decision((("weekly_all", 85.0, 20 * 3600.0),)).cap
         far = _decision((("weekly_all", 85.0, 5 * 86400.0),)).cap
         self.assertGreater(near, mid, "reset 近在眼前卻沒有比較寬鬆 ⇒ 6b 沒有接上")
         self.assertGreater(mid, far, "reset 遠在五天後卻沒有比較緊 ⇒ 6b 沒有接上")
@@ -6340,6 +6352,22 @@ class QuotaPaceOutletIsReachableTest(unittest.TestCase):
         resolve_at = main_src.index("resolve_transcript")
         self.assertLess(pace_at, resolve_at,
                         "--pace 掛在逐字稿解析之後 ⇒ 找不到 session 的機器上查不到額度")
+
+    def test_it_says_why_an_empty_short_window_still_cannot_be_burned(self) -> None:
+        """🔴 R86：掌舵者看到「短窗還很空、卻只能派 2 個」時，畫面必須自己回答為什麼。
+
+        他當時看到的只有 `binding=seven_day` ⇒ 讀起來像程式抓錯。同一次呼叫也必須落款
+        一列（換算比只能從歷時差分推估）。判準本體＝`quota_criteria.pace_line_problems`。
+        """
+        _quota_cache(self.tmp, 75.0, kind="seven_day", resets_in=72 * 3600,
+                     extra=(("five_hour", 16.0, 42 * 60),))
+        report = qg.pace_report()
+        self.assertEqual(quota_criteria.pace_line_problems(report), [], report)
+        ledger = qg.burn_ledger_path()
+        self.assertEqual(len(ledger.read_text(encoding="utf-8").splitlines()), 1,
+                         "查了一次卻沒有落款 ⇒ 樣本永不累積")
+        qg.pace_report()   # 同一份快取再查一次：不得寫出第二列重複觀測
+        self.assertEqual(len(ledger.read_text(encoding="utf-8").splitlines()), 1)
 
     def test_the_unmeasurable_case_says_so_instead_of_looking_healthy(self) -> None:
         """量不到時**不得**印一個看起來很寬鬆的數字（那正是本 repo 判過的假綠形態）。"""

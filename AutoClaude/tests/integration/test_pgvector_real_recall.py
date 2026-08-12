@@ -277,7 +277,8 @@ class TestDualAdapterFallback:
                 # 只建 fixture 而讓 `assert True` 留著，正是本 reason 自己點名的假綠形態。
                 # ⇒ 同 test_pgvector_hnsw_recall.py 的兩列：R85 起不接受「再推一輪」，
                 #   承接者必須拿到 PM 決定（保留＋同輪建自動通道／顯式廢止）二擇一。
-                "承接輪次 R86：要建的是 AutoClaude/tests/fixtures/dual_adapter_failover.json"
+                "承接輪次 R87（R86 第 4 次順延，理由見 improving_110 §0）："
+                "要建的是 AutoClaude/tests/fixtures/dual_adapter_failover.json"
                 "（BGE-M3 故障注入腳本 ＋ Minimax adapter 切換的量測欄位），"
                 "🔴 但**只建 fixture 會把這支從 skip 變成假綠**——本 case 在 fixture 存在時"
                 "落到的是下面那句 `assert True`，那是一個恆真斷言，量不到任何 RTO。"

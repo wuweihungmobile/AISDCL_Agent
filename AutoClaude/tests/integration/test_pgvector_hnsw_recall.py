@@ -207,7 +207,8 @@ def test_pgvector_recall_at_10_ge_095():
         #   這個出口——承接者只有兩個選擇：把 PM 決定拿到手（保留＋同輪建自動通道／顯式廢止），
         #   或把這兩支測試連同 reason 一起刪除並在帳本留下廢止紀錄。掌舵者未拍板前不得再改
         #   輪號，因為那會第 4 次把「有人負責」的假象續期。
-        f"[DEBT] 需 W3 G3 staging 資料集：1k seed + BGE-M3 真實向量。承接輪次 R86"
+        f"[DEBT] 需 W3 G3 staging 資料集：1k seed + BGE-M3 真實向量。"
+        f"承接輪次 R87（R86 第 4 次順延，理由見 improving_110 §0）"
         f"（該輪必須先決定保留或顯式廢止：保留就得同時建自動通道，"
         f"否則寫好也不會被跑）。"
         f"🔴 本輪再推一輪的理由（非「下輪處理」）：本輪是 macOS 本機輪，缺件是**受測對象**"
@@ -236,7 +237,8 @@ def test_pgvector_p95_latency_under_50ms():
     pytest.skip(
         # 🔴 R85：與 T1 同一筆決定、同一份順延理由（見上方 T1 那段：持有面被切開＋PM 拍板
         # 未到手），故同步推到 R85，並同樣適用「R85 起不接受再推一輪」的到期條款。
-        f"[DEBT] 需 W3 G3 staging 資料集（同 T1）。承接輪次 R86"
+        f"[DEBT] 需 W3 G3 staging 資料集（同 T1）。承接輪次 R87"
+        f"（R86 第 4 次順延，理由見 improving_110 §0）"
         f"（保留或顯式廢止的決定與 T1 同一筆）。"
         f"🔴 本輪再推一輪的理由與解除條件與 T1 逐字同一份（見 "
         f"test_pgvector_recall_at_10_ge_095 的 reason）：兩者共用同一個 staging 資料集與"

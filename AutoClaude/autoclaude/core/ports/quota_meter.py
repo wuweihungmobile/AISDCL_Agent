@@ -107,6 +107,70 @@ def reset_instant(resets_at: object) -> datetime | None:
 NO_RESET = datetime.max.replace(tzinfo=UTC)
 
 
+# ══════════════════════════════════════════════════════════════════════════════
+# 配速契約（R86 — 掌舵者：「請將演算法落實在程式機制，不是光光靠模型判斷」）
+# ══════════════════════════════════════════════════════════════════════════════
+# 🔴 為什麼不是「引擎自己照 pct 算 cap」：那會讓配速演算法有**第二個家**。演算法本體
+# （水位帶 × 期程帶 → cap／pace 倍率、跨軸聚合、單調性不變式）住在 monorepo 根層
+# `tools/lib/quota_policy.py::decide()`，而引擎**不得** import 它（`.importlinter` 的
+# no-harness-import contract）。修前引擎確實養了一份簡化版：只拿 `max(pct)` 去比兩道
+# 門檻（converge／halt），對「距 reset 幾分鐘」這一軸完全失明 ⇒ 同一份快取下，harness
+# 會 halt（cap=0）而引擎無動作的組合實測存在（R82／C3 的病，同型）。
+# ⇒ 唯一合規的形狀＝**檔案契約**：根層算完把 `Decision` 寫成一份 JSON，引擎只讀、不算。
+#
+# 契約檔（照抄，勿重新發明；路徑與 schema 的另一個家在 harness 那一側）：
+#   路徑    <tempdir>/autosdd_pace.json（與既有 autosdd_quota.json 同目錄，見 adapter）
+#   schema  必須等於 "autosdd.pace/1"
+#   cap             int ≥ 0        —— 現在能派幾個並發單位（0＝halt 帶；**沒有 null**）
+#   band            str            —— free／notice／converge／prepare／halt／unmeasured
+#   measured_at     ISO 8601 自帶 offset —— 🔴 底層**量測**時刻，不是寫檔時刻（見下）
+#   source          str            —— endpoint／cache／degraded（這份數字怎麼來的）
+#   headroom_pct        float|null —— 本窗還能燒多少（halt 水位 − 最緊那軸的水位）
+#   headroom_pct_per_hour float|null —— 攤提餘裕＝headroom_pct ÷ (距 reset 小時數)
+#   binding_kind    str|null       —— 最緊的是哪一軸（診斷用）
+#
+# 🔴 為什麼新鮮度必須讀 `measured_at` 而**不是**檔案 mtime（與 `autosdd_quota.json`
+# 那份契約的處置刻意不同，這是本輪的設計判定，不是漏抄）：那份快取由**量測者自己**整檔
+# 重寫 ⇒ mtime ≡ 量測時刻，兩者等價。本契約是**衍生物**：根層可以拿一份 30 分鐘前的舊
+# 快取現算出一個決策並立刻寫檔 ⇒ mtime 很新、底層量測很舊，而那個組合的外觀與「剛量到」
+# 完全相同（本 repo 判過最貴的失效形態：假綠與修好長得一樣）。⇒ 一律以 payload 為準。
+# 衍生物的壽命不得超過它的輸入，判準見 adapter 的 `PACE_TTL_SECONDS`。
+PACE_SCHEMA = "autosdd.pace/1"
+# 「量不到」的帶別。刻意不叫 free：free 是**有意義**的值（額度很充足），拿它代表量不到
+# 會讓所有下游門檻靜默失效——同本檔上方「絕不可回 0.0」那條的同一個判詞。
+BAND_UNMEASURED = "unmeasured"
+# 引擎真的有動作的那兩個帶（字面與根層 `quota_policy.py` 的 `BAND_*` 相同，鏡射鎖見上）。
+BAND_PREPARE, BAND_HALT = "prepare", "halt"
+# 量不到時的上限。🔴 **絕不是「不設限」**——本 repo 已判過這條（根層 `AUTOSDD_QUOTA_
+# DEGRADED_CAP` 就是它的既有實作，出廠 4）。此處是引擎側的同一個數字的鏡像；預設值相等
+# 由 `tests/test_r86_pace_contract.py` 讀根層 `ENV_SPEC` 原始碼比對（同既有鏡射鎖體例）。
+DEGRADED_CAP = 4
+
+
+@dataclass(frozen=True)
+class PaceDecision:
+    """根層算完、引擎只讀的一則配速決策。引擎**不得**在此之外自行推導 cap。"""
+
+    cap: int                      # 硬上限；0＝halt 帶。**沒有 None**（見上方 WHY）
+    band: str                     # BAND_UNMEASURED ＝這則決策量不到，走保守側
+    source: str                   # endpoint／cache／degraded：這份數字怎麼來的
+
+
+# 🔴 這個函式就是「新機制不得比現行門檻更寬鬆」那條保守原則的**結構性**實作，不是紀律：
+# `min` 在數學上不可能回出比 `static_limit` 大的值 ⇒ 任何情境下都不會比修前更寬鬆。
+# 猜錯而加速會爆額度，猜錯而減速只是慢一點 ⇒ 加速必須有證據，減速可以無證據。
+# `decision is None` 與 `band == unmeasured` 是**兩件不同的事**，刻意分開：
+#   · None        ＝根本沒注入 pace port（功能沒開）⇒ 行為與修前位元級相同（同本 repo
+#                   既有慣例 `quota_meter=None ⇒ 零行為變化`）。
+#   · unmeasured  ＝port 在、但契約缺席／過期／壞掉 ⇒ adapter 已把 cap 填成保守地板。
+# 下界夾 1：cap=0（halt 帶）在這裡不得變成「一個都不准派」而讓引擎死鎖——停不停是
+# halt 那一軸的決定（`TokenGuardPlugin.evaluate_quota`），不是併發度這一軸的。
+def effective_fanout(static_limit: int, decision: PaceDecision | None) -> int:
+    if decision is None:
+        return max(1, int(static_limit))
+    return max(1, min(int(static_limit), int(decision.cap)))
+
+
 def resume_wait_seconds(reading: QuotaReading | None, now: datetime | None = None) -> float | None:
     # 回 None ＝「不要等」（沒有 resets_at／不是等得到的 kind／時刻解不出來）。
     # 呼叫端據此走「寫任務書＋通知人」而不是 sleep。刻意不回一個猜出來的秒數：

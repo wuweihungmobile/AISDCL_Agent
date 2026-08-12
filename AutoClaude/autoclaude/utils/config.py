@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 import os
 import re
 from pathlib import Path
@@ -7,6 +8,8 @@ from typing import Literal
 
 import yaml
 from pydantic import BaseModel, Field, field_validator, model_validator
+
+from ..core.ports.quota_meter import DEGRADED_CAP
 
 # 🔴 R82（C3／C6，掌舵者訴求 b+c）：**額度門檻的名字與出廠預設不在這裡發明**。
 # 唯一的家＝monorepo 根層 `tools/lib/quota_policy.py` 的 `ENV_SPEC`（50/70/85/95 四個錨點）。
@@ -27,15 +30,50 @@ from pydantic import BaseModel, Field, field_validator, model_validator
 _ENV_FILES = (Path(__file__).resolve().parents[2] / ".env",
               Path(__file__).resolve().parents[3] / ".env")
 
+_LOG = logging.getLogger(__name__)
+# 明示覆寫的標記。形狀刻意沿用 repo 既有的「行尾 `<name>-ok:` ＋ WHY」豁免慣例
+# （PowerShell lint／毀滅性 git 守衛／git 路徑列舉那三支各有一個同族標記），**不發明第三種**；
+# 理由必填。🔴 本段刻意**不逐字寫出**那三個標記字面：`tools/tests/test_platform_neutral_
+# paths.py::TestGitPathEnumerationIsQuotepathSafe` 會掃全庫找它其中一個的字面，而「帶標記
+# 卻不是 git 路徑列舉站點」判為 stale 並轉紅——本行第一版就這樣把一句舉例變成了一個**真的
+# 豁免標記**（實測 rc=1）。這正是那道鎖該有的行為：豁免出口不得由散文順手鑄造出來。
+_OVERRIDE_MARK = "override-ok:"
 
+
+def _env_file_value(path: Path, name: str) -> str:
+    # 回傳該檔中 `name=` 的**原始右手邊**（含行尾註解，讓上層看得到覆寫標記）；缺席回 ""。
+    if not path.is_file():
+        return ""
+    return next((ln.split("=", 1)[1] for ln
+                 in path.read_text(encoding="utf-8", errors="replace").splitlines()
+                 if ln.split("=", 1)[0].strip() == name), "")
+
+
+# 🔴 R86（掌舵者：「根 .env 與 AutoClaude/.env 是否違反 SSOT」）——**判定：不是 SSOT 違反**，
+# 是 git system/global/local 那種三層繼承（根層＝兩側共用基底，AutoClaude 那份＝引擎專屬覆寫）。
+# 合併成一份會拆掉一個合法需求（無人看管的引擎本來就可能該比互動式 harness 更保守），而且
+# 這兩層是**被測試釘住的既有契約**（`test_the_env_file_takes_effect_and_autoclaude_wins_over_
+# the_root` 直接 monkeypatch `_ENV_FILES`）⇒ 動它就是動契約。
+# 🔴 真正的缺陷是**分歧靜默**：兩檔同名鍵值不同時，引擎用一個值、harness hook 用另一個值，
+# 對**同一個額度池**做決策，而沒有任何東西會出聲——本 repo 最貴的教訓逐字是「fail-open 的
+# 表徵與修好完全相同」。⇒ 治法不是禁止分歧（那會殺掉合法覆寫），是**讓分歧必須是明示的**。
+# 🔴 為什麼偵測住在 `_quota_env` 裡、而不是另寫一支「掃兩份 .env 全部鍵」的比較器（這是
+# 本輪的設計判定，不是偷懶）：`.env` 裡有機密（`MINIMAX_API_KEY`／DB DSN），而全鍵比較器
+# 必須把機密的值讀進一條會 log 的路徑，再靠一份「像機密的鍵名」關鍵詞表去遮罩——那是啟發
+# 式，會漏。本函式的呼叫點是**寫死的白名單**（只有 `AUTOSDD_QUOTA_*`），所以機密的值
+# **結構上**到不了這裡，不需要遮罩也不可能外洩。誠實劃界：代價是非配額鍵的分歧不會被偵測。
 def _quota_env(name: str, fallback: float) -> float:
     raw = os.environ.get(name, "").split("#")[0].strip()
-    for path in _ENV_FILES:
-        if raw or not path.is_file():
-            continue
-        raw = next((ln.split("=", 1)[1].split("#")[0].strip()
-                    for ln in path.read_text(encoding="utf-8", errors="replace").splitlines()
-                    if ln.split("=", 1)[0].strip() == name), "")
+    hits = [(p, v) for p in _ENV_FILES if (v := _env_file_value(p, name))]
+    if len({v.split("#")[0].strip() for _, v in hits}) > 1 \
+            and _OVERRIDE_MARK not in hits[0][1]:
+        _LOG.warning(
+            "[env 分歧] %s 在兩份 .env 值不同：%s ⇒ 引擎吃 %s、harness hook 吃 %s，"
+            "對同一個額度池做不同決策。刻意的話在贏的那一行行尾加 `# %s <WHY>`。",
+            name, [v.split("#")[0].strip() for _, v in hits],
+            hits[0][0].as_posix(), hits[-1][0].as_posix(), _OVERRIDE_MARK)
+    if not raw and hits:
+        raw = hits[0][1].split("#")[0].strip()
     try:
         return min(100.0, max(0.0, float(raw)))
     except ValueError:
@@ -173,13 +211,14 @@ class PlaybookConfig(BaseModel):
 
 
 class TokenGuardConfig(BaseModel):
-    """Token / Context 用量保護設定。
-
-    SD_06 W5-T5-12 加強 invariants：
-      - halt_threshold_pct 必須 > compact_threshold_pct（既有 M-3/X-3）
-      - resume_delay_minutes ≥ 0（避免負延遲）
-      - max_auto_resumes ≥ 1（避免 0 次自動恢復產生 dead config）
-    """
+    # Token / Context 用量保護設定。
+    # （R86 等量減法：docstring → 註解、一字未刪；理由＝`check_loc_budget` 自己印的指引
+    #  「docstring 行會被 count_loc 計入」，本輪 total 餘裕實測只有 12 行。R82 先例。）
+    #
+    # SD_06 W5-T5-12 加強 invariants：
+    #   - halt_threshold_pct 必須 > compact_threshold_pct（既有 M-3/X-3）
+    #   - resume_delay_minutes ≥ 0（避免負延遲）
+    #   - max_auto_resumes ≥ 1（避免 0 次自動恢復產生 dead config）
     enabled: bool = True
     # 觸發 /compact 的 context 使用百分比門檻（應低於 halt_threshold_pct）
     compact_threshold_pct: float = Field(default=80.0, ge=0.0, le=100.0)
@@ -199,6 +238,13 @@ class TokenGuardConfig(BaseModel):
         "AUTOSDD_QUOTA_CONVERGE_PCT", 70.0))
     quota_halt_pct: float = Field(ge=0.0, le=100.0, default_factory=lambda: _quota_env(
         "AUTOSDD_QUOTA_HALT_PCT", 95.0))
+    # 🔴 R86：配速契約量不到（缺檔／過期／壞掉）時的併發上限。**絕不是「不設限」**——
+    # 本 repo 已判過這條（根層 `AUTOSDD_QUOTA_DEGRADED_CAP` 就是它的既有實作）。
+    # 上面兩欄是「%」故吃 `_quota_env` 的 0~100 夾；本欄是「個數」，夾在同一個上界只是恰好
+    # 無害（根層 `max_fanout` 出廠 16 ≪ 100）；下界由 Field(ge=1) 守——0 會讓引擎在量不到
+    # 時一個並發單位都不准派＝死鎖，而那不是保守，是壞掉。
+    quota_degraded_cap: int = Field(ge=1, le=100, default_factory=lambda: int(_quota_env(
+        "AUTOSDD_QUOTA_DEGRADED_CAP", float(DEGRADED_CAP))))
     # 儲存檢查點後等待多少分鐘再自動繼續（0 = 立即繼續）
     # 🔴 R82：**額度**路徑不讀這一欄（改讀觀測到的 resets_at，見 core/services/auto_resume.py）；
     # context 路徑原樣保留——實測額度視窗 min 0.5 分／max 253 分，沒有一段等於固定 30 分。

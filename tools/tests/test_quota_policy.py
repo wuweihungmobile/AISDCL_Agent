@@ -34,6 +34,13 @@ from pathlib import Path
 _HERE = Path(__file__).resolve()
 _REPO = _HERE.parents[2]
 sys.path.insert(0, str(_REPO / "tools" / "lib"))
+# 🔴 判準本體（M2／M5／M7／M10 ＋ R86 三缺陷）住 `tools/lib/quota_criteria.py`，本檔只留
+# 「呼叫判準 ＋ 斷言」。理由兩條同時成立，見該檔檔頭：① 它們不依賴 unittest，是對源碼／
+# 讀數的純判定；② `tools/tests/*.py` 受護欄層行數棘輪管，判準留在這裡會逼別包去砍別的
+# 東西來抵。**鑑別力不得下降**：搬家後全部合成注入自證已重跑，結果與搬家前逐字相同。
+import pace_contract as PC  # noqa: E402
+import quota_criteria as QC  # noqa: E402
+import quota_pace as W  # noqa: E402
 import quota_policy as Q  # noqa: E402
 
 _MODULE_SRC = (_REPO / "tools" / "lib" / "quota_policy.py").read_text(encoding="utf-8")
@@ -60,11 +67,6 @@ def state(*specs, reason: str = "ok", source: str = "endpoint") -> Q.QuotaState:
     axes = tuple(axis(k, p, m) for k, p, m in specs)
     return Q.QuotaState(axes=axes, measured_at=NOW.isoformat(),
                         source=source, reason=reason)
-
-
-def cap_num(cap: int | None) -> float:
-    """`None`（不設限）視為 +∞，才能與整數 cap 比大小。"""
-    return _INF if cap is None else float(cap)
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -172,11 +174,11 @@ class TestTheTableIsProducedByTheRuleNotByHand(unittest.TestCase):
                 continue
             with self.subTest(row=label):
                 readings = Q.axes_of(st, NOW, P)
-                cap = min(cap_num(r.cap) for r in readings)
+                cap = min(QC.cap_num(r.cap) for r in readings)
                 base = min(Q._base_rec(r.band, P) for r in readings)
                 rec = Q._bound(Q._clamp(int(base * Q._pace_of(readings, P)), P),
                                None if cap == _INF else int(cap))
-                self.assertEqual(cap, cap_num(want_cap), f"{label}: cap")
+                self.assertEqual(cap, QC.cap_num(want_cap), f"{label}: cap")
                 self.assertEqual(rec, want_rec, f"{label}: rec")
 
     def test_every_axis_recommendation_stays_under_its_own_cap(self) -> None:
@@ -184,7 +186,7 @@ class TestTheTableIsProducedByTheRuleNotByHand(unittest.TestCase):
         for _label, st, *_ in _TABLE:
             for r in Q.axes_of(st, NOW, P):
                 with self.subTest(kind=r.axis.kind, band=r.band):
-                    self.assertLessEqual(float(r.recommended), cap_num(r.cap))
+                    self.assertLessEqual(float(r.recommended), QC.cap_num(r.cap))
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -201,7 +203,7 @@ def m1_problems(cap_of) -> list[str]:
     今天就是綠的（A→kind=session branch=arm、B→kind=weekly_all branch=notify），
     寫進去就是零鑑別力的鎖。
     """
-    a, b = cap_num(cap_of(_A)), cap_num(cap_of(_B))
+    a, b = QC.cap_num(cap_of(_A)), QC.cap_num(cap_of(_B))
     if a <= b:
         return [f"cap(A)={a} 未嚴格大於 cap(B)={b}：短期程與長期程被壓成同一件事"]
     return []
@@ -348,7 +350,7 @@ class TestM1bAccelerationSurvivesAggregation(unittest.TestCase):
                     d = Q.decide(state(("session", pct, m), other), NOW, P)
                     with self.subTest(pct=pct, minutes=m, other=other[1]):
                         self.assertLessEqual(
-                            float(d.recommended_fanout), cap_num(d.cap))
+                            float(d.recommended_fanout), QC.cap_num(d.cap))
 
     def test_an_axis_with_no_horizon_but_a_real_cap_blocks_acceleration(self) -> None:
         """fail-closed 那一半**原封不動**：期程不明且**真的在煞車**的軸仍一票否決。
@@ -369,7 +371,7 @@ class TestM1bAccelerationSurvivesAggregation(unittest.TestCase):
         readings = Q.axes_of(state(("session", 75, 3), ("spend", 55, None)), NOW, P)
         no_veto = max(Q._mult(r.horizon, P) for r in readings)      # ＝拿掉整個 if
         base = min(Q._base_rec(r.band, P) for r in readings)
-        cap = min(cap_num(r.cap) for r in readings)
+        cap = min(QC.cap_num(r.cap) for r in readings)
         self.assertEqual(Q._pace_of(readings, P), 1.0)
         self.assertEqual(no_veto, 2.0)
         self.assertEqual(Q._bound(Q._clamp(int(base * no_veto), P), int(cap)), 4)
@@ -413,27 +415,10 @@ class TestM1bAccelerationSurvivesAggregation(unittest.TestCase):
 # ═══════════════════════════════════════════════════════════════════════════
 # M2 reset 距離必須真的影響輸出（6b 的存在性證明）
 # ═══════════════════════════════════════════════════════════════════════════
-def m2_problems(cap_fn, rec_fn) -> list[str]:
-    """固定 pct=79，cap 必須隨 reset 變遠而**非遞增**，且近端嚴格大於中段。"""
-    problems = []
-    near, mid, far = cap_fn(79, 3), cap_fn(79, 240), cap_fn(79, 8640)
-    if not (cap_num(near) > cap_num(mid) > cap_num(far)):
-        problems.append(f"79% 的 cap 未隨期程遞減：{near}/{mid}/{far}")
-    seq = [cap_num(cap_fn(79, m)) for m in range(1, 20000, 37)]
-    if any(b > a for a, b in zip(seq, seq[1:], strict=False)):
-        problems.append("cap 隨 minutes 增大而變寬（方向掃描失敗）")
-    # 反向鑑別力：free 帶的 cap 恆為 None，差別只出現在建議值上
-    if cap_fn(20, 3) is not None or cap_fn(20, 240) is not None:
-        problems.append("free 帶的 cap 不該被設限")
-    if rec_fn(20, 3) <= rec_fn(20, 240):
-        problems.append("free 帶的『加速』沒有出口（rec 必須隨 reset 逼近而變大）")
-    return problems
-
-
 class TestM2HorizonActuallyMoves(unittest.TestCase):
     def test_green_the_real_implementation_passes(self) -> None:
         self.assertEqual(
-            m2_problems(lambda pct, m: Q.axis_cap(pct, m, P),
+            QC.m2_problems(lambda pct, m: Q.axis_cap(pct, m, P),
                         lambda pct, m: Q.axis_recommended(pct, m, P)), [])
 
     def test_the_three_horizons_are_three_different_caps(self) -> None:
@@ -444,7 +429,7 @@ class TestM2HorizonActuallyMoves(unittest.TestCase):
 
     def test_red_when_the_minutes_parameter_is_ignored(self) -> None:
         """注入：`axis_cap` 無視 `minutes`（＝今天 shipped 的形態）⇒ 必紅。"""
-        problems = m2_problems(lambda pct, _m: Q.axis_cap(pct, 240, P),
+        problems = QC.m2_problems(lambda pct, _m: Q.axis_cap(pct, 240, P),
                                lambda pct, _m: Q.axis_recommended(pct, 240, P))
         self.assertTrue(problems, "無視 minutes 卻沒轉紅＝零鑑別力")
 
@@ -453,7 +438,7 @@ class TestM2HorizonActuallyMoves(unittest.TestCase):
         inverted = {Q.AXIS_NEAR: 0.5, Q.AXIS_MID: 1.0,
                     Q.AXIS_FAR: 2.0, Q.AXIS_NONE: 2.0}
         self.assertTrue(
-            m2_problems(lambda pct, m: _mult_cap(pct, m, inverted),
+            QC.m2_problems(lambda pct, m: _mult_cap(pct, m, inverted),
                         lambda pct, m: Q.axis_recommended(pct, m, P)))
 
 
@@ -483,8 +468,8 @@ def m3_problems(aggregate) -> list[str]:
     for _ in range(400):
         base = [rand_axis(f"k{i}") for i in range(rng.randint(1, 4))]
         extra = rand_axis("x")
-        before = cap_num(aggregate(state(*base)))
-        after = cap_num(aggregate(state(*base, extra)))
+        before = QC.cap_num(aggregate(state(*base)))
+        after = QC.cap_num(aggregate(state(*base, extra)))
         if after > before:
             problems.append(f"加入 {extra} 後 cap 由 {before} 放寬為 {after}")
             break
@@ -638,7 +623,7 @@ def cap_monotonicity_problems(policy: Q.Policy) -> list[str]:
     """
     problems = []
     for minutes in (3, 240, 8640, None):
-        caps = [cap_num(Q.axis_cap(pct / 2.0, minutes, policy)) for pct in range(0, 201)]
+        caps = [QC.cap_num(Q.axis_cap(pct / 2.0, minutes, policy)) for pct in range(0, 201)]
         recs = [float(Q.axis_recommended(pct / 2.0, minutes, policy))
                 for pct in range(0, 201)]
         for label, seq in (("cap", caps), ("rec", recs)):
@@ -791,104 +776,30 @@ class TestM4AccelerationFailsClosed(unittest.TestCase):
 # ═══════════════════════════════════════════════════════════════════════════
 # M5 決策不得由任何單一純量驅動（`worst()` 的墓碑 ＋ 純量簽章禁令）
 # ═══════════════════════════════════════════════════════════════════════════
-#: 決策詞。🔴 規格原表另有 `band`／`budget`——**刻意移除**：規格自己的 `pct_band(pct, p)`
-#: 是二元決策合法的前半，把它判紅就是 15 筆假紅裡的第一筆，而那種鎖活不過一輪。
-_DECISION_WORDS = ("cap", "tier", "fanout", "throttle", "halt", "gate", "decide")
-_SCALAR_PARAMS = ("pct", "percent", "utilization")
-#: 🔴 第二軸的證據。規格原文只寫「參數名含 pct 且註記為 float/int」——照抄會把
-#: 規格自己宣告的 `axis_cap(pct: float, minutes: float | None, p: Policy)` 判紅。
-#: 真正要禁的是「**只**由一個純量決策」，所以判準多一個合取項：沒有任何期程輸入。
-#:
-#: 🔴 R82 複驗鏡實測的**三條洗白路徑**（此前 `now`／`state` 也在這張表裡）：
-#:   · 加一個 `now: datetime` ⇒ 判準放行。但 `now` 不帶任何 reset 時刻，
-#:     「現在幾點」單獨存在時對 horizon 零資訊 ⇒ 它從來就不是第二軸的證據。
-#:   · 加一個 `state` ⇒ 判準放行。吃 `QuotaState` 的函式根本不需要 `pct` 參數，
-#:     兩者同時出現正是「表面上收了狀態、實際上還是照純量決策」的形狀。
-#:   · 寫成 `async def` ⇒ `ast.FunctionDef` 比對整片失明（見下方 walk 的型別）。
-#: 三條都不是假想：M5-④ 要埋的 `fanout_cap(pct)` 就住在下一階段要接線的
-#: `tools/lib/quota_gate.py`，任何一條都能讓它靜默逃出射程。
-_HORIZON_PARAMS = ("minutes", "horizon", "resets", "deadline", "remaining", "until")
-_FUNC_NODES = (ast.FunctionDef, ast.AsyncFunctionDef)
-
-
-def _is_number_annotation(node) -> bool:
-    return node is not None and any(
-        tok in ast.unparse(node) for tok in ("float", "int"))
-
-
-def scalar_decision_defs(source: str) -> list[str]:
-    """列出「只吃一個純量水位就做決策」的函式（M5 靜態半 ④）。"""
-    found = []
-    for node in ast.walk(ast.parse(source)):
-        if not isinstance(node, _FUNC_NODES):
-            continue
-        if not any(w in node.name.lower() for w in _DECISION_WORDS):
-            continue
-        args = node.args.posonlyargs + node.args.args + node.args.kwonlyargs
-        names = [a.arg.lower() for a in args]
-        if any(h in n for n in names for h in _HORIZON_PARAMS):
-            continue
-        if any(any(s in a.arg.lower() for s in _SCALAR_PARAMS)
-               and _is_number_annotation(a.annotation) for a in args):
-            found.append(node.name)
-    return found
-
-
-def worst_mentions(source: str) -> list[str]:
-    """`worst()` 的墓碑：**定義與呼叫兩邊都算**（只認 `def worst` 會漏掉呼叫端）。"""
-    hits = []
-    tree = ast.parse(source)
-    for node in ast.walk(tree):
-        if isinstance(node, _FUNC_NODES) and node.name == "worst":
-            hits.append("def worst")
-        if isinstance(node, ast.Call):
-            fn = node.func
-            name = fn.id if isinstance(fn, ast.Name) else getattr(fn, "attr", "")
-            if name == "worst":
-                hits.append("call worst()")
-    return hits
-
-
-def scalar_escape_problems(cls) -> list[str]:
-    """執行期半：型別上**不得**存在任何無參數的取值出口。
-
-    🔴 判準必須走 `__mro__` 的 `__dict__`，**不能**用 `getattr`：`object` 自己就帶
-    `__lt__`／`__gt__`（回 `NotImplemented` 的預設實作），`getattr` 版對**任何**
-    類別都回非 None ⇒ 那是一支恆紅、因而必然被刪掉的鎖。本註解是實測得來的：
-    第一版正是 `getattr`，跑出來 `Axis` 自己就被判了兩筆違規。
-    """
-    problems = []
-    owners = [k for k in cls.__mro__ if k is not object]
-    for dunder in ("__float__", "__int__", "__index__", "__lt__", "__gt__"):
-        if any(dunder in k.__dict__ for k in owners):
-            problems.append(f"{cls.__name__} 定義了 {dunder} ⇒ 不指名軸別就拿得到數字")
-    return problems
-
-
 class TestM5NoSingleScalarDrivesDecisions(unittest.TestCase):
     def test_green_the_module_itself_is_clean(self) -> None:
-        self.assertEqual(scalar_decision_defs(_MODULE_SRC), [])
-        self.assertEqual(worst_mentions(_MODULE_SRC), [])
+        self.assertEqual(QC.scalar_decision_defs(_MODULE_SRC), [])
+        self.assertEqual(QC.worst_mentions(_MODULE_SRC), [])
 
     def test_red_the_shipped_signatures_are_caught(self) -> None:
         """注入：貼回 `fanout_cap(pct)` 與 `quota_tier_of(pct)` ⇒ 兩支都必須被抓。"""
         injected = (
             "def fanout_cap(pct: float | None) -> int | None:\n    return 2\n"
             "def quota_tier_of(pct: float) -> str:\n    return 'normal'\n")
-        self.assertEqual(sorted(scalar_decision_defs(injected)),
+        self.assertEqual(sorted(QC.scalar_decision_defs(injected)),
                          ["fanout_cap", "quota_tier_of"])
 
     def test_green_a_display_helper_is_not_caught(self) -> None:
         """鑑別力反證：顯示用的 `format_pct` 必須放行，否則只是在抓 `pct` 這個字。"""
         harmless = ("def format_pct(pct: float) -> str:\n    return f'{pct}%'\n"
                     "def pct_band(pct: float, p: object) -> str:\n    return 'free'\n")
-        self.assertEqual(scalar_decision_defs(harmless), [])
+        self.assertEqual(QC.scalar_decision_defs(harmless), [])
 
     def test_green_the_two_axis_signature_is_not_caught(self) -> None:
         """規格自己的 `axis_cap(pct, minutes, p)` 必須綠——否則判準把正解判成違規。"""
         good = ("def axis_cap(pct: float, minutes: float | None, p: object):\n"
                 "    return 1\n")
-        self.assertEqual(scalar_decision_defs(good), [])
+        self.assertEqual(QC.scalar_decision_defs(good), [])
 
     def test_red_none_of_the_three_whitewash_paths_works(self) -> None:
         """🔴 三條洗白路徑逐條注入：加 `now`／加 `state`／寫成 `async def`。
@@ -908,23 +819,23 @@ class TestM5NoSingleScalarDrivesDecisions(unittest.TestCase):
                           "    return 2\n"),
         ):
             with self.subTest(whitewash=label):
-                self.assertEqual(scalar_decision_defs(injected), ["fanout_cap"])
+                self.assertEqual(QC.scalar_decision_defs(injected), ["fanout_cap"])
 
     def test_green_a_real_state_consumer_has_no_scalar_parameter(self) -> None:
         """鑑別力反證：真的吃狀態的函式**不會**有 `pct` 參數 ⇒ 一開始就不在射程內。"""
         real = ("def decide(state: object, now: object, p: object) -> object:\n"
                 "    return state\n")
-        self.assertEqual(scalar_decision_defs(real), [])
+        self.assertEqual(QC.scalar_decision_defs(real), [])
 
     def test_the_tombstone_catches_call_sites_not_only_definitions(self) -> None:
         """判準自證：只認 `def worst` 會漏掉「別處定義、這裡呼叫」的版本。"""
         call_only = "top = worst(readings)\npct = top['pct']\n"
-        self.assertEqual(worst_mentions(call_only), ["call worst()"])
-        self.assertEqual(worst_mentions("def worst(rs):\n    return rs[0]\n"),
+        self.assertEqual(QC.worst_mentions(call_only), ["call worst()"])
+        self.assertEqual(QC.worst_mentions("def worst(rs):\n    return rs[0]\n"),
                          ["def worst"])
 
     def test_axis_has_no_scalar_escape_hatch(self) -> None:
-        self.assertEqual(scalar_escape_problems(Q.Axis), [])
+        self.assertEqual(QC.scalar_escape_problems(Q.Axis), [])
         with self.assertRaises(TypeError):
             float(axis("session", 61, 13.5))
         with self.assertRaises(TypeError):
@@ -936,7 +847,7 @@ class TestM5NoSingleScalarDrivesDecisions(unittest.TestCase):
             def __float__(self) -> float:
                 return self.pct
 
-        self.assertTrue(scalar_escape_problems(Leaky))
+        self.assertTrue(QC.scalar_escape_problems(Leaky))
 
     def test_quota_state_has_no_pct(self) -> None:
         st = state(("session", 61, 13.5), ("weekly_all", 57, 8233))
@@ -972,20 +883,20 @@ class TestM5ScanSurfaceScope(unittest.TestCase):
                 for path in files:
                     if path.is_file():   # in-flight 的包可能還沒把檔放上來
                         self.assertIsInstance(
-                            scalar_decision_defs(path.read_text(encoding="utf-8")),
+                            QC.scalar_decision_defs(path.read_text(encoding="utf-8")),
                             list, f"{path} 掃不動＝這一面實際上沒有被掃")
 
     def test_the_owned_surface_is_gated_hard(self) -> None:
         """本包擁有的那一面是硬 gate；其餘兩面見 `TestM5EveryScanSurfaceIsGatedHard`。"""
-        self.assertEqual(scalar_decision_defs(_MODULE_SRC), [])
-        self.assertEqual(worst_mentions(_MODULE_SRC), [])
+        self.assertEqual(QC.scalar_decision_defs(_MODULE_SRC), [])
+        self.assertEqual(QC.worst_mentions(_MODULE_SRC), [])
         self.assertIn(_REPO / "tools" / "lib" / "quota_policy.py",
                       _M5_SCAN_SURFACES["tools/lib/quota_*.py"])
 
 
 # 🔴 R82／C4：把「三個掃描面」從**列舉**升成**硬 gate**。
 #
-# 病（複審鏡以沙箱注入實測，每次跑全套）：`worst_mentions`／`scalar_decision_defs` 兩個
+# 病（複審鏡以沙箱注入實測，每次跑全套）：`QC.worst_mentions`／`QC.scalar_decision_defs` 兩個
 # 判準只對 `_MODULE_SRC`（＝`quota_policy.py` 自己）斷言，於是
 #   worst() 放回 quota_gate.py → rc=0 GREEN；放回 quota_meter.py → rc=0 GREEN；
 #   fanout_cap(pct) 放回 quota_gate.py → GREEN；quota_tier_of(pct) 放回 hook → GREEN；
@@ -997,7 +908,7 @@ class TestM5ScanSurfaceScope(unittest.TestCase):
 # 「掃描面列出來了」與「掃描面被判了」是兩件事，前者讀起來很像後者。
 #
 # 現在的判準：三個面（＋ AutoClaude adapter 那一面）**每一支檔**都必須同時
-# `scalar_decision_defs == []` 且 `worst_mentions == []`。今天全部為空（落地當回合實測），
+# `QC.scalar_decision_defs == []` 且 `QC.worst_mentions == []`。今天全部為空（落地當回合實測），
 # 所以這不是「登記存量」而是「不准有人放回去」。
 class TestM5EveryScanSurfaceIsGatedHard(unittest.TestCase):
     def _files(self) -> list[Path]:
@@ -1011,7 +922,7 @@ class TestM5EveryScanSurfaceIsGatedHard(unittest.TestCase):
         for path in self._files():
             with self.subTest(file=path.name):
                 self.assertEqual(
-                    scalar_decision_defs(path.read_text(encoding="utf-8")), [],
+                    QC.scalar_decision_defs(path.read_text(encoding="utf-8")), [],
                     f"{path} 出現「只吃一個純量水位就做決策」的函式 ⇒ "
                     "(pct, 距 reset 幾分鐘) 的後半在簽章層就不存在了")
 
@@ -1019,7 +930,7 @@ class TestM5EveryScanSurfaceIsGatedHard(unittest.TestCase):
         for path in self._files():
             with self.subTest(file=path.name):
                 self.assertEqual(
-                    worst_mentions(path.read_text(encoding="utf-8")), [],
+                    QC.worst_mentions(path.read_text(encoding="utf-8")), [],
                     f"{path} 又出現 worst()（定義或呼叫）⇒ 那是 R82 的墓碑")
 
     def test_red_all_five_injections_from_the_review_turn_red(self) -> None:
@@ -1030,18 +941,18 @@ class TestM5EveryScanSurfaceIsGatedHard(unittest.TestCase):
         """
         cases = {
             "worst 回到 quota_gate": ("def worst(readings):\n    return readings[0]\n",
-                                      worst_mentions),
+                                      QC.worst_mentions),
             "worst 回到 quota_meter": ("top = worst(bucket_readings(payload))\n",
-                                       worst_mentions),
+                                       QC.worst_mentions),
             "fanout_cap 回到 quota_gate": (
                 "def fanout_cap(pct: float | None) -> int | None:\n    return 2\n",
-                scalar_decision_defs),
+                QC.scalar_decision_defs),
             "quota_tier_of 回到 hook": (
                 "def quota_tier_of(pct: float) -> str:\n    return 'normal'\n",
-                scalar_decision_defs),
+                QC.scalar_decision_defs),
             "fanout_cap 進 AutoClaude adapter": (
                 "class A:\n    def fanout_cap(self, pct: float) -> int:\n        return 2\n",
-                scalar_decision_defs),
+                QC.scalar_decision_defs),
         }
         for label, (injected, judge) in cases.items():
             with self.subTest(injection=label):
@@ -1056,7 +967,7 @@ class TestM5EveryScanSurfaceIsGatedHard(unittest.TestCase):
             with self.subTest(file=path.name):
                 polluted = path.read_text(encoding="utf-8") + (
                     "\n\ndef fanout_cap(pct: float) -> int:\n    return 2\n")
-                self.assertEqual(scalar_decision_defs(polluted), ["fanout_cap"])
+                self.assertEqual(QC.scalar_decision_defs(polluted), ["fanout_cap"])
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -1206,60 +1117,19 @@ class TestM6TheGeneratedFileSurvivesItsOwnConsumer(unittest.TestCase):
 # ═══════════════════════════════════════════════════════════════════════════
 # M7 每一個印出去的百分比都必須指名桶名與剩餘分鐘
 # ═══════════════════════════════════════════════════════════════════════════
-_PCT_RE = re.compile(r"\d+(?:\.\d+)?%")
-
-
-def m7_problems(text: str) -> list[str]:
-    """**逐一個百分比**判：每個 `%` 自己前面要有 `kind=`、後面要有剩餘分鐘。
-
-    🔴 判準由「chunk 級」改成「百分比級」（R82 複驗鏡 ⑦）。舊版先用
-    `re.split(r"[；\\n　]", text)` 切段、再問「這一段裡有沒有 kind= 和 分鐘」——
-    於是**只要改 `describe()` 的分隔符**（或乾脆不放分隔符），兩個桶就會落進同一段，
-    第一個桶的 `kind=`／「分鐘」替第二個裸百分比背書，整段矇混過關。判準去問文字
-    怎麼被切，而不是去問每個百分比自己有沒有被指名——那是把鑑別力寄放在被判者手上。
-
-    現在的切法只依**百分比自己的位置**：一個 `%` 的「名牌區」是它與**前一個** `%`
-    之間、「期程區」是它與**後一個** `%` 之間。分隔符換成什麼都不影響。
-    """
-    problems = []
-    marks = list(_PCT_RE.finditer(text))
-    for i, mark in enumerate(marks):
-        before = text[marks[i - 1].end() if i else 0: mark.start()]
-        after = text[mark.end(): marks[i + 1].start() if i + 1 < len(marks) else len(text)]
-        shown = text[max(0, mark.start() - 20): mark.end() + 20]
-        if "kind=" not in before:
-            problems.append(f"裸的百分比，沒說是哪一桶：…{shown}…")
-        if "分鐘" not in after and "reset 距離不明" not in after:
-            problems.append(f"沒說還剩幾分鐘：…{shown}…")
-    return problems
-
-
-def _chunk_level_m7_problems(text: str) -> list[str]:
-    """注入形態＝**舊的 chunk 級判準**（只留作對照組，不是現行判準）。"""
-    problems = []
-    for chunk in re.split(r"[；\n　]", text):
-        if not _PCT_RE.search(chunk):
-            continue
-        if "kind=" not in chunk:
-            problems.append(f"裸的百分比：{chunk!r}")
-        if "分鐘" not in chunk and "reset 距離不明" not in chunk:
-            problems.append(f"沒說還剩幾分鐘：{chunk!r}")
-    return problems
-
-
 class TestM7EveryPercentNamesItsBucket(unittest.TestCase):
     def test_green_describe_passes_for_every_table_row(self) -> None:
         for label, st, *_ in _TABLE:
             with self.subTest(row=label):
-                self.assertEqual(m7_problems(Q.describe(Q.decide(st, NOW, P))), [])
+                self.assertEqual(QC.m7_problems(Q.describe(Q.decide(st, NOW, P))), [])
 
     def test_red_a_bare_percentage_is_caught(self) -> None:
         """注入＝掌舵者當場誤讀的**那個**形狀。"""
-        self.assertTrue(m7_problems("額度 54% 了，要收斂"))
+        self.assertTrue(QC.m7_problems("額度 54% 了，要收斂"))
 
     def test_red_naming_the_bucket_but_not_the_horizon(self) -> None:
         """只補桶名不補分鐘 ⇒ 仍必紅（兩個都是 6b 的輸入）。"""
-        problems = m7_problems("kind=weekly_all 54% 了，要收斂")
+        problems = QC.m7_problems("kind=weekly_all 54% 了，要收斂")
         self.assertEqual(len(problems), 1, problems)
 
     def test_both_axes_are_named_when_both_halt(self) -> None:
@@ -1268,7 +1138,7 @@ class TestM7EveryPercentNamesItsBucket(unittest.TestCase):
             state(("session", 96, 20), ("weekly_all", 97, 8640)), NOW, P))
         self.assertIn("kind=session", text)
         self.assertIn("kind=weekly_all", text)
-        self.assertEqual(m7_problems(text), [])
+        self.assertEqual(QC.m7_problems(text), [])
 
     def test_red_removing_the_separators_no_longer_launders_a_bare_percentage(
             self) -> None:
@@ -1279,9 +1149,9 @@ class TestM7EveryPercentNamesItsBucket(unittest.TestCase):
         也有「分鐘」⇒ 放行；百分比級判準逐個問 ⇒ 抓到兩筆。
         """
         laundered = "kind=session 61% 剩 13 分鐘 57% 剩 8233 分鐘"
-        self.assertEqual(_chunk_level_m7_problems(laundered), [],
+        self.assertEqual(QC.chunk_level_m7_problems(laundered), [],
                          "控制組：舊判準本來就該放行這一則（那正是它的病）")
-        problems = m7_problems(laundered)
+        problems = QC.m7_problems(laundered)
         self.assertEqual(len(problems), 1, problems)
         self.assertIn("沒說是哪一桶", problems[0])
 
@@ -1291,14 +1161,14 @@ class TestM7EveryPercentNamesItsBucket(unittest.TestCase):
             state(("session", 61, 13.5), ("weekly_all", 57, 8233)), NOW, P))
         for old, new in (("；", " / "), ("　", " ")):
             text = text.replace(old, new)
-        self.assertEqual(m7_problems(text), [])
-        self.assertEqual(len(_PCT_RE.findall(text)), 2)
+        self.assertEqual(QC.m7_problems(text), [])
+        self.assertEqual(len(QC.PCT_RE.findall(text)), 2)
 
     def test_the_unmeasurable_message_carries_no_bare_percentage(self) -> None:
         d = Q.decide(Q.QuotaState(axes=(), measured_at=NOW.isoformat(),
                                   source="cache", reason="http-401"), NOW, P)
         text = Q.describe(d)
-        self.assertEqual(_PCT_RE.findall(text), [])
+        self.assertEqual(QC.PCT_RE.findall(text), [])
         self.assertIn("http-401", text)
 
 
@@ -1560,30 +1430,16 @@ class TestM9UnmeasurableIsNotUnlimited(unittest.TestCase):
 # ═══════════════════════════════════════════════════════════════════════════
 # M10 決策入口唯一化（本層可釘的那一半）
 # ═══════════════════════════════════════════════════════════════════════════
-def decision_constructors(source: str) -> list[str]:
-    """列出「自己組出一個 `Decision`」的函式——正解是**恰好一個**（`decide`）。"""
-    owners = []
-    for node in ast.walk(ast.parse(source)):
-        if not isinstance(node, ast.FunctionDef):
-            continue
-        for inner in ast.walk(node):
-            if (isinstance(inner, ast.Call) and isinstance(inner.func, ast.Name)
-                    and inner.func.id == "Decision"):
-                owners.append(node.name)
-                break
-    return sorted(set(owners))
-
-
 class TestM10SingleDecisionEntry(unittest.TestCase):
     def test_green_only_decide_builds_a_decision(self) -> None:
-        self.assertEqual(decision_constructors(_MODULE_SRC), ["decide"])
+        self.assertEqual(QC.decision_constructors(_MODULE_SRC), ["decide"])
 
     def test_red_a_second_derivation_path_is_caught(self) -> None:
         """注入：hook 裡再長出一條自己推導 band/cap 的路徑 ⇒ 必紅。"""
         injected = _MODULE_SRC + (
             "\n\ndef quota_gate(payload):\n"
             "    return Decision(2, 1, BAND_PREPARE, None, (), 'ok')\n")
-        self.assertEqual(decision_constructors(injected), ["decide", "quota_gate"])
+        self.assertEqual(QC.decision_constructors(injected), ["decide", "quota_gate"])
 
     def test_decide_is_patchable_so_a_spy_can_be_installed(self) -> None:
         """接線時 M10 要用 `mock.patch` 裝 spy；`decide` 必須是模組層可替換的名字。"""
@@ -1651,6 +1507,108 @@ class TestR84ThePaceCoefficientsAreTunableAndDirectional(unittest.TestCase):
         self.assertEqual(Q._mult(Q.AXIS_FAR, P), P.pace_far)
         self.assertEqual(Q._mult(Q.AXIS_NONE, P), P.pace_far)
         self.assertEqual(Q._mult(Q.AXIS_MID, P), 1.0)
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# R86 缺陷 A（門檻是絕對分鐘數）／B（瞬時 pct 無意義）／C（cap 保護錯的配額）
+# ═══════════════════════════════════════════════════════════════════════════
+# 判準本體、對照組（R85 版判讀的程式重建）、掃描網格與 CLI 校準基準全住
+# `tools/lib/quota_criteria.py`；逐項實測數字與治法辯護住
+# `docs/06_quality/CrossPlatform_R86_Pace_Calibration.md`。本節只做斷言。
+class TestR86WindowRelativeHorizonAndCrossWindowAmortization(unittest.TestCase):
+    def test_defect_a_the_same_distance_means_different_things_per_window(self) -> None:
+        """同 pct、同 reset 距離、不同窗長 ⇒ 新版必須分歧；R85 版必須**逐格相同**。"""
+        old, new = QC.defect_a_divergence(P, Q, NOW)
+        self.assertEqual(old[0], old[1], "對照組：R85 版本來就看不到窗長（那正是缺陷 A）")
+        self.assertEqual(new, (Q.AXIS_FAR, Q.AXIS_NEAR), f"新版仍然看不到窗長：{new}")
+
+    def test_defect_b_the_same_pct_at_two_burn_rates_gets_two_caps(self) -> None:
+        """74% ＋ 已過 20%／90% ⇒ 新版 cap 必須不同；R85 版必須相同。"""
+        old, new = QC.defect_b_divergence(P, Q, NOW)
+        self.assertEqual(old[0], old[1], "對照組：R85 版對燃燒率整片失明（那正是缺陷 B）")
+        self.assertLess(new[0], new[1], f"超支的那一格必須比省的那一格緊：{new}")
+
+    def test_defect_c_this_window_allowance_moves_with_the_long_window(self) -> None:
+        """短窗讀數完全相同、長窗剩餘窗數不同 ⇒ 本窗餘裕與 cap 必須不同。"""
+        old, caps, headrooms = QC.defect_c_divergence(P, Q, NOW)
+        self.assertEqual(old[0], old[1], "對照組：R85 版沒有跨窗攤提這個概念")
+        self.assertNotEqual(caps[0], caps[1], f"攤提沒有進到 cap：{caps}")
+        self.assertGreater(headrooms[0], headrooms[1], "長窗剩餘窗數愈多 ⇒ 本窗配額愈小")
+
+    def test_acceleration_never_happens_without_evidence_of_thrift(self) -> None:
+        """🔴 方向鎖（本節最重要的一支）：新版**只准**在有節省證據時比 R85 版鬆。"""
+        looser, unlicensed = QC.unlicensed_acceleration(P, Q, W, NOW)
+        self.assertTrue(looser, "一格都沒有放寬 ⇒ 這支測試失去鑑別力（缺陷 A 沒被治）")
+        self.assertEqual(unlicensed, [], f"無證據就放寬了：{unlicensed[:5]}")
+
+    def test_amortization_only_tightens_and_never_triggers_halt(self) -> None:
+        """攤提是 `max(原始 pct, 攤提後)` ⇒ 換算比被設成任何值都不可能放寬；且封頂在 halt-1。"""
+        for ratio in (0.1, 1.0, 7.0, 1e6):
+            shown = W.band_inputs((("five_hour", 40.0), ("seven_day", 75.0)),
+                                  (100.0, 9000.0), (300.0, 10080.0), ratio, 95.0)[0]
+            self.assertGreaterEqual(shown[0], 40.0, f"r={ratio} 讓攤提放寬了")
+            self.assertEqual(shown[1], 75.0, "攤提不得動長窗那一軸的水位")
+        hot = W.band_inputs((("five_hour", 90.0), ("seven_day", 99.0)),
+                            (100.0, 9000.0), (300.0, 10080.0), 1.0, 95.0)[0]
+        self.assertEqual(Q.pct_band(hot[0], P), Q.BAND_PREPARE, "推導值把短窗推進 halt 帶")
+        self.assertEqual(W.band_inputs((("five_hour", 99.0),), (100.0,), (300.0,),
+                                       1.0, 95.0)[0][0], 99.0, "真 halt 的軸被放寬了")
+
+    def test_an_unresolvable_window_keeps_the_shipped_absolute_thresholds(self) -> None:
+        """窗長解不出 ⇒ 逐格等於 R85 版（向後相容是**跑出來的**，不是宣稱的）。"""
+        self.assertIsNone(W.window_minutes("session"))
+        self.assertEqual(QC.backward_compat_problems(P, Q, NOW), [])
+
+    def test_the_conversion_ratio_is_conservative_while_samples_are_thin(self) -> None:
+        """樣本不足 ⇒ 取 min 並**說出來**；翻頁不得被讀成一次負燃燒的觀測。"""
+        ratio, note = W.estimate_ratio(list(W.SEED_OBSERVATIONS))
+        self.assertIn("保守", note)
+        self.assertLess(ratio, 15.0, "點估 15 是上界；下界才是保守側")
+        self.assertEqual(W.estimate_ratio([])[0], None)
+        text = "".join(W.row_of(ts, (("five_hour", s), ("seven_day", lg)))
+                       for ts, s, lg in W.SEED_OBSERVATIONS)
+        self.assertEqual(len(W.rows_from_jsonl(text + text)), 2)
+        self.assertEqual(W.rows_from_jsonl("not json\n{}\n{\"pct\": 3}\n"), [])
+        rows = [("2026-08-12T01:00+08:00", 10.0, 70.0), ("2026-08-12T02:00+08:00", 40.0, 72.0),
+                ("2026-08-12T07:00+08:00", 5.0, 73.0), ("2026-08-12T08:00+08:00", 35.0, 75.0)]
+        self.assertEqual([len(s) for s in W.segments(rows)], [2, 2])
+        self.assertIsNone(W.ratio_of(-30.0, 1.0), "翻頁的負差值不得產生換算比")
+
+    def test_the_helm_cli_screen_reconciles_with_the_axes_snapshot(self) -> None:
+        """🔴 外部校準憑證：CLI 畫面上的兩個數字 vs 程式從 `axes[]` 算出來的兩個數字。"""
+        text, pct, resets_at, read_at, cli_minutes = QC.CLI_CALIBRATION
+        self.assertIn(f"{pct:g}% used", text)
+        when = datetime.fromisoformat(read_at)
+        self.assertAlmostEqual(Q.minutes_to_reset(resets_at, when), cli_minutes,
+                               delta=QC.CLI_TOLERANCE_MINUTES)
+        reading = Q.axes_of(Q.QuotaState((Q.Axis("session", pct, resets_at),),
+                                         read_at, "endpoint", "ok"), when, P)[0]
+        self.assertEqual(reading.axis.pct, pct, "pct 必須逐字吻合，不吃容差")
+        self.assertAlmostEqual(reading.minutes, cli_minutes,
+                               delta=QC.CLI_TOLERANCE_MINUTES)
+
+
+class TestR86ThePaceContractWriterMatchesTheEngineReader(unittest.TestCase):
+    """引擎不准 import 根層（`no-harness-import`）⇒ 檔名與 schema 兩個字面必然有兩個家。"""
+
+    def test_both_literals_are_identical_on_the_two_sides(self) -> None:
+        engine = _REPO / "AutoClaude" / "autoclaude"
+        self.assertEqual(QC.contract_literal_problems(
+            PC, (engine / "infra" / "adapters" / "file_quota_meter.py").read_text(
+                encoding="utf-8"),
+            (engine / "core" / "ports" / "quota_meter.py").read_text(encoding="utf-8")), [])
+
+    def test_the_payload_never_writes_a_null_cap_and_carries_provenance(self) -> None:
+        """`cap=None`（不設限）必須映射成整數；`measured_at` 是**量測**時刻不是現在。"""
+        st = state(("session", 0, 30))
+        free = PC.payload(Q.decide(st, NOW, P), st, P.max_fanout, P.halt_pct)
+        self.assertEqual((free["cap"], free["schema"]), (P.max_fanout, PC.CONTRACT_SCHEMA))
+        self.assertEqual(free["measured_at"], NOW.isoformat())
+        halted = PC.payload(Q.decide(state(("session", 96, 20)), NOW, P), st,
+                            P.max_fanout, P.halt_pct)
+        self.assertEqual((halted["cap"], halted["band"]), (0, Q.BAND_HALT))
+        for key in ("headroom_pct", "headroom_pct_per_hour", "binding_kind", "source"):
+            self.assertIn(key, free)
 
 
 if __name__ == "__main__":

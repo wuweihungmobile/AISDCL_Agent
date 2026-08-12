@@ -74,6 +74,15 @@ _REPO_ROOT = Path(__file__).resolve().parents[1]
 # 掃描面（相對 repo 根）：pytest 基線數字歷史上實際漂移過的高風險文件。
 # 擴大範圍時加入本清單即可，核心判定邏輯（scan）不需改動。
 _SCAN_FILES = [
+    # R86：SD 包的「宣稱先於查證」判準與其回歸鎖。納管理由＝它們的**合成語料**
+    #      本身就是 `NNNN passed` 形態（偵測數字的判準當然要有數字），因此會被
+    #      `discover_unmanaged_sites()` 判為新開的家。🔴 實測：光加 `baseline-ok:`
+    #      豁免**不足**——`_line_is_claim()` 不吃豁免，站點數棘輪照樣紅（判準自己的
+    #      修法說明給了兩條出口，而第二條對那道棘輪無效；該缺口已登記於缺陷帳本
+    #      DEF-200-105 一族，待下一輪覆核）。
+    #      正解是「納管 ＋ 行內豁免」兩者並用。
+    ".claude/hooks/check_claim_provenance.py",
+    "tools/tests/test_claim_provenance_r86.py",
     "CLAUDE.md",
     "ONBOARDING.md",
     "useMacWin.md",

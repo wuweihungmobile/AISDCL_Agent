@@ -10,10 +10,13 @@
 """
 from __future__ import annotations
 
+import json
 import os
 import sys
 import unittest
 from collections.abc import Mapping, Sequence
+from datetime import UTC, datetime
+from pathlib import Path
 
 from skip_tag_policy import (
     _WINDOWS_LIKE_SKIP_HINTS,
@@ -153,3 +156,115 @@ def report_untagged_windows_like_skips(
             file=sys.stderr,
         )
     return offenders
+
+
+# ── 職責④之二：**test-id 集合**面（M6 的「可求值」形狀）─────────────────────────
+# 立案（R85 QA）：職責⑤（`skip_group_policy`）比的是**計數**⇒ 換掉一支 test-id 而計數不變
+# 時恆綠，於是它答不了 M6（「每一支測試都至少在某條軌上跑過一次」）——缺口在判準的定義域、
+# 不在量測，所以上 Windows 真機重量也一樣答不了。本面把落款換成 **skip 的 test-id 集合**、
+# 判準換成集合關係 `skip(A) ⊆ run(B) ∪ 合法平台專屬集合`（`run(B)`＝「B 的落款裡沒有它」；
+# 移項即 `skip(A) ∩ skip(B) − 豁免 = ∅`）。完整 WHY／門檻／誠實劃界的 SSOT＝M6 判準表
+# `docs/06_quality/CrossPlatform_Maturity_Criteria.md`，本檔不複寫。
+#
+# 三態而不是布林（同 `skip_group_policy.declared_skipped` 回 `None` 的既有紀律）：缺互補
+# 落款時是**不可求值**，它與通過在型別上就必須分得開——fail-open 的表徵與修好完全相同。
+M6_OK, M6_VIOLATION, M6_UNEVALUABLE = "ok", "violation", "unevaluable"
+
+#: 落款的家。刻意住 `docs/` 而非 `tools/`：它是**史料**（每平台各自落款、由 diff 稽核）
+#: 不是判準；把數十行資料塞進護欄層是拿判準的行數額度養資料。
+SKIP_ID_LEDGER = Path(__file__).resolve().parents[2] / "docs" / "06_quality" / "skip_id_ledger.json"
+
+#: 合法「平台專屬」豁免（id → 為什麼世界上沒有一台機器該跑它）。**今天 0 筆**：現行 44 支
+#: `[WINDOWS-NATIVE-ONLY]` 在真 Windows 上跑得到 ⇒ 它們的著落是落款而不是豁免。每加一筆
+#: 都等於宣稱「這支測試永遠不會被執行」，那是缺陷不是豁免，故門檻刻意訂得很高。
+_M6_EXEMPT: dict[str, str] = {}
+
+
+def load_skip_id_ledger(path: Path | None = None) -> dict[str, object]:
+    """讀落款。檔不存在回 `{}`（一個剖面都沒落款 ⇒ 上層一律走「不可求值」那一支）。"""
+    target = path or SKIP_ID_LEDGER
+    return json.loads(target.read_text(encoding="utf-8")) if target.exists() else {}
+
+
+def ledger_ids(ledger: Mapping[str, object], profile: str) -> set[str] | None:
+    """某剖面落款的 skip id 集合；**沒落款／格式壞掉回 `None` 而不是 `set()`**——空集合的
+    語意是「這個剖面一支都沒 skip」（最健康），與「沒人量過」正好相反。"""
+    entry = ledger.get(profile)
+    ids = entry.get("skipped") if isinstance(entry, Mapping) else None
+    return set(ids) if isinstance(ids, list) else None
+
+
+# 純函式：M6 的集合關係判準，回 `(三態, 訊息)`；只有 `M6_OK` 是通過。三向各帶方括號標籤
+# 讓注入測試斷言「紅的是對的那一款」：①`[漂移]` live 集合 ≠ 本剖面落款集合（**計數相等時
+# 照樣說話**＝集合粒度取代計數粒度的理由，且不需要另一個平台就能求值）②`[落款過時]` 互補
+# 落款裡有 id 的模組已不在樹上（同一棵樹的落款可從**任一**平台驗證，這是 mac 上唯一抓得到
+# Windows 落款腐化的一向）③`[全世界沒跑過]` 交集非空 ⇒ M6 本體被破壞。① 先於 ③：落款與
+# 磁碟不符時 ③ 的兩個輸入都不可信（同 `skip_measurement_problems` 對「量測塌掉」的排序）。
+def m6_id_set_problems(
+    profile: str, live_ids: Sequence[str], counterparts: Sequence[str],
+    ledger: Mapping[str, object], *, tests_dir: Path,
+    exempt: Mapping[str, str] = _M6_EXEMPT,
+) -> tuple[str, list[str]]:
+    live, problems, blocked = set(live_ids), [], []
+    own = ledger_ids(ledger, profile)
+    if own is None:
+        blocked.append(f"[未落款] `{profile}` 還沒有 id 落款 ⇒ 它的 skip 集合無從對帳。"
+                       "取得＝把下面那份可貼落款填進落款檔")
+    elif own != live:
+        problems.append(
+            f"[漂移] `{profile}` live 集合 ≠ 落款集合（計數 {len(live)} vs {len(own)}）："
+            f"落款缺 {sorted(live - own)}／落款多 {sorted(own - live)}——🔴 **兩邊計數相等時"
+            "這一向照樣說話**，那正是集合粒度取代計數粒度的理由。合法出口：確認差異是預期的"
+            "（新增／改名測試）後把可貼落款重釘進落款檔")
+    tree = profile.split("@", 1)[0]
+    for counterpart in counterparts:
+        other = ledger_ids(ledger, counterpart)
+        if other is None:
+            blocked.append(
+                f"[缺互補落款] `{counterpart}` 沒有 id 落款 ⇒ M6 對 `{profile}` **不可求值**"
+                "（這不是通過）：取得＝在那個剖面上跑一次同一支 runner，把它印出的可貼落款"
+                f"填進 {SKIP_ID_LEDGER.name} 的同名鍵")
+            continue
+        if counterpart.split("@", 1)[0] == tree:
+            stale = sorted(i for i in other
+                           if not (tests_dir / f"{i.split('.')[0]}.py").is_file())
+            if stale:
+                problems.append(f"[落款過時] `{counterpart}` 的落款有 {len(stale)} 支 id 的"
+                                f"模組已不在樹上：{stale}——那批 id 永遠對不上任何測試，"
+                                "③ 的交集因此低報")
+        nowhere = sorted((live & other) - set(exempt))
+        if nowhere:
+            problems.append(
+                f"[全世界沒跑過] {len(nowhere)} 支在 `{profile}` 與 `{counterpart}` **都** "
+                f"skip：{nowhere}——M6 的本體是 skip(A) ⊆ run(B) ∪ 合法平台專屬集合，這幾支"
+                "落在差集裡 ⇒ 沒有任何機械證據顯示它們在世界上任何一處跑過")
+    if problems:
+        return M6_VIOLATION, problems + blocked
+    return (M6_UNEVALUABLE, blocked) if blocked else (M6_OK, [])
+
+
+def report_m6_id_sets(
+    profile: str, result: unittest.TestResult, counterparts: Sequence[str],
+    *, tests_dir: Path, path: Path | None = None,
+) -> int:
+    """印 M6 三態並回 rc（只有 `M6_VIOLATION` 回 1）。
+
+    🔴 「不可求值」刻意回 0：擋下一個**結構上不可能在本平台補齊**的條件就是把守衛變成常紅，
+    而本 repo 判過「擋到讓人無法工作的守衛會被整個關掉」。它與通過的區別落在三態值與措辭
+    （逐字「這不是通過」），不在 rc ⇒ 判準的消費面是 `m6_id_set_problems` 的回傳值。
+    """
+    live = sorted(test_id for test_id, _ in all_skips(result))
+    status, messages = m6_id_set_problems(
+        profile, live, counterparts, load_skip_id_ledger(path), tests_dir=tests_dir)
+    label = {M6_OK: "✅ 集合關係成立", M6_VIOLATION: "❌ 集合關係被破壞",
+             M6_UNEVALUABLE: "⚠️  不可求值（**不是**通過）"}[status]
+    stream = sys.stderr if status == M6_VIOLATION else sys.stdout
+    print(f"[M6 id 集合] {profile}：{label}（本次 skip {len(live)} 支）", file=stream)
+    for message in messages:
+        print(f"   - {message}", file=stream)
+    if status != M6_OK:
+        print(f"   本剖面可貼落款（填進 {SKIP_ID_LEDGER}）：\n" + json.dumps(
+            {profile: {"measured-at": datetime.now(UTC).isoformat(
+                timespec="seconds"), "skipped": live}}, ensure_ascii=False, indent=2),
+            file=stream)
+    return 1 if status == M6_VIOLATION else 0

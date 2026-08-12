@@ -80,8 +80,18 @@ try:
 except Exception:  # noqa: BLE001 — 見上
     schedule_backend = None  # type: ignore[assignment]
 
+# 落款目錄的 SSOT。🔴 **持久目錄**（`~/.autosdd/traces`）而不是 `$TMPDIR`：R84／ZT-03 判過
+# 系統暫存重開機即消失，而「事後查不到」不等於「沒發生」。跨窗攤提的換算比只能從**歷時**
+# 差分推估 ⇒ 落款一蒸發，這條軸就永遠只有 0 個樣本、永遠走保守側。
+# 刻意**沒有** try/except（同 `quota_limits` 那一行的判準）：它是一個純粹的路徑 SSOT，
+# 自己就已經把「拿不到家目錄／目錄唯讀」退化成 `$TMPDIR`（見該檔 `trace_dir()`），
+# 給它第二層 fallback 等於讓同一份退化知識有兩個家，而那正是本 repo 反覆判過的形態。
+import endurance_env  # noqa: E402
+
 # 判讀原語。**刻意沒有 try/except**：能力提供者可以降級，判讀原語不行——給它
 # fallback stub 等於讓同一份字面有第二個家，而且會用錯的答案靜默通過。
+import pace_contract  # noqa: E402  # R86：配速檔案契約的寫入端（引擎側唯一的傳遞方式）
+import quota_pace  # noqa: E402  # R86：窗長／燃燒率／跨窗攤提（同樣是判讀原語）
 import quota_policy  # noqa: E402
 from quota_limits import parse_reset_at, unhandled_limit_event  # noqa: E402
 
@@ -143,6 +153,8 @@ QUOTA_TRACE_NAME = "autosdd_quota_degraded.jsonl"
 DEGRADED_STAMP_PREFIX = "autosdd_quota_degraded_"
 #: 95% 閂鎖的家（同樣 per-account）。
 QUOTA_LATCH_NAME = "autosdd_quota_latch.json"
+#: 跨窗攤提的落款檔名（R86）。住持久目錄，見 `burn_ledger_path()`。
+BURN_LEDGER_NAME = "quota_burn.jsonl"
 
 QUOTA_BRANCH_ARM = "arm"
 QUOTA_BRANCH_NOTIFY = "notify"
@@ -242,6 +254,42 @@ def quota_latch_path() -> Path:
     return Path(tempfile.gettempdir()) / QUOTA_LATCH_NAME
 
 
+def burn_ledger_path() -> Path:
+    """跨窗攤提的落款（**持久目錄**，見檔頭 `endurance_env` 那段；沙箱走該檔的逃生口）。"""
+    return endurance_env.trace_dir() / BURN_LEDGER_NAME
+
+
+# 🔴 為什麼要落款：換算比 r（短窗 pp／長窗 pp）只能從**歷時差分**推估，而快取只存最新一
+# 次 ⇒ 沒有落款就結構上沒有樣本。R86 實測今天三個時刻（21:24／22:16／22:29）的兩軸讀數
+# 給出 r 的量級 6~15，而它們全部只活在對話裡——這一支就是把那種觀測變成可累積的資料。
+# 同一個 `measured_at` 只寫一次：`--pace` 可能在同一份快取上被連呼數次。
+# 失敗一律吞掉：落款是**取數的副產品**，不得讓 `--pace` 掛掉（同 `note_degraded` 的紀律）。
+def record_burn(state: quota_policy.QuotaState, live: int = 0) -> bool:
+    """把這一次的逐軸讀數 append 一列。回傳「有沒有真的寫」。"""
+    if not state.usable() or not state.measured_at:
+        return False
+    try:
+        path = burn_ledger_path()   # `trace_dir()` 自己 mkdir 過了，這裡不重複一份
+        if path.exists() and state.measured_at in path.read_text(encoding="utf-8"):
+            return False
+        with path.open("a", encoding="utf-8") as handle:
+            handle.write(quota_pace.row_of(
+                state.measured_at, [(a.kind, a.pct) for a in state.axes], live))
+    except OSError:
+        return False
+    return True
+
+
+def burn_ratio() -> tuple:
+    """`(r|None, note)`：由落款＋外部校準先驗推估換算比。樣本不足**說出來**。"""
+    try:
+        text = burn_ledger_path().read_text(encoding="utf-8")
+    except OSError:
+        text = ""
+    return quota_pace.estimate_ratio(
+        quota_pace.rows_from_jsonl(text) + list(quota_pace.SEED_OBSERVATIONS))
+
+
 def _aware(raw: object) -> datetime | None:
     """ISO 字串 → aware datetime；解不出來回 `None`。"""
     # 🔴 aware 是硬要求（R80 判準「naive 本地時間戳不得被持久化」）：naive 相減跨 DST
@@ -253,9 +301,13 @@ def _aware(raw: object) -> datetime | None:
     return moment if moment.tzinfo is not None else None
 
 
-def _blank(source: str) -> quota_policy.QuotaState:
+# 🔴 R86（Dev 包挖出、本檔修）：`source` 與 `reason` 現在可以**不同**。`source` 是分類器
+# （降級痕跡的檔名、測試的相等鎖都吃它，必須是穩定的短字面），`reason` 是給人看的那一句。
+# 病：畫面印「量不到任何一軸」，而事實是「資料在、只是超過 TTL」——**這兩者要求 operator
+# 做不同的事**（前者去看網路／憑證，後者只要重量一次），而分不出來時人會往錯的方向查。
+def _blank(source: str, reason: str = "") -> quota_policy.QuotaState:
     """量不到的 `QuotaState`：`axes == ()`，而**為什麼**量不到寫在 `source`／`reason`。"""
-    return quota_policy.QuotaState((), "", source, source)
+    return quota_policy.QuotaState((), "", source, reason or source)
 
 
 # 🔴 **逐軸進、逐軸出**（R82／HELM-04）：舊版把 meter 挑好的那一桶投影成頂層
@@ -292,7 +344,11 @@ def read_quota(now: datetime, path: Path | None = None) -> quota_policy.QuotaSta
         # 等速（率完全取決於當下在做什麼），所以「上調一個安全邊際」同樣是猜。
         # ⇒ 降級到「量不到」，而量不到有自己的 cap（`degraded_cap`），不是不設限。
         # 出聲那一半的落點是 `note_degraded()`，由 `quota_gate()` 在該分支呼叫。
-        return _blank("stale-cache")
+        # 🔴 R86：把 age／TTL 兩個數字帶進 `reason`——「量不到」與「量到了但太舊」在畫面上
+        # 此前完全同形，而它們要求 operator 做的事不同（見 `_blank` 上方那段）。
+        return _blank("stale-cache", f"stale-cache（資料在，但已 "
+                      f"{int((now - measured).total_seconds())}s > TTL "
+                      f"{QUOTA_CACHE_TTL_SECONDS}s ⇒ 重量一次即可，不是取數壞掉）")
     return quota_policy.QuotaState(axes, str(data.get("measured_at") or ""), "cache", "ok")
 
 
@@ -669,14 +725,28 @@ def pace_line(decision: quota_policy.Decision) -> str:
     return head + f"｜最緊的一條＝{axis.kind} {axis.pct:g}% {when}"
 
 
+# 🔴 R86：多出的第三行是**攤提**（掌舵者不滿的直接原因）。他看到「短窗 16% used／45 分鐘
+# 就 reset」卻只能派 2 個，而畫面只寫 `binding=seven_day` ⇒ 讀起來像程式抓錯或過度保守。
+# 那一行現在自己回答「為什麼空著也不能衝」：本窗分攤到的長窗配額是多少、已用多少、
+# 還剩幾分鐘會蒸發。落款則在同一次呼叫裡 append 一列——**查一次就多一個樣本**，
+# 而換算比只能從歷時差分來（見 `record_burn` 上方那段）。
 def pace_report(now: datetime | None = None) -> str:
     """`--pace` 的全文：第一行是那個數字，第二行起是逐軸明細（每個 % 都帶 kind 與分鐘）。"""
     now = now or datetime.now().astimezone()
     policy, problems = quota_policy.load_policy(policy_env())
     state = pace_state(now)
-    decision = quota_policy.decide(state, now, policy)
+    # 🔴 `live` 落款進去是為了**下一輪**：per-agent 燃燒率＝Δpct ÷（Δ分鐘 × 併發數），
+    # 而併發數不記下來就永遠算不出來（本輪的 r 只到「每 pp 換幾 pp」這一層）。
+    record_burn(state, live_dispatches(fanout_ledger_path(), now))
+    ratio, ratio_note = burn_ratio()
+    decision = quota_policy.decide(state, now, policy, ratio, ratio_note)
+    # 🔴 R86 跨包：引擎（`autoclaude/`）**不准** import 本層（`.importlinter` 的
+    # `no-harness-import`）⇒ 唯一的傳遞方式是檔案契約。fail-soft 在 `pace_contract.write`
+    # 內（寫不進去只在 stderr 說一次，`--pace` 的 rc 與那一行輸出都不受影響）。
+    pace_contract.write(decision, state, policy.max_fanout, policy.halt_pct)
     tail = f"\n⚠️ .env 有設錯：{'；'.join(problems)}" if problems else ""
     return (f"{pace_line(decision)}\n  {quota_policy.describe(decision)}\n"
+            f"  {quota_pace.explain(decision.amort)}\n"
             f"  來源={state.source} 量測於={state.measured_at or '(無)'}{tail}\n")
 
 

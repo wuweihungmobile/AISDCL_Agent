@@ -375,6 +375,12 @@ on:
       #    三套既有掃描器同時零訊號。名冊成員中此前未被任何 pattern 涵蓋者即下列 7 份文件。
       - "tools/lib/baseline_origin.py"
       - "tools/lib/defect_ledger_index.py"
+      # R86：本輪新增的四支根層 SSOT（配速攤提／判準本體／pace 契約寫入者／護欄層分桶判準）
+      #      漏列的代價逐字同 DEF-101-042：只改該檔時其回歸鎖不會跑。
+      - "tools/lib/quota_pace.py"
+      - "tools/lib/quota_criteria.py"
+      - "tools/lib/pace_contract.py"
+      - "tools/lib/guard_bucket_policy.py"
       - "AutoClaude/autoclaude/execution/pre_run_validator.py"
       - "AutoClaude/autoclaude/core/ports/observability.py"
       - "AutoClaude/autoclaude/core/ports/rtm_feedback.py"
@@ -630,6 +636,12 @@ on:
       # test_push_and_pr_paths_symmetric 會抓單側漏補）
       - "tools/lib/baseline_origin.py"
       - "tools/lib/defect_ledger_index.py"
+      # R86：本輪新增的四支根層 SSOT（配速攤提／判準本體／pace 契約寫入者／護欄層分桶判準）
+      #      漏列的代價逐字同 DEF-101-042：只改該檔時其回歸鎖不會跑。
+      - "tools/lib/quota_pace.py"
+      - "tools/lib/quota_criteria.py"
+      - "tools/lib/pace_contract.py"
+      - "tools/lib/guard_bucket_policy.py"
       - "AutoClaude/autoclaude/execution/pre_run_validator.py"
       - "AutoClaude/autoclaude/core/ports/observability.py"
       - "AutoClaude/autoclaude/core/ports/rtm_feedback.py"
