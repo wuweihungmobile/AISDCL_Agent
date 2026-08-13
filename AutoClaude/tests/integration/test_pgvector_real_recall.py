@@ -277,7 +277,16 @@ class TestDualAdapterFallback:
                 # 只建 fixture 而讓 `assert True` 留著，正是本 reason 自己點名的假綠形態。
                 # ⇒ 同 test_pgvector_hnsw_recall.py 的兩列：R85 起不接受「再推一輪」，
                 #   承接者必須拿到 PM 決定（保留＋同輪建自動通道／顯式廢止）二擇一。
-                "承接輪次 R87（R86 第 4 次順延，理由見 improving_110 §0）："
+                # 🔴 R88：掌舵者 2026-08-14 拍板「保留並本輪建自動通道」（對照選項為顯式
+                #   廢止）⇒「PM 未拍板 ⇒ 不得改輪號」的封鎖解除，本次改輪號是履行拍板後的
+                #   正常承接。**本檔早已在自動通道內**（`run_local_nightly.ps1` pg-e2e stage
+                #   的 `-m pg_real` 那次呼叫），所以「保留」附帶的建通道義務對本列不適用；
+                #   本列的阻塞從頭到尾就只有解除條件①②那兩項受測資產，與通道無關。
+                # 🔴 **剩餘阻塞是平台綁定的，不是時間綁定的**（掌舵者 2026-08-14 告知）：
+                #   PG17+pgvector staging（≥1k 列真實 BGE-M3 向量）**只有 Windows 11 那台
+                #   環境有** ⇒ 本列只可能在 Windows 11 輪轉綠；mac 輪跑到它一律 skip，
+                #   那是正確結果不是欠工。承接輪號因此是「複審檢查點」而非交付承諾。
+                "承接輪次 R89："
                 "要建的是 AutoClaude/tests/fixtures/dual_adapter_failover.json"
                 "（BGE-M3 故障注入腳本 ＋ Minimax adapter 切換的量測欄位），"
                 "🔴 但**只建 fixture 會把這支從 skip 變成假綠**——本 case 在 fixture 存在時"

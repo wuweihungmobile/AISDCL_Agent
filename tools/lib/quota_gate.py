@@ -72,13 +72,11 @@ try:
 except Exception:  # noqa: BLE001 — 見上
     quota_ledger = None  # type: ignore[assignment]
 
-# 排程**載具**（schtasks／launchd／沒有）唯一的家。本檔只向它問一件事：「怎麼查它真的
-# 排進去了」——見 `evidence_hint()`。同一種 fail-open：不可達時退化成一句不指路的話，
-# 而不是印一個在本平台不存在的指令。
-try:
-    import schedule_backend  # type: ignore[import-not-found]
-except Exception:  # noqa: BLE001 — 見上
-    schedule_backend = None  # type: ignore[assignment]
+# 🔴 R88／LOC-01：排程**載具**的參照隨 `evidence_hint()` 一起搬到 `quota_messages.py`，
+# 本檔**刻意不留**一份 `import schedule_backend`——搬移後它在本檔零使用，留著就是同一份
+# 參照兩個家，而且是**會靜默騙人**的那一種：測試 patch 本檔這一份時，真正被呼叫的是
+# `quota_messages` 那一份 ⇒ 「patch 了卻沒有生效」。這不是假想，本次搬移第一版就是這樣
+# 被兩支既有測試抓到的（`QuotaHaltMessagePointsAtThisPlatformTest` 兩支同時紅）。
 
 # 落款目錄的 SSOT。🔴 **持久目錄**（`~/.autosdd/traces`）而不是 `$TMPDIR`：R84／ZT-03 判過
 # 系統暫存重開機即消失，而「事後查不到」不等於「沒發生」。跨窗攤提的換算比只能從**歷時**
@@ -94,6 +92,26 @@ import pace_contract  # noqa: E402  # R86：配速檔案契約的寫入端（引
 import quota_pace  # noqa: E402  # R86：窗長／燃燒率／跨窗攤提（同樣是判讀原語）
 import quota_policy  # noqa: E402
 from quota_limits import parse_reset_at, unhandled_limit_event  # noqa: E402
+
+# 🔴 R88／LOC-01：**人話面**整族搬到 `quota_messages.py`（立案與射程劃界見該檔檔頭）。
+# 這裡 re-export 是為了讓四個既有消費端與測試沿用 `quota_gate.<name>` 零改動；
+# 方向是單向的（本檔 → quota_messages），反向 import 會造成循環。
+from quota_messages import (  # noqa: E402,F401
+    QUOTA_BRANCH_ARM,
+    QUOTA_BRANCH_ESCALATE,
+    QUOTA_BRANCH_NOTIFY,
+    RESET_ARM_HORIZON_SECONDS,
+    USAGE_URL,
+    _aware,
+    binding_resets_at,
+    evidence_hint,
+    pace_line,
+    quota_halt_message,
+    quota_prepare_message,
+    reset_branch,
+    reset_horizon_phrase,
+    throttle_horizon_line,
+)
 
 # ── 兩道的分工（掌舵者訴求 b 逐字；門檻值本身住 `quota_policy.ENV_SPEC`）─────────
 #   水位偏高 ⇒ 少派 agent：扇出型工具受**滾動視窗派發預算**節制，超出即 `exit 2`（那次
@@ -113,10 +131,6 @@ QUOTA_CACHE_TTL_SECONDS = 180
 #: ——端點 RTT 三次實測 0.33／0.36／0.41 秒，4 秒約 10 倍餘裕；逾時的正確方向是
 #: 「量不到」而不是「慢慢等」，因為這一格**在 hook 的關鍵路徑上**（那是刻意的取捨）。
 QUOTA_SYNC_TIMEOUT_SECONDS = 4
-#: reset 多遠以內才值得「排程等它」。5 小時視窗最遠 5h、週視窗最遠 7 天，中間這個
-#: 缺口大到不需要精確：取 6 小時。方向鎖守的是「七天後才 reset 的線不得被排程」。
-RESET_ARM_HORIZON_SECONDS = 6 * 3600
-
 #: 額度守衛的逃生口。刻意不沿用 hook 的 `AUTOSDD_CONTEXT_GUARD_OFF`／`AUTOSDD_SENTINEL_OFF`：
 #: 三者關掉的是三件不同的事（context 阻斷／續航哨兵／額度節流），共用一個開關會讓「我只是
 #: 想暫時別被擋」順手把另外兩層一起關掉，而那件事沒有人會注意到。
@@ -156,17 +170,10 @@ QUOTA_LATCH_NAME = "autosdd_quota_latch.json"
 #: 跨窗攤提的落款檔名（R86）。住持久目錄，見 `burn_ledger_path()`。
 BURN_LEDGER_NAME = "quota_burn.jsonl"
 
-QUOTA_BRANCH_ARM = "arm"
-QUOTA_BRANCH_NOTIFY = "notify"
-QUOTA_BRANCH_ESCALATE = "escalate"
-
-#: 🔴 誠實劃界（R82／Q2-07 只做了一半）：月度支出上限唯一會回來的路徑，SSOT 在
-#: `tools/lib/quota_escalation.py:USAGE_URL`。本檔**不 import 它**——那支模組在模組層
-#: `import context_budget_guard`，本檔一旦 import 它就會在 hook 起動時把 hook 載入第二次
-#: （見檔頭的單向規則）。所以這個字面今天還有兩個家；把 URL 下沉到一個雙方都能安全
-#: import 的葉子模組（`quota_limits`）是正解，但那支檔不在本包的所有權內，已登記交棒。
-#: 在此之前至少把**本檔內**原有的兩處字面收成一處（`reset_horizon_phrase`）。
-USAGE_URL = "https://claude.ai/settings/usage"
+#: 🔴 R88／LOC-01：分支字面、`USAGE_URL` 與三支期程 helper 一併搬到 `quota_messages.py`
+#: （本檔頂部 re-export）。那支是**不 import 任何 hook 的葉子模組** ⇒ 上一版此處記載的
+#: 「把 URL 下沉到雙方都能安全 import 的葉子模組是正解，但那支檔不在本包所有權內」
+#: 這筆交棒，正解已經存在：`quota_escalation.py` 現在可以改指本檔搬去的那一份。
 
 
 # 🔴 `quota_tier_of(pct)` 與 `fanout_cap(pct)` 的墓碑（R82／HELM-04，**刻意不留
@@ -290,17 +297,6 @@ def burn_ratio() -> tuple:
         quota_pace.rows_from_jsonl(text) + list(quota_pace.SEED_OBSERVATIONS))
 
 
-def _aware(raw: object) -> datetime | None:
-    """ISO 字串 → aware datetime；解不出來回 `None`。"""
-    # 🔴 aware 是硬要求（R80 判準「naive 本地時間戳不得被持久化」）：naive 相減跨 DST
-    # 會靜默差 3600 秒。本機時區不實施 DST ⇒ 這個缺陷在本機結構上重現不了。
-    try:
-        moment = datetime.fromisoformat(str(raw))
-    except (TypeError, ValueError):
-        return None
-    return moment if moment.tzinfo is not None else None
-
-
 # 🔴 R86（Dev 包挖出、本檔修）：`source` 與 `reason` 現在可以**不同**。`source` 是分類器
 # （降級痕跡的檔名、測試的相等鎖都吃它，必須是穩定的短字面），`reason` 是給人看的那一句。
 # 病：畫面印「量不到任何一軸」，而事實是「資料在、只是超過 TTL」——**這兩者要求 operator
@@ -350,20 +346,6 @@ def read_quota(now: datetime, path: Path | None = None) -> quota_policy.QuotaSta
                       f"{int((now - measured).total_seconds())}s > TTL "
                       f"{QUOTA_CACHE_TTL_SECONDS}s ⇒ 重量一次即可，不是取數壞掉）")
     return quota_policy.QuotaState(axes, str(data.get("measured_at") or ""), "cache", "ok")
-
-
-def reset_branch(resets_at: object, now: datetime) -> str:
-    """95% 那道該做什麼：`arm`（排程等它）／`notify`（等沒有意義）／`escalate`（沒有 reset）。"""
-    # 🔴 分支由**資料**決定，不由桶名決定（禁止寫死桶名清單：live payload 當時 17 個
-    # 頂層鍵，`claude.exe` 內嵌名單只有 8 個 ⇒ schema 正在長）。三條線的差別本來就是
-    # 「reset 有多遠」：five_hour ≤5h、weekly 最長 7 天、spend **根本沒有 reset**。
-    # 這一條是設計洞不是細節：把「95% ⇒ 排程等 reset」寫成無條件，會在週額度上排一支
-    # 七天後才響的工作，而痕跡全綠——那與 R59 事故同形。
-    moment = _aware(resets_at)
-    if moment is None:
-        return QUOTA_BRANCH_ESCALATE
-    delta = (moment - now).total_seconds()
-    return QUOTA_BRANCH_NOTIFY if delta > RESET_ARM_HORIZON_SECONDS else QUOTA_BRANCH_ARM
 
 
 # 🔴 為什麼是「滾動視窗的派發率」而不是「in-flight 併發數」（SD-B1 的正面答覆）：
@@ -535,16 +517,6 @@ def quota_floor_reading(payload: dict, now: datetime) -> quota_policy.QuotaState
         now.isoformat(timespec="seconds"), "transcript-floor", "transcript-floor")
 
 
-# 🔴 `reset_branch()` 唯一合法的輸入＝**產生 min 的那一軸**的 `resets_at`。此前餵的是
-# `worst()` 挑出來的那一桶（pct 數值最大、與期程無關），於是「session 96%、10 分鐘後
-# reset」很可能被 weekly 那一桶的 `resets_at` 蓋掉，分支就從 `arm`（排程等它）翻成
-# `notify`（等沒有意義）——排程動作與訊息一起錯，而痕跡全綠。
-# 回歸鎖：`test_context_budget_guard.py::QuotaDecisionEntryIsSingleTest`。
-def binding_resets_at(decision: quota_policy.Decision) -> object:
-    """產生 min 的那一軸的 `resets_at`；量不到（`binding is None`）時回 `None`。"""
-    return decision.binding.resets_at if decision.binding is not None else None
-
-
 def quota_halt_actions(payload: dict, decision: quota_policy.Decision, now: datetime, *,
                        plan_writer, waker) -> dict:
     """halt 閂鎖那一刻真的做的事。回稽核欄位（給訊息與測試讀）。
@@ -562,115 +534,6 @@ def quota_halt_actions(payload: dict, decision: quota_policy.Decision, now: date
     return {"branch": branch, "plan": plan, "armed": bool(arm.get("armed")),
             "sentinel_off": bool(arm.get("sentinel_off")), "posix": bool(arm.get("posix")),
             "kind": decision.binding.kind if decision.binding is not None else ""}
-
-
-# 🔴 R83／F2-② 立案（缺陷本體）：halt／armed 那一支原本硬寫「憑證是 `NextRunTime` 這個
-# **值**」＋ 一行 `Get-ScheduledTask …`。R83 把 mac 接上 launchd 之後那條路在 mac 上**走得
-# 到**（`posix` 由 `has_carrier()` 決定 ⇒ mac 是 False），於是 mac 使用者會拿到：武裝是真的、
-# 憑證是真的、**指路是假的**——那個 cmdlet 在 mac 不存在，而 `NextRunTime` 這個概念 launchd
-# 從不提供（`launchctl print` 輸出裡 next／fire／due 皆不存在，R83 實測）。同型判例：
-# 「憑證裡混一句假話，比沒有那一欄更難看見」（`schedule_backend._readback` 的 depth-1 訂正）。
-# 順帶收掉一個字面複本：`AutoSDD_Sentinel_*` 這個前綴此前在本檔有一份，而它的家在
-# `tools/lib/sentinel_lifecycle.TASK_PREFIX`。
-def evidence_hint() -> str:
-    """「怎麼查它真的排進去了」——唯一的家＝本機那個排程後端。"""
-    return (schedule_backend.select().evidence_hint() if schedule_backend is not None
-            else "排程載具不可達（import 失敗）⇒ 本工具**說不出**取證指令；"
-                 "在拿到憑證之前不要把它當成已排程。")
-
-
-def reset_horizon_phrase(branch: str, resets_at: object) -> str:
-    """三支分支各自的「這條線的 reset 有多遠」——**唯一的家**（R82／Q2-07 的減法那一半）。
-
-    🔴 halt 與 throttle 此前各自寫了一份幾乎逐字相同的三分支句子（含兩處硬寫的 URL），
-    而既有鎖只認「沒有 reset 可以等」這個字樣、不認結構 ⇒ 兩份漂移不會有任何東西轉紅。
-    收成一份之後，兩支呼叫端各自只補**自己的動作句**（halt＝排程是錯的動作、
-    throttle＝這道節流不會自己解除），三支分支的字串仍**彼此不同**——那條不變式
-    （否則「不排程」與「排不了」外觀相同）是被保留的，不是被參數化掉的。
-    """
-    if branch == QUOTA_BRANCH_ESCALATE:
-        return f"**沒有 reset 可以等**（例：月度支出上限）；只有人去提額：{USAGE_URL}"
-    hours = RESET_ARM_HORIZON_SECONDS // 3600
-    if branch == QUOTA_BRANCH_NOTIFY:
-        return f"reset 在 {resets_at}（**遠超 {hours} 小時**）"
-    return f"reset 在 {resets_at}（{hours} 小時內）"
-
-
-# 🔴 **開頭不再印裸百分比**（R82／M7）：舊版第一行是「額度水位 54%（≥95%…）」，而裸的
-# 「54%」正是掌舵者當場誤讀的**那個**形狀——那個數字沒有說自己是哪一桶、什麼時候 reset。
-# 改由 `quota_policy.describe()` 逐軸渲染，每一個 % 都自帶 `kind=` 與剩餘分鐘（或明文
-# 「reset 距離不明」），而且**每一軸都說**，不是只說最緊的那一格。
-def quota_halt_message(decision: quota_policy.Decision, act: dict) -> str:
-    """halt 的一次性訊息。三支分支**字串必須不同**，否則「不排程」與「排不了」外觀相同。"""
-    head = (f"🔴 額度到達**停止**水位（最緊的一條＝{act['kind'] or '未知'}）⇒ **停止派發**："
-            "扇出型工具一律不執行；收斂（讀檔／寫檔／跑 git）不受影響。\n"
-            f"   {quota_policy.describe(decision)}\n"
-            f"   任務書：{act['plan'] or '（寫不出來——逐字稿路徑不可得）'}\n")
-    horizon = reset_horizon_phrase(act["branch"], binding_resets_at(decision))
-    if act["posix"]:
-        # 🔴 SA-B7：沒有排程載具的平台若沿用 weekly 那支「不排程」的靜默路徑，
-        # 「不排程」與「排不了」會長得一模一樣。
-        # 🔴 R83／F2-② 訂正本句的平台清單（原文寫「schtasks 只在 Windows 成立…mac/Linux
-        # 請自行以 launchd／cron 掛」——R83 已把 mac 接上 launchd ⇒ `posix` 這個鍵在 mac
-        # 上是 False，這一支**走不到** mac；把 mac 寫在這裡是拿過期事實當指引）。
-        return head + ("   ⚠️ 本平台**沒有排程載具**（Windows 走 schtasks、macOS 走 "
-                       "launchd，本平台兩者皆無）⇒ 已寫任務書，但**沒有武裝任何喚醒**。"
-                       "請自行以 cron／systemd-timer 掛，或留在這裡等人回來。\n")
-    if act["branch"] == QUOTA_BRANCH_ARM and act["armed"]:
-        return head + f"   ✅ 已武裝喚醒（{horizon}）。{evidence_hint()}\n"
-    if act["branch"] == QUOTA_BRANCH_ARM:
-        return head + ("   ⚠️ 這一條的 reset 近在眼前、本來該武裝喚醒，但**這次沒有武裝**："
-                       + ("哨兵逃生口有設（AUTOSDD_SENTINEL_OFF）。\n" if act["sentinel_off"]
-                          else "拿不到逐字稿路徑 ⇒ 沒有可以掛的任務書。\n"))
-    if act["branch"] == QUOTA_BRANCH_NOTIFY:
-        return head + (f"   🔴 這一條的 {horizon} ⇒ 「等」幾乎沒有意義，"
-                       "本次**刻意不排程**（排一支七天後才響的工作而痕跡全綠＝R59 事故同形）。"
-                       "改做不吃額度的工作，或降扇出／切小模型。\n")
-    return head + (f"   🔴 這一條{horizon} ⇒ 排程是錯的動作，"
-                   "只有人去提額才會回來。\n")
-
-
-# halt 帶用 `reset_branch()` 分得出 arm／notify／escalate，**throttle 帶此前完全不分**
-# ⇒ 週額度偏高時 cap 會連續套用好幾天，與 five_hour 同水位（最多 5 小時）代價差一個
-# 數量級，而訊息裡讀不出差別。
-# 🔴 R82 訂正本段的舊結語（原文寫「本行只把差別說出來，**不動 cap 的階梯**，因為按 reset
-# 距離分檔是政策決定」——那句話已被裁決推翻，故不留著當現行說法）：cap 現在**本來就**是
-# `f(pct, horizon)` 的函式，reset 距離已經進了階梯本身；本行說的是同一件事的人話面，
-# 兩者同源於 `quota_policy`，不是兩個判準。
-def throttle_horizon_line(decision: quota_policy.Decision, now: datetime) -> str:
-    """節流帶要說出「這道限制會套多久」。"""
-    resets_at = binding_resets_at(decision)
-    branch = reset_branch(resets_at, now)
-    horizon = reset_horizon_phrase(branch, resets_at)
-    if branch == QUOTA_BRANCH_ESCALATE:
-        return f"   ⏳ 這一條{horizon} ⇒ 這道節流不會自己解除。\n"
-    if branch == QUOTA_BRANCH_NOTIFY:
-        return (f"   ⏳ 這一條的 {horizon} ⇒ 這道節流會**連續套用好幾天**，不是等一下"
-                "就好。改做不吃額度的工作，或降扇出／切小模型。\n")
-    return f"   ⏳ 這一條的 {horizon} ⇒ 這道節流很快就會自己解除。\n"
-
-
-# ── 6C：85~95%「準備下一次 reset」那一帶真的要做的事（R84／SA-03）────────────────
-# 🔴 立案（SA 合成 86% 快取走真閘實測，逐字）：`event=PostToolUse tool=Read rc=0
-# stderr_bytes=0 plan_writer_calls=0`；`event=PreToolUse tool=Read rc=0 stderr_bytes=0`。
-# 對照 96%：`PostToolUse rc=2 stderr_bytes=569 plan_writer_calls=1`。
-# 也就是說 prepare 帶今天唯一真的會發生的事，是 PreToolUse×`Workflow` 被擋
-# （`UNBOUNDED_FANOUT_TOOLS` 實測只有這一個成員）；`Task`／`Agent`／`Read` 在 86% 全部
-# 靜默放行，訴求 6C 要的「提前準備下一次 reset」**一份任務書都沒有**，而外觀與「額度
-# 很健康」完全相同。R83 交棒書把射程記成只有 PostToolUse，實測是兩個事件都靜默。
-# 🔴 為什麼**不**在這一帶回 2：85% 不是停止水位，擋下收斂型工作會讓人連收斂都做不完
-#   （本 repo 判過「擋到讓人無法工作的守衛會被整個關掉」）。這一帶要的是**出聲＋留下
-#   可重啟點**，節流本身仍由既有的 cap／派發帳承接（prepare 帶 cap=2 已經在擋 Workflow）。
-# 🔴 一個 reset 視窗只做一次：沿用 halt 那套閂鎖鍵（`kind@reset 截到分鐘`），否則 85%
-#   之後每一次 Read／Bash 都會 spawn 一支 planner ＝ spawn 風暴（R83／D2 的同一個病）。
-def quota_prepare_message(decision: quota_policy.Decision, plan: str, now: datetime) -> str:
-    """prepare 帶那一次性的訊息。**不擋任何東西**，只說話 ＋ 指向已落磁碟的任務書。"""
-    return (f"🟡 額度進入**準備**水位（85~95%）⇒ 現在就收斂，別開新戰場。\n"
-            f"   {quota_policy.describe(decision)}\n"
-            f"   可重啟點任務書：{plan or '（寫不出來——逐字稿路徑不可得）'}\n"
-            + throttle_horizon_line(decision, now)
-            + "   下一步：把手上的工作收到可重啟點（工作樹狀態確定／任務書落磁碟），"
-              "現查還能派幾個：`python tools/session_resume_planner.py --pace`。\n")
 
 
 def quota_prepare_actions(payload: dict, decision: quota_policy.Decision, now: datetime, *,
@@ -707,22 +570,6 @@ def pace_state(now: datetime) -> quota_policy.QuotaState:
     if reading is not None:
         quota_meter.write_cache(reading, quota_cache_path())
     return read_quota(datetime.now().astimezone())
-
-
-# 🔴 binding 一律具名（SA-06）：此前它恆是資訊量最低的那一軸（cap 平手時期程不明的軸
-# 必勝，實測 live 快取 `binding=nimbus_quill`＝0%、reset 不明、完全不消耗），於是真正的
-# 約束（weekly 那一族）在訊息裡不具名。`_binding_key` 已同輪修好，這裡只負責呈現。
-def pace_line(decision: quota_policy.Decision) -> str:
-    """**一行**：能派幾個／cap／band／距 reset／binding 是哪一軸（SA-02 要的五項）。"""
-    head = (f"現在可派 {decision.recommended_fanout} 個 agent（硬上限 cap="
-            f"{'不設限' if decision.cap is None else decision.cap}）"
-            f"｜band={decision.band}")
-    axis = decision.binding
-    if axis is None:
-        return head + "｜**量不到任何一軸**（這不是「額度很寬鬆」）"
-    when = next((f"剩 {int(r.minutes)} 分鐘" for r in decision.per_axis
-                 if r.axis is axis and r.minutes is not None), "reset 距離不明")
-    return head + f"｜最緊的一條＝{axis.kind} {axis.pct:g}% {when}"
 
 
 # 🔴 R86：多出的第三行是**攤提**（掌舵者不滿的直接原因）。他看到「短窗 16% used／45 分鐘

@@ -60,6 +60,7 @@ import context_budget_guard as guard  # noqa: E402
 sys.path.insert(0, str(_REPO_ROOT / "tools" / "lib"))
 import quota_criteria  # noqa: E402  # R86：判準本體的家（本檔只做斷言）
 import quota_gate as qg  # noqa: E402
+import quota_messages as qm  # noqa: E402  # R88／LOC-01：人話面與載具參照的家
 import quota_meter  # noqa: E402  # R82／HELM-02：`NO_WINDOW` 相等鎖的另一端
 import quota_policy  # noqa: E402  # R82：門檻／階梯的唯一的家，本檔不再持有任何數字
 import schedule_backend as sb  # noqa: E402  # R83：取證指引的家（見 halt 訊息接線鎖）
@@ -3500,9 +3501,11 @@ class QuotaHaltMessagePointsAtThisPlatformTest(unittest.TestCase):
     def _armed_message(self, backend: type) -> str:
         stub = unittest.mock.Mock()
         stub.select.return_value = backend()
-        old = qg.schedule_backend
-        qg.schedule_backend = stub
-        self.addCleanup(setattr, qg, "schedule_backend", old)
+        # 🔴 R88／LOC-01：patch 位址隨結構移到 `quota_messages`（載具參照的**唯一**的家）。
+        # 意圖一字未改：每個載具給出自己的取證指令、不得印另一個平台的。
+        old = qm.schedule_backend
+        qm.schedule_backend = stub
+        self.addCleanup(setattr, qm, "schedule_backend", old)
         return qg.quota_halt_message(
             _decision((("session", 96.0, 600.0),)),
             {"plan": "P", "kind": "session", "branch": qg.QUOTA_BRANCH_ARM,
@@ -3534,9 +3537,9 @@ class QuotaHaltMessagePointsAtThisPlatformTest(unittest.TestCase):
         fail-open 的方向必須是「少說一句話」而不是「說一句本平台不存在的話」——後者
         與這個缺陷同型（憑證真、指路假），只是成因換成 import 失敗。
         """
-        old = qg.schedule_backend
-        qg.schedule_backend = None
-        self.addCleanup(setattr, qg, "schedule_backend", old)
+        old = qm.schedule_backend
+        qm.schedule_backend = None
+        self.addCleanup(setattr, qm, "schedule_backend", old)
         hint = qg.evidence_hint()
         for command in ("Get-ScheduledTask", "launchctl", "schtasks"):
             self.assertNotIn(command, hint)

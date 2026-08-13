@@ -328,7 +328,7 @@ powershell -ExecutionPolicy Bypass -File scripts\ci-gate.ps1   # 偵測到 Git B
 >   `AISDLC_SDD/scripts/tests/`、`AutoClaude/tests/`）的 `*.py` 內容。理論上「生產碼變動改變
 >   `parametrize` 來源」也能改變計數，該面**不在指紋內**；docker daemon 可用性、平台差異亦然
 >   （見下方容差訂正段）。故它是 stale 的**充分觸發器、非必要條件**——會漏、不會冤。
-> <!-- snapshot-fingerprints-darwin: v001=8ffe3c3dabbd v030=59a99343a6b9 scripts=90effa5613bf autoclaude=2ed393181552 measured-at=2026-08-13 host=Darwin-25.5.0-arm64 docker=up pgextras=absent interpreter=venv-clean/bin@3.11.15 sdk-extra=absent baseline-origin=self-recorded ／ 由 `python tools/sync_onboarding_baselines.py --write --with-slow` 在 macOS 上維護，勿手改；刪除本標記會讓 --check-snapshot fail-loud -->
+> <!-- snapshot-fingerprints-darwin: v001=8ffe3c3dabbd v030=59a99343a6b9 scripts=90effa5613bf autoclaude=ec4bf357f6a7 measured-at=2026-08-14 host=Darwin-25.5.0-arm64 docker=up pgextras=absent interpreter=venv-clean/bin@3.11.15 sdk-extra=absent baseline-origin=self-recorded ／ 由 `python tools/sync_onboarding_baselines.py --write --with-slow` 在 macOS 上維護，勿手改；刪除本標記會讓 --check-snapshot fail-loud -->
 > <!-- snapshot-fingerprints-win32: v001=8ffe3c3dabbd v030=59a99343a6b9 scripts=3a849798a422 autoclaude=a46066b1baba measured-at=2026-08-09 host=Windows-10-AMD64 docker=up pgextras=absent interpreter=venv-clean-r82/Scripts@3.11.9 sdk-extra=absent baseline-origin=self-recorded ／ 同上，由 Windows 側維護。🔴 該 origin 值的語意以 `tools/lib/baseline_origin.py::ORIGIN_SELF` 為準（本行不另寫一份定義）＝**本欄四格是在同一台 Windows 真機上一次量完、env 欄位在當時的定義下齊全**。🔴 兩條錨的後兩欄現值是 `tools/lib/baseline_origin.py::PRE_FIELD`＝**本錨早於那一欄**（不是「不可考」，也**不得**手填一個猜的值——那會把今天的環境寫在昨天的數字旁邊）；下一次在該平台跑 `--write --with-slow` 就會自動被真值取代 -->
 >
 > 🔴 **Windows 欄 provenance 沿革（史料段，非現況；R74 訂正）**：本段標題與內文自 R67 起逐字寫著

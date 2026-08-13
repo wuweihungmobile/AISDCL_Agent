@@ -254,6 +254,7 @@ on:
       # useMacWin.md／docs/AISDLC_Agent_UserGuide.md 三份**文件**列入的理由同構（盲區 H）。
       - "tools/lib/ledger_rotation.py"
       - "tools/lib/quota_gate.py"
+      - "tools/lib/quota_messages.py"
       - "tools/lib/quota_policy.py"
       - "tools/lib/secret_scan.py"
       - "tools/lib/sentinel_lifecycle.py"
@@ -565,6 +566,7 @@ on:
       # useMacWin.md／docs/AISDLC_Agent_UserGuide.md 三份**文件**列入的理由同構（盲區 H）。
       - "tools/lib/ledger_rotation.py"
       - "tools/lib/quota_gate.py"
+      - "tools/lib/quota_messages.py"
       - "tools/lib/quota_policy.py"
       - "tools/lib/secret_scan.py"
       - "tools/lib/sentinel_lifecycle.py"

@@ -537,3 +537,36 @@ def pytest_terminal_summary(terminalreporter, exitstatus, config):  # noqa: ARG0
             if body:
                 terminalreporter.write_sep("=", headline)
                 terminalreporter.write_line(body)
+
+
+# ─────────────────────────────────────────────────────────────
+# R88／DEF-200-110：引擎測試**不得**讀開發機的真實額度快取
+# ─────────────────────────────────────────────────────────────
+# 立案（本輪實測，非假想）：`tests/helpers/test_fixtures.py::TestMakeService::
+# test_full_run_fail_escalates` 在本機轉紅，斷言 `result.escalated` 實得 False、
+# `reason='halted'`、`peak_token_pct=0.0`。`peak_token_pct` 是 0 ⇒ **不是** context 水位
+# 造成的 halt。真因：`FileQuotaMeterAdapter` 的預設路徑是
+# `tempfile.gettempdir()/autosdd_quota.json`，那正是**護欄層寫的活體快取**；當回合該檔
+# 內容逐字為 `extra_usage 100.0 / spend 100.0`（月度支出上限撞頂，沒有 reset 可以等），
+# 而 `read_worst_pct()` 取的就是水位最高那一軸 ⇒ TokenGuard 每一步都 HALT。
+#
+# 🔴 這是**測試不密封**，不是引擎判錯：production 端「額度 100% ⇒ halt」是設計行為。
+# 病在於一支驗證「評估失敗 + max_retries=0 ⇒ escalated」的測試，其結果被開發者帳號的
+# 計費狀態決定——帳號健康時綠、撞上限時紅，而失敗訊息（`assert False`）一個字都不會提到
+# 額度。這與本 repo 反覆判過的形態同型：**失效的表徵與被測邏輯無關**。
+#
+# 🔴 射程刻意收在「預設路徑」這一格：顯式傳入 `path=` 的測試（例如契約測試自己造一份
+# 快取去驗解析）完全不受影響，因為那些測試的受測對象**就是**讀取行為本身。改
+# `tempfile.gettempdir` 會波及同一個行程裡所有用到暫存目錄的東西（那是全域副作用），
+# 故只換這一個類別的預設值。
+@pytest.fixture(autouse=True)
+def _hermetic_quota_cache(monkeypatch, tmp_path_factory):
+    from autoclaude.infra.adapters.file_quota_meter import FileQuotaMeterAdapter
+
+    isolated = tmp_path_factory.mktemp("quota_iso") / "autosdd_quota.json"
+    original = FileQuotaMeterAdapter.__init__
+
+    def _init(self, path=None, *args, **kwargs):
+        original(self, path if path is not None else str(isolated), *args, **kwargs)
+
+    monkeypatch.setattr(FileQuotaMeterAdapter, "__init__", _init)

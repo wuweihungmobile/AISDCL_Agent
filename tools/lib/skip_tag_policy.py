@@ -472,7 +472,12 @@ _SITE_CLASS_CENSUS: dict[str, dict[str, int]] = {
         "windows-only": 14,
         "posix-only": 10,
         "tool-absence": 36,
-        "runtime-skipTest": 20,
+        # 🔴 R88 重釘 `runtime-skipTest` 20→22（**非放寬**，同上：本表判準是「相等」）。
+        # DEF-200-104 的第三個掃描面（SDD LATEST hook 樹的 console-spawn 判準）新增兩支測試，
+        # 兩支皆以函式體內 `self.skipTest("[TOOL-ABSENCE] …")` 對「解不出 LATEST／該樹無
+        # hook」退場——那是「量不到 ≠ 量到合格」的正確形態（解不出來時不得假綠），
+        # 不是隱藏失敗。定位方式同上：對該檔各以 HEAD 版與工作樹版跑 `site_class_counts()` 相減。
+        "runtime-skipTest": 22,
         "unclassified": 0,
     },
     # 🔴 R81 包 F 重釘 `windows-only` 9→10：並行包在

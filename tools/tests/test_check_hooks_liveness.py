@@ -2966,8 +2966,23 @@ _AC_HOOK_DIR = _REPO_ROOT / "AutoClaude" / "tools" / "hooks"
 _SPAWN_ATTRS = ("run", "Popen", "call", "check_output", "check_call")
 
 
-def _console_spawn_offenders() -> list[str]:
-    """`AutoClaude/tools/hooks/*.py` 內**會配 console 視窗**的 spawn 站點。
+def _sdd_latest_hook_dir() -> Path | None:
+    """SDD **LATEST** 的 hook 樹（第三個掃描面，R88／DEF-200-104）。
+
+    版號一律現查 SSOT，不寫死：寫死會在下一次 Copy-on-Evolve 之後靜默指向凍結面
+    （＝掃描面塌掉而判準照樣綠），那正是本面要防的失明形態本身。
+    """
+    try:
+        sys.path.insert(0, str(_REPO_ROOT / "tools" / "lib"))
+        from sdd_latest import resolve_latest_root  # type: ignore[import-not-found]
+
+        return resolve_latest_root(_REPO_ROOT / "AISDLC_SDD") / ".claude" / "hooks"
+    except Exception:  # noqa: BLE001 — 解不出來一律降級成 skip，不得假綠
+        return None
+
+
+def _console_spawn_offenders(hook_dir: Path | None = None) -> list[str]:
+    """某一棵 hook 樹內**會配 console 視窗**的 spawn 站點（預設 `AutoClaude/tools/hooks/`）。
 
     判準只判「argv[0] 不是 `sys.executable`」那些：本目錄的 hook 由 exec form 的
     `pythonw.exe`（GUI 子系統、無 console）啟動，所以 `sys.executable` 本身也是
@@ -2975,7 +2990,7 @@ def _console_spawn_offenders() -> list[str]:
     OS **配一個新 console**。刻意不判 `sys.executable` 那一族＝刻意不製造假紅。
     """
     offenders: list[str] = []
-    for path in sorted(_AC_HOOK_DIR.glob("*.py")):
+    for path in sorted((hook_dir or _AC_HOOK_DIR).glob("*.py")):
         for node in ast.walk(ast.parse(path.read_text(encoding="utf-8"))):
             if not isinstance(node, ast.Call):
                 continue
@@ -3022,6 +3037,42 @@ class TestAutoClaudeHookSpawnsAreConsoleFree(unittest.TestCase):
             and n.func.attr in _SPAWN_ATTRS
         ]
         self.assertTrue(found, "這棵樹一個 subprocess spawn 站點都掃不到 ⇒ 判準空轉")
+
+    def test_the_sdd_latest_hook_tree_is_covered_too(self) -> None:
+        """🔴 R88／DEF-200-104：**第三個掃描面**＝SDD LATEST 的 `.claude/hooks/`。
+
+        立案（R85／P4 提出、R88 修）：前兩個掃描面是 `.claude/hooks/` 與
+        `AutoClaude/tools/hooks/`，而 SDD LATEST 那一棵樹**一個判準都看不到**——當回合
+        AST 實查有 3 個裸 `subprocess.check_output(["git", ...])`（`closure_evidence_
+        verify.py` 1 個、`post_commit_drift.py` 2 個）。它們是真的會跑的：SDD 框架的
+        hook 掛在版本目錄下，以 LATEST 為 cwd 開 session 是常態（同 R84 對
+        `FROZEN_SETTINGS_PREFIX` 下過的判決——把活躍面排除在普查外＝假的安心）。
+
+        🔴 LATEST 走 SSOT 現查（`tools/lib/sdd_latest.resolve_latest_root`），**不寫版號**：
+        寫死版號會在下一次 Copy-on-Evolve 時靜默指向凍結面，而那正是本列要防的失明。
+        """
+        sdd_hooks = _sdd_latest_hook_dir()
+        if sdd_hooks is None or not list(sdd_hooks.glob("*.py")):
+            self.skipTest("[TOOL-ABSENCE] 解不出 SDD LATEST 或該樹無 hook ⇒ 量不到 ≠ 量到合格")
+        self.assertEqual(
+            _console_spawn_offenders(sdd_hooks), [],
+            "SDD LATEST hook 樹有 spawn 站點會在 Windows 配 console 視窗——"
+            "請加 `creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0)`")
+
+    def test_the_sdd_scan_face_is_not_vacuous(self) -> None:
+        """反空轉：SDD 那一面塌成空的話上一格恆綠（同本檔既有慣例）。"""
+        sdd_hooks = _sdd_latest_hook_dir()
+        if sdd_hooks is None:
+            self.skipTest("[TOOL-ABSENCE] 解不出 SDD LATEST")
+        found = [
+            f"{p.name}:{n.lineno}"
+            for p in sorted(sdd_hooks.glob("*.py"))
+            for n in ast.walk(ast.parse(p.read_text(encoding="utf-8")))
+            if isinstance(n, ast.Call) and isinstance(n.func, ast.Attribute)
+            and isinstance(n.func.value, ast.Name) and n.func.value.id == "subprocess"
+            and n.func.attr in _SPAWN_ATTRS
+        ]
+        self.assertTrue(found, "SDD LATEST hook 樹一個 spawn 站點都掃不到 ⇒ 判準空轉")
 
     def test_removing_the_flag_turns_it_red(self) -> None:
         """合成注入（不動磁碟）：同一支判準函式餵一段拔掉 creationflags 的原始碼必紅。"""

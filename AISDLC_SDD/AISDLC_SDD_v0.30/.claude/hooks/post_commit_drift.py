@@ -55,6 +55,10 @@ def _repo_root() -> Path:
             ["git", "rev-parse", "--path-format=absolute", "--git-common-dir"],
             cwd=_PKG_ROOT,
             stderr=subprocess.DEVNULL,
+            # 🔴 R88／DEF-200-104：`creationflags` 非有不可——hook 載具在 Windows 是
+            # `pythonw.exe`（GUI 子系統、無 console），OS 會替這個 child **另配一個新
+            # console 視窗** ⇒ 每次觸發就閃一次。平台中立：POSIX 上 `getattr` 兜底成 0。
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
         )
         s = out.decode().strip()
         if s:
@@ -70,7 +74,12 @@ REPO_ROOT = _repo_root()
 def _current_sha() -> str:
     try:
         out = subprocess.check_output(
-            ["git", "rev-parse", "HEAD"], cwd=REPO_ROOT, stderr=subprocess.DEVNULL
+            ["git", "rev-parse", "HEAD"], cwd=REPO_ROOT,
+            stderr=subprocess.DEVNULL,
+            # 🔴 R88／DEF-200-104：`creationflags` 非有不可——hook 載具在 Windows 是
+            # `pythonw.exe`（GUI 子系統、無 console），OS 會替這個 child **另配一個新
+            # console 視窗** ⇒ 每次觸發就閃一次。平台中立：POSIX 上 `getattr` 兜底成 0。
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
         )
         return out.decode().strip()
     except (subprocess.CalledProcessError, FileNotFoundError):

@@ -727,7 +727,7 @@ _FROZEN_GUARD_LINES: dict[str, int] = {
     "_platform_helpers.py": 549,
     "_ps_engine.py": 115,
     "test_act_local_runner_image.py": 322,
-    "test_adr_xplat001_c1c2_lock.py": 5395,
+    "test_adr_xplat001_c1c2_lock.py": 5401,
     "test_archive_defect_log.py": 3878,
     "test_bash32_compat.py": 946,
     "test_bash_probe_spec_contract.py": 983,
@@ -736,13 +736,13 @@ _FROZEN_GUARD_LINES: dict[str, int] = {
     "test_bootstrap_ps1.py": 160,
     "test_check_defect_log_crossref.py": 3269,
     "test_check_gha_action_versions.py": 295,
-    "test_check_hooks_liveness.py": 3382,
+    "test_check_hooks_liveness.py": 3433,
     "test_check_pytest_baseline_sites.py": 297,
     "test_check_script_parity.py": 2098,
     "test_check_wrapper_thinness.py": 1234,
     "test_claim_provenance_r86.py": 248,
     "test_component_sanitizer_shared_layer_lock.py": 293,
-    "test_context_budget_guard.py": 6382,
+    "test_context_budget_guard.py": 6385,
     "test_defect_id_reference_integrity.py": 261,
     "test_dev_start.py": 7065,
     "test_dev_start_ps1_lastexitcode.py": 548,
@@ -861,6 +861,12 @@ _GUARD_LINES_REPIN_LOG: tuple[tuple[str, int, int, int, str], ...] = (
      ""),
     ("R87", 83470, 83610, 140,
      "[非淨減法輪] 逐檔清單與立案＝CrossPlatform_R87_Guard_Repin_Evidence.md"),
+    ("R88", 83610, 83670, 60,
+     "[非淨減法輪] 單人收斂輪（額度 halt ⇒ 零並行包，重釘由唯一窗口做一次）。"
+     "成長面：test_check_hooks_liveness.py +51（DEF-200-104 的**第三個掃描面**＝SDD LATEST "
+     "hook 樹的 console-spawn 判準＋反空轉＋SSOT 版號解析，該面此前一個觀測者都沒有，"
+     "沒有等量舊判準可退場去換）／test_context_budget_guard.py +3（DEF-200-104 站點修復"
+     "連帶的 patch 位址註解）。逐筆立案＝CrossPlatform_R88_Closure_Evidence.md"),
 )
 
 
@@ -1084,10 +1090,10 @@ _GUARD_LINE_DRIFT_TOLERANCE = 0
 #: 追加當輪不必動指紋（一列寬限），下一輪要再追加就必須先把前一列納入前綴並重釘，
 #: 否則 `[前綴過期]` 轉紅。草稿兩個值都由 `--print-guard-lines` 印出
 #: （ARCH-02 的教訓：紅了卻沒有出路的鎖會被關掉）。
-_REPIN_LOG_FROZEN_PREFIX_LEN = 16
+_REPIN_LOG_FROZEN_PREFIX_LEN = 17
 _REPIN_LOG_MAX_UNFROZEN_TAIL = 1
 _REPIN_LOG_HISTORY_SHA256 = (
-    "0d2107a62afd4d242e1c6349e2c53904982a52c216f09d433f29ce99c054465d")
+    "6e0750bcfa88d31737bfcc074729f52e31117e805868b92b8dd089478097e99e")
 
 
 def repin_log_history_digest(
