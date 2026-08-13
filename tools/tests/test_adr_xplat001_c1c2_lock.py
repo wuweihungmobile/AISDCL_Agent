@@ -727,7 +727,7 @@ _FROZEN_GUARD_LINES: dict[str, int] = {
     "_platform_helpers.py": 549,
     "_ps_engine.py": 115,
     "test_act_local_runner_image.py": 322,
-    "test_adr_xplat001_c1c2_lock.py": 5392,
+    "test_adr_xplat001_c1c2_lock.py": 5395,
     "test_archive_defect_log.py": 3878,
     "test_bash32_compat.py": 946,
     "test_bash_probe_spec_contract.py": 983,
@@ -770,7 +770,7 @@ _FROZEN_GUARD_LINES: dict[str, int] = {
     "test_ps51_compat.py": 621,
     "test_ps_engine_ssot.py": 933,
     "test_python_c_percent_shim.py": 119,
-    "test_quota_policy.py": 1615,
+    "test_quota_policy.py": 1752,
     "test_root_infra_parity.py": 441,
     "test_run_root_unittests.py": 2190,
     "test_sanitize_component_frozen_sdd_versions_lock.py": 375,
@@ -859,6 +859,8 @@ _GUARD_LINES_REPIN_LOG: tuple[tuple[str, int, int, int, str], ...] = (
      "以及「量測面內的減法 ≠ 總量的減法」這條劃界，"
      "逐字見 CrossPlatform_R86_Guard_Repin_Evidence.md 與 CrossPlatform_R86_Scan_Findings.md §F-1。"
      ""),
+    ("R87", 83470, 83610, 140,
+     "[非淨減法輪] 逐檔清單與立案＝CrossPlatform_R87_Guard_Repin_Evidence.md"),
 )
 
 
@@ -919,14 +921,15 @@ _NET_DELTA_ACCOUNTING_SINCE = 81
 _REPIN_NET_CAP_SCHEDULE: tuple[tuple[int, int], ...] = (
     (84, 5400),   # R84：款(10) 上線，取歷來單輪最大淨額（今天零假紅、明天只准更緊）
     (85, 3200),   # R85：兌現款(12) 的到期義務（見下方 `_REPIN_NET_CAP_DUE_*`）
+    (87, 2600),   # R87：到期輪下修。本輪自身淨額遠低於此（事故鎖 ＋ 派工前置檢查兩組）
 )
 #: 生效點＝首列輪號、現行上限＝末列上限，**皆由表導出不另立常數**（R73 判例：一份知識一個家）。
 _REPIN_ROUND_CAP_SINCE = _REPIN_NET_CAP_SCHEDULE[0][0]
 _REPIN_ROUND_NET_CAP = _REPIN_NET_CAP_SCHEDULE[-1][1]
 _REPIN_MAX_CONSECUTIVE_RISING_ROUNDS = 2
-_FROZEN_REPIN_NET_CAP_SCHEDULE = ((84, 5400), (85, 3200))
+_FROZEN_REPIN_NET_CAP_SCHEDULE = ((84, 5400), (85, 3200), (87, 2600))
 _FROZEN_REPIN_ROUND_CAP_SINCE = 84
-_FROZEN_REPIN_ROUND_NET_CAP = 3200
+_FROZEN_REPIN_ROUND_NET_CAP = 2600
 _FROZEN_REPIN_MAX_CONSECUTIVE_RISING_ROUNDS = 2
 
 
@@ -983,8 +986,8 @@ def net_cap_schedule_problems(
 #:
 #: 🔴 **下一段的步伐刻意變小**：5400→3200 一次砍 2200 是因為 5400 取的是史上最寬值；再往下
 #: 就逼近真實輪次大小（現查逐輪淨額的最小正值），步伐不縮就會製造沒有出路的紅（ARCH-02）。
-_REPIN_NET_CAP_DUE_ROUND = 87
-_REPIN_NET_CAP_DUE_TARGET = 2600
+_REPIN_NET_CAP_DUE_ROUND = 89
+_REPIN_NET_CAP_DUE_TARGET = 2000
 
 #: 🔴 R85 收尾單人窗口：款(11)／ADR-XPLAT-002 §8.1 item 15 那條「**必須出現一次淨額 ≤ 0**」
 #: 的**到期輪**。此前它寄生在 `test_the_real_repin_log_stays_inside_the_cost_envelope` 的
@@ -1081,10 +1084,10 @@ _GUARD_LINE_DRIFT_TOLERANCE = 0
 #: 追加當輪不必動指紋（一列寬限），下一輪要再追加就必須先把前一列納入前綴並重釘，
 #: 否則 `[前綴過期]` 轉紅。草稿兩個值都由 `--print-guard-lines` 印出
 #: （ARCH-02 的教訓：紅了卻沒有出路的鎖會被關掉）。
-_REPIN_LOG_FROZEN_PREFIX_LEN = 15
+_REPIN_LOG_FROZEN_PREFIX_LEN = 16
 _REPIN_LOG_MAX_UNFROZEN_TAIL = 1
 _REPIN_LOG_HISTORY_SHA256 = (
-    "18c6bd4a3f6f35f52ee06cc0ecaf8780823b5c1b1f60063546e77d3b76ec2074")
+    "0d2107a62afd4d242e1c6349e2c53904982a52c216f09d433f29ce99c054465d")
 
 
 def repin_log_history_digest(

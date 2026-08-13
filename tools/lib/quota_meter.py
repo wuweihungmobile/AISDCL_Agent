@@ -335,6 +335,22 @@ def normalize_pct(value: object, scale: float) -> float | None:
 # `claude.exe` 內嵌名單只有 8 個 ⇒ schema 正在長，寫死名單的失明是靜默的。
 # 第三條規則（頂層 dict 的 `percent`）是為了把 `spend` 收進來——它沒有 `utilization`
 # 只有 `percent`，而它是「沒有 reset 可以等」的那一條線（見 `reset_branch`）。
+# 🔴 R87 事故墓碑（`DEF-200-R87-spend`）：**不要**因為桶自報 `enabled: false` /
+# `is_enabled: false` 就把它排除在軸之外。R87 舵手這樣做過，代價是 13 個 subagent 全數
+# 撞 `You've hit your monthly spend limit`、燒掉 1,319,703 tokens、零產出。
+#
+# 當時的 payload 逐字：`extra_usage {"is_enabled": false, "monthly_limit": 500,
+# "used_credits": 610.0, "utilization": 100.0, "disabled_reason": "org_level_disabled_until"}`、
+# `spend {"used": 610, "limit": 500, "percent": 100, "severity": "critical", "enabled": false}`。
+# 誤讀＝「池子關著 ⇒ 它不在管制我」；**真意＝`used > limit` 已撞月度支出上限，額外用量
+# 購買功能因此被 org 層停用**。`enabled:false` 是撞頂的**後果**，不是「這一軸不算數」。
+#
+# 反證當時被舵手拿來推翻守衛的兩條「證據」，兩條都不成立：
+#   ① 「主力軸只有 1%」——`session`／`five_hour` 是**訂閱制用量窗**，`spend` 是**月度付費
+#      上限**，不同的池；前者低不蘊含後者沒撞。
+#   ② 「我還能送請求」——主 session 走訂閱額度尚有餘裕，不蘊含 subagent 那條路沒撞牆。
+# 而 hook 當時已逐字印出正確答案：「這一條**沒有 reset 可以等**（例：月度支出上限）；
+# 只有人去提額」。⇒ 這一族撞線時 **halt 是對的**，且**排程是錯的動作**。
 def bucket_readings(payload: object) -> list[dict]:
     """payload 裡每一個看得到水位的桶：`{kind, pct, resets_at, group, via}`。
 
@@ -378,6 +394,68 @@ def bucket_readings(payload: object) -> list[dict]:
 # 幽靈引用比沒有引用更糟：它讓下一個人以為查過了。複審鏡以沙箱注入實測，把 `worst()`
 # 放回本檔、放回 `quota_gate.py`，把 `fanout_cap(pct)` 放回 hook 與 AutoClaude adapter，
 # **五組全部 rc=0 GREEN**——因為當時的斷言只套在 `quota_policy.py` 自己身上。
+
+
+#: credits 池在 payload 裡的兩種表述。**兩個都要看**：`extra_usage` 用 dollars 記
+#: (`used_credits`／`monthly_limit`)，`spend` 用 minor units 記 (`used.amount_minor`／
+#: `limit.amount_minor`) ⇒ **不得跨來源比絕對值**，只比各自的 used/limit 比值。
+CREDIT_POOL_KEYS = ("extra_usage", "spend")
+
+
+def _credit_pool(payload: dict, key: str) -> dict | None:
+    """把一個 credits 表述正規化成 `{enabled, used, limit}`；讀不出來回 `None`。"""
+    val = payload.get(key)
+    if not isinstance(val, dict):
+        return None
+    if key == "extra_usage":
+        used, limit = val.get("used_credits"), val.get("monthly_limit")
+        enabled = val.get("is_enabled")
+    else:
+        used = (val.get("used") or {}).get("amount_minor")
+        limit = (val.get("limit") or {}).get("amount_minor")
+        enabled = val.get("enabled")
+    if not isinstance(used, int | float) or not isinstance(limit, int | float):
+        return None
+    return {"enabled": enabled is True, "used": float(used), "limit": float(limit)}
+
+
+def account_posture(payload: object) -> dict:
+    """**派工前**必須先知道的兩件事：這是什麼帳號、它有沒有**可用的** credits。
+
+    🔴 立案（R87 真實事故 ＋ 掌舵者裁決逐字：「配置 Agents 前，要先知道 Account Type
+    and Account 是否有 Usage credits 再進行配置」）：本輪 13 個 subagent 全數撞
+    `You've hit your monthly spend limit`、燒 1,319,703 tokens、零產出。事故當下
+    **訂閱窗（five_hour）還有 37% 餘裕**，但 credits 池已爆（`used 610 > limit 500`、
+    `severity: critical`）且被 org 層停用（`disabled_reason: org_level_disabled_until`）
+    ⇒ **扇出全滅，而主 session 照常運作**。
+
+    ⇒ 本函式把 credits 從「另一條節流軸」重新表述成它真正的角色：
+    **`fallback_available` ＝ 訂閱窗用完之後還有沒有救。**
+    掌舵者同時指出「（通常沒有）」——多數帳號未啟用 credits ⇒ 預設就是
+    `fallback_available=False`，也就是**訂閱窗本身即硬牆**，這是保守且正確的方向。
+
+    🔴 `plan_fingerprint` 是**軸組合**不是方案名稱：payload 沒有 plan 欄位
+    （實測 `member_dashboard_available=false`、頂層 17 鍵無一為方案名），
+    而軸組合本身就是指紋。它的用途是**偵測方案變更**（組合變了 ⇒ 歷史標定／燃燒率
+    作廢重學），**不是**拿去查一組寫死的參數——那就是本 repo 判過的「寫死的數字必過期」。
+    """
+    if not isinstance(payload, dict):
+        return {"plan_fingerprint": (), "credits_present": False,
+                "credits_enabled": False, "credits_exhausted": False,
+                "fallback_available": False, "pools": {}}
+    pools = {k: p for k in CREDIT_POOL_KEYS if (p := _credit_pool(payload, k))}
+    # 🔴 任一池可用即算有 fallback；**全部**不可用才算沒有。方向刻意保守：
+    # 讀不出來（`None`）不計入「可用」，同 repo 通篇的「量不到 ≠ 量到零」。
+    enabled = any(p["enabled"] for p in pools.values())
+    exhausted = all(p["used"] >= p["limit"] for p in pools.values()) if pools else False
+    return {
+        "plan_fingerprint": tuple(sorted(r["kind"] for r in bucket_readings(payload))),
+        "credits_present": bool(pools),
+        "credits_enabled": enabled,
+        "credits_exhausted": exhausted,
+        "fallback_available": bool(pools) and enabled and not exhausted,
+        "pools": pools,
+    }
 
 
 # 🔴 SA-B2 的修法：分母**從 payload 推導**，不寫死一句散文。
@@ -460,6 +538,9 @@ def measure_detail(timeout: int = HTTP_TIMEOUT_SECONDS,
         "measured_at": datetime.now(UTC).astimezone().isoformat(timespec="seconds"),
         "denominator": denominator_of(payload),
         "schema_keys": sorted(payload),
+        # 🔴 R87：派工前置檢查的資料來源（見 `account_posture`）。快取裡沒有它，
+        # `--pace` 就只能講水位、講不出「訂閱窗用完之後還有沒有救」。
+        "posture": {k: v for k, v in account_posture(payload).items() if k != "pools"},
     }, REASON_OK
 
 

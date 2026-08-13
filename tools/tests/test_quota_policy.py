@@ -40,6 +40,7 @@ sys.path.insert(0, str(_REPO / "tools" / "lib"))
 # 東西來抵。**鑑別力不得下降**：搬家後全部合成注入自證已重跑，結果與搬家前逐字相同。
 import pace_contract as PC  # noqa: E402
 import quota_criteria as QC  # noqa: E402
+import quota_meter as M  # noqa: E402
 import quota_pace as W  # noqa: E402
 import quota_policy as Q  # noqa: E402
 
@@ -1609,6 +1610,142 @@ class TestR86ThePaceContractWriterMatchesTheEngineReader(unittest.TestCase):
         self.assertEqual((halted["cap"], halted["band"]), (0, Q.BAND_HALT))
         for key in ("headroom_pct", "headroom_pct_per_hour", "binding_kind", "source"):
             self.assertIn(key, free)
+
+
+class TestR87TheMeterMayNotDropAThrottlingAxis(unittest.TestCase):
+    """R87 事故鎖：**取數層不得把「已撞頂但自報 `enabled:false`」的軸丟掉。**
+
+    🔴 立案（本輪真實事故，非假想）：13 個 subagent 全數撞
+    `You've hit your monthly spend limit`，燒 **1,319,703 tokens**／331 tool_uses／634 秒、
+    **零產出**。根因**不在判讀層**——`decide()` 的「halt 一票否決」不變式當時完好無損；
+    舵手是從**取數層**把 `spend`／`extra_usage` 兩軸整個排除掉（誤讀
+    `enabled:false` ＝「池子關著、不算節流軸」，真意是 `used 610 > limit 500` 已撞月度
+    支出上限、購買功能因此被 org 層停用）。於是判讀層**拿不到輸入**，整道保護在
+    **零判準觸發**的情況下失效，且失敗表徵與「一切正常」完全相同。
+
+    ⇒ 這揭露的架構缺口是：判讀層的不變式只保證「**給定的軸**不會被放寬」，
+    它**不保證「軸不會消失」**。本鎖補的就是那一格——把事故當下的真實 payload 釘成
+    fixture，任何讓它**不再 halt** 的改動當場轉紅。
+
+    🔴 本鎖的存在理由是「**由程式否決模型，不是由模型自律**」：掌舵者對本事故的裁決
+    逐字為「不是要寫在程式架構控制嗎？怎麼變成你在控制？」。散文約束對當下的模型
+    零攔阻力（repo 已多次實證），所以下一次有人再判定「這是假紅」時，必須有東西轉紅。
+    """
+
+    #: 事故當回合 http 200 回應的**真實**節錄（關鍵欄位逐字保留，時間欄改為相對本檔 NOW）。
+    INCIDENT = {
+        "limits": [{"kind": "session", "percent": 1, "resets_at": at(30),
+                    "group": "session", "is_active": True}],
+        "five_hour": {"utilization": 1.0, "resets_at": at(30),
+                      "limit_dollars": None, "used_dollars": None},
+        "extra_usage": {"is_enabled": False, "monthly_limit": 500,
+                        "used_credits": 610.0, "utilization": 100.0,
+                        "disabled_reason": "org_level_disabled_until",
+                        "spend_limit_reached": True, "credits_ever_enabled": True},
+        "spend": {"used": {"amount_minor": 610}, "limit": {"amount_minor": 500},
+                  "percent": 100, "severity": "critical", "enabled": False,
+                  "disabled_reason": "org_level_disabled_until",
+                  "can_purchase_credits": False},
+    }
+
+    @staticmethod
+    def _state_from(readings) -> Q.QuotaState:
+        return Q.QuotaState(
+            axes=tuple(Q.Axis(kind=r["kind"], pct=r["pct"], resets_at=r["resets_at"])
+                       for r in readings),
+            measured_at=NOW.isoformat(), source="endpoint", reason="ok")
+
+    def test_the_throttling_axes_survive_the_meter(self) -> None:
+        """`spend`／`extra_usage` 必須出現在取數層的輸出裡——這是被繞過的那一格。"""
+        kinds = {r["kind"] for r in M.bucket_readings(self.INCIDENT)}
+        self.assertIn("spend", kinds)
+        self.assertIn("extra_usage", kinds)
+
+    def test_the_incident_payload_still_halts(self) -> None:
+        """端到端：這份 payload 餵完整條鏈，結論必須是 halt／cap=0。"""
+        st = self._state_from(M.bucket_readings(self.INCIDENT))
+        out = PC.payload(Q.decide(st, NOW, P), st, P.max_fanout, P.halt_pct)
+        self.assertEqual(out["band"], Q.BAND_HALT)
+        self.assertEqual(out["cap"], 0)
+
+    def test_the_lock_discriminates(self) -> None:
+        """合成注入自證：**重演** R87 那個錯誤實作，必須不再 halt。
+
+        這一條證明前兩條守的就是那個差異——沒有它，前兩條可能只是在斷言一個
+        恆真的東西（本 repo 對「結構上恆綠的假鎖」已有多次判例）。
+        """
+        dropped = [r for r in M.bucket_readings(self.INCIDENT)
+                   if r["kind"] not in ("spend", "extra_usage")]
+        self.assertTrue(dropped, "重演組不得為空，否則本自證無鑑別力")
+        st = self._state_from(dropped)
+        out = PC.payload(Q.decide(st, NOW, P), st, P.max_fanout, P.halt_pct)
+        self.assertNotEqual(
+            out["band"], Q.BAND_HALT,
+            "把兩軸排除後若仍 halt，代表 halt 另有來源，本鎖並未守住那個缺口")
+
+    def test_disabled_is_not_a_reason_to_drop_an_axis(self) -> None:
+        """`enabled:false` 這個欄位本身**不得**成為排除依據。
+
+        判準刻意寫成「同一份 payload、只把布林翻成 True」的對照：兩者收到的軸集合
+        必須**逐字相同**。若哪天有人再以 `enabled`／`is_enabled` 當過濾條件，
+        這一條會當場紅——而它是這次事故裡唯一被動過的那一行。
+        """
+        enabled = {k: (dict(v, **({"enabled": True} if "enabled" in v else {}),
+                          **({"is_enabled": True} if "is_enabled" in v else {}))
+                       if isinstance(v, dict) else v)
+                   for k, v in self.INCIDENT.items()}
+        self.assertEqual(
+            {r["kind"] for r in M.bucket_readings(self.INCIDENT)},
+            {r["kind"] for r in M.bucket_readings(enabled)})
+
+
+class TestR87AccountPostureIsKnownBeforeDispatch(unittest.TestCase):
+    """R87：**派工前**要先知道 Account Type 與有沒有可用 credits（掌舵者裁決）。
+
+    立案逐字：「配置 Agents 前，要先知道 Account Type and Account 是否有 Usage
+    credits 再進行配置！」。事故機制＝訂閱窗尚有 37% 餘裕、credits 池已爆且停用
+    ⇒ 扇出全滅而主 session 照常 ⇒ **credits 是「還有沒有救」的布林，不是節流軸**。
+    """
+
+    INCIDENT = TestR87TheMeterMayNotDropAThrottlingAxis.INCIDENT
+
+    def test_the_exhausted_and_disabled_pool_gives_no_fallback(self) -> None:
+        """事故當下的真實 payload：兩池皆 `used>limit` 且 `enabled:false`。"""
+        p = M.account_posture(self.INCIDENT)
+        self.assertTrue(p["credits_present"])
+        self.assertFalse(p["credits_enabled"])
+        self.assertTrue(p["credits_exhausted"])
+        self.assertFalse(p["fallback_available"])
+
+    def test_an_account_without_credits_defaults_to_no_fallback(self) -> None:
+        """掌舵者：「（通常沒有）」⇒ 沒有 credits 欄的帳號＝訂閱窗即硬牆。"""
+        bare = {k: v for k, v in self.INCIDENT.items()
+                if k not in M.CREDIT_POOL_KEYS}
+        p = M.account_posture(bare)
+        self.assertFalse(p["credits_present"])
+        self.assertFalse(p["fallback_available"])
+
+    def test_a_healthy_pool_does_give_fallback(self) -> None:
+        """**鑑別力**：池若真的可用，必須回 `True`，否則本判準恆假＝假鎖。"""
+        healthy = dict(self.INCIDENT)
+        healthy["extra_usage"] = dict(self.INCIDENT["extra_usage"],
+                                      is_enabled=True, used_credits=10.0)
+        healthy["spend"] = dict(self.INCIDENT["spend"], enabled=True,
+                                used={"amount_minor": 10})
+        self.assertTrue(M.account_posture(healthy)["fallback_available"])
+
+    def test_unreadable_payload_is_not_read_as_healthy(self) -> None:
+        """「量不到 ≠ 量到零」：讀不出來一律**無 fallback**，不得樂觀。"""
+        for bad in (None, [], "x", {}, {"spend": "not-a-dict"}):
+            self.assertFalse(M.account_posture(bad)["fallback_available"], bad)
+
+    def test_the_fingerprint_is_the_axis_set_not_a_plan_name(self) -> None:
+        """指紋＝軸組合。payload 沒有方案名（實測 17 個頂層鍵無一為方案名），
+        且它的用途是**偵測方案變更**，不是查一組寫死的參數。"""
+        p = M.account_posture(self.INCIDENT)
+        self.assertIn("spend", p["plan_fingerprint"])
+        self.assertIn("session", p["plan_fingerprint"])
+        self.assertEqual(p["plan_fingerprint"], tuple(sorted(p["plan_fingerprint"])))
 
 
 if __name__ == "__main__":

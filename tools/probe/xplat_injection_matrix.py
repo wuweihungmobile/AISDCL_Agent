@@ -18,14 +18,35 @@
   · 雲端 CI 那一格本檔**不量**（需要 Actions 額度且不在本機控制內），一律標 `N/A`，
     **禁止**以 `--dry-run` 的輸出或以「本機綠」推論該格。
 
-🔴 **`--apply` 會就地改動共用工作樹**，故預設是 `--dry-run`（只列不改）。依 `DEF-101-886`，
-`--apply` **只能在所有 agent 停工的窗口內跑**：多包並行時量到的 rc 是別人鍵盤的函數，
-而本檔的注入也會污染別人。本檔在 `--apply` 前後各取一次 `git status --porcelain` 指紋並
-逐字比對，不一致即 fail-loud（還原不完全比沒還原更危險：它看起來乾淨）。
+🔴 **R87 訂正：本檔在 R85／R86 兩輪「應該開工第一件事就跑」而一次都沒跑成**，交件理由逐輪
+都是「M5 需停工窗口，並行時始終有人在動工作樹」。那個理由對**當時的本檔**為真，但它是本檔
+自己造出來的——**不是量測本身的性質**。舊設計把兩個完全不同的命題 AND 成同一個指紋比對：
+
+    P1（本檔真的清乾淨了）   ← 我擁有、我可以負責、也正是要斷言的那一件事
+    P2（整輪沒有別人動過樹） ← 環境事實，本檔無法控制，而**並行輪次下它恆為假**
+
+`before/after` 取的是**全樹** `git status --porcelain`，於是只要有任何別包在編輯任何檔案，
+`after != before` 就成立、rc=1、訊息逐字指控「還原不完全 ⇒ 工作樹已被污染」。也就是說：
+**在並行輪次下，本檔的預設結局是「誣告自己」**，而那個假紅與真的沒還原乾淨長得一模一樣。
+⇒ 判準結構上永遠跑不了，而一個永遠跑不了的判準等於沒有判準（R86 交件的「留到收尾」正是
+它的下游後果——收尾窗口也從來沒有出現過）。
+
+**修法＝把 P1 與 P2 拆開，各自用對的方式回答**：
+  · **P1 改成「射程只涵蓋本檔擁有的東西」**：注入路徑逐一不存在 ＋ 沙箱目錄已消失。
+    這兩件事完全不受別人鍵盤影響 ⇒ 在並行輪次下仍然**可求值**，且鑑別力沒有下降
+    （少還原任何一個檔案都會被抓到——見 `restoration_problems()` 的注入自證）。
+  · **P2 降為「並行活動觀測」**：仍然量，但**只報不判**（`並行活動` 段落）。資訊沒有丟失，
+    只是不再拿別人的編輯去改本檔的 rc。
+
+🔴 **共用 index 那一半（`pre-commit` 關）另外處理**：該關需要 `git add` 才量得到，而 index 是
+**跨包共用**的單一狀態 ⇒ 預設**不碰**，標 `N/A(needs --stage)`。加 `--stage` 時走
+`GIT_INDEX_FILE` 指向沙箱內的私有 index 副本，`git add` 只寫那份拋棄式檔案，共用 index
+一個 byte 都不動（本檔會在前後各取一次共用 index 的 digest 並列進報表佐證）。
 
 用法：
     python tools/probe/xplat_injection_matrix.py            # 乾跑：列出六類與三關，不動樹
-    python tools/probe/xplat_injection_matrix.py --apply    # 真跑（需停工窗口）
+    python tools/probe/xplat_injection_matrix.py --apply    # 真跑（並行輪次下即可跑）
+    python tools/probe/xplat_injection_matrix.py --apply --stage   # 連 pre-commit 關一起量
     python tools/probe/xplat_injection_matrix.py --apply --only sh-crlf,posix-sep
 """
 from __future__ import annotations

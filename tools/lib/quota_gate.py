@@ -746,8 +746,36 @@ def pace_report(now: datetime | None = None) -> str:
     pace_contract.write(decision, state, policy.max_fanout, policy.halt_pct)
     tail = f"\n⚠️ .env 有設錯：{'；'.join(problems)}" if problems else ""
     return (f"{pace_line(decision)}\n  {quota_policy.describe(decision)}\n"
-            f"  {quota_pace.explain(decision.amort)}\n"
+            f"  {quota_pace.explain(decision.amort)}\n  {posture_line()}\n"
             f"  來源={state.source} 量測於={state.measured_at or '(無)'}{tail}\n")
+
+
+def posture_line(path: Path | None = None) -> str:
+    """派工**前置檢查**那一行：帳號指紋 ＋ credits 姿態（R87／`DEF-200-R87-spend`）。
+
+    🔴 掌舵者裁決逐字：「配置 Agents 前，要先知道 Account Type and Account 是否有
+    Usage credits 再進行配置」。事故當下 `--pace` 只講得出水位，講不出
+    「訂閱窗用完之後還有沒有救」——而後者才是 13 個 subagent 全滅的直接原因。
+
+    🔴 三種讀不出來的情形一律回報**無 fallback**（保守方向）：快取不可用、
+    取數層版本較舊（沒有 `posture` 欄）、欄位形狀不對。「量不到 ≠ 量到零」。
+    """
+    try:
+        data = json.loads((path or quota_cache_path()).read_text(encoding="utf-8"))
+        posture = data["posture"]
+        fingerprint = tuple(posture["plan_fingerprint"])
+    except (OSError, ValueError, KeyError, TypeError):
+        return "派工前置：帳號姿態讀不出來 ⇒ 一律當作**無 credits fallback**（保守）"
+    if not posture.get("credits_present"):
+        state = "此帳號**沒有** usage credits ⇒ 訂閱窗本身即硬牆"
+    elif posture.get("fallback_available"):
+        state = "credits **可用** ⇒ 訂閱窗用完後仍有 fallback"
+    else:
+        why = "已耗盡" if posture.get("credits_exhausted") else ""
+        why += "、" if why and not posture.get("credits_enabled") else ""
+        why += "已停用" if not posture.get("credits_enabled") else ""
+        state = f"credits {why} ⇒ **無 fallback**，訂閱窗即硬牆"
+    return f"派工前置：方案指紋={'+'.join(fingerprint) or '(空)'}｜{state}"
 
 
 def quota_throttle_message(decision: quota_policy.Decision, tool: str, live: int,
