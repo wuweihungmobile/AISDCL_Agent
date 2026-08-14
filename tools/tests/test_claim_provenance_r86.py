@@ -327,7 +327,7 @@ class TestTheCausalEscapeHatchIsItsOwn(unittest.TestCase):
         env = {**os.environ, "AUTOSDD_CAUSAL_GUARD_OFF": "1"}
         payload = json.dumps({
             "hook_event_name": "Stop",
-            "last_assistant_message": _INCIDENT + " 另外全套 99991 passed。",
+            "last_assistant_message": _INCIDENT + " 全套 99991 passed。",  # baseline-ok: 合成語料
             "transcript_path": str(self.transcript)})
         done = subprocess.run([sys.executable, str(_HOOK)], input=payload, env=env,
                               capture_output=True, text=True, timeout=60,
