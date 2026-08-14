@@ -6366,7 +6366,9 @@ class QuotaPaceOutletIsReachableTest(unittest.TestCase):
         """等不到 reset／等得到／free 帶不宣稱有節流——三型各自說對。"""
         human = qg.reset_horizon_phrase(qg.QUOTA_BRANCH_ESCALATE, None)
         for name, seed, want, deny in (
-            ("只能等人", {"pct": 100.0, "kind": "spend", "resets_in": None,
+            # 🔴 R89：`spend` → `nimbus_quill`——`spend` 已是 `FALLBACK_KINDS`（保險軸，
+            # 不進 cap 聚合）⇒ 拿它構造 halt，測到的就不再是「halt 的兩型分得出來」。
+            ("只能等人", {"pct": 100.0, "kind": "nimbus_quill", "resets_in": None,
                           "extra": (("session", 20.0, 1800),)}, human, None),
             ("等得到", {"pct": 99.0, "kind": "session", "resets_in": 1200}, "⏳", human),
             ("free 帶", {"pct": 35.0, "extra": (("nimbus_quill", 0.0, None),)},

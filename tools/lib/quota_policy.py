@@ -109,6 +109,15 @@ BAND_FREE, BAND_NOTICE, BAND_CONVERGE, BAND_PREPARE, BAND_HALT = (
 #: 🔴 「量不到」不是任何一個水位帶（規格加寬②）。
 BAND_UNMEASURED = "unmeasured"
 
+#: 🔴 R89：**保險軸**——訂閱窗用完之後才會被考慮的付費池，不是與訂閱窗平起平坐的節流軸。
+#: 憲法依據＝PRD §6 4b（`OVERAGE_POLICY=FREEZE` 預設＝絕不動用超額）＋§15.5 紅線 2
+#: （超額必須顯式 opt-in）＋§0.6 新發現 1（「達到訂閱限制**後**可能可以付費續跑」）。
+#: 官方 UI 逐字亦同：「Turn on usage credits to keep using Claude **if you hit a plan limit**」。
+#: 消費端只有 `decide()` 的 cap 聚合；**取數層不得因此少量一個軸**（`DEF-200-107` 的教訓）。
+#: 未來若實作 PRD 的 `OVERAGE_POLICY=ALLOW_WITH_CAP`，那是讓這些軸重新參與的開關，
+#: 不是把本常數刪掉——刪掉會讓「保險」與「主力」再度分不出來。
+FALLBACK_KINDS = frozenset({"extra_usage", "spend"})
+
 #: 逐軸解析的失效字面。`missing`（欄位缺席＝**正常**，實測 weekly_scoped／spend 都是）
 #: 與 `bad-horizon`（有字串但解不出 aware＝**伺服器格式變了**）必須分得開——今天兩者
 #: 共用一個 `None`，於是格式變更是靜默的。
@@ -491,14 +500,41 @@ def decide(state: QuotaState, now: datetime, p: Policy,
             cap=max(1, p.degraded_cap), recommended_fanout=max(1, p.degraded_cap),
             band=BAND_UNMEASURED, binding=None, per_axis=(),
             reason=state.reason or "unmeasurable")
-    binding = min(readings, key=_binding_key)
-    notes = sorted({r.note for r in readings if r.note})
-    reason = ",".join([state.reason, *notes]) if notes else state.reason
-    base = min(_base_rec(r.band, p) for r in readings)
+    # 🔴 R89／憲法裁決：**保險池不得一票否決主力**。掌舵者原話「付費額度是一個保險，
+    # 你把它當成主要，本末倒置」；官方 UI 逐字「Turn on usage credits to keep using
+    # Claude **if you hit a plan limit**」；PRD §6 4b 的預設是 `OVERAGE_POLICY=FREEZE`
+    # ＝**絕不動用超額** ⇒ 系統本就不打算用它，它的水位對「訂閱窗還有餘裕時能不能派工」
+    # 結構上無關。實帳：訂閱窗只用 48%，卻因這個**關著的**池子帳面超支而 cap=0。
+    # 🔴 風險方向此前是**反的**：PRD §15.1 前置檢查 3 把「靜默計費」列為最危險的單一
+    # 失敗模式（怕它被偷偷用掉），而守衛做成「它沒得用所以停工」。
+    # 🔴 這**不是** `DEF-200-107`（R87）禁止的那件事：那次是在**取數層**
+    # （`bucket_readings()`）把兩軸整個丟掉，判讀層因此拿不到輸入；這裡兩軸照樣被量到、
+    # 照樣進 `per_axis`（訊息、`--pace`、告警全都看得見），只是不進 **cap 聚合**。
+    # 判讀歸判讀、取數歸取數，正是該案要求的方向。
+    # 🔴 `or readings` 是 fail-safe：萬一某天全部的軸都是保險軸，寧可退回舊行為（全部
+    # 參與、可能過度保守），也不要讓 `min()` 對空序列拋例外而讓整條額度軸消失。
+    gate = [r for r in readings if r.axis.kind not in FALLBACK_KINDS] or readings
+    binding = min(gate, key=_binding_key)
+    # 🔴 `if notes else` 分支是冗餘的（`",".join(["x"])` 不產生尾逗號）——R89 就地簡化，
+    # 行為逐字等價，騰出的 LOC 餘裕給下面那道地板（本檔 tier 上限 400，改動前 398）。
+    reason = ",".join([state.reason, *sorted({r.note for r in readings if r.note})])
+    base = min(_base_rec(r.band, p) for r in gate)
+    # 🔴 R89／Architect 複審 B-2：保險軸撞頂時**不是**放回 `C_max`，而是夾到 1。
+    # 立案事實：R87 那 13 個 subagent 全滅時，訂閱窗**只用 1%**（`R87_HANDOFF.md:20`
+    # 逐字「主力軸只有 1%」），姿態與今天相同（`credits_exhausted=true`／
+    # `fallback_available=false`）⇒ 本輪那個「派 1 個成功」的探針證明了「保險池滿 ⇒ 一定
+    # 派不出去」不恆真，但**沒有解釋 R87 為何 13/13 全滅**。最可能的變數是
+    # `disabled_reason: org_level_disabled_until` 的期限，而 payload 從不揭露它
+    # ⇒ **本機結構上觀測不到**。n=1 的成功探針不足以把 cap 從 0 放到 16。
+    # ⇒ 這一格就是把「先派一個看看」的取證協定**機制化**：殘餘風險收斂成 1 個 agent。
+    # `min` 而不是直接給 1：訂閱窗自己撞線時 cap 已是 0，保險軸不得把它**放寬**回 1。
+    cap = binding.cap
+    if any(r.band == BAND_HALT and r.axis.kind in FALLBACK_KINDS for r in readings):
+        cap = 1 if cap is None else min(cap, 1)
     return Decision(
-        cap=binding.cap,
+        cap=cap,
         recommended_fanout=_bound(
-            _clamp(int(base * _pace_of(readings, p)), p), binding.cap),
+            _clamp(int(base * _pace_of(gate, p)), p), cap),
         band=binding.band, binding=binding.axis, per_axis=readings, reason=reason,
         # 🔴 餵**帶號**分鐘（不是 `minutes_to_reset` 那個夾 0 的版本）：時鐘偏移的軸必須
         # 被攤提整個排除。夾 0 之後長窗軸會變成「窗數 1、配額＝全部剩餘」＝**放寬**，

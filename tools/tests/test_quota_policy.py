@@ -362,7 +362,10 @@ class TestM1bAccelerationSurvivesAggregation(unittest.TestCase):
         ×2：live 快取 7 軸有 3 軸 `resets_at=null` 且全是 0% ⇒ 否決永遠成立。
         現在的不變式是「**不參與 cap 的軸不得參與 pace**」，兩個方向各自被下面兩支釘住。
         """
-        braking = Q.decide(state(("session", 75, 3), ("spend", 55, None)), NOW, P)
+        # 🔴 R89：fixture 由 `spend` 換成 `nimbus_quill`——被測的性質是「**無期程但有 cap
+        # 的軸**能否決加速」，與那個軸是誰無關；而 `spend` 自 R89 起是 `FALLBACK_KINDS`
+        # （保險池，不進 cap 聚合）⇒ 拿它當煞車軸的例子，測的就不再是本測試宣稱的性質。
+        braking = Q.decide(state(("session", 75, 3), ("nimbus_quill", 55, None)), NOW, P)
         self.assertEqual(braking.recommended_fanout, 2, "期程不明的煞車軸必須仍能否決加速")
         self.assertEqual(braking.cap, 4, "它的 cap 也必須真的在（否則它不是煞車軸）")
 
@@ -408,8 +411,10 @@ class TestM1bAccelerationSurvivesAggregation(unittest.TestCase):
         self.assertEqual(d.binding.kind, "weekly_all")
         # 🔴 反向：halt／節流帶的無期程軸**必須**保留原優先權——否則 `reset_branch()` 會從
         # `escalate`（只有人去提額）翻成 `arm`（排一支等 reset 的工作）＝R59 事故同形。
-        halting = Q.decide(state(("weekly_all", 96, 5976), ("spend", 96, None)), NOW, P)
-        self.assertEqual(halting.binding.kind, "spend")
+        # 🔴 R89：同上，fixture 由 `spend` 換成 `nimbus_quill`（`spend` 已是保險軸）。
+        halting = Q.decide(state(("weekly_all", 96, 5976), ("nimbus_quill", 96, None)),
+                           NOW, P)
+        self.assertEqual(halting.binding.kind, "nimbus_quill")
         self.assertIsNone(halting.binding.resets_at)
 
 
@@ -1405,7 +1410,8 @@ class TestM9UnmeasurableIsNotUnlimited(unittest.TestCase):
     def test_no_horizon_only_slows_down_it_does_not_degrade(self) -> None:
         """S7「200、有桶、無任何 `resets_at`」那一列：走 ×0.5，不是 degraded。"""
         d = Q.decide(Q.QuotaState(
-            axes=(axis("spend", 88, None), axis("nimbus_quill", 0, None)),
+            # 🔴 R89：`spend` → `weekly_all`（保險軸不進 cap 聚合，拿它測 cap 會失準）。
+            axes=(axis("weekly_all", 88, None), axis("nimbus_quill", 0, None)),
             measured_at=NOW.isoformat(), source="endpoint",
             reason="no-horizon"), NOW, P)
         self.assertEqual([r.horizon for r in d.per_axis],
@@ -1661,27 +1667,46 @@ class TestR87TheMeterMayNotDropAThrottlingAxis(unittest.TestCase):
         self.assertIn("spend", kinds)
         self.assertIn("extra_usage", kinds)
 
-    def test_the_incident_payload_still_halts(self) -> None:
-        """端到端：這份 payload 餵完整條鏈，結論必須是 halt／cap=0。"""
-        st = self._state_from(M.bucket_readings(self.INCIDENT))
-        out = PC.payload(Q.decide(st, NOW, P), st, P.max_fanout, P.halt_pct)
-        self.assertEqual(out["band"], Q.BAND_HALT)
-        self.assertEqual(out["cap"], 0)
+    def test_the_incident_payload_still_carries_both_axes_end_to_end(self) -> None:
+        """端到端：兩軸的**逐軸讀數必須原封不動**，只有 cap 聚合不吃它們。
+
+        🔴 R89 重新表述（Architect 複審 4-1）。舊判準是「結論必須是 halt／cap=0」，
+        而 R89 的憲法裁決（PRD §6 4b `OVERAGE_POLICY=FREEZE`＝絕不動用超額 ⇒ 保險軸
+        不進 cap 聚合）讓它必然為假。**但期望值不可以改成 `free`**：Architect 實測
+        把事故 payload 同時餵給正確實作與 R87 錯誤實作，`band`／`cap`／`rec`／`binding`
+        四欄**逐字相同** ⇒ 改成 free 會得到一支對 R87 錯誤實作照樣通過的假鎖。
+        ⇒ 判準改到**仍有鑑別力**的觀測面：R87 是「軸整個消失」，所以就守軸還在不在、
+        水位有沒有被改寫、逐軸帶別與逐軸 cap 有沒有被放寬。R87 錯誤實作**結構上**
+        滿足不了第一條（軸不在 `per_axis` 裡）。
+        """
+        d = Q.decide(self._state_from(M.bucket_readings(self.INCIDENT)), NOW, P)
+        seen = {r.axis.kind: r for r in d.per_axis}
+        for kind in ("spend", "extra_usage"):
+            self.assertIn(kind, seen, f"{kind} 從 per_axis 消失＝R87 原樣復發")
+            self.assertEqual(seen[kind].axis.pct, 100.0, "水位被改寫")
+            self.assertEqual(seen[kind].band, Q.BAND_HALT, "逐軸帶別被放寬")
+            self.assertEqual(seen[kind].cap, 0, "逐軸 cap 被放寬")
+            self.assertIn(f"kind={kind} 100%", Q.describe(d), "人看的那一面少一軸")
+        # 🔴 保險軸撞頂 ⇒ cap 夾到 1（不是 0、也不是 C_max）。理由見 `decide()` 內
+        # 那段 B-2：n=1 的成功探針不足以解釋 R87 的 13/13 全滅，殘餘風險收斂成 1 個。
+        self.assertEqual(d.cap, 1)
 
     def test_the_lock_discriminates(self) -> None:
-        """合成注入自證：**重演** R87 那個錯誤實作，必須不再 halt。
+        """合成注入自證：**重演** R87 那個錯誤實作，必須被抓到。
 
-        這一條證明前兩條守的就是那個差異——沒有它，前兩條可能只是在斷言一個
-        恆真的東西（本 repo 對「結構上恆綠的假鎖」已有多次判例）。
+        🔴 R89：判準隨上一支一起換面。舊版斷言「重演組必須不再 halt」，而正確實作
+        現在**也**不 halt ⇒ 該斷言已恆真（Architect 實測四欄逐字相同）＝假鎖。
+        新判準指向 R87 真正的差異：**軸在不在**。
         """
         dropped = [r for r in M.bucket_readings(self.INCIDENT)
                    if r["kind"] not in ("spend", "extra_usage")]
         self.assertTrue(dropped, "重演組不得為空，否則本自證無鑑別力")
-        st = self._state_from(dropped)
-        out = PC.payload(Q.decide(st, NOW, P), st, P.max_fanout, P.halt_pct)
-        self.assertNotEqual(
-            out["band"], Q.BAND_HALT,
-            "把兩軸排除後若仍 halt，代表 halt 另有來源，本鎖並未守住那個缺口")
+        d_broken = Q.decide(self._state_from(dropped), NOW, P)
+        kinds = {r.axis.kind for r in d_broken.per_axis}
+        self.assertNotIn("spend", kinds, "重演組沒把軸拿掉＝這個自證沒有在重演 R87")
+        self.assertNotIn("extra_usage", kinds)
+        # 正確實作與錯誤實作在**這個**觀測面上必須不同（上一支守正向，這裡守反向）。
+        self.assertNotEqual(d_broken.cap, 1, "掉軸之後 cap 若仍是 1，本鎖無鑑別力")
 
     def test_disabled_is_not_a_reason_to_drop_an_axis(self) -> None:
         """`enabled:false` 這個欄位本身**不得**成為排除依據。
@@ -1746,6 +1771,35 @@ class TestR87AccountPostureIsKnownBeforeDispatch(unittest.TestCase):
         self.assertIn("spend", p["plan_fingerprint"])
         self.assertIn("session", p["plan_fingerprint"])
         self.assertEqual(p["plan_fingerprint"], tuple(sorted(p["plan_fingerprint"])))
+
+
+class TestR89TheFallbackSetMayNotSwallowASubscriptionAxis(unittest.TestCase):
+    """🔴 R89／Architect 複審②：`FALLBACK_KINDS` 是新開的繞過面，本鎖是它唯一的觀測者。
+
+    立案實測（Architect 對該常數逐條合成注入，跑全套 136 測）：注入 `five_hour`
+    ——**最主要的訂閱節流軸**——只有 **1** 支測試會紅，而那支正是同輪被改寫的
+    `test_the_incident_payload_still_halts`；注入**全部**訂閱軸則轉紅 **0** 支
+    （被 `decide()` 裡的 `or readings` fail-safe 遮住）。⇒ `DEF-200-107` 的形狀
+    （一個軸可以靜默停止 gating，而失敗表徵與正常運作相同）沒有被消滅，只是從**取數層**
+    搬到了**判讀層**，新住址一個不變式都沒有。本鎖補的就是那一格。
+    """
+
+    #: 訂閱窗那一族——它們**永遠**不是保險池，被吞掉即等於關閉主節流。
+    SUBSCRIPTION = frozenset({"session", "five_hour", "seven_day", "weekly_all"})
+
+    def test_no_subscription_axis_is_ever_a_fallback_axis(self) -> None:
+        """三條一起：不得吞訂閱軸／保險集只有一個家／訂閱軸撞線仍然 halt。"""
+        self.assertEqual(Q.FALLBACK_KINDS & self.SUBSCRIPTION, frozenset(),
+                         "訂閱軸被列為保險池＝主節流被關掉，而這是唯一會叫的地方")
+        # 🔴 同一份知識今天住兩個家（`quota_policy.FALLBACK_KINDS` 與
+        # `quota_meter.CREDIT_POOL_KEYS`）且結構上不准互相 import ⇒ 那個縫只能由判準
+        # 縫起來（體例同 `TestR86ThePaceContractWriterMatchesTheEngineReader`）。
+        self.assertEqual(Q.FALLBACK_KINDS, frozenset(M.CREDIT_POOL_KEYS),
+                         "保險池清單在 policy 與 meter 兩邊漂移了")
+        # 排除「這道放寬只准作用在保險軸上」：訂閱軸自己撞線必須仍然 cap=0。
+        self.assertEqual(
+            Q.decide(state(("five_hour", 96, 30), ("spend", 0, None)), NOW, P).cap, 0,
+            "訂閱軸撞停止水位卻沒 halt ⇒ 這道改動放寬到了不該放寬的地方")
 
 
 if __name__ == "__main__":
