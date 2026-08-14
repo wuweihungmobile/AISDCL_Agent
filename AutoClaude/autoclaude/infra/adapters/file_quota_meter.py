@@ -38,6 +38,7 @@ from pathlib import Path
 from ...core.ports.quota_meter import (
     BAND_UNMEASURED,
     DEGRADED_CAP,
+    FALLBACK_KINDS,
     NO_RESET,
     PACE_SCHEMA,
     PaceDecision,
@@ -95,7 +96,13 @@ class FileQuotaMeterAdapter:
     # 一個，不會讓第二個消費者消失。
     # `type(...) in (int, float)` 而不是 isinstance：bool 是 int 的子類別，
     # `True` 會被 isinstance 收成 pct=1.0 這種假讀數。
-    def _pick(self, key) -> QuotaReading | None:
+    # 🔴 R89：`keep` 是**選軸準則的第二個維度**（哪些軸有資格當這個問題的答案），刻意與
+    # `key`（同一批候選裡誰排第一）分開——兩者回答的不是同一件事，混在 `key` 裡要靠一個
+    # 魔術大數字把不合格的軸壓到最後，那種寫法沒有人看得出它在排除誰。
+    # 🔴 `[…if keep(a)] or axes` 是 fail-safe，與根層 `decide()` 的 `gate = […] or readings`
+    # 逐字同構：萬一某天**全部**的軸都被排除，寧可退回舊行為（全部參與、可能過度保守），
+    # 也不要讓這一軸靜默消失（`DEF-200-107` 的形狀：一個軸可以無聲停止 gating）。
+    def _pick(self, key, keep=lambda a: True) -> QuotaReading | None:
         try:
             age = time.time() - self._path.stat().st_mtime
             raw = json.loads(self._path.read_text(encoding="utf-8"))
@@ -103,9 +110,9 @@ class FileQuotaMeterAdapter:
             return None
         if age > self._ttl or not isinstance(raw, dict) or raw.get("schema") != SCHEMA:
             return None
-        pick = min((a for a in raw.get("axes") or []
-                    if isinstance(a, dict) and type(a.get("pct")) in (int, float)),
-                   key=key, default={})
+        axes = [a for a in raw.get("axes") or []
+                if isinstance(a, dict) and type(a.get("pct")) in (int, float)]
+        pick = min([a for a in axes if keep(a)] or axes, key=key, default={})
         return QuotaReading(float(pick["pct"]), str(pick.get("kind") or ""),
                             pick.get("resets_at") or None) if pick else None
 
@@ -115,8 +122,21 @@ class FileQuotaMeterAdapter:
 
     # 水位最高的那條線＝最緊的那條（「還剩多少可燒」）。名字刻意不叫 `worst()`：那個符號是
     # R82 的墓碑（它把整條軸投影成一個純量、丟掉每一桶的 reset 期程）；這裡回的是完整一條軸。
+    # 🔴 R89：候選集**排除保險軸**（`FALLBACK_KINDS`，憲法依據見 port 那一段）。
+    # 「還剩多少可燒」在 `OVERAGE_POLICY=FREEZE` 之下問的只能是**訂閱窗**——付費池結構上
+    # 不可燒 ⇒ 它從來就不是這個問題的答案，而不是「答案被過濾掉了」。
+    # 🔴 這**不是** `DEF-200-107` 禁止的那件事（取數層把軸整個丟掉、判讀層拿不到輸入）：
+    #   上面的 `axes` 仍然逐條解析出每一軸、`read()`（「要等多久」那個面）仍然看得見它們、
+    #   磁碟上的快取一格未動。被改的是**這個具名面的選軸準則**，而「選軸依問題而定，所以
+    #   port 開兩個具名的面」正是 R82 開這支函式的理由。判讀歸判讀、取數歸取數。
+    # 🔴 實帳（不是假想）：`tests/conftest.py` 的 `DEF-200-110` 記載本機活體快取內容逐字
+    #   為 `extra_usage 100.0 / spend 100.0` 時，本函式取到那一軸 ⇒ TokenGuard **每一步都
+    #   HALT**，而訂閱窗當時還有餘裕。R88 當時把它整個歸因成「測試不密封」（處置＝隔離快取）
+    #   並在該段逐字寫「production 端『額度 100% ⇒ halt』是設計行為」——本輪的憲法裁決推翻
+    #   了後半句：保險池撞頂不是訂閱窗撞頂，那一半的病到本輪才治。
     def read_worst_pct(self) -> QuotaReading | None:
-        return self._pick(lambda a: -float(a["pct"]))
+        return self._pick(lambda a: -float(a["pct"]),
+                          lambda a: a.get("kind") not in FALLBACK_KINDS)
 
     # R86：配速契約的讀取端。**永不回 None**——「缺檔／過期／壞掉」一律回一則 band=
     # unmeasured 的決策，cap 已經填成保守地板。這是與 `read()`／`read_worst_pct()` 刻意

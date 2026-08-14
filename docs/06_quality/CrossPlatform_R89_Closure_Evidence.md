@@ -285,3 +285,79 @@ headless 情境的刷新者只能是「自己去打 T5」，於是：
 架構能解的——它的成因是**新增判準時沒有同步把等量史料搬出量測面**。這一輪新增了
 一道完整的回歸鎖（含雙向注入自證），而護欄層總量**零成長**。做法可重複：
 判準留在測試檔，史料進輪次證據檔，兩者以檔名指針相連。
+
+
+---
+
+## 護欄層減法（第二批）— 兩支鎖檔的史料段
+
+🔴 **本節的存在理由本身是一個判例**：這兩段是由一個 subagent 搬走的，而它在
+**寫進本檔之前**就死於 `monthly spend limit`（R87 的同一個錯誤訊息）⇒ 原檔的史料
+已被刪除、docstring 裡卻留下指向本檔的**指針**，而本檔當時一個字都沒有。
+**指針指向空處**比不搬更糟：它讓「資訊已保全」看起來是真的。原文由收尾者以
+`git diff` 自工作樹取回並補齊於此。教訓：**搬遷是兩個動作，缺一即為刪除**；
+派工時必須要求「先寫入目的地、再刪來源」，順序反了就沒有安全網。
+
+### `tools/tests/test_sanitize_component_frozen_sdd_versions_lock.py`（−38 行）
+
+>   對這 7 支檔案逐一用該既有 AST 掃描邏輯（掃描「風險識別字是否裸露出現在組
+>   檔名的 f-string/字串串接/`%`/`.format()` 表達式中」）做對抗式驗證時，實測發現
+>   兩個真實盲點，會讓搬過來的版本對兩支檔案完全失去鑑別力（bug-injection 用
+>   `git show <固定基線 commit>:<path>` 取得修復前的真實歷史內容重放驗證，証實
+>   下列兩者在修復前『0 offenders』——即該掃描法看不到真正的漏洞；此固定基線
+>   commit 的選擇理由見下方 `_PRE_FIX_BASELINE_SHA` 常數註解與
+>   `TestExpectedSanitizeCallDiscriminatesRealHistoricalRegression` docstring
+>   ——R44 QA 一審發現原本用 `git show HEAD:<path>` 會在本輪修復 commit 之後
+>   永久恆紅，已修正為錨定固定 SHA）：
+>
+>     (a) `production_to_fpl.py::generate_fpl_draft()`：修復前寫法
+>         `fid = fpl_id or f"FPL-PROD-{ac_id}-{divergence_kind}"`——內層 f-string
+>         本身不以 `.md`/`.yaml` 等副檔名結尾（副檔名是下一行
+>         `f"{fid}.md"` 才組上去的兩段式間接組檔名），泛用掃描的
+>         『f-string 字面結尾是否像檔名』判準因此不會命中這個 f-string，风险
+>         識別字裸露完全被漏放。
+>
+>     (b) `counterfactual_replay.py::write_report()`：修復前寫法
+>         `f"REPLAY-{patch.ac_id or 'unknown'}-{date}.md"`——`FormattedValue`
+>         內是 `patch.ac_id or 'unknown'`（`ast.BoolOp`），泛用掃描的
+>         `_raw_risky_reference()` 只認得裸 `Name`/`Attribute`/`Subscript`，
+>         不會拆解 `BoolOp` 找出裡面包的 `Attribute`，同樣被漏放。
+>
+>   這兩個盲點目前也存在於 v0.30 端既有的 `test_sanitize_component_call_site_lock.py`
+>   本身（R44 對該檔案做同款 bug-injection 交叉驗證證實，非本檔新引入的缺陷；
+>   修復/回報該既有盲點超出本輪 P2 finding 的範圍，僅在此如實記載，供下一輪
+>   評估是否值得投入修復那份泛用掃描器）。若要讓泛用 AST 掃描器同時涵蓋這兩種
+>   形狀，需要遞迴拆解 `BoolOp`/追蹤『組檔名用到的中繼變數是否源自另一個本身不
+>   以副檔名結尾的 f-string』——複雜度與投入不成比例（Rule 2 比例原則），對
+>   **本質靜態、Copy-on-Evolve 之後不再變動**的 29 份凍結快照而言，改用下列
+>   更簡單也更精準的手法：直接對每支檔案的『已知修復呼叫式』（如
+>   `_sanitize_component(rule_id)`）做逐版正向存在性斷言——不管該呼叫式週邊的
+>   程式碼結構多複雜、外層是否為 `BoolOp`/兩段式間接組檔名，只要修復呼叫式本身
+>   被移除或還原，正向斷言必定測不到而失敗。本檔頂部 bug-injection 驗證
+>   （見下方 `TestExpectedSanitizeCallDiscriminatesRealHistoricalRegression`）
+>   逐一以 `git show <固定基線 commit>:<path>` 重放全部 7 支檔案修復前的真實
+>   歷史內容，證實這個更簡單的正向斷言對全部 7 支檔案、包含上述兩個泛用掃描
+>   盲點案例，均正確判定為「未通過」。
+
+### `tools/tests/test_skip_discoverability_r83.py`（−21 行）
+
+> ═══════════════════════════════════════════════════════════════════════════
+> WHY（本檔為何存在——三筆當回合實測的缺陷，全部長在「指引」上）
+> ═══════════════════════════════════════════════════════════════════════════
+>
+> 1. **DSN 守衛的修法只印 PowerShell 形態**（本輪主缺陷）。
+>    `AutoClaude/tests/conftest.py::pg_dsn_problems` 修前逐字印
+>    `$env:AUTOCLAUDE_TEST_PG_DSN = '…'`。`$env:` 是 PowerShell 專屬語法，bash/zsh 照抄
+>    會把它展開成空字串、再把 `=` 當成指令名 ⇒ 得到一個與 DSN 毫無關係的錯誤。難看之處
+>    在於**它長在一支專門用來「把人導向正解」的訊息上**：那則訊息存在的全部理由就是省下
+>    使用者從 SQLAlchemy 錯誤反推回「我少打了四個字」那段路，而它自己在 mac 上又製造了
+>    一段同型的反推。同檔另有 2 處、姊妹檔 `tests/perf/test_pgvector_recall_perf.py` 2 處、
+>    `AutoClaude/tools/setup_pg_runtime_role.py` 1 處，全部同形態（本輪一併修）。
+>
+> 2. **`timeout <n>` 在 macOS 不存在**（GNU coreutils；BSD 沒有）。當回合實測：
+>    `which timeout` → `timeout not found`、rc=1。repo 已有
+>    `tools/tests/test_bash32_compat.py` 守 `.sh` 與 workflow inline `run:` 這兩個面，
+>    但**文件與錯誤訊息裡的示範指令一個字都沒人看**。
+>
+> 3. 兩者的共同形態＝**單平台指引不外推**，而它發生的那個平面（活文件的散文與
+>    Python 的訊息字串）此前零判準。

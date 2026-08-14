@@ -1791,9 +1791,8 @@ class TestR89TheFallbackSetMayNotSwallowASubscriptionAxis(unittest.TestCase):
         """三條一起：不得吞訂閱軸／保險集只有一個家／訂閱軸撞線仍然 halt。"""
         self.assertEqual(Q.FALLBACK_KINDS & self.SUBSCRIPTION, frozenset(),
                          "訂閱軸被列為保險池＝主節流被關掉，而這是唯一會叫的地方")
-        # 🔴 同一份知識今天住兩個家（`quota_policy.FALLBACK_KINDS` 與
-        # `quota_meter.CREDIT_POOL_KEYS`）且結構上不准互相 import ⇒ 那個縫只能由判準
-        # 縫起來（體例同 `TestR86ThePaceContractWriterMatchesTheEngineReader`）。
+        # 🔴 同一份知識住兩個家（`FALLBACK_KINDS` 與 `quota_meter.CREDIT_POOL_KEYS`）
+        # 且不准互相 import ⇒ 那個縫只能由判準縫（體例同 pace contract 那對）。
         self.assertEqual(Q.FALLBACK_KINDS, frozenset(M.CREDIT_POOL_KEYS),
                          "保險池清單在 policy 與 meter 兩邊漂移了")
         # 排除「這道放寬只准作用在保險軸上」：訂閱軸自己撞線必須仍然 cap=0。

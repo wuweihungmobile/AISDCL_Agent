@@ -160,9 +160,20 @@ class TokenGuardPlugin:
     # 🔴 R82（C3）：讀的是 `read_worst_pct()`（水位最高那條線）而**不是** `read()`
     # （最先 reset 那條線）。這裡問的是「還剩多少可燒」，那是最緊的一條說了算；
     # `read()` 服務的是 AutoResumeService 的「要等多久」，兩者是相反的問題。
-    # 這個等式讓 halt 與根層**恰好等價**：任一軸 ≥95 ⇒ max(pct) ≥95 ⇒ 兩邊同時 halt；
-    # 反之根層 halt ⇒ 某軸 cap=0 ⇒ 該軸 ≥95 ⇒ max(pct) ≥95。回歸鎖＝
-    # `tests/test_r82_quota_axis_and_shipped_defaults.py::TestBandParityWithTheHarness`。
+    # 🔴 R89 訂正上一段緊接著的那句等價宣稱（原文逐字：「任一軸 ≥95 ⇒ max(pct) ≥95 ⇒ 兩邊
+    # 同時 halt」——R89 落地憲法裁決後那句話已為假，故不留著當現行說法）。今天的等價鏈是：
+    #   根層 `decision.band==halt` ⇔ **某訂閱軸** cap==0 ⇔ 某訂閱軸 pct ≥ halt_pct
+    #                             ⇔ `read_worst_pct().pct >= quota_halt_pct` ⇔ 引擎 halt
+    # 中間那一段被 R89 換掉的原因：根層 `decide()` 的 cap 聚合只看**非保險軸**
+    # （`gate = [r for r in readings if r.axis.kind not in FALLBACK_KINDS]`），因為
+    # `OVERAGE_POLICY=FREEZE` 之下付費池結構上不可燒。等價因此靠**兩側各自排除同一組
+    # kind** 維持——引擎那一半住在 `FileQuotaMeterAdapter.read_worst_pct()` 的選軸準則裡，
+    # 而兩份字面由 `TestTheFallbackKindsMirrorTheRootDeclaration` 縫住（跨 importlinter
+    # 邊界只能這樣接，體例同 `PACE_SCHEMA`／`DEGRADED_CAP`）。
+    # 🔴 本檔**沒有**因此多養一份分類：`evaluate_quota` 一個字都沒改，它問的還是同一個
+    # 問題，只是那個問題的答案（`read_worst_pct()`）現在真的只回訂閱窗。
+    # 回歸鎖＝`tests/test_r82_quota_axis_and_shipped_defaults.py::TestBandParityWithTheHarness`
+    # （含 `axes4` 這一格：保險軸 99% ＋ 訂閱軸 12% ⇒ 兩側都**不得** halt）。
     # 🔴 誠實劃界：本判定掛在 POST_ATTEMPT，而 Kernel 先算 correction 才 emit POST_ATTEMPT
     # ⇒ 撞線那一輪仍會多一次 Brain 呼叫；擋掉的是**其後**所有重試，不是當次。
     # 說明寫成 # 而非 docstring：docstring 會被 count_loc 計入（見 check_loc_budget 提示）。

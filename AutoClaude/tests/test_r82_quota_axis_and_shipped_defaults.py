@@ -435,7 +435,7 @@ class TestBandParityWithTheHarness:
     """🔴 兩個引擎讀同一份快取時**不得**得到相反的答案（C3 的驗收本體）。
 
     只鎖 `halt` 這一格是刻意的，而且它是**恰好等價**（雙向都成立，可以證明）：
-      根層 band==halt ⇔ 某軸 cap==0 ⇔ 某軸 pct ≥ halt_pct ⇔ max(pct) ≥ halt_pct
+      根層 band==halt ⇔ 某**訂閱**軸 cap==0 ⇔ 某訂閱軸 pct ≥ halt_pct
                      ⇔ 引擎 `read_worst_pct().pct >= quota_halt_pct` ⇔ 引擎 halt。
     🔴 比較對象是**逐軸的帶別**（`decision.per_axis`），不是 `decision.band`——後者是
     **argmin(cap)** 那一軸的帶別，一個聚合值，與引擎的 argmax(pct) 本來就不是同一個量。
@@ -443,6 +443,17 @@ class TestBandParityWithTheHarness:
     ⇒ 兩軸 cap 都是 4，平手時 `_binding_key` 取期程較長者 ⇒ binding=weekly_all、
     `decision.band='notice'`，而同一份 payload 裡真的有一軸站在 82%（converge）。
     拿 `decision.band` 當判準會把「兩個正確的答案」判成分歧，那種鎖活不過一輪。
+
+    🔴 R89 訂正上面那條鏈中間的一段（原文逐字是「某軸 cap==0 ⇔ 某軸 pct ≥ halt_pct
+    ⇔ max(pct) ≥ halt_pct」，落地憲法裁決後它已為假，故不留著當現行說法）：根層
+    `decide()` 的 cap 聚合只看**非保險軸**（`FALLBACK_KINDS`＝付費池；`OVERAGE_POLICY=
+    FREEZE` 之下它結構上不可燒）⇒ 分位詞從「某軸」收成「某訂閱軸」。
+    🔴 這條訂正**不是為了讓紅測試變綠**——本類在 R89 之後對 `axes4` 是**結構上不可滿足**
+    的：`any(per_axis 有人 halt)` 要求 `engine_halts is True`，而同一格的
+    `decision.band == halt` 要求 `False`，兩條 assert 對著同一個布林要相反的值，任何實作
+    都過不了。也就是說舊判準本身內含一句假話（「任一軸 halt 必定是 binding」對保險軸不
+    成立）。修法是把兩條 assert 收斂到**同一個**分位詞上，收斂後它們互為證明：
+    ∃ 訂閱軸 band==halt ⇔ 該軸 cap==0（階梯最小）⇔ 它必為 binding ⇔ decision.band==halt。
     """
 
     def _sides(self, tmp_path, axes):
@@ -463,15 +474,22 @@ class TestBandParityWithTheHarness:
         [("session", 96.0, 20), ("weekly_all", 55.0, 7200)],   # 短期程軸撞線
         [("five_hour", 82.0, 240), ("weekly_all", 55.0, 7200)],  # 收斂帶，兩軸期程不同
         [("session", 10.0, 20), ("weekly_all", 20.0, 7200)],   # 全綠（反向對照：不得亂擋）
-        [("spend", 99.0, None), ("five_hour", 12.0, 180)],     # 沒有 reset 可等的那條線最緊
+        [("spend", 99.0, None), ("five_hour", 12.0, 180)],     # 保險軸爆頂、訂閱窗還很空
+        [("extra_usage", 99.0, None), ("five_hour", 12.0, 180)],   # 另一支保險軸，同上
+        # 🔴 鑑別力（缺了它，「保險軸一律不看」會被誤讀成「有保險軸就不 halt」）：
+        # 保險軸再高，訂閱軸自己撞線時**兩側都必須仍然 halt**。
+        [("spend", 99.0, None), ("five_hour", 96.0, 180)],
+        [("spend", 12.0, None), ("session", 96.0, 20)],
     ])
     def test_halt_is_exactly_equivalent_on_both_sides(self, tmp_path, axes):
         Q, decision, plugin = self._sides(tmp_path, axes)
         engine_halts = plugin.evaluate_quota({}) is not None
-        assert any(r.band == Q.BAND_HALT for r in decision.per_axis) is engine_halts, (
-            f"harness per_axis={[r.band for r in decision.per_axis]} 但引擎 halt="
-            f"{engine_halts} ⇒ 同一份快取兩個答案")
-        # cap=0 是階梯裡最小的 ⇒ 任一軸 halt 必定是 binding ⇒ 聚合值也必須說 halt。
+        subscription_halts = any(r.band == Q.BAND_HALT for r in decision.per_axis
+                                 if r.axis.kind not in Q.FALLBACK_KINDS)
+        assert subscription_halts is engine_halts, (
+            f"harness per_axis={[(r.axis.kind, r.band) for r in decision.per_axis]} 但引擎"
+            f" halt={engine_halts} ⇒ 同一份快取兩個答案")
+        # cap=0 是階梯裡最小的 ⇒ 任一**訂閱**軸 halt 必定是 binding ⇒ 聚合值也必須說 halt。
         assert (decision.band == Q.BAND_HALT) is engine_halts
 
     @pytest.mark.parametrize("axes", [
@@ -480,19 +498,27 @@ class TestBandParityWithTheHarness:
         [("session", 71.0, 20), ("weekly_all", 20.0, 7200)],
         [("session", 69.9, 20), ("weekly_all", 20.0, 7200)],   # 門檻正下方（不得亂擋）
         [("session", 10.0, 20), ("weekly_all", 20.0, 7200)],   # 全綠
+        [("spend", 88.0, None), ("five_hour", 12.0, 180)],     # 保險軸在收斂帶 ⇒ 兩側都不收斂
+        [("spend", 12.0, None), ("session", 71.0, 20)],        # 訂閱軸在收斂帶 ⇒ 兩側都收斂
     ])
     def test_the_converge_band_is_exactly_equivalent_per_axis(self, tmp_path, axes):
-        """收斂帶：「有沒有任何一軸站在 converge 以上」兩側必須同答案。
+        """收斂帶：「有沒有任何**訂閱**軸站在 converge 以上」兩側必須同答案。
 
-        引擎 throttle ⇔ max(pct) ≥ 70 ⇔ ∃ 軸 pct ≥ 70 ⇔ ∃ 軸 band ∈ {converge,
-        prepare, halt}。這是恆等式，不是啟發式；上下兩組 payload 同時含正例與反例。
+        引擎 throttle ⇔ max(訂閱軸 pct) ≥ 70 ⇔ ∃ 訂閱軸 pct ≥ 70 ⇔ ∃ 訂閱軸 band ∈
+        {converge, prepare, halt}。這是恆等式，不是啟發式；上下兩組 payload 同時含正例
+        與反例。🔴 R89：分位詞由「任何一軸」收成「任何**訂閱**軸」，理由同本類 docstring
+        ——保險池在 `OVERAGE_POLICY=FREEZE` 之下不可燒，拿它的水位觸發收斂等於用一個系統
+        本來就不打算動用的東西去停掉正在動用的東西。最後兩組是這一格的鑑別力：同一支
+        `spend` 分別站在收斂帶與空檔，答案必須由**另一軸**決定。
         """
         Q, decision, plugin = self._sides(tmp_path, axes)
         tight = (Q.BAND_CONVERGE, Q.BAND_PREPARE, Q.BAND_HALT)
-        harness = any(r.band in tight for r in decision.per_axis)
+        harness = any(r.band in tight for r in decision.per_axis
+                      if r.axis.kind not in Q.FALLBACK_KINDS)
         engine = plugin.evaluate_quota({"in_correction_loop": True}) is not None
         assert harness is engine, (
-            f"harness per_axis={[r.band for r in decision.per_axis]} 但引擎 throttle={engine}")
+            f"harness per_axis={[(r.axis.kind, r.band) for r in decision.per_axis]} "
+            f"但引擎 throttle={engine}")
 
     def test_the_parity_judge_can_fail(self, tmp_path):
         """判準自證：把引擎的選軸換回**最先 reset**那一支，分歧組①必須讓上面那條紅。"""
@@ -504,6 +530,78 @@ class TestBandParityWithTheHarness:
         meter.read_worst_pct = meter.read      # ← 這就是修前的形態
         assert decision.band == Q.BAND_HALT
         assert TokenGuardPlugin(quota_meter=meter).evaluate_quota({}) is None
+
+    def test_the_r89_judge_can_fail_when_the_engine_forgets_the_constitution(self, tmp_path):
+        """判準自證（R89 那一半）：把選軸準則換回「全部軸取 max(pct)」＝修前的形態，
+        `spend 99% ＋ five_hour 12%` 這一格必須讓 `test_halt_is_exactly_equivalent_*` 紅。
+
+        沒有這一條，上面那個參數格只證明「今天不 halt」，不證明「是**因為**排除了保險軸」
+        ——把 `read_worst_pct` 整支拔掉回 `None` 也會讓它綠（那是量不到，不是判對）。
+        """
+        Q, decision, plugin = self._sides(
+            tmp_path, [("spend", 99.0, None), ("five_hour", 12.0, 180)])
+        assert decision.band != Q.BAND_HALT and plugin.evaluate_quota({}) is None
+        # 反向注入：候選集不排除保險軸 ⇒ 引擎讀到 99% ⇒ halt ⇒ 與根層相反。
+        meter = FileQuotaMeterAdapter(str(tmp_path / "autosdd_quota.json"))
+        meter.read_worst_pct = lambda: meter._pick(lambda a: -float(a["pct"]))
+        assert TokenGuardPlugin(quota_meter=meter).evaluate_quota({}) is not None
+
+
+class TestTheFallbackKindsMirrorTheRootDeclaration:
+    """🔴 R89：`FALLBACK_KINDS` 跨 `.importlinter` 邊界的**第三個家**只能由本鎖縫住。
+
+    鏈上另外兩家（`tools/lib/quota_policy.py::FALLBACK_KINDS` ↔
+    `tools/lib/quota_meter.py::CREDIT_POOL_KEYS`）由根層
+    `tools/tests/test_quota_policy.py::TestR89TheFallbackSetMayNotSwallowASubscriptionAxis`
+    縫住；本鎖接上引擎那一段，三家因此構成一條**閉合**的鏈——任一家單獨漂移即紅。
+    體例＝同檔既有的 schema 鏡射鎖與 `test_r86_pace_contract.py::
+    TestDegradedCapMirrorsTheRootDeclaration`（生產碼那個方向由 forbidden contract 擋住，
+    所以比對只發生在測試裡：一邊 import、一邊讀原始碼）。
+
+    🔴 失效表徵：漂移之後兩側對同一份快取給相反的答案，而**兩邊各自的測試都會綠**
+    （各自對自己的常數自洽）。這正是本輪要治的那個病，所以它自己必須有觀測者。
+    """
+
+    #: 訂閱窗那一族——它們**永遠**不是保險池（與根層那道鎖逐字同一份清單）。
+    SUBSCRIPTION = frozenset({"session", "five_hour", "seven_day", "weekly_all"})
+
+    def test_the_engine_copy_equals_the_root_declaration(self):
+        from autoclaude.core.ports.quota_meter import FALLBACK_KINDS
+        assert FALLBACK_KINDS == _root_quota_policy().FALLBACK_KINDS, (
+            "引擎與根層對「哪些是保險軸」的認定漂開了 ⇒ 同一份快取兩個答案")
+
+    def test_the_engine_copy_equals_the_meter_declaration(self):
+        """第三家：取數層的 `CREDIT_POOL_KEYS`。刻意讀原始碼而不 import——
+        `quota_meter` 是取數層（會碰網路／OAuth），import 它只為了讀一個字面是不對等的。"""
+        from autoclaude.core.ports.quota_meter import FALLBACK_KINDS
+        src = (REPO.parent / "tools" / "lib" / "quota_meter.py").read_text(encoding="utf-8")
+        m = re.search(r"^CREDIT_POOL_KEYS\s*=\s*\(([^)]*)\)", src, re.M)
+        assert m, "根層取數層找不到 CREDIT_POOL_KEYS ⇒ 這條鏡射鎖已靜默歸零"
+        assert FALLBACK_KINDS == frozenset(re.findall(r'"([^"]+)"', m.group(1)))
+
+    def test_no_subscription_axis_may_ever_be_swallowed(self):
+        """鑑別力：把訂閱軸列進保險集＝**主節流被整條關掉**，而那件事完全靜默
+        （引擎照跑、`read_worst_pct()` 照回一條軸，只是回的是別人）。"""
+        from autoclaude.core.ports.quota_meter import FALLBACK_KINDS
+        assert FALLBACK_KINDS & self.SUBSCRIPTION == frozenset()
+
+    def test_the_selection_still_sees_every_axis_it_measures(self, tmp_path):
+        """🔴 `DEF-200-107` 的方向鎖：排除只准發生在**選軸準則**，不准發生在取數。
+        同一份快取裡保險軸仍然被解析、`read()`（「要等多久」那個面）仍然選得到它。"""
+        now = datetime.now(UTC)
+        meter = FileQuotaMeterAdapter(str(_write_quota(tmp_path, {"schema": SCHEMA, "axes": [
+            _axis("spend", 99.0, (now + timedelta(minutes=5)).isoformat()),
+            _axis("five_hour", 12.0, (now + timedelta(minutes=180)).isoformat())]})))
+        assert meter.read().kind == "spend"            # 取數面：一格都沒少
+        assert meter.read_worst_pct().kind == "five_hour"   # 判讀面：問題換了，答案才換
+
+    def test_an_all_insurance_payload_falls_back_instead_of_going_blind(self, tmp_path):
+        """fail-safe，與根層 `decide()` 的 `gate = […] or readings` 逐字同構：
+        全部的軸都是保險軸時退回舊行為（可能過度保守），**不得**讓這一軸靜默消失。"""
+        meter = FileQuotaMeterAdapter(str(_write_quota(tmp_path, {"schema": SCHEMA, "axes": [
+            _axis("spend", 99.0, None), _axis("extra_usage", 80.0, None)]})))
+        assert meter.read_worst_pct() is not None
+        assert meter.read_worst_pct().kind == "spend"
 
 
 # ─────────────────────────────────────────────────────────────

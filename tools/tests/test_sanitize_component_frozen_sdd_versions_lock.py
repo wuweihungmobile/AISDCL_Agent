@@ -21,44 +21,9 @@ LATEST），且既有 repo-wide 掃描（`tools/tests/test_windowsapps_guard_*.p
 `test_sanitize_component_call_site_lock.py` 泛用 AST 掃描邏輯，而是改用逐檔
 「已知淨化呼叫式必須存在」的正向斷言）：
 
-  對這 7 支檔案逐一用該既有 AST 掃描邏輯（掃描「風險識別字是否裸露出現在組
-  檔名的 f-string/字串串接/`%`/`.format()` 表達式中」）做對抗式驗證時，實測發現
-  兩個真實盲點，會讓搬過來的版本對兩支檔案完全失去鑑別力（bug-injection 用
-  `git show <固定基線 commit>:<path>` 取得修復前的真實歷史內容重放驗證，証實
-  下列兩者在修復前『0 offenders』——即該掃描法看不到真正的漏洞；此固定基線
-  commit 的選擇理由見下方 `_PRE_FIX_BASELINE_SHA` 常數註解與
-  `TestExpectedSanitizeCallDiscriminatesRealHistoricalRegression` docstring
-  ——R44 QA 一審發現原本用 `git show HEAD:<path>` 會在本輪修復 commit 之後
-  永久恆紅，已修正為錨定固定 SHA）：
-
-    (a) `production_to_fpl.py::generate_fpl_draft()`：修復前寫法
-        `fid = fpl_id or f"FPL-PROD-{ac_id}-{divergence_kind}"`——內層 f-string
-        本身不以 `.md`/`.yaml` 等副檔名結尾（副檔名是下一行
-        `f"{fid}.md"` 才組上去的兩段式間接組檔名），泛用掃描的
-        『f-string 字面結尾是否像檔名』判準因此不會命中這個 f-string，风险
-        識別字裸露完全被漏放。
-
-    (b) `counterfactual_replay.py::write_report()`：修復前寫法
-        `f"REPLAY-{patch.ac_id or 'unknown'}-{date}.md"`——`FormattedValue`
-        內是 `patch.ac_id or 'unknown'`（`ast.BoolOp`），泛用掃描的
-        `_raw_risky_reference()` 只認得裸 `Name`/`Attribute`/`Subscript`，
-        不會拆解 `BoolOp` 找出裡面包的 `Attribute`，同樣被漏放。
-
-  這兩個盲點目前也存在於 v0.30 端既有的 `test_sanitize_component_call_site_lock.py`
-  本身（R44 對該檔案做同款 bug-injection 交叉驗證證實，非本檔新引入的缺陷；
-  修復/回報該既有盲點超出本輪 P2 finding 的範圍，僅在此如實記載，供下一輪
-  評估是否值得投入修復那份泛用掃描器）。若要讓泛用 AST 掃描器同時涵蓋這兩種
-  形狀，需要遞迴拆解 `BoolOp`/追蹤『組檔名用到的中繼變數是否源自另一個本身不
-  以副檔名結尾的 f-string』——複雜度與投入不成比例（Rule 2 比例原則），對
-  **本質靜態、Copy-on-Evolve 之後不再變動**的 29 份凍結快照而言，改用下列
-  更簡單也更精準的手法：直接對每支檔案的『已知修復呼叫式』（如
-  `_sanitize_component(rule_id)`）做逐版正向存在性斷言——不管該呼叫式週邊的
-  程式碼結構多複雜、外層是否為 `BoolOp`/兩段式間接組檔名，只要修復呼叫式本身
-  被移除或還原，正向斷言必定測不到而失敗。本檔頂部 bug-injection 驗證
-  （見下方 `TestExpectedSanitizeCallDiscriminatesRealHistoricalRegression`）
-  逐一以 `git show <固定基線 commit>:<path>` 重放全部 7 支檔案修復前的真實
-  歷史內容，證實這個更簡單的正向斷言對全部 7 支檔案、包含上述兩個泛用掃描
-  盲點案例，均正確判定為「未通過」。
+  逐項理由（不搬 v0.30 泛用 AST 掃描的兩個實測盲點、bug-injection 的固定基線 SHA
+  錨定、正向斷言對 7 支檔案的鑑別力驗證）原文逐字＝
+  `docs/06_quality/CrossPlatform_R89_Closure_Evidence.md`。
 
 方法論邊界（誠實記載）：
   - 本檢查只驗證『已知淨化呼叫式的字面文字仍存在於檔案中（非注釋內）』，非

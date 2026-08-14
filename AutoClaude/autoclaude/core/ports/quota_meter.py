@@ -55,6 +55,30 @@ _LIMIT_MARKERS = ("usage limit reached", "claude usage limit", "quota exceeded",
 # ⇒ 對它們排程等待是錯的動作（記憶：monthly spend limit 沒有 reset 可等）。
 _WAITABLE_KINDS = ("session", "five_hour", "5h")
 
+# 🔴 R89：**保險軸**——訂閱窗用完之後才「可能」被動用的付費池，不是與訂閱窗平起平坐的
+# 節流軸。憲法依據＝`docs/01_requirements/AutoClaude_Token_監控與喚醒機制_PRD_v2.1.md`
+# §6 4b（預設 `OVERAGE_POLICY=FREEZE`＝**絕不動用超額**）＋ §15.5 紅線 2（超額用量必須是
+# 顯式 opt-in）＋ §0.6 新發現 1（「達到訂閱限制**後**可能可以付費續跑」）。掌舵者裁決逐字：
+# 「付費額度是一個保險，你把它當成主要，本末倒置」。
+# ⇒ 在 FREEZE 之下這個池子**結構上不可燒**，所以它不是「還剩多少可燒」這個問題的答案；
+#   拿它的水位去比 halt 門檻，量的是一個系統本來就不打算動用的東西。
+#
+# 🔴 為什麼這個字面必須在引擎側再有一份（＝這不是「同一份知識多開一個家」的復發）：
+#   `.importlinter` 的 `no-harness-import` 契約禁止 `autoclaude` import 根層 `tools/`
+#   ⇒ 跨這條邊界的**字面**只能兩側各自持有，縫由判準縫起來。本檔內已有兩筆同型先例
+#   （`_LIMIT_MARKERS` 逐字複製 `tools/lib/quota_limits.py` 的字串、`_WAITABLE_KINDS`
+#   就是同一族的 kind 分類），R86 的 `PACE_SCHEMA`／`DEGRADED_CAP` 亦然。體例＝
+#   **字面多個家、判準一個家**。三個家的縫由兩道鎖接成一條鏈：
+#     · 根層兩家（`quota_policy.FALLBACK_KINDS` ↔ `quota_meter.CREDIT_POOL_KEYS`）＝
+#       `tools/tests/test_quota_policy.py::
+#        TestR89TheFallbackSetMayNotSwallowASubscriptionAxis`
+#     · 根層 ↔ 本檔 ＝ `tests/test_r82_quota_axis_and_shipped_defaults.py::
+#       TestTheFallbackKindsMirrorTheRootDeclaration`（讀原始碼／不進生產碼的 import）
+# 🔴 它是**分類**不是演算法：沒有門檻、沒有公式、不隨量測改變，唯一會改動它的事件是 PRD
+#   的 `OVERAGE_POLICY` 改掉。配速演算法（水位帶 × 期程帶 → cap、跨軸聚合、單調性不變式）
+#   仍然只有根層 `quota_policy.decide()` 一個家，引擎照舊只讀 `read_pace()` 的**結論**。
+FALLBACK_KINDS = frozenset({"extra_usage", "spend"})
+
 
 @dataclass(frozen=True)
 class QuotaReading:
