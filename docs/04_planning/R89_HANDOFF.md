@@ -142,24 +142,37 @@ python tools/check_defect_log_crossref.py              # rc=0；未結 88
 §15.3 的「PreToolUse 在 `Agent` 工具層攔截」正是 `context_budget_guard.py` 在做的事
 ⇒ PRD 稱之為「本次核實帶來最大的簡化」，本 repo 已經走在這條路上。
 
-🔴 **但有一條紅線衝突，必須由架構師裁決**：
+🔴 **PRD 有一條紅線在本專案不成立——已實測，不是推論**：
 
 > §15.5 紅線 1 逐字：「**不要碰未公開的 HTTP 端點。** statusLine 已提供你需要的一切，
 > 而且是官方支援的路徑。原 PRD 的 T5 方案現在既無必要也有風險。」
+> §0.6 第一列同義：遙測引擎「**採用** statusLine，原 T5 整條刪除」。
 
-而 `quota_meter.fetch_usage()` 打的正是 `/api/oauth/usage` —— 那就是 PRD §4.1.1 分層表裡
-的 **T5（可靠性低、隨時可能失效，PRD 建議預設 `false`）**。PRD §0.6 主張改用
-statusLine hook 的 stdin JSON（含 `rate_limits.five_hour.used_percentage` / `.resets_at`
-/ `seven_day.*` / `subscription_type`），那是官方支援且同樣零 Token 的路徑。
+`quota_meter.fetch_usage()` 打的正是 `/api/oauth/usage`＝PRD 的 **T5**。
+本輪原本把它記成「repo 違反紅線 1，待架構師裁決」——**那個方向錯了**，實測見下。
 
-**本輪刻意不動**，理由與 `DEF-200-114` 同型：換遙測來源＝改**取數層**，
-`DEF-200-107` 的教訓逐字是「不得以模型判斷改取數層」，需第三方複審。
-且本 repo 的現行選擇可能有正當理由（statusLine 只在互動 session 被呼叫，
-無人看管的排程哨兵路徑上可能拿不到）——**這正是需要架構師判斷而非我單方裁定的事**。
+**當回合實測**（`claude --version` 2.1.226；探針與對照組都在 scratchpad，
+逐字與方法見 `CrossPlatform_R89_Closure_Evidence.md` §statusLine 實測）：
 
-**給下一輪的具體題目**：statusLine 那條路在「哨兵 tick（非互動、無 session）」情境下
-拿不拿得到 `rate_limits`？拿不到的話，T5 是否為不可避免的必要之惡、還是應該做成
-「互動時用 statusLine、無人看管時才降級到 T5」的雙軌？
+| 遙測管道 | headless（`claude -p`）會發生？ | payload 含 `rate_limits`？ |
+|---|---|---|
+| statusLine | ❌ **一次都沒被呼叫** | 無從得知（根本沒跑） |
+| hook（SessionStart） | ✅ 會跑 | ❌ **不含**（只有 `session_id`／`transcript_path`／`cwd`／`hook_event_name`／`source`） |
+| `/api/oauth/usage`（T5） | ✅ | ✅ ← repo 現行在用 |
+
+**載具因素已排除**：同一份 `--settings` 檔同時掛 statusLine 與 SessionStart hook，
+一次 `claude -p` 之後 `hook_fired=YES`／`statusline_fired=NO` ⇒ 不是 `--settings` 沒生效，
+是**非互動模式沒有狀態列可畫，所以不呼叫 statusLine**。
+
+⇒ **結論：對 AutoClaude 的主要使用情境（headless Playbook 執行、續航哨兵 tick），
+PRD §0.6 第一列與紅線 1 的前提不成立；repo 走 T5 不是違規，是唯一可行的路。**
+這同時解釋了 `core/ports/quota_meter.py` docstring 自陳的那個洞
+（「額度軸會在無人看管那一跑上安靜地不存在」）為什麼**不能**用 statusLine 補。
+
+**給下一輪的真題目**（原題目作廢）：headless 情境的刷新者只能是「自己去打 T5」，
+那麼 ①誰來打（AutoClaude 不得 import harness ⇒ 要嘛引擎自己有一份取數器、要嘛
+由外部排程器打完寫檔案契約）？②T5 失效時的降級路徑是什麼（PRD 對「內部介面」
+的要求逐字是「必須有降級路徑，不可硬依賴」）？
 
 其餘值得下一輪查的紅線：**紅線 10**（`.autoclaude/`、`.claude/settings*.json` 應列為
 Agent 禁寫，否則「幫我把併發調高」就能拆掉整套治理）——本輪未查本 repo 有無此保護。

@@ -151,6 +151,64 @@ grep -rn "作廢|invalidate|重學" tools/lib/quota_pace.py tools/lib/quota_gate
 
 ---
 
+## statusLine 實測：PRD §0.6／§15.5 紅線 1 的前提在本專案不成立
+
+### 為什麼要測
+
+PRD 把「遙測引擎」整條的建議定成**採用 statusLine、刪除 T5（未公開 HTTP 端點）**
+（§0.6 第一列＋§15.5 紅線 1 逐字：「statusLine 已提供你需要的一切」）。
+而 `quota_meter.fetch_usage()` 打的正是 T5 ⇒ 照 PRD 字面讀，repo 現況是違規的。
+
+**但 PRD 自己要求**（§前言逐字）：「核實來源是實作內部字串，不是官方文件承諾的公開介面
+…凡標示內部者，實作時必須有降級路徑，不可硬依賴。」⇒ 先實測，不照抄。
+
+### 方法（探針與對照組都不碰使用者環境）
+
+`claude --version` = **2.1.226**。用 `--settings <file>` 掛臨時設定（scratchpad 內），
+statusLine 指向一支「把 stdin 原封不動落地 + 印固定字串」的探針。
+**對照組是關鍵**：同一份 settings 內同時掛一個 SessionStart hook（同樣落地 stdin）
+——用來分辨「statusLine 沒被呼叫」與「`--settings` 根本沒生效」。
+
+### 結果（當回合，rc 與檔案存在性皆為實測）
+
+```
+claude -p --settings <probe> --model haiku "reply ok"   → rc=0
+hook_fired:       YES     ← --settings 確實生效
+statusline_fired: NO      ← 同一份 settings 下 statusLine 一次都沒跑
+```
+
+SessionStart hook 的 payload 逐字只有五個鍵：
+`session_id` / `transcript_path` / `cwd` / `hook_event_name` / `source`
+⇒ **`rate_limits` 不在裡面**（`'rate_limits' in payload` → `False`）。
+
+| 遙測管道 | headless（`claude -p`）會發生？ | payload 含 `rate_limits`？ |
+|---|---|---|
+| statusLine | ❌ 一次都沒被呼叫 | 無從得知（根本沒跑） |
+| hook（SessionStart） | ✅ 會跑 | ❌ 不含 |
+| `/api/oauth/usage`（PRD 的 T5） | ✅ | ✅ ← repo 現行在用 |
+
+### 結論
+
+**對 AutoClaude 的主要使用情境（headless Playbook 執行、續航哨兵 tick），
+PRD §0.6 第一列與紅線 1 的前提不成立。** 非互動模式沒有狀態列可畫 ⇒ 不呼叫 statusLine；
+而 hook 這條通得了的路，payload 裡沒有額度資料。**repo 走 T5 不是違規，是唯一可行的路。**
+
+這同時解釋了 `autoclaude/core/ports/quota_meter.py` docstring 自陳的那個洞
+（逐字：「額度軸會在無人看管那一跑上安靜地不存在」）**為什麼不能用 statusLine 補**。
+
+🔴 **本節同時是一次自我訂正**：R89 稍早把這件事記成「repo 違反紅線 1，待架構師裁決」，
+並寫進了交棒書。那個方向是**照 PRD 字面推論**得來的，實測後為假，已就地訂正。
+判例同型於本輪 `DEF-200-112`：**照散文動手之前先問「這句話今天還是真的嗎」。**
+
+### 給下一輪的真題目（原題目作廢）
+
+headless 情境的刷新者只能是「自己去打 T5」，於是：
+①**誰來打**？（`.importlinter` 的 `no-harness-import` 禁止 `autoclaude` import harness
+⇒ 要嘛引擎自己有一份取數器，要嘛由外部排程器打完寫檔案契約 `autosdd_pace.json`）
+②**T5 失效時的降級路徑是什麼**？（PRD 對內部介面的要求逐字是「必須有降級路徑」）
+
+---
+
 ## 護欄層減法（R89 淨額 ≤ 0 的來源）
 
 ### 為什麼本輪**必須**做減法
