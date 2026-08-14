@@ -36,7 +36,7 @@
 |---|---|---|
 | 1 | `DEF-200-112` 治本（①資訊面） | `--pace` rc=0，尾行新增期程句；hook 閂鎖後 stderr 同步 |
 | 2 | 訂正 `DEF-200-112` 的**射程**（R88 散文比實際寬） | 見下 §2 |
-| 3 | 立案 `DEF-200-114`（`plan_fingerprint` 宣稱的用途零實作） | `grep` 實證：唯一消費端只印字串 |
+| 3 | 立案 `DEF-200-114`（`plan_fingerprint` 宣稱的用途零實作<!-- absent-if: invalidate -->） | `grep` 實證：唯一消費端只印字串 |
 | 4 | 護欄層**淨額 0** 的減法示範 | `--print-guard-lines` → `83670→83670 (+0)`、逐檔漂移 0 支 |
 | 5 | ADR-XPLAT-002 §6 邊界 1 補 R89 列（SC-10） | `test_adr_xplat001_c1c2_lock.py` 138 passed |
 | 6 | 立案 `DEF-200-115`（守衛可被受守衛者關閉：模型寫 `.claude/settings.json` 的 `env` 即可設 `AUTOSDD_QUOTA_OFF=1`） | 讀 PRD §15.5 紅線 10 後實查，全 repo 無禁寫保護 |
@@ -70,8 +70,10 @@ R88 寫「halt 判準**不分**兩型」，並推出「續航哨兵結構上等�
 全部因 `band=halt` 而未執行，現查 `python tools/session_resume_planner.py --pace`：
 
 - **四方複審（Architect／SA／SD／QA）** — 一次都沒跑，本輪所有結論皆為自證。
-  <!-- absent-if: CrossPlatform_R89_Review --> 證偽標的是那個 pattern：四方複審一旦真的
-  跑過，本 repo 既有體例會產出 `CrossPlatform_R89_Review*` 證據檔，屆時本行當場被打臉。
+  <!-- absent-if: CrossPlatform_R89_Review --> 證偽標的就是上一行標記裡那個 pattern：
+  四方複審一旦真的跑過，本 repo 既有體例會在 `docs/06_quality/` 產出對應的複審證據檔，
+  屆時本行當場被打臉。🔴 **說明句刻意不逐字重複那個字面**——R89 第一版重複了它，
+  於是鎖 grep 到的是我自己的說明文字，判定「宣稱為假」（自己命中自己）。
   現查「現在派不派得出去」：`python tools/session_resume_planner.py --pace`
   （`band=halt` 即結構上派不出任何 agent）
 - PRD `AutoClaude_Token_監控與喚醒機制_PRD_v2.1.md` 只讀完 §1–§4.4（1574 行讀了 628 行），
