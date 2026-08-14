@@ -562,28 +562,49 @@ class TestTheFallbackKindsMirrorTheRootDeclaration:
     （各自對自己的常數自洽）。這正是本輪要治的那個病，所以它自己必須有觀測者。
     """
 
-    #: 訂閱窗那一族——它們**永遠**不是保險池（與根層那道鎖逐字同一份清單）。
-    SUBSCRIPTION = frozenset({"session", "five_hour", "seven_day", "weekly_all"})
+    #: 🔴 R89 收尾／QA 複審 N1：與根層那道鎖同步翻面——由「黑名單四個訂閱軸」改成
+    #: **白名單以外一律紅**。舊黑名單只罩 7 個活體軸中的 4 個，注入 `weekly_scoped`
+    #: 兩家一起改 ⇒ 紅 0 支（全綠）⇒ `DEF-200-107` 的形狀對它完全失明。
+    #: 前三個成員的出處＝PRD `:78`；`spend` PRD 未列，是端點頂層鍵、由 payload 實測補入。
+    ALLOWED_FALLBACK = frozenset({"extra_usage", "overage", "spend",
+                                  "seven_day_overage_included"})
+    #: 舊黑名單，只留給注入自證當對照組（不再是任何生效判準）。
+    OLD_BLACKLIST = frozenset({"session", "five_hour", "seven_day", "weekly_all"})
 
     def test_the_engine_copy_equals_the_root_declaration(self):
         from autoclaude.core.ports.quota_meter import FALLBACK_KINDS
         assert FALLBACK_KINDS == _root_quota_policy().FALLBACK_KINDS, (
             "引擎與根層對「哪些是保險軸」的認定漂開了 ⇒ 同一份快取兩個答案")
 
-    def test_the_engine_copy_equals_the_meter_declaration(self):
+    def test_the_engine_copy_contains_the_meter_declaration(self):
         """第三家：取數層的 `CREDIT_POOL_KEYS`。刻意讀原始碼而不 import——
-        `quota_meter` 是取數層（會碰網路／OAuth），import 它只為了讀一個字面是不對等的。"""
+        `quota_meter` 是取數層（會碰網路／OAuth），import 它只為了讀一個字面是不對等的。
+
+        🔴 R89 收尾／SA 複審 B-3：由 `==` 改為**子集**。兩者命名空間不同——
+        `CREDIT_POOL_KEYS`＝美元計價池在 payload **頂層**的兩種表述（`_credit_pool()`
+        對每個鍵有各自的欄位形狀，補 bucket kind 進去是錯的）；`FALLBACK_KINDS`＝哪些
+        **bucket kind** 不進 cap 聚合。今天恰好在兩個字面上重疊卻被 `==` 焊死 ⇒
+        「補齊保險軸」這件事本身會轉紅（本輪補 PRD `:78` 的 overage 類時實測到）。
+        """
         from autoclaude.core.ports.quota_meter import FALLBACK_KINDS
         src = (REPO.parent / "tools" / "lib" / "quota_meter.py").read_text(encoding="utf-8")
         m = re.search(r"^CREDIT_POOL_KEYS\s*=\s*\(([^)]*)\)", src, re.M)
         assert m, "根層取數層找不到 CREDIT_POOL_KEYS ⇒ 這條鏡射鎖已靜默歸零"
-        assert FALLBACK_KINDS == frozenset(re.findall(r'"([^"]+)"', m.group(1)))
+        assert frozenset(re.findall(r'"([^"]+)"', m.group(1))) <= FALLBACK_KINDS, (
+            "美元計價池不是保險軸 ⇒ 它會進 cap 聚合＝R89 憲法裁決被繞過")
 
-    def test_no_subscription_axis_may_ever_be_swallowed(self):
+    def test_no_axis_without_a_provenance_may_ever_be_swallowed(self):
         """鑑別力：把訂閱軸列進保險集＝**主節流被整條關掉**，而那件事完全靜默
-        （引擎照跑、`read_worst_pct()` 照回一條軸，只是回的是別人）。"""
+        （引擎照跑、`read_worst_pct()` 照回一條軸，只是回的是別人）。
+        判準是「白名單以外一律紅」，理由見 `ALLOWED_FALLBACK` 的註解。"""
         from autoclaude.core.ports.quota_meter import FALLBACK_KINDS
-        assert FALLBACK_KINDS & self.SUBSCRIPTION == frozenset()
+        assert FALLBACK_KINDS - self.ALLOWED_FALLBACK == frozenset()
+        assert {"overage", "seven_day_overage_included"} <= FALLBACK_KINDS, (
+            "PRD :78 明列的 overage 類漏列 ⇒ 伺服器吐出來時會被當訂閱軸進 cap 聚合")
+        # 🔴 合成注入：`weekly_scoped` 被吞——舊黑名單全綠，新白名單必紅。
+        injected = FALLBACK_KINDS | {"weekly_scoped"}
+        assert injected & self.OLD_BLACKLIST == frozenset(), "舊判準對它全綠"
+        assert injected - self.ALLOWED_FALLBACK != frozenset(), "新判準必須紅"
 
     def test_the_selection_still_sees_every_axis_it_measures(self, tmp_path):
         """🔴 `DEF-200-107` 的方向鎖：排除只准發生在**選軸準則**，不准發生在取數。

@@ -77,7 +77,13 @@ _WAITABLE_KINDS = ("session", "five_hour", "5h")
 # 🔴 它是**分類**不是演算法：沒有門檻、沒有公式、不隨量測改變，唯一會改動它的事件是 PRD
 #   的 `OVERAGE_POLICY` 改掉。配速演算法（水位帶 × 期程帶 → cap、跨軸聚合、單調性不變式）
 #   仍然只有根層 `quota_policy.decide()` 一個家，引擎照舊只讀 `read_pace()` 的**結論**。
-FALLBACK_KINDS = frozenset({"extra_usage", "spend"})
+# 🔴 R89 收尾／SA 複審 B-3：`overage`／`seven_day_overage_included` 補入（逐字取自 PRD `:78`
+#   §0.6 新發現 1 的額度類型列舉）。取數層把 `item["kind"]` 原樣帶出 ⇒ 伺服器哪天吐這兩個
+#   kind，它們會被當訂閱軸進 cap 聚合＝本輪剛治好的病原樣復發。`spend` 不在 PRD 那份列舉
+#   裡（端點頂層鍵、不是 `rate_limits` 的 kind），由 payload 實測補入——照實記。
+#   ⚠️ 與根層 `quota_meter.CREDIT_POOL_KEYS` 的關係是**包含不是相等**：後者是「美元計價池
+#   在 payload 頂層的兩種表述」，命名空間不同；鏡射鎖已由 `==` 改為子集判準。
+FALLBACK_KINDS = frozenset({"extra_usage", "spend", "overage", "seven_day_overage_included"})
 
 
 @dataclass(frozen=True)

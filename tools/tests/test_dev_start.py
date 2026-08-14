@@ -4077,14 +4077,12 @@ class TestMacNightlyPlistCapabilityTable(MacNightlyStatusTestCase):
 
         沒有這一組，「退化 plist 會噴 ⚠️」只證明載具會叫，不證明它會分辨。
 
-        🔴 R82：「健康」在本測試裡是**兩個自變數**，不是一個。能力表混了兩種輸入——
-        大多數列讀 plist **檔案內容**（`install_healthy_plist()` 全權控制），
-        WakeToRun／NextRunTime 兩列讀 `pmset -g sched` ＝ **這台機器的電源排程狀態**
-        （需 sudo 才排得起來，安裝器刻意不代跑）。修前只設了前者就斷言「每列皆 ✅」，
-        等於偷偷把「跑測試這台 Mac 剛好排過 pmset repeat」寫成前提；那是多數 Mac 的
-        **非**常態 ⇒ 本測試在真 mac 上結構性必紅，而在 Windows 上被 class 的
-        @skipUnless(darwin) 跳過所以沒有人看見。夾具的 pmset stub 把第二個自變數也
-        收進測試手裡，兩列因此**留在**斷言內（沒有被拿掉、沒有被放寬成允許 ⚠️）。
+        🔴「健康」在本測試裡是**兩個自變數**：能力表大多數列讀 plist 檔案內容
+        （`install_healthy_plist()` 全權控制），WakeToRun／NextRunTime 兩列讀
+        `pmset -g sched` ＝**這台機器的電源排程狀態**。夾具的 pmset stub 把第二個
+        自變數也收進測試手裡，兩列因此**留在**斷言內（沒被拿掉、沒被放寬成允許 ⚠️）。
+        只設前者時本測試在真 mac 上為何結構性必紅、又為何在 Windows 上沒人看見，
+        史料＝`docs/06_quality/CrossPlatform_R89_Closure_Evidence.md`。
         """
         self.install_healthy_plist()
         self.write_heartbeat()
@@ -4137,23 +4135,16 @@ class TestMacNightlyPlistCapabilityTable(MacNightlyStatusTestCase):
     def test_status_prints_exactly_the_rows_static_extraction_predicts(self) -> None:
         """行為驗證（darwin-only）＋ 靜態抽取器的**現實對帳單**。
 
-        R72：跨平台對稱斷言（mac 列數 ≥ Windows 列數）已搬到
-        `test_schedule_capability_parity.py::TestScheduleCapabilityParity::
-        test_capability_row_count_reaches_windows_side_parity`——那是一道兩側都只讀
-        原始碼的靜態鎖，不需要 Darwin，卻因為住在本 darwin-only 類別裡而在
-        Windows／Linux 三道閘門上一律 SKIPPED。
-
-        留在這裡的是**只有 macOS 才做得到的那一半**，而且刻意做成對帳而非重複斷言：
+        跨平台對稱斷言（mac 列數 ≥ Windows 列數）住
+        `test_schedule_capability_parity.py`（兩側只讀原始碼、不需要 Darwin）。
+        留在這裡的是**只有 macOS 才做得到的那一半**，且刻意做成對帳而非重複斷言：
         真跑一次 `--status`，驗 ① 能力表整段印得出來、② 每一列 `(expected …)` 都是
         ✅（健康 plist 不該有任何告警）、③ **執行期列數逐一等於**靜態抽取器對同一支
         安裝器的預測。③ 才是關鍵——靜態抽取器是那道跨平台鎖的量測面，而量測面本身
         必須被驗證（若它多算/少算，跨平台鎖會在 mac 以外的所有平台默默失準，
-        而沒有任何人有辦法發現）。
-
-        🔴 R82：②「每一列都是 ✅」同樣吃兩個自變數（plist 檔案內容 ＋ 機器的 pmset
-        排程狀態），理由與 `test_healthy_plist_passes_every_capability_row` 逐字相同，
-        夾具的 pmset stub 已把後者收進測試手裡。③ 不受影響——它比的是列**數**，
-        兩列的值是 ✅ 還是 ⚠️ 都算一列。
+        而沒有任何人有辦法發現）。② 同樣吃 plist 內容與 pmset 排程兩個自變數，
+        夾具的 stub 已把後者收進測試手裡；③ 不受影響（它比的是列**數**）。
+        搬遷前的原文＝`docs/06_quality/CrossPlatform_R89_Closure_Evidence.md`。
         """
         static_rows = _cap_parity.mac_capability_rows(self.installer_source())
         self.install_healthy_plist()

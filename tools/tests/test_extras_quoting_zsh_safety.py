@@ -1,46 +1,9 @@
 """機械鎖：pip/uv 安裝指令的 extras 與 target 必須加引號（macOS zsh glob 安全）.
 
-# 缺陷（R57 Scan-A2 = DEF-101-479；R59 擴面 = DEF-101-507／508）
-
-macOS 自 Catalina 起預設登入 shell 為 **zsh**，且 `nomatch` 預設開啟。zsh 對未加引號的
-`.[dev,notifications]` 執行 filename generation（glob）；repo 內沒有「`.` + 單一字元」的
-匹配檔名，zsh 遂 **在執行指令之前就中止整條命令列**：
-
-    $ zsh -c 'echo REACHED .[dev,notifications]'
-    zsh:1: no matches found: .[dev,notifications]      rc=1     ← echo 從未執行
-    $ zsh -c "echo REACHED '.[dev,notifications]'"
-    REACHED .[dev,notifications]                        rc=0
-    $ bash -c 'echo REACHED .[dev,notifications]'
-    REACHED .[dev,notifications]                        ← bash 無此行為
-
-實害：macOS 開發者照文件複製貼上 `uv pip install -e .[dev,notifications]`，看到的是  <!-- zsh-glob-ok: 本檔即此鎖的實作，docstring 必須原樣引述壞形態才能說明缺陷本身 -->
-一個與套件完全無關的 `no matches found` —— uv/pip 根本沒被呼叫到。同一行在 bash 與
-PowerShell 下都正常，故 **Windows 開發者永遠不會遇到**，是單邊平台缺陷。
-
-R57 動工時全 repo 活文件共 16 處未加引號（`AutoClaude/README.md` 9、
-`docs/AISDLC_Agent_UserGuide.md` 4、另三份各 1），全部已修。
-
-**R59 擴面的兩個新形態**（DEF-101-507／508）：R57 只修了裸 `.[extras]`，但同一個 zsh
-`nomatch` 語意對 **具名套件** 完全一樣——`autoclaude[postgres]` 是合法 glob（literal
-`autoclaude` + 一個取自 `{p,o,s,t,g,r,e}` 的字元），無匹配檔名時同樣整條中止。R59 動工時
-掃描面內這種形態有 40 行（另 1 行在 `README_Prompt_v0.1_history.md` 歷史快照，依逐字保全
-政策不改），其中十幾處是 **執行期 raise/print 給使用者的唯一修復指引**
-（`factory.py` 4 處、各 `Pg*` adapter/repository 的 ImportError、`alembic/env.py`、
-`migrate_file_to_pg.py`）——使用者已經卡在缺依賴，照唯一提示做又拿到第二個看不懂的錯。
-另一形態是 `tools/bootstrap_core.py` 安裝失敗訊息把 **f-string 插值的絕對路徑 target**
-裸著印出（DEF-101-508）。
-
-# 為何需要這道鎖
-
-修完只是解決當下；本 repo 反覆的教訓是「人工修完的東西沒有機械鎖就會回流」。
-extras 語法在文件裡是高頻複製貼上的樣板，未來任一次新增安裝說明都可能寫回未加引號
-形態，而 `check_pytest_baseline_sites.py` 等既有守門完全不看這個面向。
-
-**R59 的教訓更直接**：這道鎖 R57 版的 docstring 曾以「repo 內無此寫法」為理由明文排除
-具名套件形態——該前提當下即為假（40 行），且 R57 自己在 `ONBOARDING.md` 寫的
-`pip install -e 'AutoClaude[dev,notifications,lint]'` 已經加了引號，可見它認得這個風險，
-卻在鎖裡宣稱不存在。**未實測的「repo 內沒有」不可以拿來當縮減掃描面的理由**，這正是
-`docs/06_quality/CrossPlatform_Scan_Dimensions.md` 判準 (4) 要治的病。
+# 缺陷本體（R57 Scan-A2＝DEF-101-479；R59 擴面＝DEF-101-507／508）與立案理由
+# **逐字遷至** `docs/06_quality/CrossPlatform_R89_Closure_Evidence.md` §A-2。
+# 一句話：zsh 的 `nomatch` 讓未加引號的 extras 在**指令執行之前**就中止整條命令列，
+# 使用者拿到與套件完全無關的 `no matches found`；bash／PowerShell 皆無此行為。
 
 # 掃描面與邊界（三段式，依 CrossPlatform_Scan_Dimensions.md 判準 (4)）
 

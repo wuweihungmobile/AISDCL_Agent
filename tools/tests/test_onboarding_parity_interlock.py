@@ -181,11 +181,9 @@ class TestOnboardingParityInterlock(unittest.TestCase):
 class TestOnboardingSelfSectionRefsResolve(unittest.TestCase):
     """R69（DEF-101-702／R68-13 同族的死指標面）：ONBOARDING 的**自我**節次引用必須解析得到。
 
-    WHY：R69 實測 §6.1 的 `root-infra-ci.yml` 列寫著「逐輪覆蓋沿革見 **§9.1 逐輪平台覆蓋表**」
-    ——而本文件從來沒有 §9.1。那句話是在同一輪把別處改寫成「指向 live 來源」時寫下的，
-    指路句本身卻指向不存在的地方；讀者按圖索驥找不到東西，只會退回猜測，比不指路更糟。
-    同型判準 `ADR-XPLAT-002` §8 item 14 (d)（內部交叉引用必須解析得到）早已寫成規格，
-    但射程只到那兩份 ADR，本文件不在內——本鎖補上這一半。
+    WHY：指路句指向不存在的節次時，讀者按圖索驥找不到東西、只會退回猜測，比不指路更糟；
+    同型判準早已寫成規格但射程不含本文件，本鎖補上這一半（立案的死指標逐字＝
+    `docs/06_quality/CrossPlatform_R89_Closure_Evidence.md`）。
 
     刻意只管**自我引用**：`ADR-SD07-001 §6.2`／`docs/…UserGuide.md §1.2` 這種前面緊接
     他檔名的引用指的是別份文件的節次，本文件無從判定，納入只會製造誤紅。

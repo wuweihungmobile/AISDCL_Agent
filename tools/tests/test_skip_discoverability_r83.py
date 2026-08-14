@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """R83／包 W2-B：「示範指令只在單一平台成立」機械守門 ＋ PG skip 解法的可發現性錨。
 
-立案（三筆當回合實測的缺陷，全部長在「指引」上）原文逐字＝`docs/06_quality/CrossPlatform_R89_Closure_Evidence.md`。
+立案原文逐字＝`docs/06_quality/CrossPlatform_R89_Closure_Evidence.md`（三筆，皆長在「指引」上）。
 ═══════════════════════════════════════════════════════════════════════════
 判準（誠實劃界：掃什麼、怎麼判、故意不判什麼）
 ═══════════════════════════════════════════════════════════════════════════
@@ -693,13 +693,9 @@ class TestDetectorRedGreenSelfProof(unittest.TestCase):
 class TestPgSkipRemedyStaysDiscoverable(unittest.TestCase):
     """「大量 skipped 的最大宗解法＝一行 docker 指令」必須留在使用者找得到的地方。
 
-    Rule 9：本類守的是**可發現性**這個意圖，不是某段文字的排版。R83 實測
-    （macOS，同一棵工作樹、同一支直譯器）：
-      · `AUTOCLAUDE_NO_PG_AUTODETECT=1 pytest tests/ -q` → 172 skipped
-      · 容器 healthy、零程式改動零環境變數 → 76 skipped
-    ⇒ 96 支 skip 的全部成因就是「容器沒起來」，而這件事在 R83 之前於
-    `ONBOARDING.md`／`useMacWin.md` 兩份 onboarding 文件裡**一個字都找不到**
-    （只寫在 `AutoClaude/docker-compose.ci.yml` 檔頭——那是已經知道要找它的人才會開的檔）。
+    Rule 9：本類守的是**可發現性**這個意圖，不是某段文字的排版。大量 skip 的最大宗成因
+    就是「容器沒起來」，而這件事在 R83 之前於兩份 onboarding 文件裡一個字都找不到
+    （立案的兩組實測 skip 數＝`docs/06_quality/CrossPlatform_R89_Closure_Evidence.md`）。
     這兩份文件是掌舵者實際會讀的入口，拿掉這段＝缺陷復發。
     """
 

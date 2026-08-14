@@ -18,6 +18,7 @@ import json
 import os
 import subprocess
 import sys
+import tempfile
 import unittest
 from pathlib import Path
 
@@ -242,6 +243,98 @@ class TestTruncationBiasesTowardsSilenceNotFalseRed(unittest.TestCase):
                               encoding="utf-8", errors="replace")
         self.assertEqual(done.returncode, 0)
         self.assertEqual(done.stderr.strip(), "")
+
+
+#: R89 事故的字面樣本：機器吐出來的那句話，與主控把它當成機制結論的那一句。
+_MACHINE_SAID = "API Error: You've hit your monthly spend limit · raise it at claude.ai"
+_INCIDENT = ("R87 的真實形狀是：主池被 13 個並發衝爆，而衝爆後後備池沒了 ⇒ "
+             "報 `monthly spend limit`。")
+
+
+class TestTheR89ErrorLiteralMechanismJudgement(unittest.TestCase):
+    """`DEF-200-123`：把**錯誤訊息的字面**當成機制結論。
+
+    守的是什麼：那句假前提被寫進交棒書、多個 commit，還當成前提餵給 Architect ⇒ 整段
+    分析建立在假前提上；而真相是那個量**連續 15 列都是 100.0＝常數**，不可能是變因。
+    本判準治**形態**，內容那一半治在 `tools/probe/variate_contrast.py`。
+    """
+
+    def test_the_incident_sentence_is_flagged(self) -> None:
+        """缺陷復發即紅——沒有這一條，整支判準可以恆回 `[]` 而 rc 一模一樣。"""
+        hits = G.error_literal_mechanism_hits(_INCIDENT, _MACHINE_SAID)
+        self.assertTrue(hits, "事故原句未被指出來")
+        self.assertEqual(hits[0]["literal"], "monthly spend limit")
+
+    def test_the_corrected_sentence_with_a_contrast_word_is_silent(self) -> None:
+        """對照組＝掌舵者訂正後我自己寫下的**正解**，命中它就是處罰正解。
+        普查實測：抑制詞在全母體只擋掉這一句 ⇒ 只擋正解、不減損鑑別力。"""
+        self.assertEqual(G.error_literal_mechanism_hits(
+            "`monthly spend limit` 全程都是滿的 ⇒ 它是常數，不可能是變因。",
+            _MACHINE_SAID), [])
+
+    def test_a_literal_the_machine_never_said_is_silent(self) -> None:
+        """問的是「這串字是不是機器吐給你的」——沒在工具輸出裡出現就不是。
+        少了這一條，判準會變成「不准在結論裡引述任何英文」，那是另一回事。"""
+        self.assertEqual(G.error_literal_mechanism_hits(_INCIDENT, "rc=0 全綠"), [])
+
+    def test_symbols_are_not_messages(self) -> None:
+        """普查裡 10 筆假陽性有 8 筆是這一型 ⇒ 精確率 23%→100% 全靠這一條。
+        寫「⇒ `ModuleNotFoundError`」的人是在指認他**推理出來的**失效模式，不是在轉述
+        機器的散文。符號的記號＝詞內大寫／`.`／`_`／`:`／只有一個詞。"""
+        for symbol in ("ModuleNotFoundError", "WinError 216", "DeadlineExceeded",
+                       "subprocess.TimeoutExpired",
+                       "TestR71CodeRoundLabelsNeverExceedLedgerCurrentRound"):
+            with self.subTest(symbol=symbol):
+                self.assertEqual(
+                    G.error_literal_mechanism_hits(f"打包沒宣告 ⇒ `{symbol}`。",
+                                                   f"log: {symbol} raised"),
+                    [], f"{symbol!r} 是符號不是訊息，不該命中")
+
+    def test_an_ordinary_mechanism_sentence_stays_silent(self) -> None:
+        """全母體 1,474 句機制結論句只命中 3 筆——沒有這一條就量不出那個分母有沒有意義。"""
+        self.assertEqual(G.error_literal_mechanism_hits(
+            "根因是 `_defer_bootout` 寫死的 sleep 3。", _MACHINE_SAID), [])
+
+
+class TestTheCausalEscapeHatchIsItsOwn(unittest.TestCase):
+    """兩個判準各自一個逃生口——共用會讓「別唸我這件事」順手關掉另一件。"""
+
+    def setUp(self) -> None:
+        """造一支**真的逐字稿**當證據面：證據只認 `tool_result` 區塊，隨便給支 `.py`
+        會讓工具輸出是空的，於是「機器說過那句話」這個前提在測試裡不成立（實測）。"""
+        self._dir = tempfile.TemporaryDirectory()
+        self.transcript = Path(self._dir.name) / "t.jsonl"
+        self.transcript.write_text(json.dumps({"message": {"role": "user", "content": [
+            {"type": "tool_result", "content": _MACHINE_SAID}]}}) + "\n",
+            encoding="utf-8")
+        self.addCleanup(self._dir.cleanup)
+
+    def _payload(self) -> str:
+        return json.dumps({"hook_event_name": "Stop",
+                           "last_assistant_message": _INCIDENT,
+                           "transcript_path": str(self.transcript)})
+
+    def test_it_speaks_on_stderr_but_still_exits_zero(self) -> None:
+        done = subprocess.run([sys.executable, str(_HOOK)], input=self._payload(),
+                              capture_output=True, text=True, timeout=60,
+                              encoding="utf-8", errors="replace")
+        self.assertEqual(done.returncode, 0, "本守衛永不阻斷")
+        self.assertIn("monthly spend limit", done.stderr)
+        self.assertIn("variate_contrast.py", done.stderr, "必須指出查證只要一行")
+
+    def test_turning_off_the_causal_guard_leaves_the_other_one_armed(self) -> None:
+        """關掉因果判準之後，值域判準必須**還在**——否則兩個逃生口只是名字不同。"""
+        env = {**os.environ, "AUTOSDD_CAUSAL_GUARD_OFF": "1"}
+        payload = json.dumps({
+            "hook_event_name": "Stop",
+            "last_assistant_message": _INCIDENT + " 另外全套 99991 passed。",
+            "transcript_path": str(self.transcript)})
+        done = subprocess.run([sys.executable, str(_HOOK)], input=payload, env=env,
+                              capture_output=True, text=True, timeout=60,
+                              encoding="utf-8", errors="replace")
+        self.assertEqual(done.returncode, 0)
+        self.assertNotIn("錯誤訊息的字面", done.stderr, "逃生口沒有真的關掉本判準")
+        self.assertIn("99991", done.stderr, "另一個判準被順手關掉了")
 
 
 if __name__ == "__main__":

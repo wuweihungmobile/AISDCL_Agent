@@ -10,14 +10,15 @@
     本檔只交付**純文字判準** ＋ 對現存兩支檔的「兩邊 SCHEMA 必須相等」比對。
   · M9 的端到端半（`quota_gate` 連呼 21 次）——`quota_gate` 住 hook，本包不動 hook。
   · M10 的 spy 半（`quota_gate` 必須恰好呼叫 `decide` 一次）——同上。
-  · ✅ **M5 靜態半的三個掃描面已於 R82／C4 全數轉成硬 gate**（見
-    `TestM5EveryScanSurfaceIsGatedHard`）。此處原本記載「本包只 gate 得動第一個、
-    其餘兩面留待下一階段」——那段劃界在當時是誠實的，但它被留在原地整整一輪，
-    期間複審鏡以沙箱注入實測**五組全綠**（worst() 放回 gate／meter、fanout_cap(pct)
-    放回 gate 與 AutoClaude adapter、quota_tier_of(pct) 放回 hook）。
-    現在四個面逐檔硬判，並附「注入真檔內容後必須翻紅」的端到端自證。
+  · ✅ **M5 靜態半的四個掃描面已於 R82／C4 全數轉成硬 gate**（見
+    `TestM5EveryScanSurfaceIsGatedHard`；立案史料＝R89 收尾證據檔）。
 本檔另外釘住**本層**可釘的那一半：`Decision` 的建構點必須唯一（＝`decide`），
 讓「hook 裡再長出第二條自己推導 band/cap 的路徑」在接線時就沒有可抄的樣板。
+
+🔴 **本檔各鎖的立案史料原文一律住 `docs/06_quality/CrossPlatform_R89_Closure_Evidence.md`**
+（R89 起的搬遷體例：判準與判準的理由留在本檔，事故數字／裁決逐字／舊版形態進證據檔）。
+下文以「R89 收尾證據檔」指稱它——**指標的家只有這一處**，逐處複寫完整路徑會讓同一份
+知識住十幾個家，而其中只有一個會被人改（本 repo 對 `Find-GitBash` 已下過同型判決）。
 
 執行：python -m unittest test_quota_policy -v   （cwd＝tools/tests）
 """
@@ -30,14 +31,13 @@ import sys
 import unittest
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
+from unittest import mock
 
 _HERE = Path(__file__).resolve()
 _REPO = _HERE.parents[2]
 sys.path.insert(0, str(_REPO / "tools" / "lib"))
 # 🔴 判準本體（M2／M5／M7／M10 ＋ R86 三缺陷）住 `tools/lib/quota_criteria.py`，本檔只留
-# 「呼叫判準 ＋ 斷言」。理由兩條同時成立，見該檔檔頭：① 它們不依賴 unittest，是對源碼／
-# 讀數的純判定；② `tools/tests/*.py` 受護欄層行數棘輪管，判準留在這裡會逼別包去砍別的
-# 東西來抵。**鑑別力不得下降**：搬家後全部合成注入自證已重跑，結果與搬家前逐字相同。
+# 「呼叫判準 ＋ 斷言」；理由見該檔檔頭。**鑑別力不得下降**（搬家後注入自證全數重跑）。
 import pace_contract as PC  # noqa: E402
 import quota_criteria as QC  # noqa: E402
 import quota_meter as M  # noqa: E402
@@ -356,15 +356,11 @@ class TestM1bAccelerationSurvivesAggregation(unittest.TestCase):
     def test_an_axis_with_no_horizon_but_a_real_cap_blocks_acceleration(self) -> None:
         """fail-closed 那一半**原封不動**：期程不明且**真的在煞車**的軸仍一票否決。
 
-        🔴 R84／SA-01 訂正本測試此前的形狀（原版拿 `spend 0%`＝free 帶當否決者，斷言
-        `rec == 8`）。那個斷言把「一個 cap=None、零煞車力的軸有完整否決權」釘成了契約，
-        於是掌舵者錨點①（低水位＋近 reset ⇒ 多派）在 production **任何**水位下都拿不到
-        ×2：live 快取 7 軸有 3 軸 `resets_at=null` 且全是 0% ⇒ 否決永遠成立。
-        現在的不變式是「**不參與 cap 的軸不得參與 pace**」，兩個方向各自被下面兩支釘住。
+        不變式＝「**不參與 cap 的軸不得參與 pace**」，兩個方向各自被下面兩支釘住。
+        R84／SA-01 的立案史料＝`CrossPlatform_R89_Closure_Evidence.md`。
         """
-        # 🔴 R89：fixture 由 `spend` 換成 `nimbus_quill`——被測的性質是「**無期程但有 cap
-        # 的軸**能否決加速」，與那個軸是誰無關；而 `spend` 自 R89 起是 `FALLBACK_KINDS`
-        # （保險池，不進 cap 聚合）⇒ 拿它當煞車軸的例子，測的就不再是本測試宣稱的性質。
+        # 🔴 R89：fixture 由 `spend` 換成 `nimbus_quill`——`spend` 是保險軸、不進 gate，
+        # 拿它當煞車軸的例子，測的就不再是本測試宣稱的性質。
         braking = Q.decide(state(("session", 75, 3), ("nimbus_quill", 55, None)), NOW, P)
         self.assertEqual(braking.recommended_fanout, 2, "期程不明的煞車軸必須仍能否決加速")
         self.assertEqual(braking.cap, 4, "它的 cap 也必須真的在（否則它不是煞車軸）")
@@ -372,7 +368,7 @@ class TestM1bAccelerationSurvivesAggregation(unittest.TestCase):
     def test_red_dropping_the_conjunct_lets_a_braking_null_axis_be_overtaken(self) -> None:
         """🔴 合成注入：拿掉 `r.cap is not None` 的**對偶**——把否決整條移除 ⇒ 上一支的
         情境從 2 變 4 ⇒ fail-closed 那一半有牙齒，不是恆綠。"""
-        readings = Q.axes_of(state(("session", 75, 3), ("spend", 55, None)), NOW, P)
+        readings = Q.axes_of(state(("session", 75, 3), ("nimbus_quill", 55, None)), NOW, P)
         no_veto = max(Q._mult(r.horizon, P) for r in readings)      # ＝拿掉整個 if
         base = min(Q._base_rec(r.band, P) for r in readings)
         cap = min(QC.cap_num(r.cap) for r in readings)
@@ -384,15 +380,17 @@ class TestM1bAccelerationSurvivesAggregation(unittest.TestCase):
         """治本那一半：`cap is None`（free 帶）的無期程軸**不得**否決加速。
 
         數字是 live 快取的形狀（3 軸 `resets_at=null` 且 0%）：修前 8、修後 16。
+        🔴 R89 收尾／QA 複審 B-3：fixture 由 `spend` 換成 `nimbus_quill`（保險軸到不了
+        `_pace_of()` ⇒ 對它零鑑別力），紅端自證同步換軸讓兩端的軸集合配對得起來。
         """
-        with_none = Q.decide(state(("session", 0, 5), ("spend", 0, None)), NOW, P)
-        without = Q.decide(state(("session", 0, 5), ("spend", 0, 8640)), NOW, P)
+        with_none = Q.decide(state(("session", 0, 5), ("nimbus_quill", 0, None)), NOW, P)
+        without = Q.decide(state(("session", 0, 5), ("nimbus_quill", 0, 8640)), NOW, P)
         self.assertEqual(with_none.recommended_fanout, 16, "零煞車力的軸仍在從後門煞車")
         self.assertEqual(without.recommended_fanout, 16, "對照組：沒有 null 軸時本來就 16")
 
     def test_red_the_old_any_none_predicate_halves_the_recommendation(self) -> None:
         """🔴 合成注入：把判準退回舊形態（`any(horizon == NONE)`）⇒ 上一支必紅（8 != 16）。"""
-        readings = Q.axes_of(state(("session", 0, 5), ("spend", 0, None)), NOW, P)
+        readings = Q.axes_of(state(("session", 0, 5), ("nimbus_quill", 0, None)), NOW, P)
         fastest = max(Q._mult(r.horizon, P) for r in readings)
         old_pace = (min(1.0, fastest)
                     if any(r.horizon == Q.AXIS_NONE for r in readings) else fastest)
@@ -900,22 +898,14 @@ class TestM5ScanSurfaceScope(unittest.TestCase):
                       _M5_SCAN_SURFACES["tools/lib/quota_*.py"])
 
 
-# 🔴 R82／C4：把「三個掃描面」從**列舉**升成**硬 gate**。
-#
-# 病（複審鏡以沙箱注入實測，每次跑全套）：`QC.worst_mentions`／`QC.scalar_decision_defs` 兩個
-# 判準只對 `_MODULE_SRC`（＝`quota_policy.py` 自己）斷言，於是
-#   worst() 放回 quota_gate.py → rc=0 GREEN；放回 quota_meter.py → rc=0 GREEN；
-#   fanout_cap(pct) 放回 quota_gate.py → GREEN；quota_tier_of(pct) 放回 hook → GREEN；
-#   fanout_cap(pct) 放進 AutoClaude adapter → GREEN。
-# 五組注入全綠。`_M5_SCAN_SURFACES` 當時**列了**三個面，但那一條只 `assertIsInstance(...,
-# list)`＝「解析得動」，不是「乾淨」；而那支「確認掃描器擋得住活標的」的測試（同輪一併
-# 刪除，名字刻意不用反引號寫出來——它已不存在，寫成反引號就是新的幽靈引用）
-# 用的是 `if 定義還在: assertIn(...)` ⇒ 定義不在就整條沉默，**結構上不可能失敗**。
-# 「掃描面列出來了」與「掃描面被判了」是兩件事，前者讀起來很像後者。
-#
-# 現在的判準：三個面（＋ AutoClaude adapter 那一面）**每一支檔**都必須同時
-# `QC.scalar_decision_defs == []` 且 `QC.worst_mentions == []`。今天全部為空（落地當回合實測），
-# 所以這不是「登記存量」而是「不准有人放回去」。
+# 🔴 R82／C4：把「三個掃描面」從**列舉**升成**硬 gate**。病＝兩個判準只對
+# `quota_policy.py` 自己斷言，於是把 `worst()`／`fanout_cap(pct)`／`quota_tier_of(pct)`
+# 放回 gate／meter／hook／AutoClaude adapter **五組注入全綠**；「掃描面列出來了」與
+# 「掃描面被判了」是兩件事，前者讀起來很像後者。當時那支「確認掃描器擋得住活標的」的
+# 測試寫成 `if 定義還在: assertIn(...)` ⇒ 定義不在就整條沉默＝**結構上不可能失敗**
+# （這一型比沒有鎖更難看見）。立案史料原文＝R89 收尾證據檔。
+# 現在的判準：四個面**每一支檔**都必須同時 `QC.scalar_decision_defs == []` 且
+# `QC.worst_mentions == []`。今天全部為空 ⇒ 這不是「登記存量」而是「不准有人放回去」。
 class TestM5EveryScanSurfaceIsGatedHard(unittest.TestCase):
     def _files(self) -> list[Path]:
         return [p for files in _M5_SCAN_SURFACES.values() for p in files if p.is_file()]
@@ -1621,21 +1611,9 @@ class TestR86ThePaceContractWriterMatchesTheEngineReader(unittest.TestCase):
 class TestR87TheMeterMayNotDropAThrottlingAxis(unittest.TestCase):
     """R87 事故鎖：**取數層不得把「已撞頂但自報 `enabled:false`」的軸丟掉。**
 
-    🔴 立案（本輪真實事故，非假想）：13 個 subagent 全數撞
-    `You've hit your monthly spend limit`，燒 **1,319,703 tokens**／331 tool_uses／634 秒、
-    **零產出**。根因**不在判讀層**——`decide()` 的「halt 一票否決」不變式當時完好無損；
-    舵手是從**取數層**把 `spend`／`extra_usage` 兩軸整個排除掉（誤讀
-    `enabled:false` ＝「池子關著、不算節流軸」，真意是 `used 610 > limit 500` 已撞月度
-    支出上限、購買功能因此被 org 層停用）。於是判讀層**拿不到輸入**，整道保護在
-    **零判準觸發**的情況下失效，且失敗表徵與「一切正常」完全相同。
-
-    ⇒ 這揭露的架構缺口是：判讀層的不變式只保證「**給定的軸**不會被放寬」，
-    它**不保證「軸不會消失」**。本鎖補的就是那一格——把事故當下的真實 payload 釘成
-    fixture，任何讓它**不再 halt** 的改動當場轉紅。
-
-    🔴 本鎖的存在理由是「**由程式否決模型，不是由模型自律**」：掌舵者對本事故的裁決
-    逐字為「不是要寫在程式架構控制嗎？怎麼變成你在控制？」。散文約束對當下的模型
-    零攔阻力（repo 已多次實證），所以下一次有人再判定「這是假紅」時，必須有東西轉紅。
+    架構缺口：判讀層的不變式只保證「**給定的軸**不會被放寬」，不保證「軸不會消失」。
+    立案史料原文（事故數字、掌舵者裁決逐字、本鎖的存在理由）＝R89 收尾證據檔的
+    〈護欄層史料搬遷（R89 收尾批）〉節（路徑見檔頭）。
     """
 
     #: 事故當回合 http 200 回應的**真實**節錄（關鍵欄位逐字保留，時間欄改為相對本檔 NOW）。
@@ -1668,17 +1646,8 @@ class TestR87TheMeterMayNotDropAThrottlingAxis(unittest.TestCase):
         self.assertIn("extra_usage", kinds)
 
     def test_the_incident_payload_still_carries_both_axes_end_to_end(self) -> None:
-        """端到端：兩軸的**逐軸讀數必須原封不動**，只有 cap 聚合不吃它們。
-
-        🔴 R89 重新表述（Architect 複審 4-1）。舊判準是「結論必須是 halt／cap=0」，
-        而 R89 的憲法裁決（PRD §6 4b `OVERAGE_POLICY=FREEZE`＝絕不動用超額 ⇒ 保險軸
-        不進 cap 聚合）讓它必然為假。**但期望值不可以改成 `free`**：Architect 實測
-        把事故 payload 同時餵給正確實作與 R87 錯誤實作，`band`／`cap`／`rec`／`binding`
-        四欄**逐字相同** ⇒ 改成 free 會得到一支對 R87 錯誤實作照樣通過的假鎖。
-        ⇒ 判準改到**仍有鑑別力**的觀測面：R87 是「軸整個消失」，所以就守軸還在不在、
-        水位有沒有被改寫、逐軸帶別與逐軸 cap 有沒有被放寬。R87 錯誤實作**結構上**
-        滿足不了第一條（軸不在 `per_axis` 裡）。
-        """
+        """端到端：逐軸讀數原封不動，只有 cap 聚合不吃它們。判準刻意不守「結論必須是
+        halt」（正確與 R87 錯誤實作四欄逐字相同＝假鎖）。史料＝R89 證據檔。"""
         d = Q.decide(self._state_from(M.bucket_readings(self.INCIDENT)), NOW, P)
         seen = {r.axis.kind: r for r in d.per_axis}
         for kind in ("spend", "extra_usage"):
@@ -1687,17 +1656,15 @@ class TestR87TheMeterMayNotDropAThrottlingAxis(unittest.TestCase):
             self.assertEqual(seen[kind].band, Q.BAND_HALT, "逐軸帶別被放寬")
             self.assertEqual(seen[kind].cap, 0, "逐軸 cap 被放寬")
             self.assertIn(f"kind={kind} 100%", Q.describe(d), "人看的那一面少一軸")
-        # 🔴 保險軸撞頂 ⇒ cap 夾到 1（不是 0、也不是 C_max）。理由見 `decide()` 內
-        # 那段 B-2：n=1 的成功探針不足以解釋 R87 的 13/13 全滅，殘餘風險收斂成 1 個。
-        self.assertEqual(d.cap, 1)
+        # 🔴 R89 收尾：舊斷言 `assertEqual(d.cap, 1)`＝那道地板的契約，地板已拆（三條理由
+        # ＝`quota_policy.decide()` 的墓碑段）。改守它拆掉才回來的**不變式**：cap 由 binding
+        # 解釋，否則取 binding `resets_at` 的人機訊息會講另一條軸的 reset＝假話。
+        self.assertEqual(d.cap, seen[d.binding.kind].cap, "cap 不再由 binding 解釋")
+        self.assertNotIn(d.binding.kind, Q.FALLBACK_KINDS, "binding 落在保險軸")
 
     def test_the_lock_discriminates(self) -> None:
-        """合成注入自證：**重演** R87 那個錯誤實作，必須被抓到。
-
-        🔴 R89：判準隨上一支一起換面。舊版斷言「重演組必須不再 halt」，而正確實作
-        現在**也**不 halt ⇒ 該斷言已恆真（Architect 實測四欄逐字相同）＝假鎖。
-        新判準指向 R87 真正的差異：**軸在不在**。
-        """
+        """合成注入自證：**重演** R87 那個錯誤實作，必須被抓到。判準指向 R87 真正的
+        差異＝**軸在不在**（舊版「重演組必須不再 halt」已恆真＝假鎖）。"""
         dropped = [r for r in M.bucket_readings(self.INCIDENT)
                    if r["kind"] not in ("spend", "extra_usage")]
         self.assertTrue(dropped, "重演組不得為空，否則本自證無鑑別力")
@@ -1705,16 +1672,13 @@ class TestR87TheMeterMayNotDropAThrottlingAxis(unittest.TestCase):
         kinds = {r.axis.kind for r in d_broken.per_axis}
         self.assertNotIn("spend", kinds, "重演組沒把軸拿掉＝這個自證沒有在重演 R87")
         self.assertNotIn("extra_usage", kinds)
-        # 正確實作與錯誤實作在**這個**觀測面上必須不同（上一支守正向，這裡守反向）。
-        self.assertNotEqual(d_broken.cap, 1, "掉軸之後 cap 若仍是 1，本鎖無鑑別力")
+        # 🔴 R89 收尾：舊斷言 `assertNotEqual(d_broken.cap, 1)` 隨地板作廢；反向判準改指
+        # 第二個出口（`per_axis` 與 `describe()` 各自會失明，R87 是兩條同時失明）。
+        self.assertNotIn("kind=spend ", Q.describe(d_broken), "掉軸之後人看的那一面仍印得出它")
 
     def test_disabled_is_not_a_reason_to_drop_an_axis(self) -> None:
-        """`enabled:false` 這個欄位本身**不得**成為排除依據。
-
-        判準刻意寫成「同一份 payload、只把布林翻成 True」的對照：兩者收到的軸集合
-        必須**逐字相同**。若哪天有人再以 `enabled`／`is_enabled` 當過濾條件，
-        這一條會當場紅——而它是這次事故裡唯一被動過的那一行。
-        """
+        """`enabled:false` 本身**不得**成為排除依據：同一份 payload 只把布林翻成 True，
+        兩者收到的軸集合必須逐字相同（那是這次事故裡唯一被動過的那一行）。"""
         enabled = {k: (dict(v, **({"enabled": True} if "enabled" in v else {}),
                           **({"is_enabled": True} if "is_enabled" in v else {}))
                        if isinstance(v, dict) else v)
@@ -1727,10 +1691,8 @@ class TestR87TheMeterMayNotDropAThrottlingAxis(unittest.TestCase):
 class TestR87AccountPostureIsKnownBeforeDispatch(unittest.TestCase):
     """R87：**派工前**要先知道 Account Type 與有沒有可用 credits（掌舵者裁決）。
 
-    立案逐字：「配置 Agents 前，要先知道 Account Type and Account 是否有 Usage
-    credits 再進行配置！」。事故機制＝訂閱窗尚有 37% 餘裕、credits 池已爆且停用
-    ⇒ 扇出全滅而主 session 照常 ⇒ **credits 是「還有沒有救」的布林，不是節流軸**。
-    """
+    立案逐字與事故機制史料＝R89 收尾證據檔（路徑見檔頭）。
+    結論：**credits 是「還有沒有救」的布林，不是節流軸**。"""
 
     INCIDENT = TestR87TheMeterMayNotDropAThrottlingAxis.INCIDENT
 
@@ -1765,8 +1727,7 @@ class TestR87AccountPostureIsKnownBeforeDispatch(unittest.TestCase):
             self.assertFalse(M.account_posture(bad)["fallback_available"], bad)
 
     def test_the_fingerprint_is_the_axis_set_not_a_plan_name(self) -> None:
-        """指紋＝軸組合。payload 沒有方案名（實測 17 個頂層鍵無一為方案名），
-        且它的用途是**偵測方案變更**，不是查一組寫死的參數。"""
+        """指紋＝軸組合（payload 沒有方案名），不是拿去查一組寫死的參數。"""
         p = M.account_posture(self.INCIDENT)
         self.assertIn("spend", p["plan_fingerprint"])
         self.assertIn("session", p["plan_fingerprint"])
@@ -1775,30 +1736,74 @@ class TestR87AccountPostureIsKnownBeforeDispatch(unittest.TestCase):
 
 class TestR89TheFallbackSetMayNotSwallowASubscriptionAxis(unittest.TestCase):
     """🔴 R89／Architect 複審②：`FALLBACK_KINDS` 是新開的繞過面，本鎖是它唯一的觀測者。
+    立案實測與 R89 收尾的判準翻面（黑名單 → 白名單）史料＝R89 收尾證據檔。"""
 
-    立案實測（Architect 對該常數逐條合成注入，跑全套 136 測）：注入 `five_hour`
-    ——**最主要的訂閱節流軸**——只有 **1** 支測試會紅，而那支正是同輪被改寫的
-    `test_the_incident_payload_still_halts`；注入**全部**訂閱軸則轉紅 **0** 支
-    （被 `decide()` 裡的 `or readings` fail-safe 遮住）。⇒ `DEF-200-107` 的形狀
-    （一個軸可以靜默停止 gating，而失敗表徵與正常運作相同）沒有被消滅，只是從**取數層**
-    搬到了**判讀層**，新住址一個不變式都沒有。本鎖補的就是那一格。
-    """
-
-    #: 訂閱窗那一族——它們**永遠**不是保險池，被吞掉即等於關閉主節流。
-    SUBSCRIPTION = frozenset({"session", "five_hour", "seven_day", "weekly_all"})
+    #: 🔴 R89 收尾／QA 複審 N1：判準由「黑名單四個訂閱軸」翻成**白名單以外一律紅**（舊黑
+    #: 名單只罩 7 個活體軸中的 4 個，注入 `weekly_scoped` 紅 0 支＝對它完全失明）。前三個
+    #: 成員的出處＝PRD `:78`；`spend` PRD 未列，是端點頂層鍵，由 payload 實測補入。
+    ALLOWED_FALLBACK = frozenset({"extra_usage", "overage", "spend",
+                                  "seven_day_overage_included"})
+    #: 舊黑名單，只留給下一支注入自證當對照組（不再是任何生效判準）。
+    OLD_BLACKLIST = frozenset({"session", "five_hour", "seven_day", "weekly_all"})
 
     def test_no_subscription_axis_is_ever_a_fallback_axis(self) -> None:
-        """三條一起：不得吞訂閱軸／保險集只有一個家／訂閱軸撞線仍然 halt。"""
-        self.assertEqual(Q.FALLBACK_KINDS & self.SUBSCRIPTION, frozenset(),
-                         "訂閱軸被列為保險池＝主節流被關掉，而這是唯一會叫的地方")
-        # 🔴 同一份知識住兩個家（`FALLBACK_KINDS` 與 `quota_meter.CREDIT_POOL_KEYS`）
-        # 且不准互相 import ⇒ 那個縫只能由判準縫（體例同 pace contract 那對）。
-        self.assertEqual(Q.FALLBACK_KINDS, frozenset(M.CREDIT_POOL_KEYS),
-                         "保險池清單在 policy 與 meter 兩邊漂移了")
+        """四條一起：白名單以外一律不得是保險軸／兩家是**包含**不是相等／PRD 明列的
+        overage 類必須在／訂閱軸撞線仍然 halt。"""
+        self.assertEqual(Q.FALLBACK_KINDS - self.ALLOWED_FALLBACK, set(),
+                         "保險集吞了一個沒有出處的 kind＝主節流可能被整條關掉")
+        # 🔴 SA 複審 B-3：由 `==` 改為**子集**——兩者命名空間不同（頂層美元池 vs bucket
+        # kind），今天恰好同值卻被焊死 ⇒「補齊保險軸」這件事本身會轉紅（本輪實測到）。
+        self.assertLessEqual(frozenset(M.CREDIT_POOL_KEYS), Q.FALLBACK_KINDS,
+                             "美元計價池不是保險軸 ⇒ 它會進 cap 聚合＝憲法裁決被繞過")
+        # PRD `:78` 的 overage 類：取數層原樣帶出 kind ⇒ 漏列＝本輪剛治好的病原樣復發。
+        self.assertLessEqual({"overage", "seven_day_overage_included"}, Q.FALLBACK_KINDS)
         # 排除「這道放寬只准作用在保險軸上」：訂閱軸自己撞線必須仍然 cap=0。
         self.assertEqual(
             Q.decide(state(("five_hour", 96, 30), ("spend", 0, None)), NOW, P).cap, 0,
             "訂閱軸撞停止水位卻沒 halt ⇒ 這道改動放寬到了不該放寬的地方")
+
+    def test_red_the_old_blacklist_was_blind_to_the_axes_it_did_not_name(self) -> None:
+        """🔴 合成注入：`weekly_scoped` 被吞——舊黑名單全綠，新白名單必紅。"""
+        injected = Q.FALLBACK_KINDS | {"weekly_scoped"}
+        self.assertEqual(injected & self.OLD_BLACKLIST, frozenset(), "舊判準對它全綠")
+        self.assertNotEqual(injected - self.ALLOWED_FALLBACK, set(), "新判準必須紅")
+
+
+class TestR89UnknownKindsAreLoudButNeverReclassified(unittest.TestCase):
+    """🔴 R89 收尾／SA 複審 B-3 末項：未知 kind（live 實測 `nimbus_quill`）的**預設分類**
+    ＝維持訂閱軸／保守側，但必須出聲。兩個方向缺一即假鎖：①`note` 與 `reason` 兩個出口都
+    要看得到；②`KNOWN_KINDS` 的成員資格對 `band`／`cap`／`rec` 必須**零影響**，否則它就
+    變成檔頭紀律「禁止寫死桶名清單」真正要禁的那種東西（過期即靜默答錯）。
+    史料＝R89 收尾證據檔（路徑見檔頭）。"""
+
+    KNOWN_PAIR = (("session", 10, 60), ("seven_day", 88, 30))
+
+    def test_an_unknown_kind_says_so_in_both_outlets(self) -> None:
+        d = Q.decide(state(("session", 10, 60), ("nimbus_quill", 0, None)), NOW, P)
+        seen = {r.axis.kind: r for r in d.per_axis}
+        self.assertIn(Q.NOTE_UNKNOWN, seen["nimbus_quill"].note, "note 出口沒說")
+        self.assertIn(Q.NOTE_UNKNOWN, d.reason, "reason 出口沒說")
+        self.assertNotIn(Q.NOTE_UNKNOWN, seen["session"].note, "已知軸被誤標")
+
+    def test_membership_changes_nothing_but_the_note(self) -> None:
+        """②：同一組讀數換一個「已知」的軸名，三個決策欄必須逐字相同。"""
+        unknown = Q.decide(state(("session", 10, 60), ("nimbus_quill", 88, 30)), NOW, P)
+        known = Q.decide(state(*self.KNOWN_PAIR), NOW, P)
+        self.assertEqual(
+            (unknown.cap, unknown.recommended_fanout, unknown.band),
+            (known.cap, known.recommended_fanout, known.band),
+            "未知 kind 的成員資格改變了決策 ⇒ 它已經在分類，而過期的名單會靜默答錯")
+
+    def test_red_a_stale_vocabulary_only_adds_noise(self) -> None:
+        """🔴 合成注入（fail-safe 方向）：把一個**已知**軸從詞彙表拿掉 ⇒ 只多一句話、
+        三個決策欄一格不動＝「名單過期只會多說、不會答錯」那句宣稱的證明。"""
+        before = Q.decide(state(*self.KNOWN_PAIR), NOW, P)
+        with mock.patch.object(Q, "KNOWN_KINDS", Q.KNOWN_KINDS - {"seven_day"}):
+            after = Q.decide(state(*self.KNOWN_PAIR), NOW, P)
+        self.assertEqual((before.cap, before.recommended_fanout, before.band),
+                         (after.cap, after.recommended_fanout, after.band))
+        self.assertNotIn(Q.NOTE_UNKNOWN, before.reason)
+        self.assertIn(Q.NOTE_UNKNOWN, after.reason, "詞彙表少一項卻沒多說＝觀測者失效")
 
 
 if __name__ == "__main__":

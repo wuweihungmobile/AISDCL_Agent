@@ -116,14 +116,42 @@ BAND_UNMEASURED = "unmeasured"
 #: 消費端只有 `decide()` 的 cap 聚合；**取數層不得因此少量一個軸**（`DEF-200-107` 的教訓）。
 #: 未來若實作 PRD 的 `OVERAGE_POLICY=ALLOW_WITH_CAP`，那是讓這些軸重新參與的開關，
 #: 不是把本常數刪掉——刪掉會讓「保險」與「主力」再度分不出來。
-FALLBACK_KINDS = frozenset({"extra_usage", "spend"})
+#:
+#: 🔴 R89 收尾／SA 複審 B-3：本集合**不是** `quota_meter.CREDIT_POOL_KEYS` 的同義詞。
+#: 兩者的命名空間不同——後者是「美元計價池在 payload **頂層**的兩種表述」（`_credit_pool()`
+#: 對每一個鍵有各自的欄位形狀），本集合是「哪些 **bucket kind** 不進 cap 聚合」。R89 第一版
+#: 的鏡射鎖寫成 `==`＝把「今天恰好同值」焊成契約，於是**補齊保險軸這件事本身會轉紅**。
+#: 正確關係是**包含**：美元池必為保險軸，保險軸可以更多（鎖已改為子集判準）。
+#: 🔴 補進來的兩個 kind 逐字取自 PRD `:78`（§0.6 新發現 1 的額度類型列舉）：`overage`／
+#: `seven_day_overage_included`。它們今天在 live payload 一次都沒出現過，但
+#: `quota_meter.bucket_readings()` 把 `item["kind"]` **原樣**帶出 ⇒ 伺服器哪天吐出來，
+#: 它們會被當訂閱軸進 cap 聚合＝本輪剛治好的病原樣復發，而失敗表徵與正常運作相同。
+#: 🔴 `spend` **不在** PRD `:78` 的列舉裡（它是端點頂層鍵，不是 `rate_limits` 的 kind），
+#: 由 payload 實測補入——照實記，不要讓下一個人以為四個成員都有憲法出處。
+FALLBACK_KINDS = frozenset({"extra_usage", "spend", "overage", "seven_day_overage_included"})
+
+#: 🔴 R89 收尾／SA 複審 B-3 末項：**未知 kind 的預設分類**。live 快取當回合實測 7 軸
+#: （`session`／`weekly_all`／`weekly_scoped`／`five_hour`／`seven_day`／`nimbus_quill`／
+#: `spend`），其中 `nimbus_quill` 不在 PRD 任何列舉裡 ⇒ 它今天**已經**在參與 cap 聚合，
+#: 而沒有任何地方說過這件事。定調＝**維持訂閱軸／保守側**（deny-list 的結構性後果：不在
+#: `FALLBACK_KINDS` 就進 gate），但必須**出聲**：靜默地把一個沒人看過的 kind 當主力節流軸，
+#: 與靜默地當保險軸一樣壞——兩者的失敗表徵都與正常運作相同。
+#: 🔴 這**不是**檔頭「禁止寫死桶名清單」那條紀律要禁的東西，差別在**用途**：那條禁的是拿
+#: 名單去**選桶／分類**（名單一過期就整片失明、而且會靜默答錯）；本集合一行都不參與分類，
+#: 只決定「要不要多說一句」。它過期的後果是**多說**幾句（false unknown），結構上不可能改變
+#: 任何一個 cap／band／rec ⇒ 方向是 fail-safe。這條性質由
+#: `TestR89UnknownKindsAreLoudButNeverReclassified` 釘住（含合成注入雙向自證）。
+KNOWN_KINDS = FALLBACK_KINDS | frozenset({"session", "five_hour", "5h", "seven_day",
+    "seven_day_opus", "seven_day_sonnet", "weekly_all", "weekly_scoped"})
 
 #: 逐軸解析的失效字面。`missing`（欄位缺席＝**正常**，實測 weekly_scoped／spend 都是）
 #: 與 `bad-horizon`（有字串但解不出 aware＝**伺服器格式變了**）必須分得開——今天兩者
 #: 共用一個 `None`，於是格式變更是靜默的。
 NOTE_OK, NOTE_MISSING, NOTE_BAD, NOTE_SKEW = "", "missing", "bad-horizon", "clock-skew"
 #: 水位本身不是量測值（NaN／±inf／非數字／越界）。與上面三個同樣不得靜默。
-NOTE_BAD_PCT = "bad-pct"
+#: `unknown-kind`＝伺服器吐出一個本 repo 從未列舉過的 kind（見 `KNOWN_KINDS`）。它與上面
+#: 幾個同族：**都只描述取數面發生了什麼，一個都不參與分類**。多重情形以 `+` 串接。
+NOTE_BAD_PCT, NOTE_UNKNOWN = "bad-pct", "unknown-kind"
 
 _INF = float("inf")
 
@@ -434,6 +462,8 @@ def axes_of(state: QuotaState, now: datetime, p: Policy,
     readings = []
     for axis, (pct, horizon, minutes, note) in zip(state.axes, resolved):
         band = pct_band(pct, p)
+        # 🔴 只加一句話，**不改任何分類**（`band`／`cap`／`rec` 三欄都在這一行之外算完）。
+        note = "+".join(x for x in (note, "" if axis.kind in KNOWN_KINDS else NOTE_UNKNOWN) if x)
         readings.append(AxisReading(axis, band, horizon, _cap_for(band, horizon, p),
                                    _rec_for(band, horizon, p), minutes, note))
     return tuple(readings)
@@ -516,25 +546,44 @@ def decide(state: QuotaState, now: datetime, p: Policy,
     gate = [r for r in readings if r.axis.kind not in FALLBACK_KINDS] or readings
     binding = min(gate, key=_binding_key)
     # 🔴 `if notes else` 分支是冗餘的（`",".join(["x"])` 不產生尾逗號）——R89 就地簡化，
-    # 行為逐字等價，騰出的 LOC 餘裕給下面那道地板（本檔 tier 上限 400，改動前 398）。
+    # 行為逐字等價。（此處原先接著一句「騰出的餘裕給下面那道地板」，那道地板已於本輪
+    # 拆除，故該句一併刪去——留著就是一個指向不存在物的散文。）
     reason = ",".join([state.reason, *sorted({r.note for r in readings if r.note})])
     base = min(_base_rec(r.band, p) for r in gate)
-    # 🔴 R89／Architect 複審 B-2：保險軸撞頂時**不是**放回 `C_max`，而是夾到 1。
-    # 立案事實：R87 那 13 個 subagent 全滅時，訂閱窗**只用 1%**（`R87_HANDOFF.md:20`
-    # 逐字「主力軸只有 1%」），姿態與今天相同（`credits_exhausted=true`／
-    # `fallback_available=false`）⇒ 本輪那個「派 1 個成功」的探針證明了「保險池滿 ⇒ 一定
-    # 派不出去」不恆真，但**沒有解釋 R87 為何 13/13 全滅**。最可能的變數是
-    # `disabled_reason: org_level_disabled_until` 的期限，而 payload 從不揭露它
-    # ⇒ **本機結構上觀測不到**。n=1 的成功探針不足以把 cap 從 0 放到 16。
-    # ⇒ 這一格就是把「先派一個看看」的取證協定**機制化**：殘餘風險收斂成 1 個 agent。
-    # `min` 而不是直接給 1：訂閱窗自己撞線時 cap 已是 0，保險軸不得把它**放寬**回 1。
-    cap = binding.cap
-    if any(r.band == BAND_HALT and r.axis.kind in FALLBACK_KINDS for r in readings):
-        cap = 1 if cap is None else min(cap, 1)
+    # ── 墓碑：`if any(halt ∧ FALLBACK_KINDS) ⇒ cap = min(cap, 1)` 那道地板（R89 中段
+    #    落地，同輪末拆除；掌舵者裁決＋QA 複審 REJECT）。**刻意不留一個「暫時關掉」的版本**
+    #    ——本檔已判過「留一個沒人叫的版本等於把缺陷留在原地等下一個呼叫端」。
+    #    三條理由各自獨立成立：
+    #    ① **立案事實被落款證偽（引用方向整個反過來）**：舊註解引 `R87_HANDOFF.md:20`
+    #       逐字「主力軸只有 1%」當立案事實，而該行住在事故表的「**錯誤的證據①**」那一列
+    #       ——它是 R87 自己標記為錯誤的判讀，不是事實。`~/.autosdd/traces/quota_burn.jsonl`
+    #       第 5~8 列：`five_hour` 1.0 → 6.0 → 11.0 → **63.0**（22:29:22 → 22:40:56，
+    #       11 分鐘、Δ=62pp，與 `R87_HANDOFF.md` 的「Δpct 62」逐字吻合）⇒ 那 13 個 agent
+    #       跑了 634 秒、真的燒掉 62pp 訂閱窗才死，**不是被擋在派工口**。舊註解那兩句
+    #       「沒有解釋 13/13 全滅」「本機結構上觀測不到」因此都不成立：**R87 的死因至今
+    #       未知**，而 `monthly spend limit` 是後果的字面，不是變因。
+    #    ② **判準鍵在一個常數上 ⇒ 零鑑別力**：對池子撞頂的帳號，那個 `any(...)` 終生無
+    #       條件成立 ⇒ cap 被**永久**釘在 1。它不是「殘餘風險收斂成 1 個 agent」，是把本輪
+    #       剛拿掉的否決權（16→0）從後門還回 15/16（16→1）＝掌舵者裁定的「本末倒置」
+    #       原樣復發。
+    #    ③ **同一個 commit 自帶反證**：`ca9985b` 的 message 逐字「派 1 個 subagent 成功
+    #       （63027 tokens / 4.6s）」⇒ 探針已推翻「保險池滿 ⇒ 一定派不出去」，地板卻仍以
+    #       「未解釋」為由裝上。
+    #    憲法面（就算前提沒被證偽，這道地板仍是明示偏離）：PRD §4.2.3（`:289-298`）是一份
+    #    **封閉**的 8 步閘門列舉，任一步命中即短路，而**沒有任何一步讀 overage**；把它掛在
+    #    §1.2 原則 5（fail-safe，`:113-114`）之下也不成立——該原則列舉的觸發是「遙測不可得／
+    #    逾時／解析失敗／時鐘異常」，**不含**「過去有一次無法解釋的事故」⇒ 那是外推。
+    #    附帶效益（拆掉才回來的不變式）：`decision.cap == decision.binding.cap`。地板在時
+    #    binding 不再解釋 cap，`quota_messages.throttle_horizon_line()` 取 binding 的
+    #    `resets_at` ⇒ 在本輪自己的姿態下會印「這道節流很快就會自己解除」＝假話；而
+    #    `quota_gate` 的 free 帶早退寫成 `cap is None`，`cap == 1` 從它底下漏過去。
+    #    要保留「先派一個看看」的取證協定是**另案**：正確的鍵不是保險軸的 band，而是
+    #    `account_posture()["fallback_available"] is False` **且**訂閱軸已進 prepare 帶；
+    #    本輪沒有任何量測支持任何一個門檻值 ⇒ 不在這裡發明數字。
     return Decision(
-        cap=cap,
+        cap=binding.cap,
         recommended_fanout=_bound(
-            _clamp(int(base * _pace_of(gate, p)), p), cap),
+            _clamp(int(base * _pace_of(gate, p)), p), binding.cap),
         band=binding.band, binding=binding.axis, per_axis=readings, reason=reason,
         # 🔴 餵**帶號**分鐘（不是 `minutes_to_reset` 那個夾 0 的版本）：時鐘偏移的軸必須
         # 被攤提整個排除。夾 0 之後長窗軸會變成「窗數 1、配額＝全部剩餘」＝**放寬**，

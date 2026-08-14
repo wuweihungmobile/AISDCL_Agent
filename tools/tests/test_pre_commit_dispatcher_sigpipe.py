@@ -356,9 +356,8 @@ class TestHookPathScopeFlavourParity(unittest.TestCase):
 class TestHookPathScopeDirectoryBoundary(unittest.TestCase):
     """R77-50 附帶：白名單前綴比對必須帶目錄邊界。
 
-    WHY：舊實作是裸 `str.startswith(prefix)`，於是與白名單目錄**同前綴的另一個目錄**
-    會被整片收下。本輪實測改前逐字：`is_allowed_md('docs/06_qualityEXTRA/a.md')` → True。
-    這一格與平台無關，兩個平台一起錯。
+    WHY：裸 `str.startswith(prefix)` 會把與白名單目錄**同前綴的另一個目錄**整片收下。
+    這一格與平台無關，兩個平台一起錯。改前的實測逐字＝R89 收尾證據檔。
     """
 
     def setUp(self) -> None:

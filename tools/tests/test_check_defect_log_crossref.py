@@ -218,10 +218,11 @@ class TestScanTarget(unittest.TestCase):
         self.assertEqual(len(problems), 1)
 
     def test_long_parenthetical_over_150_chars_still_flagged(self) -> None:
-        """括號內容超過 150 字元的長句敘述仍須被偵測到矛盾（回歸鎖：曾因 _CLAIM_RE 括號
-        內容量詞硬性上限 {0,150} 導致超長度的真實宣稱被靜默跳過比對，複審實測 ONBOARDING.md
-        DEF-101-057 的括號內容達 186 字元，工具因此完全沒抓到該筆宣稱，帳本狀態即使被刻意
-        改成與文件矛盾也不會被回報——本測試以同等長度的長句重現，並鎖住修復後的行為）。"""
+        """括號內容超過 150 字元的長句敘述仍須被偵測到矛盾。
+
+        回歸鎖：`_CLAIM_RE` 的括號內容量詞曾有硬性上限，`ONBOARDING.md` 內一筆超長的
+        真實宣稱因此被靜默跳過比對（帳本被改成與文件矛盾也不會回報）。當時的實測長度
+        與該筆 DEF 編號＝R89 收尾證據檔。"""
         long_claim = (
             "install_post_commit.{sh,ps1} worktree 路徑解析 bug 在 v0.01~v0.29 之殘留，"
             "open，記事存證；本文件先前誤記為某狀態，經機械檢查揪出已訂正；"
@@ -616,12 +617,10 @@ class TestMain(unittest.TestCase):
     def test_a_legal_first_word_can_no_longer_land_in_the_vague_soft_exit(self) -> None:
         """🔴 B5 / SA-R60R3-07：`partial` 這條軟出口已關閉（本測試是舊測試的**繼承者**）。
 
-        舊測試 `test_main_separates_vague_rows_from_valid_count_and_does_not_fail` 拿
-        `partial@R60（降級出口）` 當「含糊但首詞合法」的 fixture —— 而**那個 fixture 本身
-        就是缺陷**：`partial` 是《格式定義》宣告的合法首詞，卻沒有任何分類器對應，於是
-        `_classify` 回 None、該列落進 `main()` 的「狀態含糊」桶，而含糊**只印 warning、
-        永不 fail**。DEF-101-556 要消滅的「只修一半被當成已修」並沒有消失，只是從
-        「靜默算 fixed」搬到「靜默算含糊」。
+        病＝`partial` 是合法首詞卻沒有分類器對應 ⇒ `_classify` 回 None、該列落進
+        `main()` 的「狀態含糊」桶，而含糊**只印 warning、永不 fail**（DEF-101-556 的
+        「只修一半被當成已修」沒有消失，只是從「靜默算 fixed」搬到「靜默算含糊」）。
+        舊測試與其 fixture 的原文＝`docs/06_quality/CrossPlatform_R89_Closure_Evidence.md`。
 
         修復後 `partial` 歸類為 `open`（照 `workaround` 判例：缺陷本體仍在＝未結案），
         於是同一份 fixture 的斷言**方向相反**：不再期待 warning，而是期待它被算成一筆
@@ -745,9 +744,8 @@ class TestMain(unittest.TestCase):
         return ledger
 
     def test_main_fails_when_archive_exceeds_limit(self) -> None:
-        """R10 QA-9 回歸鎖：archive 檔 ≥ 256KB 必須 fail——R9 補的 archive glob 迴圈
-        先前零測試覆蓋（fixture 目錄天然無 archive，迴圈從未被驗證會紅），glob
-        pattern / parent 路徑被改壞時主檔測試仍綠、DEF-99-001 政策的一半守門無聲失效。"""
+        """R10 QA-9 回歸鎖：archive 檔 ≥ 256KB 必須 fail——glob pattern / parent 路徑
+        被改壞時主檔測試仍綠、DEF-99-001 政策的一半守門無聲失效（史料＝R89 收尾證據檔）。"""
         ledger = self._make_isolated_ledger_dir(
             "archive_fail", m._LEDGER_FAIL_BYTES + 10
         )
@@ -1223,10 +1221,9 @@ class TestCurrentRoundIsReadofFromTheLedgerNotHardcoded(unittest.TestCase):
     def test_real_ledger_current_round_is_two_digit_and_not_the_planning_dir_max(self) -> None:
         """🔴 明文否決掃描員建議的取值來源（`docs/04_planning/AutoSDD_improving_NN` 最大號）。
 
-        兩套編號**不是同一個東西**：整合迭代輪（`AutoSDD_improving_NN`）與跨平台複審輪
-        （`R\\d+`）各自獨立累積。若拿前者當「當前輪」，帳本裡每一列的承接輪號都會遠小於
-        它 ⇒ 整本帳本瞬間全紅。本測試就地實查兩者並斷言**不相等**，讓「哪天有人改回去」
-        當場翻紅（數字一律現查，不寫死）。
+        兩套編號**不是同一個東西**：整合迭代輪與跨平台複審輪各自獨立累積，拿前者當
+        「當前輪」會讓整本帳本瞬間全紅（推導＝R89 收尾證據檔）。本測試就地實查兩者並
+        斷言**不相等**，讓「哪天有人改回去」當場翻紅（數字一律現查，不寫死）。
         """
         cur = m.current_round(m._DEFECT_LOG.read_text(encoding="utf-8-sig"))
         self.assertIsNotNone(cur, "真實帳本推不出當前輪 ⇒ 硬規則② 失去比較基準")
@@ -2010,8 +2007,8 @@ class TestR71CodeRoundLabelsNeverExceedLedgerCurrentRound(unittest.TestCase):
 
     意圖（Rule 9）：這條鎖的價值**不在**「輪號寫錯很難看」，而在 `current_round()` 是
     `check_defect_log_crossref.py` 硬規則② 的比較基準——程式碼與帳本對「現在是第幾輪」
-    各說各話時，承接稽核就會拿一個錯的基準做判定（`DEF-101-765` 實測：當前輪被推成 72 時
-    `DEF-101-752` 立刻被誤判為孤兒 backlog、rc=1）。所以這是**判準基準的一致性**問題。
+    各說各話時，承接稽核就會拿一個錯的基準做判定（`DEF-101-765` 的實測＝R89 收尾
+    證據檔）。所以這是**判準基準的一致性**問題。
     """
 
     @classmethod

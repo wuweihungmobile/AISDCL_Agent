@@ -410,13 +410,11 @@ class HookExitContractTest(unittest.TestCase):
 
     def setUp(self) -> None:
         self.tmp = Path(tempfile.mkdtemp(prefix="ctxguard-e2e-"))
-        # 🔴 R83：本類量的是 **context** 那把尺，而接電讓額度那把尺也跑在 PostToolUse 上 ⇒
-        # 不種快取時額度軸會在這裡回報「量不到」並出聲，三條「必須完全靜默」當場紅，而**紅的
-        # 原因與被測性質無關**：`_isolated_env` 把 `HOME` 指到沙箱、Keychain 讀不到憑證
-        # （source=no-credentials-darwin）＝fixture 產物，不是 production 狀態（本機真跑
-        # `quota_meter.py --json` 為 session 42%／rc=0）。種一份 free 帶健康快取把被測世界
-        # 收斂回「額度正常時，低 context 必須靜默」；斷言一個字都沒放寬（`err == ""` 仍逐字
-        # 成立，額度軸若誤出聲照樣紅）。
+        # 🔴 本類量的是 **context** 那把尺，而額度那把尺也跑在 PostToolUse 上 ⇒ 不種快取時
+        # 額度軸會在這裡回報「量不到」並出聲，三條「必須完全靜默」當場紅，而**紅的原因與被測
+        # 性質無關**（成因是 fixture 把 `HOME` 指到沙箱，不是 production 狀態；實測讀數＝R89
+        # 收尾證據檔）。種一份 free 帶健康快取把被測世界收斂回「額度正常時，低 context 必須
+        # 靜默」；斷言一個字都沒放寬（`err == ""` 仍逐字成立，額度軸若誤出聲照樣紅）。
         _quota_cache(self.tmp, 20.0)
 
     def _payload(self, used: int, name: str) -> dict:
@@ -4745,15 +4743,8 @@ class MeterFailureShapesTest(unittest.TestCase):
     排程器把認證失敗誤判成額度未恢復而一直等下去（R80 哨兵整晚失明同形）。
     落地前實測：憑證讀不到 → `None`；HTTP 401（真連線、0.30s）→ `None`。**同一個答案。**
 
-    🔴 **R83 訂正本 docstring 原本的「誠實劃界」段（不逐字留著當現行說法）**：那段寫
-    「`CREDENTIALS` 仍然只有一個來源、零平台分支」，而 R82 同輪就把 darwin 分支落地了
-    （`access_token()` 的平台分支，見 `git show HEAD:tools/lib/quota_meter.py`）
-    ⇒ 這段自陳從落地當回合起就是假的，且它假在**會讓人以為這裡已經沒有平台問題**的方向。
-    真正的缺口是另一件事、而且沒有任何東西在守：`measure_detail()` 當時**沒有憑證來源的
-    注入點** ⇒ 本組只能靠改主機自己的憑證存放處來構造那兩條臂，於是每條臂只在一個平台
-    成立。mac 真機實測（**R83**＝mac 真機首輪）：把 `CREDENTIALS` 指到不存在的檔，
-    darwin 完全不讀它 ⇒ 期望 `no-credentials`、實得 `http-401`，該臂在 mac 上結構性量不到。
-    現在改成**雙欄矩陣**（見 `_CRED_COLUMNS`）：兩個平台的憑證來源在任何一台機器上都跑。
+    輪次考古（原文逐字）＝`docs/06_quality/CrossPlatform_R89_Closure_Evidence.md`；現行劃界：
+    `tools/lib/quota_meter.py` 的憑證來源走**雙欄矩陣**（`_CRED_COLUMNS`），兩平台皆可跑。
 
     🔴 **上一段的輪號本身被獨立驗證者訂正過一次（R83／PD 複驗，此段留為判例）**：它原本
     把訂正與 mac 真機實測都署名 **R82**，而 R82 收輪 commit（`7975140`）裡這支檔的同一段
@@ -5722,9 +5713,9 @@ class SentinelReapVerdictTest(unittest.TestCase):
     def test_a_finished_session_is_reaped(self) -> None:
         """反向控制組：閒置夠久 ＋ 狀態在可收清單內 ⇒ 收。否則這支工具沒有用途。
 
-        `armed` 一定要在裡面：本輪實跑 dry-run 才發現第一版只認終態，而現實中**每一支
-        巡邏中的哨兵狀態都是 `armed`** ⇒ 那個版本對真正要收的東西一支都收不到，
-        而它的外觀是「很保守、很安全」。
+        `armed` 一定要在裡面：**每一支巡邏中的哨兵狀態都是 `armed`**，只認終態的版本
+        對真正要收的東西一支都收不到，而它的外觀是「很保守、很安全」（史料＝R89 收尾
+        證據檔）。
         """
         for state in ("disarmed", "abandoned", "armed", "sentinel", None):
             reap, _ = sentinel_lifecycle.reap_verdict(
@@ -5738,11 +5729,10 @@ class SentinelReapVerdictTest(unittest.TestCase):
         self.assertTrue(reap)
 
     def test_an_unlocatable_transcript_dir_reaps_nothing(self) -> None:
-        """🔴 本輪 dry-run 當場抓到的自產缺陷，釘成回歸鎖。
+        """🔴 dry-run 當場抓到的自產缺陷，釘成回歸鎖（實跑數字＝R89 收尾證據檔）。
 
-        第一版把「逐字稿目錄定位不到」（planner import 失敗 ⇒ `_transcript_dir()` 回
-        `None`）與「這個 session 的檔真的被刪了」擠進同一個 `False` ⇒ **實跑時三支哨兵
-        全被判為可收，包含當下正在跑的那一支**。同一條紀律（量不到 ≠ 量到零）本 repo
+        把「逐字稿目錄定位不到」與「這個 session 的檔真的被刪了」擠進同一個 `False`
+        ⇒ 連當下正在跑的那一支都會被判為可收。同一條紀律（量不到 ≠ 量到零）本 repo
         寫了很多輪，而它在最貴的地方仍然被犯了一次——所以它需要的是鎖，不是提醒。
         """
         reap, why = sentinel_lifecycle.reap_verdict(
@@ -5798,11 +5788,9 @@ class SentinelReapVerdictTest(unittest.TestCase):
     def test_reaping_a_sentinel_leaves_an_audit_trace(self) -> None:
         """🔴 回收**不得靜默**——這是本輪實機觀測到的那個病徵的另一半。
 
-        `_sweep_artifacts` 把任務書／閂鎖／boot log／水位 state 四件全刪、`_remove_task`
-        又把排程本體拆掉 ⇒ 少了這一行痕跡，`--apply` 跑完之後的磁碟狀態與「哨兵自己靜默
-        消失」（判過四次 `arm_reset`、log 某刻起空白、`launchctl` 零命中）**完全同形**，
-        事後連「是被收掉還是自己死了」都分不出來。根 CLAUDE.md〈反事後諸葛取證規則〉要的
-        是「沒觸發＝可偵測」，而回收是排程生命週期的另一半——武裝那半一直有痕跡，這半沒有。
+        少了這一行痕跡，`--apply` 跑完之後的磁碟狀態與「哨兵自己靜默消失」**完全同形**，
+        事後連「是被收掉還是自己死了」都分不出來（實機觀測原文＝
+        `docs/06_quality/CrossPlatform_R89_Closure_Evidence.md`）。
         斷言逐項對應那個歸因問題：誰（`task`／`session_id`）、為什麼（`why`）、
         排程真的拆掉了嗎（`unregister_rc`）、殘骸掃了幾件（`swept`）、何時（`at`）。
         """
@@ -5821,10 +5809,9 @@ class SentinelReapVerdictTest(unittest.TestCase):
     def test_a_trace_that_never_landed_is_not_reported_as_landed(self) -> None:
         """🔴 上一條的**牙**：判準是「那個檔變大了」，不是「寫入沒有拋例外」。
 
-        注入的是真實形態而不是合成例外：`planner.append_log` 對寫不進去是**刻意吞掉**的
-        （留不下痕跡不得升級成回收失敗），所以「靜默沒寫成」是這條路上真的會發生的事。
-        少了這條斷言，`_record_reap` 可以無條件回傳路徑字串而全綠——那就變成「回報說留了
-        痕跡，磁碟上沒有」，比完全不留痕跡更難看見（本 repo 對「憑證裡混一句假話」的判例）。
+        注入的是真實形態而不是合成例外：`planner.append_log` 對寫不進去是**刻意吞掉**的，
+        所以「靜默沒寫成」是這條路上真的會發生的事。少了這條斷言，`_record_reap` 可以
+        無條件回傳路徑字串而全綠＝「回報說留了痕跡，磁碟上沒有」，比完全不留痕跡更難看見。
         """
         with unittest.mock.patch.object(planner, "append_log",
                                         lambda *a, **k: None):
@@ -6276,11 +6263,9 @@ class QuotaPrepareBandActuallyPreparesTest(unittest.TestCase):
 # R84／6b 第二半：「我現在能派幾個 agent」必須有一個人問得到的出口 —— SA-02／SA-06
 # ═══════════════════════════════════════════════════════════════════════════
 class QuotaPaceOutletIsReachableTest(unittest.TestCase):
-    """🔴 紅端：`python tools/lib/quota_policy.py` → rc=2 只印用法；
-    `quota_meter.py --from-cache --json` → rc=0 但全文無 band／cap／pace／recommended；
-    `describe()` 的唯一呼叫端是被擋下時的三個 stderr 寫入點 ⇒ 舵手要拿到那個數字，
-    今天唯一的途徑是**先被守衛擋下**。訴求 6a「隨時監控」在人機介面這一側等於不存在。
-    """
+    """🔴 紅端：`quota_policy.py` rc=2 只印用法、`quota_meter.py --from-cache --json`
+    全文無 band／cap／pace／recommended、`describe()` 的唯一呼叫端是被擋下時的 stderr
+    ⇒ 要拿到那個數字唯一的途徑是**先被守衛擋下**（訴求 6a 在人機面等於不存在）。"""
 
     def setUp(self) -> None:
         self.tmp = Path(tempfile.mkdtemp(prefix="pace-outlet-"))
@@ -6336,11 +6321,8 @@ class QuotaPaceOutletIsReachableTest(unittest.TestCase):
                         "--pace 掛在逐字稿解析之後 ⇒ 找不到 session 的機器上查不到額度")
 
     def test_it_says_why_an_empty_short_window_still_cannot_be_burned(self) -> None:
-        """🔴 R86：掌舵者看到「短窗還很空、卻只能派 2 個」時，畫面必須自己回答為什麼。
-
-        他當時看到的只有 `binding=seven_day` ⇒ 讀起來像程式抓錯。同一次呼叫也必須落款
-        一列（換算比只能從歷時差分推估）。判準本體＝`quota_criteria.pace_line_problems`。
-        """
+        """🔴 R86：「短窗還很空、卻只能派 2 個」時畫面必須自己回答為什麼；同一次呼叫也
+        必須落款一列。判準本體＝`quota_criteria.pace_line_problems`。"""
         _quota_cache(self.tmp, 75.0, kind="seven_day", resets_in=72 * 3600,
                      extra=(("five_hour", 16.0, 42 * 60),))
         report = qg.pace_report()
@@ -6359,19 +6341,24 @@ class QuotaPaceOutletIsReachableTest(unittest.TestCase):
         report = qg.pace_report()
         self.assertIn("量不到", report, f"量不到卻沒說：{report}")
 
-    # ── R89／`DEF-200-112`：`--pace` 是派工**前**查的出口，而 cap=0 有兩型（等得到 reset
-    # ／只能等人）此前在它上面逐字相同。三型互為鑑別力；期望字串向 `reset_horizon_phrase()`
-    # 要、不複寫。詳情＋雙向注入實測＝`docs/06_quality/CrossPlatform_R89_Closure_Evidence.md`
+    # ── R89／`DEF-200-112`：cap=0 的兩型（等得到 reset／只能等人）此前在 `--pace` 上逐字
+    # 相同。期望字串向 `reset_horizon_phrase()` 要、不複寫。四格的取捨、雙向注入實測與
+    # R89 收尾對第四格期望值的翻面理由＝`CrossPlatform_R89_Closure_Evidence.md`
     def test_the_pace_outlet_tells_a_waitable_halt_from_one_needing_a_human(self) -> None:
-        """等不到 reset／等得到／free 帶不宣稱有節流——三型各自說對。"""
+        """等不到 reset／等得到／free 帶／保險軸撞頂——四型各自說對。"""
         human = qg.reset_horizon_phrase(qg.QUOTA_BRANCH_ESCALATE, None)
         for name, seed, want, deny in (
-            # 🔴 R89：`spend` → `nimbus_quill`——`spend` 已是 `FALLBACK_KINDS`（保險軸，
-            # 不進 cap 聚合）⇒ 拿它構造 halt，測到的就不再是「halt 的兩型分得出來」。
+            # 🔴 R89：`spend` → `nimbus_quill`（保險軸不進 cap 聚合 ⇒ 拿它構造 halt 測到
+            # 的就不再是「halt 兩型分得出來」）；保險軸撞頂本身改由第四格覆蓋。
             ("只能等人", {"pct": 100.0, "kind": "nimbus_quill", "resets_in": None,
                           "extra": (("session", 20.0, 1800),)}, human, None),
             ("等得到", {"pct": 99.0, "kind": "session", "resets_in": 1200}, "⏳", human),
             ("free 帶", {"pct": 35.0, "extra": (("nimbus_quill", 0.0, None),)},
+             None, "這道節流"),
+            # 🔴 R89 收尾／QA B-3：地板拆掉後 `spend` 不進 cap 聚合 ⇒ 誠實的答案是**一句
+            # 節流都不宣稱**（宣告不存在的節流更難看見），故 deny 而非 assert escalate。
+            ("保險軸撞頂但訂閱窗健康", {"pct": 100.0, "kind": "spend", "resets_in": None,
+                                       "extra": (("session", 20.0, 1800),)},
              None, "這道節流"),
         ):
             with self.subTest(name):

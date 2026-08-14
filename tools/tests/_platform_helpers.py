@@ -269,28 +269,16 @@ def usable_bash_for_fixture() -> str | None:
 def copy_functional_interpreter(dest: Path) -> None:
     """把目前真正在跑的直譯器複製到 dest，供測試偽裝成「健康的既有 venv」。
 
-    真實 Windows 機器踩到的落差（tools/tests 首次真跑於本機 venv-launcher
-    佈局才顯形，Mock/CI 環境不重現）：Windows 上（尤其 uv/`python -m venv`
-    建立的 `.venv/Scripts/python.exe`）sys.executable 常是依賴同層
-    `pyvenv.cfg`（記錄 `home=` 指回真正安裝目錄）才能運作的轉導 stub，並非
-    完整直譯器本體；只複製這個 exe、不帶走 pyvenv.cfg，會得到一個檔案存在
-    但 subprocess 執行 rc=106（"No pyvenv.cfg file"）的壞掉直譯器，讓本應
-    測「健康」情境的測試誤判為「不健康」。一併複製 pyvenv.cfg（若源頭存在）
-    並維持同層相對位置（dest 上一層），讓複製後的直譯器仍可正確解析 home=。
-
-    R21 四方一審（Architect/SA/SD/QA）追加（DEF-101-256）：當 sys.executable
-    本身**不是**透過 venv 執行時（任何未啟用 venv 的官方支援直譯器安裝
-    路徑皆會命中同一情境——pyenv-win、winget／python.org 安裝器版型，見
-    ONBOARDING.md §1；uv 管理的直譯器因走上面 pyvenv.cfg 分支已被涵蓋），
-    複製出的直譯器旁邊沒有同層相依 DLL（`python3*.dll`／`vcruntime140*.dll`），
-    在 Windows 上啟動會因 STATUS_DLL_NOT_FOUND（0xC0000135）失敗
-    （rc=3221225781）。修法無條件（不做任何 `if is_windows()` 平台分支）
-    從 exe 本身同層 glob 具名 DLL pattern 並複製到 dest 同層——macOS/Linux
-    上 sys.executable 同層通常沒有 `.dll` 副檔名檔案，glob 自然空手，本身
-    即是安全的 no-op，三平台行為天生一致，不需要平台條件判斷（避開
-    R19/R20 QA 抓到過的「條件分支寫反/從未真正執行卻沒人發現」風險形態）。
-    刻意使用具名 glob pattern（非裸 `*.dll` 全複製）避免誤複製到
-    sqlite3/libssl/tcl-tk 等不必要的 DLL（增加 I/O 與被鎖檔風險）。
+    只複製 exe **不夠**，兩種壞法都會讓本應測「健康」的情境誤判成「不健康」：
+      ① Windows 的 `.venv/Scripts/python.exe` 常只是依賴同層 `pyvenv.cfg`（`home=`
+         指回真正安裝目錄）的轉導 stub ⇒ 必須一併複製 pyvenv.cfg 並維持同層相對
+         位置（dest 上一層）；
+      ② sys.executable 本身不在 venv 內時，複製出的 exe 旁沒有相依 DLL ⇒ 從 exe
+         同層 glob `python3*.dll`／`vcruntime140*.dll` 一併帶走（DEF-101-256）。
+    ② 刻意**無條件**執行、不做 `if is_windows()` 分支：POSIX 上 glob 自然空手＝天生
+    no-op，加分支反而製造 R19/R20 QA 抓過的「條件寫反卻從未被執行到」形態；也刻意用
+    具名 glob 而非裸 `*.dll`（避免誤複製 sqlite3/libssl/tcl-tk，徒增 I/O 與鎖檔風險）。
+    兩種壞法的實測 rc 與立案原文＝`docs/06_quality/CrossPlatform_R89_Closure_Evidence.md`。
     """
     shutil.copy(sys.executable, dest)
     src_cfg = Path(sys.executable).resolve().parent.parent / "pyvenv.cfg"

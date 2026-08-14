@@ -580,11 +580,9 @@ class TestRootDocsPathRefsAreCaseExact(unittest.TestCase):
 
         若未來有人把目錄改回小寫卻沒動這 3 行（或反之），本條會紅。
 
-        🔴 R72 訂正：清單裡的**站點路徑**原本寫死在上層（`docs/04_planning/
-        AutoSDD_improving_54.md`），而該檔本輪依歸檔慣例搬進了 `Archive/`
-        ⇒ `read_text()` 當場 FileNotFoundError。這正是本 repo 反覆在治的
-        「會過期的站點」：鎖以為自己在守引用，其實還多守了一個檔案位置。
-        改為經 `resolve_doc_ref()` 解析——清單指名的是**文件**，不是它今天住哪。
+        🔴 站點路徑一律經 `resolve_doc_ref()` 解析：清單指名的是**文件**，不是它今天
+        住哪——寫死上層路徑的版本在該檔歸檔後當場 FileNotFoundError，那正是本 repo
+        反覆在治的「會過期的站點」（原文＝R89 收尾證據檔）。
         """
         sites = [
             "docs/04_planning/AutoSDD_improving_54.md",

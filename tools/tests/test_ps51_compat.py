@@ -13,10 +13,9 @@ WHY：Windows 11 內建的是 **Windows PowerShell 5.1**（Desktop edition，隨
     （＝PowerShell 7 Core），少數刻意例外：windows-smoke 有走 `shell: bash` 的
     dispatcher hooks 步驟，windows-nightly-full 有走 `shell: powershell`（＝原生
     5.1）的步驟實跑 bootstrap.ps1／dev_start.ps1／install_post_commit.ps1。
-    （R57 QA-R57-04 訂正：本段原文「全部 step 一律 `shell: pwsh`（＝7），只有
-    windows-nightly-full 有**一支** `shell: powershell` 步驟」與 workflow 實況
-    不符——bash 例外未提、5.1 步驟已不只一支。此處刻意不寫死各引擎的步驟支數，
-    以免再次靜默過期；逐 job 的 shell 分佈以 workflow 檔本身為準。）
+    （**R57 QA-R57-04 訂正**了本段原文的過期宣稱；該訂正史料逐字遷至
+    `docs/06_quality/CrossPlatform_R89_Closure_Evidence.md` §A-1。此處刻意不寫死
+    各引擎的步驟支數，逐 job 的 shell 分佈一律以 workflow 檔本身為準。）
   - 其餘只有 `windows-compat-ci.yml` 檔頭 R5 段落的**人工宣稱**（當時列名七支
     「均未見 PS7-only 語法」），該宣稱立於 2026-07-14、13+ 輪未複驗，實測 active
     `.ps1` 已 21 支＝涵蓋率 7/21，且會隨新增檔案靜默過期。
@@ -37,69 +36,14 @@ ubuntu bash 5.x）早已有 `tools/tests/test_bash32_compat.py` 機械鎖，Wind
 
 剝除策略（比 bash32 版**多剝字串**，刻意，非疏漏）：本 repo 的 `.ps1` 大量以字串
 與 here-string **產生 bash 腳本內容**（`install_post_commit.ps1` 的 here-string 內就
-有 `|| true`），只剝註解會立刻假紅。實測（2026-07-27，四棵樹 21 支）此策略零命中；
-未剝字串則 4 筆偽陽性（2 筆 here-string 內的 bash `|| true`、2 筆變數名
-`$utf8NoBom` 撞 `utf8NoBOM` 關鍵字——後者另以「前一字元不得為 `$`/單字元」的
-negative lookbehind 收斂）。
+有 `|| true`），只剝註解會立刻假紅。
 代價（如實揭露）：真的寫在字串裡、之後 `Invoke-Expression` 執行的 PS7-only 語法
 掃不到；行級 regex 無語法樹，屬 heuristic 邊界。該邊界的兩個**具名子情形**
-（R56 round 5 由 QA／SD 實測補列，避免下一輪重新「發現」後誤判為新缺陷）：
-  - here-string 誤啟（QA B-2）：`_HERE_STRING_RE` 只認 `@"`／`@'` 這兩個字元組合、
-    不分辨其是否位於行尾。**行內**出現的 `@"`（如 `Write-Host "user@"`）或 `@'`
-    （如 `.Split('@')`）會被當成 here-string 起點，一路吃到下一個行首 `"@`／`'@`，
-    **遮蔽其間的真違規**（純函式探針實證：緊接其後一行的 `$IsWindows` 掃不到）。
-    刻意不改 regex：實害目前為零（R56 round 5 訂正、分列口徑實測——四棵樹 21 支共
-    3550 行中，**here-string 規則單獨**只清空 18 個非空行（span 19 行），
-    block-comment 規則另清空 311 個非空行（span 362 行），兩者合計 329；原文把合計
-    值 329 掛在「本規則」名下，把 here-string 規則的覆蓋面誇大約 17 倍。且
-    **四棵樹掃描面內**「非行尾的 `@"`／`@'`」只有 2 處（LATEST 版
-    `install_post_commit.ps1:116/117`），兩處都已落在既開啟的 here-string 區內；
-    凍結版 v0.01~v0.29 的同名檔另有 47 處同形，惟凍結版不在掃描面內），
-    而收緊判準所引入的偽陽性風險高於這個零實害的漏判。
-  - 三元判準的 `?` 別名區辨（SD P3-SD-1）：實際把別名寫法擋在門外的是「同一行
-    後方必須另有 ` : `」這個條件——PowerShell **程式碼**層級的「空白 冒號 空白」
-    幾乎只出現在三元（`$env:X`／`C:\\`／`:label`／`${function:f}` 的冒號兩側都無
-    空白）。`(?<!\\|)` 是額外的前瞻性防護（擋 `| ? { … }` 同行寫法），但**現行
-    21 支 active `.ps1` 的 code 段連一處「空白 `?` 空白」都沒有**（2026-07-27
-    實掃），故它今天不被任何真實檔案行使，偽陽性回歸鎖也**驗不到它**——如實記載，免得
-    後續審查員誤以為該 lookbehind 已受測試保護（同輪 QA B-3 名實不符的教訓）。
-    已知殘餘缺口（**偽陽性**方向）：管線換行後另起一行只寫 `? { … }`（行首無 `|`）
-    且該行另含 ` : ` 時仍會偽陽性。
-    已知殘餘缺口（**假陰性**方向。R56 round 5 SA 補列，round 6 Architect／SD／SA
-    三方各自獨立以 pwsh 7.6.3 `Parser::ParseInput` + `FindAll(TernaryExpressionAst)`
-    複驗、主控再親跑一次後訂正——原列的四例中有一例其實不成立，見下）：
-    本判準 `(?<!\\|)\\s\\?\\s.*?\\s:\\s` 要求「`?` 後有空白**且**冒號兩側皆有空白」，
-    但 PS7 語法不要求冒號兩側有空白——故下列**六例**皆為合法 `TernaryExpressionAst`
-    （在 PS 5.1 必 parse error＝正是本鎖守備目標）卻**不命中**（兩項都實測過：
-    pwsh AST errs=0／ternary=1，且本檔 `scan_source()` hits=0）：
-    `$c ? 1:2`／`$c ?1 : 2`／`$c ? 1 :2`／`$c ? $a :$b`／`$c ? 1:$b`／`$c ? ($a):($b)`。
-    **R56 round 7 二次訂正**：round 6 原列的第七例 `$c ? 'a':'b'` 其實**會命中**
-    （`scan_source()` hits=1，`$x = $c ? "a":"b"`／`Write-Host ($c ? 'yes':'no')`
-    亦同）——`split_code_comment()` 把字串字面值抹成等長空白後，該行變成
-    `$x = $c ?  : `，反而製造出判準所需的 ` ? … : `。故「**兩分支皆為引號字串
-    字面值**」的形態是**已被涵蓋**、不是缺口。此例由 Architect 與 QA 於 round 7
-    各自獨立實測揪出，主控複驗確認（並發現自己首次複驗時把 `scan_source(source, rel)`
-    的參數傳反、掃到檔名字串而得出全 0 的假結論——**驗證手法本身無鑑別力**的同型
-    錯誤，同輪已在 venv 污染檢查上犯過一次，見帳本 DEF-101-461）。
-    教訓：驗證「合法三元」（AST 面）與驗證「本鎖是否真的漏抓」（掃描器面）是
-    **兩件事**，round 6 只驗了前者就下結論，故連續兩輪都在同一清單上出錯。
-    **不需涵蓋、非缺口的三種形態**（實測皆非 `TernaryExpressionAst`）：
-      - `$true?1:2` —— 全無空白，PS7 根本不解析為三元（errs=0／ternary=0）。
-      - `$c ? $a:$b`／`$c ? $a: $b` —— 真值分支以**變數**結尾且緊接 `:` 時，
-        `$a:` 被當成 scope-qualified 變數（`$scope:name`），PS7 本身即 parse error
-        （errs=3／ternary=0：「Variable reference is not valid. ':' was not
-        followed by a valid variable name character.」）。**R56 round 6 訂正**：
-        此例原被誤列為假陰性，三方 AST 複驗證偽。留著會反向製造假缺口，誘使
-        後續維護者去放寬 regex——而放寬正是下一段明確裁定不做的事，且 `$a:$b`
-        恰恰就是那段所警告的 `$var:NAME` 形狀（自我矛盾）。
-    故真正的判準不是「冒號兩側有無空白」，而是**冒號左側是否為變數**
-    （`$c ? 1:$b` 成立、`$c ? $a:1` 不成立）。
-    刻意不放寬冒號空白條件：實測放寬為 `\\s\\?\\s*.*?\\s*:\\s*` 雖對現行 21 支 active
-    `.ps1` 仍零命中，但會讓 `… | ? { $_ -ne $env:TEMP }` 這類「Where-Object 別名
-    ＋ `$env:X`」的同行寫法變成偽陽性，收緊代價高於收益。
-    **因此檔頭「A 語法/運算子組」所列的 `? :` 僅涵蓋全空白形態**，非該禁令的完整
-    機械化；`tools/windows_smoke_local.ps1` 檔頭列的 4 項禁令中，三元這一項仍部分
-    依賴人工複核。
+（here-string 誤啟 QA B-2／三元 `?` 別名區辨 SD P3-SD-1）的判讀史、逐項實測數字，
+以及「刻意不改 regex／不放寬冒號空白條件」的理由，**逐字遷至**
+`docs/06_quality/CrossPlatform_R89_Closure_Evidence.md` §A-1；判準本體一行都沒動。
+  - 三元判準的 `?` 別名區辨（SD P3-SD-1）：判讀史逐字遷至 §A-1（見上）。結論一句話：
+    真正的判準不是「冒號兩側有無空白」，而是**冒號左側是否為變數**。
 
 🔴 **本檔行級掃描架構上抓不到的一整類 5.1 缺陷（R71／DEF-101-760，誠實劃界）**：
 「原生指令引數的引號傳遞」。Windows PowerShell 5.1 把參數交給**原生執行檔**

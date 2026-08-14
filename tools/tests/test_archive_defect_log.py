@@ -3574,10 +3574,9 @@ class TestR82RotationSideEffectsAreAnnounced(unittest.TestCase):
 class TestCriterion2VerbatimQuoteTailMask(unittest.TestCase):
     """判準② 第三種遮罩（R76）：「訂正首詞（原文…接於後）：」之後是**舊狀態引文**。
 
-    立案實測（R76 動工時對主檔現查）：20 筆列**只**被判準② 一項擋著、合計 69,113 bytes
-    ＝主檔的 29.3%，其中 15 筆命中的字樣全部落在這一族慣用語之後的引文裡——那段文字的
-    用途正是**宣告該狀態已不成立**，判準② 卻把它讀成「還成立」，語意剛好相反。這是
-    `DEF-101-676`（R68 收窄反引號／角引號）的同型復發，第三種逸出面。
+    病＝那一族慣用語之後的引文，用途正是**宣告該狀態已不成立**，判準② 卻把它讀成
+    「還成立」，語意剛好相反（`DEF-101-676` 的同型復發，第三種逸出面）。立案實測數字＝
+    `docs/06_quality/CrossPlatform_R89_Closure_Evidence.md`。
 
     🔴 本類刻意雙向鎖，只做 (a) 不算有鑑別力：
       (a) 帶慣用語且**現況已結** ⇒ 修後可搬（下方三種真實形態 ＋ row 級控制組）；

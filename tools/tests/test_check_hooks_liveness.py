@@ -1780,7 +1780,7 @@ class TestHookAndProbeShareOneCriterion(unittest.TestCase):
 
         這一維是上一版鎖缺的那個：字面同步、行為在 gap 0 也一致，但兩邊的**視窗**
         長度不同 ⇒ gap≥1 的多行指令在量測端整類看不見。低報的方向看起來像「變乾淨」，
-        而那個數字是拿來寫進根 CLAUDE.md 下結論的。
+        而那個數字是拿來寫進根 CLAUDE.md 下結論的（沿革＝R89 收尾證據檔）。
         """
         for category, command in _PARITY_HITS:
             if category != "rc-after-pipe" or "\n" not in command:

@@ -409,13 +409,9 @@ class TestOnboardingLiveBaselineFreshness(unittest.TestCase):
 class TestLockedLineProseIsAlsoManaged(unittest.TestCase):
     """R60 round 3（DEF-101-562）：受鎖行的**散文**也受管。
 
-    四方複審 round 2 **全部四位獨立命中同一根因**（ARCH-R60R2-03／SA-R60R2-02／
-    SD-R60-R2-03／QA2-R60-02）：round 1 落地產生器後，受鎖行的 token 已回填為當輪
-    實測值，而**同一行的散文仍留著同輪的較舊宣稱**。⇒ 產生器 ＋ `--check` 只保證
-    「被抽取的那個 token」新鮮，不保證同一行的散文新鮮。
-
-    🔴 **正樣本刻意用「真實缺陷的逐字形態」**（比照本 repo 既有慣例：以真實語料當守門
-    樣本）——`R60=756` 這串就是 round 2 四方在 ONBOARDING.md:216 抓到的原字樣。
+    產生器 ＋ `--check` 只保證「被抽取的那個 token」新鮮，**不保證同一行的散文新鮮**；
+    正樣本刻意用真實缺陷的逐字形態（`R60=756`）。立案史料＝
+    `docs/06_quality/CrossPlatform_R89_Closure_Evidence.md`。
     """
 
     #: 受鎖行的最小合成骨架（帶 rootunit 錨點與受管 token）。
@@ -1731,15 +1727,10 @@ class TestR67R2OtherPlatformNoticeIsNotAStandingWarning(unittest.TestCase):
 class TestR67CliFailsLoud(unittest.TestCase):
     """R67-D20：CLI 改 argparse——未知旗標／打錯字一律 rc=2，文件不得引用不存在的旗標。
 
-    WHY：原版 `"--flag" in argv` 手搓解析，未知旗標一律靜默掉進 default 分支並 rc=0。
-    實測後果（Scan-D 於乾淨 clone 注入真實過期後）：正確拼法 rc=1，少打一個字母 rc=0
-    **假綠**——同一棵工作樹、同一時刻，該紅的守門回綠燈。而 `--check` 這個被 ONBOARDING
-    §7、`CrossPlatform_Scan_Dimensions.md`、`ADR-XPLAT-002` 三份文件引用的旗標，在 R67
-    之前**根本不存在**，只是恰好掉進 default 分支才「看起來對」。
-
-    修法選「把 `--check` 實作為真旗標」而非「改三份文件」：那三份文件有兩份不在本包授權
-    範圍內，且「產生器 ＋ `--check`」本就是本 repo 既有慣例（`snapshot_sync.py`）——讓字面
-    成真比讓三份文件改口更小、也更對。
+    WHY：原版 `"--flag" in argv` 手搓解析，未知旗標一律靜默掉進 default 分支並 rc=0
+    ⇒ 少打一個字母就把該紅的守門變成綠燈（假綠）。修法選「把 `--check` 實作為真旗標」
+    而非改引用它的文件——那是本 repo 既有慣例（`snapshot_sync.py`）。實測 rc 與
+    立案原文＝`docs/06_quality/CrossPlatform_R89_Closure_Evidence.md`。
     """
 
     def test_unknown_flag_is_rejected_with_rc2(self) -> None:
@@ -1796,9 +1787,8 @@ class TestR67CliFailsLoud(unittest.TestCase):
         `--flag`（反引號與否皆算）——來源＝ONBOARDING.md 全檔 ＋ 本工具 docstring 的
         「用法」區塊（該區塊每一行都是本工具的呼叫式，正是最容易寫出假旗標的地方）。
         刻意不掃全節：§7 內另有 pytest 的 `--collect-only` 等他人旗標，全節掃描會大量假紅。
-        未覆蓋面（如實揭露）：散落在**不提工具名**之行上的旗標，例如
-        `CrossPlatform_Scan_Dimensions.md`／`ADR-XPLAT-002` 的引用——那兩份不在本包授權
-        範圍內，本輪改以「把 `--check` 實作成真旗標」讓它們的字面成真，而非改它們的字。
+        未覆蓋面（如實揭露）：散落在**不提工具名**之行上的旗標仍不在射程內，逐份清單＝
+        `docs/06_quality/CrossPlatform_R89_Closure_Evidence.md`。
         """
         known = {
             opt
@@ -1856,21 +1846,14 @@ _SANDBOX_PLATFORM = "darwin"
 def _slow_window_sandbox(mutate_during_window: bool):
     """把 `--write --with-slow` 整條路徑搬進 tmp 沙箱，並可選擇在**量測窗口內**改動測試樹。
 
-    為何要沙箱：這條路徑會**寫 ONBOARDING.md** 並實跑分鐘級量測。以 tmp 目錄替換
-    `_REPO_ROOT`／`_ONBOARDING`、以確定性 stub 替換兩支慢量測器之後，同一條生產程式碼
-    可以在毫秒內被完整驅動，且真實 repo 的檔案全程唯讀。
-
     stub 的計數刻意**定義為「該棵樹當下的 `.py` 檔數」**：於是「樹變了 ⇒ 計數變了」在
     測試裡是**可驗證的因果**，而不是靠測試自己宣告。`mutate_during_window=True` 時，
     在 ci-gate 量完之後、AutoClaude pytest 量測期間新增一支測試檔——這正是本缺陷的
     活體形態（並行的修復包在分鐘級窗口內寫測試檔）。
 
-    平台亦是沙箱的一部分（R67 round 3）：`current_platform_key()` 被釘成
-    `_SANDBOX_PLATFORM`，理由見該常數上方。帶參數呼叫仍走真實實作，才不會連帶蓋掉
-    `current_platform_key("linux")` 這種顯式查詢的語意。
-
     yield 出 `(sandbox_path, trees, state)`；`state["mutated"]` 供測試反查注入是否真的
-    發生（避免 fixture 空轉造成「測試永遠綠」）。
+    發生（避免 fixture 空轉造成「測試永遠綠」）。沙箱化與釘平台的理由＝
+    `docs/06_quality/CrossPlatform_R89_Closure_Evidence.md`。
     """
     import shutil
     import tempfile
@@ -1934,22 +1917,12 @@ def _slow_window_sandbox(mutate_during_window: bool):
 class TestR67SlowMeasurementWindowIsFingerprintBracketed(unittest.TestCase):
     """R67 收尾 Scan-H（DEF-101-677）：`--write --with-slow` 的量測窗口 TOCTOU。
 
-    WHY 這道鎖必須存在（Rule 9：測 intent 不只測 behavior）：
-      表② 之所以敢在沒有 live 鎖的情況下被信任，**全部理由**就是
-      `snapshot-fingerprints-<平台>` 錨那一句「這一欄的數字是在**哪一棵測試樹**上量的」。
-      而回填路徑原本是「先跑分鐘級慢量測、**跑完之後**才取指紋」⇒ 樹若在窗口內被改動，
-      錨記下的是一棵**從未被量測過**的樹，四格計數卻留在改動前的樹上。
-      事後 `--check-snapshot` 量到的 live 指紋與錨相符 ⇒ ✅ rc=0，而計數已 stale。
-
-      這不是「指紋這種觸發器本來就會漏」那一類（那是已揭露的邊界：docker 狀態、
-      生產碼改 parametrize 都能改變計數而指紋不動）。這一類是**回填路徑親手把觸發器
-      拆掉**：樹確實變動了——那正是本觸發器唯一認得的事件——卻被寫進錨當成基準。
-      既有契約已是「指紋一變即判 presumed stale」，唯獨回填路徑替自己免除了這一條；
-      修法是取消那個豁免，**不是**提高嚴格度。
-
-    活體證據（R67 收尾 Scan-H）：BASELINE 包寫入的 macOS `scripts/tests` 格是 253、
-    收尾包在同一棵樹量到 259，而 `snapshot-fingerprints-darwin` 的 `scripts=` 前後
-    **完全相同** ⇒ 那條錨當時正在為一組對不上的計數背書。
+    這不是「指紋這種觸發器本來就會漏」那一類（那是已揭露的邊界：docker 狀態、
+    生產碼改 parametrize 都能改變計數而指紋不動）。這一類是**回填路徑親手把觸發器
+    拆掉**：樹確實變動了——那正是本觸發器唯一認得的事件——卻被寫進錨當成基準。
+    既有契約已是「指紋一變即判 presumed stale」，唯獨回填路徑替自己免除了這一條；
+    修法是取消那個豁免，**不是**提高嚴格度。缺陷機制詳述與活體證據（兩個對不上的
+    計數）＝`docs/06_quality/CrossPlatform_R89_Closure_Evidence.md`。
     """
 
     def test_mutation_inside_window_fails_loud_and_writes_nothing(self) -> None:
@@ -2037,11 +2010,10 @@ class TestR67SlowMeasurementWindowIsFingerprintBracketed(unittest.TestCase):
     def test_unmanaged_platform_refuses_to_backfill_instead_of_guessing_a_column(self) -> None:
         """無欄平台（Linux CI runner）跑回填 ⇒ rc=2、點名受管欄、且**一個 byte 都不寫**。
 
-        WHY 這支要單獨存在（R67 round 3）：同輪把沙箱的平台**釘死**在受管欄上，才能讓
-        窗口鎖在三個 host 上跑同一件事；那個釘死同時把「無欄平台會怎樣」擋在射程外。
-        而那條分支正是 R67-D1 的最後一道——`current_platform_key()` 回 None 時若「猜一欄
-        來寫」，本機數字就會被寫進標示別平台實測的格子，表格還是滿的、rc 還是 0，但它
-        從此在說謊。故把沙箱移除的那半邊當場補回來，而不是讓它變成沒人看守的分支。
+        WHY 這支要單獨存在：`current_platform_key()` 回 None 時若「猜一欄來寫」，本機
+        數字就會被寫進標示別平台實測的格子，表格還是滿的、rc 還是 0，但它從此在說謊。
+        沙箱把平台釘死在受管欄（那是窗口鎖能在三個 host 上跑同一件事的前提），因此
+        這條分支必須單獨補回來，不能變成沒人看守的分支（史料＝R89 收尾證據檔）。
         """
         with _slow_window_sandbox(mutate_during_window=False) as (sandbox, _trees, _state):
             doc = sandbox / "ONBOARDING.md"
@@ -2094,9 +2066,8 @@ class TestR67SlowMeasurementWindowIsFingerprintBracketed(unittest.TestCase):
     def test_read_only_paths_measure_live_fingerprints_exactly_once(self) -> None:
         """同型收斂：單次 CLI 呼叫內，live 指紋只准量一次（判決與取證同一份）。
 
-        原版 `--check-snapshot` 判決後又重量一次才印 ✅ 那一行、`--json` 更量了 3 次 ⇒
-        「印出來的證據」與「判決所依據的」可能是不同時點的樹。這與主缺陷同型（同一個量
-        在不同時點被量兩次），且違反 Nightly 取證紀律「取證載具必須就是判決依據」。
+        量兩次 ⇒「印出來的證據」與「判決所依據的」可能是不同時點的樹，違反 Nightly
+        取證紀律「取證載具必須就是判決依據」。原版各路徑量幾次＝R89 收尾證據檔。
         """
         with _slow_window_sandbox(mutate_during_window=False) as (_sandbox, _trees, _state):
             self.assertEqual(SYNC.main(["--write", "--with-slow"]), 0)
@@ -3924,7 +3895,6 @@ _GHOST_SYMBOL_BASELINE: frozenset[str] = frozenset({
     "test_frozen_guard_count_matches_the_worktree",  # R79-docs：同檔數棘輪一併退場
     "test_is_windows_apps_stub_defined_exactly_once",
     "test_latest_install_post_commit_pins_utf8_before_reading_git_common_dir",
-    "test_main_separates_vague_rows_from_valid_count_and_does_not_fail",
     "test_only_the_matching_check_reds",
     "test_the_header_boundary_excludes_a_row_that_legitimately_quotes_it",
     "test_untracked_action_is_ignored",
@@ -3937,7 +3907,10 @@ _GHOST_SYMBOL_BASELINE: frozenset[str] = frozenset({
 #: 的重釘紀律）；**不得**為了讓一筆新寫下的懸空引用過關而調高它。
 #: 🔴 R85 P2：33→32（**收緊**）。TREE_FLOOR_RATIO 那一筆已無引用（本輪把 schedule
 #: parity 的下限第二個家改成直取 SSOT）⇒ 依 stale 向的指示刪除，天花板同步降到現值。
-_GHOST_SYMBOL_BASELINE_CEILING = 32
+#: 🔴 R89 收尾：32→31（**收緊**）。`test_main_separates_vague_rows_from_valid_count_and_
+#: does_not_fail` 那一筆的唯一引用是一段史料敘述，該段本輪已遷入 R89 收尾證據檔 ⇒ 全引用
+#: 面歸零、幽靈清乾淨，依 stale 向的指示刪除，天花板同步降到現值。
+_GHOST_SYMBOL_BASELINE_CEILING = 31
 
 _SYMBOL_INDEX_CACHE: dict[str, frozenset[str]] = {}
 
@@ -5403,12 +5376,10 @@ def cloud_nightly_red_problems(
 def parse_cloud_fields(anchor_tail: str) -> tuple[dict[str, str], list[str]]:
     """錨尾解析成 `({欄位: 值}, 問題清單)`；同一欄位出現 ≥2 次一律 **fail-loud**。
 
-    🔴 WHY fail-loud 而不是沿用「取最後一個」（R75 落地當回合被自己咬到，實測取證）：
-    原版是 `dict(_CLOUD_FIELD_RE.findall(...))`，而錨是**單獨一行**、機器欄位與人讀散文
-    同住那一行。我為了說明 pending 的用法，在同一行散文裡寫了一個 `pending=<sha>…` 字樣，
-    它就**靜默覆蓋**掉真正的欄位值，判準於是拿一個帶省略號的字串去比 sha ⇒ 假紅，而錯誤
-    訊息還印著一個看起來正確的值（`pending=a371068…` vs `origin/main=a371068448a5…`
-    ——兩者其實是同一個 commit）。
+    🔴 WHY fail-loud 而不是沿用「取最後一個」：錨是**單獨一行**、機器欄位與人讀散文
+    同住那一行，於是散文裡一個 `pending=<sha>…` 字樣就會**靜默覆蓋**真正的欄位值，
+    判準拿帶省略號的字串去比 sha ⇒ 假紅，而錯誤訊息印著一個看起來正確的值
+    （被自己咬到的那次逐字＝R89 收尾證據檔）。
 
     這與根 CLAUDE.md 那條「已橋接的 hook 名稱不得與射程字樣同行」是**同一個病**：逐行
     substring 判準遇上同一行的散文。那邊的解是把文件寫成可精確判定，這邊的解是讓歧義
@@ -5654,14 +5625,12 @@ class TestR74CloudCiStatusIsRecorded(unittest.TestCase):
         return head
 
     def test_pending_is_green_even_when_head_equals_the_pushed_commit(self) -> None:
-        """🔴 **本次 main 三支全紅的直接重現條件**（結構性回歸鎖）。
+        """🔴 **CI 上三支全紅的直接重現條件**（結構性回歸鎖）。
 
-        CI 是在 push **之後**跑的，所以在 CI 上「最後一次 push 的 commit」就等於**被測的
-        那個 commit 自己**。第一版判準拿 remote ref 當比較對象，於是要求 X 的內容寫進 X
-        自己的 sha——自我指涉、不可能滿足，**每一次 push 都必紅**。
-
-        本測試把那個條件直接餵進來：`head` 就是被測 commit（＝CI 上的狀態），而錨記載的
-        `head-sha`／`pending` 都是它的祖先。這在任何 commit 上都必須綠。
+        CI 在 push **之後**跑 ⇒「最後一次 push 的 commit」就等於**被測 commit 自己**；
+        拿 remote ref 當比較對象等於要求 X 的內容寫進 X 自己的 sha＝自我指涉、每次必紅。
+        本測試把那個條件直接餵進來：`head` 就是被測 commit，而錨記載的 `head-sha`／
+        `pending` 都是它的祖先。這在任何 commit 上都必須綠。
         """
         head = self._head_or_skip()
         fields, _dup = parse_cloud_fields(
@@ -5812,10 +5781,9 @@ class TestR74CloudCiStatusIsRecorded(unittest.TestCase):
     def test_a_job_level_fail_open_with_a_trailing_comment_is_still_seen(self) -> None:
         """🔴 注入＝R76 複審 SA-02 的活體逃逸形態：值後面加一個行尾註解。
 
-        落地首版的正則寫成 `…true\\s*$`（行尾不得有東西），而 YAML 最普通的寫法就是
-        `continue-on-error: true  # 理由`——磁碟上當時就有一個
-        （`autoclaude-pg-e2e-on-label.yml`）。它逃掉的方向有兩個：新增的同形態 job
-        永遠不必申報；反過來若有人照實把它填進 `nightly-red=` 反而會被判成 unknown 假紅。
+        「行尾不得有東西」的正則會漏掉 YAML 最普通的寫法 `continue-on-error: true  # 理由`
+        （落地首版原文＝R89 收尾證據檔）。它逃掉的方向有兩個：新增的同形態 job 永遠不必
+        申報；反過來若有人照實把它填進 `nightly-red=` 反而會被判成 unknown 假紅。
         """
         with tempfile.TemporaryDirectory() as td:
             d = Path(td)
@@ -5841,9 +5809,8 @@ class TestR74CloudCiStatusIsRecorded(unittest.TestCase):
     def test_the_regex_is_shared_with_ci_liveness_not_copied(self) -> None:
         """兩個消費者必須是**同一個物件**（掌舵者第 2 點：不重複模組）。
 
-        R76 之前是兩份逐字相同的複本，於是同一個瞎點有兩個家、修一個不會修到另一個
-        （實測：對 windows-compat-ci 那一行加註解，`ci_liveness` 的 run 層 fail-open
-        自白會一起啞掉）。`assertIs` 讓「又抄了一份」在下一次就當場紅。
+        兩份逐字相同的複本＝同一個瞎點有兩個家、修一個不會修到另一個；`assertIs`
+        讓「又抄了一份」在下一次就當場紅。當時的實測＝R89 收尾證據檔。
         """
         self.assertIs(_JOB_FAIL_OPEN_RE, _CI_LIVENESS.JOB_FAIL_OPEN_RE)
 
@@ -6906,21 +6873,17 @@ def _handoff_perdoc_problems(
 class TestR78HandoffClaimsCarryLiveCommands(unittest.TestCase):
     """交棒書凡述及「尚未做」，一律附現查指令（R78 SA-04／SA-05 的體例層修法）。
 
-    🔴 為何是體例而不是兩個個案：R78 收到的兩筆 finding 是**同一個形態**——
-      · 「30 支 tag 尚未推送」：R78 開場實查，遠端 30 支都在（`git ls-remote --tags`）。
-      · 「Windows nightly 缺 root_unittests」：R77 自己在同一輪已把它併進 STAGE-L，
-        照原文再加一次的代價是每晚多跑一次 260〜313 秒的全套。
-    兩筆都不是「寫錯了」，是**把量測值當常數寫**：交棒書記的是收輪那一刻的狀態，讀者卻
-    在數天後、由別人動過的樹上讀它。附上現查指令，讀者的第一動作就會是重量而不是採信。
+    🔴 為何是體例而不是個案：立案的兩筆 finding 都不是「寫錯了」，是**把量測值當常數
+    寫**——交棒書記的是收輪那一刻的狀態，讀者卻在數天後、由別人動過的樹上讀它。
+    附上現查指令，讀者的第一動作就會是重量而不是採信。
 
     逃生口是 `handoff-claim-verified:`（WHY 必填）：有些事（例如「這一輪有沒有做複審」）
     真的沒有機械現查管道，逼人編一個指令比誠實說沒有更糟。
 
-    🔴 R82 Q4-01 修的兩個縫（兩個都讓本鎖在**看起來全綠**的狀態下失去射程）：
-      ① 取材面只收 list item ⇒ R81 交棒書（§3 全是散文＋fenced code）整份 **0 命中**；
-      ② 反崩塌斷言跨文件加總 ⇒ R79 那 7 筆把總量永久撐 ≥1，最新一份掉到 0 打不出來。
     現行形狀：取材面加收**標題塊／散文塊**（見 `_handoff_claim_blocks`），反崩塌改成
     **逐文件**（見 `_handoff_perdoc_problems`），並對「最新一份」再加一道不得豁免的牙。
+    兩筆 finding 的原文、以及 R82 Q4-01 修掉的那兩個縫＝
+    `docs/06_quality/CrossPlatform_R89_Closure_Evidence.md`。
     """
 
     def _docs(self) -> list[tuple[str, str]]:
@@ -6948,9 +6911,9 @@ class TestR78HandoffClaimsCarryLiveCommands(unittest.TestCase):
     def test_the_newest_handoff_carries_its_own_lower_bound(self) -> None:
         """最新一份交棒書必須**自己**收得到宣稱，不准靠舊輪的命中數補貼（第②道牙）。
 
-        🔴 這一條就是 R82 Q4-01 的驗收：R81 交棒書當時整份 0 命中，而跨文件加總被
-        R79 的 7 筆永久撐綠。逐文件判準補上之後，還必須擋住「把最新一份加進豁免表」
-        這條最省力的關法——否則崩塌只是換個位置重演。
+        🔴 跨文件加總會被舊輪的命中數永久撐綠（實測＝R89 收尾證據檔）。逐文件判準補上
+        之後，還必須擋住「把最新一份加進豁免表」這條最省力的關法——否則崩塌只是換個
+        位置重演。
         """
         docs = self._docs()
         rel, text = max(docs, key=lambda pair: _handoff_round(pair[0]))
@@ -7037,13 +7000,9 @@ class TestR78HandoffClaimsCarryLiveCommands(unittest.TestCase):
         self.assertEqual(_handoff_problems("syn.md", outside), ([], 0), "射程外的章節被誤收")
 
     def test_a_subheading_without_the_trigger_word_stays_in_its_parents_scope(self) -> None:
-        """巢狀小標題繼承父節射程——這是 R79 複審點名、上一版**靜默放行**的那個縫。
+        """巢狀小標題繼承父節射程——上一版**靜默放行**的那個縫（史料＝R89 收尾證據檔）。
 
-        上一版對任何 `##` 以上標題一律重設 `in_section`，於是「待辦」大節底下一個
-        普通 `###` 小標題就會把其下所有條目整區踢出射程；本輪 §4 的四個小標題正是
-        靠「把觸發字寫進每一個小標題」繞過的。這支測試把繞過換成判準：小標題**不含**
-        任何觸發字時，父節的裸宣稱仍必須被抓到。
-
+        判準：小標題**不含**任何觸發字時，父節的裸宣稱仍必須被抓到。
         另兩向一起釘住，避免修過頭：① `###` 在**射程外**的大節底下不得被吸進來；
         ② 同級或更高級的標題仍必須關掉射程（否則一路吃到檔尾）。
         """

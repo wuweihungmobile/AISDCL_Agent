@@ -352,24 +352,17 @@ class TestSmokeCiSync(unittest.TestCase):
             )
 
     def test_min_pass_equals_actual_step_count(self) -> None:
-        """DEF-101-243①：$MinPass/MIN_PASS 釘選值本身須等於腳本實際會執行到的
-        PASS 步驟數，而非只交叉比對「文件宣稱＝腳本釘選」（上方
-        test_onboarding_pass_claims_match_script_pins 只鎖這一半）。QA 二審
-        bug-injection 證實：只改錯釘選值本身、步驟仍在，既有測試不會變紅。
+        """DEF-101-243①：釘選值**本身**須等於腳本實際會執行到的 PASS 步驟數，
+        而非只交叉比對「文件宣稱＝腳本釘選」（那一半由
+        test_onboarding_pass_claims_match_script_pins 鎖）。
 
-        兩腳本「原始碼字面 pass/Pass-Item 呼叫次數」與「實際執行到的步驟數」不
-        直接相等：
-        - macos_smoke_local.sh 有互斥分支（case/if-else 兩條路徑各呼叫一次
-          pass，實際執行恰命中其一），字面數比實際數多。
-        - windows_smoke_local.ps1 有共用函式（Test-InstallRoundtrip /
-          Test-WorktreeReject）被呼叫多次、函式定義內只有 1 個 Pass-Item 字面
-          出現，字面數比實際數少。
-
-        通用剖析器精確歸納這兩種語意風險高（易在未來改版時悄悄算錯、製造假的
-        安全感），改用顯式登記表 + fail-loud 存在性檢查（同 R19 修復包 A
-        test_known_consumers_detected() 精神）：登記已知的「字面數與實際執行數
-        不一致」樣式，明確列出其原始碼錨點；錨點消失（訊息被改寫/函式改名）即
-        讓本測試紅，逼人工重新核算並更新登記表。
+        兩腳本「原始碼字面 pass/Pass-Item 次數」與「實際執行到的步驟數」不直接相等：
+        - macos_smoke_local.sh 有互斥分支（兩條路徑各一次 pass、實際命中其一）⇒ 字面偏多；
+        - windows_smoke_local.ps1 有共用函式被呼叫多次、函式體內只 1 個字面 ⇒ 字面偏少。
+        故不寫通用剖析器（易在改版時悄悄算錯而製造假的安全感），改用顯式登記表 ＋
+        fail-loud 存在性檢查：錨點消失（訊息改寫／函式改名）即紅，逼人工重新核算。
+        立案史料（含 QA 二審 bug-injection 的實測）＝
+        `docs/06_quality/CrossPlatform_R89_Closure_Evidence.md`。
         """
         sh_text = _read(_SH)
         all_sh_msgs = _SH_PASS_RE.findall(sh_text)
@@ -423,13 +416,12 @@ class TestSmokeCiSync(unittest.TestCase):
         )
 
     def test_exclusive_pass_groups_are_genuinely_branch_separated(self) -> None:
-        """DEF-101-246⑤／DEF-101-247④（R19 QA 二審提案，R20 落地）：
-        `_SH_EXCLUSIVE_PASS_GROUPS` 顯式登記表本身完全信任人工登記——R19 QA
-        bug-injection 證實：在 macos_smoke_local.sh 插入兩個實際非互斥、但謊報
-        登記進登記表的假互斥 `pass` 呼叫（連同同步竄改 MIN_PASS 與 ONBOARDING
-        排除交叉訊號），test_min_pass_equals_actual_step_count 仍全綠。
+        """DEF-101-246⑤／DEF-101-247④：`_SH_EXCLUSIVE_PASS_GROUPS` 顯式登記表本身
+        完全信任人工登記——謊報一組假互斥並同步竄改 MIN_PASS 與 ONBOARDING 之後，
+        test_min_pass_equals_actual_step_count 仍全綠（立案原文＝
+        `docs/06_quality/CrossPlatform_R89_Closure_Evidence.md`）。
 
-        QA 提出的輕量緩解（非完整控制流解析，成本遠低於此）：斷言登記表內
+        輕量緩解（非完整控制流解析，成本遠低於此）：斷言登記表內
         每組訊息在原始碼中的兩個錨點之間（a）存在 `else`/`;;` 其中之一的字面
         字串，且（b）行距不超過寬鬆上限——不能杜絕蓄意造假，但能擋下「兩個
         無條件執行、彼此相鄰又無分支關鍵字」這種注入手法。"""
@@ -491,11 +483,10 @@ class TestSmokeCiSync(unittest.TestCase):
             )
 
     def test_bash_n_scan_surface_matches_root_infra_ci(self) -> None:
-        """R56 新增（Architect round 3 建議的治本鎖）：`root-infra-ci.yml` 第 1 道
-        （bash -n）與 `macos_smoke_local.sh` [1/7] 是兩份手寫實作，兩者自述「同一份
-        git ls-files 清單、同一套判準」，但此前零機械互鎖——R56 一輪之內就連續發生
-        三種漂移：CI 擴面而本地沒跟上、下限釘選值訂在被凍結版稀釋的總數上、本地
-        少了 CI 有的引號防護。凡「兩份硬編實作互稱鏡射」本 repo 一律建鎖（同
+        """`root-infra-ci.yml` 第 1 道（bash -n）與 `macos_smoke_local.sh` [1/7] 是兩份
+        手寫實作、兩者自述「同一份 git ls-files 清單、同一套判準」，但此前零機械互鎖
+        （立案的三種實測漂移＝`docs/06_quality/CrossPlatform_R89_Closure_Evidence.md`）。
+        凡「兩份硬編實作互稱鏡射」本 repo 一律建鎖（同
         test_root_infra_parity 的 CI↔pre-push 守門清單鎖），故機械斷言三件事：
           1. 兩處 `git ls-files` 的 pathspec 樣式集合逐字相同；
           2. 兩處的兩段下限釘選值（active .sh／無副檔名 git-hooks）逐字相同；

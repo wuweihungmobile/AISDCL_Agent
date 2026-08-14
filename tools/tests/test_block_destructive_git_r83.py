@@ -248,8 +248,8 @@ class TestSafeFormsAreNotBlocked(unittest.TestCase):
 class TestQuotingAndHeredocAreInert(unittest.TestCase):
     """把危險形態當**資料**寫出來（探針、文件、重現缺陷）是最常見的正當情境。
 
-    上一代姊妹守衛在這裡誤擋過（SD-02 實測三條規則全中），修法是「先把不是可執行
-    結構的區段拿掉再比對」——本類是那個修法在本檔的回歸鎖。
+    修法是「先把不是可執行結構的區段拿掉再比對」——本類是那個修法在本檔的回歸鎖
+    （上一代姊妹守衛在這裡誤擋過，實測＝R89 收尾證據檔）。
     """
 
     def test_quoted_text_is_not_a_command(self) -> None:
@@ -589,10 +589,8 @@ class TestStashIsBlockedInEveryTree(_ForeignTreeCase):
 
 
 class TestTheRelaxationOpensNoNewHoles(_ForeignTreeCase):
-    """換樹放寬的四道前提，每一條都對應一個**實測過**的漏擋形態。
-
-    複審者的警告逐字：「只看『cwd 不在專案根』就整條放行，會不會製造新的漏擋？」
-    本類就是那個問題的答案，逐條列舉並釘死。
+    """換樹放寬的四道前提，每一條都對應一個**實測過**的漏擋形態（複審者的警告逐字＝
+    R89 收尾證據檔）。
     """
 
     def test_dash_c_pointing_back_at_the_shared_tree_wins_over_cd(self) -> None:
@@ -625,12 +623,8 @@ class TestTheRelaxationOpensNoNewHoles(_ForeignTreeCase):
     def test_the_filesystem_root_contains_the_project_too(self) -> None:
         """🔴 反向包含的**邊界格**，獨立驗證輪實測出來的漏擋（不是想像的形態）。
 
-        WHY 它躲得過上一支測試：包含判準原本寫 `p + os.sep`，而檔案系統根的
-        `"/" + "/"` ＝ `"//"`，**沒有任何路徑以 `"//"` 開頭** ⇒ 反向包含在
-        `target == "/"` 這一格恆假，`cd / && git clean -fdx` 實測被放行（rc=0）。
-        `cd /Users …` 那一級擋得住，所以整條前提 ②「與專案根互不包含（雙向）」
-        讀起來完全成立——這正是本 repo 反覆判紅的「鎖在、但某一格沒有鑑別力」，
-        而它只有把根這一格真的送進去才看得見。
+        它躲得過上一支測試的機制、以及當時 `cd / && git clean -fdx` 被放行的實測，
+        逐字＝`docs/06_quality/CrossPlatform_R89_Closure_Evidence.md`。
 
         判準本身刻意不寫死 `/`：用 `os.path.abspath(os.sep)` 取當前平台的根
         （Windows 上是磁碟機根），否則這支鎖在另一個平台上量的是別的東西。
@@ -798,8 +792,7 @@ class TestTheCriterionItselfCanFail(unittest.TestCase):
         必須當場變成放行——那證明擋住它的真的是這次的訂正，不是別的判準恰好也擋了它。
 
         這一支的存在理由與上面三支不同：它守的不是「判準會不會恆真」，而是
-        「**已知會漏的那個寫法不准回來**」。獨立驗證輪實測 `cd / && git clean -fdx`
-        在舊寫法下 rc=0。
+        「**已知會漏的那個寫法不准回來**」（舊寫法下的實測 rc＝R89 收尾證據檔）。
         """
         fs_root = os.path.abspath(os.sep)
         command = f"cd {fs_root} && git clean -fdx"
@@ -1084,10 +1077,9 @@ class TestIronLaw6CriteriaHaveTeeth(unittest.TestCase):
 class TestTheFalsePositiveCensusIsRerunnable(unittest.TestCase):
     """🔴 假紅普查必須留下**可重跑**的產物（`DEF-200-046`／SD-04）。
 
-    立案事實：根 CLAUDE.md 鐵律五自陳「對全庫 tracked 檔抽出的 N 筆 git 指令片段實跑該
-    判準、假陽性 0」，而 R84 去找那份產物時 repo 裡**一支都沒有** ⇒ 交棒書要求後人
-    「用同樣的方法」結構上做不到（沒有共同母體、沒有去重規則、沒有逐筆歸屬理由）。
-    CLAUDE.md 自己已對 R77 的失誤分群下過同一個判決並以 probe 修好；這是同一個修法。
+    立案事實：根 CLAUDE.md 鐵律五自陳做過一次「假陽性 0」的普查，而 repo 裡**一支產物
+    都沒有** ⇒ 交棒書要求後人「用同樣的方法」結構上做不到（沒有共同母體、沒有去重規則、
+    沒有逐筆歸屬理由）。逐筆數字＝R89 收尾證據檔。
     """
 
     _PROBE = _REPO_ROOT / "tools" / "probe" / "shell_command_corpus.py"
@@ -1114,16 +1106,14 @@ class TestTheFalsePositiveCensusIsRerunnable(unittest.TestCase):
     def test_the_census_surface_is_the_transcripts_not_tracked_files(self) -> None:
         """SD-02：R83 教的「tracked 檔普查」對鐵律六是**錯的量測面**。
 
-        實測（本輪）：tracked 面上 `waitform` 的命中**全部落在描述這兩種形態的 `.md`
-        散文與本判準自己的 docstring**，而 hook 結構上讀不到 `.md` ⇒ 照 tracked 面判會
-        得到「全是假紅」的錯誤結論並否決一個好判準。本條把那個知識釘進程式碼。
+        tracked 面上 `waitform` 的命中全部落在 `.md` 散文，而 hook 結構上讀不到 `.md`
+        ⇒ 照 tracked 面判會得到「全是假紅」的錯誤結論並否決一個好判準（逐筆實測＝
+        R89 收尾證據檔）。本條把那個知識釘進程式碼。
         """
         # 🔴 讀**原始碼**而不是 `__doc__`：那段 WHY 刻意住在 `#` 註解裡而不是 docstring，
-        # 因為 `count_loc` 排除純 `#` 行而計入 docstring ⇒ 同一份 WHY 寫成註解是 0 行成本，
-        # 而本包同輪把被守的那支 hook 推到 718/750（`guardrail_cli` tier）。
-        # 🔴 誠實劃界（本註解第一版寫錯過一次，故留在這裡）：根層 `tools/` 是**獨立帳**，
-        # `check_loc_budget.py` 逐字寫「不進 total／baseline cap」⇒ 那個「全庫 total 只剩
-        # 個位數餘裕」的預警**與本檔無關**，不可拿它當本檔的理由。真正咬人的是 tier。
+        # 因為 `count_loc` 排除純 `#` 行而計入 docstring ⇒ 同一份 WHY 寫成註解是 0 行成本。
+        # 🔴 誠實劃界：根層 `tools/` 是**獨立帳**（`check_loc_budget.py` 逐字寫「不進 total／
+        # baseline cap」）⇒ 全庫 total 的餘裕與本檔無關，真正咬人的是 tier。
         source = self._PROBE.read_text(encoding="utf-8")
         self.assertIn("假紅普查一律以", source)
         self.assertIn("transcripts", source)
@@ -1258,10 +1248,8 @@ class TestR84BothGapsAreClosed(unittest.TestCase):
 class TestR84TheArgvPlaneDoesNotOverBlock(unittest.TestCase):
     """假紅是這道鎖的生死線。本類逐條釘住普查裡**實測到**的假紅來源。
 
-    普查（可重跑）：母體＝`~/.claude/projects/**/*.jsonl` 的 `tool_use` 指令字串
-    **42,387 筆、去重 39,739 種**；新判準把命中由 252 → 257（新增 5），逐筆判讀
-    **1 筆真陽性（原凶本身）＋ 4 筆是本次鑑識自己寫的探針**（把危險形態當資料寫出來），
-    且**舊擋新放 0 筆**（沒有任何既有守備被這次改動換掉）。
+    普查母體＝逐字稿的 `tool_use` 指令字串（可重跑，見 `shell_command_corpus.py`）；
+    逐筆數字與判讀＝`docs/06_quality/CrossPlatform_R89_Closure_Evidence.md`。
     """
 
     ALLOWED = (
@@ -1396,13 +1384,9 @@ class TestR84TheNewCriteriaHaveTeeth(unittest.TestCase):
 class TestR84StashRefSentinel(unittest.TestCase):
     """🔴 誠實劃界要求的另一半：擋不到的必須**看得見**。
 
-    本守衛只讀指令字串 ⇒ 這四條路它結構上碰不到：MCP git 工具（不是 Bash 呼叫）、
-    別的 session、**寫在 `.py` 檔裡**的 `subprocess`（工具面只看得到 `python foo.py`）、
-    別名與殼函式。加判準對它們一行都沒用 ⇒ 只能改成「事後一定看得見」。
-
     判準刻意只看 `refs/stash`：它**只會**因 stash push／pop／drop／clear 而變。
-    （第一版一起看 `logs/HEAD`，已否決——每次 `git commit` 都會變 ⇒ 常駐亮燈，
-      而常駐全亮的燈等於沒有燈。）
+    本守衛結構上碰不到的那四條路、以及第一版為何不看 `logs/HEAD`，逐字＝
+    `docs/06_quality/CrossPlatform_R89_Closure_Evidence.md`。
     """
 
     def setUp(self) -> None:
@@ -1428,10 +1412,9 @@ class TestR84StashRefSentinel(unittest.TestCase):
         """🔴 假紅面為零就靠這個 ack 位元：上一次呼叫**真的帶著一次會改 `refs/stash` 的
         呼叫、而且那次呼叫沒有被本守衛擋下** ⇒ 那次變動**不是隱形的路**。
 
-        🔴 R84／SD-04 訂正本 docstring 的兩處假事實：ack **不是**「指令字串裡出現 stash」
-        （子字串判定會被 `grep -rn stash docs/` 點亮 ⇒ 下一次真 drift 靜默、而且 head 已被
-        改寫成新 SHA ⇒ **永久吞掉**），也**不含**「被擋」與 `stash create` 這兩種——被擋的
-        指令根本不會跑、`stash create` 一個字節都不動那個 ref，兩者都解釋不了任何變動。
+        ack **不是**子字串判定，也**不含**「被擋」與 `stash create` 兩種（前者根本不會跑、
+        後者一個字節都不動那個 ref ⇒ 都解釋不了任何變動）；被訂正掉的兩處假事實逐字＝
+        `docs/06_quality/CrossPlatform_R89_Closure_Evidence.md`。
         判準與紅綠自證見 `TestR84SentinelAckIsNotASubstring`。"""
         self.ref.write_text("aaaaaaaaaaaa\n", encoding="utf-8")
         G.stash_ref_sentinel(str(self.root), ack=True)

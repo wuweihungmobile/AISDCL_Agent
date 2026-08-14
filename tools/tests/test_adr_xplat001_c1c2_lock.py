@@ -724,31 +724,31 @@ _GUARD_LINE_STALE_SLACK = 0.02
 #: 寫出淨額與理由——讓方向在 diff 上一望即知。
 #: 🔴 本表含**本檔自己**，所以動本檔就會動到本表 ⇒ 改完必須重跑一次並用實測值收斂。
 _FROZEN_GUARD_LINES: dict[str, int] = {
-    "_platform_helpers.py": 549,
+    "_platform_helpers.py": 537,
     "_ps_engine.py": 115,
     "test_act_local_runner_image.py": 322,
-    "test_adr_xplat001_c1c2_lock.py": 5401,
-    "test_archive_defect_log.py": 3878,
+    "test_adr_xplat001_c1c2_lock.py": 5419,
+    "test_archive_defect_log.py": 3877,
     "test_bash32_compat.py": 946,
     "test_bash_probe_spec_contract.py": 983,
-    "test_block_destructive_git_r83.py": 2006,
+    "test_block_destructive_git_r83.py": 1989,
     "test_bootstrap_core.py": 439,
     "test_bootstrap_ps1.py": 160,
-    "test_check_defect_log_crossref.py": 3269,
+    "test_check_defect_log_crossref.py": 3266,
     "test_check_gha_action_versions.py": 295,
     "test_check_hooks_liveness.py": 3433,
     "test_check_pytest_baseline_sites.py": 297,
     "test_check_script_parity.py": 2098,
     "test_check_wrapper_thinness.py": 1234,
-    "test_claim_provenance_r86.py": 248,
+    "test_claim_provenance_r86.py": 341,
     "test_component_sanitizer_shared_layer_lock.py": 293,
-    "test_context_budget_guard.py": 6385,
+    "test_context_budget_guard.py": 6374,
     "test_defect_id_reference_integrity.py": 261,
-    "test_dev_start.py": 7065,
+    "test_dev_start.py": 7056,
     "test_dev_start_ps1_lastexitcode.py": 548,
-    "test_doc_env_prefix_platform_parity_r60.py": 341,
-    "test_doc_loc_baseline_freshness_r60.py": 7176,
-    "test_extras_quoting_zsh_safety.py": 402,
+    "test_doc_env_prefix_platform_parity_r60.py": 340,
+    "test_doc_loc_baseline_freshness_r60.py": 7135,
+    "test_extras_quoting_zsh_safety.py": 365,
     "test_find_git_bash_parity.py": 1230,
     "test_gha_action_versions.py": 703,
     "test_git_hooks_install_common.py": 393,
@@ -760,24 +760,24 @@ _FROZEN_GUARD_LINES: dict[str, int] = {
     "test_negative_existence_claims_r82.py": 380,
     "test_nightly_interpreter_determinism.py": 278,
     "test_no_invalid_escape_sequences.py": 329,
-    "test_ntfs_trailing_space_device_name.py": 772,
-    "test_onboarding_parity_interlock.py": 235,
+    "test_ntfs_trailing_space_device_name.py": 770,
+    "test_onboarding_parity_interlock.py": 233,
     "test_platform_neutral_paths.py": 6197,
     "test_platform_utils_dedup.py": 1123,
-    "test_pre_commit_dispatcher_sigpipe.py": 965,
+    "test_pre_commit_dispatcher_sigpipe.py": 964,
     "test_pre_push_dispatcher.py": 686,
     "test_ps1_bom.py": 204,
-    "test_ps51_compat.py": 621,
+    "test_ps51_compat.py": 565,
     "test_ps_engine_ssot.py": 933,
     "test_python_c_percent_shim.py": 119,
-    "test_quota_policy.py": 1752,
+    "test_quota_policy.py": 1810,
     "test_root_infra_parity.py": 441,
     "test_run_root_unittests.py": 2190,
-    "test_sanitize_component_frozen_sdd_versions_lock.py": 375,
+    "test_sanitize_component_frozen_sdd_versions_lock.py": 340,
     "test_schedule_capability_parity.py": 635,
     "test_script_scan_surface_ssot.py": 391,
-    "test_skip_discoverability_r83.py": 779,
-    "test_smoke_ci_sync.py": 1359,
+    "test_skip_discoverability_r83.py": 755,
+    "test_smoke_ci_sync.py": 1350,
     "test_stdio_utf8.py": 76,
     "test_subprocess_encoding_hygiene.py": 1594,
     "test_windows_forbidden_filename_parity.py": 1005,
@@ -867,6 +867,21 @@ _GUARD_LINES_REPIN_LOG: tuple[tuple[str, int, int, int, str], ...] = (
      "hook 樹的 console-spawn 判準＋反空轉＋SSOT 版號解析，該面此前一個觀測者都沒有，"
      "沒有等量舊判準可退場去換）／test_context_budget_guard.py +3（DEF-200-104 站點修復"
      "連帶的 patch 位址註解）。逐筆立案＝CrossPlatform_R88_Closure_Evidence.md"),
+    ("R89", 83670, 83670, 0,
+     "[淨額 0] 憲法裁決落地輪：新增 DEF-200-112 回歸鎖與 FALLBACK_KINDS 專屬鎖、R87 鎖改"
+     "判準，並兌現款(12) 到期義務（追加更小的單輪上限，那一列自己也佔行）；成長全數以四段"
+     "史料搬遷等量抵銷（原文逐字＝CrossPlatform_R89_Closure_Evidence.md），計數因此歸零。"),
+    ("R89", 83670, 83578, -92,
+     "[淨減法] R89 收尾單人窗口。動因是**分桶棘輪**（`prose` 桶）而不是總量棘輪——"
+     "而立案查證推翻了「散文成長」這個假設：+157 全部來自 chunk 粒度的**重新歸類**"
+     "（三塊在 HEAD 為 selfcontained，因搬遷體例留下的一行 `docs/` 指標而整塊改記入 prose，"
+     "行數合計反而只 +6）。處置照棘輪自己列的第三條出口做，未動任何門檻、未重釘桶基準："
+     "①把散落各鎖檔、屬「哪一輪發生過什麼／實測數字多少」的史料段逐字遷入 "
+     "CrossPlatform_R89_Closure_Evidence.md，判準與判準的理由**一行都沒搬**——這是本列 "
+     "-105 行的來源，逐段清單見該檔〈護欄層史料搬遷（R89 收尾窗口批）〉；"
+     "②`test_quota_policy.py` 的完整路徑指標收斂成檔頭唯一一處（其餘三處改用同檔既有的"
+     "短指稱），三塊因而回到 HEAD 時的歸屬。分桶讀數 4276→4009（相對 HEAD 基準 4119 為 "
+     "-110），量測與逐筆歸因逐字見該檔〈分桶棘輪：+157 全部來自重新歸類〉。"),
 )
 
 
@@ -928,6 +943,7 @@ _REPIN_NET_CAP_SCHEDULE: tuple[tuple[int, int], ...] = (
     (84, 5400),   # R84：款(10) 上線，取歷來單輪最大淨額（今天零假紅、明天只准更緊）
     (85, 3200),   # R85：兌現款(12) 的到期義務（見下方 `_REPIN_NET_CAP_DUE_*`）
     (87, 2600),   # R87：到期輪下修。本輪自身淨額遠低於此（事故鎖 ＋ 派工前置檢查兩組）
+    (89, 2000),   # R89：到期輪下修。本輪淨額 ≤ 0（史料搬遷抵銷新判準，兌現款(11)）
 )
 #: 生效點＝首列輪號、現行上限＝末列上限，**皆由表導出不另立常數**（R73 判例：一份知識一個家）。
 _REPIN_ROUND_CAP_SINCE = _REPIN_NET_CAP_SCHEDULE[0][0]
@@ -981,7 +997,7 @@ def net_cap_schedule_problems(
     return problems
 
 
-#: 🔴 **R84 F3／A-03：現行上限的到期義務**（R85 已兌現一次，並就地**重新武裝**）。
+#: 🔴 **R84 F3／A-03：現行上限的到期義務**（R85 起每次兌現都就地**重新武裝**下一段）。
 #: 立案理由：上限取的是歷來單輪最大值，代價是**對現況零攔阻力**——逐輪淨額一律現查
 #: `repin_round_nets(_GUARD_LINES_REPIN_LOG)`（本段刻意不複寫那張表：前一輪把它抄成
 #: 散文，抄完當輪就被自己的第二次重釘證偽，而三份複本沒有一份會因為彼此不一致而轉紅）。
@@ -992,8 +1008,10 @@ def net_cap_schedule_problems(
 #:
 #: 🔴 **下一段的步伐刻意變小**：5400→3200 一次砍 2200 是因為 5400 取的是史上最寬值；再往下
 #: 就逼近真實輪次大小（現查逐輪淨額的最小正值），步伐不縮就會製造沒有出路的紅（ARCH-02）。
-_REPIN_NET_CAP_DUE_ROUND = 89
-_REPIN_NET_CAP_DUE_TARGET = 2000
+#: 🔴 **兌現必然是「下修上限」＋「重新武裝下一段」兩個動作**，不是可選的第二步——本款要
+#: `cap ≤ 目標`、下方 assertLess 要 `目標 < cap`，互斥推導見 CrossPlatform_R89 結案證據檔。
+_REPIN_NET_CAP_DUE_ROUND = 91
+_REPIN_NET_CAP_DUE_TARGET = 1600
 
 #: 🔴 R85 收尾單人窗口：款(11)／ADR-XPLAT-002 §8.1 item 15 那條「**必須出現一次淨額 ≤ 0**」
 #: 的**到期輪**。此前它寄生在 `test_the_real_repin_log_stays_inside_the_cost_envelope` 的
@@ -1090,10 +1108,10 @@ _GUARD_LINE_DRIFT_TOLERANCE = 0
 #: 追加當輪不必動指紋（一列寬限），下一輪要再追加就必須先把前一列納入前綴並重釘，
 #: 否則 `[前綴過期]` 轉紅。草稿兩個值都由 `--print-guard-lines` 印出
 #: （ARCH-02 的教訓：紅了卻沒有出路的鎖會被關掉）。
-_REPIN_LOG_FROZEN_PREFIX_LEN = 17
+_REPIN_LOG_FROZEN_PREFIX_LEN = 19
 _REPIN_LOG_MAX_UNFROZEN_TAIL = 1
 _REPIN_LOG_HISTORY_SHA256 = (
-    "6e0750bcfa88d31737bfcc074729f52e31117e805868b92b8dd089478097e99e")
+    "d06b7172260d74dd713036b1e964b65568a38385a570a9977d4d774679332567")
 
 
 def repin_log_history_digest(

@@ -224,9 +224,8 @@ class TestLiveDocEnvPrefixPlatformParity(unittest.TestCase):
     def test_known_sites_are_still_discovered(self) -> None:
         """釘住已知站點仍被 fence 解析器看到（防解析器壞掉導致全面假綠）。
 
-        🔴 R83：`useMacWin.md` 加入本清單——該檔新增 ONBOARDING §7.1 的最短路徑
-        （`AUTOCLAUDE_DB_DSN=… alembic upgrade head`），同檔已附 PowerShell 對照，
-        故 `test_live_docs_have_powershell_counterpart` 仍綠；本清單只是庫存盤點。
+        本清單只是庫存盤點（是否附 PowerShell 對照由上一支判），逐份加入的沿革＝
+        `docs/06_quality/CrossPlatform_R89_Closure_Evidence.md`。
         """
         found = {
             rel: [s.lineno for s in iter_env_prefix_sites(

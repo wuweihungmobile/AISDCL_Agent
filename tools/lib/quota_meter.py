@@ -399,6 +399,12 @@ def bucket_readings(payload: object) -> list[dict]:
 #: credits 池在 payload 裡的兩種表述。**兩個都要看**：`extra_usage` 用 dollars 記
 #: (`used_credits`／`monthly_limit`)，`spend` 用 minor units 記 (`used.amount_minor`／
 #: `limit.amount_minor`) ⇒ **不得跨來源比絕對值**，只比各自的 used/limit 比值。
+#: 🔴 R89 收尾／SA 複審 B-3：本常數與 `quota_policy.FALLBACK_KINDS` 是**兩件事**，關係是
+#: 「本常數 ⊆ 保險軸」而不是相等。本常數的成員必須是 payload **頂層**的鍵、且 `_credit_pool()`
+#: 認得它的欄位形狀（所以補 `overage`／`seven_day_overage_included` 是錯的——那兩個是
+#: `limits[].kind`，不是頂層 dollar 池）；`FALLBACK_KINDS` 的成員是 **bucket kind**。
+#: 兩者今天恰好在 `extra_usage`／`spend` 這兩個字面上重疊，鏡射鎖曾因此被寫成 `==`＝把巧合
+#: 焊成契約，結果是**補齊保險軸這件事本身會轉紅**。判準已改為子集。
 CREDIT_POOL_KEYS = ("extra_usage", "spend")
 
 
