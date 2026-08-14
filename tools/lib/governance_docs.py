@@ -63,6 +63,9 @@ _GOVERNANCE_DOCS = (
     # R88 五筆結案的詳情面（同一資格：複審者要逐條重驗就得讀完它 ⇒ 受體積守門；
     # 它逐筆寫出「某缺陷現居何處／當回合實測值」⇒ 受指針稽核）。即刻登記，不等下一輪。
     _REPO_ROOT / "docs" / "06_quality" / "CrossPlatform_R88_Closure_Evidence.md",
+    # R89 兩列（`DEF-200-112` 結案／`DEF-200-114` 立案）的詳情面。同一資格：帳本列被
+    # 體積守門壓成索引之後，逐條重驗所需的原文只住這裡 ⇒ 它自己也必須受體積守門。
+    _REPO_ROOT / "docs" / "06_quality" / "CrossPlatform_R89_Closure_Evidence.md",
     # 本輪的兩份：triage（去重分級與跨維形態）與 fix plan（修復包切分與驗收指令）。
     # 同一個資格——複審者要逐條重驗就得讀完，且兩者都寫出缺陷座標宣稱。即刻登記。
     _REPO_ROOT / "docs" / "06_quality" / "CrossPlatform_R77_Triage.md",

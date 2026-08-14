@@ -286,7 +286,8 @@ class TestDualAdapterFallback:
                 #   PG17+pgvector staging（≥1k 列真實 BGE-M3 向量）**只有 Windows 11 那台
                 #   環境有** ⇒ 本列只可能在 Windows 11 輪轉綠；mac 輪跑到它一律 skip，
                 #   那是正確結果不是欠工。承接輪號因此是「複審檢查點」而非交付承諾。
-                "承接輪次 R89："
+                "承接輪次 R90（R89 推遲，理由見上一段：阻塞是平台綁定的，"
+                "R89 在 mac 真機上跑，該輪結構上不可能轉綠）："
                 "要建的是 AutoClaude/tests/fixtures/dual_adapter_failover.json"
                 "（BGE-M3 故障注入腳本 ＋ Minimax adapter 切換的量測欄位），"
                 "🔴 但**只建 fixture 會把這支從 skip 變成假綠**——本 case 在 fixture 存在時"

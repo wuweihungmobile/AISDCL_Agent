@@ -5091,35 +5091,14 @@ class QuotaDegradationReachesTheModelTest(unittest.TestCase):
 class MacCredentialSourceTest(unittest.TestCase):
     """🔴 L4-03：mac 的 Claude Code 憑證在 login Keychain，不在檔案系統上。
 
-    R81 版是**單一硬編碼檔案路徑、零平台分支**，而代價是量出來的（本輪 Windows 模擬：
-    把 `CREDENTIALS` 指到不存在的檔＝等價於 mac 上該檔缺席 ⇒ `measure_detail` 回
-    `no-credentials`、`quota_gate` rc=0、`fanout_cap(None) is None`）：切到 mac 之後
-    整條額度軸永久 `unmeasurable`，R81 落地的 80%／95% 兩道門**結構上一次都到不了**，
-    而外觀與「水位很低、很健康」完全相同。
-
-    🔴 **獨立複驗訂正本段的「誠實劃界」（原文今天起是假的，故不留著當現行說法）**：
-    原文寫「本組**沒有 mac 真機**」，並把「`security` 的 service 名與輸出形態在真 mac
-    上對不對」列為交棒項——而 **R83（mac 真機首輪）**已在真機上把那一半驗完。
-    🔴 這一行的輪號由獨立驗證者訂正過（原文署名 **R82**）：R82 收輪 commit 內這支檔逐字
-    寫著「我手上沒有 mac 真機…交由下一輪承接」⇒ 署名 R82 等於把交棒項講成上一輪已結清，
-    而那正是 `quota_meter.KEYCHAIN_SERVICE` 上方 R82 就寫下的那句預先警告在防的形態。
-    實測值的**唯一的家**
-    是 `quota_meter.KEYCHAIN_SERVICE` 的註解；本段刻意**不複寫**那幾個數字，複寫一份
-    就是再開一個會漂移的第二個家（R73 `Find-GitBash` 把一台機器的事實寫成常數，同型）。
-    這一段之所以會變假，正是「同一份知識住兩個家、只有一個家被改」：訂正落在 quota_meter
-    那一份，這一份留在原地說反話，而假在**會讓人以為這條路仍未驗**的方向。
-
-    🔴 順帶訂正這一行的輪號：原文把交棒輪號從承接輪改寫成**本批輪號**，而該行自己的
-    括號逐字寫著「交棒指名承接輪，非自稱本批輪號」⇒ 句子與它自己的判準相矛盾。而且那次
-    改寫**不必要**：該行同行本來就帶著 `round-label-ok` 具名豁免，輪號超前鎖
-    （`test_check_defect_log_crossref.TestR71CodeRoundLabelsNeverExceedLedgerCurrentRound`）
-    對它從來不成立（本回合實掃：違規清單裡沒有本檔）。交棒項既已結清，整個輪號標籤連同
-    那個豁免一併移除——留著一個沒有標的的豁免，下一個人只會再花一次力氣去讀它。
-
-    本組今天守得住的仍然是「判定邏輯」：平台分支選對了路、取不到時回一個**分得出來的**
+    本組今天守得住的是「判定邏輯」：平台分支選對了路、取不到時回一個**分得出來的**
     理由字面、`security` 吐出來的垃圾不得變成 token。**仍然守不住**的是「一台**沒有**
     Keychain 條目的 mac」——本機構造不出來（清掉條目等於把使用者登出），那一半只由
-    `_runner` 注入覆蓋，屬於模擬而非真機。
+    `_runner` 注入覆蓋，屬於模擬而非真機。實測值的**唯一的家**是
+    `quota_meter.KEYCHAIN_SERVICE` 的註解，本段刻意不複寫（R73 判例）。
+
+    🔴 R89 減法：本段此前另有 25 行「誰署名錯了、哪一句今天變假了」的**史料**（是輪次
+    證據不是判準），逐字保全於 `CrossPlatform_R89_Closure_Evidence.md` §護欄層減法。
     """
 
     def setUp(self) -> None:
@@ -6379,6 +6358,27 @@ class QuotaPaceOutletIsReachableTest(unittest.TestCase):
         self.addCleanup(setattr, quota_meter, "measure_detail", old)
         report = qg.pace_report()
         self.assertIn("量不到", report, f"量不到卻沒說：{report}")
+
+    # ── R89／`DEF-200-112`：`--pace` 是派工**前**查的出口，而 cap=0 有兩型（等得到 reset
+    # ／只能等人）此前在它上面逐字相同。三型互為鑑別力；期望字串向 `reset_horizon_phrase()`
+    # 要、不複寫。詳情＋雙向注入實測＝`docs/06_quality/CrossPlatform_R89_Closure_Evidence.md`
+    def test_the_pace_outlet_tells_a_waitable_halt_from_one_needing_a_human(self) -> None:
+        """等不到 reset／等得到／free 帶不宣稱有節流——三型各自說對。"""
+        human = qg.reset_horizon_phrase(qg.QUOTA_BRANCH_ESCALATE, None)
+        for name, seed, want, deny in (
+            ("只能等人", {"pct": 100.0, "kind": "spend", "resets_in": None,
+                          "extra": (("session", 20.0, 1800),)}, human, None),
+            ("等得到", {"pct": 99.0, "kind": "session", "resets_in": 1200}, "⏳", human),
+            ("free 帶", {"pct": 35.0, "extra": (("nimbus_quill", 0.0, None),)},
+             None, "這道節流"),
+        ):
+            with self.subTest(name):
+                _quota_cache(self.tmp, **seed)
+                report = qg.pace_report()
+                if want:
+                    self.assertIn(want, report, f"{name}：{report}")
+                if deny:
+                    self.assertNotIn(deny, report, f"{name}：{report}")
 
 
 if __name__ == "__main__":

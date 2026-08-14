@@ -592,8 +592,16 @@ def pace_report(now: datetime | None = None) -> str:
     # 內（寫不進去只在 stderr 說一次，`--pace` 的 rc 與那一行輸出都不受影響）。
     pace_contract.write(decision, state, policy.max_fanout, policy.halt_pct)
     tail = f"\n⚠️ .env 有設錯：{'；'.join(problems)}" if problems else ""
+    # 🔴 R89／`DEF-200-112`：這一行此前**只有撞牆時才說得出來**。`--pace` 是舵手派工前
+    # 查的那個出口，而它對 cap=0 只印「reset 距離不明」——「等 20 分鐘就好」與「只能等
+    # 人去提額」在畫面上完全相同，於是 R88 整輪都在等一個結構上不會來的 reset。
+    # 判讀本身**不新造**：`reset_branch()` 的 arm／notify／escalate 三分支早就承載這個
+    # 語意（halt 撞線訊息已在用），這裡只是把同一個家接到第二個出口。
+    # 🔴 free 帶（`cap is None`）刻意不印：那一行逐字說「這道節流…」，而 free 帶沒有任何
+    # 節流 ⇒ 印出來就是一句假話，而「訊息裡混一句假話比少一欄更難看見」是本 repo 的判例。
+    horizon = "" if decision.cap is None else throttle_horizon_line(decision, now)
     return (f"{pace_line(decision)}\n  {quota_policy.describe(decision)}\n"
-            f"  {quota_pace.explain(decision.amort)}\n  {posture_line()}\n"
+            f"  {quota_pace.explain(decision.amort)}\n  {posture_line()}\n{horizon}"
             f"  來源={state.source} 量測於={state.measured_at or '(無)'}{tail}\n")
 
 
@@ -723,8 +731,13 @@ def quota_gate(payload: dict, *, blocking, latch_read, latch_write,
             # 🔴 R83：此句原本逐字說「`{tool}` 仍然不執行」——那在 PostToolUse 上是**假話**
             # （那次 Read／Bash 已經執行完了，PostToolUse 的 exit 2 只回饋 stderr）。訊息裡
             # 混一句假話比少一欄更難看見，故改成對兩個事件都為真的說法。
+            # 🔴 R89／`DEF-200-112`：閂鎖之後這則會**每一次** Read／Bash 都印，也就是撞牆
+            # 期間人唯一持續看得到的那一則；而它此前不帶期程 ⇒ 「等一下就好」與「只能等
+            # 人」在整個 halt 期間都分不出來。第一則（`quota_halt_message`）分得出來，但它
+            # 一個 reset 視窗只印一次，早就捲出畫面了。同一個 `reset_branch()`，第三個出口。
             sys.stderr.write(f"🔴 {quota_policy.describe(decision)}\n"
-                             "   額度仍在停止水位：扇出一律不執行，任務書已在磁碟上。\n")
+                             "   額度仍在停止水位：扇出一律不執行，任務書已在磁碟上。\n"
+                             + throttle_horizon_line(decision, now))
         return 2
     # 🔴 R84／6C（SA-03）：prepare 帶（85~95%）的準備動作。位置刻意在 halt **之後**、
     # 在下面那道早退**之前**——早退對 `PostToolUse` 與 free 帶無條件 `return 0`，把這一段
