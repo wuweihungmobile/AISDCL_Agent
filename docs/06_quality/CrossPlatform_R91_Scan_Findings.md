@@ -207,3 +207,82 @@ docstring 一律參照 `.claude/hooks/context_budget_guard.py`／`tools/lib/plat
   ~240 ms 是行程啟動＋import ⇒ 正解是先壓固定成本，不是加工具名。
 * **帳本 33 列 R90→R91 的批次改派未逐列複驗真實狀態**（`DEF-200-136`）；該面由仍 open
   的 `DEF-200-106` 承接。
+
+---
+
+## §E R91 結案包：五列的當回合複驗證據
+
+> 本節是 `AutoSDD_Defect_Log.md` 五列結案的**唯一**可重驗載體：那五列受 `ROW_MAX_BYTES`
+> 限制（結案前逐列餘裕 13~209 bytes），狀態欄只放得下索引 ⇒ 判「這幾筆結案是不是真的」
+> 只能讀本節。全部數字都是本輪當回合真跑的原始輸出，非轉述。
+
+### §DEF-200-126（`fixed@R91`）— 三個只寫不讀的 `_port_*` 已隨 R90 包 C 拆除
+
+該列自書「本列僅立案；包 C 落地回報後由主控裁決是否同輪轉 `fixed`」⇒ 本輪做的就是那次裁決。
+
+* `grep -n "_port_" AutoClaude/autoclaude/execution/playbook_runner.py` → **零命中**
+  （立案時三筆 `ctx=Store` 屬性皆在）。落地載體＝commit `982adf4`（R90）。
+* 同檔 `:109-113` 現為拆除紀錄，逐字寫「四者**全部只寫不讀**（AST 掃 502 檔，三筆 port
+  屬性皆 ctx=Store 零 Load；`._evaluator` 全庫零讀取），已拆除」，並把真正的 executor DI
+  指回 Kernel 那條路（`main.py` → `build_kernel(executor=…)`）⇒ 該列點名的**誤導修法**
+  這個危害面已不存在。
+* `python -m pytest tests/test_gap014_020.py tests/test_gap039_049.py -q` →
+  `83 passed in 10.93s`，rc=0。
+
+### §DEF-200-127（`fixed@R91`）— skip reason 的錯誤指路已訂正，patch 層已落地
+
+* `AutoClaude/tests/helpers/fake_pty.py` 存在且**已追蹤**（`git ls-files --error-unmatch`
+  rc=0）；`test_gap014_020.py:41`／`test_gap039_049.py:27` 於 module 層 import
+  `fake_pty, hermetic_runner`。
+* 立案座標 `test_gap014_020.py:103`／`test_gap039_049.py:59` 的 skip reason **已不存在**
+  （該兩行現分別是 `_mock_response()` 與 `_write_playbook()`）。兩檔檔頭 `:45-53`／`:30-33`
+  改記「11 支在兩平台都跑得到」「斷言零修改」，且逐字指出**該列判定的那句錯誤正解**
+  （「make_service 重寫」）住 `tests/helpers/fake_pty.py` 的 docstring ⇒ 錯誤指路已被反向
+  登記，不是被抹掉。
+* `pytest` 兩檔 → `83 passed in 10.93s`，rc=0。
+
+### §DEF-200-130（`fixed@R91`）— 平台綁定債登記表與真探針皆在，且有牙
+
+該列分流欄自書「已落地」，只因包 E 禁碰帳本才由 R90 收尾窗口代寫成 open。當回合逐項複驗
+（`AutoClaude/tests/test_conftest_windows_native_skip_report.py`）：
+
+* `_PLATFORM_BOUND_DEBTS`（`:366`）／真探針 `probe_pgvector_bge_m3_staging()`（`:310`）／
+  三態常數 `UNMEASURABLE`（`:277`）皆在；未登記的平台條件即紅（`:511`）、債還完仍留探針
+  也紅（`:519`）＝雙邊咬人。
+* 注入自證仍在（`test_injection_unmeasurable_is_not_read_as_not_payable`、
+  `test_injection_real_probe_reports_unmeasurable_when_the_query_dies`）。
+* `python -m pytest tests/test_conftest_windows_native_skip_report.py -q` →
+  `23 passed in 3.93s`，rc=0。
+* 分流欄留的可裁項（`unmeasurable ⇒ 紅` 是 fail-loud 判斷非實測結論）本輪裁決＝**維持**，
+  理由是它與本 repo 通則「量不到 ≠ 量到零」同向；改成放行才需要新證據。
+
+### §DEF-200-010（`fixed@R91`）— act 前置的「先 pull 再 build」已落到磁碟
+
+該列立案時自陳「磁碟上未落任何站點」，分流欄指定的處置就是把解法寫進 act 前置。
+
+* 落地站點＝`ONBOARDING.md` 的 Docker 那一列（act 前置的既有站點，與原有的
+  「Apple Silicon 走 QEMU」說明同住一格）：新增「先 `docker pull <基底映像>` 再 `docker build`」
+  ＋失敗字面 `DeadlineExceeded` ＋「buildkit 的 deadline 涵蓋拉基底與 RUN 層整段」的因果。
+* `useMacWin.md` 只放**指針**、不抄第二份：該檔 `:202` 已對 PG 立過「唯一站點，本檔不重抄，
+  避免第二個會漂的家」的判例，本列沿用同一條紀律 ⇒ 分流欄寫的兩個檔都有交代，而知識只有
+  一個家。
+
+### §DEF-200-097（`fixed@R91`）— 政策鍵不再被渲染成開關
+
+走該列分流欄二擇一裡的**改結構歸類**（另一條「改渲染分節」需新增區段標題常數與分支，而
+`tools/lib/quota_policy.py` 的 `guardrail_lib` LOC 餘裕實測為 0）：
+
+* `AUTOSDD_QUOTA_FANOUT_CAP` 的 `section` 由 `escape` 改 `policy` 並上移到政策區尾；理由逐字
+  寫在該處註解：逃生口關掉的是守衛，而本鍵永遠只收緊（`min(cap, override)`，見
+  `fanout_cap()`），一個字都關不掉 ⇒ 兩者不同族。
+* 連帶訂正同檔 `AUTOSDD_CONTEXT_SIGNAL_OFF` 上方註解的「**第五個**逃生口／上面四個」為
+  「**第四個**／上面三個」——不改它，本輪就會在修一句假話的同時製造另一句。
+* `.env.example` 依生成器重生（該檔不得手寫，`test_the_disk_copy_is_in_sync` 守著）。
+* 當回合實測：`python tools/lib/quota_policy.py --print-env-example` rc=0，該鍵已印在政策區、
+  不再夾在兩個 `_OFF` 之間；`python -m pytest tools/tests/test_quota_policy.py -q` →
+  `146 passed, 292 subtests passed in 0.37s`，rc=0；
+  `python -m pytest tools/tests/test_context_budget_guard.py tools/tests/test_pre_commit_dispatcher_sigpipe.py -q`
+  → `400 passed, 8 skipped, 201 subtests passed in 25.08s`，rc=0；AutoClaude 側
+  `tests/test_r82_quota_axis_and_shipped_defaults.py` ＋ `tests/contract/test_loc_budget_tiered.py`
+  → `128 passed in 2.11s`，rc=0；`python AutoClaude/tools/check_loc_budget.py` rc=0
+  （`quota_policy.py` 仍 `loc=400`／budget 400／headroom 0，**未動任何門檻**）。

@@ -232,6 +232,8 @@ Pop-Location
 
 ⚠️ **與 B 段第 3 步的關係別搞混**：那一步（回填 §7 表② dated snapshot）要的是**出廠環境乾淨 venv**，而本節是「日常開發時把 skip 降到最低」。兩者的 provenance 欄位會如實記下 `docker=up`／`down`，**不同條件的兩欄依 §7 既定紀律不可相減**。
 
+🔴 **mac 側第一次建 `run_act` runner 映像會撞 `DeadlineExceeded`（DEF-200-010）**：正解是**先 pull 基底、再 build**。做法、因果與失敗字面一律見 **ONBOARDING.md §前置條件的 Docker 那一列**（唯一站點，本檔不重抄——同上一段 PG 的處置，避免第二個會漂的家）。
+
 ---
 
 ## 可選旗標

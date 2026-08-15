@@ -13,7 +13,7 @@
 |------|------|
 | **Python ≥ 3.11** | 版本鎖定於 [.python-version](.python-version)（`3.11`，對齊 CI 與 Docker）。**系統內建的舊 Python（如 macOS 的 3.9）不夠**。 |
 | **Git** | 已 clone 本 repo。行尾政策由 [.gitattributes](.gitattributes) 自動處理（見 §5）。 |
-| Docker（選用） | 只有要跑 `run_act` / PG 契約測 / nightly mutation 時才需要。**Windows 須確認 Docker Desktop 啟用 WSL2 backend**（預設值；仍在用 Hyper-V backend 的舊機器/公司鎖定環境請切換，否則 `run_act` 等容器操作可能無法正常啟動）。macOS（Apple Silicon）執行 `run_act` 時，`.actrc` 的 `--container-architecture linux/amd64` 會強制走 QEMU 模擬（刻意設計，貼近雲端 amd64 runner），預期較慢屬正常代價。 |
+| Docker（選用） | 只有要跑 `run_act` / PG 契約測 / nightly mutation 時才需要。**Windows 須確認 Docker Desktop 啟用 WSL2 backend**（預設值；仍在用 Hyper-V backend 的舊機器/公司鎖定環境請切換，否則 `run_act` 等容器操作可能無法正常啟動）。macOS（Apple Silicon）執行 `run_act` 時，`.actrc` 的 `--container-architecture linux/amd64` 會強制走 QEMU 模擬（刻意設計，貼近雲端 amd64 runner），預期較慢屬正常代價。🔴 **act 前置（mac 專屬，DEF-200-010）**：第一次建 runner 映像時**先把基底拉下來、再 build**（`docker pull <基底映像>` 之後才 `docker build`）——buildkit 的 deadline 涵蓋「拉基底 ＋ 跑 RUN 層」整段，而 QEMU 下光拉 2GB 級基底就可能吃掉整個額度，失敗字面是 `DeadlineExceeded`，讀起來像 build 本身壞掉（實測 RUN 層本身只要數秒）。 |
 | Java（選用） | 只有要跑 AISDLC_SDD 的 TLA+/TLC 形式化驗證時才需要。建議 **JRE/JDK ≥ 11**（本機以 OpenJDK 21 實測 `tla2tools.jar` 正常運作；未測試更舊版本相容性下限，若遇到問題請優先升級 Java）。 |
 | PowerShell（Windows） | Windows 11 內建 **Windows PowerShell 5.1**（`powershell.exe`）可執行本文件日常指令；CI（`root-infra-ci.yml`）的 `.ps1` 語法檢查則用 **PowerShell 7**（`pwsh`）。若頻繁遇到 BOM／編碼類雷區（見 §5），建議 `winget install Microsoft.PowerShell` 額外裝 pwsh 7。 |
 
