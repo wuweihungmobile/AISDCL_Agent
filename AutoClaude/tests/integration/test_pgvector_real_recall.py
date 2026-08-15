@@ -286,8 +286,14 @@ class TestDualAdapterFallback:
                 #   PG17+pgvector staging（≥1k 列真實 BGE-M3 向量）**只有 Windows 11 那台
                 #   環境有** ⇒ 本列只可能在 Windows 11 輪轉綠；mac 輪跑到它一律 skip，
                 #   那是正確結果不是欠工。承接輪號因此是「複審檢查點」而非交付承諾。
-                "承接輪次 R90（R89 推遲，理由見上一段：阻塞是平台綁定的，"
-                "R89 在 mac 真機上跑，該輪結構上不可能轉綠）："
+                # 🔴 R90（掌舵者本輪裁決「平台綁定的欠債改用平台條件記」）：本列自本輪起
+                #   不再寫承接輪號——這個檢查點被推了四次（R84／R85／R88／R89），四次的阻塞
+                #   條件都是同一個：輪號量的是日曆，而阻塞在環境。改記成條件之後，開火條件是
+                #   「跑在**同時**備妥 staging 與 Minimax 憑證的那台機器上卻沒還」。
+                "承接平台條件：DUAL_ADAPTER_FAILOVER_RIG（平台綁定登記於 R90；"
+                "探針＝tests/test_conftest_windows_native_skip_report.py::"
+                "probe_dual_adapter_failover_rig，量 staging 列數 ＋ MINIMAX_API_KEY，"
+                "兩半都到位才判「還得了」並當場轉紅；量不到一律紅，不退回綠）："
                 "要建的是 AutoClaude/tests/fixtures/dual_adapter_failover.json"
                 "（BGE-M3 故障注入腳本 ＋ Minimax adapter 切換的量測欄位），"
                 "🔴 但**只建 fixture 會把這支從 skip 變成假綠**——本 case 在 fixture 存在時"

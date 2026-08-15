@@ -351,14 +351,62 @@ def normalize_pct(value: object, scale: float) -> float | None:
 #   ② 「我還能送請求」——主 session 走訂閱額度尚有餘裕，不蘊含 subagent 那條路沒撞牆。
 # 而 hook 當時已逐字印出正確答案：「這一條**沒有 reset 可以等**（例：月度支出上限）；
 # 只有人去提額」。⇒ 這一族撞線時 **halt 是對的**，且**排程是錯的動作**。
+# 🔴 R89：`is_active`／`severity` 是**純觀測欄位**，本輪補上的是「接好卻沒有電的線」。
+# 立案事實（三處全部實查，不是推論）：
+#   ① `quota_policy.Axis` 自 R82 起就宣告了這兩欄（`:179-180`）；
+#   ② `quota_gate.read_quota()` 逐字 `a.get("is_active"), a.get("severity")` 在讀它們；
+#   ③ 而本函式從來沒有寫過 ⇒ live 快取 7 軸 × 2 欄 = **14 格全部 `None`**，
+#      伺服器每一次都有給值（本輪實測 `limits[]` 三筆皆帶 `severity`＋`is_active`）。
+#   失效是靜默的：`.get()` 對「欄位不存在」與「伺服器真的給 null」回同一個 `None`。
+# 🔴 **這兩欄一格都不得參與分類／選桶／band／cap／rec**，只准被人看見。三條理由各自成立：
+#   · `quota_policy` 檔頭既有紀律逐字禁止拿 `is_active` 選桶（五次觀測都等於
+#     argmax(percent)，但五次一致不構成契約——伺服器無文件）；
+#   · `severity` 至今只觀測到 `normal`／`critical` 兩值，而 `critical` 只出現在已被
+#     R89 判為**保險軸**的 `spend` ⇒ 對主力軸零鑑別力；
+#   · R87 墓碑（見上方）：讀了一個自報欄位就讓程式少判一軸，代價是 13 個 subagent 全滅。
+#     ⇒ 本輪的方向是**只准讓人多看見，不准讓程式少判**。
+# 🔴 `SCHEMA` **刻意不升版**：純追加鍵，向後相容。AutoClaude adapter（`file_quota_meter.
+#   _pick()`）只讀 `pct`／`kind`／`resets_at` 三鍵、其餘 `.get()` 忽略 ⇒ 未知鍵不影響它；
+#   升版反而會讓 `TestM8SchemaStaysInSync` 要求 adapter 同一次 commit 跟著改（那是別的
+#   持有面，鐵律七）。舊快取被新程式讀到時 `.get()` 回 `None`＝與本輪之前逐字相同。
+# 🔴 頂層桶那一支**不是**「一律 `None`」：`spend` 實測自帶 `severity`（事故當時是
+#   `critical`、今天是 `normal`），寫死 `None` 會把伺服器真的給了的值丟掉。兩支都走
+#   `.get()`，讓「沒有這個欄位」與「伺服器給 null」照樣壓成 `None`（那是既有語意）。
+#
+# ── 〈R89 觀測欄〉判準的立案史料（**史料住這裡、判準住測試檔**）──────────────────
+# 機械物＝`tools/tests/test_quota_policy.py::TestR89ObservationFieldsAreWiredButInert`
+# ＋ 同檔 `r89_decision_drift_problems()`；桶列舉那一面＝`tools/tests/
+# test_context_budget_guard.py::QuotaBucketUnionTest` 的三支 R89 測試。史料所以搬到本檔，
+# 是因為根層護欄層有**淨額棘輪**（量測面＝`tools/tests/*.py` 的**原始行數**，
+# `test_adr_xplat001_c1c2_lock._FROZEN_GUARD_LINES`）：新增判準時把史料一起寫進測試檔，
+# 等於用「不可壓縮的真實功能」的名義讓量測面長大。本檔不在那個量測面內，而 `count_loc()`
+# 也不計註解行 ⇒ 史料放這裡對兩條棘輪皆零成本，且它本來就是這段實作的 WHY。
+#
+# 🔴 交付條件「加欄位前後的 `Decision` 必須完全相等（逐位元）」**結構上不可滿足**，故判準
+# 不取它的字面（不可滿足的驗收條件會逼人去滿足一個假的）。理由：`Decision.per_axis[i].axis`
+# 與 `Decision.binding` 是**被回聲回來的輸入 `Axis` 物件本身**，而 `Axis` 是帶結構化
+# `__eq__` 的 frozen dataclass ⇒ 欄位只要真的送達，`d_old == d_new` 恆為 `False`
+# （實測：`False`）。要它為 `True` 只剩兩條路——欄位根本沒接上（＝這一包什麼都沒做），
+# 或去動 `Axis.__eq__`（判讀層＝另一個持有面）。
+# ⇒ 判準改成**可滿足且更強**的形狀：把回聲那兩格抹成 `None` 之後，整個 `Decision` 物件
+# 必須 `==` 舊決策。它比「逐一比對幾個欄位」強——`cap`／`recommended_fanout`／`band`／
+# `binding`／`reason`／`amort`／`per_axis`（含每一列的 horizon／minutes／note）全在這**一個**
+# `==` 底下，漏掉任何一格結構上不可能。實測四組（新帳號 Team／舊帳號 R87 事故形狀
+# × `ratio` 缺席／7.5）：原始 `==` 皆 `False`、抹掉回聲欄後皆 `True`。
+#
+# 🔴 反向判準是必要的，不是補強：「通電前後相同」那一族在**欄位根本沒接上**時兩邊都是
+# `None` ⇒ 同樣全綠（沙箱實測：把本檔那兩對 `.get()` 整行拿掉後，該族仍回 `[]`）。
+# 所以另有一條釘住「電真的通了」，否則整包可以靠什麼都不做通過驗收。
 def bucket_readings(payload: object) -> list[dict]:
-    """payload 裡每一個看得到水位的桶：`{kind, pct, resets_at, group, via}`。
+    """payload 裡每一個看得到水位的桶：`{kind, pct, resets_at, group,
+    is_active, severity, via}`。
 
     🔴 `resets_at` 與 `group` **逐桶保留**（R82）：判讀層的分類只由 `resets_at` 導出，
     而 `group` 是伺服器自己的分組欄（實測多數桶沒有它 ⇒ 一律允許 `None`，
     **不得**拿它當分類依據，那會對沒有 group 的桶整片失明）。
     `resets_at` 一律是**伺服器原字串**：不轉本地、不重新格式化（naive 本地時間戳跨
     DST 相減實測差 3600 秒且完全靜默，本 repo 已有具名機械物禁止持久化它）。
+    `is_active`／`severity` 同屬「帶出來但不許參與判讀」那一族（理由見上方 R89 段）。
     """
     if not isinstance(payload, dict):
         return []
@@ -370,7 +418,10 @@ def bucket_readings(payload: object) -> list[dict]:
         if pct is not None:
             out.append({"kind": str(item.get("kind") or "?"), "pct": pct,
                         "resets_at": item.get("resets_at"),
-                        "group": item.get("group"), "via": "limits[].percent"})
+                        "group": item.get("group"),
+                        "is_active": item.get("is_active"),
+                        "severity": item.get("severity"),
+                        "via": "limits[].percent"})
     for key, val in payload.items():
         if key == "limits" or not isinstance(val, dict):
             continue
@@ -378,7 +429,10 @@ def bucket_readings(payload: object) -> list[dict]:
             pct = normalize_pct(val.get(field), scale)
             if pct is not None:
                 out.append({"kind": key, "pct": pct, "resets_at": val.get("resets_at"),
-                            "group": val.get("group"), "via": f"{key}.{field}"})
+                            "group": val.get("group"),
+                            "is_active": val.get("is_active"),
+                            "severity": val.get("severity"),
+                            "via": f"{key}.{field}"})
                 break
     return out
 
@@ -626,8 +680,12 @@ def _report(reading: dict) -> str:
     # 說自己是哪一桶、什麼時候 reset。本函式不挑桶也不排序：挑桶是判讀層的事。
     den = reading["denominator"]
     lines = [f"measured_at={reading['measured_at']}  axes={len(reading['axes'])}"]
+    # 🔴 R89：`is_active`／`severity` 走 `.get()` 而不是 `[...]`——`--from-cache` 讀得到
+    # **本輪之前寫下的舊快取**（那些軸沒有這兩鍵），下標會當場 KeyError，而它的表徵是
+    # 「額度工具壞了」而不是「這格沒有值」。兩者都印成 `None`＝與缺席語意一致。
     lines += [f"  kind={a['kind']} {a['pct']:.1f}%  resets_at={a['resets_at']}"
-              f"  group={a['group']}  via={a['via']}" for a in reading["axes"]]
+              f"  group={a['group']}  is_active={a.get('is_active')}"
+              f"  severity={a.get('severity')}  via={a['via']}" for a in reading["axes"]]
     lines.append(f"denominator[{den['kind']}]={den['text']}")
     if den["cross_check"]:
         lines.append(f"cross_check={den['cross_check']}")

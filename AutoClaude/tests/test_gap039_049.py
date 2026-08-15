@@ -16,55 +16,27 @@ Gap-039 ~ Gap-049 測試（Evo-006）。
 """
 from __future__ import annotations
 
-import os
-import shutil
 from pathlib import Path
 from unittest.mock import MagicMock
 
-import pytest
 import yaml
 
 from autoclaude.execution.playbook_runner import PlaybookRunner
 from autoclaude.models.playbook import PlaybookTask
 from autoclaude.utils.config import AppConfig
+from tests.helpers.fake_pty import fake_pty, hermetic_runner  # noqa: F401  fixture 需在本模組可見
 
-# SD_09 R56 zero-trust audit：CI runner 無 `claude` CLI binary；dry_run=False 真實執行測試
-# 經 perception/pty_wrapper spawn `claude` → FileNotFoundError。環境前提閘門（同
-# autoclaude/execution/pre_run_validator.py:56 shutil.which 與 ~50 PG importorskip 慣例）：
-# 本地有 claude 照常驗證；CI 無 binary → graceful skip（非掩蓋 code bug）。SD_10 P3-R56-2 重寫。
+# 🔴 R90／DEF-200-127：本檔 3 支（連同 test_gap014_020.py 共 11 支）原本掛
+# `requires_claude_cli` skipif，因為 `dry_run=False` 的 `runner.run()` 會真的去
+# spawn `claude` CLI。現改掛 `@hermetic_runner`（patch 掉真實執行接縫
+# `autoclaude.execution.playbook_runner.PtyWrapper`），兩平台都跑得到，斷言零修改。
+# 完整推導只住一個地方＝`tests/helpers/fake_pty.py` 的 docstring；本檔與
+# test_gap014_020.py 皆刻意不複寫（這兩檔的 reason 字串在 R79~R84 期間就是因為
+# 各留一份而一起漂掉的）。
 #
-# DEF-101-089 補強：本機裝有 `claude` CLI 且從巢狀 Claude Code session 執行 pytest 時，這裡
-# spawn 的子行程會無限掛起（見 test_gap014_020.py 同款註解的完整根因說明）。
-# `CLAUDECODE=1` 為 Claude Code 官方啟動時設定的環境變數，非行程樹猜測。
-#
-# 🔴 本輪訂正分類（完整推導見 test_gap014_020.py 同款註解）：這一批**不是**永久不覆蓋，
-# 而是「只在巢狀 Claude Code session 不可跑」；每日 nightly（非巢狀）實測會真的跑。
-# reason 因此改為寫得出那條真的可用的配方。
-#
-# 🔴 R79 訂正本條的**因果敘述**（原文把掛起歸因到 `CLAUDECODE=1` 這個變數本身，該歸因
-# 已被剝除該變數的對照組推翻，故此處不逐字複述原句）。掛住的是「巢狀 Claude Code
-# session 這個執行環境 × `wexpect.spawn()`」這一組，`CLAUDECODE` 只是該環境的可靠標記。
-# DEF-101-089 原結論在 `claude -p` 非互動 subprocess spawn 上確實已被推翻（rc=0／約 4s），
-# 但那條路不是本檔走的路。判準維持不變（拿掉這半個條件會當場掛死整棵樹，已注入實證）。
-# 三次量測與對照組見 `docs/06_quality/CrossPlatform_R79_Debt_Audit.md` 的 `## DEF-101-913` 節。
-#
-# 🔴 R85（macOS 本機輪）：上面那段因果是 **Windows 專屬**的（mac 上 `wexpect` 未安裝，
-# `_start_wexpect()` 結構上到不了）。**完整推導、mac 側量測與承接方向只寫在一個地方**——
-# `test_gap014_020.py` 同款註解的 R85 段；本檔刻意不複寫，避免同一份知識住兩個家而只有
-# 一個家被改（本檔與該檔的 reason 字串在 R79~R84 期間就是這樣一起漂的）。
-# 一句話結論：判準維持不變（mac 上實測 `env -u CLAUDECODE pytest 本檔` 逾 600s 未完成），
-# 但 mac 側成因**未歸因**，不得寫成已歸因。
-requires_claude_cli = pytest.mark.skipif(
-    shutil.which("claude") is None or os.environ.get("CLAUDECODE") == "1",
-    reason="[ENV-DISABLED] 【未啟用，非缺件】需要 claude CLI binary 且非巢狀 Claude Code "
-    "session。🔴 成因**因平台而異**（完整推導見 test_gap014_020.py 的 R85 段，本檔不複寫）："
-    "Windows＝wexpect pty spawn 掛住不回（DEF-101-913）；macOS＝wexpect 未安裝、該機制到不了，"
-    "但 R85 實測仍逾 600s 未完成 ⇒ 成因未知且未歸因。"
-    "跑法：在**非** Claude Code session 的 PowerShell 執行 "
-    "`python -m pytest tests/test_gap039_049.py`"
-    "（每日 nightly 排程即為此環境，2026-08-06 nightly log 實測會真的跑）。"
-    "治本方向＝SD_10 P3-R56-2 改用 fake-executor 重寫，使兩平台都跑得到",
-)
+# 🔴 被繞過但**未歸因**：macOS 上 R85 實測 `env -u CLAUDECODE pytest 本檔` 逾 600s
+# 未完成，成因未知（Windows 側已歸因＝wexpect pty spawn，DEF-101-913）。本輪的修法
+# 讓這 3 支不再觸發它，**不是**查清了它。
 
 
 # ──────────────────────────────────────────────
@@ -449,7 +421,7 @@ def test_gap043_split_step_rfind_returns_neg1():
 # Gap-044：GOAL_SYNTHESIS ESCALATION → MinimaxEvolver
 # ══════════════════════════════════════════════
 
-@requires_claude_cli
+@hermetic_runner
 def test_gap044_goal_synthesis_escalation_tries_minimax_evolver_first(tmp_path):
     """Gap-044：GOAL_SYNTHESIS ESCALATION 應先呼叫 MinimaxEvolver（max_retries=0）。"""
     minimax_mock = MagicMock()
@@ -468,7 +440,7 @@ def test_gap044_goal_synthesis_escalation_tries_minimax_evolver_first(tmp_path):
         "Gap-044: GOAL_SYNTHESIS ESCALATION 應先呼叫 MinimaxEvolver"
 
 
-@requires_claude_cli
+@hermetic_runner
 def test_gap044_goal_synthesis_inject_step_returns_evolved_path(tmp_path):
     """Gap-044：MinimaxEvolver 提議 INJECT_STEP 時應返回演化版路徑。"""
     minimax_mock = MagicMock()
@@ -666,7 +638,7 @@ def test_gap047_compact_anchor_includes_success_regex():
 # Gap-048：per-step 演化次數限制
 # ══════════════════════════════════════════════
 
-@requires_claude_cli
+@hermetic_runner
 def test_gap048_same_step_evolution_limited_to_twice(tmp_path):
     """Gap-048：同一步驟觸發演化次數達 2 次時，強制人工介入（不再演化）。"""
     minimax_mock = MagicMock()

@@ -14,44 +14,45 @@ W3-T12 變更（≤ 450 行 LOC 預算達成）：
 from __future__ import annotations
 
 import logging
-import shutil                                                                  # noqa: F401  re-export
+import shutil  # noqa: F401  re-export
 import time
 from pathlib import Path
-from typing import Optional
 
-from ..utils.config import AppConfig
-from ..utils.notifier import notify, notify_escalation                         # noqa: F401  re-export
-from ..utils.token_tracker import TokenUsageLogger, build_patterns
-from ..utils.checkpoint_manager import CheckpointManager
-from ..perception.hotkey_handler import HotkeyHandler
-from ..perception.pty_wrapper import PtyWrapper                                # noqa: F401  re-export
-from ..decision.minimax_client import MinimaxClient
-from ..execution.evaluator import Evaluator
-from ..execution.workflow_detector import WorkflowDetector
-from ..execution.error_classifier import ErrorClassifier
-from ..execution.convergence_monitor import ConvergenceMonitor                 # noqa: F401  re-export
-from ..execution.cross_step_validator import CrossStepStateValidator           # noqa: F401  re-export
-from ..utils.knowledge_base import FailureKnowledgeBase
-from ..evolution.playbook_evolver import PlaybookEvolver
-from ..evolution.minimax_evolver import MinimaxEvolver
 from ..core.services.auto_resume import AutoResumeService
+from ..decision.minimax_client import MinimaxClient
+from ..evolution.minimax_evolver import MinimaxEvolver
+from ..evolution.playbook_evolver import PlaybookEvolver
+from ..execution.convergence_monitor import ConvergenceMonitor  # noqa: F401  re-export
+from ..execution.cross_step_validator import CrossStepStateValidator  # noqa: F401  re-export
+from ..execution.error_classifier import ErrorClassifier
+from ..execution.workflow_detector import WorkflowDetector
+from ..perception.hotkey_handler import HotkeyHandler
+from ..perception.pty_wrapper import PtyWrapper  # noqa: F401  re-export
+
+# SD_Improving_05 W3：CheckpointPlugin 吸收 3 中斷路徑（TOKEN_HALT/ESC+F12/ESCALATION dump）+ 演化後 checkpoint  # noqa: E501
+from ..plugins.checkpoint import CheckpointPlugin
+
 # SD_Improving_05 W1 Step-1：counter SSOT 遷移 — Runner 直接持有 GotoCounterPlugin
 from ..plugins.goto_counter_plugin import GotoCounterPlugin
+
 # SD_Improving_05 W2：TokenGuardPlugin 吸收 5 方法群（M-2 雙寫拔除 + M-7 per-step override）
 from ..plugins.token_guard_plugin import TokenGuardPlugin
-# SD_Improving_05 W3：CheckpointPlugin 吸收 3 中斷路徑（TOKEN_HALT/ESC+F12/ESCALATION dump）+ 演化後 checkpoint
-from ..plugins.checkpoint import CheckpointPlugin
+from ..utils.checkpoint_manager import CheckpointManager
+from ..utils.config import AppConfig
+from ..utils.knowledge_base import FailureKnowledgeBase
+from ..utils.notifier import notify, notify_escalation  # noqa: F401  re-export
+from ..utils.token_tracker import TokenUsageLogger, build_patterns
 
 # SD_06 W6-T6-6/T6-7：資料類別（PlaybookState / _StepOutput / PlaybookResult / _MutationResult）
 # + 純函式已搬移至 autoclaude.execution.types（_runner_compat.py 物理刪除）。
 # SD_07 W4-T4-8：`_prepend_global_goal_brief` shim 已物理拔除（plugin SSOT GoalSynthesisPlugin）。
 from .types import (
-    PlaybookState,        # noqa: F401  re-export
-    _StepOutput,          # noqa: F401  re-export
     PlaybookResult,
-    _MutationResult,      # noqa: F401  re-export
-    _validate_batch_compatibility_impl,
+    PlaybookState,  # noqa: F401  re-export
     _evaluate_impl,
+    _MutationResult,  # noqa: F401  re-export
+    _StepOutput,  # noqa: F401  re-export
+    _validate_batch_compatibility_impl,
 )
 
 logger = logging.getLogger("autoclaude.execution.playbook")
@@ -85,7 +86,7 @@ class PlaybookRunner:
       - __init__：所有屬性建構（測試引用 180+ 處）
       - run：外層自動重載演化版 + auto-resume 迴圈
       - M1 shim 三方法（check_frozen_surface_shim.py Gate）
-      - backward-compat shim（_get_correction / _notify；SD_07 W4 已拔除 _prepend_global_goal_brief）
+      - backward-compat shim（_get_correction/_notify；SD_07 W4 已拔除 _prepend_global_goal_brief）
       - 17 個 strategy delegate shim（原 _runner_internals mixin）
     """
 
@@ -96,24 +97,20 @@ class PlaybookRunner:
         hotkey_handler: HotkeyHandler,
         dry_run: bool = False,
         *,
-        executor: "Optional[object]" = None,
-        evaluator: "Optional[object]" = None,
-        brain: "Optional[object]" = None,
-        checkpoint_mgr: "Optional[CheckpointManager]" = None,
-        knowledge_base: "Optional[FailureKnowledgeBase]" = None,
-        kernel: "Optional[AutoResumeService]" = None,
-        evolution_approver: "Optional[object]" = None,
+        checkpoint_mgr: CheckpointManager | None = None,
+        knowledge_base: FailureKnowledgeBase | None = None,
+        kernel: AutoResumeService | None = None,
+        evolution_approver: object | None = None,
     ):
         self._cfg = config
         self._minimax = minimax_client
         self._hotkey = hotkey_handler
         self._dry_run = dry_run
-        self._evaluator = Evaluator(timeout=config.playbook.evaluator_timeout_seconds)
-
-        # IExecutor / IEvaluator / IBrain ports（hex 架構，目前為可選注入）
-        self._port_executor = executor
-        self._port_evaluator = evaluator
-        self._port_brain = brain
+        # R90／DEF-200-126：此處原有 `executor=` / `evaluator=` / `brain=` 三個 kwarg
+        # ＋ 一個 `self._evaluator = Evaluator(...)`，四者**全部只寫不讀**（AST 掃 502 檔，
+        # 三筆 port 屬性皆 ctx=Store 零 Load；`._evaluator` 全庫零讀取），已拆除。
+        # 真正的 executor DI 住 Kernel 那條路（`main.py` → `build_kernel(executor=…)`）；
+        # 本 facade 的執行接縫見 `_execute_prompt` 上方註解。
         # DEF-13-004（L5 signoff 守界）：演化重載核可者 callable(count, evolved_path)->bool。
         # 僅在 cfg.playbook.require_evolution_signoff=True 時生效；None＝未注入。
         self._evolution_approver = evolution_approver
@@ -127,7 +124,7 @@ class PlaybookRunner:
         self._notify_enabled = config.notification.enabled
         # SD_Improving_05 W2 (M-2)：TokenGuardPlugin 為 compact_failure SSOT。
         # SD_07 W4-T4-4：原 `_consecutive_compact_failures` property + setter 已物理拔除；
-        # 直接透過 `self._token_guard_plugin.compact_failure_count` 讀取 / `_compact_failure_count` 寫入。
+        # 直接透過 `self._token_guard_plugin.compact_failure_count` 讀取 / `_compact_failure_count` 寫入。  # noqa: E501
         self._token_guard_plugin = TokenGuardPlugin(token_guard_cfg=config.token_guard)
         self._knowledge_base = knowledge_base or FailureKnowledgeBase(
             str(Path(config.checkpoint_dir) / "failure_knowledge_base.jsonl")
@@ -135,7 +132,7 @@ class PlaybookRunner:
         self._evolver = PlaybookEvolver()
         self._minimax_evolver = MinimaxEvolver()
         self._escalation_history: list = []
-        self._orchestrator: "Optional[AutoResumeService]" = kernel
+        self._orchestrator: AutoResumeService | None = kernel
         # SD_Improving_05 W1 Step-1：counter SSOT — GotoCounterPlugin 成為 4 個計數器
         # （goto / inject_before / skip_to / step_evolution）的唯一資料儲存點。
         # _run_steps 內 local 變數 `_goto_counter` 等將為此 plugin 內部 dict 的 alias，
@@ -147,8 +144,8 @@ class PlaybookRunner:
         self._checkpoint_plugin = CheckpointPlugin(checkpoint_manager=self._checkpoint_mgr)
         # SD_Improving_05 W4-2/3/4：3 個新 plugin（mixin delegate；W6 完整下沉）
         from ..plugins.fast_path_plugin import FastPathPlugin
-        from ..plugins.playbook_persistence_plugin import PlaybookPersistencePlugin
         from ..plugins.goal_synthesis_plugin import GoalSynthesisPlugin
+        from ..plugins.playbook_persistence_plugin import PlaybookPersistencePlugin
         self._fast_path_plugin = FastPathPlugin()
         # SD_05 W4 三方審查修復：callable resolver 使 cfg.checkpoint_dir 動態變動同步生效
         self._playbook_persistence_plugin = PlaybookPersistencePlugin(
@@ -262,6 +259,14 @@ class PlaybookRunner:
         from .boot_helper import detect_workflow_impl
         return detect_workflow_impl(self, playbook)
 
+    # 🔴 執行接縫住這裡，而它**不是**建構子注入（R90／DEF-200-126）。
+    # 實際取得執行器的路徑是模組全域查詢：
+    #   execute_prompt_impl → `_pr().PtyWrapper(...)`（prompt_dispatcher.py:44,56）
+    #   → sys.modules["autoclaude.execution.playbook_runner"].PtyWrapper
+    # ⇒ 測試要換掉執行器一律 `patch("autoclaude.execution.playbook_runner.PtyWrapper", …)`
+    #   （全庫既有 26 個站點；共用 fixture＝tests/helpers/fake_pty.py）。
+    # 不要在本 class 的 __init__ 再加一個 `executor=` port：那個東西存在過、零讀取、
+    # 已於 R90 拆除，而 production 根本不建構本 class（`main.py` 走 Kernel 那條路）。
     def _execute_prompt(self, *a, **kw):
         from .prompt_dispatcher import execute_prompt_impl
         return execute_prompt_impl(self, *a, **kw)
@@ -350,7 +355,7 @@ class PlaybookRunner:
                     try:
                         playbook = self._load_playbook(str(_mutated_path))
                     except Exception as exc:
-                        logger.warning("Gap-013-C | 載入 .mutated.yaml 失敗，使用原始 Playbook: %s", exc)
+                        logger.warning("Gap-013-C | 載入 .mutated.yaml 失敗，使用原始 Playbook: %s", exc)  # noqa: E501
 
             self._validate_evaluator_commands(playbook)
             total = len(playbook.tasks)

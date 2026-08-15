@@ -242,6 +242,18 @@ def skip_measurement_problems(pytest_output: str, parsed_skips: int) -> list[str
 #: 對照組（誠實劃界）：`tools/tests` 那一棵**不受**這個維度影響——當回合以 Grep 對
 #: `tools/tests` 全樹搜 `CLAUDECODE` 命中 0 ⇒ 該剖面鍵刻意不帶這一段，不是漏寫。
 #:
+#: 🔴 R90 包 C 訂正上一段的**現行蘊含**（原文在 R80 當時為真，故不刪除；過期的是它今天
+#: 還在暗示的那件事）：那「一族 11 支」已經**不存在了**——R90／DEF-200-127 把
+#: `test_gap014_020.py`／`test_gap039_049.py` 的 `requires_claude_cli` 述詞整個拿掉，
+#: 11 支改掛 `@hermetic_runner`（patch 掉 `playbook_runner.PtyWrapper`）後在兩平台都真的跑。
+#: 當回合實查：`AutoClaude/tests` 全樹搜 `CLAUDECODE` 只剩註解／docstring 命中，
+#: **runtime 述詞 0 個** ⇒ `+nested` 這一段在今天的 `AutoClaude/tests` 上**鑑別力為 0**
+#: （巢狀與非巢狀跑出來的 census 已經一樣）。
+#: **本輪刻意不動剖面鍵**，兩個理由：① 拿掉 `+nested` 會改變 `_RUNTIME_SKIP_CEILING`／
+#: `_RUNTIME_SKIP_CEILING_MAX` 的字典鍵，是 re-key 不是改數字，屬另案；② 鑑別力為 0
+#: **不等於**應該拿掉——它是「這棵樹目前沒有巢狀專屬 skip」的記錄點，下一支寫出
+#: `CLAUDECODE` 述詞的測試會讓它立刻恢復意義。承接：若連續數輪維持 0，再決定是否 re-key。
+#:
 #: 剖面鍵 ＝ `<樹>@<平台>+<能力>`。剖面是必要的：同一棵樹在「本機 PG 可用」與「沒有 PG」
 #: 兩種狀態下的健康值差 92 支，用同一個數字管必然一邊沒有鑑別力、另一邊恆假紅；平台同理。
 #: 剖面由呼叫端**實測**決定（local_ci_gate 探測完 PG 才知道自己在哪一格），不是由人宣告。
@@ -309,10 +321,27 @@ _RUNTIME_SKIP_CEILING: dict[str, dict[str, int]] = {
     # 是選配 extra（`[sdk]`／`pgvector`）未裝，裝了就會跑——刻意**不在本輪裝**：那會就地改掉
     # 本機 `.venv` 的母體，使這六格再也沒有人重量得出來（ONBOARDING 基線要求出廠環境）。
     # `debt` 3 全部指名承接 R84 且需要真實 BGE-M3 語料，不是設一個旗標就能還。
+    #
+    # 🔴 R90 補洞包 F 重釘：73 → 62（`env-disabled` 12 → **2**、`untagged` 1 → **0**，其餘四格
+    # 逐格不變）。上一段那句「`env-disabled` 12 支裡有 11 支的述詞是『非巢狀 session』」**今天
+    # 已為假**：R90 包 C（DEF-200-127）把 `test_gap014_020.py`／`test_gap039_049.py` 的
+    # `requires_claude_cli` 述詞整個拿掉，那 11 支改掛 `@hermetic_runner` 後在本剖面真的會跑。
+    # 🔴 為什麼這不是「順手整理」而是必修：包 C 讓 11 支變成真的會跑（＝真實成果），而天花板
+    # 判準是 `實測 ≤ 上限` ⇒ `2 ≤ 12` **恆綠**，沒有任何機械物會為這 11 格轉紅 ⇒ 它們變成
+    # 「日後可無聲加回去」的隱形額度，與本表下方 `_RUNTIME_SKIP_CEILING_MAX` 那句「天花板不
+    # 跟著降＝把剛還掉的欠債額度留著，日後可無聲用回去」是同一句話、同一個病。
+    # 值逐格照抄載具當場印出的那一行、零加減推算（本表既有紀律），原始整行：
+    #   `[skip census] AutoClaude/tests@darwin+pg+nested 共 62 支：platform=53／tool-absence=3
+    #    ／env-disabled=2／structural-pair=1／debt=3／untagged=0／欠債型 8 支（目標 0）`
+    # 載具＝`python tools/local_ci_gate.py --census-only <log>`（rc=0），log 產自同一輪
+    # `python -m pytest tests/ -q -rs --tb=line -p no:randomly`（rc=0；剖面標記逐字
+    # `AUTOCLAUDE-PG-DSN-IN-EFFECT=1 AUTOCLAUDE-NESTED-SESSION=1`）。全套計數的唯一出處＝
+    # ONBOARDING.md §7，本表不複寫。**只動 darwin 剖面**：win32 各剖面在 mac 上量不到，
+    # 憑空改它就是憑空捏造（同本表「憑空填數字」那條紀律的反向）。
     "AutoClaude/tests@darwin+pg+nested": {
         SKIP_GROUP_PLATFORM: 53, SKIP_GROUP_TOOL_ABSENCE: 3,
-        SKIP_GROUP_ENV_DISABLED: 12, SKIP_GROUP_STRUCTURAL: 1,
-        SKIP_GROUP_DEBT: 3, SKIP_GROUP_UNTAGGED: 1,
+        SKIP_GROUP_ENV_DISABLED: 2, SKIP_GROUP_STRUCTURAL: 1,
+        SKIP_GROUP_DEBT: 3, SKIP_GROUP_UNTAGGED: 0,
     },
     # 🔴 R80 包 A（S3-04）：根層 `tools/tests` 那一棵此前**完全不在任何天花板管轄內**
     # （43 支 skip，`run_root_unittests.py` 只印不判、rc 與它無關）。本列即那道管轄的入表。
@@ -401,10 +430,12 @@ _RUNTIME_SKIP_CEILING_MAX: dict[str, dict[str, int]] = {
         SKIP_GROUP_DEBT: 6,
         SKIP_GROUP_UNTAGGED: 0,
     },
+    # 🔴 R90 補洞包 F：連同基線一起下修（`env-disabled` 12 → 2、`untagged` 1 → 0；理由與
+    # census 原始整行見 `_RUNTIME_SKIP_CEILING` 同鍵那一段。同輪改兩表、無餘裕＝本表紀律②③）。
     "AutoClaude/tests@darwin+pg+nested": {
         SKIP_GROUP_PLATFORM: 53, SKIP_GROUP_TOOL_ABSENCE: 3,
-        SKIP_GROUP_ENV_DISABLED: 12, SKIP_GROUP_STRUCTURAL: 1,
-        SKIP_GROUP_DEBT: 3, SKIP_GROUP_UNTAGGED: 1,
+        SKIP_GROUP_ENV_DISABLED: 2, SKIP_GROUP_STRUCTURAL: 1,
+        SKIP_GROUP_DEBT: 3, SKIP_GROUP_UNTAGGED: 0,
     },
     # 🔴 R82（CARRIER-02）：連同基線一起下修 40 → 37（天花板不跟著降＝把剛還掉的
     # 欠債額度留著，日後可無聲用回去——這句話是本表自己的既有紀律）。

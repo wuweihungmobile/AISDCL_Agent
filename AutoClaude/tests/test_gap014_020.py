@@ -14,8 +14,6 @@ Gap-014 ~ Gap-020 整合驗證測試。
 from __future__ import annotations
 
 import json
-import os
-import shutil
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
@@ -40,76 +38,26 @@ from autoclaude.models.escalation import EscalationDump
 from autoclaude.models.playbook import PlaybookTask
 from autoclaude.models.step_mutation import StepMutation, StepMutationType
 from autoclaude.utils.config import AppConfig, PlaybookConfig
+from tests.helpers.fake_pty import fake_pty, hermetic_runner  # noqa: F401  fixture 需在本模組可見
 from tests.helpers.kernel_fixtures import make_service
 
-# SD_09 R56 zero-trust audit：CI runner 無 `claude` CLI binary；dry_run=False 真實執行測試
-# 經 perception/pty_wrapper spawn `claude` → FileNotFoundError。環境前提閘門（同
-# autoclaude/execution/pre_run_validator.py:56 shutil.which 與 ~50 PG importorskip 慣例）：
-# 本地有 claude 照常驗證 escalation/evolution 真實路徑；CI 無 binary → graceful skip（非掩蓋
-# code bug，純環境缺 binary）。完整 CI 覆蓋（改用 make_service fake-executor 重寫）列
-# SD_10 P3-R56-2。
+# 🔴 R90／DEF-200-127：本檔曾有 8 支（連同 test_gap039_049.py 共 11 支）掛
+# `requires_claude_cli = pytest.mark.skipif(shutil.which("claude") is None or
+# os.environ.get("CLAUDECODE") == "1", …)`，因為 `dry_run=False` 的 `runner.run()`
+# 會真的去 spawn `claude` CLI。現改掛 `@hermetic_runner`（patch 掉真實執行接縫
+# `autoclaude.execution.playbook_runner.PtyWrapper`），11 支在兩平台都跑得到，
+# **斷言與測試本體一個字都沒改**。完整推導（為什麼是這個接縫、為什麼登記的
+# 「make_service 重寫」正解是錯的）住 `tests/helpers/fake_pty.py` 的 docstring，
+# 本檔刻意不複寫——同一份知識只有一個家。
 #
-# DEF-101-089 補強（R4 Mac/Windows 複審主 agent 發現，親推 push 時實機重現）：本機裝有
-# `claude` CLI 且從「本身已是存活 Claude Code session」巢狀執行 pytest（不論本機開發驗證
-# 或 pre-push hook）時，這裡 spawn 的子行程會無限掛起。`CLAUDECODE=1` 是 Claude Code
-# 執行環境官方在啟動時就會設定的環境變數（非行程樹猜測），用它額外 skip 巢狀 session
-# 情境是可靠訊號、非 heuristic 賭注——一般 CI runner／非巢狀本機開發環境不受影響
-# （該變數不存在）。
-#
-# 🔴 本輪訂正分類（Rule 12 fail-loud：分類錯的方向是**悲觀**，後果一樣是資訊遺失）。
-# 前一份全庫 skip 盤點把這一批歸為「可辯護的永久不覆蓋」、並寫「在 Claude Code session
-# 內永遠跑不到」。前半句是真的，後半句被推廣成了「永遠跑不到」——而上面那個 `or` 有
-# **兩個**條件：本機 `claude` binary 存在（第一個條件為 False），只有巢狀那個條件成立。
-# 於是在**非**巢狀 session（＝ schtasks 跑的每日 nightly）兩個條件都不成立，這一批會真的
-# 跑。當回合對帳：nightly log 與巢狀 session 同一棵樹 collected 相同，nightly 少了 15 支
-# skip、多了 15 支 passed，且其 `-rs` 清單對本檔零命中 ⇒ 它們跑了而且綠。
-# 代價是那條**真的可用的配方**從未進過任何文件；reason 因此改為寫得出配方。
-#
-# 🔴 R79 訂正本條的**因果敘述**（原文把掛起歸因到 `CLAUDECODE=1` 這個變數本身，該歸因
-# 已被對照組推翻，故此處不逐字複述原句）。當回合三次實測，載具＝直接驅動 `PtyWrapper`：
-#   · 繼承 `CLAUDECODE=1`：`start()` 180.16s 未回返（watchdog rc=99）
-#   · **剝除** `CLAUDECODE` 的對照組：180.05s 未回返，行為完全一樣
-#   · 行程樹快照：掛在 wexpect 自己的 host↔console-reader 交握，`claude.exe` 從未被啟動
-# ⇒ 真正掛住的是「巢狀 Claude Code session 這個執行環境 × `wexpect.spawn()`」這一組，
-# `CLAUDECODE` 只是該環境的**可靠標記**、不是成因。判準因此**維持不變**（在該環境內
-# skip 仍然是對的，拿掉這半個條件會讓這 11 支當場掛死整棵樹——已注入實證），只改寫
-# reason 讓它別再宣稱一個已被證偽的因果。另一半也要講清楚：DEF-101-089 的原結論在
-# `claude -p` 這種**非互動 subprocess** spawn 上確實已被推翻（rc=0／約 4s），但那條路
-# **不是**本檔走的路（本機 `claude` 解析為 `.EXE` 而非 `.cmd` shim ⇒ 進 `_start_wexpect`）。
-# 逐次量測見 `docs/06_quality/CrossPlatform_R79_Debt_Audit.md` 的 `## DEF-101-913` 節。
-#
-# 🔴 R85（macOS 本機輪）訂正本條 reason 的**射程**（判準一個字都沒改，改的是它給的理由）。
-# 上面整段因果（`wexpect.spawn()` 的 host↔console-reader 交握掛住）是 **Windows 專屬**的：
-#   · 當回合 mac 實測 `importlib.util.find_spec('wexpect')` → **None**（未安裝）
-#     ⇒ `PtyWrapper.start()` 的 `_WEXPECT_AVAILABLE` 短路恆 False
-#     ⇒ `_start_wexpect()` 在 macOS 上**結構上到不了**，它不可能是這裡的成因。
-#   · 同回合 AC-(b) 端到端實跑的 log 逐字印 `wexpect 未安裝，改用 subprocess 模式`，
-#     且該路徑（`claude -p` 非互動 subprocess）在巢狀 session 內 rc=0 正常回返。
-# ⇒ 把一個 Windows 專屬機制寫成無平台限定的 reason，正是本 repo 反覆判過的
-#   「有鎖在守，但它給的理由是假的」——鎖照樣綠，讀的人拿到假知識。
-#
-# 🔴 但**判準維持不變**，因為 mac 上的實測不支持「拿掉就能跑」：當回合以
-# `env -u CLAUDECODE pytest tests/test_gap039_049.py -q` 實跑，**逾 600 秒未完成**
-# （外層 timeout 砍掉，rc=143；砍後 `pgrep` 對 `claude -p` 命中 0 ⇒ 行程樹有收乾淨）。
-# ⇒ macOS 上這一批**仍然跑不完**，只是**成因未知、且確定不是 wexpect**。
-#   誠實劃界：這裡登記的是「還沒查出來」，不是「已歸因」。在查清楚之前拿掉
-#   `CLAUDECODE` 那半個條件，會讓每一次 `pytest tests -q` 都掛 10 分鐘以上。
-# 承接：需要一輪專門的歸因（候選：真 `claude -p` 的 agentic turn 本來就很久／
-#   stdin pipe 沒有 EOF 而子行程在等輸入／`--continue` 在巢狀 session 內的行為），
-#   正解方向是本檔上方已登記的 SD_10 P3-R56-2「改用 make_service fake-executor 重寫」
-#   ——那才會讓這 11 支變成**兩平台都跑得到**的 hermetic 測試，而不是換一個 skip 理由。
-requires_claude_cli = pytest.mark.skipif(
-    shutil.which("claude") is None or os.environ.get("CLAUDECODE") == "1",
-    reason="[ENV-DISABLED] 【未啟用，非缺件】需要 claude CLI binary 且非巢狀 Claude Code "
-    "session。🔴 成因**因平台而異**：Windows 上是 wexpect pty spawn 掛住不回（R79 實測 "
-    "180s×2＋45s、claude.exe 從未啟動，見 DEF-101-913）；macOS 上 wexpect 根本沒安裝、"
-    "該機制結構上到不了，但 R85 實測 `env -u CLAUDECODE pytest` 仍逾 600s 未完成 ⇒ "
-    "mac 側成因**未知且未歸因**（不得寫成已歸因）。"
-    "跑法：在**非** Claude Code session 的 PowerShell 執行 "
-    "`python -m pytest tests/test_gap014_020.py`"
-    "（每日 nightly 排程即為此環境，2026-08-06 nightly log 實測會真的跑）。"
-    "治本方向＝SD_10 P3-R56-2 改用 fake-executor 重寫，使兩平台都跑得到",
-)
+# 🔴 被繞過、但**尚未歸因**的兩件事（拿掉 skip 不等於解釋了它們，別把本段讀成已解決）：
+#   · Windows：`wexpect` pty spawn 掛住不回（R79 三次實測 180s×2＋45s，`claude.exe`
+#     從未被啟動）——已歸因，見 DEF-101-913 與
+#     `docs/06_quality/CrossPlatform_R79_Debt_Audit.md`。
+#   · macOS：`wexpect` 未安裝 ⇒ 上面那個機制結構上到不了，但 R85 實測
+#     `env -u CLAUDECODE pytest tests/test_gap039_049.py -q` 仍**逾 600 秒未完成**
+#     （rc=143；砍後 `pgrep` 對 `claude -p` 命中 0）⇒ **成因未知且未歸因**，
+#     不得寫成已歸因。本輪的修法讓這 11 支不再觸發它，不是查清了它。
 
 
 # ──────────────────────────────────────────────
@@ -810,7 +758,7 @@ class TestGap019BatchMutationRunner:
         data = outer.model_dump()
         assert data["batch_mutations"][0]["delete_step_id"] == "T03"
 
-    @requires_claude_cli
+    @hermetic_runner
     def test_batch_mutations_applied_via_mock_correction(self, tmp_path):
         """Gap-019-B：mock _get_correction 回傳 batch_mutations，驗證每個突變都被套用。"""
         from unittest.mock import patch as upatch
@@ -851,7 +799,7 @@ class TestGap019BatchMutationRunner:
             result = runner.run(pb_path)
         assert result.success
 
-    @requires_claude_cli
+    @hermetic_runner
     def test_batch_mutations_truncated_to_3(self, tmp_path):
         """Gap-019-B：batch_mutations 超過 3 個時 runner 截斷至前 3 個。"""
         from unittest.mock import patch as upatch
@@ -899,7 +847,7 @@ class TestGap019BatchMutationRunner:
 # Gap-017: SKIP_TO 執行邏輯（補足有效測試）
 # ──────────────────────────────────────────────
 
-@requires_claude_cli
+@hermetic_runner
 class TestGap017SkipToRunnerExtended:
     """Gap-017-C SKIP_TO 執行邏輯的有效整合測試（使用 mock _get_correction）。"""
 
@@ -1128,7 +1076,7 @@ class TestGap014GoalSynthesisInjectionExtended:
 # Gap-016-C: MinimaxEvolver fallback 整合測試
 # ──────────────────────────────────────────────
 
-@requires_claude_cli
+@hermetic_runner
 class TestGap016CMinimaxEvolverFallback:
     """驗證 PlaybookRunner 在 ESCALATION 時的 MinimaxEvolver → 規則引擎 fallback 機制。"""
 

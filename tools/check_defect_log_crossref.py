@@ -653,13 +653,13 @@ _UNASSIGNED_LITERAL = "未指派"
 #: 尾巴＝1，未逾 `_SEAL_TAIL_MAX`，故封印本身不必動）。這是判準訊息自己指名的動作，不是放寬。
 _UNPINNED_HANDOVER_GRANDFATHERED = frozenset({
     "DEF-101-235", "DEF-101-238",
-    "DEF-101-324", "DEF-101-377", "DEF-101-392",
+    "DEF-101-324", "DEF-101-392",
 })
 #: shrink-only 棘輪上限（形狀比照 `tools/tests/` 的檔數棘輪）。只能往小改。
-#: 🔴 R80 包 C 下修 34 → 28：`DEF-01-007`／`DEF-100-002`／`DEF-101-021`／`022`／`025`／
-#: `418` 六筆已結案（逐筆實查見 `CrossPlatform_R80_Scan_Findings.md` §C），不再需要豁免。
-#: 是判準自己指名的動作（訊息逐字要求刪除並下修為 28），不是放寬。
-_UNPINNED_HANDOVER_CEILING = 5
+#: 🔴 歷次下修（34→28→…→5→4）的逐筆理由與被刪 ID 一律**不住這裡**：本檔受 LOC 相等棘輪
+#: 管、餘裕近乎零，史料逐字保全於 `CrossPlatform_R89_Closure_Evidence.md` 的
+#: 〈護欄層史料搬遷（帳本瘦身批）〉節。每一次下修都是判準訊息自己指名的動作，不是放寬。
+_UNPINNED_HANDOVER_CEILING = 4
 
 #: 🔴 本天花板的**方向鎖**（`DEF-101-993`）：`grandfather_ceiling_problems()` 判的是
 #: 「清單筆數 ≤ 天花板」，對「把天花板往上搬」零判準。判準、重釘史與 WHY 皆住

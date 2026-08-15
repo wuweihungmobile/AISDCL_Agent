@@ -727,7 +727,7 @@ _FROZEN_GUARD_LINES: dict[str, int] = {
     "_platform_helpers.py": 537,
     "_ps_engine.py": 115,
     "test_act_local_runner_image.py": 322,
-    "test_adr_xplat001_c1c2_lock.py": 5419,
+    "test_adr_xplat001_c1c2_lock.py": 5431,
     "test_archive_defect_log.py": 3877,
     "test_bash32_compat.py": 946,
     "test_bash_probe_spec_contract.py": 983,
@@ -742,7 +742,7 @@ _FROZEN_GUARD_LINES: dict[str, int] = {
     "test_check_wrapper_thinness.py": 1234,
     "test_claim_provenance_r86.py": 341,
     "test_component_sanitizer_shared_layer_lock.py": 293,
-    "test_context_budget_guard.py": 6374,
+    "test_context_budget_guard.py": 6399,
     "test_defect_id_reference_integrity.py": 261,
     "test_dev_start.py": 7056,
     "test_dev_start_ps1_lastexitcode.py": 548,
@@ -770,7 +770,7 @@ _FROZEN_GUARD_LINES: dict[str, int] = {
     "test_ps51_compat.py": 565,
     "test_ps_engine_ssot.py": 933,
     "test_python_c_percent_shim.py": 119,
-    "test_quota_policy.py": 1810,
+    "test_quota_policy.py": 1934,
     "test_root_infra_parity.py": 441,
     "test_run_root_unittests.py": 2190,
     "test_sanitize_component_frozen_sdd_versions_lock.py": 340,
@@ -882,6 +882,18 @@ _GUARD_LINES_REPIN_LOG: tuple[tuple[str, int, int, int, str], ...] = (
      "②`test_quota_policy.py` 的完整路徑指標收斂成檔頭唯一一處（其餘三處改用同檔既有的"
      "短指稱），三塊因而回到 HEAD 時的歸屬。分桶讀數 4276→4009（相對 HEAD 基準 4119 為 "
      "-110），量測與逐筆歸因逐字見該檔〈分桶棘輪：+157 全部來自重新歸類〉。"),
+    ("R90", 83578, 83739, 161,
+     "[非淨減法輪] R90 收尾單人窗口（靜止樹、零並行包 ⇒ rc 可歸因）。成長面全數落在"
+     "「R89 觀測欄（`is_active`／`severity`）接好卻沒有電」那組回歸鎖，逐檔清單＝"
+     "CrossPlatform_R90_Guard_Repin_Evidence.md。三條合法出口**逐條實查**後才重釘："
+     "①刪死碼＝0（新增的每一個 helper 都有實際消費者，實查零孤兒）；"
+     "②搬史料**已由前段包用盡**（+253→+149，−41%）——殘餘散文 26 行中 8 行已是"
+     "指向 `tools/lib/quota_meter.py`〈R89 觀測欄〉的指標、18 行是判準理由，"
+     "而「判準與判準的理由」不在棘輪自列的出口內（R89 那一列同一句話）；"
+     "③抽共用層（判準本體下沉 `tools/lib/quota_criteria.py`，該檔檔頭自訂的體例）"
+     "只涵蓋約 11 行／7%，且要動 `tools/lib/` 另一個 LOC 預算面 ⇒ 收尾窗口刻意不做，"
+     "列為交棒項。代價側現查：R90 上限 2000（`net_cap_for_round(90)`）、"
+     "連升 streak 因 R89 的 -92 已歸零 ⇒ 本輪為第 1／2 輪，款(10)(11) 皆未觸發。"),
 )
 
 
@@ -1108,10 +1120,10 @@ _GUARD_LINE_DRIFT_TOLERANCE = 0
 #: 追加當輪不必動指紋（一列寬限），下一輪要再追加就必須先把前一列納入前綴並重釘，
 #: 否則 `[前綴過期]` 轉紅。草稿兩個值都由 `--print-guard-lines` 印出
 #: （ARCH-02 的教訓：紅了卻沒有出路的鎖會被關掉）。
-_REPIN_LOG_FROZEN_PREFIX_LEN = 19
+_REPIN_LOG_FROZEN_PREFIX_LEN = 20
 _REPIN_LOG_MAX_UNFROZEN_TAIL = 1
 _REPIN_LOG_HISTORY_SHA256 = (
-    "d06b7172260d74dd713036b1e964b65568a38385a570a9977d4d774679332567")
+    "ba09b0ef132541dd69b994c6482bb7609e9854c1b0a287ad432125fde5bfd4e5")
 
 
 def repin_log_history_digest(

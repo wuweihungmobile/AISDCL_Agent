@@ -492,10 +492,19 @@ _SITE_CLASS_CENSUS: dict[str, dict[str, int]] = {
     # `sys.platform == "win32" or shutil.which("bash") is None`（posix-only）改成
     # 「解不到可用 bash」（tool-absence）。這是**分類訂正**不是額度位移：那 12 支被
     # 標成「別的平台才有驗證價值」，而它們在 Windows 上實測全綠（25 passed）。
+    # 🔴 R90 包 C 重釘 `tool-absence` 17 → 15（**方向是樹變健康，不是放寬**；本表判準是
+    # 「相等」，任一格變動都必須有人回來改，而失敗訊息自己會印出該填的數字 ⇒ 重釘是設計
+    # 好的流程）。消掉的兩個站點＝`test_gap014_020.py`／`test_gap039_049.py` 各一個
+    # `requires_claude_cli = pytest.mark.skipif(shutil.which("claude") is None or …)`
+    # 的 class/module 級述詞：那 11 支測試（8+3）改掛 `@hermetic_runner`（patch 掉真實執行
+    # 接縫 `autoclaude.execution.playbook_runner.PtyWrapper`）之後**變成真的會跑**，
+    # 斷言零修改 ⇒ 這是本表「合法出口只有把那些測試變成真的會跑」的那一條，不是補標籤位移
+    # （`unclassified` 仍是 0，其餘四格未動）。推導與為何登記的「make_service 重寫」正解是
+    # 錯的：`AutoClaude/tests/helpers/fake_pty.py` 的 docstring ＋ DEF-200-126／127。
     "AutoClaude/tests": {
         "windows-only": 10,
         "posix-only": 5,
-        "tool-absence": 17,
+        "tool-absence": 15,
         "runtime-skipTest": 0,
         "unclassified": 0,
     },

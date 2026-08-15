@@ -35,16 +35,18 @@ except ImportError:  # pragma: no cover - 另一種 sys.path 形態，兩者擇�
 #     **相等**斷言 ⇒ 帳本一長，那支測試**要求**你把常數調高。
 # ⇒ 相等自檢在這件事上是幫兇不是守衛；缺的不是「常數 vs 實測」，是「常數 vs 它自己的上一個值」。
 # 取值紀律：每個元素都是**當時的實測值**，歷史不得回填、不得改寫。
-OVERSIZE_ROW_CEILING_HISTORY: tuple[int, ...] = (105, 101, 98, 85, 83, 66)
+OVERSIZE_ROW_CEILING_HISTORY: tuple[int, ...] = (105, 101, 98, 85, 83, 66, 63)
 OVERSIZE_ROW_EXCESS_CEILING_HISTORY: tuple[int, ...] = (
     162282, 147944, 147455, 146210, 143303, 140957, 138938, 138936, 123867,
-    121758, 82896,
+    121758, 82896, 77186,
 )
 # 🔴 誠實劃界：本序列只收錄 `check_defect_log_crossref.py` 註解**自己留下證據**的那幾次
 # （34→28 見該檔 R80 包 C 段、17 見「第六次轉動」段、6 為 R82 實測）。第三～第五次轉動的
 # 中間值在該檔沒有留下數字，**刻意不回填猜測值**——靠猜的史料會讓方向判準判的是虛構的東西。
 #: R84 追加 5：`DEF-101-206` 結為 wontfix ⇒ 白名單 6 → 5，天花板同步下修（收緊方向）。
-UNPINNED_HANDOVER_CEILING_HISTORY: tuple[int, ...] = (34, 28, 17, 6, 5)
+#: 追加 4：`DEF-101-377` 結為 wontfix（原文逐字保全於
+#: `CrossPlatform_R89_Closure_Evidence.md`）⇒ 白名單 5 → 4，天花板同步下修（收緊方向）。
+UNPINNED_HANDOVER_CEILING_HISTORY: tuple[int, ...] = (34, 28, 17, 6, 5, 4)
 
 # ---------------------------------------------------------------- 史料前綴的封印
 # 🔴 立案（`DEF-101-995`，R82 掃描 §F 的四組實跑對照）：上面那條「歷史不得回填、不得
@@ -69,12 +71,13 @@ UNPINNED_HANDOVER_CEILING_HISTORY: tuple[int, ...] = (34, 28, 17, 6, 5)
 _SEALED_HISTORY_PREFIXES: dict[str, tuple[int, ...]] = {
     # 帳本洩壓包：史料尾端追加 66，故把 83 一併封入（`_SEAL_TAIL_MAX=1` 只准留一個未封印
     # 的尾巴）。封印**只准在尾端延長**，這裡沒有改寫任何已釘過的值。
-    "OVERSIZE_ROW_CEILING": (105, 101, 98, 85, 83),
+    "OVERSIZE_ROW_CEILING": (105, 101, 98, 85, 83, 66),
     "OVERSIZE_ROW_EXCESS_CEILING": (
         162282, 147944, 147455, 146210, 143303, 140957, 138938, 138936, 123867,
-    121758,
+    121758, 82896,
     ),
-    "_UNPINNED_HANDOVER_CEILING": (34, 28, 17, 6),
+    # 帳本瘦身包：史料尾端追加 4，故把 5 一併封入（同上，只在尾端延長、零改寫）。
+    "_UNPINNED_HANDOVER_CEILING": (34, 28, 17, 6, 5),
 }
 
 #: 未封印的尾巴上限。1＝「除了最新追加的那一筆，全部都要封」。取 1 而不是 0：追加與
@@ -114,12 +117,12 @@ def seal_table_digest(seals: Mapping[str, tuple[int, ...]]) -> str:
 
 #: 封印表的**總長度下限**（＝三條封印的元素數總和）。只准上升：史料長大時封印跟著長，
 #: 這個數字就跟著調上去；任何讓它變小的動作都是「把封印砍短」。
-_SEAL_TOTAL_MIN_LEN = 19
+_SEAL_TOTAL_MIN_LEN = 22
 
 #: 封印表的內容摘要（`seal_table_digest(_SEALED_HISTORY_PREFIXES)` 的當回合實測值）。
 #: 追加新值到某條封印是合法動作，但必須在**同一次變更內**把上面那個長度與這個摘要一起
 #: 重釘——不重釘即紅，故「改封印」在結構上不可能是無聲的。
-_SEAL_TABLE_SHA256 = "ae6c3cf868529ff4"
+_SEAL_TABLE_SHA256 = "7fd8298441c96f8f"
 
 
 def seal_table_problems(

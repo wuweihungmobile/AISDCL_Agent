@@ -76,7 +76,7 @@
 **新發現、PRD 完全遺漏的維度：**
 
 1. **超額用量（overage / extra usage）**：額度類型除 `five_hour`、`seven_day` 外，還有 `seven_day_opus`、`seven_day_sonnet`、`seven_day_overage_included`、`overage`、`extra_usage`，且有月度支出上限與 `overage-utilization` 概念。**這代表達到訂閱限制後可能可以付費續跑**，治理決策從「凍結」變成「凍結 or 付費續跑」二選一 —— 必須是顯式設定，不能預設替使用者花錢。見 §6 的 `OVERAGE_POLICY`。
-2. **額度狀態是枚舉不只是百分比**：`allowed` / `allowed_warning` / `rejected`，配合 `resetsAt` 與 `rateLimitType`。**應以此枚舉為主要狀態訊號**，百分比僅作為配速輸入 —— 比自訂水位可靠得多。
+2. **額度狀態是枚舉不只是百分比**：`allowed` / `allowed_warning` / `rejected`，配合 `resetsAt` 與 `rateLimitType`。**應以此枚舉為主要狀態訊號**，百分比僅作為配速輸入 —— 比自訂水位可靠得多。🔴 **通道限定（R90 補；語意不變，只補「它住在哪」——附錄 B-13 已寫對，本條與 §15.5 紅線 7 漏寫）**：此枚舉的唯一載體是**模型 API 呼叫的限流回應標頭**（`anthropic-ratelimit-unified-status`）。⇒ 本條只對「本身會發模型請求、因而拿得到那組標頭」的元件成立；**不發模型請求的純觀測型元件結構上取不到它**，對它們而言百分比不是「次要訊號」而是唯一可得訊號。依據＝R90 四通道實測（`/api/oauth/usage` body 與其回應標頭、statusLine stdin、逐字稿，四條皆 0 命中），見 `docs/06_quality/Quota_R90_CrossAccount_Experiment.md`。
 3. **週額度依模型分軌**：`seven_day_opus`、`seven_day_sonnet` 為獨立額度（Max / Team 方案可見），證實 v2 的「模型降級致動器」方向正確且可實作。
 4. **前置條件**：Node.js ≥ 22；CLI 現以各平台原生二進位發佈（含 `linux-x64-musl`、`linux-arm64`、`win32-arm64`）。v2 對 Linux 支援的批評（A-24）成立。
 
@@ -1369,7 +1369,7 @@ Q3. 是否真的需要一個常駐 Daemon？
 4. **`CronCreate` 的 durable 任務 7 天後自動過期。** 不能當成永久排程。
 5. **不要在真實額度上調參**（見 P2）。
 6. **失效方向永遠往保守。** 讀不到治理狀態、檔案過期、鎖搶不到 → 一律當成「額度不明」而降級，絕不「先跑再說」。
-7. **以 `status` 枚舉為主，百分比為輔。** `rejected` / `allowed_warning` 是平台給的權威判斷；自訂百分比水位只是預測。兩者衝突時信前者。
+7. **以 `status` 枚舉為主，百分比為輔。** `rejected` / `allowed_warning` 是平台給的權威判斷；自訂百分比水位只是預測。兩者衝突時信前者。🔴 **通道限定（R90 補；語意不變，只補「它住在哪」——附錄 B-13 已寫對，本條與 §0.6 新發現 2 漏寫）**：枚舉只隨**模型 API 呼叫的限流回應標頭** `anthropic-ratelimit-unified-status` 回來，四條本機可達通道（`/api/oauth/usage` body、同一支 API 的回應標頭、statusLine stdin JSON、逐字稿）R90 實測**全部 0 命中**。⇒ 不發模型請求的元件**沒有「兩者」可衝突**，照本條字面寫出的枚舉分支會是一段永遠走不到的死碼；那種元件的正確作法是把百分比當唯一訊號並在痕跡裡說出「枚舉不可得」，而不是留一個恆假的判斷。依據見 `docs/06_quality/Quota_R90_CrossAccount_Experiment.md`。
 8. **本機推估看不到其他裝置的用量。** 若你同時在別的機器或網頁端用同一帳號，statusLine 的讀數不一定同步。務必保留 §4.1.1 的安全邊際，並把 429 當成「推估偏低」的證據。
 9. **`--dangerously-skip-permissions` 不要當預設。** 用 `--permission-mode` 加工具白名單。若真的需要旁路，關在容器裡。
 10. **不要讓 Agent 修改治理層的設定或狀態檔。** `PreToolUse` hook 要把 `.autoclaude/`、`.claude/settings*.json` 列為禁寫。否則一個「幫我把併發調高」的合理請求就能拆掉整套治理。

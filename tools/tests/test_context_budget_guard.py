@@ -3409,6 +3409,31 @@ class QuotaBucketUnionTest(unittest.TestCase):
         readings = meter.bucket_readings({"limits": [], "spend": {"percent": 96}})
         self.assertEqual([(r["kind"], r["pct"]) for r in readings], [("spend", 96.0)])
 
+    # 🔴 R89 觀測欄（史料＝`tools/lib/quota_meter.py` 的〈R89 觀測欄〉段，本節不複寫）。
+    # 與 `test_quota_policy.TestR89…` 刻意分家：那邊守「判讀層拿到新欄位後決策不變」，
+    # 這裡守「取數層列舉出來的**桶集合**不變」——R87 的形狀正是一個軸無聲消失。
+    def test_the_new_fields_change_neither_enumeration_nor_key_presence(self) -> None:
+        """①同一份 payload 拿掉／加回兩欄，桶集合逐字相同；②鍵恆在（缺鍵與 `None` 在
+        快取 JSON 裡讀起來不同，而只有一種代表「伺服器沒給」）。"""
+        meter = _meter()
+        rich = {"limits": [{"kind": "session", "percent": 12, "severity": "critical",
+                            "is_active": True}], "five_hour": {"utilization": 12.0},
+                "spend": {"percent": 0, "severity": "normal", "enabled": False}}
+        bare = {"limits": [{"kind": "session", "percent": 12}],
+                "five_hour": {"utilization": 12.0}, "spend": {"percent": 0, "enabled": False}}
+        key = [(r["kind"], r["pct"], r["via"]) for r in meter.bucket_readings(rich)]
+        self.assertEqual(key, [(r["kind"], r["pct"], r["via"])
+                               for r in meter.bucket_readings(bare)],
+                         "新欄位影響到了桶的列舉＝取數層的責任邊界被越過")
+        for row in meter.bucket_readings(bare):
+            self.assertEqual((row["is_active"], row["severity"]), (None, None))
+
+    def test_a_hostile_field_shape_is_carried_verbatim_not_coerced(self) -> None:
+        """型別換掉時**原樣帶出**：這兩欄一格都不參與判讀，猜一個布林只會製造沒有出處的
+        值；而拋例外會讓整條額度軸變成量不到，而量不到在本 repo 的語意是**不節流**。"""
+        rows = _meter().bucket_readings({"limits": [
+            {"kind": "session", "percent": 5, "is_active": "yes", "severity": {"l": 3}}]})
+        self.assertEqual((rows[0]["is_active"], rows[0]["severity"]), ("yes", {"l": 3}))
 
 class QuotaKindBranchTest(unittest.TestCase):
     """M6＋SA-B7：三條線走不同分支，而分支由**資料**（reset 有多遠）決定、不由桶名決定。"""

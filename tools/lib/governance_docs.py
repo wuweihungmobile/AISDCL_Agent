@@ -183,6 +183,9 @@ _GOVERNANCE_DOCS = (
     # exists_on_disk` 對磁碟驗——稽核列指名的清單不存在，款(9) 就是被幽靈檔名滿足的。
     _REPO_ROOT / "docs" / "06_quality" / "CrossPlatform_R86_Guard_Repin_Evidence.md",
     _REPO_ROOT / "docs" / "06_quality" / "CrossPlatform_R87_Guard_Repin_Evidence.md",
+    # R90 收尾單人窗口：稽核列款(9) 指名的「逐檔清單的家」，資格同上兩列（受
+    # `test_every_per_file_list_named_by_a_real_row_exists_on_disk` 對磁碟驗）。
+    _REPO_ROOT / "docs" / "06_quality" / "CrossPlatform_R90_Guard_Repin_Evidence.md",
     # 本輪掃描發現的居所（慣例位置，資格同 R80~R85 同名檔：逐筆寫出座標宣稱 ⇒ 指針稽核；
     # 複審者要判「還有哪些缺口開著」就得讀完它 ⇒ 體積守門）。它同時是 `doc_guard_total_
     # problems()` 款(1) 要求的兩個標記站點之一（另一處＝`AutoSDD_improving_110.md`）。

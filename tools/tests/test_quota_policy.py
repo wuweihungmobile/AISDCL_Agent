@@ -25,6 +25,7 @@
 from __future__ import annotations
 
 import ast
+import dataclasses
 import random
 import re
 import sys
@@ -257,6 +258,129 @@ class TestM1OppositeScenariosDiverge(unittest.TestCase):
         self.assertEqual(without.cap, with_group.cap)
         self.assertEqual(without.band, with_group.band)
 
+
+# ── R89 `is_active`／`severity`：接好卻沒有電的線（通電不得改判）────────────────
+# 🔴 判準的**立案史料原文**（為何交付條件的字面不可滿足、抹回聲欄的判準為何更強、
+#    反向判準為何必要）＝`tools/lib/quota_meter.py` 的〈R89 觀測欄〉段，本節不複寫。
+#: 新帳號（Team）payload 形狀，2026-08-15 真機節錄（時間欄改為相對 NOW）。與舊帳號的
+#: 形狀差異即本節要驗的兩點：`extra_usage` 各欄皆 `None`（⇒ 不成一個軸）、多 `weekly_scoped`。
+_R89_TEAM = {
+    "five_hour": {"utilization": 6.0, "resets_at": at(264), "limit_dollars": None},
+    "seven_day": {"utilization": 1.0, "resets_at": at(9624)},
+    "nimbus_quill": {"utilization": 0.0, "resets_at": None},
+    "extra_usage": {"is_enabled": False, "monthly_limit": None, "used_credits": None},
+    "limits": [{"kind": "session", "group": "session", "percent": 6,
+                "severity": "normal", "resets_at": at(264), "is_active": True},
+               {"kind": "weekly_all", "group": "weekly", "percent": 1,
+                "severity": "normal", "resets_at": at(9624), "is_active": False},
+               {"kind": "weekly_scoped", "group": "weekly", "percent": 0,
+                "severity": "normal", "resets_at": None, "is_active": False}],
+    "spend": {"used": {"amount_minor": 0}, "limit": None, "percent": 0,
+              "severity": "normal", "enabled": False},
+}
+
+
+def _r89_state(rows, carry: bool) -> Q.QuotaState:
+    """建 `QuotaState`；`carry=False`＝重演通電前。欄序同 `quota_gate.read_quota()`。"""
+    return Q.QuotaState(tuple(
+        Q.Axis(str(r["kind"]), float(r["pct"]), r.get("resets_at"), r.get("group"),
+               r.get("is_active") if carry else None,
+               r.get("severity") if carry else None, str(r.get("via") or ""))
+        for r in rows), NOW.isoformat(), "cache", "ok")
+
+
+def r89_decision_drift_problems(decide_fn, rows, ratio=None) -> list[str]:
+    """判準本體：同一批讀數餵兩次（不帶／帶新欄），**抹掉回聲欄後**決策須逐位元相同。"""
+    def strip(a):
+        return a and dataclasses.replace(a, is_active=None, severity=None)
+
+    def blank(d):
+        return dataclasses.replace(d, binding=strip(d.binding), per_axis=tuple(
+            r._replace(axis=strip(r.axis)) for r in d.per_axis))
+    old = decide_fn(_r89_state(rows, False), ratio)
+    new = decide_fn(_r89_state(rows, True), ratio)
+    return [] if blank(new) == old else [f"通電改判：舊={old}／新={blank(new)}"]
+
+
+def _r89_decide(st: Q.QuotaState, ratio) -> Q.Decision:
+    return Q.decide(st, NOW, P, ratio, "r89-fixture")
+
+
+class TestR89ObservationFieldsAreWiredButInert(unittest.TestCase):
+    """兩個新欄位必須**真的送達**，且**一格都不得參與**分類／選桶／band／cap／rec。"""
+
+    def test_green_neither_account_shape_moves_a_single_decision_bit(self) -> None:
+        """兩種帳號形狀 ×「攤提分支開不開」。`ratio` 那一組不是湊數：不帶它時
+        `Decision.amort` 恆為 `None`＝那個欄位從未真的被比對過。"""
+        legacy = TestR87TheMeterMayNotDropAThrottlingAxis.INCIDENT
+        self.assertIn("critical", [r.get("severity") for r in M.bucket_readings(legacy)],
+                      "舊帳號 fixture 沒有 critical ⇒ severity 那一半沒被測到")
+        for label, payload in (("team", _R89_TEAM), ("legacy", legacy)):
+            for ratio in (None, 7.5):
+                with self.subTest(shape=label, ratio=ratio):
+                    self.assertEqual(r89_decision_drift_problems(
+                        _r89_decide, M.bucket_readings(payload), ratio), [])
+        self.assertIsNotNone(
+            _r89_decide(_r89_state(M.bucket_readings(_R89_TEAM), True), 7.5).amort,
+            "fixture 沒觸發攤提 ⇒ 上面那組 ratio 沒有在多守什麼")
+
+    def test_red_an_aggregator_that_reads_either_field_is_caught(self) -> None:
+        """合成注入：把新欄位接進 cap／binding ⇒ 必紅（那是 `worst()` 換個寫法再犯）。"""
+        def by_severity(st, ratio):
+            d = _r89_decide(st, ratio)
+            return dataclasses.replace(d, cap=0) if any(a.severity for a in st.axes) else d
+
+        def by_is_active(st, ratio):
+            d, hot = _r89_decide(st, ratio), [a for a in st.axes if a.is_active]
+            return dataclasses.replace(d, binding=hot[0]) if hot else d
+        for name, fn in (("severity→cap", by_severity), ("is_active→binding", by_is_active)):
+            with self.subTest(injection=name):
+                self.assertTrue(r89_decision_drift_problems(
+                    fn, M.bucket_readings(_R89_TEAM)), "注入了缺陷卻沒轉紅＝零鑑別力")
+
+    def test_severity_is_never_used_to_pick_a_bucket(self) -> None:
+        """`test_is_active_is_never_used_to_pick_a_bucket` 的雙生子：`critical` 至今只
+        出現在已被判為**保險軸**的池子上 ⇒ 拿它當節流訊號＝把 R89 剛拿掉的否決權從後門
+        還回去。把它掛到**低水位**那一軸，決策必須一個位元都不變。"""
+        plain = state(("session", 10, 34), ("weekly_all", 90, 8640))
+        flagged = Q.QuotaState(
+            axes=(axis("session", 10, 34, severity="critical"),
+                  axis("weekly_all", 90, 8640, severity="normal")),
+            measured_at=NOW.isoformat(), source="endpoint")
+        d1, d2 = Q.decide(plain, NOW, P), Q.decide(flagged, NOW, P)
+        self.assertEqual((d1.cap, d1.recommended_fanout, d1.binding.kind, d1.band),
+                         (d2.cap, d2.recommended_fanout, d2.binding.kind, d2.band))
+
+    def test_the_meter_really_energises_both_fields_end_to_end(self) -> None:
+        """**反向判準**（史料見 meter 檔頭）：端到端走到 `read_quota()`，只驗
+        `bucket_readings()` 的回傳值等於只驗了半條線。順帶釘住交付座標那句括號註記為假
+        ——頂層桶**不是**「一律 `None`」，`spend` 自帶 `severity`。"""
+        import tempfile  # noqa: PLC0415 — 與本檔既有的延後 import 同形態
+
+        import quota_gate as G  # noqa: PLC0415
+        rows = M.bucket_readings(_R89_TEAM)
+        by = {r["kind"]: r for r in rows}
+        self.assertIs(by["weekly_all"]["is_active"], False,
+                      "`False` 被壓成 `None` ⇒ 「沒給」與「給了 false」分不開")
+        self.assertIsNone(by["five_hour"]["is_active"], "頂層真的沒有它，不得偽造")
+        path = Path(tempfile.mkdtemp()) / M.CACHE_NAME
+        self.assertTrue(M.write_cache({"schema": M.SCHEMA, "axes": rows,
+                                       "source": "endpoint", "measured_at":
+                                       datetime.now(UTC).astimezone().isoformat()}, path))
+        got = {a.kind: (a.is_active, a.severity)
+               for a in G.read_quota(datetime.now(UTC), path).axes}
+        self.assertEqual((got["session"], got["spend"]),
+                         ((True, "normal"), (None, "normal")))
+
+    def test_backward_compatibility_holds_in_both_directions(self) -> None:
+        """① `SCHEMA` 不得升版（純追加鍵；升版會把 AutoClaude adapter 拉進同一次 commit
+        ＝另一個持有面）；② 通電前寫下的舊快取沒有這兩鍵，`_report()` 不得 KeyError。"""
+        self.assertEqual(M.SCHEMA, "autosdd.quota/2")
+        old = {"schema": M.SCHEMA, "measured_at": NOW.isoformat(),
+               "denominator": {"kind": "undisclosed", "text": "t", "cross_check": None},
+               "axes": [{"kind": "session", "pct": 6.0, "resets_at": at(264),
+                         "group": "session", "via": "limits[].percent"}]}
+        self.assertIn("is_active=None", M._report(old))
 
 # ═══════════════════════════════════════════════════════════════════════════
 # M1b 加速訊號必須**穿過 `decide()`**，不是只穿 `axis_cap()`（R82 複驗鏡 ①）
