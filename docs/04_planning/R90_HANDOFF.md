@@ -67,6 +67,10 @@
 - **前進**：M5 本輪**真的跑到了**（R86 那一輪是「一次都沒跑」）；M2 的分母第一次是現查值而不是估計。
 - **退步**：M1 的護欄行數半由「三輪中的第 1 輪」被本輪的 +161 打回 **0**——而那個 +161 是本輪合法且必要的重釘（見 §0.0 與重釘證據檔），**不是有人偷加行**。這兩件事同時為真，且它們的張力就是 M1 存在的理由。
 
+<!-- absent-if: R86 / M5 注入矩陣 -->（上一列「一次都沒跑」的證偽標的：沿用 R86 交棒書自己為**同一句話**
+登記的那個字面當鍵——一件事只准有一個證偽鍵，另造一個就是同一份知識住兩個家。R86 那一輪若其實跑過矩陣、
+日後有人補記，補記必然落在這個鍵上。）
+
 > **本檔由 R90 交棒書編纂包撰寫，不是主控撰寫。** 理由記在這裡，因為它是本檔的可信度前提：
 > 主控本輪在事實上被六個包駁回過（宣稱時鐘推到 R90／cap 語意混用／extras 分歧數字／
 > 「五項交付」／判準檔名寫錯／讀交棒書到 245 行就停）。〈可重啟點四條件〉第 3 條要求
@@ -277,7 +281,7 @@ cd /Users/wuweihong/Antigravity/AISDCL_Agent
 # N1／SA N-7：本機 builder 與 pip 是否存在（本包量到 venv-built + pip 26.2.1 ⇒ 不可重現）
 grep -E '^command' .venv/pyvenv.cfg; ./.venv/bin/python -m pip --version; echo "RC=$?"
 # SA N-6：OVERAGE_POLICY 是否仍是零實作
-git grep -nF 'OVERAGE_MONTHLY_UTILIZATION_HALT' -- . | cat
+git grep -nF 'OVERAGE_MONTHLY_UTILIZATION_HALT' -- . | cat  # <!-- absent-if: OVERAGE_POLICY = -->
 # QA N4：根層 skip 數（本包量到 44）
 ./.venv/bin/python tools/run_root_unittests.py > /tmp/root.log 2>&1; echo "RC=$?"; grep -E 'Ran |FAILED|^OK' /tmp/root.log
 ```
@@ -293,6 +297,11 @@ git grep -nF 'OVERAGE_MONTHLY_UTILIZATION_HALT' -- . | cat
 | QA **N2** | 2 支測試任何 CI job 都跑不到 | 未驗 |
 | QA **N4** | 根層 44 支 M6「**不可求值**」（需 Windows 剖面落款） | 本輪是 mac 輪 ⇒ 結構上做不到，**應與 §2-2 裁決合併處理**（改用平台條件記，而非留在 mac 輪等它到期） |
 | SD／包 B | `account_key` 實作 | 🔴 **前置未驗**：同帳號跨機器 org/ws 是否穩定。**且污染正在發生**：`r` 由 34 列舊帳號 ＋ 2 列新帳號混算 |
+
+<!-- absent-if: OVERAGE_MONTHLY_UTILIZATION_HALT = -->（上表 SA **N-6** 列「零實作」的證偽標的，沿用
+`R89_HANDOFF.md:403` 為同一句話登記的**同一個鍵**：帶空白的 `= ` ＝ Python 賦值＝真的有人實作了它；
+PRD `:879` 的 env 形態（無空白）與各處註解引用都不會誤命中。同 R81 §3.3 的劃界——標的的用途是「這句話
+有辦法被打臉」，不是窮舉所有交付形態。）
 
 ### 3.3 旁測挖出
 

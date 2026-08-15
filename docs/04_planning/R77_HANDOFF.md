@@ -22,7 +22,11 @@
 
 1. **本輪四方複審一次都沒跑**（月度支出上限，`DEF-101-876`）。所有「已修畢」宣稱皆為
    **作者自證**，而本 repo 的成熟度判準 M3 明文「作者自證不計分」。**R78 第一件事是補跑複審。**
-   <!-- handoff-claim-verified: 「複審有沒有跑過」不落磁碟，無機械現查管道；只能看該輪的複審輸出檔是否存在 -->
+   現查該輪有無複審輸出檔（回空＝這一輪確實沒跑過）：`git ls-files 'docs/06_quality/*R77_Review*'`
+   <!-- absent-if: CrossPlatform_R77_Review -->（**R90 收尾把這一筆從逃生口轉成真的證偽標的**：原標記的 WHY
+   寫「無機械現查管道」，而 R90 §0.0c 的 M3 判定用的正是這條管道〔`ls docs/06_quality/ | grep 'R90_Review'`〕
+   ⇒ 那個前提今天已不成立。實測佐證：真的跑過複審的 R78／R79／R80／R81／R85 五輪，`CrossPlatform_R<NN>_Review`
+   這個字面在 tracked 內容裡各命中 4～8 支檔；R77 命中 0。）
 2. **三個修復包完全未執行**：skipped 治理、承接稽核覆蓋率、依賴債。它們的規格書仍在
    `docs/06_quality/CrossPlatform_R77_Fix_Plan.md`（PKG-11-SKIPGOV／PKG-04-CROSSREF／PKG-12-DEBT），
    可直接照做。現查各包是否已落地：`git log --oneline --grep=PKG-11-SKIPGOV --grep=PKG-04-CROSSREF --grep=PKG-12-DEBT`
